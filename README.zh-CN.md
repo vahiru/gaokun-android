@@ -8,7 +8,8 @@ recovery 分区，也没有串口。这不是一次常规移植 —— 它是 **
 每一个 HAL 都建在上游驱动之上。
 
 > ### ⚠️ Alpha 阶段，先读这段
-> 游戏跑得不错。**但这台机器不能待机** —— 见[已知问题](#已知问题)。
+> 游戏跑得不错，而且从 v0.3.0-alpha 起**待机也好了**。
+> **但仍然没有可用的 recovery** —— 见[已知问题](#已知问题)。
 > 安装会**清空内置硬盘**。你需要有能力救一台开不了机的机器。不提供任何担保。
 
 [**English → README.md**](README.md)
@@ -31,13 +32,13 @@ recovery 分区，也没有串口。这不是一次常规移植 —— 它是 **
 | Wi-Fi | ✅ | ath11k / WCN6855 |
 | 蓝牙 | ⚠️ | 可用 —— `hci_qca`，adapter `ON`，开机后零崩溃。**但长期运行后可能与音频一起死锁**，见 [#38](docs/stage4-findings.md) |
 | 扬声器 | ⚠️ | 可用 —— 用户实机确认出声，WSA883x 走 audioreach。**但长期运行后音频可能死锁**，与蓝牙一起，见 [#38](docs/stage4-findings.md) |
-| 耳机口 / 麦克风 | ❌ | 已实测。内核侧是好的 —— 插入被识别，编解码器甚至量出了耳机阻抗 —— 但后端 `RX_CODEC_DMA_RX_0` 打不开（换任何前端都失败、内核无报错，而扬声器后端正常）。Android 的音频策略里也压根没声明耳机设备。[#40](docs/stage4-findings.md) |
+| 耳机口 / 麦克风 | ✅ | **已修复，用户实机确认出声。** 三处阻塞，没有一处玄学：真凶是 rx-macro 内部的插值器链从来没接上（输入 mux 与解调 mux 都停在复位值），DAPM 路径不完整 → 后端拒绝打开，而**内核一行日志都不打**；其次是音频策略里没声明耳机设备；最后是框架去看 `/sys/class/switch/h2w`，主线上根本没这个东西。⚠️ 顺带查出**内置麦克风此前完全是断的、而且谁都没发现**，同样已修（安静房间 RMS −30.5 dBFS）。[#40](docs/stage4-findings.md) |
 | 电池、充电、合盖检测 | ✅ | 华为 EC 驱动 |
 | **游戏** | ✅ | 原神画质极高流畅。GPU 空闲 270 MHz、峰值 690 MHz、最高 50 °C |
 | CPU 温控降频 | ✅ | 主线 DTS **根本没有** CPU 的 cooling map —— 已由 [`patches/0009`](patches/) 在设备树里根治 |
-| **待机 / 挂起** | ❌ | s2idle **挂得下去、醒不回来**，随后整机复位。内核/EC 缺陷 —— Ubuntu 下同样复现 |
+| **待机 / 挂起** | ✅ | **2026-08-22 修复 —— 而且真凶是我们自己，不是内核。** 真实挂起/唤醒，零复位。⚠️ 代价一条：息屏时 USB adb 会断。[#52](docs/stage4-findings.md)、[#57](docs/stage4-findings.md) |
 | 传感器（加速度计+陀螺仪）| ✅ | **自动旋转可用，用户实机确认方向正确。** 为本机写的 sensors HAL 已把真实读数喂给 SensorService，框架据此自动融合出 Game Rotation Vector / Gravity / Linear Acceleration。出厂安装矩阵全零（校准数据随 Windows 一起没了），但实测传感器坐标系与面板方向本来就一致，**不需要纠正**。本机**没有磁力计**（所以没有指南针）；光感一使能就会污染整个 DSP 会话，见 [#37](docs/stage4-findings.md) |
-| 硬件视频解码 | ❌ | Venus 未启用；66 个编解码器全是软解 |
+| 硬件视频解码 | ⚠️ | **内核这一半已通** —— `/dev/video0` / `/dev/video1` 就是 `qcom-venus-decoder` / `qcom-venus-encoder`，供应方全部解析、固件零报错，据我们所知是 SC8280XP 上的头一次。但 Android 还缺一个跟 V4L2 说话的 Codec2 组件，所以 66 个解码器仍全是软解。[#41](docs/stage4-findings.md) |
 | 摄像头 | ❌ | 没开始 |
 | USB-C 外接显示 / UCSI | ❌ | UCSI PPM 初始化超时，本机主线的已知缺陷 |
 | 指纹、TPM | ❌ | 没有驱动 |
@@ -55,12 +56,23 @@ recovery 分区，也没有串口。这不是一次常规移植 —— 它是 **
 的实测对比：每个温区绑定的 cooling device 从 0 变 1、trip 点从 1 变 2。
 **这个缺口不是本机特有的** —— 任何跑主线的 sc8280xp 机器都值得看一眼。
 
-**待机是在 Android 之下坏掉的。** 机器挂得下去，醒不回来，大约 13 秒后整机复位。
-RTC 闹钟**确实按时触发**，所以坏在 *resume* 而不是 suspend。已用实验排除：
-himax 触摸驱动、三个 remoteproc、以及 **EC 驱动本身**。两个自称修这个毛病的
-上游 EC 补丁**其实一直都打着**。**在 Ubuntu 上用同一棵内核复现得一模一样**，
-所以既不是 Android 的问题，也不是我们设备树的问题。因此默认持有一个 wakelock，
-但息屏是正常的。将来复测的逃生口：`setprop persist.gaokun3.allow_suspend 1`。
+**待机坏了整整一个阶段，而真凶是我们自己改的一行设备树。**
+它看起来像内核或 EC 的缺陷：挂下去几秒后整机复位，而且**在 Ubuntu 上用同一棵
+内核复现得一模一样** —— 这恰恰是你会拿来排除 Android 的那种证据。
+它确实排除了 Android，也把我们指向了完全错误的一层。
+
+真正的原因是 Stage 2 为了 USB adb 自己加的：我们把第二个 USB 控制器设成
+`dr_mode = "otg"` + `usb-role-switch`，而上游就是普通的 `host`。本机的 UCSI
+是坏的，没有任何东西会去指派 role，于是控制器停在 `device`、既没有 gadget
+也没有 xhci 子设备。给这个"半初始化"状态断电 —— 系统挂起会，单纯解绑驱动也会
+—— **整板复位，且不留任何日志**。
+
+有两件事让它拖了这么久。**两道坎叠在一起**（第二道是 EC 的 `suspend_noirq`
+超时，而它早就被我们带着的一个补丁修好了），所以每个单变量实验都返回"无效"。
+而且**单次失败率约 93%** —— "改一条、试一次、炸了"对任何配置都是大概率事件，
+有好几轮是在追噪声。Android 侧的修法是**睡下去之前把 role 切到 `host`、
+亮屏时切回 `device`**，这也就是息屏时 USB adb 会断的原因。
+[#52](docs/stage4-findings.md)、[#57](docs/stage4-findings.md)
 
 ---
 
@@ -148,11 +160,10 @@ Android 相关的配置断言在
 
 | 问题 | 位置 |
 |---|---|
-| s2idle 醒不回来，整机复位 | [`docs/stage6-crdroid.md`](docs/stage6-crdroid.md) §M4 |
 | **没有可用的 recovery。** 镜像能造能交付，但启动它会让机器进复位循环，所以启动项默认不创建。代价：没有 `adb sideload`、没有 `fastbootd`，设置里的"恢复出厂设置"大概不起作用（它是去请求 bootloader 进 recovery，而 systemd-boot 不读那个请求）| [#39](docs/stage4-findings.md) |
 | **音频与蓝牙在长期运行后可能死锁** —— 用户实机报告，尚未复现定位。两者都走同一条到 DSP 的 QRTR/FastRPC 通路，而那条通路上我们已经实测到过会话级卡死 | [#38](docs/stage4-findings.md) |
-| 传感器：Linux 侧加速度计已能正确读数，但 Android 侧尚无 HAL；使能光感会弄坏 DSP 会话（#37） | [`docs/stage4-findings.md`](docs/stage4-findings.md) |
-| 拔插 USB 后 adb 不重枚举，用 adb over TCP 兜底（#27） | [`docs/stage4-findings.md`](docs/stage4-findings.md) |
+| 使能环境光传感器不但不返回读数，还会污染整个 DSP 会话，所以没有自动亮度（#37）。加速度计与陀螺仪本身已经跑通并接进框架 | [`docs/stage4-findings.md`](docs/stage4-findings.md) |
+| 拔插 USB 后 adb 不重枚举（#27）；现在**息屏时 USB adb 也会断** —— 那正是待机修复在把控制器切到 host。默认开着的 5555 端口 adb over TCP 不受影响 | [`docs/stage4-findings.md`](docs/stage4-findings.md) |
 | GPU SMMU 拉的是 SPI 675/680，而 DT 声明 678/679 | [`docs/stage5-freedreno.md`](docs/stage5-freedreno.md) D6 |
 | 热管理 HAL 是 AOSP mock，它的 SHUTDOWN 阈值只有 36 °C | [`docs/stage6-crdroid.md`](docs/stage6-crdroid.md) §M4 |
 
@@ -162,8 +173,13 @@ Android 相关的配置断言在
 
 都是边界清楚的活，大致由易到难：
 
-1. **硬件视频解码。** `refs/linux-gaokun/patch sets/media/` 里有 8 个 Venus
-   补丁，buildbot **没有**应用。现在 66 个编解码器全是软解。
+1. **硬件视频解码 —— Android 这一半。** 内核那半已经做完：`/dev/video0` 与
+   `/dev/video1` 是能用的 Venus 解码器和编码器。缺的是一个跟 V4L2 说话的
+   Codec2 组件，所以 66 个解码器仍全是软解。`external/v4l2_codec2` 本来就在
+   manifest 里，三个前提也已在设备上核实：它要的 `IComponentStore/default`
+   是空的、`media.c2.hal.selection` 已经是 `aidl`；⚠️ 而 poolmask 必须用 BLOB
+   的 `0xfc0000`，**不是**它 README 里写的 `0xf50000` —— 那是 ION 的值，
+   而本机内核没有 ION。
 2. **GPU SMMU 中断修复。** SMMU 拉的是 SPI 675/680，设备树声明的是 678/679，
    所以 context fault 永远到不了 CPU。改 DTB 应该就能彻底丢掉
    `smmu-nostall.sh` 那个轮询 workaround。
@@ -171,18 +187,15 @@ Android 相关的配置断言在
    阈值改掉** —— AOSP mock 报的是 36 °C，`ThermalManagerService` 看到就会
    直接关机。
 4. **SELinux 转 enforcing。** 有两个服务需要写策略。
-5. **s2idle 的 resume。** 要先编一个带 `CONFIG_PM_DEBUG` 的内核才能二分
-   （现在的配置里没有 `/sys/power/pm_test`）。多半是上游内核/EC 的活。
-6. **传感器 —— 剩 sepolicy 与一个内核开关。** 传感器本体已经做完：
+5. **传感器 —— 剩 sepolicy 与一个内核开关。** 传感器本体已经做完：
    加速度计与陀螺仪经 SLPI DSP 进到为本机写的 HAL，**自动旋转可用**。
    据我们所知其他 SC8280XP 设备都没跑通过这一套，ThinkPad X13s 也没有 ——
    协议整理在 [`docs/sensors-ssc-protocol.md`](docs/sensors-ssc-protocol.md)，
    想在自己机器上做可以直接拿。这里剩两个尾巴：HAL 与 `hexagonrpcd`
-   都还没写 sepolicy（现在靠 `permissive` 顶着）；`CONFIG_QCOM_FASTRPC` 仍是
-   `=m` 而这棵树不发模块，所以每次重启都要手动把 fastrpc 节点弄出来。
+   都还没写 sepolicy，现在靠 `permissive` 顶着。
    **环境光传感器是另一个更硬的问题**：使能后不但不返回读数，还会污染整个
    SSC 会话，所以没有自动亮度。
-7. **摄像头。** 完全没碰。
+6. **摄像头。** 完全没碰。
 
 如果你手上有 MateBook E Go 想帮忙测，欢迎开 issue —— **报告哪里坏了和交补丁
 一样有用**。请附上你的 BIOS 版本和 SKU。

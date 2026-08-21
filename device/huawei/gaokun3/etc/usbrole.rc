@@ -1,9 +1,9 @@
 # 挂起前把 USB role 切到 host —— 见 bin/gaokun3-usbrole.sh 与
 # docs/stage4-findings.md #52 / #54 / #56。
 #
-# ★ 默认【不启用】。opt-in：
-#     adb shell setprop persist.gaokun3.allow_suspend 1
+# ★ 默认【已启用】（device.mk 把 persist.gaokun3.allow_suspend 设成 1）。
 #   启用后 gaokun3_nosuspend 被放开，改由 gaokun3_usbrole 单独把关。
+#   排查时关掉：adb shell setprop persist.gaokun3.allow_suspend 0（要重启才完全生效）。
 #
 # ⚠️ 屏幕状态属性的值是 Android 的 Display.STATE_*：**1 = OFF，2 = ON**，
 #    不是 0/1（2026-08-22 实机核对过，差点按 0/1 写错）。

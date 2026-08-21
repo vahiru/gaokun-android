@@ -4,52 +4,42 @@ on early-init
     # 本机没有串口，内核日志只能靠 dmesg / efi_pstore
     write /proc/sys/kernel/printk "7 4 1 7"
 
-# ═════════ 挡住 s2idle 休眠（★M4 已定性：内核/EC 缺陷，与 Android 无关）═════════
-# 症状：挂起后【永不 resume】，约 20–40 秒后整机被复位。默认启动项是 Ubuntu，
-# 于是自动落到 Ubuntu —— 这既是安全网，也是我们唯一的远程救援通路。
+# ═════════ s2idle 休眠：★2026-08-22 已修好，默认【开启】 ═════════
+# 真凶既不是内核也不是 EC，是我们自己在 Stage 2 为 USB adb 改的那行设备树：
+# a600000.usb 被设成 dr_mode="otg" + usb-role-switch（上游是 host），
+# 而本机 UCSI 是坏的、没有任何 role 源 → 控制器停在 role=device、
+# 既没有 gadget 也没有 xhci 子设备。给这个"半初始化"状态断电
+# （系统挂起会，单纯解绑驱动也会）→【整板复位，且不留任何日志】。
+# 完整案卷：docs/stage4-findings.md #52 / #54 / #56 / #57。
 #
-# ★★ 2026-08-19 M4 的判决性实验（推翻了"Android 的挂起模型太激进"这一旧猜想）：
-#   在【Ubuntu】里用同一棵内核源码做同样的一件事 —— 直接
-#   `echo mem > /sys/power/state` —— 结果完全一样：写下去就再也没回来，
-#   机器约 20 秒后复位。
-#   证据：/home/user/suspend-test.log 停在 "写 /sys/power/state = mem" 那一行，
-#   紧随其后的 "★ 走到这一行就说明 resume 成功了" 从未被写出；
-#   机器回来后 `uptime` 显示是**全新启动**（不是 resume）。
-#   → 与 Android、与 SystemSuspend、与我们的设备树【全都无关】，
-#     是内核/EC 层面的缺陷。根治要往上游走，不在本项目范围内。
+# ⚠️ 别再被这段历史带偏：它在 Ubuntu 上用同一棵内核复现得一模一样，
+#    于是被判过"内核/EC 缺陷、与 Android 无关"—— 那个推理排除得对（确实与
+#    Android 无关），指向的层却完全错了。设备树两边是同一份。
 #
-# 已排除的两个"看起来应该已经修好了"的因素（都在现役 kb23 内核里，实测仍然挂）：
-#   - patches/upstream/0012：把 EC 的 PM 回调从 NOIRQ_SYSTEM_SLEEP_PM_OPS 换成
-#     SYSTEM_SLEEP_PM_OPS。补丁说明原话就是修 "resume to fail silently"
-#     —— NOIRQ 变体在 I2C 控制器已挂起后才跑，EC 握手不可能完成。
-#   - patches/others/0017：给 EC 的 i2c client 加 device_init_wakeup(dev, true)。
-#     实机佐证：/sys/class/wakeup/ 里确实有 15-0038（EC 的 i2c 地址）→ 这句在跑。
-#   两个补丁都在，s2idle 照样醒不来。
-#   ⚠️ 无法用 /sys/power/pm_test 做分层二分：本机内核没开 CONFIG_PM_DEBUG，
-#      该节点不存在（Ubuntu 与 Android 两侧都不存在）。
-#   ⚠️ 也拿不到挂起瞬间的日志：userspace 已冻结，journald 来不及落盘；
-#      clean hang 不产生 panic，efi_pstore 同样抓不到（实测 pstore 里没有当日记录）。
-#
-# 为什么用内核 wakelock 而不是 `svc power stayon true`：
-#   stayon 走 stay_on_while_plugged_in，只在【插电】时有效，而且它把**屏幕**也钉亮着；
-#   /sys/power/wake_lock 是 CONFIG_PM_WAKELOCKS 的用户态接口，init 以 root 写入后
-#   无条件阻止自动挂起，与供电状态无关，**而且不妨碍息屏**。
-#   → 于是用户仍能得到"按电源键息屏、再按点亮"的正常体验，只是机器不真的睡。
-#     这就是本机目前能提供的"待机"。
+# 两个 wakelock 的分工（别混淆）：
+#   - gaokun3_nosuspend（本文件）：总开关。allow_suspend=1 时放开。
+#   - gaokun3_usbrole（etc/usbrole.rc + bin/gaokun3-usbrole.sh）：真正的把关者。
+#     息屏时先切 role=host 并【确认 xhci 子设备出现】才放行挂起，亮屏切回 device。
+#     确认不了就一直按住 —— 所有失败路径都停在"不许睡"这一侧。
+# ⚠️ 用户可见代价：息屏时 USB device-mode adb 断开（UDC 就在那个控制器上），
+#    亮屏即恢复；TCP adb（5555）不受影响。
 #
 # ⚠️ 排查用的副作用（记一条，省下一次两小时的误诊）：
 #   持有 wakelock 时读 /sys/power/wakeup_count 会【永久阻塞】（实测 cat 挂死 120s）。
-#   Android 的 SystemSuspend 正是卡在这一读上，所以它连一次挂起都不会发起
-#   —— /sys/power/suspend_stats/success 恒为 0。别在探测脚本里 cat 这个节点。
+#   Android 的 SystemSuspend 正是卡在这一读上，所以持锁期间
+#   /sys/power/suspend_stats/success 恒为 0 —— 那不代表挂起坏了。
+#   别在探测脚本里 cat 这个节点。
 #
 # ⚠️ 必须是 `on init` 而不是 `on early-init`：早期 sysfs 还没挂好，
 #    2026-08-19 实测 early-init 写入静默失败。
+# ★ 为什么开机仍然先上锁：属性触发器要等 property_service 起来才跑，
+#   那几秒里 role 还是出厂的 device。失败方向永远选"不睡"。
 on init
     write /sys/power/wake_lock gaokun3_nosuspend
 
-# 逃生口：留给将来复测 s2idle（内核修好后一条属性就能放开，不必重编镜像）。
-#   adb shell setprop persist.gaokun3.allow_suspend 1
-# ⚠️ 现在设它 = 机器挂起后必然复位并落到 Ubuntu。只在你准备好做复现实验时才用。
+# 总开关。device.mk 默认把它设成 1（= 待机开启）。
+# ⚠️ 运行时 setprop ... 0 只能阻止后续的息屏切换，【不会】把这个 wakelock 重新拿回来
+#    —— 要完全回到"挡住挂起"的状态得重启。放开容易收回难，所以这里只做放开一个方向。
 on property:persist.gaokun3.allow_suspend=1
     write /sys/power/wake_unlock gaokun3_nosuspend
 

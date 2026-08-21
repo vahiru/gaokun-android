@@ -72,7 +72,7 @@ SH3001 Accelerometer: last 50 events
   **自动旋转方向正确**。运气好：单位矩阵恰好与本机面板方向一致。
   ⚠️ 别据此以为所有 gaokun3 都一样；换面板批次的机器若发现方向反了，
   纠正点就在 `Sensor.cpp` 的两个 `readEventPayload` 里。
-* ⬜ **`CONFIG_QCOM_FASTRPC=y`**：还是 `=m`，所以每次重启 `/dev/fastrpc-*` 不存在，
-  要跑 `scripts/sensors-up-android.sh` 手动补。断言已进
-  `scripts/kernel-config-android.sh`，等下次编内核。
+* ✅ **`CONFIG_QCOM_FASTRPC=y`**：M13 起已是 `=y` 并实机验证 —— `#18` 内核起来后
+  四个 `/dev/fastrpc-*` 都在而 `/proc/modules` 是 **0 行**，
+  `scripts/sensors-up-android.sh` 那套手动步骤不再需要（这是本项目第 13 个「=m 坑」）。
 * 采样率/batching/flush 的语义映射仍用上游默认（`no batching`）。

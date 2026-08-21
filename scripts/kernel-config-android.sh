@@ -235,10 +235,13 @@ OUT="${1:?用法: $0 <kernel-out-dir>}"
 #    但看到它出现在 .config 里不要当成配错了。
 ./scripts/config --file "$OUT/.config"     --enable MEDIA_SUPPORT     --enable MEDIA_PLATFORM_SUPPORT     --enable VIDEO_DEV     --enable V4L_MEM2MEM_DRIVERS     --enable VIDEOBUF2_DMA_CONTIG     --enable V4L2_MEM2MEM_DEV     --enable SM_VIDEOCC_8350     --enable VIDEO_QCOM_VENUS
 
-# ─── 电源管理调试（对着本机头号缺陷：s2idle 醒不回来）───
-# 本机 s2idle 挂得下去、醒不回来，约 20–40 秒后整机复位，Ubuntu 同款内核复现
-# （M4 定性）。M4 卡在没法继续二分：`/sys/power/pm_test` 需要 CONFIG_PM_DEBUG，
-# 而它没开。这里补上，让后来的人不用先自己编一个内核。
+# ─── 电源管理调试（★留着，它是 s2idle 那一仗的决胜工具）───
+# 历史：s2idle 曾被判成"挂得下去、醒不回来的内核/EC 缺陷"，而当时卡死在
+# 没法二分 —— /sys/power/pm_test 需要 CONFIG_PM_DEBUG，默认没开。
+# 补上之后 pm_test=devices 成了最安全最快的复现器（5 秒自动返回、不需要唤醒源），
+# 也正是它把故障夹到 dpm_suspend_start()+dpm_suspend_noirq() 之内，
+# 最终定到 a600000.usb 的 role（2026-08-22 已修，见 docs/stage4-findings.md #52-#57）。
+# ⚠️ 别因为"问题已解决"就把这几项关掉：下一个挂起类问题还得靠它。
 #
 #   PM_DEBUG        → /sys/power/pm_test（分层二分：freezer/devices/platform/
 #                     processors/core）与 /sys/power/pm_print_times

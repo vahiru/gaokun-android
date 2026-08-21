@@ -1,8 +1,10 @@
 #!/system/bin/sh
-# 重启后一键恢复传感器（临时手段）。
-# 之所以需要它：内核里 CONFIG_QCOM_FASTRPC 还是 =m，而这棵树不发模块，
-# 所以每次重启 /dev/fastrpc-* 都不存在。下一次出 ROM 会带 =y 的内核，
-# 届时 init 会自己拉起 hexagonrpcd，本脚本即可废弃。
+# ★★ 已废弃（M13, 2026-08-20）——发版内核里 CONFIG_QCOM_FASTRPC 已是 =y，
+# 实机验证四个 /dev/fastrpc-* 都在、/proc/modules 0 行，init 自己会拉起
+# hexagonrpcd。留着只为一种情况：你手上是老内核（=m）或自编的内核忘了这一项。
+#
+# 原说明：重启后一键恢复传感器（临时手段）。内核里 CONFIG_QCOM_FASTRPC 是 =m
+# 而这棵树不发模块，所以每次重启 /dev/fastrpc-* 都不存在。
 set -x
 insmod /data/local/tmp/fastrpc.ko
 pkill -f hexagonrpcd

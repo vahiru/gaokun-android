@@ -27,7 +27,7 @@ Download from [Releases](../../releases) and unpack into one directory:
 |---|---|
 | `super.img.zst` | system / system_ext / product / vendor |
 | `boot.img` | Kernel, device tree and first-stage ramdisk in one standard Android boot image (header v2). Written to both `boot_a` and `boot_b`; the installer also unpacks it onto the ESP for systemd-boot |
-| `recovery-ramdisk.img` | Android recovery. Optional — releases before v0.3 do not have it. It shares the kernel and DTB with the system, so only the ramdisk ships. The installer puts it on the ESP for both slots and adds a boot menu entry |
+| `recovery-ramdisk.img` | Android recovery. **No release ships this yet** — recovery is built but reset-loops on this machine, so it is deliberately not published. The installer accepts it if you build one yourself: it shares the kernel and DTB with the system, so only the ramdisk is needed, and it lands on the ESP for both slots. The boot menu entry is *not* created unless you set `ENABLE_RECOVERY_ENTRY=1` |
 | `crDroidAndroid-*.zip` | The OTA package. **Not needed to install** — this is what the updater consumes later |
 
 ```sh

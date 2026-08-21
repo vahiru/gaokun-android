@@ -1,6 +1,6 @@
 # 待办清单
 
-最后更新：2026-08-20（v0.2.0-alpha 发布之后）
+最后更新：2026-08-22（v0.3.0-alpha 发布之后）
 
 这份清单的排序原则是**用户能不能感觉到**，而不是有趣程度。每条都尽量写出
 **具体的第一步** —— 没有第一步的条目只是愿望，不是待办。
@@ -17,10 +17,16 @@
 两者共用同一条到 DSP 的 QRTR/FastRPC 通路，而这条通路上**已经实测到过**
 会话级卡死（使能光感会污染整个 SSC 会话）。
 
-**第一步**：拿到复现条件（多久、什么负载、是同时死还是各自死）。
-死锁当场跑 `gaokun3-qrtr-lookup`（已随镜像发布）与正常时对比服务表 ——
-少了哪个服务就指向哪个 DSP。⚠️ 别把 `Handover signaled` 当崩溃证据，
-那是良性噪声（#37 已用对照实验证明）。
+★ **取证看门狗已随 v0.2.0 起的镜像发布**（`bin/gaokun3-hangdump.sh`）：
+现实是死锁时用户只会重启、证据就没了，所以证据必须自动留下。它 60 秒采一次
+`/proc` 线程状态（刻意不跑 dumpsys，很便宜），判据是**同一个 tid 连续三次都在 D**
+（≥2 分钟），命中后把 stack/wchan/QRTR 服务表/PCM 状态/binder 日志/logcat
+写到 `/data/vendor/gaokun3/hangdump-<uptime>/`。
+
+**第一步**：下次死锁后把那个目录整个要过来 —— 不必再追问"多久、什么负载"。
+若目录是空的，说明它没判定成死锁（比如卡的不是 D 状态），那本身就是线索。
+手工对照仍可用 `gaokun3-qrtr-lookup` 比服务表：少了哪个服务就指向哪个 DSP。
+⚠️ 别把 `Handover signaled` 当崩溃证据，那是良性噪声（#37 已用对照实验证明）。
 
 ### A2. 硬件视频解码（Venus）— 内核这一半 ✅ 已通，Android 侧待做
 详见 [#41](stage4-findings.md)。实机验证：`/dev/video0` = `qcom-venus-decoder`、
@@ -70,64 +76,6 @@
 **第一步**：找 SLPI 侧 I2C 实例号 → 实际 QUP 控制器的映射，
 再比对 AP 的 DTS 里哪些 i2c 节点是开着的，看是不是 AP 把 instance 5 占了。
 
-### A4. 耳机口不出声 ✅ 已修，待用户插一次耳机验收
-详见 [#40](stage4-findings.md)。**三个阻塞点，全部定位并修复**，内核侧一点没缺。
-
-1. **RX 插值器链从来没接上** —— 这是"后端打不开"的真凶。我原先只设了
-   `RX_MACRO RXn MUX`，而 rx-macro 内部还有一级插值器停在默认值
-   （`RX INTn_1 MIX1 INP0 = ZERO`、`RX INTn DEM MUX = NORMAL_DSM_OUT`、
-   `CLSH/LO Switch = Off`）。DAPM 路径不完整 → PCM open 失败，**内核不打任何日志**。
-   补齐 9 个控件后当场通：`tinyplay -D 0 -d 0` rc=0、`pcm0p` `state: RUNNING`、
-   hw_ptr 2 秒前进 48960 帧/秒（实时 48 kHz）。
-   ⚠️ 我为此下过的错结论（"拓扑缺 APM 图 / soundwire 没上电 / q6apm 静默失败"）
-   三个候选一个都不是 —— 案卷里保留了它是怎么错的。
-2. **策略里没声明耳机设备** → 已加 `WIRED_HEADPHONE` / `WIRED_HEADSET` /
-   `IN_WIRED_HEADSET`（`CARD_0_DEV_0` / `_2`）。
-3. **框架找的是 `/sys/class/switch/h2w`，本机 ENOENT** →
-   `config_useDevInputEventForAudioJack = true`，改从 evdev 取
-   `SW_HEADPHONE_INSERT`。那个 input 设备本来就在、而且已经在被读。
-
-配方来源：救援 Ubuntu 上的上游 ALSA UCM2 —— **上游用
-`Regex "HUAWEI.*MateBook E.*"` 把本机直接 include 成 ThinkPad X13s**。
-★ 方法论：本机凡是 LPASS 音频的事，先去抄那个目录，别自己推 DAPM 图。
-
-**构建前已用 overlayfs 在设备上验过**：45 个控件零失败、策略被 audioserver 接受
-（三个新端口带地址出现在 `dumpsys media.audio_policy`）、扬声器无回归。
-**仍需用户做的**：新 ROM 起来后插一次耳机 —— 框架资源只能构建期 overlay，
-且 `WiredAccessoryManager` 在 SystemServer 启动时只读一次，框架层也没有
-插拔模拟命令可用。
-
-### A9. ✅ s2idle 根因已解决；救援 Ubuntu 已修复验收，Android 侧待做
-案卷 [#52](stage4-findings.md) / [#53](stage4-findings.md) / [#54](stage4-findings.md) /
-[#55](stage4-findings.md)。工具与修复：`scripts/s2idle/`（含 `INSTALL-rescue.md`）。
-
-**根因（双臂对照 + 多次独立复现）**：`a600000.usb` 的 USB role switch 停在
-`device`、没有任何 gadget、连 xhci 都没实例化 —— 这个"半初始化"状态一旦断电
-（系统挂起或驱动解绑都会）就**整板复位**，且不留任何日志。
-`dr_mode="otg"` + `usb-role-switch` 是我们 Stage 2 为 USB adb 自己加的
-（上游是 `host`），加上本机 UCSI 是坏的、没有 role 源，才成了这个状态。
-
-**第二道坎**：EC（`15-0038`）`suspend_noirq` 超时 −110 ——
-**发版内核本来就修好了**（buildbot 的 EC ordering 补丁）。
-⇒ 两道坎叠在一起，所以整晚每个单变量实验都失败。
-
-**✅ 已完成**：救援 Ubuntu 装 `system-sleep` 钩子，`systemctl suspend` **3/3**
-（`success=3 fail=0`，墙钟 ~115s / 内核时间 ~2.1s = 真睡）。
-
-**⬜ 待做（按顺序）**
-1. **重编一个带 `CONFIG_PM_DEBUG` 但【不带调试插桩】的 Android 内核** ——
-   ⚠️ 必须去掉我加在 `drivers/base/power/main.c` `device_prepare()` 里的 DPM
-   看门狗：Ubuntu 上无害，但 Android 的 SystemSuspend 不停发起挂起尝试，
-   每次给约 700 个设备各建一个定时器，疑似把系统拖死过一次。
-2. 用它 + `pm_test=devices` 测 Android 是否受同一个坑影响。
-   ⚠️ 放开 `gaokun3_nosuspend` wakelock 之前**先设 RTC 闹钟**。
-3. 若受影响，三个选项：①DTS 改回 `dr_mode="host"`（**失去 USB device-mode adb**，
-   UDC 就在这个控制器上）；②保留 otg，在挂起前后临时切 host/device
-   （Android 侧没有 systemd-sleep 钩子，要在 SystemSuspend 或 power HAL 上做）；
-   ③等 UCSI 修好 —— 那才是根上的问题。
-4. Android 挂起真的通了之后，才谈得上撤掉 `init.gaokun3.rc` 里的
-   `gaokun3_nosuspend` wakelock。
-
 ### A5. 恢复出厂设置不起作用
 设置里那条路走 misc 的 BCB + recovery，而本机没有可用 recovery
 （[#39](stage4-findings.md)）。实机证据：misc 里躺着一条没人消费的 `boot-recovery`。
@@ -135,9 +83,15 @@
 **现在的替代**：从救援 Linux `mkfs.ext4 -F /dev/disk/by-partlabel/userdata`。
 **真正的修法**：见 B3（EFI 加载器）或让 recovery 能启动（已搁置）。
 
-### A6. USB-C 外接显示（UCSI）
+### A6. USB-C 外接显示（UCSI）★ 现在还欠着待机那笔账
 `PPM init failed -ETIMEDOUT`，本机主线已知缺陷，`/sys/class/typec/` 是空的。
 代价还包括 USB 只有 high-speed（SuperSpeed 需要 UCSI 切 orientation）。
+
+★ **它现在是三个问题的共同根因**：没有 role 源正是 `a600000.usb` 停在
+半初始化 `device` 态的原因（[#52](stage4-findings.md)），而我们为此付的代价
+就是**息屏时 USB adb 断开**。UCSI 修好 → role 被正确指派 → 那个取舍自动消失。
+⚠️ 顺带说明这条为什么值得排在摄像头前面：**USB adb 掉线是本项目迄今最大的
+效率税**（#27），每次都要靠扫网段 + TCP adb 找回来。
 
 ### A8. 设备的 WAN 吞吐只有 PC 的 1/20（原因未定）
 详见 [#44](stage4-findings.md)。⚠️ **不是 WiFi、不是 ath11k** ——
@@ -153,6 +107,28 @@ URL 是 **36.9 MB/s**。对"用户走系统内 OTA 升级"有实际影响（1 GB
 
 ### A7. 摄像头
 完全没碰。
+
+---
+
+## A′. 最近关闭（记在这里，免得下次又被当成待办）
+
+* **s2idle 待机** ✅ 2026-08-22 修好并随 v0.3.0-alpha 发版。
+  真凶是**我们自己** Stage 2 为 USB adb 加的 `dr_mode="otg"` +
+  `usb-role-switch`：本机 UCSI 坏 → 没有 role 源 → 控制器停在没有 gadget、
+  没有 xhci 的 `device` 态 → 挂起阶段给它断电就**整板复位、零日志**。
+  救援 Ubuntu 用 `system-sleep` 钩子，Android 用息屏切 host / 亮屏切回 device
+  （`bin/gaokun3-usbrole.sh`）。案卷 [#52](stage4-findings.md) →
+  [#57](stage4-findings.md)。
+  ⚠️★ **这条留着是当方法论用的**：它在 Ubuntu 上用同一棵内核复现得一模一样，
+  于是被判成"内核/EC 缺陷、与 Android 无关"——**排除得对，指向的层完全错**
+  （设备树两边是同一份）。另外两道坎叠在一起 + 单次失败率 93%，
+  让每个单变量实验都返回"无效"。剩下的尾巴只有一条：息屏时 USB adb 断（见 A6）。
+* **耳机口 + 内置麦克风** ✅ 已由用户实机确认出声。真凶是 rx-macro 的插值器链
+  从来没接上（内核对此**一行日志都不打**），外加策略没声明耳机设备、
+  框架去看主线上不存在的 `/sys/class/switch/h2w`。
+  ★ 配方来自救援 Ubuntu 上的上游 ALSA UCM2 —— 上游用
+  `Regex "HUAWEI.*MateBook E.*"` 把本机直接 include 成 ThinkPad X13s。
+  **本机凡是 LPASS 音频的事，先去抄那个目录。**[#40](stage4-findings.md)
 
 ---
 
@@ -229,10 +205,6 @@ range in the curve:`（后面是空的，连哪条曲线都没说）。
 
 ## C. 上游或硬件层面（本地做不了）
 
-* **待机（s2idle resume）** —— 挂得下去、醒不回来，随后整机复位。
-  **Ubuntu 上同款内核完全复现** → 内核/EC 缺陷，不是 Android 的问题。
-  第一步是编一个带 `CONFIG_PM_DEBUG` 的内核（现在 `/sys/power/pm_test` 不存在），
-  否则无法二分。三个元凶（himax / 三个 remoteproc / EC 驱动本身）已逐个排除。
 * **磁力计** —— 本机**没有这个硬件**（SSC 亲口回答），所以没有指南针、
   没有 9 轴融合。不是缺驱动。
 * **指纹（FocalTech FTE7001）、TPM** —— 没有任何驱动存在。
@@ -265,6 +237,12 @@ range in the curve:`（后面是空的，连哪条曲线都没说）。
 需要切槽时写 oneshot 而不是改 default。顺带给设备加一个
 `gaokun3-reboot-to-rescue` 小工具（写 oneshot + reboot），
 远程救援就不再依赖 ESP 手术。
+
+### D5. PR #3 待回复（已审完，等你定措辞）
+线上那个 PR 动的正是内核预编译这一块。我把要问的整理好了，**没有发到 GitHub**
+—— 对外发言等你。三个问题：`dr_mode=host` 是不是有意为之（那正是我们 #52 的
+取舍另一半）；他们刷完之后 USB adb 还通不通；能不能公开那份内核 `.config`
+（我们这边的断言是 52 条 MUST_Y + `VIDEO_QCOM_IRIS` MUST_N，可以对一遍）。
 
 ---
 

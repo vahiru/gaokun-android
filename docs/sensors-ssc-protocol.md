@@ -226,7 +226,7 @@ message SscAccelerometerResponse {
 
 | 部件 | 状态 |
 |---|---|
-| `CONFIG_QCOM_FASTRPC` | ⬜ 仍是 `=m`，靠 insmod 验证过；已进 `kernel-config-android.sh` 断言，待重编内核 |
+| `CONFIG_QCOM_FASTRPC` | ✅ 已是 `=y`（M13 实机验证：4 个 `/dev/fastrpc-*` 节点、`/proc/modules` 0 行）|
 | `/dev/fastrpc-sdsp` | ✅ 出现（权限由 `ueventd.gaokun3.rc` 给 system:system）|
 | `hexagonrpcd`（AOSP 构建）| ✅ 已编出并运行，DSP 20 秒内发来 2880 行文件请求 |
 | VFS 根 → `/vendor/etc/hexagonrpcd-root` | ✅ 已进 `device.mk` |

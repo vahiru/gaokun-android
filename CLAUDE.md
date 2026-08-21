@@ -5,7 +5,26 @@
 在华为 MateBook E Go（Snapdragon 8cx Gen 3 / sc8280xp，代号 gaokun）上跑原生 AOSP，
 最终目标是能稳定运行 arm64 手游。
 
-**当前阶段：Stage 6 M15 — ★★★★ s2idle 根因找到并在救援 Ubuntu 上修复验收（`systemctl suspend` 3/3）：真凶是 `a600000.usb` 的 role switch 停在 `device`（无 gadget、无 xhci），断电即整板复位；修法是 `system-sleep` 钩子在每次挂起前置 `host`。Android 侧未做（USB adb 的 UDC 就在这个控制器上，要权衡）**（每次开工时更新这一行）
+**当前阶段：Stage 6 M16 — ★★★★★ s2idle 两端都修好并已发版（v0.3.0-alpha，构建戳 `1787335922`）：Android 真实挂起/唤醒 ×4 零复位，救援 Ubuntu `systemctl suspend` 3/3。真凶是我们自己 Stage 2 加的 `dr_mode="otg"`——`a600000.usb` 的 role 停在 `device`（无 gadget、无 xhci），断电即整板复位；Android 的修法是息屏切 `host`、亮屏切回 `device`（代价：息屏时 USB adb 断，TCP adb 不受影响）。README/TODO/设备树注释已同步到这个事实**（每次开工时更新这一行）
+
+> **★ Stage 6 M16（2026-08-22）：发版 v0.3.0-alpha + 一次全仓文档对账。**
+> 发布物就是**在硬件上验过的那一版**（`--no-build`，构建戳 `1787335922`）；
+> R2 五条路径全 200，`release.sh` 三条断言全过。
+> ★ 随后做了一次**文档与现实的对账**，结果值得记：**公开 README 仍在首屏写着
+> "The machine cannot suspend"**，而那正是这一版的头号卖点；zh-CN 更落后一整版
+> （耳机口还是 ❌ 且写着**已被 #40 推翻**的旧诊断、Venus 还是 ❌、
+> 招募项还在说 `CONFIG_QCOM_FASTRPC` 是 `=m`——M13 早就实测 `=y`/0 模块）。
+> 设备树注释同样：`init.gaokun3.rc` 整段还在讲"机器不真的睡"，
+> `usbrole.rc` 与 `device.mk` 一个说"默认不启用"、一个默认设成 1，自相矛盾。
+> ⚠️★ **教训：发版说明写了不等于文档更新了。** 首屏状态、状态表、招募项、
+> 以及**代码里的成段注释**都是独立的副本，每一份都会各自变质。
+> ★ 下次发版的收尾清单里必须有一条"grep 一遍旧结论的关键词"
+> （`cannot suspend` / `不能待机` / `=m` / `❌`）。
+> - 顺带修掉两处会误导人的产物/文档不一致：`ota/gaokun3.json` 的仓库副本
+>   还是 `createjson.sh` 生成的 **sourceforge** 下载地址（线上那份是对的，
+>   `release.sh` 在上传时重写；但仓库里留着假地址会让人以为发错了），
+>   已改成与线上**逐字节相同**；`INSTALL.md` 说"v0.3 起带 `recovery-ramdisk.img`"
+>   —— **没有任何一版发过它**（recovery 还在复位循环），已改成实话。
 
 > **★★ Stage 6 M15（2026-08-21）：s2idle 从"内核缺陷、无从下手"变成两个可定位的问题。**
 >

@@ -389,7 +389,7 @@ PRODUCT_COPY_FILES += \
 # 挂起前把 a600000.usb 的 USB role 切到 host —— 那个控制器停在 role=device 时，
 # 设备挂起阶段会【整板复位】且不留任何日志；而 USB adb 的 UDC 就在它上面，
 # 所以不能简单把 DTS 改成 host。见 docs/stage4-findings.md #52 / #54 / #56。
-# ★ 默认不启用；opt-in: setprop persist.gaokun3.allow_suspend 1
+# ★ 默认【启用】（见下面的 persist.gaokun3.allow_suspend）。
 PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/bin/gaokun3-usbrole.sh:$(TARGET_COPY_OUT_VENDOR)/bin/gaokun3-usbrole.sh \
     $(LOCAL_PATH)/etc/usbrole.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/usbrole.rc
