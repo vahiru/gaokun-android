@@ -2395,3 +2395,98 @@ resume）之内。** freezer 层（只冻结进程、不碰设备）完好，
 `pm_test=devices` 循环 + 只数 `rc=0`，让"改了 X 之后好没好"第一次变成可测量的。
 在这之前我做的十几个"改一次、试一次"的实验，**在 ~93% 的单次失败率下几乎没有
 证据力** —— 这也是为什么 #39/#43 会一正一反、把我带偏两轮。
+
+---
+
+## #52 ★★★★★ s2idle 真凶：**`a600000.usb`（我们自己改成 otg 的那个空闲 dwc3）**（2026-08-21）
+
+接 #51。这一条把整晚的碎片全部串起来，并**推翻 #48**（"7.1→7.2 回归"）。
+
+### 定位过程（每一步都是实测）
+
+**1. 先修判据。** 关掉 `gaokun-ec-adapter` 的唤醒能力后（等价于 buildbot
+`others/0017` 的效果），`wakeup_count` 从"每 2 秒 +1"变成**全程冻住**：
+
+```
+gaokun-ec-adapter    event+10 active+10   ← 20 秒内 +10，唯一持续产生事件的源
+关掉后：20 秒内没有任何源增长，wakeup_count 冻在 62
+```
+
+⚠️ 这个事件洪水**只在 PLAINV72（零补丁 v7.2-rc2）上有** —— 我从 #31 起一直用它测，
+而 buildbot 的 0017 正是治这个的。**测试内核与发版内核在"EC 唤醒行为"上不同，
+我却拿它的统计去推断发版内核。**
+
+**2. ★ 那个"`-EBUSY`"根本不是 EBUSY。** 把 write 的错误串抓出来：
+
+```
+错误串 = 写入错误: 无效的参数            ← EINVAL，不是 EBUSY
+suspend_stats: step=[suspend] dev=[xhci-hcd.2.auto] errno=[-22]
+第一次的 dmesg: usb 3-3: USB disconnect, device number 2
+```
+
+`xhci_suspend()` 里有一段：HCD 状态不是 `HC_STATE_SUSPENDED` 就 `return -EINVAL`。
+**第一次挂起周期里掉了一个 USB 设备，之后 xhci 永久返回 -EINVAL。**
+★ 教训：**`echo ... > sysfs` 失败时一定要把 stderr 抓下来**，
+不要凭 `rc!=0` 猜 errno —— 我猜了 EBUSY，猜错了，还为此写了个没用的
+`wakeup_count` 回写协议。
+
+**3. ★★ 只解绑 USB（2 个 xhci + 3 个 dwc3）→ 10/10 全过。**
+与上一轮的差别**只有这一项**（同 cmdline、同样关了适配器唤醒）：
+`1/10` → `10/10`。
+
+**4. ★★★★ 逐个解绑 dwc3，日志精确停在一行上：**
+
+```
+xhci-hcd.0.auto 的父设备 = a800000.usb     已解绑，活着
+xhci-hcd.2.auto 的父设备 = a400000.usb     已解绑，活着
+dwc3/a400000.usb                           已解绑，活着
+★ 即将解绑 dwc3/a600000.usb                ← 日志到此为止
+```
+
+换成把 a600000 放**第一个**解，结果一模一样 ⇒ **与顺序无关。**
+
+### 凶手的身份 —— 而且是我们自己造的
+
+```
+a600000.usb  compatible=snps,dwc3  dr_mode=otg  maximum-speed=high-speed
+             usb-role-switch  子设备=0 个 xhci  下挂=usb_role
+a400000.usb  dr_mode=host   子设备=1 个 xhci
+a800000.usb  dr_mode=host   子设备=1 个 xhci
+dmesg: Fixed dependency cycle(s) with
+       /soc@0/geniqup@ac0000/i2c@a9c000/embedded-controller@38/connector@0
+       ↔ /soc@0/usb@a6f8800/usb@a600000
+```
+
+★ **`dr_mode="otg"` + `usb-role-switch` + `high-speed` 是我们在 Stage 2 为了
+USB adb 自己改上去的**（上游是 `host`，见工作区 DTS 的那段注释）。
+而本机 **UCSI 是坏的**（`PPM init failed -ETIMEDOUT`，已知坑），
+**没有 role 源** ⇒ 这个控制器停在半初始化的 OTG 状态、**一个 xhci 都没起**、
+还和 EC 的 USB-C 连接器构成 devlink 依赖环。
+**给这个状态断电（挂起或解绑都会）就整板复位。**
+
+### ★★ 由此推翻 / 解释的旧结论
+
+* ❌ **#48"上游 7.1.0-rc3 正常 ⇒ 7.1→7.2 回归"作废。**
+  那次用的是**另一份 DTB**（166 783 B vs 173 026 B），
+  两份 DTB 的 diff 有 4131 行 —— a600000 的 `dr_mode` 极可能还是 `host`。
+  **从来不是内核回归，是 DTB 差异。**
+* ✅ 解释了为什么"解绑 EC / venus / 音频 / remoteproc / cpuidle"全都无效 ——
+  它们都不在这条路上。
+* ✅ 解释了 #34 的批量解绑为什么"死在中途" —— 那个序列里就有 dwc3。
+* ✅ 解释了 `pcie_aspm=off + APST 关` 为什么**看起来**有效又不稳定：
+  它根本不是修复，只是把这个概率性的断电时机稍微挪了一下。
+  ⇒ **#51 那张 cmdline 对照表的因果解释作废**（数据保留）。
+* ✅ 解释了 `last_failed_dev=[a600000.usb] step=[resume]` ——
+  同一个设备在 resume 上也失败过，两条独立证据指向同一处。
+
+### ⬜ 修复方向（未做，有取舍）
+
+1. **把 a600000 改回 `dr_mode = "host"`**（= 上游原样）。
+   ⚠️ **代价：USB device-mode adb 会没有**（UDC 在这个控制器上，Stage 1 的
+   "UDC 出现"就是它）。但 USB adb 本来就有 #27 那个"掉了不回来"的缺陷，
+   而 TCP adb 需要 WiFi 在。**这是个真实取舍，要用户决定。**
+2. 保留 otg，但让它不要停在半初始化状态 —— 先试运行时写
+   `/sys/class/usb_role/*/role`（强制一个角色）再挂起，看断电是否变安全。
+   这条**零构建**，应该先试。
+3. 上游方向：UCSI 修好了这个问题多半自然消失（`refs/linux-gaokun/README.MD:86-87`
+   记着 UCSI 的缺陷）。
