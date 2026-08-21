@@ -2534,3 +2534,35 @@ adb shell 'cat /sys/class/usb_role/*/role; ls /sys/bus/platform/devices/a600000.
 
 ⚠️ **必须用 `pm_test=devices`**，不要在 Android 上跑真实挂起 ——
 "醒不回来"仍未解决，真实挂起会把机器睡死、只能长按电源键。
+
+### ★ Android 侧现状（决定"要不要改 DTS"的关键）
+
+```
+/sys/class/udc/a600000.usb -> .../a6f8800.usb/a600000.usb/udc/a600000.usb
+sys.usb.controller = a600000.usb    sys.usb.state = adb    sys.usb.ffs.ready = 1
+configfs: /config/usb_gadget/g1  已配置
+usb_role: a600000.usb-role-switch = [device]    子 xhci = 0
+/sys/power/ 里【没有 pm_test】
+```
+
+三条结论：
+
+1. ★ **USB adb 的 UDC 就在 a600000 上** ⇒ 改成 `host` **确实会失去 USB
+   device-mode adb**。取舍是真实的，不是理论上的。
+2. ★★ **但 Android 上这个 `device` 角色是有真实 gadget 的**（configfs g1 已配、
+   `ffs.ready=1`、`sys.usb.state=adb`），而救援 Ubuntu 上**一个 gadget 都没有**。
+   ⇒ "半初始化状态"可能**只在救援 Ubuntu 成立**。
+   **如果 Android 本来就不受影响，那修法是零代价的**：只在救援 Ubuntu 的
+   启动脚本里写一行 `role=host`（那边根本不用 USB gadget）。
+3. ⚠️ **Android 内核 #19 没有 `CONFIG_PM_DEBUG`**（`/sys/power/pm_test` 不存在），
+   所以**在 Android 上安全验证这件事需要重编内核**。
+   `scripts/kernel-config-android.sh` 在 M14 已经把 PM debug 那一块加进断言了，
+   只是还没构建过。
+
+⬜ **待用户决定的岔路**（两条路工作量和代价差很多）：
+* **A**：重编 Android 内核（带 `PM_DEBUG`）→ 在 Android 上用 `pm_test=devices`
+  安全测一次 → 才能知道 Android 是否受影响、以及要不要动 DTS。
+  代价：构建机开机时间 + 换掉设备上现役内核。
+* **B**：先只修救援 Ubuntu（开机写 `role=host`，零代价、零风险），
+  Android 侧留着不动。
+⚠️ **不要**在 Android 上跑真实挂起来省这一步 —— "醒不回来"没解决，会睡死。
