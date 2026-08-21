@@ -2776,3 +2776,46 @@ QMP combo PHY 上，那条路径断电时打死 SoC。
 ★ 第二行是唯一两全的，但要写代码。Android 侧可行的挂点：
 `android.system.suspend` 的 wakelock 协调、或一个监听 `/sys/power/` 的原生
 小服务、或干脆在内核里给 dwc3 加一个"挂起前切 host"的 quirk（那才是根治）。
+
+## #57 ★★★★★★ **Android 的 s2idle 通了** —— 真实挂起/唤醒 ×4（2026-08-22）
+
+配置：内核 `#32`（= 发版内核 + `CONFIG_PM_DEBUG`，**无调试插桩**）
++ `bin/gaokun3-usbrole.sh host`，`pm_test=none`（**真实挂起**），RTC 闹钟 +45 秒。
+**走的是 Android 自己的 SystemSuspend 路径**，不是手动 `echo mem`。
+
+```
+role=[host] 子xhci=1
+RTC 闹钟=1787334892（45 秒后）
+★★★ 放开 wakelock，交给 Android 自己挂起
+★★★ 回来了  success 3 → 7  fail=3
+dmesg: PM: suspend entry (s2idle) → Restarting tasks: Done → PM: suspend exit
+```
+
+★ **`success` +4** —— 那个窗口里 Android 自己挂起并唤醒了**四次**，
+每次都干净恢复，**`fail` 一次没涨**（那 3 次旧的是 pm_test 阶段
+`alarmtimer.1.auto` 的良性拒绝，见 #56 末尾）。
+
+### ★★ 附带结论：**"醒不回来"这个第二个问题并不存在**
+
+M4 以来一直把 s2idle 当成两个问题（"挂起时复位" + "醒不回来"）。
+现在看：**它们是同一个根因的两种表现**。#39 那次唯一的"睡进去没醒"观测，
+是在 role 还坏着的情况下做的。role 修好之后，**进入和唤醒都正常**。
+⇒ `docs/TODO.md` A9 里"复位解决后再攻醒不回来"那一条**可以划掉**。
+
+### 完整的解决路径（三层，缺一不可）
+
+1. **内核**：buildbot 的 `huawei-gaokun-ec: fix suspend/resume ordering`
+   —— 治 EC 在 `suspend_noirq` 超时 −110。**发版内核本来就有。**
+2. **救援 Ubuntu**：`/usr/lib/systemd/system-sleep/` 钩子，挂起前置 `role=host`。
+   实测 `systemctl suspend` 3/3。零代价（那边不用 USB gadget）。
+3. **Android**：`bin/gaokun3-usbrole.sh` + `etc/usbrole.rc`
+   —— 息屏切 host、亮屏切回 device，靠"确认到 host 才放行"的 wakelock 不变量
+   消除竞态。实测**真实挂起唤醒 ×4，零复位**。
+
+⬜ **剩下的收尾**
+* 目前 Android 侧默认**关闭**（`persist.gaokun3.allow_suspend` 未设）。
+  要正式启用得走一次 ROM 构建 + 验收。
+* ⚠️ 启用后的用户可见代价：**息屏时 USB device-mode adb 断开，亮屏恢复**
+  （TCP adb 不受影响）。发版说明必须写清楚。
+* ⚠️ 发版说明里"挂起是内核/EC 缺陷、Ubuntu 同样复现"那句是**错的**，必须改
+  —— 真凶是我们自己在 Stage 2 加的 `dr_mode="otg"`。
