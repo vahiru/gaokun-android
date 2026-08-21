@@ -1,0 +1,49 @@
+From: gaokun3 port <nekovahiru@gmail.com>
+Subject: [PATCH] arm64: dts: gaokun3: usb_0 到 otg 以获得 USB device-mode adb
+
+⚠️⚠️ 这个补丁【会让 s2idle 挂起整板复位】。它是一个【取舍】，不是修复。
+   打之前先读完这段。
+
+Stage 2 为了拿到 USB device-mode adb（UDC 在 a600000.usb 上），
+把上游的 dr_mode = "host" 改成 otg + usb-role-switch。
+
+★ 代价（2026-08-22 查明，案卷 docs/stage4-findings.md #52 / #54 / #55）：
+本机 UCSI 是坏的（PPM init failed -ETIMEDOUT，见"已知坑"），没有 role 源，
+所以开机后这个控制器停在 role=device、【没有任何 gadget】、连 xhci 都没实例化
+—— 一个"半初始化"状态。给这个状态断电（系统挂起，或解绑驱动）就【整板复位】，
+而且不留任何日志（固件/TZ 级复位，pstore 抓不到）。
+
+双臂对照（同一次开机、同一内核、什么都不解绑，只改 role switch 一个值）：
+  role=host    子 xhci=1  → pm_test=devices 5/5 通过
+  role=device  子 xhci=0  → 第 1 次就整板复位
+
+★ 取舍表：
+  dr_mode="host"（= 不打这个补丁）   待机 ✅ / USB device-mode adb ❌（只剩 TCP adb）
+  dr_mode="otg" + 挂起前切 host      待机 ✅ / USB adb ✅（Android 侧尚未实现）
+  dr_mode="otg"（= 打这个补丁）      待机 ❌ / USB adb ✅
+
+★ 救援 Ubuntu 侧已有零代价解法：scripts/s2idle/ 的 system-sleep 钩子
+  在每次挂起前把 role 置成 host（救援系统不用 gadget）。
+  Android 侧不能照搬 —— UDC 就在这个控制器上。
+
+⚠️ 另记：maximum-speed = "high-speed" 是另一回事（k11 起 DP 驱动会抢走
+   QMP combo PHY 的 USB3 pipe 时钟，UCSI 不工作没人管 mux，dwc3 软复位超时
+   -110），与上面的取舍无关。
+---
+--- a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
++++ b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
+@@ -1287,7 +1287,13 @@
+ };
+ 
+ &usb_0_dwc3 {
+-	dr_mode = "host";
++	/* port0（空闲口）。port1 (a800000) 挂启动介质，必须保持 host。 */
++	dr_mode = "otg";
++	usb-role-switch;
++	/* 限 USB2：k11 起 DP 驱动激活，QMP combo PHY 的 USB3 pipe 时钟
++	 * 被 DP 抢走（UCSI 不工作没人管 mux），dwc3 软复位超时 -110。
++	 * high-speed 让 dwc3 跳过 USB3 PHY。SuperSpeed 本来就需要 UCSI。 */
++	maximum-speed = "high-speed";
+ };
+ 
+ &usb_0_dwc3_hs {

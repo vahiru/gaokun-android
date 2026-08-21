@@ -1,0 +1,26 @@
+From: gaokun3 port <nekovahiru@gmail.com>
+Subject: [PATCH] arm64: dts: gaokun3: enable Venus video codec
+
+M14 打通 Venus 内核侧时加的，一直只活在构建机的工作区、从未入库。
+firmware-name 指向 qcvss8280.mbn —— ⚠️ VSS = Video SubSystem，不是 Voice；
+firmware/README.md 里那一行当初被标成"语音服务（未用到）"，是错的。
+
+配套：scripts/kernel-config-android.sh 里的 Venus 那一块
+（8 个符号 + 必须 --disable VIDEO_QCOM_IRIS）。
+
+案卷：CLAUDE.md 的 Stage 6 M14 段。
+---
+--- a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
++++ b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
+@@ -1425,6 +1425,11 @@
+ 	status = "okay";
+ };
+ 
++&venus {
++	firmware-name = "qcom/sc8280xp/HUAWEI/gaokun3/qcvss8280.mbn";
++	status = "okay";
++};
++
+ &wsamacro {
+ 	status = "okay";
+ };
