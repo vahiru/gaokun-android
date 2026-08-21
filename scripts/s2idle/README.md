@@ -64,17 +64,37 @@
 的流程见 `docs/stage4-findings.md` #51；EFI 变量的写法（属性 `0x07` +
 UTF-16LE + 双 NUL，覆盖前 `chattr -i`）见 M14 段。
 
-## 目前的结论（截至 2026-08-21）
+## ★★ 结论：s2idle 通了（2026-08-21 夜）
 
-| 配置 | 有通过的开机 / 总开机 |
+**两道坎叠在一起**，所以整晚每个单变量实验都失败、每个假说都看起来被"否定"：
+
+| 坎 | 症状 | 修法 |
+|---|---|---|
+| `a600000.usb` 的 role 停在 `device`（无 gadget、无 xhci、半初始化） | 设备挂起阶段**整板复位**，零日志 | **`role=host`**（子 xhci 0→1）|
+| EC（`15-0038`）`suspend_noirq` 超时 −110 | 干净失败 | **发版内核本来就修好了**（buildbot 的 EC ordering 补丁）|
+
+**实测**：我们带补丁的内核 + `role=host`，救援 Ubuntu 上真实 s2idle 挂起
+**5/5**（`success=5 fail=0`）。
+★ 判据不只看计数：每次**墙钟走约 43 秒而内核 printk 时间只走约 2.7 秒**
+—— 本地时钟停了、墙钟靠 RTC 补回来，这才是"真睡"的签名。
+
+★★★ **方法论（本轮最贵的一条）**：**当排除法把所有候选都排干净时，
+先怀疑"是不是有两个原因"，而不是继续找第三个候选。**
+
+## 落地
+
+* `99-gaokun3-usb-role.rules` —— 装到救援 Ubuntu 的 `/etc/udev/rules.d/`，
+  开机自动把 role 置成 host。**救援系统不用 USB gadget，零代价。**
+* ⚠️ **Android 侧不能照搬**：USB adb 的 UDC 就在这个控制器上
+  （`sys.usb.controller=a600000.usb`），置成 host 就没有 USB device-mode adb。
+  而 Android 的 `device` 角色**有真实 gadget**，未必受影响 —— 需要一次实测
+  （用带 `CONFIG_PM_DEBUG` 的内核 + `pm_test=devices`）。
+  ⚠️ 那个内核**不要带调试插桩**：我给 `device_prepare()` 加的 DPM 看门狗在
+  Ubuntu 上无害，但 Android 的 SystemSuspend 会不停发起挂起尝试，
+  每次给约 700 个设备各建一个定时器 —— 疑似把系统拖死过一次。
+
+| 文件 | 用途 |
 |---|---|
-| 基线（`pcie_aspm.policy=powersupersave` + APST 开） | **0 / 约 16** |
-| 只 `pcie_aspm=off` | 0 / 1 |
-| 只 APST 关 | 0 / 1（另有一次挂死） |
-| 去掉策略（ASPM 默认）+ APST 关 | 0 / 1 |
-| **`pcie_aspm=off` + APST 关** | **3 / 5**（其中一轮连过 10/10） |
-
-两个都必需，且**光去掉我们自己加的 `powersupersave` 策略不够**。
-⚠️ 但**不是确定性修复** —— 同一条 cmdline 另有 2 次开机第 1 次就死，
-而**同一次开机内行为高度一致**（连过 10 次 或 第 1 次就死）
-⇒ 决定性因素是**开机时确定下来的状态**。`s2fp.sh` 就是为查这一层写的。
+| `s2real.sh` | 真实挂起测试（role=host + RTC 闹钟），⚠️ 有睡死风险，需人在旁边 |
+| `s2verify.sh` | 验收：**不自己写 role**，检查 udev 规则是否开机生效，不是 host 就拒绝挂起 |
+| `99-gaokun3-usb-role.rules` | 救援 Ubuntu 的永久修复 |

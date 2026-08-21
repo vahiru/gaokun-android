@@ -2676,3 +2676,56 @@ dtb/initrd 复用 slot_b 的以省 ESP 空间），靠 oneshot 进去。
 * 若 Android 确实受影响，可选项：①DTS 改回 `dr_mode="host"`（失去 USB adb）；
   ②保留 otg，但在息屏/挂起前临时切 host、恢复后切回 device；
   ③等 UCSI 修好（那才是根上的问题）。
+
+## #55 ★★★★ **救援 Ubuntu 的挂起已修复并端到端验收**（2026-08-22）
+
+```
+挂起前 role=[device]                                  ← 系统正常状态就是 device
+★ 第1/3 挂起成功（success 0→1）role 现在=[host]
+★ 第2/3 挂起成功（success 1→2）
+★ 第3/3 挂起成功（success 2→3）
+==== 3/3  success=3 fail=0 ====
+每次墙钟 ~115 秒，内核 printk 时间只走 ~2.1 秒 = 真睡
+```
+
+**走的是 `systemctl suspend`** —— 也就是合盖 / 闲置 / 用户触发实际会走的那条路径。
+
+### ★★ 修复形态：**必须是 `system-sleep` 钩子，开机设一次不够**
+
+`a600000.usb` 的 role switch **不归我们管，typec/UCSI 层才是它的主人**
+（dmesg: `Fixed dependency cycle(s) with .../embedded-controller@38/connector@0`）。
+实测三段证据：
+
+1. 开机的 systemd 单元**确实成功**置成了 host
+   （journal: `role: device -> host（子 xhci = 1）`，`status=0/SUCCESS`）；
+2. **但到 up=76 秒它又变回 `device`** —— 被 typec 层改回去了；
+3. 而且开机太早时写入会直接失败（journal 里有一次
+   `⚠️ 置 host 失败，仍是 device`）。
+
+⇒ 管用的是 **`/usr/lib/systemd/system-sleep/` 钩子：每次挂起之前再置一次**。
+装法见 `scripts/s2idle/INSTALL-rescue.md`。
+
+★ 另外 **udev 规则那条路走不通**（`ATTR{role}="host"`）：
+`udevadm test` 显示规则确实匹配上了，但它设的值同样会被 typec 层覆盖。
+已从仓库删除，免得误导。
+
+### ⚠️★ 两个"判据本身错了"的坑，都值得记
+
+1. **`echo mem > /sys/power/state` 不会跑 `system-sleep` 钩子** ——
+   只有 `systemctl suspend`（及合盖/闲置这些走 logind 的路径）才会。
+   我第一版验收脚本用 `echo mem`，钩子从没被调用，于是"修复看起来无效"。
+   ★ **用错的触发方式去验证一个挂在正确触发方式上的修复，必然得到假阴性。**
+2. ★ **`systemctl reboot` 是异步返回的。** 我在验收脚本里写了
+   "role 不是 host 就拒绝挂起 → `systemctl reboot`"，但**没有 `exit`** ——
+   于是护栏打印完警告后**照样往下跑进了真实挂起**，正好是危险配置。
+   （所幸失败模式是复位、可自动恢复。）
+   ★ **安全护栏里的"终止"必须真的终止**：`systemctl reboot` 后面要跟 `exit`。
+
+### ⬜ Android 侧仍未做
+
+USB adb 的 UDC 就在这个控制器上（`sys.usb.controller=a600000.usb`），
+所以不能照搬。而 Android 的 `device` 角色**有真实 gadget**，未必受影响。
+需要一次实测：**带 `CONFIG_PM_DEBUG` 但【不带调试插桩】的内核** + `pm_test=devices`。
+⚠️ 那个插桩（我给 `device_prepare()` 加的 DPM 看门狗）在 Ubuntu 上无害，
+但 Android 的 SystemSuspend 会不停发起挂起尝试，每次给约 700 个设备各建一个
+定时器 —— 疑似把系统拖死过一次。**调试插桩要有"退场"意识。**

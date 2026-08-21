@@ -1,0 +1,6 @@
+#!/bin/sh
+# systemd-sleep 钩子：每次挂起【之前】重新确认 role=host。
+# 运行中若有东西把它改回 device，挂起就会整板复位 —— 这一层是防那个的。
+case "$1" in
+    pre) /usr/local/bin/gaokun3-usb-role-host.sh ;;
+esac

@@ -1,0 +1,14 @@
+[Unit]
+Description=gaokun3: force a600000.usb role switch to host (s2idle prerequisite)
+Documentation=https://github.com/vahiru/gaokun-android/blob/main/scripts/s2idle/README.md
+DefaultDependencies=no
+After=sysinit.target
+Wants=sysinit.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/gaokun3-usb-role-host.sh
+
+[Install]
+WantedBy=multi-user.target
