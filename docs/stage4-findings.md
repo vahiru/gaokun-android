@@ -2566,3 +2566,26 @@ usb_role: a600000.usb-role-switch = [device]    子 xhci = 0
 * **B**：先只修救援 Ubuntu（开机写 `role=host`，零代价、零风险），
   Android 侧留着不动。
 ⚠️ **不要**在 Android 上跑真实挂起来省这一步 —— "醒不回来"没解决，会睡死。
+
+### ⚠️★ 靶场纪律补一条（第四次让用户按电源键，成因与前三次不同）
+
+Android 侧测试：我先设 `pm_test=devices` **再**放开 `gaokun3_nosuspend` wakelock，
+以为这样连 Android 自己的 autosleep 都变成安全的测试挂起 —— 这一半是对的。
+**漏掉的是收尾路径**：脚本结束时"先拿回 wakelock、再 `pm_test=none`"，
+那一刻起真实挂起就重新可能发生，而**唯一的拦阻只剩那个 wakelock**。
+它没拿稳（或 Android 自己的 wakelock 也为空）→ 几秒内真睡下去 → 醒不回来。
+
+★★ **正确做法（已定为纪律）**：**在放开 wakelock 之前，先
+`echo +120 > /sys/class/rtc/rtc0/wakealarm`。**
+真睡下去也会被闹钟叫；即使醒不回来，结果也只是**整板复位**，
+而**复位会自动回到默认启动项（Android），是可恢复的；无限睡下去不可恢复。**
+⇒ **设计安全网时要区分"可恢复的失败"和"不可恢复的失败"，
+把不可恢复的那种堵死，而不是笼统地"减少失败"。**
+
+★ 顺带记录本轮的部署手法（是好的，值得复用）：新内核放进**独立的 ESP 目录 +
+独立 BLS 条目**（`android/slot_b_pmdbg/Image` + `*-android-b-pmdbg.conf`，
+dtb/initrd 复用 slot_b 的以省 ESP 空间），靠 oneshot 进去。
+默认启动项仍是 `*-android-b.conf`（glob 不匹配 `-pmdbg`），
+所以**新内核起不来时复位就回到已知可用的那个**。这一半奏效了：
+新内核（`#31`，带 `CONFIG_PM_DEBUG`）实测正常启动、`pm_test` 节点出现、
+`boot_completed=1`、USB adb 正常。
