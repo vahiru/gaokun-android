@@ -2490,3 +2490,47 @@ USB adb 自己改上去的**（上游是 `host`，见工作区 DTS 的那段注�
    这条**零构建**，应该先试。
 3. 上游方向：UCSI 修好了这个问题多半自然消失（`refs/linux-gaokun/README.MD:86-87`
    记着 UCSI 的缺陷）。
+
+### ★★★★★★ 双臂确认：**只改 `usb_role` 一个值，结果就翻转**
+
+同一次开机、同一内核、同一 cmdline、**什么都不解绑**，只写 role switch：
+
+```
+==== 臂 host ====
+  role 回读=[host]    子 xhci=1  rt=[active]
+  ★ 通过 1/5 ... 5/5              ← 5/5 全过
+
+==== 臂 device ====
+  role 回读=[device]  子 xhci=0  rt=[active]
+  PRE 臂=device 第1/5
+（日志到此为止 —— 整板复位）
+```
+
+⇒ **根因确认：`a600000.usb` 的 role switch 停在 `device`、没有任何 gadget
+配置、连 xhci 都没实例化（子 xhci=0）—— 给这个"半初始化"状态断电就复位。
+给它一个真实角色（`host`，子 xhci=1）之后，它就是个普通控制器，挂起完全正常。**
+
+★ 注意默认值：**开机后 role switch 自己停在 `device`**
+（`a600000.usb-role-switch 当前=[device]`），所以这个坑是默认命中的。
+
+### ⚠️ 修复的取舍 —— 需要用户决定，且**先要做一个 Android 侧实验**
+
+`role=host`（或 DTS 改回 `dr_mode="host"`）能修好挂起，但**代价是
+USB device-mode adb 没了**（UDC 就在这个控制器上，Stage 1 的"UDC 出现"就是它）。
+
+★★ **但在 Android 上情况可能不同，必须先测**：救援 Ubuntu 里**没有任何东西配置
+USB gadget**，所以 `device` 角色是空的、半初始化的；而 **Android 的 adbd 会通过
+configfs 真的把 gadget 配起来**，那时 `device` 角色未必是"半初始化"状态。
+⇒ **如果 Android 上挂起本来就没问题，那这个坑只影响救援 Ubuntu，不需要改 DTS。**
+
+**Android 侧怎么安全测**（内核带 `CONFIG_PM_DEBUG`，`pm_test` 可用）：
+
+```sh
+adb shell 'echo gaokun3_nosuspend > /sys/power/wake_unlock'   # 先放开 wakelock
+adb shell 'echo devices > /sys/power/pm_test'                 # ★ 只测设备阶段，5 秒自动返回
+adb shell 'echo mem > /sys/power/state; echo rc=$?'
+adb shell 'cat /sys/class/usb_role/*/role; ls /sys/bus/platform/devices/a600000.usb/ | grep -c ^xhci'
+```
+
+⚠️ **必须用 `pm_test=devices`**，不要在 Android 上跑真实挂起 ——
+"醒不回来"仍未解决，真实挂起会把机器睡死、只能长按电源键。

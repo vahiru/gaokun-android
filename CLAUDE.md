@@ -5,7 +5,7 @@
 在华为 MateBook E Go（Snapdragon 8cx Gen 3 / sc8280xp，代号 gaokun）上跑原生 AOSP，
 最终目标是能稳定运行 arm64 手游。
 
-**当前阶段：Stage 6 M15 进行中 — ★s2idle 改判：复位在【挂起进入】而非唤醒；`pm_test=devices` 循环是本平台唯一有证据力的判据；找到一个能把"从不成功"变成"约 60% 开机能成功"的组合，但仍非确定性修复**（每次开工时更新这一行）
+**当前阶段：Stage 6 M15 — ★★s2idle 根因确认：`a600000.usb` 的 role switch 默认停在 `device`、无 gadget、无 xhci，给这个半初始化状态断电就整板复位；写 `role=host` 后 `pm_test=devices` 5/5 通过（双臂对照，只改这一个值）。修复有取舍（会失去 USB adb），且需先测 Android 侧**（每次开工时更新这一行）
 
 > **★★ Stage 6 M15（2026-08-21）：s2idle 从"内核缺陷、无从下手"变成两个可定位的问题。**
 >
