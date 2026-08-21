@@ -223,6 +223,21 @@ range in the curve:`（后面是空的，连哪条曲线都没说）。
 
 ---
 
+### B9. SLPI 每 200 ms 一条 handover 噪声（根因未查）
+详见 [#59](stage4-findings.md)。**它无害但有代价** —— 正是它把 [#58](stage4-findings.md)
+那两次 panic 的调用栈从 pstore 里挤掉了（45 条记录里有用的不到 10 条）。
+`patches/0014` 已把打印改成 ratelimited（治症状，正确且值得上游），
+但**远端为什么每 200 ms 翻一次 smp2p 位仍然不知道**。
+
+硬证据：SLPI 的 `q6v5 ready` 与 `q6v5 handover` 两条中断计数**完全相同、
+同步增长**（5 秒 5475→5502），ADSP/CDSP 各只有 2。
+
+**第一步**：5 Hz 很像一个采样节拍 —— 停掉 sensors HAL / `hexagonrpcd`
+看频率变不变。⚠️ **别在没人看着时做**：M12 记过停/重启 HAL 会污染 SSC 会话，
+自动旋转当场失效、要重启 `hexagonrpcd` 并等约 20 秒才恢复。
+
+---
+
 ## C. 上游或硬件层面（本地做不了）
 
 * **磁力计** —— 本机**没有这个硬件**（SSC 亲口回答），所以没有指南针、

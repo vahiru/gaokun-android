@@ -31,6 +31,7 @@ KPATCHES=(
     0011-arm64-dts-gaokun3-enable-venus.patch
     0012-arm64-dts-gaokun3-usb0-otg-for-usb-adb.patch
     0013-drm-crtc-drop-racy-BUG_ON-in-fence_to_crtc.patch
+    0014-remoteproc-qcom-ratelimit-repeat-handover-error.patch
 )
 
 cd "$TREE"

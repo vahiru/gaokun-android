@@ -1,0 +1,39 @@
+From: gaokun-android contributors <nekovahiru@gmail.com>
+Subject: [PATCH] remoteproc: qcom_q6v5: ratelimit the repeated handover error
+
+q6v5_handover_interrupt() dev_err()s every time a handover is signalled after
+the first one. On a Huawei MateBook E Go (SC8280XP) the SLPI signals it about
+five times a second, forever, and it never stops:
+
+  qcom_q6v5_pas 2400000.remoteproc: Handover signaled, but it already happened
+  [... 1478 identical lines by 1133 seconds of uptime ...]
+
+/proc/interrupts shows why the message is harmless and also why it will not go
+away: the "q6v5 ready" and "q6v5 handover" smp2p bits of this remote carry
+*identical* counts and advance together (5475 -> 5502 over five seconds),
+while adsp and nsp0 sit at 2 apiece. The remote keeps toggling both bits. The
+handler already does the right thing -- it returns early without touching the
+proxy resources -- so the only consequence is the log.
+
+That consequence is not small. This log flood is what erased the useful part
+of an efi_pstore capture on that machine: pstore keeps only the tail of the
+kernel log, so of 45 records saved across two panics, fewer than ten held
+anything but this one line. A benign, self-repeating condition must not be
+able to push a panic backtrace out of the crash log.
+
+Ratelimit it. The first occurrences still show up, an unhealthy remote is
+still visible in dmesg, and the message can no longer drown out everything
+else.
+
+--- a/drivers/remoteproc/qcom_q6v5.c
++++ b/drivers/remoteproc/qcom_q6v5.c
+@@ -165,7 +165,8 @@ static irqreturn_t q6v5_handover_interrupt(int irq, void *data)
+ 	struct qcom_q6v5 *q6v5 = data;
+ 
+ 	if (q6v5->handover_issued) {
+-		dev_err(q6v5->dev, "Handover signaled, but it already happened\n");
++		dev_err_ratelimited(q6v5->dev,
++				    "Handover signaled, but it already happened\n");
+ 		return IRQ_HANDLED;
+ 	}
+ 

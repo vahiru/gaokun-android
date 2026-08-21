@@ -2947,7 +2947,7 @@ ops->get_driver_name(fence)
 ★ 顺带堵掉一个长期漂移源：`patches/*.patch` **此前没有任何消费者**（全靠人在
 构建机上手 `git apply`），本会话刚为此付过一次代价（`ee5eca9` 补上两个只活在
 构建机工作区里的 DTS 改动）。新增 `scripts/kernel-apply-patches.sh`：
-只打 7 个内核补丁、幂等（用反向 `--check` 判定已应用）、失败就非零退出。
+只打内核那几个补丁（目前 8 个）、幂等（用反向 `--check` 判定已应用）、失败就非零退出。
 
 ### 附带记两条噪声，别再被它们带偏
 
@@ -2958,3 +2958,47 @@ ops->get_driver_name(fence)
 * 崩溃前有一大串 `avc: denied` 指向 `vulkan.freedreno.so` / `minigbm` /
   `vendor_default_prop`，全是 `permissive=1`，且属于 app 首次初始化 GPU 的正常
   过程。**与 panic 无关**，但它们确实指出了肇事 app 是谁 —— 这次帮上了忙。
+
+---
+
+## #59 ★★ SLPI 的 handover 噪声：查清了、量化了，并且**它损害取证能力**（2026-08-22）
+
+[#58](#58) 的副产品。那条从 #37 起就被当成"良性噪声"放过的日志：
+
+```
+qcom_q6v5_pas 2400000.remoteproc: Handover signaled, but it already happened
+```
+
+**它确实无害，但它不是无代价的。** 本轮的量化：
+
+* `2400000.remoteproc` = **remoteproc0 = SLPI**（传感器 DSP），`state=running`。
+  ADSP 是 `3000000`、CDSP 是 `1b300000`，两者都不刷。
+* uptime 1133 s 时 dmesg 里已有 **1478 行**，间隔约 **199 ms（≈5 Hz）**，
+  而且永不停止。
+* ★ **`/proc/interrupts` 给出了硬证据**：SLPI 的 `q6v5 ready`（smp2p bit 1）
+  与 `q6v5 handover`（bit 2）**计数完全相同、同步增长**
+  （5 秒内 5475 → 5502），而 `smp2p-adsp` / `smp2p-nsp0` 的对应两条各只有 **2**。
+  ⇒ **是远端在以 5 Hz 反复翻转这两个位**，不是中断卡住
+  （卡住的电平中断会连续刷，不会是整齐的 5 Hz）。
+  ⇒ 也不是我们的驱动数错了：`q6v5_handover_interrupt()` 在
+  `handover_issued` 已置时**直接返回、不碰任何 proxy 资源**（源码核对过），
+  所以唯一的后果就是那行日志。
+
+### ★ 后果不小：它擦掉了 #58 的崩溃栈
+
+pstore 只保留内核日志的**尾部**。#58 那两次 panic 一共留下 45 条 efi_pstore
+记录，而**其中不到 10 条装着有用东西** —— 其余全是这一行。
+**一个良性且自我重复的条件，不该有能力把 panic 的调用栈挤出崩溃日志。**
+
+### 修法：`patches/0014-remoteproc-qcom-ratelimit-repeat-handover-error.patch`
+
+`dev_err` → `dev_err_ratelimited`。前几条照样打（远端不健康仍然看得见），
+但它再也淹不掉别的东西。已对 v7.2-rc2 原文 `git apply --check` 通过。
+⬜ 未编译上机。
+
+⬜ **根因仍未查**（远端为什么每 200 ms 翻一次位）。**第一步**：5 Hz 这个数字
+很像一个采样节拍 —— 停掉 sensors HAL / `hexagonrpcd` 看频率变不变，就能判定
+是不是我们自己的传感器通路在驱动它。
+⚠️ 但**别在没人看着的时候做这个实验**：M12 记过停/重启 HAL 会污染 SSC 会话，
+之后连独立客户端都读不到传感器，要重启 `hexagonrpcd` 才恢复
+（还得等约 20 秒沉降）。代价是自动旋转当场失效。
