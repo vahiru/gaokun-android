@@ -1,0 +1,34 @@
+# 挂起前把 USB role 切到 host —— 见 bin/gaokun3-usbrole.sh 与
+# docs/stage4-findings.md #52 / #54 / #56。
+#
+# ★ 默认【不启用】。opt-in：
+#     adb shell setprop persist.gaokun3.allow_suspend 1
+#   启用后 gaokun3_nosuspend 被放开，改由 gaokun3_usbrole 单独把关。
+#
+# ⚠️ 屏幕状态属性的值是 Android 的 Display.STATE_*：**1 = OFF，2 = ON**，
+#    不是 0/1（2026-08-22 实机核对过，差点按 0/1 写错）。
+#
+# ⚠️ 代价：息屏时会切到 host，于是 USB device-mode adb 断开，亮屏后恢复。
+#    TCP adb（persist.adb.tcp.port=5555）不受影响。
+
+service gaokun3_role_host /vendor/bin/gaokun3-usbrole.sh host
+    user root
+    group root wakelock
+    oneshot
+    disabled
+
+service gaokun3_role_device /vendor/bin/gaokun3-usbrole.sh device
+    user root
+    group root wakelock
+    oneshot
+    disabled
+
+# 开机就把门关上：role 出厂是 device，未经确认一律不放行挂起。
+on init
+    write /sys/power/wake_lock gaokun3_usbrole
+
+on property:persist.gaokun3.allow_suspend=1 && property:debug.tracing.screen_state=1
+    start gaokun3_role_host
+
+on property:persist.gaokun3.allow_suspend=1 && property:debug.tracing.screen_state=2
+    start gaokun3_role_device
