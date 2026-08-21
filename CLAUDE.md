@@ -5,7 +5,7 @@
 在华为 MateBook E Go（Snapdragon 8cx Gen 3 / sc8280xp，代号 gaokun）上跑原生 AOSP，
 最终目标是能稳定运行 arm64 手游。
 
-**当前阶段：Stage 6 M15 — ★★s2idle 根因确认：`a600000.usb` 的 role switch 默认停在 `device`、无 gadget、无 xhci，给这个半初始化状态断电就整板复位；写 `role=host` 后 `pm_test=devices` 5/5 通过（双臂对照，只改这一个值）。修复有取舍（会失去 USB adb），且需先测 Android 侧**（每次开工时更新这一行）
+**当前阶段：Stage 6 M15 — ★★★★ s2idle 通了：救援 Ubuntu 上真实挂起 5/5（墙钟 43s / 内核时间 2.7s，真睡）。两道坎 = `a600000.usb` 的 role 停在 `device`（写 `host` 修好）+ EC `suspend_noirq` −110（我们发版内核本来就修好）。待做：把修复做成永久的，Android 侧要权衡是否牺牲 USB adb**（每次开工时更新这一行）
 
 > **★★ Stage 6 M15（2026-08-21）：s2idle 从"内核缺陷、无从下手"变成两个可定位的问题。**
 >

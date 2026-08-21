@@ -2628,3 +2628,51 @@ dtb/initrd 复用 slot_b 的以省 ESP 空间），靠 oneshot 进去。
 ⚠️ 这一步**必须用真实挂起**，因此有"睡死、要按电源键"的风险。
 唯一的历史观测是 #39（那时 role 还是坏的）：真睡进去了、没醒。
 现在两道已知的坎都修好了，值得再试一次，但**要事先跟用户说明可能要按一次电源键**。
+
+## #54 ★★★★★★ **s2idle 通了** —— 真实挂起 5/5（2026-08-21）
+
+配置：**我们带补丁的内核 `#31`（= 发版内核 + `CONFIG_PM_DEBUG`）+ `role=host`**，
+救援 Ubuntu，`pm_test=none`（真实挂起，不是测试模式），RTC 闹钟 +40 秒。
+
+```
+★ role=[host]  子xhci=1
+第1 次 rc=0 success=1 fail=0
+第2 次 rc=0 success=2 fail=0
+第3 次 rc=0 success=3 fail=0
+第4 次 rc=0 success=4 fail=0
+第5 次 rc=0 success=5 fail=0
+最终 success=5 fail=0
+
+每次的 dmesg：
+  PM: suspend entry (s2idle)
+  Restarting tasks: Done
+  PM: suspend exit
+```
+
+★ **判据不只是 `success` 计数**：每一次**墙钟走约 43 秒，而内核 printk 时间
+只走约 2.7 秒** —— 本地时钟停了、墙钟靠 RTC 补回来，这正是"真的睡下去"的签名。
+如果只是空转 40 秒，两个时间会一起走。
+
+### 两道坎，各有归属
+
+| 坎 | 症状 | 修法 |
+|---|---|---|
+| **`a600000.usb` 的 role 停在 `device`**（无 gadget、无 xhci、半初始化） | 设备挂起阶段**整板复位**，无任何日志 | **`role=host`**（子 xhci 从 0 变 1）—— 双臂对照 + 三次独立复现 |
+| **EC（`15-0038`）`suspend_noirq` 超时 −110** | 干净失败，`pm_test=platform` 0/5 | **我们发版内核本来就修好了**：buildbot `platform/arm64: huawei-gaokun-ec: fix suspend/resume ordering`（把 EC 的 PM 回调从 NOIRQ 挪出来）|
+
+⇒ 这也解释了为什么整晚测不出来：我从 #31 起用的测试内核是**零补丁的 PLAINV72**，
+它缺第二道坎的修复；而 role 那道坎两个内核都有。**两道坎叠在一起，
+任何单独一项的实验都会失败**，于是每个假说看起来都被"否定"了。
+
+### ⬜ 还要做的：把修复变成永久的
+
+* **救援 Ubuntu**：零代价 —— 开机写一次 `role=host` 即可（那边不用 USB gadget）。
+* **Android**：⚠️ **有取舍**。USB adb 的 UDC 就在 a600000 上
+  （`sys.usb.controller=a600000.usb`），改成 host 就没有 USB device-mode adb。
+  ★ 但 Android 上那个 `device` 角色**有真实 gadget**（configfs g1 已配、
+  `ffs.ready=1`），而救援 Ubuntu 上一个都没有 —— 差别正是"半初始化"的关键。
+  **所以 Android 未必受影响，需要一次实测**（内核 `#31` 已在 ESP 上，
+  `pm_test` 可用，测法见 #52 末尾；⚠️ 放开 wakelock 前先设 RTC 闹钟）。
+* 若 Android 确实受影响，可选项：①DTS 改回 `dr_mode="host"`（失去 USB adb）；
+  ②保留 otg，但在息屏/挂起前临时切 host、恢复后切回 device；
+  ③等 UCSI 修好（那才是根上的问题）。
