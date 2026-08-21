@@ -3060,6 +3060,29 @@ TODO 里写的是"需要写 policy 的至少有 `hexagonrpcd`、sensors HAL、
 [#59](#59) 刚证明日志洪水会把 panic 的调用栈从 pstore 里挤掉。
 **"permissive 下 denial 无害"是错的** —— 它们要花取证预算。
 
+### ✅ 第二块也就地清掉了：`/dev/dri/*` 从来没人打过标签（约 130 条）
+
+追到具体节点：那批 `device : chr_file` 里绝大多数点名的是
+**`/dev/dri/renderD128`（多个域共 130+）与 `/dev/dri/card1`（17）**。
+上机核实三条：
+* 两个节点的标签确实是通用兜底的 `u:object_r:device:s0`；
+* `/vendor/etc/selinux/vendor_file_contexts` 里**一条 dri 都没有**；
+* ★ AOSP 核心的 `plat_file_contexts` 只有 `/dev/pvrsrvkm → gpu_device`
+  —— **它根本没考虑过 `/dev/dri`**，因为常见 Android 设备走 `/dev/kgsl-3d0`
+  或 mali 节点，不是 DRM 渲染节点。这正是"AOSP on mainline"会独有的缺口。
+
+`gpu_device` 是 AOSP 的**公共**类型，surfaceflinger / bootanim / system_server /
+system_app / platform_app / 两个 graphics HAL / mediaswcodec 的读写规则核心策略
+里全都现成 ⇒ **只加两行 `file_contexts`，不写一条 allow**。
+⚠️ 本机 DRM 主节点是 **card1 不是 card0**，用通配别写死。
+
+⬜ **同一处还剩一半**：`/dev/dri`【目录本身】被拒的是 `{ read open }`
+而**不是** `search` —— 那是 mesa/libdrm 在 `opendir`+`readdir` 枚举显卡节点。
+给目录换类型解决不了，得真写 allow 规则，而规则该落在核心还是 vendor 策略
+要先对 Treble 的 neverallow 确认。留到真正切 enforcing 时做。
+★ 记这条是因为**两者看着像同一个问题，其实不是**：一个是标签缺失，
+一个是缺规则。
+
 ### ⬜ B1 的真正待办（按顺序）
 
 1. 给 `hexagonrpcd`、sensors HAL、`gaokun3-usbrole`、`audioroute`、

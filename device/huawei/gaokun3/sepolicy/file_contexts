@@ -1,4 +1,35 @@
 # sepolicy/file_contexts -- gaokun3
-# Stage 2 跑 permissive，这里只放最基本的，编过即可。
+#
+# ⚠️ 全系统仍是 permissive（TODO B1）。这里只放【标签】——
+#    标签写对了，AOSP 核心策略里现成的 allow 规则就会生效，
+#    不必自己写 allow。要新增 allow 规则的条目一律先想清楚再动。
+
 /vendor/etc/init/hw/init\.gaokun3\.rc       u:object_r:vendor_configs_file:s0
 /vendor/etc/init/hw/init\.gaokun3\.usb\.rc  u:object_r:vendor_configs_file:s0
+
+# ── GPU：/dev/dri/* 此前【没有任何人】给它打标签 ──────────────────────────
+#
+# 实测（2026-08-22，设备上核对，不是推测）：
+#   * /dev/dri/card1 与 /dev/dri/renderD128 的标签都是通用兜底的
+#     u:object_r:device:s0
+#   * /vendor/etc/selinux/vendor_file_contexts 里【一条】dri 相关的都没有
+#   * AOSP 核心的 plat_file_contexts 只有 /dev/pvrsrvkm → gpu_device
+#     （PowerVR），根本没考虑过 /dev/dri —— 因为常见 Android 设备走的是
+#     /dev/kgsl-3d0 或 mali 节点，不是 DRM 渲染节点。
+#
+# 后果：一次普通启动里约 130 条 avc denial 都是这两个节点造成的，主体包括
+# surfaceflinger、bootanim、system_server、system_app、platform_app
+# （launcher3）、hal_graphics_allocator、hal_graphics_composer、mediaswcodec。
+# 见 docs/stage4-findings.md #60。
+#
+# gpu_device 是 AOSP 的【公共】类型，上面这些域的读写规则核心策略里全都现成，
+# 所以只要标签对了，那一整片 denial 一起消失，不需要新增任何 allow。
+#
+# ⚠️ 本机的 DRM 主节点是 card1（不是 card0）—— 用通配覆盖，别写死。
+/dev/dri/card[0-9]*          u:object_r:gpu_device:s0
+/dev/dri/renderD[0-9]*       u:object_r:gpu_device:s0
+
+# ⬜ 还没解决：/dev/dri【目录本身】被拒的是 { read open }（不是 search）——
+#    那是 mesa/libdrm 在 opendir+readdir 枚举显卡节点。给目录换类型解决不了，
+#    需要真的写 allow 规则；而规则该落在核心策略还是 vendor 策略，
+#    要先对着 Treble 的 neverallow 确认。留到真正切 enforcing 时一起做。
