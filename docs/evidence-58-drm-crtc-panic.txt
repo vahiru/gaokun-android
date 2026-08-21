@@ -1,0 +1,403 @@
+gaokun3 / Huawei MateBook E Go (SC8280XP) — kernel 7.2.0-rc2-gaokun3+ #19
+efi_pstore capture, 2026-08-22. Two crashes, uptime 411 s and 713 s.
+See docs/stage4-findings.md #58.
+
+Reassembled from /sys/fs/pstore by pstore part number (part N = oldest,
+part 1 = newest). 163 repetitions of the benign
+"qcom_q6v5_pas ... Handover signaled" line were dropped (see finding #37).
+
+==========================================================================
+EVENT 1 (uptime 411 s)
+==========================================================================
+
+---- record part 11 (instance 1) ----
+Oops#1 Part11
+<11>[  403.088426] logd: HexToBytes: Invalid size: 21
+<38>[  403.557909] type=1400 audit(1787338068.946:1946): avc:  denied  { read } for  comm="android.hardwar" scontext=u:r:init:s0 tcontext=u:r:init:s0 tclass=qipcrtr_socket permissive=1
+
+---- record part 10 (instance 1) ----
+Oops#1 Part10
+<38>[  405.921088] type=1400 audit(1787338071.310:1947): avc:  denied  { read } for  comm="RenderThread" name="vulkan.freedreno.so" dev="dm-11" ino=534 scontext=u:r:updater_app:s0:c512,c768 tcontext=u:object_r:vendor_file:s0 tclass=file permissive=1 app=org.lineageos.updater
+
+---- record part 9 (instance 1) ----
+Oops#1 Part9
+<38>[  405.921782] type=1400 audit(1787338071.310:1948): avc:  denied  { open } for  comm="RenderThread" path="/vendor/lib64/hw/vulkan.freedreno.so" dev="dm-11" ino=534 scontext=u:r:updater_app:s0:c512,c768 tcontext=u:object_r:vendor_file:s0 tclass=file permissive=1 app=org.lineageos.updater
+<11>[  405.922312] logd: HexToBytes: Invalid characters: ", /
+<38>[  405.922718] type=1400 audit(1787338071.310:1949): avc:  denied  { getattr } for  comm="RenderThread" path="/vendor/lib64/hw/vulkan.freedreno.so" dev="dm-11" ino=534 scontext=u:r:updater_app:s0:c512,c768 tcontext=u:object_r:vendor_file:s0 tclass=file permissive=1 app=org.lineageos.updater
+<11>[  405.923318] logd: HexToBytes: Invalid characters: ", /
+<38>[  405.923851] type=1400 audit(1787338071.310:1950): avc:  denied  { map } for  comm="RenderThread" path="/vendor/lib64/hw/vulkan.freedreno.so" dev="dm-11" ino=534 scontext=u:r:updater_app:s0:c512,c768 tcontext=u:object_r:vendor_file:s0 tclass=file permissive=1 app=org.lineageos.updater
+
+---- record part 8 (instance 1) ----
+Oops#1 Part8
+<11>[  405.924623] logd: HexToBytes: Invalid characters: ", /
+<38>[  405.926370] type=1400 audit(1787338071.310:1951): avc:  denied  { execute } for  comm="RenderThread" path="/vendor/lib64/android.hardware.graphics.allocator@3.0.so" dev="dm-11" ino=505 scontext=u:r:updater_app:s0:c512,c768 tcontext=u:object_r:vendor_file:s0 tclass=file permissive=1 app=org.lineageos.updater
+<11>[  405.927033] logd: HexToBytes: Invalid characters: ", /
+<38>[  405.930765] type=1400 audit(1787338071.318:1952): avc:  denied  { open } for  comm="RenderThread" path="/dev/__properties__/u:object_r:vendor_default_prop:s0" dev="tmpfs" ino=407 scontext=u:r:updater_app:s0:c512,c768 tcontext=u:object_r:vendor_default_prop:s0 tclass=file permissive=1 app=org.lineageos.updater
+
+---- record part 7 (instance 1) ----
+Oops#1 Part7
+<4>[  405.931359] audit: audit_lost=1042 audit_rate_limit=5 audit_backlog_limit=64
+<3>[  405.932639] audit: rate limit exceeded
+<11>[  405.932648] logd: HexToBytes: Invalid size: 55
+<38>[  405.933939] type=1400 audit(1787338071.318:1953): avc:  denied  { getattr } for  comm="RenderThread" path="/dev/__properties__/u:object_r:vendor_default_prop:s0" dev="tmpfs" ino=407 scontext=u:r:updater_app:s0:c512,c768 tcontext=u:object_r:vendor_default_prop:s0 tclass=file permissive=1 app=org.lineageos.updater
+<11>[  405.934730] logd: HexToBytes: Invalid size: 55
+<14>[  405.935638] servicemanager: Caller(pid=2901,uid=10232,sid=u:r:updater_app:s0:c512,c768) Found android.hardware.graphics.allocator.IAllocator/default in device VINTF manifest.
+
+---- record part 6 (instance 1) ----
+Oops#1 Part6
+<38>[  405.936294] type=1400 audit(1787338071.318:1954): avc:  denied  { map } for  comm="RenderThread" path="/dev/__properties__/u:object_r:vendor_default_prop:s0" dev="tmpfs" ino=407 scontext=u:r:updater_app:s0:c512,c768 tcontext=u:object_r:vendor_default_prop:s0 tclass=file permissive=1 app=org.lineageos.updater
+<14>[  405.936659] servicemanager: Caller(pid=2901,uid=10232,sid=u:r:updater_app:s0:c512,c768) Found android.hardware.graphics.allocator.IAllocator/default in device VINTF manifest.
+<11>[  405.937217] logd: HexToBytes: Invalid size: 55
+<14>[  405.938064] servicemanager: Caller(pid=2901,uid=10232,sid=u:r:updater_app:s0:c512,c768) Found mapper/minigbm in device VINTF manifest.
+<14>[  405.947763] servicemanager: Caller(pid=2901,uid=10232,sid=u:r:updater_app:s0:c512,c768) Found android.hardware.graphics.allocator.IAllocator/default in device VINTF manifest.
+
+---- record part 5 (instance 1) ----
+Oops#1 Part5
+<14>[  405.948884] servicemanager: Caller(pid=2901,uid=10232,sid=u:r:updater_app:s0:c512,c768) Found android.hardware.graphics.allocator.IAllocator/default in device VINTF manifest.
+<14>[  405.949856] servicemanager: Caller(pid=2901,uid=10232,sid=u:r:updater_app:s0:c512,c768) Found mapper/minigbm in device VINTF manifest.
+
+---- record part 4 (instance 1) ----
+Oops#1 Part4
+
+---- record part 3 (instance 1) ----
+Oops#1 Part3
+<6>[  411.226774] ------------[ cut here ]------------
+<2>[  411.228889] kernel BUG at drivers/gpu/drm/drm_crtc.c:161!
+
+---- record part 2 (instance 1) ----
+Oops#1 Part2
+<0>[  411.229718] Internal error: Oops - BUG: 00000000f2000800 [#1]  SMP
+<4>[  411.230487] Modules linked in:
+<4>[  411.232162] CPU: 1 UID: 1000 PID: 1658 Comm: RenderThread Not tainted 7.2.0-rc2-gaokun3+ #19 PREEMPT 
+<4>[  411.233211] Hardware name: HUAWEI GK-W7X/GK-W7X-PCB, BIOS 2.16 01/31/2023
+<4>[  411.233994] pstate: 00400005 (nzcv daif +PAN -UAO -TCO -DIT -SSBS BTYPE=--)
+<4>[  411.234779] pc : drm_crtc_fence_get_driver_name+0x2c/0x30
+<4>[  411.237120] lr : dma_fence_driver_name+0x1c/0x34
+<4>[  411.239511] sp : ffff800090c1bcf0
+<4>[  411.241899] x29: ffff800090c1bcf0 x28: 0000000000000050 x27: ffff000192476180
+<4>[  411.244320] x26: ffff800090c1bd90 x25: ffff0001444e9ba0 x24: b400f1f8d64405c0
+<4>[  411.246737] x23: 0000000000000000 x22: 00000000c0383e04 x21: 0000000000000050
+<4>[  411.249175] x20: ffff0001444e9ba0 x19: ffff000135640ac0 x18: 0000000000000000
+<4>[  411.251617] x17: 0000000000000000 x16: 0000000000000000 x15: b400f1f8d64405c0
+
+---- record part 1 (instance 1) ----
+Oops#1 Part1
+<4>[  411.254067] x14: 0000000000000000 x13: 0000000000000000 x12: 0000000000000000
+<4>[  411.256520] x11: 0000000000000000 x10: 0000000000000000 x9 : 0000000000000000
+<4>[  411.258977] x8 : ffff0001444e9c00 x7 : 0000000000000000 x6 : ffff800090c1bdc8
+<4>[  411.261443] x5 : ffff800090c1bdc8 x4 : 0000000000000000 x3 : 0000000000000020
+<4>[  411.263019] x2 : 0000000000000000 x1 : ffffa238e71e6a40 x0 : ffff000135640ac0
+<4>[  411.263840] Call trace:
+<4>[  411.264659]  drm_crtc_fence_get_driver_name+0x2c/0x30 (P)
+<4>[  411.265485]  sync_file_ioctl+0x260/0x610
+<4>[  411.266313]  __arm64_sys_ioctl+0xac/0x104
+<4>[  411.267142]  invoke_syscall+0x54/0x110
+<4>[  411.267973]  el0_svc_common.constprop.0+0x40/0xe0
+<4>[  411.268809]  do_el0_svc+0x1c/0x28
+<4>[  411.269642]  el0_svc+0x38/0x1dc
+<4>[  411.270455]  el0t_64_sync_handler+0xa0/0xe4
+<4>[  411.271245]  el0t_64_sync+0x198/0x19c
+<0>[  411.272030] Code: f9400000 f9401c00 f9404c00 d65f03c0 (d4210000) 
+<4>[  411.272798] ---[ end trace 0000000000000000 ]---
+
+---- record part 12 (instance 2) ----
+Panic#2 Part12
+<38>[  405.921088] type=1400 audit(1787338071.310:1947): avc:  denied  { read } for  comm="RenderThread" name="vulkan.freedreno.so" dev="dm-11" ino=534 scontext=u:r:updater_app:s0:c512,c768 tcontext=u:object_r:vendor_file:s0 tclass=file permissive=1 app=org.lineageos.updater
+<38>[  405.921782] type=1400 audit(1787338071.310:1948): avc:  denied  { open } for  comm="RenderThread" path="/vendor/lib64/hw/vulkan.freedreno.so" dev="dm-11" ino=534 scontext=u:r:updater_app:s0:c512,c768 tcontext=u:object_r:vendor_file:s0 tclass=file permissive=1 app=org.lineageos.updater
+<11>[  405.922312] logd: HexToBytes: Invalid characters: ", /
+<38>[  405.922718] type=1400 audit(1787338071.310:1949): avc:  denied  { getattr } for  comm="RenderThread" path="/vendor/lib64/hw/vulkan.freedreno.so" dev="dm-11" ino=534 scontext=u:r:updater_app:s0:c512,c768 tcontext=u:object_r:vendor_file:s0 tclass=file permissive=1 app=org.lineageos.updater
+
+---- record part 11 (instance 2) ----
+Panic#2 Part11
+<11>[  405.923318] logd: HexToBytes: Invalid characters: ", /
+<38>[  405.923851] type=1400 audit(1787338071.310:1950): avc:  denied  { map } for  comm="RenderThread" path="/vendor/lib64/hw/vulkan.freedreno.so" dev="dm-11" ino=534 scontext=u:r:updater_app:s0:c512,c768 tcontext=u:object_r:vendor_file:s0 tclass=file permissive=1 app=org.lineageos.updater
+<11>[  405.924623] logd: HexToBytes: Invalid characters: ", /
+<38>[  405.926370] type=1400 audit(1787338071.310:1951): avc:  denied  { execute } for  comm="RenderThread" path="/vendor/lib64/android.hardware.graphics.allocator@3.0.so" dev="dm-11" ino=505 scontext=u:r:updater_app:s0:c512,c768 tcontext=u:object_r:vendor_file:s0 tclass=file permissive=1 app=org.lineageos.updater
+
+---- record part 10 (instance 2) ----
+Panic#2 Part10
+<11>[  405.927033] logd: HexToBytes: Invalid characters: ", /
+<38>[  405.930765] type=1400 audit(1787338071.318:1952): avc:  denied  { open } for  comm="RenderThread" path="/dev/__properties__/u:object_r:vendor_default_prop:s0" dev="tmpfs" ino=407 scontext=u:r:updater_app:s0:c512,c768 tcontext=u:object_r:vendor_default_prop:s0 tclass=file permissive=1 app=org.lineageos.updater
+<4>[  405.931359] audit: audit_lost=1042 audit_rate_limit=5 audit_backlog_limit=64
+<3>[  405.932639] audit: rate limit exceeded
+<11>[  405.932648] logd: HexToBytes: Invalid size: 55
+<38>[  405.933939] type=1400 audit(1787338071.318:1953): avc:  denied  { getattr } for  comm="RenderThread" path="/dev/__properties__/u:object_r:vendor_default_prop:s0" dev="tmpfs" ino=407 scontext=u:r:updater_app:s0:c512,c768 tcontext=u:object_r:vendor_default_prop:s0 tclass=file permissive=1 app=org.lineageos.updater
+
+---- record part 9 (instance 2) ----
+Panic#2 Part9
+<11>[  405.934730] logd: HexToBytes: Invalid size: 55
+<14>[  405.935638] servicemanager: Caller(pid=2901,uid=10232,sid=u:r:updater_app:s0:c512,c768) Found android.hardware.graphics.allocator.IAllocator/default in device VINTF manifest.
+<38>[  405.936294] type=1400 audit(1787338071.318:1954): avc:  denied  { map } for  comm="RenderThread" path="/dev/__properties__/u:object_r:vendor_default_prop:s0" dev="tmpfs" ino=407 scontext=u:r:updater_app:s0:c512,c768 tcontext=u:object_r:vendor_default_prop:s0 tclass=file permissive=1 app=org.lineageos.updater
+<14>[  405.936659] servicemanager: Caller(pid=2901,uid=10232,sid=u:r:updater_app:s0:c512,c768) Found android.hardware.graphics.allocator.IAllocator/default in device VINTF manifest.
+
+---- record part 8 (instance 2) ----
+Panic#2 Part8
+<11>[  405.937217] logd: HexToBytes: Invalid size: 55
+<14>[  405.938064] servicemanager: Caller(pid=2901,uid=10232,sid=u:r:updater_app:s0:c512,c768) Found mapper/minigbm in device VINTF manifest.
+<14>[  405.947763] servicemanager: Caller(pid=2901,uid=10232,sid=u:r:updater_app:s0:c512,c768) Found android.hardware.graphics.allocator.IAllocator/default in device VINTF manifest.
+<14>[  405.948884] servicemanager: Caller(pid=2901,uid=10232,sid=u:r:updater_app:s0:c512,c768) Found android.hardware.graphics.allocator.IAllocator/default in device VINTF manifest.
+<14>[  405.949856] servicemanager: Caller(pid=2901,uid=10232,sid=u:r:updater_app:s0:c512,c768) Found mapper/minigbm in device VINTF manifest.
+
+---- record part 7 (instance 2) ----
+Panic#2 Part7
+
+---- record part 6 (instance 2) ----
+Panic#2 Part6
+
+---- record part 5 (instance 2) ----
+Panic#2 Part5
+<6>[  411.226774] ------------[ cut here ]------------
+<2>[  411.228889] kernel BUG at drivers/gpu/drm/drm_crtc.c:161!
+<0>[  411.229718] Internal error: Oops - BUG: 00000000f2000800 [#1]  SMP
+<4>[  411.230487] Modules linked in:
+<4>[  411.232162] CPU: 1 UID: 1000 PID: 1658 Comm: RenderThread Not tainted 7.2.0-rc2-gaokun3+ #19 PREEMPT 
+<4>[  411.233211] Hardware name: HUAWEI GK-W7X/GK-W7X-PCB, BIOS 2.16 01/31/2023
+<4>[  411.233994] pstate: 00400005 (nzcv daif +PAN -UAO -TCO -DIT -SSBS BTYPE=--)
+
+---- record part 4 (instance 2) ----
+Panic#2 Part4
+<4>[  411.234779] pc : drm_crtc_fence_get_driver_name+0x2c/0x30
+<4>[  411.237120] lr : dma_fence_driver_name+0x1c/0x34
+<4>[  411.239511] sp : ffff800090c1bcf0
+<4>[  411.241899] x29: ffff800090c1bcf0 x28: 0000000000000050 x27: ffff000192476180
+<4>[  411.244320] x26: ffff800090c1bd90 x25: ffff0001444e9ba0 x24: b400f1f8d64405c0
+<4>[  411.246737] x23: 0000000000000000 x22: 00000000c0383e04 x21: 0000000000000050
+<4>[  411.249175] x20: ffff0001444e9ba0 x19: ffff000135640ac0 x18: 0000000000000000
+<4>[  411.251617] x17: 0000000000000000 x16: 0000000000000000 x15: b400f1f8d64405c0
+<4>[  411.254067] x14: 0000000000000000 x13: 0000000000000000 x12: 0000000000000000
+<4>[  411.256520] x11: 0000000000000000 x10: 0000000000000000 x9 : 0000000000000000
+<4>[  411.258977] x8 : ffff0001444e9c00 x7 : 0000000000000000 x6 : ffff800090c1bdc8
+<4>[  411.261443] x5 : ffff800090c1bdc8 x4 : 0000000000000000 x3 : 0000000000000020
+<4>[  411.263019] x2 : 0000000000000000 x1 : ffffa238e71e6a40 x0 : ffff000135640ac0
+
+---- record part 3 (instance 2) ----
+Panic#2 Part3
+<4>[  411.263840] Call trace:
+<4>[  411.264659]  drm_crtc_fence_get_driver_name+0x2c/0x30 (P)
+<4>[  411.265485]  sync_file_ioctl+0x260/0x610
+<4>[  411.266313]  __arm64_sys_ioctl+0xac/0x104
+<4>[  411.267142]  invoke_syscall+0x54/0x110
+<4>[  411.267973]  el0_svc_common.constprop.0+0x40/0xe0
+<4>[  411.268809]  do_el0_svc+0x1c/0x28
+<4>[  411.269642]  el0_svc+0x38/0x1dc
+<4>[  411.270455]  el0t_64_sync_handler+0xa0/0xe4
+<4>[  411.271245]  el0t_64_sync+0x198/0x19c
+<0>[  411.272030] Code: f9400000 f9401c00 f9404c00 d65f03c0 (d4210000) 
+<4>[  411.272798] ---[ end trace 0000000000000000 ]---
+
+---- record part 2 (instance 2) ----
+Panic#2 Part2
+
+---- record part 1 (instance 2) ----
+Panic#2 Part1
+<0>[  415.355197] Kernel panic - not syncing: Oops - BUG: Fatal exception
+<2>[  415.355827] SMP: stopping secondary CPUs
+<0>[  415.556411] Kernel Offset: 0x223865bc0000 from 0xffff800080000000
+<0>[  415.556953] PHYS_OFFSET: 0x80000000
+<0>[  415.557467] CPU features: 0x02000000,005c000a,00460501,0400720b
+<0>[  415.557959] Memory Limit: none
+
+==========================================================================
+EVENT 2 (uptime 713 s)
+==========================================================================
+
+---- record part 11 (instance 1) ----
+Oops#1 Part11
+<11>[  704.354669] logd: HexToBytes: Invalid size: 93
+<38>[  704.355787] type=1400 audit(1787338835.311:1366): avc:  denied  { getattr } for  comm="IpClient.wlan0" path="/sys/devices/platform/soc@0/1c00000.pcie/pci0006:00/0006:00:00.0/0006:01:00.0/net/wlan0/mtu" dev="sysfs" ino=57763 scontext=u:r:network_stack:s0 tcontext=u:object_r:sysfs:s0 tclass=file permissive=1
+<11>[  704.357130] logd: HexToBytes: Invalid size: 93
+
+---- record part 10 (instance 1) ----
+Oops#1 Part10
+
+---- record part 9 (instance 1) ----
+Oops#1 Part9
+<38>[  707.584371] type=1400 audit(1787338838.543:1367): avc:  denied  { read } for  comm="RenderThread" name="vulkan.freedreno.so" dev="dm-3" ino=534 scontext=u:r:permissioncontroller_app:s0:c250,c256,c512,c768 tcontext=u:object_r:vendor_file:s0 tclass=file permissive=1 app=com.android.permissioncontroller
+<38>[  707.585822] type=1400 audit(1787338838.543:1368): avc:  denied  { open } for  comm="RenderThread" path="/vendor/lib64/hw/vulkan.freedreno.so" dev="dm-3" ino=534 scontext=u:r:permissioncontroller_app:s0:c250,c256,c512,c768 tcontext=u:object_r:vendor_file:s0 tclass=file permissive=1 app=com.android.permissioncontroller
+<4>[  707.587911] audit: audit_lost=438 audit_rate_limit=5 audit_backlog_limit=64
+<3>[  707.588772] audit: rate limit exceeded
+<11>[  707.590186] logd: HexToBytes: Invalid characters: ", /
+
+---- record part 8 (instance 1) ----
+Oops#1 Part8
+<38>[  707.593047] type=1400 audit(1787338838.543:1369): avc:  denied  { getattr } for  comm="RenderThread" path="/vendor/lib64/hw/vulkan.freedreno.so" dev="dm-3" ino=534 scontext=u:r:permissioncontroller_app:s0:c250,c256,c512,c768 tcontext=u:object_r:vendor_file:s0 tclass=file permissive=1 app=com.android.permissioncontroller
+<14>[  707.596405] servicemanager: Caller(pid=1598,uid=10250,sid=u:r:permissioncontroller_app:s0:c250,c256,c512,c768) Found android.hardware.graphics.allocator.IAllocator/default in device VINTF manifest.
+<11>[  707.596519] logd: HexToBytes: Invalid characters: ", /
+<14>[  707.597681] servicemanager: Caller(pid=1598,uid=10250,sid=u:r:permissioncontroller_app:s0:c250,c256,c512,c768) Found android.hardware.graphics.allocator.IAllocator/default in device VINTF manifest.
+<14>[  707.599749] servicemanager: Caller(pid=1598,uid=10250,sid=u:r:permissioncontroller_app:s0:c250,c256,c512,c768) Found mapper/minigbm in device VINTF manifest.
+
+---- record part 7 (instance 1) ----
+Oops#1 Part7
+<38>[  707.600772] type=1400 audit(1787338838.543:1370): avc:  denied  { map } for  comm="RenderThread" path="/vendor/lib64/hw/vulkan.freedreno.so" dev="dm-3" ino=534 scontext=u:r:permissioncontroller_app:s0:c250,c256,c512,c768 tcontext=u:object_r:vendor_file:s0 tclass=file permissive=1 app=com.android.permissioncontroller
+<11>[  707.601678] logd: HexToBytes: Invalid characters: ", /
+<38>[  707.602850] type=1400 audit(1787338838.543:1371): avc:  denied  { execute } for  comm="RenderThread" path="/vendor/lib64/libui.so" dev="dm-3" ino=588 scontext=u:r:permissioncontroller_app:s0:c250,c256,c512,c768 tcontext=u:object_r:vendor_file:s0 tclass=file permissive=1 app=com.android.permissioncontroller
+<11>[  707.604925] logd: HexToBytes: Invalid characters: ", /
+<14>[  707.608923] servicemanager: Caller(pid=1598,uid=10250,sid=u:r:permissioncontroller_app:s0:c250,c256,c512,c768) Found android.hardware.graphics.allocator.IAllocator/default in device VINTF manifest.
+
+---- record part 6 (instance 1) ----
+Oops#1 Part6
+<14>[  707.610745] servicemanager: Caller(pid=1598,uid=10250,sid=u:r:permissioncontroller_app:s0:c250,c256,c512,c768) Found android.hardware.graphics.allocator.IAllocator/default in device VINTF manifest.
+<14>[  707.612562] servicemanager: Caller(pid=1598,uid=10250,sid=u:r:permissioncontroller_app:s0:c250,c256,c512,c768) Found mapper/minigbm in device VINTF manifest.
+
+---- record part 5 (instance 1) ----
+Oops#1 Part5
+
+---- record part 4 (instance 1) ----
+Oops#1 Part4
+
+---- record part 3 (instance 1) ----
+Oops#1 Part3
+<6>[  713.188528] ------------[ cut here ]------------
+<2>[  713.191036] kernel BUG at drivers/gpu/drm/drm_crtc.c:161!
+<0>[  713.193404] Internal error: Oops - BUG: 00000000f2000800 [#1]  SMP
+<4>[  713.195643] Modules linked in:
+<4>[  713.197885] CPU: 0 UID: 1000 PID: 1587 Comm: RenderThread Not tainted 7.2.0-rc2-gaokun3+ #19 PREEMPT 
+<4>[  713.200123] Hardware name: HUAWEI GK-W7X/GK-W7X-PCB, BIOS 2.16 01/31/2023
+<4>[  713.202370] pstate: 00400005 (nzcv daif +PAN -UAO -TCO -DIT -SSBS BTYPE=--)
+<4>[  713.204632] pc : drm_crtc_fence_get_timeline_name+0x20/0x24
+<4>[  713.206916] lr : dma_fence_timeline_name+0x1c/0x34
+
+---- record part 2 (instance 1) ----
+Oops#1 Part2
+<4>[  713.209202] sp : ffff80008c3ebcc0
+<4>[  713.211477] x29: ffff80008c3ebcc0 x28: ffff0000dbb37000 x27: ffff0001154ef480
+<4>[  713.213789] x26: ffff80008c3ebd90 x25: 0000000000000000 x24: 0000e0b1700fce50
+<4>[  713.216102] x23: 0000000000000001 x22: ffffc2fb9d2deef0 x21: ffff0000c28a3b00
+<4>[  713.218431] x20: 0000000000000020 x19: ffff80008c3ebd90 x18: 0000000000000000
+<4>[  713.220764] x17: 0000000000000000 x16: 0000000000000000 x15: 0000e0b1700fce50
+<4>[  713.223107] x14: 0000000000000000 x13: 0000000000000000 x12: 0000000000000000
+<4>[  713.225454] x11: 0000000000000000 x10: 0000000000000000 x9 : 0000000000000000
+<4>[  713.227797] x8 : 0000000000000000 x7 : 0000000000000000 x6 : ffff80008c3ebdc8
+<4>[  713.230144] x5 : ffff80008c3ebdc8 x4 : ffffc2fb9cf26a40 x3 : ffffc2fb9cf26a40
+<4>[  713.232501] x2 : 0000000000000000 x1 : ffffc2fb9cf26a40 x0 : ffff0000c28a3b00
+<4>[  713.234866] Call trace:
+<4>[  713.237229]  drm_crtc_fence_get_timeline_name+0x20/0x24 (P)
+
+---- record part 1 (instance 1) ----
+Oops#1 Part1
+<3>[  713.238608] [drm:dpu_encoder_frame_done_timeout:2731] [dpu error]enc35 frame done timeout
+<4>[  713.239618]  sync_file_get_name+0x64/0xa0
+<4>[  713.244559]  sync_file_ioctl+0x354/0x610
+<4>[  713.246976]  __arm64_sys_ioctl+0xac/0x104
+<4>[  713.249405]  invoke_syscall+0x54/0x110
+<4>[  713.251839]  el0_svc_common.constprop.0+0x40/0xe0
+<38>[  713.252214] type=1400 audit(1787338844.211:1393): avc:  denied  { read } for  comm="android.hardwar" path="socket:[20947]" dev="sockfs" ino=20947 scontext=u:r:hal_graphics_composer_default:s0 tcontext=u:r:hal_graphics_composer_default:s0 tclass=netlink_kobject_uevent_socket permissive=1
+<4>[  713.254289]  do_el0_svc+0x1c/0x28
+<11>[  713.257117] logd: HexToBytes: Invalid characters: ", s
+<4>[  713.259605]  el0_svc+0x38/0x1dc
+<4>[  713.259614]  el0t_64_sync_handler+0xa0/0xe4
+<4>[  713.259622]  el0t_64_sync+0x198/0x19c
+<0>[  713.259630] Code: 54000081 f9400000 91003000 d65f03c0 (d4210000) 
+<4>[  713.271703] ---[ end trace 0000000000000000 ]---
+
+---- record part 11 (instance 2) ----
+Panic#2 Part11
+<4>[  707.587911] audit: audit_lost=438 audit_rate_limit=5 audit_backlog_limit=64
+<3>[  707.588772] audit: rate limit exceeded
+<11>[  707.590186] logd: HexToBytes: Invalid characters: ", /
+<38>[  707.593047] type=1400 audit(1787338838.543:1369): avc:  denied  { getattr } for  comm="RenderThread" path="/vendor/lib64/hw/vulkan.freedreno.so" dev="dm-3" ino=534 scontext=u:r:permissioncontroller_app:s0:c250,c256,c512,c768 tcontext=u:object_r:vendor_file:s0 tclass=file permissive=1 app=com.android.permissioncontroller
+<14>[  707.596405] servicemanager: Caller(pid=1598,uid=10250,sid=u:r:permissioncontroller_app:s0:c250,c256,c512,c768) Found android.hardware.graphics.allocator.IAllocator/default in device VINTF manifest.
+<11>[  707.596519] logd: HexToBytes: Invalid characters: ", /
+<14>[  707.597681] servicemanager: Caller(pid=1598,uid=10250,sid=u:r:permissioncontroller_app:s0:c250,c256,c512,c768) Found android.hardware.graphics.allocator.IAllocator/default in device VINTF manifest.
+
+---- record part 10 (instance 2) ----
+Panic#2 Part10
+<14>[  707.599749] servicemanager: Caller(pid=1598,uid=10250,sid=u:r:permissioncontroller_app:s0:c250,c256,c512,c768) Found mapper/minigbm in device VINTF manifest.
+<38>[  707.600772] type=1400 audit(1787338838.543:1370): avc:  denied  { map } for  comm="RenderThread" path="/vendor/lib64/hw/vulkan.freedreno.so" dev="dm-3" ino=534 scontext=u:r:permissioncontroller_app:s0:c250,c256,c512,c768 tcontext=u:object_r:vendor_file:s0 tclass=file permissive=1 app=com.android.permissioncontroller
+<11>[  707.601678] logd: HexToBytes: Invalid characters: ", /
+<38>[  707.602850] type=1400 audit(1787338838.543:1371): avc:  denied  { execute } for  comm="RenderThread" path="/vendor/lib64/libui.so" dev="dm-3" ino=588 scontext=u:r:permissioncontroller_app:s0:c250,c256,c512,c768 tcontext=u:object_r:vendor_file:s0 tclass=file permissive=1 app=com.android.permissioncontroller
+
+---- record part 9 (instance 2) ----
+Panic#2 Part9
+<11>[  707.604925] logd: HexToBytes: Invalid characters: ", /
+<14>[  707.608923] servicemanager: Caller(pid=1598,uid=10250,sid=u:r:permissioncontroller_app:s0:c250,c256,c512,c768) Found android.hardware.graphics.allocator.IAllocator/default in device VINTF manifest.
+<14>[  707.610745] servicemanager: Caller(pid=1598,uid=10250,sid=u:r:permissioncontroller_app:s0:c250,c256,c512,c768) Found android.hardware.graphics.allocator.IAllocator/default in device VINTF manifest.
+<14>[  707.612562] servicemanager: Caller(pid=1598,uid=10250,sid=u:r:permissioncontroller_app:s0:c250,c256,c512,c768) Found mapper/minigbm in device VINTF manifest.
+
+---- record part 8 (instance 2) ----
+Panic#2 Part8
+
+---- record part 7 (instance 2) ----
+Panic#2 Part7
+
+---- record part 6 (instance 2) ----
+Panic#2 Part6
+<6>[  713.188528] ------------[ cut here ]------------
+<2>[  713.191036] kernel BUG at drivers/gpu/drm/drm_crtc.c:161!
+<0>[  713.193404] Internal error: Oops - BUG: 00000000f2000800 [#1]  SMP
+<4>[  713.195643] Modules linked in:
+<4>[  713.197885] CPU: 0 UID: 1000 PID: 1587 Comm: RenderThread Not tainted 7.2.0-rc2-gaokun3+ #19 PREEMPT 
+
+---- record part 5 (instance 2) ----
+Panic#2 Part5
+<4>[  713.200123] Hardware name: HUAWEI GK-W7X/GK-W7X-PCB, BIOS 2.16 01/31/2023
+<4>[  713.202370] pstate: 00400005 (nzcv daif +PAN -UAO -TCO -DIT -SSBS BTYPE=--)
+<4>[  713.204632] pc : drm_crtc_fence_get_timeline_name+0x20/0x24
+<4>[  713.206916] lr : dma_fence_timeline_name+0x1c/0x34
+<4>[  713.209202] sp : ffff80008c3ebcc0
+<4>[  713.211477] x29: ffff80008c3ebcc0 x28: ffff0000dbb37000 x27: ffff0001154ef480
+<4>[  713.213789] x26: ffff80008c3ebd90 x25: 0000000000000000 x24: 0000e0b1700fce50
+<4>[  713.216102] x23: 0000000000000001 x22: ffffc2fb9d2deef0 x21: ffff0000c28a3b00
+<4>[  713.218431] x20: 0000000000000020 x19: ffff80008c3ebd90 x18: 0000000000000000
+<4>[  713.220764] x17: 0000000000000000 x16: 0000000000000000 x15: 0000e0b1700fce50
+<4>[  713.223107] x14: 0000000000000000 x13: 0000000000000000 x12: 0000000000000000
+<4>[  713.225454] x11: 0000000000000000 x10: 0000000000000000 x9 : 0000000000000000
+
+---- record part 4 (instance 2) ----
+Panic#2 Part4
+<4>[  713.227797] x8 : 0000000000000000 x7 : 0000000000000000 x6 : ffff80008c3ebdc8
+<4>[  713.230144] x5 : ffff80008c3ebdc8 x4 : ffffc2fb9cf26a40 x3 : ffffc2fb9cf26a40
+<4>[  713.232501] x2 : 0000000000000000 x1 : ffffc2fb9cf26a40 x0 : ffff0000c28a3b00
+<4>[  713.234866] Call trace:
+<4>[  713.237229]  drm_crtc_fence_get_timeline_name+0x20/0x24 (P)
+<3>[  713.238608] [drm:dpu_encoder_frame_done_timeout:2731] [dpu error]enc35 frame done timeout
+<4>[  713.239618]  sync_file_get_name+0x64/0xa0
+<4>[  713.244559]  sync_file_ioctl+0x354/0x610
+<4>[  713.246976]  __arm64_sys_ioctl+0xac/0x104
+<4>[  713.249405]  invoke_syscall+0x54/0x110
+<4>[  713.251839]  el0_svc_common.constprop.0+0x40/0xe0
+<38>[  713.252214] type=1400 audit(1787338844.211:1393): avc:  denied  { read } for  comm="android.hardwar" path="socket:[20947]" dev="sockfs" ino=20947 scontext=u:r:hal_graphics_composer_default:s0 tcontext=u:r:hal_graphics_composer_default:s0 tclass=netlink_kobject_uevent_socket permissive=1
+
+---- record part 3 (instance 2) ----
+Panic#2 Part3
+<4>[  713.254289]  do_el0_svc+0x1c/0x28
+<11>[  713.257117] logd: HexToBytes: Invalid characters: ", s
+<4>[  713.259605]  el0_svc+0x38/0x1dc
+<4>[  713.259614]  el0t_64_sync_handler+0xa0/0xe4
+<4>[  713.259622]  el0t_64_sync+0x198/0x19c
+<0>[  713.259630] Code: 54000081 f9400000 91003000 d65f03c0 (d4210000) 
+<4>[  713.271703] ---[ end trace 0000000000000000 ]---
+<3>[  713.294609] [drm:dpu_encoder_frame_done_timeout:2731] [dpu error]enc35 frame done timeout
+<3>[  713.350608] [drm:dpu_encoder_frame_done_timeout:2731] [dpu error]enc35 frame done timeout
+<3>[  713.406609] [drm:dpu_encoder_frame_done_timeout:2731] [dpu error]enc35 frame done timeout
+<3>[  713.470607] [drm:dpu_encoder_frame_done_timeout:2731] [dpu error]enc35 frame done timeout
+<3>[  713.526608] [drm:dpu_encoder_frame_done_timeout:2731] [dpu error]enc35 frame done timeout
+
+---- record part 2 (instance 2) ----
+Panic#2 Part2
+<3>[  713.578610] [drm:dpu_encoder_frame_done_timeout:2731] [dpu error]enc35 frame done timeout
+<3>[  713.634609] [drm:dpu_encoder_frame_done_timeout:2731] [dpu error]enc35 frame done timeout
+<3>[  713.698604] [drm:dpu_encoder_frame_done_timeout:2731] [dpu error]enc35 frame done timeout
+<3>[  713.754612] [drm:dpu_encoder_frame_done_timeout:2731] [dpu error]enc35 frame done timeout
+<4>[  715.042632] ath11k_pci 0006:01:00.0: failed to request fw stats: -110
+<4>[  715.045218] ath11k_pci 0006:01:00.0: failed to request fw pdev stats: -110
+<4>[  718.254605] dpu_encoder_frame_done_timeout: 75 callbacks suppressed
+<3>[  718.254609] [drm:dpu_encoder_frame_done_timeout:2731] [dpu error]enc35 frame done timeout
+<3>[  718.314604] [drm:dpu_encoder_frame_done_timeout:2731] [dpu error]enc35 frame done timeout
+<3>[  718.374604] [drm:dpu_encoder_frame_done_timeout:2731] [dpu error]enc35 frame done timeout
+<3>[  718.434604] [drm:dpu_encoder_frame_done_timeout:2731] [dpu error]enc35 frame done timeout
+
+---- record part 1 (instance 2) ----
+Panic#2 Part1
+<3>[  718.494604] [drm:dpu_encoder_frame_done_timeout:2731] [dpu error]enc35 frame done timeout
+<3>[  718.554604] [drm:dpu_encoder_frame_done_timeout:2731] [dpu error]enc35 frame done timeout
+<3>[  718.614604] [drm:dpu_encoder_frame_done_timeout:2731] [dpu error]enc35 frame done timeout
+<3>[  718.674603] [drm:dpu_encoder_frame_done_timeout:2731] [dpu error]enc35 frame done timeout
+<3>[  718.734603] [drm:dpu_encoder_frame_done_timeout:2731] [dpu error]enc35 frame done timeout
+<3>[  718.794604] [drm:dpu_encoder_frame_done_timeout:2731] [dpu error]enc35 frame done timeout
+<0>[  721.118020] Kernel panic - not syncing: Oops - BUG: Fatal exception
+<2>[  721.120007] SMP: stopping secondary CPUs
+<0>[  721.321847] Kernel Offset: 0x42fb1b900000 from 0xffff800080000000
+<0>[  721.323578] PHYS_OFFSET: 0x80000000
+<0>[  721.325254] CPU features: 0x02000000,005c000a,00460501,0400720b
+<0>[  721.326928] Memory Limit: none

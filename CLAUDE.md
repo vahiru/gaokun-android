@@ -5,7 +5,37 @@
 在华为 MateBook E Go（Snapdragon 8cx Gen 3 / sc8280xp，代号 gaokun）上跑原生 AOSP，
 最终目标是能稳定运行 arm64 手游。
 
-**当前阶段：Stage 6 M16 — ★★★★★ s2idle 两端都修好并已发版（v0.3.0-alpha，构建戳 `1787335922`）：Android 真实挂起/唤醒 ×4 零复位，救援 Ubuntu `systemctl suspend` 3/3。真凶是我们自己 Stage 2 加的 `dr_mode="otg"`——`a600000.usb` 的 role 停在 `device`（无 gadget、无 xhci），断电即整板复位；Android 的修法是息屏切 `host`、亮屏切回 `device`（代价：息屏时 USB adb 断，TCP adb 不受影响）。README/TODO/设备树注释已同步到这个事实**（每次开工时更新这一行）
+**当前阶段：Stage 6 M17 — ★★★★★ 用户报的「切到设置卡死」定性为**内核 panic**（`kernel BUG at drm_crtc.c:161`），根因是 `drm_crtc` 的 `fence_to_crtc()` 那个 `BUG_ON` 与 dma-fence「signal 即摘 ops」的竞态 —— **上游 mainline master 至今未修**，普通应用即可触发。补丁 `patches/0013` 已写并对 v7.2-rc2 验过可应用，⬜ 未编译上机。证据全靠 pstore 抢回来的（现场已重启）**（每次开工时更新这一行）
+
+> **★★★ Stage 6 M17（2026-08-22）：一个用户报告，一路查到上游活着的缺陷。**
+> ★ **`ESR=0xf2000800` → EC=0x3C（BRK）⇒ 是 `BUG()` 断言，不是空指针。**
+> 这一个数字就定了方向：去找那行 `BUG_ON`，别查内存越界。
+> - ★ **救回证据的是 pstore**（45 条 efi_pstore 记录，两次事件）。
+>   logcat 是内存的、`/data/anr/` 是空的、hangdump 看门狗也没命中
+>   （它判 D 状态 ≥2 分钟，而机器压根没活到两分钟）。
+>   Stage 0 布下的"没串口就走 EFI 变量"这条通路，**第一次在用户报告的问题上
+>   付清成本**。⚠️ 读它要 root，而本机 `adb root` 前得先
+>   `setprop service.adb.root 1`。
+> - ★★ **与"设置"无关**：两次事件分属 `org.lineageos.updater` 与
+>   `com.android.permissioncontroller`，两条不同的 ioctl 路径
+>   （`dma_fence_driver_name` / `dma_fence_timeline_name`）。
+>   任何 app 的 RenderThread 查 present fence 的名字都能触发
+>   ⇒ **普通应用能把整台机器 panic 掉**。
+> - ⚠️★ **我的第一个假说是"7.2-rc2 缺保护、后来修了"** —— 顺，但错。
+>   救我的是没停在假说上：用 GitHub compare API 逐个查那四个提交在不在
+>   `v7.2-rc2` 里，**全是 `behind`（早就在）**；再拉 master 对比，
+>   那个 `BUG_ON` 一字未改。"应该已经修了"和"确认在不在"差着一次 panic。
+> - 修法 `patches/0013`：**只删那一行 `BUG_ON`**。`fence_to_crtc()` 只有两个
+>   调用者，而它们本身就是那张 ops 表的成员 —— 断言的是调用路径已经保证过的
+>   事，事后再查只能引入竞态。
+> - ★ 顺带堵住一个长期漂移源：`patches/*.patch` **此前没有任何消费者**
+>   （全靠手动 `git apply`，本会话刚为此付过一次代价）。新增
+>   `scripts/kernel-apply-patches.sh`——只打 7 个内核补丁、幂等、失败非零退出。
+> - ⚠️ `Handover signaled` 噪声在崩溃日志里刷了 163 行，**把 pstore 的有效
+>   内容挤掉了**（45 条里真正有用的不到 10 条）。它本身无害（#37 已证），
+>   但它损害取证能力，值得单独治。
+
+**上一阶段：Stage 6 M16 — ★★★★★ s2idle 两端都修好并已发版（v0.3.0-alpha，构建戳 `1787335922`）：Android 真实挂起/唤醒 ×4 零复位，救援 Ubuntu `systemctl suspend` 3/3。真凶是我们自己 Stage 2 加的 `dr_mode="otg"`——`a600000.usb` 的 role 停在 `device`（无 gadget、无 xhci），断电即整板复位；Android 的修法是息屏切 `host`、亮屏切回 `device`（代价：息屏时 USB adb 断，TCP adb 不受影响）。README/TODO/设备树注释已同步到这个事实**
 
 > **★ Stage 6 M16（2026-08-22）：发版 v0.3.0-alpha + 一次全仓文档对账。**
 > 发布物就是**在硬件上验过的那一版**（`--no-build`，构建戳 `1787335922`）；

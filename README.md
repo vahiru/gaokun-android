@@ -178,6 +178,7 @@ conclusions were later overturned. Several of them were.
 
 | Issue | Where |
 |---|---|
+| ⚠️ **An ordinary app can panic the kernel.** A `sync_file` ioctl on a present fence races with dma-fence's detach-on-signal and trips a `BUG_ON` in `drm_crtc.c:161`, taking the whole machine down. This is what "switching to Settings freezes" turned out to be. Live upstream bug — still present in mainline master. `patches/0013` deletes the racy check; **not built yet** | [#58](docs/stage4-findings.md) |
 | **No working recovery.** The image builds and ships, but booting it reset-loops the machine, so the boot entry is not created. Costs: no `adb sideload`, no `fastbootd`, and *Erase all data* in Settings probably does nothing (it asks the bootloader for recovery, and systemd-boot does not read that request) | [#39](docs/stage4-findings.md) |
 | **Audio and Bluetooth can deadlock after long uptime** — reported on device, not yet reproduced or diagnosed. Both ride the same QRTR/FastRPC path to the DSPs, where we have already measured session-level lockups | [#38](docs/stage4-findings.md) |
 | Enabling the ambient light sensor returns no readings *and* poisons the whole DSP session, so there is no auto-brightness (#37) | [`docs/stage4-findings.md`](docs/stage4-findings.md) |

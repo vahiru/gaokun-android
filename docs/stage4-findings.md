@@ -2819,3 +2819,142 @@ M4 以来一直把 s2idle 当成两个问题（"挂起时复位" + "醒不回来
   （TCP adb 不受影响）。发版说明必须写清楚。
 * ⚠️ 发版说明里"挂起是内核/EC 缺陷、Ubuntu 同样复现"那句是**错的**，必须改
   —— 真凶是我们自己在 Stage 2 加的 `dr_mode="otg"`。
+
+★ **2026-08-22 更新**：以上三条都已随 **v0.3.0-alpha** 发版，Android 侧
+`persist.gaokun3.allow_suspend=1` **默认开启**（`device.mk`），发版说明也已按
+真实归因重写。所以这一节的"剩下的收尾"已经清空。
+
+---
+
+## #58 ★★★★★ 「切到设置就卡死」是**内核 panic**，而且是一个活着的上游竞态（2026-08-22）
+
+用户报「切换到设置卡死」。**现场没保住**（机器已重启、logcat 是内存的、
+`/data/anr/` 是空的、hangdump 看门狗也没命中——它判的是 D 状态线程 ≥2 分钟，
+而这次机器压根没活到两分钟）。
+
+★ **救回证据的是 pstore。** `/sys/fs/pstore/` 里有 **45 条 efi_pstore 记录**，
+分属今天两次事件（uptime **411 s** 与 **713 s**）。这是 Stage 0 布下的那条
+"没有串口就走 EFI 变量"的通路第一次在一个**用户报告的问题**上付清成本。
+⚠️ 记一条：`ls /sys/fs/pstore/` 需要 root（普通 shell 是 Permission denied），
+而 `adb root` 在本机要先 `setprop service.adb.root 1`。
+
+原始日志已入库：[`evidence-58-drm-crtc-panic.txt`](evidence-58-drm-crtc-panic.txt)
+（按 part 号重排回时间顺序，去掉 163 行 Handover 噪声；已扫过无 IP/SSID/凭据）。
+⚠️ 每次事件在 pstore 里有**两份**：`Oops#1`（BUG 当场）与 `Panic#2`
+（随后的 panic），内容大半重复 —— 别把它当成"崩了四次"。
+
+### 不是卡死，是 `BUG()` → panic
+
+```
+kernel BUG at drivers/gpu/drm/drm_crtc.c:161!
+Internal error: Oops - BUG: 00000000f2000800 [#1]  SMP
+CPU: 1 UID: 1000 PID: 1658 Comm: RenderThread Not tainted 7.2.0-rc2-gaokun3+ #19
+pc : drm_crtc_fence_get_driver_name+0x2c/0x30
+lr : dma_fence_driver_name+0x1c/0x34
+Call trace:
+ drm_crtc_fence_get_driver_name+0x2c/0x30 (P)
+ sync_file_ioctl+0x260/0x610
+ __arm64_sys_ioctl+0xac/0x104
+ ...
+Kernel panic - not syncing: Oops - BUG: Fatal exception
+```
+
+★ **ESR = `0xf2000800`，EC = 0x3C（BRK 指令）** ⇒ 这是**显式的 `BUG()` 断言**，
+不是空指针访问。这一个数字就把方向定死了：去找那一行的 `BUG_ON`，
+不要去查内存越界。
+
+**两次事件不是同一条路径，也不是同一个 app：**
+
+| | 事件 1（411 s） | 事件 2（713 s） |
+|---|---|---|
+| helper | `dma_fence_driver_name` | `dma_fence_timeline_name` |
+| 回调 | `drm_crtc_fence_get_driver_name` | `drm_crtc_fence_get_timeline_name` |
+| 入口 | `sync_file_ioctl+0x260` | `sync_file_get_name` ← `sync_file_ioctl+0x354` |
+| 肇事进程 | `RenderThread`，`app=org.lineageos.updater` | `RenderThread`，`app=com.android.permissioncontroller` |
+
+⇒ ★**跟"设置"没有关系**。是任何 app 的 RenderThread 对一个 present fence 做
+`SYNC_IOC_FILE_INFO` / `SYNC_IOC_MERGE` 就能触发 —— 也就是**普通应用能把整台
+机器 panic 掉**。用户看到的"卡死"就是 panic 到重启之间那几秒。
+
+### 根因：`drm_crtc` 的 `BUG_ON` 与 dma-fence 的「signal 时摘掉 ops」相互冲突
+
+v7.2-rc2 原文（逐字核对过，就是第 161 行）：
+
+```c
+static struct drm_crtc *fence_to_crtc(struct dma_fence *fence)
+{
+	BUG_ON(rcu_access_pointer(fence->ops) != &drm_crtc_fence_ops);
+	return container_of(fence->extern_lock, struct drm_crtc, fence_lock);
+}
+```
+
+而 `dma_fence_signal_timestamp_locked()` 里（同样是 v7.2-rc2）：
+
+```c
+	ops = rcu_dereference_protected(fence->ops, true);
+	if (!ops->release && !ops->wait)
+		RCU_INIT_POINTER(fence->ops, NULL);
+```
+
+`drm_crtc_fence_ops` **只有两个 name 回调，既没有 `.release` 也没有 `.wait`**
+—— 正好是"signal 即摘 ops"的那一类。而两个 helper 是**先取 ops 再通过它回调**：
+
+```c
+	ops = rcu_dereference(fence->ops);
+	if (ops)
+		return (const char __rcu *)ops->get_driver_name(fence);
+```
+
+于是竞态窗口是明摆着的：
+
+```
+CPU A（sync_file_ioctl）                    CPU B（vblank）
+ops = rcu_dereference(fence->ops)  → &drm_crtc_fence_ops
+                                            RCU_INIT_POINTER(fence->ops, NULL)
+ops->get_driver_name(fence)
+  → fence_to_crtc(): BUG_ON(... != &drm_crtc_fence_ops)   ← 现在是 NULL → panic
+```
+
+**CRTC out-fence 每次 vblank 都 signal**（本机面板 120 Hz），Android 又在不停地
+查 fence 名字，所以撞上只是时间问题 —— 表现为"随机卡死"。
+
+### ★ 这不是我们的锅，而且**上游 master 也没修**
+
+* 摘 ops 那套机制的四个提交（`f4cc3ab824d6` protect fence ops by RCU、
+  **`541c8f2468b9` detach fence ops on signal**、`3e5067931b5d`、`1f32f310a13c`）
+  用 GitHub compare API 逐个查过：相对 `v7.2-rc2` 全是 `behind`
+  ⇒ **都已经在我们的内核里**。所以"升级内核就好了"这条路不存在。
+* 拉 `torvalds/linux` **master** 的 `drm_crtc.c` 对比：那个 `BUG_ON` **一字未改**
+  ⇒ 缺陷在当前 mainline 里仍然活着。搜 lore / dri-devel 没有对应报告。
+* ⚠️★ 方法论：我一开始的假说是"7.2-rc2 缺了保护、后来修了"，很顺，也**错了**。
+  救我的是**没有停在假说上，而是去查那几个提交到底在不在这个 tag 里**
+  （compare API 一条命令）。"应该已经修了"和"确认在不在"差着一次 panic。
+
+### 修法：`patches/0013-drm-crtc-drop-racy-BUG_ON-in-fence_to_crtc.patch`
+
+删掉那行 `BUG_ON`，**不做别的**。理由（不是想当然）：
+* `fence_to_crtc()` **只有两个调用者**，而它们本身就是 `drm_crtc_fence_ops` 的
+  成员 —— 能进到函数里就说明解引用那一刻 ops 是匹配的。这个 `BUG_ON` 断言的
+  正是调用路径已经保证过的事，**而事后再查一遍只能引入竞态**。
+* 摘 ops 只是宣告"驱动数据在一个 RCU grace period 后可能被释放"。
+  这两个回调之后读的东西都还活着：`crtc->timeline_name` 是嵌在 CRTC 里的数组、
+  `crtc->dev->driver->name` 是静态存储；而两个 helper 的文档明写只能在
+  `rcu_read_lock()` 里调，那就是 CRTC 不会消失的依据。
+
+已用 `git apply --check` 对着 **v7.2-rc2 原文**验过能干净应用。
+⬜ **但还没编、没上机** —— 需要一次内核构建。
+
+★ 顺带堵掉一个长期漂移源：`patches/*.patch` **此前没有任何消费者**（全靠人在
+构建机上手 `git apply`），本会话刚为此付过一次代价（`ee5eca9` 补上两个只活在
+构建机工作区里的 DTS 改动）。新增 `scripts/kernel-apply-patches.sh`：
+只打 7 个内核补丁、幂等（用反向 `--check` 判定已应用）、失败就非零退出。
+
+### 附带记两条噪声，别再被它们带偏
+
+* `qcom_q6v5_pas 2400000.remoteproc: Handover signaled, but it already happened`
+  在崩溃日志里刷了 **163 行**（约每 200 ms 一条）。#37 已用对照实验证明它是
+  **良性噪声**（工作正常的加速度计同样每 12 秒 13 条）。⚠️ 它在这里唯一的作用
+  是**把 pstore 的有效内容挤掉** —— 45 条记录里真正有用的不到 10 条。
+* 崩溃前有一大串 `avc: denied` 指向 `vulkan.freedreno.so` / `minigbm` /
+  `vendor_default_prop`，全是 `permissive=1`，且属于 app 首次初始化 GPU 的正常
+  过程。**与 panic 无关**，但它们确实指出了肇事 app 是谁 —— 这次帮上了忙。

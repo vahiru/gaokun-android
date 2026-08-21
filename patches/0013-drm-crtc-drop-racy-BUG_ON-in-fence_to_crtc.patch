@@ -1,0 +1,79 @@
+From: gaokun-android contributors <nekovahiru@gmail.com>
+Subject: [PATCH] drm/crtc: drop the racy BUG_ON in fence_to_crtc()
+
+fence_to_crtc() re-checks fence->ops after the caller has already
+dereferenced it:
+
+	static struct drm_crtc *fence_to_crtc(struct dma_fence *fence)
+	{
+		BUG_ON(rcu_access_pointer(fence->ops) != &drm_crtc_fence_ops);
+		return container_of(fence->extern_lock, struct drm_crtc, fence_lock);
+	}
+
+Since commit 541c8f2468b9 ("dma-buf: detach fence ops on signal v3") that
+re-check is racy, and losing the race kills the machine.
+
+dma_fence_signal_timestamp_locked() detaches the ops of any fence whose ops
+provide neither ->release nor ->wait:
+
+	ops = rcu_dereference_protected(fence->ops, true);
+	if (!ops->release && !ops->wait)
+		RCU_INIT_POINTER(fence->ops, NULL);
+
+drm_crtc_fence_ops provides exactly ->get_driver_name and ->get_timeline_name
+and nothing else, so every CRTC fence is detached the moment it signals.
+
+Meanwhile dma_fence_driver_name() and dma_fence_timeline_name() load the ops
+once and then call through them:
+
+	ops = rcu_dereference(fence->ops);
+	if (ops)
+		return (const char __rcu *)ops->get_driver_name(fence);
+
+so there is a window between that load and the BUG_ON re-read. If the fence
+signals inside it -- and a CRTC out-fence signals on every vblank -- the
+BUG_ON observes NULL and takes the whole kernel down:
+
+  kernel BUG at drivers/gpu/drm/drm_crtc.c:161!
+  Internal error: Oops - BUG: 00000000f2000800 [#1] SMP
+  CPU: 1 UID: 1000 PID: 1658 Comm: RenderThread 7.2.0-rc2 PREEMPT
+  pc : drm_crtc_fence_get_driver_name+0x2c/0x30
+  lr : dma_fence_driver_name+0x1c/0x34
+  Call trace:
+   drm_crtc_fence_get_driver_name+0x2c/0x30 (P)
+   sync_file_ioctl+0x260/0x610
+   __arm64_sys_ioctl+0xac/0x104
+  Kernel panic - not syncing: Oops - BUG: Fatal exception
+
+Observed twice within five minutes on a Huawei MateBook E Go (SC8280XP, MSM
+DPU, 120 Hz panel) running Android 16, once through dma_fence_driver_name()
+as above and once through dma_fence_timeline_name() ->
+drm_crtc_fence_get_timeline_name() -> sync_file_get_name(). Both times the
+caller was an ordinary application's RenderThread doing SYNC_IOC_FILE_INFO on
+a present fence, so this is a kernel panic reachable by unprivileged
+userspace on any driver that hands CRTC out-fences to applications.
+
+Deleting the check loses nothing. fence_to_crtc() has exactly two callers,
+both of them members of drm_crtc_fence_ops, so they are only reachable when
+the ops did match at dereference time -- which is the very property the
+BUG_ON tries to assert, and the only moment at which it can be asserted
+without a race.
+
+What the callbacks go on to read stays valid: crtc->timeline_name is an array
+embedded in the CRTC and crtc->dev->driver->name is static storage. Detaching
+the ops only announces that driver data may be freed after an RCU grace
+period, and both accessors are documented as callable only inside
+rcu_read_lock(), which is what keeps the CRTC itself alive.
+
+Fixes: 541c8f2468b9 ("dma-buf: detach fence ops on signal v3")
+
+--- a/drivers/gpu/drm/drm_crtc.c
++++ b/drivers/gpu/drm/drm_crtc.c
+@@ -158,7 +158,6 @@ static const struct dma_fence_ops drm_crtc_fence_ops;
+ 
+ static struct drm_crtc *fence_to_crtc(struct dma_fence *fence)
+ {
+-	BUG_ON(rcu_access_pointer(fence->ops) != &drm_crtc_fence_ops);
+ 	return container_of(fence->extern_lock, struct drm_crtc, fence_lock);
+ }
+ 

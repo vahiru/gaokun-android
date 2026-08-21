@@ -12,7 +12,27 @@
 
 ## A. 用户能感觉到的缺口
 
-### A1. 音频与蓝牙长期运行后死锁 ⚠️ 最高优先
+### A0. ⚠️★ 普通应用能把内核 panic 掉 —— 已定位，补丁待构建
+案卷 [#58](stage4-findings.md)。用户报的「切到设置就卡死」**不是卡死，是内核
+panic**：`kernel BUG at drivers/gpu/drm/drm_crtc.c:161`。
+
+`drm_crtc` 的 `fence_to_crtc()` 在回调里**再查一遍** `fence->ops`，而
+`dma_fence_signal_timestamp_locked()` 会在 signal 时把没有 `.release`/`.wait`
+的 ops（`drm_crtc_fence_ops` 正是）置 NULL —— 两个 name helper 是"先取 ops 再
+回调"，中间那个窗口一旦被 vblank 撞上就 `BUG()`。CRTC out-fence 每 vblank 都
+signal（本机 120 Hz），Android 又在不停查 fence 名字。
+两次实测事件分属两个不同的 app、两条不同的 ioctl 路径 ⇒ **与"设置"无关**。
+
+★ 已确认**不是"升级内核就好"**：摘 ops 那套的四个提交相对 `v7.2-rc2` 全是
+`behind`（已在我们内核里），而 master 的那个 `BUG_ON` 一字未改。
+
+**第一步**：编一次内核，带上
+`patches/0013-drm-crtc-drop-racy-BUG_ON-in-fence_to_crtc.patch`
+（已用 `git apply --check` 对 v7.2-rc2 原文验过）。
+验收判据不是"没崩" —— 而是**反复开合设置/权限页各几十次 + `/sys/fs/pstore/`
+零新记录**。⬜ 之后值得把它报到 dri-devel（对外动作，等用户定）。
+
+### A1. 音频与蓝牙长期运行后死锁 ⚠️ 次高优先
 用户实机报告，我未复现、未定位（[#38](stage4-findings.md)）。
 两者共用同一条到 DSP 的 QRTR/FastRPC 通路，而这条通路上**已经实测到过**
 会话级卡死（使能光感会污染整个 SSC 会话）。

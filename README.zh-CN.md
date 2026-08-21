@@ -160,6 +160,7 @@ Android 相关的配置断言在
 
 | 问题 | 位置 |
 |---|---|
+| ⚠️ **普通应用就能把内核 panic 掉。** 对 present fence 做 `sync_file` ioctl 会与 dma-fence 的「signal 即摘 ops」竞态，撞上 `drm_crtc.c:161` 的 `BUG_ON`，整台机器当场倒下 —— 「切到设置就卡死」就是这个。**上游缺陷，mainline master 至今未修**。`patches/0013` 删掉那个竞态检查，**尚未编译上机** | [#58](docs/stage4-findings.md) |
 | **没有可用的 recovery。** 镜像能造能交付，但启动它会让机器进复位循环，所以启动项默认不创建。代价：没有 `adb sideload`、没有 `fastbootd`，设置里的"恢复出厂设置"大概不起作用（它是去请求 bootloader 进 recovery，而 systemd-boot 不读那个请求）| [#39](docs/stage4-findings.md) |
 | **音频与蓝牙在长期运行后可能死锁** —— 用户实机报告，尚未复现定位。两者都走同一条到 DSP 的 QRTR/FastRPC 通路，而那条通路上我们已经实测到过会话级卡死 | [#38](docs/stage4-findings.md) |
 | 使能环境光传感器不但不返回读数，还会污染整个 DSP 会话，所以没有自动亮度（#37）。加速度计与陀螺仪本身已经跑通并接进框架 | [`docs/stage4-findings.md`](docs/stage4-findings.md) |
