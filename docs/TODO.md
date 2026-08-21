@@ -156,10 +156,22 @@ URL 是 **36.9 MB/s**。对"用户走系统内 OTA 升级"有实际影响（1 GB
 
 ### B1. SELinux 转 enforcing
 现在是 `permissive`。影响 Play Integrity 与部分带反作弊的游戏。
-需要写 policy 的至少有：`hexagonrpcd`、sensors HAL、`audioroute`、`smmustall`。
-logcat 里现成一串 `avc: denied` 就是清单。
 
-**第一步**：把现有 denial 收集成 `.te`，先让 `hexagonrpcd` 与 sensors HAL 干净。
+★ **已做过一次普查**（[#60](stage4-findings.md)）：988 行 → **237 种**去重元组。
+而普查**推翻了这一条原先的第一步**（"把现有 denial 收集成 `.te`"）——
+我们的服务**根本没有域**：init 起的 root 进程没有 `file_contexts` 条目就留在
+`u:r:init:s0` 里，所以 `hexagonrpcd`、sensors HAL 的 denial 全挂在 `init` 名下。
+照着这样的清单写 `.te`，主体从一开始就是错的。
+
+✅ **已就地清掉 363 条（约全系统 37%）**：`bpf-relabel.sh` 在带 `patches/0007`
+的内核上完全多余，改成"标签已对就 `exit 0`"。⚠️ 顺带记住：**permissive 下的
+denial 不是无害的** —— [#59](stage4-findings.md) 证明日志洪水会把 panic 栈从
+pstore 里挤掉。
+
+**第一步（改过的）**：给 `hexagonrpcd` / sensors HAL / `gaokun3-usbrole` /
+`audioroute` / `smmustall` / `hangdump` / `bpfrelabel` 各定一个域 +
+`file_contexts` 条目。然后是那批 `device : chr_file` —— 那是**设备节点没打类型**
+（`device` 是兜底标签），给节点定类型就一起消失，不必逐条写 allow。
 
 ### B2. 真温控 HAL
 现在是 AOSP mock（温度恒定 30.1/30.2），框架完全没有真实温控感知。

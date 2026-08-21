@@ -3002,3 +3002,68 @@ pstore 只保留内核日志的**尾部**。#58 那两次 panic 一共留下 45 
 ⚠️ 但**别在没人看着的时候做这个实验**：M12 记过停/重启 HAL 会污染 SSC 会话，
 之后连独立客户端都读不到传感器，要重启 `hexagonrpcd` 才恢复
 （还得等约 20 秒沉降）。代价是自动旋转当场失效。
+
+---
+
+## #60 ★★ SELinux 转 enforcing 的第一步：先做一次 denial 普查（2026-08-22）
+
+[TODO B1](TODO.md) 的第一步一直写着"把现有 denial 收集成 `.te`"。真做了一次
+普查之后，发现**清单本身就推翻了那句话的前提**。
+
+**方法**（uptime 约 1200 s 的一次普通启动，未刻意操作）：
+`dmesg` + `logcat -b all` 里的 `avc: denied` 全取出来，按
+`(scontext, tcontext, tclass, perm)` 去重。
+
+**结果：988 行 → 237 种去重元组。** 按来源分：
+
+| scontext | 条数 | 真正是谁 |
+|---|---:|---|
+| `vendor_init` | 381 | ★ **`chcon`（363）= 我们自己的 `bpf-relabel.sh`** |
+| `shell` | 121 | 我自己的 adb 探测（`sys_rawio` / `sys_ptrace`），不是目标 |
+| `init` | 88 | ★ `android.hardwar`(46) + **`hexagonrpcd`**(22) + `gaokun3-usbrole`(1) |
+| `platform_app` / `surfaceflinger` / `hal_graphics_*` / `bootanim` | 约 130 | 几乎全是 `device : chr_file {ioctl,read,write,map}` |
+| `hal_health_default` | 50 | `sysfs : file {read,open,getattr}` |
+| `network_stack` | 27 | 同上，`sysfs` |
+
+### ★ 推翻的前提：我们的服务**根本没有域**
+
+TODO 里写的是"需要写 policy 的至少有 `hexagonrpcd`、sensors HAL、
+`audioroute`、`smmustall`"。但普查里**根本找不到这些域名** —— 因为它们
+`scontext` 是 `u:r:init:s0`：init 起的 root 进程没有 `file_contexts` 条目就
+**留在 init 域里**。（`sensors HAL` 在列表里显示为 `comm=android.hardwar`，
+被截断的进程名。）
+
+⇒ 所以第一步不是"补 allow 规则"，是**给我们的可执行文件定义域并做 transition**。
+在那之前收集到的 denial 都挂在错误的主体上，照着写出来的 `.te` 是错的。
+
+### 第二个结构性发现：一大批 `device : chr_file`
+
+`surfaceflinger` / `platform_app` / `bootanim` / `hal_graphics_composer` /
+`hal_graphics_allocator` 都在被拒 `device : chr_file {ioctl,read,write,map}`。
+`device` 是**通用兜底标签** —— 说明那些设备节点没有任何 `file_contexts`
+条目。这一类不用逐条写 allow，**给节点打上正确的类型就一起消失**。
+
+### ✅ 本轮就地清掉的一块：`bpf-relabel.sh`（-363 条，约全系统 37%）
+
+★ **denial 自己就是证据**：`chcon` 被拒时的 **tcontext 已经是
+`fs_bpf_netd_shared`**，而不是错的根标签 `fs_bpf` —— 要是标签靠这个脚本设的，
+它走进去时看到的应该是后者。上机复核：9 个子目录标签全对；临时造一个
+`zz_probe` 拿到 `fs_bpf`（`genfs_contexts` 里没有它的条目，回落正是惰性匹配
+该有的行为）⇒ **`patches/0007` 在干活，脚本是死重量。**
+
+**但没有删它** —— 没打 0007 的内核上它仍是 system_server 不崩溃循环的唯一依靠
+（#36 那一仗）。改成**先检查再动手**：探一个已知子目录的标签，对了就
+`exit 0`，错了才走原来的 `chcon -R`。实机 `sh -x` 验过走的是早退分支、
+`chcon` 一次都没跑。
+
+⚠️ 顺带记一条：这个脚本一个人贡献了全系统 **约 1/3** 的 denial，而
+[#59](#59) 刚证明日志洪水会把 panic 的调用栈从 pstore 里挤掉。
+**"permissive 下 denial 无害"是错的** —— 它们要花取证预算。
+
+### ⬜ B1 的真正待办（按顺序）
+
+1. 给 `hexagonrpcd`、sensors HAL、`gaokun3-usbrole`、`audioroute`、
+   `smmustall`、`hangdump`、`bpfrelabel` 各定一个域 + `file_contexts` 条目。
+2. 给那批 `device` 标签的字符设备节点定类型。
+3. `hal_health_default` / `network_stack` 要的 `sysfs` 子路径打标签。
+4. 全部做完再重新普查一次 —— **只有那时的清单才是可以照抄成 allow 规则的**。
