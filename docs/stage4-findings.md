@@ -2729,3 +2729,50 @@ USB adb 的 UDC 就在这个控制器上（`sys.usb.controller=a600000.usb`）�
 ⚠️ 那个插桩（我给 `device_prepare()` 加的 DPM 看门狗）在 Ubuntu 上无害，
 但 Android 的 SystemSuspend 会不停发起挂起尝试，每次给约 700 个设备各建一个
 定时器 —— 疑似把系统拖死过一次。**调试插桩要有"退场"意识。**
+
+## #56 ★★★ Android 同样受影响 —— 而且"有真实 gadget"并不能免疫（2026-08-22）
+
+用**干净的测试内核 `#32`**（= 发版内核 + `CONFIG_PM_DEBUG`，**已删掉我加在
+`device_prepare()` 里的 DPM 看门狗插桩**）在 Android 上测。
+方法只用 `pm_test=devices`（5 秒自动返回、不需要唤醒源），**不做真实挂起**。
+
+```
+==== Android 设备挂起阶段测试  内核=#32 ====
+role=[device] 子xhci=0
+UDC=[a600000.usb] state=[configured] gadget=[ffs.adb]   ← ★ 有真实 gadget
+RTC 已武装 1787332812
+pm_test=[... [devices] ...]
+已放开 wakelock
+（日志到此为止 —— 整板复位，回到默认的 android-b / #19）
+```
+
+★ **注意日志停的位置**：在"已放开 wakelock"之后、我的测试循环第一次试验**之前**。
+也就是说 **wakelock 一松开，Android 的 SystemSuspend 自己立刻发起了挂起，
+然后就复位了** —— 不是我的脚本触发的，是 Android 的正常待机路径。
+
+⇒ **结论：Android 与救援 Ubuntu 一样受影响。**
+★★ 而 Android 上 UDC 是 `configured`、gadget 是 `ffs.adb` —— **有真实 gadget
+照样复位**。所以致命的**不是"缺 gadget"，是 `device` 模式本身**
+（#52 里"半初始化"那个说法要收窄：缺 gadget 只是 Ubuntu 侧的表象）。
+
+★ 推测的机制（未验证）：`host` 模式下 xhci 是子设备，走正常 USB PM 路径先挂起；
+`device` 模式下走的是 `dwc3_gadget_suspend`，在本机这个被 DP 半占用的
+QMP combo PHY 上，那条路径断电时打死 SoC。
+
+### ⚠️ 直接推论：那个 wakelock 现在是**承重**的
+
+`init.gaokun3.rc` 里的 `write /sys/power/wake_lock gaokun3_nosuspend`
+**是唯一挡着随机整板复位的东西**。在这个问题修好之前**不能撤**。
+（M4 当初加它是因为"挂起醒不来"，现在知道真实后果更严重：是复位。）
+
+### 取舍表（Android 侧，现在是确定的了）
+
+| 做法 | 待机 | USB device-mode adb | 状态 |
+|---|---|---|---|
+| `dr_mode="host"`（= 上游；PR #3 的 DTB 就是这个） | ✅ | ❌ 只剩 TCP adb（要 WiFi） | 可立即落地 |
+| 保留 `otg`，挂起前切 `host` / 恢复后切回 | ✅ | ✅ | **需实现**：Android 没有 systemd-sleep 钩子，得在 SystemSuspend 或 power HAL 上挂 |
+| 保留 `otg` 不动（现状） | ❌ 必须一直持 wakelock | ✅ | 现状 |
+
+★ 第二行是唯一两全的，但要写代码。Android 侧可行的挂点：
+`android.system.suspend` 的 wakelock 协调、或一个监听 `/sys/power/` 的原生
+小服务、或干脆在内核里给 dwc3 加一个"挂起前切 host"的 quirk（那才是根治）。
