@@ -386,6 +386,14 @@ PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/bin/gaokun3-hangdump.sh:$(TARGET_COPY_OUT_VENDOR)/bin/gaokun3-hangdump.sh \
     $(LOCAL_PATH)/etc/hangdump.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/hangdump.rc
 
+# 挂起前把 a600000.usb 的 USB role 切到 host —— 那个控制器停在 role=device 时，
+# 设备挂起阶段会【整板复位】且不留任何日志；而 USB adb 的 UDC 就在它上面，
+# 所以不能简单把 DTS 改成 host。见 docs/stage4-findings.md #52 / #54 / #56。
+# ★ 默认不启用；opt-in: setprop persist.gaokun3.allow_suspend 1
+PRODUCT_COPY_FILES += \
+    $(LOCAL_PATH)/bin/gaokun3-usbrole.sh:$(TARGET_COPY_OUT_VENDOR)/bin/gaokun3-usbrole.sh \
+    $(LOCAL_PATH)/etc/usbrole.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/usbrole.rc
+
 # ★ WindowManager 每显示器设置：关掉大屏默认的 ignoreOrientationRequest。
 # 不装它 → 应用请求横屏时系统不转屏而是把应用信箱化（原神被压成 1600x1000）。
 # 完整机制、实测症状与格式依据见 etc/display_settings.xml 的注释。
