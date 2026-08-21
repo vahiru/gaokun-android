@@ -97,71 +97,36 @@
 且 `WiredAccessoryManager` 在 SystemServer 启动时只读一次，框架层也没有
 插拔模拟命令可用。
 
-### A9. ★s2idle：复位与"醒不回来"是**两个**问题，前者已找到绕过手段
-案卷 [#50](stage4-findings.md) / [#51](stage4-findings.md)（2026-08-21 大幅改写；
-#45–#49 的**归因**多已作废，实测数据仍保留）。
+### A9. ✅ s2idle 根因已解决；救援 Ubuntu 已修复验收，Android 侧待做
+案卷 [#52](stage4-findings.md) / [#53](stage4-findings.md) / [#54](stage4-findings.md) /
+[#55](stage4-findings.md)。工具与修复：`scripts/s2idle/`（含 `INSTALL-rescue.md`）。
 
-**★ 本轮确立的三件事**
-1. **复位发生在挂起【进入】时，不是唤醒时。** 判据：RTC 闹钟设 180 秒，机器仍在
-   几秒内复位。⇒ M4/#47 的"死在任何唤醒"是错的，之前所有"解绑某某"方向注定无效。
-2. **`pm_test` 是本平台最好的复现器，不是"无效判据"。**
-   `pm_test=freezer` rc=0、`pm_test=devices` 复位 ⇒ 故障夹在
-   `dpm_suspend_start()` + `dpm_suspend_noirq()` 之内。
-   它 5 秒自动返回、**不需要唤醒源**，因此**安全**（不会把机器睡死）。
-3. **量化测量已建立**（每轮 = 一次开机，`pm_test=devices` 跑到失败或跑满 10 次，
-   **只数 `rc=0`**）：
+**根因（双臂对照 + 多次独立复现）**：`a600000.usb` 的 USB role switch 停在
+`device`、没有任何 gadget、连 xhci 都没实例化 —— 这个"半初始化"状态一旦断电
+（系统挂起或驱动解绑都会）就**整板复位**，且不留任何日志。
+`dr_mode="otg"` + `usb-role-switch` 是我们 Stage 2 为 USB adb 自己加的
+（上游是 `host`），加上本机 UCSI 是坏的、没有 role 源，才成了这个状态。
 
-| 配置 | 有通过的开机 / 总开机 |
-|---|---|
-| 基线（`pcie_aspm.policy=powersupersave` + APST 开） | **0 / 约 16** |
-| 只 `pcie_aspm=off` | 0 / 1 |
-| 只 APST 关 | 0 / 1（另有一次挂死） |
-| 去掉策略（ASPM 默认）+ APST 关 | 0 / 1 |
-| **`pcie_aspm=off` + APST 关** | **3 / 5**（其中一轮连过 10/10） |
+**第二道坎**：EC（`15-0038`）`suspend_noirq` 超时 −110 ——
+**发版内核本来就修好了**（buildbot 的 EC ordering 补丁）。
+⇒ 两道坎叠在一起，所以整晚每个单变量实验都失败。
 
-   ⇒ 两个都必需，且**光去掉我们自己加的 `powersupersave` 策略不够**。
-   差异是真的（p≈0.002），但**不是确定性修复**。
+**✅ 已完成**：救援 Ubuntu 装 `system-sleep` 钩子，`systemctl suspend` **3/3**
+（`success=3 fail=0`，墙钟 ~115s / 内核时间 ~2.1s = 真睡）。
 
-**下一步（都不需要编内核）**
-* ⬜ ★ **找那个"开机时确定下来的因素"** —— 这是唯一还有把握推进的方向。
-  同一次开机内行为高度一致（连过 10 次 或 第 1 次就死），跨开机才翻转。
-  做法：固定用那个组合配置连开机若干次，**每次都记录完整设备绑定清单 +
-  `/sys/class/wakeup/` + dmesg**，然后比对"能过"与"不能过"的开机。
-* ⬜ 只有弄清上面这层，才谈得上是否把 `pcie_aspm=off` 写进发版 cmdline。
-  ⚠️ 现在就写会让待机变成"有时能睡、有时炸"，**比确定不能睡更糟**。
-* ⬜ 若最终确认与 **NVMe** 有关：正解是给这块盘加 `NVME_QUIRK_NO_APST` /
-  `NVME_QUIRK_SIMPLE_SUSPEND` quirk，而不是让所有用户加 cmdline。
-  先 `nvme id-ctrl` 记下 vendor/device id 与 APST 表。
-* ⬜ 复位解决后再攻 **"醒不回来"** —— M4 描述的原始症状，
-  本轮唯一那次成功睡进去的观测（#39）就是死在这一步。
-
-**⚠️ 判据纪律（本轮最贵的教训）**
-★ 这个故障的**单次失败率约 93%**，所以"改一次、试一次、炸了"对任何配置都是
-大概率事件，**几乎没有证据力**。#39/#43 用同一条 cmdline 一正一反，
-把我带偏了两轮。**任何结论都必须来自"跑到失败或跑满 10 次"的循环。**
-⚠️ 工具本身也有坑：`pm_test` 周期后会留 pending 唤醒事件，紧接着再挂起会
-**立刻 `-EBUSY` 返回**；第一版脚本把非零返回当成"通过"，报出了假的 10/10。
-判据是**耗时**（真实周期 5–8 秒，`-EBUSY` 是 0–1 秒）。
-★ **工具已入库**：`scripts/s2idle/`（`s2fp.sh` 采开机指纹+循环、
-`s2cmp.sh` 比对、`s2loop.sh` 轻量循环、`sx.sh` 安全单次挂起）。
-那个 README 里写了三条动手前必读的坑，别跳过。
-
-**⚠️ 靶场纪律（本轮让用户按了三次电源键，是我的问题）**
-* **"醒不回来"没解决之前，一律不跑真实挂起** —— `pm_test=devices` 够用且安全。
-* 实验用的 BLS 条目**加 `panic=10`**：内核已开 `CONFIG_DPM_WATCHDOG`，
-  设备回调卡住会 panic，配 `panic=10` 就能自动重启回默认项。
-* 改 **DTB / 引导链**这类可能连 userspace 都到不了的实验，
-  动手前先明说"可能要按一次电源键"。
-* ★ "stay 模式"（脚本只准备、不挂起）让机器停在救援 Ubuntu 且 ssh 可达，
-  一次开机能连做多个实验，效率高很多。
-
-**已被实测否掉的假说**（别再重试）：EC 的 PM 回调 / EC 的中断 / **EC 本身（解绑）** /
-Venus / geni I²C 的 noirq 重构 / PDC 唤醒映射 / **我们全部 20 个 buildbot 补丁**
-（零补丁 v7.2-rc2 同样复位）/ cpuidle 深空闲态 / 硬件看门狗 /
-音频+USB+三个 remoteproc+ucsi 全解绑。
-
-⚠️ 原 A9 里"问题 1 = ath11k 的 suspend 回调卡死"那条**并未被否定，但优先级降低**：
-它是 WiFi 关联状态下挂起路上的一道坎，而本轮的复位在它之前就发生了。
+**⬜ 待做（按顺序）**
+1. **重编一个带 `CONFIG_PM_DEBUG` 但【不带调试插桩】的 Android 内核** ——
+   ⚠️ 必须去掉我加在 `drivers/base/power/main.c` `device_prepare()` 里的 DPM
+   看门狗：Ubuntu 上无害，但 Android 的 SystemSuspend 不停发起挂起尝试，
+   每次给约 700 个设备各建一个定时器，疑似把系统拖死过一次。
+2. 用它 + `pm_test=devices` 测 Android 是否受同一个坑影响。
+   ⚠️ 放开 `gaokun3_nosuspend` wakelock 之前**先设 RTC 闹钟**。
+3. 若受影响，三个选项：①DTS 改回 `dr_mode="host"`（**失去 USB device-mode adb**，
+   UDC 就在这个控制器上）；②保留 otg，在挂起前后临时切 host/device
+   （Android 侧没有 systemd-sleep 钩子，要在 SystemSuspend 或 power HAL 上做）；
+   ③等 UCSI 修好 —— 那才是根上的问题。
+4. Android 挂起真的通了之后，才谈得上撤掉 `init.gaokun3.rc` 里的
+   `gaokun3_nosuspend` wakelock。
 
 ### A5. 恢复出厂设置不起作用
 设置里那条路走 misc 的 BCB + recovery，而本机没有可用 recovery
