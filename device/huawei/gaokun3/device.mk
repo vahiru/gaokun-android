@@ -394,6 +394,13 @@ PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/bin/gaokun3-usbrole.sh:$(TARGET_COPY_OUT_VENDOR)/bin/gaokun3-usbrole.sh \
     $(LOCAL_PATH)/etc/usbrole.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/usbrole.rc
 
+# ★ 默认【开启】待机（2026-08-22 起）。开关留着是为了排查时能一条属性关掉。
+#   开启后：息屏切 role=host（挂起安全）、亮屏切回 device（USB adb 可用）。
+#   实测 Android 真实挂起/唤醒 ×4 零复位、救援 Ubuntu systemctl suspend 3/3。
+# ⚠️ 用户可见代价：息屏时 USB device-mode adb 断开，亮屏恢复；TCP adb 不受影响。
+PRODUCT_PROPERTY_OVERRIDES += \
+    persist.gaokun3.allow_suspend=1
+
 # ★ WindowManager 每显示器设置：关掉大屏默认的 ignoreOrientationRequest。
 # 不装它 → 应用请求横屏时系统不转屏而是把应用信箱化（原神被压成 1600x1000）。
 # 完整机制、实测症状与格式依据见 etc/display_settings.xml 的注释。
