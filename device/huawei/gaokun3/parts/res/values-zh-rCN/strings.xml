@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">MateBook E Go</string>
+    <string name="keyboard_title">磁吸键盘</string>
+    <string name="keyboard_summary">开关配套键盘与触控板</string>
+    <string name="keyboard_switch_title">启用键盘</string>
+    <string name="keyboard_switch_summary_on">键盘与触控板正常工作</string>
+    <string name="keyboard_switch_summary_off">键盘与触控板不再响应任何输入</string>
+    <string name="keyboard_note">关闭后由内核层面禁止这些输入设备。键盘仍然吸附在机器上、仍然供电，只是不再上报按键、指针移动和唤醒事件。</string>
+</resources>

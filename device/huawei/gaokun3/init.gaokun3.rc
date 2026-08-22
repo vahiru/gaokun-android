@@ -43,6 +43,17 @@ on init
 on property:persist.gaokun3.allow_suspend=1
     write /sys/power/wake_unlock gaokun3_nosuspend
 
+# ═══ 背光节点交给 lights HAL（它跑 system:system，不跑 root）═══
+# ⚠️ init 的 chown 不支持通配，所以这里写的是实际路径。它来自设备树里的 DSI
+#    节点地址 —— 换 DTB / 换面板就会变。HAL 那边是 glob 找的，写失败会在
+#    logcat 打 "写 .../brightness 失败（权限？看 init 里的 chown）"，
+#    照那条日志回来改这一行。
+# ⚠️ 这个节点的 SELinux 标签是通用的 u:object_r:sysfs:s0。现在 permissive 无碍，
+#    将来转 enforcing 要给它单独打标签（TODO B1）。
+on boot
+    chown system system /sys/class/backlight/ae96000.dsi.0/brightness
+    chmod 0664 /sys/class/backlight/ae96000.dsi.0/brightness
+
 # ⚠️ 这里绝不能自己挂 binderfs —— AOSP 16 的 init.rc 已原生处理
 # （挂 /dev/binderfs + 建 /dev/binder 等符号链接）。
 # 再挂一次会创建【第二个】binderfs 实例盖在上面：每个 binderfs 挂载是

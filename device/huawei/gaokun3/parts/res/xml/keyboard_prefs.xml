@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android">
+    <SwitchPreference
+        android:key="keyboard_enabled"
+        android:title="@string/keyboard_switch_title"
+        android:summaryOn="@string/keyboard_switch_summary_on"
+        android:summaryOff="@string/keyboard_switch_summary_off"
+        android:defaultValue="true" />
+    <Preference
+        android:selectable="false"
+        android:summary="@string/keyboard_note" />
+</PreferenceScreen>

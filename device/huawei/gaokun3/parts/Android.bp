@@ -1,0 +1,26 @@
+//
+// gaokun3 设备设置（目前只有磁吸键盘开关）。
+//
+// ★ platform_apis + certificate: "platform" 两个都必需：
+//   前者才能用 android.os.SystemProperties（@hide），
+//   后者才能拿 android.uid.system（写 persist.sys.* 需要 system uid）。
+//
+// ★ 装到 product 分区而不是 vendor：它是面向用户的设置界面，
+//   而且 sharedUserId=android.uid.system 的应用不该待在 vendor 里
+//   （Treble 下 vendor 应用不允许共享 system uid）。
+//
+android_app {
+    name: "Gaokun3Parts",
+    srcs: ["src/**/*.java"],
+    resource_dirs: ["res"],
+    manifest: "AndroidManifest.xml",
+
+    platform_apis: true,
+    certificate: "platform",
+    privileged: true,
+    product_specific: true,
+
+    optimize: {
+        enabled: false,
+    },
+}

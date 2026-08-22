@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">MateBook E Go</string>
+    <string name="keyboard_title">Detachable keyboard</string>
+    <string name="keyboard_summary">Turn the magnetic keyboard and touchpad on or off</string>
+    <string name="keyboard_switch_title">Keyboard enabled</string>
+    <string name="keyboard_switch_summary_on">Keyboard and touchpad are active</string>
+    <string name="keyboard_switch_summary_off">Keyboard and touchpad ignore all input</string>
+    <string name="keyboard_note">Turning this off inhibits the input devices in the kernel. The keyboard stays physically attached and charging; it simply stops reporting keys, pointer movement and wake events.</string>
+</resources>

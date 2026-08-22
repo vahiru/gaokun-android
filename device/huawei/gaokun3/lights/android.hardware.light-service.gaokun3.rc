@@ -1,0 +1,7 @@
+# 亮度 HAL。跑 system:system —— 它只需要写 /sys/class/backlight/*/brightness，
+# 那个节点由 init.gaokun3.rc 的 `on boot` chown 给 system。
+# ⚠️ 别跑 root：这个进程只做一件很小的事，没有理由拿全权限。
+service vendor.light-gaokun3 /vendor/bin/hw/android.hardware.light-service.gaokun3
+    class hal
+    user system
+    group system

@@ -600,3 +600,29 @@ PRODUCT_VENDOR_PROPERTIES += \
 # 不证明能解码。见 tools/decode-test.cpp。
 PRODUCT_PACKAGES += \
     gaokun3-decode-test
+
+# ═══════════ 亮度：真的 lights HAL ═══════════
+#
+# 出厂装的是 AOSP 示例实现（android.hardware.lights-service.example），只打日志。
+# 实测后果：亮度滑条【完全无效】—— 框架从 1 调到 255，面板始终停在 512/4095
+# （12.5%），机器永远是暗的；而以 root 直接写那个 sysfs 节点立刻生效。
+# 见 lights/Lights.cpp 的注释与 docs/stage4-findings.md。
+# ★ 排除示例实现靠的是 lights/Android.bp 里的 `overrides:` —— PRODUCT_PACKAGES
+#   只能加不能减，两个 HAL 都装上会抢注册 ILights/default。
+PRODUCT_PACKAGES += \
+    android.hardware.light-service.gaokun3
+
+# ═══════════ 磁吸键盘开关 ═══════════
+#
+# 后端：属性 persist.sys.gaokun3.keyboard → init 触发器 → 脚本写内核的
+#       /sys/class/input/inputN/inhibited（实测本机这套键盘注册了 7 个 input
+#       设备，全部按名字前缀 "HID 12d1:10b8" 匹配）。
+# 前端：parts/ 里的小应用，用 Settings 注入（IA_SETTINGS）出现在「设置 → 系统」，
+#       不需要改 packages/apps/Settings，也不依赖 LineageParts
+#       （实测这个 ROM 没装 org.lineageos.lineageparts）。
+PRODUCT_PACKAGES += \
+    Gaokun3Parts
+
+PRODUCT_COPY_FILES += \
+    $(LOCAL_PATH)/bin/gaokun3-keyboard.sh:$(TARGET_COPY_OUT_VENDOR)/bin/gaokun3-keyboard.sh \
+    $(LOCAL_PATH)/etc/keyboard.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/keyboard.rc

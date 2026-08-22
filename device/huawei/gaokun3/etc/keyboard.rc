@@ -1,0 +1,30 @@
+# 磁吸键盘开关。UI 侧只需要设置这个属性，剩下的交给 init 触发器。
+#
+# ★ 用 persist.sys.* 前缀是【故意的】：它的属性上下文是 system_prop，
+#   系统应用（Settings，uid system）可以直接 SystemProperties.set()。
+#   换成 persist.vendor.* 或自定义前缀，Settings 就写不了，还得再造一个服务。
+#
+# ⚠️ 默认不设 = 键盘开着。只有显式设成 0 才会关 —— 失败方向永远选"键盘可用"，
+#    否则一个写坏的属性就能把用户唯一的输入设备锁死。
+
+service gaokun3_kbd_on /vendor/bin/gaokun3-keyboard.sh on
+    user root
+    group root
+    oneshot
+    disabled
+
+service gaokun3_kbd_off /vendor/bin/gaokun3-keyboard.sh off
+    user root
+    group root
+    oneshot
+    disabled
+
+on property:persist.sys.gaokun3.keyboard=1
+    start gaokun3_kbd_on
+
+on property:persist.sys.gaokun3.keyboard=0
+    start gaokun3_kbd_off
+
+# 开机时如果属性是 0，把状态补上（属性触发器在 init 早期不会重放）
+on boot && property:persist.sys.gaokun3.keyboard=0
+    start gaokun3_kbd_off

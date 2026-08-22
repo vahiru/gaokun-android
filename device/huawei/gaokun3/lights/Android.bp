@@ -1,0 +1,38 @@
+//
+// lights HAL for gaokun3。
+//
+// ★ overrides: 是关键 —— 出厂那个 android.hardware.lights-service.example 会
+//   注册同一个 ILights/default，两个一起装就是抢注册。Soong 的 overrides
+//   会让被覆盖的模块【不被安装】，这是唯一干净的排除办法（PRODUCT_PACKAGES
+//   只能加不能减）。
+//
+cc_binary {
+    name: "android.hardware.light-service.gaokun3",
+    relative_install_path: "hw",
+    vendor: true,
+    overrides: ["android.hardware.lights-service.example"],
+
+    srcs: ["Lights.cpp"],
+
+    init_rc: ["android.hardware.light-service.gaokun3.rc"],
+    vintf_fragment_modules: ["android.hardware.light-service.gaokun3.xml"],
+
+    stl: "c++_static",
+    shared_libs: [
+        "libbinder_ndk",
+        "liblog",
+    ],
+    static_libs: [
+        // ⚠️ 版本必须是 V2：设备上现有的 vintf 声明就是 <version>2</version>，
+        //    对不上会在开机时 VINTF 校验失败。
+        "android.hardware.light-V2-ndk",
+        "libbase",
+    ],
+    cflags: ["-Wall", "-Werror"],
+}
+
+vintf_fragment {
+    name: "android.hardware.light-service.gaokun3.xml",
+    src: "android.hardware.light-service.gaokun3.xml",
+    vendor: true,
+}
