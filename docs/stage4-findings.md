@@ -3090,3 +3090,78 @@ system_app / platform_app / 两个 graphics HAL / mediaswcodec 的读写规则�
 2. 给那批 `device` 标签的字符设备节点定类型。
 3. `hal_health_default` / `network_stack` 要的 `sysfs` 子路径打标签。
 4. 全部做完再重新普查一次 —— **只有那时的清单才是可以照抄成 allow 规则的**。
+
+---
+
+## #61 ★★★★ `kernel-apply-patches.sh` 第一次跑就拦下两处真实回归（2026-08-22）
+
+[#58](#58) 顺手加的那个脚本（补"`patches/*.patch` 没有消费者"这个漂移源），
+**第一次在构建机上运行就抓到两件事**。两件都不会在构建时报错、
+都要等到用户遇到症状才暴露。
+
+### 一、`patches/0009`（CPU cooling maps）从内核树上掉了
+
+```
+→ 可应用（--check 模式，未改动）  0009-arm64-dts-sc8280xp-add-cpu-cooling-maps.patch
+```
+
+"可应用" = **没打上**。而设备上跑的那个内核**是有的**
+（实测 `cpu0-thermal` 起 `cdev` 1 个 / `trip` 2 个，`cpu0→cpufreq-cpu0`、
+`cpu4→cpufreq-cpu4`，与 M7 当年记录一致）⇒ 是**构建机的树被回退过**。
+
+★ **要是没被拦住**：新内核的 DTB 会**悄悄失去 CPU 温控降频**。
+主线 `sc8280xp.dtsi` 的 8 个 `cpuN-thermal` 只有一条 110 °C critical、
+没有任何 cooling device —— 也就是 CPU 一路满频跑到内核**紧急关机**。
+这台是无风扇平板，症状会是"打游戏打着打着自己关机"，
+而且**要等到某次长时间负载才出现**，与本次改动八竿子打不着。
+
+### 二、上游 Venus 补丁集也只活在构建机工作区
+
+补上 0009 后构建立刻炸在 DTB：
+
+```
+Error: sc8280xp-huawei-gaokun3.dts:1428.1-7 Label or path venus not found
+FATAL ERROR: Syntax error parsing input tree
+```
+
+`sc8280xp.dtsi` 里连 `venus` 节点都没有 —— 说明那个文件不是"少打了 0009"，
+而是**整体被回退过**，把上游 `0019-arm64-dts-qcom-sc8280xp-Add-Venus.patch`
+一起带走了。而本仓的 `patches/0011`（`&venus { status = "okay"; }`）
+**依赖**它提供的 label。
+
+⇒ ★★ **从干净的 v7.2-rc2 出发，照本仓的 `patches/` 根本重建不出发版内核。**
+这比单个补丁丢失更糟：丢的是一条**跨仓库的依赖**，而依赖是不会自己报错的
+（`patches/0011` 自己 apply 得好好的）。
+
+**已入库**：`patches/upstream-venus/`（8 个原样保存，含带说明的 README；
+0014 故意不用 —— 纯格式清理、主线已分叉）。
+
+### ⚠️ 0019 需要模糊匹配，而这件事必须【明说】
+
+`0019` 第一个 hunk 的上下文是 `#include` 列表，v7.2-rc2 比补丁的基线多一行
+`#include <dt-bindings/firmware/qcom,scm.h>`，于是 `git apply` 直接拒绝：
+
+```
+error: patch failed: arch/arm64/boot/dts/qcom/sc8280xp.dtsi:11
+```
+
+`patch -p1 --fuzz=3` 三个 hunk 全成（fuzz 2 / offset 6 / offset 36），
+应用后复核 `venus: video-codec@aa00000`、`videocc: clock-controller@abf0000`、
+`pil_video_mem` 三个节点都在，且 0009 的 cooling-maps 仍是 9 处。
+
+脚本因此加了 fuzz 回落，但**必须打印"用了 fuzz=3"并计数** ——
+静默的模糊匹配是灾难的开始：它会在上游漂移到某个程度时突然把 hunk
+放到错误的位置，而一切看起来仍然"成功"。
+
+### ★ 这次构建脚本里加的两条后验，值得成为惯例
+
+先验（省构建机时间）+ 后验（验产物）：
+
+* 源码侧：`0013` 的 `BUG_ON` 必须**不在**、`0014` 的 `dev_err_ratelimited`
+  必须**在**、dtsi 的 `cooling-maps` 至少 9 处。三条不过就不开编。
+* 产物侧：**反解 DTB** 数 `cooling-maps` —— 实得 **10 处**，与 M7 当年
+  "1→10 处"的记录一致。
+  ⚠️ 只查源码不够：源码对而 DTB 错是完全可能的（用错 dtsi、编错目标）。
+
+⇒ **判据要落在最终产物上，不是中间状态。** 本仓在 `| tail` 吞退出码那次
+（#41）学过同一课：那次的正确判据是 `Image` 的时间戳。
