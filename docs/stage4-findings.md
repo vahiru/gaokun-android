@@ -3442,3 +3442,58 @@ E V4L2DecodeComponent: Failed to create V4L2Decoder for H264
   至少能从应用抽屉打开；
 * 去掉 `privileged: true`（我们没申请任何特权权限，放 priv-app 只是多一层
   privapp 白名单约束）。
+
+---
+
+## #67 ★★★★★ 音量翻案：不是"没余量"，是**上游故意锁了 43 dB**（2026-08-22）
+
+[#64](#64) 的结论"混音器已无余量"**在观察上是对的、在归因上是错的**。用户追问
+"音量真没救了吗"，于是把 81 这个上限查到底 —— 答案在**内核机器驱动**里，
+而且上游写了注释：
+
+`sound/soc/qcom/sc8280xp.c:41-49`
+```c
+case WSA_CODEC_DMA_RX_0:
+case WSA_CODEC_DMA_RX_1:
+	/*
+	 * Set limit of -3 dB on Digital Volume and 0 dB on PA Volume
+	 * to reduce the risk of speaker damage until we have active
+	 * speaker protection in place.
+	 */
+	snd_soc_limit_volume(card, "WSA_RX0 Digital Volume", 81);
+	snd_soc_limit_volume(card, "WSA_RX1 Digital Volume", 81);
+	snd_soc_limit_volume(card, "SpkrLeft PA Volume", 17);
+	snd_soc_limit_volume(card, "SpkrRight PA Volume", 17);
+```
+
+★ 这一条解释了**全部**现象：为什么 `WSA_RX0` 报 0→81 而在
+`lpass-wsa-macro.c` 里**声明完全相同**的 `WSA_RX0_MIX` 报 0→124；
+为什么写 82 就被拒；为什么 `PA Volume` 怎么调都没反应。
+而注释里那句 **"-3 dB"** 恰好印证了刻度换算：**控件值 v → dB = v − 84**，
+所以 81 = −3 dB、124 = +40 dB。**被锁掉的是 43 dB。**
+
+### ⚠️ 我在这一路上排错过两次，都值得记
+
+1. **"BOOST 打开会更响"** —— 错。查源码发现 `BOOST Switch` 是
+   `wsa883x_set_swr_port(WSA883X_PORT_BOOST, ...)`，是 **SoundWire 端口使能**，
+   不是功放升压器开关。实测也确认对电平零影响。
+2. ★ **"81 是华为的 audioreach 拓扑封的"** —— 也错。把
+   `SC8280XP-HUAWEI-GAOKUN3-tplg.bin`（24296 字节）拉下来逐字符串解析，
+   里面**只有两个音量控件**（`MultiMedia1/2 Playback Volume`，且未暴露成
+   kcontrol），**根本没有 `WSA_RX0 Digital Volume`**。
+   ★ 方法论：两个"看起来合理"的嫌疑人都被排除之后，才轮到去读机器驱动
+   —— 而正确答案一直明写在那里，还带注释。**先 grep `snd_soc_limit_volume`
+   这类"运行时改上限"的 API，比逆向二进制固件便宜得多。**
+
+### 修法：`patches/0015`（用户选了 +6 dB）
+
+把两个 `snd_soc_limit_volume(..., 81)` 改成 **90**（= +6 dB）。
+⚠️ **明确标了 NOT FOR UPSTREAM** —— 这是拿安全余量换响度。
+`PA Volume` 的两个上限**不动**：实测它对输出没有影响，放开只会平添风险。
+
+接受这个风险的本机理由（写进补丁说明了）：无风扇 12.35 寸平板的小喇叭、
+WSA883x 的 compander 与 VISENSE 都开着、而这颗 SoC 本该加载的出厂校准数据
+在 Windows 被抹掉时就没了 —— 上游那个默认值在本机保护不了它想保护的东西。
+
+⬜ 未上机（等下一次内核构建）。★ 判据不是"听着响了"，而是**重跑 #64 那套
+麦克风测量**：440 Hz 分量应比现在高约 6 dB。

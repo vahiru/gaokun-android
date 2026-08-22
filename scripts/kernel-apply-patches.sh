@@ -46,6 +46,7 @@ KPATCHES=(
     0012-arm64-dts-gaokun3-usb0-otg-for-usb-adb.patch
     0013-drm-crtc-drop-racy-BUG_ON-in-fence_to_crtc.patch
     0014-remoteproc-qcom-ratelimit-repeat-handover-error.patch
+    0015-asoc-sc8280xp-raise-wsa-digital-volume-ceiling.patch
 )
 
 cd "$TREE"
