@@ -1,0 +1,41 @@
+From: gaokun3 debug <nekovahiru@gmail.com>
+Subject: [DEBUG, NOT FOR MERGE] venus: print the numbers behind "HW can't support this load"
+
+⚠️ 这是【临时插桩】，问题定位后就删。放在 patches/debug/ 下就是为了不让它
+   混进正式补丁集（kernel-apply-patches.sh 不会自动应用本目录）。
+
+背景：本机 Venus 解码在 VIDIOC_STREAMON 阶段被内核拒绝：
+  E V4L2Device: (OUTPUT_MPLANE)VIDIOC_STREAMON failed
+  qcom-venus aa00000.video-codec: HW can't support this load
+出处是 pm_helpers.c 的 decide_core()，判据：
+  cur_inst_load + min_load <= max_freq
+而测试片只有 640x360，不可能真的超载，所以是某个量算错了。
+
+已知的一处硬矛盾：设备上 aa00000.video-codec 的 OPP 表是
+720/1014/1098/1332 MHz，而驱动里 sc8280xp_freq_table 写的是
+240/338/366/444/533/560 MHz —— 两张表不在一个量级。
+
+⚠️ 动态调试那条路走不通：即使 root，
+   echo ... > /sys/kernel/debug/dynamic_debug/control 也是 Permission denied。
+   所以只能插一条 dev_info。
+
+插桩点选在两次 min_loaded_core() 之后、判定之前，一次把所有输入量打全：
+分辨率、fps、inst->state、vpp_freq/low_power_freq、四个 load、max_freq。
+只在每次开流时打一行，不会刷屏。
+
+--- a/drivers/media/platform/qcom/venus/pm_helpers.c
++++ b/drivers/media/platform/qcom/venus/pm_helpers.c
+@@ -810,6 +810,13 @@ static int decide_core(struct venus_inst *inst)
+ 	min_loaded_core(inst, &min_coreid, &min_load, false);
+ 	min_loaded_core(inst, &min_lp_coreid, &min_lp_load, true);
+ 
++	/* gaokun3 DEBUG: 查 "HW can't support this load" 到底是哪个量爆了 */
++	dev_info(dev,
++		"gaokun3-dbg: %ux%u fps=%u state=%d vpp=%lu lp=%lu | inst=%u instlp=%u min=%u minlp=%u | max_freq=%lu",
++		inst->width, inst->height, inst->fps, inst->state,
++		inst->clk_data.vpp_freq, inst->clk_data.low_power_freq,
++		cur_inst_load, cur_inst_lp_load, min_load, min_lp_load, max_freq);
++
+ 	if (cur_inst_load + min_load <= max_freq) {
+ 		inst->clk_data.core_id = min_coreid;
+ 		cu.video_core_enable_mask = min_coreid;

@@ -3497,3 +3497,45 @@ WSA883x 的 compander 与 VISENSE 都开着、而这颗 SoC 本该加载的出�
 
 ⬜ 未上机（等下一次内核构建）。★ 判据不是"听着响了"，而是**重跑 #64 那套
 麦克风测量**：440 Hz 分量应比现在高约 6 dB。
+
+---
+
+## #68 ★★ 自动亮度（A3）：又排除两条，嫌疑只剩 I2C 实例号（2026-08-22）
+
+把两份 SLPI 配置逐字段拉平对照（`hexagonrpcd-root/sensors/config/`，
+字段藏在 `"key":{"type":...,"data":N}` 里，得展平才看得见）：
+
+| 字段 | `sh3001`（加速度计，**能用**）| `tcs3701`（光感，**不通**）|
+|---|---|---|
+| `bus_type` | 0（I2C） | 0（I2C） |
+| **`bus_instance`** | **1** | **5** |
+| `slave_config` | 54 | 57 = 0x39 ✓ 正是 tcs3701 的地址 |
+| **`dri_irq_num`** | **32** | **127** |
+| `irq_is_chip_pin` | 1 | 1 |
+| `irq_trigger_type` | 3 | 1 |
+| **`rail_on_state`** | **1** | **2** |
+| `vddio_rail` | `/pmic/client/sensor_vddio` | 同左 |
+
+### 本轮排除的两条（都有实测依据）
+
+* ❌ **"AP 占了光感的中断脚"** —— `sc8280xp-huawei-gaokun3.dts` 全文
+  **没有任何 GPIO 127 的引用**（AP 只启用了 i2c4 与 i2c15）。
+* ❌ ★ **"SSC 要用的 TLMM 脚没被正确配置"** —— 实机
+  `/sys/kernel/debug/pinctrl/f100000.pinctrl/pinmux-pins`：
+  光感中断脚 **`pin 127: UNCLAIMED`**，而**能用的加速度计**中断脚
+  **`pin 32: UNCLAIMED`** —— 两者状态完全一样。
+  ⇒ **引脚在 Linux 侧未认领是正常状态**（SSC 独立于 AP 的 pinctrl 拿脚），
+  它区分不了能用与不能用。
+
+### 还剩的嫌疑
+
+**`bus_instance` 5**（主）与 **`rail_on_state` 2**（次）。前者与 #43 的结论一致。
+⬜ 下一步：SSC 侧 I2C 实例号 → 实际 QUP 硬件的映射。⚠️ 这是 Qualcomm 的私有
+编号，公开文档里没有；靠猜代价很高（每次都要改配置 + 重启 hexagonrpcd +
+等 20 秒沉降，而且一失败就污染整个 SSC 会话，见 #37）。
+★ 更省的路子可能是找一台**光感在主线上能用的 sc8280xp 机器**（ThinkPad X13s
+同样有环境光传感器，而上游 ALSA UCM2 已经把本机与 X13s 视为同一套）
+去抄它的配置，而不是自己逆向编号。
+
+⚠️ 顺带记一条工具坑：这些 JSON 在 NTFS 上直接看 DriverStore 时是**重解析点**
+（见 firmware/README）；本仓 `hexagonrpcd-root/` 下的是从 cab 解出的真文件。
