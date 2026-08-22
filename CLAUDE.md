@@ -5,7 +5,33 @@
 在华为 MateBook E Go（Snapdragon 8cx Gen 3 / sc8280xp，代号 gaokun）上跑原生 AOSP，
 最终目标是能稳定运行 arm64 手游。
 
-**当前阶段：Stage 6 M17（构建已完成上机）— ★★★★★ 「切到设置卡死」定性为**内核 panic**（`drm_crtc.c:161` 的竞态 `BUG_ON`，**上游 mainline 至今未修**，普通应用即可触发），`patches/0013` 已编入内核并装机验收（`#33` / 戳 `1787373122` / 槽 `_b`，pstore 零新增、GPU 三项判据全 0）。同批还修好了 CPU cooling maps 回归与 `/dev/dri` 标签缺失（denial −493）。⚠️ **本版不可发布**：boot_b 里带了两份 DTB（已就地修 ESP，需清空 `prebuilt-boot/dtb/` 重编）**（每次开工时更新这一行） ★★★★★ 用户报的「切到设置卡死」定性为**内核 panic**（`kernel BUG at drm_crtc.c:161`），根因是 `drm_crtc` 的 `fence_to_crtc()` 那个 `BUG_ON` 与 dma-fence「signal 即摘 ops」的竞态 —— **上游 mainline master 至今未修**，普通应用即可触发。补丁 `patches/0013` 已写并对 v7.2-rc2 验过可应用，⬜ 未编译上机。证据全靠 pstore 抢回来的（现场已重启）**（每次开工时更新这一行）
+**当前阶段：Stage 6 M18 — ★★★ 光感（自动亮度）定性收敛：驱动在固件里、类型已声明、SEE 确实在 probe，**但芯片在 I²C 上不应答**；`bus_instance` 0–7、`bus_type` 0–3、`rail_on_state` 1/2 全部扫空，#43/#68/#70 的历次归因一并作废。本轮真正的产出是**可信实验循环**（`scripts/ssc/`，60–90 秒一次、带阳性/阴性对照）。同期已装机验收：亮度真 HAL、键盘开关（设置项 + 控制中心磁贴）、WSA 音量上限 90（实测 +5.7 dB）。⚠️ 当前机上构建 m21 带 venus 调试插桩，**不可发布****（每次开工时更新这一行）
+
+> **★★★ Stage 6 M18（2026-08-22）：光感 —— 先造工具，再做实验。**
+> ★★ **纠正一条本仓记错的事实：SLPI 停得掉。** 此前写着"`echo stop` 返回 0
+> 但状态还是 running（attached mode）"，实测直接变 `offline`
+> （`remoteproc remoteproc0: stopped remote processor slpi`）。
+> 判据一眼可见：sysfs 显示的是 **`running`** 而不是 **`attached`**，
+> 且 `firmware` 属性有值 ⇒ 是 Linux 引导的。
+> ⇒ "每个实验都得重启整机"不成立，循环降到 **60–90 秒**。
+> - ★★★ **补上了 #70 缺的那一环：证明 DSP 真读了我的目录。**
+>   阳性对照 = 把加速度计 JSON 从自定义根里删掉 → 该传感器消失而 SSC 照常上线。
+>   同时再次确认 #71：只重启 hexagonrpcd 时，根目录换成**空目录**加速度计
+>   照样满血 ⇒ SEE 初始化一次后不再依赖文件服务器。
+> - ★★ **阴性对照定出失败形状**：把能用的加速度计地址改错（54→99），
+>   失败签名与光感**一模一样** ⇒ 驱动在跑、在 probe，**芯片不应答**。
+> - ★ **新结构：二供料。** IMU（sh3001 ✅／t1000）在 bus 1，
+>   光感（tcs3701／sy3133cs）都在 bus 5。t1000 同参数却没注册 ⇒
+>   SEE 的"探测择优"本身正常。
+> - ❌ `is_dri = 0` ⇒ 光感**本来就轮询**，#43/#68 的"DRI 中断到不了"**不成立**；
+>   TLMM 32 与 127 在 Linux 侧都是 `UNCLAIMED`。
+> - ★ **`hw_platform = QRD` 是我们自己编出来喂 DSP 的**（主线不导出它）
+>   ⇒ 这套是**高通参考设计**的配置，板级差异原在 Windows DriverData 注册表，
+>   已随抹除 Windows 丢失（#37 当时只当是丢了校准精度）。
+> - ⚠️ 做完实验**必须恢复**：SLPI 起回来、hexagonrpcd 用回 `/vendor` 根，
+>   并且**验到框架层**（`dumpsys sensorservice`）—— SSC 通不代表 HAL 会话还在。
+> - 完整案卷 `docs/stage4-findings.md` #72；工具与纪律 `scripts/ssc/README.md`。
+
 
 > **★★★ Stage 6 M17（2026-08-22）：一个用户报告，一路查到上游活着的缺陷。**
 > ★ **`ESR=0xf2000800` → EC=0x3C（BRK）⇒ 是 `BUG()` 断言，不是空指针。**
