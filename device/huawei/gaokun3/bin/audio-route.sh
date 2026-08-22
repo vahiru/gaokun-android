@@ -55,7 +55,9 @@ set -- \
     "SpkrRight VISENSE Switch" 1 \
     "SpkrRight DAC Switch" 1 \
     "SpkrLeft PA Volume" 12 \
-    "SpkrRight PA Volume" 12
+    "SpkrRight PA Volume" 12 \
+    "WSA_RX0 Digital Volume" 90 \
+    "WSA_RX1 Digital Volume" 90
 
 apply() {
     while [ $# -ge 2 ]; do
@@ -153,5 +155,13 @@ log -t audioroute "内置麦路由已应用（PCM3 / VA / DMIC0+1）"
 #     现状实测出声正常、dmesg 无抱怨，故未动；但这是个未验证的偏离，
 #     若将来查扬声器功耗或保护逻辑，先看这里。
 #   另两处查过是【已经一致】的，不用设：`WSA MODE` 默认就是上游的 0；
-#   `WSA_RXn Digital Volume` 本机范围是 0->81 且已在 81（最大），
-#   上游写的 84 在本机是超范围值。
+#   ⚠️★ `WSA_RXn Digital Volume` 那条旧注释已作废（原文："本机范围是 0->81
+#   且已在 81（最大），上游写的 84 在本机是超范围值"）。真相是：81 这个上限
+#   是【内核机器驱动故意设的】——sound/soc/qcom/sc8280xp.c 里
+#   snd_soc_limit_volume(card, "WSA_RX0 Digital Volume", 81)，注释写着
+#   "Set limit of -3 dB ... until we have active speaker protection in place"。
+#   控件刻度是 v-84 dB，所以 81 = -3 dB、124 = +40 dB，被锁掉的是 43 dB。
+#   本仓 patches/0015 把上限抬到 90（+6 dB），所以这里【必须显式设 90】：
+#   驱动默认是 84（0 dB），不设就白抬了。
+#   实测（内置麦克风、440 Hz Goertzel）：81 → -28.0 dBFS，90 → -22.3 dBFS，
+#   +5.7 dB（理论 +9，差额被 WSA883x 的压缩器吃掉）。详见 docs #67。
