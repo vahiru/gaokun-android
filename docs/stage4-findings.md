@@ -3361,3 +3361,84 @@ Goertzel 单独取 440 Hz 分量），而不是靠听感。
 ⚠️ 键盘挂在 **`a400000.usb`**，不是待机切 role 的那个 `a600000.usb` ——
 两者互不影响（查过了，不是假设）。
 ⬜ UI 未上机（等下一次构建）。
+
+---
+
+## #66 ★★★ m20 上机验收：亮度修好了，硬解卡在内核，键盘 UI 差一步（2026-08-22）
+
+构建戳 `1787390010`，槽位 `_b`。
+
+### ✅ 亮度：修好了，实测线性
+
+| 框架 | 面板 | 期望 |
+|---|---|---|
+| 30/255 | 482/4095 | 482 ✓ |
+| 128/255 | 2056/4095 | 2056 ✓ |
+| 255/255 | 4095/4095 | 4095 ✓ |
+
+HAL 跑 `system:system`，`init` 的 chown 生效（节点已是 `system system 0664`）。
+
+⚠️★ **一个把我绕了四轮的测量陷阱**：反复出现 `面板=225` 这个怪值，我先后归因为
+"斜坡未沉降"、"屏幕熄了"，**都不对**。连续采样才看清：
+
+```
+t=2s  面板=2056  ← 正确
+t=8s  面板=1140  ← 开始变暗
+t=9s  面板=225   ← dim
+t=11s 面板=0，屏幕关闭
+```
+
+而 `settings get system screen_off_timeout` 是 **1800000**（30 分钟）。真凶是
+`dumpsys power` 里的 **`mUserActivityTimeoutOverrideFromWindowManager=10000`**
+—— 锁屏状态下 WindowManager 把用户活动超时压到 10 秒。
+★ 教训：**`screen_off_timeout` 不是唯一的熄屏依据**；量亮度必须先确认
+`mUserActivityTimeoutOverrideFromWindowManager`，或干脆解锁后再测。
+
+### ⚠️ 硬解：Android 侧全部就位，卡在内核
+
+逐段确认全通：4 个解码组件在 `MediaCodecList` 里、`IComponentStore/default`
+已注册、`/dev/video*` 是 `media:media`、扩展 seccomp 策略已装、
+**SIGSYS 计数 0**（上一版就是被它打死的）。解码测试跑到：
+
+```
+★ 实际用的组件: c2.v4l2.avc.decoder
+D V4L2Device: (OUTPUT_MPLANE)Requesting 16 buffers.
+D V4L2Device: (OUTPUT_MPLANE)Queue 10: got 16 buffers.
+E V4L2Device: (OUTPUT_MPLANE)VIDIOC_STREAMON failed
+E V4L2DecodeComponent: Failed to create V4L2Decoder for H264
+```
+
+内核侧：`qcom-venus aa00000.video-codec: HW can't support this load`
+—— 出处 `drivers/media/platform/qcom/venus/pm_helpers.c:827` 的 `decide_core()`，
+判据是 `cur_inst_load + min_load <= max_freq`，其中
+`cur_inst_load = mbs_per_sec × inst->clk_data.vpp_freq`、
+`max_freq` 来自对 venus 设备的 `dev_pm_opp_find_freq_floor()`。
+**640×360 的片子不可能真的超载**，所以是某个量算错了。
+
+★ **一处硬矛盾（下一步的抓手）**：设备上 `aa00000.video-codec` 的 OPP 表是
+**720 / 1014 / 1098 / 1332 MHz**（`/sys/kernel/debug/opp/soc@0-aa00000.video-codec`），
+而驱动里 `sc8280xp_freq_table` 写的是 **240 / 338 / 366 / 444 / 533 / 560 MHz**。
+两张表根本不在一个量级。顺带注意那张 freq_tbl 的**第一列（load）全填 0**。
+
+⬜ 再往下需要带插桩的内核（把 `cur_inst_load` / `min_load` / `max_freq` 打出来）。
+⚠️ 动态调试这条路走不通：`echo ... > /sys/kernel/debug/dynamic_debug/control`
+即使 root 也是 Permission denied。
+
+### ⚠️ 键盘：机制通了，Settings 入口差一步
+
+**属性通路实测通过**：`setprop persist.sys.gaokun3.keyboard 0` → 7 个 input
+设备 `inhibited=1`，设 1 → 全部 0。也就是说**功能今天就能用**，只是还没有界面。
+
+应用本身装好且健康：uid **1000**（`sharedUserId` + platform 签名都生效）、
+`HAS_CODE`、`classes.dex` 里确实有
+`Lcom/huawei/gaokun3/parts/KeyboardSettingsActivity;`、二进制 manifest 里
+`activity` 元素和 `IA_SETTINGS` 过滤器都在、PMS 的解析器表里也有这条。
+**但 `am start -n` 报 `START_CLASS_NOT_FOUND`（result code=-92）。**
+
+⬜ 根因未定。已做三处稳健化，下次构建验证：
+* `android:name` 改成**全限定类名**（相对名展开是唯一可疑处）；
+* 补 `android.intent.category.DEFAULT`；
+* 加一个 LAUNCHER 入口作退路 —— 万一 Settings 注入在这个 ROM 上不生效，
+  至少能从应用抽屉打开；
+* 去掉 `privileged: true`（我们没申请任何特权权限，放 priv-app 只是多一层
+  privapp 白名单约束）。

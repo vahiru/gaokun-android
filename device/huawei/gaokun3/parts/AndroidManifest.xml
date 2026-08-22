@@ -21,12 +21,25 @@
         android:allowBackup="false"
         android:theme="@android:style/Theme.DeviceDefault.Settings">
 
+        <!-- ⚠️ 写【全限定类名】而不是 ".KeyboardSettingsActivity"：
+             2026-08-22 实测 `am start -n .../.KeyboardSettingsActivity` 报
+             START_CLASS_NOT_FOUND（result code=-92），而 dex 里类在、
+             manifest 里 activity 也在、PMS 的解析器表里也有这条 IA_SETTINGS
+             过滤器。相对名的展开是唯一可疑处，写死全名就没有这个歧义。
+             ⚠️ 同时补 DEFAULT category：没有它，隐式意图匹配不到。
+             ⚠️ 再加一个 LAUNCHER 入口作退路 —— 万一 Settings 注入在这个 ROM
+             上不生效，至少能从应用抽屉里打开。 -->
         <activity
-            android:name=".KeyboardSettingsActivity"
+            android:name="com.huawei.gaokun3.parts.KeyboardSettingsActivity"
             android:exported="true"
             android:label="@string/keyboard_title">
             <intent-filter>
                 <action android:name="com.android.settings.action.IA_SETTINGS" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
             <meta-data
                 android:name="com.android.settings.category"

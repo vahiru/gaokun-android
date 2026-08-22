@@ -24,7 +24,8 @@ android_app {
 
     platform_apis: true,
     certificate: "platform",
-    privileged: true,
+    // ⚠️ 不设 privileged：我们没申请任何特权权限，
+    //    放 priv-app 只会多一层 privapp 白名单约束。
 
     optimize: {
         enabled: false,
