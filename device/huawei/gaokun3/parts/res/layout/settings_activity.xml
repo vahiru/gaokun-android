@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ⚠️★ 这个 layout 存在的唯一理由是 fitsSystemWindows。
+  targetSdk 35+ 起 Android 强制 edge-to-edge，直接把 fragment 塞进
+  android.R.id.content 会让内容画到状态栏/标题栏【底下】——
+  2026-08-22 实机 uiautomator 抓到的就是这个：开关在 y=59，而 activity
+  标题在 y=89，开关整个被压在标题栏后面，用户看到的是一页"没有开关"的界面。
+  ⚠️ 这种坏法不会报任何错，视图层级里 Switch 也确实在，只有抓层级+看坐标
+  才发现得了。
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/container"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fitsSystemWindows="true" />

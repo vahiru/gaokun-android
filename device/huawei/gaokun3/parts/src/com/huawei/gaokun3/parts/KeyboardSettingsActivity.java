@@ -30,9 +30,15 @@ public class KeyboardSettingsActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        getFragmentManager().beginTransaction()
-                .replace(android.R.id.content, new KeyboardFragment())
-                .commit();
+        // ⚠️ 必须用自己的 layout（带 fitsSystemWindows），不能直接塞
+        //    android.R.id.content：targetSdk 35+ 强制 edge-to-edge，
+        //    那样开关会被画到标题栏底下，界面看起来"没有开关"。
+        setContentView(R.layout.settings_activity);
+        if (savedInstanceState == null) {
+            getFragmentManager().beginTransaction()
+                    .replace(R.id.container, new KeyboardFragment())
+                    .commit();
+        }
     }
 
     public static class KeyboardFragment extends PreferenceFragment
