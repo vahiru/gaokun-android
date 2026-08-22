@@ -3248,3 +3248,116 @@ FDT，sha 复核一致），boot_b 分区里仍是双份。发布前必须清空
 ⚠️ `update_engine_client` 这个版本**没有 `--status`**（报
 `unknown command line flag`），我为此白等了 4 分钟。判断装没装完看
 `bootctl get-active-boot-slot` 是否已切到另一个槽。
+
+---
+
+## #63 ★★★★ 亮度滑条一直是【完全无效】的：lights HAL 是个只打日志的桩（2026-08-22）
+
+用户报"亮度的问题"。实测扫描一遍就见分晓：
+
+```
+框架 screen_brightness   1/255 →  面板 512/4095
+                        10/255 →  面板 512/4095
+                        50/255 →  面板 512/4095
+                       255/255 →  面板 512/4095
+```
+
+**从 1 到 255，面板纹丝不动，永远停在 512/4095 = 12.5%。** 机器一直在最暗附近。
+
+**根因**：装的是 `/vendor/bin/hw/android.hardware.lights-service.example`
+—— AOSP 的示例实现，跑在 `nobody` 下，只把请求打进日志：
+`lights_service_example_rust: Lights setting state for id=1 to color ff2c2c2c`。
+跟温控那个 AOSP mock（TODO B2）是同一类问题。
+
+★ **内核这条路完全正常**（拿 root 直接写 `/sys/class/backlight/ae96000.dsi.0/brightness`，
+3800/100/2048 全都立刻生效）—— 缺的只是一个真 HAL。
+
+**修法**：`device/huawei/gaokun3/lights/`，AIDL **V2**（对齐设备上现有的
+`<version>2</version>` 声明，写错会在开机 VINTF 校验失败）。几个刻意的决定：
+* **只声明 BACKLIGHT 一种灯**。本机没有通知灯/按键背光/电池灯 ——
+  M12 在 sensors HAL 上学过：报假的会让框架据此做错误判断。
+* 背光节点 **glob 找**而不是写死 `ae96000.dsi.0`（换 DTB/换面板就变），
+  写失败会打一条直接指向 init chown 的日志。
+* ★ `Android.bp` 里 **`overrides:` 掉示例实现** —— `PRODUCT_PACKAGES`
+  只能加不能减，两个 HAL 都装上会抢注册 `ILights/default`。
+* 跑 `system:system` 不跑 root，节点由 `init.gaokun3.rc` 的 `on boot` chown。
+⬜ 未上机（等下一次构建）。
+
+---
+
+## #64 ★★★ 音量：混音器已无余量 —— 每个杠杆都实测过（2026-08-22）
+
+用户报"音量太小"。用**内置麦克风做客观测量**（放 440 Hz 正弦，录音后用
+Goertzel 单独取 440 Hz 分量），而不是靠听感。
+
+★ **先立对照**（这一步不能省）：静默时 440 Hz = **−99.4 dBFS**，
+放音时 **−23.2 dBFS** —— 差 76 dB，证明测量灵敏。
+
+| 杠杆 | 理论 | 实测 |
+|---|---|---|
+| `WSA_RX0/1 Digital Volume` 81→61→41 | 每步 ~1 dB | ✅ **−23.2 → −40.3 → −50.0 dBFS，跟手** |
+| 同上，写 100 | +19 步 | ❌ **`invalid value`，硬上限就是 81** |
+| `WSA_RX0/1_MIX Digital Volume` 84→124 | +40 dB | ❌ 毫无变化（不在通路上）|
+| `SpkrLeft/Right PA Volume` 12→6→1 | +3→+18 dB | ❌ **毫无变化** |
+| `BOOST Switch` 0→1 | — | ❌ 毫无变化 |
+| `COMP Switch` 1→0 | — | ❌ 毫无变化 |
+| 策略音量曲线 | — | 100% 处已是 **0 dB**，框架没吃音量 |
+
+⇒ **扬声器链的数字增益已经顶在硬上限，其余控件对输出没有任何影响。**
+
+### ★ 两条被推翻的推断（都值得记）
+
+1. ⚠️ **"打开 BOOST 会更响"是错的。** 我一开始以为 `BOOST Switch` 是功放升压器
+   开关（Stage 4 为消爆音关掉的就是它）。查源码才发现：
+   ```c
+   SOC_SINGLE_EXT("BOOST Switch", WSA883X_PORT_BOOST, 0, 1, 0,
+                  wsa883x_get_swr_port, wsa883x_set_swr_port),
+   ```
+   —— 它是 **SoundWire 端口使能**（DAC/COMP/BOOST/VISENSE 四个数据端口之一），
+   根本不是增益。实测也确认开关它对电平零影响。
+2. ⚠️ **PA Volume 的方向我算对了、结论却没用。** 用 regmap debugfs 读
+   `0x346d` 扫控件值，确认字段 = `31 − 控件值`（`xinvert=1` 实锤），
+   套 TLV 得控件 12 = +3 dB、控件 1 = +18 dB。**算得没错，但实测出来
+   +3 和 +18 一样响** —— 下游的扬声器保护（DRE/COMP/VISENSE）把电平钉死了。
+   ★ **能算出正确的 dB 不等于那个 dB 会出现在空气里。**
+
+### ⬜ 剩下的可能性（用户选了"先别加，我再听听"）
+
+* 在音频 HAL 里加固定软件增益 —— ⚠️ 内容本来就压到接近 0 dBFS，会削顶失真，
+  长期大音量对小喇叭也有损伤风险。
+* 去查那个 **81 的上限**：内核源码写的是 `SOC_SINGLE_S8_TLV(..., -84, 40, ...)`
+  即 0→124，设备却报 0→81，**差 43 步**。而同一文件里声明方式完全相同的
+  `WSA_RX0_MIX` 报的就是 0→124。嫌疑是华为的 `audioreach-tplg.bin` 封的。
+  这是唯一可能真正拿回余量的路，但工作量大且不保证有结果。
+* ⚠️ 也完全可能就是物理极限：12.35 寸无风扇平板的小喇叭。
+
+---
+
+## #65 ★★ 磁吸键盘开关：用内核的 `inhibited`，UI 走 Settings 注入（2026-08-22）
+
+用户要"在系统内加个开关开关配套的键盘"，选了"设置里放一个手动开关"。
+
+**机制**：`/sys/class/input/inputN/inhibited`（内核支持，实测存在）。
+写 1 之后设备还在、evdev 节点还在，但不再上报事件也不再唤醒 ——
+这正是"关掉键盘"该有的语义，比解绑 USB 干净（解绑要重新插拔才能恢复）。
+**实测 7 个 input 设备干净地开/关。**
+
+★ 几个非显然的点：
+* 这套键盘注册了 **7 个** input 设备（两个 interface 各自的
+  keyboard / mouse / touchpad / consumer-control），编号随插拔顺序变
+  ⇒ 必须按名字前缀 `HID 12d1:10b8` 匹配，不能写死 eventN。
+* **触控板一起关**是有意的：只关键盘会留下"能动光标打不了字"的半残状态。
+* 属性用 **`persist.sys.*`**：它的上下文是 `system_prop`，系统应用可以直接
+  `SystemProperties.set()`。换成 `persist.vendor.*` 或自定义前缀，
+  Settings 就写不了，还得再造一个服务。
+* **默认不设 = 键盘开着**。失败方向永远选"键盘可用" —— 一个写坏的属性
+  不该能把用户唯一的输入设备锁死。
+* ★ UI 用 **Settings 注入**（`com.android.settings.action.IA_SETTINGS`
+  + category meta-data），自动出现在「设置 → 系统」里，**不用改
+  `packages/apps/Settings`**，也不依赖 LineageParts —— 实测这个 ROM
+  **根本没装** `org.lineageos.lineageparts`。全部代码留在设备树里，
+  跟 ROM 升级不冲突。
+
+⚠️ 键盘挂在 **`a400000.usb`**，不是待机切 role 的那个 `a600000.usb` ——
+两者互不影响（查过了，不是假设）。
+⬜ UI 未上机（等下一次构建）。
