@@ -56,5 +56,22 @@
                 android:name="com.android.settings.icon"
                 android:resource="@drawable/ic_keyboard" />
         </activity>
+
+        <!-- 控制中心（快捷设置）里的开关。
+             ⚠️ android:permission 必须是 BIND_QUICK_SETTINGS_TILE —— 那是给
+                【系统】绑定这个服务用的权限声明，不是我们要申请的权限；
+                写错了 SystemUI 直接不认这个磁贴，而且不报错。
+             ⚠️ 磁贴不会自动出现在控制中心：用户要在快捷设置编辑页里手动加一次。
+                这是 Android 的设计，不是缺陷。 -->
+        <service
+            android:name="com.huawei.gaokun3.parts.KeyboardTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_keyboard"
+            android:label="@string/keyboard_title"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
     </application>
 </manifest>

@@ -7,4 +7,6 @@
     <string name="keyboard_switch_summary_on">键盘与触控板正常工作</string>
     <string name="keyboard_switch_summary_off">键盘与触控板不再响应任何输入</string>
     <string name="keyboard_note">关闭后由内核层面禁止这些输入设备。键盘仍然吸附在机器上、仍然供电，只是不再上报按键、指针移动和唤醒事件。</string>
+    <string name="tile_on">已启用</string>
+    <string name="tile_off">已关闭</string>
 </resources>
