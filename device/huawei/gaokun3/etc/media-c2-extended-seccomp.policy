@@ -1,0 +1,28 @@
+# v4l2_codec2 服务的【扩展】seccomp 策略。
+#
+# ★ 这个文件不加，服务会在真正开始编解码时被 SIGSYS 打死：
+#     init: Service 'android-hardware-media-c2-v4l2-hal' (pid N) received SIGSYS
+#     libminijail: blocked syscall: eventfd2
+#   ——【实测踩到的就是 eventfd2】（V4L2DevicePoller 用 eventfd 唤醒轮询线程）。
+#   服务源码 service.cpp:32-34 会去读
+#     /vendor/etc/seccomp_policy/android.hardware.media.c2-extended-seccomp_policy
+#   注释原话："This file does not exist by default."
+#
+# ⚠️ 上游 README 那张表是【32 位 ARM】的（_llseek / mmap2 / fstat64 /
+#    fstatat64 / fstatfs64 / getuid32 / statfs64 / ugetrlimit），arm64 上这些
+#    名字根本不存在。这里只列 arm64 有的。
+# ⚠️ 只有 eventfd2 是实测确认必需的；其余是按上游清单折算过来的预防项。
+#    加系统调用就是放宽沙箱，别往里堆用不到的。
+
+eventfd2: 1
+epoll_create1: 1
+epoll_ctl: 1
+epoll_pwait: 1
+ppoll: 1
+pselect6: 1
+getdents64: 1
+getcwd: 1
+sysinfo: 1
+statfs: 1
+fstatfs: 1
+newfstatat: 1

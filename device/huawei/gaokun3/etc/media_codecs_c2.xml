@@ -31,27 +31,10 @@
   min 128x128 则是实测值（ENUM_FRAMESIZES 报的下限，比上游模板的 16x16 大得多）。
 -->
 <MediaCodecs>
-    <Encoders>
-        <MediaCodec name="c2.v4l2.avc.encoder" type="video/avc">
-            <Limit name="size" min="128x128" max="1920x1088" />
-            <Limit name="alignment" value="2x2" />
-            <Limit name="block-size" value="16x16" />
-            <Limit name="blocks-per-second" range="1-244800" />
-            <Limit name="bitrate" range="1-40000000" />
-            <Limit name="concurrent-instances" max="8" />
-            <Limit name="performance-point-1920x1080" range="30-30" />
-        </MediaCodec>
-
-        <MediaCodec name="c2.v4l2.vp8.encoder" type="video/x-vnd.on2.vp8">
-            <Limit name="size" min="128x128" max="1920x1088" />
-            <Limit name="alignment" value="2x2" />
-            <Limit name="block-size" value="16x16" />
-            <Limit name="blocks-per-second" range="1-244800" />
-            <Limit name="bitrate" range="1-40000000" />
-            <Limit name="concurrent-instances" max="8" />
-            <Limit name="performance-point-1920x1080" range="30-30" />
-        </MediaCodec>
-    </Encoders>
+    <!-- 编码器故意不声明：实测 surface 输入路径走不通（Venus 要 NV12，而
+         SurfaceFlinger 给 RGBX_8888/IMPLEMENTATION_DEFINED，EncodeComponent
+         不做转换），而组件 rank 0x80 会压过软编的 0x200，于是应用是失败而
+         不是回退。理由与实测日志见 device.mk。 -->
 
     <Decoders>
         <MediaCodec name="c2.v4l2.avc.decoder" type="video/avc">

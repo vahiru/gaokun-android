@@ -1,0 +1,12 @@
+// gaokun3 的小工具。
+// ★ 不是 vendor:true —— libmediandk 是 NDK/系统库，vendor 命名空间看不见它
+//   （本仓在 tinymix/libtinyalsa 与 protobuf 上各踩过一次同类坑）。
+cc_binary {
+    name: "gaokun3-decode-test",
+    srcs: ["decode-test.cpp"],
+    shared_libs: [
+        "libmediandk",
+        "liblog",
+    ],
+    cflags: ["-Wall", "-Werror"],
+}

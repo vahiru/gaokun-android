@@ -558,11 +558,45 @@ PRODUCT_VENDOR_PROPERTIES += \
     ro.vendor.v4l2_codec2.decoder.supported.hevc=true \
     ro.vendor.v4l2_codec2.decoder.supported.vp8=true \
     ro.vendor.v4l2_codec2.decoder.supported.vp9=true \
-    ro.vendor.v4l2_codec2.encoder.supported.h264=true \
-    ro.vendor.v4l2_codec2.encoder.supported.vp8=true \
-    ro.vendor.v4l2_codec2.decode_concurrent_instances=8 \
-    ro.vendor.v4l2_codec2.encode_concurrent_instances=8
+    ro.vendor.v4l2_codec2.decode_concurrent_instances=8
+
+# 警告：编码器【故意不启用】—— 实测它在 surface 输入路径上根本走不通，而且会让
+#   应用【失败而不是回退到软编】（组件 rank 0x80 压过软编的 0x200）。
+#   实测日志（screenrecord，2026-08-22）：
+#     E EncodeComponent: Unable to parse RGBX_8888 from IMPLEMENTATION_DEFINED
+#     E EncodeComponent: Failed to get input block layout
+#     E ...: Attempted to lock() a buffer that was not allocated with a
+#            BufferUsage::CPU_* usage.
+#   SurfaceFlinger 给的是 RGBX_8888/IMPLEMENTATION_DEFINED，而 Venus 编码器要
+#   NV12，v4l2_codec2 的 EncodeComponent 不做这个转换 —— 不是配置能解决的。
+#   录屏/录像继续走软编（能用）。要复测就把这两行加回上面的属性块：
+#     ro.vendor.v4l2_codec2.encoder.supported.h264=true
+#     ro.vendor.v4l2_codec2.encoder.supported.vp8=true
+#     ro.vendor.v4l2_codec2.encode_concurrent_instances=8
 
 # Codec2 的 pool mask：BLOB(19) 那一档。见上面第 3 条。
 PRODUCT_VENDOR_PROPERTIES += \
     debug.stagefright.c2-poolmask=0xfc0000
+
+# ★ 扩展 seccomp 策略：不装它，服务一开始真干活就被 SIGSYS 打死
+#   （实测 `libminijail: blocked syscall: eventfd2`）。
+#   服务源码 service.cpp:32-34 写死了这个路径，注释还明说"默认不存在"；
+#   上游 README 里给的文件名（codec2.vendor.ext.policy）不是这个，照抄会无效。
+PRODUCT_COPY_FILES += \
+    $(LOCAL_PATH)/etc/media-c2-extended-seccomp.policy:$(TARGET_COPY_OUT_VENDOR)/etc/seccomp_policy/android.hardware.media.c2-extended-seccomp_policy
+
+# ★ 顺手修一个【与硬解无关、本机一直存在】的框架崩溃：
+#   CCodec::createInputSurface() 在 CreateCompatibleInputSurface() 返回 null 时
+#   不判空就解引用（frameworks/av CCodec.cpp:2189-2190），于是任何用 surface
+#   输入编码的东西（screenrecord、录像）都是 SIGSEGV。本机够不到 Codec2 的
+#   input surface 服务，而 OMX 回退路径随 HIDL 一起没了 —— 只剩
+#   CCodec.cpp:3417 那条由属性开启的 AidlGraphicBufferSource 兜底。
+#   实测：设了它，崩溃变成干净的错误返回。
+PRODUCT_VENDOR_PROPERTIES += \
+    debug.stagefright.c2inputsurface=-1
+
+# 解码验证工具。本机【没有任何能放视频的应用】（gallery3d 是精简版，
+# 连 MovieActivity 都没有），而"组件出现在 MediaCodecList"只证明能实例化、
+# 不证明能解码。见 tools/decode-test.cpp。
+PRODUCT_PACKAGES += \
+    gaokun3-decode-test
