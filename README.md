@@ -43,7 +43,7 @@ Everything below was measured on hardware, not inferred. The evidence is in
 | CPU thermal throttling | ✅ | Mainline DTS has **no** CPU cooling maps at all — fixed in [`patches/0009`](patches/) |
 | **Suspend / standby** | ✅ | **Fixed 2026-08-22 — and the cause was ours, not the kernel's.** Real suspend and resume, no resets. ⚠️ One trade-off: USB adb drops while the screen is off. [#52](docs/stage4-findings.md), [#57](docs/stage4-findings.md) |
 | Sensors (accel + gyro) | ✅ | **Auto-rotate works, confirmed on device.** A sensors HAL written for this port feeds real accelerometer and gyroscope data to SensorService, and the framework derives Game Rotation Vector / Gravity / Linear Acceleration from them. The factory mount matrix is all zeros (that calibration data died with Windows), but the sensor frame turns out to match the panel, so no correction was needed. This machine has **no magnetometer** (so no compass), and enabling the ALS poisons the DSP session. The ALS failure is now narrowed to one difference: a field-by-field comparison against the working accelerometer rules out the PMIC rail (both use the same one) and chip-pin interrupts (both use one), leaving the SLPI-side I²C instance — 1 for the accelerometer, 5 for the light sensor. See [#37](docs/stage4-findings.md), [#43](docs/stage4-findings.md) |
-| Hardware video decode | ⚠️ | **Kernel half done** — `/dev/video0` and `/dev/video1` are `qcom-venus-decoder` / `qcom-venus-encoder`, all suppliers resolved, no firmware errors. As far as we know a first for SC8280XP. Android still needs a Codec2 component to talk to V4L2, so all 66 decoders remain software. [#41](docs/stage4-findings.md) |
+| Hardware video decode | ✅ | Venus, through `c2.v4l2.avc.decoder` — measured 30 frames decoded on device. As far as we know a first for SC8280XP. Two portability bugs in `external/v4l2_codec2` had to be fixed: it passed `ui::Size()` (which defaults to **-1 x -1**, not 0 x 0) as the coded size for the compressed input queue, so Venus clamped it to its 8192x8192 maximum and refused the load; and it treated a pre-`SOURCE_CHANGE` `G_FMT` failure as fatal, which is the behaviour the V4L2 stateful spec actually requires of the driver. Encode is not verified. [#41](docs/stage4-findings.md) |
 | Camera | ❌ | Not started |
 | USB-C DisplayPort / UCSI | ❌ | UCSI PPM init times out — a known mainline defect on this machine |
 | Fingerprint, TPM | ❌ | No driver exists |
@@ -197,14 +197,11 @@ What follows is the curated subset worth someone's weekend.
 
 Concrete, well-scoped work, roughly easiest first:
 
-1. **Hardware video decode — the Android half.** The kernel half is done:
-   `/dev/video0` and `/dev/video1` are a working Venus decoder and encoder.
-   What is missing is a Codec2 component that talks to V4L2, so all 66 codecs
-   are still software. `external/v4l2_codec2` is already in the manifest, and
-   three prerequisites are confirmed on device: the `IComponentStore/default`
-   instance it wants is free, `media.c2.hal.selection` is already `aidl`, and
-   ⚠️ the poolmask must be BLOB `0xfc0000`, **not** the `0xf50000` its README
-   suggests — that value is for ION, and this kernel has none.
+1. **Hardware video *encode*.** Decode works; the encoder side is untested —
+   `screenrecord` still fails and no `c2.v4l2.*.encoder` has been shown to produce
+   a frame. The two decoder fixes in `scripts/crdroid-tree-fixes.py` are worth
+   reading first; the encoder likely has its own version of the same
+   ChromeOS-shaped assumptions.
 2. **GPU SMMU interrupt fix.** The SMMU asserts SPI 675/680; the device tree
    declares 678/679, so context faults never reach the CPU. A DTB change should
    remove the need for the `smmu-nostall.sh` polling workaround entirely.

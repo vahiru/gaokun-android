@@ -17,4 +17,29 @@
     -->
     <integer name="def_screen_off_timeout">120000</integer>
 
+    <!--
+      Show the on-screen keyboard even while the magnetic keyboard is attached.
+
+      Android suppresses the IME whenever a hardware keyboard is present, and
+      this tablet's keyboard is a magnetic cover that is often folded back or
+      simply not being typed on — so the effect is "tap a text field, nothing
+      comes up". frameworks/base/packages/SettingsProvider/res/values/
+      defaults.xml:132 ships def_show_ime_with_hard_keyboard = false; this
+      flips it.
+
+      ⚠️★ This is the actual fix for the problem the keyboard on/off switch was
+      built to work around. That switch writes the input devices' `inhibited`
+      node, but Android decides whether to suppress the IME from whether a
+      keyboard device *exists*, not whether it is inhibited — measured on
+      device: with all seven HID 12d1:10b8 devices inhibited=1, the IME still
+      would not appear. The switch is still useful (it stops stray keypresses
+      and trackpad input when the cover is folded back), it just never
+      addressed this.
+
+      ⚠️ def_* values are only consulted when the setting has never been
+      written, i.e. on first boot or after wiping userdata. Existing installs
+      need:  settings put secure show_ime_with_hard_keyboard 1
+    -->
+    <bool name="def_show_ime_with_hard_keyboard">true</bool>
+
 </resources>

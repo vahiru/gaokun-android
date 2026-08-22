@@ -260,6 +260,108 @@ def patch_gapps_conflicts(tree: pathlib.Path) -> str:
     return " · ".join(msgs)
 
 
+def patch_v4l2_initial_output(tree: pathlib.Path) -> str:
+    """—— 修补 5：v4l2_codec2 在拿到 SOURCE_CHANGE 之前就想建输出队列 ——
+
+    症状（修补 3 之后暴露出来的下一层）：
+        V4L2Decoder: ioctl() failed: VIDIOC_G_FMT
+        V4L2Decoder: Failed to start initialy output queue
+        V4L2DecodeComponent: Failed to create V4L2Decoder for H264
+
+    ★ **venus 这边是对的。** `vdec_check_src_change()`（vdec.c）明写着：
+
+        if (inst->subscriptions & V4L2_EVENT_SOURCE_CHANGE &&
+            inst->codec_state == VENUS_DEC_STATE_INIT &&
+            !inst->reconfig)
+                return -EINVAL;
+
+    客户端订阅了 SOURCE_CHANGE，就必须**等事件到了再问 CAPTURE 的格式** ——
+    这正是 V4L2 stateful 解码器规范要求的顺序。而 v4l2_codec2 的
+    `setupInitialOutput()` 在**喂任何码流之前**就 G_FMT，那是 ChromeOS/ARCVM
+    的一个优化（预先备一个 EOS 缓冲区），在守规范的驱动上必然失败。
+
+    ⇒ 改成**失败不致命**：真正的输出队列本来就在分辨率变更事件里建
+      （changeResolution() -> startOutputQueue()，同文件第 753 行附近）。
+
+    ★ 安全性判据（逐个查过，不是猜的）：`mInitialEosBuffer` 的**每一处使用
+      都已经有空指针判断**（V4L2Decoder.cpp 的 112 / 375 / 454 / 749 行），
+      也就是说"它是空"本来就是被支持的状态。那三处分别是：
+        · 375 提前判 DRC —— 跳过后 mPendingDRC 保持 false，只是少一个优化；
+        · 454 "没有码流就直接结束 drain" —— 是 ARCVM 特有的捷径，
+          不走它就落到 `sendV4L2DecoderCmd(false)`，那才是**标准**的 V4L2 drain；
+        · 112 / 749 是清理。
+      并且 `startOutputQueue()` 是在**第一步** getFormatInfo() 就返回 false 的，
+      此时还没碰过队列，所以不会留下半配置状态。
+    """
+    p = tree / "external/v4l2_codec2/v4l2/V4L2Decoder.cpp"
+    if not p.exists():
+        return f"跳过（找不到 {p}）"
+    s = io.open(p, encoding="utf-8").read()
+    if "venus 在收到 SOURCE_CHANGE 之前" in s:
+        return "已打过（幂等，无需改动）"
+    anchor = ('    if (!setupInitialOutput()) {' + chr(10)
+              + '        ALOGE("Unable to setup initial output");' + chr(10)
+              + '        return false;' + chr(10)
+              + '    }')
+    if anchor not in s:
+        return "⚠️ 找不到锚点，上游可能改了 start()"
+    NL = chr(10)
+    new = (
+        "    // venus 在收到 SOURCE_CHANGE 之前会拒绝 CAPTURE 队列的 G_FMT" + NL
+        + "    // （vdec_check_src_change() 返回 -EINVAL），这是 V4L2 stateful 规范" + NL
+        + "    // 要求的顺序，不是驱动缺陷。所以这个「预先建最小输出队列」的" + NL
+        + "    // ChromeOS 优化在本平台必然失败 —— 失败不致命：真正的输出队列" + NL
+        + "    // 会在分辨率变更事件里建起来，且 mInitialEosBuffer 的每一处使用" + NL
+        + "    // 都已有空指针判断。" + NL
+        + "    if (!setupInitialOutput()) {" + NL
+        + '        ALOGW("Unable to setup initial output up front; the driver wants a '
+          'SOURCE_CHANGE event first. Continuing without the initial EOS buffer.");' + NL
+        + "    }"
+    )
+    s = s.replace(anchor, new, 1)
+    io.open(p, "w", encoding="utf-8", newline="").write(s)
+    return "已改为失败不致命"
+
+
+def patch_disable_desktop_mode(tree: pathlib.Path) -> str:
+    """—— 修补 6：关掉 crDroid 给所有设备开的桌面窗口模式 ——
+
+    用户要求关掉：这台平板上它会把每个应用都放进 freeform 窗口，日用很干扰。
+
+    ⚠️★ **不能只在设备树的 overlay 里写 false —— 实测那样【无效】。**
+      两次构建断言都顶回来 `config_isDesktopModeSupported 还是 true`：
+
+        device/huawei/gaokun3/overlay/...        false   (DEVICE_PACKAGE_OVERLAYS)
+        vendor/lineage/overlay/common/...        true    (PRODUCT_PACKAGE_OVERLAYS)
+
+      **胜出的是 vendor/lineage 那份。** 也就是说在这棵树里
+      `PRODUCT_PACKAGE_OVERLAYS` 的优先级【高于】`DEVICE_PACKAGE_OVERLAYS`
+      —— 与"设备树优先"的常见说法相反。我们别的 overlay 值之所以一直好用，
+      只是因为 vendor/lineage 没碰它们（逐个比对过，只有这一个资源冲突）。
+
+    ⇒ 所以直接改胜出的那份。repo sync 会还原它，故本脚本每次构建前都要跑。
+
+    ★ 顺带记一条被推翻的判断：上游参考（dragon-lineage 的 Radxa Dragon
+      提交 d480d02）**只**设 config_canInternalDisplayHostDesktops，那对
+      Lineage 系的树是**正确且充分**的 —— 因为 Lineage 自己已经把
+      config_isDesktopModeSupported 设成 true 了。只查 AOSP 默认值（false）
+      而不查 ROM 自己的 overlay，就会得出"他们漏了一个"的错误结论。
+    """
+    p = tree / "vendor/lineage/overlay/common/frameworks/base/core/res/res/values/config.xml"
+    if not p.exists():
+        return f"跳过（找不到 {p}）"
+    s = io.open(p, encoding="utf-8").read()
+    old = '<bool name="config_isDesktopModeSupported">true</bool>'
+    new = '<bool name="config_isDesktopModeSupported">false</bool>'
+    if new in s:
+        return "已是 false（幂等，无需改动）"
+    if old not in s:
+        return "⚠️ 找不到锚点，crDroid 可能改了写法"
+    s = s.replace(old, new, 1)
+    io.open(p, "w", encoding="utf-8", newline="").write(s)
+    return "已把 crDroid 的 config_isDesktopModeSupported 改成 false"
+
+
 def main():
     tree = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else pathlib.Path.home() / "crdroid").expanduser()
     if not (tree / "build/envsetup.sh").exists():
@@ -269,6 +371,8 @@ def main():
     print("  [2] hexagonfs CR 截断: " + patch_hexagonfs_cr(tree))
     print("  [3] v4l2_codec2 输入分辨率: " + patch_v4l2_input_size(tree))
     print("  [4] GApps 冲突: " + patch_gapps_conflicts(tree))
+    print("  [5] v4l2_codec2 初始输出队列: " + patch_v4l2_initial_output(tree))
+    print("  [6] 关闭桌面窗口模式: " + patch_disable_desktop_mode(tree))
 
 if __name__ == "__main__":
     main()

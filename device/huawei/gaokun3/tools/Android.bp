@@ -6,6 +6,7 @@ cc_binary {
     srcs: ["decode-test.cpp"],
     shared_libs: [
         "libmediandk",
+        "libbinder_ndk",
         "liblog",
     ],
     cflags: ["-Wall", "-Werror"],

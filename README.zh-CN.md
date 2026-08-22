@@ -38,7 +38,7 @@ recovery 分区，也没有串口。这不是一次常规移植 —— 它是 **
 | CPU 温控降频 | ✅ | 主线 DTS **根本没有** CPU 的 cooling map —— 已由 [`patches/0009`](patches/) 在设备树里根治 |
 | **待机 / 挂起** | ✅ | **2026-08-22 修复 —— 而且真凶是我们自己，不是内核。** 真实挂起/唤醒，零复位。⚠️ 代价一条：息屏时 USB adb 会断。[#52](docs/stage4-findings.md)、[#57](docs/stage4-findings.md) |
 | 传感器（加速度计+陀螺仪）| ✅ | **自动旋转可用，用户实机确认方向正确。** 为本机写的 sensors HAL 已把真实读数喂给 SensorService，框架据此自动融合出 Game Rotation Vector / Gravity / Linear Acceleration。出厂安装矩阵全零（校准数据随 Windows 一起没了），但实测传感器坐标系与面板方向本来就一致，**不需要纠正**。本机**没有磁力计**（所以没有指南针）；光感一使能就会污染整个 DSP 会话，见 [#37](docs/stage4-findings.md) |
-| 硬件视频解码 | ⚠️ | **内核这一半已通** —— `/dev/video0` / `/dev/video1` 就是 `qcom-venus-decoder` / `qcom-venus-encoder`，供应方全部解析、固件零报错，据我们所知是 SC8280XP 上的头一次。但 Android 还缺一个跟 V4L2 说话的 Codec2 组件，所以 66 个解码器仍全是软解。[#41](docs/stage4-findings.md) |
+| 硬件视频解码 | ✅ | Venus，走 `c2.v4l2.avc.decoder` —— 实机实测解出 30 帧，据我们所知是 SC8280XP 上的头一次。为此修了 `external/v4l2_codec2` 的两个可移植性 bug：它给压缩输入队列的 `S_FMT` 传 `ui::Size()`，而那个默认值是 **−1×−1**（不是 0×0），转成无符号后被 Venus clamp 到上限 8192×8192，于是判过载；以及它把「`SOURCE_CHANGE` 事件之前 `G_FMT` 失败」当成致命错误，而那恰恰是 V4L2 stateful 规范要求驱动做的事。编码未验证。[#41](docs/stage4-findings.md) |
 | 摄像头 | ❌ | 没开始 |
 | USB-C 外接显示 / UCSI | ❌ | UCSI PPM 初始化超时，本机主线的已知缺陷 |
 | 指纹、TPM | ❌ | 没有驱动 |
@@ -174,13 +174,11 @@ Android 相关的配置断言在
 
 都是边界清楚的活，大致由易到难：
 
-1. **硬件视频解码 —— Android 这一半。** 内核那半已经做完：`/dev/video0` 与
-   `/dev/video1` 是能用的 Venus 解码器和编码器。缺的是一个跟 V4L2 说话的
-   Codec2 组件，所以 66 个解码器仍全是软解。`external/v4l2_codec2` 本来就在
-   manifest 里，三个前提也已在设备上核实：它要的 `IComponentStore/default`
-   是空的、`media.c2.hal.selection` 已经是 `aidl`；⚠️ 而 poolmask 必须用 BLOB
-   的 `0xfc0000`，**不是**它 README 里写的 `0xf50000` —— 那是 ION 的值，
-   而本机内核没有 ION。
+1. **硬件视频【编码】。** 解码已经通了，编码这一侧还没验过 ——
+   `screenrecord` 仍然失败，也没有任何 `c2.v4l2.*.encoder` 被证明能产出一帧。
+   动手前先读 `scripts/crdroid-tree-fixes.py` 里那两条解码修复：
+   编码器多半有它自己那一份「照搬 ChromeOS 行为」的假设。
+
 2. **GPU SMMU 中断修复。** SMMU 拉的是 SPI 675/680，设备树声明的是 678/679，
    所以 context fault 永远到不了 CPU。改 DTB 应该就能彻底丢掉
    `smmu-nostall.sh` 那个轮询 workaround。

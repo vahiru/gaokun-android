@@ -13,6 +13,7 @@
  * 用法: gaokun3-decode-test <file.mp4> [期望的组件名]
  *   返回 0 = 解出至少 1 帧；非 0 = 失败（并打印卡在哪一步）
  */
+#include <android/binder_process.h>
 #include <media/NdkMediaExtractor.h>
 #include <media/NdkMediaCodec.h>
 #include <media/NdkMediaFormat.h>
@@ -34,6 +35,15 @@ int main(int argc, char **argv)
         puts("用法: gaokun3-decode-test <file.mp4> [期望组件名]");
         return 2;
     }
+
+    // ★ 必须先起 binder 线程池。Codec2 服务会【回调】本进程里的
+    //   图形缓冲分配器（IGBA）去申请输出块；没有线程接收入站事务，
+    //   分配就报 igba::allocate transaction failed: -129
+    //   （EX_TRANSACTION_FAILED），然后 VideoFramePool 拿不到块、整个解码挂住。
+    //   征兆很早就打在 logcat 里了："Thread Pool max thread count is 0"、
+    //   "there are no threads (yet?) listening to incoming transactions"。
+    ABinderProcess_setThreadPoolMaxThreadCount(2);
+    ABinderProcess_startThreadPool();
     const char *path = argv[1];
     const char *want = (argc > 2) ? argv[2] : NULL;
 

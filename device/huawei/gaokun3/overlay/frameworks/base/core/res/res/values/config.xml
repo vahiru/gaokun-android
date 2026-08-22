@@ -61,46 +61,66 @@
     <bool name="config_useDevInputEventForAudioJack">true</bool>
 
     <!--
-      Android 16 desktop windowing on the built-in display.
+      Android 16 desktop windowing: deliberately turned OFF.
 
-      This is a tablet with a magnetic keyboard and trackpad, so the desktop
-      windowing session AOSP 16 ships is genuinely useful here. It is gated by
-      three separate device resources, all defaulting to false, plus a runtime
-      property. Read frameworks/base/services/core/java/com/android/server/wm/
-      DesktopModeHelper.java before changing any of them:
+      It was switched on briefly and switched back off at the user's request:
+      on this tablet it puts every app into a freeform window, which is
+      disruptive for normal use.
 
-        canEnterDesktopMode()
-            = (isDeviceEligibleForDesktopMode() && ENABLE_DESKTOP_WINDOWING_MODE)
-              || isDesktopModeEnabledByDevOption()
+      ⚠️★ These must be explicit `false` overrides, not just "leave them out".
+      crDroid turns desktop mode on for **every** device:
 
-        isDeviceEligibleForDesktopMode()
-            = !shouldEnforceDeviceRestrictions()
-              || config_isDesktopModeSupported                     (:69 default false)
-              || (enableDesktopModeThroughDevOption
-                  && config_isDesktopModeDevOptionSupported)       (:72 default false)
+        vendor/lineage/overlay/common/frameworks/base/core/res/res/values/
+        config.xml:98   <bool name="config_isDesktopModeSupported">true</bool>
 
-        isDesktopModeSupportedOnInternalDisplay()
-            = !shouldEnforceDeviceRestrictions()
-              || config_canInternalDisplayHostDesktops             (:66 default false)
+      ⚠️★ And writing `false` **here** does not work either. Measured twice:
+      the build assertion still reported `config_isDesktopModeSupported 还是
+      true` with this file saying false. In this tree
+      **PRODUCT_PACKAGE_OVERLAYS (vendor/lineage) outranks
+      DEVICE_PACKAGE_OVERLAYS (this file)** — the opposite of the usual
+      claim that the device overlay wins. Our other values here work only
+      because vendor/lineage does not touch them (checked name by name:
+      config_isDesktopModeSupported is the single conflict).
+      The actual disable is done by scripts/crdroid-tree-fixes.py, which
+      edits vendor/lineage/overlay/common directly. The entries below are
+      kept only to state intent.
 
-      shouldEnforceDeviceRestrictions() reads the property
-      persist.wm.debug.desktop_mode_enforce_device_restrictions, which defaults
-      to *true* (DesktopModeHelper.java:37), so the restrictions are on and the
-      resources above are what lift them.
+      Removing our own entry therefore changed nothing — the build assertion
+      caught it (`config_isDesktopModeSupported 还是 true`). Ours is a
+      DEVICE_PACKAGE_OVERLAYS overlay, which outranks vendor/lineage's
+      PRODUCT_PACKAGE_OVERLAYS, so an explicit false here wins.
 
-      ⚠️ The upstream reference for this (dragon-lineage's Radxa Dragon commit
-      d480d02, "allow desktop mode on internal displays") sets only
-      config_canInternalDisplayHostDesktops. On a stock AOSP 16 tree that alone
-      is not enough: it satisfies isDesktopModeSupportedOnInternalDisplay() but
-      leaves isDeviceEligibleForDesktopMode() false, so canEnterDesktopMode()
-      still returns false. Hence config_isDesktopModeSupported here too.
+      ★ This also corrects an earlier misreading: the upstream reference
+      (dragon-lineage's Radxa Dragon commit d480d02) sets *only*
+      config_canInternalDisplayHostDesktops, and that is in fact correct and
+      sufficient for a Lineage-based tree, because Lineage already supplies
+      config_isDesktopModeSupported=true. Checking AOSP's default (false)
+      without checking the ROM's own overlays is what led to the wrong call.
 
-      config_isDesktopModeDevOptionSupported is set as well so the Developer
-      Options toggle appears — that gives a runtime way to turn the feature off
-      again without another build.
+      ⚠️ There is no runtime way back — the developer-options toggle can only
+      force desktop mode ON. Measured on device:
+
+        show_desktop_experience_dev_option = true
+
+      and DesktopModeFlags.getToggleOverrideFromSystem() short-circuits on it:
+
+        if (Flags.showDesktopExperienceDevOption()) {
+            if (DesktopExperienceFlags.getToggleOverride()) return OVERRIDE_ON;
+            return ToggleOverride.OVERRIDE_UNSET;      // never OVERRIDE_OFF
+        }
+
+      so Settings.Global "override_desktop_mode_features" is dead here —
+      verified: writing 0 changed nothing. "Off by default, opt in later" is
+      likewise not expressible, because canEnterDesktopMode() is
+      isDeviceEligibleForDesktopMode() && ENABLE_DESKTOP_WINDOWING_MODE, the
+      aconfig flag is already true, and being eligible at all therefore means
+      "always on".
+
+      ⇒ To enable desktop windowing again, flip these two to true and rebuild.
     -->
-    <bool name="config_isDesktopModeSupported">true</bool>
-    <bool name="config_canInternalDisplayHostDesktops">true</bool>
-    <bool name="config_isDesktopModeDevOptionSupported">true</bool>
+    <bool name="config_isDesktopModeSupported">false</bool>
+    <bool name="config_canInternalDisplayHostDesktops">false</bool>
+    <bool name="config_isDesktopModeDevOptionSupported">false</bool>
+
 
 </resources>
