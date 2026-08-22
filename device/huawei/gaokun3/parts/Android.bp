@@ -5,9 +5,16 @@
 //   前者才能用 android.os.SystemProperties（@hide），
 //   后者才能拿 android.uid.system（写 persist.sys.* 需要 system uid）。
 //
-// ★ 装到 product 分区而不是 vendor：它是面向用户的设置界面，
-//   而且 sharedUserId=android.uid.system 的应用不该待在 vendor 里
-//   （Treble 下 vendor 应用不允许共享 system uid）。
+// ⚠️★ 装到 system（不写分区属性），不是 vendor 也不是 product：
+//   * vendor：Treble 下 vendor 应用不允许共享 android.uid.system。
+//   * product：本树设了 PRODUCT_ENFORCE_PRODUCT_PARTITION_INTERFACE，
+//     product 分区的应用【必须】声明 sdk_version（用稳定 SDK），
+//     而那样就用不了 platform_apis，也就拿不到 SystemProperties（@hide）。
+//     2026-08-22 实测踩到：
+//       error: sdk_version must have a value when the module is located at
+//              vendor or product (only if
+//              PRODUCT_ENFORCE_PRODUCT_PARTITION_INTERFACE is set)
+//   ⇒ 只有 system 分区能同时满足 platform_apis + system uid。
 //
 android_app {
     name: "Gaokun3Parts",
@@ -18,7 +25,6 @@ android_app {
     platform_apis: true,
     certificate: "platform",
     privileged: true,
-    product_specific: true,
 
     optimize: {
         enabled: false,
