@@ -18,6 +18,12 @@
   以上均于 2026-08-19 用 `repo manifest -o -` 逐条核实。
 -->
 <manifest>
+  <!-- MindTheGapps 托管在 GitLab，crDroid 的 manifest 里没有这个 remote。
+       ⚠️ fetch 只到域名：repo 会把它和 project 的 name 直接拼接，
+       写成 ".../MindTheGapps/" 再配 name="MindTheGapps/vendor_gapps"
+       会拼成 MindTheGapps/MindTheGapps/…，报 "Unable to remote fetch"。 -->
+  <remote name="mindthegapps" fetch="https://gitlab.com/" />
+
   <!--
     device/linaro/dragonboard —— 唯一需要补的项目。
     db845c 是树内唯一的"高通主线内核 + minigbm + drm_hwcomposer"参考设备，
@@ -63,4 +69,22 @@
   <project path="external/hexagonrpc" name="linux-msm/hexagonrpc"
            remote="github"
            revision="435ed1cd68e20f8a9fe4871233ed1f8ce7ccf9e8" />
+  <!--
+    vendor/gapps —— MindTheGapps（Google 应用套件）。
+
+    ⚠️ **专有软件，不可再分发。** 这个仓库本身不入库，只在这里声明来源；
+    Google 的 APK 不属于 GPL/Apache 的范畴，把它们打进【公开发布】的 ROM
+    等于替 Google 分发它的闭源应用。自用构建没问题，**对外发版前想清楚**。
+
+    分支 baklava = Android 16（Google 的甜点代号；vic=15、cinnamonbun=17）。
+    ⚠️ 不能走 Lineage 的 `WITH_GMS := true` —— 那条路要的是
+    `vendor/partner_gms/products/gms.mk` 布局（Lineage 私有仓库），
+    而 MindTheGapps 是 `arm64/arm64-vendor.mk` 布局。所以我们在
+    lineage_gaokun3.mk 里直接 inherit，并用 inherit-product-if-exists，
+    这样【没同步这个仓库也能正常构建】。
+
+    体积：arm64/proprietary 1.1 GiB。super 12 GiB、每槽现用约 2.5 GiB，放得下。
+  -->
+  <project path="vendor/gapps" name="MindTheGapps/vendor_gapps"
+           remote="mindthegapps" revision="baklava" />
 </manifest>

@@ -60,4 +60,47 @@
     -->
     <bool name="config_useDevInputEventForAudioJack">true</bool>
 
+    <!--
+      Android 16 desktop windowing on the built-in display.
+
+      This is a tablet with a magnetic keyboard and trackpad, so the desktop
+      windowing session AOSP 16 ships is genuinely useful here. It is gated by
+      three separate device resources, all defaulting to false, plus a runtime
+      property. Read frameworks/base/services/core/java/com/android/server/wm/
+      DesktopModeHelper.java before changing any of them:
+
+        canEnterDesktopMode()
+            = (isDeviceEligibleForDesktopMode() && ENABLE_DESKTOP_WINDOWING_MODE)
+              || isDesktopModeEnabledByDevOption()
+
+        isDeviceEligibleForDesktopMode()
+            = !shouldEnforceDeviceRestrictions()
+              || config_isDesktopModeSupported                     (:69 default false)
+              || (enableDesktopModeThroughDevOption
+                  && config_isDesktopModeDevOptionSupported)       (:72 default false)
+
+        isDesktopModeSupportedOnInternalDisplay()
+            = !shouldEnforceDeviceRestrictions()
+              || config_canInternalDisplayHostDesktops             (:66 default false)
+
+      shouldEnforceDeviceRestrictions() reads the property
+      persist.wm.debug.desktop_mode_enforce_device_restrictions, which defaults
+      to *true* (DesktopModeHelper.java:37), so the restrictions are on and the
+      resources above are what lift them.
+
+      ⚠️ The upstream reference for this (dragon-lineage's Radxa Dragon commit
+      d480d02, "allow desktop mode on internal displays") sets only
+      config_canInternalDisplayHostDesktops. On a stock AOSP 16 tree that alone
+      is not enough: it satisfies isDesktopModeSupportedOnInternalDisplay() but
+      leaves isDeviceEligibleForDesktopMode() false, so canEnterDesktopMode()
+      still returns false. Hence config_isDesktopModeSupported here too.
+
+      config_isDesktopModeDevOptionSupported is set as well so the Developer
+      Options toggle appears — that gives a runtime way to turn the feature off
+      again without another build.
+    -->
+    <bool name="config_isDesktopModeSupported">true</bool>
+    <bool name="config_canInternalDisplayHostDesktops">true</bool>
+    <bool name="config_isDesktopModeDevOptionSupported">true</bool>
+
 </resources>

@@ -186,6 +186,41 @@ PRODUCT_PACKAGES += \
 
 $(call inherit-product, device/huawei/gaokun3/device.mk)
 
+# ─────────────────────── GApps（MindTheGapps）───────────────────────
+#
+# ⚠️ **专有软件。** Google 的 APK 不在任何开源许可之下，把它们打进
+#    【对外发布】的 ROM 等于替 Google 分发闭源应用。自用构建没问题。
+#
+# 用 inherit-product-if-exists：**没同步 vendor/gapps 也能正常构建**，
+# 这样这棵公开的设备树对没有该仓库的人依然可用。
+# 仓库来源见 manifests/local_manifest_gaokun3.xml。
+#
+# ⚠️ 不能走 Lineage 的 `WITH_GMS := true` —— 那条路 inherit 的是
+#    vendor/partner_gms/products/gms.mk（Lineage 私有仓库的布局），
+#    而 MindTheGapps 是 arm64/arm64-vendor.mk 布局，两者对不上。
+$(call inherit-product-if-exists, vendor/gapps/arm64/arm64-vendor.mk)
+
+# ★★ 去掉 Google 的开机向导与撞名的 libjni_latinimegoogle
+#    —— **不在这里做**，见下面的理由。
+#
+# Google 的 SetupWizard 在初始化阶段强制连 Google 服务器，
+# **中国大陆网络下会卡在欢迎页过不去，设备根本无法完成初始化**。
+# crDroid 自带的 LineageSetupWizard 不依赖任何 Google 服务，保留它即可。
+#
+# ⚠️★ **`PRODUCT_PACKAGES := $(filter-out X,$(PRODUCT_PACKAGES))` 在这里是无效的。**
+#   我先写了这一句，然后用 `get_build_var PRODUCT_PACKAGES` 实测 ——
+#   `SetupWizard` 仍在 1005 个条目里。现代 AOSP 的产品配置会从**继承图**
+#   重新推导 PRODUCT_PACKAGES，产品 makefile 中途的直接赋值会被丢弃。
+#   ★ 判据就一句：get_build_var PRODUCT_PACKAGES 里还能不能 grep 到 SetupWizard。
+#   （这个坑很贵：不实测的话，这一版会带着 Google 欢迎页发出去，
+#     而我会以为已经删掉了。）
+#
+# ⇒ 正确做法是**改源头**：由 scripts/crdroid-tree-fixes.py 从
+#   vendor/gapps/arm64/arm64-vendor.mk 里删掉这两个包名，
+#   并从 vendor/gapps/arm64/Android.bp 里删掉 libjni_latinimegoogle 模块
+#   （它与 packages/inputmethods/LatinIME 撞名，见那里的注释）。
+#   repo sync 会还原 vendor/gapps，所以 tree-fixes 每次构建前都要跑（幂等）。
+
 # 动态分区（super）。这是 product 变量，必须设在这里而不是 BoardConfig.mk
 # —— 后者解析时它已经只读了（build/make/core/product.mk:311）。
 PRODUCT_USE_DYNAMIC_PARTITIONS := true

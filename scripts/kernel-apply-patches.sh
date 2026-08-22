@@ -49,6 +49,30 @@ KPATCHES=(
     0015-asoc-sc8280xp-raise-wsa-digital-volume-ceiling.patch
 )
 
+# ★★ 指纹判据：补丁是否【已在树里】。
+#
+# ⚠️ 为什么不能只靠 `git apply -R --check`：**用 fuzz 打进去的补丁，反向检查
+#    一定失败**（上下文已经和补丁里的不一致了）。于是脚本会认为"没打过"，
+#    再用 fuzz 打一遍 —— 结果就是【同一段代码出现两份】。
+#    本仓已经因此中招两次：venus 的 sc8280xp_freq_table / sc8280xp_res 被打成
+#    两份，of_match 里 sc8280xp-venus 出现三条。**构建不一定报错**，
+#    重复的 static 结构体只是浪费空间，重复的 of_match 条目只是第一条生效，
+#    所以症状极其隐蔽。
+#
+# 判据：从补丁里挑一条足够独特的新增行（长度 > 25、不是纯符号），
+#       到它要改的文件里 grep。找到 ⇒ 已应用。
+already_applied() {
+    local f="$1" probe files ff
+    probe=$(grep -E '^\+[^+]' "$f" | sed 's/^+//'             | grep -vE '^[[:space:]]*$'             | awk 'length($0) > 25' | head -1)
+    [ -n "$probe" ] || return 1
+    files=$(grep -E '^\+\+\+ b/' "$f" | sed 's|^+++ b/||')
+    for ff in $files; do
+        [ -f "$TREE/$ff" ] || continue
+        grep -qF "$probe" "$TREE/$ff" && return 0
+    done
+    return 1
+}
+
 cd "$TREE"
 echo "内核树: $TREE"
 echo "版本:   $(make kernelversion 2>/dev/null || echo 未知)"
@@ -59,9 +83,15 @@ for p in "${UPATCHES[@]}" "${KPATCHES[@]}"; do
     f="$REPO/patches/$p"
     [ -f "$f" ] || { echo "✗ 缺文件 $p"; failed=$((failed + 1)); continue; }
 
-    # 反向能打通 ⇒ 已经在树里了
+    # 反向能打通 ⇒ 已经在树里了（精确应用过的走这条）
     if git apply --check -R "$f" 2>/dev/null; then
         echo "· 已应用，跳过  $p"
+        skipped=$((skipped + 1)); continue
+    fi
+    # ★ 指纹判据 —— 专治"用 fuzz 打进去过"的情况，反向检查对它们无效。
+    #   少了这一步会把同一个补丁重复打进去（详见 already_applied 的注释）。
+    if already_applied "$f"; then
+        echo "· 已应用（指纹命中，当初多半是 fuzz 打的），跳过  $p"
         skipped=$((skipped + 1)); continue
     fi
     if ! git apply --check "$f" 2>/dev/null; then

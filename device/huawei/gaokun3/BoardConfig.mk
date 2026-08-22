@@ -287,4 +287,8 @@ BOARD_USES_QCOM_HARDWARE := false
 # kernel.mk 去找 kernel/huawei/gaokun3。TARGET_NO_KERNEL 已在上面设过。
 TARGET_KERNEL_SOURCE :=
 
+# GApps 的板级片段（MindTheGapps 目前是空文件，为将来它加东西而 include）。
+# 用 -include：没同步 vendor/gapps 时静默跳过。
+-include vendor/gapps/arm64/BoardConfigVendor.mk
+
 include vendor/lineage/config/BoardConfigLineage.mk
