@@ -514,3 +514,55 @@ PRODUCT_PACKAGES += \
 
 PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/bin/gaokun3-ota-postinstall.sh:$(TARGET_COPY_OUT_VENDOR)/bin/gaokun3-ota-postinstall.sh
+
+# ═══════════ Venus 硬件视频编解码：Android 这一半（external/v4l2_codec2）═══════════
+#
+# 内核那一半 M14 就通了（/dev/video0 = qcom-venus-decoder、
+# /dev/video1 = qcom-venus-encoder，见 docs/stage4-findings.md #41）。
+# 缺的一直是一个跟 V4L2 说话的 Codec2 组件，所以 66 个解码器全是软解。
+#
+# ⚠️★ 上游 README 有三处会把人带沟里，逐条对着源码核过：
+#  1. README 让装 `android.hardware.media.c2@1.0-service-v4l2` —— 那是 **HIDL**，
+#     Android 15+ 随 hwservicemanager 一起没了。真实模块名见
+#     service/Android.bp:`android.hardware.media.c2-service-v4l2`（libcodec2-aidl-defaults）。
+#     本机 media.c2.hal.selection 早就是 aidl（#36 那一仗的成果），正好对上。
+#  2. ★★ README **完全没提**每个组件都由一条属性把守：
+#     v4l2/V4L2ComponentStore.cpp:29-79 里每个 builder.decoder()/encoder()
+#     外面都套着 property_get_bool("ro.vendor.v4l2_codec2.*.supported.*", false)。
+#     不设 = 服务正常起来、IComponentStore/default 也注册上、**但零个组件**，
+#     而且不报任何错。
+#  3. poolmask 不能抄 README 的 0xf50000（那是 ION）—— 本机没有 ION
+#     （/dev/ion 不存在、CONFIG_ION 也不在），要用 BLOB 的 0xfc0000。
+#  ★ 另外 libv4l2_codec2_vendor_allocator **不必装**：
+#     plugin_store/VendorAllocatorLoader.cpp:26 的 dlopen 失败只 ALOGI 返回 nullptr，
+#     是可选项（给安全播放用的，本机没有）。
+#
+# 顶层 Android.bp 里有 soong_namespace{}，所以命名空间必须显式加。
+PRODUCT_SOONG_NAMESPACES += external/v4l2_codec2
+
+PRODUCT_PACKAGES += \
+    android.hardware.media.c2-service-v4l2
+
+# 组件清单是 XML 决定的（Codec2InfoBuilder.cpp:543：不在 XML 里的组件直接跳过），
+# 而 media_codecs_c2.xml 是被【单独】搜索的，不必从 media_codecs.xml <Include>。
+PRODUCT_COPY_FILES += \
+    $(LOCAL_PATH)/etc/media_codecs_c2.xml:$(TARGET_COPY_OUT_VENDOR)/etc/media_codecs_c2.xml
+
+# ★ 每一条都对应 tools/v4l2-probe 的实测结果，不是照抄模板：
+#   解码器认 H264 VP80 VP90 HEVC MPG2；编码器只出 H264 VP80 HEVC。
+#   → av1 没有硬件；vp9 编码没有硬件；MPEG-2 与 HEVC 编码硬件有、
+#     但 v4l2_codec2 没有对应组件（v4l2/V4L2ComponentCommon.cpp）。
+#   → secure 变体全关：本机没有安全播放。
+PRODUCT_VENDOR_PROPERTIES += \
+    ro.vendor.v4l2_codec2.decoder.supported.h264=true \
+    ro.vendor.v4l2_codec2.decoder.supported.hevc=true \
+    ro.vendor.v4l2_codec2.decoder.supported.vp8=true \
+    ro.vendor.v4l2_codec2.decoder.supported.vp9=true \
+    ro.vendor.v4l2_codec2.encoder.supported.h264=true \
+    ro.vendor.v4l2_codec2.encoder.supported.vp8=true \
+    ro.vendor.v4l2_codec2.decode_concurrent_instances=8 \
+    ro.vendor.v4l2_codec2.encode_concurrent_instances=8
+
+# Codec2 的 pool mask：BLOB(19) 那一档。见上面第 3 条。
+PRODUCT_VENDOR_PROPERTIES += \
+    debug.stagefright.c2-poolmask=0xfc0000

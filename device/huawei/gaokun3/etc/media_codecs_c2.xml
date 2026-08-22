@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!--
+  gaokun3 硬件视频编解码（Venus，经 external/v4l2_codec2）。
+
+  ★ 这个文件是【必需】的，不是可选的：
+    frameworks/av/media/codec2/sfplugin/Codec2InfoBuilder.cpp:543 里
+        if (parser.getCodecMap().count(nameOrAlias) == 0) { ... continue; }
+    —— HAL 枚举出来的组件，只要不在 XML 里就会被直接跳过。
+  ★ 也【不需要】从 media_codecs.xml 里 <Include>：同一文件 :442-444 明确单独
+    搜索 media_codecs_c2.xml。而且 APEX 的软解表在 :437-439 先解析，
+    所以加这个文件不会顶掉那 66 个 c2.android.* 软解。
+
+  ── 声明哪些编解码器：两边取交集，都是实测出来的 ──
+
+  硬件（`tools/v4l2-probe` 实测 VIDIOC_ENUM_FMT，见 docs/stage4-findings.md）：
+    /dev/video0 解码 OUTPUT : H264 VP80 VP90 HEVC MPG2
+    /dev/video1 编码 CAPTURE: H264 VP80 HEVC
+  v4l2_codec2 有组件的（v4l2/V4L2ComponentCommon.cpp）：
+    解码 avc / vp8 / vp9 / hevc / av1，编码 avc / vp8 / vp9
+  ⇒ 交集 = 解码 avc/vp8/vp9/hevc，编码 avc/vp8。
+    ⚠️ MPEG-2 硬件能解但 v4l2_codec2 没有组件；
+    ⚠️ HEVC 硬件能编但 v4l2_codec2 没有 HEVC 编码组件；
+    ⚠️ AV1、VP9 编码硬件都没有 —— 对应属性必须保持 false。
+  ⚠️ 不声明 *.decoder.secure：本机没有安全播放（无 Widevine L1）。
+
+  ── 尺寸上限是【判断】，不是实测 ──
+  ⚠️ 驱动不钳位：TRY_FMT 送 8192x8192 它照收（只把裸帧高度对齐到 32，
+     1080→1088、2160→2176），所以拿不到真实上限。
+     这里按 Snapdragon 8cx Gen 3 公开规格取 4K，并遵循"宁可少报"——
+     报小了应用退回软解（慢但能放），报大了应用把啃不动的流交给硬件（花屏）。
+  min 128x128 则是实测值（ENUM_FRAMESIZES 报的下限，比上游模板的 16x16 大得多）。
+-->
+<MediaCodecs>
+    <Encoders>
+        <MediaCodec name="c2.v4l2.avc.encoder" type="video/avc">
+            <Limit name="size" min="128x128" max="1920x1088" />
+            <Limit name="alignment" value="2x2" />
+            <Limit name="block-size" value="16x16" />
+            <Limit name="blocks-per-second" range="1-244800" />
+            <Limit name="bitrate" range="1-40000000" />
+            <Limit name="concurrent-instances" max="8" />
+            <Limit name="performance-point-1920x1080" range="30-30" />
+        </MediaCodec>
+
+        <MediaCodec name="c2.v4l2.vp8.encoder" type="video/x-vnd.on2.vp8">
+            <Limit name="size" min="128x128" max="1920x1088" />
+            <Limit name="alignment" value="2x2" />
+            <Limit name="block-size" value="16x16" />
+            <Limit name="blocks-per-second" range="1-244800" />
+            <Limit name="bitrate" range="1-40000000" />
+            <Limit name="concurrent-instances" max="8" />
+            <Limit name="performance-point-1920x1080" range="30-30" />
+        </MediaCodec>
+    </Encoders>
+
+    <Decoders>
+        <MediaCodec name="c2.v4l2.avc.decoder" type="video/avc">
+            <Limit name="size" min="128x128" max="4096x2176" />
+            <Limit name="alignment" value="2x2" />
+            <Limit name="block-size" value="16x16" />
+            <Limit name="blocks-per-second" min="1" max="1879200" />
+            <Limit name="bitrate" range="1-62500000" />
+            <Limit name="concurrent-instances" max="8" />
+            <Limit name="performance-point-3840x2160" range="30-30" />
+            <Feature name="adaptive-playback" />
+        </MediaCodec>
+
+        <MediaCodec name="c2.v4l2.hevc.decoder" type="video/hevc">
+            <Limit name="size" min="128x128" max="4096x2176" />
+            <Limit name="alignment" value="2x2" />
+            <Limit name="block-size" value="16x16" />
+            <Limit name="blocks-per-second" min="1" max="1879200" />
+            <Limit name="bitrate" range="1-62500000" />
+            <Limit name="concurrent-instances" max="8" />
+            <Limit name="performance-point-3840x2160" range="30-30" />
+            <Feature name="adaptive-playback" />
+        </MediaCodec>
+
+        <MediaCodec name="c2.v4l2.vp8.decoder" type="video/x-vnd.on2.vp8">
+            <Limit name="size" min="128x128" max="4096x2176" />
+            <Limit name="alignment" value="2x2" />
+            <Limit name="block-size" value="16x16" />
+            <Limit name="blocks-per-second" min="1" max="1984500" />
+            <Limit name="bitrate" range="1-62500000" />
+            <Limit name="concurrent-instances" max="8" />
+            <Limit name="performance-point-3840x2160" range="30-30" />
+            <Feature name="adaptive-playback" />
+        </MediaCodec>
+
+        <MediaCodec name="c2.v4l2.vp9.decoder" type="video/x-vnd.on2.vp9">
+            <Limit name="size" min="128x128" max="4096x2176" />
+            <Limit name="alignment" value="2x2" />
+            <Limit name="block-size" value="16x16" />
+            <Limit name="blocks-per-second" min="1" max="2073600" />
+            <Limit name="bitrate" range="1-62500000" />
+            <Limit name="concurrent-instances" max="8" />
+            <Limit name="performance-point-3840x2160" range="30-30" />
+            <Feature name="adaptive-playback" />
+        </MediaCodec>
+    </Decoders>
+</MediaCodecs>

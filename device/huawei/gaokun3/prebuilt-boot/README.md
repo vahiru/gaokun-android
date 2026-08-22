@@ -13,6 +13,15 @@ dtb/gaokun3.dtb      设备树。目录名固定 —— BoardConfig.mk 的
                      BOARD_PREBUILT_DTBIMAGE_DIR 指向 prebuilt-boot/dtb
 ```
 
+⚠️★ **`dtb/` 里必须【只有一个】 .dtb 文件**（文件名本身不重要）。
+`BOARD_PREBUILT_DTBIMAGE_DIR` 会把目录里**所有** `*.dtb` **首尾拼接**成一个
+dtb 段塞进 boot.img，而**构建全程不报一声**。
+2026-08-22 真踩过：目录里同时留了 `gaokun3.dtb` 与旧的
+`sc8280xp-huawei-gaokun3.dtb`，产出的 dtb 段是 346052 字节 = 恰好 2 × 173026，
+**唯一的线索就是"大小是整数倍"**。
+`scripts/release.sh` 现在有断言（数 boot.img dtb 段里的 `d00dfeed` 魔数，≠1 就 die），
+但换机器 / 手动拷贝时仍要自己注意。
+
 `vmlinuz.efi` 会被 `PRODUCT_COPY_FILES` 装成 `$(PRODUCT_OUT)/kernel`
 —— 那是构建系统认的名字（`build/make/core/Makefile:1014`）。
 

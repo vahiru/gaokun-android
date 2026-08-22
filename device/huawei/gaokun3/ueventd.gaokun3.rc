@@ -14,3 +14,11 @@
 # ★ 只放行 sdsp 这一个：adsp/cdsp/cdsp-secure 我们不用，不必授权。
 # 用途与整条通路见 docs/stage4-findings.md #37。
 /dev/fastrpc-sdsp         0660   system     system
+
+# Venus 硬件视频编解码。v4l2_codec2 的服务
+# （android.hardware.media.c2-service-v4l2）在自带的 .rc 里声明 `user media`，
+# 而 /dev/video* 默认是 root:root 0600 —— 不改属主它连设备都打不开，
+# 症状会是"服务起来了、IComponentStore/default 也注册了、但一个组件都没有"。
+# 上游 README 给的就是这一条（0600 media media）。
+# ★ 只有这两个节点：video0=qcom-venus-decoder、video1=qcom-venus-encoder。
+/dev/video*               0600   media      media
