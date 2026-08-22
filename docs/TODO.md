@@ -26,11 +26,15 @@ signal（本机 120 Hz），Android 又在不停查 fence 名字。
 ★ 已确认**不是"升级内核就好"**：摘 ops 那套的四个提交相对 `v7.2-rc2` 全是
 `behind`（已在我们内核里），而 master 的那个 `BUG_ON` 一字未改。
 
-**第一步**：编一次内核，带上
-`patches/0013-drm-crtc-drop-racy-BUG_ON-in-fence_to_crtc.patch`
-（已用 `git apply --check` 对 v7.2-rc2 原文验过）。
-验收判据不是"没崩" —— 而是**反复开合设置/权限页各几十次 + `/sys/fs/pstore/`
-零新记录**。⬜ 之后值得把它报到 dri-devel（对外动作，等用户定）。
+✅ **已编入内核并装机**（[#62](stage4-findings.md)）：`#33` / 构建戳
+`1787373122` / 槽位 `_b`。6 轮 app 启动 + 800 个 monkey 事件后 pstore 零新增、
+dmesg 零 Oops、`screencap` 正常、GPU 三项判据全 0。
+⚠️ 但**竞态的阴性结果不构成证明**（旧内核也是几分钟才炸一次）——
+真正的依据是那行 `BUG_ON` 已不存在；上机测试回答的是"删掉它有没有引入新问题"。
+
+⬜ **还欠两件**：① 长时间日常使用观察（唯一能提高置信度的办法）；
+② 报到 dri-devel —— 普通应用能 panic 整机、且 mainline master 现存，
+**值得报**。对外动作，等用户定；稿子照 `patches/0013` 的 commit message 改即可。
 
 ### A1. 音频与蓝牙长期运行后死锁 ⚠️ 次高优先
 用户实机报告，我未复现、未定位（[#38](stage4-findings.md)）。

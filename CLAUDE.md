@@ -5,7 +5,7 @@
 在华为 MateBook E Go（Snapdragon 8cx Gen 3 / sc8280xp，代号 gaokun）上跑原生 AOSP，
 最终目标是能稳定运行 arm64 手游。
 
-**当前阶段：Stage 6 M17 — ★★★★★ 用户报的「切到设置卡死」定性为**内核 panic**（`kernel BUG at drm_crtc.c:161`），根因是 `drm_crtc` 的 `fence_to_crtc()` 那个 `BUG_ON` 与 dma-fence「signal 即摘 ops」的竞态 —— **上游 mainline master 至今未修**，普通应用即可触发。补丁 `patches/0013` 已写并对 v7.2-rc2 验过可应用，⬜ 未编译上机。证据全靠 pstore 抢回来的（现场已重启）**（每次开工时更新这一行）
+**当前阶段：Stage 6 M17（构建已完成上机）— ★★★★★ 「切到设置卡死」定性为**内核 panic**（`drm_crtc.c:161` 的竞态 `BUG_ON`，**上游 mainline 至今未修**，普通应用即可触发），`patches/0013` 已编入内核并装机验收（`#33` / 戳 `1787373122` / 槽 `_b`，pstore 零新增、GPU 三项判据全 0）。同批还修好了 CPU cooling maps 回归与 `/dev/dri` 标签缺失（denial −493）。⚠️ **本版不可发布**：boot_b 里带了两份 DTB（已就地修 ESP，需清空 `prebuilt-boot/dtb/` 重编）**（每次开工时更新这一行） ★★★★★ 用户报的「切到设置卡死」定性为**内核 panic**（`kernel BUG at drm_crtc.c:161`），根因是 `drm_crtc` 的 `fence_to_crtc()` 那个 `BUG_ON` 与 dma-fence「signal 即摘 ops」的竞态 —— **上游 mainline master 至今未修**，普通应用即可触发。补丁 `patches/0013` 已写并对 v7.2-rc2 验过可应用，⬜ 未编译上机。证据全靠 pstore 抢回来的（现场已重启）**（每次开工时更新这一行）
 
 > **★★★ Stage 6 M17（2026-08-22）：一个用户报告，一路查到上游活着的缺陷。**
 > ★ **`ESR=0xf2000800` → EC=0x3C（BRK）⇒ 是 `BUG()` 断言，不是空指针。**
@@ -36,6 +36,28 @@
 >   但它损害取证能力，值得单独治。
 
 **上一阶段：Stage 6 M16 — ★★★★★ s2idle 两端都修好并已发版（v0.3.0-alpha，构建戳 `1787335922`）：Android 真实挂起/唤醒 ×4 零复位，救援 Ubuntu `systemctl suspend` 3/3。真凶是我们自己 Stage 2 加的 `dr_mode="otg"`——`a600000.usb` 的 role 停在 `device`（无 gadget、无 xhci），断电即整板复位；Android 的修法是息屏切 `host`、亮屏切回 `device`（代价：息屏时 USB adb 断，TCP adb 不受影响）。README/TODO/设备树注释已同步到这个事实**
+
+> **★★ M17 补记（构建 + 上机）**：`kernel-apply-patches.sh` **第一次跑就拦下
+> 两处真实回归** —— `patches/0009`（CPU cooling maps）从构建机内核树上掉了
+> （没拦住的话新内核会**悄悄失去 CPU 温控降频**，无风扇平板会一路满频跑到
+> 紧急关机，症状要等某次长时间游戏后突然关机才出现）；上游 Venus 补丁集
+> **也只活在构建机工作区**，`sc8280xp.dtsi` 被回退过，`patches/0011` 依赖的
+> `venus` label 没了 ⇒ **从干净的 v7.2-rc2 照本仓 `patches/` 根本重建不出
+> 发版内核**。已入库 `patches/upstream-venus/`（8 个原样保存，0014 故意不用）。
+> ⚠️ 其中 `0019` 需要 `patch --fuzz=3`，脚本会**明确打印用了 fuzz** ——
+> 静默的模糊匹配是灾难的开始。
+> - ⚠️★ **`patches/0014` 被自己的实测否掉**：`dev_err_ratelimited` 只抑制
+>   **62%**（事件 5.05 Hz → 打印 1.95/s，正好是默认的 10 条/5 秒预算），
+>   而它的立项理由是"别让噪声把 panic 栈挤出 pstore"，2/s 一小时仍七千行。
+>   已改成 `DEFINE_RATELIMIT_STATE(60 * HZ, 1)`。
+>   ★ **"用了标准做法"不等于"达成了目标"**，差一次测量就会把 62% 当成完成。
+> - ⚠️★ 新坑：**`BOARD_PREBUILT_DTBIMAGE_DIR` 会把目录里所有 `*.dtb` 拼接**。
+>   陈旧残留让 boot.img 带了两份 DTB（346052 = 恰好 2×173026），
+>   **构建全程不报一声，唯一线索是大小是整数倍**。已在 `release.sh` 做成断言
+>   （数 `d00dfeed`，≠1 就 die），并**拿真样本正反验过**（boot_a→1、boot_b→2）。
+> - 运维：直连构建机只有 1.32 MB/s，**R2 中转 41 MB/s**，把 14 分钟计费空转
+>   压成约 2 分钟。⚠️ 这个版本的 `update_engine_client` **没有 `--status`**，
+>   判断装完看 `bootctl get-active-boot-slot` 是否切槽。
 
 > **★ Stage 6 M16（2026-08-22）：发版 v0.3.0-alpha + 一次全仓文档对账。**
 > 发布物就是**在硬件上验过的那一版**（`--no-build`，构建戳 `1787335922`）；
