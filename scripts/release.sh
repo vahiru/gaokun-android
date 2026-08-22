@@ -96,6 +96,27 @@ PY
     V=$(sha256sum device/huawei/gaokun3/prebuilt-boot/vmlinuz.efi | cut -d' ' -f1)
     [ "$K" = "$V" ] || die "boot.img 里的 kernel 与 prebuilt-boot/vmlinuz.efi 不同"
     ok "boot.img 的 kernel 与 prebuilt 内核逐字节相同"
+
+    # ★ boot.img 里的 DTB 必须【只有一个】FDT。
+    #   BOARD_PREBUILT_DTBIMAGE_DIR 会把目录里【所有】*.dtb 拼接起来 ——
+    #   目录里留一个陈旧文件，产出的就是两份 DTB 首尾相连，而构建全程不报一声。
+    #   2026-08-22 真踩过：346052 字节 = 恰好 2 × 173026，靠"大小是整数倍"才看出来。
+    #   后果取决于消费者读不读第二个，属于那种"这次没炸不代表下次不炸"的隐患。
+    NF=$(python3 - "$OUT/boot.img" <<'PY'
+import struct, sys
+f = open(sys.argv[1], "rb"); d = f.read(4096)
+ks, ka, rs, ra, ss, sa, tags, page, hv = struct.unpack("<9I", d[8:44])
+if hv < 2:
+    print(1); sys.exit()                      # header v0/v1 不带 dtb 段
+dtb_size = struct.unpack("<I", d[1648:1652])[0]
+def pad(n): return (n + page - 1) // page * page
+off = pad(1) + pad(ks) + pad(rs) + pad(ss) + pad(struct.unpack("<I", d[1632:1636])[0])
+f.seek(off)
+print(f.read(dtb_size).count(bytes.fromhex("d00dfeed")))
+PY
+)
+    [ "$NF" = 1 ] || die "boot.img 的 dtb 段里有 $NF 个 FDT —— prebuilt-boot/dtb/ 多半留了陈旧文件"
+    ok "boot.img 的 dtb 段只含 1 个 FDT"
 fi
 
 VER=$(basename "$ZIP" .zip)

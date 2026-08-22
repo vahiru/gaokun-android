@@ -1,19 +1,18 @@
 From: gaokun-android contributors <nekovahiru@gmail.com>
-Subject: [PATCH] remoteproc: qcom_q6v5: ratelimit the repeated handover error
+Subject: [PATCH] remoteproc: qcom_q6v5: heavily ratelimit the repeated handover error
 
 q6v5_handover_interrupt() dev_err()s every time a handover is signalled after
 the first one. On a Huawei MateBook E Go (SC8280XP) the SLPI signals it about
 five times a second, forever, and it never stops:
 
   qcom_q6v5_pas 2400000.remoteproc: Handover signaled, but it already happened
-  [... 1478 identical lines by 1133 seconds of uptime ...]
 
 /proc/interrupts shows why the message is harmless and also why it will not go
 away: the "q6v5 ready" and "q6v5 handover" smp2p bits of this remote carry
-*identical* counts and advance together (5475 -> 5502 over five seconds),
-while adsp and nsp0 sit at 2 apiece. The remote keeps toggling both bits. The
-handler already does the right thing -- it returns early without touching the
-proxy resources -- so the only consequence is the log.
+*identical* counts and advance together -- 303 each over 60 seconds -- while
+adsp and nsp0 sit at 2 apiece. The remote keeps toggling both bits. The
+handler already does the right thing, returning early without touching the
+proxy resources, so the only consequence is the log.
 
 That consequence is not small. This log flood is what erased the useful part
 of an efi_pstore capture on that machine: pstore keeps only the tail of the
@@ -21,19 +20,45 @@ kernel log, so of 45 records saved across two panics, fewer than ten held
 anything but this one line. A benign, self-repeating condition must not be
 able to push a panic backtrace out of the crash log.
 
-Ratelimit it. The first occurrences still show up, an unhealthy remote is
-still visible in dmesg, and the message can no longer drown out everything
-else.
+Plain dev_err_ratelimited() is not enough here, and that was measured rather
+than assumed: with the default 10-per-5s budget the print rate on this machine
+fell from 5.05/s to 1.95/s. A 62% cut still leaves some 7000 lines an hour.
+For a condition that is permanent rather than bursty, the useful information
+is carried by the first message and everything after it costs forensic budget.
+
+Use an explicit ratelimit state of one message per minute. An unhealthy remote
+is still visible in dmesg, a recurrence after a remoteproc restart still shows
+up, and the message can no longer drown out a backtrace. The state is shared
+by all remotes deliberately: it caps the total rate, while still letting
+whichever device hits the condition be the one that reports it.
 
 --- a/drivers/remoteproc/qcom_q6v5.c
 +++ b/drivers/remoteproc/qcom_q6v5.c
-@@ -165,7 +165,8 @@ static irqreturn_t q6v5_handover_interrupt(int irq, void *data)
+@@ -12,6 +12,7 @@
+ #include <linux/interrupt.h>
+ #include <linux/module.h>
+ #include <linux/soc/qcom/qcom_aoss.h>
++#include <linux/ratelimit.h>
+ #include <linux/soc/qcom/smem.h>
+ #include <linux/soc/qcom/smem_state.h>
+ #include <linux/remoteproc.h>
+@@ -162,10 +163,18 @@ EXPORT_SYMBOL_GPL(qcom_q6v5_wait_for_start);
+ 
+ static irqreturn_t q6v5_handover_interrupt(int irq, void *data)
+ {
++	/*
++	 * A remote can assert this several times a second indefinitely. One
++	 * report a minute is plenty to notice it, and keeps the flood from
++	 * pushing a backtrace out of a pstore crash dump.
++	 */
++	static DEFINE_RATELIMIT_STATE(handover_rs, 60 * HZ, 1);
  	struct qcom_q6v5 *q6v5 = data;
  
  	if (q6v5->handover_issued) {
 -		dev_err(q6v5->dev, "Handover signaled, but it already happened\n");
-+		dev_err_ratelimited(q6v5->dev,
-+				    "Handover signaled, but it already happened\n");
++		if (__ratelimit(&handover_rs))
++			dev_err(q6v5->dev,
++				"Handover signaled, but it already happened\n");
  		return IRQ_HANDLED;
  	}
  
