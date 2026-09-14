@@ -53,8 +53,11 @@ device/huawei/gaokun3/adb_keys
 device/huawei/gaokun3/hexagonrpcd-root/**
 !device/huawei/gaokun3/hexagonrpcd-root/README.md
 
-# 树外内核的产物（Image / DTB），作为 prebuilt 供 device.mk 装进 vendor/boot/，
-# 好让内核跟着 OTA 走。二进制不入版本库；换内核时自己放进去。
-# ⚠️ 同 firmware/ 一样【整目录忽略 + 只放行 README.md】。
+# 树外内核的产物（EFI_ZBOOT / DTB），作为 prebuilt 供 device.mk 装进
+# vendor/boot/，好让内核跟着 OTA 走。只跟踪 Android 构建实际消费的两个
+# 已验证产物；裸 Image、配置和其他临时文件继续忽略。
 device/huawei/gaokun3/prebuilt-boot/**
 !device/huawei/gaokun3/prebuilt-boot/README.md
+!device/huawei/gaokun3/prebuilt-boot/vmlinuz.efi
+!device/huawei/gaokun3/prebuilt-boot/dtb/
+!device/huawei/gaokun3/prebuilt-boot/dtb/gaokun3.dtb

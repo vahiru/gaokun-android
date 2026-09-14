@@ -1,6 +1,7 @@
 # 树外内核的产物（供构建 boot.img）
 
-`.gitignore` 把本目录**整个**忽略，只放行这份 README。
+仓库跟踪 Android 构建实际消费的 `vmlinuz.efi` 与
+`dtb/gaokun3.dtb`。裸 `Image`、内核配置和其他中间产物不提交。
 
 本机的内核不在 AOSP 树里编（主线 v7.2-rc2 + `refs/gaokun-buildbot/patches/`
 那一套 + 本仓 `patches/`），所以作为 prebuilt 放在这里，由构建系统装进 boot 镜像。
@@ -46,6 +47,29 @@ cp <out>/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dtb prebuilt-boot/dtb/
 内核最终会被 postinstall 钩子解到 **ESP** 上，而 ESP 只有 300 MiB，
 还要和固件自己那个 73 MiB 的 `Persisted_Capsules.bin` 共处，
 并且 A/B **两个槽位各存一份**。
-未压缩的 `Image` 是 39,422,464 字节，`vmlinuz.efi` 是 14,021,120 字节
-（2026-08-20 实测，2.8 分之一），每槽一份从 53 MB 降到约 26 MB。
+当前未压缩的 `Image` 是 40,176,128 字节，`vmlinuz.efi` 是 14,320,128 字节
+（2026-08-21 实测，约 2.8 分之一），每槽一份从约 53 MB 降到约 27 MB。
 `vmlinuz.efi` 经 systemd-boot 实机启动验证通过。
+
+## 当前预编译版本
+
+当前文件由
+[`pgs666/linux-gaokun-buildbot`](https://github.com/pgs666/linux-gaokun-buildbot)
+的 `android/v7.2-egotouch-venus` 分支构建：
+
+- buildbot commit: `99b7701db62ab0b8ccccec99ee315f62bd69cbcc`
+- Linux tag: `v7.2-rc2`
+- gaokun-android inputs: `844045acae7f6b845d7048845fce9305d76b37bd`
+- GitHub Actions run:
+  [`32485581600`](https://github.com/pgs666/linux-gaokun-buildbot/actions/runs/32485581600)
+
+产物校验：
+
+```text
+029dd6e03c1bdb5b6aa19e8fc07a7e922b4cce8ec5928e846526d31adad96849  vmlinuz.efi
+459069e394a3150cb61634cedacbc5e50a7a444e4bbcb892d71fd03dea64a650  dtb/gaokun3.dtb
+```
+
+该版本包含更新后的 EGoTouchRev 触摸驱动和 SC8280XP Venus 支持。产物已于
+2026-08-21 写入 `boot_a` 并同步到 ESP `slot_a`，在 gaokun3 上实机启动进入
+Android，触摸与系统启动正常；`boot_b` 保持为回退槽。
