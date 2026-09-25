@@ -1,0 +1,35 @@
+// Vendor audio-effect plugin for the Huawei MateBook E Go (gaokun3).
+//
+// Built with Soong inside the ROM tree rather than with the NDK: the audio data
+// path is FMQ and the NDK does not ship libfmq at all.  The shared
+// `aidlaudioeffectservice_defaults` default already brings in exactly the
+// dependencies an effect library in this HAL needs (libfmq, libutils,
+// libcutils, libbinder_ndk and the AIDL audio-effect NDK bindings), so this
+// module only has to name its sources and say where to install.
+//
+// `relative_install_path: "soundfx"` + vendor:true is what makes it land in
+// /vendor/lib64/soundfx, which is where audio_effects_config.xml looks.
+cc_library_shared {
+    name: "libgaokunhisteneffect",
+    defaults: ["aidlaudioeffectservice_defaults"],
+    // ★ ":effectCommonFile" IS NOT OPTIONAL.
+    //
+    // It is the filegroup in hardware/interfaces/audio/aidl/default/Android.bp
+    // holding EffectContext.cpp, EffectThread.cpp and EffectImpl.cpp -- i.e. the
+    // whole effect framework: the FMQ rings, the event flag, the worker thread
+    // and the pump that calls our effectProcessImpl().  Each effect library in
+    // AOSP compiles its own copy (see .../default/bassboost/Android.bp), which is
+    // also why EffectImpl.cpp, not this module, is what exports `destroyEffect`.
+    srcs: [
+        "gaokun_effect.cpp",
+        ":effectCommonFile",
+    ],
+    relative_install_path: "soundfx",
+    cflags: [
+        "-Wall",
+        "-Wno-unused-parameter",
+    ],
+    // The default for this HAL is installable:false (it goes into the APEX).
+    // We are a plain vendor library on the vendor partition.
+    installable: true,
+}

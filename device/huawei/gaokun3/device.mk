@@ -99,9 +99,32 @@ PRODUCT_PACKAGES += \
 # effects HAL 启动即退（"config file audio_effects_config.xml not found"，
 # 实测）。默认配置的 prebuilt_etc 被 soong config 门控着
 # （hardware/interfaces/audio/aidl/default/Android.bp:372-378）：
-$(call soong_config_set_bool,hardware_interfaces_audio,use_default_audio_effects_config,true)
+#
+# ★ 2026-09-25：开关改为 false —— 改由我们自己那份配置接管。
+#   已读该 Android.bp 原文确认：这个 soong config **只门控那一个
+#   prebuilt_etc 的 enabled**，不参与任何编译期决策，所以关掉是安全的。
+#   ⚠ 但它与下面那行 PRODUCT_COPY_FILES 是成对的：关掉而没装上自己的配置，
+#     HAL 会因找不到配置文件启动即退（正是当初设 true 的原因）。
+$(call soong_config_set_bool,hardware_interfaces_audio,use_default_audio_effects_config,false)
+PRODUCT_COPY_FILES += \
+    $(LOCAL_PATH)/effects/audio_effects_config.xml:$(TARGET_COPY_OUT_VENDOR)/etc/audio_effects_config.xml
+
+# 扬声器后处理链：自研 AIDL effect（LR4 高通 + EQ + 限幅 + 软削波）。
+# 与 stock 配置的差别是纯增量（stock 的 21 库/18 effect 全保留，只多一个
+# gaokun_histen 槽位与一条 music postprocess）—— 已用脚本逐项比对过。
+# 详见 device/huawei/gaokun3/effects/README.md。
 PRODUCT_PACKAGES += \
-    audio_effects_config.xml
+    libgaokunhisteneffect
+
+# ⚠ 下面这份 libhw_histen_processing.so 是**华为专有二进制**（iMedia Audio 8.0 /
+#   Histen 6.1.9，从麒麟 V10 SP1 的音频栈提取，未获再分发授权）—— 这是本仓库里
+#   唯一一个【没有】按 firmware/ 、hexagonrpcd-root/ 、prebuilt-boot/ 那套
+#   「整目录忽略 + 只放行 README.md」约定处理的专有 blob，属于有意偏离。
+#   来源、限制与替代做法见 device/huawei/gaokun3/effects/README.md 第七节。
+#   不想要它：删掉下面那行 PRODUCT_COPY_FILES 与 effects/prebuilt/ 整个目录即可，
+#   其余部分照常工作 —— effect 会在引擎缺失时自动降级为逐比特直通，不会哑。
+PRODUCT_COPY_FILES += \
+    $(LOCAL_PATH)/effects/prebuilt/lib64/soundfx/libhw_histen_processing.so:$(TARGET_COPY_OUT_VENDOR)/lib64/soundfx/libhw_histen_processing.so
 
 # 音频 policy 配置 —— example HAL 的 IModule 实例清单【完全来自】
 # audio_policy_configuration.xml 解析结果（main.cpp:93-99 实名核实），
