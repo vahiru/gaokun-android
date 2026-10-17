@@ -270,6 +270,24 @@ KPATCHES=(
     0100-wifi-ath11k-hand-a-firmware-crash-found-on-resume-to-crash-recovery.patch
     0101-wifi-ath11k-stay-awake-for-a-while-after-crash-recovery.patch
     0102-wifi-ath11k-arm-the-WoW-disconnect-events-only-when-connected.patch
+    # ★★ 0103–0105：休眠中的Wi-Fi。0103（mac80211）：驱动挂起失败（返回负值）时清掉local->suspending，
+    #    否则系统一直醒着，到下一次成功挂起之前收不到信标也不探测AP；0104：扫描期间持wakeup source "ath11k_scan"
+    #    （最长到扫描超时），扫完再保持5秒，留给上层取结果、发起连接。息屏时Android的软件PNO靠闹钟把系统叫醒去扫描，
+    #    却不为扫描持wakelock，系统马上又挂起，mac80211中止扫描，休眠中断线后就一直连不回来；0105：固件拒绝进入WoW
+    #    （htc suspend not complete）时让这次挂起失败、稍后重试（连续最多3次），不再退回到断开连接、断电挂起。
+    #    0103、0105准备推主线；0104是为Android做的取舍，不推。
+    0103-wifi-mac80211-clear-the-suspending-flag-when-the-driver-fails-to-suspend.patch
+    0104-wifi-ath11k-keep-the-system-awake-while-a-scan-runs.patch
+    0105-wifi-ath11k-retry-the-suspend-when-the-firmware-declines-WoW.patch
+    # ★★ 0106–0110：主线7.3的5个补丁原样移植（cd054a6e272c、eb667d0fbdd3、541735571578、b9b23e72abef、
+    #    b05482e7ce1b）。LPASS的四个编解码宏（WSA/VA/TX/RX）改用PM clock框架，空闲时撤掉向ADSP投的
+    #    LPASS_HW_MACRO/LPASS_HW_DCODEC票。原来从probe起一直投着，ADSP从不睡，系统睡眠时内存也停在1017MHz；
+    #    打上以后ADSP能睡，内存降到200MHz。
+    0106-ASoC-codecs-lpass-wsa-macro-Switch-to-PM-clock-framework-for-runtime-PM.patch
+    0107-ASoC-codecs-lpass-va-macro-Switch-to-PM-clock-framework-for-runtime-PM.patch
+    0108-ASoC-codecs-lpass-wsa-macro-Use-devm_clk_hw_register-for-MCLK-output.patch
+    0109-ASoC-codecs-lpass-tx-macro-switch-to-PM-clock-framework-for-runtime-PM.patch
+    0110-ASoC-codecs-lpass-rx-macro-switch-to-PM-clock-framework-for-runtime-PM.patch
 )
 
 # ⚠️ 诊断补丁【不进发版内核】：只在带 --with-diag 时打。顺序有依赖：0028/0029 依赖 0023，

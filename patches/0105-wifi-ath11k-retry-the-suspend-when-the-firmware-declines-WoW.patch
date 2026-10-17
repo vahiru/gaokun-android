@@ -1,0 +1,116 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] wifi: ath11k: retry the suspend when the firmware declines
+ WoW
+
+When the firmware doesn't complete the HTC suspend ("htc suspend not
+complete" three times), ath11k_wow_op_suspend() returns 1. cfg80211
+then disconnects and suspends without WoW, which powers the device down
+for the whole sleep: the connection is gone until the system is awake
+again. The firmware answers every time, it is only busy for the moment.
+
+Return -EBUSY from ath11k_wow_enable() in that case and fail the system
+suspend instead, up to ATH11K_WOW_DECLINED_MAX times in a row; the
+system tries again shortly. Undo the WoW setup done so far, as the
+device keeps running. A firmware that keeps declining still gets the
+fallback to a suspend without WoW, after which the count starts over.
+
+Tested-on: WCN6855 hw2.1 PCI WLAN.HSP.1.1-03125-QCAHSPSWPL_V1_V2_SILICONZ_LITE-3.6510.41
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ drivers/net/wireless/ath/ath11k/wow.c | 35 ++++++++++++++++++++++++++-
+ drivers/net/wireless/ath/ath11k/wow.h |  3 +++
+ 2 files changed, 37 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/net/wireless/ath/ath11k/wow.c b/drivers/net/wireless/ath/ath11k/wow.c
+index fa3fa4724..5b79530d8 100644
+--- a/drivers/net/wireless/ath/ath11k/wow.c
++++ b/drivers/net/wireless/ath/ath11k/wow.c
+@@ -60,7 +60,8 @@ int ath11k_wow_enable(struct ath11k_base *ab)
+ 
+ 	ath11k_warn(ab, "htc suspend not complete, failing after %d tries\n", i);
+ 
+-	return -ETIMEDOUT;
++	/* The firmware answered every time, it is just busy. */
++	return -EBUSY;
+ }
+ 
+ int ath11k_wow_wakeup(struct ath11k_base *ab)
+@@ -711,10 +712,25 @@ static void ath11k_wow_resume_crashed(struct ath11k *ar)
+ 		ath11k_hif_irq_enable(ab);
+ }
+ 
++/*
++ * Undo what ath11k_wow_op_suspend() sets up before ath11k_wow_enable(), for
++ * a device that stays up after all.
++ */
++static void ath11k_wow_undo_setup(struct ath11k *ar)
++{
++	ath11k_wow_nlo_cleanup(ar);
++	ath11k_wow_clear_hw_filter(ar);
++	ath11k_wow_protocol_offload(ar, false);
++	ath11k_wow_set_keepalive(ar, WMI_STA_KEEPALIVE_METHOD_NULL_FRAME,
++				 WMI_STA_KEEPALIVE_INTERVAL_DISABLE);
++	ath11k_dp_rx_pktlog_start(ar->ab);
++}
++
+ int ath11k_wow_op_suspend(struct ieee80211_hw *hw,
+ 			  struct cfg80211_wowlan *wowlan)
+ {
+ 	struct ath11k *ar = hw->priv;
++	bool declined = false;
+ 	int ret;
+ 
+ 	ret = ath11k_mac_wait_tx_complete(ar);
+@@ -784,6 +800,7 @@ int ath11k_wow_op_suspend(struct ieee80211_hw *hw,
+ 	ret = ath11k_wow_enable(ar->ab);
+ 	if (ret) {
+ 		ath11k_warn(ar->ab, "failed to start wow: %d\n", ret);
++		declined = ret == -EBUSY;
+ 		goto cleanup;
+ 	}
+ 
+@@ -822,6 +839,22 @@ int ath11k_wow_op_suspend(struct ieee80211_hw *hw,
+ 		ret = 0;
+ 	}
+ 
++	if (declined && ++ar->wow.declined <= ATH11K_WOW_DECLINED_MAX) {
++		/*
++		 * Returning 1 makes cfg80211 disconnect and power the device
++		 * down for the whole sleep, which is a high price for a
++		 * firmware that is only busy for the moment. Fail this
++		 * suspend instead; the system tries again shortly.
++		 */
++		ath11k_warn(ar->ab, "firmware declined wow, failing the suspend (%u/%u)\n",
++			    ar->wow.declined, ATH11K_WOW_DECLINED_MAX);
++		ath11k_wow_undo_setup(ar);
++		mutex_unlock(&ar->conf_mutex);
++		return -EBUSY;
++	}
++	/* Suspended, failed for another reason or fell back: start over. */
++	ar->wow.declined = 0;
++
+ 	mutex_unlock(&ar->conf_mutex);
+ 	return ret ? 1 : 0;
+ }
+diff --git a/drivers/net/wireless/ath/ath11k/wow.h b/drivers/net/wireless/ath/ath11k/wow.h
+index 13dbcfec9..dca7bc690 100644
+--- a/drivers/net/wireless/ath/ath11k/wow.h
++++ b/drivers/net/wireless/ath/ath11k/wow.h
+@@ -11,6 +11,8 @@ struct ath11k_wow {
+ 	u32 max_num_patterns;
+ 	struct completion wakeup_completed;
+ 	struct wiphy_wowlan_support wowlan_support;
++	/* consecutive suspends the firmware declined */
++	u32 declined;
+ };
+ 
+ struct rfc1042_hdr {
+@@ -23,6 +25,7 @@ struct rfc1042_hdr {
+ 
+ #define ATH11K_WOW_RETRY_NUM		3
+ #define ATH11K_WOW_RETRY_WAIT_MS	200
++#define ATH11K_WOW_DECLINED_MAX		3
+ #define ATH11K_WOW_PATTERNS		22
+ 
+ #ifdef CONFIG_PM

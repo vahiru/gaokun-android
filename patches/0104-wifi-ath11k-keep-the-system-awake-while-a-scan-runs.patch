@@ -1,0 +1,105 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] wifi: ath11k: keep the system awake while a scan runs
+
+A system suspend aborts a running scan. With the screen off, Android
+looks for known networks from a wakeup alarm (software PNO, used when
+the driver can't do scheduled scans, as ath11k can't), but holds no
+wakelock for the scan itself: the system suspends right away and
+mac80211 aborts the scan. After a disconnect during standby the device
+then stays offline until the screen turns on.
+
+Hold a wakeup source from the start of a hardware scan until it ends,
+at most for the scan timeout, and for ATH11K_SCAN_SETTLE_MS (5 s) after
+it, so that user space can fetch the results and start connecting.
+
+Tested-on: WCN6855 hw2.1 PCI WLAN.HSP.1.1-03125-QCAHSPSWPL_V1_V2_SILICONZ_LITE-3.6510.41
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ drivers/net/wireless/ath/ath11k/core.c |  3 +++
+ drivers/net/wireless/ath/ath11k/core.h |  2 ++
+ drivers/net/wireless/ath/ath11k/mac.c  | 17 +++++++++++++++++
+ 3 files changed, 22 insertions(+)
+
+diff --git a/drivers/net/wireless/ath/ath11k/core.c b/drivers/net/wireless/ath/ath11k/core.c
+index 1cf3ac8f5..0029500ff 100644
+--- a/drivers/net/wireless/ath/ath11k/core.c
++++ b/drivers/net/wireless/ath/ath11k/core.c
+@@ -2825,6 +2825,7 @@ void ath11k_core_free(struct ath11k_base *ab)
+ 	destroy_workqueue(ab->workqueue_aux);
+ 	destroy_workqueue(ab->workqueue);
+ 	wakeup_source_unregister(ab->recovery_ws);
++	wakeup_source_unregister(ab->scan_ws);
+ 
+ 	kfree(ab);
+ }
+@@ -2851,6 +2852,8 @@ struct ath11k_base *ath11k_core_alloc(struct device *dev, size_t priv_size,
+ 
+ 	/* Without it recovery still works, just without holding off suspend. */
+ 	ab->recovery_ws = wakeup_source_register(dev, "ath11k_recovery");
++	/* Same for scans, see ath11k_mac_op_hw_scan(). */
++	ab->scan_ws = wakeup_source_register(dev, "ath11k_scan");
+ 
+ 	mutex_init(&ab->core_lock);
+ 	mutex_init(&ab->tbl_mtx_lock);
+diff --git a/drivers/net/wireless/ath/ath11k/core.h b/drivers/net/wireless/ath/ath11k/core.h
+index cdc5816ca..c67055876 100644
+--- a/drivers/net/wireless/ath/ath11k/core.h
++++ b/drivers/net/wireless/ath/ath11k/core.h
+@@ -73,6 +73,7 @@ extern bool ath11k_ftm_mode;
+ #define ATH11K_RECOVER_START_TIMEOUT_HZ (20 * HZ)
+ #define ATH11K_RECOVERY_WAKEUP_MS (60 * MSEC_PER_SEC)
+ #define ATH11K_RECOVERY_SETTLE_MS (10 * MSEC_PER_SEC)
++#define ATH11K_SCAN_SETTLE_MS (5 * MSEC_PER_SEC)
+ 
+ enum ath11k_supported_bw {
+ 	ATH11K_BW_20	= 0,
+@@ -1028,6 +1029,7 @@ struct ath11k_base {
+ 	u8 new_alpha2[3];
+ 	struct workqueue_struct *workqueue_aux;
+ 	struct wakeup_source *recovery_ws;
++	struct wakeup_source *scan_ws;
+ 	struct work_struct reset_work;
+ 	atomic_t reset_count;
+ 	atomic_t recovery_count;
+diff --git a/drivers/net/wireless/ath/ath11k/mac.c b/drivers/net/wireless/ath/ath11k/mac.c
+index 8b8c3eb58..27663ffdc 100644
+--- a/drivers/net/wireless/ath/ath11k/mac.c
++++ b/drivers/net/wireless/ath/ath11k/mac.c
+@@ -3902,6 +3902,14 @@ void __ath11k_mac_scan_finish(struct ath11k *ar)
+ 			};
+ 
+ 			ieee80211_scan_completed(ar->hw, &info);
++
++			/*
++			 * Leave user space a moment to fetch the results and
++			 * start connecting before the system may suspend.
++			 */
++			__pm_relax(ar->ab->scan_ws);
++			pm_wakeup_ws_event(ar->ab->scan_ws,
++					   ATH11K_SCAN_SETTLE_MS, false);
+ 		}
+ 
+ 		ar->scan.state = ATH11K_SCAN_IDLE;
+@@ -4329,12 +4337,21 @@ static int ath11k_mac_op_hw_scan(struct ieee80211_hw *hw,
+ 	/* Add a margin to account for event/command processing */
+ 	scan_timeout += ATH11K_MAC_SCAN_CMD_EVT_OVERHEAD;
+ 
++	/*
++	 * A system suspend aborts the scan, and Android starts its software
++	 * PNO scans from a wakeup alarm without holding a wakelock for the
++	 * scan. Keep the system awake until the scan is done, at most until
++	 * it times out.
++	 */
++	pm_wakeup_ws_event(ar->ab->scan_ws, scan_timeout, false);
++
+ 	ret = ath11k_start_scan(ar, arg);
+ 	if (ret) {
+ 		ath11k_warn(ar->ab, "failed to start hw scan: %d\n", ret);
+ 		spin_lock_bh(&ar->data_lock);
+ 		ar->scan.state = ATH11K_SCAN_IDLE;
+ 		spin_unlock_bh(&ar->data_lock);
++		__pm_relax(ar->ab->scan_ws);
+ 	}
+ 
+ 	ieee80211_queue_delayed_work(ar->hw, &ar->scan.timeout,
