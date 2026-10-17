@@ -259,11 +259,20 @@ PRODUCT_PACKAGES += \
 #   上机判据：`pm list features` 里 reqGlEsVersion=0x30002。
 PRODUCT_PROPERTY_OVERRIDES += \
     ro.opengles.version=196610
-# ⚠️ ANGLE 库在 /system/lib64/ 根（AOSP 16 默认自带，不在 egl/ 子目录），
-# 加载开关是 persist.graphics.egl（Loader.cpp:67-70 实名核实），
-# ro.hardware.egl 走的是 egl/libEGL_*.so 搜索路径，对 ANGLE 不生效。
+# ⚠️ ANGLE 库在 /system/lib64/ 根（AOSP 16 默认自带，不在 egl/ 子目录），本机没有别的 GLES 驱动。
+# EGL 加载器按 persist.graphics.egl、ro.hardware.egl、ro.board.platform 的顺序取第一个非空值；值为 angle 时
+# 从 /system/lib64 加载 ANGLE，不管它来自哪个属性（frameworks/native opengl/libs/EGL/Loader.cpp，
+# android-16.0.0_r4：:72-76、:299-311、:505、:523）。两个都设：
+#   · persist.graphics.egl=angle：设置里"把 ANGLE 用作系统 GLES 驱动"的开关读它。
+#   · ro.hardware.egl=angle：兜底。设置每次走"关闭开发者选项"的流程（主开关关掉；开发者选项页面开着时被
+#     adb / 脚本关掉；开发者选项已关时打开这个页面）都会把 persist.graphics.egl 写成空值、存进 /data
+#     （packages/apps/Settings GraphicsDriverEnableAngleAsSystemDriverController.onDeveloperOptionsSwitchDisabled）。
+#     没有这一行，下次开机 zygote 找不到 GLES 驱动，在 preload 里 abort，一直卡在内核日志；
+#     关开发者选项时 USB 调试也一起关了，adb 连不上。
 PRODUCT_PROPERTY_OVERRIDES += \
     persist.graphics.egl=angle
+PRODUCT_VENDOR_PROPERTIES += \
+    ro.hardware.egl=angle
 PRODUCT_VENDOR_PROPERTIES += \
     debug.hwui.renderer=skiagl
 # GLES 应用的着色器 / 管线磁盘缓存（EGL_ANDROID_blob_cache，ANGLE 的程序与 VkPipelineCache 都存这里）。
