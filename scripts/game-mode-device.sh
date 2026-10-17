@@ -8,8 +8,11 @@
 #   * resetprop 用 KSU 的 /data/adb/ksu/bin/resetprop（Magisk 语法）。
 #     ro.* 删掉只影响内存属性区，重启自还原；persist.* 是真持久，靠状态文件还原。
 #   * on 的最后一步是【延迟关 adb】—— 立即关会把正在执行的 shell 一起杀掉。
-#     定时器、安全网必须先布好。⚠️ USB 配置要走 setprop 才改 gadget（resetprop 不触发
-#     init 的 on property 钩子）；改 gadget 会立刻断开本会话。
+#     定时器、安全网必须先布好。开关 adb 只改 adb_enabled：AdbService 据此起停 adbd，
+#     UsbDeviceManager（patches/0096 补上 android_usb 类以后才有）把 adb 加进或移出 USB 功能，
+#     并维护 persist.sys.usb.config。sys.usb.config / persist.sys.usb.config 归框架管，
+#     脚本不直接写、也不直接 stop / start adbd，否则框架记录的状态和 gadget 实际对不上（#41 评审）。
+#     关 adb 会立刻断开本会话。
 #   * ⚠️★★★ 定时器必须先【搬出 adbd 的 cgroup】：Mac 侧 `adb shell` 拿到的 root shell（KSU 自动给的）
 #     在 adbd 的 cgroup（/system/uid_0/pid_<adbd>）里，后台起的子进程跟着在；`stop adbd` 时 init
 #     把这个 cgroup 里的进程【全部 SIGKILL】—— setsid / trap HUP 都挡不住。2026-10-10、10-11 两次
@@ -167,6 +170,8 @@ do_unhide() {
 # ⚠️ 每次都按本脚本的版本重写（写临时文件，内容不同才替换）。原来"已存在就返回"，
 #    改过兜底逻辑后已装过旧版的设备永远拿不到新版（审查 2026-10-11）。
 write_safety() {
+  # KSU 不一定建了 service.d（10-17 用户的机器上就没有）；没有它兜底写不进去
+  mkdir -p "${SAFETY%/*}"
   cat > "$SAFETY.new" <<'EOF'
 #!/system/bin/sh
 # gk3 游戏模式兜底：开机时若仍有残留标记，把 adb / 开发者选项恢复回来。
@@ -177,6 +182,8 @@ write_safety() {
 #    并用读回校验重试。
 MARK=/data/local/tmp/gk3-game-mode/active
 [ -f "$MARK" ] || exit 0
+# 定时器活不过重启。它的 pid 文件留着的话，之后手动 off 会去 kill 一个不相干的进程（pid 已被复用）
+rm -f /data/local/tmp/gk3-game-mode/timer.pid
 
 # 等 boot_completed（最长 90 秒）
 i=0
@@ -201,13 +208,16 @@ restore_setting() {
   return 1
 }
 
-restore_setting development_settings_enabled 1
-restore_setting adb_enabled 1
+# TCP adb 按 on 存下的原值还原，要在 adb_enabled=1 之前：adbd 起来时才会监听
+T=/data/local/tmp/gk3-game-mode/state/persist.adb.tcp.port
+if [ -s "$T" ]; then
+  setprop persist.adb.tcp.port "$(cat "$T")"
+  setprop service.adb.tcp.port "$(cat "$T")"
+fi
 
-setprop persist.sys.usb.config adb
-setprop sys.usb.config adb
-setprop persist.adb.tcp.port 5555
-setprop service.adb.tcp.port 5555
+restore_setting development_settings_enabled 1
+# adb_enabled=1：AdbService 起 adbd，UsbDeviceManager 把 adb 加回 USB 功能（不直接写 sys.usb.config）
+restore_setting adb_enabled 1
 
 # 校验通过才删标记，下次开机还能再兜一次
 if [ "$(settings get global development_settings_enabled)" = "1" ] && \
@@ -221,6 +231,8 @@ EOF
   else
     mv "$SAFETY.new" "$SAFETY" && log "已安装 / 更新开机兜底 $SAFETY"
   fi
+  # 和定时器一样：兜底没装上就不关 adb，免得把自己锁在外面
+  [ -x "$SAFETY" ] || { log "✗ 开机兜底装不上（$SAFETY）—— 不关 adb"; rm -f "$SAFETY.new"; return 1; }
 }
 
 # 开机身份归一（独立于 game-mode 开关；resetprop 不持久，每开机都要重打）
@@ -287,27 +299,21 @@ do_on() {
   do_identity
   save_setting global development_settings_enabled
   save_setting global adb_enabled
-  [ -f "$STATE/persist.sys.usb.config" ] || getprop persist.sys.usb.config > "$STATE/persist.sys.usb.config"
   [ -f "$STATE/persist.adb.tcp.port" ] || getprop persist.adb.tcp.port > "$STATE/persist.adb.tcp.port"
-  write_safety
+  write_safety || exit 1
   start_timer "$min" || exit 1
   touch "$ACTIVE"
-  # ⚠️ USB / TCP 配置要走 setprop（属性服务）：resetprop 直写属性区、不触发 init 的
-  #    `on property:persist.sys.usb.config=*`，gadget 不重新枚举 —— 主机侧 adb 接口
-  #    会一直挂着（2026-10-10 实测）。改 gadget 会立刻断开本会话 ⇒ 定时器与安全网
-  #    必须先就位（上面两行已布好）。resetprop 只用来做持久副本，兜底 setprop 被拒。
-  # ⚠️ 切 gadget 那一下，走 USB 的 adb 会话当场断（stdout 管道关闭 ⇒ 下一次 echo 收 SIGPIPE），
+  # ⚠️ 关 adb 那一下，走 USB 的 adb 会话当场断（stdout 管道关闭 ⇒ 下一次 echo 收 SIGPIPE），
   #    排在它后面的步骤就不执行了 ⇒ 不断开会话的先做，会断开的全部放进脱离会话、输出丢弃的子 shell。
+  #    定时器与安全网必须先就位（上面已布好）。
+  # adb 只改 adb_enabled（见文件头）：AdbService 停 adbd，UsbDeviceManager 把 adb 移出 USB 功能，
+  #    USB 回到用户选的用途（或只充电）。TCP 端口先清掉，adbd 被别处拉起来时也不会监听 5555。
   "$RP" --delete persist.adb.tcp.port
   settings put global development_settings_enabled 0
   log "关闭 adb……"
   ( trap '' HUP PIPE; escape_cgroup; sleep 1
-    "$RP" persist.sys.usb.config mtp
-    setprop persist.sys.usb.config mtp
-    setprop sys.usb.config mtp
     setprop service.adb.tcp.port ""
-    settings put global adb_enabled 0
-    stop adbd ) >/dev/null 2>&1 &
+    settings put global adb_enabled 0 ) >/dev/null 2>&1 &
 }
 
 do_off() {
@@ -316,7 +322,15 @@ do_off() {
     old=$(cat "$TIMER_PID" 2>/dev/null)
     # 定时器触发的 off 不杀定时器（pid 可能就是自己，见 start_timer）；手动 off 才杀
     if [ -z "${GK3_TIMER_FIRED:-}" ] && [ -n "$old" ] && [ "$old" != "$$" ]; then
-      kill "$old" 2>/dev/null
+      # 只杀确实是定时器的进程（pid 可能已被复用）
+      case "$(tr '\0' ' ' < "/proc/$old/cmdline" 2>/dev/null)" in
+        *gk3-game-mode*)
+          # 定时器的 sh 正在等前台的 sleep；sh（mksh）接管了 SIGTERM，要等 sleep 返回才处理，
+          # 光 kill 它，它会一直等到时间到（10-17 实机：off 之后定时器还活着）。所以连 sleep 一起杀。
+          # 先 sh 后 sleep：sleep 一结束 sh 就按挂起的 SIGTERM 退出，不会再跑后面的 off。
+          kill "$old" 2>/dev/null
+          pkill -P "$old" 2>/dev/null ;;
+      esac
     fi
     rm -f "$TIMER_PID"
   fi
@@ -328,17 +342,10 @@ do_off() {
       rm -f "$STATE/$p"
     fi
   done
-  # persist 值还原（原值一般是 adb / 5555）。
-  # ⚠️ 同 do_on：USB 配置必须 setprop 才改 gadget；resetprop 只做持久副本。
-  #    另外把运行时 sys.usb.config 与 service.adb.tcp.port 一并拉回，
-  #    否则 adbd 起来了主机侧仍看不到接口 / 5555 不监听。
-  if [ -f "$STATE/persist.sys.usb.config" ]; then
-    v=$(cat "$STATE/persist.sys.usb.config")
-    [ -n "$v" ] && { "$RP" persist.sys.usb.config "$v"; setprop persist.sys.usb.config "$v"; }
-    rm -f "$STATE/persist.sys.usb.config"
-  fi
-  usb=$(getprop persist.sys.usb.config)
-  [ -n "$usb" ] && setprop sys.usb.config "$usb"
+  # 旧版 on 存过 persist.sys.usb.config；现在由框架维护，不再还原
+  rm -f "$STATE/persist.sys.usb.config"
+  # TCP 端口按原值还原（一般是 5555 或空），要在 adb_enabled=1 之前：adbd 起来时才会监听。
+  # 用 setprop 而不只是 resetprop：属性服务才写持久区、触发 init 的属性钩子。
   if [ -f "$STATE/persist.adb.tcp.port" ]; then
     v=$(cat "$STATE/persist.adb.tcp.port")
     [ -n "$v" ] && { "$RP" persist.adb.tcp.port "$v"; setprop persist.adb.tcp.port "$v"; }
@@ -355,8 +362,8 @@ do_off() {
     fi
   done
   rm -f "$ACTIVE"
+  # 最后确保 adb 打开：AdbService 起 adbd，UsbDeviceManager 把 adb 加回 USB 功能
   settings put global adb_enabled 1
-  start adbd 2>/dev/null
   log "已恢复"
 }
 
@@ -368,6 +375,7 @@ do_status() {
     echo "  $p = $(getprop "$p")"
   done
   echo "  persist.sys.usb.config = $(getprop persist.sys.usb.config)"
+  echo "  sys.usb.config / state = $(getprop sys.usb.config) / $(getprop sys.usb.state)"
   echo "  persist.adb.tcp.port   = $(getprop persist.adb.tcp.port)"
   echo "  adb_enabled            = $(settings get global adb_enabled)"
   echo "  development_settings   = $(settings get global development_settings_enabled)"

@@ -51,11 +51,12 @@ BROKEN=vendor.gaokun3.usbrole.broken
 #     symlink 已存在、写 UDC 失败 —— host 模式下 a600000.usb 这个 UDC 根本不存在，configfs 的 gadget 驱动是
 #     match_existing_only（linux v7.2-rc2 drivers/usb/gadget/configfs.c:1985），注册时找不到 UDC 就返回 -EBUSY
 #     （drivers/usb/gadget/udc/core.c:1733-1737），udc_name 随即清空（configfs.c:295-303）⇒ 不会挂起等待，下一秒再来。
+#     patches/0112 起写 UDC 不再失败：驱动挂起等 UDC 出现，再写同名就重新注册；adbd 照样每秒重开 functionfs、重写描述符。
 # 上游早就留了开关，正是为这种情况：usb.cpp:728-740 —— "When the device is acting as a USB host, we'll be unable
 #   to bind to the USB gadget…"，读 sys.usb.adb.disabled，为真就在 open_functionfs 之后停在 PropertyMonitor 里等它
 #   变回假（:751-755）；init.usb.rc:23-24（refs/lineage-system-core/rootdir/）把 vendor.sys.usb.adb.disabled 拷过去。
 # ⇒ 我们按【实际角色】设它：host ⇒ 1，device ⇒ 0。只停 adbd 的 USB 传输：不动 sys.usb.config（B1 的「USB 调试」
-#   开关语义、init.gaokun3.usb.rc 里 init.svc.adbd 的桥接都不受影响），TCP / 无线调试照常。
+#   开关语义和 UsbDeviceManager 选的「USB 用途」都不受影响），TCP / 无线调试照常。
 #   切回 device、设回 0 之后：adbd 起连接 → 1 秒等不到 BIND → 重开 ffs → ffs.ready=1 → init 写 UDC（此时 UDC 已在）
 #   → 绑上，USB adb 约 1–2 秒回来 —— 与现在"切回 device 后靠每秒重试碰上"是同一条路，只是 host 期间不再空转。
 # 属性链：本脚本 setprop vendor.gaokun3.usbrole.adb_pause（vendor_gaokun3_prop，本域有 set_prop）→ etc/usbrole.rc
@@ -94,7 +95,7 @@ fi
 # ★ 2026-09-14（#112）：插着 USB 主机（PC 在用 adb）时【不切 host、不放行挂起】。
 #   依据：#56 实测 device 模式带着已枚举的 gadget 挂起照样整板复位，所以"插着线睡"在这块板子上
 #   目前不可能安全；而切 host 就等于把用户正在用的 adb 拔掉。折中：插着主机 → 息屏但不睡（反正在充电），
-#   拔线后再切 host 放行挂起（role_host 进程原地每 2 秒看一次 UDC 状态）。判据用 UDC 的 state：
+#   拔线后再切 host 放行挂起（role_host 进程原地每 2 秒看一次，见下面的 host_unplugged）。判据用 UDC 的 state：
 #   configured/addressed = 有主机在总线另一端；not attached = 没有。
 #   ⚠️ 这不是根治。根治是让 dwc3 device 模式的挂起不复位（见 docs/stage4-findings.md #112）。
 #   ⚠️ 拔线之后 UDC 的 state 不会变：一直停在 configured，直到重新插上、主机再次枚举（dwc3 没有得知
@@ -114,6 +115,17 @@ host_attached() {
     esac
 }
 
+# 确认插着主机以后，等拔线时只看适配器在线（#41 评审）：切"USB 用途"时 gadget 要重绑，dwc3 断开上拉，
+#   UDC 会短暂变成 not attached；2 秒一次的轮询碰上这一瞬，就会当成拔线、切 host，把正在用的连接断掉。
+#   适配器节点读不到时只能照旧看 UDC。主机让总线休眠（UDC=suspended，比如电脑睡了）也接着等，直到拔线或亮屏。
+host_unplugged() {
+    case "$(cat $ADAPTER 2>/dev/null)" in
+        0) return 0 ;;
+        1) return 1 ;;
+        *) ! host_attached ;;
+    esac
+}
+
 if [ "$WANT" = host ] && host_attached; then
     # 息屏期间插着主机：先关门，再【就在这个进程里】等到拔线（或亮屏）再切 host。
     # ⚠️★ 2026-09-29 改（SELinux 第七轮审计）：原先是 `(setsid "$0" watch &)` 另起一个 watch 进程、
@@ -127,7 +139,7 @@ if [ "$WANT" = host ] && host_attached; then
     #   现在：role_host 自己留着等；亮屏时 usbrole.rc 先 `stop gaokun3_role_host` 再起 role_device。
     echo $WL > /sys/power/wake_lock
     say "USB 主机在线（UDC=$(cat $UDC 2>/dev/null)，适配器在线=$(cat $ADAPTER 2>/dev/null)）→ 保持 device、不放行挂起（充电中，息屏不睡）；拔线后自动切 host"
-    while host_attached; do
+    until host_unplugged; do
         [ "$(getprop debug.tracing.screen_state)" = 2 ] && exit 0
         sleep 2
     done

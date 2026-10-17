@@ -34,9 +34,8 @@
      "老用户 OTA 后自动生效"：build.prop 里的默认值不落盘 —— refs/lineage-system-core/init/property_service.cpp:424-425
      只有经 setprop（socket）且 persist 属性已载入后才 WritePersistentProperty。自己 setprop 过 persist.adb.tcp.port
      的人 /data/property 里会留着它 —— 清除办法 ⬜ 待上机核实（v1.0-plan.md:46 的"还要验证"）。
-     "「USB 调试」每次重启复位成关"：device/huawei/gaokun3/init.gaokun3.usb.rc:59-64（本机没有 UsbDeviceManager，
-     只在 /sys/class/android_usb 存在时才建；重启后 AdbService 按 persist.sys.usb.config 复位，发布构建里它为空）；
-     AdbService 那半句按 frameworks/base 推断，本地 refs 没有那棵树，待构建机核实（usb.rc:68-69 的 ⚠️）。 -->
+     「USB 调试」开关：patches/0096 补上 /sys/class/android_usb 以后有了 UsbDeviceManager，它按 persist.sys.usb.config
+     记住这个开关，重启后保持原状（AOSP 原生行为）。 -->
 * **现象**：在 v0.7.1 及以前的版本上看不出任何异常 —— 问题恰恰在这里。
 * **原因**：v0.7.1 及以前的镜像会在所有网卡（包括 Wi-Fi 热点那个口）上监听 TCP 5555 端口的 adb，连接时**不弹**
   "允许调试吗？"的授权框。镜像是可调试的（`ro.debuggable=1`），连上后再 `adb root` 就是 root。镜像里还带着维护者的
@@ -47,9 +46,7 @@
 * **替代办法**：
   * 下一个发布版出来后尽快更新。在那之前，不要连不信任的 Wi-Fi，也不要让陌生人连你的热点。
   * 自己设过 `persist.adb.tcp.port` 的：更新后怎么清掉它，会补在这里（⬜ 待上机核实）。
-  * 从那一版起，开发者选项里的 **USB 调试**每次重启都会自己变回关闭，要用时再打开一次。这是已知限制：Android 里
-    平时负责记住这个开关的那一部分（USB 设备管理器）在这台机器上不运行。想通过网络用 adb，请用 **无线调试**
-    （[常见问题](FAQ.zh-CN.md#无线调试)）。
+  * 想通过网络用 adb，请用 **无线调试**（[常见问题](FAQ.zh-CN.md#无线调试)）。
 
 ### 系统用 AOSP 公开的测试密钥签名
 <!-- B2 / SEC-2（用户 2026-10-04 定 D2：保留 test-key、披露）。证据：实机 otacerts.zip 只有 testkey.x509.pem，
@@ -162,17 +159,20 @@
   但这条路还没在真机上验证过 —— 请当它不起作用。
 * **替代办法**：用图形安装器的 **重新安装 Android**，它默认清除数据。步骤见[常见问题](FAQ.zh-CN.md#恢复出厂--卖机前清除数据)。
 
-### 用 USB 线连电脑不能传文件（没有 MTP / PTP）
-<!-- PWR-6 / BKUP-7 / STOR-7（1.0 只做文档；完整实现推迟到 1.0 之后）。证据：device/huawei/gaokun3/device.mk:57-64 注释
-     （UsbDeviceManager 只在 /sys/class/android_usb 存在时才建，本机是 configfs）；init.gaokun3.usb.rc 只建了 ffs.adb；
-     实机 sys.usb.config=adb、dumpsys usb 没有 device_manager。 -->
-* **现象**：插上电脑后，电脑上不会出现这台平板的盘符或"便携设备"。平板上也没有"USB 用途 / 文件传输"的通知和设置项。
-* **原因**：USB 的设备端目前只实现了 adb 调试这一种功能。要支持文件传输，还得补一整套 USB 功能切换，
-  而且要和已知的 USB-C 口问题一起测试，排在 1.0 之后。
+### 用 USB 线传文件：不弹通知，要到设置里选；只有 USB 2.0 的速度
+<!-- PWR-6 / BKUP-7 / STOR-7。有了 UsbDeviceManager（patches/0096 补上 /sys/class/android_usb，连接状态由 USB 端口 HAL 写）
+     以后，MTP / PTP 走 FunctionFS（init.gaokun3.usb.rc），协议由 MtpService 在用户态实现。
+     不弹通知：键盘接口的 MCU（12d1:10b8）一直挂在 USB 上、带 HID 接口，UsbDeviceManager 看到这类设备就隐藏 USB 连接通知。
+     速度：靠近电源键的口（a600000.usb）在设备模式下只有 high-speed。
+     同一页的 USB 网络共享（RNDIS）和 MIDI 见 init.gaokun3.usb.rc 的"USB 网络共享（RNDIS）、MIDI"一段。 -->
+* **现象**：插上电脑后，平板上不会弹出"USB 用途"的通知。要传文件，到 **设置 > 已连接的设备 > USB** 里选
+  "文件传输"或"PTP"，电脑上随后会出现"MateBook E Go"这个便携设备。传输速度只有 USB 2.0 的水平（约 30 MB/s）。
+  同一个页面里还有"USB 网络共享"和"MIDI"。
+* **原因**：键盘接口在系统里是一个一直插着的 USB 键盘，Android 看到这类设备时不显示 USB 连接的通知。
+  靠近电源键的 USB-C 口在设备模式下只能跑 USB 2.0。
 * **替代办法**：
-  * 用局域网传文件的 App（例如 LocalSend），或者网盘。
-  * 会用 adb 的话：打开 USB 调试，然后 `adb pull /sdcard/DCIM/ .`、`adb push 文件 /sdcard/Download/`。
-  * 插着电脑 USB 口时这台机器不会进入待机（这是有意的设计，避免待机时整机复位），传完记得拔线。
+  * 按上面的路径在设置里选"文件传输"。
+  * 插着电脑时平板不会进入待机（这是有意的设计，避免待机时整机复位），所以息屏后传输不会中断；传完记得拔线。
 
 ### 插 U 盘没有反应
 <!-- STOR-1 / BKUP-6：fstab 的 voldmanaged 行已写（8da5974，device/huawei/gaokun3/fstab.gaokun3 末尾），⬜ 未构建、未上机。

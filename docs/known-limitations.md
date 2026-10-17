@@ -41,10 +41,7 @@ Problems specific to one release are in that release's [release notes](relnotes/
     let strangers join your hotspot.
   * If you set `persist.adb.tcp.port` yourself: how to clear it after updating will be added here (⬜ not yet verified
     on hardware).
-  * From that release on, the **USB debugging** switch in Developer options turns itself off at every reboot; turn it
-    on again when you need it. This is a known limitation: the part of Android that normally remembers this switch
-    (the USB device manager) does not run on this machine. For adb over the network, use **Wireless debugging**
-    ([FAQ](FAQ.md#wireless-debugging)).
+  * For adb over the network, use **Wireless debugging** ([FAQ](FAQ.md#wireless-debugging)).
 
 ### The system is signed with Android's public test keys
 <!-- B2 / SEC-2 (user decision D2, 2026-10-04: keep test-keys, disclose). -->
@@ -154,17 +151,19 @@ yourself, you should know that they contain these components.
 * **What to do**: use the graphical installer's **Reinstall Android**, which wipes data by default. Steps in the
   [FAQ](FAQ.md#factory-reset--wiping-before-you-sell).
 
-### No file transfer over USB (no MTP / PTP)
-<!-- PWR-6 / BKUP-7 / STOR-7 (1.0: documentation only; the real thing is after 1.0). -->
-* **What you see**: when you connect the tablet to a computer, no drive or "portable device" appears on the computer, and
-  the tablet shows no "USB preferences / File transfer" notification or setting.
-* **Why**: on the USB device side only adb debugging is implemented. File transfer needs the whole USB function-switching
-  machinery, which must be tested together with a known USB-C port problem; it is planned for after 1.0.
+### File transfer over USB: no notification, choose it in Settings; USB 2.0 speed only
+<!-- PWR-6 / BKUP-7 / STOR-7. See the comment in known-limitations.zh-CN.md. -->
+* **What you see**: when you connect the tablet to a computer, the tablet shows no "USB preferences" notification. To
+  transfer files, go to **Settings > Connected devices > USB** and choose "File transfer" or "PTP"; "MateBook E Go" then
+  appears on the computer as a portable device. Transfers run at USB 2.0 speed (about 30 MB/s). The same page also
+  offers "USB tethering" and "MIDI".
+* **Why**: the keyboard connector shows up as a USB keyboard that is always plugged in, and Android hides the USB
+  connection notification while such a device is present. The USB-C port next to the power button only runs at USB 2.0
+  in device mode.
 * **What to do**:
-  * Use a local-network transfer app (e.g. LocalSend) or a cloud drive.
-  * With adb: enable USB debugging, then `adb pull /sdcard/DCIM/ .` or `adb push file /sdcard/Download/`.
-  * While it is plugged into a computer's USB port the machine does not go to standby (deliberately: standby in that
-    state resets the board). Unplug when you are done.
+  * Choose "File transfer" in Settings as above.
+  * While it is plugged into a computer the tablet does not go to standby (deliberately: standby in that state resets
+    the board), so transfers keep going with the screen off. Unplug when you are done.
 
 ### USB sticks are not recognised
 <!-- STOR-1 / BKUP-6: the voldmanaged lines are in fstab (8da5974), ⬜ not built, not tested on hardware.

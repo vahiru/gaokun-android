@@ -1,0 +1,77 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] usb: gadget: configfs: 把"none"当作解绑，UDC不在时挂起等它出现
+
+Android的init.usb.configfs.rc切换USB功能时，先往g1/UDC写"none"、删掉功能
+链接，再链接新功能、写入UDC的名字。主线的configfs和Android的内核在这里有两
+处不同：
+
+- "none"：Android的内核把它当作解绑；主线只认空串，把"none"当成一个UDC的
+  名字。
+- 写入的UDC不存在：主线（match_existing_only）直接返回-EBUSY，不注册驱动。
+  已经注册好的驱动在UDC消失以后仍保持注册，UDC回来时自动绑上。
+
+这台机器的port0当主机时，dwc3会注销UDC（a600000.usb）。这期间切换USB功能，
+写UDC就会失败，回到设备模式后也没人再写：带adb的配置有adbd每秒重试，只开
+MTP、PTP时gadget一直不绑，接上电脑也枚举不到。
+
+这个补丁改三处：
+- "none"和空串一样，解绑。
+- 去掉match_existing_only：UDC不在时驱动先注册、挂起，UDC出现时再绑定，和
+  "先注册、后来UDC消失"的情况一样。
+- 已经注册、但没有绑上（UDC刚才不在，或者绑定时某个FunctionFS功能还没准备
+  好），再写同一个名字时重新注册一次，UDC在的话就绑上。否则绑定失败一次以后，
+  驱动一直占着名字，之后写UDC都返回-EBUSY。
+
+只去掉match_existing_only不行：开机时init第一次写"none"，驱动就会挂起等一个
+叫"none"的UDC，占住名字，之后链接功能（config_usb_cfg_link要求驱动没有注册）
+和写UDC都会失败。
+
+只给Android用，不进主线。
+---
+ drivers/usb/gadget/configfs.c | 20 ++++++++++++++++----
+ 1 file changed, 16 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/usb/gadget/configfs.c b/drivers/usb/gadget/configfs.c
+index dd6d6b111..151b6f1e1 100644
+--- a/drivers/usb/gadget/configfs.c
++++ b/drivers/usb/gadget/configfs.c
+@@ -286,15 +286,28 @@ static ssize_t gadget_dev_desc_UDC_store(struct config_item *item,
+ 
+ 	mutex_lock(&gi->lock);
+ 
+-	if (!strlen(name)) {
++	/* Android's init.usb.configfs.rc writes "none" to unbind. */
++	if (!strlen(name) || !strcmp(name, "none")) {
+ 		ret = unregister_gadget(gi);
+ 		if (ret)
+ 			goto err;
+ 		kfree(name);
+ 	} else {
+ 		if (gi->composite.gadget_driver.udc_name) {
+-			ret = -EBUSY;
+-			goto err;
++			/*
++			 * Registered but not bound to that UDC: it was absent (a
++			 * dual-role controller in host mode), or binding failed
++			 * (a FunctionFS function not ready yet). Register again,
++			 * which binds if the UDC is there now.
++			 */
++			if (gi->composite.gadget_driver.is_bound ||
++			    strcmp(gi->composite.gadget_driver.udc_name, name)) {
++				ret = -EBUSY;
++				goto err;
++			}
++			ret = unregister_gadget(gi);
++			if (ret)
++				goto err;
+ 		}
+ 		gi->composite.gadget_driver.udc_name = name;
+ 		ret = usb_gadget_register_driver(&gi->composite.gadget_driver);
+@@ -1982,7 +1995,6 @@ static const struct usb_gadget_driver configfs_driver_template = {
+ 	.driver = {
+ 		.owner          = THIS_MODULE,
+ 	},
+-	.match_existing_only = 1,
+ };
+ 
+ static struct config_group *gadgets_make(

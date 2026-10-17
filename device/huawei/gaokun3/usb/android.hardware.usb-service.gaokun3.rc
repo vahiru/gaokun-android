@@ -1,6 +1,7 @@
 # USB 端口 HAL，说明见 Usb.cpp 开头。
-# 跑 system:system。它只写两个节点：port0 的 role（切数据角色）和 UDC 的 soft_connect
-# （对端拔掉后让 UDC 断开再接上）。两个节点默认 root 独占，由 ueventd.gaokun3.rc 交给 system 组。
+# 跑 system:system。它写三个节点：port0 的 role（切数据角色）、UDC 的 soft_connect
+# （对端拔掉后让 UDC 断开再接上），以及 android_usb 的 state（给 UsbDeviceManager 的连接状态，patches/0096）。
+# 三个节点默认 root 独占，由 ueventd.gaokun3.rc 交给 system 组。
 service vendor.usb-gaokun3 /vendor/bin/hw/android.hardware.usb-service.gaokun3
     class hal
     user system

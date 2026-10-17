@@ -3,7 +3,8 @@
 # 分工（依据 AOSP 16 源码，不是猜的）：
 #   system/core/rootdir/init.rc              已挂 configfs 到 /config
 #   system/etc/init/hw/init.usb.configfs.rc  属性触发：adbd 起、ffs.ready 后写 UDC
-#   本文件                                    gadget 骨架 + ffs 挂载 + 角色 + configfs=1
+#   本文件                                    gadget 骨架 + ffs 挂载（adb、MTP、PTP）+ 角色 + configfs=1
+#                                            + MTP / PTP 配置要的链接和产品 ID
 #
 # 实测教训（docs/stage2-findings.md 第 8.3quinquies 节）：
 # ① 骨架（尤其 mkdir functions/ffs.adb 注册实例）必须在 functionfs mount
@@ -30,6 +31,19 @@ on post-fs-data
     mkdir /dev/usb-ffs 0775 shell shell
     mkdir /dev/usb-ffs/adb 0770 shell shell
     mount functionfs adb /dev/usb-ffs/adb rmode=0770,fmode=0660,uid=2000,gid=2000,no_disconnect=1
+    # MTP / PTP（"USB 用途"里的文件传输 / 传照片）走 FunctionFS，协议由 MtpService 的 MtpServer 在用户态实现
+    # （主线没有 Android 内核的 f_mtp）。system_server 的 UsbDeviceManager 一启动就打开 ep0 写描述符，所以要在
+    # zygote 之前挂好。uid / gid 1024 = mtp：MtpService 跑在 android.process.media 进程里（SELinux 域 mediaprovider，
+    # 核心策略已给它 functionfs 的读写），它持有 ACCESS_MTP，在 mtp 组里。
+    mkdir /config/usb_gadget/g1/functions/ffs.mtp
+    mkdir /config/usb_gadget/g1/functions/ffs.ptp
+    mkdir /dev/usb-ffs/mtp 0770 mtp mtp
+    mkdir /dev/usb-ffs/ptp 0770 mtp mtp
+    mount functionfs mtp /dev/usb-ffs/mtp rmode=0770,fmode=0660,uid=1024,gid=1024,no_disconnect=1
+    mount functionfs ptp /dev/usb-ffs/ptp rmode=0770,fmode=0660,uid=1024,gid=1024,no_disconnect=1
+    # MIDI（"USB 用途"里的 MIDI）：内核的 f_midi（USB_CONFIGFS_F_MIDI）。system 的 init.usb.configfs.rc 只把
+    # functions/midi.gs5 链接成 f1，不建它（rndis.gs4 它会建），所以在这里建。
+    mkdir /config/usb_gadget/g1/functions/midi.gs5
     # 切 device 交给 gaokun3_role_device（etc/usbrole.rc）：port0 上插着 U 盘 / 鼠标这类设备、
     # xhci 已枚举到它们时保持 host，否则照旧切 device（v1.0 PWR-5 / STOR-2）。
     # 用 exec_start（同步，etc/bpfrelabel.rc 用过同一招）而不是 start：下面 configfs=1 → adbd →
@@ -56,16 +70,70 @@ on boot
     #   · 开发机跑发布构建：先 setprop persist.sys.usb.config adb 持久化进 /data。
     #   当初强写，推测是因为 Stage 2 那时 system_ext 还没有 ro.debuggable=1、也就没有这个 persist 值。
 
-# 发布构建里用户在开发者选项打开「USB 调试」/「无线调试」：AdbService 只负责起 adbd，
-# 把 adb 写进 sys.usb.config 的是 UsbDeviceManager —— 本机没有它（只在
-# /sys/class/android_usb 存在时才建，主线内核没有这个类，见 device.mk 的 usb.host 一段）。
-# 于是 adbd 起来了、gadget 却永远不绑 UDC。这里补上：adbd 一跑起来就把 config 落成 adb，
-# 交给 init.usb.configfs.rc 的 ffs.ready 触发器去绑 UDC。
-#   · 只在会话内有效：重启后 AdbService 按 persist.sys.usb.config（发布构建为空）把开关复位成关。
-#   · 开发构建里 config 本来就是 adb：同值 setprop 照样触发（property_service.cpp:434 无条件
-#     NotifyPropertyChange），再走一遍绑定动作 —— 与 adb root 重启 adbd 时那一遍相同，
-#     symlink 已存在 / UDC 已绑定只会各报一条错，不断连（UDC 那半句待上机核实）。
-# ⚠️ "AdbService 只 ctl.start adbd、不碰 sys.usb.config"与"重启后按 persist 复位"是按 frameworks/base 写的，本地 refs
-#   没有那棵树，待构建机核实（services/core/java/com/android/server/adb/AdbService.java）。
-on property:init.svc.adbd=running && property:sys.usb.configfs=1
+# 「USB 调试」/「无线调试」打开时，AdbService 起 adbd，把 adb 写进 sys.usb.config 的是 UsbDeviceManager
+# （它也管"USB 用途"）。框架只在 /sys/class/android_usb 存在时才建它，patches/0096 补上了这个类，
+# 连接状态由 USB 端口 HAL 写（usb/Usb.cpp）。原先这里有一条"adbd 一跑起来就把 config 落成 adb"的规则，
+# 是没有 UsbDeviceManager 时的顶替；无条件留着它会把 UsbDeviceManager 切出的 mtp,adb 又改回 adb。
+# 现在只在内核没有 android_usb 类（没有 0096 的旧内核）时生效：那时没有 UsbDeviceManager，不补这条的话
+# adbd 起来了、gadget 却永远不绑 UDC。USB 端口 HAL 启动时查这个类，没有就设 vendor.gaokun3.usb.no_android_usb=1。
+on property:init.svc.adbd=running && property:sys.usb.configfs=1 && property:vendor.gaokun3.usb.no_android_usb=1
     setprop sys.usb.config adb
+
+# ── MTP / PTP 的配置（UsbDeviceManager 切"USB 用途"时设 sys.usb.config）──────────────
+# system 的 init.usb.configfs.rc 给 mtp / ptp 链接的是 Android 内核的 f_mtp（functions/mtp.gs0、ptp.gs1），
+# 主线没有，它那句 symlink 会失败（无害）。本文件先于它被 import（init.rc 先导入 init.${ro.hardware}.rc），
+# 同一触发条件下这里先执行：把 FunctionFS 的实例链接成 f1、换上对应的 Google 产品 ID，再由它写 UDC。
+# 切换时 UsbDeviceManager 先经过 none，init.usb.configfs.rc 在那一步删掉 f1–f3（这里只用到 f1）。
+on property:sys.usb.config=mtp && property:sys.usb.configfs=1
+    write /config/usb_gadget/g1/idProduct 0x4EE1
+    symlink /config/usb_gadget/g1/functions/ffs.mtp /config/usb_gadget/g1/configs/b.1/f1
+
+on property:sys.usb.ffs.ready=1 && property:sys.usb.config=mtp,adb && property:sys.usb.configfs=1
+    write /config/usb_gadget/g1/idProduct 0x4EE2
+    symlink /config/usb_gadget/g1/functions/ffs.mtp /config/usb_gadget/g1/configs/b.1/f1
+
+on property:sys.usb.config=ptp && property:sys.usb.configfs=1
+    write /config/usb_gadget/g1/idProduct 0x4EE5
+    symlink /config/usb_gadget/g1/functions/ffs.ptp /config/usb_gadget/g1/configs/b.1/f1
+
+on property:sys.usb.ffs.ready=1 && property:sys.usb.config=ptp,adb && property:sys.usb.configfs=1
+    write /config/usb_gadget/g1/idProduct 0x4EE6
+    symlink /config/usb_gadget/g1/functions/ffs.ptp /config/usb_gadget/g1/configs/b.1/f1
+
+# ── USB 网络共享（RNDIS）、MIDI ────────────────────────────────────────────────
+# system 的 init.usb.configfs.rc 在 rndis / rndis,adb 时建 functions/rndis.gs4、链接成 f1、写 UDC，本文件的同名
+# 触发器先执行。RNDIS 的功能类改成 E0/01/03（无线控制器类下的 RNDIS）：Windows 10 / 11 据此装自带的 RNDIS 驱动；
+# 主线 f_rndis 的默认值是 02/02/FF，Windows 不认。class / subclass / protocol 写的是接口关联描述符
+# （drivers/usb/gadget/function/f_rndis.c 的 rndis_bind）。实例在切走时被 init.usb.configfs.rc 删掉，每次都要重设。
+# ⚠️ 值写两位十六进制、不带 0x：这三个属性用 sscanf("%02hhx") 解析（u_ether_configfs.h 的
+#    USB_ETHER_CONFIGFS_ITEM_ATTR_U8_RW），"0xe0" 只读到 "0x"，结果是 0。
+# 网卡名改成 rndis%d（默认是 usb%d）：Android 15 起 EthernetService 默认接管名字匹配 (eth|usb)\d+ 的网卡
+# （packages/modules/Connectivity ServiceConnectivityResources config.xml:216-219，config_ethernet_iface_regex 为
+# "*"），会在 usb0 上跑 DHCP 客户端、登记成有线网络；网络共享把它当上游，发现和自己分出去的网段相同，就不停
+# 重启（PrivateAddressCoordinator 的网段冲突）。网络共享认 rndis\d（tetherableUsbRegexs），EthernetService 不认。
+# ifname 要在绑定之前写，正好跟在 mkdir 后面。
+on property:sys.usb.config=rndis && property:sys.usb.configfs=1
+    mkdir /config/usb_gadget/g1/functions/rndis.gs4
+    write /config/usb_gadget/g1/functions/rndis.gs4/class e0
+    write /config/usb_gadget/g1/functions/rndis.gs4/subclass 01
+    write /config/usb_gadget/g1/functions/rndis.gs4/protocol 03
+    write /config/usb_gadget/g1/functions/rndis.gs4/ifname rndis%d
+    write /config/usb_gadget/g1/idProduct 0x4EE3
+
+on property:sys.usb.ffs.ready=1 && property:sys.usb.config=rndis,adb && property:sys.usb.configfs=1
+    mkdir /config/usb_gadget/g1/functions/rndis.gs4
+    write /config/usb_gadget/g1/functions/rndis.gs4/class e0
+    write /config/usb_gadget/g1/functions/rndis.gs4/subclass 01
+    write /config/usb_gadget/g1/functions/rndis.gs4/protocol 03
+    write /config/usb_gadget/g1/functions/rndis.gs4/ifname rndis%d
+    write /config/usb_gadget/g1/idProduct 0x4EE4
+
+on property:sys.usb.config=midi && property:sys.usb.configfs=1
+    write /config/usb_gadget/g1/idProduct 0x4EE8
+
+on property:sys.usb.ffs.ready=1 && property:sys.usb.config=midi,adb && property:sys.usb.configfs=1
+    write /config/usb_gadget/g1/idProduct 0x4EE9
+
+# 切回只有 adb 时换回 adb 的产品 ID（post-fs-data 里设的初值）。
+on property:sys.usb.ffs.ready=1 && property:sys.usb.config=adb && property:sys.usb.configfs=1
+    write /config/usb_gadget/g1/idProduct 0x4EE7

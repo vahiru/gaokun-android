@@ -45,17 +45,17 @@ bool Exists(const std::string& path) {
     return access(path.c_str(), F_OK) == 0;
 }
 
-bool WriteAttr(const char* path, const char* value) {
+bool WriteAttr(const char* path, const char* value, bool logError = true) {
     int fd = open(path, O_WRONLY | O_CLOEXEC);
     if (fd < 0) {
-        LOGE("open %s: %s", path, strerror(errno));
+        if (logError) LOGE("open %s: %s", path, strerror(errno));
         return false;
     }
     ssize_t n = TEMP_FAILURE_RETRY(write(fd, value, strlen(value)));
     int err = errno;
     close(fd);
     if (n < 0) {
-        LOGE("write %s to %s: %s", value, path, strerror(err));
+        if (logError) LOGE("write %s to %s: %s", value, path, strerror(err));
         return false;
     }
     return true;
@@ -215,6 +215,14 @@ bool WriteRole(const std::string& role) {
 void RestartPullup() {
     WriteAttr(kUdcSoftConnect, "disconnect");
     WriteAttr(kUdcSoftConnect, "connect");
+}
+
+bool HasGadgetState() {
+    return Exists(kGadgetState);
+}
+
+bool WriteGadgetState(const std::string& state, bool logError) {
+    return WriteAttr(kGadgetState, state.c_str(), logError);
 }
 
 bool L9dAlwaysOn() {

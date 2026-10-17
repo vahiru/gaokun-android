@@ -30,6 +30,8 @@ OUT="${1:?用法: $0 <kernel-out-dir>}"
     --enable USB_CONFIGFS_F_FS --enable USB_CONFIGFS_ACM \
     --enable USB_CONFIGFS_MASS_STORAGE --enable USB_CONFIGFS_ECM \
     --enable USB_CONFIGFS_RNDIS --enable USB_CONFIGFS_EEM \
+    `# "USB 用途"里的 MIDI：gadget 的 MIDI 功能（functions/midi.gs5，init.gaokun3.usb.rc），要 SND_RAWMIDI。` \
+    --enable USB_CONFIGFS_F_MIDI \
     --enable OVERLAY_FS
 
 # ---- 让【同一个内核】也能当救援/LiveCD 系统用（见 docs/stage7-live-installer.md）----
@@ -476,6 +478,10 @@ OUT="${1:?用法: $0 <kernel-out-dir>}"
 #   80 秒后 "PPM init failed, stop trying"，/sys/class/typec 为空（#27 / #112 / #118 里的"UCSI 坏了"）。
 ./scripts/config --file "$OUT/.config" --enable TYPEC_MUX_GPIO_SBU
 
+# ★ USB 传文件（MTP/PTP）与"设置"里的 USB 页面：UsbService 只在 /sys/class/android_usb 存在时才建
+#   UsbDeviceManager。主线没有这个类，patches/0096 补上它（连接状态由 USB 端口 HAL 写）。
+./scripts/config --file "$OUT/.config" --enable USB_ANDROID_USB_STATE
+
 # ─── olddefconfig + 断言（止损"=m 坑"）───
 # 这个坑已经踩了 13 次：`scripts/config --enable X` 写进去了，olddefconfig
 # 却可能因为依赖把它降回 =m（或压根没有该符号），而 Android **不加载任何模块**
@@ -536,6 +542,7 @@ SQUASHFS NTFS3_FS NLS_UTF8
 USB_NET_DRIVERS USB_USBNET MII USB_RTL8152 USB_NET_AX8817X USB_NET_AX88179_178A
 ARM64_USER_MMAP_WINDOW_39
 USB_NET_CDCETHER USB_NET_CDC_EEM USB_NET_CDC_NCM USB_NET_HUAWEI_CDC_NCM USB_NET_RNDIS_HOST
+USB_CONFIGFS_RNDIS USB_CONFIGFS_F_MIDI USB_F_MIDI
 INET_ESP INET6_ESP INET6_IPCOMP INET_DIAG_DESTROY INET_UDP_DIAG
 IPV6_ROUTER_PREF IPV6_ROUTE_INFO IPV6_OPTIMISTIC_DAD IPV6_MIP6 IPV6_VTI NET_IPVTI NET_IPGRE_DEMUX
 NET_SCH_HTB NET_SCH_TBF NET_SCH_INGRESS NET_CLS_U32 NET_CLS_BPF NET_CLS_MATCHALL
@@ -550,7 +557,7 @@ NETFILTER_XT_MATCH_MAC NETFILTER_XT_MATCH_STATISTIC NETFILTER_XT_MATCH_STRING NE
 CRYPTO_CHACHA20POLY1305 CRYPTO_MD5 CRYPTO_XCBC
 DETECT_HUNG_TASK SOFTLOCKUP_DETECTOR ANON_VMA_NAME THERMAL_STATISTICS
 ARMV8_DEPRECATED SWP_EMULATION CP15_BARRIER_EMULATION SETEND_EMULATION
-TOUCHSCREEN_HIMAX_HX83121A_PEN TYPEC_MUX_GPIO_SBU
+TOUCHSCREEN_HIMAX_HX83121A_PEN TYPEC_MUX_GPIO_SBU USB_ANDROID_USB_STATE
 "
 # 接了 ReSukiSU 才断言 KSU —— 没接的树上断言它只会误报。
 if [ "$RESUKISU" = 1 ]; then

@@ -68,17 +68,27 @@ PRODUCT_PROPERTY_OVERRIDES += \
 # ★ USB 系统服务（issue #13）：SystemServer 只在声明了 usb.host 或 usb.accessory 特性时才起 UsbService
 #   （frameworks/base/services/java/com/android/server/SystemServer.java:2536-2542），本机两个都没声明 ⇒
 #   `usb` 服务不存在，getSystemService(USB_SERVICE) 返回 null，不判空的 App（天翼云电脑）启动即崩。
-#   只加 host：UsbDeviceManager 只在 /sys/class/android_usb 存在时才建（UsbService.java:218，本机是
-#   configfs，没有这个目录）⇒ 不碰 adb 的 gadget；没有 USB HAL 时 UsbPortManager 打一条异常就返回 null
-#   （hal/port/UsbPortHalInstance.java:31-43）。
+#   只加 host：UsbDeviceManager 只在 /sys/class/android_usb 存在时才建（UsbService.java:218），主线内核
+#   没有这个类，patches/0096 补上（连接状态由下面的 USB 端口 HAL 写）；没有 USB HAL 时 UsbPortManager 打一条
+#   异常就返回 null（hal/port/UsbPortHalInstance.java:31-43）。
 #   ✅ 2026-10-04 上机（bind-mount 这个文件 + 重启 zygote，_b 1790702971）：`usb` 服务起来、dumpsys usb 列出键盘、
-#   查 HAL 耗时 3 ms、USB adb 不断、无新 denial。不加 accessory（要 gadget 那一侧，本机没有 UsbDeviceManager）。
+#   查 HAL 耗时 3 ms、USB adb 不断、无新 denial。不加 accessory：Android 配件模式（AOA）要 Android 内核的
+#   f_accessory，主线没有。
 PRODUCT_COPY_FILES += \
     frameworks/native/data/etc/android.hardware.usb.host.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.hardware.usb.host.xml
 
+# MIDI：SystemServer 只在声明了 android.software.midi 时才起 MidiService（frameworks/base android-16.0.0_r4
+#   services/java/com/android/server/SystemServer.java:2488），Settings 的 USB 页也只在有这个特性时列出 MIDI
+#   （packages/apps/Settings connecteddevice/usb/UsbBackend.java:77、:100）。没有它，"USB 用途"里没有 MIDI，
+#   插上 USB MIDI 键盘 App 也看不到。gadget 侧要内核的 USB_CONFIGFS_F_MIDI（scripts/kernel-config-android.sh）
+#   和 functions/midi.gs5（init.gaokun3.usb.rc）。
+PRODUCT_COPY_FILES += \
+    frameworks/native/data/etc/android.software.midi.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.software.midi.xml
+
 # USB 端口 HAL（usb/）：向 UsbPortManager 报告 port0 的状态，并按插进来的东西决定 port0 的数据角色
-# （原先 gaokun3-usbrole.sh 每 2 秒轮询一次的 follow 模式）。设置里的 USB 页面（数据角色、USB 用途）
-# 还要 UsbDeviceManager，见上一段：没有 /sys/class/android_usb 时框架不建它。
+# （原先 gaokun3-usbrole.sh 每 2 秒轮询一次的 follow 模式），还把 gadget 的连接状态写给 UsbDeviceManager
+# （patches/0096 的 android_usb 类）。设置里的 USB 页面（数据角色、USB 用途）和 MTP / PTP 都由 UsbDeviceManager 管，
+# MTP / PTP 的 FunctionFS 与配置在 init.gaokun3.usb.rc。
 # 权限见 ueventd.gaokun3.rc 与 sepolicy/hal_usb_default.te。
 PRODUCT_PACKAGES += \
     android.hardware.usb-service.gaokun3

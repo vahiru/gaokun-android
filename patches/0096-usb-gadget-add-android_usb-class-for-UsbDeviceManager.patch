@@ -1,0 +1,153 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] usb: gadget: 新增android_usb类，供Android的UsbDeviceManager使用
+
+Android的UsbService只在/sys/class/android_usb存在时才创建UsbDeviceManager
+（USB用途、MTP/PTP、“USB调试”的状态都由它管）。没有USB gadget HAL时，它在
+启动时从/sys/class/android_usb/android0/state读连接状态，之后跟着这个设备
+带USB_STATE=...的change uevent走。Android的内核由configfs gadget发这些
+uevent，主线既没有这个类，也不发。
+
+这个补丁建出android0，它的state可写（DISCONNECTED、CONNECTED、CONFIGURED），
+写入新值时发uevent。状态由用户态来写：这台机器的UDC在拔线后状态一直停在
+configured，写的一方还要看EC的适配器在线标志，这件事交给USB端口HAL
+（device/huawei/gaokun3/usb）。
+
+只给Android用，不进主线。
+---
+ drivers/usb/gadget/Kconfig             | 13 +++++
+ drivers/usb/gadget/Makefile            |  2 +
+ drivers/usb/gadget/android_usb_state.c | 91 ++++++++++++++++++++++++++++++++++
+ 3 files changed, 106 insertions(+)
+
+diff --git a/drivers/usb/gadget/Kconfig b/drivers/usb/gadget/Kconfig
+index 76521555e..b46303c8d 100644
+--- a/drivers/usb/gadget/Kconfig
++++ b/drivers/usb/gadget/Kconfig
+@@ -378,6 +378,19 @@ config USB_CONFIGFS_F_FS
+ 	  implemented in kernel space (for instance Ethernet, serial or
+ 	  mass storage) and other are implemented in user space.
+ 
++config USB_ANDROID_USB_STATE
++	tristate "android_usb class for Android's UsbDeviceManager"
++	depends on USB_CONFIGFS
++	help
++	  Android's UsbDeviceManager only runs when /sys/class/android_usb
++	  exists, and takes the gadget's connection state from
++	  /sys/class/android_usb/android0/state and its change uevents
++	  (USB_STATE=...), which Android kernels send from their configfs
++	  gadget. This creates that device with a writable state, which
++	  userspace fills in.
++
++	  Say Y only for Android.
++
+ config USB_CONFIGFS_F_UAC1
+ 	bool "Audio Class 1.0"
+ 	depends on USB_CONFIGFS
+diff --git a/drivers/usb/gadget/Makefile b/drivers/usb/gadget/Makefile
+index 33f1ef91b..66a4c0dab 100644
+--- a/drivers/usb/gadget/Makefile
++++ b/drivers/usb/gadget/Makefile
+@@ -9,4 +9,6 @@ obj-$(CONFIG_USB_LIBCOMPOSITE)	+= libcomposite.o
+ libcomposite-y			:= usbstring.o config.o epautoconf.o
+ libcomposite-y			+= composite.o functions.o configfs.o u_f.o
+ 
++obj-$(CONFIG_USB_ANDROID_USB_STATE)	+= android_usb_state.o
++
+ obj-$(CONFIG_USB_GADGET)	+= udc/ function/ legacy/
+diff --git a/drivers/usb/gadget/android_usb_state.c b/drivers/usb/gadget/android_usb_state.c
+new file mode 100644
+index 000000000..c89311a69
+--- /dev/null
++++ b/drivers/usb/gadget/android_usb_state.c
+@@ -0,0 +1,91 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * android_usb class for Android's UsbDeviceManager on a mainline kernel.
++ *
++ * Android's UsbService only creates UsbDeviceManager (USB preferences,
++ * MTP/PTP, the "USB debugging" state) when /sys/class/android_usb exists.
++ * Without a USB gadget HAL, its handler reads the gadget's connection state
++ * from /sys/class/android_usb/android0/state when it starts, and follows
++ * change uevents of that device carrying USB_STATE=... afterwards. Android
++ * kernels send those from their configfs gadget; mainline has neither the
++ * class nor the uevents.
++ *
++ * This creates android0 with a writable "state" (DISCONNECTED, CONNECTED or
++ * CONFIGURED); writing a new value sends the uevent. The state is written
++ * from userspace: on the Huawei MateBook E Go the UDC's own state stays
++ * "configured" after the cable is pulled, so the writer also looks at the
++ * EC's adapter-online flag.
++ */
++#include <linux/device.h>
++#include <linux/kobject.h>
++#include <linux/module.h>
++#include <linux/mutex.h>
++#include <linux/string.h>
++#include <linux/sysfs.h>
++
++static const char *const usb_states[] = { "DISCONNECTED", "CONNECTED", "CONFIGURED" };
++
++static struct class *android_usb_class;
++static struct device *android0;
++static DEFINE_MUTEX(state_lock);
++static int cur_state;	/* index into usb_states */
++
++static ssize_t state_show(struct device *dev, struct device_attribute *attr,
++			  char *buf)
++{
++	return sysfs_emit(buf, "%s\n", usb_states[READ_ONCE(cur_state)]);
++}
++
++static ssize_t state_store(struct device *dev, struct device_attribute *attr,
++			   const char *buf, size_t count)
++{
++	char env[32];
++	char *envp[] = { env, NULL };
++	int i = sysfs_match_string(usb_states, buf);
++
++	if (i < 0)
++		return i;
++
++	mutex_lock(&state_lock);
++	if (i != cur_state) {
++		WRITE_ONCE(cur_state, i);
++		snprintf(env, sizeof(env), "USB_STATE=%s", usb_states[i]);
++		kobject_uevent_env(&dev->kobj, KOBJ_CHANGE, envp);
++	}
++	mutex_unlock(&state_lock);
++	return count;
++}
++static DEVICE_ATTR_RW(state);
++
++static struct attribute *android0_attrs[] = {
++	&dev_attr_state.attr,
++	NULL
++};
++ATTRIBUTE_GROUPS(android0);
++
++static int __init android_usb_state_init(void)
++{
++	android_usb_class = class_create("android_usb");
++	if (IS_ERR(android_usb_class))
++		return PTR_ERR(android_usb_class);
++
++	android0 = device_create_with_groups(android_usb_class, NULL, MKDEV(0, 0),
++					     NULL, android0_groups, "android0");
++	if (IS_ERR(android0)) {
++		class_destroy(android_usb_class);
++		return PTR_ERR(android0);
++	}
++	return 0;
++}
++
++static void __exit android_usb_state_exit(void)
++{
++	device_unregister(android0);
++	class_destroy(android_usb_class);
++}
++
++module_init(android_usb_state_init);
++module_exit(android_usb_state_exit);
++
++MODULE_DESCRIPTION("android_usb class for Android's UsbDeviceManager");
++MODULE_LICENSE("GPL");

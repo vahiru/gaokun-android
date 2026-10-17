@@ -52,7 +52,7 @@ UEFI。这不是一次常规移植 —— 它是 **AOSP on mainline**，每一�
 | 硬件视频解码 | ✅ | **v0.7.0 起是 `qcom-iris`**（原来是 `qcom-venus`）：H.264、HEVC、VP9 走 `c2.v4l2.*.decoder`，中途停止、拖动、重播、中途变分辨率都过了，为此修了上游驱动几处（[#128](docs/stage4-findings.md#128)）。VP8 走软解。最早打通解码时修的两个 `external/v4l2_codec2` 可移植性 bug 见 [#41](docs/stage4-findings.md#41) |
 | 硬件视频编码 | ❌ | 故意关着：`v4l2_codec2` 的编码组件不会把交给它的 RGBX 帧转成硬件要的 NV12，开着的话应用会直接失败而不是回退。应用用的是软件编码器 |
 | 摄像头 | ✅ | **前后摄都能用**（v0.6.1 起）。前摄 Hynix hi846，后摄 **OmniVision OV13B10** —— 是从华为 Windows 驱动包里解出上电序列才认出来的（[#106](docs/stage4-findings.md#106)）。链路：主线 `camss` → libcamera simple 流水线 + 软件 ISP → libyuv → 为本机写的 AIDL HAL。闪光灯可用；后摄有**自动对焦**（v0.7.0，感谢 @mashen11）；照片按应用要求的方向旋转。"每隔一次就拍不了"的电源域缺陷已根治（[`patches/0031`](patches/)、[#105](docs/stage4-findings.md#105)）。⚠️ 最高 15 fps，没有变焦、没有曝光补偿。画质没调：没有色彩矫正矩阵、暗处噪点多、闪光片过曝；暗处对焦慢。**录像没在实机上验证过** |
-| USB-C | ⚠️ | UCSI 起得来，两个连接器都注册了（[#112](docs/stage4-findings.md#112)）。数据角色跟着对面实际是什么走 —— 接电脑时我们是设备；接 hub 或 U 盘时应当切成主机，这是按设计做的、还没拿真硬件试过（[`patches/0048`](patches/)，v0.7.0）—— v0.7.1 起 Android 的 USB 服务也起来了，应用能用 USB 设备（[#13](https://github.com/vahiru/gaokun-android/issues/13)）。⚠️ **回插之后（在待机后出现过）这个口可能坏掉，要重启才恢复** —— 按代码推断，那之后到重启为止整机也不再待机。⚠️ **不能和电脑传文件**（没有 MTP/PTP），**U 盘不会挂载**（Android 侧还没有可移动存储的配置）。DP 外接显示没测过 |
+| USB-C | ⚠️ | UCSI 起得来，两个连接器都注册了（[#112](docs/stage4-findings.md#112)）。数据角色跟着对面实际是什么走 —— 接电脑时我们是设备；接 hub 或 U 盘时应当切成主机，这是按设计做的、还没拿真硬件试过（[`patches/0048`](patches/)，v0.7.0）—— v0.7.1 起 Android 的 USB 服务也起来了，应用能用 USB 设备（[#13](https://github.com/vahiru/gaokun-android/issues/13)）。⚠️ **回插之后（在待机后出现过）这个口可能坏掉，要重启才恢复** —— 按代码推断，那之后到重启为止整机也不再待机。能和电脑传文件（MTP/PTP：到设置 > 已连接的设备 > USB 里选，USB 2.0 的速度）。⚠️ **U 盘不会挂载**（Android 侧还没有可移动存储的配置）。DP 外接显示没测过 |
 | 指纹 | ❌ | 进行中：华为签名的指纹 TA 已经能在本机加载进安全世界（[#125](docs/stage4-findings.md#125)）；驱动和 HAL 还没有 |
 | 手写笔（M-Pencil）、TPM | ❌ | 不支持 |
 | Root | ⚠️ | 每个内核都**内置了** KernelSU（ReSukiSU 分支），关不掉。不装 ReSukiSU 管理器 App 时处于休眠；装了之后，只有你在管理器里批准的应用才能拿到 root。检测 root 或未锁定启动链的应用可能拒绝运行（[详情](docs/known-limitations.zh-CN.md#默认带-rootkernelsu--resukisu)） |
@@ -138,7 +138,7 @@ Secure Boot。安装器有两个：
   Play 商店会说设备未经认证（[INSTALL 的这一节](docs/INSTALL.zh-CN.md#此设备未经-play-保护机制认证)），
   Play Integrity 过不了。没有 Widevine，Netflix 这类付费流媒体放不了。没有 GPS，
   网络定位靠 Google 服务。没有预装中文输入法。
-* **不支持：** 指纹（进行中）、手写笔、TPM、USB 传文件（MTP）、U 盘、USB 音频、
+* **不支持：** 指纹（进行中）、手写笔、TPM、U 盘、USB 音频、
   硬件视频编码、蓝牙耳机麦克风、有线耳机麦克风、自动亮度。
 * **已知缺陷：** 长期运行后音频与蓝牙可能死锁（看门狗会把证据存到
   `/data/vendor/gaokun3/hangdump-*`，请附上）；插电脑时平板可能反过来给电脑供电、

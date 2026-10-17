@@ -55,12 +55,14 @@ Mac 侧的 `game-mode.sh` 把 `game-mode-device.sh` 推到设备上执行，需�
 2. ⚠️★★★ **定时器必须搬出 adbd 的 cgroup。** Mac 侧直接 `adb shell` 拿到的 root shell（KSU 自动给的）在 adbd 的 cgroup（`/system/uid_0/pid_<adbd>`）里，后台起的子进程跟着也在。`stop adbd` 时 init 会把这个 cgroup 里的进程**全部 SIGKILL**，`setsid`、`trap '' HUP` 都挡不住。经 `su -c` 起的不受影响（KSU su 落在根 cgroup `0::/`）。
    10-10 和 10-11 两次定时器都是这样死的，10-10 当时误归因成 SIGHUP。10-11 实机核过：普通 `adb shell` 起的 setsid 进程在 `setprop ctl.restart adbd` 后死了，`su -c` 起的、以及把自己 pid 写进 `/sys/fs/cgroup/cgroup.procs` 的都活着。
    现在定时器和"断 adb"子 shell 一起来就先把自己移到根 cgroup；`start_timer` 会核对，没移出去就不关 adb。`trap '' HUP` / `setsid` 照旧保留。
-3. **resetprop 不会触发 init 的 `on property:` 钩子**：用它改 `persist.sys.usb.config` 不会让 USB gadget 重新枚举。USB 配置要用 `setprop`，并且要显式拉回 `sys.usb.config` 和 `service.adb.tcp.port`。
+3. **adb 只经 `adb_enabled` 开关。** 有了 UsbDeviceManager（`patches/0096`）以后，`sys.usb.config` 和 `persist.sys.usb.config` 由框架维护：AdbService 按 `adb_enabled` 起停 adbd，UsbDeviceManager 把 adb 加进或移出 USB 功能。脚本直接写这两个属性、直接 `stop` / `start adbd`，框架记录的状态就会和 gadget 实际对不上（#41 评审）。TCP 端口仍用 `setprop` 设（resetprop 不触发 init 的 `on property:` 钩子），并且要在 `adb_enabled=1` 之前设好，adbd 起来时才会监听。
 4. 开机兜底跑在 `service.d` 阶段时，SettingsProvider 可能还没起来：`settings put` 返回 0 却没写进去。兜底要先等 `sys.boot_completed`，写完读回校验，校验通过才删除标记。兜底脚本每次 `on` 都按当前版本重写（内容不同才替换）。
 5. **toybox `setsid` 在后台作业里不 fork**：pid 文件记下的就是到点后 `exec` 成 `off` 的那个进程。`off` 不认出自己就会先 `kill` 自己（2026-10-11 审查发现、实机核过 pid 关系）。现在由定时器触发的 `off` 带 `GK3_TIMER_FIRED=1`（`export` 后再 `exec`），不杀定时器。
-6. 走 USB adb 跑 `on` 时，切 gadget 的那一刻会话就断了。所有会断开会话的步骤（切 USB、关 5555、`adb_enabled=0`、`stop adbd`）都放进脱离会话、输出丢弃的子 shell 里做。
+6. 走 USB adb 跑 `on` 时，切 gadget 的那一刻会话就断了。所有会断开会话的步骤（关 5555、`adb_enabled=0`）都放进脱离会话、输出丢弃的子 shell 里做。
 7. **TrickyStore 要用 `pidof` 找。** 它是 `app_process64` 起的，`cmdline` 是 `TrickyStore`，`comm` 却是 `main`。toybox `pgrep -x` 比的是 `comm`，所以 `pgrep -x TrickyStore` 和 `pgrep -x daemon` 都找不到。模块 `service.sh` 的循环在 daemon 非 0 退出时直接 `exit 1`，所以杀掉后不会被拉起（10-11 实测）。
 8. Mac 侧每个子命令都检查 adb / 设备端的退出码，失败时不打印成功提示（`on` 除外，它会切断自己的会话）。
+9. **`off` 要连定时器的 `sleep` 一起杀。** 定时器的 `sh`（mksh）接管了 SIGTERM，等前台的 `sleep` 返回才处理，所以只 `kill` 它，它会一直等到时间到。`off` 先给 `sh` 发 SIGTERM，再用 `pkill -P` 杀它的 `sleep`；`sh` 随即按挂起的 SIGTERM 退出，不会再跑后面的 `off`。杀之前先核对 pid 的命令行带 `gk3-game-mode`，开机兜底也会删掉活不过重启的 pid 文件，免得误杀复用了这个 pid 的进程。
+10. **KSU 不一定建了 `/data/adb/service.d`。** 没有这个目录，开机兜底写不进去。`on` 现在先建目录，兜底装不上就不关 adb。
 
 **2026-10-11 上机结果**（dev 机，`_b` = `1791704075`，这次开机是 7.2.9 内核）：
 * `hide` / `unhide`：✅ 普通查询看不到、`-u` 能看到；放进去的测试标记 unhide 后还在；root 不受影响。这次是从备份装回的（`install-existing` 当时没成功，原因未查）。

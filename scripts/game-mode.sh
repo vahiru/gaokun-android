@@ -23,7 +23,8 @@
 #   2. 删 ro.crdroid.version（SystemPropertiesDetector 对任意非空值直接 danger）。
 #      ro.crdroid.device 别删——find-device.sh 的身份判据。
 #   3. on 额外：development_settings_enabled=0（warning 项）、adb_enabled=0、
-#      persist.sys.usb.config=mtp、persist.adb.tcp.port=空 ⇒ AdbRuntime 转绿。
+#      TCP 端口清空 ⇒ AdbRuntime 转绿。adb 只经 adb_enabled 开关：AdbService 起停 adbd，
+#      UsbDeviceManager 增删 USB 功能里的 adb；sys.usb.config / persist.sys.usb.config 归框架管，不直接写。
 #   4. hide：卸载 com.resukisu.resukisu / bin.mt.termex（dangerous_apps 与
 #      root_managers 的命中，uninstall -k --user 0 保留数据 + APK 备份，备份不全不卸；unhide 装回）。
 #

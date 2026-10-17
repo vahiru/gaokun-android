@@ -2,7 +2,7 @@
 # 类型、init 的域转换、binder、服务注册、uevent 套接字和普通 sysfs 文件的读写，AOSP 都写好了
 # （system/sepolicy 的 vendor/hal_usb_default.te 与 private/hal_usb.te）；所有域都能 search sysfs 目录、
 # 读 sysfs 里的链接。实机标签：role、UDC 的 state / soft_connect、/sys/class/typec/port0 下的属性、
-# regulator 全是 sysfs。这里只补三样。
+# regulator 全是 sysfs。这里只补下面几样。
 
 # /sys/class/udc 是 sysfs_udc（核心策略 genfscon）：读 UDC 的 state、写 soft_connect 都要经过它和其中的链接。
 # 只给 search 不够，enforcing 下会读不到 UDC 状态（gaokun3_usbrole 在 #126 里就是这样被拦的），所以和它一样给 r_dir_file。
@@ -12,5 +12,12 @@ r_dir_file(hal_usb_default, sysfs_udc)
 # sysfs_batteryinfo（对它的 neverallow 只限 coredomain，见 gaokun3_scripts.te 里 gaokun3_usbrole 的同一条）。
 r_dir_file(hal_usb_default, sysfs_batteryinfo)
 
-# vendor.gaokun3.usbrole.adb_pause / .reversed / .broken：etc/usbrole.rc 和 Parts 的 UsbPortNotifier 据此动作。
+# vendor.gaokun3.usbrole.adb_pause / .reversed / .broken：etc/usbrole.rc 和 Parts 的 UsbPortNotifier 据此动作；
+# vendor.gaokun3.usb.no_android_usb：内核没有 android_usb 类时设，init.gaokun3.usb.rc 据此自己把 adb 写进 sys.usb.config。
 set_prop(hal_usb_default, vendor_gaokun3_prop)
+
+# gadget 的连接状态写进 /sys/class/android_usb/android0/state（patches/0096），UsbDeviceManager 读它和它的 uevent。
+# 核心策略的 genfscon 把 /class/android_usb 和 /devices/virtual/android_usb 标成 sysfs_android_usb；
+# 对它的 neverallow 只限不受信任的应用（app_neverallows.te）。
+r_dir_file(hal_usb_default, sysfs_android_usb)
+allow hal_usb_default sysfs_android_usb:file w_file_perms;
