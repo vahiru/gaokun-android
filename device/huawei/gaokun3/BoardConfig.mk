@@ -134,12 +134,18 @@ BOARD_KERNEL_CMDLINE := \
     androidboot.selinux=enforcing androidboot.veritymode=disabled \
     firmware_class.path=/vendor/firmware/ \
     init=/init printk.devkmsg=on deferred_probe_timeout=10 \
+    fw_devlink.sync_state=timeout \
     console=tty0 \
     clk_ignore_unused pd_ignore_unused arm64.nopauth efi=noruntime \
     fbcon=rotate:1 usbhid.quirks=0x12d1:0x10b8:0x20000000 \
     usbcore.quirks=12d1:10b8:b \
     himax_hx83121a_spi.disable_pressure=0 \
     snd_usb_audio.index=-2,-2,-2,-2
+# ↑ fw_devlink.sync_state=timeout（PWR-10）：GCC、GPUCC 的 sync_state 要等所有消费者 probe 完，而 3d6a000.gmu
+#   没有驱动，永远等不到。开机时开着的 GDSC 在 sync_state 之前一直是 stay_on，没人用的那 6 个（2 个 UFS、
+#   4 个 MMNOC TBU）于是一直开着；deferred_probe_timeout 到期后 sync_state 照常执行，genpd 把它们关掉。
+#   pd_ignore_unused 只跳过 late_initcall 那次 genpd_power_off_unused()，管不到 stay_on 和 of_genpd_sync_state()，
+#   所以留着不影响。clk_ignore_unused 也还留着。
 # ↑ usbcore.quirks（手写笔，#26）：b = USB_QUIRK_RESET_RESUME，系统休眠恢复时复位键盘 / 笔 MCU（12d1:10b8）。
 #   不复位的话，它醒来后照样报告笔已连接、键盘也能用，却不再转发压感（hidraw 报文 0x55）；
 #   重新握手、重绑 usbhid、取消再重新授权都无效，只有 USB 端口复位能恢复。usbhid 支持 reset-resume，
