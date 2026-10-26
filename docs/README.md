@@ -50,6 +50,7 @@
 | [fingerprint-driver-design.md](fingerprint-driver-design.md) | 指纹（FTE7001）：TA 已加载进 QSEE（M1），M2 发真命令暂停；架构、复现步骤 | 现行（暂停中） | 维护者 · AI |
 | [gaming.md](gaming.md) | 游戏特化总览：39 位地址窗口、着色器缓存、低延迟音频、触摸 game 预设、游戏模式脚本、netlink 边界、版本串覆写；边界（如实修正 / 不伪造）与待定项 | 现行 | 维护者 · AI |
 | [duck-detector-plan.md](duck-detector-plan.md) | Duck Detector 体检的逐项诊断、A–D 分类、每次上机后的 delta（10-11）；文首有更正 | 现行（过程记录；结论以 [gaming.md](gaming.md) 为准） | 维护者 · AI |
+| [hyperos-port-research.md](hyperos-port-research.md) | 移植小米 HyperOS 的调研（10-26）：Treble / SELinux / 图形 / vendor 自洽性的地基评估、硬依赖清单、路线比较、donor 选择、分阶段实验计划、许可与分发 | 现行（调研；分支 `hyperos-port`，未立项、待用户决定） | 维护者 · AI |
 | [upstream/README.md](upstream/README.md) | 5 份待投上游的相机 / camcc 补丁稿与收件人（未发，等用户点头） | 现行 | 维护者 |
 
 ## 案卷与证据（"某个结论是怎么来的"）
