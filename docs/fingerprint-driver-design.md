@@ -59,20 +59,27 @@ Android FingerprintService
 `ff_trustlet_client_exchange_message`（别名 `TA_Commication`/`ff_trustlet_RWQSEE`）。
 ⚠️ 2026-09-24 一次静态复核校正了"安全首发命令"的候选：Windows 的 `ff_sc_GetSCFirmwareVersion` /
 `ff_sc_check_health` 里的 **`sc` = sensor controller（传感器 MCU），走 SPI** —— 它们**不是** SPI-free，
-不能当第一条只读命令（要先 `INIT_SPI`）。⇒ 真正安全的第一条只能是 **`INIT_SPI` 之前的 TA 级命令**
-（`FF_CMD_TA_CREATE` / `FF_CMD_TA_INIT`，纯 TA、不碰传感器；是否碰安全存储待确认）。
-⬜ 仍待定死（focused RE，非一次能拆完）：
-- 请求 header 的确切布局（含 InvokeCommand 的 magic `0x1255` 与 `{cmd,req_len,rsp_len}` 两说要对齐）、
-  以及 `0x80xx` 与 `FF_CMD_TA_*` 枚举序的映射（0x8020≠ordinal 0x20，两套编号，需 TA 分发表）；
-- `CREATE`/`INIT` 的确切 cmd 号与字节 —— 定死它 = 能上机跑 M2；
-- enroll/authenticate 触发的 **listener 请求/响应缓冲格式**（驱动 `->service()` 要解析）。
-> 注：命令协议逆向是【多次会话量级】的独立子任务（TA 是优化过的 aarch64 secelf，分发表运行时注入），
-> 不宜边猜边发。M2 需要先把 CREATE/INIT 的确切字节定死，再上机（TA 仍常驻，不用重启）。
+不能当第一条只读命令（要先 `INIT_SPI`）。
+✅ 2026-10-30 命令协议已基本定死（详见 `fingerprint/fp-cmd-protocol.md`，本节被其取代）：
+- 请求 header 两说已对齐：wire 帧 `{cmd,dlen,rlen,payload}` 12B 头（0x80xx，WBDI）走 sub_ADFC；
+  InvokeCommand 魔数 `0x1255` 是 sub_CEA4 case 2 的 a4 校验值，与 wire 帧无关（协议文档 §8.4）；
+- `CREATE=0x1001`、`INIT=0x1004` 命令号已定死（ff_cmd_name 跳表全解，协议文档 §3）——**但它们走
+  word8≠0 的 FF_CMD 路径（36B 描述符 +32）**；§6.4 已指令级闭合（2026-10-30）：word8 全链**不可设**
+  （SMC=5 参无第 6 参、IOCTL +12 死槽），FF_CMD 是 TA↔TA GP 内部通道——对 FTE7001 **不该发也发不进**，
+  M2-M4 全走 wire 0x80xx（协议文档 §6.4）；
+- **M2 首发已修正**：不得发 0x1001 当 wire cmd（会毒化 dword_2A4640=2 不可逆），首发只允许
+  0x8031 只读探测（协议文档 §7）；
+- ⬜ 仍待定（只剩一项，且**只能上机**）：enroll/authenticate 的 listener 请求/响应缓冲格式
+  （驱动 `->service()` 要解析，要看真实回调）。
+  ~~FF_CMD payload 格式~~ → **已判 moot**：word8 发不进（§6.4），payload 在 GPAppLib 内这件事
+  只对 Goodix/GP 变体有意义，不再列为 FTE7001 的未决项。
 
 ## 3. 驱动状态机（草案，待命令号落定）
 
 ```
-init：      LOAD → app_id → 注册 listener(安全存储) → FF_CMD_TA_INIT → INIT_SPI → PROBE_CHIP_ID → INIT_DEVICE
+init：      LOAD → app_id → 注册 listener(安全存储) → wire init（0x8022 握手 / 0x8020+0x8021 SPI /
+            0x8026 / 芯片 ID 探测序列）  ← FF_CMD 的 INIT/INIT_SPI/PROBE_CHIP_ID/INIT_DEVICE 是
+            TA↔TA GP 内部序列（普通世界发不进，协议文档 §6.4），Android 侧用 wire 0x80xx 复刻
 idle：      等 GPIO181 finger-down 中断（或 QUERY_FINGER_STATUS 轮询）
 authenticate：START_SCANNING → CAPTURE_IMAGE → AUTNENTICATE →(listener 读模板)→ 结果 → HAT
 enroll：    PRE_ENROLL → 多帧 CAPTURE_IMAGE + ENROLL →(listener 写模板)→ POST_ENROLL
@@ -105,7 +112,7 @@ GPIO185 复位可能由 TA 经 QSEE-GPIO 自己做（待确认）。届时加一
 
 - [x] M1 LOAD 成功（#125）
 - [ ] M2 SEND 一条只读命令成功（证明能与 TA 对话）← **当前目标**
-- [ ] M3 init 序列跑通（INIT/INIT_SPI/PROBE_CHIP_ID 拿到芯片 ID）
+- [ ] M3 init 序列跑通（wire 0x8020/0x8021/0x8026 + 芯片 ID 探测序列拿到芯片 ID——非 FF_CMD，协议文档 §7.3）
 - [ ] M4 listener 服务 + 一次 authenticate（含安全存储读）
 - [ ] M5 enroll 落一枚模板
 - [ ] M6 client driver 成形（字符设备接口）
@@ -140,5 +147,9 @@ GPIO185 复位可能由 TA 经 QSEE-GPIO 自己做（待确认）。届时加一
   持久值：`persist.vendor.gaokun3.allow_suspend=0`（开发机不睡）。IP 静态 `192.168.10.239`。
 * **本地提交未推**：指纹整条线 #120→#125 + 设计文档 + 工具，均为本地提交（发版/推仓需用户点头）。
 * **构建机**：`az vm deallocate` 后用完即停，树在 `~/gk3-kernel`（已含 0050 的工作区改动，未提交，靠 `patches/` 复现）。
-* **下一步的入口**：M2 = 把 `FF_CMD_TA_CREATE`/`INIT` 的确切命令号与请求字节从 TA 分发表逆出来
-  （§2），然后 `send_hex` 发之、看响应。TA 分发函数运行时注入，静态难拆，是独立子任务。
+* **下一步的入口**：M2 = `send_hex` 发 0x8031 只读探测（唯一允许首发，见 `fingerprint/fp-cmd-protocol.md` §7）。
+  命令号逆向已完成（`FF_CMD_TA_CREATE=0x1001`/`INIT=0x1004` 已定死），不再是 M2 前置；
+  本地能做的逆向已收口（2026-10-30，含 §6.4 word8 指令级闭合），剩余**只能上机**一项：
+  ① listener 缓冲格式（要看真实回调）。
+  ~~FF_CMD payload 格式~~ 已判 moot：word8 发不进（协议文档 §6.4），上机也测不了；
+  若日后拿到带 GPAppLib 的 blob 可离线续 Goodix/GP 变体分析，与 FTE7001 主线无关。
