@@ -1,0 +1,139 @@
+From: HyperOS gaokun3 adaptation experiment
+Subject: [BLOCKED - DO NOT BUILD OR DEPLOY] usb: typec: ucsi: bound Huawei initialization timeout retries
+
+BLOCKED: Early GET_CONNECTOR_CAPABILITY timeout skips fwnode/role-switch
+reference cleanup; the gaokun transport has no suspend/resume callbacks
+to cancel this non-freezable init work. Do not apply this retry candidate.
+See docs/hyperos-ucsi-init-review.md for the lifecycle audit.
+
+Opt in only the Huawei gaokun transport to two additional initialization
+attempts after ETIMEDOUT, one and three seconds later. Do not replay
+GET_ALTERNATE_MODES or ACK: the observed altmode failure does not identify
+which command timed out. Reuse ucsi_init cleanup and the next attempt's
+PPM reset. Never retry after connectors have been published. Preserve
+original errors and the independent EPROBE_DEFER retry path.
+
+Log reset failure during cleanup without replacing the original errno.
+The existing delayed work is canceled by ucsi_unregister; no new work
+or recovery thread is introduced. PPM resets can affect PD/DP state.
+
+Applies after repository patches 0087 through 0093 on Linux v7.2.9.
+Offline candidate only: not kernel-built or device-tested.
+
+---
+
+diff --git a/drivers/usb/typec/ucsi/ucsi.c b/drivers/usb/typec/ucsi/ucsi.c
+--- a/drivers/usb/typec/ucsi/ucsi.c
++++ b/drivers/usb/typec/ucsi/ucsi.c
+@@ -143,8 +143,12 @@
+ 	if (*cci & UCSI_CCI_BUSY)
+ 		return ucsi_run_command(ucsi, UCSI_CANCEL, cci,
+ 					NULL, 0, NULL, 0, false) ?: -EBUSY;
+-	if (ret)
++	if (ret) {
++		if ((ucsi->quirks & UCSI_RETRY_INIT_TIMEOUT) && !ucsi->connector)
++			dev_err(ucsi->dev, "Init command %#llx transfer failed (%pe)\n",
++				command, ERR_PTR(ret));
+ 		return ret;
++	}
+ 
+ 	if (!(*cci & UCSI_CCI_COMMAND_COMPLETE))
+ 		return -EIO;
+@@ -160,8 +164,12 @@
+ 	 * Don't ACK connection change if there was an error.
+ 	 */
+ 	ret = ucsi_acknowledge(ucsi, err ? false : conn_ack);
+-	if (ret)
++	if (ret) {
++		if ((ucsi->quirks & UCSI_RETRY_INIT_TIMEOUT) && !ucsi->connector)
++			dev_err(ucsi->dev, "Init command %#llx ACK failed (%pe)\n",
++				command, ERR_PTR(ret));
+ 		return ret;
++	}
+ 
+ 	return err ?: UCSI_CCI_LENGTH(*cci);
+ }
+@@ -2073,7 +2081,7 @@
+ 	struct ucsi_connector *con, *connector;
+ 	u64 command, ntfy;
+ 	u32 cci;
+-	int ret;
++	int ret, reset_ret;
+ 	int i;
+ 
+ 	/* Reset the PPM */
+@@ -2155,7 +2163,10 @@
+ 	kfree(connector);
+ err_reset:
+ 	memset(&ucsi->cap, 0, sizeof(ucsi->cap));
+-	ucsi_reset_ppm(ucsi);
++	reset_ret = ucsi_reset_ppm(ucsi);
++	if (reset_ret)
++		dev_err(ucsi->dev, "PPM reset after init failure failed (%pe); original error %pe\n",
++			ERR_PTR(reset_ret), ERR_PTR(ret));
+ err:
+ 	return ret;
+ }
+@@ -2218,6 +2229,30 @@
+ 	ret = ucsi_init(ucsi);
+ 	if (ret)
+ 		dev_err_probe(ucsi->dev, ret, "PPM init failed\n");
++
++	/*
++	 * Huawei's EC can time out while discovering connector alt modes.
++	 * ucsi_init() has unwound unpublished ports; start a new transaction
++	 * with its PPM reset, rather than replaying a GET or ACK in place.
++	 * A failure after connector publication must not register ports again.
++	 * Keep this budget independent of the role-switch deferred-probe budget.
++	 */
++	if (ret == -ETIMEDOUT && (ucsi->quirks & UCSI_RETRY_INIT_TIMEOUT) &&
++	    !ucsi->connector) {
++		unsigned int delay_ms;
++
++		if (ucsi->init_timeout_retries >= 2) {
++			dev_err(ucsi->dev, "PPM init timeout retry budget exhausted\n");
++			return;
++		}
++		delay_ms = ucsi->init_timeout_retries ? 3000 : 1000;
++		ucsi->init_timeout_retries++;
++		dev_warn(ucsi->dev, "PPM init timed out; retry %u/2 in %u ms\n",
++			 ucsi->init_timeout_retries, delay_ms);
++		queue_delayed_work(system_long_wq, &ucsi->work,
++				   msecs_to_jiffies(delay_ms));
++		return;
++	}
+ 
+ 	if (ret == -EPROBE_DEFER) {
+ 		if (ucsi->work_count++ > UCSI_ROLE_SWITCH_WAIT_COUNT) {
+diff --git a/drivers/usb/typec/ucsi/ucsi.h b/drivers/usb/typec/ucsi/ucsi.h
+--- a/drivers/usb/typec/ucsi/ucsi.h
++++ b/drivers/usb/typec/ucsi/ucsi.h
+@@ -486,6 +486,7 @@
+ 	struct work_struct resume_work;
+ 	struct delayed_work work;
+ 	int work_count;
++	unsigned int init_timeout_retries;
+ #define UCSI_ROLE_SWITCH_RETRY_PER_HZ	10
+ #define UCSI_ROLE_SWITCH_INTERVAL	(HZ / UCSI_ROLE_SWITCH_RETRY_PER_HZ)
+ #define UCSI_ROLE_SWITCH_WAIT_COUNT	(10 * UCSI_ROLE_SWITCH_RETRY_PER_HZ)
+@@ -509,6 +510,9 @@
+ 
+ /* USB4 connection can imply that USB communcation is supported */
+ #define UCSI_USB4_IMPLIES_USB	BIT(2)
++
++/* Retry timed-out initialization before publishing connectors. */
++#define UCSI_RETRY_INIT_TIMEOUT	BIT(3)
+ };
+ 
+ #define UCSI_MAX_DATA_LENGTH(u) (((u)->version < UCSI_VERSION_2_0) ? 0x10 : 0xff)
+diff --git a/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c b/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c
+--- a/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c
++++ b/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c
+@@ -654,6 +654,7 @@
+ 	if (IS_ERR(uec->ucsi))
+ 		return PTR_ERR(uec->ucsi);
+ 
++	uec->ucsi->quirks |= UCSI_RETRY_INIT_TIMEOUT;
+ 	ucsi_set_drvdata(uec->ucsi, uec);
+ 	auxiliary_set_drvdata(adev, uec);
+ 

@@ -209,6 +209,10 @@ std::string Describe(const Inputs& in) {
 }
 
 bool WriteRole(const std::string& role) {
+    if (role == "host" && DeviceOnly()) {
+        LOGW("host role blocked by %s", kDeviceOnly);
+        return false;
+    }
     return WriteAttr(kRoleSwitch, role.c_str());
 }
 

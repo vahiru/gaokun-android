@@ -22,6 +22,19 @@ UDC=/sys/class/udc/a600000.usb/state
 ADAPTER=/sys/class/power_supply/gaokun-ec-adapter/online
 WL=gaokun3_usbrole
 TAG=gaokun3-usbrole
+DEVICE_ONLY=persist.vendor.gaokun3.usbrole.device_only
+device_only() {
+    case "$(getprop "$DEVICE_ONLY")" in 1|true) return 0 ;; esac
+    return 1
+}
+# Re-read at wait/write/unlock boundaries, including a property change while
+# this oneshot was already waiting for unplug. Never release the device lock.
+apply_device_policy() {
+    if device_only; then
+        echo $WL > /sys/power/wake_lock
+        WANT=device
+    fi
+}
 
 say() { log -t $TAG "$*"; }
 
@@ -126,6 +139,8 @@ host_unplugged() {
     esac
 }
 
+apply_device_policy
+
 if [ "$WANT" = host ] && host_attached; then
     # 息屏期间插着主机：先关门，再【就在这个进程里】等到拔线（或亮屏）再切 host。
     # ⚠️★ 2026-09-29 改（SELinux 第七轮审计）：原先是 `(setsid "$0" watch &)` 另起一个 watch 进程、
@@ -140,10 +155,11 @@ if [ "$WANT" = host ] && host_attached; then
     echo $WL > /sys/power/wake_lock
     say "USB 主机在线（UDC=$(cat $UDC 2>/dev/null)，适配器在线=$(cat $ADAPTER 2>/dev/null)）→ 保持 device、不放行挂起（充电中，息屏不睡）；拔线后自动切 host"
     until host_unplugged; do
+        if device_only; then WANT=device; break; fi
         [ "$(getprop debug.tracing.screen_state)" = 2 ] && exit 0
         sleep 2
     done
-    say "USB 主机已拔掉（UDC=$(cat $UDC 2>/dev/null)，适配器在线=$(cat $ADAPTER 2>/dev/null)）→ 现在切 host 放行挂起"
+    [ "$WANT" = host ] && say "USB 主机已拔掉（UDC=$(cat $UDC 2>/dev/null)，适配器在线=$(cat $ADAPTER 2>/dev/null)）→ 现在切 host 放行挂起"
 fi
 
 # ★ 先把门关上，再动 role。失败路径全都停在这个状态。
@@ -156,18 +172,24 @@ echo $WL > /sys/power/wake_lock
 #   wakelock 照旧持有（上面刚拿）：亮屏时本来就不睡，息屏时 role_host 会重新确认 host 再放行 —— #52 的不变量不受影响。
 #   ⚠️ 开机那次可能早于 U 盘枚举完成 ⇒ 那时仍会切 device（与改之前一样），这一点没有办法在不拖慢开机的前提下根治。
 #   ⚠️ 源码推断，未实测：要用户在场插 U 盘做息屏→亮屏（v1.0 计划 PWR-5 的验收）。
-if [ "$WANT" = device ] && [ "$(cat "$S" 2>/dev/null)" = host ] && has_downstream; then
+apply_device_policy
+if ! device_only && [ "$WANT" = device ] && [ "$(cat "$S" 2>/dev/null)" = host ] && has_downstream; then
     say "role=host 且 xhci 下有下游设备（$(ls "$D"/xhci-hcd.*/usb* 2>/dev/null | grep -E '^[0-9]+-[0-9.]+$' | tr '\n' ' ')）→ 保持 host、不切 device；wakelock 保持持有"
     adb_gate     # USB-2：停在 host ⇒ adbd 的 USB 传输停下（开机那次尤其要紧：USB 端口 HAL 可能还没起来）
     exit 0
 fi
 
+apply_device_policy
 echo "$WANT" > "$S" 2>/dev/null
 
 # 轮询确认（最多约 6 秒）
 i=0
 OK=0
 while [ $i -lt 60 ]; do
+    if [ "$WANT" = host ] && device_only; then
+        apply_device_policy
+        echo device > "$S" 2>/dev/null
+    fi
     CUR=$(cat "$S" 2>/dev/null)
     if [ "$CUR" = "$WANT" ]; then
         if [ "$WANT" = host ]; then
@@ -187,7 +209,12 @@ done
 NX=$(ls -d "$D"/xhci-hcd.*/driver 2>/dev/null | wc -l)
 adb_gate         # USB-2：按读回来的实际角色同步（切不成时角色没变，它也就不动）
 if [ "$WANT" = host ]; then
-    if [ "$OK" = 1 ]; then
+    if device_only; then
+        apply_device_policy
+        echo device > "$S" 2>/dev/null
+        adb_gate
+        say "device-only policy → device, keeping suspend protection"
+    elif [ "$OK" = 1 ]; then
         echo $WL > /sys/power/wake_unlock
         [ "$(getprop $BROKEN)" = 1 ] && setprop $BROKEN 0
         say "已确认 role=host（子 xhci=${NX}，耗时 $((i * 100))ms）→ 放行挂起"

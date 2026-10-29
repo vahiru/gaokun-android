@@ -1,0 +1,512 @@
+{
+  "production_pin": "435ed1cd68e20f8a9fe4871233ed1f8ce7ccf9e8",
+  "source_config_sha256": {
+    "8280_qrd_sh3001_0.json": "ed520b8752634db3930da2ec02ce4da65b9c5e51156ef422c463849ab6d26288",
+    "8280_qrd_sy3133cs_0.json": "fbbcb97d9b563a235489908aae3428df29b219d7daf40cfeef7cb2630d40a6ad",
+    "8280_qrd_t1000_0.json": "7555bf786eb370209694f32ccaae69b6eacc28fa8f46a1399a6a5a9fb191846d",
+    "8280_qrd_tcs3701.json": "9de3626410fa38230338200a615f306336cbc9178b6e513bf5e72ac6d4cb435d",
+    "default_sensors.json": "4c1823bb9dc952e521eaa57ddc9be6e260dd40482917bc816a9bd2e40fa376d2",
+    "sh3001_0.json": "c22c5c844ecd3657dacfc7295393caefe81e8b411b8c815c90f2379be9517581",
+    "sns_amd.json": "684b3f3f3971429c78b7aebf6f0183812f7a0876c7ada4afa0226d9b9e1fadb6",
+    "sns_amd_sw_disabled.json": "8571a0e315d72d07a192f678d1e0ad9b90e5d84a328e9d5a1c0ac8ec18f41347",
+    "sns_amd_sw_enabled.json": "1360edbe5f1bae88d52231348196271b0036e89cc6e16f31e3267a3d9134c24e",
+    "sns_aont.json": "e635f641b0ef34e7f232e21518df475907e9820d8f95394c17811d280c1d47fd",
+    "sns_ccd.json": "2033c01a4f39f7cba4f62bbe7b20e8fa354a0b0ff866cc4f548573df08f14988",
+    "sns_cm.json": "668492dd7ba5d9a72f321a7826bbc562c49c055471dd08c481f87b62e6f30240",
+    "sns_dae.json": "dbcad8542fa47b2d89f6d9a9dc68957577f2a2b8f84334f23f1c3bd97f873f6d",
+    "sns_device_orient.json": "cd27ada256ee2a9b7fa6b16765d21830914d887576b14b51d24e5e1c6ca55a06",
+    "sns_diag_filter.json": "014274fb1659eda999235152a89c18eaa4df99979506091f7035a8783e88bdd6",
+    "sns_fmv.json": "7d2a67e66a18c89cbd38ab73d5d9d6a269695b94399244b2f07973ca575634a4",
+    "sns_geomag_rv.json": "c5e94f9edfaaa986ebc32ac605bd22fc53550303e1f6e71b35ffbd93e577de5e",
+    "sns_gyro_cal.json": "491a656b28298f83a86a37942995eb4b79320f4ee3f41f6a0b242279f7aed80a",
+    "sns_mag_cal.json": "7ed05857d00b0cb5e4b0bf06fd80c55da95e40b4d5ff628ec6c0eec36d47202c",
+    "sns_rmd.json": "4a299dc738929bfe3295d2f4c5994b32887c9aace4e7689a051b964fe6dd4442",
+    "sns_rotv.json": "717297fc449906d2b17a737aeb177941f584947b603c17bf8b5b9752b7140ee2",
+    "sns_tilt_sw_disabled.json": "30925c539d0af2b126a19ec81a20b508b5544524ad8d3ec91bd8eb6cbd7918db",
+    "stm_lid_angle.json": "fa17a840d28ee8833d25efb551f6374772fb9891b42ecbb403f707072348976b",
+    "sy3133cs_0.json": "f8dd424233311be61241ec42c2df3c64e5c4a375572e3ac3eea4cc138274ca4c",
+    "t1000_0.json": "75ccc8e7445809b3c7688ae2df8e998167175de0eaada42626ba51f7b6f2c876",
+    "tcs3701.json": "dc2d72ce965a4abd637a205d215043232aa321ba811a9b9cd33623a9c9e48c2b"
+  },
+  "selected": [
+    "8280_qrd_sh3001_0.json",
+    "8280_qrd_sy3133cs_0.json",
+    "8280_qrd_t1000_0.json",
+    "8280_qrd_tcs3701.json",
+    "default_sensors.json",
+    "sh3001_0.json",
+    "sns_amd.json",
+    "sns_amd_sw_enabled.json",
+    "sns_aont.json",
+    "sns_ccd.json",
+    "sns_cm.json",
+    "sns_dae.json",
+    "sns_device_orient.json",
+    "sns_diag_filter.json",
+    "sns_fmv.json",
+    "sns_geomag_rv.json",
+    "sns_gyro_cal.json",
+    "sns_mag_cal.json",
+    "sns_rmd.json",
+    "sns_rotv.json",
+    "stm_lid_angle.json",
+    "sy3133cs_0.json",
+    "t1000_0.json",
+    "tcs3701.json"
+  ],
+  "excluded": [
+    {
+      "file": "sns_amd_sw_disabled.json",
+      "config": {
+        "hw_platform": [
+          "MTP",
+          "QRD"
+        ],
+        "soc_id": [
+          ""
+        ]
+      }
+    },
+    {
+      "file": "sns_tilt_sw_disabled.json",
+      "config": {
+        "hw_platform": [
+          "MTP",
+          "QRD"
+        ],
+        "soc_id": [
+          ""
+        ]
+      }
+    }
+  ],
+  "groups": {
+    "ccd_amd": [
+      "sns_ccd.json"
+    ],
+    "ccd_ttw": [
+      "sns_ccd.json"
+    ],
+    "dae": [
+      "sns_dae.json"
+    ],
+    "default_sensors": [
+      "default_sensors.json"
+    ],
+    "default_sensors.accel": [
+      "default_sensors.json"
+    ],
+    "default_sensors.accel.attr_0": [
+      "default_sensors.json"
+    ],
+    "default_sensors.accel_cal": [
+      "default_sensors.json"
+    ],
+    "default_sensors.accel_cal.attr_0": [
+      "default_sensors.json"
+    ],
+    "default_sensors.ambient_light": [
+      "default_sensors.json"
+    ],
+    "default_sensors.ambient_light.attr_0": [
+      "default_sensors.json"
+    ],
+    "default_sensors.amd": [
+      "default_sensors.json"
+    ],
+    "default_sensors.amd.attr_0": [
+      "default_sensors.json"
+    ],
+    "default_sensors.fmv": [
+      "default_sensors.json"
+    ],
+    "default_sensors.fmv.attr_0": [
+      "default_sensors.json"
+    ],
+    "default_sensors.game_rv": [
+      "default_sensors.json"
+    ],
+    "default_sensors.game_rv.attr_0": [
+      "default_sensors.json"
+    ],
+    "default_sensors.geomag_rv": [
+      "default_sensors.json"
+    ],
+    "default_sensors.geomag_rv.attr_0": [
+      "default_sensors.json"
+    ],
+    "default_sensors.gravity": [
+      "default_sensors.json"
+    ],
+    "default_sensors.gravity.attr_0": [
+      "default_sensors.json"
+    ],
+    "default_sensors.gyro": [
+      "default_sensors.json"
+    ],
+    "default_sensors.gyro.attr_0": [
+      "default_sensors.json"
+    ],
+    "default_sensors.gyro_cal": [
+      "default_sensors.json"
+    ],
+    "default_sensors.gyro_cal.attr_0": [
+      "default_sensors.json"
+    ],
+    "default_sensors.gyro_rot_matrix": [
+      "default_sensors.json"
+    ],
+    "default_sensors.gyro_rot_matrix.attr_0": [
+      "default_sensors.json"
+    ],
+    "default_sensors.mag": [
+      "default_sensors.json"
+    ],
+    "default_sensors.mag.attr_0": [
+      "default_sensors.json"
+    ],
+    "default_sensors.mag_cal": [
+      "default_sensors.json"
+    ],
+    "default_sensors.mag_cal.attr_0": [
+      "default_sensors.json"
+    ],
+    "default_sensors.motion_detect": [
+      "default_sensors.json"
+    ],
+    "default_sensors.motion_detect.attr_0": [
+      "default_sensors.json"
+    ],
+    "default_sensors.proximity": [
+      "default_sensors.json"
+    ],
+    "default_sensors.proximity.attr_0": [
+      "default_sensors.json"
+    ],
+    "default_sensors.rotv": [
+      "default_sensors.json"
+    ],
+    "default_sensors.rotv.attr_0": [
+      "default_sensors.json"
+    ],
+    "default_sensors.sar": [
+      "default_sensors.json"
+    ],
+    "default_sensors.sar.attr_0": [
+      "default_sensors.json"
+    ],
+    "default_sensors.sensor_temperature": [
+      "default_sensors.json"
+    ],
+    "default_sensors.sensor_temperature.attr_0": [
+      "default_sensors.json"
+    ],
+    "default_sensors.sensor_temperature.attr_1": [
+      "default_sensors.json"
+    ],
+    "default_sensors.tilt": [
+      "default_sensors.json"
+    ],
+    "default_sensors.tilt.attr_0": [
+      "default_sensors.json"
+    ],
+    "hingeangle_0_platform": [
+      "stm_lid_angle.json"
+    ],
+    "hingeangle_0_platform.hingeangle": [
+      "stm_lid_angle.json"
+    ],
+    "hingeangle_0_platform.hingeangle.config": [
+      "stm_lid_angle.json"
+    ],
+    "sh3001_0": [
+      "sh3001_0.json"
+    ],
+    "sh3001_0.accel": [
+      "sh3001_0.json"
+    ],
+    "sh3001_0.accel.config": [
+      "sh3001_0.json"
+    ],
+    "sh3001_0.gyro": [
+      "sh3001_0.json"
+    ],
+    "sh3001_0.gyro.config": [
+      "sh3001_0.json"
+    ],
+    "sh3001_0.md": [
+      "sh3001_0.json"
+    ],
+    "sh3001_0.md.config": [
+      "sh3001_0.json"
+    ],
+    "sh3001_0_platform": [
+      "8280_qrd_sh3001_0.json"
+    ],
+    "sh3001_0_platform.accel": [
+      "8280_qrd_sh3001_0.json"
+    ],
+    "sh3001_0_platform.accel.fac_cal": [
+      "8280_qrd_sh3001_0.json"
+    ],
+    "sh3001_0_platform.accel.fac_cal.bias": [
+      "8280_qrd_sh3001_0.json"
+    ],
+    "sh3001_0_platform.accel.fac_cal.corr_mat": [
+      "8280_qrd_sh3001_0.json"
+    ],
+    "sh3001_0_platform.config": [
+      "8280_qrd_sh3001_0.json"
+    ],
+    "sh3001_0_platform.gyro": [
+      "8280_qrd_sh3001_0.json"
+    ],
+    "sh3001_0_platform.gyro.fac_cal": [
+      "8280_qrd_sh3001_0.json"
+    ],
+    "sh3001_0_platform.gyro.fac_cal.bias": [
+      "8280_qrd_sh3001_0.json"
+    ],
+    "sh3001_0_platform.gyro.fac_cal.corr_mat": [
+      "8280_qrd_sh3001_0.json"
+    ],
+    "sh3001_0_platform.md": [
+      "8280_qrd_sh3001_0.json"
+    ],
+    "sh3001_0_platform.md.config": [
+      "8280_qrd_sh3001_0.json"
+    ],
+    "sh3001_0_platform.orient": [
+      "8280_qrd_sh3001_0.json"
+    ],
+    "sh3001_0_platform.placement": [
+      "8280_qrd_sh3001_0.json"
+    ],
+    "sh3001_0_platform.temp": [
+      "8280_qrd_sh3001_0.json"
+    ],
+    "sh3001_0_platform.temp.fac_cal": [
+      "8280_qrd_sh3001_0.json"
+    ],
+    "sh3001_0_platform.temp.fac_cal.bias": [
+      "8280_qrd_sh3001_0.json"
+    ],
+    "sh3001_0_platform.temp.fac_cal.scale": [
+      "8280_qrd_sh3001_0.json"
+    ],
+    "sns_amd": [
+      "sns_amd.json",
+      "sns_amd_sw_enabled.json"
+    ],
+    "sns_aont": [
+      "sns_aont.json"
+    ],
+    "sns_cm": [
+      "sns_cm.json"
+    ],
+    "sns_device_orient_platform": [
+      "sns_device_orient.json"
+    ],
+    "sns_device_orient_platform.config": [
+      "sns_device_orient.json"
+    ],
+    "sns_diag_config": [
+      "sns_diag_filter.json"
+    ],
+    "sns_diag_sensor_datatype": [
+      "sns_diag_filter.json"
+    ],
+    "sns_fmv_platform": [
+      "sns_fmv.json"
+    ],
+    "sns_fmv_platform.config": [
+      "sns_fmv.json"
+    ],
+    "sns_geomag_rv": [
+      "sns_geomag_rv.json"
+    ],
+    "sns_geomag_rv.config": [
+      "sns_geomag_rv.json"
+    ],
+    "sns_gyro_cal_config": [
+      "sns_gyro_cal.json"
+    ],
+    "sns_mag_cal_config": [
+      "sns_mag_cal.json"
+    ],
+    "sns_rmd": [
+      "sns_rmd.json"
+    ],
+    "sns_rotv_platform": [
+      "sns_rotv.json"
+    ],
+    "sns_rotv_platform.config": [
+      "sns_rotv.json"
+    ],
+    "sy3133cs_0": [
+      "sy3133cs_0.json"
+    ],
+    "sy3133cs_0.als": [
+      "sy3133cs_0.json"
+    ],
+    "sy3133cs_0.als.config": [
+      "sy3133cs_0.json"
+    ],
+    "sy3133cs_0.rgb": [
+      "sy3133cs_0.json"
+    ],
+    "sy3133cs_0.rgb.config": [
+      "sy3133cs_0.json"
+    ],
+    "sy3133cs_0_platform": [
+      "8280_qrd_sy3133cs_0.json"
+    ],
+    "sy3133cs_0_platform.als": [
+      "8280_qrd_sy3133cs_0.json"
+    ],
+    "sy3133cs_0_platform.als.cal_reference_value0": [
+      "8280_qrd_sy3133cs_0.json"
+    ],
+    "sy3133cs_0_platform.als.cal_reference_value1": [
+      "8280_qrd_sy3133cs_0.json"
+    ],
+    "sy3133cs_0_platform.als.cie_matrix_0": [
+      "8280_qrd_sy3133cs_0.json"
+    ],
+    "sy3133cs_0_platform.als.cie_matrix_1": [
+      "8280_qrd_sy3133cs_0.json"
+    ],
+    "sy3133cs_0_platform.als.coefficient_0": [
+      "8280_qrd_sy3133cs_0.json"
+    ],
+    "sy3133cs_0_platform.als.coefficient_1": [
+      "8280_qrd_sy3133cs_0.json"
+    ],
+    "sy3133cs_0_platform.als.fac_cal": [
+      "8280_qrd_sy3133cs_0.json"
+    ],
+    "sy3133cs_0_platform.config": [
+      "8280_qrd_sy3133cs_0.json"
+    ],
+    "t1000_0": [
+      "t1000_0.json"
+    ],
+    "t1000_0.accel": [
+      "t1000_0.json"
+    ],
+    "t1000_0.accel.config": [
+      "t1000_0.json"
+    ],
+    "t1000_0.gyro": [
+      "t1000_0.json"
+    ],
+    "t1000_0.gyro.config": [
+      "t1000_0.json"
+    ],
+    "t1000_0.md": [
+      "t1000_0.json"
+    ],
+    "t1000_0.md.config": [
+      "t1000_0.json"
+    ],
+    "t1000_0_platform": [
+      "8280_qrd_t1000_0.json"
+    ],
+    "t1000_0_platform.accel": [
+      "8280_qrd_t1000_0.json"
+    ],
+    "t1000_0_platform.accel.fac_cal": [
+      "8280_qrd_t1000_0.json"
+    ],
+    "t1000_0_platform.accel.fac_cal.bias": [
+      "8280_qrd_t1000_0.json"
+    ],
+    "t1000_0_platform.accel.fac_cal.corr_mat": [
+      "8280_qrd_t1000_0.json"
+    ],
+    "t1000_0_platform.config": [
+      "8280_qrd_t1000_0.json"
+    ],
+    "t1000_0_platform.gyro": [
+      "8280_qrd_t1000_0.json"
+    ],
+    "t1000_0_platform.gyro.fac_cal": [
+      "8280_qrd_t1000_0.json"
+    ],
+    "t1000_0_platform.gyro.fac_cal.bias": [
+      "8280_qrd_t1000_0.json"
+    ],
+    "t1000_0_platform.gyro.fac_cal.corr_mat": [
+      "8280_qrd_t1000_0.json"
+    ],
+    "t1000_0_platform.md": [
+      "8280_qrd_t1000_0.json"
+    ],
+    "t1000_0_platform.md.config": [
+      "8280_qrd_t1000_0.json"
+    ],
+    "t1000_0_platform.orient": [
+      "8280_qrd_t1000_0.json"
+    ],
+    "t1000_0_platform.placement": [
+      "8280_qrd_t1000_0.json"
+    ],
+    "t1000_0_platform.temp": [
+      "8280_qrd_t1000_0.json"
+    ],
+    "t1000_0_platform.temp.fac_cal": [
+      "8280_qrd_t1000_0.json"
+    ],
+    "t1000_0_platform.temp.fac_cal.bias": [
+      "8280_qrd_t1000_0.json"
+    ],
+    "t1000_0_platform.temp.fac_cal.scale": [
+      "8280_qrd_t1000_0.json"
+    ],
+    "tcs3701": [
+      "tcs3701.json"
+    ],
+    "tcs3701.als": [
+      "tcs3701.json"
+    ],
+    "tcs3701.als.config": [
+      "tcs3701.json"
+    ],
+    "tcs3701.prox": [
+      "tcs3701.json"
+    ],
+    "tcs3701.prox.config": [
+      "tcs3701.json"
+    ],
+    "tcs3701_platform": [
+      "8280_qrd_tcs3701.json"
+    ],
+    "tcs3701_platform.als": [
+      "8280_qrd_tcs3701.json"
+    ],
+    "tcs3701_platform.als.fac_cal": [
+      "8280_qrd_tcs3701.json"
+    ],
+    "tcs3701_platform.channel": [
+      "8280_qrd_tcs3701.json"
+    ],
+    "tcs3701_platform.channel.fac_cal": [
+      "8280_qrd_tcs3701.json"
+    ],
+    "tcs3701_platform.coefficient": [
+      "8280_qrd_tcs3701.json"
+    ],
+    "tcs3701_platform.config": [
+      "8280_qrd_tcs3701.json"
+    ],
+    "tcs3701_platform.prox": [
+      "8280_qrd_tcs3701.json"
+    ],
+    "tcs3701_platform.prox.fac_cal": [
+      "8280_qrd_tcs3701.json"
+    ]
+  },
+  "extra_existing_sentinel": "registry",
+  "historical_sibling_temp": "temp.json",
+  "reference": "docs/stage4-findings.md #37 line 641; exact spelling only, no general traversal"
+}

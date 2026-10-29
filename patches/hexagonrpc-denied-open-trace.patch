@@ -1,0 +1,95 @@
+--- a/hexagonrpcd/apps_std.c
++++ b/hexagonrpcd/apps_std.c
+@@ -20,6 +20,10 @@
+  */
+ 
+ #include <errno.h>
++#ifdef __ANDROID__
++#include <android/log.h>
++#include <stdatomic.h>
++#endif
+ #include <stdio.h>
+ #include <stdint.h>
+ #include <string.h>
+@@ -150,14 +154,58 @@
+ 	return 0;
+ }
+ 
++#ifdef __ANDROID__
++/* Metadata only. Escaped field and scanned input bounded; budget never wraps. */
++static atomic_uint denied_open_logs;
++static void escape_denied_path(char *out, const char *in, size_t limit)
++{
++	static const char hex[] = "0123456789abcdef";
++	size_t i, n = 0;
++	for (i = 0; i < limit && in[i]; ++i) {
++		unsigned char c = (unsigned char)in[i];
++		size_t width = (c >= 0x20 && c <= 0x7e && c != '\\' && c != '"') ? 1 : 4;
++		if (n + width > limit) break;
++		if (c >= 0x20 && c <= 0x7e && c != '\\' && c != '"')
++			out[n++] = c;
++		else {
++			out[n++] = '\\'; out[n++] = 'x';
++			out[n++] = hex[c >> 4]; out[n++] = hex[c & 15];
++		}
++	}
++	out[n] = 0;
++}
++static void trace_denied_open(const char *path, const char *mode)
++{
++	unsigned int seen = atomic_load_explicit(&denied_open_logs, memory_order_relaxed);
++	while (seen < 64) {
++		if (atomic_compare_exchange_weak_explicit(&denied_open_logs, &seen, seen + 1,
++				memory_order_relaxed, memory_order_relaxed)) {
++			char escaped[256 + 1], escaped_mode[16 + 1];
++			escape_denied_path(escaped, path, 256);
++			escape_denied_path(escaped_mode, mode, 16);
++			__android_log_print(ANDROID_LOG_INFO, "hexagonrpcd-denied",
++				"method=apps_std_fopen_with_env mode=\"%s\" path=\"%s\"",
++				escaped_mode, escaped);
++			return;
++		}
++	}
++}
++#endif
++
+ static uint32_t apps_std_fopen_with_env(void *data,
+ 					const struct fastrpc_io_buffer *inbufs,
+ 					struct fastrpc_io_buffer *outbufs)
+ {
+ 	struct apps_std_ctx *ctx = data;
+-	uint32_t *out = outbufs[0].p;
++	uint32_t *out;
+ 	char rw_mode;
+ 	int dirfd, fd;
++
++	if (!data || !inbufs || !outbufs || !outbufs[0].p || outbufs[0].s < sizeof(*out)
++	 || !inbufs[1].p || !inbufs[1].s || !inbufs[3].p || !inbufs[3].s
++	 || !inbufs[4].p || !inbufs[4].s)
++		return AEE_EBADPARM;
++	out = outbufs[0].p;
+ 
+ 	// The name and environment variable must also be NULL-terminated
+ 	if (((const char *) inbufs[1].p)[inbufs[1].s - 1] != 0
+@@ -167,8 +215,9 @@
+ 
+ 	rw_mode = ((const char *) inbufs[4].p)[0];
+ 	if (rw_mode == 'w' || rw_mode == 'a') {
+-		fprintf(stderr, "Tried to open %s for writing\n",
+-				(const char *) inbufs[3].p);
++#ifdef __ANDROID__
++		trace_denied_open(inbufs[3].p, inbufs[4].p);
++#endif
+ 		return AEE_EUNSUPPORTED;
+ 	}
+ 
+--- a/hexagonrpcd/Android.bp
++++ b/hexagonrpcd/Android.bp
+@@ -18,6 +18,7 @@
+     ],
+     shared_libs: [
+         "libhexagonrpc",
++        "liblog",
+     ],
+     vendor: true,
+ }

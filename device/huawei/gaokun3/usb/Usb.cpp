@@ -62,6 +62,7 @@
 #include <android/log.h>
 
 #include <sys/epoll.h>
+#include <sys/system_properties.h>
 #include <sys/eventfd.h>
 #include <unistd.h>
 
@@ -108,7 +109,7 @@ PortStatus ToStatus(const Inputs& in, bool following) {
     s.portName = kPortName;
     s.supportedModes = {PortMode::DRP};
     s.usbDataStatus = {UsbDataStatus::ENABLED};
-    s.canChangeMode = following;
+    s.canChangeMode = following && !DeviceOnly();
     bool host = in.role == "host";
     if (in.typec) {
         if (!in.partner || (!host && in.role != "device")) return s;
@@ -171,6 +172,24 @@ class Usb : public BnUsb {
             SetProp(kNoAndroidUsb, "1");
         }
         std::thread([this] { Monitor(); }).detach();
+        // A persistent policy can change without any USB uevent. Wait on its
+        // property serial, without polling or restarting the HAL/callback.
+        std::thread([this] {
+            bool last = DeviceOnly();
+            Wake();
+            for (;;) {
+                uint32_t serial = __system_property_area_serial();
+                const prop_info* prop = __system_property_find(kDeviceOnly);
+                if (prop) serial = __system_property_serial(prop);
+                bool current = DeviceOnly();
+                if (current != last) {
+                    last = current;
+                    Wake();
+                }
+                uint32_t next;
+                __system_property_wait(prop, serial, &next, nullptr);
+            }
+        }).detach();
     }
 
     // Lets the HAL decide the data role, once it is registered.
@@ -215,6 +234,7 @@ class Usb : public BnUsb {
                 default: break;
             }
         }
+        if (target && *target == "host" && DeviceOnly()) target.reset();
         Status status = Status::NOT_SUPPORTED;
         if (target) {
             if (!ReadInputs().partner) {
@@ -427,7 +447,8 @@ class Usb : public BnUsb {
         if (!mSwitch) return;
         const std::string& want = mSwitch->target;
         bool done = in.role == want && (want == "host" ? in.xhci : !in.udc.empty());
-        if (done) Finish(true, "done");
+        if (want == "host" && DeviceOnly()) Finish(false, "device-only policy");
+        else if (done) Finish(true, "done");
         else if (!mFollowing || !in.partner) Finish(false, "the partner is gone");
         else if (now >= mSwitch->deadline) Finish(false, "timed out");
     }

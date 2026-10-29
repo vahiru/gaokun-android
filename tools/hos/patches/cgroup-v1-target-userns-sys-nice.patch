@@ -1,0 +1,25 @@
+Subject: [EXPERIMENTAL HOS] cgroup: permit v1 migration with target-userns CAP_SYS_NICE
+
+Port the Android common android15-6.6 cgroup-v1 permission exception.
+System_server already holds CAP_SYS_NICE but mainline only considers the
+open-time euid, so cross-UID app scheduling fails after a successful open.
+
+Preserve the root, target uid and target saved-uid checks. The additional
+check uses the caller's capability in the target task's user namespace,
+exactly as Android common does; no DAC or SELinux permission is bypassed.
+This is opt-in and is not added to the production kernel patch list.
+
+Source: https://android.googlesource.com/kernel/common/+/refs/heads/android15-6.6/kernel/cgroup/cgroup-v1.c
+
+--- a/kernel/cgroup/cgroup-v1.c
++++ b/kernel/cgroup/cgroup-v1.c
+@@ -523,7 +523,8 @@
+ 	tcred = get_task_cred(task);
+ 	if (!uid_eq(cred->euid, GLOBAL_ROOT_UID) &&
+ 	    !uid_eq(cred->euid, tcred->uid) &&
+-	    !uid_eq(cred->euid, tcred->suid))
++	    !uid_eq(cred->euid, tcred->suid) &&
++	    !ns_capable(tcred->user_ns, CAP_SYS_NICE))
+ 		ret = -EACCES;
+ 	put_cred(tcred);
+ 	if (ret)

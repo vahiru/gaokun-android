@@ -32,6 +32,11 @@
  * A role chosen in Settings is kept until the partner detaches, and restored
  * if something else changes it (gaokun3-usbrole.sh at screen off and on).
  *
+ * persist.vendor.gaokun3.usbrole.device_only=true (or 1) overrides both
+ * automatic and Settings host choices. The HAL keeps reporting connections;
+ * usbrole.rc and the role script keep suspend protection while device-only.
+ * false/0 or an absent property restores the default rules.
+ *
  * Only for a DT with vreg_l9d always on: then the controller may suspend in
  * either role, so roles change regardless of the screen, and no wakelock is
  * needed around role changes.
@@ -67,6 +72,7 @@ class RoleFollow {
     void SyncAdbPause(const std::string& role);
     void SetFlag(const char* prop, bool on, const char* why);
 
+    bool mDeviceOnly = false;
     bool mAttached = false;
     // The role last written, until the controller shows it: it changes role
     // asynchronously, and inputs read before that still show the old one.

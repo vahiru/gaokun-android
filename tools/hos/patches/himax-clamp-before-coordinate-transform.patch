@@ -1,0 +1,26 @@
+Subject: [EXPERIMENTAL HOS] Input: himax-spi: bound coordinates before inversion
+
+Edge compensation can produce raw x=2560 or y=1600 for a panel whose
+inclusive maxima are 2559 and 1599. Inverting x before the DT-requested
+axis swap then reports ABS_Y=-1. Clamp signed raw coordinates to the
+touchscreen properties' inclusive bounds before the existing transform.
+
+Interior positions, contact tracking, pressure, palm detection and rotation
+order are unchanged. This corrects edge overflow only; it does not claim
+to fix interrupted or insensitive swipes in the screen interior.
+
+--- a/drivers/input/touchscreen/himax-spi-core.c
++++ b/drivers/input/touchscreen/himax-spi-core.c
+@@ -1076,7 +1076,11 @@
+ 		if (!on)
+ 			continue;
+ 
++		/* Edge compensation may reach size, one past the inclusive max.
++		 * Clamp while signed, before inversion and axis swapping.
++		 */
+ 		touchscreen_report_pos(ts->input_dev, &ts->props,
+-				       ts->algo->tracks[i].x, ts->algo->tracks[i].y, true);
++				       clamp_t(s32, ts->algo->tracks[i].x, 0, ts->props.max_x),
++				       clamp_t(s32, ts->algo->tracks[i].y, 0, ts->props.max_y), true);
+ 		if (!disable_pressure) {
+ 			if (ts->algo->pressure_enabled) {

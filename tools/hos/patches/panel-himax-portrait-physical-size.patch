@@ -1,0 +1,34 @@
+Subject: [HOS] drm/panel: himax-hx83121a: match physical size to portrait modes
+
+Both BOE and CSOT descriptors expose 1600x2560 portrait modes, but their
+physical dimensions use landscape order. Swap the dimensions to match
+the mode axes. This changes reported geometry only, not panel timings.
+
+Without EDID, drm_hwcomposer uses the connector width for both DPI axes:
+1600 * 25.4 / 266 = 152.78195 instead of 244.81928 with width 166 mm.
+The corrected 166x266 mm rectangle retains the 12.35-inch diagonal.
+
+--- a/drivers/gpu/drm/panel/panel-himax-hx83121a.c
++++ b/drivers/gpu/drm/panel/panel-himax-hx83121a.c
+@@ -684,8 +684,8 @@
+ 
+ /* Model name: BOE PPC357DB1-4 */
+ static const struct panel_desc boe_ppc357db1_4_desc = {
+-	.width_mm = 266,
+-	.height_mm = 166,
++	.width_mm = 166,
++	.height_mm = 266,
+ 	.lanes = 4,
+ 	.format = MIPI_DSI_FMT_RGB888,
+ 	.mode_flags = MIPI_DSI_MODE_VIDEO | MIPI_DSI_CLOCK_NON_CONTINUOUS |
+@@ -703,8 +703,8 @@
+ 
+ /* Model name: CSOT PPC357DB1-4 */
+ static const struct panel_desc csot_ppc357db1_4_desc = {
+-	.width_mm = 266,
+-	.height_mm = 166,
++	.width_mm = 166,
++	.height_mm = 266,
+ 	.lanes = 4,
+ 	.format = MIPI_DSI_FMT_RGB888,
+ 	.mode_flags = MIPI_DSI_MODE_VIDEO | MIPI_DSI_CLOCK_NON_CONTINUOUS |

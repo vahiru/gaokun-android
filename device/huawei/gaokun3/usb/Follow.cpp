@@ -44,7 +44,26 @@ bool HasData(const Inputs& in) {
 
 std::optional<RoleFollow::Clock::time_point> RoleFollow::Tick(const Inputs& in,
                                                               Clock::time_point now) {
+    const bool deviceOnly = DeviceOnly();
+    if (deviceOnly != mDeviceOnly) {
+        mDeviceOnly = deviceOnly;
+        Choose("");  // Do not resurrect a pre-policy Settings host choice.
+        mSwitching.clear();
+    }
     SyncAdbPause(in.role);
+    if (deviceOnly) {
+        SetFlag(kReversed, false, "device-only policy");
+        if (mAttached && !in.partner && in.role == "device") RestartPullup();
+        mAttached = in.partner;
+        if (in.role != "device") {
+            // Retry a failed/asynchronous write without blocking the HAL
+            // connection-state reporting.
+            Switch(in.role, "device", "device-only policy", now);
+            return now + kSwitchSettle;
+        }
+        mSwitching.clear();
+        return std::nullopt;
+    }
     if (in.role == "host" && in.xhci) SetFlag(kBroken, false, "the host role came up");
 
     if (!mSwitching.empty()) {
@@ -142,7 +161,7 @@ std::optional<RoleFollow::Clock::time_point> RoleFollow::Tick(const Inputs& in,
 }
 
 void RoleFollow::Choose(const std::string& role) {
-    mChosen = role;
+    mChosen = role == "host" && DeviceOnly() ? "" : role;
     mChosenWritten = false;
     mChosenSeen = false;
     mIdleSince.reset();
@@ -152,6 +171,7 @@ void RoleFollow::Choose(const std::string& role) {
 }
 
 std::string RoleFollow::Describe() const {
+    if (DeviceOnly()) return "device-only policy";
     std::string s = mAttached ? "partner attached" : "no partner";
     if (!mChosen.empty()) s += ", role chosen in Settings: " + mChosen;
     if (mSettled) s += ", settled on host";

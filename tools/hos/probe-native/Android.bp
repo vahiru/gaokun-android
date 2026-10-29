@@ -1,0 +1,10 @@
+// Diagnostic target only: do not add to PRODUCT_PACKAGES.
+cc_binary {
+    name: "gaokun3-thermal-contract-probe",
+    vendor: true,
+    srcs: ["thermal-contract.cpp"],
+    stl: "c++_static",
+    shared_libs: ["libbinder_ndk", "liblog"],
+    static_libs: ["android.hardware.thermal-V3-ndk"],
+    cflags: ["-Wall", "-Wextra", "-Werror"],
+}

@@ -1,0 +1,1325 @@
+diff --git a/hexagonrpcd/Android.bp b/hexagonrpcd/Android.bp
+--- a/hexagonrpcd/Android.bp
++++ b/hexagonrpcd/Android.bp
+@@ -6,6 +6,7 @@
+         "apps_mem.c",
+         "apps_std.c",
+         "hexagonfs.c",
++        "hexagonfs_registry.c",
+         "hexagonfs_mapped.c",
+         "hexagonfs_plat_subtype_name.c",
+         "hexagonfs_virt_dir.c",
+diff --git a/hexagonrpcd/apps_std.c b/hexagonrpcd/apps_std.c
+--- a/hexagonrpcd/apps_std.c
++++ b/hexagonrpcd/apps_std.c
+@@ -23,6 +23,8 @@
+ #include <stdio.h>
+ #include <stdint.h>
+ #include <string.h>
++#include <stdbool.h>
++#include <fcntl.h>
+ #include <sys/stat.h>
+ #include <unistd.h>
+ 
+@@ -32,7 +34,10 @@
+ #include "iobuffer.h"
+ #include "listener.h"
+ 
++static const struct fastrpc_function_impl registry_procs[32];
++
+ struct apps_std_ctx {
++    bool registry_output;
+ 	int rootfd;
+ 	int adsp_avs_cfg_dirfd;
+ 	int adsp_library_dirfd;
+@@ -150,6 +155,100 @@
+ 	return 0;
+ }
+ 
++static int apps_std_open_mode(struct apps_std_ctx *ctx, int dirfd,
++			      const char *name, const char *mode)
++{
++    int flags;
++    int ret=hexagonfs_parse_mode(mode,&flags);
++    if(ret)return ret;
++    if((flags&O_ACCMODE)==O_RDONLY)
++        return hexagonfs_openat(ctx->fds,ctx->rootfd,dirfd,name);
++    return hexagonfs_create(ctx->fds,ctx->rootfd,dirfd,name,flags);
++}
++
++static uint32_t apps_std_fopen(void *data,
++			       const struct fastrpc_io_buffer *inbufs,
++			       struct fastrpc_io_buffer *outbufs)
++{
++	struct apps_std_ctx *ctx = data;
++	uint32_t *out = outbufs[0].p;
++	const char *name = inbufs[1].p;
++	const char *mode = inbufs[2].p;
++	int dirfd, fd;
++
++	// The name and mode must be NULL-terminated
++	if (!inbufs[1].s || !inbufs[2].s || name[inbufs[1].s - 1] != 0 || mode[inbufs[2].s - 1] != 0)
++		return AEE_EBADPARM;
++
++	dirfd = name[0] == '/' ? ctx->rootfd : ctx->adsp_library_dirfd;
++	if (dirfd < 0) {
++		fprintf(stderr, "Could not open %s: no search directory\n", name);
++		return AEE_EFAILED;
++	}
++
++	fd = apps_std_open_mode(ctx, dirfd, name, mode);
++	if (fd < 0) {
++        if(fd == -ENOSYS && (mode[0]=='w' || mode[0]=='a')) return AEE_EUNSUPPORTED;
++		fprintf(stderr, "Could not open %s (%s): %s\n",
++				name, mode, strerror(-fd));
++		return AEE_EFAILED;
++	}
++
++#ifdef HEXAGONRPC_VERBOSE
++	printf("open(%s, %s) -> %d\n", name, mode, fd);
++#endif
++
++	*out = fd;
++
++	return 0;
++}
++
++static uint32_t apps_std_fwrite(void *data,
++				const struct fastrpc_io_buffer *inbufs,
++				struct fastrpc_io_buffer *outbufs)
++{
++	struct apps_std_ctx *ctx = data;
++	const struct {
++		uint32_t fd;
++		uint32_t buf_size;
++	} *first_in = inbufs[0].p;
++	struct {
++		uint32_t written;
++		uint32_t is_eof;
++	} *first_out = outbufs[0].p;
++	ssize_t ret;
++
++	if (inbufs[0].s < sizeof(*first_in) || outbufs[0].s < sizeof(*first_out) ||
++        first_in->buf_size != inbufs[1].s) return AEE_EBADPARM;
++    first_out->written = 0;
++    first_out->is_eof = 0;
++    ret = hexagonfs_write(ctx->fds, first_in->fd, inbufs[1].s, inbufs[1].p);
++	if (ret < 0) {
++		fprintf(stderr, "Could not write file: %s\n", strerror(-ret));
++		return AEE_EFAILED;
++	}
++
++#ifdef HEXAGONRPC_VERBOSE
++	printf("write(%u, %u) -> %ld\n", first_in->fd, first_in->buf_size, ret);
++#endif
++
++	first_out->written = ret;
++	first_out->is_eof = 0;
++
++	return 0;
++}
++
++static uint32_t apps_std_fsync(void *data,
++			       const struct fastrpc_io_buffer *inbufs,
++			       struct fastrpc_io_buffer *outbufs)
++{
++    struct apps_std_ctx *ctx=data;
++    (void)outbufs;
++    if(inbufs[0].s < sizeof(uint32_t)) return AEE_EBADPARM;
++    int ret=hexagonfs_sync(ctx->fds, *(const uint32_t *)inbufs[0].p);
++    if(ret) { fprintf(stderr,"Registry fsync failed: %s\n",strerror(-ret)); return AEE_EFAILED; }
++    return 0;
++}
+ static uint32_t apps_std_fopen_with_env(void *data,
+ 					const struct fastrpc_io_buffer *inbufs,
+ 					struct fastrpc_io_buffer *outbufs)
+@@ -160,13 +259,14 @@
+ 	int dirfd, fd;
+ 
+ 	// The name and environment variable must also be NULL-terminated
+-	if (((const char *) inbufs[1].p)[inbufs[1].s - 1] != 0
++	if (!inbufs[1].s || !inbufs[3].s || !inbufs[4].s
++     || ((const char *) inbufs[1].p)[inbufs[1].s - 1] != 0
+ 	 || ((const char *) inbufs[3].p)[inbufs[3].s - 1] != 0
+ 	 || ((const char *) inbufs[4].p)[inbufs[4].s - 1] != 0)
+ 		return AEE_EBADPARM;
+ 
+ 	rw_mode = ((const char *) inbufs[4].p)[0];
+-	if (rw_mode == 'w' || rw_mode == 'a') {
++	if (!ctx->registry_output && (rw_mode == 'w' || rw_mode == 'a')) {
+ 		fprintf(stderr, "Tried to open %s for writing\n",
+ 				(const char *) inbufs[3].p);
+ 		return AEE_EUNSUPPORTED;
+@@ -188,7 +288,10 @@
+ 		return AEE_EFAILED;
+ 	}
+ 
+-	fd = hexagonfs_openat(ctx->fds, ctx->rootfd, dirfd, inbufs[3].p);
++	fd = ctx->registry_output ?
++        apps_std_open_mode(ctx,dirfd,inbufs[3].p,inbufs[4].p) :
++        hexagonfs_openat(ctx->fds,ctx->rootfd,dirfd,inbufs[3].p);
++    if (fd == -ENOSYS && (rw_mode=='w' || rw_mode=='a')) return AEE_EUNSUPPORTED;
+ 	if (fd < 0) {
+ 		fprintf(stderr, "Could not open %s: %s\n",
+ 				(const char *) inbufs[3].p,
+@@ -217,7 +320,8 @@
+ 	int ret;
+ 
+ 	// The name must be NULL-terminated
+-	if (((const char *) inbufs[1].p)[inbufs[1].s - 1] != 0)
++	if (!inbufs[1].s
++     || ((const char *) inbufs[1].p)[inbufs[1].s - 1] != 0)
+ 		return AEE_EBADPARM;
+ 
+ 	ret = hexagonfs_openat(ctx->fds, ctx->rootfd, ctx->rootfd, inbufs[1].p);
+@@ -310,7 +414,8 @@
+ 	struct stat stats;
+ 	int fd, ret;
+ 
+-	if (((const char *) inbufs[1].p)[inbufs[1].s - 1] != 0)
++	if (!inbufs[1].s
++     || ((const char *) inbufs[1].p)[inbufs[1].s - 1] != 0)
+ 		return AEE_EBADPARM;
+ 
+ 	fd = hexagonfs_openat(ctx->fds, ctx->rootfd, ctx->adsp_library_dirfd, pathname);
+@@ -351,7 +456,7 @@
+ 	return 0;
+ }
+ 
+-struct fastrpc_interface *fastrpc_apps_std_init(struct hexagonfs_dirent *root)
++struct fastrpc_interface *fastrpc_apps_std_init(struct hexagonfs_dirent *root, bool registry_output)
+ {
+ 	struct fastrpc_interface *iface;
+ 	struct apps_std_ctx *ctx;
+@@ -365,6 +470,8 @@
+ 		goto err_free_iface;
+ 
+ 	memcpy(iface, &apps_std_interface, sizeof(struct fastrpc_interface));
++    ctx->registry_output=registry_output;
++    if(registry_output)iface->procs=registry_procs;
+ 
+ 	ctx->rootfd = hexagonfs_open_root(ctx->fds, root);
+ 	if (ctx->rootfd < 0)
+@@ -396,7 +503,7 @@
+ 	struct apps_std_ctx *ctx = iface->data;
+ 	int i;
+ 
+-	for (i = 0; i < HEXAGONFS_MAX_FD; i++) {
++	for (i = HEXAGONFS_MAX_FD - 1; i >= 0; i--) {
+ 		if (ctx->fds[i] != NULL)
+ 			hexagonfs_close(ctx->fds, i);
+ 	}
+@@ -472,3 +579,19 @@
+ 	.n_procs = 32,
+ 	.procs = apps_std_procs,
+ };
++
++/* Opt-in only: default dispatch table and unknown-method contract are unchanged. */
++static const struct fastrpc_function_impl registry_procs[32] = {
++    [0]={.def=&apps_std_fopen_def,.impl=apps_std_fopen},
++    [2]={.def=&apps_std_fflush_def,.impl=apps_std_fflush},
++    [3]={.def=&apps_std_fclose_def,.impl=apps_std_fclose},
++    [4]={.def=&apps_std_fread_def,.impl=apps_std_fread},
++    [5]={.def=&apps_std_fwrite_def,.impl=apps_std_fwrite},
++    [9]={.def=&apps_std_fseek_def,.impl=apps_std_fseek},
++    [19]={.def=&apps_std_fopen_with_env_def,.impl=apps_std_fopen_with_env},
++    [23]={.def=&apps_std_fsync_def,.impl=apps_std_fsync},
++    [26]={.def=&apps_std_opendir_def,.impl=apps_std_opendir},
++    [27]={.def=&apps_std_closedir_def,.impl=apps_std_closedir},
++    [28]={.def=&apps_std_readdir_def,.impl=apps_std_readdir},
++    [31]={.def=&apps_std_stat_def,.impl=apps_std_stat},
++};
+diff --git a/hexagonrpcd/apps_std.h b/hexagonrpcd/apps_std.h
+--- a/hexagonrpcd/apps_std.h
++++ b/hexagonrpcd/apps_std.h
+@@ -21,11 +21,12 @@
+ 
+ #ifndef APPS_STD_H
+ #define APPS_STD_H
++#include <stdbool.h>
+ 
+ #include "hexagonfs.h"
+ #include "listener.h"
+ 
+-struct fastrpc_interface *fastrpc_apps_std_init(struct hexagonfs_dirent *root);
++struct fastrpc_interface *fastrpc_apps_std_init(struct hexagonfs_dirent *root, bool registry_output);
+ void fastrpc_apps_std_deinit(struct fastrpc_interface *iface);
+ 
+ #endif
+diff --git a/hexagonrpcd/hexagonfs.c b/hexagonrpcd/hexagonfs.c
+--- a/hexagonrpcd/hexagonfs.c
++++ b/hexagonrpcd/hexagonfs.c
+@@ -20,6 +20,7 @@
+  */
+ 
+ #include <errno.h>
++#include <fcntl.h>
+ #include <stdbool.h>
+ #include <stddef.h>
+ #include <stdio.h>
+@@ -129,8 +130,7 @@
+ 	fd->ops = root->ops;
+ 
+ 	ret = root->ops->from_dirent(root->u.ptr, true, &fd->data);
+-	if (ret)
+-		goto err;
++	if (ret) { free(fd); return ret; }
+ 
+ 	ret = allocate_file_number(fds, fd);
+ 	if (ret < 0)
+@@ -183,6 +183,13 @@
+ 	if (ret)
+ 		goto err;
+ 
++    /* Registry FDs own independent host/root/parent FDs. Detach their
++     * temporary lookup chain so closing an assigned directory first cannot
++     * leave a dangling ->up pointer. Generic legacy backends are unchanged. */
++    if(fd->ops==&hexagonfs_registry_ops && !fd->is_assigned){
++        struct hexagonfs_fd *parent=fd->up;fd->up=NULL;
++        destroy_file_descriptor(parent);
++    }
+ 	ret = allocate_file_number(fds, fd);
+ 	if (ret)
+ 		goto err;
+@@ -198,6 +205,7 @@
+ int hexagonfs_close(struct hexagonfs_fd **fds, int fileno)
+ {
+ 	struct hexagonfs_fd *fd;
++	size_t i;
+ 
+ 	if (fileno < 0 || fileno >= HEXAGONFS_MAX_FD)
+ 		return -EBADF;
+@@ -205,12 +213,29 @@
+ 	fd = fds[fileno];
+ 	if (fd == NULL || fd->ops == NULL)
+ 		return -EBADF;
++
++    if(fd->ops->sync) {
++        struct stat st;
++        int ret=fd->ops->stat(fd,&st);
++        if(ret)return ret;
++        /* Flush regular files (including read-only handles). Directory lookup
++         * cleanup has no buffered writes; explicit sync still flushes it. */
++        if(S_ISREG(st.st_mode)){ret=fd->ops->sync(fd);if(ret)return ret;}
++    }
++	fds[fileno] = NULL;
++
++	/*
++	 * ".", ".." and the search directory itself can be handed out under a
++	 * second file number: only the last reference may destroy it.
++	 */
++	for (i = 0; i < HEXAGONFS_MAX_FD; i++) {
++		if (fds[i] == fd)
++			return 0;
++	}
+ 
+ 	fd->is_assigned = false;
+ 	destroy_file_descriptor(fd);
+ 
+-	fds[fileno] = NULL;
+-
+ 	return 0;
+ }
+ 
+@@ -281,3 +306,180 @@
+ 
+ 	return fd->ops->stat(fd, stats);
+ }
++
++/* Canonicalize CR segments as in production; only the historically observed
++ * absolute temp spelling may contain '..'. All other write traversal is denied. */
++static int normalize_write_path(const char *name,char **out) {
++    if(!name || !*name || strlen(name)>1024)return -EINVAL;
++    char *copy=strdup(name);if(!copy)return -ENOMEM;
++    char *src=copy,*dst=copy;
++    while(*src){
++        if(*src=='/'){*dst++=*src++;continue;}
++        char *end=strchr(src,'/');if(!end)end=src+strlen(src);
++        char *last=end;if(last>src && last[-1]=='\r')--last;
++        if(last==src){free(copy);return -EINVAL;}
++        for(char *p=src;p<last;++p)if((unsigned char)*p<32){free(copy);return -EINVAL;}
++        memmove(dst,src,(size_t)(last-src));dst+=last-src;src=end;
++    }
++    *dst=0;
++    const char *legacy[]={"/persist/sensors/registry/registry/../temp.json",
++        "/mnt/vendor/persist/sensors/registry/registry/../temp.json"};
++    const char *target[]={"/persist/sensors/registry/temp.json",
++        "/mnt/vendor/persist/sensors/registry/temp.json"};
++    for(unsigned i=0;i<2;++i)if(!strcmp(copy,legacy[i])){strcpy(copy,target[i]);break;}
++    *out=copy;return 0;
++}
++static int resolve_parent(struct hexagonfs_fd **fds, int rootfd, int dirfd,
++			  const char *name, const char **base, bool *owned)
++{
++	const char *slash = strrchr(name, '/');
++	char *dir;
++	int fileno;
++
++	*owned = false;
++    if (!name || !*name || rootfd < 0 || rootfd >= HEXAGONFS_MAX_FD ||
++        dirfd < 0 || dirfd >= HEXAGONFS_MAX_FD || !fds[rootfd] || !fds[dirfd])
++        return -EINVAL;
++    /* Mutations reject dot traversal before directory resolution. */
++    const char *part = name;
++    while (*part) {
++        while (*part == '/') ++part;
++        const char *end = strchr(part, '/');
++        size_t len = end ? (size_t)(end-part) : strlen(part);
++        if (len && part[len-1] == '\r') --len;
++        if ((len==1 && part[0]=='.') || (len==2 && part[0]=='.' && part[1]=='.'))
++            return -EPERM;
++        if (!end) break;
++        part=end+1;
++    }
++
++
++	if (slash == NULL) {
++		*base = name;
++		return dirfd;
++	}
++
++	*base = slash + 1;
++
++	if (slash == name)
++		return rootfd;
++
++	dir = strndup(name, slash - name);
++	if (dir == NULL)
++		return -ENOMEM;
++
++	fileno = hexagonfs_openat(fds, rootfd, dirfd, dir);
++	free(dir);
++	if (fileno < 0)
++		return fileno;
++
++	*owned = true;
++
++	return fileno;
++}
++static int create_normalized(struct hexagonfs_fd **fds, int rootfd, int dirfd, const char *name, int flags)
++{
++	struct hexagonfs_fd *dir, *fd;
++	const char *base;
++	bool owned;
++	int parent, ret;
++
++	parent = resolve_parent(fds, rootfd, dirfd, name, &base, &owned);
++	if (parent < 0)
++		return parent;
++
++	dir = fds[parent];
++	if (dir == NULL) {
++		ret = -EBADF;
++		goto out;
++	}
++
++	if (*base == '\0') {
++		ret = -EISDIR;
++		goto out;
++	}
++
++	if (dir->ops->create == NULL) {
++		ret = -ENOSYS;
++		goto out;
++	}
++
++	ret = dir->ops->create(dir, base, flags, &fd);
++	if (ret)
++		goto out;
++
++	/* The file stands on its own: its directory may be closed before it. */
++	fd->up = NULL;
++
++	ret = allocate_file_number(fds, fd);
++	if (ret < 0)
++		destroy_file_descriptor(fd);
++
++out:
++	if (owned)
++		hexagonfs_close(fds, parent);
++
++	return ret;
++}
++
++int hexagonfs_create(struct hexagonfs_fd **fds,int rootfd,int dirfd,const char *name,int flags) {
++    char *normalized=NULL;int ret=normalize_write_path(name,&normalized);
++    if(ret)return ret;
++    ret=create_normalized(fds,rootfd,dirfd,normalized,flags);
++    free(normalized);return ret;
++}
++ssize_t hexagonfs_write(struct hexagonfs_fd **fds, int fileno, size_t size, const void *ptr)
++{
++	struct hexagonfs_fd *fd;
++
++	if (fileno < 0 || fileno >= HEXAGONFS_MAX_FD)
++		return -EBADF;
++
++	fd = fds[fileno];
++	if (fd == NULL)
++		return -EBADF;
++
++	if (fd->ops->write == NULL)
++		return -ENOSYS;
++
++	return fd->ops->write(fd, size, ptr);
++}
++int hexagonfs_ftruncate(struct hexagonfs_fd **fds, int fileno, off_t len)
++{
++	struct hexagonfs_fd *fd;
++
++	if (fileno < 0 || fileno >= HEXAGONFS_MAX_FD)
++		return -EBADF;
++
++	fd = fds[fileno];
++	if (fd == NULL)
++		return -EBADF;
++
++	if (fd->ops->truncate == NULL)
++		return -ENOSYS;
++
++	return fd->ops->truncate(fd, len);
++}
++int hexagonfs_sync(struct hexagonfs_fd **fds, int fileno)
++{
++    if (fileno < 0 || fileno >= HEXAGONFS_MAX_FD || !fds[fileno]) return -EBADF;
++    struct hexagonfs_fd *fd=fds[fileno];
++    if (!fd->ops->sync) return -ENOSYS;
++    return fd->ops->sync(fd);
++}
++int hexagonfs_parse_mode(const char *mode, int *flags)
++{
++    if (!mode || !*mode) return -EINVAL;
++    char kind=*mode++;
++    if (kind!='r' && kind!='w' && kind!='a') return -EINVAL;
++    bool binary=false, plus=false;
++    for (; *mode; ++mode) {
++        if (*mode=='b' && !binary) binary=true;
++        else if (*mode=='+' && !plus) plus=true;
++        else return -EINVAL;
++    }
++    *flags=plus?O_RDWR:(kind=='r'?O_RDONLY:O_WRONLY);
++    if(kind=='w')*flags|=O_CREAT|O_TRUNC;
++    if(kind=='a')*flags|=O_CREAT|O_APPEND;
++    return 0;
++}
+diff --git a/hexagonrpcd/hexagonfs.h b/hexagonrpcd/hexagonfs.h
+--- a/hexagonrpcd/hexagonfs.h
++++ b/hexagonrpcd/hexagonfs.h
+@@ -32,6 +32,10 @@
+ struct hexagonfs_fd;
+ 
+ struct hexagonfs_file_ops {
++    int (*sync)(struct hexagonfs_fd *fd);
++    int (*create)(struct hexagonfs_fd *dir,const char *name,int flags,struct hexagonfs_fd **out);
++    ssize_t (*write)(struct hexagonfs_fd *fd,size_t size,const void *ptr);
++    int (*truncate)(struct hexagonfs_fd *fd,off_t len);
+ 	void (*close)(void *fd_data);
+ 	int (*from_dirent)(const void *dirent_data, bool dir, void **fd_data);
+ 	int (*openat)(struct hexagonfs_fd *dir,
+@@ -63,6 +67,7 @@
+ 	struct hexagonfs_file_ops *ops;
+ };
+ 
++extern struct hexagonfs_file_ops hexagonfs_registry_ops;
+ extern struct hexagonfs_file_ops hexagonfs_mapped_ops;
+ extern struct hexagonfs_file_ops hexagonfs_mapped_or_empty_ops;
+ extern struct hexagonfs_file_ops hexagonfs_mapped_sysfs_ops;
+@@ -78,4 +83,10 @@
+ int hexagonfs_readdir(struct hexagonfs_fd **fds, int fileno, size_t size, char *name);
+ ssize_t hexagonfs_read(struct hexagonfs_fd **fds, int fileno, size_t size, void *ptr);
+ 
++int hexagonfs_registry_validate_new_root(const char *path);
++int hexagonfs_create(struct hexagonfs_fd **fds,int rootfd,int dirfd,const char *name,int flags);
++ssize_t hexagonfs_write(struct hexagonfs_fd **fds,int fileno,size_t size,const void *ptr);
++int hexagonfs_ftruncate(struct hexagonfs_fd **fds,int fileno,off_t len);
++int hexagonfs_sync(struct hexagonfs_fd **fds,int fileno);
++int hexagonfs_parse_mode(const char *mode,int *flags);
+ #endif
+diff --git a/hexagonrpcd/hexagonfs_registry.c b/hexagonrpcd/hexagonfs_registry.c
+new file mode 100644
+--- /dev/null
++++ b/hexagonrpcd/hexagonfs_registry.c
+@@ -0,0 +1,260 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later
++ * Opt-in registry output backend. No generic mapped path gains write rights.
++ * Exact QRD/449 groups and historically observed temp.json are permitted.
++ * Rename/removal protocols remain unsupported; no generated payload is seeded.
++ */
++#include <dirent.h>
++#include <errno.h>
++#include <fcntl.h>
++#include <stdbool.h>
++#include <stdint.h>
++#include <stdlib.h>
++#include <string.h>
++#include <sys/file.h>
++#include <sys/stat.h>
++#include <unistd.h>
++#include "hexagonfs.h"
++#include "registry_names.h"
++
++#define REGISTRY_MAX_BYTES (256 * 1024)
++#define REGISTRY_TOTAL_BYTES (2 * 1024 * 1024)
++#define REGISTRY_MAX_FILES (REGISTRY_NAME_COUNT + 1)
++struct registry_ctx { int fd, parent, root; unsigned depth; bool writing, reading; DIR *dir; };
++
++static bool group_name(const char *s) {
++    for(size_t i=0;i<REGISTRY_NAME_COUNT;++i)if(!strcmp(s,registry_names[i]))return true;
++    return false;
++}
++static bool allowed(unsigned depth,const char *s) {
++    return depth==0 ? !strcmp(s,"temp.json") : depth==1 && group_name(s);
++}
++static int check_file(int fd) {
++    struct stat s;
++    if (fstat(fd, &s)) return -errno;
++    if (!S_ISREG(s.st_mode) || s.st_nlink != 1 || s.st_uid != geteuid()) return -EPERM;
++    if (s.st_size < 0 || s.st_size > REGISTRY_MAX_BYTES) return -EFBIG;
++    return 0;
++}
++static int check_dir(int fd) {
++    struct stat s;
++    if (fstat(fd, &s)) return -errno;
++    if (!S_ISDIR(s.st_mode) || s.st_uid != geteuid() || (s.st_mode & 077)) return -EPERM;
++    return 0;
++}
++/* Inspect the entire fixed-depth tree; bounds apply across all aliases/FDs. */
++static int scan_dir(int fd,unsigned depth,size_t *bytes,size_t *files) {
++    int copy=openat(fd,".",O_RDONLY|O_DIRECTORY|O_CLOEXEC|O_NOFOLLOW);
++    if(copy<0)return -errno;
++    DIR *d=fdopendir(copy);if(!d){int e=errno;close(copy);return -e;}
++    int ret=0;struct dirent *e;errno=0;
++    while((e=readdir(d))) {
++        if(!strcmp(e->d_name,".") || !strcmp(e->d_name,".."))continue;
++        if(depth==0 && !strcmp(e->d_name,"registry")) {
++            int child=openat(fd,"registry",O_RDONLY|O_DIRECTORY|O_CLOEXEC|O_NOFOLLOW);
++            if(child<0){ret=-errno;break;}
++            ret=check_dir(child);if(!ret)ret=scan_dir(child,1,bytes,files);close(child);
++            if(ret)break;
++        } else {
++            struct stat st;
++            if(!allowed(depth,e->d_name)){ret=-EPERM;break;}
++            if(fstatat(fd,e->d_name,&st,AT_SYMLINK_NOFOLLOW)){ret=-errno;break;}
++            if(!S_ISREG(st.st_mode)||st.st_nlink!=1||st.st_uid!=geteuid()){ret=-EPERM;break;}
++            if(st.st_size<0||st.st_size>REGISTRY_MAX_BYTES){ret=-EFBIG;break;}
++            *bytes+=(size_t)st.st_size;++*files;
++            if(*bytes>REGISTRY_TOTAL_BYTES||*files>REGISTRY_MAX_FILES){ret=-EDQUOT;break;}
++        }
++        errno=0;
++    }
++    if(!ret && errno)ret=-errno;
++    closedir(d);return ret;
++}
++static int quota(int root,size_t *bytes) {size_t files=0;*bytes=0;return scan_dir(root,0,bytes,&files);}
++/* A fresh open description per operation, not dup: flock serializes aliases
++ * and threads even when their capability descriptors share an open description. */
++static int gate(int root) {
++    int fd=openat(root,".",O_RDONLY|O_DIRECTORY|O_CLOEXEC|O_NOFOLLOW);
++    if(fd<0)return -errno;
++    if(flock(fd,LOCK_EX|LOCK_NB)){int e=errno;close(fd);return -e;}
++    return fd;
++}
++/* Trusted CLI path must be absolute; even its parent components cannot be links. */
++static int open_output_root(const char *path) {
++    if (!path || path[0] != '/' || !path[1]) return -EINVAL;
++    char *copy = strdup(path + 1); if (!copy) return -ENOMEM;
++    int fd = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC), ret = 0;
++    if (fd < 0) { free(copy); return -errno; }
++    char *next = copy, *part;
++    while ((part = strsep(&next, "/"))) {
++        if (!*part || !strcmp(part, ".") || !strcmp(part, "..") || strchr(part, '\r')) { ret = -EINVAL; break; }
++        int n = openat(fd, part, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
++        if (n < 0) { ret = -errno; break; }
++        close(fd); fd = n;
++    }
++    free(copy);
++    if (ret) { close(fd); return ret; }
++    return fd;
++}
++/* Called once by CLI before opening FastRPC. Never reuse generated/failed
++ * outputs across daemon runs; an empty sentinel is the sole permitted file. */
++static int fresh_entries(int fd,bool top) {
++    int copy=openat(fd,".",O_RDONLY|O_DIRECTORY|O_CLOEXEC|O_NOFOLLOW);
++    if(copy<0)return -errno;
++    DIR *d=fdopendir(copy);if(!d){int e=errno;close(copy);return -e;}
++    struct dirent *e;int ret=0;errno=0;
++    while((e=readdir(d))) {
++        if(!strcmp(e->d_name,".")||!strcmp(e->d_name,".."))continue;
++        struct stat st;
++        if(strcmp(e->d_name,"registry")){ret=-EPERM;break;}
++        if(fstatat(fd,e->d_name,&st,AT_SYMLINK_NOFOLLOW)){ret=-errno;break;}
++        if(top?!S_ISDIR(st.st_mode):(!S_ISREG(st.st_mode)||st.st_nlink!=1||st.st_size!=0)){
++            ret=-EPERM;break;
++        }
++        errno=0;
++    }
++    if(!ret&&errno)ret=-errno;closedir(d);return ret;
++}
++int hexagonfs_registry_validate_new_root(const char *path) {
++    int root=open_output_root(path);if(root<0)return root;
++    int ret=check_dir(root);if(!ret)ret=fresh_entries(root,true);
++    int child=-1;
++    if(!ret){child=openat(root,"registry",O_RDONLY|O_DIRECTORY|O_CLOEXEC|O_NOFOLLOW);if(child<0)ret=-errno;}
++    if(!ret)ret=check_dir(child);
++    if(!ret)ret=fresh_entries(child,false);
++    if(child>=0)close(child);close(root);return ret;
++}
++static void reg_close(void *data) {
++    struct registry_ctx *c = data;
++    if(c->dir)closedir(c->dir);
++    close(c->fd); close(c->root); if (c->parent >= 0) close(c->parent); free(c);
++}
++static int reg_root(const void *data, bool dir, void **out) {
++    (void)dir;
++    int fd = open_output_root(data); if (fd < 0) return fd;
++    int ret = check_dir(fd);
++    size_t total=0; if (!ret) ret = quota(fd,&total);
++    int child = -1;
++    if (!ret) { child = openat(fd,"registry",O_RDONLY|O_DIRECTORY|O_CLOEXEC|O_NOFOLLOW); if (child < 0) ret = -errno; }
++    if (!ret) ret = check_dir(child);
++
++    if (child >= 0) close(child);
++    if (ret) { close(fd); return ret; }
++    struct registry_ctx *c = calloc(1,sizeof(*c));
++    if (!c) { close(fd); return -ENOMEM; }
++    c->root=dup(fd);if(c->root<0){int e=errno;free(c);close(fd);return -e;}
++    c->fd=fd; c->parent=-1; c->reading=true; *out=c; return 0;
++}
++static int finish_open(struct hexagonfs_fd *dir, int fd, unsigned depth,
++                       bool writing, bool reading, struct hexagonfs_fd **out) {
++    struct registry_ctx *p = dir->data;
++    struct registry_ctx *c = calloc(1,sizeof(*c));
++    struct hexagonfs_fd *f = calloc(1,sizeof(*f));
++    if (!c || !f) { free(c); free(f); close(fd); return -ENOMEM; }
++    int parent = dup(p->fd);
++    if (parent < 0) { int e=errno; free(c); free(f); close(fd); return -e; }
++    c->root=dup(p->root);if(c->root<0){int e=errno;close(parent);close(fd);free(c);free(f);return -e;}
++    c->fd=fd; c->parent=parent; c->depth=depth; c->writing=writing; c->reading=reading;
++    f->data=c; f->up=dir; f->ops=&hexagonfs_registry_ops; *out=f; return 0;
++}
++static int reg_open(struct hexagonfs_fd *dir,const char *name,bool expect_dir,struct hexagonfs_fd **out) {
++    struct registry_ctx *c=dir->data;
++    bool directory=c->depth==0 && !strcmp(name,"registry");
++    if(!directory && !allowed(c->depth,name))return -EPERM;
++    if(expect_dir && !directory)return -ENOTDIR;
++    int flags=O_RDONLY|O_CLOEXEC|O_NOFOLLOW|O_NONBLOCK;
++    if(directory)flags|=O_DIRECTORY;
++    int fd=openat(c->fd,name,flags);if(fd<0)return -errno;
++    int ret=directory?check_dir(fd):check_file(fd);
++    if(ret){close(fd);return ret;}
++    return finish_open(dir,fd,directory?1:2,false,true,out);
++}
++static int reg_create(struct hexagonfs_fd *dir,const char *name,int flags,struct hexagonfs_fd **out) {
++    struct registry_ctx *c=dir->data;int access=flags&O_ACCMODE;
++    if(!allowed(c->depth,name)||(access!=O_WRONLY&&access!=O_RDWR)||
++       (flags&~(O_ACCMODE|O_CREAT|O_TRUNC|O_APPEND)))return -EPERM;
++    int lock=gate(c->root);if(lock<0)return lock;
++    size_t total;int ret=quota(c->root,&total);int fd=-1;
++    if(!ret){fd=openat(c->fd,name,access|O_CLOEXEC|O_NOFOLLOW|O_NONBLOCK|(flags&(O_CREAT|O_APPEND)),0600);if(fd<0)ret=-errno;}
++    if(!ret)ret=check_file(fd);
++    if(!ret&&flock(fd,LOCK_EX|LOCK_NB))ret=-errno;
++    if(!ret&&(flags&O_TRUNC)&&ftruncate(fd,0))ret=-errno;
++    close(lock);
++    if(ret){if(fd>=0)close(fd);return ret;}
++    return finish_open(dir,fd,2,true,access==O_RDWR,out);
++}
++static ssize_t reg_read(struct hexagonfs_fd *fd,size_t n,void *buf) {
++    struct registry_ctx *c=fd->data;
++    if(!c->reading || c->depth!=2)return -EBADF;
++    ssize_t ret; do{ret=read(c->fd,buf,n);}while(ret<0 && errno==EINTR);
++    return ret<0?-errno:ret;
++}
++static ssize_t reg_write(struct hexagonfs_fd *fd,size_t n,const void *buf) {
++    struct registry_ctx *c=fd->data;
++    if(!c->writing||c->depth!=2)return -EBADF;
++    int lock=gate(c->root);if(lock<0)return lock;
++    size_t total;int ret=quota(c->root,&total);struct stat st;
++    if(!ret)ret=check_file(c->fd);
++    if(!ret&&fstat(c->fd,&st))ret=-errno;
++    int flags=-1;off_t pos=-1;
++    if(!ret){flags=fcntl(c->fd,F_GETFL);if(flags<0)ret=-errno;}
++    if(!ret){pos=lseek(c->fd,0,(flags&O_APPEND)?SEEK_END:SEEK_CUR);if(pos<0)ret=-errno;}
++    if(!ret&&(pos>REGISTRY_MAX_BYTES||n>(size_t)(REGISTRY_MAX_BYTES-pos)))ret=-EFBIG;
++    if(!ret){size_t end=(size_t)pos+n,growth=end>(size_t)st.st_size?end-(size_t)st.st_size:0;
++        if(growth>REGISTRY_TOTAL_BYTES-total)ret=-EDQUOT;}
++    size_t done=0;
++    while(!ret&&done<n){ssize_t k=write(c->fd,(const char*)buf+done,n-done);
++        if(k<0){if(errno==EINTR)continue;ret=-errno;}else if(!k)ret=-EIO;else done+=(size_t)k;}
++    close(lock);return ret?ret:(ssize_t)done;
++}
++static int reg_truncate(struct hexagonfs_fd *fd,off_t size) {
++    struct registry_ctx *c=fd->data;
++    if(!c->writing||c->depth!=2)return -EBADF;
++    if(size<0||size>REGISTRY_MAX_BYTES)return -EFBIG;
++    int lock=gate(c->root);if(lock<0)return lock;
++    size_t total;int ret=quota(c->root,&total);struct stat st;
++    if(!ret)ret=check_file(c->fd);
++    if(!ret&&fstat(c->fd,&st))ret=-errno;
++    if(!ret&&size>st.st_size&&(size_t)(size-st.st_size)>REGISTRY_TOTAL_BYTES-total)ret=-EDQUOT;
++    if(!ret&&ftruncate(c->fd,size))ret=-errno;
++    close(lock);return ret;
++}
++static int reg_sync(struct hexagonfs_fd *fd) {
++    struct registry_ctx *c=fd->data;
++    /* A read-only handle can reference an inode modified through another FD. */
++    if(fsync(c->fd))return -errno;
++    return c->parent >= 0 && fsync(c->parent) ? -errno : 0;
++}
++static int reg_readdir(struct hexagonfs_fd *fd,size_t size,char *out) {
++    struct registry_ctx *c=fd->data;
++    if(!size)return -EINVAL;
++    if(c->depth>1)return -ENOTDIR;
++    if(!c->dir){int copy=openat(c->fd,".",O_RDONLY|O_DIRECTORY|O_CLOEXEC|O_NOFOLLOW);
++        if(copy<0)return -errno;
++        c->dir=fdopendir(copy);if(!c->dir){int e=errno;close(copy);return -e;}}
++    struct dirent *e;
++    errno=0;
++    while((e=readdir(c->dir))){
++        if(!strcmp(e->d_name,".") || !strcmp(e->d_name,".."))continue;
++        if(!(c->depth==0&&!strcmp(e->d_name,"registry"))&&!allowed(c->depth,e->d_name))return -EPERM;
++        size_t len=strlen(e->d_name)+1;if(size<len)return -ENAMETOOLONG;
++        memcpy(out,e->d_name,len);return 0;
++    }
++    out[0]=0;return -errno;
++}
++static int reg_stat(struct hexagonfs_fd *fd,struct stat *out) {
++    struct registry_ctx *c=fd->data;return fstat(c->fd,out)?-errno:0;
++}
++static int reg_seek(struct hexagonfs_fd *fd,off_t off,int whence) {
++    struct registry_ctx *c=fd->data;struct stat s;off_t base=0;
++    if(c->depth!=2)return -EISDIR;
++    if(whence==SEEK_CUR){base=lseek(c->fd,0,SEEK_CUR);if(base<0)return -errno;}
++    else if(whence==SEEK_END){if(fstat(c->fd,&s))return -errno;base=s.st_size;}
++    else if(whence!=SEEK_SET)return -EINVAL;
++    if(off < -base || off > REGISTRY_MAX_BYTES-base)return -EFBIG;
++    return lseek(c->fd,base+off,SEEK_SET)<0?-errno:0;
++}
++struct hexagonfs_file_ops hexagonfs_registry_ops={
++    .close=reg_close,.from_dirent=reg_root,.openat=reg_open,.create=reg_create,
++    .read=reg_read,.write=reg_write,.truncate=reg_truncate,.sync=reg_sync,
++    .stat=reg_stat,.seek=reg_seek,.readdir=reg_readdir,
++    /* No rename or unlink until the real registry protocol is known. */
++};
+diff --git a/hexagonrpcd/interfaces/adsp_listener.def b/hexagonrpcd/interfaces/adsp_listener.def
+--- a/hexagonrpcd/interfaces/adsp_listener.def
++++ b/hexagonrpcd/interfaces/adsp_listener.def
+@@ -29,4 +29,7 @@
+ HEXAGONRPC_DEFINE_REMOTE_METHOD(3, adsp_listener_init2, 0, 0, 0, 0)
+ HEXAGONRPC_DEFINE_REMOTE_METHOD(4, adsp_listener_next2, 2, 1, 4, 1)
+ 
++/* quic/fastrpc adsp_listener_get_in_bufs2: ctx, offset, output length, output bytes. */
++HEXAGONRPC_DEFINE_REMOTE_METHOD(5, adsp_listener_get_in_bufs2, 2, 0, 1, 1)
++
+ #endif /* INTERFACE_ADSP_LISTENER_DEF */
+diff --git a/hexagonrpcd/interfaces/apps_std.def b/hexagonrpcd/interfaces/apps_std.def
+--- a/hexagonrpcd/interfaces/apps_std.def
++++ b/hexagonrpcd/interfaces/apps_std.def
+@@ -24,6 +24,9 @@
+ 
+ #include <libhexagonrpc/interface.h>
+ 
++HEXAGONRPC_DEFINE_REMOTE_METHOD(0, apps_std_fopen, 0, 2, 1, 0)
++HEXAGONRPC_DEFINE_REMOTE_METHOD(5, apps_std_fwrite, 1, 1, 2, 0)
++HEXAGONRPC_DEFINE_REMOTE_METHOD(23, apps_std_fsync, 1, 0, 0, 0)
+ HEXAGONRPC_DEFINE_REMOTE_METHOD(1, apps_std_freopen, 1, 0, 1, 1)
+ HEXAGONRPC_DEFINE_REMOTE_METHOD(2, apps_std_fflush, 8, 0, 0, 0)
+ HEXAGONRPC_DEFINE_REMOTE_METHOD(3, apps_std_fclose, 1, 0, 0, 0)
+diff --git a/hexagonrpcd/listener.c b/hexagonrpcd/listener.c
+--- a/hexagonrpcd/listener.c
++++ b/hexagonrpcd/listener.c
+@@ -24,6 +24,9 @@
+ #include <libhexagonrpc/interfaces/remotectl.def>
+ #include <stddef.h>
+ #include <stdio.h>
++#include <stdbool.h>
++#include <stdlib.h>
++#include <string.h>
+ 
+ #include "aee_error.h"
+ #include "interfaces/adsp_listener.def"
+@@ -133,16 +136,49 @@
+ 	return 0;
+ }
+ 
++/* Only explicit registry mode changes the legacy 256-byte limit. The two-
++ * phase fetch follows quic/fastrpc listener_android.c, using the OLD interp2
++ * API. No interp4 or handle API migration is required. */
++#define REGISTRY_MAX_INBUFS (256 * 1024 + 4096)
++static int fetch_registry_inbufs(int fd,uint32_t rctx,uint32_t length,const char *head,char **out) {
++    if(length<=256 || length>REGISTRY_MAX_INBUFS)return -1;
++    char *all=calloc(1,length);if(!all)return -1;
++    memcpy(all,head,256);uint32_t required=0;
++    int ret=fastrpc2(&adsp_listener_get_in_bufs2_def,fd,ADSP_LISTENER_HANDLE,
++                    rctx,(uint32_t)256,&required,length-256,all+256);
++    if(ret || required!=length){free(all);return -1;}
++    *out=all;return 0;
++}
++
++/* Bound every declared blob before passing a newly supported large frame to
++ * the legacy decoder (which otherwise allocates from those declarations). */
++static int valid_registry_frame(uint32_t sc,const char *data,size_t length) {
++    size_t pos=0;
++    for(unsigned i=0;i<REMOTE_SCALARS_INBUFS(sc);++i){
++        if(length-pos<4)return 0;
++        const unsigned char *p=(const unsigned char*)data+pos;
++        uint32_t size=(uint32_t)p[0]|((uint32_t)p[1]<<8)|((uint32_t)p[2]<<16)|((uint32_t)p[3]<<24);
++        pos+=4;pos=(pos+7)&~(size_t)7;
++        if(!size || pos>length || size>length-pos)return 0;
++        pos+=size;
++    }
++    if(length-pos>7)return 0;
++    while(pos<length)if(data[pos++])return 0;
++    return 1;
++}
++
+ static int return_for_next_invoke(int fd,
+ 				  uint32_t result,
+ 				  uint32_t *rctx,
+ 				  uint32_t *handle,
+ 				  uint32_t *sc,
+ 				  const struct fastrpc_io_buffer *returned,
+-				  struct fastrpc_io_buffer **decoded)
++				  struct fastrpc_io_buffer **decoded, bool registry_io)
+ {
+ 	struct fastrpc_decoder_context *ctx;
+ 	char inbufs[256];
++    char *large=NULL;
++    const char *input=inbufs;
+ 	char *outbufs = NULL;
+ 	uint32_t inbufs_len;
+ 	uint32_t outbufs_len;
+@@ -151,7 +187,7 @@
+ 	outbufs_len = outbufs_calculate_size(REMOTE_SCALARS_OUTBUFS(*sc), returned);
+ 
+ 	if (outbufs_len) {
+-		outbufs = malloc(outbufs_len);
++		outbufs = registry_io ? calloc(1,outbufs_len) : malloc(outbufs_len);
+ 		if (outbufs == NULL) {
+ 			perror("Could not allocate encoded output buffer");
+ 			return -1;
+@@ -174,11 +210,16 @@
+ 		goto err_free_outbufs;
+ 	}
+ 
+-	if (inbufs_len > 256) {
+-		fprintf(stderr, "Large (>256B) input buffers aren't implemented\n");
+-		ret = -1;
+-		goto err_free_outbufs;
+-	}
++    if(inbufs_len>256) {
++        if(!registry_io || fetch_registry_inbufs(fd,*rctx,inbufs_len,inbufs,&large)) {
++            fprintf(stderr,"Unsupported/failed input buffer fetch (%" PRIu32 " bytes)\n",inbufs_len);
++            ret=-1;goto err_free_outbufs;
++        }
++        if(!valid_registry_frame(*sc,large,inbufs_len)){
++            free(large);large=NULL;ret=-1;goto err_free_outbufs;
++        }
++        input=large;
++    }
+ 
+ 	ctx = inbuf_decode_start(*sc);
+ 	if (!ctx) {
+@@ -187,7 +228,7 @@
+ 		goto err_free_outbufs;
+ 	}
+ 
+-	ret = inbuf_decode(ctx, inbufs_len, inbufs);
++	ret = inbuf_decode(ctx, inbufs_len, input);
+ 	if (ret) {
+ 		perror("Could not decode");
+ 		goto err_free_outbufs;
+@@ -202,6 +243,7 @@
+ 	*decoded = inbuf_decode_finish(ctx);
+ 
+ err_free_outbufs:
++    free(large);
+ 	free(outbufs);
+ 	return ret;
+ }
+@@ -220,6 +262,17 @@
+ 	uint32_t method = REMOTE_SCALARS_METHOD(sc);
+ 	int ret;
+ 
++    /* Inline field 31 is the escape marker, not a mask for an arbitrary method.
++     * Decode its full uint32 ID before indexing. Only existing stat(31) is
++     * implemented; ftrunc(32)/rename(33) are explicitly unsupported. */
++    if(method==31){
++        if(!REMOTE_SCALARS_INBUFS(sc) || decoded[0].s<sizeof(uint32_t)){
++            *result=AEE_EBADPARM;return 1;
++        }
++        uint32_t extended;memcpy(&extended,decoded[0].p,sizeof(extended));
++        if(extended!=31){*result=AEE_EUNSUPPORTED;return 1;}
++    }
++
+ 	if (sc & 0xff) {
+ 		fprintf(stderr, "Handles are not supported, but got %u in, %u out\n",
+ 				(sc & 0xf0) >> 4, sc & 0xf);
+@@ -282,7 +335,7 @@
+ 
+ int run_fastrpc_listener(int fd,
+ 			 size_t n_ifaces,
+-			 struct fastrpc_interface **ifaces)
++			 struct fastrpc_interface **ifaces, bool registry_io)
+ {
+ 	struct fastrpc_io_buffer *decoded = NULL,
+ 				 *returned = NULL;
+@@ -302,24 +355,32 @@
+ 	while (!ret) {
+ 		ret = return_for_next_invoke(fd,
+ 					     result, &rctx, &handle, &sc,
+-					     returned, &decoded);
++					     returned, &decoded, registry_io);
+ 		if (ret)
+ 			break;
+ 
+-		if (returned != NULL)
+-			iobuf_free(n_outbufs, returned);
++        if(returned != NULL){iobuf_free(n_outbufs,returned);returned=NULL;}
+ 
+ 		ret = invoke_requested_procedure(n_ifaces, ifaces,
+ 						 handle, sc, &result,
+ 						 decoded, &returned);
+-		if (ret)
+-			break;
+-
+-		if (decoded != NULL)
+-			iobuf_free(REMOTE_SCALARS_INBUFS(sc), decoded);
++        if(ret) {
++            if(!registry_io)break; /* Preserve the legacy unsupported-call path. */
++            /* Send the explicit rejection on the next invoke, without running
++             * another method or leaving the opt-in DSP request unanswered. */
++            uint32_t count=REMOTE_SCALARS_OUTBUFS(sc);
++            returned=count?calloc(count,sizeof(*returned)):NULL;
++            if(count&&!returned)break;
++            ret=0;
++        }
++
++        if(decoded != NULL){iobuf_free(REMOTE_SCALARS_INBUFS(sc),decoded);decoded=NULL;}
+ 
+ 		n_outbufs = REMOTE_SCALARS_OUTBUFS(sc);
+ 	}
+ 
++    if(returned)iobuf_free(n_outbufs,returned);
++    if(decoded)iobuf_free(REMOTE_SCALARS_INBUFS(sc),decoded);
++
+ 	return ret;
+ }
+diff --git a/hexagonrpcd/listener.h b/hexagonrpcd/listener.h
+--- a/hexagonrpcd/listener.h
++++ b/hexagonrpcd/listener.h
+@@ -25,6 +25,7 @@
+ #include <libhexagonrpc/fastrpc.h>
+ #include <stddef.h>
+ #include <stdint.h>
++#include <stdbool.h>
+ 
+ #include "iobuffer.h"
+ 
+@@ -49,6 +50,6 @@
+ 
+ int run_fastrpc_listener(int fd,
+ 			 size_t n_ifaces,
+-			 struct fastrpc_interface **ifaces);
++			 struct fastrpc_interface **ifaces, bool registry_io);
+ 
+ #endif
+diff --git a/hexagonrpcd/meson.build b/hexagonrpcd/meson.build
+--- a/hexagonrpcd/meson.build
++++ b/hexagonrpcd/meson.build
+@@ -4,6 +4,7 @@
+   'apps_std.c',
+   'interfaces.c',
+   'hexagonfs.c',
++  'hexagonfs_registry.c',
+   'hexagonfs_mapped.c',
+   'hexagonfs_plat_subtype_name.c',
+   'hexagonfs_virt_dir.c',
+diff --git a/hexagonrpcd/registry_names.h b/hexagonrpcd/registry_names.h
+new file mode 100644
+--- /dev/null
++++ b/hexagonrpcd/registry_names.h
+@@ -0,0 +1,146 @@
++/* Exact QRD/449 group-name union; no calibration values. */
++static const char *const registry_names[] = {
++    "ccd_amd",
++    "ccd_ttw",
++    "dae",
++    "default_sensors",
++    "default_sensors.accel",
++    "default_sensors.accel.attr_0",
++    "default_sensors.accel_cal",
++    "default_sensors.accel_cal.attr_0",
++    "default_sensors.ambient_light",
++    "default_sensors.ambient_light.attr_0",
++    "default_sensors.amd",
++    "default_sensors.amd.attr_0",
++    "default_sensors.fmv",
++    "default_sensors.fmv.attr_0",
++    "default_sensors.game_rv",
++    "default_sensors.game_rv.attr_0",
++    "default_sensors.geomag_rv",
++    "default_sensors.geomag_rv.attr_0",
++    "default_sensors.gravity",
++    "default_sensors.gravity.attr_0",
++    "default_sensors.gyro",
++    "default_sensors.gyro.attr_0",
++    "default_sensors.gyro_cal",
++    "default_sensors.gyro_cal.attr_0",
++    "default_sensors.gyro_rot_matrix",
++    "default_sensors.gyro_rot_matrix.attr_0",
++    "default_sensors.mag",
++    "default_sensors.mag.attr_0",
++    "default_sensors.mag_cal",
++    "default_sensors.mag_cal.attr_0",
++    "default_sensors.motion_detect",
++    "default_sensors.motion_detect.attr_0",
++    "default_sensors.proximity",
++    "default_sensors.proximity.attr_0",
++    "default_sensors.rotv",
++    "default_sensors.rotv.attr_0",
++    "default_sensors.sar",
++    "default_sensors.sar.attr_0",
++    "default_sensors.sensor_temperature",
++    "default_sensors.sensor_temperature.attr_0",
++    "default_sensors.sensor_temperature.attr_1",
++    "default_sensors.tilt",
++    "default_sensors.tilt.attr_0",
++    "hingeangle_0_platform",
++    "hingeangle_0_platform.hingeangle",
++    "hingeangle_0_platform.hingeangle.config",
++    "registry",
++    "sh3001_0",
++    "sh3001_0.accel",
++    "sh3001_0.accel.config",
++    "sh3001_0.gyro",
++    "sh3001_0.gyro.config",
++    "sh3001_0.md",
++    "sh3001_0.md.config",
++    "sh3001_0_platform",
++    "sh3001_0_platform.accel",
++    "sh3001_0_platform.accel.fac_cal",
++    "sh3001_0_platform.accel.fac_cal.bias",
++    "sh3001_0_platform.accel.fac_cal.corr_mat",
++    "sh3001_0_platform.config",
++    "sh3001_0_platform.gyro",
++    "sh3001_0_platform.gyro.fac_cal",
++    "sh3001_0_platform.gyro.fac_cal.bias",
++    "sh3001_0_platform.gyro.fac_cal.corr_mat",
++    "sh3001_0_platform.md",
++    "sh3001_0_platform.md.config",
++    "sh3001_0_platform.orient",
++    "sh3001_0_platform.placement",
++    "sh3001_0_platform.temp",
++    "sh3001_0_platform.temp.fac_cal",
++    "sh3001_0_platform.temp.fac_cal.bias",
++    "sh3001_0_platform.temp.fac_cal.scale",
++    "sns_amd",
++    "sns_aont",
++    "sns_cm",
++    "sns_device_orient_platform",
++    "sns_device_orient_platform.config",
++    "sns_diag_config",
++    "sns_diag_sensor_datatype",
++    "sns_fmv_platform",
++    "sns_fmv_platform.config",
++    "sns_geomag_rv",
++    "sns_geomag_rv.config",
++    "sns_gyro_cal_config",
++    "sns_mag_cal_config",
++    "sns_rmd",
++    "sns_rotv_platform",
++    "sns_rotv_platform.config",
++    "sy3133cs_0",
++    "sy3133cs_0.als",
++    "sy3133cs_0.als.config",
++    "sy3133cs_0.rgb",
++    "sy3133cs_0.rgb.config",
++    "sy3133cs_0_platform",
++    "sy3133cs_0_platform.als",
++    "sy3133cs_0_platform.als.cal_reference_value0",
++    "sy3133cs_0_platform.als.cal_reference_value1",
++    "sy3133cs_0_platform.als.cie_matrix_0",
++    "sy3133cs_0_platform.als.cie_matrix_1",
++    "sy3133cs_0_platform.als.coefficient_0",
++    "sy3133cs_0_platform.als.coefficient_1",
++    "sy3133cs_0_platform.als.fac_cal",
++    "sy3133cs_0_platform.config",
++    "t1000_0",
++    "t1000_0.accel",
++    "t1000_0.accel.config",
++    "t1000_0.gyro",
++    "t1000_0.gyro.config",
++    "t1000_0.md",
++    "t1000_0.md.config",
++    "t1000_0_platform",
++    "t1000_0_platform.accel",
++    "t1000_0_platform.accel.fac_cal",
++    "t1000_0_platform.accel.fac_cal.bias",
++    "t1000_0_platform.accel.fac_cal.corr_mat",
++    "t1000_0_platform.config",
++    "t1000_0_platform.gyro",
++    "t1000_0_platform.gyro.fac_cal",
++    "t1000_0_platform.gyro.fac_cal.bias",
++    "t1000_0_platform.gyro.fac_cal.corr_mat",
++    "t1000_0_platform.md",
++    "t1000_0_platform.md.config",
++    "t1000_0_platform.orient",
++    "t1000_0_platform.placement",
++    "t1000_0_platform.temp",
++    "t1000_0_platform.temp.fac_cal",
++    "t1000_0_platform.temp.fac_cal.bias",
++    "t1000_0_platform.temp.fac_cal.scale",
++    "tcs3701",
++    "tcs3701.als",
++    "tcs3701.als.config",
++    "tcs3701.prox",
++    "tcs3701.prox.config",
++    "tcs3701_platform",
++    "tcs3701_platform.als",
++    "tcs3701_platform.als.fac_cal",
++    "tcs3701_platform.channel",
++    "tcs3701_platform.channel.fac_cal",
++    "tcs3701_platform.coefficient",
++    "tcs3701_platform.config",
++    "tcs3701_platform.prox",
++    "tcs3701_platform.prox.fac_cal",
++};
++#define REGISTRY_NAME_COUNT (sizeof(registry_names)/sizeof(registry_names[0]))
+diff --git a/hexagonrpcd/rpcd.c b/hexagonrpcd/rpcd.c
+--- a/hexagonrpcd/rpcd.c
++++ b/hexagonrpcd/rpcd.c
+@@ -140,6 +140,7 @@
+ 	       "\t-f DEVICE\tFastRPC device node to attach to\n"
+ 	       "\t-p PROGRAM\tRun client program with shared file descriptor\n"
+ 	       "\t-R DIR\t\tRoot directory of served files (default: /usr/share/qcom/)\n"
++	       "\t-W DIR\t\tOpt-in private registry output directory\n"
+ 	       "\t-s\t\tAttach to sensorspd\n");
+ }
+ 
+@@ -250,7 +251,7 @@
+ 	return 0;
+ }
+ 
+-static void *start_reverse_tunnel(int fd, const char *device_dir, const char *dsp)
++static void *start_reverse_tunnel(int fd, const char *device_dir, const char *dsp, const char *registry_output)
+ {
+ 	struct fastrpc_interface **ifaces;
+ 	struct hexagonfs_dirent *root_dir;
+@@ -261,7 +262,7 @@
+ 	if (ifaces == NULL)
+ 		return NULL;
+ 
+-	root_dir = construct_root_dir(device_dir, dsp);
++	root_dir = construct_root_dir(device_dir, dsp, registry_output);
+ 
+ 	/*
+ 	 * The apps_remotectl interface patiently waits for this function to
+@@ -271,14 +272,14 @@
+ 	ifaces[REMOTECTL_HANDLE] = fastrpc_localctl_init(n_ifaces, ifaces);
+ 
+ 	// Dynamic interfaces with no hardcoded handle
+-	ifaces[1] = fastrpc_apps_std_init(root_dir);
++	ifaces[1] = fastrpc_apps_std_init(root_dir, registry_output != NULL);
+ 	ifaces[2] = fastrpc_apps_mem_init(fd);
+ 
+ 	ret = register_fastrpc_listener(fd);
+ 	if (ret)
+ 		goto err;
+ 
+-	run_fastrpc_listener(fd, n_ifaces, ifaces);
++	run_fastrpc_listener(fd, n_ifaces, ifaces, registry_output != NULL);
+ 
+ 	fastrpc_localctl_deinit(ifaces[REMOTECTL_HANDLE]);
+ 
+@@ -412,6 +413,7 @@
+ 	const char *device_dir = "/usr/share/qcom/";
+ 	const char *dsp = "";
+ 	const char *create_shell = NULL;
++	const char *registry_output = NULL;
+ 	const char *guessed_device_dir;
+ 	const char **progs;
+ 	pid_t *pids;
+@@ -435,7 +437,7 @@
+ 	if (guessed_device_dir != NULL)
+ 		device_dir = guessed_device_dir;
+ 
+-	while ((opt = getopt(argc, argv, "c:d:f:p:R:s")) != -1) {
++	while ((opt = getopt(argc, argv, "c:d:f:p:R:W:s")) != -1) {
+ 		switch (opt) {
+ 			case 'c':
+ 				create_shell = optarg;
+@@ -452,6 +454,9 @@
+ 				break;
+ 			case 'R':
+ 				device_dir = optarg;
++				break;
++			case 'W':
++				registry_output=optarg;
+ 				break;
+ 			case 's':
+ 				attach_sns = true;
+@@ -466,6 +471,11 @@
+ 		print_usage(argv[0]);
+ 		goto err_free_pids;
+ 	}
++
++    if(registry_output) {
++        ret=hexagonfs_registry_validate_new_root(registry_output);
++        if(ret){fprintf(stderr,"Registry output must be a fresh private tree: %s\n",strerror(-ret));goto err_free_pids;}
++    }
+ 
+ 	printf("Starting %s (%s) on %s\n", argv[0], attach_sns? "INIT_ATTACH_SNS": "INIT_ATTACH", fastrpc_node);
+ 
+@@ -496,7 +506,7 @@
+ 	if (ret)
+ 		goto err_close_dev;
+ 
+-	start_reverse_tunnel(fd, device_dir, dsp);
++	start_reverse_tunnel(fd, device_dir, dsp, registry_output);
+ 
+ 	terminate_clients(n_progs, pids);
+ 
+diff --git a/hexagonrpcd/rpcd_builder.c b/hexagonrpcd/rpcd_builder.c
+--- a/hexagonrpcd/rpcd_builder.c
++++ b/hexagonrpcd/rpcd_builder.c
+@@ -109,7 +109,7 @@
+  *
+  * TODO: Make this free()-able with reference counts
+  */
+-struct hexagonfs_dirent *construct_root_dir(const char *prefix, const char *dsp)
++struct hexagonfs_dirent *construct_root_dir(const char *prefix, const char *dsp, const char *registry_output)
+ {
+ 	char *acdbdata, *dsp_libs, *sns_cfg, *sns_reg, *sns_reg_config, *socinfo;
+ 	size_t n_prefix;
+@@ -160,6 +160,12 @@
+ 	 * Some platforms need this in / and some need it in /mnt/vendor. Form
+ 	 * a hard link between both locations.
+ 	 */
++    if(registry_output) {
++        struct hexagonfs_dirent *mapping=hfs_map("registry",registry_output);
++        if(!mapping)return NULL;
++        mapping->ops=&hexagonfs_registry_ops;
++        persist_dir=hfs_mkdir("persist",1,hfs_mkdir("sensors",1,mapping));
++    } else {
+ 	persist_dir = hfs_mkdir("persist", 1,
+ 				hfs_mkdir("sensors", 1,
+ 					hfs_mkdir("registry", 1,
+@@ -167,6 +173,7 @@
+ 					)
+ 				)
+ 		      );
++    }
+ 
+ 	/*
+ 	 * Some platforms need vendor in / and some need it in /system. Form
+diff --git a/hexagonrpcd/rpcd_builder.h b/hexagonrpcd/rpcd_builder.h
+--- a/hexagonrpcd/rpcd_builder.h
++++ b/hexagonrpcd/rpcd_builder.h
+@@ -24,6 +24,6 @@
+ 
+ #include "hexagonfs.h"
+ 
+-struct hexagonfs_dirent *construct_root_dir(const char *prefix, const char *dsp);
++struct hexagonfs_dirent *construct_root_dir(const char *prefix, const char *dsp, const char *registry_output);
+ 
+ #endif

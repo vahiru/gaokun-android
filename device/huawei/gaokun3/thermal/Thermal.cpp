@@ -1,23 +1,7 @@
-/*
- * gaokun3 的温控 HAL —— 读 /sys/class/thermal，替掉 AOSP 那个 mock。
- *
- * ⚠️★★ 为什么这件事有危险，以及这里是怎么处理的：
- *   AOSP 的 mock（android.hardware.thermal-service.example）报的 skin/battery
- *   SHUTDOWN 阈值只有 36.0 °C，而 ThermalManagerService.shutdownIfNeeded()
- *   一到 SHUTDOWN 就直接 powerManager.shutdown()。
- *   本机温区【空载就是 36–37 °C】—— 也就是说，只要换成报真实温度的 HAL 而
- *   不同时改阈值，机器会开机几分钟就自动关机。本仓从 M4 起就记着这颗地雷。
- *   ⇒ 这里的阈值全部按【裸片温度】重新定，见下面 kHot。
- *
- * ★ 关于 SKIN：本机【没有】外壳热敏电阻。但框架的 getThermalHeadroom()
- *   （游戏用来自我降档的那个）只看 SKIN，不报的话它返回 NaN，等于没有。
- *   折中：SKIN 取所有 CPU/GPU 温区的最大值，并明确按裸片温度定阈值。
- *   这不是真的外壳温度，是一个诚实标注过的代理值。
- *
- * ★ 内核仍是最后一道闸：sc8280xp.dtsi 里 8 个 cpu 温区各有 85 °C passive
- *   （patches/0009 加的 cooling-maps）和 110 °C critical。我们的 SHUTDOWN
- *   定在 105，比内核的 critical 低 —— 顺序是对的：先由 Android 有序关机，
- *   真到 110 才轮到内核紧急断电。
+/* gaokun3 Thermal HAL: real kernel sensors only.
+ * CPU/GPU/PMIC retain the existing die-temperature policy. SKIN is available
+ * only for skin-temp-thermal with a validated kernel trip policy. No CPU proxy.
+ * An absent/invalid skin policy is unavailable, never fabricated as 0 C/NONE.
  */
 #include <aidl/android/hardware/thermal/BnThermal.h>
 #include <android-base/file.h>
@@ -28,6 +12,8 @@
 #include <android/binder_process.h>
 
 #include <dirent.h>
+#include "ThermalPolicy.h"
+#include <map>
 
 #include <algorithm>
 #include <chrono>
@@ -43,21 +29,13 @@ namespace aidl::android::hardware::thermal::impl::gaokun3 {
 using ::android::base::ReadFileToString;
 using ::android::base::Trim;
 
-// 阈值顺序与 ThrottlingSeverity 一一对应：
-//   NONE / LIGHT / MODERATE / SEVERE / CRITICAL / EMERGENCY / SHUTDOWN
-// ⚠️ 这是【裸片】温度，不是外壳温度。理由见文件头。
-static constexpr float kHot[7] = {NAN, 60.0f, 70.0f, 80.0f, 90.0f, 100.0f, 105.0f};
 static constexpr float kCold[7] = {NAN, NAN, NAN, NAN, NAN, NAN, NAN};
-
-// ★ 读数合理性钳位：传感器抽风时不能让它把机器关掉。
-static constexpr float kSaneMin = -40.0f;
-static constexpr float kSaneMax = 150.0f;
 
 struct Zone {
     std::string path;   // /sys/class/thermal/thermal_zoneN
     std::string name;   // 上报给框架的名字（去掉 -thermal 后缀）
     TemperatureType type;
-    bool feeds_skin;    // 是否参与 SKIN 的取最大值
+    gaokun_thermal::Thresholds hot;
 };
 
 struct Cdev {
@@ -77,28 +55,34 @@ static bool ReadTrimmed(const std::string& p, std::string* out) {
 static float ReadTempC(const std::string& zone_path) {
     std::string s;
     if (!ReadTrimmed(zone_path + "/temp", &s)) return NAN;
-    int64_t milli = 0;
-    if (!::android::base::ParseInt(s, &milli)) return NAN;
-    float c = static_cast<float>(milli) / 1000.0f;
-    if (c < kSaneMin || c > kSaneMax) {
-        LOG(WARNING) << "忽略不合理读数 " << zone_path << " = " << c << " C";
-        return NAN;
-    }
-    return c;
+    return gaokun_thermal::Celsius(s).value_or(NAN);
 }
 
-static ThrottlingSeverity SeverityFor(float c) {
-    if (std::isnan(c)) return ThrottlingSeverity::NONE;
-    for (int i = 6; i >= 1; --i) {
-        if (!std::isnan(kHot[i]) && c >= kHot[i]) return static_cast<ThrottlingSeverity>(i);
+static std::optional<gaokun_thermal::Thresholds> ReadSkinThresholds(
+        const std::string& path) {
+    DIR* d = opendir(path.c_str());
+    if (!d) return std::nullopt;
+    std::vector<gaokun_thermal::Trip> trips;
+    bool valid = true;
+    while (dirent* e = readdir(d)) {
+        std::string n(e->d_name);
+        if (n.rfind("trip_point_", 0) != 0 || n.size() < 5 ||
+            n.compare(n.size() - 5, 5, "_type") != 0) continue;
+        std::string type, temp;
+        if (!ReadTrimmed(path + "/" + n, &type) ||
+            !ReadTrimmed(path + "/" + n.substr(0, n.size() - 5) + "_temp", &temp)) {
+            valid = false;
+            break;
+        }
+        trips.push_back({type, temp});
     }
-    return ThrottlingSeverity::NONE;
+    closedir(d);
+    return valid ? gaokun_thermal::SkinThresholds(trips) : std::nullopt;
 }
 
 class Thermal : public BnThermal {
   public:
     Thermal() {
-        Discover();
         poller_ = std::thread([this] { PollLoop(); });
         poller_.detach();
     }
@@ -178,9 +162,16 @@ class Thermal : public BnThermal {
 
     // ★ 没有预测模型，就返回当前值（平坦外推）。返回 UNSUPPORTED 会让
     //   getThermalHeadroom() 拿不到数，游戏那条自我降档的路就断了。
-    ndk::ScopedAStatus forecastSkinTemperature(int32_t, float* out) override {
+    ndk::ScopedAStatus forecastSkinTemperature(int32_t forecastSeconds, float* out) override {
+        if (forecastSeconds < 0) {
+            return ndk::ScopedAStatus::fromExceptionCodeWithMessage(
+                    EX_ILLEGAL_ARGUMENT, "forecastSeconds must be nonnegative");
+        }
         float c = SkinTempC();
-        if (std::isnan(c)) return ndk::ScopedAStatus::fromExceptionCode(EX_UNSUPPORTED_OPERATION);
+        if (std::isnan(c)) {
+            return ndk::ScopedAStatus::fromExceptionCodeWithMessage(
+                    EX_UNSUPPORTED_OPERATION, "Physical skin temperature or trip policy unavailable");
+        }
         *out = c;
         return ndk::ScopedAStatus::ok();
     }
@@ -191,11 +182,15 @@ class Thermal : public BnThermal {
         std::optional<TemperatureType> filter;
     };
 
-    void Discover() {
+    struct Topology { std::vector<Zone> zones; std::vector<Cdev> cdevs; };
+
+    // Local topology: binder callers and poller never share mutable zone indices.
+    static Topology Discover() {
+        Topology result;
         DIR* d = opendir("/sys/class/thermal");
         if (d == nullptr) {
             PLOG(ERROR) << "打不开 /sys/class/thermal";
-            return;
+            return result;
         }
         std::vector<std::string> zone_dirs, cdev_dirs;
         while (dirent* e = readdir(d)) {
@@ -215,20 +210,24 @@ class Thermal : public BnThermal {
             std::string path = "/sys/class/thermal/" + n;
             std::string type;
             if (!ReadTrimmed(path + "/type", &type)) continue;
-            Zone z{path, type, TemperatureType::UNKNOWN, false};
-            if (type.rfind("cpu", 0) == 0 || type.rfind("cluster", 0) == 0) {
-                z.type = TemperatureType::CPU;
-                z.feeds_skin = true;
-            } else if (type.rfind("gpu", 0) == 0) {
-                z.type = TemperatureType::GPU;
-                z.feeds_skin = true;
+            Zone z{path, type, TemperatureType::UNKNOWN, gaokun_thermal::kDieHot};
+            switch (gaokun_thermal::Classify(type)) {
+                case gaokun_thermal::Sensor::Cpu: z.type = TemperatureType::CPU; break;
+                case gaokun_thermal::Sensor::Gpu: z.type = TemperatureType::GPU; break;
+                case gaokun_thermal::Sensor::Skin: {
+                    auto hot = ReadSkinThresholds(path);
+                    if (!hot) continue; // Unsupported policy is not a safe temperature.
+                    z.type = TemperatureType::SKIN;
+                    z.hot = *hot;
+                    break;
+                }
+                case gaokun_thermal::Sensor::Unknown: break;
             }
-            // mem/pmic 等如实报为 UNKNOWN，不参与 SKIN。
             if (z.name.size() > suffix.size() &&
                 z.name.compare(z.name.size() - suffix.size(), suffix.size(), suffix) == 0) {
                 z.name = z.name.substr(0, z.name.size() - suffix.size());
             }
-            zones_.push_back(z);
+            result.zones.push_back(z);
         }
 
         for (const auto& n : cdev_dirs) {
@@ -241,15 +240,15 @@ class Thermal : public BnThermal {
             } else if (type.find("gpu") != std::string::npos) {
                 c.type = CoolingType::GPU;
             }
-            cdevs_.push_back(c);
+            result.cdevs.push_back(c);
         }
-        LOG(INFO) << "发现 " << zones_.size() << " 个温区、" << cdevs_.size() << " 个冷却设备";
+        return result;
     }
 
     float SkinTempC() {
         float m = NAN;
-        for (const auto& z : zones_) {
-            if (!z.feeds_skin) continue;
+        for (const auto& z : Discover().zones) {
+            if (z.type != TemperatureType::SKIN) continue;
             float c = ReadTempC(z.path);
             if (std::isnan(c)) continue;
             if (std::isnan(m) || c > m) m = c;
@@ -259,7 +258,7 @@ class Thermal : public BnThermal {
 
     std::vector<Temperature> Snapshot(std::optional<TemperatureType> filter) {
         std::vector<Temperature> out;
-        for (const auto& z : zones_) {
+        for (const auto& z : Discover().zones) {
             if (filter.has_value() && filter.value() != z.type) continue;
             float c = ReadTempC(z.path);
             if (std::isnan(c)) continue;
@@ -267,42 +266,32 @@ class Thermal : public BnThermal {
             t.type = z.type;
             t.name = z.name;
             t.value = c;
-            t.throttlingStatus = SeverityFor(c);
+            t.throttlingStatus = static_cast<ThrottlingSeverity>(gaokun_thermal::Severity(c, z.hot));
             out.push_back(t);
-        }
-        if (!filter.has_value() || filter.value() == TemperatureType::SKIN) {
-            float c = SkinTempC();
-            if (!std::isnan(c)) {
-                Temperature t;
-                t.type = TemperatureType::SKIN;
-                t.name = "skin";
-                t.value = c;
-                t.throttlingStatus = SeverityFor(c);
-                out.push_back(t);
-            }
         }
         return out;
     }
 
     std::vector<TemperatureThreshold> Thresholds(std::optional<TemperatureType> filter) {
         std::vector<TemperatureThreshold> out;
-        auto add = [&](TemperatureType t, const std::string& n) {
+        auto add = [&](const Zone& z) {
+            auto t = z.type;
+            const auto& n = z.name;
             if (filter.has_value() && filter.value() != t) return;
             TemperatureThreshold th;
             th.type = t;
             th.name = n;
-            th.hotThrottlingThresholds.assign(std::begin(kHot), std::end(kHot));
+            th.hotThrottlingThresholds.assign(z.hot.begin(), z.hot.end());
             th.coldThrottlingThresholds.assign(std::begin(kCold), std::end(kCold));
             out.push_back(th);
         };
-        for (const auto& z : zones_) add(z.type, z.name);
-        add(TemperatureType::SKIN, "skin");
+        for (const auto& z : Discover().zones) add(z);
         return out;
     }
 
     std::vector<CoolingDevice> CdevSnapshot(std::optional<CoolingType> filter) {
         std::vector<CoolingDevice> out;
-        for (const auto& c : cdevs_) {
+        for (const auto& c : Discover().cdevs) {
             if (filter.has_value() && filter.value() != c.type) continue;
             std::string s;
             int64_t v = 0;
@@ -336,33 +325,34 @@ class Thermal : public BnThermal {
 
     // 只在【等级变化】时回调，不是每次采样都喊 —— 否则 system_server 会被刷爆。
     void PollLoop() {
-        std::vector<ThrottlingSeverity> last(zones_.size() + 1, ThrottlingSeverity::NONE);
+        using Key = std::pair<TemperatureType, std::string>;
+        std::map<Key, ThrottlingSeverity> last;
         while (true) {
             std::this_thread::sleep_for(std::chrono::seconds(2));
             std::vector<Temperature> temps = Snapshot(std::nullopt);
+            std::map<Key, ThrottlingSeverity> current;
             for (const auto& t : temps) {
-                size_t idx = zones_.size();  // 末位留给 skin
-                for (size_t i = 0; i < zones_.size(); ++i) {
-                    if (zones_[i].name == t.name) {
-                        idx = i;
-                        break;
-                    }
-                }
-                if (t.throttlingStatus == last[idx]) continue;
-                last[idx] = t.throttlingStatus;
+                Key key{t.type, t.name};
+                current[key] = t.throttlingStatus;
+                auto previous = last.find(key);
+                if (previous != last.end() && previous->second == t.throttlingStatus) continue;
                 LOG(INFO) << t.name << " 等级变为 " << static_cast<int>(t.throttlingStatus) << "（"
                           << t.value << " C）";
-                std::lock_guard<std::mutex> lk(cb_mutex_);
-                for (const auto& e : cbs_) {
+                std::vector<CbEntry> callbacks;
+                {
+                    std::lock_guard<std::mutex> lk(cb_mutex_);
+                    callbacks = cbs_;
+                }
+                // Never hold the registration mutex across a remote Binder call.
+                for (const auto& e : callbacks) {
                     if (e.filter.has_value() && e.filter.value() != t.type) continue;
                     e.cb->notifyThrottling(t);
                 }
             }
+            last = std::move(current); // Reappearance emits an initial callback.
         }
     }
 
-    std::vector<Zone> zones_;
-    std::vector<Cdev> cdevs_;
     std::mutex cb_mutex_;
     std::vector<CbEntry> cbs_;
     std::thread poller_;

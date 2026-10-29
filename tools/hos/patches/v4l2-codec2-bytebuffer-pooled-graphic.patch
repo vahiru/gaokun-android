@@ -1,0 +1,72 @@
+Subject: [EXPERIMENTAL HOS] v4l2_codec2: use pooled graphics for bytebuffer decoding
+
+BASIC_GRAPHIC has null pool data. Avoid dereferencing it and provide a
+reusable GRALLOC pool for the bounded VideoFramePool; recognize AIDL2 IDs
+as well as legacy HIDL IDs. Leave client Surface pools and poolmask intact.
+Candidate only: requires an A17 platform build and device regression tests.
+Apply at external/v4l2_codec2, not the Android source root.
+
+--- a/components/DecodeComponent.cpp
++++ b/components/DecodeComponent.cpp
+@@ -198,7 +198,12 @@
+     auto poolId = mIntfImpl->getBlockPoolId();
+     ALOGI("Using C2BlockPool ID = %" PRIu64 " for allocating output buffers", poolId);
+     std::shared_ptr<C2BlockPool> blockPool;
+-    auto status = GetCodec2BlockPool(poolId, std::move(sharedThis), &blockPool);
++    // The basic graphic pool carries no pool data and never reuses blocks.
++    // VideoFramePool requires stable bufferpool IDs for its bounded frame set.
++    auto status = poolId == C2BlockPool::BASIC_GRAPHIC
++            ? CreateCodec2BlockPool(C2PlatformAllocatorStore::GRALLOC,
++                                   std::move(sharedThis), &blockPool)
++            : GetCodec2BlockPool(poolId, std::move(sharedThis), &blockPool);
+     if (status != C2_OK) {
+         ALOGE("Graphic block allocator is invalid: %d", status);
+         reportError(status);
+--- a/components/VideoFramePool.cpp
++++ b/components/VideoFramePool.cpp
+@@ -12,6 +12,7 @@
+ 
+ #include <C2BlockInternal.h>
+ #include <bufferpool/BufferPoolTypes.h>
++#include <bufferpool2/BufferPoolTypes.h>
+ 
+ #include <android/hardware_buffer.h>
+ #include <android/hardware/graphics/common/1.0/types.h>
+@@ -48,7 +49,7 @@
+         std::shared_ptr<_C2BlockPoolData> blockPoolData =
+                 _C2BlockFactory::GetGraphicBlockPoolData(block);
+         struct AHardwareBuffer *buf;
+-        if (blockPoolData->getType() != _C2BlockPoolData::TYPE_AHWBUFFER) {
++        if (!blockPoolData || blockPoolData->getType() != _C2BlockPoolData::TYPE_AHWBUFFER) {
+             ALOGE("Blockpool type must be AHardwareBuffer for IGBA.");
+             return std::nullopt;
+         }
+@@ -74,6 +75,18 @@
+     case V4L2AllocatorId::SECURE_LINEAR: {
+         std::shared_ptr<_C2BlockPoolData> blockPoolData =
+                 _C2BlockFactory::GetGraphicBlockPoolData(block);
++        if (!blockPoolData) {
++            ALOGE("Obtained C2GraphicBlock has no pool data.");
++            return std::nullopt;
++        }
++        if (blockPoolData->getType() == _C2BlockPoolData::TYPE_BUFFERPOOL2) {
++            std::shared_ptr<aidl::android::hardware::media::bufferpool2::BufferPoolData> bpData;
++            if (!_C2BlockFactory::GetBufferPoolData(blockPoolData, &bpData) || !bpData) {
++                ALOGE("AIDL BufferPoolData unavailable in block.");
++                return std::nullopt;
++            }
++            return bpData->mId;
++        }
+         if (blockPoolData->getType() != _C2BlockPoolData::TYPE_BUFFERPOOL) {
+             ALOGE("Obtained C2GraphicBlock is not bufferpool-backed.");
+             return std::nullopt;
+--- a/components/Android.bp
++++ b/components/Android.bp
+@@ -41,6 +41,7 @@
+         "libcutils",
+         "liblog",
+         "libsfplugin_ccodec_utils",
++        "libstagefright_aidl_bufferpool2",
+         "libstagefright_bufferqueue_helper",
+         "libstagefright_foundation",
+         "libui",

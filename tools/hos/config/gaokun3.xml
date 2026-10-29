@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Experimental HyperOS capabilities for the gaokun3 mainline vendor.
+     These flags describe implemented integration, not donor hardware.
+     Generic Android keyboard/stylus input is independent of Xiaomi features.
+     See docs/hyperos-hal-audit.md for selection and implementation evidence. -->
+<features>
+    <bool name="is_pad">true</bool>
+    <bool name="is_xiaomi">false</bool>
+    <bool name="is_xiaomi_device">false</bool>
+    <bool name="is_hongmi">false</bool>
+    <bool name="is_mediatek">false</bool>
+    <string name="vendor">qcom</string>
+
+    <!-- No Xiaomi displayfeature HAL or adaptive refresh integration. -->
+    <bool name="is_ltpo_screen">false</bool>
+    <bool name="support_smart_fps">false</bool>
+    <integer name="support_max_fps">120</integer>
+    <!-- fpsList enables PowerKeeper's Xiaomi displayfeature FPS controller.
+         Omit it until that backend exists; DRM display modes remain separate. -->
+    <bool name="support_displayfeature_gamemode">false</bool>
+    <bool name="support_dark_mode_notify">false</bool>
+    <bool name="support_screen_color_persist">false</bool>
+    <bool name="support_screen_paper_mode">false</bool>
+    <bool name="support_truetone">false</bool>
+    <bool name="support_aod">false</bool>
+    <bool name="support_hdr_hbm_brighten">false</bool>
+
+    <!-- Xiaomi touch/keyboard/pen protocols are not supplied by this vendor. -->
+    <bool name="support_touchfeature_gamemode">false</bool>
+    <bool name="support_iic_keyboard">false</bool>
+    <bool name="support_usb_keyboard">false</bool>
+    <bool name="support_keyboard_lid_track">false</bool>
+    <bool name="new_keyboard_upgrade">false</bool>
+    <bool name="support_stylus_gesture">false</bool>
+    <bool name="stylus_quick_note">false</bool>
+    <bool name="support_mi_game_macro">false</bool>
+    <bool name="support_gesture_wakeup">false</bool>
+    <bool name="support_wakeup_single_click">false</bool>
+
+    <!-- No donor torch/IR/notification LED or Xiaomi TEE authentication. -->
+    <bool name="support_torch">false</bool>
+    <bool name="support_android_flashlight">false</bool>
+    <bool name="support_back_ir_transmit">false</bool>
+    <bool name="support_ir">false</bool>
+    <bool name="support_button_light">false</bool>
+    <bool name="support_led_light">false</bool>
+    <bool name="support_led_color">false</bool>
+    <bool name="support_tee_face_unlock">false</bool>
+    <bool name="support_multi_face_input">false</bool>
+    <bool name="support_multi_face_input_global">false</bool>
+    <integer name="ifaa_2dfa_support">0</integer>
+    <integer name="type_soter_finger_pay">0</integer>
+    <integer name="support_widevine_l1">0</integer>
+    <bool name="support_device_encrypt">false</bool>
+
+    <!-- This vendor has no cellular modem integration. -->
+    <bool name="support_dual_sim_card">false</bool>
+    <bool name="support_ca">false</bool>
+    <bool name="support_eap_sim">false</bool>
+</features>

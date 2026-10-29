@@ -1,0 +1,24 @@
+daab6ff1905799bc6b3ecb32470a0eb172c6da21 fastrpc: libhexagonrpc: add error API
+78e2a9425143edda8bd03626210a2e855985aefb fastrpc: hexagonrpcd: listener: support more than 31 methods
+ea3e58d9e658aa54a832f19e85092e5801c860c1 libhexagonrpc: add version 4 of method definition format
+4fd9efcde26e5b2e36bf43ef9b32dc12442a6601 libhexagonrpc: add remote interface open and close API
+034d35a6edf381da50c525a641f7a98bb7e89d3b hexagonrpcd: use hexagonrpc handle API for default listener
+85d96d4df6002502455e9a5b27d34450aa2aa841 chrecd: use hexagonrpc handle API
+7d71de1ebce9911e0db9557afc3b89b0b74e2fdc hexagonrpcd: iobuffer: use size_t for buffer sizes
+8cbdeb5ebf26fde0b3d168abab976f584d7dead1 hexagonrpcd: listener: decode interp4 method definitions
+1dacea047061ddc293982630fc663e34759c40fb libhexagonrpc: interface: switch remotectl interface to interp4
+e53998a12e874619b295c6f51c50ba5a0e500447 chrecd: interface: switch chre_slpi interface to interp4
+2469c21ca70674783bd6f7dca04b7100a4f89fa5 hexagonrpcd: interface: switch apps_std interface to interp4
+0390727bca21b7cd2a7819891918c2c2982160af hexagonrpcd: interface: switch apps_mem interface to interp4
+0b2b5d245e80e7074c33d05b340309fce354b781 hexagonrpcd: interface: switch adsp_listener to interp4
+9da2b5ec0c7f4862a19de2c38eeeba00d098ef10 hexagonrpcd: interface: switch adsp_default_listener to interp4
+4210f6d851648232f330a9ae673d24d12cef8d59 hexagonrpcd: listener: remove interp2 support
+5218213f6634f794f31ef2baebe3fe4ca2bc4e26 tests: depend on stdlib and new libhexagonrpc header file
+605b90ac7eaf16a81952e9529f5f5877ba79859d hexagonrpcd: iobuffer: depend on new hexagonrpc header
+ab26a830a6065bdb142ca220b1a69d7b17ea5047 libhexagonrpc: remove legacy APIs
+598b591ae9da6a6cfe2ca5ea78998019ca6395ea tests: add unit test for hexagonrpc function
+518fdf09921bf9afef987fd17adb325d41afefcc hexagonfs: add create, write, truncate, unlink and rename for mapped directories
+7543f3381729d529c631c36ac7ce25b9024528ec apps_std: serve fopen, fwrite, fsync, fremove, ftrunc and frename
+f0dfd5095d3b7defc3b368f227337bfc6d6aef42 listener: answer unsupported requests and fetch input buffers longer than 256 bytes
+7f2fc1d5afdd811416a4b1bb5664f2a932f7855f rpcd_builder: map the registry's parent directory when DIR/sensors/persist exists
+40e50412812adce9dddc2be9a4510ebce05eef89 hexagonrpcd: fix descriptor lifetimes and the write paths added for the registry

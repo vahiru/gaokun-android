@@ -1,0 +1,101 @@
+From: HyperOS gaokun3 adaptation experiment
+Subject: [EXPERIMENTAL] usb: typec: ucsi: diagnose Huawei initialization failures
+
+The con2 altmode error does not distinguish a GET_ALTERNATE_MODES
+transfer timeout from the following ACK_CC_CI timeout. Log the command
+and failing phase while the opted-in Huawei transport has not published
+connectors. Also report initial and cleanup PPM reset errors, preserving
+the original initialization errno.
+
+No retries, added work, timeout changes, resource cleanup changes or PM
+lifecycle changes. This does not fix initialization failure. Applies to
+Linux v7.2.9 after repository patches 0087 through 0093. Use instead of,
+never together with, the BLOCKED init-timeout retry candidate.
+
+---
+
+diff --git a/drivers/usb/typec/ucsi/ucsi.c b/drivers/usb/typec/ucsi/ucsi.c
+--- a/drivers/usb/typec/ucsi/ucsi.c
++++ b/drivers/usb/typec/ucsi/ucsi.c
+@@ -143,8 +143,12 @@
+ 	if (*cci & UCSI_CCI_BUSY)
+ 		return ucsi_run_command(ucsi, UCSI_CANCEL, cci,
+ 					NULL, 0, NULL, 0, false) ?: -EBUSY;
+-	if (ret)
++	if (ret) {
++		if ((ucsi->quirks & UCSI_INIT_DIAGNOSTICS) && !ucsi->connector)
++			dev_err(ucsi->dev, "Init command %#llx transfer failed (%pe)\n",
++				command, ERR_PTR(ret));
+ 		return ret;
++	}
+ 
+ 	if (!(*cci & UCSI_CCI_COMMAND_COMPLETE))
+ 		return -EIO;
+@@ -160,8 +164,12 @@
+ 	 * Don't ACK connection change if there was an error.
+ 	 */
+ 	ret = ucsi_acknowledge(ucsi, err ? false : conn_ack);
+-	if (ret)
++	if (ret) {
++		if ((ucsi->quirks & UCSI_INIT_DIAGNOSTICS) && !ucsi->connector)
++			dev_err(ucsi->dev, "Init command %#llx ACK failed (%pe)\n",
++				command, ERR_PTR(ret));
+ 		return ret;
++	}
+ 
+ 	return err ?: UCSI_CCI_LENGTH(*cci);
+ }
+@@ -2073,13 +2081,16 @@
+ 	struct ucsi_connector *con, *connector;
+ 	u64 command, ntfy;
+ 	u32 cci;
+-	int ret;
++	int ret, reset_ret;
+ 	int i;
+ 
+ 	/* Reset the PPM */
+ 	ret = ucsi_reset_ppm(ucsi);
+ 	if (ret) {
+ 		dev_err(ucsi->dev, "failed to reset PPM!\n");
++		if (ucsi->quirks & UCSI_INIT_DIAGNOSTICS)
++			dev_err(ucsi->dev, "Initial PPM reset failed (%pe)\n",
++				ERR_PTR(ret));
+ 		goto err;
+ 	}
+ 
+@@ -2155,7 +2166,10 @@
+ 	kfree(connector);
+ err_reset:
+ 	memset(&ucsi->cap, 0, sizeof(ucsi->cap));
+-	ucsi_reset_ppm(ucsi);
++	reset_ret = ucsi_reset_ppm(ucsi);
++	if (reset_ret && (ucsi->quirks & UCSI_INIT_DIAGNOSTICS))
++		dev_err(ucsi->dev, "PPM reset after init failure failed (%pe); original error %pe\n",
++			ERR_PTR(reset_ret), ERR_PTR(ret));
+ err:
+ 	return ret;
+ }
+diff --git a/drivers/usb/typec/ucsi/ucsi.h b/drivers/usb/typec/ucsi/ucsi.h
+--- a/drivers/usb/typec/ucsi/ucsi.h
++++ b/drivers/usb/typec/ucsi/ucsi.h
+@@ -509,6 +509,9 @@
+ 
+ /* USB4 connection can imply that USB communcation is supported */
+ #define UCSI_USB4_IMPLIES_USB	BIT(2)
++
++/* Log transport and ACK failures while discovering connectors. */
++#define UCSI_INIT_DIAGNOSTICS	BIT(3)
+ };
+ 
+ #define UCSI_MAX_DATA_LENGTH(u) (((u)->version < UCSI_VERSION_2_0) ? 0x10 : 0xff)
+diff --git a/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c b/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c
+--- a/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c
++++ b/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c
+@@ -654,6 +654,7 @@
+ 	if (IS_ERR(uec->ucsi))
+ 		return PTR_ERR(uec->ucsi);
+ 
++	uec->ucsi->quirks |= UCSI_INIT_DIAGNOSTICS;
+ 	ucsi_set_drvdata(uec->ucsi, uec);
+ 	auxiliary_set_drvdata(adev, uec);
+ 

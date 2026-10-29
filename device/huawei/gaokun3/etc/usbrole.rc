@@ -66,3 +66,37 @@ on property:vendor.gaokun3.usbrole.adb_pause=1
 
 on property:vendor.gaokun3.usbrole.adb_pause=0
     setprop vendor.sys.usb.adb.disabled 0
+
+# Optional port0 device-only policy. Keep a separate lock across in-flight
+# oneshots: even a host script racing the property change cannot expose an
+# unprotected device role. The ordinary role lock is also never released by
+# the policy-aware script. Missing/false retains the original policy.
+on property:persist.vendor.gaokun3.usbrole.device_only=true
+    write /sys/power/wake_lock gaokun3_usb_device_only
+    stop gaokun3_role_host
+    stop gaokun3_role_device
+    write /sys/power/wake_lock gaokun3_usbrole
+    start gaokun3_role_device
+
+on property:persist.vendor.gaokun3.usbrole.device_only=1
+    write /sys/power/wake_lock gaokun3_usb_device_only
+    stop gaokun3_role_host
+    stop gaokun3_role_device
+    write /sys/power/wake_lock gaokun3_usbrole
+    start gaokun3_role_device
+
+on property:persist.vendor.gaokun3.usbrole.device_only=false
+    write /sys/power/wake_lock gaokun3_usbrole
+    write /sys/power/wake_unlock gaokun3_usb_device_only
+
+on property:persist.vendor.gaokun3.usbrole.device_only=false && property:persist.vendor.gaokun3.allow_suspend=1 && property:debug.tracing.screen_state=1
+    stop gaokun3_role_device
+    start gaokun3_role_host
+
+on property:persist.vendor.gaokun3.usbrole.device_only=0
+    write /sys/power/wake_lock gaokun3_usbrole
+    write /sys/power/wake_unlock gaokun3_usb_device_only
+
+on property:persist.vendor.gaokun3.usbrole.device_only=0 && property:persist.vendor.gaokun3.allow_suspend=1 && property:debug.tracing.screen_state=1
+    stop gaokun3_role_device
+    start gaokun3_role_host

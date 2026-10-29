@@ -69,6 +69,13 @@ bool L9dAlwaysOn();
 std::string GetProp(const char* name);
 bool SetProp(const char* name, const std::string& value);
 
+// Optional port0-only policy; absent/false preserves the automatic role rules.
+constexpr char kDeviceOnly[] = "persist.vendor.gaokun3.usbrole.device_only";
+inline bool DeviceOnly() {
+    const std::string value = GetProp(kDeviceOnly);
+    return value == "1" || value == "true";
+}
+
 int OpenUeventSocket();
 // Drains the socket; true if any uevent that can change port0 arrived, or
 // some were lost. Sets *udcReplaced when the UDC was added or removed (or

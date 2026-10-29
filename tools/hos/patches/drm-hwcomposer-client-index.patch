@@ -1,0 +1,50 @@
+--- a/hwc/HwcDisplay.cpp
++++ b/hwc/HwcDisplay.cpp
+@@ -1074,6 +1074,12 @@
+     // Client target buffer may be updated since the composition was validated,
+     // so get the latest LayerData.
+     if (client_z_order.has_value()) {
++      if (client_z_order.value() < 0 ||
++          static_cast<size_t>(client_z_order.value()) >=
++              composition.composition_plan->plan.size()) {
++        ALOGE("Invalid client target index in cached composition");
++        return std::nullopt;
++      }
+       composition.composition_plan->plan[client_z_order.value()]
+           .layer = client_layer_.GetLayerData();
+     }
+@@ -1173,19 +1179,23 @@
+   ALOGW_IF(z_map.empty() && !cursor_layer.has_value(), "Empty composition");
+ 
+   std::vector<LayerData> composition_layers;
++  std::optional<int> client_layer_index;
+ 
+   // now that they're ordered by z, add them to the composition
+   for (const auto &[_, layer] : z_map) {
+     if (!layer->IsLayerUsableAsDevice()) {
+       return nullptr;
+     }
++    if (layer == &client_layer_) {
++      client_layer_index = static_cast<int>(composition_layers.size());
++    }
+     composition_layers.emplace_back(layer->GetLayerData());
+   }
+   auto composition = LayerToPlaneJoiningPlan::
+       CreateLayerToPlaneJoiningPlan(GetPipe(), std::move(composition_layers),
+                                     cursor_layer);
+   if (composition) {
+-    composition->client_z_order = client_z_order;
++    composition->client_z_order = client_layer_index;
+   }
+   return composition;
+ }
+--- a/compositor/LayerToPlaneJoiningPlan.h
++++ b/compositor/LayerToPlaneJoiningPlan.h
+@@ -36,6 +36,7 @@
+   };
+ 
+   std::vector<LayerToPlaneJoining> plan;
++  // Index in plan, not the original (possibly sparse) HWC layer Z order.
+   std::optional<int> client_z_order;
+ 
+   static auto CreateLayerToPlaneJoiningPlan(
