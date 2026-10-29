@@ -47,10 +47,13 @@
 | [stage7-live-installer.md](stage7-live-installer.md) | 第一版 Stage 7 设计（C + cairo 安装器 + Alpine 救援）与 M0 实测 | 部分有效：一套镜像 / 共用内核与 dtb / ESP 约束 / M0 实测仍被 `scripts/live/` 引用；界面与底座已被 [stage7-flutter-debian.md](stage7-flutter-debian.md) 取代 | 维护者 |
 | [a17-migration-plan.md](a17-migration-plan.md) | crDroid 13 / Android 17 迁移：上游现状、耦合点、OTA 与构建机约束、步骤与进度（1.0 改在 A17 上发） | 现行 | 维护者 · AI |
 | [mesa-a17.md](mesa-a17.md) | A17 上 turnip 的生成管线（mesa 26.1 + meson2hermetic，`scripts/mesa-a17/`） | 现行 | 维护者 · AI |
-| [fingerprint-driver-design.md](fingerprint-driver-design.md) | 指纹（FTE7001）：TA 已加载进 QSEE（M1），M2 发真命令暂停；架构、复现步骤 | 现行（暂停中） | 维护者 · AI |
+| [fingerprint-driver-design.md](fingerprint-driver-design.md) | 指纹（FTE7001）：TA 已加载进 QSEE（M1）；10-30 离线逆向收口（FF_CMD 不适用，M2–M4 走 wire 0x80xx）；架构、复现步骤 | 现行（10-30 起 M2 上机中） | 维护者 · AI |
 | [gaming.md](gaming.md) | 游戏特化总览：39 位地址窗口、着色器缓存、低延迟音频、触摸 game 预设、游戏模式脚本、netlink 边界、版本串覆写；边界（如实修正 / 不伪造）与待定项 | 现行 | 维护者 · AI |
 | [duck-detector-plan.md](duck-detector-plan.md) | Duck Detector 体检的逐项诊断、A–D 分类、每次上机后的 delta（10-11）；文首有更正 | 现行（过程记录；结论以 [gaming.md](gaming.md) 为准） | 维护者 · AI |
-| [hyperos-port-research.md](hyperos-port-research.md) | 移植小米 HyperOS 的调研（10-26）：Treble / SELinux / 图形 / vendor 自洽性的地基评估、硬依赖清单、路线比较、donor 选择、分阶段实验计划、许可与分发 | 现行（调研；分支 `hyperos-port`，未立项、待用户决定） | 维护者 · AI |
+| [hyperos-port-research.md](hyperos-port-research.md) | 移植小米 HyperOS 的调研（10-26）：Treble / SELinux / 图形 / vendor 自洽性的地基评估、硬依赖清单、路线比较、donor 选择、分阶段实验计划、许可与分发 | 参考（10-26 第一轮调研；之后的实际进展见下一行） | 维护者 · AI |
+| [hyperos-adaptation-progress.md](hyperos-adaptation-progress.md) | HyperOS 适配执行记录 R3–R19：隔离分区、SELinux、ramdisk / vendor 生成、各轮部署与验收；**末尾几节是现状与未关闭项** | 现行（分支 `hyperos-port`，不公开分发） | 维护者 · AI |
+| `hyperos-r14-*` … `hyperos-r19-*`（24 份） | 每轮的部署记录（`-deployment`）与专题审计：触摸鬼点、控制中心密度 / 面板物理尺寸、设置渲染、桌面翻页、皮温 / 温控 HAL、PowerKeeper / Millet、光感 registry 等；入口链接都在上一行文档里 | 历史（每轮的当时记录） | 维护者 |
+| `hyperos-*` 专题（无轮次号，10 份） | USB device-only / 保持 device、UCSI 初始化、libc 属性标签、Himax 边界、gravity NaN、HAL 审计、super 升级工具、冒烟命令；[hyperos-repartition-20261030-review.md](hyperos-repartition-20261030-review.md) 是 10-30 数据分区重排的复核 | 参考 | 维护者 |
 | [upstream/README.md](upstream/README.md) | 5 份待投上游的相机 / camcc 补丁稿与收件人（未发，等用户点头） | 现行 | 维护者 |
 
 ## 案卷与证据（"某个结论是怎么来的"）

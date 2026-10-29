@@ -1,22 +1,30 @@
 # 项目：MateBook E Go (sc8280xp / gaokun3) 移植 Android
 
-在华为 MateBook E Go 上跑原生 AOSP（现基于 crDroid 16），目标是稳定运行 arm64 手游。本文件每个会话都整份读入 —— **只放"现在"和规矩**，历史进 `docs/project-log.md`。
+在华为 MateBook E Go 上跑原生 AOSP（现基于 crDroid 13 / Android 17；另有一条不公开的 HyperOS 移植线），目标是稳定运行 arm64 手游。本文件每个会话都整份读入 —— **只放"现在"和规矩**，历史进 `docs/project-log.md`。
 
-## 现在（2026-10-25；每次开工更新，旧内容搬进 project-log）
+## 现在（2026-10-30；每次开工更新，旧内容搬进 project-log）
 
-* **阶段：1.0 发版前。** **`1.0.0-rc.2` 2026-10-25 已发布并进 OTA 清单**（用户定：v0.7.1-alpha / rc.1 用户在「系统更新」里都会收到；**0.7.x → 1.0 升级（G6 / E11）没演练就发了**，发版说明里写了先备份）。发的是第五次构建 **rc2e，戳 `1792913333`**（dev `827ed7b` = rc2d + Parts 触摸手感 game / daily 开关；内核 `7636022f`、boot.img `f60c65d2` 与 rc2d 同），tag `v1.0.0-rc.2` = `6464492`（= origin/main = origin/dev）。R2：`builds/` + `install/crDroidAndroid-16.0-20261025-gaokun3-v12.11/` + `installer/0.2.0-rc.2/`（U 盘镜像带 rc2e 系统）；GitHub pre-release（不标 Latest，Latest 仍是 v0.7.1-alpha），13 个附件字节数核过。开发机 `_b` = rc2e、active = `_b`，A 档 47 / 0（`out/accept/1792913333-20261025-165335/`）。留档 `out/rc2-1792913333/`。⬜ 盯 issue / 群里 0.7.x → rc.2 的升级反馈。剩什么看 `docs/TODO.md` 顶部「▶ 1.0」；发版标准 / 阻断项 / 待定决定看 `docs/v1.0-plan.md`。
+* **阶段：1.0 发版前，1.0 改在 A17 上发**（crDroid 13 / `android-17.0.0_r1`，lunch `lineage_gaokun3-cp2a-userdebug`；用户 10-25 定：A16 停维护，rc.1 / rc.2 的 A16 验收不再作为 1.0 依据）。
+  `dev` 10-26 已快进到 A17 线（`fcf069b`），`main` 仍停在 A16 时代。迁移 M0–M4、M6 已完成，M5 / M7 没做（`docs/a17-migration-plan.md` §7）。
+  已发布的最新版仍是 A16 的 **`1.0.0-rc.2`**（rc2e，戳 `1792913333`，10-25 进 OTA；GitHub pre-release，Latest 仍是 v0.7.1-alpha）。⬜ A16 → A17 的 OTA 会被 Updater 的 `allow_major_upgrades` 拦下，rc.2 用户怎么升还要用户定。
+  剩什么看 `docs/TODO.md` 顶部；发版标准 / 阻断项 / 待定决定看 `docs/v1.0-plan.md`。
+* **HyperOS 移植**（分支 `hyperos-port`，**未推、不能公开分发**，`docs/hyperos-port-research.md`）：装在一套隔离分区（`super_hos` / `userdata_hos` / `metadata_hos` / `misc_hos`），从 ESP 上单独的 `gaokun3-hos-hyperos-r*` 条目启动。
+  10-30 已部署到 **R18**（R17 内核，enforcing）；R19（光感 / 自动亮度 registry）只做了离线修复和只读诊断，没上机。用户 10-30 说以后**主力用 HyperOS**，但**默认启动项不改**（仍是 crDroid）。
+  进度与未关闭项看 `docs/hyperos-adaptation-progress.md` 末尾几节；工具 `tools/hos/README.md`。
 * 内核 v7.2.9 stable + `patches/0076`（撤回 stable 撤掉的双 DSI 绑定 PLL 修复，否则黑屏）；dev.9 起发布内核不带指纹的 0050（D21，只进实验内核）。
 * 统一启动入口 `gk3boot.efi` + fastboot 执行端：E3–E8（含 OTA 自动回滚）、E6、E7 真机过；镜像默认动作模式 + BCB 分派开；E10 恢复出厂用户定不测（`docs/boot-entry-design.md`）。
 * 发布构建（dev.1 起）= 关免授权 adb、`ro.debuggable=0`，变体仍是 userdebug。SELinux 默认 enforcing（用户 10-06 定 D5，dev.10 起）。
 * 图形安装器（Flutter + Debian live，现行 `0.2.0-rc.x`，随 rc 发）真机装过、网络安装通；双系统 / Windows 伴随工具已写，多数没上过真 Windows（`docs/stage7-flutter-debian.md`）。
-* 指纹：华为签名 TA 已在本机加载进 QSEE（app_id=5，#125）；剩 client driver + HAL（TODO T6）。
+  ⚠️ 10-30 改过分区后 p2 / p12 不再按磁盘顺序排（见下），安装器 / 双系统脚本里按顺序假设布局的地方没复核过。
+* 指纹：华为签名 TA 已在本机加载进 QSEE（app_id=5，#125）。10-29/30 离线逆向收口：FF_CMD 的 CREATE/INIT 不适用于 FTE7001，M2–M4 都走 wire 0x80xx 命令（`docs/fingerprint-driver-design.md`）。
+  10-30 起 **M2 上机进行中**（先发只读探测 0x8031；需要带 0050 的实验内核）；剩 client driver + HAL（TODO T6）。
 
 > ## ★★★ 开工前先读
 >
 > ### 设备与连线
-> USB adb（**只走靠近电源键的口 port0**）与 TCP adb（`:5555`）。家里 SSID 下设备静态 IP `192.168.10.239`（路由器 `192.168.10.1` 也做了保留）；
+> USB adb（**只走靠近电源键的口 port0**）与 TCP adb（`:5555`）。家里 SSID 下 crDroid 是静态 IP `192.168.10.239`（路由器 `192.168.10.1` 也做了保留），**HyperOS 下是 `192.168.10.182`**；
 > 其他网络走 DHCP、会漂（本机网段也会漂）⇒ 跑 **`bash scripts/find-device.sh`**（绕沙箱，扫本机所在每个 /24、按协议认身份）。
-> 手工找就扫**全网段**，别按"上几次落在哪"收窄（09-12 因此把好好的机器误判成挂死）；判据 `getprop ro.crdroid.device`，局域网里的小米手机 `pudding` 也开着 5555。
+> 手工找就扫**全网段**，别按"上几次落在哪"收窄（09-12 因此把好好的机器误判成挂死）；判据 `getprop ro.crdroid.device`（HyperOS 下没有这个属性，看 `getprop ro.boot.hos_build`），局域网里的小米手机 `pudding` 也开着 5555。
 >
 > ### 四条会让你损失一小时以上的运维坑
 > 1. **`| tail` 之后的 `$?` 是 `tail` 的退出码**（`az` 停机、`make`、`gh release upload` 都栽过）⇒ 判据看**产物**。
@@ -43,30 +51,24 @@
 > * ★ **分支（用户 2026-10-18 定，有协作者了）：所有修改都在开发分支 `dev` 上改、提交、推 `dev`，不直接提交 / 推 `main`。**
 >   `main` 只在发版时从 `dev` 合并（什么时候合由用户定）；协作者的 PR 也提到 `dev`。开工先 `git switch dev && git pull`。
 >
-> ### 现在设备上跑的是什么（2026-10-18 22:3x 实机读到；历次状态见 project-log）
-> * ★ **10-18 22:1x 起：active = `_a` = rc.2 候选 `1792312407`**（`install-ota-local.sh --go` 装、OneShot 直连条目起来、验收后 `set-active-boot-slot 0`，ESP default = `*-android-a.conf`），
->   内核 0085 版（`uname -r` = `6.6.30-android15-8-…`，真实 7.2.9）、enforcing；`_b` 仍是 `1791704075`。adb 便利持久化照旧（USB + TCP 5555 都通）。
->   ⚠️ 屏幕锁着（开机后没人解锁，焦点 `FallbackHome`），解锁前普通 App 的入口解析不到。
-> * （以下是装 rc.2 之前的记录）**10-18 16:2x 只读复核**：跑的仍是 `_b` = `1791704075`、内核 `7.2.9-gaokun3+`、enforcing（USB adb 在，5555 局域网里没扫到）。
->   ⚠️ 但 **active 槽是 `_a`**（`bootctl get-active-boot-slot` = 0、`_a` 已不可启动），这次开机（10-18 14:28）是 gk3boot **回落**到 `_b`
->   （`androidboot.gk3boot.event=fallback`、`streak=1`）—— 之前有人把 active 设成了 `_a`、`_a` 没起来；谁设的、`_a` 为什么起不来没查（开机日志已滚掉）。
->   `vendor.gk3pend` 在 7.2.9 上每 10 秒崩一次重启（没有 `gk3_pen` 设备，PR #27 的内核侧不在这个内核里），无害但刷日志。
-> * **active = `_b` = 新 ROM 戳 `1791704075`**（10-11 构建，带 tree-fix [22]、去掉 swangle sepolicy；**不带 [23]**——`/system/build.prop` 指纹仍是 `:userdebug/`，`getprop` 的 `:user/` 是运行时改的；内核槽里是 dev.11 的 `705b1387`；载荷不在本机 `out/`），enforcing。
->   18:2x 用户按电源键重启后走默认入口（`via=gk3boot`、`gk3boot-android-b.conf`）⇒ 内核是 `boot_b` 里的 **7.2.9**（`7.2.9-gaokun3+`）——
->   证实 `boot_b` 没换成 0085 内核（TODO GAME-4）。0085 内核 `out/dev12-k0085/vmlinuz-a8f7c90e.efi` 只能走直连槽条目 `8a29534f…-android-b.conf` + oneshot 起。
->   10-11 21:4x 重启过（B5 测试，oneshot 进内置安装器再回来）⇒ TrickyStore 已回来、走默认入口 gk3boot 起的 7.2.9。
-  ⚠️ **内置盘的 `gaokun3 installer` 10-11 已换成 0.2.0-rc.1**（`nvme0n1p3:/gaokun3/live.squashfs` + ESP `…/live/initramfs.img`；旧 09-27 版是同目录 `.bak-0927`）。ESP `slot_b/Image` 是 0085 内核（live 里 `uname` 报 6.6.30）。
-  ✅ enforcing 下 `boot-oneshot.sh` **不用** `setenforce 0` 就能写（10-11 实测，a1d303a 生效）。
->   设备上另有用户自装的 TrickyStore / PIF / LSPosed / HMA（`hma_oss_zygisk` disable 中）—— 测游戏流程见 `docs/gaming.md`。
-> * 以下 `_a` 一条是 10-09 的记录，10-11 未复核（其中「active = `_a`」「`_b` = rc.1」已被上一条取代）：
-> * 槽 **`_a` = `1.0.0-dev.11`**（戳 `1791554509`，内核 `705b1387…` = 7.2.9 + 0078），active = `_a`（ESP default 已同步），**SELinux enforcing**；`_b` = `1.0.0-rc.1`（戳 `1791285623`）。载荷 `out/dev11-1791554509/`（rc.1 的在 `out/rc1-1791285623/`，安装器 `out/rc1-wt/out/release-installer/0.2.0-rc.1/`）。`a1d303a`（efivarfs 标签）已在 dev.11 里；enforcing 下 `boot-oneshot.sh` 不 `setenforce 0` 也能写（10-11 在 `1791704075` 上实测）。
-> * ESP 上的实验内核 `android/va39w/` 与条目 `gaokun3-va39w.conf` 10-19 已删（备份 `out/esp-backup-20261019-va39w/`）。
-> * ⚠️ 分派开着：**设置里的恢复出厂会真擦**（发布构建会丢 adb_keys ⇒ 连不上 adb）；`adb reboot bootloader|fastboot|recovery` 进 fastboot 执行端，Mac 上 `fastboot reboot` 回来。
-> * ESP 10-06 已清理（备份 `out/esp-backup-20261006/`）：菜单只剩 Android（入口 / 上一版入口 / fastboot / 两个直连槽）、`gaokun3 installer`（内置盘上的 live，能重装，安全网）、Ubuntu 救援。
-> * 10-06 Mac 与设备都在热点「Xiaomi 17」（设备 `10.146.153.115`）。
-> * 常驻：预置 `/data/misc/adb/adb_keys`（Mac + Windows）+ 持久化 `persist.sys.usb.config=adb`、`persist.adb.tcp.port=5555` ⇒ 发布构建下 USB / TCP adb 照常；`adb shell` 经 KSU 即 root（无 `adb root`）。
-> * 常驻：`persist.vendor.gaokun3.allow_suspend` 开发机显式持久化为 0（不睡；镜像默认 1；旧名 `persist.gaokun3.allow_suspend` 的孤儿值无害）；`persist.logd.audit.rate=1000`。
->   2026-10-06 实机核过：`persist.vendor.gaokun3.allow_suspend` 仍为持久 0（开发机不睡）；`screen_off_timeout` 已是 600000（10 分钟）。
+> ### 现在设备上跑的是什么（2026-10-30，根据当天各会话的记录整理，没有重新实机读取；历次状态见 project-log）
+> * ★ **分区 10-30 改过**（用户在 Ubuntu 救援里操作；脚本、日志与改前 GPT 备份在 `out/repart-20261030/`，复核记录 `docs/hyperos-repartition-20261030-review.md`）：
+>   p12 `userdata_hos` = 扇区 616448–789178367（**376 GiB**），p2 `userdata`（crDroid）= 839845888–948561919（**51.8 GiB**）。分区号 / PARTUUID / PARTNAME / fs UUID 都没变，
+>   但 **p2、p12 不再按磁盘顺序排，盘上也没有空闲空间了** ⇒ 任何按扇区或分区顺序假设布局的脚本（installer、hw-inventory）以这一条为准。
+> * **crDroid**：active = `_a` = A17 戳 `1792983426`（enforcing，10-26 A 档过，A21 iris 15/15）；`_b` 被 update_engine 标成不可启动；**A16 已不在任何槽上**，
+>   A16 的 `/data` 快照 10-30 已删 ⇒ 不能带着数据回 A16。ESP default 仍是 `*-android-a.conf`。crDroid 的 `/data` 10-30 从 HyperOS 里离线清到约 2.5 GiB
+>   （游戏和日常应用删了，`packages.xml` 里还留着这些包的登记，下次进 crDroid 看会不会自动清掉）。**改完分区后 crDroid 还没起过。**
+> * **HyperOS**：R18 的 system / HAL + R17 内核（ADC_TM5 内建、真实皮温 `skin-temp`）。常驻设置：USB 持久 **device-only**（`persist.vendor.gaokun3.usbrole.device_only=true`，
+>   代价是这个口接不了 U 盘），无线 adb `persist.adb.tcp.port=5555`，家里 IP **`192.168.10.182`**（和 crDroid 的 `.239` 不是同一个）。
+>   ⚠️ `scripts/find-device.sh` 靠 `ro.crdroid.device` 认机器，**在 HyperOS 下认不出来**。设置页按压色只是临时 overlay，没进镜像。
+> * Ubuntu 救援（ESP 条目）在家网 `192.168.10.225`（`ssh user@…`），HyperOS 的 super 升级都在这里用 `tools/hos/update-isolated-super.py` 做；
+>   救援里存在 `/var/lib/gaokun-hos-super-update.started.json` 时说明上次升级没收尾，**不要直接重试**，先核对任务和日志。
+> * ESP 10-30 清理过（备份 `out/esp-backup-20261030-hos/`），只剩约 43 MiB。R15 条目还引用 `r6-baseline/gaokun3.dtb` 与 `r9-hyperos/ramdisk.img`，别删。
+> * 内置盘 p3 上的 `gaokun3 installer`（live）是 0.2.0-rc.1（10-11 换的，旧版 `.bak-0927`）。
+> * ⚠️ crDroid 里分派开着：**设置里的恢复出厂会真擦**（发布构建会丢 adb_keys ⇒ 连不上 adb）；`adb reboot bootloader|fastboot|recovery` 进 fastboot 执行端，Mac 上 `fastboot reboot` 回来。
+> * 常驻（crDroid）：预置 `/data/misc/adb/adb_keys`（Mac + Windows）+ 持久化 `persist.sys.usb.config=adb`、`persist.adb.tcp.port=5555` ⇒ 发布构建下 USB / TCP adb 照常；`adb shell` 经 KSU 即 root（无 `adb root`）。
+>   `persist.vendor.gaokun3.allow_suspend` 开发机持久为 0（不睡；镜像默认 1）；`persist.logd.audit.rate=1000`。⚠️ crDroid `/data` 被清过，这几项没复核。
+> * A17 的 adbd 会把每条 shell 命令原样打进 logcat（`adbd service requested '…'`）⇒ 在设备上 `logcat | grep 关键字` 会先匹配到命令自己，判据前先 `grep -v "adbd service requested"`。
 
 ## 文档地图
 
@@ -83,6 +85,7 @@
 | 构建机 | `docs/build-machine.md` + `scripts/cicd.sh` |
 | 图形安装器 | `docs/stage7-flutter-debian.md`；`scripts/live/installer-lib.sh`、`scripts/live/README.md` |
 | 指纹 | `docs/fingerprint-driver-design.md`；案卷 #120/#123/#124/#125；`tools/fingerprint-bringup/` |
+| A17 迁移 / HyperOS 移植 | `docs/a17-migration-plan.md`（§7 进度）/ `docs/hyperos-adaptation-progress.md`（末尾是现状）+ `docs/hyperos-r*-*.md`、`tools/hos/README.md` |
 | 游戏特化（兼容 / 延迟 / 触摸 / 游戏模式 / 检测边界） | `docs/gaming.md`；过程 `docs/duck-detector-plan.md`；TODO「②′ 游戏环境」GAME-1–8 |
 
 ⚠️ **冲突时**：实机实测 > 案卷 > 本文件 > `project-log.md`。历史里大量结论已被实测推翻（推翻过程故意留着），别当现状。

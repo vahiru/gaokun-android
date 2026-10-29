@@ -1,6 +1,6 @@
 # HyperOS 适配执行记录
 
-2026-10-29，当前 R14 已部署并完成下述实机验证；最新状态见文末 R14 节。早期记录保留用于复现历史基线。综合报告位于
+2026-10-30 更新：当前 R18 已部署（R17 内核），R19 只做了离线修复与只读诊断、未上机；最新状态见文末 R15–R19 各节（R14 节及以前是历史）。10-30 数据分区重排见 [hyperos-repartition-20261030-review.md](hyperos-repartition-20261030-review.md)。早期记录保留用于复现历史基线。综合报告位于
 `out/hyperos-r2/hyperos-port-comprehensive-report.md`；本文只存工程方法和实测结论，
 不含小米文件。新增工具用法见 [tools/hos/README.md](../tools/hos/README.md)。
 
