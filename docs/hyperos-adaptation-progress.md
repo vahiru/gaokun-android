@@ -1057,4 +1057,8 @@ Type-C辅助驱动保持绑定，但/sys/class/typec为空；早期日志存在c
 
 用户配合持续状态查询窗口，明确接触后第121笔1d置1，15680B新帧传输及基础解码通过；原Windows DLL解码与Python输出逐字相等。此前空闲15秒即使无人接触也产生无效回复，立即150轮查询则持续正常，后续生产生命周期还需处理低功耗唤醒。首帧不等于录入/认证/Android HAL完成；旧STRONG/HAT假设和8026探测说法已从主设计撤回，按真实契约继续整合。
 
+### 指纹客户端命令面闭合（2026-10-31）
+
+离线复核 Windows 产品驱动（SHA256 `90dfeb2c…0fb0`）：唯一 TA 传输封装共 7 个调用点，只发 `0x8020/0x8021/0x8029/0x8031`；`0x8026/0x8027/0x802B` 不可达。TA 的 `tz_app_init` 只分配 1 MiB，且是工作区指针 `qword_2A4638` 的唯一写入；`0x9280→0x50FC→0x955C4` 不重新分配，算法路径仍取 `base+0x950000` 并越界。TA 只存 16 字节模板元数据（`0x8029`），完整模板和 enroll/identify 在 `ftWbioEngineAdapter.dll` 用户态完成。据此禁止再发算法 wire 命令；M4/M5 改为“主机侧算法桥 + 主机模板存储”，且无 TEE 匹配链，不能声明 STRONG/HAT。见[设计文档](fingerprint-driver-design.md) §4.1 与 `docs/fingerprint/windows-client-command-surface-2026-10-31.md`。
+
 设置按压视频已捕捉到边缘消失阶段：卡片与背景在按下/取消过渡中接近同色；仍未排除另有outline时序问题。见[逐帧复核](hyperos-r22-settings-animation.md)。保持原配色的轮廓候选正在离线分析，未安装或加入镜像。
