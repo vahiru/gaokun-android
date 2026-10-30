@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Bounded offline address-reference audit; not a whole-program alias proof."""
+import argparse
 import hashlib
 import json
 import struct
@@ -7,10 +8,12 @@ from capstone import Cs, CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN
 from capstone.arm64 import ARM64_OP_IMM, ARM64_OP_MEM, ARM64_OP_REG
 from replay_preprocess import HERE, TA_PIN
 
-TARGET=0x2a4638
-
 
 def main():
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--target',type=lambda s:int(s,0),default=0x2a4638)
+    args=parser.parse_args()
+    target=args.target
     blob=(HERE/'cabs/qctree/fingerpr.mbn').read_bytes()
     assert hashlib.sha256(blob).hexdigest()==TA_PIN
     header=struct.unpack_from('<16sHHIQQQIHHHHHH',blob)
@@ -29,7 +32,7 @@ def main():
             address,info,addend=struct.unpack_from('<QQq',blob,offset)
             if info&0xffffffff==1027:
                 relocations[address]=addend
-                if TARGET-0x200<=addend<TARGET+0x200 or TARGET<=address<TARGET+8:
+                if target-0x200<=addend<target+0x200 or target-8<=address<target+8:
                     nearby.append({'location':hex(address),'addend':hex(addend)})
     md=Cs(CS_ARCH_ARM64,CS_MODE_LITTLE_ENDIAN);md.detail=True;md.skipdata=True
     def register(insn,reg):
@@ -49,15 +52,16 @@ def main():
                 base=old.get(register(insn,mem.base))
                 if base is None or mem.index:continue
                 address=base+mem.disp
-                if TARGET<=address<TARGET+8:
+                if target<=address<target+8 or (insn.mnemonic.startswith('st') and target-8<=address<target):
                     hits.append({'pc':hex(insn.address),'instruction':insn.mnemonic+' '+insn.op_str,
-                                 'effective_address':hex(address)})
+                                 'effective_address':hex(address),
+                                 'access':'store' if insn.mnemonic.startswith('st') else 'load'})
             _,writes=insn.regs_access()
             for reg in writes:known.pop(register(insn,reg),None)
             value=None
             if insn.mnemonic in ('adrp','adr'):
                 value=operands[1].imm
-                if value==TARGET&~4095:page_seeds.append(hex(insn.address))
+                if value==target&~4095:page_seeds.append(hex(insn.address))
             elif insn.mnemonic=='mov' and len(operands)==2:
                 if operands[1].type==ARM64_OP_REG:value=old.get(register(insn,operands[1].reg))
                 elif operands[1].type==ARM64_OP_IMM:value=operands[1].imm
@@ -71,13 +75,13 @@ def main():
                 if base is not None and not mem.index:value=relocations.get(base+mem.disp)
             if value is not None and operands[0].type==ARM64_OP_REG:
                 known[register(insn,operands[0].reg)]=value
-                if TARGET<=value<TARGET+8:
+                if target<=value<target+8:
                     address_takes.append({'pc':hex(insn.address),'instruction':insn.mnemonic+' '+insn.op_str})
             if insn.mnemonic in ('bl','blr'):
                 for i in range(19):known.pop('x'+str(i),None)
             elif insn.mnemonic in ('b','br','ret') or insn.mnemonic.startswith('b.') or insn.mnemonic in ('cbz','cbnz','tbz','tbnz'):
                 known.clear()
-    print(json.dumps({'ta_sha256':TA_PIN,'target':hex(TARGET),
+    print(json.dumps({'ta_sha256':TA_PIN,'target':hex(target),
         'direct_references_with_local_constant_propagation':hits,
         'address_constructions':address_takes,'nearby_relative_relocations':nearby,
         'page_seed_count':len(page_seeds),'page_seeds':page_seeds,
