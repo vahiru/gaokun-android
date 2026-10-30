@@ -333,9 +333,21 @@ int main(int argc,char **argv){
       unsigned flag=db?*(uint16_t *)(db+50118):0;
       unsigned fid=db?*(uint32_t *)(db+50120):0;
       unsigned acc=db?*(uint32_t *)(db+50128):0;
+      unsigned char *probe=image;
+      if(pat_perturb){
+       probe=arena_alloc(bytes);
+       if(probe){
+        unsigned span=2*pat_perturb+1;
+        for(unsigned i=0;i<bytes;++i){
+         int v=(int)image[i]+(int)(((i*2654435761u)>>16)%span)-
+               (int)pat_perturb;
+         if(v<0)v=0;if(v>255)v=255;probe[i]=(unsigned char)v;
+        }
+       }else probe=image;
+      }
       unsigned char id=0xEE,v5=0xEE;
       trace_reset();
-      uint64_t irc=((entry)(ta_map+0x9E1F0))((uint64_t)(uintptr_t)image,1,
+      uint64_t irc=((entry)(ta_map+0x9E1F0))((uint64_t)(uintptr_t)probe,1,
                                              (uint64_t)(uintptr_t)&id,
                                              (uint64_t)(uintptr_t)&v5);
       int inmax=trace_nmax,inmin=trace_nmin,imach=trace_mach,irmach=trace_rmach;
@@ -346,7 +358,7 @@ int main(int argc,char **argv){
        frc=((entry)(ta_map+0xE83B4))(0,0,0,0);
        flag2=db?*(uint16_t *)(db+50118):0;
        trace_reset();
-       irc2=((entry)(ta_map+0x9E1F0))((uint64_t)(uintptr_t)image,1,
+       irc2=((entry)(ta_map+0x9E1F0))((uint64_t)(uintptr_t)probe,1,
                                       (uint64_t)(uintptr_t)&id2,
                                       (uint64_t)(uintptr_t)&v52);
        fnmax=trace_nmax;fnmin=trace_nmin;fmach=trace_mach;frmach=trace_rmach;
