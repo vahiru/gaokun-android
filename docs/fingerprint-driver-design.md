@@ -1,39 +1,31 @@
 # 指纹驱动设计（gaokun3 / FocalTech FTE7001）
 
-> **现状（2026-09-24）**：走到里程碑 **M1（把厂商签名的指纹 TA 加载进 QSEE）已在硬件验证成功**，
-> 命令收发工具就位并上机跑通到"发送边界"。**M2（发第一条真命令）暂停**，卡在命令帧的精确逆向——
-> 那是块需要专门啃的硬骨头（见 §2）。本文是这项工作的完整记录 + 架构 + 复现步骤，接手从这里读起。
-> 一路证据：`docs/stage4-findings.md` #120（判定不可做）→ #123（翻案：其实可做）→ #124（内核移植）→
-> #125（上机 LOAD 成功）；Windows 侧逆向报告在 `docs/fingerprint/`（专有二进制的笔记，不入库）。
+> **现状（2026-10-30）**：M2 已在真机通过：LOAD 返回 id=5，固定 wire 0x8031 返回有效 ACK=0x5aa5、状态0，SHUTDOWN成功。见 [实机记录](fingerprint-machine-check-2026-10-30.md)。
+> GPIO185复位后，MCU/SPI版本查询已通过，返回 `FT9769_APP_ST_SPI_ENC_SV0.1_202303152035`。只读尺寸返回40、196，兼容应答0x5aa5（同版本MCU固件固定返回，不能证明ready）；空载真实帧标志等待和无帧拒绝导出已实测通过；用户接触确认后已取得帧标志置1的新编码帧，7840个LE16样本基础解码检查通过；完整图像质量/处理、录入、认证或 Android HAL 尚未完成。
+> 旧文档把 0x8026/0x8027 当作只读信息查询的结论已撤回：它们涉及录入/匹配算法，不能按旧表执行。
 
 ## 背景：这颗传感器为什么不能按常规驱动
 
 * 型号 **FocalTech `FTE7001`**（`FTE7001` 是华为的 ACPI PNP ID；真实芯片是 FocalTech FT9769 模组 + FT9391 AFE，
   电源键式小面阵）。部分机型是 Goodix `GDIX5125`，由 GPIO61/62 两个板级 strap 选型；本机实测是 FocalTech。
-* **取图、特征提取、模板库、比对全在 TrustZone 的一个高通签名可信应用里**（`fingerpr.mbn`，TA 名 `fingerprint`），
-  它经 **QSEE-SPI 直接持有传感器的 SPI 总线**。非安全世界（Windows/Linux）**拿不到这条 SPI**，
-  ACPI `\_SB.SPBA` 只暴露两根 GPIO（中断 181 / 复位 185），没有 SpiSerialBus（#120）。
-* 所以路线不是"写个 SPI 驱动读图"——那条 SPI 归 TZ，读不到；就算读到，MOC 小传感器的图质差、匹配也难。
-  **唯一可行的路线**是：用厂商自己的 QSEECOM SMC 把厂商自己签名的 TA 加载进 QSEE，让 TA 去驱动传感器、做比对，
-  普通世界只当"发命令 + 替 TA 搬运加密模板"的中间人。**这不改 TA、不绕安全启动，TZ 仍逐段验签**——
-  性质与我们已在做的 GPU/DSP/WiFi 固件加载相同。
+* 已验证的传输路径是签名TA `fingerpr.mbn` 经QSEE-SPI桥接MCU；本机ACPI `\_SB.SPBA` 只暴露中断181/复位185，没有SpiSerialBus（#120）。LOOKUP("fingerprint")仍返回ENOENT，当前只在已验证例外下使用成功LOAD返回的动态app_id。
+* 当前MCU产帧，编码图像经TA返回普通世界后由主机解码。TA另有可达的录入/识别算法入口，但完整调用链、模板持久化和Android认证令牌尚未验证。当前路线复用厂商签名TA，不修改TA或绕过加载验签；不能由“使用TEE”推断整个采集/认证链已符合某种安全强度。
 * 为什么以前判"不可做"（#120）又翻案（#123）：#120 只看到"上游 mainline 的 qcom_scm 只有 LOOKUP/SEND、没有 LOAD"，
   漏了两点——指纹走的是**旧 QSEECOM**（不是新 QTEE），gaokun3 恰在它的 allowlist 里、本机 `uefisecapp` 已 probe
   说明这条传输今天就通；而缺的 LOAD 已有人（samcday/Dawid）在别的 SoC 上真机验证过、可移植。
 
 ## 0. 一句话架构
 
-传感器的取图/比对/模板都在 **TrustZone 里的高通签名 TA `fingerprint`**（`fingerpr.mbn`，单一 secelf）。
-普通世界（Linux）**不碰传感器 SPI**，只做三件事：① 用 QSEECOM SMC 把这个签名 TA 加载进 QSEE、
-② 给 TA 发命令（`FF_CMD_TA_*`）、③ 应答 TA 回调普通世界读写它加密模板的 listener 请求。
+当前已实现的是：由 **TrustZone 里的高通签名 TA**（`fingerpr.mbn`，单一 secelf；LOOKUP名仍未确认）桥接SPI读出MCU编码帧。TA的录入/识别入口已离线定位，但实际算法调用、模板生命周期及Android认证令牌契约尚未闭合。
+当前Linux侧管理TA与共享缓冲、发送已核实wire命令、接收编码图像并做诊断解码；生产驱动还需明确模板存储和listener的真实契约。
 Android 侧再包一层 `IFingerprint` HAL。**全程不改 TA、不绕安全启动，TZ 逐段验签。**
 
 ```
 Android FingerprintService
         │  AIDL IFingerprint/ISession
-   [指纹 HAL(用户态)]  ── STRONG，ISharedSecret 签 HAT（本机全软件 KeyMint，#120 §3 已论证可行）
+   [指纹 HAL(用户态)]  ── 强度与HAT契约待验证；尚未实现录入/认证
         │  ioctl/字符设备
-   [in-kernel client driver]  ── LOAD→app_id、按状态机发 FF_CMD_TA_*、listener 服务(安全存储)
+   [in-kernel client driver]  ── LOAD→app_id、按状态机发 wire 0x80xx、listener 服务(安全存储)
         │  qcom_scm_qseecom_app_load / _app_send / listener  ← patch 0050
    [QSEECOM / TZ]  ── 验签、映射 TA、TA 经 QSEE-SPI 直连传感器
         │
@@ -48,9 +40,9 @@ Android FingerprintService
 | D2 | LOAD 用 samcday/Dawid 的移植（patch 0050），非自研 | 有 SDM670 真机验证；SMC 参数逐字段对上 Windows 逆向（#124） |
 | D3 | 单一 secelf ⇒ `mdt_len=0`，整文件传，跳过 mdt 拼接 | fingerpr.mbn 是单 secelf；Windows QcTrEE 的 LOAD 也是 mdt_len=0（#124） |
 | D4 | **必须把 scm 设备约束到 32 位 DMA** | 本机 dma-ranges 40 位+内存>4GB；LOAD 物理地址是 SMC32 裸参数会截断（#124/#125 实测镜像落 `0xec000000`） |
-| D5 | staging 池分配**正好 4MiB**（不是 img+4MiB） | img<4MiB；img+4MiB=7.7MB 超 MAX_PAGE_ORDER(4MB) `-ENOMEM`（#125）。⚠️ img 若>4MiB 得改走 CMA |
-| D6 | 驱动**常驻**加载 TA（不是每次用完卸） | 收发命令要 app_id 稳定；`qcom_qseecom_fpcmd` 已按此验证 |
-| D7 | listener 无人认领时安全网兜底 | patch 0050 的 service_listeners 自动 FAILURE、256 轮 -ELOOP，发错命令不硬挂（#125 续） |
+| D5 | 按物理地址验证4MiB对齐及完整区间低于4GiB | 旧内核8MiB分配曾失败；当前7.2.9实验内核8MiB池成功并取得0xf6400000对齐子区。不能假设虚拟/物理对齐偏移相同，分配失败必须在LOAD前退出 |
+| D6 | 生产会话生命周期待验证；当前诊断每轮LOAD后SHUTDOWN | 单轮始终使用该次成功LOAD的app_id；不能据取图探针推定长期驻留/多用户认证已通过 |
+| D7 | listener 无人认领时安全网兜底 | patch 0050 的 service_listeners 自动 FAILURE、最多256轮；只限制已返回SMC的循环，不能防止单次SMC不返回 |
 
 ## 2. 命令协议（⬜ 逆向中，`fp-cmd-protocol.md`）
 
@@ -69,7 +61,7 @@ Android FingerprintService
   M2-M4 全走 wire 0x80xx（协议文档 §6.4）；
 - **M2 首发已修正**：不得发 0x1001 当 wire cmd（会毒化 dword_2A4640=2 不可逆），首发只允许
   0x8031 只读探测（协议文档 §7）；
-- ⬜ 仍待定（只剩一项，且**只能上机**）：enroll/authenticate 的 listener 请求/响应缓冲格式
+- ⬜ 仍待定：MCU初始化/识别帧、录入/匹配实际调用链，以及 listener 请求/响应缓冲格式
   （驱动 `->service()` 要解析，要看真实回调）。
   ~~FF_CMD payload 格式~~ → **已判 moot**：word8 发不进（§6.4），payload 在 GPAppLib 内这件事
   只对 Goodix/GP 变体有意义，不再列为 FTE7001 的未决项。
@@ -77,22 +69,20 @@ Android FingerprintService
 ## 3. 驱动状态机（草案，待命令号落定）
 
 ```
-init：      LOAD → app_id → 注册 listener(安全存储) → wire init（0x8022 握手 / 0x8020+0x8021 SPI /
-            0x8026 / 芯片 ID 探测序列）  ← FF_CMD 的 INIT/INIT_SPI/PROBE_CHIP_ID/INIT_DEVICE 是
+init：      LOAD → app_id → 注册 listener(安全存储) → 已核实的 wire init / MCU芯片识别帧（具体字节待定；不把0x8026当版本查询）  ← FF_CMD 的 INIT/INIT_SPI/PROBE_CHIP_ID/INIT_DEVICE 是
             TA↔TA GP 内部序列（普通世界发不进，协议文档 §6.4），Android 侧用 wire 0x80xx 复刻
 idle：      等 GPIO181 finger-down 中断（或 QUERY_FINGER_STATUS 轮询）
 authenticate：START_SCANNING → CAPTURE_IMAGE → AUTNENTICATE →(listener 读模板)→ 结果 → HAT
 enroll：    PRE_ENROLL → 多帧 CAPTURE_IMAGE + ENROLL →(listener 写模板)→ POST_ENROLL
 teardown：  FREE_SPI → FREE → 注销 listener → app_shutdown
 ```
-⚠️ enroll/authenticate 会触发 listener 回调 —— **第一次跑这些命令仍需人在设备旁**（安全网只保证不硬挂，
-不保证一次成功；模板的安全存储后端要落地，见 §4）。
+⚠️ enroll/authenticate 会触发 listener 回调 —— **第一次跑这些命令仍需人在设备旁**（listener轮数上限不能阻止单次SMC卡死；模板的安全存储后端要落地，见 §4）。
 
 ## 4. 安全存储后端（listener 的 `->service()`）
 
-TA 会请求普通世界替它读写加密模板（它自己用 `qsee_sfs_*` 封装、带防回滚+HMAC）。普通世界只是搬运
-密文，看不到明文。落地选项：① 存到 `/data/vendor/` 下的文件（简单，够用）；② RPMB（防回滚，Windows 用的）。
-先做 ①。格式由逆向出的 listener 消息结构决定。
+模板持久化的实际wire契约仍在复核，不能将旧设计中“统一listener搬运SFS密文、RPMB防回滚”直接当成本机已验证事实。特别是0x802B存在删除既有slot并提交模板的路径，不能用于无副作用探测。
+
+应先闭合存储入口、用户/slot命名空间、模板格式与完整失败处理，再设计隔离的测试存储。当前只做MCU新帧采集及主机离线解码，未注册生产存储listener、未录入或覆盖模板。0x802D长模式导出的是处理图像，不是模板；0x802C有校验失败仍落入预处理的路径，ACK不能视为图像处理成功。新增纯离线ta_image_contract.py只描述精确7852B响应的图像导出边界，不执行命令，且要求同一TA会话内处理图缓冲已独立确认。
 
 ## 5. GPIO 与设备树
 
@@ -103,16 +93,18 @@ GPIO185 复位可能由 TA 经 QSEE-GPIO 自己做（待确认）。届时加一
 
 ## 6. Android HAL
 
-以 AOSP 虚拟 HAL（`hardware/interfaces/biometrics/fingerprint/aidl/default/`）为骨架，
-把 `FakeFingerprintEngine` 的 enroll/authenticate 换成"经字符设备驱动真实取图+TA 比对"，
-`SensorProps` 设 `STRONG`，接 `ISharedSecret` 用同一把软件 HMAC 密钥签 HAT —— 本机 KeyMint/gatekeeper
-都是软件实现，三方协商同一密钥，keystore 会认（#120 §3）。强度设 STRONG 才能绑 keystore 与 72h 免密。
+AOSP AIDL定义可用作接口与生命周期参考，但虚拟HAL的模拟录入/匹配不能作为实机功能实现。
+需要先闭合真实图像处理、模板添加/枚举/删除、匹配结果、用户隔离、取消/超时、锁定策略与会话生命周期，再实现IFingerprint/ISession及回调。
+
+此前“设STRONG并共享软件HMAC密钥就可用”的设计结论撤回：软件KeyMint能否接收某种令牌，不等于满足生物识别强度要求；当前编码图像可出TEE、主机解码，尚无证据证明安全采集/匹配链、抗重放或认证令牌来源满足STRONG。不能仅为使keystore接受而声明强度或生成成功HAT。生产SensorProps、HAT与KeyMint/Gatekeeper集成须以真实协议和平台要求验证，当前不注册可用指纹HAL，也不把采图成功回调成认证成功。
 
 ## 7. 里程碑
 
 - [x] M1 LOAD 成功（#125）
-- [ ] M2 SEND 一条只读命令成功（证明能与 TA 对话）← **当前目标**
-- [ ] M3 init 序列跑通（wire 0x8020/0x8021/0x8026 + 芯片 ID 探测序列拿到芯片 ID——非 FF_CMD，协议文档 §7.3）
+- [x] M2 SEND 0x8031 只读命令成功（2026-10-30：ACK=0x5aa5、状态0、SHUTDOWN成功；见 fingerprint-machine-check-2026-10-30.md）
+- [ ] M3（部分通过）GPIO185复位、版本/尺寸、真实帧门槛及基础解码已通过；完整图像处理、可重复接触/抬起和低功耗恢复仍待验。通信仅使用已核实的0x8020/0x8021及MCU子命令；0x8026是录入算法，不能当作芯片探测。
+- [x] M3a 首次用户接触触发的新帧与基础解码：空载150个合法无帧状态；接触后第121次状态置1，15680B传输校验通过，7840样本min69/max503，无>4096样本。
+- [x] M3b 限定离线预处理对照：Linux arm64重放真实TA/Windows算法，真实接触帧生成的7840B输出逐字节一致。分配失败/超量程行为有缺陷，不据此开放wire录入或宣称完整质量验收。
 - [ ] M4 listener 服务 + 一次 authenticate（含安全存储读）
 - [ ] M5 enroll 落一枚模板
 - [ ] M6 client driver 成形（字符设备接口）
@@ -140,7 +132,9 @@ GPIO185 复位可能由 TA 经 QSEE-GPIO 自己做（待确认）。届时加一
    预期：`★★★ LOAD 成功！app_id=N`（实测 app_id=5，镜像落物理 `0xec000000`，无挂机）。
    `qcom_qseecom_fpcmd.ko` 则是常驻版：`echo 1 > .../gaokun3_fpcmd/load` 后可 `echo <hex> > .../send_hex` 发命令。
 
-## 9. 设备与工作区现状（交接用）
+## 9. 历史交接记录（已被当前实机记录取代）
+
+以下为早期#125阶段记录，旧IP、启动项、构建机状态及“只能上机”判断均不能用于当前操作。当前状态应读取真机并对照fingerprint-machine-check-2026-10-30.md最后一节。
 
 * **设备**：#125/后续测试后，若仍在 RAM 里的"fp 内核"（`#25`，= stock + 0050 休眠，经 oneshot 单独 `Image.fp` 启动），
   **任意一次重启都自动回发布版内核 `1790206017`**；ESP 已复原（临时 `Image.fp` 与启动项已删）。

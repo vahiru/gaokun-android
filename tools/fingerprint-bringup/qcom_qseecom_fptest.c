@@ -25,6 +25,7 @@
 #include <linux/fs.h>
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
+#include "fp_app_compat.h"
 
 #define FP_IMG_ALIGN	(4 * 1024 * 1024)	/* TZ 要 4 MiB 对齐的物理地址 */
 #define FP_IMG_PATH	"/data/local/tmp/fingerpr.mbn"
@@ -43,6 +44,9 @@ static int fp_do_load(void)
 	size_t img_len = 0;
 	u32 app_id = 0, look_id = 0;
 	int ret;
+
+	/* 同 0050：先收窄 DMA 到 32 位，再建池（事后改 mask 没用） */
+	fpq_constrain_scm_dma();
 
 	ret = kernel_read_file_from_path(FP_IMG_PATH, 0, &filebuf, FP_IMG_MAX,
 					 &img_len, READING_FIRMWARE);
@@ -103,7 +107,7 @@ static int fp_do_load(void)
 		&img_phys, FP_APP_NAME);
 
 	/* 单一 secelf ⇒ mdt_len = 0 */
-	ret = qcom_scm_qseecom_app_load(aligned, 0, img_len, &app_id);
+	ret = fpq_app_load(aligned, 0, img_len, &app_id);
 	if (ret) {
 		pr_err("fptest: ★ LOAD 失败: %d（TA 未加载）\n", ret);
 		goto out_stage;
@@ -119,7 +123,7 @@ static int fp_do_load(void)
 			look_id == app_id ? "== " : "!= 注意 ");
 
 	/* 收工：卸载，免得二次加载被拒 */
-	ret = qcom_scm_qseecom_app_shutdown(app_id);
+	ret = fpq_app_shutdown(app_id);
 	if (ret)
 		pr_warn("fptest: app_shutdown(%u) 失败: %d（下次加载可能要重启）\n", app_id, ret);
 	else

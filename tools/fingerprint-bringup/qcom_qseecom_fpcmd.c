@@ -27,6 +27,7 @@
 #include <linux/vmalloc.h>
 #include <linux/slab.h>
 #include <linux/mutex.h>
+#include "fp_app_compat.h"
 
 #define FP_IMG_ALIGN	(4 * 1024 * 1024)
 #define FP_IMG_PATH	"/data/local/tmp/fingerpr.mbn"
@@ -45,17 +46,28 @@ static void fp_hexdump(const char *tag, const void *p, size_t n)
 	print_hex_dump(KERN_INFO, tag, DUMP_PREFIX_OFFSET, 16, 1, p, n, false);
 }
 
+/* 响应里最后一个非零字节的后一位（0=全零）——长响应(如 BulkRead)只 dump 头部时靠它判断有没有数据 */
+static size_t fp_nz_tail(const u8 *p, size_t n)
+{
+	while (n > 0 && !p[n - 1])
+		n--;
+	return n;
+}
+
 static int fp_load(void)
 {
 	struct qcom_tzmem_pool_config cfg = { .policy = QCOM_TZMEM_POLICY_STATIC };
 	struct qcom_tzmem_pool *img_pool;
-	void *stage, *filebuf = NULL;
+	void *stage, *stage_raw, *filebuf = NULL;
 	phys_addr_t phys;
 	size_t img_len = 0, stage_len;
 	int ret;
 
 	if (fp_loaded)
 		return -EBUSY;
+
+	/* 同 0050：先收窄 DMA 到 32 位，再建池（事后改 mask 没用） */
+	fpq_constrain_scm_dma();
 
 	ret = kernel_read_file_from_path(FP_IMG_PATH, 0, &filebuf, FP_IMG_MAX,
 					 &img_len, READING_FIRMWARE);
@@ -64,21 +76,26 @@ static int fp_load(void)
 		return ret;
 	}
 
-	/* 镜像 <4MiB ⇒ 分配正好 4MiB(order-10,天然对齐),见 #125 */
+	/* TZ 要镜像落在 4MiB 对齐的【物理】地址。池基址只保证 PAGE 对齐，且 vaddr 与
+	 * paddr 的对齐偏移不一定一致（实测 P=0xf6100000）——所以要在物理空间对齐：
+	 * 多分配一段 4MiB slack，按 phys 对齐后反推虚拟址（同厂商参考实现的
+	 * "img+4MiB 再找对齐子区"，见 fptest.c 头注）。 */
 	stage_len = ALIGN(img_len, FP_IMG_ALIGN);
-	cfg.initial_size = cfg.max_size = stage_len;
+	cfg.initial_size = cfg.max_size = stage_len + FP_IMG_ALIGN;
 	img_pool = qcom_tzmem_pool_new(&cfg);
 	if (IS_ERR(img_pool)) { ret = PTR_ERR(img_pool); goto out_file; }
-	stage = qcom_tzmem_alloc(img_pool, stage_len, GFP_KERNEL);
-	if (!stage) { ret = -ENOMEM; goto out_imgpool; }
-	phys = qcom_tzmem_to_phys(stage);
-	if (upper_32_bits(phys) || !IS_ALIGNED(phys, FP_IMG_ALIGN)) {
+	stage_raw = qcom_tzmem_alloc(img_pool, stage_len + FP_IMG_ALIGN, GFP_KERNEL);
+	if (!stage_raw) { ret = -ENOMEM; goto out_imgpool; }
+	phys = ALIGN(qcom_tzmem_to_phys(stage_raw), FP_IMG_ALIGN);
+	stage = stage_raw + (phys - qcom_tzmem_to_phys(stage_raw));
+	if (upper_32_bits(phys) || upper_32_bits(phys + img_len - 1) ||
+	    !IS_ALIGNED(phys, FP_IMG_ALIGN)) {
 		pr_err("fpcmd: 镜像缓冲 %pa 不满足 <4GB+4MiB 对齐,放弃\n", &phys);
 		ret = -EINVAL; goto out_stage;
 	}
 	memcpy(stage, filebuf, img_len);
 
-	ret = qcom_scm_qseecom_app_load(stage, 0, img_len, &fp_app_id);
+	ret = fpq_app_load(stage, 0, img_len, &fp_app_id);
 	if (ret) { pr_err("fpcmd: LOAD 失败 %d\n", ret); goto out_stage; }
 	pr_info("fpcmd: LOAD ok, app_id=%u\n", fp_app_id);
 
@@ -97,9 +114,9 @@ static int fp_load(void)
 out_iopool:
 	qcom_tzmem_pool_free(fp_io_pool); fp_io_pool = NULL;
 out_shutdown:
-	qcom_scm_qseecom_app_shutdown(fp_app_id);
+	fpq_app_shutdown(fp_app_id);
 out_stage:
-	qcom_tzmem_free(stage);
+	qcom_tzmem_free(stage_raw);
 out_imgpool:
 	qcom_tzmem_pool_free(img_pool);
 out_file:
@@ -115,7 +132,7 @@ static void fp_unload(void)
 	qcom_tzmem_free(fp_rsp);
 	qcom_tzmem_pool_free(fp_io_pool);
 	fp_io_pool = NULL;
-	qcom_scm_qseecom_app_shutdown(fp_app_id);
+	fpq_app_shutdown(fp_app_id);
 	pr_info("fpcmd: app_shutdown(%u)\n", fp_app_id);
 	fp_loaded = false;
 }
@@ -172,8 +189,11 @@ static ssize_t fp_send_write(struct file *f, const char __user *ubuf,
 		pr_err("fpcmd: app_send 失败 %d\n", ret);
 		return ret;
 	}
-	pr_info("fpcmd: SEND ok, 响应前 64 字节:\n");
-	fp_hexdump("fpcmd rsp: ", fp_rsp, 64);
+	pr_info("fpcmd: SEND ok, ack(req 前 16B)+rsp 尾=%zu:\n",
+		fp_nz_tail(fp_rsp, FP_IO_SZ));
+	/* sub_ADFC LABEL_150 把 0x5AA5 ack 写回 req[0]——dump 回来确认 handler 真跑了 */
+	fp_hexdump("fpcmd ack: ", fp_req, 16);
+	fp_hexdump("fpcmd rsp: ", fp_rsp, 256);
 	return len;
 }
 
