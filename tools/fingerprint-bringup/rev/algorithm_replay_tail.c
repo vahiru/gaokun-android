@@ -22,6 +22,8 @@ static unsigned char *heap_arena;
 static size_t heap_used,heap_size=HEAP_BYTES;
 static unsigned log_calls_host,sfs_calls,spi_calls;
 static int algorithm_ran;
+static unsigned template_count,template_nonzero;
+static uint64_t template_hash;
 struct arena_block {void *ptr;size_t size;};
 #define MAX_BLOCKS 4096
 static struct arena_block blocks[MAX_BLOCKS];
@@ -76,10 +78,12 @@ static void report(const char *stage,uint64_t init_rc,uint64_t config_rc,uint64_
  printf("{\"stage\":\"%s\",\"app_init_rc\":%llu,\"config_build_rc\":%llu,"
         "\"enroll_rc\":%llu,\"image_bytes\":%u,"
         "\"arena_used\":%zu,\"allocations\":%u,\"log_calls\":%u,"
-        "\"sfs_calls\":%u,\"spi_calls\":%u,\"algorithm_executed\":%s,\"hits\":[",
+        "\"sfs_calls\":%u,\"spi_calls\":%u,\"algorithm_executed\":%s,"
+        "\"template_count\":%u,\"template_nonzero\":%u,\"template_hash\":\"%016llx\",\"hits\":[",
         stage,(unsigned long long)init_rc,(unsigned long long)config_rc,
         (unsigned long long)enroll_rc,image_bytes,heap_used,block_count,
-        log_calls_host,sfs_calls,spi_calls,algorithm_ran?"true":"false");
+        log_calls_host,sfs_calls,spi_calls,algorithm_ran?"true":"false",
+        template_count,template_nonzero,(unsigned long long)template_hash);
  unsigned shown=0;
  for(unsigned i=0;i<import_count;++i)if(import_hits[i]){
   printf("%s{\"name\":\"%s\",\"count\":%u}",shown?",":"",import_names[i],import_hits[i]);
@@ -200,6 +204,18 @@ int main(int argc,char **argv){
      algorithm_ran=1;
      uint64_t rc=((entry)(ta_map+0x9b57c))(0,0,(uint64_t)(uintptr_t)image,0);
      enroll_rc=rc;
+     if(rc==0){
+      uintptr_t dbs=*(uintptr_t *)(ta_map+0x361540);
+      uintptr_t db=dbs?*(uintptr_t *)dbs:0;
+      if(db){
+       template_count=*(uint16_t *)(db+50116);
+       const unsigned char *record=(const unsigned char *)db;
+       uint64_t h=1469598103934665603ULL;
+       for(unsigned i=0;i<520;++i){h^=record[i];h*=1099511628211ULL;
+                                   if(record[i])++template_nonzero;}
+       template_hash=h;
+      }
+     }
      report(case_name,init_rc,config_rc,enroll_rc,image_bytes);
      return 0;
     }
