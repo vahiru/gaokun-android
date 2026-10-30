@@ -53,6 +53,19 @@ static void trace_reset(void){
  trace_nmax=trace_nmin=trace_mach=trace_rmach=-1;
  trace_featsz=trace_tplbin=trace_far=-1;
 }
+static uint64_t fnv1a(const unsigned char *p,size_t n){
+ uint64_t h=1469598103934665603ULL;
+ for(size_t i=0;i<n;++i){h^=p[i];h*=1099511628211ULL;}
+ return h;
+}
+static int read_blob(const char *path,unsigned char *buf,size_t cap,size_t *out){
+ FILE *fp=fopen(path,"rb");if(!fp)return -1;
+ if(fseek(fp,0,SEEK_END)){fclose(fp);return -1;}
+ long n=ftell(fp);if(n<0||(size_t)n>cap){fclose(fp);return -1;}
+ if(fseek(fp,0,SEEK_SET)){fclose(fp);return -1;}
+ size_t got=fread(buf,1,(size_t)n,fp);fclose(fp);
+ if(got!=(size_t)n)return -1;*out=got;return 0;
+}
 static void trace_log(unsigned level,const char *tag,const char *fmt,...){
  (void)tag;char buf[512];va_list ap;va_start(ap,fmt);
  vsnprintf(buf,sizeof(buf),fmt,ap);va_end(ap);
@@ -266,6 +279,96 @@ int main(int argc,char **argv){
    }
    uint64_t image_instance=((entry)(ta_map+0x9746c))(0,0,0,0);
    if(image_instance)config_rc=image_instance;
+   if(!strncmp(case_name,"persist",7)&&image_instance==0){
+    enum {TPLBUF_MAX=512*1024};
+    unsigned width=*(uint32_t *)cfg,height=*(uint32_t *)(cfg+4),bytes=width*height;
+    unsigned char *image=arena_alloc(bytes);
+    unsigned char *tpl=arena_alloc(TPLBUF_MAX);
+    const char *path=argc>6?argv[6]:"/build/tpl.bin";
+    if(image&&tpl){
+     for(unsigned i=0;i<bytes;++i)
+      image[i]=(unsigned char)pattern_value(pat_kind,pat_param,i%width,i/width,
+                                            width,height,i);
+     if(!strncmp(case_name,"persistsave",11)){
+      uintptr_t dbs0=*(uintptr_t *)(ta_map+0x361540);
+      uintptr_t db0=dbs0?*(uintptr_t *)dbs0:0;
+      unsigned flag0=db0?*(uint16_t *)(db0+50118):0;
+      uint64_t erc=((entry)(ta_map+0x9b57c))(0,0,(uint64_t)(uintptr_t)image,0);
+      uintptr_t dbs1=*(uintptr_t *)(ta_map+0x361540);
+      uintptr_t db1=dbs1?*(uintptr_t *)dbs1:0;
+      unsigned flag1=db1?*(uint16_t *)(db1+50118):0;
+      unsigned type=0,size=0;uint64_t xrc=0xFFFFFFFFFFFFFFFFULL;
+      size_t written=0;
+      if(erc==0){
+       xrc=((entry)(ta_map+0xDFD20))(0,(uint64_t)(uintptr_t)&type,
+                                     (uint64_t)(uintptr_t)&size,
+                                     (uint64_t)(uintptr_t)tpl);
+       if(xrc==0&&size){
+        FILE *o=fopen(path,"wb");
+        if(o){written=fwrite(tpl,1,size,o);fclose(o);}
+       }
+      }
+      dbs1=*(uintptr_t *)(ta_map+0x361540);
+      db1=dbs1?*(uintptr_t *)dbs1:0;
+      flag1=db1?*(uint16_t *)(db1+50118):0;
+      uint32_t magic=size>=4?*(uint32_t *)tpl:0;
+      unsigned crc=size>=2?*(uint16_t *)(tpl+size-2):0;
+      printf("{\"stage\":\"%s\",\"pattern\":[%u,%u,%u],\"image_bytes\":%u,"
+             "\"enroll_rc\":%lld,\"export_rc\":%lld,\"tpl_type\":%u,"
+             "\"tpl_size\":%u,\"magic\":\"0x%08x\",\"crc\":\"0x%04x\","
+             "\"written\":%zu,\"tpl_hash\":\"%016llx\",\"path\":\"%s\","
+             "\"flag_before\":%u,\"flag_after\":%u}\n",
+             case_name,pat_kind,pat_param,pat_perturb,bytes,(long long)erc,
+             (long long)xrc,type,size,magic,crc,written,
+             size?(unsigned long long)fnv1a(tpl,size):0ULL,path,flag0,flag1);
+     }else{
+      size_t n=0;int rr=read_blob(path,tpl,TPLBUF_MAX,&n);
+      uint64_t lrc=0xFFFFFFFFFFFFFFFFULL;
+      if(rr==0&&n>=4)
+       lrc=((entry)(ta_map+0xE0460))(0,121,(uint64_t)n,
+                                     (uint64_t)(uintptr_t)tpl);
+      uintptr_t dbs=*(uintptr_t *)(ta_map+0x361540);
+      uintptr_t db=dbs?*(uintptr_t *)dbs:0;
+      unsigned count=db?*(uint16_t *)(db+50116):0;
+      unsigned flag=db?*(uint16_t *)(db+50118):0;
+      unsigned fid=db?*(uint32_t *)(db+50120):0;
+      unsigned acc=db?*(uint32_t *)(db+50128):0;
+      unsigned char id=0xEE,v5=0xEE;
+      trace_reset();
+      uint64_t irc=((entry)(ta_map+0x9E1F0))((uint64_t)(uintptr_t)image,1,
+                                             (uint64_t)(uintptr_t)&id,
+                                             (uint64_t)(uintptr_t)&v5);
+      int inmax=trace_nmax,inmin=trace_nmin,imach=trace_mach,irmach=trace_rmach;
+      uint64_t frc=0xFFFFFFFFFFFFFFFFULL,irc2=0xFFFFFFFFFFFFFFFFULL;
+      unsigned flag2=flag,id2=0xEE,v52=0xEE;
+      int fnmax=-1,fnmin=-1,fmach=-1,frmach=-1;
+      if(pat_flag&&db&&irc!=0){
+       frc=((entry)(ta_map+0xE83B4))(0,0,0,0);
+       flag2=db?*(uint16_t *)(db+50118):0;
+       trace_reset();
+       irc2=((entry)(ta_map+0x9E1F0))((uint64_t)(uintptr_t)image,1,
+                                      (uint64_t)(uintptr_t)&id2,
+                                      (uint64_t)(uintptr_t)&v52);
+       fnmax=trace_nmax;fnmin=trace_nmin;fmach=trace_mach;frmach=trace_rmach;
+      }
+      printf("{\"stage\":\"%s\",\"pattern\":[%u,%u,%u],\"image_bytes\":%u,"
+             "\"read_rc\":%d,\"bytes_read\":%zu,\"tpl_hash\":\"%016llx\","
+             "\"load_rc\":%lld,\"template_count\":%u,\"flag\":%u,"
+             "\"fid\":%u,\"acc\":%u,\"identify_rc\":%lld,\"id\":%u,\"v5\":%u,"
+             "\"identify\":{\"nmax\":%d,\"nmin\":%d,\"mach\":%d,\"rmach\":%d},"
+             "\"valid_rc\":%lld,\"flag_after_valid\":%u,"
+             "\"identify_forced_rc\":%lld,\"id_forced\":%u,\"v5_forced\":%u,"
+             "\"identify_forced\":{\"nmax\":%d,\"nmin\":%d,\"mach\":%d,"
+             "\"rmach\":%d},\"path\":\"%s\"}\n",
+             case_name,pat_kind,pat_param,pat_perturb,bytes,rr,n,
+             n?(unsigned long long)fnv1a(tpl,n):0ULL,(long long)lrc,
+             count,flag,fid,acc,(long long)irc,id,v5,
+             inmax,inmin,imach,irmach,(long long)frc,flag2,
+             (long long)irc2,id2,v52,fnmax,fnmin,fmach,frmach,path);
+     }
+     fflush(stdout);return 0;
+    }
+   }
    if(!strncmp(case_name,"quality",7)&&image_instance==0){
     unsigned width=*(uint32_t *)cfg,height=*(uint32_t *)(cfg+4),bytes=width*height;
     uintptr_t inst=*(uintptr_t *)(ta_map+0x346430);
