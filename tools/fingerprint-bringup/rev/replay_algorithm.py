@@ -101,7 +101,8 @@ def main():
         source.write_text('#define main unused_preprocess_main\n'+
                           (HERE/'preprocess_replay_runner.c').read_text()+'\n'+tail)
         with runner(root,'linux-container',source) as (command,scope):
-            for case,timeout in (('init',20),('config',30),('quality',60),('enroll',60),('enroll_forced',60)):
+            for case,timeout in (('init',20),('config',30),('quality',60),('quality96',60),('enroll',60),
+                            ('enroll96',60),('enroll_forced',60),('enroll_forced96',60)):
                 try:
                     result=subprocess.run(command+['unused','0',case],
                                           capture_output=True,timeout=timeout)
