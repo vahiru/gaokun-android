@@ -113,6 +113,8 @@ def main():
                             ('persistload40x196dimsfix:13:40:0:1',120),
                             ('persistload40x196dimsfix:13:40:4:0',120),
                             ('persistload40x196dimsfix:4:0',120),
+                            ('persistsave40x196dimsfix:13:40:0:0:1',120),
+                            ('persistload40x196dimsfix:13:40:0:0:1',120),
                             ('persistload196x40dimsfix:13:40:0:0',120),
                             ('persistsave196x40dimsfix:13:40',120),
                             ('persistload196x40dimsfix:13:40:0:1',120),
