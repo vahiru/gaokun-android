@@ -220,9 +220,11 @@ int main(int argc,char **argv){
  assert(argc>=6);struct rlimit limit={0,0};assert(!setrlimit(RLIMIT_CORE,&limit));
  static char case_buf[64];
  snprintf(case_buf,sizeof case_buf,"%s",argv[5]);
- unsigned pat_kind=3,pat_param=0,pat_perturb=0,pat_flag=0;
+ unsigned pat_kind=3,pat_param=0,pat_perturb=0,pat_flag=0,pat_finger=0;
  {char *c=strchr(case_buf,':');
-  if(c){*c=0;(void)sscanf(c+1,"%u:%u:%u:%u",&pat_kind,&pat_param,&pat_perturb,&pat_flag);}}
+  if(c){*c=0;(void)sscanf(c+1,"%u:%u:%u:%u:%u",&pat_kind,&pat_param,&pat_perturb,
+                          &pat_flag,&pat_finger);}}
+ if(pat_finger>5)pat_finger=0;
  const char *case_name=case_buf;
  struct sigaction sa={0};sa.sa_sigaction=fault;sa.sa_flags=SA_SIGINFO;
  sigaction(SIGSEGV,&sa,NULL);sigaction(SIGBUS,&sa,NULL);sigaction(SIGILL,&sa,NULL);
@@ -291,16 +293,14 @@ int main(int argc,char **argv){
                                             width,height,i);
      if(!strncmp(case_name,"persistsave",11)){
       uintptr_t dbs0=*(uintptr_t *)(ta_map+0x361540);
-      uintptr_t db0=dbs0?*(uintptr_t *)dbs0:0;
+      uintptr_t db0=dbs0?((uintptr_t *)dbs0)[pat_finger]:0;
       unsigned flag0=db0?*(uint16_t *)(db0+50118):0;
-      uint64_t erc=((entry)(ta_map+0x9b57c))(0,0,(uint64_t)(uintptr_t)image,0);
-      uintptr_t dbs1=*(uintptr_t *)(ta_map+0x361540);
-      uintptr_t db1=dbs1?*(uintptr_t *)dbs1:0;
-      unsigned flag1=db1?*(uint16_t *)(db1+50118):0;
+      uint64_t erc=((entry)(ta_map+0x9b57c))(pat_finger,0,
+                                             (uint64_t)(uintptr_t)image,0);
       unsigned type=0,size=0;uint64_t xrc=0xFFFFFFFFFFFFFFFFULL;
       size_t written=0;
       if(erc==0){
-       xrc=((entry)(ta_map+0xDFD20))(0,(uint64_t)(uintptr_t)&type,
+       xrc=((entry)(ta_map+0xDFD20))(pat_finger,(uint64_t)(uintptr_t)&type,
                                      (uint64_t)(uintptr_t)&size,
                                      (uint64_t)(uintptr_t)tpl);
        if(xrc==0&&size){
@@ -308,27 +308,29 @@ int main(int argc,char **argv){
         if(o){written=fwrite(tpl,1,size,o);fclose(o);}
        }
       }
-      dbs1=*(uintptr_t *)(ta_map+0x361540);
-      db1=dbs1?*(uintptr_t *)dbs1:0;
-      flag1=db1?*(uint16_t *)(db1+50118):0;
+      uintptr_t dbs1=*(uintptr_t *)(ta_map+0x361540);
+      uintptr_t db1=dbs1?((uintptr_t *)dbs1)[pat_finger]:0;
+      unsigned flag1=db1?*(uint16_t *)(db1+50118):0;
       uint32_t magic=size>=4?*(uint32_t *)tpl:0;
       unsigned crc=size>=2?*(uint16_t *)(tpl+size-2):0;
-      printf("{\"stage\":\"%s\",\"pattern\":[%u,%u,%u],\"image_bytes\":%u,"
+      printf("{\"stage\":\"%s\",\"finger\":%u,\"pattern\":[%u,%u,%u],"
+             "\"image_bytes\":%u,"
              "\"enroll_rc\":%lld,\"export_rc\":%lld,\"tpl_type\":%u,"
              "\"tpl_size\":%u,\"magic\":\"0x%08x\",\"crc\":\"0x%04x\","
              "\"written\":%zu,\"tpl_hash\":\"%016llx\",\"path\":\"%s\","
              "\"flag_before\":%u,\"flag_after\":%u}\n",
-             case_name,pat_kind,pat_param,pat_perturb,bytes,(long long)erc,
+             case_name,pat_finger,pat_kind,pat_param,pat_perturb,bytes,
+             (long long)erc,
              (long long)xrc,type,size,magic,crc,written,
              size?(unsigned long long)fnv1a(tpl,size):0ULL,path,flag0,flag1);
      }else{
       size_t n=0;int rr=read_blob(path,tpl,TPLBUF_MAX,&n);
       uint64_t lrc=0xFFFFFFFFFFFFFFFFULL;
       if(rr==0&&n>=4)
-       lrc=((entry)(ta_map+0xE0460))(0,121,(uint64_t)n,
+       lrc=((entry)(ta_map+0xE0460))(pat_finger,121,(uint64_t)n,
                                      (uint64_t)(uintptr_t)tpl);
       uintptr_t dbs=*(uintptr_t *)(ta_map+0x361540);
-      uintptr_t db=dbs?*(uintptr_t *)dbs:0;
+      uintptr_t db=dbs?((uintptr_t *)dbs)[pat_finger]:0;
       unsigned count=db?*(uint16_t *)(db+50116):0;
       unsigned flag=db?*(uint16_t *)(db+50118):0;
       unsigned fid=db?*(uint32_t *)(db+50120):0;
@@ -363,7 +365,8 @@ int main(int argc,char **argv){
                                       (uint64_t)(uintptr_t)&v52);
        fnmax=trace_nmax;fnmin=trace_nmin;fmach=trace_mach;frmach=trace_rmach;
       }
-      printf("{\"stage\":\"%s\",\"pattern\":[%u,%u,%u],\"image_bytes\":%u,"
+      printf("{\"stage\":\"%s\",\"finger\":%u,\"pattern\":[%u,%u,%u],"
+             "\"image_bytes\":%u,"
              "\"read_rc\":%d,\"bytes_read\":%zu,\"tpl_hash\":\"%016llx\","
              "\"load_rc\":%lld,\"template_count\":%u,\"flag\":%u,"
              "\"fid\":%u,\"acc\":%u,\"identify_rc\":%lld,\"id\":%u,\"v5\":%u,"
@@ -372,7 +375,7 @@ int main(int argc,char **argv){
              "\"identify_forced_rc\":%lld,\"id_forced\":%u,\"v5_forced\":%u,"
              "\"identify_forced\":{\"nmax\":%d,\"nmin\":%d,\"mach\":%d,"
              "\"rmach\":%d},\"path\":\"%s\"}\n",
-             case_name,pat_kind,pat_param,pat_perturb,bytes,rr,n,
+             case_name,pat_finger,pat_kind,pat_param,pat_perturb,bytes,rr,n,
              n?(unsigned long long)fnv1a(tpl,n):0ULL,(long long)lrc,
              count,flag,fid,acc,(long long)irc,id,v5,
              inmax,inmin,imach,irmach,(long long)frc,flag2,
