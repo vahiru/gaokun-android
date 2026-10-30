@@ -118,6 +118,28 @@ static unsigned char *build_sensor_config(void){
  cfg[118]=0;*(uint16_t *)(cfg+119)=1;*(uint16_t *)(cfg+121)=6;
  return cfg;
 }
+static unsigned pattern_value(unsigned kind,unsigned param,unsigned x,unsigned y,
+                              unsigned width,unsigned height,unsigned i){
+ switch(kind){
+ case 0:return 0;
+ case 1:return 128;
+ case 2:return 255;
+ case 3:return (unsigned char)(32+((i*7+y*29)%192));
+ case 4:return (unsigned char)((i*1103515245u+12345u)>>16);
+ case 5:return ((x/param+y/param)&1)?200:40;
+ case 6:return ((y%16)<param)?40:200;
+ case 7:return (unsigned char)(100+(((i*2654435761u)>>24)%56));
+ case 8:return (x<width/2)?40:200;
+ case 9:return ((x%16)<param)?40:200;
+ default:{
+  unsigned area=width*height*param/100,side=1;
+  while((side+1)*(side+1)<=area)++side;
+  unsigned x0=(width-side)/2,y0=(height-side)/2;
+  int inside=x>=x0&&x<x0+side&&y>=y0&&y<y0+side;
+  if(kind==10)return inside?((((x+y)%8)<4)?60:200):40;
+  return inside?(unsigned char)(100+(((i*2654435761u)>>24)%56)):20;
+ }}
+}
 int main(int argc,char **argv){
  assert(argc>=6);struct rlimit limit={0,0};assert(!setrlimit(RLIMIT_CORE,&limit));
  const char *case_name=argv[5];
@@ -152,48 +174,75 @@ int main(int argc,char **argv){
  if(strcmp(case_name,"init")){
   unsigned char *cfg=build_sensor_config();
   config_rc=cfg?1:0;
+  int dims96=cfg&&strstr(case_name,"96")!=NULL;
+  if(cfg&&dims96){*(uint32_t *)cfg=96;*(uint32_t *)(cfg+4)=96;}
   if(cfg){
-   if(!strcmp(case_name,"enroll_forced")){
+   if(strstr(case_name,"forced")){
     cfg[12]=0;cfg[13]=0;*(uint16_t *)(cfg+38)=0;*(uint16_t *)(cfg+46)=0;
    }
    *(uintptr_t *)(ta_map+0x346368)=(uintptr_t)cfg;
    uint64_t image_instance=((entry)(ta_map+0x9746c))(0,0,0,0);
    if(image_instance)config_rc=image_instance;
-   if(!strcmp(case_name,"quality")&&image_instance==0){
-    unsigned width=*(uint32_t *)cfg,height=*(uint32_t *)(cfg+4);
-    unsigned bytes=width*height;
+   if((!strcmp(case_name,"quality")||!strcmp(case_name,"quality96"))&&image_instance==0){
+    unsigned width=*(uint32_t *)cfg,height=*(uint32_t *)(cfg+4),bytes=width*height;
     uintptr_t inst=*(uintptr_t *)(ta_map+0x346430);
     unsigned char *dst=inst?((unsigned char **)(void *)inst)[1]:NULL;
     if(!dst)dst=arena_alloc(bytes);
     if(dst){
-     static const char *const names[]={"const0","const128","const255","gradient",
+     enum {MAXP=48};
+     char names[MAXP][24];unsigned kind[MAXP],param[MAXP],count=0;
+     static const char *const base_names[]={"const0","const128","const255","gradient",
        "random","checker8","ridges8","noise_mid","split"};
-     printf("{\"stage\":\"quality\",\"width\":%u,\"height\":%u,\"patterns\":[",width,height);
      for(unsigned p=0;p<9;++p){
-      for(unsigned i=0;i<bytes;++i){
-       unsigned x=i%width,y=i/width,v=0;
-       switch(p){
-       case 0:v=0;break;case 1:v=128;break;case 2:v=255;break;
-       case 3:v=(unsigned char)(32+((i*7+y*29)%192));break;
-       case 4:v=(unsigned char)((i*1103515245u+12345u)>>16);break;
-       case 5:v=((x/8+y/8)&1)?200:40;break;
-       case 6:v=((y%16)<8)?40:200;break;
-       case 7:v=(unsigned char)(100+(((i*2654435761u)>>24)%56));break;
-       default:v=(x<width/2)?40:200;break;
-       }
-       dst[i]=(unsigned char)v;
-      }
+      snprintf(names[count],24,"%s",base_names[p]);
+      kind[count]=p==5?5:(p==6?6:p);
+      param[count]=(p==5||p==6)?8:0;++count;
+     }
+     for(unsigned c=2;c<=32;c*=2){snprintf(names[count],24,"checker%u",c);
+      kind[count]=5;param[count]=c;++count;}
+     for(unsigned d=2;d<=14;d+=2){snprintf(names[count],24,"hstripe%u",d);
+      kind[count]=6;param[count]=d;++count;}
+     for(unsigned d=2;d<=14;d+=2){snprintf(names[count],24,"vstripe%u",d);
+      kind[count]=9;param[count]=d;++count;}
+     for(unsigned pc=50;pc<=98;pc+=12){snprintf(names[count],24,"box%u",pc);
+      kind[count]=10;param[count]=pc;++count;}
+     for(unsigned pc=80;pc<=98;pc+=6){snprintf(names[count],24,"noisebox%u",pc);
+      kind[count]=11;param[count]=pc;++count;}
+     unsigned quals[MAXP],areas[MAXP],best=count;
+     uintptr_t dims=*(uintptr_t *)(ta_map+0x361530);
+     uint64_t dp=dims?(unsigned long long)dims:0ULL;
+     unsigned dw=dims?*(uint32_t *)dims:0,dh=dims?*(uint32_t *)(dims+4):0;
+     printf("{\"stage\":\"quality\",\"width\":%u,\"height\":%u,"
+            "\"dims_ptr\":\"%llu\",\"dims\":[%u,%u],\"patterns\":[",
+            width,height,(unsigned long long)dp,dw,dh);
+     for(unsigned p=0;p<count;++p){
+      for(unsigned i=0;i<bytes;++i)
+       dst[i]=(unsigned char)pattern_value(kind[p],param[p],i%width,i/width,
+                                           width,height,i);
       unsigned out=0xFFFFFFFFu;
       uint64_t q=((entry)(ta_map+0xE6B64))((uint64_t)(uintptr_t)dst,
                                             (uint64_t)(uintptr_t)&out,0,0);
+      quals[p]=out&0xff;areas[p]=(out>>8)&0xff;
       printf("%s{\"name\":\"%s\",\"quality\":%u,\"area\":%u,\"b2\":%u,"
-             "\"b3\":%u,\"rc\":%llu}",p?",":"",names[p],out&0xff,(out>>8)&0xff,
+             "\"b3\":%u,\"rc\":%llu}",p?",":"",names[p],quals[p],areas[p],
              (out>>16)&0xff,(out>>24)&0xff,(unsigned long long)q);
+      if(best==count&&quals[p]>=30&&areas[p]>=90)best=p;
      }
-     printf("]}\n");fflush(stdout);return 0;
+     printf("],\"selected\":");
+     if(best<count){
+      for(unsigned i=0;i<bytes;++i)
+       dst[i]=(unsigned char)pattern_value(kind[best],param[best],i%width,i/width,
+                                           width,height,i);
+      algorithm_ran=1;
+      enroll_rc=((entry)(ta_map+0x9b57c))(0,0,(uint64_t)(uintptr_t)dst,0);
+      printf("{\"name\":\"%s\",\"quality\":%u,\"area\":%u,\"enroll_rc\":%lld}",
+             names[best],quals[best],areas[best],(long long)enroll_rc);
+     }else printf("null");
+     printf("}\n");fflush(stdout);return 0;
     }
    }
-   if((!strcmp(case_name,"enroll")||!strcmp(case_name,"enroll_forced"))
+   if((!strcmp(case_name,"enroll")||!strcmp(case_name,"enroll_forced")||
+       !strcmp(case_name,"enroll96")||!strcmp(case_name,"enroll_forced96"))
       &&image_instance==0){
     unsigned width=*(uint32_t *)cfg,height=*(uint32_t *)(cfg+4);
     image_bytes=width*height;
