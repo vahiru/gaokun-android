@@ -3,6 +3,7 @@
 > **现状（2026-10-30）**：M2 已在真机通过：LOAD 返回 id=5，固定 wire 0x8031 返回有效 ACK=0x5aa5、状态0，SHUTDOWN成功。见 [实机记录](fingerprint-machine-check-2026-10-30.md)。
 > GPIO185复位后，MCU/SPI版本查询已通过，返回 `FT9769_APP_ST_SPI_ENC_SV0.1_202303152035`。只读尺寸返回40、196，兼容应答0x5aa5（同版本MCU固件固定返回，不能证明ready）；空载真实帧标志等待和无帧拒绝导出已实测通过；用户接触确认后已取得帧标志置1的新编码帧，7840个LE16样本基础解码检查通过；完整图像质量/处理、录入、认证或 Android HAL 尚未完成。
 > 旧文档把 0x8026/0x8027 当作只读信息查询的结论已撤回：它们涉及录入/匹配算法，不能按旧表执行。
+> **2026-10-31 客户端命令面已闭合**：Windows 产品只发 0x8020/0x8021/0x8029/0x8031；0x8026/0x8027/0x802B 在该产品中不可达，且 TA 工作区越界，继续禁止发送。TA 只存 16 字节模板元数据，录入/匹配在用户态引擎适配器；Android 侧需主机算法方案（见 §4.1）。
 
 ## 背景：这颗传感器为什么不能按常规驱动
 
@@ -43,6 +44,9 @@ Android FingerprintService
 | D5 | 按物理地址验证4MiB对齐及完整区间低于4GiB | 旧内核8MiB分配曾失败；当前7.2.9实验内核8MiB池成功并取得0xf6400000对齐子区。不能假设虚拟/物理对齐偏移相同，分配失败必须在LOAD前退出 |
 | D6 | 生产会话生命周期待验证；当前诊断每轮LOAD后SHUTDOWN | 单轮始终使用该次成功LOAD的app_id；不能据取图探针推定长期驻留/多用户认证已通过 |
 | D7 | listener 无人认领时安全网兜底 | patch 0050 的 service_listeners 自动 FAILURE、最多256轮；只限制已返回SMC的循环，不能防止单次SMC不返回 |
+| D8 | Windows 客户端只使用 0x8020/0x8021/0x8029/0x8031 | 驱动唯一传输封装 7 个调用点全枚举；0x8026/27/2B 无调用（2026-10-31） |
+| D9 | TA 算法 wire 路径判为未使用遗留/缺陷路径 | tz_app_init 仅分配 1 MiB 且是 qword_2A4638 唯一写入；算法路径仍取 +0x950000；初始化链无重新分配（2026-10-31） |
+| D10 | 不在 TA 内做录入/匹配，改为主机侧算法 | 厂商 Windows 产品由 ftWbioEngineAdapter 在用户态完成 enroll/identify；TA 仅存 16 B 元数据 |
 
 ## 2. 命令协议（⬜ 逆向中，`fp-cmd-protocol.md`）
 
@@ -65,6 +69,9 @@ Android FingerprintService
   （驱动 `->service()` 要解析，要看真实回调）。
   ~~FF_CMD payload 格式~~ → **已判 moot**：word8 发不进（§6.4），payload 在 GPAppLib 内这件事
   只对 Goodix/GP 变体有意义，不再列为 FTE7001 的未决项。
+- **2026-10-31 追加（取代上一条的 listener 假设）**：Windows 产品驱动只发
+  0x8020/0x8021/0x8029/0x8031；0x8026/0x8027/0x802B 在该产品中不可达；
+  0x8029 只同步模板计数和 16 字节元数据。不要再把 TA 算法入口当作可用 enroll 路径（§4.1）。
 
 ## 3. 驱动状态机（草案，待命令号落定）
 
@@ -72,17 +79,38 @@ Android FingerprintService
 init：      LOAD → app_id → 注册 listener(安全存储) → 已核实的 wire init / MCU芯片识别帧（具体字节待定；不把0x8026当版本查询）  ← FF_CMD 的 INIT/INIT_SPI/PROBE_CHIP_ID/INIT_DEVICE 是
             TA↔TA GP 内部序列（普通世界发不进，协议文档 §6.4），Android 侧用 wire 0x80xx 复刻
 idle：      等 GPIO181 finger-down 中断（或 QUERY_FINGER_STATUS 轮询）
-authenticate：START_SCANNING → CAPTURE_IMAGE → AUTNENTICATE →(listener 读模板)→ 结果 → HAT
-enroll：    PRE_ENROLL → 多帧 CAPTURE_IMAGE + ENROLL →(listener 写模板)→ POST_ENROLL
-teardown：  FREE_SPI → FREE → 注销 listener → app_shutdown
+authenticate：CAPTURE_IMAGE → 主机侧预处理/匹配 → 结果 →（若走 STRONG 需另证 TEE 链路）
+enroll：    多帧 CAPTURE_IMAGE → 主机侧特征提取/模板 → 主机侧存储
+teardown：  FREE_SPI → FREE → 注销 listener（若未使用 listener 则跳过） → app_shutdown
 ```
 ⚠️ enroll/authenticate 会触发 listener 回调 —— **第一次跑这些命令仍需人在设备旁**（listener轮数上限不能阻止单次SMC卡死；模板的安全存储后端要落地，见 §4）。
 
-## 4. 安全存储后端（listener 的 `->service()`）
+## 4. 安全存储后端（旧假设，已被 §4.1 的厂商实际分工取代）
+
+⚠️ 2026-10-31：Windows 产品并不通过 listener/8026/802B 搬运完整模板，TA 只存
+16 字节元数据；本节保留为旧假设记录，Android 方案见 §4.1。
 
 模板持久化的实际wire契约仍在复核，不能将旧设计中“统一listener搬运SFS密文、RPMB防回滚”直接当成本机已验证事实。特别是0x802B存在删除既有slot并提交模板的路径，不能用于无副作用探测。
 
 应先闭合存储入口、用户/slot命名空间、模板格式与完整失败处理，再设计隔离的测试存储。当前只做MCU新帧采集及主机离线解码，未注册生产存储listener、未录入或覆盖模板。0x802D长模式导出的是处理图像，不是模板；0x802C有校验失败仍落入预处理的路径，ACK不能视为图像处理成功。新增纯离线ta_image_contract.py只描述精确7852B响应的图像导出边界，不执行命令，且要求同一TA会话内处理图缓冲已独立确认。
+
+### 4.1 厂商实际模板/算法分工（2026-10-31）
+
+Windows 产品不把完整生物模板交给 TA：
+
+* 驱动 `0x8029` 只同步模板计数和 16 字节元数据（`focal_tpl_info.bin` / `tplNN.bin`），
+  `GET_TPL_DATA` 返回 16 字节，`SET_TPL_DATA` 甚至未把输入送给 TA；
+* 完整模板和 enroll/identify 算法在 `ftWbioEngineAdapter.dll`（WinBio
+  `EngineAdapter*` 接口、`FtEnrollByTemplate`/`FtVerifyByTemplate`、
+  `OpenDatabase`/`StorageAdaptor`），不经过 QSEE；
+* TA 的 0x8026/0x8027/0x802B 算法路径未被该驱动调用，且工作区越界（§1 D9）。
+
+因此 Android 侧不能再按「listener 搬模板 + TA 匹配」推进，需要主机侧算法方案：
+可复用 TA 内的 FocalTech 算法做受限离线执行（已有 0x1c68 预处理重放基础），
+或移植引擎适配器算法。两条路线都不具备 TEE 支撑的采集/匹配链，不能声明
+STRONG/HAT；功能 bring-up 与安全等级验收必须分开记录。
+
+`0x8029` 本身会写/删 SFS 文件，仍有副作用，只能作为受限诊断候选，不能当只读枚举。
 
 ## 5. GPIO 与设备树
 
@@ -105,10 +133,14 @@ AOSP AIDL定义可用作接口与生命周期参考，但虚拟HAL的模拟录�
 - [ ] M3（部分通过）GPIO185复位、版本/尺寸、真实帧门槛及基础解码已通过；完整图像处理、可重复接触/抬起和低功耗恢复仍待验。通信仅使用已核实的0x8020/0x8021及MCU子命令；0x8026是录入算法，不能当作芯片探测。
 - [x] M3a 首次用户接触触发的新帧与基础解码：空载150个合法无帧状态；接触后第121次状态置1，15680B传输校验通过，7840样本min69/max503，无>4096样本。
 - [x] M3b 限定离线预处理对照：Linux arm64重放真实TA/Windows算法，真实接触帧生成的7840B输出逐字节一致。分配失败/超量程行为有缺陷，不据此开放wire录入或宣称完整质量验收。
-- [ ] M4 listener 服务 + 一次 authenticate（含安全存储读）
-- [ ] M5 enroll 落一枚模板
+- [ ] M4 主机侧算法桥：受限离线执行 TA/引擎的 enroll/identify 算法（原 listener 假设作废）
+- [ ] M5 主机侧模板存储 + 一次 enroll/authenticate 闭环（不含 STRONG/HAT 声明）
 - [ ] M6 client driver 成形（字符设备接口）
 - [ ] M7 Android 指纹 HAL，Settings 里能录/解锁
+
+> 2026-10-31 修正：M4/M5 原定义依赖 TA listener 安全存储；厂商客户端证据表明
+> 模板与算法在主机侧，故重定义为上述主机侧方案。M4 的离线算法桥仍须先证明
+> 模板 ABI 和工作区可独立提供，不能直接上机试 0x8026/802B。
 
 ## 8. 复现 M1（加载测试）
 
@@ -147,3 +179,6 @@ AOSP AIDL定义可用作接口与生命周期参考，但虚拟HAL的模拟录�
   ① listener 缓冲格式（要看真实回调）。
   ~~FF_CMD payload 格式~~ 已判 moot：word8 发不进（协议文档 §6.4），上机也测不了；
   若日后拿到带 GPAppLib 的 blob 可离线续 Goodix/GP 变体分析，与 FTE7001 主线无关。
+* **2026-10-31 更新**：客户端命令面已闭合，0x8026/27/2B 禁止发送；原「只剩 listener
+  缓冲格式上机」的说法作废。下一步是主机侧算法可行性（离线）与模板存储设计，
+  不再向 TA 发算法命令。

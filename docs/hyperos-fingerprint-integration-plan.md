@@ -35,3 +35,10 @@ Native thermal合约RESULT PASS failures=0，真实skin约27.03°C。USBdevice�
 ## 首帧门槛已跨过，录入/认证尚未实现
 
 在R22 super＋匹配指纹内核下，用户接触确认后第121笔1d状态变1，取得15680B新编码帧；7840个LE16样本min69/max503、无>4096样本且非均匀，基础解码检查通过。空载150轮保持合法无帧，说明持续查询窗口比单纯idle等待适合此固件。详见机器检查记录最新一节。后续仍需图像布局/质量、可靠接触与抬起生命周期，以及Android HAL、录入和认证；不得把首帧成功升级为解锁可用。
+
+
+## 客户端命令面闭合后的整合调整（2026-10-31）
+
+Windows 产品驱动（SHA256 `90dfeb2c…0fb0`）只发 `0x8020/0x8021/0x8029/0x8031`；`0x8026/0x8027/0x802B` 不可达，且 TA 算法工作区 `base+0x950000` 超出 1 MiB 初始分配。TA 只在 SFS 存 16 字节模板元数据，完整模板与 enroll/identify 在 `ftWbioEngineAdapter.dll` 用户态完成。
+
+因此 HyperOS 侧把「TA 只做取图 + MCU 状态」作为固定边界：Android 的算法与模板存储另行实现，不再等 TA listener 或 0x8026。该主机侧匹配链没有 TEE 支撑，不能声明 STRONG/HAT；功能 bring-up 与安全等级验收分开。详见[设计文档](fingerprint-driver-design.md) §4.1。
