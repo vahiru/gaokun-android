@@ -108,9 +108,13 @@ def main():
                             ('loop40x196dimsfix:13:40:0:1',120),
                             ('quality196x40dimsfix',60),('enroll196x40dimsfix:13:40',60),
                             ('loop196x40dimsfix:13:40:0:1',120),
-                            ('loop40x196dimsfix:13:40:0:0',120)):
+                            ('loop40x196dimsfix:13:40:0:0',120),
+                            ('persistsave40x196dimsfix:13:40',120),
+                            ('persistload40x196dimsfix:13:40:0:1',120),
+                            ('persistsave196x40dimsfix:13:40',120),
+                            ('persistload196x40dimsfix:13:40:0:1',120)):
                 try:
-                    result=subprocess.run(command+['unused','0',case],
+                    result=subprocess.run(command+['unused','0',case,'/build/tpl.bin'],
                                           capture_output=True,timeout=timeout)
                     item={'case':case,'exit_code':result.returncode}
                     if result.stdout:
@@ -126,7 +130,15 @@ def main():
         'runtime':scope,'ta_sha256':TA_PIN,'device_actions':False,
         'map_bytes':MAP_SIZE,'counts':counts,
         'executed_original':{'app_init':'0xaccc','image_instance':'0x9746c',
-                             'image_quality':'0xe6b64','enrol':'0x9b57c'},
+                             'image_quality':'0xe6b64','enrol':'0x9b57c',
+                             'template_export':'0xdfd20','template_import':'0xe0460',
+                             'template_valid_flag':'0xe83b4'},
+        'template_persistence':{
+            'tpl_type':121,'magic':'0x1415927d','crc':'crc16 over [0,tplSize-2)',
+            'observed_size_bytes':{'40x196':238970,'196x40':239938},
+            'layout':'4 magic + 212 header + 96*(489 fixed + bin 984 + mask 981) + feat + 2 crc',
+            'note':'import restores count=1 and db+50118=1 by itself; identify succeeds '
+                   'in a fresh process with an identical image'},
         'research_only_case':'enroll_forced zeroes cfg quality/area thresholds; '
                              'not a real configuration',
         'config':'124-byte struct replicated from focal_SensorResourceCreate (0x955c4) fields',

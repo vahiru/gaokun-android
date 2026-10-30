@@ -51,6 +51,7 @@ Android FingerprintService
 | D12 | 全镜像离线装载证明录入算法本体可执行 | 373 RELATIVE + 37 导入绑定 + 4 ABS64；原 `0xaccc`→1、`0x9746c`→0；质量函数按 `off_361530` 的 [96,96] 读图，配置改为 96×96 后真实阈值下 `0x9b57c`→0（模板计数 1，0 次 SFS/SPI 调用）；模板进入 `off_361540` 内存库（520 B/槽，含运行期指针），持久化格式仍待闭合（2026-10-31） |
 | D14 | 传感器几何必须在模板缓冲初始化前设定 | `off_361530` 是运行期传感器几何（宽,高），`FtInitErollTemplate`/`FtInitTempalteBuf` 据此分配模板 bin/mask 缓冲。实测：40×196（7840 B）若在 `0x9746c` **之后**才改 dims，`FtSubTemplateCopy` 报目标 1160/1153 与源 984/981 不一致 → 录入 -2；在 `0x9746c` **之前**设成 [40,196]（或 [196,40]）后缓冲变为 984/981，录入→0，有效化后 identify→0（score 54/71）。默认 96×96 只是我们没灌传感器资源时的静态值（2026-10-31） |
 | D13 | enroll 后必须先“模板有效化”，identify 才会比对 | `FtVerifyByTemplate`（`0xF1334`）对每个 finger 先查 `*(u16*)(db+50118) == 1`，否则整库跳过 → `machCnts=0`、`ret=-1`、上层 `-2`。enroll（`0x9b57c`）只把模板写进内存库并令 count=1，**不置该标志**；`FtGetTplData`（`0xDFD20`，导出模板给主机）和 `FtSetTplValidFlag`（`0xE83B4`）都会置位。离线在 enroll 后调用原 `0xE83B4(0)` 复现该步：同图 identify→0（score 77），±24 灰阶扰动仍通过（score 45）；不置位则稳定 `-2`/`machCnts=0`（2026-10-31） |
+| D15 | 主机侧模板持久化 ABI 已离线闭合（导出→新进程重灌→识别） | `FtGetTplData(0xDFD20)`：`(fingerId, &tplType, &tplSize, buf)`，`tplType=121`、magic `0x1415927D`、CRC16 在尾部；40×196 实测 238,970 B、196×40 为 239,938 B。布局 = 4 B magic + 212 B 头 + 96×(489 B 定长 + bin 984 + mask 981) + 单模板 feat（3168/4136）+ 2 B CRC。`FtIniAlgTplData_v1(0xE0460)`：`(fingerId, tplType, tplSize, buf)` 在全新进程重灌→0，count=1、`+50118=1`（加载器自己置有效位，无需再调 `0xE83B4`），同图 identify→0（40×196 score 54、196×40 score 71）。`50136` 只是内存 `sizeof(ST_FocalEnrollTemplate)`，不是导出长度（2026-10-31） |
 
 ## 2. 命令协议（⬜ 逆向中，`fp-cmd-protocol.md`）
 
@@ -138,8 +139,9 @@ AOSP AIDL定义可用作接口与生命周期参考，但虚拟HAL的模拟录�
 - [x] M3a 首次用户接触触发的新帧与基础解码：空载150个合法无帧状态；接触后第121次状态置1，15680B传输校验通过，7840样本min69/max503，无>4096样本。
 - [x] M3b 限定离线预处理对照：Linux arm64重放真实TA/Windows算法，真实接触帧生成的7840B输出逐字节一致。分配失败/超量程行为有缺陷，不据此开放wire录入或宣称完整质量验收。
 - [ ] M4 主机侧算法桥：受限离线执行 TA/引擎的 enroll/identify 算法（原 listener 假设作废）
-  - 2026-10-31：工作区前提已在离线 harness 验证（16 MiB 受保护映射，原 `0x9a94`+`0xd350` 精确清零）；全镜像装载后原算法本体已可执行（D12）。同日闭合 **enroll→有效化→identify** 离线闭环（D13）：96×96 合成图录入 40/68 极值、`0x9b57c`→0、调用原 `0xE83B4` 置模板有效后 `0x9E1F0`→0，同图 score 77、±24 扰动 score 45。下一步：闭合 `FtGetTplData`/`FtIniAlgTplData` 的 50136 B 持久化格式（跨进程重放），再谈真实图像门槛。
+  - 2026-10-31：工作区前提已在离线 harness 验证（16 MiB 受保护映射，原 `0x9a94`+`0xd350` 精确清零）；全镜像装载后原算法本体已可执行（D12）。同日闭合 **enroll→有效化→identify** 离线闭环（D13）：96×96 合成图录入 40/68 极值、`0x9b57c`→0、调用原 `0xE83B4` 置模板有效后 `0x9E1F0`→0，同图 score 77、±24 扰动 score 45。也已闭合 **模板导出→新进程重灌→识别**（D15）：`FtGetTplData` 导出 238,970 B（40×196），`FtIniAlgTplData_v1` 重灌→0 并置有效位，同图 identify→0。下一步：用真实帧而不是合成图跑同一闭环，再谈图像质量门槛。
 - [ ] M5 主机侧模板存储 + 一次 enroll/authenticate 闭环（不含 STRONG/HAT 声明）
+  - 2026-10-31：持久化 ABI 已离线闭合（D15），存储内容可跨进程字节级还原（导出/读回 FNV 哈希一致）。剩余：把该 blob 接进主机侧存储与 client driver，并用真实接触帧验证，而不是合成图案。
 - [ ] M6 client driver 成形（字符设备接口）
 - [ ] M7 Android 指纹 HAL，Settings 里能录/解锁
 
