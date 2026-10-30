@@ -24,6 +24,8 @@ extern void bridge_alloc(void),bridge_free(void),bridge_memset(void),bridge_memc
 extern void bridge_log(void),bridge_logpath(void);
 static unsigned alloc_calls,free_calls,fail_at,live_allocs,logs;
 static uintptr_t ta_start,win_start;
+static size_t ta_bytes=0x1e4000;
+#define MAX_ALLOCS 256
 static void fault(int sig,siginfo_t *info,void *context){
 #ifdef __APPLE__
  uintptr_t pc=((ucontext_t *)context)->uc_mcontext->__ss.__pc;
@@ -31,29 +33,29 @@ static void fault(int sig,siginfo_t *info,void *context){
  uintptr_t pc=((ucontext_t *)context)->uc_mcontext.pc;
 #endif
  const char *region="host-boundary";uintptr_t offset=0;
- if(pc>=ta_start&&pc<ta_start+0x1e4000){region="ta";offset=pc-ta_start;}
+ if(pc>=ta_start&&pc<ta_start+ta_bytes){region="ta";offset=pc-ta_start;}
  if(pc>=win_start&&pc<win_start+0x28000){region="windows";offset=pc-win_start;}
  printf("{\"signal\":%d,\"region\":\"%s\",\"pc_offset\":%lu,\"null_address\":%s,\"allocation_calls\":%u}\n",
         sig,region,(unsigned long)offset,(uintptr_t)info->si_addr<4096?"true":"false",alloc_calls);
  fflush(stdout);_Exit(128+sig);
 }
 struct allocation {unsigned char *base,*ptr;size_t size;};
-static struct allocation allocations[128];
+static struct allocation allocations[MAX_ALLOCS];
 
 void *tracked_alloc(size_t n) {
  ++alloc_calls;
  if(alloc_calls==fail_at)return NULL;
- if(!n||n>4*1024*1024||live_allocs>=128)exit(90);
+ if(!n||n>128*1024*1024||live_allocs>=MAX_ALLOCS)exit(90);
  unsigned char *base=malloc(n+128);if(!base)exit(91);
  memset(base,0xc3,64);memset(base+64,0xa5,n);memset(base+64+n,0x3c,64);
- for(unsigned i=0;i<128;++i)if(!allocations[i].ptr){
+ for(unsigned i=0;i<MAX_ALLOCS;++i)if(!allocations[i].ptr){
   allocations[i]=(struct allocation){base,base+64,n};++live_allocs;return base+64;
  }
  exit(92);
 }
 void tracked_free(void *ptr) {
  if(!ptr)return;
- for(unsigned i=0;i<128;++i)if(allocations[i].ptr==ptr){
+ for(unsigned i=0;i<MAX_ALLOCS;++i)if(allocations[i].ptr==ptr){
   struct allocation *a=&allocations[i];
   for(unsigned j=0;j<64;++j)if(a->base[j]!=0xc3||a->ptr[a->size+j]!=0x3c)exit(93);
   free(a->base);memset(a,0,sizeof(*a));--live_allocs;++free_calls;return;
@@ -120,7 +122,7 @@ static struct result run(unsigned char *map,int ta,const unsigned char *input,
  memcpy(output,dest+64,OUTPUT_BYTES);
  /* Report leaks, then release only harness-owned allocations; never disguise
     an algorithm allocation failure as successful output. */
- for(unsigned i=0;i<128;++i)if(allocations[i].ptr)tracked_free(allocations[i].ptr);
+ for(unsigned i=0;i<MAX_ALLOCS;++i)if(allocations[i].ptr)tracked_free(allocations[i].ptr);
  free(work);free(dest);return r;
 }
 int main(int argc,char **argv){
