@@ -84,6 +84,9 @@ Findings preventing direct deployment:
    does not cover this confinement property.
 2. `apps_std_fsync` returns success without a host fsync; page-cache completion
    is not persistence. Registry commit/reboot durability is not implemented.
+   Later official-ABI review found Qualcomm maps apps_std_fsync to fflush;
+   this is a gap relative to our stronger durability requirement, not by itself
+   proof the fork violates the reference API. See the rename ABI review.
 3. Mode parsing accepts arbitrary strings containing w/a/+ and silently falls
    back to a read-only open for some failed r+ opens. Validate the actual fopen
    grammar and report access/flush errors honestly.

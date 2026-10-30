@@ -27,6 +27,7 @@ HAL_TARGETS = {
 }
 THERMAL_HAL_PATH = '/bin/hw/android.hardware.thermal-service.gaokun3'
 HEXAGONRPCD_PATH = '/bin/hexagonrpcd'
+SENSORS_HAL_PATH = '/bin/hw/android.hardware.sensors-service.gaokun3'
 
 
 def validate_arm64_executable(blob):
@@ -51,13 +52,15 @@ def validate_arm64_executable(blob):
         raise ValueError('ELF has no file-backed executable entry point')
 
 
-def optional_hal_replacements(thermal=None, usb_dir=None, hexagonrpcd=None):
+def optional_hal_replacements(thermal=None, usb_dir=None, hexagonrpcd=None, sensors=None):
     """Validate the entire optional group before returning any replacements."""
     inputs = []
     if thermal is not None:
         inputs.append((thermal, THERMAL_HAL_PATH, True))
     if hexagonrpcd is not None:
         inputs.append((hexagonrpcd, HEXAGONRPCD_PATH, True))
+    if sensors is not None:
+        inputs.append((sensors, SENSORS_HAL_PATH, True))
     if usb_dir is not None:
         if not usb_dir.is_dir() or usb_dir.is_symlink():
             raise ValueError('USB group must be a real directory')
@@ -270,8 +273,11 @@ def main():
                    help='complete USB HAL/script/rc group; does not set persistent device_only policy')
     p.add_argument('--hexagonrpcd', type=Path,
                    help='reviewed ARM64 daemon; replace /bin/hexagonrpcd only, preserve rc and libraries')
+    p.add_argument('--sensors-hal', type=Path,
+                   help='reviewed ARM64 sensors HAL; replace existing inode only, preserve rc and VINTF')
     a = p.parse_args()
-    hal_replacements, hal_inputs = optional_hal_replacements(a.thermal_hal, a.usb_device_only_dir, a.hexagonrpcd)
+    hal_replacements, hal_inputs = optional_hal_replacements(
+        a.thermal_hal, a.usb_device_only_dir, a.hexagonrpcd, a.sensors_hal)
     recents_overlay = None
     if a.recents_overlay:
         if not a.recents_overlay.is_file() or not stat.S_ISREG(a.recents_overlay.stat().st_mode):

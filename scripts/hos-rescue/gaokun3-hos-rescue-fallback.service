@@ -1,0 +1,12 @@
+[Unit]
+Description=gaokun3 unclaimed HOS rescue session fallback
+ConditionKernelCommandLine=gaokun3.hos_rescue_device=1
+After=local-fs.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/gaokun3-hos-rescue-fallback
+TimeoutStopSec=5
+
+[Install]
+WantedBy=multi-user.target

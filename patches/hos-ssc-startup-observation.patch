@@ -1,0 +1,189 @@
+--- a/SscHub.cpp
++++ b/SscHub.cpp
+@@ -9,6 +9,9 @@
+ 
+ #include <atomic>
+ #include <chrono>
++#include <cstring>
++#include <iomanip>
++#include <time.h>
+ #include <string>
+ #include <vector>
+ 
+@@ -16,6 +19,29 @@
+ 
+ namespace gaokun3 {
+ namespace {
++// Diagnostic-only process budget; never changes a sensor decision.
++uint64_t ObserveNs() {
++    struct timespec ts = {};
++    clock_gettime(CLOCK_MONOTONIC, &ts);
++    return static_cast<uint64_t>(ts.tv_sec) * 1000000000ULL + ts.tv_nsec;
++}
++uint32_t ObserveBits(float value) {
++    uint32_t bits;
++    static_assert(sizeof(bits) == sizeof(value), "float32 required");
++    std::memcpy(&bits, &value, sizeof(bits));
++    return bits;
++}
++bool ObservePermit() {
++    static std::atomic_uint used{0};
++    unsigned n = used.load(std::memory_order_relaxed);
++    while (n < 512) {
++        if (used.compare_exchange_weak(n, n + 1, std::memory_order_relaxed)) {
++            if (n == 511) LOG(INFO) << "SscObs: observation-budget-exhausted mono_ns=" << ObserveNs();
++            return n < 511;
++        }
++    }
++    return false;
++}
+ // 50 Hz 足够自动旋转与体感；SSC 会给出它实际采用的速率。
+ constexpr float kRateHz = 50.0f;
+ // hexagonrpcd 刚起来时 SSC 约需 20 秒沉降，给足余量（实测 6 秒读不到）。
+@@ -98,12 +124,24 @@
+         SscClient client;
+         std::string err;
+ 
+-        if (!client.Open(&err)) {
++        uint64_t stage_start = ObserveNs();
++        if (ObservePermit()) LOG(INFO) << "SscObs: open begin mono_ns=" << stage_start;
++        const bool open_ok = client.Open(&err);
++        if (ObservePermit()) LOG(INFO) << "SscObs: open end mono_ns=" << ObserveNs()
++                << " elapsed_ns=" << ObserveNs() - stage_start << " ok=" << open_ok
++                << " err=" << (open_ok ? "" : err.substr(0, 160));
++        if (!open_ok) {
+             LOG(ERROR) << "SscHub: 打开 SSC 失败: " << err;
+             std::this_thread::sleep_for(std::chrono::seconds(5));
+             continue;
+         }
+-        if (!client.WaitForService(kServiceWaitMs, &err)) {
++        stage_start = ObserveNs();
++        if (ObservePermit()) LOG(INFO) << "SscObs: registry-wait begin mono_ns=" << stage_start;
++        const bool service_ok = client.WaitForService(kServiceWaitMs, &err);
++        if (ObservePermit()) LOG(INFO) << "SscObs: registry-wait end mono_ns=" << ObserveNs()
++                << " elapsed_ns=" << ObserveNs() - stage_start << " ok=" << service_ok
++                << " err=" << (service_ok ? "" : err.substr(0, 160));
++        if (!service_ok) {
+             LOG(ERROR) << "SscHub: SSC 未就绪: " << err;
+             std::this_thread::sleep_for(std::chrono::seconds(5));
+             continue;
+@@ -130,8 +168,24 @@
+         bool has_accel = false, has_gyro = false;
+         bool asked = false;
+         for (int round = 0; !stop_; round++) {
+-            if (!has_accel) has_accel = client.FindSensor("accel", &accel_uid, &err);
+-            if (!has_gyro) has_gyro = client.FindSensor("gyro", &gyro_uid, &err);
++            if (!has_accel) {
++                const uint64_t started = ObserveNs();
++                if (ObservePermit()) LOG(INFO) << "SscObs: find-begin type=accel round=" << round
++                        << " mono_ns=" << started;
++                has_accel = client.FindSensor("accel", &accel_uid, &err);
++                if (ObservePermit()) LOG(INFO) << "SscObs: find type=accel round=" << round
++                        << " mono_ns=" << ObserveNs() << " elapsed_ns=" << ObserveNs() - started
++                        << " ok=" << has_accel << " err=" << (has_accel ? "" : err.substr(0, 160));
++            }
++            if (!has_gyro) {
++                const uint64_t started = ObserveNs();
++                if (ObservePermit()) LOG(INFO) << "SscObs: find-begin type=gyro round=" << round
++                        << " mono_ns=" << started;
++                has_gyro = client.FindSensor("gyro", &gyro_uid, &err);
++                if (ObservePermit()) LOG(INFO) << "SscObs: find type=gyro round=" << round
++                        << " mono_ns=" << ObserveNs() << " elapsed_ns=" << ObserveNs() - started
++                        << " ok=" << has_gyro << " err=" << (has_gyro ? "" : err.substr(0, 160));
++            }
+             if (has_accel && has_gyro) break;
+             // 只要有一个就先用着（与原来一样）；一个都没有才接着等
+             if ((has_accel || has_gyro) && round + 1 >= kFindFastRounds) break;
+@@ -152,6 +206,8 @@
+         //   on_* = 此刻在 SSC 上实际开着的，只有本线程读写；会话刚建好时全是
+         //   false，下面按 want_* 补开 —— 重建会话后原有订阅也就自动恢复。
+         bool on_accel = false, on_gyro = false;
++        unsigned observed_accel = 8, observed_gyro = 8;
++        uint64_t accel_enable_ns = 0, gyro_enable_ns = 0;
+         auto drain = [&client]() {
+             const auto until = std::chrono::steady_clock::now() +
+                                std::chrono::milliseconds(kDrainMs);
+@@ -190,6 +246,12 @@
+                         : client.Disable(accel_uid, &err);
+                 LOG(INFO) << "SscHub: accel " << (want_accel ? "使能" : "停用")
+                           << (ok ? "" : " 失败: " + err);
++                if (want_accel) {
++                    observed_accel = 0;
++                    accel_enable_ns = ObserveNs();
++                    if (ObservePermit()) LOG(INFO) << "SscObs: enable type=accel mono_ns="
++                            << accel_enable_ns << " ok=" << ok;
++                }
+                 on_accel = want_accel;
+                 idle = 0;
+                 re_enabled = false;
+@@ -201,6 +263,12 @@
+                         : client.Disable(gyro_uid, &err);
+                 LOG(INFO) << "SscHub: gyro " << (want_gyro ? "使能" : "停用")
+                           << (ok ? "" : " 失败: " + err);
++                if (want_gyro) {
++                    observed_gyro = 0;
++                    gyro_enable_ns = ObserveNs();
++                    if (ObservePermit()) LOG(INFO) << "SscObs: enable type=gyro mono_ns="
++                            << gyro_enable_ns << " ok=" << ok;
++                }
+                 on_gyro = want_gyro;
+                 idle = 0;
+                 re_enabled = false;
+@@ -226,8 +294,20 @@
+             if (!client.ReadReports(&reports, 1000, &ignore)) {
+                 if (++idle == kReEnableSec && !re_enabled) {
+                     LOG(WARNING) << "SscHub: 15 秒无读数，在同一会话上重新使能";
+-                    if (on_accel) client.EnableContinuous(accel_uid, kRateHz, &err);
+-                    if (on_gyro) client.EnableContinuous(gyro_uid, kRateHz, &err);
++                    if (on_accel) {
++                        const bool observed_ok = client.EnableContinuous(accel_uid, kRateHz, &err);
++                        observed_accel = 0;
++                        accel_enable_ns = ObserveNs();
++                        if (ObservePermit()) LOG(INFO) << "SscObs: reenable type=accel mono_ns="
++                                << accel_enable_ns << " ok=" << observed_ok;
++                    }
++                    if (on_gyro) {
++                        const bool observed_ok = client.EnableContinuous(gyro_uid, kRateHz, &err);
++                        observed_gyro = 0;
++                        gyro_enable_ns = ObserveNs();
++                        if (ObservePermit()) LOG(INFO) << "SscObs: reenable type=gyro mono_ns="
++                                << gyro_enable_ns << " ok=" << observed_ok;
++                    }
+                     re_enabled = true;
+                     continue;
+                 }
+@@ -241,12 +321,34 @@
+             idle = 0;
+             re_enabled = false;
+             asked_recovery = false;
++            const uint64_t receive_ns = ObserveNs(); // After ReadReports, same host time for this batch.
+             for (size_t i = 0; i < reports.size(); i++) {
+                 const SscReport& r = reports[i];
+                 if (r.msg_id != kMsgReportMeasurement) continue;
+                 SscAccelerometerResponse m;
+                 if (!m.ParseFromString(r.payload)) continue;
+                 if (m.acceleration_size() < 3) continue;
++
++                // Before cache/accuracy conversion; log only the first eight matching
++                // parsed measurement vectors per enable attempt, with a process cap.
++                unsigned* observed = nullptr;
++                uint64_t enable_ns = 0;
++                const char* kind = "";
++                if (on_accel && r.uid_low == accel_uid.low() && r.uid_high == accel_uid.high()) {
++                    observed = &observed_accel; enable_ns = accel_enable_ns; kind = "accel";
++                } else if (on_gyro && r.uid_low == gyro_uid.low() && r.uid_high == gyro_uid.high()) {
++                    observed = &observed_gyro; enable_ns = gyro_enable_ns; kind = "gyro";
++                }
++                if (observed && *observed < 8) {
++                    ++*observed;
++                    if (ObservePermit()) LOG(INFO) << "SscObs: report type=" << kind
++                            << " ordinal=" << *observed << " enable_mono_ns=" << enable_ns
++                            << " receive_mono_ns=" << receive_ns << " dsp_timestamp=" << r.timestamp
++                            << " accuracy=" << m.accuracy() << " float_bits=0x"
++                            << std::hex << std::setw(8) << std::setfill('0') << ObserveBits(m.acceleration(0))
++                            << ",0x" << std::setw(8) << ObserveBits(m.acceleration(1))
++                            << ",0x" << std::setw(8) << ObserveBits(m.acceleration(2)) << std::dec;
++                }
+ 
+                 Sample s;
+                 s.v[0] = m.acceleration(0);

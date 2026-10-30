@@ -1,0 +1,13 @@
+[Unit]
+Description=gaokun3 flag-only rescue ECM transport
+ConditionKernelCommandLine=gaokun3.hos_rescue_device=1
+After=local-fs.target systemd-udevd.service gaokun3-usb-role.service NetworkManager.service systemd-networkd.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+TimeoutStartSec=60
+ExecStart=/usr/local/sbin/gaokun3-hos-rescue-device
+
+[Install]
+WantedBy=multi-user.target

@@ -14,7 +14,11 @@
 
 诊断前、候选运行时、恢复后分别运行严格四传感器探针：每种均约343–348事件，NaN/非有限/时间戳错误均0。证明正常IMU和融合数据可继续交付，不是光感/绝对方向校准验证。
 
-热重启后的定点logcat未捕获hexagonrpcd-denied记录，采样中也未见目标DSP fatal。没有在服务启动前建立连续日志捕获，所以不能排除早期日志已滚出；不能把“未捕获”解读为当前固件不需要写入。也没有通过激活ALS强行触发请求。下一次诊断应在服务启动前连续采集，或覆盖正常冷启动的registry初始化。
+首次热重启后的定点logcat使用了 `hexagonrpcd-denied:W`，但候选事件级别为 `ANDROID_LOG_INFO`；因此这次未捕获不构成任何拒写请求不存在的证据。
+
+第二次在替换服务之前启动连续90秒采集，使用 `logcat -b all -v threadtime -T1 -s hexagonrpcd-denied:V`。确认运行进程 `/proc/<pid>/exe` 的SHA与候选一致、域为hexagonrpcd，未设置抑制标签的属性，策略允许写logd；完整采集仍为0行。此次覆盖服务启动窗口，但只是热重启，DSP注册表可能早已初始化，所以不能排除正常冷启动的写入请求。没有激活ALS、重启remoteproc或写入校准数据。下一步改为冷启动只读诊断，并保留logcat缓冲中的早期事件（不能使用 `-T1` 丢弃已有日志）。
+
+第二次测试后也恢复原daemon和自动恢复属性；严格四类传感器探针通过，测试APK与tmpfs已清理。证据为 `~/.cache/hos-r19-rpc-continuous/events.txt` 与 `imu-restored.txt`。
 
 随后显式恢复原daemon，读回SHA256 `122b57f908ad74c02fb9b43621fe8aa2f3a46c410c075bef0e5f570579bbf69c`；Sensors/RPC均running，自动恢复值恢复空（原策略启用），SLPI running、USB device、SELinux Enforcing。恢复后再次严格传感器验证通过。测试APK、tmpfs和probe独立锁已清理，原device-only锁保持。
 

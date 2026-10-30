@@ -1022,3 +1022,39 @@ Type-C辅助驱动保持绑定，但/sys/class/typec为空；早期日志存在c
 ### R19 只读RPC诊断与生产回移准备
 
 只读拒写日志版hexagonrpcd完成Android构建与临时运行，原shared lib/ABI不变；前、中、恢复后三轮严格IMU测试通过，已恢复原守护进程和自动恢复策略，未动DSP/ALS/registry数据。热重启定点采样未得到写路径，早期捕获窗口不足，不能作为否定证据。独立生产pin受限write回移五套离线C测试通过，但未Android构建或上机。见hyperos-r19-rpc-trace-runtime.md。
+
+### 指纹支线实机进展（2026-10-30，尚未部署到HyperOS）
+
+用户将任务转向指纹后，当前设备实际为crDroid B，独立oneshot实验内核7.2.9含0050，uname被伪装为6.6.30，不能据uname判断真实内核。已验证LOAD/8031有效ACK/SHUTDOWN；GPIO185复位后读取FT9769固件版本、40/196尺寸及状态5aa5。初始化四项配置写ACK通过，但休眠收尾89回包无效；发现底层每次app_send后的10ms延时遗漏，正在修正复测。证据见fingerprint-machine-check-2026-10-30.md。
+
+这些结果尚未证明HyperOS指纹HAL可用，也没有录入/解锁。后续集成需在保留R17/R18内核与平台修复的基线上加入经验证指纹支持，不能直接用支线旧实验内核覆盖HyperOS内核。R19只读RPC冷启动镜像已离线打包验证，尚未刷写。
+
+
+## R21 已部署与剩余问题（2026-10-30）
+
+见 [R21部署与验证](hyperos-r21-sensor-fusion-candidate.md)。固定super_hos更新并全分区读回验证，保留R17内核、userdata与默认Android B启动项。HAL不再输出未就绪零向量，实际OEM融合入口增加零/非有限范数保护。冷启动早期12项仍因0事件FAIL；约69秒SSC枚举后同boot复测12项PASS，不再持续NaN。启动延迟及gyro前两帧三轴约-2000度/秒待查，有限值测试不代表首帧准确。
+
+用户确认此前重启没有人工操作，BCB及关机记录证实RescueParty自动恢复请求；已备份并仅清除请求字段，没有擦除数据、没有关闭RescueParty，停止连续热重启框架方式。R21本轮31分钟仍同一boot，crash/pstore为空且BCB无恢复命令。温控契约通过，无线ADB和USB device模式保持；调试allow_suspend=0，不能计作休眠验收。
+
+指纹协议后续逆向已修正：旧buffer不等于真实取帧，空载帧就绪轮询未就绪时返回ENODATA并不读取旧图。HyperOS指纹候选内核已构建但当前仍R17，未完成真实指纹帧、HAL或解锁。用户暂不方便接触测试，继续遵守空载限制。设置按压渲染、ALS与其他未覆盖外设仍开放。
+
+
+### R21指纹内核接触对照与R22离线准备
+
+用户现已配合真实接触测试。通过已有一次性入口启动指纹候选内核、保留R21 super，boot e4417420-7d4d-4235-a981-01a173145e74。空载与持续接触均raw1d0/ENODATA；交替接触与复位重叠时有一次版本回包全零，移开后复位/version-info恢复。没有取得真实帧，没有录入/认证，不能称指纹可用。四轮SHUTDOWN及GPIO恢复成功，模块已卸载；随后12项传感器数据检查和thermal契约通过，USBdevice/无线ADB连接/Enforcing保持，无待执行BCB恢复请求。见[指纹现场记录](fingerprint-machine-check-2026-10-30.md)。
+
+已确认实际OEM融合路径忽略gyro accuracy0，新增独立guard仅跳过不可靠gyro融合消费并推进时间基准，保留raw交付和既有ACC保护。实际OEM路径离线重放与静态测试通过；system重打包4807条目只变库。诊断HAL补充真实SSC首帧与枚举耗时，Android独立构建和ABI核对完成，vendor保留另外19项修复。R22仍离线准备，见[候选与验证边界](hyperos-r22-gyro-startup-candidate.md)，不以构建通过声称真机修复完成。
+
+
+## R22 已部署并完成限定回归（2026-10-30）
+
+见[R22部署记录](hyperos-r22-gyro-startup-candidate.md)。新super SHA76dec7…d2ad写入固定p7并完成stream/EOF/整区读回及GPT/boot/ESP保护核验；R17内核、userdata、Android B默认项保持。实际SystemServer库a242与HAL476a匹配。早期16–40秒12项无数据FAIL仍存在，69.512秒DSP provider才出现；诊断已排除HAL查询阻塞，两次启动异常gyro是独立DSP时间戳报告。出数后三轮12项PASS，精度感知guard在实际进程中生效。
+
+存储/HTTPS/音频采样和播放数据通路/双摄YUV+JPEG/BLE扫描/临时密钥/H.264120帧/公共及native温控均通过限定检查。先前缺探针权限导致的失败保留，临时授权复测后恢复四项权限并停止探针；同boot约8分钟无crash/pstore/待执行恢复请求，USBdevice与无线ADB保持。休眠调试锁仍启用，不声称本轮深睡通过。指纹、设置渲染、ALS与其他未覆盖外设等目标仍开放。
+
+
+### R22 后续指纹首帧与设置动画证据
+
+用户配合持续状态查询窗口，明确接触后第121笔1d置1，15680B新帧传输及基础解码通过；原Windows DLL解码与Python输出逐字相等。此前空闲15秒即使无人接触也产生无效回复，立即150轮查询则持续正常，后续生产生命周期还需处理低功耗唤醒。首帧不等于录入/认证/Android HAL完成；旧STRONG/HAT假设和8026探测说法已从主设计撤回，按真实契约继续整合。
+
+设置按压视频已捕捉到边缘消失阶段：卡片与背景在按下/取消过渡中接近同色；仍未排除另有outline时序问题。见[逐帧复核](hyperos-r22-settings-animation.md)。保持原配色的轮廓候选正在离线分析，未安装或加入镜像。

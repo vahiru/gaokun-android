@@ -1,0 +1,52 @@
+--- a/device/huawei/gaokun3/sensors-hal/Sensor.cpp
++++ b/device/huawei/gaokun3/sensors-hal/Sensor.cpp
+@@ -165,12 +165,36 @@
+ 
+ std::vector<Event> Sensor::readEvents() {
+     std::vector<Event> events;
++    // Sample.valid describes whether a real, fresh SSC sample exists. An
++    // UNRELIABLE accuracy value is not a substitute for absence: publishing
++    // the default zero cache still looks like a measurement to framework fusion.
++    // Read one snapshot so a second lookup cannot cross expiry/invalidation.
++    const bool sscVector = mSensorInfo.type == SensorType::ACCELEROMETER ||
++                           mSensorInfo.type == SensorType::GYROSCOPE;
++    gaokun3::Sample sample;
++    if (sscVector) {
++        sample = mSensorInfo.type == SensorType::ACCELEROMETER
++                ? gaokun3::SscHub::Get().Accel() : gaokun3::SscHub::Get().Gyro();
++        if (!sample.valid) return events;
++    }
+     Event event;
+     event.sensorHandle = mSensorInfo.sensorHandle;
+     event.sensorType = mSensorInfo.type;
+     event.timestamp = ::android::elapsedRealtimeNano();
+     memset(&event.payload, 0, sizeof(event.payload));
+-    readEventPayload(event.payload);
++    if (sscVector) {
++        // Preserve legitimate zero vectors (stationary gyro/free fall) and the
++        // existing accuracy mapping. Only sample absence suppresses an event.
++        EventPayload::Vec3 vec3 = {
++                .x = sample.v[0],
++                .y = sample.v[1],
++                .z = sample.v[2],
++                .status = SscAccuracyToStatus(sample.accuracy),
++        };
++        event.payload.set<EventPayload::Tag::vec3>(vec3);
++    } else {
++        readEventPayload(event.payload);
++    }
+     events.push_back(event);
+     return events;
+ }
+--- a/device/huawei/gaokun3/sensors-hal/include/sensors-impl/Sensors.h
++++ b/device/huawei/gaokun3/sensors-hal/include/sensors-impl/Sensors.h
+@@ -95,6 +95,9 @@
+     ::ndk::ScopedAStatus unregisterDirectChannel(int32_t in_channelHandle) override;
+ 
+     void postEvents(const std::vector<Event>& events, bool wakeup) override {
++        // No measurement must not dereference front(), write an empty FMQ,
++        // wake the framework, or update wake-lock accounting.
++        if (events.empty()) return;
+         std::lock_guard<std::mutex> lock(mWriteLock);
+         if (mEventQueue == nullptr) {
+             return;

@@ -824,6 +824,19 @@ diff --git a/hexagonrpcd/interfaces/apps_std.def b/hexagonrpcd/interfaces/apps_s
  HEXAGONRPC_DEFINE_REMOTE_METHOD(1, apps_std_freopen, 1, 0, 1, 1)
  HEXAGONRPC_DEFINE_REMOTE_METHOD(2, apps_std_fflush, 8, 0, 0, 0)
  HEXAGONRPC_DEFINE_REMOTE_METHOD(3, apps_std_fclose, 1, 0, 0, 0)
+diff --git a/hexagonrpcd/iobuffer.c b/hexagonrpcd/iobuffer.c
+--- a/hexagonrpcd/iobuffer.c
++++ b/hexagonrpcd/iobuffer.c
+@@ -216,7 +216,8 @@
+ 	size_t i;
+ 
+ 	for (i = 0; i < n_outbufs; i++) {
+-		*(uint32_t *) ptr = htole32(outbufs[i].s);
++		uint32_t size_le = htole32(outbufs[i].s);
++		memcpy(ptr, &size_le, sizeof(size_le));
+ 		ptr = &ptr[4];
+ 		align = (align + 4) & 0x7;
+ 
 diff --git a/hexagonrpcd/listener.c b/hexagonrpcd/listener.c
 --- a/hexagonrpcd/listener.c
 +++ b/hexagonrpcd/listener.c

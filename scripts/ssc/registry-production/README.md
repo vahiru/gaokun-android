@@ -106,7 +106,11 @@ buffer as fopen: count/size validation rejects it before any operation. Bits
 already discarded by a producer cannot be recovered; a byte-identical legitimate
 fopen packet cannot be distinguished by guessing its former method number.
 The fixtures prove conforming extended32/33 and malformed masked32 do not change
-the file. In opt-in mode, unknown-method rejection is actually returned on the
+the file. A complete method33 three-buffer packet (checked against Qualcomm's
+pinned generated skeleton) leaves both a staged source and existing destination
+unchanged. Its unaligned string lengths exposed a legacy iobuffer length-store
+UB; the patch uses memcpy without changing wire bytes. UBSan now stops on the
+first error rather than recovering past a later PASS line. In opt-in mode, unknown-method rejection is actually returned on the
 next listener invoke; default unknown-call control flow remains unchanged.
 
 **Not supported/verified:** RPC method32 truncate, remove, rename, real rename
@@ -150,4 +154,11 @@ reply. Host-only endian/stat shims are never installed. On macOS LeakSanitizer
 is unavailable, so it is disabled; ASan and UBSan remain enabled. Temporary data
 is isolated and removed after passing tests. Production-source evidence and
 fresh-checkout logs are under `~/.cache/hos-r18-als/production-source-audit.json`
-and `production-final-fixture.txt`. The manifest pin remains unchanged.
+and `production-abi-final-fixture.txt`. The manifest pin remains unchanged.
+
+
+Further rename/durability ABI review:
+`docs/hyperos-registry-rename-abi-review.md`. Official apps_std_fsync maps to
+fflush and does not promise disk persistence; our real fsync is intentionally
+stronger. Correct rename ABI alone does not establish the actual SEE rename
+pair, FD lifetime, commit order or safe reuse policy. Rename remains unsupported.

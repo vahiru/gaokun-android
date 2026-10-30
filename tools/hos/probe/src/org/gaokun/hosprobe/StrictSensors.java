@@ -19,14 +19,14 @@ final class StrictSensors {
                 Map<Integer,StrictSensorStats> stats=new LinkedHashMap<>();
                 Map<Integer,Sensor> sensors=new LinkedHashMap<>();
                 for (int type:new int[]{1,4,9,15}) {
-                    stats.put(type,new StrictSensorStats());
+                    stats.put(type,new StrictSensorStats(type));
                     sensors.put(type,sm.getDefaultSensor(type));
                 }
                 SensorEventListener listener=new SensorEventListener() {
                     public void onAccuracyChanged(Sensor sensor,int accuracy) {}
                     public void onSensorChanged(SensorEvent e) {
                         StrictSensorStats s=stats.get(e.sensor.getType());
-                        if (s!=null) s.accept(e.values,e.timestamp,SystemClock.elapsedRealtimeNanos(),start,sampleStart);
+                        if (s!=null) s.accept(e.values,e.timestamp,SystemClock.elapsedRealtimeNanos(),start,sampleStart,e.accuracy);
                     }
                 };
                 activity.log("BEGIN strict sensors round="+round+" warmupMs=2000 sampleMs=5000 simultaneous=true");
@@ -46,7 +46,11 @@ final class StrictSensors {
                     StrictSensorStats s=stats.get(type); Sensor sensor=sensors.get(type);
                     boolean pass=s.passed(); allPass &= pass;
                     activity.log((pass?"PASS":"FAIL")+" strict-sensor round="+round+" type="+type+
-                        " sensor="+(sensor==null?"MISSING":sensor.getName())+" "+s.summary());
+                        " sensor="+(sensor==null?"MISSING":sensor.getName())+
+                        (sensor==null?"":" maxRange="+sensor.getMaximumRange()+" resolution="+sensor.getResolution())+" "+s.summary());
+                    StrictSensorStats.ObservedEvent[] early=s.observedEvents();
+                    for (int i=0;i<early.length;i++) activity.log("OBS strict-sensor round="+round+
+                        " type="+type+" firstEvent="+(i+1)+" "+early[i].summary());
                 }
                 if (round<rounds) Thread.sleep(1000);
             }

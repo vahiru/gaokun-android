@@ -7,6 +7,7 @@ extents, not Android sparse format. Current prototype uses only logical slot a.
 import argparse
 import hashlib
 import json
+import shutil
 from pathlib import Path
 import subprocess
 
@@ -41,6 +42,22 @@ def sha(path):
     return h.hexdigest()
 
 
+
+def require_build_space(images, output):
+    """Require space for raw super, verification copies and a 2 GiB margin."""
+    required = SIZE + sum(path.stat().st_size for path in images.values()) + 2 * 1024**3
+    existing = output.resolve().parent
+    while not existing.exists():
+        existing = existing.parent
+    free = shutil.disk_usage(existing).free
+    if free < required:
+        raise ValueError(
+            f'insufficient disk space before build: available={free} bytes, '
+            f'required={required} bytes (raw super + unpacked verification + 2 GiB margin); '
+            'no output directory or image created')
+    return {'available_bytes': free, 'required_bytes': required,
+            'policy': 'raw super + full unpack + 2 GiB margin'}
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     for name in ('system', 'system-ext', 'product', 'vendor', 'out'):
@@ -55,6 +72,7 @@ def main():
             images[name] = getattr(a, name).resolve()
     try:
         validate_images(images, a.hyperos)
+        space = require_build_space(images, a.out)
     except ValueError as e:
         p.error(str(e))
     a.out.mkdir(parents=True, exist_ok=False)
@@ -85,7 +103,7 @@ def main():
         parts[name+'_a'] = {'source': str(source), 'size': source.stat().st_size, 'sha256': expected}
     report = {'mode': 'hyperos' if a.hyperos else 'a17-baseline',
               'logical_slot': '_a', 'super_name': 'super_hos', 'size': image.stat().st_size,
-              'group_size': GROUP, 'argv': cmd, 'partitions': parts, 'sha256': sha(image),
+              'group_size': GROUP, 'space_preflight': space, 'argv': cmd, 'partitions': parts, 'sha256': sha(image),
               'ready_to_boot': False,
               'remaining': ['Create and verify independent GPT partitions and backups',
                             'Use matching fstab/ramdisk, force_super_partition=super_hos and slot_suffix=_a',

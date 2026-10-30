@@ -73,6 +73,25 @@ int main(void){
  request_sc=REMOTE_SCALARS_MAKE(31,1,0);loop_mode=1;loop_next=0;
  assert(run_fastrpc_listener(0,1,ifaces,true)==9);assert(loop_next==2);loop_mode=0;
  assert(!hexagonfs_lseek(ctx.fds,opened,0,SEEK_SET));assert(hexagonfs_read(ctx.fds,opened,sizeof(actual),actual)==sizeof(actual));assert(!memcmp(actual,data,sizeof(data)));
+ /* Qualcomm apps_std_skel method33 uses three input buffers and no output:
+  * [33, old-length, new-length], NUL-terminated old path, new path. This tests
+  * only rejection; these fixture names do not authorize any real rename pair. */
+ int staged=hexagonfs_create(ctx.fds,ctx.rootfd,ctx.rootfd,"temp.json",O_RDWR|O_CREAT);assert(staged>=0);
+ assert(hexagonfs_write(ctx.fds,staged,5,"STAGE")==5);assert(!hexagonfs_close(ctx.fds,staged));
+ char oldpath[]="/temp.json",newpath[]="/registry/registry";
+ uint32_t rename_words[3]={33,sizeof(oldpath),sizeof(newpath)};
+ struct fastrpc_io_buffer rename_wire[3]={{.p=rename_words,.s=sizeof(rename_words)},
+   {.p=oldpath,.s=sizeof(oldpath)},{.p=newpath,.s=sizeof(newpath)}};
+ free(encoded);encoded_len=(uint32_t)outbufs_calculate_size(3,rename_wire);encoded=malloc(encoded_len);assert(encoded);outbufs_encode(3,rename_wire,encoded);
+ request_sc=REMOTE_SCALARS_MAKE(31,3,0);sc=0;decoded=NULL;
+ assert(!return_for_next_invoke(0,0,&rctx,&handle,&sc,NULL,&decoded,true));status=0;
+ assert(invoke_requested_procedure(1,ifaces,0,sc,&status,decoded,&returned)!=0);assert(status==20);assert(!returned);
+ iobuf_free(3,decoded);decoded=NULL;
+ staged=hexagonfs_openat(ctx.fds,ctx.rootfd,ctx.rootfd,"temp.json");assert(staged>=0);char stage[6]={0};
+ assert(hexagonfs_read(ctx.fds,staged,5,stage)==5);assert(!strcmp(stage,"STAGE"));assert(!hexagonfs_close(ctx.fds,staged));
+ assert(!hexagonfs_lseek(ctx.fds,opened,0,SEEK_SET));assert(hexagonfs_read(ctx.fds,opened,sizeof(actual),actual)==sizeof(actual));assert(!memcmp(actual,data,sizeof(data)));
+ char temporary[1200];snprintf(temporary,sizeof(temporary),"%s/temp.json",base);assert(!unlink(temporary));
+ puts("PASS official method33 complete framing is rejected with 20; source STAGE and destination 4096 bytes both unchanged");
  assert(!hexagonfs_close(ctx.fds,opened));assert(!hexagonfs_close(ctx.fds,ctx.rootfd));unlink(file);rmdir(sub);rmdir(base);free(base);free(encoded);
  puts("PASS old interp2 real framing/dispatch: opt-in 4096B exact write; default method5=20 and no large fetch; fetch errors/short reply/size cap reject, extended32/33 and malformed masked32 never mutate");
 }
