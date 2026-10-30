@@ -101,8 +101,14 @@ def main():
         source.write_text('#define main unused_preprocess_main\n'+
                           (HERE/'preprocess_replay_runner.c').read_text()+'\n'+tail)
         with runner(root,'linux-container',source) as (command,scope):
-            for case,timeout in (('init',20),('config',30),('quality',60),('quality96',60),('enroll',60),
-                            ('enroll96',60),('enroll_forced',60),('enroll_forced96',60)):
+            for case,timeout in (('init',20),('config',30),
+                            ('quality96',60),('enroll96:13:40',60),
+                            ('loop96:13:40:0:1',120),
+                            ('quality40x196dimsfix',60),('enroll40x196dimsfix:13:40',60),
+                            ('loop40x196dimsfix:13:40:0:1',120),
+                            ('quality196x40dimsfix',60),('enroll196x40dimsfix:13:40',60),
+                            ('loop196x40dimsfix:13:40:0:1',120),
+                            ('loop40x196dimsfix:13:40:0:0',120)):
                 try:
                     result=subprocess.run(command+['unused','0',case],
                                           capture_output=True,timeout=timeout)
@@ -110,7 +116,7 @@ def main():
                     if result.stdout:
                         try:item['result']=json.loads(result.stdout)
                         except ValueError:item['stdout']=result.stdout.decode('utf-8','replace')[:2000]
-                    if result.stderr:item['stderr']=result.stderr.decode('utf-8','replace')[:1000]
+                    if result.stderr:item['stderr']=result.stderr.decode('utf-8','replace')[:12000]
                 except subprocess.TimeoutExpired:
                     item={'case':case,'timeout':True}
                 records.append(item)
