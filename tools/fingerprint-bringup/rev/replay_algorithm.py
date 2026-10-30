@@ -130,6 +130,8 @@ def main():
                            'app_heap_*/app_stack_* -> arena/stack marker'],
         'not_executed':['focal_SensorResourceCreate SPI path','real templates',
                         'real images','any 0x80xx wire command'],
+        'template_abi':{'db_array':'off_361540','count_field':'db+50116',
+                        'record_bytes':520,'data_offset':94},
         'note':'SFS/SPI errors make the original init fail closed; a non-zero return is a '
                'finding, not a harness success'
     },indent=2)+'\n')
