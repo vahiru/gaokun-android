@@ -170,13 +170,14 @@ def main():
                             ('persistload96:13:40:0:0',120)]
             if real_plain is not None:
                 cases.append(('realimg40x196dimsfix:13:40:0:0',180))
+                cases.append(('realmulti40x196dimsfix:13:40:0:0',180))
                 cases.append(('realstoresave40x196dimsfix:13:40:0:0',180))
                 cases.append(('realstoreload40x196dimsfix:13:40:0:0',180))
             for case,timeout in cases:
                 try:
                     result=subprocess.run(command+['unused','0',case,'/build/tpl.bin'],
                                           capture_output=True,timeout=timeout,
-                                          input=real_plain if case.startswith(('realimg','realstore'))
+                                          input=real_plain if case.startswith('real')
                                                 else b'')
                     item={'case':case,'exit_code':result.returncode}
                     if result.stdout:
@@ -242,8 +243,7 @@ def main():
     if real_plain is not None:
         scope_data['not_executed'].remove('real images')
         real={r['case'].split(':')[0]:r['result'] for r in records
-              if r.get('case','').startswith(('realimg','realstore'))
-              and 'result' in r}
+              if r.get('case','').startswith('real') and 'result' in r}
         scope_data['real_image']={
             'source':'private encoded contact frame, decoded locally (AES key/iv '
                      'from FtWbioDriverUmdf.dll 0x24060/0x24070)',

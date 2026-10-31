@@ -341,7 +341,7 @@ int main(int argc,char **argv){
       area=(q>>8)&0xffu;
      }
      uint64_t erc=0xFFFFFFFFFFFFFFFFULL;
-     if(got==REAL_IN)
+     if(prc==0)
       erc=((entry)(ta_map+0x9b57c))(pat_finger,0,(uint64_t)(uintptr_t)img,0);
      uintptr_t dbs=*(uintptr_t *)(ta_map+0x361540);
      uintptr_t db=dbs?((uintptr_t *)dbs)[pat_finger]:0;
@@ -361,18 +361,142 @@ int main(int argc,char **argv){
                                     (uint64_t)(uintptr_t)&id,
                                     (uint64_t)(uintptr_t)&v5);
      }
+     /* Robustness and false-accept probes on the real template: a 2 px shifted
+      * copy of the same frame should still match; an unrelated synthetic
+      * texture must not. */
+     unsigned char ids=0xEE,v5s=0xEE,idn=0xEE,v5n=0xEE;
+     uint64_t irc_s=0xFFFFFFFFFFFFFFFFULL,irc_n=0xFFFFFFFFFFFFFFFFULL;
+     int smax=-1,smach=-1,nmax=-1,nmach=-1;
+     if(erc==0&&got==REAL_IN){
+      unsigned char *shift=arena_alloc(bytes);
+      if(shift){
+       for(unsigned i=0;i<bytes;++i){
+        int xx=(int)(i%width)+2,yy=(int)(i/width)+2;
+        if(xx>=(int)width)xx=(int)width-1;
+        if(yy>=(int)height)yy=(int)height-1;
+        shift[i]=img[(unsigned)yy*width+(unsigned)xx];
+       }
+       trace_reset();
+       irc_s=((entry)(ta_map+0x9E1F0))((uint64_t)(uintptr_t)shift,1,
+                                       (uint64_t)(uintptr_t)&ids,
+                                       (uint64_t)(uintptr_t)&v5s);
+       smax=trace_max;smach=trace_mach;
+      }
+      unsigned char *neg=arena_alloc(bytes);
+      if(neg){
+       for(unsigned i=0;i<bytes;++i)
+        neg[i]=(unsigned char)pattern_value(4,0,i%width,i/width,
+                                            width,height,i);
+       trace_reset();
+       irc_n=((entry)(ta_map+0x9E1F0))((uint64_t)(uintptr_t)neg,1,
+                                       (uint64_t)(uintptr_t)&idn,
+                                       (uint64_t)(uintptr_t)&v5n);
+       nmax=trace_max;nmach=trace_mach;
+      }
+     }
      printf("{\"stage\":\"%s\",\"finger\":%u,\"geometry\":[%u,%u],"
             "\"input_bytes\":%zu,\"preprocess_rc\":%ld,"
             "\"quality\":%u,\"area\":%u,\"quality_rc\":%llu,"
             "\"enroll_rc\":%lld,\"template_count\":%u,\"flag\":%u,"
             "\"export_rc\":%lld,\"tpl_type\":%u,\"tpl_size\":%u,"
             "\"tpl_hash\":\"%016llx\","
-            "\"identify_rc\":%lld,\"id\":%u,\"v5\":%u}\n",
+            "\"identify_rc\":%lld,\"id\":%u,\"v5\":%u,"
+            "\"identify_shift\":{\"dx\":2,\"dy\":2,\"rc\":%lld,\"id\":%u,"
+            "\"v5\":%u,\"max\":%d,\"mach\":%d},"
+            "\"identify_neg\":{\"rc\":%lld,\"id\":%u,\"v5\":%u,"
+            "\"max\":%d,\"mach\":%d}}\n",
             case_name,pat_finger,width,height,got,prc,q&0xffu,area,
             (unsigned long long)qrc,(long long)erc,count,flag,
             (long long)xrc,type,size,
             size?(unsigned long long)fnv1a(tpl,size):0ULL,
-            (long long)irc,id,v5);
+            (long long)irc,id,v5,
+            (long long)irc_s,ids,v5s,smax,smach,
+            (long long)irc_n,idn,v5n,nmax,nmach);
+     fflush(stdout);return 0;
+    }
+   }
+   /* Multiple real-frame enrolments (shifted copies) exercise the incremental
+    * guidance path with real data before any HAL sequencing is written. */
+   if(!strncmp(case_name,"realmulti",9)&&image_instance==0){
+    unsigned width=*(uint32_t *)cfg,height=*(uint32_t *)(cfg+4),bytes=width*height;
+    unsigned char *in16=arena_alloc(15680);
+    unsigned char *img=arena_alloc(bytes);
+    unsigned char *tpl=arena_alloc(512*1024);
+    if(in16&&img&&tpl&&bytes==7840){
+     size_t got=fread(in16,1,15680,stdin);
+     long prc=-999;
+     if(got==15680)
+      prc=call_preprocess(in16,img,196,40,(void*)(ta_map+0x1c68));
+     enum {MAXEN=4};
+     static const int dxs[MAXEN]={0,2,-3,4},dys[MAXEN]={0,3,1,-2};
+     long long ercs[MAXEN]={-999,-999,-999,-999};
+     int subs[MAXEN]={-1,-1,-1,-1};
+     if(prc==0)
+      for(unsigned k=0;k<MAXEN;++k){
+       unsigned char *v=arena_alloc(bytes);
+       if(!v){ercs[k]=-999;subs[k]=-1;continue;}
+       for(unsigned i=0;i<bytes;++i){
+        int xx=(int)(i%width)+dxs[k],yy=(int)(i/width)+dys[k];
+        if(xx<0)xx=0;if(xx>=(int)width)xx=(int)width-1;
+        if(yy<0)yy=0;if(yy>=(int)height)yy=(int)height-1;
+        v[i]=img[(unsigned)yy*width+(unsigned)xx];
+       }
+       trace_reset();
+       ercs[k]=(long long)((entry)(ta_map+0x9b57c))(pat_finger,k,
+                                                    (uint64_t)(uintptr_t)v,0);
+       subs[k]=trace_subtpl;
+      }
+     uintptr_t dbs=*(uintptr_t *)(ta_map+0x361540);
+     uintptr_t db=dbs?((uintptr_t *)dbs)[pat_finger]:0;
+     unsigned count=db?*(uint16_t *)(db+50116):0;
+     unsigned flag=db?*(uint16_t *)(db+50118):0;
+     unsigned type=0,size=0;uint64_t xrc=0xFFFFFFFFFFFFFFFFULL;
+     if(prc==0)
+      xrc=((entry)(ta_map+0xDFD20))(pat_finger,(uint64_t)(uintptr_t)&type,
+                                    (uint64_t)(uintptr_t)&size,
+                                    (uint64_t)(uintptr_t)tpl);
+     unsigned char id=0xEE,v5=0xEE;
+     uint64_t irc=0xFFFFFFFFFFFFFFFFULL;int max=-1,mach=-1;
+     if(prc==0&&xrc==0){
+      trace_reset();
+      irc=((entry)(ta_map+0x9E1F0))((uint64_t)(uintptr_t)img,1,
+                                    (uint64_t)(uintptr_t)&id,
+                                    (uint64_t)(uintptr_t)&v5);
+      max=trace_max;mach=trace_mach;
+     }
+     unsigned char id2=0xEE,v52=0xEE;
+     uint64_t irc2=0xFFFFFFFFFFFFFFFFULL;int max2=-1,mach2=-1;
+     unsigned char *shift=arena_alloc(bytes);
+     if(prc==0&&xrc==0&&shift){
+      for(unsigned i=0;i<bytes;++i){
+       int xx=(int)(i%width)+dxs[1],yy=(int)(i/width)+dys[1];
+       if(xx<0)xx=0;if(xx>=(int)width)xx=(int)width-1;
+       if(yy<0)yy=0;if(yy>=(int)height)yy=(int)height-1;
+       shift[i]=img[(unsigned)yy*width+(unsigned)xx];
+      }
+      trace_reset();
+      irc2=((entry)(ta_map+0x9E1F0))((uint64_t)(uintptr_t)shift,1,
+                                     (uint64_t)(uintptr_t)&id2,
+                                     (uint64_t)(uintptr_t)&v52);
+      max2=trace_max;mach2=trace_mach;
+     }
+     printf("{\"stage\":\"%s\",\"finger\":%u,\"geometry\":[%u,%u],"
+            "\"input_bytes\":%zu,\"preprocess_rc\":%ld,"
+            "\"enroll_rcs\":[%lld,%lld,%lld,%lld],"
+            "\"subtemplates_after\":[%d,%d,%d,%d],\"template_count\":%u,"
+            "\"flag\":%u,\"export_rc\":%lld,\"tpl_type\":%u,\"tpl_size\":%u,"
+            "\"tpl_hash\":\"%016llx\","
+            "\"identify\":{\"rc\":%lld,\"id\":%u,\"v5\":%u,\"max\":%d,"
+            "\"mach\":%d},"
+            "\"identify_shift\":{\"dx\":%d,\"dy\":%d,\"rc\":%lld,\"id\":%u,"
+            "\"v5\":%u,\"max\":%d,\"mach\":%d}}\n",
+            case_name,pat_finger,width,height,got,prc,
+            ercs[0],ercs[1],ercs[2],ercs[3],
+            subs[0],subs[1],subs[2],subs[3],count,flag,
+            (long long)xrc,type,size,
+            size?(unsigned long long)fnv1a(tpl,size):0ULL,
+            (long long)irc,id,v5,max,mach,
+            dxs[1],dys[1],(long long)irc2,id2,v52,max2,mach2);
      fflush(stdout);return 0;
     }
    }
