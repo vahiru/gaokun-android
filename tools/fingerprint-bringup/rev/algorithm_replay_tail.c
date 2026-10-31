@@ -568,6 +568,10 @@ int main(int argc,char **argv){
                                              (uint64_t)(uintptr_t)&v5);
      int inmax=trace_nmax,inmin=trace_nmin,imach=trace_mach,irmach=trace_rmach;
      int ifeat=trace_featsz,itpl=trace_tplbin,ifar=trace_far;
+     uintptr_t dbs2=*(uintptr_t *)(ta_map+0x361540);
+     uintptr_t db2=dbs2?((uintptr_t *)dbs2)[pat_finger]:0;
+     unsigned count2=db2?*(uint16_t *)(db2+50116):0;
+     unsigned flag2=db2?*(uint16_t *)(db2+50118):0;
      uint64_t hash=1469598103934665603ULL;unsigned nonzero=0;
      if(db){const unsigned char *rec=(const unsigned char *)db;
       for(unsigned i=0;i<520;++i){hash^=rec[i];hash*=1099511628211ULL;
@@ -579,6 +583,7 @@ int main(int argc,char **argv){
             "\"id\":%u,\"v5\":%u,\"sfs_calls\":%u,\"spi_calls\":%u,"
             "\"db_header\":{\"count\":%u,\"flag\":%u,\"fid\":%u,\"acc\":%u,"
             "\"valid_rc\":%lld},"
+            "\"db_header_after\":{\"count\":%u,\"flag\":%u},"
             "\"enroll\":{\"nmax\":%d,\"nmin\":%d,\"feat\":%d,\"tplbin\":%d},"
             "\"identify\":{\"nmax\":%d,\"nmin\":%d,\"feat\":%d,\"tplbin\":%d,"
             "\"mach\":%d,\"rmach\":%d,\"far\":%d}}\n",
@@ -586,6 +591,7 @@ int main(int argc,char **argv){
             count,nonzero,(unsigned long long)hash,(long long)irc,
             id,v5,sfs_calls,spi_calls,
             count,flag,fid,acc,(long long)valid_rc,
+            count2,flag2,
             enmax,enmin,efeat,etpl,inmax,inmin,ifeat,itpl,imach,irmach,ifar);
      fflush(stdout);return 0;
     }
