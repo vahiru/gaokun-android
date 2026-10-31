@@ -403,6 +403,79 @@ int main(int argc,char **argv){
      fflush(stdout);return 0;
     }
    }
+   if((!strncmp(case_name,"dual",4)||!strncmp(case_name,"bload",5))
+      &&image_instance==0){
+    unsigned width=*(uint32_t *)cfg,height=*(uint32_t *)(cfg+4),bytes=width*height;
+    unsigned char *image=arena_alloc(bytes);
+    unsigned char *tpl=arena_alloc(512*1024);
+    const char *p0=argc>6?argv[6]:"/build/tpl.bin";
+    char p1[256];snprintf(p1,sizeof p1,"%s.1",p0);
+    if(image&&tpl){
+     if(!strncmp(case_name,"dualsave",8)){
+      /* finger 0 = ridge+dots, finger 1 = random texture */
+      render_shift(image,width,height,13,40,0,0);
+      uint64_t e0=((entry)(ta_map+0x9b57c))(0,0,(uint64_t)(uintptr_t)image,0);
+      uint64_t x0=0xFFFFFFFFFFFFFFFFULL;size_t w0=0;
+      if(e0==0){
+       unsigned type=0,size=0;
+       x0=((entry)(ta_map+0xDFD20))(0,(uint64_t)(uintptr_t)&type,
+                                    (uint64_t)(uintptr_t)&size,
+                                    (uint64_t)(uintptr_t)tpl);
+       if(x0==0&&size){
+        FILE *o=fopen(p0,"wb");
+        if(o){w0=fwrite(tpl,1,size,o);fclose(o);}
+       }
+      }
+      render_shift(image,width,height,4,0,0,0);
+      uint64_t e1=((entry)(ta_map+0x9b57c))(1,0,(uint64_t)(uintptr_t)image,0);
+      uint64_t x1=0xFFFFFFFFFFFFFFFFULL;size_t w1=0;
+      if(e1==0){
+       unsigned type=0,size=0;
+       x1=((entry)(ta_map+0xDFD20))(1,(uint64_t)(uintptr_t)&type,
+                                    (uint64_t)(uintptr_t)&size,
+                                    (uint64_t)(uintptr_t)tpl);
+       if(x1==0&&size){
+        FILE *o=fopen(p1,"wb");
+        if(o){w1=fwrite(tpl,1,size,o);fclose(o);}
+       }
+      }
+      printf("{\"stage\":\"%s\",\"mode\":\"save\",\"finger0_enroll\":%lld,"
+             "\"finger0_export\":%lld,\"finger0_written\":%zu,"
+             "\"finger1_enroll\":%lld,\"finger1_export\":%lld,"
+             "\"finger1_written\":%zu}\n",
+             case_name,(long long)e0,(long long)x0,w0,
+             (long long)e1,(long long)x1,w1);
+     }else{
+      size_t n=0;uint64_t l0=0xFFFFFFFFFFFFFFFFULL,l1=0xFFFFFFFFFFFFFFFFULL;
+      if(!strncmp(case_name,"dualload",8)){
+       if(read_blob(p0,tpl,512*1024,&n)==0)
+        l0=((entry)(ta_map+0xE0460))(0,121,(uint64_t)n,(uint64_t)(uintptr_t)tpl);
+      }
+      if(read_blob(p1,tpl,512*1024,&n)==0)
+       l1=((entry)(ta_map+0xE0460))(1,121,(uint64_t)n,(uint64_t)(uintptr_t)tpl);
+      unsigned char ida=0xEE,v5a=0xEE,idb=0xEE,v5b=0xEE;
+      render_shift(image,width,height,13,40,0,0);
+      trace_reset();
+      uint64_t ra=((entry)(ta_map+0x9E1F0))((uint64_t)(uintptr_t)image,1,
+                                            (uint64_t)(uintptr_t)&ida,
+                                            (uint64_t)(uintptr_t)&v5a);
+      int amax=trace_max,amach=trace_mach;
+      render_shift(image,width,height,4,0,0,0);
+      trace_reset();
+      uint64_t rb=((entry)(ta_map+0x9E1F0))((uint64_t)(uintptr_t)image,1,
+                                            (uint64_t)(uintptr_t)&idb,
+                                            (uint64_t)(uintptr_t)&v5b);
+      int bmax=trace_max,bmach=trace_mach;
+      printf("{\"stage\":\"%s\",\"mode\":\"load\",\"load0_rc\":%lld,"
+             "\"load1_rc\":%lld,\"probeA\":{\"rc\":%lld,\"id\":%u,"
+             "\"max\":%d,\"mach\":%d},\"probeB\":{\"rc\":%lld,\"id\":%u,"
+             "\"max\":%d,\"mach\":%d}}\n",
+             case_name,(long long)l0,(long long)l1,(long long)ra,ida,amax,amach,
+             (long long)rb,idb,bmax,bmach);
+     }
+     fflush(stdout);return 0;
+    }
+   }
    if(!strncmp(case_name,"multi",5)&&image_instance==0){
     unsigned width=*(uint32_t *)cfg,height=*(uint32_t *)(cfg+4),bytes=width*height;
     unsigned char *image=arena_alloc(bytes);
