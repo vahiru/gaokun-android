@@ -534,11 +534,61 @@ int main(int argc,char **argv){
     unsigned char *image=arena_alloc(bytes);
     unsigned char *tpl=arena_alloc(512*1024);
     const char *base=argc>6?argv[6]:"/build/tpl.bin";
-    char path[512];snprintf(path,sizeof path,"%s.store",base);
+    char path[512];snprintf(path,sizeof path,"%s.store.%u",base,pat_finger);
     if(image&&tpl&&slot){
      struct ft_tpl_meta meta;memset(&meta,0,sizeof meta);
      meta.finger=pat_finger;meta.width=width;meta.height=height;
      meta.slot_bytes=slot;config_digest(cfg,124,meta.config_digest);
+     if(!strncmp(case_name,"storeloadmulti",14)){
+      long long lrc[2]={-1,-1};unsigned cnt[2]={0,0},fl[2]={0,0};
+      size_t blen[2]={0,0};
+      for(unsigned f=0;f<2;++f){
+       struct ft_tpl_meta m;memset(&m,0,sizeof m);
+       m.finger=(uint8_t)f;m.width=width;m.height=height;
+       m.slot_bytes=slot;config_digest(cfg,124,m.config_digest);
+       char fp[512];snprintf(fp,sizeof fp,"%s.store.%u",base,f);
+       uint8_t *st=NULL;size_t sl=0;
+       enum ft_tpl_status s=ft_tpl_store_read(fp,&m,&st,&sl);
+       blen[f]=sl;
+       if(s==FT_TPL_OK){
+        lrc[f]=(long long)((entry)(ta_map+0xE0460))(f,121,(uint64_t)sl,
+                                                    (uint64_t)(uintptr_t)st);
+        uintptr_t dbs=*(uintptr_t *)(ta_map+0x361540);
+        uintptr_t db=dbs?((uintptr_t *)dbs)[f]:0;
+        cnt[f]=db?*(uint16_t *)(db+50116):0;
+        fl[f]=db?*(uint16_t *)(db+50118):0;
+        ft_tpl_free(st);
+       }
+      }
+      unsigned char ida=0xEE,v5a=0xEE,idb=0xEE,v5b=0xEE,idn=0xEE,v5n=0xEE;
+      render_shift(image,width,height,13,40,0,0);
+      trace_reset();
+      uint64_t ra=((entry)(ta_map+0x9E1F0))((uint64_t)(uintptr_t)image,1,
+                                            (uint64_t)(uintptr_t)&ida,
+                                            (uint64_t)(uintptr_t)&v5a);
+      render_shift(image,width,height,4,0,0,0);
+      trace_reset();
+      uint64_t rb=((entry)(ta_map+0x9E1F0))((uint64_t)(uintptr_t)image,1,
+                                            (uint64_t)(uintptr_t)&idb,
+                                            (uint64_t)(uintptr_t)&v5b);
+      render_shift(image,width,height,3,0,0,0);
+      trace_reset();
+      uint64_t rn=((entry)(ta_map+0x9E1F0))((uint64_t)(uintptr_t)image,1,
+                                            (uint64_t)(uintptr_t)&idn,
+                                            (uint64_t)(uintptr_t)&v5n);
+      printf("{\"stage\":\"%s\",\"mode\":\"loadmulti\",\"geometry\":[%u,%u],"
+             "\"slot\":%u,\"load\":[{\"finger\":0,\"rc\":%lld,\"size\":%zu,"
+             "\"count\":%u,\"flag\":%u},{\"finger\":1,\"rc\":%lld,"
+             "\"size\":%zu,\"count\":%u,\"flag\":%u}],"
+             "\"probeA\":{\"rc\":%lld,\"id\":%u,\"v5\":%u},"
+             "\"probeB\":{\"rc\":%lld,\"id\":%u,\"v5\":%u},"
+             "\"probeNeg\":{\"rc\":%lld,\"id\":%u,\"v5\":%u}}\n",
+             case_name,width,height,slot,lrc[0],blen[0],cnt[0],fl[0],
+             lrc[1],blen[1],cnt[1],fl[1],
+             (long long)ra,ida,v5a,(long long)rb,idb,v5b,
+             (long long)rn,idn,v5n);
+      fflush(stdout);return 0;
+     }
      if(!strncmp(case_name,"storesave",9)){
       for(unsigned i=0;i<bytes;++i)
        image[i]=(unsigned char)pattern_value(pat_kind,pat_param,i%width,i/width,
