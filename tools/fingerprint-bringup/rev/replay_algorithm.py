@@ -166,6 +166,10 @@ def main():
             'tamper_note':'on -3 the TA has already populated the DB (count=1, flag=1) '
                           'and identify still matches, so the host must pre-validate '
                           'magic/geometry/crc and treat any non-zero load rc as fatal',
+            'geometry_binding':'the 216-byte header is byte-identical for 40x196 '
+                               'and 196x40; width/height and the 124-byte config are '
+                               'not stored in the blob, so the host store must persist '
+                               '{width,height,config-hash} alongside it',
             'observed_size_bytes':{'40x196':238970,'196x40':239938,'96x96':273962},
             'layout':'4 magic + 212 header + 96*(489 fixed + bin 984 + mask 981) + feat + 2 crc',
             'note':'import restores count=1 and db+50118=1 by itself; identify succeeds '
