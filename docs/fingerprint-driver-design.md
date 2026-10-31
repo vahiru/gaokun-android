@@ -147,7 +147,7 @@ AOSP AIDL定义可用作接口与生命周期参考，但虚拟HAL的模拟录�
 - [ ] M4 主机侧算法桥：受限离线执行 TA/引擎的 enroll/identify 算法（原 listener 假设作废）
   - 2026-10-31：工作区前提已在离线 harness 验证（16 MiB 受保护映射，原 `0x9a94`+`0xd350` 精确清零）；全镜像装载后原算法本体已可执行（D12）。同日闭合 **enroll→有效化→identify** 离线闭环（D13）：96×96 合成图录入 40/68 极值、`0x9b57c`→0、调用原 `0xE83B4` 置模板有效后 `0x9E1F0`→0，同图 score 77、±24 扰动 score 45。也已闭合 **模板导出→新进程重灌→识别**（D15）：`FtGetTplData` 导出 238,970 B（40×196），`FtIniAlgTplData_v1` 重灌→0 并置有效位，同图 identify→0。下一步：用真实帧而不是合成图跑同一闭环，再谈图像质量门槛。
 - [ ] M5 主机侧模板存储 + 一次 enroll/authenticate 闭环（不含 STRONG/HAT 声明）
-  - 2026-10-31：持久化 ABI 已离线闭合（D15），存储内容可跨进程字节级还原（导出/读回 FNV 哈希一致）；2 个子模板的 blob 也能导出→重灌→识别（count 保持 2）。增量录入的引导语义（-6/-4）已记录（D16）。主机侧校验契约已定（D19）：magic/几何长度/CRC16 预校验，非零 load rc 视为会话失败；blob 不自带几何/配置，存储需外带 `{width,height,config-hash}`（D20）。参考实现 `tools/fingerprint-bringup/host-store/`（`FPT1` 容器、0600 原子写入、读取时元数据比对）已通过单测；harness `storesave`/`storeload` 在 40×196、196×40、96×96 三种几何完成“导出→写容器→校验读回→重灌→识别”，几何错配的容器被主机侧拒绝。剩余：把该 blob 接进主机侧存储与 client driver，并用真实接触帧验证，而不是合成图案。
+  - 2026-10-31：持久化 ABI 已离线闭合（D15），存储内容可跨进程字节级还原（导出/读回 FNV 哈希一致）；2 个子模板的 blob 也能导出→重灌→识别（count 保持 2）。增量录入的引导语义（-6/-4）已记录（D16）。主机侧校验契约已定（D19）：magic/几何长度/CRC16 预校验，非零 load rc 视为会话失败；blob 不自带几何/配置，存储需外带 `{width,height,config-hash}`（D20）。参考实现 `tools/fingerprint-bringup/host-store/`（`FPT1` 容器、0600 原子写入、读取时元数据比对）已通过单测；harness `storesave`/`storeload` 在 40×196、196×40、96×96 三种几何完成“导出→写容器→校验读回→重灌→识别”，几何错配的容器被主机侧拒绝；两指容器（ridge+dots / 随机纹理）恢复后探针分别命中 id 0/1，未录入图案→-2。剩余：把该 blob 接进主机侧存储与 client driver，并用真实接触帧验证，而不是合成图案。
 - [ ] M6 client driver 成形（字符设备接口）
 - [ ] M7 Android 指纹 HAL，Settings 里能录/解锁
   - 测试环境约定（2026-10-31 用户要求）：安卓系统侧的录入/解锁联调**使用 CrDroid 镜像**；HyperOS 仅继续用于已有 TA/QSEECOM/算法实验。

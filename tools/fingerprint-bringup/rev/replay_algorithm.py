@@ -134,6 +134,9 @@ def main():
                             ('storeload196x40dimsfix:13:40:0:0',180),
                             ('storesave96:13:40:0:0',180),
                             ('storeload96:13:40:0:0',180),
+                            ('storesave40x196dimsfix:13:40:0:0:0',180),
+                            ('storesave40x196dimsfix:4:0:0:0:1',180),
+                            ('storeloadmulti40x196dimsfix:13:40:0:0',180),
                             ('persistsave40x196dimsfix:13:40',120),
                             ('persistload40x196dimsfix:13:40:0:1',120),
                             ('persisttamperpayload40x196dimsfix:13:40:0:0',120),
@@ -191,7 +194,9 @@ def main():
                                 'shift) for 40x196, 196x40 and 96x96',
             'host_store':{'module':'../host-store','container':'FPT1 + 64-byte header + blob',
                           'verified':['storesave/storeload 40x196, 196x40, 96x96',
-                                      '40x196 container rejected when read as 196x40']},
+                                      '40x196 container rejected when read as 196x40',
+                                      'two-finger store restore: probes hit id 0 and 1, '
+                                      'unknown pattern -2']},
             'observed_size_bytes':{'40x196':238970,'196x40':239938,'96x96':273962},
             'layout':'4 magic + 212 header + 96*(489 fixed + bin 984 + mask 981) + feat + 2 crc',
             'note':'import restores count=1 and db+50118=1 by itself; identify succeeds '
