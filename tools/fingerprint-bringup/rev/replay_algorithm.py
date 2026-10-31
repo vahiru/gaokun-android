@@ -92,6 +92,9 @@ def main():
     tail=(HERE/'algorithm_replay_tail.c').read_text()
     assert '/*__LOADER_DATA__*/' in tail
     tail=tail.replace('/*__LOADER_DATA__*/',data)
+    store=HERE.parent/'host-store'
+    store_hdr=(store/'tpl_store.h').read_text()
+    store_impl=(store/'tpl_store.c').read_text().replace('#include "tpl_store.h"\n','')
     records=[]
     with tempfile.TemporaryDirectory(prefix='mapped-',dir=args.out) as temporary:
         root=Path(temporary)
@@ -99,7 +102,8 @@ def main():
         (root/'windows.map').write_bytes(b'')
         source=root/'algorithm.c'
         source.write_text('#define main unused_preprocess_main\n'+
-                          (HERE/'preprocess_replay_runner.c').read_text()+'\n'+tail)
+                          (HERE/'preprocess_replay_runner.c').read_text()+'\n'+
+                          store_hdr+'\n'+store_impl+'\n'+tail)
         with runner(root,'linux-container',source) as (command,scope):
             for case,timeout in (('init',20),('config',30),
                             ('quality96',60),('enroll96:13:40',60),
@@ -118,6 +122,13 @@ def main():
                             ('dualsave40x196dimsfix:13:40',180),
                             ('dualload40x196dimsfix:13:40:0:0',180),
                             ('bload40x196dimsfix:13:40:0:0',180),
+                            ('storesave40x196dimsfix:13:40:0:0',180),
+                            ('storeload40x196dimsfix:13:40:0:0',180),
+                            ('storeload196x40dimsfix:13:40:0:0',120),
+                            ('storesave196x40dimsfix:13:40:0:0',180),
+                            ('storeload196x40dimsfix:13:40:0:0',180),
+                            ('storesave96:13:40:0:0',180),
+                            ('storeload96:13:40:0:0',180),
                             ('persistsave40x196dimsfix:13:40',120),
                             ('persistload40x196dimsfix:13:40:0:1',120),
                             ('persisttamperpayload40x196dimsfix:13:40:0:0',120),
@@ -170,6 +181,9 @@ def main():
                                'and 196x40; width/height and the 124-byte config are '
                                'not stored in the blob, so the host store must persist '
                                '{width,height,config-hash} alongside it',
+            'host_store':{'module':'../host-store','container':'FPT1 + 64-byte header + blob',
+                          'verified':['storesave/storeload 40x196, 196x40, 96x96',
+                                      '40x196 container rejected when read as 196x40']},
             'observed_size_bytes':{'40x196':238970,'196x40':239938,'96x96':273962},
             'layout':'4 magic + 212 header + 96*(489 fixed + bin 984 + mask 981) + feat + 2 crc',
             'note':'import restores count=1 and db+50118=1 by itself; identify succeeds '
