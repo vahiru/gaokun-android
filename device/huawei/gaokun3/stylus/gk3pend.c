@@ -130,6 +130,110 @@ static int rec_fd = -1;					/* -rec */
 static int col_map;	/* the column pitch in solver.h: BOE panel only */
 
 /*
+ * The even sensor columns are read about 1 ms after the odd ones.  Y comes from
+ * the columns next to the peak and X from the peak's own column, so on a moving
+ * pen both swing with the column pair, in opposite senses, which only shows on
+ * diagonals.  Fitted on free strokes: X reads x_us sin(pi col) late and Y -y_us
+ * sin(pi col), col in cells.  Sampling is even at 240 Hz, but the time stamps
+ * only say when the driver read a frame: they alternate 3.0 / 5.35 ms, and the
+ * frame after a gap was sampled one slot after the last one and read late, so
+ * the gap belongs to the step into the next frame.  If seq jumps the frames in
+ * between really are gone and it belongs to this step.  Velocity is counted in
+ * sample slots on that basis.  A stroke's first frames can be old data, so a
+ * restart keeps the whole gap for the next step, which leaves them uncorrected.
+ * Measured on a BOE panel, so off on the others unless -sk asks for it.
+ */
+#define SLOT_NS		4166667ULL
+
+static int pos_x_us = 294, pos_y_us = 531;	/* -sk x,y */
+
+/* sin(pi * col / 1024) without libm: Bhaskara's fit, within 0.2 % */
+static double sin_cell(int col)
+{
+	int p = col & 2047, q = p & 1023;
+	double c = (double)q * (1024 - q);
+	double s = 16 * c / (5.0 * 1024 * 1024 - 4 * c);
+
+	return p < 1024 ? s : -s;
+}
+
+static void pos_skew(double *fx, double *fy, int col, unsigned long long t, unsigned int seq,
+		     int restart, int skipped)
+{
+	static double hx[2], hy[2];
+	static long hs[2], pend, carry;
+	static unsigned long long last;
+	static unsigned int lseq;
+	static int n;
+	double x = *fx, y = *fy;
+	long slot = 0, k = (long)((t - last + SLOT_NS / 2) / SLOT_NS), step;
+	int lost = !restart && seq - lseq > 1;
+
+	if (k < 1)
+		k = 1;
+	step = 1 + pend + (lost ? k - 1 : 0);
+	pend = lost ? 0 : k - 1;
+	last = t;
+	lseq = seq;
+	if (skipped) {		/* only the time counts */
+		carry += step;
+		return;
+	}
+	if (restart)
+		n = 0;
+	if (n) {
+		int j = n > 1;
+		double ms, sn = sin_cell(col);
+
+		slot = hs[0] + step + carry;
+		ms = (double)(slot - hs[j]) * SLOT_NS / 1e6;
+		*fx = x - (x - hx[j]) / ms * pos_x_us / 1000.0 * sn;
+		*fy = y + (y - hy[j]) / ms * pos_y_us / 1000.0 * sn;
+	}
+	carry = 0;
+	hx[1] = hx[0];
+	hy[1] = hy[0];
+	hs[1] = hs[0];
+	hx[0] = x;
+	hy[0] = y;
+	hs[0] = slot;
+	if (n < 2)
+		n++;
+}
+
+/*
+ * Now and then a pad keeps last frame's reading, some pads far more often than
+ * others.  Harmless on a slow pen; on a fast one about three such frames in
+ * ten land over 0.3 mm off the path and draw a kink, so leave them out.  Corners
+ * repeat by chance more often and matter less.
+ */
+static int stale_on = 1;	/* -ns turns it off */
+
+static int stale_frame(const int *g, int ar, int ac)
+{
+	static int prev[81], par = -100, pac = -100, held;
+	int dr = ar - par, dc = ac - pac, i, j, hit = 0;
+
+	if (dr >= -3 && dr <= 3 && dc >= -3 && dc <= 3)
+		for (i = 3; i < 6; i++)
+			for (j = 3; j < 6; j++) {
+				int x = i + dr, y = j + dc;
+
+				if (x >= 0 && x < 9 && y >= 0 && y < 9 &&
+				    g[i * 9 + j] >= (i == 4 || j == 4 ? 100 : 300) &&
+				    g[i * 9 + j] == prev[x * 9 + y])
+					hit = 1;
+			}
+	memcpy(prev, g, sizeof(prev));
+	par = ar;
+	pac = ac;
+	/* never two in a row: a pad stuck at one value must not stop the pen */
+	hit = hit && !held;
+	held = hit;
+	return hit;
+}
+
+/*
  * Within a cell of an edge the position across that edge is extrapolated
  * (solver.h edge_pos) and jitters by a few px a frame: low-pass that axis
  * there (alpha 0.25 per frame, ~13 ms at 227 Hz).  Measured on edge strokes:
@@ -157,6 +261,8 @@ static double edge_smooth(double *s, double v, int zone, int max, int reset)
  * low-passed at dcutoff.  It restarts when the pen enters range and at every
  * touch-down, so a stroke starts where the tip lands.  -pf MIN,BETA,DCUT in
  * mHz, mHz per mm/s and mHz (as himax-spi's track_filter_*); -pf 0 is off.
+ * -sk X,Y sets the column timing correction in us (0,0 is off), -ns keeps
+ * frames with a repeated reading (see pos_skew, stale_frame above).
  */
 static int pf_mincutoff = 1000, pf_beta = 500, pf_dcutoff = 5000;
 
@@ -541,7 +647,7 @@ int main(int argc, char **argv)
 	struct pen_rec rec;
 	struct mcu mcu = { .fd = -1 };
 	struct tilt_state ts;
-	int tilt_x = 0, tilt_y = 0;
+	int tilt_x = 0, tilt_y = 0, sk_given = 0;
 	long tsum_x = 0, tsum_y = 0, tn = 0;	/* -v: mean tilt of a stroke */
 	unsigned char rep[64];
 	int pen, hid, ui;
@@ -583,6 +689,16 @@ int main(int argc, char **argv)
 			rec_fd = open(argv[++i], O_WRONLY | O_CREAT | O_APPEND, 0644);
 		else if (!strcmp(argv[i], "-nt"))
 			tilt_on = 0;
+		else if (!strcmp(argv[i], "-ns"))
+			stale_on = 0;
+		else if (!strcmp(argv[i], "-sk") && i + 1 < argc) {
+			const char *sk = argv[++i];
+
+			pos_x_us = atoi(sk);
+			if ((sk = strchr(sk, ',')) != NULL)
+				pos_y_us = atoi(sk + 1);
+			sk_given = 1;
+		}
 		else if (!strcmp(argv[i], "-tx"))
 			tilt_sx = -tilt_sx;
 		else if (!strcmp(argv[i], "-ty"))
@@ -597,6 +713,8 @@ int main(int argc, char **argv)
 	}
 
 	col_map = panel_is_boe();
+	if (!col_map && !sk_given)
+		pos_x_us = pos_y_us = 0;
 
 	/* ueventd creates /dev/gk3_pen a moment after insmod: wait up to 10 s */
 	for (int tries = 0; tries < 100; tries++) {
@@ -614,9 +732,10 @@ int main(int argc, char **argv)
 	}
 	if (side_mode != SIDE_NONE)
 		mcu_open(&mcu, now_ms());
-	printf("gk3pend: running, flip x %d y %d, column pitch %s, filter %d,%d,%d, pressure %s tau %d ms, "
-	       "tilt %s, side %s, mcu %s\n",
+	printf("gk3pend: running, flip x %d y %d, column pitch %s, filter %d,%d,%d, pos skew %d,%d us, "
+	       "stale frames %s, pressure %s tau %d ms, tilt %s, side %s, mcu %s\n",
 	       flip_x, flip_y, col_map ? "boe" : "even", pf_mincutoff, pf_beta, pf_dcutoff,
+	       pos_x_us, pos_y_us, stale_on ? "skipped" : "kept",
 	       press_incell ? "incell" : "direct", press_tau_ms,
 	       !tilt_on ? "off" : tilt_sx * tilt_sy > 0 ? (tilt_sx > 0 ? "on" : "on -tx -ty") :
 	       tilt_sx > 0 ? "on -ty" : "on -tx",
@@ -776,7 +895,7 @@ int main(int argc, char **argv)
 			frame_valid = rec.d[0] == 0x5a && rec.d[1] == 0xa5 &&
 				      !(ar == 0xff && ac == 0xff) && peak >= PEAK_MIN;
 			if (frame_valid) {
-				int g[81], g2[81], lc, lr, col, row, k, c2, r2, s2;
+				int g[81], g2[81], lc, lr, col, row, col0, k, c2, r2, s2, restart, skip;
 				double fx, fy;
 				int a2r = word(rec.d, 83) & 0xff, a2c = word(rec.d, 84) & 0xff;
 				int press = pressure > 0 && t - press_t <= PRESS_MAX_AGE;
@@ -785,10 +904,13 @@ int main(int argc, char **argv)
 					g[k] = word(rec.d, 2 + k);
 					g2[k] = word(rec.d, 85 + k);
 				}
+				restart = !in_range || t - valid_t > 20 || (press && !touching);
+				skip = stale_on && stale_frame(g, ar, ac) && !restart;
 				solve_local(g, ar, ac, &lc, &lr);
 				/* window centre (cell 4) sits on the anchor cell */
 				col = lc + (ac - 4) * UNIT;
 				row = lr + (ar - 4) * UNIT;
+				col0 = col;
 				if (tilt_on) {
 					/* a frame without a usable TX2 keeps the last tilt */
 					if (!(a2r == 0xff && a2c == 0xff) &&
@@ -814,8 +936,11 @@ int main(int argc, char **argv)
 					col = 60 * UNIT - col;
 				fx = row * 5.0 / 128;	/* 40 cells -> 1600 px */
 				fy = col / 24.0;	/* 60 cells -> 2560 px */
-				euro_filter(&euro, &fx, &fy, rec.t_ns,
-					    !in_range || t - valid_t > 20 || (press && !touching));
+				if (pos_x_us || pos_y_us)
+					pos_skew(&fx, &fy, col0, rec.t_ns, rec.seq, restart, skip);
+				if (skip)
+					goto position_done;
+				euro_filter(&euro, &fx, &fy, rec.t_ns, restart);
 				if (fx < 0) fx = 0;
 				if (fx > 1599) fx = 1599;
 				if (fy < 0) fy = 0;
@@ -824,6 +949,8 @@ int main(int argc, char **argv)
 				fy = edge_smooth(&edge_y, fy, EDGE_ZONE_Y, 2559, t - valid_t > 20);
 				x = (int)(fx * SUBPX + 0.5);
 				y = (int)(fy * SUBPX + 0.5);
+position_done:
+				;
 			}
 		}
 
