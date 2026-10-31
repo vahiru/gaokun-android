@@ -131,6 +131,23 @@ Windows ACPI `\_SB.SPBA`：中断 **GPIO181**（edge/active-high/wake）、**GPI
 GPIO185 复位可能由 TA 经 QSEE-GPIO 自己做（待确认）。届时加一个 fingerprint 的 DT 节点带这两脚。
 ⚠️ 传感器的 SPI **归 TZ**，DT 里【不要】给它建 spi 节点。
 
+## 5.1 M6 client driver 接口契约（草案，未上机）
+
+离线部分已足以固定内核/用户态分工；字符设备本身仍缺内核源码树与真机，源码未在本工作区编译。
+
+* **内核只做传输**：`/dev/gaokun3_fp` 单会话（互斥），仅暴露 `LOAD`（读 mbn → 32 位 DMA 约束 → `APP_START`，沿用 `fptest` 的物理地址安全阀）、`SEND`（把 4 KiB 请求/响应缓冲拷进 tzmem 后调
+  `qcom_scm_qseecom_app_send`）、`SHUTDOWN`、`STATUS`。不在内核里拼命令、不解析图像、不碰模板。
+* **用户态负责协议与算法**：唯一首条 wire 命令 `0x8031`；采集只用已核实的 `0x8020/0x8021`；禁止发送
+  `0x8026/0x8027/0x802B`（D8/D9）。编码帧 15,680 B 在主机侧解码，预处理/质量/录入/识别全部主机侧
+  （D10/D22），模板写入主机存储（D19/D20）。
+* **缓冲尺寸**：内核 req/rsp 各 4 KiB；图像导出响应边界 7,852 B（`ta_image_contract.py`）；解码明文
+  15,680 B；预处理图 7,840 B；导出模板 238,970～273,962 B，存储槽 2,454 B（40×196/196×40）或
+  2,802 B（96×96）。
+* **返回码契约**：质量 `<30` 或面积 `<90` 不录入；录入 `-6` = 移动手指后重试、`-4` = 面积不足；
+  identify `-2` = 无匹配；模板 load/store 任何非零都是会话失败（D19）。
+* **待真机闭合**：`0x8031` 在 LOAD 后的响应语义、SPI 归属、GPIO181 中断、`SEND` 的 SMC 错误映射。
+  在这些之前不注册 HAL（§6），也不把采图成功当作认证成功。
+
 ## 6. Android HAL
 
 AOSP AIDL定义可用作接口与生命周期参考，但虚拟HAL的模拟录入/匹配不能作为实机功能实现。
@@ -150,6 +167,9 @@ AOSP AIDL定义可用作接口与生命周期参考，但虚拟HAL的模拟录�
 - [x] M5 主机侧模板存储 + 一次 enroll/authenticate 闭环（不含 STRONG/HAT 声明）
   - 2026-10-31：持久化 ABI 已离线闭合（D15），存储内容可跨进程字节级还原（导出/读回 FNV 哈希一致）；2 个子模板的 blob 也能导出→重灌→识别（count 保持 2）。增量录入的引导语义（-6/-4）已记录（D16）。主机侧校验契约已定（D19）：magic/几何长度/CRC16 预校验，非零 load rc 视为会话失败；blob 不自带几何/配置，存储需外带 `{width,height,config-hash}`（D20）。参考实现 `tools/fingerprint-bringup/host-store/`（`FPT1` 容器、0600 原子写入、读取时元数据比对）已通过单测；harness `storesave`/`storeload` 在 40×196、196×40、96×96 三种几何完成“导出→写容器→校验读回→重灌→识别”，几何错配的容器被主机侧拒绝；两指容器（ridge+dots / 随机纹理）恢复后探针分别命中 id 0/1，未录入图案→-2。真实帧也已完成“preprocess→enroll→export→容器写入→另一进程读回→重灌→识别”闭环（D22）：242,842 B blob、load→0、count/flag 1/1、identify→0（score 158）。剩余工作转入 client driver（M6）。
 - [ ] M6 client driver 成形（字符设备接口）
+  - 2026-10-31：内核/用户态分工与 ioctl 契约已写入 §5.1；内核只做 LOAD/SEND/SHUTDOWN 传输，
+    协议、图像与算法全部在用户态（已有真实帧离线闭环 D22 支撑）。当前工作区没有内核源码树，
+    字符设备实现需在带 patch 0050 的树里编译并上机验证，未开始写未验证的内核代码。
 - [ ] M7 Android 指纹 HAL，Settings 里能录/解锁
   - 测试环境约定（2026-10-31 用户要求）：安卓系统侧的录入/解锁联调**使用 CrDroid 镜像**；HyperOS 仅继续用于已有 TA/QSEECOM/算法实验。
 
