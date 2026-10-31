@@ -77,6 +77,20 @@ static unsigned crc16_ft(const unsigned char *p,size_t n){
  }
  return crc;
 }
+/* Bind a stored blob to the exact sensor config used for enrollment. */
+static void config_digest(const unsigned char *cfg,size_t n,unsigned char out[32]){
+ uint64_t h=1469598103934665603ULL;
+ for(int round=0;round<4;++round){
+  for(size_t i=0;i<n;++i){h^=cfg[i];h*=1099511628211ULL;}
+  h^=(uint64_t)(round+1);h*=1099511628211ULL;
+  memcpy(out+round*8,&h,8);
+ }
+}
+static unsigned slot_bytes_for(unsigned width,unsigned height){
+ if(width*height==7840)return 2454;   /* 40x196 / 196x40 */
+ if(width*height==9216)return 2802;   /* 96x96 */
+ return 0;
+}
 static void trace_log(unsigned level,const char *tag,const char *fmt,...){
  (void)tag;char buf[512];va_list ap;va_start(ap,fmt);
  vsnprintf(buf,sizeof(buf),fmt,ap);va_end(ap);
@@ -510,6 +524,80 @@ int main(int argc,char **argv){
              "\"max\":%d,\"mach\":%d}}\n",
              case_name,(long long)l0,(long long)l1,(long long)ra,ida,amax,amach,
              (long long)rb,idb,bmax,bmach);
+     }
+     fflush(stdout);return 0;
+    }
+   }
+   if(!strncmp(case_name,"store",5)&&image_instance==0){
+    unsigned width=*(uint32_t *)cfg,height=*(uint32_t *)(cfg+4),bytes=width*height;
+    unsigned slot=slot_bytes_for(width,height);
+    unsigned char *image=arena_alloc(bytes);
+    unsigned char *tpl=arena_alloc(512*1024);
+    const char *base=argc>6?argv[6]:"/build/tpl.bin";
+    char path[512];snprintf(path,sizeof path,"%s.store",base);
+    if(image&&tpl&&slot){
+     struct ft_tpl_meta meta;memset(&meta,0,sizeof meta);
+     meta.finger=pat_finger;meta.width=width;meta.height=height;
+     meta.slot_bytes=slot;config_digest(cfg,124,meta.config_digest);
+     if(!strncmp(case_name,"storesave",9)){
+      for(unsigned i=0;i<bytes;++i)
+       image[i]=(unsigned char)pattern_value(pat_kind,pat_param,i%width,i/width,
+                                             width,height,i);
+      uint64_t erc=((entry)(ta_map+0x9b57c))(pat_finger,0,
+                                             (uint64_t)(uintptr_t)image,0);
+      uint64_t xrc=0xFFFFFFFFFFFFFFFFULL;unsigned type=0,size=0;
+      int wrc=-99;size_t written=0;
+      if(erc==0){
+       xrc=((entry)(ta_map+0xDFD20))(pat_finger,(uint64_t)(uintptr_t)&type,
+                                     (uint64_t)(uintptr_t)&size,
+                                     (uint64_t)(uintptr_t)tpl);
+       if(xrc==0&&size){
+        meta.blob_len=size;
+        wrc=(int)ft_tpl_store_write(path,&meta,tpl,size);
+        if(wrc==FT_TPL_OK)written=size;
+       }
+      }
+      printf("{\"stage\":\"%s\",\"mode\":\"save\",\"finger\":%u,"
+             "\"pattern\":[%u,%u,%u],\"geometry\":[%u,%u],\"slot\":%u,"
+             "\"enroll_rc\":%lld,\"export_rc\":%lld,\"tpl_size\":%u,"
+             "\"store_rc\":%d,\"store\":\"%s\",\"written\":%zu,"
+             "\"tpl_hash\":\"%016llx\",\"path\":\"%s\"}\n",
+             case_name,pat_finger,pat_kind,pat_param,pat_perturb,width,height,
+             slot,(long long)erc,(long long)xrc,size,wrc,
+             ft_tpl_status_str((enum ft_tpl_status)wrc),written,
+             size?(unsigned long long)fnv1a(tpl,size):0ULL,path);
+     }else{
+      uint8_t *stored=NULL;size_t slen=0;
+      enum ft_tpl_status src=ft_tpl_store_read(path,&meta,&stored,&slen);
+      uint64_t lrc=0xFFFFFFFFFFFFFFFFULL;
+      unsigned count=0,flag=0,fid=0;
+      unsigned char id=0xEE,v5=0xEE;
+      uint64_t irc=0xFFFFFFFFFFFFFFFFULL;
+      if(src==FT_TPL_OK){
+       lrc=((entry)(ta_map+0xE0460))(pat_finger,121,(uint64_t)slen,
+                                     (uint64_t)(uintptr_t)stored);
+       uintptr_t dbs=*(uintptr_t *)(ta_map+0x361540);
+       uintptr_t db=dbs?((uintptr_t *)dbs)[pat_finger]:0;
+       count=db?*(uint16_t *)(db+50116):0;
+       flag=db?*(uint16_t *)(db+50118):0;
+       fid=db?*(uint32_t *)(db+50120):0;
+       for(unsigned i=0;i<bytes;++i)
+        image[i]=(unsigned char)pattern_value(pat_kind,pat_param,i%width,
+                                              i/width,width,height,i);
+       irc=((entry)(ta_map+0x9E1F0))((uint64_t)(uintptr_t)image,1,
+                                     (uint64_t)(uintptr_t)&id,
+                                     (uint64_t)(uintptr_t)&v5);
+      }
+      printf("{\"stage\":\"%s\",\"mode\":\"load\",\"finger\":%u,"
+             "\"pattern\":[%u,%u,%u],\"geometry\":[%u,%u],\"slot\":%u,"
+             "\"store_rc\":%d,\"store\":\"%s\",\"blob_size\":%zu,"
+             "\"load_rc\":%lld,\"template_count\":%u,\"flag\":%u,"
+             "\"fid\":%u,\"identify_rc\":%lld,\"id\":%u,\"v5\":%u,"
+             "\"path\":\"%s\"}\n",
+             case_name,pat_finger,pat_kind,pat_param,pat_perturb,width,height,
+             slot,(int)src,ft_tpl_status_str(src),slen,(long long)lrc,
+             count,flag,fid,(long long)irc,id,v5,path);
+      if(stored)ft_tpl_free(stored);
      }
      fflush(stdout);return 0;
     }
