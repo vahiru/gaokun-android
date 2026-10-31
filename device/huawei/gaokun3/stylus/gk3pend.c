@@ -127,6 +127,14 @@ static int side_mode = SIDE_ERASER;
 static int press_incell = 1;	/* -pm incell|direct */
 static int tilt_on = 1, tilt_sx = 1, tilt_sy = 1;	/* -nt, -tx, -ty */
 static int rec_fd = -1;					/* -rec */
+static int region_on = 1; /* -lr restores legacy peak selection */
+static double screen_x_scale = 1.0; /* -sx: unit-specific landscape calibration */
+
+static double screen_x_calibrate(double x)
+{
+	return 1279.875 + screen_x_scale * (x - 1279.875);
+}
+
 static int col_map;	/* the column pitch in solver.h: BOE panel only */
 
 /*
@@ -158,7 +166,7 @@ static double edge_smooth(double *s, double v, int zone, int max, int reset)
  * touch-down, so a stroke starts where the tip lands.  -pf MIN,BETA,DCUT in
  * mHz, mHz per mm/s and mHz (as himax-spi's track_filter_*); -pf 0 is off.
  */
-static int pf_mincutoff = 1000, pf_beta = 500, pf_dcutoff = 5000;
+static int pf_mincutoff = 1000, pf_beta = 125, pf_dcutoff = 5000;
 
 struct euro {
 	double x, y;		/* filtered position, px */
@@ -579,6 +587,15 @@ int main(int argc, char **argv)
 					pf_dcutoff = atoi(++s);
 			}
 		}
+		else if (!strcmp(argv[i], "-pr"))
+			region_on = 1;
+		else if (!strcmp(argv[i], "-lr"))
+			region_on = 0;
+		else if (!strcmp(argv[i], "-sx") && i + 1 < argc) {
+			double scale = atof(argv[++i]);
+			if (scale > 0.5 && scale < 1.5)
+				screen_x_scale = scale;
+		}
 		else if (!strcmp(argv[i], "-rec") && i + 1 < argc)
 			rec_fd = open(argv[++i], O_WRONLY | O_CREAT | O_APPEND, 0644);
 		else if (!strcmp(argv[i], "-nt"))
@@ -785,7 +802,10 @@ int main(int argc, char **argv)
 					g[k] = word(rec.d, 2 + k);
 					g2[k] = word(rec.d, 85 + k);
 				}
-				solve_local(g, ar, ac, &lc, &lr);
+				if (region_on)
+					solve_local_region(g, ar, ac, &lc, &lr, 1);
+				else
+					solve_local(g, ar, ac, &lc, &lr);
 				/* window centre (cell 4) sits on the anchor cell */
 				col = lc + (ac - 4) * UNIT;
 				row = lr + (ar - 4) * UNIT;
@@ -822,6 +842,11 @@ int main(int argc, char **argv)
 				if (fy > 2559) fy = 2559;
 				fx = edge_smooth(&edge_x, fx, EDGE_ZONE_X, 1599, t - valid_t > 20);
 				fy = edge_smooth(&edge_y, fy, EDGE_ZONE_Y, 2559, t - valid_t > 20);
+				/* Raw Y becomes horizontal in landscape. Identity unless
+				 * this unit has a measured screen calibration. */
+				fy = screen_x_calibrate(fy);
+				if (fy < 0) fy = 0;
+				if (fy > 2559) fy = 2559;
 				x = (int)(fx * SUBPX + 0.5);
 				y = (int)(fy * SUBPX + 0.5);
 			}

@@ -150,20 +150,44 @@ static int edge_index(int idx)
  * just past the last column): they are left out of the region and the
  * projections, as in GridFeatureExtractor/CoordinateSolver.
  */
-static void solve_local(const int *g, int ar, int ac, int *col, int *row)
+#define GK3_PEAK_REGION_API 1
+
+/* Returns 1 when the opt-in strong region is used, 0 for the legacy path. */
+static int solve_local_region(const int *g, int ar, int ac, int *col, int *row,
+			     int peak_relative)
 {
 	unsigned char in[81] = { 0 };
 	int stack[81], sp = 0, r0 = 4, r1 = 4, c0 = 4, c1 = 4;
 	int pc[9], pr[9], ic = 4, ir = 4, i, j;
+	int seed = 40, count = 0;
 	int rlo = 4 - ar < 0 ? 0 : 4 - ar, rhi = 4 + SENSOR_ROWS - 1 - ar > 8 ? 8 : 4 + SENSOR_ROWS - 1 - ar;
 	int clo = 4 - ac < 0 ? 0 : 4 - ac, chi = 4 + SENSOR_COLS - 1 - ac > 8 ? 8 : 4 + SENSOR_COLS - 1 - ac;
 
-	/* grow the peak region from the centre cell (8-connected, > floor, on the sensor) */
-	in[40] = 1;
-	stack[sp++] = 40;
+	if (peak_relative) {
+		if (ar < 0 || ar >= SENSOR_ROWS || ac < 0 || ac >= SENSOR_COLS)
+			return solve_local_region(g, ar, ac, col, row, 0);
+		for (i = rlo; i <= rhi; i++)
+			for (j = clo; j <= chi; j++)
+				if (g[i * 9 + j] > g[seed]) seed = i * 9 + j;
+		if (g[seed] <= REGION_FLOOR)
+			return solve_local_region(g, ar, ac, col, row, 0);
+		r0 = r1 = seed / 9;
+		c0 = c1 = seed % 9;
+	}
+	/* Legacy: centre, eight-connected, > floor. Opt-in: on-sensor maximum,
+	 * four-connected, also > half peak (GridFeatureExtractor::InPeak).
+	 * With a global maximum seed, its adjacent-value ratio checks are
+	 * redundant for this strictly-above-half component. */
+	in[seed] = 1;
+	stack[sp++] = seed;
 	while (sp) {
 		int k = stack[--sp], r = k / 9, c = k % 9;
 
+		/* The reference rejects/cleans regions of ten or more cells. This
+		 * narrow experiment does not port multi-peak cleanup: retain the
+		 * shipped result for ambiguous broad regions instead. */
+		if (peak_relative && ++count >= 10)
+			return solve_local_region(g, ar, ac, col, row, 0);
 		if (r < r0) r0 = r;
 		if (r > r1) r1 = r;
 		if (c < c0) c0 = c;
@@ -173,6 +197,8 @@ static void solve_local(const int *g, int ar, int ac, int *col, int *row)
 				int nr = r + dr, nc = c + dc, n = nr * 9 + nc;
 
 				if (nr < rlo || nr > rhi || nc < clo || nc > chi || in[n] || g[n] <= REGION_FLOOR)
+					continue;
+				if (peak_relative && ((dr == 0) == (dc == 0) || g[n] <= (g[seed] >> 1)))
 					continue;
 				in[n] = 1;
 				stack[sp++] = n;
@@ -195,6 +221,12 @@ static void solve_local(const int *g, int ar, int ac, int *col, int *row)
 			  pitch_cols);
 	*row = pitch_comp(solve_axis(pr, ir, edge_index(4 - ar), edge_index(4 + SENSOR_ROWS - 1 - ar)),
 			  pitch_rows);
+	return peak_relative != 0;
+}
+
+static void solve_local(const int *g, int ar, int ac, int *col, int *row)
+{
+	solve_local_region(g, ar, ac, col, row, 0);
 }
 
 /*
