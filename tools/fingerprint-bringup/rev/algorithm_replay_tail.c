@@ -323,6 +323,138 @@ int main(int argc,char **argv){
    }
    uint64_t image_instance=((entry)(ta_map+0x9746c))(0,0,0,0);
    if(image_instance)config_rc=image_instance;
+   if(!strncmp(case_name,"realimg",7)&&image_instance==0){
+    unsigned width=*(uint32_t *)cfg,height=*(uint32_t *)(cfg+4),bytes=width*height;
+    enum {REAL_IN=15680};
+    unsigned char *in16=arena_alloc(REAL_IN);
+    unsigned char *img=arena_alloc(bytes);
+    unsigned char *tpl=arena_alloc(512*1024);
+    if(in16&&img&&tpl&&bytes==7840){
+     size_t got=fread(in16,1,REAL_IN,stdin);
+     long prc=-999;unsigned q=0xFFFFFFFFu,area=0;
+     uint64_t qrc=0xFFFFFFFFFFFFFFFFULL;
+     if(got==REAL_IN){
+      /* Original TA preprocess: 15680 B LE16 -> 7840 B 8-bit image. */
+      prc=call_preprocess(in16,img,196,40,(void*)(ta_map+0x1c68));
+      qrc=((entry)(ta_map+0xE6B64))((uint64_t)(uintptr_t)img,
+                                    (uint64_t)(uintptr_t)&q,0,0);
+      area=(q>>8)&0xffu;
+     }
+     uint64_t erc=0xFFFFFFFFFFFFFFFFULL;
+     if(got==REAL_IN)
+      erc=((entry)(ta_map+0x9b57c))(pat_finger,0,(uint64_t)(uintptr_t)img,0);
+     uintptr_t dbs=*(uintptr_t *)(ta_map+0x361540);
+     uintptr_t db=dbs?((uintptr_t *)dbs)[pat_finger]:0;
+     unsigned count=db?*(uint16_t *)(db+50116):0;
+     unsigned flag=db?*(uint16_t *)(db+50118):0;
+     unsigned type=0,size=0;
+     uint64_t xrc=0xFFFFFFFFFFFFFFFFULL;
+     if(erc==0)
+      xrc=((entry)(ta_map+0xDFD20))(pat_finger,(uint64_t)(uintptr_t)&type,
+                                    (uint64_t)(uintptr_t)&size,
+                                    (uint64_t)(uintptr_t)tpl);
+     unsigned char id=0xEE,v5=0xEE;
+     uint64_t irc=0xFFFFFFFFFFFFFFFFULL;
+     if(erc==0){
+      trace_reset();
+      irc=((entry)(ta_map+0x9E1F0))((uint64_t)(uintptr_t)img,1,
+                                    (uint64_t)(uintptr_t)&id,
+                                    (uint64_t)(uintptr_t)&v5);
+     }
+     printf("{\"stage\":\"%s\",\"finger\":%u,\"geometry\":[%u,%u],"
+            "\"input_bytes\":%zu,\"preprocess_rc\":%ld,"
+            "\"quality\":%u,\"area\":%u,\"quality_rc\":%llu,"
+            "\"enroll_rc\":%lld,\"template_count\":%u,\"flag\":%u,"
+            "\"export_rc\":%lld,\"tpl_type\":%u,\"tpl_size\":%u,"
+            "\"tpl_hash\":\"%016llx\","
+            "\"identify_rc\":%lld,\"id\":%u,\"v5\":%u}\n",
+            case_name,pat_finger,width,height,got,prc,q&0xffu,area,
+            (unsigned long long)qrc,(long long)erc,count,flag,
+            (long long)xrc,type,size,
+            size?(unsigned long long)fnv1a(tpl,size):0ULL,
+            (long long)irc,id,v5);
+     fflush(stdout);return 0;
+    }
+   }
+   /* Real contact frame through the host template store: preprocess -> enrol ->
+    * export -> ft_tpl_store_write, then a fresh process restores the container
+    * and identifies against the same decoded frame. */
+   if(!strncmp(case_name,"realstore",9)&&image_instance==0){
+    unsigned width=*(uint32_t *)cfg,height=*(uint32_t *)(cfg+4),bytes=width*height;
+    unsigned slot=slot_bytes_for(width,height);
+    const char *base=argc>6?argv[6]:"/build/tpl.bin";
+    char path[512];snprintf(path,sizeof path,"%s.realstore.%u",base,pat_finger);
+    unsigned char *in16=arena_alloc(15680);
+    unsigned char *img=arena_alloc(bytes);
+    unsigned char *tpl=arena_alloc(512*1024);
+    if(in16&&img&&tpl&&bytes==7840&&slot){
+     size_t got=fread(in16,1,15680,stdin);
+     long prc=-999;
+     if(got==15680)
+      prc=call_preprocess(in16,img,196,40,(void*)(ta_map+0x1c68));
+     struct ft_tpl_meta meta;memset(&meta,0,sizeof meta);
+     meta.finger=pat_finger;meta.width=width;meta.height=height;
+     meta.slot_bytes=slot;config_digest(cfg,124,meta.config_digest);
+     if(!strncmp(case_name,"realstoresave",13)){
+      uint64_t erc=0xFFFFFFFFFFFFFFFFULL,xrc=0xFFFFFFFFFFFFFFFFULL;
+      unsigned type=0,size=0;int wrc=-99;size_t written=0;
+      if(prc==0)
+       erc=((entry)(ta_map+0x9b57c))(pat_finger,0,(uint64_t)(uintptr_t)img,0);
+      if(erc==0){
+       xrc=((entry)(ta_map+0xDFD20))(pat_finger,(uint64_t)(uintptr_t)&type,
+                                     (uint64_t)(uintptr_t)&size,
+                                     (uint64_t)(uintptr_t)tpl);
+       if(xrc==0&&size){
+        meta.blob_len=size;
+        wrc=(int)ft_tpl_store_write(path,&meta,tpl,size);
+        if(wrc==FT_TPL_OK)written=size;
+       }
+      }
+      printf("{\"stage\":\"%s\",\"finger\":%u,\"geometry\":[%u,%u],"
+             "\"input_bytes\":%zu,\"preprocess_rc\":%ld,\"slot\":%u,"
+             "\"enroll_rc\":%lld,\"export_rc\":%lld,\"tpl_type\":%u,"
+             "\"tpl_size\":%u,\"store_rc\":%d,\"store\":\"%s\","
+             "\"written\":%zu,\"tpl_hash\":\"%016llx\",\"path\":\"%s\"}\n",
+             case_name,pat_finger,width,height,got,prc,slot,
+             (long long)erc,(long long)xrc,type,size,wrc,
+             ft_tpl_status_str((enum ft_tpl_status)wrc),written,
+             size?(unsigned long long)fnv1a(tpl,size):0ULL,path);
+     }else{
+      uint8_t *stored=NULL;size_t slen=0;
+      enum ft_tpl_status src=ft_tpl_store_read(path,&meta,&stored,&slen);
+      uint64_t lrc=0xFFFFFFFFFFFFFFFFULL,irc=0xFFFFFFFFFFFFFFFFULL;
+      unsigned count=0,flag=0,fid=0;unsigned char id=0xEE,v5=0xEE;
+      int max=-1,mach=-1;
+      if(src==FT_TPL_OK){
+       lrc=((entry)(ta_map+0xE0460))(pat_finger,121,(uint64_t)slen,
+                                     (uint64_t)(uintptr_t)stored);
+       uintptr_t dbs=*(uintptr_t *)(ta_map+0x361540);
+       uintptr_t db=dbs?((uintptr_t *)dbs)[pat_finger]:0;
+       count=db?*(uint16_t *)(db+50116):0;
+       flag=db?*(uint16_t *)(db+50118):0;
+       fid=db?*(uint32_t *)(db+50120):0;
+       ft_tpl_free(stored);
+      }
+      if(prc==0&&lrc==0){
+       trace_reset();
+       irc=((entry)(ta_map+0x9E1F0))((uint64_t)(uintptr_t)img,1,
+                                     (uint64_t)(uintptr_t)&id,
+                                     (uint64_t)(uintptr_t)&v5);
+       max=trace_max;mach=trace_mach;
+      }
+      printf("{\"stage\":\"%s\",\"finger\":%u,\"geometry\":[%u,%u],"
+             "\"input_bytes\":%zu,\"preprocess_rc\":%ld,\"slot\":%u,"
+             "\"store_rc\":%d,\"store\":\"%s\",\"blob_size\":%zu,"
+             "\"load_rc\":%lld,\"template_count\":%u,\"flag\":%u,"
+             "\"fid\":%u,\"identify_rc\":%lld,\"id\":%u,\"v5\":%u,"
+             "\"max\":%d,\"mach\":%d,\"path\":\"%s\"}\n",
+             case_name,pat_finger,width,height,got,prc,slot,
+             (int)src,ft_tpl_status_str(src),slen,(long long)lrc,
+             count,flag,fid,(long long)irc,id,v5,max,mach,path);
+     }
+     fflush(stdout);return 0;
+    }
+   }
    if(!strncmp(case_name,"persist",7)&&image_instance==0){
     enum {TPLBUF_MAX=512*1024};
     unsigned width=*(uint32_t *)cfg,height=*(uint32_t *)(cfg+4),bytes=width*height;

@@ -84,7 +84,23 @@ def loader_source(blob):
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--out',type=Path,required=True)
+    parser.add_argument('--private-encoded',type=Path,
+                        help='optional 15680-byte encoded contact frame; decoded '
+                             'locally and fed to the real-image enrol case')
     args=parser.parse_args()
+    real_plain=None
+    if args.private_encoded:
+        try:
+            from decode_sc_image import decode
+        except ModuleNotFoundError as exc:
+            raise SystemExit('--private-encoded needs PyCryptodome (Crypto.Cipher); '
+                             'in this workspace run with /usr/bin/python3') from exc
+        real_plain,real_stats=decode(args.private_encoded.read_bytes(),
+                                     HERE/'cabs/ftwbio/FtWbioDriverUmdf.dll')
+        assert len(real_plain)==15680
+        print(json.dumps({'real_frame':str(args.private_encoded),
+                          'decoded_bytes':len(real_plain),
+                          'stats':real_stats}),flush=True)
     blob=(HERE/'cabs/qctree/fingerpr.mbn').read_bytes()
     assert hashlib.sha256(blob).hexdigest()==TA_PIN
     args.out.mkdir(parents=True,exist_ok=False)
@@ -105,7 +121,7 @@ def main():
                           (HERE/'preprocess_replay_runner.c').read_text()+'\n'+
                           store_hdr+'\n'+store_impl+'\n'+tail)
         with runner(root,'linux-container',source) as (command,scope):
-            for case,timeout in (('init',20),('config',30),
+            cases=[('init',20),('config',30),
                             ('quality96',60),('enroll96:13:40',60),
                             ('loop96:13:40:0:1',120),
                             ('mutate96:13:40:0:0',180),
@@ -151,10 +167,17 @@ def main():
                             ('persistsave196x40dimsfix:13:40',120),
                             ('persistload196x40dimsfix:13:40:0:1',120),
                             ('persistsave96:13:40',120),
-                            ('persistload96:13:40:0:0',120)):
+                            ('persistload96:13:40:0:0',120)]
+            if real_plain is not None:
+                cases.append(('realimg40x196dimsfix:13:40:0:0',180))
+                cases.append(('realstoresave40x196dimsfix:13:40:0:0',180))
+                cases.append(('realstoreload40x196dimsfix:13:40:0:0',180))
+            for case,timeout in cases:
                 try:
                     result=subprocess.run(command+['unused','0',case,'/build/tpl.bin'],
-                                          capture_output=True,timeout=timeout)
+                                          capture_output=True,timeout=timeout,
+                                          input=real_plain if case.startswith(('realimg','realstore'))
+                                                else b'')
                     item={'case':case,'exit_code':result.returncode}
                     if result.stdout:
                         try:item['result']=json.loads(result.stdout)
@@ -165,7 +188,7 @@ def main():
                 records.append(item)
                 print(json.dumps(item),flush=True)
     (args.out/'results.json').write_text(json.dumps(records,indent=2)+'\n')
-    (args.out/'scope.json').write_text(json.dumps({
+    scope_data={
         'runtime':scope,'ta_sha256':TA_PIN,'device_actions':False,
         'map_bytes':MAP_SIZE,'counts':counts,
         'executed_original':{'app_init':'0xaccc','image_instance':'0x9746c',
@@ -215,7 +238,24 @@ def main():
                         'record_bytes':520,'data_offset':94},
         'note':'SFS/SPI errors make the original init fail closed; a non-zero return is a '
                'finding, not a harness success'
-    },indent=2)+'\n')
+    }
+    if real_plain is not None:
+        scope_data['not_executed'].remove('real images')
+        real={r['case'].split(':')[0]:r['result'] for r in records
+              if r.get('case','').startswith(('realimg','realstore'))
+              and 'result' in r}
+        scope_data['real_image']={
+            'source':'private encoded contact frame, decoded locally (AES key/iv '
+                     'from FtWbioDriverUmdf.dll 0x24060/0x24070)',
+            'encoded_bytes':15680,'decoded_bytes':len(real_plain),
+            'decode_stats':real_stats,
+            'cases':real,
+            'note':'one real contact frame through original preprocess (0x1c68), '
+                   'quality (0xe6b64), enrol (0x9b57c), export (0xdfd20) and '
+                   'identify (0x9e1f0), plus host-store save/restore across two '
+                   'processes; proves the offline algorithm and storage path accept '
+                   'a real sensor frame, not yet the live SPI/SFS wire path'}
+    (args.out/'scope.json').write_text(json.dumps(scope_data,indent=2)+'\n')
 
 
 if __name__=='__main__':main()
