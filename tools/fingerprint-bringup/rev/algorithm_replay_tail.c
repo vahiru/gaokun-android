@@ -68,6 +68,15 @@ static int read_blob(const char *path,unsigned char *buf,size_t cap,size_t *out)
  size_t got=fread(buf,1,(size_t)n,fp);fclose(fp);
  if(got!=(size_t)n)return -1;*out=got;return 0;
 }
+/* FtCalCrc16: reflected poly 0x8005 (0xA001), init 0, no final reflection/xor. */
+static unsigned crc16_ft(const unsigned char *p,size_t n){
+ unsigned crc=0;
+ for(size_t i=0;i<n;++i){
+  crc^=p[i];
+  for(int b=0;b<8;++b)crc=(crc&1)?((crc>>1)^0xA001):(crc>>1);
+ }
+ return crc;
+}
 static void trace_log(unsigned level,const char *tag,const char *fmt,...){
  (void)tag;char buf[512];va_list ap;va_start(ap,fmt);
  vsnprintf(buf,sizeof(buf),fmt,ap);va_end(ap);
@@ -344,6 +353,31 @@ int main(int argc,char **argv){
              size?(unsigned long long)fnv1a(tpl,size):0ULL,path,flag0,flag1);
      }else{
       size_t n=0;int rr=read_blob(path,tpl,TPLBUF_MAX,&n);
+      /* Host-side store must not trust the blob: exercise corrupt inputs.
+       *  payload -> flip one byte in the descriptor/payload region
+       *  magic   -> flip a magic byte (TA rejects in FtInitEnrollTplData)
+       *  crc     -> corrupt the trailing CRC16
+       *  trunc   -> drop the trailing CRC16 and zero the tail, modelling a
+       *             short buffer.  The TA derives the CRC end offset from the
+       *             header, not from tplSize, so stale tail bytes would be read
+       *             past the declared length. */
+      int tamper=0;
+      if(strstr(case_name,"tamperpayload"))tamper=1;
+      else if(strstr(case_name,"tampermagic"))tamper=2;
+      else if(strstr(case_name,"tampercrc"))tamper=3;
+      else if(strstr(case_name,"tampertrunc"))tamper=4;
+      const char *tamper_name=tamper==1?"payload":tamper==2?"magic":
+                            tamper==3?"crc":tamper==4?"trunc":"none";
+      if(rr==0&&tamper==1&&n>1024)tpl[1024]^=0x5A;
+      if(rr==0&&tamper==2&&n>=1)tpl[0]^=0x01;
+      if(rr==0&&tamper==3&&n>=2)tpl[n-2]^=0xFF;
+      if(rr==0&&tamper==4&&n>=2){n-=2;memset(tpl+n,0,2);}
+      unsigned host_crc=0,host_crc_read=0;int host_crc_ok=0;
+      if(rr==0&&n>=2){
+       host_crc=crc16_ft(tpl,n-2);
+       host_crc_read=(unsigned)tpl[n-2]|((unsigned)tpl[n-1]<<8);
+       host_crc_ok=host_crc==host_crc_read;
+      }
       uint64_t lrc=0xFFFFFFFFFFFFFFFFULL;
       if(rr==0&&n>=4)
        lrc=((entry)(ta_map+0xE0460))(pat_finger,121,(uint64_t)n,
@@ -385,8 +419,10 @@ int main(int argc,char **argv){
        fnmax=trace_nmax;fnmin=trace_nmin;fmach=trace_mach;frmach=trace_rmach;
       }
       printf("{\"stage\":\"%s\",\"finger\":%u,\"pattern\":[%u,%u,%u],"
-             "\"image_bytes\":%u,"
+             "\"image_bytes\":%u,\"tamper\":\"%s\","
              "\"read_rc\":%d,\"bytes_read\":%zu,\"tpl_hash\":\"%016llx\","
+             "\"host_crc\":\"0x%04x\",\"host_crc_read\":\"0x%04x\","
+             "\"host_crc_ok\":%s,"
              "\"load_rc\":%lld,\"template_count\":%u,\"flag\":%u,"
              "\"fid\":%u,\"acc\":%u,\"identify_rc\":%lld,\"id\":%u,\"v5\":%u,"
              "\"identify\":{\"nmax\":%d,\"nmin\":%d,\"mach\":%d,\"rmach\":%d},"
@@ -394,8 +430,10 @@ int main(int argc,char **argv){
              "\"identify_forced_rc\":%lld,\"id_forced\":%u,\"v5_forced\":%u,"
              "\"identify_forced\":{\"nmax\":%d,\"nmin\":%d,\"mach\":%d,"
              "\"rmach\":%d},\"path\":\"%s\"}\n",
-             case_name,pat_finger,pat_kind,pat_param,pat_perturb,bytes,rr,n,
-             n?(unsigned long long)fnv1a(tpl,n):0ULL,(long long)lrc,
+             case_name,pat_finger,pat_kind,pat_param,pat_perturb,bytes,tamper_name,
+             rr,n,n?(unsigned long long)fnv1a(tpl,n):0ULL,
+             host_crc,host_crc_read,host_crc_ok?"true":"false",
+             (long long)lrc,
              count,flag,fid,acc,(long long)irc,id,v5,
              inmax,inmin,imach,irmach,(long long)frc,flag2,
              (long long)irc2,id2,v52,fnmax,fnmin,fmach,frmach,path);
