@@ -49,9 +49,11 @@ static size_t arena_size(void *p){
 }
 static int trace_nmax=-1,trace_nmin=-1,trace_mach=-1,trace_rmach=-1;
 static int trace_featsz=-1,trace_tplbin=-1,trace_far=-1;
+static int trace_subtpl=-1,trace_max=-1,trace_midx=-1;
 static void trace_reset(void){
  trace_nmax=trace_nmin=trace_mach=trace_rmach=-1;
  trace_featsz=trace_tplbin=trace_far=-1;
+ trace_subtpl=trace_max=trace_midx=-1;
 }
 static uint64_t fnv1a(const unsigned char *p,size_t n){
  uint64_t h=1469598103934665603ULL;
@@ -81,6 +83,12 @@ static void trace_log(unsigned level,const char *tag,const char *fmt,...){
                &trace_featsz,&trace_tplbin);
  if(strstr(buf,"verify far level"))
   (void)sscanf(strstr(buf,"verify far level"),"verify far level = %d",&trace_far);
+ if(strstr(buf,"currentSubtemplatesNum"))
+  (void)sscanf(strstr(buf,"currentSubtemplatesNum"),
+               "currentSubtemplatesNum = %d",&trace_subtpl);
+ if(strstr(buf,"MaxMatchSccores"))
+  (void)sscanf(strstr(buf,"MaxMatchSccores"),
+               "MaxMatchSccores = %d, MatchIndex = %d",&trace_max,&trace_midx);
  /* High-volume per-extremum trace is decoded into the JSON counters above. */
  if(strstr(buf,"FtInterpExtremum")||strstr(buf,"FtSeqSort"))return;
  fprintf(stderr,"ta-log[%u] %s\n",level,buf);
@@ -215,6 +223,17 @@ static unsigned pattern_value(unsigned kind,unsigned param,unsigned x,unsigned y
   if(kind==10)return inside?((((x+y)%8)<4)?60:200):40;
   return inside?(unsigned char)(100+(((i*2654435761u)>>24)%56)):20;
  }}
+}
+static void render_shift(unsigned char *dst,unsigned width,unsigned height,
+                         unsigned kind,unsigned param,int dx,int dy){
+ unsigned bytes=width*height;
+ for(unsigned i=0;i<bytes;++i){
+  int xx=(int)(i%width)+dx,yy=(int)(i/width)+dy;
+  if(xx<0)xx=0;if(xx>=(int)width)xx=(int)width-1;
+  if(yy<0)yy=0;if(yy>=(int)height)yy=(int)height-1;
+  dst[i]=(unsigned char)pattern_value(kind,param,(unsigned)xx,(unsigned)yy,
+                                      width,height,i);
+ }
 }
 int main(int argc,char **argv){
  assert(argc>=6);struct rlimit limit={0,0};assert(!setrlimit(RLIMIT_CORE,&limit));
@@ -381,6 +400,72 @@ int main(int argc,char **argv){
              inmax,inmin,imach,irmach,(long long)frc,flag2,
              (long long)irc2,id2,v52,fnmax,fnmin,fmach,frmach,path);
      }
+     fflush(stdout);return 0;
+    }
+   }
+   if(!strncmp(case_name,"multi",5)&&image_instance==0){
+    unsigned width=*(uint32_t *)cfg,height=*(uint32_t *)(cfg+4),bytes=width*height;
+    unsigned char *image=arena_alloc(bytes);
+    unsigned char *tpl=arena_alloc(512*1024);
+    const char *path=argc>6?argv[6]:"/build/tpl.bin";
+    if(image&&tpl){
+     enum {MAXEN=4};
+     static const int dxs[MAXEN]={0,2,-3,4},dys[MAXEN]={0,3,1,-2};
+     long long ercs[MAXEN];int subs[MAXEN];
+     for(unsigned k=0;k<MAXEN;++k){
+      render_shift(image,width,height,pat_kind,pat_param,dxs[k],dys[k]);
+      trace_reset();
+      ercs[k]=(long long)((entry)(ta_map+0x9b57c))(pat_finger,k,
+                                                   (uint64_t)(uintptr_t)image,0);
+      subs[k]=trace_subtpl;
+     }
+     uintptr_t dbs=*(uintptr_t *)(ta_map+0x361540);
+     uintptr_t db=dbs?((uintptr_t *)dbs)[pat_finger]:0;
+     unsigned count=db?*(uint16_t *)(db+50116):0;
+     unsigned flag=db?*(uint16_t *)(db+50118):0;
+     uint64_t vrc=((entry)(ta_map+0xE83B4))(0,0,0,0);
+     flag=db?*(uint16_t *)(db+50118):0;
+     unsigned char id=0xEE,v5=0xEE;
+     render_shift(image,width,height,pat_kind,pat_param,0,0);
+     trace_reset();
+     uint64_t irc=((entry)(ta_map+0x9E1F0))((uint64_t)(uintptr_t)image,1,
+                                            (uint64_t)(uintptr_t)&id,
+                                            (uint64_t)(uintptr_t)&v5);
+     int imax=trace_max,imach=trace_mach,imid=trace_midx;
+     unsigned char id2=0xEE,v52=0xEE;
+     render_shift(image,width,height,pat_kind,pat_param,dxs[1],dys[1]);
+     trace_reset();
+     uint64_t irc2=((entry)(ta_map+0x9E1F0))((uint64_t)(uintptr_t)image,1,
+                                             (uint64_t)(uintptr_t)&id2,
+                                             (uint64_t)(uintptr_t)&v52);
+     int vmax=trace_max,vmach=trace_mach,vidx=trace_midx;
+     unsigned type=0,size=0;uint64_t xrc=0xFFFFFFFFFFFFFFFFULL;size_t written=0;
+     if(pat_flag){
+      xrc=((entry)(ta_map+0xDFD20))(pat_finger,(uint64_t)(uintptr_t)&type,
+                                    (uint64_t)(uintptr_t)&size,
+                                    (uint64_t)(uintptr_t)tpl);
+      if(xrc==0&&size){
+       FILE *o=fopen(path,"wb");
+       if(o){written=fwrite(tpl,1,size,o);fclose(o);}
+      }
+     }
+     printf("{\"stage\":\"%s\",\"finger\":%u,\"pattern\":[%u,%u,%u],"
+            "\"image_bytes\":%u,\"enroll_rcs\":[%lld,%lld,%lld,%lld],"
+            "\"subtemplates_after\":[%d,%d,%d,%d],\"template_count\":%u,"
+            "\"valid_rc\":%lld,\"flag\":%u,"
+            "\"export_rc\":%lld,\"tpl_size\":%u,\"written\":%zu,"
+            "\"tpl_hash\":\"%016llx\","
+            "\"identify\":{\"rc\":%lld,\"max\":%d,\"mach\":%d,\"midx\":%d,"
+            "\"id\":%u,\"v5\":%u},"
+            "\"identify_shift\":{\"dx\":%d,\"dy\":%d,\"rc\":%lld,\"max\":%d,"
+            "\"mach\":%d,\"midx\":%d,\"id\":%u,\"v5\":%u}}\n",
+            case_name,pat_finger,pat_kind,pat_param,pat_perturb,bytes,
+            ercs[0],ercs[1],ercs[2],ercs[3],
+            subs[0],subs[1],subs[2],subs[3],count,(long long)vrc,flag,
+            (long long)xrc,size,written,
+            size?(unsigned long long)fnv1a(tpl,size):0ULL,
+            (long long)irc,imax,imach,imid,id,v5,
+            dxs[1],dys[1],(long long)irc2,vmax,vmach,vidx,id2,v52);
      fflush(stdout);return 0;
     }
    }
