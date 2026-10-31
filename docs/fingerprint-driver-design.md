@@ -55,6 +55,7 @@ Android FingerprintService
 | D16 | 增量录入有引导阈值，HAL 必须把 -6 反馈成“移动手指” | `FtEnrollTipsTemplate_v2`：与已存子模板 `DeltaOverlap >= 80` 且 `DeltaAng < 10` 时拒绝（`ret=-1` → `focal_EnrollByImage` 返回 **-6**，日志 `should move a little!`）；模板 `area < 90` 返回 **-4**；足够不同才新增子模板（`db+50116` 增长）。实测 40×196 连续 4 次录入 rc `[0,-6,-4,0]`、最终 2 个子模板；196×40 为 `[0,-6,0,-6]`。2 个子模板后同图与 2–3 px 平移探针都 identify→0（score 54/40、71/49）。HAL 录入流程需把 -6 当作“请移动手指”继续，而不是终止录入（2026-10-31） |
 | D17 | 模板删除走主机侧存储，不在 TA 内调 `FtDelTpl` | 模板与算法在主机侧（D10），删除一次录入 = 删除对应 blob 并在下次 init 时不重灌；离线每个重灌都是新进程，未重灌的 finger 库为空、identify 不会命中。TA 侧确有 `FtDelTpl` 名称串，wire 分发器 `sub_104B0` 也有 case 4/5（del user tpl / del all tpl），但那属于 TA 自身命令路径；只有将来保留长驻 TA 上下文时才需要定位 `FtDelTpl` 入口（2026-10-31） |
 | D18 | 模板 blob 按 fingerId 隔离，跨手指不会误匹配 | 同一进程给 finger 0（ridge+dots）与 finger 1（随机纹理）分别录入并导出 blob（238,970 / 239,762 B）；新进程同时重灌两个 blob 后，探针 A→id 0（score 54）、B→id 1（score 56，比较 2 个模板）；只重灌 finger 1 时探针 A→-2（max 0）、B→id 1。主机存储按手指保存/重灌即可获得正确隔离，不需要额外过滤（2026-10-31） |
+| D19 | 主机侧必须自行校验模板 blob；TA 导入先写库、后校验 CRC | CRC16 参数离线确认：反射多项式 0x8005（实现用 0xA001）、init 0、无输出反射/异或，覆盖 `[0, len-2)`，小端存于 `[len-2, len)`；三种几何导出 blob 复算全部一致（40×196 `0xB785`、196×40 `0xCEC0`、96×96 `0x645A`）。`FtIniAlgTplData_v1` 用头部解析出的 end offset（40×196 为 238,968）定位 CRC，**不按 `tplSize` 截断**：长度减 2 且尾部清零 → `-3`；若尾部仍是旧字节（短缓冲但内存残留）则 CRC 通过 → 短缓冲会读到声明长度之外 2 B，主机必须在调用前校验 `len == 该几何的期望长度`。40×196 篡改实验：payload 字节翻转 → `-3`；CRC 尾字节翻转 → `-3`；截断 2 B（尾部清零）→ `-3`；magic 翻转 → `-2`（`FtInitEnrollTplData` 报 headerSize 不符，库不可用）。关键：**CRC 失败发生在库已填充之后**——三种 `-3` 情形下 `db+50116=1`、`db+50118=1`，随后 identify 仍返回 0/id 0；因此主机不能忽略 load 返回值，必须预校验 magic/几何/CRC 使 `-3` 不可达；若仍出现非零 rc，应失败关闭本次认证、不得继续 identify。CRC 只防意外损坏，不防可重算 CRC 的恶意改写，blob 的机密性/完整性仍需主机存储层保护（2026-10-31） |
 
 ## 2. 命令协议（⬜ 逆向中，`fp-cmd-protocol.md`）
 
@@ -144,7 +145,7 @@ AOSP AIDL定义可用作接口与生命周期参考，但虚拟HAL的模拟录�
 - [ ] M4 主机侧算法桥：受限离线执行 TA/引擎的 enroll/identify 算法（原 listener 假设作废）
   - 2026-10-31：工作区前提已在离线 harness 验证（16 MiB 受保护映射，原 `0x9a94`+`0xd350` 精确清零）；全镜像装载后原算法本体已可执行（D12）。同日闭合 **enroll→有效化→identify** 离线闭环（D13）：96×96 合成图录入 40/68 极值、`0x9b57c`→0、调用原 `0xE83B4` 置模板有效后 `0x9E1F0`→0，同图 score 77、±24 扰动 score 45。也已闭合 **模板导出→新进程重灌→识别**（D15）：`FtGetTplData` 导出 238,970 B（40×196），`FtIniAlgTplData_v1` 重灌→0 并置有效位，同图 identify→0。下一步：用真实帧而不是合成图跑同一闭环，再谈图像质量门槛。
 - [ ] M5 主机侧模板存储 + 一次 enroll/authenticate 闭环（不含 STRONG/HAT 声明）
-  - 2026-10-31：持久化 ABI 已离线闭合（D15），存储内容可跨进程字节级还原（导出/读回 FNV 哈希一致）；2 个子模板的 blob 也能导出→重灌→识别（count 保持 2）。增量录入的引导语义（-6/-4）已记录（D16）。剩余：把该 blob 接进主机侧存储与 client driver，并用真实接触帧验证，而不是合成图案。
+  - 2026-10-31：持久化 ABI 已离线闭合（D15），存储内容可跨进程字节级还原（导出/读回 FNV 哈希一致）；2 个子模板的 blob 也能导出→重灌→识别（count 保持 2）。增量录入的引导语义（-6/-4）已记录（D16）。主机侧校验契约已定（D19）：magic/几何长度/CRC16 预校验，非零 load rc 视为会话失败。剩余：把该 blob 接进主机侧存储与 client driver，并用真实接触帧验证，而不是合成图案。
 - [ ] M6 client driver 成形（字符设备接口）
 - [ ] M7 Android 指纹 HAL，Settings 里能录/解锁
   - 测试环境约定（2026-10-31 用户要求）：安卓系统侧的录入/解锁联调**使用 CrDroid 镜像**；HyperOS 仅继续用于已有 TA/QSEECOM/算法实验。

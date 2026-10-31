@@ -120,6 +120,10 @@ def main():
                             ('bload40x196dimsfix:13:40:0:0',180),
                             ('persistsave40x196dimsfix:13:40',120),
                             ('persistload40x196dimsfix:13:40:0:1',120),
+                            ('persisttamperpayload40x196dimsfix:13:40:0:0',120),
+                            ('persisttampermagic40x196dimsfix:13:40:0:0',120),
+                            ('persisttampercrc40x196dimsfix:13:40:0:0',120),
+                            ('persisttampertrunc40x196dimsfix:13:40:0:0',120),
                             ('persistload40x196dimsfix:13:40:4:0',120),
                             ('persistload40x196dimsfix:4:0',120),
                             ('persistsave40x196dimsfix:13:40:0:0:1',120),
@@ -150,8 +154,19 @@ def main():
                              'template_export':'0xdfd20','template_import':'0xe0460',
                              'template_valid_flag':'0xe83b4'},
         'template_persistence':{
-            'tpl_type':121,'magic':'0x1415927d','crc':'crc16 over [0,tplSize-2)',
-            'observed_size_bytes':{'40x196':238970,'196x40':239938},
+            'tpl_type':121,'magic':'0x1415927d','crc':'crc16 over [0, header_end)',
+            'crc16':{'poly':'0x8005 reflected (0xa001)','init':0,'refin':True,
+                     'refout':False,'xorout':0,'coverage':'[0, len-2)',
+                     'storage':'little-endian u16 at [len-2, len)',
+                     'observed':{'40x196':'0xb785','196x40':'0xcec0','96x96':'0x645a'}},
+            'crc_offset':'header-derived end offset, not tplSize; a short buffer '
+                         'makes the loader read the 2 CRC bytes past the declared length',
+            'tamper_expectations':{'payload_flip':-3,'crc_flip':-3,'truncate2':-3,
+                                   'magic_flip':-2},
+            'tamper_note':'on -3 the TA has already populated the DB (count=1, flag=1) '
+                          'and identify still matches, so the host must pre-validate '
+                          'magic/geometry/crc and treat any non-zero load rc as fatal',
+            'observed_size_bytes':{'40x196':238970,'196x40':239938,'96x96':273962},
             'layout':'4 magic + 212 header + 96*(489 fixed + bin 984 + mask 981) + feat + 2 crc',
             'note':'import restores count=1 and db+50118=1 by itself; identify succeeds '
                    'in a fresh process with an identical image'},
