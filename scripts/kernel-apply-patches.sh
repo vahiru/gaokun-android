@@ -343,6 +343,8 @@ KPATCHES=(
     0136-drm-msm-dpu-expose-ABGR-and-XBGR-2101010-on-planes.patch
     # 0138：背光寄存器和亮度成线性，报成 linear，否则 HWC 接管背光后会再叠一条 HLG 曲线。
     0138-drm-panel-himax-hx83121a-report-a-linear-backlight-scale.patch
+    # 0141：vreg_l4b常开。原先只有usb_1_qmpphy用它，Type-C重配时断电，port1的USB2一侧可能冻住到重启（#53）。
+    0141-arm64-dts-gaokun3-vreg-l4b-always-on.patch
 )
 
 # ⚠️ 诊断补丁【不进发版内核】：只在带 --with-diag 时打。顺序有依赖：0028/0029 依赖 0023，

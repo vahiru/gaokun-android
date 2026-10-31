@@ -1,0 +1,35 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] arm64: dts: gaokun3: vreg_l4b常开
+
+这份设备树里只有usb_1_qmpphy（vdda-pll）用到vreg_l4b（0.912V），主线里
+usb_1_hsphy也持有它。UCSI切换插头方向或模式时，combo PHY强制重新初始化，
+l4b就会断电。断电后port1的USB2一侧可能冻住：端口不再看到插拔，设备拔掉后
+xHCI还显示已连接，再插也枚举不了，直到重启。USB3走QMP重新训练，不受影响，
+所以U盘这类设备看不出这个问题。
+
+不是每次断电都出事，现象是偶发的。有些开机时EC在启动阶段就发USB事件，重配
+发生在插设备之前，这次开机里USB2一开始就不能用。
+
+这和port0的vreg_l9d（0086）是同一类问题，映射同样来自linux-gaokun的20445ba。
+port1保持host角色时PHY一直持有这路电，常开不改变待机时的状态。
+
+问题由Rivarise在#53报告，并定位到Type-C重配这条路径。
+---
+--- a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
++++ b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
+@@ -440,6 +440,15 @@
+ 			regulator-min-microvolt = <912000>;
+ 			regulator-max-microvolt = <912000>;
+ 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
++			/*
++			 * usb_1_qmpphy is its only consumer here, but port1's
++			 * USB2 side needs it too: mainline also has usb_1_hsphy
++			 * on this rail. Without this, every forced combo PHY
++			 * re-initialisation (orientation or mode switch) turns
++			 * it off, and USB2 on port1 can stop seeing any plug
++			 * or unplug until reboot.
++			 */
++			regulator-always-on;
+ 			// HACK: wrongly voting for LPM may block DP Alt
+ 			// regulator-allow-set-load;
+ 			// regulator-allowed-modes = <RPMH_REGULATOR_MODE_LPM
