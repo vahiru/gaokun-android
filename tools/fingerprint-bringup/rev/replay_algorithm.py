@@ -108,11 +108,16 @@ def main():
             for case,timeout in (('init',20),('config',30),
                             ('quality96',60),('enroll96:13:40',60),
                             ('loop96:13:40:0:1',120),
+                            ('mutate96:13:40:0:0',180),
                             ('quality40x196dimsfix',60),('enroll40x196dimsfix:13:40',60),
                             ('loop40x196dimsfix:13:40:0:1',120),
                             ('quality196x40dimsfix',60),('enroll196x40dimsfix:13:40',60),
                             ('loop196x40dimsfix:13:40:0:1',120),
+                            ('mutate196x40dimsfix:13:40:0:0',180),
+                            ('mutate196x40dimsfix:13:40:2:0',180),
                             ('loop40x196dimsfix:13:40:0:0',120),
+                            ('mutate40x196dimsfix:13:40:0:0',180),
+                            ('mutate40x196dimsfix:13:40:2:0',180),
                             ('multi40x196dimsfix:13:40',180),
                             ('multipersist40x196dimsfix:13:40:0:1',180),
                             ('persistload40x196dimsfix:13:40:0:0',120),
@@ -181,6 +186,9 @@ def main():
                                'and 196x40; width/height and the 124-byte config are '
                                'not stored in the blob, so the host store must persist '
                                '{width,height,config-hash} alongside it',
+            'identify_mutation':'default config: export hash/size identical before '
+                                'and after a successful match (same image and 2 px '
+                                'shift) for 40x196, 196x40 and 96x96',
             'host_store':{'module':'../host-store','container':'FPT1 + 64-byte header + blob',
                           'verified':['storesave/storeload 40x196, 196x40, 96x96',
                                       '40x196 container rejected when read as 196x40']},

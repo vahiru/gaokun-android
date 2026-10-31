@@ -602,6 +602,60 @@ int main(int argc,char **argv){
      fflush(stdout);return 0;
     }
    }
+   if(!strncmp(case_name,"mutate",6)&&image_instance==0){
+    unsigned width=*(uint32_t *)cfg,height=*(uint32_t *)(cfg+4),bytes=width*height;
+    unsigned char *image=arena_alloc(bytes);
+    unsigned char *tpl=arena_alloc(512*1024);
+    if(image&&tpl){
+     render_shift(image,width,height,pat_kind,pat_param,0,0);
+     uint64_t erc=((entry)(ta_map+0x9b57c))(pat_finger,0,
+                                            (uint64_t)(uintptr_t)image,0);
+     unsigned type=0,sizeA=0,sizeB=0;
+     uint64_t xrcA=0xFFFFFFFFFFFFFFFFULL,xrcB=0xFFFFFFFFFFFFFFFFULL;
+     uint64_t hashA=0,hashB=0;
+     if(erc==0){
+      xrcA=((entry)(ta_map+0xDFD20))(pat_finger,(uint64_t)(uintptr_t)&type,
+                                     (uint64_t)(uintptr_t)&sizeA,
+                                     (uint64_t)(uintptr_t)tpl);
+      if(xrcA==0&&sizeA)hashA=fnv1a(tpl,sizeA);
+     }
+     unsigned char *probe=image;
+     if(pat_perturb){
+      probe=arena_alloc(bytes);
+      if(probe)render_shift(probe,width,height,pat_kind,pat_param,
+                            (int)pat_perturb,(int)pat_perturb);
+      else probe=image;
+     }
+     unsigned char id=0xEE,v5=0xEE;
+     trace_reset();
+     uint64_t irc=((entry)(ta_map+0x9E1F0))((uint64_t)(uintptr_t)probe,1,
+                                            (uint64_t)(uintptr_t)&id,
+                                            (uint64_t)(uintptr_t)&v5);
+     if(erc==0){
+      xrcB=((entry)(ta_map+0xDFD20))(pat_finger,(uint64_t)(uintptr_t)&type,
+                                     (uint64_t)(uintptr_t)&sizeB,
+                                     (uint64_t)(uintptr_t)tpl);
+      if(xrcB==0&&sizeB)hashB=fnv1a(tpl,sizeB);
+     }
+     uintptr_t dbs=*(uintptr_t *)(ta_map+0x361540);
+     uintptr_t db=dbs?((uintptr_t *)dbs)[pat_finger]:0;
+     unsigned count=db?*(uint16_t *)(db+50116):0;
+     unsigned flag=db?*(uint16_t *)(db+50118):0;
+     const char *mut=(xrcA==0&&xrcB==0&&sizeA&&sizeB)?
+                     (hashA==hashB?"false":"true"):"unknown";
+     printf("{\"stage\":\"%s\",\"finger\":%u,\"pattern\":[%u,%u,%u],"
+            "\"geometry\":[%u,%u],\"enroll_rc\":%lld,"
+            "\"export_before\":{\"rc\":%lld,\"size\":%u,\"hash\":\"%016llx\"},"
+            "\"identify\":{\"rc\":%lld,\"id\":%u,\"v5\":%u},"
+            "\"export_after\":{\"rc\":%lld,\"size\":%u,\"hash\":\"%016llx\"},"
+            "\"template_count\":%u,\"flag\":%u,\"mutated\":%s}\n",
+            case_name,pat_finger,pat_kind,pat_param,pat_perturb,width,height,
+            (long long)erc,(long long)xrcA,sizeA,(unsigned long long)hashA,
+            (long long)irc,id,v5,(long long)xrcB,sizeB,
+            (unsigned long long)hashB,count,flag,mut);
+     fflush(stdout);return 0;
+    }
+   }
    if(!strncmp(case_name,"multi",5)&&image_instance==0){
     unsigned width=*(uint32_t *)cfg,height=*(uint32_t *)(cfg+4),bytes=width*height;
     unsigned char *image=arena_alloc(bytes);
