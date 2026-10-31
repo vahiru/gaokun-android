@@ -1,0 +1,164 @@
+v4l2_codec2：声明HDR静态元数据，并随输出帧传下去
+
+应用到AOSP树的external/v4l2_codec2，由scripts/crdroid-tree-fixes.py第34条自动应用（幂等），
+排在0019、0128和[30]后面。别往内核树上打。
+
+框架只有在解码器声明了C2StreamHdrStaticInfo时，才会给HEVC列出Main10 HDR10这个profile
+（Codec2InfoBuilder.cpp），而按profile选片源的应用要看到它才会选HDR10。VP9框架默认算支持。
+这里给HEVC和VP9加上这个参数。
+
+值由客户端设置：容器里的mastering display和content light level经MediaFormat的
+hdr-static-info传进来。CCodecBufferChannel只从输出缓冲上读这份数据，所以每帧都要setInfo，
+SF才能拿到。没有元数据时不附加。
+
+几个容易漏的点：
+
+- ToneMapper13的内容峰值写死成4000尼特，不读这份元数据，所以它现在不改变画面。真正起作用的是声明这个
+  参数：框架靠它列出Main10 HDR10。
+- 只传容器带的元数据，不解析码流里的SEI。系统的MPEG4Extractor不读mdcv和clli，只有Media3这类自己
+  解析容器的播放器才传得进来。
+- HDR10+的动态元数据不支持。
+- 不要照抄C2SoftGav1Dec的字段列表，它把mastering.white.x写了两遍，漏了y。
+
+diff --git a/components/DecodeComponent.cpp b/components/DecodeComponent.cpp
+index 305b1ff..d1e9b2b 100644
+--- a/components/DecodeComponent.cpp
++++ b/components/DecodeComponent.cpp
+@@ -622,6 +622,10 @@ void DecodeComponent::onOutputFrameReady(std::unique_ptr<VideoFrame> frame) {
+     if (mCurrentColorAspects) {
+         buffer->setInfo(mCurrentColorAspects);
+     }
++    std::shared_ptr<C2StreamHdrStaticInfo::output> hdrStaticInfo;
++    if (mIntfImpl->queryHdrStaticInfo(&hdrStaticInfo) == C2_OK) {
++        buffer->setInfo(hdrStaticInfo);
++    }
+     work->worklets.front()->output.buffers.emplace_back(std::move(buffer));
+ 
+     // Check no-show frame by timestamps for VP8/VP9 cases before reporting the current work.
+diff --git a/components/DecodeInterface.cpp b/components/DecodeInterface.cpp
+index db560db..3d751d3 100644
+--- a/components/DecodeInterface.cpp
++++ b/components/DecodeInterface.cpp
+@@ -7,6 +7,8 @@
+ 
+ #include <v4l2_codec2/components/DecodeInterface.h>
+ 
++#include <algorithm>
++
+ #include <C2PlatformSupport.h>
+ #include <SimpleC2Interface.h>
+ #include <android/hardware/graphics/common/1.0/types.h>
+@@ -81,6 +83,26 @@ C2R DecodeInterface::DefaultColorAspectsSetter(bool /* mayBlock */, C2P<T>& def)
+     return C2R::Ok();
+ }
+ 
++// static
++C2R DecodeInterface::HdrStaticInfoSetter(bool /* mayBlock */,
++                                         C2P<C2StreamHdrStaticInfo::output>& info) {
++    const auto clamp = [](float value, float max) { return std::clamp(value, 0.f, max); };
++    C2StreamHdrStaticInfo::output& m = info.set();
++    m.mastering.red.x = clamp(m.mastering.red.x, 1.f);
++    m.mastering.red.y = clamp(m.mastering.red.y, 1.f);
++    m.mastering.green.x = clamp(m.mastering.green.x, 1.f);
++    m.mastering.green.y = clamp(m.mastering.green.y, 1.f);
++    m.mastering.blue.x = clamp(m.mastering.blue.x, 1.f);
++    m.mastering.blue.y = clamp(m.mastering.blue.y, 1.f);
++    m.mastering.white.x = clamp(m.mastering.white.x, 1.f);
++    m.mastering.white.y = clamp(m.mastering.white.y, 1.f);
++    m.mastering.maxLuminance = clamp(m.mastering.maxLuminance, 65535.f);
++    m.mastering.minLuminance = clamp(m.mastering.minLuminance, 6.5535f);
++    m.maxCll = clamp(m.maxCll, 65535.f);
++    m.maxFall = clamp(m.maxFall, 65535.f);
++    return C2R::Ok();
++}
++
+ // static
+ C2R DecodeInterface::MergedColorAspectsSetter(bool /* mayBlock */,
+                                               C2P<C2StreamColorAspectsInfo::output>& merged,
+@@ -407,6 +429,29 @@ DecodeInterface::DecodeInterface(const std::string& name,
+                     .withSetter(DefaultColorAspectsSetter)
+                     .build());
+ 
++    if (mVideoCodec == VideoCodec::HEVC || mVideoCodec == VideoCodec::VP9) {
++        helper->addStructDescriptors<C2MasteringDisplayColorVolumeStruct, C2ColorXyStruct>();
++        addParameter(DefineParam(mHdrStaticInfo, C2_PARAMKEY_HDR_STATIC_INFO)
++                             .withDefault(new C2StreamHdrStaticInfo::output(
++                                     0u, C2HdrStaticMetadataStruct{}))
++                             .withFields({C2F(mHdrStaticInfo, mastering.red.x).inRange(0, 1),
++                                          C2F(mHdrStaticInfo, mastering.red.y).inRange(0, 1),
++                                          C2F(mHdrStaticInfo, mastering.green.x).inRange(0, 1),
++                                          C2F(mHdrStaticInfo, mastering.green.y).inRange(0, 1),
++                                          C2F(mHdrStaticInfo, mastering.blue.x).inRange(0, 1),
++                                          C2F(mHdrStaticInfo, mastering.blue.y).inRange(0, 1),
++                                          C2F(mHdrStaticInfo, mastering.white.x).inRange(0, 1),
++                                          C2F(mHdrStaticInfo, mastering.white.y).inRange(0, 1),
++                                          C2F(mHdrStaticInfo, mastering.maxLuminance)
++                                                  .inRange(0, 65535),
++                                          C2F(mHdrStaticInfo, mastering.minLuminance)
++                                                  .inRange(0, 6.5535),
++                                          C2F(mHdrStaticInfo, maxCll).inRange(0, 65535),
++                                          C2F(mHdrStaticInfo, maxFall).inRange(0, 65535)})
++                             .withSetter(HdrStaticInfoSetter)
++                             .build());
++    }
++
+     // At this moment v4l2_codec2 support decoding this information only for
+     // unprotected H264 and both protected and unprotected HEVC.
+     if ((mVideoCodec == VideoCodec::H264 && !secureMode) || mVideoCodec == VideoCodec::HEVC) {
+@@ -436,6 +481,23 @@ size_t DecodeInterface::getInputBufferSize() const {
+     return mMaxInputSize->value;
+ }
+ 
++c2_status_t DecodeInterface::queryHdrStaticInfo(
++        std::shared_ptr<C2StreamHdrStaticInfo::output>* targetInfo) {
++    if (!mHdrStaticInfo) {
++        return C2_NOT_FOUND;
++    }
++    auto info = std::make_unique<C2StreamHdrStaticInfo::output>(0u, C2HdrStaticMetadataStruct{});
++    c2_status_t status = query({info.get()}, {}, C2_DONT_BLOCK, nullptr);
++    if (status != C2_OK) {
++        return status;
++    }
++    if (info->mastering.maxLuminance <= 0.f && info->maxCll <= 0.f) {
++        return C2_NOT_FOUND;
++    }
++    *targetInfo = std::move(info);
++    return C2_OK;
++}
++
+ c2_status_t DecodeInterface::queryColorAspects(
+         std::shared_ptr<C2StreamColorAspectsInfo::output>* targetColorAspects) {
+     std::unique_ptr<C2StreamColorAspectsInfo::output> colorAspects =
+diff --git a/components/include/v4l2_codec2/components/DecodeInterface.h b/components/include/v4l2_codec2/components/DecodeInterface.h
+index 7e513c5..d5c006b 100644
+--- a/components/include/v4l2_codec2/components/DecodeInterface.h
++++ b/components/include/v4l2_codec2/components/DecodeInterface.h
+@@ -35,6 +35,8 @@ public:
+     size_t getInputBufferSize() const;
+     c2_status_t queryColorAspects(
+             std::shared_ptr<C2StreamColorAspectsInfo::output>* targetColorAspects);
++    // Returns C2_NOT_FOUND when the client gave no HDR static metadata.
++    c2_status_t queryHdrStaticInfo(std::shared_ptr<C2StreamHdrStaticInfo::output>* targetInfo);
+ 
+ private:
+     // Configurable parameter setters.
+@@ -48,6 +50,8 @@ private:
+     template <typename T>
+     static C2R DefaultColorAspectsSetter(bool mayBlock, C2P<T>& def);
+ 
++    static C2R HdrStaticInfoSetter(bool mayBlock, C2P<C2StreamHdrStaticInfo::output>& info);
++
+     static C2R MergedColorAspectsSetter(bool mayBlock,
+                                         C2P<C2StreamColorAspectsInfo::output>& merged,
+                                         const C2P<C2StreamColorAspectsTuning::output>& def,
+@@ -100,6 +104,10 @@ private:
+     // as C2Info in decoded output buffers.
+     std::shared_ptr<C2StreamColorAspectsInfo::output> mColorAspects;
+ 
++    // HDR static metadata from the container, set by the client. The framework advertises the HDR
++    // profiles of HEVC only for decoders with this parameter. Passed through with the output.
++    std::shared_ptr<C2StreamHdrStaticInfo::output> mHdrStaticInfo;
++
+     c2_status_t mInitStatus;
+     std::optional<VideoCodec> mVideoCodec;
+ };

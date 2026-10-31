@@ -66,15 +66,22 @@ HDR 图层上屏 ─→ 框架算出提亮后的亮度 ─→ SF 压暗 SDR 图�
 - 框架只在 HDR 图层占屏幕 10% 以上时提亮，省电模式下不提亮。亮度条在最大时没有提亮空间。
 - 色调映射保持默认的 500 尼特目标。调低它中间调会变亮，但高光压缩得更早，天空这类大面积亮部会发白。
 - HWC 只把背光绑给内置屏。sysfs 没有说明背光属于哪个连接器，绑给外接显示器的话，它的亮度会写到内置屏上。
-- 显示器没有声明 HDR 类型，所以 YouTube 这类按显示能力选片源的应用不会选 HDR 片源。
-- Ultra HDR 照片还是按 SDR 显示。声明 HDR 类型后 Glimpse 没试，Edge 仍然不提亮：Chromium 只在系统
-  已经提亮时才按 HDR 渲染，单张图片不会触发。
+- HWC 给内置屏声明 HDR10 和 HLG（patches/0140，`vendor.hwc.drm.force_hdr_support`），应用靠 `Display.isHdr()`
+  选片源。声明之后 SF 不再把 HDR 图层强制交给 GPU，平面又做不了色调映射，所以 HWC 自己转给 GPU。
+- v4l2_codec2 声明 HDR 静态元数据（patches/0139），框架才会给 HEVC 列出 Main10 HDR10。元数据只来自容器，
+  不解析码流里的 SEI；系统的 MP4 提取器不读 `mdcv` 和 `clli`，只有 Media3 这类自己解析容器的播放器传得进来。
+  HDR10+ 不支持。
+- ToneMapper13 的内容峰值写死 4000 尼特，不读静态元数据，所以元数据不改变画面。
+- Ultra HDR 要应用自己申请 `COLOR_MODE_HDR`。Google 相册可以提亮；Glimpse 和 Edge 不申请，按 SDR 显示。
+  Chromium 只在系统已经提亮时才按 HDR 渲染，单张图片不会触发。
 
 ## 排查
 
 ```sh
 dumpsys display | grep -E 'BacklightAdapter|mHdrBrightnessData|mMode='   # useSurfaceControl=true，播 HDR 时 mMode=HBM_HDR
 dumpsys SurfaceFlinger | grep displayBrightnessNits              # 提亮时 displayBrightnessNits 大于 sdrWhitePointNits
+dumpsys SurfaceFlinger | grep 'HWC Support'                      # hdr10=true hlg=true
+dumpsys media.player | grep Main10HDR10                          # HEVC 解码器列出 HDR10 profile
 cat /sys/class/backlight/*/scale                                 # linear
 dmesg | grep 'factory calibration'     # 两行，0 = sRGB，1 = P3，后面是 Q15 矩阵
 dumpsys SurfaceFlinger | grep -E 'Device supports wide color|Current color mode'

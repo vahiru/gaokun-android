@@ -1288,16 +1288,27 @@ def main():
         tree, "external/drm_hwcomposer",
         "0131-drm-hwcomposer-10-bit-client-target.patch",
         covered_by=("0132-drm-hwcomposer-switch-panels-between-srgb-and-display-p3.patch",
-                    "0137-drm-hwcomposer-dim-layers-through-the-gpu.patch")))
+                    "0137-drm-hwcomposer-dim-layers-through-the-gpu.patch",
+                    "0140-drm-hwcomposer-declare-hdr-on-internal-panels.patch")))
     # 要和内核 0134 的 Colorspace 属性、device.mk 的两个属性一起生效；没有 Colorspace 属性时 HWC 保持原样。
     step(" [32] drm_hwcomposer 让内置屏在 sRGB 和 Display P3 之间切换: ", apply_patch_file(
         tree, "external/drm_hwcomposer",
         "0132-drm-hwcomposer-switch-panels-between-srgb-and-display-p3.patch",
-        covered_by=("0137-drm-hwcomposer-dim-layers-through-the-gpu.patch",)))
+        covered_by=("0137-drm-hwcomposer-dim-layers-through-the-gpu.patch",
+                    "0140-drm-hwcomposer-declare-hdr-on-internal-panels.patch")))
 
     step(" [33] drm_hwcomposer 让压暗的图层走 GPU（HDR 提亮）: ", apply_patch_file(
         tree, "external/drm_hwcomposer",
-        "0137-drm-hwcomposer-dim-layers-through-the-gpu.patch"))
+        "0137-drm-hwcomposer-dim-layers-through-the-gpu.patch",
+        covered_by=("0140-drm-hwcomposer-declare-hdr-on-internal-panels.patch",)))
+
+    # 声明 HDR：[34] 让框架列出 HEVC 的 HDR10 profile，[35] 让应用看到显示器支持 HDR，两条一起才有意义。
+    step(" [34] v4l2_codec2 声明 HDR 静态元数据: ", apply_patch_file(
+        tree, "external/v4l2_codec2",
+        "0139-v4l2-codec2-pass-hdr-static-metadata.patch"))
+    step(" [35] drm_hwcomposer 内置屏声明 HDR10 和 HLG: ", apply_patch_file(
+        tree, "external/drm_hwcomposer",
+        "0140-drm-hwcomposer-declare-hdr-on-internal-panels.patch"))
     # 游戏环境如实修正：fingerprint 尾部 userdebug→user，与 ro.build.type=user 对齐
     # （Duck Detector system_properties 3 条 danger 的根；运行时改不掉 Build.FINGERPRINT 常量）
     step(" [23] BUILD_FINGERPRINT/THUMBPRINT/SYSTEM_FINGERPRINT 变体段改写成 user（与 ro.build.type 对齐）: ",

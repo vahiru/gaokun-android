@@ -1,0 +1,164 @@
+drm_hwcomposer：内置屏声明HDR10和HLG
+
+应用到AOSP树的external/drm_hwcomposer，由scripts/crdroid-tree-fixes.py第35条自动应用（幂等），
+排在0137后面。别往内核树上打。
+
+应用靠Display.isHdr()判断要不要选HDR片源，它只看显示器声明的HDR类型。这块屏没有HDR元数据，
+但0137之后有提亮，SF也能做色调映射，所以用vendor.hwc.drm.force_hdr_support声明HDR10和HLG。
+亮度留0，SF继续用默认的500尼特目标；上报真实峰值反而会让高光压得太早。
+
+几个容易漏的点：
+
+- 声明之后SF不再把HDR图层强制交给GPU，而平面做不了色调映射，所以HWC要自己转给GPU。
+  判断放在ColorConversionByGpu，有color pipeline的设备不受影响。
+- HLG原来映射成kUnknown，每帧打一行错误日志，也认不出是HDR，这里加上kHlg。
+- 输出不切BT2100_PQ：HWC没有这个模式，SF按legacy HDR处理，继续输出P3。
+
+diff --git a/compositor/LayerData.h b/compositor/LayerData.h
+index 004c17a..86f7f7d 100644
+--- a/compositor/LayerData.h
++++ b/compositor/LayerData.h
+@@ -45,6 +45,7 @@ enum class TransferFunction : int32_t {
+   kUnknown,
+   kSrgb,
+   kPq,
++  kHlg,
+ };
+ 
+ /* Rotation is defined in the clockwise direction */
+diff --git a/drm/ResourceManager.cpp b/drm/ResourceManager.cpp
+index defec12..983b632 100644
+--- a/drm/ResourceManager.cpp
++++ b/drm/ResourceManager.cpp
+@@ -51,6 +51,7 @@ void ResourceManager::Init() {
+ 
+   color_pipeline_enabled_ = Properties::UseColorPipeline();
+   force_p3_support_ = Properties::ForceP3Support();
++  force_hdr_support_ = Properties::ForceHdrSupport();
+ 
+   // Could be a valid path or it can have at the end of it the wildcard %
+   // which means that it will try open all devices until an error is met.
+diff --git a/drm/ResourceManager.h b/drm/ResourceManager.h
+index 03b10d8..ab498bf 100644
+--- a/drm/ResourceManager.h
++++ b/drm/ResourceManager.h
+@@ -72,6 +72,10 @@ class ResourceManager {
+   bool ForceP3Support() const {
+     return force_p3_support_;
+   }
++
++  bool ForceHdrSupport() const {
++    return force_hdr_support_;
++  }
+   auto &GetMainLock() {
+     return main_lock_;
+   }
+@@ -97,6 +101,7 @@ class ResourceManager {
+   CtmHandling ctm_handling_{};
+   bool color_pipeline_enabled_{};
+   bool force_p3_support_{};
++  bool force_hdr_support_{};
+ 
+   std::shared_ptr<UEventListener> uevent_listener_;
+ 
+diff --git a/hwc/HwcDisplay.cpp b/hwc/HwcDisplay.cpp
+index 3b712bd..7c40df8 100644
+--- a/hwc/HwcDisplay.cpp
++++ b/hwc/HwcDisplay.cpp
+@@ -871,7 +871,22 @@ void HwcDisplay::GetHdrCapabilities(std::vector<ui::Hdr> *types,
+                                     float *max_luminance,
+                                     float *max_average_luminance,
+                                     float *min_luminance) {
+-  if (IsInHeadlessMode() || !hwc_->GetResMan().UseColorPipeline()) {
++  if (IsInHeadlessMode()) {
++    return;
++  }
++
++  // A panel without HDR metadata still shows HDR through SurfaceFlinger's tone
++  // mapping, with headroom from the backlight. Apps look at these types to
++  // decide whether to send HDR. Leaving the luminance at 0 keeps the default
++  // tone mapping target of SurfaceFlinger.
++  if (GetPipe().connector->Get()->IsInternal() &&
++      hwc_->GetResMan().ForceHdrSupport()) {
++    types->push_back(ui::Hdr::HDR10);
++    types->push_back(ui::Hdr::HLG);
++    return;
++  }
++
++  if (!hwc_->GetResMan().UseColorPipeline()) {
+     return;
+   }
+ 
+@@ -1309,6 +1324,12 @@ bool HwcDisplay::ColorConversionByGpu(const HwcLayer *layer) const {
+     return false;
+   }
+ 
++  // SurfaceFlinger stops forcing HDR layers to the GPU once the display declares
++  // HDR types, but only the GPU path tone maps them.
++  if (layer->IsHdr()) {
++    return true;
++  }
++
+   // Otherwise there is no per-plane gamut mapping, so scanning out a layer that
+   // isn't already in the output's color space would show the wrong colors.
+   const bool p3_layer = layer->GetColorspace() == Colorspace::kDciP3RgbD65;
+diff --git a/hwc/HwcLayer.h b/hwc/HwcLayer.h
+index c8aff93..edc61b6 100644
+--- a/hwc/HwcLayer.h
++++ b/hwc/HwcLayer.h
+@@ -102,6 +102,11 @@ class HwcLayer {
+     return transfer_func_;
+   }
+ 
++  bool IsHdr() const {
++    return transfer_func_ == TransferFunction::kPq ||
++           transfer_func_ == TransferFunction::kHlg;
++  }
++
+   // SurfaceFlinger dims SDR layers while the backlight is raised for HDR
+   // content. Planes can't do that, so such a layer has to go through the GPU.
+   bool NeedsDimming() const {
+diff --git a/hwc3/ComposerClient.cpp b/hwc3/ComposerClient.cpp
+index 12857f3..8c4d8ec 100644
+--- a/hwc3/ComposerClient.cpp
++++ b/hwc3/ComposerClient.cpp
+@@ -212,6 +212,8 @@ std::optional<TransferFunction> AidlToTransferFunc(
+   switch (transfer_func) {
+     case static_cast<int32_t>(common::Dataspace::TRANSFER_ST2084):
+       return TransferFunction::kPq;
++    case static_cast<int32_t>(common::Dataspace::TRANSFER_HLG):
++      return TransferFunction::kHlg;
+     case static_cast<int32_t>(common::Dataspace::TRANSFER_SRGB):
+       return TransferFunction::kSrgb;
+     case static_cast<int32_t>(common::Dataspace::UNKNOWN):
+diff --git a/utils/properties.cpp b/utils/properties.cpp
+index f8063a9..c892338 100644
+--- a/utils/properties.cpp
++++ b/utils/properties.cpp
+@@ -92,6 +92,14 @@ auto Properties::ForceP3Support() -> bool {
+   return (property_get_bool("vendor.hwc.drm.force_p3_support", 0) != 0);
+ }
+ 
++/**
++ * Declares HDR10 and HLG on internal panels that have no HDR metadata, and rely
++ * on SurfaceFlinger's tone mapping instead.
++ */
++auto Properties::ForceHdrSupport() -> bool {
++  return (property_get_bool("vendor.hwc.drm.force_hdr_support", 0) != 0);
++}
++
+ /**
+  * Determine if color pipeline feature is enabled. This uses the color pipeline
+  * plane property to configure color settings instead of color_encoding etc.
+diff --git a/utils/properties.h b/utils/properties.h
+index 1c9b182..728a619 100644
+--- a/utils/properties.h
++++ b/utils/properties.h
+@@ -40,6 +40,7 @@ class Properties {
+   static auto DropDrmMasterAfterInit() -> bool;
+   static auto ForcedHolePunchingEnabled() -> bool;
+   static auto ForceP3Support() -> bool;
++  static auto ForceHdrSupport() -> bool;
+ };
+ 
+ }  // namespace android::drm_hwcomposer
