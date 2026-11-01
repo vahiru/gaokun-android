@@ -1,0 +1,10 @@
+# Kernel release reported to apps (patches/0085), persist.sys.gaokun3.app_kernel_*.
+#
+# persist.sys.* is system_prop, which every app can read. This type keeps the setting
+# from them: Parts writes it, and vendor_init reads it for init.gaokun3.rc.
+#
+# It is here and not in sepolicy/ because vendor policy cannot give a context to a
+# persist.sys.* name, and Parts, being a coredomain, cannot set a vendor property.
+system_restricted_prop(gaokun3_app_kernel_prop)
+set_prop(system_app, gaokun3_app_kernel_prop)
+get_prop(vendor_init, gaokun3_app_kernel_prop)

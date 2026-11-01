@@ -61,4 +61,18 @@
     <string name="touch_mode_tile_label">Game touch</string>
     <string name="touch_mode_game">Game</string>
     <string name="touch_mode_daily">Everyday</string>
+
+    <!-- Kernel version spoofing (AppKernelSettingsActivity), injected into Settings → System. -->
+    <string name="app_kernel_title">Kernel version spoofing</string>
+    <string name="app_kernel_summary">The kernel version reported to apps</string>
+    <string name="app_kernel_switch_title">Report a different version to apps</string>
+    <string name="app_kernel_switch_summary_on">Non-system apps will read the kernel version set here</string>
+    <string name="app_kernel_switch_summary_off">Non-system apps will read the real kernel version</string>
+    <string name="app_kernel_version_title">Version reported to non-system apps</string>
+    <string name="app_kernel_version_invalid">Enter a version such as 6.6.30, using only letters, digits and . _ + -, at most 64 characters.</string>
+    <string name="app_kernel_real_title">Real kernel version</string>
+    <string name="app_kernel_note">Some apps only accept running on kernel 6.x or older. This setting only affects the kernel version number that non-system apps read; system components can still read the real version. Changes apply after a restart.</string>
+    <string name="app_kernel_restart_message">Changes apply after a restart. Restart now?</string>
+    <string name="app_kernel_restart_now">Restart</string>
+    <string name="app_kernel_restart_later">Later</string>
 </resources>

@@ -44,5 +44,9 @@ type gaokun3_firmware_file, vendor_file_type, file_type;
 # 通用 sysfs 也不在里面。给这一个文件专用类型，规则在 sepolicy/init.te。
 type gaokun3_sysfs_disk_queue, fs_type, sysfs_type;
 
+# Kernel release reported to apps (patches/0085): init.gaokun3.rc writes it during boot.
+# The rule is in sepolicy/vendor_init.te.
+type gaokun3_proc_app_osrelease, fs_type, proc_type;
+
 # 手写笔：触摸从片驱动（patches/0079）的 /dev/gk3_pen，只有 gk3pend 读写
 type gaokun3_pen_device, dev_type;

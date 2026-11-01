@@ -71,6 +71,13 @@ on property:persist.sys.gaokun3.allow_suspend=1
 on property:persist.sys.gaokun3.allow_suspend=0
     setprop persist.vendor.gaokun3.allow_suspend 0
 
+# Kernel release reported to apps (patches/0085, Settings → System → Kernel version spoofing).
+# load-bpf-programs is the first trigger after post-fs-data loads the persist props, and it
+# runs before zygote-start, so no app ever sees another value. Unset or off: apps see the real
+# release. A value the kernel refuses fails the write and has the same result.
+on load-bpf-programs && property:persist.sys.gaokun3.app_kernel_custom=1 && property:persist.sys.gaokun3.app_kernel_release=*
+    write /proc/sys/kernel/app_osrelease ${persist.sys.gaokun3.app_kernel_release}
+
 # ═══ 背光节点交给 lights HAL（它跑 system:system，不跑 root）═══
 # ⚠️ init 的 chown 不支持通配，所以这里写的是实际路径。它来自设备树里的 DSI
 #    节点地址 —— 换 DTB / 换面板就会变。HAL 那边是 glob 找的，写失败会在

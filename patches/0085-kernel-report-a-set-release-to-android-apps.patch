@@ -1,0 +1,155 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] kernel: report a set release to Android apps
+
+Mainline 7.x is newer than the kernels Android apps expect, and some
+environment checks accept only 4.x to 6.x. This patch used to overwrite
+init_uts_ns with a fixed Android kernel release, which told the same thing to
+the whole system: netd and the BPF loader needed ro.bpf.kver_override to keep
+to the right code path, and that property has no context of its own, so the
+default_prop rules leave it readable by apps. libvintf misjudged the kernel
+level, ksud took the kernel for android15-6.6, and bug reports and tombstones
+carried the wrong version.
+
+Keep the real release for everything and answer only Android apps with
+another one. The new kernel.app_osrelease sysctl holds it, empty means the real
+release, and nothing is compiled in. init writes it before zygote starts, from
+a property the user can change in Settings.
+
+An app is any UID whose app ID (uid % 100000) is 10000 or more, which includes
+isolated processes and other users' apps, but not the overflow UID. uname() is
+the only place apps can read the release, through override_release():
+/proc/sys/kernel/osrelease and /proc/version are closed to them by SELinux
+(system/sepolicy private/coredomain.te and app_neverallows.te), so those two
+stay real. The whole field is written, because newuname() has already copied
+the real release to the caller and a shorter value would leave its tail there.
+
+The value must start with "major.minor" and use only letters, digits and
+"._+-", because Android parses it. The sysctl is 0600, so only root can read or
+set it, and SELinux limits that to vendor_init.
+
+LINUX_VERSION_CODE, vermagic and linux_banner are unchanged. The vDSO's
+.note.Linux also still holds the real version; this does not hide it.
+
+Two ROM changes go with this, see scripts/crdroid-tree-fixes.py [36] and [37]:
+zygote reads uname() as root, so os.version has to be re-read in each
+specialized process, and init must not publish ro.kernel.version.
+---
+ kernel/sys.c | 96 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 96 insertions(+)
+
+diff --git a/kernel/sys.c b/kernel/sys.c
+index 35b538ba8..12bdfcaac 100644
+--- a/kernel/sys.c
++++ b/kernel/sys.c
+@@ -1316,6 +1316,93 @@ DECLARE_RWSEM(uts_sem);
+ #define override_architecture(name)	0
+ #endif
+ 
++/*
++ * Android: the release apps are told instead of the real one, empty for the
++ * real one. Nothing else sees it, so the version checks in netd, the BPF loader
++ * and libvintf stay correct. init sets it before zygote starts, from a property
++ * the user can change in Settings.
++ *
++ * SELinux keeps apps out of /proc/version and /proc/sys/kernel/osrelease, which
++ * leaves uname().
++ */
++#define ANDROID_USER_OFFSET	100000	/* AID_USER_OFFSET */
++#define ANDROID_APP_START	10000	/* AID_APP_START */
++#define ANDROID_OVERFLOW_UID	65534	/* AID_OVERFLOWUID, not an app */
++
++static char app_release[__NEW_UTS_LEN + 1];
++
++/* If current should see the app release, copy it to buf and return true. */
++static bool uts_app_release(char *buf)
++{
++	uid_t appid = from_kuid(&init_user_ns, current_uid()) % ANDROID_USER_OFFSET;
++	bool set;
++
++	if (appid < ANDROID_APP_START || appid == ANDROID_OVERFLOW_UID)
++		return false;
++
++	down_read(&uts_sem);
++	set = app_release[0];
++	if (set)
++		memcpy(buf, app_release, sizeof(app_release));
++	up_read(&uts_sem);
++	return set;
++}
++
++#ifdef CONFIG_SYSCTL
++/* Whatever parses a release expects it to start with "major.minor". */
++static bool app_release_valid(const char *s)
++{
++	unsigned int major, minor;
++	const char *p;
++
++	for (p = s; *p; p++)
++		if (!isalnum(*p) && !strchr("._+-", *p))
++			return false;
++	return sscanf(s, "%u.%u", &major, &minor) == 2;
++}
++
++static int proc_app_release(const struct ctl_table *table, int write,
++			    void *buffer, size_t *lenp, loff_t *ppos)
++{
++	char tmp[sizeof(app_release)];
++	struct ctl_table t = *table;
++	int ret;
++
++	t.data = tmp;
++	down_read(&uts_sem);
++	memcpy(tmp, app_release, sizeof(tmp));
++	up_read(&uts_sem);
++
++	ret = proc_dostring(&t, write, buffer, lenp, ppos);
++	if (ret || !write)
++		return ret;
++	if (tmp[0] && !app_release_valid(tmp))
++		return -EINVAL;
++
++	down_write(&uts_sem);
++	strscpy_pad(app_release, tmp);
++	up_write(&uts_sem);
++	return 0;
++}
++
++static const struct ctl_table app_release_table[] = {
++	{
++		.procname	= "app_osrelease",
++		.maxlen		= sizeof(app_release),
++		.mode		= 0600,
++		.proc_handler	= proc_app_release,
++	},
++};
++
++static int __init init_app_release_sysctl(void)
++{
++	register_sysctl_init("kernel", app_release_table);
++	return 0;
++}
++
++postcore_initcall(init_app_release_sysctl);
++#endif /* CONFIG_SYSCTL */
++
+ /*
+  * Work around broken programs that cannot handle "Linux 3.0".
+  * Instead we map 3.x to 2.6.40+x, so e.g. 3.0 would be 2.6.40
+@@ -1324,8 +1411,17 @@ DECLARE_RWSEM(uts_sem);
+  */
+ static int override_release(char __user *release, size_t len)
+ {
++	char app[sizeof(app_release)];
+ 	int ret = 0;
+ 
++	/* The whole field: the real release is already in the caller's buffer. */
++	if (uts_app_release(app)) {
++		size_t copy = min(len, sizeof(app));
++
++		app[copy - 1] = '\0';
++		return copy_to_user(release, app, copy);
++	}
++
+ 	if (current->personality & UNAME26) {
+ 		const char *rest = UTS_RELEASE;
+ 		char buf[65] = { 0 };

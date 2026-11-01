@@ -1,0 +1,2 @@
+# See gaokun3_app_kernel_prop.te.
+persist.sys.gaokun3.app_kernel_  u:object_r:gaokun3_app_kernel_prop:s0

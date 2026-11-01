@@ -53,4 +53,18 @@
     <string name="touch_mode_tile_label">游戏触摸</string>
     <string name="touch_mode_game">游戏</string>
     <string name="touch_mode_daily">日常</string>
+
+    <!-- 内核版本伪装（AppKernelSettingsActivity），注入到「设置 → 系统」。 -->
+    <string name="app_kernel_title">内核版本伪装</string>
+    <string name="app_kernel_summary">向应用报告的内核版本号</string>
+    <string name="app_kernel_switch_title">向应用报告其他版本</string>
+    <string name="app_kernel_switch_summary_on">非系统应用将会读到在此设置的内核版本</string>
+    <string name="app_kernel_switch_summary_off">非系统应用将会读到真实内核版本</string>
+    <string name="app_kernel_version_title">向非系统应用报告的版本</string>
+    <string name="app_kernel_version_invalid">请输入形如 6.6.30 的版本号，只能包含字母、数字和 . _ + -，最多 64 个字符。</string>
+    <string name="app_kernel_real_title">真实内核版本</string>
+    <string name="app_kernel_note">部分应用只接受在6.x及更早版本的内核上运行。此设置项只影响非系统应用读取到的内核版本号，系统组件仍然能读出真实版本。更改在重启后生效。</string>
+    <string name="app_kernel_restart_message">修改在重启后生效，现在重启吗？</string>
+    <string name="app_kernel_restart_now">重启</string>
+    <string name="app_kernel_restart_later">稍后</string>
 </resources>

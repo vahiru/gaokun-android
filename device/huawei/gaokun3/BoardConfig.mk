@@ -386,3 +386,8 @@ TARGET_KERNEL_SOURCE :=
 -include vendor/gapps/arm64/BoardConfigVendor.mk
 
 include vendor/lineage/config/BoardConfigLineage.mk
+
+# What vendor policy cannot do: a context for a persist.sys.* property that apps cannot read.
+# After the include above, so nothing it sets can drop the directory: that would still
+# build, and apps could read the setting again.
+SYSTEM_EXT_PRIVATE_SEPOLICY_DIRS += device/huawei/gaokun3/sepolicy_private
