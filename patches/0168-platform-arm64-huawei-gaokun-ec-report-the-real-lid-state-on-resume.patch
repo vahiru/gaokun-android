@@ -1,0 +1,64 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] platform: arm64: huawei-gaokun-ec: report the real lid state on resume
+
+gaokun_ec_resume() reports the lid as open on every resume, whatever woke the
+system. With the lid closed, the first resume from any other source, even an
+aborted suspend, looks like the lid opening. Android answers with
+WAKE_REASON_LID: the screen comes on with the cover closed, and the lid counts
+as open until it is next opened and closed.
+
+Read EC_LID_STATE, as the IRQ handler and the probe path do, and report that.
+The read comes before the IRQ is enabled again, so a pending EC_EVENT_LID is
+handled afterwards and only reports a difference. If the read fails, keep the
+last state: Android acts only on a change, so a failed read neither wakes a
+closed tablet nor puts one in use to sleep.
+
+The IRQ handler ignores the result of the same read, and on failure compares
+an uninitialized status. Android now acts on the lid, so skip the event then.
+---
+ drivers/platform/arm64/huawei-gaokun-ec.c | 19 ++++++++++++++-----
+ 1 file changed, 14 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/platform/arm64/huawei-gaokun-ec.c b/drivers/platform/arm64/huawei-gaokun-ec.c
+--- a/drivers/platform/arm64/huawei-gaokun-ec.c
++++ b/drivers/platform/arm64/huawei-gaokun-ec.c
+@@ -658,6 +658,7 @@ static int gaokun_ec_resume(struct device *dev)
+ {
+ 	struct gaokun_ec *ec = dev_get_drvdata(dev);
+ 	u8 ec_req[] = MKREQ(0x02, EC_STANDBY_REG, 1, EC_STANDBY_EXIT);
++	u8 status;
+ 	int ret;
+ 	int i;
+ 
+@@ -678,10 +679,16 @@ static int gaokun_ec_resume(struct device *dev)
+ 	if (ret)
+ 		return ret;
+ 
+-	/* Resume may be unstable, so open lid anyways */
+-	input_report_switch(ec->idev, SW_LID, 0);
+-	input_sync(ec->idev);
+-	ec->lid_opened = true;
++	/*
++	 * Any wakeup source ends up here, so report the lid as the EC sees it:
++	 * a wakeup with the lid closed must not look like the lid opening.
++	 * If the read fails, keep the last state.
++	 */
++	if (!gaokun_ec_psy_read_byte(ec, EC_LID_STATE, &status)) {
++		ec->lid_opened = status & EC_LID_OPEN;
++		input_report_switch(ec->idev, SW_LID, !ec->lid_opened);
++		input_sync(ec->idev);
++	}
+ 
+ 	ec->suspended = false;
+ 	enable_irq(ec->client->irq);
+@@ -758,7 +765,9 @@ static irqreturn_t gaokun_ec_irq_handler(int irq, void *data)
+ 		break;
+ 
+ 	case EC_EVENT_LID:
+-		gaokun_ec_psy_read_byte(ec, EC_LID_STATE, &status);
++		if (gaokun_ec_psy_read_byte(ec, EC_LID_STATE, &status))
++			break;
++
+ 		status &= EC_LID_OPEN;
+ 		if (ec->lid_opened != !!status) {
+ 			input_report_switch(ec->idev, SW_LID, !status);
