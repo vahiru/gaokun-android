@@ -345,6 +345,11 @@ KPATCHES=(
     0138-drm-panel-himax-hx83121a-report-a-linear-backlight-scale.patch
     # 0141：vreg_l4b常开。原先只有usb_1_qmpphy用它，Type-C重配时断电，port1的USB2一侧可能冻住到重启（#53）。
     0141-arm64-dts-gaokun3-vreg-l4b-always-on.patch
+    # ★ 0142、0143：触摸的flick和抬手。0142点击锁定改看信号和步长：信号塌下去时的跳动不解锁，一帧走过约1.5毫米就解锁，
+    #    解锁时报接触点本身，一欧滤波beta提到30。0143固件说屏幕上没有手指时，丢失的跟踪只留track_fw_lost_frames帧
+    #    （默认1）。回放工具scripts/touch/hxsim同步新参数，`-F`从录下的网格还原手指标志。
+    0142-Input-himax-spi-release-the-tap-lock-on-signal-and-step.patch
+    0143-Input-himax-spi-end-a-touch-early-when-the-firmware-sees-no-finger.patch
 )
 
 # ⚠️ 诊断补丁【不进发版内核】：只在带 --with-diag 时打。顺序有依赖：0028/0029 依赖 0023，

@@ -1,0 +1,219 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] Input: himax-spi: 点击锁定改看信号和步长，flick不用先走完半径
+
+点击锁定（0119）只看距离。半径要盖住抬手时中心的跳动，所以flick也要先走这么远
+才开始上报，而判定flick的游戏看的正是上报的移动。点击和flick其实有两处可以区分：
+
+- 抬手的跳动发生在信号塌下去的时候。信号低于这次触摸峰值的track_tap_fall%（默认
+  50，0为关）时，只有超过track_tap_hard（默认30，约3毫米，不小于track_tap_radius）
+  才解锁。
+- 落稳之后点击几乎不再移动，所以一帧走过track_tap_speed（默认15，约1.5毫米，0为关）
+  就是手指在动，不用等到半径。
+
+解锁的那一帧报接触点本身，滤波器从当前位置和速度接着算（track_tap_snap，默认开），
+不再从后面追上来。这同时用于第二帧就走出两倍半径的情况。
+
+track_filter_beta从15提到30，快速移动时滞后减半，代价是慢速滑动的抖动略有增加。
+
+track_tap_speed、track_tap_fall、track_tap_snap都设0，track_filter_beta设回15，
+就是这个补丁之前的行为。
+---
+ drivers/input/touchscreen/himax-spi-core.c |  8 +++
+ drivers/input/touchscreen/hx-algo.c        | 68 ++++++++++++++++++----
+ drivers/input/touchscreen/hx-algo.h        | 22 +++++--
+ 3 files changed, 80 insertions(+), 18 deletions(-)
+
+diff --git a/drivers/input/touchscreen/himax-spi-core.c b/drivers/input/touchscreen/himax-spi-core.c
+index 17f8ad0..9d9e118 100644
+--- a/drivers/input/touchscreen/himax-spi-core.c
++++ b/drivers/input/touchscreen/himax-spi-core.c
+@@ -1117,6 +1117,10 @@ HX_ALGO_ATTR_BOOL_RW(zone_split);
+ /* Tracking */
+ HX_ALGO_ATTR_S32_RW(track_dist2_max);
+ HX_ALGO_ATTR_S32_RW(track_tap_radius);
++HX_ALGO_ATTR_S32_RW(track_tap_speed);
++HX_ALGO_ATTR_S32_RW(track_tap_hard);
++HX_ALGO_ATTR_S32_RW(track_tap_fall);
++HX_ALGO_ATTR_BOOL_RW(track_tap_snap);
+ HX_ALGO_ATTR_S32_RW(track_filter_mincutoff);
+ HX_ALGO_ATTR_S32_RW(track_filter_beta);
+ HX_ALGO_ATTR_S32_RW(track_filter_dcutoff);
+@@ -1264,6 +1268,10 @@ static struct attribute *hx_algo_attrs[] = {
+ 	&dev_attr_track_start_debounce.attr,
+ 	&dev_attr_track_jump_dist2.attr,
+ 	&dev_attr_track_tap_radius.attr,
++	&dev_attr_track_tap_speed.attr,
++	&dev_attr_track_tap_hard.attr,
++	&dev_attr_track_tap_fall.attr,
++	&dev_attr_track_tap_snap.attr,
+ 	&dev_attr_track_filter_mincutoff.attr,
+ 	&dev_attr_track_filter_beta.attr,
+ 	&dev_attr_track_filter_dcutoff.attr,
+diff --git a/drivers/input/touchscreen/hx-algo.c b/drivers/input/touchscreen/hx-algo.c
+index 17fe45d..f752112 100644
+--- a/drivers/input/touchscreen/hx-algo.c
++++ b/drivers/input/touchscreen/hx-algo.c
+@@ -93,8 +93,12 @@ void hx_algo_init_defaults(struct hx_algo *algo)
+ 	algo->track_start_debounce = 2;
+ 	algo->track_jump_dist2     = 0;  /* disabled by default */
+ 	algo->track_tap_radius     = 20;   /* ~2 mm */
++	algo->track_tap_speed      = 15;   /* ~1.5 mm in one frame */
++	algo->track_tap_hard       = 30;
++	algo->track_tap_fall       = 50;
++	algo->track_tap_snap       = true;
+ 	algo->track_filter_mincutoff = 1000;  /* 1 Hz at rest */
+-	algo->track_filter_beta      = 15;
++	algo->track_filter_beta      = 30;
+ 	algo->track_filter_dcutoff   = 30000;
+ }
+ 
+@@ -2168,6 +2172,15 @@ static void hx_filter_reset(struct hx_track *trk)
+ 	trk->fvy = 0;
+ }
+ 
++/* Start the filter from where the contact is now, moving as it is moving. */
++static void hx_filter_snap(struct hx_track *trk)
++{
++	trk->fx = trk->x << 8;
++	trk->fy = trk->y << 8;
++	trk->fvx = trk->vx * HX_FILTER_HZ;
++	trk->fvy = trk->vy * HX_FILTER_HZ;
++}
++
+ static void hx_filter_update(const struct hx_algo *algo, struct hx_track *trk)
+ {
+ 	s32 ex = (trk->x << 8) - trk->fx;
+@@ -2189,6 +2202,41 @@ static void hx_filter_update(const struct hx_algo *algo, struct hx_track *trk)
+ 	trk->fy += ((s64)a * ey + (1 << 15)) >> 16;
+ }
+ 
++/*
++ * Has an anchored track started to move?  A radius alone has to clear the jump
++ * of a tap's centroid as the finger lifts, and so holds a flick back until it
++ * has gone that far.  Two things tell the two apart.  The lifting centroid
++ * jumps while the signal collapses: under track_tap_fall percent of the touch's
++ * peak only track_tap_hard releases.  And once the landing has settled a tap
++ * stays put, so a single step of track_tap_speed units is the finger moving.
++ */
++static bool hx_track_left_anchor(const struct hx_algo *algo,
++				 const struct hx_track *trk)
++{
++	s64 ax = trk->x - trk->ref_x;
++	s64 ay = trk->y - trk->ref_y;
++	s64 d2 = ax * ax + ay * ay;
++	s64 r = algo->track_tap_radius;
++	s64 hard = max_t(s64, algo->track_tap_hard, r);
++	s64 v = algo->track_tap_speed;
++
++	if (r <= 0 || d2 > hard * hard)
++		return true;
++	if (algo->track_tap_fall > 0 &&
++	    (s64)trk->signal_sum * 100 < (s64)algo->track_tap_fall * trk->sig_peak)
++		return false;
++	return d2 > r * r ||
++	       (v > 0 && (s64)trk->vx * trk->vx + (s64)trk->vy * trk->vy >= v * v);
++}
++
++/* The touch moves: from here on it reports the contact, not the down position. */
++static void hx_track_unanchor(const struct hx_algo *algo, struct hx_track *trk)
++{
++	trk->anchored = false;
++	if (algo->track_tap_snap && algo->track_filter_mincutoff > 0)
++		hx_filter_snap(trk);
++}
++
+ /*
+  * Row ghost (ghost_row_filter), after the EGoTouchRev service's tracker.
+  * On a poorly grounded or charger-coupled panel a finger can raise a weaker
+@@ -2340,6 +2388,7 @@ void hx_track_contacts(struct hx_algo *algo,
+ 		trk->missed = 0;
+ 		if (m->det_idx < algo->contact_count)
+ 			trk->signal_sum = algo->contacts[m->det_idx].signal_sum;
++		trk->sig_peak = max(trk->sig_peak, trk->signal_sum);
+ 		if (trk->age < U8_MAX)
+ 			trk->age++;
+ 		if (trk->debounce > 0) {
+@@ -2366,24 +2415,18 @@ void hx_track_contacts(struct hx_algo *algo,
+ 			 * moved more than twice the radius, which is the
+ 			 * finger, not the contact.
+ 			 */
++			hx_filter_update(algo, trk);
+ 			if (ax * ax + ay * ay > r2 * r2) {
+-				trk->anchored = false;
++				hx_track_unanchor(algo, trk);
+ 			} else {
+ 				trk->ref_x = trk->x;
+ 				trk->ref_y = trk->y;
+ 			}
+-			hx_filter_update(algo, trk);
+ 		} else {
+-			if (trk->anchored) {
+-				s64 ax = trk->x - trk->ref_x;
+-				s64 ay = trk->y - trk->ref_y;
+-				s64 r  = algo->track_tap_radius;
+-
+-				/* Released for good once it moves; also when the lock is off. */
+-				if (r <= 0 || ax * ax + ay * ay > r * r)
+-					trk->anchored = false;
+-			}
+ 			hx_filter_update(algo, trk);
++			/* Released for good once it moves; also when the lock is off. */
++			if (trk->anchored && hx_track_left_anchor(algo, trk))
++				hx_track_unanchor(algo, trk);
+ 		}
+ 
+ 		track_matched[m->track_idx] = true;
+@@ -2491,6 +2534,7 @@ void hx_track_contacts(struct hx_algo *algo,
+ 		hx_filter_reset(trk);
+ 		if (j < algo->contact_count)
+ 			trk->signal_sum = algo->contacts[j].signal_sum;
++		trk->sig_peak = trk->signal_sum;
+ 
+ 		/* Record what this contact looked like when it was born. */
+ 		algo->stats.tracks_new++;
+diff --git a/drivers/input/touchscreen/hx-algo.h b/drivers/input/touchscreen/hx-algo.h
+index df4d205..75fbfcd 100644
+--- a/drivers/input/touchscreen/hx-algo.h
++++ b/drivers/input/touchscreen/hx-algo.h
+@@ -100,18 +100,21 @@ struct hx_track {
+ 	u8   debounce;
+ 	u8   palm;
+ 	/*
+-	 * Anchor lock (track_tap_radius): until the track has moved more than
+-	 * track_tap_radius from where it was first reported (debounce reaching
+-	 * 0), that down position is reported instead of x/y.  Matching and
+-	 * prediction still use x/y.  The distance is taken from ref_x/ref_y:
+-	 * the down position, or for a track reported in the frame it was born
+-	 * the position one frame later, once the contact has settled.
++	 * Anchor lock (track_tap_radius): until the track has moved away from
++	 * where it was first reported (debounce reaching 0; see
++	 * hx_track_left_anchor()), that down position is reported instead of
++	 * x/y.  Matching and prediction still use x/y.  The distance is taken
++	 * from ref_x/ref_y: the down position, or for a track reported in the
++	 * frame it was born the position one frame later, once the contact has
++	 * settled.
+ 	 */
+ 	bool anchored;
+ 	s32  anchor_x;
+ 	s32  anchor_y;
+ 	s32  ref_x;
+ 	s32  ref_y;
++	/* Strongest signal_sum so far, which a lifting finger falls away from. */
++	s32  sig_peak;
+ 	/*
+ 	 * Position filter (track_filter_mincutoff): the filtered position in
+ 	 * 1/256 units and the low-passed velocity in units per second.
+@@ -379,6 +382,13 @@ struct hx_algo {
+ 	s32  track_jump_dist2;     /* position jump → force lift+repress   */
+ 	s32  track_tap_radius;     /* hold the down position until the     */
+ 				   /* track moves this far (0 = off)       */
++	s32  track_tap_speed;      /* or takes one step this long (0 = off) */
++	s32  track_tap_hard;       /* radius while the signal is falling   */
++				   /* (at least track_tap_radius)          */
++	s32  track_tap_fall;       /* falling: under this % of the touch's */
++				   /* peak signal (0 = ignore the signal)  */
++	bool track_tap_snap;       /* on release, report the contact       */
++				   /* itself, not the filter behind it     */
+ 	s32  track_filter_mincutoff; /* One Euro cutoff at rest, mHz (0 = off) */
+ 	s32  track_filter_beta;    /* cutoff added per unit/s of speed, mHz */
+ 	s32  track_filter_dcutoff; /* cutoff of the speed estimate, mHz    */

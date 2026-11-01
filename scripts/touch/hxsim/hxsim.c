@@ -5,17 +5,22 @@
  * build.sh compiles this file together with hx-algo.c from a kernel tree,
  * so the replay always runs the algorithm that tree would ship.
  *
- * Usage: hxsim [-r] [-p params.txt] [-s name=value]... FILE
+ * Usage: hxsim [-r [-F]] [-p params.txt] [-s name=value]... FILE
  *   -r  feed frame_raw through hx_preprocess_frame() (the full pipeline,
  *       CMF and IIR included) instead of the recorded processed grid.  Each
  *       frame line then counts the cells that differ from the grid the
  *       driver produced on the device, which shows whether the replay is
  *       faithful.
+ *   -F  with -r, take the firmware's finger flag from the recorded grid: an
+ *       all-zero grid counts as flag off.  On the device such a frame is
+ *       blanked, which also removes the last frame of a lift; without -F the
+ *       replay keeps the centroid jumps of those frames and overstates how
+ *       many taps move under a rule that does not look at the signal.
  *   -p  apply name=value tunables, e.g. a dump of the files in
  *       /sys/bus/spi/devices/spi0.0/algo/
  *   -s  apply one tunable (after -p)
- *   baseline_fw_finger is always replayed as 0: recordings do not carry the
- *   firmware's finger flag.
+ *   Without -F baseline_fw_finger is replayed as 0: recordings do not carry
+ *   the firmware's finger flag.
  *
  * Output, one block per frame:
  *   F t_ns idx stable report_on mism
@@ -89,10 +94,13 @@ static struct param params[] = {
 	PM(hand_land_dist, K_U8, HX_HAND_LAND_DIST_MAX),
 	P(pressure_enabled, K_BOOL), P(edge_comp_enabled, K_BOOL),
 	P(edge_boost_pct, K_S16), P(edge_push_q8, K_S16), P(edge_blend_q8, K_S16),
-	P(track_dist2_max, K_S32), P(track_lost_frames, K_U8), P(debounce_base, K_U8),
+	P(track_dist2_max, K_S32), P(track_lost_frames, K_U8),
+	P(track_fw_lost_frames, K_U8), P(debounce_base, K_U8),
 	P(track_smoothing, K_BOOL), P(track_active_guard, K_BOOL),
 	P(track_start_debounce, K_U8), P(track_jump_dist2, K_S32),
-	P(track_tap_radius, K_S32), P(track_filter_mincutoff, K_S32),
+	P(track_tap_radius, K_S32), P(track_tap_speed, K_S32),
+	P(track_tap_hard, K_S32), P(track_tap_fall, K_S32), P(track_tap_snap, K_BOOL),
+	P(track_filter_mincutoff, K_S32),
 	P(track_filter_beta, K_S32), P(track_filter_dcutoff, K_S32),
 	PM(baseline_mode, K_U8, 2), P(baseline_fw_finger, K_BOOL),
 	P(baseline_gate, K_S16), PM(cmf_mode, K_U8, 3),
@@ -227,6 +235,8 @@ static void run_frame(long long t_ns, long idx, int mism, bool quiet)
 }
 
 /* Replay the empty frames the recorder skipped before a grid at t_ns. */
+static int flag_grid;
+
 static void fill_idle(long long *last_t, long long t_ns, bool raw_mode)
 {
 	static u16 idle_raw[HX_ROWS * HX_COLS];
@@ -239,9 +249,10 @@ static void fill_idle(long long *last_t, long long t_ns, bool raw_mode)
 		for (k = 0; k < HX_ROWS * HX_COLS; k++)
 			idle_raw[k] = 0x7ffe;
 		for (k = 1; k <= n; k++) {
-			if (raw_mode)
+			if (raw_mode) {
+				algo.fw_finger = false;
 				hx_preprocess_frame(&algo, idle_raw);
-			else
+			} else
 				memset(algo.frame, 0, sizeof(algo.frame));
 			run_frame(*last_t + k * FRAME_NS, -1, -1, true);
 		}
@@ -265,6 +276,8 @@ int main(int argc, char **argv)
 	for (i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "-r"))
 			raw_mode = 1;
+		else if (!strcmp(argv[i], "-F"))
+			flag_grid = 1;
 		else if (!strcmp(argv[i], "-p") && i + 1 < argc)
 			pfile = argv[++i];
 		else if (!strcmp(argv[i], "-s") && i + 1 < argc && nsets < 64)
@@ -272,12 +285,12 @@ int main(int argc, char **argv)
 		else if (!path)
 			path = argv[i];
 		else {
-			fprintf(stderr, "usage: hxsim [-r] [-p params] [-s name=value]... FILE\n");
+			fprintf(stderr, "usage: hxsim [-r [-F]] [-p params] [-s name=value]... FILE\n");
 			return 2;
 		}
 	}
 	if (!path) {
-		fprintf(stderr, "usage: hxsim [-r] [-p params] [-s name=value]... FILE\n");
+		fprintf(stderr, "usage: hxsim [-r [-F]] [-p params] [-s name=value]... FILE\n");
 		return 2;
 	}
 
@@ -290,9 +303,14 @@ int main(int argc, char **argv)
 	/*
 	 * Recordings carry no firmware finger flag: fw_finger stays false,
 	 * and with baseline_fw_finger every frame would read as untouched
-	 * and come out empty.  Replay the baseline without the flag.
+	 * and come out empty.  Replay the baseline without the flag, unless
+	 * -F derives it from the recorded grids.
 	 */
-	if (algo.baseline_fw_finger) {
+	if (flag_grid && !raw_mode) {
+		fprintf(stderr, "hxsim: -F needs -r\n");
+		return 2;
+	}
+	if (algo.baseline_fw_finger && !flag_grid) {
 		fprintf(stderr, "hxsim: no finger flag in recordings, replaying with baseline_fw_finger 0\n");
 		algo.baseline_fw_finger = false;
 	}
@@ -345,6 +363,11 @@ int main(int argc, char **argv)
 			/* hx_prepare_frame_baseline() subtracts 0x7ffe; add it back */
 			for (k = 0; k < HX_ROWS * HX_COLS; k++)
 				rawbuf[k] = (u16)(raw[k] + 0x7ffe);
+			if (flag_grid) {
+				algo.fw_finger = false;
+				for (k = 0; k < HX_ROWS * HX_COLS && !algo.fw_finger; k++)
+					algo.fw_finger = grid[k] != 0;
+			}
 			hx_preprocess_frame(&algo, rawbuf);
 			for (k = 0; k < HX_ROWS * HX_COLS; k++)
 				mism += algo.frame[k / HX_COLS][k % HX_COLS] != grid[k];
