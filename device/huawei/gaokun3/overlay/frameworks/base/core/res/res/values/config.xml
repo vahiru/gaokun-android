@@ -238,4 +238,17 @@
         <item>255</item>
     </integer-array>
 
+    <!--
+      Closing the keyboard cover turns the screen off, opening it wakes it.
+
+      PhoneWindowManager acts on SW_LID according to Settings.Global.LID_BEHAVIOR,
+      and AOSP's default of 0 ignores it. This resource is only read once:
+      SettingsProvider's DatabaseHelper.loadGlobalSettings() turns it into
+      LID_BEHAVIOR = 1 when the settings database is created. Installs that
+      already have a database get the same value from LidBehaviorDefault in Parts.
+
+      Folding the cover behind the screen does not raise SW_LID.
+    -->
+    <bool name="config_lidControlsSleep">true</bool>
+
 </resources>

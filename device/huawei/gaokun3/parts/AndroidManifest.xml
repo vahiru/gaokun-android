@@ -29,6 +29,8 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- 启动选项（S15）："重启到 Windows" / "重启到引导菜单" 调 PowerManager.reboot；REBOOT 是 signature 权限，本应用平台签名 -->
     <uses-permission android:name="android.permission.REBOOT" />
+    <!-- LidBehaviorDefault writes Settings.Global.LID_BEHAVIOR. -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
 
     <application
         android:label="@string/app_name"

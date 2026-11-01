@@ -37,7 +37,7 @@ UEFI。这不是一次常规移植 —— 它是 **AOSP on mainline**，每一�
 | GPU —— Adreno 690 硬件 Vulkan | ✅ | Mesa 26.0.3 `turnip`；22 分钟浸泡零 SMMU fault |
 | 触摸屏 | ⚠️ | 可用 —— Himax HX83121A，需要 `patches/` 里的 gpio174 补丁（[#26](docs/stage4-findings.md#26)）。**v0.6.2 起手感是实机量出来的**：① 默认预设里的跳点检测阈值实际上是一条 1.0 m/s 的限速线，快滑时驱动一个点都不上报，一次甩动被切成十几次触摸 —— 判据改成对照预测位置（[#114](docs/stage4-findings.md#114)）；② 坐标 `fuzz` 从 8 改为 0：实测质心抖动不到半个坐标单位，而 fuzz=8 抹掉了四分之一的真实运动数据（[#116](docs/stage4-findings.md#116)）；③ 按下延迟 25→17 ms；④ 上报触点面积与压力，供读取它们的应用使用（本机 Android 自带的手掌误触抑制是关着的，用不上这些数据）。驱动本身修了 6 个缺陷并加了逐级计数器与原始电容帧导出（[#115](docs/stage4-findings.md#115)）。⚠️ 手掌压屏会碎成多个触点（不影响点击） |
 | 磁吸键盘 + 触控板 | ✅ | USB HID `12d1:10b8`；可以在"设置 › 系统"里关掉（"磁吸键盘"） |
-| 键盘盖当合盖 | ⚠️ | EC 会上报合盖开关，但 Android 不处理：合上键盘盖不会熄屏，要等息屏超时 |
+| 键盘盖当合盖 | ✅ | 合上键盘盖熄屏，打开就唤醒；翻到背面不受影响 |
 | Wi-Fi | ✅ | ath11k / WCN6855。局域网拉 200 MB 实测 61.7 MB/s（[#44](docs/stage4-findings.md#44)）。从远处服务器（约 300 ms）下载时，单连接原先封顶约 3.5 MB/s —— 是 Android 默认 TCP 缓冲区的限制；v0.7.0 调大，实测 3.5→9.5 MB/s（[#119](docs/stage4-findings.md#119)）。WPA3-SAE 能连（[#107](docs/stage4-findings.md#107)）；有的 WPA2/WPA3 混合模式路由器会拒绝 Android 自动把 WPA2 升级成 WPA3，v0.7.1 起关掉了这个升级。[issue #2](https://github.com/vahiru/gaokun-android/issues/2)（纯 WPA3，在中兴路由器上关联后被踢）这里复现不出来。⚠️ MAC 地址每次开机都变 |
 | Wi-Fi 热点 | ⚠️ | v0.7.1 起可用（[#11](https://github.com/vahiru/gaokun-android/issues/11)）—— 热点开得起来；还没测过真有手机连上来。⚠️ 一开热点平板自己就断开 Wi-Fi（还没配置 Wi-Fi + 热点同时工作），所以没有上行可以分享 |
 | 蓝牙 | ⚠️ | 可用 —— `hci_qca`，adapter `ON`，开机后零崩溃。⚠️ 蓝牙耳机放音（A2DP）**没在实机上验证过**。音频策略里没有蓝牙 SCO 通路，所以**通话时用不了蓝牙耳机的麦克风**。长期运行后可能与音频一起死锁（[#38](docs/stage4-findings.md#38)） |
