@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Values come from persist.sys.gaokun3.app_kernel_*, see AppKernelSettingsActivity. -->
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android">
+    <SwitchPreferenceCompat
+        android:key="app_kernel_enabled"
+        android:title="@string/app_kernel_switch_title"
+        android:summaryOn="@string/app_kernel_switch_summary_on"
+        android:summaryOff="@string/app_kernel_switch_summary_off"
+        android:persistent="false" />
+    <EditTextPreference
+        android:key="app_kernel_release"
+        android:title="@string/app_kernel_version_title"
+        android:dialogTitle="@string/app_kernel_version_title"
+        android:persistent="false" />
+    <Preference
+        android:key="app_kernel_real"
+        android:title="@string/app_kernel_real_title"
+        android:selectable="false" />
+    <com.android.settingslib.widget.FooterPreference
+        android:key="app_kernel_note"
+        android:title="@string/app_kernel_note"
+        android:selectable="false" />
+</PreferenceScreen>

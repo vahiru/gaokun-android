@@ -115,20 +115,19 @@ Problems specific to one release are in that release's [release notes](relnotes/
   off. That open boot chain is exactly what makes installing another OS on this machine possible.
 * **What to do**: nothing; this is the price of running Android on this machine at all.
 
-### The kernel reports a version that is not its real one (from 1.0.0-rc.2)
+### Apps are told a kernel version that is not the real one
 <!-- GAME-1 (patches/0085). Evidence in the Chinese file. -->
-* **What you see**: `uname -r`, `/proc/version` and *Kernel version* under *Settings → About tablet → Android version* all say
-  `6.6.30-android15-8-g0a4d3c12b3`. The kernel that actually runs is mainline Linux **7.2.9** plus this project's
-  patches. The hash at the end of that string and the build signature are made up and match no real Android kernel.
-* **Why**: some games and apps run environment checks that only accept the 4.x / 5.x / 6.x versions of Android's common
-  kernel, and treat a 7.x kernel as a tampered device and refuse to run. We changed only the version string the kernel
-  *reports*; the kernel itself, its compile-time version and module checks are unchanged. It is a deliberate disguise,
-  which is why it is listed here.
-* **What to do**: to see the real version, run `dmesg | head -1` as root (the first line is `Linux version 7.2.9-gaokun3…`),
-  or read the `kernel-config.txt` / `kernel-source.txt` attached to each release. In bug reports, give the real version or
-  simply the ROM version (`getprop ro.vendor.gaokun3.version`); bug reports and crash records carry the disguised
-  version too. The KernelSU manager also takes the kernel for `android15-6.6`: **do not use its "Install" / LKM patching**,
-  KernelSU is built into this kernel.
+* **What you see**: apps read the kernel version as `6.6.30-android15-8-g0a4d3c12b3`, a string that matches no real Android
+  kernel. The kernel that actually runs is mainline Linux **7.2.9** plus this project's patches, and that is what
+  `uname -r` in `adb shell` and *Kernel version* under *Settings → About tablet → Android version* show. Crash records of
+  apps carry the version apps are told, those of system components the real one. On 1.0.0-rc.2 and rc.3 the whole system
+  reports the 6.6.30 string.
+* **Why**: some environment checks in apps accept only the 4.x / 5.x / 6.x versions of Android's common kernel. Only the
+  number apps read changes; the kernel itself, its compile-time version and module checks are the same. It is a deliberate
+  disguise, which is why it is listed here.
+* **What to do**: *Settings → System → Kernel version spoofing* turns it off or sets another version, and applies after a
+  restart. On 1.0.0-rc.2 and rc.3 there is no setting: run `dmesg | head -1` as root for the real version. **Do not use the
+  KernelSU manager's *Install* / LKM patching**: KernelSU is already built into this kernel.
 
 ---
 

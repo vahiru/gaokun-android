@@ -123,22 +123,18 @@
   能在这台机器上装别的系统，靠的就是这条开着的启动链。
 * **替代办法**：没有。这是在这台机器上运行 Android 的前提。
 
-### 内核对外报告的版本号不是真实版本（从 1.0.0-rc.2 起）
-<!-- GAME-1。patches/0085（用户 2026-10-11 定进发版内核，docs/gaming.md §4.1）：只在 init 阶段覆写 init_uts_ns.name.release，
-     uname() / /proc/version（v7.2.9 fs/proc/version.c:14 读的是 utsname）都报 6.6.30-android15-8-g0a4d3c12b3；
-     dmesg 第一行的 linux_banner 是编译期常量、仍是真实版本（构建机 init/version.o 里两串都在，10-11 核过）。
-     LINUX_VERSION_CODE 与模块 vermagic 不变（include/linux/vermagic.h:41-42、kernel/module/main.c:1105/2658）；本机没有可加载模块。
-     10-18 按源码排查（docs/source-audit-20261018.md 任务 B；gaming.md §4.1）：bpf 加载器门槛都 ≤6.1、加载的程序集不变（NetBpfLoad 的"非 LTS"告警反而消失）；
-     libvintf 把内核级别认成 V(202404)，多一条 WARNING，运行时检查不比内核；KSU 内核侧没有按 uname 的分支，
-     ksud 会把 KMI 认成 android15-6.6（KernelUtils / boot_patch.rs:82-117）；ART 的 UFFDIO_MOVE 探测会退回 COPY（仅当内核开 USERFAULTFD）。
-     ⬜ 0085 内核下上机核对（TODO GAME-1）。 -->
-* **现象**：`uname -r`、`/proc/version`、设置"关于本机 → Android 版本"里的"内核版本"都显示 `6.6.30-android15-8-g0a4d3c12b3`。
-  实际跑的是主线 Linux **7.2.9** 加本项目的补丁。版本号末尾那串哈希和构建署名都是编出来的，对不上任何真实的 Android 内核。
-* **原因**：一些游戏和 App 的环境检测只认 Android 通用内核的 4.x / 5.x / 6.x 版本号，见到 7.x 就判定设备异常、拒绝运行。
-  我们只改了内核**对外报告**的版本字符串；内核本身、编译期的版本号和模块校验都没变。这是有意的伪装，所以写在这里。
-* **替代办法**：要看真实版本，以 root 运行 `dmesg | head -1`（第一行是 `Linux version 7.2.9-gaokun3…`），或者看发版说明附带的
-  `kernel-config.txt` / `kernel-source.txt`。报告问题时请写真实版本，或者直接写 ROM 版本（`getprop ro.vendor.gaokun3.version`）；bug 报告和崩溃记录里的内核版本也是这个伪装值。
-  KernelSU 管理器也会把内核认成 `android15-6.6`：**不要用管理器里的"安装" / LKM 修补**，本机的 KernelSU 是编进内核的。
+### 应用读到的内核版本不是真实版本
+<!-- GAME-1。patches/0085：内核对应用 UID（uid % 100000 ≥ 10000，不含 65534）的 uname() 报 kernel.app_osrelease，
+     其他进程报真实版本，/proc/version 和 /proc/sys/kernel/osrelease 被 SELinux 挡住、不改；crash_dump 以崩溃进程的 UID 运行，所以 App 的墓碑记录设定值；值来自 persist.sys.gaokun3.app_kernel_*（device.mk 默认开，默认值 6.6.30-android15-8-g0a4d3c12b3），
+     init.gaokun3.rc 在 load-bpf-programs 写入，早于 zygote-start。os.version 与 ro.kernel.version 见 crdroid-tree-fixes [36][37]。
+     LINUX_VERSION_CODE、vermagic、linux_banner 不变。rc.2、rc.3 的 0085 是全局覆写 init_uts_ns，排查见 docs/source-audit-20261018.md 任务 B。 -->
+* **现象**：应用读到的内核版本是 `6.6.30-android15-8-g0a4d3c12b3`，这个版本串对不上任何真实的 Android 内核。
+  实际跑的是主线 Linux **7.2.9** 加本项目的补丁，`adb shell` 里的 `uname -r` 和设置"关于本机 → Android 版本"里的"内核版本"显示的都是真实版本。
+  应用的崩溃记录里是应用读到的版本，系统组件的崩溃记录里是真实版本。1.0.0-rc.2 和 rc.3 上整个系统都报 6.6.30 这个版本串。
+* **原因**：一些应用的环境检测只接受 Android 通用内核的 4.x / 5.x / 6.x 版本号。这里只改变应用读到的数字；
+  内核本身、编译期的版本号和模块校验都没变。这是有意的伪装，所以写在这里。
+* **替代办法**：在"设置 → 系统 → 内核版本伪装"里可以关闭或改成别的版本，重启后生效。1.0.0-rc.2 和 rc.3 没有这个设置：
+  要看真实版本，以 root 运行 `dmesg | head -1`。**不要用 KernelSU 管理器里的"安装" / LKM 修补**：本机的 KernelSU 已经编进内核了。
 
 ---
 

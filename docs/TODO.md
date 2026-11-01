@@ -151,7 +151,7 @@ NET-10 开机探测打到 hicloud 与 miui 两个端点都 204；fcitx5 在输�
 
 | 编号 | 一句话 | 状态 | 下一步 | 证据 |
 |---|---|---|---|---|
-| GAME-1 | 内核版本串覆写 `patches/0085`（uname 报 `6.6.30-android15-8-…`） | ◐ 用户 10-11 定：进发版 | vermagic 不变已核（gaming.md §4.1）。✅ 10-11 known-limitations 中英已披露（第一节「内核对外报告的版本号不是真实版本」，真实版本看 `dmesg | head -1`）；⬜ 发版说明披露（rc.2 的说明定稿时写）；✅ 10-18 源码排查：无功能影响（libvintf 多一条 WARNING、NetBpfLoad 非 LTS 告警消失、ART UFFDIO_MOVE 退回 COPY；ksud 把 KMI 认成 android15-6.6 ⇒ 已知限制已提醒别用 LKM 安装）；✅ 10-18 在 `1792312407` 上上机核对 5 项全符合 | gaming.md §4.1 |
+| GAME-1 | 向应用报告的内核版本 `patches/0085`（系统组件看到真实版本，设置 → 系统可改；rc.2、rc.3 是全局覆写） | ◐ | 用户 10-11 定进发版，默认值不变。✅ 11-02 rc.3 ROM + 测试内核：A17 全系统跑真实 `uname`，开机、netd、Wi-Fi 正常，崩溃和 SELinux 拒绝与旧内核相同；⬜ ROM 构建后：`vendor_init` 能读 `gaokun3_app_kernel_prop` 并写节点，Parts 能写属性，普通应用读不到这两个属性，应用里 `uname()` 和 `os.version` 一致（logcat 没有 `Could not refresh os.version`），`ro.kernel.version` 为空；⬜ 带 ACE 的游戏和英雄联盟手游进对局；⬜ 构建机 grep `ro.kernel.version` 的其他读者（tree-fix [37]）；⬜ 发版说明定稿 | gaming.md §4.1 |
 | GAME-2 | netlink 隐私边界 `patches/0084` | ◐ | 开发机 10-11 两条泄露都 `EACCES` ✅。⬜ 随下一个发版内核走 `--verify` + A 档；⬜ Wi-Fi / 热点 / `ip neigh`（root）照常 | gaming.md §1 |
 | GAME-3 | `system_server execmem` 去掉（swangle sepolicy 移出、`…EXECMEM_FOR_SWIFTSHADER` 注释掉） | ◐ 已提交 `53b34ff` | `1791704075` 实测 Denied ✅。✅ 10-18 `1792312407` enforcing 下全机 avc 0 条 `execmem` | BoardConfig.mk 注释 |
 | GAME-4 | 0085 内核固化进 `boot_b`（现在只能走直连槽条目） | ◐ 10-18（`1792312407` 装进 `_a`，直连条目起来 `uname -r` = 6.6.30；`boot_a` 与 ESP `slot_a/Image` 出自同一个 boot.img ⇒ 默认入口应同样是 6.6.30 —— 推断，⬜ 下次自然重启走默认入口时核一次） | **10-11 证实**：走默认入口起的是 7.2.9（`boot_b` 里没换）。✅ 10-11 rc.2：`prebuilt-boot/` 换成 `a0ea6ea4`（含 0079–0085）、`release.sh` 断言 boot.img 的 kernel 与它逐字节同。⬜ 装上 rc.2 后默认入口起来 `uname -r` = `6.6.30-android15-8-…` | gaming.md §4.3 |

@@ -29,7 +29,8 @@ echo "设备: $DEV"
 
 echo
 echo "══ 1. 内核 ══"
-# uname / /proc/version 从 rc.2 起是伪装值（patches/0085，GAME-1）⇒ 看 dmesg 第一行的 linux_banner（编译期常量，真实版本）
+# dmesg's first line is linux_banner, a compile-time constant. Since patches/0085 reports another
+# release to apps only, uname as root is real too, but rc.2 and rc.3 kernels report 6.6.30 to everyone.
 u=$(sh 'dmesg 2>/dev/null | head -1')
 echo "  $u"
 ck "内核是 gaokun3 主线" 'Linux version 7\.[0-9]+\.[0-9]+(-rc[0-9]+)?-gaokun3' "$u"

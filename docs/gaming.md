@@ -23,7 +23,7 @@
 | 环境 | **netlink 隐私边界**（`patches/0084`） | 普通 App 能用 `RTM_GETLINK` / `RTM_GETNEIGH` 读到 wlan0 物理 MAC 和局域网邻居。AOSP 策略本来不允许，主线内核缺这套 remap | `kernel-apply-patches.sh:221-223` | 已在 KPATCHES ⇒ 下一个发版内核会带上。开发机 10-11 实测两条泄露都被拒（`EACCES`） |
 | 环境 | **指纹变体段对齐**（tree-fix [23]） | `ro.build.type=user` 而 `Build.FINGERPRINT` 尾部写 `userdebug`，前后矛盾。`Build.FINGERPRINT` 常量由 zygote 预加载，运行时改不掉 | `crdroid-tree-fixes.py:748`、`:847` | 镜像（**`1.0.0-rc.2` 起**）。⚠️ `1791704075` 里**没有** [23]：它的 `/system/build.prop` 是 `…:userdebug/release-keys`（10-11 实机读），`getprop` 显示的 `:user/` 是运行时改过的属性；构建机树上 [23] 10-11 12:0x 才第一次打上 |
 | 环境 | **去掉 swangle 的 sepolicy**；`PRODUCT_REQUIRES_INSECURE_EXECMEM_FOR_SWIFTSHADER` 注释掉 | `system_server` 本不该有 `execmem`。早已改用 freedreno/turnip，SwiftShader 不再加载（10-11 全机 0 个进程映射它） | `BoardConfig.mk` sepolicy 一节（注释里有依据和回退办法） | `1791704075` 里已生效：Duck 报 `system_server execmem: Denied`。⚠️ 改动**还没提交**。回退到软渲染时，这个开关和 `ro.hardware.vulkan` 要一起改 |
-| 环境 | **内核版本串覆写**（`patches/0085`） | Duck 的 KernelCheck 只认 4/5/6 开头的内核，7.x 直接判 DANGER | `kernel-apply-patches.sh` 的 KPATCHES 链尾 | 开发机上在跑；**10-11 用户定进发版内核**（版本串伪装，见 §4.1）。vermagic 不变 |
+| 环境 | **向应用报告的内核版本**（`patches/0085`，设置 → 系统） | Duck 的 KernelCheck 只认 4/5/6 开头的内核，7.x 直接判 DANGER | KPATCHES；`init.gaokun3.rc`；Parts `AppKernelSettingsActivity`；tree-fix [36][37] | 默认开，只有应用读到设定的版本，系统组件看到真实版本（见 §4.1） |
 | 构建 | KernelSU `task_stack.h` include（原 `patches/0086`） | 7.2.9 ≥ 6.7 时这个 include 被版本门控跳过，10-11 构建机报 KSU 链接失败 | 改名 `patches/resukisu/0003-…`，由 `kernel-setup-resukisu.sh` 打、`release.sh` 核对（两版都要） | 本机对 pin `b2ac2fc` 的原文件 `--check` 过；⬜ 构建机 `kernel-setup-resukisu.sh --check`。为什么此前 7.2.9 不需要它没查清（README 0003 节） |
 
 ---
@@ -110,19 +110,20 @@ Mac 侧的 `game-mode.sh` 把 `game-mode-device.sh` 推到设备上执行，需�
 
 ## 4. 待定与风险（要用户看）
 
-1. **0085 是伪装 → 用户 2026-10-11 定：进发版内核**（所有人的 `uname` 都会报 6.6.30-android15-8）。⬜ known-limitations 与发版说明要写明。
-   * 7.2.9 是真的上游 stable 版本（[`build-machine.md`](build-machine.md) §6）。真实情况是 Duck 的 KernelCheck 只认得 4/5/6，不是"项目自定版本号"。
-   * `6.6.30-android15-8-g0a4d3c12b3` 冒充的是 Android 通用内核（GKI）的版本串，末尾的 git 哈希是编出来的。构建署名 `android-build@abfarm-release` 同理。
-   * **vermagic 不变**（v7.2.9 源码核过）：`VERMAGIC_STRING` 是编译期的 `UTS_RELEASE`（`include/linux/vermagic.h:41-42`）；模块校验比的是编进内核的静态串（`kernel/module/main.c:1105`、`:2658`）；0085 只改运行时的 `init_uts_ns`，`/proc/version` 读的也是它（`fs/proc/version.c:14`）。
-     现在本机根本没有可加载模块（`/proc/modules` 0 行，没有 `/lib/modules`）。⚠️ 将来要发模块时注意：Android first-stage init 按 `uname` 的 major.minor 选 `/lib/modules/<目录>`（`first_stage_init.cpp:216-257`），内核报 6.6，找不到 `7.2.*` 目录。到时要用精确同名（`uname -r`）的目录。
-   * 副作用**已按源码排查**（10-18，构建机只读；明细 [`source-audit-20261018.md`](source-audit-20261018.md) 任务 B）：平台里按内核版本分支的地方门槛几乎都 ≤6.1，
-     报 6.6.30 与 7.2.9 走同一条路。真正分叉的三处：① libvintf 把内核级别认成 V(202404)，多一条 WARNING
-     `uname() reports kernel level …`，运行时唯一的全量检查 `verifyBuildAtBoot` 不比内核 ⇒ 无功能影响；② NetBpfLoad 的
-     "Android V+ only supports LTS kernels / Unsupported kernel version" 告警反而消失，加载的 bpf 程序集不变；③ ART 的 UFFDIO_MOVE
-     探测会失败、退回 COPY（只影响 GC 性能，且前提是内核开了 USERFAULTFD）。另外：KSU 内核侧没有按 uname 走的分支；**ksud 会把 KMI
-     认成 `android15-6.6`**，别用管理器的"安装 / LKM 修补"（已写进已知限制）；bugreport / tombstone / 设置里的内核版本都是 6.6.30；
-     `ro.kernel.version` 变 6.6，平台里没有消费者命中。⬜ 0085 内核下上机核对：logcat 里只有 `reports kernel level` 一种、开机无
-     "设备内部出现问题"、`zcat /proc/config.gz | grep USERFAULTFD`、`su -c "ksud boot-info current-kmi"`、`getprop ro.kernel.version`。
+1. **0085：向应用报告的内核版本。** 用户 2026-10-11 定进发版时，它覆写 `init_uts_ns`，全系统都报 6.6.30。现在系统组件看到真实版本，
+   只有应用读到 `kernel.app_osrelease`，值在"设置 → 系统 → 内核版本伪装"里改，重启后生效。默认开，默认值仍是 `6.6.30-android15-8-g0a4d3c12b3`（`device.mk`）。
+   * 依据：记录里只有 Duck 的 KernelCheck 需要它。0085 之前的 10-04 冒烟（三角洲、卡拉彼丘等 8/8）和 10-08 的英雄联盟手游启动，内核报的都是真实的 7.x；对局没在真实版本下测过。
+   * 这个版本串是编出来的，末尾的 git 哈希对不上任何真实内核。
+   * 应用 = `uid % 100000 ≥ 10000`（含隔离进程和其他用户的应用），不含 overflow UID 65534。应用只能从 `uname()`（`override_release()`）读到版本；
+     `/proc/version` 和 `/proc/sys/kernel/osrelease` 被 SELinux 挡住（`private/app_neverallows.te`、`private/coredomain.te`），内容保持真实。
+   * `crash_dump` 以崩溃进程的 UID 运行，所以应用的墓碑里是设定值，系统组件的墓碑里是真实版本。
+   * 配套 ROM 修改：zygote 以 root 读 `uname()`，所以 tree-fix [36] 在每个专用化后的进程里重新读 `os.version`（用反射，ART 开了 `hiddenapi_platform_enforcement` 会失败，cp2a 默认关，失败时 logcat 有 `Could not refresh os.version`）；init 的 `ro.kernel.version` 落在 App 可读的 `default_prop`，
+     tree-fix [37] 不再设它（`init.rc` 里只有 4.19、5.4 两个 `late-fs` 条件块用它）。
+   * `persist.sys.gaokun3.app_kernel_*` 有自己的类型`gaokun3_app_kernel_prop`（`sepolicy_private/`），Parts 写、`vendor_init`读，普通应用读不到。属性名在`property_info`里仍然可见，bug 报告也可能带上这两个值。
+   * `ro.bpf.kver_override` 已删：netd 和 BPF 加载器本来就读到真实版本。⚠️ 这要求 ROM 和内核一起换：旧 0085 的内核配新 ROM 时 netd 读到 6.6.30，会走 L4S 路径（crDroid 17.0 `BpfHandler.cpp:174-178`，主线 7.2 上没跑过）。
+     `kernel-apply-patches.sh` 见到树里的 `spoof_uts_release` 会报错退出。
+   * 应用还能拿到的真实版本：vDSO 的 `.note.Linux`（`arch/arm64/kernel/vdso/note.S`，`LINUX_VERSION_CODE`）。`linux_banner`（dmesg 第一行）应用读不到。
+   * **vermagic 不变**：只影响运行时返回给应用的字符串，`UTS_RELEASE`、`LINUX_VERSION_CODE` 不动。
 2. **原 0086 已收进 `patches/resukisu/0003`**，由 `kernel-setup-resukisu.sh` 打、`release.sh` 核对，不再只活在构建机工作区。
 3. ⚠️ **新 ROM 和新内核还没合在一起**（10-11 18:2x 重启后证实）：`1791704075` 打包的 `boot_b` 用的似乎还是 `prebuilt-boot/` 里的旧内核（16:09 的报告是 7.2.9）。0085 内核只能通过直连槽条目启动（本次开机 `vendor.gaokun3.bootentry.via=direct`）。走默认入口 `gk3boot.efi` 读的是 `boot_b`，会回到 7.2.9。要固化就得把 `prebuilt-boot/` 换成新内核再打包。
 4. 10-11 的第一版 0085 内核 `03085d81…` 是用通用 defconfig 编的，已作废，**别用**。正确做法是以运行中的 `/proc/config.gz` 为底，`olddefconfig`，再跑 `kernel-config-android.sh` 断言（详见 `duck-detector-plan.md` 的"差点装了个起不来的内核"一节）。

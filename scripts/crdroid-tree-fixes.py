@@ -1193,6 +1193,79 @@ def patch_codec2_blob_linear_map(tree: pathlib.Path) -> str:
     return "mapReadView / mapWriteView：非 DMABUF 句柄退回 allocation->map()"
 
 
+def patch_zygote_os_version(tree: pathlib.Path) -> str:
+    """Fix 36: re-read os.version in each specialized process.
+
+    libcore's System.java sets os.version once from uname(), in
+    initUnchangeableSystemProperties() (android-17.0.0_r1 ojluni/.../System.java:1085-1090).
+    Zygote runs as root, so with patches/0085 it gets the real release and every app inherits
+    that, while uname() in the same app returns the reported one.
+
+    callPostForkChildHooks() runs after setresuid() in SpecializeCommon()
+    (core/jni/com_android_internal_os_Zygote.cpp:2055, :2215), for system_server, apps, USAPs
+    and child zygotes alike, so reading uname() there gives each process what the kernel tells
+    it. Nothing changes for system_server. setUnchangeableSystemProperty() is @hide outside the
+    core platform API, hence the reflection; native bridge calls it for the same kind of reason.
+    ART's hiddenapi_platform_enforcement flag would make this fail with a log line. cp2a leaves
+    it off; check again when the release config moves on.
+    Check on a device: an app's System.getProperty("os.version") equals its uname().
+    """
+    p = tree / "frameworks/base/core/java/com/android/internal/os/Zygote.java"
+    if not p.exists():
+        return f"⚠️ 找不到 Zygote.java（{p}）"
+    s = io.open(p, encoding="utf-8").read()
+    marker = "gaokun3 tree-fix [36]"
+    if marker in s:
+        return "已改（幂等，无需改动）"
+    old = ("        ZygoteHooks.postForkChild(runtimeFlags, isSystemServer, isZygote, instructionSet);\n"
+           "    }\n")
+    if s.count(old) != 1:
+        return "⚠️ 找不到 callPostForkChildHooks 那段（或不唯一），上游可能改了写法；什么都没动"
+    new = ("        ZygoteHooks.postForkChild(runtimeFlags, isSystemServer, isZygote, instructionSet);\n"
+           "        // " + marker + ": os.version was read by zygote as root; apps may be told\n"
+           "        // another release (patches/0085). The uid is final here.\n"
+           "        try {\n"
+           "            System.class.getMethod(\"setUnchangeableSystemProperty\", String.class, String.class)\n"
+           "                    .invoke(null, \"os.version\", Os.uname().release);\n"
+           "        } catch (ReflectiveOperationException e) {\n"
+           "            Log.w(\"Zygote\", \"Could not refresh os.version\", e);\n"
+           "        }\n"
+           "    }\n")
+    io.open(p, "w", encoding="utf-8", newline="").write(s.replace(old, new, 1))
+    return "callPostForkChildHooks 重新读取 os.version"
+
+
+def patch_init_no_kernel_version_prop(tree: pathlib.Path) -> str:
+    """Fix 37: do not publish ro.kernel.version.
+
+    SetKernelVersion() (android-17.0.0_r1 init/init.cpp:741-750, called at :1193) sets it from
+    init's own uname(), before any rc file is read. With patches/0085 that is the real release,
+    the property has no entry in property_contexts so it falls to default_prop, and apps can
+    read default_prop (private/coredomain.te:38; private/untrusted_app.te:11). It would
+    contradict the release they are told.
+
+    The only uses in rootdir/init.rc are the two late-fs blocks at :645-648 for 4.19 and 5.4,
+    which never applied here. Grep the crDroid tree for other readers before merging:
+    grep -rn "ro\\.kernel\\.version" --include='*.rc' --include='*.cpp' --include='*.java' .
+    Check on a device: `getprop ro.kernel.version` is empty.
+    """
+    p = tree / "system/core/init/init.cpp"
+    if not p.exists():
+        return f"⚠️ 找不到 init.cpp（{p}）"
+    s = io.open(p, encoding="utf-8").read()
+    marker = "gaokun3 tree-fix [37]"
+    if marker in s:
+        return "已改（幂等，无需改动）"
+    old_def = "static void SetKernelVersion() {\n"
+    old_call = "    SetKernelVersion();\n"
+    if s.count(old_def) != 1 or s.count(old_call) != 1:
+        return "⚠️ 找不到 SetKernelVersion（或不唯一），上游可能改了写法；什么都没动"
+    s = s.replace(old_def, "[[maybe_unused]] " + old_def, 1)
+    s = s.replace(old_call, "    // " + marker + ": apps could read the real kernel version from it (patches/0085).\n", 1)
+    io.open(p, "w", encoding="utf-8", newline="").write(s)
+    return "不再设 ro.kernel.version"
+
+
 def main():
     tree = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else pathlib.Path.home() / "crdroid").expanduser()
     if not (tree / "build/envsetup.sh").exists():
@@ -1316,6 +1389,9 @@ def main():
     step(" [24] adb_root 只在 WITH_SU=true 时装（发布构建没有 adb root）: ", patch_adb_root_only_with_su(tree))
     step(" [25] KeyGestureController 读 LineageSettings 失败不致命（10-11 救砖兜底）: ", patch_keygesture_lineagesettings_guard(tree))
     step(" [26] codec2 BLOB 线性块在没有 ION 时也能 map（HEVC CSD 合并 / 硬解）: ", patch_codec2_blob_linear_map(tree))
+    # Both go with patches/0085: what apps read has to agree with the release the kernel tells them.
+    step(" [36] 应用进程重新读取 os.version: ", patch_zygote_os_version(tree))
+    step(" [37] init 不再设 ro.kernel.version: ", patch_init_no_kernel_version_prop(tree))
     if failed:
         print(f"✗ {len(failed)} 条没做成：" + "；".join(failed))
         sys.exit(1)

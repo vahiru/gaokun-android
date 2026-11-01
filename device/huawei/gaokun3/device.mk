@@ -362,27 +362,6 @@ PRODUCT_VENDOR_PROPERTIES += \
     vendor.hwc.drm.force_p3_support=true \
     vendor.hwc.drm.force_hdr_support=true
 
-# ★ A17：让 BPF 网络栈按真实内核版本走，不按 0085 伪装出来的 6.6.30。
-#   0085 改的是 init_uts_ns 的 release，uname() 报 6.6.30。A17 的 netd（Tethering APEX 里的 libnetd_updatable）
-#   对 6.1 ≤ kver < 6.18 多走一条 L4S 路径：挂 BPF_CGROUP_SOCK_OPS 程序、query 不到就 abort()，
-#   再拿 getsockopt(TCP_ANDROID_L4S) 做开机自检（构建机 crDroid 17.0 树
-#   packages/modules/Connectivity/bpf/netd/BpfHandler.cpp:174-178、:218-222、:365-420，门控是 isAtLeast26Q2，A16 上不走）；
-#   NetBpfLoad 也按版本选 netd.o / netd@funcs.o（bpf/loader/NetBpfLoad.cpp:1354，≥ 6.6.118 才用 @funcs）。
-#   这条路在本机 7.2 主线内核上从没跑过，自检失败 = netd 起不来、开机循环。
-#   Lineage 给版本判断加了覆盖属性：Connectivity 的 bpf/headers/include/bpf/KernelUtils.h:38-41（ab21b78a18）
-#   与平台 bpfloader system/bpf/loader/bpfloader.rs:489-490（1787201）都先读 ro.bpf.kver_override、没有才看 uname。
-#   设成真实版本 ⇒ 网络栈走 ≥ 6.18 的分支（跳过 L4S 的 SOCK_OPS 路径，用 netd@funcs.o），与不打 0085 时一致；
-#   uname()、/proc/version、App 看到的仍是 6.6.30。
-#   · 只认 major.minor.sub 的前两段以上（sscanf "%u.%u.%u"），内核升到别的 7.x 也不必改，取值只要 ≥ 6.18。
-#   · 没有 property_contexts 条目 ⇒ 落 default_prop（system/sepolicy/private/property_contexts:163 的 *），
-#     coredomain 都能读（private/coredomain.te:38）：netd / bpfloader / system_server 都是 coredomain；App 读不到，不会泄露真版本。
-#   · 必须走 system_ext：vendor 的 build.prop 由 vendor_init 身份加载，设不了 default_prop（见本文件开头 #126 那段）。
-#   ⬜ 未编译、未上机。判据：`getprop ro.bpf.kver_override` = 7.2.9；netd 不重启（`logcat -b all | grep -i "netd\|l4s"`）；
-#   L4S 的程序是 prog_netd_sockops_accecn_option（bpf/progs/netd.h:249）—— 它在 ≥ 6.18 时是否仍会被 NetBpfLoad 加载没核，
-#   判据看挂没挂：`bpftool cgroup show /sys/fs/cgroup` 里没有 sock_ops（设备上有没有 bpftool 没核）。
-PRODUCT_SYSTEM_EXT_PROPERTIES += \
-    ro.bpf.kver_override=7.2.9
-
 # ⚠️ 软渲染（SwiftShader）导入不了 UBWC 压缩 buffer —— SF 崩于
 # "Failed to create a valid texture"（GaneshBackendTexture 导入
 # AHardwareBuffer 失败，tombstone_48 实测）。强制 minigbm 分配线性 buffer。
@@ -1209,6 +1188,14 @@ PRODUCT_COPY_FILES += \
 #   写在 PRODUCT_VENDOR_PROPERTIES 里 enforcing 下会被 init 静默丢掉（理由同本文件开头 adb 那段）。
 PRODUCT_SYSTEM_EXT_PROPERTIES += \
     persist.sys.gaokun3.touch_mode=game
+
+# Kernel release reported to apps (patches/0085), changed in Settings → System. init hands it
+# to the kernel before zygote starts; everything that is not an app keeps the real release.
+# Some environment checks accept only 4.x to 6.x; this value is what 0085 used to report to
+# everyone. system_ext for the same reason as touch_mode above.
+PRODUCT_SYSTEM_EXT_PROPERTIES += \
+    persist.sys.gaokun3.app_kernel_custom=1 \
+    persist.sys.gaokun3.app_kernel_release=6.6.30-android15-8-g0a4d3c12b3
 
 # ═══════════ 默认时区 Asia/Shanghai（v1.0 D15 / OTA-13 / NET-6，2026-10-05 用户定）═══════════
 #

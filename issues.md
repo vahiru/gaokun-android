@@ -37,8 +37,8 @@ adb shell 'cat /sys/class/dmi/id/product_name /sys/class/dmi/id/product_sku /sys
 ```
 
 * `ro.build.date.utc`（10 位数字）是**构建戳**，最能说明装的是哪一版；每份发版说明里都写着它。
-* ⚠️ 从 1.0.0-rc.2 起，`uname` 显示的 `6.6.30-android15-…` 是**伪装的版本号**（见 known-limitations 第一节），真实内核版本以
-  `adb shell su -c 'dmesg | head -1'` 为准；报告里两样都贴上。
+* ⚠️ 1.0.0-rc.2 和 rc.3 上，`uname` 显示的 `6.6.30-android15-…` 是**伪装的版本号**（见 known-limitations 第一节）；之后的版本
+  只有应用读到伪装的版本，`adb shell` 里的 `uname` 是真实的，但应用的崩溃记录里仍是伪装的版本。真实内核版本一律以 `adb shell su -c 'dmesg | head -1'` 为准；报告里两样都贴上。
 * 问用户：这个版本是怎么装上去的（图形安装器的哪种模式 / 系统更新 / 别的），从哪个版本升上来的。
 
 ## 第 3 步：问清现象

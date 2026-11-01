@@ -127,3 +127,6 @@ genfscon efivarfs / u:object_r:gaokun3_efivarfs:s0
 # Android 为输入设备找电池时，从设备节点往上找最近的 power_supply 目录，
 # 而 gk3pend 的 uinput 笔在 /sys/devices/virtual。读它的是 system_server 与 health HAL。
 genfscon sysfs /devices/virtual/power_supply/m-pencil u:object_r:sysfs_gaokun3_pen_battery:s0
+
+# Kernel release reported to apps (patches/0085).
+genfscon proc /sys/kernel/app_osrelease u:object_r:gaokun3_proc_app_osrelease:s0

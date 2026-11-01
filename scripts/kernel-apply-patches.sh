@@ -222,10 +222,8 @@ KPATCHES=(
     # ★ 0084（#game-env）：netlink RTM_GETLINK/GETNEIGH 隐私边界 —— AOSP 策略有 readpriv/getneigh
     #    细分权限，主线 nlmsgtab 把它们全映射到 NLMSG_READ 导致检查形同虚设。钉死 remap。
     0084-selinux-netlink-route-remap-getlink-getneigh-priv-perms.patch
-    # ★ 0085（#game-env）：UTS_RELEASE 运行时覆写 —— 不动 Makefile 版本号（会串 LINUX_VERSION_CODE），
-    #    init 阶段把 uname 看到的版本改成 6.6.30-android15-8（版本串伪装，过 Duck KernelCheck）。
-    #    UTS_RELEASE 宏不变 ⇒ vermagic 不变（vermagic.h:41-42、module/main.c:1105/2658）。用户 2026-10-11 定进发版。
-    0085-init-version-spoof-uts-release-for-integrity-checks.patch
+    # 0085: the release Android apps are told, set from Settings. Everything else sees the real one.
+    0085-kernel-report-a-set-release-to-android-apps.patch
     # 原 0086（KernelSU 子目录）已改名 patches/resukisu/0003，由 kernel-setup-resukisu.sh 打、release.sh 核对。
     # ★★ 0086：vreg_l9d常开。原先只有usb_0_qmpphy用它，combo PHY一退出就断电，而port0的USB2、
     #    多口USB控制器和PCIe也靠它：device模式挂起整板复位（#52）、port0切换后坏掉（#27一类）都是它。
@@ -403,6 +401,14 @@ else
             exit 1
         fi
     done
+fi
+
+# The first version of 0085 overwrote init_uts_ns in init/version.c. No patch in the table touches
+# that file any more, so --verify would not compare it: a tree still carrying it would report the
+# fake release to netd and the BPF loader, which no longer have ro.bpf.kver_override to correct it.
+if grep -q spoof_uts_release "$TREE/init/version.c"; then
+    echo "✗ 旧版 0085 还在树里（init/version.c 的 spoof_uts_release）。撤掉：git apply -R 旧补丁（git show 54eb84f:patches/0085-init-version-spoof-uts-release-for-integrity-checks.patch）" >&2
+    exit 1
 fi
 
 # ★★ 指纹判据：补丁是否【已在树里】。
