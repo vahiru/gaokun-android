@@ -348,6 +348,8 @@ KPATCHES=(
     #    （默认1）。回放工具scripts/touch/hxsim同步新参数，`-F`从录下的网格还原手指标志。
     0142-Input-himax-spi-release-the-tap-lock-on-signal-and-step.patch
     0143-Input-himax-spi-end-a-touch-early-when-the-firmware-sees-no-finger.patch
+    # 0165：DMIC时钟从4.8 MHz降到3.2 MHz。4.8 MHz下麦克风录到密集的尖脉冲，App用的DMIC0、DMIC1一直有。
+    0165-arm64-dts-gaokun3-lower-the-DMIC-clock-to-3.2-MHz.patch
 )
 
 # ⚠️ 诊断补丁【不进发版内核】：只在带 --with-diag 时打。顺序有依赖：0028/0029 依赖 0023，
