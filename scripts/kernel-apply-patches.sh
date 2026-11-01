@@ -354,6 +354,8 @@ KPATCHES=(
     0166-ASoC-codecs-lpass-va-macro-mute-the-decimators-while-they-settle.patch
     # 0167：VA解码器的高通在启动后300毫秒恢复原值（4 Hz）。不打的话录音一直带着150 Hz高通，低频被削掉。
     0167-ASoC-codecs-lpass-va-macro-restore-the-high-pass-corner-after-the-start.patch
+    # 0168：恢复时按EC读到的状态上报盖子，原来一律报开着。不打的话，合着盖被闹钟等唤醒时Android当成开盖，屏幕会亮。
+    0168-platform-arm64-huawei-gaokun-ec-report-the-real-lid-state-on-resume.patch
 )
 
 # ⚠️ 诊断补丁【不进发版内核】：只在带 --with-diag 时打。顺序有依赖：0028/0029 依赖 0023，

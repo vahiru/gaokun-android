@@ -121,7 +121,7 @@ NET-10 开机探测打到 hicloud 与 miui 两个端点都 204；fcitx5 在输�
 | DISP-3 · D10 | 中文输入法 fcitx5-android | ◐ | APK 已入构建（`f2fd400`），dev.10 起进镜像。⬜ 上机：设置里能启用、拼音出字、实体键盘中英切换（与 Android 自己的 Ctrl+Space 冲不冲突）、候选窗 | 下文 B12a |
 | PWR-4 · USB-1 · USB-2 | USB-C 口异常 / 插电脑落成我方供电时弹通知；host 时不再每秒重绑 UDC | ◐ | 代码 dev.2 起在（`5dfe7dd` / `ccd54f9` / `d511d18`）。⬜ V11 里复现时看通知（插 Mac 落成我方供电、待机后回插坏口）；~~小改进：接收器改 directBootAware~~（10-19 核：10-05 起 `UsbPortNotifier` 与 `BootReceiver` 都已 `directBootAware`、收 `LOCKED_BOOT_COMPLETED`，`parts/AndroidManifest.xml:149-178`） | 下文 A6 |
 | PWR-5 · STOR-1 · STOR-2 · STOR-5 | port0 有下游时保持 host；U 盘挂载；`/data` 保留块 | ◐ | STOR-5 dev.1 实测 ✅（保留块 32768 / gid 1065）。⬜ V11：U 盘 FAT32 / exFAT 插 port1 出现在「文件」；port0 插外设息屏亮屏 5 次仍是 host；开机插着 U 盘再换插 PC 时 adb 能否回来 | 下文 V11 |
-| BATT-1/2/3 · DISP-1 | 电池按位解码（0072）；EC 初始 LID（0073） | ◐ | dev.3 起在。⬜ 用户在场：插电脑 USB 口带负载放电采 `ec_raw` / `current_now` 正负 / `capacity_level`；合盖开机一次看 `initial lid state: closed`；三种合盖姿态 getevent ⇒ 再决定 lid overlay | archive `#v1-batch01` dev.3 段 |
+| BATT-1/2/3 · DISP-1 | 电池按位解码（0072）；EC 初始 LID（0073） | ◐ | dev.3 起在。⬜ 用户在场：插电脑 USB 口带负载放电采 `ec_raw` / `current_now` 正负 / `capacity_level`。✅ 合盖开机（`initial lid state: closed`，开机结束后熄屏，开盖唤醒）、三种合盖姿态（合盖 SW_LID 1、开盖 0、翻到背面没有事件）⇒ 默认合盖熄屏：`config_lidControlsSleep`，已有的安装由 Parts 的 `LidBehaviorDefault` 改一次；恢复时的状态见 0168 | archive `#v1-batch01` dev.3 段 |
 | PWR-13 · LIVE-13 · APP-17 | 内核配置项 | ◐ | dev.9 看到 THERMAL_STATISTICS、ARMV8_DEPRECATED ✅。⬜ PWR-13 另一半：SKIN 温度其实是芯片温度，要标定 EC 温度通道 | 同上「批 2 ROM 侧」 |
 
 **还没做、要用户在场的**（v1.0-plan 批 1 / 批 2 的验收项）：

@@ -26,6 +26,7 @@ public class BootReceiver extends BroadcastReceiver {
                 && !Intent.ACTION_BOOT_COMPLETED.equals(action)) {
             return;
         }
+        LidBehaviorDefault.apply(context);
         context.startService(new Intent(context, UsbPortNotifier.class));
         context.startService(new Intent(context, BootEntryNotifier.class));
         context.startService(new Intent(context, KeyboardReplugWatcher.class));
