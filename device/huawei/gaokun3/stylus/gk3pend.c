@@ -152,7 +152,7 @@ static int col_map;	/* the column pitch in solver.h: BOE panel only */
  * between really are gone and it belongs to this step.  Velocity is counted in
  * sample slots on that basis.  A stroke's first frames can be old data, so a
  * restart keeps the whole gap for the next step, which leaves them uncorrected.
- * Measured on a BOE panel, so off on the others unless -sk asks for it.
+ * Fitted on a BOE panel; one CSOT unit measured the same.
  */
 #define SLOT_NS		4166667ULL
 
@@ -686,7 +686,7 @@ int main(int argc, char **argv)
 	struct pen_rec rec;
 	struct mcu mcu = { .fd = -1 };
 	struct tilt_state ts;
-	int tilt_x = 0, tilt_y = 0, sk_given = 0;
+	int tilt_x = 0, tilt_y = 0;
 	long tsum_x = 0, tsum_y = 0, tn = 0;	/* -v: mean tilt of a stroke */
 	unsigned char rep[64];
 	int pen, hid, ui;
@@ -736,7 +736,6 @@ int main(int argc, char **argv)
 			pos_x_us = atoi(sk);
 			if ((sk = strchr(sk, ',')) != NULL)
 				pos_y_us = atoi(sk + 1);
-			sk_given = 1;
 		}
 		else if (!strcmp(argv[i], "-tx"))
 			tilt_sx = -tilt_sx;
@@ -755,8 +754,6 @@ int main(int argc, char **argv)
 	side_given = side_mode >= 0;
 	read_settings();
 	col_map = panel_is_boe();
-	if (!col_map && !sk_given)
-		pos_x_us = pos_y_us = 0;
 
 	/* ueventd creates /dev/gk3_pen a moment after insmod: wait up to 10 s */
 	for (int tries = 0; tries < 100; tries++) {
