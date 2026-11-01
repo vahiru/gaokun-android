@@ -195,16 +195,19 @@ log -t audioroute "耳机麦路由已应用（PCM2 / TX）"
 #
 # 序列来自上游 UCM 的 SectionDevice."Mic"：
 #   codecs/qcom-lpass/va-macro/DMIC0EnableSeq.conf 与 DMIC1EnableSeq.conf
+#
+# VA_DECn Volume 的刻度是 v-84 dB，所以 112 = +28 dB。数字增益不改变信噪比。
+# ⚠️ 依赖 patches/0165：4.8 MHz 下的脉冲噪声在增益之前，会被一起放大。
 set -- \
     "MultiMedia4 Mixer VA_CODEC_DMA_TX_0" 1 \
     "VA DEC0 MUX" VA_DMIC \
     "VA DMIC MUX0" DMIC0 \
     "VA_AIF1_CAP Mixer DEC0" 1 \
-    "VA_DEC0 Volume" 100 \
+    "VA_DEC0 Volume" 112 \
     "VA DEC1 MUX" VA_DMIC \
     "VA DMIC MUX1" DMIC1 \
     "VA_AIF1_CAP Mixer DEC1" 1 \
-    "VA_DEC1 Volume" 100
+    "VA_DEC1 Volume" 112
 apply "$@"
 
 log -t audioroute "内置麦路由已应用（PCM3 / VA / DMIC0+1）"
