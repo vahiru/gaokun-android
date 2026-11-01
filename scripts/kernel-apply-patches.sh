@@ -352,6 +352,8 @@ KPATCHES=(
     0165-arm64-dts-gaokun3-lower-the-DMIC-clock-to-3.2-MHz.patch
     # 0166：VA解码器启动时静音，40毫秒后解除。不打的话每段录音开头都有高通滤波器的阶跃，听起来是一声咔哒。
     0166-ASoC-codecs-lpass-va-macro-mute-the-decimators-while-they-settle.patch
+    # 0167：VA解码器的高通在启动后300毫秒恢复原值（4 Hz）。不打的话录音一直带着150 Hz高通，低频被削掉。
+    0167-ASoC-codecs-lpass-va-macro-restore-the-high-pass-corner-after-the-start.patch
 )
 
 # ⚠️ 诊断补丁【不进发版内核】：只在带 --with-diag 时打。顺序有依赖：0028/0029 依赖 0023，
