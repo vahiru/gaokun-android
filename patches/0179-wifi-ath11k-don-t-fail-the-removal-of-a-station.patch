@@ -1,0 +1,42 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] wifi: ath11k: don't fail the removal of a station
+
+mac80211 doesn't allow a sta_state callback to fail for a down transition,
+but ath11k_mac_op_sta_state() passes on the result of the peer delete. With
+crashed firmware that is -ESHUTDOWN, which on a deauthentication before a
+restart trips the check in mac80211:
+
+  wlan0: failed to remove key (0, xx:xx:xx:xx:xx:xx) from hardware (-108)
+  WARNING: net/mac80211/sta_info.c:1603 at __sta_info_destroy_part2+0x144/0x168
+  Call trace:
+   __sta_info_destroy_part2+0x144/0x168 (P)
+   __sta_info_flush+0x154/0x220
+   ieee80211_set_disassoc+0x4cc/0x664
+   ieee80211_mgd_deauth+0x13c/0x5fc
+
+The failure doesn't matter here: mac80211 goes on either way, the code
+below the call drops a peer entry that the delete left behind, and the
+firmware has no peers once it restarts. On WCN6855 the early vdev stop can
+fail first, and ath11k_mac_station_remove() then returns before its cleanup,
+so the station stays counted and its stats stay allocated, as they did
+before this patch. Warn in the log as before and report success.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ drivers/net/wireless/ath/ath11k/mac.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/drivers/net/wireless/ath/ath11k/mac.c b/drivers/net/wireless/ath/ath11k/mac.c
+index ef3fb5069..cb51b3da1 100644
+--- a/drivers/net/wireless/ath/ath11k/mac.c
++++ b/drivers/net/wireless/ath/ath11k/mac.c
+@@ -10022,6 +10022,9 @@ static int ath11k_mac_op_sta_state(struct ieee80211_hw *hw,
+ 		mutex_unlock(&ar->ab->tbl_mtx_lock);
+ 
+ 		ath11k_cfr_decrement_peer_count(ar, arsta);
++
++		/* mac80211 doesn't allow a down transition to fail. */
++		ret = 0;
+ 	} else if (old_state == IEEE80211_STA_AUTH &&
+ 		   new_state == IEEE80211_STA_ASSOC &&
+ 		   (vif->type == NL80211_IFTYPE_AP ||

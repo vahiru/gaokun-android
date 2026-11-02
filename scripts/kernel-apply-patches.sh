@@ -369,6 +369,43 @@ KPATCHES=(
     # 0172：xHCI控制器死掉后，系统挂起和恢复都跳过它。不打的话xhci_suspend()一直返回-EINVAL，到重启前每次系统挂起都失败。
     #    USB设备本身还是要重启才回来。
     0172-usb-xhci-don-t-fail-system-suspend-on-a-dead-host.patch
+    # ★ 0173–0187：ath11k和mac80211在挂起恢复和固件崩溃恢复上的修复，打在0170之上（0178、0184都改它加的函数）。
+    # 0173：停掉影子定时器时清started。不打的话挂起时碰上一次，这个定时器到重启前都不再运行。
+    0173-wifi-ath11k-clear-the-started-flag-of-a-stopped-shadow-timer.patch
+    # 0174：WoW醒来后对丢了RX BA会话的TID发DELBA，让路由器重新建立会话。不打的话TCP乱序一直持续到重新关联。
+    0174-wifi-mac80211-set-RX-block-ack-sessions-up-again-after-WoWLAN.patch
+    # 0175：重启失败时留着已注册的hw。不打的话会释放mac80211还在用的hw。和Julius Bairaktaris的列表补丁
+    #    （ath11k 2026-October/009366）相同，多一行注释，那组补丁进了所用内核后去掉。
+    0175-wifi-ath11k-keep-the-registered-hw-when-a-restart-fails.patch
+    # 0176：不重复关PCI中断。不打的话中断在下次启动后还是关着，到重启前每次重启固件都超时。留着0177就要留着它。
+    #    Florian Maurer的列表补丁（ath11k 2026-November/009504）修了外部中断那一半，它进了所用内核后这里收窄到CE中断。
+    0176-wifi-ath11k-don-t-disable-the-PCI-interrupts-twice.patch
+    # 0177：重启途中再崩也reset。不打的话固件已死、radio还开着，所有帧和WMI命令都失败，直到碰巧有一次挂起给设备下电。
+    0177-wifi-ath11k-reset-again-when-the-firmware-crashes-during-a-restart.patch
+    # 0178：打在0177之上。崩溃循环里前两次立刻reset，之后从30秒起翻倍等待，6次后放弃，等下一次给设备下电的挂起再试。
+    #    不打的话固件一直崩就一直reset，系统被反复叫醒。
+    0178-wifi-ath11k-back-off-from-a-firmware-crash-loop-then-give-up.patch
+    # 0179：删除station不失败。不打的话固件崩溃后断开连接会触发mac80211的WARNING。
+    #    列表补丁ath11k 2026-November/009513覆盖得更宽，它进了所用内核后去掉。两者文本上不冲突，要人工去掉。
+    0179-wifi-ath11k-don-t-fail-the-removal-of-a-station.patch
+    # 0180：主线e588e83e5c7a，拆除RX BA会话时停掉会话定时器。7.2.10已带（09b7d5e4f885），内核升到7.2.10时去掉。
+    0180-wifi-mac80211-shut-down-RX-BA-session-timer-on-teardown.patch
+    # 0181：主线c7555d47b1d0，ath11k_dp_rx_tid_del_func()的加锁。所用内核带上后去掉。
+    0181-wifi-ath11k-fix-locking-problem-in-ath11k_dp_rx_tid_del_func.patch
+    # 0182、0183：主线3e7f5d362b2b、dc29226dada3，两处一边遍历IDR一边删除，要成对打。不打的话这两处都可能崩溃。
+    #    所用内核带上后去掉。
+    0182-wifi-ath11k-avoid-IDR-mutation-during-pending-mgmt-TX-cleanup.patch
+    0183-wifi-ath11k-avoid-IDR-mutation-during-vif-mgmt-TX-cleanup.patch
+    # 0184：重启途中崩溃时op_start、add_interface不失败。不打的话mac80211关掉接口，Android的WifiSelfRecovery跟着关Wi-Fi，要手动打开。
+    0184-wifi-ath11k-don-t-fail-a-restart-on-a-firmware-crash.patch
+    # 0185：Julius Bairaktaris的列表补丁v2（ath11k 2026-October/009368），和0184配对。环重建完才清CRASH_FLUSH。
+    #    不打的话重建期间发WMI命令会解引用空指针。换成v3或正式版本时，要按它的错误路径核对0186。
+    0185-wifi-ath11k-clear-CRASH_FLUSH-only-after-recovery-rebuilds-the-rings.patch
+    # 0186：覆盖0184之后的失败路径。不打的话挂起失败后会在已释放的环上启动定时器，引发Oops。
+    0186-wifi-ath11k-cover-a-restart-that-fails-and-a-suspend-that-fails-after-it.patch
+    # 0187：reset里上电失败的处理。不打的话PCIe链路丢失后MHI准备失败，下一次给设备下电的挂起或关机会重复释放
+    #    MHI的命令环并解引用空指针；op_start还要持着rtnl等满40秒。
+    0187-wifi-ath11k-handle-a-failed-power-up-in-a-reset.patch
 )
 
 # ⚠️ 诊断补丁【不进发版内核】：只在带 --with-diag 时打。顺序有依赖：0028/0029 依赖 0023，
