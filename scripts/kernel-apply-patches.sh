@@ -358,6 +358,9 @@ KPATCHES=(
     0168-platform-arm64-huawei-gaokun-ec-report-the-real-lid-state-on-resume.patch
     # 0169：恢复时给键盘/笔MCU的HID接口发SET_IDLE，配合去掉cmdline里的USB复位。不打的话睡眠后没有压感。
     0169-HID-usbhid-add-a-quirk-to-send-SET_IDLE-on-resume.patch
+    # 0170：Wi-Fi关着时固件崩溃，mac80211不走reconfig_complete，这次reset结束不了。不打的话之后每次加载固件都持60秒
+    #    ath11k_recovery，Wi-Fi关着时每次挂起都给设备下电，所以每次醒来都多醒一分钟。
+    0170-wifi-ath11k-end-a-reset-that-has-no-radio-to-restart.patch
     # 0172：xHCI控制器死掉后，系统挂起和恢复都跳过它。不打的话xhci_suspend()一直返回-EINVAL，到重启前每次系统挂起都失败。
     #    USB设备本身还是要重启才回来。
     0172-usb-xhci-don-t-fail-system-suspend-on-a-dead-host.patch

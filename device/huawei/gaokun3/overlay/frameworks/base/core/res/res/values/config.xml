@@ -168,7 +168,7 @@
       ★ 2026-10-04 起 ntp.aliyun.com 排第一（v1.0 计划 NET-12）：原来 time.android.com 在前，国内每轮对时
         都要先在它上面耗掉一个超时（mTimeout=PT5S）。那次开机从连上网到第一次对时成功用了 7 分 12 秒，
         前 5 轮全失败（同期在做 #16 的挂起测试、网络 id 100→122 换个不停，混杂因素没排除），成功的是 aliyun。
-        time.android.com 挪到第二：国外用户若连不上 aliyun，多等的也只是一个 5 s 超时，随后本次开机就排到最前。
+        time.android.com 挪到第二：国外用户若连不上 aliyun，多等的也只是一个超时（见下面 config_ntpTimeout），随后本次开机就排到最前。
         ⚠️ aliyun 在海外的可达性没有实测过（开发机在国内、走代理，测不出来）。
       ⚠️ 设置项 ntp_server 优先于这里（NtpTrustedTime.java:647-653）；开发机上手动设过的话，
          验证这份覆盖前先 settings delete global ntp_server。
@@ -193,9 +193,16 @@
       EngineImpl.refreshAndRescheduleIfRequired 在失败时：mTryAgainTimesMax < 0 ⇒ mTryAgainCounter 固定为 1、
       下次按短间隔（60 s）；否则计数超过上限就归 0、改按 18 h。成功一次计数即归 0，回到 18 h 的正常周期。
       代价：只在"对时一直失败"时每分钟发一轮 NTP 请求；排程用的闹钟类型是 3（ELAPSED_REALTIME，不唤醒），
-      睡着时不会因此醒来。
+      睡着时不会因此醒来，但到点后由之后的某次唤醒带着跑一轮，这一轮全程持唤醒锁（见下面 config_ntpTimeout）。
     -->
     <integer name="config_ntpRetry">-1</integer>
+
+    <!--
+      每个 NTP 地址的超时，默认 5 s。对时失败时一轮要把解析出的地址逐个试完，全程持 PARTIAL 唤醒锁。
+      连着没有互联网、域名又能解析的 Wi-Fi 时，每一轮都要等满所有超时。2 s 把这样的一轮缩短到约五分之二。
+      代价：没有地址在 2 s 内回复、但有地址能在 5 s 内回复的网络（原来对得上），现在每一轮都会失败。
+    -->
+    <integer name="config_ntpTimeout">2000</integer>
 
     <!-- Automatic brightness, from the tcs3701 ambient light sensor the sensors
          HAL offers (sensors-hal/README.md). No nits mapping is configured, so
