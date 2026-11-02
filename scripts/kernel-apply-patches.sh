@@ -361,6 +361,11 @@ KPATCHES=(
     # 0170：Wi-Fi关着时固件崩溃，mac80211不走reconfig_complete，这次reset结束不了。不打的话之后每次加载固件都持60秒
     #    ath11k_recovery，Wi-Fi关着时每次挂起都给设备下电，所以每次醒来都多醒一分钟。
     0170-wifi-ath11k-end-a-reset-that-has-no-radio-to-restart.patch
+    # 0171：上游FastRPC修复v3的移植，还没进主线。被信号打断的invoke重试时接回原来的上下文，不再重发给DSP。
+    #    不打的话每冻结一次泄漏一个ctx编号，255个用完后hexagonrpcd-sdsp起不来（ENOSPC，退出码4），重启才恢复
+    #    （按代码SLPI重启也能恢复）。主线收入正式修复后去掉，去掉前先核对正式版本是否还带着v3的问题
+    #    （补丁说明末尾的[Akisaira: ...]，例如硬中断里拿fl->lock）。
+    0171-misc-fastrpc-fix-context-leak-and-hang-on-signal-interrupted-invoke.patch
     # 0172：xHCI控制器死掉后，系统挂起和恢复都跳过它。不打的话xhci_suspend()一直返回-EINVAL，到重启前每次系统挂起都失败。
     #    USB设备本身还是要重启才回来。
     0172-usb-xhci-don-t-fail-system-suspend-on-a-dead-host.patch
