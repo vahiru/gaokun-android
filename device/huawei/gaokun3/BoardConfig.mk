@@ -139,8 +139,7 @@ BOARD_KERNEL_CMDLINE := \
     console=tty0 \
     clk_ignore_unused pd_ignore_unused arm64.nopauth efi=noruntime \
     efi_pstore.pstore_disable=1 \
-    fbcon=rotate:1 usbhid.quirks=0x12d1:0x10b8:0x20000000 \
-    usbcore.quirks=12d1:10b8:b \
+    fbcon=rotate:1 usbhid.quirks=0x12d1:0x10b8:0x21000000 \
     himax_hx83121a_spi.disable_pressure=0 \
     snd_usb_audio.index=-2,-2,-2,-2
 # ↑ ⚠️★★★ efi_pstore.pstore_disable=1（2026-10-30 安全修复）：用户报告 efi_pstore 把每次 oops 的 dmesg 写进 UEFI 变量
@@ -155,11 +154,11 @@ BOARD_KERNEL_CMDLINE := \
 #   4 个 MMNOC TBU）于是一直开着；deferred_probe_timeout 到期后 sync_state 照常执行，genpd 把它们关掉。
 #   pd_ignore_unused 只跳过 late_initcall 那次 genpd_power_off_unused()，管不到 stay_on 和 of_genpd_sync_state()，
 #   所以留着不影响。clk_ignore_unused 也还留着。
-# ↑ usbcore.quirks（手写笔，#26）：b = USB_QUIRK_RESET_RESUME，系统休眠恢复时复位键盘 / 笔 MCU（12d1:10b8）。
-#   不复位的话，它醒来后照样报告笔已连接、键盘也能用，却不再转发压感（hidraw 报文 0x55）；
-#   重新握手、重绑 usbhid、取消再重新授权都无效，只有 USB 端口复位能恢复。usbhid 支持 reset-resume，
-#   键盘不受影响。cmdline 里的怪癖每次枚举都会重新生效（运行时设的标志在每次复位后会被
-#   hub_port_init 清掉，所以只能走 cmdline）。
+# ↑ usbhid.quirks（键盘 / 笔 MCU 12d1:10b8）：0x20000000 = HID_QUIRK_NO_INIT_REPORTS，0x01000000 = HID_QUIRK_IDLE_ON_RESUME（0169）。
+#   MCU 收到 SET_FEATURE(REMOTE_WAKEUP) 后按接口扣住 IN 报文，要等该接口收到 SET_IDLE 或 OUT 才放行。接口 2 由 mt_resume()
+#   放行，gk3pend 的握手放行接口 1；接口 0 绑 hid-generic，恢复时没有任何请求，所以靠这个怪癖，否则没有压感（hidraw 报文 0x55）。
+#   以前用 usbcore.quirks=12d1:10b8:b（USB_QUIRK_RESET_RESUME）复位 MCU 来恢复，复位会清掉队列，唤醒系统的那下按键丢失，
+#   按第二下屏幕才亮。cmdline 和 0169 要一起改：只去掉复位、不打 0169，睡眠后就没有压感。
 # ↑ 触摸报 ABS_MT_TOUCH_MAJOR/PRESSURE（#116 实测：轴建起、真值上报正常，Android 侧无异常）。
 #   这是 0444 模块参数，只能走 cmdline。配套 gaokun3-touch-mode.sh 里 pressure_enabled=1。
 # ↑ snd_usb_audio.index（v1.0 AV-4，⬜ 未上机）：USB 声卡永远不占 card0。内置声卡要等 ADSP 起来才注册，

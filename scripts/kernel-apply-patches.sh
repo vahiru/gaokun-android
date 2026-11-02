@@ -356,6 +356,8 @@ KPATCHES=(
     0167-ASoC-codecs-lpass-va-macro-restore-the-high-pass-corner-after-the-start.patch
     # 0168：恢复时按EC读到的状态上报盖子，原来一律报开着。不打的话，合着盖被闹钟等唤醒时Android当成开盖，屏幕会亮。
     0168-platform-arm64-huawei-gaokun-ec-report-the-real-lid-state-on-resume.patch
+    # 0169：恢复时给键盘/笔MCU的HID接口发SET_IDLE，配合去掉cmdline里的USB复位。不打的话睡眠后没有压感。
+    0169-HID-usbhid-add-a-quirk-to-send-SET_IDLE-on-resume.patch
 )
 
 # ⚠️ 诊断补丁【不进发版内核】：只在带 --with-diag 时打。顺序有依赖：0028/0029 依赖 0023，

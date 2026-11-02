@@ -147,11 +147,11 @@ index 000000000..f7f513c8c
 + *
 + * Userspace (gk3pend) turns the frames into a stylus: position, hover and
 + * tilt from the frames, pressure, side double-tap and battery from the pen
-+ * controller on USB (12d1:10b8).  That controller needs
-+ * usbcore.quirks=12d1:10b8:b (reset-resume): after a system suspend it keeps
-+ * reporting the pen as connected but no longer forwards the pressure, and
-+ * only a USB port reset brings that back (re-handshake, HID rebind and
-+ * deauthorize/authorize do not).
++ * controller on USB (12d1:10b8).  That controller holds its reports across
++ * a system suspend until the host talks to it on each interface: usbhid
++ * does it for pressure (HID_QUIRK_IDLE_ON_RESUME), gk3pend for the side
++ * double-tap.  Without it the pen still shows as connected but pressure
++ * stays off.
 + *
 + * It never touches the master, so finger touch is unaffected.
 + *
