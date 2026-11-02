@@ -71,25 +71,30 @@ static const double pitch_rows[4] = { 0.0, -1.4495726495726495, 0.00474572649572
  * middle 63/64.  Taken as even, the pen read up to 1.3-1.5 mm off towards
  * the nearer end around columns 10 and 50, the same in every target row;
  * with this map a second session read 0.11 mm rms, about the tapping
- * precision.  The rows are even (end sections fit no better).  The factory
- * table (CoordinateSolver::ApplyPitchMap, from a CSOT-panel unit) has the
- * same corners with the opposite sign and half the size, 63/64 at the ends
- * and 129/128 in the middle: on the BOE panel it would triple the error.
- * So gk3pend applies this map on BOE only; other panels stay even until
- * measured.  col_pitch_map() takes a global column coordinate (UNIT per
- * nominal cell, sensor order) to the physical position in the same units,
- * linearly beyond the sensor.
+ * precision.  The rows are even (end sections fit no better).  The CSOT
+ * panel uses the factory table (EGoTouchRev CoordinateSolver::ApplyPitchMap):
+ * the same corners with the opposite sign and half the size, 63/64 at the
+ * ends and 129/128 in the middle.  Taken as even, a CSOT unit read inwards on
+ * both sides, and a horizontal scale of 1.004 fitted to its taps brought
+ * them out; that agrees with the table, which gives 1.003-1.005 for such a
+ * test when the outer targets sit about a tenth of the width from the edges.
+ * The largest offset, about 0.7 mm, is at columns 10 and 50.  On the BOE
+ * panel the table would make the error 1.5 times larger than even pitch.
+ * An unknown panel stays even.  col_pitch_map()
+ * takes a global column coordinate (UNIT per nominal cell, sensor order) to
+ * the physical position in the same units, linearly beyond the sensor.
  */
-#define PITCH_END	66	/* width of the 10 end columns, 1/64 cell */
-#define PITCH_MID	63	/* width of the 40 middle columns */
+static const int pitch_boe[2] = { 132, 126 };	/* width of the 10 end and the 40 middle columns, 1/128 cell */
+static const int pitch_csot[2] = { 126, 129 };
+static const int *pitch = pitch_boe;		/* set for the panel before col_pitch_map() is used */
 
-static int col_bound(int k)	/* left edge of column k, 1/64 cell */
+static int col_bound(int k)	/* left edge of column k, 1/128 cell */
 {
 	if (k <= 10)
-		return k * PITCH_END;
+		return k * pitch[0];
 	if (k <= 50)
-		return 10 * PITCH_END + (k - 10) * PITCH_MID;
-	return 10 * PITCH_END + 40 * PITCH_MID + (k - 50) * PITCH_END;
+		return 10 * pitch[0] + (k - 10) * pitch[1];
+	return 10 * pitch[0] + 40 * pitch[1] + (k - 50) * pitch[0];
 }
 
 static int col_pitch_map(int col)
@@ -97,7 +102,7 @@ static int col_pitch_map(int col)
 	int k = col < 0 ? 0 : col >= SENSOR_COLS * UNIT ? SENSOR_COLS - 1 : col / UNIT;
 	int lo = col_bound(k);
 
-	return (lo * UNIT + (col - k * UNIT) * (col_bound(k + 1) - lo)) / 64;
+	return (lo * UNIT + (col - k * UNIT) * (col_bound(k + 1) - lo)) / 128;
 }
 
 /*

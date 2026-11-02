@@ -139,7 +139,7 @@ static int press_incell = 1;	/* -pm incell|direct */
 static int tilt_on = 1, tilt_sx = 1, tilt_sy = 1;	/* -nt, -tx, -ty */
 static int region_on = -1;	/* -pr strong peak region, -lr legacy; unset: strong except on BOE */
 static int rec_fd = -1;					/* -rec */
-static int col_map;	/* the column pitch in solver.h: BOE panel only */
+static int col_map;	/* the column pitch in solver.h: PANEL_BOE, PANEL_CSOT, else even */
 
 /*
  * The even sensor columns are read about 1 ms after the odd ones.  Y comes from
@@ -365,17 +365,19 @@ static long long suspended_ms(void)
 }
 
 /* gaokun3 ships with a BOE or a CSOT panel; the DSI panel node says which */
-static int panel_is_boe(void)
+enum { PANEL_UNKNOWN, PANEL_BOE, PANEL_CSOT };
+
+static int panel_kind(void)
 {
 	char b[8] = { 0 };
 	int fd = open("/sys/firmware/devicetree/base/soc@0/display-subsystem@ae00000/"
 		      "dsi@ae94000/panel@0/compatible", O_RDONLY);
 
 	if (fd < 0)
-		return 0;
+		return PANEL_UNKNOWN;
 	read(fd, b, sizeof(b) - 1);
 	close(fd);
-	return !strncmp(b, "boe,", 4);
+	return !strncmp(b, "boe,", 4) ? PANEL_BOE : !strncmp(b, "csot,", 5) ? PANEL_CSOT : PANEL_UNKNOWN;
 }
 
 static int word(const unsigned char *d, int i)
@@ -764,7 +766,8 @@ int main(int argc, char **argv)
 	beta_given = pf_beta >= 0;
 	side_given = side_mode >= 0;
 	read_settings();
-	col_map = panel_is_boe();
+	col_map = panel_kind();
+	pitch = col_map == PANEL_CSOT ? pitch_csot : pitch_boe;
 
 	/* ueventd creates /dev/gk3_pen a moment after insmod: wait up to 10 s */
 	for (int tries = 0; tries < 100; tries++) {
@@ -783,12 +786,13 @@ int main(int argc, char **argv)
 	mcu_open(&mcu, now_ms());
 	/* on BOE the strong region bends gentle curves further off the path */
 	if (region_on < 0)
-		region_on = !col_map;
+		region_on = col_map != PANEL_BOE;
 	if (region_on && !sk_given)
 		pos_x_us = 600;
 	printf("gk3pend: running, flip x %d y %d, column pitch %s, peak region %s, filter %d,%d,%d, "
 	       "pos skew %d,%d us, stale frames %s, pressure %s tau %d ms, tilt %s, side %s, mcu %s\n",
-	       flip_x, flip_y, col_map ? "boe" : "even", region_on ? "strong" : "legacy",
+	       flip_x, flip_y, col_map == PANEL_BOE ? "boe" : col_map == PANEL_CSOT ? "csot" : "even",
+	       region_on ? "strong" : "legacy",
 	       pf_mincutoff, pf_beta, pf_dcutoff,
 	       pos_x_us, pos_y_us, stale_on ? "skipped" : "kept",
 	       press_incell ? "incell" : "direct", press_tau_ms,

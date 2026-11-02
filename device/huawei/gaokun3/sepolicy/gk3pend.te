@@ -18,7 +18,7 @@ allow gk3pend usb_device:dir r_dir_perms;
 allow gk3pend usb_device:chr_file rw_file_perms;
 
 # 设备树里面板的 compatible（/sys/firmware/devicetree/base/...，标签 sysfs）：
-# BOE 屏才用实测的列间距。只读这一个文件，不需要别的 sysfs。
+# 按面板选列间距表。只读这一个文件，不需要别的 sysfs。
 allow gk3pend sysfs:file r_file_perms;
 
 # 设置页的平滑强度和侧边双击：init 从 persist.sys.gaokun3.pen_* 转写的 vendor.gaokun3.pen_*（stylus/gk3pend.rc）
