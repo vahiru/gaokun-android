@@ -406,6 +406,24 @@ KPATCHES=(
     # 0187：reset里上电失败的处理。不打的话PCIe链路丢失后MHI准备失败，下一次给设备下电的挂起或关机会重复释放
     #    MHI的命令环并解引用空指针；op_start还要持着rtnl等满40秒。
     0187-wifi-ath11k-handle-a-failed-power-up-in-a-reset.patch
+    # ★ 0188–0195：深度待机，以及PCIe、NVMe恢复失败时的处理，说明见docs/deep-sleep.md。依赖0170、0172、0173–0187。
+    # 0188：链路断开时留一票active-only的PCIe-MEM投票。不打的话两条链路都断开后整机复位。只对SC8280XP、SA8540P生效。
+    0188-PCI-qcom-keep-an-active-only-PCIe-MEM-vote-in-L2-on-SC8280XP.patch
+    # 0189：VCC_WLAN_3R9常开。不打的话pcie4断链时这路被关掉，WoW的固件却还在运行。Windows在D3时也不关这路。
+    0189-arm64-dts-qcom-sc8280xp-huawei-gaokun3-keep-VCC_WLAN_3R9-on.patch
+    # 0190：上游d0cd9c8d0fd5。蓝牙串口系统休眠时放掉时钟和投票。不打的话开着蓝牙CX下不去。
+    0190-serial-qcom-geni-add-force-suspend-resume-to-system-sleep-callbacks.patch
+    # 0191：上游d4c79b63d82d。根端口能进D3hot，链路才会走L2。不打的话SoC进不了深度待机。
+    #    依赖0188，单独打就走到无票路径。SC8280XP CRD上有这个提交导致挂起崩溃的报告（2026-09，未定论）。
+    #    出问题时cmdline加pcie_port_pm=off回到不断链的待机。
+    0191-PCI-Allow-D3-for-native-hotplug-capable-Root-Ports-on-non-x86-platforms.patch
+    # 0192：恢复时链路超时不再拆host。不打的话根端口和端点的访问会碰到断了时钟的DBI。
+    0192-PCI-dwc-keep-the-host-up-if-the-link-fails-on-resume.patch
+    # 0193：恢复时链路没起来，把槽断开重来一次。不打的话这条链路一直断着，上面的设备用不了。
+    0193-PCI-dwc-retry-a-link-that-doesn-t-come-back-on-resume.patch
+    # 0194、0195：系统盘没了就panic重启。不打的话/data不可用、也挂起不了，一直卡着。
+    0194-PCI-dwc-panic-if-the-link-to-the-NVMe-disk-is-lost-on-resume.patch
+    0195-nvme-panic-when-a-disk-is-marked-dead.patch
 )
 
 # ⚠️ 诊断补丁【不进发版内核】：只在带 --with-diag 时打。顺序有依赖：0028/0029 依赖 0023，
