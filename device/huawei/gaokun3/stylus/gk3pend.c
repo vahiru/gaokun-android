@@ -44,8 +44,16 @@
  * Side touch: the pen reports a double-tap on its side as event 0x2F = 1
  * (single taps and long presses report nothing).  Windows uses it to switch
  * between pen and eraser; -side eraser (default) does the same, -side button
- * sends a BTN_STYLUS click instead, -side none ignores it.  A switch asked for
- * while the tip is down waits for the lift, so a stroke never changes tool.
+ * sends a BTN_STYLUS click instead, -side none ignores it (the controller is
+ * still opened, for the battery).  A switch asked for while the tip is down
+ * waits for the lift, so a stroke never changes tool.
+ *
+ * Settings (parts/StylusSettingsActivity.java): the filter's beta and what a
+ * double-tap does come from vendor.gaokun3.pen_beta and vendor.gaokun3.pen_side,
+ * which init copies from the persist.sys.gaokun3 ones the page writes
+ * (gk3pend.rc).  They are read at start and again after any property changes,
+ * so a change applies from the next frame; bionic builds only.  -pf with a
+ * beta, or -side, on the command line wins.
  *
  * Tilt: TiltProcess (TX1 tip vs TX2 ring electrode offset -> asin per axis)
  * reported as ABS_TILT_X/Y in degrees (resolution 0: Android reads degrees);
@@ -72,6 +80,9 @@
 #include <sys/ioctl.h>
 #include <time.h>
 #include <unistd.h>
+#ifdef __BIONIC__
+#include <sys/system_properties.h>
+#endif
 #endif
 #include <linux/hidraw.h>
 #include <linux/input.h>
@@ -123,7 +134,7 @@ struct mcu {
 
 static int verbose, flip_x, flip_y = 1;
 static int press_tau_ms = 4;	/* -pt N: pressure smoothing time constant */
-static int side_mode = SIDE_ERASER;
+static int side_mode = -1;	/* -side; unset: from the settings, else SIDE_ERASER */
 static int press_incell = 1;	/* -pm incell|direct */
 static int tilt_on = 1, tilt_sx = 1, tilt_sy = 1;	/* -nt, -tx, -ty */
 static int rec_fd = -1;					/* -rec */
@@ -264,7 +275,35 @@ static double edge_smooth(double *s, double v, int zone, int max, int reset)
  * -sk X,Y sets the column timing correction in us (0,0 is off), -ns keeps
  * frames with a repeated reading (see pos_skew, stale_frame above).
  */
-static int pf_mincutoff = 1000, pf_beta = 500, pf_dcutoff = 5000;
+static int pf_mincutoff = 1000, pf_beta = -1, pf_dcutoff = 5000;	/* beta unset: from the settings, else 500 */
+static int beta_given, side_given;	/* on the command line, so the settings stay out */
+
+/* The settings (see the top of this file).  Returns 1 when one changed. */
+static int read_settings(void)
+{
+	int beta = 500, side = SIDE_ERASER, changed;
+#ifdef __BIONIC__
+	static unsigned int serial;
+	unsigned int s = __system_property_area_serial();
+	char v[PROP_VALUE_MAX];
+
+	if (s == serial && pf_beta >= 0 && side_mode >= 0)
+		return 0;
+	serial = s;
+	if (__system_property_get("vendor.gaokun3.pen_beta", v) > 0 && atoi(v) >= 50 && atoi(v) <= 5000)
+		beta = atoi(v);
+	if (__system_property_get("vendor.gaokun3.pen_side", v) > 0)
+		side = !strcmp(v, "button") ? SIDE_BUTTON : !strcmp(v, "none") ? SIDE_NONE : SIDE_ERASER;
+#endif
+	if (beta_given)
+		beta = pf_beta;
+	if (side_given)
+		side = side_mode;
+	changed = beta != pf_beta || side != side_mode;
+	pf_beta = beta;
+	side_mode = side;
+	return changed;
+}
 
 struct euro {
 	double x, y;		/* filtered position, px */
@@ -712,6 +751,9 @@ int main(int argc, char **argv)
 		}
 	}
 
+	beta_given = pf_beta >= 0;
+	side_given = side_mode >= 0;
+	read_settings();
 	col_map = panel_is_boe();
 	if (!col_map && !sk_given)
 		pos_x_us = pos_y_us = 0;
@@ -730,8 +772,7 @@ int main(int argc, char **argv)
 		       pen, hid, ui, errno);
 		return 1;
 	}
-	if (side_mode != SIDE_NONE)
-		mcu_open(&mcu, now_ms());
+	mcu_open(&mcu, now_ms());
 	printf("gk3pend: running, flip x %d y %d, column pitch %s, filter %d,%d,%d, pos skew %d,%d us, "
 	       "stale frames %s, pressure %s tau %d ms, tilt %s, side %s, mcu %s\n",
 	       flip_x, flip_y, col_map ? "boe" : "even", pf_mincutoff, pf_beta, pf_dcutoff,
@@ -761,6 +802,12 @@ int main(int argc, char **argv)
 			return 1;
 		}
 		t = now_ms();
+		if (read_settings()) {
+			if (side_mode != SIDE_ERASER)
+				eraser = 0;	/* back to the pen: now if hovering, at the lift if the tip is down */
+			printf("%lld settings: filter beta %d, side %s\n", t, pf_beta,
+			       side_mode == SIDE_ERASER ? "eraser" : side_mode == SIDE_BUTTON ? "button" : "none");
+		}
 
 		/*
 		 * Back from system suspend: the pen controller holds its reports
@@ -883,7 +930,7 @@ int main(int argc, char **argv)
 				emit(ui, EV_SYN, SYN_REPORT, 0);
 			}
 		}
-		if (mcu.fd < 0 && side_mode != SIDE_NONE && t >= mcu.retry_at)
+		if (mcu.fd < 0 && t >= mcu.retry_at)
 			mcu_open(&mcu, t);
 
 		if (pf[0].revents & POLLIN && read(pen, &rec, sizeof(rec)) == sizeof(rec)) {

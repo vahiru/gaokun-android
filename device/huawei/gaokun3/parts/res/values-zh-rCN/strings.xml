@@ -67,4 +67,24 @@
     <string name="app_kernel_restart_message">修改在重启后生效，现在重启吗？</string>
     <string name="app_kernel_restart_now">重启</string>
     <string name="app_kernel_restart_later">稍后</string>
+
+    <!-- 手写笔设置，注入到「设置 → 已连接的设备」 -->
+    <string name="stylus_title">手写笔设置</string>
+    <string name="stylus_summary">笔迹平滑和双击笔身</string>
+    <string name="stylus_smooth_title">笔迹平滑</string>
+    <string name="stylus_smooth_weak">弱</string>
+    <string name="stylus_smooth_strong">强</string>
+    <string-array name="stylus_smooth_levels">
+        <item>弱</item>
+        <item>较弱</item>
+        <item>较强</item>
+        <item>强</item>
+    </string-array>
+    <string name="stylus_side_title">双击笔身功能</string>
+    <string-array name="stylus_side_entries">
+        <item>切换橡皮擦</item>
+        <item>侧键单击</item>
+        <item>关</item>
+    </string-array>
+    <string name="stylus_note">平滑越强，放大后的线条越平滑，但书写时笔迹会更明显地落后于笔尖。</string>
 </resources>
