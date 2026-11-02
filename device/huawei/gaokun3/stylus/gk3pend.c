@@ -137,6 +137,7 @@ static int press_tau_ms = 4;	/* -pt N: pressure smoothing time constant */
 static int side_mode = -1;	/* -side; unset: from the settings, else SIDE_ERASER */
 static int press_incell = 1;	/* -pm incell|direct */
 static int tilt_on = 1, tilt_sx = 1, tilt_sy = 1;	/* -nt, -tx, -ty */
+static int region_on = -1;	/* -pr strong peak region, -lr legacy; unset: strong except on BOE */
 static int rec_fd = -1;					/* -rec */
 static int col_map;	/* the column pitch in solver.h: BOE panel only */
 
@@ -152,11 +153,16 @@ static int col_map;	/* the column pitch in solver.h: BOE panel only */
  * between really are gone and it belongs to this step.  Velocity is counted in
  * sample slots on that basis.  A stroke's first frames can be old data, so a
  * restart keeps the whole gap for the next step, which leaves them uncorrected.
- * Fitted on a BOE panel; one CSOT unit measured the same.
+ * Fitted on a BOE panel; one CSOT unit measured the same.  The legacy peak
+ * region (solver.h) usually spans the whole row, so X also takes in the
+ * neighbouring columns, which are read at the other time.  The strong region
+ * is the peak column alone in about two thirds of frames and two columns
+ * otherwise, and X reads about twice as late there: 600 instead of 294,
+ * fitted on both panels.  Y changes little (517 and 494 fitted) and keeps 531.
  */
 #define SLOT_NS		4166667ULL
 
-static int pos_x_us = 294, pos_y_us = 531;	/* -sk x,y */
+static int pos_x_us = 294, pos_y_us = 531, sk_given;	/* -sk x,y; x is 600 with the strong region */
 
 /* sin(pi * col / 1024) without libm: Bhaskara's fit, within 0.2 % */
 static double sin_cell(int col)
@@ -736,6 +742,7 @@ int main(int argc, char **argv)
 			pos_x_us = atoi(sk);
 			if ((sk = strchr(sk, ',')) != NULL)
 				pos_y_us = atoi(sk + 1);
+			sk_given = 1;
 		}
 		else if (!strcmp(argv[i], "-tx"))
 			tilt_sx = -tilt_sx;
@@ -748,6 +755,10 @@ int main(int argc, char **argv)
 			side_mode = !strcmp(argv[i], "button") ? SIDE_BUTTON :
 				    !strcmp(argv[i], "none") ? SIDE_NONE : SIDE_ERASER;
 		}
+		else if (!strcmp(argv[i], "-pr"))
+			region_on = 1;
+		else if (!strcmp(argv[i], "-lr"))
+			region_on = 0;
 	}
 
 	beta_given = pf_beta >= 0;
@@ -770,9 +781,15 @@ int main(int argc, char **argv)
 		return 1;
 	}
 	mcu_open(&mcu, now_ms());
-	printf("gk3pend: running, flip x %d y %d, column pitch %s, filter %d,%d,%d, pos skew %d,%d us, "
-	       "stale frames %s, pressure %s tau %d ms, tilt %s, side %s, mcu %s\n",
-	       flip_x, flip_y, col_map ? "boe" : "even", pf_mincutoff, pf_beta, pf_dcutoff,
+	/* on BOE the strong region bends gentle curves further off the path */
+	if (region_on < 0)
+		region_on = !col_map;
+	if (region_on && !sk_given)
+		pos_x_us = 600;
+	printf("gk3pend: running, flip x %d y %d, column pitch %s, peak region %s, filter %d,%d,%d, "
+	       "pos skew %d,%d us, stale frames %s, pressure %s tau %d ms, tilt %s, side %s, mcu %s\n",
+	       flip_x, flip_y, col_map ? "boe" : "even", region_on ? "strong" : "legacy",
+	       pf_mincutoff, pf_beta, pf_dcutoff,
 	       pos_x_us, pos_y_us, stale_on ? "skipped" : "kept",
 	       press_incell ? "incell" : "direct", press_tau_ms,
 	       !tilt_on ? "off" : tilt_sx * tilt_sy > 0 ? (tilt_sx > 0 ? "on" : "on -tx -ty") :
@@ -949,7 +966,10 @@ int main(int argc, char **argv)
 				}
 				restart = !in_range || t - valid_t > 20 || (press && !touching);
 				skip = stale_on && stale_frame(g, ar, ac) && !restart;
-				solve_local(g, ar, ac, &lc, &lr);
+				if (region_on)
+					solve_local_region(g, ar, ac, &lc, &lr, 1);
+				else
+					solve_local(g, ar, ac, &lc, &lr);
 				/* window centre (cell 4) sits on the anchor cell */
 				col = lc + (ac - 4) * UNIT;
 				row = lr + (ar - 4) * UNIT;
