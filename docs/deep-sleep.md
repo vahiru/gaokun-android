@@ -36,7 +36,7 @@ APPS 留在 RPMh sleep 集合里的投票不清空，AOSS 就不会关 DDR 和 C
 Windows 的 PEP 表也是这样：D3 时拉低 SSD 的供电，Wi-Fi 的 3.9 V 和 WLAN_EN 不动。
 `qcom_pcie_deinit_2_7_0()` 无条件关 `vddpe-3v3`，`skip_pwrctrl_off` 只保 WLAN_EN，所以 3.9 V 靠 `regulator-always-on`。
 
-NVMe 每次待机都做一次 shutdown，醒来重新建队列。两条链路在 noirq 阶段依次训练，加起来约 570 ms，是醒来时最慢的一段。
+NVMe 每次待机都做一次 shutdown，醒来重新建队列。两条链路在 noirq 阶段重新训练，SSD 那条约 0.35 秒，Wi-Fi 那条约 0.25 秒，是醒来时最慢的一段；两个控制器并行恢复（patches/0196），不再一条等一条。
 
 ## Wi-Fi
 

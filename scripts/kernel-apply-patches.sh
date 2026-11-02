@@ -424,6 +424,8 @@ KPATCHES=(
     # 0194、0195：系统盘没了就panic重启。不打的话/data不可用、也挂起不了，一直卡着。
     0194-PCI-dwc-panic-if-the-link-to-the-NVMe-disk-is-lost-on-resume.patch
     0195-nvme-panic-when-a-disk-is-marked-dead.patch
+    # 0196：SC8280XP的PCIe控制器在系统挂起和恢复时并行处理。不打的话唤醒时两条链路依次重新训练，每次多等约0.24秒。
+    0196-PCI-qcom-resume-the-SC8280XP-controllers-in-parallel.patch
 )
 
 # ⚠️ 诊断补丁【不进发版内核】：只在带 --with-diag 时打。顺序有依赖：0028/0029 依赖 0023，
