@@ -763,10 +763,10 @@ int main(int argc, char **argv)
 		t = now_ms();
 
 		/*
-		 * Back from system suspend: gk3_pen_slave has the pen controller
-		 * reset during resume (USB_QUIRK_RESET_RESUME), after which it
-		 * sends no events until queried again.  Pressure needs nothing
-		 * (usbhid survives the reset); the event channel is reopened.
+		 * Back from system suspend: the pen controller holds its reports
+		 * per interface until the host talks to it there.  usbhid does
+		 * that for pressure (HID_QUIRK_IDLE_ON_RESUME); the event channel
+		 * is ours, and the OUT of the handshake after reopening frees it.
 		 */
 		if (suspended_ms() - slept > 1000) {
 			slept = suspended_ms();
@@ -833,10 +833,9 @@ int main(int argc, char **argv)
 
 			while (ioctl(mcu.fd, USBDEVFS_REAPURBNDELAY, &u) == 0) {
 				/*
-				 * A reset of the controller, as on every resume (even one
-				 * too short for the check above), kills the URBs and drops
-				 * our claim on the interface, and the controller then needs
-				 * the handshake again: reopen rather than resubmit.
+				 * A system suspend, even one too short for the check above,
+				 * kills the URBs, and the controller then needs the handshake
+				 * again: reopen rather than resubmit.
 				 */
 				if (u->status != 0) {
 					printf("%lld mcu: urb status %d, reopening\n", t, u->status);

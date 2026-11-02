@@ -32,7 +32,7 @@
 |---|---|---|
 | 从片驱动 | `patches/0079` | `drivers/input/touchscreen/himax_hx83121a_pen.c`（`CONFIG_TOUCHSCREEN_HIMAX_HX83121A_PEN`，`kernel-config-android.sh` 里 =y），帧经 `/dev/gk3_pen` 交给 `gk3pend` |
 | 设备树 | `patches/0080` | 启用 `&spi20` 与引脚，挂上从片节点 `pen@0` |
-| 启动参数 | `BoardConfig.mk` | `usbcore.quirks=12d1:10b8:b`，见下 |
+| 休眠恢复 | `patches/0169`、`BoardConfig.mk` | `usbhid.quirks=0x12d1:0x10b8:0x21000000`，见下 |
 | 守护进程 | `device/huawei/gaokun3/stylus/` | `gk3pend`，服务 `vendor.gk3pend`（user system，group uhid usb） |
 | 权限 | `ueventd.gaokun3.rc`、`sepolicy/gk3pend.te` | `/dev/gk3_pen`、hidraw、uinput、usbfs，以及读设备树中面板的 compatible |
 | 电量 | 驱动 + `sepolicy/genfs_contexts`、`system_server.te`、`hal_health_default.te` | power supply `m-pencil`，见下 |
@@ -50,9 +50,10 @@
   失败时重新初始化，并用一个跟随面板的看门狗，在亮屏却收不到帧时重新初始化。
 - **省电。** 没有笔时从片每秒仍中断约 125 次。超过 `idle_after_ms` 没见到笔，驱动就关掉中断，改为每 `idle_poll_ms` 读一帧；
   `gk3pend` 收到笔 MCU 的报文时写一下 `/dev/gk3_pen`，让驱动立即恢复中断。
-- **休眠恢复。** 系统休眠恢复后，笔 MCU 不再转发压感，只有 USB 端口复位能恢复，所以启动参数里加了
-  `usbcore.quirks=12d1:10b8:b`（`USB_QUIRK_RESET_RESUME`）。复位后 MCU 要重新收到查询才会发事件，`gk3pend` 检测到
-  休眠恢复后会重新握手。
+- **休眠恢复。** 笔 MCU 收到 SET_FEATURE(REMOTE_WAKEUP) 后按接口扣住 IN 报文，要等该接口收到 SET_IDLE 或 OUT 才放行。
+  接口 2 由 `mt_resume()` 放行；接口 0（压感）绑 hid-generic，恢复时没有任何请求，靠 `patches/0169` 的
+  `HID_QUIRK_IDLE_ON_RESUME`；接口 1（侧键、电量等事件）靠 `gk3pend` 检测到休眠恢复后重新握手。
+  排查：`/sys/bus/usb/devices/3-3/quirks` 应为 0x0，hidraw 收不到 0x55 时先看 dmesg 里有没有 `SET_IDLE on resume failed`。
 - **电量。** 驱动注册的 power supply `m-pencil` 作用域为设备，health HAL 会跳过它。它故意不挂父设备：EventHub 为输入设备
   找电池时，从设备的 sysfs 节点往上找最近的 `power_supply` 目录，而 uinput 设备位于 `/sys/devices/virtual`，所以这块电池
   会被认作触控笔的电池。读取它的是 system_server 里的 InputManager，而核心策略只允许 health HAL 读 `sysfs_batteryinfo`，
