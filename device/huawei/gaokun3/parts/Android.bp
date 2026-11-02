@@ -39,6 +39,9 @@ android_app {
         "SettingsLibCollapsingToolbarBaseActivity",
         "SettingsLibFooterPreference",
         "SettingsLibSettingsTheme",
+        // 手写笔设置的四档平滑滑块（Material 离散滑块，带刻度和两端文字）：frameworks/base/packages/SettingsLib/
+        // SliderPreference/，crDroid 17.0 与 LineageOS 24.0 是同一版。这一版默认不画刻度，StylusSettingsActivity 里打开。
+        "SettingsLibSliderPreference",
         "androidx.preference_preference",
     ],
     // ⚠️ 不设 privileged：我们没申请任何特权权限，

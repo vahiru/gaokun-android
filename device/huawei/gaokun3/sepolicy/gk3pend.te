@@ -21,6 +21,9 @@ allow gk3pend usb_device:chr_file rw_file_perms;
 # BOE 屏才用实测的列间距。只读这一个文件，不需要别的 sysfs。
 allow gk3pend sysfs:file r_file_perms;
 
+# 设置页的平滑强度和侧边双击：init 从 persist.sys.gaokun3.pen_* 转写的 vendor.gaokun3.pen_*（stylus/gk3pend.rc）
+get_prop(gk3pend, vendor_gaokun3_prop)
+
 # stdio_to_kmsg（stylus/gk3pend.rc）：日志写进 /dev/kmsg_debug，只有 userdebug / eng 有这个节点。
 # init 以只写（不带 O_APPEND）打开后传给 gk3pend，exec 时按 write 检查，没有 write 就会被换成 /dev/null。
 userdebug_or_eng(`

@@ -75,4 +75,29 @@
     <string name="app_kernel_restart_message">Changes apply after a restart. Restart now?</string>
     <string name="app_kernel_restart_now">Restart</string>
     <string name="app_kernel_restart_later">Later</string>
+
+    <!-- Stylus settings, injected into Settings → Connected devices -->
+    <string name="stylus_title">Stylus settings</string>
+    <string name="stylus_summary">Ink smoothing and double-tap on the pen</string>
+    <string name="stylus_smooth_title">Ink smoothing</string>
+    <string name="stylus_smooth_weak">Weak</string>
+    <string name="stylus_smooth_strong">Strong</string>
+    <string-array name="stylus_smooth_levels">
+        <item>Weak</item>
+        <item>Medium weak</item>
+        <item>Medium strong</item>
+        <item>Strong</item>
+    </string-array>
+    <string name="stylus_side_title">Double-tap action</string>
+    <string-array name="stylus_side_entries">
+        <item>Toggle eraser</item>
+        <item>Side button click</item>
+        <item>Off</item>
+    </string-array>
+    <string-array name="stylus_side_values" translatable="false">
+        <item>eraser</item>
+        <item>button</item>
+        <item>none</item>
+    </string-array>
+    <string name="stylus_note">Stronger smoothing gives smoother lines when zoomed in, but the ink trails further behind the pen tip while you write.</string>
 </resources>

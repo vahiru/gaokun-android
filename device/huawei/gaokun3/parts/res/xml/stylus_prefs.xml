@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+    <!-- Four positions, weak to strong (labels under the ends); StylusSettingsActivity turns the tick
+         marks on, maps the positions to the filter's beta and reads the value back from the property.
+         Written when the slider is let go. -->
+    <com.android.settingslib.widget.SliderPreference
+        android:key="pen_smooth"
+        android:title="@string/stylus_smooth_title"
+        android:max="3"
+        app:min="0"
+        app:seekBarIncrement="1"
+        app:textStart="@string/stylus_smooth_weak"
+        app:textEnd="@string/stylus_smooth_strong"
+        app:updatesContinuously="false"
+        android:persistent="false" />
+    <ListPreference
+        android:key="pen_side"
+        android:title="@string/stylus_side_title"
+        android:dialogTitle="@string/stylus_side_title"
+        android:entries="@array/stylus_side_entries"
+        android:entryValues="@array/stylus_side_values"
+        android:persistent="false" />
+    <com.android.settingslib.widget.FooterPreference
+        android:key="stylus_note"
+        android:title="@string/stylus_note"
+        android:selectable="false" />
+</PreferenceScreen>

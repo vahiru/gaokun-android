@@ -11,3 +11,29 @@ service vendor.gk3pend /vendor/bin/gk3pend
     user system
     group system uhid usb
     stdio_to_kmsg
+
+# 设置 → 已连接的设备 → 手写笔设置（parts/…/StylusSettingsActivity.java）写 persist.sys.gaokun3.pen_*。
+# Parts 是 system_app，设不了 vendor 属性，gk3pend 又读不了 system_prop（理由同 etc/histen.rc），
+# 所以按字面值转成非持久的 vendor.gaokun3.pen_*；真值只有 Parts 那一个，开机加载持久属性时这些触发器
+# 会再走一遍。gk3pend 在属性变化后的下一帧就用新值，不用重启。认不出的值不转：开机后 gk3pend 用默认值，
+# 运行中则保持上一个值。
+on property:persist.sys.gaokun3.pen_beta=500
+    setprop vendor.gaokun3.pen_beta 500
+
+on property:persist.sys.gaokun3.pen_beta=300
+    setprop vendor.gaokun3.pen_beta 300
+
+on property:persist.sys.gaokun3.pen_beta=200
+    setprop vendor.gaokun3.pen_beta 200
+
+on property:persist.sys.gaokun3.pen_beta=125
+    setprop vendor.gaokun3.pen_beta 125
+
+on property:persist.sys.gaokun3.pen_side=eraser
+    setprop vendor.gaokun3.pen_side eraser
+
+on property:persist.sys.gaokun3.pen_side=button
+    setprop vendor.gaokun3.pen_side button
+
+on property:persist.sys.gaokun3.pen_side=none
+    setprop vendor.gaokun3.pen_side none
