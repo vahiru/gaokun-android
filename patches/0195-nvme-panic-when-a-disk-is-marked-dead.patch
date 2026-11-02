@@ -1,0 +1,39 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] nvme: panic when a disk is marked dead
+
+The link can come back while the disk doesn't. If the reset that follows
+a resume fails, or the one after a timeout at runtime, nvme_reset_work()
+marks the namespaces dead, with the same outcome as losing the link: ext4
+is shut down on /data and /metadata, nothing in the kernel reboots the
+system, and the controller refuses to suspend.
+
+This machine has one NVMe device and everything runs from it, so panic
+there. A failed reset, a reset that loses all I/O queues and the removal of
+a controller that is already dead all go through
+nvme_mark_namespaces_dead(). A namespace removed after a successful reset
+doesn't, so that case isn't covered. The first probe doesn't either, so a
+disk that never came up behaves as before, and neither does an orderly
+removal.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ drivers/nvme/host/core.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/drivers/nvme/host/core.c b/drivers/nvme/host/core.c
+index a73cc6a43..993a705ea 100644
+--- a/drivers/nvme/host/core.c
++++ b/drivers/nvme/host/core.c
+@@ -5298,6 +5298,12 @@ void nvme_mark_namespaces_dead(struct nvme_ctrl *ctrl)
+ 	struct nvme_ns *ns;
+ 	int srcu_idx;
+ 
++	/*
++	 * This is the only NVMe device in the machine and everything runs from
++	 * it. Nothing restarts the system once its disk is gone.
++	 */
++	panic("%s: disk lost\n", dev_name(ctrl->device));
++
+ 	srcu_idx = srcu_read_lock(&ctrl->srcu);
+ 	list_for_each_entry_srcu(ns, &ctrl->namespaces, list,
+ 				 srcu_read_lock_held(&ctrl->srcu))

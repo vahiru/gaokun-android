@@ -489,6 +489,8 @@ c6200000-c85fffff  ffa76000-fff21fff
 
 来源：`08-storage.txt`
 
+**两个 PCIe 根端口的 SLTCAP 都有 HPC=1**，见 [deep-sleep.md](deep-sleep.md)。
+
 **内置 NVMe `nvme0n1`（476.9 GB，GPT）：**
 
 | 分区 | 大小 | 文件系统 | PARTLABEL | LABEL |

@@ -1,0 +1,70 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] PCI: qcom: resume the SC8280XP controllers in parallel
+
+Each controller brings its link up again in its noirq resume, and
+dw_pcie_wait_for_link() alone can take up to 900 ms. Once the links go to
+L2 in every system suspend, the controllers resume one after the other,
+and every resume waits for all of them in turn.
+
+Mark the SC8280XP and SA8540P controllers for async suspend and resume.
+The PM core still orders each one after its parent and its device link
+suppliers on resume, and before them on suspend. None of the SC8280XP
+device trees uses an I2C-controlled switch, and the regulators, GPIOs and
+WCN6855 power sequencer that power their slots have no noirq callbacks.
+
+Not for the other platforms: there the slot power control can reach a
+device that the controller has no device link to, such as the I2C
+controller behind the TC9563 switch on QCS6490 RB3gen2. Only the order of
+the PM list puts it before the controller, and an async controller
+doesn't wait for it.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ drivers/pci/controller/dwc/pcie-qcom.c | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/drivers/pci/controller/dwc/pcie-qcom.c b/drivers/pci/controller/dwc/pcie-qcom.c
+index d5ed8b1e2..d7f8b9abd 100644
+--- a/drivers/pci/controller/dwc/pcie-qcom.c
++++ b/drivers/pci/controller/dwc/pcie-qcom.c
+@@ -263,6 +263,7 @@ struct qcom_pcie_ops {
+   * snooping
+   * @firmware_managed: Set if the Root Complex is firmware managed
+   * @l2_mem_vote: Keep a minimal active-only PCIe-MEM vote while the link is down
++  * @async_pm: Suspend and resume in parallel with the other controllers
+   */
+ struct qcom_pcie_cfg {
+ 	const struct qcom_pcie_ops *ops;
+@@ -270,6 +271,7 @@ struct qcom_pcie_cfg {
+ 	bool firmware_managed;
+ 	bool no_l0s;
+ 	bool l2_mem_vote;
++	bool async_pm;
+ };
+ 
+ struct qcom_pcie_perst {
+@@ -1612,6 +1614,7 @@ static const struct qcom_pcie_cfg cfg_sc8280xp = {
+ 	.ops = &ops_1_21_0,
+ 	.no_l0s = true,
+ 	.l2_mem_vote = true,
++	.async_pm = true,
+ };
+ 
+ static const struct qcom_pcie_cfg cfg_x1e80100 = {
+@@ -2050,6 +2053,16 @@ static int qcom_pcie_probe(struct platform_device *pdev)
+ 		return -ENODATA;
+ 	}
+ 
++	/*
++	 * Each controller retrains its link in its noirq resume, which can take
++	 * most of a second, so let them suspend and resume in parallel where
++	 * nothing makes one wait for another. Elsewhere the slot power control
++	 * can depend on a device, like an I2C controller, that only the order of
++	 * the PM list puts before the controller.
++	 */
++	if (pcie_cfg->async_pm)
++		device_enable_async_suspend(dev);
++
+ 	pm_runtime_enable(dev);
+ 	ret = pm_runtime_get_sync(dev);
+ 	if (ret < 0)
