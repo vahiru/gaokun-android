@@ -265,18 +265,14 @@ ndk::ScopedAStatus Session::configureStreams(const StreamConfiguration &cfg,
 
 	/*
 	 * ★ 相机应用一定会配多路（预览 + 拍照）。libcamera 只开【一路】，
-	 *   尺寸取各路里最大的那个，再用 libyuv 缩放分发 ——
-	 *   软件 ISP 是 CPU 瓶颈，开多路等于把同一份拜耳去马赛克多次。
+	 *   再用 libyuv 裁剪、缩放分发 —— 软件 ISP 是 CPU 瓶颈，开多路等于把同一份拜耳去马赛克多次。
 	 */
 	int32_t maxW = 0, maxH = 0;
 	for (const auto &s2 : cfg.streams) {
 		ALOGI("  请求流 id=%d %dx%d fmt=0x%x", s2.id, s2.width, s2.height,
 		      static_cast<int>(s2.format));
-		if (static_cast<int64_t>(s2.width) * s2.height >
-		    static_cast<int64_t>(maxW) * maxH) {
-			maxW = s2.width;
-			maxH = s2.height;
-		}
+		maxW = std::max(maxW, s2.width);
+		maxH = std::max(maxH, s2.height);
 	}
 
 	if (streaming_) {
@@ -320,7 +316,22 @@ ndk::ScopedAStatus Session::configureStreams(const StreamConfiguration &cfg,
 		return err(Status::INTERNAL_ERROR);
 	}
 	libcamera::StreamConfiguration &sc = config_->at(0);
-	sc.size = libcamera::Size(maxW, maxH);
+	/*
+	 * libcamera's software ISP crops, it does not scale: an output smaller
+	 * than the sensor mode is a window out of its middle, with less field
+	 * of view than the stills. Ask for the whole image of a mode and scale
+	 * in deliver(): the 2x2 binned mode when every stream fits in half the
+	 * array, full size otherwise. The CSI-2 packed debayer keeps a 4-pixel
+	 * border on either side, so the binned mode's whole image is 8 pixels
+	 * narrower than half the array (ov13b10 2104x1560 -> 2096x1560, hi846
+	 * 1632x1224 -> 1624x1224). This also keeps libcamera, which picks the
+	 * smallest mode that holds the output, off a 16:9 mode for 4:3 streams.
+	 * A multiple of 8 keeps the RGB888 rows packed (checked below).
+	 */
+	const int32_t halfW = (facts_.activeW / 2 - 8) & ~7;
+	const int32_t halfH = facts_.activeH / 2;
+	sc.size = maxW <= halfW && maxH <= halfH ? libcamera::Size(halfW, halfH)
+						 : libcamera::Size(facts_.activeW, facts_.activeH);
 	/* 固定要 RGB888。⚠️ 用 3 字节的 RGB888 而不是 4 字节的 ABGR8888：
 	 * 8 MP 下每帧少搬 8 MB，而软件去拜耳本来就是 CPU 瓶颈。 */
 	sc.pixelFormat = libcamera::formats::RGB888;
@@ -336,6 +347,12 @@ ndk::ScopedAStatus Session::configureStreams(const StreamConfiguration &cfg,
 
 	if (cam_->configure(config_.get())) {
 		ALOGE("Camera::configure 失败");
+		return err(Status::INTERNAL_ERROR);
+	}
+
+	/* The frame is read everywhere as packed RGB888, with no row padding. */
+	if (sc.stride != sc.size.width * 3) {
+		ALOGE("RGB888 行有填充（%s，stride %u），不支持", sc.size.toString().c_str(), sc.stride);
 		return err(Status::INTERNAL_ERROR);
 	}
 
@@ -764,6 +781,16 @@ void Session::dropAllCaches()
 	bufferCache_.clear();
 }
 
+Session::Crop Session::cropFor(int32_t dstW, int32_t dstH) const
+{
+	int w = srcWidth_, h = srcHeight_;
+	if (static_cast<int64_t>(w) * dstH > static_cast<int64_t>(h) * dstW)
+		w = static_cast<int>(static_cast<int64_t>(h) * dstW / dstH) & ~1;
+	else
+		h = static_cast<int>(static_cast<int64_t>(w) * dstH / dstW) & ~1;
+	return { ((srcWidth_ - w) / 2) & ~1, ((srcHeight_ - h) / 2) & ~1, w, h };
+}
+
 bool Session::deliver(const uint8_t *rgb, buffer_handle_t dst,
 		      int32_t dstW, int32_t dstH, int chromaBlur)
 {
@@ -795,9 +822,12 @@ bool Session::deliver(const uint8_t *rgb, buffer_handle_t dst,
 	 *   字节序照旧：convert.h:959 注释明写 "RGB little endian (bgr in
 	 *   memory) to J420"，与 libcamera 的 RGB888(=BGR24) 对得上。
 	 */
+	const Crop c = cropFor(dstW, dstH);
+	const uint8_t *crop = rgb + static_cast<size_t>(c.y) * srcStride +
+			      static_cast<size_t>(c.x) * 3;
 	int rc;
-	if (dstW == srcWidth_ && dstH == srcHeight_) {
-		rc = libyuv::RGB24ToJ420(rgb, srcStride, dy, dstW, du, cw, dv, cw,
+	if (dstW == c.w && dstH == c.h) {
+		rc = libyuv::RGB24ToJ420(crop, srcStride, dy, dstW, du, cw, dv, cw,
 					 dstW, dstH);
 	} else {
 		/*
@@ -806,19 +836,18 @@ bool Session::deliver(const uint8_t *rgb, buffer_handle_t dst,
 		 *    而先缩放 RGB 再转会多搬一次 3 字节/像素的数据。
 		 * ⬜ 这条路每帧多一次全图拷贝；多路预览时值得再优化。
 		 */
-		const int scw = (srcWidth_ + 1) / 2, schh = (srcHeight_ + 1) / 2;
-		std::vector<uint8_t> src(static_cast<size_t>(srcWidth_) * srcHeight_ +
+		const int scw = (c.w + 1) / 2, schh = (c.h + 1) / 2;
+		std::vector<uint8_t> src(static_cast<size_t>(c.w) * c.h +
 					 static_cast<size_t>(scw) * schh * 2);
 		uint8_t *sy = src.data();
-		uint8_t *su = sy + static_cast<size_t>(srcWidth_) * srcHeight_;
+		uint8_t *su = sy + static_cast<size_t>(c.w) * c.h;
 		uint8_t *sv = su + static_cast<size_t>(scw) * schh;
-		rc = libyuv::RGB24ToJ420(rgb, srcStride, sy, srcWidth_, su, scw, sv, scw,
-					 srcWidth_, srcHeight_);
+		rc = libyuv::RGB24ToJ420(crop, srcStride, sy, c.w, su, scw, sv, scw,
+					 c.w, c.h);
 		if (rc == 0)
-			rc = libyuv::I420Scale(sy, srcWidth_, su, scw, sv, scw,
-					       srcWidth_, srcHeight_,
+			rc = libyuv::I420Scale(sy, c.w, su, scw, sv, scw, c.w, c.h,
 					       dy, dstW, du, cw, dv, cw,
-					       dstW, dstH, libyuv::kFilterBilinear);
+					       dstW, dstH, libyuv::kFilterBox);
 	}
 
 	if (rc == 0 && chromaBlur > 0) {
@@ -910,12 +939,15 @@ bool Session::deliverJpeg(const uint8_t *rgb, buffer_handle_t dst,
 	 *    在内存里是 B,G,R,A，正好对上 libjpeg 的 JCS_EXT_BGRA，不用再转回
 	 *    3 通道，也正好对上 ARGBScale / ARGBRotate 的入参。
 	 */
-	const bool needScale = dstW != srcWidth_ || dstH != srcHeight_;
+	const Crop c = cropFor(dstW, dstH);
+	const uint8_t *crop = rgb + static_cast<size_t>(c.y) * srcWidth_ * 3 +
+			      static_cast<size_t>(c.x) * 3;
+	const bool needScale = dstW != c.w || dstH != c.h;
 	const bool needRotate = rotMode != libyuv::kRotate0;
 
 	std::vector<uint8_t> argb;      /* dstW×dstH，已缩放、未旋转（BGRA） */
 	std::vector<uint8_t> rotated;   /* outW×outH，已旋转（BGRA） */
-	const uint8_t *src = rgb;
+	const uint8_t *src = crop;
 	int srcStride = srcWidth_ * 3;
 	int components = 3;
 	J_COLOR_SPACE colorSpace = JCS_EXT_BGR;   /* ★ 字节序见上面的说明 */
@@ -924,23 +956,22 @@ bool Session::deliverJpeg(const uint8_t *rgb, buffer_handle_t dst,
 		argb.resize(static_cast<size_t>(dstW) * dstH * 4);
 
 		if (needScale) {
-			std::vector<uint8_t> full(static_cast<size_t>(srcWidth_) *
-						  srcHeight_ * 4);
-			if (libyuv::RGB24ToARGB(rgb, srcWidth_ * 3, full.data(),
-						srcWidth_ * 4, srcWidth_, srcHeight_) != 0) {
+			std::vector<uint8_t> full(static_cast<size_t>(c.w) * c.h * 4);
+			if (libyuv::RGB24ToARGB(crop, srcWidth_ * 3, full.data(),
+						c.w * 4, c.w, c.h) != 0) {
 				ALOGE("deliverJpeg: RGB24ToARGB 失败");
 				mapper.unlock(dst);
 				return false;
 			}
-			if (libyuv::ARGBScale(full.data(), srcWidth_ * 4, srcWidth_,
-					      srcHeight_, argb.data(), dstW * 4, dstW, dstH,
-					      libyuv::kFilterBilinear) != 0) {
+			if (libyuv::ARGBScale(full.data(), c.w * 4, c.w, c.h,
+					      argb.data(), dstW * 4, dstW, dstH,
+					      libyuv::kFilterBox) != 0) {
 				ALOGE("deliverJpeg: ARGBScale 失败");
 				mapper.unlock(dst);
 				return false;
 			}
 		} else {
-			if (libyuv::RGB24ToARGB(rgb, srcWidth_ * 3, argb.data(), dstW * 4,
+			if (libyuv::RGB24ToARGB(crop, srcWidth_ * 3, argb.data(), dstW * 4,
 						dstW, dstH) != 0) {
 				ALOGE("deliverJpeg: RGB24ToARGB 失败");
 				mapper.unlock(dst);

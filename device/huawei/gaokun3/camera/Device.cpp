@@ -3,6 +3,7 @@
 #include "Provider.h"
 #include "Session.h"
 
+#include <algorithm>
 #include <fcntl.h>
 #include <unistd.h>
 
@@ -216,17 +217,42 @@ bool Device::init()
 
 	/*
 	 * ── 对外声明的输出尺寸 ──
-	 * ⚠️★ 不要只报满分辨率：HAL 按请求里最大的流配置 libcamera，每个输出流还要从整帧
-	 *    各转换一次（[#95] 时帧间隔约 130 ms；2026-11 多线程去拜耳下全尺寸约 33 ms）。
-	 *    这里给一组【降采样】的常用尺寸 + 满分辨率（留给静态拍照），
-	 *    宽高比与传感器一致，避免框架做非等比裁剪。
+	 * ⚠️★ 不要只报满分辨率：流都不超过半个阵列时 HAL 向 libcamera 要合并模式的完整画面，
+	 *    否则要全尺寸，每个输出流还要从整帧各转换一次（[#95] 时帧间隔约 130 ms；
+	 *    2026-11 多线程去拜耳下全尺寸约 33 ms）。
+	 *    这里给一组【降采样】的尺寸 + 满分辨率（留给静态拍照）。
 	 */
 	auto ratio = [&](int w) {
 		return std::make_pair(w, static_cast<int>(
 			static_cast<int64_t>(w) * facts_.activeH / facts_.activeW) & ~1);
 	};
-	facts_.outputSizes = { ratio(640), ratio(1280),
-			       { facts_.activeW, facts_.activeH } };
+	/*
+	 * Besides the sensor's own aspect ratio, offer the standard sizes (and
+	 * 320x240, which camera2 requires for JPEG on every camera):
+	 * this device has no media_profiles, so CameraX finds video qualities
+	 * by probing 640x480, 1280x720, 1920x1080 and so on, and without them
+	 * a camera gets no video at all (the rear one had only 640x474 and
+	 * 1280x948). deliver() crops to each stream's aspect ratio.
+	 *
+	 * Also exact 4:3 and 16:9 sizes at full resolution: CameraX takes the
+	 * largest size that matches its aspect ratio within a few pixels, and
+	 * the ov13b10's 4208x3120 is not 4:3 by that measure. With 1280x960 on
+	 * the list and no full-size 4:3, Aperture took photos at 1280x960.
+	 */
+	const int w43 = facts_.activeH * 4 / 3 & ~1;
+	const std::pair<int, int> candidates[] = {
+		{ 320, 240 }, ratio(640), { 640, 480 }, { 1280, 720 }, ratio(1280), { 1280, 960 },
+		{ 1920, 1080 }, { w43, w43 * 9 / 16 & ~1 }, { w43, facts_.activeH },
+		{ facts_.activeW, facts_.activeH },
+	};
+	facts_.outputSizes.clear();
+	for (const auto &s : candidates) {
+		if (s.first > facts_.activeW || s.second > facts_.activeH ||
+		    std::find(facts_.outputSizes.begin(), facts_.outputSizes.end(), s) !=
+			    facts_.outputSizes.end())
+			continue;
+		facts_.outputSizes.push_back(s);
+	}
 
 	/*
 	 * 30 fps: the multithreaded CPU debayer keeps up with the sensor's

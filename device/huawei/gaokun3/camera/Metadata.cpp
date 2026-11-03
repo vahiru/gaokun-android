@@ -215,10 +215,11 @@ std::vector<uint8_t> buildCharacteristics(const SensorFacts &f)
 	add_camera_metadata_entry(m, ANDROID_CONTROL_AWB_LOCK_AVAILABLE, &awbLockAvail, 1);
 
 	/*
-	 * The HAL does not pass a frame rate to libcamera, which picks the
-	 * smallest sensor mode that holds the largest stream: 30 fps at full
-	 * size, 60 fps in the binned modes. Delivery is slower only when
-	 * processing falls behind (see the frame duration in Device.cpp).
+	 * The HAL does not pass a frame rate to libcamera. It asks for the
+	 * 2x2 binned mode when every stream fits in half the array (60 fps on
+	 * ov13b10, 30 fps on hi846) and for full size otherwise (30 fps).
+	 * Delivery is slower only when processing falls behind (see the frame
+	 * duration in Device.cpp).
 	 */
 	const int32_t fpsRanges[] = { 15, 30, 30, 30 };
 	add_camera_metadata_entry(m, ANDROID_CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES,

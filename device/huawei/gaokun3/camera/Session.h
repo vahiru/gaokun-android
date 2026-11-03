@@ -100,9 +100,15 @@ private:
 	void dropAllCaches();
 
 	/* 把一帧 RGB（源尺寸 srcWidth_×srcHeight_）交付到一个 gralloc 缓冲，
-	 * 必要时缩放到该路流自己的尺寸。 */
+	 * 必要时裁成该路流的宽高比、再缩放到它的尺寸。 */
 	bool deliver(const uint8_t *rgb, buffer_handle_t dst,
 		     int32_t dstW, int32_t dstH, int chromaBlur);
+	/* Centre crop of the source frame with the aspect ratio of dstW x dstH,
+	 * even-aligned. */
+	struct Crop {
+		int x, y, w, h;
+	};
+	Crop cropFor(int32_t dstW, int32_t dstH) const;
 	/*
 	 * JPEG 流：把 RGB 编码成 JPEG 写进 BLOB 缓冲。
 	 * jpegOrientation 是应用给的【顺时针】校正角（ANDROID_JPEG_ORIENTATION）。
@@ -189,7 +195,7 @@ private:
 	/*
 	 * 配置好的 Android 流。
 	 * ★ 相机应用【一定】会配多路（预览 + 拍照，实测 Aperture 要 2 路）。
-	 *   libcamera 这边只开一路（按最大请求尺寸），再用 libyuv 缩放分发到每一路
+	 *   libcamera 这边只开一路（一个传感器模式的完整画面），再用 libyuv 裁剪缩放分发到每一路
 	 *   —— 软件 ISP 是 CPU 瓶颈，开多路等于把同一份拜耳去马赛克多次。
 	 */
 	struct HalStreamInfo {
@@ -199,7 +205,7 @@ private:
 		int32_t blobSize = 0;       /* Stream::bufferSize */
 	};
 	std::vector<HalStreamInfo> halStreams_;
-	/* libcamera 实际输出的尺寸（= 各路里最大的那个）。 */
+	/* libcamera 实际输出的尺寸：一个传感器模式的完整画面（见 configureStreams）。 */
 	int32_t srcWidth_ = 0, srcHeight_ = 0;
 
 	/* 空闲的 libcamera 请求。 */
