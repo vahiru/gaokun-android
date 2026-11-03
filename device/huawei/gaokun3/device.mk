@@ -362,6 +362,23 @@ PRODUCT_VENDOR_PROPERTIES += \
     vendor.hwc.drm.force_p3_support=true \
     vendor.hwc.drm.force_hdr_support=true
 
+# Landscape as the default orientation of the built-in display. bootanimation ignores
+# WindowManager and draws in the panel's natural portrait unless
+# ro.bootanim.set_orientation_<physical display id>, or as a fallback
+# ro.bootanim.set_orientation_logical_0, asks for a rotation (frameworks/base
+# cmds/bootanimation/BootAnimation.cpp, parseOrientationProperty()). WindowManager reads the
+# same properties as the default display's initial rotation (wm/DisplayRotation.java,
+# readDefaultDisplayRotation()), so the UI also starts in landscape until the sensor reports
+# an orientation. logical_0 keeps it independent of the physical display id. ORIENTATION_90
+# is the landscape WindowManager calls ROTATION_90.
+# Limit: the multi-display boot animation (enabled in cp2a) applies this rotation to every
+# display, so an external monitor already detected when it starts shows it sideways.
+# system_ext: the property has no property_contexts entry, so it is default_prop, which only
+# init may set. init checks /vendor/build.prop as vendor_init and would drop the line under
+# enforcing.
+PRODUCT_SYSTEM_EXT_PROPERTIES += \
+    ro.bootanim.set_orientation_logical_0=ORIENTATION_90
+
 # ⚠️ 软渲染（SwiftShader）导入不了 UBWC 压缩 buffer —— SF 崩于
 # "Failed to create a valid texture"（GaneshBackendTexture 导入
 # AHardwareBuffer 失败，tombstone_48 实测）。强制 minigbm 分配线性 buffer。
