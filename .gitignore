@@ -71,6 +71,9 @@ device/huawei/gaokun3/prebuilt-gk3boot/**
 # ⚠️ 同 firmware/ 一样【整目录忽略 + 只放行 README.md】。
 device/huawei/gaokun3/effects/prebuilt/**
 !device/huawei/gaokun3/effects/prebuilt/README.md
+# 麦克风阵列的系数文件（华为Windows驱动包里的数据），获取与校验见device/huawei/gaokun3/micarray/prebuilt/README.md。
+device/huawei/gaokun3/micarray/prebuilt/**
+!device/huawei/gaokun3/micarray/prebuilt/README.md
 
 # 指纹逆向报告（docs/fingerprint/*.md）—— 对华为/高通【签名专有二进制】fingerpr.mbn
 # 与 Windows 驱动 QcTrEE.sys/FtWbioDriverUmdf.dll 的静态逆向笔记（用户从 Windows/Ghidra 侧做）。

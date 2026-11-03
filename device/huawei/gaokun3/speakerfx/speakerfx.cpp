@@ -103,6 +103,7 @@
 #include <new>
 
 #include "bass_chain.h"
+#include "echo_reference.h"
 
 namespace {
 
@@ -400,6 +401,29 @@ struct Stream {
     }
 };
 
+/*
+ * ECHO REFERENCE
+ * Every block this library hands back -- whatever it did to it, so exactly what ALSA plays on the
+ * speakers -- also goes into one ring as mono float, for the capture hook's echo canceller
+ * (echo_reference.h, micarray/README.md).  A copy and an average per frame; no lock, no wait.
+ */
+gaokun::echoref::EchoReference &echoReference() {
+    /* Constant-initialised and trivially destructible: in .bss, no allocation, no guard. */
+    static gaokun::echoref::EchoReference r;
+    return r;
+}
+
+void tapEchoReference(const Stream &s, const void *buf, size_t frames) {
+    gaokun::echoref::EchoReference &r = echoReference();
+    uint64_t n = r.written.load(std::memory_order_relaxed);
+    for (size_t i = 0; i < frames; i++, n++) {
+        r.mono[n % gaokun::echoref::EchoReference::kFrames] =
+                static_cast<float>(0.5 * (s.read(buf, 2 * i) + s.read(buf, 2 * i + 1)));
+    }
+    r.lastWriteNs.store(static_cast<int64_t>(nowUs() * 1000.0), std::memory_order_relaxed);
+    r.written.store(n, std::memory_order_release);
+}
+
 }  // namespace
 
 extern "C" __attribute__((visibility("default"))) void *playback_hook_open(
@@ -426,7 +450,14 @@ extern "C" __attribute__((visibility("default"))) void playback_hook_process(voi
                                                                              void *buffer,
                                                                              size_t frames) {
     if (handle == nullptr || buffer == nullptr || frames == 0) return;
-    static_cast<Stream *>(handle)->process(buffer, frames);
+    Stream *s = static_cast<Stream *>(handle);
+    s->process(buffer, frames);
+    tapEchoReference(*s, buffer, frames);
+}
+
+extern "C" __attribute__((visibility("default"))) gaokun::echoref::EchoReference *
+playback_hook_echo_reference(void) {
+    return &echoReference();
 }
 
 extern "C" __attribute__((visibility("default"))) void playback_hook_close(void *handle) {

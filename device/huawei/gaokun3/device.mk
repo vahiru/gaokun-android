@@ -249,6 +249,22 @@ PRODUCT_PACKAGES += \
 PRODUCT_VENDOR_PROPERTIES += \
     ro.vendor.audio.primary.playback_hook=/vendor/lib64/soundfx/libgaokunspeakerfx.so
 
+# 内置麦克风阵列（micarray/README.md）：音频HAL打开内置麦之前先问这个库（补丁0206，tree-fix [38]）。
+# 它接管时ALSA按四路开，每块录音由顶部三颗麦克风经固定波束成形变成双声道，延迟30 ms；
+# UNPROCESSED、VOICE_PERFORMANCE等音源不经过它。四路要拓扑改过（micarray/tplg-four-channel-capture.py），
+# 拓扑没改时HAL按原来的两路开；拓扑改了就必须带内核0203、0204，否则声道是重混过的。
+# 系数文件不入库（micarray/prebuilt/README.md），与Histen引擎同一套规矩：构建机上由sync-device-tree.sh带过去并断言；
+# 用wildcard，没有它照样能编，库打开时读不到就不接管。
+PRODUCT_PACKAGES += \
+    libgaokunmicarray
+PRODUCT_VENDOR_PROPERTIES += \
+    ro.vendor.audio.primary.capture_hook=/vendor/lib64/soundfx/libgaokunmicarray.so
+GAOKUN3_MICARRAY_WEIGHTS := $(LOCAL_PATH)/micarray/prebuilt/hdrec_bf_data.bin
+ifneq ($(wildcard $(GAOKUN3_MICARRAY_WEIGHTS)),)
+PRODUCT_COPY_FILES += \
+    $(GAOKUN3_MICARRAY_WEIGHTS):$(TARGET_COPY_OUT_VENDOR)/etc/micarray/hdrec_bf_data.bin
+endif
+
 # ------------------------------------------------------------------ 固件
 # [measured] 全部来自 Stage 0 的 dmesg 固件加载路径。
 # 配合 cmdline 里的 firmware_class.path=/vendor/firmware/，
