@@ -320,13 +320,19 @@ static void testPixels(int srcW, int srcH, int dstW, int dstH, int deg,
 	check(ok, label);
 }
 
-/* libcamera Rotation（逆时针）→ ANDROID_SENSOR_ORIENTATION（顺时针） */
-static int32_t androidOrientation(int32_t rawRotation)
+/*
+ * libcamera Rotation（设备树，横屏参照系，逆时针）→ ANDROID_SENSOR_ORIENTATION（顺时针），
+ * 表达式照抄 Device::init()。undone 在 HAL 里来自 libcamera 的 validate()，这里按
+ * computeTransform 的规则给：0 不用消；180 要传感器两个方向都能翻；90 / 270 要转置，消不掉。
+ */
+static int32_t androidOrientation(int32_t rawRotation, bool front, bool canFlip)
 {
 	int32_t ccw = ((rawRotation % 360) + 360) % 360;
 	if (ccw % 90 != 0)
 		ccw = 0;
-	return (360 - ccw) % 360;
+	const int32_t undone = (ccw == 0 || (ccw == 180 && canFlip)) ? ccw : 0;
+	const int32_t natural = (ccw - undone + (front ? 90 : 270) + 360) % 360;
+	return (360 - natural) % 360;
 }
 
 int main()
@@ -339,18 +345,24 @@ int main()
 	}
 
 	printf("\n=== D. 运行级：Rotation → ANDROID_SENSOR_ORIENTATION 换算 ===\n");
-	struct { int32_t in, out; } cases[] = {
-		/* in 是设备树/libcamera 的逆时针安装角，out 是 Android 的顺时针校正角 */
-		{ 0, 0 }, { 90, 270 }, { 180, 180 }, { 270, 90 },
-		{ 360, 0 },      /* 归一化 */
-		{ -90, 90 },     /* -90 逆时针 ≡ 270 逆时针 ⇒ 校正角 90 */
-		{ 45, 0 },       /* 非法 ⇒ 归 0 */
+	struct { int32_t in; bool front, canFlip; int32_t out; } cases[] = {
+		/* 本机：后摄 ov13b10 能翻转，前摄 hi846 不能 */
+		{ 180, false, true, 90 },    /* 后摄设备树 180，被翻转消掉 */
+		{ 0, true, false, 270 },     /* 前摄设备树 0 */
+		/* 其他角度：90 / 270 消不掉，180 在不能翻转的传感器上也消不掉 */
+		{ 0, false, true, 90 }, { 90, false, true, 0 }, { 270, false, true, 180 },
+		{ 90, true, false, 180 }, { 180, true, false, 90 }, { 270, true, false, 0 },
+		{ 180, false, false, 270 },
+		{ 360, true, false, 270 },   /* 归一化 */
+		{ -90, true, false, 0 },     /* -90 逆时针 ≡ 270 逆时针 */
+		{ 45, true, false, 270 },    /* 非法 ⇒ 按 0 */
 	};
 	for (auto &c : cases) {
+		const int32_t got = androidOrientation(c.in, c.front, c.canFlip);
 		char label[128];
-		snprintf(label, sizeof(label), "Rotation=%d -> %d", c.in,
-			 androidOrientation(c.in));
-		check(androidOrientation(c.in) == c.out, label);
+		snprintf(label, sizeof(label), "Rotation=%d %s%s -> %d", c.in,
+			 c.front ? "前摄" : "后摄", c.canFlip ? "（能翻转）" : "", got);
+		check(got == c.out, label);
 	}
 
 	printf("\n=== 汇总 ===\n  检查项 %d，失败 %d\n", g_checks, g_fail);
