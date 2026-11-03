@@ -31,6 +31,14 @@
  * AF region: one region (ANDROID_CONTROL_AF_REGIONS, rear camera only). Its
  * sharpness replaces that of the central 70% of the frame; a new region starts
  * a new search.
+ *
+ * Phase detection: with the full-size RAW frame (full-size sensor mode only,
+ * see PhaseDetect.h) a search first moves straight to where the PD disparity
+ * points, kPdCodesPerUnit lens codes per unit, measuring again after each move,
+ * and ends when the disparity is below kPdDone. It falls back to the contrast
+ * sweep when the disparity is not trustworthy (featureless scene) or does not
+ * settle within kPdMaxSteps moves. In the continuous modes a disparity above
+ * kPdRescan also starts a new search.
  */
 #pragma once
 
@@ -42,6 +50,7 @@
 #include <system/camera_metadata.h>
 
 #include "Lens.h"
+#include "PhaseDetect.h"
 
 namespace gaokun3 {
 
@@ -62,7 +71,8 @@ public:
 	 * ⚠️ 为什么必须等它：我们唯一的信号就是帧本身，AGC 还在爬的时候整帧的
 	 *    gamma/对比度都在变，锐度分数会跟着漂 —— 实测同一马达位置（1020）
 	 *   在 AGC 收敛前后能差 3 倍（612 → 211），那样的"曲线"里根本没有焦点信息。 */
-	void onFrame(const uint8_t *rgb, int w, int h, bool sceneStable);
+	void onFrame(const uint8_t *rgb, int w, int h, bool sceneStable,
+		     const RawFrame *raw = nullptr);
 
 	/* AF region as fractions of the frame (x0, y0, x1, y1), or none: the
 	 * central 70%. A change starts a new search. */
@@ -102,6 +112,17 @@ private:
 	static constexpr double kDropRatio = 0.75;
 	static constexpr int kDropPoints = 2;
 	static constexpr int kMaxMoves = 24;        /* 兜底：探测次数上限 */
+	/*
+	 * Phase detection. Calibration on a textured target at 30-50 cm
+	 * (experiments/rear-pdaf-20261103): the disparity is linear in the lens
+	 * position from 100 to 500 at about 300 codes per unit, zero at the
+	 * contrast peak, and saturates (keeping its sign) further out.
+	 */
+	static constexpr double kPdCodesPerUnit = 300.0;
+	static constexpr double kPdMinConfidence = 0.5;
+	static constexpr double kPdDone = 0.06;     /* about 18 codes */
+	static constexpr double kPdRescan = 0.15;   /* about 45 codes */
+	static constexpr int kPdMaxSteps = 4;
 	static constexpr double kMinScore = 20.0;   /* "这场景没法对焦"（白墙）的下限；
 						     ⚠️ 量纲随指标变（拉普拉斯/亮度）。实测本机
 						     标准卡场景：真峰 347、远端平坦区 33、
@@ -139,6 +160,10 @@ private:
 	bool fineDone_ = false;
 	int drops_ = 0;                  /* coarse points in a row below kDropRatio of the peak */
 	std::map<int, double> samples_;  /* this search's (position, score) samples */
+	bool phaseMode_ = false;         /* this search follows the PD disparity */
+	bool havePhase_ = false;         /* the last frame came with a RAW frame */
+	int pdSteps_ = 0;
+	int pdOff_ = 0;                  /* frames in a row with the disparity above kPdRescan */
 	int moveTarget_ = -1;            /* where a stepped move is heading, -1 = none */
 	/* AF region in fractions of the frame; default the central 70%. */
 	float region_[4] = { 0.15f, 0.15f, 0.85f, 0.85f };

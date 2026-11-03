@@ -191,6 +191,11 @@ private:
 	std::unique_ptr<libcamera::CameraConfiguration> config_;
 	std::unique_ptr<libcamera::FrameBufferAllocator> allocator_;
 	libcamera::Stream *stream_ = nullptr;
+	/* Full-size RAW stream for phase detection (rear camera in full-size mode). */
+	libcamera::Stream *rawStream_ = nullptr;
+	bool rawForPhase_ = false;
+	unsigned int rawStride_ = 0;
+	int32_t rawWidth_ = 0, rawHeight_ = 0;
 
 	/*
 	 * 配置好的 Android 流。

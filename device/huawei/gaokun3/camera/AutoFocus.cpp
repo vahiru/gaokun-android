@@ -133,6 +133,9 @@ void AutoFocus::startScan()
 	fineDone_ = false;
 	drops_ = 0;
 	samples_.clear();
+	phaseMode_ = havePhase_;
+	pdSteps_ = 0;
+	pdOff_ = 0;
 	/*
 	 * Coarse sweep over kLensLow..kLensHigh in kCoarseStep, from the end nearer
 	 * the lens; the fine sweep around the peak is generated when it ends.
@@ -269,13 +272,20 @@ double AutoFocus::sharpness(const uint8_t *rgb, int w, int h)
 	return 1000.0 * lap / lum;
 }
 
-void AutoFocus::onFrame(const uint8_t *rgb, int w, int h, bool sceneStable)
+void AutoFocus::onFrame(const uint8_t *rgb, int w, int h, bool sceneStable,
+			const RawFrame *raw)
 {
 	if (!rgb || w <= 0 || h <= 0)
 		return;
 	const double score = sharpness(rgb, w, h);
 
 	std::lock_guard<std::mutex> lk(m_);
+
+	havePhase_ = raw != nullptr;
+	PhaseResult ph;
+	if (raw && mode_ != Mode::Off)
+		ph = measurePhase(*raw, region_[0], region_[1], region_[2], region_[3]);
+	const bool phaseOk = ph.valid && ph.confidence >= kPdMinConfidence;
 
 	/* 镜头状态描述【这一帧曝光时】的马达：上一帧我们刚发过移动指令，
 	 * 这一帧还没走到位 ⇒ MOVING；再下一帧起 STATIONARY。 */
@@ -395,6 +405,13 @@ void AutoFocus::onFrame(const uint8_t *rgb, int w, int h, bool sceneStable)
 		 * 阈值 = max(相对 kRescanRel，绝对 kRescanAbs)：绝对下限挡住低分场景的噪声，
 		 * 也让 refScore_≈0（全平场景、或钉住后刚放开）时照样能触发。
 		 */
+		/* Out of focus by the PD disparity: search again. */
+		pdOff_ = phaseOk && std::fabs(ph.disparity) > kPdRescan ? pdOff_ + 1 : 0;
+		if (pdOff_ >= kRescanFrames) {
+			ALOGI("AF 相位显示失焦（错位 %+.3f），重新搜索", ph.disparity);
+			startScan();
+			return;
+		}
 		const double delta = std::fabs(score - refScore_);
 		if (delta > std::max(refScore_ * kRescanRel, kRescanAbs)) {
 			if (++stable_ >= kRescanFrames) {
@@ -427,6 +444,36 @@ void AutoFocus::onFrame(const uint8_t *rgb, int w, int h, bool sceneStable)
 		settle_--;
 		ALOGD("AF 等稳定：pos=%d 分数=%.1f（还需 %d 帧）", cur, score, settle_);
 		return;
+	}
+
+	/* Phase detection: go where the disparity points, then measure again.
+	 * A search started before the first RAW frame (session start) switches
+	 * to it as long as it has not sampled or moved yet. */
+	if (!phaseMode_ && havePhase_ && moves_ == 0 && samples_.empty())
+		phaseMode_ = true;
+	if (phaseMode_) {
+		const int lo = std::max(lens_->minPos(), kLensLow);
+		const int hi = std::min(lens_->maxPos(), kLensHigh);
+		if (phaseOk && pdSteps_ < kPdMaxSteps) {
+			const int target = std::clamp(
+				static_cast<int>(std::lround(cur - ph.disparity * kPdCodesPerUnit)), lo, hi);
+			ALOGI("AF 相位 pos=%d 错位=%+.3f 可信度=%.2f 分数=%.1f → %d", cur, ph.disparity,
+			      ph.confidence, score, target);
+			if (std::fabs(ph.disparity) <= kPdDone || target == cur) {
+				bestPos_ = cur;
+				bestScore_ = score;
+				finishScan();
+				return;
+			}
+			pdSteps_++;
+			moves_++;
+			if (!moveTo(target))
+				finishScan();
+			return;
+		}
+		ALOGI("AF 相位不可用（%s，可信度 %.2f），改用对比度扫描",
+		      phaseOk ? "步数用完" : "不可信", ph.confidence);
+		phaseMode_ = false;
 	}
 
 	/* 每个采样点都打一行（pos + 分数）——"马达到底动没动 / 焦点落在哪"的客观证据。 */

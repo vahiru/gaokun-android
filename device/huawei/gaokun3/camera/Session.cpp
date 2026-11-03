@@ -309,9 +309,22 @@ ndk::ScopedAStatus Session::configureStreams(const StreamConfiguration &cfg,
 	lastSettings_.clear();
 	lastAfState_ = 0xff;
 
+	const int32_t halfW = (facts_.activeW / 2 - 8) & ~7;
+	const int32_t halfH = facts_.activeH / 2;
+	const bool fullSize = !(maxW <= halfW && maxH <= halfH);
+	/*
+	 * Phase detection needs the RAW frame, and the ov13b10 has its PD pixels
+	 * in the full-size mode only (PhaseDetect.h): ask for it alongside. It is
+	 * the soft ISP's input, so libcamera captures into it without a copy.
+	 */
+	const bool withRaw = fullSize && facts_.hasAf;
+
 	/* Viewfinder role 会启用软件 ISP（Raw role 不会）。 */
-	config_ = cam_->generateConfiguration({ libcamera::StreamRole::Viewfinder });
-	if (!config_ || config_->empty()) {
+	std::vector<libcamera::StreamRole> roles = { libcamera::StreamRole::Viewfinder };
+	if (withRaw)
+		roles.push_back(libcamera::StreamRole::Raw);
+	config_ = cam_->generateConfiguration(roles);
+	if (!config_ || config_->size() != roles.size()) {
 		ALOGE("generateConfiguration 失败");
 		return err(Status::INTERNAL_ERROR);
 	}
@@ -328,14 +341,17 @@ ndk::ScopedAStatus Session::configureStreams(const StreamConfiguration &cfg,
 	 * smallest mode that holds the output, off a 16:9 mode for 4:3 streams.
 	 * A multiple of 8 keeps the RGB888 rows packed (checked below).
 	 */
-	const int32_t halfW = (facts_.activeW / 2 - 8) & ~7;
-	const int32_t halfH = facts_.activeH / 2;
-	sc.size = maxW <= halfW && maxH <= halfH ? libcamera::Size(halfW, halfH)
-						 : libcamera::Size(facts_.activeW, facts_.activeH);
+	sc.size = fullSize ? libcamera::Size(facts_.activeW, facts_.activeH)
+			   : libcamera::Size(halfW, halfH);
 	/* 固定要 RGB888。⚠️ 用 3 字节的 RGB888 而不是 4 字节的 ABGR8888：
 	 * 8 MP 下每帧少搬 8 MB，而软件去拜耳本来就是 CPU 瓶颈。 */
 	sc.pixelFormat = libcamera::formats::RGB888;
 	sc.bufferCount = 4;
+	if (withRaw) {
+		libcamera::StreamConfiguration &rc = config_->at(1);
+		rc.size = libcamera::Size(facts_.activeW, facts_.activeH);
+		rc.bufferCount = sc.bufferCount;
+	}
 
 	libcamera::CameraConfiguration::Status st = config_->validate();
 	if (st == libcamera::CameraConfiguration::Invalid) {
@@ -359,19 +375,39 @@ ndk::ScopedAStatus Session::configureStreams(const StreamConfiguration &cfg,
 	stream_ = sc.stream();
 	srcWidth_ = sc.size.width;
 	srcHeight_ = sc.size.height;
+	rawStream_ = nullptr;
+	if (withRaw) {
+		const libcamera::StreamConfiguration &rc = config_->at(1);
+		rawStream_ = rc.stream();
+		rawStride_ = rc.stride;
+		rawWidth_ = rc.size.width;
+		rawHeight_ = rc.size.height;
+		/* PhaseDetect reads CSI-2 packed 10-bit GRBG at full size, unflipped. */
+		rawForPhase_ = rc.pixelFormat == libcamera::formats::SGRBG10_CSI2P &&
+			       rawWidth_ == facts_.activeW && rawHeight_ == facts_.activeH;
+		ALOGI("RAW 流 %s stride %u%s", rc.toString().c_str(), rc.stride,
+		      rawForPhase_ ? "，用于相位对焦" : "，格式不符，不做相位对焦");
+	}
 
 	/* 上一次配置若在建池之后失败（start 失败等），池里还是指向旧 allocator 缓冲的 Request ——
 	 * 换 allocator 之前先清掉，别让新旧两代混在一个池里。此时没有在途请求（streaming_ 为假）。 */
 	freeRequests_.clear();
 	configRequests_.clear();
 	allocator_ = std::make_unique<libcamera::FrameBufferAllocator>(cam_);
-	if (allocator_->allocate(stream_) < 0) {
+	if (allocator_->allocate(stream_) < 0 ||
+	    (rawStream_ && allocator_->allocate(rawStream_) < 0)) {
 		ALOGE("分配 libcamera 缓冲失败");
 		return err(Status::INTERNAL_ERROR);
 	}
-	for (const auto &b : allocator_->buffers(stream_)) {
+	/* Each request carries a buffer of each stream, paired by index. */
+	const auto &bufs = allocator_->buffers(stream_);
+	const size_t nbufs = rawStream_ ? std::min(bufs.size(), allocator_->buffers(rawStream_).size())
+					: bufs.size();
+	for (size_t i = 0; i < nbufs; i++) {
 		auto r = cam_->createRequest();
-		if (!r || r->addBuffer(stream_, b.get())) {
+		if (!r || r->addBuffer(stream_, bufs[i].get()) ||
+		    (rawStream_ &&
+		     r->addBuffer(rawStream_, allocator_->buffers(rawStream_)[i].get()))) {
 			ALOGE("建 libcamera 请求失败");
 			return err(Status::INTERNAL_ERROR);
 		}
@@ -1276,7 +1312,15 @@ void Session::onRequestCompleted(libcamera::Request *req)
 		return;
 	}
 
-	const libcamera::FrameBuffer *fb = req->buffers().begin()->second;
+	const libcamera::FrameBuffer *fb = req->findBuffer(stream_);
+	if (!fb) {
+		ALOGE("frame=%d 完成的请求里没有处理过的帧", pend.frameNumber);
+		reportRequestError(pend);
+		std::lock_guard<std::mutex> lk(mutex_);
+		flashRequestDone(pend);
+		returnToPool(std::move(owned));
+		return;
+	}
 	const int64_t timestamp = fb->metadata().timestamp;
 
 	/* mmap 一次，分发给所有流。 */
@@ -1329,8 +1373,26 @@ void Session::onRequestCompleted(libcamera::Request *req)
 	 *   到那时新位置已经写进马达，所以"下一帧的分数"确实属于新位置 —— 等价于
 	 *   每帧采一个点。（[#95] 时每帧70–130 ms；现在全尺寸约33 ms。）
 	 */
-	if (rgb && facts_.hasAf)
-		af_.onFrame(rgb, srcWidth_, srcHeight_, lumaStableFor >= 2);
+	if (rgb && facts_.hasAf) {
+		/* The RAW frame of the same request, for phase detection. */
+		const libcamera::FrameBuffer *rawFb = rawForPhase_ ? req->findBuffer(rawStream_) : nullptr;
+		void *rawMap = MAP_FAILED;
+		size_t rawLen = 0;
+		RawFrame raw{};
+		if (rawFb && rawFb->metadata().status == libcamera::FrameMetadata::FrameSuccess &&
+		    !rawFb->planes().empty()) {
+			const auto &rp = rawFb->planes()[0];
+			rawLen = rp.offset + rp.length;
+			rawMap = mmap(nullptr, rawLen, PROT_READ, MAP_SHARED, rp.fd.get(), 0);
+			if (rawMap != MAP_FAILED &&
+			    rp.length >= static_cast<size_t>(rawStride_) * rawHeight_)
+				raw = { static_cast<const uint8_t *>(rawMap) + rp.offset,
+					static_cast<int>(rawStride_), rawWidth_, rawHeight_ };
+		}
+		af_.onFrame(rgb, srcWidth_, srcHeight_, lumaStableFor >= 2, raw.data ? &raw : nullptr);
+		if (rawMap != MAP_FAILED)
+			munmap(rawMap, rawLen);
+	}
 
 	/* libcamera（libipa 的 Agc::fillMetadata）每帧报实际曝光与模拟增益：回填结果、驱动降噪强度与闪光判据。 */
 	int64_t exposureNs = 0;
