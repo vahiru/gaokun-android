@@ -47,6 +47,9 @@
 
 #include <libcamera/control_ids.h>
 #include <libcamera/formats.h>
+#include <libcamera/orientation.h>
+#include <libcamera/property_ids.h>
+#include <libcamera/transform.h>
 
 using ::aidl::android::hardware::camera::common::Status;
 using ::aidl::android::hardware::camera::device::BufferCache;
@@ -317,18 +320,8 @@ ndk::ScopedAStatus Session::configureStreams(const StreamConfiguration &cfg,
 	 * in the full-size mode only (PhaseDetect.h): ask for it alongside. It is
 	 * the soft ISP's input, so libcamera captures into it without a copy.
 	 */
-	const bool withRaw = fullSize && facts_.hasAf;
+	bool withRaw = fullSize && facts_.hasAf;
 
-	/* Viewfinder role 会启用软件 ISP（Raw role 不会）。 */
-	std::vector<libcamera::StreamRole> roles = { libcamera::StreamRole::Viewfinder };
-	if (withRaw)
-		roles.push_back(libcamera::StreamRole::Raw);
-	config_ = cam_->generateConfiguration(roles);
-	if (!config_ || config_->size() != roles.size()) {
-		ALOGE("generateConfiguration 失败");
-		return err(Status::INTERNAL_ERROR);
-	}
-	libcamera::StreamConfiguration &sc = config_->at(0);
 	/*
 	 * libcamera's software ISP crops, it does not scale: an output smaller
 	 * than the sensor mode is a window out of its middle, with less field
@@ -341,30 +334,47 @@ ndk::ScopedAStatus Session::configureStreams(const StreamConfiguration &cfg,
 	 * smallest mode that holds the output, off a 16:9 mode for 4:3 streams.
 	 * A multiple of 8 keeps the RGB888 rows packed (checked below).
 	 */
-	sc.size = fullSize ? libcamera::Size(facts_.activeW, facts_.activeH)
-			   : libcamera::Size(halfW, halfH);
-	/* 固定要 RGB888。⚠️ 用 3 字节的 RGB888 而不是 4 字节的 ABGR8888：
-	 * 8 MP 下每帧少搬 8 MB，而软件去拜耳本来就是 CPU 瓶颈。 */
-	sc.pixelFormat = libcamera::formats::RGB888;
-	sc.bufferCount = 4;
-	if (withRaw) {
-		libcamera::StreamConfiguration &rc = config_->at(1);
-		rc.size = libcamera::Size(facts_.activeW, facts_.activeH);
-		rc.bufferCount = sc.bufferCount;
-	}
+	auto setUp = [&](bool raw) {
+		libcamera::StreamConfiguration &vc = config_->at(0);
+		vc.size = fullSize ? libcamera::Size(facts_.activeW, facts_.activeH)
+				   : libcamera::Size(halfW, halfH);
+		/* 固定要 RGB888。⚠️ 用 3 字节的 RGB888 而不是 4 字节的 ABGR8888：
+		 * 8 MP 下每帧少搬 8 MB，而软件去拜耳本来就是 CPU 瓶颈。 */
+		vc.pixelFormat = libcamera::formats::RGB888;
+		vc.bufferCount = 4;
+		if (raw) {
+			libcamera::StreamConfiguration &rc = config_->at(1);
+			rc.size = libcamera::Size(facts_.activeW, facts_.activeH);
+			rc.bufferCount = vc.bufferCount;
+		}
+	};
 
-	libcamera::CameraConfiguration::Status st = config_->validate();
-	if (st == libcamera::CameraConfiguration::Invalid) {
-		ALOGE("配置无效");
-		return err(Status::ILLEGAL_ARGUMENT);
+	/* Viewfinder role 会启用软件 ISP（Raw role 不会）。Without RAW if libcamera
+	 * refuses it: phase detection is optional, the stream is not. */
+	libcamera::CameraConfiguration::Status st;
+	for (;;) {
+		std::vector<libcamera::StreamRole> roles = { libcamera::StreamRole::Viewfinder };
+		if (withRaw)
+			roles.push_back(libcamera::StreamRole::Raw);
+		config_ = cam_->generateConfiguration(roles);
+		if (config_ && config_->size() == roles.size()) {
+			setUp(withRaw);
+			st = config_->validate();
+			if (st != libcamera::CameraConfiguration::Invalid &&
+			    !cam_->configure(config_.get()))
+				break;
+		}
+		if (!withRaw) {
+			ALOGE("generateConfiguration/validate/configure 失败");
+			return err(Status::INTERNAL_ERROR);
+		}
+		ALOGW("libcamera 不接受 RAW 流：只用 Viewfinder，不做相位对焦");
+		withRaw = false;
 	}
+	libcamera::StreamConfiguration &sc = config_->at(0);
 	if (st == libcamera::CameraConfiguration::Adjusted)
 		ALOGW("配置被调整为 %s", sc.toString().c_str());
 
-	if (cam_->configure(config_.get())) {
-		ALOGE("Camera::configure 失败");
-		return err(Status::INTERNAL_ERROR);
-	}
 
 	/* The frame is read everywhere as packed RGB888, with no row padding. */
 	if (sc.stride != sc.size.width * 3) {
@@ -376,18 +386,32 @@ ndk::ScopedAStatus Session::configureStreams(const StreamConfiguration &cfg,
 	srcWidth_ = sc.size.width;
 	srcHeight_ = sc.size.height;
 	rawStream_ = nullptr;
+	rawForPhase_ = false;
 	if (withRaw) {
 		const libcamera::StreamConfiguration &rc = config_->at(1);
 		rawStream_ = rc.stream();
 		rawStride_ = rc.stride;
 		rawWidth_ = rc.size.width;
 		rawHeight_ = rc.size.height;
-		/* PhaseDetect reads CSI-2 packed 10-bit GRBG at full size, unflipped. */
+		/*
+		 * PhaseDetect reads CSI-2 packed 10-bit GRBG at full size, with the PD
+		 * positions measured on a readout that libcamera flipped H+V (DT
+		 * rotation 180). The driver keeps GRBG under flips, so the format
+		 * does not show them: compare the configured orientation with the
+		 * mounting one (libcamera falls back to no flips when it can't do the
+		 * transform, and then reports the mounting orientation).
+		 */
+		const auto rot = cam_->properties().get(libcamera::properties::Rotation);
+		const libcamera::Transform readout =
+			config_->orientation / libcamera::orientationFromRotation(rot ? *rot : 0);
 		rawForPhase_ = rc.pixelFormat == libcamera::formats::SGRBG10_CSI2P &&
-			       rawWidth_ == facts_.activeW && rawHeight_ == facts_.activeH;
-		ALOGI("RAW 流 %s stride %u%s", rc.toString().c_str(), rc.stride,
-		      rawForPhase_ ? "，用于相位对焦" : "，格式不符，不做相位对焦");
+			       rawWidth_ == facts_.activeW && rawHeight_ == facts_.activeH &&
+			       readout == libcamera::Transform::HVFlip;
+		ALOGI("RAW 流 %s stride %u 读出 %s%s", rc.toString().c_str(), rc.stride,
+		      libcamera::transformToString(readout),
+		      rawForPhase_ ? "，用于相位对焦" : "，格式或读出方向不符，不做相位对焦");
 	}
+	af_.setPhaseAvailable(rawForPhase_);
 
 	/* 上一次配置若在建池之后失败（start 失败等），池里还是指向旧 allocator 缓冲的 Request ——
 	 * 换 allocator 之前先清掉，别让新旧两代混在一个池里。此时没有在途请求（streaming_ 为假）。 */
@@ -1385,7 +1409,8 @@ void Session::onRequestCompleted(libcamera::Request *req)
 	 */
 	if (rgb && facts_.hasAf) {
 		/* The RAW frame of the same request, for phase detection. */
-		const libcamera::FrameBuffer *rawFb = rawForPhase_ ? req->findBuffer(rawStream_) : nullptr;
+		const libcamera::FrameBuffer *rawFb =
+			rawForPhase_ && af_.wantsRaw() ? req->findBuffer(rawStream_) : nullptr;
 		void *rawMap = MAP_FAILED;
 		size_t rawLen = 0;
 		RawFrame raw{};

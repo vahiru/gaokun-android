@@ -1,15 +1,14 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 /*
- * gaokun3 相机 HAL —— 自动对焦（对比度检测 CDAF）。
+ * gaokun3 相机 HAL —— 自动对焦（对比度检测 CDAF，全尺寸模式下加相位检测）。
  *
- * ★ 为什么只能做 CDAF：
- *   ov13b10 的成像链路里，相位/对比度统计【没有任何一层给】——
- *   内核只把马达当 v4l2 子设备暴露（无 AF 统计），软件 ISP（simple pipeline +
- *   softisp）的 IPA 只有 AGC/AWB，libcamera 也不产 AF 统计。
- *   所以唯一可用的信号就是【帧本身的清晰度】：读一帧 → 算清晰度 → 爬山搜马达位置。
+ * ★ 没有现成的 AF 统计：内核只把马达当 v4l2 子设备暴露，软件 ISP（simple
+ *   pipeline + softisp）的 IPA 只有 AGC/AWB，libcamera 也不产 AF 统计。
+ *   所以信号由 HAL 自己算：【帧本身的清晰度】（任何模式），以及全尺寸 RAW 里
+ *   ov13b10 的 PD 像素算出的相位错位（见下面 Phase detection 一段）。
  *
  * ★ 判据（与曝光无关）：
- *   梯度能量 / 亮度能量 = Σ(|gx|+|gy|) / Σ(luma)，再乘 1000。
+ *   降采样亮度网格的拉普拉斯能量 / 亮度总和，再乘 1000（见 sharpness()）。
  *   亮度整体伸缩（AGC 换曝光/增益）时分子分母同比例变，比值不动 ——
  *   否则"越亮越清晰"会把马达一路推到曝光最好而画面最糊的位置。
  *
@@ -24,9 +23,14 @@
  * travel. Below about 100 the lens does not move at all (it rests on its stop:
  * identical frames at 0 and 100), and the ends are where it audibly hits the
  * stops. The sweep starts from the end nearer the lens and stops early once
- * the score has fallen well below its peak, so a scene in focus near where the
- * lens already is costs a few points, not the whole range. Moves longer than
- * kMaxJump go in steps, one per frame, rather than in one jump.
+ * the score has fallen well below the best sweep point (the sample where the
+ * search started does not count: it says nothing about the side the sweep has
+ * not reached), so a scene in focus near the lens costs a few points, not the
+ * whole range. Moves longer than kMaxJump go in steps, one per frame, rather
+ * than in one jump. A parabola through the best point and its neighbours
+ * kFineStep away gives the final position; while a fine point wins, the sweep
+ * goes on outward in kFineStep steps (within the range and kMaxMoves) until its
+ * outer neighbour has been sampled.
  *
  * AF region: one region (ANDROID_CONTROL_AF_REGIONS, rear camera only). Its
  * sharpness replaces that of the central 70% of the frame; a new region starts
@@ -34,11 +38,17 @@
  *
  * Phase detection: with the full-size RAW frame (full-size sensor mode only,
  * see PhaseDetect.h) a search first moves straight to where the PD disparity
- * points, kPdCodesPerUnit lens codes per unit, measuring again after each move,
- * and ends when the disparity is below kPdDone. It falls back to the contrast
- * sweep when the disparity is not trustworthy (featureless scene) or does not
- * settle within kPdMaxSteps moves. In the continuous modes a disparity above
- * kPdRescan also starts a new search.
+ * points and measures again after each move; it ends when the disparity is
+ * below kPdDone. The first move uses kPdCodesPerUnit lens codes per unit of
+ * disparity, later ones the slope between the last two measurements (secant):
+ * the codes per unit change along the travel (the lens moves less per code
+ * below the focus of a 30-50 cm target) and with the scene. It falls back to
+ * the contrast sweep, from where the lens is, when the disparity is not
+ * trustworthy (featureless scene), the target is outside the sweep range, or
+ * it does not settle within kPdMaxSteps moves. In the continuous modes a
+ * disparity above kPdRescan also starts a new search, unless the last phase
+ * search fell back for one of those three reasons (running out of RAW frames,
+ * e.g. in a binned configuration, does not count).
  */
 #pragma once
 
@@ -81,6 +91,15 @@ public:
 
 	/* 结果元数据。 */
 	uint8_t afState() const;
+	/*
+	 * Whether the RAW frame that comes with the frame about to be passed to
+	 * onFrame() may be used for phase: while scanning or while a continuous
+	 * mode is unlocked. A superset of the frames onFrame() measures (not settle
+	 * or move frames); Session maps the RAW buffer only then.
+	 */
+	bool wantsRaw() const;
+	/* Whether this stream configuration delivers RAW frames for phase. */
+	void setPhaseAvailable(bool available);
 	uint8_t lensState() const;
 	float focusDistance() const;      /* 屈光度（1/m），UNCALIBRATED 下的标称值 */
 
@@ -97,9 +116,12 @@ private:
 	void finishScan();
 	bool apply(int pos);              /* 挪马达并记 justMoved_；失败返回 false */
 	bool moveTo(int pos);             /* apply() in steps of at most kMaxJump */
-	void regionChanged();
+	/* tap: the app's own region (a tap), not the default one */
+	void regionChanged(bool tap);
+	void applyRegion(float x0, float y0, float x1, float y1, bool tap);
 
-	double sharpness(const uint8_t *rgb, int w, int h);
+	double sharpness(const uint8_t *rgb, int w, int h, const float region[4]);
+	void buildSweep();
 
 	/* 搜索参数。 */
 	/* Sweep range and steps (lens codes). */
@@ -113,15 +135,23 @@ private:
 	static constexpr int kDropPoints = 2;
 	static constexpr int kMaxMoves = 24;        /* 兜底：探测次数上限 */
 	/*
-	 * Phase detection. Calibration on a textured target at 30-50 cm
-	 * (experiments/rear-pdaf-20261103): the disparity is linear in the lens
-	 * position from 100 to 500 at about 300 codes per unit, zero at the
-	 * contrast peak, and saturates (keeping its sign) further out.
+	 * Phase detection (experiments/rear-pdaf-20261103/notes.md). On a textured
+	 * target at 30-50 cm the disparity is zero at the contrast peak, about 300
+	 * codes per unit above it and about 650 below it, and saturates (keeping
+	 * its sign) more than ~200 codes away; a search on 11-04 measured 660-870
+	 * codes per unit around 225-511. The first step uses kPdCodesPerUnit
+	 * (short of the target rather than past it); later steps use the measured
+	 * slope when the disparity changed by at least kPdSecantMinDelta; a slope
+	 * outside kPdMinCodesPerUnit..kPdMaxCodesPerUnit (saturated disparity,
+	 * noise) is ignored and the previous gain kept.
 	 */
 	static constexpr double kPdCodesPerUnit = 300.0;
+	static constexpr double kPdMinCodesPerUnit = 150.0;
+	static constexpr double kPdMaxCodesPerUnit = 1500.0;
+	static constexpr double kPdSecantMinDelta = 0.05;
 	static constexpr double kPdMinConfidence = 0.5;
-	static constexpr double kPdDone = 0.06;     /* about 18 codes */
-	static constexpr double kPdRescan = 0.15;   /* about 45 codes */
+	static constexpr double kPdDone = 0.06;     /* about 20-40 codes */
+	static constexpr double kPdRescan = 0.15;   /* about 45-100 codes */
 	static constexpr int kPdMaxSteps = 4;
 	static constexpr double kMinScore = 20.0;   /* "这场景没法对焦"（白墙）的下限；
 						     ⚠️ 量纲随指标变（拉普拉斯/亮度）。实测本机
@@ -133,6 +163,14 @@ private:
 	static constexpr double kRescanRel = 0.30;
 	static constexpr double kRescanAbs = kMinScore / 2;
 	static constexpr int kRescanFrames = 4;
+	/*
+	 * Requests after a START in a continuous mode within which a switch to AUTO
+	 * keeps that search (setMode()), and after a tap's region change within
+	 * which a CONTINUOUS_VIDEO START lets that scan finish (trigger()). CameraX
+	 * switched to AUTO in the next request (30 ms, provider log 11-04
+	 * 04:00:54); a repeating request queued in between must not drop the tap.
+	 */
+	static constexpr int kStartCarryRequests = 3;
 	static constexpr float kMinFocusDiopters = 10.0f;  /* 与 Metadata.cpp 声明一致 */
 	/* 降采样：网格步长 16 像素、每格内部再 4×4 平均。
 	 * ⚠️ 曾经是"每 16 像素只取 1 个像素"，那样单像素噪声全进来 —— 实测噪声
@@ -152,18 +190,27 @@ private:
 
 	bool scanning_ = false;
 	bool converged_ = false;
-	/* 探测点序列（粗扫 9 点 → 峰附近细扫 5 点）与游标。
+	/* 探测点序列（粗扫最多 9 点 → 峰两侧细扫）与游标。
 	 * ★ 用确定性扫描而不是爬山：爬山是局部的，实测会卡在"先探到坏的那一侧"
 	 *   （反向也只是从那一侧往回挪），峰在另一侧整片探索不到。 */
 	std::vector<int> sweep_;
 	int sweepIdx_ = 0;
 	bool fineDone_ = false;
-	int drops_ = 0;                  /* coarse points in a row below kDropRatio of the peak */
+	int drops_ = 0;                  /* sweep points in a row below kDropRatio of coarseBest_ */
+	double coarseBest_ = 0.0;        /* best score among this sweep's points */
+	bool regionScan_ = false;        /* this scan was started by the app's new AF region */
+	int regionAge_ = 99;             /* setMode() calls since that region change */
+	int startAge_ = 99;              /* setMode() calls since a START in a continuous mode */
 	std::map<int, double> samples_;  /* this search's (position, score) samples */
 	bool phaseMode_ = false;         /* this search follows the PD disparity */
-	bool havePhase_ = false;         /* the last frame came with a RAW frame */
+	bool havePhase_ = false;         /* this configuration delivers RAW frames (setPhaseAvailable) */
+	int noRaw_ = 0;                  /* phase-search frames in a row without their RAW frame */
 	int pdSteps_ = 0;
 	int pdOff_ = 0;                  /* frames in a row with the disparity above kPdRescan */
+	double pdGain_ = kPdCodesPerUnit; /* lens codes per unit of disparity, this search */
+	int pdLastPos_ = -1;             /* last phase measurement: lens position, disparity */
+	double pdLastD_ = 0.0;
+	bool pdRescanOk_ = true;         /* the last phase search settled: trust it for rescans */
 	int moveTarget_ = -1;            /* where a stepped move is heading, -1 = none */
 	/* AF region in fractions of the frame; default the central 70%. */
 	float region_[4] = { 0.15f, 0.15f, 0.85f, 0.85f };

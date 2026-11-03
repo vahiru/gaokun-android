@@ -7,7 +7,8 @@
  * of its GRBG pattern, in pairs four rows apart. Measured on this unit's RAW:
  *   rows (1, 5) and (17, 21), columns 10 and 26: one orientation
  *   rows (9, 13) and (25, 29), columns 2 and 18: the opposite one
- * (block origin at the frame's top left, no flip). Along a pair of rows the two
+ * (block origin at the frame's top left, on the readout libcamera flips H+V for
+ * the rear's DT rotation of 180; Session checks it). Along a pair of rows the two
  * members see the scene shifted horizontally by an amount that grows with
  * defocus and changes sign across focus.
  */
