@@ -185,6 +185,6 @@ HAL实现`android.hardware.camera.provider-V3`，组件说明详见[`device/huaw
     - 手电筒支持20档亮度（`turnOnTorchWithStrengthLevel`，每档10 mA，10–200 mA），SystemUI手电筒磁贴据此提供亮度滑块；档位与`brightness`的换算见`device/huawei/gaokun3/camera/README.md`第四节。
     - 因PMIC LED无硬件帧同步信号，拍照闪光采用预闪常亮策略：收到`AE_PRECAPTURE_TRIGGER_START`时点亮LED并上报`AE_STATE_PRECAPTURE`让AGC收敛，通过`firedPending_`计数在途拍照请求，直至静态JPEG帧曝光完成才熄灭LED。
 11. **传感器朝向（`Device.cpp`）**：
-    - 设备树按横屏使用的方向写安装角：后摄180、前摄0。Android把`1600×2560`的面板视为天生竖屏，接键盘横放时显示旋转为`ROTATION_90`。
-    - `ANDROID_SENSOR_ORIENTATION`相对竖屏计算，并扣掉`libcamera`已用翻转消掉的部分（后摄ov13b10的180°由水平加垂直翻转读出消掉）：后摄为90，前摄为270。接键盘横放时应用算出的JPEG角为0，交付的画面横放时本来就是正的。
+    - 设备树按横屏使用的方向写安装角：后摄180、前摄0。设备树为面板声明了安装方向（`rotation = <90>`，`patches/kernel/dts/0030`），Android的自然方向因此也是横屏，接键盘横放时显示旋转为`ROTATION_0`。
+    - `ANDROID_SENSOR_ORIENTATION`直接按设备树的角度计算，并扣掉`libcamera`已用翻转消掉的部分（后摄ov13b10的180°由水平加垂直翻转读出消掉）：两颗都是0。接键盘横放时应用算出的JPEG角为0，交付的画面横放时本来就是正的。
     - JPEG按应用下发的`ANDROID_JPEG_ORIENTATION`转像素；转过时EXIF方向写0（未定义），0°时写1。

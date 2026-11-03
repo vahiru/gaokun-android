@@ -13,6 +13,7 @@ SLPI DSP → QMI/QRTR → libgaokun3ssc → SscHub → android.hardware.sensors-
 1. 将默认示例中的9个模拟传感器裁剪为本机实际具备的3个物理传感器：`AccelSensor`（`SH3001 Accelerometer`）、`GyroSensor`（`SH3001 Gyroscope`）与`LightSensor`（`TCS3701 Ambient Light`）。Android框架基于`accel` + `gyro`自动融合生成`Game Rotation Vector`、`Gravity`与`Linear Acceleration`。
 2. `Sensor::readEventPayload`从`SscHub`读取最新实测样本；在首个有效样本到达或数据过期（超过2秒未刷新）时上报`SensorStatus::UNRELIABLE`。
 3. `Sensor::activate`将订阅状态同步至`SscHub`，实现按需启停。
+4. 加速度计和陀螺仪按屏幕自然方向的坐标轴上报。SSC给出的是芯片自身的坐标轴（安装矩阵全为0），即面板竖屏的坐标轴；屏幕的自然方向是横屏（设备树中面板的`rotation`，见`device.mk`），所以上报时换算为`x = -y`、`y = x`，`z`不变。
 
 ## 二、`SscHub`单会话线程模型与按需启停
 

@@ -81,7 +81,7 @@ echo $?        # 0 = 无FAIL；1 = 有FAIL；2 = adb不通或中途掉线（不�
 
 | 检查项 | 操作步骤 | 通过判据 |
 | --- | --- | --- |
-| 前后摄取景与对焦 | 打开Aperture相机，横竖屏切换查看前后摄取景，在画面各处点按对焦 | 取景方向正确（后摄Orientation 90、前摄270）；后摄点按能锁焦 |
+| 前后摄取景与对焦 | 打开Aperture相机，横竖屏切换查看前后摄取景，在画面各处点按对焦 | 取景方向正确（前后摄Orientation都是0）；后摄点按能锁焦 |
 | USB线与U盘拔插 | 拔插USB线；port0与port1在亮屏、息屏下分别插入U盘 | USB adb正常恢复；U盘自动挂载 |
 | USB调试授权弹窗 | 发布构建首次连接电脑USB | 弹出RSA公钥授权框；未授权前`adb devices`显示`unauthorized` |
 | 拔线深度休眠唤醒 | 设`allow_suspend=1` → 拔除USB → 息屏静置等待入睡 → 按电源键唤醒 → 插回USB | `suspend_stats/success`计数增长；唤醒后Wi-Fi与USB adb正常恢复 |
