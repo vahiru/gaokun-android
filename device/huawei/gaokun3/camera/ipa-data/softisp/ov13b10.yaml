@@ -8,30 +8,46 @@
 # not edit by hand. The Windows tuning keeps each matrix flat over its colour
 # temperature range, so each appears at both ends of its range here; libcamera
 # interpolates between the points and clamps outside them. The colour
-# temperature that picks the matrix is libcamera's estimate from raw sensor
-# means, so the ranges match the Windows ones only nominally. With a Ccm the
-# CPU debayer takes its slower matrix path.
+# temperature that picks the matrix is the AWB's, on this module's white-point
+# scale (Awb below). With a Ccm the CPU debayer takes its slower matrix path.
 #
-# Awb colourGains: unit gains, only so that the key parses (without it libcamera
-# logs "Failed to parse 'colourGains'"). They hold no calibration, so a manual
-# colour temperature still applies no white balance.
-#
-# Agc AeExposureMode: raise the exposure time to 33 ms first, then the gain to
-# 8x, and only then, where the frame duration limits allow it, the exposure to
-# 66 ms (15 fps). Without it the AGC fills the exposure first: with the preview
-# template's 15-30 fps range an ordinary room already drops to 15 fps. Exposure
-# beyond the mode's default frame needs patches/libcamera/0006-0008.
+# Awb: Bayesian AWB along this module's white points from the same Windows
+# tuning (MWBGainV1: H, A, TL84, D50, D65, D75). Grey world alone takes a scene
+# filled with one colour for the illuminant: green close-ups turned magenta.
+# With no lux estimate in the soft ISP the prior is flat; the search may leave
+# the curve by 0.02 in R/G and B/G. The curve and its trade-offs are explained
+# in the generator; below about 2460 K red stays slightly too strong, as the H
+# point asks for an R gain under the AWB's floor of 1.0.
 %YAML 1.1
 ---
 version: 1
 algorithms:
   - BlackLevel:
   - Awb:
+      algorithm: bayes
       colourGains:
-        - ct: 2860
-          gains: [ 1.0, 1.0 ]
+        - ct: 2300
+          gains: [ 0.9409, 2.4767 ]
+        - ct: 2856
+          gains: [ 1.1876, 2.0625 ]
+        - ct: 4000
+          gains: [ 1.6824, 1.8002 ]
+        - ct: 5000
+          gains: [ 1.9442, 1.3920 ]
         - ct: 6500
-          gains: [ 1.0, 1.0 ]
+          gains: [ 2.3550, 1.2480 ]
+        - ct: 7500
+          gains: [ 2.4383, 1.2411 ]
+      priors:
+        - lux: 0
+          ct: [ 2000, 8000 ]
+          probability: [ 1.0, 1.0 ]
+      transversePos: 0.02
+      transverseNeg: 0.02
+      AwbMode:
+        AwbAuto:
+          lo: 2300
+          hi: 7500
   - Ccm:
       ccms:
         - ct: 3000  # region 1-3000 K
@@ -71,6 +87,9 @@ algorithms:
           offsets: [ 0, 0, 0 ]
   - Adjust:
   - Agc:
+      # Keep 30 fps (33 ms) until the gain reaches 8x before lengthening the
+      # exposure to 66 ms; with patches/libcamera/0006-0008 the AGC otherwise
+      # drops a 15-30 fps preview to 15 fps in ordinary room light.
       AeExposureMode:
         ExposureNormal:
           exposureTime: [ 33000, 66000 ]

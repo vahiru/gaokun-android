@@ -14,6 +14,24 @@ matrix for flash shots (LED branch, table 0x1b7) is not used.
 Each region entry is 72 bytes: CCT start, pad, CCT end, pad (f32), the 3x3
 matrix c[9] (row-major RGB), offsets k[3] (all zero here), 2 pad.
 
+The AWB white points come from the same file: MWBGainV1 holds the module's
+manual white balance gains (R, G, B) per illuminant, the inverse of the
+reference points in refPtV1. The file names no illuminants; the order is taken
+to be Qualcomm's (one unnamed entry, D75, D65, D50, CW, TL84, U30, A, H and one
+more), which the data fits: R/G rises steadily along it. libcamera's Bayesian
+AWB searches along the curve these points make, linear in colour temperature
+between them in R/G and B/G, and up to transversePos/Neg off it.
+
+This takes H, A, TL84, D50, D65 and D75. CW and U30 lie near TL84 and within
+that band of the curve, but between A and D50 they would put a sharp kink into
+it, which made the colour temperature estimate jump in a simulation of the
+search. TL84 bends the curve towards the fluorescent green around 4000 K: a
+warm non-fluorescent light there may sit about twice the band off it and keep
+a slight magenta tint (estimated from the geometry, not measured); without
+TL84 the fluorescent lights would turn green instead. The H point's R gain
+(0.94) is below the 1.0 the AWB clamps gains to, so below about 2460 K red
+stays slightly too strong.
+
 Usage: gen-ov13b10-ccm.py <com.qti.tuned.ofilm_ov13b10.bin> > ov13b10.yaml
 """
 import struct
@@ -38,6 +56,24 @@ def load(path):
         doff, dsize = struct.unpack_from('<QQ', b, o + 56)
         recs[rid] = (name, b[base + doff:base + doff + dsize])
     return recs
+
+
+# MWBGainV1 entries used for the AWB curve: (index, colour temperature).
+MWB_POINTS = ((8, 2300), (7, 2856), (5, 4000), (3, 5000), (2, 6500), (1, 7500))
+
+
+def awb_points(recs):
+    (name, data), = [r for r in recs.values() if r[0] == 'MWBGainV1']
+    f = [struct.unpack_from('<f', data, 8 * i)[0] for i in range(len(data) // 8)]
+    triples = [f[6 + 3 * i: 9 + 3 * i] for i in range(10)]
+    out = []
+    for idx, ct in MWB_POINTS:
+        r, g, b = triples[idx]
+        assert g == 1.0, (idx, triples[idx])
+        out.append((ct, r, b))
+    rs, bs = [p[1] for p in out], [p[2] for p in out]
+    assert rs == sorted(rs) and bs == sorted(bs, reverse=True), out
+    return out
 
 
 def main():
@@ -70,6 +106,10 @@ def main():
             out.append((ct, c, f'{int(start)}-{int(end)} K'))
 
     print(HEADER, end='')
+    for ct, r, b in awb_points(recs):
+        print(f'        - ct: {ct}')
+        print(f'          gains: [ {r:.4f}, {b:.4f} ]')
+    print(AWB_TAIL, end='')
     for ct, c, src in out:
         print(f'        - ct: {ct}  # region {src}')
         rows = [', '.join(f'{v:8.5f}' for v in c[3 * r:3 * r + 3]) for r in range(3)]
@@ -91,30 +131,36 @@ HEADER = """\
 # not edit by hand. The Windows tuning keeps each matrix flat over its colour
 # temperature range, so each appears at both ends of its range here; libcamera
 # interpolates between the points and clamps outside them. The colour
-# temperature that picks the matrix is libcamera's estimate from raw sensor
-# means, so the ranges match the Windows ones only nominally. With a Ccm the
-# CPU debayer takes its slower matrix path.
+# temperature that picks the matrix is the AWB's, on this module's white-point
+# scale (Awb below). With a Ccm the CPU debayer takes its slower matrix path.
 #
-# Awb colourGains: unit gains, only so that the key parses (without it libcamera
-# logs "Failed to parse 'colourGains'"). They hold no calibration, so a manual
-# colour temperature still applies no white balance.
-#
-# Agc AeExposureMode: raise the exposure time to 33 ms first, then the gain to
-# 8x, and only then, where the frame duration limits allow it, the exposure to
-# 66 ms (15 fps). Without it the AGC fills the exposure first: with the preview
-# template's 15-30 fps range an ordinary room already drops to 15 fps. Exposure
-# beyond the mode's default frame needs patches/libcamera/0006-0008.
+# Awb: Bayesian AWB along this module's white points from the same Windows
+# tuning (MWBGainV1: H, A, TL84, D50, D65, D75). Grey world alone takes a scene
+# filled with one colour for the illuminant: green close-ups turned magenta.
+# With no lux estimate in the soft ISP the prior is flat; the search may leave
+# the curve by 0.02 in R/G and B/G. The curve and its trade-offs are explained
+# in the generator; below about 2460 K red stays slightly too strong, as the H
+# point asks for an R gain under the AWB's floor of 1.0.
 %YAML 1.1
 ---
 version: 1
 algorithms:
   - BlackLevel:
   - Awb:
+      algorithm: bayes
       colourGains:
-        - ct: 2860
-          gains: [ 1.0, 1.0 ]
-        - ct: 6500
-          gains: [ 1.0, 1.0 ]
+"""
+
+AWB_TAIL = """      priors:
+        - lux: 0
+          ct: [ 2000, 8000 ]
+          probability: [ 1.0, 1.0 ]
+      transversePos: 0.02
+      transverseNeg: 0.02
+      AwbMode:
+        AwbAuto:
+          lo: 2300
+          hi: 7500
   - Ccm:
       ccms:
 """
@@ -122,6 +168,9 @@ algorithms:
 FOOTER = """\
   - Adjust:
   - Agc:
+      # Keep 30 fps (33 ms) until the gain reaches 8x before lengthening the
+      # exposure to 66 ms; with patches/libcamera/0006-0008 the AGC otherwise
+      # drops a 15-30 fps preview to 15 fps in ordinary room light.
       AeExposureMode:
         ExposureNormal:
           exposureTime: [ 33000, 66000 ]
