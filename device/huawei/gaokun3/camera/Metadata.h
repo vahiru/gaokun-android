@@ -101,6 +101,13 @@ std::vector<uint8_t> stripTriggers(const std::vector<uint8_t> &settings);
 std::vector<uint8_t> buildDefaultRequest(int templateId, const SensorFacts &f);
 
 /*
+ * Whether the HAL serves this template. ZERO_SHUTTER_LAG and MANUAL need the
+ * PRIVATE/YUV_REPROCESSING and MANUAL_SENSOR capabilities, which it doesn't
+ * declare, so those must be refused with ILLEGAL_ARGUMENT.
+ */
+bool templateSupported(int templateId);
+
+/*
  * 从【请求设置】里读一个整型条目的第 index 个值，读不到就给 def。
  *
  * ★ 必要性：JPEG 的旋转角与质量是【应用】在每一帧的请求里给的

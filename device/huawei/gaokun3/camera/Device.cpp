@@ -436,6 +436,8 @@ ndk::ScopedAStatus Device::getTorchStrengthLevel(int32_t *)
 ndk::ScopedAStatus Device::constructDefaultRequestSettings(RequestTemplate type,
 							   CameraMetadata *out)
 {
+	if (!templateSupported(static_cast<int>(type)))
+		return err(Status::ILLEGAL_ARGUMENT);
 	out->metadata = buildDefaultRequest(static_cast<int>(type), facts_);
 	if (out->metadata.empty())
 		return err(Status::INTERNAL_ERROR);

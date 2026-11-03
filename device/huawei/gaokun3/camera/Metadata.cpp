@@ -502,6 +502,13 @@ std::vector<uint8_t> stripTriggers(const std::vector<uint8_t> &settings)
 	return out;
 }
 
+bool templateSupported(int templateId)
+{
+	const auto tmpl = static_cast<RequestTemplate>(templateId);
+
+	return tmpl != RequestTemplate::ZERO_SHUTTER_LAG && tmpl != RequestTemplate::MANUAL;
+}
+
 std::vector<uint8_t> buildDefaultRequest(int templateId, const SensorFacts &f)
 {
 	camera_metadata_t *m = allocate_camera_metadata(32, 2048);
@@ -514,6 +521,28 @@ std::vector<uint8_t> buildDefaultRequest(int templateId, const SensorFacts &f)
 	 *   （RequestTemplate.aidl：PREVIEW=1 STILL_CAPTURE=2 VIDEO_RECORD=3 VIDEO_SNAPSHOT=4
 	 *    ZERO_SHUTTER_LAG=5 MANUAL=6）。 */
 	const auto tmpl = static_cast<RequestTemplate>(templateId);
+	/*
+	 * Every template carries the capture intent that matches it (CameraDevice
+	 * template docs). Clients build their requests from these templates, and
+	 * the camera service refuses to start a Camera1 (android.hardware.Camera)
+	 * preview without it (Camera2-Parameters updateRequest: BAD_VALUE), e.g. in
+	 * QQ.
+	 */
+	uint8_t intent = ANDROID_CONTROL_CAPTURE_INTENT_PREVIEW;
+	switch (tmpl) {
+	case RequestTemplate::STILL_CAPTURE:
+		intent = ANDROID_CONTROL_CAPTURE_INTENT_STILL_CAPTURE;
+		break;
+	case RequestTemplate::VIDEO_RECORD:
+		intent = ANDROID_CONTROL_CAPTURE_INTENT_VIDEO_RECORD;
+		break;
+	case RequestTemplate::VIDEO_SNAPSHOT:
+		intent = ANDROID_CONTROL_CAPTURE_INTENT_VIDEO_SNAPSHOT;
+		break;
+	default:   /* PREVIEW; ZERO_SHUTTER_LAG and MANUAL are refused */
+		break;
+	}
+	add_camera_metadata_entry(m, ANDROID_CONTROL_CAPTURE_INTENT, &intent, 1);
 	/* 有闪光灯时，静态拍照模板默认 ON_AUTO_FLASH，与 CameraCharacteristics 文档对模板的
 	 * 约定一致；其余模板不闪。 */
 	const uint8_t aeMode = (!f.flashLed.empty() && tmpl == RequestTemplate::STILL_CAPTURE)

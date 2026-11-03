@@ -509,6 +509,8 @@ ndk::ScopedAStatus Session::configureStreamsV2(
 ndk::ScopedAStatus Session::constructDefaultRequestSettings(RequestTemplate type,
 							    CameraMetadata *out)
 {
+	if (!templateSupported(static_cast<int>(type)))
+		return err(Status::ILLEGAL_ARGUMENT);
 	out->metadata = buildDefaultRequest(static_cast<int>(type), facts_);
 	return ndk::ScopedAStatus::ok();
 }
