@@ -1,0 +1,86 @@
+From d18b870d791ebf825880dddebb18c36d0eaa27ff Mon Sep 17 00:00:00 2001
+From: Akisaira <akisaira@outlook.com>
+Date: Tue, 3 Nov 2026 23:01:41 +1100
+Subject: [PATCH 10/13] ipa: softisp: awb: Start from the last white balance
+
+Each configure() resets the white balance to the tuning default, unit
+gains unless the tuning file has a colourGains calibration.
+The image then shows the sensor's raw, green colour until the grey
+world algorithm converges, which its smoothing (a fifth of the way
+per statistics frame, statistics every fourth frame) stretches over
+about a second.
+
+The IPA lives as long as the camera, so keep the automatic gains and
+colour temperature it reached and start the next session from them.
+The first session after the camera is created still starts from the
+tuning default.
+
+Signed-off-by: Akisaira <akisaira@outlook.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/ipa/softisp/algorithms/awb.cpp | 18 +++++++++++++++++-
+ src/ipa/softisp/algorithms/awb.h   |  5 +++++
+ 2 files changed, 22 insertions(+), 1 deletion(-)
+
+diff --git a/src/ipa/softisp/algorithms/awb.cpp b/src/ipa/softisp/algorithms/awb.cpp
+index 41c859a5..d902e62f 100644
+--- a/src/ipa/softisp/algorithms/awb.cpp
++++ b/src/ipa/softisp/algorithms/awb.cpp
+@@ -84,7 +84,20 @@ int Awb::init(IPAContext &context, const ValueNode &tuningData)
+ int Awb::configure(IPAContext &context,
+ 		   [[maybe_unused]] const IPAConfigInfo &configInfo)
+ {
+-	return awbAlgo_.configure(context.activeState.awb);
++	int ret = awbAlgo_.configure(context.activeState.awb);
++	if (ret)
++		return ret;
++
++	/*
++	 * Start from the white balance the last session reached. The tuning
++	 * default (unit gains without colourGains) shows the sensor's raw,
++	 * green colour until the algorithm converges, which its smoothing
++	 * stretches over about a second.
++	 */
++	if (lastAutomatic_)
++		context.activeState.awb.automatic = *lastAutomatic_;
++
++	return 0;
+ }
+ 
+ /**
+@@ -154,6 +167,9 @@ void Awb::process(IPAContext &context, [[maybe_unused]] const uint32_t frame,
+ 
+ 	awbAlgo_.process(context.activeState.awb, frameContext.awb, awbStats,
+ 			 kDefaultLux, metadata);
++
++	if (awbStats.valid())
++		lastAutomatic_ = context.activeState.awb.automatic;
+ }
+ 
+ REGISTER_IPA_ALGORITHM(Awb, "Awb")
+diff --git a/src/ipa/softisp/algorithms/awb.h b/src/ipa/softisp/algorithms/awb.h
+index c92bdbfd..bd502e95 100644
+--- a/src/ipa/softisp/algorithms/awb.h
++++ b/src/ipa/softisp/algorithms/awb.h
+@@ -7,6 +7,8 @@
+ 
+ #pragma once
+ 
++#include <optional>
++
+ #include <libcamera/controls.h>
+ 
+ #include "libcamera/internal/software_isp/debayer_params.h"
+@@ -57,6 +59,9 @@ private:
+ 	 * reasonable.
+ 	 */
+ 	AwbAlgorithm<UQ<2, 8>> awbAlgo_;
++
++	/* The automatic white balance reached last, to start the next session. */
++	std::optional<awb::Context> lastAutomatic_;
+ };
+ 
+ } /* namespace ipa::softisp::algorithms */
+-- 
+2.53.0
+

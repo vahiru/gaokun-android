@@ -1,0 +1,72 @@
+From 6d5ce8bca93ccef7081b56e9e8ba937bbe052a18 Mon Sep 17 00:00:00 2001
+From: Akisaira <akisaira@outlook.com>
+Date: Tue, 3 Nov 2026 20:55:42 +1100
+Subject: [PATCH 05/13] libipa: camera_sensor_helper: ov13b10: Model the
+ analogue gain steps
+
+The ov13b10 takes the analogue gain as gain * 128 but keeps only four
+fractional bits per octave. Measured on the Huawei MateBook E Go rear
+camera with a manual gain sweep, the image brightness changes in steps
+of 1/16 between 1x and 2x, 1/4 between 4x and 8x and 1/2 above 8x, and
+codes in between give the gain of the step below.
+
+The linear model let the AGC believe in gain changes the sensor
+ignored: at constant light it raised the gain in small increments with
+no effect until the next real step, saw the brightness jump by about 5%
+and backed off, twice a second. Round gain codes to the nearest step and
+report the gain the sensor applies.
+
+Signed-off-by: Akisaira <akisaira@outlook.com>
+---
+ src/ipa/libipa/camera_sensor_helper.cpp | 33 +++++++++++++++++++++----
+ 1 file changed, 28 insertions(+), 5 deletions(-)
+
+diff --git a/src/ipa/libipa/camera_sensor_helper.cpp b/src/ipa/libipa/camera_sensor_helper.cpp
+index dc84ab12..5e65f16a 100644
+--- a/src/ipa/libipa/camera_sensor_helper.cpp
++++ b/src/ipa/libipa/camera_sensor_helper.cpp
+@@ -538,13 +538,36 @@ public:
+ 	CameraSensorHelperOv13b10()
+ 	{
+ 		/*
+-		 * gaokun3 rear camera. Gain model from the kernel driver's
+-		 * definitions (ov13b10.c: OV13B10_ANA_GAIN_MIN 0x80 = 1x, step 1),
+-		 * i.e. gain = code / 128. Black level 64 at 10 bits is the usual
+-		 * OmniVision BLC target and has NOT been measured on this module.
++		 * gaokun3 rear camera. Black level 64 at 10 bits is the usual
++		 * OmniVision BLC target and has NOT been measured on this
++		 * module. The analogue gain is modelled by gainCode() and gain().
+ 		 */
+ 		blackLevel_ = 4096;
+-		gain_ = AnalogueGainLinear{ 1, 0, 0, 128 };
++	}
++
++	/*
++	 * The control takes gain * 128 (kernel driver: OV13B10_ANA_GAIN_MIN
++	 * 0x80 = 1x, maximum 0x7c0 = 15.5x), but the sensor keeps only 4
++	 * fractional bits per octave and drops the lower code bits: steps of
++	 * 1/16 from 1x to 2x, 1/8 to 4x, 1/4 to 8x and 1/2 to 15.5x. Measured
++	 * on the gaokun3 rear camera with gain sweeps over 1-1.25x, 4-4.5x
++	 * and 10-11x; the octave boundaries and the 2x octave follow the
++	 * pattern. Without this the AGC believes in gain changes that never
++	 * reach the sensor, and hunts between two real steps.
++	 */
++	uint32_t gainCode(double gain) const override
++	{
++		gain = std::clamp(gain, 1.0, 15.5);
++		const double step = std::ldexp(1.0, static_cast<int>(std::log2(gain))) / 16;
++		return std::lround(std::round(gain / step) * step * 128);
++	}
++
++	double gain(uint32_t gainCode) const override
++	{
++		uint32_t stepCode = 8;
++		while (stepCode < 64 && gainCode >= stepCode * 32)
++			stepCode <<= 1;
++		return (gainCode & ~(stepCode - 1)) / 128.0;
+ 	}
+ };
+ REGISTER_CAMERA_SENSOR_HELPER("ov13b10", CameraSensorHelperOv13b10)
+-- 
+2.53.0
+

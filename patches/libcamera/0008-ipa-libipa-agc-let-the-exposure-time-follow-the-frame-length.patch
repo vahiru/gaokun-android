@@ -1,0 +1,261 @@
+From 1bc6289bb3c51618d4aed2eecad1ab9105376717 Mon Sep 17 00:00:00 2001
+From: Akisaira <akisaira@outlook.com>
+Date: Tue, 3 Nov 2026 22:59:27 +1100
+Subject: [PATCH 08/13] ipa: libipa: agc: Let the exposure time follow the
+ frame length
+
+The AGC limits the exposure time to the V4L2_CID_EXPOSURE maximum read
+at configure time. Sensor drivers such as ov13b10 and hi846 set that
+maximum for the current frame length and raise it only when VBLANK
+grows, so the limit never exceeds the default frame length. With an
+ov13b10 in its 60 fps binned mode and FrameDurationLimits of 33.3 ms,
+the AGC kept the exposure time at 16.7 ms in a dim room and made up
+with 12x analogue gain, instead of using the longer frame.
+
+Add the exposure margin to CameraSensorHelper: the number of lines by
+which the exposure time must be shorter than the frame, 8 on ov13b10
+and 6 on hi846 (whose driver lengthens the frame beyond the mode's
+default when the exposure exceeds it minus 6, although it limits the
+control at 2). It is a fixed property of the sensor, while the exposure
+range of the controls can be stale: when a mode change leaves VBLANK at
+the same value, the V4L2 core skips the driver's VBLANK handler, which
+is what updates the range.
+
+When the IPA sets the frame length (setsFrameLength) and the helper
+knows the margin, allow exposure times up to the longest frame minus
+the margin, limit each frame's to its maximum frame duration minus the
+margin, and leave the margin after the exposure when computing the
+frame length. The soft ISP clips each frame's exposure time to that
+limit after prepare(): a manual one, as documented for
+FrameDurationLimits, and an automatic one computed for an earlier,
+longer limit.
+
+Without FrameDurationLimits the limits stay at the sensor's default
+frame length. On ov13b10 the exposure limit is then the same as before;
+on hi846 it is 4 lines shorter than the control's maximum, which the
+driver used to honour by lengthening the frame. Other IPAs, and sensors
+without a known margin, keep the old limits.
+
+Signed-off-by: Akisaira <akisaira@outlook.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/ipa/libipa/agc.cpp                  | 35 ++++++++++++++++++++++---
+ src/ipa/libipa/agc.h                    |  1 +
+ src/ipa/libipa/camera_sensor_helper.cpp | 26 ++++++++++++++++++
+ src/ipa/libipa/camera_sensor_helper.h   |  2 ++
+ src/ipa/softisp/algorithms/agc.cpp      | 14 ++++++++++
+ 5 files changed, 74 insertions(+), 4 deletions(-)
+
+diff --git a/src/ipa/libipa/agc.cpp b/src/ipa/libipa/agc.cpp
+index ad06582a..4dea9acc 100644
+--- a/src/ipa/libipa/agc.cpp
++++ b/src/ipa/libipa/agc.cpp
+@@ -95,6 +95,12 @@ namespace agc {
+  * \var Session::lineDuration
+  * \brief Line duration for the streaming session
+  *
++ * \var Session::exposureMargin
++ * \brief Lines by which the exposure time must be shorter than the frame
++ *
++ * Zero unless the IPA sets the frame length and the camera sensor helper knows
++ * the margin, see AgcAlgorithm::ConfigurationParams::setsFrameLength.
++ *
+  * \var Session::sensor
+  * \brief Details of the sensor configuration
+  *
+@@ -276,6 +282,12 @@ namespace agc {
+  * FrameContext::vblank is computed for the exposure time of the same frame
+  * context, in whole lines: the IPA writes it to the sensor together with
+  * that exposure time.
++ *
++ * When the camera sensor helper also knows the sensor's exposure margin,
++ * exposure times may reach the maximum frame duration minus that margin, and
++ * vblank leaves the margin after the exposure time. The IPA must then keep
++ * each frame's exposure time within its maximum frame duration minus the
++ * margin, which also applies to manual exposure times.
+  */
+ 
+ /**
+@@ -424,12 +436,26 @@ int AgcAlgorithm::configure(agc::Session &session, agc::ActiveState &state,
+ 		frameDurations[i] = frameSize * 1000000U / config.sensorInfo.pixelRate;
+ 	}
+ 
++	/*
++	 * The exposure range of the controls covers only the default frame
++	 * length; the sensor drivers widen it when VBLANK grows. An IPA that
++	 * sets the frame length can lengthen the frame for a longer exposure
++	 * time, so allow exposure times up to the longest frame minus the
++	 * sensor's margin.
++	 */
++	if (config.setsFrameLength && sensor_ && sensor_->exposureMargin()) {
++		session.exposureMargin = *sensor_->exposureMargin();
++		maxExposure = std::max(maxExposure,
++				       static_cast<int32_t>(frameHeights[1] - session.exposureMargin));
++	}
++
+ 	/*
+ 	 * When the AGC computes the new exposure values for a frame, it needs
+ 	 * to know the limits for exposure time and analogue gain. As it depends
+ 	 * on the sensor, update it with the controls.
+ 	 *
+-	 * \todo take VBLANK into account for maximum exposure time
++	 * \todo Take VBLANK into account for the maximum exposure time of IPAs
++	 * that do not set the frame length
+ 	 */
+ 	session.minExposureTime = minExposure * session.lineDuration;
+ 	session.maxExposureTime = maxExposure * session.lineDuration;
+@@ -771,7 +797,8 @@ void AgcAlgorithm::process(const agc::Session &session, agc::ActiveState &state,
+ 
+ 	if (frameContext.autoExposureEnabled) {
+ 		minExposureTime = session.minExposureTime;
+-		maxExposureTime = std::clamp(frameContext.maxFrameDuration,
++		maxExposureTime = std::clamp(utils::Duration(frameContext.maxFrameDuration -
++							     session.exposureMargin * lineDuration),
+ 					     session.minExposureTime,
+ 					     session.maxExposureTime);
+ 	} else {
+@@ -874,7 +901,7 @@ void AgcAlgorithm::process(const agc::Session &session, agc::ActiveState &state,
+  * For an IPA that sets the frame length, compute vblank for the exposure time
+  * of \a frameContext: the minimum frame duration rounded up to whole lines
+  * (ignoring floating-point error below a thousandth of a line), or the
+- * exposure time if that is longer.
++ * exposure time plus the sensor's margin if that is longer.
+  */
+ void AgcAlgorithm::processFrameLength(const agc::Session &session,
+ 				      agc::FrameContext &frameContext)
+@@ -882,7 +909,7 @@ void AgcAlgorithm::processFrameLength(const agc::Session &session,
+ 	const double minLines = frameContext.minFrameDuration / session.lineDuration;
+ 	const uint32_t frameLength =
+ 		std::max(static_cast<uint32_t>(std::ceil(minLines - 1e-3)),
+-			 frameContext.exposure);
++			 frameContext.exposure + session.exposureMargin);
+ 
+ 	frameContext.vblank = frameLength - session.sensor.outputSize.height;
+ 	frameContext.frameDuration = frameLength * session.lineDuration;
+diff --git a/src/ipa/libipa/agc.h b/src/ipa/libipa/agc.h
+index fcd31cce..7a3ccf4b 100644
+--- a/src/ipa/libipa/agc.h
++++ b/src/ipa/libipa/agc.h
+@@ -44,6 +44,7 @@ struct Session {
+ 	utils::Duration minFrameDuration;
+ 	utils::Duration maxFrameDuration;
+ 	utils::Duration lineDuration;
++	uint32_t exposureMargin;
+ 
+ 	struct {
+ 		Size outputSize;
+diff --git a/src/ipa/libipa/camera_sensor_helper.cpp b/src/ipa/libipa/camera_sensor_helper.cpp
+index 5e65f16a..037d5301 100644
+--- a/src/ipa/libipa/camera_sensor_helper.cpp
++++ b/src/ipa/libipa/camera_sensor_helper.cpp
+@@ -76,6 +76,17 @@ namespace ipa {
+  * \return The black level of the sensor, or std::nullopt if not known
+  */
+ 
++/**
++ * \fn CameraSensorHelper::exposureMargin()
++ * \brief Fetch the exposure margin of the sensor
++ *
++ * The exposure time must be this many lines shorter than the frame. Sensor
++ * drivers usually limit V4L2_CID_EXPOSURE accordingly, but only for the
++ * current frame length.
++ *
++ * \return The exposure margin in lines, or std::nullopt if not known
++ */
++
+ /**
+  * \brief Compute gain code from the analogue gain absolute value
+  * \param[in] gain The real gain to pass
+@@ -221,6 +232,12 @@ double CameraSensorHelper::quantizeGain(double _gain, double *quantizationGain)
+  * \sa CameraSensorHelper::blackLevel()
+  */
+ 
++/**
++ * \var CameraSensorHelper::exposureMargin_
++ * \brief The exposure margin of the sensor, in lines
++ * \sa CameraSensorHelper::exposureMargin()
++ */
++
+ /**
+  * \var CameraSensorHelper::gain_
+  * \brief The analogue gain parameters used for calculation
+@@ -528,6 +545,12 @@ public:
+ 		/* From measurement on a MateBook E Go (sc8280xp): 64 at 10bits. */
+ 		blackLevel_ = 4096;
+ 		gain_ = AnalogueGainLinear{ 1, 16, 0, 16 };
++		/*
++		 * The kernel driver limits the exposure to the frame length
++		 * minus 2, but lengthens the frame beyond the mode's default
++		 * length when the exposure exceeds that length minus 6.
++		 */
++		exposureMargin_ = 6;
+ 	}
+ };
+ REGISTER_CAMERA_SENSOR_HELPER("hi846", CameraSensorHelperHi846)
+@@ -541,8 +564,11 @@ public:
+ 		 * gaokun3 rear camera. Black level 64 at 10 bits is the usual
+ 		 * OmniVision BLC target and has NOT been measured on this
+ 		 * module. The analogue gain is modelled by gainCode() and gain().
++		 * The kernel driver limits the exposure to the frame length
++		 * minus 8.
+ 		 */
+ 		blackLevel_ = 4096;
++		exposureMargin_ = 8;
+ 	}
+ 
+ 	/*
+diff --git a/src/ipa/libipa/camera_sensor_helper.h b/src/ipa/libipa/camera_sensor_helper.h
+index bd3d0bee..15424fc9 100644
+--- a/src/ipa/libipa/camera_sensor_helper.h
++++ b/src/ipa/libipa/camera_sensor_helper.h
+@@ -27,6 +27,7 @@ public:
+ 	virtual ~CameraSensorHelper() = default;
+ 
+ 	std::optional<int16_t> blackLevel() const { return blackLevel_; }
++	std::optional<uint32_t> exposureMargin() const { return exposureMargin_; }
+ 	virtual uint32_t gainCode(double gain) const;
+ 	virtual double gain(uint32_t gainCode) const;
+ 	double quantizeGain(double gain, double *quantizationGain) const;
+@@ -45,6 +46,7 @@ protected:
+ 	};
+ 
+ 	std::optional<int16_t> blackLevel_;
++	std::optional<uint32_t> exposureMargin_;
+ 	std::variant<std::monostate, AnalogueGainLinear, AnalogueGainExp> gain_;
+ 
+ private:
+diff --git a/src/ipa/softisp/algorithms/agc.cpp b/src/ipa/softisp/algorithms/agc.cpp
+index 793854f3..e904bf96 100644
+--- a/src/ipa/softisp/algorithms/agc.cpp
++++ b/src/ipa/softisp/algorithms/agc.cpp
+@@ -7,6 +7,9 @@
+ 
+ #include "agc.h"
+ 
++#include <algorithm>
++#include <cmath>
++
+ #include <libcamera/base/log.h>
+ 
+ #include <libipa/histogram.h>
+@@ -77,6 +80,17 @@ void Agc::prepare(IPAContext &context, [[maybe_unused]] const uint32_t frame,
+ 		  IPAFrameContext &frameContext, [[maybe_unused]] DebayerParams *params)
+ {
+ 	agc_.prepare(context.activeState.agc, frameContext.agc);
++
++	/*
++	 * The frame is lengthened to fit the exposure time. Keep it within
++	 * this frame's maximum duration, whether the exposure time is manual,
++	 * or automatic and computed for an earlier limit.
++	 */
++	const agc::Session &session = context.configuration.agc;
++	const double maxLines = frameContext.agc.maxFrameDuration / session.lineDuration;
++	frameContext.agc.exposure =
++		std::min(frameContext.agc.exposure,
++			 static_cast<uint32_t>(std::floor(maxLines + 1e-3)) - session.exposureMargin);
+ }
+ 
+ void Agc::process(IPAContext &context,
+-- 
+2.53.0
+

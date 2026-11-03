@@ -1,0 +1,104 @@
+From 6e3ac59b8f7994f988cf7f2c6362d4fc99c1233c Mon Sep 17 00:00:00 2001
+From: Akisaira <akisaira@outlook.com>
+Date: Wed, 4 Nov 2026 02:13:35 +1100
+Subject: [PATCH 13/13] ipa: libipa: agc_mean_luminance: Keep the target within
+ the exposure limits
+
+In the dark the luminance estimate is near zero and estimateInitialGain()
+multiplies the gain by 10 on each of its 8 iterations. The exposure time
+and gain stop at their maximums, but the filtered exposure value keeps
+the target, up to 10^8 times what the sensor can do. When the light
+comes back, each calculation shrinks that excess by the filter speed
+only, and the exposure stays at its maximum until the filtered value is
+back below it: seconds of a white image.
+
+Clamp the target to the range of exposure time times analogue gain of
+the exposure mode before filtering, and the filtered value too, so that
+limits that shrink (a higher minimum frame rate, a manual gain) take
+effect at once. None of the users of AgcMeanLuminance applies digital
+gain.
+
+After manual exposure or gain, the automatic exposure now ramps from the
+manual value at the filter speed instead of jumping: the filtered value
+stays pinned while the limits are a single value.
+
+On the Huawei MateBook E Go's rear camera (ov13b10, soft ISP), lying on
+a desk in the dark, the exposure did not move at all during 5 seconds
+of flash LED light. With the clamp it starts on the next statistics,
+0.13 s after the LED, and settles in about 2.3 s for a 130 times
+brighter scene.
+
+Signed-off-by: Akisaira <akisaira@outlook.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/ipa/libipa/agc_mean_luminance.cpp | 33 ++++++++++++++++++++++-----
+ 1 file changed, 27 insertions(+), 6 deletions(-)
+
+diff --git a/src/ipa/libipa/agc_mean_luminance.cpp b/src/ipa/libipa/agc_mean_luminance.cpp
+index 34f21bcc..4ed0e1bd 100644
+--- a/src/ipa/libipa/agc_mean_luminance.cpp
++++ b/src/ipa/libipa/agc_mean_luminance.cpp
+@@ -134,8 +134,9 @@ static constexpr unsigned int kDefaultLuxLevel = 500;
+  * \class AgcMeanLuminance
+  * \brief A mean-based auto-exposure algorithm
+  *
+- * This algorithm calculates an exposure time, analogue and digital gain such
+- * that the normalised mean luminance value of an image is driven towards a
++ * This algorithm calculates an exposure time and analogue gain (plus a digital
++ * gain that only makes up for rounding) such that the normalised mean
++ * luminance value of an image is driven towards a
+  * target, which itself is discovered from tuning data. The algorithm is a
+  * two-stage process.
+  *
+@@ -154,8 +155,9 @@ static constexpr unsigned int kDefaultLuxLevel = 500;
+  * stage is then clamped to the gain from this stage.
+  *
+  * The final gain is used to adjust the effective exposure value of the image,
+- * and that new exposure value is divided into exposure time, analogue gain and
+- * digital gain according to the selected AeExposureMode. This class uses the
++ * and that new exposure value, kept within the limits of exposure time and
++ * analogue gain, is divided into exposure time, analogue gain and digital gain
++ * according to the selected AeExposureMode. This class uses the
+  * \ref ExposureModeHelper class to assist in that division, and expects the
+  * data needed to initialise that class to be present in tuning data in a
+  * format described in \ref parseTuningData().
+@@ -662,8 +664,10 @@ utils::Duration AgcMeanLuminance::filterExposure(utils::Duration exposureValue,
+  * \param[in] params The set of parameters for the exppsure value calculation
+  *
+  * Calculate a new exposure value to try to obtain the target. The calculated
+- * exposure value is filtered to prevent rapid changes from frame to frame, and
+- * divided into exposure time, analogue, quantization and digital gain.
++ * exposure value is kept within the limits of exposure time and analogue gain,
++ * filtered to prevent rapid changes from frame to frame, and divided into
++ * exposure time, analogue, quantization and digital gain. The digital gain
++ * makes up for rounding only.
+  *
+  * \return Tuple of exposure time, analogue gain, quantization gain and digital
+  * gain
+@@ -703,6 +707,23 @@ AgcMeanLuminance::calculateNewEv(const Params &params)
+ 
+ 	utils::Duration newExposureValue = params.effectiveExposureValue * gain;
+ 
++	/*
++	 * Keep the target within what exposure time and analogue gain can do.
++	 * The filter would otherwise hold a value the exposure cannot follow:
++	 * in the dark the gain estimate reaches 10^8, and when the light comes
++	 * back the filtered value takes seconds to come down to the maximum,
++	 * while the exposure stays there.
++	 */
++	const utils::Duration minExposureValue =
++		exposureModeHelper.minExposureTime() * exposureModeHelper.minGain();
++	const utils::Duration maxExposureValue =
++		exposureModeHelper.maxExposureTime() * exposureModeHelper.maxGain();
++	newExposureValue = std::clamp(newExposureValue, minExposureValue, maxExposureValue);
++	/* The limits change with the frame duration and manual controls too. */
++	if (frameCount_)
++		filteredExposure_ = std::clamp(filteredExposure_, minExposureValue,
++					       maxExposureValue);
++
+ 	/*
+ 	 * We filter the exposure value to make sure changes are not too jarring
+ 	 * from frame to frame.
+-- 
+2.53.0
+

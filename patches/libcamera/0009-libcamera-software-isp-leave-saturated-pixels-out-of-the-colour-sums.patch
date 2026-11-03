@@ -1,0 +1,160 @@
+From 6c05b54e2ea1119f55383ce5565f6882b45dfb5d Mon Sep 17 00:00:00 2001
+From: Akisaira <akisaira@outlook.com>
+Date: Tue, 3 Nov 2026 23:01:41 +1100
+Subject: [PATCH 09/13] libcamera: software_isp: Leave saturated pixels out of
+ the colour sums
+
+The soft ISP's grey world white balance divides the colour sums of the
+statistics by the number of sampled pixels. Clipped highlights enter
+the sums as raw neutral, whatever their real colour, and with green the
+strongest channel of a Bayer sensor they pull the gains towards unity:
+on the gaokun3's ov13b10 and hi846, scenes with bright highlights come
+out with a green cast.
+
+Leave sampled pixels with a channel at or above 250 (in 8-bit units)
+out of the sums, count the pixels that remain, and have the AWB divide
+by that count. The luminance histogram still covers every sampled pixel.
+When every pixel is saturated the AWB skips the frame.
+
+Signed-off-by: Akisaira <akisaira@outlook.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../internal/software_isp/swisp_stats.h       |  7 +++-
+ src/ipa/softisp/algorithms/awb.cpp            |  7 ++--
+ src/libcamera/software_isp/swstats_cpu.cpp    | 40 ++++++++++++++-----
+ 3 files changed, 38 insertions(+), 16 deletions(-)
+
+diff --git a/include/libcamera/internal/software_isp/swisp_stats.h b/include/libcamera/internal/software_isp/swisp_stats.h
+index d9d0d9be..ed57abbe 100644
+--- a/include/libcamera/internal/software_isp/swisp_stats.h
++++ b/include/libcamera/internal/software_isp/swisp_stats.h
+@@ -28,9 +28,14 @@ struct SwIspStats {
+ 	 */
+ 	bool valid;
+ 	/**
+-	 * \brief Sums of colour channels of all the sampled pixels
++	 * \brief Sums of colour channels of the sampled pixels, leaving out
++	 * those with a channel at or near saturation
+ 	 */
+ 	RGB<uint64_t> sum_;
++	/**
++	 * \brief Number of sampled pixels in \a sum_
++	 */
++	uint64_t sumCount;
+ 	/**
+ 	 * \brief Number of bins in the yHistogram
+ 	 */
+diff --git a/src/ipa/softisp/algorithms/awb.cpp b/src/ipa/softisp/algorithms/awb.cpp
+index 55fd326f..41c859a5 100644
+--- a/src/ipa/softisp/algorithms/awb.cpp
++++ b/src/ipa/softisp/algorithms/awb.cpp
+@@ -7,7 +7,6 @@
+ 
+ #include "awb.h"
+ 
+-#include <numeric>
+ #include <stdint.h>
+ 
+ #include <libcamera/base/log.h>
+@@ -118,7 +117,6 @@ SoftIspAwbStats Awb::calculateRgbMeans(IPAContext &context,
+ 	if (!stats->valid)
+ 		return {};
+ 
+-	const SwIspStats::Histogram &histogram = stats->yHistogram;
+ 	const uint8_t blackLevel = context.activeState.blc.level;
+ 
+ 	/*
+@@ -126,8 +124,9 @@ SoftIspAwbStats Awb::calculateRgbMeans(IPAContext &context,
+ 	 * would be off if they were computed from the whole brightness range
+ 	 * rather than from the sensor range.
+ 	 */
+-	const uint64_t nPixels = std::accumulate(
+-		histogram.begin(), histogram.end(), uint64_t(0));
++	const uint64_t nPixels = stats->sumCount;
++	if (!nPixels)
++		return {};
+ 	const uint64_t offset = blackLevel * nPixels;
+ 	const uint64_t minValid = 1;
+ 
+diff --git a/src/libcamera/software_isp/swstats_cpu.cpp b/src/libcamera/software_isp/swstats_cpu.cpp
+index 7fb77ce7..21467aab 100644
+--- a/src/libcamera/software_isp/swstats_cpu.cpp
++++ b/src/libcamera/software_isp/swstats_cpu.cpp
+@@ -171,28 +171,43 @@ static constexpr unsigned int kRedYMul = 77; /* 0.299 * 256 */
+ static constexpr unsigned int kGreenYMul = 150; /* 0.587 * 256 */
+ static constexpr unsigned int kBlueYMul = 29; /* 0.114 * 256 */
+ 
++/*
++ * Sampled pixels with a channel at or above this level (in 8-bit units) are
++ * left out of the colour sums. Clipped highlights read as neutral in the raw
++ * data whatever their colour, and would pull the grey world white balance
++ * towards unit gains, i.e. green.
++ */
++static constexpr unsigned int kSaturationLevel = 250;
++
+ #define SWSTATS_START_LINE_STATS(pixel_t) \
+ 	pixel_t r, g, g2, b;              \
+ 	uint64_t yVal;                    \
+                                           \
+ 	uint64_t sumR = 0;                \
+ 	uint64_t sumG = 0;                \
+-	uint64_t sumB = 0;
+-
+-#define SWSTATS_ACCUMULATE_LINE_STATS(div) \
+-	sumR += r;                         \
+-	sumG += g;                         \
+-	sumB += b;                         \
+-                                           \
+-	yVal = r * kRedYMul;               \
+-	yVal += g * kGreenYMul;            \
+-	yVal += b * kBlueYMul;             \
++	uint64_t sumB = 0;                \
++	uint64_t count = 0;
++
++#define SWSTATS_ACCUMULATE_LINE_STATS(div)                     \
++	if (r < kSaturationLevel * (div) &&                    \
++	    g < kSaturationLevel * (div) &&                    \
++	    b < kSaturationLevel * (div)) {                    \
++		sumR += r;                                     \
++		sumG += g;                                     \
++		sumB += b;                                     \
++		count++;                                       \
++	}                                                      \
++                                                               \
++	yVal = r * kRedYMul;                                   \
++	yVal += g * kGreenYMul;                                \
++	yVal += b * kBlueYMul;                                 \
+ 	stats.yHistogram[yVal * SwIspStats::kYHistogramSize / (256 * 256 * (div))]++;
+ 
+ #define SWSTATS_FINISH_LINE_STATS() \
+ 	stats.sum_.r() += sumR;     \
+ 	stats.sum_.g() += sumG;     \
+-	stats.sum_.b() += sumB;
++	stats.sum_.b() += sumB;     \
++	stats.sumCount += count;
+ 
+ void SwStatsCpu::statsBGGR8Line0(const uint8_t *src[], SwIspStats &stats)
+ {
+@@ -391,6 +406,7 @@ void SwStatsCpu::startFrame(uint32_t frame)
+ 
+ 	for (auto &s : stats_) {
+ 		s.sum_ = RGB<uint64_t>({ 0, 0, 0 });
++		s.sumCount = 0;
+ 		s.yHistogram.fill(0);
+ 	}
+ }
+@@ -408,9 +424,11 @@ void SwStatsCpu::finishFrame(uint32_t frame, uint32_t bufferId)
+ 
+ 	if (valid) {
+ 		sharedStats_->sum_ = RGB<uint64_t>({ 0, 0, 0 });
++		sharedStats_->sumCount = 0;
+ 		sharedStats_->yHistogram.fill(0);
+ 		for (const auto &s : stats_) {
+ 			sharedStats_->sum_ += s.sum_;
++			sharedStats_->sumCount += s.sumCount;
+ 			for (unsigned int j = 0; j < SwIspStats::kYHistogramSize; j++)
+ 				sharedStats_->yHistogram[j] += s.yHistogram[j];
+ 		}
+-- 
+2.53.0
+
