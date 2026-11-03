@@ -130,6 +130,20 @@ bool Device::init()
 	facts_.fovX = (facts_.activeW - facts_.fovW) / 2 & ~1;
 	facts_.fovY = (facts_.activeH - facts_.fovH) / 2 & ~1;
 
+	/*
+	 * Pixel size, for SENSOR_INFO_PHYSICAL_SIZE: the camera service builds
+	 * the Camera1 (android.hardware.Camera) parameters with a field of view
+	 * computed from it and refuses those clients without it ("unable to build
+	 * defaults"), e.g. QQ.
+	 */
+	auto cell = props.get(libcamera::properties::UnitCellSize);
+	if (cell) {
+		facts_.unitCellW = cell->width;
+		facts_.unitCellH = cell->height;
+	} else {
+		ALOGW("相机没有报 UnitCellSize：不声明物理尺寸，用 Camera1 的应用打不开它");
+	}
+
 	/* ── 朝向 ── */
 	auto loc = props.get(libcamera::properties::Location);
 	facts_.frontFacing = !loc || *loc == libcamera::properties::CameraLocationFront;

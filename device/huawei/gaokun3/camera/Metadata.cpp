@@ -140,6 +140,13 @@ std::vector<uint8_t> buildCharacteristics(const SensorFacts &f)
 	const int32_t pixelArray[] = { f.fovW, f.fovH };
 	add_camera_metadata_entry(m, ANDROID_SENSOR_INFO_PIXEL_ARRAY_SIZE,
 				  pixelArray, 2);
+	/* The declared pixel array times the pixel size, in mm (see Device::init()). */
+	if (f.unitCellW > 0 && f.unitCellH > 0) {
+		const float physicalSize[] = { f.fovW * (f.unitCellW / 1e6f),
+					       f.fovH * (f.unitCellH / 1e6f) };
+		add_camera_metadata_entry(m, ANDROID_SENSOR_INFO_PHYSICAL_SIZE,
+					  physicalSize, 2);
+	}
 	const int32_t orientation = f.orientation;
 	add_camera_metadata_entry(m, ANDROID_SENSOR_ORIENTATION, &orientation, 1);
 
@@ -241,7 +248,9 @@ std::vector<uint8_t> buildCharacteristics(const SensorFacts &f)
 	const uint8_t flashAvailable = hasFlash ? ANDROID_FLASH_INFO_AVAILABLE_TRUE
 					       : ANDROID_FLASH_INFO_AVAILABLE_FALSE;
 	add_camera_metadata_entry(m, ANDROID_FLASH_INFO_AVAILABLE, &flashAvailable, 1);
-	const float focalLengths[] = { 3.0f };       /* ⚠️ 占位值，未测 */
+	/* ⚠️ 占位值，未测。Camera1 rebuilds the view angles from it and
+	 * SENSOR_INFO_PHYSICAL_SIZE, so those are made up too. */
+	const float focalLengths[] = { 3.0f };
 	add_camera_metadata_entry(m, ANDROID_LENS_INFO_AVAILABLE_FOCAL_LENGTHS,
 				  focalLengths, 1);
 	const float apertures[] = { 2.2f };          /* ⚠️ 占位值，未测 */

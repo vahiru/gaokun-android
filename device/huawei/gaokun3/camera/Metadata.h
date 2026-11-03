@@ -34,6 +34,9 @@ struct SensorFacts {
 	int32_t fovY = 0;
 	int32_t fovW = 0;
 	int32_t fovH = 0;
+	/* Pixel size in nm (libcamera properties::UnitCellSize); 0 = not reported. */
+	int32_t unitCellW = 0;
+	int32_t unitCellH = 0;
 	int32_t orientation = 0;        /* 0/90/180/270 */
 	bool    frontFacing = true;
 	/* 闪光灯的 LED class 目录（如 /sys/class/leds/white:flash）；空 = 这个相机没有闪光灯。
