@@ -1,0 +1,383 @@
+audio AIDL HAL（StreamPrimary）：采集方向加一个厂商钩子——ro.vendor.audio.primary.capture_hook指定的库决定ALSA开几路，读到的每块进管道之前交给它处理
+
+应用到AOSP树的hardware/interfaces，排在0117之后（StreamPrimary的standby / start / shutdown改在0117加的那几行旁边）。
+由scripts/crdroid-tree-fixes.py第38条自动应用（幂等）。⚠️ 别往内核树上打。
+
+为什么要在HAL里做：内置麦克风阵列（device/huawei/gaokun3/micarray）要四路原始输入、交给客户端两路。
+会话音效拿到的已经是两路，改不了ALSA的声道数；包装tinyalsa能改声道数，却看不到录音轨的音源，
+UNPROCESSED也只能跟着一起处理。HAL两样都有。
+
+做法（StreamAlsaBase / StreamAlsaMonoPipe / StreamPrimary，只动采集方向的非stub流）：
+* ro.vendor.audio.primary.capture_hook给出库的绝对路径；不设 = 没有钩子，行为与原来完全相同。
+  第一次用到时dlopen一次，库缺capture_hook_open / _process / _set_sources / _close任一个就当没有，记一行错误。
+* start()打开ALSA之前调open(card, device, 采样率, 声道数, tinyalsa的pcm_format, 音源列表, …)：
+  返回nullptr = 这条流它不管；接管时给出硬件声道数和处理延迟（帧）。ALSA按这个声道数打开
+  （openDeviceProxies新增一个参数，只用于内置设备，其余配置不变）。打不开（比如拓扑不允许这么多声道）就关掉钩子、按原来的声道数重开。
+  恢复（ALSA已经开着）时不再调open。
+* I/O线程每读一块，先经process(句柄, 硬件数据, 输出, 帧数)转成流自己的格式，再写进管道；
+  管道和transfer()都还是客户端的格式。
+* 音源是各录音轨SinkMetadata里的AudioSource。open时带上当前列表，之后updateMetadata经set_sources()通知
+  （Binder线程上；与open / close互斥，可能与process同时）。
+* refinePosition()：采集位置的时间往前挪处理延迟——客户端拿到的帧是这么早录下的。
+* standby()、shutdown()、换设备时，I/O线程停下、ALSA关掉之后调close()。
+* StreamPrimary加了析构函数，在里面停worker：客户端没调close就销毁流时，worker退出时的shutdown()还能关掉钩子
+  （0117的播放钩子在这条路径上原来也会漏掉），I/O线程也不会比这个类活得久。
+* 库必须能从这个APEX隔离的链接器命名空间加载（本机放/vendor/lib64/soundfx，0068放行了这个目录）。
+
+验证：对着rc.3的源码（lineage-24.0 13fc23d + 0010 / 0051 / 0052 / 0063 / 0068 / 0069 / 0077 / 0083 / 0117），
+用Android.bp的编译参数（-Wall -Wextra -Werror -Wthread-safety）做了编译检查，33个编译单元都通过。2026-11-04在ROM树外编出rc.3的HAL加本补丁，替换进APEX在本机跑过（#15内核，强制模式）：
+各音源接管或原样、通话的回声消除和降噪、20次重开、HAL被杀后重启都通过；ROM里还没完整构建过。
+钩子库在rc.3的HAL进程里经tinyalsa包装层按本补丁的调用顺序实测过。
+
+diff --git a/audio/aidl/default/alsa/StreamAlsaBase.cpp b/audio/aidl/default/alsa/StreamAlsaBase.cpp
+index e5914a9..f1780b0 100644
+--- a/audio/aidl/default/alsa/StreamAlsaBase.cpp
++++ b/audio/aidl/default/alsa/StreamAlsaBase.cpp
+@@ -105,7 +105,10 @@ ndk::ScopedAStatus StreamAlsaBase::setGain(float gain) {
+     return ndk::ScopedAStatus::ok();
+ }
+ 
+-::android::status_t StreamAlsaBase::openDeviceProxies(std::vector<alsa::DeviceProxy>* proxies) {
++::android::status_t StreamAlsaBase::openDeviceProxies(std::vector<alsa::DeviceProxy>* proxies,
++                                                      unsigned int channelCount) {
++    struct pcm_config attachedConfig = mConfig.value();
++    if (channelCount != 0) attachedConfig.channels = channelCount;
+     for (const auto& device : getDeviceProfiles()) {
+         if ((device.direction == PCM_OUT && mIsInput) ||
+             (device.direction == PCM_IN && !mIsInput)) {
+@@ -119,6 +122,8 @@ ndk::ScopedAStatus StreamAlsaBase::setGain(float gain) {
+             proxy = alsa::openProxyForExternalDevice(
+                     device, const_cast<struct pcm_config*>(&mConfig.value()),
+                     true /*require_exact_match*/);
++        } else if (channelCount != 0) {
++            proxy = alsa::openProxyForAttachedDevice(device, &attachedConfig, mBufferSizeFrames);
+         } else {
+             proxy = alsa::openProxyForAttachedDevice(
+                     device, const_cast<struct pcm_config*>(&mConfig.value()), mBufferSizeFrames);
+diff --git a/audio/aidl/default/alsa/StreamAlsaMonoPipe.cpp b/audio/aidl/default/alsa/StreamAlsaMonoPipe.cpp
+index 21cfd3d..99bb2a8 100644
+--- a/audio/aidl/default/alsa/StreamAlsaMonoPipe.cpp
++++ b/audio/aidl/default/alsa/StreamAlsaMonoPipe.cpp
+@@ -98,7 +98,8 @@ StreamAlsaMonoPipe::~StreamAlsaMonoPipe() {
+     decltype(mAlsaDeviceProxies) alsaDeviceProxies;
+     decltype(mSources) sources;
+     decltype(mSinks) sinks;
+-    if (::android::status_t status = openDeviceProxies(&alsaDeviceProxies);
++    if (::android::status_t status =
++                openDeviceProxies(&alsaDeviceProxies, mIsInput ? mCaptureHardwareChannels : 0);
+         status != ::android::OK) {
+         return status;
+     }
+@@ -195,10 +196,18 @@ void StreamAlsaMonoPipe::inputIoThread(size_t idx) {
+ #endif
+     const size_t bufferSize = mBufferSizeFrames * mFrameSizeBytes;
+     std::vector<char> buffer(bufferSize);
++    // With 'mCaptureHardwareChannels' set, ALSA fills 'hardwareBuffer' and 'convertCapture'
++    // writes the stream's format into 'buffer'.
++    const bool convert = mCaptureHardwareChannels != 0;
++    const size_t readSize =
++            convert ? bufferSize / mConfig->channels * mCaptureHardwareChannels : bufferSize;
++    std::vector<char> hardwareBuffer(convert ? readSize : 0);
++    char* const readBuffer = convert ? hardwareBuffer.data() : buffer.data();
+     while (mIoThreadIsRunning) {
+-        if (int ret = proxy_read_with_retries(mAlsaDeviceProxies[idx].get(), &buffer[0], bufferSize,
++        if (int ret = proxy_read_with_retries(mAlsaDeviceProxies[idx].get(), readBuffer, readSize,
+                                               mReadWriteRetries);
+             ret == 0) {
++            if (convert) convertCapture(readBuffer, buffer.data(), mBufferSizeFrames);
+             size_t bufferFramesWritten = 0;
+             while (bufferFramesWritten < mBufferSizeFrames) {
+                 if (!mIoThreadIsRunning) return;
+diff --git a/audio/aidl/default/include/core-impl/StreamAlsaBase.h b/audio/aidl/default/include/core-impl/StreamAlsaBase.h
+index 765a5c0..7d92783 100644
+--- a/audio/aidl/default/include/core-impl/StreamAlsaBase.h
++++ b/audio/aidl/default/include/core-impl/StreamAlsaBase.h
+@@ -55,7 +55,10 @@ class StreamAlsaBase : public StreamCommonImpl {
+ 
+     // Helper used by subclass start() implementations to open ALSA device proxies.
+     // Returns ::android::NO_INIT if no proxies could be opened, ::android::OK otherwise.
+-    ::android::status_t openDeviceProxies(std::vector<alsa::DeviceProxy>* proxies);
++    // A non-zero 'channelCount' opens attached devices with that many channels instead of the
++    // stream's own count, the rest of the configuration stays the same.
++    ::android::status_t openDeviceProxies(std::vector<alsa::DeviceProxy>* proxies,
++                                          unsigned int channelCount = 0);
+ 
+     // Playback only, for a subclass that writes straight into ALSA instead of through a pipe and
+     // an I/O thread (StreamPrimary), so that the hardware clock paces the stream.
+diff --git a/audio/aidl/default/include/core-impl/StreamAlsaMonoPipe.h b/audio/aidl/default/include/core-impl/StreamAlsaMonoPipe.h
+index 6a5ba23..d9213db 100644
+--- a/audio/aidl/default/include/core-impl/StreamAlsaMonoPipe.h
++++ b/audio/aidl/default/include/core-impl/StreamAlsaMonoPipe.h
+@@ -53,6 +53,16 @@ class StreamAlsaMonoPipe : public StreamAlsaBase {
+     // silence).
+     size_t mLastCaptureFramesRead = 0;
+ 
++    // Capture only, for a subclass that processes the audio before the client gets it. Set
++    // before 'start', a non-zero count opens the ALSA device (an attached one, see
++    // 'openDeviceProxies') with that many channels, and the I/O thread passes every block it
++    // reads through 'convertCapture' into the stream's own format before the block goes into
++    // the pipe.
++    unsigned int mCaptureHardwareChannels = 0;
++    // Converts 'frameCount' frames of 'mCaptureHardwareChannels' channels in 'in' into the
++    // stream's format in 'out'. Called on the I/O thread.
++    virtual void convertCapture(const void* in, void* out, size_t frameCount) = 0;
++
+   private:
+     ::android::NBAIO_Format getPipeFormat() const;
+     ::android::sp<::android::MonoPipe> makeSink(bool writeCanBlock);
+diff --git a/audio/aidl/default/include/core-impl/StreamPrimary.h b/audio/aidl/default/include/core-impl/StreamPrimary.h
+index da563a7..30db1f4 100644
+--- a/audio/aidl/default/include/core-impl/StreamPrimary.h
++++ b/audio/aidl/default/include/core-impl/StreamPrimary.h
+@@ -30,6 +30,7 @@ namespace aidl::android::hardware::audio::core {
+ class StreamPrimary : public StreamAlsaMonoPipe {
+   public:
+     StreamPrimary(StreamContext* context, const Metadata& metadata);
++    ~StreamPrimary();
+ 
+     // Methods of 'DriverInterface'.
+     ::android::status_t init(DriverCallbackInterface* callback) override;
+@@ -45,8 +46,10 @@ class StreamPrimary : public StreamAlsaMonoPipe {
+ 
+     // Overridden methods of 'StreamCommonImpl', called on a Binder thread.
+     ndk::ScopedAStatus setConnectedDevices(const ConnectedDevices& devices) override;
++    ndk::ScopedAStatus updateMetadataCommon(const Metadata& metadata) override;
+ 
+   protected:
++    void convertCapture(const void* in, void* out, size_t frameCount) override;
+     std::vector<alsa::DeviceProfile> getDeviceProfiles() override;
+     bool isStubStream();
+ 
+@@ -76,14 +79,26 @@ class StreamPrimary : public StreamAlsaMonoPipe {
+     // ALSA device the stream has just opened.
+     void openPlaybackHook();
+     void closePlaybackHook();
++    // Capture only: opens the vendor capture hook (see StreamPrimary.cpp) before the ALSA device
++    // is opened, closes it after the device and the I/O thread are gone.
++    void openCaptureHook();
++    void closeCaptureHook();
+ 
+     DriverStubImpl mStubDriver;
+     mutable std::mutex mLock;
+     AlsaDeviceId mAlsaDeviceId GUARDED_BY(mLock) = kStubDeviceId;
+ 
++    // Capture only. The worker thread opens and closes the hook under 'mCaptureHookLock', Binder
++    // threads pass metadata updates to it under the lock, the I/O thread uses it without the
++    // lock: the thread only runs while the hook is open.
++    std::mutex mCaptureHookLock;
++    std::vector<int> mCaptureSources GUARDED_BY(mCaptureHookLock);
++    void* mCaptureHook = nullptr;
++
+     // Used by the worker thread only.
+     AlsaDeviceId mCurrAlsaDeviceId = kStubDeviceId;
+     void* mPlaybackHook = nullptr;
++    int64_t mCaptureHookDelayNs = 0;
+ };
+ 
+ class StreamInPrimary final : public StreamIn, public StreamPrimary, public StreamInHwGainHelper {
+diff --git a/audio/aidl/default/primary/StreamPrimary.cpp b/audio/aidl/default/primary/StreamPrimary.cpp
+index e8fd896..0a6dbce 100644
+--- a/audio/aidl/default/primary/StreamPrimary.cpp
++++ b/audio/aidl/default/primary/StreamPrimary.cpp
+@@ -90,15 +90,87 @@ const PlaybackHookLib* getPlaybackHookLib() {
+     }();
+     return lib;
+ }
++
++// A vendor library that processes the capture of an attached device before the client gets it,
++// e.g. turns a microphone array into a beamformed pair. Named by
++// ro.vendor.audio.primary.capture_hook; unset means none.
++//   void* capture_hook_open(int card, int device, int sampleRate, int channelCount,
++//                           int pcmFormat, const int* sources, size_t sourceCount,
++//                           int* hardwareChannelCount, int* delayFrames);
++//       nullptr: not interested in this stream, which then captures as it does without a hook.
++//       Otherwise the ALSA device is opened with *hardwareChannelCount channels (same rate and
++//       format), and the capture position accounts for *delayFrames frames of processing delay.
++//   void capture_hook_process(void* handle, const void* in, void* out, size_t frameCount);
++//       'in' holds *hardwareChannelCount interleaved channels, 'out' gets channelCount.
++//   void capture_hook_set_sources(void* handle, const int* sources, size_t sourceCount);
++//   void capture_hook_close(void* handle);
++// 'sources' are the AudioSource values of the stream's record tracks. open() and close() are
++// called on the stream's worker thread, process() on its I/O thread in between, and
++// set_sources() on a Binder thread when the client updates the metadata, never at the same time
++// as open() or close(). The library has to be loadable from this APEX's linker namespace.
++struct CaptureHookLib {
++    void* (*open)(int, int, int, int, int, const int*, size_t, int*, int*);
++    void (*process)(void*, const void*, void*, size_t);
++    void (*setSources)(void*, const int*, size_t);
++    void (*close)(void*);
++};
++
++const CaptureHookLib* getCaptureHookLib() {
++    static const CaptureHookLib* const lib = []() -> const CaptureHookLib* {
++        const std::string path =
++                ::android::base::GetProperty("ro.vendor.audio.primary.capture_hook", "");
++        if (path.empty()) return nullptr;
++        void* handle = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
++        if (handle == nullptr) {
++            LOG(ERROR) << "capture hook: " << dlerror();
++            return nullptr;
++        }
++        auto* l = new CaptureHookLib{
++                reinterpret_cast<void* (*)(int, int, int, int, int, const int*, size_t, int*,
++                                           int*)>(dlsym(handle, "capture_hook_open")),
++                reinterpret_cast<void (*)(void*, const void*, void*, size_t)>(
++                        dlsym(handle, "capture_hook_process")),
++                reinterpret_cast<void (*)(void*, const int*, size_t)>(
++                        dlsym(handle, "capture_hook_set_sources")),
++                reinterpret_cast<void (*)(void*)>(dlsym(handle, "capture_hook_close"))};
++        if (l->open == nullptr || l->process == nullptr || l->setSources == nullptr ||
++            l->close == nullptr) {
++            LOG(ERROR) << "capture hook: " << path << " lacks the capture_hook_* functions";
++            delete l;
++            dlclose(handle);
++            return nullptr;
++        }
++        LOG(INFO) << "capture hook: using " << path;
++        return l;
++    }();
++    return lib;
++}
++
++std::vector<int> getCaptureSources(const StreamCommonInterface::Metadata& metadata) {
++    std::vector<int> sources;
++    if (const auto* sinkMetadata = std::get_if<SinkMetadata>(&metadata)) {
++        for (const auto& track : sinkMetadata->tracks) {
++            sources.push_back(static_cast<int>(track.source));
++        }
++    }
++    return sources;
++}
+ }  // namespace
+ 
+ StreamPrimary::StreamPrimary(StreamContext* context, const Metadata& metadata)
+     : StreamAlsaMonoPipe(context, metadata, 3 /*readWriteRetries*/),
+       mIsAsynchronous(!!getContext().getAsyncCallback()),
+-      mStubDriver(getContext()) {
++      mStubDriver(getContext()),
++      mCaptureSources(getCaptureSources(metadata)) {
+     context->startStreamDataProcessor();
+ }
+ 
++StreamPrimary::~StreamPrimary() {
++    // A stream destroyed without 'close' stops its worker here, so that the worker's 'shutdown'
++    // still finds this class and closes the hooks, and the I/O thread never outlives it.
++    cleanupWorker();
++}
++
+ ::android::status_t StreamPrimary::init(DriverCallbackInterface* callback) {
+     RETURN_STATUS_IF_ERROR(mStubDriver.init(callback));
+     return StreamAlsaMonoPipe::init(callback);
+@@ -121,7 +193,10 @@ StreamPrimary::StreamPrimary(StreamContext* context, const Metadata& metadata)
+ 
+ ::android::status_t StreamPrimary::standby() {
+     closePlaybackHook();
+-    return isStubStreamOnWorker() ? mStubDriver.standby() : StreamAlsaMonoPipe::standby();
++    if (isStubStreamOnWorker()) return mStubDriver.standby();
++    const ::android::status_t status = StreamAlsaMonoPipe::standby();
++    closeCaptureHook();
++    return status;
+ }
+ 
+ ::android::status_t StreamPrimary::start() {
+@@ -136,13 +211,28 @@ StreamPrimary::StreamPrimary(StreamContext* context, const Metadata& metadata)
+     if (shutdownAlsaStream) {
+         closePlaybackHook();
+         StreamAlsaMonoPipe::shutdown();  // Close currently opened ALSA devices.
++        closeCaptureHook();
+     }
+     if (isStub) {
+         return mStubDriver.start();
+     }
+-    // Playback writes straight into ALSA (see 'transfer'): no pipe and no output I/O thread.
+-    RETURN_STATUS_IF_ERROR(mIsInput ? StreamAlsaMonoPipe::start() : startPlaybackDirect());
+-    if (!mIsInput) openPlaybackHook();
++    if (mIsInput) {
++        // The hook decides how many channels the ALSA device is opened with. A device that does
++        // not open that way captures without the hook.
++        openCaptureHook();
++        ::android::status_t status = StreamAlsaMonoPipe::start();
++        if (status != ::android::OK && mCaptureHook != nullptr) {
++            LOG(WARNING) << __func__ << ": the device does not open with "
++                         << mCaptureHardwareChannels << " channels, capturing without the hook";
++            closeCaptureHook();
++            status = StreamAlsaMonoPipe::start();
++        }
++        RETURN_STATUS_IF_ERROR(status);
++    } else {
++        // Playback writes straight into ALSA (see 'transfer'): no pipe and no output I/O thread.
++        RETURN_STATUS_IF_ERROR(startPlaybackDirect());
++        openPlaybackHook();
++    }
+     mStartTimeNs = ::android::uptimeNanos();
+     mFramesSinceStart = 0;
+     mSkipNextTransfer = false;
+@@ -237,15 +327,68 @@ StreamPrimary::StreamPrimary(StreamContext* context, const Metadata& metadata)
+     if (!mIsInput && !isStubStreamOnWorker()) return refinePlaybackPosition(position);
+     // Capture: since not all data is actually sent to the HAL, use the position maintained by
+     // Stream class which accounts for all frames passed from / to the client.
++    // A capture hook delays the audio: the frames the client has got were captured that much
++    // earlier.
++    position->timeNs -= mCaptureHookDelayNs;
+     return ::android::OK;
+ }
+ 
+ void StreamPrimary::shutdown() {
+     closePlaybackHook();
+     StreamAlsaMonoPipe::shutdown();
++    closeCaptureHook();
+     mStubDriver.shutdown();
+ }
+ 
++void StreamPrimary::convertCapture(const void* in, void* out, size_t frameCount) {
++    getCaptureHookLib()->process(mCaptureHook, in, out, frameCount);
++}
++
++void StreamPrimary::openCaptureHook() {
++    // A resume keeps the ALSA device as it is, with or without a hook.
++    if (mCaptureHook != nullptr || !mAlsaDeviceProxies.empty() || !mConfig.has_value()) return;
++    const CaptureHookLib* lib = getCaptureHookLib();
++    if (lib == nullptr) return;
++    std::lock_guard l(mCaptureHookLock);
++    int hardwareChannels = 0, delayFrames = 0;
++    void* hook = lib->open(mCurrAlsaDeviceId.first, mCurrAlsaDeviceId.second, mSampleRate,
++                           static_cast<int>(mConfig->channels), static_cast<int>(mConfig->format),
++                           mCaptureSources.data(), mCaptureSources.size(), &hardwareChannels,
++                           &delayFrames);
++    if (hook == nullptr) return;
++    if (hardwareChannels <= 0 || delayFrames < 0) {
++        LOG(ERROR) << __func__ << ": capture hook opened with " << hardwareChannels
++                   << " channels and a delay of " << delayFrames << " frames, not using it";
++        lib->close(hook);
++        return;
++    }
++    mCaptureHook = hook;
++    mCaptureHardwareChannels = static_cast<unsigned int>(hardwareChannels);
++    mCaptureHookDelayNs = static_cast<int64_t>(delayFrames) * NANOS_PER_SECOND / mSampleRate;
++}
++
++void StreamPrimary::closeCaptureHook() {
++    std::lock_guard l(mCaptureHookLock);
++    if (mCaptureHook == nullptr) return;
++    getCaptureHookLib()->close(mCaptureHook);
++    mCaptureHook = nullptr;
++    mCaptureHardwareChannels = 0;
++    mCaptureHookDelayNs = 0;
++}
++
++ndk::ScopedAStatus StreamPrimary::updateMetadataCommon(const Metadata& metadata) {
++    ndk::ScopedAStatus status = StreamAlsaMonoPipe::updateMetadataCommon(metadata);
++    if (status.isOk() && mIsInput) {
++        std::lock_guard l(mCaptureHookLock);
++        mCaptureSources = getCaptureSources(metadata);
++        if (mCaptureHook != nullptr) {
++            getCaptureHookLib()->setSources(mCaptureHook, mCaptureSources.data(),
++                                            mCaptureSources.size());
++        }
++    }
++    return status;
++}
++
+ void StreamPrimary::openPlaybackHook() {
+     // A resume after a pause keeps the hook the stream already has.
+     if (mPlaybackHook != nullptr || !mConfig.has_value()) return;

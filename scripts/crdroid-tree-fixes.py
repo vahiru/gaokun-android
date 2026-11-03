@@ -192,6 +192,38 @@ def patch_minigbm_p010_scanout(tree: pathlib.Path) -> str:
     return "⚠️ 锚点不唯一或找不到，上游可能改了 msm_init()"
 
 
+def patch_webrtc_vendor_visibility(tree: pathlib.Path) -> str:
+    """—— 修补 39：让设备树链 webrtc_audio_processing（通话的回声消除）——
+
+    采集钩子（device/huawei/gaokun3/micarray/）对通话流自己做回声消除，用的是AOSP自带的WebRTC
+    （external/webrtc，android-17.0.0_r1）里的AEC3：平台给VOICE_COMMUNICATION接的AEC/NS在这个HAL上
+    拿不到音频（AudioFlinger把预处理音效交给HAL，HAL的addEffect不支持，日志是
+    `Error when adding effect: -38`，2026-11-03在rc.3上核实）。
+
+    webrtc_audio_processing本身是vendor可用的静态库，但visibility只放行
+    frameworks/av的preprocessing、cuttlefish和//vendor:__subpackages__（6bf8f3ca "Allow vendor
+    codes to use webrtc"），device/下的模块链它会被Soong拒绝。这里只在它自己的列表里加上本设备树。
+    """
+    p = tree / "external/webrtc/Android.bp"
+    if not p.exists():
+        return f"✗ 找不到 {p}"
+    s = io.open(p, encoding="utf-8").read()
+    NL = chr(10)
+    old = ("    visibility: [" + NL
+           + "        \"//vendor:__subpackages__\"," + NL
+           + "    ]," + NL)
+    new = ("    visibility: [" + NL
+           + "        \"//vendor:__subpackages__\"," + NL
+           + "        \"//device/huawei/gaokun3:__subpackages__\"," + NL
+           + "    ]," + NL)
+    if new in s:
+        return "已打过（幂等，无需改动）"
+    if s.count(old) == 1:
+        io.open(p, "w", encoding="utf-8").write(s.replace(old, new))
+        return "已修补"
+    return "⚠️ 锚点不唯一或找不到，上游可能改了webrtc_audio_processing的visibility"
+
+
 def patch_v4l2_10bit_profiles(tree: pathlib.Path) -> str:
     """—— 修补 30：v4l2_codec2 没有声明 10-bit profile ——
 
@@ -1316,7 +1348,10 @@ def main():
     step(" [15] audio AIDL HAL 采集改成数据驱动交付（去掉开头静音与常驻延迟）: ", apply_patch_file(
         tree, "hardware/interfaces",
         "0063-audio-aidl-primary-capture-data-driven.patch",
-        covered_by=("0069-audio-aidl-primary-playback-paced-by-alsa.patch",)))
+        covered_by=("0069-audio-aidl-primary-playback-paced-by-alsa.patch",
+                    "0077-audio-aidl-primary-alsa-fallback-by-device-type.patch",
+                    "0117-audio-aidl-primary-playback-hook.patch",
+                    "0206-audio-aidl-primary-capture-hook.patch")))
     # 不依赖前面几条（只动 audio/aidl/default/apex/）。v0.7.0 验收 B2：effect HAL 在 vendor APEX 里，加载不了 /vendor/lib64/soundfx 的 Histen
     # ⚠️ 这是唯一一条会【新建】文件的 AOSP 补丁（linker.config.json，未跟踪）：把 hardware/interfaces 还原成上游时
     #    `git checkout -- .` / `reset --hard` 删不掉它，要再 `git clean -f audio/aidl/default/apex/`，否则这一条报"打不上"（2026-09-29 审查）
@@ -1326,7 +1361,10 @@ def main():
     # A17：改 StreamAlsaBase.{h,cpp} 与 StreamPrimary.cpp，上下文只和 [15]（0063）在 StreamPrimary.cpp 里重叠，所以排在它后面。#130：播放由硬件定拍、不再整块丢音乐
     step(" [17] audio AIDL HAL 播放由硬件定拍、位置按真实播出上报（卡顿不再整块丢音乐）: ", apply_patch_file(
         tree, "hardware/interfaces",
-        "0069-audio-aidl-primary-playback-paced-by-alsa.patch"))
+        "0069-audio-aidl-primary-playback-paced-by-alsa.patch",
+        covered_by=("0077-audio-aidl-primary-alsa-fallback-by-device-type.patch",
+                    "0117-audio-aidl-primary-playback-hook.patch",
+                    "0206-audio-aidl-primary-capture-hook.patch")))
     # v1.0 NET-1 / TODO V3：软件 PNO 的第二道门（DeviceConfig wifi/software_pno_enabled，GMS 下发 false）
     step(" [18] Wi-Fi 软件 PNO 不受 DeviceConfig 覆盖（息屏断网后能自己回连）: ", patch_wifi_sw_pno_gate(tree))
     # v1.0 NET-4：稳定的设备 MAC（HAL 出厂 MAC 由 soc0 序列号派生）+ 新网络默认按网络固定的随机 MAC
@@ -1337,7 +1375,9 @@ def main():
     # 正向 --check 干净，打上之后 0010/0051/0052/0069 的反向检查仍过，撤 0069 后 0063 的反向检查仍过）。
     step(" [21] audio AIDL HAL 地址里没有 CARD_/DEV_ 时按设备类型回落（耳机麦）: ", apply_patch_file(
         tree, "hardware/interfaces",
-        "0077-audio-aidl-primary-alsa-fallback-by-device-type.patch"))
+        "0077-audio-aidl-primary-alsa-fallback-by-device-type.patch",
+        covered_by=("0117-audio-aidl-primary-playback-hook.patch",
+                    "0206-audio-aidl-primary-capture-hook.patch")))
     # 音游延迟：播放块按 ro.vendor.audio.primary.out_latency_ms（device.mk 设 10）⇒ FastMixer 开、游戏拿到 FAST 轨道。
     # 只动 ModulePrimary.cpp（头文件区与 getNominalLatencyMs()），与 [12]–[21] 不重叠；依赖 [17]（播放直接写 ALSA）。
     step(" [22] audio AIDL HAL 播放块大小可配（10 ms，开 FastMixer）: ", apply_patch_file(
@@ -1348,11 +1388,22 @@ def main():
     # 在 lineage-24.0 + 0010/0051/0052/0063/0068/0069/0077/0083 上核过：正向 --check 干净、打上后反向 --check 通过。
     step(" [27] audio AIDL HAL 播放方向的厂商钩子（扬声器低音处理，覆盖 FAST 轨）: ", apply_patch_file(
         tree, "hardware/interfaces",
-        "0117-audio-aidl-primary-playback-hook.patch"))
+        "0117-audio-aidl-primary-playback-hook.patch",
+        covered_by=("0206-audio-aidl-primary-capture-hook.patch",)))
+    # 麦克风阵列（device/huawei/gaokun3/micarray）：采集方向的厂商钩子，ro.vendor.audio.primary.capture_hook 的库决定 ALSA 开几路、
+    # 读到的每块进管道之前交给它处理。改 StreamAlsaBase.{h,cpp}、StreamAlsaMonoPipe.{h,cpp}、StreamPrimary.{h,cpp}，
+    # standby / start / shutdown 的上下文是 [27]（0117）加的，所以排在它后面；[15][17][21][27] 的 covered_by 因此带上它。
+    # 在 lineage-24.0 + 0010/0051/0052/0063/0068/0069/0077/0083/0117 上核过：正向 --check 干净、打上后反向 --check 通过，
+    # 重跑时 [15][17][21][27] 判为"已打过"。
+    step(" [38] audio AIDL HAL 采集方向的厂商钩子（内置麦克风阵列）: ", apply_patch_file(
+        tree, "hardware/interfaces",
+        "0206-audio-aidl-primary-capture-hook.patch"))
     # 字节缓冲模式的块 ID。要和 device.mk 的 poolmask（GRALLOC 位）一起生效，见补丁说明。
     step(" [28] v4l2_codec2 字节缓冲模式用 dmabuf ID: ", apply_patch_file(
         tree, "external/v4l2_codec2",
         "0128-v4l2-codec2-use-dmabuf-id-for-gralloc-blocks.patch"))
+    step(" [39] external/webrtc 让设备树链 webrtc_audio_processing（通话的回声消除）: ",
+         patch_webrtc_vendor_visibility(tree))
     # 10-bit 视频：[29][30] 要和 patches/0129（iris）、0130（turnip）一起生效，见各函数说明。
     step(" [29] minigbm 给 P010 开显示用途: ", patch_minigbm_p010_scanout(tree))
     step(" [30] v4l2_codec2 声明 HEVC Main10、VP9 Profile 2: ", patch_v4l2_10bit_profiles(tree))

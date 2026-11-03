@@ -1,0 +1,36 @@
+// Microphone array processing for the Huawei MateBook E Go (gaokun3), loaded by
+// the audio HAL's capture hook (patches/0206, ro.vendor.audio.primary.capture_hook
+// in device.mk). See README.md.
+//
+// In /vendor/lib64/soundfx like speakerfx: the only vendor directory the HAL's
+// APEX linker namespace may load from (patches/0068).
+cc_library_shared {
+    name: "libgaokunmicarray",
+    vendor: true,
+    relative_install_path: "soundfx",
+    srcs: [
+        "beamformer.cpp",
+        "echo_canceller.cpp",
+        "echo_reference_reader.cpp",
+        "micarray.cpp",
+    ],
+    // speakerfx/echo_reference.h: the echo reference speakerfx writes.
+    include_dirs: ["device/huawei/gaokun3/speakerfx"],
+    shared_libs: ["liblog"],
+    // AEC3 for calls (echo_canceller.cpp): AOSP's WebRTC, visible to this tree through
+    // tree-fix [39] (scripts/crdroid-tree-fixes.py).
+    static_libs: [
+        "webrtc_audio_processing",
+        "absl_strings_string_view",
+        "absl_types_optional",
+    ],
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        // WebRTC's headers have unused parameters (frameworks/av's preprocessing says the same).
+        "-Wno-unused-parameter",
+        "-fvisibility=hidden",
+        "-DGAOKUN_MICARRAY_AEC",
+    ],
+}

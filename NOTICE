@@ -43,6 +43,15 @@ under other licenses; those keep their own terms.
       (with its submodules). The APK is the project's own signed release build.
 * external/hexagonrpc (fetched by the local manifest, not vendored here):
       GNU General Public License v3.0, upstream linux-msm/hexagonrpc.
+* device/huawei/gaokun3/denoise/ (microphone noise suppression service):
+      service/: **Apache-2.0** (SPDX headers), so that it may load Qualcomm's
+      proprietary QNN runtime; service/third_party/pocketfft: BSD-3-Clause.
+      model/: a DeepFilterNet3 network compiled for the Hexagon HTP; DeepFilterNet
+      is MIT OR Apache-2.0 (Copyright (c) 2021 Hendrik Schröter), licence texts
+      next to it. The FastRPC user library (github.com/qualcomm/fastrpc,
+      BSD-3-Clause), the QNN runtime and headers and the CDSP files are NOT in
+      this repository: scripts/fetch-denoise-blobs.py fetches them at build time
+      (device/huawei/gaokun3/denoise/prebuilt/README.md).
 * Proprietary firmware for this device (Huawei .mbn / .jsn / audioreach
   topology blobs, and the SLPI sensor configuration) is NOT contained in this
   repository. See device/huawei/gaokun3/firmware/README.md and
@@ -86,6 +95,16 @@ consequences: section 2 of docs/known-limitations.md
   when "Speaker enhancement (experimental)" is turned on. See
   device/huawei/gaokun3/effects/README.md and
   device/huawei/gaokun3/effects/prebuilt/README.md.
+* Qualcomm QNN runtime (libQnnHtp.so, libQnnHtpV68Stub.so, libQnnSystem.so
+  under /vendor/lib64/gk3denoise/, libQnnHtpV68Skel.so under
+  /vendor/dsp/gk3denoise/), used only by the noise suppression service:
+  Qualcomm's AI Stack License, /vendor/etc/gk3denoise/QNN-LICENSE.pdf and
+  QNN-NOTICE.txt. Whoever builds the images downloads it from Qualcomm at
+  build time and thereby accepts that licence; it is not part of this
+  repository. See device/huawei/gaokun3/denoise/prebuilt/README.md.
+* CDSP user-PD shell and its C++ runtime (fastrpc_shell_unsigned_3,
+  libc++.so.1, libc++abi.so.1 under /vendor/dsp/gk3denoise/): from the same
+  Windows driver packages as the firmware above.
 * Google apps and services (MindTheGapps: Play Store, Play services, ...),
   under Google's own terms.
 

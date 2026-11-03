@@ -100,4 +100,14 @@
         <item>none</item>
     </string-array>
     <string name="stylus_note">Stronger smoothing gives smoother lines when zoomed in, but the ink trails further behind the pen tip while you write.</string>
+
+    <string name="denoise_title">Microphone noise suppression</string>
+    <string name="denoise_summary">Reduce background noise picked up by the built-in microphones</string>
+    <string name="denoise_call_title">Calls</string>
+    <string name="denoise_call_summary">Voice and video calls</string>
+    <string name="denoise_record_title">Recording</string>
+    <string name="denoise_record_summary">Voice recorders and most apps that record sound</string>
+    <string name="denoise_camcorder_title">Video recording</string>
+    <string name="denoise_camcorder_summary">The sound of videos recorded with the camera</string>
+    <string name="denoise_note">Only sound from the built-in microphones is processed. Noise suppression keeps speech and turns down other sounds, including music and ambient sound. Changes apply from the next call or recording.</string>
 </resources>

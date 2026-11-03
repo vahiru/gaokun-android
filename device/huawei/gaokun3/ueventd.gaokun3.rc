@@ -16,9 +16,11 @@
 # FastRPC 到 SLPI 传感器 DSP。hexagonrpcd（上游自带的 hexagonrpcd-sdsp.rc）
 # 跑在 user/group system 下，而 /dev/fastrpc-* 默认 root 独占 —— 不给权限就
 # 打不开，服务会起不来。
-# ★ 只放行 sdsp 这一个：adsp/cdsp/cdsp-secure 我们不用，不必授权。
+# ★ 只放行 sdsp 和 cdsp：adsp/cdsp-secure 我们不用，不必授权。cdsp 给麦克风降噪服务
+#   gk3denoised（denoise/，user system）在 CDSP 的 NPU 上跑模型。
 # 用途与整条通路见 docs/stage4-findings.md #37。
 /dev/fastrpc-sdsp         0660   system     system
+/dev/fastrpc-cdsp         0660   system     system
 
 # Venus 硬件视频编解码。v4l2_codec2 的服务
 # （android.hardware.media.c2-service-v4l2）在自带的 .rc 里声明 `user media`，

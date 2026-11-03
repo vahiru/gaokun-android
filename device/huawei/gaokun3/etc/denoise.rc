@@ -1,0 +1,38 @@
+# 麦克风降噪的场景开关（micarray/README.md）：把Parts写的system属性镜像成音频HAL读得到的vendor属性。
+# 绕init这一跳的理由同etc/histen.rc：Parts（system_app）只能写persist.sys.*，音频HAL读不了system_prop。
+#
+#   persist.sys.gaokun3.denoise.call       通话（VOICE_COMMUNICATION），没设过 = 开
+#   persist.sys.gaokun3.denoise.record     录音（MIC、DEFAULT），没设过 = 关
+#   persist.sys.gaokun3.denoise.camcorder  录像（CAMCORDER），没设过 = 关
+#
+# 采集钩子（micarray/micarray.cpp的denoiseScenes()）每次开始录音时读镜像：call只有"0"算关，另外两个只有"1"算开，
+# 所以镜像不存在就是默认值。
+# 按值逐条写触发器，不用${…}把system_prop的值展开进动作（同histen.rc）。
+
+on property:persist.sys.gaokun3.denoise.call=0
+    setprop vendor.gaokun3.denoise.call 0
+
+on property:persist.sys.gaokun3.denoise.call=1
+    setprop vendor.gaokun3.denoise.call 1
+
+on property:persist.sys.gaokun3.denoise.record=0
+    setprop vendor.gaokun3.denoise.record 0
+
+on property:persist.sys.gaokun3.denoise.record=1
+    setprop vendor.gaokun3.denoise.record 1
+
+on property:persist.sys.gaokun3.denoise.camcorder=0
+    setprop vendor.gaokun3.denoise.camcorder 0
+
+on property:persist.sys.gaokun3.denoise.camcorder=1
+    setprop vendor.gaokun3.denoise.camcorder 1
+
+# 开机补一次：属性触发器在init早期不会重放（同histen.rc）。只补和默认值不同的那几种。
+on boot && property:persist.sys.gaokun3.denoise.call=0
+    setprop vendor.gaokun3.denoise.call 0
+
+on boot && property:persist.sys.gaokun3.denoise.record=1
+    setprop vendor.gaokun3.denoise.record 1
+
+on boot && property:persist.sys.gaokun3.denoise.camcorder=1
+    setprop vendor.gaokun3.denoise.camcorder 1

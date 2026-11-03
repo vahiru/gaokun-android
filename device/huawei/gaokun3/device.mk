@@ -249,6 +249,50 @@ PRODUCT_PACKAGES += \
 PRODUCT_VENDOR_PROPERTIES += \
     ro.vendor.audio.primary.playback_hook=/vendor/lib64/soundfx/libgaokunspeakerfx.so
 
+# 内置麦克风阵列（micarray/README.md）：音频HAL打开内置麦之前先问这个库（补丁0206，tree-fix [38]）。
+# 它接管时ALSA按四路开，每块录音由顶部三颗麦克风经固定波束成形变成双声道，延迟30 ms；
+# UNPROCESSED、VOICE_PERFORMANCE等音源不经过它。四路要拓扑改过（micarray/tplg-four-channel-capture.py），
+# 拓扑没改时HAL按原来的两路开；拓扑改了就必须带内核0203、0204，否则声道是重混过的。
+# 系数文件不入库（micarray/prebuilt/README.md），与Histen引擎同一套规矩：构建机上由sync-device-tree.sh带过去并断言；
+# 用wildcard，没有它照样能编，库打开时读不到就不接管。
+PRODUCT_PACKAGES += \
+    libgaokunmicarray
+PRODUCT_VENDOR_PROPERTIES += \
+    ro.vendor.audio.primary.capture_hook=/vendor/lib64/soundfx/libgaokunmicarray.so
+GAOKUN3_MICARRAY_WEIGHTS := $(LOCAL_PATH)/micarray/prebuilt/hdrec_bf_data.bin
+ifneq ($(wildcard $(GAOKUN3_MICARRAY_WEIGHTS)),)
+PRODUCT_COPY_FILES += \
+    $(GAOKUN3_MICARRAY_WEIGHTS):$(TARGET_COPY_OUT_VENDOR)/etc/micarray/hdrec_bf_data.bin
+endif
+# 麦克风降噪的场景开关：Parts「声音 → 麦克风降噪」写persist.sys.gaokun3.denoise.*，这个rc镜像成
+# vendor.gaokun3.denoise.*给钩子读（理由同histen.rc）。
+PRODUCT_COPY_FILES += \
+    $(LOCAL_PATH)/etc/denoise.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/denoise.rc
+
+# 麦克风降噪服务gk3denoised（denoise/README.md）：在CDSP的NPU上跑DeepFilterNet3，音频HAL的采集钩子经
+# /dev/socket/gk3denoise用它。QNN运行库和头文件、CDSP外壳和DSP侧C++库、FastRPC源码都不入库，构建前由
+# scripts/fetch-denoise-blobs.py从公开来源取到denoise/prebuilt/（sync-device-tree.sh会做并核对sha256）；模型入库。
+# 故意不用wildcard：缺了就是构建错误——ROM里一定要有这个服务（用户2026-11-03定）。
+# ELF经PRODUCT_COPY_FILES装进vendor靠BoardConfig.mk的BUILD_BROKEN_ELF_PREBUILT_PRODUCT_COPY_FILES。
+GAOKUN3_DENOISE := $(LOCAL_PATH)/denoise
+PRODUCT_PACKAGES += \
+    gk3denoised \
+    libcdsprpc_gk3denoise
+PRODUCT_COPY_FILES += \
+    $(GAOKUN3_DENOISE)/prebuilt/qairt/lib/aarch64-android/libQnnHtp.so:$(TARGET_COPY_OUT_VENDOR)/lib64/gk3denoise/libQnnHtp.so \
+    $(GAOKUN3_DENOISE)/prebuilt/qairt/lib/aarch64-android/libQnnHtpV68Stub.so:$(TARGET_COPY_OUT_VENDOR)/lib64/gk3denoise/libQnnHtpV68Stub.so \
+    $(GAOKUN3_DENOISE)/prebuilt/qairt/lib/aarch64-android/libQnnSystem.so:$(TARGET_COPY_OUT_VENDOR)/lib64/gk3denoise/libQnnSystem.so \
+    $(GAOKUN3_DENOISE)/prebuilt/qairt/lib/hexagon-v68/unsigned/libQnnHtpV68Skel.so:$(TARGET_COPY_OUT_VENDOR)/dsp/gk3denoise/libQnnHtpV68Skel.so \
+    $(GAOKUN3_DENOISE)/prebuilt/dsp/fastrpc_shell_unsigned_3:$(TARGET_COPY_OUT_VENDOR)/dsp/gk3denoise/fastrpc_shell_unsigned_3 \
+    $(GAOKUN3_DENOISE)/prebuilt/dsp/libc++.so.1:$(TARGET_COPY_OUT_VENDOR)/dsp/gk3denoise/libc++.so.1 \
+    $(GAOKUN3_DENOISE)/prebuilt/dsp/libc++abi.so.1:$(TARGET_COPY_OUT_VENDOR)/dsp/gk3denoise/libc++abi.so.1 \
+    $(GAOKUN3_DENOISE)/model/dfn3_v2_cal2_x8_a16w8_v68.bin:$(TARGET_COPY_OUT_VENDOR)/etc/gk3denoise/dfn3_v2_cal2_x8_a16w8_v68.bin \
+    $(GAOKUN3_DENOISE)/prebuilt/qairt/LICENSE.pdf:$(TARGET_COPY_OUT_VENDOR)/etc/gk3denoise/QNN-LICENSE.pdf \
+    $(GAOKUN3_DENOISE)/prebuilt/qairt/NOTICE.txt:$(TARGET_COPY_OUT_VENDOR)/etc/gk3denoise/QNN-NOTICE.txt \
+    $(GAOKUN3_DENOISE)/prebuilt/fastrpc/LICENSE.txt:$(TARGET_COPY_OUT_VENDOR)/etc/gk3denoise/fastrpc-LICENSE.txt \
+    $(GAOKUN3_DENOISE)/model/LICENSE-MIT:$(TARGET_COPY_OUT_VENDOR)/etc/gk3denoise/DeepFilterNet-LICENSE-MIT \
+    $(GAOKUN3_DENOISE)/model/LICENSE-APACHE:$(TARGET_COPY_OUT_VENDOR)/etc/gk3denoise/DeepFilterNet-LICENSE-APACHE
+
 # ------------------------------------------------------------------ 固件
 # [measured] 全部来自 Stage 0 的 dmesg 固件加载路径。
 # 配合 cmdline 里的 firmware_class.path=/vendor/firmware/，

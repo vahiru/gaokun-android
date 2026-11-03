@@ -279,4 +279,7 @@
 
 # 手写笔（M-Pencil）：守护进程，与触摸从片驱动交出帧的节点（docs/stylus.md）
 /vendor/bin/gk3pend          u:object_r:gk3pend_exec:s0
+# 麦克风降噪服务（denoise/，sepolicy/gk3denoise.te）
+/vendor/bin/gk3denoised      u:object_r:gk3denoise_exec:s0
+/dev/socket/gk3denoise       u:object_r:gk3denoise_socket:s0
 /dev/gk3_pen                 u:object_r:gaokun3_pen_device:s0

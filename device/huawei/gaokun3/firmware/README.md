@@ -27,7 +27,7 @@ cp -r /tmp/fw/firmware/* device/huawei/gaokun3/firmware/
 | `qca/wcnhpbtfw21.tlv`<br>`qca/wcnhpnv21g.bin` | 蓝牙 WCN6855 | 蓝牙不起 | linux-firmware ≥ 20241210 |
 | `ath11k/WCN6855/hw2.0/{amss,board-2,m3,regdb}.bin` | WiFi | 无 WiFi | linux-firmware ≥ 20241210（上游把 hw2.1 软链到 hw2.0；`device.mk` 把同一份装到两个路径） |
 | `qcom/sc8280xp/HUAWEI/gaokun3/qcadsp8280.mbn`<br>`qccdsp8280.mbn`<br>`qcslpi8280.mbn` | ADSP / CDSP / SLPI | 音频、传感器全无 | **华为专有** |
-| `qcom/sc8280xp/HUAWEI/gaokun3/audioreach-tplg.bin` | 音频**拓扑** | **声卡不注册** | **华为专有** |
+| `qcom/sc8280xp/HUAWEI/gaokun3/audioreach-tplg.bin` | 音频**拓扑** | **声卡不注册**；没改成四路时麦克风阵列不接管（恢复后在构建机上跑一次`micarray/tplg-four-channel-capture.py`，`sync-device-tree.sh`第3b1b步核对） | **华为专有** |
 | `qcom/sc8280xp/HUAWEI/gaokun3/qcvss8280.mbn` | 语音服务 | （未用到，一并带上） | **华为专有** |
 | `qcom/sc8280xp/HUAWEI/gaokun3/{adspr,adspua,battmgr,cdspr}.jsn` | pd_mapper 服务表 | remoteproc 域映射缺失 | **华为专有** |
 

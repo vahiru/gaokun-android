@@ -431,6 +431,13 @@ KPATCHES=(
     # 0197：挂起时设备已经发了PME（要叫醒系统），就让这次挂起失败，不再发PME_Turn_Off。不打的话开着WoWLAN时，
     #    挂起途中Wi-Fi收到唤醒包会不回应PME_Turn_Off，主机照样断电，几次之后链路回不来。
     0197-PCI-dwc-abort-suspend-when-a-device-has-signalled-PME.patch
+    # ★ 0203、0204：内置麦四路采集（麦克风阵列，device/huawei/gaokun3/micarray/）。0203让VA后端在前端要四路时保留四路，
+    #    不打的话四路请求在后端被压回两路；0204让采集按源的顺序标声道，不打的话DSP的MFC把四路重新混过（第三路混进前两路）。
+    0203-ASoC-qcom-sc8280xp-let-VA-capture-use-four-channels.patch
+    0204-ASoC-qcom-q6apm-dai-keep-the-source-s-channel-order-on-capture.patch
+    # ★ 0205：CDSP的FastRPC上下文（compute-cb）标成dma-coherent，录音降噪服务（DeepFilterNet3在NPU上）要用。
+    #    不打的话用户态FastRPC在CDSP上加载skel几乎每次都失败（AEE_EUNABLETOLOAD，与时序有关），降噪服务起不来。
+    0205-arm64-dts-qcom-sc8280xp-mark-the-CDSP-FastRPC-context-banks-dma-coherent.patch
 )
 
 # ⚠️ 诊断补丁【不进发版内核】：只在带 --with-diag 时打。顺序有依赖：0028/0029 依赖 0023，

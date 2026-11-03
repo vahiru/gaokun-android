@@ -1,0 +1,127 @@
+// Microphone noise suppression service (README.md): gk3denoised runs DeepFilterNet3 on the CDSP's
+// HTP through Qualcomm's QNN runtime, for the audio HAL's capture hook (micarray/).
+//
+// Built here: the service (service/, Apache-2.0, so that it may load the proprietary QNN libraries
+// although the ROM as a whole is GPL-3.0) and the FastRPC user library it talks to the CDSP with,
+// from github.com/qualcomm/fastrpc (BSD-3-Clause). Neither the FastRPC sources nor the QNN headers
+// are in this repository: scripts/fetch-denoise-blobs.py puts them into prebuilt/ (git-ignored)
+// before every build, together with the QNN runtime and the CDSP files device.mk copies.
+//
+// ⬜ Not built in a ROM tree yet: the same sources build with the NDK
+// (gaokun-workspace audio/denoise/build.sh) and ran on the tablet as a KernelSU module.
+
+cc_binary {
+    name: "gk3denoised",
+    vendor: true,
+    srcs: [
+        "service/gk3denoised.cpp",
+        "service/dfn3_engine.cpp",
+        "service/socid_override.c",
+    ],
+    local_include_dirs: [
+        "service",
+        "service/third_party/pocketfft",
+        "prebuilt/qairt/include/QNN",
+    ],
+    // denoise_protocol.h, shared with the capture hook.
+    include_dirs: ["device/huawei/gaokun3/micarray"],
+    shared_libs: ["liblog"],
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Wno-unused-parameter",
+        "-Wno-missing-field-initializers",
+        "-DGK3DENOISE_VERSION=\"rom\"",
+    ],
+    // pocketfft (dfn3_engine.h) reports errors with throw; Soong builds C++ with -fno-exceptions.
+    cppflags: ["-fexceptions"],
+    // socid_override.c defines the fortified open variants itself.
+    conlyflags: [
+        "-std=c11",
+        "-U_FORTIFY_SOURCE",
+    ],
+    // QNN reads the SoC id with libc's open() family from the libraries it dlopens; the service
+    // answers that one read itself (socid_override.c), which only works if these are exported
+    // from the executable.
+    ldflags: [
+        "-Wl,--export-dynamic-symbol=open",
+        "-Wl,--export-dynamic-symbol=open64",
+        "-Wl,--export-dynamic-symbol=openat",
+        "-Wl,--export-dynamic-symbol=openat64",
+        "-Wl,--export-dynamic-symbol=__open_2",
+        "-Wl,--export-dynamic-symbol=__openat_2",
+        "-Wl,--export-dynamic-symbol=fopen",
+        "-Wl,--export-dynamic-symbol=fopen64",
+    ],
+    init_rc: ["gk3denoise.rc"],
+}
+
+// libcdsprpc.so in /vendor/lib64/gk3denoise, next to the QNN libraries that dlopen it by name.
+// Flags as fastrpc's src/Makefile.am for Android, domain 3 (CDSP). The CDSP shell is looked for
+// only in DEFAULT_DSP_SEARCH_PATHS (and /vendor/dsp), never in ADSP_LIBRARY_PATH: it has to name
+// the directory device.mk copies the shell to.
+cc_library_shared {
+    name: "libcdsprpc_gk3denoise",
+    stem: "libcdsprpc",
+    vendor: true,
+    relative_install_path: "gk3denoise",
+    srcs: [
+        "prebuilt/fastrpc/src/fastrpc_apps_user.c",
+        "prebuilt/fastrpc/src/fastrpc_perf.c",
+        "prebuilt/fastrpc/src/fastrpc_pm.c",
+        "prebuilt/fastrpc/src/fastrpc_config.c",
+        "prebuilt/fastrpc/src/fastrpc_mem.c",
+        "prebuilt/fastrpc/src/fastrpc_notif.c",
+        "prebuilt/fastrpc/src/fastrpc_ioctl.c",
+        "prebuilt/fastrpc/src/fastrpc_log.c",
+        "prebuilt/fastrpc/src/fastrpc_procbuf.c",
+        "prebuilt/fastrpc/src/fastrpc_cap.c",
+        "prebuilt/fastrpc/src/log_config.c",
+        "prebuilt/fastrpc/src/dspsignal.c",
+        "prebuilt/fastrpc/src/dspqueue/dspqueue_cpu.c",
+        "prebuilt/fastrpc/src/dspqueue/dspqueue_rpc_stub.c",
+        "prebuilt/fastrpc/src/listener_android.c",
+        "prebuilt/fastrpc/src/apps_std_imp.c",
+        "prebuilt/fastrpc/src/apps_mem_imp.c",
+        "prebuilt/fastrpc/src/apps_mem_skel.c",
+        "prebuilt/fastrpc/src/rpcmem_linux.c",
+        "prebuilt/fastrpc/src/adspmsgd.c",
+        "prebuilt/fastrpc/src/adspmsgd_printf.c",
+        "prebuilt/fastrpc/src/std_path.c",
+        "prebuilt/fastrpc/src/std_dtoa.c",
+        "prebuilt/fastrpc/src/BufBound.c",
+        "prebuilt/fastrpc/src/platform_libs.c",
+        "prebuilt/fastrpc/src/pl_list.c",
+        "prebuilt/fastrpc/src/gpls.c",
+        "prebuilt/fastrpc/src/remotectl_stub.c",
+        "prebuilt/fastrpc/src/remotectl1_stub.c",
+        "prebuilt/fastrpc/src/adspmsgd_apps_skel.c",
+        "prebuilt/fastrpc/src/adspmsgd_adsp_stub.c",
+        "prebuilt/fastrpc/src/adspmsgd_adsp1_stub.c",
+        "prebuilt/fastrpc/src/apps_remotectl_skel.c",
+        "prebuilt/fastrpc/src/adsp_current_process_stub.c",
+        "prebuilt/fastrpc/src/adsp_current_process1_stub.c",
+        "prebuilt/fastrpc/src/adsp_listener_stub.c",
+        "prebuilt/fastrpc/src/adsp_listener1_stub.c",
+        "prebuilt/fastrpc/src/apps_std_skel.c",
+        "prebuilt/fastrpc/src/adsp_perf_stub.c",
+        "prebuilt/fastrpc/src/adsp_perf1_stub.c",
+        "prebuilt/fastrpc/src/mod_table.c",
+        "prebuilt/fastrpc/src/fastrpc_context.c",
+    ],
+    local_include_dirs: ["prebuilt/fastrpc/inc"],
+    shared_libs: ["liblog"],
+    cflags: [
+        "-Wno-error",
+        "-fno-short-enums",
+        "-U_DEBUG",
+        "-DARM_ARCH_7A",
+        "-DLE_ENABLE",
+        "-DENABLE_UPSTREAM_DRIVER_INTERFACE",
+        "-DUSE_SYSLOG",
+        "-DCONFIG_BASE_DIR=\"/usr/share/qcom/\"",
+        "-DMACHINE_NAME_PATH=\"/sys/firmware/devicetree/base/model\"",
+        "-DDEFAULT_DSP_SEARCH_PATHS=\";/vendor/dsp/gk3denoise;/vendor/lib/rfsa/adsp;/vendor/dsp;\"",
+        "-DDEFAULT_DOMAIN_ID=3",
+    ],
+}

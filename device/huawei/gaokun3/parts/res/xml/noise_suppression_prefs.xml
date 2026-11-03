@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- One switch per scene. The values live in persist.sys.gaokun3.denoise.*;
+         NoiseSuppressionSettingsActivity reads them back, so the defaults here only matter to
+         SharedPreferences. -->
+    <SwitchPreferenceCompat
+        android:key="denoise_call"
+        android:title="@string/denoise_call_title"
+        android:summary="@string/denoise_call_summary"
+        android:defaultValue="true"
+        android:persistent="false" />
+    <SwitchPreferenceCompat
+        android:key="denoise_record"
+        android:title="@string/denoise_record_title"
+        android:summary="@string/denoise_record_summary"
+        android:defaultValue="false"
+        android:persistent="false" />
+    <SwitchPreferenceCompat
+        android:key="denoise_camcorder"
+        android:title="@string/denoise_camcorder_title"
+        android:summary="@string/denoise_camcorder_summary"
+        android:defaultValue="false"
+        android:persistent="false" />
+    <com.android.settingslib.widget.FooterPreference
+        android:key="denoise_note"
+        android:title="@string/denoise_note"
+        android:selectable="false" />
+</PreferenceScreen>
