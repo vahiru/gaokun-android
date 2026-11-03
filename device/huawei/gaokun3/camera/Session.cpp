@@ -643,6 +643,26 @@ ndk::ScopedAStatus Session::processCaptureRequest(const std::vector<CaptureReque
 			if (afMode >= 0)
 				af_.setMode(static_cast<uint8_t>(afMode));
 			const int32_t afTrig = requestEntryInt(p.settings, ANDROID_CONTROL_AF_TRIGGER, -1);
+			/*
+			 * AF region (at most one, see Metadata.cpp): active array
+			 * coordinates, and libcamera delivers the whole array, so map by
+			 * fraction. Weight 0 means no region. Set before the trigger, which
+			 * searches it.
+			 */
+			const int32_t rx0 = requestEntryInt(p.settings, ANDROID_CONTROL_AF_REGIONS, -1, 0);
+			if (rx0 >= 0) {
+				const int32_t ry0 = requestEntryInt(p.settings, ANDROID_CONTROL_AF_REGIONS, -1, 1);
+				const int32_t rx1 = requestEntryInt(p.settings, ANDROID_CONTROL_AF_REGIONS, -1, 2);
+				const int32_t ry1 = requestEntryInt(p.settings, ANDROID_CONTROL_AF_REGIONS, -1, 3);
+				const int32_t rw = requestEntryInt(p.settings, ANDROID_CONTROL_AF_REGIONS, 0, 4);
+				if (rw > 0 && rx1 > rx0 && ry1 > ry0)
+					af_.setRegion(static_cast<float>(rx0) / facts_.activeW,
+						      static_cast<float>(ry0) / facts_.activeH,
+						      static_cast<float>(rx1) / facts_.activeW,
+						      static_cast<float>(ry1) / facts_.activeH);
+				else
+					af_.clearRegion();
+			}
 			if (afTrig > 0)   /* 1=START 2=CANCEL；0=IDLE 不必下发 */
 				af_.trigger(static_cast<uint8_t>(afTrig));
 		}

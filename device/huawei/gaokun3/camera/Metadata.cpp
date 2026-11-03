@@ -226,7 +226,8 @@ std::vector<uint8_t> buildCharacteristics(const SensorFacts &f)
 	add_camera_metadata_entry(m, ANDROID_CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES,
 				  fpsRanges, 4);
 
-	const int32_t maxRegions[] = { 0, 0, 0 };   /* AE/AWB/AF 都不支持区域 */
+	/* AE/AWB 不支持区域；AF 在有马达的后摄上支持一个区域（AutoFocus::setRegion）。 */
+	const int32_t maxRegions[] = { 0, 0, f.hasAf ? 1 : 0 };
 	add_camera_metadata_entry(m, ANDROID_CONTROL_MAX_REGIONS, maxRegions, 3);
 
 	/* ── 闪光灯 / 镜头 ── */
@@ -329,6 +330,7 @@ std::vector<uint8_t> buildCharacteristics(const SensorFacts &f)
 	if (f.hasAf) {
 		reqKeys.push_back(ANDROID_CONTROL_AF_MODE);
 		reqKeys.push_back(ANDROID_CONTROL_AF_TRIGGER);
+		reqKeys.push_back(ANDROID_CONTROL_AF_REGIONS);
 	}
 	std::vector<int32_t> resKeys = reqKeys;
 	for (int32_t k : { ANDROID_SENSOR_TIMESTAMP, ANDROID_REQUEST_PIPELINE_DEPTH,

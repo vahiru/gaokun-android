@@ -13,17 +13,29 @@
  *   亮度整体伸缩（AGC 换曝光/增益）时分子分母同比例变，比值不动 ——
  *   否则"越亮越清晰"会把马达一路推到曝光最好而画面最糊的位置。
  *
- * ★ 搜索：**确定性扫描**（不是爬山）。粗扫 kCoarsePoints 点覆盖整个行程，
- *   再在最高分点附近细扫 ±2 格；步长与帧率都允许这么做（行程 1024 步、
- *   实测约 28 fps ⇒ 14 个探测点 ≈ 2 秒），换来的是"一定能找到全局峰"。
+ * ★ 搜索：**确定性扫描**（不是爬山）。按 kCoarseStep 粗扫搜索范围，
+ *   再在最高分点附近按 kFineStep 细扫。
  *   ⚠️ 曾经用粗到细爬山，实测会卡死：起始点往一侧探到更差后反向，只是从
  *   那一侧往回挪，峰在另一侧的整片区域从未被探索（收敛到 896/34.9，而真峰
  *   在 320/347）。行程这么短、帧率这么高，没有理由用局部算法。
  *   每个探测点的 (位置, 分数) 都会打进日志，标定与排障直接看日志。
+ *
+ * Search range and order: the sweep covers kLensLow..kLensHigh, not the whole
+ * travel. Below about 100 the lens does not move at all (it rests on its stop:
+ * identical frames at 0 and 100), and the ends are where it audibly hits the
+ * stops. The sweep starts from the end nearer the lens and stops early once
+ * the score has fallen well below its peak, so a scene in focus near where the
+ * lens already is costs a few points, not the whole range. Moves longer than
+ * kMaxJump go in steps, one per frame, rather than in one jump.
+ *
+ * AF region: one region (ANDROID_CONTROL_AF_REGIONS, rear camera only). Its
+ * sharpness replaces that of the central 70% of the frame; a new region starts
+ * a new search.
  */
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <mutex>
 #include <vector>
 
@@ -52,6 +64,11 @@ public:
 	 *   在 AGC 收敛前后能差 3 倍（612 → 211），那样的"曲线"里根本没有焦点信息。 */
 	void onFrame(const uint8_t *rgb, int w, int h, bool sceneStable);
 
+	/* AF region as fractions of the frame (x0, y0, x1, y1), or none: the
+	 * central 70%. A change starts a new search. */
+	void setRegion(float x0, float y0, float x1, float y1);
+	void clearRegion();
+
 	/* 结果元数据。 */
 	uint8_t afState() const;
 	uint8_t lensState() const;
@@ -69,12 +86,21 @@ private:
 	void startScan();
 	void finishScan();
 	bool apply(int pos);              /* 挪马达并记 justMoved_；失败返回 false */
+	bool moveTo(int pos);             /* apply() in steps of at most kMaxJump */
+	void regionChanged();
 
 	double sharpness(const uint8_t *rgb, int w, int h);
 
 	/* 搜索参数。 */
-	/* 粗扫点数（含两端）：9 点 ⇒ 0,128,256,…,1023，覆盖整个行程。 */
-	static constexpr int kCoarsePoints = 9;
+	/* Sweep range and steps (lens codes). */
+	static constexpr int kLensLow = 100;
+	static constexpr int kLensHigh = 900;
+	static constexpr int kCoarseStep = 100;
+	static constexpr int kFineStep = 25;
+	static constexpr int kMaxJump = 150;
+	/* Coarse sweep stops early after kDropPoints points below kDropRatio of the peak. */
+	static constexpr double kDropRatio = 0.75;
+	static constexpr int kDropPoints = 2;
 	static constexpr int kMaxMoves = 24;        /* 兜底：探测次数上限 */
 	static constexpr double kMinScore = 20.0;   /* "这场景没法对焦"（白墙）的下限；
 						     ⚠️ 量纲随指标变（拉普拉斯/亮度）。实测本机
@@ -94,7 +120,8 @@ private:
 	static constexpr int kAvg = 4;
 	/* ⚠️ 流水线延迟：setPosition 之后相机流水线里还有 3–4 帧是旧位置曝的，
 	 * 立刻用下一帧的分数就等于把"位置"和"分数"错配。必须等几帧再采样。 */
-	static constexpr int kSettleFrames = 3;
+	/* 4: after moves of 50 codes or more the score was often still rising on the third frame. */
+	static constexpr int kSettleFrames = 4;
 
 	Lens *lens_ = nullptr;
 
@@ -110,6 +137,11 @@ private:
 	std::vector<int> sweep_;
 	int sweepIdx_ = 0;
 	bool fineDone_ = false;
+	int drops_ = 0;                  /* coarse points in a row below kDropRatio of the peak */
+	std::map<int, double> samples_;  /* this search's (position, score) samples */
+	int moveTarget_ = -1;            /* where a stepped move is heading, -1 = none */
+	/* AF region in fractions of the frame; default the central 70%. */
+	float region_[4] = { 0.15f, 0.15f, 0.85f, 0.85f };
 	/* ★ 调试口：`debug.gaokun3.camera.af.hold <pos>` 把马达钉在某个位置、不搜对焦。
 	 *   标定"这个马达到底动没动 / 焦点在哪"必须靠它 —— 自动搜索的曲线分不清
 	 *   "焦点变了"和"AGC 漂了"。置 -1 或空串恢复正常 AF（见 AutoFocus.cpp）。 */

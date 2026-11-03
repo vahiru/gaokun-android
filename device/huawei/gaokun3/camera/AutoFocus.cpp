@@ -131,12 +131,20 @@ void AutoFocus::startScan()
 	bestPos_ = lens_->position();
 	stable_ = 0;
 	fineDone_ = false;
-	/* 粗扫 kCoarsePoints 点（含两端）覆盖整个行程；峰附近的细扫在粗扫结束后生成。 */
+	drops_ = 0;
+	samples_.clear();
+	/*
+	 * Coarse sweep over kLensLow..kLensHigh in kCoarseStep, from the end nearer
+	 * the lens; the fine sweep around the peak is generated when it ends.
+	 */
 	sweep_.clear();
-	const int lo = lens_->minPos();
-	const int hi = lens_->maxPos();
-	for (int i = 0; i < kCoarsePoints; i++)
-		sweep_.push_back(lo + (hi - lo) * i / (kCoarsePoints - 1));
+	const int lo = std::max(lens_->minPos(), kLensLow);
+	const int hi = std::min(lens_->maxPos(), kLensHigh);
+	for (int p = lo; p < hi; p += kCoarseStep)
+		sweep_.push_back(p);
+	sweep_.push_back(hi);
+	if (lens_->position() - lo > hi - lens_->position())
+		std::reverse(sweep_.begin(), sweep_.end());
 	sweepIdx_ = 0;
 	settle_ = kSettleFrames;   /* 起始位置也要等流水线把画面换过来再采第一个点 */
 }
@@ -149,11 +157,40 @@ bool AutoFocus::apply(int pos)
 	return true;
 }
 
+/*
+ * The dw9714 moves straight to each code, so a long move lands hard. Go at most
+ * kMaxJump per frame; onFrame() continues the move and waits kSettleFrames
+ * once it arrives. Caller holds the lock.
+ */
+bool AutoFocus::moveTo(int pos)
+{
+	const int cur = lens_->position();
+	const int step = std::clamp(pos - cur, -kMaxJump, kMaxJump);
+	if (!apply(cur + step)) {
+		moveTarget_ = -1;
+		return false;
+	}
+	moveTarget_ = cur + step == pos ? -1 : pos;
+	settle_ = kSettleFrames;
+	return true;
+}
+
 /* 调用者必须已持锁。 */
 void AutoFocus::finishScan()
 {
 	scanning_ = false;
 	converged_ = bestScore_ >= kMinScore;
+	/* Peak between samples: vertex of the parabola through the best sample
+	 * and its two neighbours kFineStep away, when both were sampled. */
+	const auto l = samples_.find(bestPos_ - kFineStep);
+	const auto r = samples_.find(bestPos_ + kFineStep);
+	if (converged_ && l != samples_.end() && r != samples_.end()) {
+		const double curv = l->second - 2 * bestScore_ + r->second;
+		if (curv < 0) {
+			const double off = std::clamp(0.5 * (l->second - r->second) / curv, -0.5, 0.5);
+			bestPos_ += static_cast<int>(std::lround(off * kFineStep));
+		}
+	}
 	stable_ = 0;
 	/*
 	 * 挪回最佳点之后，流水线里还有 kSettleFrames 帧是【细扫最后一个点】曝出来的。
@@ -162,8 +199,8 @@ void AutoFocus::finishScan()
 	 * ⇒ 等流水线换过来，再把第一帧当"收敛后的基准分数"（refScore_），重扫只跟它比。
 	 */
 	settle_ = 0;
-	if (lens_ && lens_->position() != bestPos_ && apply(bestPos_))
-		settle_ = kSettleFrames;
+	if (lens_ && lens_->position() != bestPos_)
+		moveTo(bestPos_);
 	refScore_ = -1.0;
 	ALOGI("AF 搜索结束：最佳位置 %d 分数 %.1f（%s）共 %d 次移动",
 	      bestPos_, bestScore_, converged_ ? "已合焦" : "未合焦（场景对比度太低）",
@@ -187,10 +224,10 @@ double AutoFocus::sharpness(const uint8_t *rgb, int w, int h)
 	 *   最后除以亮度总和：AGC 改变曝光/增益时分子分母同比例变化，分数不动
 	 *   —— 否则爬山会往"最亮"跑而不是往"最清晰"跑。
 	 */
-	const int x0 = w * 15 / 100;
-	const int x1 = w * 85 / 100;
-	const int y0 = h * 15 / 100;
-	const int y1 = h * 85 / 100;
+	const int x0 = static_cast<int>(w * region_[0]);
+	const int x1 = static_cast<int>(w * region_[2]);
+	const int y0 = static_cast<int>(h * region_[1]);
+	const int y1 = static_cast<int>(h * region_[3]);
 	const int gw = (x1 - x0) / kBlock;
 	const int gh = (y1 - y0) / kBlock;
 	if (gw < 3 || gh < 3)
@@ -275,6 +312,7 @@ void AutoFocus::onFrame(const uint8_t *rgb, int w, int h, bool sceneStable)
 			ALOGW("AF 被属性钉住：保持马达位置 %d，不再自动搜索", holdPos_);
 		hold_ = true;
 		scanning_ = false;
+		moveTarget_ = -1;
 		stableSeen_ = 0;
 		if (lens_->position() != holdPos_) {
 			if (lens_->setPosition(holdPos_)) {
@@ -302,6 +340,12 @@ void AutoFocus::onFrame(const uint8_t *rgb, int w, int h, bool sceneStable)
 
 	if (mode_ == Mode::Off)
 		return;
+
+	/* A stepped move continues every frame, whatever else is going on. */
+	if (moveTarget_ >= 0) {
+		moveTo(moveTarget_);
+		return;
+	}
 
 	if (!shouldScan()) {
 		scanning_ = false;
@@ -388,9 +432,18 @@ void AutoFocus::onFrame(const uint8_t *rgb, int w, int h, bool sceneStable)
 	/* 每个采样点都打一行（pos + 分数）——"马达到底动没动 / 焦点落在哪"的客观证据。 */
 	ALOGI("AF 采样 pos=%d 分数=%.1f（当前最佳 %d / %.1f）",
 	      cur, score, bestPos_, bestScore_);
+	samples_[cur] = score;
 	if (score > bestScore_) {
 		bestScore_ = score;
 		bestPos_ = cur;
+	}
+	/* Past a clear peak: stop the coarse sweep early. */
+	if (!fineDone_) {
+		drops_ = bestScore_ >= kMinScore && score < bestScore_ * kDropRatio ? drops_ + 1 : 0;
+		if (drops_ >= kDropPoints) {
+			ALOGI("AF 粗扫提前结束：已越过峰值 %d / %.1f", bestPos_, bestScore_);
+			sweepIdx_ = static_cast<int>(sweep_.size());
+		}
 	}
 
 	/* 取下一个【与当前位置不同】的探测点；粗扫走完就转到峰附近的细扫。 */
@@ -410,29 +463,62 @@ void AutoFocus::onFrame(const uint8_t *rgb, int w, int h, bool sceneStable)
 		}
 		if (target >= 0) {
 			moves_++;
-			if (!lens_->setPosition(target)) {
+			if (!moveTo(target))
 				finishScan();
-				return;
-			}
-			settle_ = kSettleFrames;
-			justMoved_ = true;
 			return;
 		}
 		if (fineDone_) {   /* 细扫也走完 → 收敛到最佳点 */
 			finishScan();
 			return;
 		}
-		/* 粗扫结束：在最佳点附近细扫 ±2 格，格距 = 行程/32（≈32 步）。 */
-		const int st = std::max((lens_->maxPos() - lens_->minPos()) / 32, 1);
+		/* Coarse sweep done: sample kFineStep on either side of the best
+		 * point, nearer side first; finishScan() fits a parabola through
+		 * the three. */
+		const int lo = std::max(lens_->minPos(), kLensLow);
+		const int hi = std::min(lens_->maxPos(), kLensHigh);
+		const int dir = lens_->position() >= bestPos_ ? 1 : -1;
 		sweep_.clear();
-		for (int k = -2; k <= 2; k++) {
-			const int p = bestPos_ + k * st;
-			sweep_.push_back(std::clamp(p, lens_->minPos(), lens_->maxPos()));
+		for (int k : { 1, -1 }) {
+			const int p = std::clamp(bestPos_ + dir * k * kFineStep, lo, hi);
+			if (p != bestPos_)
+				sweep_.push_back(p);
 		}
 		sweepIdx_ = 0;
 		fineDone_ = true;
-		ALOGI("AF 粗扫完成：最佳 %d 分数 %.1f → 细扫 ±%d", bestPos_, bestScore_, 2 * st);
+		ALOGI("AF 粗扫完成：最佳 %d 分数 %.1f → 细扫 ±%d", bestPos_, bestScore_, kFineStep);
 	}
+}
+
+void AutoFocus::setRegion(float x0, float y0, float x1, float y1)
+{
+	/* At least 10% of the frame each way (so the grid has a few blocks),
+	 * centred on the request, moved inside the frame if needed. */
+	constexpr float kMin = 0.10f;
+	const float w = std::clamp(x1 - x0, kMin, 1.0f), h = std::clamp(y1 - y0, kMin, 1.0f);
+	const float left = std::clamp((x0 + x1 - w) / 2, 0.0f, 1.0f - w);
+	const float top = std::clamp((y0 + y1 - h) / 2, 0.0f, 1.0f - h);
+	const float region[4] = { left, top, left + w, top + h };
+
+	std::lock_guard<std::mutex> lk(m_);
+	if (std::equal(region, region + 4, region_))
+		return;
+	std::copy(region, region + 4, region_);
+	ALOGI("AF 区域 (%.2f,%.2f)-(%.2f,%.2f)", region_[0], region_[1], region_[2], region_[3]);
+	regionChanged();
+}
+
+void AutoFocus::clearRegion()
+{
+	setRegion(0.15f, 0.15f, 0.85f, 0.85f);
+}
+
+/* Caller holds the lock. In AUTO the app's next trigger searches the new
+ * region; the continuous modes search it now. */
+void AutoFocus::regionChanged()
+{
+	refScore_ = -1.0;
+	if ((mode_ == Mode::ContinuousPicture || mode_ == Mode::ContinuousVideo) && !triggered_)
+		startScan();
 }
 
 uint8_t AutoFocus::afState() const
