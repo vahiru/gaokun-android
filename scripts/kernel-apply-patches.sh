@@ -426,6 +426,9 @@ KPATCHES=(
     0195-nvme-panic-when-a-disk-is-marked-dead.patch
     # 0196：SC8280XP的PCIe控制器在系统挂起和恢复时并行处理。不打的话唤醒时两条链路依次重新训练，每次多等约0.24秒。
     0196-PCI-qcom-resume-the-SC8280XP-controllers-in-parallel.patch
+    # 0197：挂起时设备已经发了PME（要叫醒系统），就让这次挂起失败，不再发PME_Turn_Off。不打的话开着WoWLAN时，
+    #    挂起途中Wi-Fi收到唤醒包会不回应PME_Turn_Off，主机照样断电，几次之后链路回不来。
+    0197-PCI-dwc-abort-suspend-when-a-device-has-signalled-PME.patch
 )
 
 # ⚠️ 诊断补丁【不进发版内核】：只在带 --with-diag 时打。顺序有依赖：0028/0029 依赖 0023，
