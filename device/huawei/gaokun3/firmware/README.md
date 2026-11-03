@@ -82,7 +82,7 @@ unzip -o 200.0.10.0.zip 'qc*.cab'
 老规矩的 `HUAWEI/gaokun3/audioreach-tplg.bin` **内核从不去读**。
 `device.mk` 两个路径都装。详见 `docs/stage4-findings.md` #33。
 
-## 指纹 TA（fingerpr.mbn）—— 供未来的 client driver `request_firmware`
+## 指纹 TA（fingerpr.mbn）
 
 指纹的可信应用 `fingerpr.mbn`（TA 名 `fingerprint`，单一 secelf，3669575 B，
 sha256 `b081543c7b6ae4…`）来自同一个 uup-drivers release 的 `QcTreeExtOem8280.cab`：
@@ -93,5 +93,8 @@ cabextract QcTreeExtOem8280.cab   # 取 fingerpr.mbn
 它是华为/高通签名的专有二进制，**不入库**（与本目录其它 .mbn 同待遇）。
 * 加载路线见 `docs/stage4-findings.md` #120 / #123 / #124、`docs/fingerprint/`（不入库）。
 * 冒烟测试阶段（`tools/fingerprint-bringup/`）模块直接读 `/data/local/tmp/fingerpr.mbn`。
-* 正式 client driver 用 `request_firmware()`，届时按这里的规则放到 `/vendor/firmware/`
-  下的某个子路径（名字与驱动里的 `request_firmware` 字符串一致，待定）。
+* 2026-11-01 crDroid 候选的固定 ioctl 驱动（0113）通过
+  `kernel_read_file_from_path(..., READING_FIRMWARE)` 读
+  `/vendor/firmware/fingerpr.mbn`。仅 `GAOKUN3_FINGERPRINT=true` 时打包。
+  `python3 scripts/fingerprint/prepare-crdroid.py` 可离线核验交接包并准备本地输入；
+  完整步骤和当前限制见 [指纹候选说明](../fingerprint/README.md)。

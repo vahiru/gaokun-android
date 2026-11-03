@@ -1,0 +1,17 @@
+# Device access is exclusive in the driver. Only the HAL owns this node.
+type gaokun3_fpcmd_device, dev_type;
+type gaokun3_fp_gpio_device, dev_type;
+allow hal_fingerprint_default gaokun3_fpcmd_device:chr_file { open read write getattr ioctl };
+allowxperm hal_fingerprint_default gaokun3_fpcmd_device:chr_file ioctl { 0x4700-0x4706 };
+allow hal_fingerprint_default gaokun3_fp_gpio_device:chr_file { open read getattr ioctl };
+# GPIO_GET_CHIPINFO, GPIO_V2_GET_LINE, SET_CONFIG, GET_VALUES, SET_VALUES.
+allowxperm hal_fingerprint_default gaokun3_fp_gpio_device:chr_file ioctl { 0xb401 0xb407 0xb40d 0xb40e 0xb40f };
+# vold prepares /data/vendor_de/<user>; the HAL creates only its named fpdata
+# child. This puts templates under Android's per-user deletion lifecycle.
+allow hal_fingerprint_default vendor_data_file:dir { write add_name };
+type_transition hal_fingerprint_default vendor_data_file:dir fingerprint_vendor_data_file "fpdata";
+allow hal_fingerprint_default fingerprint_vendor_data_file:dir create_dir_perms;
+# kernel_read_file_from_path(READING_FIRMWARE) runs inside the caller's ioctl
+# context. SELinux checks firmware_load against the HAL SID, not kernel SID.
+# The fixed driver ABI accepts only its configured fingerprint TA path.
+allow hal_fingerprint_default gaokun3_firmware_file:system firmware_load;

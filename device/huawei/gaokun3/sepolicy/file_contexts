@@ -280,3 +280,7 @@
 # 手写笔（M-Pencil）：守护进程，与触摸从片驱动交出帧的节点（docs/stylus.md）
 /vendor/bin/gk3pend          u:object_r:gk3pend_exec:s0
 /dev/gk3_pen                 u:object_r:gaokun3_pen_device:s0
+# Gaokun3 FTE7001 candidate HAL and its private transport/storage.
+/vendor/bin/hw/android\.hardware\.biometrics\.fingerprint-service\.gaokun3 u:object_r:hal_fingerprint_default_exec:s0
+/dev/gaokun3_fpcmd u:object_r:gaokun3_fpcmd_device:s0
+/dev/gpiochip4 u:object_r:gaokun3_fp_gpio_device:s0

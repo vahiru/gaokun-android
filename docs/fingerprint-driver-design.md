@@ -1,5 +1,13 @@
 # 指纹驱动设计（gaokun3 / FocalTech FTE7001）
 
+> **2026-11-01 crDroid 候选源码**：已接入 NixOS 交接包的固定 ioctl 传输与
+> DoG/RANSAC 主机匹配器，补充 AIDL V4 服务、每用户模板存储和构建/SELinux 接线。
+> 入口为 [fingerprint/README.md](../device/huawei/gaokun3/fingerprint/README.md)。
+> core/matcher 离线测试及 Android 服务/策略/内核构建通过；FP2 已在 B 槽 Enforcing 启动，
+> 修复会话生命周期与状态坏帧错误处理的 FP3 候选已完成真实录入及同指解锁/未录入手指拒绝；永久安装与重启恢复验证进行中，见[实机记录](crdroid-fingerprint-machine-check-2026-11-01.md)。
+> 默认关闭、仅显式候选构建启用；无可信 HAT 验证/签发，不声明强生物识别或已可解锁。
+> 下文保留早期探针与旧算法路线的历史记录，不能替代候选说明。
+
 > **现状（2026-10-30）**：M2 已在真机通过：LOAD 返回 id=5，固定 wire 0x8031 返回有效 ACK=0x5aa5、状态0，SHUTDOWN成功。见 [实机记录](fingerprint-machine-check-2026-10-30.md)。
 > GPIO185复位后，MCU/SPI版本查询已通过，返回 `FT9769_APP_ST_SPI_ENC_SV0.1_202303152035`。只读尺寸返回40、196，兼容应答0x5aa5（同版本MCU固件固定返回，不能证明ready）；空载真实帧标志等待和无帧拒绝导出已实测通过；用户接触确认后已取得帧标志置1的新编码帧，7840个LE16样本基础解码检查通过；完整图像质量/处理、录入、认证或 Android HAL 尚未完成。
 > 旧文档把 0x8026/0x8027 当作只读信息查询的结论已撤回：它们涉及录入/匹配算法，不能按旧表执行。

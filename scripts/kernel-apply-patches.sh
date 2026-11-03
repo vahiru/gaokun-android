@@ -317,6 +317,7 @@ DIAG_PATCHES=(
 #   原来排在 0049 之后、0053 之前；它与 0053–0076 不相干（--verify 会在干净 worktree 上重放证明这一点）。
 FP_PATCHES=(
     0050-firmware-qcom-scm-qseecom-app-load-shutdown-listener.patch
+    0113-firmware-qcom-gaokun3-fingerprint-ioctl.patch
 )
 WITH_FP=0
 for a in "$@"; do [ "$a" = "--with-fp" ] && WITH_FP=1; done

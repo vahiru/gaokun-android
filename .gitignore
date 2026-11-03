@@ -101,3 +101,5 @@ wheels/
 tools/fingerprint-bringup/rev/err*.log
 .DS_Store
 .vscode/
+# Private fingerprint handoffs contain the signed vendor TA.
+gaokun3-fingerprint-driver-handoff-*.zip
