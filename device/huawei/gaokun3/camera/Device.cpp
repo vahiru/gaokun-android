@@ -4,6 +4,7 @@
 #include "Session.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <fcntl.h>
 #include <unistd.h>
 
@@ -105,6 +106,29 @@ bool Device::init()
 		ALOGE("拿不到有效的传感器尺寸（%dx%d）", facts_.activeW, facts_.activeH);
 		return false;
 	}
+
+	/*
+	 * Android's active array: the largest centred 4:3 part of the active
+	 * area when that is within 2% of 4:3, all of it otherwise. Each output is
+	 * the largest centred crop of the active array with its own aspect ratio
+	 * (Session::cropFor()), and CameraX assumes the same when it lines up the
+	 * streams of a session. With the ov13b10's 4208x3120 it took the 4:3
+	 * preview to cover 4160 columns and the 16:9 video all 4208, and cropped
+	 * the video to the 4160x2367 they share: 1080p recorded at 1898x1080.
+	 * On an exact 4:3 array the 16:9 streams cover its full width.
+	 */
+	facts_.fovW = facts_.activeW;
+	facts_.fovH = facts_.activeH;
+	const int64_t w3 = static_cast<int64_t>(facts_.activeW) * 3;
+	const int64_t h4 = static_cast<int64_t>(facts_.activeH) * 4;
+	if (std::abs(w3 - h4) * 50 <= h4) {
+		if (w3 > h4)
+			facts_.fovW = static_cast<int32_t>(h4 / 3) & ~1;
+		else
+			facts_.fovH = static_cast<int32_t>(w3 / 4) & ~1;
+	}
+	facts_.fovX = (facts_.activeW - facts_.fovW) / 2 & ~1;
+	facts_.fovY = (facts_.activeH - facts_.fovH) / 2 & ~1;
 
 	/* ── 朝向 ── */
 	auto loc = props.get(libcamera::properties::Location);
@@ -224,7 +248,7 @@ bool Device::init()
 	 */
 	auto ratio = [&](int w) {
 		return std::make_pair(w, static_cast<int>(
-			static_cast<int64_t>(w) * facts_.activeH / facts_.activeW) & ~1);
+			static_cast<int64_t>(w) * facts_.fovH / facts_.fovW) & ~1);
 	};
 	/*
 	 * Besides the sensor's own aspect ratio, offer the standard sizes (and
@@ -235,19 +259,19 @@ bool Device::init()
 	 * 1280x948). deliver() crops to each stream's aspect ratio.
 	 *
 	 * Also exact 4:3 and 16:9 sizes at full resolution: CameraX takes the
-	 * largest size that matches its aspect ratio within a few pixels, and
-	 * the ov13b10's 4208x3120 is not 4:3 by that measure. With 1280x960 on
-	 * the list and no full-size 4:3, Aperture took photos at 1280x960.
+	 * largest size that matches its aspect ratio within a few pixels. With
+	 * 1280x960 on the list and no full-size 4:3, Aperture took photos at
+	 * 1280x960.
 	 */
-	const int w43 = facts_.activeH * 4 / 3 & ~1;
+	const int w43 = facts_.fovH * 4 / 3 & ~1;
 	const std::pair<int, int> candidates[] = {
 		{ 320, 240 }, ratio(640), { 640, 480 }, { 1280, 720 }, ratio(1280), { 1280, 960 },
-		{ 1920, 1080 }, { w43, w43 * 9 / 16 & ~1 }, { w43, facts_.activeH },
-		{ facts_.activeW, facts_.activeH },
+		{ 1920, 1080 }, { w43, w43 * 9 / 16 & ~1 }, { w43, facts_.fovH },
+		{ facts_.fovW, facts_.fovH },
 	};
 	facts_.outputSizes.clear();
 	for (const auto &s : candidates) {
-		if (s.first > facts_.activeW || s.second > facts_.activeH ||
+		if (s.first > facts_.fovW || s.second > facts_.fovH ||
 		    std::find(facts_.outputSizes.begin(), facts_.outputSizes.end(), s) !=
 			    facts_.outputSizes.end())
 			continue;
@@ -269,9 +293,10 @@ bool Device::init()
 		return false;
 	}
 
-	ALOGI("%s 就绪：阵列 %dx%d 有效 %dx%d 朝向 %d（libcamera rotation=%d，逆时针） %s%s%s",
+	ALOGI("%s 就绪：阵列 %dx%d 有效 %dx%d 视野 %dx%d+%d+%d 朝向 %d（libcamera rotation=%d，逆时针） %s%s%s",
 	      name_.c_str(), facts_.pixelArrayW, facts_.pixelArrayH,
-	      facts_.activeW, facts_.activeH, facts_.orientation, rawRotation,
+	      facts_.activeW, facts_.activeH, facts_.fovW, facts_.fovH, facts_.fovX,
+	      facts_.fovY, facts_.orientation, rawRotation,
 	      facts_.frontFacing ? "前摄" : "后摄",
 	      facts_.flashLed.empty() ? "" : "（带闪光灯）",
 	      facts_.hasAf ? "（带自动对焦）" : "");

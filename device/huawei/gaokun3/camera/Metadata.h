@@ -24,6 +24,16 @@ struct SensorFacts {
 	int32_t pixelArrayH = 0;
 	int32_t activeW = 0;
 	int32_t activeH = 0;
+	/*
+	 * The field of view all outputs share: a centred part of the libcamera
+	 * active area above (Device::init()). Android sees only this, as pixel,
+	 * pre-correction and active array at (0,0); fovX/fovY place it in the
+	 * libcamera frame.
+	 */
+	int32_t fovX = 0;
+	int32_t fovY = 0;
+	int32_t fovW = 0;
+	int32_t fovH = 0;
 	int32_t orientation = 0;        /* 0/90/180/270 */
 	bool    frontFacing = true;
 	/* 闪光灯的 LED class 目录（如 /sys/class/leds/white:flash）；空 = 这个相机没有闪光灯。

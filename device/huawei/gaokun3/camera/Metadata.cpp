@@ -125,12 +125,19 @@ std::vector<uint8_t> buildCharacteristics(const SensorFacts &f)
 	}
 
 	/* ── 传感器几何 ── */
-	const int32_t activeArray[] = { 0, 0, f.activeW, f.activeH };
+	/*
+	 * The outputs' shared field of view (SensorFacts::fov*) is all Android
+	 * sees of the sensor: pixel array, pre-correction and active array alike,
+	 * at (0,0). Without distortion correction the two arrays must be equal,
+	 * and CameraX uses the active array's left edge as an offset for its
+	 * metering regions. The HAL maps back into the libcamera frame itself.
+	 */
+	const int32_t activeArray[] = { 0, 0, f.fovW, f.fovH };
 	add_camera_metadata_entry(m, ANDROID_SENSOR_INFO_ACTIVE_ARRAY_SIZE,
 				  activeArray, 4);
 	add_camera_metadata_entry(m, ANDROID_SENSOR_INFO_PRE_CORRECTION_ACTIVE_ARRAY_SIZE,
 				  activeArray, 4);
-	const int32_t pixelArray[] = { f.pixelArrayW, f.pixelArrayH };
+	const int32_t pixelArray[] = { f.fovW, f.fovH };
 	add_camera_metadata_entry(m, ANDROID_SENSOR_INFO_PIXEL_ARRAY_SIZE,
 				  pixelArray, 2);
 	const int32_t orientation = f.orientation;
@@ -262,7 +269,7 @@ std::vector<uint8_t> buildCharacteristics(const SensorFacts &f)
 	/* ── JPEG ── */
 	const int32_t thumbSizes[] = { 0, 0, 160, 120 };
 	add_camera_metadata_entry(m, ANDROID_JPEG_AVAILABLE_THUMBNAIL_SIZES, thumbSizes, 4);
-	const int32_t maxJpegSize = f.activeW * f.activeH * 3 / 2 + 65536;
+	const int32_t maxJpegSize = f.fovW * f.fovH * 3 / 2 + 65536;
 	add_camera_metadata_entry(m, ANDROID_JPEG_MAX_SIZE, &maxJpegSize, 1);
 
 	/* ── 统计 ── */
@@ -442,7 +449,7 @@ bool streamCombinationSupported(const StreamConfiguration &cfg, const SensorFact
 			return no(id + "不支持输入流（没有 reprocess）");
 		if (s.rotation != StreamRotation::ROTATION_0)
 			return no(id + "不支持流旋转");
-		if (s.width <= 0 || s.height <= 0 || s.width > f.activeW || s.height > f.activeH)
+		if (s.width <= 0 || s.height <= 0 || s.width > f.fovW || s.height > f.fovH)
 			return no(id + "尺寸 " + std::to_string(s.width) + "x" +
 				  std::to_string(s.height) + " 超出有效阵列");
 		switch (s.format) {
@@ -542,7 +549,7 @@ std::vector<uint8_t> buildDefaultRequest(int templateId, const SensorFacts &f)
 			   tmpl == RequestTemplate::VIDEO_SNAPSHOT;
 	const int32_t fps[] = { video ? 30 : 15, 30 };
 	add_camera_metadata_entry(m, ANDROID_CONTROL_AE_TARGET_FPS_RANGE, fps, 2);
-	const int32_t cropRegion[] = { 0, 0, f.activeW, f.activeH };
+	const int32_t cropRegion[] = { 0, 0, f.fovW, f.fovH };
 	add_camera_metadata_entry(m, ANDROID_SCALER_CROP_REGION, cropRegion, 4);
 	const uint8_t jpegQuality = 90;
 	add_camera_metadata_entry(m, ANDROID_JPEG_QUALITY, &jpegQuality, 1);

@@ -681,9 +681,9 @@ ndk::ScopedAStatus Session::processCaptureRequest(const std::vector<CaptureReque
 			const int32_t afTrig = requestEntryInt(p.settings, ANDROID_CONTROL_AF_TRIGGER, -1);
 			/*
 			 * AF region (at most one, see Metadata.cpp): active array
-			 * coordinates, and libcamera delivers the whole array, so map by
-			 * fraction. Weight 0 means no region. Set before the trigger, which
-			 * searches it.
+			 * coordinates, with (0,0) at its top left. libcamera delivers the
+			 * whole area around it, so map by fraction of that. Weight 0 means
+			 * no region. Set before the trigger, which searches it.
 			 */
 			const int32_t rx0 = requestEntryInt(p.settings, ANDROID_CONTROL_AF_REGIONS, -1, 0);
 			if (rx0 >= 0) {
@@ -692,10 +692,10 @@ ndk::ScopedAStatus Session::processCaptureRequest(const std::vector<CaptureReque
 				const int32_t ry1 = requestEntryInt(p.settings, ANDROID_CONTROL_AF_REGIONS, -1, 3);
 				const int32_t rw = requestEntryInt(p.settings, ANDROID_CONTROL_AF_REGIONS, 0, 4);
 				if (rw > 0 && rx1 > rx0 && ry1 > ry0)
-					af_.setRegion(static_cast<float>(rx0) / facts_.activeW,
-						      static_cast<float>(ry0) / facts_.activeH,
-						      static_cast<float>(rx1) / facts_.activeW,
-						      static_cast<float>(ry1) / facts_.activeH);
+					af_.setRegion(static_cast<float>(facts_.fovX + rx0) / facts_.activeW,
+						      static_cast<float>(facts_.fovY + ry0) / facts_.activeH,
+						      static_cast<float>(facts_.fovX + rx1) / facts_.activeW,
+						      static_cast<float>(facts_.fovY + ry1) / facts_.activeH);
 				else
 					af_.clearRegion();
 			}
@@ -857,7 +857,17 @@ void Session::dropAllCaches()
 
 Session::Crop Session::cropFor(int32_t dstW, int32_t dstH) const
 {
-	int w = srcWidth_, h = srcHeight_;
+	/*
+	 * The largest centred crop with the output's aspect ratio of the active
+	 * array declared to Android (SensorFacts::fovW/fovH), which can be
+	 * narrower than the frame. The frame is the libcamera active area, binned
+	 * or not, less a few border columns of the debayer, so its height gives
+	 * the scale.
+	 */
+	int w = static_cast<int>(std::min<int64_t>(
+		srcWidth_, static_cast<int64_t>(facts_.fovW) * srcHeight_ / facts_.activeH)) & ~1;
+	int h = static_cast<int>(std::min<int64_t>(
+		srcHeight_, static_cast<int64_t>(facts_.fovH) * srcHeight_ / facts_.activeH)) & ~1;
 	if (static_cast<int64_t>(w) * dstH > static_cast<int64_t>(h) * dstW)
 		w = static_cast<int>(static_cast<int64_t>(h) * dstW / dstH) & ~1;
 	else
