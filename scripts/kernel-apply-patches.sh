@@ -431,6 +431,9 @@ KPATCHES=(
     # 0197：挂起时设备已经发了PME（要叫醒系统），就让这次挂起失败，不再发PME_Turn_Off。不打的话开着WoWLAN时，
     #    挂起途中Wi-Fi收到唤醒包会不回应PME_Turn_Off，主机照样断电，几次之后链路回不来。
     0197-PCI-dwc-abort-suspend-when-a-device-has-signalled-PME.patch
+    # 0198：s2idle里集群下电被固件拒绝（-EPERM）后先等3 ms再申请。不打的话被拒的CPU马上重新申请，几个CPU轮流被拒，
+    #    这个环可能一直转到下次唤醒，这段时间SoC进不了深度待机。说明见docs/deep-sleep.md。
+    0198-cpuidle-psci-wait-after-a-denied-cluster-request-in-s2idle.patch
     # ★ 0199–0202：Wi-Fi用PCIe WAKE#把睡眠中的系统叫醒。依赖0188–0196的断链待机：从固件字符串和测试推断，
     #    固件要在链路走L2、PERST#拉低之后才拉WAKE#。0197让挂起途中碰上唤醒时不丢链路。
     # 0199：上游071e245ab749，PCI核心支持WAKE#中断。不打的话WAKE#没有人处理，Wi-Fi的唤醒要等下一个闹钟。
