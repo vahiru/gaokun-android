@@ -54,3 +54,14 @@ msm_vfe0_rdi0:1 → msm_vfe0_video0   [不可变]  ⇒ /dev/video0（或被 Venu
 `camtest` 第三轮打开传感器彩条（Test Pattern 2），从原始拜耳解出的序列应为
 **黄 青 绿 品 红 蓝**，R/G/B 满量程 1023 或 0，上下行逐像素差 0 —— 与环境光无关。
 2026-09-11 实测逐字命中，见 #81。
+
+## 后摄色彩矫正矩阵：`gen-ov13b10-ccm.py`
+
+生成`device/huawei/gaokun3/camera/ipa-data/softisp/ov13b10.yaml`。矩阵取自华为Windows相机驱动为后摄这款模组做的调校
+（200.0.10.0驱动包里`qccamrearsensor_extension8280.cab`中的`com.qti.tuned.ofilm_ov13b10.bin`），
+不是每台机器单独的标定（那个在模组的EEPROM里）。只用不开闪光灯时亮光那一档（lux index 1–180），因为libcamera的Ccm只按色温插值。
+文件格式和取值方法写在脚本开头。
+
+    python3 scripts/camera/gen-ov13b10-ccm.py com.qti.tuned.ofilm_ov13b10.bin > device/huawei/gaokun3/camera/ipa-data/softisp/ov13b10.yaml
+
+脚本会检查数据位置、区间数和每行之和为1，驱动换版本导致结构变化时会直接报错。前摄hi846在Windows驱动里用的是高通的默认调校，没有可借的矩阵。

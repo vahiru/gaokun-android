@@ -432,7 +432,7 @@ tcs3701 的驱动给 `ambient_light` 注册了两个 SUID，默认的那个（�
 过程记录（#81–#112 的全过程、已否的候选修复）见 [archive/TODO-history-2026-10.md#a7](archive/TODO-history-2026-10.md#a7)。还剩：
 * ⬜ **AV-12 前摄方向**：设备树 0，未目视（PR 文档 7.2 的照片证据支持 0）—— 1.0 应做。
 * ⬜ **AV-1 录像 / 录屏出片**、⬜ Aperture 后摄闪光 ON 拍一张看 LED 亮灭各一次 —— 都要用户在场。
-* ⬜ **T3 画质**（1.0 之后）：闪光帧下发 `ExposureValue` 负补偿；libcamera AWB 剔饱和像素（值得投上游）；CCM 要色卡；手电筒亮度档位（HAL 声明 `FLASH_INFO_STRENGTH_*`、实现 `turnOnTorchWithStrengthLevel`）；`kDarkLuma=50` 是启发式（要 softisp IPA 把曝光 / 增益写进结果元数据）；AV-11变焦/EV（帧率已声明到30 fps，加上录像流后实际能否保持30 fps还没验证）。
+* ⬜ **T3 画质**（1.0 之后）：闪光帧下发 `ExposureValue` 负补偿；libcamera AWB 剔饱和像素（值得投上游）；前摄CCM要色卡（后摄已用华为Windows驱动里这款模组的调校，见`ov13b10.yaml`）；手电筒亮度档位（HAL 声明 `FLASH_INFO_STRENGTH_*`、实现 `turnOnTorchWithStrengthLevel`）；`kDarkLuma=50` 是启发式（要 softisp IPA 把曝光 / 增益写进结果元数据）；AV-11变焦/EV（帧率已声明到30 fps，加上录像流后实际能否保持30 fps还没验证）。
 * ⬜ libcamera：`camera_sensor_properties` 加 ov13b10、增益模型 helper、`ov13b10.yaml`；生成源码改成 Soong `genrule`（`patches/libcamera/README.md:34`）。上游：`ov13b10.c` 补 `get_selection`；读 EEPROM@0x50；camcc `Mark RCGs shared` 投稿 + 等待值 `0027`。
 * ⬜ `patches/0022`（unbind / rebind 的 genpd 注销）在 camss **健康**时补一次验证。⚠️ camss 已 `runtime_error` 时不要 unbind（会拖死整机）。
 
