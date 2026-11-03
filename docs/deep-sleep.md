@@ -43,6 +43,11 @@ NVMe 每次待机都做一次 shutdown，醒来重新建队列。两条链路在
 开着 WoW 时，固件在 PERST# 拉低后继续运行，关联不断。Wi-Fi 现在叫不醒系统（见 [known-limitations.zh-CN.md](known-limitations.zh-CN.md)），
 要等下一个闹钟：内核还没有处理 PCIe 的 WAKE#。Wi-Fi 关着时固件不运行，pcie4 挂起时会打一条 `Timeout waiting for L2 entry`，这是预期的。
 
+Wi-Fi 进了 D3hot 之后、主机发 PME_Turn_Off 之前，固件如果碰上触发唤醒的事件，会通过链路给主机发 PME。根端口的 PME 中断走 GIC ITS 的 MSI，
+不能唤醒系统，挂起时已经被 `pcie_pme_suspend()` 关掉，这条 PME 没人处理。固件这时不回应 PME_Turn_Off，照样断电的话几次之后链路回不来，
+所以 `dw_pcie_suspend_noirq()` 发 PME_Turn_Off 之前先看根端口的 Root Status，有 PME 就给发 PME 的设备记一次唤醒、让这次挂起失败（patches/0197）。
+日志里是 `PME from 01:00.0, aborting suspend` 加一行 `failed to suspend noirq: error -16`，Android 随后重试挂起，这是预期的。
+
 mac80211 休眠时拆掉 RX BA 会话并发 DELBA，但路由器不一定跟着拆：它可能保留原来的会话，也可能在主机睡着时由固件代答新的 ADDBA。
 这时路由器继续发 A-MPDU，REO 的窗口却是 1，TCP 看到大量乱序，而且下一次休眠没有会话可拆，状态一直留到重新关联。
 patches/0174 记下这些 TID，每次醒来发一次 DELBA，直到新会话建立。路由器不一定马上响应，所以偶尔要到下一次唤醒才恢复。
