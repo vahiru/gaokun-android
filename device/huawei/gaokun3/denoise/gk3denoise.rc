@@ -1,0 +1,12 @@
+# 麦克风降噪服务gk3denoised（denoise/README.md）：在CDSP的NPU上跑DeepFilterNet3，给音频HAL的采集钩子用。
+#
+# 用户system就够：/dev/fastrpc-cdsp由ueventd.gaokun3.rc给system，/dev/dma_heap/system人人可读。
+# 套接字0660 system:audio：音频HAL在audio组。不需要任何capability。
+# 模型在后台加载，加载失败时服务照样监听、对开流回答"不可用"，每30秒自己再试；一次加载卡住超过60秒就退出，
+# init把它重新拉起来（不是oneshot）。
+service vendor.gk3denoise /vendor/bin/gk3denoised
+    class main
+    user system
+    group system audio
+    socket gk3denoise seqpacket 0660 system audio
+    capabilities

@@ -1,0 +1,36 @@
+--- a/pocketfft_hdronly.h	2026-11-03 08:08:25.545012690 +1100
++++ b/pocketfft_hdronly.h	2026-11-03 20:40:19.236889772 +1100
+@@ -2411,9 +2411,17 @@
+     template<typename T> void exec(T c[], T0 fct, bool r2hc) const
+       {
+       if (length==1) { c[0]*=fct; return; }
+-      size_t nf=fact.size();
+       arr<T> ch(length);
+-      T *p1=c, *p2=ch.data();
++      exec_scratch(c, fct, r2hc, ch.data());
++      }
++
++    // gk3denoise: exec() with a caller-provided work buffer of length()
++    // elements instead of a heap allocation per call (same arithmetic).
++    template<typename T> void exec_scratch(T c[], T0 fct, bool r2hc, T *scratch) const
++      {
++      if (length==1) { c[0]*=fct; return; }
++      size_t nf=fact.size();
++      T *p1=c, *p2=scratch;
+ 
+       if (r2hc)
+         for(size_t k1=0, l1=length; k1<nf;++k1)
+@@ -2711,6 +2719,13 @@
+     template<typename T> POCKETFFT_NOINLINE void exec(T c[], T0 fct, bool fwd) const
+       { packplan ? packplan->exec(c,fct,fwd) : blueplan->exec_r(c,fct,fwd); }
+ 
++    // gk3denoise: true if exec_scratch() needs no allocation (no Bluestein plan).
++    bool has_packplan() const { return bool(packplan); }
++    // gk3denoise: exec() without allocation, scratch holds length() elements;
++    // only for lengths with has_packplan().
++    template<typename T> POCKETFFT_NOINLINE void exec_scratch(T c[], T0 fct, bool fwd, T *scratch) const
++      { packplan->exec_scratch(c,fct,fwd,scratch); }
++
+     size_t length() const { return len; }
+   };
+ 

@@ -1,0 +1,30 @@
+# 麦克风降噪服务gk3denoised（denoise/README.md）：在CDSP的NPU上跑DeepFilterNet3，音频HAL的采集钩子
+# 经/dev/socket/gk3denoise连它。规则来自KernelSU模块gk3denoise在本机强制模式下的实测（2026-11-03，#15）。
+# 在ROM树外按lineage_gaokun3-cp2a-userdebug的方式编过整套策略（neverallow、vendor策略只用公开的平台类型、
+# sepolicy_tests都通过）；⬜ 还没在真正的ROM构建里编过。
+type gk3denoise, domain;
+type gk3denoise_exec, exec_type, vendor_file_type, file_type;
+type gk3denoise_socket, file_type;
+# tmpfs_domain()只写规则，不声明这个类型（同public/audioserver.te）
+type gk3denoise_tmpfs, file_type;
+init_daemon_domain(gk3denoise)
+
+# soc_id的回答是memfd（denoise/service/socid_override.c）
+tmpfs_domain(gk3denoise)
+
+# QNN查自己的调度参数。libcdsprpc对DSP目录做inotify：平台的domain.te已经给了非core域vendor_file_type目录的
+# r_dir_perms（含watch），这里不用再写。
+allow gk3denoise self:process getsched;
+
+# CDSP的FastRPC会话（/dev/fastrpc-cdsp，ueventd.gaokun3.rc给system）和共享缓冲（dma-buf系统堆）
+allow gk3denoise gaokun3_fastrpc_device:chr_file { rw_file_perms map };
+allow gk3denoise dmabuf_system_heap_device:chr_file r_file_perms;
+# libcdsprpc先试/dev/fastrpc-cdsp-secure（通用device类型、root 0600），打不开就用上面那个
+dontaudit gk3denoise device:chr_file r_file_perms;
+
+# QNN读soc0下的平台信息（soc_id由服务自己回答，见上），libcdsprpc读/sys/class/remoteproc/*/name判断CDSP在不在。
+# 平台策略里这些都是通用的sysfs，没有更窄的类型（hexagonrpcd等服务也是这样写的）。
+allow gk3denoise sysfs:file r_file_perms;
+
+# 音频HAL的采集钩子连这个服务（hal_audio_default域）
+unix_socket_connect(hal_audio_default, gk3denoise, gk3denoise)

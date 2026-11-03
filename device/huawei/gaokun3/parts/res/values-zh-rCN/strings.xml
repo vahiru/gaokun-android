@@ -87,4 +87,14 @@
         <item>关</item>
     </string-array>
     <string name="stylus_note">平滑越强，放大后的线条越平滑，但书写时笔迹会更明显地落后于笔尖。</string>
+
+    <string name="denoise_title">麦克风降噪</string>
+    <string name="denoise_summary">压低内置麦克风收到的背景噪声</string>
+    <string name="denoise_call_title">通话</string>
+    <string name="denoise_call_summary">语音通话和视频通话</string>
+    <string name="denoise_record_title">录音</string>
+    <string name="denoise_record_summary">录音机和大多数录音的应用</string>
+    <string name="denoise_camcorder_title">录像</string>
+    <string name="denoise_camcorder_summary">相机录像的声音</string>
+    <string name="denoise_note">只处理从内置麦克风输入的声音。降噪会保留人声、压低其他声音，包括音乐和环境声。改动从下一次通话或录音开始生效。</string>
 </resources>
