@@ -52,7 +52,7 @@ UEFI。这不是一次常规移植 —— 它是 **AOSP on mainline**，每一�
 | 传感器（加速度计+陀螺仪+光感）| ✅ | **自动旋转、自动亮度可用，实机确认。** 为本机写的 sensors HAL 把真实的加速度计、陀螺仪读数喂给 SensorService，框架据此融合出 Game Rotation Vector / Gravity / Linear Acceleration。出厂安装矩阵全零（校准数据随 Windows 一起没了），但传感器坐标系与面板方向本来就一致，不需要纠正。本机**没有磁力计**（所以没有指南针）。环境光传感器驱动自动亮度；它的驱动注册了两个光感，只能用连续上报的那个，默认的那个一激活就让传感器 DSP 崩溃（[sensors-hal/README](device/huawei/gaokun3/sensors-hal/README.md)）。据我们所知，加速度计、陀螺仪、光感这一套是 SC8280XP 上头一次跑通，ThinkPad X13s 也没有 —— 协议整理在 [`docs/sensors-ssc-protocol.md`](docs/sensors-ssc-protocol.md)，想在自己机器上做可以直接拿。⚠️ 那颗 DSP 一旦崩溃重启，传感器就全丢了，要重启才回来（[#121](docs/stage4-findings.md#121)） |
 | 硬件视频解码 | ✅ | **v0.7.0 起是 `qcom-iris`**（原来是 `qcom-venus`）：H.264、HEVC、VP9 走 `c2.v4l2.*.decoder`，中途停止、拖动、重播、中途变分辨率都过了，为此修了上游驱动几处（[#128](docs/stage4-findings.md#128)）。VP8 走软解。最早打通解码时修的两个 `external/v4l2_codec2` 可移植性 bug 见 [#41](docs/stage4-findings.md#41) |
 | 硬件视频编码 | ❌ | 故意关着：`v4l2_codec2` 的编码组件不会把交给它的 RGBX 帧转成硬件要的 NV12，开着的话应用会直接失败而不是回退。应用用的是软件编码器 |
-| 摄像头 | ✅ | **前后摄都能用**（v0.6.1 起）。前摄 Hynix hi846，后摄 **OmniVision OV13B10** —— 是从华为 Windows 驱动包里解出上电序列才认出来的（[#106](docs/stage4-findings.md#106)）。链路：主线 `camss` → libcamera simple 流水线 + 软件 ISP → libyuv → 为本机写的 AIDL HAL。闪光灯可用；后摄有**自动对焦**（v0.7.0，感谢 @mashen11）；照片按应用要求的方向旋转。"每隔一次就拍不了"的电源域缺陷已根治（[`patches/0031`](patches/)、[#105](docs/stage4-findings.md#105)）。⚠️ 最高 15 fps，没有变焦、没有曝光补偿。画质没调：没有色彩矫正矩阵、暗处噪点多、闪光片过曝；暗处对焦慢。**录像没在实机上验证过** |
+| 摄像头 | ✅ | **前后摄都能用**（v0.6.1 起）。前摄 Hynix hi846，后摄 **OmniVision OV13B10** —— 是从华为 Windows 驱动包里解出上电序列才认出来的（[#106](docs/stage4-findings.md#106)）。链路：主线 `camss` → libcamera simple 流水线 + 软件 ISP → libyuv → 为本机写的 AIDL HAL。闪光灯可用；后摄有**自动对焦**（v0.7.0，感谢 @mashen11），拍照时用相位对焦；照片按应用要求的方向旋转。"每隔一次就拍不了"的电源域缺陷已根治（[`patches/0031`](patches/)、[#105](docs/stage4-findings.md#105)）。⚠️ 没有变焦、没有曝光补偿；预览最高30 fps。画质只调了一部分：后摄用上了华为Windows驱动为这款模组做的调校里的色彩矫正矩阵和白点，前摄用的是同一驱动里的通用矩阵和在一台机器上实测的白点；暗处噪点多、闪光片过曝；暗处对焦慢。前后摄都能录像（30 fps） |
 | USB-C | ⚠️ | UCSI 起得来，两个连接器都注册了（[#112](docs/stage4-findings.md#112)）。数据角色跟着对面实际是什么走 —— 接电脑时我们是设备；接 hub 或 U 盘时应当切成主机，这是按设计做的、还没拿真硬件试过（[`patches/0048`](patches/)，v0.7.0）—— v0.7.1 起 Android 的 USB 服务也起来了，应用能用 USB 设备（[#13](https://github.com/vahiru/gaokun-android/issues/13)）。⚠️ **回插之后（在待机后出现过）这个口可能坏掉，要重启才恢复** —— 按代码推断，那之后到重启为止整机也不再待机。能和电脑传文件（MTP/PTP：到设置 > 已连接的设备 > USB 里选，USB 2.0 的速度）。⚠️ **U 盘不会挂载**（Android 侧还没有可移动存储的配置）。DP 外接显示没测过 |
 | 指纹 | ❌ | 进行中：华为签名的指纹 TA 已经能在本机加载进安全世界（[#125](docs/stage4-findings.md#125)）；驱动和 HAL 还没有 |
 | 手写笔（M-Pencil）、TPM | ❌ | 不支持 |
@@ -230,7 +230,7 @@ DTB 怎么编、放哪里，见
    复测时要改的三处。
 4. **SELinux 转 enforcing。** 已经做了七轮，enforcing 试跑能用；剩下的是 enforcing
    下的真实待机、enforcing → enforcing 的 OTA、enforcing 下的全新安装（[#129](docs/stage4-findings.md#129)）。
-5. **相机画质。** 剩下的是画质，不是链路：没有色彩矫正矩阵（要色卡）、软件 ISP
+5. **相机画质。** 剩下的是画质，不是链路：前摄的色彩矫正矩阵是通用的（标定要色卡）、软件 ISP
    自己没有降噪、闪光片高光过曝。具体下一步见 [`docs/TODO.md`](docs/TODO.md) T3。
 
 恢复出厂和 `fastboot` 现在走统一启动入口（设计 [`docs/boot-entry-design.md`](docs/boot-entry-design.md)，

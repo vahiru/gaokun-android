@@ -24,6 +24,19 @@ struct SensorFacts {
 	int32_t pixelArrayH = 0;
 	int32_t activeW = 0;
 	int32_t activeH = 0;
+	/*
+	 * The field of view all outputs share: a centred part of the libcamera
+	 * active area above (Device::init()). Android sees only this, as pixel,
+	 * pre-correction and active array at (0,0); fovX/fovY place it in the
+	 * libcamera frame.
+	 */
+	int32_t fovX = 0;
+	int32_t fovY = 0;
+	int32_t fovW = 0;
+	int32_t fovH = 0;
+	/* Pixel size in nm (libcamera properties::UnitCellSize); 0 = not reported. */
+	int32_t unitCellW = 0;
+	int32_t unitCellH = 0;
 	int32_t orientation = 0;        /* 0/90/180/270 */
 	bool    frontFacing = true;
 	/* 闪光灯的 LED class 目录（如 /sys/class/leds/white:flash）；空 = 这个相机没有闪光灯。
@@ -88,7 +101,14 @@ std::vector<uint8_t> stripTriggers(const std::vector<uint8_t> &settings);
 std::vector<uint8_t> buildDefaultRequest(int templateId, const SensorFacts &f);
 
 /*
- * 从【请求设置】里读一个整型条目，读不到就给 def。
+ * Whether the HAL serves this template. ZERO_SHUTTER_LAG and MANUAL need the
+ * PRIVATE/YUV_REPROCESSING and MANUAL_SENSOR capabilities, which it doesn't
+ * declare, so those must be refused with ILLEGAL_ARGUMENT.
+ */
+bool templateSupported(int templateId);
+
+/*
+ * 从【请求设置】里读一个整型条目的第 index 个值，读不到就给 def。
  *
  * ★ 必要性：JPEG 的旋转角与质量是【应用】在每一帧的请求里给的
  *   （ANDROID_JPEG_ORIENTATION / ANDROID_JPEG_QUALITY），HAL 必须自己取。
@@ -96,7 +116,7 @@ std::vector<uint8_t> buildDefaultRequest(int templateId, const SensorFacts &f);
  *   ANDROID_JPEG_ORIENTATION 是 int32，读错类型会读出垃圾值。
  */
 int32_t requestEntryInt(const std::vector<uint8_t> &requestSettings,
-			uint32_t tag, int32_t def);
+			uint32_t tag, int32_t def, size_t index = 0);
 
 /*
  * 这套 HAL 能不能交付这组流？Device::isStreamCombinationSupported 与

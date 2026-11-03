@@ -1,0 +1,70 @@
+From 4baaa45f2ba2b80bda65c1e2beb67951a7be3a4e Mon Sep 17 00:00:00 2001
+From: Akisaira <akisaira@outlook.com>
+Date: Tue, 3 Nov 2026 22:35:21 +1100
+Subject: [PATCH 06/13] ipa: softisp: Update the sensor info on configure
+
+The soft ISP IPA gets the sensor info only once, in init(), when the
+camera is created. It describes whatever mode the sensor was in at that
+time, so after configure() selects another mode the AGC computes with
+the line duration and output size of the old one, while it reads the
+VBLANK and exposure ranges of the new one. With an ov13b10 left in its
+2104x1560 mode and a 2080x1170 stream configured, the frame durations
+derived from the VBLANK range use 1560 lines instead of 1170: the
+advertised minimum frame duration is 20.87 ms instead of 16.78 ms.
+
+Once the IPA sets VBLANK from the frame duration limits, the same error
+makes a 33.3 ms minimum come out as 2785-line frames of 29.2 ms instead
+of 3175 lines.
+
+Pass the sensor info of the configured mode in IPAConfigInfo, as the
+other IPAs do, and update the context with it in configure().
+
+Signed-off-by: Akisaira <akisaira@outlook.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ include/libcamera/ipa/softisp.mojom      | 1 +
+ src/ipa/softisp/softisp.cpp              | 1 +
+ src/libcamera/pipeline/simple/simple.cpp | 3 +++
+ 3 files changed, 5 insertions(+)
+
+diff --git a/include/libcamera/ipa/softisp.mojom b/include/libcamera/ipa/softisp.mojom
+index 209af1fd..308d410d 100644
+--- a/include/libcamera/ipa/softisp.mojom
++++ b/include/libcamera/ipa/softisp.mojom
+@@ -9,6 +9,7 @@ module ipa.softisp;
+ import "include/libcamera/ipa/core.mojom";
+ 
+ struct IPAConfigInfo {
++	libcamera.IPACameraSensorInfo sensorInfo;
+ 	libcamera.ControlInfoMap sensorControls;
+ };
+ 
+diff --git a/src/ipa/softisp/softisp.cpp b/src/ipa/softisp/softisp.cpp
+index 8acfcd1a..3de0508b 100644
+--- a/src/ipa/softisp/softisp.cpp
++++ b/src/ipa/softisp/softisp.cpp
+@@ -186,6 +186,7 @@ int IPASoftIsp::init(const IPASettings &settings,
+ 
+ int IPASoftIsp::configure(const IPAConfigInfo &configInfo, ControlInfoMap *ipaControls)
+ {
++	context_.sensorInfo = configInfo.sensorInfo;
+ 	context_.sensorControls = configInfo.sensorControls;
+ 
+ 	/* Clear the IPA context before the streaming session. */
+diff --git a/src/libcamera/pipeline/simple/simple.cpp b/src/libcamera/pipeline/simple/simple.cpp
+index 35c29cec..36360c27 100644
+--- a/src/libcamera/pipeline/simple/simple.cpp
++++ b/src/libcamera/pipeline/simple/simple.cpp
+@@ -1604,6 +1604,9 @@ int SimplePipelineHandler::configure(Camera *camera, CameraConfiguration *c)
+ 		return data->converter_->configure(inputCfg, outputCfgs);
+ 	} else {
+ 		ipa::softisp::IPAConfigInfo configInfo;
++		ret = data->sensor_->sensorInfo(&configInfo.sensorInfo);
++		if (ret)
++			return ret;
+ 		configInfo.sensorControls = data->sensor_->controls();
+ 		return data->swIsp_->configure(inputCfg, outputCfgs, configInfo, &data->controlInfo_);
+ 	}
+-- 
+2.53.0
+

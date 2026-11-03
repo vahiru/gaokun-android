@@ -129,7 +129,7 @@ NET-10 开机探测打到 hicloud 与 miui 两个端点都 204；fcitx5 在输�
 | 编号 | 一句话 | 状态 | 下一步 |
 |---|---|---|---|
 | DISP-2 · D9 | 接键盘横放时竖屏 App 把整屏转竖 | ⬜ | `wm set-ignore-orientation-request` 运行时 A/B，倾向回 Android 默认 |
-| AV-1 | 录屏 / 录像从没产出过文件 | ⬜ | Recorder 录 10 秒屏 → Aperture 前摄 720p → 后摄；按结果补 media_profiles |
+| AV-1 | 录屏 / 录像从没产出过文件 | ◐ | Aperture前后摄都录出过（后摄1080p，30 fps）；Recorder录屏还没测 |
 | AV-12 | 前摄方向没目视（DT 是 0） | ⬜ | 先拉 DCIM 看 EXIF，再请用户看一眼 |
 | APP-4 | 银行 / 支付 App 与 Play Integrity 从没测 | ⬜ | 支付宝、微信支付、招行、工行、云闪付、12306 + 一个 Integrity 检测 App |
 | INST-18 · D19 | 开机菜单不接键盘能否操作 | ⬜ | V15 实测音量键 / 电源键；再定 timeout |
@@ -182,7 +182,7 @@ NET-10 开机探测打到 hicloud 与 miui 两个端点都 204；fcitx5 在输�
 ### ④ 1.0 之后（v1.0-plan §7 + 本文件的长期项）
 
 指纹 T6（③ client driver、④ Android HAL；APP-18 支付指纹）· 硬件视频编码 A2 · MTP / USB 用途 · BT SCO 通话 · WoW 待机联网 ·
-A6 根因（dwc3 / QMP 的 resume 路径）与 B14 息屏 USB adb 原生化 · GPU SMMU 中断根治 B6 · 手掌碎块 T1 · 手写笔 · 相机 30 fps / 变焦 / EV / 画质（T3、A7 余项）·
+A6 根因（dwc3 / QMP 的 resume 路径）与 B14 息屏 USB adb 原生化 · GPU SMMU 中断根治 B6 · 手掌碎块 T1 · 手写笔 · 相机变焦 / EV / 画质（T3、A7 余项）·
 游戏音频基础延迟（B25 尾巴 / AV-7）· NET-4 按网络的随机 MAC（连同一次性迁移）· Power HAL 真实现与 RT uclamp · 120 Hz 无缝降频 ·
 quota / projid / casefold · FUSE passthrough · zram · Wi-Fi Direct · 海外 regdomain · B0 构建机的树换成本仓 checkout ·
 B3 余项（退役 ESP 派生文件、AVB）· tinymix 的 vendor 变体 · #12 的 39 位地址空间测试内核起不来（搁置）· iris 零碎（`venus_compat_gfmt=N` 复测、HAL 的 POLLPRI 空转、SYS_ERROR 后 `invalid uc_region`；seek 到更低分辨率后裁剪不更新：flush 之后固件不发序列事件；字节缓冲 + 遗留数组模式下分辨率变大时报 `tried 5 realloc and failed`：DecodeComponent 不上报尺寸变化）·
@@ -431,8 +431,8 @@ tcs3701 的驱动给 `ambient_light` 注册了两个 SUID，默认的那个（�
 已收口：电源域（`patches/0031`）、基于 libcamera（simple 流水线 + 软件 ISP）的相机 HAL、后摄 OV13B10（0032 / 0034 / 0035）、闪光灯与手电筒、相机 ID 稳定、后摄方向 180（用户目视）、PR #6（AF / JPEG 旋转 / 崩溃）、后摄隐私灯（0074）。
 过程记录（#81–#112 的全过程、已否的候选修复）见 [archive/TODO-history-2026-10.md#a7](archive/TODO-history-2026-10.md#a7)。还剩：
 * ⬜ **AV-12 前摄方向**：设备树 0，未目视（PR 文档 7.2 的照片证据支持 0）—— 1.0 应做。
-* ⬜ **AV-1 录像 / 录屏出片**、⬜ Aperture 后摄闪光 ON 拍一张看 LED 亮灭各一次 —— 都要用户在场。
-* ⬜ **T3 画质**（1.0 之后）：闪光帧下发 `ExposureValue` 负补偿；libcamera AWB 剔饱和像素（值得投上游）；CCM 要色卡；手电筒亮度档位（HAL 声明 `FLASH_INFO_STRENGTH_*`、实现 `turnOnTorchWithStrengthLevel`）；`kDarkLuma=50` 是启发式（要 softisp IPA 把曝光 / 增益写进结果元数据）；AV-11 15 fps / 变焦 / EV。
+* ◐ **AV-1 录屏出片**（录像已经出片）、⬜ Aperture 后摄闪光 ON 拍一张看 LED 亮灭各一次 —— 都要用户在场。
+* ⬜ **T3 画质**（1.0 之后）：闪光帧下发 `ExposureValue` 负补偿；libcamera AWB 剔饱和像素（已做：`patches/libcamera/0009`，值得投上游）；前摄CCM要色卡（现在是Windows驱动里高通的通用矩阵，白点只在一台机器上量了两种光源，见`hi846.yaml`；后摄已用华为Windows驱动里这款模组的调校，见`ov13b10.yaml`）；手电筒亮度档位（HAL 声明 `FLASH_INFO_STRENGTH_*`、实现 `turnOnTorchWithStrengthLevel`）；`kDarkLuma=50` 是启发式（要 softisp IPA 把曝光 / 增益写进结果元数据）；AV-11变焦/EV。
 * ⬜ libcamera：`camera_sensor_properties` 加 ov13b10、增益模型 helper、`ov13b10.yaml`；生成源码改成 Soong `genrule`（`patches/libcamera/README.md:34`）。上游：`ov13b10.c` 补 `get_selection`；读 EEPROM@0x50；camcc `Mark RCGs shared` 投稿 + 等待值 `0027`。
 * ⬜ `patches/0022`（unbind / rebind 的 genpd 注销）在 camss **健康**时补一次验证。⚠️ camss 已 `runtime_error` 时不要 unbind（会拖死整机）。
 

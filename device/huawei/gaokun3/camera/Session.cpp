@@ -47,6 +47,9 @@
 
 #include <libcamera/control_ids.h>
 #include <libcamera/formats.h>
+#include <libcamera/orientation.h>
+#include <libcamera/property_ids.h>
+#include <libcamera/transform.h>
 
 using ::aidl::android::hardware::camera::common::Status;
 using ::aidl::android::hardware::camera::device::BufferCache;
@@ -265,18 +268,14 @@ ndk::ScopedAStatus Session::configureStreams(const StreamConfiguration &cfg,
 
 	/*
 	 * ★ 相机应用一定会配多路（预览 + 拍照）。libcamera 只开【一路】，
-	 *   尺寸取各路里最大的那个，再用 libyuv 缩放分发 ——
-	 *   软件 ISP 是 CPU 瓶颈，开多路等于把同一份拜耳去马赛克多次。
+	 *   再用 libyuv 裁剪、缩放分发 —— 软件 ISP 是 CPU 瓶颈，开多路等于把同一份拜耳去马赛克多次。
 	 */
 	int32_t maxW = 0, maxH = 0;
 	for (const auto &s2 : cfg.streams) {
 		ALOGI("  请求流 id=%d %dx%d fmt=0x%x", s2.id, s2.width, s2.height,
 		      static_cast<int>(s2.format));
-		if (static_cast<int64_t>(s2.width) * s2.height >
-		    static_cast<int64_t>(maxW) * maxH) {
-			maxW = s2.width;
-			maxH = s2.height;
-		}
+		maxW = std::max(maxW, s2.width);
+		maxH = std::max(maxH, s2.height);
 	}
 
 	if (streaming_) {
@@ -313,48 +312,126 @@ ndk::ScopedAStatus Session::configureStreams(const StreamConfiguration &cfg,
 	lastSettings_.clear();
 	lastAfState_ = 0xff;
 
-	/* Viewfinder role 会启用软件 ISP（Raw role 不会）。 */
-	config_ = cam_->generateConfiguration({ libcamera::StreamRole::Viewfinder });
-	if (!config_ || config_->empty()) {
-		ALOGE("generateConfiguration 失败");
-		return err(Status::INTERNAL_ERROR);
+	const int32_t halfW = (facts_.activeW / 2 - 8) & ~7;
+	const int32_t halfH = facts_.activeH / 2;
+	const bool fullSize = !(maxW <= halfW && maxH <= halfH);
+	/*
+	 * Phase detection needs the RAW frame, and the ov13b10 has its PD pixels
+	 * in the full-size mode only (PhaseDetect.h): ask for it alongside. It is
+	 * the soft ISP's input, so libcamera captures into it without a copy.
+	 */
+	bool withRaw = fullSize && facts_.hasAf;
+
+	/*
+	 * libcamera's software ISP crops, it does not scale: an output smaller
+	 * than the sensor mode is a window out of its middle, with less field
+	 * of view than the stills. Ask for the whole image of a mode and scale
+	 * in deliver(): the 2x2 binned mode when every stream fits in half the
+	 * array, full size otherwise. The CSI-2 packed debayer keeps a 4-pixel
+	 * border on either side, so the binned mode's whole image is 8 pixels
+	 * narrower than half the array (ov13b10 2104x1560 -> 2096x1560, hi846
+	 * 1632x1224 -> 1624x1224). This also keeps libcamera, which picks the
+	 * smallest mode that holds the output, off a 16:9 mode for 4:3 streams.
+	 * A multiple of 8 keeps the RGB888 rows packed (checked below).
+	 */
+	auto setUp = [&](bool raw) {
+		libcamera::StreamConfiguration &vc = config_->at(0);
+		vc.size = fullSize ? libcamera::Size(facts_.activeW, facts_.activeH)
+				   : libcamera::Size(halfW, halfH);
+		/* 固定要 RGB888。⚠️ 用 3 字节的 RGB888 而不是 4 字节的 ABGR8888：
+		 * 8 MP 下每帧少搬 8 MB，而软件去拜耳本来就是 CPU 瓶颈。 */
+		vc.pixelFormat = libcamera::formats::RGB888;
+		vc.bufferCount = 4;
+		if (raw) {
+			libcamera::StreamConfiguration &rc = config_->at(1);
+			rc.size = libcamera::Size(facts_.activeW, facts_.activeH);
+			rc.bufferCount = vc.bufferCount;
+		}
+	};
+
+	/* Viewfinder role 会启用软件 ISP（Raw role 不会）。Without RAW if libcamera
+	 * refuses it: phase detection is optional, the stream is not. */
+	libcamera::CameraConfiguration::Status st;
+	for (;;) {
+		std::vector<libcamera::StreamRole> roles = { libcamera::StreamRole::Viewfinder };
+		if (withRaw)
+			roles.push_back(libcamera::StreamRole::Raw);
+		config_ = cam_->generateConfiguration(roles);
+		if (config_ && config_->size() == roles.size()) {
+			setUp(withRaw);
+			st = config_->validate();
+			if (st != libcamera::CameraConfiguration::Invalid &&
+			    !cam_->configure(config_.get()))
+				break;
+		}
+		if (!withRaw) {
+			ALOGE("generateConfiguration/validate/configure 失败");
+			return err(Status::INTERNAL_ERROR);
+		}
+		ALOGW("libcamera 不接受 RAW 流：只用 Viewfinder，不做相位对焦");
+		withRaw = false;
 	}
 	libcamera::StreamConfiguration &sc = config_->at(0);
-	sc.size = libcamera::Size(maxW, maxH);
-	/* 固定要 RGB888。⚠️ 用 3 字节的 RGB888 而不是 4 字节的 ABGR8888：
-	 * 8 MP 下每帧少搬 8 MB，而软件去拜耳本来就是 CPU 瓶颈。 */
-	sc.pixelFormat = libcamera::formats::RGB888;
-	sc.bufferCount = 4;
-
-	libcamera::CameraConfiguration::Status st = config_->validate();
-	if (st == libcamera::CameraConfiguration::Invalid) {
-		ALOGE("配置无效");
-		return err(Status::ILLEGAL_ARGUMENT);
-	}
 	if (st == libcamera::CameraConfiguration::Adjusted)
 		ALOGW("配置被调整为 %s", sc.toString().c_str());
 
-	if (cam_->configure(config_.get())) {
-		ALOGE("Camera::configure 失败");
+
+	/* The frame is read everywhere as packed RGB888, with no row padding. */
+	if (sc.stride != sc.size.width * 3) {
+		ALOGE("RGB888 行有填充（%s，stride %u），不支持", sc.size.toString().c_str(), sc.stride);
 		return err(Status::INTERNAL_ERROR);
 	}
 
 	stream_ = sc.stream();
 	srcWidth_ = sc.size.width;
 	srcHeight_ = sc.size.height;
+	rawStream_ = nullptr;
+	rawForPhase_ = false;
+	if (withRaw) {
+		const libcamera::StreamConfiguration &rc = config_->at(1);
+		rawStream_ = rc.stream();
+		rawStride_ = rc.stride;
+		rawWidth_ = rc.size.width;
+		rawHeight_ = rc.size.height;
+		/*
+		 * PhaseDetect reads CSI-2 packed 10-bit GRBG at full size, with the PD
+		 * positions measured on a readout that libcamera flipped H+V (DT
+		 * rotation 180). The driver keeps GRBG under flips, so the format
+		 * does not show them: compare the configured orientation with the
+		 * mounting one (libcamera falls back to no flips when it can't do the
+		 * transform, and then reports the mounting orientation).
+		 */
+		const auto rot = cam_->properties().get(libcamera::properties::Rotation);
+		const libcamera::Transform readout =
+			config_->orientation / libcamera::orientationFromRotation(rot ? *rot : 0);
+		rawForPhase_ = rc.pixelFormat == libcamera::formats::SGRBG10_CSI2P &&
+			       rawWidth_ == facts_.activeW && rawHeight_ == facts_.activeH &&
+			       readout == libcamera::Transform::HVFlip;
+		ALOGI("RAW 流 %s stride %u 读出 %s%s", rc.toString().c_str(), rc.stride,
+		      libcamera::transformToString(readout),
+		      rawForPhase_ ? "，用于相位对焦" : "，格式或读出方向不符，不做相位对焦");
+	}
+	af_.setPhaseAvailable(rawForPhase_);
 
 	/* 上一次配置若在建池之后失败（start 失败等），池里还是指向旧 allocator 缓冲的 Request ——
 	 * 换 allocator 之前先清掉，别让新旧两代混在一个池里。此时没有在途请求（streaming_ 为假）。 */
 	freeRequests_.clear();
 	configRequests_.clear();
 	allocator_ = std::make_unique<libcamera::FrameBufferAllocator>(cam_);
-	if (allocator_->allocate(stream_) < 0) {
+	if (allocator_->allocate(stream_) < 0 ||
+	    (rawStream_ && allocator_->allocate(rawStream_) < 0)) {
 		ALOGE("分配 libcamera 缓冲失败");
 		return err(Status::INTERNAL_ERROR);
 	}
-	for (const auto &b : allocator_->buffers(stream_)) {
+	/* Each request carries a buffer of each stream, paired by index. */
+	const auto &bufs = allocator_->buffers(stream_);
+	const size_t nbufs = rawStream_ ? std::min(bufs.size(), allocator_->buffers(rawStream_).size())
+					: bufs.size();
+	for (size_t i = 0; i < nbufs; i++) {
 		auto r = cam_->createRequest();
-		if (!r || r->addBuffer(stream_, b.get())) {
+		if (!r || r->addBuffer(stream_, bufs[i].get()) ||
+		    (rawStream_ &&
+		     r->addBuffer(rawStream_, allocator_->buffers(rawStream_)[i].get()))) {
 			ALOGE("建 libcamera 请求失败");
 			return err(Status::INTERNAL_ERROR);
 		}
@@ -432,6 +509,8 @@ ndk::ScopedAStatus Session::configureStreamsV2(
 ndk::ScopedAStatus Session::constructDefaultRequestSettings(RequestTemplate type,
 							    CameraMetadata *out)
 {
+	if (!templateSupported(static_cast<int>(type)))
+		return err(Status::ILLEGAL_ARGUMENT);
 	out->metadata = buildDefaultRequest(static_cast<int>(type), facts_);
 	return ndk::ScopedAStatus::ok();
 }
@@ -626,9 +705,47 @@ ndk::ScopedAStatus Session::processCaptureRequest(const std::vector<CaptureReque
 			if (afMode >= 0)
 				af_.setMode(static_cast<uint8_t>(afMode));
 			const int32_t afTrig = requestEntryInt(p.settings, ANDROID_CONTROL_AF_TRIGGER, -1);
+			/*
+			 * AF region (at most one, see Metadata.cpp): active array
+			 * coordinates, with (0,0) at its top left. libcamera delivers the
+			 * whole area around it, so map by fraction of that. Weight 0 means
+			 * no region. Set before the trigger, which searches it.
+			 */
+			const int32_t rx0 = requestEntryInt(p.settings, ANDROID_CONTROL_AF_REGIONS, -1, 0);
+			if (rx0 >= 0) {
+				const int32_t ry0 = requestEntryInt(p.settings, ANDROID_CONTROL_AF_REGIONS, -1, 1);
+				const int32_t rx1 = requestEntryInt(p.settings, ANDROID_CONTROL_AF_REGIONS, -1, 2);
+				const int32_t ry1 = requestEntryInt(p.settings, ANDROID_CONTROL_AF_REGIONS, -1, 3);
+				const int32_t rw = requestEntryInt(p.settings, ANDROID_CONTROL_AF_REGIONS, 0, 4);
+				if (rw > 0 && rx1 > rx0 && ry1 > ry0)
+					af_.setRegion(static_cast<float>(facts_.fovX + rx0) / facts_.activeW,
+						      static_cast<float>(facts_.fovY + ry0) / facts_.activeH,
+						      static_cast<float>(facts_.fovX + rx1) / facts_.activeW,
+						      static_cast<float>(facts_.fovY + ry1) / facts_.activeH);
+				else
+					af_.clearRegion();
+			}
 			if (afTrig > 0)   /* 1=START 2=CANCEL；0=IDLE 不必下发 */
 				af_.trigger(static_cast<uint8_t>(afTrig));
 		}
+
+		/*
+		 * Frame rate: pass the requested AE target FPS range to libcamera
+		 * as FrameDurationLimits. The soft ISP IPA sets the sensor's
+		 * VBLANK from it, and its AGC may expose up to the maximum frame
+		 * duration, so a {15, 30} range slows down to 15 fps in the dark. reuse()
+		 * clears the controls; p.settings holds the full settings of this
+		 * request or the last one, which include the range from the
+		 * request template.
+		 */
+		const int32_t fpsMin =
+			requestEntryInt(p.settings, ANDROID_CONTROL_AE_TARGET_FPS_RANGE, 0, 0);
+		const int32_t fpsMax =
+			requestEntryInt(p.settings, ANDROID_CONTROL_AE_TARGET_FPS_RANGE, 0, 1);
+		if (fpsMin > 0 && fpsMax >= fpsMin)
+			lreq->controls().set(libcamera::controls::FrameDurationLimits,
+					     { static_cast<int64_t>(1000000 / fpsMax),
+					       static_cast<int64_t>(1000000 / fpsMin) });
 
 		const bool fired = p.flashFired;
 		pending_[key] = std::move(p);
@@ -764,6 +881,26 @@ void Session::dropAllCaches()
 	bufferCache_.clear();
 }
 
+Session::Crop Session::cropFor(int32_t dstW, int32_t dstH) const
+{
+	/*
+	 * The largest centred crop with the output's aspect ratio of the active
+	 * array declared to Android (SensorFacts::fovW/fovH), which can be
+	 * narrower than the frame. The frame is the libcamera active area, binned
+	 * or not, less a few border columns of the debayer, so its height gives
+	 * the scale.
+	 */
+	int w = static_cast<int>(std::min<int64_t>(
+		srcWidth_, static_cast<int64_t>(facts_.fovW) * srcHeight_ / facts_.activeH)) & ~1;
+	int h = static_cast<int>(std::min<int64_t>(
+		srcHeight_, static_cast<int64_t>(facts_.fovH) * srcHeight_ / facts_.activeH)) & ~1;
+	if (static_cast<int64_t>(w) * dstH > static_cast<int64_t>(h) * dstW)
+		w = static_cast<int>(static_cast<int64_t>(h) * dstW / dstH) & ~1;
+	else
+		h = static_cast<int>(static_cast<int64_t>(w) * dstH / dstW) & ~1;
+	return { ((srcWidth_ - w) / 2) & ~1, ((srcHeight_ - h) / 2) & ~1, w, h };
+}
+
 bool Session::deliver(const uint8_t *rgb, buffer_handle_t dst,
 		      int32_t dstW, int32_t dstH, int chromaBlur)
 {
@@ -795,9 +932,12 @@ bool Session::deliver(const uint8_t *rgb, buffer_handle_t dst,
 	 *   字节序照旧：convert.h:959 注释明写 "RGB little endian (bgr in
 	 *   memory) to J420"，与 libcamera 的 RGB888(=BGR24) 对得上。
 	 */
+	const Crop c = cropFor(dstW, dstH);
+	const uint8_t *crop = rgb + static_cast<size_t>(c.y) * srcStride +
+			      static_cast<size_t>(c.x) * 3;
 	int rc;
-	if (dstW == srcWidth_ && dstH == srcHeight_) {
-		rc = libyuv::RGB24ToJ420(rgb, srcStride, dy, dstW, du, cw, dv, cw,
+	if (dstW == c.w && dstH == c.h) {
+		rc = libyuv::RGB24ToJ420(crop, srcStride, dy, dstW, du, cw, dv, cw,
 					 dstW, dstH);
 	} else {
 		/*
@@ -806,19 +946,18 @@ bool Session::deliver(const uint8_t *rgb, buffer_handle_t dst,
 		 *    而先缩放 RGB 再转会多搬一次 3 字节/像素的数据。
 		 * ⬜ 这条路每帧多一次全图拷贝；多路预览时值得再优化。
 		 */
-		const int scw = (srcWidth_ + 1) / 2, schh = (srcHeight_ + 1) / 2;
-		std::vector<uint8_t> src(static_cast<size_t>(srcWidth_) * srcHeight_ +
+		const int scw = (c.w + 1) / 2, schh = (c.h + 1) / 2;
+		std::vector<uint8_t> src(static_cast<size_t>(c.w) * c.h +
 					 static_cast<size_t>(scw) * schh * 2);
 		uint8_t *sy = src.data();
-		uint8_t *su = sy + static_cast<size_t>(srcWidth_) * srcHeight_;
+		uint8_t *su = sy + static_cast<size_t>(c.w) * c.h;
 		uint8_t *sv = su + static_cast<size_t>(scw) * schh;
-		rc = libyuv::RGB24ToJ420(rgb, srcStride, sy, srcWidth_, su, scw, sv, scw,
-					 srcWidth_, srcHeight_);
+		rc = libyuv::RGB24ToJ420(crop, srcStride, sy, c.w, su, scw, sv, scw,
+					 c.w, c.h);
 		if (rc == 0)
-			rc = libyuv::I420Scale(sy, srcWidth_, su, scw, sv, scw,
-					       srcWidth_, srcHeight_,
+			rc = libyuv::I420Scale(sy, c.w, su, scw, sv, scw, c.w, c.h,
 					       dy, dstW, du, cw, dv, cw,
-					       dstW, dstH, libyuv::kFilterBilinear);
+					       dstW, dstH, libyuv::kFilterBox);
 	}
 
 	if (rc == 0 && chromaBlur > 0) {
@@ -910,12 +1049,15 @@ bool Session::deliverJpeg(const uint8_t *rgb, buffer_handle_t dst,
 	 *    在内存里是 B,G,R,A，正好对上 libjpeg 的 JCS_EXT_BGRA，不用再转回
 	 *    3 通道，也正好对上 ARGBScale / ARGBRotate 的入参。
 	 */
-	const bool needScale = dstW != srcWidth_ || dstH != srcHeight_;
+	const Crop c = cropFor(dstW, dstH);
+	const uint8_t *crop = rgb + static_cast<size_t>(c.y) * srcWidth_ * 3 +
+			      static_cast<size_t>(c.x) * 3;
+	const bool needScale = dstW != c.w || dstH != c.h;
 	const bool needRotate = rotMode != libyuv::kRotate0;
 
 	std::vector<uint8_t> argb;      /* dstW×dstH，已缩放、未旋转（BGRA） */
 	std::vector<uint8_t> rotated;   /* outW×outH，已旋转（BGRA） */
-	const uint8_t *src = rgb;
+	const uint8_t *src = crop;
 	int srcStride = srcWidth_ * 3;
 	int components = 3;
 	J_COLOR_SPACE colorSpace = JCS_EXT_BGR;   /* ★ 字节序见上面的说明 */
@@ -924,23 +1066,22 @@ bool Session::deliverJpeg(const uint8_t *rgb, buffer_handle_t dst,
 		argb.resize(static_cast<size_t>(dstW) * dstH * 4);
 
 		if (needScale) {
-			std::vector<uint8_t> full(static_cast<size_t>(srcWidth_) *
-						  srcHeight_ * 4);
-			if (libyuv::RGB24ToARGB(rgb, srcWidth_ * 3, full.data(),
-						srcWidth_ * 4, srcWidth_, srcHeight_) != 0) {
+			std::vector<uint8_t> full(static_cast<size_t>(c.w) * c.h * 4);
+			if (libyuv::RGB24ToARGB(crop, srcWidth_ * 3, full.data(),
+						c.w * 4, c.w, c.h) != 0) {
 				ALOGE("deliverJpeg: RGB24ToARGB 失败");
 				mapper.unlock(dst);
 				return false;
 			}
-			if (libyuv::ARGBScale(full.data(), srcWidth_ * 4, srcWidth_,
-					      srcHeight_, argb.data(), dstW * 4, dstW, dstH,
-					      libyuv::kFilterBilinear) != 0) {
+			if (libyuv::ARGBScale(full.data(), c.w * 4, c.w, c.h,
+					      argb.data(), dstW * 4, dstW, dstH,
+					      libyuv::kFilterBox) != 0) {
 				ALOGE("deliverJpeg: ARGBScale 失败");
 				mapper.unlock(dst);
 				return false;
 			}
 		} else {
-			if (libyuv::RGB24ToARGB(rgb, srcWidth_ * 3, argb.data(), dstW * 4,
+			if (libyuv::RGB24ToARGB(crop, srcWidth_ * 3, argb.data(), dstW * 4,
 						dstW, dstH) != 0) {
 				ALOGE("deliverJpeg: RGB24ToARGB 失败");
 				mapper.unlock(dst);
@@ -1207,7 +1348,15 @@ void Session::onRequestCompleted(libcamera::Request *req)
 		return;
 	}
 
-	const libcamera::FrameBuffer *fb = req->buffers().begin()->second;
+	const libcamera::FrameBuffer *fb = req->findBuffer(stream_);
+	if (!fb) {
+		ALOGE("frame=%d 完成的请求里没有处理过的帧", pend.frameNumber);
+		reportRequestError(pend);
+		std::lock_guard<std::mutex> lk(mutex_);
+		flashRequestDone(pend);
+		returnToPool(std::move(owned));
+		return;
+	}
 	const int64_t timestamp = fb->metadata().timestamp;
 
 	/* mmap 一次，分发给所有流。 */
@@ -1258,10 +1407,29 @@ void Session::onRequestCompleted(libcamera::Request *req)
 	 * ── 自动对焦：喂这一帧的清晰度，必要时把马达挪一步（见 AutoFocus.cpp）──
 	 * ★ 时机的关键：这里挪位置，下一帧的请求是在 processCaptureRequest 里入队的，
 	 *   到那时新位置已经写进马达，所以"下一帧的分数"确实属于新位置 —— 等价于
-	 *   每帧采一个点。软件 ISP 每帧 70–130 ms，一次粗到细搜索约 1.2–2.4 s。
+	 *   每帧采一个点。（[#95] 时每帧70–130 ms；现在全尺寸约33 ms。）
 	 */
-	if (rgb && facts_.hasAf)
-		af_.onFrame(rgb, srcWidth_, srcHeight_, lumaStableFor >= 2);
+	if (rgb && facts_.hasAf) {
+		/* The RAW frame of the same request, for phase detection. */
+		const libcamera::FrameBuffer *rawFb =
+			rawForPhase_ && af_.wantsRaw() ? req->findBuffer(rawStream_) : nullptr;
+		void *rawMap = MAP_FAILED;
+		size_t rawLen = 0;
+		RawFrame raw{};
+		if (rawFb && rawFb->metadata().status == libcamera::FrameMetadata::FrameSuccess &&
+		    !rawFb->planes().empty()) {
+			const auto &rp = rawFb->planes()[0];
+			rawLen = rp.offset + rp.length;
+			rawMap = mmap(nullptr, rawLen, PROT_READ, MAP_SHARED, rp.fd.get(), 0);
+			if (rawMap != MAP_FAILED &&
+			    rp.length >= static_cast<size_t>(rawStride_) * rawHeight_)
+				raw = { static_cast<const uint8_t *>(rawMap) + rp.offset,
+					static_cast<int>(rawStride_), rawWidth_, rawHeight_ };
+		}
+		af_.onFrame(rgb, srcWidth_, srcHeight_, lumaStableFor >= 2, raw.data ? &raw : nullptr);
+		if (rawMap != MAP_FAILED)
+			munmap(rawMap, rawLen);
+	}
 
 	/* libcamera（libipa 的 Agc::fillMetadata）每帧报实际曝光与模拟增益：回填结果、驱动降噪强度与闪光判据。 */
 	int64_t exposureNs = 0;

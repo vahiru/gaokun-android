@@ -1,0 +1,560 @@
+From 456c3bd7dae07c580512076fad15b7bf5bbd1b07 Mon Sep 17 00:00:00 2001
+From: Akisaira <akisaira@outlook.com>
+Date: Wed, 4 Nov 2026 01:42:10 +1100
+Subject: [PATCH 11/13] libcamera: software_isp: Correct phase detection pixels
+ before debayering
+
+The ov13b10 has partly masked phase detection pixels at 16 blue sites of
+every 32x32 block in its full-size mode, about 1.25 times as bright as
+the other blue pixels. Debayered as image pixels they leave a 32-pixel
+grid of blue dots in the picture.
+
+Record the positions in the sensor properties database. They are given
+per sensor transform: sensors whose flips keep the Bayer order move the
+readout window by a pixel in a direction of their own, so flipping moves
+the positions by more than a mirror image. The ov13b10's are known for
+both flips, as mounted in the Huawei MateBook E Go.
+
+The software ISP corrects only frames of the whole active area at full
+resolution, as the driver's analogue crop can't be trusted to tell a
+binned mode, and only with a transform the positions are known for. The
+ov13b10's 4160x3120 and 4160x2340 crop modes stay uncorrected. The CPU
+debayer replaces each pixel in its copy of the input line with the mean
+of the two same colour pixels two away, along the direction where they
+differ less. The input
+buffer is left alone, as a raw stream may share it, and line copies are
+always made while there is something to correct. Only CSI-2 packed
+10-bit data is handled.
+
+On the tablet, in the 4208x3120 mode, the blue channel's 32-pixel
+fixed pattern drops from 5.1 to 0.9 (RMS of the high-passed image
+averaged over 32x32 blocks; red, without such pixels, is at 0.7), with
+the frame rate unchanged at 30 fps.
+
+Signed-off-by: Akisaira <akisaira@outlook.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../internal/camera_sensor_properties.h       |   8 ++
+ .../internal/software_isp/software_isp.h      |   7 +-
+ src/libcamera/pipeline/simple/simple.cpp      |   3 +-
+ .../sensor/camera_sensor_properties.cpp       |  48 +++++++
+ src/libcamera/software_isp/debayer.cpp        |  11 ++
+ src/libcamera/software_isp/debayer.h          |   3 +
+ src/libcamera/software_isp/debayer_cpu.cpp    | 119 +++++++++++++++++-
+ src/libcamera/software_isp/debayer_cpu.h      |  10 ++
+ src/libcamera/software_isp/software_isp.cpp   |  46 ++++++-
+ 9 files changed, 248 insertions(+), 7 deletions(-)
+
+diff --git a/include/libcamera/internal/camera_sensor_properties.h b/include/libcamera/internal/camera_sensor_properties.h
+index d7d4dab6..c5450ff7 100644
+--- a/include/libcamera/internal/camera_sensor_properties.h
++++ b/include/libcamera/internal/camera_sensor_properties.h
+@@ -10,9 +10,11 @@
+ #include <map>
+ #include <stdint.h>
+ #include <string>
++#include <vector>
+ 
+ #include <libcamera/control_ids.h>
+ #include <libcamera/geometry.h>
++#include <libcamera/transform.h>
+ 
+ namespace libcamera {
+ 
+@@ -24,11 +26,17 @@ struct CameraSensorProperties {
+ 		uint8_t hblankDelay;
+ 	};
+ 
++	struct PhaseDetectPixels {
++		Size period;
++		std::map<Transform, std::vector<Point>> positions;
++	};
++
+ 	static const CameraSensorProperties *get(const std::string &sensor);
+ 
+ 	Size unitCellSize;
+ 	std::map<controls::draft::TestPatternModeEnum, int32_t> testPatternModes;
+ 	SensorDelays sensorDelays;
++	PhaseDetectPixels phaseDetectPixels;
+ };
+ 
+ } /* namespace libcamera */
+diff --git a/include/libcamera/internal/software_isp/software_isp.h b/include/libcamera/internal/software_isp/software_isp.h
+index b8b24bb1..9d889cfc 100644
+--- a/include/libcamera/internal/software_isp/software_isp.h
++++ b/include/libcamera/internal/software_isp/software_isp.h
+@@ -24,6 +24,7 @@
+ 
+ #include <libcamera/geometry.h>
+ #include <libcamera/pixel_format.h>
++#include <libcamera/transform.h>
+ 
+ #include <libcamera/ipa/softisp_ipa_interface.h>
+ #include <libcamera/ipa/softisp_ipa_proxy.h>
+@@ -66,7 +67,7 @@ public:
+ 	int configure(const StreamConfiguration &inputCfg,
+ 		      const std::vector<std::reference_wrapper<const StreamConfiguration>> &outputCfgs,
+ 		      const ipa::softisp::IPAConfigInfo &configInfo,
+-		      ControlInfoMap *ipaControls);
++		      Transform transform, ControlInfoMap *ipaControls);
+ 
+ 	int exportBuffers(const Stream *stream, unsigned int count,
+ 			  std::vector<std::unique_ptr<FrameBuffer>> *buffers);
+@@ -95,6 +96,10 @@ private:
+ 	void statsReady(uint32_t frame, uint32_t bufferId);
+ 	void inputReady(FrameBuffer *input);
+ 	void outputReady(FrameBuffer *output);
++	std::vector<Point>
++	framePhaseDetectPixels(const IPACameraSensorInfo &sensorInfo, Transform transform) const;
++
++	const CameraSensorProperties *sensorProps_;
+ 	std::unique_ptr<Debayer> debayer_;
+ 	Thread ispWorkerThread_;
+ 	SharedMemObject<DebayerParams> sharedParams_;
+diff --git a/src/libcamera/pipeline/simple/simple.cpp b/src/libcamera/pipeline/simple/simple.cpp
+index ebdc45e2..ab3432c8 100644
+--- a/src/libcamera/pipeline/simple/simple.cpp
++++ b/src/libcamera/pipeline/simple/simple.cpp
+@@ -1622,7 +1622,8 @@ int SimplePipelineHandler::configure(Camera *camera, CameraConfiguration *c)
+ 		if (ret)
+ 			return ret;
+ 		configInfo.sensorControls = data->sensor_->controls();
+-		return data->swIsp_->configure(inputCfg, outputCfgs, configInfo, &data->controlInfo_);
++		return data->swIsp_->configure(inputCfg, outputCfgs, configInfo,
++					       config->combinedTransform(), &data->controlInfo_);
+ 	}
+ }
+ 
+diff --git a/src/libcamera/sensor/camera_sensor_properties.cpp b/src/libcamera/sensor/camera_sensor_properties.cpp
+index d5e053e1..893c3098 100644
+--- a/src/libcamera/sensor/camera_sensor_properties.cpp
++++ b/src/libcamera/sensor/camera_sensor_properties.cpp
+@@ -47,6 +47,35 @@ LOG_DEFINE_CATEGORY(CameraSensorProperties)
+  *
+  * This structure may be defined as empty if the actual sensor delays are not
+  * available or have not been measured.
++ *
++ * \var CameraSensorProperties::phaseDetectPixels
++ * \brief Phase detection pixels in the image
++ *
++ * Empty for sensors without phase detection pixels, or whose phase detection
++ * pixels are not known.
++ */
++
++/**
++ * \struct CameraSensorProperties::PhaseDetectPixels
++ * \brief Positions of the phase detection pixels in the image
++ *
++ * Phase detection pixels are partly masked: their values are those of image
++ * pixels of the same colour scaled by an unknown factor, and need correcting
++ * before the image is processed. Their positions repeat with \a period across
++ * an image read out from the whole pixel array active area at full resolution,
++ * starting at its top left corner.
++ *
++ * The positions depend on the flips the sensor applies, by more than mirroring
++ * the image: sensors whose flips keep the Bayer order move their readout window
++ * by a pixel in a direction of their own. They are therefore given separately
++ * for each transform they were measured with.
++ *
++ * \var CameraSensorProperties::PhaseDetectPixels::period
++ * \brief Size of the block in which the positions repeat
++ *
++ * \var CameraSensorProperties::PhaseDetectPixels::positions
++ * \brief Positions of the phase detection pixels inside a block, for each
++ * transform applied by the sensor
+  */
+ 
+ /**
+@@ -143,6 +172,25 @@ const CameraSensorProperties *CameraSensorProperties::get(const std::string &sen
+ 				 * libcamera equivalent.
+ 				 */
+ 			},
++			/*
++			 * Measured on RAW frames of the 4208x3120 mode, read out
++			 * with both flips (the rear camera of the Huawei MateBook
++			 * E Go is mounted upside down): 16 blue pixels per 32x32
++			 * block, in pairs 4 rows apart, about 1.25 times as
++			 * bright as the other blue pixels. The binned modes do
++			 * not show them.
++			 */
++			.phaseDetectPixels = {
++				.period = { 32, 32 },
++				.positions = {
++					{ Transform::HVFlip, {
++						{ 10, 1 }, { 26, 1 }, { 10, 5 }, { 26, 5 },
++						{ 2, 9 }, { 18, 9 }, { 2, 13 }, { 18, 13 },
++						{ 10, 17 }, { 26, 17 }, { 10, 21 }, { 26, 21 },
++						{ 2, 25 }, { 18, 25 }, { 2, 29 }, { 18, 29 },
++					} },
++				},
++			},
+ 		} },
+ 		{ "hi846", {
+ 			.unitCellSize = { 1120, 1120 },
+diff --git a/src/libcamera/software_isp/debayer.cpp b/src/libcamera/software_isp/debayer.cpp
+index a4854e51..7f5a9f85 100644
+--- a/src/libcamera/software_isp/debayer.cpp
++++ b/src/libcamera/software_isp/debayer.cpp
+@@ -111,6 +111,17 @@ Debayer::~Debayer()
+  * \return The preferred input stride in bytes or 0 if there is no preference
+  */
+ 
++/**
++ * \fn void Debayer::setPhaseDetectPixels(const Size &period, const std::vector<Point> &positions)
++ * \brief Set the phase detection pixels to correct before debayering
++ * \param[in] period The size of the block in which the positions repeat
++ * \param[in] positions The positions of the phase detection pixels inside a
++ * block, relative to the top left corner of the input frames, empty for none
++ *
++ * Takes effect at the next configure(). The default implementation does not
++ * correct phase detection pixels.
++ */
++
+ /**
+  * \fn void Debayer::process(uint32_t frame, FrameBuffer *input, FrameBuffer *output, DebayerParams params)
+  * \brief Process the bayer data into the requested format
+diff --git a/src/libcamera/software_isp/debayer.h b/src/libcamera/software_isp/debayer.h
+index 55685226..d8bf075b 100644
+--- a/src/libcamera/software_isp/debayer.h
++++ b/src/libcamera/software_isp/debayer.h
+@@ -12,6 +12,7 @@
+ #pragma once
+ 
+ #include <stdint.h>
++#include <vector>
+ 
+ #include <libcamera/base/log.h>
+ #include <libcamera/base/object.h>
+@@ -47,6 +48,8 @@ public:
+ 	virtual std::tuple<unsigned int, unsigned int>
+ 	strideAndFrameSize(const PixelFormat &outputFormat, const Size &size) = 0;
+ 	virtual uint32_t preferredInputStride([[maybe_unused]] const PixelFormat &inputFormat, [[maybe_unused]] const Size &size) { return 0; }
++	virtual void setPhaseDetectPixels([[maybe_unused]] const Size &period,
++					  [[maybe_unused]] const std::vector<Point> &positions) {}
+ 
+ 	virtual void process(uint32_t frame, FrameBuffer *input, FrameBuffer *output, const DebayerParams &params) = 0;
+ 	virtual int start() { return 0; }
+diff --git a/src/libcamera/software_isp/debayer_cpu.cpp b/src/libcamera/software_isp/debayer_cpu.cpp
+index c6d5d1e1..9b46a4de 100644
+--- a/src/libcamera/software_isp/debayer_cpu.cpp
++++ b/src/libcamera/software_isp/debayer_cpu.cpp
+@@ -12,6 +12,7 @@
+ #include "debayer_cpu.h"
+ 
+ #include <algorithm>
++#include <cstdlib>
+ #include <stdlib.h>
+ #include <sys/ioctl.h>
+ #include <utility>
+@@ -49,6 +50,7 @@ private:
+ 	void setupInputMemcpy(const uint8_t *linePointers[]);
+ 	void shiftLinePointers(const uint8_t *linePointers[], const uint8_t *src);
+ 	void memcpyNextLine(const uint8_t *linePointers[]);
++	void correctPhaseDetectPixels(uint8_t *line, const uint8_t *src);
+ 	void process2(uint32_t frame, const uint8_t *src, uint8_t *dst);
+ 	void process4(uint32_t frame, const uint8_t *src, uint8_t *dst);
+ 
+@@ -64,6 +66,9 @@ private:
+ 	unsigned int lineBufferIndex_;
+ 	std::vector<uint8_t> lineBuffers_[kMaxLineBuffers];
+ 	bool enableInputMemcpy_;
++	/* Phase detection pixels are corrected in the copies, never in the input */
++	bool copyInput_;
++	const uint8_t *frame_;
+ };
+ 
+ /**
+@@ -671,6 +676,8 @@ int DebayerCpu::configure(const StreamConfiguration &inputCfg,
+ 
+ 	ccmEnabled_ = ccmEnabled;
+ 
++	setupPhaseDetectCorrection(inputCfg);
++
+ 	/*
+ 	 * Lookup tables must be initialized because the initial value is used for
+ 	 * the first two frames, i.e. until stats processing starts providing its
+@@ -726,7 +733,8 @@ void DebayerCpuThread::configure(unsigned int yStart, unsigned int yEnd)
+ 	lineBufferLength_ = debayer_->window_.width * inputConfig.bpp / 8 +
+ 			    2 * lineBufferPadding_;
+ 
+-	if (enableInputMemcpy_) {
++	copyInput_ = enableInputMemcpy_ || !debayer_->pdColumns_.empty();
++	if (copyInput_) {
+ 		for (unsigned int i = 0; i <= inputConfig.patternSize.height; i++)
+ 			lineBuffers_[i].resize(lineBufferLength_);
+ 	}
+@@ -768,13 +776,14 @@ void DebayerCpuThread::setupInputMemcpy(const uint8_t *linePointers[])
+ {
+ 	const unsigned int patternHeight = debayer_->inputConfig_.patternSize.height;
+ 
+-	if (!enableInputMemcpy_)
++	if (!copyInput_)
+ 		return;
+ 
+ 	for (unsigned int i = 0; i < patternHeight; i++) {
+ 		memcpy(lineBuffers_[i].data(),
+ 		       linePointers[i + 1] - lineBufferPadding_,
+ 		       lineBufferLength_);
++		correctPhaseDetectPixels(lineBuffers_[i].data(), linePointers[i + 1]);
+ 		linePointers[i + 1] = lineBuffers_[i].data() + lineBufferPadding_;
+ 	}
+ 
+@@ -797,17 +806,35 @@ void DebayerCpuThread::memcpyNextLine(const uint8_t *linePointers[])
+ {
+ 	const unsigned int patternHeight = debayer_->inputConfig_.patternSize.height;
+ 
+-	if (!enableInputMemcpy_)
++	if (!copyInput_)
+ 		return;
+ 
+ 	memcpy(lineBuffers_[lineBufferIndex_].data(),
+ 	       linePointers[patternHeight] - lineBufferPadding_,
+ 	       lineBufferLength_);
++	correctPhaseDetectPixels(lineBuffers_[lineBufferIndex_].data(),
++				 linePointers[patternHeight]);
+ 	linePointers[patternHeight] = lineBuffers_[lineBufferIndex_].data() + lineBufferPadding_;
+ 
+ 	lineBufferIndex_ = (lineBufferIndex_ + 1) % (patternHeight + 1);
+ }
+ 
++/*
++ * Correct the phase detection pixels in \a line, the copy of the input line
++ * that \a src points into.
++ */
++void DebayerCpuThread::correctPhaseDetectPixels(uint8_t *line, const uint8_t *src)
++{
++	if (debayer_->pdColumns_.empty())
++		return;
++
++	const unsigned int stride = debayer_->inputConfig_.stride;
++	const unsigned int y = (src - frame_) / stride;
++	const int offset = static_cast<int>(src - frame_ - y * stride) -
++			   static_cast<int>(lineBufferPadding_);
++	debayer_->correctPhaseDetectPixels(line, offset, lineBufferLength_, frame_, y);
++}
++
+ /**
+  * \brief Process part of the image assigned to this debayer thread
+  * \param[in] frame The frame number
+@@ -818,6 +845,8 @@ void DebayerCpuThread::process(uint32_t frame, const uint8_t *src, uint8_t *dst)
+ {
+ 	Rectangle &window = debayer_->window_;
+ 
++	frame_ = src;
++
+ 	/* Adjust src to top left corner of the window */
+ 	src += (window.y + yStart_) * debayer_->inputConfig_.stride +
+ 	       window.x * debayer_->inputConfig_.bpp / 8;
+@@ -954,6 +983,90 @@ void DebayerCpuThread::process4(uint32_t frame, const uint8_t *src, uint8_t *dst
+ 	}
+ }
+ 
++void DebayerCpu::setPhaseDetectPixels(const Size &period, const std::vector<Point> &positions)
++{
++	pdPeriod_ = period;
++	pdPositions_ = positions;
++}
++
++void DebayerCpu::setupPhaseDetectCorrection(const StreamConfiguration &inputCfg)
++{
++	pdColumns_.clear();
++	inputSize_ = inputCfg.size;
++
++	if (pdPositions_.empty() || pdPeriod_.isNull())
++		return;
++
++	/* The sensors known to have them send CSI-2 packed 10-bit data. */
++	const BayerFormat bayer = BayerFormat::fromPixelFormat(inputCfg.pixelFormat);
++	if (bayer.bitDepth != 10 || bayer.packing != BayerFormat::Packing::CSI2) {
++		LOG(Debayer, Warning)
++			<< "Phase detection pixels not corrected in "
++			<< inputCfg.pixelFormat;
++		return;
++	}
++
++	pdColumns_.assign(pdPeriod_.height, {});
++	for (const Point &p : pdPositions_) {
++		if (p.x < 0 || p.y < 0 || static_cast<unsigned int>(p.x) >= pdPeriod_.width ||
++		    static_cast<unsigned int>(p.y) >= pdPeriod_.height)
++			continue;
++		pdColumns_[p.y].push_back(p.x);
++	}
++
++	LOG(Debayer, Info)
++		<< "Correcting " << pdPositions_.size()
++		<< " phase detection pixels per " << pdPeriod_ << " block";
++}
++
++/*
++ * Replace the phase detection pixels of input line \a y in \a line, its copy:
++ * \a line[i] holds byte \a offset + i of the line, for \a length bytes. The
++ * values come from the same colour pixels two away in \a frame, the input,
++ * along the direction where they differ less so that edges stay sharp.
++ */
++void DebayerCpu::correctPhaseDetectPixels(uint8_t *line, int offset, unsigned int length,
++					  const uint8_t *frame, unsigned int y) const
++{
++	const std::vector<unsigned int> &columns = pdColumns_[y % pdPeriod_.height];
++	if (columns.empty())
++		return;
++
++	const unsigned int stride = inputConfig_.stride;
++	const unsigned int width = inputSize_.width;
++	const uint8_t *row = frame + y * stride;
++	const uint8_t *above = frame + (y >= 2 ? y - 2 : y + 2) * stride;
++	const uint8_t *below = frame + (y + 2 < inputSize_.height ? y + 2 : y - 2) * stride;
++
++	/* CSI-2 packed: the 8 MSBs of 4 pixels, then a byte with their 2 LSBs. */
++	auto value = [](const uint8_t *r, unsigned int x) {
++		const uint8_t *p = r + x / 4 * 5;
++		return (p[x % 4] << 2) | ((p[4] >> (x % 4 * 2)) & 3);
++	};
++
++	for (unsigned int c : columns) {
++		for (unsigned int x = c; x < width; x += pdPeriod_.width) {
++			const int msb = static_cast<int>(x / 4 * 5 + x % 4) - offset;
++			if (msb < 0 || msb >= static_cast<int>(length))
++				continue;
++
++			const int l = value(row, x >= 2 ? x - 2 : x + 2);
++			const int r = value(row, x + 2 < width ? x + 2 : x - 2);
++			const int a = value(above, x);
++			const int b = value(below, x);
++			const int v = std::abs(l - r) <= std::abs(a - b)
++					    ? (l + r + 1) / 2 : (a + b + 1) / 2;
++
++			line[msb] = v >> 2;
++			const int lsb = static_cast<int>(x / 4 * 5 + 4) - offset;
++			if (lsb >= 0 && lsb < static_cast<int>(length)) {
++				const unsigned int shift = x % 4 * 2;
++				line[lsb] = (line[lsb] & ~(3 << shift)) | ((v & 3) << shift);
++			}
++		}
++	}
++}
++
+ void DebayerCpu::updateGammaTable(const DebayerParams &params)
+ {
+ 	const float gamma = params.gamma;
+diff --git a/src/libcamera/software_isp/debayer_cpu.h b/src/libcamera/software_isp/debayer_cpu.h
+index 2c88c9e1..cd9969b0 100644
+--- a/src/libcamera/software_isp/debayer_cpu.h
++++ b/src/libcamera/software_isp/debayer_cpu.h
+@@ -47,6 +47,7 @@ public:
+ 	void stop() override;
+ 	SizeRange sizes(PixelFormat inputFormat, const Size &inputSize) override;
+ 	const SharedFD &getStatsFD() override { return stats_->getStatsFD(); }
++	void setPhaseDetectPixels(const Size &period, const std::vector<Point> &positions) override;
+ 
+ private:
+ 	friend class DebayerCpuThread;
+@@ -127,6 +128,9 @@ private:
+ 				bool ccmEnabled);
+ 	void updateGammaTable(const DebayerParams &params);
+ 	void updateLookupTables(const DebayerParams &params);
++	void setupPhaseDetectCorrection(const StreamConfiguration &inputCfg);
++	void correctPhaseDetectPixels(uint8_t *line, int offset, unsigned int length,
++				      const uint8_t *frame, unsigned int y) const;
+ 
+ 	static constexpr unsigned int kRGBLookupSize = 256;
+ 	static constexpr unsigned int kGammaLookupSize = 1024;
+@@ -156,6 +160,12 @@ private:
+ 	std::unique_ptr<SwStatsCpu> stats_;
+ 	unsigned int xShift_; /* Offset of 0/1 applied to window_.x */
+ 
++	std::vector<Point> pdPositions_;
++	/* Phase detection pixel columns in each row of a period, empty for none */
++	std::vector<std::vector<unsigned int>> pdColumns_;
++	Size pdPeriod_;
++	Size inputSize_;
++
+ 	static constexpr unsigned int kMinThreads = 1;
+ 	static constexpr unsigned int kMaxThreads = 8;
+ 	static constexpr unsigned int kDefaultThreads = 2;
+diff --git a/src/libcamera/software_isp/software_isp.cpp b/src/libcamera/software_isp/software_isp.cpp
+index f8efd244..68d5fd1d 100644
+--- a/src/libcamera/software_isp/software_isp.cpp
++++ b/src/libcamera/software_isp/software_isp.cpp
+@@ -80,7 +80,8 @@ LOG_DEFINE_CATEGORY(SoftwareIsp)
+  */
+ SoftwareIsp::SoftwareIsp(PipelineHandler *pipe, const CameraSensor *sensor,
+ 			 ControlInfoMap *ipaControls)
+-	: ispWorkerThread_("SWIspWorker"),
++	: sensorProps_(CameraSensorProperties::get(sensor->model())),
++	  ispWorkerThread_("SWIspWorker"),
+ 	  dmaHeap_(DmaBufAllocator::DmaBufAllocatorFlag::CmaHeap |
+ 		   DmaBufAllocator::DmaBufAllocatorFlag::SystemHeap |
+ 		   DmaBufAllocator::DmaBufAllocatorFlag::UDmaBuf)
+@@ -279,13 +280,14 @@ uint32_t SoftwareIsp::preferredInputStride(const PixelFormat &inputFormat, const
+  * \param[in] inputCfg The input configuration
+  * \param[in] outputCfgs The output configurations
+  * \param[in] configInfo The IPA configuration data, received from the pipeline handler
++ * \param[in] transform The transform applied by the sensor
+  * \param[out] ipaControls The IPA controls to update
+  * \return 0 on success, a negative errno on failure
+  */
+ int SoftwareIsp::configure(const StreamConfiguration &inputCfg,
+ 			   const std::vector<std::reference_wrapper<const StreamConfiguration>> &outputCfgs,
+ 			   const ipa::softisp::IPAConfigInfo &configInfo,
+-			   ControlInfoMap *ipaControls)
++			   Transform transform, ControlInfoMap *ipaControls)
+ {
+ 	ASSERT(ipa_ && debayer_);
+ 
+@@ -293,6 +295,9 @@ int SoftwareIsp::configure(const StreamConfiguration &inputCfg,
+ 	if (ret < 0)
+ 		return ret;
+ 
++	const std::vector<Point> pdPixels = framePhaseDetectPixels(configInfo.sensorInfo, transform);
++	debayer_->setPhaseDetectPixels(pdPixels.empty() ? Size{} : sensorProps_->phaseDetectPixels.period,
++				       pdPixels);
+ 	ret = debayer_->configure(inputCfg, outputCfgs, ccmEnabled_);
+ 	if (ret < 0)
+ 		return ret;
+@@ -305,6 +310,43 @@ int SoftwareIsp::configure(const StreamConfiguration &inputCfg,
+ 	return 0;
+ }
+ 
++/**
++ * \brief Locate the sensor's phase detection pixels in the captured frames
++ * \param[in] sensorInfo The sensor mode
++ * \param[in] transform The transform applied by the sensor
++ *
++ * The positions apply to images read out from the whole active area at full
++ * resolution, with a transform they are known for, see
++ * CameraSensorProperties::PhaseDetectPixels. Binning and skipping average the
++ * phase detection pixels with image pixels or leave them out, and the analogue
++ * crop cannot tell a binned mode from a cropped one: some drivers report the
++ * mode's size centred in the array for both.
++ *
++ * \return The positions of the phase detection pixels inside a block, relative
++ * to the top left corner of the frame, or none when the sensor has none, the
++ * frame is not the whole active area at full resolution, or the sensor applies
++ * a transform they are not known for
++ */
++std::vector<Point>
++SoftwareIsp::framePhaseDetectPixels(const IPACameraSensorInfo &sensorInfo,
++				    Transform transform) const
++{
++	if (!sensorProps_ || sensorProps_->phaseDetectPixels.positions.empty())
++		return {};
++
++	const CameraSensorProperties::PhaseDetectPixels &pd = sensorProps_->phaseDetectPixels;
++	const auto it = pd.positions.find(transform);
++	if (sensorInfo.outputSize != sensorInfo.activeAreaSize || it == pd.positions.end()) {
++		LOG(SoftwareIsp, Debug)
++			<< "Phase detection pixels not corrected: output "
++			<< sensorInfo.outputSize << " of " << sensorInfo.activeAreaSize
++			<< ", transform " << transformToString(transform);
++		return {};
++	}
++
++	return it->second;
++}
++
+ /**
+  * \brief Export the buffers from the Software ISP
+  * \param[in] stream Output stream exporting the buffers
+-- 
+2.53.0
+

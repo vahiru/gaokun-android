@@ -37,7 +37,7 @@ std::vector<uint8_t> pack(const camera_metadata_t *m)
 }
 
 int32_t requestEntryInt(const std::vector<uint8_t> &requestSettings,
-			uint32_t tag, int32_t def)
+			uint32_t tag, int32_t def, size_t index)
 {
 	if (requestSettings.empty())
 		return def;
@@ -50,12 +50,12 @@ int32_t requestEntryInt(const std::vector<uint8_t> &requestSettings,
 	if (find_camera_metadata_ro_entry(m, tag, &e) != 0)
 		return def;
 
-	if (e.count == 0)
+	if (e.count <= index)
 		return def;
 	if (e.type == TYPE_INT32)
-		return e.data.i32[0];
+		return e.data.i32[index];
 	if (e.type == TYPE_BYTE)
-		return e.data.u8[0];
+		return e.data.u8[index];
 
 	ALOGW("请求里的 tag %u 类型是 %d，不是整数类型 —— 用默认值 %d",
 	      tag, static_cast<int>(e.type), def);
@@ -125,14 +125,28 @@ std::vector<uint8_t> buildCharacteristics(const SensorFacts &f)
 	}
 
 	/* ── 传感器几何 ── */
-	const int32_t activeArray[] = { 0, 0, f.activeW, f.activeH };
+	/*
+	 * The outputs' shared field of view (SensorFacts::fov*) is all Android
+	 * sees of the sensor: pixel array, pre-correction and active array alike,
+	 * at (0,0). Without distortion correction the two arrays must be equal,
+	 * and CameraX uses the active array's left edge as an offset for its
+	 * metering regions. The HAL maps back into the libcamera frame itself.
+	 */
+	const int32_t activeArray[] = { 0, 0, f.fovW, f.fovH };
 	add_camera_metadata_entry(m, ANDROID_SENSOR_INFO_ACTIVE_ARRAY_SIZE,
 				  activeArray, 4);
 	add_camera_metadata_entry(m, ANDROID_SENSOR_INFO_PRE_CORRECTION_ACTIVE_ARRAY_SIZE,
 				  activeArray, 4);
-	const int32_t pixelArray[] = { f.pixelArrayW, f.pixelArrayH };
+	const int32_t pixelArray[] = { f.fovW, f.fovH };
 	add_camera_metadata_entry(m, ANDROID_SENSOR_INFO_PIXEL_ARRAY_SIZE,
 				  pixelArray, 2);
+	/* The declared pixel array times the pixel size, in mm (see Device::init()). */
+	if (f.unitCellW > 0 && f.unitCellH > 0) {
+		const float physicalSize[] = { f.fovW * (f.unitCellW / 1e6f),
+					       f.fovH * (f.unitCellH / 1e6f) };
+		add_camera_metadata_entry(m, ANDROID_SENSOR_INFO_PHYSICAL_SIZE,
+					  physicalSize, 2);
+	}
 	const int32_t orientation = f.orientation;
 	add_camera_metadata_entry(m, ANDROID_SENSOR_ORIENTATION, &orientation, 1);
 
@@ -214,19 +228,29 @@ std::vector<uint8_t> buildCharacteristics(const SensorFacts &f)
 	const uint8_t awbLockAvail = ANDROID_CONTROL_AWB_LOCK_AVAILABLE_FALSE;
 	add_camera_metadata_entry(m, ANDROID_CONTROL_AWB_LOCK_AVAILABLE, &awbLockAvail, 1);
 
-	/* 帧率区间：软件去拜耳 8 MP 跑不快，如实声明。 */
-	const int32_t fpsRanges[] = { 5, 15, 15, 15 };
+	/*
+	 * The HAL passes the requested range to libcamera as
+	 * FrameDurationLimits (see processCaptureRequest), which sets the
+	 * sensor's frame length from it. The modes the HAL asks for run at up
+	 * to 60 fps (ov13b10 binned) or 30 fps (full size, hi846 binned), so
+	 * 30 fps is always reachable. Delivery is slower only when processing
+	 * falls behind (see the frame duration in Device.cpp).
+	 */
+	const int32_t fpsRanges[] = { 15, 30, 30, 30 };
 	add_camera_metadata_entry(m, ANDROID_CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES,
 				  fpsRanges, 4);
 
-	const int32_t maxRegions[] = { 0, 0, 0 };   /* AE/AWB/AF 都不支持区域 */
+	/* AE/AWB 不支持区域；AF 在有马达的后摄上支持一个区域（AutoFocus::setRegion）。 */
+	const int32_t maxRegions[] = { 0, 0, f.hasAf ? 1 : 0 };
 	add_camera_metadata_entry(m, ANDROID_CONTROL_MAX_REGIONS, maxRegions, 3);
 
 	/* ── 闪光灯 / 镜头 ── */
 	const uint8_t flashAvailable = hasFlash ? ANDROID_FLASH_INFO_AVAILABLE_TRUE
 					       : ANDROID_FLASH_INFO_AVAILABLE_FALSE;
 	add_camera_metadata_entry(m, ANDROID_FLASH_INFO_AVAILABLE, &flashAvailable, 1);
-	const float focalLengths[] = { 3.0f };       /* ⚠️ 占位值，未测 */
+	/* ⚠️ 占位值，未测。Camera1 rebuilds the view angles from it and
+	 * SENSOR_INFO_PHYSICAL_SIZE, so those are made up too. */
+	const float focalLengths[] = { 3.0f };
 	add_camera_metadata_entry(m, ANDROID_LENS_INFO_AVAILABLE_FOCAL_LENGTHS,
 				  focalLengths, 1);
 	const float apertures[] = { 2.2f };          /* ⚠️ 占位值，未测 */
@@ -254,7 +278,7 @@ std::vector<uint8_t> buildCharacteristics(const SensorFacts &f)
 	/* ── JPEG ── */
 	const int32_t thumbSizes[] = { 0, 0, 160, 120 };
 	add_camera_metadata_entry(m, ANDROID_JPEG_AVAILABLE_THUMBNAIL_SIZES, thumbSizes, 4);
-	const int32_t maxJpegSize = f.activeW * f.activeH * 3 / 2 + 65536;
+	const int32_t maxJpegSize = f.fovW * f.fovH * 3 / 2 + 65536;
 	add_camera_metadata_entry(m, ANDROID_JPEG_MAX_SIZE, &maxJpegSize, 1);
 
 	/* ── 统计 ── */
@@ -322,6 +346,7 @@ std::vector<uint8_t> buildCharacteristics(const SensorFacts &f)
 	if (f.hasAf) {
 		reqKeys.push_back(ANDROID_CONTROL_AF_MODE);
 		reqKeys.push_back(ANDROID_CONTROL_AF_TRIGGER);
+		reqKeys.push_back(ANDROID_CONTROL_AF_REGIONS);
 	}
 	std::vector<int32_t> resKeys = reqKeys;
 	for (int32_t k : { ANDROID_SENSOR_TIMESTAMP, ANDROID_REQUEST_PIPELINE_DEPTH,
@@ -433,7 +458,7 @@ bool streamCombinationSupported(const StreamConfiguration &cfg, const SensorFact
 			return no(id + "不支持输入流（没有 reprocess）");
 		if (s.rotation != StreamRotation::ROTATION_0)
 			return no(id + "不支持流旋转");
-		if (s.width <= 0 || s.height <= 0 || s.width > f.activeW || s.height > f.activeH)
+		if (s.width <= 0 || s.height <= 0 || s.width > f.fovW || s.height > f.fovH)
 			return no(id + "尺寸 " + std::to_string(s.width) + "x" +
 				  std::to_string(s.height) + " 超出有效阵列");
 		switch (s.format) {
@@ -477,6 +502,13 @@ std::vector<uint8_t> stripTriggers(const std::vector<uint8_t> &settings)
 	return out;
 }
 
+bool templateSupported(int templateId)
+{
+	const auto tmpl = static_cast<RequestTemplate>(templateId);
+
+	return tmpl != RequestTemplate::ZERO_SHUTTER_LAG && tmpl != RequestTemplate::MANUAL;
+}
+
 std::vector<uint8_t> buildDefaultRequest(int templateId, const SensorFacts &f)
 {
 	camera_metadata_t *m = allocate_camera_metadata(32, 2048);
@@ -489,6 +521,28 @@ std::vector<uint8_t> buildDefaultRequest(int templateId, const SensorFacts &f)
 	 *   （RequestTemplate.aidl：PREVIEW=1 STILL_CAPTURE=2 VIDEO_RECORD=3 VIDEO_SNAPSHOT=4
 	 *    ZERO_SHUTTER_LAG=5 MANUAL=6）。 */
 	const auto tmpl = static_cast<RequestTemplate>(templateId);
+	/*
+	 * Every template carries the capture intent that matches it (CameraDevice
+	 * template docs). Clients build their requests from these templates, and
+	 * the camera service refuses to start a Camera1 (android.hardware.Camera)
+	 * preview without it (Camera2-Parameters updateRequest: BAD_VALUE), e.g. in
+	 * QQ.
+	 */
+	uint8_t intent = ANDROID_CONTROL_CAPTURE_INTENT_PREVIEW;
+	switch (tmpl) {
+	case RequestTemplate::STILL_CAPTURE:
+		intent = ANDROID_CONTROL_CAPTURE_INTENT_STILL_CAPTURE;
+		break;
+	case RequestTemplate::VIDEO_RECORD:
+		intent = ANDROID_CONTROL_CAPTURE_INTENT_VIDEO_RECORD;
+		break;
+	case RequestTemplate::VIDEO_SNAPSHOT:
+		intent = ANDROID_CONTROL_CAPTURE_INTENT_VIDEO_SNAPSHOT;
+		break;
+	default:   /* PREVIEW; ZERO_SHUTTER_LAG and MANUAL are refused */
+		break;
+	}
+	add_camera_metadata_entry(m, ANDROID_CONTROL_CAPTURE_INTENT, &intent, 1);
 	/* 有闪光灯时，静态拍照模板默认 ON_AUTO_FLASH，与 CameraCharacteristics 文档对模板的
 	 * 约定一致；其余模板不闪。 */
 	const uint8_t aeMode = (!f.flashLed.empty() && tmpl == RequestTemplate::STILL_CAPTURE)
@@ -528,9 +582,12 @@ std::vector<uint8_t> buildDefaultRequest(int templateId, const SensorFacts &f)
 	add_camera_metadata_entry(m, ANDROID_CONTROL_AF_TRIGGER, &afTrigger, 1);
 	const uint8_t flashMode = ANDROID_FLASH_MODE_OFF;
 	add_camera_metadata_entry(m, ANDROID_FLASH_MODE, &flashMode, 1);
-	const int32_t fps[] = { 5, 15 };
+	/* Recording templates get a fixed range, the others a variable one. */
+	const bool video = tmpl == RequestTemplate::VIDEO_RECORD ||
+			   tmpl == RequestTemplate::VIDEO_SNAPSHOT;
+	const int32_t fps[] = { video ? 30 : 15, 30 };
 	add_camera_metadata_entry(m, ANDROID_CONTROL_AE_TARGET_FPS_RANGE, fps, 2);
-	const int32_t cropRegion[] = { 0, 0, f.activeW, f.activeH };
+	const int32_t cropRegion[] = { 0, 0, f.fovW, f.fovH };
 	add_camera_metadata_entry(m, ANDROID_SCALER_CROP_REGION, cropRegion, 4);
 	const uint8_t jpegQuality = 90;
 	add_camera_metadata_entry(m, ANDROID_JPEG_QUALITY, &jpegQuality, 1);

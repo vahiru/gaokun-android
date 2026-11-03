@@ -3,6 +3,8 @@
 #include "Provider.h"
 #include "Session.h"
 
+#include <algorithm>
+#include <cstdlib>
 #include <fcntl.h>
 #include <unistd.h>
 
@@ -103,6 +105,43 @@ bool Device::init()
 	if (facts_.activeW <= 0 || facts_.activeH <= 0) {
 		ALOGE("拿不到有效的传感器尺寸（%dx%d）", facts_.activeW, facts_.activeH);
 		return false;
+	}
+
+	/*
+	 * Android's active array: the largest centred 4:3 part of the active
+	 * area when that is within 2% of 4:3, all of it otherwise. Each output is
+	 * the largest centred crop of the active array with its own aspect ratio
+	 * (Session::cropFor()), and CameraX assumes the same when it lines up the
+	 * streams of a session. With the ov13b10's 4208x3120 it took the 4:3
+	 * preview to cover 4160 columns and the 16:9 video all 4208, and cropped
+	 * the video to the 4160x2367 they share: 1080p recorded at 1898x1080.
+	 * On an exact 4:3 array the 16:9 streams cover its full width.
+	 */
+	facts_.fovW = facts_.activeW;
+	facts_.fovH = facts_.activeH;
+	const int64_t w3 = static_cast<int64_t>(facts_.activeW) * 3;
+	const int64_t h4 = static_cast<int64_t>(facts_.activeH) * 4;
+	if (std::abs(w3 - h4) * 50 <= h4) {
+		if (w3 > h4)
+			facts_.fovW = static_cast<int32_t>(h4 / 3) & ~1;
+		else
+			facts_.fovH = static_cast<int32_t>(w3 / 4) & ~1;
+	}
+	facts_.fovX = (facts_.activeW - facts_.fovW) / 2 & ~1;
+	facts_.fovY = (facts_.activeH - facts_.fovH) / 2 & ~1;
+
+	/*
+	 * Pixel size, for SENSOR_INFO_PHYSICAL_SIZE: the camera service builds
+	 * the Camera1 (android.hardware.Camera) parameters with a field of view
+	 * computed from it and refuses those clients without it ("unable to build
+	 * defaults"), e.g. QQ.
+	 */
+	auto cell = props.get(libcamera::properties::UnitCellSize);
+	if (cell) {
+		facts_.unitCellW = cell->width;
+		facts_.unitCellH = cell->height;
+	} else {
+		ALOGW("相机没有报 UnitCellSize：不声明物理尺寸，用 Camera1 的应用打不开它");
 	}
 
 	/* ── 朝向 ── */
@@ -216,20 +255,51 @@ bool Device::init()
 
 	/*
 	 * ── 对外声明的输出尺寸 ──
-	 * ⚠️★ 不要把传感器满分辨率一股脑报上去：软件去拜耳 8 MP 单帧就要几十毫秒
-	 *    （[#95] 实测 AGC 收敛后帧间隔约 130 ms），预览用满分辨率会卡死。
-	 *    这里给一组【降采样】的常用尺寸 + 满分辨率（留给静态拍照），
-	 *    宽高比与传感器一致，避免框架做非等比裁剪。
+	 * ⚠️★ 不要只报满分辨率：流都不超过半个阵列时 HAL 向 libcamera 要合并模式的完整画面，
+	 *    否则要全尺寸，每个输出流还要从整帧各转换一次（[#95] 时帧间隔约 130 ms；
+	 *    2026-11 多线程去拜耳下全尺寸约 33 ms）。
+	 *    这里给一组【降采样】的尺寸 + 满分辨率（留给静态拍照）。
 	 */
 	auto ratio = [&](int w) {
 		return std::make_pair(w, static_cast<int>(
-			static_cast<int64_t>(w) * facts_.activeH / facts_.activeW) & ~1);
+			static_cast<int64_t>(w) * facts_.fovH / facts_.fovW) & ~1);
 	};
-	facts_.outputSizes = { ratio(640), ratio(1280),
-			       { facts_.activeW, facts_.activeH } };
+	/*
+	 * Besides the sensor's own aspect ratio, offer the standard sizes (and
+	 * 320x240, which camera2 requires for JPEG on every camera):
+	 * this device has no media_profiles, so CameraX finds video qualities
+	 * by probing 640x480, 1280x720, 1920x1080 and so on, and without them
+	 * a camera gets no video at all (the rear one had only 640x474 and
+	 * 1280x948). deliver() crops to each stream's aspect ratio.
+	 *
+	 * Also exact 4:3 and 16:9 sizes at full resolution: CameraX takes the
+	 * largest size that matches its aspect ratio within a few pixels. With
+	 * 1280x960 on the list and no full-size 4:3, Aperture took photos at
+	 * 1280x960.
+	 */
+	const int w43 = facts_.fovH * 4 / 3 & ~1;
+	const std::pair<int, int> candidates[] = {
+		{ 320, 240 }, ratio(640), { 640, 480 }, { 1280, 720 }, ratio(1280), { 1280, 960 },
+		{ 1920, 1080 }, { w43, w43 * 9 / 16 & ~1 }, { w43, facts_.fovH },
+		{ facts_.fovW, facts_.fovH },
+	};
+	facts_.outputSizes.clear();
+	for (const auto &s : candidates) {
+		if (s.first > facts_.fovW || s.second > facts_.fovH ||
+		    std::find(facts_.outputSizes.begin(), facts_.outputSizes.end(), s) !=
+			    facts_.outputSizes.end())
+			continue;
+		facts_.outputSizes.push_back(s);
+	}
 
-	/* 15 fps 是软件 ISP 的现实上限，别声明做不到的数。 */
-	facts_.minFrameDurationNs = 66666666;   /* 15 fps */
+	/*
+	 * 30 fps: the multithreaded CPU debayer keeps up with the sensor's
+	 * 30 fps full-size mode (the preview was measured at about 29 fps at
+	 * 4200x3120). Each extra output stream adds a conversion of the full
+	 * frame in deliver(), which can lower the delivered rate. Aperture
+	 * crashes when switching to video if no range reaches 24 or 30 fps.
+	 */
+	facts_.minFrameDurationNs = 33333333;   /* 30 fps */
 
 	characteristics_ = buildCharacteristics(facts_);
 	if (characteristics_.empty()) {
@@ -237,9 +307,10 @@ bool Device::init()
 		return false;
 	}
 
-	ALOGI("%s 就绪：阵列 %dx%d 有效 %dx%d 朝向 %d（libcamera rotation=%d，逆时针） %s%s%s",
+	ALOGI("%s 就绪：阵列 %dx%d 有效 %dx%d 视野 %dx%d+%d+%d 朝向 %d（libcamera rotation=%d，逆时针） %s%s%s",
 	      name_.c_str(), facts_.pixelArrayW, facts_.pixelArrayH,
-	      facts_.activeW, facts_.activeH, facts_.orientation, rawRotation,
+	      facts_.activeW, facts_.activeH, facts_.fovW, facts_.fovH, facts_.fovX,
+	      facts_.fovY, facts_.orientation, rawRotation,
 	      facts_.frontFacing ? "前摄" : "后摄",
 	      facts_.flashLed.empty() ? "" : "（带闪光灯）",
 	      facts_.hasAf ? "（带自动对焦）" : "");
@@ -365,6 +436,8 @@ ndk::ScopedAStatus Device::getTorchStrengthLevel(int32_t *)
 ndk::ScopedAStatus Device::constructDefaultRequestSettings(RequestTemplate type,
 							   CameraMetadata *out)
 {
+	if (!templateSupported(static_cast<int>(type)))
+		return err(Status::ILLEGAL_ARGUMENT);
 	out->metadata = buildDefaultRequest(static_cast<int>(type), facts_);
 	if (out->metadata.empty())
 		return err(Status::INTERNAL_ERROR);

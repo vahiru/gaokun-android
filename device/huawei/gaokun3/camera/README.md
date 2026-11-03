@@ -42,7 +42,7 @@ AOSP 自带的 libjpeg/libyuv 直接可用 ⇒ 绕开整个依赖问题。
   内核 `patches/0036` 暴露成一个 `/sys/class/leds/white:flash`。GPIO93 那个"flash"是假的，已删。
 * **手电筒**：`Device::setTorchMode` 写 `brightness = max_brightness`；相机被会话占用时报 `CAMERA_IN_USE`；
   `open()` 时经 provider 回调报 `NOT_AVAILABLE`，会话关闭报 `AVAILABLE_OFF`。快捷设置的手电筒砖走的就是这条。
-* **拍照闪光 = 预闪点灯到拍完**：没有与曝光同步的 strobe（libcamera 排队深度 4、每帧 60–130 ms，strobe 打下去
+* **拍照闪光 = 预闪点灯到拍完**：没有与曝光同步的 strobe（libcamera 排队深度 4、每帧约 33 ms（早期 60–130 ms），strobe 打下去
   哪一帧在曝光不可控）。所以收到 `AE_PRECAPTURE_TRIGGER_START` 就点灯、报几帧 `AE_STATE_PRECAPTURE` 让 AGC 适应，
   一路亮到那张静态照片（BLOB / `STILL_CAPTURE` intent / `FLASH_MODE_SINGLE`）**完成**才灭。
   ⚠️ 不能在"下一个不要灯的请求入队时"就灭：框架把预览请求紧跟拍照请求发来，那帧还没曝光——
