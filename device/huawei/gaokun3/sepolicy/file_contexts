@@ -284,3 +284,7 @@
 /vendor/bin/gk3denoised      u:object_r:gk3denoise_exec:s0
 /dev/socket/gk3denoise       u:object_r:gk3denoise_socket:s0
 /dev/gk3_pen                 u:object_r:gaokun3_pen_device:s0
+# Gaokun3 FTE7001 candidate HAL and its private transport/storage.
+/vendor/bin/hw/android\.hardware\.biometrics\.fingerprint-service\.gaokun3 u:object_r:hal_fingerprint_default_exec:s0
+/dev/gaokun3_fpcmd u:object_r:gaokun3_fpcmd_device:s0
+/dev/gpiochip4 u:object_r:gaokun3_fp_gpio_device:s0

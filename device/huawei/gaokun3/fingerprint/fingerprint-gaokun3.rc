@@ -1,0 +1,7 @@
+service vendor.fingerprint-gaokun3 /vendor/bin/hw/android.hardware.biometrics.fingerprint-service.gaokun3
+    class hal
+    user system
+    group system
+    interface aidl android.hardware.biometrics.fingerprint.IFingerprint/default
+    # Secure calls may block in firmware. Do not automatically kill/restart an
+    # active operation with a userspace watchdog or periodic reset.

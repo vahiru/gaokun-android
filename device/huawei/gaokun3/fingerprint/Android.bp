@@ -1,0 +1,57 @@
+// SPDX-License-Identifier: Apache-2.0
+cc_library_shared {
+    name: "libgaokun3-fingerprint-matcher",
+    vendor: true,
+    srcs: ["gaokun3-matcher.c"],
+    export_include_dirs: ["."],
+    shared_libs: ["libm"],
+    cflags: ["-Wall", "-Wextra", "-Werror"],
+}
+
+cc_binary {
+    name: "android.hardware.biometrics.fingerprint-service.gaokun3",
+    vendor: true,
+    relative_install_path: "hw",
+    compile_multilib: "64",
+    srcs: ["Core.cpp", "Transport.cpp", "Service.cpp"],
+    init_rc: ["fingerprint-gaokun3.rc"],
+    vintf_fragment_modules: ["fingerprint-gaokun3.xml"],
+    shared_libs: [
+        "libbase",
+        "libbinder_ndk",
+        "libcrypto",
+        "liblog",
+        "libgaokun3-fingerprint-matcher",
+        "android.hardware.biometrics.fingerprint-V4-ndk",
+        "android.hardware.biometrics.common-V4-ndk",
+        "android.hardware.keymaster-V4-ndk",
+    ],
+    cpp_std: "c++17",
+    cflags: ["-Wall", "-Wextra", "-Werror"],
+}
+
+vintf_fragment {
+    name: "fingerprint-gaokun3.xml",
+    src: "fingerprint-gaokun3.xml",
+    vendor: true,
+}
+
+cc_test {
+    name: "gaokun3-fingerprint-session-test",
+    vendor: true,
+    compile_multilib: "64",
+    srcs: ["Core.cpp", "Transport.cpp", "test_session.cpp"],
+    shared_libs: [
+        "libbase",
+        "libbinder_ndk",
+        "libcrypto",
+        "liblog",
+        "libgaokun3-fingerprint-matcher",
+        "android.hardware.biometrics.fingerprint-V4-ndk",
+        "android.hardware.biometrics.common-V4-ndk",
+        "android.hardware.keymaster-V4-ndk",
+    ],
+    ldflags: ["-Wl,--wrap=open", "-Wl,--wrap=__open_2", "-Wl,--wrap=close", "-Wl,--wrap=ioctl"],
+    cpp_std: "c++17",
+    cflags: ["-Wall", "-Wextra", "-Werror"],
+}

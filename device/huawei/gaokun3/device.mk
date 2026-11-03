@@ -1292,3 +1292,5 @@ PRODUCT_PACKAGES += \
     Fcitx5Android
 endif
 endif
+# Class 1 fingerprint candidate; see fingerprint/README.md.
+include $(LOCAL_PATH)/fingerprint/fingerprint.mk
