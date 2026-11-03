@@ -438,6 +438,17 @@ KPATCHES=(
     # ★ 0205：CDSP的FastRPC上下文（compute-cb）标成dma-coherent，录音降噪服务（DeepFilterNet3在NPU上）要用。
     #    不打的话用户态FastRPC在CDSP上加载skel几乎每次都失败（AEE_EUNABLETOLOAD，与时序有关），降噪服务起不来。
     0205-arm64-dts-qcom-sc8280xp-mark-the-CDSP-FastRPC-context-banks-dma-coherent.patch
+    # ★ 0207、0208：前摄hi846的帧时间。0207让PIXEL_RATE报像素阵列的速率（各模式都是288 MHz），并补回LINK_FREQ控件
+    #    给camss用；不打的话所有模式都报144 MHz，libcamera算出的帧长和曝光都翻倍，暗处也不会延长帧时间，camss给全尺寸
+    #    模式推出的链路频率也是错的。0208让写曝光时沿用VBLANK设的帧长；不打的话每次写曝光都把帧长打回模式默认值，
+    #    帧率控制在前摄上无效。
+    0207-media-i2c-hi846-Report-the-pixel-array-rate-and-the-link-frequency.patch
+    0208-media-i2c-hi846-Keep-the-VBLANK-frame-length-when-setting-the-exposure.patch
+    # ★ 0209、0210：换模式时按新模式的高度更新曝光上限（0209后摄ov13b10，0210前摄hi846）。不打的话VBLANK值恰好
+    #    不变时（如ov13b10在2104x1560下设76行再切到4208x3120），开始出流之前曝光上限还是旧模式的（1628行，只有新模式
+    #    一帧的一半），libcamera配置时读到的就是这个值。
+    0209-media-i2c-ov13b10-Update-the-exposure-limit-on-every-format-change.patch
+    0210-media-i2c-hi846-Update-the-exposure-limit-on-every-format-change.patch
 )
 
 # ⚠️ 诊断补丁【不进发版内核】：只在带 --with-diag 时打。顺序有依赖：0028/0029 依赖 0023，

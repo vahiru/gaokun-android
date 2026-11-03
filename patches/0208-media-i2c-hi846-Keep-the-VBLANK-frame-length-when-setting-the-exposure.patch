@@ -1,0 +1,34 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: i2c: hi846: Keep the VBLANK frame length when setting the exposure
+
+The exposure control writes the frame length register too, lengthening
+the frame when the exposure comes within 6 lines of it. It started from
+the mode's default frame length, not from the one set through
+V4L2_CID_VBLANK: every exposure update, which comes every few frames
+under auto exposure, put the frame length back to the default and
+undid a longer frame set for a lower frame rate. Start from height +
+vblank.
+
+The exposure limit allows up to 2 lines below the frame, so an
+exposure in the top 4 lines still lengthens the frame by up to 4
+lines, as before.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ drivers/media/i2c/hi846.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/media/i2c/hi846.c b/drivers/media/i2c/hi846.c
+index d68412691..edd279563 100644
+--- a/drivers/media/i2c/hi846.c
++++ b/drivers/media/i2c/hi846.c
+@@ -1560,7 +1560,8 @@ static int hi846_set_ctrl(struct v4l2_ctrl *ctrl)
+ 
+ 	case V4L2_CID_EXPOSURE:
+ 		shutter = ctrl->val;
+-		frame_len = hi846->cur_mode->frame_len;
++		/* The frame length set through V4L2_CID_VBLANK, not the mode's default */
++		frame_len = hi846->cur_mode->height + hi846->vblank->val;
+ 
+ 		if (shutter > frame_len - 6) { /* margin */
+ 			frame_len = shutter + 6;
