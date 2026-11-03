@@ -216,8 +216,8 @@ bool Device::init()
 
 	/*
 	 * ── 对外声明的输出尺寸 ──
-	 * ⚠️★ 不要把传感器满分辨率一股脑报上去：软件去拜耳 8 MP 单帧就要几十毫秒
-	 *    （[#95] 实测 AGC 收敛后帧间隔约 130 ms），预览用满分辨率会卡死。
+	 * ⚠️★ 不要只报满分辨率：HAL 按请求里最大的流配置 libcamera，每个输出流还要从整帧
+	 *    各转换一次（[#95] 时帧间隔约 130 ms；2026-11 多线程去拜耳下全尺寸约 33 ms）。
 	 *    这里给一组【降采样】的常用尺寸 + 满分辨率（留给静态拍照），
 	 *    宽高比与传感器一致，避免框架做非等比裁剪。
 	 */
@@ -228,8 +228,14 @@ bool Device::init()
 	facts_.outputSizes = { ratio(640), ratio(1280),
 			       { facts_.activeW, facts_.activeH } };
 
-	/* 15 fps 是软件 ISP 的现实上限，别声明做不到的数。 */
-	facts_.minFrameDurationNs = 66666666;   /* 15 fps */
+	/*
+	 * 30 fps: the multithreaded CPU debayer keeps up with the sensor's
+	 * 30 fps full-size mode (the preview was measured at about 29 fps at
+	 * 4200x3120). Each extra output stream adds a conversion of the full
+	 * frame in deliver(), which can lower the delivered rate. Aperture
+	 * crashes when switching to video if no range reaches 24 or 30 fps.
+	 */
+	facts_.minFrameDurationNs = 33333333;   /* 30 fps */
 
 	characteristics_ = buildCharacteristics(facts_);
 	if (characteristics_.empty()) {

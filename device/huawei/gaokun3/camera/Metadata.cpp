@@ -214,8 +214,13 @@ std::vector<uint8_t> buildCharacteristics(const SensorFacts &f)
 	const uint8_t awbLockAvail = ANDROID_CONTROL_AWB_LOCK_AVAILABLE_FALSE;
 	add_camera_metadata_entry(m, ANDROID_CONTROL_AWB_LOCK_AVAILABLE, &awbLockAvail, 1);
 
-	/* 帧率区间：软件去拜耳 8 MP 跑不快，如实声明。 */
-	const int32_t fpsRanges[] = { 5, 15, 15, 15 };
+	/*
+	 * The HAL does not pass a frame rate to libcamera, which picks the
+	 * smallest sensor mode that holds the largest stream: 30 fps at full
+	 * size, 60 fps in the binned modes. Delivery is slower only when
+	 * processing falls behind (see the frame duration in Device.cpp).
+	 */
+	const int32_t fpsRanges[] = { 15, 30, 30, 30 };
 	add_camera_metadata_entry(m, ANDROID_CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES,
 				  fpsRanges, 4);
 
@@ -528,7 +533,10 @@ std::vector<uint8_t> buildDefaultRequest(int templateId, const SensorFacts &f)
 	add_camera_metadata_entry(m, ANDROID_CONTROL_AF_TRIGGER, &afTrigger, 1);
 	const uint8_t flashMode = ANDROID_FLASH_MODE_OFF;
 	add_camera_metadata_entry(m, ANDROID_FLASH_MODE, &flashMode, 1);
-	const int32_t fps[] = { 5, 15 };
+	/* Recording templates get a fixed range, the others a variable one. */
+	const bool video = tmpl == RequestTemplate::VIDEO_RECORD ||
+			   tmpl == RequestTemplate::VIDEO_SNAPSHOT;
+	const int32_t fps[] = { video ? 30 : 15, 30 };
 	add_camera_metadata_entry(m, ANDROID_CONTROL_AE_TARGET_FPS_RANGE, fps, 2);
 	const int32_t cropRegion[] = { 0, 0, f.activeW, f.activeH };
 	add_camera_metadata_entry(m, ANDROID_SCALER_CROP_REGION, cropRegion, 4);

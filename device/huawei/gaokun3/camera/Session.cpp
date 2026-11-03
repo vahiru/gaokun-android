@@ -1258,7 +1258,7 @@ void Session::onRequestCompleted(libcamera::Request *req)
 	 * ── 自动对焦：喂这一帧的清晰度，必要时把马达挪一步（见 AutoFocus.cpp）──
 	 * ★ 时机的关键：这里挪位置，下一帧的请求是在 processCaptureRequest 里入队的，
 	 *   到那时新位置已经写进马达，所以"下一帧的分数"确实属于新位置 —— 等价于
-	 *   每帧采一个点。软件 ISP 每帧 70–130 ms，一次粗到细搜索约 1.2–2.4 s。
+	 *   每帧采一个点。（[#95] 时每帧70–130 ms；现在全尺寸约33 ms。）
 	 */
 	if (rgb && facts_.hasAf)
 		af_.onFrame(rgb, srcWidth_, srcHeight_, lumaStableFor >= 2);
