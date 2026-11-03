@@ -91,7 +91,7 @@ A 档里不在 `accept.sh` 的这几项（要手动，但不用人在场；A28�
 
 | # | 检查 | 怎么做 | 通过判据 | 来源 |
 |---|---|---|---|---|
-| B1 | 前后摄目视 | 解锁后开 Aperture，后摄、前摄各看一次，点按对焦 | 取景是正的（后摄朝向 180，#119 §7）；点按能锁焦 | v063#2 |
+| B1 | 前后摄目视 | 解锁后开 Aperture，后摄、前摄各看一次，横放、竖放都看，点按对焦 | 取景是正的（`dumpsys media.camera`里后摄Orientation 90、前摄270，#23）；点按能锁焦 | v063#2 |
 | B2 | USB 拔插 | 拔插一次 USB 线；port0 / port1 各插一次 U 盘，亮屏、息屏各一次 | USB adb 能回来（0048 + follow）；U 盘能挂上。⚠️ 待机后回插 port0 失败是已知问题 A6 | v063#4、批 1 |
 | B3 | USB 授权弹窗 | 发布构建插 USB | 弹 RSA 授权框；不授权时 `adb devices` 是 unauthorized | G1 |
 | B4 | 真实待机 | 临时 `setprop persist.vendor.gaokun3.allow_suspend 1` → 拔 USB → 息屏等它睡 → 电源键唤醒 → 插回 USB → 改回原值 | `suspend_stats/success` 涨了；TCP adb 回来；插回后 USB adb 回来。⚠️ 别插着线直接 `echo mem`（device 角色挂起会整板复位，#128 §17） | v070#8 |

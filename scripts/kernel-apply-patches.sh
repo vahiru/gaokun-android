@@ -146,6 +146,8 @@ KPATCHES=(
     #    vreg_l9d 随 combo PHY 断电（0086）；UCSI 工作以后它反而让 port0 上的 U 盘根本不枚举（USB3 链路起不来，
     #    又不退回 USB2）。0012 里的 maximum-speed = "high-speed" 同理去掉了。文件留作案卷。
     # ★ 0049：后摄 rotation 180 经用户目视确认（2026-09-24），只去掉 FIXME、值不变 ⇒ dtb 与 0048 逐字节同。
+    #    rotation 180本身没错（设备树按横屏写），但它注释里的"preview upright, SENSOR_ORIENTATION 180"
+    #    已被#23、#42推翻：HAL现在扣掉翻转、换算到竖屏后上报90（见camera/Device.cpp）。
     #    ⚠️ 同号的前身（前 90 / 后 270，按 PR #6 描述）与目视结论相反，已作废 —— 构建机树上若还打着它，
     #    先 `git apply -R` 旧版（正文在 git 历史 cecb9ec 里）再打这一版。
     0049-arm64-dts-gaokun3-camera-rear-rotation-180-confirmed.patch

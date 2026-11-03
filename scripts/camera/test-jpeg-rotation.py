@@ -9,7 +9,8 @@
 
     ① 设备树 rotation                  逆时针，传感器物理安装角
     ② libcamera properties::Rotation   逆时针，继承 ①
-    ③ ANDROID_SENSOR_ORIENTATION       顺时针，= 360 - ②
+    ③ ANDROID_SENSOR_ORIENTATION       顺时针，= 360 - ②′
+       ②′ = ② 扣掉 libcamera 用翻转消掉的角，再从横屏参照系换到竖屏自然方向
     ④ ANDROID_JPEG_ORIENTATION         顺时针，应用按当前设备姿态算出来的
     ⑤ libyuv RotationMode              顺时针，与 ④ 同向
 
@@ -146,10 +147,23 @@ def part_a():
           "A6c 头文件里的声明同步了")
 
     # ── A7. Device.cpp 的逆时针 → 顺时针换算 ──
-    check(re.search(r"facts_\.orientation\s*=\s*\(360\s*-\s*ccw\)\s*%\s*360\s*;",
+    check(re.search(r"facts_\.orientation\s*=\s*\(360\s*-\s*natural\)\s*%\s*360\s*;",
                     dev_code) is not None,
-          "A7 ANDROID_SENSOR_ORIENTATION = (360 - 逆时针安装角) % 360",
-          "上游 libcamera 的 src/android/camera_device.cpp 就是这个式子")
+          "A7 ANDROID_SENSOR_ORIENTATION = (360 - 竖屏自然方向下的逆时针角) % 360",
+          "(360 - x) 这一步和上游 camera_device.cpp 相同；x 先按 A7d、A7e 换算")
+    check(re.search(r"natural\s*=\s*\(ccw\s*-\s*undone\s*\+\s*\(facts_\.frontFacing\s*\?\s*90\s*:\s*270\)",
+                    dev_code) is not None,
+          "A7d 横屏 → 竖屏：前摄加 90、后摄加 270，并扣掉 libcamera 翻转消掉的角",
+          "设备树按横屏使用的方向写，Android 的自然方向是竖屏（#23、#42）")
+    check(re.search(r"probe->validate\(\)\s*;\s*if\s*\(\s*probe->orientation\s*==\s*"
+                    r"libcamera::Orientation::Rotate0\s*\)\s*undone\s*=\s*ccw\s*;",
+                    dev_code) is not None,
+          "A7e libcamera 用翻转凑出了 Rotate0，才把设备树的角度算作已消掉",
+          "C 部分按这条规则建模；不 validate() 的话 orientation 永远是默认的 Rotate0")
+    check("__system_property_get" not in dev_code
+          and "debug.gaokun3.camera.orientation" not in dev_code,
+          "A7f 不再读调试属性 debug.gaokun3.camera.orientation.*",
+          "按旧换算设的值（后 270、前 90）会把新换算带歪")
     check(re.search(r"facts_\.orientation\s*=\s*rot\s*\?\s*\*\s*rot\s*:\s*0\s*;",
                     dev_code) is None,
           "A7b 老的直接抄数值（rot ? *rot : 0）已经删掉",
@@ -201,8 +215,10 @@ def part_b(verbose=False):
     print("\n=== B. 行为模型：场景 → 传感器读出 → HAL 旋转 → JPEG ===")
     print("""
     三个量的关系（很容易混，这里一次说清）：
-      · dt_rotation  设备树/libcamera 的角，【逆时针】，= 把画面转正所需的
-                     逆时针角；它【在数值上】恰好等于"照片看起来顺时针歪了多少"
+      · dt_rotation  竖屏自然方向下、扣掉 libcamera 翻转之后的安装角（Device.cpp 的
+                     natural），【逆时针】，= 把画面转正所需的逆时针角；
+                     它【在数值上】恰好等于"照片看起来顺时针歪了多少"
+                     （设备树的值怎么换到这里见 C 部分）
       · apparent_cw  照片看起来顺时针歪了多少      = dt_rotation
       · sensor_orient ANDROID_SENSOR_ORIENTATION，【顺时针】校正角
                      = (360 - apparent_cw) % 360  = (360 - dt_rotation) % 360
@@ -226,7 +242,7 @@ def part_b(verbose=False):
         # ① HAL 把逆时针的安装角换算成顺时针的校正角（这才是 Android 要的）
         sensor_orientation = (360 - dt_rotation) % 360
         check(sensor_orientation == (360 - apparent_cw) % 360,
-              "B1 Rotation=%3d 度(逆时针) -> 上报 SENSOR_ORIENTATION=%3d 度(顺时针)"
+              "B1 安装角=%3d 度(逆时针) -> 上报 SENSOR_ORIENTATION=%3d 度(顺时针)"
               % (dt_rotation, sensor_orientation))
 
         # ② 设备自然朝向下，应用算出的 JPEG 旋转角就等于 SENSOR_ORIENTATION
@@ -235,20 +251,20 @@ def part_b(verbose=False):
         out = libyuv_rotate(raw, requested)
 
         check(out == upright,
-              "B2 Rotation=%3d 度: 修复后 JPEG == 正立场景" % dt_rotation)
+              "B2 安装角=%3d 度: 修复后 JPEG == 正立场景" % dt_rotation)
 
         # 回归：老代码完全不动像素
         if dt_rotation == 0:
-            check(raw == upright, "B3 Rotation=  0 度: 不旋转本来就对（老代码无辜）")
+            check(raw == upright, "B3 安装角=  0 度: 不旋转本来就对（老代码无辜）")
         else:
             check(raw != upright,
-                  "B3 Rotation=%3d 度: 修复前 JPEG != 正立场景（用户看到的歪）"
+                  "B3 安装角=%3d 度: 修复前 JPEG != 正立场景（用户看到的歪）"
                   % dt_rotation)
         if dt_rotation == 270:
             # 需要补 90 度顺时针而一点没补 ⇒ 看起来是 270 度顺时针
             # = 90 度逆时针，逐字对上用户的描述。
             check(raw == rotate_cw(upright, 270),
-                  "B3b Rotation=270 度: 修复前看起来顺时针歪 270 度",
+                  "B3b 安装角=270 度: 修复前看起来顺时针歪 270 度",
                   "270 度顺时针 == 90 度逆时针，这就是用户报的症状")
 
         # 宽高：校正角为 90/270 时必须换过来
@@ -259,7 +275,7 @@ def part_b(verbose=False):
         out_h = dst_w if swapped else dst_h      # HAL 的 outH
         expect = (h, w) if swapped else (w, h)
         check((out_w, out_h) == expect,
-              "B4 Rotation=%3d 度: 输出 %dx%d（流声明 %dx%d）"
+              "B4 安装角=%3d 度: 输出 %dx%d（流声明 %dx%d）"
               % (dt_rotation, out_w, out_h, dst_w, dst_h))
 
     # ── B5. HAL 对请求角的合同：忠实按【顺时针】转，不自己再猜设备姿态 ──
@@ -274,7 +290,7 @@ def part_b(verbose=False):
             # 否则说明发生了双重校正。
             should_be_upright = (requested == correct_angle)
             check(faithful and (out == upright) == should_be_upright,
-                  "B5 Rotation=%3d 请求=%3d: 忠实旋转，且仅角度正确时正立"
+                  "B5 安装角=%3d 请求=%3d: 忠实旋转，且仅角度正确时正立"
                   % (dt_rotation, requested),
                   "" if should_be_upright
                   else "此时本就不该正立（HAL 不替应用猜设备姿态）")
@@ -287,8 +303,57 @@ def part_b(verbose=False):
         once = libyuv_rotate(raw, angle)
         twice = rotate_cw(once, angle)
         check(once == upright and twice != upright,
-              "B6 Rotation=%3d: 只转一次正好，转两次就歪" % dt_rotation,
+              "B6 安装角=%3d: 只转一次正好，转两次就歪" % dt_rotation,
               "所以 EXIF 里不能再写这个角，否则看图器会再转一遍")
+
+
+# ─────────────── C. 设备树 → SENSOR_ORIENTATION（按本机已确认的事实建模） ───────────────
+
+
+def undone_by_flips(dt, can_flip):
+    """libcamera 用传感器翻转消掉的角（computeTransform，会话要 Rotate0）。
+
+    0 不用消；180 = 水平 + 垂直翻转，传感器两个方向都能翻才消得掉；
+    90 / 270 要转置，翻转做不到，libcamera 就不翻转。
+    """
+    return dt if dt == 0 or (dt == 180 and can_flip) else 0
+
+
+def hal_orientation(dt, front, undone):
+    """Device.cpp 的式子：横屏的设备树角 → 竖屏自然方向 → 顺时针。"""
+    natural = (dt - undone + (90 if front else 270) + 360) % 360
+    return (360 - natural) % 360
+
+
+def shown_cw(undone, sensor_orientation):
+    """原始读出最终被顺时针转了多少度才显示（翻转 = 转 180 度）。"""
+    return (undone + sensor_orientation) % 360
+
+
+def part_c():
+    print("\n=== C. 设备树 → SENSOR_ORIENTATION（按本机已确认的事实建模） ===")
+    # 真机上两颗摄像头都要把原始读出顺时针转 270 度才是正的：
+    # 设调试属性后 270 / 前 90 的旧 HAL 上报后 90 / 前 270，后摄还被翻转，
+    # 取景和照片都是正的（#23、#42）。
+    truth = 270
+    rear = dict(dt=180, front=False, can_flip=True)     # ov13b10
+    front = dict(dt=0, front=True, can_flip=False)      # hi846
+
+    for name, cam, want in (("后摄", rear, 90), ("前摄", front, 270)):
+        u = undone_by_flips(cam["dt"], cam["can_flip"])
+        so = hal_orientation(cam["dt"], cam["front"], u)
+        check(so == want, "C1 %s 设备树 %d -> SENSOR_ORIENTATION %d" % (name, cam["dt"], so),
+              "应为 %d" % want)
+        check(shown_cw(u, so) == truth, "C2 %s 显示出来是正的" % name)
+        # 旧 HAL 直接 360 - 设备树：差 90 度（#23）
+        old = (360 - cam["dt"]) % 360
+        check(shown_cw(u, old) != truth, "C3 %s 旧式子 %d 是歪的" % (name, old))
+
+    # 推算（没在真机上见过）：设备树后摄写 270（0049 的前身）就不再翻转，
+    # 旧式子上报 90，画面上下颠倒；后摄要和现在等价，设备树得写 90。
+    u = undone_by_flips(270, True)
+    check(u == 0 and (shown_cw(u, (360 - 270) % 360) - truth) % 360 == 180,
+          "C4 推算：设备树后摄 270 + 旧式子 = 上下颠倒")
 
 
 def main():
@@ -299,6 +364,7 @@ def main():
     print("照片方向链路自检 —— 目录 %s" % CAM_DIR)
     part_a()
     part_b(args.verbose)
+    part_c()
 
     print("\n=== 汇总 ===")
     print("  检查项 %d，失败 %d" % (CHECKS, len(FAILURES)))

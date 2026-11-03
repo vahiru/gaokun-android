@@ -3,11 +3,8 @@
 #include "Provider.h"
 #include "Session.h"
 
-#include <cstdlib>
 #include <fcntl.h>
 #include <unistd.h>
-
-#include <sys/system_properties.h>   /* __system_property_get：仅用于方向标定的调试覆盖 */
 
 #include <aidl/android/hardware/camera/common/CameraResourceCost.h>
 #include <aidl/android/hardware/camera/common/Status.h>
@@ -126,16 +123,30 @@ bool Device::init()
 	 *
 	 *   ANDROID_SENSOR_ORIENTATION = 把输出图像转正所需的【顺时针】角。
 	 *
-	 *   ⇒ android = (360 - rotation) % 360。上游 libcamera 自己的 Android HAL
-	 *     就是这么算的（src/android/camera_device.cpp）：
+	 *   ⇒ 逆时针换顺时针用 (360 - x) % 360，上游 libcamera 自己的 Android HAL
+	 *     也是这一步（src/android/camera_device.cpp）：
 	 *       "The Android orientation metadata specifies its rotation correction
 	 *        value in clockwise direction whereas libcamera specifies the
 	 *        rotation property in anticlockwise direction."
+	 *     但 x 不能直接用设备树的值，还要先做下面两步。
 	 *
-	 *   ★ 本机设备树：后摄 180（2026-09-24 用户目视确认，patches/0049 只去掉了 FIXME）、
-	 *     前摄 0（待目视）⇒ SENSOR_ORIENTATION 后 180 / 前 0。0 和 180 在这个换算下自反，
-	 *     所以换算方向错了在本机看不出来 —— 一旦哪颗标成 90/270，错了就立刻差 180°。
-	 *     ⚠️ PR #6 描述里的"前 90 / 后 270"与目视结论相反，别照它改。
+	 *   ★ 两边的参照系差 90°（issue #23、#42）：
+	 *     设备树按【横屏使用】的方向写（与下游 Linux 内核一致；绑定文档说"上"由使用环境决定，
+	 *     笔记本摄像头的例子写 0）：后摄 180、前摄 0。Android 的自然方向却是面板原生的
+	 *     【竖屏】，接键盘横放（前摄在上边框）时显示旋转是 ROTATION_90。SENSOR_ORIENTATION
+	 *     要相对竖屏算：从横屏换到竖屏，前摄的安装角加 90°；后摄从机背那一面看，方向相反，
+	 *     加 270°。
+	 *
+	 *   ★ 还要扣掉 libcamera 已经转掉的部分：会话不设 CameraConfiguration::orientation，
+	 *     默认要 Rotate0，simple 流水线用 CameraSensor::computeTransform() 去凑。180 能靠
+	 *     水平 + 垂直翻转消掉，后摄 ov13b10 支持翻转，就是被翻转读出的（日志里
+	 *     transform hvflip）；90 / 270 要转置，消不掉。前摄 hi846 没有翻转控件。
+	 *
+	 *   ⇒ 本机：后摄 180 - 180 + 270 = 270 → SENSOR_ORIENTATION 90；
+	 *           前摄 0 + 90 = 90 → SENSOR_ORIENTATION 270。
+	 *     核对：接键盘横放（ROTATION_90，右边朝上，OrientationEventListener 报 270）时，
+	 *     应用按 Android 文档的 getJpegOrientation 算出的 JPEG 角是后摄 (90 + 270) % 360 = 0、
+	 *     前摄 (270 - 270) = 0，即交付的画面横放时本来就是正的，和设备树按横屏写的意思一致。
 	 */
 	auto rot = props.get(libcamera::properties::Rotation);
 	const int32_t rawRotation = rot ? *rot : 0;
@@ -143,46 +154,42 @@ bool Device::init()
 		ALOGW("libcamera 没报 Rotation 属性，按 0° 处理"
 		      "（到 /dev/v4l-subdev* 上查 camera_sensor_rotation 控件）");
 	int32_t ccw = ((rawRotation % 360) + 360) % 360;
-
-	/*
-	 * ★ 调试覆盖：用系统属性顶掉设备树的值，省掉标定时的
-	 *   「改设备树 → 重编内核 → 刷机 → 重启」循环。
-	 *
-	 *   为什么必须留这个口子：设备树里的 rotation 经驱动
-	 *   v4l2_ctrl_new_fwnode_properties() 变成 V4L2_CID_CAMERA_SENSOR_ROTATION，
-	 *   而那个控件 min==max==def，是【只读】的 —— 运行时 v4l2-ctl 改不动它，
-	 *   每次试一个角都要重来一遍内核。
-	 *   ⚠️ 它只是标定用的临时口子：正确值必须写进设备树（patches/0032 / 0049）。PR #6 初版把
-	 *      标定结果只放在仓库外的 post-fs-data 脚本里设这组属性，干净构建的 ROM 就又歪了。
-	 *
-	 *   ⚠️ 属性给的数就是【写进设备树的那个数】（同一个约定，不用再换算），
-	 *      免得标定时多做一次 360-x 的心算：
-	 *        setprop debug.gaokun3.camera.orientation.rear 270
-	 *      标定完把属性清空，并把值写进设备树 —— 正确的位置是设备树。
-	 *      步骤见 docs/camera-photo-rotation-2026-09-19.md。
-	 */
-	const char *prop = facts_.frontFacing
-				   ? "debug.gaokun3.camera.orientation.front"
-				   : "debug.gaokun3.camera.orientation.rear";
-	char propVal[PROP_VALUE_MAX] = {};
-	if (__system_property_get(prop, propVal) > 0) {
-		const int32_t v = atoi(propVal);
-		if (v == 0 || v == 90 || v == 180 || v == 270) {
-			ALOGW("%s 方向被属性覆盖：%s=%d（设备树报的是 %d）—— 仅调试用",
-			      name_.c_str(), prop, v, rawRotation);
-			ccw = v;
-		} else {
-			ALOGW("%s 属性 %s=\"%s\" 不是 0/90/180/270，忽略",
-			      name_.c_str(), prop, propVal);
-		}
-	}
-
 	if (ccw % 90 != 0) {
 		ALOGW("Rotation=%d 不是 90 的整数倍，按 0° 处理（Android 只认 0/90/180/270）",
 		      rawRotation);
 		ccw = 0;
 	}
-	facts_.orientation = (360 - ccw) % 360;
+
+	/*
+	 * libcamera 用翻转消掉了多少：生成一份配置，和 Session::configureStreams() 一样
+	 * 不设 orientation（会话哪天要设，这里也得跟着改）。validate() 之后 orientation
+	 * 还是 Rotate0，就是设备树的角度整个被消掉了；消不掉时它会把 orientation 改成
+	 * 安装方向，不翻转。
+	 * 不看 validate() 的返回值：simple 流水线一开头就算 orientation，后面即使因为
+	 * 格式返回 Invalid，这个结果也已经定了，和会话用的格式无关。
+	 */
+	int32_t undone = 0;
+	auto probe = cam_->generateConfiguration({ libcamera::StreamRole::Viewfinder });
+	if (!probe || probe->empty()) {
+		ALOGW("%s 生成不了配置，按 libcamera 不翻转处理", name_.c_str());
+	} else {
+		probe->validate();
+		if (probe->orientation == libcamera::Orientation::Rotate0)
+			undone = ccw;
+	}
+
+	/*
+	 * 不再读 debug.gaokun3.camera.orientation.{rear,front}：那两个属性是给旧换算标定用的，
+	 * 照 #42 设过的旧值（后 270、前 90）在这里会把方向带歪。要试别的角度就改设备树
+	 * （rotation 控件是只读的，运行时改不了）。
+	 *
+	 * 先换到竖屏自然方向下的逆时针角，再按 (360 - 逆时针) 换成顺时针。
+	 */
+	const int32_t natural = (ccw - undone + (facts_.frontFacing ? 90 : 270) + 360) % 360;
+	facts_.orientation = (360 - natural) % 360;
+	ALOGI("%s 朝向：安装角 %d°（横屏参照系，逆时针），libcamera 翻转消掉 %d°，"
+	      "竖屏自然方向下 %d° ⇒ SENSOR_ORIENTATION %d",
+	      name_.c_str(), ccw, undone, natural, facts_.orientation);
 
 	/*
 	 * ── 闪光灯（#110）──
