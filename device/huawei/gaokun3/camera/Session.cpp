@@ -647,6 +647,24 @@ ndk::ScopedAStatus Session::processCaptureRequest(const std::vector<CaptureReque
 				af_.trigger(static_cast<uint8_t>(afTrig));
 		}
 
+		/*
+		 * Frame rate: pass the requested AE target FPS range to libcamera
+		 * as FrameDurationLimits. The soft ISP IPA sets the sensor's
+		 * VBLANK from it, and its AGC may expose up to the maximum frame
+		 * duration, so a {15, 30} range slows down to 15 fps in the dark. reuse()
+		 * clears the controls; p.settings holds the full settings of this
+		 * request or the last one, which include the range from the
+		 * request template.
+		 */
+		const int32_t fpsMin =
+			requestEntryInt(p.settings, ANDROID_CONTROL_AE_TARGET_FPS_RANGE, 0, 0);
+		const int32_t fpsMax =
+			requestEntryInt(p.settings, ANDROID_CONTROL_AE_TARGET_FPS_RANGE, 0, 1);
+		if (fpsMin > 0 && fpsMax >= fpsMin)
+			lreq->controls().set(libcamera::controls::FrameDurationLimits,
+					     { static_cast<int64_t>(1000000 / fpsMax),
+					       static_cast<int64_t>(1000000 / fpsMin) });
+
 		const bool fired = p.flashFired;
 		pending_[key] = std::move(p);
 

@@ -12,6 +12,11 @@
 #   随便填一个矩阵会让颜色更错而不是更对，而且上游自己在 uncalibrated.yaml
 #   里就写着 "has a significant performance impact, and should only be
 #   enabled if tuned"。⬜ 真要好颜色，需要一次色卡标定。
+#
+# Agc 的 AeExposureMode：曝光时间和增益的分配顺序。先把曝光加到 33 ms（30 fps），
+#   增益到 8 倍还不够亮，才在帧率范围允许时把曝光延到 66 ms（15 fps）。不写这一项时
+#   AGC 先把曝光拉满再加增益：预览模板的 15–30 fps 范围下，普通室内光也会掉到 15 fps。
+#   要配合 libcamera 补丁才有曝光延长；没有补丁时曝光到不了一帧以上，行为和原来一样。
 %YAML 1.1
 ---
 version: 1
@@ -27,4 +32,8 @@ algorithms:
           gains: [ 1.0, 1.0 ]
   - Adjust:
   - Agc:
+      AeExposureMode:
+        ExposureNormal:
+          exposureTime: [ 33000, 66000 ]
+          gain: [ 8.0, 15.5 ]
 ...

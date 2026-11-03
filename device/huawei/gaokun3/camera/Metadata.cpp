@@ -37,7 +37,7 @@ std::vector<uint8_t> pack(const camera_metadata_t *m)
 }
 
 int32_t requestEntryInt(const std::vector<uint8_t> &requestSettings,
-			uint32_t tag, int32_t def)
+			uint32_t tag, int32_t def, size_t index)
 {
 	if (requestSettings.empty())
 		return def;
@@ -50,12 +50,12 @@ int32_t requestEntryInt(const std::vector<uint8_t> &requestSettings,
 	if (find_camera_metadata_ro_entry(m, tag, &e) != 0)
 		return def;
 
-	if (e.count == 0)
+	if (e.count <= index)
 		return def;
 	if (e.type == TYPE_INT32)
-		return e.data.i32[0];
+		return e.data.i32[index];
 	if (e.type == TYPE_BYTE)
-		return e.data.u8[0];
+		return e.data.u8[index];
 
 	ALOGW("请求里的 tag %u 类型是 %d，不是整数类型 —— 用默认值 %d",
 	      tag, static_cast<int>(e.type), def);
@@ -215,11 +215,12 @@ std::vector<uint8_t> buildCharacteristics(const SensorFacts &f)
 	add_camera_metadata_entry(m, ANDROID_CONTROL_AWB_LOCK_AVAILABLE, &awbLockAvail, 1);
 
 	/*
-	 * The HAL does not pass a frame rate to libcamera. It asks for the
-	 * 2x2 binned mode when every stream fits in half the array (60 fps on
-	 * ov13b10, 30 fps on hi846) and for full size otherwise (30 fps).
-	 * Delivery is slower only when processing falls behind (see the frame
-	 * duration in Device.cpp).
+	 * The HAL passes the requested range to libcamera as
+	 * FrameDurationLimits (see processCaptureRequest), which sets the
+	 * sensor's frame length from it. The modes the HAL asks for run at up
+	 * to 60 fps (ov13b10 binned) or 30 fps (full size, hi846 binned), so
+	 * 30 fps is always reachable. Delivery is slower only when processing
+	 * falls behind (see the frame duration in Device.cpp).
 	 */
 	const int32_t fpsRanges[] = { 15, 30, 30, 30 };
 	add_camera_metadata_entry(m, ANDROID_CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES,
