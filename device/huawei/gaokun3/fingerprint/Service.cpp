@@ -477,6 +477,20 @@ class Fingerprint final : public BnFingerprint {
         p.commonProps.maxEnrollmentsPerUser = gaokun3::kMaxFingers;
         p.sensorType = FingerprintSensorType::POWER_BUTTON;
         p.supportsDetectInteraction = true;
+        // Where the power key sits, so the framework can point at it (side
+        // fingerprint indicator, enrollment animation). Pixels of the built-in
+        // display in its natural portrait orientation (1600 x 2560, 244.8 ppi,
+        // 0.1038 mm per pixel), origin top-left. Held in landscape (ROTATION_90)
+        // the key is on the left edge, its centre about 27 mm below the top of
+        // the 184 mm chassis, i.e. 18 mm below the top of the active area past
+        // the 9 mm bezel; the left edge is the natural top edge and the top
+        // edge the natural right one. The key is about 16 mm long. Both sensor
+        // variants sit in the same key. From Huawei's outline drawing, +/- 2 mm.
+        SensorLocation location{};
+        location.sensorLocationX = 1600 - 172;
+        location.sensorLocationY = 0;
+        location.sensorRadius = 78;
+        p.sensorLocations = {location};
         *out = {p}; return ScopedAStatus::ok();
     }
     ScopedAStatus createSession(int32_t sensor, int32_t user,
