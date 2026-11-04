@@ -1,6 +1,6 @@
 # 待办清单
 
-最后更新：**2026-10-06**（重整：本文件只回答"还剩什么、下一步是什么"。已完成项的过程记录、1.0 dev.1–dev.9 的逐版装机记录、已结案的调查、
+最后更新：**2026-11-05**（状态回填到1.0.0-rc.3发布和dev合入PR #91为止；下面各段原有的日期照旧）。**2026-10-06**重整（本文件只回答"还剩什么、下一步是什么"。已完成项的过程记录、1.0 dev.1–dev.9 的逐版装机记录、已结案的调查、
 v0.6.x / v0.7.x 时期已收口的条目和旧的分梯队总表，原样搬到 [`archive/TODO-history-2026-10.md`](archive/TODO-history-2026-10.md)（按原顺序、标题层级不变）。
 被搬走的节在原位置留了**同名标题 + 结论 + 指引**，所以别的文档里"TODO 的 v0.7.0 一节""TODO B1""TODO「▶ 1.0 批 0/1」dev.5 段"这类引用照旧能找到入口；
 旧文件的 `TODO.md:NNN` 行号引用已对不上，按节名去 archive 里找。原来的文件头（历次对账说明）与 09-23 那行没重算过的统计已删，原文见 archive 的 [`#file-header`](archive/TODO-history-2026-10.md#file-header) / [`#summary-stats`](archive/TODO-history-2026-10.md#summary-stats)；条目数以下面总表为准。）
@@ -18,11 +18,11 @@ D1–D23 是 v1.0-plan §6 的决定，其余是 v1.0-plan 与本文件的条目
 
 所有已发布版本（`patches/0001` 自 08-15 首个提交起）每次内核 oops 往 UEFI 变量写约 10 个 `dump-type0-*`（record_size 1024、kmsg_bytes 10240、
 PSTORE_COMPRESS 关；10-30 实机只读核对），Android 不清 ⇒ 报告者两天 103 个 / 约 98 KB，固件建不了 Boot####、U 盘 / 官方恢复都不出现，售后判"换主板"。
-◐ 止血：`BoardConfig.mk` cmdline 加 `efi_pstore.pstore_disable=1`（现有内核即生效，经 OTA 同步进 ESP 条目 / gk3boot / 救援条目）；
-内核 config 加 `EFI_VARS_PSTORE_DEFAULT_DISABLE`（下次编内核）；live USB cmdline 同步；FAQ 中英加检查与清理步骤。
-⬜ 上机核 `/sys/module/pstore/parameters/backend` 为空、`pstore_disable=Y`（要重启）· ⬜ 已写入变量的自动清理放哪（要用户定：
-gk3boot 开机删 / Android 开机一次性服务删 / 只靠 FAQ）· ⬜ 报告里的 oops `sync_file_ioctl → drm_crtc_fence_get_timeline_name` 另立条目查 ·
-⬜ HyperOS 分支同样带 0001、cmdline 未改 · ⬜ 发版（要用户点头）。
+✅ 止血（随1.0.0-rc.3发布，10-30）：`BoardConfig.mk` cmdline 加 `efi_pstore.pstore_disable=1`（现有内核即生效，经 OTA 同步进 ESP 条目 / gk3boot / 救援条目）；
+内核 config 加 `EFI_VARS_PSTORE_DEFAULT_DISABLE`；live USB cmdline 同步（rc.3没有重做安装器，要等下一次重做才进发布物）；FAQ 中英加检查与清理步骤。
+✅ rc.3上机核过`pstore_disable=Y`、backend 为 `(null)`（[rc.3 发版说明](relnotes/v1.0.0-rc.3.zh-CN.md)）· ⬜ 已写入变量的自动清理放哪（要用户定：
+gk3boot 开机删 / Android 开机一次性服务删 / 只靠 FAQ；rc.3发版说明目前请用户按#56手动清）· ⬜ 报告里的 oops `sync_file_ioctl → drm_crtc_fence_get_timeline_name` 另立条目查 ·
+⬜ HyperOS 分支同样带 0001、cmdline 未改 · ✅ 随rc.3发布。
 
 ## 总表：现在在做 / 待办（2026-10-18 更新；下面「设备现状」一段是 10-06 的，现状以 CLAUDE.md「现在」为准）
 
@@ -42,6 +42,10 @@ D17 充电上限保持现状、**不做写 EC 的上机实测**（2026-10-06）�
 **★ 2026-10-09 `1.0.0-dev.11` 上机（发布构建，戳 `1791554509`，槽 `_a`，载荷 `out/dev11-1791554509/`）**：构建机 D32 —— 内核 `~/gk3-kernel-72y` 打 0078（apply 时 0018 报打不上 = #110 的已知误报）、`--verify` 打不上 0 / fuzz 0 / 47 文件一致、配置断言 164/2、`.config` 与 va39w 实验内核一致、dtb 与 rc.1 逐字节同（`c84f26f7…`），vmlinuz `705b1387…`（`~/v1-work/k78/`，本机 `prebuilt-boot/` 已换，旧的备份在 `out/prebuilt-boot-backup-k77/`）；整包 `release.sh --dry-run` 约 20 分钟，第 2 步断言全过。payload 经 R2 `staging/dev11-1791554509/` 中转（⚠️ 单连接只有约 230 KB/s，8 段并发约 14 MB/s）。`install-ota-local.sh --go`（先 `setenforce 0`）→ oneshot **40 秒起来**。实测：enforcing；`mmap_rnd_bits=24`、482 个进程 0 个映射 ≥ 2^39；`ro.egl.blobcache.multifile=true`；镜像里有相机 `fd use` 与 crash_dump tmpfs 规则；avc 只有已知两类（HID `country`、`com.android.se`）。**A 档 `out/accept/1791554509-20261009-225132/`：PASS 45 · FAIL 2（A3 = 开发机持久化的 5555，预期）· WARN 1（上面两类 avc）· SKIP 1（A11 没给 --video）**。enforcing 下 `bootctl set-active-boot-slot 0` 成功、ESP default 自动同步成 `_a`、零 avc ⇒ **`309f735` 过**。⬜ 要解锁的：App `kill -SEGV` 出 tombstone（`a3c354c`）、Aperture 预览 5 分钟零 `tclass=fd`（#23）；⬜ 英雄联盟进对局、抖音复测；⬜ `a1d303a`（enforcing 下 oneshot 不 setenforce）。
 
 **dev.11 带上的（上面已上机）**：`5c48d08` fcitx5 原样安装、`309f735` HAL 的 ESP 认法（EBUSY / enforcing）、`ec5f2a5` 相机 HAL 用合成器栅栏（issue #23）、`a3c354c` crash_dump 的 memfd（enforcing 下无 tombstone）、**内核：`5b5534c` 0078 进链（要重编内核）**，`ro.egl.blobcache.multifile=true`（issue #34），安装器 S1 / S2 修复与风险确认页（安装器侧，重建 live 镜像时带上）。
+
+**★★★★★ 2026-10-30 `1.0.0-rc.3`发布（Android 17 / crDroid 13，戳`1793322048`）**：首要是SEC-1的安全修复，另带A17、扬声器（#50、#52）、自动亮度（#54）、触摸（#51）、手写笔平滑（#55）。
+经OTA装进开发机备用槽、OneShot起、enforcing：A档PASS 46 · FAIL 0 · WARN 2 · SKIP 0，硬解15/15，前后摄冒烟过；实际走的是A17 → A17，**A16 → A17的OTA没有重新演练**。
+没有重做安装器。验收与下载见[`relnotes/v1.0.0-rc.3.zh-CN.md`](relnotes/v1.0.0-rc.3.zh-CN.md)。rc.3之后合入dev的#57–#91还没进任何ROM构建。
 
 **★★★★ 2026-10-25 `1.0.0-rc.2` 第五次构建（rc2e，戳 `1792913333`）✅ 10-25 上机验收、✅ 10-25 发布并进 OTA 清单**（用户：做触摸 game / daily 开关，发一版 rc.2 进 OTA、把 v0.7.1-alpha 用户带上来；E11 用户定不演练）：仓库 dev `827ed7b`（rc2d + Parts 触摸手感开关）`git archive` 到构建机 `~/v1-work/repo-rc2e/`（956 个文件）；内核沿用 rc2d `7636022f`（boot.img 内核逐字节断言过）；设备树 `sync-device-tree.sh` 237 个文件一致。`release.sh --dry-run`（D32，约 23 分钟）第 2 步断言全过；APK 里有 `TouchModeSettingsActivity` / `TouchModeTileService`。`--no-build --stage-only` → `staging/crDroidAndroid-16.0-20261025-gaokun3-v12.11/`；开发机 payload `staging/rc2-1792913333/`（`payload.bin` 1396335676 字节、sha256 `7a7b8ae3…`，已下回本机 `out/rc2-1792913333/payload/` 核过）。r2-prune 删了 rc2c 两组。构建机已停。⚠️ **进 OTA 清单之前**：v1.0-plan G6 / E11（0.7.x → 1.0 原地升级、保留数据）从没在真机上演练过，而清单一改，所有 v0.7.1-alpha 用户都会走这条路。
 **上机（10-25，用户在场）**：payload push 核 sha → `install-ota-local.sh --go` 装进 `_b` → oneshot **50 秒起来**（戳 `1792913333`、enforcing、`6.6.30-android15-8-…`）→ 解锁后 uiautomator 点「设置 → 系统 → 触摸手感」两次：`touch_mode` game→daily→game，`algo/track_smoothing` 0→1→0、`hand_enabled` 0→1→0，无相关 avc；#48 / #49 只核了属性（cmdline 有 `fw_devlink.sync_state=timeout`、`ro.hardware.egl=angle`），功能没测。
@@ -87,7 +91,7 @@ NET-10 开机探测打到 hicloud 与 miui 两个端点都 204；fcitx5 在输�
 | B4 · G4 | 新用户的安装路径都没在真机上跑过 | ⬜ | **M4a**：外接盘写出厂布局 → U 盘启动（两个口各一次）→ 整盘清空 → 开机并 OTA 一次 → 双系统 → 默认的"清除数据重装" → 首次开机向导走一遍；Windows 脚本找一台真 Windows（否则按 D18 标预览）。安装器代码侧（批 3 前后端、S10 / S15、Windows 伴随工具）都已写、本机测过；live 镜像 10-06 本机重建、rootfs 体检过 | 下文「等安装器」；[`stage7-flutter-debian.md`](stage7-flutter-debian.md) §5.13–§5.15 |
 | B5 · G5 | live 写盘期间电源键 / 合盖会关机或挂起 | ✅ 10-11 真机 | ✅ **2026-10-11 真机过**（用户在场）：开发机内置盘的 `gaokun3 installer` 换成 0.2.0-rc.1 的 live（`nvme0n1p3:/gaokun3/live.squashfs` + ESP `live/initramfs.img`，sha 与发布的 `rescue.squashfs` / `initramfs.img` 同；旧的 09-27 版改名 `.bak-0927` 留着）、oneshot 进去：5 个 sleep target masked、logind 6 个键 ignore、`systemctl suspend` → `Access denied`；短按电源键与合盖 logind 都记到（`Power key pressed short.` / `Lid closed.`）且被忽略，90 秒内 uptime 连续、`suspend_stats/success` 0 → 0。⚠️ 顺带发现：live 文本控制台被 `ucsi connector is not initialized yet` 刷屏（约 2 条/秒，开机起不停）⇒ 终端没法用，要先盲打 `dmesg -n 1`（见下文「安装器控制台刷屏」） | 下文「等安装器」 |
 | B6 · G3 | 设置里"清除所有数据"静默失效 | ◐ | 统一启动入口接管：1.0 镜像默认动作模式 + 分派开（`ca55b5c`），QEMU exec-wipe 过；**用户定 E10 不测** ⇒ 已知限制里"别指望设置里的清除数据"那段保持原样，推荐"图形安装器 → 重新安装 + 清除数据" | [`boot-entry-design.md`](boot-entry-design.md) E10；下文 A5 |
-| B7 · G7 / G8 | 用户默认配置下的待机与长稳没测过 | ⬜ | 批 4（用户在场、拔线）：`allow_suspend=1` 放 8 小时（前后读 `qcom_stats`、`charge_now`、`suspend_stats`）、亮屏硬解 1 小时、72 小时狗粮；先用 V14 验 `scripts/perf/standby.sh` 的输出格式（✅ 插线部分 10-09）。**10-09 线索**：rc.1 息屏 25.7 小时 ADSP 累计只睡 5 秒，此时无 PCM、macro 全 runtime suspended，`LPASS_HW_MACRO` / `DCODEC` 投票仍是 4/4（怀疑相关，未验证）；用户反馈待机功率仍高（版本未确认，PWR-3 只在 rc.1） | v1.0-plan B7 |
+| B7 · G7 / G8 | 用户默认配置下的待机与长稳没测过 | ◐ | 做深度待机（PR #80，下一版起）时在开发内核上拔线过夜实测约0.51 W（README待机一行）；发布构建默认配置下的下面几项仍没做。批 4（用户在场、拔线）：`allow_suspend=1` 放 8 小时（前后读 `qcom_stats`、`charge_now`、`suspend_stats`）、亮屏硬解 1 小时、72 小时狗粮；先用 V14 验 `scripts/perf/standby.sh` 的输出格式（✅ 插线部分 10-09）。**10-09 线索**：rc.1 息屏 25.7 小时 ADSP 累计只睡 5 秒，此时无 PCM、macro 全 runtime suspended，`LPASS_HW_MACRO` / `DCODEC` 投票仍是 4/4（怀疑相关，未验证）；用户反馈待机功率仍高（版本未确认，PWR-3 只在 rc.1） | v1.0-plan B7 |
 | G6 · OTA-2 | OTA 新槽起不来时自动回落 | ◐ | 入口的启动计数与自动回滚已真机过（E5 / E6 / E8）。⬜ **E11：0.7.x → 1.0 那一跳的迁移演练**（那次 OTA 由旧 HAL 执行） | archive [`#v1-batch01`](archive/TODO-history-2026-10.md#v1-batch01) dev.5 段 |
 | G9 · SEC-4 | SELinux：1.0 切 enforcing | ◐ **用户 10-06 定：切** | ✅ dev.9 经 OneShot 真 enforcing 开机：普查只剩两类已知上游缺口；显示 / 触摸 / Wi-Fi / 传感器 / 音频 / iris 15/15 / 前后摄 / A 档 44 / s2idle 11/11（含 USB 角色切换与回插）全过（`out/sel-d5-*`）。BoardConfig 默认改 enforcing，dev.10 起。✅ enforcing → enforcing OTA：rc.1 在 dev.10（enforcing）上经 OTA 装过（10-06，第二次 enforcing 下 OTA），dev.11 再过一次；OTA-5 手工分区 ESP 名字不标准的机器 enforcing 下 OTA 失败（INSTALL 已写改名办法） | BoardConfig.mk 注释 |
 | G10 | 用户文档 | ◐ | README 中英、INSTALL 中英（`33faa9b`）、FAQ、known-limitations、1.0 发版说明草稿（`8ccdd35`）都有了。⬜ 定稿（V17）：草稿里十余处"⬜ 还没在真机上测过"逐条回填或删掉 | `docs/relnotes/v1.0.0-draft*.md` |
@@ -107,7 +111,7 @@ NET-10 开机探测打到 hicloud 与 miui 两个端点都 204；fcitx5 在输�
 
 | 编号 | 一句话 | 状态 | 下一步 | 证据 |
 |---|---|---|---|---|
-| NET-4 · B20 | 稳定的 Wi-Fi MAC | ◐ | dev.9 上查出原修法没生效（随机化总开关关着时框架不碰 MAC）⇒ `b2c8c44`：开机在 Wi-Fi 打开前把 `wlan0` 写成序列号派生值；手动验证过、挂起 11 轮固件重载后地址不变。⬜ dev.10：两次重启 `wlan0` 相同且首字节含 0x02 | 下文「批 2 · 网络」 |
+| NET-4 · B20 | 稳定的 Wi-Fi MAC | ✅ rc.1 | dev.9 上查出原修法没生效（随机化总开关关着时框架不碰 MAC）⇒ `b2c8c44`：开机在 Wi-Fi 打开前把 `wlan0` 写成序列号派生值；手动验证过、挂起 11 轮固件重载后地址不变。✅ rc.1 验收里过了"稳定MAC"（上面总表rc.1 段），rc.1 发版说明已写 | 下文「批 2 · 网络」 |
 | NET-2 | 热点与 Wi-Fi 同时开 | ◐ | dev.9 `wlan1` 预建就位。⬜ 用户在场：连着 Wi-Fi 开热点，Wi-Fi 不断、另一台手机连热点能上网（顺带收掉 #11 的尾巴） | 同上 |
 | NET-7 / NET-10 | 热点 5 GHz / WPA3 / 国家码；联网探测备用地址 | ◐ | ✅ 10-18：国家码 CN；NET-10 开机探测打到 hicloud 与 miui 两个端点都 204（overlay `com.android.networkstack.overlay` 生效；settings 里的两项是 null，正常）。⬜ 手机连 5 GHz / WPA3 热点 | 同上 |
 | NET-1 | 息屏时 AP 断开后自动重连（软件 PNO） | ◐ | DeviceConfig 那道门已去（`e3c5ba3`，tree-fix [18]，dev.2 起）。⬜ V13 实测 | 下文 V3 / V13 |
@@ -118,7 +122,7 @@ NET-10 开机探测打到 hicloud 与 miui 两个端点都 204；fcitx5 在输�
 | B21 · DISP-14 | SLPI 崩溃自愈后传感器全丢 | ◐ | 恢复服务 `gaokun3_sscrecover` 已进 dev.9。⬜ V18：征得同意后让 SLPI 崩一次（唯一允许碰光感的地方），看恢复日志、约 60 秒内 accel 回来、自动旋转跟手 | 下文 V18 |
 | DISP-15 · HW-6 | 键盘关着时拔插仍关；去掉 vibrator example | ◐ | dev.9 已无 vibrator HAL ✅。⬜ 用户拔插键盘盖；设置里"振动和触感"一项消失 | 下文 V18 |
 | BKUP-5 · D15 | 备份默认 Seedvault；默认时区上海 | ◐ | 只在全新 `/data` 上看得到 ⇒ 并进 B4 的新装机验收；"从没设过时区的老机器 OTA 后变上海时间"写进发版说明 | 下文 V18 |
-| DISP-3 · D10 | 中文输入法 fcitx5-android | ◐ | APK 已入构建（`f2fd400`），dev.10 起进镜像。⬜ 上机：设置里能启用、拼音出字、实体键盘中英切换（与 Android 自己的 Ctrl+Space 冲不冲突）、候选窗 | 下文 B12a |
+| DISP-3 · D10 | 中文输入法 fcitx5-android | ◐ | APK 已入构建（`f2fd400`），随rc.1发布（rc.1验收：是系统应用、签名吻合）。⬜ 上机：设置里能启用、拼音出字、实体键盘中英切换（与 Android 自己的 Ctrl+Space 冲不冲突）、候选窗 | 下文 B12a |
 | PWR-4 · USB-1 · USB-2 | USB-C 口异常 / 插电脑落成我方供电时弹通知；host 时不再每秒重绑 UDC | ◐ | 代码 dev.2 起在（`5dfe7dd` / `ccd54f9` / `d511d18`）。⬜ V11 里复现时看通知（插 Mac 落成我方供电、待机后回插坏口）；~~小改进：接收器改 directBootAware~~（10-19 核：10-05 起 `UsbPortNotifier` 与 `BootReceiver` 都已 `directBootAware`、收 `LOCKED_BOOT_COMPLETED`，`parts/AndroidManifest.xml:149-178`） | 下文 A6 |
 | PWR-5 · STOR-1 · STOR-2 · STOR-5 | port0 有下游时保持 host；U 盘挂载；`/data` 保留块 | ◐ | STOR-5 dev.1 实测 ✅（保留块 32768 / gid 1065）。⬜ V11：U 盘 FAT32 / exFAT 插 port1 出现在「文件」；port0 插外设息屏亮屏 5 次仍是 host；开机插着 U 盘再换插 PC 时 adb 能否回来 | 下文 V11 |
 | BATT-1/2/3 · DISP-1 | 电池按位解码（0072）；EC 初始 LID（0073） | ◐ | dev.3 起在。⬜ 用户在场：插电脑 USB 口带负载放电采 `ec_raw` / `current_now` 正负 / `capacity_level`。✅ 合盖开机（`initial lid state: closed`，开机结束后熄屏，开盖唤醒）、三种合盖姿态（合盖 SW_LID 1、开盖 0、翻到背面没有事件）⇒ 默认合盖熄屏：`config_lidControlsSleep`，已有的安装由 Parts 的 `LidBehaviorDefault` 改一次；恢复时的状态见 0168 | archive `#v1-batch01` dev.3 段 |
@@ -130,7 +134,7 @@ NET-10 开机探测打到 hicloud 与 miui 两个端点都 204；fcitx5 在输�
 |---|---|---|---|
 | DISP-2 · D9 | 接键盘横放时竖屏 App 把整屏转竖 | ⬜ | `wm set-ignore-orientation-request` 运行时 A/B，倾向回 Android 默认 |
 | AV-1 | 录屏 / 录像从没产出过文件 | ◐ | Aperture前后摄都录出过（后摄1080p，30 fps）；Recorder录屏还没测 |
-| AV-12 | 前摄方向没目视（DT 是 0） | ⬜ | 先拉 DCIM 看 EXIF，再请用户看一眼 |
+| AV-12 | 前摄方向没目视（DT 是 0） | ✅ dev | 设备树的0 / 180是对的（按横屏取景），HAL少算了转到竖屏自然方向的90°，所以前后摄画面都转了90°；PR #83在 HAL 里补上，实机前后摄预览和照片都正，下一版起（见下文 A7） |
 | APP-4 | 银行 / 支付 App 与 Play Integrity 从没测 | ⬜ | 支付宝、微信支付、招行、工行、云闪付、12306 + 一个 Integrity 检测 App |
 | INST-18 · D19 | 开机菜单不接键盘能否操作 | ⬜ | V15 实测音量键 / 电源键；再定 timeout |
 | V12 | 亮屏后方向、陀螺仪、亮度 | ⬜ | 见下文 V12 |
@@ -181,8 +185,8 @@ NET-10 开机探测打到 hicloud 与 miui 两个端点都 204；fcitx5 在输�
 
 ### ④ 1.0 之后（v1.0-plan §7 + 本文件的长期项）
 
-指纹 T6（③ client driver、④ Android HAL；APP-18 支付指纹）· 硬件视频编码 A2 · MTP / USB 用途 · BT SCO 通话 · WoW 待机联网 ·
-A6 根因（dwc3 / QMP 的 resume 路径）与 B14 息屏 USB adb 原生化 · GPU SMMU 中断根治 B6 · 手掌碎块 T1 · 手写笔 · 相机变焦 / EV / 画质（T3、A7 余项）·
+指纹 T6（③ client driver、④ Android HAL；APP-18 支付指纹）· 硬件视频编码 A2 · BT SCO 通话 ·
+A6待机后回插复测（0086之后）与 B14 息屏 USB adb 原生化 · WoW 收包唤醒（#88、#89）在ROM构建上、enforcing下上机核对 · GPU SMMU 中断根治 B6 · 相机变焦 / EV / 画质（T3、A7 余项）·
 游戏音频基础延迟（B25 尾巴 / AV-7）· NET-4 按网络的随机 MAC（连同一次性迁移）· Power HAL 真实现与 RT uclamp · 120 Hz 无缝降频 ·
 quota / projid / casefold · FUSE passthrough · zram · Wi-Fi Direct · 海外 regdomain · B0 构建机的树换成本仓 checkout ·
 B3 余项（退役 ESP 派生文件、AVB）· tinymix 的 vendor 变体 · #12 的 39 位地址空间测试内核起不来（搁置）· iris 零碎（`venus_compat_gfmt=N` 复测、HAL 的 POLLPRI 空转、SYS_ERROR 后 `invalid uc_region`；seek 到更低分辨率后裁剪不更新：flush 之后固件不发序列事件；字节缓冲 + 遗留数组模式下分辨率变大时报 `tried 5 realloc and failed`：DecodeComponent 不上报尺寸变化）·
@@ -201,7 +205,7 @@ B3 余项（退役 ESP 派生文件、AVB）· tinymix 的 vendor 变体 · #12 
 | B15 全新安装丢触摸参数 · B17 find-device | ✅ 2026-09-23 | — |
 | B16 TCP 缓冲 · B18 remoteproc · B22 NTP · B23 zap shader 随 live 发 | ✅（v0.6.3 / v0.7.0 / v0.7.1 验收） | — |
 | B19 没有回落槽 | VAB 的设计；回落由统一启动入口的自动回滚承担（E8 过） | G6 |
-| B20 MAC 每次开机都变 | ◐ | NET-4 |
+| B20 MAC 每次开机都变 | ✅ rc.1 | NET-4 |
 | B21 SLPI 自愈后传感器全丢 | ◐ 已进 dev.9 | ② 表 B21 |
 | B24 内置麦克风 App 录音 | ✅ v0.7.0 验收 A1–A5（#127 §7） | — |
 | B25 音游播放丢块 | ✅ 0069 随 v0.7.1 发、出声音游过（#130 §7）；播放回归 = AV-8（批 4），基础延迟 = 1.0 之后 | — |
@@ -340,8 +344,8 @@ B3 余项（退役 ESP 派生文件、AVB）· tinymix 的 vendor 变体 · #12 
 | #20 英雄联盟手游（国际版同包名） | 与 #17 同一崩溃（tombstone_09/10：同 BuildId、同 pc `0x3c4a880`）⇒ 按重复关闭；附带的 tombstone_36 是 system_server 的 HWUI 走 Vulkan 时 `queueCount < kRequestedQueueCount`（turnip 只报 1 个队列，`stage5-freedreno.md` 已记） | — |
 | #18 Wi-Fi + 热点同开 | rc.1 预建 `wlan1`，等报告者验 | 并入 NET-2 |
 | #19 抖音闪退 | x18 / SCS 说法已核否（10-06 回复）。**2026-10-08 本机 A/B**：抖音官方 64 位包（`v5072_400601`，versionName 40.6.0，带 `libbyteVC2dec.so`），原内核（rc.1，7.2.9，48 位）与 0078 内核各刷 12 个视频，BVC2 解码线程在跑、**两边都不崩** ⇒ 本机复现不了（报告时是 7.2.0-rc2 #15）；0078 下无回归 | 等报告者在 rc.1 上复测与 `/proc/<pid>/maps` |
-| #21 手写笔 | 作者已撤回 PR #22（基线换到 7.2.9、改走面板从片 `spi20` 路线）；issue 留作跟踪，DISP-13 仍是 1.0 之后 | 等作者按新基线重提 |
-| #23 相机会话报错 + 画面转 90° | ★ 会话报错的根因：enforcing 下 `hal_camera_default` 用不了 drm_hwcomposer 发的 sync_file 栅栏（`tclass=fd`）⇒ binder `BR_FAILED_REPLY` ⇒ CAMERA_ERROR。rc.1 验收没抓到（预览没跑到缓冲带着栅栏回来的那一轮）。规则已补（`ec5f2a5`），**进 dev.11** | ⬜ dev.11 上 Aperture 预览跑满 5 分钟零 `tclass=fd`；⬜ 方向：报告者机器是 2023 款 GK-W76（后摄同为 ov13b10 + dw9714），开发机上 Aperture 横 / 竖各目视一次（与 AV-12、DISP-2 一起）；⬜ 浏览器里后摄 R/B 对调、部分网站开不了后摄（要网站名与复现时的 logcat） |
+| #21 手写笔 | PR #22（mashen11）10-08撤回，issue同日关闭；面板从片`spi20`路线由PR #27另行实现，随rc.2发布 | ✅ DISP-13完成 |
+| #23 相机会话报错 + 画面转 90° | ★ 会话报错的根因：enforcing 下 `hal_camera_default` 用不了 drm_hwcomposer 发的 sync_file 栅栏（`tclass=fd`）⇒ binder `BR_FAILED_REPLY` ⇒ CAMERA_ERROR。rc.1 验收没抓到（预览没跑到缓冲带着栅栏回来的那一轮）。规则已补（`ec5f2a5`），**进 dev.11** | ⬜ dev.11 上 Aperture 预览跑满 5 分钟零 `tclass=fd`；✅ 方向：不是机型差异，HAL对每台机器都少算了转到竖屏自然方向的 90°，PR #83 修了（下一版起，见 AV-12）；⬜ 浏览器里后摄 R/B 对调、部分网站开不了后摄（要网站名与复现时的 logcat） |
 | #24 待机时 `System (AUDIO)` 耗电高 | 开发机静置时 audioserver / 音频 HAL 30 秒 CPU 为 0，未复现。那一项是估算值（"音频输出开着的时长" × power_profile 的 `audio` 30 mA），要先分清是真掉电还是只是记账 | 等报告者的 `dumpsys batterystats` / `media.audio_flinger` |
 | （顺带）enforcing 下 App 崩溃不出 tombstone | crDroid bionic 把 `/proc/*/maps` 先拷进 `memfd:axion:*`，本机 memfd 落在通用 `tmpfs`，`crash_dump` 写被拒 ⇒ `Failed to parse maps` ⇒ 无 tombstone（英雄联盟崩溃、`kill -SEGV` Twelve 都复现）。规则 `a3c354c`，**未编译** | ⬜ dev.11 前在 crDroid 树 grep axion 看上游策略；⬜ dev.11 上 `kill -SEGV` 普通 App 出 tombstone、零 crash_dump avc；进 `release-checklist` |
 
@@ -366,13 +370,14 @@ B3 余项（退役 ESP 派生文件、AVB）· tinymix 的 vendor 变体 · #12 
 ### A0. ✅ 侧滑返回手势失效 —— 根因：这台机器从来没有过导航栏
 结论：overlay 设 `config_showNavigationBar=true`，#86 装机验收生效，用户 2026-09-23 确认。过程记录见 [archive/TODO-history-2026-10.md#a0](archive/TODO-history-2026-10.md#a0)。
 
-### T1. ✅ 触摸手感 —— 已随 v0.6.2 发布，只剩手掌碎块（[#114](stage4-findings.md)–[#116](stage4-findings.md)）
+### T1. ✅ 触摸手感 —— 已随 v0.6.2 发布，手掌碎块随rc.2解决（[#114](stage4-findings.md)–[#116](stage4-findings.md)）
 结论：T1a 幽灵触摸（跳点限速线）、T1c fuzz=0 与触点面积轴、T1d 驱动六个缺陷、T1e 可观测性（`patches/0037`–`0047`）都已发。过程记录见 [archive/TODO-history-2026-10.md#t1](archive/TODO-history-2026-10.md#t1)。
 还剩（都不阻断 1.0）：
-* ⬜ 手掌碎成多触点（`max_contacts` 打满 10）：三个阈值假设全被实测否决、不影响点击 ⇒ 下一版驱动做跨帧形态判据（DISP-7，1.0 之后）。
+* ✅ 手掌碎成多触点（`max_contacts` 打满 10）：PR #30（`patches/0081`、`0082`，手的位置图 + `MT_TOOL_PALM`撤回）随rc.2发布，见[`palm-rejection.md`](palm-rejection.md)；
+  BOE机器上实测过（回放里手掌误报281 → 1）。剩手掌加另一只手同时在屏上时偶尔误触。
 * ⬜ T1b 三道形同虚设的噪声闸门：`patches/0039` 已做成旋钮 `iso_nbr_ratio_q8` / `edge_min_area`、默认值不变 —— 没有证据说幽灵走这两条路，留作边缘幽灵复现时的工具。
 * ⬜ 触摸 IDC（`dumpsys input` 里 `ConfigurationFile: <none>`）：面积轴已有，可以写 `touch.size.calibration`（DISP-6，polish）。
-* ◐ Parts 里的触摸手感开关（2026-10-25 用户要求，有人反馈 game 预设手感差）：「设置 → 系统 → 触摸手感」+ 控制中心「游戏触摸」磁贴，改 `persist.sys.gaokun3.touch_mode`（开 = game、关 = daily）。⬜ 构建、上机：两个入口互相同步、切换后 `algo/hand_enabled` 跟着变（`track_smoothing` 两种模式都是 0）、enforcing 零 avc。
+* ✅ Parts 里的触摸手感开关（2026-10-25 用户要求，有人反馈 game 预设手感差）：「设置 → 系统 → 触摸手感」+ 控制中心「游戏触摸」磁贴，改 `persist.sys.gaokun3.touch_mode`（开 = game、关 = daily）。随rc2e发布；10-25 上机在设置页切换两次，`touch_mode`、`hand_enabled` 跟着变，无相关 avc（上面总表 rc.2 段）。磁贴与设置页互相同步没有单独记录。
 
 ### T2. ⬜ Google 未认证（"设备未经 Play 保护机制认证"）
 修法是把本机的 Android ID 登记一次：工具 `bash scripts/google/gsf-android-id.sh`（新版 GMS 的 ID 在 `shared_prefs/Checkin.xml`，不在 `gservices.db`）、
@@ -408,7 +413,7 @@ B3 余项（退役 ESP 派生文件、AVB）· tinymix 的 vendor 变体 · #12 
 
 ### A3. 自动亮度（环境光）—— ✅ #54
 tcs3701 的驱动给 `ambient_light` 注册了两个 SUID，默认的那个（变化时上报）是驱动内部的主传感器，一使能 SLPI 就崩溃（`sns_stream_service.c:436` 的 `req_found` 断言）；连续上报的那个可用。传感器 HAL 只用后者（`SscHub::FindStreamingLight`），overlay 打开自动亮度。细节见 [`device/huawei/gaokun3/sensors-hal/README.md`](../device/huawei/gaokun3/sensors-hal/README.md) 的"环境光"一节。
-⬜ A17 构建上机看一眼光线传感器和自动亮度（#54 只在 A16 rc.2 上实测过）。
+✅ 随rc.3（A17）发布，rc.3上自动亮度可用（rc.3 发版说明）。
 2026-09-23 之前"芯片不应答"的定性与 `scripts/ssc/` 实验记录见 [archive/TODO-history-2026-10.md#a3](archive/TODO-history-2026-10.md#a3)。
 
 ### A5. 恢复出厂设置不起作用 —— ◐ 已交给统一启动入口
@@ -418,6 +423,11 @@ tcs3701 的驱动给 `ambient_light` 注册了两个 SUID，默认的那个（�
 ### A6. USB-C 口（port0）角色 / UCSI ★ 待机后回插仍会坏
 * 0048（`qcom,select-utmi-as-pipe-clk`）修好了常规角色切换（#118 §8：来回切三次 `-110` / `-524` 各 0 次）；角色策略用用户态 `follow`（电气探测，不信 EC）。
 * ❌ **待机 / 唤醒之后回插 port0 仍会坏**（v0.7.0 第 8 项：`-524` / `-110`，间歇，第一个候选版同样步骤过过一次）⇒ 1.0 只止损：PWR-4 通知（`5dfe7dd`）+ 已知限制；根因（dwc3 / QMP PHY 的 resume 路径）放 1.0 之后。
+  ◐ 2026-10查到的线索：组合PHY退出时vreg_l9d断电，port0的dwc3软复位超时（`-110`）、xhci和gadget起不来直到重启，
+  device角色挂起整板复位（#52）也是它。`patches/0086`（PR #36，vreg_l9d常开）随rc.2发布；修好以后"待机后回插"没有单独复测，复测过再改已知限制。
+* ◐ rc.2起（PR #36–#39）：UCSI修好（`TYPEC_MUX_GPIO_SBU=y`、0087–0093），port0能跑USB 3；数据角色改由USB端口HAL按供电方向判断
+  （EC只报供电方向，不报对面是主机还是设备，各种外设都量过），U盘插上约1秒后以USB 3枚举。下面两条是rc.2之前的情况。
+  另有偶发的开机时UCSI初始化失败（`PPM init failed`，`/sys/class/typec`为空，重启恢复），还没查。
 * UCSI 在当前内核上是活的，但给的数据角色是反的（PC 插着时 `data_role=[host]`），靠 `init.gaokun3.usb.rc` 硬写 device 盖回来（#112）；EC 的 `partner_type` 插不插都是 2，可能是常数（#118 §6）。
 * 2026-10-05 新发现：插 Mac 有时落成**我方供电**（USB-1，`ccd54f9` 弹通知请重插）；host 时每秒重绑 UDC（USB-2，`d511d18`）；port0 = 靠近电源键的口（STOR-3 ✅）。
 * ⬜ 下一步：① 复现 —— 待机前后各切一次角色看哪一步坏，开 dwc3 / QMP 的 dyndbg；② **要用户插拔**：U 盘 / 纯充电器 / 扩展坞各跑一次 `scripts/usb/ucsi-snapshot.sh`，看 `partner_type` 与 `pwr_dir`，再定 quirk（扩展坞会 DR_Swap，不能盲用"受电 ⇒ 对方是主机"）；③ hub / U 盘 / 充电器的真机场景（V11）。
@@ -428,9 +438,10 @@ tcs3701 的驱动给 `ambient_light` 注册了两个 SUID，默认的那个（�
 见 [archive/TODO-history-2026-10.md#a8](archive/TODO-history-2026-10.md#a8)（★ 对照组要先确认两边走的是同一条链路）。
 
 ### A7. 摄像头 —— 前后摄可用，电源域缺陷已根治（#105）
-已收口：电源域（`patches/0031`）、基于 libcamera（simple 流水线 + 软件 ISP）的相机 HAL、后摄 OV13B10（0032 / 0034 / 0035）、闪光灯与手电筒、相机 ID 稳定、后摄方向 180（用户目视）、PR #6（AF / JPEG 旋转 / 崩溃）、后摄隐私灯（0074）。
+已收口：电源域（`patches/0031`）、基于 libcamera（simple 流水线 + 软件 ISP）的相机 HAL、后摄 OV13B10（0032 / 0034 / 0035）、闪光灯与手电筒、相机 ID 稳定、后摄方向 180（用户目视；画面其实还转了90°，见下面AV-12）、PR #6（AF / JPEG 旋转 / 崩溃）、后摄隐私灯（0074）。
 过程记录（#81–#112 的全过程、已否的候选修复）见 [archive/TODO-history-2026-10.md#a7](archive/TODO-history-2026-10.md#a7)。还剩：
-* ⬜ **AV-12 前摄方向**：设备树 0，未目视（PR 文档 7.2 的照片证据支持 0）—— 1.0 应做。
+* ✅ **AV-12 前摄方向**：设备树的 0 / 180 按横屏取景是对的；Android 的自然方向是竖屏，HAL 少算了这 90°，前后摄画面都转了90°。
+  PR #83在HAL里补上（不改设备树，后摄ov13b10的H+V翻转照旧），实机前后摄预览和照片都正，下一版起。
 * ◐ **AV-1 录屏出片**（录像已经出片）、⬜ Aperture 后摄闪光 ON 拍一张看 LED 亮灭各一次 —— 都要用户在场。
 * ⬜ **T3 画质**（1.0 之后）：闪光帧下发 `ExposureValue` 负补偿；libcamera AWB 剔饱和像素（已做：`patches/libcamera/0009`，值得投上游）；前摄CCM要色卡（现在是Windows驱动里高通的通用矩阵，白点只在一台机器上量了两种光源，见`hi846.yaml`；后摄已用华为Windows驱动里这款模组的调校，见`ov13b10.yaml`）；手电筒亮度档位（HAL 声明 `FLASH_INFO_STRENGTH_*`、实现 `turnOnTorchWithStrengthLevel`）；`kDarkLuma=50` 是启发式（要 softisp IPA 把曝光 / 增益写进结果元数据）；AV-11变焦/EV。
 * ⬜ libcamera：`camera_sensor_properties` 加 ov13b10、增益模型 helper、`ov13b10.yaml`；生成源码改成 Soong `genrule`（`patches/libcamera/README.md:34`）。上游：`ov13b10.c` 补 `get_selection`；读 EEPROM@0x50；camcc `Mark RCGs shared` 投稿 + 等待值 `0027`。
@@ -444,7 +455,7 @@ s2idle 待机（`dr_mode="otg"`，#52–#57）· 耳机口与内置麦（#40）�
 
 ## B. 工程债与正确性
 
-### B12a. ◐ 中文输入法（DISP-3 / D10）：fcitx5-android 0.1.3 已放进构建，⬜ 下一版构建 + 上机
+### B12a. ◐ 中文输入法（DISP-3 / D10）：fcitx5-android 0.1.3 随rc.1预装，⬜ 上机核对打字
 2026-10-06 用户定从 GitHub release 取：APK sha256 `8e5de1036aea…` 与 GitHub 资产 digest 一致；`device.mk` 改成 APK 在就带（`GAOKUN3_WITH_FCITX5=false` 显式不带）；`sync-device-tree.sh` 3b2 断言；NOTICE 记 LGPL 源码 tag；已知限制中英改成"已预装、要自己打开一次"（没设成默认输入法）。
 ⬜ 上机：设置里能启用、拼音能出字、GK-W7X 键盘盖上怎么中英切换（与 Android 自己的 Ctrl+Space 冲不冲突）、候选窗正常。
 10-05 的选型调研（fcitx5-android vs Trime）见 [archive/TODO-history-2026-10.md#b12a](archive/TODO-history-2026-10.md#b12a)。
@@ -457,7 +468,7 @@ s2idle 待机（`dr_mode="otg"`，#52–#57）· 耳机口与内置麦（#40）�
 
 ### B14. ⬜ 息屏 USB adb（1.0 之后；[#112](stage4-findings.md)）
 脚本折中（`bin/gaokun3-usbrole.sh` v2：插着主机息屏不切 host、不放行挂起，拔线再切）已在镜像里（2026-10-04 在 v0.7.1 上 md5 与仓库一致）；开发机 `allow_suspend` 持久为 0，1.0 起可用 Parts 开关（PWR-16）。
-源码定性：device 模式挂起无条件 `dwc3_core_exit()`、gadget 总 soft disconnect ⇒ 上游 dwc3 没有"adb 穿越睡眠"。⬜ 复位根因（device 角色下挂起会整板复位，#52）开放；⬜ UCSI 角色修好（A6）后去掉脚本的 host 切换。
+源码定性：device 模式挂起无条件 `dwc3_core_exit()`、gadget 总 soft disconnect ⇒ 上游 dwc3 没有"adb 穿越睡眠"。◐ device 角色下挂起会整板复位（#52）：查到是vreg_l9d断电，`patches/0086`随rc.2发布，PR #39审查时device角色挂起61次无复位（A6）；⬜ UCSI 角色修好（A6）后去掉脚本的 host 切换。
 原文见 [archive/TODO-history-2026-10.md#b14](archive/TODO-history-2026-10.md#b14)。
 
 ### B13. ✅ `install-ota-local.sh` 装前先算 ESP 空间（2026-09-14）
@@ -473,7 +484,7 @@ s2idle 待机（`dr_mode="otg"`，#52–#57）· 耳机口与内置麦（#40）�
 ### B1. SELinux 转 enforcing（= SEC-4 / G9）
 现状以 [#129](stage4-findings.md)（第七轮）为准：块设备标签改按 by-name、相机 allocator 等 20 余处已修（`572a060` / `d885275` / `4d93d4c`）；**2026-09-30 第一次真 enforcing 开机成功**
 （vendor 域零 denial，解锁 / GPU / 相机 / 音频 / 硬解 / 传感器 / Wi-Fi / 蓝牙 / usbrole 全过）。工具在 [`scripts/selinux/`](../scripts/selinux/README.md)。
-* ⬜ enforcing 下真实待机与回插、enforcing → enforcing OTA；然后**用户定（D5）**默认改 enforcing 跟哪一版发（先发策略、再去掉 cmdline 的 permissive）。恢复出厂那一项随 E10 不测。
+* ✅ 用户10-06定D5：dev.10起默认enforcing，随rc.1发布；enforcing → enforcing OTA在rc.1、dev.11上过了（①表G9）。⬜ enforcing下拔线真实待机与回插没有单独测过。恢复出厂那一项随 E10 不测。
 * ⬜ 新服务（PWR-16 开关、sscrecover、wlanap、Histen 开着放音 + 录音）在 enforcing 下各跑一次看 avc（`hal_audio_default` 自调用的规则已在 `hal_audio_default.te:34`，`572a060`）。
 * ⬜ 非阻塞：rproc-kick / hexagonrpcd / bootctl 规则收窄；tinymix 的 vendor 变体（有了它 audioroute 就不用挂 `vendor_executes_system_violators`）；genfscon 前缀匹配盖住 UCSI `power_supply` 下的 `wakeupN`（语义不对、当前无后果，别当成有功能在等着修）。
 * ⚠️ 切 enforcing 后 ESP 名字不标准的机器 OTA 会失败（OTA-5）；**不要用 `-user` 变体构建**（#117 §15）。

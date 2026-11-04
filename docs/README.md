@@ -7,7 +7,7 @@
 | Install / update / remove | [INSTALL.md](INSTALL.md) | [INSTALL.zh-CN.md](INSTALL.zh-CN.md) |
 | Questions & troubleshooting | [FAQ.md](FAQ.md) | [FAQ.zh-CN.md](FAQ.zh-CN.md) |
 | Known limitations, unsupported features | [known-limitations.md](known-limitations.md) | [known-limitations.zh-CN.md](known-limitations.zh-CN.md) |
-| Release notes | [relnotes/](relnotes/) (latest released: [v0.7.1-alpha](relnotes/v0.7.1-alpha.md)) | 同左（已发布的各版只有英文；1.0.0 起另附 `.zh-CN.md`） |
+| Release notes | [relnotes/](relnotes/) (latest released: [v1.0.0-rc.3](relnotes/v1.0.0-rc.3.md)) | 同左（已发布的各版只有英文；1.0.0 起另附 `.zh-CN.md`） |
 
 项目总览与状态表在仓库根的 [README.md](../README.md) / [README.zh-CN.md](../README.zh-CN.md)。
 下面是全部文档，给维护者和 AI 助手用。
@@ -26,7 +26,7 @@
 | [INSTALL.md](INSTALL.md) / [.zh-CN](INSTALL.zh-CN.md) | 图形 / 命令行安装、免 U 盘双系统、更新、adb、救援系统、启动入口与 fastboot | 现行（中英同步） | 用户 |
 | [FAQ.md](FAQ.md) / [.zh-CN](FAQ.zh-CN.md) | 按"出了什么事 → 怎么办"组织的问答：启动菜单、回退、抓日志、恢复出厂、卸载 | 现行（中英同步；出处在中文版注释里） | 用户 |
 | [known-limitations.md](known-limitations.md) / [.zh-CN](known-limitations.zh-CN.md) | 装之前该知道的长期限制、不支持的功能、安全与许可取舍（每条注释对应 v1.0-plan 的 id） | 现行（中英同步） | 用户 |
-| [relnotes/](relnotes/) | 各版发版说明：v0.3.0 / v0.6.0 / v0.6.1 / v0.6.2 / v0.7.0 / v0.7.1 已发布 | 历史（已发布的不改） | 用户 |
+| [relnotes/](relnotes/) | 各版发版说明：v0.3.0 / v0.6.0 / v0.6.1 / v0.6.2 / v0.7.0 / v0.7.1 已发布，之后是候选版1.0.0-rc.1 / rc.2 / rc.3 | 历史（已发布的不改） | 用户 |
 | [relnotes/v1.0.0-draft.md](relnotes/v1.0.0-draft.md) / [.zh-CN](relnotes/v1.0.0-draft.zh-CN.md) | 1.0.0 发版说明草稿（定稿时改名） | 现行（草稿） | 维护者 |
 | [relnotes/v0.6.3-alpha.md](relnotes/v0.6.3-alpha.md) | 从未发布的 v0.6.3 草稿 | 已取代 → [v0.7.0-alpha](relnotes/v0.7.0-alpha.md)（并入） | 维护者 |
 | [relnotes/TEMPLATE.md](relnotes/TEMPLATE.md) | 发版说明模板（头注释的状态行格式） | 现行 | 维护者 |
@@ -80,6 +80,7 @@
 | [fingerprint/README.md](fingerprint/README.md) | 指纹 Windows 侧逆向报告的目录说明（报告本身不入库） | 参考 | 维护者 |
 | [parallel-mainline-generic.md](parallel-mainline-generic.md) | LineageOS 系 mainline-generic 的 gaokun3 支持（他人分享的补丁与交叉验证） | 历史（2026-08-17 后未跟进） | 维护者 |
 | [deep-sleep.md](deep-sleep.md) | 深度待机：`qcom_stats` 三个计数的含义，之前挡住 DDR 和 CX 下电的三处投票，链路断开时的供电，WoW 下的 BA 失步，Wi-Fi 崩溃恢复，恢复失败时怎么办，排查方法 | 现行 | 维护者 · AI |
+| [display-color.md](display-color.md) | 显示色彩：BIOS装进ACPI `DLUT`表的工厂校准怎么用，sRGB和Display P3怎么切换，10-bit怎么到8位面板，HDR提亮，排查 | 现行 | 维护者 · AI |
 | [palm-rejection.md](palm-rejection.md) | 触摸屏的手掌识别：驱动里“手的位置图”的规则，以`MT_TOOL_PALM`撤回已上报的触点，参数、计数器、已知限制与调试 | 现行 | 维护者 · AI |
 | `img/`、`stage3-desktop.png` | README 与案卷引用的截图 / 照片 | — | — |
 
