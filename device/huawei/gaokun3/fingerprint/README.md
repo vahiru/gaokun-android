@@ -32,7 +32,7 @@ HAL 持久化失败计数：每 5 次失败锁定 30 秒，20 次永久锁定，
 ## 内核
 
 沿用 Android 自己的内核基线、配置、DTB 和补丁链，不使用 NixOS/HyperOS 内核替代。
-交接包 QSEE 补丁与本仓 0050 完全相同；0113 添加常驻驱动，默认不开启：
+交接包 QSEE 补丁与本仓 0050 完全相同；0212 添加常驻驱动，默认不开启：
 
 ```sh
 bash /path/to/gaokun-android/scripts/kernel-apply-patches.sh /path/to/kernel --with-fp
@@ -42,10 +42,10 @@ make O=/path/to/kernel-output ARCH=arm64 -j8 vmlinuz.efi
 ```
 
 继续使用已有 ARM64 编译器/CROSS_COMPILE 设置。配置脚本只运行 olddefconfig，
-不编译、不插入模块。0050 和 0113 均留在 `--with-fp` 实验补丁链。
+不编译、不插入模块。0050 和 0212 均留在 `--with-fp` 实验补丁链。
 大构建开始前必须核对实际输出文件系统空间，预留镜像、验证副本及至少 2 GiB。
 
-0113 与原交付版本的差异：TA 默认路径 `/vendor/firmware/fingerpr.mbn`；
+0212 与原交付版本的差异：TA 默认路径 `/vendor/firmware/fingerpr.mbn`；
 驱动编为 built-in；同一时刻只允许一个 open；HAL 崩溃后 release 请求 shutdown；
 shutdown 一旦失败，保留 DMA 缓冲且拒绝重试和重新 open，重启后才能恢复。
 单次 secure call 仍可能不返回，取消只在两次 ioctl 之间生效，不会异步复位传感器。
@@ -111,7 +111,7 @@ bash scripts/fingerprint/test-offline.sh
 2026-11-01 本机结果：Clang `-Wall -Wextra -Werror` 编译 core/matcher，
 AddressSanitizer + UBSan 通过；模板往返、权限/损坏/截断/符号链接拒绝、
 合成同图/异图匹配、AES 有效图像解码及平帧/越界帧拒绝通过。同图 100、异图约 1.85，**仅为合成输入回归，
-不能推导误识率**。0113 在参考 Kconfig/Makefile 上可应用，UAPI 字节一致；
+不能推导误识率**。0212 在参考 Kconfig/Makefile 上可应用，UAPI 字节一致；
 V4 方法覆盖和 XML 检查、交接包损坏拒绝、构建开关/内核摘要门禁及 shell 语法检查通过。
 静态 API 检查不等于 Android 编译。
 

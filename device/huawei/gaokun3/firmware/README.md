@@ -93,7 +93,7 @@ cabextract QcTreeExtOem8280.cab   # 取 fingerpr.mbn
 它是华为/高通签名的专有二进制，**不入库**（与本目录其它 .mbn 同待遇）。
 * 加载路线见 `docs/stage4-findings.md` #120 / #123 / #124、`docs/fingerprint/`（不入库）。
 * 冒烟测试阶段（`tools/fingerprint-bringup/`）模块直接读 `/data/local/tmp/fingerpr.mbn`。
-* 2026-11-01 crDroid 候选的固定 ioctl 驱动（0113）通过
+* 2026-11-01 crDroid 候选的固定 ioctl 驱动（0212）通过
   `kernel_read_file_from_path(..., READING_FIRMWARE)` 读
   `/vendor/firmware/fingerpr.mbn`。仅 `GAOKUN3_FINGERPRINT=true` 时打包。
   `python3 scripts/fingerprint/prepare-crdroid.py` 可离线核验交接包并准备本地输入；

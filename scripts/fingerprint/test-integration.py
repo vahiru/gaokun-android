@@ -18,7 +18,7 @@ with tempfile.TemporaryDirectory(prefix='gk3-fp-integration-') as tmp:
     dest.mkdir(parents=True)
     for name in ('Makefile', 'Kconfig'):
         shutil.copyfile(ROOT / 'refs/linux-v7.2-rc2-git/drivers/firmware/qcom' / name, dest / name)
-    patch = ROOT / 'patches/0113-firmware-qcom-gaokun3-fingerprint-ioctl.patch'
+    patch = ROOT / 'patches/0212-firmware-qcom-gaokun3-fingerprint-ioctl.patch'
     subprocess.run(['git', 'apply', '--check', str(patch)], cwd=tmp / 'kernel', check=True)
     subprocess.run(['git', 'apply', str(patch)], cwd=tmp / 'kernel', check=True)
     assert (dest / 'gaokun3_fpcmd.h').read_bytes() == (FP / 'gaokun3_fpcmd.h').read_bytes()
