@@ -98,3 +98,11 @@ cabextract QcTreeExtOem8280.cab   # 取 fingerpr.mbn
   `/vendor/firmware/fingerpr.mbn`。仅 `GAOKUN3_FINGERPRINT=true` 时打包。
   `python3 scripts/fingerprint/prepare-crdroid.py` 可离线核验交接包并准备本地输入；
   完整步骤和当前限制见 [指纹候选说明](../fingerprint/README.md)。
+
+## Goodix配置模板（gaokun3-goodix-cfg.bin）
+
+装Goodix GDIX5125的机器初始化时要下发的传感器配置（类型14，224字节，sha256 `273537378e759cc1…`），
+取自同一个uup-drivers release里`gfspi.cab`中的`gfspi.dll`，由
+`python3 scripts/fingerprint/prepare-crdroid.py --gfspi <gfspi.dll>`核对后导出到这里。
+它是Goodix的专有数据，**不入库**。驱动（0213）从`/vendor/firmware/gaokun3-goodix-cfg.bin`读取，
+只接受这一份，再按每台机器的OTP修补；仅`GAOKUN3_FINGERPRINT=true`时打包。

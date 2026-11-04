@@ -58,6 +58,7 @@ class ContactAudit {
 
 static Gaokun3Frame texture(unsigned seed) {
     Gaokun3Frame frame{};std::mt19937 random(seed);
+    frame.width=gaokun3::kFocalTech.width;frame.height=gaokun3::kFocalTech.height;
     for (auto& value : frame.pixels) value=random()&255;
     return frame;
 }
@@ -79,14 +80,16 @@ int main(int argc,char** argv) {
         perror("drop to system UID");return 1;
     }
     if (geteuid()!=1000) return 1;
-    gaokun3::Store store("/data/vendor_de/0/fpdata/gaokun3-templates.db");
+    const gaokun3::SensorProfile* profile=gaokun3::Transport::detect();
+    if (!profile) {puts("NO_SENSOR: board straps report none");return 1;}
+    gaokun3::Store store("/data/vendor_de/0/fpdata/gaokun3-templates.db",*profile);
     if (!store.load() || store.enrollments.empty()) {
         fputs("Read-only template validation failed.\n",stderr);return 1;
     }
     ContactAudit audit(store.enrollments);
     // Never terminate an in-flight secure call or reset the sensor on timeout.
     signal(SIGINT,SIG_IGN);signal(SIGTERM,SIG_IGN);signal(SIGHUP,SIG_IGN);
-    gaokun3::Transport transport;
+    gaokun3::Transport transport(*profile);
     bool ok=transport.start();
     unsigned framingErrors=0,consecutiveErrors=0,qualityRejected=0,captures=0,polls=0;
     using namespace std::chrono_literals;

@@ -110,3 +110,5 @@ tools/fingerprint-bringup/rev/err*.log
 .vscode/
 # Private fingerprint handoffs contain the signed vendor TA.
 gaokun3-fingerprint-driver-handoff-*.zip
+# Default location of the Goodix driver DLL that prepare-crdroid.py --gfspi reads.
+/gfspi.dll

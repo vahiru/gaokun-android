@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later
  * Adapted from libfprint-fte7001's fte7001-matcher.c for Gaokun3's
- * 40 x 196 sensor. This is a host-side matcher, not the Windows matcher.
+ * sensors; the frame carries its geometry. This is a host-side matcher, not
+ * the Windows matcher.
  */
 
 #include "gaokun3-matcher.h"
@@ -10,10 +11,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define GAOKUN3_IMG_W GAOKUN3_WIDTH
-#define GAOKUN3_IMG_H GAOKUN3_HEIGHT
-#define GAOKUN3_IMG_CROP_OFF 0
-#define GAOKUN3_IMG_CROP_SIZE GAOKUN3_PIXELS
 #define GAOKUN3_M_PATCH 16
 #define GAOKUN3_M_SIGMA_COUNT 4
 #define GAOKUN3_M_DESC_DIM 128
@@ -174,9 +171,10 @@ mt_sample2 (Mt19937 *r, uint32_t n, uint32_t out[2])
 
 static const double SIGMAS[GAOKUN3_M_SIGMA_COUNT] = { 2.0, 2.8, 4.0, 5.7 };
 
-/* px / out 均为裁行布局（行距 GAOKUN3_IMG_W，高 GAOKUN3_IMG_H） */
+/* px and out are row major: stride w, height h. */
 static void
-gaokun3_gauss_blur (const float *px, double sigma, float *out /* W*H */)
+gaokun3_gauss_blur (const float *px, int w, int h, double sigma,
+                    float *out /* w*h */)
 {
   int radius = (int) (2.5 * sigma + 0.5);
   int ksize = 2 * radius + 1;
@@ -197,20 +195,20 @@ gaokun3_gauss_blur (const float *px, double sigma, float *out /* W*H */)
   for (k = 0; k < ksize; k++)
     g[k] /= s;
 
-  tmp = malloc (sizeof (float) * GAOKUN3_IMG_CROP_SIZE);
+  tmp = malloc (sizeof (float) * (size_t) w * (size_t) h);
   assert (tmp);
 
   /* horizontal */
-  for (y = 0; y < GAOKUN3_IMG_H; y++)
+  for (y = 0; y < h; y++)
     {
-      int row = y * GAOKUN3_IMG_W;
-      for (x = 0; x < GAOKUN3_IMG_W; x++)
+      int row = y * w;
+      for (x = 0; x < w; x++)
         {
           double acc = 0.0;
           for (k = 0; k < ksize; k++)
             {
               int xx = x + k - radius;
-              if (xx >= 0 && xx < GAOKUN3_IMG_W)
+              if (xx >= 0 && xx < w)
                 acc += g[k] * (double) px[row + xx];
             }
           tmp[row + x] = (float) acc;
@@ -218,20 +216,31 @@ gaokun3_gauss_blur (const float *px, double sigma, float *out /* W*H */)
     }
 
   /* vertical */
-  for (y = 0; y < GAOKUN3_IMG_H; y++)
-    for (x = 0; x < GAOKUN3_IMG_W; x++)
+  for (y = 0; y < h; y++)
+    for (x = 0; x < w; x++)
       {
         double acc = 0.0;
         for (k = 0; k < ksize; k++)
           {
             int yy = y + k - radius;
-            if (yy >= 0 && yy < GAOKUN3_IMG_H)
-              acc += g[k] * (double) tmp[yy * GAOKUN3_IMG_W + x];
+            if (yy >= 0 && yy < h)
+              acc += g[k] * (double) tmp[yy * w + x];
           }
-        out[y * GAOKUN3_IMG_W + x] = (float) acc;
+        out[y * w + x] = (float) acc;
       }
 
   free (tmp);
+}
+
+/* ===== Frame geometry ===== */
+
+bool
+gaokun3_frame_geometry_valid (const Gaokun3Frame *frame)
+{
+  return frame && frame->width >= GAOKUN3_MIN_SIDE &&
+         frame->height >= GAOKUN3_MIN_SIDE &&
+         frame->width <= GAOKUN3_MAX_WIDTH &&
+         frame->height <= GAOKUN3_MAX_HEIGHT;
 }
 
 /* ===== 质量闸门（原型 quality_gate）===== */
@@ -240,20 +249,27 @@ bool
 gaokun3_quality_check (const Gaokun3Frame *frame,
                        float *coverage, float *mean_tc)
 {
-  /* Evaluate local texture across the full 40 x 196 sensor frame. */
-  const uint8_t *px = frame->pixels + GAOKUN3_IMG_CROP_OFF;
+  /* Evaluate local texture across the full sensor frame. */
+  const uint8_t *px = frame->pixels;
+  int w = frame->width, h = frame->height;
   int y, x, i;
   double sum_tc = 0.0;
   long n_tc = 0, n_cov = 0;
 
-  for (y = 1; y < GAOKUN3_IMG_H - 1; y++)
-    for (x = 1; x < GAOKUN3_IMG_W - 1; x++)
+  if (coverage)
+    *coverage = 0;
+  if (mean_tc)
+    *mean_tc = 0;
+  if (!gaokun3_frame_geometry_valid (frame))
+    return false;
+  for (y = 1; y < h - 1; y++)
+    for (x = 1; x < w - 1; x++)
       {
         double vals[9], m = 0.0, ss = 0.0, tc;
         for (i = 0; i < 9; i++)
           {
             int dy = (i / 3) - 1, dx = (i % 3) - 1;
-            vals[i] = (double) px[(y + dy) * GAOKUN3_IMG_W + x + dx];
+            vals[i] = (double) px[(y + dy) * w + x + dx];
             m += vals[i];
           }
         m /= 9.0;
@@ -283,24 +299,30 @@ gaokun3_quality_check (const Gaokun3Frame *frame,
 
 /* ===== 关键点检测（原型 detect_keypoints）===== */
 
-/* 25 x 5 spatial buckets, at most two keypoints per bucket. */
-#define GAOKUN3_M_MAX_KPS 250
+/* 8 x 8 spatial buckets, at most two keypoints per bucket: 25 x 5 buckets
+ * for the largest (40 x 196) frame. */
+#define GAOKUN3_M_GRID 8
+#define GAOKUN3_M_GRID_ROWS \
+  ((GAOKUN3_MAX_HEIGHT + GAOKUN3_M_GRID - 1) / GAOKUN3_M_GRID)
+#define GAOKUN3_M_GRID_COLS \
+  ((GAOKUN3_MAX_WIDTH + GAOKUN3_M_GRID - 1) / GAOKUN3_M_GRID)
+#define GAOKUN3_M_MAX_KPS (GAOKUN3_M_GRID_ROWS * GAOKUN3_M_GRID_COLS * 2)
 
 static int
-gaokun3_detect_keypoints (const float *px, Gaokun3Keypoint *out)
+gaokun3_detect_keypoints (const float *px, int w, int h, Gaokun3Keypoint *out)
 {
   static const float THRESH = 3.0f;
-  static const int GRID = 8;
-  float layers[GAOKUN3_M_SIGMA_COUNT][GAOKUN3_IMG_CROP_SIZE];
-  float dogs[3][GAOKUN3_IMG_CROP_SIZE];
+  static const int GRID = GAOKUN3_M_GRID;
+  float layers[GAOKUN3_M_SIGMA_COUNT][GAOKUN3_MAX_PIXELS];
+  float dogs[3][GAOKUN3_MAX_PIXELS];
   Gaokun3Keypoint pts[1024];
   int n_pts = 0;
   int li, x, y;
 
   for (li = 0; li < GAOKUN3_M_SIGMA_COUNT; li++)
-    gaokun3_gauss_blur (px, SIGMAS[li], layers[li]);
+    gaokun3_gauss_blur (px, w, h, SIGMAS[li], layers[li]);
   for (li = 0; li < 3; li++)
-    for (y = 0; y < GAOKUN3_IMG_CROP_SIZE; y++)
+    for (y = 0; y < w * h; y++)
       dogs[li][y] = layers[li + 1][y] - layers[li][y];
 
   for (li = 0; li < 3; li++)
@@ -310,10 +332,10 @@ gaokun3_detect_keypoints (const float *px, Gaokun3Keypoint *out)
       const float *dnext = dogs[li < 2 ? li + 1 : 2];
       int same = (li == 0) || (li == 2);
 
-      for (y = 2; y < GAOKUN3_IMG_H - 2; y++)
-        for (x = 2; x < GAOKUN3_IMG_W - 2; x++)
+      for (y = 2; y < h - 2; y++)
+        for (x = 2; x < w - 2; x++)
           {
-            float v = dog[y * GAOKUN3_IMG_W + x];
+            float v = dog[y * w + x];
             int is_max = 1, is_min = 1;
             int dy, dx, stop = 0;
 
@@ -325,7 +347,7 @@ gaokun3_detect_keypoints (const float *px, Gaokun3Keypoint *out)
                   float nv;
                   if (dy == 0 && dx == 0)
                     continue;
-                  nv = dog[(y + dy) * GAOKUN3_IMG_W + x + dx];
+                  nv = dog[(y + dy) * w + x + dx];
                   if (nv >= v)
                     is_max = 0;
                   if (nv <= v)
@@ -340,8 +362,8 @@ gaokun3_detect_keypoints (const float *px, Gaokun3Keypoint *out)
                 int l;
                 for (l = 0; l < 2; l++)
                   {
-                    float nv = l == 0 ? dprev[y * GAOKUN3_IMG_W + x]
-                                       : dnext[y * GAOKUN3_IMG_W + x];
+                    float nv = l == 0 ? dprev[y * w + x]
+                                       : dnext[y * w + x];
                     if (is_max && nv >= v)
                       {
                         is_max = 0;
@@ -372,8 +394,9 @@ gaokun3_detect_keypoints (const float *px, Gaokun3Keypoint *out)
   /* 桶化：每 8×8 桶取 |v| 最强的 2 个（原型 L101-110）。桶表用定长数组；
    * 每桶按插入序维护 top-2（|v| 降序），等价于原型的 sort+take-2。 */
   {
-    Gaokun3Keypoint buckets[25][5][2];
-    int bucket_n[25][5];
+    Gaokun3Keypoint buckets[GAOKUN3_M_GRID_ROWS][GAOKUN3_M_GRID_COLS][2];
+    int bucket_n[GAOKUN3_M_GRID_ROWS][GAOKUN3_M_GRID_COLS];
+    int rows = (h + GRID - 1) / GRID, cols = (w + GRID - 1) / GRID;
     int kept = 0;
     int bx, by, idx;
 
@@ -405,8 +428,8 @@ gaokun3_detect_keypoints (const float *px, Gaokun3Keypoint *out)
           }
       }
 
-    for (by = 0; by < 25; by++)
-      for (bx = 0; bx < 5; bx++)
+    for (by = 0; by < rows; by++)
+      for (bx = 0; bx < cols; bx++)
         for (idx = 0; idx < bucket_n[by][bx]; idx++)
           {
             Gaokun3Keypoint k = buckets[by][bx][idx];
@@ -432,18 +455,18 @@ gaokun3_detect_keypoints (const float *px, Gaokun3Keypoint *out)
 
 /* Caller verifies a one-pixel gradient margin plus the bilinear footprint. */
 static double
-gaokun3_sample (const float *px, double x, double y)
+gaokun3_sample (const float *px, int w, double x, double y)
 {
   int ix = (int) floor (x), iy = (int) floor (y);
   double fx = x - ix, fy = y - iy;
-  const float *p = px + iy * GAOKUN3_IMG_W + ix;
+  const float *p = px + iy * w + ix;
 
   return (1 - fy) * ((1 - fx) * p[0] + fx * p[1]) +
-         fy * ((1 - fx) * p[GAOKUN3_IMG_W] + fx * p[GAOKUN3_IMG_W + 1]);
+         fy * ((1 - fx) * p[w] + fx * p[w + 1]);
 }
 
 static double
-gaokun3_patch_orient (const float *px, const Gaokun3Keypoint *kp)
+gaokun3_patch_orient (const float *px, int w, const Gaokun3Keypoint *kp)
 {
   double hist[36] = { 0 }, smooth[36];
   int dx, dy, b, pass, best = 0;
@@ -454,10 +477,8 @@ gaokun3_patch_orient (const float *px, const Gaokun3Keypoint *kp)
     for (dx = -7; dx <= 7; dx++)
       {
         int x = kp->x + dx, y = kp->y + dy;
-        double gx = px[y * GAOKUN3_IMG_W + x + 1] -
-                    px[y * GAOKUN3_IMG_W + x - 1];
-        double gy = px[(y + 1) * GAOKUN3_IMG_W + x] -
-                    px[(y - 1) * GAOKUN3_IMG_W + x];
+        double gx = px[y * w + x + 1] - px[y * w + x - 1];
+        double gy = px[(y + 1) * w + x] - px[(y - 1) * w + x];
         double angle = (atan2 (gy, gx) + M_PI) * 36 / (2 * M_PI);
         int bin = (int) floor (angle);
         double fraction = angle - bin;
@@ -486,16 +507,15 @@ gaokun3_patch_orient (const float *px, const Gaokun3Keypoint *kp)
 }
 
 static int
-gaokun3_describe (const float *px, const Gaokun3Keypoint *kp,
+gaokun3_describe (const float *px, int w, int h, const Gaokun3Keypoint *kp,
                   float desc[GAOKUN3_M_DESC_DIM])
 {
   int py, pxx, i;
   double theta, c, s, norm = 0;
 
-  if (kp->x < 9 || kp->y < 9 ||
-      kp->x >= GAOKUN3_IMG_W - 9 || kp->y >= GAOKUN3_IMG_H - 9)
+  if (kp->x < 9 || kp->y < 9 || kp->x >= w - 9 || kp->y >= h - 9)
     return 0;
-  theta = gaokun3_patch_orient (px, kp);
+  theta = gaokun3_patch_orient (px, w, kp);
   c = cos (theta);
   s = sin (theta);
   memset (desc, 0, sizeof (float) * GAOKUN3_M_DESC_DIM);
@@ -511,10 +531,10 @@ gaokun3_describe (const float *px, const Gaokun3Keypoint *kp,
 
         /* Rotate the spatial sampling grid along with the gradient direction.
          * Reject unsupported border patches rather than inventing padding. */
-        if (x < 1 || x >= GAOKUN3_IMG_W - 2 || y < 1 || y >= GAOKUN3_IMG_H - 2)
+        if (x < 1 || x >= w - 2 || y < 1 || y >= h - 2)
           return 0;
-        gx = gaokun3_sample (px, x + 1, y) - gaokun3_sample (px, x - 1, y);
-        gy = gaokun3_sample (px, x, y + 1) - gaokun3_sample (px, x, y - 1);
+        gx = gaokun3_sample (px, w, x + 1, y) - gaokun3_sample (px, w, x - 1, y);
+        gy = gaokun3_sample (px, w, x, y + 1) - gaokun3_sample (px, w, x, y - 1);
         angle = fmod ((atan2 (gy, gx) - theta) * 8 / (2 * M_PI) + 16, 8);
         bin = (int) floor (angle);
         fraction = angle - bin;
@@ -561,15 +581,19 @@ Gaokun3FeatureSet
 gaokun3_feature_extract (const Gaokun3Frame *frame)
 {
   Gaokun3FeatureSet fs = { NULL, NULL, 0 };
-  float px[GAOKUN3_IMG_CROP_SIZE];
+  float px[GAOKUN3_MAX_PIXELS];
   Gaokun3Keypoint kps[GAOKUN3_M_MAX_KPS];
-  int n_kps, i;
+  int n_kps, i, w, h;
 
-  /* Use the complete decrypted sensor frame. */
-  for (i = 0; i < GAOKUN3_IMG_CROP_SIZE; i++)
-    px[i] = (float) frame->pixels[GAOKUN3_IMG_CROP_OFF + i];
+  if (!gaokun3_frame_geometry_valid (frame))
+    return fs;
+  w = frame->width;
+  h = frame->height;
+  /* Use the complete decoded sensor frame. */
+  for (i = 0; i < w * h; i++)
+    px[i] = (float) frame->pixels[i];
 
-  n_kps = gaokun3_detect_keypoints (px, kps);
+  n_kps = gaokun3_detect_keypoints (px, w, h, kps);
   if (n_kps == 0)
     return fs;
 
@@ -587,7 +611,7 @@ gaokun3_feature_extract (const Gaokun3Frame *frame)
   for (i = 0; i < n_kps; i++)
     {
       float d[GAOKUN3_M_DESC_DIM];
-      if (gaokun3_describe (px, &kps[i], d))
+      if (gaokun3_describe (px, w, h, &kps[i], d))
         {
           fs.kps[fs.n_feats] = kps[i];
           memcpy (fs.descs[fs.n_feats], d, sizeof (d));

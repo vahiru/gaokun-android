@@ -18,15 +18,19 @@ with tempfile.TemporaryDirectory(prefix='gk3-fp-integration-') as tmp:
     dest.mkdir(parents=True)
     for name in ('Makefile', 'Kconfig'):
         shutil.copyfile(ROOT / 'refs/linux-v7.2-rc2-git/drivers/firmware/qcom' / name, dest / name)
-    patch = ROOT / 'patches/0212-firmware-qcom-gaokun3-fingerprint-ioctl.patch'
-    subprocess.run(['git', 'apply', '--check', str(patch)], cwd=tmp / 'kernel', check=True)
-    subprocess.run(['git', 'apply', str(patch)], cwd=tmp / 'kernel', check=True)
+    for name in ('0212-firmware-qcom-gaokun3-fingerprint-ioctl.patch',
+                 '0213-firmware-qcom-gaokun3-fpcmd-add-the-Goodix-GDIX5125-sensor.patch'):
+        patch = ROOT / 'patches' / name
+        subprocess.run(['git', 'apply', '--check', str(patch)], cwd=tmp / 'kernel', check=True)
+        subprocess.run(['git', 'apply', str(patch)], cwd=tmp / 'kernel', check=True)
     assert (dest / 'gaokun3_fpcmd.h').read_bytes() == (FP / 'gaokun3_fpcmd.h').read_bytes()
     source = (dest / 'qcom_qseecom_fpcmd.c').read_text()
     assert '/vendor/firmware/fingerpr.mbn' in source
+    assert '/vendor/firmware/gaokun3-goodix-cfg.bin' in source
     assert 'static int fp_open(' in source and 'static int fp_release(' in source
     assert 'fp_shutdown_failed = true;' in source
-    print('PASS: kernel patch application, UAPI equality, exclusive owner/shutdown guard')
+    assert (dest / 'gaokun3_fpcmd_goodix.h').exists()
+    print('PASS: kernel patch application (0212 + 0213), UAPI equality, exclusive owner/shutdown guard')
 
     # Check implemented methods against the real frozen Android V4 API snapshot.
     api = (ROOT / 'refs/a17/hardware/interfaces/biometrics/fingerprint/aidl/aidl_api'
@@ -40,7 +44,8 @@ with tempfile.TemporaryDirectory(prefix='gk3-fp-integration-') as tmp:
     print('PASS: all frozen AIDL V4 session methods present; VINTF version agrees (source check only)')
 
     archive = ROOT / 'gaokun3-fingerprint-driver-handoff-20261101.zip'
-    if archive.exists():
+    gfspi = ROOT / 'gfspi.dll'
+    if archive.exists() and gfspi.exists():
         tree = tmp / 'device'
         script = ROOT / 'scripts/fingerprint/prepare-crdroid.py'
         subprocess.run(['python3', str(script), '--device-tree', str(tree)], check=True)
@@ -57,7 +62,19 @@ with tempfile.TemporaryDirectory(prefix='gk3-fp-integration-') as tmp:
                                  '--handoff', str(bad)], capture_output=True)
         assert result.returncode != 0
         assert hashlib.sha256(ta.read_bytes()).hexdigest() == expected
-        print('PASS: handoff staging and corrupt archive rejection leave existing input intact')
+        cfg = tree / 'firmware/gaokun3-goodix-cfg.bin'
+        staged = cfg.read_bytes()
+        dll = gfspi.read_bytes()
+        # The template bytes occur more than once in gfspi.dll: damage them all.
+        damaged = staged[:100] + bytes([staged[100] ^ 1]) + staged[101:]
+        wrong = tmp / 'wrong.dll'
+        for data in (bytes([dll[0] ^ 1]) + dll[1:], dll.replace(staged, damaged)):
+            assert data != dll
+            wrong.write_bytes(data)
+            result = subprocess.run(['python3', str(script), '--device-tree', str(tree),
+                                     '--gfspi', str(wrong)], capture_output=True)
+            assert result.returncode != 0 and cfg.read_bytes() == staged
+        print('PASS: handoff/template staging and corrupt input rejection leave existing input intact')
         makefile = tmp / 'gate.mk'
         makefile.write_text('LOCAL_PATH := ' + str(tree) + '\n'
                             'TARGET_COPY_OUT_VENDOR := vendor\n'
@@ -75,9 +92,15 @@ with tempfile.TemporaryDirectory(prefix='gk3-fp-integration-') as tmp:
         proof.write_text(hashlib.sha256(image.read_bytes()).hexdigest() + '  vmlinuz.efi\n')
         assert make('GAOKUN3_FINGERPRINT=true',
                     'EXPECTED=android.hardware.biometrics.fingerprint-service.gaokun3').returncode == 0
+        cfg_bytes = cfg.read_bytes()
+        cfg.unlink()
+        assert make('GAOKUN3_FINGERPRINT=true').returncode != 0
+        cfg.write_bytes(cfg_bytes[:-1] + bytes([cfg_bytes[-1] ^ 1]))
+        assert make('GAOKUN3_FINGERPRINT=true').returncode != 0
+        cfg.write_bytes(cfg_bytes)
         image.write_bytes(b'stale kernel fixture')
         assert make('GAOKUN3_FINGERPRINT=true').returncode != 0
-        print('PASS: product disabled by default, missing/stale kernel rejected, pinned inputs accepted')
+        print('PASS: product disabled by default, missing/stale kernel and Goodix template rejected, pinned inputs accepted')
         # Synthetic extractor/image fixtures exercise staging rollback logic only.
         # They do not establish that any real EFI image has the required config.
         extractor = tmp / 'fake-kernel/scripts/extract-ikconfig'
@@ -102,5 +125,5 @@ with tempfile.TemporaryDirectory(prefix='gk3-fp-integration-') as tmp:
 
 
     else:
-        print('SKIP: private handoff archive unavailable; staging tests require local input')
+        print('SKIP: private handoff archive or gfspi.dll unavailable; staging tests require local input')
 print('PASS: offline integration checks (no Android compile or device validation)')

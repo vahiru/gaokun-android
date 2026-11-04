@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Fixed, read-only on-device audit. Never captures, writes or exports templates.
 #include "../../device/huawei/gaokun3/fingerprint/Core.h"
+#include "../../device/huawei/gaokun3/fingerprint/Transport.h"
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
@@ -32,6 +33,7 @@ static Gaokun3Frame nativePattern() {
         state=state*1664525u+1013904223u;signs[i]=(state&1)?1:-1;
     }
     Gaokun3Frame frame{};
+    frame.width=40;frame.height=196;
     for (int y=0;y<196;++y) for (int x=0;x<40;++x) {
         int dots=128;
         for (int i=0;i<40;++i) {
@@ -113,6 +115,8 @@ static Summary summarize(const gaokun3::Frames& frames) {
 
 static Gaokun3Frame texture(unsigned seed) {
     Gaokun3Frame frame{};
+    frame.width = gaokun3::kFocalTech.width;
+    frame.height = gaokun3::kFocalTech.height;
     std::mt19937 random(seed);
     for (auto& value : frame.pixels) value = random() & 255;
     return frame;
@@ -148,7 +152,7 @@ int main(int argc, char** argv) {
     if (argc == 2 && !std::strcmp(argv[1], "--synthetic-native-self-test")) {
         if (audit_native_open()) return 1;
         auto input = texture(1);
-        Gaokun3Frame output{};
+        Gaokun3Frame output = input;
         const bool ok = audit_native_apply(input.pixels, output.pixels) == 0;
         audit_native_close();
         if (ok) puts("PASS: pinned original preprocess with guarded allocation boundaries");
@@ -171,16 +175,25 @@ int main(int argc, char** argv) {
         fputs("Requires system UID; refusing to bypass database ownership checks.\n", stderr);
         return 1;
     }
-    gaokun3::Store store("/data/vendor_de/0/fpdata/gaokun3-templates.db");
+    const gaokun3::SensorProfile* profile = gaokun3::Transport::detect();
+    if (!profile) {
+        fputs("Board straps report no fingerprint sensor.\n", stderr);
+        return 1;
+    }
+    gaokun3::Store store("/data/vendor_de/0/fpdata/gaokun3-templates.db", *profile);
     if (!store.load()) {
         fputs("Database failed read-only validation.\n", stderr);
         return 1;
     }
 #ifdef GAOKUN3_NATIVE_PREPROCESS_AUDIT
     if (nativeMode) {
+        // The pinned FocalTech TA preprocess only takes 40 x 196 frames.
+        if (profile->sensor != gaokun3::Sensor::kFocalTech) {
+            fputs("Native proxy audit is FocalTech-only.\n", stderr); return 1;
+        }
         if (audit_native_open()) { fputs("Pinned native map initialization failed.\n", stderr); return 1; }
         for (auto& entry : store.enrollments) for (auto& frame : entry.frames) {
-            Gaokun3Frame output{};
+            Gaokun3Frame output = frame;
             if (audit_native_apply(frame.pixels, output.pixels)) {
                 audit_native_close(); fputs("Native proxy preprocessing failed.\n", stderr); return 1;
             }

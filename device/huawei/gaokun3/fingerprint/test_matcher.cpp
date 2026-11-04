@@ -9,6 +9,13 @@ extern "C" {
 #include <iostream>
 #include <random>
 
+// The suite runs once per sensor geometry (FocalTech 40 x 196, Goodix 36 x 160).
+static int W = 40, H = 196;
+static Gaokun3Frame blank() {
+    Gaokun3Frame f{}; f.width = W; f.height = H;
+    return f;
+}
+
 static void similarityGeometry() {
     // Orthogonal descriptors make correspondence unambiguous, isolating the
     // geometric verifier from feature extraction and interpolation effects.
@@ -36,35 +43,36 @@ static void similarityGeometry() {
     assert(gaokun3_match_score(&fa,&fb) == 0.0f);
     // Identical descriptors without consistent geometry must not match.
     std::mt19937 random(7001);
-    for (auto& point : b) { point.x=random()%40; point.y=random()%196; }
+    for (auto& point : b) { point.x=random()%W; point.y=random()%H; }
     assert(gaokun3_match_score(&fa,&fb) < 12.0f);
 }
 
 static Gaokun3Frame texture(unsigned seed) {
-    Gaokun3Frame f{}; std::mt19937 random(seed);
-    for (auto& value : f.pixels) value=random()&255;
+    Gaokun3Frame f=blank(); std::mt19937 random(seed);
+    for (int i=0; i<W*H; ++i) f.pixels[i]=random()&255;
     return f;
 }
 
 static Gaokun3Frame scaled(const Gaokun3Frame& frame, double scale) {
-    Gaokun3Frame out{};
-    for (int y=0; y<GAOKUN3_HEIGHT; ++y) for (int x=0; x<GAOKUN3_WIDTH; ++x) {
-        const double sx=(x-19.5)/scale+19.5, sy=(y-97.5)/scale+97.5;
+    Gaokun3Frame out=blank();
+    const double cx=(W-1)/2.0, cy=(H-1)/2.0;
+    for (int y=0; y<H; ++y) for (int x=0; x<W; ++x) {
+        const double sx=(x-cx)/scale+cx, sy=(y-cy)/scale+cy;
         const int ix=std::floor(sx), iy=std::floor(sy);
         const double fx=sx-ix, fy=sy-iy;
-        auto& value=out.pixels[y*GAOKUN3_WIDTH+x];
+        auto& value=out.pixels[y*W+x];
         value=128;
-        if (ix>=0 && ix+1<GAOKUN3_WIDTH && iy>=0 && iy+1<GAOKUN3_HEIGHT) {
-            const auto* p=frame.pixels+iy*GAOKUN3_WIDTH+ix;
+        if (ix>=0 && ix+1<W && iy>=0 && iy+1<H) {
+            const auto* p=frame.pixels+iy*W+ix;
             value=std::lround((1-fy)*((1-fx)*p[0]+fx*p[1])+
-                             fy*((1-fx)*p[GAOKUN3_WIDTH]+fx*p[GAOKUN3_WIDTH+1]));
+                             fy*((1-fx)*p[W]+fx*p[W+1]));
         }
     }
     return out;
 }
 
 // A larger generated scene supplies real texture beyond the reference crop.
-// Rotating an existing 40 x 196 image with blank padding would confound the
+// Rotating an existing sensor image with blank padding would confound the
 // descriptor test with lost sensor coverage and fail the image quality gate.
 constexpr int kSceneSide=320;
 using Scene=std::array<uint8_t,kSceneSide*kSceneSide>;
@@ -76,20 +84,20 @@ static Scene scene(unsigned seed) {
 static Gaokun3Frame sceneView(const Scene& values,double degrees) {
     constexpr double pi=3.14159265358979323846;
     const double c=std::cos(degrees*pi/180),s=std::sin(degrees*pi/180);
-    Gaokun3Frame image{};
-    for (int y=0;y<GAOKUN3_HEIGHT;++y) for (int x=0;x<GAOKUN3_WIDTH;++x) {
-        const double dx=x-19.5,dy=y-97.5;
+    Gaokun3Frame image=blank();
+    for (int y=0;y<H;++y) for (int x=0;x<W;++x) {
+        const double dx=x-(W-1)/2.0,dy=y-(H-1)/2.0;
         const double sx=c*dx+s*dy+159.5,sy=-s*dx+c*dy+159.5;
         const int ix=std::floor(sx),iy=std::floor(sy);
         const double fx=sx-ix,fy=sy-iy;
         assert(ix>=0 && ix+1<kSceneSide && iy>=0 && iy+1<kSceneSide);
         const auto* p=values.data()+iy*kSceneSide+ix;
-        image.pixels[y*GAOKUN3_WIDTH+x]=std::lround(
+        image.pixels[y*W+x]=std::lround(
             (1-fy)*((1-fx)*p[0]+fx*p[1])+fy*((1-fx)*p[kSceneSide]+fx*p[kSceneSide+1]));
     }
     return image;
 }
-static void rotatedSceneRegression() {
+static void rotatedSceneRegression(size_t minimumAccepted) {
     constexpr size_t count=32;
     std::array<Gaokun3FeatureSet,count> reference{},rotated{};
     size_t accepted=0;
@@ -109,7 +117,7 @@ static void rotatedSceneRegression() {
     }
     // A distribution regression, not a claim about real fingerprints. Narrow
     // crops and unstable extrema can still lose genuine correspondences.
-    assert(accepted>=48);
+    assert(accepted>=minimumAccepted);
     float maximum=0;
     for (size_t i=0;i<count;++i) for (size_t j=0;j<count;++j) {
         if (i==j) continue;
@@ -121,13 +129,24 @@ static void rotatedSceneRegression() {
     }
     for (auto& value : reference) gaokun3_feature_set_free(&value);
     for (auto& value : rotated) gaokun3_feature_set_free(&value);
-    std::cout << "PASS: full-coverage rotated scene views " << accepted
+    std::cout << "PASS " << W << "x" << H << ": full-coverage rotated scene views " << accepted
               << "/64; 1984 unrelated scene comparisons, maximum=" << maximum << '\n';
 }
 
-int main() {
+static void geometryBounds() {
+    // Frames without a supported geometry never pass or yield features.
+    for (auto [w,h] : {std::pair{0,0},{19,196},{41,196},{40,197},{36,19}}) {
+        Gaokun3Frame f{}; f.width=w; f.height=h;
+        for (auto& value : f.pixels) value=std::rand()&255;
+        assert(!gaokun3_quality_check(&f,nullptr,nullptr));
+        auto fs=gaokun3_feature_extract(&f); assert(fs.n_feats==0);
+    }
+}
+
+static void suite(int width, int height, size_t minimumRotated) {
+    W=width; H=height;
     similarityGeometry();
-    rotatedSceneRegression();
+    rotatedSceneRegression(minimumRotated);
     auto original=texture(1);
     auto reference=gaokun3_feature_extract(&original);
     for (double scale : {0.9,1.1}) {
@@ -156,6 +175,15 @@ int main() {
         assert(value < 12.0f);
     }
     for (auto& feature : features) gaokun3_feature_set_free(&feature);
-    std::cout << "PASS: similarity geometry, scale bounds, scaled image regression; "
+    std::cout << "PASS " << W << "x" << H << ": similarity geometry, scale bounds, scaled image regression; "
                  "992 unrelated texture comparisons, maximum=" << maximum << '\n';
+}
+
+int main() {
+    geometryBounds();
+    suite(40,196,48);
+    // Same synthetic floor for the Goodix frame (56/64 when written). Its
+    // unrelated maxima run higher (about 8) as fewer features normalise the
+    // score; real-finger FAR still needs real data.
+    suite(36,160,48);
 }

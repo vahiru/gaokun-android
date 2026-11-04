@@ -47,7 +47,7 @@ static bool waitFor(const std::atomic_int& value, int ticks=500) {
     return value.load() != 0;
 }
 TEST(SessionLifecycle, ReplacesUnclosedSession) {
-    auto hal = ndk::SharedRefBase::make<Fingerprint>();
+    auto hal = ndk::SharedRefBase::make<Fingerprint>(&gaokun3::kFocalTech);
     auto oldCb = ndk::SharedRefBase::make<Callback>();
     auto newCb = ndk::SharedRefBase::make<Callback>();
     std::shared_ptr<ISession> old, current;
@@ -61,7 +61,7 @@ TEST(SessionLifecycle, ReplacesUnclosedSession) {
     EXPECT_TRUE(waitFor(newCb->closes));
 }
 TEST(SessionLifecycle, HardwareErrorAllowsReentrantRetry) {
-    auto hal = ndk::SharedRefBase::make<Fingerprint>();
+    auto hal = ndk::SharedRefBase::make<Fingerprint>(&gaokun3::kFocalTech);
     auto oldCb = ndk::SharedRefBase::make<Callback>();
     auto newCb = ndk::SharedRefBase::make<Callback>();
     std::shared_ptr<ISession> old, current;
@@ -80,7 +80,7 @@ TEST(SessionLifecycle, HardwareErrorAllowsReentrantRetry) {
     EXPECT_TRUE(waitFor(newCb->closes));
 }
 TEST(SessionLifecycle, CloseCallbackCanReplaceSession) {
-    auto hal = ndk::SharedRefBase::make<Fingerprint>();
+    auto hal = ndk::SharedRefBase::make<Fingerprint>(&gaokun3::kFocalTech);
     auto oldCb = ndk::SharedRefBase::make<Callback>();
     auto newCb = ndk::SharedRefBase::make<Callback>();
     std::shared_ptr<ISession> old, current;
@@ -100,7 +100,7 @@ TEST(SessionLifecycle, CloseCallbackCanReplaceSession) {
 namespace aidl::android::hardware::biometrics::fingerprint {
 TEST(SessionLifecycle, CancellationRetainsInitializedTransportForNextEnrollment) {
     resetMockTransport();
-    auto hal=ndk::SharedRefBase::make<Fingerprint>();
+    auto hal=ndk::SharedRefBase::make<Fingerprint>(&gaokun3::kFocalTech);
     auto cb=ndk::SharedRefBase::make<Callback>();
     std::shared_ptr<ISession> session;
     ASSERT_TRUE(hal->createSession(0,0,cb,&session).isOk());
@@ -125,7 +125,7 @@ TEST(SessionLifecycle, CancellationRetainsInitializedTransportForNextEnrollment)
 }
 TEST(SessionLifecycle, ReplacementWaitsForPreviousTransportShutdown) {
     resetMockTransport();
-    auto hal=ndk::SharedRefBase::make<Fingerprint>();
+    auto hal=ndk::SharedRefBase::make<Fingerprint>(&gaokun3::kFocalTech);
     auto oldCb=ndk::SharedRefBase::make<Callback>();
     auto cb=ndk::SharedRefBase::make<Callback>();
     std::shared_ptr<ISession> old, session;
@@ -166,7 +166,7 @@ TEST(StatusPolling, TransientBadFramesDoNotTerminateDetection) {
     resetMockTransport();
     mockStatusSamples={0,-EPROTO,-EBADMSG,1};
     TemporaryStore dir;
-    auto hal=ndk::SharedRefBase::make<Fingerprint>();
+    auto hal=ndk::SharedRefBase::make<Fingerprint>(&gaokun3::kFocalTech);
     auto cb=ndk::SharedRefBase::make<Callback>();
     std::shared_ptr<ISession> session;
     ASSERT_TRUE(hal->createSession(0,0,cb,&session).isOk());
@@ -184,7 +184,7 @@ TEST(StatusPolling, PersistentBadFramesRetireSession) {
     resetMockTransport();
     mockStatusSamples=std::vector<int>(6,-EPROTO);
     TemporaryStore dir;
-    auto hal=ndk::SharedRefBase::make<Fingerprint>();
+    auto hal=ndk::SharedRefBase::make<Fingerprint>(&gaokun3::kFocalTech);
     auto cb=ndk::SharedRefBase::make<Callback>();
     std::shared_ptr<ISession> session;
     ASSERT_TRUE(hal->createSession(0,0,cb,&session).isOk());
@@ -203,7 +203,7 @@ TEST(StatusPolling, TransportIoFailureIsNotRetried) {
     resetMockTransport();
     mockStatusSamples={-EIO,1};
     TemporaryStore dir;
-    auto hal=ndk::SharedRefBase::make<Fingerprint>();
+    auto hal=ndk::SharedRefBase::make<Fingerprint>(&gaokun3::kFocalTech);
     auto cb=ndk::SharedRefBase::make<Callback>();
     std::shared_ptr<ISession> session;
     ASSERT_TRUE(hal->createSession(0,0,cb,&session).isOk());
@@ -223,33 +223,33 @@ namespace aidl::android::hardware::biometrics::fingerprint {
 // accessing a real fingerprint or bypassing the authentication decision.
 static Gaokun3Frame encryptedSyntheticFrame(unsigned seed) {
     std::mt19937 random(seed);
-    std::array<uint8_t,gaokun3::kImageBytes> plain{};
-    for (size_t i=0;i<GAOKUN3_PIXELS;++i) {
+    std::array<uint8_t,gaokun3::kFocalTech.captureBytes> plain{};
+    for (size_t i=0;i<size_t(gaokun3::kFocalTech.width)*gaokun3::kFocalTech.height;++i) {
         unsigned value=200+(random()&255)*8;
         plain[2*i]=value&255;plain[2*i+1]=value>>8;
     }
     static const uint8_t key[]={0xeb,0x4a,0xa0,0x13,0x68,0xd8,0x46,0x47,0x0d,0x2b,0xae,0xe3,0x9d,0x02,0x0f,0xdf};
     static const uint8_t iv[]={0xd5,0xaa,0x36,0xa5,0x4b,0x7b,0x18,0x35,0xf2,0x37,0xd3,0xf0,0xc5,0x45,0x49,0xbb};
     auto* ctx=EVP_CIPHER_CTX_new();CHECK(ctx);int n=0,tail=0;
-    std::array<uint8_t,gaokun3::kImageBytes+EVP_MAX_BLOCK_LENGTH> encrypted{};
+    std::array<uint8_t,gaokun3::kFocalTech.captureBytes+EVP_MAX_BLOCK_LENGTH> encrypted{};
     CHECK_EQ(EVP_EncryptInit_ex(ctx,EVP_aes_128_cbc(),nullptr,key,iv),1);
     CHECK_EQ(EVP_CIPHER_CTX_set_padding(ctx,0),1);
     CHECK_EQ(EVP_EncryptUpdate(ctx,encrypted.data(),&n,plain.data(),plain.size()),1);
     CHECK_EQ(EVP_EncryptFinal_ex(ctx,encrypted.data()+n,&tail),1);
-    EVP_CIPHER_CTX_free(ctx);CHECK_EQ(static_cast<size_t>(n+tail),gaokun3::kImageBytes);
+    EVP_CIPHER_CTX_free(ctx);CHECK_EQ(static_cast<size_t>(n+tail),gaokun3::kFocalTech.captureBytes);
     memcpy(mockCipher.data(),encrypted.data(),mockCipher.size());
     Gaokun3Frame decoded{};CHECK(gaokun3::decode(mockCipher.data(),&decoded));return decoded;
 }
 static void storeSyntheticEnrollment(const TemporaryStore& dir,const Gaokun3Frame& frame,uint32_t failures=0) {
     CHECK_EQ(mkdir(dir.data().c_str(),0700),0);
-    gaokun3::Store store(dir.data()+"/gaokun3-templates.db");
+    gaokun3::Store store(dir.data()+"/gaokun3-templates.db",gaokun3::kFocalTech);
     gaokun3::Enrollment entry{};entry.id=7;entry.frames.fill(frame);
     store.enrollments.push_back(entry);store.failures=failures;store.authenticatorId=gaokun3::randomId();CHECK(store.save());
 }
 TEST(Authentication, AlreadyPresentMatchingContactIsProcessed) {
     resetMockTransport();mockStatusSamples={1};
     TemporaryStore dir;auto frame=encryptedSyntheticFrame(1);storeSyntheticEnrollment(dir,frame);
-    auto hal=ndk::SharedRefBase::make<Fingerprint>();auto cb=ndk::SharedRefBase::make<Callback>();
+    auto hal=ndk::SharedRefBase::make<Fingerprint>(&gaokun3::kFocalTech);auto cb=ndk::SharedRefBase::make<Callback>();
     std::shared_ptr<ISession> session;ASSERT_TRUE(hal->createSession(0,0,cb,&session).isOk());
     std::static_pointer_cast<Session>(session)->setStoreDirectoryForTest(dir.data());
     Signal signal;ASSERT_TRUE(session->authenticate(0,&signal).isOk());
@@ -261,7 +261,7 @@ TEST(Authentication, AlreadyPresentUnrelatedContactIsRejected) {
     resetMockTransport();mockStatusSamples={1,0};
     TemporaryStore dir;auto frame=encryptedSyntheticFrame(1);storeSyntheticEnrollment(dir,frame);
     encryptedSyntheticFrame(400);
-    auto hal=ndk::SharedRefBase::make<Fingerprint>();auto cb=ndk::SharedRefBase::make<Callback>();
+    auto hal=ndk::SharedRefBase::make<Fingerprint>(&gaokun3::kFocalTech);auto cb=ndk::SharedRefBase::make<Callback>();
     std::shared_ptr<ISession> session;ASSERT_TRUE(hal->createSession(0,0,cb,&session).isOk());
     std::static_pointer_cast<Session>(session)->setStoreDirectoryForTest(dir.data());
     Signal signal;ASSERT_TRUE(session->authenticate(0,&signal).isOk());
@@ -278,7 +278,7 @@ TEST(Authentication, FrameGapDoesNotCountAnAttemptOrLockout) {
     auto frame=encryptedSyntheticFrame(1);auto matching=mockCipher;
     storeSyntheticEnrollment(dir,frame,4);
     encryptedSyntheticFrame(400);mockCipherQueue={mockCipher,matching};
-    auto hal=ndk::SharedRefBase::make<Fingerprint>();auto cb=ndk::SharedRefBase::make<Callback>();
+    auto hal=ndk::SharedRefBase::make<Fingerprint>(&gaokun3::kFocalTech);auto cb=ndk::SharedRefBase::make<Callback>();
     std::shared_ptr<ISession> session;ASSERT_TRUE(hal->createSession(0,0,cb,&session).isOk());
     std::static_pointer_cast<Session>(session)->setStoreDirectoryForTest(dir.data());
     Signal signal;ASSERT_TRUE(session->authenticate(0,&signal).isOk());
@@ -295,7 +295,7 @@ TEST(Authentication, RejectedWindowDoesNotRequireReadyFlagToClear) {
     auto frame=encryptedSyntheticFrame(1);auto matching=mockCipher;
     storeSyntheticEnrollment(dir,frame);
     encryptedSyntheticFrame(400);
-    auto hal=ndk::SharedRefBase::make<Fingerprint>();auto cb=ndk::SharedRefBase::make<Callback>();
+    auto hal=ndk::SharedRefBase::make<Fingerprint>(&gaokun3::kFocalTech);auto cb=ndk::SharedRefBase::make<Callback>();
     // Runs on the capture worker between reads: after the first unsuccessful
     // matching window, present the matching image while ready remains set.
     cb->rejectionHook=[matching] { mockCipher=matching; };

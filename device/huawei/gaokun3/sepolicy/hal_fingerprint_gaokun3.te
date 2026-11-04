@@ -2,9 +2,11 @@
 type gaokun3_fpcmd_device, dev_type;
 type gaokun3_fp_gpio_device, dev_type;
 allow hal_fingerprint_default gaokun3_fpcmd_device:chr_file { open read write getattr ioctl };
-allowxperm hal_fingerprint_default gaokun3_fpcmd_device:chr_file ioctl { 0x4700-0x4706 };
+# LOAD..GET_FINGER_STATUS, SET_SENSOR (0x4707, Goodix units).
+allowxperm hal_fingerprint_default gaokun3_fpcmd_device:chr_file ioctl { 0x4700-0x4707 };
 allow hal_fingerprint_default gaokun3_fp_gpio_device:chr_file { open read getattr ioctl };
-# GPIO_GET_CHIPINFO, GPIO_V2_GET_LINE, SET_CONFIG, GET_VALUES, SET_VALUES.
+# GPIO_GET_CHIPINFO, GPIO_V2_GET_LINE, SET_CONFIG, GET_VALUES, SET_VALUES:
+# reset line 185 and, once at start, the GPIO61/62 sensor straps.
 allowxperm hal_fingerprint_default gaokun3_fp_gpio_device:chr_file ioctl { 0xb401 0xb407 0xb40d 0xb40e 0xb40f };
 # vold prepares /data/vendor_de/<user>; the HAL creates only its named fpdata
 # child. This puts templates under Android's per-user deletion lifecycle.
@@ -13,5 +15,5 @@ type_transition hal_fingerprint_default vendor_data_file:dir fingerprint_vendor_
 allow hal_fingerprint_default fingerprint_vendor_data_file:dir create_dir_perms;
 # kernel_read_file_from_path(READING_FIRMWARE) runs inside the caller's ioctl
 # context. SELinux checks firmware_load against the HAL SID, not kernel SID.
-# The fixed driver ABI accepts only its configured fingerprint TA path.
+# The fixed driver ABI accepts only its configured TA and Goodix template paths.
 allow hal_fingerprint_default gaokun3_firmware_file:system firmware_load;

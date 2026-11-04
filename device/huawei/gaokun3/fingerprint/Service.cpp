@@ -43,12 +43,15 @@ class Cancellation final : public common::BnCancellationSignal {
 
 class Session final : public BnSession {
   public:
-    Session(int32_t user, std::shared_ptr<ISessionCallback> cb,
+    Session(const gaokun3::SensorProfile& profile, int32_t user,
+            std::shared_ptr<ISessionCallback> cb,
             std::shared_ptr<gaokun3::Lockout> lockout,
             std::shared_ptr<std::mutex> hardwareMutex,
             std::shared_ptr<Session> predecessor = nullptr)
-        : cb_(std::move(cb)), dir_("/data/vendor_de/"+std::to_string(user)+"/fpdata"),
-          store_(dir_+"/gaokun3-templates.db"), lockout_(std::move(lockout)),
+        : cb_(std::move(cb)),
+          dir_("/data/vendor_de/"+std::to_string(user)+"/fpdata"),
+          store_(dir_+"/gaokun3-templates.db",profile), transport_(profile),
+          lockout_(std::move(lockout)),
           hardwareMutex_(std::move(hardwareMutex)), predecessor_(std::move(predecessor)),
           worker_([this] { loop(); }) {}
     ~Session() override {
@@ -72,7 +75,7 @@ class Session final : public BnSession {
 #ifdef GAOKUN3_FP_TEST
     void setStoreDirectoryForTest(const std::string& dir) {
         dir_ = dir;
-        store_ = gaokun3::Store(dir_+"/gaokun3-templates.db");
+        store_ = gaokun3::Store(dir_+"/gaokun3-templates.db",store_.profile());
     }
     void setCaptureForTest(std::function<void(gaokun3::Transport&, const std::atomic_bool&)> hook) {
         captureForTest_ = std::move(hook);
@@ -464,7 +467,10 @@ class Session final : public BnSession {
 
 class Fingerprint final : public BnFingerprint {
   public:
+    // nullptr: the board straps report no sensor, so none is offered.
+    explicit Fingerprint(const gaokun3::SensorProfile* profile) : profile_(profile) {}
     ScopedAStatus getSensorProps(std::vector<SensorProps>* out) override {
+        if (!profile_) { out->clear(); return ScopedAStatus::ok(); }
         SensorProps p{};
         p.commonProps.sensorId = 0;
         p.commonProps.sensorStrength = common::SensorStrength::CONVENIENCE;
@@ -476,7 +482,7 @@ class Fingerprint final : public BnFingerprint {
     ScopedAStatus createSession(int32_t sensor, int32_t user,
                                const std::shared_ptr<ISessionCallback>& cb,
                                std::shared_ptr<ISession>* out) override {
-        if (sensor != 0 || user < 0 || !cb) return invalid();
+        if (!profile_ || sensor != 0 || user < 0 || !cb) return invalid();
         std::lock_guard lock(mutex_);
         retired_.erase(std::remove_if(retired_.begin(),retired_.end(),
                       [](const auto& s) { return s->finished(); }),retired_.end());
@@ -492,11 +498,13 @@ class Fingerprint final : public BnFingerprint {
         // exclusive kernel FD release shuts down the TA before another open.
         auto& lockout = lockouts_[user];
         if (!lockout) lockout = std::make_shared<gaokun3::Lockout>();
-        session_ = ndk::SharedRefBase::make<Session>(user,cb,lockout,hardwareMutex_,std::move(predecessor));
+        session_ = ndk::SharedRefBase::make<Session>(*profile_,user,cb,lockout,hardwareMutex_,
+                                                     std::move(predecessor));
         if (!session_->linkToDeath()) { session_->close(); return unavailable(); }
         *out = session_; return ScopedAStatus::ok();
     }
   private:
+    const gaokun3::SensorProfile* const profile_;
     std::mutex mutex_;
     std::shared_ptr<Session> session_;
     std::vector<std::shared_ptr<Session>> retired_;
@@ -510,7 +518,9 @@ int main(int argc, char** argv) {
     (void)argc;
     ::android::base::InitLogging(argv,::android::base::LogdLogger());
     ABinderProcess_setThreadPoolMaxThreadCount(2);
-    auto hal = ndk::SharedRefBase::make<aidl::android::hardware::biometrics::fingerprint::Fingerprint>();
+    // The straps pick the sensor once; one image serves both variants.
+    auto hal = ndk::SharedRefBase::make<aidl::android::hardware::biometrics::fingerprint::Fingerprint>(
+            gaokun3::Transport::detect());
     const std::string name = std::string(hal->descriptor)+"/default";
     CHECK(AServiceManager_addService(hal->asBinder().get(),name.c_str()) == STATUS_OK);
     ABinderProcess_joinThreadPool();

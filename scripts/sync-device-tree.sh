@@ -100,16 +100,21 @@ else
     echo "· 本机没有 prebuilt-boot/vmlinuz.efi，保留构建机上的那份"
 fi
 
-# Fingerprint candidates require both ignored inputs. This branch is only
+# Fingerprint candidates require three ignored inputs: the TA, the Goodix
+# configuration template and the fingerprint kernel. This branch is only
 # reached when explicitly enabled; no device connection is made by this script.
 if [ "${GAOKUN3_FINGERPRINT:-false}" = true ]; then
     FP_TA="$SRC/firmware/fingerpr.mbn"
+    FP_CFG="$SRC/firmware/gaokun3-goodix-cfg.bin"
     [ -f "$FP_TA" ] || die "指纹 TA 缺失：先运行 scripts/fingerprint/prepare-crdroid.py"
     [ "$(shasum -a 256 "$FP_TA" | cut -d' ' -f1)" = b081543c7b6ae4360969007836747601e8c48ec48a8335a5479e45ec0e34355a ] || die "指纹 TA 哈希错误"
+    [ -f "$FP_CFG" ] || die "Goodix 配置模板缺失：先运行 scripts/fingerprint/prepare-crdroid.py --gfspi"
+    [ "$(shasum -a 256 "$FP_CFG" | cut -d' ' -f1)" = 273537378e759cc19b829c6c5a3b5226da603b55f96be6bcdf9a2e66c6c26725 ] || die "Goodix 配置模板哈希错误"
     (cd "$SRC/prebuilt-boot" && shasum -a 256 -c fingerprint-kernel.sha256) || die "指纹候选内核缺失或已变化"
-    rsync -a -e "$SSH" "$FP_TA" "$DST/firmware/"
+    rsync -a -e "$SSH" "$FP_TA" "$FP_CFG" "$DST/firmware/"
     $SSH "vahiru@$HOST" 'cd ~/crdroid/device/huawei/gaokun3 &&
       test "$(sha256sum firmware/fingerpr.mbn | cut -d" " -f1)" = b081543c7b6ae4360969007836747601e8c48ec48a8335a5479e45ec0e34355a &&
+      test "$(sha256sum firmware/gaokun3-goodix-cfg.bin | cut -d" " -f1)" = 273537378e759cc19b829c6c5a3b5226da603b55f96be6bcdf9a2e66c6c26725 &&
       cd prebuilt-boot && sha256sum -c fingerprint-kernel.sha256' || die "构建机指纹输入校验失败"
 fi
 
@@ -166,7 +171,7 @@ echo "═══ 3. 断言：构建机上不入库的构建输入都在 ═══
 if [ "${GAOKUN3_DEV_BUILD:-}" = 1 ]; then AK_MIN=500; AK_WHAT="adb_keys（开发构建）"
 else AK_MIN=-1; AK_WHAT="adb_keys 不要求（发布构建；开发构建设 GAOKUN3_DEV_BUILD=1 再跑）"; fi
 $SSH "vahiru@$HOST" "AK_MIN=$AK_MIN; "'cd ~/crdroid/device/huawei/gaokun3
-  fw=$(find firmware -type f ! -name README.md ! -name fingerpr.mbn 2>/dev/null | wc -l)
+  fw=$(find firmware -type f ! -name README.md ! -name fingerpr.mbn ! -name gaokun3-goodix-cfg.bin 2>/dev/null | wc -l)
   hx=$(find hexagonrpcd-root -type f ! -name README.md 2>/dev/null | wc -l)
   ak=$( (wc -c < adb_keys) 2>/dev/null || echo 0)
   dtb=$(ls prebuilt-boot/dtb/*.dtb 2>/dev/null | wc -l)

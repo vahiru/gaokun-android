@@ -3,18 +3,27 @@
 
 Offline only. Does not build, sync, flash, or contact a device. A candidate
 kernel must carry its own IKCONFIG proving that the restricted driver is built in.
+The Goodix configuration template comes from gfspi.dll of the same Windows
+driver release as the TA (uup-drivers-sc8280xp 200.0.10.0, gfspi.cab).
 """
 import argparse
 import hashlib
 import os
 from pathlib import Path
 import shutil
+import struct
 import subprocess
 import tempfile
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
 TA_HASH = "b081543c7b6ae4360969007836747601e8c48ec48a8335a5479e45ec0e34355a"
+# Sensor type 14 template (chips 0x2507/0x2508/0x2510), 224 bytes at
+# 0x1800b85a0 + 14 * 0xe0 in gfspi.dll 1.1.143.622. The kernel patches it from
+# the unit's OTP and accepts only this template.
+GOODIX_CFG_VA = 0x1800B85A0 + 14 * 0xE0
+GOODIX_CFG_LEN = 0xE0
+GOODIX_CFG_HASH = "273537378e759cc19b829c6c5a3b5226da603b55f96be6bcdf9a2e66c6c26725"
 
 
 def atomic_copy(source, target):
@@ -31,10 +40,36 @@ def atomic_copy(source, target):
             os.unlink(tmp)
 
 
+def goodix_template(dll):
+    """Map the template's VA through the PE section table."""
+    if dll[:2] != b"MZ":
+        raise ValueError("gfspi.dll is not a PE image")
+    pe = struct.unpack_from("<I", dll, 0x3C)[0]
+    if dll[pe:pe + 4] != b"PE\0\0":
+        raise ValueError("gfspi.dll is not a PE image")
+    sections = struct.unpack_from("<H", dll, pe + 6)[0]
+    optional = struct.unpack_from("<H", dll, pe + 20)[0]
+    image_base = struct.unpack_from("<Q", dll, pe + 24 + 24)[0]
+    entry = pe + 24 + optional
+    for _ in range(sections):
+        vsize, vaddr, rsize, raw = struct.unpack_from("<IIII", dll, entry + 8)
+        start = image_base + vaddr
+        if start <= GOODIX_CFG_VA and GOODIX_CFG_VA + GOODIX_CFG_LEN <= start + min(vsize, rsize):
+            off = raw + GOODIX_CFG_VA - start
+            cfg = dll[off:off + GOODIX_CFG_LEN]
+            if hashlib.sha256(cfg).hexdigest() != GOODIX_CFG_HASH:
+                raise ValueError("unexpected gfspi.dll revision (Goodix template)")
+            return cfg
+        entry += 40
+    raise ValueError("Goodix template not backed by file data")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--handoff", type=Path,
                         default=ROOT / "gaokun3-fingerprint-driver-handoff-20261101.zip")
+    parser.add_argument("--gfspi", type=Path, default=ROOT / "gfspi.dll",
+                        help="gfspi.dll from the Windows driver release (gfspi.cab)")
     parser.add_argument("--device-tree", type=Path, default=ROOT / "device/huawei/gaokun3")
     parser.add_argument("--kernel-image", type=Path)
     parser.add_argument("--kernel-tree", type=Path,
@@ -52,6 +87,7 @@ def main():
         ta = z.read("firmware/fingerpr.mbn")
     if hashlib.sha256(ta).hexdigest() != TA_HASH:
         raise ValueError("unexpected TA revision")
+    goodix_cfg = goodix_template(args.gfspi.read_bytes())
     kernel = None
     if args.kernel_image:
         config = subprocess.check_output(
@@ -65,12 +101,16 @@ def main():
     args.device_tree.mkdir(parents=True, exist_ok=True)
     old_image = args.device_tree / "prebuilt-boot/vmlinuz.efi"
     rollback_bytes = old_image.stat().st_size if kernel and old_image.exists() else 0
-    need = 2 * (len(ta) + (len(kernel) if kernel else 0) + rollback_bytes) + 2 * 1024**3
+    need = 2 * (len(ta) + len(goodix_cfg) + (len(kernel) if kernel else 0) +
+                rollback_bytes) + 2 * 1024**3
     if shutil.disk_usage(args.device_tree).free < need:
         raise OSError("insufficient free space for staging plus 2 GiB reserve")
     dest = args.device_tree / "firmware/fingerpr.mbn"
     atomic_copy(ta, dest)
     print("Verified/staged ignored TA:", dest)
+    dest = args.device_tree / "firmware/gaokun3-goodix-cfg.bin"
+    atomic_copy(goodix_cfg, dest)
+    print("Verified/staged ignored Goodix template:", dest)
     if kernel:
         dest = args.device_tree / "prebuilt-boot/vmlinuz.efi"
         if dest.exists() and dest.read_bytes() != kernel:

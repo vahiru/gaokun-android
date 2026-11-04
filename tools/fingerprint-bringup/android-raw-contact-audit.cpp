@@ -25,8 +25,11 @@ extern "C" int audit_engine_identify(const unsigned char*);
 extern "C" int audit_engine_quality(const unsigned char*);
 extern "C" void audit_engine_close();
 
-using Cipher=std::array<uint8_t,gaokun3::kImageBytes>;
-using Plain=std::array<uint8_t,gaokun3::kImageBytes+EVP_MAX_BLOCK_LENGTH>;
+// FocalTech-only audit (40 x 196 encrypted frames).
+constexpr size_t kImageBytes=gaokun3::kFocalTech.captureBytes;
+constexpr size_t kPixels=size_t(gaokun3::kFocalTech.width)*gaokun3::kFocalTech.height;
+using Cipher=std::array<uint8_t,kImageBytes>;
+using Plain=std::array<uint8_t,kImageBytes+EVP_MAX_BLOCK_LENGTH>;
 static const uint8_t key[]={0xeb,0x4a,0xa0,0x13,0x68,0xd8,0x46,0x47,0x0d,0x2b,0xae,0xe3,0x9d,0x02,0x0f,0xdf};
 static const uint8_t iv[]={0xd5,0xaa,0x36,0xa5,0x4b,0x7b,0x18,0x35,0xf2,0x37,0xd3,0xf0,0xc5,0x45,0x49,0xbb};
 static bool decrypt(const Cipher& cipher,Plain& plain) {
@@ -40,26 +43,26 @@ static bool decrypt(const Cipher& cipher,Plain& plain) {
     EVP_CIPHER_CTX_free(ctx);return ok;
 }
 static bool inRange(const Plain& plain) {
-    for (size_t i=0;i<GAOKUN3_PIXELS;++i)
+    for (size_t i=0;i<kPixels;++i)
         if (unsigned(plain[2*i])+(unsigned(plain[2*i+1])<<8)>4096) return false;
     return true;
 }
 static int selfTest() {
     Plain input{},output{};std::mt19937 random(1);
-    for (size_t i=0;i<GAOKUN3_PIXELS;++i) {
+    for (size_t i=0;i<kPixels;++i) {
         unsigned value=200+(random()&255)*8;input[2*i]=value&255;input[2*i+1]=value>>8;
     }
-    std::array<uint8_t,gaokun3::kImageBytes+EVP_MAX_BLOCK_LENGTH> encrypted{};
+    std::array<uint8_t,kImageBytes+EVP_MAX_BLOCK_LENGTH> encrypted{};
     auto* ctx=EVP_CIPHER_CTX_new();if (!ctx) return 1;int bytes=0,tail=0;
     bool ok=EVP_EncryptInit_ex(ctx,EVP_aes_128_cbc(),nullptr,key,iv)==1 &&
             EVP_CIPHER_CTX_set_padding(ctx,0)==1 &&
-            EVP_EncryptUpdate(ctx,encrypted.data(),&bytes,input.data(),gaokun3::kImageBytes)==1 &&
+            EVP_EncryptUpdate(ctx,encrypted.data(),&bytes,input.data(),kImageBytes)==1 &&
             EVP_EncryptFinal_ex(ctx,encrypted.data()+bytes,&tail)==1 &&
-            bytes+tail==static_cast<int>(gaokun3::kImageBytes);
+            bytes+tail==static_cast<int>(kImageBytes);
     EVP_CIPHER_CTX_free(ctx);Cipher cipher{};
     std::copy_n(encrypted.begin(),cipher.size(),cipher.begin());
     ok=ok && decrypt(cipher,output) && inRange(output) &&
-       !std::memcmp(input.data(),output.data(),gaokun3::kImageBytes);
+       !std::memcmp(input.data(),output.data(),kImageBytes);
     output[0]=255;output[1]=255;ok=ok && !inRange(output);
     if (ok) puts("PASS: synthetic raw AES round-trip and strict ADC range rejection");
     return ok?0:1;
@@ -108,6 +111,7 @@ static void pipeline(unsigned mode,const std::vector<Plain>& inputs) {
         std::vector<Gaokun3Frame> processed;unsigned rejected=0;
         for (const auto& input : inputs) {
             Gaokun3Frame output{};
+            output.width=gaokun3::kFocalTech.width;output.height=gaokun3::kFocalTech.height;
             if (audit_native_apply_raw(input.data(),output.pixels)) ++rejected;
             else processed.push_back(output);
         }
@@ -131,7 +135,7 @@ int main(int argc,char** argv) {
     if (geteuid()==0 && (setgroups(0,nullptr) || setgid(1000) || setuid(1000))) return 1;
     if (geteuid()!=1000 || audit_native_open()) return 1;
     signal(SIGINT,SIG_IGN);signal(SIGTERM,SIG_IGN);signal(SIGHUP,SIG_IGN);
-    gaokun3::Transport transport;bool ok=transport.start();
+    gaokun3::Transport transport(gaokun3::kFocalTech);bool ok=transport.start();
     std::vector<Cipher> images;unsigned captures=0,duplicates=0,errors=0,framing=0;
     using namespace std::chrono_literals;
     auto deadline=std::chrono::steady_clock::now()+5min;
@@ -146,7 +150,7 @@ int main(int argc,char** argv) {
             errors=0;
             if (ready) {
                 Cipher image{};
-                if (!transport.captureEncoded(image)) {ok=false;break;}
+                if (!transport.captureRaw(image.data(),image.size())) {ok=false;break;}
                 ++captures;
                 if (std::find(images.begin(),images.end(),image)==images.end()) images.push_back(image);
                 else ++duplicates;

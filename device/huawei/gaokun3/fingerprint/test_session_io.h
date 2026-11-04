@@ -8,9 +8,9 @@
 #include <linux/gpio.h>
 #include <sys/ioctl.h>
 static std::atomic_int mockLoads{0}, mockUnloads{0};
-static std::array<uint8_t,gaokun3::kImageBytes> mockCipher{};
+static std::array<uint8_t,gaokun3::kFocalTech.captureBytes> mockCipher{};
 static std::atomic_int mockCaptures{0};
-static std::vector<std::array<uint8_t,gaokun3::kImageBytes>> mockCipherQueue;
+static std::vector<std::array<uint8_t,gaokun3::kFocalTech.captureBytes>> mockCipherQueue;
 static size_t mockCipherCursor=0;
 static std::vector<int> mockStatusSamples;
 static size_t mockStatusCursor=0;
