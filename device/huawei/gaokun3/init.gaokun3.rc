@@ -159,6 +159,18 @@ service gaokun3_wlanap /vendor/bin/gaokun3-wlan-ap.sh
     oneshot
     disabled
 
+# 待机时让推送叫醒系统：按推送连接（Google Play 服务的 FCM 长连接）的服务器地址给 Wi-Fi 设收包唤醒规则，醒着时每 10 秒核对一次。
+# 设规则是 nl80211 SET_WOWLAN，要 CAP_NET_ADMIN；不用 root。原理见 bin/gaokun3-wifi-wake.sh 头注释。
+# 排查：logcat -s gaokun3-wifiwake。临时停用：stop gaokun3_wifiwake，再关开一次 Wi-Fi，
+# wpa_supplicant 重新设触发条件时会把已设的规则清掉。
+# oneshot：内核没有 ath11k_wow 唤醒源时脚本自己退出，不要让 init 每 5 秒重启它。
+service gaokun3_wifiwake /vendor/bin/gaokun3-wifi-wake.sh
+    user wifi
+    group wifi net_admin
+    capabilities NET_ADMIN
+    oneshot
+    disabled
+
 # remoteproc 兜底：ramdisk 里已带固件，早期 probe 正常就已 running；
 # 万一没起来（固件路径变动等），这里补一刀。ADSP 不起来就没有声卡。
 # ⚠️ 2026-09-24：不再直接写 start —— 对已在运行的 DSP 写 start 会泄漏一次引用
@@ -172,6 +184,7 @@ service gaokun3_rprockick /vendor/bin/gaokun3-rproc-kick.sh
 
 on property:sys.boot_completed=1
     start gaokun3_rprockick
+    start gaokun3_wifiwake
 
 # turnip 调试旗标（快速迭代机制 v3，见 docs/stage5-freedreno.md）：
 # 内核 cmdline 加 androidboot.tu_debug=<flags> → ro.boot.tu_debug → 下面的属性。

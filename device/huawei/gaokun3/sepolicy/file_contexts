@@ -124,6 +124,7 @@
 /vendor/bin/gaokun3-rproc-kick\.sh   u:object_r:gaokun3_rprockick_exec:s0
 /vendor/bin/gaokun3-ssc-recover\.sh  u:object_r:gaokun3_sscrecover_exec:s0
 /vendor/bin/gaokun3-wlan-ap\.sh      u:object_r:gaokun3_wlanap_exec:s0
+/vendor/bin/gaokun3-wifi-wake\.sh    u:object_r:gaokun3_wifiwake_exec:s0
 # ⚠️★ 2026-09-18 补：触摸手感模式（v0.6.2 随 #116 加的 touchmode.rc）当初
 #    【整个漏了这一步】—— 服务没有 seclabel、可执行文件没有标签，于是它和
 #    2026-08-23 之前的那批服务一样留在 init 域里。permissive 下功能完全正常，

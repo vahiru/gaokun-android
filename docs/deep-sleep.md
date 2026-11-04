@@ -46,7 +46,13 @@ PCI 核心把它登记成 Wi-Fi 的专用唤醒中断，低电平触发（patche
 Wi-Fi 关着时固件不运行，pcie4 挂起时会打一条 `Timeout waiting for L2 entry`，这是预期的。
 
 默认的唤醒条件只有断线和 GTK 更新失败（`device/huawei/gaokun3/wifi/wpa_supplicant.conf` 的 `wowlan_triggers`）。
-收包唤醒要用户态另外设规则（`iw phy phy0 wowlan enable ... patterns ...`），ROM 里还没有，推送照旧要等下一次唤醒（见 [known-limitations.zh-CN.md](known-limitations.zh-CN.md)）。
+收包唤醒的规则由 vendor 服务 `gaokun3_wifiwake`（`bin/gaokun3-wifi-wake.sh`）设置，做法照 ChromeOS：只让推送连接的服务器发来的 TCP 包叫醒系统。
+它从 `/proc/net/tcp`、`/proc/net/tcp6` 找远端端口是 5228–5230 的已建立连接（Google Play 服务的 FCM 长连接用这几个端口；
+分不出连接属于哪个 App，别的 App 连到这几个端口也会算进去），每个服务器地址一条规则，
+连同上面两个条件用 `iw phy <phy> wowlan enable ... patterns ...` 设下去；醒着时每 10 秒核对一次，地址变了、或者 wpa_supplicant
+重设触发条件把规则冲掉了，就重新设。一分钟内被叫醒超过 3 次、或十分钟内超过 10 次（`ath11k_wow` 的 `event_count`），
+就撤掉规则 10 分钟，防止唤醒风暴。不走 Google 推送的 App（比如国内版微信、QQ）匹配不上，还是要等下一次唤醒（见 [known-limitations.zh-CN.md](known-limitations.zh-CN.md)）。
+Play 服务换了服务器之后，要等系统醒着满 10 秒规则才跟上；走 VPN，或者 IPv4 连接经 464XLAT 转成 IPv6 时，`/proc` 里的地址和 Wi-Fi 上的包对不上，规则不会匹配。
 
 Wi-Fi 叫醒系统之后，会拉着 WAKE# 一会儿。恢复时内核先撤掉唤醒中断的唤醒设置，再重新打开设备中断（patches/0201），
 否则低电平触发的 WAKE# 中断会在这段空档里反复触发，一次恢复多出几千到两万多个中断。
@@ -56,6 +62,7 @@ Wi-Fi 叫醒系统之后，会拉着 WAKE# 一会儿。恢复时内核先撤掉�
 排查：被 WAKE# 叫醒时 `/sys/power/pm_wakeup_irq` 是 `/proc/interrupts` 里 `0006:01:00.0:wakeup` 那一行的中断号。
 内核开了 `CONFIG_ATH11K_DEBUG` 时，`echo 2 > /sys/module/ath11k/parameters/debug_mask` 之后日志里有 `wow wakeup host reason`，
 `UNSPECIFIED` 一般是主机自己醒来时固件的回答，`PATTERN_MATCH_FOUND` 是收包规则匹配上了。
+现在设着的规则看 `iw phy phy0 wowlan show`，服务的记录看 `logcat -s gaokun3-wifiwake`。
 
 Wi-Fi 进了 D3hot 之后、主机发 PME_Turn_Off 之前，固件如果碰上触发唤醒的事件，会通过链路给主机发 PME。根端口的 PME 中断走 GIC ITS 的 MSI，
 不能唤醒系统，挂起时已经被 `pcie_pme_suspend()` 关掉，这条 PME 没人处理。固件这时不回应 PME_Turn_Off，照样断电的话几次之后链路回不来，

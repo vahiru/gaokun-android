@@ -587,6 +587,10 @@ PRODUCT_PACKAGES += \
     iw_vendor
 PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/bin/gaokun3-wlan-ap.sh:$(TARGET_COPY_OUT_VENDOR)/bin/gaokun3-wlan-ap.sh
+# 待机时让推送叫醒系统：按推送连接的服务器地址设收包唤醒规则（docs/deep-sleep.md 的 Wi-Fi 一节）。
+# 也用 iw_vendor（上面那个包）。⬜ 未经 ROM 构建、未在 enforcing 下上机。
+PRODUCT_COPY_FILES += \
+    $(LOCAL_PATH)/bin/gaokun3-wifi-wake.sh:$(TARGET_COPY_OUT_VENDOR)/bin/gaokun3-wifi-wake.sh
 
 # ★ Wi-Fi 的 TCP 缓冲区上限调大（rro/Gaokun3WifiOverlay，#119）：国内到海外 CDN 的 RTT
 #   约 300 ms，AOSP 默认 2 MB 的接收上限把单连接卡在 ~3.5 MB/s；8 MB 实测 ~9.5 MB/s。
