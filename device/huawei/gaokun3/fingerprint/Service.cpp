@@ -486,8 +486,11 @@ class Fingerprint final : public BnFingerprint {
         // the 9 mm bezel; the left edge is the natural top edge and the top
         // edge the natural right one. The key is about 16 mm long. Both sensor
         // variants sit in the same key. From Huawei's outline drawing, +/- 2 mm.
+        // SystemUI's side-fps math takes y == 0 as "on the natural top edge",
+        // x as the key's start along that edge and the radius as half its
+        // length: the key spans [x, x + 2r], so x = centre (1428) - r.
         SensorLocation location{};
-        location.sensorLocationX = 1600 - 172;
+        location.sensorLocationX = 1600 - 172 - 78;
         location.sensorLocationY = 0;
         location.sensorRadius = 78;
         // The framework and Settings take "" as the default display, but
