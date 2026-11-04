@@ -1,0 +1,272 @@
+From: Krishna Chaitanya Chundru <krishna.chundru@oss.qualcomm.com>
+Subject: [PATCH] PCI: Add support for PCIe WAKE# interrupt
+
+According to PCIe r7.0, sec 5.3.3.2, two link wakeup mechanisms are
+defined: Beacon and WAKE#. Beacon is a hardware-only mechanism and is
+invisible to software (sec 4.2.7.8.1). This change adds support for the
+WAKE# mechanism in the PCI core.
+
+According to the PCIe specification, multiple WAKE# signals can exist in a
+system or several components in the hierarchy may share a single WAKE#
+signal. In configurations involving a PCIe switch, each downstream port
+(DSP) of the switch may be connected to a separate WAKE# line, allowing
+each endpoint to signal WAKE# independently. From figure 5.4 in sec
+5.3.3.2, WAKE# can also be terminated at the switch itself. Such topologies
+are typically not described in Device Tree, therefore it is out of scope
+for this series.
+
+To support this, the WAKE# should be described in the device tree node of
+the endpoint/bridge. If all endpoints share a single WAKE# line, then each
+endpoint node shall describe the same WAKE# signal or a single WAKE# in the
+Root Port node.
+
+In pci_device_add(), PCI framework will search for the WAKE# in device
+node. Once found, register for the wake IRQ through
+dev_pm_set_dedicated_wake_irq() associates a wakeup IRQ with a device and
+requests it, but the PM core keeps the IRQ disabled by default. The IRQ is
+enabled by the PM core, only when the device is permitted to wake the
+system, i.e. during system suspend and after runtime suspend, and only when
+device wakeup is enabled.
+
+If the same WAKE# GPIO is described in multiple device tree nodes, only the
+first device that successfully registers the wake IRQ will succeed, while
+subsequent registrations may fail. This limitation does not affect
+functional correctness, since WAKE# is only used to bring the link to D0,
+and endpoint-specific wakeup handling is resolved later through PME
+detection (PME_EN is set in suspend path by PCI core by default).
+
+When the wake IRQ fires, the wakeirq handler invokes pm_runtime_resume() to
+bring the device back to an active power state, such as transitioning from
+D3cold to D0. Once the device is active and the link is usable, the
+endpoint may generate a PME, which is then handled by the PCI core through
+PME polling or the PCIe PME service driver to complete the wakeup of the
+endpoint.
+
+WAKE# is added in dts schema and merged based on below links.
+
+Link: https://lore.kernel.org/all/20250515090517.3506772-1-krishna.chundru@oss.qualcomm.com/
+Link: https://github.com/devicetree-org/dt-schema/pull/170
+Signed-off-by: Krishna Chaitanya Chundru <krishna.chundru@oss.qualcomm.com>
+Signed-off-by: Bjorn Helgaas <bhelgaas@google.com>
+Reviewed-by: Linus Walleij <linus.walleij@linaro.org>
+Reviewed-by: Bartosz Golaszewski <bartosz.golaszewski@oss.qualcomm.com>
+Acked-by: Manivannan Sadhasivam <mani@kernel.org>
+Link: https://patch.msgid.link/20260707-wakeirq_support-v12-1-b4453f5bcc97@oss.qualcomm.com
+(cherry picked from commit 071e245ab749c52338ec4eb7fe0a9bb2cee97492)
+---
+ drivers/pci/of.c       | 79 ++++++++++++++++++++++++++++++++++++++++++
+ drivers/pci/pci.c      | 11 ++++++
+ drivers/pci/pci.h      |  2 ++
+ drivers/pci/probe.c    |  2 ++
+ drivers/pci/remove.c   |  1 +
+ include/linux/of_pci.h |  6 ++++
+ include/linux/pci.h    |  2 ++
+ 7 files changed, 103 insertions(+)
+
+diff --git a/drivers/pci/of.c b/drivers/pci/of.c
+index 8b18c4ba8..a51dff91b 100644
+--- a/drivers/pci/of.c
++++ b/drivers/pci/of.c
+@@ -7,6 +7,7 @@
+ #define pr_fmt(fmt)	"PCI: OF: " fmt
+ 
+ #include <linux/cleanup.h>
++#include <linux/gpio/consumer.h>
+ #include <linux/irqdomain.h>
+ #include <linux/kernel.h>
+ #include <linux/pci.h>
+@@ -15,6 +16,7 @@
+ #include <linux/of_address.h>
+ #include <linux/of_pci.h>
+ #include <linux/platform_device.h>
++#include <linux/pm_wakeirq.h>
+ #include "pci.h"
+ 
+ #ifdef CONFIG_PCI
+@@ -586,6 +588,83 @@ int of_irq_parse_and_map_pci(const struct pci_dev *dev, u8 slot, u8 pin)
+ 	return irq_create_of_mapping(&oirq);
+ }
+ EXPORT_SYMBOL_GPL(of_irq_parse_and_map_pci);
++
++static void pci_configure_wake_irq(struct pci_dev *pdev, struct gpio_desc *wake)
++{
++	int ret, wake_irq, irq_type;
++
++	wake_irq = gpiod_to_irq(wake);
++	if (wake_irq < 0) {
++		pci_err(pdev, "Failed to get wake IRQ: %d\n", wake_irq);
++		return;
++	}
++
++	/*
++	 * dev_pm_set_dedicated_wake_irq() associates a wakeup IRQ with the
++	 * device and requests it, but the PM core keeps it disabled by
++	 * default.  The IRQ is enabled only when the device is allowed to
++	 * wake the system (during system suspend and after runtime
++	 * suspend), and only if device wakeup is enabled.
++	 *
++	 * When the wake IRQ fires, the wakeirq handler invokes
++	 * pm_runtime_resume() to bring the device back to an active power
++	 * state (e.g. from D3cold to D0).  Once the device is active and
++	 * the link is usable, the endpoint may signal a PME, which is then
++	 * handled by the PCI core (either via PME polling or the PCIe PME
++	 * service driver) to wakeup the particular endpoint.
++	 */
++	ret = dev_pm_set_dedicated_wake_irq(&pdev->dev, wake_irq);
++	if (ret < 0) {
++		pci_err(pdev, "Failed to set WAKE# IRQ: %d\n", ret);
++		return;
++	}
++
++	irq_type = gpiod_is_active_low(wake) ? IRQ_TYPE_LEVEL_LOW :
++						IRQ_TYPE_LEVEL_HIGH;
++	ret = irq_set_irq_type(wake_irq, irq_type);
++	if (ret < 0) {
++		dev_pm_clear_wake_irq(&pdev->dev);
++		pci_err(pdev, "Failed to set irq_type: %d\n", ret);
++		return;
++	}
++
++	device_init_wakeup(&pdev->dev, true);
++}
++
++void pci_configure_of_wake_gpio(struct pci_dev *dev)
++{
++	struct device_node *dn = pci_device_to_OF_node(dev);
++	struct gpio_desc *gpio;
++
++	if (!dn && !dev->wake)
++		return;
++	/*
++	 * fwnode_gpiod_get() may fail with -EBUSY (e.g. shared WAKE#), but
++	 * the actual WAKE# trigger from the device would still work and
++	 * the host controller driver will enable power to the topology.
++	 *
++	 * -EPROBE_DEFER cannot be propagated here since pci_device_add()
++	 * has no retry mechanism.
++	 */
++	gpio = fwnode_gpiod_get(of_fwnode_handle(dn), "wake", GPIOD_IN, NULL);
++	if (!IS_ERR(gpio)) {
++		dev->wake = gpio;
++		pci_configure_wake_irq(dev, gpio);
++	}
++}
++
++void pci_remove_of_wake_gpio(struct pci_dev *dev)
++{
++	struct device_node *dn = pci_device_to_OF_node(dev);
++
++	if (!dn)
++		return;
++
++	device_init_wakeup(&dev->dev, false);
++	dev_pm_clear_wake_irq(&dev->dev);
++	gpiod_put(dev->wake);
++	dev->wake = NULL;
++}
+ #endif	/* CONFIG_OF_IRQ */
+ 
+ static int pci_parse_request_of_pci_ranges(struct device *dev,
+diff --git a/drivers/pci/pci.c b/drivers/pci/pci.c
+index 0941475e7..327c8424a 100644
+--- a/drivers/pci/pci.c
++++ b/drivers/pci/pci.c
+@@ -17,6 +17,7 @@
+ #include <linux/lockdep.h>
+ #include <linux/msi.h>
+ #include <linux/of.h>
++#include <linux/of_pci.h>
+ #include <linux/pci.h>
+ #include <linux/pm.h>
+ #include <linux/slab.h>
+@@ -1114,6 +1115,16 @@ static inline bool platform_pci_bridge_d3(struct pci_dev *dev)
+ 	return acpi_pci_bridge_d3(dev);
+ }
+ 
++void platform_pci_configure_wake(struct pci_dev *dev)
++{
++	pci_configure_of_wake_gpio(dev);
++}
++
++void platform_pci_remove_wake(struct pci_dev *dev)
++{
++	pci_remove_of_wake_gpio(dev);
++}
++
+ /**
+  * pci_update_current_state - Read power state of given device and cache it
+  * @dev: PCI device to handle.
+diff --git a/drivers/pci/pci.h b/drivers/pci/pci.h
+index 62c1b324a..5323a82aa 100644
+--- a/drivers/pci/pci.h
++++ b/drivers/pci/pci.h
+@@ -285,6 +285,8 @@ void pci_msix_init(struct pci_dev *dev);
+ bool pci_bridge_d3_possible(struct pci_dev *dev);
+ void pci_bridge_d3_update(struct pci_dev *dev);
+ int pci_bridge_wait_for_secondary_bus(struct pci_dev *dev, char *reset_type);
++void platform_pci_configure_wake(struct pci_dev *dev);
++void platform_pci_remove_wake(struct pci_dev *dev);
+ 
+ static inline bool pci_bus_rrs_vendor_id(u32 l)
+ {
+diff --git a/drivers/pci/probe.c b/drivers/pci/probe.c
+index dd0abbc63..27008e2ea 100644
+--- a/drivers/pci/probe.c
++++ b/drivers/pci/probe.c
+@@ -2749,6 +2749,8 @@ void pci_device_add(struct pci_dev *dev, struct pci_bus *bus)
+ 
+ 	pci_init_capabilities(dev);
+ 
++	platform_pci_configure_wake(dev);
++
+ 	/*
+ 	 * Add the device to our list of discovered devices
+ 	 * and the bus list for fixup functions, etc.
+diff --git a/drivers/pci/remove.c b/drivers/pci/remove.c
+index d8bffa214..e711ac1d4 100644
+--- a/drivers/pci/remove.c
++++ b/drivers/pci/remove.c
+@@ -34,6 +34,7 @@ static void pci_destroy_dev(struct pci_dev *dev)
+ 	if (pci_dev_test_and_set_removed(dev))
+ 		return;
+ 
++	platform_pci_remove_wake(dev);
+ 	pci_doe_sysfs_teardown(dev);
+ 	pci_npem_remove(dev);
+ 
+diff --git a/include/linux/of_pci.h b/include/linux/of_pci.h
+index 29658c0ee..649fe8eaf 100644
+--- a/include/linux/of_pci.h
++++ b/include/linux/of_pci.h
+@@ -30,12 +30,18 @@ static inline void of_pci_check_probe_only(void) { }
+ 
+ #if IS_ENABLED(CONFIG_OF_IRQ)
+ int of_irq_parse_and_map_pci(const struct pci_dev *dev, u8 slot, u8 pin);
++void pci_configure_of_wake_gpio(struct pci_dev *dev);
++void pci_remove_of_wake_gpio(struct pci_dev *dev);
+ #else
+ static inline int
+ of_irq_parse_and_map_pci(const struct pci_dev *dev, u8 slot, u8 pin)
+ {
+ 	return 0;
+ }
++
++static inline void pci_configure_of_wake_gpio(struct pci_dev *dev) { }
++
++static inline void pci_remove_of_wake_gpio(struct pci_dev *dev) { }
+ #endif
+ 
+ #endif
+diff --git a/include/linux/pci.h b/include/linux/pci.h
+index 66a4fda05..aab426d01 100644
+--- a/include/linux/pci.h
++++ b/include/linux/pci.h
+@@ -591,6 +591,8 @@ struct pci_dev {
+ 	/* These methods index pci_reset_fn_methods[] */
+ 	u8 reset_methods[PCI_NUM_RESET_METHODS]; /* In priority order */
+ 
++	struct gpio_desc *wake;		/* WAKE# GPIO */
++
+ #ifdef CONFIG_PCIE_TPH
+ 	u16		tph_cap;	/* TPH capability offset */
+ 	u8		tph_mode;	/* TPH mode */

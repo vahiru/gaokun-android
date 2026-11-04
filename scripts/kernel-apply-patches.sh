@@ -431,6 +431,19 @@ KPATCHES=(
     # 0197：挂起时设备已经发了PME（要叫醒系统），就让这次挂起失败，不再发PME_Turn_Off。不打的话开着WoWLAN时，
     #    挂起途中Wi-Fi收到唤醒包会不回应PME_Turn_Off，主机照样断电，几次之后链路回不来。
     0197-PCI-dwc-abort-suspend-when-a-device-has-signalled-PME.patch
+    # ★ 0199–0202：Wi-Fi用PCIe WAKE#把睡眠中的系统叫醒。依赖0188–0196的断链待机：从固件字符串和测试推断，
+    #    固件要在链路走L2、PERST#拉低之后才拉WAKE#。0197让挂起途中碰上唤醒时不丢链路。
+    # 0199：上游071e245ab749，PCI核心支持WAKE#中断。不打的话WAKE#没有人处理，Wi-Fi的唤醒要等下一个闹钟。
+    0199-PCI-Add-support-for-PCIe-WAKE-interrupt.patch
+    # 0200：wake-gpios从pcie4搬到wifi@0，PCI核心只在设备自己的节点上找它。不打的话0199找不到这根线。
+    #    只能搬，不能两处都写：同一根GPIO引用两次会被当成共享GPIO。
+    0200-arm64-dts-qcom-sc8280xp-huawei-gaokun3-move-wake-gpios-to-the-Wi-Fi-node.patch
+    # 0201：恢复时先撤掉唤醒中断的唤醒设置，再重新打开设备中断。不打的话Wi-Fi还拉着WAKE#时，电平触发的WAKE#中断
+    #    在这段空档里反复触发，一次恢复多出几千到两万多个中断，拖慢恢复最多约0.25秒。
+    0201-PM-sleep-disarm-wake-IRQs-before-resuming-device-IRQs.patch
+    # 0202：固件因为收到的东西叫醒系统后，ath11k_wow唤醒源保持1秒（ath11k.wow_wakeup_ms）。不打的话Android
+    #    约0.1秒后就又挂起，收包的进程可能还没运行。
+    0202-wifi-ath11k-keep-the-system-awake-briefly-after-a-WoW-wakeup.patch
     # ★ 0203、0204：内置麦四路采集（麦克风阵列，device/huawei/gaokun3/micarray/）。0203让VA后端在前端要四路时保留四路，
     #    不打的话四路请求在后端被压回两路；0204让采集按源的顺序标声道，不打的话DSP的MFC把四路重新混过（第三路混进前两路）。
     0203-ASoC-qcom-sc8280xp-let-VA-capture-use-four-channels.patch

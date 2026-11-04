@@ -1,0 +1,63 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] PM: sleep: disarm wake IRQs before resuming device IRQs
+
+dpm_resume_noirq() enables the device IRQs again and only then disarms
+the wake IRQs. A dedicated wake IRQ that fired during the sleep is
+re-enabled by resume_device_irqs(), IRQD_WAKEUP_ARMED is already cleared,
+so the core runs its handler. handle_threaded_wake_irq() still sees the
+wakeup set, reports a wakeup event and returns. If the line is level
+triggered and still asserted, the IRQ fires again as soon as the oneshot
+thread unmasks it, until device_wakeup_disarm_wake_irqs() disables it.
+
+The PCIe WAKE# IRQ of 071e245ab749 ("PCI: Add support for PCIe WAKE#
+interrupt") is such an IRQ, and the endpoint can still hold WAKE# at that
+point. On a Huawei MateBook E Go (SC8280XP, WCN6855 Wi-Fi), in 20 sleeps
+of which 19 ended on WAKE#, 6 resumes fired it 5 to 26,358 times over up
+to 244 ms, the IRQ thread delaying the disarm on its CPU.
+
+Disarm the wake IRQs before resume_device_irqs(). A dedicated wake IRQ
+that the disarm disables is then still disabled when resume_irq() runs,
+and stays disabled. Plain wake IRQs only lose the wake setting earlier:
+resume_irq() restores an IRQ that suspend enabled for wakeup
+(IRQCHIP_ENABLE_WAKEUP_ON_SUSPEND) from IRQD_IRQ_ENABLED_ON_SUSPEND,
+which the disarm does not touch.
+
+Side effects:
+- The handler no longer runs for such a wakeup, so the wakeup is not
+  counted on the device's wakeup source. pm_system_irq_wakeup() still
+  records the IRQ.
+- An edge triggered dedicated wake IRQ that fired during the sleep used
+  to be replayed during resume. Now it stays pending until the IRQ is
+  enabled next, at the next runtime suspend or system suspend, where the
+  replay can report a wakeup and abort that suspend.
+
+Not covered: a dedicated wake IRQ left enabled for runtime PM
+(WAKE_IRQ_DEDICATED_ENABLED). The disarm doesn't disable it, so a held
+level line keeps firing as before, and its handler now finds the wakeup
+cleared and fails to resume the device while runtime PM is still
+disabled ("wake IRQ with no resume: -13").
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ drivers/base/power/main.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/base/power/main.c b/drivers/base/power/main.c
+index 4ed2e9b7e..106ade94c 100644
+--- a/drivers/base/power/main.c
++++ b/drivers/base/power/main.c
+@@ -938,8 +938,13 @@ void dpm_resume_noirq(pm_message_t state)
+ {
+ 	dpm_noirq_resume_devices(state);
+ 
+-	resume_device_irqs();
++	/*
++	 * Disarm first: a dedicated wake IRQ that is still asserted would
++	 * fire again as soon as resume_device_irqs() enables it, and keep
++	 * firing until the disarm disables it.
++	 */
+ 	device_wakeup_disarm_wake_irqs();
++	resume_device_irqs();
+ }
+ 
+ static void async_resume_early(void *data, async_cookie_t cookie);
