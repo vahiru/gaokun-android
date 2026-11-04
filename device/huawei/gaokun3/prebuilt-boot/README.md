@@ -2,7 +2,7 @@
 
 `.gitignore` 把本目录**整个**忽略，只放行这份 README。
 
-本机的内核不在 AOSP 树里编（主线 v7.2-rc2 + `refs/gaokun-buildbot/patches/`
+本机的内核不在 AOSP 树里编（主线 v7.2.9 stable + `refs/gaokun-buildbot/patches/`
 那一套 + 本仓 `patches/`），所以作为 prebuilt 放在这里，由构建系统装进 boot 镜像。
 
 ## 需要放什么

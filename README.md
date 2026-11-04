@@ -1,6 +1,6 @@
 # Android on the Huawei MateBook E Go (SC8280XP / `gaokun3`)
 
-**crDroid 16.0 (Android 16) on a mainline Linux kernel, with hardware Vulkan on
+**crDroid 13 (Android 17) on a mainline Linux kernel, with hardware Vulkan on
 the Adreno 690.**
 
 Qualcomm never shipped an Android BSP for the 8cx family — only Windows and
@@ -10,9 +10,9 @@ bootloader, no recovery partition and no serial console — just UEFI. So this i
 not a normal device port: it is *AOSP on mainline*, with every HAL built on top
 of upstream drivers.
 
-> ### ⚠️ Alpha. Read this first.
-> Latest release: **v0.7.1-alpha**. Games run well, and the machine sleeps and
-> wakes properly.
+> ### ⚠️ 1.0 release candidate. Read this first.
+> Latest release: **v1.0.0-rc.3** (the third 1.0 release candidate). Games run
+> well, and the machine sleeps and wakes properly.
 > **There is still no working recovery and no working factory reset** — see
 > [Known limitations](#known-limitations).
 > The command-line installer (and the graphical installer's *Erase the whole
@@ -23,7 +23,8 @@ of upstream drivers.
 >
 > Before you install, also know: **`/data` is not encrypted**, **root is built
 > into the kernel**, the images are **signed with Android's public test keys**,
-> and up to v0.7.1 **adb over the network is open without authorization**.
+> and up to v0.7.1 **adb over the network is open without authorization**
+> (closed since 1.0.0-rc.1).
 > Details in [Known limitations](#known-limitations); common questions (logs,
 > the boot menu, wiping before you sell) in the [FAQ](docs/FAQ.md).
 
@@ -35,7 +36,8 @@ of upstream drivers.
 
 ## Status
 
-As of v0.7.1-alpha. Every ✅ was measured on hardware, not inferred; whatever
+As of v1.0.0-rc.3; anything marked *next release* is merged into the `dev`
+branch but not in a release yet. Every ✅ was measured on hardware, not inferred; whatever
 has not been tested says so. The evidence is in [`docs/`](docs/), the case
 numbers (#NN) are in [`docs/stage4-findings.md`](docs/stage4-findings.md).
 
@@ -43,39 +45,40 @@ numbers (#NN) are in [`docs/stage4-findings.md`](docs/stage4-findings.md).
 |---|:--:|---|
 | Boot (UEFI + systemd-boot, internal disk) | ✅ | No USB media required. A/B slots with Virtual A/B; system updates (kernel included) install from Settings |
 | Display 1600×2560 @ 120 Hz | ✅ | The framework default pinned rendering to 60; overridden, measured 8.33 ms vsync |
-| Display colour | ✅ | Factory calibration read from the firmware, Display P3 for apps that ask for it, 10-bit content dithered to the 8-bit panel, HDR video with highlights brighter than the UI ([details](docs/display-color.md)) |
-| GPU — Adreno 690, hardware Vulkan | ✅ | Mesa 26.0.3 `turnip`; zero SMMU faults over a 22-minute soak |
-| Touchscreen | ⚠️ | Works — Himax HX83121A, needs the gpio174 patch in `patches/` ([#26](docs/stage4-findings.md#26)). **Since v0.6.2 touch is tuned from measurements, not feel**: (1) the jump-detection threshold in the shipped preset was in effect a 1.0 m/s speed limit above which the driver reported nothing — one fast flick arrived as a dozen touches; the test is now against the predicted position ([#114](docs/stage4-findings.md#114)); (2) coordinate `fuzz` 8 → 0: measured centroid jitter is under half an output unit, while fuzz 8 was discarding a quarter of real motion ([#116](docs/stage4-findings.md#116)); (3) press latency 25 → 17 ms; (4) contact size and pressure are reported, for apps that read them (Android's own palm rejection is off on this device, so it does not use them). Six driver defects fixed plus per-stage counters and raw capacitance-frame dumps ([#115](docs/stage4-findings.md#115)). ⚠️ A palm on the panel fragments into several contacts (taps still work) |
-| Detachable keyboard + touchpad | ✅ | USB HID `12d1:10b8`; can be switched off in *Settings › System › Detachable keyboard* |
-| Keyboard cover as a lid | ✅ | Closing the cover turns the screen off and opening it wakes the tablet; folding it behind the screen does nothing |
-| Wi-Fi | ✅ | ath11k / WCN6855. Measured 61.7 MB/s pulling 200 MB over the LAN ([#44](docs/stage4-findings.md#44)). Downloads from far-away servers (~300 ms) used to cap at about 3.5 MB/s per connection — Android's default TCP buffers; raised in v0.7.0, measured 3.5 → 9.5 MB/s ([#119](docs/stage4-findings.md#119)). WPA3-SAE connects ([#107](docs/stage4-findings.md#107)); Android's automatic WPA2 → WPA3 upgrade on mixed-mode routers is off since v0.7.1, because some of them rejected it. [Issue #2](https://github.com/vahiru/gaokun-android/issues/2) (pure WPA3, kicked after association on a ZTE router) does not reproduce here. ⚠️ The MAC address changes on every boot |
-| Wi-Fi hotspot | ⚠️ | Works since v0.7.1 ([#11](https://github.com/vahiru/gaokun-android/issues/11)) — the hotspot comes up; a phone actually joining it has not been tested. ⚠️ Turning it on disconnects the tablet from Wi-Fi (no Wi-Fi + hotspot combination is configured yet), so there is no uplink to share |
+| Display colour | ⚠️ | From the next release: factory calibration read from the firmware, Display P3 for apps that ask for it, 10-bit content dithered to the 8-bit panel, HDR video with highlights brighter than the UI ([details](docs/display-color.md)) |
+| GPU — Adreno 690, hardware Vulkan | ✅ | Mesa 26.1 `turnip` (since 1.0.0-rc.3, 26.0.3 before); zero SMMU faults over a 22-minute soak |
+| Touchscreen | ✅ | Works — Himax HX83121A, needs the gpio174 patch in `patches/` ([#26](docs/stage4-findings.md#26)). **Since v0.6.2 touch is tuned from measurements, not feel**: (1) the jump-detection threshold in the shipped preset was in effect a 1.0 m/s speed limit above which the driver reported nothing — one fast flick arrived as a dozen touches; the test is now against the predicted position ([#114](docs/stage4-findings.md#114)); (2) coordinate `fuzz` 8 → 0: measured centroid jitter is under half an output unit, while fuzz 8 was discarding a quarter of real motion ([#116](docs/stage4-findings.md#116)); (3) press latency 25 → 17 ms; (4) contact size and pressure are reported, for apps that read them (Android's own palm rejection is off on this device, so it does not use them). Six driver defects fixed plus per-stage counters and raw capacitance-frame dumps ([#115](docs/stage4-findings.md#115)). Palm rejection since 1.0.0-rc.2: once a palm or the side of a hand is recognised, the contacts wrongly reported as fingers are withdrawn ([details](docs/palm-rejection.md)); *Settings › System › Touch feel* switches between game mode (no palm rejection) and everyday mode (palm rejection). rc.3 fixed taps that were occasionally lost and touches starting at the screen edge being dropped whole, and reports a press one frame earlier. Next release: fast swipes are judged sooner and a touch ends sooner after lifting (`patches/0142`, `0143`; 0142's default parameters have not run on hardware yet). ⚠️ A palm with the other hand on the screen at the same time can still cause an occasional stray touch |
+| Detachable keyboard + touchpad | ✅ | USB HID `12d1:10b8`; can be switched off in *Settings › System › Detachable keyboard*. From the next release resume no longer resets the keyboard's MCU, so the first key press wakes the screen |
+| Keyboard cover as a lid | ⚠️ | From the next release closing the cover turns the screen off and opening it wakes the tablet; folding it behind the screen does nothing. Up to 1.0.0-rc.3 closing the cover leaves the screen on until the screen timeout |
+| Wi-Fi | ✅ | ath11k / WCN6855. Measured 61.7 MB/s pulling 200 MB over the LAN ([#44](docs/stage4-findings.md#44)). Downloads from far-away servers (~300 ms) used to cap at about 3.5 MB/s per connection — Android's default TCP buffers; raised in v0.7.0, measured 3.5 → 9.5 MB/s ([#119](docs/stage4-findings.md#119)). WPA3-SAE connects ([#107](docs/stage4-findings.md#107)); Android's automatic WPA2 → WPA3 upgrade on mixed-mode routers is off since v0.7.1, because some of them rejected it. [Issue #2](https://github.com/vahiru/gaokun-android/issues/2) (pure WPA3, kicked after association on a ZTE router) does not reproduce here. The MAC address is stable since 1.0.0-rc.1 (derived from the SoC serial number; every network sees the same address) |
+| Wi-Fi hotspot | ⚠️ | Works since v0.7.1 ([#11](https://github.com/vahiru/gaokun-android/issues/11)) — the hotspot comes up; a phone actually joining it has not been tested. ⚠️ Up to v0.7.1, turning it on disconnects the tablet from Wi-Fi, so there is no uplink to share; since 1.0.0-rc.1 Wi-Fi and hotspot together are configured (the second interface the hotspot needs is created at boot), not yet tried on hardware |
 | Bluetooth | ⚠️ | Works — `hci_qca`, adapter `ON`, zero crashes at boot. ⚠️ Playback to Bluetooth headphones (A2DP) has **not been verified** on hardware. The audio policy has no Bluetooth SCO path, so **a Bluetooth headset's microphone cannot be used for calls**. Can deadlock after long uptime, together with audio ([#38](docs/stage4-findings.md#38)) |
-| Speakers | ⚠️ | Work — WSA883x via audioreach. The gain staging used to clip (THD −20 dB on −6 dBFS material); since v0.6.0 digital gain is pinned at unity and loudness comes from the PA, about 20 dB cleaner ([#86](docs/stage4-findings.md#86)). Optional *Speaker enhancement (experimental)* in *Settings › Sound & vibration*, off by default: bass enhancement for everything the speakers play, games included, or Huawei Histen for media (v0.7.0, thanks @mashen11). Since v0.7.1 playback is paced by the sound hardware and nothing is dropped under load, so rhythm games stay in sync ([#130](docs/stage4-findings.md#130)). ⚠️ Audio can deadlock after long uptime, together with Bluetooth ([#38](docs/stage4-findings.md#38)) |
+| Speakers | ⚠️ | Work — WSA883x via audioreach. The gain staging used to clip (THD −20 dB on −6 dBFS material); since v0.6.0 digital gain is pinned at unity and loudness comes from the PA, about 20 dB cleaner ([#86](docs/stage4-findings.md#86)). 1.0.0-rc.3 fixed the heavily compressed dynamic range and the distortion at high volume (amplifier port mapping, dynamic DRE, a bus conflict). Optional *Speaker enhancement (experimental)* in *Settings › Sound & vibration*, off by default. Since v0.7.0 it can turn on Huawei Histen (thanks @mashen11); since 1.0.0-rc.3 it runs in the audio HAL, defaults to bass enhancement for everything the speakers play, games included, and can be switched to Huawei Histen, which processes media only. Since v0.7.1 playback is paced by the sound hardware and nothing is dropped under load, so rhythm games stay in sync ([#130](docs/stage4-findings.md#130)). ⚠️ Audio can deadlock after long uptime, together with Bluetooth ([#38](docs/stage4-findings.md#38)) |
 | Headphone jack | ✅ | **Fixed, user-confirmed.** Three separate blockers: the RX macro's interpolator stage was never wired up (so the backend refused to open — with no kernel message at all), the audio policy declared no wired output, and `WiredAccessoryManager` was watching `/sys/class/switch/h2w`, which does not exist on mainline ([#40](docs/stage4-findings.md#40)) |
-| Microphones | ⚠️ | **Built-in microphones record since v0.7.0** ([PR #10](https://github.com/vahiru/gaokun-android/pull/10), thanks @mashen11; [#127](docs/stage4-findings.md#127)). They had never worked: the front-end mixer and DMIC sequence were never set, the HAL overwrote the microphone's address, the policy offered a rate the hardware refuses, and a pipe throttle dropped about one block in eight. ⚠️ **The microphone of a wired headset is not used** — calls and recordings with a 4-pole headset still take the built-in microphones |
-| USB audio | ❌ | USB headsets and USB sound cards are not routed (the kernel driver is there, the audio HAL has no USB module) |
+| Microphones | ⚠️ | **Built-in microphones record since v0.7.0** ([PR #10](https://github.com/vahiru/gaokun-android/pull/10), thanks @mashen11; [#127](docs/stage4-findings.md#127)). They had never worked: the front-end mixer and DMIC sequence were never set, the HAL overwrote the microphone's address, the policy offered a rate the hardware refuses, and a pipe throttle dropped about one block in eight. Next release: the noise, the click at the start and the missing low end in recordings are fixed and the gain is higher; the built-in microphones are captured as four channels for array beamforming, with echo cancellation and noise suppression in calls ([details](device/huawei/gaokun3/micarray/README.md)). ⚠️ **The microphone of a wired headset is not confirmed to work** — up to v0.7.1, calls and recordings with a 4-pole headset still take the built-in microphones; since 1.0.0-rc.1 the HAL opens the headset microphone path, not yet tried on hardware |
+| USB audio | ⚠️ | Since 1.0.0-rc.1 the audio HAL has a USB module; USB headsets and USB sound cards have not been tried on hardware (before, the kernel driver was there but the audio HAL had no USB module, so nothing was routed) |
 | Battery, charging | ⚠️ | Huawei EC driver. ⚠️ On a low-power source (a computer's USB port, a small phone charger) the battery can show *charging* while it drains, and Android then never does its low-battery shutdown — the machine switches off hard at 0%. Battery temperature reads 0 |
-| **Gaming** | ✅ | Genshin Impact at max graphics, smooth. GPU idles at 270 MHz, peaks 690 MHz, 50 °C. v0.7.1 smoke test: Arknights, Delta Force, Strinova, Phigros, Arcaea run. ⚠️ *League of Legends: Wild Rift* closes right after launch (reported, no log yet) |
+| **Gaming** | ✅ | Genshin Impact at max graphics, smooth. GPU idles at 270 MHz, peaks 690 MHz, 50 °C. v0.7.1 smoke test: Arknights, Delta Force, Strinova, Phigros, Arcaea run. ⚠️ *League of Legends: Wild Rift* used to close right after launch; since 1.0.0-rc.2 it starts ([#17](https://github.com/vahiru/gaokun-android/issues/17)), whether a match can be played is untested |
 | CPU thermal throttling | ✅ | Mainline DTS has **no** CPU cooling maps at all — fixed in [`patches/0009`](patches/) |
-| **Suspend / standby** | ✅ | **Fixed 2026-08-22 — and the cause was ours, not the kernel's** ([#52](docs/stage4-findings.md#52), [#57](docs/stage4-findings.md#57)). Real suspend and resume, no resets. v0.7.1 fixed a hang on waking after a long uptime ([#16](https://github.com/vahiru/gaokun-android/issues/16), [#131](docs/stage4-findings.md#131)). With a computer attached over USB the screen turns off but the machine stays awake, so USB adb keeps working. The SoC now reaches deep sleep, with DDR in self-refresh and CX off ([details](docs/deep-sleep.md)). About 0.51 W over a night with the cable out, or about 1.2 % per hour |
-| Sensors (accel + gyro + light) | ✅ | **Auto-rotate and auto-brightness work, confirmed on device.** A sensors HAL written for this port feeds real accelerometer and gyroscope data to SensorService; the framework derives Game Rotation Vector / Gravity / Linear Acceleration from them. The factory mount matrix is all zeros (that calibration data died with Windows), but the sensor frame matches the panel, so no correction was needed. **No magnetometer** (so no compass). The ambient light sensor feeds auto-brightness; its driver registers two light sensors and only the streaming one can be used, because activating the default one crashes the sensor DSP ([sensors-hal/README](device/huawei/gaokun3/sensors-hal/README.md)). As far as we know this is the first working accelerometer / gyroscope / light stack on SC8280XP, the ThinkPad X13s included; the protocol is written up in [`docs/sensors-ssc-protocol.md`](docs/sensors-ssc-protocol.md) if you want it for your machine. ⚠️ If that DSP ever crashes and restarts, the sensors are gone until a reboot ([#121](docs/stage4-findings.md#121)) |
-| Hardware video decode | ✅ | **`qcom-iris` since v0.7.0** (was `qcom-venus`): H.264, HEVC and VP9 through `c2.v4l2.*.decoder`, including stop, seek, replay and mid-stream resolution changes, after fixes to the upstream driver ([#128](docs/stage4-findings.md#128)). VP8 is decoded in software. The two `external/v4l2_codec2` portability bugs found when decode was first brought up are in [#41](docs/stage4-findings.md#41) |
+| **Suspend / standby** | ✅ | **Fixed 2026-08-22 — and the cause was ours, not the kernel's** ([#52](docs/stage4-findings.md#52), [#57](docs/stage4-findings.md#57)). Real suspend and resume, no resets. v0.7.1 fixed a hang on waking after a long uptime ([#16](https://github.com/vahiru/gaokun-android/issues/16), [#131](docs/stage4-findings.md#131)). With a computer attached over USB the screen turns off but the machine stays awake, so USB adb keeps working. From the next release the SoC reaches deep sleep, with DDR in self-refresh and CX off ([details](docs/deep-sleep.md)), about 0.51 W over a night with the cable out, or about 1.2 % per hour; and Wi-Fi wakes the machine when data arrives from Google's push servers (the prototype was tested as a KernelSU module, this ROM version has not run on hardware yet; WeChat and QQ in China do not use Google push, so nothing changes for them) |
+| Sensors (accel + gyro + light) | ✅ | **Auto-rotate and auto-brightness work, confirmed on device.** A sensors HAL written for this port feeds real accelerometer and gyroscope data to SensorService; the framework derives Game Rotation Vector / Gravity / Linear Acceleration from them. The factory mount matrix is all zeros (that calibration data died with Windows), but the sensor frame matches the panel, so no correction was needed. **No magnetometer** (so no compass). The ambient light sensor feeds auto-brightness; its driver registers two light sensors and only the streaming one can be used, because activating the default one crashes the sensor DSP ([sensors-hal/README](device/huawei/gaokun3/sensors-hal/README.md)). As far as we know this is the first working accelerometer / gyroscope / light stack on SC8280XP, the ThinkPad X13s included; the protocol is written up in [`docs/sensors-ssc-protocol.md`](docs/sensors-ssc-protocol.md) if you want it for your machine. ⚠️ If that DSP ever crashes and restarts, the sensors are gone until a reboot ([#121](docs/stage4-findings.md#121)); since 1.0.0-rc.1 a recovery service is there, not yet checked on hardware |
+| Hardware video decode | ✅ | **`qcom-iris` since v0.7.0** (was `qcom-venus`): H.264, HEVC and VP9 through `c2.v4l2.*.decoder`, including stop, seek, replay and mid-stream resolution changes, after fixes to the upstream driver ([#128](docs/stage4-findings.md#128)). VP8 is decoded in software. The two `external/v4l2_codec2` portability bugs found when decode was first brought up are in [#41](docs/stage4-findings.md#41). Next release: 10-bit video such as HEVC Main10 and VP9 Profile 2 is decoded in hardware and shown directly; also fixed: playback failing to start, a crash in byte-buffer mode, a firmware watchdog hang and wrong 1080p cropping |
 | Hardware video encode | ❌ | Deliberately off: `v4l2_codec2`'s encoder does not convert the RGBX frames it is handed into the NV12 the hardware takes, and if enabled it would make apps fail instead of falling back. Apps use the software encoders |
-| Camera | ✅ | **Both cameras work** (since v0.6.1). Front is a Hynix hi846, rear an **OmniVision OV13B10** — identified by recovering the power sequence from Huawei’s Windows driver package ([#106](docs/stage4-findings.md#106)). Path: mainline `camss` → libcamera *simple* pipeline with the software ISP → libyuv → an AIDL HAL written for this port. Flash works; the rear camera has **autofocus** (v0.7.0, thanks @mashen11), with phase detection when taking photos; photos are rotated the way the app asks. The power-domain defect that made every second capture fail is fixed ([`patches/0031`](patches/), [#105](docs/stage4-findings.md#105)). ⚠️ No zoom, no exposure compensation; the preview runs at up to 30 fps. Image quality is only partly tuned: the rear camera uses the colour matrix and white points from Huawei's Windows tuning for its module, the front the generic colour matrix from the same driver and white points measured on one unit; dim scenes are noisy, flash shots overexpose; autofocus in the dark is slow. Both cameras record video at 30 fps |
-| USB-C | ⚠️ | UCSI comes up and both connectors register ([#112](docs/stage4-findings.md#112)). The data role follows what is on the other end — a computer gets us as a device; a hub or flash drive should get us as the host, which is designed for but not yet tried with real hardware ([`patches/0048`](patches/), v0.7.0) — and since v0.7.1 Android's USB service runs, so apps can use USB devices ([#13](https://github.com/vahiru/gaokun-android/issues/13)). ⚠️ **After replugging (seen after standby) the port can stop working until a reboot** — and, going by the code, the machine then also stays out of standby until that reboot. File transfer to a computer works (MTP/PTP: choose it under Settings > Connected devices > USB; USB 2.0 speed). ⚠️ **USB flash drives are not mounted** (Android has no removable-storage configuration yet). DisplayPort alt-mode is untested |
+| Camera | ✅ | **Both cameras work** (since v0.6.1). Front is a Hynix hi846, rear an **OmniVision OV13B10** — identified by recovering the power sequence from Huawei’s Windows driver package ([#106](docs/stage4-findings.md#106)). Path: mainline `camss` → libcamera *simple* pipeline with the software ISP → libyuv → an AIDL HAL written for this port. Flash works; the rear camera has **autofocus** (v0.7.0, thanks @mashen11); photos are rotated the way the app asks. The power-domain defect that made every second capture fail is fixed ([`patches/0031`](patches/), [#105](docs/stage4-findings.md#105)). ⚠️ No zoom, no exposure compensation; dim scenes are noisy, flash shots overexpose; autofocus in the dark is slow. Up to 1.0.0-rc.3 the preview runs at up to 15 fps, both cameras' pictures are rotated by 90° and there is no colour matrix. Next release: preview and recording at 30 fps, both cameras record video; phase detection when taking photos; the picture orientation is corrected; the rear camera uses the colour matrix and white points from Huawei's Windows tuning for its module, the front the generic colour matrix from the same driver and white points measured on one unit |
+| USB-C | ⚠️ | UCSI comes up and both connectors register ([#112](docs/stage4-findings.md#112)). Since 1.0.0-rc.2 the USB port HAL picks the data role from the power direction (the EC does not report what is on the other end): a computer gets us as a device, a flash drive or hub as the host, and a flash drive is enumerated at USB 3 speed about a second after it is plugged in. Since v0.7.1 Android's USB service runs, so apps can use USB devices ([#13](https://github.com/vahiru/gaokun-android/issues/13)). ⚠️ **After replugging (seen after standby) the port can stop working until a reboot** — and, going by the code, the machine then also stays out of standby until that reboot. File transfer to a computer works since 1.0.0-rc.2 (MTP/PTP: choose it under Settings > Connected devices > USB; USB 2.0 speed). Next release: USB 2.0 devices on the other port no longer freeze after a Type-C reconfiguration, and a USB controller that has died no longer keeps the machine out of standby. ⚠️ **USB flash drives are recognised, but opening one in *Files* has not been confirmed on hardware** (the mount configuration is there since 1.0.0-rc.1). DisplayPort alt-mode is untested |
 | Fingerprint | ❌ | In progress: Huawei's signed fingerprint app loads into the secure world on this machine ([#125](docs/stage4-findings.md#125)); there is no driver or HAL yet |
-| Stylus (M-Pencil), TPM | ❌ | No support |
+| Stylus (M-Pencil) | ✅ | Works since 1.0.0-rc.2: pressure, hover, tilt and the side double-tap ([details](docs/stylus.md)). Since rc.3 the position is smoothed and reported with sub-pixel precision, so zoomed-in strokes are no longer jagged. Next release: less wobble on diagonal lines; CSOT panels use the factory column-pitch table, meant to stop strokes near the left and right edges being pulled towards the middle, not yet confirmed on a CSOT unit; *Settings › Connected devices › Stylus settings* sets the stroke smoothing and can turn the double-tap into a side-button click or off. ⚠️ The first-generation pen uses another protocol and is not supported; the third generation has not been tested |
+| TPM | ❌ | No support |
 | Root | ⚠️ | KernelSU (the ReSukiSU fork) is **built into every kernel** and cannot be switched off. It stays dormant until you install the ReSukiSU manager app; then only apps you approve there get root. Apps that look for root or an unlocked boot chain may refuse to run ([details](docs/known-limitations.md#root-is-built-in-kernelsu--resukisu)) |
 | DRM (Widevine) | ❌ | No DRM module at all: Netflix, Disney+, Prime Video and the like do not play their shows ([details](docs/known-limitations.md#no-drm-protected-video-no-widevine)) |
-| SELinux | ⚠️ | `permissive`. Seven rounds of policy work towards enforcing; in enforcing trial runs the main functions work, the camera included ([#129](docs/stage4-findings.md#129)) |
+| SELinux | ✅ | `enforcing` since 1.0.0-rc.1, `permissive` up to v0.7.1 ([#129](docs/stage4-findings.md#129)). On a hand-partitioned disk whose EFI partition has a non-standard name, system updates fail ([details](docs/known-limitations.md#selinux-is-enforcing-from-100-rc1--but-hand-partitioned-disks-may-need-their-efi-partition-renamed)) |
 
 ## Hardware
 
 | | |
 |---|---|
 | SoC | Qualcomm Snapdragon 8cx Gen 3 (SC8280XP) |
-| Model | HUAWEI GK-W7X, 2022, CSOT panel — the only model this has been built and tested on |
+| Model | HUAWEI GK-W7X. The panel is either CSOT or BOE; both are in use. From the next release one image tells the two panels apart by ID pins on the mainboard; images up to 1.0.0-rc.3 carry only the CSOT device tree, so BOE machines have to swap it themselves ([#28](https://github.com/vahiru/gaokun-android/issues/28)) |
 | BIOS | Any version. (Earlier versions of this page said 2.16 only and warned against 2.17; that restriction was lifted on 2026-09-25 — it has been verified not to depend on the BIOS version. Please do not downgrade.) |
 | GPU | Adreno 690 |
 | Panel | Himax HX83121A, MIPI-DSI, 1600×2560 — the same panel as the Galaxy Tab S7 FE |
@@ -97,7 +100,7 @@ works; Secure Boot must be off. There are two installers:
 | What it can do | **Install next to Windows** (dual boot), erase the whole disk, **reinstall Android** in place (wiping data by default, or keeping it), adjust partitions by hand | Erase the whole disk and install |
 | Runs from | Its own small Linux: a USB stick, or — without any USB stick — started from Windows with `gaokun3-setup.cmd` | An arm64 Linux live USB plus a checkout of this repository (a generic Ubuntu/Debian image booting on this machine has not been verified) |
 | System image | Carried on the medium, or downloaded over Wi-Fi | `super.img.zst` + `boot.img` + `install-artifacts.sha256` from the release |
-| Files | `gaokun3-installer-0.1.0-preview-*` on the [v0.7.0-alpha release](https://github.com/vahiru/gaokun-android/releases/tag/v0.7.0-alpha) | `scripts/install-gaokun3.sh` |
+| Files | `gaokun3-installer-0.2.0-rc.2-*` on the [v1.0.0-rc.2 release](https://github.com/vahiru/gaokun-android/releases/tag/v1.0.0-rc.2) (rc.3 did not rebuild the installer; the USB image carries rc.2, update to rc.3 in Settings after installing) | `scripts/install-gaokun3.sh` |
 | Tested on hardware | Only *Reinstall Android, keeping data*. Dual boot, erasing the disk and adjusting partitions have run on test disks only; the Windows script only in a virtual machine; the USB image has not been booted yet | The original install path. Since 2026-09-24 it runs on the graphical installer's backend, and the layout below has so far been created on test disks only, not on a real machine |
 
 Erasing the whole disk creates this layout:
@@ -148,7 +151,7 @@ installs into the inactive slot and the new version starts on the next reboot.
 
 The full list, with workarounds, is in
 [`docs/known-limitations.md`](docs/known-limitations.md); the latest release
-notes ([v0.7.1-alpha](docs/relnotes/v0.7.1-alpha.md)) list what changed. In short:
+notes ([v1.0.0-rc.3](docs/relnotes/v1.0.0-rc.3.md)) list what changed. In short:
 
 * **Security and privacy.** `/data` is **not encrypted** — anyone with the
   machine in hand can read everything on it; the lock screen does not change
@@ -158,27 +161,27 @@ notes ([v0.7.1-alpha](docs/relnotes/v0.7.1-alpha.md)) list what changed. In shor
   with **Android's public test keys**, so anyone can sign an update or system
   app this device will accept. Up to v0.7.1, **adb over Wi-Fi (port 5555) is on
   with no authorization prompt** — anyone on the same network can get a root
-  shell; release builds will turn this off (planned for 1.0). SELinux is
-  `permissive`.
+  shell; it is off since 1.0.0-rc.1. SELinux is `enforcing` since
+  1.0.0-rc.1.
 * **No working recovery**, so *Erase all data* in Settings does nothing. To wipe
   the device, use the graphical installer's *Reinstall Android*.
 * **Google.** Release images include Google apps (MindTheGapps); there is no
   build without them. The Play Store reports the device as uncertified until
   you register it ([INSTALL §4](docs/INSTALL.md#this-device-isnt-play-protect-certified)),
   and Play Integrity fails. No Widevine, so Netflix-style paid streaming does
-  not play. No GPS, and network location comes from Google services. No
-  Chinese input method is preinstalled.
-* **Not supported:** fingerprint (in progress), stylus, TPM, USB flash drives,
-  USB audio, hardware video encoding, the Bluetooth headset microphone, the
-  wired headset microphone.
+  not play. No GPS, and network location comes from Google services. A Chinese
+  input method (fcitx5) is preinstalled since 1.0.0-rc.1 and has to be turned
+  on once in Settings.
+* **Not supported:** fingerprint (in progress), TPM, hardware video encoding,
+  the Bluetooth headset microphone.
+* **Configured since 1.0.0-rc.1, not yet tried on hardware:** USB flash drives,
+  USB audio, the wired headset microphone, Wi-Fi and hotspot at the same time.
 * **Known bugs:** audio and Bluetooth can deadlock after long uptime (a watchdog
   saves evidence under `/data/vendor/gaokun3/hangdump-*` — please attach it);
   plugged into a computer, the tablet may end up powering the computer and
   neither side sees the other (replug); the USB-C port can stop working after
-  replugging until a reboot; a palm
-  fragments into several touches; the hotspot drops Wi-Fi; *Wild Rift* closes
-  on launch; the battery can show *charging* while draining on low-power
-  sources.
+  replugging until a reboot; the battery can show *charging* while draining on
+  low-power sources.
 * **Proprietary components.** Release images contain Huawei firmware and the
   Huawei Histen audio library, which are **not** in this repository.
 
@@ -225,8 +228,8 @@ m bacon superimage
   `cp ~/.android/adbkey.pub device/huawei/gaokun3/adb_keys`); release builds
   do not use it.
 
-The kernel is built separately, in layers: mainline **v7.2-rc2**
-(`8cdeaa50eae8dad34885515f62559ee83e7e8dda`), the
+The kernel is built separately, in layers: mainline **v7.2.9** stable (since
+1.0.0-rc.1; v7.2-rc2 before), the
 [`linux-gaokun-buildbot`](https://github.com/KawaiiHachimi/linux-gaokun-buildbot)
 patches on top, then this repository's [`patches/`](patches/)
 (`scripts/kernel-apply-patches.sh <tree>`, idempotent) and ReSukiSU
@@ -272,19 +275,16 @@ first:
    declares 678/679, so context faults never reach the CPU. A DTB change should
    remove the need for the `smmu-nostall.sh` polling workaround entirely
    ([`docs/stage5-freedreno.md`](docs/stage5-freedreno.md) D6).
-2. **Palm rejection.** A palm on the panel fragments into several contacts;
-   three threshold-based fixes were measured and all failed, so the next step
-   is a cross-frame shape test in the touch driver. The driver already reports
-   contact size; there is no touch IDC file yet. [#116](docs/stage4-findings.md#116),
-   [`scripts/touch/README.md`](scripts/touch/README.md).
-3. **Hardware video *encode*.** Off on purpose (see the status table). Making
+2. **Hardware video *encode*.** Off on purpose (see the status table). Making
    it work means teaching `v4l2_codec2`'s encode component to convert RGBX to
    NV12 — the notes in `device/huawei/gaokun3/device.mk` list the three places
    to change for a re-test.
-4. **SELinux enforcing.** Seven rounds are done and an enforcing trial run
-   works; what remains is real standby, an enforcing-to-enforcing OTA and a
-   fresh install under enforcing ([#129](docs/stage4-findings.md#129)).
-5. **Camera image quality.** What is left is quality, not plumbing: the front
+3. **Tighter SELinux policy.** Enforcing is the default since 1.0.0-rc.1. What
+   is left is narrowing a few rules that are too broad (rproc-kick,
+   hexagonrpcd, bootctl) and a vendor build of tinymix, so that audioroute no
+   longer needs `vendor_executes_system_violators` ([`docs/TODO.md`](docs/TODO.md),
+   section "B1. SELinux 转 enforcing").
+4. **Camera image quality.** What is left is quality, not plumbing: the front
    camera's colour matrix is a generic one (calibrating it needs a colour
    chart), the software ISP has no denoise of its own, and flash-lit shots blow
    out the highlights.
@@ -292,9 +292,9 @@ first:
 
 Factory reset and `fastboot` now go through a unified boot entry
 ([`docs/boot-entry-design.md`](docs/boot-entry-design.md), code in
-[`tools/gk3boot/`](tools/gk3boot/README.md)). It is in the 1.0 development
-builds, not in a release yet, and factory reset through it has not been tested
-on hardware — please talk to us before starting on recovery.
+[`tools/gk3boot/`](tools/gk3boot/README.md)). It has been in the releases
+since 1.0.0-rc.1, but factory reset through it has not been tested on
+hardware — please talk to us before starting on recovery.
 
 **If you have a MateBook E Go and want to test**, these have never been tried on
 hardware: Bluetooth headphones, an external display over USB-C, a phone joining
