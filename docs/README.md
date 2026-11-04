@@ -39,6 +39,7 @@
 | [TODO.md](TODO.md) | 还剩什么、下一步（按 1.0 发版路径分组的总表）；过程记录见 [archive/TODO-history-2026-10.md](archive/TODO-history-2026-10.md) | 现行 | 维护者 · AI |
 | [v1.0-plan.md](v1.0-plan.md) | 1.0.0 发版前修复计划：发版标准、阻断项、分批路线、待拍板的决定（D 编号） | 现行 | 维护者 · AI |
 | [release-checklist.md](release-checklist.md) | 发版回归清单（A 无人值守 / B 要人在场 / C 长稳与测量），每个候选版从这里抄 | 现行 | 维护者 |
+| [BUILDING.zh-CN.md](BUILDING.zh-CN.md) | 自己编译：crDroid 树怎么拉、`lunch` 与 `m bacon superimage`、发布构建和开发构建的区别、不入库的构建输入、内核怎么分层构建 | 现行 | 维护者 · AI |
 | [build-machine.md](build-machine.md) | 构建机（Azure VM）按负载选机型、停机规矩、盘的代价 | 现行 | 维护者 · AI |
 | [boot-entry-design.md](boot-entry-design.md) | 统一启动入口 `gk3boot.efi` + fastboot 执行端 + 双系统（方案 Y，实验 E0–E11、决定 U1–U25） | 现行（开头"还没有实现"已过时：E3–E8 真机过，实现见 [`tools/gk3boot/README.md`](../tools/gk3boot/README.md)） | 维护者 · AI |
 | [fastboot-design.md](fastboot-design.md) | 最早的 fastboot 设计稿（C′：ESP 常驻 initramfs） | 部分有效：§4 `gk3-fastbootd` 的协议 / 白名单 / 清除语义 / USB / 界面仍是执行端依据；§3.3 推荐与 §7.1 U1–U7 已被 [boot-entry-design.md](boot-entry-design.md) 取代 | 维护者 |

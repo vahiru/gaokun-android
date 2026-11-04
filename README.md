@@ -1,309 +1,135 @@
-# Android on the Huawei MateBook E Go (SC8280XP / `gaokun3`)
+# Gaokun Android
 
-**crDroid 13 (Android 17) on a mainline Linux kernel, with hardware Vulkan on
-the Adreno 690.**
+Unofficial port of crDroid 13 for Huawei MateBook E Go (gaokun3).
 
-Qualcomm never shipped an Android BSP for the 8cx family — only Windows and
-Linux drivers. There is no stock Android ROM to lift vendor blobs from, and the
-machine has none of the usual Android plumbing: no `fastboot`, no Android
-bootloader, no recovery partition and no serial console — just UEFI. So this is
-not a normal device port: it is *AOSP on mainline*, with every HAL built on top
-of upstream drivers.
+[**中文 → README.zh-CN.md**](README.zh-CN.md)
 
-> ### ⚠️ 1.0 release candidate. Read this first.
-> Latest release: **v1.0.0-rc.3** (the third 1.0 release candidate). Games run
-> well, and the machine sleeps and wakes properly.
-> **There is still no working recovery and no working factory reset** — see
-> [Known limitations](#known-limitations).
-> The command-line installer (and the graphical installer's *Erase the whole
-> disk*) **erases the internal disk, Windows included**; only the graphical
-> installer's dual-boot mode (preview) keeps Windows. No image of the factory
-> state exists anywhere. You need to be comfortable recovering a machine that
-> will not boot. No warranty of any kind.
->
-> Before you install, also know: **`/data` is not encrypted**, **root is built
-> into the kernel**, the images are **signed with Android's public test keys**,
-> and up to v0.7.1 **adb over the network is open without authorization**
-> (closed since 1.0.0-rc.1).
-> Details in [Known limitations](#known-limitations); common questions (logs,
-> the boot menu, wiping before you sell) in the [FAQ](docs/FAQ.md).
-
-[**中文说明 → README.zh-CN.md**](README.zh-CN.md)
-
-**Talk to us:** [Telegram](https://t.me/gaokunAndroid) · QQ group **920133252**
-
----
+<p align="center">
+  <a href="https://t.me/gaokunAndroid"><img alt="Telegram channel: gaokunAndroid" src="https://img.shields.io/badge/Telegram-gaokunAndroid-26A5E4?logo=telegram&logoColor=white"></a>
+  <a href="https://qm.qq.com/q/3VIV2KY6o0"><img alt="QQ group: 920133252" src="https://img.shields.io/badge/QQ%20Group-920133252-12B7F5?logo=qq&logoColor=white"></a>
+  <a href="https://github.com/vahiru/gaokun-android/releases/tag/v1.0.0-rc.3"><img alt="Latest release: 1.0.0-rc.3" src="https://img.shields.io/badge/Latest-1.0.0--rc.3-yellow"></a>
+</p>
 
 ## Status
 
-As of v1.0.0-rc.3; anything marked *next release* is merged into the `dev`
-branch but not in a release yet. Every ✅ was measured on hardware, not inferred; whatever
-has not been tested says so. The evidence is in [`docs/`](docs/), the case
-numbers (#NN) are in [`docs/stage4-findings.md`](docs/stage4-findings.md).
+> ### ⚠️ Before you install
+> Installing this system can **erase all data on the disk**. Before installing, make sure you can recover a machine that no longer boots, and **back up your important data**.
+>
+> More known issues are listed under [Known limitations](#known-limitations); common questions (collecting logs, the boot menu, wiping before you sell) are answered in the [FAQ](docs/FAQ.md).
 
-| Area | State | Notes |
+The table below shows how the main features work in the current version. See the [detailed documentation](docs/) for more.
+
+- ✅: works
+- ⚠️: usable, with known issues
+- ❌: not available
+
+| Feature | State | Notes |
 |---|:--:|---|
-| Boot (UEFI + systemd-boot, internal disk) | ✅ | No USB media required. A/B slots with Virtual A/B; system updates (kernel included) install from Settings |
-| Display 1600×2560 @ 120 Hz | ✅ | The framework default pinned rendering to 60; overridden, measured 8.33 ms vsync |
-| Display colour | ⚠️ | From the next release: factory calibration read from the firmware, Display P3 for apps that ask for it, 10-bit content dithered to the 8-bit panel, HDR video with highlights brighter than the UI ([details](docs/display-color.md)) |
-| GPU — Adreno 690, hardware Vulkan | ✅ | Mesa 26.1 `turnip` (since 1.0.0-rc.3, 26.0.3 before); zero SMMU faults over a 22-minute soak |
-| Touchscreen | ✅ | Works — Himax HX83121A, needs the gpio174 patch in `patches/` ([#26](docs/stage4-findings.md#26)). **Since v0.6.2 touch is tuned from measurements, not feel**: (1) the jump-detection threshold in the shipped preset was in effect a 1.0 m/s speed limit above which the driver reported nothing — one fast flick arrived as a dozen touches; the test is now against the predicted position ([#114](docs/stage4-findings.md#114)); (2) coordinate `fuzz` 8 → 0: measured centroid jitter is under half an output unit, while fuzz 8 was discarding a quarter of real motion ([#116](docs/stage4-findings.md#116)); (3) press latency 25 → 17 ms; (4) contact size and pressure are reported, for apps that read them (Android's own palm rejection is off on this device, so it does not use them). Six driver defects fixed plus per-stage counters and raw capacitance-frame dumps ([#115](docs/stage4-findings.md#115)). Palm rejection since 1.0.0-rc.2: once a palm or the side of a hand is recognised, the contacts wrongly reported as fingers are withdrawn ([details](docs/palm-rejection.md)); *Settings › System › Touch feel* switches between game mode (no palm rejection) and everyday mode (palm rejection). rc.3 fixed taps that were occasionally lost and touches starting at the screen edge being dropped whole, and reports a press one frame earlier. Next release: fast swipes are judged sooner and a touch ends sooner after lifting (`patches/0142`, `0143`; 0142's default parameters have not run on hardware yet). ⚠️ A palm with the other hand on the screen at the same time can still cause an occasional stray touch |
-| Detachable keyboard + touchpad | ✅ | USB HID `12d1:10b8`; can be switched off in *Settings › System › Detachable keyboard*. From the next release resume no longer resets the keyboard's MCU, so the first key press wakes the screen |
-| Keyboard cover as a lid | ⚠️ | From the next release closing the cover turns the screen off and opening it wakes the tablet; folding it behind the screen does nothing. Up to 1.0.0-rc.3 closing the cover leaves the screen on until the screen timeout |
-| Wi-Fi | ✅ | ath11k / WCN6855. Measured 61.7 MB/s pulling 200 MB over the LAN ([#44](docs/stage4-findings.md#44)). Downloads from far-away servers (~300 ms) used to cap at about 3.5 MB/s per connection — Android's default TCP buffers; raised in v0.7.0, measured 3.5 → 9.5 MB/s ([#119](docs/stage4-findings.md#119)). WPA3-SAE connects ([#107](docs/stage4-findings.md#107)); Android's automatic WPA2 → WPA3 upgrade on mixed-mode routers is off since v0.7.1, because some of them rejected it. [Issue #2](https://github.com/vahiru/gaokun-android/issues/2) (pure WPA3, kicked after association on a ZTE router) does not reproduce here. The MAC address is stable since 1.0.0-rc.1 (derived from the SoC serial number; every network sees the same address) |
-| Wi-Fi hotspot | ⚠️ | Works since v0.7.1 ([#11](https://github.com/vahiru/gaokun-android/issues/11)) — the hotspot comes up; a phone actually joining it has not been tested. ⚠️ Up to v0.7.1, turning it on disconnects the tablet from Wi-Fi, so there is no uplink to share; since 1.0.0-rc.1 Wi-Fi and hotspot together are configured (the second interface the hotspot needs is created at boot), not yet tried on hardware |
-| Bluetooth | ⚠️ | Works — `hci_qca`, adapter `ON`, zero crashes at boot. ⚠️ Playback to Bluetooth headphones (A2DP) has **not been verified** on hardware. The audio policy has no Bluetooth SCO path, so **a Bluetooth headset's microphone cannot be used for calls**. Can deadlock after long uptime, together with audio ([#38](docs/stage4-findings.md#38)) |
-| Speakers | ⚠️ | Work — WSA883x via audioreach. The gain staging used to clip (THD −20 dB on −6 dBFS material); since v0.6.0 digital gain is pinned at unity and loudness comes from the PA, about 20 dB cleaner ([#86](docs/stage4-findings.md#86)). 1.0.0-rc.3 fixed the heavily compressed dynamic range and the distortion at high volume (amplifier port mapping, dynamic DRE, a bus conflict). Optional *Speaker enhancement (experimental)* in *Settings › Sound & vibration*, off by default. Since v0.7.0 it can turn on Huawei Histen (thanks @mashen11); since 1.0.0-rc.3 it runs in the audio HAL, defaults to bass enhancement for everything the speakers play, games included, and can be switched to Huawei Histen, which processes media only. Since v0.7.1 playback is paced by the sound hardware and nothing is dropped under load, so rhythm games stay in sync ([#130](docs/stage4-findings.md#130)). ⚠️ Audio can deadlock after long uptime, together with Bluetooth ([#38](docs/stage4-findings.md#38)) |
-| Headphone jack | ✅ | **Fixed, user-confirmed.** Three separate blockers: the RX macro's interpolator stage was never wired up (so the backend refused to open — with no kernel message at all), the audio policy declared no wired output, and `WiredAccessoryManager` was watching `/sys/class/switch/h2w`, which does not exist on mainline ([#40](docs/stage4-findings.md#40)) |
-| Microphones | ⚠️ | **Built-in microphones record since v0.7.0** ([PR #10](https://github.com/vahiru/gaokun-android/pull/10), thanks @mashen11; [#127](docs/stage4-findings.md#127)). They had never worked: the front-end mixer and DMIC sequence were never set, the HAL overwrote the microphone's address, the policy offered a rate the hardware refuses, and a pipe throttle dropped about one block in eight. Next release: the noise, the click at the start and the missing low end in recordings are fixed and the gain is higher; the built-in microphones are captured as four channels for array beamforming, with echo cancellation and noise suppression in calls ([details](device/huawei/gaokun3/micarray/README.md)). ⚠️ **The microphone of a wired headset is not confirmed to work** — up to v0.7.1, calls and recordings with a 4-pole headset still take the built-in microphones; since 1.0.0-rc.1 the HAL opens the headset microphone path, not yet tried on hardware |
-| USB audio | ⚠️ | Since 1.0.0-rc.1 the audio HAL has a USB module; USB headsets and USB sound cards have not been tried on hardware (before, the kernel driver was there but the audio HAL had no USB module, so nothing was routed) |
-| Battery, charging | ⚠️ | Huawei EC driver. ⚠️ On a low-power source (a computer's USB port, a small phone charger) the battery can show *charging* while it drains, and Android then never does its low-battery shutdown — the machine switches off hard at 0%. Battery temperature reads 0 |
-| **Gaming** | ✅ | Genshin Impact at max graphics, smooth. GPU idles at 270 MHz, peaks 690 MHz, 50 °C. v0.7.1 smoke test: Arknights, Delta Force, Strinova, Phigros, Arcaea run. ⚠️ *League of Legends: Wild Rift* used to close right after launch; since 1.0.0-rc.2 it starts ([#17](https://github.com/vahiru/gaokun-android/issues/17)), whether a match can be played is untested |
-| CPU thermal throttling | ✅ | Mainline DTS has **no** CPU cooling maps at all — fixed in [`patches/0009`](patches/) |
-| **Suspend / standby** | ✅ | **Fixed 2026-08-22 — and the cause was ours, not the kernel's** ([#52](docs/stage4-findings.md#52), [#57](docs/stage4-findings.md#57)). Real suspend and resume, no resets. v0.7.1 fixed a hang on waking after a long uptime ([#16](https://github.com/vahiru/gaokun-android/issues/16), [#131](docs/stage4-findings.md#131)). With a computer attached over USB the screen turns off but the machine stays awake, so USB adb keeps working. From the next release the SoC reaches deep sleep, with DDR in self-refresh and CX off ([details](docs/deep-sleep.md)), about 0.51 W over a night with the cable out, or about 1.2 % per hour; and Wi-Fi wakes the machine when data arrives from Google's push servers (the prototype was tested as a KernelSU module, this ROM version has not run on hardware yet; WeChat and QQ in China do not use Google push, so nothing changes for them) |
-| Sensors (accel + gyro + light) | ✅ | **Auto-rotate and auto-brightness work, confirmed on device.** A sensors HAL written for this port feeds real accelerometer and gyroscope data to SensorService; the framework derives Game Rotation Vector / Gravity / Linear Acceleration from them. The factory mount matrix is all zeros (that calibration data died with Windows), but the sensor frame matches the panel, so no correction was needed. **No magnetometer** (so no compass). The ambient light sensor feeds auto-brightness; its driver registers two light sensors and only the streaming one can be used, because activating the default one crashes the sensor DSP ([sensors-hal/README](device/huawei/gaokun3/sensors-hal/README.md)). As far as we know this is the first working accelerometer / gyroscope / light stack on SC8280XP, the ThinkPad X13s included; the protocol is written up in [`docs/sensors-ssc-protocol.md`](docs/sensors-ssc-protocol.md) if you want it for your machine. ⚠️ If that DSP ever crashes and restarts, the sensors are gone until a reboot ([#121](docs/stage4-findings.md#121)); since 1.0.0-rc.1 a recovery service is there, not yet checked on hardware |
-| Hardware video decode | ✅ | **`qcom-iris` since v0.7.0** (was `qcom-venus`): H.264, HEVC and VP9 through `c2.v4l2.*.decoder`, including stop, seek, replay and mid-stream resolution changes, after fixes to the upstream driver ([#128](docs/stage4-findings.md#128)). VP8 is decoded in software. The two `external/v4l2_codec2` portability bugs found when decode was first brought up are in [#41](docs/stage4-findings.md#41). Next release: 10-bit video such as HEVC Main10 and VP9 Profile 2 is decoded in hardware and shown directly; also fixed: playback failing to start, a crash in byte-buffer mode, a firmware watchdog hang and wrong 1080p cropping |
-| Hardware video encode | ❌ | Deliberately off: `v4l2_codec2`'s encoder does not convert the RGBX frames it is handed into the NV12 the hardware takes, and if enabled it would make apps fail instead of falling back. Apps use the software encoders |
-| Camera | ✅ | **Both cameras work** (since v0.6.1). Front is a Hynix hi846, rear an **OmniVision OV13B10** — identified by recovering the power sequence from Huawei’s Windows driver package ([#106](docs/stage4-findings.md#106)). Path: mainline `camss` → libcamera *simple* pipeline with the software ISP → libyuv → an AIDL HAL written for this port. Flash works; the rear camera has **autofocus** (v0.7.0, thanks @mashen11); photos are rotated the way the app asks. The power-domain defect that made every second capture fail is fixed ([`patches/0031`](patches/), [#105](docs/stage4-findings.md#105)). ⚠️ No zoom, no exposure compensation; dim scenes are noisy, flash shots overexpose; autofocus in the dark is slow. Up to 1.0.0-rc.3 the preview runs at up to 15 fps, both cameras' pictures are rotated by 90° and there is no colour matrix. Next release: preview and recording at 30 fps, both cameras record video; phase detection when taking photos; the picture orientation is corrected; the rear camera uses the colour matrix and white points from Huawei's Windows tuning for its module, the front the generic colour matrix from the same driver and white points measured on one unit |
-| USB-C | ⚠️ | UCSI comes up and both connectors register ([#112](docs/stage4-findings.md#112)). Since 1.0.0-rc.2 the USB port HAL picks the data role from the power direction (the EC does not report what is on the other end): a computer gets us as a device, a flash drive or hub as the host, and a flash drive is enumerated at USB 3 speed about a second after it is plugged in. Since v0.7.1 Android's USB service runs, so apps can use USB devices ([#13](https://github.com/vahiru/gaokun-android/issues/13)). ⚠️ **After replugging (seen after standby) the port can stop working until a reboot** — and, going by the code, the machine then also stays out of standby until that reboot. File transfer to a computer works since 1.0.0-rc.2 (MTP/PTP: choose it under Settings > Connected devices > USB; USB 2.0 speed). Next release: USB 2.0 devices on the other port no longer freeze after a Type-C reconfiguration, and a USB controller that has died no longer keeps the machine out of standby. ⚠️ **USB flash drives are recognised, but opening one in *Files* has not been confirmed on hardware** (the mount configuration is there since 1.0.0-rc.1). DisplayPort alt-mode is untested |
-| Fingerprint | ❌ | In progress: Huawei's signed fingerprint app loads into the secure world on this machine ([#125](docs/stage4-findings.md#125)); there is no driver or HAL yet |
-| Stylus (M-Pencil) | ✅ | Works since 1.0.0-rc.2: pressure, hover, tilt and the side double-tap ([details](docs/stylus.md)). Since rc.3 the position is smoothed and reported with sub-pixel precision, so zoomed-in strokes are no longer jagged. Next release: less wobble on diagonal lines; CSOT panels use the factory column-pitch table, meant to stop strokes near the left and right edges being pulled towards the middle, not yet confirmed on a CSOT unit; *Settings › Connected devices › Stylus settings* sets the stroke smoothing and can turn the double-tap into a side-button click or off. ⚠️ The first-generation pen uses another protocol and is not supported; the third generation has not been tested |
-| TPM | ❌ | No support |
-| Root | ⚠️ | KernelSU (the ReSukiSU fork) is **built into every kernel** and cannot be switched off. It stays dormant until you install the ReSukiSU manager app; then only apps you approve there get root. Apps that look for root or an unlocked boot chain may refuse to run ([details](docs/known-limitations.md#root-is-built-in-kernelsu--resukisu)) |
-| DRM (Widevine) | ❌ | No DRM module at all: Netflix, Disney+, Prime Video and the like do not play their shows ([details](docs/known-limitations.md#no-drm-protected-video-no-widevine)) |
-| SELinux | ✅ | `enforcing` since 1.0.0-rc.1, `permissive` up to v0.7.1 ([#129](docs/stage4-findings.md#129)). On a hand-partitioned disk whose EFI partition has a non-standard name, system updates fail ([details](docs/known-limitations.md#selinux-is-enforcing-from-100-rc1--but-hand-partitioned-disks-may-need-their-efi-partition-renamed)) |
+| Boot and system updates | ✅ | Seamless A/B system updates |
+| Factory reset | ⚠️ | Not yet tested on hardware; to wipe the device, reinstall with the graphical installer |
+| Display | ✅ | 120 Hz, factory-calibrated colour, wide colour gamut and HDR |
+| GPU | ✅ | Hardware acceleration and Vulkan |
+| Touchscreen | ✅ | Everyday and game modes can be switched in Settings; everyday mode suppresses accidental palm touches while writing and the like |
+| Stylus (M-Pencil) | ⚠️ | Second- and third-generation M-Pencils are supported, with pressure, hover, tilt and the side double-tap; stroke smoothing is adjustable in Settings. Everyday use of the third-generation M-Pencil has not been tested yet |
+| Detachable keyboard and touchpad | ✅ | |
+| Wi-Fi | ✅ | |
+| Wi-Fi hotspot | ⚠️ | Can be turned on; other devices going online through the hotspot has not been tested yet |
+| Bluetooth | ⚠️ | The microphone of a Bluetooth headset cannot be used in calls |
+| Speakers | ✅ | Bass enhancement or Huawei Histen can be turned on in Settings |
+| Microphones | ✅ | Beamforming, with echo cancellation and noise suppression that can be switched per scenario |
+| Headphones | ⚠️ | The microphone of a wired headset has not been tested yet |
+| USB audio | ⚠️ | USB headsets and USB sound cards have not been tested yet |
+| Battery and charging | ⚠️ | Because of the high base power draw of the machine, the battery may drain while on a low-power source, and the tablet may shut down without warning when the battery runs low |
+| Standby | ✅ | About 0.5 W in standby, about three days on a full charge |
+| Push notifications | ⚠️ | In sleep, FCM can wake the system and deliver messages promptly; apps that do not use FCM receive their messages at the next system wake-up, usually a minute or two late |
+| Sensors | ✅ | Accelerometer and ambient light sensor work, with auto-rotate and auto-brightness; there is no magnetometer |
+| Games | ⚠️ | Genshin Impact runs smoothly at the highest settings, Arknights, Delta Force and others run; League of Legends: Wild Rift starts. **Playing games that come with ACE framework or other anti-cheat mechanisms on this system may get your account banned** |
+| Video playback | ✅ | Hardware decoding, including 10-bit and HDR video |
+| Video encoding | ❌ | Hardware encoding is not available yet, because adapting the encoder component is unfinished; screen and camera recording use software encoding |
+| Camera | ⚠️ | Uses a software ISP. Both cameras take photos and record video, the rear camera has autofocus; exposure compensation is not supported yet, dim scenes are noisy, and recording above 720p@30fps may crash the camera app |
+| USB-C | ⚠️ | File transfer and network sharing with a computer, USB flash drives and external displays work; occasionally the USB-C port does not work after a boot until a restart, the cause is still under investigation |
+| Fingerprint | ❌ | Not available yet; the driver and system service are under development |
+| Location | ❌ | No GPS hardware, satellite positioning is not available |
+| TPM | ❌ | Not supported |
+| Video copy protection (DRM) | ❌ | Widevine is not included, paid streaming content such as Netflix does not play |
+| Root | ⚠️ | KernelSU is built in; some apps that detect root may refuse to run |
+| Chinese input method | ✅ | fcitx5 is preinstalled |
 
 ## Hardware
 
-| | |
+| Component | Specification |
 |---|---|
 | SoC | Qualcomm Snapdragon 8cx Gen 3 (SC8280XP) |
-| Model | HUAWEI GK-W7X. The panel is either CSOT or BOE; both are in use. From the next release one image tells the two panels apart by ID pins on the mainboard; images up to 1.0.0-rc.3 carry only the CSOT device tree, so BOE machines have to swap it themselves ([#28](https://github.com/vahiru/gaokun-android/issues/28)) |
-| BIOS | Any version. (Earlier versions of this page said 2.16 only and warned against 2.17; that restriction was lifted on 2026-09-25 — it has been verified not to depend on the BIOS version. Please do not downgrade.) |
+| Model | HUAWEI GK-W7X |
 | GPU | Adreno 690 |
-| Panel | Himax HX83121A, MIPI-DSI, 1600×2560 — the same panel as the Galaxy Tab S7 FE |
-| Wi-Fi / BT | WCN6855 |
+| Display | PPC357DB1-4 (supplied by CSOT or BOE), Himax HX83121A driver IC, 1600×2560, 120 Hz |
+| Wi-Fi / Bluetooth | WCN6855 |
 | Storage | NVMe |
-| Firmware | UEFI. Secure Boot must be disabled |
 
 ---
 
 ## Installing
 
-Take the latest [**Release**](https://github.com/vahiru/gaokun-android/releases)
-and follow [`docs/INSTALL.md`](docs/INSTALL.md) (English; 中文:
-[`docs/INSTALL.zh-CN.md`](docs/INSTALL.zh-CN.md)). Any BIOS version
-works; Secure Boot must be off. There are two installers:
+Get the latest version from [**Releases**](https://github.com/vahiru/gaokun-android/releases); the full installation steps are in [`docs/INSTALL.md`](docs/INSTALL.md) (Chinese: [`docs/INSTALL.zh-CN.md`](docs/INSTALL.zh-CN.md)). **Secure Boot must be turned off** before installing.
+
+There are two installers to choose from:
 
 | | Graphical installer (preview) | Command-line installer |
 |---|---|---|
-| What it can do | **Install next to Windows** (dual boot), erase the whole disk, **reinstall Android** in place (wiping data by default, or keeping it), adjust partitions by hand | Erase the whole disk and install |
-| Runs from | Its own small Linux: a USB stick, or — without any USB stick — started from Windows with `gaokun3-setup.cmd` | An arm64 Linux live USB plus a checkout of this repository (a generic Ubuntu/Debian image booting on this machine has not been verified) |
-| System image | Carried on the medium, or downloaded over Wi-Fi | `super.img.zst` + `boot.img` + `install-artifacts.sha256` from the release |
-| Files | `gaokun3-installer-0.2.0-rc.2-*` on the [v1.0.0-rc.2 release](https://github.com/vahiru/gaokun-android/releases/tag/v1.0.0-rc.2) (rc.3 did not rebuild the installer; the USB image carries rc.2, update to rc.3 in Settings after installing) | `scripts/install-gaokun3.sh` |
-| Tested on hardware | Only *Reinstall Android, keeping data*. Dual boot, erasing the disk and adjusting partitions have run on test disks only; the Windows script only in a virtual machine; the USB image has not been booted yet | The original install path. Since 2026-09-24 it runs on the graphical installer's backend, and the layout below has so far been created on test disks only, not on a real machine |
+| Installation modes | Next to Windows (dual boot); erase the whole disk and install; reinstall Android over the existing partitions (wipes data by default, keeping it is optional); adjust partitions by hand | Erase the whole disk and install |
+| Runs from | Its own Linux system, started from a USB stick, or from Windows with `gaokun3-setup.cmd` without a USB stick | An arm64 Linux live USB stick plus a copy of this repository; whether a generic Ubuntu/Debian image boots on this machine has not been verified |
+| System image | Carried on the installer medium, or downloaded over the network | Downloaded by hand from the release page: `super.img.zst`, `boot.img` and `install-artifacts.sha256` |
+| Where to get it | The `gaokun3-installer-0.2.0-rc.2-*` files on the [v1.0.0-rc.2 release page](https://github.com/vahiru/gaokun-android/releases/tag/v1.0.0-rc.2) (v1.0.0-rc.3 did not rebuild the installer; the USB image carries the rc.2 system, so update to rc.3 in Settings after installing) | `scripts/install-gaokun3.sh` in this repository |
+| Hardware testing | "Erase the whole disk and install" has not been tested on hardware; errors may still appear after a successful installation | Shares its installation steps with the graphical installer; the partition layout below has so far been created on test disks only |
 
-Erasing the whole disk creates this layout:
+Default partition layout when the whole disk is erased:
 
 | Partition | Size | Purpose |
 |---|---|---|
-| `esp` | 300 MiB | systemd-boot, plus the kernel / DTB / ramdisk it loads, one directory per slot |
+| `esp` | 300 MiB | systemd-boot, plus the kernel / DTB / ramdisk it actually loads, one directory per slot |
 | `misc` | 4 MiB | A/B slot state |
 | `metadata` | 32 MiB | Android metadata |
 | `super` | 12 GiB | system / system_ext / product / vendor, A/B |
-| `boot_a`, `boot_b` | 64 MiB each | Android boot images; OTA updates write these, and the ESP copies are unpacked from them |
-| `gk3rescue` | 1 GiB | Optional rescue system — see below |
-| `userdata` | rest of the disk | `/data` |
+| `boot_a`, `boot_b` | 64 MiB each | Android boot images; OTA updates write these, and the copies on the ESP are unpacked from them |
+| `gk3rescue` | 1 GiB | Optional rescue system, see below |
+| `userdata` | The rest | `/data` |
 
-**The rescue system.** This machine has no working Android recovery and no
-serial console, so a small Linux you can boot from the menu is how you repair
-it. The installer puts it on its own 1 GiB partition, as a **non-default** entry
-in the boot menu (every boot shows the menu for 15 seconds): if Android hangs,
-hold the power button and pick the rescue entry. Nothing falls back to it on its
-own. The graphical installer installs it; the command-line installer only if it
-finds the rescue image — releases do not include it, so from a
-generic live USB you get Android only.
+**Rescue system:** this machine has no working Android recovery, so the rescue system is the way to repair it when something goes wrong. It is a small Linux system, the same program as the graphical installer, so it can also reinstall Android, and it lives in its own 1 GiB partition. The graphical installer can install it as well (tick *Also install the rescue system*); the command-line installer installs it only when given the rescue system image.
 
-> Earlier versions of this README described a ~25 GiB Ubuntu rescue partition
-> as the default boot entry. That is gone (2026-09-24); see
-> [`docs/INSTALL.md`](docs/INSTALL.md#about-the-rescue-system).
+Every boot shows a 15-second boot menu, from which the rescue system can be started; the system does not switch to it on its own when Android hangs. When you need it, hold the power button to force a shutdown, then choose the rescue system in the menu on the next boot; choosing a menu entry needs the keyboard cover attached. To log in to the rescue system over the network (SSH), put your own SSH public key on the installer USB stick before installing; see the [installation guide](docs/INSTALL.md#about-the-rescue-system) for how.
 
-**Logging in to the rescue system over SSH** needs your public key, put on the
-installer stick before installing — the published image carries nobody's key.
-See
-[`docs/INSTALL.md`](docs/INSTALL.md#about-the-rescue-system).
+**Downloads from mainland China:** when GitHub's download servers are slow or unreachable, the system images (`boot.img`, `super.img.zst`) can be downloaded from a mirror: `https://ota.072172.xyz/install/<build>/<file name>`, where `<build>` is the release's OTA package file name without `.zip`; see [`docs/INSTALL.md`](docs/INSTALL.md#downloads).
 
-**Downloading from mainland China:** if GitHub's download servers are slow or
-unreachable, the system images (`boot.img`, `super.img.zst`,
-`install-artifacts.sha256`) are mirrored at
-`https://ota.072172.xyz/install/<build>/<file>`, where `<build>` is the name of
-that release's OTA package without `.zip` — see
-[`docs/INSTALL.md`](docs/INSTALL.md#downloads). The graphical installer
-downloads from this mirror itself; the installer's own files are on GitHub only
-for now.
-
-**Updating:** from v0.2.x onward, update in Settings — the in-system updater
-installs into the inactive slot and the new version starts on the next reboot.
-
----
+**Updating:** OTA updates are installed under Settings → System → System update; the OTA package is downloaded from the mirror above. If the network is poor, you can also get the OTA package another way, put it in the tablet's internal storage and install it with *Install local update* on the same screen.
 
 ## Known limitations
 
-The full list, with workarounds, is in
-[`docs/known-limitations.md`](docs/known-limitations.md); the latest release
-notes ([v1.0.0-rc.3](docs/relnotes/v1.0.0-rc.3.md)) list what changed. In short:
+The table below lists the limitations to keep in mind in daily use. The full explanation is in [`docs/known-limitations.md`](docs/known-limitations.md).
 
-* **Security and privacy.** `/data` is **not encrypted** — anyone with the
-  machine in hand can read everything on it; the lock screen does not change
-  that. Root (ReSukiSU, a KernelSU fork) is **built into every kernel**; it
-  stays dormant until you install its manager app, but apps that look for root
-  or an unlocked boot chain may refuse to run. Images and updates are signed
-  with **Android's public test keys**, so anyone can sign an update or system
-  app this device will accept. Up to v0.7.1, **adb over Wi-Fi (port 5555) is on
-  with no authorization prompt** — anyone on the same network can get a root
-  shell; it is off since 1.0.0-rc.1. SELinux is `enforcing` since
-  1.0.0-rc.1.
-* **No working recovery**, so *Erase all data* in Settings does nothing. To wipe
-  the device, use the graphical installer's *Reinstall Android*.
-* **Google.** Release images include Google apps (MindTheGapps); there is no
-  build without them. The Play Store reports the device as uncertified until
-  you register it ([INSTALL §4](docs/INSTALL.md#this-device-isnt-play-protect-certified)),
-  and Play Integrity fails. No Widevine, so Netflix-style paid streaming does
-  not play. No GPS, and network location comes from Google services. A Chinese
-  input method (fcitx5) is preinstalled since 1.0.0-rc.1 and has to be turned
-  on once in Settings.
-* **Not supported:** fingerprint (in progress), TPM, hardware video encoding,
-  the Bluetooth headset microphone.
-* **Configured since 1.0.0-rc.1, not yet tried on hardware:** USB flash drives,
-  USB audio, the wired headset microphone, Wi-Fi and hotspot at the same time.
-* **Known bugs:** audio and Bluetooth can deadlock after long uptime (a watchdog
-  saves evidence under `/data/vendor/gaokun3/hangdump-*` — please attach it);
-  plugged into a computer, the tablet may end up powering the computer and
-  neither side sees the other (replug); the USB-C port can stop working after
-  replugging until a reboot; the battery can show *charging* while draining on
-  low-power sources.
-* **Proprietary components.** Release images contain Huawei firmware and the
-  Huawei Histen audio library, which are **not** in this repository.
+| Topic | What it means | What to do |
+|---|---|---|
+| Data encryption | The user data partition is not encrypted: anyone who has the machine can read all data on it, and the lock screen cannot stop that | Don't keep sensitive data on it; before selling or sending it in for repair, reinstall and wipe it with the graphical installer |
+| Root | KernelSU is built into the kernel and cannot be turned off; it stays dormant until the manager app is installed. Some apps that detect root may refuse to run; once adb root is enabled in the manager, any computer authorized for USB debugging gets root through adb | Don't enable adb root unless you need it; only authorize computers you trust, and turn USB debugging and wireless debugging off when not in use |
+| System signing | The system and its updates are signed with Android's public test keys, so anyone can build an update package or a system app this device will accept | Update only through System update in Settings or this project's release page, and don't install "system components" of unknown origin |
+| Boot security | Secure Boot must be off, the boot chain is unlocked, and system partitions are not integrity-checked | This is what running Android on this machine requires; there is no way around it |
+| Factory reset | *Erase all data* in Settings has not been tested; don't rely on it | Wipe the device with the graphical installer's *Reinstall Android* |
+| Rolling back | Once a new version has booted successfully, the previous version is merged away and cannot be restored; major version updates also upgrade user data | Back up important data before updating |
+| Google certification | The device is not Play Protect certified, so the Play Store works properly only after you register it by hand; Play Integrity cannot pass, so apps that depend on it (Google Wallet, some banking apps) do not work | Register it once, following the [installation guide](docs/INSTALL.md#this-device-isnt-play-protect-certified) |
+| Use in mainland China | The system ships only Google apps and no Chinese app store; without access to Google, the Play Store, Google services and network location do not work | Download app packages from the apps' official sites or the web versions of app stores |
+| Kernel version | To pass some apps' environment checks, apps are told a disguised kernel version | Turn it off or change it in Settings → System → Kernel version spoofing |
+| Audio and Bluetooth | Users have reported sound and Bluetooth both stopping after a long uptime; the cause is still under investigation | Restart to recover; when reporting it, attach `/data/vendor/gaokun3/hangdump-*` (reading it needs root) |
+| Connecting to a computer | With some computers, the tablet may end up powering the computer, and neither side sees the other | Unplug and plug in again, or use another port on the computer |
+| USB-C port | After plugging and unplugging devices (mostly after standby), the USB-C port may stop working until a restart | Restart; until then, use adb and file transfer over Wi-Fi |
+| Low-power sources | On a computer's USB port or a small charger, the tablet may show *charging* while the battery still drains, and it switches off hard when the battery is empty | Use a charger with enough power, watch the battery percentage and save your work in time |
 
----
+## Contributing
 
-## Building
+You are welcome to help in these ways:
 
-A Linux host with at least 64 GB of RAM (AOSP's own recommendation; we never
-build with less — [`docs/build-machine.md`](docs/build-machine.md)) and about
-400 GB of disk.
+- **Testing and feedback**: if you have tried a feature marked "not yet tested" under [Status](#status), please [open an issue](https://github.com/vahiru/gaokun-android/issues/new/choose) and tell us how it went, whatever the result. Before reporting a problem, please read [issues.md](issues.md).
+- **Development**: open tasks and the next step for each are in [`docs/TODO.md`](docs/TODO.md).
 
-```sh
-repo init -u https://github.com/crdroidandroid/android.git -b 17.0 --git-lfs
-cp <this repo>/manifests/local_manifest_gaokun3.xml .repo/local_manifests/
-repo sync -c -j"$(nproc)"
-
-cp -a <this repo>/device/huawei/gaokun3 device/huawei/gaokun3
-python3 <this repo>/scripts/crdroid-tree-fixes.py .   # read the script for why
-source build/envsetup.sh
-lunch lineage_gaokun3-cp2a-userdebug
-m bacon superimage
-```
-
-* Run `bacon` and `superimage` in **one** `m` invocation: two invocations give
-  the OTA package and `super.img` different build stamps, and they no longer
-  recognise each other ([`scripts/release.sh`](scripts/release.sh)).
-* Build **`userdebug`**, not `user`: a `user` build forces SELinux enforcing,
-  and this port's policy cannot boot that yet.
-* By default this is a **release build** (still the `userdebug` variant): adb
-  is off until you enable it and asks to authorize each computer, nothing
-  listens on TCP 5555, `ro.debuggable` is 0 and no adb key is built in.
-  `GAOKUN3_DEV_BUILD=1 m bacon superimage` gives a **development build** with
-  the old conveniences (adb without authorization, TCP 5555,
-  `ro.debuggable=1`, your key built in) — never publish one. The switch is in
-  [`lineage_gaokun3.mk`](device/huawei/gaokun3/lineage_gaokun3.mk); it is new
-  since v0.7.1-alpha.
-* Some build inputs are **not** in this repository; each directory's README
-  says how to produce them: `firmware/` (Huawei firmware, from your own
-  machine — [`firmware/README.md`](device/huawei/gaokun3/firmware/README.md)),
-  `hexagonrpcd-root/` (sensor DSP files), `prebuilt-boot/` (the kernel, below),
-  and `effects/prebuilt/` (the Histen library; without it the speaker
-  enhancement is silently absent). Development builds also need `adb_keys`
-  (your own adb public key:
-  `cp ~/.android/adbkey.pub device/huawei/gaokun3/adb_keys`); release builds
-  do not use it.
-
-The kernel is built separately, in layers: mainline **v7.2.9** stable (since
-1.0.0-rc.1; v7.2-rc2 before), the
-[`linux-gaokun-buildbot`](https://github.com/KawaiiHachimi/linux-gaokun-buildbot)
-patches on top, then this repository's [`patches/`](patches/)
-(`scripts/kernel-apply-patches.sh <tree>`, idempotent) and ReSukiSU
-(`scripts/kernel-setup-resukisu.sh <tree>`). Exactly which sources went into a
-given release's kernel is listed in that release's `kernel-source.txt`
-attachment (for v0.7.1-alpha, which predates it:
-[`docs/relnotes/v0.7.1-alpha-sources.md`](docs/relnotes/v0.7.1-alpha-sources.md)).
-`scripts/clone-refs.sh` checks out the buildbot's `main` branch as a reference
-only; that is not necessarily what a release was built from. The
-Android-specific configuration is asserted by [`scripts/kernel-config-android.sh`](scripts/kernel-config-android.sh);
-how to build `vmlinuz.efi` and the DTB and where to put them is in
-[`prebuilt-boot/README.md`](device/huawei/gaokun3/prebuilt-boot/README.md).
-
----
-
-## Repository layout
-
-| Path | Contents |
-|---|---|
-| `device/huawei/gaokun3/` | The device tree |
-| `patches/` | Kernel, Mesa and AOSP patches that are not upstream |
-| `scripts/` | Build, release, deploy, forensics and installer tooling (`scripts/live/` builds the graphical installer's Linux) |
-| `live/installer-flutter/` | The graphical installer (Flutter) |
-| `tools/` | Bring-up tools (fingerprint, camera, debugging) |
-| `docs/` | **The engineering record.** Every finding, with evidence. Start from the index: [`docs/README.md`](docs/README.md) |
-| `manifests/` | `repo` local manifest |
-
-`docs/` is not an afterthought. Nothing about this platform exists in any wiki
-or in any model's training data, so the findings files are a primary artifact:
-they record what was measured, what turned out to be wrong, and which earlier
-conclusions were later overturned. Several of them were.
-
----
-
-## Help wanted
-
-The full backlog — with the concrete first step for each item, and the reasons
-behind everything that is parked — lives in [`docs/TODO.md`](docs/TODO.md).
-What follows is the curated subset worth someone's weekend, roughly easiest
-first:
-
-1. **GPU SMMU interrupt fix.** The SMMU asserts SPI 675/680; the device tree
-   declares 678/679, so context faults never reach the CPU. A DTB change should
-   remove the need for the `smmu-nostall.sh` polling workaround entirely
-   ([`docs/stage5-freedreno.md`](docs/stage5-freedreno.md) D6).
-2. **Hardware video *encode*.** Off on purpose (see the status table). Making
-   it work means teaching `v4l2_codec2`'s encode component to convert RGBX to
-   NV12 — the notes in `device/huawei/gaokun3/device.mk` list the three places
-   to change for a re-test.
-3. **Tighter SELinux policy.** Enforcing is the default since 1.0.0-rc.1. What
-   is left is narrowing a few rules that are too broad (rproc-kick,
-   hexagonrpcd, bootctl) and a vendor build of tinymix, so that audioroute no
-   longer needs `vendor_executes_system_violators` ([`docs/TODO.md`](docs/TODO.md),
-   section "B1. SELinux 转 enforcing").
-4. **Camera image quality.** What is left is quality, not plumbing: the front
-   camera's colour matrix is a generic one (calibrating it needs a colour
-   chart), the software ISP has no denoise of its own, and flash-lit shots blow
-   out the highlights.
-   Concrete next steps are in [`docs/TODO.md`](docs/TODO.md) T3.
-
-Factory reset and `fastboot` now go through a unified boot entry
-([`docs/boot-entry-design.md`](docs/boot-entry-design.md), code in
-[`tools/gk3boot/`](tools/gk3boot/README.md)). It has been in the releases
-since 1.0.0-rc.1, but factory reset through it has not been tested on
-hardware — please talk to us before starting on recovery.
-
-**If you have a MateBook E Go and want to test**, these have never been tried on
-hardware: Bluetooth headphones, an external display over USB-C, a phone joining
-the hotspot, the v0.7.1 change for WPA2/WPA3 mixed-mode routers, the graphical installer's dual-boot
-and erase-disk modes on a real disk, and the Windows script on a real Windows.
-Open an issue — reports of what breaks are as useful as patches. Please include
-your BIOS version and SKU.
-
----
+Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening an issue or a pull request.
 
 ## Community
 
@@ -311,31 +137,23 @@ your BIOS version and SKU.
 |---|---|
 | **Telegram** | [t.me/gaokunAndroid](https://t.me/gaokunAndroid) |
 | **QQ group** | **920133252** |
-| Issues | [GitHub issues](https://github.com/vahiru/gaokun-android/issues) — the right place for anything that needs a paper trail |
-
-Chat is good for "is this normal?"; open an issue for anything reproducible, so
-it does not get lost in scrollback.
-
----
+| Issues | [GitHub issues](https://github.com/vahiru/gaokun-android/issues) |
 
 ## Credits
 
-* The **gaokun Linux community** —
-  [linux-gaokun](https://github.com/right-0903/linux-gaokun),
-  [linux-gaokun-buildbot](https://github.com/KawaiiHachimi/linux-gaokun-buildbot),
-  [EGoTouchRev](https://github.com/chiyuki0325/EGoTouchRev-Linux) — for the
-  kernel, the EC driver and the touch reverse-engineering this port stands on.
-* **[aospm](https://github.com/aospm)**, for showing that AOSP on a mainline
-  kernel is a workable shape at all.
-* **Johan Hovold** and everyone who brought SC8280XP support upstream.
+This project is built on the work of many people. Our thanks go to:
+
+* **The gaokun Linux community**: [linux-gaokun](https://github.com/right-0903/linux-gaokun), [linux-gaokun-buildbot](https://github.com/KawaiiHachimi/linux-gaokun-buildbot), [EGoTouchRev](https://github.com/chiyuki0325/EGoTouchRev-Linux), [matebook-e-go-linux](https://github.com/whitelewi1-ctrl/matebook-e-go-linux) and [matebook-e-go-boot-works](https://github.com/matalama80td3l/matebook-e-go-boot-works), for the kernel, the EC driver, the panel driver, touch reverse-engineering and more.
+* **[uup-drivers-sc8280xp](https://github.com/matebook-e-go/uup-drivers-sc8280xp)**, for collecting Huawei's Windows driver packages; the firmware, camera tuning and microphone array parameters used here come from it.
+* **[aospm](https://github.com/aospm)**, for showing that AOSP can run on a mainline kernel.
+* **Johan Hovold** and everyone who contributed to mainline SC8280XP support.
 * **crDroid** and **LineageOS**.
-* **Mesa** — `freedreno` and `turnip`.
-* **@mashen11** — microphone, speaker enhancement and camera autofocus.
+* **Mesa**, for the `freedreno` and `turnip` drivers.
+* **@mashen11**, for the microphones, the speaker enhancement and camera autofocus.
+* **@Rivarise**, for tuning and testing the stylus on CSOT panels.
+* **@dezige131**, for fixes to the graphical installer.
+* Everyone who helped with testing.
 
 ## License
 
-GNU General Public License v3.0 or later — see [`LICENSE`](LICENSE) and
-[`NOTICE`](NOTICE). A few files adapted from AOSP keep their Apache-2.0
-headers. The kernel patches under [`patches/`](patches/) stay GPL-2.0-only,
-because they are derivative works of Linux; the Mesa patches are MIT, matching
-upstream.
+This project is licensed under the GPL-3.0 or later, see [`LICENSE`](LICENSE). Some files keep the license of the project they come from, for example the kernel patches are GPL-2.0-only; see [`NOTICE`](NOTICE) for details.
