@@ -465,6 +465,9 @@ KPATCHES=(
     #    一帧的一半），libcamera配置时读到的就是这个值。
     0209-media-i2c-ov13b10-Update-the-exposure-limit-on-every-format-change.patch
     0210-media-i2c-hi846-Update-the-exposure-limit-on-every-format-change.patch
+    # 0211：EC的中断在挂起期间改成边沿触发，醒着时仍是电平触发。不打的话SoC进了最深的待机（AOSD）之后，
+    #    睡眠中插上充电器多半叫不醒系统：PDC一直把SoC叫醒，GIC上却没有中断，要等下一个闹钟或电源键。
+    0211-platform-arm64-huawei-gaokun-ec-use-an-edge-triggered-IRQ-while-suspended.patch
 )
 
 # ⚠️ 诊断补丁【不进发版内核】：只在带 --with-diag 时打。顺序有依赖：0028/0029 依赖 0023，
