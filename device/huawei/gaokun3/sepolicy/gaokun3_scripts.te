@@ -339,3 +339,30 @@ r_dir_file(gaokun3_wlanap, sysfs_net)
 #   ⬜ 先写后验：未经 enforcing 普查。
 r_dir_file(gaokun3_wlanap, sysfs)
 allowxperm gaokun3_wlanap self:udp_socket ioctl { SIOCGIFFLAGS SIOCSIFHWADDR };
+
+# ── gaokun3-wifi-wake.sh：按推送连接的服务器地址给 Wi-Fi 设收包唤醒规则（2026-11-04）──────────
+# ⚠️ 先写后验：按源码推出来的，没有经过 ROM 构建、没有在 enforcing 下上机。原型是 KernelSU 模块，跑在 ksu 域里。
+#   * shebang /vendor/bin/sh + toybox（cat / sleep / log）—— 同上面的脚本域。
+#   * 执行 /vendor/bin/iw（vendor_file，同 gaokun3_wlanap）。nl80211 SET_WOWLAN 要 CAP_NET_ADMIN（rc 里 capabilities NET_ADMIN）；
+#     用的是 "iw phy <名字>"，不解析接口名，所以不需要 gaokun3_wlanap 那个 AF_INET 套接字。
+#     iw 按名字找 phy 时读 /sys/class/ieee80211/phyN/index（sysfs）。
+#   * 读 /proc/net/tcp、/proc/net/tcp6 找推送连接：proc_net_tcp_udp（system/sepolicy/private/genfs_contexts:30），
+#     核心策略只禁应用域读它（private/app.te:794）。/proc/net 的目录查找所有域都有（private/domain.te:26）。
+#   * 读 /proc/uptime：proc_uptime（private/genfs_contexts:113）。
+#   * 读 /sys/bus/pci/drivers/ath11k_pci/<设备>/wakeup/wakeupN/{name,event_count} 找 ath11k_wow 唤醒源：驱动目录、
+#     指向 PCI 设备的链接和设备目录都是 sysfs，wakeupN 由本仓 file_contexts 的唤醒源正则标成 sysfs_wakeup。
+#     不扫 /sys/class/wakeup：那里有的唤醒源在本域读不了的目录里（EC 的 power_supply 是 sysfs_batteryinfo），每次都会报拒绝。
+#   * 读 /sys/class/net/wlan0/phy80211/name：sysfs_net，链接指向的 ieee80211/phy0 是 sysfs。
+type gaokun3_wifiwake, domain;
+type gaokun3_wifiwake_exec, exec_type, vendor_file_type, file_type;
+init_daemon_domain(gaokun3_wifiwake)
+allow gaokun3_wifiwake vendor_shell_exec:file rx_file_perms;
+allow gaokun3_wifiwake vendor_toolbox_exec:file rx_file_perms;
+allow gaokun3_wifiwake vendor_file:file rx_file_perms;
+allow gaokun3_wifiwake self:global_capability_class_set net_admin;
+allow gaokun3_wifiwake self:netlink_generic_socket create_socket_perms_no_ioctl;
+allow gaokun3_wifiwake proc_net_tcp_udp:file r_file_perms;
+allow gaokun3_wifiwake proc_uptime:file r_file_perms;
+r_dir_file(gaokun3_wifiwake, sysfs_wakeup)
+r_dir_file(gaokun3_wifiwake, sysfs_net)
+r_dir_file(gaokun3_wifiwake, sysfs)
