@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Centre of the power key (fingerprint sensor) in the built-in display's
+         natural orientation (portrait 1600x2560, origin top left). In landscape
+         (ROTATION_90) the key is on the left edge, about 18 mm below the top of
+         the visible area: the natural top edge, 172 px from its right end.
+         Derived from Huawei's outline drawing and the device dimensions, to
+         about 2 mm. The HAL reports the same point to the side fingerprint
+         indicator, as the key start 1350 and radius 78. -->
+    <dimen name="physical_fingerprint_sensor_center_screen_location_x">1428px</dimen>
+    <dimen name="physical_fingerprint_sensor_center_screen_location_y">0px</dimen>
+</resources>

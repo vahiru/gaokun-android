@@ -20,6 +20,8 @@ ifneq ($(shell cd $(LOCAL_PATH)/prebuilt-boot && sha256sum -c fingerprint-kernel
 $(error Fingerprint kernel missing/stale: prepare a kernel with 0050 + 0212 + 0213 and CONFIG_GAOKUN3_FPCMD=y)
 endif
 PRODUCT_PACKAGES += android.hardware.biometrics.fingerprint-service.gaokun3
+# Starts the unlock ripple at the power key (rro/Gaokun3SystemUIFingerprintOverlay).
+PRODUCT_PACKAGES += Gaokun3SystemUIFingerprintOverlay
 PRODUCT_COPY_FILES += \
     $(GAOKUN3_FP_TA):$(TARGET_COPY_OUT_VENDOR)/firmware/fingerpr.mbn \
     $(GAOKUN3_FP_GOODIX_CFG):$(TARGET_COPY_OUT_VENDOR)/firmware/gaokun3-goodix-cfg.bin \

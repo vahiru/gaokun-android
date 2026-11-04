@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SystemUI RRO for the fingerprint unlock ripple origin; see Android.bp. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.android.systemui.gaokun3.fingerprint"
+    android:versionCode="1"
+    android:versionName="1.0">
+    <application android:hasCode="false" />
+    <overlay
+        android:targetPackage="com.android.systemui"
+        android:priority="0"
+        android:isStatic="true" />
+</manifest>

@@ -91,7 +91,8 @@ with tempfile.TemporaryDirectory(prefix='gk3-fp-integration-') as tmp:
         proof = boot / 'fingerprint-kernel.sha256'
         proof.write_text(hashlib.sha256(image.read_bytes()).hexdigest() + '  vmlinuz.efi\n')
         assert make('GAOKUN3_FINGERPRINT=true',
-                    'EXPECTED=android.hardware.biometrics.fingerprint-service.gaokun3').returncode == 0
+                    'EXPECTED=android.hardware.biometrics.fingerprint-service.gaokun3 '
+                    'Gaokun3SystemUIFingerprintOverlay').returncode == 0
         cfg_bytes = cfg.read_bytes()
         cfg.unlink()
         assert make('GAOKUN3_FINGERPRINT=true').returncode != 0
