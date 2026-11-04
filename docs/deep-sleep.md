@@ -121,8 +121,11 @@ patches/0174 记下这些 TID，每次醒来发一次 DELBA，直到新会话建
 - 接着电源时单次睡眠最长约 55 秒，那是 health HAL 的 60 秒闹钟，拔线后是 600 秒。
 - 恢复时链路训练失败，host 会留着（patches/0192）。日志是 `Device not found`、`Device found, but not active` 或 `Link failed to come up` 之一，接着是 `Link didn't come back`，然后按上一节重试。
 - `aosd` 的 Count 比 `/sys/power/suspend_stats/success` 少，有的睡眠整段不涨：s2idle 里几个 CPU 轮流申请集群下电，
-  固件拒绝后内核立刻重试，形成循环，这段时间 SoC 一直醒着。环内没有设备中断，固件拒绝的原因还不知道。
-  `/sys/devices/system/cpu/cpu*/cpuidle/state1/s2idle/usage` 一觉涨几千以上就是它。
+  固件拒绝后，被拒的 CPU 几微秒内又申请，跟踪显示这时别的 CPU 还在固件里、genpd 也还算它们下电，它又成了最后一个，就形成循环，
+  这段时间 SoC 一直醒着，环里几乎没有中断。patches/0198 让被固件拒绝（`-EPERM`）的 CPU 在 s2idle 里先忙等 3 ms 再申请，
+  之后没有再见到环；固件拒绝的原因还不知道。别的失败（`-EOPNOTSUPP`，没下电就返回）不在环里，不等。
+  判断：`/sys/devices/system/cpu/cpu*/cpuidle/state1/s2idle/usage` 八个 CPU 加起来，一次睡眠涨 8 到十来次，
+  一觉涨几千以上就是环。偶尔被拒还会有（一夜几次到二十次左右），每次多等 3 ms，这是预期的。
 - `vendor.hexagonrpcd-sdsp` 退出码 4、`Could not attach to FastRPC node: No space left on device`：
   `drivers/misc/fastrpc.c` 每冻结一次泄漏一个 ctx 编号，用完 255 个之后就起不来，不是 SLPI 崩溃。
   patches/0171 修了这个问题，还看到的话先确认内核带着它。
