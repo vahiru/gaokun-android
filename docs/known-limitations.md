@@ -25,20 +25,22 @@ Problems specific to one release are in that release's [release notes](relnotes/
 ## 1. Security and privacy (read this part first)
 
 ### Up to v0.7.1, network adb lets anyone in without asking
-<!-- B1 / D1 (SEC-1, OTA-1 and others in docs/v1.0-plan.md): ⬜ not built, not tested on hardware. Check before the
-     release. Evidence in the Chinese file. -->
+<!-- B1 / D1 (SEC-1, OTA-1 and others in docs/v1.0-plan.md): every release build since 1.0.0-rc.1 has it (release.sh asserts
+     ro.adb.secure=1 and ro.debuggable=0; the interactive checks ran on hardware on 10-11, docs/TODO.md blocker table B1).
+     ⬜ Left: no listener on 5555 after a fresh install, and how to clear a self-set port (below). Evidence in the Chinese file. -->
 * **What you see**: on v0.7.1 and earlier, nothing. That is the problem.
 * **Why**: v0.7.1 and earlier images open adb on TCP port 5555 on every network interface, the Wi-Fi hotspot included,
   and accept connections **without** the "Allow debugging?" prompt. The images are debuggable (`ro.debuggable=1`), so
   `adb root` then gives a root shell. They also carry the maintainer's adb public key. Anyone on the same Wi-Fi, or
   connected to your hotspot, can take over the machine.
-  From the next release (planned as 1.0) adb is **off** by default, asks you to authorize each computer, does not
+  From 1.0.0-rc.1 on, adb is **off** by default, asks you to authorize each computer, does not
   listen on port 5555, cannot `adb root`, and the image carries no maintainer key. Existing users get this with the
   OTA update, nothing to do: the old port-5555 setting came from the image's built-in defaults, and Android never
   saves those to `/data`. The exception is anyone who set `persist.adb.tcp.port` themselves.
 * **What to do**:
-  * Update to the next release as soon as it is out. Until then, stay off Wi-Fi networks you don't trust, and don't
-    let strangers join your hotspot.
+  * If you are still on v0.7.1 or earlier, back up first, then update in **Settings → System → System update** (going
+    from Android 16 to 17 rewrites `/data` with no rollback point, see the [rc.3 release notes](relnotes/v1.0.0-rc.3.md)).
+    Until then, stay off Wi-Fi networks you don't trust, and don't let strangers join your hotspot.
   * If you set `persist.adb.tcp.port` yourself: how to clear it after updating will be added here (⬜ not yet verified
     on hardware).
   * For adb over the network, use **Wireless debugging** ([FAQ](FAQ.md#wireless-debugging)).
@@ -118,14 +120,14 @@ Problems specific to one release are in that release's [release notes](relnotes/
 ### Apps are told a kernel version that is not the real one
 <!-- GAME-1 (patches/0085). Evidence in the Chinese file. -->
 * **What you see**: apps read the kernel version as `6.6.30-android15-8-g0a4d3c12b3`, a string that matches no real Android
-  kernel. The kernel that actually runs is mainline Linux **7.2.9** plus this project's patches, and that is what
-  `uname -r` in `adb shell` and *Kernel version* under *Settings → About tablet → Android version* show. Crash records of
-  apps carry the version apps are told, those of system components the real one. On 1.0.0-rc.2 and rc.3 the whole system
-  reports the 6.6.30 string.
+  kernel. The kernel that actually runs is mainline Linux **7.2.9** plus this project's patches. On 1.0.0-rc.2 and rc.3
+  the whole system reports the 6.6.30 string; from the next release only apps are told it, and `uname -r` in `adb shell`
+  and *Kernel version* under *Settings → About tablet → Android version* show the real one. Crash records of apps carry
+  the version apps are told, those of system components the real one.
 * **Why**: some environment checks in apps accept only the 4.x / 5.x / 6.x versions of Android's common kernel. Only the
   number apps read changes; the kernel itself, its compile-time version and module checks are the same. It is a deliberate
   disguise, which is why it is listed here.
-* **What to do**: *Settings → System → Kernel version spoofing* turns it off or sets another version, and applies after a
+* **What to do**: from the next release, *Settings → System → Kernel version spoofing* turns it off or sets another version, and applies after a
   restart. On 1.0.0-rc.2 and rc.3 there is no setting: run `dmesg | head -1` as root for the real version. **Do not use the
   KernelSU manager's *Install* / LKM patching**: KernelSU is already built into this kernel.
 
@@ -180,13 +182,15 @@ yourself, you should know that they contain these components.
     the board), so transfers keep going with the screen off. Unplug when you are done.
 
 ### USB sticks are not recognised
-<!-- STOR-1 / BKUP-6: the voldmanaged lines are in fstab (8da5974), ⬜ not built, not tested on hardware.
+<!-- STOR-1 / BKUP-6: the voldmanaged lines are in fstab (8da5974) and shipped in rc.1, ⬜ not tested on hardware.
      Once tested, rewrite this entry as "port1 works; port0 only once usbrole has switched it to host", and say which
      physical port is port1 (STOR-3: user confirmed 2026-10-05 that port0 is the one next to the power button, so port1 is the other). Body text unchanged until then. -->
-* **What you see**: a USB stick or external drive does not appear in the file manager.
-* **Why**: the kernel does see it, but the system's partition table doesn't declare any removable storage, so Android
-  never mounts it.
-* **What to do**: nothing yet. Use the network to copy files.
+* **What you see**: up to v0.7.1, a USB stick or external drive does not appear in the file manager. Whether it does
+  from 1.0.0-rc.1 on has not been checked on hardware.
+* **Why**: the kernel does see it, but up to v0.7.1 the system's partition table doesn't declare any removable storage,
+  so Android never mounts it. From 1.0.0-rc.1 it is declared.
+* **What to do**: use the network to copy files. If you have tried a USB stick on rc.1 or later, please open an issue
+  and tell us whether it worked.
 
 ### Fingerprint does not work (in progress)
 <!-- HW-5 / T6 (D12: not a 1.0 gate). -->
@@ -198,21 +202,18 @@ yourself, you should know that they contain these components.
 * **What to do**: unlock with a PIN or password. Even once fingerprint works, fingerprint payments in payment apps will
   most likely still be unavailable.
 
-### Stylus (Huawei M-Pencil): has a driver from 1.0.0-rc.2, not yet checked on the developer's machine
-<!-- DISP-13. PR #27 (community contribution): patches/0079 + 0080, gk3pend, usbcore.quirks. Evidence in the Chinese file. -->
-* **What you see**: up to 1.0.0-rc.1 the pen does nothing at all. From rc.2 the kernel has a driver for it, and you should get
-  pressure, hover, tilt and the side double-tap. The contributor tested those on their own machine with the same code;
-  **we have not checked them on rc.2 yet**.
-* **Why**: the pen is sensed by the touch screen's second controller chip, which had no driver; a community contributor
-  reverse-engineered it.
-* **What to do**: if the pen does not work on rc.2 or later, open an issue with the output of `adb shell getevent -pl`
-  (needs adb).
-
-### No automatic brightness
-<!-- DISP-8 / HW-4 / A3 (#121). -->
-* **What you see**: there is no *Adaptive brightness* in Settings; brightness is manual only.
-* **Why**: the light sensor answers on its bus, but turning it on crashes the DSP that runs the sensors, so it stays off.
-* **What to do**: adjust brightness by hand.
+### Stylus (Huawei M-Pencil): second-generation pens only
+<!-- DISP-13. PR #27 (community contribution): patches/0079 + 0080, gk3pend, usbcore.quirks. Tested on a BOE unit (PR #27 as an
+     out-of-tree module on rc.1, and rc.3); PR #75's column timing fix checked by eye on a CSOT unit, #78's pitch table
+     not tap-tested on CSOT; not on the maintainer's machine. Evidence in the Chinese file.
+     The "No automatic brightness" section was removed: PR #54 shipped in rc.3. -->
+* **What you see**: up to 1.0.0-rc.1 the pen does nothing at all. From rc.2 the second-generation M-Pencil works:
+  pressure, hover, tilt and the side double-tap; from rc.3 strokes are smoothed. A first-generation pen does nothing,
+  and the third generation has not been tested.
+* **Why**: the pen is sensed by the touch screen's second controller chip; a community contributor reverse-engineered its
+  driver. The first-generation pen speaks a different protocol that the driver does not understand.
+* **What to do**: if a second-generation pen does not work on rc.2 or later, open an issue with the output of
+  `adb shell getevent -pl` (needs adb).
 
 ### Location mostly does not work (no GPS)
 <!-- APP-13 / NET-5. Whether domestic apps' own Wi-Fi location SDKs work: not tested yet (batch 4). -->
@@ -246,6 +247,12 @@ yourself, you should know that they contain these components.
 ### No push notifications while in standby
 <!-- APP-5 / NET-9 / PWR-12 (1.0: measure, then disclose; waking on incoming packets after 1.0). Evidence: PR #40 (Wi-Fi stays
      connected in standby) and the PR #46 author's measurements of 2026-10-17 — see the zh-CN file.
+     patches/0199–0202 wire up PCIe WAKE#; tested: a matching receive rule wakes the system (the two default triggers,
+     disconnect and GTK rekey failure, were not tested separately). gaokun3_wifiwake sets the receive rules for the servers on
+     ports 5228–5230, i.e. Play services' push connections (docs/deep-sleep.md, Wi-Fi section); the prototype ran as a
+     KernelSU module, this ROM version has not run on hardware. Push arrival times were not checked app by app; WeChat and
+     QQ in China do not use Google push, so the text below stays true for them. Rewrite the text below once it is checked
+     on hardware.
      The standby switch is the Parts one from 1.0 on (PWR-16); its place and wording on the Battery page still have to be checked on hardware. -->
 * **What you see**: once the screen is off and the machine is in standby, new WeChat, QQ and other messages do not
   arrive in real time. They arrive at the system's next timed wake-up (or when you turn the screen on), usually a
@@ -313,7 +320,10 @@ These are bugs, not trade-offs, and they will be removed from this list once fix
 
 ### The USB-C port can stop working after replugging, until a reboot
 <!-- A6 / PWR-4 / HW-14. The "no standby" half is inferred from the code (role switch keeps failing and holds the
-     machine awake), not observed; README.md:64 says the same. -->
+     machine awake), not observed; README.md:64 says the same.
+     ⬜ patches/0086 (PR #36, since rc.2) keeps vreg_l9d on; its description (port0 dwc3 soft reset timing out with -110,
+     xhci and the gadget dead until a reboot) matches this entry, but replugging after standby has not been retested
+     since. Rewrite or drop this entry once it has. -->
 * **What you see**: after you unplug and plug something back into the USB-C port (seen mostly after standby), the port
   stops working: no USB adb, USB devices are not detected. It stays like that until you reboot. Going by the code, the
   machine also no longer goes into standby until that reboot, so the battery drains with the screen off.
@@ -321,15 +331,8 @@ These are bugs, not trade-offs, and they will be removed from this list once fix
   the port's role keeps failing and keeps the machine awake.
 * **What to do**: reboot. Until then, use Wi-Fi for adb or file transfer.
 
-### A palm on the screen turns into several touches (improved from 1.0.0-rc.2, not yet checked on the developer's machine)
-<!-- DISP-7 / T1. PR #30 (community contribution): patches/0081 + 0082. Evidence in the Chinese file. -->
-* **What you see**: up to 1.0.0-rc.1, resting your palm or the side of your hand on the screen produces several separate
-  touches, which can tap, zoom or scroll by accident. From rc.2 the driver remembers where the hand is and withdraws the
-  parts it had mistaken for fingers (apps get a *cancel*, not a tap), so this should be much rarer; **we have not checked
-  it on rc.2 yet**. The touch preset for games turns this off, so that a thumb resting near the edge is not swallowed.
-* **Why**: the touch points are computed by the kernel driver itself from raw capacitance data, and it used to be unable to
-  tell a palm from fingers.
-* **What to do**: if it still happens, keep your palm off the screen and open an issue describing the gesture.
+<!-- Removed "A palm on the screen turns into several touches" (DISP-7 / T1): PR #30 (patches/0081, 0082) shipped in rc.2 and was
+     checked on a BOE unit. Game touch mode skipping palm rejection is a choice stated in Settings, not a defect. -->
 
 ### *League of Legends: Wild Rift*: closed right after launch up to 1.0.0-rc.1; starts from rc.2, matches not yet tested
 <!-- #15 / #17; patches/0078. Evidence in the Chinese file. -->
@@ -355,13 +358,15 @@ These are bugs, not trade-offs, and they will be removed from this list once fix
 <!-- NET-2 (batch 2). The v0.7.1 notes blamed the chip; iw shows the driver supports STA+AP, the software config does not.
      2026-10-05 confirmed in source: ath11k advertises STA and AP in one interface combination for WCN6855 hw2.1
      (ath11k mac.c:10327-10356, core.c:525-529/:572 @7.2.9). Fix written (BoardConfig WIFI_HAL_INTERFACE_COMBINATIONS +
-     wlan1 pre-created by gaokun3-wlan-ap.sh), not built or tested yet. Delete this entry once a release passes the
+     wlan1 pre-created by gaokun3-wlan-ap.sh), shipped in rc.1 (wlan1 created at boot was checked on rc.1); ⬜ another device
+     joining the hotspot while Wi-Fi stays up has not been tested. Delete this entry once a release passes the
      "hotspot + Wi-Fi at the same time" check. -->
-* **What you see**: when you turn on the hotspot, the tablet drops its own Wi-Fi connection. With no modem, the hotspot
-  then has no connection to share.
-* **Why**: the current software configuration cannot run Wi-Fi and the hotspot at the same time. This is not a limit
-  of the chip.
-* **What to do**: nothing yet; connect your other devices to the router directly.
+* **What you see**: up to v0.7.1, when you turn on the hotspot, the tablet drops its own Wi-Fi connection. With no modem,
+  the hotspot then has no connection to share. From 1.0.0-rc.1 both should work at once; not yet tried on hardware.
+* **Why**: up to v0.7.1 the software configuration cannot run Wi-Fi and the hotspot at the same time. This is not a
+  limit of the chip. From 1.0.0-rc.1 it is configured.
+* **What to do**: try it on rc.1 or later; if Wi-Fi still drops, please open an issue, and connect your other devices
+  to the router directly meanwhile.
 
 ### The Chinese input method has to be turned on once
 <!-- DISP-3 (D10). fcitx5-android 0.1.3 (GitHub release build), preinstalled from 1.0.0-rc.1 — the first build that really
