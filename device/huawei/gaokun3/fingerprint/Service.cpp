@@ -490,7 +490,14 @@ class Fingerprint final : public BnFingerprint {
         location.sensorLocationX = 1600 - 172;
         location.sensorLocationY = 0;
         location.sensorRadius = 78;
-        p.sensorLocations = {location};
+        // The framework and Settings take "" as the default display, but
+        // SystemUI's side fingerprint indicator looks the location up by the
+        // display's unique ID only (SideFpsSensorInteractor, no "" fallback)
+        // and stays hidden without it. "local:0" is the built-in panel's ID
+        // (drm_hwcomposer physical display 0).
+        SensorLocation builtIn = location;
+        builtIn.display = "local:0";
+        p.sensorLocations = {location, builtIn};
         *out = {p}; return ScopedAStatus::ok();
     }
     ScopedAStatus createSession(int32_t sensor, int32_t user,
