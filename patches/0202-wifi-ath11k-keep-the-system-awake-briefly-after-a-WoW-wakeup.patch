@@ -1,0 +1,110 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] wifi: ath11k: keep the system awake briefly after a WoW wakeup
+
+When the firmware wakes the system from WoW, for a packet that matched a
+wake pattern for example, nothing holds a wakeup source after the resume.
+On Android the system suspends again within about 0.1 s, often before the
+process that owns the packet has run. The wakeup then costs a resume and
+delivers nothing until the next one.
+
+Report the wakeup on a new "ath11k_wow" wakeup source and keep it active
+for wow_wakeup_ms (default 1000 ms), unless the firmware reports an
+unspecified reason, which is its answer to a wakeup the host started.
+An event without the WOW_EVENT_INFO TLV counts as unspecified.
+The source's counters also tell userspace how often the firmware wakes
+the system, so it can back off from wake patterns that match too often.
+
+Android only: on mainline Linux, userspace decides how long to stay up
+after a wakeup.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ drivers/net/wireless/ath/ath11k/core.c |  8 ++++++++
+ drivers/net/wireless/ath/ath11k/core.h |  2 ++
+ drivers/net/wireless/ath/ath11k/wmi.c  | 13 ++++++++++++-
+ 3 files changed, 22 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/net/wireless/ath/ath11k/core.c b/drivers/net/wireless/ath/ath11k/core.c
+index 50e15b17b..7ef3a829b 100644
+--- a/drivers/net/wireless/ath/ath11k/core.c
++++ b/drivers/net/wireless/ath/ath11k/core.c
+@@ -38,6 +38,11 @@ bool ath11k_ftm_mode;
+ module_param_named(ftm_mode, ath11k_ftm_mode, bool, 0444);
+ MODULE_PARM_DESC(ftm_mode, "Boots up in factory test mode");
+ 
++unsigned int ath11k_wow_wakeup_ms = 1000;
++module_param_named(wow_wakeup_ms, ath11k_wow_wakeup_ms, uint, 0644);
++MODULE_PARM_DESC(wow_wakeup_ms,
++		 "Keep the system awake this long after the firmware woke it from WoW (ms, 0: only count the wakeup)");
++
+ static const struct ath11k_hw_params ath11k_hw_params[] = {
+ 	{
+ 		.hw_rev = ATH11K_HW_IPQ8074,
+@@ -2954,6 +2959,7 @@ void ath11k_core_free(struct ath11k_base *ab)
+ 	destroy_workqueue(ab->workqueue);
+ 	wakeup_source_unregister(ab->recovery_ws);
+ 	wakeup_source_unregister(ab->scan_ws);
++	wakeup_source_unregister(ab->wow_ws);
+ 
+ 	kfree(ab);
+ }
+@@ -2982,6 +2988,8 @@ struct ath11k_base *ath11k_core_alloc(struct device *dev, size_t priv_size,
+ 	ab->recovery_ws = wakeup_source_register(dev, "ath11k_recovery");
+ 	/* Same for scans, see ath11k_mac_op_hw_scan(). */
+ 	ab->scan_ws = wakeup_source_register(dev, "ath11k_scan");
++	/* And for WoW wakeups, see ath11k_wmi_event_wow_wakeup_host(). */
++	ab->wow_ws = wakeup_source_register(dev, "ath11k_wow");
+ 
+ 	mutex_init(&ab->core_lock);
+ 	mutex_init(&ab->tbl_mtx_lock);
+diff --git a/drivers/net/wireless/ath/ath11k/core.h b/drivers/net/wireless/ath/ath11k/core.h
+index 3dca739ce..ee4eaca55 100644
+--- a/drivers/net/wireless/ath/ath11k/core.h
++++ b/drivers/net/wireless/ath/ath11k/core.h
+@@ -61,6 +61,7 @@
+ 
+ extern unsigned int ath11k_frame_mode;
+ extern bool ath11k_ftm_mode;
++extern unsigned int ath11k_wow_wakeup_ms;
+ 
+ #define ATH11K_SCAN_TIMEOUT_HZ (20 * HZ)
+ 
+@@ -1039,6 +1040,7 @@ struct ath11k_base {
+ 	struct workqueue_struct *workqueue_aux;
+ 	struct wakeup_source *recovery_ws;
+ 	struct wakeup_source *scan_ws;
++	struct wakeup_source *wow_ws;
+ 	struct work_struct reset_work;
+ 	atomic_t reset_count;
+ 	atomic_t recovery_count;
+diff --git a/drivers/net/wireless/ath/ath11k/wmi.c b/drivers/net/wireless/ath/ath11k/wmi.c
+index e46f4d7dd..61b1adcdb 100644
+--- a/drivers/net/wireless/ath/ath11k/wmi.c
++++ b/drivers/net/wireless/ath/ath11k/wmi.c
+@@ -8631,7 +8631,8 @@ static int ath11k_wmi_tlv_wow_wakeup_host_parse(struct ath11k_base *ab,
+ 
+ static void ath11k_wmi_event_wow_wakeup_host(struct ath11k_base *ab, struct sk_buff *skb)
+ {
+-	struct wmi_wow_ev_arg ev = { };
++	/* An event without WMI_TAG_WOW_EVENT_INFO gives no reason. */
++	struct wmi_wow_ev_arg ev = { .wake_reason = WOW_REASON_UNSPECIFIED };
+ 	int ret;
+ 
+ 	ret = ath11k_wmi_tlv_iter(ab, skb->data, skb->len,
+@@ -8644,6 +8645,16 @@ static void ath11k_wmi_event_wow_wakeup_host(struct ath11k_base *ab, struct sk_b
+ 
+ 	ath11k_dbg(ab, ATH11K_DBG_WMI, "event wow wakeup host");
+ 
++	/*
++	 * The firmware woke the system for something it received, a packet
++	 * that matched a wake pattern for one. Nothing holds the system awake
++	 * after the resume, so it can suspend again before the process that
++	 * owns the packet has read it. Give that process a moment. An
++	 * unspecified reason is the answer to a wakeup the host started.
++	 */
++	if (ev.wake_reason != WOW_REASON_UNSPECIFIED)
++		pm_wakeup_ws_event(ab->wow_ws, READ_ONCE(ath11k_wow_wakeup_ms), false);
++
+ 	complete(&ab->wow.wakeup_completed);
+ }
+ 

@@ -40,8 +40,22 @@ NVMe 每次待机都做一次 shutdown，醒来重新建队列。两条链路在
 
 ## Wi-Fi
 
-开着 WoW 时，固件在 PERST# 拉低后继续运行，关联不断。Wi-Fi 现在叫不醒系统（见 [known-limitations.zh-CN.md](known-limitations.zh-CN.md)），
-要等下一个闹钟：内核还没有处理 PCIe 的 WAKE#。Wi-Fi 关着时固件不运行，pcie4 挂起时会打一条 `Timeout waiting for L2 entry`，这是预期的。
+开着 WoW 时，固件在 PERST# 拉低后继续运行，关联不断。碰上唤醒条件时，固件拉低 WAKE#（TLMM 139，经 PDC，AOSD 里也能叫醒）。
+PCI 核心把它登记成 Wi-Fi 的专用唤醒中断，低电平触发（patches/0199）；它只在设备自己的 DT 节点上找 `wake-gpios`，所以这根线写在 `wifi@0` 上，
+不在 pcie4 上（patches/0200）。从固件字符串和测试推断，固件要在链路走 L2、PERST# 拉低之后才拉这根线，所以 WAKE# 离不开上面断链待机的那几个补丁。
+Wi-Fi 关着时固件不运行，pcie4 挂起时会打一条 `Timeout waiting for L2 entry`，这是预期的。
+
+默认的唤醒条件只有断线和 GTK 更新失败（`device/huawei/gaokun3/wifi/wpa_supplicant.conf` 的 `wowlan_triggers`）。
+收包唤醒要用户态另外设规则（`iw phy phy0 wowlan enable ... patterns ...`），ROM 里还没有，推送照旧要等下一次唤醒（见 [known-limitations.zh-CN.md](known-limitations.zh-CN.md)）。
+
+Wi-Fi 叫醒系统之后，会拉着 WAKE# 一会儿。恢复时内核先撤掉唤醒中断的唤醒设置，再重新打开设备中断（patches/0201），
+否则低电平触发的 WAKE# 中断会在这段空档里反复触发，一次恢复多出几千到两万多个中断。
+固件因为收到的东西叫醒系统时（唤醒原因不是 `UNSPECIFIED`），`ath11k_wow` 唤醒源保持 `ath11k.wow_wakeup_ms` 毫秒（默认 1000，patches/0202），
+让收包的进程来得及运行，不然 Android 约 0.1 秒后就又挂起了。它的 `event_count` 就是固件叫醒系统的次数，用户态可以拿来给收包规则限流。
+
+排查：被 WAKE# 叫醒时 `/sys/power/pm_wakeup_irq` 是 `/proc/interrupts` 里 `0006:01:00.0:wakeup` 那一行的中断号。
+内核开了 `CONFIG_ATH11K_DEBUG` 时，`echo 2 > /sys/module/ath11k/parameters/debug_mask` 之后日志里有 `wow wakeup host reason`，
+`UNSPECIFIED` 一般是主机自己醒来时固件的回答，`PATTERN_MATCH_FOUND` 是收包规则匹配上了。
 
 Wi-Fi 进了 D3hot 之后、主机发 PME_Turn_Off 之前，固件如果碰上触发唤醒的事件，会通过链路给主机发 PME。根端口的 PME 中断走 GIC ITS 的 MSI，
 不能唤醒系统，挂起时已经被 `pcie_pme_suspend()` 关掉，这条 PME 没人处理。固件这时不回应 PME_Turn_Off，照样断电的话几次之后链路回不来，
