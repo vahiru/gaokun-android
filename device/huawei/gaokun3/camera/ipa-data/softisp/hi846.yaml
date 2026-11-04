@@ -84,4 +84,12 @@ algorithms:
           offsets: [ 0, 0, 0 ]
   - Adjust:
   - Agc:
+      # Keep 30 fps (33 ms) until the gain reaches 8x before lengthening the
+      # exposure to 66 ms. Without a mode the AGC lengthens the exposure first,
+      # and with patches/libcamera/0006-0008 a 15-30 fps preview drops to
+      # 15 fps in ordinary room light. hi846's analogue gain tops out at 16x.
+      AeExposureMode:
+        ExposureNormal:
+          exposureTime: [ 33000, 66000 ]
+          gain: [ 8.0, 16.0 ]
 ...
