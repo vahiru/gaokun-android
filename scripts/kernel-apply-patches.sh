@@ -487,6 +487,7 @@ DIAG_PATCHES=(
 FP_PATCHES=(
     0050-firmware-qcom-scm-qseecom-app-load-shutdown-listener.patch
     0212-firmware-qcom-gaokun3-fingerprint-ioctl.patch
+    0213-firmware-qcom-gaokun3-fpcmd-add-the-Goodix-GDIX5125-sensor.patch
 )
 WITH_FP=0
 for a in "$@"; do [ "$a" = "--with-fp" ] && WITH_FP=1; done
