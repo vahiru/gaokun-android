@@ -1,4 +1,4 @@
-# `scripts/live/` —— 救援系统与LiveCD构建
+# `scripts/live/`：救援系统与LiveCD构建
 
 本目录构建`gaokun3`的救援系统与图形安装器LiveCD镜像。两者共用同一套基于**Debian 13（trixie）arm64**的只读`squashfs` + `tmpfs` overlay内存根文件系统：
 

@@ -37,7 +37,7 @@
 | MIPI CSI-2通路 | `CSIPHY3`，4-lane | `CSIPHY0`，4-lane（560 MHz link freq） |
 | 拜耳排列格式 | `SGBRG10_CSI2P` | `SGRBG10_CSI2P` |
 | MCLK时钟 | `camcc_mclk3_clk`（24 MHz） | `camcc_mclk4_clk`（19.2 MHz，匹配上游寄存器表） |
-| 复位与供电使能GPIO | Reset `GPIO 15`；DVDD 1.2V使能 `GPIO 44`（`vreg_camf`） | Reset `GPIO 7`；DVDD使能 `GPIO 92`（`vreg_camr`） |
+| 复位与供电使能GPIO | Reset `GPIO 15`；DVDD 1.2V使能`GPIO 44`（`vreg_camf`） | Reset `GPIO 7`；DVDD使能`GPIO 92`（`vreg_camr`） |
 | PMIC供电轨 | `vdda` = `LDO11_C`（2.8V），`vddio` = `LDO2_C`（1.8V） | `avdd` = `LDO2_B`（2.8V），`dovdd` = `LDO2_C`（1.8V） |
 | 附加外设 | — | 对焦马达DW9714（`1-000c`，`LDO7_B` 2.8V）、模组EEPROM（`1-0050`，16 KiB） |
 

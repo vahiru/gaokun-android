@@ -26,4 +26,19 @@
 | `sx.sh` | 单次挂起辅助脚本（强制检查`rtc0`与`wakealarm`是否就绪，防止无唤醒源死睡） |
 | `s2real.sh` | 结合`role=host`与RTC闹钟的真实`s2idle`挂起测试脚本 |
 | `s2verify.sh` | 验收脚本：检查udev规则是否已生效并执行真实挂起测试 |
-| `99-gaokun3-usb-role.rules` | Linux环境udev规则：将未绑定gadget的`a600000.usb`角色设为`host`，避免半初始化`device`角色在挂起时触发整板复位 |
+| `99-gaokun3-usb-role.rules`、`gaokun3-usb-role*` | Linux环境规则与systemd挂起钩子：将未绑定gadget的`a600000.usb`角色设为`host`，避免半初始化`device`角色在挂起时触发整板复位 |
+
+---
+
+## 三、在救援Linux环境中部署挂起钩子
+
+在救援Ubuntu/Debian环境中（未使用USB gadget），可通过`system-sleep`钩子在每次挂起前确保`a600000.usb`处于`host`角色（仅靠开机设置一次会被迟到的Type-C/UCSI初始化改回`device`）：
+
+```sh
+sudo install -m755 gaokun3-usb-role-host.sh   /usr/local/bin/
+sudo install -m644 gaokun3-usb-role.service   /etc/systemd/system/
+sudo install -m755 gaokun3-usb-role-sleephook /usr/lib/systemd/system-sleep/gaokun3-usb-role
+sudo systemctl enable gaokun3-usb-role.service
+```
+
+验证时请使用`systemctl suspend`（直接写`/sys/power/state`不会触发`system-sleep`钩子）。Android环境下的动态USB角色切换逻辑见[`../../device/huawei/gaokun3/bin/gaokun3-usbrole.sh`](../../device/huawei/gaokun3/bin/gaokun3-usbrole.sh)。

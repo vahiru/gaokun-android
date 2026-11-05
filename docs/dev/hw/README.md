@@ -1,10 +1,10 @@
 # 硬件原始数据与拆包清单
 
-## `bios-2.16/` —— BIOS 2.16升级包拆包
+## `bios-2.16/`：BIOS 2.16升级包拆包
 
 拆包脚本、分析脚本和逐模块清单（名字 / GUID / 大小 / sha256 / depex）。固件二进制本身不入库，[`bios-2.16/README.md`](bios-2.16/README.md)记录了从官方安装包逐字节复现的步骤。
 
-## `ov13b10-module-eeprom-0x50.bin` —— 后摄模组EEPROM（16 KiB）
+## `ov13b10-module-eeprom-0x50.bin`：后摄模组EEPROM（16 KiB）
 
 后摄模组（OV13B10，CCI总线0 = `/dev/i2c-1`）上`0x50`地址EEPROM的完整内容，16位地址、16384字节、前后两半不重复（不是8 KiB镜像）。
 
