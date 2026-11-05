@@ -13,7 +13,7 @@ import sys
 import uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SRC = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "..", "..", "..", "..", "refs")
+SRC = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "..", "..", "..", "..", "..", "refs")
 ROOTS = ["edk2", "clo-abl-5.0/QcomModulePkg", "systemd-v257/src/boot",
          "systemd-v257/src/fundamental", "gbl"]
 
