@@ -468,6 +468,9 @@ KPATCHES=(
     # 0211：EC的中断在挂起期间改成边沿触发，醒着时仍是电平触发。不打的话SoC进了最深的待机（AOSD）之后，
     #    睡眠中插上充电器多半叫不醒系统：PDC一直把SoC叫醒，GIC上却没有中断，要等下一个闹钟或电源键。
     0211-platform-arm64-huawei-gaokun-ec-use-an-edge-triggered-IRQ-while-suspended.patch
+    # ★ 0214：电池温度上报（POWER_SUPPLY_PROP_TEMP）。EC状态块0x9c（ec_raw的w9c）以0.1 K为单位上报电池温度，
+    #    换算为0.1 °C（raw - 2731）并限制在[-40.0 °C, 120.0 °C]范围内（越界返回-ENODATA，避免未初始化或读失败触发Android过温关机）。
+    0214-power-supply-huawei-gaokun-battery-report-temperature.patch
 )
 
 # ⚠️ 诊断补丁【不进发版内核】：只在带 --with-diag 时打。顺序有依赖：0028/0029 依赖 0023，
