@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# REL-6 / PERF-12：发版装机验收的 A 档（无人值守）一键跑。逐条对应 docs/release-checklist.md 的 A1–A20。
+# 发版装机验收的 A 档（无人值守）一键跑。逐条对应 docs/dev/release-checklist.md 的 A1–A20。
 # 在【宿主机】跑，走 adb；以只读检查为主，B / C 档（要人在场、长稳与测量）不在这里。
 #
 #   SER=gaokun3 bash scripts/accept.sh [选项]
@@ -13,10 +13,10 @@
 #   退出码：0 = 没有 FAIL（WARN 要人看一眼，但不挡），1 = 有 FAIL，2 = adb 不通 / 参数错 / 中途掉线
 #   中途掉线也照样写汇总行，并记一个 A0 FAIL —— 读汇总行的人（release.sh）不会把半截报告当成全绿。
 #
-# ⚠️ 退出码就是本脚本自己的，报告是另外写进文件的 —— 别 `bash accept.sh | tail` 再取 $?（CLAUDE.md 运维坑 1），
-#    要看结果就看退出码，或者看报告目录里的 report.txt 最后一行。
-# ⚠️ 要 root（qcom_stats、dropbox、/proc/<pid>/maps）：adb 本身是 root 就直接跑；否则走 su -c（KernelSU 要先给 shell 授权）。
-# ⚠️ 判据都是这台机器上【实测过】的路径与字符串（2026-10-04，1791053208）；新增检查请同样先在实机上核对再写。
+# 退出码就是本脚本自己的，报告是另外写进文件的 —— 别 `bash accept.sh | tail` 再取 $?，
+#   要看结果就看退出码，或者看报告目录里的 report.txt 最后一行。
+# 要 root（qcom_stats、dropbox、/proc/<pid>/maps）：adb 本身是 root 就直接跑；否则走 su -c（KernelSU 要先给 shell 授权）。
+# 判据都是这台机器上【实测过】的路径与字符串（2026-10-04，1791053208）；新增检查请同样先在实机上核对再写。
 set -u
 export MSYS_NO_PATHCONV=1
 HERE=$(cd "$(dirname "$0")" && pwd)

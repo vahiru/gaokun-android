@@ -8,7 +8,7 @@
 #
 # It writes everything to ./hw-inventory-<timestamp>/ and tars it up.
 # Copy the tarball back to the project box and it becomes the source of truth
-# for docs/hw-inventory.md.
+# for docs/dev/hardware.md.
 #
 # Nothing here modifies the system. Every command is read-only.
 # Missing tools are recorded as MISSING rather than aborting the run — collect
@@ -77,7 +77,7 @@ grab 00-identity.txt  /sys/class/dmi/id/sys_vendor \
 grab 00-identity.txt  /proc/device-tree/model /proc/device-tree/compatible
 
 # ------------------------------------------------------------------ 01 config
-# CLAUDE.md Stage 0: ".config 中所有 QCOM / ath11k / hid 相关项"
+# .config 中所有 QCOM / ath11k / hid 相关项
 echo "--- kernel config"
 KCONF=""
 for c in /proc/config.gz "/boot/config-$(uname -r)" /boot/config; do
@@ -106,7 +106,7 @@ echo "--- dmesg"
 run 02-dmesg-full.txt      "full ring buffer"  dmesg -T
 run 02-dmesg-errors.txt    "errors + warnings" dmesg -T --level=emerg,alert,crit,err,warn
 
-# CLAUDE.md Stage 0: "dmesg | grep -i firmware 的完整固件加载路径"
+# dmesg | grep -i firmware 的完整固件加载路径
 if [ -s "$OUT/02-dmesg-full.txt" ]; then
     grep -iE 'firmware|fw |\.mbn|\.mdt|\.b0[0-9]|\.elf|\.tlv|\.bin|nvm|loading|direct-loading|failed to load' \
         "$OUT/02-dmesg-full.txt" > "$OUT/02-dmesg-firmware.txt"
@@ -118,8 +118,7 @@ fi
 grab 02-dmesg-firmware.txt /sys/module/firmware_class/parameters/path
 
 # --------------------------------------------------------------- 03 DRM / KMS
-# CLAUDE.md Stage 0: "modetest 完整输出：connector 名、plane 数量、支持的
-# format 和 modifier（Stage 3 配 minigbm 的关键依据）"
+# modetest 完整输出：connector 名、plane 数量、支持的 format 和 modifier
 echo "--- DRM / KMS"
 run 03-modetest.txt  "modetest, all resources"  modetest -c -p -e -a
 run 03-modetest.txt  "connectors"               modetest -c
@@ -144,7 +143,7 @@ for d in /sys/class/drm/*; do
 done
 run 03-drm-sysfs.txt "drm drivers in use" sh -c 'ls -l /sys/class/drm/*/device/driver 2>&1'
 
-# Panel: CLAUDE.md says Himax HX83121A / ppc357db11, shared with Galaxy Tab S7 FE.
+# Panel: Himax HX83121A / ppc357db11, shared with Galaxy Tab S7 FE.
 # Confirm what the running kernel actually binds, and capture the backlight curve.
 run 03-panel.txt   "panel + backlight drivers" \
     sh -c 'ls -l /sys/class/backlight/*/device/driver /sys/bus/mipi-dsi/devices 2>&1'
@@ -170,8 +169,7 @@ run 04-gpu-gl.txt "adreno / freedreno in dmesg" \
     sh -c 'dmesg | grep -iE "adreno|msm_dpu|msm_dsi|a6xx|gmu|zap" 2>&1'
 
 # ----------------------------------------------------------------- 05 input
-# CLAUDE.md Stage 0: "触摸屏/键盘/触控板的 evdev 名和 evtest 输出" +
-#                    "触摸屏走 SPI 还是 I2C"
+# 触摸屏/键盘/触控板的 evdev 名和 evtest 输出 + 触摸屏走 SPI 还是 I2C
 echo "--- input"
 # /proc/bus/input/devices gives name AND bus id in one shot.
 # Bus ids that matter here: 0018=I2C, 001C=SPI, 0003=USB, 0019=HOST.
@@ -210,7 +208,7 @@ run 05-input-bus.txt "touch/keyboard in dmesg" \
     sh -c 'dmesg | grep -iE "hid|touch|i2c_hid|input:|elan|synaptics|himax|goodix" 2>&1'
 
 # ----------------------------------------------------------------- 06 audio
-# CLAUDE.md Stage 0: "ALSA UCM2 配置文件（Stage 4 要翻译成 mixer_paths.xml）"
+# ALSA UCM2 配置文件（用于翻译成 mixer_paths.xml）
 echo "--- audio"
 run 06-audio.txt "playback devices" aplay -l
 run 06-audio.txt "capture devices"  arecord -l
@@ -245,8 +243,7 @@ else
 fi
 
 # ---------------------------------------------------------------- 07 pstore
-# CLAUDE.md: "Stage 0 必须先配好 ramoops/pstore，否则 Stage 2 会盲调到放弃"
-# This section verifies whether that is actually working YET.
+# Verify whether ramoops/pstore is working.
 echo "--- pstore / ramoops"
 run 07-pstore.txt "pstore mount" sh -c 'mount | grep -i pstore 2>&1'
 run 07-pstore.txt "pstore contents" sh -c 'ls -la /sys/fs/pstore/ 2>&1'
@@ -262,7 +259,7 @@ run 07-pstore.txt "ramoops/pstore in dmesg" \
 run 07-pstore.txt "iomem (find a safe reserved window)" cat /proc/iomem
 
 # --------------------------------------------------------------- 08 storage
-# CLAUDE.md: "fstab 用 PARTLABEL" — so PARTLABEL is what we must capture.
+# fstab uses PARTLABEL — so PARTLABEL is what we must capture.
 echo "--- storage"
 run 08-storage.txt "block devices with PARTLABEL" \
     lsblk -o NAME,SIZE,TYPE,FSTYPE,PARTLABEL,PARTUUID,LABEL,UUID,MOUNTPOINT

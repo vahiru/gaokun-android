@@ -13,11 +13,11 @@
 #   index.txt 里逐条标了"手写"和理由。
 #
 # 场景：
-#   factory       出厂布局（docs/hw-inventory.md 第 8 节），整盘都是 Windows，没有空闲区
+#   factory       出厂布局（见 docs/dev/hardware.md），整盘都是 Windows，没有空闲区
 #   windows-free  factory 上【真跑一次 gk3_shrink】把 Data 缩掉 80 GiB 之后 → 走双系统
 #   blank         一块空盘 → 走整盘
 #   android       blank 上真装一遍之后（"已经装过"：双系统应被 partlabel-conflict 拒绝；重新安装可行）
-#   windows-live  免 U 盘装双系统（用户 2026-09-25）：出厂盘缩出空闲区 + 一个放 live 的 FAT32 分区，
+#   windows-live  免 U 盘装双系统：出厂盘缩出空闲区 + 一个放 live 的 FAT32 分区，
 #                 安装器就从这块盘上跑（介质与目标同盘）—— 整盘清空要被拦、双系统要放行、介质分区不可缩
 #   windows-setup 2026-09-27 起 Windows 脚本的默认：只缩出 512 MiB 放 GK3LIVE、没有空闲 → 在安装器里缩 Data
 #   windows-setup-shrunk  上面那块盘在安装器里真缩了一次 Data 之后 → 走双系统
@@ -116,7 +116,7 @@ header() {   # $1=场景 $2=说明
       echo "# 格式：<界面发出的调用>  <文件>。找不到精确匹配时用 '<函数> *' 那一行。"; } > "$OUT/$1/index.txt"
 }
 
-# 出厂布局（docs/hw-inventory.md 第 8 节）：factory 与 windows-live 两个场景各造一块
+# 出厂布局（见 docs/dev/hardware.md）：factory 与 windows-live 两个场景各造一块
 make_factory() {
     local DF=$1 TOT LAST E7 S7 E6 S6 E5 S5 n
     TOT=$(blockdev --getsz "$DF"); LAST=$(( TOT - 34 ))
@@ -135,7 +135,7 @@ make_factory() {
     mkfs.vfat -F 32 -n SYSTEM "${DF}p1" >/dev/null; mkfs.vfat -F 32 -n WINPE "${DF}p5" >/dev/null
     mkntfs -Q -F -L Windows "${DF}p3" >/dev/null 2>&1; mkntfs -Q -F -L Data   "${DF}p4" >/dev/null 2>&1
     mkntfs -Q -F -L Onekey  "${DF}p6" >/dev/null 2>&1; mkntfs -Q -F -L WinRE  "${DF}p7" >/dev/null 2>&1
-    # ESP 里放 Windows 的引导件与一块"固件胶囊"，占到接近出厂的用量（hw-inventory.md 第 8ter 节：188 MiB 空闲）
+    # ESP 里放 Windows 的引导件与一块"固件胶囊"，占到接近出厂的用量（docs/dev/hardware.md：188 MiB 空闲）
     mmd -i "${DF}p1" ::/EFI ::/EFI/Microsoft ::/EFI/Microsoft/Boot ::/EFI/Boot
     head -c 1572864  /dev/urandom > "$W/f1"; mcopy -i "${DF}p1" "$W/f1" ::/EFI/Microsoft/Boot/bootmgfw.efi
     head -c 29360128 /dev/urandom > "$W/f2"; mcopy -i "${DF}p1" "$W/f2" ::/EFI/Microsoft/Boot/BCD-and-fonts.bin
@@ -148,7 +148,7 @@ make_factory() {
 
 echo "═══ factory ═══"
 DF=$(new_disk factory 488386M); make_factory "$DF"
-header factory "出厂布局（docs/hw-inventory.md 第 8 节），整盘都是 Windows，没有空闲区"
+header factory "出厂布局（见 docs/dev/hardware.md），整盘都是 Windows，没有空闲区"
 rec factory "$DF" probe.txt           "gk3_probe" "$(probe_of "$DF")"
 rec factory "$DF" esp_info.txt        "gk3_esp_info /dev/nvme0n1p1"
 rec factory "$DF" shrink_scan.txt     "gk3_shrink_scan /dev/nvme0n1"
@@ -301,8 +301,8 @@ echo "gk3_apply *                                                               
 echo "═══ common（与盘无关）═══"
 C=$OUT/common; mkdir -p "$C"; rm -f "$C"/*.txt
 { echo "# 与盘无关的调用。所有场景找不到时都回落到这里。"
-  echo "# ⚠️ 标了「手写」的几条是容器里做不到的：不是这台机器（没有 DMI）、没有 wlan0、下载清单还不存在。"
-  echo "#    它们照着真实输出的格式写：预检的值取自 docs/hw-inventory.md:33 的实测 dmesg。"; } > "$C/index.txt"
+  echo "# 标了「手写」的几条是容器里做不到的：不是这台机器（没有 DMI）、没有 wlan0、下载清单还不存在。"
+  echo "# 它们照着真实输出的格式写：预检的值取自实测 dmesg（见 docs/dev/hardware.md）。"; } > "$C/index.txt"
 # 手写：预检（容器不是 gaokun3）
 cat > "$C/preflight-ok.txt" <<'EOF'
 O CHECK id=root ok=yes

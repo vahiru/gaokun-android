@@ -1,4 +1,4 @@
-# 执行端 initramfs（fastboot.img，设计稿 docs/boot-entry-design.md §4.4 / §5 S7b）的构建与 QEMU 测试环境。
+# 执行端 initramfs（fastboot.img，见 tools/gk3boot/README.md）的构建与 QEMU 测试环境。
 # 由 scripts/gk3boot/build-fastboot-img.sh、scripts/gk3boot/test-initramfs.sh 调用；镜像名 fbi-gk3boot-build。
 # ★ 与 gk3boot-build.Dockerfile 同一个 Debian 13 基础镜像（arm64，Mac 上原生，不用 qemu-user）。
 # ★ 进 fastboot.img 的东西版本钉死（busybox-static / musl / console-setup 的字体 / cpio），这样同一份源码

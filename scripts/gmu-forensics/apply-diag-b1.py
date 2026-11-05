@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """B1 诊断补丁：定性"到底是哪个 image 没绑内存却被当渲染目标用"。
 
-背景（docs/stage5-freedreno.md D9 残余问题）：
+背景（见 docs/dev/gpu-turnip.md）：
   patch 0004 v2 让 Android 用 turnip 启动进桌面了，但仍有少量 GPU SMMU
   fault（`FAR=0x100`，即 iova≈0 + 小偏移），7 分钟后拖垮框架。
   `struct tu_image` 的注释写明 `iova` 是 "Set when bound"，未绑定就是 0

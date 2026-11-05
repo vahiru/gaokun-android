@@ -26,7 +26,7 @@
 #   AOSP 的 external/libcamera（platform/external/libcamera @ android-16.0.0_r4）
 #   【没有】softisp —— 只有 ipu3/libipa/mtkisp7/rkisp1/rpi/vimc。
 #   构建流程是：用上游 libcamera 换掉 external/libcamera，再打 patches/libcamera/*.patch。
-#   见 patches/libcamera/README.md 与 docs/stage4-findings.md（#109 的坑）。
+#   见 patches/libcamera/README.md 与 docs/dev/camera.md。
 #
 # 用法：
 #   bash scripts/camera/gen-libcamera-sources.sh <libcamera_tree>            # 干跑：只检查

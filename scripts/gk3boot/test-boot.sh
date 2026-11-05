@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# gk3boot.efi（S5 最小版，E4 门槛用）一键：构建 → 准备测试载荷 → 造夹具盘 → QEMU aarch64 + AAVMF + systemd-boot 257.13
-# → 收串口 → 判 PASS/FAIL。设计稿 docs/boot-entry-design.md §5 S5、§6 E0/E4；说明见 tools/gk3boot/README.md §10。
+# gk3boot.efi 一键：构建 → 准备测试载荷 → 造夹具盘 → QEMU aarch64 + AAVMF + systemd-boot 257.13
+# → 收串口 → 判 PASS/FAIL。说明见 tools/gk3boot/README.md §10。
 #
 #   bash scripts/gk3boot/test-boot.sh                       全部场景（real linux-a linux-b force-a badsha miscerr）
 #   bash scripts/gk3boot/test-boot.sh linux-a badsha        只跑列出的场景

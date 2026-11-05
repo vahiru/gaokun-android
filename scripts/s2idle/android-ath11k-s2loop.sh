@@ -2,7 +2,7 @@
 # issue #16 / patches/0070 验证：ath11k 断电挂起/恢复循环，看固件每次都能重新下载、Wi-Fi 每次都能恢复。
 # ⚠️ 必须是 pm_test=platform：devices 档不跑 suspend_late/resume_early，ath11k 既不断电也不重载、停了影子定时器 ⇒ Wi-Fi 必坏（2026-10-04 踩过）
 # 用法（root）：setsid nohup sh android-ath11k-s2loop.sh <pm_test 次数> <真实 s2idle 次数> <同网段可 ping 的主机> &
-# 案卷 docs/stage4-findings.md #131。
+# 详见 docs/dev/deep-sleep.md。
 # ⚠️ role=device 时挂起会整板复位（gaokun3-usbrole.sh 顶部）⇒ 先切 host，结束切回 device（USB adb 期间断开）。
 N=${1:-10}; NR=${2:-3}; PEER=${3:?第三个参数：同网段一台能 ping 的主机（别猜网关：Android 的默认路由在策略路由表里）}
 D=/data/local/tmp/mhi-test; mkdir -p $D; L=$D/log; : > $L

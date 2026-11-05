@@ -2,10 +2,10 @@
 #
 # ★ 这个服务就是"那根线"：Alpine 版第一次把安装器编进了镜像却【没有任何东西去拉起它】，
 #   实机启动后停在 login 提示符。build-rootfs.sh 断言它是 enabled 的。
-# ★ cage -s：允许切换 VT。cage 0.2.0【默认禁止】—— 不加它，命令行逃生口（tty2 上的 getty、
-#   安装器里的"退出到终端"）必然失效（docs/stage7-flutter-debian.md §5.4）。
-# ★ 拿 DRM 与输入设备走 libseat → seatd（Wants/After seatd）。
-# ⚠️ 安装器崩了或被退出，cage 跟着退出，这里 2 秒后拉起来；tty2 始终有 getty 兜底。
+# cage -s：允许切换 VT。cage 0.2.0【默认禁止】—— 不加它，命令行逃生口（tty2 上的 getty、
+#   安装器里的"退出到终端"）必然失效（见 live/installer-flutter/README.md）。
+# 拿 DRM 与输入设备走 libseat → seatd（Wants/After seatd）。
+# 安装器崩了或被退出，cage 跟着退出，这里 2 秒后拉起来；tty2 始终有 getty 备用。
 [Unit]
 Description=gaokun3 图形安装器（cage）
 After=systemd-user-sessions.service seatd.service systemd-udev-settle.service gk3-wifi.service

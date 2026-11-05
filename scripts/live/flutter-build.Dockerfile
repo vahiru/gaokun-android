@@ -1,8 +1,8 @@
 # 在 Mac（Apple Silicon）上构建 gaokun3 图形安装器的 Linux arm64 版本。
 # 由 scripts/live/build-flutter.sh 构建和调用。
 #
-# ★ 为什么在这里而不是构建机：构建机是 x86_64，Flutter 的 Linux 桌面构建不做交叉编译；
-#   Mac 是 arm64，arm64 容器里就是原生构建，不需要 qemu（docs/stage7-flutter-debian.md）。
+# 为什么在这里而不是构建机：构建机是 x86_64，Flutter 的 Linux 桌面构建不做交叉编译；
+#   Mac 是 arm64，arm64 容器里就是原生构建，不需要 qemu（见 live/installer-flutter/README.md）。
 # ★ 钉死：Debian 按摘要，Flutter 按 tag（与 live/installer-flutter/pubspec.yaml 的
 #   environment.flutter 一致）。换版本改这里的两行。
 FROM debian@sha256:9cc080028c43b27d2074d63a5f9caf7166d731494965616c1a6d2827a004585c

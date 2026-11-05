@@ -29,7 +29,7 @@
 #   tar.zst 里的 xattr 不受影响。
 #
 # ⚠️ restore 会删掉 userdata 根下除 media / ota_package / gk3-snap / lost+found 之外的一切再解包。
-# ⚠️ 挂载点用私有名字（CLAUDE.md 操作禁忌 4）。
+# 挂载点用私有名字，避免与其他脚本冲突。
 # ============================================================================
 set -euo pipefail
 

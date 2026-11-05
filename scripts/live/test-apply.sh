@@ -15,15 +15,15 @@
 #   C. 反例，都必须【在动盘之前】拒绝：截断的 .zst、sha256 不符、在已装过的盘上再装一次；
 #      以及 dry-run 一个字节都不写
 #   D. 探测输出里 PARTLABEL 的空格按协议编码（"Basic data partition" 不能变成 "Basic"）
-#   K. 双系统专项（S10 / S15，docs/boot-entry-design.md §4.7、§4.9）：Windows 休眠拒绝写 ESP（U18）、BitLocker + 换 BOOTAA64
-#      要确认恢复密钥（U16）、默认系统写进 GK3 的 set_default（U12）、timeout 5（U13）、32 MiB 余量（U17）、
+#   K. 双系统专项（见 tools/gk3boot/README.md）：Windows 休眠拒绝写 ESP、BitLocker + 换 BOOTAA64
+#      要确认恢复密钥、默认系统写进 GK3 的 set_default、timeout 5、32 MiB 余量、
 #      重新安装删掉统一启动入口的条目、BOOTAA64 字节相同就不重写、LoaderEntryDefault 被删掉
-#   M. MBR 盘与读不出分区表的盘（设计稿 S1 / S2）：MBR 盘上方案报 mbr-disk、apply / 缩分区 / 手动调整在动盘前
+#   M. MBR 盘与读不出分区表的盘（见 docs/dev/installer-rust-design.md）：MBR 盘上方案报 mbr-disk、apply / 缩分区 / 手动调整在动盘前
 #      ERR mbr-disk touched=no、整盘清空照常；读不出的盘（dm-error 真设备 + 照它实录输出回答的假 sgdisk）探测不报空闲、
 #      写盘入口 ERR disk-unreadable
-#   每一次装完都核对 misc 的前 64 KiB 与 Python 独立算的初始状态逐字节相同（gk3-misc init，S10）
+#   每一次装完都核对 misc 的前 64 KiB 与 Python 独立算的初始状态逐字节相同（gk3-misc init）
 #   GK3_TEST_DUEL=<Rust 版路径>：在下面标了 duel_* 的场景点上顺带与 Rust 版（tools/gk3-installer）对拍只读入口
-#      （scripts/live/duel-lib.sh，docs/installer-rust-design.md §6）；不设时 duel_* 什么都不做
+#      （scripts/live/duel-lib.sh，见 docs/dev/installer-rust-design.md）；不设时 duel_* 什么都不做
 #
 # ⚠️ 故意不开 pipefail：判据都显式取退出码（scripts/verify-root.sh:8-11）。
 set -u
@@ -733,11 +733,11 @@ OUT=$(gk3__node_matches "$DS" "${DS}p1" 2>&1); rc=$?
 umount "$ms"; partprobe "$DS"; sleep 1
 gk3__node_matches "$DS" "${DS}p1" 2>/dev/null && ok "卸下、partprobe 生效之后：对上了" || bad "partprobe 之后还说对不上"
 
-# ── M. MBR 盘与读不出分区表的盘（设计稿 docs/installer-rust-design.md §3.2 的 S1 / S2，2026-10-06 修）──────
-# S2：原来的 MBR 检查找 "MBR only"，gdisk 1.0.10 从不这么说 ⇒ MBR 盘上照算双系统方案，挡住写盘的是 ESP 类型检查的
-#     副作用（esp-not-esp-type）。现在：方案报 mbr-disk；apply / 缩分区 / 手动调整在动盘前报 ERR mbr-disk touched=no；
-#     整盘清空照常（本来就要抹掉分区表）。这块盘上故意放一个 0xEF 分区：证明拦住它的是 MBR 检查，不是 ESP 检查。
-# S1：sgdisk -p 读不出时原来把整块盘报成一段空闲。现在 DISK 标 table=unreadable、不列 PART / FREE、ERR disk-unreadable。
+# ── M. MBR 盘与读不出分区表的盘（见 docs/dev/installer-rust-design.md）──────
+# 原来的 MBR 检查找 "MBR only"，gdisk 1.0.10 从不这么说 ⇒ MBR 盘上照算双系统方案，挡住写盘的是 ESP 类型检查的
+# 副作用（esp-not-esp-type）。现在：方案报 mbr-disk；apply / 缩分区 / 手动调整在动盘前报 ERR mbr-disk touched=no；
+# 整盘清空照常（本来就要抹掉分区表）。这块盘上故意放一个 0xEF 分区：证明拦住它的是 MBR 检查，不是 ESP 检查。
+# sgdisk -p 读不出时原来把整块盘报成一段空闲。现在 DISK 标 table=unreadable、不列 PART / FREE、ERR disk-unreadable。
 echo "═══ M. MBR 盘与读不出分区表的盘：动盘之前明确拒绝 ═══"
 DM=$(new_disk m 40G)
 printf 'label: dos\n,300M,ef\n,4G,7\n,2G,83\n' | sfdisk -q "$DM"

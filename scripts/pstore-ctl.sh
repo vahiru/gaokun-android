@@ -26,7 +26,7 @@
 #
 # 背景：ramoops 在这台机器上不可用 —— 固件每次复位都重新初始化 DRAM，
 # 低位(0xae900000)和高位(0x865d38000)地址都试过，内容一律不存活。
-# 详见 docs/hw-inventory.md 第 7bis 节。
+# 详见 docs/dev/hardware.md。
 
 set -u
 

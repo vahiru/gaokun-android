@@ -56,7 +56,7 @@
 #                  所以构建候选版时和用 --no-build 发它时要设【同一个】GK3_VERSION。
 #                  不动 gaokun3.json 的 version 字段（Updater 的兼容判断可能用到它）。
 #                  ⚠️ 环境变量能否传进 Kati 的产品配置【待构建机核实】—— 与 GAOKUN3_DEV_BUILD 是同一个问题
-#                  （核法见 docs/build-machine.md「开发构建与发布构建」一节）。
+#                  （见 docs/dev/release-checklist.md）。
 #
 #   ★ REL-6 / G11 验收闸门（2026-10-05）：正式发版前必须有【这个戳】的 A 档验收报告且全过。
 #     GK3_ACCEPT_REPORT  scripts/accept.sh 写的 report.txt 的路径。
@@ -111,10 +111,10 @@ fi
 if [ "$NO_BUILD" = 0 ] && [ "$STAGE_ONLY" = 0 ] && [ -z "${GK3_VERSION:-}" ]; then
     die "没设 GK3_VERSION —— 它在构建时写进 ro.vendor.gaokun3.version；构建时和发版时要设同一个 GK3_VERSION"
 fi
-# ═══ REL-7 / SEC-11：内核的"对应源码清单"（GPL-2.0 §3），每版一份 ═══
+# ═══ 内核的"对应源码清单"（GPL-2.0 §3），每版一份 ═══
 # boot.img 里是 GPL-2.0 的内核二进制，而内核在 AOSP 树外编（prebuilt-boot/），配方分在四处：
 #   上游 tag · 构建树上 git am 进来的 gaokun-buildbot 补丁（提交）· 本仓 patches/（只活在构建树
-#   【工作区】里，CLAUDE.md 运维坑 4）· ReSukiSU（钉住的提交 + 本仓补丁）。
+#   【工作区】里）· ReSukiSU（钉住的提交 + 本仓补丁）。
 # 以前一样都没随发版留下，外人照仓库重建不出同一个内核；v0.7.1 是事后从实机与 boot.img 补录的
 # （docs/relnotes/v0.7.1-alpha-sources.md）。产出放在 $S，随 install/$VER/ 与 GitHub release 一起发：
 #   kernel-source.txt           清单本体：二进制 sha256、基底、补丁序列与 sha256、ReSukiSU、配置、重建步骤
@@ -329,14 +329,14 @@ else
     #   `android-build` ⇒ 指纹里是 `eng.androi`（2026-09-14 在 v0.6.1 上实测），
     #   与 `ro.build.version.incremental`（构建戳）**对不上** —— 一个构建里两个
     #   互相矛盾的 incremental，崩溃归并、缺陷报告、任何解析指纹的东西都会拿到没用的值。
-    #   见 docs/stage4-findings.md #113。
+    #   见 docs/dev/android-bringup.md。
     export BUILD_NUMBER=${BUILD_NUMBER:-$(date -u +%Y%m%d%H%M%S)}
     echo "  BUILD_NUMBER=${BUILD_NUMBER}（进指纹的 incremental）"
-    # ★ OTA-11：vendor/build.prop 是 Make 生成的（crDroid 16 build/make/core/sysprop.mk:216），规则只依赖
+    # vendor/build.prop 是 Make 生成的（crDroid 16 build/make/core/sysprop.mk:216），规则只依赖
     #   属性文件（同文件 :127），日期是命令运行时才 `cat` 的（config.mk:874 BUILD_DATETIME_FROM_FILE）
     #   ⇒ 增量构建里 vendor 属性没变就不重生成，日期 / 指纹 / incremental 停在老构建
     #   （v0.7.0–v0.7.1 的 vendor 一直是 09-28 的 1790597477）。删掉输出逼它重跑。
-    #   （行号取自 refs/aosp-build，crDroid 16 的 build/make 待构建机核实；第 2 步有断言兜底。）
+    #   （行号取自 refs/aosp-build，crDroid 16 的 build/make 待构建机核实；第 2 步有断言把关。）
     rm -f "$OUT/vendor/build.prop"
     m -j"$(nproc)" bacon superimage
 fi

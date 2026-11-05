@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """patch 0004 v3：实现 turnip 的 `TODO handle VkNativeBufferANDROID`。
 
-实测定性（2026-08-19，三探针一轮编译，见 docs/stage5-freedreno.md D10）：
+实测定性（2026-08-19，三探针一轮编译，见 docs/dev/gpu-turnip.md）：
   Android 的 libvulkan 走 **延迟绑定** —— vkCreateImage 时**不带** ANB
   （所以 vk_image_init 没把 android_buffer_type 设成 NATIVE、
   vk_android_import_anb() 从未运行、vk.anb_memory 为空），

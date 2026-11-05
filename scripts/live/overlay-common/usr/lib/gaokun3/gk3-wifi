@@ -29,10 +29,10 @@ CTRL=/run/wpa_supplicant
 
 ip link set lo up 2>/dev/null
 
-# ★ 兜底：ath11k 若因为任何原因 probe 失败，【重新绑定一次】—— 此刻 squashfs 已挂好，
+# 若 ath11k 因为任何原因 probe 失败，【重新绑定一次】—— 此刻 squashfs 已挂好，
 #   /lib/firmware 里的固件一定拿得到。重绑之后 wlan0 出现 ⇒ 确实是"probe 时固件不可达"。
 #   （内建 ath11k 在 initramfs 阶段 t≈1.19s 就 probe，所以固件也打进了 initramfs，
-#    见 docs/stage7-live-installer.md 的 M0 一节。这里是第二道保险。）
+#    见 scripts/live/README.md。这里是第二道保险。）
 if [ -z "$IFACE" ]; then
     echo "没有无线网卡 —— 试着重新绑定 ath11k_pci"
     DRV=/sys/bus/pci/drivers/ath11k_pci

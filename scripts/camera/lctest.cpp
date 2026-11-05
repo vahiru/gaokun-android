@@ -198,7 +198,7 @@ int main(int argc, char **argv)
 		 * ⚠️★ 存【最后一帧】而不是第 0 帧。
 		 * 开流后的第一帧偶尔是不完整的：标定增益时同一档重复测，
 		 * 离群值【全是偏低的、没有偏高的】（如 66/99/68），
-		 * 正是 frame 0 偶发坏帧的签名。见 docs/stage4-findings.md #94。
+		 * 正是 frame 0 偶发坏帧的签名。见 docs/dev/camera.md。
 		 * 顺带：跑 AGC 时最后一帧也是曝光收敛得最好的那一帧。
 		 */
 		if (got == want - 1) {

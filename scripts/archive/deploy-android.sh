@@ -82,7 +82,7 @@ echo
 echo "════════ 1. 写 super.img ════════"
 # ⚠⚠ super.img 默认是 Android sparse 格式（魔数 0xED26FF3A，小端 3a ff 26 ed）。
 #    直接 dd 会把 sparse 容器原样写进去 —— init 读不到 LP 元数据，
-#    挂载失败后主动复位，且不留任何日志（docs/stage2-findings.md 第 1 节）。
+#    挂载失败后主动复位，且不留任何日志（见 docs/dev/android-bringup.md）。
 #    2026-08-19 审出：本脚本原先就是直接 dd，是个潜伏 bug；
 #    实际在用的 deploy-from-ubuntu.sh 用的是 simg2img。
 MAGIC=$(od -A n -t x1 -N 4 "$SRC/super.img" | tr -d ' ')

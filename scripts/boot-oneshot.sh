@@ -13,7 +13,7 @@
 #     2. 格式 = 4 字节属性（NV|BS|RT = 0x07，小端）+ 条目名的 **UTF-16LE** + 双字节 NUL。
 #     3. 覆盖已存在的变量前要 **`chattr -i`**，否则 write 直接 EPERM。
 #
-# ⚠️ 本脚本**不重启**。重启要征得用户同意（失败要有人能按电源键，见 CLAUDE.md）。
+# 本脚本**不重启**。重启前请确认现场有人能按电源键。
 set -uo pipefail
 SER=${SER:-gaokun3}
 GUID=4a67b082-0a4c-41cf-b6c7-440b29bb8c4f      # systemd-boot 的厂商 GUID

@@ -40,7 +40,7 @@ tmo() {
     else perl -e 'alarm shift; exec @ARGV' "$s" "$@"; fi
 }
 
-# 本机【所有】私网 IPv4（CLAUDE.md：本机自己的网段也会漂，还可能同时在两个网段上）。
+# 本机【所有】私网 IPv4（本机自己的网段也会漂，还可能同时在两个网段上）。
 # 198.18.x 是沙箱代理的 fake-IP 段，不是真网卡。
 SELFS=$( { ipconfig 2>/dev/null; ifconfig 2>/dev/null; ip -4 -o addr 2>/dev/null; } \
     | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' \

@@ -1,4 +1,4 @@
-﻿<#
+<#
     Stage 0 -- Windows preflight (run on the Ego, not on the build machine)
 
     Purpose, now that the plan is USB-boot rather than an internal install:
@@ -82,9 +82,9 @@ if ($wwan) {
     foreach ($w in $wwan) { Say ("    " + $w.FriendlyName + "  [" + $w.Class + "]") }
     Say ""
     Say "    !! 检出蜂窝设备，可能是 LTE 版。"
-    Say "       CLAUDE.md 第 60 行『无 modem，libqril/qrild/qrtr 全跳过』需要复核。"
+    Say "       『无 modem，libqril/qrild/qrtr 全跳过』假设需要复核。"
 } else {
-    Say "    未检出蜂窝设备 -> 非 LTE 版，与 CLAUDE.md 假设一致。"
+    Say "    未检出蜂窝设备 -> 非 LTE 版，与预期一致。"
 }
 
 Say ""

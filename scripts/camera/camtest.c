@@ -164,8 +164,8 @@ int main(int argc, char **argv) {
     int argbase = 1;
     if (argc > 1 && strcmp(argv[1], "pix") == 0) { use_pix = 1; argbase = 2; }
 
-    /* ★ --stop N：停在第 N 步就退出，用来做"哪一步毒化了电源域"的阶梯实验
-       （docs/stage4-findings.md #102）。各级边界【就是下面代码里的注释编号】：
+    /* --stop N：停在第 N 步就退出，用来做"哪一步毒化了电源域"的阶梯实验
+       （见 docs/dev/camera.md）。各级边界【就是下面代码里的注释编号】：
          1 = 读拓扑 + 接链后退出（不设格式）
          2 = + 沿链传格式 + 打开 video 节点 + video S_FMT 后退出
          3 = + REQBUFS/QUERYBUF/mmap/QBUF 后退出
@@ -386,7 +386,7 @@ int main(int argc, char **argv) {
         return 0;
     }
 
-    /* ★ 因为"开机后只有第一次 STREAMON 能成功"（camss 下电有缺陷，见案卷），
+    /* 因为"开机后只有第一次 STREAMON 能成功"（camss 下电有缺陷，见 docs/dev/camera.md），
        两个条件必须放在【同一次流】里对照，否则第二组永远拿不到数据。 */
     for (unsigned round = 0; round < 4; round++) {
     if (round == 2 || round == 3) {

@@ -13,7 +13,7 @@ LD_LIBRARY_PATH=/data/local/tmp /data/local/tmp/hexagonrpcd \
   > /data/local/tmp/hx.log 2>&1 &
 # ★ 必须等 SSC 把物理传感器注册完（约 20 秒）再拉 HAL：
 #   HAL 一上来查不到就会重试，而重试会新建/丢弃 SSC 客户端，那种 churn
-#   实测会把传感器枚举彻底弄坏（见 docs/stage4-findings.md #37）。
+#   实测会把传感器枚举彻底弄坏（见 docs/dev/sensors-ssc-protocol.md）。
 sleep 25
 stop vendor.sensors-gaokun3
 start vendor.sensors-gaokun3
