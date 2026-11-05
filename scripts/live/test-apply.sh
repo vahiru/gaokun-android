@@ -192,10 +192,10 @@ verify_install() {
     m=$W/mnt-esp; mkdir -p "$m"; mount -o ro "$esp" "$m" || { bad "ESP 挂不上"; return; }
     [ "$(sha "$m/EFI/BOOT/BOOTAA64.EFI")" = "$(sha "$GK3_SDBOOT")" ] && ok "EFI/BOOT/BOOTAA64.EFI = systemd-boot" || bad "BOOTAA64.EFI 不对"
     grep -qx 'default \*-android-a.conf' "$m/loader/loader.conf" && ok "loader.conf default = *-android-a.conf" || bad "loader.conf default 不对"
-    # U13 / U3：有 Windows 的启动管理器 ⇒ 菜单 5 秒；纯 Android 15 秒；都不写 menu-hidden
-    local tmo=15; [ -f "$m/EFI/Microsoft/Boot/bootmgfw.efi" ] && tmo=5
+    # 纯 Android 与双系统统一菜单 5 秒，都不写 menu-hidden
+    local tmo=5
     grep -qx "timeout $tmo" "$m/loader/loader.conf" && ! grep -q 'menu-hidden' "$m/loader/loader.conf" \
-        && ok "loader.conf timeout ${tmo}（$([ "$tmo" = 5 ] && echo 双系统 U13 || echo 纯 Android U3)），没有 menu-hidden" || bad "loader.conf 的 timeout 不对（要 $tmo）：$(grep timeout "$m/loader/loader.conf")"
+        && ok "loader.conf timeout ${tmo}，没有 menu-hidden" || bad "loader.conf 的 timeout 不对（要 $tmo）：$(grep timeout "$m/loader/loader.conf")"
     for s in a b; do
         for n in Image gaokun3.dtb ramdisk.img; do
             [ "$(sha "$m/$MID/android/slot_$s/$n")" = "$(sha "$W/expect/$n")" ] || { bad "slot_$s/$n 不对"; umount "$m"; return; }
