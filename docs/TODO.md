@@ -28,11 +28,11 @@
 
 ## 三、已知问题
 
-- **USB-C偶尔开机后无法工作**：开机时UCSI初始化失败（`PPM init failed`，`/sys/class/typec`为空），重启后恢复；另有偶发的开机后电脑无法识别平板的情况。原因尚在排查。
-- **插电脑时平板反过来供电**：对方不支持USB PD时偶尔发生，目前只会弹通知提示重插。自动重新协商尚未实现。
-- **音频与蓝牙在长时间运行后一起卡死**：有用户报告，从未复现。看门狗会把现场记录到`/data/vendor/gaokun3/hangdump-*`，请遇到的人提供。
-- **休眠期间大流量下载可能断网**：息屏休眠期间若后台有持续大带宽下载，有较大概率被路由器踢下线，点亮屏幕后自动重连恢复。
-- **GPU的SMMU中断号不对**：硬件触发的是SPI 675/680，设备树声明的是678/679，所以context fault到不了CPU，目前用`smmu-nostall.sh`定时轮询作为替代。改错了不会有任何征兆，需要先确认正确的映射，见[`dev/gpu-turnip.md`](dev/gpu-turnip.md)。
+- **USB-C偶尔开机后无法工作**（[issue #102](https://github.com/vahiru/gaokun-android/issues/102)）：开机时UCSI初始化失败（`PPM init failed`，`/sys/class/typec`为空），重启后恢复；另有偶发的开机后电脑无法识别平板的情况。原因尚在排查。
+- **插电脑时平板反过来供电**（[issue #103](https://github.com/vahiru/gaokun-android/issues/103)）：对方不支持USB PD时偶尔发生，目前只会弹通知提示重插。自动重新协商尚未实现。
+- **音频与蓝牙在长时间运行后一起卡死**（[issue #104](https://github.com/vahiru/gaokun-android/issues/104)）：有用户报告，从未复现。看门狗会把现场记录到`/data/vendor/gaokun3/hangdump-*`，请遇到的人提供。
+- **休眠期间大流量下载可能断网**（[issue #105](https://github.com/vahiru/gaokun-android/issues/105)）：息屏休眠期间若后台有持续大带宽下载，有较大概率被路由器踢下线，点亮屏幕后自动重连恢复。
+- **GPU的SMMU中断号不对**（[issue #101](https://github.com/vahiru/gaokun-android/issues/101)）：硬件触发的是SPI 675/680，设备树声明的是678/679，所以context fault到不了CPU，目前用`smmu-nostall.sh`定时轮询作为替代。改错了不会有任何征兆，需要先确认正确的映射，见[`dev/gpu-turnip.md`](dev/gpu-turnip.md)。
 - **无限暖暖启动即崩溃**（[issue #33](https://github.com/vahiru/gaokun-android/issues/33)）：推测虚幻引擎按ANGLE报告的渲染器名称匹配机型时选了GLES，而游戏只带了Vulkan着色器。下一步：请报告者用`debug.angle.gl_renderer`和`debug.angle.gl_vendor`覆盖渲染器名称后对比。
 - **部分网站里后摄红蓝颠倒或无法打开**：需要网站名称和复现时的日志。
 - **硬件解码的遗留问题**：拖动到更低分辨率后裁剪不更新；字节缓冲模式下分辨率变大时重新分配失败；`SYS_ERROR`之后出现`invalid uc_region`；HAL里POLLPRI空转；`venus_compat_gfmt=N`需要复测。
@@ -41,9 +41,9 @@
 ## 四、功能开发
 
 - **指纹**：驱动和HAL在[PR #92](https://github.com/vahiru/gaokun-android/pull/92)（草稿），支持FocalTech和Goodix两种传感器，匹配效果还需要改进。
-- **硬件视频编码**：除上层`v4l2_codec2`编码组件不支持`RGBX`到`NV12`转换外，底层固件的OX编码路径在收到首个输出缓冲（`FTB`）时会直接触发整板硬复位（Windows驱动使用的是固件的DX架构接口）。在内核中支持编码需要调查`PERSIST`安全缓冲区或实现DX架构编码流；任何编码测试都会导致整机复位，测试前请做好准备。
-- **蓝牙通话**：音频策略里没有蓝牙SCO通路，蓝牙耳机的麦克风在通话中无法使用。
-- **相机**：变焦和曝光补偿；软件ISP降噪；闪光灯照片负向曝光补偿；手电筒亮度档位；libcamera补丁和传感器参数提交到上游。
+- **硬件视频编码**（[issue #106](https://github.com/vahiru/gaokun-android/issues/106)）：除上层`v4l2_codec2`编码组件不支持`RGBX`到`NV12`转换外，底层固件的OX编码路径在收到首个输出缓冲（`FTB`）时会直接触发整板硬复位（Windows驱动使用的是固件的DX架构接口）。在内核中支持编码需要调查`PERSIST`安全缓冲区或实现DX架构编码流；任何编码测试都会导致整机复位，测试前请做好准备。
+- **蓝牙通话**（[issue #107](https://github.com/vahiru/gaokun-android/issues/107)）：音频策略里没有蓝牙SCO通路，蓝牙耳机的麦克风在通话中无法使用。
+- **相机**（[issue #108](https://github.com/vahiru/gaokun-android/issues/108)）：变焦和曝光补偿；软件ISP降噪；闪光灯照片负向曝光补偿；手电筒亮度档位；libcamera补丁和传感器参数提交到上游。
 - **按网络随机的Wi-Fi MAC地址**：需要同时做一次性迁移，避免老网络的设置突然生效。
 - **120 Hz无缝降频**
 - **Wi-Fi Direct**；海外地区的Wi-Fi频段设置（regdomain）
