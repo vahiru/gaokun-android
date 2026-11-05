@@ -465,6 +465,20 @@ OUT="${1:?用法: $0 <kernel-out-dir>}"
     --enable ARMV8_DEPRECATED --enable SWP_EMULATION \
     --enable CP15_BARRIER_EMULATION --enable SETEND_EMULATION
 
+# ★ LIVE-5：BTF 与 userfaultfd。
+#   · DEBUG_INFO_BTF（lib/Kconfig.debug:398）：buildbot defconfig 未选 DWARF 选项，olddefconfig 默认选
+#     DEBUG_INFO_NONE=y，导致 DEBUG_INFO_BTF 不可见、不产出 /sys/kernel/btf/vmlinux，Android 16 的
+#     timeInState.bpf 与 dmabufIter.bpf 加载报 ESRCH: No BTF found。开启 DEBUG_INFO_DWARF_TOOLCHAIN_DEFAULT
+#     只会让中间产物 vmlinux 带 DWARF 供 pahole（dwarves >= 1.22，宿主机还需 libelf-dev 供 resolve_btfids 编译）
+#     生成去重后的 .BTF 段，最终 Image / vmlinuz.efi 走 objcopy -S 仍会剥离 .debug_* 段。
+#   · USERFAULTFD（mm/Kconfig:1389）：ART 并发压缩 GC（CMC）依赖 userfaultfd 系统调用，未开启时回退到
+#     旧版并发复制 GC（CC）。
+./scripts/config --file "$OUT/.config" \
+    --disable DEBUG_INFO_NONE \
+    --disable DEBUG_INFO_REDUCED --disable DEBUG_INFO_SPLIT \
+    --enable DEBUG_INFO_DWARF_TOOLCHAIN_DEFAULT --enable DEBUG_INFO_BTF \
+    --enable USERFAULTFD
+
 # ─── 用户态 39 位地址窗口（patches/0078，issue #17 / #19 / #20；用户 2026-10-08 定进发版）───
 # 页表仍 48 位，64 位进程默认拿到的地址压到 2^39 以下（与 Android GKI 的 39 位布局相同）。
 # 2026-10-08 A/B：英雄联盟手游 7.3.0.2813 在原内核 2 秒崩（il2cpp_init 写 0x10），开了它过 il2cpp_init。
@@ -559,6 +573,7 @@ NETFILTER_XT_MATCH_CONNLIMIT NETFILTER_XT_MATCH_HELPER NETFILTER_XT_MATCH_IPRANG
 NETFILTER_XT_MATCH_MAC NETFILTER_XT_MATCH_STATISTIC NETFILTER_XT_MATCH_STRING NETFILTER_XT_MATCH_TIME
 CRYPTO_CHACHA20POLY1305 CRYPTO_MD5 CRYPTO_XCBC
 DETECT_HUNG_TASK SOFTLOCKUP_DETECTOR ANON_VMA_NAME THERMAL_STATISTICS
+DEBUG_INFO_BTF USERFAULTFD
 ARMV8_DEPRECATED SWP_EMULATION CP15_BARRIER_EMULATION SETEND_EMULATION
 TOUCHSCREEN_HIMAX_HX83121A_PEN TYPEC_MUX_GPIO_SBU USB_ANDROID_USB_STATE
 "
@@ -575,7 +590,13 @@ for s in $MUST_Y; do
     case "$v" in
         y) ;;
         m) echo "  ✗ CONFIG_$s=m  ← Android 不加载模块，必须 =y"; bad=1 ;;
-        *) echo "  ✗ CONFIG_$s 缺失/未启用（值='$v'）"; bad=1 ;;
+        *)
+            echo "  ✗ CONFIG_$s 缺失/未启用（值='$v'）"
+            if [ "$s" = "DEBUG_INFO_BTF" ] && grep -qx 'CONFIG_PAHOLE_VERSION=0' "$OUT/.config"; then
+                echo "    （构建机未安装 pahole >= 1.22，olddefconfig 丢弃了 DEBUG_INFO_BTF；请先安装 dwarves 包）"
+            fi
+            bad=1
+            ;;
     esac
 done
 # 反向断言：这些**必须关**，开着会主动破坏 Android
