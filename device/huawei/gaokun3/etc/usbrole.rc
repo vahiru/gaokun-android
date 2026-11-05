@@ -33,9 +33,30 @@ service gaokun3_role_device /vendor/bin/gaokun3-usbrole.sh device
 # 数据角色跟着"对面实际是什么"走（#118 §8）原先是这里的常驻服务 gaokun3_usbfollow（gaokun3-usbrole.sh 的
 # follow 模式，每 2 秒轮询一次），现在由 USB 端口 HAL 按 uevent 做（usb/Follow.h）。
 
+# 开机早期从SMBIOS（/sys/class/dmi/id/product_serial）读取整机序列号并写入vendor.gaokun3.serialno，
+# 再由下方vendor_init触发器同步到ro.boot.serialno与ro.serialno（早于late-fs的KeyMint与post-fs-data的USB gadget）。
+service gaokun3_serialno /vendor/bin/gaokun3-usbrole.sh serialno
+    user root
+    group root
+    oneshot
+    disabled
+
 # 开机就把门关上：role 出厂是 device，未经确认一律不放行挂起。
 on init
     write /sys/power/wake_lock gaokun3_usbrole
+    exec_start gaokun3_serialno
+
+on early-fs && property:vendor.gaokun3.serialno=* && property:ro.boot.serialno=""
+    setprop ro.boot.serialno ${vendor.gaokun3.serialno}
+
+on early-fs && property:vendor.gaokun3.serialno=* && property:ro.serialno=""
+    setprop ro.serialno ${vendor.gaokun3.serialno}
+
+on property:vendor.gaokun3.serialno=* && property:ro.boot.serialno=""
+    setprop ro.boot.serialno ${vendor.gaokun3.serialno}
+
+on property:vendor.gaokun3.serialno=* && property:ro.serialno=""
+    setprop ro.serialno ${vendor.gaokun3.serialno}
 
 # 切 host 失败（A6：待机后回插 port0 坏口）时脚本置 vendor.gaokun3.usbrole.broken=1、成功时清 0 ——
 # 失败就一直持有 wakelock，这次开机余下的时间整机不再睡（v1.0 PWR-4）。Parts 的 UsbPortNotifier 读它，亮屏时弹常驻通知请用户重启。
