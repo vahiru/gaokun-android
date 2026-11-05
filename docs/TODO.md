@@ -37,7 +37,6 @@
 - **部分网站里后摄红蓝颠倒或无法打开**：需要网站名称和复现时的日志。
 - **硬件解码的遗留问题**：拖动到更低分辨率后裁剪不更新；字节缓冲模式下分辨率变大时重新分配失败；`SYS_ERROR`之后出现`invalid uc_region`；HAL里POLLPRI空转；`venus_compat_gfmt=N`需要复测。
 - **Wi-Fi芯片启动失败时泄漏内存**：`ath11k_mhi_start`失败后没有释放，每次泄漏约4 MB DMA内存（`mhi.c:446-450`）。
-- **内核未开启BTF与`CONFIG_USERFAULTFD`**：未开启`CONFIG_DEBUG_INFO_BTF`导致`timeInState.bpf`与`dmabufIter.bpf`加载报`ESRCH`；未开启`CONFIG_USERFAULTFD`导致ART退回到并发复制GC。
 
 ## 四、功能开发
 
@@ -45,7 +44,6 @@
 - **硬件视频编码**：除上层`v4l2_codec2`编码组件不支持`RGBX`到`NV12`转换外，底层固件的OX编码路径在收到首个输出缓冲（`FTB`）时会直接触发整板硬复位（Windows驱动使用的是固件的DX架构接口）。在内核中支持编码需要调查`PERSIST`安全缓冲区或实现DX架构编码流；任何编码测试都会导致整机复位，测试前请做好准备。
 - **蓝牙通话**：音频策略里没有蓝牙SCO通路，蓝牙耳机的麦克风在通话中无法使用。
 - **相机**：变焦和曝光补偿；软件ISP降噪；闪光灯照片负向曝光补偿；手电筒亮度档位；libcamera补丁和传感器参数提交到上游。
-- **电池温度上报**：EC状态块`0x9c`（`ec_raw`中的`w9c`）以0.1 K为单位报告温度，可在`huawei-gaokun-battery.c`中接入`POWER_SUPPLY_PROP_TEMP`。
 - **按网络随机的Wi-Fi MAC地址**：需要同时做一次性迁移，避免老网络的设置突然生效。
 - **120 Hz无缝降频**
 - **Wi-Fi Direct**；海外地区的Wi-Fi频段设置（regdomain）
