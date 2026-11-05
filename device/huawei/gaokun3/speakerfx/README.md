@@ -4,9 +4,9 @@
 不让低音把人声和高频压下去。它跑在**音频 HAL 里**，处理的是 AudioFlinger 混好、马上要写进 ALSA
 的那一块数据，所以扬声器放出来的所有声音都经过它：音乐、游戏的低延迟（FAST）音轨、铃声、通知、系统音。
 
-> ★ **默认不开。** 打开方式：「设置 → 声音 → 扬声器增强」打开（`persist.sys.gaokun3.histen`）。
+> **默认关闭。** 打开方式：「设置 → 声音 → 扬声器增强」打开（`persist.sys.gaokun3.histen`）。
 > 同一页的「处理方式」默认就是「低音增强」（`persist.sys.gaokun3.speakerfx.engine`，没设过 = `bass`）；
-> 选「华为 Histen」时改由会话音效（effects/）处理，这个库直通。两边由 `etc/histen.rc` 的同一个镜像
+> 选「华为 Histen」时改由会话音效（`effects/`）处理，这个库直通。两边由 `etc/histen.rc` 的同一个镜像
 > `vendor.gaokun3.speakerfx.engine` 决定谁动手，不会处理两遍。只认内置扬声器的 PCM（card 0 / device 1），
 > 耳机、蓝牙、USB 不经过它。
 

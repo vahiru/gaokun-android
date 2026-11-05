@@ -7,7 +7,7 @@ DMIC1、DMIC3、DMIC2，DMIC0在别处。原来的录音只用DMIC0和DMIC1两�
 让前方的声音叠加、其他方向的声音相互抵消一部分），输出双声道交给应用。人声更集中，房间里的背景声更小。
 代价是**30毫秒延迟**和一些CPU时间：在音频HAL里实际录音时，每85毫秒的一块要处理7–8毫秒（CPU此时多在低频）；连续跑满时每块约1.4毫秒。
 
-> ★ **默认打开**。系数文件不在版本库里，见[`prebuilt/README.md`](prebuilt/README.md)；拓扑要在构建机上改成允许四路，见第六节。
+> **默认打开**。系数文件不在版本库里，见[`prebuilt/README.md`](prebuilt/README.md)；拓扑要在构建机上改成允许四路，见第六节。
 > 正式构建一定带着这两样（`sync-device-tree.sh`会核对），缺一样这个库就不接管录音。
 > 关掉：`persist.vendor.gaokun3.micarray=0`，从下一次开始录音起生效。
 > 只处理内置麦（card 0 / device 3）的MIC、CAMCORDER、VOICE_RECOGNITION、VOICE_COMMUNICATION和DEFAULT音源；

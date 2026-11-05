@@ -40,7 +40,7 @@ echo 0.2.0-e5.g<提交> > device/huawei/gaokun3/prebuilt-gk3boot/version   # 与
 shasum -a 256 device/huawei/gaokun3/prebuilt-gk3boot/gk3boot.efi
 ```
 
-⚠️ 版本串里带 `.dirty`（工作区有未提交的改动时编的）就不要放进来：那一版对不上任何提交。
+版本串里带`.dirty`（工作区有未提交的改动时编的）就不要放进来：那一版对不上任何提交。
 
 执行端（可选）：
 

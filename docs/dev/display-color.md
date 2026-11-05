@@ -72,4 +72,4 @@ cmd activity get-config | grep -o widecg                         # 应用看到�
 service call SurfaceFlinger 1023 i32 0 i32 7                     # 强制 sRGB 输出，P3 图层交给 GPU 转换；i32 0 i32 0 恢复
 ```
 
-确认某个改动是否改变了输出，用编码器CRC：`/sys/kernel/debug/dri/1/crtc-0/crc`，`control`写`encoder`，`data`每行以NUL开头。⚠️ 不要用`devmem`读DPU寄存器，显示掉电时会让整机崩溃。
+确认某个改动是否改变了输出，用编码器CRC：`/sys/kernel/debug/dri/1/crtc-0/crc`，`control`写`encoder`，`data`每行以NUL开头。注意不要用`devmem`读DPU寄存器，显示掉电时会让整机崩溃。

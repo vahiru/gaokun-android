@@ -8,19 +8,14 @@
 ## 需要放什么
 
 ```
-vmlinuz.efi          内核。★用 EFI_ZBOOT 的自解压 PE（13 MB），不要用 Image（37 MB）
+vmlinuz.efi          内核（使用 EFI_ZBOOT 自解压 PE，约 14 MB，不要使用未压缩的 Image）
 dtb/gaokun3.dtb      设备树。目录名固定 —— BoardConfig.mk 的
                      BOARD_PREBUILT_DTBIMAGE_DIR 指向 prebuilt-boot/dtb
 ```
 
-⚠️★ **`dtb/` 里必须【只有一个】 .dtb 文件**（文件名本身不重要）。
-`BOARD_PREBUILT_DTBIMAGE_DIR` 会把目录里**所有** `*.dtb` **首尾拼接**成一个
-dtb 段塞进 boot.img，而**构建全程不报一声**。
-2026-08-22 真踩过：目录里同时留了 `gaokun3.dtb` 与旧的
-`sc8280xp-huawei-gaokun3.dtb`，产出的 dtb 段是 346052 字节 = 恰好 2 × 173026，
-**唯一的线索就是"大小是整数倍"**。
-`scripts/release.sh` 现在有断言（数 boot.img dtb 段里的 `d00dfeed` 魔数，≠1 就 die），
-但换机器 / 手动拷贝时仍要自己注意。
+**`dtb/` 目录下必须只放一个 `.dtb` 文件**（文件名本身不限）。
+`BOARD_PREBUILT_DTBIMAGE_DIR` 会将该目录下所有 `*.dtb` 首尾拼接成一个 dtb 段写入 `boot.img`，且不会报错。
+`scripts/release.sh` 会校验 `boot.img` dtb 段中的 `d00dfeed` 魔数数量（不为 1 则报错退出），但手动拷贝时仍需确保目录下没有旧的 `.dtb` 残留。
 
 `vmlinuz.efi` 会被 `PRODUCT_COPY_FILES` 装成 `$(PRODUCT_OUT)/kernel`
 —— 那是构建系统认的名字（`build/make/core/Makefile:1014`）。
@@ -36,10 +31,7 @@ mkdir -p prebuilt-boot/dtb
 cp <out>/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dtb prebuilt-boot/dtb/gaokun3.dtb
 ```
 
-⚠️★ **`CROSS_COMPILE` 两处都要带**：编译时不带会在 `prepare0` 阶段就报
-`gcc: unrecognized command-line option '-mlittle-endian'`（它去用宿主 gcc 了）；
-而 `olddefconfig` 不带会用**宿主 gcc** 去评估 `CC_HAS_*` 这类能力符号，
-静默改掉一批配置（本仓踩过，见 `scripts/kernel-config-android.sh` 里的说明）。
+**`CROSS_COMPILE` 在配置与编译两步均需指定**：编译时不带会在 `prepare0` 阶段报错（误用宿主 gcc）；`olddefconfig` 时不带则会用宿主 gcc 评估 `CC_HAS_*` 能力符号，静默改动内核配置（详见 `scripts/kernel-config-android.sh`）。
 
 ## 为什么一定要 EFI_ZBOOT
 
