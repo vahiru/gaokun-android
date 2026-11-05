@@ -891,11 +891,8 @@ PRODUCT_COPY_FILES += \
 #    ⚠️ 代价说清楚：**新装机的用户默认也不进 s2idle**，息屏耗电按不睡算 ——
 #      这与 v0.3.0～v0.6.2 的镜像默认相反，发版说明里必须写。
 #      要开（persist 属性，重启不丢）：
-#        · ★ 1.0 起（PWR-16）：「设置 → 电池 → 待机（睡眠）」里的开关（Parts 的 StandbySettingsActivity）
-#          写 persist.sys.gaokun3.allow_suspend，init.gaokun3.rc 镜像成这个 vendor 属性；
-#        · 排查用：开发构建 adb root 之后 adb shell setprop persist.vendor.gaokun3.allow_suspend 1；
-#          发布构建（ro.debuggable=0，没有 adb root）给 Shell 授 root 后
-#          adb shell su -c "setprop persist.vendor.gaokun3.allow_suspend 1"（⬜ 发布构建上的 su 路径未实测）。
+#        · 写 persist.sys.gaokun3.allow_suspend 1（init.gaokun3.rc 镜像成这个 vendor 属性）；
+#        · 或 root 下直接 setprop persist.vendor.gaokun3.allow_suspend 1。
 #      普通 adb shell 在 enforcing 下设不了 vendor 属性，见 etc/usbrole.rc 顶部。
 #    ★ 2026-09-23 用户定：开发期保持 0；【正式版】发布前改回 1（老用户 OTA 后不能丢待机，
 #      TODO S1）。改回 1 之后，开发机自己 setprop … 0（persist 属性重启不丢）。

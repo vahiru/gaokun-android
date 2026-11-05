@@ -49,22 +49,15 @@ on init
 on property:persist.vendor.gaokun3.allow_suspend=1
     write /sys/power/wake_unlock gaokun3_nosuspend
 
-# ── Parts 的待机开关（v1.0 PWR-16，并入 SEC-4）：system 属性 → vendor 属性的镜像 ───────────────
-# Parts（system_app，coredomain）设不了任何 vendor 属性（refs/lineage-sepolicy/private/property.te:492-502），
-# 只能写 persist.sys.gaokun3.allow_suspend（system_prop，private/property_contexts:77；private/system_app.te:43）。
-# 这里照 etc/histen.rc 的做法转一手：触发条件由 init 自己求值（vendor rc 里 persist.sys.* 的触发器要
+# ── 待机开关属性镜像：system 属性 → vendor 属性 ───────────────
+# persist.sys.gaokun3.allow_suspend（system_prop，private/property_contexts:77）镜像到
+# persist.vendor.gaokun3.allow_suspend：触发条件由 init 自己求值（vendor rc 里 persist.sys.* 的触发器要
 # vendor_init 能读 system_prop 才不被丢 —— sepolicy/vendor_init.te:16 已经给了），动作在 vendor_init 里
 # setprop（set_prop(vendor_init, vendor_gaokun3_prop)，sepolicy/vendor_gaokun3_props.te:63）。
 # ★ 用两条【字面值】而不是 ${persist.sys.gaokun3.allow_suspend} 展开：只认 0 / 1，别的值（写坏了）一律不动。
-# ★ 镜像目标本身就是 persist 属性，所以【不做开机重放】：没碰过开关的机器（含开发机上以前 setprop 过 0 的）
-#   完全按原来的 persist.vendor 值走；碰过开关之后两边相同。属性触发器会不会在加载持久属性时重放一次，
-#   本仓的记录是"不会"（etc/histen.rc 的注释），就算会，重放的也是同一个值。
-#   ⚠️ 用过 Parts 开关之后又用 root `setprop persist.vendor.gaokun3.allow_suspend …` 改，两边就不一致了：
-#   生效的是 vendor 那个，Parts 页面也显示 vendor 那个（StandbySettingsActivity 读的是生效值），下次拨开关再覆盖。
+# ★ 镜像目标本身就是 persist 属性，所以【不做开机重放】：没设过 persist.sys 的机器
+#   完全按原来的 persist.vendor 值走；设过之后两边相同。
 # 生效时机：1→0 立刻生效（亮屏时 gaokun3_usbrole 握着，息屏不再放）；0→1 从下一次息屏起生效。
-# ⬜ 未上机。判据：Parts 拨到关 → `getprop persist.vendor.gaokun3.allow_suspend` = 0、
-#   `grep allow_suspend /data/property/persistent_properties`（二进制，用 strings）里两个名字都在；息屏 2 分钟
-#   `/sys/power/suspend_stats/success` 不变、wake_lock 里有 gaokun3_usbrole；拨回开 → = 1，下一次息屏后 success 增长。
 on property:persist.sys.gaokun3.allow_suspend=1
     setprop persist.vendor.gaokun3.allow_suspend 1
 

@@ -101,9 +101,7 @@ Each entry follows the same format: **Symptom** (what you will run into), **Caus
 ### Messages from some apps are delayed in standby
 * **Symptom**: once the screen is off and the machine is in standby, new messages from apps that do not use Google's push service (FCM), such as WeChat and QQ, only arrive at the system's next scheduled wake-up or when you turn the screen on, usually one or two minutes late, occasionally around three. Apps that use FCM are delayed the same way on 1.0.0-rc.3 and earlier; from the next release they can wake the system and arrive on time. Wi-Fi stays connected during standby, so there is no need to reconnect after waking.
 * **Cause**: Chinese apps have no vendor push channel on this system, so they can only fetch messages from their servers when the system is awake.
-* **What to do**:
-  * When you need messages on time, keep the screen on, or receive them on a phone.
-  * You can also turn standby off entirely, at the cost of clearly higher power use with the screen off: in Settings → Battery → Standby (sleep), turn off "Allow standby". This takes effect immediately and survives restarts; after turning it back on, standby resumes from the next time the screen goes off.
+* **What to do**: when you need messages on time, keep the screen on, or receive them on a phone.
 
 ### Not Google-certified
 * **Symptom**: the Play Store says "This device isn't Play Protect certified", and some apps cannot be installed. Apps that depend on Play Integrity (for example Google Wallet and some banking apps outside China) cannot be used.
