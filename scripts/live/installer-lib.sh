@@ -75,10 +75,9 @@ GK3_ESP_GK3BOOT_KIB=5120
 # 比这小的 ESP（用户自己重装 Windows 得到的 100 MiB）在 1.0 里明确不装。
 # 200：出厂 300 MiB 与 Windows 在 4Kn 盘上建的 260 MiB 都过，100 MiB 那一档不过
 GK3_ESP_MIN_SIZE_MIB=200
-# loader.conf 的菜单等待（秒）。纯 Android 观察期保持 15（要等"不接键盘盖也能操作菜单"确认之后
-#   才降到 3 / menu-hidden，见 docs/TODO.md）；双系统固定显示菜单 5 秒，不写 menu-hidden
-#   （平板形态下切 Windows 主要靠这个菜单）。OTA postinstall 只把【这里原来写的 15】改成 5，用户改过的不动
-GK3_LOADER_TIMEOUT=15
+# loader.conf 的菜单等待（秒）。纯 Android 与双系统统一显示菜单 5 秒，不写 menu-hidden。
+#   OTA postinstall 只把【早先版本写的 15】改成 5，用户改过的不动
+GK3_LOADER_TIMEOUT=5
 GK3_LOADER_TIMEOUT_DUAL=5
 # systemd-boot 的厂商 GUID（refs/systemd-v257/src/boot/efivars.h:12，与 scripts/boot-oneshot.sh、
 # overlay-common/usr/bin/gk3-boot-android 相同）。LoaderEntryDefault / LoaderEntryOneShot 都在它下面
@@ -1344,8 +1343,8 @@ ENTRY
         #    但 boot_control HAL 在 Android 第一次标记启动成功时就会把 default
         #    改写成 *-android-<槽>.conf（EspSlot.cpp:120-172）—— 那个选择只活到
         #    第一次开机，代价却是每个新用户第一次重启落进一个他不认识的系统。）
-        # ★ 菜单等待：双系统（ESP 上有 Windows 的启动管理器）5 秒、不写 menu-hidden（U13）；纯 Android 15 秒（U3 / D19）。
-        #   OTA postinstall 认的就是这两个数：只把【我们写的】15 在双系统机器上改成 5，用户改过的不碰
+        # ★ 菜单等待：纯 Android 与双系统统一 5 秒、不写 menu-hidden。
+        #   OTA postinstall 只把【早先版本写的】15 改成 5，用户改过的不碰
         local tmo=$GK3_LOADER_TIMEOUT
         [ -f "$mnt/EFI/Microsoft/Boot/bootmgfw.efi" ] && tmo=$GK3_LOADER_TIMEOUT_DUAL
         cat > "$mnt/loader/loader.conf" <<LOADER || { esp_fail "loader.conf"; return 1; }

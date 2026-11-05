@@ -198,7 +198,7 @@ If an updated system repeatedly fails to finish booting, the machine automatical
 
 ## The boot menu
 
-The boot menu appears at every start: for 15 seconds when only Android is installed, and for 5 seconds with dual boot. If you do not choose, the default system starts. Choosing an entry needs the keyboard cover. The main entries are:
+The boot menu appears at every start for 5 seconds by default; if you do not choose, the default system starts. You can select an entry with the volume up/down buttons and confirm with the power button, or use the arrow keys and Enter on the keyboard cover. The main entries are:
 
 | Entry | Purpose |
 |---|---|

@@ -63,7 +63,7 @@ See [issue #56](https://github.com/vahiru/gaokun-android/issues/56) for the disc
 
 ### What are the entries in the boot menu?
 
-The boot menu stays for 15 seconds when only Android is installed, and for 5 seconds with dual boot. If you do not choose, the default entry starts.
+The boot menu stays for 5 seconds by default. If you do not choose, the default entry starts.
 
 | Entry | Purpose |
 |---|---|
@@ -77,7 +77,7 @@ The boot menu stays for 15 seconds when only Android is installed, and for 5 sec
 
 ### Can I use the boot menu without the keyboard cover?
 
-With the keyboard cover, use the arrow keys to choose and Enter to confirm. Whether the volume and power buttons can operate the boot menu without it has not been tested yet. When you need to choose something in the menu, please attach the keyboard cover first.
+Yes. Without the keyboard cover, use the volume up/down buttons to move the cursor and the power button to confirm; with the keyboard cover attached, you can also use the arrow keys and Enter.
 
 ## Updates and going back
 
