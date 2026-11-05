@@ -1,11 +1,10 @@
 /*
- * gk3boot.efi —— 统一启动入口（docs/boot-entry-design.md 方案 Y）。S5 后续版本：观察模式 + 动作模式，目标是
- * "可以当开发机默认条目"（E5 / E6 / E7 / E8 的前提）。README §10（E4 最小版）、§11（这一版）。
+ * gk3boot.efi —— 统一启动入口（见 tools/gk3boot/README.md）：观察模式 + 动作模式。
  *
  *   systemd-boot（默认条目 gk3boot-android-<x>[+N].conf，或经 OneShot）→ gk3boot → 定位本盘 → 读 misc → 选槽
  *   →（动作模式：扣 tries、写 GK3 记录，写后读回）→ 读 boot_<x> 整份、校验 SHA1(id) → 拼 cmdline → H2 交接（handoff.c）。
  *
- * 两种模式（§4.12）：
+ * 两种模式：
  *   观察模式 gk3.observe=1：决策照算，"会怎么做"只记日志；不写 misc、不扣 tries、不消费 BCB（块设备包装连 write 回调都不给）；
  *     每次开机写一份 ESP 日志；唯一允许的写 = fail-open 时的 LoaderEntryOneShot（见下）。
  *   动作模式（gk3.observe=0 或不带 observe）：

@@ -1,16 +1,16 @@
-/* libgk3core：双系统（Windows + Android）的决定（S15；docs/boot-entry-design.md §4.9.3、§4.9.4、§4.4.4）。
+/* libgk3core：双系统（Windows + Android）的决定（见 tools/gk3boot/README.md）。
  *
  * 只决定、不写盘：两个函数都只改调用方给的 GK3 记录缓冲区（清掉消费了的标记、记事件），要不要写 LoaderEntryDefault /
  * LoaderEntryOneShot、写回 misc、复位，由调用方（gk3boot.efi）照 out 去做。这样整套规则能在主机上逐条测
  * （test/test_dual.c），UEFI 那边只剩"读变量、看文件在不在、写变量"。
  *
- * 判定顺序（§4.9.3 "gk3boot 的判定顺序"）：
+ * 判定顺序：
  *   a. LoaderEntryDefault 不是合法值就删（合法 = 不存在，或 Windows 条目 id）；
  *   b. 应用 set_default=windows|android（写或删 LoaderEntryDefault），不复位，接着往下走；
  *   c. Android 有待办 ⇒ next=windows、clean_poweroff 作废并记事件，照常启动 Android；
  *   d. 没有待办、且 (next=windows 或 (clean_poweroff 且默认是 Windows)) 且 bootmgfw 在 ⇒ 先清标记，再 OneShot=Windows、复位；
  *   e. 其余照常启动 Android；默认是 Windows 时交接前预置 OneShot。
- * next=sdboot-menu（执行端"Other systems"的退化出口，§4.4.4）属于 §4.2 第 4 步、早于 BCB 分派：清掉、返回菜单；
+ * next=sdboot-menu（执行端"Other systems"的退化出口）早于 BCB 分派处理：清掉、返回菜单；
  * 它同时让 clean_poweroff 作废（"有 Android 待办"的一种）。 */
 #include "gk3core.h"
 
@@ -94,7 +94,7 @@ void gk3_dual_plan_boot(uint8_t *rec, bool default_windows, bool windows_present
         return;
     }
     if (nk == GK3_NEXT_SLOT)
-        android_pending = true;    /* next=slot:x 归入口的另一段（§4.4.4 "Boot other slot"），这里只把它当待办 */
+        android_pending = true;    /* next=slot:x 归入口的另一段（"Boot other slot"），这里只把它当待办 */
 
     bool want_next = nk == GK3_NEXT_WINDOWS;
     bool want_off = cp && default_windows;

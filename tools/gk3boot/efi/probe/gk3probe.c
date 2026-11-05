@@ -1,7 +1,7 @@
 /*
- * gk3probe.efi —— 统一启动入口的只读探针（设计稿 docs/boot-entry-design.md §5 S4、§6 E3）。
+ * gk3probe.efi —— 统一启动入口的只读探针（见 tools/gk3boot/README.md）。
  *
- * 作为 systemd-boot 的 efi 条目、经 LoaderEntryOneShot 进入；只读地收集入口（S5）要依赖的
+ * 作为 systemd-boot 的 efi 条目、经 LoaderEntryOneShot 进入；只读地收集入口要依赖的
  * 固件事实，写进自己所在 ESP 的 \EFI\gk3boot\probe\log-<n>.txt（n 递增、不覆盖），
  * 同时打到屏幕；最后 ResetSystem(EfiResetCold) —— 下一次启动自动回到 ESP default 的 Android，
  * 日志从 Android 里只读挂 ESP 取（步骤见 tools/gk3boot/README.md）。

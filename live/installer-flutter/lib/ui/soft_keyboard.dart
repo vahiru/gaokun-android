@@ -4,7 +4,7 @@ import 'package:flutter/services.dart';
 import 'theme.dart';
 
 /// 屏幕软键盘。Linux 桌面 embedder 不提供输入法面板，平板又可能没接键盘盖，
-/// 所以 WiFi 密码这种东西只能自己画一个（C 版也是自己画的，docs/archive/stage7-installer-roadmap.md:113-115）。
+/// 所以 WiFi 密码这种东西只能自己画一个。
 /// 接了实体键盘照样能直接打字 —— 两者写的是同一个 TextEditingController。
 class SoftKeyboard extends StatefulWidget {
   const SoftKeyboard({super.key, required this.controller, this.onDone});

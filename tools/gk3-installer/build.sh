@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# gk3-installer 的构建 / 测试 / 静态交叉编译（设计稿 docs/installer-rust-design.md §7）。
+# gk3-installer 的构建 / 测试 / 静态交叉编译（见 docs/dev/installer-rust-design.md）。
 #
 #   bash tools/gk3-installer/build.sh test     # 主机单测（macOS / Linux 都行）
 #   bash tools/gk3-installer/build.sh lint     # clippy（-D warnings，含 unwrap / expect / panic 禁令）+ rustfmt --check

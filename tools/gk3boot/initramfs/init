@@ -1,24 +1,22 @@
 #!/bin/sh
-# gaokun3 执行端（fastboot.img）的 /init —— 统一启动入口方案 Y 的 S7b。
+# gaokun3 执行端（fastboot.img）的 /init（见 tools/gk3boot/README.md）。
 #
-# 设计稿：docs/boot-entry-design.md §4.4（进入、命令、菜单）、§4.13（界面）；
-#         docs/fastboot-design.md §4.2.2（initramfs）、§4.7（USB 与电源）、§4.8（界面）、§4.10（安全）。
 # 由 gk3boot.efi 用【和 Android 同一个内核】（boot_x 里的 Image）+ 本 initramfs 引导，cmdline 带
 #   panic=10 gk3.mode=fastboot gk3.why=<…> gk3.slot=<a|b> gk3.bootver=<ver> gk3.disk=<misc 的 PARTUUID>
 # （tools/gk3boot/core/src/cmdline.c gk3_cmdline_fastboot）。
 #
 # 分工：本文件只管"环境 + 界面"——挂文件系统、USB 角色与 gadget、不挂起、空闲关机、tty1 文本菜单、
-#   按键。fastboot 协议本身、清 BCB、擦数据都在 /bin/gk3-fastbootd（S7a，另一份代码）。
-#   两边的接口约定见 tools/gk3boot/README.md §13.3（统一后的那一份：退出码、子命令、环境变量、状态文件）。
-#   ★ 分工原则：一块盘一个写者；本文件是 PID 1，管生命周期、USB gadget / UDC / role 与界面；
+#   按键。fastboot 协议本身、清 BCB、擦数据都在 /bin/gk3-fastbootd（另一份代码）。
+#   两边的接口约定见 tools/gk3boot/README.md §13.3（退出码、子命令、环境变量、状态文件）。
+#   分工原则：一块盘一个写者；本文件是 PID 1，管生命周期、USB gadget / UDC / role 与界面；
 #     守护进程管协议与盘写，不碰 UDC、不调 reboot()，用退出码告诉这里接下来做什么。
 #   gk3-fastbootd 不在 → 显示 "executor missing"，菜单照样能用（重启 / 关机 / 看日志）。
 #
-# ★ PID 1 不许退出：退出 = 内核 panic（panic=10 → 10 秒后重启）。所以不用 set -e，每一步自己判。
-# ★ 界面一律英文 ASCII：Linux VT 画不了 CJK（fastboot-design.md §4.8）。
-# ★ 不挂起：这里没有 systemd / logind，也没人写 /sys/power/state；另外拿一个 wakelock 作保险（§4.7）。
+# PID 1 不许退出：退出 = 内核 panic（panic=10 → 10 秒后重启）。所以不用 set -e，每一步自己判。
+# 界面一律英文 ASCII：Linux VT 画不了 CJK。
+# 不挂起：这里没有 systemd / logind，也没人写 /sys/power/state；另外拿一个 wakelock 作保险。
 #   电源键只是 evdev 事件，由我们解释为"确认"。
-# ★ 确认页没有超时自动执行（§4.8）。唯一的定时动作是空闲关机：没有主机连接、也没有按键 30 分钟（U6）。
+# 确认页没有超时自动执行。唯一的定时动作是空闲关机：没有主机连接、也没有按键 30 分钟。
 #
 # 离线测试：scripts/gk3boot/test-initramfs.sh（QEMU）。测试时 initrd 后面会再拼一份 overlay cpio，
 #   里面带 /etc/gk3-fbi/test-hook（本文件 source 它：加载测试内核的模块、改 UDC 名、缩短超时）。
@@ -35,10 +33,10 @@ KEYS_LOG=$RUN/keys.log
 
 # —— 可被 test-hook 覆盖的默认值（真机的值）——
 FBD=/bin/gk3-fastbootd
-GK3_UDC=a600000.usb                                         # port0 的 dwc3（fastboot-design.md §4.7）
+GK3_UDC=a600000.usb                                         # port0 的 dwc3
 GK3_ROLE=/sys/class/usb_role/a600000.usb-role-switch/role   # 同 gaokun3-usbrole.sh
 GK3_USB_PLAT=/sys/bus/platform/devices/a600000.usb
-GK3_IDLE_TIMEOUT=${GK3_IDLE_TIMEOUT:-1800}                  # 秒；U6 = 30 分钟。cmdline 里写 GK3_IDLE_TIMEOUT=60 也行
+GK3_IDLE_TIMEOUT=${GK3_IDLE_TIMEOUT:-1800}                  # 秒；默认 30 分钟。cmdline 里写 GK3_IDLE_TIMEOUT=60 也行
 GK3_TRACE=${GK3_TRACE:-0}                                   # 1 = 每条日志也打到控制台（测试用）
 GK3_QUIET=${GK3_QUIET:-1}                                   # 1 = dmesg -n 1，内核消息不盖住界面
 GK3_TTY=${GK3_TTY:-/dev/console}                            # 真机 console=tty0 → 前台 VT（fbcon）
@@ -64,7 +62,7 @@ trace() { [ "$GK3_TRACE" = 1 ] && echo "[gk3-fbi] $*" > /dev/console 2>/dev/null
 
 # 最早期的失败（连 /proc 都挂不上）：照 scripts/live/initramfs-init 的做法，打印原因、60 秒后重启。
 # 重启 = 回到 gk3boot：BCB 驱动的进入会再来一次，wipe 有 3 次上限，bootloader/fastboot 的 BCB
-# 入口进来之前已经清了（boot-entry-design.md §4.3.4），不会无限循环。
+# 入口进来之前已经清了，不会无限循环。
 early_fail() {
     echo
     echo "================ gaokun3 fastboot: cannot start ================"
@@ -155,7 +153,7 @@ has_downstream() {
 
 ROLE_LAST_WRITE=-100
 # 要 device。启动时已经是 device（patch 0012 之后冷启动默认就是）就不写；不是才写，
-# 之后每 10 秒最多再写一次（UCSI 插拔可能把它改回 host，boot-entry-design.md T12 / fastboot-design.md T6）。
+# 之后每 10 秒最多再写一次（UCSI 插拔可能把它改回 host）。
 # 不 unbind / rebind dwc3（patch 0012:13）。
 role_reconcile() {
     local r t
@@ -364,7 +362,7 @@ do_poweroff() {
     early_fail "poweroff -f returned"
 }
 
-# 离开菜单回 Android 之前：why=recovery / prompt_wipe 的 BCB 由执行端清（boot-entry-design.md §4.3.4），
+# 离开菜单回 Android 之前：why=recovery / prompt_wipe 的 BCB 由执行端清，
 # 不清的话 gk3boot 下次还会把机器送回这里。why=wipe 只在用户【明确拒绝】擦除时清（$1 = declined）；
 # 擦除失败后从菜单重启则不清 —— 让 gk3boot 的 3 次上限去记 wipe_failed、通知 Android。
 reboot_to_android() {
@@ -510,7 +508,7 @@ draw_confirm_reset() {
     echo
 }
 
-# why=wipe 而 gk3-fastbootd 说"免确认的条件不满足"（退出码 3，boot-entry-design.md §4.4.3）
+# why=wipe 而 gk3-fastbootd 说"免确认的条件不满足"（退出码 3）
 build_wipe_confirm() {
     menu_reset
     menu_add cancel_reboot "No - keep my data and reboot to Android"
@@ -525,7 +523,7 @@ draw_wipe_confirm() {
     echo
 }
 
-# why=prompt_wipe：RescueParty（boot-entry-design.md §4.3.4：必须按键确认，永不自动清）
+# why=prompt_wipe：RescueParty（必须按键确认，永不自动清）
 build_prompt_wipe() {
     menu_reset
     menu_add tryagain "Try again (reboot to Android)"
@@ -653,7 +651,7 @@ fi
 # 进入原因决定第一页
 case "$WHY" in
     wipe)
-        # 免确认的判据（迁移标记 + BCB 摘要一致，boot-entry-design.md §4.4.3）由 gk3-fastbootd 判
+        # 免确认的判据（迁移标记 + BCB 摘要一致）由 gk3-fastbootd 判
         screen_msg "Factory reset requested by Android" "Checking the request..."
         fbd_sub --wipe-data
         rc=$?

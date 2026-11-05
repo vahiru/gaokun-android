@@ -881,7 +881,7 @@ void main() {
     });
   });
 
-  // ── 后端留给前端的三个接口（stage7-flutter-debian.md §5.13）：GUI-11 / GUI-12 / INST-16 ──────────────
+  // ── 后端留给前端的三个接口 ──────────────
 
   testWidgets('界面重新起来时写盘任务还在跑：欢迎页直接接上去跟（gk3_job_follow <id>），侧栏禁用，跟完到完成页（GUI-11）', (t) async {
     final rec = await pumpApp(t, 'blank', overrides: {'gk3_job_status': 'job_status-running.txt', 'gk3_job_follow': 'job_follow-apply.txt'});
@@ -955,7 +955,7 @@ void main() {
     await see(t, find.text(l.checkBlocked));
   });
 
-  // ── 双系统专项（S15，docs/boot-entry-design.md §4.9）──────────────────────────────────────────────
+  // ── 双系统专项（见 tools/gk3boot/README.md）──────────────────────────────────────────────
   /// U 盘双系统一路走到确认页（windows-free，或 overrides 换掉 gk3_esp_info）
   Future<Rec> toConfirm(WidgetTester t, {String scenario = 'windows-free', Map<String, String> overrides = const {}}) async {
     final rec = await pumpApp(t, scenario, overrides: overrides);

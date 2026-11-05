@@ -1,6 +1,6 @@
-# gaokun3 安装器后端的 Rust 实现（并行轨道，docs/installer-rust-design.md）。
+# gaokun3 安装器后端的 Rust 实现（并行轨道，见 docs/dev/installer-rust-design.md）。
 # 现役仍是 scripts/live/installer-lib.sh；这里的每个入口都要先在对拍（scripts/live/duel-lib.sh）里与它逐行相同，
-# 才谈得上让前端换过来（设计稿 §5 迁移顺序）。
+# 才谈得上让前端换过来。
 [package]
 name = "gk3-installer"
 version = "0.1.0"
@@ -9,8 +9,8 @@ rust-version = "1.99"   # 只在 1.99.0 上编过、测过（rust-toolchain.toml
 publish = false
 description = "gaokun3 installer backend (Rust rewrite of scripts/live/installer-lib.sh)"
 
-# ★ 零依赖（只用 std）：这个二进制以 root 身份跑、动别人整块盘 —— 每多一个 crate 就多一份要审的代码，
-#   也多一处离线构建要拉网的地方。真要加依赖，先在设计稿 §4.4 写理由。
+# 零依赖（只用 std）：这个二进制以 root 身份跑、动别人整块盘 —— 每多一个 crate 就多一份要审的代码，
+# 也多一处离线构建要拉网的地方。真要加依赖，先在设计文档中说明理由。
 [dependencies]
 
 [[bin]]

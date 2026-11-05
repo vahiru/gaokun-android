@@ -395,7 +395,7 @@ class Session extends ChangeNotifier {
     await computePlan();
   }
 
-  // ── 双系统（S15，docs/boot-entry-design.md §4.9）──────────────────────────
+  // ── 双系统（见 tools/gk3boot/README.md）──────────────────────────────────
   /// 这次装完是不是双系统：ESP 上有 Windows 的启动管理器，而且是装在它旁边 / 在它旁边重新安装
   bool get dual {
     final w = espInfo?.windows ?? false;
@@ -406,7 +406,7 @@ class Session extends ChangeNotifier {
     };
   }
 
-  /// 冷开机默认进哪个系统（U12）：预选 Android —— 依赖最少（不写任何变量），而且第一次开机本来就要进 Android
+  /// 冷开机默认进哪个系统：预选 Android —— 依赖最少（不写任何变量），而且第一次开机本来就要进 Android
   /// 走开机向导。选 Windows 时后端把它写成 GK3 的 set_default 请求，由统一启动入口第一次运行时生效
   String defaultOs = 'android';
   void setDefaultOs(String v) {

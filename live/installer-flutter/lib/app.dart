@@ -22,9 +22,9 @@ extension SessionX on BuildContext {
   L10n get l => L10n.of(this);
 }
 
-/// 跳到下一步。★ 导航就是 Navigator 的栈：返回 = 回到真正来的那一页。
+/// 跳到下一步。导航就是 Navigator 的栈：返回 = 回到真正来的那一页。
 /// C 版用 screen++/screen-- 时，分支屏插在枚举中间，"来源"页按返回会掉进
-/// 一个用户没走过的"缩分区"页（docs/archive/stage7-installer-roadmap.md:146-151）。
+/// 一个用户没走过的"缩分区"页。
 ///
 /// [name] 给路由起名，后面要按名字跳过它时用（失败页"返回修改"跳过风险确认页，见 screens_risk.dart 的 kRiskRoute）
 Future<T?> go<T>(BuildContext context, Widget page, {bool replace = false, String? name}) {
