@@ -1,148 +1,68 @@
-name: 🔬 Hardware feature report / 硬件功能报告
-description: You tried a piece of hardware on a real machine — working or not, we want the numbers. / 你在实机上试了某个硬件部件，不管通没通，把数字发过来。
-title: "[Hardware] "
+name: Test report / 测试报告
+description: You tried a feature or an accessory on a real machine. Reports that something works are just as welcome. / 你在实机上试了某项功能或某个配件，能用的结果也同样欢迎。
 labels: ["test-report"]
 body:
   - type: markdown
     attributes:
       value: |
-        **Reports of what breaks are as useful as patches**, and a confirmation that something works is not noise — several conclusions in `docs/` were overturned by exactly one user's measurement.
-        **报告哪里坏了和交补丁一样有价值**，"能用"的确认也不是废话 —— `docs/` 里有好几条结论就是被某位用户的一次实测推翻的。
+        Thank you for testing. Many features have only been tried on one or two machines, so every result helps. The "Needs testing on real hardware" section of [docs/TODO.md](https://github.com/vahiru/gaokun-android/blob/main/docs/TODO.md) lists what is still waiting for someone to try.
+        感谢你帮忙测试。很多功能只在一两台机器上试过，每一份结果都有帮助。还在等人测试的项目，列在[docs/TODO.md](https://github.com/vahiru/gaokun-android/blob/main/docs/TODO.md)的"需要在实机上核对的改动"一节。
 
-        Things currently waiting on someone with the right accessory:
-        目前在等有相应配件的人：
-        * **Headset microphone**, and the **speaker enhancement** switch with headphones or Bluetooth audio connected. / **耳机麦**，以及插着耳机或连着蓝牙耳机时的**扬声器增强**开关。
-        * **USB-C**: a hub or dock, a USB stick, an external display (DisplayPort alt mode has never been tested), and plugging the cable back in after standby. / **USB-C**：扩展坞、U 盘、外接显示器（DisplayPort 从没测过），以及待机唤醒后重新插线。
-        * **Audio / Bluetooth deadlock after long uptime** — reported, never reproduced. If it happens to you, look for a `hangdump-*` directory in `/data/vendor/gaokun3/` (needs root); the watchdog collects the evidence automatically. / **长时间运行后音频/蓝牙死锁**：被报过，从未复现。碰上了请去 `/data/vendor/gaokun3/` 看有没有 `hangdump-*` 目录（需要 root），看门狗会自动留证。
-
-        Not supported yet, no need to report as broken: fingerprint (work in progress), TPM, compass (this tablet has no magnetometer), auto-brightness (enabling the light sensor crashes the sensor DSP).
-        目前还不支持、不必当缺陷报的：指纹（进行中）、TPM、指南针（本机没有磁力计）、自动亮度（一使能光感，传感器 DSP 就崩）。
-
-  - type: dropdown
+  - type: input
     id: subject
     attributes:
-      label: What you tested / 测了什么
-      multiple: true
-      options:
-        - Headphone jack / 耳机口
-        - Headset microphone / 耳机麦
-        - Internal microphone / 内置麦
-        - Speakers / speaker enhancement / 扬声器与扬声器增强
-        - Bluetooth — audio, pairing, long uptime / 蓝牙
-        - Audio or Bluetooth deadlock after long uptime / 长时间运行后的音频蓝牙死锁
-        - Wi-Fi / hotspot / Wi-Fi 与热点
-        - Touchscreen / pen / 触摸或手写笔
-        - Keyboard cover / touchpad / 键盘与触控板
-        - Sensors / auto-rotate / 传感器与自动旋转
-        - Camera — front or rear / 摄像头（前或后）
-        - USB-C — hub, USB stick, charger / USB-C（扩展坞、U 盘、充电器）
-        - USB-C DisplayPort / external display / 外接显示
-        - Standby / suspend and wake / 待机与唤醒
-        - Charging / battery life / thermals / 充电、续航、温度
-        - Hardware video decode / 硬件视频解码
-        - A different SC8280XP machine (X13s, other) / 另一台 SC8280XP 机器
-        - Other / 其他
+      label: What you tested / 测试内容
+      placeholder: "Hotspot shared with a phone while connected to Wi-Fi / 连接Wi-Fi的同时开启热点给手机上网"
     validations:
       required: true
 
   - type: dropdown
-    id: outcome
+    id: result
     attributes:
-      label: Outcome / 结果
+      label: Result / 结果
       options:
-        - "Works, as documented / 能用，和文档一致"
-        - "Works, but differently than documented / 能用，但和文档说的不一样"
-        - "Partly works / 半通"
-        - "Does not work / 不通"
-        - "Worse than before — a regression / 比以前更差，疑似回归"
+        - Works / 正常
+        - Works partly / 部分正常
+        - Does not work / 不正常
+        - Worked before, broken now / 以前正常，现在不正常
     validations:
       required: true
 
   - type: input
-    id: release
+    id: version
     attributes:
-      label: Release / 发布版本
-      placeholder: "v0.7.1-alpha"
-    validations:
-      required: true
-
-  - type: textarea
-    id: build
-    attributes:
-      label: Build stamp and kernel / 构建戳与内核
-      description: |
-        The build stamp (`ro.build.date.utc`) says exactly which build you tested; every release note lists it. Over adb:
-        构建戳（`ro.build.date.utc`）能精确确定你测的是哪一版，每份发版说明里都写着它。adb 下跑：
-        ```
-        getprop ro.build.date.utc; getprop ro.build.version.incremental; getprop ro.vendor.gaokun3.version; uname -a; getprop ro.boot.slot_suffix
-        ```
-        Without a computer, the *crDroid version* line in *Settings → About tablet* (looks like `v12.11-20261003`) will do. / 没电脑的话，写「设置 → 关于本机」里"crDroid 版本"那一行（形如 `v12.11-20261003`）。
-      render: shell
-    validations:
-      required: true
-
-  - type: dropdown
-    id: install-path
-    attributes:
-      label: How this build got onto the machine / 这个版本是怎么装上去的
-      multiple: true
-      options:
-        - Graphical installer / 图形安装器
-        - Command-line installer scripts/install-gaokun3.sh / 命令行安装脚本
-        - System update in Settings (OTA) / 设置里的系统更新（OTA）
-        - Local payload — scripts/install-ota-local.sh / 本地 payload 安装
-        - Self-built from source / 自己编的
-        - Other / unsure / 其他或不确定
+      label: Version / 版本
+      description: The release you installed, or the output of `adb shell getprop ro.build.date.utc`. / 安装的版本，或`adb shell getprop ro.build.date.utc`的输出。
+      placeholder: "v1.0.0-rc.3"
     validations:
       required: true
 
   - type: input
-    id: hardware
+    id: machine
     attributes:
       label: Machine / 机器
-      description: |
-        Model, SKU, BIOS version (any BIOS version is supported — this is for statistics). If you are testing a **different** SC8280XP machine, say which one — some findings here (the missing CPU cooling maps, the sensor stack) apply to the whole SoC, not just this tablet.
-        型号、SKU、BIOS 版本（不限版本，填它是为了统计）。如果测的是**别的** SC8280XP 机器，请写清是哪台 —— 本项目有些结论（CPU 缺 cooling map、传感器那一套）对整颗 SoC 都成立，不限于这台平板。
-      placeholder: "GK-W7X, SKU C233, BIOS 2.16"
-    validations:
-      required: true
+      description: Model, SKU and BIOS version. If you tested on another SC8280XP device, please name it. / 型号、SKU和BIOS版本。如果是在其他SC8280XP设备上测试的，请写明设备名称。
+      placeholder: "GK-W7X, SKU C233, BIOS 2.18"
 
-  - type: textarea
+  - type: input
     id: accessory
     attributes:
-      label: Accessory used / 用了什么配件
-      description: Brand and model of the headphones, hub, charger, display, pen… — "a cheap USB-C hub" is less useful than the model number. / 耳机、扩展坞、充电器、显示器、笔的品牌型号 —— "一个便宜的扩展坞"不如型号有用。
+      label: Accessory / 使用的配件
+      description: Brand and model, if an accessory was involved. / 如果用到了配件，请写明品牌和型号。
+      placeholder: "UGREEN 6-in-1 USB-C hub"
 
   - type: textarea
-    id: procedure
+    id: how
     attributes:
-      label: What exactly you did / 具体怎么测的
-      description: |
-        The steps, in order. "Plugged in headphones and pressed play in the music app" is a valid procedure — just say which app and which output.
-        按顺序写步骤。"插上耳机在音乐 App 里点播放"也是合格的步骤 —— 写清哪个应用、哪路输出就行。
-      placeholder: |
-        1. Plugged 3.5 mm headphones into the jack
-        2. Played a file in the music app
-        3. adb shell cat /proc/asound/card0/pcm0p/sub0/status
+      label: How you tested / 测试方法
+      description: The steps, in order. / 按顺序写出步骤。
     validations:
       required: true
 
   - type: textarea
-    id: measurements
+    id: evidence
     attributes:
-      label: Numbers and evidence / 数字与证据
+      label: Logs or measurements / 日志或测量数据
       description: |
-        Anything mechanical beats an impression. How to turn on USB debugging and collect logs is in the [FAQ](https://github.com/vahiru/gaokun-android/blob/main/docs/FAQ.md). Useful probes on this device:
-        任何机械可读的数据都好过主观感受。怎么打开 USB 调试、怎么抓日志见 [FAQ](https://github.com/vahiru/gaokun-android/blob/main/docs/FAQ.md)。本机可用的探针：
-        * audio: `cat /proc/asound/card0/pcm0p/sub0/status` (`state: RUNNING` and an advancing `hw_ptr` prove the DMA is really consuming data), `dumpsys media.audio_flinger` / 音频
-        * sensors: `dumpsys sensorservice` / 传感器
-        * USB-C: `ls /sys/class/typec/`, `cat /sys/class/udc/*/state`, and the kernel log right after plugging in / USB-C 看这几个，加上插线那一刻的内核日志
-        * standby: `cat /sys/power/suspend_stats/success /sys/power/suspend_stats/fail` before and after / 待机：前后各读一次
-        * thermals: `for z in /sys/class/thermal/thermal_zone*; do cat $z/type $z/temp; done` / 温度
-        * always useful: the kernel log around the moment it happened — `adb shell su -c dmesg` (needs root) / 出问题那一刻前后的内核日志（需要 root）
-      render: shell
-
-  - type: textarea
-    id: extra
-    attributes:
-      label: Anything else / 其他补充
+        Optional, but helpful when something does not work. The [FAQ](https://github.com/vahiru/gaokun-android/blob/main/docs/FAQ.md) explains how to collect logs; the kernel log from around the moment of the test is usually the most useful.
+        可选；功能不正常时尤其有帮助。抓取日志的方法见[常见问题](https://github.com/vahiru/gaokun-android/blob/main/docs/FAQ.zh-CN.md)，测试前后的内核日志通常最有用。

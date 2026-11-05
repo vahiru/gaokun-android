@@ -1,67 +1,37 @@
-name: 💬 Other — development task, proposal, question / 其他（开发任务、提案、提问）
-description: You intend to build something, want to take a help-wanted item, or have a question none of the other forms fits. / 你打算动手做某件事、想认领 help-wanted 里的一项，或者有个别的表单都不合适的问题。
-title: "[Other] "
+name: Other / 其他
+description: Development plans, questions about the design, or anything the other forms do not cover. / 开发计划、关于设计的问题，或者其他表单都不合适的内容。
 labels: ["needs-triage"]
 body:
   - type: markdown
     attributes:
       value: |
-        Before asking, the [FAQ](https://github.com/vahiru/gaokun-android/blob/main/docs/FAQ.md) and the [install guide](https://github.com/vahiru/gaokun-android/blob/main/docs/INSTALL.md) answer the common questions — boot menu, rollback, logs, uninstalling. Quick "is this normal?" questions get faster answers in the chat groups linked on the previous page.
-        提问之前，[FAQ](https://github.com/vahiru/gaokun-android/blob/main/docs/FAQ.md) 和[安装指南](https://github.com/vahiru/gaokun-android/blob/main/docs/INSTALL.md)回答了常见问题 —— 开机菜单、回退、抓日志、卸载。"这正常吗"这种小问题，在上一页列出的交流群里问回得更快。
-
-        **If you plan to do work:** nothing about this platform exists in any wiki or in any model's training data, so a proposal is only as good as its evidence. **"Vendor X ships this, so it should work here" is not evidence** — there is no Android BSP for the 8cx family at all, and several plausible-sounding conclusions in this repo turned out to be flatly wrong. Check [`docs/TODO.md`](https://github.com/vahiru/gaokun-android/blob/main/docs/TODO.md) first — most obvious ideas are already there, usually with the reason they are parked.
-        **如果你打算动手：** 这个平台的任何东西都不在任何 wiki 或任何模型的训练数据里，所以提案的价值全在证据上。**"某厂有这个功能所以本机应该也行"不算证据** —— 8cx 系列压根没有 Android BSP，而本仓里好几条听起来很有道理的结论后来被证明是错的。先看一眼 [`docs/TODO.md`](https://github.com/vahiru/gaokun-android/blob/main/docs/TODO.md) —— 显而易见的想法基本都在里面，而且大多写了为什么搁置。
-
-        If you simply want the ROM to gain a capability, the **Feature request** form asks less of you and is the right place for a wish.
-        如果你只是希望这个 ROM 多一个能力，请用 **功能申请** —— 那个要填的少得多，提需求走那边就对了。
+        For quick questions, the Telegram channel and the QQ group usually answer faster. If you would like to work on something, it helps to check [docs/TODO.md](https://github.com/vahiru/gaokun-android/blob/main/docs/TODO.md) first; many items there already describe the next step.
+        简单的问题在Telegram频道或QQ群里通常能更快得到回复。如果你想参与开发，可以先看看[docs/TODO.md](https://github.com/vahiru/gaokun-android/blob/main/docs/TODO.md)，很多条目已经写好了下一步。
 
   - type: dropdown
     id: kind
     attributes:
       label: Kind / 类型
       options:
-        - "I want to work on this myself / 我想自己做这个"
-        - "Proposal, worked out enough for someone else to pick up / 提案，已想到别人能接手的程度"
-        - "Claiming an item from Help wanted / 认领 Help wanted 里的一项"
-        - "Question about how something is designed here / 想问本项目某处为什么这么设计"
-        - "Something else / 别的"
+        - I would like to work on something / 我想参与开发某项内容
+        - A proposal / 提案
+        - A question about the design / 关于设计的问题
+        - Something else / 其他
     validations:
       required: true
-
-  - type: input
-    id: existing
-    attributes:
-      label: Related backlog item or issue, if any / 对应的待办项或 issue（如果有）
-      placeholder: "Help wanted #2 — GPU SMMU interrupt fix  /  docs/TODO.md B6  /  #12"
-
-  - type: input
-    id: release
-    attributes:
-      label: Release you are on, if it matters / 你装的版本（相关的话）
-      description: The release tag, and the build stamp from `getprop ro.build.date.utc` if you have it. / 发布 tag；有的话再加上 `getprop ro.build.date.utc` 的构建戳。
-      placeholder: "v0.7.1-alpha, 1791053208"
 
   - type: textarea
     id: what
     attributes:
-      label: What and why / 做什么、为什么
-      description: What the machine cannot do today and what it would do afterwards — or, for a question, what you want to know and what you already found. / 现在做不到什么、做完之后能做到什么；提问的话，写你想知道什么、已经查到了什么。
+      label: Details / 详细说明
+      description: |
+        For development plans and proposals, it helps to describe the goal, what you already know about how it could work on this machine (related code, kernel logs, existing documents), and a first step whose result can be checked on the device.
+        如果是开发计划或提案，建议写明目标、你对它在本机上如何实现已经了解到的情况（相关代码、内核日志、已有文档），以及第一个能在设备上验证结果的步骤。
     validations:
       required: true
 
-  - type: textarea
-    id: evidence
+  - type: input
+    id: related
     attributes:
-      label: Evidence it is possible on this hardware (tasks and proposals) / 本机可行的证据（开发任务和提案必填）
-      description: |
-        Source paths with line numbers, kernel log lines, sysfs nodes that exist, an upstream commit — anything checkable. If you are not sure it is possible, say so plainly; "I do not know, this needs verification" is a perfectly good answer here and costs everyone far less than a confident guess.
-        源码路径加行号、内核日志行、确实存在的 sysfs 节点、上游 commit —— 任何可核对的东西。不确定就直说：在这个项目里"我不确定，需要验证"是完全合格的回答，比一个自信的猜测便宜得多。
-
-  - type: textarea
-    id: first-step
-    attributes:
-      label: First verifiable step (tasks and proposals) / 第一个可验证的步骤（开发任务和提案必填）
-      description: |
-        The smallest change whose success or failure can be observed on the device, and how you would observe it. Work here moves in increments that can be checked on hardware.
-        最小的那一步改动 —— 在设备上能看出成没成，以及你打算怎么看。这个项目的活是按"实机可验证的增量"推进的。
-      placeholder: "Change the SMMU interrupt numbers in the DTB, then check that a deliberately triggered context fault shows up in the kernel log without smmu-nostall.sh running."
+      label: Related item / 相关条目
+      description: Optional. A related issue, pull request or item in docs/TODO.md. / 可选。相关的issue、PR或docs/TODO.md里的条目。

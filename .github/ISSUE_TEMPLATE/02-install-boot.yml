@@ -1,40 +1,26 @@
-name: 🧨 Install / boot failure / 安装与开机失败
-description: The installer failed, or the machine will not boot far enough to use. / 装不上，或者开不起来。
-title: "[Install] "
+name: Install / boot failure / 安装与启动问题
+description: The installation failed, or the system does not start properly. / 安装失败，或者系统无法正常启动。
 labels: ["install", "needs-triage"]
 body:
   - type: markdown
     attributes:
       value: |
-        This machine has **no serial console and no working recovery**, so most evidence lives in two places: the diagnostics the installer writes onto its own medium, and the rescue system in the boot menu (`gaokun3 rescue (runs from RAM)`, if you installed it). If you can still reach either, say so — that usually means the machine is repairable and this issue is solvable. How to get into each is in the [FAQ](https://github.com/vahiru/gaokun-android/blob/main/docs/FAQ.md).
-        本机**没有串口、也没有可用的 recovery**，所以证据基本只在两个地方：安装器写在自己介质上的诊断文件，以及开机菜单里的救援系统（`gaokun3 rescue (runs from RAM)`，装的时候带上了才有）。只要还能进其中一个，请写明 —— 那基本意味着机器还救得回来。怎么进见 [FAQ](https://github.com/vahiru/gaokun-android/blob/main/docs/FAQ.md)。
+        Sorry you ran into this. Please first check the "If it does not boot" section of the [install guide](https://github.com/vahiru/gaokun-android/blob/main/docs/INSTALL.md); many common cases are covered there.
+        遇到这种情况很抱歉。请先看一下[安装说明](https://github.com/vahiru/gaokun-android/blob/main/docs/INSTALL.zh-CN.md)里"无法开机时"一节，常见的情况那里都有说明。
 
-        ⚠️ **Redact your Wi-Fi SSID, MAC addresses and public IP before pasting** — the installer's diagnostic log contains all three.
-        ⚠️ **贴之前先删掉 Wi-Fi 名称（SSID）、MAC 地址、公网 IP** —— 安装器的诊断日志里这三样都有。
-
-  - type: checkboxes
-    id: preflight
-    attributes:
-      label: Pre-flight / 提交前确认
-      options:
-        - label: "I read the [install guide](https://github.com/vahiru/gaokun-android/blob/main/docs/INSTALL.md), including \"If it will not boot\", and my symptom is not in that table. / 读过[安装指南](https://github.com/vahiru/gaokun-android/blob/main/docs/INSTALL.md)，包括\"开不了机怎么办\"，我的症状不在那张表里。"
-          required: true
-        - label: "Secure Boot is disabled in the UEFI setup. / UEFI 里已关闭 Secure Boot。"
-          required: true
-        - label: "I checked the downloaded files against the release's SHA256SUMS. / 核对过下载文件与发布页 SHA256SUMS 一致。"
-          required: true
+        This machine has no serial console, so most clues come from the installer's diagnostic files and from the rescue system in the boot menu. If either of them still works, the machine can usually be recovered.
+        这台机器没有串口，线索主要来自安装器保存的诊断文件和开机菜单里的救援系统。只要其中一个还能用，机器一般都能救回来。
 
   - type: dropdown
     id: method
     attributes:
-      label: How you installed / 安装方式
+      label: How you installed or updated / 安装或更新方式
       options:
-        - Graphical installer, booted from a USB stick / 图形安装器，U 盘启动
-        - Graphical installer, started from Windows with gaokun3-setup.cmd (no USB stick) / 图形安装器，从 Windows 用 gaokun3-setup.cmd 启动（免 U 盘）
-        - Graphical installer, from the boot menu entry on the internal disk / 图形安装器，从内置盘的开机菜单项进入
-        - Command-line installer scripts/install-gaokun3.sh from a Linux live USB / 命令行安装脚本（Linux live U 盘）
-        - System update in Settings (OTA) / 设置里的系统更新（OTA）
-        - Local payload — scripts/install-ota-local.sh / 本地 payload 安装
+        - Graphical installer from a USB stick / 图形安装器，从U盘启动
+        - Graphical installer started from Windows (gaokun3-setup.cmd) / 图形安装器，从Windows启动（gaokun3-setup.cmd）
+        - Graphical installer from the boot menu / 图形安装器，从开机菜单进入
+        - Command-line installer (scripts/install-gaokun3.sh) / 命令行安装器（scripts/install-gaokun3.sh）
+        - System update in Settings / 设置中的系统更新
         - Other / 其他
     validations:
       required: true
@@ -43,144 +29,74 @@ body:
     id: mode
     attributes:
       label: Install mode / 安装模式
-      description: For the graphical installer, the choice on its install-mode page. / 图形安装器的话，是安装模式页上选的那一项。
       options:
-        - Erase the whole disk / 清除整个磁盘
-        - Keep the current system (dual boot with Windows) / 保留现有系统（与 Windows 双系统）
-        - Shrink an existing partition to make room / 缩小现有分区腾出空间
-        - Reinstall Android, keep user data / 重新安装 Android，保留数据
-        - Reinstall Android, wipe user data / 重新安装 Android，清除数据
-        - Adjust the disk manually / 手动调整磁盘
-        - Not applicable (command line, OTA) / 不适用（命令行、OTA）
-    validations:
-      required: true
-
-  - type: dropdown
-    id: source
-    attributes:
-      label: Where the system image came from / 系统镜像从哪来
-      options:
-        - From the installer's medium / 安装介质里自带的
-        - Downloaded by the installer over Wi-Fi (network install) / 安装器联网下载的（网络安装）
-        - Files I downloaded from the release page / 我自己从发布页下载的文件
+        - Erase the whole disk / 清空整块硬盘
+        - Dual boot with Windows / 与Windows双系统
+        - Reinstall Android, keep data / 重新安装Android，保留数据
+        - Reinstall Android, wipe data / 重新安装Android，清除数据
+        - Adjust partitions manually / 手动调整分区
         - Not applicable / 不适用
-    validations:
-      required: true
-
-  - type: input
-    id: release
-    attributes:
-      label: Release and installer version / 发布版本与安装器版本
-      description: |
-        The release tag (or OTA zip filename), and the installer's version — shown at the bottom of its side bar and in `gaokun3/release.txt` on the medium.
-        发布 tag（或 OTA zip 文件名），以及安装器版本 —— 显示在安装器侧边栏底部，也写在介质上的 `gaokun3/release.txt` 里。
-      placeholder: "v0.7.1-alpha, installer 0.1.0-preview"
-    validations:
-      required: true
-
-  - type: input
-    id: hardware
-    attributes:
-      label: Machine / 机器
-      description: |
-        Model, SKU, BIOS version (from the label on the back and the UEFI setup screen; the installer's pre-check page also shows it). Any BIOS version is supported — this is for statistics.
-        型号、SKU、BIOS 版本（机身标签 + UEFI 设置界面；安装器的预检页也会显示）。BIOS 版本不限，填它是为了统计。
-      placeholder: "GK-W7X, SKU C233, BIOS 2.16"
-    validations:
-      required: true
 
   - type: dropdown
     id: stage
     attributes:
-      label: Where it broke / 卡在哪一步
+      label: Where it went wrong / 出问题的环节
       options:
-        - The USB stick will not boot / U 盘引导不起来
-        - gaokun3-setup.cmd failed, or the machine did not restart into the installer / gaokun3-setup.cmd 报错，或者重启后没进安装器
-        - The installer starts, but its screen, touch or Wi-Fi does not work / 安装器起来了，但屏幕、触摸或 Wi-Fi 不工作
-        - The installer's pre-check refused / 安装器预检不通过
-        - The installer failed while downloading / 安装器下载失败
-        - The installer failed while writing the disk / 安装器写盘中途失败
-        - scripts/install-gaokun3.sh failed / 命令行安装脚本报错
-        - Installer finished, but there is no boot menu or no Android entry / 装完了但没有启动菜单或没有 Android 项
-        - Boot menu appears, Android entry reboots or resets / 菜单有，选 Android 就重启
-        - Android boots but reset-loops before the desktop / 起来了但进桌面前循环重启
-        - Boots to desktop, but a core piece is dead (no Wi-Fi / no GPU / no sound) / 能进桌面但核心功能是死的
-        - Broke after a system update / 系统更新之后坏的
-        - Windows no longer boots, or asks for the BitLocker recovery key / Windows 起不来了，或者要 BitLocker 恢复密钥
-        - The rescue system itself will not boot / 救援系统起不来
+        - The installer does not start / 安装器无法启动
+        - The installer reported an error / 安装器报错
+        - No Android entry in the boot menu after installing / 安装后开机菜单里没有Android
+        - Android does not reach the desktop / Android无法进入桌面
+        - It broke after a system update / 系统更新之后出了问题
+        - Windows no longer starts, or asks for the BitLocker recovery key / Windows无法启动，或要求输入BitLocker恢复密钥
         - Other / 其他
     validations:
       required: true
 
   - type: dropdown
-    id: rescue
+    id: reachable
     attributes:
-      label: What can you still reach? / 现在还能进什么？
+      label: What still works / 现在还能进入什么
       options:
-        - "The rescue system, with a network (SSH works) / 救援系统，有网（SSH 能连）"
-        - "The rescue system, but no network / 救援系统能进，但没网"
-        - "Only the installer USB stick / 只有安装 U 盘还能起"
-        - "Android, with adb / Android 能起、adb 能连"
-        - "Nothing boots / 什么都起不来"
-        - "No rescue system was installed / 没装救援系统"
+        - Android, with adb / Android，可以使用adb
+        - The rescue system / 救援系统
+        - Only the installer USB stick / 只有安装器U盘
+        - Nothing / 都进不去
     validations:
       required: true
 
-  - type: textarea
-    id: symptom
+  - type: input
+    id: version
     attributes:
-      label: What you did and what happened / 你做了什么、发生了什么
-      description: Exact commands and exact messages. If the screen showed something before dying, describe it or attach a photo. / 命令和报错原文照贴。屏幕上闪过什么也写下来，可以配照片。
+      label: Release and installer version / 系统与安装器版本
+      description: The installer version is shown at the bottom of its side bar. / 安装器版本显示在它的侧边栏底部。
+      placeholder: "v1.0.0-rc.3, installer 0.2.0-rc.2"
+    validations:
+      required: true
+
+  - type: input
+    id: machine
+    attributes:
+      label: Machine / 机器
+      description: Model, SKU and BIOS version. / 型号、SKU和BIOS版本。
+      placeholder: "GK-W7X, SKU C233, BIOS 2.18"
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened / 问题描述
+      description: What you did, and the exact error message if there was one. A photo of the screen is welcome. / 你做了哪些操作；如果有报错，请写下原文。也欢迎附上屏幕照片。
     validations:
       required: true
 
   - type: textarea
     id: diag
     attributes:
-      label: Installer diagnostics / 安装器诊断文件
+      label: Diagnostic files / 诊断文件
       description: |
-        The installer and the rescue system save `installer.log` and a `boot-<time>.log` (plus a screenshot) in **`gaokun3/diag/`** on their own medium. On the USB stick that is the FAT partition labelled `GK3LIVE` — plug it into any computer and attach the files. From the rescue system they are under `/media/gk3/gaokun3/diag/`. **Redact SSIDs and MAC addresses first.**
-        安装器和救援系统会把 `installer.log` 和 `boot-<时间>.log`（外加一张截图）存到自己介质上的 **`gaokun3/diag/`**。U 盘上就是卷标为 `GK3LIVE` 的 FAT 分区 —— 插到任何一台电脑上就能拷出来附上。在救援系统里是 `/media/gk3/gaokun3/diag/`。**上传前先删掉 SSID 和 MAC 地址。**
-      render: shell
+        The installer and the rescue system save their logs in the `gaokun3/diag/` folder. On the installer USB stick this is on the partition labelled `GK3LIVE`, which any computer can open; in the rescue system it is `/media/gk3/gaokun3/diag/`. Please attach the files, after removing Wi-Fi names and MAC addresses. The [FAQ](https://github.com/vahiru/gaokun-android/blob/main/docs/FAQ.md) describes how to collect more information.
+        安装器和救援系统会把日志保存在`gaokun3/diag/`文件夹里：在安装器U盘上，它位于卷标为`GK3LIVE`的分区，任何电脑都能打开；在救援系统里，它位于`/media/gk3/gaokun3/diag/`。请删除其中的Wi-Fi名称和MAC地址后作为附件上传。更多收集方法见[常见问题](https://github.com/vahiru/gaokun-android/blob/main/docs/FAQ.zh-CN.md)。
 
   - type: textarea
-    id: disk
+    id: extra
     attributes:
-      label: Partition table and boot entries / 分区表与启动项
-      description: |
-        From the rescue system (on screen or over SSH), as root — the ESP is mounted read-only here:
-        在救援系统里（屏幕上或 SSH）以 root 跑，ESP 以只读方式挂载：
-        ```
-        lsblk -o NAME,SIZE,FSTYPE,PARTLABEL; sgdisk -p /dev/nvme0n1
-        mount -o ro /dev/disk/by-partlabel/esp /mnt
-        cat /mnt/loader/loader.conf; ls -l /mnt/loader/entries/; ls -l /mnt/*/android/slot_*/; df -h /mnt; umount /mnt
-        ```
-        If `by-partlabel/esp` does not exist (partitioned by hand, dual boot), use the vfat partition `lsblk` shows instead — and say so: a wrong ESP name is itself a known cause of failed updates.
-        如果没有 `by-partlabel/esp`（手工分区、双系统），换成 `lsblk` 里那个 vfat 分区，并写明 —— ESP 名字不对本身就是更新失败的已知原因。
-        A **full ESP** is also a real and non-obvious cause on this device — it makes the update's postinstall step fail.
-        **ESP 满了**在本机也是真实且不显然的故障原因 —— 会让更新的 postinstall 步骤失败。
-      render: shell
-
-  - type: textarea
-    id: logs
-    attributes:
-      label: Other logs / 其他日志
-      description: |
-        Whatever else you can get, in this order of usefulness (details in the [FAQ](https://github.com/vahiru/gaokun-android/blob/main/docs/FAQ.md)):
-        其他能拿到的，按有用程度排序（详见 [FAQ](https://github.com/vahiru/gaokun-android/blob/main/docs/FAQ.md)）：
-        * the full output of the command-line installer, if you used it / 用的是命令行脚本的话，它的完整输出
-        * `/sys/fs/pstore/` from the rescue system — ⚠️ **empty is expected for first-stage-mount failures**: Android init calls `reboot()` rather than panicking. Adding `androidboot.init_fatal_panic=true` to the boot entry turns that into a real panic that `efi_pstore` does capture. / 救援系统里的 `/sys/fs/pstore/` —— ⚠️ **first-stage mount 失败时它必然是空的**：init 是主动 `reboot()` 而不是 panic。给启动项加 `androidboot.init_fatal_panic=true` 才能把它变成真 panic 被 `efi_pstore` 抓住。
-        * `adb logcat -b all -d`, if adb ever comes up / adb 起来过的话
-      render: shell
-
-  - type: textarea
-    id: firmware
-    attributes:
-      label: Firmware (only if GPU, Wi-Fi or sound is dead) / 固件（只在 GPU、Wi-Fi 或声音不工作时填）
-      description: |
-        The release images already contain the proprietary firmware; a normal install needs nothing extra. But missing firmware looks exactly like broken hardware — no GPU, no Wi-Fi, no sound — so if that is your symptom, paste:
-        发布镜像里已经带着专有固件，正常安装不需要另外找。但**固件缺失的表现和硬件坏了一模一样**（没 GPU、没 Wi-Fi、没声音），症状是这个的话请贴：
-        ```
-        adb shell 'ls /vendor/firmware/qcom/sc8280xp/HUAWEI/gaokun3/'; adb shell su -c 'dmesg' | grep -i firmware
-        ```
-      render: shell
+      label: Anything else / 其他补充

@@ -1,23 +1,17 @@
 blank_issues_enabled: false
 contact_links:
-  - name: 💬 Telegram — "is this normal?" / 提问闲聊
+  - name: Telegram
     url: https://t.me/gaokunAndroid
-    about: Fast answers. Anything reproducible still deserves an issue, so it does not get lost in scrollback. / 能复现的问题请开 issue，聊天记录会沉底。
-  - name: 💬 QQ 群 920133252
-    url: https://github.com/vahiru/gaokun-android/blob/main/README.zh-CN.md
-    about: 中文交流群，群号 920133252。
-  - name: 📄 Known issues / 已知问题
-    url: https://github.com/vahiru/gaokun-android/releases/latest
-    about: The latest release notes list what is known and already tracked. / 最新发版说明里列着已知、已在跟踪的问题，不用重复提。
-  - name: ❓ FAQ / 常见问题
+    about: For quick questions and discussion. Please still open an issue for anything you can reproduce. / 适合提问和讨论；能复现的问题请仍然提交issue。
+  - name: QQ群 920133252
+    url: https://qm.qq.com/q/3VIV2KY6o0
+    about: 中文交流群。
+  - name: Known limitations / 已知限制
+    url: https://github.com/vahiru/gaokun-android/blob/main/docs/known-limitations.md
+    about: Limitations that are already known, with workarounds. / 已知的限制及应对办法。
+  - name: FAQ / 常见问题
     url: https://github.com/vahiru/gaokun-android/blob/main/docs/FAQ.md
-    about: Boot menu, rollback, collecting logs, the rescue system, uninstalling. / 开机菜单、回退、抓日志、救援系统、卸载。
-  - name: 🗂 Backlog / 待办清单
-    url: https://github.com/vahiru/gaokun-android/blob/main/docs/TODO.md
-    about: Every open and parked item, with the reason it is parked and the first concrete step. / 每一项为什么搁置、下一步是什么，都写了。
-  - name: 🧭 Install guide / 安装指南
+    about: Boot menu, updates and rollback, collecting logs, the rescue system, uninstalling. / 启动菜单、更新与回退、抓取日志、救援系统、卸载。
+  - name: Install guide / 安装说明
     url: https://github.com/vahiru/gaokun-android/blob/main/docs/INSTALL.md
-    about: Read "If it will not boot" before filing an install problem. / 开安装类 issue 前先读"开不了机怎么办"。
-  - name: 📚 Engineering record / 工程案卷
-    url: https://github.com/vahiru/gaokun-android/tree/main/docs
-    about: What was measured, what turned out wrong, which conclusions were overturned. / 实测了什么、哪条结论被推翻了。
+    about: Please read this before reporting an installation problem. / 报告安装问题前请先阅读。
