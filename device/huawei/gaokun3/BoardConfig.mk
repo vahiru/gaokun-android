@@ -6,7 +6,7 @@
 # boot to fail, and this machine has no serial console to tell us which one.
 #
 # Everything marked [measured] came from the Stage 0 hardware inventory on the
-# real device (docs/hw-inventory.md), not from a template.
+# real device (docs/dev/hardware.md), not from a template.
 #
 
 # ---------------------------------------------------------------- 架构
@@ -125,8 +125,8 @@ BOARD_BOOTIMAGE_PARTITION_SIZE := 67108864
 #   退回：这一行改回 permissive（userdebug 变体认它；user 变体无条件 enforcing，本仓不编 user，#117 §15）。
 #   ⚠️ OTA-5：ESP 的 GPT 名字既不是 esp 也不是 EFI system partition 的手工分区机器，enforcing 下 postinstall 扫全盘找 ESP
 #   会被拒（通用 block_device，domain.te:705）⇒ OTA 失败；INSTALL 写了 `sgdisk -c <N>:esp` 改名。
-# ⚠️ 绝对不要加 earlycon：强烈怀疑 earlycon=efifb 会挂死本机启动，
-#    见 docs/stage1-kernel-plan.md 第 1.0 节。
+# ⚠️ 绝对不要加 earlycon：earlycon=efifb 会挂死本机启动，
+#    见 docs/dev/android-bringup.md。
 BOARD_KERNEL_CMDLINE := \
     androidboot.flash.locked=0 androidboot.verifiedbootstate=orange \
     iommu.passthrough=0 iommu.strict=0 \
@@ -184,7 +184,7 @@ BOARD_GAOKUN3_DYNAMIC_PARTITIONS_SIZE := 12683575296   # super - 200 MiB
 # [实测必需] 只有设了这一项，AOSP 才会在 system 镜像根目录创建 /metadata 挂载点。
 # 缺了它，init 在 switch_root 时会因为
 #   "Unable to move mount at '/metadata' to '/system/metadata'"
-# 而失败并复位。见 docs/stage2-findings.md 第 4 节。
+# 而失败并复位。见 docs/dev/android-bringup.md。
 # 注意：不能事后往镜像里 mkdir 补 —— system.img 按内容精确打包，可用空间为 0。
 BOARD_USES_METADATA_PARTITION := true
 

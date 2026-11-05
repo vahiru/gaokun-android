@@ -7,7 +7,7 @@
 #   本文件                                    gadget 骨架 + ffs 挂载（adb、MTP、PTP）+ 角色 + configfs=1
 #                                            + MTP / PTP 配置要的链接和产品 ID
 #
-# 实测教训（docs/stage2-findings.md 第 8.3quinquies 节）：
+# 实测教训（docs/dev/android-bringup.md）：
 # ① 骨架（尤其 mkdir functions/ffs.adb 注册实例）必须在 functionfs mount
 #    之前，否则 mount 报 ENODEV —— 全部放 post-fs-data 按序执行。
 # ② UCSI（EC 内建后）会把 otg 口切成 host，xhci 一起来 gadget 就没戏。

@@ -1,4 +1,4 @@
-# 手写笔（M-Pencil）守护进程，说明见 docs/stylus.md。
+# 手写笔（M-Pencil）守护进程，说明见 docs/dev/stylus.md。
 #
 # 不用 root：user system 加上这两个组就够了。
 #   /dev/gk3_pen       0660 system system（ueventd.gaokun3.rc）  从片的帧

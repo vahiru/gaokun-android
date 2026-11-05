@@ -14,7 +14,7 @@
                                     （WiFi HAL 用它的 libwifi-hal-emu）
       external/mesa3d               platform/external/mesa3d @ android-17.0.0_r1
                                     （VERSION = 26.1.0-devel；A17 起在它上面重新生成 turnip，
-                                     不再铺 26.0.3 归档，见 docs/a17-migration-plan.md）
+                                     不再铺 26.0.3 归档，见 docs/dev/mesa-a17.md）
       external/minigbm              platform/external/minigbm
       external/drm_hwcomposer       platform/external/drm_hwcomposer
       external/deqp-deps/glslang    platform/external/deqp-deps/glslang
@@ -44,7 +44,7 @@
            remote="aosp" />
   <!--
     external/hexagonrpc —— 传感器用。它给 SLPI 上的 DSP 当只读文件服务器
-    （AP 侧没有到传感器芯片的总线，见 docs/stage4-findings.md #37）。
+    （AP 侧没有到传感器芯片的总线，见 docs/dev/sensors-ssc-protocol.md）。
 
     ★ 上游【自带完整 Android 构建支持】，不用我们写 Android.bp：
         Android.bp                  cc_defaults "hexagonrpc_defaults"

@@ -32,8 +32,8 @@
        拓扑：cpu0-3 = Cortex-A78C（capacity-dmips-mhz 981）、cpu4-7 = Cortex-X1C（1024），两个 cpufreq 域
        （refs/linux-v7.2-rc2/arch/arm64/boot/dts/qcom/sc8280xp.dtsi:49-226，qcom,freq-domain <&cpufreq_hw 0/1>）。
        频点：实机 /sys/devices/system/cpu/cpufreq/policy{0,4}/stats/time_in_state（1.0.0-dev.3 验收的
-       freq-before.txt）—— policy0 21 档 300.0–2438.4 MHz、policy4 18 档 825.6–2688.0 MHz；与
-       docs/stage6-crdroid.md:1176（max 2.44 / 2.69 GHz）、:1309（cpufreq-cpu0 max_state 20、cpu4 17）一致。
+       freq-before.txt）—— policy0 21 档 300.0–2438.4 MHz、policy4 18 档 825.6–2688.0 MHz（max 2.44 / 2.69 GHz，
+       cpufreq-cpu0 max_state 20、cpu4 17，见 docs/dev/hardware.md）。
        每核电流（估计，未实测）：满频 A78C ≈ 1.0 W、X1C ≈ 2.0 W；其余档位按 P = Pmax·(f/fmax)·(V/Vmax)²、
        电压从最低档的 0.55·Vmax 线性升到满频 Vmax 推算，再按 7.7 V 折成 mA。 -->
   <array name="cpu.clusters.cores">
@@ -177,7 +177,7 @@
   <item name="camera.avg">150</item>
   <item name="camera.flashlight">80</item>
 
-  <!-- ── 没有的硬件：GPS、蜂窝基带（本机无 modem，CLAUDE.md「关键约束」）—— 全 0 ──── -->
+  <!-- ── 没有的硬件：GPS、蜂窝基带（本机无 modem，见 docs/dev/hardware.md）—— 全 0 ──── -->
   <item name="gps.on">0</item>
   <array name="gps.signalqualitybased">
     <value>0</value>

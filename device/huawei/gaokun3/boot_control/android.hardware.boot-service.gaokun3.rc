@@ -5,7 +5,7 @@ service vendor.boot-gaokun3 /vendor/bin/hw/android.hardware.boot-service.gaokun3
     user root
     group root
 
-# ★ 统一启动入口（2026-10-05，S9；docs/boot-entry-design.md §4.6.1）：开机完成时让 HAL 的线程干活
+# ★ 统一启动入口（tools/gk3boot/README.md）：开机完成时让 HAL 的线程干活
 #   （Gk3Boot.cpp：bless 入口条目、清 GK3 boot_streak、导出 vendor.gaokun3.bootentry.*、部署 / 撤掉入口）。
 #   HAL 不直接读 sys.boot_completed（boot_status_prop），由这里转成我们自己的 vendor 属性：
 #   vendor_init 读得到 boot_status_prop（refs/lineage-sepolicy/private/vendor_init.te:316），
@@ -13,7 +13,7 @@ service vendor.boot-gaokun3 /vendor/bin/hw/android.hardware.boot-service.gaokun3
 on property:sys.boot_completed=1
     setprop vendor.gaokun3.boot.done 1
 
-# ★ 统一启动入口 S15（双系统，2026-10-05；docs/boot-entry-design.md §4.6.1 动作 7、§4.9.3、§4.9.4；⬜ 未编译、未上机）
+# ★ 统一启动入口（双系统，tools/gk3boot/README.md）
 #
 # 1) Parts 的"重启到 Windows" / "默认启动系统"：Parts 是 system_app（coredomain），写不了 vendor 属性，
 #    只能设 system_prop 的 sys.gaokun3.bootreq（refs/lineage-sepolicy/private/system_app.te:43）。触发条件由 init 求值，

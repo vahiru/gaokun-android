@@ -1,5 +1,5 @@
 // 应用视角的录音冒烟测试（AAudio）：走 AudioFlinger → 音频策略 → HAL → ALSA 的真实路径
-// （tinycap 绕过了 HAL 与策略 —— 所以 #40 之后 App 录音坏了也没人发现，见 docs/stage4-findings.md #127）。
+// （tinycap 绕过了 HAL 与策略，见 docs/dev/audio-video.md）。
 // 不进镜像（不在 PRODUCT_PACKAGES 里），`m gaokun3-mic-smoke` 后 push 到 /data/local/tmp 跑。
 // 不走 AOSP 树也能用 NDK 编（scripts/audio/mic-verify.sh 的文件头有命令）。
 cc_binary {

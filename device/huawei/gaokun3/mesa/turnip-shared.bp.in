@@ -2,7 +2,7 @@
 //
 // ⚠️ 仅 A16。A17 的 meson2hermetic 直接生成 cc_library_shared "vulkan.freedreno"
 // （target_renames + relative_install_path: "hw"），不再需要这个手写包装；
-// compile_multilib 由 scripts/mesa-a17/postprocess.py 补。见 docs/mesa-a17.md。
+// compile_multilib 由 scripts/mesa-a17/postprocess.py 补。见 docs/dev/mesa-a17.md。
 //
 // meson_to_hermetic 只生成了 cc_library_static "vulkan_freedreno"（对应
 // meson 的 libvulkan_freedreno）。Android 的 Vulkan 加载器要的是

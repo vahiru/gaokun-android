@@ -3,7 +3,7 @@
 # by-name 由 GPT 的 PARTLABEL 生成。内置盘上 Windows 建的分区 PARTLABEL
 # 全是 "Basic data partition"（不唯一），不能引用；但下面这三个分区是
 # 我们自己新建的，建的时候就把 PARTLABEL 设成 super / userdata / metadata，
-# 所以 by-name 可用。见 docs/stage2-plan.md 第 2.2 节。
+# 所以 by-name 可用。见 docs/dev/android-bringup.md。
 #
 # <src>  <mnt_point>  <type>  <mnt_flags>  <fs_mgr_flags>
 #

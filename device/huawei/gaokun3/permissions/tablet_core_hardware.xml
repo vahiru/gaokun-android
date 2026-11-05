@@ -37,8 +37,8 @@
     <feature name="android.hardware.audio.output" />
     <feature name="android.hardware.location" />
     <feature name="android.hardware.location.network" />
-    <!-- gaokun3（v1.0 HW-7，2026-10-05）：删掉了 android.hardware.sensor.compass。
-         本机没有磁力计（docs/sensors-ssc-protocol.md：mag ❌；sensorservice 只有 SH3001 加速度计 / 陀螺仪），
+    <!-- gaokun3（2026-10-05）：删掉了 android.hardware.sensor.compass。
+         本机没有磁力计（docs/dev/sensors-ssc-protocol.md：sensorservice 只有 SH3001 加速度计 / 陀螺仪），
          声明了指南针，指南针 / AR 类应用能装、打开却拿不到磁力计。陀螺仪另由
          android.hardware.sensor.gyroscope.xml 声明（device.mk）。 -->
     <feature name="android.hardware.sensor.accelerometer" />

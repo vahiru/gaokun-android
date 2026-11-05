@@ -1,7 +1,7 @@
 #!/vendor/bin/sh
 # SLPI 崩溃 / 自愈之后把传感器整条链收拾回来（v1.0 DISP-14 / HW-1，TODO B21）。
 #
-# 现象（docs/stage4-findings.md #121 §3，实测）：SLPI 崩溃自愈时 init 只把 vendor.hexagonrpcd-sdsp
+# 现象（docs/dev/sensors-ssc-protocol.md，实测）：SLPI 崩溃自愈时 init 只把 vendor.hexagonrpcd-sdsp
 #   按常规重启了（pid 741 退出 → 9002 退出码 4 → 9188），而 SEE 要在 SLPI【起来之后】hexagonrpcd
 #   【再重启一次】才注册传感器（#118 §4）⇒ SSC 里连 accel 都没有，自动旋转失效，直到重启。
 # 收拾办法就是 #121 §3 手工做过、实测有效的那一套：停 HAL → 停 hexagonrpcd（并清掉残留进程）
@@ -19,7 +19,7 @@
 #   vendor.gaokun3.sscrecover.step=stop|start-rpc|start-hal|done，由 rc 里的 vendor_init 动作执行，
 #   与 keyboard.rc / boot HAL 的 bootreq 同一种写法。
 #
-# ⚠️★ 一行命令里永远不用 pkill -f / pgrep -f（CLAUDE.md 运维坑 3）：残留进程用 pidof（按可执行文件名精确匹配）。
+# ⚠️★ 一行命令里永远不用 pkill -f / pgrep -f：残留进程用 pidof（按可执行文件名精确匹配）。
 # ⚠️★ 绝不碰 ambient_light（#37 / #121：一使能 SLPI 的 sensor_process 就整个崩溃）—— 本脚本不开任何 SSC 会话。
 #
 # 关掉自动收拾（做 SLPI 实验时）：setprop persist.vendor.gaokun3.sscrecover 0（root）。

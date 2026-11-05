@@ -1,5 +1,5 @@
 /*
- * 统一启动入口（gk3boot.efi）的 Android 侧：开机完成线程（docs/boot-entry-design.md §4.6.1、S9）。
+ * 统一启动入口（gk3boot.efi）的 Android 侧：开机完成线程（tools/gk3boot/README.md）。
  *
  * ── 为什么放在 boot_control HAL 里 ────────────────────────────────────────────
  *   要做的三件事正好是这个 HAL 已经有权限的：挂 ESP 改文件（EspSlot.cpp，sepolicy/hal_bootctl_default.te）、
