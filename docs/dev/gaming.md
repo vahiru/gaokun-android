@@ -13,8 +13,6 @@
 | 触摸响应 | **`game`触摸预设** | 关闭坐标平滑（减少约25 ms稳态滞后）、debounce设为1帧、关闭手掌位置图（避免贴屏幕边缘平放的拇指被当成手掌撤回）。可在"设置 → 显示 → 触摸模式"切换 | `bin/gaokun3-touch-mode.sh`，详见[`palm-rejection.md`](palm-rejection.md) |
 | 调度 | **后台cpuset限在`0-3`** | 将`background`和`system-background`限制在4个能效核，避免后台任务与前台游戏争抢大核 | `device/huawei/gaokun3/` |
 
----
-
 ## 2. 按应用UID伪装内核版本（`patches/0085`）
 
 在1.0.0-rc.2和rc.3中，`patches/0085`直接覆写全局`init_uts_ns`，导致全系统都读到`6.6.30-android15-8-g0a4d3c12b3`。但这会让系统组件也误以为运行在6.6内核上（例如crDroid 17的`netd`在读到6.6版本时会启用未在主线7.2上验证过的L4S BPF路径，`BpfHandler.cpp:174-178`），在`adb shell`和系统设置中也看不到真实内核版本。
@@ -24,8 +22,6 @@
 * **内核作用域**：`override_release()`仅对`uid % 100000 ≥ 10000`（含多用户与隔离进程，不含overflow UID 65534）返回`kernel.app_osrelease`；其他进程仍读真实`UTS_RELEASE`。`/proc/version`和`/proc/sys/kernel/osrelease`由SELinux拦截，应用只能通过`uname()`读取。
 * **Zygote `os.version`刷新**：由于zygote以root（UID 0）启动并在预加载时缓存Java的`os.version`系统属性，直接fork出的应用进程如果读`System.getProperty("os.version")`仍会拿到真实版本。`crdroid-tree-fixes.py`在应用进程专用化（specialize）后重新调用`uname()`刷新`os.version`，且不再设置可读的`ro.kernel.version`。
 * **属性与模块边界**：`persist.sys.gaokun3.app_kernel_*`使用独立的SELinux类型`gaokun3_app_kernel_prop`，由Parts写入、`vendor_init`在`zygote-start`前写入sysctl，普通应用不可读。内核编译期的`LINUX_VERSION_CODE`、模块`vermagic`、`linux_banner`（`dmesg`首行）均保持真实版本不变。
-
----
 
 ## 3. 环境检测的取舍边界与会话脚本
 

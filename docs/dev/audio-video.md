@@ -2,8 +2,6 @@
 
 本文档说明`gaokun3`的LPASS/SoundWire音频拓扑、扬声器/耳机/麦克风通路配置、低延迟播放修复以及基于`qcom-iris`与`v4l2_codec2`的硬件视频解码架构。
 
----
-
 ## 一、音频拓扑与内核驱动要求
 
 ### 1. 声卡与PCM节点映射
@@ -24,8 +22,6 @@
 - `CONFIG_QRTR_SMD=y`：使AP能够通过RPMSG与ADSP上的Q6服务建立QRTR通信。
 - `CONFIG_PINCTRL_LPASS_LPI=y`、`CONFIG_PINCTRL_SC8280XP_LPASS_LPI=y`、`CONFIG_SC_LPASSCC_8280XP=y`：LPASS LPI引脚与时钟控制器；若缺失则`swr0`/`swr1`/`swr2`与`rxmacro`/`txmacro`/`vamacro`/`wsamacro`全部因`EPROBE_DEFER`挂起。
 - `CONFIG_SND_SOC_WSA883X=y`、`CONFIG_SND_SOC_WCD938X=y`、`CONFIG_SND_SOC_WCD_MBHC=y`：扬声器功放与耳放编解码器驱动。
-
----
 
 ## 二、扬声器、有线耳机与混音器配置（`audio-route.sh`）
 
@@ -70,8 +66,6 @@
      - 在`audio_policy_configuration.xml`中，可热插拔设备端口（`Wired Headphones`、`Wired Headset`、`Wired Headset Mic`）不可写死`address="CARD_0_DEV_0"`，因为`WiredAccessoryManager`构造连接通知时固定传入`address=""`，写死非空地址会导致策略引擎匹配不到模板端口而丢弃事件。省略`address`后，AOSP默认ALSA地址解析自动回退至`(card=0, device=0)`。
      - AOSP `libaudiohal@aidl`的`ModulePrimary`继承自基类空实现`Module::populateConnectedDevicePort`（不会像USB/蓝牙子类那样探测硬件填充采样率与通道掩码），而`setDeviceConnectionState`要求连接后的端口必须带有非空`profiles`。`patches/0010`在`ModulePrimary`中重写`populateConnectedDevicePort`，当目标端口`profiles`为空时直接复用模板端口声明的`profile`列表。
 
----
-
 ## 三、内置麦克风录音修复（`patches/0051`、`0052`、`0063`）
 
 ### 1. 混音器路由
@@ -96,8 +90,6 @@ TX_DEC0 Volume = 102, TX_DEC1 Volume = 102
    - AOSP `StreamAlsa`的采集线程每10 ms从ALSA读取480帧写入容量为3840帧（8块）的`MonoPipe`，但其内部的`OffsetProvider`设置`setpoint = capacity / 2`，将写入速率钳制在平均每11.25 ms一块，导致每8块必然溢出丢弃1块。`patches/0052`将采集`MonoPipe`容量翻倍。
    - AOSP `StreamPrimary::transfer`原本对采集流也按墙钟休眠（`sleep`）定拍，而非按ALSA硬件就绪数据驱动，造成开头约171 ms全零静音与124 ms交付延迟。`patches/0063`将采集方向的`transfer`改为直接在`mAlsaDeviceProxy->read()`上阻塞等待硬件数据就绪，启动静音降至0 ms、单次交付耗时降至约1 ms。
 
----
-
 ## 四、低延迟音频播放与音游偏移修复（`patches/0008`、`0069`）
 
 1. **`tinyalsa`周期重算修复（`patches/0008`）**：
@@ -106,8 +98,6 @@ TX_DEC0 Volume = 102, TX_DEC1 Volume = 102
    与输入侧同理，从`audio_policy_configuration.xml`中移除`mmap_no_irq_out`（对应的`StreamOutMmapStub`会把走AAudio MMAP路径的游戏音频静默丢弃）。
 3. **播放方向取消墙钟跳帧（`patches/0069`）**：
    AOSP示例实现`StreamPrimary::transfer`在播放方向同样维护一条合成墙钟：一旦上层混音线程唤醒稍晚，HAL就打印`skipping transfer`并将整块音频直接丢弃，导致音乐游戏出现严重的节奏漂移与吞音。`patches/0069`在播放方向当ALSA proxy就绪时直接调用阻塞式ALSA写入，由声卡硬件时钟自然反压上层混音线程。
-
----
 
 ## 五、硬件视频解码（`qcom-iris` + `v4l2_codec2`）
 

@@ -11,8 +11,6 @@
 
 项目总览与硬件支持状态表位于仓库根目录的[README.md](../README.md)与[README.zh-CN.md](../README.zh-CN.md)。
 
----
-
 ## 一、用户与构建者文档（`docs/`顶层）
 
 | 文档 | 内容说明 |
@@ -23,8 +21,6 @@
 | [BUILDING.zh-CN.md](BUILDING.zh-CN.md) | 从源码编译ROM与主线Linux内核：拉取crDroid树、准备专有固件、发布构建与开发构建的区别 |
 | [TODO.md](TODO.md) | 待办事项、待实机核对的改动与后续功能开发清单 |
 | [relnotes/](relnotes/) | 历次发布的版本说明、模板（[TEMPLATE.md](relnotes/TEMPLATE.md)）及GPL源码对应清单（[v0.7.1-alpha-sources.md](relnotes/v0.7.1-alpha-sources.md)） |
-
----
 
 ## 二、开发者技术文档（`docs/dev/`）
 
@@ -57,8 +53,6 @@
 | [dev/hw/README.md](dev/hw/README.md) | 硬件原始转储：后摄模组EEPROM镜像与[BIOS 2.16解包工具及清单](dev/hw/bios-2.16/README.md) |
 | [dev/fingerprint/README.md](dev/fingerprint/README.md) | 指纹Windows侧专有二进制本地逆向报告目录说明 |
 | [dev/upstream/README.md](dev/upstream/README.md) | 待提交至Linux主线的5份内核补丁草稿（`camcc-sc8280xp` / `ov13b10` / `camss`） |
-
----
 
 ## 三、各代码目录内的模块说明
 

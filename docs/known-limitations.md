@@ -6,8 +6,6 @@ This system runs on a machine that has no vendor Android support at all. Below i
 
 Each entry follows the same format: **Symptom** (what you will run into), **Cause**, and **What to do** (for now). Problems specific to one release are in that release's [release notes](relnotes/).
 
----
-
 ## 1. Security and privacy (please read this part first)
 
 ### v0.7.1 and earlier opened network adb without authorization
@@ -60,25 +58,7 @@ Each entry follows the same format: **Symptom** (what you will run into), **Caus
 * **Cause**: some apps' environment checks only accept the version numbers of Android's common kernels. Only the number apps read is changed; the kernel itself, its build-time version and module checks are untouched. This is a deliberate disguise, which is why it is listed here.
 * **What to do**: from the next release, you can turn it off or change it in Settings → System → Kernel version spoofing; it takes effect after a restart. 1.0.0-rc.2 and rc.3 do not have this setting; to see the real version, run `dmesg | head -1` as root. Please do not use "Install" or LKM patching in the KernelSU manager: KernelSU is already built into this kernel.
 
----
-
-## 2. Proprietary components shipped in the images
-
-This project's source code is released under GPL and other open-source licenses (see [NOTICE](../NOTICE)), but the released system images, OTA packages and installer images also contain the following components, which do not belong to this project and are not open source. Without them, the GPU, Wi-Fi, Bluetooth, sound and sensors do not work:
-
-| Component | Location in the system | Source | Notes |
-|---|---|---|---|
-| Huawei proprietary firmware: GPU zap shader, ADSP / CDSP / SLPI firmware, audio topology, pd_mapper service tables | `/vendor/firmware/qcom/sc8280xp/HUAWEI/gaokun3/` | Huawei's Windows driver package | No redistribution permission from Huawei. The installer image also carries the GPU part |
-| Sensor DSP configuration (SLPI JSON and registry) | `/vendor/etc/hexagonrpcd-root/` | Same (Qualcomm reference configuration) | Same |
-| Histen audio engine `libhw_histen_processing.so` | `/vendor/lib64/soundfx/` | Huawei's Windows driver | Huawei proprietary, no redistribution permission, and binary-modified. It only processes sound when Huawei Histen is selected in Settings |
-| Google apps and services (MindTheGapps: Play Store, Play services, etc.) | `/system_ext`, `/product` | Google | Closed source, used under Google's terms |
-| GPU microcode, Wi-Fi and Bluetooth firmware | `/vendor/firmware/` | linux-firmware | Qualcomm's redistributable license; not affected by the issues above |
-
-This means the download pages may be taken down if a rights holder asks. If you pass the images on yourself, please be aware that they contain these components.
-
----
-
-## 3. Unsupported or incomplete features
+## 2. Unsupported or incomplete features
 
 ### "Erase all data" in Settings has not been tested
 * **Symptom**: "Erase all data (factory reset)" in Settings is carried out by fastboot mode after a restart, but this has not been tested on a real machine, so there is no guarantee that your data is fully erased.
@@ -89,11 +69,6 @@ This means the download pages may be taken down if a rights holder asks. If you 
 * **Symptom**: when connected to a computer, the tablet does not show the "USB usage" notification. To transfer files, choose "File transfer" or "PTP" in Settings → Connected devices → USB; a portable device called "MateBook E Go" then appears on the computer. The same page offers "USB tethering" and "MIDI". Transfers only reach USB 2.0 speed, about 30 MB/s.
 * **Cause**: the keyboard cover's connector appears to the system as a permanently attached USB keyboard, and Android hides the USB connection notification when it sees such a device. The USB-C port next to the power button only runs at USB 2.0 speed when connected to a computer.
 * **What to do**: choose "File transfer" in Settings as above. The tablet does not enter standby while connected to a computer, so transfers continue with the screen off; please unplug the cable when you are done.
-
-### Whether USB sticks and external drives open in "Files" has not been tested
-* **Symptom**: on v0.7.1 and earlier, USB sticks and external drives do not show up in the file manager. Since 1.0.0-rc.1 the system recognizes and mounts such devices, but whether they open properly in "Files" has not been tested yet.
-* **Cause**: v0.7.1 and earlier did not register such devices as removable storage, so Android did not mount them.
-* **What to do**: if you have tried a USB stick on rc.1 or later, we would welcome a [test report](https://github.com/vahiru/gaokun-android/issues/new/choose), whatever the outcome.
 
 ### Fingerprint is not available yet
 * **Symptom**: Settings has no fingerprint option, and the sensor in the power button cannot be used.
@@ -144,9 +119,7 @@ This means the download pages may be taken down if a rights holder asks. If you 
 * **Mobile network and SIM card**: this machine has no modem.
 * **Compass**: there is no magnetometer. Auto-rotation uses the accelerometer and gyroscope and is not affected.
 
----
-
-## 4. Unresolved problems
+## 3. Unresolved problems
 
 The following are bugs, not trade-offs; they will be removed from this list once fixed.
 
@@ -160,25 +133,15 @@ The following are bugs, not trade-offs; they will be removed from this list once
 * **Cause**: the USB-C ports of the tablet and of many computers can both supply and receive power. When the computer does not support USB PD, which side supplies power is decided at the moment of plugging in, and occasionally it ends up the wrong way round. The tablet then acts as the host, while the computer will not act as a USB device, so neither sees the other.
 * **What to do**: unplug the cable and plug it in again (once is usually enough), or use another port on the computer. Only the USB-C port next to the power button can be used for USB debugging; the other port only connects peripherals.
 
-### After plugging devices in and out, the USB-C port may stop working until a restart
-* **Symptom**: after plugging devices in and out of a USB-C port (mostly after standby), the port may stop working: USB debugging cannot connect and USB devices are not recognized, until a restart. Occasionally the USB-C port does not work right after power-on; a restart brings it back.
-* **Cause**: still being investigated.
+### Occasionally the USB-C port does not work after power-on until a restart
+* **Symptom**: occasionally right after power-on, the USB-C port does not work: USB debugging cannot connect and USB devices are not recognized, until a restart.
+* **Cause**: the Type-C controller (UCSI) occasionally fails to initialize at boot; the cause is still being investigated.
 * **What to do**: a restart brings it back. Until then, use adb and transfer files over Wi-Fi.
 
 ### *League of Legends: Wild Rift* starts; whether matches work has not been tested
 * **Symptom**: on 1.0.0-rc.1 and earlier, the game quits as soon as it opens. Since rc.2 it starts and reaches the user agreement screen; whether you can get into a match has not been tested yet.
 * **Cause**: the game engine assumes that a 64-bit process's memory addresses stay below 2^39, while this kernel gave processes a 2^48 address space by default. The kernel now hands out addresses below 2^39 by default.
 * **What to do**: if the game still quits or gets stuck elsewhere on rc.2 or later, collect the crash log right after it quits (see the [FAQ](FAQ.md#when-android-starts)) and attach it to [#15](https://github.com/vahiru/gaokun-android/issues/15).
-
-### On a low-power charger the battery shows "Charging" while it drains
-* **Symptom**: on a computer's USB port or a low-power phone charger, the battery shows "Charging" while the percentage keeps going down. In this state the system does not shut down automatically when the battery is low; when it runs out, the machine simply loses power and unsaved work is lost.
-* **Cause**: the battery state comes from Huawei's embedded controller (EC). Either the driver misreads some of its status values, or the controller itself reports "charging"; which one has not been determined yet.
-* **What to do**: use a charger with enough power (for example the original charger). On a low-power source, watch the percentage rather than the charging icon, and save your work before the battery runs out.
-
-### Using the Wi-Fi hotspot and Wi-Fi at the same time has not been tested
-* **Symptom**: on v0.7.1 and earlier, turning on the hotspot disconnects the tablet's own Wi-Fi. Since 1.0.0-rc.1 the two should work together, but getting online through the hotspot from another device has not been tested yet.
-* **Cause**: v0.7.1 and earlier did not configure Wi-Fi and the hotspot to run at the same time in software; it was not a limit of the chip.
-* **What to do**: if Wi-Fi still disconnects when you turn on the hotspot on rc.1 or later, please open an issue.
 
 ### The Chinese input method has to be turned on once
 * **Symptom**: the default keyboard does not support Chinese.

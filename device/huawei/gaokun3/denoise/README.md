@@ -6,8 +6,6 @@
 
 采集钩子通过Unix域套接字`/dev/socket/gk3denoise`（`SOCK_SEQPACKET`，协议定义见[`../micarray/denoise_protocol.h`](../micarray/denoise_protocol.h)）按块发送音频跳（hop），服务端按连接与声道维护滤波器状态并返回等长帧数据，固定引入3跳（30 ms）算法延迟。
 
----
-
 ## 一、目录组成与相关组件
 
 | 路径 | 说明 |
@@ -22,8 +20,6 @@
 | `../device.mk` | 打包服务二进制、私有运行库、DSP侧skel组件、上下文模型与许可证文件 |
 | 内核补丁`patches/0205` | 将CDSP的FastRPC上下文标记为`dma-coherent`，修复CDSP加载skel时因缓存一致性时序触发的`AEE_EUNABLETOLOAD`错误 |
 
----
-
 ## 二、关键实现机制
 
 - **SoC ID兼容覆写（`socid_override.c`）**：
@@ -36,8 +32,6 @@
   若QNN或CDSP模型加载失败，服务仍保持套接字监听并对建流请求返回不可用状态，由采集钩子自动旁路降噪；后台每30秒重试加载（`--retry-s`），若单次加载阻塞超过60秒则主动退出，交由`init`重启进程（`--load-timeout-s`）。
 - **HTP功耗档位投票**：
   存在活动客户端连接时向HTP投票`low`性能档位，最后一个客户端连接断开时立即撤销投票以节省待机功耗。
-
----
 
 ## 三、验证现状
 

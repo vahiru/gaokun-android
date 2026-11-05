@@ -11,8 +11,6 @@
 
 编译C诊断工具：`bash scripts/camera/build.sh <内核源码树路径>`（生成静态链接二进制，`adb push`至`/data/local/tmp/`以root运行）。
 
----
-
 ## 一、CAMSS硬件与接口注意事项
 
 1. **`titan_top_gdsc`电源域复位时序**：
@@ -20,8 +18,6 @@
    - **严禁在`camcc`处于`runtime-suspend`时通过`devmem`读取`camcc`寄存器**，否则会因寄存器块时钟门控触发同步外部中止（external abort）导致整机死锁。若必须读取寄存器，需先执行`echo on > /sys/devices/platform/soc@0/ad00000.clock-controller/power/control`固定供电状态。
 2. **像素格式与Media Bus码匹配**：RDI（Raw Dump Interface）直接转储CSI-2裸数据而不做格式转换，`video`节点的像素格式必须与传感器输出的media bus码同族（映射表见内核`drivers/media/platform/qcom/camss/camss-vfe.c`及`camtest.c`中的`kBusToPix`），否则`STREAMON`返回`-EPIPE`。
 3. **Multiplanar API约束**：`camss`驱动仅实现多平面接口（`V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE`）；若使用单平面`V4L2_BUF_TYPE_VIDEO_CAPTURE`调用，`ENUM_FMT`会返回空且`S_FMT`返回`-EINVAL`。
-
----
 
 ## 二、测试彩条判据（以`hi846`为例）
 
@@ -33,8 +29,6 @@ msm_vfe0_rdi0:1 -> msm_vfe0_video0   [固定连接] => /dev/videoN
 ```
 
 `camtest`第3轮开启传感器彩条模式（Test Pattern 2）后，从原始Bayer帧解出的色带序列应严格为**黄、青、绿、品、红、蓝**（R/G/B通道满量程`1023`或`0`，相邻行像素差为`0`）。
-
----
 
 ## 三、SoftISP标定配置生成
 

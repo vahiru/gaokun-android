@@ -2,8 +2,6 @@
 
 本文档汇总`gaokun3`从UEFI引导进入Android用户态的启动链路、内核配置强约束、核心HAL（电源/温控/无线/蓝牙）、SELinux策略及内置`ReSukiSU`集成方案。
 
----
-
 ## 一、UEFI启动链路与动态分区布局
 
 ### 1. 双阶段引导流程
@@ -28,8 +26,6 @@ UEFI 2.16 (关闭Secure Boot)
 3. **Virtual A/B与回滚注意事项**：
    - 通过`update_engine`执行OTA更新后，`super`分区的LP元数据仅保留目标槽位的一套逻辑分区（可通过`lpdump`核实）。`bootctl is-slot-bootable`仅读取`misc`分区标志位，不能代表`super`内仍存在旧槽逻辑分区。
 
----
-
 ## 二、Android必选内核配置（`scripts/kernel-config-android.sh`）
 
 主线`defconfig`默认面向通用Linux发行版，大量驱动配为`=m`且缺少Android专属内核特性。由于本项目的Android镜像不部署`/vendor/lib/modules`模块树，`scripts/kernel-config-android.sh`强制将所有板级驱动与Android子系统设为内建（`=y`）：
@@ -41,8 +37,6 @@ UEFI 2.16 (关闭Secure Boot)
 | `netd`网络栈 | `NETFILTER_XT_MATCH_QUOTA2=y`（`patches/0016`移植AOSP `xt_quota2`）、`IP_NF_RAW=y`、`IP6_NF_RAW=y`、`NETFILTER_XT_TARGET_CT=y`、`NETFILTER_XT_MATCH_OWNER=y`、`NETFILTER_XT_MATCH_BPF=y`、`CLS_BPF=y`、`NET_SCH_INGRESS=y` | `netd`在`BandwidthController::enableBandwidthControl()`初始化时报错退出，触发60秒rescue party重启循环 |
 | 远端处理器与QMI | `QCOM_Q6V5_PAS=y`、`QCOM_SYSMON=y`、`QCOM_FASTRPC=y`、`QCOM_PD_MAPPER=y`、`QRTR=y`、`QRTR_SMD=y`、`QRTR_MHI=y` | ADSP/CDSP/SLPI与Wi-Fi QMI无法建立通信 |
 | 板级外设驱动 | `DRM_MSM=y`、`HID_HIMAX_83121A=y`、`ATH11K_PCI=y`、`BT_HCIUART_QCA=y`、`EC_HUAWEI_GAOKUN=y`、`QCOM_PMIC_GLINK=y`、`TYPEC_UCSI=y` | 屏幕、触控、Wi-Fi、蓝牙、电池状态与USB角色切换不可用 |
-
----
 
 ## 三、核心HAL与系统服务集成
 
@@ -56,8 +50,6 @@ UEFI 2.16 (关闭Secure Boot)
 - **电池与充电器状态**：由内核`ec_huawei_gaokun`驱动暴露`/sys/class/power_supply/gaokun-battery`与`gaokun-psy-ec`，对接`android.hardware.health-service.example`。
 - **导航栏与侧滑返回手势**：平板设备必须在framework overlay（`overlay/frameworks/base/core/res/res/values/config.xml`）中声明`config_showNavigationBar = true`。在Android中，全屏边缘侧滑返回（Edge Back Gesture）的输入监听器由`NavigationBar` / `Taskbar`组件负责创建；若未启用该项，系统既无底部任务栏也无法响应侧滑返回手势。
 - **游戏模式与高刷调度**：CPU/GPU调频、SurfaceFlinger合成锁与触控采样率优化详见[gaming.md](gaming.md)，深度休眠（S3 mem sleep）详见[deep-sleep.md](deep-sleep.md)。
-
----
 
 ## 四、无线网络（Wi-Fi 6E）与蓝牙（Bluetooth 5.2）
 
@@ -75,8 +67,6 @@ UEFI 2.16 (关闭Secure Boot)
   - 高通手机常用的vendor `libbt-vendor`假定用户态直接操作裸tty节点下载固件，会与主线内核的`btqca`驱动冲突。
   - 本项目采用`android.hardware.bluetooth-service.btlinux`，通过Linux内核提供的`AF_BLUETOOTH`（`BTPROTO_HCI`、`HCI_CHANNEL_USER`）独占打开`hci0`，将其桥接为Android标准的`android.hardware.bluetooth.IBluetoothHci` AIDL接口。
 
----
-
 ## 五、SELinux策略与块设备标签（`device/huawei/gaokun3/sepolicy/`）
 
 设备侧SELinux策略位于`device/huawei/gaokun3/sepolicy/`，遵循以下原则：
@@ -87,8 +77,6 @@ UEFI 2.16 (关闭Secure Boot)
 2. **块设备按GPT分区名匹配而非分区号**：
    - 用户通过双系统安装器（Windows收缩分区后追加）与全盘安装创建的NVMe分区号（`nvme0n1pX`）并不相同。
    - 因此`file_contexts`中对`super`、`userdata`、`metadata`、`misc`、`esp`的标签统一绑定在`/dev/block/platform/soc@0/1c08000.pcie/pci0000:00/.../by-name/<name>`符号链接路径上，不得硬编码`nvme0n1p*`编号。
-
----
 
 ## 六、内置Root方案（`ReSukiSU`）
 

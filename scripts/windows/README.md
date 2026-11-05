@@ -16,8 +16,6 @@ bash scripts/live/build-live.sh --boot-img ... --firmware out/vendor-firmware   
 bash scripts/windows/test-setup.sh
 ```
 
----
-
 ## 免U盘部署设计要点
 
 - **按需划分安装器分区**：脚本默认仅压缩出安装器自身所需的`GK3LIVE` FAT32分区空间（按安装包大小×1.25 + 128 MiB并按256 MiB向上取整，至少512 MiB，可通过`-LiveMiB`覆盖）；给Android使用的磁盘空间留在进入图形安装器后再行划分。若目标卷启用了BitLocker或设备加密（`VolumeStatus`非`FullyDecrypted`），由于Linux侧无法离线缩小BitLocker卷，脚本会在Windows侧提示一次缩出Android所需空间（默认64 GiB，也可通过`-AndroidGiB <N>`显式指定）。
@@ -26,8 +24,6 @@ bash scripts/windows/test-setup.sh
 - **一次性引导进入安装器**：默认通过`bcdedit /set {fwbootmgr} bootsequence`设置单次启动（等效于UEFI `BootNext`），不修改常规默认启动项；若固件不支持`bootsequence`，可使用`-UseFallbackPath`接管`\EFI\Boot\bootaa64.efi`（原文件备份为`.before-gaokun3`）。
 - **Wi-Fi配置迁移**：自动提取当前连接的Wi-Fi配置写入`GK3LIVE`供Live安装器使用。WPA2使用802.11i预推导的64位十六进制PSK；WPA3（SAE）写入明文密码；`netsh`导出的临时明文文件在`finally`块中清理。
 - **编码与语法兼容**：`.ps1`文件采用带BOM的UTF-8与CRLF换行，确保Windows内置PowerShell 5.1正确解析中文且不使用PowerShell 7专有语法（`?:`、`??`、`&&`、`?.`）。
-
----
 
 ## Windows伴随工具
 
@@ -52,8 +48,6 @@ bash scripts/windows/test-setup.sh
 | `-RemoveAndroid [-NoExtend]` | 安全卸载Android并恢复纯Windows：先只读校验系统盘GPT分区表（核对分区名、Linux filesystem类型、偏移、唯一性及非NTFS/BitLocker/FAT内容），暂停BitLocker 1次，将`bootmgfw.efi`还原至`EFI\Boot\bootaa64.efi`，清理ESP上的Android目录与Loader变量，删除Android与`GK3LIVE`分区并在相邻时将空间合并回`D:`，最后恢复快速启动设置并卸载伴随工具 |
 | `-WindowsPreset on\|off` | 可选特性（默认`off`）：Windows开机时预置`LoaderEntryOneShot`为Windows条目，正常关机时清除，使Windows更新的多次重启始终留在Windows |
 | `-Hibernate ask\|off\|keep` | 安装伴随工具时是否关闭Windows休眠（`powercfg /hibernate off`） |
-
----
 
 ## 验证状态
 

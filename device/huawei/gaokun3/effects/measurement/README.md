@@ -2,8 +2,6 @@
 
 本目录包含扬声器处理链的测量脚本与Windows对照测量数据（不含华为闭源二进制与`sws_config.xml`），用于复查和复现「Windows侧响度更高且低频更足」「整体增益差约12 dB」「116–145 Hz凹陷与185 Hz峰值」等测量结论。音频效果链实现详见[`../README.md`](../README.md)与[`../../../../../docs/dev/audio-video.md`](../../../../../docs/dev/audio-video.md)。
 
----
-
 ## 一、两种测量域
 
 | 测量域 | 测量对象 | Windows侧 | Android侧 |
@@ -12,8 +10,6 @@
 | **声学域** | 扬声器播放+麦克风回采的声压响应 | 外录双机位或内置麦克风回采 | `android/audio_goertzel.py`：内置麦克风回采440 Hz单音，Goertzel提取基波（含PA爆音掐头去尾、削顶检查与信噪比诊断） |
 
 主力采用数字域的原因：两侧均消除了房间反射、麦克风频响与扬声器物理差异，差值直接对应数字信号处理链的差异；声学域用于测定绝对响度差并与数字域结果交叉印证。
-
----
 
 ## 二、目录结构
 
@@ -32,8 +28,6 @@ measurement/
     ├── base_eq.txt                    # eqscan输出的基线槽值与实测频带中心
     └── win-freq-response.csv          # Windows扬声器端声学频响（92个1/12 oct采样点）
 ```
-
----
 
 ## 三、复现步骤
 
@@ -73,8 +67,6 @@ python3 analysis/win_vs_android.py --win data/win-digital-response.csv \
 
 依赖：`python3`、`numpy`（求解器另需`scipy`，Windows侧采集需`soundcard`）。
 
----
-
 ## 四、关键测量结论
 
 1. **整体增益差约`+12 dB`**：数字域实测`@1 kHz`相差`+12.27 dB`，声学域双机位外录实测相差`+11.6 dB`，两者吻合，证实未加载音效插件时Android侧响度偏低源于缺少Windows侧软件音效链与功放增益配置。
@@ -83,8 +75,6 @@ python3 analysis/win_vs_android.py --win data/win-digital-response.csv \
 4. **HPF截止频率与失真保护**：
    - `win_vs_android.py`求解器仅评估`--grid-lo`（默认90 Hz）以上的频响残差，不包含振膜非线性失真（THD）约束。
    - 实测表明，若将HPF从150 Hz降至90 Hz，40–60 Hz频段净抬升达`+12.6`至`+15.5 dB`，显著增加微型扬声器冲程与破音风险；而在150 Hz LR4高通下，150 Hz处的THD从`-2.7 dB`降至`-26.8 dB`。因此ROM默认部署保持`HPF = 150 Hz`、`makeup = +4 dB`、WSA883x `PA Volume = 21`（内核驱动上限为`23`，即`+9 dB`）。
-
----
 
 ## 五、测量注意事项
 

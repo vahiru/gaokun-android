@@ -10,8 +10,6 @@ Huawei MateBook E Go（gaokun3）配备四颗数字麦克风（`DMIC0`–`DMIC3`
   若任一条件缺失，本库自动放弃接管并回退为原有的`DMIC0`/`DMIC1`双路采集。
 - **音源过滤**：仅接管内置麦克风（ALSA `card 0` / `device 3`）上的`MIC`、`CAMCORDER`、`VOICE_RECOGNITION`、`VOICE_COMMUNICATION`与`DEFAULT`音源；要求原始信号的`UNPROCESSED`、`VOICE_PERFORMANCE`音源以及外接耳机麦克风均不经过本库处理。
 
----
-
 ## 一、设计背景：为何置于音频HAL采集层
 
 固定波束成形需要采集**4声道原始PCM输入**并输出**2声道立体声（或单声道）**交给上层应用：
@@ -19,8 +17,6 @@ Huawei MateBook E Go（gaokun3）配备四颗数字麦克风（`DMIC0`–`DMIC3`
 - 若仅在`tinyalsa`层做透明包装，则无法获知上层录音轨的`AudioSource`类型，会导致要求无处理的`UNPROCESSED`录音也被强制波束成形。
 
 将钩子置于音频HAL的`StreamPrimary`采集入口，可以在打开ALSA PCM前根据音源决定是否以4声道打开硬件，并在运行期响应录音轨音源的动态增减。
-
----
 
 ## 二、模块组成
 
@@ -35,8 +31,6 @@ Huawei MateBook E Go（gaokun3）配备四颗数字麦克风（`DMIC0`–`DMIC3`
 | `denoise_protocol.h`、[`../denoise/`](../denoise/README.md) | 采集钩子与NPU降噪守护进程之间的Unix域套接字（`SOCK_SEQPACKET`）协议与服务端实现 |
 | [`../etc/denoise.rc`](../etc/denoise.rc)、`NoiseSuppressionSettingsActivity` | 将「设置 → 声音 → 麦克风降噪」的各场景开关镜像至`vendor.gaokun3.denoise.*` |
 
----
-
 ## 三、频域固定波束成形算法
 
 采样率固定为48 kHz，帧移（hop size）为480帧（10 ms）：
@@ -48,8 +42,6 @@ Huawei MateBook E Go（gaokun3）配备四颗数字麦克风（`DMIC0`–`DMIC3`
 算法特性：
 - **权重来源**：取自华为Windows驱动录音组件（`hdrec_bf_data.bin`）中的第一组3输入2输出复数权重矩阵。
 - **固定算法延迟**：分析窗需累积960帧历史样本，加上480帧分块，总延迟为**1440帧（30 ms）**；HAL据此向框架修正采集位置时间戳。
-
----
 
 ## 四、音源切换与混音器管理
 
@@ -63,8 +55,6 @@ Huawei MateBook E Go（gaokun3）配备四颗数字麦克风（`DMIC0`–`DMIC3`
 - **开启4声道采集前**：本库先核实`DEC0`/`DEC1`路由正常，随后将`DEC2`、`DEC3`路由至`DMIC2`、`DMIC3`（`DMIC3`时钟依赖`DMIC2`同时开启），匹配`DEC1`数字增益，并将`VA_AIF1_CAP Mixer DEC2/DEC3`置为`1`。
 - **关闭最后一条阵列流时**：显式将`VA_AIF1_CAP Mixer DEC2/DEC3`置为`0`（并在普通2声道开流前主动清理可能因前次HAL异常退出而残留的`DEC2`/`DEC3`混音器开关），确保2声道录音行为与未加载本库时完全一致。
 
----
-
 ## 五、音频拓扑准备（构建机）
 
 在构建机同步固件目录后，需对`audioreach-tplg.bin`执行一次性的4声道上限补丁：
@@ -75,8 +65,6 @@ python3 device/huawei/gaokun3/micarray/tplg-four-channel-capture.py \
 ```
 
 该脚本校验原始拓扑的SHA-256（`ee911c74...`），将`MultiMedia4 Capture`的声道上限字节由`2`改为`4`并校验输出SHA-256（`8f5f040b...`），支持幂等执行。`scripts/sync-device-tree.sh`会在同步设备树时校验构建机上的拓扑是否已打好该补丁。
-
----
 
 ## 六、通话回声消除（AEC3）与NPU降噪串联
 
@@ -97,8 +85,6 @@ python3 device/huawei/gaokun3/micarray/tplg-four-channel-capture.py \
 
 - `VOICE_RECOGNITION`遵循Android CDD 5.4.2要求，始终不启用降噪。
 - **超时与故障回退**：采集钩子通过`/dev/socket/gk3denoise`与降噪服务通信。若开流时服务未就绪，或者录音中途单次IPC往返超过当前音频块时长的60%（4096帧块下约51 ms），本库立即无缝切回波束成形（含AEC3）直出，绝不阻塞音频HAL的I/O线程。
-
----
 
 ## 七、日志验证与已知限制
 

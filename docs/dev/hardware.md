@@ -2,8 +2,6 @@
 
 本文汇总HUAWEI MateBook E Go性能版（型号`GK-W7X`、代号`gaokun3`）的硬件拓扑、显示与输入总线、USB控制器分工、固件清单及崩溃日志持久化机制。
 
----
-
 ## 一、平台概览
 
 | 项目 | 规格与内核标识 |
@@ -20,8 +18,6 @@
 | 电源与EC | Huawei Matebook E Go EC（I2C `@0x76`，电源适配器`gaokun-psy-ec`、电池`gaokun-battery`、Type-C连接器状态） |
 | 指纹传感器 | FocalTech `FTE7001`（侧边电源键集成，SPI接口由TrustZone安全世界独占，通过QSEECOM `fingerprint` TA访问） |
 
----
-
 ## 二、BIOS版本警告：2.16与8cx Gen 2固件不可混用
 
 本项目的设备树与固件解包基线为**BIOS 2.16**（`2023-07-24`）。
@@ -35,8 +31,6 @@
 | 面板ID检测引脚 | `GPIO 102`（`ID0`）、`GPIO 91`（`ID1`） | `GPIO 178`、`GPIO 179` | 在`gaokun3`上`GPIO 178/179`为左右WSA8830扬声器功放的`powerdown-gpios`，误配会导致面板与扬声器互相干扰 |
 
 BIOS 2.16的UEFI DXE卷结构与显示表参数详见[bios-2.16/README.md](hw/bios-2.16/README.md)。
-
----
 
 ## 三、显示与输入总线
 
@@ -64,8 +58,6 @@ BIOS 2.16的UEFI DXE卷结构与显示表参数详见[bios-2.16/README.md](hw/bi
   - 通过底部POGO触点挂在内部USB控制器`a400000.usb`（USB2，`12d1:10b8`）：接口0为键盘（`Huawei HID Keyboard Device Keyboard`），接口1为多点触控板（`Huawei HID Keyboard Device Touchpad`）。
 - **物理按键**：`gpio-keys`提供音量加/减键；PMIC `pm8941_pwrkey`（`/dev/input/event0`）提供电源键。
 
----
-
 ## 四、USB控制器分工
 
 SC8280XP在`gaokun3`上启用了3个DWC3控制器，各自的角色能力不同：
@@ -79,8 +71,6 @@ SC8280XP在`gaokun3`上启用了3个DWC3控制器，各自的角色能力不同�
 - **USB角色切换与休眠行为**：
   - `pmic_glink.ucsi`通过`typec_Port0`通知`a600000.usb-role-switch`切换Host/Device角色。
   - 当Type-C端口未连接对端或UCSI报告断开时，控制器切回`host`或`none`并撤下Gadget（`configfs-gadget.g1`）。调试脚本可通过写入`/sys/class/usb_role/a600000.usb-role-switch/role`手动强制`device`模式。
-
----
 
 ## 五、专用固件清单（`/vendor/firmware/`与ramdisk）
 
@@ -98,8 +88,6 @@ SC8280XP在`gaokun3`上启用了3个DWC3控制器，各自的角色能力不同�
 | `qcom/sc8280xp/SC8280XP-HUAWEI-GAOKUN3-tplg.bin` | 音频拓扑 | Audioreach（`q6apm`）声卡拓扑文件 |
 | `ath11k/WCN6855/hw2.1/{amss.bin,m3.bin,board-2.bin,regdb.bin}` | Wi-Fi | WCN6855 PCIe无线网卡固件与板级校准数据 |
 | `qca/wcnhpbtfw21.tlv`、`qca/wcnhpnv21g.bin` | 蓝牙 | WCN6855蓝牙控制器补丁与NVM配置 |
-
----
 
 ## 六、崩溃日志持久化（`efi_pstore` vs `ramoops`）
 

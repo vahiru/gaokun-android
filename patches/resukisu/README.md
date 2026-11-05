@@ -10,8 +10,6 @@
 | 差异原因 | 直接引用Android通用内核（ACK）私有的`policydb.android_netlink_route`等字段 | 同一处代码使用`KSU_COMPAT_HAS_*`宏做条件编译保护 |
 | 跨内核版本探测机制 | 手写`LINUX_VERSION_CODE`上限（仅覆盖至6.18） | `tools/kernel_compat.mk`通过扫描内核源码头文件探测各API是否存在 |
 
----
-
 ## 补丁列表
 
 ### `0001`：`asm/patching.h`更名为`asm/text-patching.h`

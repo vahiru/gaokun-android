@@ -2,8 +2,6 @@
 
 本目录通过`.gitignore`忽略所有二进制文件，仅将本说明文件纳入版本控制。统一启动入口（`gk3boot.efi`）与fastboot执行端（`fastboot.img`）的完整设计与实现规范见[`tools/gk3boot/README.md`](../../../../tools/gk3boot/README.md)。
 
----
-
 ## 一、目录结构与文件要求
 
 ```text
@@ -18,8 +16,6 @@ fastboot.img   可选：执行端initramfs（gzip压缩cpio，2–4 MiB），来
   - `version`内容必须与`gk3boot.efi`内部嵌入的版本串（`gk3boot-<version>`）完全一致，`scripts/sync-device-tree.sh`会在同步时提取二进制字符串进行比对。
   - `fastboot.img`与`gk3boot.efi`共用同一个`version`，同步部署至同一`EFI/gk3boot/<version>/`目录并随版本轮换或回收。**只要更新了`gk3boot.efi`或`fastboot.img`中的任意一项（包括增删`fastboot.img`），都必须递增`version`**，以确保旧版本能正常保留至上一版回退槽（`gk3prev`）。
   - 请勿放入带`.dirty`后缀（工作区存在未提交改动时构建）的产物。
-
----
 
 ## 二、构建与更新步骤
 
@@ -37,8 +33,6 @@ bash scripts/gk3boot/build-fastboot-img.sh
 cp tools/gk3boot/build/fastboot/fastboot.img device/huawei/gaokun3/prebuilt-gk3boot/
 shasum -a 256 device/huawei/gaokun3/prebuilt-gk3boot/fastboot.img
 ```
-
----
 
 ## 三、ESP部署模式与条目格式
 

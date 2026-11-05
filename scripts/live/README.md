@@ -7,8 +7,6 @@
 | `rescue` | 无图形界面：`sshd`、Wi-Fi连接服务及分区/文件系统维护工具 | 内置NVMe磁盘的`gk3rescue`小分区（约1 GiB） |
 | `live` | 在`rescue`基础上集成图形安装器（[`live/installer-flutter/`](../../live/installer-flutter/README.md) + `cage` Wayland合成器） | USB启动盘或免U盘双系统安装的`GK3LIVE`分区 |
 
----
-
 ## 一、构建命令
 
 所有构建步骤均在arm64容器内执行，无需连接Android编译服务器：
@@ -32,8 +30,6 @@ bash scripts/live/build-live.sh --profile rescue --boot-img <boot.img> --ssh-key
 bash scripts/live/release-installer.sh --boot-img <boot.img> --rom <ROM版本> --firmware <目录> [--upload <tag>]
 ```
 
----
-
 ## 二、关键架构设计
 
 1. **与Android共用同一内核镜像**：
@@ -47,8 +43,6 @@ bash scripts/live/release-installer.sh --boot-img <boot.img> --rom <ROM版本> -
    由于设备无外露串口，若`initramfs`找不到根文件系统且未传入`gk3.debug`参数，会在打印诊断信息60秒后自动执行`reboot -f`，由启动加载器超时回退至默认系统（Android或Windows），避免停在无人值守的错误shell中。
 4. **无线凭据与公钥外部化**：
    `/etc/init.d/gk3-wifi`优先读取启动介质上的`gaokun3/wpa_supplicant.conf`与`gaokun3/authorized_keys`，使公开发布的Live镜像不含任何私人凭据，且用户可在FAT分区上直接预置Wi-Fi配置。
-
----
 
 ## 三、安装器后端（`installer-lib.sh`）与测试套件
 

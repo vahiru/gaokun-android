@@ -66,8 +66,6 @@ The table below shows how the main features work in the current version. See the
 | Wi-Fi / Bluetooth | WCN6855 |
 | Storage | NVMe |
 
----
-
 ## Installing
 
 Get the latest version from [**Releases**](https://github.com/vahiru/gaokun-android/releases); the full installation steps are in [`docs/INSTALL.md`](docs/INSTALL.md) (Chinese: [`docs/INSTALL.zh-CN.md`](docs/INSTALL.zh-CN.md)). **Secure Boot must be turned off** before installing.

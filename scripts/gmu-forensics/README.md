@@ -2,8 +2,6 @@
 
 本目录收录排查Adreno 690（`a690`）GMU HFI通信、SMMU上下文故障与Mesa Turnip渲染问题的设备端脚本和宿主机侧devcoredump解析工具。Adreno 690架构与修复细节详见[`../../docs/dev/gpu-turnip.md`](../../docs/dev/gpu-turnip.md)。
 
----
-
 ## 一、设备端工具（Android）
 
 | 文件 | 用途 |
@@ -13,8 +11,6 @@
 | `tudebug.rc` | 注入Turnip调试属性（属性名为`debug.mesa.tu.debug`） |
 | `gpu-pin.sh` + `gpupin.rc` | 固定GPU `min_freq`（读取`/data/local/tmp/gpu_min_freq`），用于隔离动态调频引发的问题 |
 | `capture-death.sh` | 宿主机侧异常现场捕获脚本：持续拉取内核日志、devcoredump与devfreq快照 |
-
----
 
 ## 二、宿主机与Linux对照分析工具
 
@@ -28,8 +24,6 @@
 | `gmu-lab.sh` | Linux对照侧压力与电源循环脚本（`evidence` / `churn` / `stress` / `watch`） |
 | `vk-prio.c` | 最小跨优先级Vulkan队列提交复现程序（模拟SurfaceFlinger与App双优先级并发） |
 | `mesa-lab-setup.sh` | 在Linux环境编译Mesa `crashdec`等分析工具的辅助脚本 |
-
----
 
 ## 三、调试注意事项
 

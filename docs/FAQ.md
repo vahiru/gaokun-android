@@ -17,8 +17,6 @@
 * [Removing Android, getting Windows back](#removing-android-getting-windows-back)
 * [Developer options and adb](#developer-options-and-adb)
 
----
-
 ## Starting up and the boot menu
 
 ### How do I get into the firmware settings, or boot from a USB stick?
@@ -81,8 +79,6 @@ The boot menu stays for 15 seconds when only Android is installed, and for 5 sec
 
 With the keyboard cover, use the arrow keys to choose and Enter to confirm. Whether the volume and power buttons can operate the boot menu without it has not been tested yet. When you need to choose something in the menu, please attach the keyboard cover first.
 
----
-
 ## Updates and going back
 
 ### Something broke after an update. Can I go back to the previous version?
@@ -103,8 +99,6 @@ You can install any version with "Reinstall Android" in the graphical installer.
 1. If it started after an update, wait for a few restarts first; the machine usually goes back to the previous version by itself. If it is stuck on one screen, hold the power button to turn it off, then start it again.
 2. If it still does not start, choose `gaokun3 rescue` in the boot menu, or boot from the installer USB stick, and choose "Reinstall Android". Ticking "Keep user data" keeps your data; reinstalling the same version this way has been verified on a real machine.
 3. You can also collect logs from the rescue system; see [Collecting logs when Android does not start](#collecting-logs-when-android-does-not-start).
-
----
 
 ## Collecting logs
 
@@ -163,8 +157,6 @@ Choose `gaokun3 rescue` in the boot menu, or boot from the installer USB stick.
 - If SSH is set up, fetch the diagnostics on your computer with `scp -r root@<IP>:/media/gk3/gaokun3/diag .`; see the next section for setting it up.
 - When booted from the installer USB stick, `/media/gk3` is the stick itself. Plug it into any computer and the logs are in `gaokun3/diag/`.
 
----
-
 ## The rescue system and SSH
 
 ### How do I log in to the rescue system over SSH?
@@ -193,8 +185,6 @@ The rescue system only accepts SSH public-key logins. The released images contai
 
 **Connecting**: in the rescue system's terminal, find the IP address with `ip addr`, then run `ssh root@<IP>` on your computer.
 
----
-
 ## Erasing your data
 
 ### How do I factory reset? How do I erase my data before selling or sending the machine for repair?
@@ -208,8 +198,6 @@ Erase your data as follows:
 3. The system image is read from the USB stick; if the stick does not carry it, it is downloaded over Wi-Fi (about 1.3 GB).
 
 The user data partition on this machine is not encrypted (see [known limitations](known-limitations.md)), so please make sure to erase it before selling the machine or sending it for repair.
-
----
 
 ## Removing Android, getting Windows back
 
@@ -232,8 +220,6 @@ Note that once Android is installed, `gaokun3-setup.cmd -Uninstall` only removes
 ### Installed with "Erase the whole disk" and want Windows back
 
 In this case Windows has already been deleted, and the only way back is to reinstall it from Huawei's recovery media or a Windows installation USB stick. This has not been tested on this machine yet. If you want to keep Windows, choose "Keep the current system" (dual boot) when installing.
-
----
 
 ## Developer options and adb
 

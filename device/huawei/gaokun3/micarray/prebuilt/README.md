@@ -11,13 +11,9 @@ hdrec_bf_data.bin
 - **缺失时**：不影响镜像编译；运行期`libgaokunmicarray`因无法打开系数文件而在日志中记录`weights: /vendor/etc/micarray/hdrec_bf_data.bin: cannot open: ... -- array off`，并自动旁路阵列处理，保持原始双声道采集行为。
 - **正式发布校验**：[`scripts/sync-device-tree.sh`](../../../../../scripts/sync-device-tree.sh)会将本目录同步至构建机并核对`hdrec_bf_data.bin`的SHA-256校验值；若文件缺失或哈希不匹配则报错终止（如需在无系数文件下构建，可显式设置`GK3_ALLOW_NO_MICARRAY=1`）。
 
----
-
 ## 一、不纳入版本控制的原因
 
 `hdrec_bf_data.bin`提取自华为官方Windows录音音效驱动（`HWVEAPO`），属厂商专有标定数据，未获公开再分发授权。与[`../../firmware/`](../../firmware/README.md)及[`../../effects/prebuilt/`](../../effects/prebuilt/README.md)一致，本目录通过`.gitignore`忽略专有二进制文件，仅保留说明文档。
-
----
 
 ## 二、提取方法与校验信息
 

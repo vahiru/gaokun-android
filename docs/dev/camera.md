@@ -2,8 +2,6 @@
 
 本文档说明`gaokun3`前后置相机的板级供电拓扑、Qualcomm CAMSS电源域与时钟修复、`libcamera`软件ISP移植与传感器标定，以及自研AIDL Camera HAL（`device/huawei/gaokun3/camera/`）的设计。
 
----
-
 ## 一、端到端流水线概览
 
 由于主线内核`qcom-camss`的VFE（Video Front End）仅支持将CSI-2原始拜耳帧（10-bit Packed Bayer）通过RDI（Raw Dump Interface）直接DMA输出至内存（`msm_vfe0_pix`源pad同样只输出`MEDIA_BUS_FMT_SGBRG10_1X10`/`SGRBG10_1X10`，不做硬件去马赛克），本项目采用`libcamera`的`simple`流水线配合CPU软件ISP完成去拜耳、自动曝光（AGC）与自动白平衡（AWB），再由自研AIDL Camera HAL向Android框架提供标准相机服务：
@@ -23,8 +21,6 @@
                                             android.hardware.camera.provider-V3-gaokun3-service
                                             (预览NV21 Gralloc缓冲 / 拍照libjpeg-turbo BLOB)
 ```
-
----
 
 ## 二、板级硬件拓扑与上电序列
 
@@ -52,8 +48,6 @@
 ### 3. 后摄模组EEPROM（`1-0050`）
 
 后摄模组搭载16 KiB EEPROM（挂载在CCI0总线`0x50`，与面板共用1.8V轨，亮屏即应答）。因高通CCI适配器不支持`I2C_RDWR`复合消息，读取时需使用两步SMBus操作（`i2cset`写16位大端地址指针，再连续调用`i2cget`逐字节读取）。原始转储位于[ov13b10-module-eeprom-0x50.bin](hw/ov13b10-module-eeprom-0x50.bin)。
-
----
 
 ## 三、CAMSS电源域（`titan_top_gdsc`）死锁修复
 
@@ -86,8 +80,6 @@ qcom-camss ac5a000.camss: Failed to power up pipeline: -110
   - `patches/0027`：为`camcc-sc8280xp`的8个GDSC显式填入硬件复位等待周期（`en_rest_wait_val = 2, en_few_wait_val = 2, clk_dis_wait_val = 0xf`），避免`gdsc_init()`用MSM8974的历史默认值`2/8/2`覆盖硬件配置。
   - `patches/0035`：为`camss`的`v4l2-async`通知器增加20秒超时降级，若某台机器的后摄模组未应答，仅跳过未绑定的endpoint，保证前摄仍能正常注册`/dev/v4l-subdev*`。
 
----
-
 ## 四、`libcamera`移植与传感器标定
 
 ### 1. Soong同树编译与ABI约束
@@ -108,8 +100,6 @@ Android NDK的`libc++`使用内联命名空间`std::__ndk1`，而AOSP平台源�
 |---|---|---|---|
 | `hi846` | `blackLevel_ = 4096`（10位下为64，位于模拟增益之后的数字偏置） | `AnalogueGainLinear{1, 16, 0, 16}`，即$\text{gain} = 1 + \frac{\text{code}}{16}$ | 经固定曝光留出法实测标定（`code=0..240`对应`1.0×..16.0×`，留出验证误差<2.3%） |
 | `ov13b10` | `blackLevel_ = 4096`（10位下为64） | `AnalogueGainLinear{1, 0, 0, 128}`，即$\text{gain} = \frac{\text{code}}{128}$ | 匹配OmniVision寄存器线性步进定义，配合`ov13b10.yaml`调优文件 |
-
----
 
 ## 五、自研AIDL Camera HAL（`device/huawei/gaokun3/camera/`）
 

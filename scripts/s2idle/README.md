@@ -2,8 +2,6 @@
 
 本目录包含在Linux环境下排查`s2idle`（Suspend-to-Idle）设备挂起复位与唤醒问题的自动化循环测试脚本。`s2idle`与AOSS深睡（CX collapse）的完整架构与修复详见[`../../docs/dev/deep-sleep.md`](../../docs/dev/deep-sleep.md)。
 
----
-
 ## 一、测试方法与判据
 
 1. **多轮循环验证**：单次挂起测试受竞态影响可能偶发通过，本目录脚本（`s2loop.sh` / `s2fp.sh`）以连续通过10轮作为稳定判据。
@@ -13,8 +11,6 @@
    - `pm_test`周期刚结束时可能残留pending唤醒事件，立即再次执行`echo mem > /sys/power/state`会在0–1秒内返回`-EBUSY`。
    - 真实`pm_test=devices`周期耗时5–8秒；脚本仅在`rc=0`时计入成功次数，非零返回时等待10秒后重试。
 4. **真实`s2idle`时间判据**：在真实`s2idle`挂起（带RTC唤醒闹钟）中，除检查返回码外，还需核对墙钟时间（由RTC补偿）显著大于内核`printk`单调时钟增量，以确认本地时钟确实进入停机状态。
-
----
 
 ## 二、目录文件说明
 
@@ -27,8 +23,6 @@
 | `s2real.sh` | 结合`role=host`与RTC闹钟的真实`s2idle`挂起测试脚本 |
 | `s2verify.sh` | 验收脚本：检查udev规则是否已生效并执行真实挂起测试 |
 | `99-gaokun3-usb-role.rules`、`gaokun3-usb-role*` | Linux环境规则与systemd挂起钩子：将未绑定gadget的`a600000.usb`角色设为`host`，避免半初始化`device`角色在挂起时触发整板复位 |
-
----
 
 ## 三、在救援Linux环境中部署挂起钩子
 

@@ -8,8 +8,6 @@ lib64/soundfx/libhw_histen_processing.so
 
 [`device.mk`](../../device.mk)通过`$(wildcard ...)`检查该文件：存在时安装至`/vendor/lib64/soundfx/libhw_histen_processing.so`；缺失时不影响ROM正常编译，音效库在运行时会自动回退为仅执行自研扬声器高通与限幅链路（日志输出`Histen unavailable -- speaker chain only`）。
 
----
-
 ## 一、来源与二进制修改说明
 
 - **来源**：提取自麒麟V10 SP1（ARM64桌面Linux）的华为音频栈（iMedia Audio 8.0 / Histen 6.1.9），属华为专有二进制，未获再分发授权，故不纳入源码仓库。
@@ -25,8 +23,6 @@ git fetch upstream pull/7/head:pr7
 D=device/huawei/gaokun3/effects/prebuilt/lib64/soundfx
 mkdir -p "$D" && git show 4d90d48:"$D/libhw_histen_processing.so" > "$D/libhw_histen_processing.so"
 ```
-
----
 
 ## 二、文件校验信息
 

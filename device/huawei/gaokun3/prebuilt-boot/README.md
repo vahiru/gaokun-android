@@ -4,8 +4,6 @@
 
 由于本机使用外部构建的主线Linux内核（主线7.2.y stable + `refs/gaokun-buildbot/patches/` + 本仓[`patches/`](../../../../patches/)），内核镜像与DTB需作为预编译产物放置于本目录，供AOSP构建系统打包`boot.img`。
 
----
-
 ## 一、目录结构与文件要求
 
 ```text
@@ -16,8 +14,6 @@ dtb/gaokun3.dtb      设备树二进制（目录名由BoardConfig.mk中的BOARD_
 - **`dtb/`目录下必须仅保留单个`.dtb`文件**：`BOARD_PREBUILT_DTBIMAGE_DIR`会将该目录下所有`*.dtb`首尾拼接写入`boot.img`的dtb段而不报错。`scripts/release.sh`会校验`boot.img` dtb段中的`d00dfeed`魔数数量（不为1则终止），手动更新时请勿在`dtb/`目录下留存旧文件备份。
 - **`vmlinuz.efi`安装目标**：由`PRODUCT_COPY_FILES`复制为`$(PRODUCT_OUT)/kernel`（`build/make/core/Makefile`要求的固定文件名）。
 - **为何使用`EFI_ZBOOT`**：OTA `postinstall`钩子会将内核解包写入300 MiB的ESP分区（A/B双槽各存一份，且与固件胶囊文件共用空间）。`EFI_ZBOOT`将单份内核体积从约39.4 MB压缩至约14.0 MB，显著降低ESP空间占用，并可直接由`systemd-boot`或`gk3boot.efi`加载启动。
-
----
 
 ## 二、编译与更新步骤
 

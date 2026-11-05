@@ -9,8 +9,6 @@ Histen引擎（内置多段EQ与低音增强） ──► LR4高通滤波 ──
 - **开关与分流机制**：由「设置 → 声音 → 扬声器增强」（`persist.sys.gaokun3.histen`，默认关闭）总控。当同一页面的「处理方式」（`persist.sys.gaokun3.speakerfx.engine`）处于默认的「低音增强」（`bass`）时，音频由音频HAL内的[`speakerfx/`](../speakerfx/README.md)处理，本effect保持逐比特直通；仅当用户选择「华为Histen」（`histen`）且总开关打开时，才由本effect处理内置扬声器上的媒体流（耳机、蓝牙与USB音频一律直通）。
 - **专有二进制依赖**：Histen算法引擎（`libhw_histen_processing.so`）不纳入版本控制，需放置于[`prebuilt/`](prebuilt/README.md)。缺失该文件时不影响编译，运行时自动退化为仅执行自研高通与限幅链路。
 
----
-
 ## 一、目录结构
 
 | 文件 / 目录 | 说明 |
@@ -22,8 +20,6 @@ Histen引擎（内置多段EQ与低音增强） ──► LR4高通滤波 ──
 | `audio_effects_config.xml` | 替代上游默认配置的effect注册表，在`music`流`<postprocess>`中挂载`gaokun_histen` |
 | [`measurement/`](measurement/README.md) | 离线频响扫描工具（`eqscan`）、Windows WASAPI回环采集与频响对比分析脚本 |
 | [`prebuilt/`](prebuilt/README.md) | 存放不入库的`libhw_histen_processing.so`专有二进制 |
-
----
 
 ## 二、架构与构建集成
 
@@ -47,8 +43,6 @@ effects HAL服务（APEX com.android.hardware.audio，SELinux域 hal_audio_defau
 - **APEX链接器命名空间放行（`patches/0068`）**：effects HAL运行在vendor APEX `com.android.hardware.audio`中，默认隔离命名空间不放行`/vendor/lib64/soundfx/`。`patches/0068`在该APEX的`linker.config.pb`中追加了`/vendor/${LIB}/soundfx`许可路径。
 - **SELinux属性转发**：由于`hal_audio_default`受`neverallow`限制不可直接读取`system_prop`（`persist.sys.*`），[`etc/histen.rc`](../etc/histen.rc)将其镜像为`vendor.gaokun3.histen.on`与`vendor.gaokun3.speakerfx.engine`（`vendor_gaokun3_prop`）。
 
----
-
 ## 三、生效条件与低延迟音轨限制
 
 `music`流上的`gaokun_histeneffect`实例仅在以下条件**同时满足**时执行信号处理，否则逐比特直通：
@@ -60,8 +54,6 @@ effects HAL服务（APEX com.android.hardware.audio，SELinux域 hal_audio_defau
 5. **双声道立体声格式**：Histen引擎仅在48 kHz采样率下接入（其他采样率仅运行自研扬声器保护链）。
 
 **低延迟（`FAST`）音轨限制**：主输出开启`FastMixer`后（`patches/0083`），AudioFlinger拒绝在含`FAST`音轨的会话上挂载非硬件加速effect。使用低延迟通路的游戏音轨不会经过本模块；如需覆盖游戏音轨，请使用默认的音频HAL层「低音增强」模式（[`../speakerfx/README.md`](../speakerfx/README.md)）。
-
----
 
 ## 四、调试属性（root）
 
@@ -79,8 +71,6 @@ effects HAL服务（APEX com.android.hardware.audio，SELinux域 hal_audio_defau
 | `...limit` | `0` / `1`（默认`1`） | 自研链限幅器开关 | 约1秒 |
 | `...ceiling` | dBFS（默认`-1`） | 限幅器输出天花板 | 约1秒 |
 | `...release` | ms（默认`120`） | 限幅器释放时间 | 约1秒 |
-
----
 
 ## 五、日志验证与故障回退
 

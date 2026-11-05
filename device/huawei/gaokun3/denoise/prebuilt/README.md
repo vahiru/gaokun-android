@@ -17,15 +17,11 @@ SHA256SUMS                                           # 拉取脚本生成的校�
 
 [`scripts/sync-device-tree.sh`](../../../../../scripts/sync-device-tree.sh)在同步设备树前会自动检查本目录：若文件缺失或校验不匹配则自动调用`fetch-denoise-blobs.py`拉取，随后同步至构建机并二次校验SHA-256，校验失败则立即终止构建。
 
----
-
 ## 一、不纳入版本控制的原因
 
 - **QNN运行时库与头文件**：高通AI Stack许可证（`qairt/LICENSE.pdf`）仅允许将运行时库以目标代码形式随应用程序一并分发，禁止单独再分发或将SDK头文件直接提交至公开源码仓库。因此构建流程遵循与`meta-qcom`相同的规范，由构建者在本地直接从高通官方公开地址下载并随ROM镜像打包，同时附带许可证与声明文件。
 - **CDSP外壳与DSP侧C++运行库**：提取自华为MateBook E Go官方Windows驱动包（与[`../../firmware/`](../../firmware/README.md)中的CDSP固件同源），未获单独再分发授权。
 - **FastRPC用户态源码**：上游采用BSD-3-Clause许可证，为避免在设备树中重复维护第三方源码副本，构建时按固定提交哈希直接拉取。
-
----
 
 ## 二、上游来源与校验方式
 

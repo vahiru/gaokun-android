@@ -66,8 +66,6 @@
 | Wi-Fi / 蓝牙 | WCN6855 |
 | 存储 | NVMe |
 
----
-
 ## 安装
 
 从[**Releases**](https://github.com/vahiru/gaokun-android/releases)取最新版，详细安装操作请见[`docs/INSTALL.zh-CN.md`](docs/INSTALL.zh-CN.md)（英文版[`docs/INSTALL.md`](docs/INSTALL.md)）。安装前**必须关闭Secure Boot**。

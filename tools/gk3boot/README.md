@@ -8,8 +8,6 @@
 - [../../device/huawei/gaokun3/prebuilt-gk3boot/README.md](../../device/huawei/gaokun3/prebuilt-gk3boot/README.md)（ROM侧预编译产物放入方式）
 - [../../scripts/live/README.md](../../scripts/live/README.md)（Live安装器初始化`misc`与ESP布局）
 
----
-
 ## 1. 架构与目录结构
 
 华为MateBook E Go的UEFI固件仅加载ESP上的PE/COFF应用（`systemd-boot`），不读取Android的`misc`或`boot_a`/`boot_b`裸分区。`gk3boot.efi`作为`systemd-boot`的默认加载项运行在UEFI阶段，直接读取GPT与`misc`分区完成A/B选槽、`tries_remaining`递减、BCB（Bootloader Control Block）分派、双系统一次性跳转，并通过Linux EFI Stub直接从`boot_a`/`boot_b`分区加载内核或拉起`fastboot.img`执行端。
@@ -39,8 +37,6 @@ tools/gk3boot/
 - 无动态内存分配（不调用`malloc`/`free`），所有缓冲区由调用方在栈或静态区提供。
 - 所有盘上结构采用显式小端字节序读写（`gk3/endian.h`），并附带`_Static_assert`尺寸断言。
 - 对外纯函数输入输出均为`const uint8_t *` / `uint8_t *`，不直接发起I/O。
-
----
 
 ## 2. 盘上格式与选槽规则
 
@@ -123,8 +119,6 @@ tools/gk3boot/
    - `boot-quiescent`或未知非空命令：清空BCB并记`bcb_dropped`，正常启动Android。
    - **首跑迁移（`gk3_rec_migrate`）**：当`gk3.dispatch=1`首次启用（GK3记录无`migrated`位）时，若`misc`中存在历史遗留BCB，只清空不执行，置`migrated`位并记`bcb_dropped`，防止历史残留的`--wipe_data`在升级后意外触发擦除。
 
----
-
 ## 3. `gk3boot.efi`引导模式与交接机制
 
 ### 3.1 运行模式与选项（`options`）
@@ -163,8 +157,6 @@ tools/gk3boot/
 4. 调用`RT->ResetSystem(EfiResetCold, ...)`冷复位，由`systemd-boot`消费`LoaderEntryOneShot`直接引导ESP上的直连内核副本。
 5. 此外，部署的默认入口条目名带有`systemd-boot`启动计数后缀（`gk3boot-android-{a,b}+3.conf`，`sort-key 0gk3`）。若连续3次启动未进到Android完成祝福（重命名为不带`+N`的`.conf`），`systemd-boot`在第4次启动时会自动跳过`+0-3`条目，落到排序次之的直连条目`<mid>-android-{a,b}.conf`（`sort-key 1android`）。
 
----
-
 ## 4. Android侧集成
 
 ### 4.1 组件与职责
@@ -189,8 +181,6 @@ HAL在正常开机时先以**只读**方式挂载ESP比对文件状态；若条�
 
 - 只读导出属性：`via`（`gk3boot`/`gk3prev`/`direct`）、`mode`（`off`/`observe`/`action`）、`version`、`event`、`notify`、`bypassed`、`streak`、`windows`（`0`/`1`）、`default`（`android`/`windows`）、`default_pending`、`menu`（`0`/`1`）、`error`、`done`。
 - 写入请求链路：`GaokunParts`设置`sys.gaokun3.bootreq=<next_windows|default_windows|default_android>` → `init`触发器转发至`vendor.gaokun3.bootentry.request` → HAL请求线程更新`misc`中的GK3记录并回写`vendor.gaokun3.bootentry.ack`。
-
----
 
 ## 5. Fastboot与恢复执行端（`gk3-fastbootd`与`fastboot.img`）
 
@@ -228,8 +218,6 @@ HAL在正常开机时先以**只读**方式挂载ESP比对文件状态；若条�
   - 免确认条件：`gk3.why=wipe`、GK3记录已有`migrated`标记、BCB确为`wipe`且其SHA-1与`gk3boot.efi`分派时记录的`bcb_wipe_sha1`一致。满足时自动擦除并重启；从菜单手动进入、未迁移或摘要不匹配时均返回退出码`3`，由`/init`弹出二次确认界面（默认高亮`Cancel`）。
   - 擦除顺序：对`userdata`执行`BLKDISCARD`并将首尾各1 MiB写零读回，对`metadata`整块写零读回；两分区均确认完成后最后清空BCB，保证中途断电下次开机可重入完成擦除。
 
----
-
 ## 6. 双系统引导（Android + Windows）
 
 在保留Windows的双系统布局下，Windows Boot Manager（`EFI/Microsoft/Boot/bootmgfw.efi`）与Android共用同一ESP。`gk3boot`通过UEFI变量与GK3记录协同维护默认启动系统与跨系统重启：
@@ -242,8 +230,6 @@ HAL在正常开机时先以**只读**方式挂载ESP比对文件状态；若条�
 3. **从Android一键重启到Windows**：在「设置 → 系统 → 启动选项」中点击「重启到Windows」，HAL将GK3记录的`next_kind`设为`GK3_NEXT_WINDOWS (3)`并触发重启；`gk3boot.efi`检查无Android待办事项后清零`next_kind`，写`LoaderEntryOneShot=<Windows条目>`并冷复位进入Windows（若正处于OTA新槽验证或有待执行BCB，则自动作废该一次性意图并记`intent_dropped`，优先完成Android启动）。
 4. **从Windows重启到Android / 切换默认系统**：使用[../../scripts/windows/gaokun3-setup.ps1](../../scripts/windows/gaokun3-setup.ps1)（`-RebootToAndroid` / `-SetDefault`）修改固件NVRAM中的`LoaderEntryOneShot`或`LoaderEntryDefault`（详见[../../scripts/windows/README.md](../../scripts/windows/README.md)）。
 5. **安装器初始化（`gk3-misc init`）**：Live安装器在写入分区后调用`gk3-misc init <misc> --slot a --default <windows|android|none>`，一步初始化空BCB、槽`_a`（`15/6/未成功`）及带`migrated`标记与`set_default`请求的GK3记录。
-
----
 
 ## 7. 构建与测试
 

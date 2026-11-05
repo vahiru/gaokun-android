@@ -22,8 +22,6 @@ echo $?        # 0 = 无FAIL；1 = 有FAIL；2 = adb不通或中途掉线（不�
 * `--readonly`：仅执行只读检查（跳过开相机、录音、硬解视频），可在任意时刻运行。
 * **涉及重启的检查项**（启动入口部署与祝福、fastboot执行端查询、BCB分派、稳定Wi-Fi MAC）：重启前需确认有人可在设备旁长按电源键恢复；新候选版首次跑fastboot执行端时需人在场。
 
----
-
 ## 2. 无人值守检查
 
 ### 2.1 `scripts/accept.sh`自动检查项
@@ -73,8 +71,6 @@ echo $?        # 0 = 无FAIL；1 = 有FAIL；2 = adb不通或中途掉线（不�
 | `cpuset`分组 | `cat /dev/cpuset/{background,system-background,foreground,top-app}/cpus` | `background`与`system-background`为`0-3`，`foreground`与`top-app`为`0-7` |
 | 待机开关属性镜像 | `getprop persist.sys.gaokun3.allow_suspend`、`getprop persist.vendor.gaokun3.allow_suspend` | 设置过前者时两者保持一致 |
 
----
-
 ## 3. 人在场交互检查
 
 | 检查项 | 操作步骤 | 通过判据 |
@@ -104,8 +100,6 @@ echo $?        # 0 = 无FAIL；1 = 有FAIL；2 = adb不通或中途掉线（不�
 | USB文件传输/PTP/RNDIS/MIDI | 连接电脑依次切换文件传输（拷贝>1 GB文件并校验哈希）、PTP、USB网络共享、MIDI，并测试`scripts/game-mode.sh` | 四种USB功能在电脑端均正常识别工作，大文件传输哈希一致；游戏模式开启与恢复后adb正常重连 |
 | 手写笔设置 | 在“设置 → 已连接的设备 → 手写笔设置”中调节笔迹平滑档位与双击笔身功能，重启后复查 | 每次调节后`dmesg`输出对应`beta`值（300/200/125），双击功能与电量显示正常，重启后设置保留 |
 
----
-
 ## 4. 长稳与性能/功耗测量
 
 | 检查项 | 操作命令 | 判据与记录要求 |
@@ -116,8 +110,6 @@ echo $?        # 0 = 无FAIL；1 = 有FAIL；2 = adb不通或中途掉线（不�
 | 72小时日常综合测试 | 设`allow_suspend=1`并开启`standby.sh start`，拔线日常使用72小时后`pull`并跑`accept.sh` | 累计挂起≥30次；`system_server_crash`与系统tombstone为0；关键守护进程PID不变、无内存或fd泄漏；每次唤醒后Wi-Fi自动恢复 |
 | 挂起/恢复压力循环 | 内核休眠路径有改动时运行[`scripts/s2idle/android-ath11k-s2loop.sh`](../../scripts/s2idle/android-ath11k-s2loop.sh) | 全部循环正常唤醒、Wi-Fi每次恢复、恢复期间无`GFP_DMA`高阶内存分配失败 |
 | 60 / 120 Hz功耗对比 | 同一静止与滑动场景下分别采样60 Hz与120 Hz的`current_now` | 存档作为刷新率功耗基线 |
-
----
 
 ## 5. 发版核对（宿主机侧）
 
