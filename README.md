@@ -86,17 +86,17 @@ Default partition layout when the whole disk is erased:
 
 | Partition | Size | Purpose |
 |---|---|---|
-| `esp` | 300 MiB | systemd-boot, plus the kernel / DTB / ramdisk it actually loads, one directory per slot |
+| `esp` | 300 MiB | Boot menu and the kernel of each slot |
 | `misc` | 4 MiB | A/B slot state |
 | `metadata` | 32 MiB | Android metadata |
-| `super` | 12 GiB | system / system_ext / product / vendor, A/B |
-| `boot_a`, `boot_b` | 64 MiB each | Android boot images; OTA updates write these, and the copies on the ESP are unpacked from them |
-| `gk3rescue` | 1 GiB | Optional rescue system, see below |
-| `userdata` | The rest | `/data` |
+| `super` | 12 GiB | System partitions, A and B |
+| `boot_a`, `boot_b` | 64 MiB each | Kernel and boot image, A and B |
+| `gk3rescue` | 1 GiB | Rescue system (optional) |
+| `userdata` | All remaining space | User data |
 
 **Rescue system:** this machine has no working Android recovery, so the rescue system is the way to repair it when something goes wrong. It is a small Linux system, the same program as the graphical installer, so it can also reinstall Android, and it lives in its own 1 GiB partition. The graphical installer can install it as well (tick *Also install the rescue system*); the command-line installer installs it only when given the rescue system image.
 
-Every boot shows a 15-second boot menu, from which the rescue system can be started; the system does not switch to it on its own when Android hangs. When you need it, hold the power button to force a shutdown, then choose the rescue system in the menu on the next boot; choosing a menu entry needs the keyboard cover attached. To log in to the rescue system over the network (SSH), put your own SSH public key on the installer USB stick before installing; see the [installation guide](docs/INSTALL.md#about-the-rescue-system) for how.
+Every boot shows a 15-second boot menu, from which the rescue system can be started; the system does not switch to it on its own when Android hangs. When you need it, hold the power button to force a shutdown, then choose the rescue system in the menu on the next boot; choosing a menu entry needs the keyboard cover attached. To log in to the rescue system over the network (SSH), put your own SSH public key on the installer USB stick before installing; see the [installation guide](docs/INSTALL.md#rescue-system) for how.
 
 **Downloads from mainland China:** when GitHub's download servers are slow or unreachable, the system images (`boot.img`, `super.img.zst`) can be downloaded from a mirror: `https://ota.072172.xyz/install/<build>/<file name>`, where `<build>` is the release's OTA package file name without `.zip`; see [`docs/INSTALL.md`](docs/INSTALL.md#downloads).
 
@@ -116,7 +116,7 @@ The table below lists the limitations to keep in mind in daily use. The full exp
 | Rolling back | Once a new version has booted successfully, the previous version is merged away and cannot be restored; major version updates also upgrade user data | Back up important data before updating |
 | Google certification | The device is not Play Protect certified, so the Play Store works properly only after you register it by hand; Play Integrity cannot pass, so apps that depend on it (Google Wallet, some banking apps) do not work | Register it once, following the [installation guide](docs/INSTALL.md#this-device-isnt-play-protect-certified) |
 | Use in mainland China | The system ships only Google apps and no Chinese app store; without access to Google, the Play Store, Google services and network location do not work | Download app packages from the apps' official sites or the web versions of app stores |
-| Kernel version | To pass some apps' environment checks, apps are told a disguised kernel version | Turn it off or change it in Settings → System → Kernel version spoofing |
+| Kernel version | To pass some apps' environment checks, apps are told a disguised kernel version | From the next release, turn it off or change it in Settings → System → Kernel version spoofing |
 | Audio and Bluetooth | Users have reported sound and Bluetooth both stopping after a long uptime; the cause is still under investigation | Restart to recover; when reporting it, attach `/data/vendor/gaokun3/hangdump-*` (reading it needs root) |
 | Connecting to a computer | With some computers, the tablet may end up powering the computer, and neither side sees the other | Unplug and plug in again, or use another port on the computer |
 | USB-C port | After plugging and unplugging devices (mostly after standby), the USB-C port may stop working until a restart | Restart; until then, use adb and file transfer over Wi-Fi |

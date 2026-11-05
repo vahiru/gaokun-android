@@ -1,381 +1,186 @@
-<!--
-  Maintenance (not rendered):
-  * This list is "what you should know before installing this ROM": long-standing limitations, unsupported features,
-    and the security and licensing trade-offs. Bugs specific to one release go into that release's Known issues, not here.
-  * The comment after each entry names its id in docs/v1.0-plan.md. Check every entry before a release; delete an entry
-    once it is fixed, rewrite it when the trade-off changes (as the SELinux and Chinese-input entries were rewritten for
-    1.0.0-rc.1, when SELinux went enforcing and the IME was really preinstalled).
-  * Keep this file and known-limitations.zh-CN.md in sync. Evidence (file:line / on-device checks) is in the
-    comments of the Chinese file; it is the same for both.
--->
 # Known limitations and unsupported features
 
 [**中文 → known-limitations.zh-CN.md**](known-limitations.zh-CN.md) · [FAQ](FAQ.md) · [Installing](INSTALL.md)
 
-This ROM was built from scratch for a machine that has **no vendor Android support at all**. Below is what you should
-know before installing it. Some of these are deliberate trade-offs, some are not done yet, and some cannot be done on
-this hardware.
+This system runs on a machine that has no vendor Android support at all. Below is what you should know before installing: some items are deliberate trade-offs, some are features not finished yet, and some are limits of the machine itself.
 
-Every entry has the same three parts: **what you see**, **why** (in one sentence or two), and **what to do instead**.
-
-Problems specific to one release are in that release's [release notes](relnotes/).
+Each entry follows the same format: **Symptom** (what you will run into), **Cause**, and **What to do** (for now). Problems specific to one release are in that release's [release notes](relnotes/).
 
 ---
 
-## 1. Security and privacy (read this part first)
+## 1. Security and privacy (please read this part first)
 
-### Up to v0.7.1, network adb lets anyone in without asking
-<!-- B1 / D1 (SEC-1, OTA-1 and others in docs/v1.0-plan.md): every release build since 1.0.0-rc.1 has it (release.sh asserts
-     ro.adb.secure=1 and ro.debuggable=0; the interactive checks ran on hardware on 10-11, docs/TODO.md blocker table B1).
-     ⬜ Left: no listener on 5555 after a fresh install, and how to clear a self-set port (below). Evidence in the Chinese file. -->
-* **What you see**: on v0.7.1 and earlier, nothing. That is the problem.
-* **Why**: v0.7.1 and earlier images open adb on TCP port 5555 on every network interface, the Wi-Fi hotspot included,
-  and accept connections **without** the "Allow debugging?" prompt. The images are debuggable (`ro.debuggable=1`), so
-  `adb root` then gives a root shell. They also carry the maintainer's adb public key. Anyone on the same Wi-Fi, or
-  connected to your hotspot, can take over the machine.
-  From 1.0.0-rc.1 on, adb is **off** by default, asks you to authorize each computer, does not
-  listen on port 5555, cannot `adb root`, and the image carries no maintainer key. Existing users get this with the
-  OTA update, nothing to do: the old port-5555 setting came from the image's built-in defaults, and Android never
-  saves those to `/data`. The exception is anyone who set `persist.adb.tcp.port` themselves.
+### v0.7.1 and earlier opened network adb without authorization
+* **Symptom**: nothing visible in use.
+* **Cause**: v0.7.1 and earlier opened adb on TCP port 5555 on every network interface (including the Wi-Fi hotspot), without asking for authorization; once connected, root was available, and the image also carried the maintainer's adb public key. Anyone on the same Wi-Fi, or connected to your hotspot, could take full control of the machine. Since 1.0.0-rc.1, adb is off by default, every computer needs your authorization, port 5555 is no longer opened, and the maintainer's key is gone. Updating through System update is enough for this to take effect.
 * **What to do**:
-  * If you are still on v0.7.1 or earlier, back up first, then update in **Settings → System → System update** (going
-    from Android 16 to 17 rewrites `/data` with no rollback point, see the [rc.3 release notes](relnotes/v1.0.0-rc.3.md)).
-    Until then, stay off Wi-Fi networks you don't trust, and don't let strangers join your hotspot.
-  * If you set `persist.adb.tcp.port` yourself: how to clear it after updating will be added here (⬜ not yet verified
-    on hardware).
-  * For adb over the network, use **Wireless debugging** ([FAQ](FAQ.md#wireless-debugging)).
+  * If you are still on v0.7.1 or earlier, back up first, then update in Settings → System → System update. Upgrading from Android 16 to 17 rewrites your user data and cannot be undone; see the [rc.3 release notes](relnotes/v1.0.0-rc.3.md). Until you have updated, do not join Wi-Fi networks you do not trust, and do not let strangers join your hotspot.
+  * If you ever set `persist.adb.tcp.port` by hand, that setting survives the update; how to clear it has not been documented yet.
+  * To use adb over the network, use [wireless debugging](FAQ.md#wireless-debugging).
 
-### The system is signed with Android's public test keys
-<!-- B2 / SEC-2 (user decision D2, 2026-10-04: keep test-keys, disclose). -->
-* **What you see**: nothing. The build information says `release-keys`, but that is only a label.
-* **Why**: the system, the system apps and the OTA update packages are signed with the test keys that ship **publicly**
-  in the AOSP source; anyone can download the private keys. So **anyone** can build an OTA package, or an app that runs
-  with system privileges, that this ROM will accept as genuine. The safety of this machine therefore rests on the
-  download channel not being taken over, and on you not installing "system components" from unknown sources.
+### The system is signed with AOSP's public test keys
+* **Symptom**: nothing visible. The `release-keys` shown in the build information is only a label.
+* **Cause**: the system, system apps and OTA packages are signed with the test keys published in the AOSP source, whose private keys anyone can download. So anyone can build an OTA package this machine will accept, or an app that runs with system privileges. The machine's security therefore depends on the download channel being trustworthy, and on you not installing "system components" from unknown sources.
 * **What to do**:
-  * Update only through the built-in system updater in Settings, or from this project's GitHub Releases page.
-  * Do not install APKs or zips that someone sends you as a "system patch" or "system component".
-  * On a fresh install the installer checks `install-artifacts.sha256` before writing to the disk. Don't skip it.
+  * Update only through System update in Settings, or from this project's GitHub release pages.
+  * Do not install APKs or zip files that someone sends you as a "system patch" or "system component".
+  * On a fresh install, the installer checks `install-artifacts.sha256` before writing to the disk; please do not skip this.
 
-### `/data` (all your personal data) is not encrypted
-<!-- B3 / SEC-3 (user decision D3: no encryption in 1.0, disclose honestly). -->
-* **What you see**: the lock screen protects the machine while it is running, and nothing more. It does not protect
-  your data from someone who has the machine in their hands.
-* **Why**: the data partition is plain ext4. Secure Boot has to be off; the boot menu offers the installer and a rescue
-  system, both of which give a root login at the local console without a password; and any Linux USB stick works too.
-  Whoever holds the machine can read your photos, chats, browser logins, Wi-Fi passwords and everything else.
+### User data is not encrypted
+* **Symptom**: the screen lock only stops others from using the machine directly; it does not stop them from reading its data.
+* **Cause**: the user data partition is an unencrypted ext4 file system. Secure Boot must be off, the boot menu offers the installer and the rescue system, and logging in as root in front of the machine needs no password; plugging in a Linux USB stick reads the disk just as well. Whoever has the machine can read photos, chat histories, browser logins, Wi-Fi passwords and everything else.
 * **What to do**:
-  * Treat this machine as one whose data anyone holding it can read. Don't keep sensitive material on it.
-  * Before you sell it, send it for repair or lend it out, wipe it with the graphical installer's
-    **Reinstall Android** (wipes data by default), see the [FAQ](FAQ.md#factory-reset--wiping-before-you-sell).
-  * If encryption arrives later, getting it will mean wiping and reinstalling. An OTA update cannot encrypt an
-    existing installation.
+  * Treat this machine as one whose data anyone holding it can read, and do not keep sensitive material on it.
+  * Before selling it, sending it for repair or lending it out, erase your data with "Reinstall Android" in the graphical installer; see the [FAQ](FAQ.md#erasing-your-data).
+  * If file-based encryption is added later, getting it will require wiping data and reinstalling; it cannot arrive through a system update.
 
-### Root is built in (KernelSU / ReSukiSU)
-<!-- SEC-12 / REL-10 (user decision D6: keep root, disclose fully; no root-less variant before 1.0).
-     ⚠️ v0.7.1 and earlier do NOT preinstall the manager APK (TODO B11). If 1.0 preinstalls it, say so in the first
-     sentence; the "without the manager" sentence stays true either way. -->
-* **What you see**: the kernel contains a root implementation, KernelSU (the ReSukiSU fork). Some banking and payment
-  apps, and games with anti-cheat, may detect it and warn about a "risky device" or refuse to run.
-* **Why**: root is essential for development and troubleshooting, and we decided to keep it in release builds.
-  The **ReSukiSU manager** app decides who gets root: only apps you approve in the manager do. Without the manager
-  installed, no app can get root.
+### Root is built into the kernel (KernelSU / ReSukiSU)
+* **Symptom**: the kernel has KernelSU (the ReSukiSU fork) built in. Some banking and payment apps and games with anti-cheat may detect it, warn that the device is at risk, or refuse to run.
+* **Cause**: developing and troubleshooting need root, so release builds keep it. Which apps get root is decided by the ReSukiSU manager: only apps you have approved there get it; without the manager installed, no app can get it.
 * **What to do**:
-  * If you don't need root, don't grant it to any app in the manager.
-  * **adb is root too**: any computer you have authorized for USB or wireless debugging gets a root shell
-    (`adb shell` runs as root through KernelSU, even though `ro.debuggable=0`). Only authorize computers you trust,
-    and turn USB / wireless debugging off when you don't need them.
-    <!-- 2026-10-05 measured on the 1.0.0-dev.1/dev.2 release builds: adbd in u:r:ksu:s0, `adb shell id` = uid 0. -->
-  * There is no build without root yet, and the kernel's root capability cannot be switched off.
-  * In our smoke tests, *Delta Force* and *Strinova* (both protected by ACE anti-cheat) ran normally. Banking and payment
-    apps have not been tested systematically. Reports are welcome.
+  * If you do not need root, do not grant it to any app in the manager.
+  * Once adb root is turned on in the manager, any computer you have authorized for USB or wireless debugging gets root directly through `adb shell`. Leave adb root off unless you need it, only authorize computers you trust, and turn USB and wireless debugging off when you are not using them.
+  * There is no build without root yet, and the kernel's root support cannot be switched off.
+  * In smoke tests, *Delta Force* and *Strinova*, which use ACE anti-cheat, run normally; banking and payment apps have not been tested systematically yet, and feedback is welcome.
 
-### SELinux is enforcing from 1.0.0-rc.1 — but hand-partitioned disks may need their EFI partition renamed
-<!-- SEC-4 / D5 (user decision 2026-10-06: switch). Enforcing by default from 1.0.0-dev.10; the first published build with it
-     is 1.0.0-rc.1. Evidence in the Chinese file. Rewrite this entry if the policy is ever relaxed again, and drop the
-     OTA-5 half once the components can find a differently named ESP under enforcing. -->
-* **What you see**: on most machines, nothing. v0.7.1 and earlier ran SELinux in `permissive` mode (it only logged what its
-  rules did not allow); from 1.0.0-rc.1 it is `enforcing` and blocks those things. **On a disk you partitioned by hand**,
-  system updates and switching slots fail if the EFI partition's GPT partition *name* is neither `esp` nor
-  `EFI system partition`.
-* **Why**: Android's app sandbox has two layers, ordinary user permissions and SELinux; with SELinux enforcing, an app
-  that finds a vulnerability can do much less. The rules let the update and boot-control components open the EFI
-  partition only under those two names: `esp` is what the installer's *Erase the whole disk* creates, and
-  `EFI system partition` is what Windows creates (dual boot uses that one). Scanning every block device for it, as
-  earlier releases did as a fallback, is not allowed under enforcing.
+### SELinux is enforcing; hand-partitioned disks may need their EFI partition renamed
+* **Symptom**: nothing visible on most machines. But if you partitioned the disk yourself and the EFI partition's GPT partition name is neither `esp` nor `EFI system partition`, system updates and slot switching fail.
+* **Cause**: since 1.0.0-rc.1, SELinux has changed from permissive (log only) to enforcing (actually block). SELinux is the second layer of Android's app sandbox: even an app that finds a vulnerability can do far less. The policy only lets the update and boot control components open the EFI partition by these two names: `esp` is the name the installer gives it when erasing the whole disk, and `EFI system partition` is the name Windows gives it, which is what dual boot uses. Earlier versions scanned every storage device when the partition was not found; enforcing mode does not allow that.
 * **What to do**:
-  * If your EFI partition has another name, rename it once from any Linux (the installer's terminal or the rescue system):
-    `sgdisk -c <N>:esp /dev/nvme0n1`, where N is the EFI partition's number. UEFI only looks at the partition type,
-    so renaming is harmless. See [Updating](INSTALL.md#updating). The installer warns when it sees such a name.
-  * The rules are new. If something worked on v0.7.1 and is broken now, report it with the output of
-    `adb shell dmesg | grep avc`.
+  * If your EFI partition has a different name, rename it once from any Linux (the installer's terminal or the rescue system will do): `sgdisk -c <N>:esp /dev/nvme0n1`, where N is the EFI partition's number. UEFI only looks at the partition type, so renaming has no side effects. The installer also warns you when it sees such a name.
+  * If something worked on v0.7.1 and no longer does, please report it and attach the output of `adb shell dmesg | grep avc`.
 
 ### The boot chain is unlocked, and system partitions are not verified
-* **What you see**: nothing at boot checks whether the system has been modified. Play Integrity never passes (see
-  *Not Google-certified* below).
-* **Why**: the machine boots through UEFI and systemd-boot with Secure Boot off; the kernel is unsigned, and dm-verity is
-  off. That open boot chain is exactly what makes installing another OS on this machine possible.
-* **What to do**: nothing; this is the price of running Android on this machine at all.
+* **Symptom**: nothing checks at boot whether the system has been modified, and Play Integrity cannot pass (see "Not Google-certified" below).
+* **Cause**: this machine boots through UEFI and systemd-boot, Secure Boot must be off, the kernel is not signed, and dm-verity is not enabled. This open boot chain is exactly what makes it possible to install other systems on the machine.
+* **What to do**: there is no way around it; it is the precondition for running Android on this machine.
 
 ### Apps are told a kernel version that is not the real one
-<!-- GAME-1 (patches/0085). Evidence in the Chinese file. -->
-* **What you see**: apps read the kernel version as `6.6.30-android15-8-g0a4d3c12b3`, a string that matches no real Android
-  kernel. The kernel that actually runs is mainline Linux **7.2.9** plus this project's patches. On 1.0.0-rc.2 and rc.3
-  the whole system reports the 6.6.30 string; from the next release only apps are told it, and `uname -r` in `adb shell`
-  and *Kernel version* under *Settings → About tablet → Android version* show the real one. Crash records of apps carry
-  the version apps are told, those of system components the real one.
-* **Why**: some environment checks in apps accept only the 4.x / 5.x / 6.x versions of Android's common kernel. Only the
-  number apps read changes; the kernel itself, its compile-time version and module checks are the same. It is a deliberate
-  disguise, which is why it is listed here.
-* **What to do**: from the next release, *Settings → System → Kernel version spoofing* turns it off or sets another version, and applies after a
-  restart. On 1.0.0-rc.2 and rc.3 there is no setting: run `dmesg | head -1` as root for the real version. **Do not use the
-  KernelSU manager's *Install* / LKM patching**: KernelSU is already built into this kernel.
+* **Symptom**: apps read the kernel version `6.6.30-android15-8-g0a4d3c12b3`, which matches no real Android kernel; the kernel actually running is mainline Linux 7.2.9 with this project's patches. On 1.0.0-rc.2 and rc.3 the whole system reports this version; from the next release, only apps see it, while `uname -r` in `adb shell` and the kernel version shown in Settings are the real one.
+* **Cause**: some apps' environment checks only accept the version numbers of Android's common kernels. Only the number apps read is changed; the kernel itself, its build-time version and module checks are untouched. This is a deliberate disguise, which is why it is listed here.
+* **What to do**: from the next release, you can turn it off or change it in Settings → System → Kernel version spoofing; it takes effect after a restart. 1.0.0-rc.2 and rc.3 do not have this setting; to see the real version, run `dmesg | head -1` as root. Please do not use "Install" or LKM patching in the KernelSU manager: KernelSU is already built into this kernel.
 
 ---
 
 ## 2. Proprietary components shipped in the images
 
-<!-- SEC-10 / REL-15 (D20: disclose, and prepare a build switch without Histen). NOTICE now covers the binary
-     releases too (its section "Third-party proprietary components in the binary releases", 2026-10-05). -->
-The source code of this project is released under GPL and other open-source licenses (see [NOTICE](../NOTICE)). The
-**system images, OTA packages and installer images** we publish also contain the components below, which are **not
-part of this project and not open source**. Without them there is no GPU, Wi-Fi, Bluetooth, sound or sensors:
+This project's source code is released under GPL and other open-source licenses (see [NOTICE](../NOTICE)), but the released system images, OTA packages and installer images also contain the following components, which do not belong to this project and are not open source. Without them, the GPU, Wi-Fi, Bluetooth, sound and sensors do not work:
 
-| Component | Where on the system | Comes from | Notes |
+| Component | Location in the system | Source | Notes |
 |---|---|---|---|
-| Huawei firmware: GPU zap shader, ADSP / CDSP / SLPI firmware, audio topology, pd_mapper service tables | `/vendor/firmware/qcom/sc8280xp/HUAWEI/gaokun3/` | Huawei's Windows driver packages | Not licensed by Huawei for redistribution. The installer image carries the GPU one as well |
-| Sensor DSP configuration (SLPI JSON files and registry) | `/vendor/etc/hexagonrpcd-root/` | Same (Qualcomm reference configuration) | Same |
-| Histen audio engine `libhw_histen_processing.so` | `/vendor/lib64/soundfx/` | Huawei Windows driver | Proprietary to Huawei, not licensed for redistribution, and binary-patched. It processes audio only when *Speaker enhancement (experimental)* is turned on |
-| Google apps and services (MindTheGapps: Play Store, Play services, …) | `/system_ext`, `/product` | Google | Closed source, under Google's terms |
-| GPU microcode, Wi-Fi and Bluetooth firmware | `/vendor/firmware/` | linux-firmware | Under Qualcomm's redistributable license; not affected by the above |
+| Huawei proprietary firmware: GPU zap shader, ADSP / CDSP / SLPI firmware, audio topology, pd_mapper service tables | `/vendor/firmware/qcom/sc8280xp/HUAWEI/gaokun3/` | Huawei's Windows driver package | No redistribution permission from Huawei. The installer image also carries the GPU part |
+| Sensor DSP configuration (SLPI JSON and registry) | `/vendor/etc/hexagonrpcd-root/` | Same (Qualcomm reference configuration) | Same |
+| Histen audio engine `libhw_histen_processing.so` | `/vendor/lib64/soundfx/` | Huawei's Windows driver | Huawei proprietary, no redistribution permission, and binary-modified. It only processes sound when Huawei Histen is selected in Settings |
+| Google apps and services (MindTheGapps: Play Store, Play services, etc.) | `/system_ext`, `/product` | Google | Closed source, used under Google's terms |
+| GPU microcode, Wi-Fi and Bluetooth firmware | `/vendor/firmware/` | linux-firmware | Qualcomm's redistributable license; not affected by the issues above |
 
-So if a rights holder asks for it, the downloads could be taken down. If you mirror or redistribute the images
-yourself, you should know that they contain these components.
+This means the download pages may be taken down if a rights holder asks. If you pass the images on yourself, please be aware that they contain these components.
 
 ---
 
 ## 3. Unsupported or incomplete features
 
-### *Erase all data* (factory reset) in Settings does nothing
-<!-- ⬜ 2026-10-05：1.0 构建起镜像默认 persist.vendor.gaokun3.gk3boot=action、条目带 gk3.dispatch=1（device.mk / Gk3Boot.cpp），Settings 写的 --wipe_data 会由统一启动入口分派给 fastboot 执行端去擦（QEMU exec-wipe 过、E7 分派真机过）。但 E10 真机恢复出厂还没做（要用户同意 + 备份）⇒ 这一节先不改；E10 过了再改成"1.0 起可用"，并写明首次开机后才生效（0.7.x 升上来的机器第一次开机走直连）。 -->
-<!-- B6 / A5 (user decision D4: to be handled by a future fastboot; design in progress). Rewrite once fastboot ships. -->
-* **What you see**: the machine reboots and **all your data is still there**, with no message.
-* **Why**: that feature relies on recovery to carry it out, and recovery cannot boot on this machine, so after the reboot
-  nothing acts on the request. From 1.0 the request is handed to the boot entry's fastboot environment instead
-  (see [INSTALL](INSTALL.md#the-boot-entry-and-fastboot-from-10)), but that path has not been verified on the machine —
-  treat it as not working.
-* **What to do**: use the graphical installer's **Reinstall Android**, which wipes data by default. Steps in the
-  [FAQ](FAQ.md#factory-reset--wiping-before-you-sell).
+### "Erase all data" in Settings has not been tested
+* **Symptom**: "Erase all data (factory reset)" in Settings is carried out by fastboot mode after a restart, but this has not been tested on a real machine, so there is no guarantee that your data is fully erased.
+* **Cause**: this feature normally relies on Android recovery, which cannot start on this machine, so fastboot mode in the boot menu carries it out instead.
+* **What to do**: erase your data with "Reinstall Android" in the graphical installer, which wipes user data by default; see the [FAQ](FAQ.md#erasing-your-data).
 
-### File transfer over USB: no notification, choose it in Settings; USB 2.0 speed only
-<!-- PWR-6 / BKUP-7 / STOR-7. See the comment in known-limitations.zh-CN.md. -->
-* **What you see**: when you connect the tablet to a computer, the tablet shows no "USB preferences" notification. To
-  transfer files, go to **Settings > Connected devices > USB** and choose "File transfer" or "PTP"; "MateBook E Go" then
-  appears on the computer as a portable device. Transfers run at USB 2.0 speed (about 30 MB/s). The same page also
-  offers "USB tethering" and "MIDI".
-* **Why**: the keyboard connector shows up as a USB keyboard that is always plugged in, and Android hides the USB
-  connection notification while such a device is present. The USB-C port next to the power button only runs at USB 2.0
-  in device mode.
+### File transfer over USB: no prompt, and USB 2.0 speed only
+* **Symptom**: when connected to a computer, the tablet does not show the "USB usage" notification. To transfer files, choose "File transfer" or "PTP" in Settings → Connected devices → USB; a portable device called "MateBook E Go" then appears on the computer. The same page offers "USB tethering" and "MIDI". Transfers only reach USB 2.0 speed, about 30 MB/s.
+* **Cause**: the keyboard cover's connector appears to the system as a permanently attached USB keyboard, and Android hides the USB connection notification when it sees such a device. The USB-C port next to the power button only runs at USB 2.0 speed when connected to a computer.
+* **What to do**: choose "File transfer" in Settings as above. The tablet does not enter standby while connected to a computer, so transfers continue with the screen off; please unplug the cable when you are done.
+
+### Whether USB sticks and external drives open in "Files" has not been tested
+* **Symptom**: on v0.7.1 and earlier, USB sticks and external drives do not show up in the file manager. Since 1.0.0-rc.1 the system recognizes and mounts such devices, but whether they open properly in "Files" has not been tested yet.
+* **Cause**: v0.7.1 and earlier did not register such devices as removable storage, so Android did not mount them.
+* **What to do**: if you have tried a USB stick on rc.1 or later, we would welcome a [test report](https://github.com/vahiru/gaokun-android/issues/new/choose), whatever the outcome.
+
+### Fingerprint is not available yet
+* **Symptom**: Settings has no fingerprint option, and the sensor in the power button cannot be used.
+* **Cause**: the fingerprint driver and system service are still in development.
+* **What to do**: unlock with a PIN or password. Even once fingerprints are supported, fingerprint payment in payment apps will most likely not work.
+
+### The stylus does not support the first-generation M-Pencil
+* **Symptom**: on 1.0.0-rc.1 and earlier, the stylus does nothing at all. Since rc.2, the second- and third-generation M-Pencil support pressure, hover, tilt and double-tap on the side; everyday use of the third-generation pen has not been tested yet. The first-generation M-Pencil does not work.
+* **Cause**: the stylus signal comes from the touchscreen's second controller chip, whose driver was reverse-engineered by a community contributor; the first-generation pen uses a different protocol that the driver does not support.
+* **What to do**: if a second- or third-generation pen does not work properly on rc.2 or later, please open an issue and attach the output of `adb shell getevent -pl`.
+
+### Location mostly does not work
+* **Symptom**: maps, weather, delivery and ride-hailing apps cannot get a location, or stay on "locating".
+* **Cause**: this machine has no GPS. Network location is provided by Google Play services and is unavailable in mainland China, where Google cannot be reached.
 * **What to do**:
-  * Choose "File transfer" in Settings as above.
-  * While it is plugged into a computer the tablet does not go to standby (deliberately: standby in that state resets
-    the board), so transfers keep going with the screen off. Unplug when you are done.
-
-### USB sticks are not recognised
-<!-- STOR-1 / BKUP-6: the voldmanaged lines are in fstab (8da5974) and shipped in rc.1, ⬜ not tested on hardware.
-     Once tested, rewrite this entry as "port1 works; port0 only once usbrole has switched it to host", and say which
-     physical port is port1 (STOR-3: user confirmed 2026-10-05 that port0 is the one next to the power button, so port1 is the other). Body text unchanged until then. -->
-* **What you see**: up to v0.7.1, a USB stick or external drive does not appear in the file manager. Whether it does
-  from 1.0.0-rc.1 on has not been checked on hardware.
-* **Why**: the kernel does see it, but up to v0.7.1 the system's partition table doesn't declare any removable storage,
-  so Android never mounts it. From 1.0.0-rc.1 it is declared.
-* **What to do**: use the network to copy files. If you have tried a USB stick on rc.1 or later, please open an issue
-  and tell us whether it worked.
-
-### Fingerprint does not work (in progress)
-<!-- HW-5 / T6 (D12: not a 1.0 gate). -->
-* **What you see**: the fingerprint reader in the power button does not exist as far as Android is concerned; Settings
-  has no fingerprint option.
-* **Why**: matching runs inside Huawei-signed secure firmware, and its command protocol has to be reverse-engineered from
-  the Windows driver. Huawei's fingerprint program can already be loaded into the secure environment; the kernel driver
-  and the Android fingerprint service are still missing.
-* **What to do**: unlock with a PIN or password. Even once fingerprint works, fingerprint payments in payment apps will
-  most likely still be unavailable.
-
-### Stylus (Huawei M-Pencil): second-generation pens only
-<!-- DISP-13. PR #27 (community contribution): patches/0079 + 0080, gk3pend, usbcore.quirks. Tested on a BOE unit (PR #27 as an
-     out-of-tree module on rc.1, and rc.3); PR #75's column timing fix checked by eye on a CSOT unit, #78's pitch table
-     not tap-tested on CSOT; not on the maintainer's machine. Evidence in the Chinese file.
-     The "No automatic brightness" section was removed: PR #54 shipped in rc.3. -->
-* **What you see**: up to 1.0.0-rc.1 the pen does nothing at all. From rc.2 the second-generation M-Pencil works:
-  pressure, hover, tilt and the side double-tap; from rc.3 strokes are smoothed. A first-generation pen does nothing,
-  and the third generation has not been tested.
-* **Why**: the pen is sensed by the touch screen's second controller chip; a community contributor reverse-engineered its
-  driver. The first-generation pen speaks a different protocol that the driver does not understand.
-* **What to do**: if a second-generation pen does not work on rc.2 or later, open an issue with the output of
-  `adb shell getevent -pl` (needs adb).
-
-### Location mostly does not work (no GPS)
-<!-- APP-13 / NET-5. Whether domestic apps' own Wi-Fi location SDKs work: not tested yet (batch 4). -->
-* **What you see**: maps, weather, delivery and ride-hailing apps cannot get a position, or keep "locating".
-* **Why**: the system has no GPS. Network location is provided by Google Play services, which cannot reach Google from
-  mainland China.
-* **What to do**:
-  * Choose your city manually in weather apps and similar.
-  * Apps with their own location SDK (for example map apps that locate by Wi-Fi) may work; we have not tested them.
+  * Choose your city manually in weather and similar apps.
+  * Chinese apps with their own location services (for example map apps using Wi-Fi positioning) may work; this has not been tested yet.
   * Use a phone for navigation.
 
-### No DRM-protected video (no Widevine)
-<!-- AV-9 / APP-6 (D11: don't ship it, disclose). Impact on Chinese video apps' VIP content: not tested. -->
-* **What you see**: Netflix, Disney+, Prime Video and the like will not play their shows; they report a DRM or "device
-  not supported" error. Some paid or licensed content in Chinese video apps may be affected too (not tested yet).
-* **Why**: the system has no DRM module at all. Widevine is a closed Google component that needs licensing and
-  certification, which we cannot provide.
-* **What to do**: watch such content on another device.
+### DRM-protected video cannot be played
+* **Symptom**: Netflix, Disney+, Prime Video and similar services cannot play their content and report a DRM error or that the device is not supported. Some members-only or licensed content in Chinese video apps may be affected too; this has not been tested yet.
+* **Cause**: the system has no DRM module. Widevine is a closed-source Google component that requires licensing and certification, which this project cannot ship.
+* **What to do**: please watch such content on another device.
 
-### Bluetooth headset microphone does not work in calls
-<!-- AV-2 (1.0: disclose only). AV-3: A2DP playback never fully verified on hardware. AV-10: the wired headset mic is
-     broken too (planned for batch 2; drop that sentence once fixed). -->
-* **What you see**: in WeChat voice calls, Tencent Meeting, in-game voice chat and the like, the microphone on a
-  Bluetooth headset does not work, and the call audio may not go to the headset either. The microphone on a wired headset
-  does not work at the moment either.
-* **Why**: Bluetooth calls need a dedicated audio path. Phones get it from Qualcomm's Android software, which this
-  machine doesn't have, and the system has no replacement for it yet.
-* **What to do**: use the tablet's built-in microphone and speakers for calls. Listening to music over Bluetooth (A2DP)
-  takes a different path and is not affected, though it has not been fully tested on hardware yet.
+### The Bluetooth headset microphone does not work in calls
+* **Symptom**: in WeChat voice calls, Tencent Meeting or in-game voice chat over a Bluetooth headset, the headset microphone does not work, and the call audio may not play through the headset either. The microphone on wired headsets has not been tested yet.
+* **Cause**: Bluetooth calls need a dedicated audio path; this machine lacks the one Qualcomm provides for phones, and no replacement has been implemented yet.
+* **What to do**: use the tablet's own microphone and speakers for calls. Listening to music over a Bluetooth headset uses a different path and is not affected.
 
-### No push notifications while in standby
-<!-- APP-5 / NET-9 / PWR-12 (1.0: measure, then disclose; waking on incoming packets after 1.0). Evidence: PR #40 (Wi-Fi stays
-     connected in standby) and the PR #46 author's measurements of 2026-10-17 — see the zh-CN file.
-     patches/0199–0202 wire up PCIe WAKE#; tested: a matching receive rule wakes the system (the two default triggers,
-     disconnect and GTK rekey failure, were not tested separately). gaokun3_wifiwake sets the receive rules for the servers on
-     ports 5228–5230, i.e. Play services' push connections (docs/deep-sleep.md, Wi-Fi section); the prototype ran as a
-     KernelSU module, this ROM version has not run on hardware. Push arrival times were not checked app by app; WeChat and
-     QQ in China do not use Google push, so the text below stays true for them. Rewrite the text below once it is checked
-     on hardware.
-     The standby switch is the Parts one from 1.0 on (PWR-16); its place and wording on the Battery page still have to be checked on hardware. -->
-* **What you see**: once the screen is off and the machine is in standby, new WeChat, QQ and other messages do not
-  arrive in real time. They arrive at the system's next timed wake-up (or when you turn the screen on), usually a
-  minute or two late, occasionally around three. Wi-Fi stays connected in standby, so nothing has to reconnect.
-* **Why**: we have not yet got the Wi-Fi chip to wake the machine from standby when data arrives, so messages are
-  picked up when the system wakes on its own. Chinese apps also have no vendor push channel available on this
-  system.
+### Messages from some apps are delayed in standby
+* **Symptom**: once the screen is off and the machine is in standby, new messages from apps that do not use Google's push service (FCM), such as WeChat and QQ, only arrive at the system's next scheduled wake-up or when you turn the screen on, usually one or two minutes late, occasionally around three. Apps that use FCM are delayed the same way on 1.0.0-rc.3 and earlier; from the next release they can wake the system and arrive on time. Wi-Fi stays connected during standby, so there is no need to reconnect after waking.
+* **Cause**: Chinese apps have no vendor push channel on this system, so they can only fetch messages from their servers when the system is awake.
 * **What to do**:
-  * When you need messages promptly, keep the screen on, or receive them on your phone.
-  * Or turn standby off completely, which costs noticeably more battery with the screen off: **Settings → Battery →
-    Standby (sleep)**, turn off "Allow standby". Turning it off applies right away and survives restarts; turning it
-    back on restores standby from the next time the screen turns off.
+  * When you need messages on time, keep the screen on, or receive them on a phone.
+  * You can also turn standby off entirely, at the cost of clearly higher power use with the screen off: in Settings → Battery → Standby (sleep), turn off "Allow standby". This takes effect immediately and survives restarts; after turning it back on, standby resumes from the next time the screen goes off.
 
 ### Not Google-certified
-<!-- T2 / INST-14 / APP-4. -->
-* **What you see**: the Play Store says "This device isn't Play Protect certified" and some apps will not install. Apps
-  that depend on Play Integrity (Google Wallet, some banks outside China) do not work.
-* **Why**: this ROM is not on Google's list of certified devices. Play Integrity also requires a locked boot chain and a
-  Google-signed system, which this machine can never meet.
-* **What to do**: register the device once, as described in
-  [INSTALL.md, "This device isn't Play Protect certified"](INSTALL.md#this-device-isnt-play-protect-certified), and the
-  Play Store works normally. There is nothing to be done about Play Integrity.
+* **Symptom**: the Play Store says "This device isn't Play Protect certified", and some apps cannot be installed. Apps that depend on Play Integrity (for example Google Wallet and some banking apps outside China) cannot be used.
+* **Cause**: this system is not on Google's list of certified devices. Play Integrity also requires a locked boot chain and a system signed by Google, which this machine cannot provide.
+* **What to do**: register the device once as described in the [install guide](INSTALL.md#this-device-isnt-play-protect-certified), and the Play Store works normally. There is no way around Play Integrity.
 
-### Google apps are built in, unusable in mainland China, and there is no Chinese app store
-<!-- APP-12 (user decision D7: ship only the GApps build, no vanilla build). Battery cost of GMS retrying: not measured. -->
-* **What you see**: without a proxy, neither the Play Store nor Google services can connect, and Google services keep
-  retrying in the background (battery impact not measured). There is no Chinese app store on the system.
-* **Why**: we only ship the build with Google apps.
-* **What to do**: download APKs with the browser, from each app's official website or from the web version of a Chinese
-  app store.
+### Google apps are built in, and there is no Chinese app store
+* **Symptom**: where Google cannot be reached, the Play Store and Google services do not work, and Google services keep trying to connect in the background; the power cost of this has not been measured. The system has no Chinese app store.
+* **Cause**: this project only releases builds with Google apps.
+* **What to do**: download APKs with a browser from the apps' official websites or the web versions of Chinese app stores.
 
-### Other hardware that is not there
-* **No cellular network, no SIM**: the machine has no modem.
-* **No compass**: there is no magnetometer. Auto-rotate works; it uses the accelerometer and gyroscope.
+### Hardware this machine does not have
+* **Mobile network and SIM card**: this machine has no modem.
+* **Compass**: there is no magnetometer. Auto-rotation uses the accelerometer and gyroscope and is not affected.
 
 ---
 
-## 4. Other common problems (planned to improve)
+## 4. Unresolved problems
 
-These are bugs, not trade-offs, and they will be removed from this list once fixed.
+The following are bugs, not trade-offs; they will be removed from this list once fixed.
 
-### Audio and Bluetooth can deadlock after a long uptime
-<!-- A1 / AV-6 (#38: reported by a user, never reproduced by us). -->
-* **What you see**: after the machine has been running for a long time, sound and Bluetooth stop working, and only a
-  reboot brings them back. Reported by users; we have never reproduced it.
-* **Why**: not known yet. Audio and Bluetooth share one path to the DSPs, and the suspicion is that this path gets
-  stuck.
-* **What to do**: reboot. A watchdog collects evidence automatically when it detects the hang, in
-  `/data/vendor/gaokun3/hangdump-*`, and keeps it across reboots. Please attach it to your report (it needs root; the
-  command is in the [FAQ](FAQ.md#with-a-computer-when-the-machine-boots)). If there is no such folder, say so: that is
-  a clue too.
+### After a long uptime, sound and Bluetooth may stop working together
+* **Symptom**: after the machine has been running for a long time, sound and Bluetooth stop working together, and only a restart brings them back. This was reported by users and has not been reproduced yet.
+* **Cause**: not known yet. Audio and Bluetooth share a path to the DSP, and that path is suspected of getting stuck.
+* **What to do**: a restart brings them back. A watchdog in the system saves records to `/data/vendor/gaokun3/hangdump-*` when it detects the hang, and they survive the restart. Please attach them when reporting (root is needed; see the [FAQ](FAQ.md#when-android-starts) for the commands); if the directory does not exist, please say so in the report too.
 
 ### Plugged into a computer, the tablet may charge the computer instead
-<!-- USB-1 (2026-10-05 on the dev machine with a Mac): port0 settled as power source, partner without USB PD,
-     kernel picked host ⇒ nothing enumerates; usbfollow only corrects the case where we are the sink. -->
-* **What you see**: you plug the tablet into a computer (port next to the power button) and USB debugging / the
-  computer does not see it. The tablet's battery goes *down* instead of charging.
-* **Why**: both the tablet's port and many computers' USB-C ports can be either the power source or the power sink.
-  Without USB Power Delivery on the computer's side, which side becomes which is decided at plug-in and can come out
-  the wrong way round. Then the tablet acts as the host, the computer does not act as a USB device, and neither sees
-  the other.
-* **What to do**: unplug and plug the cable in again (once is usually enough), or use another port on the computer.
-  A fix that asks to renegotiate automatically is planned.
-* Only the USB-C port **next to the power button** can do USB debugging at all; the other port is host-only.
+* **Symptom**: after connecting the tablet (the USB-C port next to the power button) to a computer, neither the computer nor USB debugging sees the tablet, and the tablet's battery goes down instead.
+* **Cause**: the USB-C ports of the tablet and of many computers can both supply and receive power. When the computer does not support USB PD, which side supplies power is decided at the moment of plugging in, and occasionally it ends up the wrong way round. The tablet then acts as the host, while the computer will not act as a USB device, so neither sees the other.
+* **What to do**: unplug the cable and plug it in again (once is usually enough), or use another port on the computer. Only the USB-C port next to the power button can be used for USB debugging; the other port only connects peripherals.
 
-### The USB-C port can stop working after replugging, until a reboot
-<!-- A6 / PWR-4 / HW-14. The "no standby" half is inferred from the code (role switch keeps failing and holds the
-     machine awake), not observed; README.md:64 says the same.
-     ⬜ patches/0086 (PR #36, since rc.2) keeps vreg_l9d on; its description (port0 dwc3 soft reset timing out with -110,
-     xhci and the gadget dead until a reboot) matches this entry, but replugging after standby has not been retested
-     since. Rewrite or drop this entry once it has. -->
-* **What you see**: after you unplug and plug something back into the USB-C port (seen mostly after standby), the port
-  stops working: no USB adb, USB devices are not detected. It stays like that until you reboot. Going by the code, the
-  machine also no longer goes into standby until that reboot, so the battery drains with the screen off.
-* **Why**: the root cause in the USB controller is not known yet. While the port is broken, the service that switches
-  the port's role keeps failing and keeps the machine awake.
-* **What to do**: reboot. Until then, use Wi-Fi for adb or file transfer.
+### After plugging devices in and out, the USB-C port may stop working until a restart
+* **Symptom**: after plugging devices in and out of a USB-C port (mostly after standby), the port may stop working: USB debugging cannot connect and USB devices are not recognized, until a restart. Occasionally the USB-C port does not work right after power-on; a restart brings it back.
+* **Cause**: still being investigated.
+* **What to do**: a restart brings it back. Until then, use adb and transfer files over Wi-Fi.
 
-<!-- Removed "A palm on the screen turns into several touches" (DISP-7 / T1): PR #30 (patches/0081, 0082) shipped in rc.2 and was
-     checked on a BOE unit. Game touch mode skipping palm rejection is a choice stated in Settings, not a defect. -->
+### *League of Legends: Wild Rift* starts; whether matches work has not been tested
+* **Symptom**: on 1.0.0-rc.1 and earlier, the game quits as soon as it opens. Since rc.2 it starts and reaches the user agreement screen; whether you can get into a match has not been tested yet.
+* **Cause**: the game engine assumes that a 64-bit process's memory addresses stay below 2^39, while this kernel gave processes a 2^48 address space by default. The kernel now hands out addresses below 2^39 by default.
+* **What to do**: if the game still quits or gets stuck elsewhere on rc.2 or later, collect the crash log right after it quits (see the [FAQ](FAQ.md#when-android-starts)) and attach it to [#15](https://github.com/vahiru/gaokun-android/issues/15).
 
-### *League of Legends: Wild Rift*: closed right after launch up to 1.0.0-rc.1; starts from rc.2, matches not yet tested
-<!-- #15 / #17; patches/0078. Evidence in the Chinese file. -->
-* **What you see**: up to 1.0.0-rc.1 the game closes right after you open it. From rc.2 (development build dev.11 on) it
-  starts and reaches the user-agreement screen; **whether a match can be played has not been tested yet**.
-* **Why**: the game's engine assumes that a 64-bit process never gets memory addresses above 2^39, while this kernel gave
-  processes a 2^48 address space. The kernel now hands out addresses below 2^39 by default; the page tables are unchanged.
-* **What to do**: if it still closes or gets stuck somewhere else on rc.2 or later, collect the crash log right after it
-  closes (see the [FAQ](FAQ.md#with-a-computer-when-the-machine-boots)) and attach it to
-  [#15](https://github.com/vahiru/gaokun-android/issues/15).
+### On a low-power charger the battery shows "Charging" while it drains
+* **Symptom**: on a computer's USB port or a low-power phone charger, the battery shows "Charging" while the percentage keeps going down. In this state the system does not shut down automatically when the battery is low; when it runs out, the machine simply loses power and unsaved work is lost.
+* **Cause**: the battery state comes from Huawei's embedded controller (EC). Either the driver misreads some of its status values, or the controller itself reports "charging"; which one has not been determined yet.
+* **What to do**: use a charger with enough power (for example the original charger). On a low-power source, watch the percentage rather than the charging icon, and save your work before the battery runs out.
 
-### On a low-power charger the battery says *charging* while it drains
-<!-- BATT-1 (BATT-2 merged into it). -->
-* **What you see**: on a weak power source (a computer's USB port, a small phone charger) the battery shows
-  *charging*, but the percentage keeps going down. Android then never does its low-battery shutdown, and at 0% the
-  machine switches off hard; unsaved work is lost.
-* **Why**: the battery status comes from Huawei's embedded controller. Either the driver decodes some of its status
-  values wrongly, or the controller itself reports *charging*; which one is not settled yet.
-* **What to do**: charge with a charger that can actually charge the machine, such as the one that came with it. On a
-  weak source, watch the percentage rather than the charging icon, and save your work before it runs low.
-
-### Turning on the Wi-Fi hotspot disconnects the tablet from Wi-Fi
-<!-- NET-2 (batch 2). The v0.7.1 notes blamed the chip; iw shows the driver supports STA+AP, the software config does not.
-     2026-10-05 confirmed in source: ath11k advertises STA and AP in one interface combination for WCN6855 hw2.1
-     (ath11k mac.c:10327-10356, core.c:525-529/:572 @7.2.9). Fix written (BoardConfig WIFI_HAL_INTERFACE_COMBINATIONS +
-     wlan1 pre-created by gaokun3-wlan-ap.sh), shipped in rc.1 (wlan1 created at boot was checked on rc.1); ⬜ another device
-     joining the hotspot while Wi-Fi stays up has not been tested. Delete this entry once a release passes the
-     "hotspot + Wi-Fi at the same time" check. -->
-* **What you see**: up to v0.7.1, when you turn on the hotspot, the tablet drops its own Wi-Fi connection. With no modem,
-  the hotspot then has no connection to share. From 1.0.0-rc.1 both should work at once; not yet tried on hardware.
-* **Why**: up to v0.7.1 the software configuration cannot run Wi-Fi and the hotspot at the same time. This is not a
-  limit of the chip. From 1.0.0-rc.1 it is configured.
-* **What to do**: try it on rc.1 or later; if Wi-Fi still drops, please open an issue, and connect your other devices
-  to the router directly meanwhile.
+### Using the Wi-Fi hotspot and Wi-Fi at the same time has not been tested
+* **Symptom**: on v0.7.1 and earlier, turning on the hotspot disconnects the tablet's own Wi-Fi. Since 1.0.0-rc.1 the two should work together, but getting online through the hotspot from another device has not been tested yet.
+* **Cause**: v0.7.1 and earlier did not configure Wi-Fi and the hotspot to run at the same time in software; it was not a limit of the chip.
+* **What to do**: if Wi-Fi still disconnects when you turn on the hotspot on rc.1 or later, please open an issue.
 
 ### The Chinese input method has to be turned on once
-<!-- DISP-3 (D10). fcitx5-android 0.1.3 (GitHub release build), preinstalled from 1.0.0-rc.1 — the first build that really
-     carries it (in 1.0.0-dev.10 Android refused to install it: the build system had damaged its v2 signature; fixed by
-     installing it unmodified). Evidence in the Chinese file. ⬜ Not yet checked on the machine: the menu names below, and
-     how a hardware keyboard switches between Chinese and English. Rewrite this entry once that is checked. -->
-* **What you see**: the default keyboard has no Chinese.
-* **Why**: from 1.0.0-rc.1 a Chinese input method (fcitx5, pinyin / shuangpin / wubi built in) is preinstalled, but it is
-  not made the default. v0.7.1 and earlier had none.
-* **What to do**: Settings → System → Keyboard → On-screen keyboard → turn on *Fcitx5*, then switch to it. Updates come
-  from the project's GitHub releases (the F-Droid build is signed differently and will not install over it).
-  How the hardware keyboard switches between Chinese and English has not been checked yet.
+* **Symptom**: the default keyboard does not support Chinese.
+* **Cause**: since 1.0.0-rc.1 the Chinese input method fcitx5 (with Pinyin, Shuangpin and Wubi) is preinstalled, but it is not set as the default.
+* **What to do**: turn on Fcitx5 in Settings → System → Keyboard → On-screen keyboard, then switch to it. Update it later from fcitx5-android's GitHub release page; the F-Droid build has a different signature and cannot be installed over it. How to switch between Chinese and English on the physical keyboard has not been documented yet.

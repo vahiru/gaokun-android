@@ -1,33 +1,21 @@
 <!--
-  发版说明模板（照 v0.7.1-alpha.md 的结构抽出来的）。复制成 docs/relnotes/v<版本>.md 再填；这个文件本身不发。
+  发版说明模板。复制为docs/relnotes/v<版本>.md与docs/relnotes/v<版本>.zh-CN.md后填写；本模板文件本身不对外发布。
 
-  ── 头注释（发版后保留在新文件里，记状态）──────────────────────────────
-  v<X.Y.Z>（用户 YYYY-MM-DD 定名）。<这一版收了哪些 issue / 案卷 #NN>。
-  ⬜ 用户定稿 → ✅ 用户 YYYY-MM-DD 定稿。发的是候选版 <构建戳>（incremental <YYYYMMDDhhmmss>），release.sh --no-build。
-  ⬜ 装机验收 → ✅ 装机验收：<docs/TODO.md 的哪一节 / 案卷>（槽 _a/_b，日期）
-  ⬜ 发布 → ✅ YYYY-MM-DD hh:mm 发布：release.sh --no-build 传 R2、清单最后传（设备端抓取 200、timestamp = 戳）；
-     GitHub release <N> 个附件服务端字节数逐一核对、标 Latest，tag v<X.Y.Z> = <提交>
-
-  ── 填写规矩（填完把这一段删掉）────────────────────────────────────────
-  * 写给用户看：先写"你会看到什么变了"，再写原因，数字放在原因后面。每一条修复都写清"在这台机器上测过什么、没测过什么"。
-  * 感谢报告者：issue 链接 + @用户名。
-  * "Known issues"只写【这一版】特有、或这一版有变化的问题。长期存在的限制和取舍不要在这里重新写一遍，
-    改 docs/known-limitations.md（中英两份）。下面"Known limitations"那一节只留一行摘要，并链接过去。
-  * 发版前把 docs/known-limitations.md 逐条对一遍：这一版修好的就删掉，取舍变了的就改写（SELinux、root 管理器是否预装、
-    恢复出厂、MTP、U 盘……），然后照着改下面的摘要。
-  * 降级：只要这一版改了 /data 里的东西（数据库升级、新的 persist 属性等），就在 Alpha 框里写一句"不保证能降级回去"。
-  * Files 表：每个文件同时给 GitHub 和 R2 两个链接（国内打不开 GitHub）。R2 的路径规则以 scripts/release.sh 的
-    "═══ 4. 上传"一段为准（行号会漂，按这串标题找）：OTA 包 = builds/<zip 名>；安装文件与源码清单 =
-    install/<zip 名去掉 .zip>/<文件名>；域名 = release.sh 里的 HOST（默认 https://ota.072172.xyz）。
-    ⚠️ release.sh 结尾目前【只】打印清单的 curl 核对命令，不打印本版的 R2 链接（INST-5 建议加，还没做）——
-    在那之前按上面的规则自己拼，贴之前每条 curl -sI 一下要 200。
-  * GPL 对应源码（REL-7 已落地，2bf59e1）：release.sh 每版生成 kernel-source.txt、kernel-config.txt、
-    kernel-base-patches.tar.gz，能拿到 repo 时还有 crdroid-manifest.xml（gen_kernel_sources；没生成的那一行从
-    Files 表里删掉，别留空链接）。Files 表里那四行与 Source 一行的 kernel-source.txt 链接都要填。
-    GitHub release 要带上这几个附件，并像载荷一样逐个用 gh release view --json assets 核对服务端字节数。
-  * 用户在中国的多：中文版另出一份（REL-4），结构相同。
+  ── 填写说明（填完后删掉本段注释）────────────────────────────────────────
+  * 面向用户撰写：先写用户能直观感知到的变化，再说明技术原因与实测范围。
+  * 感谢报告者：附上issue链接与@用户名。
+  * "Known issues"仅列出本版本特有或本版本发生变化的问题。长期存在的限制统一维护在
+    docs/known-limitations.md与docs/known-limitations.zh-CN.md中；下方"Known limitations"一节仅保留摘要与链接。
+  * 发版前核对docs/known-limitations.md：本版本已修复的条目及时移除，行为有变化的同步更新。
+  * 降级说明：若本版本修改了/data下的持久化结构（数据库迁移、新增persist属性等），需在提示框中注明不支持保留数据降级。
+  * Files表：每个文件同时提供GitHub与R2下载链接。R2路径规则见scripts/release.sh上传逻辑：
+    OTA包位于builds/<zip名>；安装镜像与源码清单位于install/<zip名去掉.zip>/<文件名>；
+    默认域名见release.sh中的HOST（https://ota.072172.xyz）。发布前请用curl -sI确认所有链接返回200。
+  * GPL对应源码：release.sh每版自动生成kernel-source.txt、kernel-config.txt、
+    kernel-base-patches.tar.gz与crdroid-manifest.xml，发布时一并上传至GitHub Release与R2并核对服务端字节数。
+  * 同步提供中文版发版说明（v<版本>.zh-CN.md），结构保持一致。
 -->
-Android 16 (crDroid) for the **Huawei MateBook E Go** (Snapdragon 8cx Gen 3 /
+Android 17 (crDroid 13) for the **Huawei MateBook E Go** (Snapdragon 8cx Gen 3 /
 SC8280XP) on a **mainline Linux kernel**, with hardware Vulkan on the Adreno 690.
 
 <One paragraph: what kind of release this is, and the two or three changes a user will notice, in bold.>
@@ -66,18 +54,18 @@ thanks to **@reporter**). <Why it was broken, in plain words. What changed. What
 
 ## Known limitations
 
-<!-- 一行一条，和 docs/known-limitations.md 逐条对应；那边删了这边也删。下面是 v0.7.1 / 1.0 计划时的状态。 -->
+<!-- 一行一条，和 docs/known-limitations.md 逐条对应；那边删了这边也删。 -->
 The full list, with workarounds, is in
 **[docs/known-limitations.md](https://github.com/vahiru/gaokun-android/blob/main/docs/known-limitations.md)**
 ([中文](https://github.com/vahiru/gaokun-android/blob/main/docs/known-limitations.zh-CN.md)). In short:
 
 * **Security**: signed with Android's public test keys; `/data` is **not encrypted**; root (KernelSU / ReSukiSU) is
-  built in; SELinux is `permissive`; the boot chain is unlocked.
+  built in; the boot chain is unlocked.
 * **Proprietary components** ship in the images: Huawei firmware and sensor configuration, the Huawei Histen audio
   engine, and Google apps (MindTheGapps).
-* **Not supported**: *Erase all data* in Settings (use the graphical installer's *Reinstall Android*); file transfer
-  over USB (MTP); USB sticks; fingerprint (in progress); stylus; automatic brightness; GPS / location; DRM video
-  (no Widevine); Bluetooth headset microphone in calls; push notifications while in standby; Google certification
+* **Not supported or incomplete**: *Erase all data* in Settings (untested; use the graphical installer's *Reinstall Android*);
+  fingerprint (in progress); first-generation M-Pencil; GPS / location; DRM video (no Widevine); Bluetooth headset
+  microphone in calls; push notifications from apps that do not use FCM while in standby; Google certification
   (register once; Play Integrity never passes).
 
 ## Files
@@ -87,19 +75,19 @@ update. For a **fresh install** you want `super.img.zst` and `boot.img`.
 
 | File | Download | What |
 |---|---|---|
-| `crDroidAndroid-16.0-<YYYYMMDD>-gaokun3-v12.11.zip` (<size>) | GitHub · [R2](https://ota.072172.xyz/builds/crDroidAndroid-16.0-<YYYYMMDD>-gaokun3-v12.11.zip) | OTA package, also what the in-system updater downloads |
-| `super.img.zst` (<size>) | GitHub · [R2](https://ota.072172.xyz/install/crDroidAndroid-16.0-<YYYYMMDD>-gaokun3-v12.11/super.img.zst) | system / system_ext / product / vendor, for a fresh install |
-| `boot.img` (<size>) | GitHub · [R2](https://ota.072172.xyz/install/crDroidAndroid-16.0-<YYYYMMDD>-gaokun3-v12.11/boot.img) | kernel + device tree + first-stage ramdisk |
-| `install-artifacts.sha256` | GitHub · [R2](https://ota.072172.xyz/install/crDroidAndroid-16.0-<YYYYMMDD>-gaokun3-v12.11/install-artifacts.sha256) | checksums of the three files above |
+| `crDroidAndroid-17.0-<YYYYMMDD>-gaokun3-v13.0.zip` (<size>) | GitHub · [R2](https://ota.072172.xyz/builds/crDroidAndroid-17.0-<YYYYMMDD>-gaokun3-v13.0.zip) | OTA package, also what the in-system updater downloads |
+| `super.img.zst` (<size>) | GitHub · [R2](https://ota.072172.xyz/install/crDroidAndroid-17.0-<YYYYMMDD>-gaokun3-v13.0/super.img.zst) | system / system_ext / product / vendor, for a fresh install |
+| `boot.img` (<size>) | GitHub · [R2](https://ota.072172.xyz/install/crDroidAndroid-17.0-<YYYYMMDD>-gaokun3-v13.0/boot.img) | kernel + device tree + first-stage ramdisk |
+| `install-artifacts.sha256` | GitHub · [R2](https://ota.072172.xyz/install/crDroidAndroid-17.0-<YYYYMMDD>-gaokun3-v13.0/install-artifacts.sha256) | checksums of the three files above |
 | `gaokun3.json` | GitHub | the updater manifest for this build |
-| `kernel-source.txt` | GitHub · [R2](https://ota.072172.xyz/install/crDroidAndroid-16.0-<YYYYMMDD>-gaokun3-v12.11/kernel-source.txt) | kernel corresponding source (GPL-2.0): exact base, patch series and rebuild steps |
-| `kernel-config.txt` | GitHub · [R2](https://ota.072172.xyz/install/crDroidAndroid-16.0-<YYYYMMDD>-gaokun3-v12.11/kernel-config.txt) | the kernel `.config`, extracted from this `boot.img` |
-| `kernel-base-patches.tar.gz` | GitHub · [R2](https://ota.072172.xyz/install/crDroidAndroid-16.0-<YYYYMMDD>-gaokun3-v12.11/kernel-base-patches.tar.gz) | the kernel patches between the upstream tag and the build tree |
-| `crdroid-manifest.xml` | GitHub · [R2](https://ota.072172.xyz/install/crDroidAndroid-16.0-<YYYYMMDD>-gaokun3-v12.11/crdroid-manifest.xml) | exact revisions of the crDroid source tree |
+| `kernel-source.txt` | GitHub · [R2](https://ota.072172.xyz/install/crDroidAndroid-17.0-<YYYYMMDD>-gaokun3-v13.0/kernel-source.txt) | kernel corresponding source (GPL-2.0): exact base, patch series and rebuild steps |
+| `kernel-config.txt` | GitHub · [R2](https://ota.072172.xyz/install/crDroidAndroid-17.0-<YYYYMMDD>-gaokun3-v13.0/kernel-config.txt) | the kernel `.config`, extracted from this `boot.img` |
+| `kernel-base-patches.tar.gz` | GitHub · [R2](https://ota.072172.xyz/install/crDroidAndroid-17.0-<YYYYMMDD>-gaokun3-v13.0/kernel-base-patches.tar.gz) | the kernel patches between the upstream tag and the build tree |
+| `crdroid-manifest.xml` | GitHub · [R2](https://ota.072172.xyz/install/crDroidAndroid-17.0-<YYYYMMDD>-gaokun3-v13.0/crdroid-manifest.xml) | exact revisions of the crDroid source tree |
 
 Build stamp `<ro.build.date.utc>`, incremental `<YYYYMMDDhhmmss>`. The checks above were run
 on a machine running exactly this build. Not run on it: <list what was not tested>.
 
-Source: tag [`v<X.Y.Z>`](https://github.com/vahiru/gaokun-android/tree/v<X.Y.Z>) · kernel source manifest: [`kernel-source.txt`](https://github.com/vahiru/gaokun-android/releases/download/v<X.Y.Z>/kernel-source.txt) ([R2](https://ota.072172.xyz/install/crDroidAndroid-16.0-<YYYYMMDD>-gaokun3-v12.11/kernel-source.txt))
+Source: tag [`v<X.Y.Z>`](https://github.com/vahiru/gaokun-android/tree/v<X.Y.Z>) · kernel source manifest: [`kernel-source.txt`](https://github.com/vahiru/gaokun-android/releases/download/v<X.Y.Z>/kernel-source.txt) ([R2](https://ota.072172.xyz/install/crDroidAndroid-17.0-<YYYYMMDD>-gaokun3-v13.0/kernel-source.txt))
 
 The graphical installer is <unchanged — use `<installer version>` from [v<…>](https://github.com/vahiru/gaokun-android/releases/tag/v<…>) / attached: `gaokun3-installer-<version>-…`>.
