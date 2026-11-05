@@ -26,7 +26,7 @@ HAL两样都有：开ALSA前知道这条流的音源，开几路由它定。
 
 | 文件/改动 | 说明 |
 |---|---|
-| `patches/0206-audio-aidl-primary-capture-hook.patch`（tree-fix [38]） | `StreamPrimary`采集方向的厂商钩子：开ALSA前按`ro.vendor.audio.primary.capture_hook` dlopen一个库，库决定硬件声道数；读到的每块进管道之前交给它转换；音源（录音轨的AudioSource）变化时通知它；采集位置的时间扣掉它报的延迟。不设这个属性 = 和原来完全一样 |
+| `patches/0206-audio-aidl-primary-capture-hook.patch`（`crdroid-tree-fixes.py`） | `StreamPrimary`采集方向的厂商钩子：开ALSA前按`ro.vendor.audio.primary.capture_hook` dlopen一个库，库决定硬件声道数；读到的每块进管道之前交给它转换；音源（录音轨的AudioSource）变化时通知它；采集位置的时间扣掉它报的延迟。不设这个属性 = 和原来完全一样 |
 | `micarray/micarray.cpp` → `libgaokunmicarray.so` | 钩子的实现：认内置麦、按音源决定处理还是原样、设混音器、日志。装在`/vendor/lib64/soundfx`：HAL在APEX里，隔离的链接器命名空间只放行这个vendor目录（补丁0068） |
 | `micarray/beamformer.{h,cpp}` | 波束成形本体（第三节） |
 | `micarray/prebuilt/` | 系数文件（不入库），`device.mk`有就装到`/vendor/etc/micarray/` |
@@ -136,7 +136,7 @@ HAL在阵列录音中途崩溃重启后，存下的“原值”就成了“接�
 应用却会看到“有AEC”而关掉自己的。所以通话的回声消除在本库里做。
 
 - **算法**：WebRTC的AEC3（`echo_canceller.cpp`，AudioProcessing只开回声消除，`mobile_mode`关，也就是不用AECM），
-  用ROM树里AOSP自带的`webrtc_audio_processing`（external/webrtc，android-17.0.0_r1；设备树能链它靠tree-fix [39]）。
+  用ROM树里AOSP自带的`webrtc_audio_processing`（external/webrtc，android-17.0.0_r1；设备树能链它靠`crdroid-tree-fixes.py`）。
 - **远端参考**：扬声器的处理库speakerfx把每一块交回HAL的数据（它自己处理完、ALSA拿去播的那份）抄进一个无锁环形缓冲
   （`speakerfx/echo_reference.h`），不加锁、不等待。本库在通话流开流时（HAL的工作线程上）用同一个路径`dlopen`speakerfx拿到这个缓冲，HAL还没加载过它时就由这里先加载，
   句柄一直留着；I/O线程上不查找。找不到时这条流不做回声消除。
@@ -147,8 +147,8 @@ HAL在阵列录音中途崩溃重启后，存下的“原值”就成了“接�
 - **延迟**：AEC3的分频滤波器让采集晚430帧（约9毫秒，冲激测得），开流时加到流的延迟里。
 - **电脑上的测试**（gaokun-workspace的experiments/denoise-hal-20261103/hook-host）：远端经过60毫秒、T60 150毫秒的响应
   回到四颗麦克风，过阵列再进AEC3：只有远端时回声压低43 dB，只有近端时人声只低0.9 dB。
-- **本机**（2026-11-04，#15内核，rc.3的HAL）：媒体音量13/15时回声比底噪高约20 dB，开AEC3后压到底噪（约19.5 dB）；
-  QQ外放通话盲测，开着回声消除的那一通，对方听到的回声明显少。⬜ 双讲还没单独测。
+- **实机验证**：媒体音量13/15时回声比底噪高约20 dB，开AEC3后压到底噪（约19.5 dB）；
+  QQ外放通话盲测中，开启回声消除后对方听到的回声明显减少。双讲场景尚未单独实测。
 
 ## 九、日志与排查
 

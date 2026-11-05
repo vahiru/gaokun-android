@@ -1,135 +1,38 @@
-# gaokun3 的 sensors HAL
+# gaokun3传感器HAL（`android.hardware.sensors` AIDL）
 
-把 SLPI DSP 上的加速度计与陀螺仪喂给 Android 的 SensorService。
-**实机验证通过（2026-08-20）**：框架里能看到真实读数，自动旋转的
-`WindowOrientationListener` 正在消费它们。
+本模块通过[`libgaokun3ssc`](../ssc/README.md)订阅SLPI DSP上的加速度计、陀螺仪与环境光传感器数据，向Android `SensorService`提供标准AIDL传感器接口。底层协议规格见[`docs/dev/sensors-ssc-protocol.md`](../../../../docs/dev/sensors-ssc-protocol.md)。
 
 ```
-Active sensors: SH3001 Accelerometer (handle=0x00000001, connections=2)
-Recent Sensor events:
-SH3001 Accelerometer: last 50 events
-     1 (ts=612.371743828, wall=17:42:46.858) -0.04, 0.05, 9.88,
+SLPI DSP → QMI/QRTR → libgaokun3ssc → SscHub → android.hardware.sensors-service.gaokun3 → SensorService
 ```
 
-数据通路：`SLPI → QMI/QRTR → libgaokun3ssc → SscHub → 本 HAL → SensorService`。
-再往下（AP 怎么给 DSP 当文件服务器）见 `docs/stage4-findings.md` #37，
-协议规格见 `docs/sensors-ssc-protocol.md`。
+## 一、实现结构
 
-## 这是 AOSP 默认实现的改造副本，不是从零写的
+本模块基于AOSP `hardware/interfaces/sensors/aidl/default/`（Apache-2.0）改造：
 
-源自 `hardware/interfaces/sensors/aidl/default/`（Apache-2.0，版权头原样保留）。
-**为什么必须复制而不能继承**：
-* 那个 `Sensors` 类的传感器列表在**构造函数体里**硬加，而 `mSensors` 是 `private`；
-* `libsensorsexampleimpl` 的 `visibility` 只放行 `hardware/interfaces` 的子包，
-  设备树链不了它。
+1. 将默认示例中的9个模拟传感器裁剪为本机实际具备的3个物理传感器：`AccelSensor`（`SH3001 Accelerometer`）、`GyroSensor`（`SH3001 Gyroscope`）与`LightSensor`（`TCS3701 Ambient Light`）。Android框架基于`accel` + `gyro`自动融合生成`Game Rotation Vector`、`Gravity`与`Linear Acceleration`。
+2. `Sensor::readEventPayload`从`SscHub`读取最新实测样本；在首个有效样本到达或数据过期（超过2秒未刷新）时上报`SensorStatus::UNRELIABLE`。
+3. `Sensor::activate`将订阅状态同步至`SscHub`，实现按需启停。
 
-改动只有四处，其余原样：
-1. `Sensors.h` 的传感器列表从 9 个假传感器收敛为 `AccelSensor` + `GyroSensor`。
-   ★**必须删掉那 7 个**，留着会让框架以为本机有气压计/湿度计。
-2. `Sensor.cpp` 里两个 `readEventPayload` 从硬编码的 `{0,0,9.8}` 换成
-   从 `SscHub` 取真数据；数据没到时报 `UNRELIABLE` 而**不是**编一个 9.8 出来
-   —— 那会让上层以为机器平放着。
-3. `SensorInfo` 写上真名字（`SH3001 Accelerometer` 等）。
-4. `Sensor::activate` 把开/关告诉 `SscHub`（见下面"按订阅启停"）。
+## 二、`SscHub`单会话线程模型与按需启停
 
-新增的只有 `SscHub.{h,cpp}`。
+1. **单线程独占持久会话**：
+   - `SscClient`内部维护事务计数与socket读取循环，不可跨线程并发调用。
+   - 此外，在SSC上频繁关闭并新建`SscClient`会在DSP侧累积残留客户端状态并破坏传感器枚举。因此`SscHub`由单一工作线程持久持有一个`SscClient`，初始化阶段在同一会话内轮询等待`FindSensor`（`registry`服务比物理传感器早约20秒上线），绝不因暂未查到传感器而销毁重建会话。
+2. **按订阅状态启停（`EnableContinuous` / `Disable`）**：
+   - 当上层无任何订阅者时（如息屏期间），工作线程在同一会话上发送`Disable`（`msg_id = 10`）停止采样上报，排空在途数据包后进入条件变量等待，使SLPI得以进入低功耗休眠。
+   - 当有订阅者激活传感器时，工作线程唤醒并在同一会话上重新发送`EnableContinuous`。
+3. **SLPI崩溃自愈后的恢复协同**：
+   - 若SLPI发生SSR重启，`hexagonrpcd`必须在SLPI恢复运行后重启一次，SEE才会重新注册传感器。
+   - 当`SscHub`检测到超时未收到数据或未注册传感器时，置位属性`vendor.gaokun3.sscrecover.req`，由`etc/sscrecover.rc`调用`bin/gaokun3-ssc-recover.sh`按顺序重启`hexagonrpcd`与本HAL服务。
 
-## ★ SscHub 的线程模型：一个坑换来的设计
+## 三、环境光传感器（`ambient_light`）流类型筛选
 
-**整个 SSC 会话由一个线程独占**，各传感器的 `readEventPayload` 只读缓存。
-两个原因：
-1. `SscClient` 有 txn 计数器，`FindSensor` 内部自己也在 recv —— 多线程共用
-   一个 client 必然互抢数据包。
-2. ★★**更要紧的**：最初的实现在查不到传感器时会**重建整个会话**
-   （每 10 秒 `Open` 一个新 client）。实测这会把**传感器枚举彻底弄坏**：
-   之后连独立命令行客户端都报 `SSC 说没有传感器提供 data_type=accel`，
-   必须重启 `hexagonrpcd` 才恢复。**干净的 A/B**：停掉 HAL、重建会话，
-   独立客户端立刻又能读到 Z≈9.88。
-   > 根因是每次重建都在 SSC 上留下一个**被丢弃的客户端**。
+SLPI固件中的`tcs3701`驱动为`ambient_light`注册了两个SUID：
 
-所以现在的逻辑是：**在同一个 client 上重试 `FindSensor`**，绝不为此重建会话。
-—— ★ 这也解释了一个必知的时序事实：**`registry` 服务比物理传感器【先】注册**，
-所以 `WaitForService` 成功之后立刻查 `accel` 会得到"没有传感器提供"，
-必须再等（约 20 秒）。
-
-## 按订阅启停（v1.0 计划 PWR-3 / LIVE-2 / HW-3，⬜ 待上机）
-
-此前会话一建好就 50 Hz 常开 accel+gyro、之后再不停：框架**没有任何订阅者**时
-（息屏后 `dumpsys sensorservice` 是 `0 open event connections`）SLPI 也照样采样、
-5 Hz 往 AP 投递，`qcom_stats/slpi` 几乎不涨。#119 §4 的"没人读时为 0"是**停掉 HAL**
-测的，不是"HAL 在跑但没人订阅"。
-
-现在 `activate(true/false)` → `SscHub::Set{Accel,Gyro}Wanted()` 只记下"想要"，
-读线程在**同一个 client** 上 `EnableContinuous` / `Disable` 对应那一路，**不重建会话**
-（上一节的教训）。两路都停用后：读掉在途上报（0.5 秒）、缓存作废（再次使能、新数据到之前
-报 `UNRELIABLE`）、在条件变量上睡到下次 activate。
-★ **空转看门狗（15 秒重新使能 / 60 秒请求收拾）只在流该开着时计时** —— 否则停用后它会
-自己把流打开、再去请求收拾，正好制造 churn。
-⚠️ "同一个 client 上反复 Disable/Enable" 此前**从没实测过**，上机要专门验。
-
-## SLPI 崩溃 / 自愈之后（v1.0 DISP-14 / HW-1，TODO B21，⬜ 待上机）
-
-SLPI 自愈后 SEE 要 hexagonrpcd **在 SLPI 起来之后再重启一次**才注册传感器（#118 §4 / #121 §3），
-进程里怎么重建会话都救不回来 —— 而重建本身就是上面那种 churn。所以：
-
-* **HAL 不再自己重建会话**。原来的两处（"等了 60 秒仍没有任何传感器注册，重建会话"、
-  "60 秒没有读数，重建 SSC 会话"）都改成 `RequestRecovery()`：设 `vendor.gaokun3.sscrecover.req`，
-  自己留在同一个 client 上接着等（找传感器放慢到 10 秒一次）。
-* **收拾由 init 做**：`etc/sscrecover.rc` → `bin/gaokun3-ssc-recover.sh`，按 #121 §3 手工实测有效的顺序
-  停本 HAL → 停 hexagonrpcd（`pidof` 清残留，**不用 `pkill -f`**）→ 起 hexagonrpcd → 起本 HAL。
-  触发有两条：HAL 的请求；以及 **hexagonrpcd 意外退出**（`init.svc.vendor.hexagonrpcd-sdsp=restarting`，
-  开机完成之后）—— 后者不依赖 HAL，息屏没有订阅者时 SLPI 崩了也会收拾。
-  每次开机最多 5 次、两次至少隔 120 秒；做 SLPI 实验时 `setprop persist.vendor.gaokun3.sscrecover 0` 关掉。
-* **不报旧值**：缓存样本 2 秒没刷新就当作没有，报 `UNRELIABLE`（原来流断了以后一直报断流前的最后一个值）。
-* 收拾脚本不开任何 SSC 会话。
-
-## 本机能提供什么
-
-| Android 传感器 | 来源 |
-|---|---|
-| `TYPE_ACCELEROMETER` | SSC `accel`（sh3001 六轴）|
-| `TYPE_GYROSCOPE` | SSC `gyro`（同一颗）|
-| `TYPE_LIGHT` | SSC `ambient_light`（tcs3701），**只用连续上报的那个提供者**（见下一节），5 Hz、按订阅启停；SSC 给 {lux, 色温}，只报 lux |
-| Game Rotation Vector / Gravity / Linear Acceleration | ★**框架自动融合出来的**，有 accel+gyro 就有 |
-
-没有的：磁力计（本机无硬件 → 没有指南针、没有 9 轴融合）、
-接近（同一颗 tcs3701，但 SSC 里没有注册出 `proximity`）。
-
-## 环境光：只用连续上报的那个提供者
-
-tcs3701 驱动（华为版，在 SLPI 固件里）给 `ambient_light` 注册了**两个** SUID：
-
-| SUID | 流类型（属性 16） | 能不能用 |
+| SUID | 流类型（属性16） | 状态与行为 |
 |---|---|---|
-| `57069a9c48dd76bdef49dfb91c177728` | 1，变化时上报（DRI） | ❌ 驱动内部的主传感器（读 registry、探测芯片），不受理客户端请求 |
-| `57069a9c48dd768def497fb916377829` | 0，连续上报，1 / 2 / 5 / 10 Hz | ✅ |
+| `57069a9c48dd76bdef49dfb91c177728` | `1`（DRI变化上报，默认项） | 驱动内部主传感器实例，不受理外部客户端请求；向其发送使能请求会触发SEE框架`SNS_ASSERT(req_found)`并导致SLPI崩溃重启 |
+| `57069a9c48dd768def497fb916377829` | `0`（连续采样上报，1/2/5/10 Hz） | 正常输出光照度（lux）与色温 |
 
-* 给第一个发使能请求：驱动的 `set_client_request` 把请求连同实例一起删掉，SEE 框架随即
-  `SNS_ASSERT(req_found)`（`sns_stream_service.c:436`，"Request %x not found on Instance %x"），
-  `sensor_process` 崩溃、SLPI 整个重启。以前记录的"使能光感污染会话 / 只回一条 msg_id=130"都是这个崩溃
-  （130 里的 4 是 `SNS_STD_ERROR_INVALID_STATE`）。
-* 而**默认的偏偏是它**：registry `default_sensors.ambient_light` 按流类型 = 1 选默认，SUID 查询的
-  `only_default_values` 在 SEE 一侧默认为 true —— 只按默认去查的客户端拿到的都是会崩的那个。
-* 所以 `SscHub` 用 `FindSensors`（显式 `only_default_values=false`）拿到全部提供者，按属性 16 挑流类型
-  为 0 的那个（`FindStreamingLight`），**从不使能默认的那个**；找不到就不开光感（框架里光线传感器
-  没有读数，自动亮度退回手动亮度）。
-* 命令行核对：`gaokun3-ssc-test ambient_light 5 10`（连续上报，工具同样按流类型挑提供者，
-  并拒绝 `onchange`）。
-
-自动亮度的曲线在 `overlay/frameworks/base/core/res/res/values/config.xml`
-（`config_autoBrightnessLevels` / `config_autoBrightnessLcdBacklightValues`，没有 nits 映射，框架走
-`SimpleMappingStrategy`）。
-
-## 还欠的
-
-* ⬜ **sepolicy**：现在跑在 permissive 下，logcat 里有一串 `avc: denied`
-  （`execute_no_trans` / `add` 到 `hal_sensors_service` 等）。转 enforcing 前必须补。
-* ✅ **轴向：不用改。** SSC 报的安装矩阵**全零**（出厂校准随 Windows 永久丢失，
-  见 #37），所以我们直接用了传感器自身坐标系 —— 2026-08-20 用户实机确认
-  **自动旋转方向正确**。运气好：单位矩阵恰好与本机面板方向一致。
-  ⚠️ 别据此以为所有 gaokun3 都一样；换面板批次的机器若发现方向反了，
-  纠正点就在 `Sensor.cpp` 的两个 `readEventPayload` 里。
-* ✅ **`CONFIG_QCOM_FASTRPC=y`**：M13 起已是 `=y` 并实机验证 —— `#18` 内核起来后
-  四个 `/dev/fastrpc-*` 都在而 `/proc/modules` 是 **0 行**，
-  `scripts/archive/sensors-up-android.sh` 那套手动步骤不再需要（这是本项目第 13 个「=m 坑」）。
-* 采样率/batching/flush 的语义映射仍用上游默认（`no batching`）。
+由于SEE在`only_default_values=true`时默认返回流类型为1的SUID，`SscHub::FindStreamingLight`显式以`only_default_values=false`查询全部提供者，并按属性`16`（`SNS_STD_SENSOR_ATTRID_STREAM_TYPE`）筛选出流类型为`0`的SUID进行订阅。自动亮度映射曲线配置于`overlay/frameworks/base/core/res/res/values/config.xml`。

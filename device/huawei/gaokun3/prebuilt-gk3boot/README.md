@@ -1,9 +1,8 @@
 # 统一启动入口 gk3boot.efi 与执行端 fastboot.img 的预编译产物（随 vendor 下发）
 
-`.gitignore` 把本目录**整个**忽略，只放行这份 README —— 与 `prebuilt-boot/` 同一个规矩：二进制不入库，
-构建机上由 `scripts/sync-device-tree.sh` 同步过去并断言。
+`.gitignore`把本目录**整个**忽略，只放行这份README——与`prebuilt-boot/`同一个规矩：二进制不入库，构建机上由`scripts/sync-device-tree.sh`同步过去并断言。
 
-设计：`docs/boot-entry-design.md` §4.6.2、§4.11（S9）；入口本身：`tools/gk3boot/`（README §10–§11）。
+统一启动入口与执行端的完整实现与规范见[`tools/gk3boot/README.md`](../../../../tools/gk3boot/README.md)。
 
 ## 需要放什么
 

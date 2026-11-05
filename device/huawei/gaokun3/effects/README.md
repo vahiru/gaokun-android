@@ -265,42 +265,4 @@ adb shell su -c 'logcat -d -s gaokun_effect' | tail -40
    仍然只在场景 3 上标定过。
 4. 进 Histen 之前信号被量化到 16 位（高半字）并硬限在 ±1.0，出来再丢掉低 16 位 —— 外放听不出来，但不是无损的。
 5. 在**本机扬声器（WSA 双单元）**上调的参数，不具备跨机型通用性。
-6. ✅ **2026-09-26 编译验证通过**（构建机独立 `OUT_DIR=out-pr7`，不碰 `out/`）：effect 在 `-Werror -Wthread-safety -Wextra` 下编过、导出 `createEffect / queryEffect / destroyEffect`、字符串里只有新属性名；Parts 的 APK 带 `SpeakerFxSettingsActivity`（注入 `ia.sound`）；`selinux_policy`（含 neverallow）与 `vendor_property_contexts`（前缀检查）通过；引擎 / 配置 / `histen.rc` 三份拷贝与源文件一致。★ 第一轮编译抓到一处我自己的错：`get_prop(hal_audio_default, system_prop)` 撞 neverallow（`system_prop` 是 `core_property_type`），于是改成 init 镜像（`etc/histen.rc`）。
-   ❌ **2026-09-28 第一次上机（v0.7.0 候选版 `1790597477`）：效果根本没挂上播放链。**
-   * 开关本身是通的：「设置 → 声音」里有这一项，打开后 `persist.sys.gaokun3.histen=1`、`vendor.gaokun3.histen.on=1`。
-   * 但开、关两种状态下放音乐都既没有 `bypass` 也没有 `meter:`；effect factory 只创建过 AudioFX 的三个效果，从没创建 `gaokun_histen`（b7e4c9a2-…）。
-   * effect HAL 进程的 maps 里没有这两个库；它加载的 soundfx 库全在 `/apex/com.android.hardware.audio/lib64/soundfx/` 下。
-   * 放音一直正常，没有崩溃。
-   **根因（已坐实）**：effect HAL 跑在 vendor APEX `com.android.hardware.audio` 里。
-   * 直接证据：同日重启 effect HAL 后抓到 `AHAL_EffectConfig: parseLibrary gaokun_histen : /vendor/lib64/soundfx//libgaokunhisteneffect.so`
-     （先试了 APEX 的 soundfx 目录，不存在，才回落到 vendor），随后 `linker: library "/vendor/lib64/soundfx//libgaokunhisteneffect.so" … needed or dlopened by
-     "/apex/com.android.hardware.audio/bin/hw/android.hardware.audio.effect.service-aidl.example" is not accessible for the namespace`
-     与 `AHAL_EffectFactory: openEffectLibrary: dlopen failed`。postprocess 引用了这个没注册上的 effect，又报了 3 条 `queryProcessing … getDescriptorFailed`。
-     配置本身没问题（`EffectConfig successfully parsed /vendor/etc/audio_effects_config.xml, skipping 0 element(s)`）。
-   * 它的链接器命名空间是隔离的：`/linkerconfig/com.android.hardware.audio/ld.config.txt` 里 `namespace.default.isolated = true`，
-     permitted.paths 只有 APEX 自己的 `${LIB}`、`/system/${LIB}`、`/system_ext/${LIB}`。
-   * effect 服务和 libeffectconfig 都用普通 dlopen，所以 `/vendor/lib64/soundfx/` 下的库能被 access() 看到，却会被命名空间拒掉。
-   * 引擎走的 `histen_chain` 路径同理。
-   * 原作者是用 KSU 装在 `/system/lib64/soundfx/` 的，正好在 permitted 里，所以他那边能跑。
-   （iris 会话代查，原始输出在本机 `out/v070-accept/b2-diag/`；重启 effect HAL 那次的日志是 `6-restart.txt`–`8-histen-grep.txt`。）
-   ⬜ 修法（都要重编 vendor / APEX）：
-   * ① 把 effect 库和引擎一起打进 APEX 的 soundfx，最正；
-   * ② 改用 vendor 侧的加载接口（例如 `AApexSupport_loadLibrary` 一类，⬜ 接口名要对照源码核实）；
-   * ③ 改 linkerconfig，不推荐；
-   * 放 `/system` 能跑，但分区归属不对。
-   ✅ **修复 = `patches/0068`**（iris 会话写，tree-fixes 第 16 条）：音频 APEX 自带的 `etc/linker.config.pb` 加一条 `permittedPaths: /vendor/${LIB}/soundfx`，只放行这一个目录。
-   ✅ **2026-09-28 重编候选版 `1790605865` 上机通过**（原始输出在本机 `out/v070b-accept/`）：
-   * 自然开机后，effect HAL 已经把 `/vendor/lib64/soundfx/libgaokunhisteneffect.so` 映射进来了；重启 effect HAL，日志依次是
-     `parseLibrary gaokun_histen` → `openEffectLibrary dlopen lib: /vendor/lib64/soundfx//…` → `queryEffect: ok`；
-     `dlopen failed`、`not accessible`、`getDescriptorFailed` 都是 0 条。
-   * 开关关时：`open: vendor.gaokun3.histen.on is off -- bit-exact passthrough, nothing loaded`，`output device: … -> built-in speaker`，以及一行 `bypass: master switch off`。
-   * 开关打开（新 Parts 页）、重新放一次：
-     * 依次出现 `speaker chain up: … hpf=150Hz makeup=+4.0dB limit=1 ceiling=-1.0dB`、`Histen engine loaded from /vendor/lib64/soundfx/libhw_histen_processing.so`、
-       `init: dlopen+GetSize+Init+SetParams ok`、`ready: scene SWS_SPK_LANDSCAPE_ONE`、`Histen chain up: scene=0 of 15, block=480 frames`、
-       `processing: built-in speaker, Histen + speaker chain`，并且有 `meter:` 行（音量 1 格，电平很低）；
-     * 放音期间 AudioOut_D 上有 1 条 Effect Chain（`Gaokun Histen`，b7e4c9a2），maps 里两个库都在。
-   * 再关掉：回到 bypass，`meter:` 0 条；两种状态下都没有崩溃。
-   * ⬜ 插耳机那一项没测（手边没耳机，发版说明里写明了）。
-   * ⬜ enforcing：录音期间见到 `hal_audio_default → hal_audio_default` 的 binder call denial，也就是 core HAL 调 effect HAL，要补规则，见 TODO B1。
-   开关开 + 外放有 `meter:`；插耳机立刻 `bypass: output is not the built-in speaker`；
-   enforcing 下没有 `hal_audio_default` 读属性的 avc。
+6. **APEX链接器命名空间约束（`patches/0068`）**：effect HAL运行在vendor APEX `com.android.hardware.audio`内，其默认隔离命名空间（`etc/linker.config.pb`）仅放行APEX自身目录与`/system/${LIB}`。`patches/0068`在该APEX的`linker.config.pb`中追加`permittedPaths: /vendor/${LIB}/soundfx`，使effect服务能够正常`dlopen`位于`/vendor/lib64/soundfx/`下的`libgaokunhisteneffect.so`与`libhw_histen_processing.so`。

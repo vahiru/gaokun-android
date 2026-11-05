@@ -1,18 +1,18 @@
-# SSC 传感器配置实验循环
+# SSC传感器配置A/B实验工具
 
-给 SLPI/SSC 传感器配置做 A/B 实验用。**一次约 60–90 秒，不写 `/vendor`、
-不重启整机。** 案卷见 `docs/stage4-findings.md` #72。
+本目录提供在不修改`/vendor`分区、无需整机重启的前提下验证SLPI/SSC传感器JSON配置的实验脚本。SLPI传感器架构与QMI/Protobuf协议详见[`../../docs/dev/sensors-ssc-protocol.md`](../../docs/dev/sensors-ssc-protocol.md)与[`../../device/huawei/gaokun3/hexagonrpcd-root/README.md`](../../device/huawei/gaokun3/hexagonrpcd-root/README.md)。
 
-## 为什么需要它
+---
 
-`docs/stage4-findings.md` #70 整张实验矩阵是废数据，因为那些配置改动
-**从未生效过**：SEE 在 DSP 上初始化过一次之后就不再读文件服务器，
-只重启 `hexagonrpcd` 不会让它重读配置（实测：把根目录换成**空目录**，
-加速度计照样满血）。要让改动生效，必须**重启 SLPI**。
+## 一、工作原理
 
-## 用法
+SLPI固件中的SEE（Sensor Execution Environment）仅在DSP启动初始化阶段通过`hexagonrpcd`读取一次JSON配置文件；若仅重启用户态`hexagonrpcd`而不重启SLPI remoteproc，配置修改不会生效。`sscexp.sh`通过停止`hexagonrpcd`、重启SLPI（`/sys/class/remoteproc/remoteproc0/state`）、以自定义目录`/data/local/tmp/hr`启动临时`hexagonrpcd`并调用`gaokun3-ssc-test`验证，在60–90秒内完成一轮完整测试。
 
-```sh
+---
+
+## 二、使用方法
+
+```bash
 adb push scripts/ssc/sscexp.sh   /data/local/tmp/sscexp.sh
 adb push scripts/ssc/setfield.sh /data/local/tmp/setfield.sh
 adb shell chmod 755 /data/local/tmp/sscexp.sh /data/local/tmp/setfield.sh
@@ -26,23 +26,24 @@ adb shell '
 '
 ```
 
-`setfield.sh` 改完会**回读验证**，值不对就 `exit 1` —— 这正是 #70 缺的那一环。
+`setfield.sh`在修改JSON字段后会自动回读校验，若未命中目标字段则以非零状态码退出。
 
-## ⚠️ 每次改造实验前，先跑这两个对照
+### 有效性对照检查
 
-* **阳性对照（证明 DSP 真读了你的目录）**：把 `sensors/config/*sh3001*`
-  从自定义根目录里删掉再跑 `sscexp.sh accel`，必须得到
-  「SSC 说没有传感器提供 data_type=accel」。
-* **阴性对照（证明失败发生在 probe 层）**：把加速度计的 `slave_config`
-  从 54 改成 99，同样应该"消失"。
+在验证新传感器配置前，建议先运行以下两个对照实验确认DSP确实读取了临时目录`/data/local/tmp/hr`：
 
-两个对照都过，实验结果才可信。
+- **移除配置对照**：从`/data/local/tmp/hr/sensors/config/`删除`*sh3001*`后运行`sscexp.sh accel`，应返回无`accel`传感器。
+- **错误地址对照**：将加速度计的`slave_config`从`54`改为`99`，`sscexp.sh accel`同样应报告未探测到传感器。
 
-## 收工
+---
 
-```sh
+## 三、恢复默认服务
+
+实验结束后恢复系统自带的`vendor.hexagonrpcd-sdsp`服务：
+
+```bash
 adb shell '
-  pkill hexagonrpcd
+  pkill -x hexagonrpcd
   [ "$(cat /sys/class/remoteproc/remoteproc0/state)" = running ] || \
     echo start > /sys/class/remoteproc/remoteproc0/state
   rm -rf /data/local/tmp/hr
@@ -50,5 +51,4 @@ adb shell '
 '
 ```
 
-等约 45 秒后用 `gaokun3-ssc-test accel` 与 `dumpsys sensorservice` 双重验收
-（★ 框架层也要看 —— 自动旋转靠的是那一层，SSC 通不代表 HAL 会话还在）。
+等待约45秒后，通过`gaokun3-ssc-test accel`与`dumpsys sensorservice`确认SSC层与Android SensorService框架层均已恢复正常。

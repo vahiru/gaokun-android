@@ -35,10 +35,7 @@
 - **出错时**：模型加载失败时服务照常监听，对开流回答“不可用”，钩子就不降噪；服务每30秒自己再试（`--retry-s`），一次加载卡住超过60秒就退出，由init重启（`--load-timeout-s`）。
 - **功耗档**：有连接时投HTP的low档，最后一个连接断开时撤掉。
 
-## 验证到哪一步
+## 验证现状
 
-- 同一份源码用NDK编出来，以KernelSU模块gk3denoise在本机跑过（#15内核，强制模式，服务在自己的域里，没有拒绝记录）：
-  输出和离线参考逐位相同；音频HAL经测试shim连上服务，每85毫秒一块往返约14毫秒。
-- SELinux策略在ROM树外按`lineage_gaokun3-cp2a-userdebug`的方式整套编过：neverallow、vendor策略只用公开的平台类型、
-  file_contexts和sepolicy_tests都通过。
-- ⬜ 在ROM树里还没编过：`Android.bp`、`gk3denoise.rc`和`device.mk`的这一段都是照模块的实测写的。
+- 同一份源码用NDK编译后，以KernelSU模块`gk3denoise`在实机上验证通过（SELinux Enforcing模式，服务运行在独立域内，无拒绝记录）：输出与离线参考逐位相同；音频HAL经测试shim连接服务，每85毫秒一块往返约14毫秒。
+- SELinux策略在ROM树外按`lineage_gaokun3-cp2a-userdebug`的方式整套编译验证通过：`neverallow`、vendor策略只用公开的平台类型、`file_contexts`与`sepolicy_tests`均通过。

@@ -1,37 +1,19 @@
-# scripts/archive —— 退役的脚本
+# `scripts/archive`：已退役的早期脚本
 
-判据与 [`docs/archive/`](../../docs/archive/README.md) 相同：**做完了一次性的事、或已被别的东西取代的脚本
-挪到这里**。不删，是因为案卷（`docs/stage*-findings.md`）里按原路径 `scripts/<名字>` 引用过它们 ——
-那些引用记的是"当时用什么做的"，是证据；要复现当时的实验，脚本就在这里。
+本目录归档项目早期阶段使用过、现已被正式工具链或补丁替代的一次性脚本，仅保留供查阅历史实现。**请勿在当前设备上运行本目录中的脚本**，对应操作请使用下表所列的现行工具。
 
-⚠️ **这里的脚本按当时的机器状态写成**（U 盘启动、Windows 还在、ESP 布局是扁平的……），
-**不要拿来操作现在的机器**。要做同样的事，用"取代者"一列。
-
-2026-09-23 归档：
-
-| 脚本 | 原本做什么 | 为什么退役 / 取代者 |
+| 归档脚本 | 原用途 | 退役原因与现行替代工具 |
 |---|---|---|
-| `deploy-android.sh` | 从 U 盘 Linux 把 super + ramdisk 部署到内置盘 | Stage 2 的 U 盘时代工具。取代者：全新安装 `scripts/install-gaokun3.sh`，升级走 OTA / `scripts/install-ota-local.sh`。⚠️ 里面写死的 cmdline 早已过时（TODO B15） |
-| `partition-android.sh` | 在**保留 Windows** 的前提下划 Android 分区 | 2026-08-20 起整机归 Android（M6）。分区现在由 `install-gaokun3.sh` 做 |
-| `esp-migrate-to-internal.sh` | 把引导链从 U 盘 ESP 搬进内置 ESP | 一次性迁移，2026-08-20 做完 |
-| `flash-usb.ps1` | 在 Windows 上把 Ubuntu 镜像写回 U 盘 | U 盘时代；现在救援系统在内置盘上 |
-| `restore-boot-entries.ps1` | 在 Windows 上恢复 U 盘 ESP 的启动项 | 同上；现在用 `scripts/boot-oneshot.sh` + 槽位回落 |
-| `windows-preflight.ps1` | Stage 0：在 Windows 里读机型 / BIOS / Secure Boot | Stage 0 已完成，结果在 `docs/hw-inventory.md`；本机 Windows 已抹除 |
-| `probe-windows-sensors.sh` | 只读挂 Windows 分区认传感器型号 | 型号早已认出（案卷 #37 起）；本机 Windows 已抹除 |
-| `sensors-up-android.sh` | 老内核（`FASTRPC=m`）上手动拉起传感器 | 脚本头自己写着"已废弃（M13）"：发版内核 `CONFIG_QCOM_FASTRPC=y`，init 自己拉 hexagonrpcd |
-| `kernel-bpffs-genfscon-fix.py` | 改内核源码让 bpffs 惰性打 SELinux 标签 | 已做成 `patches/0007-bpf-inode-label-bpffs-lazily-for-android-genfscon.patch`，由 `kernel-apply-patches.sh` 应用 |
-| `glslang-host-tool.py` | 给 glslang 补 host 端 glslangValidator | 产物已固化为 `patches/0003-aosp-glslang-add-host-glslangValidator-binary.patch` |
-| `mesa-relocate-abs-paths.py` | 把 mesa `Android.bp` 里 `~/aosp` 的绝对路径改成 `~/crdroid` | 2026-08-19 换树时的一次性修补 |
-| `lpdump.py` | 读 `/dev/nvme0n1p8` 的 LP 元数据头 | 硬编码分区号的一次性调试；要看 super 里的分区用 `scripts/lpext.py` |
-
-2026-10-04 归档（1.0 计划 INST-19）：
-
-| 脚本 | 原本做什么 | 为什么退役 / 取代者 |
-|---|---|---|
-| `deploy-from-ubuntu.sh` | 在开发机的救援 Ubuntu 里从构建机拉产物，刷 super、换内核 / DTB / ramdisk | 08-20 全内置化前后的开发流程脚本。⚠️ 写死了开发机的 machine-id 与 `SUPER_PART=/dev/nvme0n1p8` —— 安装器现在的整盘布局里（带救援时）p8 是 **userdata**，照跑会把 super 镜像写进用户数据；注释里"默认启动项是救援、挂死自动回落"也早已不成立（`docs/INSTALL.md` 的救援一节）。取代者：升级 / 重刷系统用 `scripts/install-ota-local.sh` 或图形安装器的「重新安装 Android」；全新安装用图形安装器或 `scripts/install-gaokun3.sh` |
-
-**还留在 `scripts/` 顶层、但只在特定情形才用的**（不是过时，别误挪）：
-`slpi-sensors-setup.sh`（Linux 侧复现 SLPI 传感器通路，`device.mk:561` 引用）·
-`collect-hw-inventory.sh`（给别的机型采硬件清单）·
-`verify-*.sh`（各子系统的上机验收，仍然有效）。
-各子目录（`gmu-forensics/`、`s2idle/`、`ssc/`、`camera/`、`touch/`、`live/`）是带 README 的取证工具集，按目录整体管理。
+| `deploy-android.sh` | 从早期U盘Linux将`super`与`ramdisk`部署至内置盘 | 已被[`../install-gaokun3.sh`](../install-gaokun3.sh)、Live图形安装器（[`../live/README.md`](../live/README.md)）及[`../install-ota-local.sh`](../install-ota-local.sh)取代 |
+| `deploy-from-ubuntu.sh` | 在救援Ubuntu下从构建机拉取产物并刷写分区 | 硬编码了早期分区号（如`nvme0n1p8`），与现行安装器分区布局不兼容；现使用[`../install-ota-local.sh`](../install-ota-local.sh)或Live安装器 |
+| `partition-android.sh` | 早期手动划分Android分区 | 现由[`../install-gaokun3.sh`](../install-gaokun3.sh)或[`../live/installer-lib.sh`](../live/installer-lib.sh)统一完成分区创建 |
+| `esp-migrate-to-internal.sh` | 将引导链从外置U盘ESP迁移至内置ESP | 早期一次性迁移脚本 |
+| `flash-usb.ps1` | 在Windows下将Ubuntu镜像写入U盘 | 已被[`../live/build-usb.sh`](../live/build-usb.sh)与[`../windows/gaokun3-setup.ps1`](../windows/gaokun3-setup.ps1)取代 |
+| `restore-boot-entries.ps1` | 在Windows下恢复U盘ESP启动项 | 已被[`../boot-oneshot.sh`](../boot-oneshot.sh)与[`../windows/gaokun3-setup.ps1`](../windows/gaokun3-setup.ps1)取代 |
+| `windows-preflight.ps1` | 在Windows下读取机型、BIOS与Secure Boot状态 | 硬件信息已收录于[`../../docs/dev/hardware.md`](../../docs/dev/hardware.md)；现行Windows侧预检集成在[`../windows/gaokun3-setup.ps1`](../windows/gaokun3-setup.ps1)中 |
+| `probe-windows-sensors.sh` | 挂载Windows分区识别传感器型号 | 传感器型号与配置已合入[`../../device/huawei/gaokun3/hexagonrpcd-root/`](../../device/huawei/gaokun3/hexagonrpcd-root/)（详见[`../../docs/dev/sensors-ssc-protocol.md`](../../docs/dev/sensors-ssc-protocol.md)） |
+| `sensors-up-android.sh` | 在`CONFIG_QCOM_FASTRPC=m`的旧内核上手动拉起传感器 | 现役内核已将`CONFIG_QCOM_FASTRPC=y`内建，由`init`自动拉起`hexagonrpcd` |
+| `kernel-bpffs-genfscon-fix.py` | 修改内核源码使`bpffs`支持延迟SELinux标签分配 | 已固化为内核补丁[`../../patches/0007-bpf-inode-label-bpffs-lazily-for-android-genfscon.patch`](../../patches/0007-bpf-inode-label-bpffs-lazily-for-android-genfscon.patch) |
+| `glslang-host-tool.py` | 为`glslang`补充宿主机端`glslangValidator`目标 | 已固化为补丁[`../../patches/0003-aosp-glslang-add-host-glslangValidator-binary.patch`](../../patches/0003-aosp-glslang-add-host-glslangValidator-binary.patch) |
+| `mesa-relocate-abs-paths.py` | 替换Mesa `Android.bp`中的绝对路径 | 早期源码树迁移时的一次性脚本 |
+| `lpdump.py` | 读取硬编码分区的LP元数据头 | 已被通用逻辑分区解析工具[`../lpext.py`](../lpext.py)取代 |

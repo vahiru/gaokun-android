@@ -1,12 +1,12 @@
-# SELinux 普查工具（B1，案卷 #126）
+# SELinux策略普查与验证工具
 
-三件工具，对应"转 enforcing"要回答的三个不同问题：
+本目录包含3个脚本，分别用于开机AVC拒绝汇总、运行期策略查询以及Enforcing模式试运行：
 
-| 问题 | 工具 | 在哪跑 |
+| 用途 | 脚本 | 运行位置 |
 |---|---|---|
-| 开机到现在，permissive 下都拒了什么？ | `avc-summary.py` | Mac（读 logcat / dmesg 导出） |
-| 现行策略到底放不放行某个访问？ | `policy-query.sh` | 设备（root） |
-| 真 enforcing 时功能会怎么坏？ | `enforcing-trial.sh` | 设备（root，运行期，不重启） |
+| 汇总并去重开机以来的AVC拒绝日志 | `avc-summary.py` | 宿主机（读取导出的`logcat` / `dmesg`） |
+| 查询设备当前加载策略是否放行指定访问 | `policy-query.sh` | 设备（root） |
+| 在不重启的情况下临时切换Enforcing试运行 | `enforcing-trial.sh` | 设备（root，带看门狗自动恢复） |
 
 ## 1. 完整开机普查
 
@@ -16,17 +16,13 @@ adb shell dmesg > dmesg.txt
 python3 scripts/selinux/avc-summary.py logcat.txt dmesg.txt
 ```
 
-两个取样坑（都在这台机器上实测过）：
+采样注意事项：
 
-* **dmesg 会滚掉开头**；logd 的 `kernel` 缓冲从开机就在读 kmsg，通常从 0 秒起。先 `head` 看第一行时间戳。
-* **审计限速**：logd.rc 在 `boot_completed` 时把限速设成 5/秒，开机完成那几秒最容易丢（2026-09-27 这一轮丢了 20 条）。
-  开发机上已 `setprop persist.logd.audit.rate 1000`（持久），下次开机起不再丢。dmesg 里搜 `audit_lost`。
+* **`dmesg`环形缓冲可能滚掉开机早期日志**；`logd`的`kernel`缓冲区从开机起持续读取`kmsg`，通常保留自0秒起的记录。分析前先用`head`核对首行时间戳。
+* **审计限速**：`logd.rc`在`boot_completed`时将限速设为5条/秒，开机完成瞬间容易丢弃审计记录（可在`dmesg`中搜索`audit_lost`）。开发机上可执行`setprop persist.logd.audit.rate 1000`解除限速。
+* **Permissive去重机制**：Permissive模式下同一`(scontext, tcontext, tclass, perm)`四元组只记录一次。若某类问题需要通过修改文件/节点标签（而非添加`allow`规则）修复，日志中只会暴露第一个触发节点，需自行通过`/proc/<pid>/maps`、`/sys/class/wakeup/*`、`getprop -Z`或`vendor/build.prop`枚举全部同类对象。
 
-★ **permissive 下同一个 (主体, 目标类型, 类, 权限) 只记一次。** 靠【改标签】修的问题，
-日志只会露出第一个对象 —— 必须另外把同类对象全部枚举出来（`/proc/<pid>/maps`、`/sys/class/wakeup/*`、
-`getprop -Z`、vendor build.prop 的每一行……）。靠【加 allow】修的不受影响（规则是按类型写的）。
-
-## 2. 问现行策略
+## 2. 查询现行加载策略
 
 ```bash
 adb push scripts/selinux/policy-query.sh /data/local/tmp/
@@ -34,27 +30,16 @@ printf '%s\n' "kernel vendor_file system firmware_load" "p vendor_init vendor_in
   | adb shell 'su -c "sh /data/local/tmp/policy-query.sh"'
 ```
 
-走 selinuxfs 的 `access` 节点，答的是设备上此刻加载的那份策略 —— 比读 `.te` 可靠
-（2026-09-27 就查出 refs 里的 access_vectors 比构建机旧）。行首加 `p ` 表示目标是进程上下文（`u:r:`）。
-源域是 permissive 域时会标 `[permissive]`（KernelSU 的 `ksu` 域就是）。
+脚本通过`/sys/fs/selinux/access`直接查询内核当前加载的二进制策略。行首加`p `表示目标为进程上下文（`u:r:`）；源域处于Permissive状态（如KernelSU的`ksu`域）时输出会标注`[permissive]`。
 
-## 3. 运行期 enforcing 试跑
+## 3. 运行期Enforcing试跑
 
 ```bash
 adb push scripts/selinux/enforcing-trial.sh /data/local/tmp/
 adb shell 'su -c "setsid sh /data/local/tmp/enforcing-trial.sh </dev/null >/dev/null 2>&1 &"'
-# 约 3 分钟后
+# 约3分钟后查看结果
 adb shell cat /data/local/tmp/enf-trial.log
 python3 scripts/selinux/avc-summary.py --enforcing logcat.txt dmesg.txt
 ```
 
-敢这么做是因为本机的 adbd / su 跑在 permissive 的 `ksu` 域，全局 enforcing 锁不住 adb；
-脚本自带 300 秒看门狗。它看不到只在开机 / 服务启动时发生的访问 —— 那一半靠第 1 步。
-⚠️ 新策略装上之前，试跑会让 usbrole 切到 host、USB adb 掉线；结束后
-`adb shell su -c 'setprop ctl.restart vendor.usb-gaokun3'`（USB 端口 HAL）。
-
-## 4. 真的 enforcing 开机
-
-userdebug 构建认 `androidboot.selinux=enforcing`（user 构建无条件 enforcing，而且起不来，#117 §15）。
-做法是 oneshot 一个只改了这一个参数的启动项 —— 起不来下一次重启就回到 permissive 的默认项。
-⚠️ 这是重启，要用户点头、要有人能按电源键。
+由于本机`adbd`与`su`运行在Permissive的`ksu`域，全局切换Enforcing不会锁死adb连接；脚本内置300秒看门狗超时恢复。运行期试跑无法覆盖仅在开机或服务首次启动时发生的访问，后者需结合第1步或带`androidboot.selinux=enforcing`启动测试。

@@ -30,7 +30,7 @@ HAL 拿到的是 FAST 轨也已经混进去的最终结果。在这里处理还�
 
 | 文件 / 改动 | 说明 |
 |---|---|
-| `patches/0117-audio-aidl-primary-playback-hook.patch`（tree-fix [27]） | `StreamPrimary`：开流后按 `ro.vendor.audio.primary.playback_hook` dlopen 一个库，每块播放数据写进 ALSA 之前原地交给它；待机 / 关闭 / 换设备时释放。不设这个属性 = 和原来完全一样 |
+| `patches/0117-audio-aidl-primary-playback-hook.patch`（`crdroid-tree-fixes.py`） | `StreamPrimary`：开流后按 `ro.vendor.audio.primary.playback_hook` dlopen 一个库，每块播放数据写进 ALSA 之前原地交给它；待机 / 关闭 / 换设备时释放。不设这个属性 = 和原来完全一样 |
 | `speakerfx/speakerfx.cpp` → `libgaokunspeakerfx.so` | 钩子的实现：认扬声器 PCM、读开关和旋钮、借音量的补偿、日志。装在 `/vendor/lib64/soundfx`：HAL 在 APEX 里，隔离的链接器命名空间只放行这个 vendor 目录（补丁 0068） |
 | `speakerfx/bass_chain.h` | 低音处理本体（DSP），做法与每一部分的理由写在文件头 |
 | `speakerfx/bass_chain_coeffs.h` / `gen_bass_coeffs.py` | 谐波生成用的 90 度移相网络系数及其生成器（numpy + scipy；输出确定性，重跑后 diff 应为空） |
@@ -119,6 +119,3 @@ adb shell su -c 'tinymix "WSA_RX0 Digital Volume"'
 3. 只在 48 kHz 立体声、S16 / S32 的扬声器流上工作。
 4. 延迟多 3 ms（预读）。上报给应用的位置没算这 3 ms，音游里校准一次即可。
 5. 开关切换时处理从头开始（状态清零、预读的 3 ms 插入或去掉），播放中切换会有一下轻微的咔声。
-6. ⬜ 补丁 0117 未在 ROM 里编译、未上机（在 lineage-24.0 + 现有音频补丁上核过能干净打上）。
-   同一份 speakerfx.cpp 在 rc.2 上以 KSU 模块的形式跑过：替换 APEX 里的 libtinyalsav2，在 pcm_write 里调同样的三个函数，
-   开关 / 数字音量 / A/B 的切换次序都实测过；本目录的 Android.bp 构建未验证（用 NDK 以 -Werror 编过同一份源码）。
