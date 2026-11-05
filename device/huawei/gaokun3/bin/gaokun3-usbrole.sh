@@ -83,8 +83,27 @@ adb_gate() {
 }
 
 case "$WANT" in
+    serialno)
+        # 从SMBIOS（CONFIG_DMIID=y导出的/sys/class/dmi/id/product_serial）读取整机序列号，
+        # 依次回退到chassis_serial、SoC序列号与字面量gaokun3。
+        # ⚠️ 本脚本跑在gaokun3_usbrole域：核心策略private/domain.te:864禁止非白名单域读serialno_prop，
+        #   因此这里不读ro.serialno，只写vendor.gaokun3.serialno（vendor_gaokun3_prop），
+        #   再由etc/usbrole.rc在白名单内的vendor_init域写入ro.boot.serialno与ro.serialno。
+        sn=""
+        for f in /sys/class/dmi/id/product_serial /sys/class/dmi/id/chassis_serial /sys/devices/soc0/serial_number; do
+            [ -r "$f" ] || continue
+            read -r raw < "$f" 2>/dev/null
+            case "$raw" in
+                ""|None|Default*|"To be filled"*|*[!A-Za-z0-9._-]*) continue ;;
+                *) sn="$raw"; break ;;
+            esac
+        done
+        [ -n "$sn" ] || sn=gaokun3
+        setprop vendor.gaokun3.serialno "$sn"
+        exit 0
+        ;;
     host|device) ;;
-    *) say "用法: $0 host|device"; exit 2 ;;
+    *) say "用法: $0 host|device|serialno"; exit 2 ;;
 esac
 
 if [ ! -e "$S" ]; then
