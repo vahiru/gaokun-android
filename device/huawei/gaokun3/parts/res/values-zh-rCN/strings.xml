@@ -36,13 +36,6 @@
     <string name="boot_entry_other_text">这次开机之前，启动入口记录了：%1$s。系统已正常启动；如果反复出现，请反馈。</string>
     <string name="boot_entry_bypassed_title">这次开机绕过了启动入口</string>
     <string name="boot_entry_bypassed_text">启动入口（gk3boot）已经装好，但这次是从直连启动项开机的：可能是入口连续几次没能启动、被自动跳过，也可能是在开机菜单里手动选了直连项。这次开机期间，系统更新失败不会自动回滚。如果每次开机都出现，请反馈。</string>
-    <!-- 待机开关（v1.0 PWR-16，StandbySettingsActivity），注入到「设置 → 电池」。 -->
-    <string name="standby_title">待机（睡眠）</string>
-    <string name="standby_summary">息屏后让平板进入睡眠</string>
-    <string name="standby_switch_title">允许待机</string>
-    <string name="standby_switch_summary_on">息屏后不久平板会进入睡眠</string>
-    <string name="standby_switch_summary_off">息屏后平板保持唤醒，耗电明显增加</string>
-    <string name="standby_note">关闭立刻生效；打开从下一次息屏起生效。不需要重启，重启后设置仍然保留。\n\n睡眠期间 Wi-Fi 整个断电，新消息要等点亮屏幕后才到；USB 线上的调试连接也会暂停，亮屏后恢复。需要实时收消息，或者排查平板唤醒不了的问题时，可以关掉待机。</string>
     <!-- 触摸手感开关（2026-10-25，TouchModeSettingsActivity / TouchModeTileService），注入到「设置 → 系统」。 -->
     <string name="touch_mode_title">触摸手感</string>
     <string name="touch_mode_summary">游戏模式（不识别手掌）或日常模式（识别手掌）</string>
