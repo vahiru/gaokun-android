@@ -23,7 +23,7 @@
            * 这几个设备在 HAL 里本来就只走桩：StreamPrimary::useStubStream() 把 IN_TELEPHONY_RX /
              IN_FM_TUNER / OUT_TELEPHONY_TX 一律交给 DriverStubImpl（primary/StreamPrimary.cpp:196-210，
              crDroid 17.0 未打补丁的原文；A16 时在 :245-258），不碰 ALSA，留着只会让 dumpsys 里多出几个"已连接"的假设备。
-           * 仓库里别处没有引用这些端口名（2026-10-05 grep 整个仓库，命中只有本文件和案卷里的历史记录）；
+           * 仓库里别处没有引用这些端口名（2026-10-05 grep 整个仓库确认）；
              Telephony 接口（ModulePrimary::getTelephony()）不依赖策略里的端口，不受影响。
            * 放音、录音、游戏都走 primary output / primary input，不经过被删的口。
          上机判据：`dumpsys media.audio_policy` 的设备列表里不再有 Telephony / FM Tuner，
@@ -51,7 +51,7 @@
              ★ 输入侧 mmap_no_irq_in 也已删除（2026-09-28，PR #10 审查）：原先说"故意保留、无证据说明它有问题"，
              但 HAL 对 MMAP 输入一律建 StreamInMmapStub（A17 ModulePrimary.cpp:76-80，注释写着
              "no support for MMAP audio I/O on CVD"），根本不打开 ALSA —— 走 AAudio 低延迟独占输入的
-             App 录不到真麦克风。删掉后 AAudio 回落到普通共享路径（docs/stage4-findings.md #127）。 -->
+             App 录不到真麦克风。删掉后 AAudio 回落到普通共享路径（docs/dev/audio-video.md）。 -->
         <!-- ★★★ 输入剖面【只声明 48000】（2026-09-27）。这是修复，不是砍功能。
              本机全部 PCM 都定频 48 kHz（tinypcminfo d0/d1 输出、d2/d3 采集一律
              Rate: min=48000Hz max=48000Hz），没有任何硬件重采样。而 HAL 把上层给的
@@ -77,7 +77,7 @@
              ⚠️ 输出剖面【刻意不动】：AudioOut_D / AudioOut_1D 实测都已经是 48000 Hz，
              播放路径没坏，别改。 -->
         <!-- ★ 声道同理【只声明 STEREO】（维护者 2026-09-28，从代码推断、未上机实测）：
-             两个采集 PCM 都是 channels min=2 max=2（docs/stage4-findings.md #40，
+             两个采集 PCM 都是 channels min=2 max=2（docs/dev/audio-video.md，
              tinycap -c 1 实测 cannot set hw params），而 HAL 把声道数也原样交给 ALSA
              （alsa/UtilsAlsa.cpp:378）。列着 MONO 时单声道请求是精确匹配、原样下发，
              推断同样会被 hw_params 拒掉；只列 STEREO 时策略（getInputProfile →
@@ -166,7 +166,7 @@
                ③ 只在带麦的耳机上连接 —— 框架只有 WiredAccessoryManager 报 BIT_HEADSET（三段 + 麦检测）时
                   才连 IN_WIRED_HEADSET，三段耳机（无麦）只连 OUT_WIRED_HEADPHONE、录音继续用内置麦。
              ⚠️ hw:0,2 以前只在【没插耳机】时录过（RMS −62 dBFS、半数精确零，开路的样子，
-                docs/stage4-findings.md "耳机麦的数据符合没插耳机"那段），真信号与麦偏压（MIC BIAS）待上机核实。
+                见 docs/dev/audio-video.md），真信号与麦偏压（MIC BIAS）待上机核实。
              Profile 与内置麦同理只写 48000 / STEREO（两个采集 PCM 都定频 48 kHz、只支持双声道，见 mixPorts 那段）。 -->
         <devicePort tagName="Wired Headset Mic" type="AUDIO_DEVICE_IN_WIRED_HEADSET"
                     role="source">

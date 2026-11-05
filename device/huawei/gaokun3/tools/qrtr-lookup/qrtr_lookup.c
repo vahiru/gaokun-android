@@ -21,7 +21,7 @@
  *   gaokun3-qrtr-lookup 400      只看传感器服务
  * 退出码：0 = 至少找到一个；2 = 一个都没有（便于脚本判定）。
  *
- * 背景与整条通路见 docs/stage4-findings.md #37。
+ * 背景与整条通路见 docs/dev/sensors-ssc-protocol.md。
  */
 #include <errno.h>
 #include <poll.h>

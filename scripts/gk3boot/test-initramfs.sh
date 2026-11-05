@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# 执行端 initramfs（fastboot.img，设计稿 boot-entry-design.md §5 S7b）一键：打镜像 → QEMU 场景测试 → 判 PASS/FAIL。
-# 说明见 tools/gk3boot/README.md §13。
+# 执行端 initramfs（fastboot.img）一键：打镜像 → QEMU 场景测试 → 判 PASS/FAIL。
+# 说明见 tools/gk3boot/README.md。
 #
 #   bash scripts/gk3boot/test-initramfs.sh                    全部场景
 #   bash scripts/gk3boot/test-initramfs.sh fastboot idle      只跑列出的场景

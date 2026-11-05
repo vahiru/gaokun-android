@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 在真机上验证播放时间戳的修复（patches/0069，docs/stage4-findings.md #130）——
+# 在真机上验证播放时间戳的修复（patches/0069，见 docs/dev/audio-video.md）——
 # 【不刷机、不重启、不出声】：bind-mount 换上带补丁的 HAL 二进制，重启音频 HAL 与 audioserver，
 # 用 gaokun3-play-probe（播全零）从应用视角开流 N 次，最后撤掉 bind-mount、再重启两个服务。设备重启也会回到原样。
 #

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 宿主一键：在 arm64 Docker（本机 colima）里打执行端 initramfs fastboot.img（设计稿 boot-entry-design.md §5 S7b）。
+# 宿主一键：在 arm64 Docker（本机 colima）里打执行端 initramfs fastboot.img（见 tools/gk3boot/README.md）。
 #
 #   bash scripts/gk3boot/build-fastboot-img.sh                     产物 tools/gk3boot/build/fastboot/fastboot.img
 #   缺省：协议守护进程 gk3-fastbootd 在容器里从 tools/gk3boot/fastbootd/ 用 musl 静态编进去（版本串 = git describe）

@@ -17,9 +17,9 @@
 //   mirror the slot change into loader.conf whenever it happens. See
 //   EspSlot.cpp for the mirroring, and BootControl.cpp for where it hooks in.
 //
-// ★ 2026-10-05（统一启动入口 S9）：另有一个开机完成线程（Gk3Boot.cpp）—— bless gk3boot 的条目、
+// ★ 统一启动入口：另有一个开机完成线程（Gk3Boot.cpp）—— bless gk3boot 的条目、
 //   清 misc 里 GK3 记录的 boot_streak、导出事件给 Parts、按 persist.vendor.gaokun3.gk3boot 部署入口。
-//   设计见 docs/boot-entry-design.md §4.6.1。
+//   设计见 tools/gk3boot/README.md。
 //
 
 cc_binary {
@@ -48,8 +48,8 @@ cc_binary {
         "android.hardware.boot-V1-ndk",
         "libbase",
         "libboot_control",
-        // 统一启动入口的决策核心（tools/gk3boot/core/Android.bp；构建机上由 sync-device-tree.sh
-        // 第 2c 步拷到 device/huawei/gaokun3/gk3core/）。Gk3Boot.cpp 用它读写 misc 的 GK3 记录。
+        // 统一启动入口的决策核心（tools/gk3boot/core/Android.bp；构建前拷到
+        // device/huawei/gaokun3/gk3core/）。Gk3Boot.cpp 用它读写 misc 的 GK3 记录。
         "libgk3core",
     ],
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# B7 / PERF-3 / PERF-4：待机与长稳采样 —— 宿主机侧的启停与取回。设备侧的采样器是同目录的 standby-sampler.sh。
+# 待机与长稳采样 —— 宿主机侧的启停与取回。设备侧的采样器是同目录的 standby-sampler.sh。
 #
 #   SER=gaokun3 bash scripts/perf/standby.sh once     # 只读采一行打到屏幕（不在设备上写任何东西）
 #   SER=gaokun3 bash scripts/perf/standby.sh start    # 推采样器到 /data/local/tmp/gk3-standby/ 并常驻
@@ -7,16 +7,16 @@
 #   SER=gaokun3 bash scripts/perf/standby.sh pull [目录]   # 取回日志（默认 out/standby/<时间>/）并出摘要
 #   SER=gaokun3 bash scripts/perf/standby.sh stop     # 停（按 pid 文件，核对过命令行才杀）
 #
-# 典型用法（docs/release-checklist.md 的 C 档；要用户在场拔线）：
-#   1. 插着线 start（会提示当前 allow_suspend；开发机持久 0 的话要【用户决定】临时改 1，本脚本不 setprop）
+# 典型用法（docs/dev/release-checklist.md 的 C 档；要用户在场拔线）：
+#   1. 插着线 start（会提示当前 allow_suspend；开发机持久 0 的话需手动临时改 1，本脚本不 setprop）
 #   2. 拔 USB → 息屏放 8 小时（拔线后 USB adb 断开，采样器照跑：setsid + nohup，日志每行 sync）
-#      ⚠️ 期间别开关 USB 调试、别 adb root / unroot：adbd 重启会把采样器一起杀掉（setsid 出不了 adbd 的进程组 cgroup），
+#      期间别开关 USB 调试、别 adb root / unroot：adbd 重启会把采样器一起杀掉（setsid 出不了 adbd 的进程组 cgroup），
 #      不留 stop 行 —— pull 会提示"中途死了"
 #   3. 插回 → pull（摘要里有掉电百分比 / mAh、挂起次数、qcom_stats 增量）→ stop
 #   采样器不会跨重启存活；中途要是重启了，pull 会把【现在的】boot reason history 一起取回，
 #   对照日志最后一行就能分清是断电（电量耗尽 / 复位）还是正常关机。
 #
-# ⚠️ 不用 pkill -f / pgrep -f（CLAUDE.md 运维坑 3）：停的时候按 pid 文件，并先核对 /proc/<pid>/cmdline。
+# 不用 pkill -f / pgrep -f：停的时候按 pid 文件，并先核对 /proc/<pid>/cmdline。
 # ⚠️ 要 root：qcom_stats 在 debugfs。adb 本身是 root（开发构建）就直接跑；否则走 su -c（KernelSU 要先给 shell 授权）。
 set -u
 export MSYS_NO_PATHCONV=1

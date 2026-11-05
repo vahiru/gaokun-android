@@ -1,7 +1,7 @@
 # GPU SMMU stall-on-fault 解锁器（Stage 5 D5/D6 的常驻 workaround）。
 #
 # 为什么必须常驻：本平台 gpu_smmu 的 context-fault 中断打不到 CPU
-# （DT 声明 SPI 678/679，硬件实际拉 SPI 675/680 —— 见 docs/stage5-freedreno.md D9），
+# （DT 声明 SPI 678/679，硬件实际拉 SPI 675/680 —— 见 docs/dev/gpu-turnip.md），
 # 而 SCTLR.CFCFG=1 是 stall-on-fault。于是【任何一次】GPU 页错误都会让
 # SMMU 永久 stall → AHB 总线 stall → CP 断粮 → GMU 看门狗 → cx gdsc 塌不下去
 # → 全系统 VK_ERROR_DEVICE_LOST 崩溃循环，且无法自愈。

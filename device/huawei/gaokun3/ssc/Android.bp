@@ -3,7 +3,7 @@
 // 为什么自己写：libssc 依赖 glib / gio / gobject / qmi-glib / libprotobuf-c，
 // 整套 GLib 栈搬不进 Android；但协议逻辑很薄，.proto 只有几百行，
 // 而 AOSP 自带 protoc 与 libprotobuf-cpp-lite。
-// 协议规格（含每条事实的来源行号）见 docs/sensors-ssc-protocol.md。
+// 协议规格（含每条事实的来源行号）见 docs/dev/sensors-ssc-protocol.md。
 //
 // 许可证：.proto 与本目录代码都是 GPL-3.0（源自 libssc）。
 // vendor 分区里已有先例 —— hexagonrpcd 同样是 GPL-3.0。
@@ -26,7 +26,7 @@ cc_library_static {
     },
     // ★ 静态链接 protobuf，不用 shared_libs：
     //   libprotobuf-cpp-lite.so 只在 /system/lib64，而 vendor 二进制走 vendor
-    //   链接命名空间，看不见 system 那份（CLAUDE.md 里 tinymix/libtinyalsa
+    //   链接命名空间，看不见 system 那份（tinymix/libtinyalsa
     //   踩过同一个坑）。静态链接顺带让手动推送的诊断工具不必带 .so。
     static_libs: ["libprotobuf-cpp-lite"],
     export_include_dirs: ["."],

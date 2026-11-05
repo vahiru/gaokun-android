@@ -22,7 +22,7 @@
 
   ─────────────────────────────────────────────────────────────────────
   ⚠️ 这里曾经声明过 android.hardware.media.c2 IComponentStore/software，
-     是追查"解码器一个都没有"（docs/stage4-findings.md #36）时的一次尝试。
+     是追查"解码器一个都没有"（docs/dev/audio-video.md）时的一次尝试。
      【那条归因是错的，声明也已删除】：
 
      真凶是 media.c2.hal.selection 默认为 hidl

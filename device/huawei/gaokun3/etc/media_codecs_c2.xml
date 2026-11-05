@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <!--
   gaokun3 硬件视频编解码（内核驱动 qcom-iris，经 external/v4l2_codec2）。
-  ★ 2026-09-28 从 qcom-venus 换成 qcom-iris（docs/stage4-findings.md #128），VP8 随之撤掉。
+  ★ 2026-09-28 从 qcom-venus 换成 qcom-iris（docs/dev/audio-video.md），VP8 随之撤掉。
 
   ★ 这个文件是【必需】的，不是可选的：
     frameworks/av/media/codec2/sfplugin/Codec2InfoBuilder.cpp:543 里
@@ -56,7 +56,7 @@
              用默认 SPS 编造一张 pic 0，那张图要 YUV 输出缓冲，而主机在等
              SOURCE_CHANGE 才肯分配 —— 死锁。修法是让 v4l2_codec2 把 CSD 并进
              第一个帧缓冲（external/v4l2_codec2，属性 vendor.gaokun3.v4l2c2.merge_csd
-             可关掉做 A/B）。完整案卷 docs/stage4-findings.md #79。
+             可关掉做 A/B）。详见 docs/dev/audio-video.md。
              ⚠️ 若这一版实测仍不出帧，把本条 MediaCodec 整段删掉再发版：
                 留着的话 rank 压过软解，应用拿到的是失败而不是回退。 -->
         <MediaCodec name="c2.v4l2.hevc.decoder" type="video/hevc">

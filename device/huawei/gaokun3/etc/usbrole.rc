@@ -1,5 +1,5 @@
 # 挂起前把 USB role 切到 host —— 见 bin/gaokun3-usbrole.sh 与
-# docs/stage4-findings.md #52 / #54 / #56。
+# docs/dev/deep-sleep.md。
 #
 # 默认【启用】（device.mk：persist.vendor.gaokun3.allow_suspend=1；2026-09-18～09-24 开发期曾是 0）。
 #   为 1 时 gaokun3_nosuspend 被放开，改由 gaokun3_usbrole 单独把关。

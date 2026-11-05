@@ -1,5 +1,5 @@
 # 对拍：同一输入下 shell 版（installer-lib.sh）与 Rust 版（tools/gk3-installer）逐行比较。
-# 设计：docs/installer-rust-design.md §6。被 test-apply.sh 与 test-duel.sh source。
+# 设计：docs/dev/installer-rust-design.md。被 test-apply.sh 与 test-duel.sh source。
 #
 #   GK3_TEST_DUEL=<Rust 版的路径>     不设（或空）⇒ 下面的 duel_* 全是空操作，test-apply.sh 照旧
 #   duel_call  <标签> [VAR=值 …] <函数> [参数…]   一次调用：两边各跑一遍、比较

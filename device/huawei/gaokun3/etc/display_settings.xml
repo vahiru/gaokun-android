@@ -14,8 +14,8 @@
         mHasSetIgnoreOrientationRequest=false ignoreOrientationRequest=true
     （`false` 表示没人设过 → 这就是平台默认值，不是我们配错了。）
 
-  ⚠️ 这**不是**"没有加速度计"导致的。本机确实没有任何传感器
-     （DTS 里没有节点，见 docs/stage6-crdroid.md M4 §5），但那只影响
+  ⚠️ 这**不是**"没有加速度计"导致的。即使在未接通 SLPI 传感器时
+     （AP 侧 DTS 里没有传感器节点，见 docs/dev/sensors-ssc-protocol.md），那也只影响
      "自动旋转"；应用**自己请求**的固定方向本来与传感器无关，
      是被上面这个大屏策略挡掉的。两件事别混。
 

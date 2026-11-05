@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Brightness and HDR headroom of the built-in panel. HWC owns the backlight
-     with this file in place, see docs/display-color.md.
+     with this file in place, see docs/dev/display-color.md.
 
      The backlight register is linear in light, so two points describe it. The
      320 nits come from the Windows panel configuration and are not a

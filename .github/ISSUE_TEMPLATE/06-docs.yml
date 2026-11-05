@@ -1,20 +1,13 @@
-name: 📚 Documentation correction / 文档纠错
-description: Something in docs/, the README, the install guide, the FAQ or a release note is wrong, out of date, or has been overturned by a measurement. / docs/、README、安装指南、FAQ 或发版说明里有一条错了、过时了，或者被实测推翻了。
-title: "[Docs] "
+name: Documentation / 文档问题
+description: Something in the README, the install guide, the FAQ or another document is wrong, outdated or unclear. / README、安装说明、常见问题或其他文档中有错误、过时或不清楚的地方。
 labels: ["documentation"]
 body:
-  - type: markdown
-    attributes:
-      value: |
-        `docs/` is a primary artifact of this project, not an afterthought: it records what was measured, what turned out to be wrong, and which earlier conclusions were later overturned. Several were. **Overturning one is a contribution, not a complaint** — please include the measurement that does it, so the correction can be trusted as much as the original claim was.
-        `docs/` 是本项目的主要产出之一，不是附属品：它记录了实测了什么、哪条是错的、哪条后来被推翻。确实有好几条被推翻了。**推翻一条是贡献，不是抱怨** —— 请把推翻它的那次实测一起贴上来，好让新结论和旧结论一样可信。
-
   - type: input
-    id: location
+    id: where
     attributes:
       label: Where / 位置
-      description: File and line, or the section heading. / 文件加行号，或者小节标题。
-      placeholder: "docs/INSTALL.md, Updating  /  README.md, Status table, Headphone jack row  /  docs/stage4-findings.md #40"
+      description: The file and section. / 文件和章节。
+      placeholder: "docs/INSTALL.md, System updates"
     validations:
       required: true
 
@@ -23,27 +16,19 @@ body:
     attributes:
       label: Kind / 类型
       options:
-        - "Factually wrong — I measured otherwise / 事实错误，我实测的结果相反"
-        - "Out of date — fixed or changed since / 过时了，后来已经变了"
-        - "Unclear or missing a step someone will trip on / 说不清楚，或者漏了一步会让人踩坑"
-        - "Broken link, path or command / 链接、路径或命令是坏的"
-        - "The Chinese and English versions disagree, or one is missing / 中英两版对不上，或者缺了一版"
-        - "Typo / formatting / 错别字或排版"
+        - Incorrect / 内容有误
+        - Outdated / 内容过时
+        - Unclear or missing a step / 说明不清楚或缺少步骤
+        - Broken link or command / 链接或命令失效
+        - Chinese and English versions differ / 中英文版本不一致
+        - Typo or formatting / 错别字或格式问题
     validations:
       required: true
 
   - type: textarea
     id: what
     attributes:
-      label: What it says, and what is actually true / 原文怎么说、实际是什么
+      label: Details / 详细说明
+      description: What the document says, and what you think it should say. If you checked it on a machine, please include what you ran and what you saw. / 文档原来怎么写，你认为应该怎么写。如果在机器上核实过，请附上执行的操作和看到的结果。
     validations:
       required: true
-
-  - type: textarea
-    id: evidence
-    attributes:
-      label: Evidence / 证据
-      description: |
-        For a factual correction, the command you ran and its output. If the old claim and your result differ, **the hardware wins** — that rule is why several of these files read the way they do.
-        事实性纠错请贴你跑的命令和输出。如果旧结论和你的结果冲突，**以实机为准** —— 这条规则正是这些文件现在这个样子的原因。
-      render: shell

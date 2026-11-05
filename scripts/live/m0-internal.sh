@@ -11,16 +11,16 @@
 #
 #   SER=192.168.10.239:5555 bash scripts/live/m0-internal.sh check      # 走 TCP adb 时
 #
-# ★ 先例：Alpine 版 M0 就是这么做的 —— squashfs 放 p3、ESP 上一个非默认的 rescue-alpine.conf、
-#   一条 LoaderEntryOneShot 进去（docs/stage7-live-installer.md:204-224）。
-# ★ 这条路比 U 盘还好的一点：p3 上有 WiFi 配置的话，live 系统一起来就连上网，放进去的公钥让
+# 先例：Alpine 版 M0 就是这么做的 —— squashfs 放 p3、ESP 上一个非默认的 rescue-alpine.conf、
+#   一条 LoaderEntryOneShot 进去（见 scripts/live/README.md）。
+# 这条路比 U 盘还好的一点：p3 上有 WiFi 配置的话，live 系统一起来就连上网，放进去的公钥让
 #   开发机能 ssh 进去量浸泡数据 —— 人只需要看屏幕、摸触摸。
-# ★ 为什么装不坏内置盘：live 系统是从 nvme0n1 上的分区启动的，gk3_probe 把整块内置盘标成
+# 为什么装不坏内置盘：live 系统是从 nvme0n1 上的分区启动的，gk3_probe 把整块内置盘标成
 #   medium=yes，界面上禁用它；gk3_apply 的安全闸 1 也拒绝整盘清空介质所在的盘。
 #
-# ⚠️ 设备现在没有回落槽（_a 不可启动，#122 §1）—— 但这里【不碰】任何 Android 分区、不改 default：
+# 设备现在没有回落槽（_a 不可启动）—— 但这里【不碰】任何 Android 分区、不改 default：
 #    live 起不来时 initramfs 60 秒后自己重启（或者长按电源键），回到 default 的 _b。
-# ⚠️ 挂载点用私有的名字（/mnt/gaokun3_m0_*），不叫 /mnt/esp（CLAUDE.md 操作禁忌 4）。
+# 挂载点用私有的名字（/mnt/gaokun3_m0_*），不叫 /mnt/esp。
 set -uo pipefail
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 SER=${SER:-gaokun3}
@@ -44,9 +44,8 @@ warn(){ echo "   ⚠️ $*"; }
 S true >/dev/null 2>&1 || die "adb 连不上 ${SER}（走 TCP：SER=192.168.10.239:5555；找设备：bash scripts/find-device.sh）"
 [ "$(S getprop ro.crdroid.device)" = gaokun3 ] || die "$SER 不是 gaokun3（局域网里那台小米手机也开着 5555）"
 # 要 adb shell 本身就是 root：下面的命令都是多行脚本直接交给 S，不经 su -c 转发（套进 su -c '…' 要把里面的引号全改写）。
-# ⚠️ 发布构建（1.0 起 ro.debuggable=0，D1 / B1）上 adb root 走不通。开发机上 adb shell 经 KSU 直接就是 root（CLAUDE.md
-#   "现在设备上跑的是什么"那段；是 KSU 的哪项设置让它这样，没核实）；不是的话在 ReSukiSU（KSU）管理器里给 Shell 授 root ——
-#   授权之后 adb shell 是不是就直接是 uid 0、还是只能 su，未验证（TODO V10）。
+# 发布构建（ro.debuggable=0）上 adb root 走不通。开发机上 adb shell 经 KSU 直接就是 root；
+#   不是的话在 ReSukiSU（KSU）管理器里给 Shell 授 root。
 if [ "$(S id -u)" != 0 ]; then
     if [ "$(S getprop ro.debuggable)" = 1 ]; then
         die "adb shell 不是 root：开发构建上 adb -s $SER root（本机老办法：先 adb -s $SER shell setprop service.adb.root 1）"
@@ -61,7 +60,7 @@ umount_all() { S "umount $ESPM 2>/dev/null; umount $P3M 2>/dev/null; rmdir $ESPM
 trap umount_all EXIT
 
 # 找放 live 的分区：按【内容】认 —— 上面有 /gaokun3/live.squashfs（或 Alpine M0 留下的 rescue.squashfs）的那个。
-# 不写死分区号：hw-inventory.md 第 8 节那张表之后又加过 boot_a/boot_b。
+# 不写死分区号：出厂分区表之后又加过 boot_a/boot_b。
 # 只看【没挂载】的 ext4 分区，只读挂载。GK3_M0_PART=/dev/block/nvme0n1pN 可以直接指定。
 find_part() {
     if [ -n "${GK3_M0_PART:-}" ]; then echo "$GK3_M0_PART"; return; fi
@@ -125,7 +124,7 @@ check|prepare)
         done
         [ -z "$miss" ] && ok "systemd 的硬性要求与 squashfs/overlay/loop/ext4 都是 =y（$(grep -m1 '^# Linux' "$M0/slot_b.config" | cut -c3-)）" \
             || die "slot_b 的内核缺：$miss"
-    else warn "抽不出 slot_b 内核的配置（没开 IKCONFIG？）—— 按 v0.6.2 的审计结果继续（stage7-flutter-debian.md §5.3）"; fi
+    else warn "抽不出 slot_b 内核的配置（没开 IKCONFIG？）—— 按 v0.6.2 的审计结果继续"; fi
 
     say "4. 本地产物"
     for f in gaokun3-live.squashfs initramfs.img; do [ -f "$LIVE/$f" ] || die "没有 $LIVE/${f}（先跑 scripts/live/build-live.sh）"; done
@@ -171,7 +170,7 @@ check|prepare)
     say "6. 放文件（p3 读写挂载）"
     S "mkdir -p $P3M; mount -t ext4 $PART $P3M && mkdir -p $P3M/gaokun3" >/dev/null || die "p3 挂不成读写"
     adb -s "$SER" push "$LIVE_SQ" "$P3M/gaokun3/$SQ_NAME" >/dev/null || die "推 squashfs 失败"
-    # ★ 判据看产物：字节数 + sha256（CLAUDE.md 运维坑 1 —— scp 曾经退出码 0 而文件只有 77%）
+    # 判据看产物：字节数 + sha256（scp 曾经退出码 0 而文件只有 77%）
     want=$(shasum -a 256 "$LIVE_SQ" | cut -d' ' -f1)
     got=$(S "sha256sum $P3M/gaokun3/$SQ_NAME" | cut -d' ' -f1)
     [ "$want" = "$got" ] && ok "live.squashfs sha256 一致（${want:0:16}…）" || die "live.squashfs 的 sha256 不对：$got"
@@ -251,7 +250,7 @@ payload)
             ok "$f 已经在 p3 上且 sha256 一致，跳过"; continue
         fi
         adb -s "$SER" push "$REL/$f" "$P3M/gaokun3/payload/$f" >/dev/null || die "推 $f 失败"
-        # ★ 判据看产物（CLAUDE.md 运维坑 1）
+        # 判据看产物
         [ "$(S "sha256sum $P3M/gaokun3/payload/$f" | cut -d' ' -f1)" = "$want" ] && ok "$f → p3:/gaokun3/payload/（sha256 一致）" \
             || die "$f 推上去的 sha256 不对"
     done

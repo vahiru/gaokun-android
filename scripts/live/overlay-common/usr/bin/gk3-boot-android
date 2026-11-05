@@ -10,8 +10,8 @@
 #   而且 live 镜像里根本没有 bootctl（Debian 13 把它放在 systemd-boot 包里，镜像只装了 systemd-boot-efi；
 #   2026-10-05 在 09-27 构建的镜像里 command -v bootctl 为空）。这里按 *-android-<槽>.conf 的形状在 ESP 上找。
 # ★ 选的是【直连条目】<machine-id>-android-<槽>.conf（安装器写的那条，linux 行直接指 ESP 上 slot_<槽> 的内核）：
-#   统一启动入口的 gk3boot-android-<槽>.conf 也匹配这个通配，但 gk3boot 按 misc 里的 A/B 状态选槽、不看条目名里的
-#   字母（docs/boot-entry-design.md §4.3、§632）—— 要的是"进这个槽"，只有直连条目做得到。
+# 统一启动入口的 gk3boot-android-<槽>.conf 也匹配这个通配，但 gk3boot 按 misc 里的 A/B 状态选槽、不看条目名里的
+#   字母（见 tools/gk3boot/README.md）—— 要的是"进这个槽"，只有直连条目做得到。
 #   不想指定槽、只想照常进 Android：直接 reboot（菜单 15 秒后走 default）。
 # ★ 写法与 scripts/boot-oneshot.sh 相同（#42）：4 字节属性 0x07（NV|BS|RT，小端）+ 条目 ID 的 UTF-16LE + 双字节 NUL；
 #   覆盖已有的变量之前先 chattr -i；写完回读核对。厂商 GUID 4a67b082-0a4c-41cf-b6c7-440b29bb8c4f

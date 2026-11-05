@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # gk3probe.efi 一键：构建 → 造夹具盘 → QEMU aarch64 + AAVMF + systemd-boot 257.13 无头启动 → 收串口 → 判 PASS/FAIL。
-# 设计稿 docs/boot-entry-design.md §5 S3/S4、§6 E0/E3；说明见 tools/gk3boot/README.md §9。
+# 说明见 tools/gk3boot/README.md §9。
 #
 #   bash scripts/gk3boot/test-probe.sh                      五个场景（first second strictnx broken espfull）
 #   bash scripts/gk3boot/test-probe.sh first broken         只跑列出的场景

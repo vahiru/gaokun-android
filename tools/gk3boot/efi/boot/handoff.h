@@ -1,8 +1,8 @@
 /*
  * H2 交接：内存里的内核 PE（EFI stub / zboot）+ ramdisk + dtb + cmdline → LoadImage / StartImage。
- * 设计稿 docs/boot-entry-design.md §2.2（E-K2）、§4.1 "交接"、§4.12 "交接防御"。
+ * 设计与交接防御见 tools/gk3boot/README.md。
  *
- * 照 systemd-boot 257.13 的写法重写（不拷代码，许可证见设计稿 U10）：
+ * 照 systemd-boot 257.13 的写法重写（不拷代码）：
  *   - 缓冲区 LoadImage + Vendor 设备路径：refs/systemd-v257/src/boot/linux.c:44-91
  *   - LoadOptions = UCS-2 cmdline，Size 含结尾 NUL：linux.c:133-136、boot.c:2622-2624
  *   - DTB：拷进 EfiACPIReclaimMemory 页，InstallConfigurationTable(DEVICE_TREE_GUID)，

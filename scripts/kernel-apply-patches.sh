@@ -36,9 +36,9 @@ MODE=${2:-apply}
     echo "✗ $TREE 看着不像内核树（缺 Makefile 或 kernel/）" >&2; exit 2; }
 
 # ❌ 上游 Venus 补丁集（patches/upstream-venus/0013–0020）从 2026-09-28 起【不再列入】：
-#   视频编解码从 qcom-venus 换成了 qcom-iris（案卷 #128，补丁 0053–0060）。
+#   视频编解码从 qcom-venus 换成了 qcom-iris（补丁 0053–0060）。
 #   0017/0018 在 VIDEO_QCOM_IRIS=y 时根本编不过（venus/core.c 的 #if !IS_ENABLED(IRIS) 把它们
-#   引用的表编掉了），0019 的节点 iris 不认。文件留在原处作案卷，README 里写了为什么换。
+#   引用的表编掉了），0019 的节点 iris 不认。文件留在原处留档，README 里写了为什么换。
 #   ⚠️ 这里原来是一个 UPATCHES 数组。别留一个空数组：本机（macOS）的 bash 3.2 在 set -u 下
 #      展开空数组 "${A[@]}" 会报 unbound variable（与提交 5013189 同一类）。
 
@@ -52,20 +52,20 @@ KPATCHES=(
     # ❌ 0011（gaokun3.dts 里 &venus { firmware-name; status = "okay"; }）故意【不列】：
     #    upstream-venus/0020 加的是【逐字相同】的块、同一位置，而且两者的上下文在打了对方之后
     #    仍然匹配 ⇒ 依次打会得到【两份】&venus 块（dtc 会合并、DTB 不变，所以谁都没发现）。
-    #    2026-09-14 --verify 第一次跑就抓到：构建机树只有一份、重放出来两份。文件留作案卷。
+    #    2026-09-14 --verify 第一次跑就抓到：构建机树只有一份、重放出来两份。文件留作参考。
     0012-arm64-dts-gaokun3-usb0-otg-for-usb-adb.patch
     0013-drm-crtc-drop-racy-BUG_ON-in-fence_to_crtc.patch
     0014-remoteproc-qcom-ratelimit-repeat-handover-error.patch
     0015-asoc-sc8280xp-retune-wsa-speaker-gain-ceilings.patch
-    # ★★ 0016/0017 是 Android 起不来的硬前提（ashmem / xt_quota2，ACK 专有）。
+    # 0016/0017 是 Android 起不来的硬前提（ashmem / xt_quota2，ACK 专有）。
     #    它们此前只活在构建机的内核树里，2026-09-08 照本仓配方重建的内核
-    #    因此黑屏起不来 —— 见 docs/stage4-findings.md #79。别删。
+    #    因此黑屏起不来 —— 见 docs/dev/android-bringup.md。别删。
     0016-staging-android-port-ashmem-from-ack.patch
     0017-netfilter-port-xt-quota2-from-ack.patch
     # 0018：前摄要工作就得去掉后摄节点（A/B 实测，#81）。只动 camera.dtsi。
     0018-arm64-dts-gaokun3-camera-drop-rear-s5k3l6.patch
     # ✅ 0020（上游 499b4cb6710f，camcc 不再注册 CAMCC_GDSC_CLK）**已被 v7.2.y stable 收入**
-    #    （stable b425cc3913fb），基线追到 v7.2.9 起【不再列入】。文件留作案卷（v7.2-rc2 的配方见 c1062f2）。
+    #    （stable b425cc3913fb），基线追到 v7.2.9 起【不再列入】。文件留作参考（v7.2-rc2 的配方见 c1062f2）。
     # ❌ 0021（给 titan_top 加 NoC 投票）**已被实测否掉**（内核 #6，见 #102），
     #    故意【不列】在这里。文件仍留在 patches/ 下，头部有醒目的"已否"横幅。
     # ✅ 0022（上游 86b23609d5e1，gdsc_unregister 拆 genpd）**已被 v7.2.y stable 收入**（stable 40bd77fa2857），
@@ -76,8 +76,8 @@ KPATCHES=(
     #    它存在的意义是把"读 GDSCR"从 /dev/mem（本机会静默死内核）换成 regmap。
     # ❌ 0024 / 0025 / 0026 三条试验补丁**已被内核 #10 实测否掉**（#104：上电后重试、
     #    塌缩前复位 CAMNOC+CPAS、塌缩前复位全部 21 个 BCR，都救不回来），故意【不列】。
-    #    文件留在 patches/ 下作案卷。它们都依赖 0023，若要复现顺序不能反。
-    # ★ 0027 是候选根因修复（#105）：sc8280xp 的 camcc 一个 GDSC 都没给等待值，
+    #    文件留在 patches/ 下留作参考。它们都依赖 0023，若要复现顺序不能反。
+    # 0027 是候选修复（#105）：sc8280xp 的 camcc 一个 GDSC 都没给等待值，
     #    gdsc_init() 就用 MSM8974 的 2/8/2 覆盖硬件复位值；同代同偏移的 sm8150/sc8180x
     #    都写 2/2/0xf。它改的是 camcc-sc8280xp.c 的 gdsc 结构体，与 0020 的 hunk 不相交。
     0027-clk-qcom-camcc-sc8280xp-gdsc-wait-vals.patch
@@ -85,74 +85,74 @@ KPATCHES=(
     #    debugfs gdsc-dbg/init_raw 读硬件复位值（核实 0027 的依据）、wait_override 运行时改等待值。
     # ❌ 0027 已被内核 #11 实测否掉（#105）：硬件复位值确实是 2/2/0xf（0028 读出），
     #    但改回去之后脏塌缩签名与上电冻死一字不差。留在列表里是因为它**就是正确的硬件值**
-    #    （上游同代驱动全这么写），只是不是这个缺陷的根因。
+    #    （上游同代驱动全这么写），只是不是这个缺陷的原因。
     # ⚠️ 0029 是【诊断补丁，不要进发版内核】，依赖 0023/0028：裸翻转 GDSC、屏蔽 RETAIN_FF、塌缩前延时。
     # ⚠️ 0030 是【诊断补丁，不要进发版内核】：camss 按块跳过 s_power/s_stream（module 参数 dbg_skip）。
-    # ★ 0031 候选根因修复（#105）：camnoc_axi / slow_ahb / fast_ahb 三个 RCG 标成 shared，
+    # 0031 候选修复（#105）：camnoc_axi / slow_ahb / fast_ahb 三个 RCG 标成 shared，
     #    关闭时停靠 XO。实测一次出流后 camnoc_axi_clk_src 指着已熄灭的 pll0_out_even。
     #    改的是 camcc-sc8280xp.c 里三个 .ops 行，与 0020/0027 的 hunk 不相交。
     0031-clk-qcom-camcc-sc8280xp-mark-camnoc-ahb-rcgs-shared.patch
-    # ★ 后摄 OV13B10（#106）：0032 叠在 0018 之后，把后摄节点按板级电源表接回（@0x36）；
+    # 后摄 OV13B10（#106）：0032 叠在 0018 之后，把后摄节点按板级电源表接回（@0x36）；
     #    0034 给上游 ov13b10 加 OF 匹配表与板级上电序列。三关（probe / 出帧 / HAL 枚举）都过了才进来。
     #    ⚠️ 需要 .config 里 VIDEO_OV13B10=y 与 VIDEO_DW9714=y（kernel-config-android.sh 已断言）。
-    #    0033（s5k3l6xx 驱动）故意【不列】：本机后摄不是 S5K3L6，文件留作案卷。
+    #    0033（s5k3l6xx 驱动）故意【不列】：本机后摄不是 S5K3L6，文件留作参考。
     0032-arm64-dts-gaokun3-camera-rear-ov13b10-with-board-rails.patch
     0034-media-i2c-ov13b10-of-match-and-gaokun3-power-sequence.patch
-    # ★ 0035（#108）：camss 等不到某颗传感器时（同板另一种后摄模组），超时后只带绑上的传感器
+    # 0035（#108）：camss 等不到某颗传感器时（同板另一种后摄模组），超时后只带绑上的传感器
     #    完成 notifier —— 于是"后摄模组不对"只丢后摄，前摄照常。内核 #19 两路实测：
     #    正常 47 个 subdev；ov13b10.fail_probe=1 时 20 s 后回落、45 个 subdev、前摄出帧。
     0035-media-camss-continue-without-never-bound-sensors.patch
-    # ★ 0036（#110）：后摄闪光灯 = PMIC pmc8280c 闪光模块 1+4 路（内核 #19 逐路点亮实测），
+    # 0036（#110）：后摄闪光灯 = PMIC pmc8280c 闪光模块 1+4 路（内核 #19 逐路点亮实测），
     #    并删掉不亮的 GPIO93 gpio-led。只动 camera.dtsi，叠在 0032 之后。
     #    ⚠️ 需要 LEDS_CLASS_FLASH=y LEDS_QCOM_FLASH=y（kernel-config-android.sh 已断言）。
     0036-arm64-dts-gaokun3-pmic-flash-led-channels-1-4.patch
-    # ★ 0037（#113）：himax 触摸的坐标 fuzz 做成 0644 模块参数，可运行时改。
+    # 0037（#113）：himax 触摸的坐标 fuzz 做成 0644 模块参数，可运行时改。
     #    默认仍是 8 ⇒ 单独打上【不改变行为】，要的是"调参不用重启"这个能力。
     #    调定之后把值写进 DT 的 touchscreen-fuzz-x/y（标准属性，touchscreen.c:89 会覆盖驱动默认）。
     0037-Input-himax-spi-runtime-tunable-coordinate-fuzz.patch
-    # ★★ 0038（#114）：跳点检测的判据从【原始位移】改成【与预测位置的偏差】。
+    # 0038（#114）：跳点检测的判据从【原始位移】改成【与预测位置的偏差】。
     #    原判据等于一条 1.0 m/s 的限速线，越过之后 debounce 永远回不到 0 ⇒
     #    手指只要持续快过它，驱动【一个点都不上报】。实测：一次甩动被切成 87 条轨迹。
     #    本补丁不改默认值，只改判据含义。
     0038-Input-himax-spi-jump-detection-vs-predicted-position.patch
-    # ★ 0039（#114）：Z8 孤立尖峰过滤与边缘单像素豁免做成可调（iso_nbr_ratio_q8 /
+    # 0039（#114）：Z8 孤立尖峰过滤与边缘单像素豁免做成可调（iso_nbr_ratio_q8 /
     #    edge_min_area），并标注掌压规则 3 是死代码。三项默认值不变 ⇒ 单独打上不改变行为。
     0039-Input-himax-spi-tunable-isolated-spike-and-edge-gates.patch
-    # ★ 0040（#115）：修好 SPI 读重试（tx/rx 同一块缓冲，重试发的是上次收到的数据 ⇒
+    # 0040（#115）：修好 SPI 读重试（tx/rx 同一块缓冲，重试发的是上次收到的数据 ⇒
     #    三次机会实际只有一次），并让事件栈一次传完（原先每帧切成 5129+3 两次 spi_sync）。
     0040-Input-himax-spi-fix-SPI-read-retry-and-split-event-stack.patch
-    # ★★ 0041（#115）：连通域表满时原先是 return 而不是 break ⇒ 放弃扫描网格【剩下的全部】。
+    # 0041（#115）：连通域表满时原先是 return 而不是 break ⇒ 放弃扫描网格【剩下的全部】。
     #    噪声多（充电器耦合）时屏幕下半部分的真实手指整个消失。改成按 signal_sum 顶替最弱的。
     0041-Input-himax-spi-do-not-abandon-the-grid-when-zones-fill.patch
-    # ★ 0042（#115）：掌压剔除改成【标记】而不是删除 —— BFS 是 8 连通，指尖挨着手掌会进同一个
+    # 0042（#115）：掌压剔除改成【标记】而不是删除 —— BFS 是 8 连通，指尖挨着手掌会进同一个
     #    zone，删掉就把手指一起删了。默认行为不变（标记的 zone 不出峰值），但决定变得可见可逆。
     0042-Input-himax-spi-mark-palm-zones-instead-of-deleting-them.patch
-    # ★★★ 0043（#115）：逐级计数器（algo/stats）、最近 16 个触点出生记录（algo/contacts_log）、
+    # 0043（#115）：逐级计数器（algo/stats）、最近 16 个触点出生记录（algo/contacts_log）、
     #    debugfs 两个整帧导出（frame_raw = 面板产出的，frame = 流水线判定的）。
     #    不改变任何触摸行为，只是让行为可观测 —— #114 那一晚的推理以后是一次 cat 的事。
     0043-Input-himax-spi-per-stage-counters-and-raw-grid-dumps.patch
-    # ★ 0044（#115）：上报坐标轴分辨率（此前 resolution=0 = 告诉用户态"不知道"）。10 单位/毫米。
+    # 0044（#115）：上报坐标轴分辨率（此前 resolution=0 = 告诉用户态"不知道"）。10 单位/毫米。
     0044-Input-himax-spi-report-axis-resolution.patch
-    # ★ 0045（#115）：修好 W=1 报的两处 kerneldoc。纯注释，改完这个驱动 W=1 完全干净。
+    # 0045（#115）：修好 W=1 报的两处 kerneldoc。纯注释，改完这个驱动 W=1 完全干净。
     0045-Input-himax-spi-fix-two-kerneldoc-blocks.patch
-    # ★★ 0046（#116）：坐标 fuzz 定案为 0，写进 DT 的标准属性 touchscreen-fuzz-x/y。
+    # 0046（#116）：坐标 fuzz 定案为 0，写进 DT 的标准属性 touchscreen-fuzz-x/y。
     #    实机量的：空载噪声 RMS 29.6 ⇒ 质心抖动 σ 只有 0.16/0.10 输出单位（不到半个单位），
     #    而 fuzz=8 的死区是 ±4 单位（大 8 倍）。慢速拖动 A/B：位移为 0 的帧 13.7% → 1.8%。
     0046-arm64-dts-gaokun3-touchscreen-fuzz-0.patch
-    # ★ 0047（#116）：pressure_enabled 默认跟着轴走（轴存在却报常数是逻辑缺陷）；
+    # 0047（#116）：pressure_enabled 默认跟着轴走（轴存在却报常数是逻辑缺陷）；
     #    contacts_log 加 zone_area 列 —— ct->area 分不开手掌碎块和指尖（实测 8-20 vs 5-21），能分的是它。
     0047-Input-himax-spi-pressure-follows-axes-and-log-zone-area.patch
-    # ❌ 0048（usb_0 用 UTMI 当 pipe 时钟）不再列入：它要绕开的"角色切换后 xhci -110 / gadget -524"，根因是
+    # ❌ 0048（usb_0 用 UTMI 当 pipe 时钟）不再列入：它要绕开的"角色切换后 xhci -110 / gadget -524"，原因是
     #    vreg_l9d 随 combo PHY 断电（0086）；UCSI 工作以后它反而让 port0 上的 U 盘根本不枚举（USB3 链路起不来，
-    #    又不退回 USB2）。0012 里的 maximum-speed = "high-speed" 同理去掉了。文件留作案卷。
-    # ★ 0049：后摄 rotation 180 经用户目视确认（2026-09-24），只去掉 FIXME、值不变 ⇒ dtb 与 0048 逐字节同。
+    #    又不退回 USB2）。0012 里的 maximum-speed = "high-speed" 同理去掉了。文件留作参考。
+    # 0049：后摄 rotation 180 经用户目视确认（2026-09-24），只去掉 FIXME、值不变 ⇒ dtb 与 0048 逐字节同。
     #    rotation 180本身没错（设备树按横屏写），但它注释里的"preview upright, SENSOR_ORIENTATION 180"
     #    已被#23、#42推翻：HAL现在扣掉翻转、换算到竖屏后上报90（见camera/Device.cpp）。
     #    ⚠️ 同号的前身（前 90 / 后 270，按 PR #6 描述）与目视结论相反，已作废 —— 构建机树上若还打着它，
     #    先 `git apply -R` 旧版（正文在 git 历史 cecb9ec 里）再打这一版。
     0049-arm64-dts-gaokun3-camera-rear-rotation-180-confirmed.patch
-    # ⚠️ 0050（#124，指纹）已移到下面的 FP_PATCHES（v1.0 D21：只进指纹实验内核，--with-fp 才打）。
-    # ★★ 0053–0065（#128；0058、0062 不列）：视频编解码 qcom-venus → qcom-iris。iris 靠 DT 的回落 compatible
+    # ⚠️ 0050（#124，指纹）已移到下面的 FP_PATCHES（只进指纹实验内核，--with-fp 才打）。
+    # 0053–0065（#128；0058、0062 不列）：视频编解码 qcom-venus → qcom-iris。iris 靠 DT 的回落 compatible
     #    "qcom,sc8280xp-iris", "qcom,sm8250-venus" 直接用 v7.2-rc2 自带的 sm8250_data，驱动不用加平台。
     #    ⚠️ 需要 .config 里 VIDEO_QCOM_IRIS=y、VIDEO_QCOM_VENUS 不设（kernel-config-android.sh 已断言）。
     # 0053：sc8280xp.dtsi 加 iris + videocc 节点 + pil_video_mem（上游 v7.3 3a52eef16b97 的 backport）。
@@ -162,7 +162,7 @@ KPATCHES=(
     # 0054：gaokun3 打开 &iris，firmware-name 指向华为签名的 qcvss8280.mbn。依赖 0053 的 iris label。
     0054-arm64-dts-gaokun3-enable-iris.patch
     # ✅ 0055 / 0057（上游 v7.3 的 iris 修复 f87d7ed / 75d7987）**已被 v7.2.y stable 收入**
-    #    （stable 7a52e76b6309 / cb83cfff8dff），v7.2.9 起【不再列入】。文件留作案卷。
+    #    （stable 7a52e76b6309 / cb83cfff8dff），v7.2.9 起【不再列入】。文件留作参考。
     # 0056：【本地】代替上游 b9c2215。b9c2215 在持 core->lock 断电时 disable_irq() 等中断线程，
     #    而线程开头就要这把锁 ⇒ 死锁；原版 nosync 又会让线程在断电后碰寄存器（本机 = 静默死机）。
     #    这里保留 nosync，线程拿到锁后看 core->hw_powered，断电了就不碰硬件。
@@ -331,7 +331,7 @@ KPATCHES=(
     # 0129：gen1 解码器支持 10-bit（HEVC Main10、VP9 Profile 2），输出 P010。
     #    要和 0130（Turnip）、crdroid-tree-fixes.py 的 [29][30] 一起生效，单独打没有实际用处。
     0129-media-iris-gen1-decode-10-bit-to-p010.patch
-    # ★ 0133–0136：显示色彩，说明见 docs/display-color.md。
+    # 0133–0136：显示色彩，说明见 docs/dev/display-color.md。
     # 0133：修 CTM 写进 PCC 时丢符号和行列转置；不打的话色域转换时画面发绿。
     0133-drm-msm-dpu-fix-the-CTM-to-PCC-coefficient-conversion.patch
     # 0134：读 ACPI DLUT 表的工厂校准，sRGB、P3 按连接器 Colorspace 切换，默认打开，msm.panel_calibration=0 关掉。
@@ -408,7 +408,7 @@ KPATCHES=(
     # 0187：reset里上电失败的处理。不打的话PCIe链路丢失后MHI准备失败，下一次给设备下电的挂起或关机会重复释放
     #    MHI的命令环并解引用空指针；op_start还要持着rtnl等满40秒。
     0187-wifi-ath11k-handle-a-failed-power-up-in-a-reset.patch
-    # ★ 0188–0195：深度待机，以及PCIe、NVMe恢复失败时的处理，说明见docs/deep-sleep.md。依赖0170、0172、0173–0187。
+    # 0188–0195：深度待机，以及PCIe、NVMe恢复失败时的处理，说明见docs/dev/deep-sleep.md。依赖0170、0172、0173–0187。
     # 0188：链路断开时留一票active-only的PCIe-MEM投票。不打的话两条链路都断开后整机复位。只对SC8280XP、SA8540P生效。
     0188-PCI-qcom-keep-an-active-only-PCIe-MEM-vote-in-L2-on-SC8280XP.patch
     # 0189：VCC_WLAN_3R9常开。不打的话pcie4断链时这路被关掉，WoW的固件却还在运行。Windows在D3时也不关这路。
@@ -421,7 +421,7 @@ KPATCHES=(
     0191-PCI-Allow-D3-for-native-hotplug-capable-Root-Ports-on-non-x86-platforms.patch
     # 0192：恢复时链路超时不再拆host。不打的话根端口和端点的访问会碰到断了时钟的DBI。
     0192-PCI-dwc-keep-the-host-up-if-the-link-fails-on-resume.patch
-    # 0193：恢复时链路没起来，把槽断开重来一次。不打的话这条链路一直断着，上面的设备用不了。
+    # 0193：恢复时链路没起来，把槽断开重来一次。不打的话这条链路一直断着，上面的设备无法使用。
     0193-PCI-dwc-retry-a-link-that-doesn-t-come-back-on-resume.patch
     # 0194、0195：系统盘没了就panic重启。不打的话/data不可用、也挂起不了，一直卡着。
     0194-PCI-dwc-panic-if-the-link-to-the-NVMe-disk-is-lost-on-resume.patch
@@ -432,7 +432,7 @@ KPATCHES=(
     #    挂起途中Wi-Fi收到唤醒包会不回应PME_Turn_Off，主机照样断电，几次之后链路回不来。
     0197-PCI-dwc-abort-suspend-when-a-device-has-signalled-PME.patch
     # 0198：s2idle里集群下电被固件拒绝（-EPERM）后先等3 ms再申请。不打的话被拒的CPU马上重新申请，几个CPU轮流被拒，
-    #    这个环可能一直转到下次唤醒，这段时间SoC进不了深度待机。说明见docs/deep-sleep.md。
+    #    这个环可能一直转到下次唤醒，这段时间SoC进不了深度待机。说明见docs/dev/deep-sleep.md。
     0198-cpuidle-psci-wait-after-a-denied-cluster-request-in-s2idle.patch
     # ★ 0199–0202：Wi-Fi用PCIe WAKE#把睡眠中的系统叫醒。依赖0188–0196的断链待机：从固件字符串和测试推断，
     #    固件要在链路走L2、PERST#拉低之后才拉WAKE#。0197让挂起途中碰上唤醒时不丢链路。
@@ -650,7 +650,7 @@ if grep -q 'compatible = "qcom,sm8350-venus"' "$DTSI" 2>/dev/null \
     echo "  从 2026-09-28 起视频编解码走 iris（0053–0060），两者不能叠。做法（二选一）：" >&2
     echo "  ① 推荐：git -C $TREE worktree add --detach <新路径> HEAD，在新 worktree 上跑本脚本（再接 KernelSU）；" >&2
     echo "  ② 就地撤：倒序撤 upstream-venus 的 0020 0019 0018 0017 0016 0015 0013 ——" >&2
-    echo "     0017/0018/0019 当年用了 fuzz，要 patch -R -p1 --fuzz=3；其余 git apply -R。别用 git checkout（CLAUDE.md 运维坑 4）。" >&2
+    echo "     0017/0018/0019 当年用了 fuzz，要 patch -R -p1 --fuzz=3；其余 git apply -R。别用 git checkout。" >&2
     exit 1
 fi
 

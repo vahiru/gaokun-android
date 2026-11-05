@@ -1,6 +1,6 @@
 # gaokun3 (sc8280xp/Adreno 690) — 主线 msm DRM，非 kgsl
 # ⚠️ 仅 A16：旧生成器 meson_to_hermetic 的配置。A17（mesa 26.1，meson2hermetic）
-#    改用同目录 hermetic/android/aosp_mesa3d.toml 里的 gaokun_turnip 配置，见 docs/mesa-a17.md。
+#    改用同目录 hermetic/android/aosp_mesa3d.toml 里的 gaokun_turnip 配置，见 docs/dev/mesa-a17.md。
 # Copyright 2024 Google LLC
 # SPDX-License-Identifier: Apache-2.0
 build = 'Soong'

@@ -17,7 +17,7 @@
 - --blkdebug：用 QEMU 的 blkdebug 驱动按规则给盘注入读错误（测 misc 读失败时的 fail-open）。
 - --machine-opts acpi=off：AAVMF 不发 ACPI、改装固件自己的 DTB 配置表 —— gk3boot 的 DTB 要盖掉它才算数。
 - --net-fwd PORT：加一块 virtio-net（QEMU user 网络，客体 10.0.2.15），宿主 127.0.0.1:PORT 转到客体 5554
-  （执行端 gk3-fastbootd 的 TCP 传输，S7c 端到端场景里宿主 fastboot 从这里连）。
+  （执行端 gk3-fastbootd 的 TCP 传输，端到端场景里宿主 fastboot 从这里连）。
 - --on PATTERN --run CMD：串口每【新】出现一次 PATTERN，就在后台 sh -c CMD（环境变量 GK3_ON_N = 第几次，从 1 数）；
   CMD 的退出码不影响 QEMU，测试自己看它留下的文件。
 不带 -no-reboot：探针的 ResetSystem(EfiResetCold) 在 QEMU 里就是一次真复位，接着跑下一次启动。
@@ -73,7 +73,7 @@ def main():
         "-nodefaults", "-no-user-config", "-display", "none",
         "-drive", "if=pflash,format=raw,unit=0,readonly=on,file=" + a.code,
         "-drive", "if=pflash,format=raw,unit=1,file=" + a.vars,
-        # 本机是 NVMe（docs/hw-inventory.md）：设备路径的形状 …/NVMe(…)/HD(…) 与实机一致
+        # 本机是 NVMe（docs/dev/hardware.md）：设备路径的形状 …/NVMe(…)/HD(…) 与实机一致
         "-drive", drive,
         "-device", "nvme,serial=gk3fixture,drive=nvm",
         # 给 GOP（virtio-gpu）和一个 USB 键盘（ConIn 多一个物理源），探针的显示 / 按键两节才有东西可看

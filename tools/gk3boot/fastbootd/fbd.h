@@ -1,8 +1,7 @@
 /*
- * gk3-fastbootd —— 统一启动入口的 fastboot 执行端（docs/boot-entry-design.md §4.4，S7a：协议核心）。
+ * gk3-fastbootd —— 统一启动入口的 fastboot 执行端（见 tools/gk3boot/README.md）。
  *
- * 执行端细节沿用 docs/fastboot-design.md §4.2.1、§4.4–§4.7、§4.10（旧方案 C′ 的入口与进入方式已作废）；
- * 冲突时以 boot-entry-design.md 为准。盘上格式（GPT / BCB / BCAB / VAB / GK3 / boot.img）一律走 libgk3core，
+ * 盘上格式（GPT / BCB / BCAB / VAB / GK3 / boot.img）一律走 libgk3core，
  * 这里只有 fastboot 协议、sparse、LP 元数据只读解析、ESP 同步与传输。
  *
  * 线程模型：每种传输（USB FunctionFS、TCP）一个会话线程，命令执行在一把全局锁下串行 ——

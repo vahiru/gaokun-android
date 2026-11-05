@@ -3,7 +3,7 @@
 refs/
 
 # Collected inventory dumps (large, machine-specific, timestamped).
-# The distilled result belongs in docs/hw-inventory.md, not the raw dump.
+# The distilled result belongs in docs/dev/hardware.md, not the raw dump.
 hw-inventory-*/
 hw-inventory-*.tar.gz
 
@@ -19,7 +19,7 @@ scripts/ego-preflight-*.txt
 
 # deploy-turnip.sh 从构建机拉下来的中转产物（14MB ELF，构建机上随时可重建）
 scripts/gmu-forensics/*.so
-# 现场取证产物（探针日志/dmesg/fault 普查，结论誊进 docs/stage5-freedreno.md）
+# 现场取证产物（探针日志/dmesg/fault 普查，结论誊进 docs/dev/gpu-turnip.md）
 scripts/gmu-forensics/b1-*/
 
 # 固件 blob 不进版本库：
@@ -79,9 +79,9 @@ device/huawei/gaokun3/micarray/prebuilt/**
 device/huawei/gaokun3/denoise/prebuilt/**
 !device/huawei/gaokun3/denoise/prebuilt/README.md
 
-# 指纹逆向报告（docs/fingerprint/*.md）—— 对华为/高通【签名专有二进制】fingerpr.mbn
-# 与 Windows 驱动 QcTrEE.sys/FtWbioDriverUmdf.dll 的静态逆向笔记（用户从 Windows/Ghidra 侧做）。
-# 结论与工程要点已进 docs/stage4-findings.md #120/#123（受版本控制）；原始报告不入库，
+# 指纹逆向报告（docs/dev/fingerprint/*.md）—— 对华为/高通【签名专有二进制】fingerpr.mbn
+# 与 Windows 驱动 QcTrEE.sys/FtWbioDriverUmdf.dll 的静态逆向笔记。
+# 架构设计见 docs/dev/fingerprint-driver-design.md；原始报告不入库，
 # 只放行 README.md（说明它们是什么、从哪来）。获取输入的方法同 firmware/README.md（公开 uup-drivers release）。
-docs/fingerprint/*.md
-!docs/fingerprint/README.md
+docs/dev/fingerprint/*.md
+!docs/dev/fingerprint/README.md

@@ -1,42 +1,38 @@
-# 指纹 TA 加载冒烟测试（第一里程碑）
+# 指纹TA加载冒烟测试
 
-这是把 gaokun3 指纹（FocalTech `FTE7001`）在 Linux/Android 上驱动起来的**第一步**：
-证明能不能把华为签名的指纹 TA（`fingerpr.mbn`，单一 secelf，TA 名 `fingerprint`）用
-厂商自己的 QSEECOM `APP_START` SMC 加载进 QSEE 并拿到 `app_id`。背景与路线见
-`docs/stage4-findings.md` #120 / #123 / #124，以及 `docs/fingerprint/`（不入库）。
+本目录包含用于验证gaokun3指纹（FocalTech `FTE7001`）可信应用加载路径的内核测试模块：通过高通QSEECOM `APP_START` SMC将华为签名的指纹TA（`fingerpr.mbn`，单一secelf，TA名`fingerprint`）加载进QSEE并获取`app_id`。架构与设计说明见[`docs/dev/fingerprint-driver-design.md`](../../docs/dev/fingerprint-driver-design.md)与[`docs/dev/fingerprint/`](../../docs/dev/fingerprint/README.md)。
 
-> **不是绕过安全启动**：用的是厂商自己的 SMC 加载路径、加载厂商自己签名的 TA，
-> TZ 仍逐段验签。性质等同我们已在做的 GPU/DSP/WiFi 固件加载。
+> **说明**：测试使用的是厂商QSEECOM SMC加载路径与厂商签名的TA镜像，TrustZone仍逐段验签，性质与GPU/DSP/Wi-Fi固件加载相同。
 
 ## 依赖
-* 内核带 **patch 0050**（`qcom_scm_qseecom_app_load/_shutdown` + 32 位 TZ 内存约束）。
-  上游 mainline 只有 LOOKUP/SEND，没有 LOAD。
 
-## 这个模块做什么
-`qcom_qseecom_fptest.c`：insmod 后建一个 debugfs 触发文件，**加载本身什么 SMC 都不发**。
-写 `load` 才动作：读 `/data/local/tmp/fingerpr.mbn` → tzmem 分配（4 MiB 对齐）→
-**安全阀：物理地址不在 32 位内就拒发** → `APP_START` 加载 → 打印 `app_id` →
-`LOOKUP` 复核 → `APP_SHUTDOWN` 收工。
+* 内核需打入`patches/0050`（`qcom_scm_qseecom_app_load/_shutdown` + 32位TZ内存约束）。上游主线仅包含`LOOKUP`/`SEND`，不包含`LOAD`。
 
-## ⚠️ 跑之前
-* **必须有人在设备旁能按电源键**：首次发 LOAD SMC 有整机静默挂死的风险（参数错、或
-  TZ 拒绝加载时的行为未知）。安全阀只挡“物理地址被截断”这一类，挡不住 TZ 侧的未知行为。
-* 只有 `_b` 槽能启动，没有回落槽 —— 装带 0050 的新内核前把这条算进风险。
+## 模块行为
 
-## 步骤（设备旁）
+`qcom_qseecom_fptest.c`在`insmod`后创建debugfs触发文件，模块加载本身不发送任何SMC。向触发文件写入`load`后依次执行：读取`/data/local/tmp/fingerpr.mbn` → 分配tzmem（4 MiB对齐） → 校验物理地址位于32位空间内 → 调用`APP_START`加载 → 打印`app_id` → 调用`LOOKUP`复核 → 调用`APP_SHUTDOWN`卸载。
+
+## 注意事项
+
+* **需有人在设备旁可长按电源键恢复**：SMC参数异常或TZ拒绝加载时存在整机挂死风险；物理地址检查仅能拦截地址截断问题。
+
+## 运行步骤
+
 ```sh
-# 1) 装带 0050 的内核并重启（需用户同意）
-# 2) 推模块与镜像
+# 1) 启动带0050补丁的测试内核（写boot分区或单次启动前需用户确认）
+# 2) 推送模块与TA镜像
 adb push qcom_qseecom_fptest.ko /data/local/tmp/
-# fingerpr.mbn 已在 /data/local/tmp/（来自公开 uup-drivers release，见 device/.../firmware/README.md）
-# 3) 触发
+# fingerpr.mbn放在/data/local/tmp/（取自uup-drivers发布包，见device/huawei/gaokun3/firmware/README.md）
+# 3) 触发测试
 adb shell su -c 'insmod /data/local/tmp/qcom_qseecom_fptest.ko'
 adb shell su -c 'echo load > /sys/kernel/debug/gaokun3_fptest/trigger'
 adb shell su -c 'dmesg | grep fptest | tail'
 ```
-成功 = `LOAD 成功！app_id=N`。成功后下一步才是写正式 client driver + Android HAL（T6）。
 
-## 构建（out-of-tree，对着带 0050 的内核树）
+预期`dmesg`输出`LOAD 成功！app_id=N`。
+
+## 构建（外部模块，指向带0050补丁的内核树）
+
 ```sh
 make -C <kernel-tree> M=$PWD ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- modules
 ```

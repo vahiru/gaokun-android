@@ -1,5 +1,5 @@
 //! gaokun3 安装器后端的 Rust 实现 —— 并行轨道，现役仍是 `scripts/live/installer-lib.sh`。
-//! 设计、迁移顺序、与 shell 版的偏差表：`docs/installer-rust-design.md`。
+//! 设计、迁移顺序、与 shell 版的偏差表：`docs/dev/installer-rust-design.md`。
 //!
 //! 入口与 shell 版的函数同名（`gk3-installer gk3_probe …` ≡ `bash -c '. installer-lib.sh && gk3_probe …'`），
 //! stdout、协议行（PROGRESS / ERR / JOB）与退出码要与 shell 版逐字节相同 —— 对拍：`scripts/live/duel-lib.sh`。

@@ -1,5 +1,5 @@
 // gaokun3 相机 HAL（AIDL）—— 基于 libcamera 的软件 ISP。
-// 背景与三条路的取舍见本目录 README.md 与 docs/stage4-findings.md #91。
+// 背景与三条路的取舍见本目录 README.md 与 docs/dev/camera.md。
 
 package {
     default_applicable_licenses: ["Android-Apache-2.0"],

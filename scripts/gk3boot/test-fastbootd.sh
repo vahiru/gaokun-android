@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# gk3-fastbootd（统一启动入口的 fastboot 执行端，S7a）一键离线测试：
+# gk3-fastbootd（统一启动入口的 fastboot 执行端）一键离线测试：
 #   arm64 容器里静态编译 → 造 loop 盘（出厂 / 双系统 / 重名 / 缺分区 / 两块好盘 / 克隆盘）→ 起 TCP 模式的守护进程 →
-#   用 Debian 包里的真 fastboot 主机工具跑 docs/fastboot-design.md §4.5 的命令 → 判 PASS/FAIL。
+#   用 Debian 包里的真 fastboot 主机工具跑测试命令 → 判 PASS/FAIL。
 # 说明见 tools/gk3boot/README.md §13。
 #
 #   bash scripts/gk3boot/test-fastbootd.sh

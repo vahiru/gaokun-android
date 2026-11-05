@@ -126,7 +126,7 @@ if [ -n "$R2" ]; then
         case "$f" in *.txt|*SHA256SUMS) ct="text/plain; charset=utf-8" ;; *.zip) ct=application/zip ;; *) ct=application/octet-stream ;; esac
         python3 "$U" "$R2_BUCKET" "$OUT/$f" "installer/$VER/$f" "$ct" || die "传 $f 到 R2 失败"
     done
-    # 判据看服务器上的东西，不看上传命令的输出（CLAUDE.md 运维坑 1）。⚠️ 不能拿 --check 当判据：对象不存在它也返回 0。
+    # 判据看服务器上的东西，不看上传命令的输出。不能拿 --check 当判据：对象不存在它也返回 0。
     #   经公开域名 HEAD 一次，Content-Length 要等于本地字节数（与 release.sh 发完让人用 curl -sI 验是同一个意思）
     for f in "${FILES[@]}"; do
         want=$(wc -c < "$OUT/$f" | tr -d ' ')
@@ -141,7 +141,7 @@ fi
 say "4. 上传到 GitHub release $UPLOAD"
 gh release view "$UPLOAD" >/dev/null || die "GitHub 上没有 release ${UPLOAD}（先发 ROM：release.sh --no-build）"
 gh release upload "$UPLOAD" --clobber "${FILES[@]/#/$OUT/}" || die "gh release upload 失败"
-# ★ 判据看服务器上的字节数，不看 gh 的输出（CLAUDE.md 运维坑 1：gh release upload 报过 uploaded 而什么都没传）
+# 判据看服务器上的字节数，不看 gh 的输出（gh release upload 报过 uploaded 而什么都没传）
 for f in "${FILES[@]}"; do
     want=$(wc -c < "$OUT/$f" | tr -d ' ')
     got=$(gh release view "$UPLOAD" --json assets --jq ".assets[] | select(.name == \"$f\") | .size")

@@ -1,5 +1,5 @@
 /*
- * 启动选项（统一启动入口 S15，2026-10-05；docs/boot-entry-design.md §4.6.1 动作 6、7，§4.9.3、§4.9.4，U12 / U14）。
+ * 启动选项（统一启动入口，tools/gk3boot/README.md）。
  *
  * 三项，按 boot_control HAL（device/huawei/gaokun3/boot_control/Gk3Boot.cpp）开机完成时导出的属性决定显示与否：
  *   · "重启到 Windows"   vendor.gaokun3.bootentry.windows=1（ESP 上有 EFI/Microsoft/Boot/bootmgfw.efi）。

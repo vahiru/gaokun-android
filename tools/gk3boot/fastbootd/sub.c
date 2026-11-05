@@ -6,7 +6,7 @@
  * 两种 --wipe-data 都先过守卫（合并中 / 更新待验证 → 4）；没有目标盘、读写出错 → 5。
  * stdout 只打一两行英文（/init 原样显示在界面上）；过程照常进日志（stderr → /run/gk3/fastbootd.log）。
  *
- * 恢复出厂的语义（docs/boot-entry-design.md §4.4.3，沿用 docs/fastboot-design.md §4.6）：
+ * 恢复出厂的语义（见 tools/gk3boot/README.md）：
  *   userdata：BLKDISCARD（尽力）+ 开头 / 末尾各 1 MiB 写零，读回确认开头 4 KiB 全零；metadata：整块清零；
  *   misc 只清 BCB（0–2 KiB），而且等两块都擦完才清 —— 断电后下一次进入会重做（清零是幂等的）；
  *   不碰 super、boot_x、ESP、BCAB、VAB。Android 下次开机由 fs_mgr 按 formattable 重建（本机未实测，E10）。

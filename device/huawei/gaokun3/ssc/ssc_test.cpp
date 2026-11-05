@@ -29,7 +29,7 @@
  *   只接受 accel / gyro（HAL 只开这两路）；不与 onchange 组合。
  *   退出码：0 全过；1 打开 / 就绪 / 找传感器 / 使能失败或参数错；2 非 toggle 模式
  *   一条读数都没有；3 toggle 某一轮没读数；4 toggle 结束后 SSC 枚举坏了。
- * data_type 可用值见 docs/sensors-ssc-protocol.md（accel / gyro / mag /
+ * data_type 可用值见 docs/dev/sensors-ssc-protocol.md（accel / gyro / mag /
  * ambient_light / proximity / rotv）。
  *
  * ambient_light: tcs3701 registers two providers. The default one is

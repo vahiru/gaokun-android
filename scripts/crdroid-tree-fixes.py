@@ -82,7 +82,7 @@ def patch_hexagonfs_cr(tree: pathlib.Path) -> str:
       而这一条正是 Android 侧能用普通 PRODUCT_COPY_FILES 的前提：
       构建系统造不出带控制字符的文件名。
 
-    完整背景见 docs/stage4-findings.md #37。
+    完整背景见 docs/dev/sensors-ssc-protocol.md。
 
     external/hexagonrpc 来自本仓 manifests/local_manifest_gaokun3.xml（钉 435ed1c），A17 树上照样同步；
     构建机 17.0 树上的副本（2026-10-25 核过）锚点原样在。没有这个项目 = 传感器全没 ⇒ 缺了算失败。
@@ -114,7 +114,7 @@ def patch_v4l2_input_size(tree: pathlib.Path) -> str:
     症状：任何视频用 c2.v4l2.*.decoder 都 "start 失败"，内核打
     `qcom-venus: HW can't support this load`。
 
-    ★ 根因链（内核插桩实测，见 docs/stage4-findings.md）：
+    原因分析（内核插桩实测，见 docs/dev/audio-video.md）：
       1. V4L2Decoder::setupInputFormat() 对【压缩输入队列】做 S_FMT 时传
          `ui::Size()`，而 ui::Size 的默认值是 **-1 x -1**
          （frameworks/native/libs/ui/include/ui/Size.h:32-33），
@@ -638,9 +638,9 @@ def _applied_under(proj: pathlib.Path, patch: pathlib.Path, later: list) -> bool
 def patch_connected_displays_flag(tree: pathlib.Path) -> str:
     """—— 修补 11：关掉 status_bar_connected_displays 这个 aconfig flag ——
 
-    ⚠️★ **这条的立项理由从来没有被记录下来。** 它是 2026-09-12 从构建机上
+    **这条的立项理由从来没有被记录下来。** 它是 2026-09-12 从构建机上
     抢救回来的一处未提交改动（`build/release` 项目），当时那一轮（08-24）
-    的案卷没写。本条注释是现存的全部说明。
+    的详细记录缺失。本条注释是现存的全部说明。
 
     已知的事实（不是推测）：
       * flag 名 `com.android.systemui.shared/status_bar_connected_displays`，
@@ -886,8 +886,8 @@ def patch_wifi_sw_pno_gate(tree: pathlib.Path) -> str:
 def patch_wifi_stable_factory_mac(tree: pathlib.Path) -> str:
     """—— 修补 19：Wi-Fi HAL 的"出厂 MAC"改成由 SoC 序列号派生的稳定本地管理地址 ——
 
-    v1.0 NET-4（2026-10-05，构建机 crDroid 树核实）。本机 WCN6855 板子上没烧 MAC：固件每次开机给一个
-    00:03:7f:12:xx:xx（只有后两字节随机，见 CLAUDE.md 的路由器静态租约），ath11k 拿它当 perm_addr。
+    2026-10-05 构建机 crDroid 树核实。本机 WCN6855 板子上没烧 MAC：固件每次开机给一个
+    00:03:7f:12:xx:xx（只有后两字节随机），ath11k 拿它当 perm_addr。
     框架拿"出厂 MAC"的链路（行号是 crDroid 17.0 / A17 的）：ClientModeImpl.retrieveFactoryMacAddressAndStoreIfNecessary（:8351）
       → WifiNative.getStaFactoryMacAddress（:2616）→ WifiVendorHal.getStaFactoryMacAddress（:989）
       → HAL IWifiStaIface.getFactoryMacAddress → WifiIfaceUtil::getFactoryMacAddress
@@ -1111,7 +1111,7 @@ def patch_adb_root_only_with_su(tree: pathlib.Path) -> str:
     adbd 按变体编成 ANDROID_DEBUGGABLE=1（packages/modules/adb/Android.bp:47-55）；装了
     adbroot_service 之后，restart_service.cpp 的 root 路径不再看 ro.debuggable，
     用户在开发者选项里一开「adb root」，`adb root` 就成了。
-    ⇒ 发布构建 D1「没有 adb root」（docs/v1.0-plan.md、release-checklist）被悄悄打开。
+    ⇒ 发布构建「没有 adb root」（见 docs/dev/release-checklist.md）被悄悄打开。
     设备树去不掉一个 PRODUCT_PACKAGES（没有 PRODUCT_PACKAGES_REMOVE），只能改这里。
     开发机照旧用 KSU 拿 root（`adb shell` 经 KSU 即 root，从来没有 `adb root`）。
     上机判据：`pm list packages`/`ls /system_ext/bin /system/bin | grep adb_root` 为空；
@@ -1155,7 +1155,7 @@ def patch_keygesture_lineagesettings_guard(tree: pathlib.Path) -> str:
     当时在构建机树上直接给这两处读取包了 try/catch，**从没写进本脚本、全仓零记录**，
     却编进了之后每一版（含 rc2e）。2026-10-25 A17 迁移 reset 树时，对照 A16 树的改动普查才发现。
     A17（crDroid 17.0）frameworks/base 的 KeyGestureController.java:333-338 仍是同样没有防护的写法。
-    ⓘ 这只是兜底：根本的规矩仍是"别隐藏 lineagesettings / lineageparts"（docs/gaming.md）。
+    这只是防御措施：基本原则仍是"别隐藏 lineagesettings / lineageparts"（见 docs/dev/gaming.md）。
        读失败时两个开关保持默认 false（不启用部分截图 / 音量上下同按静音），与没装 Lineage 设置时一致。
     """
     p = tree / "frameworks/base/services/core/java/com/android/server/input/KeyGestureController.java"

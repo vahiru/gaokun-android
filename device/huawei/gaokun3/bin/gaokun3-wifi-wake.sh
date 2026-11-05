@@ -18,7 +18,7 @@
 # 和 shill 一样防唤醒风暴：一分钟内固件叫醒系统超过 3 次，或十分钟内超过 10 次，就撤掉规则 BACKOFF 秒。
 # 次数取自内核 ath11k_wow 唤醒源的 event_count（patches/0202），这个唤醒源还让系统每次被叫醒后醒 1 秒。
 # 内核里没有这个唤醒源，就说明 WAKE# 那几个补丁（patches/0199–0202）也不在，什么也不做。
-# 原理和排查见 docs/deep-sleep.md 的 Wi-Fi 一节。
+# 原理和排查见 docs/dev/deep-sleep.md 的 Wi-Fi 一节。
 #
 # 只用 mksh 和 toybox 的命令，不依赖 awk。
 

@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
   gaokun3（华为 MateBook E Go）免 U 盘安装：在 Windows 里把 Android 安装器放上内置盘，下次开机进安装器。
   gaokun3 USB-free install: put the Android installer on the internal disk from Windows; the next boot starts it.
@@ -17,42 +17,42 @@
   之后在安装器里先"缩小现有分区腾出空间"（缩 D:），再选"保留现有系统"；已经替 Android 缩出了空间的话直接选后者。
 
   -Uninstall 撤掉以上全部（在 Android 装上之前；装上之后只撤启动项与 ESP 上的安装器文件，
-  【不碰】EFI\gk3boot、EFI\systemd、Android 的启动项，也不重新打开快速启动 —— 双系统时它必须关着，U18）。
+  【不碰】EFI\gk3boot、EFI\systemd、Android 的启动项，也不重新打开快速启动 —— 双系统时它必须关着）。
 
-  ★ 同一个脚本也是常驻的【Windows 伴随工具】（设计稿 docs/boot-entry-design.md §4.9.15，U23）——【预览】：
-    还没在真 Windows 上跑过（D18；只在容器里有单元测试，Parallels 的 D4 与真机的 D5/D6 待做）。
+  同一个脚本也是常驻的【Windows 伴随工具】（见 tools/gk3boot/README.md）——【预览】：
+    尚未在真机 Windows 上实测（已在容器里跑过单元测试）。
     装到 %ProgramFiles%\gaokun3、开始菜单 gaokun3 文件夹、计划任务 \gaokun3\*（SYSTEM）。免 U 盘安装的最后一步会自动装；
     从 U 盘装的用户双击 U 盘上 gaokun3-windows\gaokun3-setup.cmd（不带参数 = 安装伴随工具）。
       -InstallCompanion           安装 / 刷新伴随工具（快速启动一律关；休眠按 -Hibernate 问你）
       -RepairBoot [-Check]        体检；\EFI\Boot\bootaa64.efi 被 Windows 换回 bootmgfw 时，先暂停 BitLocker 1 次重启、再拷回 systemd-boot
-      -RebootToAndroid            写 LoaderEntryOneShot = loader.conf 的 default，然后重启（⚠️ Windows 能不能写这个变量未在真机验证）
+      -RebootToAndroid            写 LoaderEntryOneShot = loader.conf 的 default，然后重启（Windows 能否写这个变量尚未在真机验证）
       -SetDefault android|windows 开机默认进哪个系统（写 / 删 LoaderEntryDefault）
       -SuspendBitLocker           只暂停 BitLocker 2 次重启，别的都不碰（U 盘路径"关安全启动之前"那一步用）
       -RemoveAndroid              卸载 Android、回到纯 Windows（先还原引导，再删 ESP 上的东西、变量、分区，再把 D: 扩回去）
-      -WindowsPreset on|off       U25：Windows 里的重启都回 Windows（默认关；D4/D6 证实之前别指望它）
+      -WindowsPreset on|off       Windows 里的重启都回 Windows（默认关）
     计划任务与开始菜单内部用（不要手动传）：-BootCheck、-Notify、-Trigger <动作>、-TaskAction <动作>
 
 .NOTES
-  ⚠️ 这个脚本是在【没有 Windows 的机器上】写的（仓库作者那台的 Windows 已在 2026-08-20 抹掉）。
+  这个脚本是在【没有 Windows 的机器上】写的（仓库作者那台的 Windows 已在 2026-08-20 抹掉）。
      纯逻辑（WiFi 配置转换、PSK 推导、大小计算、bcdedit 输出解析）在 PowerShell 容器里有单元测试
      （scripts/windows/test-setup.ps1）；Resize-Partition / New-Partition / mountvol / bcdedit 这些
-     Windows 专有的步骤【还没在真机上跑过】。见 docs/stage7-flutter-debian.md §5.8。
-  ⚠️ 必须兼容 Windows 自带的 PowerShell 5.1（不用 ?:、??、&& 这些 7 才有的语法），
+     Windows 专有的步骤尚未经真机实测。见 scripts/live/README.md。
+  必须兼容 Windows 自带的 PowerShell 5.1（不用 ?:、??、&& 这些 7 才有的语法），
      文件必须是 UTF-8 带 BOM —— 否则 5.1 按系统代码页读，中文全是乱码。
 #>
 [CmdletBinding()]
 param(
-    # 现在就替 Android 缩出多少 GiB。默认 0：只划安装器自己的空间，Android 的到安装器里分（用户 2026-09-27）。
+    # 现在就替 Android 缩出多少 GiB。默认 0：只划安装器自己的空间，Android 的到安装器里分。
     # 不给这个参数、而 D: 加了密时会问（安装器缩不了加密卷）。给的话至少 24（双系统约要 21.2 GiB，gk3_plan 实测）
     [ValidateScript({ $_ -eq 0 -or ($_ -ge 24 -and $_ -le 2048) })][int]$AndroidGiB = 0,
-    # 从哪个卷缩。出厂有独立的 D:（Data，336.6 GiB，docs/hw-inventory.md 第 8 节），缩它比缩 C: 稳
+    # 从哪个卷缩。出厂有独立的 D:（Data，336.6 GiB，见 docs/dev/hardware.md），缩它比缩 C: 稳
     [ValidatePattern('^[A-Za-z]$')][string]$ShrinkDrive = 'D',
     # 安装器分区（GK3LIVE）的大小（MiB）。默认 0 = 按安装包里的实际内容算（Get-LiveMiB：live 约 210 MiB，带载荷再加 1.3 GiB）
     [ValidateScript({ $_ -eq 0 -or ($_ -ge 256 -and $_ -le 16384) })][int]$LiveMiB = 0,
     # current：只带当前连着的 WiFi；all：带上所有保存过的；none：不带（到安装器里再连）
     [ValidateSet('current', 'all', 'none')][string]$Wifi = 'current',
     # 不用 bcdedit 的"只下一次"，改为接管 ESP 的回落路径 \EFI\Boot\bootaa64.efi（原件留 .before-gaokun3）
-    # —— 这是本机 2026-08-20 在 Windows 还在盘上时实测过的机制（hw-inventory.md 第 8quater 节）；
+    # —— 这是本机 2026-08-20 在 Windows 还在盘上时实测过的机制（见 docs/dev/hardware.md）；
     #    bcdedit 的 bootsequence 在这台机器的固件上还没验证过。开机会出 systemd-boot 菜单，Windows 在菜单里
     [switch]$UseFallbackPath,
     [switch]$Uninstall,

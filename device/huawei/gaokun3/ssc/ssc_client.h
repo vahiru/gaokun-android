@@ -5,7 +5,7 @@
  * 为什么不用 libssc：它依赖 glib / gio / gobject / qmi-glib / libprotobuf-c，
  * 整套 GLib 栈搬不进 Android。协议逻辑本身很薄，照规格重写便宜得多。
  *
- * ★ 协议规格（每条事实都注了来源文件与行号）见 docs/sensors-ssc-protocol.md。
+ * ★ 协议规格（每条事实都注了来源文件与行号）见 docs/dev/sensors-ssc-protocol.md。
  *   本文件里凡是"魔数"都能在那份文档里查到出处，没有一个是猜的。
  *
  * 许可证说明：本类使用 libssc 的 .proto（GPL-3.0），因此本身也是 GPL-3.0。

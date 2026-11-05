@@ -1,9 +1,9 @@
-/* gk3-fbi：执行端 initramfs（fastboot.img）里 /init 的小帮手（设计稿 docs/boot-entry-design.md §4.4、
- * docs/fastboot-design.md §4.2.2 / §4.8）。静态 aarch64（musl），链接 libgk3core，只读，不写任何盘。
+/* gk3-fbi：执行端 initramfs（fastboot.img）里 /init 的小帮手（见 tools/gk3boot/README.md）。
+ * 静态 aarch64（musl），链接 libgk3core，只读，不写任何盘。
  *
  *   gk3-fbi keyd                 常驻：读所有 /dev/input/event*，按键 → 一行一个词写到 stdout：
  *                                up / down / ok / back。原始事件（设备名 + 键码）记到 stderr，
- *                                真机键码就从这份日志里抄（INST-18 / E3 没人按过键）。
+ *                                真机键码就从这份日志里抄。
  *                                每 2 秒重扫一次 /dev/input（键盘盖是 USB HID，可能后插）。
  *   gk3-fbi find   <PARTUUID>    在所有盘的主 GPT 里找这个 PARTUUID（= gk3.disk，misc 的），
  *                                打印 "<分区节点> <整盘节点>"；不唯一 / 找不到 → 非零退出。
@@ -11,8 +11,8 @@
  *   gk3-fbi status <PARTUUID>    英文状态（给 tty1 的界面直接打印）：目标盘、六个名字是否唯一、
  *                                BCB、两个槽、VAB 合并状态、GK3 记录。
  *
- * ★ 输出一律英文 ASCII：Linux VT 的字体画不了 CJK（fastboot-design.md §4.8）。
- * ★ 只读：清 BCB、擦数据、写槽都是 gk3-fastbootd 的事（接口见 tools/gk3boot/README.md §13）。
+ * 输出一律英文 ASCII：Linux VT 的字体画不了 CJK。
+ * 只读：清 BCB、擦数据、写槽都是 gk3-fastbootd 的事（接口见 tools/gk3boot/README.md §13）。
  */
 #define _GNU_SOURCE
 #include <ctype.h>
@@ -49,7 +49,7 @@ struct dev {
 static struct dev devs[MAXDEV];
 static int ndev;
 
-/* 键码 → 菜单动作。音量上 / 下 + 电源是平板姿态的主通道（boot-entry-design.md §4.3.6）；
+/* 键码 → 菜单动作。音量上 / 下 + 电源是平板姿态的主通道；
  * 键盘盖的方向键 / 回车 / Esc 作备选。 */
 static const char *map_key(unsigned code)
 {

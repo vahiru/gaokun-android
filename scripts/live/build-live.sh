@@ -8,10 +8,10 @@
 #   bash scripts/live/build-live.sh --profile rescue --boot-img … --ssh-key ~/.ssh/id_ed25519.pub
 #
 #   --boot-img  内核 / dtb / 内核参数的来源：live 与 Android 共用同一个内核
-#               （docs/stage7-live-installer.md §2.3）。给 --release 时默认用里面的 boot.img
+#               （见 scripts/live/README.md）。给 --release 时默认用里面的 boot.img
 #   --firmware  GPU 固件的来源，形如 /vendor/firmware 的目录：adb pull /vendor/firmware out/vendor-firmware
 #               live 必需（cage 要 GPU；zap shader 是华为专有的，Debian 的固件包里没有 —— 见 build-rootfs.sh 的 GPU_FW）
-#               带着它的镜像可以公开发布（用户 2026-09-27 定 B23 ①：随镜像发，与 ROM 同待遇 —— 已发布的 ROM 的 vendor 里本来就带着它）
+#               带着它的镜像可以公开发布（随镜像发，与 ROM 同待遇 —— 已发布的 ROM 的 vendor 里本来就带着它）
 #   换源：GK3_DEBIAN_MIRROR=http://mirrors.ustc.edu.cn/debian bash scripts/live/build-live.sh …
 #               （2026-09-25：换网之后 colima 里连 deb.debian.org 卡死，中科大镜像 0.3 秒；透传进容器给 build-rootfs.sh）
 #   --payload   把 --release 目录整个放进 U 盘（/gaokun3/payload/），装机就不用联网
@@ -69,7 +69,7 @@ H=$(shasum -a 256 "$REPO/scripts/live/live-build.Dockerfile" 2>/dev/null || sha2
 TAG="gk3-live-build:${H:0:12}"
 docker image inspect "$TAG" >/dev/null 2>&1 || { say "构建 live 构建环境 ${TAG}"; docker build -q -t "$TAG" -f "$REPO/scripts/live/live-build.Dockerfile" "$REPO/scripts/live" >/dev/null; }
 
-# ★ M0 的变体启动项（docs/stage7-flutter-debian.md 的 M0 验收）：
+# M0 的变体启动项（见 live/installer-flutter/README.md）：
 #   渲染后端两条都要测（Impeller 是 3.47.2 的默认，#192915 说它在弱 GPU 上闪）；浸泡要持续出帧、
 #   RSS 每 5 秒记到 U 盘的 gaokun3/diag/soak-*.log；旋转方向是推理出来的，反方向也放一个
 #   ⚠️ 标题用 ASCII：开机菜单由 UEFI 固件的字体画，一般不含中文（见 build-usb.sh）

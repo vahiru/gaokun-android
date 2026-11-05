@@ -1,5 +1,5 @@
 /*
- * 统一启动入口（gk3boot.efi）的通知（2026-10-05，S9；docs/boot-entry-design.md §4.6.1 动作 4、5）。
+ * 统一启动入口（gk3boot.efi）的通知（tools/gk3boot/README.md）。
  *
  * 数据全来自 boot_control HAL 的开机完成线程（device/huawei/gaokun3/boot_control/Gk3Boot.cpp）设的
  * vendor.gaokun3.bootentry.*（vendor_gaokun3_prop，sepolicy 给了 system_app 读）：

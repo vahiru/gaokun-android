@@ -3,12 +3,12 @@
 #
 #   bash tools/gk3boot/initramfs/build.sh --out <目录> [--fastbootd <静态 aarch64 gk3-fastbootd> | --no-fastbootd]
 #
-# 内容（docs/fastboot-design.md §4.2.2，按方案 Y 收窄）：静态 busybox + 我们的 /init + gk3-fbi（按键 / 只读状态，
-# 链接 libgk3core）+ Terminus 32x16 控制台字体 + gk3-fastbootd（S7a 协议守护进程）。
+# 内容（见 tools/gk3boot/README.md）：静态 busybox + 我们的 /init + gk3-fbi（按键 / 只读状态，
+# 链接 libgk3core）+ Terminus 32x16 控制台字体 + gk3-fastbootd（协议守护进程）。
 # gk3-fastbootd 缺省就在这里从 tools/gk3boot/fastbootd/ 用 musl 静态编（与 gk3-fbi 同一套工具链，比 glibc 静态小一半，
 # 版本串取环境变量 FBD_VER）；--fastbootd 换成外面给的二进制；--no-fastbootd 打一份只有界面的（EXECUTOR MISSING）。
 # 不带模块（本机内核全内建）、不带固件、不带 python。
-# 尺寸预算：设计稿 2–4 MiB（boot-entry-design.md §4.1 ESP 布局、§4.9.8 空间账）—— 超过 4 MiB 直接失败。
+# 尺寸预算：2–4 MiB（见 tools/gk3boot/README.md）—— 超过 4 MiB 直接失败。
 # 可复现：mtime 固定为 SOURCE_DATE_EPOCH（缺省 0）、属主 0:0、按名字排序、gzip -n。同一份输入 → 同一个 sha256。
 set -euo pipefail
 

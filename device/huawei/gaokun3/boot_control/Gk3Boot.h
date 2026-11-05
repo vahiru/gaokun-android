@@ -1,6 +1,6 @@
 /*
  * 统一启动入口（gk3boot.efi）的 Android 侧：开机完成线程。
- * 设计：docs/boot-entry-design.md §4.6.1、§4.11、§4.12；实现说明在 Gk3Boot.cpp 顶部。
+ * 设计见 tools/gk3boot/README.md；实现说明在 Gk3Boot.cpp 顶部。
  *
  * Copyright 2026 The gaokun-android contributors
  * SPDX-License-Identifier: GPL-3.0-or-later

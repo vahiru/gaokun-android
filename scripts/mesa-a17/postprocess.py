@@ -12,7 +12,7 @@
   装成 /vendor/lib/hw/vulkan.freedreno.so。32 位进程的 libvulkan 会 dlopen 它、
   找不到 HAL_MODULE_INFO_SYM 再报错。A16 的手写包装（device/huawei/gaokun3/mesa/
   turnip-shared.bp.in）同样写的是 compile_multilib: "64"，这里保持一致。
-  （32 位 turnip 要另加 android_arm 平台，见 docs/mesa-a17.md「待定」。）
+  （32 位 turnip 要另加 android_arm 平台，见 docs/dev/mesa-a17.md「待定」。）
 
 A16 那 9 类合并后处理（scripts/mesa-bp-merge.py）在 A17 上都不需要了：
 生成器直接写多文件 Android.bp、不重名、tools / libs / export_generated_headers

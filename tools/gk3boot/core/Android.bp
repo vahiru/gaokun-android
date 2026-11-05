@@ -1,14 +1,12 @@
 //
-// libgk3core —— 统一启动入口的决策核心（docs/boot-entry-design.md §4.1），Android 侧的那一份。
+// libgk3core —— 统一启动入口的决策核心（见 tools/gk3boot/README.md），Android 侧的那一份。
 //
 // 同一份 C 代码还编进 gk3boot.efi（tools/gk3boot/efi/）、主机测试与 gk3-misc（tools/gk3boot/Makefile）。
 // Android 这边只有 boot_control HAL（device/huawei/gaokun3/boot_control/）用它：开机完成时读写
-// misc 偏移 8 KiB 的 GK3 记录（清 boot_streak、取事件环，设计稿 §4.5、§4.6.1）。
+// misc 偏移 8 KiB 的 GK3 记录（清 boot_streak、取事件环）。
 //
-// ⚠️★ 本文件放在 tools/gk3boot/core/，但构建机的 crDroid 树里【没有】tools/ —— 只同步
-//   device/huawei/gaokun3/。scripts/sync-device-tree.sh 第 2c 步把整个 tools/gk3boot/core/
-//   （含本文件）拷到构建机的 device/huawei/gaokun3/gk3core/，Soong 在那里看到它。
-//   ⇒ 改了 core 的源码要重跑 sync-device-tree.sh，否则构建机编的是旧库（第 2c 步有 md5 断言）。
+// 本文件放在 tools/gk3boot/core/；同步到 crDroid 树时把整个 tools/gk3boot/core/（含本文件）
+// 拷到 device/huawei/gaokun3/gk3core/，Soong 在那里看到它。
 //
 // vendor: true —— 只给 vendor 分区的 HAL 用。core 是 freestanding C11（只用 stdint/stddef/stdbool，
 // 不调 libc），所以不需要 libc 以外的任何依赖；cflags 与主机构建（Makefile 的 WARN）同一套。

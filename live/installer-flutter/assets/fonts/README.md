@@ -1,11 +1,10 @@
-# 打包进安装器的字体
+# 安装器内置字体说明
 
-字体文件本身不入库（`python3 tool/fetch-fonts.py` 取，sha256 钉在脚本里），这份说明入库。
+字体二进制文件不纳入版本控制（由`python3 tool/fetch-fonts.py`拉取并校验SHA-256），本目录仅保留此说明文件。
 
-| 文件 | 字体 | 许可证 | 上游 |
+| 文件 | 字体 | 许可证 | 上游仓库 |
 |---|---|---|---|
-| `NotoSansSC-VF.otf` | Noto Sans CJK SC（可变字重 400–900） | SIL Open Font License 1.1 | https://github.com/notofonts/noto-cjk |
-| `Roboto-VF.ttf` | Roboto（可变字重 100–900、宽度 75–100） | Apache License 2.0 / OFL 1.1 | https://github.com/googlefonts/roboto-3-classic |
+| `NotoSansSC-VF.otf` | Noto Sans CJK SC（可变字重400–900） | SIL Open Font License 1.1 | <https://github.com/notofonts/noto-cjk> |
+| `Roboto-VF.ttf` | Roboto（可变字重100–900、字宽75–100） | Apache License 2.0 / OFL 1.1 | <https://github.com/googlefonts/roboto-3-classic> |
 
-两份都取自本仓 ROM 里 Android 自带的 `/system/fonts`（Noto CJK 那份是 5 个字形版本的集合，脚本拆出 SC）。
-Material Design 3 的字体就是这两套：拉丁 Roboto，中日韩 Noto Sans CJK。
+两份字体均提取自Android系统自带的`/system/fonts/`（`NotoSansSC-VF.otf`由Noto CJK合集字体拆出简体中文子集），对应Material Design 3的拉丁字母与中日韩正文字体规范。

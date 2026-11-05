@@ -3,7 +3,7 @@
 # 把 buildbot 的 gaokun3_defconfig 调整成能跑 Android 的配置。
 # 在内核源码树里执行：bash kernel-config-android.sh <kernel-out-dir>
 #
-# 每一项都是实测必需，依据见 docs/stage2-findings.md。
+# 每一项都是实测必需，依据见 docs/dev/android-bringup.md。
 set -u
 OUT="${1:?用法: $0 <kernel-out-dir>}"
 
@@ -17,7 +17,7 @@ OUT="${1:?用法: $0 <kernel-out-dir>}"
     --enable SECURITY_SELINUX_DEVELOP --enable SECURITY_SELINUX_AVC_STATS \
     \
     `# —— 调试通道：本机无串口，崩溃日志只能走 EFI 变量 ——` \
-    `# ⚠️★★★ 2026-10-30：默认关（EFI_VARS_PSTORE_DEFAULT_DISABLE）。没人清的 dump-type* 变量会撑满 NVRAM，` \
+    `# 2026-10-30：默认关（EFI_VARS_PSTORE_DEFAULT_DISABLE）。没人清的 dump-type* 变量会撑满 NVRAM，` \
     `#    固件建不了新启动项、U 盘启动不了（BoardConfig.mk 里 efi_pstore.pstore_disable=1 的注释）。` \
     `#    开发要抓崩溃：cmdline 写 efi_pstore.pstore_disable=0，用完 scripts/pstore-ctl.sh clear。` \
     --enable PSTORE --enable PSTORE_RAM --enable PSTORE_CONSOLE --enable PSTORE_PMSG \
@@ -37,7 +37,7 @@ OUT="${1:?用法: $0 <kernel-out-dir>}"
     --enable USB_CONFIGFS_F_MIDI \
     --enable OVERLAY_FS
 
-# ---- 让【同一个内核】也能当救援/LiveCD 系统用（见 docs/stage7-live-installer.md）----
+# ---- 让【同一个内核】也能当救援/LiveCD 系统用（见 scripts/live/README.md）----
 # 今天 ESP 上有两个内核：Android 一个、救援 Ubuntu 一个，白占 14 MiB，
 # 而且两份要各自维护。统一成一个之后，救援系统只是"同一个内核 + 另一个 initramfs"。
 # 这三项对 Android 是惰性的（不挂就没有代价），但缺了救援就起不来：
@@ -96,7 +96,7 @@ OUT="${1:?用法: $0 <kernel-out-dir>}"
     --enable POWER_SEQUENCING_QCOM_WCN \
     \
     `# —— 前瞻项（来自平行项目 mainline-generic 的 gaokun3 fragment，` \
-    `#    docs/parallel-mainline-generic.md）。netd/bpfloader/lmkd 到位后必炸的：` \
+    `#    见 docs/dev/android-bringup.md）。netd/bpfloader/lmkd 到位后必炸的：` \
     --enable NETFILTER_XTABLES --enable IP_NF_IPTABLES --enable IP_NF_FILTER \
     --enable IP_NF_TARGET_REJECT --enable IP6_NF_IPTABLES --enable IP6_NF_FILTER \
     --enable IP6_NF_TARGET_REJECT --enable NETFILTER_XT_MATCH_BPF \
@@ -212,7 +212,7 @@ OUT="${1:?用法: $0 <kernel-out-dir>}"
 #   /dev/fastrpc-{sdsp,adsp,cdsp,cdsp-secure} 立刻全部出现。
 #   ⚠️ 那只是【验证手段】，不是解法 —— 正解就是这里的 =y。
 #   我们只用 sdsp（SLPI）；权限在 ueventd.gaokun3.rc 里给。
-#   整条通路与实测读数（Z≈9.87）见 docs/stage4-findings.md #37。
+#   整条通路与实测读数（Z≈9.87）见 docs/dev/sensors-ssc-protocol.md。
 ./scripts/config --file "$OUT/.config" --enable QCOM_FASTRPC
 
 # ─── Stage 6: EFI_ZBOOT（把内核编成自解压的 EFI 应用）───
@@ -324,26 +324,26 @@ OUT="${1:?用法: $0 <kernel-out-dir>}"
 # 没法二分 —— /sys/power/pm_test 需要 CONFIG_PM_DEBUG，默认没开。
 # 补上之后 pm_test=devices 成了最安全最快的复现器（5 秒自动返回、不需要唤醒源），
 # 也正是它把故障夹到 dpm_suspend_start()+dpm_suspend_noirq() 之内，
-# 最终定到 a600000.usb 的 role（2026-08-22 已修，见 docs/stage4-findings.md #52-#57）。
+# 最终定到 a600000.usb 的 role（2026-08-22 已修，见 docs/dev/deep-sleep.md）。
 # ⚠️ 别因为"问题已解决"就把这几项关掉：下一个挂起类问题还得靠它。
 #
 #   PM_DEBUG        → /sys/power/pm_test（分层二分：freezer/devices/platform/
 #                     processors/core）与 /sys/power/pm_print_times
 #   PM_SLEEP_DEBUG  → /sys/power/pm_debug_messages
 #   PM_ADVANCED_DEBUG → 每个设备的 power/ sysfs 属性
-#   ★ DPM_WATCHDOG  → 某个设备的 suspend/resume 回调卡住时 panic 并打出该回调的栈，
+#   DPM_WATCHDOG    → 某个设备的 suspend/resume 回调卡住时 panic 并打出该回调的栈，
 #                     记录进 pstore；本机 efi_pstore 是通的，所以抓得到。
 #
-# ⚠️★ DPM_WATCHDOG 的依赖是 `PM_DEBUG && PSTORE && EXPERT`
+# ⚠️ DPM_WATCHDOG 的依赖是 `PM_DEBUG && PSTORE && EXPERT`
 #   （kernel/power/Kconfig）。本机 PSTORE 早就 =y，但 **EXPERT 没开**，
 #   所以光 --enable DPM_WATCHDOG 会静默无效 —— 断言会当场抓住它。
 #   故这里必须一并打开 EXPERT（它只是"取消隐藏"一批选项，不改已有取值）。
 #
-# ⚠️★ **`PM_TRACE_RTC` 在 arm64 上不存在** —— 它 `depends on X86`
+# ⚠️ **`PM_TRACE_RTC` 在 arm64 上不存在** —— 它 `depends on X86`
 #   （kernel/power/Kconfig）。而 `PM_TRACE` 是个没有 prompt 的 bool，只能由
 #   PM_TRACE_RTC 去 select。这很可惜：那个机制（把最后执行的设备
 #   suspend/resume 哈希写进 RTC，机器不干净复位后仍能读出来）
-#   恰好就是为本机这种"userspace 已冻结、journald 来不及落盘、
+#   恰好就是为本机这种"userspace 已冻结、journald 来不及写入磁盘、
 #   clean hang 不产生 panic"的症状设计的。**别再去找它了。**
 #   arm64 上的替代品就是上面的 DPM_WATCHDOG + pstore。
 #
@@ -351,15 +351,15 @@ OUT="${1:?用法: $0 <kernel-out-dir>}"
 #   否则某个合法的慢设备会被误判成挂死。调试时在测试内核里单独设成 10 秒
 #   （本机 ~13 秒就复位，120 秒永远轮不到它开火）。
 #
-# ★★ 2026-10-04（issue #16）：上面这句"保持默认"**没落地** —— 发布内核 #13 实测
+# 2026-10-04（issue #16）：上面这句"保持默认"**没落地** —— 发布内核 #13 实测
 #   DPM_WATCHDOG_TIMEOUT=10、WARNING_TIMEOUT=10（`zcat /proc/config.gz`）：调试时设的 10 秒
 #   留在了构建树的 .config 里，olddefconfig 不会把它改回默认。用户的机器上 ath11k 恢复失败后
 #   10 秒就 panic（pstore 有整条链）。所以这里**显式写值、下面断言值**，不再依赖"默认"。
 #   WARNING 设 60：60 秒先打一次卡住回调的栈（不 panic），120 秒才 panic
 #   （kernel/power/Kconfig:271-283、drivers/base/power/main.c:595-619）。
 #   调试时要短超时就单独编测试内核，别动这里。
-# ★ PANIC_TIMEOUT=10：默认 0 = panic 后永远停住（lib/Kconfig.debug:1109-1117），用户看到的就是"睡死"、
-#   只能长按电源键。10 秒足够 efi_pstore 落盘，然后自己重启回 ESP default。cmdline 的 panic= 仍可覆盖。
+# PANIC_TIMEOUT=10：默认 0 = panic 后永远停住（lib/Kconfig.debug:1109-1117），用户看到的就是"睡死"、
+#   只能长按电源键。10 秒足够 efi_pstore 写入，然后自己重启回 ESP default。cmdline 的 panic= 仍可覆盖。
 ./scripts/config --file "$OUT/.config" \
     --enable EXPERT \
     --enable PM_DEBUG \
@@ -370,7 +370,7 @@ OUT="${1:?用法: $0 <kernel-out-dir>}"
     --set-val DPM_WATCHDOG_WARNING_TIMEOUT 60 \
     --set-val PANIC_TIMEOUT 10
 
-# ─── 1.0 批 2：网络 / 诊断 / 兼容（docs/v1.0-plan.md 批 2 的内核配置项）───
+# ─── 网络 / 诊断 / 兼容（见 docs/dev/release-checklist.md）───
 # 发布内核 #15（v0.7.1 / 1.0.0-dev.2）的 `zcat /proc/config.gz` 里下面这些全是 =m 或未设。
 # 每个符号都在 v7.2-rc2 的 Kconfig 里核实过（文件:行号写在各段）。
 #

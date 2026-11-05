@@ -11,7 +11,7 @@
 # 而本机 UCSI 是坏的、没有任何 role 源 → 控制器停在 role=device、
 # 既没有 gadget 也没有 xhci 子设备。给这个"半初始化"状态断电
 # （系统挂起会，单纯解绑驱动也会）→【整板复位，且不留任何日志】。
-# 完整案卷：docs/stage4-findings.md #52 / #54 / #56 / #57。
+# 说明见 docs/dev/deep-sleep.md。
 #
 # ⚠️ 别再被这段历史带偏：它在 Ubuntu 上用同一棵内核复现得一模一样，
 #    于是被判过"内核/EC 缺陷、与 Android 无关"—— 那个推理排除得对（确实与
@@ -94,7 +94,7 @@ on boot
     # PERF-6 第一步：background / system-background 两个 cpuset 限到 cpu0-3。
     #   AOSP init.rc:364-398（on init；A17 在 :377-403，foreground_window 挪到了最后（:400-403，A16 也有它），同样 copy 成 0-7、这里不碰）只是把每个 cpuset 都 copy 成 /dev/cpuset/cpus（= 0-7），注释原话
     #   "the device's init.rc must actually set the correct cpus" —— 本机从没设过，实机所有 cpuset 都是 0-7
-    #   （docs/stage6-crdroid.md:1414、:1426）⇒ 后台任务和游戏抢同一批核。
+    #   （见 docs/dev/gaming.md）⇒ 后台任务和游戏抢同一批核。
     #   cpu0-3 是 A78C（capacity-dmips-mhz 981，policy0 max 2438.4 MHz）、cpu4-7 是 X1C（1024，policy4 max 2688 MHz）：
     #   refs/linux-v7.2-rc2/arch/arm64/boot/dts/qcom/sc8280xp.dtsi:49-226；频点见 overlay/…/xml/power_profile.xml 的注释。
     #   两簇只差约 10%，所以只挪"后台"两档，foreground / top-app / restricted / camera-daemon 保持 0-7；
@@ -119,12 +119,12 @@ on boot
 # （内核侧 CONFIG_ANDROID_BINDERFS=y 时静态 binder 设备根本不注册，
 #   见 drivers/android/binder.c binder_init 的 IS_ENABLED 判断。）
 # 这是 aospm sdm845（Android 13 时代）模板的写法，16 上是事故源。
-# 实测踩坑记录见 docs/stage2-findings.md 第 9 节。
+# 实测踩坑记录见 docs/dev/android-bringup.md。
 
 # ⚠️ /vendor/etc/init/hw/ 不会被 init 自动扫描（自动扫的是 /vendor/etc/init/），
 # 放这里的 rc 必须显式 import，否则静默不生效。实测后果：usb rc 从未运行，
 # sys.usb.configfs 恒为 0，触发走 legacy android_usb 分支（主线内核无此 sysfs），
-# gadget 永不绑 UDC。见 docs/stage2-findings.md 第 8.3quater 节。
+# gadget 永不绑 UDC。见 docs/dev/android-bringup.md。
 import /vendor/etc/init/hw/init.gaokun3.usb.rc
 
 # ⚠️ mount_all 必须由设备 rc 调用 —— AOSP 16 的 init.rc 自己不调（A17 照旧）
@@ -132,7 +132,7 @@ import /vendor/etc/init/hw/init.gaokun3.usb.rc
 #   mount_all command"）。缺了它 /data 永远不挂载：post-fs-data 的
 #   mkdir 全打在只读 system 根的 /data 空目录上报 EROFS，
 #   keystore2 因 /data/misc/keystore 不存在而崩溃循环。实测见
-#   docs/stage2-findings.md 第 8.3bis 节。
+#   docs/dev/android-bringup.md。
 on fs
     mount_all /vendor/etc/fstab.gaokun3 --early
 
@@ -143,7 +143,7 @@ on post-fs-data
     mkdir /data/vendor 0771 root root
 
 # ath11k 内置驱动开机 5s 即 probe，/vendor 未挂载拿不到固件而永久放弃；
-# vendor 挂载后（post-fs-data）手动补一次 bind。见 docs/stage4-findings.md #28
+# vendor 挂载后（post-fs-data）手动补一次 bind。见 docs/dev/android-bringup.md
 on post-fs-data
     write /sys/bus/pci/drivers/ath11k_pci/bind "0006:01:00.0"
     start gaokun3_wlanap
@@ -186,7 +186,7 @@ on property:sys.boot_completed=1
     start gaokun3_rprockick
     start gaokun3_wifiwake
 
-# turnip 调试旗标（快速迭代机制 v3，见 docs/stage5-freedreno.md）：
+# turnip 调试旗标（见 docs/dev/gpu-turnip.md）：
 # 内核 cmdline 加 androidboot.tu_debug=<flags> → ro.boot.tu_debug → 下面的属性。
 # ⚠️ 属性名按 mesa src/util/os_misc.c os_get_android_option() 推导：
 # TU_DEBUG 不以 MESA_ 开头 → 加 "mesa." 前缀 → 下划线转点+转小写

@@ -1,6 +1,6 @@
 /*
  * SPDX-License-Identifier: GPL-3.0-or-later
- * 见 ssc_client.h 的说明与 docs/sensors-ssc-protocol.md 的协议规格。
+ * 见 ssc_client.h 的说明与 docs/dev/sensors-ssc-protocol.md 的协议规格。
  */
 #include "ssc_client.h"
 
