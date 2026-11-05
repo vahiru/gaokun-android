@@ -37,7 +37,6 @@
 - **部分网站里后摄红蓝颠倒或无法打开**：需要网站名称和复现时的日志。
 - **硬件解码的遗留问题**：拖动到更低分辨率后裁剪不更新；字节缓冲模式下分辨率变大时重新分配失败；`SYS_ERROR`之后出现`invalid uc_region`；HAL里POLLPRI空转；`venus_compat_gfmt=N`需要复测。
 - **Wi-Fi芯片启动失败时泄漏内存**：`ath11k_mhi_start`失败后没有释放，每次泄漏约4 MB DMA内存（`mhi.c:446-450`）。
-- **内核未开启BTF与`CONFIG_USERFAULTFD`**：未开启`CONFIG_DEBUG_INFO_BTF`导致`timeInState.bpf`与`dmabufIter.bpf`加载报`ESRCH`；未开启`CONFIG_USERFAULTFD`导致ART退回到并发复制GC。
 
 ## 四、功能开发
 

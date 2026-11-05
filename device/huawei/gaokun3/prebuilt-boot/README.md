@@ -26,4 +26,4 @@ mkdir -p prebuilt-boot/dtb
 cp <out目录>/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dtb prebuilt-boot/dtb/gaokun3.dtb
 ```
 
-配置与编译两步均须显式指定`CROSS_COMPILE=aarch64-linux-gnu-`，避免`olddefconfig`使用宿主机编译器评估`CC_HAS_*`能力符号而静默改变内核配置（详见[`scripts/kernel-config-android.sh`](../../../../scripts/kernel-config-android.sh)）。
+配置与编译两步均须显式指定`CROSS_COMPILE=aarch64-linux-gnu-`，避免`olddefconfig`使用宿主机编译器评估`CC_HAS_*`能力符号而静默改变内核配置；宿主机还需安装`pahole`（1.22及以上版本，Ubuntu/Debian的`dwarves`或`pahole`包）与`libelf-dev`，以生成`CONFIG_DEBUG_INFO_BTF`所需的BTF类型信息并编译宿主工具`resolve_btfids`（详见[`scripts/kernel-config-android.sh`](../../../../scripts/kernel-config-android.sh)）。
