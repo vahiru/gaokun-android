@@ -329,7 +329,6 @@ class Session final : public BnSession {
             if (e.id == INT32_MAX) { error(Error::NO_SPACE); return; }
             pending.id = std::max(pending.id,e.id+1);
         }
-        size_t stages = 0;
         // Authentication may start with the finger already on the power key.
         // The MCU flag means frame availability, not an observed finger-up.
         // Process its valid frame through the unchanged decode/match checks.
@@ -383,10 +382,11 @@ class Session final : public BnSession {
                 if (!usable) { cb_->onAcquired(AcquiredInfo::INSUFFICIENT,0); }
                 else if (kind == 1) {
                     bool duplicate = false;
-                    for (size_t i = 0; i < stages; ++i)
-                        if (!memcmp(&frame,&pending.frames[i],sizeof(frame))) duplicate = true;
+                    for (const auto& f : pending.frames)
+                        if (!memcmp(&frame,&f,sizeof(frame))) duplicate = true;
                     if (!duplicate) {
-                        pending.frames[stages++] = frame;
+                        pending.frames.push_back(frame);
+                        const size_t stages = pending.frames.size();
                         latched = true;
                         if (stages == gaokun3::kStages) {
                             store_.enrollments.push_back(pending);
@@ -412,6 +412,9 @@ class Session final : public BnSession {
                         if (s > bestScore) { bestScore = s; bestId = e.id; }
                     }
                     if (bestScore >= gaokun3::kMatchThreshold && !cancel && !closed_) {
+                        if (bestScore >= gaokun3::kLearnThreshold)
+                            for (auto& e : store_.enrollments)
+                                if (e.id == bestId) gaokun3::learn(e,frame);
                         store_.failures = 0;
                         if (!store_.save()) { error(Error::UNABLE_TO_PROCESS); return; }
                         lockout_->reset(); clearLockoutTimer();

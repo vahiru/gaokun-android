@@ -130,7 +130,7 @@ GPIO line FD 使用内核的 [gpiolib cdev 接口](https://github.com/torvalds/l
 
 ## 匹配
 
-模板保存录入时的16帧图像，匹配时重新提取特征，换匹配器不用改存储格式。窄条传感器上两帧
+模板保存的是图像，匹配时重新提取特征，换匹配器不用改存储格式。窄条传感器上两帧
 通常只有一部分重叠，位置和角度都未知（`gaokun3-matcher.c`）：
 
 - 在带通后的脊线图上取DoG极值点，按局部脊线方向转正后计算梯度方向直方图描述子。
@@ -148,10 +148,16 @@ GPIO line FD 使用内核的 [gpiolib cdev 接口](https://github.com/torvalds/l
 每用户 `/data/vendor_de/<user>/fpdata/gaokun3-templates.db`，目录 0700、文件 0600，
 跟随 Android 用户数据删除。vold 需先准备对应用户的 vendor_de 父目录。
 HAL 的命名 type_transition 为新 fpdata 目录赋予 fingerprint_vendor_data_file。
-存储`GK3A` v3数据库：头部记录传感器型号和帧尺寸，与本机不符时拒绝加载（FocalTech的v2库
-仍可读取，下次保存时写成v3）；最多 5 个有唯一正 ID 的录入、每指 16 帧、
-随机 authenticatorId、SHA256 损坏校验、临时文件 fsync→rename→目录 fsync。
-它不兼容 NixOS 的 `GK3F` 容器，需重新录入。FBE 保护文件落盘，数据库本身没有
+存储`GK3A` v4数据库：头部记录传感器型号和帧尺寸，与本机不符时拒绝加载；每根手指记录
+自己的帧数。v3库（每指固定16帧）和FocalTech的v2库仍可读取，下次保存时写成v4。最多5个
+有唯一正ID的录入、随机authenticatorId、SHA256损坏校验、临时文件fsync→rename→目录fsync。
+
+录入每指16帧。之后认证得分达到`kLearnThreshold`（40）时，这一帧补进该手指的模板，每指
+最多32帧；满了就替换最早学到的一帧，录入的16帧不动。侧边按键上，录入和日常解锁时手指
+碰到的往往不是同一块，学到的帧让模板向解锁时用的区域扩展。门槛比接受阈值33高，接近
+阈值的误识不会变成模板的一部分。
+
+它不兼容 NixOS 的 `GK3F` 容器，需重新录入。FBE 保护存储的文件，数据库本身没有
 TEE MAC、独立模板加密或防回滚；SHA256 不能防止有写权限者篡改。
 不记录原始图像或模板日志。
 

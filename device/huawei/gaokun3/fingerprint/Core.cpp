@@ -211,6 +211,12 @@ float score(const Gaokun3Frame& probe, const Frames& enrolled) {
     return best + second;
 }
 
+void learn(Enrollment& e, const Gaokun3Frame& probe) {
+    if (e.frames.size() < kStages) return;
+    if (e.frames.size() >= kMaxFrames) e.frames.erase(e.frames.begin() + kStages);
+    e.frames.push_back(probe);
+}
+
 static void put(std::vector<uint8_t>& b, uint64_t v, unsigned bytes) {
     for (unsigned i = 0; i < bytes; ++i) b.push_back(v >> (i*8));
 }
@@ -219,14 +225,16 @@ static uint64_t get(const std::vector<uint8_t>& b, size_t pos, unsigned bytes) {
     for (unsigned i = 0; i < bytes; ++i) n |= uint64_t(b[pos+i]) << (i*8);
     return n;
 }
-// GK3A v3: "GK3A" 3 0 0 0 | count u32 | width u16 | height u16 | authenticatorId
-// u64 | failures u32 | sensor u32 | records (id u32, kStages frames of width *
-// height bytes) | SHA256. v2 (FocalTech only) stored the pixel count 7840 as a
-// u32 at 12 and zero at 28; its records are laid out the same, so a FocalTech
-// unit keeps its enrollments and the next save writes v3.
+// GK3A v4: "GK3A" 4 0 0 0 | count u32 | width u16 | height u16 | authenticatorId
+// u64 | failures u32 | sensor u32 | records (id u32, frame count u16, zero u16,
+// that many frames of width * height bytes: kStages enrolment frames, then
+// the learned ones) | SHA256. v3 had the same header and records of an id and
+// exactly kStages frames. v2 (FocalTech only) stored the pixel count 7840 as
+// a u32 at 12 and zero at 28, with v3 records. Both still load; the next save
+// writes v4.
 constexpr size_t kHeader = 32;
-static size_t recordBytes(const SensorProfile& p) {
-    return 4 + kStages * size_t(p.width) * p.height;
+static size_t maxRecordBytes(const SensorProfile& p) {
+    return 8 + kMaxFrames * size_t(p.width) * p.height;
 }
 bool Store::load() {
     enrollments.clear(); authenticatorId = 0; failures = 0;
@@ -235,7 +243,7 @@ bool Store::load() {
     struct stat st{};
     bool ok = fstat(fd, &st) == 0 && S_ISREG(st.st_mode) && st.st_uid == geteuid() &&
               (st.st_mode & 0777) == 0600 && st.st_size >= int64_t(kHeader+SHA256_DIGEST_LENGTH) &&
-              st.st_size <= int64_t(kHeader+kMaxFingers*recordBytes(*profile_)+SHA256_DIGEST_LENGTH);
+              st.st_size <= int64_t(kHeader+kMaxFingers*maxRecordBytes(*profile_)+SHA256_DIGEST_LENGTH);
     std::vector<uint8_t> b(ok ? size_t(st.st_size) : 0);
     size_t pos = 0;
     while (ok && pos < b.size()) {
@@ -246,35 +254,45 @@ bool Store::load() {
     }
     close(fd);
     if (!ok) return false;
-    const size_t kRecord = recordBytes(*profile_);
     const size_t pixels = size_t(profile_->width) * profile_->height;
     unsigned count = get(b, 8, 4);
-    bool v3 = !memcmp(b.data(), "GK3A\3\0\0\0", 8) &&
-              get(b,12,2) == profile_->width && get(b,14,2) == profile_->height &&
-              get(b,28,4) == uint32_t(profile_->sensor);
+    const bool geometry = get(b,12,2) == profile_->width && get(b,14,2) == profile_->height &&
+                          get(b,28,4) == uint32_t(profile_->sensor);
+    bool v4 = !memcmp(b.data(), "GK3A\4\0\0\0", 8) && geometry;
+    bool v3 = !memcmp(b.data(), "GK3A\3\0\0\0", 8) && geometry;
     bool v2 = !memcmp(b.data(), "GK3A\2\0\0\0", 8) && profile_->sensor == Sensor::kFocalTech &&
               get(b,12,4) == pixels && !get(b,28,4);
-    if ((!v2 && !v3) || count > kMaxFingers ||
-        get(b,24,4) > 20 || (!count && get(b,24,4)) ||
-        b.size() != kHeader+count*kRecord+SHA256_DIGEST_LENGTH) return false;
+    if ((!v2 && !v3 && !v4) || count > kMaxFingers ||
+        get(b,24,4) > 20 || (!count && get(b,24,4))) return false;
     uint8_t digest[SHA256_DIGEST_LENGTH];
     SHA256(b.data(), b.size()-sizeof(digest), digest);
     if (memcmp(digest, b.data()+b.size()-sizeof(digest), sizeof(digest))) return false;
     int64_t auth = get(b, 16, 8);
     if ((count && auth <= 0) || (!count && auth)) return false;
     std::set<int32_t> ids;
+    const size_t end = b.size()-SHA256_DIGEST_LENGTH;
+    pos = kHeader;
     for (unsigned i = 0; i < count; ++i) {
-        pos = kHeader+i*kRecord;
+        const size_t head = v4 ? 8 : 4;
+        if (end - pos < head) { enrollments.clear(); return false; }
         int32_t id = get(b,pos,4);
-        if (id <= 0 || !ids.insert(id).second) { enrollments.clear(); return false; }
+        size_t frames = v4 ? get(b,pos+4,2) : kStages;
+        if (id <= 0 || !ids.insert(id).second || frames < kStages || frames > kMaxFrames ||
+            (v4 && get(b,pos+6,2)) || (end - pos - head) / pixels < frames) {
+            enrollments.clear(); return false;
+        }
+        pos += head;
         Enrollment e{}; e.id = id;
-        for (size_t f = 0; f < kStages; ++f) {
-            e.frames[f].width = profile_->width;
-            e.frames[f].height = profile_->height;
-            memcpy(e.frames[f].pixels, b.data()+pos+4+f*pixels, pixels);
+        e.frames.resize(frames);
+        for (auto& f : e.frames) {
+            f.width = profile_->width;
+            f.height = profile_->height;
+            memcpy(f.pixels, b.data()+pos, pixels);
+            pos += pixels;
         }
         enrollments.push_back(std::move(e));
     }
+    if (pos != end) { enrollments.clear(); return false; }
     authenticatorId = auth;
     failures = get(b,24,4);
     return true;
@@ -286,17 +304,18 @@ bool Store::save() {
     const size_t pixels = size_t(profile_->width) * profile_->height;
     for (const auto& e : enrollments) {
         if (e.id <= 0 || !ids.insert(e.id).second) return false;
+        if (e.frames.size() < kStages || e.frames.size() > kMaxFrames) return false;
         for (const auto& f : e.frames)
             if (f.width != profile_->width || f.height != profile_->height) return false;
     }
     if ((enrollments.empty() && authenticatorId) ||
         (!enrollments.empty() && authenticatorId <= 0) ||
         failures > 20 || (enrollments.empty() && failures)) return false;
-    std::vector<uint8_t> b{'G','K','3','A',3,0,0,0};
+    std::vector<uint8_t> b{'G','K','3','A',4,0,0,0};
     put(b,enrollments.size(),4); put(b,profile_->width,2); put(b,profile_->height,2);
     put(b,authenticatorId,8); put(b,failures,4); put(b,uint32_t(profile_->sensor),4);
     for (const auto& e : enrollments) {
-        put(b,e.id,4);
+        put(b,e.id,4); put(b,e.frames.size(),2); put(b,0,2);
         for (const auto& f : e.frames) b.insert(b.end(),f.pixels,f.pixels+pixels);
     }
     uint8_t digest[SHA256_DIGEST_LENGTH];

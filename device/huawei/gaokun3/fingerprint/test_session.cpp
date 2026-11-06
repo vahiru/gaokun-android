@@ -243,7 +243,7 @@ static Gaokun3Frame encryptedSyntheticFrame(unsigned seed) {
 static void storeSyntheticEnrollment(const TemporaryStore& dir,const Gaokun3Frame& frame,uint32_t failures=0) {
     CHECK_EQ(mkdir(dir.data().c_str(),0700),0);
     gaokun3::Store store(dir.data()+"/gaokun3-templates.db",gaokun3::kFocalTech);
-    gaokun3::Enrollment entry{};entry.id=7;entry.frames.fill(frame);
+    gaokun3::Enrollment entry{};entry.id=7;entry.frames.assign(gaokun3::kStages,frame);
     store.enrollments.push_back(entry);store.failures=failures;store.authenticatorId=gaokun3::randomId();CHECK(store.save());
 }
 TEST(Authentication, AlreadyPresentMatchingContactIsProcessed) {

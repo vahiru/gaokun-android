@@ -12,7 +12,11 @@ extern "C" {
 }
 
 namespace gaokun3 {
+// Enrolment takes kStages frames per finger. Authentications that score at
+// least kLearnThreshold add their frame, up to kMaxFrames per finger, so the
+// template grows towards the part of the finger used for unlocking.
 constexpr size_t kStages = 16;
+constexpr size_t kMaxFrames = 32;
 constexpr size_t kMaxFingers = 5;
 
 // One image serves both sensor variants; the board straps pick one at run
@@ -35,7 +39,8 @@ constexpr size_t kMaxCaptureBytes = GAOKUN3_MAX_PIXELS * 2;
 // 1/0 Goodix, 0/0 no sensor, 1/1 empty firmware.
 const SensorProfile* profileFromStraps(bool gpio61, bool gpio62);
 
-using Frames = std::array<Gaokun3Frame, kStages>;
+// Enrolment frames first, then learned frames, oldest first.
+using Frames = std::vector<Gaokun3Frame>;
 struct Enrollment {
     int32_t id;
     Frames frames;
@@ -52,6 +57,12 @@ float score(const Gaokun3Frame& probe, const Frames& enrolled);
 // A finger is accepted at this score. It lies just above the largest score
 // any other finger reached in offline comparisons of real Goodix captures.
 constexpr float kMatchThreshold = 33.0f;
+// Learning needs a margin over that: a false accept close to the threshold
+// must not become part of the finger.
+constexpr float kLearnThreshold = 40.0f;
+// Appends an authenticated probe, replacing the oldest learned frame when the
+// finger is full. Enrolment frames are kept.
+void learn(Enrollment& e, const Gaokun3Frame& probe);
 
 // Failure count is persisted in Store. Runtime deadlines use a monotonic clock.
 // Restarting the HAL at a timed boundary imposes another 30 seconds, never less.

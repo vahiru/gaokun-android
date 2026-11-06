@@ -30,6 +30,15 @@ static void writeFile(const std::string& path, const std::vector<uint8_t>& b) {
     std::ofstream f(path,std::ios::binary | std::ios::trunc);
     f.write(reinterpret_cast<const char*>(b.data()),b.size());
 }
+static bool sameFrames(const Frames& a, const Frames& b) {
+    if (a.size() != b.size()) return false;
+    for (size_t i = 0; i < a.size(); ++i)
+        if (memcmp(&a[i],&b[i],sizeof(Gaokun3Frame))) return false;
+    return true;
+}
+static void resign(std::vector<uint8_t>& b) {
+    SHA256(b.data(),b.size()-SHA256_DIGEST_LENGTH,b.data()+b.size()-SHA256_DIGEST_LENGTH);
+}
 // Goodix-like samples: per-pixel fixed pattern, a finger lowers them by
 // ~1400 with ridges of period 7 on top, plus a few counts of noise.
 static std::vector<uint16_t> goodixBase(unsigned seed) {
@@ -54,7 +63,7 @@ int main() {
     Store s(path,kFocalTech); assert(s.load()); assert(s.enrollments.empty());
     assert(s.save());
     Enrollment e{}; e.id = 7;
-    for (size_t i = 0; i < kStages; ++i) e.frames[i] = synthetic(i+1);
+    for (size_t i = 0; i < kStages; ++i) e.frames.push_back(synthetic(i+1));
     s.enrollments.push_back(e); s.authenticatorId = randomId(); assert(s.authenticatorId > 0);
     s.failures = 5;
     assert(s.save());
@@ -62,7 +71,7 @@ int main() {
     assert(restored.load()); assert(restored.failures == 5);
     assert(restored.authenticatorId == s.authenticatorId);
     assert(restored.enrollments.size() == 1 && restored.enrollments[0].id == 7);
-    assert(!memcmp(restored.enrollments[0].frames.data(),e.frames.data(),sizeof(Frames)));
+    assert(sameFrames(restored.enrollments[0].frames,e.frames));
     struct stat st{}; assert(!stat(path.c_str(),&st)); assert((st.st_mode & 0777) == 0600);
     assert(!chmod(path.c_str(),0644)); assert(!restored.load()); assert(restored.enrollments.empty());
     assert(!chmod(path.c_str(),0600)); assert(restored.load());
@@ -130,29 +139,68 @@ int main() {
     assert(profileFromStraps(true,false) == &kGoodix);
     assert(!profileFromStraps(false,false) && !profileFromStraps(true,true));
 
-    // v2 (FocalTech, before the sensor field) still loads; the next save is v3.
+    // v3 (a record is the id and exactly kStages frames) and v2 (FocalTech,
+    // before the sensor field) still load; the next save is v4.
     s.enrollments.push_back(e); s.authenticatorId = randomId(); assert(s.save());
-    auto v3 = readFile(path);
-    assert(v3[4] == 3 && v3[12] == 40 && v3[14] == 196 && v3[28] == 1);
+    auto v4 = readFile(path);
+    assert(v4[4] == 4 && v4[12] == 40 && v4[14] == 196 && v4[28] == 1);
+    assert(v4[36] == kStages && v4[37] == 0 && v4[38] == 0 && v4[39] == 0);
+    auto v3 = v4;
+    v3[4] = 3; v3.erase(v3.begin()+36,v3.begin()+40); resign(v3);
+    writeFile(path,v3); assert(!chmod(path.c_str(),0600));
+    assert(restored.load() && restored.enrollments.size() == 1);
+    assert(sameFrames(restored.enrollments[0].frames,e.frames));
     auto v2 = v3;
     v2[4] = 2; v2[12] = kPixels & 255; v2[13] = kPixels >> 8; v2[14] = v2[15] = 0;
-    v2[28] = 0;
-    SHA256(v2.data(),v2.size()-SHA256_DIGEST_LENGTH,v2.data()+v2.size()-SHA256_DIGEST_LENGTH);
-    writeFile(path,v2); assert(!chmod(path.c_str(),0600));
+    v2[28] = 0; resign(v2);
+    writeFile(path,v2);
     assert(restored.load() && restored.enrollments.size() == 1);
-    assert(!memcmp(&restored.enrollments[0].frames,&e.frames,sizeof(Frames)));
-    // A Goodix unit never reads a FocalTech database, v2 or v3.
+    assert(sameFrames(restored.enrollments[0].frames,e.frames));
+    // A Goodix unit never reads a FocalTech database, v2, v3 or v4.
     Store goodixView(path,kGoodix); assert(!goodixView.load());
-    assert(restored.save()); assert(!goodixView.load()); assert(readFile(path)[4] == 3);
+    assert(restored.save()); assert(!goodixView.load()); assert(readFile(path)[4] == 4);
+
+    // Learned frames follow the enrolment frames, up to kMaxFrames; the
+    // oldest learned one goes first and enrolment frames stay.
+    Enrollment grown = e;
+    learn(grown,synthetic(500));
+    assert(grown.frames.size() == kStages+1 && sameFrames(Frames(grown.frames.begin(),grown.frames.begin()+kStages),e.frames));
+    for (unsigned i = 1; i < kMaxFrames-kStages; ++i) learn(grown,synthetic(500+i));
+    assert(grown.frames.size() == kMaxFrames);
+    learn(grown,synthetic(600));
+    assert(grown.frames.size() == kMaxFrames);
+    const auto second = synthetic(501), newest = synthetic(600);
+    assert(!memcmp(&grown.frames[kStages],&second,sizeof(Gaokun3Frame)));
+    assert(!memcmp(&grown.frames.back(),&newest,sizeof(Gaokun3Frame)));
+    assert(sameFrames(Frames(grown.frames.begin(),grown.frames.begin()+kStages),e.frames));
+    Enrollment unfinished{}; unfinished.id = 9; learn(unfinished,synthetic(1));
+    assert(unfinished.frames.empty());
+    // They are saved and restored, and a record outside kStages..kMaxFrames
+    // frames or with a wrong count fails closed.
+    restored.enrollments[0] = grown; assert(restored.save());
+    assert(restored.load() && sameFrames(restored.enrollments[0].frames,grown.frames));
+    auto tampered = readFile(path);
+    tampered[36] = kMaxFrames+1; resign(tampered); writeFile(path,tampered); assert(!restored.load());
+    tampered[36] = kStages-1; resign(tampered); writeFile(path,tampered); assert(!restored.load());
+    tampered[36] = kMaxFrames-1; resign(tampered); writeFile(path,tampered); assert(!restored.load());
+    tampered[36] = kMaxFrames; tampered[38] = 1; resign(tampered); writeFile(path,tampered);
+    assert(!restored.load());
+    // A failed load leaves nothing behind.
+    assert(restored.enrollments.empty() && !restored.authenticatorId);
+    restored.enrollments.assign(1,grown); restored.authenticatorId = randomId();
+    restored.enrollments[0].frames.resize(kStages-1); assert(!restored.save());
+    restored.enrollments[0].frames = grown.frames; restored.enrollments[0].frames.push_back(e.frames[0]);
+    assert(!restored.save());
+    restored.enrollments[0] = e; assert(restored.save());
 
     // Goodix database round trip; FocalTech refuses it.
     Store g(path,kGoodix); Enrollment ge{}; ge.id = 3;
-    for (size_t i = 0; i < kStages; ++i) ge.frames[i] = synthetic(50+i,kGoodix);
+    for (size_t i = 0; i < kStages; ++i) ge.frames.push_back(synthetic(50+i,kGoodix));
     g.enrollments.push_back(ge); g.authenticatorId = randomId(); assert(g.save());
-    auto gv3 = readFile(path);
-    assert(gv3.size() == 32 + 4 + kStages*36*160 + SHA256_DIGEST_LENGTH && gv3[28] == 2);
+    auto gv4 = readFile(path);
+    assert(gv4.size() == 32 + 8 + kStages*36*160 + SHA256_DIGEST_LENGTH && gv4[28] == 2);
     Store gRestored(path,kGoodix); assert(gRestored.load());
-    assert(!memcmp(&gRestored.enrollments[0].frames,&ge.frames,sizeof(Frames)));
+    assert(sameFrames(gRestored.enrollments[0].frames,ge.frames));
     assert(!restored.load());
     // A frame of the wrong geometry is never saved or matched.
     g.enrollments[0].frames[3] = synthetic(9); assert(!g.save());
@@ -167,7 +215,7 @@ int main() {
     assert(decodeGoodix(finger.data(),base.data(),&gf));
     assert(gf.width == 36 && gf.height == 160);
     assert(decodeGoodix(again.data(),base.data(),&gf2));
-    Frames gframes; gframes.fill(gf2); assert(score(gf,gframes) >= kMatchThreshold);
+    Frames gframes(kStages,gf2); assert(score(gf,gframes) >= kMatchThreshold);
     assert(!decodeGoodix(empty.data(),base.data(),&gf));       // noise only
     assert(!decodeGoodix(finger.data(),nullptr,&gf));           // no base yet
     auto bad = finger; bad[17] = 4096; assert(!decodeGoodix(bad.data(),base.data(),&gf));
@@ -190,6 +238,6 @@ int main() {
     assert(goodixBaseUsable(cooler.data(),base.data()));
     assert(goodixBaseUsable(warmer.data(),base.data()));
     unlink(link.c_str()); unlink(path.c_str()); rmdir(dir);
-    std::cout << "PASS: store integrity/permissions/round-trip, v2 compatibility, sensor-bound databases, "
+    std::cout << "PASS: store integrity/permissions/round-trip, v2/v3 compatibility, learned frames, sensor-bound databases, "
                  "matcher, AES decode/invalid frames, Goodix decode/base, persistent failures and lockout deadlines\n";
 }
