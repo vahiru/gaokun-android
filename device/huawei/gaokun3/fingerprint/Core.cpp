@@ -193,7 +193,7 @@ bool goodixBaseUsable(const uint16_t* candidate, const uint16_t* current) {
     return c > b;
 }
 
-float score(const Gaokun3Frame& probe, const Frames& enrolled) {
+float score(const Gaokun3Frame& probe, const Frames& enrolled, float* bestFrame) {
     auto p = gaokun3_feature_extract(&probe);
     // A probe usually overlaps several frames of its finger, while a chance
     // alignment rarely repeats: the two best frames count together.
@@ -208,6 +208,7 @@ float score(const Gaokun3Frame& probe, const Frames& enrolled) {
         gaokun3_feature_set_free(&t);
     }
     gaokun3_feature_set_free(&p);
+    if (bestFrame) *bestFrame = best;
     return best + second;
 }
 

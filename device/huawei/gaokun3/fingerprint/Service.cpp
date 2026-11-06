@@ -405,14 +405,15 @@ class Session final : public BnSession {
                     // Report the best scoring finger, not the first one over
                     // the threshold.
                     int32_t bestId = -1;
-                    float bestScore = 0;
+                    float bestScore = 0, bestFrame = 0;
                     for (auto& e : store_.enrollments) {
                         if (cancel || closed_) break;
-                        const float s = gaokun3::score(frame,e.frames);
-                        if (s > bestScore) { bestScore = s; bestId = e.id; }
+                        float frameScore = 0;
+                        const float s = gaokun3::score(frame,e.frames,&frameScore);
+                        if (s > bestScore) { bestScore = s; bestId = e.id; bestFrame = frameScore; }
                     }
                     if (bestScore >= gaokun3::kMatchThreshold && !cancel && !closed_) {
-                        if (bestScore >= gaokun3::kLearnThreshold)
+                        if (bestScore >= gaokun3::kLearnThreshold && bestFrame < gaokun3::kRepeatScore)
                             for (auto& e : store_.enrollments)
                                 if (e.id == bestId) gaokun3::learn(e,frame);
                         store_.failures = 0;

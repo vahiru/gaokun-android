@@ -90,7 +90,9 @@ int main() {
         f.seekp(offset); f.put(0); f.close();
         assert(!restored.load());
     }
-    auto same = score(e.frames[0],e.frames);
+    float sameFrame = 0;
+    auto same = score(e.frames[0],e.frames,&sameFrame);
+    assert(sameFrame >= kRepeatScore && sameFrame <= same);
     auto other = score(synthetic(400),e.frames);
     std::cout << "Synthetic match scores: same=" << same << " other=" << other << '\n';
     assert(same >= kMatchThreshold && other < kMatchThreshold);

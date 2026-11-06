@@ -52,14 +52,21 @@ bool decode(const uint8_t* encrypted, Gaokun3Frame* frame);
 bool decodeGoodix(const uint16_t* raw, const uint16_t* base, Gaokun3Frame* frame);
 // Goodix: true if a no-finger candidate may replace the current base.
 bool goodixBaseUsable(const uint16_t* candidate, const uint16_t* current);
-// Sum of the two best gaokun3_match_score() values over a finger's frames.
-float score(const Gaokun3Frame& probe, const Frames& enrolled);
-// A finger is accepted at this score. It lies just above the largest score
-// any other finger reached in offline comparisons of real Goodix captures.
-constexpr float kMatchThreshold = 33.0f;
+// Sum of the two best gaokun3_match_score() values over a finger's frames;
+// bestFrame, if given, receives the best of them alone.
+float score(const Gaokun3Frame& probe, const Frames& enrolled, float* bestFrame = nullptr);
+// A finger is accepted at this score. Real Goodix captures of six fingers of
+// one person, against templates of 16 to 32 frames of either index finger:
+// other fingers reached 35.6 at most (32-frame templates; 33.5 with 16).
+constexpr float kMatchThreshold = 37.0f;
 // Learning needs a margin over that: a false accept close to the threshold
 // must not become part of the finger.
 constexpr float kLearnThreshold = 40.0f;
+// A probe this close to one frame of the finger repeats it: frames of one
+// press reach it with each other a third of the time, frames of different
+// presses 0.3% of the time. Repeats are not learned; two near-identical
+// frames would make one chance match count twice in score().
+constexpr float kRepeatScore = 60.0f;
 // Appends an authenticated probe, replacing the oldest learned frame when the
 // finger is full. Enrolment frames are kept.
 void learn(Enrollment& e, const Gaokun3Frame& probe);
