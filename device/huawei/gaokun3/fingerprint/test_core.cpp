@@ -90,6 +90,15 @@ int main() {
         f.seekp(offset); f.put(0); f.close();
         assert(!restored.load());
     }
+    // Enrolment: a repeated frame and a mostly blank one are refused.
+    assert(checkEnrollFrame(e.frames[0],{}) == EnrollFrame::kTake);
+    assert(checkEnrollFrame(e.frames[3],Frames(e.frames.begin(),e.frames.begin()+3)) == EnrollFrame::kTake);
+    assert(checkEnrollFrame(e.frames[1],Frames(e.frames.begin(),e.frames.begin()+3)) == EnrollFrame::kRepeat);
+    {
+        auto half = e.frames[0];
+        memset(half.pixels,128,size_t(half.width)*half.height/2);
+        assert(checkEnrollFrame(half,{}) == EnrollFrame::kPartial);
+    }
     float sameFrame = 0;
     auto same = score(e.frames[0],e.frames,&sameFrame);
     assert(sameFrame >= kRepeatScore && sameFrame <= same);

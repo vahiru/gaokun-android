@@ -70,6 +70,13 @@ constexpr float kRepeatScore = 60.0f;
 // Appends an authenticated probe, replacing the oldest learned frame when the
 // finger is full. Enrolment frames are kept.
 void learn(Enrollment& e, const Gaokun3Frame& probe);
+// Enrolment takes a frame only if ridges cover at least kEnrollCoverage of it
+// (gaokun3_quality_check) and it does not repeat a frame already taken
+// (kRepeatScore). In two real enrolments the frames under 0.6 matched 1 of 90
+// later presses; presses themselves were under 0.67 in 5% of cases.
+constexpr float kEnrollCoverage = 0.6f;
+enum class EnrollFrame { kTake, kPartial, kRepeat };
+EnrollFrame checkEnrollFrame(const Gaokun3Frame& frame, const Frames& taken);
 
 // Failure count is persisted in Store. Runtime deadlines use a monotonic clock.
 // Restarting the HAL at a timed boundary imposes another 30 seconds, never less.

@@ -212,6 +212,15 @@ float score(const Gaokun3Frame& probe, const Frames& enrolled, float* bestFrame)
     return best + second;
 }
 
+EnrollFrame checkEnrollFrame(const Gaokun3Frame& frame, const Frames& taken) {
+    float coverage = 0;
+    gaokun3_quality_check(&frame, &coverage, nullptr);
+    if (coverage < kEnrollCoverage) return EnrollFrame::kPartial;
+    float best = 0;
+    if (!taken.empty()) score(frame, taken, &best);
+    return best >= kRepeatScore ? EnrollFrame::kRepeat : EnrollFrame::kTake;
+}
+
 void learn(Enrollment& e, const Gaokun3Frame& probe) {
     if (e.frames.size() < kStages) return;
     if (e.frames.size() >= kMaxFrames) e.frames.erase(e.frames.begin() + kStages);

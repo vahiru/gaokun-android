@@ -381,10 +381,15 @@ class Session final : public BnSession {
                 if (!transport_.capture(&frame,&usable)) { error(Error::HW_UNAVAILABLE); return; }
                 if (!usable) { cb_->onAcquired(AcquiredInfo::INSUFFICIENT,0); }
                 else if (kind == 1) {
-                    bool duplicate = false;
-                    for (const auto& f : pending.frames)
-                        if (!memcmp(&frame,&f,sizeof(frame))) duplicate = true;
-                    if (!duplicate) {
+                    // One prompt per touch: a rejected frame waits for the lift.
+                    const auto check = gaokun3::checkEnrollFrame(frame,pending.frames);
+                    if (check == gaokun3::EnrollFrame::kPartial) {
+                        cb_->onAcquired(AcquiredInfo::PARTIAL,0);
+                        latched = true;
+                    } else if (check == gaokun3::EnrollFrame::kRepeat) {
+                        cb_->onAcquired(AcquiredInfo::IMMOBILE,0);
+                        latched = true;
+                    } else {
                         pending.frames.push_back(frame);
                         const size_t stages = pending.frames.size();
                         latched = true;
