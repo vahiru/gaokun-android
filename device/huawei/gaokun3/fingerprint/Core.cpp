@@ -194,19 +194,30 @@ bool goodixBaseUsable(const uint16_t* candidate, const uint16_t* current) {
 }
 
 float score(const Gaokun3Frame& probe, const Frames& enrolled, float* bestFrame) {
-    auto p = gaokun3_feature_extract(&probe);
     // A probe usually overlaps several frames of its finger, while a chance
-    // alignment rarely repeats: the two best frames count together.
-    float best = 0, second = 0;
+    // alignment rarely repeats: the best frame and the best one that shows
+    // other skin count together. Two frames of the same spot (learned frames
+    // gather where the finger unlocks) would count one chance match twice.
+    constexpr size_t kCandidates = 6;
+    auto p = gaokun3_feature_extract(&probe);
+    std::vector<Gaokun3FeatureSet> frames;
+    std::vector<std::pair<float, size_t>> ranked;
     if (p.n_feats > 0) for (const auto& frame : enrolled) {
         // Frames of another geometry never come from this sensor.
         if (frame.width != probe.width || frame.height != probe.height) continue;
-        auto t = gaokun3_feature_extract(&frame);
-        const float s = gaokun3_match_score(&p, &t);
-        if (s > best) { second = best; best = s; }
-        else if (s > second) second = s;
-        gaokun3_feature_set_free(&t);
+        frames.push_back(gaokun3_feature_extract(&frame));
+        ranked.emplace_back(gaokun3_match_score(&p, &frames.back()), frames.size() - 1);
     }
+    std::sort(ranked.begin(), ranked.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+    const float best = ranked.empty() ? 0 : ranked[0].first;
+    float second = 0;
+    for (size_t k = 1; k < ranked.size() && k < kCandidates; ++k) {
+        if (gaokun3_match_score(&frames[ranked[k].second], &frames[ranked[0].second]) >= kSameSpotScore)
+            continue;
+        second = ranked[k].first;
+        break;
+    }
+    for (auto& f : frames) gaokun3_feature_set_free(&f);
     gaokun3_feature_set_free(&p);
     if (bestFrame) *bestFrame = best;
     return best + second;

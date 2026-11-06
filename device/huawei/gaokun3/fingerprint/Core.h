@@ -52,8 +52,9 @@ bool decode(const uint8_t* encrypted, Gaokun3Frame* frame);
 bool decodeGoodix(const uint16_t* raw, const uint16_t* base, Gaokun3Frame* frame);
 // Goodix: true if a no-finger candidate may replace the current base.
 bool goodixBaseUsable(const uint16_t* candidate, const uint16_t* current);
-// Sum of the two best gaokun3_match_score() values over a finger's frames;
-// bestFrame, if given, receives the best of them alone.
+// gaokun3_match_score() of the finger's best frame plus that of the best
+// frame among the next five that is not of the same spot as it (scores below
+// kSameSpotScore against it); bestFrame, if given, receives the first alone.
 float score(const Gaokun3Frame& probe, const Frames& enrolled, float* bestFrame = nullptr);
 // A finger is accepted at this score. Real Goodix captures of six fingers of
 // one person, against templates of 16 to 32 frames of either index finger:
@@ -67,6 +68,12 @@ constexpr float kLearnThreshold = 40.0f;
 // presses 0.3% of the time. Repeats are not learned; two near-identical
 // frames would make one chance match count twice in score().
 constexpr float kRepeatScore = 60.0f;
+// Two frames of a finger scoring this much against each other show the same
+// spot. In replays with learning, a left middle finger reached 37.2 against a
+// left index grown with learned frames, 20.7 and 16.5 from two of them of one
+// spot; with this rule the other fingers stayed at 32.7 and the index fingers
+// lost nothing. Frames of different presses reach it about 2% of the time.
+constexpr float kSameSpotScore = 25.0f;
 // Appends an authenticated probe, replacing the oldest learned frame when the
 // finger is full. Enrolment frames are kept.
 void learn(Enrollment& e, const Gaokun3Frame& probe);
