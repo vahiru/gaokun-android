@@ -22,11 +22,10 @@ class Transport {
     bool loaded_ = false;
     bool poisoned_ = false;
     // Goodix: no-finger frame of this session and the time its refresh
-    // interval counts from, the last finger status, and how many candidates
-    // were rejected in a row, since when.
+    // interval counts from, and how many candidates were rejected in a row,
+    // since when.
     std::vector<uint16_t> base_;
     int64_t baseMs_ = 0;
-    bool fingerSeen_ = false;
     unsigned baseRejects_ = 0;
     int64_t firstRejectMs_ = 0;
     bool reset();

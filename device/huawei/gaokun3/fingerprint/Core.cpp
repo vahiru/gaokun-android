@@ -107,12 +107,13 @@ constexpr double kMinRidgeRms = 20;
 static bool goodixInRange(const uint16_t* v) {
     return std::none_of(v, v + kGoodixPixels, [](uint16_t s) { return s > 4095; });
 }
-// base - raw without its 7 x 7 local mean, into hp; returns the RMS.
+// base - raw without its 7 x 7 local mean, into hp; returns the RMS. With raw
+// null, the base's own pattern.
 static double goodixHighPass(const uint16_t* raw, const uint16_t* base, std::vector<double>* hp) {
     constexpr int w = kGoodix.width, h = kGoodix.height, kBox = 3;
     std::vector<double> d(kGoodixPixels);
     hp->resize(kGoodixPixels);
-    for (size_t i = 0; i < d.size(); ++i) d[i] = double(base[i]) - raw[i];
+    for (size_t i = 0; i < d.size(); ++i) d[i] = double(base[i]) - (raw ? raw[i] : 0);
     double sum2 = 0;
     for (int y = 0; y < h; ++y)
         for (int x = 0; x < w; ++x) {
@@ -133,19 +134,40 @@ static double goodixHighPass(const uint16_t* raw, const uint16_t* base, std::vec
 // Subtracting the no-finger frame removes the sensor's fixed pattern, which is
 // as strong as the ridges themselves; subtracting the 7 x 7 local mean removes
 // the slow pressure and coverage shading and keeps the ridges (period about
-// seven samples). They are mapped around 128 with a gain set by their RMS,
-// ridges bright as on the FocalTech path. Two no-finger frames differ by an
-// RMS of about 4 counts and a finger gives about 100: a plain percentile
-// stretch would turn that noise into texture that passes the quality gate,
-// so frames under kMinRidgeRms are rejected first.
+// seven samples). A finger's load also weakens the fixed pattern under it, so
+// that difference keeps a share of the pattern, the same in every frame,
+// which lets unrelated frames correlate; its projection on the base's own
+// high-passed pattern (up to half of it) is removed. That needs a base without
+// a finger trace: see Transport::status(). The ridges are mapped around 128
+// with a gain set by their RMS, bright as on the FocalTech path. Two no-finger
+// frames differ by an RMS of about 4 counts and a finger gives about 100: a
+// plain percentile stretch would turn that noise into texture that passes the
+// quality gate, so frames under kMinRidgeRms are rejected first.
 bool decodeGoodix(const uint16_t* raw, const uint16_t* base, Gaokun3Frame* frame) {
     constexpr int w = kGoodix.width, h = kGoodix.height;
     constexpr double kGain = 50;
     if (!base) return rejectedFrame("no base frame");
     if (!goodixInRange(raw) || !goodixInRange(base)) return rejectedFrame("sample range");
-    std::vector<double> hp;
+    std::vector<double> hp, pattern;
     double rms = goodixHighPass(raw, base, &hp);
     if (rms < kMinRidgeRms) return rejectedFrame("no ridge signal");
+    if (goodixHighPass(nullptr, base, &pattern) > 1.0) {
+        double dot = 0, norm = 0;
+        for (size_t i = 0; i < hp.size(); ++i) {
+            dot += hp[i] * pattern[i];
+            norm += pattern[i] * pattern[i];
+        }
+        if (dot > 0) {
+            const double share = std::min(0.5, dot / norm);
+            double sum2 = 0;
+            for (size_t i = 0; i < hp.size(); ++i) {
+                hp[i] -= share * pattern[i];
+                sum2 += hp[i] * hp[i];
+            }
+            rms = std::sqrt(sum2 / hp.size());
+            if (rms < kMinRidgeRms) return rejectedFrame("no ridge signal");
+        }
+    }
     *frame = Gaokun3Frame{};
     frame->width = w;
     frame->height = h;

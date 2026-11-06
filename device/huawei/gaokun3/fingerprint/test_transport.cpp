@@ -168,15 +168,14 @@ int main() {
       // The first frame of a session is retaken soon; later ones last 60 s.
       nowMs += 5000; assert(t.status(&finger) && captures==4);
       nowMs += 5000; assert(t.status(&finger) && captures==4);
-      // Every lift-off retakes it.
+      // A lift-off does not retake it (the finger's trace would be in it).
       statusFinger=1; assert(t.status(&finger) && finger && captures==4);
-      statusFinger=0; assert(t.status(&finger) && !finger && captures==5);
-      assert(t.status(&finger) && captures==5);
+      statusFinger=0; assert(t.status(&finger) && !finger && captures==4);
+      nowMs += 55000; assert(t.status(&finger) && captures==5);
       // Rejected candidates are retried every 5 s; the third, 10 s after the
       // first, replaces the base anyway.
       acceptBase=false;
-      statusFinger=1; assert(t.status(&finger));
-      statusFinger=0; assert(t.status(&finger) && captures==6);
+      nowMs += 60000; assert(t.status(&finger) && captures==6);
       nowMs += 4000; assert(t.status(&finger) && captures==6);
       nowMs += 1000; assert(t.status(&finger) && captures==7);
       nowMs += 5000; assert(t.status(&finger) && captures==8);

@@ -14,7 +14,9 @@
 namespace gaokun3 {
 using namespace std::chrono_literals;
 // The Goodix fixed pattern follows temperature: retake the no-finger frame
-// this often while no finger is present, and after every lift-off.
+// this often while no finger is present. Not at lift-off: a frame taken just
+// after the finger leaves still carries its trace, and decodeGoodix() would
+// then take the same finger's ridges out of the next capture.
 constexpr int64_t kBaseRefreshMs = 60000;
 // Try again this soon after a rejected candidate (a finger close to the key),
 // and after a session's first frame, which nothing could be checked against.
@@ -117,7 +119,7 @@ bool Transport::start() {
     return true;
 }
 void Transport::clearBase() {
-    base_.clear(); baseMs_ = 0; fingerSeen_ = false; baseRejects_ = 0; firstRejectMs_ = 0;
+    base_.clear(); baseMs_ = 0; baseRejects_ = 0; firstRejectMs_ = 0;
 }
 bool Transport::stop() {
     if (poisoned_) return false;
@@ -143,9 +145,7 @@ bool Transport::status(uint8_t* value) {
     if (ioctl(fd_,GAOKUN3_FPCMD_IOC_GET_FINGER_STATUS,value)) return false;
     if (profile_->sensor != Sensor::kGoodix) return true;
     // Goodix reports physical presence: take the no-finger frame while clear.
-    const bool lifted = fingerSeen_ && !*value;
-    fingerSeen_ = *value;
-    if (!*value && (base_.empty() || lifted || boottimeMs() - baseMs_ >= kBaseRefreshMs))
+    if (!*value && (base_.empty() || boottimeMs() - baseMs_ >= kBaseRefreshMs))
         return refreshBase();
     return true;
 }
