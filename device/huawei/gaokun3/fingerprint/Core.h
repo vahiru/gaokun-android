@@ -47,7 +47,11 @@ bool decode(const uint8_t* encrypted, Gaokun3Frame* frame);
 bool decodeGoodix(const uint16_t* raw, const uint16_t* base, Gaokun3Frame* frame);
 // Goodix: true if a no-finger candidate may replace the current base.
 bool goodixBaseUsable(const uint16_t* candidate, const uint16_t* current);
+// Sum of the two best gaokun3_match_score() values over a finger's frames.
 float score(const Gaokun3Frame& probe, const Frames& enrolled);
+// A finger is accepted at this score. It lies just above the largest score
+// any other finger reached in offline comparisons of real Goodix captures.
+constexpr float kMatchThreshold = 33.0f;
 
 // Failure count is persisted in Store. Runtime deadlines use a monotonic clock.
 // Restarting the HAL at a timed boundary imposes another 30 seconds, never less.

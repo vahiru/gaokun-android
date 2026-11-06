@@ -402,17 +402,22 @@ class Session final : public BnSession {
                     attempted = true;
                     ++usableProbes;
                     if (pressStart == Clock::time_point{}) pressStart = Clock::now();
+                    // Report the best scoring finger, not the first one over
+                    // the threshold.
+                    int32_t bestId = -1;
+                    float bestScore = 0;
                     for (auto& e : store_.enrollments) {
                         if (cancel || closed_) break;
-                        if (gaokun3::score(frame,e.frames) >= 12.0f) {
-                            if (cancel || closed_) break;
-                            store_.failures = 0;
-                            if (!store_.save()) { error(Error::UNABLE_TO_PROCESS); return; }
-                            lockout_->reset(); clearLockoutTimer();
-                            cb_->onAcquired(AcquiredInfo::GOOD,0);
-                            // Empty token: no fabricated MAC, SID or crypto authorization.
-                            cb_->onAuthenticationSucceeded(e.id,Hat{}); return;
-                        }
+                        const float s = gaokun3::score(frame,e.frames);
+                        if (s > bestScore) { bestScore = s; bestId = e.id; }
+                    }
+                    if (bestScore >= gaokun3::kMatchThreshold && !cancel && !closed_) {
+                        store_.failures = 0;
+                        if (!store_.save()) { error(Error::UNABLE_TO_PROCESS); return; }
+                        lockout_->reset(); clearLockoutTimer();
+                        cb_->onAcquired(AcquiredInfo::GOOD,0);
+                        // Empty token: no fabricated MAC, SID or crypto authorization.
+                        cb_->onAuthenticationSucceeded(bestId,Hat{}); return;
                     }
                 }
             }

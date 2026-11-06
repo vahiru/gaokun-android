@@ -173,16 +173,20 @@ bool goodixBaseUsable(const uint16_t* candidate, const uint16_t* current) {
 
 float score(const Gaokun3Frame& probe, const Frames& enrolled) {
     auto p = gaokun3_feature_extract(&probe);
-    float best = 0;
-    if (p.n_feats >= 6) for (const auto& frame : enrolled) {
+    // A probe usually overlaps several frames of its finger, while a chance
+    // alignment rarely repeats: the two best frames count together.
+    float best = 0, second = 0;
+    if (p.n_feats > 0) for (const auto& frame : enrolled) {
         // Frames of another geometry never come from this sensor.
         if (frame.width != probe.width || frame.height != probe.height) continue;
         auto t = gaokun3_feature_extract(&frame);
-        if (t.n_feats >= 6) best = std::max(best, gaokun3_match_score(&p, &t));
+        const float s = gaokun3_match_score(&p, &t);
+        if (s > best) { second = best; best = s; }
+        else if (s > second) second = s;
         gaokun3_feature_set_free(&t);
     }
     gaokun3_feature_set_free(&p);
-    return best;
+    return best + second;
 }
 
 static void put(std::vector<uint8_t>& b, uint64_t v, unsigned bytes) {

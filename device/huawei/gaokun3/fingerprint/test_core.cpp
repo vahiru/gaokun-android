@@ -84,7 +84,7 @@ int main() {
     auto same = score(e.frames[0],e.frames);
     auto other = score(synthetic(400),e.frames);
     std::cout << "Synthetic match scores: same=" << same << " other=" << other << '\n';
-    assert(same >= 12 && other < 12);
+    assert(same >= kMatchThreshold && other < kMatchThreshold);
     Gaokun3Frame flat{}; flat.width = kFocalTech.width; flat.height = kFocalTech.height;
     assert(!gaokun3_quality_check(&flat,nullptr,nullptr));
     auto fs = gaokun3_feature_extract(&flat); assert(fs.n_feats == 0); gaokun3_feature_set_free(&fs);
@@ -108,7 +108,7 @@ int main() {
         plain[i*2] = value & 255; plain[i*2+1] = value >> 8;
     }
     encrypt(); assert(decode(cipher.data(),&flat));
-    assert(score(flat,e.frames) >= 12); // AES, LE16 layout and inverted scaling agree.
+    assert(score(flat,e.frames) >= kMatchThreshold); // AES, LE16 layout and inverted scaling agree.
     plain.fill(255); encrypt(); assert(!decode(cipher.data(),&flat));
     Lockout tracker;
     assert(tracker.remaining(5,1000) == 30000);
@@ -157,7 +157,7 @@ int main() {
     // A frame of the wrong geometry is never saved or matched.
     g.enrollments[0].frames[3] = synthetic(9); assert(!g.save());
     assert(score(synthetic(50,kGoodix),e.frames) == 0);
-    assert(score(ge.frames[0],ge.frames) >= 12);
+    assert(score(ge.frames[0],ge.frames) >= kMatchThreshold);
 
     // Goodix decode: needs a no-finger frame, rejects frames without ridges.
     auto base = goodixBase(1);
@@ -167,7 +167,7 @@ int main() {
     assert(decodeGoodix(finger.data(),base.data(),&gf));
     assert(gf.width == 36 && gf.height == 160);
     assert(decodeGoodix(again.data(),base.data(),&gf2));
-    Frames gframes; gframes.fill(gf2); assert(score(gf,gframes) >= 12);
+    Frames gframes; gframes.fill(gf2); assert(score(gf,gframes) >= kMatchThreshold);
     assert(!decodeGoodix(empty.data(),base.data(),&gf));       // noise only
     assert(!decodeGoodix(finger.data(),nullptr,&gf));           // no base yet
     auto bad = finger; bad[17] = 4096; assert(!decodeGoodix(bad.data(),base.data(),&gf));
