@@ -451,7 +451,7 @@ class Session final : public BnSession {
                         // learned frame or failures to clear nothing changed.
                         bool changed = store_.failures != 0;
                         for (auto& e : store_.enrollments)
-                            if (e.id == bestId && gaokun3::shouldLearn(probe,e,bestScore,bestFrame)) {
+                            if (e.id == bestId && gaokun3::shouldLearn(probe,e,bestScore,bestFrame,threads)) {
                                 gaokun3::learn(e,frame);
                                 changed = true;
                             }

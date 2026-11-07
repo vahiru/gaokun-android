@@ -127,7 +127,8 @@ constexpr float kCorroboratedScore = 22.0f;
 // accepted 10 of 34 times and 8 more of its frames learned; with the rule none
 // was learned, while the index learned 26 instead of 30 frames over 57 of its
 // own presses and lost one accept.
-bool shouldLearn(const FrameFeatures& probe, const Enrollment& finger, float fingerScore, float bestFrame);
+bool shouldLearn(const FrameFeatures& probe, const Enrollment& finger, float fingerScore, float bestFrame,
+                 unsigned threads = 1);
 // Appends an authenticated probe, replacing the oldest learned frame when the
 // finger is full. Enrolment frames are kept; a feature cache only this finger
 // holds is updated with the new frame alone.

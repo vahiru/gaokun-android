@@ -214,10 +214,10 @@ FrameFeatures::~FrameFeatures() { gaokun3_feature_set_free(&fs_); }
 // skin count together, once the best is beyond chance itself. Two frames of
 // the same spot (learned frames gather where the finger unlocks) would count
 // one chance match twice.
-static float scoreFeatures(const Gaokun3FeatureSet& p, const std::vector<const Gaokun3FeatureSet*>& frames,
-                           float* bestFrame, unsigned threads = 1) {
-    constexpr size_t kCandidates = 6;
-    // Frames of another geometry never come from this sensor (score -1).
+// The probe against every frame, on up to `threads` threads. Frames of another
+// geometry never come from this sensor (score -1).
+static std::vector<float> frameScores(const Gaokun3FeatureSet& p, const std::vector<const Gaokun3FeatureSet*>& frames,
+                                      unsigned threads) {
     std::vector<float> scores(frames.size(), -1.0f);
     auto work = [&](unsigned t) {
         for (size_t k = t; k < frames.size(); k += threads)
@@ -229,6 +229,13 @@ static float scoreFeatures(const Gaokun3FeatureSet& p, const std::vector<const G
     for (unsigned t = 1; t < threads; ++t) jobs.push_back(std::async(std::launch::async, work, t));
     work(0);
     for (auto& j : jobs) j.get();
+    return scores;
+}
+
+static float scoreFeatures(const Gaokun3FeatureSet& p, const std::vector<const Gaokun3FeatureSet*>& frames,
+                           float* bestFrame, unsigned threads = 1) {
+    constexpr size_t kCandidates = 6;
+    const std::vector<float> scores = frameScores(p, frames, threads);
     std::vector<std::pair<float, size_t>> ranked;
     for (size_t k = 0; k < frames.size(); ++k)
         if (scores[k] >= 0) ranked.emplace_back(scores[k], k);
@@ -277,12 +284,15 @@ float score(const FrameFeatures& probe, const Enrollment& finger, float* bestFra
     return scoreFeatures(probe.get(), frames, bestFrame, threads);
 }
 
-bool shouldLearn(const FrameFeatures& probe, const Enrollment& finger, float fingerScore, float bestFrame) {
+bool shouldLearn(const FrameFeatures& probe, const Enrollment& finger, float fingerScore, float bestFrame,
+                 unsigned threads) {
     if (fingerScore < kLearnThreshold || bestFrame >= kRepeatScore || finger.frames.size() < kStages) return false;
     buildFeatures(finger);
     std::vector<const Gaokun3FeatureSet*> enrolled;
     for (size_t i = 0; i < kStages; ++i) enrolled.push_back(&(*finger.features)[i]->get());
-    return scoreFeatures(probe.get(), enrolled, nullptr) >= kCorroboratedScore;
+    // Below kCorroboratedScore no second frame counts, so the best one decides.
+    const auto scores = frameScores(probe.get(), enrolled, threads);
+    return *std::max_element(scores.begin(), scores.end()) >= kCorroboratedScore;
 }
 
 EnrollFrame checkEnrollFrame(const Gaokun3Frame& frame, const Frames& taken) {
