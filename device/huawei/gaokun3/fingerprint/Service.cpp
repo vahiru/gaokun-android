@@ -324,6 +324,8 @@ class Session final : public BnSession {
         if (kind == 2 && store_.enrollments.empty()) { error(Error::UNABLE_TO_PROCESS); return; }
         if (kind == 2 && checkLockout()) return;
         if (!transport_.start()) { error(Error::HW_UNAVAILABLE); return; }
+        // Feature caches are built while the finger is still on its way.
+        if (kind == 2) gaokun3::prepare(store_.enrollments);
         gaokun3::Enrollment pending{};
         pending.id = 1;
         for (auto& e : store_.enrollments) {
@@ -427,15 +429,19 @@ class Session final : public BnSession {
                         if (s > bestScore) { bestScore = s; bestId = store_.enrollments[i].id; bestFrame = frameScore; }
                     }
                     if (bestScore >= gaokun3::kMatchThreshold && !cancel && !closed_) {
+                        lockout_->reset(); clearLockoutTimer();
+                        cb_->onAcquired(AcquiredInfo::GOOD,0);
+                        // Empty token: no fabricated MAC, SID or crypto authorization.
+                        cb_->onAuthenticationSucceeded(bestId,Hat{});
+                        // The unlock does not wait for learning or the disk. If
+                        // this save fails, the failure count stays as stored:
+                        // a lockout may come early, never late.
                         if (bestScore >= gaokun3::kLearnThreshold && bestFrame < gaokun3::kRepeatScore)
                             for (auto& e : store_.enrollments)
                                 if (e.id == bestId) gaokun3::learn(e,frame);
                         store_.failures = 0;
-                        if (!store_.save()) { error(Error::UNABLE_TO_PROCESS); return; }
-                        lockout_->reset(); clearLockoutTimer();
-                        cb_->onAcquired(AcquiredInfo::GOOD,0);
-                        // Empty token: no fabricated MAC, SID or crypto authorization.
-                        cb_->onAuthenticationSucceeded(bestId,Hat{}); return;
+                        if (!store_.save()) LOG(ERROR) << "Fingerprint database not saved after authentication";
+                        return;
                     }
                 }
             }

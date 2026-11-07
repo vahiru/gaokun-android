@@ -56,10 +56,12 @@ class FrameFeatures {
 struct Enrollment {
     int32_t id;
     Frames frames;
-    // Features of frames, built by score() on first use and dropped by
-    // learn(); one thread at a time may score a given finger.
-    mutable std::shared_ptr<const std::vector<std::unique_ptr<FrameFeatures>>> features;
+    // Features of frames, built by score() or prepare() on first use and kept
+    // in step by learn(); one thread at a time may use a given finger.
+    mutable std::shared_ptr<std::vector<std::unique_ptr<FrameFeatures>>> features;
 };
+// Builds the missing feature caches of the fingers, one thread per finger.
+void prepare(const std::vector<Enrollment>& fingers);
 int64_t randomId();
 // FocalTech: decrypt and normalise one capture.
 bool decode(const uint8_t* encrypted, Gaokun3Frame* frame);
@@ -101,7 +103,8 @@ constexpr float kSameSpotScore = 25.0f;
 // finger, and none with this rule; genuine rates fell by 1 to 2 points.
 constexpr float kCorroboratedScore = 22.0f;
 // Appends an authenticated probe, replacing the oldest learned frame when the
-// finger is full. Enrolment frames are kept.
+// finger is full. Enrolment frames are kept; a feature cache only this finger
+// holds is updated with the new frame alone.
 void learn(Enrollment& e, const Gaokun3Frame& probe);
 // Enrolment takes a frame only if ridges cover at least kEnrollCoverage of it
 // (gaokun3_quality_check) and it does not repeat a frame already taken

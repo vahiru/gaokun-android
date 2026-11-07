@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstring>
 #include <fcntl.h>
+#include <future>
 #include <memory>
 #include <openssl/evp.h>
 #include <openssl/rand.h>
@@ -234,12 +235,22 @@ float score(const Gaokun3Frame& probe, const Frames& enrolled, float* bestFrame)
     return scoreFeatures(p.get(), frames, bestFrame);
 }
 
+static void buildFeatures(const Enrollment& finger) {
+    if (finger.features) return;
+    auto built = std::make_shared<std::vector<std::unique_ptr<FrameFeatures>>>();
+    for (const auto& frame : finger.frames) built->push_back(std::make_unique<FrameFeatures>(frame));
+    finger.features = std::move(built);
+}
+
+void prepare(const std::vector<Enrollment>& fingers) {
+    std::vector<std::future<void>> jobs;
+    for (const auto& f : fingers)
+        if (!f.features) jobs.push_back(std::async(std::launch::async, [&f] { buildFeatures(f); }));
+    for (auto& j : jobs) j.get();
+}
+
 float score(const FrameFeatures& probe, const Enrollment& finger, float* bestFrame) {
-    if (!finger.features) {
-        auto built = std::make_shared<std::vector<std::unique_ptr<FrameFeatures>>>();
-        for (const auto& frame : finger.frames) built->push_back(std::make_unique<FrameFeatures>(frame));
-        finger.features = std::move(built);
-    }
+    buildFeatures(finger);
     std::vector<const Gaokun3FeatureSet*> frames;
     for (const auto& f : *finger.features) frames.push_back(&f->get());
     return scoreFeatures(probe.get(), frames, bestFrame);
@@ -256,9 +267,15 @@ EnrollFrame checkEnrollFrame(const Gaokun3Frame& frame, const Frames& taken) {
 
 void learn(Enrollment& e, const Gaokun3Frame& probe) {
     if (e.frames.size() < kStages) return;
-    e.features.reset();
-    if (e.frames.size() >= kMaxFrames) e.frames.erase(e.frames.begin() + kStages);
+    // A cache shared with a copy of the finger, or out of step, is rebuilt.
+    if (e.features && (e.features.use_count() != 1 || e.features->size() != e.frames.size()))
+        e.features.reset();
+    if (e.frames.size() >= kMaxFrames) {
+        e.frames.erase(e.frames.begin() + kStages);
+        if (e.features) e.features->erase(e.features->begin() + kStages);
+    }
     e.frames.push_back(probe);
+    if (e.features) e.features->push_back(std::make_unique<FrameFeatures>(probe));
 }
 
 static void put(std::vector<uint8_t>& b, uint64_t v, unsigned bytes) {

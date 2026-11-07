@@ -106,11 +106,19 @@ int main() {
         float f1 = 0, f2 = 0;
         assert(score(probe,cached,&f1) == score(e.frames[2],e.frames,&f2) && f1 == f2);
         assert(cached.features && cached.features->size() == e.frames.size());
+        // learn() keeps a cache only this finger holds in step with its frames
         const auto fresh = synthetic(900);
         learn(cached,fresh);
-        assert(!cached.features);
+        assert(cached.features && cached.features->size() == kStages+1);
         const FrameFeatures again(fresh);
-        assert(score(again,cached) >= kMatchThreshold && cached.features->size() == kStages+1);
+        assert(score(again,cached) == score(fresh,cached.frames) && score(again,cached) >= kMatchThreshold);
+        // ...and drops one shared with a copy instead of changing both
+        Enrollment copy = cached;
+        learn(cached,synthetic(901));
+        assert(!cached.features && copy.features && copy.features->size() == kStages+1);
+        std::vector<Enrollment> fingers{cached};
+        prepare(fingers);
+        assert(fingers[0].features && fingers[0].features->size() == kStages+2);
     }
     float sameFrame = 0;
     auto same = score(e.frames[0],e.frames,&sameFrame);
