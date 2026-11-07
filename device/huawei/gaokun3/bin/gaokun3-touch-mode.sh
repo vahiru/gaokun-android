@@ -3,10 +3,10 @@
 #
 # 后端是 himax hx83121a 驱动自己暴露的算法参数
 # （/sys/bus/spi/devices/spi0.0/algo/，共 54 项），运行期可改、立刻生效。
-# 这里动六项（原来只动三项，取自上游 EGoTouchRev 的 game_preset；hand_enabled 来自 patches/0082）：
+# 这里动六项（原来只动三项，取自上游 EGoTouchRev 的 game_preset；hand_enabled 来自 patches/kernel/input/0013）：
 #   track_smoothing      基于速度预测的坐标平滑。开着更稳，代价是多一层延迟。
 #                        实现是 x = (3*旧 + 新)/4，稳态滞后 3 帧 ≈ 25 ms —— 不小。
-#                        ★ 两版都给 0：驱动对上报的位置做一欧滤波（track_filter_*，patches/0120 加入、0122 起默认打开），
+#                        ★ 两版都给 0：驱动对上报的位置做一欧滤波（track_filter_*，patches/kernel/input/0017 加入、0019 起默认打开），
 #                        慢时平滑、快时几乎不滞后；再叠这层固定平滑只会多出滞后。
 #   track_start_debounce touch_active 要连续几帧才确认。2 帧 ≈ 按下多 1 帧（8 ms）延迟，
 #                        换来的是噪声不那么容易变成一次"按下"。
@@ -22,7 +22,7 @@
 #        jump=0     手指在屏 10.3 s / 路径 4.07 m → 系统收到 **6 条**，0 碎片
 #    一次连续滑动被切成十几次独立触摸：滑动惯性反复清零（列表甩不动）、手势被判取消，
 #    而沿途多出来的那些"按下"**就是用户报的"幽灵触摸"**。两个症状同一个根因。
-#    内核 `patches/0038` 把判据改成【与预测位置的偏差】之后这个功能才真正可用；
+#    内核 `patches/kernel/input/0002` 把判据改成【与预测位置的偏差】之后这个功能才真正可用；
 #    在带 0038 的内核上实机验过之前，**这里保持 0**。说明见 `scripts/touch/README.md`。
 #
 # ⚠️ 只动这几项是【故意的】。其余参数（基线 / CMF 共模滤波 / 检测门限 / 掌压 / 边缘补偿）
@@ -49,7 +49,7 @@ done
 
 fail=0
 # ★ debounce_base 与 track_start_debounce 一起降；pressure_enabled 在轴存在时必须为 1
-#   （否则驱动报常数 1/4095，每个触点都成"针尖"，比没有轴还糟 —— patches/0047 起默认已跟着轴走，这里兜底）。
+#   （否则驱动报常数 1/4095，每个触点都成"针尖"，比没有轴还糟 —— patches/kernel/input/0010 起默认已跟着轴走，这里兜底）。
 for kv in "track_smoothing=$SMOOTH" "track_start_debounce=$DEB" "debounce_base=$DEB" "track_jump_dist2=$JUMP" "pressure_enabled=1"; do
     k="${kv%%=*}"; v="${kv##*=}"
     if ! echo "$v" > "$ALGO/$k" 2>/dev/null; then
@@ -60,7 +60,7 @@ for kv in "track_smoothing=$SMOOTH" "track_start_debounce=$DEB" "debounce_base=$
     [ "$got" = "$v" ] || { log -t gaokun3-touch "$k 回读 $got != 期望 $v"; fail=1; }
 done
 
-# ★ hand_enabled 单独写：没有 patches/0082 的内核没有这个节点，跳过而不算失败。
+# ★ hand_enabled 单独写：没有 patches/kernel/input/0013 的内核没有这个节点，跳过而不算失败。
 #   daily 也要显式写 1，否则从 game 切回来时它还停在 0。
 if [ -e "$ALGO/hand_enabled" ]; then
     if ! echo "$HAND" > "$ALGO/hand_enabled" 2>/dev/null ||

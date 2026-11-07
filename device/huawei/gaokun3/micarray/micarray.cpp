@@ -1,6 +1,6 @@
 /*
  * Microphone array processing for the Huawei MateBook E Go (gaokun3), loaded by the audio HAL's
- * capture hook (patches/0206, ro.vendor.audio.primary.capture_hook in device.mk).  See README.md.
+ * capture hook (patches/android/hardware-interfaces/0010, ro.vendor.audio.primary.capture_hook in device.mk).  See README.md.
  *
  * The built-in microphone stream is captured as four channels, decimator n = DMICn, instead of
  * two (DMIC0 and DMIC1).  The three microphones along the top edge -- DMIC1, DMIC3, DMIC2 from

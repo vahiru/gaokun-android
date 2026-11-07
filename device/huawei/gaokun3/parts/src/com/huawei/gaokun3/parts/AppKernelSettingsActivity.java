@@ -1,5 +1,5 @@
 /*
- * Kernel version reported to apps (patches/0085), in Settings → System.
+ * Kernel version reported to apps (patches/kernel/core/0008), in Settings → System.
  *
  * Only writes two persist.sys.* properties. At the next boot init.gaokun3.rc hands
  * persist.sys.gaokun3.app_kernel_release to the kernel before zygote starts, and the kernel

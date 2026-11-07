@@ -9,7 +9,7 @@
 #
 # ★ 不变量：wakelock `gaokun3_usbrole` 一直持有，【除非已确认 role 真的是 host】。
 #   任何失败路径都保持持有 → 结果只是"不挂起"，绝不会"带着 device 模式去挂起"。
-#   它只约束这个脚本自己：vreg_l9d 常开（patches/0086）以后 device 模式挂起不再复位，
+#   它只约束这个脚本自己：vreg_l9d 常开（patches/kernel/dts/0014）以后 device 模式挂起不再复位，
 #   USB 端口 HAL（usb/Follow.h）按对端切角色时不看屏幕，也不拿这把锁。
 #
 # ⚠️ dwc3 的模式切换是【异步】的（dwc3_set_mode 只 queue_work），
@@ -51,7 +51,7 @@ BROKEN=vendor.gaokun3.usbrole.broken
 #     symlink 已存在、写 UDC 失败 —— host 模式下 a600000.usb 这个 UDC 根本不存在，configfs 的 gadget 驱动是
 #     match_existing_only（linux v7.2.9 drivers/usb/gadget/configfs.c:1985），注册时找不到 UDC 就返回 -EBUSY
 #     并注销驱动（drivers/usb/gadget/udc/core.c:1760-1771），udc_name 随即清空（configfs.c:295-303）⇒ 不会挂起等待，下一秒再来。
-#     patches/0112 起写 UDC 不再失败：驱动挂起等 UDC 出现，再写同名就重新注册；adbd 照样每秒重开 functionfs、重写描述符。
+#     patches/kernel/ec-usb/0012 起写 UDC 不再失败：驱动挂起等 UDC 出现，再写同名就重新注册；adbd 照样每秒重开 functionfs、重写描述符。
 # 上游早就留了开关，正是为这种情况：usb.cpp:728-740 —— "When the device is acting as a USB host, we'll be unable
 #   to bind to the USB gadget…"，读 sys.usb.adb.disabled，为真就在 open_functionfs 之后停在 PropertyMonitor 里等它
 #   变回假（:751-755）；init.usb.rc:23-24（refs/lineage-system-core/rootdir/）把 vendor.sys.usb.adb.disabled 拷过去。

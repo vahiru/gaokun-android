@@ -28,12 +28,12 @@ under other licenses; those keep their own terms.
       device/huawei/gaokun3/boot_control/{BootControl.cpp,BootControl.h,main.cpp}
                                               (from hardware/interfaces/boot)
       device/huawei/gaokun3/mesa/gaokun.toml  (Copyright 2024 Google LLC)
-* patches/ that apply to the Linux kernel:
+* patches/kernel/ that apply to the Linux kernel:
       **GNU General Public License v2.0 only** — they are derivative works of
       Linux and cannot be relicensed. Relicensing this project to GPL-3 does
       not (and must not) change them. They are distributed alongside, not
       combined with, the GPL-3 userspace.
-* patches/ that apply to Mesa:
+* patches/mesa/ that apply to Mesa:
       MIT, matching upstream Mesa.
 * fcitx5-android 0.1.3 (Chinese input method, preinstalled in the binary
   releases from 1.0; the APK is not contained in this repository):

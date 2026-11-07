@@ -64,7 +64,7 @@ on property:persist.sys.gaokun3.allow_suspend=1
 on property:persist.sys.gaokun3.allow_suspend=0
     setprop persist.vendor.gaokun3.allow_suspend 0
 
-# Kernel release reported to apps (patches/0085, Settings → System → Kernel version spoofing).
+# Kernel release reported to apps (patches/kernel/core/0008, Settings → System → Kernel version spoofing).
 # load-bpf-programs is the first trigger after post-fs-data loads the persist props, and it
 # runs before zygote-start, so no app ever sees another value. Unset or off: apps see the real
 # release. A value the kernel refuses fails the write and has the same result.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 声学回环对照（patches/0069，见 docs/dev/audio-video.md）：镜像自带的 HAL 与另一份 HAL（bind-mount）各跑同一套，
+# 声学回环对照（patches/android/hardware-interfaces/0006，见 docs/dev/audio-video.md）：镜像自带的 HAL 与另一份 HAL（bind-mount）各跑同一套，
 # 用 gaokun3-loopback 量"应用时间戳预测的出声时刻 → 麦克风实际收到"的偏移 e，看它在开流之间、卡顿前后稳不稳。
 # ⚠️ 会出声（扬声器，每 0.5 s 一声 2 ms 的 3 kHz 短音，默认 -24 dBFS × 当前媒体音量）。宿舍环境：要有人在场、同意，并显式 LOUD=1。
 #

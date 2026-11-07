@@ -3,7 +3,7 @@
 # ⚠️ 已退役（2026-08-20，M6）。本文件【不再随镜像安装】。
 #
 # 它存在的理由是主线 sc8280xp.dtsi 的 CPU 温区没有任何 cooling device。
-# 那个缺口现在由 patches/0009-arm64-dts-sc8280xp-add-cpu-cooling-maps.patch
+# 那个缺口现在由 patches/kernel/dts/0002-arm64-dts-sc8280xp-add-cpu-cooling-maps.patch
 # 在 DTS 里根治了：8 个 cpuN-thermal 各加一条 85C passive trip 并绑到本簇的
 # cpufreq cooling device（实机验证 cdev 0->1、trip 1->2）。
 #

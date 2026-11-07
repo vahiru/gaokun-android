@@ -96,7 +96,7 @@ check_cb() {
 #     · 其它（active / resuming / suspending）或读不到 ⇒ 照旧 0.1 秒一轮。**GPU 一上电立刻回到 10 Hz**，
 #       不在刚上电的窗口里放宽间隔（v1.0-plan LIVE-4）。
 #   代价：GPU 从 suspended 恢复后、CFCFG 被内核重新置上的那一刻起，最多要等约 1 秒才清掉（原来约 0.1 秒）。
-#   这一秒里若真出 GPU 页错误会 stall 到被清掉为止；patches/0004 v3 之后实测 fault 为 0（smmustall 心跳"抓 fault=0"）。
+#   这一秒里若真出 GPU 页错误会 stall 到被清掉为止；patches/mesa/0001 v3 之后实测 fault 为 0（smmustall 心跳"抓 fault=0"）。
 #   节点路径与标签：1.0.0-dev.1 实机 /sys/devices/platform/soc@0/3d00000.gpu/power/runtime_status，
 #   u:object_r:sysfs:s0，熄屏读到 suspended（sepolicy/gaokun3_scripts.te 给了读权限）。
 #   上机判据：熄屏时 ns_last_pid 10 秒的增量比改前（约 280）明显变小、ps 里本进程累计时间基本不涨；

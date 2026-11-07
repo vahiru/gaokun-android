@@ -147,7 +147,7 @@ gen_kernel_sources() {
 
     # 补丁顺序只有一个出处：kernel-apply-patches.sh 的 KPATCHES 数组。不在这里另抄一份 —— 抄的那份一定会漂。
     local KP PIN KURL p
-    KP=$(sed -n '/^KPATCHES=(/,/^)/p' "$AP" | sed -n 's/^[[:space:]]\{1,\}\([0-9]\{4\}-[^[:space:]]*\).*/\1/p')
+    KP=$(sed -n '/^KPATCHES=(/,/^)/p' "$AP" | sed -n 's/^[[:space:]]\{1,\}\(kernel\/[a-z-]*\/[0-9]\{4\}-[^[:space:]]*\).*/\1/p')
     [ -n "$KP" ] || die "源码清单：从 $AP 解析不出 KPATCHES"
     PIN=$(sed -n 's/^RESUKISU_PIN=\([0-9a-f]\{40\}\).*/\1/p' "$RS")
     KURL=$(sed -n 's/^RESUKISU_URL=\([^[:space:]]*\).*/\1/p' "$RS")

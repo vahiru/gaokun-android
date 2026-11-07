@@ -51,7 +51,7 @@ else
     [ "$o" = "media:camera" ] && ok "${DEC}（qcom-iris-decoder）属主 ${o}" || bad "${DEC} 属主 [${o}]，应为 media:camera"
 fi
 v=$($A shell 'cat /sys/module/qcom_iris/parameters/venus_compat_gfmt 2>/dev/null' | tr -d '\r')
-echo "  [INFO] qcom_iris.venus_compat_gfmt = [${v}]（Y = 与 venus 同一条路，patches/0060）"
+echo "  [INFO] qcom_iris.venus_compat_gfmt = [${v}]（Y = 与 venus 同一条路，patches/kernel/iris/0003）"
 $A shell 'test -f /vendor/etc/seccomp_policy/android.hardware.media.c2-extended-seccomp_policy' \
     && ok "扩展 seccomp 策略已装" || bad "缺扩展 seccomp 策略（会在解码时 SIGSYS）"
 

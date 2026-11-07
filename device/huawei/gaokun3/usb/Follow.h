@@ -5,7 +5,7 @@
  *
  * The EC's UCSI gives the partner's presence, the power direction and PD, but
  * not its data role: it reports partner type UFP for everything. So UCSI
- * leaves usb_0's role switch alone (patches/0093), and the role comes from
+ * leaves usb_0's role switch alone (patches/kernel/ec-usb/0009), and the role comes from
  * electrical facts.
  *   - We supply power: the partner can only be a device (a USB drive, a
  *     keyboard, an unpowered hub). Switch to host at once.

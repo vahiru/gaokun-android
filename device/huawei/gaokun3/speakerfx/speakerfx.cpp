@@ -1,6 +1,6 @@
 /*
  * speakerfx.cpp -- libgaokunspeakerfx.so, the speaker processing behind the
- * audio HAL's playback hook (patches/0117).
+ * audio HAL's playback hook (patches/android/hardware-interfaces/0009).
  *
  * WHERE IT RUNS
  * The AIDL audio HAL (StreamPrimary) hands every playback block to

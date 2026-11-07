@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 真实游戏里的播放回归（patches/0069，见 docs/dev/audio-video.md）——【不出声】：媒体音量调 0（混音照走 HAL，只是内容为零），
+# 真实游戏里的播放回归（patches/android/hardware-interfaces/0006，见 docs/dev/audio-video.md）——【不出声】：媒体音量调 0（混音照走 HAL，只是内容为零），
 # 原版 HAL 与带补丁的 HAL（bind-mount，不刷机不重启）各跑一遍同样的剧本，比 AudioFlinger 自己的时间戳统计与 HAL 日志。
 #
 #   SER=<adb 序列号> bash scripts/audio/game-audio-check.sh <带补丁的 HAL 二进制> [包名，默认 moe.low.arc]

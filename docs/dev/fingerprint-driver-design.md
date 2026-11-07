@@ -26,11 +26,11 @@ Android FingerprintService
 | 决策 | 技术依据 |
 | --- | --- |
 | 走**旧QSEECOM**接口而非QTEE/SMCInvoke | SC8280XP位于主线`qcom_scm_qseecom_allowlist`中，实机`qcom_qseecom`与`uefisecapp`正常probe |
-| 移植samcday/Dawid的QSEECOM LOAD实现（`patches/0050`） | SMC参数布局与Windows `QcTrEE.sys`逆向结果逐字段一致 |
+| 移植samcday/Dawid的QSEECOM LOAD实现（`patches/kernel/fingerprint/0001`） | SMC参数布局与Windows `QcTrEE.sys`逆向结果逐字段一致 |
 | 单一secelf（`mdt_len=0`）整文件传入 | `fingerpr.mbn`已是合并后的单secelf，无需在内核内做mdt分段拼接 |
 | **将`qcom_scm`设备DMA掩码限制为32位** | 本机内存大于4 GiB且`dma-ranges`为40位，而QSEECOM LOAD的物理地址通过SMC32裸参数传递，超过4 GiB会被截断（实测32位DMA下镜像落于`0xec000000`） |
 | 按物理地址核对4 MiB对齐，且整段低于4 GiB | 不能假设虚拟地址和物理地址的对齐偏移相同；分配不满足时在LOAD之前就退出 |
-| 未注册listener回调时自动返回失败与轮数上限 | `patches/0050`的`service_listeners`对未认领的listener自动回填FAILURE并限制最多256轮（`-ELOOP`）；这只限制已经返回的SMC循环，单次SMC不返回时无法中断 |
+| 未注册listener回调时自动返回失败与轮数上限 | `patches/kernel/fingerprint/0001`的`service_listeners`对未认领的listener自动回填FAILURE并限制最多256轮（`-ELOOP`）；这只限制已经返回的SMC循环，单次SMC不返回时无法中断 |
 | 只发Windows客户端用到的命令 | Windows驱动的传输封装只有`0x8020`/`0x8021`/`0x8029`/`0x8031`四种；`0x8026`/`0x8027`/`0x802B`在该产品中没有调用，而且TA对应的工作区越界，不发送 |
 
 ## 3. 协议与驱动

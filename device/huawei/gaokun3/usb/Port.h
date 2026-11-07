@@ -13,7 +13,7 @@ constexpr char kUdcState[] = "/sys/class/udc/a600000.usb/state";
 constexpr char kAdapterName[] = "gaokun-ec-adapter";
 
 // The gadget's connection state for Android's UsbDeviceManager, in the
-// android_usb class that patches/0096 adds.
+// android_usb class that patches/kernel/ec-usb/0011 adds.
 constexpr char kGadgetState[] = "/sys/class/android_usb/android0/state";
 
 // Set to 1 when that class is missing: init.gaokun3.usb.rc then puts adb in
@@ -60,7 +60,7 @@ void RestartPullup();
 bool HasGadgetState();
 bool WriteGadgetState(const std::string& state, bool logError = true);
 
-// Whether the DT keeps vreg_l9d on (regulator-always-on, patches/0086).
+// Whether the DT keeps vreg_l9d on (regulator-always-on, patches/kernel/dts/0014).
 // Without it the controller must not be suspended in the device role (case
 // file #52). gaokun3-usbrole.sh guards that at screen off; this HAL, which
 // changes the role at any time, then leaves the role alone.

@@ -17,8 +17,8 @@
 #      device/huawei/gaokun3/mesa/hermetic/android/gfxstream_workaround.txt 一致
 #      （生成器原样把这个文件贴回去；上游改了它而我们没跟，会悄悄回退上游的改动）
 #   4. 打源码补丁（幂等）：scripts/mesa-a17/backports/*.patch（上游 mesa 的 9 个提交）
-#      + patches/0004（turnip ANB 延迟绑定 v3）+ patches/0130（turnip P010，上游 MR !45721）。
-#      ⚠️ 不打 patches/0005（已证伪）。
+#      + patches/mesa/0001（原 0004，turnip ANB 延迟绑定 v3）+ patches/mesa/0002（原 0130，turnip P010，上游 MR !45721）。
+#      ⚠️ 不打已退役的 0005（禁用 preemption，已证伪）。
 #   5. 删掉旧的生成 Android.bp（文件头带 "The Magma GPU Project" 的那些），重新生成
 #   6. postprocess.py：vulkan.freedreno 补 compile_multilib: "64"
 #   7. check-output.py：模块名闭合、turnip 用 msm 不用 kgsl、SP-HAL 依赖白名单、无绝对路径
@@ -34,8 +34,8 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$HERE/../.." && pwd)
 CFG=$REPO/device/huawei/gaokun3/mesa/hermetic/android
 BACKPORTS=$HERE/backports
-PATCH0004=$REPO/patches/0004-mesa-turnip-handle-anb-rebind-with-null-memory.patch
-PATCH0130=$REPO/patches/0130-mesa-turnip-support-p010.patch
+PATCH0004=$REPO/patches/mesa/0001-mesa-turnip-handle-anb-rebind-with-null-memory.patch
+PATCH0130=$REPO/patches/mesa/0002-mesa-turnip-support-p010.patch
 
 die() { echo "✗ $*" >&2; exit 1; }
 usage() { sed -n '2,12p' "$0" >&2; exit 2; }

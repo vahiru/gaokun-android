@@ -279,7 +279,7 @@ OUT="${1:?用法: $0 <kernel-out-dir>}"
 #      VIDEO_QCOM_CAMSS=m
 #   ★ 2026-09-14 第 15 个「=m 坑」：VIDEO_DW9714=m（后摄 OV13B10 的对焦马达）。它 =m 时
 #     ov13b10 的 lens-focus 永远等不到 vcm@c，v4l2-async 卡住 ⇒ 前后摄一个 subdev 节点都不出（#106）。
-#     后摄 OV13B10 本体也要 =y（上游驱动原本只有 ACPI 匹配，OF 匹配见 patches/0034）。
+#     后摄 OV13B10 本体也要 =y（上游驱动原本只有 ACPI 匹配，OF 匹配见 patches/kernel/camera/0003）。
 #   Android 不加载任何模块，所以 =m 等于不存在。
 #   （VIDEOBUF2_DMA_SG 不用手动开 —— CAMSS 会 select 它，跟着变 =y。）
 #
@@ -311,7 +311,7 @@ OUT="${1:?用法: $0 <kernel-out-dir>}"
     --enable SC_CAMCC_8280XP \
     --enable LEDS_GPIO
 
-# ★ 后摄闪光灯（#110，patches/0036）：LED 挂在 PMIC pmc8280c（PM8350C）的闪光模块 1+4 路，
+# ★ 后摄闪光灯（#110，patches/kernel/dts/0006）：LED 挂在 PMIC pmc8280c（PM8350C）的闪光模块 1+4 路，
 #   驱动 drivers/leds/flash/leds-qcom-flash.c（LEDS_QCOM_FLASH，依赖 LEDS_CLASS_FLASH）。
 #   GPIO93 那个 gpio-led 实测不亮，已从 DT 删掉。内核 #19 起带；这里断言是免得从干净树重建时
 #   悄悄丢掉 /sys/class/leds/white:flash（ROM 构建不会为此报错）。
@@ -479,13 +479,13 @@ OUT="${1:?用法: $0 <kernel-out-dir>}"
     --enable DEBUG_INFO_DWARF_TOOLCHAIN_DEFAULT --enable DEBUG_INFO_BTF \
     --enable USERFAULTFD
 
-# ─── 用户态 39 位地址窗口（patches/0078，issue #17 / #19 / #20；用户 2026-10-08 定进发版）───
+# ─── 用户态 39 位地址窗口（patches/kernel/core/0006，issue #17 / #19 / #20；用户 2026-10-08 定进发版）───
 # 页表仍 48 位，64 位进程默认拿到的地址压到 2^39 以下（与 Android GKI 的 39 位布局相同）。
 # 2026-10-08 A/B：英雄联盟手游 7.3.0.2813 在原内核 2 秒崩（il2cpp_init 写 0x10），开了它过 il2cpp_init。
 # 符号由 0078 引入 —— 补丁没打，这里会在 MUST_Y 断言上失败，而不是静默编出 48 位窗口。
 ./scripts/config --file "$OUT/.config" --enable ARM64_USER_MMAP_WINDOW_39
 
-# ★ 手写笔（M-Pencil，#26）：触摸从片驱动（patches/0079）。和主片 himax-spi 一样必须 =y
+# ★ 手写笔（M-Pencil，#26）：触摸从片驱动（patches/kernel/input/0011）。和主片 himax-spi 一样必须 =y
 #   （Android 不加载模块）；把从片的帧变成触控笔的是 vendor 的 gk3pend（device/huawei/gaokun3/stylus）。
 ./scripts/config --file "$OUT/.config" --enable TOUCHSCREEN_HIMAX_HX83121A_PEN
 
@@ -496,7 +496,7 @@ OUT="${1:?用法: $0 <kernel-out-dir>}"
 ./scripts/config --file "$OUT/.config" --enable TYPEC_MUX_GPIO_SBU
 
 # ★ USB 传文件（MTP/PTP）与"设置"里的 USB 页面：UsbService 只在 /sys/class/android_usb 存在时才建
-#   UsbDeviceManager。主线没有这个类，patches/0096 补上它（连接状态由 USB 端口 HAL 写）。
+#   UsbDeviceManager。主线没有这个类，patches/kernel/ec-usb/0011 补上它（连接状态由 USB 端口 HAL 写）。
 ./scripts/config --file "$OUT/.config" --enable USB_ANDROID_USB_STATE
 
 # ─── olddefconfig + 断言（止损"=m 坑"）───

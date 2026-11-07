@@ -7,7 +7,7 @@ This repository brings Android (crDroid) to the **Huawei MateBook E Go (`gaokun3
 This repository is not a full AOSP tree or Linux kernel tree; it holds the device configuration, custom HALs/services, patch stacks, and standalone boot/installer tools:
 
 - [`device/huawei/gaokun3/`](device/huawei/gaokun3/): Android device configuration, custom AIDL HALs (camera, sensors, light, USB, boot control, audio hooks/mic array/NPU denoise/speaker effects), stylus daemon, Parts settings app, and SELinux policies.
-- [`patches/`](patches/): Ordered kernel patch series applied to an external mainline kernel tree by [`scripts/kernel-apply-patches.sh`](scripts/kernel-apply-patches.sh), plus `libcamera/` and `resukisu/` patches.
+- [`patches/`](patches/README.md): Out-of-tree patches organized by target tree and subsystem (`kernel/`, `android/`, `mesa/`, `libcamera/`, `resukisu/`), applied by [`scripts/kernel-apply-patches.sh`](scripts/kernel-apply-patches.sh), [`scripts/crdroid-tree-fixes.py`](scripts/crdroid-tree-fixes.py), and [`scripts/mesa-a17/regen.sh`](scripts/mesa-a17/regen.sh).
 - [`scripts/crdroid-tree-fixes.py`](scripts/crdroid-tree-fixes.py): Out-of-tree modifications applied to other AOSP/crDroid repositories. Any change outside `device/huawei/gaokun3/` in the AOSP tree must be registered here rather than left uncommitted in a build tree.
 - [`tools/`](tools/) and [`live/`](live/): Self-contained subprojects — [`tools/gk3boot/`](tools/gk3boot/README.md) (UEFI boot manager `gk3boot.efi` and `fastboot` executor), [`tools/gk3-installer/`](tools/gk3-installer/Cargo.toml) (Rust installer backend), and [`live/installer-flutter/`](live/installer-flutter/README.md) (Flutter graphical installer frontend, built via [`scripts/live/`](scripts/live/README.md)).
 - `refs/` (git-ignored, fetched via `bash scripts/clone-refs.sh`): Read-only reference trees (`linux-gaokun`, `gaokun-buildbot`, `aospm-*`, `lineage-sepolicy`).
@@ -31,7 +31,7 @@ This repository is not a full AOSP tree or Linux kernel tree; it holds the devic
 ### Language
 
 - **Developer communication, developer docs (`docs/dev/`, component `README.md`, `docs/TODO.md`), code comments, and repository commit messages**: Simplified Chinese.
-- **Kernel patches (`patches/*.patch`, `docs/dev/upstream/`) and runtime log messages (`dmesg` / `logcat`)**: English, following Linux kernel coding style and commit format (`subsystem: summary`).
+- **Kernel patches (`patches/kernel/**/*.patch`, `docs/dev/upstream/`) and runtime log messages (`dmesg` / `logcat`)**: English, following Linux kernel coding style and commit format (`subsystem: summary`).
 - **User-facing documentation (`README*`, `docs/INSTALL*`, `docs/FAQ*`, `docs/known-limitations*`, `docs/relnotes/`)**: Maintained in both English (`.md`) and Simplified Chinese (`.zh-CN.md`).
 
 ### Documentation Structure & Style

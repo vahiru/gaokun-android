@@ -39,10 +39,10 @@ BIOS 2.16的UEFI DXE卷结构与显示表参数详见[bios-2.16/README.md](hw/bi
 - **DRM驱动**：`msm`（`ae00000.display-subsystem`，DPU 8.1），连接器`DSI-1`（status `connected`，物理尺寸166×265 mm）。
 - **显示模式**：
   - `1600x2560@120`：像素时钟313.524 MHz，`htotal=1912`、`vtotal=2736`（默认首选模式）。
-  - `1600x2560@60`：像素时钟313.524 MHz，`htotal=1912`、`vtotal=5472`（通过将`vtotal`翻倍保持相同DSI link clock实现无闪切60 Hz，见`patches/0107`）。
+  - `1600x2560@60`：像素时钟313.524 MHz，`htotal=1912`、`vtotal=5472`（通过将`vtotal`翻倍保持相同DSI link clock实现无闪切60 Hz，见`linux-gaokun-buildbot` `patches/0107`）。
 - **图层与格式**：DPU提供6个CRTC与25个plane，支持`XR24`/`AR24`/`XB24`/`AB24`/`RG16`/`NV12`/`P010`等格式，均同时支持`LINEAR`与Qualcomm UBWC（`QCOM_COMPRESSED`，modifier `0x0800000000000001`）。
 - **背光**：MIPI DCS背光（`/sys/class/backlight/ae96000.dsi.0`，范围`0..4095`）。
-- **多供应商面板识别**（`patches/0123`、`0124`）：通过TLMM `GPIO 102`（`ID0`）与`GPIO 91`（`ID1`）在probe时读取硬件编码（`ID0=0, ID1=1` → BOE `0x0F`；`ID0=0, ID1=0` → CSOT `0x0D`），色彩与Gamma校详见[display-color.md](display-color.md)。
+- **多供应商面板识别**（`patches/kernel/drm/0003`、`patches/kernel/dts/0017`）：通过TLMM `GPIO 102`（`ID0`）与`GPIO 91`（`ID1`）在probe时读取硬件编码（`ID0=0, ID1=1` → BOE `0x0F`；`ID0=0, ID1=0` → CSOT `0x0D`），色彩与Gamma校详见[display-color.md](display-color.md)。
 
 ### 2. 触控、手写笔与键盘盖
 
@@ -98,5 +98,5 @@ SC8280XP在`gaokun3`上启用了3个DWC3控制器，各自的角色能力不同�
    - 因此基于保留内存的`ramoops`在本机上无法跨重启保存任何数据。若在设备树中添加`ramoops`节点，还会因Linux `pstore`仅允许单个活跃后端（`pstore_register()`检查`psinfo != NULL`）而抢占`efi_pstore`槽位，导致真正可用的持久化后端被屏蔽。
 2. **使用`efi_pstore`（基于Qualcomm `uefisecapp`）**：
    - 本机内核命令行默认带有`efi=noruntime`，但Qualcomm平台通过`qcom_scm` + `qsee_uefisecapp`（`drivers/firmware/qcom/qcom_qseecom_uefisecapp.c`）将自定义`efivar_ops`直接注册到安全世界，**不依赖标准EFI Runtime Services**。
-   - **初始化时序修复（`patches/0001`）**：内置`efi_pstore`在`~0.28s`初始化时检查`efivar_supports_writes()`，而`qsee_uefisecapp`直到`~0.76s`才完成探测并调用`efivars_register()`。`patches/0001`在`drivers/firmware/efi/vars.c`中引入`efivar_ops_nh`通知链与工作队列，当`efivars_register()`稍后上线时自动触发`efi_pstore`补注册，从而使内核panic日志稳定写入`/sys/fs/pstore/dmesg-efi_pstore-*`。
+   - **初始化时序修复（`patches/kernel/core/0001`）**：内置`efi_pstore`在`~0.28s`初始化时检查`efivar_supports_writes()`，而`qsee_uefisecapp`直到`~0.76s`才完成探测并调用`efivars_register()`。`patches/kernel/core/0001`在`drivers/firmware/efi/vars.c`中引入`efivar_ops_nh`通知链与工作队列，当`efivars_register()`稍后上线时自动触发`efi_pstore`补注册，从而使内核panic日志稳定写入`/sys/fs/pstore/dmesg-efi_pstore-*`。
 

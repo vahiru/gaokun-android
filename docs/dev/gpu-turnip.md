@@ -39,7 +39,7 @@ Android App / SystemUI / SurfaceFlinger (renderengine = skiagl / skiavkthreaded)
 | Gralloc HAL | `minigbm_msm` | 分配`MSM_SUBMIT`与DPU直通兼容的DMA-BUF，支持`DRM_FORMAT_MOD_QCOM_COMPRESSED`（UBWC）与线性布局 |
 | 节点权限与SELinux | `/dev/dri/renderD128`、`/dev/dri/card*` `0666` | `vulkan.freedreno.so`必须标记为`same_process_hal_file`，以便普通应用进程在沙箱内直接打开渲染节点并加载同进程HAL |
 
-## 二、Android Native Buffer（ANB）延迟绑定修复（`patches/0004`）
+## 二、Android Native Buffer（ANB）延迟绑定修复（`patches/mesa/0001`）
 
 ### 1. 问题现象与触发路径
 
@@ -62,7 +62,7 @@ Android App / SystemUI / SurfaceFlinger (renderengine = skiagl / skiavkthreaded)
 - **用户态段错误（SIGSEGV）**：当渲染通道包含深度/模板等`LAZY`瞬态附件时，`tu_allocate_transient_attachments()`尝试解引用`image->mem->bo`（偏移`0xd0`），因`image->mem == NULL`立即崩溃。
 - **GPU写入IOVA `0x0`引发SMMU页错误**：对于不经过`tu_allocate_transient_attachments()`的颜色附件，Turnip生成的命令流直接以`image->iova == 0x0`作为渲染目标基址提交给Adreno 690，触发`gpu_smmu`写故障（`iova=0x00000000`）。
 
-### 2. 修复方案（`patches/0004` v3）
+### 2. 修复方案（`patches/mesa/0001` v3）
 
 在`tu_BindImageMemory2`中识别`pNext`链上的`VK_STRUCTURE_TYPE_NATIVE_BUFFER_ANDROID`：
 
@@ -90,10 +90,10 @@ SC8280XP的GPU SMMU（`3da0000.iommu`，`qcom,sc8280xp-smmu-500`）在`msm_iommu
 
 ## 四、10位视频（P010）零拷贝合成与构建脚本
 
-- **P010零拷贝显示合成**（`patches/0130`）：
+- **P010零拷贝显示合成**（`patches/mesa/0002`）：
   - Iris硬件解码器在解码10-bit HEVC/VP9视频时输出`HAL_PIXEL_FORMAT_YCbCr_P010`。
   - `minigbm_msm`为`DRM_FORMAT_P010`开放`BO_USE_SCANOUT`用法，DPU驱动在`msm_dpu`层直接接收P010平面，避免SurfaceFlinger回退到GPU Shader做每帧格式转换，显著降低4K 10-bit视频播放时的GPU负载与功耗。
 - **Mesa构建工具链**：
-  - Android 16使用Mesa树内`meson_to_hermetic`生成`Android.bp`，由`scripts/mesa-tool-fixes.py`与`scripts/mesa-bp-merge.py`修补并合入；同时需要`patches/0003`为`external/deqp-deps/glslang`补充Turnip编译器所需的头文件导出目标。
+  - Android 16使用Mesa树内`meson_to_hermetic`生成`Android.bp`，由`scripts/mesa-tool-fixes.py`与`scripts/mesa-bp-merge.py`修补并合入；同时为`external/deqp-deps/glslang`补充Turnip编译器所需的宿主机`glslangValidator`目标。
   - Android 17切换至重写后的`meson2hermetic`（`build_android_bp.py`），具体适配步骤见[mesa-a17.md](mesa-a17.md)。
 

@@ -164,7 +164,7 @@ esac
 #   1. ★ 条目就错了 —— android.conf 指向的是【旧 AOSP 的】Image(kb18) +
 #      ramdisk.img。crDroid 有自己的条目 $MID-crdroid.conf
 #      （Image-kb23 + ramdisk-crdroid.img）。用错条目的表现极具迷惑性：
-#      能起来、adb 能连、getprop 都对，但内核是不带 patches/0007 的旧核 →
+#      能起来、adb 能连、getprop 都对，但内核是不带 patches/kernel/core/0002 的旧核 →
 #      bpffs 标签问题回归 → system_server 崩溃循环、永远到不了 boot_completed。
 #      查的时候会一路怀疑刚换的 turnip，其实跟 GPU 毫无关系。
 #      判据：`adb shell uname -a` 的编译时间必须与本次内核一致。

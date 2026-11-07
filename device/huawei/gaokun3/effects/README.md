@@ -40,7 +40,7 @@ effects HAL服务（APEX com.android.hardware.audio，SELinux域 hal_audio_defau
 配置与实现约束：
 - **独立UUID槽位**：必须在`audio_effects_config.xml`中注册独立的`<library>`与`<effect>`条目，不可覆盖上游`LoudnessEnhancer`等原有库路径（否则LineageOS AudioFX按type UUID创建音效失败会导致`AudioPolicyService::startOutput()`中断整条会话的音效挂载）。
 - **继承`EffectImpl`**：直接复用AOSP `libaudioeffectaidlcommon`提供的`EffectImpl`与FMQ线程管理，仅重写纯虚函数。
-- **APEX链接器命名空间放行（`patches/0068`）**：effects HAL运行在vendor APEX `com.android.hardware.audio`中，默认隔离命名空间不放行`/vendor/lib64/soundfx/`。`patches/0068`在该APEX的`linker.config.pb`中追加了`/vendor/${LIB}/soundfx`许可路径。
+- **APEX链接器命名空间放行（`patches/android/hardware-interfaces/0005`）**：effects HAL运行在vendor APEX `com.android.hardware.audio`中，默认隔离命名空间不放行`/vendor/lib64/soundfx/`。`patches/android/hardware-interfaces/0005`在该APEX的`linker.config.pb`中追加了`/vendor/${LIB}/soundfx`许可路径。
 - **SELinux属性转发**：由于`hal_audio_default`受`neverallow`限制不可直接读取`system_prop`（`persist.sys.*`），[`etc/histen.rc`](../etc/histen.rc)将其镜像为`vendor.gaokun3.histen.on`与`vendor.gaokun3.speakerfx.engine`（`vendor_gaokun3_prop`）。
 
 ## 三、生效条件与低延迟音轨限制
@@ -53,7 +53,7 @@ effects HAL服务（APEX com.android.hardware.audio，SELinux域 hal_audio_defau
 4. **输出设备为内置扬声器**：框架下发的设备类型为`OUT_SPEAKER`且不含`bt-a2dp`连接标识；
 5. **双声道立体声格式**：Histen引擎仅在48 kHz采样率下接入（其他采样率仅运行自研扬声器保护链）。
 
-**低延迟（`FAST`）音轨限制**：主输出开启`FastMixer`后（`patches/0083`），AudioFlinger拒绝在含`FAST`音轨的会话上挂载非硬件加速effect。使用低延迟通路的游戏音轨不会经过本模块；如需覆盖游戏音轨，请使用默认的音频HAL层「低音增强」模式（[`../speakerfx/README.md`](../speakerfx/README.md)）。
+**低延迟（`FAST`）音轨限制**：主输出开启`FastMixer`后（`patches/android/hardware-interfaces/0008`），AudioFlinger拒绝在含`FAST`音轨的会话上挂载非硬件加速effect。使用低延迟通路的游戏音轨不会经过本模块；如需覆盖游戏音轨，请使用默认的音频HAL层「低音增强」模式（[`../speakerfx/README.md`](../speakerfx/README.md)）。
 
 ## 四、调试属性（root）
 

@@ -7,7 +7,7 @@
   2) DIRECTORY          对录回的一批 wav 做 Goertzel，输出 dBFS 对比表
   3) --selftest         不需要设备，自检：造一个 -6 dBFS 的音再量回来
 
-方法沿用 patches/0015 已验证的做法：内置麦回采 440 Hz 单音，Goertzel 取该频点幅度。
+方法沿用 patches/kernel/audio/0001 已验证的做法：内置麦回采 440 Hz 单音，Goertzel 取该频点幅度。
 寂静基准实测约 -99 dBFS、有音约 -23 dBFS，约 76 dB 测量余量。
 
 完整流程：
@@ -331,7 +331,7 @@ def analyze_dir(d, freq, head_ms=300.0, tail_ms=100.0):
     print("")
     print(" 注：Δ 是【麦克风回采到的声压差】，不是电增益。")
     print("     WSA883x 的 COMP/DRE 会压缩峰值，实测增益通常只有请求值的 60~70%。")
-    print("     （patches/0015 实测：请求 +9 dB，实得 +5.7 dB）")
+    print("     （patches/kernel/audio/0001 实测：请求 +9 dB，实得 +5.7 dB）")
     print("")
     return 0
 

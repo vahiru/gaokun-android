@@ -9,7 +9,7 @@
 #     ro.* 删掉只影响内存属性区，重启自还原；persist.* 是真持久，靠状态文件还原。
 #   * on 的最后一步是【延迟关 adb】—— 立即关会把正在执行的 shell 一起杀掉。
 #     定时器、安全网必须先布好。开关 adb 只改 adb_enabled：AdbService 据此起停 adbd，
-#     UsbDeviceManager（patches/0096 补上 android_usb 类以后才有）把 adb 加进或移出 USB 功能，
+#     UsbDeviceManager（patches/kernel/ec-usb/0011 补上 android_usb 类以后才有）把 adb 加进或移出 USB 功能，
 #     并维护 persist.sys.usb.config。sys.usb.config / persist.sys.usb.config 归框架管，
 #     脚本不直接写、也不直接 stop / start adbd，否则框架记录的状态和 gadget 实际对不上（#41 评审）。
 #     关 adb 会立刻断开本会话。

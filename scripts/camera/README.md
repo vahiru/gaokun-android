@@ -14,7 +14,7 @@
 ## 一、CAMSS硬件与接口注意事项
 
 1. **`titan_top_gdsc`电源域复位时序**：
-   - 未打[`../../patches/0027-clk-qcom-camcc-sc8280xp-gdsc-wait-vals.patch`](../../patches/0027-clk-qcom-camcc-sc8280xp-gdsc-wait-vals.patch)与[`../../patches/0031-clk-qcom-camcc-sc8280xp-mark-camnoc-ahb-rcgs-shared.patch`](../../patches/0031-clk-qcom-camcc-sc8280xp-mark-camnoc-ahb-rcgs-shared.patch)前，一旦`titan_top_gdsc`在下电后真正塌缩，再次上电会报错`titan_top_gdsc status stuck at 'off'`（`STREAMON`返回`-110`），并将genpd锁死在`runtime_error`状态。
+   - 未打[`../../patches/kernel/camera/0001-clk-qcom-camcc-sc8280xp-gdsc-wait-vals.patch`](../../patches/kernel/camera/0001-clk-qcom-camcc-sc8280xp-gdsc-wait-vals.patch)与[`../../patches/kernel/camera/0002-clk-qcom-camcc-sc8280xp-mark-camnoc-ahb-rcgs-shared.patch`](../../patches/kernel/camera/0002-clk-qcom-camcc-sc8280xp-mark-camnoc-ahb-rcgs-shared.patch)前，一旦`titan_top_gdsc`在下电后真正塌缩，再次上电会报错`titan_top_gdsc status stuck at 'off'`（`STREAMON`返回`-110`），并将genpd锁死在`runtime_error`状态。
    - **严禁在`camcc`处于`runtime-suspend`时通过`devmem`读取`camcc`寄存器**，否则会因寄存器块时钟门控触发同步外部中止（external abort）导致整机死锁。若必须读取寄存器，需先执行`echo on > /sys/devices/platform/soc@0/ad00000.clock-controller/power/control`固定供电状态。
 2. **像素格式与Media Bus码匹配**：RDI（Raw Dump Interface）直接转储CSI-2裸数据而不做格式转换，`video`节点的像素格式必须与传感器输出的media bus码同族（映射表见内核`drivers/media/platform/qcom/camss/camss-vfe.c`及`camtest.c`中的`kBusToPix`），否则`STREAMON`返回`-EPIPE`。
 3. **Multiplanar API约束**：`camss`驱动仅实现多平面接口（`V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE`）；若使用单平面`V4L2_BUF_TYPE_VIDEO_CAPTURE`调用，`ENUM_FMT`会返回空且`S_FMT`返回`-EINVAL`。

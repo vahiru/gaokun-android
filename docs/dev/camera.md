@@ -37,11 +37,11 @@
 | PMIC供电轨 | `vdda` = `LDO11_C`（2.8V），`vddio` = `LDO2_C`（1.8V） | `avdd` = `LDO2_B`（2.8V），`dovdd` = `LDO2_C`（1.8V） |
 | 附加外设 | — | 对焦马达DW9714（`1-000c`，`LDO7_B` 2.8V）、模组EEPROM（`1-0050`，16 KiB） |
 
-### 1. 后摄`LDO2_B`与显示面板共轨机制（`patches/0032`、`0034`）
+### 1. 后摄`LDO2_B`与显示面板共轨机制（`patches/kernel/dts/0005`、`patches/kernel/camera/0003`）
 
 `LDO2_B`同时连接显示面板的`vddi`（1.8V）与后摄OV13B10的模拟供电`avdd`（2.8V）。RPMh稳压器仲裁器对同一条LDO取所有消费者投票的**最大值**：当后摄打开时，`ov13b10`驱动在`power_on()`中调用`regulator_set_voltage(avdd, 2800000, 2800000)`将`LDO2_B`抬升至2.8V；后摄关闭时在`power_off()`中放宽回`1.8V..2.8V`区间，稳压器自动回落至面板所需的1.8V。这与Windows PEP电源表的设计一致。
 
-### 2. 后置闪光灯（`patches/0036`）
+### 2. 后置闪光灯（`patches/kernel/dts/0006`）
 
 机背闪光灯由PM8350C内置闪光模块驱动（而非GPIO 93直驱），物理LED并联在**通道1与通道4**（`led-sources = <1>, <4>`），在sysfs下注册为`/sys/class/leds/white:flash`（手电筒模式上限200 mA，闪光strobe上限600 mA / 400 ms）。为避免`v4l2-async`因等待额外subdev阻塞，设备树故意不在传感器节点引用`flash-leds`，由Camera HAL直接读写`/sys/class/leds/white:flash/brightness`。
 
@@ -63,7 +63,7 @@ qcom-camss ac5a000.camss: Failed to power up pipeline: -110
 
 且一旦超时，`CFG_GDSCR`状态机卡死在`0x010e0000`，软件侧无论重试上电还是解绑驱动均无法恢复（在已锁死状态下unbind `qcom-camss`还会因等待runtime PM而拖死整机）。
 
-### 2. 产生机制与三行修复（`patches/0031`）
+### 2. 产生机制与三行修复（`patches/kernel/camera/0002`）
 
 通过寄存器轨迹转储与二分实验证实：
 
@@ -74,11 +74,10 @@ qcom-camss ac5a000.camss: Failed to power up pipeline: -110
 
 **修复方案**：
 
-- **`patches/0031`**：参照`camcc-x1e80100.c`与`camcc-sc8180x.c`，将`camnoc_axi_clk_src`、`slow_ahb_clk_src`、`fast_ahb_clk_src`三个RCG的`.ops`改为`&clk_rcg2_shared_ops`。关闭时钟时`clk_rcg2_shared_disable()`自动将RCG停靠回安全晶振源`bi_tcxo`，使`titan_top_gdsc`在任意次数启停流后均可正常塌缩与唤醒。
+- **`patches/kernel/camera/0002`**：参照`camcc-x1e80100.c`与`camcc-sc8180x.c`，将`camnoc_axi_clk_src`、`slow_ahb_clk_src`、`fast_ahb_clk_src`三个RCG的`.ops`改为`&clk_rcg2_shared_ops`。关闭时钟时`clk_rcg2_shared_disable()`自动将RCG停靠回安全晶振源`bi_tcxo`，使`titan_top_gdsc`在任意次数启停流后均可正常塌缩与唤醒。
 - **配套补丁**：
-  - `patches/0022`：在`gdsc_unregister()`中正确清理genpd，防止`camcc`解绑重绑时触发`kobject`重复初始化崩溃。
-  - `patches/0027`：为`camcc-sc8280xp`的8个GDSC显式填入硬件复位等待周期（`en_rest_wait_val = 2, en_few_wait_val = 2, clk_dis_wait_val = 0xf`），避免`gdsc_init()`用MSM8974的历史默认值`2/8/2`覆盖硬件配置。
-  - `patches/0035`：为`camss`的`v4l2-async`通知器增加20秒超时降级，若某台机器的后摄模组未应答，仅跳过未绑定的endpoint，保证前摄仍能正常注册`/dev/v4l-subdev*`。
+  - `patches/kernel/camera/0001`：为`camcc-sc8280xp`的8个GDSC显式填入硬件复位等待周期（`en_rest_wait_val = 2, en_few_wait_val = 2, clk_dis_wait_val = 0xf`），避免`gdsc_init()`用MSM8974的历史默认值`2/8/2`覆盖硬件配置。
+  - `patches/kernel/camera/0004`：为`camss`的`v4l2-async`通知器增加20秒超时降级，若某台机器的后摄模组未应答，仅跳过未绑定的endpoint，保证前摄仍能正常注册`/dev/v4l-subdev*`。
 
 ## 四、`libcamera`移植与传感器标定
 

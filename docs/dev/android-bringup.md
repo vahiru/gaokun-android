@@ -32,9 +32,9 @@ UEFI 2.16 (关闭Secure Boot)
 
 | 类别 | 关键Kconfig项与补丁 | 缺失时的典型故障 |
 |---|---|---|
-| IPC与内存 | `ANDROID_BINDER_IPC=y`、`ANDROID_BINDERFS=y`、`ASHMEM=y`（`patches/0017`恢复`ashmem`）、`PSI=y` | `servicemanager`/`lmkd`无法启动，或依赖`/dev/ashmem`的应用崩溃 |
+| IPC与内存 | `ANDROID_BINDER_IPC=y`、`ANDROID_BINDERFS=y`、`ASHMEM=y`（`patches/kernel/core/0004`恢复`ashmem`）、`PSI=y` | `servicemanager`/`lmkd`无法启动，或依赖`/dev/ashmem`的应用崩溃 |
 | BPF与文件系统 | `BPF_SYSCALL=y`、`CGROUP_BPF=y`、`FS_VERITY=y`、`UNICODE=y`、`F2FS_FS=y`、`DM_SNAPSHOT=y` | `bpfloader`失败触发`init`重启；`/data/media`不区分大小写挂载失败 |
-| `netd`网络栈 | `NETFILTER_XT_MATCH_QUOTA2=y`（`patches/0016`移植AOSP `xt_quota2`）、`IP_NF_RAW=y`、`IP6_NF_RAW=y`、`NETFILTER_XT_TARGET_CT=y`、`NETFILTER_XT_MATCH_OWNER=y`、`NETFILTER_XT_MATCH_BPF=y`、`CLS_BPF=y`、`NET_SCH_INGRESS=y` | `netd`在`BandwidthController::enableBandwidthControl()`初始化时报错退出，触发60秒rescue party重启循环 |
+| `netd`网络栈 | `NETFILTER_XT_MATCH_QUOTA2=y`（`patches/kernel/core/0005`移植AOSP `xt_quota2`）、`IP_NF_RAW=y`、`IP6_NF_RAW=y`、`NETFILTER_XT_TARGET_CT=y`、`NETFILTER_XT_MATCH_OWNER=y`、`NETFILTER_XT_MATCH_BPF=y`、`CLS_BPF=y`、`NET_SCH_INGRESS=y` | `netd`在`BandwidthController::enableBandwidthControl()`初始化时报错退出，触发60秒rescue party重启循环 |
 | 远端处理器与QMI | `QCOM_Q6V5_PAS=y`、`QCOM_SYSMON=y`、`QCOM_FASTRPC=y`、`QCOM_PD_MAPPER=y`、`QRTR=y`、`QRTR_SMD=y`、`QRTR_MHI=y` | ADSP/CDSP/SLPI与Wi-Fi QMI无法建立通信 |
 | 板级外设驱动 | `DRM_MSM=y`、`HID_HIMAX_83121A=y`、`ATH11K_PCI=y`、`BT_HCIUART_QCA=y`、`EC_HUAWEI_GAOKUN=y`、`QCOM_PMIC_GLINK=y`、`TYPEC_UCSI=y` | 屏幕、触控、Wi-Fi、蓝牙、电池状态与USB角色切换不可用 |
 
@@ -58,7 +58,7 @@ UEFI 2.16 (关闭Secure Boot)
 - **固件与初始化**：PCIe设备`0002:01:00.0`加载`/vendor/firmware/ath11k/WCN6855/hw2.1/`下的`amss.bin`、`m3.bin`、`board-2.bin`与`regdb.bin`（`board-id`未收录时自动回退至通用`bus=pci,qmi-chip-id=2,qmi-board-id=255`条目）。
 - **持久化MAC地址生成**：因主线`ath11k`未从UEFI/NV读取出厂Wi-Fi MAC，`init.gaokun3.rc`在开机时运行`wpa_supplicant_mac_gen`脚本，在`/data/vendor/wifi/wlan_mac.bin`生成并持久化一个本地管理MAC地址，避免每次重启MAC变化导致路由器DHCP租约重置。
 - **WPA3（SAE-H2E）与多频段**：支持2.4 GHz / 5 GHz / 6 GHz（802.11ax 160 MHz）及WPA2-PSK与WPA3-SAE（`sae_pwe=1` H2E）。
-- **CMA内存预留与休眠恢复（`patches/0071`）**：`ath11k`在每次挂起/恢复（或模块重初始化）时向DMA子系统申请高阶连续物理内存（order-9，2 MiB×32段）。设备树在`0xec000000`处配置512 MiB `shared-dma-pool`（`reusable`），确保系统长时间运行内存碎片化后`ath11k`仍能从CMA池稳定分配DMA缓冲。
+- **CMA内存预留与休眠恢复（`patches/kernel/dts/0011`）**：`ath11k`在每次挂起/恢复（或模块重初始化）时向DMA子系统申请高阶连续物理内存（order-9，2 MiB×32段）。设备树在`0xec000000`处配置512 MiB `shared-dma-pool`（`reusable`），确保系统长时间运行内存碎片化后`ath11k`仍能从CMA池稳定分配DMA缓冲。
 
 ### 2. 蓝牙（WCN6855 UART / `bt_linux_hci`）
 
@@ -80,8 +80,8 @@ UEFI 2.16 (关闭Secure Boot)
 
 ## 六、内置Root方案（`ReSukiSU`）
 
-内核通过`patches/0100`–`0103`集成`ReSukiSU`（基于KernelSU架构的内核态Root实现）：
+内核通过`patches/resukisu/`集成`ReSukiSU`（基于KernelSU架构的内核态Root实现）：
 
-- **构建要求**：`ReSukiSU`依赖C11复合字面量与声明混排语法，`patches/0102`为其Makefile移除内核顶层的`-Wvla`与`-Wdeclaration-after-statement`警告升级。
+- **构建要求**：`ReSukiSU`依赖C11复合字面量与声明混排语法，`patches/resukisu/0002`为其Makefile移除内核顶层的`-Wvla`与`-Wdeclaration-after-statement`警告升级。
 - **使用说明**：内核内置ReSukiSU，检测root的应用可能拒绝运行。
 

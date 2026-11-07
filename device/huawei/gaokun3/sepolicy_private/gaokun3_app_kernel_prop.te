@@ -1,4 +1,4 @@
-# Kernel release reported to apps (patches/0085), persist.sys.gaokun3.app_kernel_*.
+# Kernel release reported to apps (patches/kernel/core/0008), persist.sys.gaokun3.app_kernel_*.
 #
 # persist.sys.* is system_prop, which every app can read. This type keeps the setting
 # from them: Parts writes it, and vendor_init reads it for init.gaokun3.rc.

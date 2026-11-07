@@ -37,7 +37,7 @@ ndk::ScopedAStatus err(Status s)
 	return ndk::ScopedAStatus::fromServiceSpecificError(static_cast<int32_t>(s));
 }
 
-/* 后摄闪光灯在内核里的名字（patches/0036：PM8350C 闪光模块 1+4 路 → 一个 LED）。 */
+/* 后摄闪光灯在内核里的名字（patches/kernel/dts/0006：PM8350C 闪光模块 1+4 路 → 一个 LED）。 */
 constexpr char kRearFlashLed[] = "/sys/class/leds/white:flash";
 
 bool writeSysfs(const std::string &path, const std::string &value)

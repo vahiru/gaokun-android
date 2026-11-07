@@ -9,7 +9,7 @@
  * controlled by", "Use USB for") and MTP/PTP. The framework only creates it
  * when /sys/class/android_usb exists, and takes the gadget's connection state
  * from android0/state and its uevents, which Android kernels send from their
- * configfs gadget. patches/0096 adds that class with a writable state; this
+ * configfs gadget. patches/kernel/ec-usb/0011 adds that class with a writable state; this
  * HAL writes it (GadgetState), as the UDC state alone does not show an unplug.
  * On a kernel without the class, it sets vendor.gaokun3.usb.no_android_usb,
  * and init.gaokun3.usb.rc puts adb in sys.usb.config as before 0096.
@@ -32,7 +32,7 @@
  *     before it counts as a disconnect.
  *   - Host role, connected: a device is enumerated under the controller's xhci.
  *
- * Roles. With the Type-C class and vreg_l9d always on (patches/0086), this
+ * Roles. With the Type-C class and vreg_l9d always on (patches/kernel/dts/0014), this
  * HAL decides the data role (Follow.h); gaokun3-usbrole.sh still switches it
  * at screen off and on (etc/usbrole.rc). A role can also be chosen through
  * UsbManager: Settings' "USB controlled by", or `dumpsys usb set-port-roles
@@ -167,7 +167,7 @@ class Usb : public BnUsb {
         // Without the class the framework has no UsbDeviceManager to put adb
         // in sys.usb.config; init.gaokun3.usb.rc then does.
         if (!HasGadgetState()) {
-            LOGW("no android_usb class (a kernel without patches/0096): %s=1", kNoAndroidUsb);
+            LOGW("no android_usb class (a kernel without patches/kernel/ec-usb/0011): %s=1", kNoAndroidUsb);
             SetProp(kNoAndroidUsb, "1");
         }
         std::thread([this] { Monitor(); }).detach();

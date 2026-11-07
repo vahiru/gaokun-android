@@ -1,6 +1,6 @@
 #!/bin/bash
 # Ego Ubuntu 侧：mesa 分析实验室搭建。
-# 1) 装构建依赖  2) 拉 mesa-26.0.3 官方源码  3) 打 patches/0004
+# 1) 装构建依赖  2) 拉 mesa-26.0.3 官方源码  3) 打 patches/mesa/0001
 # 4) 构建 freedreno decode 工具(crashdec) + turnip  5) 报告路径
 set -e
 cd /home/user

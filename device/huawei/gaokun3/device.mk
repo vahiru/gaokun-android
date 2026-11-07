@@ -84,7 +84,7 @@ PRODUCT_PROPERTY_OVERRIDES += \
 #   （frameworks/base/services/java/com/android/server/SystemServer.java:2536-2542），本机两个都没声明 ⇒
 #   `usb` 服务不存在，getSystemService(USB_SERVICE) 返回 null，不判空的 App（天翼云电脑）启动即崩。
 #   只加 host：UsbDeviceManager 只在 /sys/class/android_usb 存在时才建（UsbService.java:218），主线内核
-#   没有这个类，patches/0096 补上（连接状态由下面的 USB 端口 HAL 写）；没有 USB HAL 时 UsbPortManager 打一条
+#   没有这个类，patches/kernel/ec-usb/0011 补上（连接状态由下面的 USB 端口 HAL 写）；没有 USB HAL 时 UsbPortManager 打一条
 #   异常就返回 null（hal/port/UsbPortHalInstance.java:31-43）。
 #   ✅ 2026-10-04 上机（bind-mount 这个文件 + 重启 zygote，_b 1790702971）：`usb` 服务起来、dumpsys usb 列出键盘、
 #   查 HAL 耗时 3 ms、USB adb 不断、无新 denial。不加 accessory：Android 配件模式（AOA）要 Android 内核的
@@ -102,7 +102,7 @@ PRODUCT_COPY_FILES += \
 
 # USB 端口 HAL（usb/）：向 UsbPortManager 报告 port0 的状态，并按插进来的东西决定 port0 的数据角色
 # （原先 gaokun3-usbrole.sh 每 2 秒轮询一次的 follow 模式），还把 gadget 的连接状态写给 UsbDeviceManager
-# （patches/0096 的 android_usb 类）。设置里的 USB 页面（数据角色、USB 用途）和 MTP / PTP 都由 UsbDeviceManager 管，
+# （patches/kernel/ec-usb/0011 的 android_usb 类）。设置里的 USB 页面（数据角色、USB 用途）和 MTP / PTP 都由 UsbDeviceManager 管，
 # MTP / PTP 的 FunctionFS 与配置在 init.gaokun3.usb.rc。
 # 权限见 ueventd.gaokun3.rc 与 sepolicy/hal_usb_default.te。
 PRODUCT_PACKAGES += \
@@ -403,7 +403,7 @@ PRODUCT_SYSTEM_EXT_PROPERTIES += \
 
 # 广色域（docs/dev/display-color.md）：面板原生接近 Display P3，有工厂校准时内核按连接器 Colorspace 切 sRGB、P3。
 #   · has_wide_color_display 让 SF 不再滤掉 P3 模式，应用才看得到广色域；落 system_ext，理由同上。
-#   · force_p3_support 让 HWC 报告 P3（patches/0132，tree-fix [32]）。连接器没有 Colorspace 属性时它不起作用，
+#   · force_p3_support 让 HWC 报告 P3（patches/android/drm-hwcomposer/0002，tree-fix [32]）。连接器没有 Colorspace 属性时它不起作用，
 #     所以校准表读取失败的机器只是退回 sRGB。
 #   判据：`dumpsys SurfaceFlinger | grep "Device supports wide color"` = 1；空闲时 Current color mode 仍是 SRGB。
 PRODUCT_SYSTEM_EXT_PROPERTIES += \
@@ -827,14 +827,14 @@ DEVICE_PACKAGE_OVERLAYS += device/huawei/gaokun3/overlay
 PRODUCT_PACKAGES += \
     Gaokun3SettingsProviderOverlay
 
-# ★ 用户态 CPU 温控已退役（M6，2026-08-20）——改由 patches/0009 在 DTS 里根治。
+# ★ 用户态 CPU 温控已退役（M6，2026-08-20）——改由 patches/kernel/dts/0002 在 DTS 里根治。
 #
 # 原先这里装 bin/thermal-guard.sh + etc/thermalguard.rc，因为主线
 # sc8280xp.dtsi 里总共只有一个 cooling-maps（在 gpu-thermal 下），
 # 8 个 cpuN-thermal 只有一条 110C 的 critical trip、没有任何 cooling device
 # —— CPU 会一路满频跑到内核紧急关机，中间没有渐进降频。
 #
-# patches/0009-arm64-dts-sc8280xp-add-cpu-cooling-maps.patch 给这 8 个温区
+# patches/kernel/dts/0002-arm64-dts-sc8280xp-add-cpu-cooling-maps.patch 给这 8 个温区
 # 各加了一条 85C 的 passive trip 并绑到本簇的 cpufreq cooling device。
 # 实机验证（同一台机器，换 DTB 前后对比）：
 #     改前  cdev=0 trip=1
@@ -942,7 +942,7 @@ PRODUCT_PACKAGES += \
 
 # ─── Stage 6: 修正 /sys/fs/bpf 的 SELinux 标签（主线内核 vs Android 的不兼容）───
 # ⚠️ 2026-09-27 退役（#126）：bin/bpf-relabel.sh + etc/bpfrelabel.rc【不再随镜像安装】。
-#   * 根治早就在内核里：patches/0007（bpffs 改回惰性标注），在 kernel-apply-patches.sh 的链上；
+#   * 根治早就在内核里：patches/kernel/core/0002（bpffs 改回惰性标注），在 kernel-apply-patches.sh 的链上；
 #     带 0007 的内核上这个服务每次开机都是"标签已正确 → exit 0"（2026-08-22 实测）。
 #   * 而它在 enforcing 下【不可能】工作：rc 里 `seclabel u:r:vendor_init:s0` 执行一个
 #     vendor 脚本，撞两条没有任何豁免的 neverallow ——
@@ -1103,7 +1103,7 @@ endif
 #  3. poolmask 不能抄 README 的 0xf50000（那是 ION）—— 本机没有 ION
 #     （/dev/ion 不存在、CONFIG_ION 也不在），要用 BLOB 的 0xfc0000。
 #     再加 GRALLOC（第 17 位）成 0xfe0000：没有这一位，CCodec 给字节缓冲解码器的是
-#     基础块池，每次 fetch 都是新缓冲，VideoFramePool 的缓冲数用完就停住（patches/0128）。
+#     基础块池，每次 fetch 都是新缓冲，VideoFramePool 的缓冲数用完就停住（patches/android/v4l2-codec2/0002）。
 #  ★ 另外 libv4l2_codec2_vendor_allocator **不必装**：
 #     plugin_store/VendorAllocatorLoader.cpp:26 的 dlopen 失败只 ALOGI 返回 nullptr，
 #     是可选项（给安全播放用的，本机没有）。
@@ -1193,7 +1193,7 @@ PRODUCT_PACKAGES += \
 
 # ═══════════ 手写笔（M-Pencil，#26）═══════════
 #
-# 内核一侧是触摸从片驱动（patches/0079、0080，kernel-config-android.sh 里 =y）；
+# 内核一侧是触摸从片驱动（patches/kernel/input/0011、patches/kernel/dts/0013，kernel-config-android.sh 里 =y）；
 # gk3pend 把从片的帧和笔 MCU 的压感、侧键、电量合成一支 uinput 触控笔。
 # 权限见 ueventd.gaokun3.rc 与 sepolicy/gk3pend.te，整体说明见 docs/dev/stylus.md。
 PRODUCT_PACKAGES += \
@@ -1229,7 +1229,7 @@ PRODUCT_COPY_FILES += \
 #   （github.com/chiyuki0325/EGoTouchRev-Linux）。逐项比对过：14 个算法函数
 #   逐字相同，20 项默认值只差一项，上游最新提交与 buildbot 那个补丁是同一天的。
 #   ⇒ 「换成 EGoTouchRev」换不来任何东西，我们已经在跑它了。
-#   （2026-10 起检测部分按作者重写的 EGoTouchRev-rebuild 改过并设为默认，见 patches/0121、0122。）
+#   （2026-10 起检测部分按作者重写的 EGoTouchRev-rebuild 改过并设为默认，见 patches/kernel/input/0018、0019。）
 #
 # 真正的差距在【参数】：驱动跑的是日用默认值，而它的调参工具里另有一套
 # game_preset。差三项，见 bin/gaokun3-touch-mode.sh。
@@ -1242,7 +1242,7 @@ PRODUCT_COPY_FILES += \
 #   实测一次甩动被切成 87 条轨迹（详见 bin/gaokun3-touch-mode.sh 顶部）。
 #   ★ 教训：照搬上游预设时，"另外两项是关掉东西，所以第三项也无害"是一次
 #   **没做的功课**，不是一个结论。逐项问"它打开了什么"。
-#   两版预设现在都把 JUMP 清 0；坐标平滑交给驱动的一欧滤波（patches/0120，0122 起默认打开），两版都关
+#   两版预设现在都把 JUMP 清 0；坐标平滑交给驱动的一欧滤波（patches/kernel/input/0017，0019 起默认打开），两版都关
 #   track_smoothing，game 与 daily 只差 hand_enabled（手掌识别）。
 #
 # 默认仍设 game：本机目标是跑手游，game 不做手掌识别，拇指贴着屏幕边缘平放时不会连带丢掉
@@ -1257,7 +1257,7 @@ PRODUCT_COPY_FILES += \
 PRODUCT_SYSTEM_EXT_PROPERTIES += \
     persist.sys.gaokun3.touch_mode=game
 
-# Kernel release reported to apps (patches/0085), changed in Settings → System. init hands it
+# Kernel release reported to apps (patches/kernel/core/0008), changed in Settings → System. init hands it
 # to the kernel before zygote starts; everything that is not an app keeps the real release.
 # Some environment checks accept only 4.x to 6.x; this value is what 0085 used to report to
 # everyone. system_ext for the same reason as touch_mode above.

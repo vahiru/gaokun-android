@@ -38,7 +38,7 @@ gaokun-android是一个业余开源项目，目前由两名活跃贡献者维护
 
 ### 内核补丁
 
-- 内核补丁位于[`patches/`](patches/)，请遵循Linux内核的[编码风格](https://www.kernel.org/doc/html/latest/process/coding-style.html)和提交信息格式（`子系统: 简短英文描述`）。
+- 内核补丁位于[`patches/kernel/`](patches/README.md)，请遵循Linux内核的[编码风格](https://www.kernel.org/doc/html/latest/process/coding-style.html)和提交信息格式（`子系统: 简短英文描述`）。
 - 适合合入主线的通用修复整理在[`docs/dev/upstream/`](docs/dev/upstream/README.md)。如果你希望协助将某个补丁推向上游主线，欢迎在issue或PR中告知。
 
 ## 许可
