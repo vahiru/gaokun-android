@@ -284,6 +284,10 @@ class Session final : public BnSession {
         std::lock_guard lock(mutex_);
         if (closed_ || queue_.size() >= 8) return unavailable();
         queue_.push_back([this,fn=std::move(fn)] {
+            // A retired session may still be saving after an authentication;
+            // reading or changing the database before it ends could undo that
+            // save or race its temporary file.
+            waitForPredecessor();
             if (!closed_) fn();
         });
         cv_.notify_all(); return ScopedAStatus::ok();
