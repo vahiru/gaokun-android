@@ -214,6 +214,17 @@ int main() {
     assert(!memcmp(&grown.frames.back(),&newest,sizeof(Gaokun3Frame)));
     assert(sameFrames(Frames(grown.frames.begin(),grown.frames.begin()+kStages),e.frames));
     Enrollment unfinished{}; unfinished.id = 9; learn(unfinished,synthetic(1));
+    // Learning needs the enrolment frames too: a frame that matches only a
+    // learned frame (an earlier false accept) never adds another one.
+    {
+        Enrollment planted = e;
+        learn(planted,synthetic(777));
+        const FrameFeatures stranger(synthetic(777)), own(e.frames[3]);
+        assert(!shouldLearn(stranger,planted,50,50));
+        assert(shouldLearn(own,planted,50,50));
+        assert(!shouldLearn(own,planted,39,50) && !shouldLearn(own,planted,50,60));
+        assert(!shouldLearn(own,unfinished,50,50));
+    }
     assert(unfinished.frames.empty());
     // They are saved and restored, and a record outside kStages..kMaxFrames
     // frames or with a wrong count fails closed.

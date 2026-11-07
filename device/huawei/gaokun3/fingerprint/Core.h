@@ -118,6 +118,16 @@ constexpr float kSameSpotScore = 25.0f;
 // comparisons) other fingers passed kMatchThreshold up to 15 times for one
 // finger, and none with this rule; genuine rates fell by 1 to 2 points.
 constexpr float kCorroboratedScore = 22.0f;
+// Whether an accepted probe (its finger score, and its score against its best
+// frame) is learned: at least kLearnThreshold, not a repeat (kRepeatScore),
+// and beyond chance against the enrolment frames alone (kCorroboratedScore).
+// Without the last rule one learned false accept would carry the same wrong
+// finger's later presses into the template: with one frame of another finger
+// planted among a left index's learned frames, that finger's presses were
+// accepted 10 of 34 times and 8 more of its frames learned; with the rule none
+// was learned, while the index learned 26 instead of 30 frames over 57 of its
+// own presses and lost one accept.
+bool shouldLearn(const FrameFeatures& probe, const Enrollment& finger, float fingerScore, float bestFrame);
 // Appends an authenticated probe, replacing the oldest learned frame when the
 // finger is full. Enrolment frames are kept; a feature cache only this finger
 // holds is updated with the new frame alone.

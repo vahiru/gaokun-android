@@ -277,6 +277,14 @@ float score(const FrameFeatures& probe, const Enrollment& finger, float* bestFra
     return scoreFeatures(probe.get(), frames, bestFrame, threads);
 }
 
+bool shouldLearn(const FrameFeatures& probe, const Enrollment& finger, float fingerScore, float bestFrame) {
+    if (fingerScore < kLearnThreshold || bestFrame >= kRepeatScore || finger.frames.size() < kStages) return false;
+    buildFeatures(finger);
+    std::vector<const Gaokun3FeatureSet*> enrolled;
+    for (size_t i = 0; i < kStages; ++i) enrolled.push_back(&(*finger.features)[i]->get());
+    return scoreFeatures(probe.get(), enrolled, nullptr) >= kCorroboratedScore;
+}
+
 EnrollFrame checkEnrollFrame(const Gaokun3Frame& frame, const Frames& taken) {
     float coverage = 0;
     gaokun3_quality_check(&frame, &coverage, nullptr);

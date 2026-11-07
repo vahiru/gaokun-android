@@ -443,12 +443,16 @@ class Session final : public BnSession {
                         recent_.insert(recent_.begin(),bestId);
                         // The unlock does not wait for learning or the disk. If
                         // this save fails, the failure count stays as stored:
-                        // a lockout may come early, never late.
-                        if (bestScore >= gaokun3::kLearnThreshold && bestFrame < gaokun3::kRepeatScore)
-                            for (auto& e : store_.enrollments)
-                                if (e.id == bestId) gaokun3::learn(e,frame);
+                        // a lockout may come early, never late. Without a
+                        // learned frame or failures to clear nothing changed.
+                        bool changed = store_.failures != 0;
+                        for (auto& e : store_.enrollments)
+                            if (e.id == bestId && gaokun3::shouldLearn(probe,e,bestScore,bestFrame)) {
+                                gaokun3::learn(e,frame);
+                                changed = true;
+                            }
                         store_.failures = 0;
-                        if (!store_.save()) LOG(ERROR) << "Fingerprint database not saved after authentication";
+                        if (changed && !store_.save()) LOG(ERROR) << "Fingerprint database not saved after authentication";
                         return;
                     }
                 }
