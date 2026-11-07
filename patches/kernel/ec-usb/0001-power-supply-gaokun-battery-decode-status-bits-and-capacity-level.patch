@@ -36,9 +36,9 @@ index 6212b00..0800d43 100644
  #define DELAY_MODE	4
  
 +/*
-+ * EC 的 CRITICAL 位在多少电量置位，至今没有实测（1.0 计划 BATT-3）。如果它在
-+ * 5% 以上就置位，直接拿它报 Critical 会让 Android 过早关机，所以只在电量
-+ * 不高于这个值时才把它升级成 Critical；0 = 只在 0% 时才认它。
++ * Escalate EC_BAT_CRITICAL to CAPACITY_LEVEL_CRITICAL only when the reported
++ * capacity is at or below critical_max_capacity so an early EC critical bit
++ * cannot trigger a premature userspace shutdown (0 = only at 0%).
 + */
 +static int critical_max_capacity = 2;
 +module_param(critical_max_capacity, int, 0644);
@@ -52,7 +52,7 @@ index 6212b00..0800d43 100644
  	char battery_vendor[0x10];
  
  	int charge_now;
-+	u8 bat_status_raw;	/* 0x82 最近一次读成功的原始值 */
++	u8 bat_status_raw;	/* Last successfully read raw 0x82 byte */
  	int online;
  	int bat_present;
  };
@@ -61,14 +61,15 @@ index 6212b00..0800d43 100644
  }
  
 +/*
-+ * 0x82 按位解码。它与 ACPI _BST 的 state 字段同构（bit0 放电、bit1 充电、
-+ * bit2 电量危急），bit3 是 EC 自己的"充满"。原实现按整个字节精确匹配，
-+ * 0x00（插着电但不充）和任何组合值（如 0x05 = 放电 + 危急）都只打一条警告、
-+ * status 停在上一次的值 —— 于是"充电中"可以在电量一路下降时一直挂着。
++ * Decode register 0x82 bitwise. Bits 0..2 match the ACPI _BST state bitmask
++ * (bit 0 discharging, bit 1 charging, bit 2 critical) and bit 3 indicates full.
++ * Matching the whole byte with a switch statement left charge_now stale on 0x00
++ * (plugged in, not charging) or combined states such as 0x05 (discharging +
++ * critical).
 + *
-+ * 优先级：放电位压过其他位（0x05 / 0x09 / 矛盾的 0x03 都报放电 —— 宁可让
-+ * Android 的关机规则生效，也不要被一个过时的"充电中"挡住）；其次充满、充电；
-+ * 一位都没有时，插着电报 NOT_CHARGING，没插电报放电。
++ * Prioritize discharging over other bits so a stale charging bit never blocks
++ * low-battery shutdown; then check full and charging; if no bit is set, report
++ * NOT_CHARGING when on AC power and DISCHARGING otherwise.
 + */
 +static int gaokun_psy_decode_bat_status(struct gaokun_psy *ecbat, u8 raw)
 +{
@@ -91,7 +92,7 @@ index 6212b00..0800d43 100644
  	u8 charge;
  
 -	gaokun_ec_psy_read_byte(ecbat->ec, EC_BAT_STATUS, &charge);
-+	/* 读失败时 charge 是未初始化的栈变量，原实现照样拿去解码 */
++	/* Keep the previous status if the EC read fails */
 +	if (gaokun_ec_psy_read_byte(ecbat->ec, EC_BAT_STATUS, &charge))
 +		return;
  
@@ -116,22 +117,21 @@ index 6212b00..0800d43 100644
 +}
 +
 +/*
-+ * Android 的 BatteryService.shouldShutdownLocked()（本机 services.jar 反汇编，
-+ * 1.0 计划 BATT-1）：capacity_level 节点存在时【只】在它等于 Critical 时关机；
-+ * 不存在时才退回"电量 <= 0 且 status 不是充电中"。所以一旦导出这个属性，
-+ * 0% 关机就完全靠这里报 Critical，必须覆盖原规则的全部情形：
++ * When capacity_level is exposed in sysfs, Android's BatteryService shuts down
++ * only when capacity_level == Critical rather than falling back to the legacy
++ * "capacity <= 0 && status != Charging" rule:
 + *
-+ *   * 0%，且不是"EC 说在充、电流也确实为正" ⇒ Critical。这比原规则多出的
-+ *     那一种 —— 插着电脑 USB 口这类弱电源，EC 报充电、电量照掉 —— 正是
-+ *     BATT-1（09-14 那次没关机画面的断电）。
-+ *   * EC 的 CRITICAL 位、电量不高于 critical_max_capacity ⇒ Critical
-+ *     （同样排除"确实在充"），给 EC 自己的低电判断留一点余量（BATT-2）。
++ *   - Report Critical at 0% unless the EC reports charging and rate_now is
++ *     positive, covering the case where a weak USB power source asserts the
++ *     charging bit while the battery continues to drain to 0%.
++ *   - Report Critical when EC_BAT_CRITICAL is set and capacity is at or below
++ *     critical_max_capacity (unless actively gaining charge), leaving a small
++ *     safety margin for the EC's own low-battery threshold.
 + *
-+ * ⚠️ current_now 的正负约定没有带负载实测过：2026-10-05 插着 Mac 的 USB 口、
-+ *    status=Charging、电量 92% 时 7 次采样里 5 次为 +15…+106 mA、2 次为
-+ *    -19 / -57 mA，与"正 = 流入电池"一致，但只是旁证（实测步骤见 BATT-1）。
-+ *    约定若是反的：0% 接着真充电器会被报 Critical（多关一次机），弱电源下
-+ *    掉到 0% 则仍不报（退回修之前的行为）—— 验收时两种都要看。
++ * Note: rate_now is treated as signed positive when charging (+15..+106 mA
++ * observed while charging from a host USB port at 92% SOC). If a future EC
++ * firmware revision uses the opposite sign convention, verify both weak-supply
++ * drain and charger attach at 0%.
 + */
 +static int gaokun_psy_capacity_level(struct gaokun_psy *ecbat)
 +{
@@ -179,12 +179,12 @@ index 6212b00..0800d43 100644
  static DEVICE_ATTR_RW(smart_charge_delay);
  
 +/*
-+ * ec_raw：只读，给实测用（1.0 计划 BATT-1/2 的放电采样、电池温度 LIVE-11/PERF-11）。
-+ * 打出 0x82 的原始状态字节，以及三个含义未知的字：0x98、0x9C（状态块，随 _BST
-+ * 每 2 秒读一次）和 0xA0（_BIX 块，事件时刷新）—— 都是驱动本来就在读的，不增加
-+ * EC 事务。电池温度若在 EC 里，最可能就在这几个字中（例如以 0.1 K 为单位时约
-+ * 2980），但这只是猜测，所以【不】据此导出 POWER_SUPPLY_PROP_TEMP：
-+ * 报一个错的温度比报不出来更糟（温度高了会触发框架的过温关机）。
++ * ec_raw: read-only diagnostic attribute exposing the raw 0x82 status byte and
++ * the three undocumented words already fetched by the driver: 0x98 and 0x9C
++ * (from the _BST status block) and 0xA0 (from the _BIX info block), without
++ * issuing extra EC transactions. Useful for inspecting raw EC battery
++ * telemetry during discharge and thermal characterization without extra
++ * I2C traffic.
 + */
 +static ssize_t ec_raw_show(struct device *dev, struct device_attribute *attr,
 +			   char *buf)

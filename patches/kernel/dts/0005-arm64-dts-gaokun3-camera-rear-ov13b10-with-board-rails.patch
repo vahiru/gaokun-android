@@ -37,12 +37,12 @@ index 690db45..937eda9 100644
 -		 * notifier - the front camera would get no /dev/v4l-subdev*
 -		 * either. Shared-rail conflict needs board-level evidence.
 +		/*
-+		 * port@0: csiphy0 -> rear OV13B10. Restored 2026-09-14 with the
-+		 * board's real power sequence (Windows CAMS_RES_QRD.bin, see
-+		 * docs/stage4-findings.md #106): LDO2_B 2.8V (vdda), LDO2_C 1.8V
-+		 * (vddio), GPIO92-gated rail (vddd), reset GPIO7, MCLK4 24MHz.
-+		 * L2B is shared with the panel's vddi (1.8V vote); the sensor
-+		 * driver raises it to 2.8V while powered, exactly like Windows.
++		 * port@0: csiphy0 -> rear OV13B10. Powered per the board's
++		 * Windows camera power table (CAMS_RES_QRD.bin): LDO2_B 2.8V
++		 * (vdda), LDO2_C 1.8V (vddio), GPIO92-gated rail (vddd), reset
++		 * GPIO7, MCLK4 19.2MHz. L2B is shared with the panel's vddi
++		 * (1.8V vote); the sensor driver raises it to 2.8V while
++		 * powered, matching Windows.
  		 */
 +		port@0 {
 +			csiphy0_ep: endpoint@0 {
@@ -62,13 +62,13 @@ index 690db45..937eda9 100644
  	 */
 -	/* camera_rear (s5k3l6xx) removed - see camss port@0 note above */
 +	/*
-+	 * Rear camera. The board's Windows driver package ships two rear modules
-+	 * (ofilm_ov13b10 and lijing_s5k3l6); on this unit a bus scan with the
-+	 * rails up (2026-09-14, docs/stage4-findings.md #106) answered at 0x36
-+	 * (OV13B10) and 0x50 (module EEPROM), nothing at 0x10 - so it is the
-+	 * OV13B10. Rails from CAMS_RES_QRD.bin: LDO2_B 2.8V (avdd, shared with
-+	 * the panel's 1.8V vddi - the driver raises it while powered), LDO2_C
-+	 * 1.8V (dovdd), GPIO92-gated core rail (dvdd), reset GPIO7, MCLK4.
++	 * Rear camera. The board's Windows driver package lists two rear modules
++	 * (ofilm_ov13b10 and lijing_s5k3l6); on OV13B10 units, CCI responds at
++	 * 0x36 (OV13B10) and 0x50 (module EEPROM) once the rails are enabled,
++	 * with nothing at 0x10. Rails from CAMS_RES_QRD.bin: LDO2_B 2.8V (avdd,
++	 * shared with the panel's 1.8V vddi and raised to 2.8V by the sensor
++	 * driver while powered), LDO2_C 1.8V (dovdd), GPIO92-gated core rail
++	 * (dvdd), reset GPIO7, MCLK4.
 +	 * The upstream ov13b10 register tables assume a 19.2 MHz MCLK.
 +	 */
 +	camera_rear: camera@36 {

@@ -22,10 +22,10 @@ index e9c4e72..4c74447 100644
  }
  
 +/*
-+ * 开机时盖子的状态。原实现只在 EC_EVENT_LID 事件里上报 SW_LID，注册时既不读
-+ * 也不报，于是开机时盖子是合着的，输入层（和 Android 的 lid 逻辑）会一直以为
-+ * 开着，直到下一次开合（1.0 计划 DISP-1）。读法与中断里的完全相同；放在申请
-+ * 中断之前，lid_opened 不会和中断线程抢。读失败就保持原来的假设（开着）。
++ * Report the initial SW_LID state at boot. The driver previously only reported
++ * SW_LID on EC_EVENT_LID interrupts, leaving the input layer assuming the lid
++ * is open when booting with the cover closed. Query EC_LID_STATE before
++ * requesting the IRQ so lid_opened cannot race the IRQ thread.
 + */
 +static void gaokun_ec_report_initial_lid(struct gaokun_ec *ec)
 +{

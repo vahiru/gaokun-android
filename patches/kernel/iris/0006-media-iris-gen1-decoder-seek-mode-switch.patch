@@ -29,9 +29,9 @@ index f00748b..e8eeb83 100644
 +			   inst->state == IRIS_INST_INPUT_STREAMING &&
 +			   inst->sub_state & IRIS_INST_SUB_LOAD_RESOURCES) {
 +			/*
-+			 * gaokun3 0066: OUTPUT streamoff after CAPTURE streamoff (a seek, or the
-+			 * first half of a stop): flush and keep the session loaded and started,
-+			 * as venus vdec_stop_output() does. The next streamon continues it;
++			 * OUTPUT streamoff after CAPTURE streamoff (a seek, or the first half of
++			 * a stop): flush and keep the session loaded and started, as venus
++			 * vdec_stop_output() does. The next streamon continues it;
 +			 * iris_close() stops it if none comes.
 +			 */
 +			reinit_completion(&inst->flush_completion);
@@ -62,7 +62,7 @@ index 814b608..c157a01 100644
  };
  
 +/*
-+ * gaokun3 0066: how a decoder seek (v4l2_codec2 flush: CAPTURE then OUTPUT streamoff,
++ * Controls how a decoder seek (v4l2_codec2 flush: CAPTURE then OUTPUT streamoff,
 + * then both streamon) is carried out; see iris_vdec.c.
 + */
 +extern unsigned int iris_seek_mode;
@@ -95,8 +95,8 @@ index d1dc09f..f25b7da 100644
  }
  
 +/*
-+ * gaokun3 0066 (#128 §12–§13): v4l2_codec2 seeks by streaming off CAPTURE, then OUTPUT,
-+ * then streaming both back on. Upstream gen1 turns the OUTPUT streamoff into STOP +
++ * v4l2_codec2 seeks by streaming off CAPTURE, then OUTPUT, then streaming both
++ * back on. Upstream gen1 turns the OUTPUT streamoff into STOP +
 + * RELEASE_RESOURCES and the streamon into a full reconfiguration plus LOAD_RESOURCES + START
 + * in the same session; the sc8280xp firmware then asserts (video_decoder_utils.c:3056)
 + * as the output properties arrive.
@@ -159,7 +159,7 @@ index 477ef19..094a70a 100644
  	struct iris_inst *inst = iris_get_inst(filp);
  
 +	/*
-+	 * gaokun3 0066 (seek_mode=1): a session flushed at OUTPUT streamoff is still
++	 * When seek_mode=1, a session flushed at OUTPUT streamoff is still
 +	 * loaded and started. Stop it like upstream would have (STOP + RELEASE_RESOURCES)
 +	 * while the m2m context, which the stop path returns buffers through, still exists.
 +	 */

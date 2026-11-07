@@ -23,9 +23,9 @@ index 7837968c0842..cc3564630257 100644
  static struct kmem_cache *bpf_fs_inode_cachep __ro_after_init;
  
 +/*
-+ * gaokun3/Android: bpffs 必须由 SELinux 通过 genfscon 惰性标注。
-+ * 见 scripts/kernel-bpffs-genfscon-fix.py 的完整说明。
-+ * 置 1 即恢复主线原行为（Android 上会导致 system_server 崩溃循环）。
++ * On Android, SELinux labels bpffs paths via genfscon rules; skip eager
++ * security_inode_init_security() so inodes use lazy path-based labeling
++ * instead of inheriting the parent directory's label before dentry attach.
 + */
 +#define BPF_FS_EAGER_SECURITY_INIT 0
 +

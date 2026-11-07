@@ -544,8 +544,8 @@ index 6a3514413..81b3ee6f5 100644
 + * gaokun3_fpcmd_goodix.h). Requests use the Goodix TA envelope: type 1 writes
 + * a frame to SPI, type 2 reads the MCU's pending packet, types 3/4 are
 + * REQUEST_INIT_FP_DATA1/2. INIT replays the Windows boot order. The TA opens
-+ * its secure-storage files during INIT_FP_DATA; patch 0050 answers those
-+ * listener requests with a failure, which the TA treats as a fresh install
++ * its secure-storage files during INIT_FP_DATA; the in-kernel listener answers
++ * those requests with a failure, which the TA treats as a fresh install
 + * ("base available 0") and carries on. Image reads with CMD_TO_DEVICE 9 make
 + * the TA return the whole image packet instead of keeping it for its own
 + * algorithm, which needs the INIT_FP_DATA step to have run.

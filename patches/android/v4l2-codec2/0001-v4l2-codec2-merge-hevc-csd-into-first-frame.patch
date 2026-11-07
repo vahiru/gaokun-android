@@ -32,12 +32,12 @@ index 00880d7..305b1ff 100644
          }
      }
  
-+    // *** HEVC: 把 CSD 暂存下来并进第一个帧缓冲，不要单独下发。
-+    // venus 固件收到「只有 VPS/SPS/PPS、又没打 CODECCONFIG 标志」的缓冲时会报
-+    // H265_CONFIG_FLAG_MISSING，然后用默认 SPS 编造一张 pic 0；那张图要一块 YUV
-+    // 输出缓冲，而此时主机还在等 SOURCE_CHANGE 才肯分配 —— 于是死锁，一帧不出。
-+    // H.264 固件不挑同样形状的缓冲（实测 CONFIG_FLAG_MISSING 0 次），所以只改 HEVC。
-+    // 完整案卷：docs/stage4-findings.md #79（含固件自述日志）。
++    // HEVC: stash the CSD and prepend it to the first frame buffer instead of
++    // submitting it standalone. When the iris/venus firmware receives a buffer
++    // containing only VPS/SPS/PPS without V4L2_BUF_FLAG_CODECCONFIG, it reports
++    // H265_CONFIG_FLAG_MISSING and synthesizes a dummy picture that blocks
++    // waiting for a CAPTURE buffer while the host is still waiting for
++    // V4L2_EVENT_SOURCE_CHANGE. H.264 is unaffected, so limit this to HEVC.
 +    if (mIntfImpl->getVideoCodec() == VideoCodec::HEVC &&
 +        property_get_bool("vendor.gaokun3.v4l2c2.merge_csd", 1)) {
 +        C2ReadView csdView = linearBlock.map().get();
@@ -55,22 +55,22 @@ index 00880d7..305b1ff 100644
      processWorkBuffer(bitstreamId, linearBlock);
  }
  
-+// 把暂存的 CSD 拼到 |frame| 前面，产出一块新的线性 block。失败返回 false，
-+// 调用方退回原行为（宁可维持老样子，也不要静默丢帧）。
++// Prepend the stashed CSD to |frame| in a newly allocated linear block.
++// Returns std::nullopt on failure so the caller can fall back to |frame|.
 +std::optional<C2ConstLinearBlock> DecodeComponent::mergePendingCSD(
 +        const C2ConstLinearBlock& frame) {
 +    if (!mCSDMergePool) {
 +        auto sharedThis = weak_from_this().lock();
 +        if (sharedThis == nullptr) return std::nullopt;
-+        // *** 必须是【dmabuf 支撑】的线性块：输入队列走 V4L2_MEMORY_DMABUF，
-+        // V4L2Decoder 直接取 handle()->data[0] 当 fd。
-+        // 本机【没有 ION】（C2PlatformAllocatorStore::DMABUFHEAP == ION），
-+        // BASIC_LINEAR 默认走的正是它，拿到的块没有可用 fd，QBUF 会在用户态
-+        // 就失败（内核侧连 VIDIOC_QBUF 都看不到）。本机可用的是 BLOB
-+        // —— 与 media_codecs_c2.xml 里 poolmask 用 0xfc0000 是同一条事实。
-+        // 用平台默认的线性池：客户端喂进来的输入块就是从它出来的，V4L2 能导入。
-+        // (试过 C2PlatformAllocatorStore::BLOB —— 那是 gralloc 支撑的，
-+        //  handle()->data[0] 不是纯 dmabuf fd，同样 QBUF 失败。)
++        // The V4L2 OUTPUT queue uses V4L2_MEMORY_DMABUF and V4L2Decoder reads
++        // handle()->data[0] as the dmabuf fd. Allocate from the platform's
++        // default BASIC_LINEAR pool (the same pool that backs incoming input
++        // buffers) rather than C2PlatformAllocatorStore::BLOB, whose gralloc
++        // handle does not expose a raw dmabuf fd at data[0].
++        //
++        // Note that media_codecs_c2.xml must configure the linear pool mask
++        // appropriately on platforms without legacy ION support so that
++        // BASIC_LINEAR yields valid dmabuf-backed blocks.
 +        auto status = GetCodec2BlockPool(C2BlockPool::BASIC_LINEAR, std::move(sharedThis),
 +                                         &mCSDMergePool);
 +        if (status != C2_OK || !mCSDMergePool) {
@@ -83,19 +83,19 @@ index 00880d7..305b1ff 100644
 +    if (fv.error() != C2_OK) return std::nullopt;
 +
 +    const size_t total = mPendingCSD.size() + fv.capacity();
-+    // *** 分配尺寸必须 >= V4L2 输入队列的 plane 尺寸，不能只按内容大小分配。
-+    // 入队走 V4L2_MEMORY_DMABUF，vb2 会检查 dmabuf 实际大小 >= min_length
-+    // （= 队列的 plane_sizes，本机实测 8 MiB）。只分配 133 KB 的话
-+    // VIDIOC_QBUF 直接 EINVAL —— 而且报错里【看不出】是尺寸问题。
++    // With V4L2_MEMORY_DMABUF, videobuf2 rejects a dmabuf whose size is smaller
++    // than the V4L2 OUTPUT plane's min_length (e.g. 8 MiB) with EINVAL on
++    // VIDIOC_QBUF. Allocate at least mIntfImpl->getInputBufferSize() while
++    // sharing only the |total| payload range below.
 +    const size_t allocSize = std::max(total, mIntfImpl->getInputBufferSize());
 +    std::shared_ptr<C2LinearBlock> block;
 +    C2MemoryUsage usage = {C2MemoryUsage::CPU_READ, C2MemoryUsage::CPU_WRITE};
 +    if (mCSDMergePool->fetchLinearBlock(allocSize, usage, &block) != C2_OK || !block)
 +        return std::nullopt;
 +
-+    // *** 写视图必须在 share() 之前析构：映射还挂着的时候 share 出来的块，
-+    // 其 native handle 在 V4L2 那边用不了（实测 VIDIOC_QBUF 直接 EFAULT，
-+    // 而且 strace 连 v4l2_buffer 结构体都解不出来 —— 极难从报错看出是这个）。
++    // Destroy the C2WriteView before calling share(): sharing a block while its
++    // writable mapping is still live produces a native handle that fails
++    // VIDIOC_QBUF with EFAULT.
 +    {
 +        C2WriteView wv = block->map().get();
 +        if (wv.error() != C2_OK) return std::nullopt;
@@ -116,7 +116,7 @@ index 00880d7..305b1ff 100644
      C2ConstLinearBlock linearBlock = work->input.buffers.front()->data().linearBlocks().front();
      ALOG_ASSERT(linearBlock.size() > 0u, "Input buffer of work(%d) is empty.", bitstreamId);
  
-+    // *** 上一步若暂存了 CSD（HEVC），在这里合并成一个缓冲再下发。见 #79。
++    // Prepend any stashed HEVC CSD to the first input frame buffer.
 +    if (!mPendingCSD.empty()) {
 +        auto merged = mergePendingCSD(linearBlock);
 +        mPendingCSD.clear();
@@ -147,8 +147,8 @@ index 27905c7..94ab8c2 100644
      // The record of frame index to update color aspects. Details as above.
      uint64_t mPendingColorAspectsChangeFrameIndex;
  
-+    // *** HEVC CSD 合并（docs/stage4-findings.md #79）
-+    // 把 CSD 并进第一个帧缓冲，避免 venus 固件为 config-only 缓冲编造一张图后死锁。
++    // Prepend stashed HEVC CSD to the first input frame buffer so the firmware
++    // does not synthesize a dummy frame for a standalone config-only buffer.
 +    std::optional<C2ConstLinearBlock> mergePendingCSD(const C2ConstLinearBlock& frame);
 +    std::vector<uint8_t> mPendingCSD;
 +    std::shared_ptr<C2BlockPool> mCSDMergePool;

@@ -33,11 +33,11 @@ index 2123f63..747ceec 100644
  #include "camss.h"
  
 +/*
-+ * gaokun3 patches/0035：v4l2-async 要求端点上【所有】传感器都绑上才会建 subdev 节点。
-+ * 同一款板子有不同的后摄模组（OV13B10 / S5K3L6），DT 只能写一种；写错的那台机器上
-+ * 那颗传感器永远绑不上，于是前摄也一起消失（docs/stage4-findings.md #81/#106）。
-+ * 这里在 probe 之后等 sensor_wait_ms，仍未完成就把 notifier 拆掉、只带已绑上的传感器重建。
-+ * 0 = 关闭这个回落。
++ * v4l2-async only completes the notifier after all graph endpoints bind.
++ * On boards shipped with alternate rear camera modules, an absent sensor in DT
++ * never binds and would otherwise block the working front camera as well.
++ * Wait sensor_wait_ms after probe, then re-register the notifier with only the
++ * bound endpoints (0 disables the fallback).
 + */
 +static unsigned int sensor_wait_ms = 20000;
 +module_param(sensor_wait_ms, uint, 0644);
@@ -96,7 +96,7 @@ index 2123f63..747ceec 100644
  	csiphy->cfg.csi2 = &csd->interface.csi2;
  	subdev->host_priv = csiphy;
  
-+	/* 0035: 记住谁真的绑上了，回落时只带它们 */
++	/* Record bound sensor fwnodes so the fallback notifier can filter by them */
 +	if (asd->match.fwnode &&
 +	    camss->num_bound_sensors < ARRAY_SIZE(camss->bound_sensors)) {
 +		unsigned int i;
@@ -200,7 +200,7 @@ index 93d691c..c3ec868 100644
  struct camss {
  	struct v4l2_device v4l2_dev;
  	struct v4l2_async_notifier notifier;
-+	/* gaokun3 patches/0035: 容忍从未绑上的传感器（见 camss_sensor_fallback_work） */
++	/* Fallback state for completing the notifier without unbound sensors */
 +	struct delayed_work sensor_fallback_work;
 +	bool notifier_complete;
 +	struct fwnode_handle *bound_sensors[8];

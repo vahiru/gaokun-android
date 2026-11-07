@@ -18,7 +18,7 @@ Upstream-Status: Inappropriate [Android-specific]
  
  &usb_0_dwc3 {
 -	dr_mode = "host";
-+	/* port0（空闲口）。port1 (a800000) 挂启动介质，必须保持 host。 */
++	/* Port 0 is dual-role; port 1 (a800000) hosts boot storage and stays host-only. */
 +	dr_mode = "otg";
 +	usb-role-switch;
  };

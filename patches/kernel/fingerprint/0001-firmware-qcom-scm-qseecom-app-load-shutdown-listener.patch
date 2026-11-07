@@ -437,9 +437,9 @@ index 6b601a4b8..dddaf9af5 100644
 +	struct qcom_scm_desc desc = {};
 +	int status;
 +
-+	/* mdt_len==0 是合法的：单一 secelf（如 gaokun3 的 fingerpr.mbn），整
-+	 * 个文件一次性传，元数据由 TZ 从 secelf 的 program header 自解析
-+	 * （Windows QcTrEE 的 LOAD 也是 mdt_len=0）。拼接式 .mdt 才有非零元数据长度。 */
++	/* mdt_len == 0 is valid for a monolithic secelf image (such as
++	 * fingerpr.mbn), where the entire ELF is passed in a single buffer and TZ
++	 * parses the program headers directly. Split .mdt images pass mdt_len > 0. */
 +	if (!img || !img_len || mdt_len > img_len)
 +		return -EINVAL;
 +
@@ -566,16 +566,16 @@ index 6b601a4b8..dddaf9af5 100644
  	dev_info(scm->dev, "qseecom: found qseecom with version 0x%x\n", version);
  
 +	/*
-+	 * gaokun 移植补丁：把 TZ 内存（qcom_tzmem 走 scm->dev 的 dma_alloc_coherent）
-+	 * 约束到 32 位物理地址。APP_START（LOAD）把镜像物理地址当作 SMC32 的裸参数传，
-+	 * 高 32 位会被直接截断；而本平台 dma-ranges 是 40 位、内存又在 4GB 以上，不约束
-+	 * 就可能分到 >4GB 的缓冲、LOAD 收到错误地址（轻则拒绝，重则整机静默挂死）。
-+	 * SDM670 那类 <4GB 内存的机器天然满足，上游参考实现因此没做这件事。QSEECOM 的
-+	 * 缓冲都很小，收窄到 ZONE_DMA32 无副作用；万一失败也只是回退到旧行为。
++	 * Restrict qcom_tzmem allocations (backed by dma_alloc_coherent() on
++	 * scm->dev) to 32-bit physical addresses. QSEECOM_TZ_CMD_APP_START passes
++	 * the image physical address in a 32-bit SMC argument, truncating the
++	 * upper 32 bits on platforms with 40-bit dma-ranges and >4 GiB RAM.
++	 * Constraining scm->dev to DMA_BIT_MASK(32) keeps QSEECOM buffers in
++	 * ZONE_DMA32 without affecting other consumers.
 +	 */
 +	if (dma_set_coherent_mask(scm->dev, DMA_BIT_MASK(32)))
 +		dev_warn(scm->dev,
-+			 "qseecom: 无法约束到 32 位 DMA，APP_START 加载大镜像可能拿到 >4GB 物理地址\n");
++			 "qseecom: failed to set 32-bit DMA mask; APP_START buffers may exceed 4 GiB\n");
 +
 +	/*
 +	 * Set up the TEE interface device, which is what lets user space reach

@@ -23,13 +23,12 @@ diff --git a/src/freedreno/vulkan/tu_cmd_buffer.cc b/src/freedreno/vulkan/tu_cmd
 index 42a0416..9a2246e 100644
 --- a/src/freedreno/vulkan/tu_cmd_buffer.cc
 +++ b/src/freedreno/vulkan/tu_cmd_buffer.cc
-@@ -3679,8 +3679,13 @@ tu_allocate_transient_attachments(struct tu_cmd_buffer *cmd, bool sysmem)
+@@ -3679,8 +3679,12 @@ tu_allocate_transient_attachments(struct tu_cmd_buffer *cmd, bool sysmem)
  
     for (unsigned i = 0; i < fb->attachment_count; i++) {
        const struct tu_image_view *iview = cmd->state.attachments[i];
 +      /* An attachment without bound memory (see the NULL-memory bind path in
 +       * tu_image_bind) needs no lazy allocation; don't dereference mem.
-+       * (gaokun patch 0004)
 +       */
        if (iview && !(iview->image->vk.create_flags &
                       VK_IMAGE_CREATE_SPARSE_BINDING_BIT) &&
@@ -53,7 +52,7 @@ index 88df2a0..e838efd 100644
 +       * memory handle (observed pNext: NATIVE_BUFFER_ANDROID +
 +       * BIND_IMAGE_MEMORY_SWAPCHAIN_INFO_KHR, caller ANGLE -> libvulkan).
 +       * Leaving the image unbound means iova == 0 and the GPU writes to
-+       * address 0 (SMMU translation faults).  (gaokun patch 0004 v3)
++       * address 0 (SMMU translation faults).
 +       */
 +      const VkNativeBufferANDROID *anb =
 +         vk_find_struct_const(bind_info->pNext, NATIVE_BUFFER_ANDROID);

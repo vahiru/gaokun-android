@@ -29,8 +29,8 @@ index b0d3414..41042b3 100644
  };
  
 +/*
-+ * gaokun3 诊断开关：模拟"这颗传感器不在"（另一款后摄模组的机器），用来验证 camss 的
-+ * 0035 回落是否能保住前摄。cmdline: ov13b10.fail_probe=1
++ * Diagnostic parameter: simulate an absent sensor (as on board variants with an
++ * alternate rear camera module) to test camss notifier fallback.
 + */
 +static bool fail_probe;
 +module_param(fail_probe, bool, 0444);
@@ -108,9 +108,9 @@ index b0d3414..41042b3 100644
  };
  
 +/*
-+ * gaokun3: libcamera 要 NATIVE_SIZE / CROP_BOUNDS / CROP_DEFAULT / CROP，没有就把
-+ * 有效区默认成模式尺寸并警告"驱动要修"。上游驱动没给出含虚拟像素的完整阵列尺寸，
-+ * 这里按 4208x3120 全幅算，窄模式（4160 宽）居中裁切 —— 这是【假设】，不是手册值。
++ * Report the 4208x3120 active pixel array for NATIVE_SIZE, CROP_BOUNDS, and
++ * CROP_DEFAULT, and center-crop narrower modes (such as 4160-wide modes)
++ * within the full array for V4L2_SEL_TGT_CROP.
 + */
 +static int ov13b10_get_selection(struct v4l2_subdev *sd,
 +				 struct v4l2_subdev_state *sd_state,

@@ -34,8 +34,8 @@ index 937eda9..b87f09e 100644
 -			default-state = "off";
 -		};
 +		/*
-+		 * GPIO93 曾在这里被当成 flash LED（white:flash）——实测打脉冲不亮（#106），
-+		 * 连带的 camera_flash_en pinctrl 状态一起删了。真闪光灯是下面 &pmc8280c 的 led-0。
++		 * GPIO93 does not drive the rear flash LED; the physical flash
++		 * LED is driven by &pmc8280c led-0 (channels 1 and 4) below.
 +		 */
  	};
  
@@ -45,11 +45,11 @@ index 937eda9..b87f09e 100644
  };
  
 +/*
-+ * 闪光灯（patches/0036）：Windows 的 \_SB.FLSH 设备没有 GPIO/I2C 资源 ⇒ 走 PMIC 闪光模块
-+ * （pmc8280c = PM8350C，主线 leds-qcom-flash）；GPIO93 直驱实测不亮（#106）。
-+ * 2026-09-14 内核 #19 四路逐个 torch 实测（用户看背面）：LED 接在 **1 + 4 路**（#110）。
-+ * ⚠️ 电流上限是【保守假设】不是模组手册值：torch 合计 200 mA、flash 600 mA / 400 ms。
-+ * ⚠️ 故意不在 ov13b10 节点上写 flash-leds：那会让 v4l2-async 再多等一个 subdev。
++ * Rear camera flash LED: ACPI \_SB.FLSH declares no GPIO/I2C resources because
++ * the flash is driven by the PM8350C (pmc8280c) SPMI flash module on channels
++ * 1 and 4. Current limits are conservative defaults (200 mA torch, 600 mA /
++ * 400 ms flash). Do not attach flash-leds to the ov13b10 node so v4l2-async
++ * does not block waiting for an extra subdev.
 + */
 +&pmc8280c {
 +	pmc8280c_flash: led-controller@ee00 {
