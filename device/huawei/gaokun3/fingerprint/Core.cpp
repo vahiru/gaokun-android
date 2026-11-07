@@ -194,7 +194,19 @@ bool goodixBaseUsable(const uint16_t* candidate, const uint16_t* current) {
     return c > b;
 }
 
-FrameFeatures::FrameFeatures(const Gaokun3Frame& frame) : fs_(gaokun3_feature_extract(&frame)) {}
+static float matchScale(const Gaokun3Frame& frame) {
+    for (const SensorProfile* p : {&kFocalTech, &kGoodix})
+        if (frame.width == p->width && frame.height == p->height) return p->matchScale;
+    return 1.0f;
+}
+static Gaokun3FeatureSet extract(const Gaokun3Frame& frame, float scale) {
+    if (scale == 1.0f) return gaokun3_feature_extract(&frame);
+    auto resized = std::make_unique<Gaokun3Frame>();
+    if (!gaokun3_frame_resize(&frame, scale, resized.get())) return Gaokun3FeatureSet{};
+    return gaokun3_feature_extract(resized.get());
+}
+FrameFeatures::FrameFeatures(const Gaokun3Frame& frame) : FrameFeatures(frame, matchScale(frame)) {}
+FrameFeatures::FrameFeatures(const Gaokun3Frame& frame, float scale) : fs_(extract(frame, scale)) {}
 FrameFeatures::~FrameFeatures() { gaokun3_feature_set_free(&fs_); }
 
 // A probe usually overlaps several frames of its finger, while a chance

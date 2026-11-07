@@ -40,6 +40,11 @@ bool gaokun3_frame_geometry_valid (const Gaokun3Frame *frame);
  * features. */
 bool gaokun3_quality_check (const Gaokun3Frame *frame,
                             float *coverage, float *mean_tc);
+/* Resamples a frame to round(width * scale) x round(height * scale), with a
+ * Gaussian prefilter when shrinking; false when the result would have no
+ * valid geometry. in and out may not overlap. */
+bool gaokun3_frame_resize (const Gaokun3Frame *in, double scale,
+                           Gaokun3Frame *out);
 Gaokun3FeatureSet gaokun3_feature_extract (const Gaokun3Frame *frame);
 void gaokun3_feature_set_free (Gaokun3FeatureSet *fs);
 /* 0 when nothing aligns; grows with the correlation of the aligned ridges

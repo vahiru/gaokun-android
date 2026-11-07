@@ -7,6 +7,7 @@ extern "C" {
 #include <cassert>
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <random>
 
@@ -123,8 +124,47 @@ static void suite(int width, int height) {
               << ", 1984 unrelated comparisons max " << unrelatedMax << '\n';
 }
 
+static void resizing() {
+    // Vertical stripes 10 samples apart are 7.5 apart after shrinking by 0.75.
+    Gaokun3Frame stripes{}, out{};
+    stripes.width = 40;
+    stripes.height = 196;
+    for (int y = 0; y < 196; ++y)
+        for (int x = 0; x < 40; ++x)
+            stripes.pixels[y * 40 + x] = std::lround(128 + 100 * std::cos(2 * 3.14159265358979323846 * x / 10));
+    assert(gaokun3_frame_resize(&stripes, 0.75, &out) && out.width == 30 && out.height == 147);
+    std::array<double, 8> crossings{};
+    int found = 0;
+    for (int x = 0; x + 1 < 30 && found < 8; ++x) {
+        const double a = out.pixels[70 * 30 + x] - 127.5, b = out.pixels[70 * 30 + x + 1] - 127.5;
+        if ((a < 0) != (b < 0)) crossings[found++] = x + a / (a - b);
+    }
+    assert(found >= 6 && std::fabs((crossings[found - 1] - crossings[0]) / (found - 1) - 3.75) < 0.15);
+    // Scale 1 keeps the samples; results without a valid geometry fail.
+    assert(gaokun3_frame_resize(&stripes, 1.0, &out) && !memcmp(&out, &stripes, sizeof(out)));
+    assert(!gaokun3_frame_resize(&stripes, 1.1, &out) && !gaokun3_frame_resize(&stripes, 0.45, &out));
+    assert(!gaokun3_frame_resize(&stripes, 0, &out) && !gaokun3_frame_resize(&stripes, 0.75, &stripes));
+    // Views of one scene still align after both are resampled.
+    W = 40;
+    H = 196;
+    const Scene a = scene(77), b = scene(78);
+    auto resized = [](const Gaokun3Frame& f) {
+        Gaokun3Frame r{};
+        assert(gaokun3_frame_resize(&f, 0.85, &r) && r.width == 34 && r.height == 167);
+        auto fs = gaokun3_feature_extract(&r);
+        assert(fs.n_feats > 0);
+        return fs;
+    };
+    auto ref = resized(view(a, 0)), same = resized(view(a, 10)), other = resized(view(b, 0));
+    const float s = gaokun3_match_score(&same, &ref), o = gaokun3_match_score(&other, &ref);
+    assert(s >= kAccept && o < kChance);
+    for (auto* fs : {&ref, &same, &other}) gaokun3_feature_set_free(fs);
+    std::cout << "PASS resampling: stripes 10 -> 7.5 samples, resized views " << s << ", unrelated " << o << '\n';
+}
+
 int main() {
     geometryBounds();
+    resizing();
     suite(40, 196);
     suite(36, 160);
 }

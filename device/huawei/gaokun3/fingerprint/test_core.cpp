@@ -99,6 +99,14 @@ int main() {
         memset(half.pixels,128,size_t(half.width)*half.height/2);
         assert(checkEnrollFrame(half,{}) == EnrollFrame::kPartial);
     }
+    // Frames are resampled by their sensor's matchScale (1 for both for now),
+    // or by an explicit scale.
+    {
+        const FrameFeatures native(e.frames[0]), scaled(e.frames[0], 0.85f);
+        assert(native.get().width == kFocalTech.width && native.get().height == kFocalTech.height);
+        assert(scaled.get().width == 34 && scaled.get().height == 167 && scaled.get().n_feats > 0);
+        assert(FrameFeatures(e.frames[0], 1.2f).get().n_feats == 0);   // 48 x 235 does not fit
+    }
     // Cached features score exactly as fresh ones; learning rebuilds them.
     {
         Enrollment cached = e;

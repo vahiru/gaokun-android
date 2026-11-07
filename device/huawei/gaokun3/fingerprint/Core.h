@@ -31,13 +31,20 @@ struct SensorProfile {
     const char* name;
     uint16_t width, height;   // matcher frame geometry
     size_t captureBytes;      // fpcmd CAPTURE payload
+    // Frames are resampled by this before feature extraction. The matcher's
+    // sizes and its chance correction were set on Goodix frames, where
+    // ridges are about 7.5 samples apart; at another pixel pitch, unrelated
+    // frames score higher (Goodix frames resized by 1.15 gave other fingers
+    // up to 37.5 instead of 18.5). Templates keep the sensor's own samples.
+    float matchScale;
 };
-// FocalTech FTE7001: AES-encrypted LE16 40 x 196 samples.
+// FocalTech FTE7001: AES-encrypted LE16 40 x 196 samples. Its pitch has not
+// been measured on real fingers yet, so its frames are not resampled.
 inline constexpr SensorProfile kFocalTech{Sensor::kFocalTech, "FocalTech FTE7001",
-                                          40, 196, 40 * 196 * 2};
+                                          40, 196, 40 * 196 * 2, 1.0f};
 // Goodix GDIX5125: plain LE16 12-bit 36 x 160 samples (GAOKUN3_FPCMD_GOODIX_*).
 inline constexpr SensorProfile kGoodix{Sensor::kGoodix, "Goodix GDIX5125",
-                                       36, 160, 36 * 160 * 2};
+                                       36, 160, 36 * 160 * 2, 1.0f};
 constexpr size_t kMaxCaptureBytes = GAOKUN3_MAX_PIXELS * 2;
 // TLMM GPIO61/62 as the ACPI _HID of \_SB.SPBA reads them: 0/1 FocalTech,
 // 1/0 Goodix, 0/0 no sensor, 1/1 empty firmware.
@@ -45,10 +52,12 @@ const SensorProfile* profileFromStraps(bool gpio61, bool gpio62);
 
 // Enrolment frames first, then learned frames, oldest first.
 using Frames = std::vector<Gaokun3Frame>;
-// Matcher features of one frame, freed with it.
+// Matcher features of one frame, freed with it; the frame is resampled by
+// the matchScale of the sensor with its geometry, or by `scale`.
 class FrameFeatures {
   public:
     explicit FrameFeatures(const Gaokun3Frame& frame);
+    FrameFeatures(const Gaokun3Frame& frame, float scale);
     ~FrameFeatures();
     FrameFeatures(const FrameFeatures&) = delete;
     FrameFeatures& operator=(const FrameFeatures&) = delete;

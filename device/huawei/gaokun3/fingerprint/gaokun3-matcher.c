@@ -290,6 +290,42 @@ describe (const float *grad_x, const float *grad_y, const uint8_t *contact,
   return true;
 }
 
+bool
+gaokun3_frame_resize (const Gaokun3Frame *in, double scale, Gaokun3Frame *out)
+{
+  int w, h, nw, nh, x, y;
+  float *src, *tmp;
+
+  if (!gaokun3_frame_geometry_valid (in) || !out || out == in || !(scale > 0))
+    return false;
+  w = in->width;
+  h = in->height;
+  nw = (int) lround (w * scale);
+  nh = (int) lround (h * scale);
+  memset (out, 0, sizeof (*out));
+  out->width = (uint16_t) clamp_int (nw, 0, 0xffff);
+  out->height = (uint16_t) clamp_int (nh, 0, 0xffff);
+  if (!gaokun3_frame_geometry_valid (out))
+    return false;
+  src = malloc (sizeof (float) * w * h * 2);
+  if (!src)
+    return false;
+  tmp = src + w * h;
+  for (x = 0; x < w * h; x++)
+    src[x] = in->pixels[x];
+  /* Shrinking: keep what the coarser grid cannot hold from aliasing. */
+  if (scale < 1.0)
+    blur (src, w, h, 0.5 * sqrt (1.0 / (scale * scale) - 1.0), tmp, src);
+  for (y = 0; y < nh; y++)
+    for (x = 0; x < nw; x++)
+      {
+        double v = sample (src, w, h, (x + 0.5) / scale - 0.5, (y + 0.5) / scale - 0.5);
+        out->pixels[y * nw + x] = (uint8_t) clamp_int ((int) lround (v), 0, 255);
+      }
+  free (src);
+  return true;
+}
+
 Gaokun3FeatureSet
 gaokun3_feature_extract (const Gaokun3Frame *frame)
 {
