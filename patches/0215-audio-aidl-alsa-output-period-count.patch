@@ -1,0 +1,69 @@
+audio AIDL HAL（UtilsAlsa）：内置播放设备的ALSA period数由ro.vendor.audio.primary.out_period_count决定，录音方向不变
+
+应用到AOSP树的hardware/interfaces，由scripts/crdroid-tree-fixes.py第40条自动应用（幂等）。⚠️ 别往内核树上打。
+只改audio/aidl/default/alsa/UtilsAlsa.cpp，与其他音频补丁的上下文不重叠。
+
+为什么：alsa_utils给内置设备配ALSA缓冲时，period数统一取ro.hardware.audio.tinyalsa.period_count
+（默认4，system/media/alsa_utils/alsa_device_profile.c的profile_fill_builtin_device_info()），播放和录音共用这一个值。
+0083之后播放是4个480帧的period（40 ms），ALSA里平时压着20–40 ms，是游戏输出延迟里最大的一段，减到3个能少约10 ms。
+录音不能跟着减：采集钩子（0206）在I/O线程里处理85 ms的块，通话降噪的IPC最长约51 ms才回退，这段时间里新来的数据
+全靠ALSA的录音缓冲接住；四声道时4个period约能接60–90 ms，3个只剩30–60 ms。
+
+做法：openProxyForAttachedDevice()在profile_fill_builtin_device_info()之后、prepare之前，对输出设备读
+ro.vendor.audio.primary.out_period_count。值不小于2时，alsa_utils算出的块（period_size × period_count）保持不变，
+只改成切成这么多个period。内核仍会把period向上取整（q6apm-dai按480帧的步长），所以本机得到3 × 480帧（30 ms）。
+不设或小于2 = 原来的行为。外接设备（openProxyForExternalDevice）不受影响。
+
+验证：2026-11-07在ROM树外编出rc.3的HAL（lineage-24.0 13fc23d + 0010 / 0051 / 0052 / 0063 / 0068 / 0069 / 0077 / 0083 / 0117）
+加本补丁，替换进APEX在本机跑过：不设属性时扬声器为4 × 480帧；设为3后为3 × 480帧，应用按时间戳算的输出延迟
+53.8 → 43.7 ms，HAL只对输出设备<0,1>打出一行日志；录音保持4 × 1920帧，冒烟通过；设为1时被忽略。
+在lineage-24.0加全部音频补丁（到0206）上正向、反向--check都通过。ROM里尚未完整构建过。
+
+diff --git a/audio/aidl/default/alsa/UtilsAlsa.cpp b/audio/aidl/default/alsa/UtilsAlsa.cpp
+index 6332fbf..6ac6bc0 100644
+--- a/audio/aidl/default/alsa/UtilsAlsa.cpp
++++ b/audio/aidl/default/alsa/UtilsAlsa.cpp
+@@ -22,6 +22,7 @@
+ #include <Utils.h>
+ #include <aidl/android/media/audio/common/AudioFormatType.h>
+ #include <aidl/android/media/audio/common/PcmType.h>
++#include <android-base/properties.h>
+ #include <audio_utils/primitives.h>
+ #include <cutils/compiler.h>
+ 
+@@ -274,6 +275,27 @@ void applyGainToFloatBuffer(float* floatBuffer, const size_t bufferSizeBytes, co
+     }
+ }
+ 
++// gaokun3: alsa_utils takes the period count of every built-in device from
++// ro.hardware.audio.tinyalsa.period_count, playback and capture alike. Playback can run with fewer
++// periods than capture needs (the capture hook processes 85 ms blocks while the ALSA buffer keeps
++// filling), so ro.vendor.audio.primary.out_period_count sets it for output devices only. The block
++// alsa_utils asked for (period_size * period_count) stays the same; only the number of periods it
++// is cut into changes. The kernel may still round the period size up (q6apm-dai: multiples of 480
++// frames). Unset or below 2 keeps alsa_utils' choice.
++void applyOutputPeriodCount(const DeviceProfile& deviceProfile, alsa_device_profile* profile) {
++    if (deviceProfile.direction != PCM_OUT) return;
++    const unsigned periodCount = static_cast<unsigned>(
++            ::android::base::GetIntProperty("ro.vendor.audio.primary.out_period_count", 0));
++    struct pcm_config& config = profile->default_config;
++    if (periodCount < 2 || config.period_count == 0 || periodCount == config.period_count) return;
++    const unsigned blockFrames = config.period_size * config.period_count;
++    config.period_count = periodCount;
++    config.period_size = blockFrames / periodCount;
++    profile->min_period_size = profile->max_period_size = config.period_size;
++    LOG(DEBUG) << __func__ << ": address=" << deviceProfile << " period_count " << periodCount
++               << ", period_size " << config.period_size;
++}
++
+ }  // namespace
+ 
+ std::ostream& operator<<(std::ostream& os, const DeviceProfile& device) {
+@@ -412,6 +434,7 @@ DeviceProxy openProxyForAttachedDevice(const DeviceProfile& deviceProfile,
+     if (!profile_fill_builtin_device_info(proxy.getProfile(), pcmConfig, bufferFrameCount)) {
+         LOG(FATAL) << __func__ << ": failed to init for built-in device, address=" << deviceProfile;
+     }
++    applyOutputPeriodCount(deviceProfile, proxy.getProfile());
+     if (int err = proxy_prepare_from_default_config(proxy.get(), proxy.getProfile()); err != 0) {
+         LOG(FATAL) << __func__ << ": fail to prepare for device address=" << deviceProfile
+                    << " error=" << err;
