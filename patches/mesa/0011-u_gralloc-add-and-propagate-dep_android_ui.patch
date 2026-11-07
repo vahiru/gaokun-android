@@ -10,6 +10,8 @@ interface dependency properly inherit libui.
 Signed-off-by: Valentine Burley <valentine.burley@collabora.com>
 Reviewed-by: Yiwei Zhang <zzyiwei@chromium.org>
 Part-of: <https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/44278>
+Origin: upstream, https://gitlab.freedesktop.org/mesa/mesa/-/commit/b6b0902044938b50b96ae9be60f01bc689ac306d
+Upstream-Status: Backport [https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/44278]
 ---
  src/util/u_gralloc/meson.build | 6 +++++-
  1 file changed, 5 insertions(+), 1 deletion(-)

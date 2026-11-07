@@ -1,8 +1,7 @@
 From cb614dd430f864ec8b7e82c496aa2cc15a1c690e Mon Sep 17 00:00:00 2001
 From: Valentine Burley <valentine.burley@collabora.com>
 Date: Mon, 7 Sep 2026 14:36:59 +0200
-Subject: [PATCH] vulkan/runtime: Export runtime dependencies in interface
- dependencies
+Subject: [PATCH] vulkan/runtime: Export runtime dependencies in interface dependencies
 
 idep_vulkan_runtime_body and idep_vulkan_lite_runtime link the
 runtime static libraries but did not declare dependencies.
@@ -14,6 +13,8 @@ idep_u_gralloc (and thus libui) on Android.
 Signed-off-by: Valentine Burley <valentine.burley@collabora.com>
 Reviewed-by: Yiwei Zhang <zzyiwei@chromium.org>
 Part-of: <https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/44278>
+Origin: upstream, https://gitlab.freedesktop.org/mesa/mesa/-/commit/cb614dd430f864ec8b7e82c496aa2cc15a1c690e
+Upstream-Status: Backport [https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/44278]
 ---
  src/vulkan/runtime/meson.build | 6 ++++--
  1 file changed, 4 insertions(+), 2 deletions(-)

@@ -12,6 +12,8 @@ The other option is the [[fallthrough]] annotation.
 
 Reviewed-by: Valentine Burley <valentine.burley@collabora.com>
 Part-of: <https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/41518>
+Origin: upstream, https://gitlab.freedesktop.org/mesa/mesa/-/commit/f9a5524b3be7461d3f25231810884db3cde78a4a
+Upstream-Status: Backport [https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/41518]
 ---
  src/freedreno/vulkan/tu_cmd_buffer.cc | 1 +
  1 file changed, 1 insertion(+)

@@ -53,7 +53,6 @@
 | [dev/release-checklist.md](dev/release-checklist.md) | 候选版与正式版发布回归测试清单（A档自动化 / B档交互 / C档长稳 / D档产物核对） |
 | [dev/hw/README.md](dev/hw/README.md) | 硬件原始转储：后摄模组EEPROM镜像与[BIOS 2.16解包工具及清单](dev/hw/bios-2.16/README.md) |
 | [dev/fingerprint/README.md](dev/fingerprint/README.md) | 指纹Windows侧专有二进制本地逆向报告目录说明 |
-| [dev/upstream/README.md](dev/upstream/README.md) | 待提交至Linux主线的5份内核补丁草稿（`camcc-sc8280xp` / `ov13b10` / `camss`） |
 
 ## 三、各代码目录内的模块说明
 

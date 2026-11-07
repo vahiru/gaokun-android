@@ -13,6 +13,8 @@ src/freedreno/common/freedreno_dev_info.h:516:1:
 Reviewed-by: Eric Engestrom <eric@igalia.com>
 Reviewed-by: Valentine Burley <valentine.burley@collabora.com>
 Part-of: <https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/41518>
+Origin: upstream, https://gitlab.freedesktop.org/mesa/mesa/-/commit/dd47c7c06136d62a7d96100fba43ab866b4fd679
+Upstream-Status: Backport [https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/41518]
 ---
  src/freedreno/common/freedreno_dev_info.c | 2 +-
  src/freedreno/common/freedreno_dev_info.h | 2 +-

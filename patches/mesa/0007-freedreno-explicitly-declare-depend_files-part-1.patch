@@ -38,12 +38,11 @@ meson2hermetic, but being more explicit conceptually more correct.
 Reviewed-by: Eric Engestrom <eric@igalia.com>
 Part-of: <https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/41518>
 
-[gaokun 2026-10-25] 按 A17 的 mesa 26.1.0-devel（2026-03 快照）手工重做：
-上游原补丁基于 2026-05 的 main，adreno/meson.build 多了 a8xx_perfcntrs.xml 与
-perfcntr_files 那段（A17 没有），原样 git apply 失败。改动语义逐条照搬：
-xml 列表改成 files()、各 custom_target 补 depend_files、文件名改用 fs.name /
-fs.replace_suffix、registers/meson.build 把 subdir('adreno') 提前。
-A17 的 perfcntr_files 段不存在，对应的 depend_files 一并略去。
+[Backported to Android 17's Mesa 26.1.0-devel (2026-03 snapshot), which
+predates the a8xx_perfcntrs.xml and perfcntr_files additions in
+src/freedreno/registers/adreno/meson.build.]
+Origin: backport, https://gitlab.freedesktop.org/mesa/mesa/-/commit/1fe58385680017a6de546b5ab51f4e60980958e3
+Upstream-Status: Backport [https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/41518]
 ---
 diff --git a/src/freedreno/registers/adreno/meson.build b/src/freedreno/registers/adreno/meson.build
 index 7159523..d640da6 100644

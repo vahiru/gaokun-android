@@ -12,6 +12,8 @@ src/freedreno/vulkan/tu_knl_kgsl.cc:1455:16:
 Reviewed-by: Eric Engestrom <eric@igalia.com>
 Reviewed-by: Valentine Burley <valentine.burley@collabora.com>
 Part-of: <https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/41518>
+Origin: upstream, https://gitlab.freedesktop.org/mesa/mesa/-/commit/1084ddd8939d08057ddfde4b3422fa7628e35ed7
+Upstream-Status: Backport [https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/41518]
 ---
  src/freedreno/vulkan/tu_knl_kgsl.cc | 3 ++-
  1 file changed, 2 insertions(+), 1 deletion(-)

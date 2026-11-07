@@ -8,6 +8,8 @@ Fixes -Wmissing-prototypes build failures.
 Signed-off-by: Valentine Burley <valentine.burley@collabora.com>
 Reviewed-by: Yiwei Zhang <zzyiwei@chromium.org>
 Part-of: <https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/44278>
+Origin: upstream, https://gitlab.freedesktop.org/mesa/mesa/-/commit/12a0367fcb5aae0a3949f5eae38e44377ce91e96
+Upstream-Status: Backport [https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/44278]
 ---
  src/util/u_gralloc/u_gralloc_imapper4_api.cpp | 4 ++--
  src/util/u_gralloc/u_gralloc_imapper5_api.cpp | 2 +-

@@ -12,6 +12,8 @@ src/freedreno/vulkan/tu_shader.cc:134:1: error:
 
 Reviewed-by: Valentine Burley <valentine.burley@collabora.com>
 Part-of: <https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/41518>
+Origin: upstream, https://gitlab.freedesktop.org/mesa/mesa/-/commit/b0e480d428f06760bf6a41b0d0fae4c3badbfd96
+Upstream-Status: Backport [https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/41518]
 ---
  src/freedreno/vulkan/tu_acceleration_structure.cc | 2 +-
  src/freedreno/vulkan/tu_device.cc                 | 6 +++---

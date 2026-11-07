@@ -22,7 +22,7 @@
 | [`android/v4l2-codec2/`](android/v4l2-codec2/) | AOSP `external/v4l2_codec2` | [`scripts/crdroid-tree-fixes.py`](../scripts/crdroid-tree-fixes.py) | HEVC CSD合并入首帧、字节缓冲模式使用dmabuf ID、HDR静态元数据传递 |
 | [`android/tinyalsa/`](android/tinyalsa/) | AOSP `external/tinyalsa_new` | [`scripts/crdroid-tree-fixes.py`](../scripts/crdroid-tree-fixes.py) | `sw_params`从refined `hw_params`推导 |
 | [`android/frameworks-base/`](android/frameworks-base/) | AOSP `frameworks/base` | 候选/按需应用 | SystemUI指纹锁定状态处理 |
-| [`mesa/`](mesa/) | AOSP `external/mesa3d`（Turnip Vulkan驱动） | [`scripts/mesa-a17/regen.sh`](../scripts/mesa-a17/regen.sh) | Android Native Buffer空内存重绑定容错、`VK_FORMAT_G10X6_B10X6R10X6_2PLANE_420_UNORM_3PACK16`（P010）支持 |
+| [`mesa/`](mesa/) | AOSP `external/mesa3d`（Turnip Vulkan驱动） | [`scripts/mesa-a17/regen.sh`](../scripts/mesa-a17/regen.sh) | Android Native Buffer空内存重绑定容错、`VK_FORMAT_G10X6_B10X6R10X6_2PLANE_420_UNORM_3PACK16`（P010）支持及Mesa 26.1上游构建与依赖回移（`0003..0011`） |
 | [`libcamera/`](libcamera/) | 上游`libcamera`（替换`external/libcamera`） | [`scripts/camera/setup-libcamera-tree.sh`](../scripts/camera/setup-libcamera-tree.sh) | 详见[`libcamera/README.md`](libcamera/README.md) |
 | [`resukisu/`](resukisu/) | 内核树内`KernelSU/`子模块 | [`scripts/kernel-setup-resukisu.sh`](../scripts/kernel-setup-resukisu.sh) | Linux 7.x内核API适配与内置路径调整 |
 

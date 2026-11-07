@@ -7,6 +7,8 @@ See "from freedreno_dev_info import *" statement.
 
 Reviewed-by: Eric Engestrom <eric@igalia.com>
 Part-of: <https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/41518>
+Origin: upstream, https://gitlab.freedesktop.org/mesa/mesa/-/commit/00261e5d0035b7173f896aa568cf6cc8a41b973a
+Upstream-Status: Backport [https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/41518]
 ---
  src/freedreno/common/meson.build | 1 +
  1 file changed, 1 insertion(+)

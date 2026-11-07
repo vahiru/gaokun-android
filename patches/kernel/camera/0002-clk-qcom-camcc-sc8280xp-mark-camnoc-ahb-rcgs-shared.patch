@@ -14,6 +14,7 @@ camcc_slow_ahb_clk_src to clk_rcg2_shared_ops (matching camcc-sm8150,
 camcc-sc8180x, and camcc-x1e80100) so clk_rcg2_shared_disable() parks them back
 on bi_tcxo (parent index 0) when disabled.
 
+Fixes: ff93872a9c61 ("clk: qcom: camcc-sc8280xp: Add sc8280xp CAMCC")
 Origin: local
 Upstream-Status: Pending
 ---
