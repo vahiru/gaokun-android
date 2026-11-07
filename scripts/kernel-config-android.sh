@@ -28,7 +28,7 @@ OUT="${1:?用法: $0 <kernel-out-dir>}"
     `# ⚠️ USB_CONFIGFS_F_FS 等只是 tristate 父级下的 bool 子开关，` \
     `#    父级 =m 时它们照样显示 =y 但整个栈都在模块里 —— Android 无模块，` \
     `#    functionfs mount 报 ENODEV（未知文件系统类型同样是 ENODEV！）。` \
-    `#    三个父级必须显式 =y。实测见 findings 第 8.3quinquies 节。` \
+    `#    三个父级必须显式 =y。实测见 docs/dev/android-bringup.md。` \
     --enable CONFIGFS_FS --enable USB_LIBCOMPOSITE --enable USB_CONFIGFS --enable USB_F_FS \
     --enable USB_CONFIGFS_F_FS --enable USB_CONFIGFS_ACM \
     --enable USB_CONFIGFS_MASS_STORAGE --enable USB_CONFIGFS_ECM \
@@ -63,7 +63,7 @@ OUT="${1:?用法: $0 <kernel-out-dir>}"
 #   （见 device/huawei/gaokun3/init.gaokun3.rc），且与是否插电无关。
 #
 # ★ cgroup v1：6.12+ 拆分后默认关。Android 的 cgroups.json 要求 cpuset 走 v1，
-#   缺了会 SetupCgroups 失败 -> bootstrap-apexd-failed 复位（findings 第 8 节）。
+#   缺了会 SetupCgroups 失败 -> bootstrap-apexd-failed 复位（见 docs/dev/android-bringup.md）。
 #
 # ⚠️★ 2026-08-20 修掉的一个静默失效：下面这 5 项原先写在上面那条
 #   ./scripts/config 的【续行里】，而它们前面就是上述那段普通 # 注释 ——
@@ -82,7 +82,7 @@ OUT="${1:?用法: $0 <kernel-out-dir>}"
     \
     `# —— buildbot defconfig 是 Ubuntu 取向：以下关键驱动全是 =m，` \
     `#    而 Android 侧没有任何模块加载机制，必须 =y。` \
-    `#    实测后果（findings 第 8.3bis 节）：三个 dwc3 全部` \
+    `#    实测后果（见 docs/dev/android-bringup.md）：三个 dwc3 全部` \
     `#    "failed to initialize core"（缺 femto USB2 PHY + refgen 供电），` \
     `#    a9c000.i2c 不 probe -> EC 全灭，cpufreq 找不到 icc path。` \
     `#    名字全部从 Makefile 反查核实过，模块名 != config 名：` \
@@ -224,15 +224,12 @@ OUT="${1:?用法: $0 <kernel-out-dir>}"
 #   依赖 EFI_GENERIC_STUB（本机已 =y）。
 ./scripts/config --file "$OUT/.config" --enable EFI_ZBOOT
 
-# ★★ 2026-09-28 起（#128）视频编解码走 qcom-iris，【关掉】qcom-venus。
+# ★★ 2026-09-28 起视频编解码走 qcom-iris，【关掉】qcom-venus。
 #   ⚠️ 此处原来写的是反的（"必须关 IRIS，它永远服务不了本机"），那句话**错了**：
 #   v7.2-rc2 的 iris_probe.c:372 就认 "qcom,sm8250-venus"，而上游 v7.3 给 sc8280xp 的节点
 #   写的是 "qcom,sc8280xp-iris", "qcom,sm8250-venus" —— 靠回落串直接用 sm8250_data。
-#   当年只查了 of_match 的前几条，漏看了 sm8250-venus 那一条（它在 v7.2-rc2 里是有的）。
 #   为什么 VENUS 必须关、不能两个都留着：
-#     · 我们 venus 时代的 upstream-venus/0017/0018 在 IRIS=y 时编不过
-#       （venus/core.c 的 #if (!IS_ENABLED(CONFIG_VIDEO_QCOM_IRIS)) 把它们引用的表编掉了）；
-#     · 不打那两个，VENUS=y 虽能编过但永远绑不上新节点 —— 留着只是一个会误导人的 =y；
+#     · VENUS=y 虽能编过但永远绑不上新的 iris 节点 —— 留着只是一个会误导人的 =y；
 #     · 反过来的陷阱更糟：VENUS=y + IRIS=n + 新 DT，venus 会用 sm8250_res 去绑（没有 cp_* 配置）。
 #   所以 VENUS 进 MUST_N，驱动选择在 .config 里一眼可见。
 ./scripts/config --file "$OUT/.config" --disable VIDEO_QCOM_VENUS
@@ -299,9 +296,7 @@ OUT="${1:?用法: $0 <kernel-out-dir>}"
 #   drivers/leds/Kconfig:402                     LEDS_GPIO（privacy LED，
 #       camera.dtsi 里两个 sensor 节点都 `leds = <&privacy_led>`）
 #
-# ★ hi846 驱动的四个修复 buildbot 已经带了（patches/upstream/0020-0023：
-#   write_reg_16 / link frequency / 6MP+8MP 模式 / 不同 lane 数下的模式处理），
-#   我们的配方本来就打这 13 个 upstream 补丁，所以不用额外做什么。
+# ★ hi846 驱动的基础修复已在 linux-gaokun-buildbot 补丁层中带上，帧率与曝光上限修复见 patches/kernel/camera/0005–0008。
 ./scripts/config --file "$OUT/.config" \
     --enable VIDEO_QCOM_CAMSS \
     --enable VIDEO_HI846 \
@@ -311,7 +306,7 @@ OUT="${1:?用法: $0 <kernel-out-dir>}"
     --enable SC_CAMCC_8280XP \
     --enable LEDS_GPIO
 
-# ★ 后摄闪光灯（#110，patches/kernel/dts/0006）：LED 挂在 PMIC pmc8280c（PM8350C）的闪光模块 1+4 路，
+# ★ 后摄闪光灯（patches/kernel/dts/0006）：LED 挂在 PMIC pmc8280c（PM8350C）的闪光模块 1+4 路，
 #   驱动 drivers/leds/flash/leds-qcom-flash.c（LEDS_QCOM_FLASH，依赖 LEDS_CLASS_FLASH）。
 #   GPIO93 那个 gpio-led 实测不亮，已从 DT 删掉。内核 #19 起带；这里断言是免得从干净树重建时
 #   悄悄丢掉 /sys/class/leds/white:flash（ROM 构建不会为此报错）。
@@ -409,7 +404,7 @@ OUT="${1:?用法: $0 <kernel-out-dir>}"
 #     STATISTIC:1597 STRING:1606 TIME:1629
 #   crypto/Kconfig：CHACHA20POLY1305:752 MD5:885 XCBC:983（IpSec 的 AEAD / 认证算法）
 #   ⚠️ 基线里另有 NETFILTER_XT_MATCH_QUOTA2_LOG、NF_CT_PROTO_DCCP、NF_CT_PROTO_UDPLITE，
-#      这棵树的 Kconfig 里没有这三个符号，不写：QUOTA2_LOG 是 ACK 的 quota2 子选项，0017 只移植了
+#      这棵树的 Kconfig 里没有这三个符号，不写：QUOTA2_LOG 是 ACK 的 quota2 子选项，patches/kernel/core/0005 只移植了
 #      NETFILTER_XT_MATCH_QUOTA2 本身（源码里的 #ifdef 还在，但 Kconfig 没有这一项）；后两个在 v7.2-rc2 里不存在。
 ./scripts/config --file "$OUT/.config" \
     --enable INET_ESP --enable INET6_ESP --enable INET6_IPCOMP \
@@ -482,7 +477,7 @@ OUT="${1:?用法: $0 <kernel-out-dir>}"
 # ─── 用户态 39 位地址窗口（patches/kernel/core/0006，issue #17 / #19 / #20；用户 2026-10-08 定进发版）───
 # 页表仍 48 位，64 位进程默认拿到的地址压到 2^39 以下（与 Android GKI 的 39 位布局相同）。
 # 2026-10-08 A/B：英雄联盟手游 7.3.0.2813 在原内核 2 秒崩（il2cpp_init 写 0x10），开了它过 il2cpp_init。
-# 符号由 0078 引入 —— 补丁没打，这里会在 MUST_Y 断言上失败，而不是静默编出 48 位窗口。
+# 符号由 patches/kernel/core/0006 引入 —— 补丁没打，这里会在 MUST_Y 断言上失败，而不是静默编出 48 位窗口。
 ./scripts/config --file "$OUT/.config" --enable ARM64_USER_MMAP_WINDOW_39
 
 # ★ 手写笔（M-Pencil，#26）：触摸从片驱动（patches/kernel/input/0011）。和主片 himax-spi 一样必须 =y

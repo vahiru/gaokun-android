@@ -169,7 +169,7 @@ def patch_minigbm_p010_scanout(tree: pathlib.Path) -> str:
 
     根因：msm.c 里 P010 的 BO_USE_SCANOUT 包在 `#ifdef SC_7280` 里，本机是 sc8280xp。
 
-    ⚠️★ 必须和 patches/mesa/0002（原 0130，turnip 的 P010）一起生效。只放开这里、GPU 又采样不了 P010 时，
+    ⚠️★ 必须和 patches/mesa/0002（turnip 的 P010）一起生效。只放开这里、GPU 又采样不了 P010 时，
     10-bit 视频一进 SurfaceFlinger，RenderEngine 就 abort
     （`Failed to create a valid texture ... format:54`），整个界面重启。
     这台机器竖屏面板横屏用，视频要 GPU 旋转，所以 P010 一定会走到这里。
@@ -567,7 +567,7 @@ def apply_patch_file(tree: pathlib.Path, project: str, patch_name: str,
                      covered_by: tuple = ()) -> str:
     """把 <repo>/patches/<patch_name> 用 git apply 打进 AOSP 树的 <project>（幂等）。
 
-    ★ 为什么要有这个助手：本仓 `patches/android/` 里的 **AOSP 侧**补丁（archive/0003 glslang〔A17 上废弃，见 main() 的 [9]〕、
+    ★ 为什么要有这个助手：本仓 `patches/android/` 里的 **AOSP 侧**补丁（
     hardware-interfaces/0001–0011 audio HAL、v4l2-codec2/0001–0003、tinyalsa/0001、drm-hwcomposer/0001–0004）
     原先**没有任何消费者** —— 全靠人手动
     `git apply`。而本仓已经为"没有消费者的配置一定会漂"付过三次账
@@ -581,7 +581,7 @@ def apply_patch_file(tree: pathlib.Path, project: str, patch_name: str,
 
     covered_by：排在后面、改到同一段上下文的补丁（例如 hardware-interfaces/0006 改了 0004 加的那几行附近）。
     它们打上之后，本补丁正反两个方向都对不上 —— 2026-10-04 重跑时 [15] 就这样报了"打不上"，
-    而 0004（原 0063）的 42 行其实一行不缺（#130）。这时把涉及的文件拷到临时目录、先撤掉这些后续补丁，
+    而 0004 的 42 行其实一行不缺。这时把涉及的文件拷到临时目录、先撤掉这些后续补丁，
     再对本补丁做反向检查：过了才算"已打过"。不是放宽判据，判的仍是"本补丁确实在树里"。
     """
     repo = pathlib.Path(__file__).resolve().parent.parent
@@ -1203,7 +1203,7 @@ def patch_codec2_blob_linear_map(tree: pathlib.Path) -> str:
     （C2DmaBufAllocator.cpp:470-476）。A16 是直接调 allocation->map()，哪种分配都行。
     本机没有 ION，device.mk 的 debug.stagefright.c2-poolmask=0xfe0000 让默认线性分配器是 BLOB
     （C2Store.cpp:526 GetPreferredLinearAllocatorId）⇒ v4l2 解码 HAL 里 map 客户端送来的输入块报 err=22，
-    patches/android/v4l2-codec2/0001（原 0019）的 HEVC CSD 合并退回"单独下发 CSD"，venus 死锁、HEVC 硬解一帧不出
+    patches/android/v4l2-codec2/0001 的 HEVC CSD 合并退回"单独下发 CSD"，venus 死锁、HEVC 硬解一帧不出
     （2026-10-26 A17 首个候选版 1792975257 上 A21 iris 回归 11/15，挂的正是 4 项 HEVC）。
     修法：句柄不是 DMABUF 时退回 A16 的 allocation->map()；DMABUF 句柄照旧走上游新路径（custom mapper）。
     上机判据：out/iris-rc/rc-accept.sh 15/15；logcat 有 "HEVC: stashed … bytes of CSD"、没有 "cannot map CSD"。
@@ -1231,7 +1231,7 @@ def patch_zygote_os_version(tree: pathlib.Path) -> str:
 
     libcore's System.java sets os.version once from uname(), in
     initUnchangeableSystemProperties() (android-17.0.0_r1 ojluni/.../System.java:1085-1090).
-    Zygote runs as root, so with patches/kernel/core/0008 (formerly 0085) it gets the real release and every app inherits
+    Zygote runs as root, so with patches/kernel/core/0008 it gets the real release and every app inherits
     that, while uname() in the same app returns the reported one.
 
     callPostForkChildHooks() runs after setresuid() in SpecializeCommon()
@@ -1256,7 +1256,7 @@ def patch_zygote_os_version(tree: pathlib.Path) -> str:
         return "⚠️ 找不到 callPostForkChildHooks 那段（或不唯一），上游可能改了写法；什么都没动"
     new = ("        ZygoteHooks.postForkChild(runtimeFlags, isSystemServer, isZygote, instructionSet);\n"
            "        // " + marker + ": os.version was read by zygote as root; apps may be told\n"
-           "        // another release (patches/0085). The uid is final here.\n"
+           "        // another release (patches/kernel/core/0008). The uid is final here.\n"
            "        try {\n"
            "            System.class.getMethod(\"setUnchangeableSystemProperty\", String.class, String.class)\n"
            "                    .invoke(null, \"os.version\", Os.uname().release);\n"
@@ -1272,7 +1272,7 @@ def patch_init_no_kernel_version_prop(tree: pathlib.Path) -> str:
     """Fix 37: do not publish ro.kernel.version.
 
     SetKernelVersion() (android-17.0.0_r1 init/init.cpp:741-750, called at :1193) sets it from
-    init's own uname(), before any rc file is read. With patches/kernel/core/0008 (formerly 0085) that is the real release,
+    init's own uname(), before any rc file is read. With patches/kernel/core/0008 that is the real release,
     the property has no entry in property_contexts so it falls to default_prop, and apps can
     read default_prop (private/coredomain.te:38; private/untrusted_app.te:11). It would
     contradict the release they are told.
@@ -1294,7 +1294,7 @@ def patch_init_no_kernel_version_prop(tree: pathlib.Path) -> str:
     if s.count(old_def) != 1 or s.count(old_call) != 1:
         return "⚠️ 找不到 SetKernelVersion（或不唯一），上游可能改了写法；什么都没动"
     s = s.replace(old_def, "[[maybe_unused]] " + old_def, 1)
-    s = s.replace(old_call, "    // " + marker + ": apps could read the real kernel version from it (patches/0085).\n", 1)
+    s = s.replace(old_call, "    // " + marker + ": apps could read the real kernel version from it (patches/kernel/core/0008).\n", 1)
     io.open(p, "w", encoding="utf-8", newline="").write(s)
     return "不再设 ro.kernel.version"
 
@@ -1326,11 +1326,9 @@ def main():
     step("  [8] v4l2_codec2 HEVC CSD 合并: ", apply_patch_file(
         tree, "external/v4l2_codec2",
         "android/v4l2-codec2/0001-v4l2-codec2-merge-hevc-csd-into-first-frame.patch"))
-    # [9] glslang host 端 glslangValidator（原 patches/0003）—— A17 上废弃，不再打：
-    #   上游 external/deqp-deps/glslang 自己带了 cc_binary_host "glslangValidator"（Android.bp:263-292，
-    #   提交 9442208b "Build rule for Mesa's glslangValidator"；deqp_glslang_defaults 也加了 host_supported: true，
-    #   :83），模块名与 0003 加的完全相同，再打就是重名模块（而且 0003 的上下文本来也对不上了）。
-    #   mesa 侧照旧用 tools: ["glslangValidator"]，名字对得上上游。已退役，不再有消费者。
+    # [9] glslang host 端 glslangValidator —— A17 上已由上游 external/deqp-deps/glslang 自带
+    #   （Android.bp:263-292，提交 9442208b "Build rule for Mesa's glslangValidator"；
+    #   deqp_glslang_defaults 也加了 host_supported: true，:83），mesa 侧照旧用 tools: ["glslangValidator"]。
     step(" [10] tinyalsa sw_params 取自 refined hw_params: ", apply_patch_file(
         tree, "external/tinyalsa_new",
         "android/tinyalsa/0001-tinyalsa-derive-sw-params-from-refined-hw-params.patch"))
@@ -1345,7 +1343,7 @@ def main():
     step(" [14] audio AIDL HAL 采集方向 MonoPipe 容量翻倍（消除周期性插静音）: ", apply_patch_file(
         tree, "hardware/interfaces",
         "android/hardware-interfaces/0003-audio-aidl-monopipe-capacity.patch"))
-    # 依赖 [14]（采集管道要能放 2 块），所以排在它后面。#127 §6/§7：去掉开头 170 ms 静音与常驻 2 块延迟
+    # 依赖 [14]（采集管道要能放 2 块），所以排在它后面：去掉开头 170 ms 静音与常驻 2 块延迟
     step(" [15] audio AIDL HAL 采集改成数据驱动交付（去掉开头静音与常驻延迟）: ", apply_patch_file(
         tree, "hardware/interfaces",
         "android/hardware-interfaces/0004-audio-aidl-primary-capture-data-driven.patch",
@@ -1353,13 +1351,13 @@ def main():
                     "android/hardware-interfaces/0007-audio-aidl-primary-alsa-fallback-by-device-type.patch",
                     "android/hardware-interfaces/0009-audio-aidl-primary-playback-hook.patch",
                     "android/hardware-interfaces/0010-audio-aidl-primary-capture-hook.patch")))
-    # 不依赖前面几条（只动 audio/aidl/default/apex/）。v0.7.0 验收 B2：effect HAL 在 vendor APEX 里，加载不了 /vendor/lib64/soundfx 的 Histen
+    # 不依赖前面几条（只动 audio/aidl/default/apex/）：effect HAL 在 vendor APEX 里，加载不了 /vendor/lib64/soundfx 的 Histen
     # ⚠️ 这是唯一一条会【新建】文件的 AOSP 补丁（linker.config.json，未跟踪）：把 hardware/interfaces 还原成上游时
-    #    `git checkout -- .` / `reset --hard` 删不掉它，要再 `git clean -f audio/aidl/default/apex/`，否则这一条报"打不上"（2026-09-29 审查）
+    #    `git checkout -- .` / `reset --hard` 删不掉它，要再 `git clean -f audio/aidl/default/apex/`，否则这一条报"打不上"
     step(" [16] audio APEX 链接器命名空间放行 /vendor/${LIB}/soundfx（Histen 效果库）: ", apply_patch_file(
         tree, "hardware/interfaces",
         "android/hardware-interfaces/0005-audio-aidl-apex-permit-vendor-soundfx.patch"))
-    # A17：改 StreamAlsaBase.{h,cpp} 与 StreamPrimary.cpp，上下文只和 [15]（0004，原 0063）在 StreamPrimary.cpp 里重叠，所以排在它后面。#130：播放由硬件定拍、不再整块丢音乐
+    # A17：改 StreamAlsaBase.{h,cpp} 与 StreamPrimary.cpp，上下文只和 [15]（0004）在 StreamPrimary.cpp 里重叠，所以排在它后面：播放由硬件定拍、不再整块丢音乐
     step(" [17] audio AIDL HAL 播放由硬件定拍、位置按真实播出上报（卡顿不再整块丢音乐）: ", apply_patch_file(
         tree, "hardware/interfaces",
         "android/hardware-interfaces/0006-audio-aidl-primary-playback-paced-by-alsa.patch",
@@ -1372,8 +1370,7 @@ def main():
     step(" [19] Wi-Fi HAL 出厂 MAC 由 SoC 序列号派生（稳定的设备 MAC）: ", patch_wifi_stable_factory_mac(tree))
     step(" [20] Wi-Fi 新网络 MAC 随机化默认改回 AUTO（按网络固定）: ", patch_wifi_mac_randomization_default(tree))
     # v1.0 AV-10：耳机麦。可插拔端口不能带 address ⇒ HAL 按设备类型读 ro.vendor.audio.primary.alsa.<type>（device.mk 设）。
-    # 只动 StreamPrimary.cpp 的头文件区与 getCardAndDeviceId()，与 [12]–[17] 的上下文不重叠（构建机上对着打满的树核过：
-    # 正向 --check 干净，打上之后 0001/0002/0003/0006 的反向检查仍过，撤 0006 后 0004 的反向检查仍过）。
+    # 只动 StreamPrimary.cpp 的头文件区与 getCardAndDeviceId()，与 [12]–[17] 的上下文不重叠。
     step(" [21] audio AIDL HAL 地址里没有 CARD_/DEV_ 时按设备类型回落（耳机麦）: ", apply_patch_file(
         tree, "hardware/interfaces",
         "android/hardware-interfaces/0007-audio-aidl-primary-alsa-fallback-by-device-type.patch",
@@ -1385,23 +1382,19 @@ def main():
         tree, "hardware/interfaces",
         "android/hardware-interfaces/0008-audio-aidl-primary-low-latency-playback-block.patch"))
     # 扬声器低音处理（device/huawei/gaokun3/speakerfx）：播放块写进 ALSA 之前交给 ro.vendor.audio.primary.playback_hook 的库。
-    # 只动 StreamPrimary.{h,cpp}；transfer() 的上下文依赖 [17]（0006，原 0069 的播放直写），所以排在 [22] 之后。
-    # 在 lineage-24.0 + 0001..0008 上核过：正向 --check 干净、打上后反向 --check 通过。
+    # 只动 StreamPrimary.{h,cpp}；transfer() 的上下文依赖 [17]（0006 的播放直写），所以排在 [22] 之后。
     step(" [27] audio AIDL HAL 播放方向的厂商钩子（扬声器低音处理，覆盖 FAST 轨）: ", apply_patch_file(
         tree, "hardware/interfaces",
         "android/hardware-interfaces/0009-audio-aidl-primary-playback-hook.patch",
         covered_by=("android/hardware-interfaces/0010-audio-aidl-primary-capture-hook.patch",)))
     # 麦克风阵列（device/huawei/gaokun3/micarray）：采集方向的厂商钩子，ro.vendor.audio.primary.capture_hook 的库决定 ALSA 开几路、
     # 读到的每块进管道之前交给它处理。改 StreamAlsaBase.{h,cpp}、StreamAlsaMonoPipe.{h,cpp}、StreamPrimary.{h,cpp}，
-    # standby / start / shutdown 的上下文是 [27]（0009，原 0117）加的，所以排在它后面；[15][17][21][27] 的 covered_by 因此带上它。
-    # 在 lineage-24.0 + 0001..0009 上核过：正向 --check 干净、打上后反向 --check 通过，
-    # 重跑时 [15][17][21][27] 判为"已打过"。
+    # standby / start / shutdown 的上下文是 [27]（0009）加的，所以排在它后面；[15][17][21][27] 的 covered_by 因此带上它。
     step(" [38] audio AIDL HAL 采集方向的厂商钩子（内置麦克风阵列）: ", apply_patch_file(
         tree, "hardware/interfaces",
         "android/hardware-interfaces/0010-audio-aidl-primary-capture-hook.patch"))
     # 游戏音频延迟：播放方向的ALSA缓冲按ro.vendor.audio.primary.out_period_count切成几个period（device.mk设3），录音方向不变。
-    # 只动alsa/UtilsAlsa.cpp，与[12]–[38]的上下文不重叠。在lineage-24.0 + 0001..0010上
-    # 核过：正向--check干净，打上后反向--check通过，0010、0008的反向检查仍过。
+    # 只动alsa/UtilsAlsa.cpp，与[12]–[38]的上下文不重叠。
     step(" [40] audio AIDL HAL播放方向的ALSA period数可配（录音不变）: ", apply_patch_file(
         tree, "hardware/interfaces",
         "android/hardware-interfaces/0011-audio-aidl-alsa-output-period-count.patch"))
@@ -1411,7 +1404,7 @@ def main():
         "android/v4l2-codec2/0002-v4l2-codec2-use-dmabuf-id-for-gralloc-blocks.patch"))
     step(" [39] external/webrtc 让设备树链 webrtc_audio_processing（通话的回声消除）: ",
          patch_webrtc_vendor_visibility(tree))
-    # 10-bit 视频：[29][30] 要和 patches/kernel/iris/0012（原 0129，iris）、patches/mesa/0002（原 0130，turnip）一起生效，见各函数说明。
+    # 10-bit 视频：[29][30] 要和 patches/kernel/iris/0012（iris）、patches/mesa/0002（turnip）一起生效，见各函数说明。
     step(" [29] minigbm 给 P010 开显示用途: ", patch_minigbm_p010_scanout(tree))
     step(" [30] v4l2_codec2 声明 HEVC Main10、VP9 Profile 2: ", patch_v4l2_10bit_profiles(tree))
     # 要和内核平面列表的 ABGR2101010（kernel/drm/0007）一起生效；旧内核上 HWC 会保持 8 位，见补丁说明。
@@ -1421,7 +1414,7 @@ def main():
         covered_by=("android/drm-hwcomposer/0002-drm-hwcomposer-switch-panels-between-srgb-and-display-p3.patch",
                     "android/drm-hwcomposer/0003-drm-hwcomposer-dim-layers-through-the-gpu.patch",
                     "android/drm-hwcomposer/0004-drm-hwcomposer-declare-hdr-on-internal-panels.patch")))
-    # 要和内核 kernel/drm/0005（原 0134）的 Colorspace 属性、device.mk 的两个属性一起生效；没有 Colorspace 属性时 HWC 保持原样。
+    # 要和内核 patches/kernel/drm/0005 的 Colorspace 属性、device.mk 的两个属性一起生效；没有 Colorspace 属性时 HWC 保持原样。
     step(" [32] drm_hwcomposer 让内置屏在 sRGB 和 Display P3 之间切换: ", apply_patch_file(
         tree, "external/drm_hwcomposer",
         "android/drm-hwcomposer/0002-drm-hwcomposer-switch-panels-between-srgb-and-display-p3.patch",
@@ -1447,7 +1440,7 @@ def main():
     step(" [24] adb_root 只在 WITH_SU=true 时装（发布构建没有 adb root）: ", patch_adb_root_only_with_su(tree))
     step(" [25] KeyGestureController 读 LineageSettings 失败不致命（10-11 救砖兜底）: ", patch_keygesture_lineagesettings_guard(tree))
     step(" [26] codec2 BLOB 线性块在没有 ION 时也能 map（HEVC CSD 合并 / 硬解）: ", patch_codec2_blob_linear_map(tree))
-    # Both go with patches/kernel/core/0008 (formerly 0085): what apps read has to agree with the release the kernel tells them.
+    # Both go with patches/kernel/core/0008: what apps read has to agree with the release the kernel tells them.
     step(" [36] 应用进程重新读取 os.version: ", patch_zygote_os_version(tree))
     step(" [37] init 不再设 ro.kernel.version: ", patch_init_no_kernel_version_prop(tree))
     if failed:

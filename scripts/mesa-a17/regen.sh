@@ -18,7 +18,6 @@
 #      （生成器原样把这个文件贴回去；上游改了它而我们没跟，会悄悄回退上游的改动）
 #   4. 打源码补丁（幂等）：patches/mesa/*.patch（0001 turnip ANB 延迟绑定 v3、0002 turnip P010，
 #      以及 0003..0011 上游 mesa 的 9 个构建与依赖 backport 提交）。
-#      ⚠️ 不打已退役的 0005（禁用 preemption，已证伪）。
 #   5. 删掉旧的生成 Android.bp（文件头带 "The Magma GPU Project" 的那些），重新生成
 #   6. postprocess.py：vulkan.freedreno 补 compile_multilib: "64"
 #   7. check-output.py：模块名闭合、turnip 用 msm 不用 kgsl、SP-HAL 依赖白名单、无绝对路径
