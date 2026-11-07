@@ -306,8 +306,20 @@ constexpr size_t kHeader = 32;
 static size_t maxRecordBytes(const SensorProfile& p) {
     return 8 + kMaxFrames * size_t(p.width) * p.height;
 }
+static bool sameFrames(const Frames& a, const Frames& b) {
+    if (a.size() != b.size()) return false;
+    for (size_t i = 0; i < a.size(); ++i)
+        if (a[i].width != b[i].width || a[i].height != b[i].height ||
+            memcmp(a[i].pixels, b[i].pixels, size_t(a[i].width) * a[i].height)) return false;
+    return true;
+}
+
 bool Store::load() {
-    enrollments.clear(); authenticatorId = 0; failures = 0;
+    // The session reloads before every capture; a finger whose frames are
+    // unchanged keeps its feature cache.
+    std::vector<Enrollment> previous;
+    previous.swap(enrollments);
+    authenticatorId = 0; failures = 0;
     int fd = open(path_.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
     if (fd < 0) return errno == ENOENT;
     struct stat st{};
@@ -363,6 +375,12 @@ bool Store::load() {
         enrollments.push_back(std::move(e));
     }
     if (pos != end) { enrollments.clear(); return false; }
+    for (auto& e : enrollments)
+        for (auto& p : previous)
+            if (p.id == e.id && p.features && sameFrames(p.frames, e.frames)) {
+                e.features = std::move(p.features);
+                break;
+            }
     authenticatorId = auth;
     failures = get(b,24,4);
     return true;

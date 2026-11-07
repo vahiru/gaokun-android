@@ -211,6 +211,16 @@ int main() {
     // frames or with a wrong count fails closed.
     restored.enrollments[0] = grown; assert(restored.save());
     assert(restored.load() && sameFrames(restored.enrollments[0].frames,grown.frames));
+    // A reload keeps the feature cache of a finger whose frames are unchanged
+    // and drops it once the database holds other frames.
+    prepare(restored.enrollments);
+    const auto* cache = restored.enrollments[0].features.get();
+    assert(cache && restored.load() && restored.enrollments[0].features.get() == cache);
+    {
+        Store other(path,kFocalTech); assert(other.load() && !other.enrollments[0].features);
+        other.enrollments[0].frames.back() = synthetic(700); assert(other.save());
+    }
+    assert(restored.load() && !restored.enrollments[0].features);
     auto tampered = readFile(path);
     tampered[36] = kMaxFrames+1; resign(tampered); writeFile(path,tampered); assert(!restored.load());
     tampered[36] = kStages-1; resign(tampered); writeFile(path,tampered); assert(!restored.load());
