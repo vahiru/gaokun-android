@@ -25,6 +25,10 @@ constexpr int64_t kBaseRetryMs = 5000;
 // off (drift), not the candidates: take the latest one.
 constexpr unsigned kBaseMaxRejects = 3;
 constexpr int64_t kBaseRejectSpanMs = 10000;
+// A finger leaves its trace on the key for a while after it lifts. Any base,
+// the first of a session or one that fell due during a press, waits until
+// the key has been clear this long.
+constexpr int64_t kBaseSettleMs = 2000;
 
 static int64_t boottimeMs() {
     timespec t{};
@@ -145,7 +149,9 @@ bool Transport::status(uint8_t* value) {
     if (ioctl(fd_,GAOKUN3_FPCMD_IOC_GET_FINGER_STATUS,value)) return false;
     if (profile_->sensor != Sensor::kGoodix) return true;
     // Goodix reports physical presence: take the no-finger frame while clear.
-    if (!*value && (base_.empty() || boottimeMs() - baseMs_ >= kBaseRefreshMs))
+    const int64_t now = boottimeMs();
+    if (*value) { lastDownMs_ = now; return true; }
+    if ((base_.empty() || now - baseMs_ >= kBaseRefreshMs) && now - lastDownMs_ >= kBaseSettleMs)
         return refreshBase();
     return true;
 }

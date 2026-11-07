@@ -161,7 +161,10 @@ int main() {
       Gaokun3Frame frame{};bool usable=false;
       statusFinger=1; assert(t.capture(&frame,&usable) && !usable);   // finger since start
       uint8_t finger=0; assert(t.status(&finger) && finger && captures==1);
-      statusFinger=0; assert(t.status(&finger) && !finger && captures==2);
+      // The first base waits until the key has been clear for 2 s.
+      statusFinger=0; assert(t.status(&finger) && !finger && captures==1);
+      nowMs += 1999; assert(t.status(&finger) && captures==1);
+      nowMs += 1; assert(t.status(&finger) && !finger && captures==2);
       assert(t.status(&finger) && captures==2);                        // fresh base kept
       assert(t.capture(&frame,&usable) && usable && captures==3);
       assert((goodixWithBase==std::vector<bool>{false,true}));
@@ -172,14 +175,19 @@ int main() {
       statusFinger=1; assert(t.status(&finger) && finger && captures==4);
       statusFinger=0; assert(t.status(&finger) && !finger && captures==4);
       nowMs += 55000; assert(t.status(&finger) && captures==5);
+      // A refresh that falls due during a press waits 2 s after the lift.
+      statusFinger=1; nowMs += 60000; assert(t.status(&finger) && finger && captures==5);
+      statusFinger=0; assert(t.status(&finger) && !finger && captures==5);
+      nowMs += 1000; assert(t.status(&finger) && captures==5);
+      nowMs += 1000; assert(t.status(&finger) && captures==6);
       // Rejected candidates are retried every 5 s; the third, 10 s after the
       // first, replaces the base anyway.
       acceptBase=false;
-      nowMs += 60000; assert(t.status(&finger) && captures==6);
-      nowMs += 4000; assert(t.status(&finger) && captures==6);
-      nowMs += 1000; assert(t.status(&finger) && captures==7);
-      nowMs += 5000; assert(t.status(&finger) && captures==8);
-      nowMs += 5000; assert(t.status(&finger) && captures==8);   // accepted
+      nowMs += 60000; assert(t.status(&finger) && captures==7);
+      nowMs += 4000; assert(t.status(&finger) && captures==7);
+      nowMs += 1000; assert(t.status(&finger) && captures==8);
+      nowMs += 5000; assert(t.status(&finger) && captures==9);
+      nowMs += 5000; assert(t.status(&finger) && captures==9);   // accepted
       assert(t.stop()); }
     // A new session starts without a base.
     { gaokun3::Transport t(gaokun3::kGoodix); assert(t.start());

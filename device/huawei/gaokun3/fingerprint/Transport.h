@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 #include "Core.h"
+#include <cstdint>
 #include <vector>
 namespace gaokun3 {
 class Transport {
@@ -26,6 +27,8 @@ class Transport {
     // since when.
     std::vector<uint16_t> base_;
     int64_t baseMs_ = 0;
+    // When the status last read a finger (Goodix).
+    int64_t lastDownMs_ = INT64_MIN / 2;
     unsigned baseRejects_ = 0;
     int64_t firstRejectMs_ = 0;
     bool reset();
