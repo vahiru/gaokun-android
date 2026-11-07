@@ -25,9 +25,11 @@ constexpr int64_t kBaseRetryMs = 5000;
 // off (drift), not the candidates: take the latest one.
 constexpr unsigned kBaseMaxRejects = 3;
 constexpr int64_t kBaseRejectSpanMs = 10000;
-// A finger leaves its trace on the key for a while after it lifts. Any base,
-// the first of a session or one that fell due during a press, waits until
-// the key has been clear this long.
+// A finger leaves its trace on the key for a while after it lifts. After a
+// finger seen by this transport, a base (also a session's first, or one that
+// fell due during the press) waits until the key has been clear this long.
+// Presses before the session went unseen; a session's first base is checked
+// again kBaseRetryMs later, and a lighter candidate replaces one with a trace.
 constexpr int64_t kBaseSettleMs = 2000;
 
 static int64_t boottimeMs() {

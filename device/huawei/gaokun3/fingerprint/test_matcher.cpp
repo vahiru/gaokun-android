@@ -14,10 +14,10 @@ extern "C" {
 // The suite runs once per sensor geometry (FocalTech 40 x 196, Goodix 36 x 160).
 static int W = 40, H = 196;
 // Core accepts a finger at 37 (kMatchThreshold), its best frame plus one at
-// another spot. One slightly turned or shifted view of the same scene reaches
-// it alone; a view turned by 50 degrees at least counts as a best frame beyond
-// chance (kCorroboratedScore, 22); unrelated scenes stay under 16.5.
-constexpr float kAccept = 37, kBeyondChance = 22, kChance = 16.5f;
+// another spot (values as in Core.h). One slightly turned or shifted view of
+// the same scene reaches it alone; a view turned by 50 degrees reaches 33
+// (35.8 at the Goodix size), close to it; unrelated scenes stay under 16.5.
+constexpr float kAccept = 37, kFarTurn = 33, kChance = 16.5f;
 
 // Views are cut from a larger generated scene, so a turned or shifted view
 // still has texture everywhere instead of blank corners.
@@ -107,7 +107,7 @@ static void suite(int width, int height) {
         turnedMax = std::fmax(turnedMax, gaokun3_match_score(&turned, &reference[i]));
         gaokun3_feature_set_free(&turned);
     }
-    assert(sameMin >= kAccept && shiftedMin >= kAccept && farMin >= kBeyondChance);
+    assert(sameMin >= kAccept && shiftedMin >= kAccept && farMin >= kFarTurn);
     assert(turnedMax < kChance && unrelatedMax < kChance);
 
     // Missing or mismatched inputs never match.

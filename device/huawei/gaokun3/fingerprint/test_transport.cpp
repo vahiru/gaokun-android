@@ -189,10 +189,23 @@ int main() {
       nowMs += 5000; assert(t.status(&finger) && captures==9);
       nowMs += 5000; assert(t.status(&finger) && captures==9);   // accepted
       assert(t.stop()); }
-    // A new session starts without a base.
+    // A new session starts without a base; with the key clear at the first
+    // poll it is taken at once.
     { gaokun3::Transport t(gaokun3::kGoodix); assert(t.start());
       Gaokun3Frame frame{};bool usable=true;
-      assert(t.capture(&frame,&usable) && !usable); assert(t.stop()); }
+      assert(t.capture(&frame,&usable) && !usable);
+      const unsigned before = captures;
+      statusFinger=0; uint8_t finger=1; assert(t.status(&finger) && !finger && captures==before+1);
+      assert(t.stop()); }
+    // Pressing again while it waits starts the 2 s over.
+    { gaokun3::Transport t(gaokun3::kGoodix); assert(t.start());
+      const unsigned before = captures; uint8_t finger=0;
+      statusFinger=1; assert(t.status(&finger) && finger);
+      statusFinger=0; nowMs += 1500; assert(t.status(&finger) && captures==before);
+      statusFinger=1; assert(t.status(&finger) && finger);
+      statusFinger=0; nowMs += 1500; assert(t.status(&finger) && captures==before);
+      nowMs += 500; assert(t.status(&finger) && captures==before+1);
+      assert(t.stop()); }
     reset(); failInit=true;
     { gaokun3::Transport t(gaokun3::kFocalTech); assert(!t.start()); assert(!owned && !loaded); }
     reset(); failReadback=true;
