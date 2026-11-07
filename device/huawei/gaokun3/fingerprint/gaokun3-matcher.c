@@ -183,7 +183,9 @@ box_mean (const float *in, int w, int h, int r, float *out)
         int y0 = clamp_int (y - r, 0, h), y1 = clamp_int (y + r + 1, 0, h);
         double s = sat[y1 * (w + 1) + x1] - sat[y0 * (w + 1) + x1] -
                    sat[y1 * (w + 1) + x0] + sat[y0 * (w + 1) + x0];
-        out[y * w + x] = (float) (s / ((x1 - x0) * (y1 - y0)));
+        /* Rounding in the table differences can leave a hair below zero
+         * over a flat area; the mean of non-negative inputs is not. */
+        out[y * w + x] = (float) (s > 0 ? s / ((x1 - x0) * (y1 - y0)) : 0);
       }
   free (sat);
 }
@@ -386,7 +388,7 @@ gaokun3_feature_extract (const Gaokun3Frame *frame)
     sorted[i] = contrast[i] = sqrtf (contrast[i]);
   qsort (sorted, (size_t) n, sizeof (float), cmp_float);
   ref = sorted[n * 9 / 10];
-  if (ref <= 0)
+  if (!(ref > 0))
     goto fail;
   for (i = 0; i < n; i++)
     {
