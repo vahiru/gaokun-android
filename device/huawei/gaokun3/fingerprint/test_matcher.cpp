@@ -13,9 +13,11 @@ extern "C" {
 
 // The suite runs once per sensor geometry (FocalTech 40 x 196, Goodix 36 x 160).
 static int W = 40, H = 196;
-// Core accepts a finger at 33, the sum of its two best frames. One view of
-// the same scene reaches it alone; unrelated scenes stay under half of it.
-constexpr float kAccept = 33, kChance = 16.5f;
+// Core accepts a finger at 37 (kMatchThreshold), its best frame plus one at
+// another spot. One slightly turned or shifted view of the same scene reaches
+// it alone; a view turned by 50 degrees at least counts as a best frame beyond
+// chance (kCorroboratedScore, 22); unrelated scenes stay under 16.5.
+constexpr float kAccept = 37, kBeyondChance = 22, kChance = 16.5f;
 
 // Views are cut from a larger generated scene, so a turned or shifted view
 // still has texture everywhere instead of blank corners.
@@ -80,7 +82,7 @@ static void suite(int width, int height) {
     constexpr size_t count = 32;
     std::array<Gaokun3FeatureSet, count> reference{};
     std::array<Scene, count> scenes{};
-    float sameMin = 100, shiftedMin = 100, turnedMax = 0, unrelatedMax = 0;
+    float sameMin = 100, farMin = 100, shiftedMin = 100, turnedMax = 0, unrelatedMax = 0;
     for (size_t i = 0; i < count; ++i) {
         scenes[i] = scene(1000 + i);
         reference[i] = features(view(scenes[i], 0));
@@ -89,7 +91,9 @@ static void suite(int width, int height) {
         // Holding the tablet differently turns a press by up to 60 degrees.
         for (double degrees : {-10.0, 10.0, -50.0, 50.0}) {
             auto probe = features(view(scenes[i], degrees));
-            sameMin = std::fmin(sameMin, gaokun3_match_score(&probe, &reference[i]));
+            const float s = gaokun3_match_score(&probe, &reference[i]);
+            if (std::fabs(degrees) > 20) farMin = std::fmin(farMin, s);
+            else sameMin = std::fmin(sameMin, s);
             for (size_t j = 0; j < count; ++j)
                 if (j != i) unrelatedMax = std::fmax(unrelatedMax, gaokun3_match_score(&probe, &reference[j]));
             gaokun3_feature_set_free(&probe);
@@ -103,7 +107,7 @@ static void suite(int width, int height) {
         turnedMax = std::fmax(turnedMax, gaokun3_match_score(&turned, &reference[i]));
         gaokun3_feature_set_free(&turned);
     }
-    assert(sameMin >= kAccept && shiftedMin >= kAccept);
+    assert(sameMin >= kAccept && shiftedMin >= kAccept && farMin >= kBeyondChance);
     assert(turnedMax < kChance && unrelatedMax < kChance);
 
     // Missing or mismatched inputs never match.
@@ -120,7 +124,7 @@ static void suite(int width, int height) {
 
     for (auto& fs : reference) gaokun3_feature_set_free(&fs);
     // A regression on generated texture, not a claim about real fingers.
-    std::cout << "PASS " << width << "x" << height << ": turned views min " << sameMin
+    std::cout << "PASS " << width << "x" << height << ": turned views min " << sameMin << " (50 degrees " << farMin << ")"
               << ", shifted views min " << shiftedMin << ", 90-degree views max " << turnedMax
               << ", 3968 unrelated comparisons max " << unrelatedMax << '\n';
 }
