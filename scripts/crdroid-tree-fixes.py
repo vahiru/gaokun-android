@@ -1398,6 +1398,12 @@ def main():
     step(" [38] audio AIDL HAL 采集方向的厂商钩子（内置麦克风阵列）: ", apply_patch_file(
         tree, "hardware/interfaces",
         "0206-audio-aidl-primary-capture-hook.patch"))
+    # 游戏音频延迟：播放方向的ALSA缓冲按ro.vendor.audio.primary.out_period_count切成几个period（device.mk设3），录音方向不变。
+    # 只动alsa/UtilsAlsa.cpp，与[12]–[38]的上下文不重叠。在lineage-24.0 + 0010/0051/0052/0063/0068/0069/0077/0083/0117/0206上
+    # 核过：正向--check干净，打上后反向--check通过，0206、0083的反向检查仍过。
+    step(" [40] audio AIDL HAL播放方向的ALSA period数可配（录音不变）: ", apply_patch_file(
+        tree, "hardware/interfaces",
+        "0215-audio-aidl-alsa-output-period-count.patch"))
     # 字节缓冲模式的块 ID。要和 device.mk 的 poolmask（GRALLOC 位）一起生效，见补丁说明。
     step(" [28] v4l2_codec2 字节缓冲模式用 dmabuf ID: ", apply_patch_file(
         tree, "external/v4l2_codec2",

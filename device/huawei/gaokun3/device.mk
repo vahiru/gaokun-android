@@ -240,6 +240,12 @@ PRODUCT_VENDOR_PROPERTIES += \
 PRODUCT_VENDOR_PROPERTIES += \
     ro.vendor.audio.primary.out_latency_ms=10
 
+# 游戏音频延迟：播放方向的ALSA缓冲由4个480帧的period减到3个（30 ms），录音方向仍按alsa_utils默认的4个。
+# 补丁0215（tree-fix [40]）读它；不设 = 4个。不要减到2个：DSP缺数据时扣着最后一个period不放，
+# ALSA不会报XRUN，FastMixer和轨道的计数也都是0，只能在游戏里听出断音。
+PRODUCT_VENDOR_PROPERTIES += \
+    ro.vendor.audio.primary.out_period_count=3
+
 # 扬声器低音处理（speakerfx/README.md）：音频 HAL 把每块播放数据写进 ALSA 之前交给这个库
 # （补丁 0117，tree-fix [27]），所以游戏的 FAST 轨也在内 —— 会话音效挂不上 FAST 会话。
 # 只在扬声器增强打开、且处理方式不是 Histen 时处理（默认就是它；会话音效那时是直通），其余原样放过。
