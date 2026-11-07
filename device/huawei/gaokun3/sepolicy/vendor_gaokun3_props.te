@@ -39,15 +39,11 @@ vendor_public_prop(vendor_gaokun3_prop)
 #   shell 域。⬜ 未验证：enforcing 之后 ksu 域能不能设这个属性（那是 root
 #   实现在运行期打的策略补丁，本仓管不到）。真不行就只剩"改 device.mk 重新构建"。
 #
-# ★ 1.0 PWR-16（2026-10-05）：给用户的入口已经不是 setprop，而是 Parts 的待机开关
-#   （「设置 → 电池 → 待机（睡眠）」，parts/…/StandbySettingsActivity.java）。它写 system 属性
-#   persist.sys.gaokun3.allow_suspend，init.gaokun3.rc 两条字面值触发器在 vendor_init 里 setprop 成
-#   persist.vendor.gaokun3.allow_suspend。【这里不需要新规则】，三段都是现成的：
-#     · system_app 写 system_prop：refs/lineage-sepolicy/private/system_app.te:43；
+# ★ persist.sys.gaokun3.allow_suspend → persist.vendor.gaokun3.allow_suspend 镜像：
+#   init.gaokun3.rc 两条字面值触发器在 vendor_init 里 setprop 成
+#   persist.vendor.gaokun3.allow_suspend。【这里不需要新规则】：
 #     · vendor rc 里 persist.sys.* 的触发器不被丢：sepolicy/vendor_init.te:16 的 get_prop(vendor_init, system_prop)；
-#     · vendor_init 写本类型：下面的 set_prop(vendor_init, vendor_gaokun3_prop)；Parts 读生效值：下面的 get_prop(system_app, …)。
-#   neverallow 核对：system_app 没有碰 vendor 属性的 set（private/property.te:492-502 不触发）；
-#   vendor_init 不是 coredomain（同上那条与 private/property.te:200-203 都管不到它）。⬜ 未编译。
+#     · vendor_init 写本类型：下面的 set_prop(vendor_init, vendor_gaokun3_prop)。
 
 # OTA 钩子读 persist.vendor.gaokun3.recovery_entry 决定要不要写 recovery 启动项。
 # （见 bin/gaokun3-ota-postinstall.sh 与 sepolicy/postinstall.te）

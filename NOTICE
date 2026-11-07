@@ -19,7 +19,7 @@ under other licenses; those keep their own terms.
       (Copyright (C) 2022-2026 Dylan Van Assche,
       https://codeberg.org/dylanvanassche/libssc); the client code is a
       reimplementation of that protocol, documented in
-      docs/sensors-ssc-protocol.md.
+      docs/dev/sensors-ssc-protocol.md.
 * Files adapted from the Android Open Source Project keep their **Apache-2.0**
   headers and copyright lines, because that is how AOSP licenses them.
   Apache-2.0 is one-way compatible with GPL-3, so they combine cleanly:
@@ -28,7 +28,7 @@ under other licenses; those keep their own terms.
       device/huawei/gaokun3/boot_control/{BootControl.cpp,BootControl.h,main.cpp}
                                               (from hardware/interfaces/boot)
       device/huawei/gaokun3/mesa/gaokun.toml  (Copyright 2024 Google LLC)
-* ⚠️ patches/ that apply to the Linux kernel:
+* patches/ that apply to the Linux kernel:
       **GNU General Public License v2.0 only** — they are derivative works of
       Linux and cannot be relicensed. Relicensing this project to GPL-3 does
       not (and must not) change them. They are distributed alongside, not

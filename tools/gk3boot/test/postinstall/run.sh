@@ -201,7 +201,7 @@ chk "RC=0、没有派生 rescue-b.conf、原条目不变" '[ "$RC" = 0 ] && [ ! 
 gor r4 0
 chk "OTA 到 a 也不碰它" '[ "$RC" = 0 ] && [ "$(opt "$MID-rescue.conf")" = "console=tty0 gk3.squash=/my/own.squashfs" ]'
 
-# ── T：loader.conf 的 timeout（S15 / U13）：双系统只把安装器写的 15 改成 5，别的一概不动 ────────────────────
+# ── T：loader.conf 的 timeout：只把旧安装器写的 15 改成 5，别的一概不动 ────────────────────
 win() { mkdir -p "$P/sc-$1/esp/EFI/Microsoft/Boot"; printf 'MZwin' > "$P/sc-$1/esp/EFI/Microsoft/Boot/bootmgfw.efi"; }
 LCF=$P/run/esp/loader/loader.conf
 echo "  T1 双系统、loader.conf 是安装器写的 timeout 15 ⇒ 改成 5，其余行原样"
@@ -210,9 +210,9 @@ chk "RC=0、timeout 5、console-mode / editor / default 原样、没有 .new" '[
 echo "  T2 双系统、用户改过（timeout 10）⇒ 不动"
 sc t2 off ""; win t2; sed -i.bak 's/^timeout 15$/timeout 10/' "$P/sc-t2/esp/loader/loader.conf"; rm -f "$P/sc-t2/esp/loader/loader.conf.bak"; go t2
 chk "RC=0、还是 timeout 10" '[ "$RC" = 0 ] && grep -qx "timeout 10" "$LCF" && ! grep -q "timeout 5" "$LCF"'
-echo "  T3 纯 Android（没有 bootmgfw.efi）、timeout 15 ⇒ 不动（U3：观察期保持 15）"
+echo "  T3 纯 Android（没有 bootmgfw.efi）、timeout 15 ⇒ 同样改成 5"
 sc t3 off ""; go t3
-chk "RC=0、还是 timeout 15" '[ "$RC" = 0 ] && grep -qx "timeout 15" "$LCF" && ! echo "$OUT" | grep -q "改成 5"'
+chk "RC=0、timeout 5、其余行原样" '[ "$RC" = 0 ] && [ "$(cat "$LCF")" = "$(printf "timeout 5\nconsole-mode keep\neditor no\ndefault *-android-a.conf")" ] && [ ! -e "$LCF.new" ] && echo "$OUT" | grep -q "从安装器原来写的 15 改成 5"'
 echo "  T4 双系统、已是 timeout 5（1.0 安装器装的）⇒ 不动、不写"
 sc t4 off ""; win t4; sed -i.bak 's/^timeout 15$/timeout 5/' "$P/sc-t4/esp/loader/loader.conf"; rm -f "$P/sc-t4/esp/loader/loader.conf.bak"; go t4
 chk "RC=0、timeout 5、日志里没说改" '[ "$RC" = 0 ] && grep -qx "timeout 5" "$LCF" && ! echo "$OUT" | grep -q "改成 5"'

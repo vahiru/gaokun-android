@@ -5,7 +5,7 @@
       默认值出自 packages/modules/Wifi/service/ServiceWifiResources/res/values/config.xml:453，
       由 ClientModeImpl.java:8386 下发给 netd（写 /proc/sys/net/ipv4/tcp_rmem / tcp_wmem）。
 
-      ★ 实测（2026-09-24，docs/stage4-findings.md #119）：到 Cloudflare 边缘 RTT 约 294 ms，
+      ★ 实测（2026-09-24，见 docs/dev/android-bringup.md）：到 Cloudflare 边缘 RTT 约 294 ms，
         单连接吞吐 ≈ 窗口 / RTT —— 2 MB 上限时 3.5–3.8 MB/s，临时改成 8 MB 后 9.1–9.8 MB/s
         （同一 URL、同一时刻，各两次）。4 连接并发合计 12.6 MB/s ⇒ 出口本身不是瓶颈。
         系统内 OTA 是单连接下载，这条直接决定它有多快（v0.6.2 发版说明里的"下载只有 1–2 MB/s"）。
@@ -39,7 +39,7 @@
           WifiServiceImpl.isPnoSupported() —— 对外报告"支持 PNO"。
       ⚠️★ 所以光改这里还不够：还有第二道门 DeviceConfig wifi/software_pno_enabled（DeviceConfigFacade
          .updateDeviceConfigFlags 里默认 false），本机上它被显式置成了 false（device_config list wifi，
-         wifi 命名空间 94 项，多半是 GMS 同步下来的，来源未核实）。那一道要另想办法（docs/v1.0-plan.md 的 NET-1）。
+         wifi 命名空间 94 项，多半是 GMS 同步下来的，来源未核实）。那一道详见 docs/TODO.md。
     -->
     <bool name="config_wifiSwPnoEnabled" translatable="false">true</bool>
 

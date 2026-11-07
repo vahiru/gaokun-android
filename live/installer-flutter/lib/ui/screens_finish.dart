@@ -301,8 +301,8 @@ class ConfirmPage extends StatelessWidget {
   }
 }
 
-/// 双系统的两件事（S15，docs/boot-entry-design.md §4.9.3、§4.9.7）：开机默认进哪个系统（U12）、BitLocker 恢复密钥（U16）。
-/// ★ 默认系统用大字写清楚"冷开机进这里选的、之后在哪里改"（设计稿 §8.2 #60：预选 Android，但以 Windows 为主的人要看得见）
+/// 双系统的两件事（见 tools/gk3boot/README.md）：开机默认进哪个系统、BitLocker 恢复密钥。
+/// 默认系统用大字写清楚"冷开机进这里选的、之后在哪里改"（预选 Android，但以 Windows 为主的人要看得见）
 class DualOptions extends StatelessWidget {
   const DualOptions({super.key});
 
@@ -630,6 +630,6 @@ class _FailPageState extends State<FailPage> {
   }
 }
 
-/// 华为的一键恢复分区（出厂镜像）。认它的卷标 Onekey —— 出厂布局里 p6 的 LABEL（docs/hw-inventory.md 第 8 节）。
-/// ⬜ 同一套恢复机制是否还用到 WINPE（p5，1 GiB FAT）没有核实，所以只标这一个
+/// 华为的一键恢复分区（出厂镜像）。认它的卷标 Onekey —— 出厂布局里 p6 的 LABEL（见 docs/dev/hardware.md）。
+/// 同一套恢复机制是否还用到 WINPE（p5，1 GiB FAT）尚未核实，所以只标这一个
 bool isOnekey(Part p) => p.fslabel.toLowerCase() == 'onekey';

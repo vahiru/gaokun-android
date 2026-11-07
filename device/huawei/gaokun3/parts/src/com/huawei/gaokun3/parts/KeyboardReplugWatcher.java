@@ -4,7 +4,7 @@
  * ★ "关掉键盘"指的是 Parts 的键盘开关（设置 → 系统 → 磁吸键盘，或控制中心的磁贴）：
  *   设 persist.sys.gaokun3.keyboard=0 → etc/keyboard.rc → /vendor/bin/gaokun3-keyboard.sh off，
  *   把名字以 "HID 12d1:10b8" 开头的 input 设备（键盘 + 触控板，共 6–7 个）的
- *   /sys/class/input/inputN/inhibited 写成 1（docs/stage4-findings.md #65）。
+ *   /sys/class/input/inputN/inhibited 写成 1（docs/dev/hardware.md）。
  * ⚠️ 缺陷：inhibited 是【每个 input 设备】的状态。键盘盖拔下再插回，内核新建的是一组新的 input 设备，
  *   inhibited 默认 0 ⇒ 开关还显示"关"，键盘却又能用了。属性没变，init 的触发器不会再跑。
  *

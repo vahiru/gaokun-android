@@ -3,7 +3,7 @@
  * 本文件里的版本【已经带上 patches/0038 的修正】：跳点检测比的是与预测位置的偏差。
  * 想复现修正前的行为，把 swap_test/run 里那两行改回
  *     long dx = det[di].x - t->x, dy = det[di].y - t->y;
- * 即可。案卷：docs/stage4-findings.md #114。
+ * 即可。详见 scripts/touch/README.md。
  *
  *   cc -O2 -o tracker-sim tracker-sim.c && ./tracker-sim
  */

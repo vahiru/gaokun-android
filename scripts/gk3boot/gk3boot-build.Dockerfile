@@ -1,4 +1,4 @@
-# gk3boot 的 UEFI 构建与 QEMU 夹具环境（设计稿 docs/boot-entry-design.md §5 S3）。
+# gk3boot 的 UEFI 构建与 QEMU 夹具环境（见 tools/gk3boot/README.md）。
 # 由 scripts/gk3boot/test-probe.sh 调用。
 # ★ 与 scripts/live/live-build.Dockerfile 同一个 Debian 13 基础镜像（arm64，Mac 上原生，不用 qemu-user）。
 # ★ 版本钉死：systemd-boot-efi 必须与设备同版本（257.13，scripts/live/packages-live.lock:333）；

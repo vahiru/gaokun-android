@@ -59,17 +59,17 @@ class Disk {
   final bool removable, medium;
 
   /// gk3_probe 的 table=：gpt | mbr | unreadable | unknown（旧后端 / 旧 fixture 没有这个字段 → 空串，按 gpt 待）。
-  /// 设计稿 docs/installer-rust-design.md §3.2 的 S1 / S2
+  /// 设计稿见 docs/dev/installer-rust-design.md
   final String table;
   final parts = <Part>[];
   final free = <FreeRegion>[];
 
   bool get external => removable || tran == 'usb';
 
-  /// 分区表读不出来：后端不列它的分区与空闲区（原来是把整块盘报成空闲 —— S1），界面不给选
+  /// 分区表读不出来：后端不列它的分区与空闲区，界面不给选
   bool get unreadable => table == 'unreadable';
 
-  /// MBR 盘：后端只写 GPT，非整盘的写盘入口一律 ERR mbr-disk —— 只能整盘清空（S2）
+  /// MBR 盘：后端只写 GPT，非整盘的写盘入口一律 ERR mbr-disk —— 只能整盘清空
   bool get mbr => table == 'mbr';
   Part? get esp {
     for (final p in parts) {

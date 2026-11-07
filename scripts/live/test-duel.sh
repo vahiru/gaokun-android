@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # shell 版与 Rust 版（tools/gk3-installer）的对拍 —— 只读入口（gk3_probe / gk3_preflight / gk3_plan）。
-# 设计：docs/installer-rust-design.md §6。
+# 设计：docs/dev/installer-rust-design.md。
 #
 #   bash tools/gk3-installer/build.sh musl
 #   GK3_TEST_DUEL=/repo/tools/gk3-installer/target/aarch64-unknown-linux-musl/release/gk3-installer \

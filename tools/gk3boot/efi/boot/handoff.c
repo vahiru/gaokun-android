@@ -73,7 +73,7 @@ EFI_STATUS gk3_linux_boot(const gk3_linux *L, gk3_pre_start_fn pre_start, const 
     if (!L->kernel || L->kernel_len < 64 || !L->cmdline || !L->dtb || L->dtb_len < 40 || !L->initrd || !L->initrd_len)
         return EFI_INVALID_PARAMETER;
 
-    /* 1. LoadImage（缓冲区）—— E3 已在本机证明可用（docs/hw/gk3probe-e3-20261005.txt） */
+    /* 1. LoadImage（缓冲区）—— 已在本机验证可用（见 tools/gk3boot/README.md） */
     *stage = "LoadImage";
     t = gk3_ticks();
     st = gk3_bs->LoadImage(FALSE, gk3_image, (EFI_DEVICE_PATH *)&kernel_dp, (void *)L->kernel, L->kernel_len, &kimg);

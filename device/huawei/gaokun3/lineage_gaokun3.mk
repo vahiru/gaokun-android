@@ -4,7 +4,7 @@
 #    2026-10-25 起；此前是 crDroid 16.0（lineage-23.2，android-16.0.0_r4）
 #
 # 取代 Stage 2–5 时期的 aosp_gaokun3.mk（在 git 历史里）。
-# 换轨理由见 docs/stage4-findings.md #36：手搓最小 AOSP 缺产品级配置
+# 换轨理由见 docs/dev/android-bringup.md：手搓最小 AOSP 缺产品级配置
 # （MediaCodecList 空、无铃声/UI 音效），而这些是真 ROM 设备树的标配。
 #
 # ⚠️ 产品名必须是 lineage_<codename>：vendor/lineage/build/envsetup.sh 的
@@ -50,7 +50,7 @@ $(call inherit-product, $(SRC_TARGET_DIR)/product/full_base.mk)
 # ★ 默认 = 发布构建 = 安全。只有构建时环境里 GAOKUN3_DEV_BUILD=1 才是开发构建：
 #     GAOKUN3_DEV_BUILD=1 m bacon superimage
 # 下面四样开发便利【只在开发构建里】给（此前开发与发布共用一份配置，
-# v0.7.1 及以前的公开镜像全带着，见 docs/v1.0-plan.md B1）：
+# v0.7.1 及以前的公开镜像全带着，见 docs/dev/release-checklist.md）：
 #   ① WITH_ADB_INSECURE            adb 不要授权（ro.adb.secure=0）
 #   ② system_ext 的 ro.debuggable=1 adb root / adb remount（D1：发布版一起关）
 #   ③ PRODUCT_ADB_KEYS             开发机的个人公钥烤进 /product/etc/security/adb_keys
@@ -148,7 +148,7 @@ endif # GAOKUN3_DEV_BUILD
 # → MediaCodecList 为空 → App 一律 "Failed to create audio/mpeg decoder"，
 #   screenrecord 报 "unable to create video/avc codec instance"。
 #
-# 这就是 docs/stage4-findings.md #36 追了两个阶段的那个"解码器一个都没有"。
+# 这就是 docs/dev/audio-video.md 记录的"解码器一个都没有"。
 # 它与 crDroid 无关 —— AOSP 16 上同样如此，只是真机设备树都会设这个属性，
 # 我们这棵手搓的从来没设过。
 #
@@ -200,9 +200,9 @@ endif
 #       ifneq ($(TARGET_DISABLE_FASTBOOTD),true)  PRODUCT_PACKAGES += fastbootd
 #   （Lineage 提交 a438593b "Build fastbootd by default"，16.0 没有这一段）。fastbootd 是 recovery: true 的模块
 #   （构建机 system/core/fastboot/Android.bp:142-146），会进 recovery ramdisk —— 而本机的 recovery ramdisk 随 vendor
-#   走 OTA（AndroidBoard.mk）。A16 那份 recovery 里没有 fastbootd（docs/fastboot-design.md:85 解包核对），
-#   recovery 内 fastbootd 是 fastboot 设计稿里否掉的方案 A（#39 复位循环未解；上游 fastbootd 对 by-name 下任何节点
-#   都放行 flash / erase，见同文 :93）。1.0 的 fastboot 由 gk3boot 执行端承担（docs/boot-entry-design.md）。
+#   走 OTA（AndroidBoard.mk）。A16 那份 recovery 里没有 fastbootd，
+#   而上游 fastbootd 对 by-name 下任何节点都放行 flash / erase。
+#   1.0 的 fastboot 由 gk3boot 执行端承担（tools/gk3boot/README.md）。
 #   ⇒ 关掉，recovery 的内容保持与 A16 验过的那份一致。
 #   不是产品变量（不在 build/make/core/product.mk 的列表里），是普通全局变量：放在本文件里，就在 common.mk 被
 #   import 之前已经有值（inherit-product 只登记、之后才按序 include，product.mk:543-557）。
@@ -318,7 +318,7 @@ PRODUCT_MANUFACTURER := Huawei
 #   构建后用 `grep ro.build.characteristics out/target/product/gaokun3/system/build.prop` 验。
 PRODUCT_CHARACTERISTICS := tablet
 
-# API 等级：36（= Android 16）。★ 2026-10-25 定：换到 A17（SDK 37）后【不提】到 37（docs/a17-migration-plan.md §2.5）。
+# API 等级：36（= Android 16）。★ 换到 A17（SDK 37）后【不提】到 37（docs/dev/android-bringup.md）。
 #   · 它决定 VSR_VENDOR_API_LEVEL（refs/a17/build/make/core/product_config.mk:660-663，sdk-to-vendor-api-level(36)
 #     = 202504；本树不设 BOARD_SHIPPING_API_LEVEL，:664-675 那支不走）。
 #   · 202604 起的新要求都按 VSR 判：例如 config.mk:469-485 只有 VSR >= 202604 才 TARGET_RESTRICTS_ASHMEM_USAGE

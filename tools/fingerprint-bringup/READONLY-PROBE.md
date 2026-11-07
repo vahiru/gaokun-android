@@ -6,7 +6,7 @@
 
 2026-10-30 检查到当前真机是 `6.6.30-android15-8-g0a4d3c12b3 #20`，
 没有 `qcom_scm_qseecom_app_load/app_shutdown` 导出；仓库旧模块的 vermagic
-则是 `7.2.9-gaokun3+`。后续已确认 uname 受版本伪装影响，不能仅据版本显示判断不兼容；应读取启动 dmesg 和导出符号。首轮在实际 7.2.9 实验内核加载成功，LOOKUP 返回 -ENOENT，尚未执行 SEND；详见 docs/fingerprint-machine-check-2026-10-30.md。
+则是 `7.2.9-gaokun3+`。后续已确认 uname 受版本伪装影响，不能仅据版本显示判断不兼容；应读取启动 dmesg 和导出符号。首轮在实际 7.2.9 实验内核加载成功，LOOKUP 返回 -ENOENT，尚未执行 SEND；详见 docs/dev/fingerprint-machine-check-2026-10-30.md。
 
 ## 使用前提
 
@@ -58,4 +58,4 @@ patch 0050 的 listener 轮数上限只能限制每次 SMC **已经返回**后�
 
 ## 实测更新
 
-第二轮已完成真实SEND：0x8031返回有效ACK 0x5aa5与状态0，SHUTDOWN成功、模块正常卸载。仅证明M2通信；SPI/录入/认证未验证。详细证据见 `docs/fingerprint-machine-check-2026-10-30.md`。
+第二轮已完成真实SEND：0x8031返回有效ACK 0x5aa5与状态0，SHUTDOWN成功、模块正常卸载。仅证明M2通信；SPI/录入/认证未验证。详细证据见 `docs/dev/fingerprint-machine-check-2026-10-30.md`。

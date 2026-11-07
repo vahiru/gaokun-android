@@ -43,7 +43,7 @@
 # 后果：一次普通启动里约 130 条 avc denial 都是这两个节点造成的，主体包括
 # surfaceflinger、bootanim、system_server、system_app、platform_app
 # （launcher3）、hal_graphics_allocator、hal_graphics_composer、mediaswcodec。
-# 见 docs/stage4-findings.md #60。
+# 见 docs/dev/android-bringup.md。
 #
 # gpu_device 是 AOSP 的【公共】类型，上面这些域的读写规则核心策略里全都现成，
 # 所以只要标签对了，那一整片 denial 一起消失，不需要新增任何 allow。
@@ -78,7 +78,7 @@
 
 # ─────────────────────────────────────────────────────────────────────────
 # 转 enforcing 第 1 步：给我们自己的可执行文件打标签
-# （[#60](../../../../docs/stage4-findings.md) 定的顺序：先定义域，再普查，
+# （顺序：先定义域，再普查，
 #  最后才写 allow。在此之前收集到的 denial 主体全是 u:r:init:s0，照抄是错的。）
 # ─────────────────────────────────────────────────────────────────────────
 
@@ -278,7 +278,7 @@
 #    包括 genfscon 没写到的 a400000 下的 xhci-hcd.2.auto 与键盘的 usb3/3-3。
 /sys/devices/platform/.*/wakeup/wakeup[0-9]+(/.*)?   u:object_r:sysfs_wakeup:s0
 
-# 手写笔（M-Pencil）：守护进程，与触摸从片驱动交出帧的节点（docs/stylus.md）
+# 手写笔（M-Pencil）：守护进程，与触摸从片驱动交出帧的节点（docs/dev/stylus.md）
 /vendor/bin/gk3pend          u:object_r:gk3pend_exec:s0
 # 麦克风降噪服务（denoise/，sepolicy/gk3denoise.te）
 /vendor/bin/gk3denoised      u:object_r:gk3denoise_exec:s0

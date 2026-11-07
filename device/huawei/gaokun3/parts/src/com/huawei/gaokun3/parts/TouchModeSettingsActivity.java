@@ -14,8 +14,7 @@
  *   没设过 / 认不出的值都按 game 显示 —— 与 touchmode.rc 一致（只有字面 "daily" 会切到 daily）。
  *
  * 生效时机：立刻（脚本写 sysfs，驱动下一帧就用新参数），不用重启，重启后保留。
- *
- * 写法照抄 StandbySettingsActivity；控制中心磁贴见 TouchModeTileService。
+ * 控制中心磁贴见 TouchModeTileService。
  */
 package com.huawei.gaokun3.parts;
 

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """把 meson_to_hermetic 生成的 Android_res.bp 合进 external/mesa3d/Android.bp。
 
-⚠️ **仅 A16（crDroid 16.0，mesa 25.3 / 26.0.3 + 旧工具 meson_to_hermetic）。**
+**仅 A16（crDroid 16.0，mesa 25.3 / 26.0.3 + 旧工具 meson_to_hermetic）。**
 A17（crDroid 17.0，mesa 26.1.0-devel）的 external/mesa3d 已删掉 meson_to_hermetic，
-改用 meson2hermetic（`meson convert`）；A17 的管线见 docs/mesa-a17.md 与
+改用 meson2hermetic（`meson convert`）；A17 的管线见 docs/dev/mesa-a17.md 与
 scripts/mesa-a17/regen.sh。本文件只作 A16 历史留档，在 A17 树上运行会直接退出。
 
 在 external/mesa3d 目录下运行，幂等（每次从 Android.bp.gaokun-orig 重来）。
@@ -44,7 +44,7 @@ import sys
 
 if not os.path.isdir('meson_to_hermetic'):
     sys.exit('本脚本只适用于带 meson_to_hermetic 的 A16 mesa 树；'
-             'A17（mesa 26.1）请用 scripts/mesa-a17/regen.sh（见 docs/mesa-a17.md）')
+             'A17（mesa 26.1）请用 scripts/mesa-a17/regen.sh（见 docs/dev/mesa-a17.md）')
 
 ORIG = 'Android.bp'
 GEN = 'Android_res.bp'
@@ -53,7 +53,7 @@ SUFFIX = '_gaokun'
 HOST_TOOLS = {'m4', 'bison', 'flex', 'gzip', 'python3', 'glslangValidator'}
 
 if not os.path.isfile(GEN):
-    sys.exit('缺少 %s —— 先跑生成器（见 docs/stage5-freedreno.md）' % GEN)
+    sys.exit('缺少 %s —— 先跑生成器（见 docs/dev/gpu-turnip.md）' % GEN)
 
 if os.path.isfile(BAK):
     shutil.copyfile(BAK, ORIG)      # 每次从干净原文件出发
@@ -402,7 +402,7 @@ else:
 
 out = (orig.rstrip() + '\n\n'
        + '// ─── 以下由 meson_to_hermetic 生成（gaokun3: turnip/freedreno on msm DRM）───\n'
-       + '// 生成与合并流程见 docs/stage5-freedreno.md\n'
+       + '// 生成与合并流程见 docs/dev/gpu-turnip.md\n'
        + '// 工具缺口补丁 scripts/mesa-tool-fixes.py，合并后处理 scripts/mesa-bp-merge.py\n'
        + ''.join(fixed).lstrip('\n')
        + extra)

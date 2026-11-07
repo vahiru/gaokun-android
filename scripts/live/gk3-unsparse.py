@@ -21,7 +21,7 @@
 #   * 目标是普通文件时，最后截断到 total_blks*blk_sz（对应 simg2img 的 file_pad）
 #
 # ⚠️ 截断的输入必须【响亮地失败】：下载断在一半的 .zst 会让 zstd 提前 EOF，
-#    这里读不满一个块就退出码 1 —— 不能写一半然后报成功（CLAUDE.md 运维坑 1）。
+#    这里读不满一个块就退出码 1 —— 不能写一半然后报成功。
 #    结尾再核对块数与块计数是否等于头部声明的值。
 #
 # 格式：refs/lineage-system-core/libsparse/sparse_format.h:25-51

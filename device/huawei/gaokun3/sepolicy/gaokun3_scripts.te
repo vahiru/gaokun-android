@@ -216,7 +216,7 @@ set_prop(gaokun3_audioroute, vendor_gaokun3_prop)
 #   （lineage-23.0 的 domain.te:2012-2024；⚠️ 行号每次同步都会漂，
 #    判据是那条 neverallow 的正文里有没有 `userdebug_or_eng(\`-domain')`）。
 #   ⚠️★★ 2026-09-18 我在这里写过一条"更正"，说本仓发的是 user 变体所以豁免不生效
-#   —— **那条更正本身是错的，当晚就被实机推翻了**（见案卷 #117 第 15 条）。
+#   —— **那条更正本身是错的，当晚就被实机推翻了**。
 #   `ro.build.type=user` / `ro.debuggable=0` 是 build.prop 被硬写成那样的
 #   （`build/soong/scripts/gen_build_prop.py:28` 的 get_build_variant() 没有
 #    userdebug 这一档，非 eng 一律按 user 写），**与真实构建变体无关**。

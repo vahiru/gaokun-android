@@ -48,10 +48,10 @@ constexpr char kLoaderConf[] = "/mnt/gaokun3_esp/loader/loader.conf";
 // HAL has no business knowing. systemd-boot accepts a glob in `default`, so we
 // write a pattern and stay independent of it.
 //
-// ★ 统一启动入口（2026-10-05，S9）：这个通配同时匹配 gk3boot 的 efi 条目 gk3boot-android-<x>[+N].conf
+// ★ 统一启动入口：这个通配同时匹配 gk3boot 的 efi 条目 gk3boot-android-<x>[+N].conf
 //   与上一版入口 gk3prev-android-<x>.conf。这是【设计如此】，不用改：它们的 sort-key（0gk3 / 0gk3prev）
 //   排在直连条目（zandroid<x>）前面，systemd-boot 按排序取第一个匹配 ⇒ 正常走 gk3boot，入口计数用完
-//   （排到最后）时才落到直连条目（docs/boot-entry-design.md §4.2、§4.6.1）。default 里的字母从此只决定
+//   （排到最后）时才落到直连条目（tools/gk3boot/README.md）。default 里的字母从此只决定
 //   "回落时走哪一槽的直连条目"；真正选槽的是 gk3boot 读 misc。
 std::string DefaultLineForSlot(int slot) {
     return std::string("default *-android-") + (slot == 0 ? "a" : "b") + ".conf";

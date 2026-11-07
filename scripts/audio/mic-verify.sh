@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 在真机上验证内置麦克风的修复（PR #10 + 维护者跟进，docs/stage4-findings.md #127 / TODO B24）——
+# 在真机上验证内置麦克风的修复（见 docs/dev/audio-video.md）——
 # 【不刷机、不重启】：bind-mount 换上带 0051/0052 的 HAL 二进制与仓库里的策略 XML，重启音频 HAL 与 audioserver，
 # 用 gaokun3-mic-smoke 从应用视角录几段，最后撤掉 bind-mount、再重启两个服务。设备重启也会回到原样。
 #

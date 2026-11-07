@@ -18,7 +18,7 @@ PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/fstab.gaokun3:$(TARGET_COPY_OUT_VENDOR)/etc/fstab.gaokun3
 
 # ------------------------------------------------------------- 显示配置：亮度映射和 HDR 提亮
-# 有它框架才知道亮度对应的尼特数，HDR 提亮才会启动，见 docs/display-color.md。
+# 有它框架才知道亮度对应的尼特数，HDR 提亮才会启动，见 docs/dev/display-color.md。
 PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/etc/displayconfig/display_port_0.xml:$(TARGET_COPY_OUT_VENDOR)/etc/displayconfig/display_port_0.xml
 
@@ -71,7 +71,7 @@ endif
 # 屏幕密度
 # [measured] 1600x2560，物理 266x166 mm -> 对角 12.34"，约 245 dpi
 # 取 240（hdpi 桶），1dp=1.5px -> 1067dp 宽，平板比例合理。
-# CLAUDE.md 提示可对照 Galaxy Tab S7 FE（同款面板）的取值再调。
+# 可对照 Galaxy Tab S7 FE（同款面板）的取值再调。
 PRODUCT_PROPERTY_OVERRIDES += \
     ro.sf.lcd_density=240
 
@@ -112,7 +112,7 @@ PRODUCT_PACKAGES += \
 # keystore2 是 critical 服务且被 init.rc 的
 #   exec 4 (/system/bin/vdc keymaster earlyBootEnded)
 # 同步等待 —— 它起不来整个 boot 队列就堵死（实测：keystore2 连崩 52 次，
-# adbd/zygote 永远排不上队，见 docs/stage2-findings.md）。
+# adbd/zygote 永远排不上队，见 docs/dev/android-bringup.md）。
 # 本机没有可用 TEE，用 AOSP 自带的软件实现（cuttlefish 同款）：
 #   keymint:    hardware/interfaces/security/keymint/aidl/default/Android.bp:183
 #   gatekeeper: hardware/interfaces/gatekeeper/aidl/software/Android.bp:64
@@ -144,7 +144,7 @@ PRODUCT_PACKAGES += \
 # 音频 HAL（AIDL 示例实现，null 音频）—— audioserver 没有 HAL 会 NPE
 # 崩溃循环，而 system_server 主线程在 AudioService 构造时【同步阻塞】
 # 等 IAudioPolicyService，等不到就被看门狗处决 → zygote 全家轮回
-# （ANR trace 实锤，见 docs/stage2-findings.md）。audioserver 必须活。
+# （ANR trace 实锤，见 docs/dev/android-bringup.md）。audioserver 必须活。
 # Stage 4 换 tinyhal 真声卡时再替换。
 # ⚠️ example service 是 installable:false（bp 明写"installed in apex
 # com.android.hardware.audio"），直接列包名会被静默丢弃——用 APEX：
@@ -196,7 +196,7 @@ PRODUCT_COPY_FILES += \
 
 # Histen 引擎本体：华为专有二进制（iMedia Audio 8.0 / Histen 6.1.9，取自麒麟 V10 SP1，
 # 且为 bionic 打过二进制补丁），**未获再分发授权** ⇒ 与 firmware/ 同一套规矩：
-# 目录整个 .gitignore、只放行 README.md，构建机上由 sync-device-tree.sh 带过去并断言。
+# 目录整个 .gitignore、只放行 README.md。
 # 用 wildcard：别人的 checkout 里没有它也照样能编 —— effect 找不到引擎就只跑扬声器链。
 # 获取与校验见 effects/prebuilt/README.md。
 GAOKUN3_HISTEN_ENGINE := $(LOCAL_PATH)/effects/prebuilt/lib64/soundfx/libhw_histen_processing.so
@@ -229,7 +229,7 @@ PRODUCT_COPY_FILES += \
 
 # v1.0 AV-10：耳机麦走 hw:0,2。可插拔端口在策略里不能写 address（理由见 primary_audio_policy_configuration.xml
 # 耳机那段），HAL 只拿得到设备类型 ⇒ 补丁 0077（tree-fix [21]）让 StreamPrimary 按类型读这个属性。
-# 映射来自 bin/audio-route.sh / docs/stage4-findings.md 的 PCM 表：头戴麦 = hw:0,2（TX_CODEC_DMA_TX_3 → MultiMedia3）。
+# 映射来自 bin/audio-route.sh / docs/dev/audio-video.md 的 PCM 表：头戴麦 = hw:0,2（TX_CODEC_DMA_TX_3 → MultiMedia3）。
 # 属性落在 ro.vendor. → vendor_default_prop，vendor 域可读（refs/lineage-sepolicy/private/domain.te:473），不用加规则。
 PRODUCT_VENDOR_PROPERTIES += \
     ro.vendor.audio.primary.alsa.in_headset=CARD_0_DEV_2
@@ -253,7 +253,7 @@ PRODUCT_VENDOR_PROPERTIES += \
 # 它接管时ALSA按四路开，每块录音由顶部三颗麦克风经固定波束成形变成双声道，延迟30 ms；
 # UNPROCESSED、VOICE_PERFORMANCE等音源不经过它。四路要拓扑改过（micarray/tplg-four-channel-capture.py），
 # 拓扑没改时HAL按原来的两路开；拓扑改了就必须带内核0203、0204，否则声道是重混过的。
-# 系数文件不入库（micarray/prebuilt/README.md），与Histen引擎同一套规矩：构建机上由sync-device-tree.sh带过去并断言；
+# 系数文件不入库（micarray/prebuilt/README.md），与Histen引擎同一套规矩；
 # 用wildcard，没有它照样能编，库打开时读不到就不接管。
 PRODUCT_PACKAGES += \
     libgaokunmicarray
@@ -270,9 +270,9 @@ PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/etc/denoise.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/denoise.rc
 
 # 麦克风降噪服务gk3denoised（denoise/README.md）：在CDSP的NPU上跑DeepFilterNet3，音频HAL的采集钩子经
-# /dev/socket/gk3denoise用它。QNN运行库和头文件、CDSP外壳和DSP侧C++库、FastRPC源码都不入库，构建前由
-# scripts/fetch-denoise-blobs.py从公开来源取到denoise/prebuilt/（sync-device-tree.sh会做并核对sha256）；模型入库。
-# 故意不用wildcard：缺了就是构建错误——ROM里一定要有这个服务（用户2026-11-03定）。
+# /dev/socket/gk3denoise用它。QNN运行库和头文件、CDSP外壳和DSP侧C++库、FastRPC源码都不入库，构建前需按
+# denoise/prebuilt/README.md 说明放入 denoise/prebuilt/；模型入库。
+# 故意不用wildcard：缺了就是构建错误。
 # ELF经PRODUCT_COPY_FILES装进vendor靠BoardConfig.mk的BUILD_BROKEN_ELF_PREBUILT_PRODUCT_COPY_FILES。
 GAOKUN3_DENOISE := $(LOCAL_PATH)/denoise
 PRODUCT_PACKAGES += \
@@ -395,7 +395,7 @@ PRODUCT_SYSTEM_EXT_PROPERTIES += \
 PRODUCT_SYSTEM_EXT_PROPERTIES += \
     ro.surface_flinger.supports_background_blur=1
 
-# 广色域（docs/display-color.md）：面板原生接近 Display P3，有工厂校准时内核按连接器 Colorspace 切 sRGB、P3。
+# 广色域（docs/dev/display-color.md）：面板原生接近 Display P3，有工厂校准时内核按连接器 Colorspace 切 sRGB、P3。
 #   · has_wide_color_display 让 SF 不再滤掉 P3 模式，应用才看得到广色域；落 system_ext，理由同上。
 #   · force_p3_support 让 HWC 报告 P3（patches/0132，tree-fix [32]）。连接器没有 Colorspace 属性时它不起作用，
 #     所以校准表读取失败的机器只是退回 sRGB。
@@ -464,7 +464,7 @@ PRODUCT_VENDOR_PROPERTIES += \
 PRODUCT_VENDOR_PROPERTIES += \
     ro.hw_timeout_multiplier=2
 
-# ★ REL-5（docs/v1.0-plan.md）：项目自己的版本号，只读属性 ro.vendor.gaokun3.version。
+# ★ 项目自己的版本号，只读属性 ro.vendor.gaokun3.version。
 #   ⬜ 2026-10-05 写，未编译、未上机。
 #   · 值来自构建环境变量 GK3_VERSION（例如 v1.0.0）；没设（开发构建的常态）就整段不生效，
 #     build.prop 里没有这一行，不会出现空值属性。
@@ -587,7 +587,7 @@ PRODUCT_PACKAGES += \
     iw_vendor
 PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/bin/gaokun3-wlan-ap.sh:$(TARGET_COPY_OUT_VENDOR)/bin/gaokun3-wlan-ap.sh
-# 待机时让推送叫醒系统：按推送连接的服务器地址设收包唤醒规则（docs/deep-sleep.md 的 Wi-Fi 一节）。
+# 待机时让推送叫醒系统：按推送连接的服务器地址设收包唤醒规则（docs/dev/deep-sleep.md 的 Wi-Fi 一节）。
 # 也用 iw_vendor（上面那个包）。⬜ 未经 ROM 构建、未在 enforcing 下上机。
 PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/bin/gaokun3-wifi-wake.sh:$(TARGET_COPY_OUT_VENDOR)/bin/gaokun3-wifi-wake.sh
@@ -627,7 +627,7 @@ PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/wifi/wpa_supplicant.conf:$(TARGET_COPY_OUT_VENDOR)/etc/wifi/wpa_supplicant.conf
 
 # ─── 相机 HAL（AIDL，基于 libcamera 的软件 ISP）───
-# 背景：三条便宜路都走不通，只能自己写 AIDL（docs/stage4-findings.md #91）：
+# 背景：三条便宜路都走不通，只能自己写 AIDL（docs/dev/camera.md）：
 #   ❌ HIDL + 上游 provider@2.4-legacy —— 本机 hwservicemanager 根本不存在，
 #      且 FCM 202504 的兼容性矩阵里 camera.provider 只剩 format="aidl"
 #   ❌ libcamera 的 V4L2 垫片 + AOSP 的 ExternalCameraProvider —— 软件 ISP
@@ -729,7 +729,7 @@ PRODUCT_VENDOR_PROPERTIES += \
 #         qcom/<card->driver_name>/<card->name>-tplg.bin
 #     本机 = qcom/sc8280xp/SC8280XP-HUAWEI-GAOKUN3-tplg.bin
 #     （dmesg 实测：qcom-apm: tplg firmware loading ... failed -2，
-#       见 docs/stage4-findings.md #33 第 219 行）
+#       见 docs/dev/audio-video.md）
 #     老规矩的 HUAWEI/gaokun3/audioreach-tplg.bin 内核【从不去读】，
 #     两份内容 sha256 完全相同（24296 字节），所以同一个源文件装两遍。
 #
@@ -765,7 +765,7 @@ PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/firmware/qca/wcnhpnv21g.bin:ramdisk/lib/firmware/qca/wcnhpnv21g.bin
 
 # ─── Stage 5 Phase B: 硬件 Vulkan（turnip / freedreno on 主线 msm DRM）───
-# 构建流程见 docs/stage5-freedreno.md：
+# 构建流程历史见 docs/dev/gpu-turnip.md（A16）：
 #   1. scripts/mesa-tool-fixes.py     补 meson_to_hermetic 与 mesa 25.3 的 API 落差
 #   2. 生成器 + scripts/mesa-bp-merge.py 产出 external/mesa3d/Android.bp
 #   3. mesa/turnip-shared.bp.in       把静态库包成 Android Vulkan HAL 共享库
@@ -774,9 +774,9 @@ PRODUCT_COPY_FILES += \
 #    缺了它 GPU 停在安全模式，adreno probe 会失败。
 # Stage 6 M3（2026-08-19）：管线已在 crDroid 树上跑通并打开。
 # （A16 时 crDroid 的 external/mesa3d 与 Stage 5 打补丁那棵是同一个 commit d4b6f1eba289… @ android-16.0.0_r4。）
-# ★ A17（2026-10-25 用户定，docs/a17-migration-plan.md 路线 B）：上面 1–3 步只适用于 A16，全部作废。
+# ★ A17（docs/dev/mesa-a17.md）：上面 1–3 步只适用于 A16，全部作废。
 #   external/mesa3d 是 26.1.0-devel，上游的 meson_to_hermetic 换成了 meson2hermetic；现在用
-#   scripts/mesa-a17/regen.sh 在 26.1 上整树重新生成（配置 mesa/hermetic/，步骤见 docs/mesa-a17.md），
+#   scripts/mesa-a17/regen.sh 在 26.1 上整树重新生成（配置 mesa/hermetic/，步骤见 docs/dev/mesa-a17.md），
 #   生成结果直接出 cc_library_shared "vulkan.freedreno"，所以这里的包名不变。
 #   ⚠️ regen.sh 目前要在 tree-fixes 之后手动跑（repo sync 会碰这棵脏树，与 A16 铺归档时一样）。
 PRODUCT_PACKAGES += \
@@ -868,7 +868,7 @@ PRODUCT_COPY_FILES += \
 
 # 挂起前把 a600000.usb 的 USB role 切到 host —— 那个控制器停在 role=device 时，
 # 设备挂起阶段会【整板复位】且不留任何日志；而 USB adb 的 UDC 就在它上面，
-# 所以不能简单把 DTS 改成 host。见 docs/stage4-findings.md #52 / #54 / #56。
+# 所以不能简单把 DTS 改成 host。见 docs/dev/deep-sleep.md。
 # ★ 默认【启用】（persist.vendor.gaokun3.allow_suspend=1；2026-09-18～09-24 开发期曾是 0，见下面 ②）。
 PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/bin/gaokun3-usbrole.sh:$(TARGET_COPY_OUT_VENDOR)/bin/gaokun3-usbrole.sh \
@@ -885,17 +885,14 @@ PRODUCT_COPY_FILES += \
 #    ⚠️ persist.sys.gaokun3.*（键盘、触摸模式）【不要】跟着改 —— 那两个靠
 #      system_prop 才让 Parts 应用写得了，改成 vendor 前缀反而会写不了。
 #
-# ② 默认值 1 → 0（= 待机默认【关】）。这是用户 2026-09-18 的决定：
+# ② 默认值 1 → 0（= 待机默认【关】）。这是 2026-09-18 的过渡决定：
 #    改名会让已装机器上现有的 persist.gaokun3.allow_suspend=0 失效，
-#    而本机正是 0（见 CLAUDE.md 状态框）。默认改成 0，改名前后行为一致。
+#    而开发机正是 0。默认改成 0，改名前后行为一致。
 #    ⚠️ 代价说清楚：**新装机的用户默认也不进 s2idle**，息屏耗电按不睡算 ——
 #      这与 v0.3.0～v0.6.2 的镜像默认相反，发版说明里必须写。
 #      要开（persist 属性，重启不丢）：
-#        · ★ 1.0 起（PWR-16）：「设置 → 电池 → 待机（睡眠）」里的开关（Parts 的 StandbySettingsActivity）
-#          写 persist.sys.gaokun3.allow_suspend，init.gaokun3.rc 镜像成这个 vendor 属性；
-#        · 排查用：开发构建 adb root 之后 adb shell setprop persist.vendor.gaokun3.allow_suspend 1；
-#          发布构建（ro.debuggable=0，没有 adb root）给 Shell 授 root 后
-#          adb shell su -c "setprop persist.vendor.gaokun3.allow_suspend 1"（⬜ 发布构建上的 su 路径未实测）。
+#        · 写 persist.sys.gaokun3.allow_suspend 1（init.gaokun3.rc 镜像成这个 vendor 属性）；
+#        · 或 root 下直接 setprop persist.vendor.gaokun3.allow_suspend 1。
 #      普通 adb shell 在 enforcing 下设不了 vendor 属性，见 etc/usbrole.rc 顶部。
 #    ★ 2026-09-23 用户定：开发期保持 0；【正式版】发布前改回 1（老用户 OTA 后不能丢待机，
 #      TODO S1）。改回 1 之后，开发机自己 setprop … 0（persist 属性重启不丢）。
@@ -958,7 +955,7 @@ PRODUCT_PACKAGES += \
 # 再由 QRTR 上的 QMI 服务 400 把读数送回来。
 #
 # 已在救援 Linux 上实测通过：静止时加速度计 Z≈9.87 m/s²，15 秒 131 行读数。
-# 完整案卷 docs/stage4-findings.md #37，Linux 侧一键复现 scripts/slpi-sensors-setup.sh。
+# 详见 docs/dev/sensors-ssc-protocol.md，Linux 侧一键复现 scripts/slpi-sensors-setup.sh。
 #
 # ★ hexagonrpcd 上游自带 Android.bp 与 hexagonrpcd-sdsp.rc（cc_binary + vendor:true，
 #   service 跑在 system:system，-R /vendor/etc/hexagonrpcd-root）——所以这里
@@ -1045,12 +1042,12 @@ PRODUCT_PACKAGES += \
 PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/bin/gaokun3-ota-postinstall.sh:$(TARGET_COPY_OUT_VENDOR)/bin/gaokun3-ota-postinstall.sh
 
-# ★ 统一启动入口 gk3boot.efi（2026-10-05，S9；docs/boot-entry-design.md §4.6.2、§4.11）：随 vendor 下发，
+# ★ 统一启动入口 gk3boot.efi（tools/gk3boot/README.md）：随 vendor 下发，
 #   由 OTA postinstall（ESP 上还没有入口时直接部署、已有别的版本时铺 .staged）与 boot_control HAL 的开机完成线程
 #   （boot_control/Gk3Boot.cpp：激活 / 撤除）按 persist.vendor.gaokun3.gk3boot（1.0 起镜像缺省 action，见下）部署到 ESP 的
 #   EFI/gk3boot/<version>/。二进制不入库（prebuilt-gk3boot/README.md）⇒ 用 wildcard：没有就不装，照样能编；
 #   两样（gk3boot.efi + version）必须同时在，缺一样就都不装（只有二进制、没有版本串的入口没法部署）。
-#   构建机上由 sync-device-tree.sh 第 2d / 3c 步同步并断言；release.sh 断言 vendor 里那份与 prebuilt 逐字节相同。
+#   release.sh 断言 vendor 里那份与 prebuilt 逐字节相同。
 #   ⚠️ .efi 是 PE 不是 ELF，不撞 BUILD_BROKEN_ELF_PREBUILT_PRODUCT_COPY_FILES 那条检查。
 # ★ 执行端 initramfs fastboot.img（gzip cpio，scripts/gk3boot/build-fastboot-img.sh 产出；设计稿 §4.1、§4.3.5）：
 #   在 gk3boot.efi + version 都在的前提下，有就一起装进 /vendor/boot/gk3boot/fastboot.img；没有照样能编，只是没有
@@ -1082,7 +1079,7 @@ endif
 # ═══════════ 硬件视频编解码：Android 这一半（external/v4l2_codec2）═══════════
 #
 # 内核那一半 M14 就通了（当时是 qcom-venus：qcom-venus-decoder / -encoder，
-# 见 docs/stage4-findings.md #41）。★ 2026-09-28 起内核驱动换成 qcom-iris（#128）：
+# 见 docs/dev/audio-video.md）。★ 2026-09-28 起内核驱动换成 qcom-iris：
 # 节点名 qcom-iris-decoder / qcom-iris-encoder，编号随 probe 顺序（camss 占了 video0-31）。
 # v4l2_codec2 按 ENUM_FMT + caps 找节点、不看驱动名，所以这一半不用为换驱动改代码。
 # 缺的一直是一个跟 V4L2 说话的 Codec2 组件，所以 66 个解码器全是软解。
@@ -1182,7 +1179,7 @@ PRODUCT_PACKAGES += \
 # 出厂装的是 AOSP 示例实现（android.hardware.lights-service.example），只打日志。
 # 实测后果：亮度滑条【完全无效】—— 框架从 1 调到 255，面板始终停在 512/4095
 # （12.5%），机器永远是暗的；而以 root 直接写那个 sysfs 节点立刻生效。
-# 见 lights/Lights.cpp 的注释与 docs/stage4-findings.md。
+# 见 lights/Lights.cpp 的注释与 docs/dev/android-bringup.md。
 # ★ 排除示例实现靠的是 lights/Android.bp 里的 `overrides:` —— PRODUCT_PACKAGES
 #   只能加不能减，两个 HAL 都装上会抢注册 ILights/default。
 PRODUCT_PACKAGES += \
@@ -1192,7 +1189,7 @@ PRODUCT_PACKAGES += \
 #
 # 内核一侧是触摸从片驱动（patches/0079、0080，kernel-config-android.sh 里 =y）；
 # gk3pend 把从片的帧和笔 MCU 的压感、侧键、电量合成一支 uinput 触控笔。
-# 权限见 ueventd.gaokun3.rc 与 sepolicy/gk3pend.te，整体说明见 docs/stylus.md。
+# 权限见 ueventd.gaokun3.rc 与 sepolicy/gk3pend.te，整体说明见 docs/dev/stylus.md。
 PRODUCT_PACKAGES += \
     gk3pend
 
@@ -1262,7 +1259,7 @@ PRODUCT_SYSTEM_EXT_PROPERTIES += \
     persist.sys.gaokun3.app_kernel_custom=1 \
     persist.sys.gaokun3.app_kernel_release=6.6.30-android15-8-g0a4d3c12b3
 
-# ═══════════ 默认时区 Asia/Shanghai（v1.0 D15 / OTA-13 / NET-6，2026-10-05 用户定）═══════════
+# ═══════════ 默认时区 Asia/Shanghai ═══════════
 #
 # 原来全新装机默认 GMT：属性没设，本机没有基带、开机向导也没走通自动检测。
 # * 属性名：persist.sys.timezone（框架读它：frameworks/base/services/core/java/com/android/server/timezonedetector/
@@ -1273,19 +1270,19 @@ PRODUCT_SYSTEM_EXT_PROPERTIES += \
 #   而 timezone_prop 的 set 只给了 system_server / system_app / surfaceflinger（private/*.te），vendor_init 没有
 #   ⇒ 写在 vendor 里 enforcing 下会被静默丢掉。system_ext 用 init 的身份加载（同上面 touch_mode 那条）。
 # * 对已装机器的影响：/data 里持久化过的值在 build.prop 之后加载、覆盖它（property_service.cpp:1562-1571
-#   LoadPersistentProperties → InitPropertySet）⇒ 用户自己选过时区的机器不变；★ 但【从没设过时区】的机器
-#   （一直显示 GMT 的那些）OTA 之后会变成 Asia/Shanghai —— 写进 1.0 发版说明。
+#   LoadPersistentProperties → InitPropertySet）⇒ 用户自己选过时区的机器不变；但从没设过时区的机器
+#   （一直显示 GMT 的那些）OTA 之后会变成 Asia/Shanghai。
 # * 自动时区开着、并且有别的来源（GMS 的位置时区等）给出建议时，检测结果照样会覆盖它，这是预期行为。
-# ⬜ 未编译、未上机。判据：全新 /data 开机 `getprop persist.sys.timezone` = Asia/Shanghai、状态栏时间是北京时间；
+# 尚未经实测。判据：全新 /data 开机 `getprop persist.sys.timezone` = Asia/Shanghai、状态栏时间是北京时间；
 #   `/system_ext/etc/build.prop` 里有这一行。
 PRODUCT_SYSTEM_EXT_PROPERTIES += \
     persist.sys.timezone=Asia/Shanghai
 
-# ═══════════ 中文输入法 fcitx5-android（v1.0 DISP-3 / D10）：默认关 ═══════════
+# ═══════════ 中文输入法 fcitx5-android：默认关 ═══════════
 # 模块定义在 prebuilt-apps/fcitx5/Android.mk（APK 不入库、放进去才有这个模块；选型与许可证见那个文件顶部）。
-# ★ 2026-10-06 用户定 APK 来源 = GitHub release（0.1.3，版本 / sha256 / 取法见 prebuilt-apps/fcitx5/README.md）。
+# APK 来源 = GitHub release（0.1.3，版本 / sha256 / 取法见 prebuilt-apps/fcitx5/README.md）。
 #   APK 在就带（wildcard，与 Histen 引擎同一个规矩：别人的 checkout 里没有它也照样能编）；GAOKUN3_WITH_FCITX5=false 显式不带。
-#   构建机上 sync-device-tree.sh 断言它在、且 sha256 与入库的 .sha256 一致。只预装、不改默认输入法。⬜ 实体键盘中英切换未上机。
+#   构建机上 sync-device-tree.sh 断言它在、且 sha256 与入库的 .sha256 一致。只预装、不改默认输入法。实体键盘中英切换尚未上机测试。
 ifneq ($(GAOKUN3_WITH_FCITX5),false)
 ifneq ($(wildcard $(LOCAL_PATH)/prebuilt-apps/fcitx5/fcitx5-android-arm64-v8a.apk),)
 PRODUCT_PACKAGES += \

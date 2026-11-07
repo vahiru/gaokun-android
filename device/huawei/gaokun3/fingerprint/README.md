@@ -4,7 +4,7 @@
 接触检测、枚举、删除、取消和用户切换，最多5根手指。取图经内核的fpcmd驱动和厂商TA，
 解码、匹配和模板存储都在HAL里。FocalTech FTE7001和Goodix GDIX5125共用一个镜像，
 型号在运行时判断。构建、部署和实机检查的经过见
-[实机记录](../../../../docs/crdroid-fingerprint-machine-check-2026-11-01.md)。
+[实机记录](../../../../docs/dev/crdroid-fingerprint-machine-check-2026-11-01.md)。
 
 ## 能力边界
 

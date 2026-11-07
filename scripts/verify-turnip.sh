@@ -39,7 +39,7 @@ $ADB get-state >/dev/null 2>&1 || { echo "adb 不通（SER=${SER:-未设}），�
 [ -n "$(A getprop sys.boot_completed)" ] || { echo "adb 不通，停"; exit 2; }
 
 # GMU 死亡链与 recover：两个来源取较大值（它们重叠，相加会重复计数）。
-# 模式比旧版的裸 "timed out" 收窄到 GMU / HFI（stage5-freedreno.md:166-167 记的原话）：
+# 模式比旧版的裸 "timed out" 收窄到 GMU / HFI：
 # logd 的 kernel 缓冲覆盖整个开机过程，别的驱动的 "timed out" 会混进来误判。
 GMU_RE="HFI_.*timed out|gmu.*timed out|watchdog expired|gdsc didn't collapse"
 gmu_count() {

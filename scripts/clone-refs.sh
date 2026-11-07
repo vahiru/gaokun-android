@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Clone the reference trees listed in CLAUDE.md into refs/.
+# Clone upstream reference trees into refs/.
 #
 # Shallow, single-branch: these are read-only references to grep against,
 # not trees we develop in. Total ~2.3 GB (+ ~0.5 GB for the boot-entry set).
@@ -17,7 +17,7 @@ cd "$ROOT" || exit 1
 
 # dir|url|branch    (branches verified against the remotes 2026-08-13)
 #
-# 可选的第 4、5 列（2026-10-05 起，统一启动入口设计稿 docs/boot-entry-design.md 引用的上游）：
+# 可选的第 4、5 列（2026-10-05 起，统一启动入口 tools/gk3boot/README.md 引用的上游）：
 #   第 4 列 = 钉住的提交（文中的 `文件:行号` 都是对这个提交说的）；
 #             分支头移动了就按提交单独 fetch，取不到只告警
 #   第 5 列 = 稀疏检出的目录（空格分隔），只要这几个子目录

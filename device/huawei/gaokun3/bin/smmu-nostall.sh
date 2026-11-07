@@ -1,7 +1,7 @@
 #!/vendor/bin/sh
 # GPU SMMU stall-on-fault 解锁器 + fault 地址捕获器（v2：全 CB 扫描 + 无限运行）。
 #
-# 背景（docs/stage5-freedreno.md D5/D6）：a690 的 GPU SMMU 配成 stall-on-fault
+# 背景（docs/dev/gpu-turnip.md）：a690 的 GPU SMMU 配成 stall-on-fault
 # （SCTLR.CFCFG=1）且中断使能（CFIE=1），但 context-fault 中断从不到达 CPU
 # （/proc/interrupts 计数恒 0）→ 没人 resume → SMMU 永久 stall → CP 取不到指令
 # → GMU 投票超时 → 看门狗 → cx gdsc 塌不下去（stall 拖住掉电）→ 死循环。

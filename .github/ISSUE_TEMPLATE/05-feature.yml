@@ -1,102 +1,40 @@
-name: ✨ Feature request / 功能申请
-description: You want the ROM to be able to do something it cannot do today. / 你希望这个 ROM 能做到某件它现在做不到的事。
-title: "[Feature] "
+name: Feature request / 功能建议
+description: Something you would like the system to do that it cannot do today. / 希望系统支持某项现在还不支持的功能。
 labels: ["feature-request", "needs-triage"]
 body:
   - type: markdown
     attributes:
       value: |
-        Wishes are welcome. Two things worth knowing before you write one, so it does not get closed with a link:
-        提需求是欢迎的。写之前先知道两件事，免得被一条链接关掉：
-
-        **Some of it is already being worked on, and a little of it cannot be done.** There is **no magnetometer** in this tablet, so there can be no compass, and the TPM is not supported. The **fingerprint reader** (FocalTech FTE7001) is in progress: Huawei's signed matching code already loads into the secure world on this machine, but the driver and the Android side are not written yet. **Auto-brightness** is blocked because enabling the ambient light sensor crashes the sensor DSP; that is being investigated. **USB-C DisplayPort** has simply never been tested. Check [docs/TODO.md](https://github.com/vahiru/gaokun-android/blob/main/docs/TODO.md) for where each of these stands before asking for it.
-        **有些事已经在做，少数做不到。** 本机**没有磁力计**，所以不可能有指南针；TPM 不支持。**指纹**（FocalTech FTE7001）正在做：华为签名的比对程序已经能在本机的安全环境里加载，驱动和 Android 这一侧还没写。**自动亮度**卡在一使能光感，传感器 DSP 就崩，正在查。**USB-C 外接显示**只是从来没测过。提之前先在 [docs/TODO.md](https://github.com/vahiru/gaokun-android/blob/main/docs/TODO.md) 里看看它们现在到哪一步了。
-
-        **One thing is a deliberate "no":** raising a game's render resolution by spoofing the device model. Some titles pin their render buffer by a device allowlist; faking the model carries account risk, so it is not done here.
-        **有一件事是故意不做的：** 用伪装机型去提高游戏渲染档位。有些游戏按设备白名单钉住渲染缓冲，伪装机型有账号风险，所以本项目不做。
-
-        Everything else — including plain "this should have a setting" — is fair game.
-        除此之外都可以提，包括"这地方该有个开关"这种。
-
-  - type: checkboxes
-    id: preflight
-    attributes:
-      label: Pre-flight / 提交前确认
-      options:
-        - label: "I checked the [status table](https://github.com/vahiru/gaokun-android#status) and the [latest release notes](https://github.com/vahiru/gaokun-android/releases/latest) — this is not already working. / 对过现状表和[最新发版说明](https://github.com/vahiru/gaokun-android/releases/latest)，确认它现在还不能用。"
-          required: true
-        - label: "I checked [docs/TODO.md](https://github.com/vahiru/gaokun-android/blob/main/docs/TODO.md) and the [Help wanted](https://github.com/vahiru/gaokun-android#help-wanted) list, and searched existing issues. / 看过 TODO 和 Help wanted，也搜过现有 issue。"
-          required: true
-
-  - type: dropdown
-    id: area
-    attributes:
-      label: Area / 涉及方面
-      options:
-        - Hardware support — a device or port that does nothing today / 硬件支持，某个部件现在完全没用上
-        - System behaviour or a missing setting / 系统行为或缺一个设置项
-        - Display, audio or input tuning / 显示、音频、输入的调校
-        - Performance, battery or thermals / 性能、续航、温度
-        - Game compatibility / 游戏兼容
-        - Install, OTA or recovery / 安装、OTA、救援
-        - Something bundled — an app, a font, a codec / 随包带的东西：应用、字体、编解码
-        - Developer or power-user convenience / 开发者与折腾向的便利
-        - Other / 其他
-    validations:
-      required: true
+        Thank you for the suggestion. The [status table](https://github.com/vahiru/gaokun-android#status) and [docs/TODO.md](https://github.com/vahiru/gaokun-android/blob/main/docs/TODO.md) show what is supported and what is already planned; please take a look first.
+        感谢你的建议。目前支持哪些功能、哪些已经在计划中，可以先看看[现状表](https://github.com/vahiru/gaokun-android/blob/main/README.zh-CN.md#现状)和[docs/TODO.md](https://github.com/vahiru/gaokun-android/blob/main/docs/TODO.md)。
 
   - type: textarea
     id: what
     attributes:
-      label: What you want / 你想要什么
-      description: One or two sentences. Describe the outcome you want, not the implementation you imagine. / 一两句话。描述你想要的**结果**，不用替我们设计实现。
-      placeholder: "A quick-settings toggle for the 120 Hz / 60 Hz refresh rate, so I can drop to 60 on battery."
+      label: What you would like / 你希望实现什么
+      placeholder: "A quick settings tile to switch between 60 Hz and 120 Hz. / 在快捷设置里加一个60 Hz与120 Hz切换的开关。"
     validations:
       required: true
 
   - type: textarea
     id: why
     attributes:
-      label: Why, and what you do today instead / 为什么，以及你现在是怎么将就的
-      description: |
-        The workaround you are living with is the most useful part of a feature request — it says how much this actually costs you, and it sometimes turns out to be the fix.
-        你现在的将就办法是功能申请里最有用的一段 —— 它说明这件事到底有多痛，而且有时候它本身就是答案。
-    validations:
-      required: true
-
-  - type: dropdown
-    id: feasible
-    attributes:
-      label: Do you know whether this is possible on this hardware? / 你知道本机硬件上这件事可行吗？
-      description: |
-        "I do not know" is a perfectly good answer here — this platform exists in no wiki and in no model's training data, so nobody is expected to know offhand. If you do have something checkable, put it in the next box.
-        "不知道"是完全合格的回答 —— 这个平台不在任何 wiki、也不在任何模型的训练数据里，没人有义务张口就知道。有可核对的东西就写在下一栏。
-      options:
-        - "I do not know / 不知道"
-        - "It works on another device or ROM I have used / 我在别的设备或 ROM 上见它工作过"
-        - "It works in Linux on this same machine / 同一台机器上的 Linux 里能用"
-        - "I have upstream code, a driver or a spec for it / 我有上游代码、驱动或规格文档"
+      label: Why / 原因
+      description: How you would use it, and what you do today instead. / 你会怎么用它，以及现在是怎么解决的。
     validations:
       required: true
 
   - type: textarea
     id: references
     attributes:
-      label: References / 参考
-      description: |
-        Optional but valuable: an upstream commit, a driver, a sysfs node that already exists on the device, or a `dmesg` line proving the hardware is there. On this platform, one checkable reference is worth more than a page of reasoning.
-        可选但很有价值：上游 commit、驱动、设备上已经存在的 sysfs 节点，或者能证明硬件在的 `dmesg` 行。在这个平台上，一条可核对的引用比一页推理管用。
+      label: References / 参考资料
+      description: Optional. For example, the same feature on another device, related code or documentation. / 可选。例如其他设备上的同类功能、相关代码或文档。
 
   - type: dropdown
     id: help
     attributes:
-      label: Can you help? / 你能出力吗？
-      description: |
-        ⚠️ If you intend to write the code yourself, use the **Other (development task, proposal, question)** template instead — it asks for the first verifiable step, which is how work here actually gets moved.
-        ⚠️ 如果你打算自己写代码，请改用 **其他（开发任务、提案、提问）** 模板 —— 那个会问"第一个可验证的步骤"，本项目就是这么推进的。
+      label: Can you help? / 能否参与
       options:
-        - "I can test builds on real hardware / 我能在实机上帮测"
-        - "I have the hardware but cannot test unattended / 我有机器，但不方便反复折腾"
-        - "Just requesting / 只是提个需求"
-    validations:
-      required: true
+        - I can test it on my machine / 可以在我的机器上测试
+        - I would like to work on it myself / 我想自己来实现
+        - Not at the moment / 暂时不能

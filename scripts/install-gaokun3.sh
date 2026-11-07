@@ -46,7 +46,7 @@
 #                    physical copy plus COW snapshots in userdata).
 #   gk3rescue   1G   Optional rescue system: a squashfs mounted read-only from
 #                    this partition, its writable layer in RAM
-#                    (docs/stage7-live-installer.md). Installed only when
+#                    (scripts/live/README.md). Installed only when
 #                    rescue.squashfs + initramfs.img are available — in the
 #                    release directory, or on our live USB. Two boot entries
 #                    use it: one with slot a's kernel, one with slot b's.

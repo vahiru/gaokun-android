@@ -1,10 +1,9 @@
 #!/bin/sh
 # 把启动诊断写回启动介质（由 gk3-diag.timer 在开机 45 秒后触发，也可以手动 systemctl start gk3-diag）。
 #
-# ★ 为什么需要它：这台机器没有串口。救援系统一旦"起来了但网络没起来"，就【一点信息都拿不到】
+# 为什么需要它：这台机器没有串口。救援系统一旦"起来了但网络没起来"，就【一点信息都拿不到】
 #   —— 2026-08-23 上机时正是如此，只能靠人到跟前看屏幕。所以系统必须自己把证据留在介质上，
-#   下次进 Android（或把 U 盘插到别的机器上）挂上就能读。
-#   docs/stage7-live-installer.md 的原话："这一条比这次修好的那个 bug 值钱。"
+#   下次进 Android（或把 U 盘插到别的机器上）挂上就能读（见 scripts/live/README.md）。
 MEDIA=/media/gk3
 OUT=$MEDIA/gaokun3/diag
 # 介质是只读挂的（initramfs 那边就是 -o ro）。临时改成读写，写完改回去 ——

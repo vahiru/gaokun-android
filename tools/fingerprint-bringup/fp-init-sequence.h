@@ -6,7 +6,7 @@
  * constant5aa5 for88/index20. ACK/marker tests are NOT hardware-state proof. Include after the
  * fpversion module's request/response buffers and kernel declarations.
  * No user-selected registers, raw commands, flash or template operations.
- * Evidence: docs/fingerprint/sc-init-sequence-2026-10-30.md.
+ * Evidence: docs/dev/fingerprint/sc-init-sequence-2026-10-30.md.
  * Each MCU reply (including empty ACKs) must pass length/status/XOR checks.
  */
 

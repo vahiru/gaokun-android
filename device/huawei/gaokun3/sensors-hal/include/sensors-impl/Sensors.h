@@ -48,7 +48,7 @@ class Sensors : public BnSensors, public ISensorsEventCallback {
           mAutoReleaseWakeLockTime(0),
           mHasWakeLock(false) {
         // ★ 本机实际存在且可用的只有这三个（SSC 亲口回答，见
-        //   docs/stage4-findings.md #37）：
+        //   docs/dev/sensors-ssc-protocol.md）：
         //     accel / gyro     ✅ 同一颗 sh3001 六轴
         //     mag              ❌ 本机没有磁力计硬件 → 没有指南针
         //     rotv             ❌ 未注册（融合旋转矢量多半需要磁力计）

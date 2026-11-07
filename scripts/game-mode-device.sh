@@ -31,7 +31,7 @@ SAFETY=/data/adb/service.d/gk3-game-mode-safety.sh
 
 # 只删 ro.crdroid.version —— Duck Detector 的判据表（SystemPropertiesCatalog /
 # CustomRomCatalog）只查这一个键。⚠️ 别扩大到整个 ro.crdroid.* 家族：
-# ro.crdroid.device 是 find-device.sh 认设备的身份判据（CLAUDE.md），砸了会连不上排查；
+# ro.crdroid.device 是 find-device.sh 认设备的身份判据，砸了会连不上排查；
 # ro.crdroid.build.version / display.version / ro.crdroidlegal.url 没有检测器查，留着。
 CRDROID_PROPS="ro.crdroid.version"
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# S7c 一键：gk3boot 拉起执行端的 QEMU 端到端（设计稿 docs/boot-entry-design.md §4.3.4 / §4.4 / §4.10，README §15）。
+# 一键：gk3boot 拉起执行端的 QEMU 端到端（说明见 tools/gk3boot/README.md §15）。
 #
 #   bash scripts/gk3boot/test-executor.sh              exec-* 四个端到端场景 + 分派相关的三个（bcb-dispatch migrate exec-missing）
 #   bash scripts/gk3boot/test-executor.sh all          test-boot.sh 的全部场景（含 exec-*）

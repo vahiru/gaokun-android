@@ -1,6 +1,6 @@
 # 主机侧指纹模板存储（参考实现）
 
-对应设计决策 D19/D20（`docs/fingerprint-driver-design.md`）。目标是把 TA 导出的
+对应设计决策 D19/D20（结论见`docs/dev/fingerprint-driver-design.md`第4节，逐条记录在合并前的`docs/fingerprint-driver-design.md`）。目标是把 TA 导出的
 不透明模板 blob 变成一个可校验、可原子写入、带几何/配置绑定的存储文件。
 
 这是主机侧库的参考实现（C11），用于离线测试和后续 client driver 复用；

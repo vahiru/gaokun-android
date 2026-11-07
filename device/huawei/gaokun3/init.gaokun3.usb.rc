@@ -7,13 +7,14 @@
 #   本文件                                    gadget 骨架 + ffs 挂载（adb、MTP、PTP）+ 角色 + configfs=1
 #                                            + MTP / PTP 配置要的链接和产品 ID
 #
-# 实测教训（docs/stage2-findings.md 第 8.3quinquies 节）：
+# 实测教训（docs/dev/android-bringup.md）：
 # ① 骨架（尤其 mkdir functions/ffs.adb 注册实例）必须在 functionfs mount
 #    之前，否则 mount 报 ENODEV —— 全部放 post-fs-data 按序执行。
 # ② UCSI（EC 内建后）会把 otg 口切成 host，xhci 一起来 gadget 就没戏。
 #    必须写 /sys/class/usb_role/.../role = device（接口名 Ubuntu 实测）——
 #    现在由 gaokun3-usbrole.sh device 来写，port0 上有下游设备时它保持 host。
-# ③ ro.serialno 本构建未设置，write 展开会失败，用字面量。
+# ③ ro.serialno由etc/usbrole.rc在init阶段从SMBIOS（/sys/class/dmi/id/product_serial）读取写入，
+#    post-fs-data阶段在此处展开为硬件序列号。
 
 on post-fs-data
     mkdir /config/usb_gadget/g1 0770 shell shell
@@ -22,7 +23,7 @@ on post-fs-data
     write /config/usb_gadget/g1/bcdDevice 0x0100
     write /config/usb_gadget/g1/bcdUSB 0x0200
     mkdir /config/usb_gadget/g1/strings/0x409 0770 shell shell
-    write /config/usb_gadget/g1/strings/0x409/serialnumber gaokun3
+    write /config/usb_gadget/g1/strings/0x409/serialnumber ${ro.serialno}
     write /config/usb_gadget/g1/strings/0x409/manufacturer HUAWEI
     write /config/usb_gadget/g1/strings/0x409/product MateBookEGo
     mkdir /config/usb_gadget/g1/functions/ffs.adb

@@ -4,7 +4,7 @@
 # 干什么：把加速度计读通。整条链路是
 #   fastrpc → hexagonrpcd(VFS) → SLPI 上的 DSP 注册表 → SSC → QMI → libssc
 # AP 侧没有任何到传感器芯片的总线，所以只能让 AP 给 DSP 当文件服务器。
-# 背景与踩坑全记录见 docs/stage4-findings.md #37。
+# 背景与踩坑全记录见 docs/dev/sensors-ssc-protocol.md。
 #
 # 用法：
 #   bash slpi-sensors-setup.sh /path/to/extracted-cabs

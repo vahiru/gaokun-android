@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """解码 cat /dev/input/eventN 录下的原始 evdev 流，把触摸手感量化。
 
-为什么不用 getevent：CLAUDE.md 记过，`timeout N getevent > file` 会因块缓冲丢光输出。
-录二进制、离线解码是本仓既定方法（#26）。
+为什么不用 getevent：`timeout N getevent > file` 会因块缓冲丢光输出。
+录二进制、离线解码是既定方法。
 
 aarch64 的 struct input_event = timeval(16) + type(2) + code(2) + value(4) = 24 字节。
 """

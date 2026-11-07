@@ -1,158 +1,106 @@
-name: 🐞 Bug report / 缺陷报告
-description: Android boots, but something behaves wrong. / 系统能起来，但某个功能不对。
-title: "[Bug] "
+name: Bug report / 问题报告
+description: Android starts, but something does not work as expected. / 系统能正常启动，但某项功能不正常。
 labels: ["bug", "needs-triage"]
 body:
   - type: markdown
     attributes:
       value: |
-        Measurements beat adjectives. Logs are worth more than any description of how it felt — how to collect them is in the [FAQ](https://github.com/vahiru/gaokun-android/blob/main/docs/FAQ.md).
-        实测比形容词有用：日志比"卡了"值钱得多。怎么抓日志见 [FAQ](https://github.com/vahiru/gaokun-android/blob/main/docs/FAQ.md)。
+        Thank you for taking the time to report this. If the system does not start or the installation failed, please use **Install / boot failure**; for a game or app, please use **Game & app compatibility**.
+        感谢你花时间反馈。如果系统无法启动或安装失败，请使用**安装与启动问题**；游戏或应用的问题请使用**游戏与应用兼容性**。
 
-        ⚠️ **Redact before pasting: Wi-Fi SSID, MAC addresses, public IP, serial numbers, account names.**
-        ⚠️ **贴日志前先删掉：Wi-Fi 名称（SSID）、MAC 地址、公网 IP、序列号、账号名。**（这个仓库曾为此改写过一次 git 历史。）
-
-        If the machine does not boot far enough to use, or the installer failed, use **Install / boot failure** instead. A game or app that crashes or refuses to run goes to **Game & app compatibility**.
-        开不了机或安装失败，请改用 **安装与开机失败**；某个游戏 / App 崩溃或拒绝运行，请用 **游戏与 App 兼容**。
+        You can also hand [issues.md](https://github.com/vahiru/gaokun-android/blob/main/issues.md) to an AI assistant and let it collect the information below for you.
+        也可以把[issues.md](https://github.com/vahiru/gaokun-android/blob/main/issues.md)交给AI助手，让它帮你收集下面这些信息。
 
   - type: checkboxes
-    id: preflight
+    id: checked
     attributes:
-      label: Pre-flight / 提交前确认
+      label: Before submitting / 提交前
       options:
-        - label: "This is not in the known issues of the [latest release notes](https://github.com/vahiru/gaokun-android/releases/latest) or the [README's known limitations](https://github.com/vahiru/gaokun-android#known-limitations). / 确认不在[最新发版说明](https://github.com/vahiru/gaokun-android/releases/latest)的已知问题或 [README 的已知限制](https://github.com/vahiru/gaokun-android/blob/main/README.zh-CN.md#已知限制)里。"
-          required: true
-        - label: "I searched the existing issues, open and closed. / 搜过现有 issue（包括已关闭的）。"
+        - label: I checked the [known limitations](https://github.com/vahiru/gaokun-android/blob/main/docs/known-limitations.md) and searched existing issues, including closed ones. / 我看过[已知限制](https://github.com/vahiru/gaokun-android/blob/main/docs/known-limitations.zh-CN.md)，也搜索过现有issue（包括已关闭的）。
           required: true
 
   - type: dropdown
     id: area
     attributes:
-      label: Area / 涉及部件
+      label: Area / 相关部分
       options:
-        - Boot / stability — reboots, hangs, black screen / 开机与稳定性
-        - Standby / suspend — will not sleep, will not wake, drains battery / 待机
-        - Display — brightness, refresh rate, rotation / 显示
-        - GPU / rendering / Vulkan / 图形
-        - Audio — speakers, headphone jack, microphones, speaker enhancement / 音频
-        - Wi-Fi / hotspot / Bluetooth / 网络、热点与蓝牙
-        - Touchscreen / keyboard / touchpad / 输入
-        - Sensors / auto-rotate / 传感器与自动旋转
+        - Startup and stability / 启动与稳定性
+        - Standby and battery life / 待机与续航
+        - Display / 屏幕
+        - Graphics and games / 图形与游戏
+        - Audio / 音频
+        - Wi-Fi, hotspot and Bluetooth / Wi-Fi、热点与蓝牙
+        - Touchscreen, stylus, keyboard and touchpad / 触摸屏、手写笔、键盘与触控板
+        - Sensors / 传感器
         - Camera / 摄像头
-        - Battery / charging / thermal / 电池、充电与温控
-        - USB / USB-C / USB
-        - OTA / system update / A-B slots / 系统更新与槽位
-        - Apps / framework / settings / 应用、框架与设置
+        - Battery and charging / 电池与充电
+        - USB-C / USB-C
+        - System updates / 系统更新
+        - Settings and system apps / 设置与系统应用
         - Other / 其他
     validations:
       required: true
 
-  - type: input
-    id: release
-    attributes:
-      label: Release / 发布版本
-      description: |
-        The release tag you installed or last updated to, or "self-built".
-        你装的或最后一次更新到的发布 tag；自己编的写"自编"。
-      placeholder: "v0.7.1-alpha"
-    validations:
-      required: true
-
   - type: textarea
-    id: build
+    id: version
     attributes:
-      label: Build stamp and kernel / 构建戳与内核
+      label: Version / 版本
       description: |
-        The **build stamp** (`ro.build.date.utc`, a 10-digit number) says exactly which build you are on; every release note lists it. Paste the output of this, over adb:
-        **构建戳**（`ro.build.date.utc`，一个 10 位数字）能精确确定你装的是哪一版，每份发版说明里都写着它。请用 adb 跑下面这条并贴输出：
+        If you can use adb, please paste the output of the command below. Otherwise, the release you installed (e.g. v1.0.0-rc.3) is enough.
+        能使用adb的话，请粘贴下面这条命令的输出；不方便的话，写明安装的版本（如v1.0.0-rc.3）即可。
         ```
-        getprop ro.build.date.utc; getprop ro.build.version.incremental; getprop ro.build.fingerprint; getprop ro.vendor.gaokun3.version; uname -a; getprop ro.boot.slot_suffix
+        adb shell 'getprop ro.build.date.utc; getprop ro.vendor.gaokun3.version; uname -a'
         ```
-        No computer at hand? Write the *crDroid version* line in *Settings → About tablet* (looks like `v12.11-20261003`) and say that is what it is. Note that `12.11` is crDroid's version number, not this project's.
-        手边没电脑：写下「设置 → 关于本机」里"crDroid 版本"那一行（形如 `v12.11-20261003`）并注明来源。注意 `12.11` 是 crDroid 的版本号，不是本项目的版本。
       render: shell
     validations:
       required: true
 
-  - type: dropdown
-    id: install-path
-    attributes:
-      label: How this build got onto the machine / 这个版本是怎么装上去的
-      description: Pick every step that applies, e.g. installed with the graphical installer, then updated through system update. / 经过的每一步都选上，例如"图形安装器装的，后来走系统更新升上来"。
-      multiple: true
-      options:
-        - Graphical installer — Erase the whole disk / 图形安装器：清除整个磁盘
-        - Graphical installer — Keep the current system (dual boot with Windows) / 图形安装器：保留现有系统（与 Windows 双系统）
-        - Graphical installer — Reinstall Android (data kept) / 图形安装器：重新安装 Android（保留数据）
-        - Graphical installer — Reinstall Android (data wiped) / 图形安装器：重新安装 Android（清除数据）
-        - Command-line installer scripts/install-gaokun3.sh / 命令行安装脚本
-        - System update in Settings (OTA) / 设置里的系统更新（OTA）
-        - Local payload — scripts/install-ota-local.sh or update_engine_client / 本地 payload 安装
-        - Self-built from source / 自己编的
-        - Other / unsure / 其他或不确定
-    validations:
-      required: true
-
   - type: input
-    id: hardware
+    id: machine
     attributes:
       label: Machine / 机器
-      description: |
-        Model, SKU and BIOS version. Any BIOS version is supported — this is for statistics. Over adb: `cat /sys/class/dmi/id/product_name /sys/class/dmi/id/product_sku /sys/class/dmi/id/bios_version`; otherwise from the label on the back and the UEFI setup screen.
-        型号、SKU、BIOS 版本。BIOS 版本不限，填它是为了统计。adb 下可用上面那条命令读；读不到就看机身标签和 UEFI 设置界面。
-      placeholder: "GK-W7X, SKU C233, BIOS 2.16"
-    validations:
-      required: true
+      description: Model, SKU and BIOS version, as shown on the label or in the UEFI setup. / 型号、SKU和BIOS版本，可以在机身标签或UEFI设置中找到。
+      placeholder: "GK-W7X, SKU C233, BIOS 2.18"
 
   - type: textarea
-    id: what-happened
+    id: what
     attributes:
-      label: What happened, and what you expected / 现象与预期
-      description: One or two sentences each. / 各写一两句就够。
+      label: What happened / 问题描述
+      description: What you saw, and what you expected instead. / 你看到了什么，原本期望的是什么。
     validations:
       required: true
 
   - type: textarea
-    id: repro
+    id: steps
     attributes:
       label: Steps to reproduce / 复现步骤
-      description: Numbered, from a fresh boot if possible. Include the exact commands you ran and the exact app names. / 尽量从冷启动开始编号写，命令和应用名原样写。
       placeholder: |
-        1. Boot, wait for the desktop
-        2. Open ...
-        3. ...
-    validations:
-      required: true
+        1.
+        2.
+        3.
 
   - type: dropdown
     id: frequency
     attributes:
-      label: How often / 复现频率
+      label: How often / 出现频率
       options:
-        - Every time / 每次都出
-        - Often, not always / 经常但不是每次
-        - Happened once / 只出现过一次
-        - Only after long uptime / 只在长时间运行后出现
-        - Only after standby / 只在待机唤醒后出现
-    validations:
-      required: true
+        - Every time / 每次都出现
+        - Sometimes / 有时出现
+        - Once / 只出现过一次
+        - After long uptime or after standby / 长时间运行或待机唤醒后出现
 
   - type: textarea
     id: logs
     attributes:
       label: Logs / 日志
       description: |
-        Attach as files if long. The [FAQ](https://github.com/vahiru/gaokun-android/blob/main/docs/FAQ.md) explains how to turn on USB debugging and collect each of these.
-        长日志请以文件附件上传。怎么打开 USB 调试、怎么抓下面这些，见 [FAQ](https://github.com/vahiru/gaokun-android/blob/main/docs/FAQ.md)。
-        * `adb logcat -b all -d > logcat.txt` — taken soon after it happened / 出问题后尽快抓
-        * the kernel log / 内核日志：`adb shell su -c dmesg > dmesg.txt` (needs root / 需要 root)
-        * hangs and freezes: the hang watchdog writes `hangdump-<uptime>/` under `/data/vendor/gaokun3/` when a thread sits in D state for two minutes — `adb shell su -c 'ls /data/vendor/gaokun3/'` / 卡死类问题：死锁取证看门狗会在这个目录里留 `hangdump-*`
-        * crashes: the newest file in `/data/tombstones/` / 崩溃：`/data/tombstones/` 里最新那个
-        * `adb bugreport` collects everything at once, but it contains a lot of personal data (Wi-Fi names, account names, app list) — read it before attaching it publicly / `adb bugreport` 一次全收，但里面个人信息很多（Wi-Fi 名、账号名、应用列表），公开上传前请自己过一遍
-      render: shell
+        Logs help a lot. Please attach long logs as files; the [FAQ](https://github.com/vahiru/gaokun-android/blob/main/docs/FAQ.md) explains how to collect them. Before uploading, please remove anything private, such as Wi-Fi names, account names and serial numbers.
+        日志对排查很有帮助。较长的日志请作为附件上传，抓取方法见[常见问题](https://github.com/vahiru/gaokun-android/blob/main/docs/FAQ.zh-CN.md)。上传前请删除Wi-Fi名称、账号名、序列号等个人信息。
+        * `adb logcat -b all -d > logcat.txt`
+        * `adb shell su -c dmesg > dmesg.txt`
+        * For crashes: the newest file in `/data/tombstones/`. For freezes: `/data/vendor/gaokun3/hangdump-*`, if present. / 崩溃时附上`/data/tombstones/`里最新的文件；卡死时如有`/data/vendor/gaokun3/hangdump-*`，请一并附上。
 
   - type: textarea
     id: extra
     attributes:
       label: Anything else / 其他补充
-      description: Photos of the screen are fine as a supplement, but never as a substitute for text logs. / 拍屏可以作为补充，但不能代替文字日志。

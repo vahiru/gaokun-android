@@ -1,314 +1,248 @@
 <!--
-  Maintenance (not rendered):
-  * Organised as "what happened → what to do". Every answer needs a source (script / case file / on-device check);
-    the sources are in the comments of FAQ.zh-CN.md and apply to both files. Anything without a source says
-    "to be added" instead of being written from memory, firmware keys and Windows menu paths especially.
-  * Keep this file and FAQ.zh-CN.md in sync.
-  * Everything said about "from 1.0" depends on D1 (release builds without insecure adb, ro.debuggable=0). Check that it
-    actually landed before the release that ships it.
+  Maintenance notes (not rendered):
+  * Organized as "what happened → what to do". Where there is no reliable answer, say "not documented yet" or
+    "not tested yet" rather than writing from memory.
+  * Mirrors docs/FAQ.zh-CN.md; change both together.
+  * Settings menu names: what the device shows is authoritative.
 -->
-# Frequently asked questions
+# FAQ
 
-[**中文 → FAQ.zh-CN.md**](FAQ.zh-CN.md) · [Known limitations](known-limitations.md) · [Installing](INSTALL.md)
+[**中文 → FAQ.zh-CN.md**](FAQ.zh-CN.md) · [Installing](INSTALL.md) · [Known limitations](known-limitations.md)
 
-* [Booting and the boot menu](#booting-and-the-boot-menu)
-* [Updates and rolling back](#updates-and-rolling-back)
-* [Collecting logs for the developers](#collecting-logs-for-the-developers)
-* [Rescue system and SSH](#rescue-system-and-ssh)
-* [Factory reset / wiping before you sell](#factory-reset--wiping-before-you-sell)
-* [Removing Android, going back to Windows](#removing-android-going-back-to-windows)
-* [Developer options, USB debugging and wireless debugging](#developer-options-usb-debugging-and-wireless-debugging)
+* [Starting up and the boot menu](#starting-up-and-the-boot-menu)
+* [Updates and going back](#updates-and-going-back)
+* [Collecting logs](#collecting-logs)
+* [The rescue system and SSH](#the-rescue-system-and-ssh)
+* [Erasing your data](#erasing-your-data)
+* [Removing Android, getting Windows back](#removing-android-getting-windows-back)
+* [Developer options and adb](#developer-options-and-adb)
 
----
+## Starting up and the boot menu
 
-## Booting and the boot menu
+### How do I get into the firmware settings, or boot from a USB stick?
 
-### How do I get into the UEFI firmware setup, turn off Secure Boot, or boot from USB?
-<!-- INST-4 / REL-9: no record of the keys anywhere in the repository. To be filled in after the user tries it on the
-     machine: firmware setup key, boot menu key, how to do it without the keyboard cover, where the Secure Boot option is. -->
-**The keys are still to be added: we want to check them on the machine rather than guess.** If you know them, please
-tell us in the group or in an issue.
+If Windows is still on the machine, you can open the firmware settings from Windows; see the [install guide](INSTALL.md#if-windows-is-on-the-machine). The keys for entering the firmware settings and the boot menu at power-on, and how to do it without the keyboard cover, have not been documented yet. If you know them, please tell us in the community groups or in an issue.
 
-What we can say for sure:
+To boot from a USB stick, turn off Secure Boot, plug in the installer stick and choose it in the firmware's boot menu.
 
-* **Secure Boot has to be off**, because the kernel is unsigned. The installer checks this before it starts and refuses
-  to continue if it is on; the USB-free Windows setup script checks it first too.
-* To boot from USB: plug in the installer USB stick and pick it in the firmware's boot menu.
+### USB sticks do not appear in the firmware's boot menu, and Huawei's official recovery does not start
 
-### ⚠️ USB sticks / recovery media don't show up in the firmware boot menu (firmware variable store full of crash records)
-**Every version released before 2026-10-30 is affected.** Their kernel writes the log of every kernel crash into the
-firmware's variable storage (NVRAM), and nothing ever cleans it up. After enough crashes the storage is full and the
-firmware can no longer create boot entries: **USB sticks, card readers and even Huawei's official recovery image do not
-appear in the boot menu** (keyboard and mouse still work, which makes it confusing), and firmware updates or Windows
-changing boot entries may fail too. The mainboard is not broken and **does not need replacing**; deleting these records
-fixes it. Fixed versions no longer write them, but **records that are already there stay until you delete them once**.
+Every version before 1.0.0-rc.3 writes the log into the mainboard firmware's variable storage on each kernel crash, and never cleans it up. After enough crashes the storage is full and the firmware can no longer create boot entries: USB sticks, card readers and Huawei's official recovery image no longer show up in the boot menu, and firmware updates or Windows changing its boot entries may fail too. The keyboard and mouse keep working, so this is easy to miss.
 
-Check first (Android boots, adb is connected and Shell has been granted root):
+**The mainboard is not broken and does not need replacing.** Since 1.0.0-rc.3 the system no longer writes these records, but the ones already written do not go away by themselves and have to be cleaned up once as follows. Deleting them makes the firmware reorganize its storage, which can take a while; please do not force the machine off meanwhile.
 
-```sh
-adb shell "su -c 'mkdir -p /data/local/tmp/efivars; mount -t efivarfs none /data/local/tmp/efivars 2>/dev/null; ls /data/local/tmp/efivars | grep -c ^dump-type'"
-```
+**From Android** (first [set up adb](#setting-up-adb) and grant root to Shell in the ReSukiSU manager):
 
-`0` means you are fine. Otherwise, save a copy if you want to send us the logs, then delete them:
+1. Check for leftover records:
 
-```sh
-adb exec-out "su -c 'cd /data/local/tmp/efivars && tar -cf - dump-type*'" > efi-dumps.tar
-adb shell "su -c 'cd /data/local/tmp/efivars && chattr -i dump-type* && rm -f dump-type*; ls | grep -c ^dump-type'"
-```
+   ```sh
+   adb shell "su -c 'mkdir -p /data/local/tmp/efivars; mount -t efivarfs none /data/local/tmp/efivars 2>/dev/null; ls /data/local/tmp/efivars | grep -c ^dump-type'"
+   ```
 
-When the last command prints `0` you are done. Until you have a fixed version, also stop new writes after **every** boot
-(does not survive a reboot; `Y` means off):
+   `0` means there are none and nothing needs cleaning.
 
-```sh
-adb shell "su -c 'echo 1 > /sys/module/efi_pstore/parameters/pstore_disable; cat /sys/module/efi_pstore/parameters/pstore_disable'"
-```
+2. If you are willing to share these logs with us, save a copy first:
 
-Advisory and discussion: [#56](https://github.com/vahiru/gaokun-android/issues/56). **The firmware reorganises its storage while deleting, which can take a
-while. Do not force the machine off meanwhile.**
+   ```sh
+   adb exec-out "su -c 'cd /data/local/tmp/efivars && tar -cf - dump-type*'" > efi-dumps.tar
+   ```
 
-* **Rescue system / other Linux**: `sudo bash scripts/pstore-ctl.sh clear` (or delete
-  `/sys/firmware/efi/efivars/dump-type*` directly, `chattr -i` first). **Deleting the files in `/sys/fs/pstore/` does
-  not actually delete the variables on this machine.**
-* **Windows** (from the reporter, not verified by us on this machine): as administrator, call
-  `SetFirmwareEnvironmentVariableEx` with GUID `{CFC8FC79-BE2E-4DDC-97F0-9F98BFE298A0}`, each `dump-type0-*` name, data
-  length 0 and attributes **7** (attributes 0 fails with error 19).
+3. Delete the records:
+
+   ```sh
+   adb shell "su -c 'cd /data/local/tmp/efivars && chattr -i dump-type* && rm -f dump-type*; ls | grep -c ^dump-type'"
+   ```
+
+   A final `0` means they are gone.
+
+**From the rescue system or another Linux**: run `sudo bash scripts/pstore-ctl.sh clear`, or run `chattr -i` on `/sys/firmware/efi/efivars/dump-type*` and then delete them. Deleting only the files in `/sys/fs/pstore/` does not actually remove the records on this machine.
+
+**From Windows**: a method provided by the reporter, which we have not verified on this machine: with administrator rights, call `SetFirmwareEnvironmentVariableEx` with GUID `{CFC8FC79-BE2E-4DDC-97F0-9F98BFE298A0}`, the name of each `dump-type0-*`, a data length of 0 and attributes 7 (attributes 0 fails with error 19).
+
+See [issue #56](https://github.com/vahiru/gaokun-android/issues/56) for the discussion.
 
 ### What are the entries in the boot menu?
-Every boot stops at the systemd-boot menu for 15 seconds, then starts the default entry.
 
-| Entry | What it is |
+The boot menu stays for 5 seconds by default. If you do not choose, the default entry starts.
+
+| Entry | Purpose |
 |---|---|
-| `Android` | From 1.0: Android's own boot entry (gk3boot). It picks the slot by itself and rolls back after a failed update. Added on the first boot after installing / updating to 1.0. See [INSTALL](INSTALL.md#the-boot-entry-and-fastboot-from-10) |
-| `Android fastboot / boot menu` | From 1.0: the fastboot environment (USB-C port next to the power button) |
-| `crDroid 16.0 (gaokun3) — slot _a`<br>`crDroid 16.0 (gaokun3) — slot _b` | Android's two slots, started directly (from 1.0 these are the fallback; the `Android` entry is used normally). **The entry highlighted by default is the one you are running.** Whether the other one still works: see [rolling back](#something-broke-after-an-update-can-i-go-back) |
-| `gaokun3 rescue (slot a kernel)`<br>`gaokun3 rescue (slot b kernel)` | The rescue system (older installs: `gaokun3 rescue (runs from RAM)`, one entry). Only present if you installed with the graphical installer and kept the rescue system option. It is the graphical installer itself: it can reinstall Android, and you can SSH into it. The two entries differ only in which slot's kernel they borrow |
-| `Windows Boot Manager` | Only on dual boot; the menu finds it automatically |
-| `gaokun3 installer` | Left behind when the installer was started from Windows without a USB stick |
+| `Android` | Android, started by default. It picks the slot by itself, and goes back to the previous version if an updated system repeatedly fails to start |
+| `Android (previous loader)` | The previous version of the boot program, for when the `Android` entry has a problem |
+| `Android fastboot / boot menu` | Fastboot mode; see the [install guide](INSTALL.md#fastboot) |
+| `crDroid … (gaokun3) — slot _a`<br>`crDroid … (gaokun3) — slot _b` | Start Android from one particular slot, for troubleshooting. After an update, the old slot's entry no longer starts; see [below](#something-broke-after-an-update-can-i-go-back-to-the-previous-version) |
+| `gaokun3 rescue (slot a kernel)`<br>`gaokun3 rescue (slot b kernel)` | The rescue system, present only if "Also install the rescue system" was ticked during installation. The two differ only in which slot's kernel they borrow |
+| `gaokun3 installer` | Left behind when the installer was started from Windows |
+| `Windows Boot Manager` | Windows, with dual boot |
 
-### How do I use the menu? Does it work without the keyboard cover?
-With the keyboard cover attached: arrow keys to choose, Enter to boot.
+### Can I use the boot menu without the keyboard cover?
 
-**Whether the volume and power buttons can drive this menu without the keyboard cover has not been checked yet (to be
-added).** Attach the keyboard cover when you need to pick an entry.
+Yes. Without the keyboard cover, use the volume up/down buttons to move the cursor and the power button to confirm; with the keyboard cover attached, you can also use the arrow keys and Enter.
 
----
+## Updates and going back
 
-## Updates and rolling back
+### Something broke after an update. Can I go back to the previous version?
 
-### Something broke after an update. Can I go back?
-**In most cases, no.** System updates use Android's "Virtual A/B": once the new version has booted successfully, it is
-merged in the background into the only copy of the system, and the previous version is gone. The other slot is still
-listed in the menu after that, but picking it only costs you one failed boot before the machine returns to the default
-entry.
+It depends on whether the new version starts:
 
-There is one case where you can go back: **the new version does not boot at all** (it keeps restarting, say), so it never
-got merged. Then:
+- **The new version does not finish starting** (for example it keeps restarting): the machine goes back to the previous version by itself, and you get a notification once Android is up.
+- **The new version starts, but something does not work**: you cannot go back. Once the new version has booted successfully, the previous system is merged away, and from then on the old slot's entry in the boot menu no longer starts; choosing it only wastes a restart. Please wait for a fixed version, or reinstall the older version with the graphical installer (see the next question).
 
-1. Hold the power button to switch off, then switch on.
-2. In the menu pick the **other** slot (not the highlighted one).
-3. On later boots the default may still point at the broken slot (not verified). If so, pick the slot by hand on every
-   boot until the next update.
+On a freshly installed machine that has not been updated yet, the other slot holds no system.
 
-On a fresh install with no update yet, only the current slot holds a system; the other one is empty.
+### Can I install an older version?
 
-If the new version boots but something in it is broken, you cannot go back. Wait for a fix, or reinstall the older version
-with the graphical installer (next question).
+You can install any version with "Reinstall Android" in the graphical installer. But the newer version may already have upgraded your user data to a format the older one does not understand, so installing an older version while keeping data may leave it unable to start. When installing an older version, please wipe data (leave "Keep user data" unticked, which is also the default) and back up first.
 
-### Can I install an older version (downgrade)?
-The graphical installer's **Reinstall Android** installs any version. But **keeping your data across a downgrade is not
-guaranteed to work**: the newer version may have converted your data into a format the older one does not understand.
-When downgrading, let it wipe the data (the default; leave *Keep user data* unticked) and back up first.
+### The machine keeps restarting or hangs. What can I do?
 
-### It keeps restarting or hangs at boot. What now?
-1. Try the other slot from the menu, as above.
-2. If that does not help, pick `gaokun3 rescue (runs from RAM)` or boot the installer USB stick, then use
-   **Reinstall Android**. Ticking *Keep user data* keeps your data (a same-version reinstall has been verified on
-   hardware).
-3. The rescue system can collect logs: see [when the machine won't boot Android](#collecting-logs-when-the-machine-wont-boot-android).
+1. If it started after an update, wait for a few restarts first; the machine usually goes back to the previous version by itself. If it is stuck on one screen, hold the power button to turn it off, then start it again.
+2. If it still does not start, choose `gaokun3 rescue` in the boot menu, or boot from the installer USB stick, and choose "Reinstall Android". Ticking "Keep user data" keeps your data; reinstalling the same version this way has been verified on a real machine.
+3. You can also collect logs from the rescue system; see [Collecting logs when Android does not start](#collecting-logs-when-android-does-not-start).
 
----
+## Collecting logs
 
-## Collecting logs for the developers
-
-When you report a problem, include the model (GK-W7X), your BIOS version, the ROM version (see below), what you did and
-what happened, plus the logs below. Report on [GitHub issues](https://github.com/vahiru/gaokun-android/issues), or in
-[Telegram](https://t.me/gaokunAndroid) / QQ group **920133252**.
+When reporting a problem, please describe what you did and what happened, and include the system version and the logs below. Please use the [issue forms](https://github.com/vahiru/gaokun-android/issues/new/choose); you can also give feedback on [Telegram](https://t.me/gaokunAndroid) or in QQ group **920133252**.
 
 ### Setting up adb
-1. Install Google's **SDK Platform-Tools** on your computer (`adb` is in there).
-2. On the tablet, turn on **Developer options** and **USB debugging**: see [below](#developer-options-usb-debugging-and-wireless-debugging).
-3. Connect a USB cable and **keep the screen on** (USB debugging disconnects while the screen is off). Run
-   `adb devices` on the computer. **Use the USB-C port next to the power button**: only that one works for USB
-   debugging (the other port can only act as a host). If the tablet is still not listed, unplug and plug the cable in
-   again: with some computers the two sides occasionally settle the wrong way round, the tablet ends up charging the
-   computer and nothing shows up (see [known limitations](known-limitations.md#plugged-into-a-computer-the-tablet-may-charge-the-computer-instead)).
-4. To go without a cable, use [wireless debugging](#wireless-debugging).
 
-### With a computer, when the machine boots
-The quickest and most complete option:
+1. Install Google's SDK Platform Tools on your computer; they include `adb`.
+2. Turn on Developer options and USB debugging on the tablet; see [below](#turning-on-developer-options).
+3. Connect the tablet to the computer with a USB cable and run `adb devices` on the computer. Use the USB-C port **next to the power button**; the other port cannot be used for USB debugging.
+4. If the computer does not see the device, unplug the cable and plug it in again. With some computers the two sides occasionally negotiate the wrong way round, so that the tablet powers the computer and neither sees the other; see [known limitations](known-limitations.md#plugged-into-a-computer-the-tablet-may-charge-the-computer-instead).
+5. If a cable is inconvenient, use [wireless debugging](#wireless-debugging).
+
+### When Android starts
+
+The simplest and most complete way is:
 
 ```sh
 adb bugreport gaokun3-bugreport.zip
 ```
 
-It contains the system log, the kernel log, crash records and more — including the crash dumps under
-`/data/tombstones`, which you cannot read without root otherwise.
+It contains the system log, the kernel log and crash records. It also contains personal information such as Wi-Fi network names, account names and installed apps, so please check it before posting it publicly.
 
-⚠️ **A bug report contains personal data**: Wi-Fi network names, account names, the list of installed apps. Read it
-before you attach it publicly.
-
-If you only want parts of it:
+If you only need some of the logs:
 
 ```sh
-adb logcat -b all -d > logcat.txt          # the whole system log (-d: dump and exit)
+adb logcat -b all -d > logcat.txt          # the whole system log
 adb logcat -b crash -d > crash.txt         # crash records only
-adb shell dmesg > dmesg.txt                # kernel log; if it says permission denied, use the su line below
+adb shell dmesg > dmesg.txt                # the kernel log
 ```
 
-These need root (first grant it to **Shell** in the ReSukiSU manager):
+If `dmesg` reports a permission error, or you need the records saved automatically when audio and Bluetooth hang, first grant root to Shell in the ReSukiSU manager, then run:
 
 ```sh
 adb shell su -c dmesg > dmesg.txt
-# what the kernel saved during the last crash (efi_pstore). Off since the 2026-10-30 fix, so normally empty; on older versions see "USB sticks don't show up" above
-adb exec-out "su -c 'tar -C /sys/fs -cf - pstore'" > pstore.tar
-# evidence collected automatically when audio / Bluetooth deadlocks
 adb exec-out "su -c 'cd /data/vendor/gaokun3 && tar -cf - hangdump-*'" > hangdump.tar
 ```
 
-**On versions before the 2026-10-30 fix: after a crash, grab `pstore` first, then clear the records as described in [the boot menu section](#booting-and-the-boot-menu).**
-
-ROM version:
+System version:
 
 ```sh
-adb shell getprop ro.build.version.incremental    # e.g. 20261003184648
-adb shell getprop ro.build.date.utc               # the build stamp, e.g. 1791053208
+adb shell getprop ro.build.version.incremental
+adb shell getprop ro.build.date.utc
 ```
 
 ### Without a computer
-Whether *Bug report* in Developer options works on this machine has not been checked yet (to be added). For now,
-please use a computer as above.
 
-### Collecting logs when the machine won't boot Android
-Pick `gaokun3 rescue (runs from RAM)` in the menu (or boot the installer USB stick).
+Whether "Bug report" in Developer options works on this machine has not been tested yet. For now, please collect logs with a computer as described above.
 
-* 45 seconds after it boots, it writes diagnostics to `/media/gk3/gaokun3/diag/`. That directory is on disk and survives
-  a reboot.
-* Kernel log: `journalctl -k`.
-* Crash records: look in `/sys/fs/pstore/` and `/var/lib/systemd/pstore/`. **Copy them to `/media/gk3/gaokun3/diag/`
-  before you reboot**: the second one lives in RAM and is lost on reboot.
-* To fetch it all over SSH: `scp -r root@<IP>:/media/gk3/gaokun3/diag .` (SSH needs a key first; see the next section).
-* Booted from the installer USB stick? Then `/media/gk3` is the stick itself: its FAT partition, volume label
-  **`GK3LIVE`**. Plug the stick into any computer and the files are in `gaokun3/diag/`.
+### Collecting logs when Android does not start
 
----
+Choose `gaokun3 rescue` in the boot menu, or boot from the installer USB stick.
 
-## Rescue system and SSH
+- 45 seconds after starting, the rescue system writes diagnostics to `/media/gk3/gaokun3/diag/`. This directory is on the disk and survives a restart.
+- `journalctl -k` shows the kernel log.
+- If SSH is set up, fetch the diagnostics on your computer with `scp -r root@<IP>:/media/gk3/gaokun3/diag .`; see the next section for setting it up.
+- When booted from the installer USB stick, `/media/gk3` is the stick itself. Plug it into any computer and the logs are in `gaokun3/diag/`.
 
-### How do I SSH into the rescue system?
-The rescue system **accepts SSH logins with a public key only**. The published image contains nobody's key, so you have
-to add your own first; until then you can only use it at the machine.
+## The rescue system and SSH
+
+### How do I log in to the rescue system over SSH?
+
+The rescue system only accepts SSH public-key logins. The released images contain no one's key, so you need to add your own first; otherwise it can only be used in front of the machine.
 
 **Before installing** (recommended):
 
-1. Generate a key pair on your computer (skip if you have one): `ssh-keygen -t ed25519`.
-2. Save the public key (the contents of `~/.ssh/id_ed25519.pub`) as `gaokun3/authorized_keys` on the installer USB
-   stick. That partition of the stick is FAT, so Windows and Mac can write to it directly.
-3. For the rescue system to join Wi-Fi when it boots: connect to Wi-Fi once in the installer, and the installer carries
-   that configuration over. Or put a `gaokun3/wpa_supplicant.conf` on the stick.
-4. Keep the rescue system option when installing. The installer copies both files into the rescue partition.
+1. Generate a key pair on your computer (skip if you already have one): `ssh-keygen -t ed25519`.
+2. Save the public key (the contents of `~/.ssh/id_ed25519.pub`) as `gaokun3/authorized_keys` on the installer USB stick. That partition of the stick is FAT, so Windows and macOS can write to it directly.
+3. If you want the rescue system to join Wi-Fi when it starts, connect to Wi-Fi once in the installer and it copies that configuration along; or put a `gaokun3/wpa_supplicant.conf` on the stick.
+4. Tick "Also install the rescue system" during installation.
 
-**Already installed**:
+**After installing**:
 
-1. Pick `gaokun3 rescue (runs from RAM)` in the boot menu; the installer screen comes up.
-2. Choose *Quit to terminal* (or press Ctrl+Alt+F2) and log in as `root`. At the machine itself no password is needed.
-3. Append your key and restart SSH:
+1. Choose `gaokun3 rescue` in the boot menu; the installer screen appears.
+2. Tap "Quit to terminal" (or press Ctrl+Alt+F2) and log in as `root`. No password is needed in front of the machine.
+3. Add your public key and restart the SSH service:
 
    ```sh
-   cat >> /media/gk3/gaokun3/authorized_keys     # paste the key, Enter, then Ctrl+D
+   cat >> /media/gk3/gaokun3/authorized_keys     # paste the key, press Enter, then Ctrl+D
    systemctl restart ssh
    ```
 
-   The file is on the rescue partition, so it keeps working every time you boot the rescue system.
+   The file is stored on the rescue partition, so it stays in effect every time you enter the rescue system.
 
-**Connecting**: run `ip addr` in the rescue system's terminal for its IP, then `ssh root@<IP>` from your computer. If your
-network supports mDNS, `ssh root@gaokun3-live.local` may work as well (not yet tried on anyone else's network).
+**Connecting**: in the rescue system's terminal, find the IP address with `ip addr`, then run `ssh root@<IP>` on your computer.
 
----
+## Erasing your data
 
-## Factory reset / wiping before you sell
+### How do I factory reset? How do I erase my data before selling or sending the machine for repair?
 
-**_Erase all data_ in Settings does nothing on this machine**: it reboots and all your data is still there. Why: see
-[known limitations](known-limitations.md#erase-all-data-factory-reset-in-settings-does-nothing). From 1.0 the request
-is handed to the boot entry's fastboot environment, but that path has not been verified on the machine — do not rely on it.
+"Erase all data (factory reset)" in Settings is carried out by fastboot mode after a restart, but this has not been tested on a real machine yet, so please do not rely on it for now.
 
-For now, do this:
+Erase your data as follows:
 
-1. Pick `gaokun3 rescue (runs from RAM)` in the boot menu; if that entry is not there, boot the installer USB stick.
-2. Choose **Reinstall Android**. **Do not** tick *Keep user data* (unticked is the default, which wipes the data).
-3. The system image is read from the USB stick, or downloaded over Wi-Fi (about 1.3 GB) if the stick does not carry one.
+1. Choose `gaokun3 rescue` in the boot menu; if it is not there, boot from the installer USB stick.
+2. Choose "Reinstall Android" and leave "Keep user data" unticked (it is unticked by default).
+3. The system image is read from the USB stick; if the stick does not carry it, it is downloaded over Wi-Fi (about 1.3 GB).
 
-⚠️ The data partition is not encrypted (see [known limitations](known-limitations.md)). Always wipe it before you sell
-the machine or send it for repair.
+The user data partition on this machine is not encrypted (see [known limitations](known-limitations.md)), so please make sure to erase it before selling the machine or sending it for repair.
 
----
+## Removing Android, getting Windows back
 
-## Removing Android, going back to Windows
+### Using Windows now and then with dual boot
 
-### Dual boot: I just want to use Windows for a while
-Pick `Windows Boot Manager` in the boot menu.
+Choose `Windows Boot Manager` in the boot menu. With dual boot you can also make Windows the default system; see the [install guide](INSTALL.md#dual-boot).
 
-### Dual boot: removing Android completely
-**A complete removal has not been carried out on real hardware yet, so we are not giving step-by-step commands (to be
-added).** Please ask in the group before you start.
+### Removing Android completely from a dual-boot machine
 
-For reference, this is what the installer changed:
+If you started the installer from Windows, the gaokun3 folder in the Start menu has a "Remove Android" entry. It restores the boot settings, deletes Android's partitions and gives the space back to D:. This tool is a preview and has not been run on a real Windows installation yet, and the full manual removal has not been carried out on a real machine either. Before you start, please back up and ask in the community groups.
 
-* **Booting**: `EFI/BOOT/BOOTAA64.EFI` on the ESP was replaced by systemd-boot; the original was kept as
-  `EFI/BOOT/BOOTAA64.EFI.before-gaokun3`. Restore it and the machine boots straight into Windows.
-* **Files on the ESP**: a directory named after a machine-id (with `android/` inside), plus the configuration and the boot
-  entries under `loader/`.
-* **Partitions**: `misc`, `metadata`, `super`, `boot_a`, `boot_b`, `userdata`, and possibly `gk3rescue`. After deleting
-  them, give the space back to Windows from within Windows.
-* `gaokun3-setup.cmd -Uninstall` on Windows, run **after** Android has been installed, only removes the installer's own
-  boot entry and files. It does **not** remove Android.
+For reference, the installer changed the following:
 
-### Installed with "Erase the whole disk", now I want Windows back
-Windows was erased at that point; the only way back is a reinstall from Huawei's recovery media. We have not done that
-on this machine (to be added). If you want to keep Windows, choose **Keep the current system** (dual boot) when
-installing.
+- **Boot program**: `EFI/BOOT/BOOTAA64.EFI` on the EFI partition was replaced with this system's boot menu, and the original was backed up as `EFI/BOOT/BOOTAA64.EFI.before-gaokun3`. Once that file is restored, the machine starts straight into Windows.
+- **Files on the EFI partition**: a directory named after the machine-id containing `android/`, and the configuration and boot entries under `loader/`.
+- **Partitions**: `misc`, `metadata`, `super`, `boot_a`, `boot_b`, `userdata`, and possibly `gk3rescue`. After deleting them, you can merge the space back in Windows.
 
----
+Note that once Android is installed, `gaokun3-setup.cmd -Uninstall` only removes the installer's own boot entry and files; it does not remove Android.
 
-## Developer options, USB debugging and wireless debugging
+### Installed with "Erase the whole disk" and want Windows back
 
-The menu names below are the standard Android / crDroid ones; go by what your device shows.
+In this case Windows has already been deleted, and the only way back is to reinstall it from Huawei's recovery media or a Windows installation USB stick. This has not been tested on this machine yet. If you want to keep Windows, choose "Keep the current system" (dual boot) when installing.
+
+## Developer options and adb
 
 ### Turning on Developer options
-1. **Settings → About tablet**, tap *Build number* 7 times, and enter your screen lock when asked.
-2. From then on it is under **Settings → System → Developer options**.
+
+1. In Settings → About tablet, tap "Build number" seven times and enter your screen lock when asked.
+2. From then on you can find it under Settings → System → Developer options.
 
 ### USB debugging
-Turn on **USB debugging** in Developer options and connect the cable. From 1.0, the tablet asks "Allow USB debugging?":
-check the computer's key fingerprint, tick *Always allow from this computer*, and allow. A computer that has not been
-allowed cannot connect.
 
-From 1.0, **USB debugging switches itself back off at every reboot**: turn it on again after each restart. This is a
-known limitation of this port (see [known limitations](known-limitations.md)), not a setting that failed to save. Not
-yet confirmed on hardware.
+Turn on "USB debugging" in Developer options and connect the computer with a cable. The tablet asks "Allow USB debugging?"; check the computer's fingerprint, tick "Always allow from this computer" and tap Allow. Computers that have not been authorized cannot connect.
 
 ### Wireless debugging
-1. Put the tablet and the computer on the same Wi-Fi.
-2. Developer options → **Wireless debugging** → on → **Pair device with pairing code**, and note the IP, port and code.
-3. On the computer run `adb pair <IP>:<pairing port>` and enter the code. Each computer only needs pairing once.
-4. Then run `adb connect <IP>:<port>`. Use the port shown on the main *Wireless debugging* screen here, not the pairing
-   port.
 
-Turn wireless debugging off when you are not using it.
+1. Connect the tablet and the computer to the same Wi-Fi network.
+2. In Developer options, turn on "Wireless debugging", tap "Pair device with pairing code", and note the IP address, port and pairing code.
+3. On the computer, run `adb pair <IP>:<pairing port>` and enter the pairing code. Each computer only needs to pair once.
+4. Then run `adb connect <IP>:<port>`. This port is the one shown on the "Wireless debugging" page, not the pairing port.
 
-> **v0.7.1 and earlier**: the image opens network adb on port 5555 by default, **with no authorization**. Anyone on the
-> same network can connect and get root. 1.0 closes this. If you are still on an older version, update soon and stay
-> off Wi-Fi networks you don't trust.
+Please turn wireless debugging off when you are not using it.
 
-### `adb root` does not work?
-From 1.0, release builds no longer support `adb root`. For a root shell, first grant root to **Shell** in the ReSukiSU
-manager, then use `adb shell su`.
+### Why doesn't `adb root` work?
+
+Release builds do not support `adb root`. When you need a root shell, first grant root to Shell in the ReSukiSU manager, then use `adb shell su`.
+
+> v0.7.1 and earlier opened network adb on port 5555 without authorization by default, so anyone on the same network could connect and get root. This has been turned off since 1.0.0-rc.1. If you are still on an older version, please update soon, and until then do not join Wi-Fi networks you do not trust.

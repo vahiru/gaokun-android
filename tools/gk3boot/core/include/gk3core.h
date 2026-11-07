@@ -1,13 +1,13 @@
 /*
- * libgk3core —— 统一启动入口（docs/boot-entry-design.md）的决策核心。
+ * libgk3core —— 统一启动入口（tools/gk3boot/README.md）的决策核心。
  *
  * 同一份代码编进 gk3boot.efi（UEFI，无 libc）、执行端 gk3-fastbootd（静态 Linux）、
- * 主机测试和 gk3-misc CLI（设计稿 §4.1）。约束：
+ * 主机测试和 gk3-misc CLI。约束：
  *   - freestanding C11：只用 <stdint.h> <stddef.h> <stdbool.h>，不分配内存、不调 libc；
  *     缓冲区一律由调用方给（UEFI 侧用 AllocatePool，Linux 侧用栈或 malloc）。
  *   - 盘上格式一律按字节、小端显式读写，不用位域、不靠结构体布局 —— 位域布局是编译器的事，
  *     盘上格式不能跟着编译器走。
- *   - 所有"写"都只改调用方的缓冲区；落盘、刷写、读回比对由 gk3_blk_* 的回调做（§4.12：写前算 CRC、写后读回）。
+ *   - 所有"写"都只改调用方的缓冲区；刷写、读回比对由 gk3_blk_* 的回调做（写前算 CRC、写后读回）。
  *
  * 出处约定：AOSP 源码行号对的是 scripts/clone-refs.sh 钉住的提交：
  *   hardware/interfaces 1a56e38（refs/aosp-hardware-interfaces）、
@@ -469,12 +469,12 @@ uint32_t gk3_rec_events(const uint8_t *rec, gk3_event *out, uint32_t max);
 void gk3_rec_events_mark_notified(uint8_t *rec, uint32_t upto_seq);
 const char *gk3_ev_name(gk3_ev_code c);
 
-/* ------------------------------------------------------------------ 双系统（S15，§4.9.3 / §4.9.4），只决定、不写盘 */
+/* ------------------------------------------------------------------ 双系统，只决定、不写盘 */
 
-/* LoaderEntryDefault 的值分三类（§4.9.3"两条禁令"）：
+/* LoaderEntryDefault 的值分三类：
  *   ABSENT   不存在 = 默认 Android（合法）
  *   WINDOWS  Windows 条目的 id：systemd-boot 自动生成的 "auto-windows"（boot.c:2147），或安装器自写的 type1 条目
- *            "gk3-windows.conf"（U22；type1 的 id = 文件名、转小写，boot.c:1362、:1540-1541）—— 合法
+ *            "gk3-windows.conf"（type1 的 id = 文件名、转小写，boot.c:1362、:1540-1541）—— 合法
  *   OTHER    其他一切（Android 条目的精确 id、@saved、live / 救援、通配…）—— 不合法，入口删掉
  * 比较不分大小写（systemd-boot 读入时转小写，boot.c:1645）。value 为 NULL = 不存在。 */
 typedef enum { GK3_DEFVAR_ABSENT = 0, GK3_DEFVAR_WINDOWS, GK3_DEFVAR_OTHER } gk3_defvar;

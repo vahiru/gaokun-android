@@ -286,7 +286,7 @@ if [ -s "$DEST/cmdline.txt" ] && [ -f "$RA" ]; then
     done
 fi
 
-# ── 统一启动入口 gk3boot.efi（2026-10-05，S9；docs/boot-entry-design.md §4.6.2、§4.8、§4.11）──────────
+# ── 统一启动入口 gk3boot.efi（tools/gk3boot/README.md）──────────
 # 开关 persist.vendor.gaokun3.gk3boot（缺省 off，1.0 发版时再定默认值）：
 #   off            删掉 ESP 上全部 gk3boot-android-* / gk3prev-android-* 条目（含 .staged）与 gk3boot-tools.conf
 #                  ⇒ 新槽走直连条目。
@@ -436,20 +436,19 @@ gk3_deploy() {
 }
 gk3_deploy
 
-# ── loader.conf 的菜单等待（2026-10-05，S15 / U13；docs/boot-entry-design.md §4.8"已装双系统的 0.7.x 用户"、§4.9.5）──────────
-# 双系统（ESP 上有 Windows 的启动管理器）固定显示菜单 5 秒：平板形态下切 Windows 主要靠这个菜单。1.0 的安装器新装时就写 5
-# （scripts/live/installer-lib.sh 的 GK3_LOADER_TIMEOUT_DUAL）；之前装的机器上是安装器写的 15 —— 只改【正好是 timeout 15】
-# 那一行（安装器的原值，scripts/live/installer-lib.sh 的 GK3_LOADER_TIMEOUT），用户改过的（别的数、menu-hidden、多了空格）不动。
-# 纯 Android 不改：U3 观察期保持 15（降到 3 / menu-hidden 要等 D19"不接键盘盖也能操作菜单"确认，docs/v1.0-plan.md:341）。
-# 改 loader.conf 只进 PCR5，不会让 BitLocker 要密钥（设计稿 §4.9.7）。写法同条目：.new → 核对 → 改名；失败只记日志、不让 OTA 失败。
+# ── loader.conf 的菜单等待（tools/gk3boot/README.md）──────────
+# 开机菜单（音量上/下与电源键即可无键盘操作）统一显示 5 秒。新装时安装器直接写 5
+# （scripts/live/installer-lib.sh 的 GK3_LOADER_TIMEOUT）；之前装的机器上是旧安装器写的 15 —— 只改【正好是 timeout 15】
+# 那一行，用户改过的（别的数、menu-hidden、多了空格）不动。
+# 改 loader.conf 只进 PCR5，不会让 BitLocker 要密钥。写法同条目：.new → 核对 → 改名；失败只记日志、不让 OTA 失败。
 # 权限：只用到 vfat:file create/write/rename（sepolicy/postinstall.te 已有），不新增规则。
 LC="$MNT/loader/loader.conf"
-if [ -f "$MNT/EFI/Microsoft/Boot/bootmgfw.efi" ] && [ -f "$LC" ] && grep -qx 'timeout 15' "$LC"; then
+if [ -f "$LC" ] && grep -qx 'timeout 15' "$LC"; then
     if sed 's/^timeout 15$/timeout 5/' "$LC" > "$LC.new" && grep -qx 'timeout 5' "$LC.new" &&
        [ "$(grep -vx 'timeout 5' "$LC.new")" = "$(grep -vx 'timeout 15' "$LC")" ] && mv -f "$LC.new" "$LC"; then
-        log "双系统：loader.conf 的 timeout 从安装器原来写的 15 改成 5（U13）"
+        log "loader.conf 的 timeout 从安装器原来写的 15 改成 5"
     else
-        rm -f "$LC.new"; log "⚠️ 双系统：没能把 loader.conf 的 timeout 改成 5（菜单仍等 15 秒，不影响启动）"
+        rm -f "$LC.new"; log "⚠️ 没能把 loader.conf 的 timeout 改成 5（菜单仍等 15 秒，不影响启动）"
     fi
 fi
 

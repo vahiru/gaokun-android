@@ -1,13 +1,13 @@
 #!/vendor/bin/sh
 #
-# 音频/蓝牙死锁取证看门狗（stage4-findings.md #38）。
+# 音频/蓝牙死锁取证看门狗。
 #
-# 为什么要有它：#38 是用户实机报告的"长期运行后音频与蓝牙可能死锁"，
+# 为什么要有它：用户实机曾报告"长期运行后音频与蓝牙可能死锁"，
 # 而我们**一次都没复现过**。它的诊断建议全是推导出来的，不是观测。
 # 现实是死锁发生时用户只会重启，证据就没了 —— 所以证据必须【自动】留下。
 #
 # 探针刻意做得很便宜：只读 /proc 里的线程状态。每 60 秒一次、每次几毫秒。
-# ⚠️ 2026-09-27（#126）：取证部分删掉了 logcat 与 dumpsys —— 这个脚本跑在 vendor 域
+# 取证部分删掉了 logcat 与 dumpsys —— 这个脚本跑在 vendor 域
 #   （gaokun3_hangdump），而 Treble 的 neverallow 不许 vendor 域执行 /system/bin/logcat
 #   （logcat_exec）、也不许它打开 /dev/binder（dumpsys 要）。permissive 下它们能跑，
 #   enforcing 下只会留下空文件。binder 那一段改读 binderfs 的 state（见 sepolicy/gaokun3_scripts.te 末尾）。

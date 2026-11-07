@@ -5,7 +5,7 @@
 # （固件/TZ 级复位，pstore 抓不到）。实测双臂对照：role=host 5/5 通过、
 # role=device 第 1 次就复位。而 USB device-mode adb 的 UDC 就在它上面
 # （sys.usb.controller=a600000.usb），所以不能简单改成 host 了事。
-# 案卷：docs/stage4-findings.md #52 / #54 / #56。
+# 说明见 docs/dev/deep-sleep.md。
 #
 # ★ 不变量：wakelock `gaokun3_usbrole` 一直持有，【除非已确认 role 真的是 host】。
 #   任何失败路径都保持持有 → 结果只是"不挂起"，绝不会"带着 device 模式去挂起"。
@@ -83,8 +83,27 @@ adb_gate() {
 }
 
 case "$WANT" in
+    serialno)
+        # 从SMBIOS（CONFIG_DMIID=y导出的/sys/class/dmi/id/product_serial）读取整机序列号，
+        # 依次回退到chassis_serial、SoC序列号与字面量gaokun3。
+        # ⚠️ 本脚本跑在gaokun3_usbrole域：核心策略private/domain.te:864禁止非白名单域读serialno_prop，
+        #   因此这里不读ro.serialno，只写vendor.gaokun3.serialno（vendor_gaokun3_prop），
+        #   再由etc/usbrole.rc在白名单内的vendor_init域写入ro.boot.serialno与ro.serialno。
+        sn=""
+        for f in /sys/class/dmi/id/product_serial /sys/class/dmi/id/chassis_serial /sys/devices/soc0/serial_number; do
+            [ -r "$f" ] || continue
+            read -r raw < "$f" 2>/dev/null
+            case "$raw" in
+                ""|None|Default*|"To be filled"*|*[!A-Za-z0-9._-]*) continue ;;
+                *) sn="$raw"; break ;;
+            esac
+        done
+        [ -n "$sn" ] || sn=gaokun3
+        setprop vendor.gaokun3.serialno "$sn"
+        exit 0
+        ;;
     host|device) ;;
-    *) say "用法: $0 host|device"; exit 2 ;;
+    *) say "用法: $0 host|device|serialno"; exit 2 ;;
 esac
 
 if [ ! -e "$S" ]; then
@@ -97,7 +116,7 @@ fi
 #   目前不可能安全；而切 host 就等于把用户正在用的 adb 拔掉。折中：插着主机 → 息屏但不睡（反正在充电），
 #   拔线后再切 host 放行挂起（role_host 进程原地每 2 秒看一次，见下面的 host_unplugged）。判据用 UDC 的 state：
 #   configured/addressed = 有主机在总线另一端；not attached = 没有。
-#   ⚠️ 这不是根治。根治是让 dwc3 device 模式的挂起不复位（见 docs/stage4-findings.md #112）。
+#   ⚠️ 这不是根治。根治是让 dwc3 device 模式的挂起不复位（见 docs/dev/deep-sleep.md）。
 #   ⚠️ 拔线之后 UDC 的 state 不会变：一直停在 configured，直到重新插上、主机再次枚举（dwc3 没有得知
 #   VBUS 消失）。只看 UDC 的话，被主机枚举过、再拔掉线以后（在息屏前拔还是息屏期间拔都一样），每次息屏
 #   都会当成主机还在、一直等下去，wakelock 不放，到重启为止整机都不再睡。EC 报的适配器在线

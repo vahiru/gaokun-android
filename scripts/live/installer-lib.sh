@@ -20,10 +20,10 @@
 #   （2026-10-05 S10：loadervar-stuck name= value= = EFI 变量删不掉）。前端 session.notes 收集、DonePage 按代码说。
 #
 
-# ★ 值里不会有空格：自由文本字段（分区名、卷标、磁盘型号、SSID）一律经
+# 值里不会有空格：自由文本字段（分区名、卷标、磁盘型号、SSID）一律经
 #   gk3__enc 做百分号编码（% → %25，空格 → %20，制表符 → %09）。
 #   原因：Windows 建的分区 PARTLABEL 全是 "Basic data partition"
-#   （docs/hw-inventory.md 第 8 节），而 PART 记录里 name= 和 fslabel=
+#   （见 docs/dev/hardware.md），而 PART 记录里 name= 和 fslabel=
 #   两个自由文本字段都夹在中间 —— "最后一个键吃到行尾"救不了两个。
 #   ⇒ 解析规则就一条：按空格切，每个值再做 %-解码。
 #
@@ -65,20 +65,19 @@ GK3_ESP_REINSTALL_NEED_MIB=16
 # OTA postinstall 的门槛：ESP 空闲 + 目标槽目录里将被覆盖的旧文件 > 56 MiB
 # （device/huawei/gaokun3/bin/gaokun3-ota-postinstall.sh:93-96）。装完之后要还能 OTA
 GK3_ESP_OTA_NEED_KIB=57344
-# ★ 双系统（ESP 上有 EFI/Microsoft/Boot/bootmgfw.efi）共用 ESP 的余量（docs/boot-entry-design.md §4.9.8、U17）：
+# 双系统（ESP 上有 EFI/Microsoft/Boot/bootmgfw.efi）共用 ESP 的余量（见 tools/gk3boot/README.md）：
 #   写完、并扣掉下一次 OTA 的暂时空间（一个槽的 Image + ramdisk + dtb，再加一版统一启动入口）之后，
-#   还要给 Windows 和固件留 ≥ 32 MiB —— 功能更新要系统分区空闲 15 MB、质量更新 13 MB（设计稿引的微软 KB 3086249），
-#   固件胶囊也暂存在 ESP 的 EFI/UpdateCapsule。postinstall / gk3-esp-sync 要用同一个数（设计稿：三处一致）。
+#   还要给 Windows 和固件留 ≥ 32 MiB —— 功能更新要系统分区空闲 15 MB、质量更新 13 MB（微软 KB 3086249），
+#   固件胶囊也暂存在 ESP 的 EFI/UpdateCapsule。postinstall / gk3-esp-sync 要用同一个数。
 GK3_ESP_WIN_RESERVE_KIB=32768
-# 一版统一启动入口（EFI/gk3boot/<ver>/ 下 gk3boot.efi + fastboot.img）的估计，设计稿 §4.9.8 那张表的"≤5"
+# 一版统一启动入口（EFI/gk3boot/<ver>/ 下 gk3boot.efi + fastboot.img）的估计
 GK3_ESP_GK3BOOT_KIB=5120
-# 比这小的 ESP（用户自己重装 Windows 得到的 100 MiB）在 1.0 里明确不装（U17；1.x 的 XBOOTLDR 方案才放得下）。
+# 比这小的 ESP（用户自己重装 Windows 得到的 100 MiB）在 1.0 里明确不装。
 # 200：出厂 300 MiB 与 Windows 在 4Kn 盘上建的 260 MiB 都过，100 MiB 那一档不过
 GK3_ESP_MIN_SIZE_MIB=200
-# loader.conf 的菜单等待（秒）。纯 Android 按 U3：观察期保持 15（D19：要等"不接键盘盖也能操作菜单"确认之后
-#   才降到 3 / menu-hidden，docs/v1.0-plan.md:341，至今未确认）；双系统按 U13：固定显示菜单 5 秒，不写 menu-hidden
-#   （平板形态下切 Windows 主要靠这个菜单）。OTA postinstall 只把【这里原来写的 15】改成 5，用户改过的不动
-GK3_LOADER_TIMEOUT=15
+# loader.conf 的菜单等待（秒）。纯 Android 与双系统统一显示菜单 5 秒，不写 menu-hidden。
+#   OTA postinstall 只把【早先版本写的 15】改成 5，用户改过的不动
+GK3_LOADER_TIMEOUT=5
 GK3_LOADER_TIMEOUT_DUAL=5
 # systemd-boot 的厂商 GUID（refs/systemd-v257/src/boot/efivars.h:12，与 scripts/boot-oneshot.sh、
 # overlay-common/usr/bin/gk3-boot-android 相同）。LoaderEntryDefault / LoaderEntryOneShot 都在它下面
@@ -177,17 +176,17 @@ gk3_probe() {
     return $rc
 }
 
-# ── 分区表是什么、读不读得出来（docs/installer-rust-design.md §3.2 的 S1 / S2，2026-10-06 修）─────────
+# ── 分区表是什么、读不读得出来（见 docs/dev/installer-rust-design.md）─────────
 # gk3__read_table <盘>：跑一次 sgdisk -p，结论放进全局变量（不用 $(…)：调用方还要用 sgdisk 的输出）——
 #   GK3__PT     = gpt | mbr | unreadable | unknown（没有 sgdisk）
 #   GK3__PT_P   = sgdisk -p 的 stdout
 #   GK3__PT_WHY = unreadable 的原因（给人看的，只进 `!!`）
-# 判据（gdisk 1.0.10 / util-linux 2.41.5，2026-10-06 在 test-env 容器里对各种盘实录，原文见设计稿 §3.2）：
-#   ★ unreadable：sgdisk 退出码非零（打不开：rc=2 "Problem opening … for reading!"）；或者 stderr 上有读错误
+# 判据（gdisk 1.0.10 / util-linux 2.41.5，在 test-env 容器里对各种盘实录）：
+#   unreadable：sgdisk 退出码非零（打不开：rc=2 "Problem opening … for reading!"）；或者 stderr 上有读错误
 #     （"Warning! Read error 5; strange behavior now likely!" / "Error 5 reading partition table for CRC check!"）；
 #     或者 stdout 里没有 "First usable sector is N, last usable sector is M"。
-#     ⚠️★ 整块盘读都 EIO 时（dm-error 实测）sgdisk 的退出码是【0】，stdout 是一张 "Creating new GPT entries in memory."
-#       的空表 —— 只看退出码 / 只看 stdout 都会把它当成一块空盘（S1 原来的样子：整块盘报成空闲区）。读错误只在 stderr 上。
+#     整块盘读都 EIO 时（dm-error 实测）sgdisk 的退出码是【0】，stdout 是一张 "Creating new GPT entries in memory."
+#       的空表 —— 只看退出码 / 只看 stdout 都会把它当成一块空盘。读错误只在 stderr 上。
 #     只在 stderr 里找读错误：stdout 里有分区名，名字叫 "read error" 的分区不该把整块盘判成读不出。
 #   ★ mbr：blkid -p 说 PTTYPE=dos，或者 sgdisk 在行首说 "Found invalid GPT and valid MBR; converting MBR to GPT format"
 #     （这句在 stdout 上）。原来的判据找 "MBR only" —— gdisk 1.0.10 从来不这么说，于是 MBR 检查从不触发（S2）。
@@ -339,11 +338,11 @@ gk3_partpath() {
 #     前端照着提示 `apt install <pkgs>`（v1.0 计划 INST-16：原先的提示是手抄的一行包名，漏了 partprobe 所在的 parted）
 # ok=no 的项前端必须拦住；unknown 只警告 —— 读不到 ≠ 不合格（例如内核没开 DMIID）。
 #
-# ★ 型号 / BIOS 的读取点：/sys/class/dmi/id/{product_name,bios_version}
+# 型号 / BIOS 的读取点：/sys/class/dmi/id/{product_name,bios_version}
 #   （drivers/firmware/dmi-id.c:42-47，要 CONFIG_DMIID，Kconfig 默认 y），
 #   读不到时退回内核启动日志里那行 "Hardware name: HUAWEI GK-W7X/GK-W7X-PCB, BIOS 2.16 …"
-#   （本机实测原文见 docs/hw-inventory.md:33）。
-# ★ BIOS【不限制】（2026-09-25 用户：已有人验证过，不依赖 BIOS 版本）。原先只认 2.16、拒绝 2.17，
+#   （本机实测原文见 docs/dev/hardware.md）。
+# BIOS【不限制】（已有人验证过，不依赖 BIOS 版本）。原先只认 2.16、拒绝 2.17，
 #   理由几经改写（最早的"两版触摸 SPI 总线与 GPIO 编号不同"比错了表，#120 §4）。现在只报版本号，
 #   永远 ok=yes —— 出问题时 bug 报告里要有它，但它不再是装不装的条件。
 #   型号仍然拦：GK3_SKIP_MODEL_CHECK=1 放行（gaokun2 是另一台机器、另一套 EC 协议，别装）。
@@ -420,8 +419,8 @@ gk3__tool_pkg() {
 #   CHECK id=power ok=yes|no|unknown value=<电量%> ac=yes|no min=<门槛>
 #   名字取自本机的 EC 驱动：电池 gaokun-ec-battery、适配器 gaokun-ec-adapter（POWER_SUPPLY_TYPE_USB，属性 online）——
 #   refs/gaokun-buildbot/drivers/gaokun-ec/huawei-gaokun-battery.c:435、:174-175、:155-156；Android 下的实机路径
-#   docs/hw-inventory.md:664、scripts/perf/standby-sampler.sh:30-31。没有这两个名字就按 type 找（驱动改名 / 别的机器）。
-#   找不到电池 ⇒ ok=unknown（不拦）。⬜ live 镜像的内核里这个驱动在不在、名字是不是这两个，没在 live 里实测过。
+#   见 docs/dev/hardware.md、scripts/perf/standby-sampler.sh:30-31。没有这两个名字就按 type 找（驱动改名 / 别的机器）。
+#   找不到电池 ⇒ ok=unknown（不拦）。live 镜像的内核里这个驱动在不在、名字是不是这两个，尚未在 live 里实测。
 gk3__power_check() {
     local ps=${GK3_POWER_SUPPLY_DIR:-/sys/class/power_supply} min=${GK3_POWER_MIN_PCT:-15}
     local bat="" ac=no cap="" d t
@@ -731,7 +730,7 @@ gk3__sdboot() {
     gk3__find_file systemd-bootaa64.efi /usr/share/gaokun3 "${1:-}" /usr/lib/systemd/boot/efi
 }
 
-# gk3-misc（tools/gk3boot/misc/gk3-misc.c）：安装器用它的 init 子命令初始化 misc（S10，docs/boot-entry-design.md §4.7）。
+# gk3-misc（tools/gk3boot/misc/gk3-misc.c）：安装器用它的 init 子命令初始化 misc（见 tools/gk3boot/README.md）。
 # 找的顺序：GK3_MISC_TOOL → 与本库同目录（live 镜像的 /usr/share/gaokun3/gk3-misc，build-rootfs.sh 静态编进去的）→ PATH →
 #   仓库 checkout（命令行版从 scripts/live/ source 本库）里就地用 cc 编一份到 $GK3_RUNDIR/bin/（源文件比它新就重编）。
 # ⚠️ 不用 Python 另写一份：BCAB 与 GK3 记录的布局只在 libgk3core 里有一份（入口、HAL、执行端、这里都用它）
@@ -754,7 +753,7 @@ gk3__misc_tool() {
     echo "$out"
 }
 
-# 同一块盘上的 Windows 卷是什么状态（双系统写 ESP 之前看，U16 / U18；docs/boot-entry-design.md §4.9.7、§4.9.10）。
+# 同一块盘上的 Windows 卷是什么状态（双系统写 ESP 之前看，见 tools/gk3boot/README.md）。
 #   $1=ESP 分区节点 → 一行 `bitlocker=yes|no hibernated=yes|no|unknown hib_part=<分区>`
 # hibernated：任一 NTFS 卷的 hiberfil.sys 以 hibr/HIBR 开头（gk3__ntfs_hibernated，ntfscat 只读）⇒ yes；
 #   没有 ntfscat、或者盘上有 BitLocker 卷（里面的 NTFS 这边读不到）而别的 NTFS 都没在休眠 ⇒ unknown；否则 no。
@@ -779,8 +778,8 @@ gk3__win_state() {
 # ── systemd-boot 的 EFI 变量（LoaderEntryDefault / LoaderEntryOneShot）─────────────────────────
 # 文件格式同 overlay-common/usr/bin/gk3-boot-android：4 字节属性 + UTF-16LE + 双字节 NUL；覆盖 / 删之前先 chattr -i。
 # GK3_EFIVARS=<目录>：测试时当作 efivarfs（与 gk3-boot-android 同一个开关）。
-# ⓘ live 的内核 cmdline 带 efi=noruntime，但变量照样能读写：uefisecapp（docs/fastboot-design.md:71，#42）；
-#   ⬜ 在真机的 live 里删变量没实测过（gk3-boot-android 写 OneShot 同样待核，TODO V16）
+# live 的内核 cmdline 带 efi=noruntime，但变量照样能读写：uefisecapp（见 tools/gk3boot/README.md）；
+#   在真机的 live 里删变量尚未实测（gk3-boot-android 写 OneShot 同样待核）
 gk3__efivars() {   # efivarfs 的目录（没挂就挂一次）；不可用 ⇒ 返回 1
     local d=${GK3_EFIVARS:-/sys/firmware/efi/efivars}
     [ -n "${GK3_EFIVARS:-}" ] && { [ -d "$d" ] && echo "$d"; return; }
@@ -1177,22 +1176,22 @@ EOF
     local misc_kib; misc_kib=$(( $(blockdev --getsize64 "$p_misc" 2>/dev/null || echo $(( GK3_MISC_MIB << 20 ))) / 1024 ))
     # conv=nocreat：节点要是在这之前被 udev 删了又没建回来，dd 会在 /dev 里新建一个普通文件、写成功、盘上什么也没有（审查 #4）
     gk3__run dd if=/dev/zero of="$p_misc" bs=1024 count="$misc_kib" conv=fsync,nocreat status=none || return 1
-    # ★ 1.0（S10，docs/boot-entry-design.md §4.7 "misc"）：清零之后用 gk3-misc init 写一份合法的初始状态，不再留全零：
+    # 清零之后用 gk3-misc init 写一份合法的初始状态，不再留全零（见 tools/gk3boot/README.md）：
     #   * bootloader_control：_a priority 15 / tries 6 / 未成功，_b priority 0 / tries 0。原先全零 ⇒ libboot_control 读到坏 CRC
     #     重建成"每槽 7/7、当前槽已成功"（libboot_control.cpp:140-180）—— _b 也成了可启动，而新装机器的 _b 没有 system、
-    #     LP 里那一槽是陈旧元数据（C′ §2.6）。统一启动入口按 BCAB 选槽，这一槽必须是 0/0。
+    #     LP 里那一槽是陈旧元数据。统一启动入口按 BCAB 选槽，这一槽必须是 0/0。
     #   * GK3 记录（misc+8 KiB）：带迁移标记（BCB 刚清零 = 没有存量请求）⇒ 入口第一次在动作模式下运行时不把之后 Android 写的
-    #     BCB（例如第一次开机就恢复出厂）当成存量清掉（§4.10）。HAL 与入口见到的都是一份有效记录。
-    #   * 双系统的默认系统（U12）：写成 set_default 请求，由入口第一次在动作模式下运行时去写 / 删 LoaderEntryDefault
+    #     BCB（例如第一次开机就恢复出厂）当成存量清掉。HAL 与入口见到的都是一份有效记录。
+    #   * 双系统的默认系统：写成 set_default 请求，由入口第一次在动作模式下运行时去写 / 删 LoaderEntryDefault
     #     （core/src/dual.c 的 gk3_dual_plan_default；条目 id 的选法 = 入口的 win_entry_id：有 gk3-windows.conf 用它，否则 auto-windows）。
     #     【不】在这里直接写 LoaderEntryDefault=auto-windows，因为：
-    #       ① 装完第一次重启就会进 Windows —— 而第一次开机要进 Android 走开机向导（设计稿 §8.2 #60）；
+    #       ① 装完第一次重启就会进 Windows —— 而第一次开机要进 Android 走开机向导；
     #       ② 第一次开机走的是直连条目（入口要等这一次开机完成时由 HAL 部署，见下面"统一启动入口"），入口没运行就没有
-    #          "预置 OneShot"，于是 Android 里的任何重启都会落进 Windows（§4.9.3"预置 OneShot"）；
+    #          "预置 OneShot"，于是 Android 里的任何重启都会落进 Windows；
     #       ③ 装的要是一个不带入口的旧版本（版本列表里能选），变量就再也没人管，同样每次重启都进 Windows。
     #     走请求这条路：第二次开机（经入口）时生效，此后与 Parts 里改默认系统完全相同；最坏情况是"默认没改成"，不是"进错系统"。
-    #   ⚠️ 统一启动入口本身【不】在这里部署（条目与 EFI/gk3boot/ 不写）：入口二进制在 vendor 里（/vendor/boot/gk3boot/），
-    #     装好的系统在第一次开机完成时由 boot_control HAL 按 persist.vendor.gaokun3.gk3boot 部署它自己那一版（§12）——
+    #   统一启动入口本身【不】在这里部署（条目与 EFI/gk3boot/ 不写）：入口二进制在 vendor 里（/vendor/boot/gk3boot/），
+    #     装好的系统在第一次开机完成时由 boot_control HAL 按 persist.vendor.gaokun3.gk3boot 部署它自己那一版 ——
     #     安装器另带一份就是第二份拷贝，版本会和系统对不上；第一次开机本来也没有要它保护的东西（_b 不可启动、没有 OTA）。
     local misc_def=none
     [ "$esp_win" = yes ] && misc_def=$defos
@@ -1228,8 +1227,8 @@ EOF
     #    （boot_a/boot_b 有内容是为了让 update_engine 的 A/B 流程完整。）
     gk3_prog 80 bootloader
     local mid=$esp_mid
-    # ⚠️ 挂载点用 mktemp，不用 /mnt/esp —— CLAUDE.md 操作禁忌 4：共享的挂载点
-    #    会被另一个 shell 里"顺手看一眼"的人 umount 掉，于是这一步静默失败。
+    # 挂载点用 mktemp，不用 /mnt/esp —— 共享的挂载点
+    # 会被另一个 shell 里"顺手看一眼"的人 umount 掉，于是这一步静默失败。
     local mnt; mnt=$(mktemp -d)
     gk3__run mount -t vfat "$p_esp" "$mnt" || return 1
     # 整盘清空：ESP 是刚格式化的，没有现成目录 → 用 machine-id
@@ -1344,8 +1343,8 @@ ENTRY
         #    但 boot_control HAL 在 Android 第一次标记启动成功时就会把 default
         #    改写成 *-android-<槽>.conf（EspSlot.cpp:120-172）—— 那个选择只活到
         #    第一次开机，代价却是每个新用户第一次重启落进一个他不认识的系统。）
-        # ★ 菜单等待：双系统（ESP 上有 Windows 的启动管理器）5 秒、不写 menu-hidden（U13）；纯 Android 15 秒（U3 / D19）。
-        #   OTA postinstall 认的就是这两个数：只把【我们写的】15 在双系统机器上改成 5，用户改过的不碰
+        # ★ 菜单等待：纯 Android 与双系统统一 5 秒、不写 menu-hidden。
+        #   OTA postinstall 只把【早先版本写的】15 改成 5，用户改过的不碰
         local tmo=$GK3_LOADER_TIMEOUT
         [ -f "$mnt/EFI/Microsoft/Boot/bootmgfw.efi" ] && tmo=$GK3_LOADER_TIMEOUT_DUAL
         cat > "$mnt/loader/loader.conf" <<LOADER || { esp_fail "loader.conf"; return 1; }
@@ -1359,7 +1358,7 @@ LOADER
             cp "$r_initrd" "$mnt/$mid/rescue/initramfs.img" || { esp_fail "救援系统的 initramfs"; return 1; }
             # ⚠️ 标题用 ASCII：开机菜单由 UEFI 固件的字体画，一般不含中文（原先的"救援系统（Alpine，
             #    全内存）"从没在本机菜单上看过，取稳妥的一侧）。
-            # 救援系统与 Android 共用内核与 dtb（docs/stage7-live-installer.md §2.3），
+            # 救援系统与 Android 共用内核与 dtb（见 scripts/live/README.md），
             # 只多一个 initramfs；cmdline 从 Android 那份派生（见 gk3__rescue_cmdline）
             # ★ 两条：一条借 slot_a 的内核、一条借 slot_b 的（v1.0 计划 INST-17）。原先只有 slot_a 那条 ——
             #   OTA 往 slot_a 写进一个起不来的内核，救援也跟着起不来，而那正是要用救援的时候。第二条只是一个
@@ -1498,7 +1497,7 @@ gk3__find_file() {
 #      ★ v1.0 计划 INST-6：原先只按 rescue.squashfs 这个名字找，从 Windows 开始的安装（免 U 盘）永远装不上救援系统。
 #        不在 Windows 安装包里另放一份（又是约 200 MiB 要下载、要拷进 GK3LIVE），就用正在跑的这一份。
 #   ⚠️ 3、4 是 live 镜像本身（带图形安装器、开机 tty1 就起它），不是 rescue profile（只有 ssh 与工具）——
-#      发布版本来就不带 rescue profile（release-installer.sh 的注释：它在真机上一次没起过），所以这是常态，不是兜底。
+#      发布版本来就不带 rescue profile（release-installer.sh 的注释：它在真机上一次没起过），所以这是常态。
 #   装进救援分区时一律改名叫 rescue.squashfs（救援条目的 gk3.squash= 指的是它，见 gk3__rescue_cmdline）。
 gk3__find_rescue_squashfs() {
     gk3__find_file rescue.squashfs "${1:-}" /media/gk3/gaokun3/install-rescue /media/gk3/gaokun3 \
@@ -1514,7 +1513,7 @@ gk3__write_super() {
     local us="$GK3_LIBDIR/gk3-unsparse.py"
     case "$src" in
         *.zst)
-            # ⚠️ 两段的退出码都要看（CLAUDE.md 运维坑 1：只看管道尾巴会漏）。
+            # 两段的退出码都要看（只看管道尾巴会漏）。
             #    下载断在一半的 .zst → zstd 报错且提前 EOF → unsparse 也报错；
             #    反过来 unsparse 先死时 zstd 会吃 SIGPIPE。
             #    --long=31 只是放宽解压时允许的窗口上限，不多占内存（release.sh 用 -19 --long 压）。
@@ -1535,7 +1534,7 @@ gk3__write_super() {
     # ★ 判格式不判校验和：偏移 4096 处必须是 LP geometry 魔数。
     #   ⚠️ 命令行版一直有这道检查（install-gaokun3.sh 原 :131-132），这个库里漏了。
     #      dd 了 sparse 镜像的 super "看着字节都对"却没有 LP 元数据，
-    #      Android 首阶段挂载失败后主动 reboot()，不留任何日志（docs/stage2-findings.md §1）。
+    #      Android 首阶段挂载失败后主动 reboot()，不留任何日志（见 docs/dev/android-bringup.md）。
     local lp; lp=$(dd if="$dst" bs=1 skip=4096 count=4 2>/dev/null | od -An -tx1 | tr -d ' \n')
     if [ "$lp" != "67446c61" ]; then
         gk3_fail super-bad-lp -- "super 偏移 4096 处不是 LP geometry 魔数（读到 '${lp}'）—— 写进去的不是一份能用的 super"
@@ -1908,7 +1907,7 @@ gk3_wifi_scan() {
 #   转义搞坏，中文 / GBK 编码的 SSID 也一样。
 # ★ 连上之后把这份配置写到 $GK3_RUNDIR/wpa_supplicant.conf：gk3_apply 会把它
 #   装进救援分区，于是装好的救援系统一开机就能连上同一个网 —— 否则就是
-#   "救援起来了但网没起来 = 一台连不上的机器"（docs/stage7-live-installer.md:200-202）。
+#   "救援起来了但网没起来 = 一台连不上的机器"（见 scripts/live/README.md）。
 gk3_wifi_connect() {
     local ssid=$1 psk=${2:-} hidden="" sae="" ssid_cfg show ssid_show="" f
     shift 2 2>/dev/null || shift $#
@@ -2134,7 +2133,7 @@ gk3_net_fetch() {
             --speed-limit 10240 --speed-time "${GK3_NET_SPEED_TIME:-60}" -w '%{http_code}' \
             ${1:+--continue-at "$1"} -o "$dst" "$url" 2>&1 >"$cf" \
             | gk3__curl_meter "$lo" "$span" "$name" >&2
-        # ⚠️★ 取 curl 自己的退出码，不看管道尾巴（CLAUDE.md 运维坑 1）。原先只判
+        # 取 curl 自己的退出码，不看管道尾巴。原先只判
         #   [ -f "$dst" ] —— 断在 77% 的文件也"存在"，于是报下载完成。
         r=${PIPESTATUS[0]}
         http=$(cat "$cf" 2>/dev/null); [ "$cf" = /dev/null ] || rm -f "$cf"
@@ -2254,11 +2253,11 @@ gk3_release_info() {
 #       loader_default=<值>|none|unknown boot_entries=<N>|unknown
 #   windows=yes：EFI/Microsoft/Boot/bootmgfw.efi 在 —— 装完之后 systemd-boot 会把它列进菜单
 #   gaokun3=yes：上面已经有我们的启动项（重装 / 已经装过）
-#   ── 2026-10-05（S10 / S15，docs/boot-entry-design.md §4.7 的"gk3_esp_info 增报"）──
-#   small=yes：分区小于 GK3_ESP_MIN_SIZE_MIB（100 MiB 那种），双系统明确不装（U17）
+#   ── 双系统与统一启动入口字段（见 tools/gk3boot/README.md）──
+#   small=yes：分区小于 GK3_ESP_MIN_SIZE_MIB（100 MiB 那种），双系统明确不装
 #   bootaa64：EFI/BOOT/BOOTAA64.EFI 与 live 自带的 systemd-boot 比 —— none 没有 / sdboot 同一份字节 / other 不同
-#     （other + bitlocker=yes ⇒ 安装会换掉它，界面要用户确认拿到恢复密钥，U16）
-#   bitlocker / hibernated：同一块盘上的 Windows 卷（gk3__win_state）；hibernated=yes ⇒ 不许写 ESP（U18）
+#     （other + bitlocker=yes ⇒ 安装会换掉它，界面要用户确认拿到恢复密钥）
+#   bitlocker / hibernated：同一块盘上的 Windows 卷（gk3__win_state）；hibernated=yes ⇒ 不许写 ESP
 #   entry*：统一启动入口在这个 ESP 上的样子（只报告；重新安装会把它们删掉，由装好的系统自己部署，见 gk3_apply）
 #     entry = 现役 gk3boot-android-* 条目里的版本；entry_state = 各条目去掉前缀 / .conf 后的名字（a+3 = 槽 a、还剩 3 次计数）
 #   loader_default：EFI 变量 LoaderEntryDefault（none = 没设 = 默认 Android；unknown = efivarfs 读不到）

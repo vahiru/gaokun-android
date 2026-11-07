@@ -10,13 +10,13 @@
 #   live    rescue + 图形安装器（Flutter + cage）。做成 U 盘。
 #
 # ⚠️ 必须 root（mmdebstrap 的 root 模式、chroot）、必须在 arm64 上跑 —— Mac（Apple Silicon）上
-#    的 arm64 容器里就是原生的，不需要 qemu（docs/stage7-flutter-debian.md）。
+#    的 arm64 容器里就是原生的，不需要 qemu（见 scripts/live/README.md）。
 # ⚠️ 根文件系统造在容器自己的文件系统里，不要造在从 macOS 挂进来的目录上：
 #    virtiofs 不保证属主、setuid 位和设备节点。只有最终产物拷出去。
 #
-# ★ 2026-09-25 从 Alpine 换成 Debian（Flutter 引擎只有 glibc 版）。Alpine 版的每一条断言
-#   都有一次上机事故在后面，这里全部保留、换成 Debian 的查法 —— 见"体检"一节。
-# 设计取舍见 docs/stage7-flutter-debian.md 与 docs/stage7-live-installer.md。
+# 2026-09-25 从 Alpine 换成 Debian（Flutter 引擎只有 glibc 版）。Alpine 版的每一条断言
+# 都有一次上机事故在后面，这里全部保留、换成 Debian 的查法 —— 见"体检"一节。
+# 设计取舍见 scripts/live/README.md 与 live/installer-flutter/README.md。
 set -euo pipefail
 
 # ---- 钉死的上游 ----------------------------------------------------------
@@ -135,8 +135,8 @@ ch systemctl enable $UNITS >/dev/null 2>&1 || true
 # 污染"失败的单元"与 gk3-diag 的报告（scripts/live/test-boot-container.sh）
 ch systemctl mask apt-daily.timer apt-daily-upgrade.timer e2scrub_all.timer \
     nvmf-autoconnect.service nvmefc-boot-connections.service >/dev/null 2>&1 || true
-# ★ 不许睡（v1.0 计划 B5 / GUI-2）：live 里 a600000.usb 停在 role=device、没有 usbrole 守卫，挂起会整板复位
-#   （docs/stage4-findings.md #52）—— 赶上缩 NTFS 或写 super 就是一块坏盘。logind 的按键与合盖已经在
+# 不许睡：live 里 a600000.usb 停在 role=device、没有 usbrole 守卫，挂起会整板复位
+#   （见 docs/dev/deep-sleep.md）—— 赶上缩 NTFS 或写 super 就是一块坏盘。logind 的按键与合盖已经在
 #   overlay-common 的 logind.conf.d 里关了；这里把"睡"这条路本身堵上，谁来要都不行。体检逐个核对
 SLEEP_TARGETS="sleep.target suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target"
 # shellcheck disable=SC2086
@@ -266,8 +266,8 @@ if [ "$PROFILE" = live ]; then
     if in_ch 'ldd /usr/lib/gaokun3/installer/gk3_installer /usr/lib/gaokun3/installer/lib/*.so | grep -q "not found"'; then
         echo "   ✗ 安装器有解析不了的动态库："; ch sh -c 'ldd /usr/lib/gaokun3/installer/gk3_installer /usr/lib/gaokun3/installer/lib/*.so | grep "not found"' | sort -u | sed 's/^/       /'; BAD=1
     else ok "安装器的动态库全部可解析（ldd 无 not found）"; fi
-    # ★ 中文字体：主题里是【按名字】回退的（lib/ui/theme.dart 的 fontFamilyFallback）——
-    #   Flutter 在 Linux 上不按字符回退系统字体（容器里实测中文全是方块，stage7-flutter-debian.md §5.1）
+    # 中文字体：主题里是【按名字】回退的（lib/ui/theme.dart 的 fontFamilyFallback）——
+    #   Flutter 在 Linux 上不按字符回退系统字体（容器里实测中文全是方块，见 live/installer-flutter/README.md）
     if in_ch 'fc-list : family | grep -q "WenQuanYi Micro Hei"'; then ok "字体 WenQuanYi Micro Hei（主题按这个名字回退）"
     else echo "   ✗ 没有 WenQuanYi Micro Hei —— 界面上的中文会全是方块"; BAD=1; fi
     # ★ freedreno：M0 的头号风险。至少要保证驱动在镜像里
@@ -296,8 +296,8 @@ rm -rf "$ROOTFS"/var/lib/apt/lists/* "$ROOTFS"/var/cache/apt/* "$ROOTFS"/var/log
 # initramfs 要的静态 busybox 与 WiFi 固件、U 盘要的 systemd-boot：在删 rootfs 之前先抠出来
 cp "$ROOTFS/usr/bin/busybox" "$OUT/busybox.static"
 cp "$ROOTFS/usr/lib/systemd/boot/efi/systemd-bootaa64.efi" "$OUT/systemd-bootaa64.efi"
-# ★★ WiFi 固件进 initramfs：内建 ath11k 在 initramfs 阶段（t≈1.19s，远早于 switch_root）就 probe，
-#   那时 squashfs 里的固件还够不着（docs/stage7-live-installer.md M0 一节，dmesg 为证）。
+# WiFi 固件进 initramfs：内建 ath11k 在 initramfs 阶段（t≈1.19s，远早于 switch_root）就 probe，
+#   那时 squashfs 里的固件还够不着（见 scripts/live/README.md）。
 #   只带本机那颗芯片（WCN6855：hw2.0 与 hw2.1 都带，驱动按 board id 选）。
 FW_CHIPS=${FW_CHIPS:-ath11k/WCN6855}
 rm -rf "$OUT/fw"; mkdir -p "$OUT/fw/lib/firmware"

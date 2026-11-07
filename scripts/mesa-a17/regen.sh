@@ -10,7 +10,7 @@
 #     --log FILE            生成器日志写到这里（默认 ${TMPDIR:-/tmp}/mesa-a17-regen.<pid>.log）
 #   退出码：0 = 生成 + 自检全过；1 = 某一步失败（看输出最后一行）；2 = 参数 / 环境不对。
 #
-# 步骤（详见 docs/mesa-a17.md）：
+# 步骤（详见 docs/dev/mesa-a17.md）：
 #   1. 前提检查：VERSION 必须是 26.1.*；python3 >= 3.11（生成器要 tomllib）
 #   2. 准备生成器：gurchetansingh/mesonbuild 的 meson2hermetic 分支，钉 SHA（分支会强推）
 #   3. 核对 gfxstream 手写兼容块：树里根 Android.bp 末尾那段必须与
@@ -189,4 +189,4 @@ if [ -n "$EXPORT" ]; then
   rm -f "$list"
   echo "▶ 已打包 $EXPORT（$(wc -c < "$EXPORT") 字节）"
 fi
-echo "✓ 完成。下一步（构建机，D16 以上）：m vulkan.freedreno —— 见 docs/mesa-a17.md「构建验证」"
+echo "✓ 完成。下一步（构建机）：m vulkan.freedreno —— 见 docs/dev/mesa-a17.md「构建验证」"

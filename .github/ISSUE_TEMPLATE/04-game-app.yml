@@ -1,135 +1,66 @@
-name: 🎮 Game & app compatibility / 游戏与 App 兼容
-description: A game or app runs, crashes, renders wrong, or refuses to start. Stable arm64 gaming is the point of this port. / 某个游戏或 App 能跑、会崩、画面不对、或者拒绝启动。这个移植的目标就是稳定跑 arm64 手游。
-title: "[Compat] "
+name: Game & app compatibility / 游戏与应用兼容性
+description: A game or app crashes, displays incorrectly, runs slowly or refuses to start. / 某个游戏或应用崩溃、显示异常、运行缓慢或拒绝启动。
 labels: ["game-report"]
 body:
   - type: markdown
     attributes:
       value: |
-        This is arm64 native — no translation layer — on Mesa `turnip` (hardware Vulkan on the Adreno 690). GLES titles go through ANGLE on top of turnip, so a GL-only failure is a different bug from a Vulkan one; naming the renderer helps a lot.
-        本机是 arm64 原生，没有转译层，图形走 Mesa `turnip`（Adreno 690 硬件 Vulkan）。GLES 游戏是 ANGLE 叠在 turnip 上，所以"只有 GL 路径炸"和"Vulkan 炸"是两种 bug —— 写清渲染后端很有帮助。
-
-        Known, and worth reporting anyway with the exact message — but not a bug we can fix in the ROM:
-        已知情况（照样欢迎报，请附原话），但不是 ROM 里能修的 bug：
-        * The device is **not Play Protect certified** until you register it yourself (see the install guide), and the ROM **ships root (ReSukiSU, a KernelSU fork)**. Banking, payment and some games with anti-cheat or integrity checks may refuse to run. / 设备在你自己登记之前**未经 Play 保护机制认证**（见安装指南），ROM **自带 root（ReSukiSU，KernelSU 的分支）**。银行、支付和部分带反作弊 / 完整性校验的游戏可能拒绝运行。
-        * Some titles pin their render buffer by a **device allowlist**. Genshin Impact renders at 1080×1728 here regardless of the logical resolution — that is the game's device tier, not a limit of this port. Spoofing a model to raise it carries account risk and is deliberately not done. / 有些游戏按**设备白名单**给渲染档位。原神在本机被钉在 1080×1728，改逻辑分辨率也不动 —— 那是游戏给的档位，不是我们的技术限制。伪装机型有账号风险，故意没做。
+        Apps that check for root, an unlocked boot chain or Play Integrity may refuse to run on this system; see the [known limitations](https://github.com/vahiru/gaokun-android/blob/main/docs/known-limitations.md). Reports are still welcome, as they help others know what to expect.
+        检测root、未上锁启动链或Play Integrity的应用，在本系统上可能拒绝运行，详见[已知限制](https://github.com/vahiru/gaokun-android/blob/main/docs/known-limitations.zh-CN.md)。这类情况也欢迎反馈，可以帮其他用户了解哪些应用能用。
 
   - type: input
     id: app
     attributes:
-      label: Game or app, and its version / 游戏或 App 及版本
-      placeholder: "Genshin Impact 5.x  /  QQ 9.x"
+      label: Game or app, and its version / 游戏或应用及其版本
+      placeholder: "Genshin Impact 5.2"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: result
+    attributes:
+      label: What happens / 情况
+      options:
+        - Runs well / 运行正常
+        - Display problems / 显示异常
+        - Runs too slowly / 运行太卡
+        - A feature does not work (login, camera, microphone, payment...) / 某项功能不可用（登录、相机、麦克风、支付等）
+        - Crashes while in use / 使用中崩溃
+        - Crashes at launch / 启动时崩溃
+        - Refuses to run (root or integrity check) / 拒绝运行（检测到root或完整性校验未通过）
+        - Cannot be installed / 无法安装
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: System version / 系统版本
+      description: The release you installed, or the output of `adb shell getprop ro.build.date.utc`. / 安装的版本，或`adb shell getprop ro.build.date.utc`的输出。
+      placeholder: "v1.0.0-rc.3"
     validations:
       required: true
 
   - type: dropdown
     id: source
     attributes:
-      label: Where you installed it from / 从哪装的
+      label: Installed from / 安装来源
       options:
         - Google Play / Google Play
-        - Official APK from the developer's site / 官网 APK
-        - A third-party store (TapTap, a phone maker's store…) / 第三方商店（TapTap、手机厂商商店等）
+        - The developer's website / 官方网站
+        - Another app store / 其他应用商店
         - Other / 其他
-    validations:
-      required: true
-
-  - type: dropdown
-    id: outcome
-    attributes:
-      label: Outcome / 结果
-      options:
-        - "Runs well / 流畅可用"
-        - "Runs, but with visual glitches / 能跑，但画面有问题"
-        - "Runs, but too slow to use / 能跑，但太卡"
-        - "Runs, but a feature does not work (camera, mic, login, payment…) / 能跑，但某个功能不行（相机、麦克风、登录、支付等）"
-        - "Crashes during use / 用着崩"
-        - "Crashes at launch / 启动就崩"
-        - "Refuses to run (integrity check, root detected, unsupported device) / 拒绝运行（完整性校验、检测到 root、不支持的设备）"
-        - "Will not install / 装不上"
-    validations:
-      required: true
-
-  - type: input
-    id: release
-    attributes:
-      label: Release / 发布版本
-      placeholder: "v0.7.1-alpha"
-    validations:
-      required: true
 
   - type: textarea
-    id: build
+    id: what
     attributes:
-      label: Build stamp and graphics driver / 构建戳与图形驱动
-      description: |
-        The build stamp (`ro.build.date.utc`) says exactly which build you are on; every release note lists it. Over adb:
-        构建戳（`ro.build.date.utc`）能精确确定你装的是哪一版，每份发版说明里都写着它。adb 下跑：
-        ```
-        getprop ro.build.date.utc; getprop ro.build.version.incremental; getprop ro.vendor.gaokun3.version; uname -a; getprop ro.hardware.vulkan
-        ```
-        ⚠️ If `ro.hardware.vulkan` says `pastel` you are on the software rasterizer fallback, and any performance figure is meaningless.
-        ⚠️ 如果 `ro.hardware.vulkan` 是 `pastel`，那你在软渲染兜底路径上，性能数字没有意义。
-        Without a computer, the *crDroid version* line in *Settings → About tablet* (looks like `v12.11-20261003`) will do. / 没电脑的话，写「设置 → 关于本机」里"crDroid 版本"那一行（形如 `v12.11-20261003`）。
-      render: shell
-    validations:
-      required: true
-
-  - type: dropdown
-    id: install-path
-    attributes:
-      label: How this build got onto the machine / 这个版本是怎么装上去的
-      multiple: true
-      options:
-        - Graphical installer / 图形安装器
-        - Command-line installer scripts/install-gaokun3.sh / 命令行安装脚本
-        - System update in Settings (OTA) / 设置里的系统更新（OTA）
-        - Local payload — scripts/install-ota-local.sh / 本地 payload 安装
-        - Self-built from source / 自己编的
-        - Other / unsure / 其他或不确定
-    validations:
-      required: true
-
-  - type: textarea
-    id: message
-    attributes:
-      label: What you see / 看到了什么
-      description: The exact error text or a screenshot. For "refuses to run", the app's own message matters most. / 报错原文或截图。"拒绝运行"类，App 自己给的提示最关键。
-
-  - type: input
-    id: settings
-    attributes:
-      label: In-game graphics settings (games) / 游戏内画质设置（游戏才填）
-      placeholder: "Highest preset, 60 fps cap, motion blur off"
-
-  - type: textarea
-    id: performance
-    attributes:
-      label: Performance (games) / 性能（游戏才填）
-      description: |
-        Frame rate as observed, plus whatever you can capture while it runs:
-        观测到的帧率，加上运行期间能抓到的东西：
-        ```
-        cat /sys/class/devfreq/*gpu/cur_freq
-        for z in /sys/class/thermal/thermal_zone*; do echo "$(cat $z/type) $(cat $z/temp)"; done
-        dumpsys gfxinfo <package>
-        ```
-      render: shell
+      label: Details / 详细情况
+      description: The error message if there was one, the in-game graphics settings, and the frame rate you saw. Screenshots or a short video help with display problems. / 如有报错请写下原文，以及游戏内的画质设置和看到的帧率。显示问题请附截图或短视频。
 
   - type: textarea
     id: logs
     attributes:
       label: Logs / 日志
       description: |
-        How to turn on USB debugging and collect logs is in the [FAQ](https://github.com/vahiru/gaokun-android/blob/main/docs/FAQ.md). For a crash, the tombstone is the single most valuable artifact:
-        怎么打开 USB 调试、怎么抓日志见 [FAQ](https://github.com/vahiru/gaokun-android/blob/main/docs/FAQ.md)。崩溃的话，tombstone 是最有价值的东西：
-        * the newest file in `/data/tombstones/` / `/data/tombstones/` 里最新那个
-        * `adb logcat -b all -d > logcat.txt` covering the crash / 覆盖崩溃时刻
-        * GPU-side trouble shows up as `a6xx_recover`, `GMU`, or SMMU fault lines in the kernel log (`adb shell su -c dmesg`) — a healthy machine has zero of all three / GPU 侧的毛病会在内核日志里表现为 `a6xx_recover`、`GMU`、SMMU fault —— 正常机器这三样都是 0
-      render: shell
-
-  - type: textarea
-    id: extra
-    attributes:
-      label: Anything else / 其他补充
-      description: Screenshots or a short video are genuinely useful for rendering glitches. / 画面问题请附截图或短视频，这类问题确实要看图。
+        For a crash, the newest file in `/data/tombstones/` and `adb logcat -b all -d` taken right after the crash help the most. See the [FAQ](https://github.com/vahiru/gaokun-android/blob/main/docs/FAQ.md) for how to collect them.
+        崩溃时，`/data/tombstones/`里最新的文件和崩溃后立即抓取的`adb logcat -b all -d`最有帮助，抓取方法见[常见问题](https://github.com/vahiru/gaokun-android/blob/main/docs/FAQ.zh-CN.md)。

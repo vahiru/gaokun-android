@@ -1,4 +1,4 @@
-# gk3_probe：一块 MBR 盘 + 一块读不出分区表的盘（docs/installer-rust-design.md §3.2 的 S1 / S2，2026-10-06 修）。
+# gk3_probe：一块 MBR 盘 + 一块读不出分区表的盘（见 docs/dev/installer-rust-design.md）。
 # 来源：2026-10-06 test-env 容器里 shell 版与 Rust 版对拍时实录的两块盘（逐字节相同），拼进 blank 场景的 U 盘那两行：
 #   MBR 盘 = sfdisk 'label: dos' + ',300M,ef' + ',4G,7'（0xEF 分区经 sgdisk 换算显示成 EFI System / os=esp）；
 #   读不出 = 假 sgdisk 照 dm-error 上实录的输出回答（退出码 0 + 空表 + stderr 的 "Read error 5"）。

@@ -8,7 +8,7 @@
  * 所以 HAL 各传感器的 readEventPayload 只读缓存，不碰 socket。
  *
  * 背景：本机没有 AP 侧传感器驱动，整套跑在 SLPI DSP 上，
- * 见 docs/stage4-findings.md #37 与 docs/sensors-ssc-protocol.md。
+ * 见 docs/dev/sensors-ssc-protocol.md。
  */
 #pragma once
 
@@ -41,9 +41,8 @@ class SscHub {
     Sample Light();
 
     // 框架 activate(true/false) 时由 Sensor::activate 调用。
-    // ★ 只记下"想要"，真正的 EnableContinuous / Disable 由读线程在【同一个
-    //   client】上做（线程模型见文件头）。没人要时 SSC 侧停用，SLPI 才能睡
-    //   （v1.0 计划 PWR-3 / LIVE-2 / HW-3：此前一被读过就 50 Hz 常开到重启）。
+    // 只记下"想要"，真正的 EnableContinuous / Disable 由读线程在同一个
+    // client 上做（线程模型见文件头）。没人要时 SSC 侧停用，SLPI 才能进入休眠。
     void SetAccelWanted(bool on);
     void SetGyroWanted(bool on);
     void SetLightWanted(bool on);
@@ -52,11 +51,10 @@ class SscHub {
     SscHub() = default;
     void EnsureStarted();
     void ReaderLoop();
-    // 请 init 把整条传感器链收拾一遍（etc/sscrecover.rc → bin/gaokun3-ssc-recover.sh：
-    // 停本 HAL → 重启 hexagonrpcd → 起本 HAL）。v1.0 DISP-14 / HW-1（B21）：会话坏了
-    // 不再在进程里重建（那正是 README 里警告的 churn），交给外面按 #121 §3 的办法重来。
+    // 请 init 把整条传感器链重启恢复一遍（etc/sscrecover.rc → bin/gaokun3-ssc-recover.sh：
+    // 停本 HAL → 重启 hexagonrpcd → 起本 HAL）。会话异常时不再在进程内重建，交由外部统一恢复。
     void RequestRecovery(const char* why);
-    // 缓存里的样本超过这么久没刷新就当作没有（B21：SLPI 崩了以后 HAL 不能一直报旧值）
+    // 缓存里的样本超过这么久没刷新就当作无效（SLPI 崩溃后 HAL 不能一直上报旧值）
     static Sample Fresh(const Sample& s, std::chrono::steady_clock::time_point at);
 
     std::once_flag started_;

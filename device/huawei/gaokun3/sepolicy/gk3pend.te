@@ -1,4 +1,4 @@
-# 手写笔（M-Pencil）守护进程 gk3pend（stylus/，说明见 docs/stylus.md）。
+# 手写笔（M-Pencil）守护进程 gk3pend（stylus/，说明见 docs/dev/stylus.md）。
 type gk3pend, domain;
 type gk3pend_exec, exec_type, vendor_file_type, file_type;
 init_daemon_domain(gk3pend)

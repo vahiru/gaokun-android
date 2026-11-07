@@ -1,6 +1,6 @@
-⚠️ 仅 A16：这是对旧生成器 meson_to_hermetic（mesa 25.3 树内自带）的修补汇总。
+仅 A16：这是对旧生成器 meson_to_hermetic（mesa 25.3 树内自带）的修补汇总。
 A17 的 external/mesa3d（mesa 26.1.0-devel）已删掉 meson_to_hermetic，改用 meson2hermetic
-（`meson convert`，外部的 meson 分支）；A17 管线见 docs/mesa-a17.md，不打本补丁。
+（`meson convert`，外部的 meson 分支）；A17 管线见 docs/dev/mesa-a17.md，不打本补丁。
 （git apply 会跳过 diff 之前的说明文字。）
 
 diff --git a/meson_to_hermetic/meson_common.py b/meson_to_hermetic/meson_common.py

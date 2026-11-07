@@ -1,6 +1,5 @@
 //
-// gaokun3 设备设置：磁吸键盘开关 + 扬声器增强（试验功能）开关 + USB-C 口的提示通知（v1.0 PWR-4 / USB-1，UsbPortNotifier）
-// + 待机开关（v1.0 PWR-16，StandbySettingsActivity）。
+// gaokun3 设备设置：磁吸键盘开关 + 扬声器增强（试验功能）开关 + USB-C 口的提示通知（v1.0 PWR-4 / USB-1，UsbPortNotifier）。
 // 2026-09-28 用户要求：开关换成系统设置同款的 Material 3 Expressive 样式 ⇒ 改用 androidx.preference + SettingsLib。
 //
 // ★ platform_apis + certificate: "platform" 两个都必需：

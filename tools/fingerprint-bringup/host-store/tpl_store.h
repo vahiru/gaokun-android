@@ -3,7 +3,7 @@
  *
  * The TA exports one opaque blob per finger (tplType 121).  The blob carries
  * its own magic, a header-derived CRC16 tail, and no geometry/config fields
- * (D19/D20 in docs/fingerprint-driver-design.md).  This module is the host
+ * (D19/D20; summarised in docs/dev/fingerprint-driver-design.md, section 4).  This module is the host
  * contract:
  *
  *   - validate magic / layout / CRC before ever calling FtIniAlgTplData_v1;

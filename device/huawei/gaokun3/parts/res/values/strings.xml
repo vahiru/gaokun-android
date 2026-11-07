@@ -44,13 +44,6 @@
     <string name="boot_entry_other_text">Before this start-up the boot entry recorded: %1$s. The system started normally; if this keeps happening, please report it.</string>
     <string name="boot_entry_bypassed_title">This start-up bypassed the boot entry</string>
     <string name="boot_entry_bypassed_text">The boot entry (gk3boot) is installed, but this start-up used the direct boot item instead: either the boot entry failed to start several times in a row and was skipped automatically, or the direct item was picked in the boot menu. A failed system update will not be rolled back automatically during this start-up. If this appears on every start-up, please report it.</string>
-    <!-- Standby switch (v1.0 PWR-16, StandbySettingsActivity), injected into Settings > Battery. -->
-    <string name="standby_title">Standby (sleep)</string>
-    <string name="standby_summary">Let the tablet sleep when the screen is off</string>
-    <string name="standby_switch_title">Allow standby</string>
-    <string name="standby_switch_summary_on">The tablet sleeps soon after the screen turns off</string>
-    <string name="standby_switch_summary_off">The tablet stays awake with the screen off and uses noticeably more battery</string>
-    <string name="standby_note">Turning this off applies right away; turning it on applies from the next time the screen turns off. No restart is needed and the setting survives restarts.\n\nWhile asleep, Wi-Fi is powered off, so new messages arrive only when the screen comes back on, and USB debugging over the cable pauses until the screen is on. Turn standby off if you need messages in real time, or while troubleshooting a tablet that does not wake up.</string>
     <!-- Touch feel switch (2026-10-25, TouchModeSettingsActivity / TouchModeTileService), injected into Settings > System. -->
     <string name="touch_mode_title">Touch feel</string>
     <string name="touch_mode_summary">Game mode (no palm rejection) or everyday mode (palm rejection)</string>

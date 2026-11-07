@@ -18,7 +18,7 @@
 # 打不开，服务会起不来。
 # ★ 只放行 sdsp 和 cdsp：adsp/cdsp-secure 我们不用，不必授权。cdsp 给麦克风降噪服务
 #   gk3denoised（denoise/，user system）在 CDSP 的 NPU 上跑模型。
-# 用途与整条通路见 docs/stage4-findings.md #37。
+# 用途与整条通路见 docs/dev/sensors-ssc-protocol.md。
 /dev/fastrpc-sdsp         0660   system     system
 /dev/fastrpc-cdsp         0660   system     system
 

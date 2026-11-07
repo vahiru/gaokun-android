@@ -1,16 +1,16 @@
 /* gk3-fastbootd：ESP（刷 boot_x 之后的同步、set_active 的 default 镜像）。
  *
  * 规则逐条照现有实现，改一边要改另一边：
- *   · 找 ESP：只在目标盘上找（不碰别的盘）。cmdline 有 gk3.esp=<PARTUUID>（S7c：gk3boot 自己是从哪个 ESP 起的）
+ *   · 找 ESP：只在目标盘上找（不碰别的盘）。cmdline 有 gk3.esp=<PARTUUID>（gk3boot 自己是从哪个 ESP 起的）
  *     就只认它；否则候选 = 目标盘上类型为 EFI System 或开头是 FAT 引导扇区的分区，只读挂上看有没有
  *     loader/entries/ 下的 *-android-*.conf（下同）—— 与 boot_control/EspSlot.cpp:LooksLikeOurEsp、
  *     gaokun3-ota-postinstall.sh:find_esp 的"按内容认 ESP"同一判据。恰好一个才用，多个就拒绝（有歧义不猜）。
- *   · 挂载点私有（rundir/esp），不叫 /mnt/esp（CLAUDE.md 运维禁忌 4）。
+ *   · 挂载点私有（rundir/esp），不叫 /mnt/esp。
  *   · 选目录：loader/entries 里【直连条目】<32 位小写十六进制>-android-<x>.conf 必须恰好一个，它的 linux 行必须是
- *     /<mid>/android/slot_<x>/Image，内核就写进 /<mid>/android/slot_<x>/ —— gaokun3-ota-postinstall.sh 的
- *     is_direct_entry / KPATH 两段（OTA-9），installer-lib.sh 的 gk3__esp_pick_mid，gk3boot.c 的 direct_cb 同一规则。
+ *     /<mid>/android/slot_<x>/Image，内核就写进 /<mid>/android/slot_<x>/ —— 与 gaokun3-ota-postinstall.sh 的
+ *     is_direct_entry / KPATH 两段、installer-lib.sh 的 gk3__esp_pick_mid、gk3boot.c 的 direct_cb 同一规则。
  *   · 写文件：.<名字>.new → fsync → 丢缓存读回逐字节比对 → rename → fsync 目录；写前按"新文件合计 − 将被覆盖的旧文件"
- *     核空闲空间（M4b"写满却报成功"的教训）。
+ *     核对空闲空间。
  *   · 条目 options = boot.img 的 cmdline（头 cmdline + extra 直接相接）+ " androidboot.slot_suffix=_<x>"（已带则不加），
  *     与 postinstall 的 cmdline 同步一节逐字节相同；没有 options 行就不改（同 postinstall 的 grep 守卫）。
  *   · loader.conf 的 default：第一行 default 换成 "default *-android-<x>.conf"，其余 default 行删掉，没有就追加

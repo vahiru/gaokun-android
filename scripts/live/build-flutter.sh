@@ -47,7 +47,7 @@ docker run --rm -v "$REPO/live/installer-flutter:/src:ro" -v "$OUT:/out" "$TAG" 
     flutter build linux --release
     cp -a build/linux/arm64/release/bundle/. /out/
 '
-# 判据看产物，不看退出码（CLAUDE.md 运维坑 1）
+# 判据看产物，不看退出码
 [ -x "$OUT/gk3_installer" ] || die "没有产物 $OUT/gk3_installer"
 # 字体真的进了产物（中文方块那次的教训：界面用哪个字体，要在产物里看得见）
 for f in Roboto-VF.ttf NotoSansSC-VF.otf; do
