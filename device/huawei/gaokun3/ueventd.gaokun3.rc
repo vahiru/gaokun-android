@@ -66,3 +66,6 @@
 /sys/class/udc/a600000.usb                    soft_connect   0220   root   system
 # 同一个 HAL 还把 gadget 的连接状态写给 UsbDeviceManager：patches/0096 的 android_usb 类，state 默认 0644 root。
 /sys/class/android_usb/android0               state          0664   root   system
+# FTE7001: no TA operation occurs until the fingerprint HAL opens the device.
+/dev/gaokun3_fpcmd 0600 system system
+/dev/gpiochip4 0600 system system

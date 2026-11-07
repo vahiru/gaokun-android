@@ -1,6 +1,6 @@
 # 指纹逆向报告（本目录`*.md`不入版本库）
 
-MateBook E Go（gaokun3）的指纹传感器为**FocalTech `FTE7001`**（部分批次为Goodix `GDIX5125`，由GPIO61/62板级strap引脚区分）。取图、注册、比对及模板存储全部在高通签名的TrustZone可信应用`fingerpr.mbn`（TA名`fingerprint`）内完成，SPI总线由安全世界直接持有。Linux/Android侧通过厂商自身的QSEECOM SMC将该签名TA加载进QSEE（TrustZone逐段验签，不修改TA、不绕过安全启动），再编写内核客户端驱动与Android HAL。架构与设计详见[`../fingerprint-driver-design.md`](../fingerprint-driver-design.md)。
+MateBook E Go（gaokun3）的指纹传感器为**FocalTech `FTE7001`**（部分批次为Goodix `GDIX5125`，由GPIO61/62板级strap引脚区分）。SPI总线由高通签名的TrustZone可信应用`fingerpr.mbn`（TA名`fingerprint`）直接持有；Windows产品的录入和比对在用户态的引擎适配器里完成，TA只负责取图传输和16字节的模板元数据。Linux/Android侧通过厂商自身的QSEECOM SMC将该签名TA加载进QSEE（TrustZone逐段验签，不修改TA、不绕过安全启动），由内核驱动取图，Android HAL在用户态解码、匹配和存储模板。架构与设计详见[`../fingerprint-driver-design.md`](../fingerprint-driver-design.md)。
 
 ## 本地逆向报告清单（gitignore忽略）
 

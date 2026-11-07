@@ -490,8 +490,12 @@ DIAG_PATCHES=(
 #   与其头文件。2026-09-24 在本机把签名 TA 加载成功（app_id=5），但 client driver / HAL 都还没有 ⇒ 发版内核里它只是
 #   一段没人用的 SMC 通路。v0.6.x–1.0.0-dev.8 的发版内核都带着它（休眠，#125）；从下一次内核构建起不带。
 #   原来排在 0049 之后、0053 之前；它与 0053–0076 不相干（--verify 会在干净 worktree 上重放证明这一点）。
+# 0212 adds the fixed-ioctl fingerprint transport (/dev/gaokun3_fpcmd) on top of 0050, and 0213 its
+#   Goodix GDIX5125 branch; the HAL needs both. Release kernels carry neither.
 FP_PATCHES=(
     0050-firmware-qcom-scm-qseecom-app-load-shutdown-listener.patch
+    0212-firmware-qcom-gaokun3-fingerprint-ioctl.patch
+    0213-firmware-qcom-gaokun3-fpcmd-add-the-Goodix-GDIX5125-sensor.patch
 )
 WITH_FP=0
 for a in "$@"; do [ "$a" = "--with-fp" ] && WITH_FP=1; done

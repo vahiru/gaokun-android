@@ -1,0 +1,18 @@
+The matcher gaokun3-matcher.c and gaokun3-matcher.h are LGPL-2.1-or-later,
+as marked in their original SPDX headers. They are built as a separate shared
+library so the matcher remains replaceable. See the GNU Lesser General Public
+License version 2.1: https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html
+
+Source: gaokun3-fingerprint-driver-handoff-20261101.zip (2026-11-01).
+Original matcher SHA256 values are recorded in that package's SHA256SUMS.
+The handoff describes the matcher as adapted from libfprint-fte7001's
+FTE7001/FT9338 matcher. The matching part has since been rewritten in this
+tree; the image quality check still follows the handed-over code. Neither is
+a port of the Windows matching engine.
+
+The AES image decode, quality scaling, capture timing and enrollment stages
+in the Android backend follow the handed-over gaokun3.c.
+The Android service, transport wrapper and database code are Apache-2.0.
+The kernel transport is GPL-2.0, with a GPL-2.0 WITH Linux-syscall-note UAPI.
+The proprietary fingerpr.mbn is a separate local input and is not licensed or
+redistributed by this source tree.

@@ -85,3 +85,30 @@ device/huawei/gaokun3/denoise/prebuilt/**
 # 只放行 README.md（说明它们是什么、从哪来）。获取输入的方法同 firmware/README.md（公开 uup-drivers release）。
 docs/dev/fingerprint/*.md
 !docs/dev/fingerprint/README.md
+
+# 指纹逆向工作区里从 Windows 驱动包 / uup-drivers 解出来的专有二进制（华为 / 高通 / FocalTech，未获再分发授权），
+# 与本机 IDA MCP 配置（含本机绝对路径）。脚本（*.py）与说明（*.md）照常入库。
+tools/fingerprint-bringup/rev/**/*.cab
+tools/fingerprint-bringup/rev/**/*.sys
+tools/fingerprint-bringup/rev/**/*.dll
+tools/fingerprint-bringup/rev/**/*.mbn
+tools/fingerprint-bringup/rev/**/*.bin
+tools/fingerprint-bringup/rev/**/*.cat
+tools/fingerprint-bringup/rev/**/*.inf
+tools/fingerprint-bringup/rev/*.zip
+tools/fingerprint-bringup/rev/ida-mcp.json
+
+# 指纹 bring-up 的树外内核模块构建产物（用内核树随时重建，不入库）
+tools/fingerprint-bringup/*.ko
+tools/fingerprint-bringup/rev/out/
+
+# REA 离线安装用的第三方 wheel；Agent 留下的空 stderr 日志；macOS / 编辑器杂物
+wheels/
+/err*.log
+tools/fingerprint-bringup/rev/err*.log
+.DS_Store
+.vscode/
+# Private fingerprint handoffs contain the signed vendor TA.
+gaokun3-fingerprint-driver-handoff-*.zip
+# Default location of the Goodix driver DLL that prepare-crdroid.py --gfspi reads.
+/gfspi.dll
