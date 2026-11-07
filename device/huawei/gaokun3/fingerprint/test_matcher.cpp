@@ -86,7 +86,8 @@ static void suite(int width, int height) {
         reference[i] = features(view(scenes[i], 0));
     }
     for (size_t i = 0; i < count; ++i) {
-        for (double degrees : {-10.0, 10.0}) {
+        // Holding the tablet differently turns a press by up to 60 degrees.
+        for (double degrees : {-10.0, 10.0, -50.0, 50.0}) {
             auto probe = features(view(scenes[i], degrees));
             sameMin = std::fmin(sameMin, gaokun3_match_score(&probe, &reference[i]));
             for (size_t j = 0; j < count; ++j)
@@ -98,7 +99,7 @@ static void suite(int width, int height) {
         shiftedMin = std::fmin(shiftedMin, gaokun3_match_score(&shifted, &reference[i]));
         gaokun3_feature_set_free(&shifted);
         // Outside the rotation a press can have: not aligned.
-        auto turned = features(view(scenes[i], 60));
+        auto turned = features(view(scenes[i], 90));
         turnedMax = std::fmax(turnedMax, gaokun3_match_score(&turned, &reference[i]));
         gaokun3_feature_set_free(&turned);
     }
@@ -120,8 +121,8 @@ static void suite(int width, int height) {
     for (auto& fs : reference) gaokun3_feature_set_free(&fs);
     // A regression on generated texture, not a claim about real fingers.
     std::cout << "PASS " << width << "x" << height << ": turned views min " << sameMin
-              << ", shifted views min " << shiftedMin << ", 60-degree views max " << turnedMax
-              << ", 1984 unrelated comparisons max " << unrelatedMax << '\n';
+              << ", shifted views min " << shiftedMin << ", 90-degree views max " << turnedMax
+              << ", 3968 unrelated comparisons max " << unrelatedMax << '\n';
 }
 
 static void resizing() {

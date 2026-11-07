@@ -36,7 +36,13 @@ static const double kDogSigmas[DOG_LEVELS] = { 1.6, 2.2, 3.1, 4.4 };
 /* One keypoint per CELL x CELL cell; descriptors cover PATCH x PATCH. */
 #define CELL 6
 #define PATCH 16
-#define MAX_ROTATION (40.0 * M_PI / 180.0)
+/* A finger meets the key at quite different angles depending on how the
+ * tablet is held. With templates of enrolment frames only, five fingers'
+ * presses were recognised 104 of 212 times within 40 degrees and 124 within
+ * 60; other fingers' finger scores stayed under 22 in 21,000 to 28,000
+ * comparisons per finger either way. Beyond 60 the gain was small (126 at 90)
+ * while chance scores of 18 or more grew by an eighth. */
+#define MAX_ROTATION (60.0 * M_PI / 180.0)
 /* Proposals agree within this distance and rotation. */
 #define AGREE_PX 3.0
 #define AGREE_RAD (20.0 * M_PI / 180.0)
