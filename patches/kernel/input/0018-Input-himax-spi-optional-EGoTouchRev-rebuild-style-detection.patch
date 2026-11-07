@@ -1,0 +1,1518 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] Input: himax-spi: add optional EGoTouchRev-rebuild detection pipeline features
+
+Add runtime-configurable detection and tracking features ported from
+EGoTouchRev-rebuild while keeping existing defaults unchanged:
+
+- Per-cell adaptive baseline tracking (baseline_mode 1 and 2, baseline_gate,
+  and baseline_fw_finger using the firmware finger-present flag).
+- Configurable common-mode filter axis mode (cmf_mode).
+- Configurable peak edge threshold (peak_edge_threshold), press drift limit
+  (peak_drift_limit), minimum zone area (min_area), peak merge radius
+  (peak_merge_radius), and priority flood-fill zone splitting (zone_split).
+- Edge peak and edge compensation modes (edge_peak_mode, edge_comp_mode).
+- Immediate first-frame reporting for strong contacts (debounce_strong,
+  track_min_signal) and same-row ghost filtering (ghost_row_filter).
+- Allocate struct hx_algo with kvzalloc() to accommodate the enlarged state.
+
+Origin: other, https://github.com/awarson2233/EGoTouchRev-rebuild
+Upstream-Status: Pending
+---
+diff --git a/drivers/input/touchscreen/himax-spi-core.c b/drivers/input/touchscreen/himax-spi-core.c
+index 7599e68..17f8ad0 100644
+--- a/drivers/input/touchscreen/himax-spi-core.c
++++ b/drivers/input/touchscreen/himax-spi-core.c
+@@ -25,6 +25,7 @@ static bool disable_pressure = true;
+ module_param(disable_pressure, bool, 0444);
+ MODULE_PARM_DESC(disable_pressure, "Disable ABS_MT_TOUCH_MAJOR and ABS_MT_PRESSURE axes (default: true)");
+ #include <linux/spi/spi.h>
++#include <linux/unaligned.h>
+ #include <linux/math.h>
+ #include <linux/math64.h>
+ #include <linux/workqueue.h>
+@@ -725,6 +726,10 @@ static void himax_release_all_touches(struct himax_ts_data *ts)
+ 		ts->algo->touch_start_frames = 0;
+ 		ts->algo->touch_active = false;
+ 		ts->algo->iir_initialized = false;
++		/* The adaptive baseline recovers quickly from here. */
++		ts->algo->base_prev_finger = false;
++		ts->algo->base_had_freeze = false;
++		memset(ts->algo->base_hold, 0, sizeof(ts->algo->base_hold));
+ 		hx_hand_reset(ts->algo);
+ 	}
+ 
+@@ -1065,7 +1070,11 @@ static ssize_t _name##_store(struct device *dev,			\
+ static DEVICE_ATTR_RW(_name)
+ 
+ /* Preprocessing */
++HX_ALGO_ATTR_U8_MAX_RW(baseline_mode, 2);
++HX_ALGO_ATTR_BOOL_RW(baseline_fw_finger);
++HX_ALGO_ATTR_S16_RW(baseline_gate);
+ HX_ALGO_ATTR_BOOL_RW(cmf_enabled);
++HX_ALGO_ATTR_U8_MAX_RW(cmf_mode, 3);
+ HX_ALGO_ATTR_S16_RW(cmf_exclusion);
+ HX_ALGO_ATTR_S16_RW(cmf_max_correction);
+ HX_ALGO_ATTR_BOOL_RW(iir_enabled);
+@@ -1076,6 +1085,10 @@ HX_ALGO_ATTR_S16_RW(iir_gate_floor);
+ HX_ALGO_ATTR_U8_RW(iir_gate_ratio_q8);
+ /* Detection */
+ HX_ALGO_ATTR_S16_RW(macro_threshold);
++HX_ALGO_ATTR_S16_RW(peak_edge_threshold);
++HX_ALGO_ATTR_S16_RW(peak_drift_limit);
++HX_ALGO_ATTR_U8_MAX_RW(peak_merge_radius, 5);
++HX_ALGO_ATTR_U8_RW(min_area);
+ HX_ALGO_ATTR_S16_RW(peak_threshold);
+ HX_ALGO_ATTR_U16_RW(iso_nbr_ratio_q8);
+ HX_ALGO_ATTR_U8_RW(edge_min_area);
+@@ -1098,6 +1111,9 @@ HX_ALGO_ATTR_BOOL_RW(edge_comp_enabled);
+ HX_ALGO_ATTR_S16_RW(edge_boost_pct);
+ HX_ALGO_ATTR_S16_RW(edge_push_q8);
+ HX_ALGO_ATTR_S16_RW(edge_blend_q8);
++HX_ALGO_ATTR_U8_MAX_RW(edge_comp_mode, 1);
++HX_ALGO_ATTR_U8_MAX_RW(edge_peak_mode, 1);
++HX_ALGO_ATTR_BOOL_RW(zone_split);
+ /* Tracking */
+ HX_ALGO_ATTR_S32_RW(track_dist2_max);
+ HX_ALGO_ATTR_S32_RW(track_tap_radius);
+@@ -1106,6 +1122,9 @@ HX_ALGO_ATTR_S32_RW(track_filter_beta);
+ HX_ALGO_ATTR_S32_RW(track_filter_dcutoff);
+ HX_ALGO_ATTR_U8_RW(track_lost_frames);
+ HX_ALGO_ATTR_U8_RW(debounce_base);
++HX_ALGO_ATTR_BOOL_RW(ghost_row_filter);
++HX_ALGO_ATTR_S32_RW(debounce_strong);
++HX_ALGO_ATTR_S32_RW(track_min_signal);
+ HX_ALGO_ATTR_BOOL_RW(track_smoothing);
+ HX_ALGO_ATTR_BOOL_RW(track_active_guard);
+ HX_ALGO_ATTR_U8_RW(track_start_debounce);
+@@ -1138,6 +1157,10 @@ static ssize_t stats_show(struct device *dev, struct device_attribute *attr,
+ 	n += sysfs_emit_at(buf, n, "rej_isolated      %u\n", st->rej_isolated);
+ 	n += sysfs_emit_at(buf, n, "rej_minarea       %u\n", st->rej_minarea);
+ 	n += sysfs_emit_at(buf, n, "rej_edgeweak      %u\n", st->rej_edgeweak);
++	n += sysfs_emit_at(buf, n, "rej_merged        %u\n", st->rej_merged);
++	n += sysfs_emit_at(buf, n, "rej_row_ghost     %u\n", st->rej_row_ghost);
++	n += sysfs_emit_at(buf, n, "rej_weak_start    %u\n", st->rej_weak_start);
++	n += sysfs_emit_at(buf, n, "fw_finger_frames  %u\n", st->fw_finger_frames);
+ 	n += sysfs_emit_at(buf, n, "contacts          %u\n", st->contacts);
+ 	n += sysfs_emit_at(buf, n, "rej_contact_area  %u\n", st->rej_contact_area);
+ 	n += sysfs_emit_at(buf, n, "tracks_new        %u\n", st->tracks_new);
+@@ -1190,7 +1213,11 @@ static ssize_t contacts_log_show(struct device *dev,
+ static DEVICE_ATTR_RO(contacts_log);
+ 
+ static struct attribute *hx_algo_attrs[] = {
++	&dev_attr_baseline_mode.attr,
++	&dev_attr_baseline_fw_finger.attr,
++	&dev_attr_baseline_gate.attr,
+ 	&dev_attr_cmf_enabled.attr,
++	&dev_attr_cmf_mode.attr,
+ 	&dev_attr_cmf_exclusion.attr,
+ 	&dev_attr_cmf_max_correction.attr,
+ 	&dev_attr_iir_enabled.attr,
+@@ -1200,6 +1227,10 @@ static struct attribute *hx_algo_attrs[] = {
+ 	&dev_attr_iir_gate_floor.attr,
+ 	&dev_attr_iir_gate_ratio_q8.attr,
+ 	&dev_attr_macro_threshold.attr,
++	&dev_attr_peak_edge_threshold.attr,
++	&dev_attr_peak_drift_limit.attr,
++	&dev_attr_peak_merge_radius.attr,
++	&dev_attr_min_area.attr,
+ 	&dev_attr_peak_threshold.attr,
+ 	&dev_attr_iso_nbr_ratio_q8.attr,
+ 	&dev_attr_edge_min_area.attr,
+@@ -1219,9 +1250,15 @@ static struct attribute *hx_algo_attrs[] = {
+ 	&dev_attr_edge_boost_pct.attr,
+ 	&dev_attr_edge_push_q8.attr,
+ 	&dev_attr_edge_blend_q8.attr,
++	&dev_attr_edge_comp_mode.attr,
++	&dev_attr_edge_peak_mode.attr,
++	&dev_attr_zone_split.attr,
+ 	&dev_attr_track_dist2_max.attr,
+ 	&dev_attr_track_lost_frames.attr,
+ 	&dev_attr_debounce_base.attr,
++	&dev_attr_ghost_row_filter.attr,
++	&dev_attr_debounce_strong.attr,
++	&dev_attr_track_min_signal.attr,
+ 	&dev_attr_track_smoothing.attr,
+ 	&dev_attr_track_active_guard.attr,
+ 	&dev_attr_track_start_debounce.attr,
+@@ -1416,6 +1453,22 @@ static irqreturn_t himax_ts_thread(int irq, void *data)
+ 
+ 	// dump_frame((void *)ptr - OFST, true);
+ 
++	/*
++	 * The firmware's own touch report follows the grid: in the 128 words
++	 * after it, words 54 and 55 (the EGoTouchRev service's touchX/touchY)
++	 * read 0xff in their low bytes while it sees no finger.  The adaptive
++	 * baseline can use that (baseline_fw_finger).
++	 */
++	{
++		const u8 *fw = ts->event_buf + OFST + HX_PIXELS * 2;
++
++		algo->fw_finger =
++			(get_unaligned_le16(fw + 54 * 2) & 0xff) != 0xff ||
++			(get_unaligned_le16(fw + 55 * 2) & 0xff) != 0xff;
++		if (algo->fw_finger)
++			algo->stats.fw_finger_frames++;
++	}
++
+ 	hx_preprocess_frame(algo, ptr);
+ 	/* dump_frame(algo); */
+ 
+@@ -1644,6 +1697,11 @@ static int himax_mcu_check_crc(struct himax_ts_data *ts, u32 start_addr,
+ }
+ 
+ /* -------------------------------------------------------------------------- */
++static void himax_algo_free(void *algo)
++{
++	kvfree(algo);
++}
++
+ static int himax_spi_probe(struct spi_device *spi)
+ {
+ 	int ret;
+@@ -1685,9 +1743,13 @@ static int himax_spi_probe(struct spi_device *spi)
+ 	if (!ts->event_buf)
+ 		return -ENOMEM;
+ 
+-	ts->algo = devm_kzalloc(ts->dev, sizeof(*ts->algo), GFP_KERNEL);
++	/* ~95 KB: too large to ask kmalloc for in one piece. */
++	ts->algo = kvzalloc(sizeof(*ts->algo), GFP_KERNEL);
+ 	if (!ts->algo)
+ 		return -ENOMEM;
++	ret = devm_add_action_or_reset(ts->dev, himax_algo_free, ts->algo);
++	if (ret)
++		return ret;
+ 	hx_algo_init_defaults(ts->algo);
+ 	/*
+ 	 * With the TOUCH_MAJOR/PRESSURE axes registered, reporting the constants
+diff --git a/drivers/input/touchscreen/hx-algo.c b/drivers/input/touchscreen/hx-algo.c
+index 5946609..ffdeff5 100644
+--- a/drivers/input/touchscreen/hx-algo.c
++++ b/drivers/input/touchscreen/hx-algo.c
+@@ -41,7 +41,11 @@
+ 
+ void hx_algo_init_defaults(struct hx_algo *algo)
+ {
++	algo->baseline_mode      = 0;    /* fixed baseline              */
++	algo->baseline_fw_finger = false;
++	algo->baseline_gate      = 305;
+ 	algo->cmf_enabled        = true;
++	algo->cmf_mode           = 3;    /* rows and columns            */
+ 	algo->cmf_exclusion      = 250;
+ 	algo->cmf_max_correction = 500;
+ 	algo->iir_enabled        = true;
+@@ -52,6 +56,10 @@ void hx_algo_init_defaults(struct hx_algo *algo)
+ 	algo->iir_gate_ratio_q8  = 26;
+ 	algo->macro_threshold    = 800;
+ 	algo->peak_threshold     = 800;
++	algo->peak_edge_threshold = 0;
++	algo->peak_drift_limit   = 0;
++	algo->peak_merge_radius  = 0;
++	algo->min_area           = 2;
+ 	algo->iso_nbr_ratio_q8   = 8;    /* legacy (z >> 5) behaviour  */
+ 	algo->edge_min_area      = 1;    /* legacy: border cell exempt */
+ 	algo->palm_enabled       = true;
+@@ -71,9 +79,15 @@ void hx_algo_init_defaults(struct hx_algo *algo)
+ 	algo->edge_boost_pct   = 50;   /* 50% signal boost on border pixels  */
+ 	algo->edge_push_q8     = 128;  /* push up to 0.5 grid cells outward  */
+ 	algo->edge_blend_q8    = 512;  /* blend over 2 grid cells from edge  */
++	algo->edge_comp_mode   = 0;
++	algo->edge_peak_mode   = 0;
++	algo->zone_split       = false;
+ 	algo->track_dist2_max   = HIMAX_TRACK_MATCH_DIST2;
+ 	algo->track_lost_frames = HIMAX_TRACK_LOST_FRAMES;
+ 	algo->debounce_base     = HIMAX_NEW_TOUCH_DEBOUNCE;
++	algo->ghost_row_filter  = false;
++	algo->debounce_strong   = 0;
++	algo->track_min_signal  = 0;
+ 	algo->track_smoothing   = true;
+ 	algo->track_active_guard   = true;
+ 	algo->track_start_debounce = 2;
+@@ -88,8 +102,177 @@ void hx_algo_init_defaults(struct hx_algo *algo)
+ /* Phase 1A — baseline subtraction                                          */
+ /* ======================================================================== */
+ 
++/*
++ * Adaptive baseline (baseline_mode 1), after the EGoTouchRev service's
++ * BaselineTracker.
++ *
++ * Each cell tracks its own baseline in 1/256 units.  While the panel has a
++ * finger on it, the median of (raw - baseline) over the whole panel is taken
++ * as common-mode and removed; a cell that is then more than baseline_gate
++ * above its baseline passes through with its baseline frozen, and every
++ * other cell reads 0 while its baseline follows it -- slowly when it rises
++ * (temperature), faster when it falls (a lifting finger), and fast for the
++ * first frames of a touch or while nothing passes the gate (recovery), so a
++ * weak contact is absorbed rather than reported.  A cell that passed the
++ * gate is held for HX_BASE_HOLD frames after it drops below it: a sharp dip
++ * then passes through instead of being absorbed.  Without a finger every
++ * cell reads 0 and the baseline follows quickly.
++ *
++ * The firmware says whether it sees a finger; baseline_fw_finger decides
++ * whether to trust it.  Without it every frame is treated as touched, so
++ * there is no finger-off transition to start recovery from: recovery runs
++ * whenever nothing passed the gate the frame before, which also stands in
++ * for the fast no-finger tracking.  A cell that stays above the gate
++ * without a finger (a step in the panel's drift) is then never released;
++ * with the flag it is, the next time the firmware sees no finger.
++ *
++ * The baseline starts from the first frame rather than the service's
++ * fixed 0x7fee: without the flag there is no finger-free phase in which a
++ * cell whose idle level lies more than the gate above that could settle,
++ * and it would read as a touch from the start.  A finger on the panel at
++ * that moment is absorbed instead and reads negative once lifted.
++ *
++ * baseline_mode 2 runs the CMF on every cell before the gate instead of on
++ * the gated frame after it.  Coupled through a PC's USB ground, the panel
++ * carries row and column offsets that lift cells next to a finger over the
++ * gate; there the gated frame has nothing left to estimate them from.
++ */
++#define HX_BASE_DEADBAND	90	/* |delta| up to this is noise       */
++#define HX_BASE_NEG_DEADBAND	13	/* a held cell this far down passes  */
++#define HX_BASE_HOLD		60	/* frames                            */
++#define HX_BASE_RECOVERY	30	/* frames                            */
++
++static void hx_apply_cmf(struct hx_algo *algo);
++
++static void hx_base_update(struct hx_algo *algo, int i, s32 delta,
++			   int shift, s32 max_step)
++{
++	s32 step = (delta * 256) >> shift;
++
++	if (max_step > 0)
++		step = clamp_t(s32, step, -max_step * 256, max_step * 256);
++	algo->base_q8[i] = clamp_t(s32, algo->base_q8[i] + step, 0, 0xffff << 8);
++}
++
++/* The median of raw - baseline over the panel, clamped to the histogram. */
++static s32 hx_base_median(struct hx_algo *algo, const u16 *raw)
++{
++	int i, half = HX_BASE_HIST / 2;
++	u32 seen = 0;
++
++	memset(algo->base_hist, 0, sizeof(algo->base_hist));
++	for (i = 0; i < HX_PIXELS; i++) {
++		s32 d = (s32)le16_to_cpup(raw + i) - (algo->base_q8[i] >> 8);
++
++		algo->base_hist[clamp_t(s32, d + half, 0, HX_BASE_HIST - 1)]++;
++	}
++	for (i = 0; i < HX_BASE_HIST; i++) {
++		seen += algo->base_hist[i];
++		if (seen > HX_PIXELS / 2)
++			break;
++	}
++	return i - half;
++}
++
++static void hx_track_baseline(struct hx_algo *algo, const u16 *raw, u8 mode)
++{
++	bool finger = !algo->baseline_fw_finger || algo->fw_finger;
++	s16 *out = &algo->frame[0][0];
++	bool recovery = false, freeze = false;
++	s32 common;
++	int i;
++
++	if (!algo->base_init || algo->base_mode != mode) {
++		for (i = 0; i < HX_PIXELS; i++)
++			algo->base_q8[i] = (s32)le16_to_cpup(raw + i) << 8;
++		memset(algo->base_hold, 0, sizeof(algo->base_hold));
++		algo->base_prev_finger = false;
++		algo->base_had_freeze = false;
++		algo->base_recovery = 0;
++		algo->base_mode = mode;
++		algo->base_init = true;
++	}
++
++	if (!finger) {
++		for (i = 0; i < HX_PIXELS; i++) {
++			s32 delta = (s32)le16_to_cpup(raw + i) - (algo->base_q8[i] >> 8);
++
++			algo->base_hold[i] = 0;
++			if (abs(delta) > HX_BASE_DEADBAND)
++				hx_base_update(algo, i, delta, 3, 512);
++			else if (delta)
++				hx_base_update(algo, i, delta, 6, 1);
++			out[i] = 0;
++		}
++		algo->base_had_freeze = false;
++		algo->base_recovery = 0;
++		algo->base_prev_finger = false;
++		return;
++	}
++
++	/*
++	 * Recovery: a touch has just begun, or nothing passed the gate for
++	 * fewer than HX_BASE_RECOVERY frames into it.  Without the flag:
++	 * whenever nothing passed the gate last frame.
++	 */
++	if (!algo->baseline_fw_finger) {
++		recovery = !algo->base_had_freeze;
++	} else if (!algo->base_prev_finger) {
++		recovery = true;
++		algo->base_recovery = 0;
++	} else if (!algo->base_had_freeze) {
++		if (algo->base_recovery < U8_MAX)
++			algo->base_recovery++;
++		recovery = algo->base_recovery < HX_BASE_RECOVERY;
++	}
++
++	common = hx_base_median(algo, raw);
++	if (mode == 2) {
++		for (i = 0; i < HX_PIXELS; i++)
++			out[i] = clamp_t(s32, (s32)le16_to_cpup(raw + i) -
++					 (algo->base_q8[i] >> 8) - common,
++					 SHRT_MIN, SHRT_MAX);
++		out[0] = 0;
++		if (algo->cmf_enabled)
++			hx_apply_cmf(algo);
++	}
++	/* Cell 0 is not a real cell on this panel; it stays 0. */
++	out[0] = 0;
++	for (i = 1; i < HX_PIXELS; i++) {
++		s32 delta = (s32)le16_to_cpup(raw + i) - (algo->base_q8[i] >> 8);
++		s32 local = mode == 2 ? out[i] : delta - common;
++
++		if (local > algo->baseline_gate) {
++			/* Frozen: only follow the panel-wide shift. */
++			freeze = true;
++			algo->base_hold[i] = HX_BASE_HOLD;
++			if (common)
++				hx_base_update(algo, i, common, 3, 512);
++			out[i] = clamp_t(s32, local, SHRT_MIN, SHRT_MAX);
++			continue;
++		}
++		if (algo->base_hold[i]) {
++			algo->base_hold[i]--;
++			if (local < -HX_BASE_NEG_DEADBAND) {
++				out[i] = clamp_t(s32, local, SHRT_MIN, SHRT_MAX);
++				continue;
++			}
++		}
++		if (recovery)
++			hx_base_update(algo, i, delta, 2, 256);
++		else if (abs(delta) > HX_BASE_DEADBAND)
++			hx_base_update(algo, i, delta, delta > 0 ? 7 : 5, 20);
++		else if (delta)
++			hx_base_update(algo, i, delta, 6, 1);
++		out[i] = 0;
++	}
++	algo->base_had_freeze = freeze;
++	algo->base_prev_finger = true;
++}
++
+ static void hx_prepare_frame_baseline(struct hx_algo *algo, const u16 *raw)
+ {
++	u8 mode = READ_ONCE(algo->baseline_mode);
+ 	int r, c;
+ 
+ 	for (r = 0; r < HX_ROWS; r++) {
+@@ -97,16 +280,25 @@ static void hx_prepare_frame_baseline(struct hx_algo *algo, const u16 *raw)
+ 			int idx = r * HX_COLS + c;
+ 			s32 sample = (s32)le16_to_cpup(raw + idx) - HX_BASELINE;
+ 
+-			algo->frame[r][c] = clamp_t(s32, sample, SHRT_MIN, SHRT_MAX);
++			algo->raw_frame[r][c] = clamp_t(s32, sample, SHRT_MIN, SHRT_MAX);
+ 		}
+ 	}
+ 
+ 	/* pixel [0][0] is always invalid on this panel layout */
+-	algo->frame[0][0] = 0;
++	algo->raw_frame[0][0] = 0;
+ 
+-	/* Keep the untouched frame for the diagnostic dump; everything after
+-	 * this point (CMF, edge boost, IIR) rewrites frame[] in place. */
+-	memcpy(algo->raw_frame, algo->frame, sizeof(algo->frame));
++	/*
++	 * raw_frame[] keeps the frame against the fixed baseline for the
++	 * diagnostic dump in either mode (a recording of it replays through
++	 * both); everything after this point (CMF, edge boost, IIR) rewrites
++	 * frame[] in place.
++	 */
++	if (mode) {
++		hx_track_baseline(algo, raw, mode);
++	} else {
++		memcpy(algo->frame, algo->raw_frame, sizeof(algo->frame));
++		algo->base_mode = 0;
++	}
+ }
+ 
+ /* ======================================================================== */
+@@ -183,7 +375,7 @@ static void hx_apply_cmf(struct hx_algo *algo)
+ 	int r, c;
+ 
+ 	/* Row pass */
+-	for (r = 0; r < HX_ROWS; r++) {
++	for (r = 0; r < HX_ROWS && (algo->cmf_mode & 1); r++) {
+ 		s32 sum = 0, count = 0, offset;
+ 
+ 		for (c = 0; c < HX_COLS; c++) {
+@@ -208,7 +400,7 @@ static void hx_apply_cmf(struct hx_algo *algo)
+ 	}
+ 
+ 	/* Column pass */
+-	for (c = 0; c < HX_COLS; c++) {
++	for (c = 0; c < HX_COLS && (algo->cmf_mode & 2); c++) {
+ 		s32 sum = 0, count = 0, offset;
+ 
+ 		for (r = 0; r < HX_ROWS; r++) {
+@@ -302,7 +494,7 @@ void hx_preprocess_frame(struct hx_algo *algo, const u16 *raw)
+ 	algo->stats.frames++;
+ 	hx_prepare_frame_baseline(algo, raw);
+ 
+-	if (algo->cmf_enabled)
++	if (algo->cmf_enabled && algo->base_mode != 2)
+ 		hx_apply_cmf(algo);
+ 
+ 	hx_edge_boost(algo);
+@@ -884,14 +1076,17 @@ static bool hx_is_asymmetric_peak(const struct hx_algo *algo, int r, int c)
+  *
+  * A flat palm press produces a nearly-uniform row of elevated pixels with
+  * low cross-row gradient.  Returns true when the peak signal falls in the
+- * drift range [3/8, 3/4] of peak_threshold and the row gradient is low
+- * while the row signal sum is high relative to the peak.
++ * drift range [3/8, 3/4] of the limit and the row gradient is low while the
++ * row signal sum is high relative to the peak.  The limit is
++ * peak_drift_limit, or peak_threshold when that is 0 -- in which case the
++ * range lies below the threshold and the test never fires.
+  */
+ static bool hx_detect_pressure_drift(const struct hx_algo *algo, int r, int c)
+ {
++	s16 limit     = algo->peak_drift_limit ?: algo->peak_threshold;
+ 	s16 peak_sig  = algo->frame[r][c];
+-	s16 limit3_4  = (algo->peak_threshold * 3) >> 2;
+-	s16 limit3_8  = (algo->peak_threshold * 3) >> 3;
++	s16 limit3_4  = (limit * 3) >> 2;
++	s16 limit3_8  = (limit * 3) >> 3;
+ 	int grad_sum  = 0;
+ 	int row_sum   = 0;
+ 	int col;
+@@ -903,7 +1098,7 @@ static bool hx_detect_pressure_drift(const struct hx_algo *algo, int r, int c)
+ 		int grad = abs((int)hx_frame_at(algo, r, col + 1) -
+ 			       (int)hx_frame_at(algo, r, col - 1));
+ 
+-		if (grad > algo->peak_threshold / 3)
++		if (grad > limit / 3)
+ 			return false;   /* sharp spike → not drift */
+ 		grad_sum += grad;
+ 		if (algo->frame[r][col] > 0)
+@@ -936,6 +1131,99 @@ static void hx_insert_peak(struct hx_algo *algo, const struct hx_peak *p)
+ 		algo->peaks[weakest] = *p;
+ }
+ 
++/*
++ * Highest cell strictly between two peaks along the line joining them;
++ * within peak_merge_radius there is at most one.
++ */
++static s16 hx_saddle(const struct hx_algo *algo, const struct hx_peak *a,
++		     const struct hx_peak *b)
++{
++	int dr = b->r - a->r, dc = b->c - a->c;
++	int steps = max(abs(dr), abs(dc));
++	s16 saddle = 0;
++	int k;
++
++	for (k = 1; k < steps; k++) {
++		int nr = a->r + DIV_ROUND_CLOSEST(dr * k, steps);
++		int nc = a->c + DIV_ROUND_CLOSEST(dc * k, steps);
++
++		if ((nr == a->r && nc == a->c) || (nr == b->r && nc == b->c))
++			continue;
++		saddle = max(saddle, hx_frame_at(algo, nr, nc));
++	}
++	return saddle;
++}
++
++/*
++ * Two peaks of one zone within peak_merge_radius cells, with no real dip
++ * between them (the cell between is within max(80, 8%) of the weaker one),
++ * are one flat contact: drop the weaker.  Without this a pad pressed flat
++ * shows two maxima and arrives as two pointers.
++ */
++static void hx_merge_close_peaks(struct hx_algo *algo)
++{
++	bool drop[HX_MAX_PEAKS] = { false };
++	int r = algo->peak_merge_radius;
++	u8 i, j, dst = 0;
++
++	if (!r || algo->peak_count < 2)
++		return;
++
++	for (i = 0; i < algo->peak_count; i++) {
++		const struct hx_peak *a = &algo->peaks[i];
++
++		if (drop[i])
++			continue;
++		for (j = i + 1; j < algo->peak_count; j++) {
++			const struct hx_peak *b = &algo->peaks[j];
++			u8 weak;
++			s16 need;
++
++			if (drop[j] || a->zone_id != b->zone_id)
++				continue;
++			if (max(abs(a->r - b->r), abs(a->c - b->c)) > r)
++				continue;
++			weak = a->z <= b->z ? i : j;
++			need = max_t(s16, 80, algo->peaks[weak].z * 8 / 100);
++			if (algo->peaks[weak].z - hx_saddle(algo, a, b) < need) {
++				drop[weak] = true;
++				if (weak == i)
++					break;
++			}
++		}
++	}
++
++	for (i = 0; i < algo->peak_count; i++) {
++		if (drop[i])
++			algo->stats.rej_merged++;
++		else
++			algo->peaks[dst++] = algo->peaks[i];
++	}
++	algo->peak_count = dst;
++}
++
++/* Peaks on the outer columns weaker than 5/8 of the strongest cell there. */
++static void hx_drop_weak_column_peaks(struct hx_algo *algo, int c)
++{
++	s16 max_sig = 0, cutoff;
++	u8 i, dst = 0;
++	int r;
++
++	for (r = 0; r < HX_ROWS; r++)
++		max_sig = max(max_sig, algo->frame[r][c]);
++	if (max_sig <= 0)
++		return;
++
++	cutoff = (max_sig >> 3) * 5;
++	for (i = 0; i < algo->peak_count; i++) {
++		if (algo->peaks[i].c == c && algo->peaks[i].z < cutoff)
++			algo->stats.rej_edgeweak++;
++		else
++			algo->peaks[dst++] = algo->peaks[i];
++	}
++	algo->peak_count = dst;
++}
++
+ void hx_detect_peaks(struct hx_algo *algo)
+ {
+ 	u8 zi;
+@@ -964,11 +1252,15 @@ void hx_detect_peaks(struct hx_algo *algo)
+ 			int r = idx / HX_COLS;
+ 			int c = idx % HX_COLS;
+ 			s16 v = algo->frame[r][c];
++			s16 thold = algo->peak_threshold;
+ 			struct hx_peak peak;
+ 			int dr, dc;
+ 			s32 nbr_sum = 0;
+ 
+-			if (v < algo->peak_threshold)
++			/* As in the service, it can only raise the threshold. */
++			if (c == 1 || c == HX_COLS - 2 || r == HX_ROWS - 1)
++				thold = max(thold, algo->peak_edge_threshold);
++			if (v < thold)
+ 				continue;
+ 			if (!hx_is_asymmetric_peak(algo, r, c))
+ 				continue;
+@@ -997,6 +1289,8 @@ void hx_detect_peaks(struct hx_algo *algo)
+ 		}
+ 	}
+ 
++	hx_merge_close_peaks(algo);
++
+ 	/*
+ 	 * Isolated-spike filter.
+ 	 *
+@@ -1039,7 +1333,8 @@ void hx_detect_peaks(struct hx_algo *algo)
+ 	 * by 1 + edge_boost_pct/100 (corners twice, multiplicatively).
+ 	 * edge_min_area makes the exemption tunable: 1 is the historical
+ 	 * behaviour, 2 requires a border contact to have at least one
+-	 * above-threshold neighbour.
++	 * above-threshold neighbour.  min_area is the same away from the
++	 * border (2 historically).
+ 	 */
+ 	{
+ 		u8 dst = 0, i;
+@@ -1049,7 +1344,7 @@ void hx_detect_peaks(struct hx_algo *algo)
+ 					algo->peaks[i].r == HX_ROWS - 1 ||
+ 					algo->peaks[i].c == 0 ||
+ 					algo->peaks[i].c == HX_COLS - 1);
+-			u16 min_area = on_edge ? algo->edge_min_area : 2;
++			u16 min_area = on_edge ? algo->edge_min_area : algo->min_area;
+ 
+ 			if (algo->peaks[i].zone_area >= min_area)
+ 				algo->peaks[dst++] = algo->peaks[i];
+@@ -1059,8 +1354,16 @@ void hx_detect_peaks(struct hx_algo *algo)
+ 		algo->peak_count = dst;
+ 	}
+ 
+-	/* --- Edge peak filter: weak edge peaks < max_sig * 5/8 --- */
+-	{
++	/*
++	 * Edge peak filter: weak edge peaks < max_sig * 5/8.  edge_peak_mode
++	 * 0 compares the peaks on each of the four borders with the strongest
++	 * peak on it; 1 compares the peaks on the first and last column with
++	 * the strongest cell of that column, as the EGoTouchRev service does.
++	 */
++	if (algo->edge_peak_mode == 1) {
++		hx_drop_weak_column_peaks(algo, 0);
++		hx_drop_weak_column_peaks(algo, HX_COLS - 1);
++	} else {
+ 		int edge;
+ 
+ 		for (edge = 0; edge < 4; edge++) {
+@@ -1308,6 +1611,426 @@ static void hx_edge_compensate(struct hx_algo *algo, struct hx_contact *ct)
+ 	}
+ }
+ 
++/*
++ * edge_comp_mode 1: stretch the outer cell, as the EGoTouchRev service
++ * does.  A centroid within half a cell of the panel edge goes onto the
++ * edge, one between half a cell and 1.005 cells is spread linearly over
++ * 0..1.005 cells, and anything further in is left alone.  (The service
++ * takes the inner end of the first range from a log table indexed by the
++ * position along the edge, which comes out as 1/256 of a cell for all but
++ * the first eighth of each edge; this uses 1/256 throughout.)  @d is the
++ * distance from the edge in Q8 cells.
++ */
++static s32 hx_edge_stretch(s32 d)
++{
++	const s32 full = 128, blend = 129;
++	s32 t;
++
++	if (d <= full)
++		return 1;
++	if (d >= full + blend)
++		return d;
++	t = ((d - full) << 8) / blend;
++	return (d * t + (256 - t)) >> 8;
++}
++
++static void hx_edge_stretch_contact(struct hx_contact *ct)
++{
++	const s32 w = HX_COLS * 256, h = HX_ROWS * 256;
++
++	if (ct->x < 256)
++		ct->x = hx_edge_stretch(max_t(s32, ct->x, 0));
++	else if (w - ct->x < 256)
++		ct->x = w - hx_edge_stretch(max_t(s32, w - ct->x, 0));
++	if (ct->y < 256)
++		ct->y = hx_edge_stretch(max_t(s32, ct->y, 0));
++	else if (h - ct->y < 256)
++		ct->y = h - hx_edge_stretch(max_t(s32, h - ct->y, 0));
++}
++
++/*
++ * The per-contact steps both expansion paths share: carry the macro-zone
++ * area, the per-contact palm test and edge compensation.  Returns false
++ * when the contact is dropped.
++ */
++static bool hx_finish_contact(struct hx_algo *algo, int pi,
++			      struct hx_contact *ct)
++{
++	/*
++	 * ct->area is measured at half the peak and so is roughly the same
++	 * for a fingertip and for a fragment of a palm (measured on the
++	 * panel: 8-20 vs 5-21 cells).  The macro-zone area at the absolute
++	 * threshold is the quantity that can tell them apart; carry it along
++	 * so the contact log can show it.
++	 */
++	ct->zone_area = algo->peaks[pi].zone_area;
++
++	/*
++	 * Per-contact palm test.  ct->area counts only cells at or above
++	 * half the peak, so it measures this contact rather than whatever
++	 * it happens to be connected to -- the right granularity for
++	 * telling a fingertip from the heel of a hand beside it.
++	 * 0 disables it, which is the shipped default.
++	 */
++	if (algo->palm_contact_area &&
++	    ct->area >= algo->palm_contact_area) {
++		algo->stats.rej_contact_area++;
++		return false;
++	}
++
++	if (algo->edge_comp_mode == 1) {
++		if (algo->edge_comp_enabled)
++			hx_edge_stretch_contact(ct);
++	} else if (ct->is_edge) {
++		/* Push edge centroids outward toward physical sensor boundary */
++		hx_edge_compensate(algo, ct);
++	}
++	return true;
++}
++
++/*
++ * Zone split (zone_split), after the EGoTouchRev service's zone expander.
++ *
++ * Peaks are taken weakest first.  Each one that no earlier zone has
++ * reached floods out over the cells at or above its expansion threshold
++ * and also claims the still-positive cells around them, which take no part
++ * in its centroid but stop other zones.  A stronger peak the flood reached
++ * is not grown again; it joins that zone.  A zone with one peak reports its
++ * centroid; a zone with several -- fingers close enough to merge -- is
++ * divided between them by a priority flood (cells are handed out from the
++ * highest signal down, each to the peak whose part reaches it first) and
++ * each part reports its own centroid.  Without it the weaker peak kept the
++ * centroid of the whole merged blob, pulled toward the other finger, and the
++ * stronger one fell back to a 3x3 centroid.
++ */
++static const int hx_dr[] = {-1, -1, -1, 0, 0, 1, 1, 1};
++static const int hx_dc[] = {-1,  0,  1, -1, 1, -1, 0, 1};
++
++static void hx_split_claim(struct hx_algo *algo, int idx, u8 zid)
++{
++	algo->zone_map[idx] = zid;
++	algo->zone_cells[algo->zone_cell_count++] = idx;
++}
++
++static void hx_split_add(struct hx_zone_unit *u, int r, int c, s16 sig)
++{
++	u->area++;
++	u->sig_sum += sig;
++	if (sig > 0) {
++		u->w_col += (s64)c * 128 * sig;
++		u->w_row += (s64)r * 128 * sig;
++		u->w_total += sig;
++	}
++}
++
++static void hx_split_flood(struct hx_algo *algo, int pi)
++{
++	const struct hx_peak *pk = &algo->peaks[pi];
++	struct hx_zone_unit *u = &algo->units[pi];
++	int seed = pk->r * HX_COLS + pk->c;
++	u16 head = 0, tail = 0;
++	u8 zid = pi + 1;
++
++	u->thold = hx_zone_thold(algo->peak_threshold, pk->z);
++	u->peaks[u->n_peaks++] = pi;
++	hx_split_claim(algo, seed, zid);
++	hx_split_add(u, pk->r, pk->c, pk->z);
++	algo->bfs_queue[tail++] = seed;
++
++	while (head != tail) {
++		int idx = algo->bfs_queue[head++];
++		int r = idx / HX_COLS, c = idx % HX_COLS, d;
++
++		for (d = 0; d < 8; d++) {
++			int nr = r + hx_dr[d], nc = c + hx_dc[d], ni;
++			s16 sig;
++
++			if (nr < 0 || nr >= HX_ROWS || nc < 0 || nc >= HX_COLS)
++				continue;
++			ni = nr * HX_COLS + nc;
++			if (algo->zone_map[ni])
++				continue;
++			sig = algo->frame[nr][nc];
++			if (sig >= u->thold) {
++				hx_split_claim(algo, ni, zid);
++				hx_split_add(u, nr, nc, sig);
++				algo->bfs_queue[tail++] = ni;
++			} else if (sig > 0) {
++				hx_split_claim(algo, ni, zid);
++			}
++		}
++	}
++}
++
++/*
++ * Close the zone map: an empty cell with at least three neighbours of one
++ * zone joins it, unless it then still borders an empty cell.  This only
++ * bridges gaps for the partition below.
++ */
++static void hx_split_close(struct hx_algo *algo)
++{
++	u16 n_cand = 0, n_new = 0, i;
++	int d;
++
++	memcpy(algo->split_prev, algo->zone_map, sizeof(algo->split_prev));
++	for (i = 0; i < algo->zone_cell_count; i++) {
++		int idx = algo->zone_cells[i];
++		int r = idx / HX_COLS, c = idx % HX_COLS;
++
++		for (d = 0; d < 8; d++) {
++			int nr = r + hx_dr[d], nc = c + hx_dc[d], ni;
++
++			if (nr < 0 || nr >= HX_ROWS || nc < 0 || nc >= HX_COLS)
++				continue;
++			ni = nr * HX_COLS + nc;
++			if (algo->split_prev[ni] || algo->split_mask[ni])
++				continue;
++			algo->split_mask[ni] = 1;
++			algo->split_cand[n_cand++] = ni;
++		}
++	}
++
++	for (i = 0; i < n_cand; i++) {
++		int idx = algo->split_cand[i];
++		int r = idx / HX_COLS, c = idx % HX_COLS;
++		u8 votes[HX_MAX_PEAKS + 1] = { 0 };
++		u8 best = 0, best_cnt = 0;
++
++		for (d = 0; d < 8; d++) {
++			int nr = r + hx_dr[d], nc = c + hx_dc[d];
++			u8 z;
++
++			if (nr < 0 || nr >= HX_ROWS || nc < 0 || nc >= HX_COLS)
++				continue;
++			z = algo->split_prev[nr * HX_COLS + nc];
++			if (!z || z > HX_MAX_PEAKS)
++				continue;
++			if (++votes[z] > best_cnt) {
++				best_cnt = votes[z];
++				best = z;
++			}
++		}
++		if (best_cnt >= 3) {
++			algo->zone_map[idx] = best;
++			algo->split_new[n_new++] = idx;
++		}
++	}
++
++	for (i = 0; i < n_new; i++) {
++		int idx = algo->split_new[i];
++		int r = idx / HX_COLS, c = idx % HX_COLS;
++
++		for (d = 0; d < 8; d++) {
++			int nr = r + hx_dr[d], nc = c + hx_dc[d];
++
++			if (nr < 0 || nr >= HX_ROWS || nc < 0 || nc >= HX_COLS)
++				continue;
++			if (!algo->zone_map[nr * HX_COLS + nc]) {
++				algo->zone_map[idx] = 0;
++				break;
++			}
++		}
++	}
++
++	for (i = 0; i < n_cand; i++)
++		algo->split_mask[algo->split_cand[i]] = 0;
++}
++
++/*
++ * Priority-flood keys: signal first, then the lower owner, then the lower
++ * cell index, so the order matches the service's exactly.
++ */
++static inline u32 hx_split_key(s16 sig, u8 owner, int idx)
++{
++	return ((u32)(sig + 32768) << 16) | ((u32)(16 - owner) << 12) |
++	       (u32)(4095 - idx);
++}
++
++static void hx_split_push(struct hx_algo *algo, u16 *n, u32 key)
++{
++	u32 *h = algo->split_heap;
++	u16 i = (*n)++;
++
++	while (i > 0 && h[(i - 1) / 2] < key) {
++		h[i] = h[(i - 1) / 2];
++		i = (i - 1) / 2;
++	}
++	h[i] = key;
++}
++
++static u32 hx_split_pop(struct hx_algo *algo, u16 *n)
++{
++	u32 *h = algo->split_heap;
++	u32 top = h[0], last = h[--(*n)];
++	u16 i = 0;
++
++	for (;;) {
++		u16 l = 2 * i + 1, r = l + 1, big = i;
++		u32 v = last;
++
++		if (l < *n && h[l] > v) {
++			big = l;
++			v = h[l];
++		}
++		if (r < *n && h[r] > v)
++			big = r;
++		if (big == i)
++			break;
++		h[i] = h[big];
++		i = big;
++	}
++	if (*n)
++		h[i] = last;
++	return top;
++}
++
++static void hx_split_contact(struct hx_algo *algo, int pi, s64 w_col,
++			     s64 w_row, s32 w_total, u16 area, s32 sig_sum)
++{
++	const struct hx_peak *pk = &algo->peaks[pi];
++	struct hx_contact ct;
++	u8 k, weakest = 0;
++
++	if (w_total > 0) {
++		ct.x = (s32)(w_col * 2 / w_total) + 0x80;
++		ct.y = (s32)(w_row * 2 / w_total) + 0x80;
++	} else {
++		ct.x = pk->c * 256 + 128;
++		ct.y = pk->r * 256 + 128;
++	}
++	ct.area = area;
++	ct.signal_sum = sig_sum;
++	ct.is_edge = (pk->r == 0 || pk->r == HX_ROWS - 1 ||
++		      pk->c == 0 || pk->c == HX_COLS - 1);
++	if (!hx_finish_contact(algo, pi, &ct))
++		return;
++
++	/* With every slot taken, the contact with the least signal goes. */
++	if (algo->contact_count < HIMAX_MAX_TOUCH) {
++		algo->contacts[algo->contact_count++] = ct;
++		return;
++	}
++	for (k = 1; k < HIMAX_MAX_TOUCH; k++)
++		if (algo->contacts[k].signal_sum < algo->contacts[weakest].signal_sum)
++			weakest = k;
++	if (ct.signal_sum > algo->contacts[weakest].signal_sum)
++		algo->contacts[weakest] = ct;
++}
++
++static void hx_split_partition(struct hx_algo *algo, int pi)
++{
++	const struct hx_zone_unit *u = &algo->units[pi];
++	struct {
++		s64 w_col, w_row;
++		s32 w_total, sig_sum;
++		u16 area;
++		u8  peak;
++	} part[HX_SPLIT_PEAKS] = { };
++	u8 zid = pi + 1, n = 0, j;
++	u16 heap_n = 0;
++	int i;
++
++	memset(algo->split_owner, 0, sizeof(algo->split_owner));
++	for (j = 0; j < u->n_peaks; j++) {
++		const struct hx_peak *pk = &algo->peaks[u->peaks[j]];
++		int idx = pk->r * HX_COLS + pk->c;
++
++		if (algo->zone_map[idx] != zid || algo->split_owner[idx])
++			continue;
++		part[n].peak = u->peaks[j];
++		algo->split_owner[idx] = ++n;
++		hx_split_push(algo, &heap_n, hx_split_key(pk->z, n, idx));
++	}
++
++	while (heap_n) {
++		u32 key = hx_split_pop(algo, &heap_n);
++		int idx = 4095 - (key & 0xfff);
++		u8 owner = 16 - ((key >> 12) & 0xf);
++		int r = idx / HX_COLS, c = idx % HX_COLS, d;
++
++		for (d = 0; d < 8; d++) {
++			int nr = r + hx_dr[d], nc = c + hx_dc[d], ni;
++
++			if (nr < 0 || nr >= HX_ROWS || nc < 0 || nc >= HX_COLS)
++				continue;
++			ni = nr * HX_COLS + nc;
++			if (algo->zone_map[ni] != zid || algo->split_owner[ni])
++				continue;
++			algo->split_owner[ni] = owner;
++			hx_split_push(algo, &heap_n,
++				      hx_split_key(algo->frame[nr][nc], owner, ni));
++		}
++	}
++
++	for (i = 0; i < HX_PIXELS; i++) {
++		u8 owner = algo->split_owner[i];
++		s16 sig = algo->frame[i / HX_COLS][i % HX_COLS];
++
++		if (!owner || sig < u->thold)
++			continue;
++		part[owner - 1].area++;
++		part[owner - 1].sig_sum += sig;
++		if (sig > 0) {
++			part[owner - 1].w_col += (s64)(i % HX_COLS) * 128 * sig;
++			part[owner - 1].w_row += (s64)(i / HX_COLS) * 128 * sig;
++			part[owner - 1].w_total += sig;
++		}
++	}
++
++	for (j = 0; j < n; j++)
++		if (part[j].area)
++			hx_split_contact(algo, part[j].peak, part[j].w_col,
++					 part[j].w_row, part[j].w_total,
++					 part[j].area, part[j].sig_sum);
++}
++
++static void hx_split_resolve(struct hx_algo *algo)
++{
++	int pi, pj;
++
++	memset(algo->units, 0, sizeof(algo->units));
++	algo->zone_cell_count = 0;
++
++	for (pi = 0; pi < algo->peak_count; pi++) {
++		const struct hx_peak *pk = &algo->peaks[pi];
++
++		if (!algo->zone_map[pk->r * HX_COLS + pk->c])
++			hx_split_flood(algo, pi);
++	}
++
++	hx_split_close(algo);
++
++	/* Peaks a weaker peak's flood reached join its zone. */
++	for (pi = 0; pi < algo->peak_count; pi++) {
++		const struct hx_peak *pk = &algo->peaks[pi];
++		u8 zid = algo->zone_map[pk->r * HX_COLS + pk->c];
++		struct hx_zone_unit *u;
++		u8 k;
++
++		if (!zid)
++			continue;
++		u = &algo->units[zid - 1];
++		if (!u->area)
++			continue;
++		for (k = 0; k < u->n_peaks && u->peaks[k] != pi; k++)
++			;
++		if (k == u->n_peaks && u->n_peaks < HX_SPLIT_PEAKS)
++			u->peaks[u->n_peaks++] = pi;
++	}
++
++	for (pj = 0; pj < algo->peak_count; pj++) {
++		const struct hx_zone_unit *u = &algo->units[pj];
++
++		if (!u->area || u->w_total == 0)
++			continue;
++		if (u->n_peaks >= 2)
++			hx_split_partition(algo, pj);
++		else
++			hx_split_contact(algo, pj, u->w_col, u->w_row,
++					 u->w_total, u->area, u->sig_sum);
++	}
++}
++
+ void hx_expand_and_resolve(struct hx_algo *algo,
+ 			    struct input_mt_pos *pos, int *cnt)
+ {
+@@ -1316,6 +2039,11 @@ void hx_expand_and_resolve(struct hx_algo *algo,
+ 	memset(algo->zone_map, 0, sizeof(algo->zone_map));
+ 	algo->contact_count = 0;
+ 
++	if (algo->zone_split) {
++		hx_split_resolve(algo);
++		goto out;
++	}
++
+ 	/*
+ 	 * peaks[] is sorted ascending, so with more peaks than slots the
+ 	 * strongest are the last ones.  Taking the first HIMAX_MAX_TOUCH
+@@ -1332,33 +2060,8 @@ void hx_expand_and_resolve(struct hx_algo *algo,
+ 		clean = hx_expand_single_peak(algo, i, ct);
+ 		if (!clean)
+ 			hx_local_centroid(algo, i, ct);
+-		/*
+-		 * ct->area is measured at half the peak and so is roughly the same
+-		 * for a fingertip and for a fragment of a palm (measured on the
+-		 * panel: 8-20 vs 5-21 cells).  The macro-zone area at the absolute
+-		 * threshold is the quantity that can tell them apart; carry it along
+-		 * so the contact log can show it.
+-		 */
+-		ct->zone_area = algo->peaks[i].zone_area;
+-
+-		/*
+-		 * Per-contact palm test.  ct->area counts only cells at or above
+-		 * half the peak, so it measures this contact rather than whatever
+-		 * it happens to be connected to -- the right granularity for
+-		 * telling a fingertip from the heel of a hand beside it.
+-		 * 0 disables it, which is the shipped default.
+-		 */
+-		if (algo->palm_contact_area &&
+-		    ct->area >= algo->palm_contact_area) {
+-			algo->stats.rej_contact_area++;
+-			continue;
+-		}
+-
+-		/* Push edge centroids outward toward physical sensor boundary */
+-		if (ct->is_edge)
+-			hx_edge_compensate(algo, ct);
+-
+-		algo->contact_count++;
++		if (hx_finish_contact(algo, i, ct))
++			algo->contact_count++;
+ 	}
+ 
+ 	/* If more peaks than slots, keep the strongest signal_sum contacts */
+@@ -1380,6 +2083,7 @@ void hx_expand_and_resolve(struct hx_algo *algo,
+ 		algo->contact_count = HIMAX_MAX_TOUCH;
+ 	}
+ 
++out:
+ 	/* Convert Q8.8 grid coordinates to output space matching rxtx2xy:
+ 	 *   x = ct->x / 6       (maps to [~21, ~2539])
+ 	 *   y = 5 * ct->y / 32  (maps to [~20, ~1580])
+@@ -1484,12 +2188,44 @@ static void hx_filter_update(const struct hx_algo *algo, struct hx_track *trk)
+ 	trk->fy += ((s64)a * ey + (1 << 15)) >> 16;
+ }
+ 
++/*
++ * Row ghost (ghost_row_filter), after the EGoTouchRev service's tracker.
++ * On a poorly grounded or charger-coupled panel a finger can raise a weaker
++ * false peak elsewhere on its own sensor row.  With two or three contacts
++ * on the panel, a new one whose centroid lies on the same row as another
++ * contact with at least twice its signal is not started; it is looked at
++ * again next frame.
++ */
++static bool hx_row_ghost(struct hx_algo *algo, int det_cnt, int j)
++{
++	const struct hx_contact *a = &algo->contacts[j];
++	int k;
++
++	if (!algo->ghost_row_filter || det_cnt < 2 || det_cnt > 3 ||
++	    j >= algo->contact_count)
++		return false;
++
++	for (k = 0; k < det_cnt && k < algo->contact_count; k++) {
++		const struct hx_contact *b = &algo->contacts[k];
++
++		if (k == j || (a->y + 128) >> 8 != (b->y + 128) >> 8)
++			continue;
++		if ((s64)a->signal_sum * 2 < b->signal_sum) {
++			algo->stats.rej_row_ghost++;
++			return true;
++		}
++	}
++	return false;
++}
++
+ void hx_track_contacts(struct hx_algo *algo,
+ 		       struct input_mt_pos *det, int det_cnt)
+ {
+ 	bool det_used[HIMAX_MAX_TOUCH]     = { false };
+ 	bool track_matched[HIMAX_MAX_TOUCH] = { false };
+ 	u16  jump_released = 0;  /* bitmask: slots freed by jump detection */
++	u16  freed = 0;          /* bitmask: slots freed this frame         */
++	u16  born = 0;           /* bitmask: slots started this frame       */
+ 	struct hx_match_candidate cand[HIMAX_MAX_TOUCH * HIMAX_MAX_TOUCH];
+ 	int cand_cnt = 0;
+ 	int i, j, k;
+@@ -1502,9 +2238,10 @@ void hx_track_contacts(struct hx_algo *algo,
+ 	for (i = 0; i < HIMAX_MAX_TOUCH; i++) {
+ 		struct hx_track *trk = &algo->tracks[i];
+ 
+-		if (trk->palm == HX_TRK_PALM_SENT)
++		if (trk->palm == HX_TRK_PALM_SENT) {
+ 			hx_reset_track(trk);
+-		else if (trk->palm == HX_TRK_PALM_NEW)
++			freed |= 1u << i;
++		} else if (trk->palm == HX_TRK_PALM_NEW)
+ 			track_matched[i] = true;
+ 	}
+ 
+@@ -1608,15 +2345,38 @@ void hx_track_contacts(struct hx_algo *algo,
+ 			trk->debounce--;
+ 			/* Reported from now on: this is the down position. */
+ 			if (trk->debounce == 0) {
+-				trk->anchor_x = trk->x;
+-				trk->anchor_y = trk->y;
++				trk->anchor_x = trk->ref_x = trk->x;
++				trk->anchor_y = trk->ref_y = trk->y;
+ 				hx_filter_reset(trk);
+ 			}
++		} else if (trk->age == 2 && trk->anchored &&
++			   algo->track_tap_radius > 0) {
++			s64 ax = trk->x - trk->ref_x;
++			s64 ay = trk->y - trk->ref_y;
++			/* Positions span fewer than 4096 units: cap it there. */
++			s64 r2 = 2 * (s64)min_t(s32, algo->track_tap_radius, 4096);
++
++			/*
++			 * Reported in the frame it was born: the contact was
++			 * still growing then and its centroid moves a few
++			 * units more (median 9, 15% over 20 on the panel).
++			 * Keep reporting that first position but measure the
++			 * lock from here, where it has settled -- unless it
++			 * moved more than twice the radius, which is the
++			 * finger, not the contact.
++			 */
++			if (ax * ax + ay * ay > r2 * r2) {
++				trk->anchored = false;
++			} else {
++				trk->ref_x = trk->x;
++				trk->ref_y = trk->y;
++			}
++			hx_filter_update(algo, trk);
+ 		} else {
+ 			if (trk->anchored) {
+-				s32 ax = trk->x - trk->anchor_x;
+-				s32 ay = trk->y - trk->anchor_y;
+-				s32 r  = algo->track_tap_radius;
++				s64 ax = trk->x - trk->ref_x;
++				s64 ay = trk->y - trk->ref_y;
++				s64 r  = algo->track_tap_radius;
+ 
+ 				/* Released for good once it moves; also when the lock is off. */
+ 				if (r <= 0 || ax * ax + ay * ay > r * r)
+@@ -1643,6 +2403,7 @@ void hx_track_contacts(struct hx_algo *algo,
+ 		if (algo->track_active_guard && !algo->touch_active) {
+ 			algo->stats.tracks_guard_kill++;
+ 			hx_reset_track(trk);
++			freed |= 1u << i;
+ 			continue;
+ 		}
+ 
+@@ -1650,19 +2411,63 @@ void hx_track_contacts(struct hx_algo *algo,
+ 		if (trk->missed > algo->track_lost_frames) {
+ 			algo->stats.tracks_lost++;
+ 			hx_reset_track(trk);
++			freed |= 1u << i;
+ 		}
+ 	}
+ 
++	freed |= jump_released;
++
+ 	/* Create new slots for unmatched detections. */
+ 	for (j = 0; j < det_cnt; j++) {
+ 		struct hx_track *trk = NULL;
++		s32 sig = j < algo->contact_count ?
++			  algo->contacts[j].signal_sum : 0;
++		u8 debounce = algo->debounce_base;
++		u16 avoid;
+ 
+-		if (det_used[j])
++		if (det_used[j] || hx_row_ghost(algo, det_cnt, j))
+ 			continue;
+ 
++		/*
++		 * A one-frame noise blip only becomes a touch if it is reported
++		 * in the frame it appears: track_min_signal keeps the weakest
++		 * from starting at all, and debounce_strong reports at once only
++		 * a contact strong enough to be a finger.
++		 */
++		if (algo->track_min_signal && sig < algo->track_min_signal) {
++			algo->stats.rej_weak_start++;
++			continue;
++		}
++		if (algo->debounce_strong && sig >= algo->debounce_strong) {
++			debounce = 0;
++			/*
++			 * Right next to a finger already on the panel a strong
++			 * new contact is more often a piece of that finger
++			 * split off for a frame than a landing: debounce it as
++			 * usual.  Fingers landing together are not held back.
++			 */
++			for (k = 0; k < HIMAX_MAX_TOUCH; k++) {
++				if (algo->tracks[k].active && !(born & (1u << k)) &&
++				    !algo->tracks[k].palm &&
++				    hx_dist2_predicted(&det[j], &algo->tracks[k]) <
++				    4 * (s64)algo->track_dist2_max) {
++					debounce = algo->debounce_base;
++					break;
++				}
++			}
++		}
++
++		/*
++		 * A slot keeps its tracking id for as long as it is reported in
++		 * consecutive frames, so a lift and a new touch in one slot
++		 * within one frame would read as a jump.  A track reported in
++		 * the frame it is born keeps off every slot freed this frame;
++		 * otherwise its first frame is unreported and only the slots
++		 * jump detection freed need avoiding.
++		 */
++		avoid = debounce ? jump_released : freed;
+ 		for (i = 0; i < HIMAX_MAX_TOUCH; i++) {
+-			if (!algo->tracks[i].active &&
+-			    !(jump_released & (1u << i))) {
++			if (!algo->tracks[i].active && !(avoid & (1u << i))) {
+ 				trk = &algo->tracks[i];
+ 				break;
+ 			}
+@@ -1670,17 +2475,18 @@ void hx_track_contacts(struct hx_algo *algo,
+ 		if (!trk)
+ 			continue;
+ 
++		born |= 1u << i;
+ 		trk->active   = true;
+ 		trk->age      = 1;
+ 		trk->missed   = 0;
+-		trk->debounce = algo->debounce_base;
++		trk->debounce = debounce;
+ 		trk->x        = det[j].x;
+ 		trk->y        = det[j].y;
+ 		trk->vx       = 0;
+ 		trk->vy       = 0;
+ 		trk->anchored = algo->track_tap_radius > 0;
+-		trk->anchor_x = det[j].x;
+-		trk->anchor_y = det[j].y;
++		trk->anchor_x = trk->ref_x = det[j].x;
++		trk->anchor_y = trk->ref_y = det[j].y;
+ 		hx_filter_reset(trk);
+ 		if (j < algo->contact_count)
+ 			trk->signal_sum = algo->contacts[j].signal_sum;
+diff --git a/drivers/input/touchscreen/hx-algo.h b/drivers/input/touchscreen/hx-algo.h
+index f5de68e..df4d205 100644
+--- a/drivers/input/touchscreen/hx-algo.h
++++ b/drivers/input/touchscreen/hx-algo.h
+@@ -3,7 +3,7 @@
+  * Himax HX83121A touch algorithm — data structures and interface.
+  *
+  * All algorithm state lives in struct hx_algo, which is allocated once in
+- * probe via devm_kzalloc and referenced from struct himax_ts_data.
++ * probe via kvzalloc and referenced from struct himax_ts_data.
+  */
+ #ifndef HX_ALGO_H
+ #define HX_ALGO_H
+@@ -25,6 +25,12 @@
+ /* Maximum simultaneous reported contacts. */
+ #define HIMAX_MAX_TOUCH 10
+ 
++/* Histogram bins for the adaptive baseline's median, centred on zero. */
++#define HX_BASE_HIST   2048
++
++/* Peaks one zone can hold when zone_split partitions it. */
++#define HX_SPLIT_PEAKS 16
++
+ /*
+  * Upper limits of the hand_* tunables; sysfs rejects larger values.
+  * hand_age saturates at U8_MAX, which reads as "not hand", so the hold has
+@@ -97,11 +103,15 @@ struct hx_track {
+ 	 * Anchor lock (track_tap_radius): until the track has moved more than
+ 	 * track_tap_radius from where it was first reported (debounce reaching
+ 	 * 0), that down position is reported instead of x/y.  Matching and
+-	 * prediction still use x/y.
++	 * prediction still use x/y.  The distance is taken from ref_x/ref_y:
++	 * the down position, or for a track reported in the frame it was born
++	 * the position one frame later, once the contact has settled.
+ 	 */
+ 	bool anchored;
+ 	s32  anchor_x;
+ 	s32  anchor_y;
++	s32  ref_x;
++	s32  ref_y;
+ 	/*
+ 	 * Position filter (track_filter_mincutoff): the filtered position in
+ 	 * 1/256 units and the low-passed velocity in units per second.
+@@ -165,6 +175,10 @@ struct hx_stats {
+ 	u32 rej_isolated;       /* dropped by the isolated-spike gate      */
+ 	u32 rej_minarea;        /* dropped by the minimum-area filter      */
+ 	u32 rej_edgeweak;       /* dropped as a weak edge peak             */
++	u32 rej_merged;         /* merged into a close, stronger peak      */
++	u32 rej_row_ghost;      /* new contact taken for a row ghost       */
++	u32 rej_weak_start;     /* new contact below track_min_signal      */
++	u32 fw_finger_frames;   /* frames the firmware reported a finger   */
+ 	u32 contacts;           /* contacts handed to the tracker          */
+ 	u32 rej_contact_area;   /* dropped by the per-contact palm test    */
+ 	u32 tracks_new;         /* slots created                           */
+@@ -186,6 +200,28 @@ struct hx_stats {
+  * integrated signal and whether they sat on the grid border.  Keeping the
+  * last few makes that difference readable after the fact.
+  */
++/**
++ * struct hx_zone_unit - a zone grown from one peak when zone_split is on.
++ * @w_col, @w_row, @w_total: weighted centroid sums over the cells at or
++ *              above @thold
++ * @sig_sum:    signal over those cells
++ * @area:       number of those cells
++ * @thold:      expansion threshold of the peak that grew the zone
++ * @n_peaks:    peaks inside the zone: the one that grew it, then any it
++ *              swallowed
++ * @peaks:      their indices into hx_algo::peaks
++ */
++struct hx_zone_unit {
++	s64 w_col;
++	s64 w_row;
++	s32 w_total;
++	s32 sig_sum;
++	u16 area;
++	s16 thold;
++	u8  n_peaks;
++	u8  peaks[HX_SPLIT_PEAKS];
++};
++
+ struct hx_newlog {
+ 	u32  seq;
+ 	s32  x;
+@@ -199,7 +235,7 @@ struct hx_newlog {
+ /**
+  * struct hx_algo - all algorithm state, allocated once in probe.
+  *
+- * Memory budget: ~40 KB.  Never allocate on the stack.
++ * Memory budget: ~95 KB, from kvzalloc.  Never allocate on the stack.
+  */
+ struct hx_algo {
+ 	/* ---- Frame buffers ---- */
+@@ -218,6 +254,29 @@ struct hx_algo {
+ 	u8  zone_map[HX_PIXELS];             /* per-pixel zone-ID map       */
+ 	u16 bfs_queue[HX_PIXELS];            /* ring-buffer BFS queue       */
+ 
++	/* ---- Adaptive baseline (baseline_mode 1) ---- */
++	s32  base_q8[HX_PIXELS];       /* per-cell baseline, 1/256 ADC units */
++	u8   base_hold[HX_PIXELS];     /* frames a released cell stays held  */
++	u16  base_hist[HX_BASE_HIST];  /* scratch: histogram for the median  */
++	bool base_init;
++	u8   base_mode;                /* baseline_mode the state belongs to */
++	bool base_prev_finger;
++	bool base_had_freeze;          /* a cell passed the gate last frame  */
++	u8   base_recovery;            /* frames spent in recovery           */
++	bool fw_finger;                /* the firmware reports a finger; set
++					* by the bus code before each frame */
++
++	/* ---- Zone split (zone_split) ---- */
++	struct hx_zone_unit units[HX_MAX_PEAKS];
++	u16 zone_cells[HX_PIXELS];     /* cells claimed, in claiming order   */
++	u16 zone_cell_count;
++	u8  split_prev[HX_PIXELS];     /* zone_map before dilation           */
++	u8  split_mask[HX_PIXELS];     /* dilation candidate already listed  */
++	u16 split_cand[HX_PIXELS];     /* dilation candidates                */
++	u16 split_new[HX_PIXELS];      /* cells the dilation added           */
++	u8  split_owner[HX_PIXELS];    /* partition owner, 1-based           */
++	u32 split_heap[HX_PIXELS];     /* priority flood, packed keys        */
++
+ 	/* ---- Detection results ---- */
+ 	struct hx_macro_zone zones[HX_MAX_ZONES];
+ 	u8   zone_count;
+@@ -248,7 +307,13 @@ struct hx_algo {
+ 
+ 	/* ---- Tunable parameters (sysfs-writable, atomically updated) ---- */
+ 	/* Preprocessing */
++	u8   baseline_mode;        /* 0 fixed, 1 adaptive with a gate,
++				    * 2 the same with the CMF before it   */
++	bool baseline_fw_finger;   /* adaptive: trust the firmware's finger
++				    * flag (off: assume a finger always)  */
++	s16  baseline_gate;        /* adaptive: cells above this pass      */
+ 	bool cmf_enabled;          /* CMF on/off (default: true)           */
++	u8   cmf_mode;             /* bit 0 rows, bit 1 columns            */
+ 	s16  cmf_exclusion;        /* exclude pixels > this from CMF mean  */
+ 	s16  cmf_max_correction;   /* clamp per-row/col offset             */
+ 	bool iir_enabled;          /* IIR temporal filter on/off           */
+@@ -259,6 +324,15 @@ struct hx_algo {
+ 	u8   iir_gate_ratio_q8;    /* dyn threshold = max * ratio/256      */
+ 	/* Detection */
+ 	s16  macro_threshold;      /* minimum pixel value to seed BFS      */
++	s16  peak_edge_threshold;  /* peak threshold on column 1, the next
++				    * to last column and the last row
++				    * (0 = peak_threshold)                */
++	s16  peak_drift_limit;     /* scale of the pressure-drift test
++				    * (0 = peak_threshold)                */
++	u8   peak_merge_radius;    /* drop the weaker of two peaks this
++				    * close with a shallow dip between
++				    * them (0 = off)                      */
++	u8   min_area;             /* minimum zone area for a peak         */
+ 	s16  peak_threshold;       /* minimum peak signal                  */
+ 	u16  iso_nbr_ratio_q8;     /* isolated-spike gate: keep a peak only
+ 	                            * when nbr_sum * 256 >= z * this        */
+@@ -282,10 +356,23 @@ struct hx_algo {
+ 	s16  edge_boost_pct;       /* signal boost for border pixels (%)   */
+ 	s16  edge_push_q8;         /* max outward push in Q8.8 (128=0.5)  */
+ 	s16  edge_blend_q8;        /* blend range in Q8.8 (512=2 cells)   */
++	u8   edge_comp_mode;       /* 0 push, 1 stretch the outer cell     */
++	u8   edge_peak_mode;       /* 0 all edges vs the strongest edge
++				    * peak, 1 outer columns vs their
++				    * strongest cell                      */
++	bool zone_split;           /* split zones holding several peaks    */
+ 	/* Tracking */
+ 	s32  track_dist2_max;      /* max squared distance for match       */
+ 	u8   track_lost_frames;    /* missed frames before slot release    */
+ 	u8   debounce_base;        /* new-slot debounce count              */
++	s32  debounce_strong;      /* a new contact with at least this
++				    * signal is reported at once, unless
++				    * track_start_debounce holds the first
++				    * touch back (0 = off)                */
++	s32  track_min_signal;     /* a new contact needs this much signal
++				    * to start a track (0 = off)          */
++	bool ghost_row_filter;     /* drop a new contact on the row of one
++				    * with twice its signal (2-3 contacts) */
+ 	bool track_smoothing;      /* position smoothing on/off            */
+ 	bool track_active_guard;   /* kill stray tracks before 1st stable  */
+ 	u8   track_start_debounce; /* frames to confirm touch_active       */

@@ -1,0 +1,143 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] wifi: mac80211: set RX block ack sessions up again after
+ WoWLAN
+
+Suspending with a WoWLAN config tears down the RX block ack sessions and
+sends DELBA, but the peer doesn't always end up without a session. ath11k
+firmware answers the next ADDBA request of the AP by itself while the host
+sleeps, and the same state also shows up without any sign of that, cause
+unknown. Either way the AP keeps sending A-MPDUs on a session that mac80211
+doesn't know and that the driver's reorder queue isn't set up for, and the
+next suspend doesn't help because there is no session left to tear down.
+Nothing changes until the next association, and TCP sees out-of-order data
+for all that time.
+
+The checks for unexpected aggregation don't catch this on devices that
+reorder in hardware. The one for the BlockAck ack policy is in the reorder
+path that fast-rx skips on them, and BAR frames don't reach mac80211.
+
+Remember the TIDs that lost their session to a WoWLAN suspend, and send a
+DELBA for them after every resume, or right away if the driver refuses to
+suspend, until a new session comes up. That is the same frame with the same
+reason as for unexpected aggregation, and mac80211 ignores it as a peer
+when it has no session for the TID. A peer may not react at once, so this
+can take until the next resume. TIDs that had no session at suspend aren't
+covered.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ net/mac80211/agg-rx.c      | 18 ++++++++++++++++++
+ net/mac80211/ieee80211_i.h |  1 +
+ net/mac80211/pm.c          |  6 ++++++
+ net/mac80211/sta_info.h    |  3 +++
+ net/mac80211/util.c        |  2 ++
+ 5 files changed, 30 insertions(+)
+
+diff --git a/net/mac80211/agg-rx.c b/net/mac80211/agg-rx.c
+index 9629e0006..98bba1603 100644
+--- a/net/mac80211/agg-rx.c
++++ b/net/mac80211/agg-rx.c
+@@ -460,6 +460,7 @@ void __ieee80211_start_rx_ba_session(struct sta_info *sta,
+ 	if (status == WLAN_STATUS_SUCCESS) {
+ 		__set_bit(tid, sta->ampdu_mlme.agg_session_valid);
+ 		__clear_bit(tid, sta->ampdu_mlme.unexpected_agg);
++		__clear_bit(tid, sta->ampdu_mlme.rx_ba_resync);
+ 		sta->ampdu_mlme.tid_rx_token[tid] = dialog_token;
+ 	}
+ 
+@@ -469,6 +470,23 @@ void __ieee80211_start_rx_ba_session(struct sta_info *sta,
+ 					  timeout, addba_ext_data);
+ }
+ 
++/*
++ * A device that stays up in WoWLAN can answer ADDBA requests by itself while
++ * the host sleeps, and a peer doesn't always act on the DELBA sent on suspend.
++ * Either way it may keep a session that isn't known here, and it never sends a
++ * new ADDBA for it. Ask it to set one up until it does.
++ */
++void ieee80211_sta_resync_rx_ba(struct sta_info *sta)
++{
++	unsigned int tid;
++
++	for_each_set_bit(tid, sta->ampdu_mlme.rx_ba_resync, IEEE80211_NUM_TIDS)
++		ieee80211_send_delba(sta->sdata, sta->sta.addr, tid,
++				     WLAN_BACK_RECIPIENT,
++				     WLAN_REASON_QSTA_REQUIRE_SETUP,
++				     ieee80211_s1g_use_ndp_ba(sta->sdata, sta));
++}
++
+ void ieee80211_process_addba_request(struct ieee80211_local *local,
+ 				     struct sta_info *sta,
+ 				     struct ieee80211_mgmt *mgmt,
+diff --git a/net/mac80211/ieee80211_i.h b/net/mac80211/ieee80211_i.h
+index 056437041..a36574cb5 100644
+--- a/net/mac80211/ieee80211_i.h
++++ b/net/mac80211/ieee80211_i.h
+@@ -2288,6 +2288,7 @@ void __ieee80211_start_rx_ba_session(struct sta_info *sta,
+ 				     u16 buf_size, bool tx, bool auto_seq,
+ 				     bool req_ndp,
+ 				     const u8 addba_ext_data);
++void ieee80211_sta_resync_rx_ba(struct sta_info *sta);
+ void ieee80211_sta_tear_down_BA_sessions(struct sta_info *sta,
+ 					 enum ieee80211_agg_stop_reason reason);
+ void ieee80211_process_delba(struct ieee80211_sub_if_data *sdata,
+diff --git a/net/mac80211/pm.c b/net/mac80211/pm.c
+index c6dc494ad..f239e6355 100644
+--- a/net/mac80211/pm.c
++++ b/net/mac80211/pm.c
+@@ -44,6 +44,11 @@ int __ieee80211_suspend(struct ieee80211_hw *hw, struct cfg80211_wowlan *wowlan,
+ 		lockdep_assert_wiphy(local->hw.wiphy);
+ 		list_for_each_entry(sta, &local->sta_list, list) {
+ 			set_sta_flag(sta, WLAN_STA_BLOCK_BA);
++			if (wowlan)
++				bitmap_or(sta->ampdu_mlme.rx_ba_resync,
++					  sta->ampdu_mlme.rx_ba_resync,
++					  sta->ampdu_mlme.agg_session_valid,
++					  IEEE80211_NUM_TIDS);
+ 			ieee80211_sta_tear_down_BA_sessions(
+ 					sta, AGG_STOP_LOCAL_REQUEST);
+ 		}
+@@ -125,6 +130,7 @@ int __ieee80211_suspend(struct ieee80211_hw *hw, struct cfg80211_wowlan *wowlan,
+ 				list_for_each_entry(sta,
+ 						    &local->sta_list, list) {
+ 					clear_sta_flag(sta, WLAN_STA_BLOCK_BA);
++					ieee80211_sta_resync_rx_ba(sta);
+ 				}
+ 			}
+ 			ieee80211_wake_queues_by_reason(hw,
+diff --git a/net/mac80211/sta_info.h b/net/mac80211/sta_info.h
+index 5da3142d8..29c785a10 100644
+--- a/net/mac80211/sta_info.h
++++ b/net/mac80211/sta_info.h
+@@ -275,6 +275,8 @@ struct tid_ampdu_rx {
+  * @agg_session_valid: bitmap indicating which TID has a rx BA session open on
+  * @unexpected_agg: bitmap indicating which TID already sent a delBA due to
+  *	unexpected aggregation related frames outside a session
++ * @rx_ba_resync: bitmap indicating which TID lost its rx BA session to a
++ *	suspend with WoWLAN and has no new one yet
+  * @work: work struct for starting/stopping aggregation
+  * @tid_tx: aggregation info for Tx per TID
+  * @tid_start_tx: sessions where start was requested, not just protected
+@@ -292,6 +294,7 @@ struct sta_ampdu_mlme {
+ 	unsigned long tid_rx_manage_offl[BITS_TO_LONGS(2 * IEEE80211_NUM_TIDS)];
+ 	unsigned long agg_session_valid[BITS_TO_LONGS(IEEE80211_NUM_TIDS)];
+ 	unsigned long unexpected_agg[BITS_TO_LONGS(IEEE80211_NUM_TIDS)];
++	unsigned long rx_ba_resync[BITS_TO_LONGS(IEEE80211_NUM_TIDS)];
+ 	/* tx */
+ 	struct wiphy_work work;
+ 	struct tid_ampdu_tx __rcu *tid_tx[IEEE80211_NUM_TIDS];
+diff --git a/net/mac80211/util.c b/net/mac80211/util.c
+index 59f73dabe..af88319a1 100644
+--- a/net/mac80211/util.c
++++ b/net/mac80211/util.c
+@@ -2318,6 +2318,8 @@ int ieee80211_reconfig(struct ieee80211_local *local)
+ 				ieee80211_sta_tear_down_BA_sessions(
+ 						sta, AGG_STOP_LOCAL_REQUEST);
+ 			clear_sta_flag(sta, WLAN_STA_BLOCK_BA);
++			if (local->resuming)
++				ieee80211_sta_resync_rx_ba(sta);
+ 		}
+ 	}
+ 

@@ -1,3 +1,14 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] KernelSU: compat: provide ksu_compat_strncpy() on kernels without strncpy()
+
+Mainline Linux removed strncpy(), causing link failures in KernelSU's
+allowlist.c, apk_sign.c, throne_tracker.c, and dispatch.c. Provide a static
+inline ksu_compat_strncpy() fallback in kernel/compat/kernel_compat.h when
+KSU_KERNEL_HAS_STRNCPY is not defined.
+
+Origin: local
+Upstream-Status: Pending
+---
 diff --git a/kernel/compat/kernel_compat.h b/kernel/compat/kernel_compat.h
 index 50141dc..f230701 100644
 --- a/kernel/compat/kernel_compat.h

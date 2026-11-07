@@ -1,0 +1,174 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] drm/panel: himax-hx83121a: read the panel from the board's ID
+ pins
+
+The Matebook E Go ships with a BOE or a CSOT PPC357DB1-4. Their init
+sequences differ, and with the wrong one the panel only shows part of the
+picture, yet both use one device tree, which can only name one of them.
+
+The board says which panel it has: the UEFI display driver reads two strapped
+pins, and reports the BOE panel for ID0 low and ID1 high and the CSOT panel
+for both low. Read them at probe through a new optional panel-id-gpios and
+switch to the BOE description on the BOE value. Anything else keeps the panel
+that the compatible names, so a board that reads differently behaves as it
+did before.
+
+The two panel_descs differ only in their init sequences, which run in
+prepare(), so choosing at probe is enough. Userspace tells the panels apart
+by the device tree's compatible, so update it too, the way i2c-of-prober
+updates a node's status; a device tree that already names the BOE panel is
+left alone.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ .../display/panel/himax,hx83121a.yaml         |  9 +++
+ drivers/gpu/drm/panel/Kconfig                 |  1 +
+ drivers/gpu/drm/panel/panel-himax-hx83121a.c  | 81 +++++++++++++++++++
+ 3 files changed, 91 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/display/panel/himax,hx83121a.yaml b/Documentation/devicetree/bindings/display/panel/himax,hx83121a.yaml
+index e067a2f6d..836031d49 100644
+--- a/Documentation/devicetree/bindings/display/panel/himax,hx83121a.yaml
++++ b/Documentation/devicetree/bindings/display/panel/himax,hx83121a.yaml
+@@ -31,6 +31,15 @@ properties:
+   reset-gpios:
+     maxItems: 1
+ 
++  panel-id-gpios:
++    items:
++      - description: ID0 pin
++      - description: ID1 pin
++    description:
++      Pins strapped by the board to say which panel it was built with, on
++      boards sold with more than one. The compatible names the panel to use
++      when they don't say otherwise.
++
+   avdd-supply:
+     description: analog positive supply for IC
+ 
+diff --git a/drivers/gpu/drm/panel/Kconfig b/drivers/gpu/drm/panel/Kconfig
+index 3eac4d0f8..dbea02157 100644
+--- a/drivers/gpu/drm/panel/Kconfig
++++ b/drivers/gpu/drm/panel/Kconfig
+@@ -235,6 +235,7 @@ config DRM_PANEL_HIMAX_HX83121A
+ 	select DRM_DISPLAY_HELPER
+ 	select DRM_DISPLAY_DSC_HELPER
+ 	select DRM_KMS_HELPER
++	select OF_DYNAMIC
+ 	help
+ 	  Say Y here if you want to enable support for Himax HX83121A-based
+ 	  display panels, such as the one found in the HUAWEI Matebook E Go
+diff --git a/drivers/gpu/drm/panel/panel-himax-hx83121a.c b/drivers/gpu/drm/panel/panel-himax-hx83121a.c
+index 023d0a9dc..392ef1b4b 100644
+--- a/drivers/gpu/drm/panel/panel-himax-hx83121a.c
++++ b/drivers/gpu/drm/panel/panel-himax-hx83121a.c
+@@ -7,12 +7,14 @@
+  */
+ 
+ #include <linux/backlight.h>
++#include <linux/cleanup.h>
+ #include <linux/delay.h>
+ #include <linux/gpio/consumer.h>
+ #include <linux/module.h>
+ #include <linux/of.h>
+ #include <linux/of_graph.h>
+ #include <linux/regulator/consumer.h>
++#include <linux/slab.h>
+ 
+ #include <drm/display/drm_dsc.h>
+ #include <drm/display/drm_dsc_helper.h>
+@@ -583,6 +585,79 @@ static const struct drm_display_mode ppc357db1_4_modes[] = {
+ 	},
+ };
+ 
++static const struct panel_desc boe_ppc357db1_4_desc;
++
++/* Userspace reads the panel's vendor from the device tree, so keep it true. */
++static int himax_set_boe_compatible(struct device_node *np)
++{
++	static const char * const compatible[] = {
++		"boe,ppc357db1-4", "himax,hx83121a",
++	};
++	int ret;
++
++	struct of_changeset *ocs __free(kfree) = kzalloc_obj(*ocs);
++	if (!ocs)
++		return -ENOMEM;
++
++	of_changeset_init(ocs);
++	ret = of_changeset_remove_property(ocs, np,
++					   of_find_property(np, "compatible", NULL));
++	if (!ret)
++		ret = of_changeset_add_prop_string_array(ocs, np, "compatible",
++							 compatible,
++							 ARRAY_SIZE(compatible));
++	if (!ret)
++		ret = of_changeset_apply(ocs);
++	if (ret) {
++		/* ocs needs to be explicitly cleaned up before being freed. */
++		of_changeset_destroy(ocs);
++		return ret;
++	}
++
++	/* ocs has to exist as long as the change is applied. */
++	void *ptr __always_unused = no_free_ptr(ocs);
++
++	return 0;
++}
++
++/*
++ * The Matebook E Go ships with either PPC357DB1-4, and two pins strapped by the
++ * board say which; its UEFI display driver reads them to pick the panel's
++ * configuration. ID0 low and ID1 high is the BOE panel, both low the CSOT one,
++ * ID0 high is neither. Its one device tree names the CSOT panel and lists the
++ * pins, so only the BOE value changes anything here.
++ */
++static const struct panel_desc *himax_detect_panel(struct device *dev,
++						   const struct panel_desc *desc)
++{
++	struct gpio_descs *ids;
++	int id0, id1, ret;
++
++	ids = gpiod_get_array_optional(dev, "panel-id", GPIOD_IN);
++	if (IS_ERR(ids))
++		return ERR_CAST(ids);
++	if (!ids)
++		return desc;
++	if (ids->ndescs != 2) {
++		gpiod_put_array(ids);
++		return desc;
++	}
++
++	id0 = gpiod_get_value_cansleep(ids->desc[0]);
++	id1 = gpiod_get_value_cansleep(ids->desc[1]);
++	gpiod_put_array(ids);
++	dev_info(dev, "panel ID pins: %d %d\n", id0, id1);
++
++	if (id0 != 0 || id1 != 1 || desc == &boe_ppc357db1_4_desc)
++		return desc;
++
++	ret = himax_set_boe_compatible(dev->of_node);
++	if (ret)
++		dev_warn(dev, "Failed to update compatible: %d\n", ret);
++
++	return &boe_ppc357db1_4_desc;
++}
++
+ static int himax_probe(struct mipi_dsi_device *dsi)
+ {
+ 	struct mipi_dsi_device_info dsi_info = {"dsi-secondary", 0, NULL};
+@@ -613,6 +688,12 @@ static int himax_probe(struct mipi_dsi_device *dsi)
+ 	desc = of_device_get_match_data(dev);
+ 	if (!desc)
+ 		return -ENODEV;
++
++	desc = himax_detect_panel(dev, desc);
++	if (IS_ERR(desc))
++		return dev_err_probe(dev, PTR_ERR(desc),
++				     "Failed to get panel-id-gpios\n");
++
+ 	ctx->desc = desc;
+ 	ctx->dsc = *desc->dsc_cfg;
+ 

@@ -1,0 +1,35 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] arm64: dts: qcom: sc8280xp-huawei-gaokun3: attach privacy LED to rear OV13B10 sensor
+
+Attach the GPIO 34 privacy indicator LED (leds = <&privacy_led>;
+led-names = "privacy") to the rear OV13B10 camera node in addition to the front
+HI846 sensor so v4l2-subdev turns on white:indicator whenever either camera is
+streaming.
+
+Origin: local
+Upstream-Status: Pending
+---
+diff --git a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3-camera.dtsi b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3-camera.dtsi
+index 44b09c8..9c511c8 100644
+--- a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3-camera.dtsi
++++ b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3-camera.dtsi
+@@ -225,6 +225,16 @@
+ 
+ 		lens-focus = <&voice_coil_motor>;
+ 
++		/*
++		 * Same indicator as the front camera (GPIO34, white:indicator).
++		 * The removed s5k3l6 rear node carried it too; v4l2 lights it on
++		 * s_stream (v4l2-subdev.c call_s_stream), so either sensor
++		 * streaming turns it on. Not async: led_get() is not a v4l2
++		 * subdev, unlike flash-leds.
++		 */
++		leds = <&privacy_led>;
++		led-names = "privacy";
++
+ 		orientation = <1>;
+ 		/* Counter-clockwise (video-interface-devices.yaml). Confirmed on
+ 		 * device 2026-09-24: preview upright, SENSOR_ORIENTATION 180. */
+-- 
+2.50.1 (Apple Git-155)
+

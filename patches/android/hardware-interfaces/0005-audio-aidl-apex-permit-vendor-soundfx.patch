@@ -1,0 +1,62 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] audio: aidl: apex: permit dlopen from /vendor/${LIB}/soundfx
+
+The com.android.hardware.audio vendor APEX runs in an isolated linker
+namespace that only permits libraries from the APEX itself, /system/${LIB},
+and /system_ext/${LIB}. Vendor audio effect libraries installed in
+/vendor/lib64/soundfx/ cannot be dlopened by EffectFactory.
+
+Add a linker.config.pb to com.android.hardware.audio that appends
+/vendor/${LIB}/soundfx to permittedPaths.
+
+Origin: local
+Upstream-Status: Inappropriate [device-specific configuration]
+---
+diff --git a/audio/aidl/default/apex/com.android.hardware.audio/Android.bp b/audio/aidl/default/apex/com.android.hardware.audio/Android.bp
+index 510fee5..30c370c 100644
+--- a/audio/aidl/default/apex/com.android.hardware.audio/Android.bp
++++ b/audio/aidl/default/apex/com.android.hardware.audio/Android.bp
+@@ -50,6 +50,8 @@ apex {
+         "android.hardware.bluetooth.audio.xml",
+         "audio_eraser_classifier_model",
+         "audio_eraser_separator_model",
++        // gaokun3: lets the effect HAL dlopen device effect libraries from /vendor/${LIB}/soundfx
++        "com.android.hardware.audio-linker-config",
+     ],
+     required: [
+         "aidl_audio_set_configurations_bfbs",
+@@ -59,3 +61,13 @@ apex {
+         "hfp_codec_capabilities_xml",
+     ],
+ }
++
++// The default namespace of a vendor APEX only permits the APEX itself, /system and
++// /system_ext, so EffectFactory's dlopen() of an effect library that audio_effects_config.xml
++// resolves to /vendor/${LIB}/soundfx fails with "not accessible for the namespace". Permit
++// exactly that directory (the libraries' dependencies still resolve inside the APEX).
++linker_config {
++    name: "com.android.hardware.audio-linker-config",
++    src: "linker.config.json",
++    installable: false,
++}
+diff --git a/audio/aidl/default/apex/com.android.hardware.audio/file_contexts b/audio/aidl/default/apex/com.android.hardware.audio/file_contexts
+index 41a6ada..13e6460 100644
+--- a/audio/aidl/default/apex/com.android.hardware.audio/file_contexts
++++ b/audio/aidl/default/apex/com.android.hardware.audio/file_contexts
+@@ -1,4 +1,5 @@
+ (/.*)?                                                              u:object_r:vendor_file:s0
+ /etc(/.*)?                                                          u:object_r:vendor_configs_file:s0
+ /bin/hw/android\.hardware\.audio\.service-aidl\.example             u:object_r:hal_audio_default_exec:s0
+-/bin/hw/android\.hardware\.audio\.effect\.service-aidl\.example     u:object_r:hal_audio_default_exec:s0
+\ No newline at end of file
++/bin/hw/android\.hardware\.audio\.effect\.service-aidl\.example     u:object_r:hal_audio_default_exec:s0
++/etc/linker\.config\.pb                                              u:object_r:linkerconfig_file:s0
+diff --git a/audio/aidl/default/apex/com.android.hardware.audio/linker.config.json b/audio/aidl/default/apex/com.android.hardware.audio/linker.config.json
+new file mode 100644
+index 0000000..78d5c47
+--- /dev/null
++++ b/audio/aidl/default/apex/com.android.hardware.audio/linker.config.json
+@@ -0,0 +1,3 @@
++{
++  "permittedPaths": ["/vendor/${LIB}/soundfx"]
++}

@@ -1,0 +1,102 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] media: iris: guard threaded IRQ handler against register access after power-off
+
+All callers of iris_vpu_power_off() hold core->lock, and the threaded IRQ
+handler iris_hfi_isr_handler() also acquires core->lock before calling
+iris_vpu_clear_interrupt(). Using synchronous disable_irq() inside
+iris_vpu_power_off() while holding core->lock can deadlock if the IRQ thread is
+waiting on core->lock, whereas using disable_irq_nosync() without a power-state
+check allows an already-woken IRQ thread to acquire core->lock after power-off
+and read clock-gated VPU registers (causing a synchronous external abort on
+SC8280XP).
+
+Use disable_irq_nosync() in iris_vpu_power_off() and track hardware power state
+via core->hw_powered under core->lock. If core->hw_powered is false when
+iris_hfi_isr_handler() acquires core->lock, skip register and queue accesses and
+only balance the top-half disable_irq_nosync() call.
+
+Origin: local
+Upstream-Status: Pending
+---
+diff --git a/drivers/media/platform/qcom/iris/iris_core.h b/drivers/media/platform/qcom/iris/iris_core.h
+index 24da60448cf2..b4a9469f6e86 100644
+--- a/drivers/media/platform/qcom/iris/iris_core.h
++++ b/drivers/media/platform/qcom/iris/iris_core.h
+@@ -73,6 +73,8 @@ struct qcom_ubwc_cfg_data;
+  * @hfi_sys_ops: iris HFI system ops
+  * @core_init_done: structure of signal completion for system response
+  * @intr_status: interrupt status
++ * @hw_powered: the core is powered and its registers may be accessed; written and
++ *		read only under @lock (see iris_hfi_isr_handler())
+  * @sys_error_handler: a delayed work for handling system fatal error
+  * @instances: a list_head of all instances
+  * @inst_fw_caps_dec: an array of supported instance capabilities by decoder
+@@ -118,6 +120,7 @@ struct iris_core {
+ 	const struct iris_hfi_sys_ops		*hfi_sys_ops;
+ 	struct completion			core_init_done;
+ 	u32					intr_status;
++	bool					hw_powered;
+ 	struct delayed_work			sys_error_handler;
+ 	struct list_head			instances;
+ 	/* encoder and decoder have overlapping caps, so two different arrays are required */
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_common.c b/drivers/media/platform/qcom/iris/iris_hfi_common.c
+index 8769ec61f117..aff27934c8f0 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_common.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_common.c
+@@ -105,12 +105,28 @@ irqreturn_t iris_hfi_isr_handler(int irq, void *data)
+ 		return IRQ_NONE;
+ 
+ 	mutex_lock(&core->lock);
++	if (!core->hw_powered) {
++		/*
++		 * The core was powered off while this thread waited for the lock
++		 * (every iris_vpu_power_off() caller holds core->lock). Its
++		 * registers may now be clock/power gated, and on this SoC even a
++		 * read of a gated block is a fatal external abort, so neither clear
++		 * the interrupt nor run the response handler (it can ring the
++		 * doorbell via iris_hfi_queue_cmd_write()). Keep the enable_irq()
++		 * below: it balances iris_hfi_isr()'s disable_irq_nosync(), while
++		 * iris_vpu_power_off()'s own disable keeps the line off until the
++		 * next power-on.
++		 */
++		mutex_unlock(&core->lock);
++		goto out;
++	}
+ 	pm_runtime_mark_last_busy(core->dev);
+ 	iris_vpu_clear_interrupt(core);
+ 	mutex_unlock(&core->lock);
+ 
+ 	core->hfi_sys_ops->sys_hfi_response_handler(core);
+ 
++out:
+ 	if (!iris_vpu_watchdog(core, core->intr_status))
+ 		enable_irq(irq);
+ 
+diff --git a/drivers/media/platform/qcom/iris/iris_vpu_common.c b/drivers/media/platform/qcom/iris/iris_vpu_common.c
+index e4847c107709..3d7a52580005 100644
+--- a/drivers/media/platform/qcom/iris/iris_vpu_common.c
++++ b/drivers/media/platform/qcom/iris/iris_vpu_common.c
+@@ -231,13 +231,14 @@ void iris_vpu_power_off_hw(struct iris_core *core)
+ 
+ void iris_vpu_power_off(struct iris_core *core)
+ {
++	core->hw_powered = false;
+ 	iris_opp_set_rate(core->dev, 0);
+ 	core->iris_platform_data->vpu_ops->power_off_hw(core);
+ 	core->iris_platform_data->vpu_ops->power_off_controller(core);
+ 	iris_unset_icc_bw(core);
+ 
+ 	if (!iris_vpu_watchdog(core, core->intr_status))
+-		disable_irq(core->irq);
++		disable_irq_nosync(core->irq);
+ }
+ 
+ int iris_vpu_power_on_controller(struct iris_core *core)
+@@ -487,6 +488,7 @@ int iris_vpu_power_on(struct iris_core *core)
+ 
+ 	iris_vpu_interrupt_init(core);
+ 	core->intr_status = 0;
++	core->hw_powered = true;
+ 	enable_irq(core->irq);
+ 
+ 	return 0;

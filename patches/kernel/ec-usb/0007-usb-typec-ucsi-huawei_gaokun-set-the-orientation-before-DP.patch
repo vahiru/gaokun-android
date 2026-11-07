@@ -1,0 +1,106 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] usb: typec: ucsi: huawei_gaokun: Set the orientation before DP
+
+The driver sets the plug orientation only in its .connector_status()
+callback, which UCSI calls once GET_CONNECTOR_STATUS for a connector
+change has completed. The USB event from the EC carries the orientation
+along with the mode and HPD state, but its handler only switches the QMP
+PHY mode and notifies HPD, assuming the orientation has been set by then.
+
+It may not have been. On a MateBook E Go, GET_CONNECTOR_STATUS sometimes
+times out when a DP monitor is plugged in, and on port 1 UCSI got no
+connector status at all. The PHY then keeps the orientation of the
+previous plug, and if the monitor is plugged in the other way round,
+link training fails:
+
+  [drm:msm_dp_ctrl_link_train_1_2] *ERROR* max v_level reached
+  [drm:msm_dp_ctrl_link_train_1_2] *ERROR* link training #1 on phy 0 failed. ret=-11
+  [drm:msm_dp_bridge_atomic_enable] *ERROR* Failed link training (rc=-104)
+
+followed by vblank timeouts until the monitor is unplugged. In ten plugs
+with the plug flipped each time, UCSI had no connector status in time
+for six; four of them failed this way, and the other two happened to
+match the previous orientation. The four with a status all worked.
+
+Set the orientation from the USB event before the mode and HPD. Do not
+take the connector lock for it: UCSI holds the lock while it waits for a
+command completion, which only the EC notifier thread can deliver. As
+USB events are far more frequent than orientation changes, only update
+the orientation when it has changed, which also saves the uevent.
+
+Fixes: 00327d7f2c8c ("usb: typec: ucsi: add Huawei Matebook E Go ucsi driver")
+Cc: stable@vger.kernel.org
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c | 30 ++++++++++++++++++---
+ 1 file changed, 26 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c b/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c
+index 2d8b249..45851aa 100644
+--- a/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c
++++ b/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c
+@@ -180,6 +180,7 @@ static void gaokun_ucsi_update_connector(struct ucsi_connector *con)
+ static void gaokun_set_orientation(struct ucsi_connector *con,
+ 				   struct gaokun_ucsi_port *port)
+ {
++	enum typec_orientation orientation;
+ 	enum gaokun_ucsi_ccx ccx;
+ 	unsigned long flags;
+ 
+@@ -187,7 +188,9 @@ static void gaokun_set_orientation(struct ucsi_connector *con,
+ 	ccx = port->ccx;
+ 	spin_unlock_irqrestore(&port->lock, flags);
+ 
+-	typec_set_orientation(con->port, CCX_TO_ORI(ccx));
++	orientation = CCX_TO_ORI(ccx);
++	if (typec_get_orientation(con->port) != orientation)
++		typec_set_orientation(con->port, orientation);
+ }
+ 
+ static void gaokun_ucsi_connector_status(struct ucsi_connector *con)
+@@ -299,6 +302,7 @@ static int gaokun_ucsi_refresh(struct gaokun_ucsi *uec)
+ static void gaokun_ucsi_handle_usb_mode(struct gaokun_ucsi_port *port)
+ {
+ 	struct gaokun_ucsi *uec = port->ucsi;
++	struct ucsi_connector *con;
+ 	int idx = port->idx, ret;
+ 
+ 	/*
+@@ -314,14 +318,32 @@ static void gaokun_ucsi_handle_usb_mode(struct gaokun_ucsi_port *port)
+ 		return;
+ 	}
+ 
++	/*
++	 * Set the orientation from this event before the mode and HPD, so that
++	 * the PHY lanes match the plug when DP starts link training. The
++	 * .connector_status() callback sets it too, but only once UCSI's
++	 * GET_CONNECTOR_STATUS completes, which can be later or time out. Not
++	 * under the connector lock: in the EC notifier thread, UCSI may hold it
++	 * while waiting for a command completion that only this thread can
++	 * deliver. That leaves a small race with the callback: both set the
++	 * orientation from port->ccx, so they only disagree if the callback
++	 * read it just before this event changed it and writes after this, in
++	 * which case the orientation stays stale until the next event on the
++	 * port.
++	 */
++	if (idx < uec->ucsi->cap.num_connectors) {
++		con = &uec->ucsi->connector[idx];
++		if (con->port)
++			gaokun_set_orientation(con, port);
++	}
++
+ 	ret = typec_mux_set(port->typec_mux, &port->state);
+ 	if (ret)
+ 		dev_err(uec->dev, "failed to set mux %d\n", ret);
+ 
+ 	/*
+-	 * UCSI callback .connector_status() have set orientation. Report HPD
+-	 * while in DP alt mode, and once more when the port leaves it (unplug
+-	 * or a switch to USB), or the connector stays connected.
++	 * Report HPD while in DP alt mode, and once more when the port leaves
++	 * it (unplug or a switch to USB), or the connector stays connected.
+ 	 */
+ 	if (port->bridge) {
+ 		bool hpd = port->svid == USB_TYPEC_DP_SID && port->hpd_state;

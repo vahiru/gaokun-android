@@ -1,0 +1,26 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] drm/panel: himax-hx83121a: report a linear backlight scale
+
+The 12-bit brightness register is linear in panel luminance from at least
+level 256 up. Say so: userspace otherwise applies a perceptual curve of its
+own on top, as drm_hwcomposer does for an unknown or non-linear scale.
+
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/gpu/drm/panel/panel-himax-hx83121a.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/gpu/drm/panel/panel-himax-hx83121a.c b/drivers/gpu/drm/panel/panel-himax-hx83121a.c
+index 15bbc1f91..f25a37881 100644
+--- a/drivers/gpu/drm/panel/panel-himax-hx83121a.c
++++ b/drivers/gpu/drm/panel/panel-himax-hx83121a.c
+@@ -214,7 +214,7 @@ himax_create_backlight(struct mipi_dsi_device *dsi)
+ 		.type = BACKLIGHT_RAW,
+ 		.brightness = 512,
+ 		.max_brightness = 4095,
+-		.scale = BACKLIGHT_SCALE_NON_LINEAR,
++		.scale = BACKLIGHT_SCALE_LINEAR,
+ 	};
+ 
+ 	return devm_backlight_device_register(dev, dev_name(dev), dev, dsi,

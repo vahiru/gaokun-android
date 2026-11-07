@@ -16,8 +16,8 @@
 # 所以 Play 服务换了服务器后，要等系统醒着满 POLL 秒，新服务器的包才能叫醒系统。
 #
 # 和 shill 一样防唤醒风暴：一分钟内固件叫醒系统超过 3 次，或十分钟内超过 10 次，就撤掉规则 BACKOFF 秒。
-# 次数取自内核 ath11k_wow 唤醒源的 event_count（patches/0202），这个唤醒源还让系统每次被叫醒后醒 1 秒。
-# 内核里没有这个唤醒源，就说明 WAKE# 那几个补丁（patches/0199–0202）也不在，什么也不做。
+# 次数取自内核 ath11k_wow 唤醒源的 event_count（patches/kernel/wifi/0027），这个唤醒源还让系统每次被叫醒后醒 1 秒。
+# 内核里没有这个唤醒源，就说明 WAKE# 那几个补丁（patches/kernel/pcie-pm/0011–0012、patches/kernel/dts/0021、patches/kernel/wifi/0027）也不在，什么也不做。
 # 原理和排查见 docs/dev/deep-sleep.md 的 Wi-Fi 一节。
 #
 # 只用 mksh 和 toybox 的命令，不依赖 awk。
@@ -32,7 +32,7 @@ say() {
     log -t gaokun3-wifiwake "$*"
 }
 
-# ath11k 在 probe 时把 ath11k_wow 注册在 Wi-Fi 的 PCI 设备下面（patches/0202），比 wlan0 出现得早。
+# ath11k 在 probe 时把 ath11k_wow 注册在 Wi-Fi 的 PCI 设备下面（patches/kernel/wifi/0027），比 wlan0 出现得早。
 # 只在 ath11k_pci 绑定的设备目录里找：/sys/class/wakeup 下的别的唤醒源，有的在本域读不了的目录里（比如 EC 的 power_supply）。
 wakeup_source() {
     for _d in /sys/bus/pci/drivers/ath11k_pci/*/wakeup/wakeup*; do

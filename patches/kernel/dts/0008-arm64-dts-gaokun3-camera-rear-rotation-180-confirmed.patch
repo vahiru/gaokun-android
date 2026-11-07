@@ -1,0 +1,23 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] arm64: dts: qcom: sc8280xp-huawei-gaokun3: drop FIXME comment on rear camera 180-degree rotation
+
+The rear OV13B10 sensor's rotation = <180> property has been verified on
+hardware with libcamera and the Android Camera HAL. Update the comment in
+sc8280xp-huawei-gaokun3-camera.dtsi accordingly.
+
+Origin: local
+Upstream-Status: Pending
+---
+--- a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3-camera.dtsi
++++ b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3-camera.dtsi
+@@ -226,7 +226,9 @@
+ 		lens-focus = <&voice_coil_motor>;
+ 
+ 		orientation = <1>;
+-		rotation = <180>; /* FIXME */
++		/* Counter-clockwise (video-interface-devices.yaml). Confirmed on
++		 * device 2026-09-24: preview upright, SENSOR_ORIENTATION 180. */
++		rotation = <180>;
+ 
+ 		port {
+ 			ov13b10_ep: endpoint {

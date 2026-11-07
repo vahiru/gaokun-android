@@ -1,7 +1,7 @@
 From 113942949bd70b84bdf588aba1f6758eaeabcd63 Mon Sep 17 00:00:00 2001
 From: Akisaira <akisaira@outlook.com>
 Date: Wed, 4 Nov 2026 02:05:49 +1100
-Subject: [PATCH 12/13] ipa: libipa: agc: Filter over the frames between
+Subject: [PATCH] ipa: libipa: agc: Filter over the frames between
  statistics
 
 AgcMeanLuminance moves the exposure value 20% of the way to its target
@@ -22,6 +22,9 @@ instead of 2.50 s and in 0.23 s instead of 1.17 s, without overshoot.
 
 Signed-off-by: Akisaira <akisaira@outlook.com>
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+Origin: local
+Upstream-Status: Pending
 ---
  src/ipa/libipa/agc.cpp                |  8 ++++++++
  src/ipa/libipa/agc.h                  |  1 +

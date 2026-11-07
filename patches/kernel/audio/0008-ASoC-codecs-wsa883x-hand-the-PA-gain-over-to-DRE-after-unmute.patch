@@ -1,0 +1,60 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] ASoC: codecs: wsa883x: hand the PA gain over to DRE after
+ unmute
+
+With the compander (COMP) port in use, the codec's compander raises quiet
+signals and sends the matching attenuation over that port for the amplifier's
+dynamic range enhancement (DRE) to apply. The amplifier only applies it in DRE
+mode, i.e. with DRE_CTL_1[0] cleared.
+
+The driver sets that bit (gain from CSR) on unmute and only clears it on mute,
+so during playback the PA runs at the fixed CSR gain and the compander's boost
+reaches the speaker unbalanced. On a Huawei MateBook E Go (two WSA8835,
+compander on at both ends), a 1 kHz tone swept over 39 dB comes out over only
+22 dB, quiet signals 14.5 dB too loud, and any bass content pulls the rest of
+the spectrum down by 7 to 14 dB.
+
+Clear the bit 3 ms after enabling the PA, as the downstream driver does after
+PA on. Measured on the same machine with the bit cleared during playback, the
+sweep comes out over 34 dB and bass moves the rest by less than 4 dB.
+
+Fixes: cdb09e623143 ("ASoC: codecs: wsa883x: add control, dapm widgets and map")
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ sound/soc/codecs/wsa883x.c | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/sound/soc/codecs/wsa883x.c b/sound/soc/codecs/wsa883x.c
+index 468d2b38a..4d812f879 100644
+--- a/sound/soc/codecs/wsa883x.c
++++ b/sound/soc/codecs/wsa883x.c
+@@ -1381,6 +1381,7 @@ static int wsa883x_set_sdw_stream(struct snd_soc_dai *dai,
+ static int wsa883x_digital_mute(struct snd_soc_dai *dai, int mute, int stream)
+ {
+ 	struct snd_soc_component *component = dai->component;
++	struct wsa883x_priv *wsa883x = snd_soc_component_get_drvdata(component);
+ 
+ 	if (mute) {
+ 		snd_soc_component_write_field(component, WSA883X_DRE_CTL_1,
+@@ -1396,6 +1397,19 @@ static int wsa883x_digital_mute(struct snd_soc_dai *dai, int mute, int stream)
+ 					      WSA883X_GLOBAL_PA_EN_MASK,
+ 					      WSA883X_GLOBAL_PA_ENABLE);
+ 
++		/*
++		 * With the compander port in use, hand the PA gain over to DRE
++		 * once the PA is up, as the downstream driver does 3 ms after
++		 * enabling it. The codec's compander boosts quiet signals and
++		 * sends the matching attenuation over that port, which the PA
++		 * only applies in DRE mode; left at the CSR gain, the boost
++		 * reaches the speaker as heavy compression.
++		 */
++		if (wsa883x->port_enable[WSA883X_PORT_COMP]) {
++			usleep_range(3000, 3100);
++			snd_soc_component_write_field(component, WSA883X_DRE_CTL_1,
++						      WSA883X_DRE_GAIN_EN_MASK, 0);
++		}
+ 	}
+ 
+ 	return 0;

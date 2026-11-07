@@ -1,0 +1,55 @@
+From 12a0367fcb5aae0a3949f5eae38e44377ce91e96 Mon Sep 17 00:00:00 2001
+From: Valentine Burley <valentine.burley@collabora.com>
+Date: Mon, 7 Sep 2026 14:38:45 +0200
+Subject: [PATCH] u_gralloc: Mark internal imapper helpers static
+
+Fixes -Wmissing-prototypes build failures.
+
+Signed-off-by: Valentine Burley <valentine.burley@collabora.com>
+Reviewed-by: Yiwei Zhang <zzyiwei@chromium.org>
+Part-of: <https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/44278>
+Origin: upstream, https://gitlab.freedesktop.org/mesa/mesa/-/commit/12a0367fcb5aae0a3949f5eae38e44377ce91e96
+Upstream-Status: Backport [https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/44278]
+---
+ src/util/u_gralloc/u_gralloc_imapper4_api.cpp | 4 ++--
+ src/util/u_gralloc/u_gralloc_imapper5_api.cpp | 2 +-
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/src/util/u_gralloc/u_gralloc_imapper4_api.cpp b/src/util/u_gralloc/u_gralloc_imapper4_api.cpp
+index 224d16a80cf1..f17fb13af37c 100644
+--- a/src/util/u_gralloc/u_gralloc_imapper4_api.cpp
++++ b/src/util/u_gralloc/u_gralloc_imapper4_api.cpp
+@@ -34,7 +34,7 @@ using android::hardware::graphics::mapper::V4_0::IMapper;
+ using MetadataType =
+    android::hardware::graphics::mapper::V4_0::IMapper::MetadataType;
+ 
+-Error
++static Error
+ GetMetadata(android::sp<IMapper> mapper, const native_handle_t *buffer,
+             MetadataType type, hidl_vec<uint8_t> *metadata)
+ {
+@@ -55,7 +55,7 @@ GetMetadata(android::sp<IMapper> mapper, const native_handle_t *buffer,
+    return error;
+ }
+ 
+-std::optional<std::vector<PlaneLayout>>
++static std::optional<std::vector<PlaneLayout>>
+ GetPlaneLayouts(android::sp<IMapper> mapper, const native_handle_t *buffer)
+ {
+    hidl_vec<uint8_t> encoded_layouts;
+diff --git a/src/util/u_gralloc/u_gralloc_imapper5_api.cpp b/src/util/u_gralloc/u_gralloc_imapper5_api.cpp
+index dfef0cc87358..7a020cc7cd0d 100644
+--- a/src/util/u_gralloc/u_gralloc_imapper5_api.cpp
++++ b/src/util/u_gralloc/u_gralloc_imapper5_api.cpp
+@@ -30,7 +30,7 @@ using android::GraphicBufferMapper;
+ using android::OK;
+ using android::status_t;
+ 
+-std::optional<std::vector<PlaneLayout>>
++static std::optional<std::vector<PlaneLayout>>
+ GetPlaneLayouts(const native_handle_t *buffer)
+ {
+    std::vector<PlaneLayout> plane_layouts;
+-- 
+GitLab
+

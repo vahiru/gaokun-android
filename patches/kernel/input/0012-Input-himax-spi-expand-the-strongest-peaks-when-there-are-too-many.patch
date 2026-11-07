@@ -1,0 +1,37 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] Input: himax-spi: expand the strongest peaks when peak_count exceeds HIMAX_MAX_TOUCH
+
+hx_detect_peaks() sorts detected peaks in ascending order of signal strength,
+but hx_expand_and_resolve() previously iterated from index 0 and stopped after
+HIMAX_MAX_TOUCH (10) peaks, dropping the strongest peaks whenever palm fragments
+pushed peak_count above 10.
+
+Start peak expansion at max(0, peak_count - HIMAX_MAX_TOUCH) so the weakest
+peaks are skipped and the strongest HIMAX_MAX_TOUCH peaks are expanded.
+
+Origin: local
+Upstream-Status: Pending
+---
+diff --git a/drivers/input/touchscreen/hx-algo.c b/drivers/input/touchscreen/hx-algo.c
+index acbcd6ac0..0d2b8dbb1 100644
+--- a/drivers/input/touchscreen/hx-algo.c
++++ b/drivers/input/touchscreen/hx-algo.c
+@@ -996,9 +996,16 @@ void hx_expand_and_resolve(struct hx_algo *algo,
+ 	memset(algo->zone_map, 0, sizeof(algo->zone_map));
+ 	algo->contact_count = 0;
+ 
+-	n = min_t(int, algo->peak_count, HIMAX_MAX_TOUCH);
++	/*
++	 * peaks[] is sorted ascending, so with more peaks than slots the
++	 * strongest are the last ones.  Taking the first HIMAX_MAX_TOUCH
++	 * dropped exactly those; skip the weakest instead and keep the
++	 * ascending expansion order among the rest.
++	 */
++	n = algo->peak_count;
++	i = n > HIMAX_MAX_TOUCH ? n - HIMAX_MAX_TOUCH : 0;
+ 
+-	for (i = 0; i < n; i++) {
++	for (; i < n; i++) {
+ 		struct hx_contact *ct = &algo->contacts[algo->contact_count];
+ 		bool clean;
+ 

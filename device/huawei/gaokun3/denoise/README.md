@@ -18,7 +18,7 @@
 | `../sepolicy/gk3denoise.te` | `gk3denoise`独立SELinux域及音频HAL连接权限规则 |
 | `../ueventd.gaokun3.rc` | 将`/dev/fastrpc-cdsp`节点所有者设为`system` |
 | `../device.mk` | 打包服务二进制、私有运行库、DSP侧skel组件、上下文模型与许可证文件 |
-| 内核补丁`patches/0205` | 将CDSP的FastRPC上下文标记为`dma-coherent`，修复CDSP加载skel时因缓存一致性时序触发的`AEE_EUNABLETOLOAD`错误 |
+| 内核补丁`patches/kernel/dts/0022` | 将CDSP的FastRPC上下文标记为`dma-coherent`，修复CDSP加载skel时因缓存一致性时序触发的`AEE_EUNABLETOLOAD`错误 |
 
 ## 二、关键实现机制
 

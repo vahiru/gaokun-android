@@ -1,0 +1,104 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] media: iris: avoid flushing DPBs on gen1 EOS and reset last-buffer state on START
+
+When a gen1 decoder finishes draining and receives the zero-length EOS buffer,
+iris_hfi_gen1_session_ftb_done() previously issued HFI_FLUSH_OUTPUT, causing the
+firmware to return all internal DPB buffers. If the client subsequently seeks by
+issuing V4L2_DEC_CMD_START without cycling streamoff/streamon on CAPTURE (as
+v4l2_codec2 does when already in Idle state), no DPBs remain queued in firmware
+and decoding produces no frames. In addition, inst->last_buffer_dequeued was
+only cleared on streamon, preventing subsequent drains from marking the LAST
+buffer.
+
+Skip the automatic HFI_FLUSH_OUTPUT on EOS (controlled by module parameter
+qcom_iris.eos_flush, default false) and clear inst->last_buffer_dequeued and the
+m2m stopped state in iris_vdec_start_cmd().
+
+Origin: local
+Upstream-Status: Inappropriate [firmware workaround]
+---
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen1_response.c b/drivers/media/platform/qcom/iris/iris_hfi_gen1_response.c
+index bfd7495..314167f 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen1_response.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen1_response.c
+@@ -425,14 +425,23 @@ static void iris_hfi_gen1_session_ftb_done(struct iris_inst *inst, void *packet)
+ 	}
+ 
+ 	if ((hfi_flags & HFI_BUFFERFLAG_EOS) && !filled_len) {
+-		reinit_completion(&inst->flush_completion);
+-
+-		flush_pkt.shdr.hdr.size = sizeof(struct hfi_session_flush_pkt);
+-		flush_pkt.shdr.hdr.pkt_type = HFI_CMD_SESSION_FLUSH;
+-		flush_pkt.shdr.session_id = inst->session_id;
+-		flush_pkt.flush_type = HFI_FLUSH_OUTPUT;
+-		if (!iris_hfi_queue_cmd_write(core, &flush_pkt, flush_pkt.shdr.hdr.size))
+-			inst->flush_responses_pending++;
++		/*
++		 * Upstream flushes the output port here, returning the DPBs to the host.
++		 * Because gen1 does not re-queue DPBs on V4L2_DEC_CMD_START, a decode
++		 * resumed after a drain without cycling streamoff (as v4l2_codec2 does
++		 * on seek) consumes input but produces no output. Match venus by keeping
++		 * the DPBs unless eos_flush is enabled.
++		 */
++		if (READ_ONCE(iris_eos_flush)) {
++			reinit_completion(&inst->flush_completion);
++
++			flush_pkt.shdr.hdr.size = sizeof(struct hfi_session_flush_pkt);
++			flush_pkt.shdr.hdr.pkt_type = HFI_CMD_SESSION_FLUSH;
++			flush_pkt.shdr.session_id = inst->session_id;
++			flush_pkt.flush_type = HFI_FLUSH_OUTPUT;
++			if (!iris_hfi_queue_cmd_write(core, &flush_pkt, flush_pkt.shdr.hdr.size))
++				inst->flush_responses_pending++;
++		}
+ 
+ 		iris_inst_sub_state_change_drain_last(inst);
+ 	}
+diff --git a/drivers/media/platform/qcom/iris/iris_instance.h b/drivers/media/platform/qcom/iris/iris_instance.h
+index c157a01..71ed2ea 100644
+--- a/drivers/media/platform/qcom/iris/iris_instance.h
++++ b/drivers/media/platform/qcom/iris/iris_instance.h
+@@ -36,6 +36,8 @@ enum iris_fmt_type_cap {
+  * then both streamon) is carried out; see iris_vdec.c.
+  */
+ extern unsigned int iris_seek_mode;
++/* Whether to flush the output port when the EOS buffer returns; see iris_vdec.c */
++extern bool iris_eos_flush;
+ 
+ /**
+  * struct iris_inst - holds per video instance parameters
+diff --git a/drivers/media/platform/qcom/iris/iris_vdec.c b/drivers/media/platform/qcom/iris/iris_vdec.c
+index f25b7da..15e2164 100644
+--- a/drivers/media/platform/qcom/iris/iris_vdec.c
++++ b/drivers/media/platform/qcom/iris/iris_vdec.c
+@@ -378,6 +378,15 @@ unsigned int iris_seek_mode = 1;
+ module_param_named(seek_mode, iris_seek_mode, uint, 0644);
+ MODULE_PARM_DESC(seek_mode, "gaokun3: decoder seek (OUTPUT streamoff after CAPTURE streamoff): 1 flush and continue like venus (default), 0 upstream STOP + restart");
+ 
++/*
++ * Y = upstream behavior (flush the output port when the EOS buffer returns).
++ * Returning the DPBs on EOS leaves none queued if decoding resumes via
++ * V4L2_DEC_CMD_START without a CAPTURE streamoff/streamon cycle.
++ */
++bool iris_eos_flush;
++module_param_named(eos_flush, iris_eos_flush, bool, 0644);
++MODULE_PARM_DESC(eos_flush, "gaokun3: flush the output port when the EOS buffer comes back (upstream); N keeps the DPBs with the firmware like venus so decoding can resume after a drain");
++
+ int iris_vdec_streamon_input(struct iris_inst *inst)
+ {
+ 	int ret;
+@@ -561,6 +570,15 @@ int iris_vdec_start_cmd(struct iris_inst *inst)
+ 		return -EBUSY;
+ 	}
+ 
++	/*
++	 * Decoding can resume via V4L2_DEC_CMD_START without a streamoff (for
++	 * example when v4l2_codec2 seeks after a drain), so reset
++	 * last_buffer_dequeued and the m2m stopped state here to allow the
++	 * subsequent drain to mark its EOS buffer LAST again.
++	 */
++	inst->last_buffer_dequeued = false;
++	v4l2_m2m_clear_state(inst->m2m_ctx);
++
+ 	return iris_inst_change_sub_state(inst, clear_sub_state, 0);
+ }
+ 

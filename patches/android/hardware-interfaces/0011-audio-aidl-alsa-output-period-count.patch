@@ -1,0 +1,65 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] audio: aidl: alsa: allow overriding built-in output period count via ro.vendor.audio.primary.out_period_count
+
+alsa_utils derives the ALSA period_count of all built-in devices from a single
+property (ro.hardware.audio.tinyalsa.period_count, default 4), shared by
+playback and capture. Playback can run with 3 periods (3 x 480 frames = 30 ms,
+cutting output latency by ~10 ms), whereas capture requires 4 periods to
+buffer incoming audio while the capture hook runs synchronous IPC.
+
+Read ro.vendor.audio.primary.out_period_count in openProxyForAttachedDevice()
+for PCM_OUT devices after profile_fill_builtin_device_info(): when set to >= 2,
+keep the total block size (period_size * period_count) unchanged and repartition
+it into the requested number of periods.
+
+Origin: local
+Upstream-Status: Inappropriate [device-specific tuning]
+---
+diff --git a/audio/aidl/default/alsa/UtilsAlsa.cpp b/audio/aidl/default/alsa/UtilsAlsa.cpp
+index 6332fbf..6ac6bc0 100644
+--- a/audio/aidl/default/alsa/UtilsAlsa.cpp
++++ b/audio/aidl/default/alsa/UtilsAlsa.cpp
+@@ -22,6 +22,7 @@
+ #include <Utils.h>
+ #include <aidl/android/media/audio/common/AudioFormatType.h>
+ #include <aidl/android/media/audio/common/PcmType.h>
++#include <android-base/properties.h>
+ #include <audio_utils/primitives.h>
+ #include <cutils/compiler.h>
+ 
+@@ -274,6 +275,27 @@ void applyGainToFloatBuffer(float* floatBuffer, const size_t bufferSizeBytes, co
+     }
+ }
+ 
++// gaokun3: alsa_utils takes the period count of every built-in device from
++// ro.hardware.audio.tinyalsa.period_count, playback and capture alike. Playback can run with fewer
++// periods than capture needs (the capture hook processes 85 ms blocks while the ALSA buffer keeps
++// filling), so ro.vendor.audio.primary.out_period_count sets it for output devices only. The block
++// alsa_utils asked for (period_size * period_count) stays the same; only the number of periods it
++// is cut into changes. The kernel may still round the period size up (q6apm-dai: multiples of 480
++// frames). Unset or below 2 keeps alsa_utils' choice.
++void applyOutputPeriodCount(const DeviceProfile& deviceProfile, alsa_device_profile* profile) {
++    if (deviceProfile.direction != PCM_OUT) return;
++    const unsigned periodCount = static_cast<unsigned>(
++            ::android::base::GetIntProperty("ro.vendor.audio.primary.out_period_count", 0));
++    struct pcm_config& config = profile->default_config;
++    if (periodCount < 2 || config.period_count == 0 || periodCount == config.period_count) return;
++    const unsigned blockFrames = config.period_size * config.period_count;
++    config.period_count = periodCount;
++    config.period_size = blockFrames / periodCount;
++    profile->min_period_size = profile->max_period_size = config.period_size;
++    LOG(DEBUG) << __func__ << ": address=" << deviceProfile << " period_count " << periodCount
++               << ", period_size " << config.period_size;
++}
++
+ }  // namespace
+ 
+ std::ostream& operator<<(std::ostream& os, const DeviceProfile& device) {
+@@ -412,6 +434,7 @@ DeviceProxy openProxyForAttachedDevice(const DeviceProfile& deviceProfile,
+     if (!profile_fill_builtin_device_info(proxy.getProfile(), pcmConfig, bufferFrameCount)) {
+         LOG(FATAL) << __func__ << ": failed to init for built-in device, address=" << deviceProfile;
+     }
++    applyOutputPeriodCount(deviceProfile, proxy.getProfile());
+     if (int err = proxy_prepare_from_default_config(proxy.get(), proxy.getProfile()); err != 0) {
+         LOG(FATAL) << __func__ << ": fail to prepare for device address=" << deviceProfile
+                    << " error=" << err;

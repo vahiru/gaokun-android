@@ -1,0 +1,26 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] arm64: dts: qcom: sc8280xp-huawei-gaokun3: switch usb_0 to OTG mode with usb-role-switch
+
+Upstream configures usb_0 (a600000.usb) with dr_mode = "host", which prevents
+Android from binding the configfs USB gadget (ADB / MTP / PTP) to the port 0
+DWC3 controller.
+
+Change usb_0 to dr_mode = "otg" with usb-role-switch enabled so userspace can
+switch port 0 between host and peripheral roles.
+
+Origin: local
+Upstream-Status: Inappropriate [Android-specific]
+---
+--- a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
++++ b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
+@@ -1287,7 +1287,9 @@
+ };
+ 
+ &usb_0_dwc3 {
+-	dr_mode = "host";
++	/* Port 0 is dual-role; port 1 (a800000) hosts boot storage and stays host-only. */
++	dr_mode = "otg";
++	usb-role-switch;
+ };
+ 
+ &usb_0_dwc3_hs {

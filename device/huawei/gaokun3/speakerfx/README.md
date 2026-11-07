@@ -7,7 +7,7 @@
 
 ## 一、设计背景：为何置于音频HAL层
 
-主输出流开启`FastMixer`后（`patches/0083`），AudioFlinger禁止在挂载低延迟`FAST`音轨的会话上启用非硬件加速的软件effect（`checkEffectCompatibility_l`）。使用AAudio/OpenSL ES低延迟通路的音乐游戏（如Project SEKAI）音频均走`FAST`轨，会话级effect无法覆盖。
+主输出流开启`FastMixer`后（`patches/android/hardware-interfaces/0008`），AudioFlinger禁止在挂载低延迟`FAST`音轨的会话上启用非硬件加速的软件effect（`checkEffectCompatibility_l`）。使用AAudio/OpenSL ES低延迟通路的音乐游戏（如Project SEKAI）音频均走`FAST`轨，会话级effect无法覆盖。
 
 将处理钩子置于音频HAL的`StreamPrimary`写盘出口有两个优势：
 1. 能够覆盖包括`FAST`音轨在内的全部扬声器输出；
@@ -17,8 +17,8 @@
 
 | 文件 / 补丁 | 职责说明 |
 |---|---|
-| `patches/0117-audio-aidl-primary-playback-hook.patch`（及`crdroid-tree-fixes.py`） | 在`StreamPrimary`开流时按`ro.vendor.audio.primary.playback_hook`动态加载处理库，在每块PCM数据写入ALSA前原地调用处理回调 |
-| `speakerfx.cpp`（`libgaokunspeakerfx.so`） | 钩子入口：识别内置扬声器PCM、轮询属性开关与调参旋钮、管理WSA数字音量余量借还与增益补偿。安装于`/vendor/lib64/soundfx/`（由`patches/0068`向音频HAL APEX链接器命名空间放行） |
+| `patches/android/hardware-interfaces/0009-audio-aidl-primary-playback-hook.patch`（及`crdroid-tree-fixes.py`） | 在`StreamPrimary`开流时按`ro.vendor.audio.primary.playback_hook`动态加载处理库，在每块PCM数据写入ALSA前原地调用处理回调 |
+| `speakerfx.cpp`（`libgaokunspeakerfx.so`） | 钩子入口：识别内置扬声器PCM、轮询属性开关与调参旋钮、管理WSA数字音量余量借还与增益补偿。安装于`/vendor/lib64/soundfx/`（由`patches/android/hardware-interfaces/0005`向音频HAL APEX链接器命名空间放行） |
 | `bass_chain.h` | DSP信号处理核心实现 |
 | `bass_chain_coeffs.h`、`gen_bass_coeffs.py` | 虚拟低音谐波生成所用的90°全通移相网络系数及其确定性生成脚本（依赖`numpy`与`scipy`） |
 | [`bin/audio-route.sh`](../bin/audio-route.sh) | 开机设置混音器后将扬声器数字音量基准值写入`vendor.gaokun3.audioroute.spkdig` |

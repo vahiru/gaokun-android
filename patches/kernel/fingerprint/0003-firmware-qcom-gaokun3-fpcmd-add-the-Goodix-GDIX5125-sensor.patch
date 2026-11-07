@@ -1,0 +1,1127 @@
+From 1043f2e740b1de598bad3f4953b02ef0538277d2 Mon Sep 17 00:00:00 2001
+From: Akisaira <akisaira@outlook.com>
+Date: Wed, 4 Nov 2026 21:46:52 +1100
+Subject: [PATCH] firmware: qcom: gaokun3 fpcmd: add the Goodix GDIX5125 sensor
+
+Some gaokun3 units carry a Goodix GDIX5125 instead of the FocalTech
+FTE7001; the board straps (TLMM GPIO61/62) tell them apart, as the ACPI
+_HID of \_SB.SPBA does. Both sit behind the same signed TA, which talks to
+a Goodix MCU over SPI with its own request envelope and "Milan" frames.
+
+Add GAOKUN3_FPCMD_IOC_SET_SENSOR, set by user space before INIT; without
+it the driver stays on FocalTech, so existing users are unchanged. For
+Goodix the fixed ioctls map to:
+
+- INIT: the Windows boot order (version, state, idle, chip ID,
+  INIT_FP_DATA1, OTP, idle, mode idle, DAC, configuration, state,
+  INIT_FP_DATA2) and a finger-detect reference. DAC, tcode and FDT delta
+  come from the unit's own OTP, with the Windows driver's CRC-8 checks
+  and its FT, MT and 3-of-4 DAC fallbacks. Windows also tries a saved
+  OTP copy and otherwise keeps the template DAC values; there is no
+  saved copy here, so INIT fails instead. The configuration template is
+  not in the kernel: it is read from
+  /vendor/firmware/gaokun3-goodix-cfg.bin, accepted only if it is the
+  known type 14 template, and patched from OTP.
+- GET_FINGER_STATUS: physical finger presence from the ten FDT areas,
+  against a reference that follows slow drift.
+- CAPTURE: one image, returned as 36 x 160 little-endian 12-bit samples
+  (the three scans of each column averaged, dummy columns dropped). The
+  image is ready 100-130 ms after the request; a read before that comes
+  back from the TA with result 3 and no data, so the driver waits 100 ms
+  and then polls, skipping late replies to earlier commands. The image is
+  plaintext: the driver clears its copies once user space has it.
+- PROBE and WAKE: version query and NOP.
+
+The MCU sleeps after about 30 s idle and drops the command that wakes it,
+so a NOP goes first after 5 s without a command, measured in boot time to
+cover suspend. A missing reply, or an image that never arrives, is
+reported as -EPROTO.
+
+The protocol helpers are pure functions in gaokun3_fpcmd_goodix.h and are
+tested in user space against frames, replies, OTP, configuration and
+image data recorded on a Goodix unit. On that unit, with 0001 and 0002,
+the driver loads the TA, initialises the sensor in about 0.7 s, follows
+finger down and lift-off, captures in about 155 ms, and wakes the MCU
+after 40 s idle. The stricter reply checksum, the packet skipping while
+polling, the buffer clearing and the bounded configuration read came
+after those measurements and are tested offline only.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+Origin: local
+Upstream-Status: Inappropriate [device-specific QSEE transport]
+---
+ drivers/firmware/qcom/Kconfig                |   9 +-
+ drivers/firmware/qcom/gaokun3_fpcmd.h        |  18 +
+ drivers/firmware/qcom/gaokun3_fpcmd_goodix.h | 355 ++++++++++++
+ drivers/firmware/qcom/qcom_qseecom_fpcmd.c   | 550 ++++++++++++++++++-
+ 4 files changed, 923 insertions(+), 9 deletions(-)
+ create mode 100644 drivers/firmware/qcom/gaokun3_fpcmd_goodix.h
+
+diff --git a/drivers/firmware/qcom/Kconfig b/drivers/firmware/qcom/Kconfig
+index 6bbd841b7..ec919dc6a 100644
+--- a/drivers/firmware/qcom/Kconfig
++++ b/drivers/firmware/qcom/Kconfig
+@@ -1,11 +1,16 @@
+ config GAOKUN3_FPCMD
+-	bool "Gaokun3 FTE7001 restricted fingerprint transport"
++	bool "Gaokun3 FTE7001/GDIX5125 restricted fingerprint transport"
+ 	depends on QCOM_QSEECOM && QCOM_SCM=y
++	select CRC32
+ 	default n
+ 	help
+-	  Fixed ioctl transport for the signed FocalTech fingerprint TA.
++	  Fixed ioctl transport for the signed fingerprint TA, driving either
++	  the FocalTech FTE7001 or the Goodix GDIX5125 sensor; user space
++	  selects the variant from the board straps.
+ 	  Requires the downstream QSEE app-load/shutdown/listener patch.
+ 	  No TA calls occur until userspace explicitly requests them.
++	  The Goodix path reads the sensor configuration template from
++	  /vendor/firmware/gaokun3-goodix-cfg.bin.
+ 
+ # SPDX-License-Identifier: GPL-2.0-only
+ #
+diff --git a/drivers/firmware/qcom/gaokun3_fpcmd.h b/drivers/firmware/qcom/gaokun3_fpcmd.h
+index c8350ce54..5ad241173 100644
+--- a/drivers/firmware/qcom/gaokun3_fpcmd.h
++++ b/drivers/firmware/qcom/gaokun3_fpcmd.h
+@@ -39,4 +39,22 @@ struct gaokun3_fpcmd_capture {
+ #define GAOKUN3_FPCMD_IOC_GET_FINGER_STATUS \
+ 	_IOR(GAOKUN3_FPCMD_IOC_MAGIC, 0x06, gaokun3_fpcmd_u8)
+ 
++/*
++ * Sensor variant, chosen by user space from the board straps (TLMM GPIO61/62,
++ * as the ACPI _HID of \_SB.SPBA does: 0/1 FocalTech FTE7001, 1/0 Goodix
++ * GDIX5125). Set before INIT; FocalTech is the default.
++ *
++ * Goodix: GET_FINGER_STATUS reports physical finger presence (it reads to 0
++ * after lift-off). CAPTURE requires image_bytes =
++ * GAOKUN3_FPCMD_GOODIX_WIDTH * GAOKUN3_FPCMD_GOODIX_HEIGHT * 2 and fills it
++ * with little-endian 12-bit samples, row major, unencrypted.
++ */
++#define GAOKUN3_FPCMD_SENSOR_FOCALTECH	0
++#define GAOKUN3_FPCMD_SENSOR_GOODIX	1
++#define GAOKUN3_FPCMD_GOODIX_WIDTH	36
++#define GAOKUN3_FPCMD_GOODIX_HEIGHT	160
++
++#define GAOKUN3_FPCMD_IOC_SET_SENSOR \
++	_IOW(GAOKUN3_FPCMD_IOC_MAGIC, 0x07, gaokun3_fpcmd_u32)
++
+ #endif
+diff --git a/drivers/firmware/qcom/gaokun3_fpcmd_goodix.h b/drivers/firmware/qcom/gaokun3_fpcmd_goodix.h
+new file mode 100644
+index 000000000..79ad9bf33
+--- /dev/null
++++ b/drivers/firmware/qcom/gaokun3_fpcmd_goodix.h
+@@ -0,0 +1,355 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Goodix GDIX5125 (MCU chip 0x2510, sensor type 14) protocol helpers for the
++ * gaokun3 fingerprint transport. Pure functions only, so they can also be
++ * built and tested in user space; the caller provides u8/u16/u32, bool,
++ * get_unaligned_le16/32, put_unaligned_le16/32, memcpy/memset/strnlen and the
++ * E* error codes.
++ *
++ * The MCU speaks "Milan" frames:
++ *   a0 <len u16 = inner length> <header sum = a0 + len bytes>
++ *   <cmd = cmd0 << 4 | cmd1 << 1 | 1> <inner len u16 = data + 1> <data> <sum>
++ * with sum = 0xaa - (cmd & 0xfe) - inner len bytes - data bytes. The NOP
++ * request and the image packet carry the fixed sum 0x88 instead; every other
++ * reply carries the computed sum. A reply uses the request command with bit 0
++ * clear. The TA image packet starts with 0xc0 instead of 0xa0.
++ *
++ * OTP handling, the configuration patches and the INIT_FP_DATA layout follow
++ * the Windows driver (gfspi.dll 1.1.143.622: ChicagoT_check_otp,
++ * ChicagoT_check_and_parse_otp, send_init_data_to_ta).
++ */
++#ifndef _GAOKUN3_FPCMD_GOODIX_H
++#define _GAOKUN3_FPCMD_GOODIX_H
++
++#define GDX_FRAME_OVERHEAD	8
++#define GDX_NOP_SUM		0x88
++
++#define GDX_OTP_LEN		64
++#define GDX_CFG_LEN		224
++#define GDX_CFG_SUM_WORDS	0x6f
++#define GDX_CFG_SUM_OFFSET	0xde
++#define GDX_INIT_LEN		0xc0
++#define GDX_SENSOR_TYPE		14
++#define GDX_FDT_AREAS		10
++#define GDX_FDT_REPLY_LEN	(4 + 2 * GDX_FDT_AREAS)
++
++#define GDX_IMG_LINES		114
++#define GDX_IMG_LINE_BYTES	240
++#define GDX_IMG_DUMMY_COLUMNS	2
++#define GDX_IMG_WIDTH		(GDX_IMG_LINES / 3 - GDX_IMG_DUMMY_COLUMNS)
++#define GDX_IMG_HEIGHT		160
++#define GDX_IMG_DATA_LEN	(5 + GDX_IMG_LINES * GDX_IMG_LINE_BYTES + 4)
++#define GDX_IMG_PIXELS		(GDX_IMG_WIDTH * GDX_IMG_HEIGHT)
++
++struct gdx_packet {
++	u8 flags;
++	u8 cmd;
++	const u8 *data;
++	size_t len;
++	size_t size;	/* bytes of the buffer this packet used */
++};
++
++struct gdx_otp_info {
++	u16 dac[4];	/* register values: dac0 << 4 | 8, dac1, dac2, dac3 */
++	u16 tcode;
++	u16 fdt_delta;
++	u8 tcode_byte;	/* 0 if the OTP gave none; then no tcode patches */
++	u8 fdt_offset;
++	bool cp_ok, ft_ok, mt_ok;
++};
++
++static inline u8 gdx_crc8(const u8 *data, size_t len)
++{
++	u8 crc = 0;
++	size_t i;
++	int bit;
++
++	/* CRC-8, polynomial 0x07, MSB first, inverted result (FUN_180010a48). */
++	for (i = 0; i < len; i++) {
++		crc ^= data[i];
++		for (bit = 0; bit < 8; bit++)
++			crc = crc & 0x80 ? (u8)(crc << 1) ^ 0x07 : (u8)(crc << 1);
++	}
++	return (u8)~crc;
++}
++
++static inline u8 gdx_sum(const u8 *data, size_t len)
++{
++	u8 sum = 0;
++	size_t i;
++
++	for (i = 0; i < len; i++)
++		sum += data[i];
++	return sum;
++}
++
++/* Build a host-to-MCU frame; returns its length or -E2BIG. */
++static inline int gdx_build_frame(u8 *out, size_t cap, u8 cmd0, u8 cmd1,
++				  const u8 *data, size_t len)
++{
++	size_t outer = len + 4, inner = len + 1;
++	u8 cmd = (u8)(cmd0 << 4 | cmd1 << 1 | 1);
++
++	if (cmd0 > 0xf || cmd1 > 7 || len > 0xfff0 ||
++	    len + GDX_FRAME_OVERHEAD > cap)
++		return -E2BIG;
++	out[0] = 0xa0;
++	put_unaligned_le16((u16)outer, out + 1);
++	out[3] = (u8)(0xa0 + out[1] + out[2]);
++	out[4] = cmd;
++	put_unaligned_le16((u16)inner, out + 5);
++	if (len)
++		memcpy(out + 7, data, len);
++	if (!cmd0)
++		out[7 + len] = GDX_NOP_SUM;
++	else
++		out[7 + len] = (u8)(0xaa - (cmd & 0xfe) - out[5] - out[6] -
++				    gdx_sum(data, len));
++	return (int)(len + GDX_FRAME_OVERHEAD);
++}
++
++/* Parse one MCU packet at the start of buf. */
++static inline int gdx_parse_packet(const u8 *buf, size_t size,
++				   struct gdx_packet *pkt)
++{
++	size_t outer, inner;
++	u8 sum;
++
++	if (size < 7)
++		return -ENODATA;
++	if (buf[0] != 0xa0 && buf[0] != 0xc0)
++		return -EPROTO;
++	if ((u8)(buf[0] + buf[1] + buf[2]) != buf[3])
++		return -EBADMSG;
++	outer = get_unaligned_le16(buf + 1);
++	inner = get_unaligned_le16(buf + 5);
++	if (outer < 4 || 4 + outer > size || !inner || 3 + inner > outer)
++		return -EPROTO;
++	pkt->flags = buf[0];
++	pkt->cmd = buf[4];
++	pkt->data = buf + 7;
++	pkt->len = inner - 1;
++	pkt->size = 4 + outer;
++	sum = buf[7 + pkt->len];
++	if (sum != (u8)(0xaa - (pkt->cmd & 0xfe) - buf[5] - buf[6] -
++			gdx_sum(pkt->data, pkt->len)) &&
++	    !(buf[0] == 0xc0 && sum == GDX_NOP_SUM))
++		return -EBADMSG;
++	return 0;
++}
++
++/*
++ * Derive DAC, tcode and FDT delta from the OTP the MCU returns for 10/3.
++ * Returns -EINVAL if no usable DAC set exists (Windows: "OTP DAC check
++ * failed", after which it keeps the template values; we refuse instead).
++ */
++static inline int gdx_parse_otp(const u8 *otp, struct gdx_otp_info *info)
++{
++	u8 buf[27];
++	const u8 *ft = otp + 0x32, *mt = otp + 0x2e, *src = NULL;
++	u8 dac[4], t, b;
++	bool ft_dac_ok, mt_dac_ok;
++	int i, same = 0;
++	u32 x;
++
++	memset(info, 0, sizeof(*info));
++
++	/* ChicagoT_OTP_CRC_Check: three CRC-8 regions. */
++	memcpy(buf, otp, 11);
++	memcpy(buf + 11, otp + 0x24, 4);
++	info->cp_ok = gdx_crc8(buf, 15) == otp[0x3c];
++	memcpy(buf, otp + 0x0b, 9);
++	buf[9] = otp[0x1c];
++	memcpy(buf + 10, otp + 0x32, 4);
++	memcpy(buf + 14, otp + 0x38, 4);
++	buf[18] = otp[0x3e];
++	info->ft_ok = gdx_crc8(buf, 19) == otp[0x3d];
++	memcpy(buf, otp + 0x14, 8);
++	memcpy(buf + 8, otp + 0x1d, 7);
++	memcpy(buf + 15, otp + 0x28, 10);
++	memcpy(buf + 25, otp + 0x36, 2);
++	info->mt_ok = gdx_crc8(buf, 27) == otp[0x3f];
++
++	/* ChicagoT_OTP_DAC_Check: FT set, else MT set, else 3-of-4 vote. */
++	ft_dac_ok = ft[0] && ft[1] && ft[2] && ft[3] &&
++		    gdx_crc8(ft, 4) == otp[0x3e];
++	mt_dac_ok = mt[0] && mt[1] && mt[2] && mt[3] &&
++		    gdx_crc8(mt, 4) == otp[0x16];
++	if (info->ft_ok || ft_dac_ok) {
++		src = ft;
++	} else if (info->mt_ok || mt_dac_ok) {
++		src = mt;
++	} else {
++		for (i = 0; i < 4; i++)
++			if (mt[i] == ft[i] && ft[i])
++				same++;
++		if (same < 3)
++			return -EINVAL;
++		for (i = 0; i < 4; i++)
++			dac[i] = mt[i] == ft[i] ? ft[i] :
++				 (u8)((mt[(i + 1) % 4] + mt[(i + 2) % 4] +
++				       mt[(i + 3) % 4]) / 3);
++		src = dac;
++	}
++	info->dac[0] = (u16)(src[0] << 4 | 8);
++	for (i = 1; i < 4; i++)
++		info->dac[i] = src[i];
++
++	/* ChicagoT_check_and_parse_otp: tcode byte with its inverted copy. */
++	info->tcode = 0x80;
++	info->fdt_delta = 0x15;
++	if (otp[0x2a] && otp[0x2a] == (u8)~otp[0x2b])
++		t = otp[0x2a];
++	else if (otp[0x2d] && otp[0x2d] == (u8)~otp[0x2b])
++		t = otp[0x2d];
++	else if (otp[0x2a] && otp[0x2d] == otp[0x2a])
++		t = otp[0x2a];
++	else
++		t = 0;
++	if (t) {
++		info->tcode_byte = t;
++		info->tcode = (u16)(((t >> 4) + 1) * 0x10 + 0x40);
++		x = ((t & 0xf) + 2) * 100;
++		info->fdt_delta = (u8)(((x * 0x100) / info->tcode / 3) >> 4);
++	}
++
++	b = otp[0x1b];
++	if (b) {
++		if ((b & 3) == ((b >> 4) & 3))
++			info->fdt_offset = b & 3;
++		else if ((b & 3) == (((u8)~b >> 2) & 3))
++			info->fdt_offset = b & 3;
++		else if (((b >> 4) & 3) == (((u8)~b >> 2) & 3))
++			info->fdt_offset = (b >> 4) & 3;
++	}
++	return 0;
++}
++
++static inline u16 gdx_cfg_checksum(const u8 *cfg)
++{
++	u16 sum = 0xa5a5;
++	int i;
++
++	for (i = 0; i < GDX_CFG_SUM_WORDS; i++)
++		sum += get_unaligned_le16(cfg + 2 * i);
++	return (u16)-sum;
++}
++
++/* modify_sensor_config: mode 0 = word, 1 = low byte, 2 = high byte. */
++static inline int gdx_cfg_set(u8 *cfg, u16 reg, u16 value, int section,
++			      int mode)
++{
++	size_t start = cfg[1 + 2 * section], len = cfg[2 + 2 * section];
++	size_t pos;
++	u16 old;
++
++	if (start + len > GDX_CFG_SUM_OFFSET || len % 4)
++		return -EINVAL;
++	for (pos = start; pos < start + len; pos += 4) {
++		if (get_unaligned_le16(cfg + pos) != reg)
++			continue;
++		old = get_unaligned_le16(cfg + pos + 2);
++		if (mode == 1)
++			value = (old & 0xff00) | (value & 0xff);
++		else if (mode == 2)
++			value = (value & 0xff00) | (old & 0xff);
++		put_unaligned_le16(value, cfg + pos + 2);
++		return 0;
++	}
++	return -ENOENT;
++}
++
++/*
++ * Patch the type 14 template in place with the values derived from OTP. The
++ * template's own checksum field is stale in gfspi.dll; Windows recomputes it
++ * after patching, and so does this.
++ */
++static inline int gdx_cfg_patch(u8 *cfg, const struct gdx_otp_info *info)
++{
++	int ret;
++
++	if (cfg[0] != 0x90)
++		return -EINVAL;
++	ret = gdx_cfg_set(cfg, 0x220, info->dac[0], 0, 0);
++	if (!ret)
++		ret = gdx_cfg_set(cfg, 0x236, info->dac[1], 0, 0);
++	if (!ret)
++		ret = gdx_cfg_set(cfg, 0x238, info->dac[2], 0, 0);
++	if (!ret)
++		ret = gdx_cfg_set(cfg, 0x23a, info->dac[3], 0, 0);
++	if (!ret && info->tcode_byte)
++		ret = gdx_cfg_set(cfg, 0x5c, info->tcode, 0, 0);
++	if (!ret && info->tcode_byte)
++		ret = gdx_cfg_set(cfg, 0x82, (u16)(info->fdt_delta << 8), 2, 2);
++	if (!ret && info->fdt_offset)
++		ret = gdx_cfg_set(cfg, 0x56, info->fdt_offset + 4, 2, 1);
++	if (ret)
++		return ret;
++	put_unaligned_le16(gdx_cfg_checksum(cfg), cfg + GDX_CFG_SUM_OFFSET);
++	return 0;
++}
++
++/*
++ * REQUEST_INIT_FP_DATA1 (otp == NULL) and INIT_FP_DATA2 payloads. version is
++ * the NUL-terminated string from the 10/4 reply.
++ */
++static inline void gdx_init_payload(u8 *out, u32 chip_id, const char *version,
++				    const u8 *otp,
++				    const struct gdx_otp_info *info)
++{
++	memset(out, 0, GDX_INIT_LEN);
++	put_unaligned_le32(GDX_SENSOR_TYPE, out + 0x00);
++	put_unaligned_le32(chip_id, out + 0x04);
++	put_unaligned_le16(GDX_OTP_LEN, out + 0x0c);
++	if (otp)
++		memcpy(out + 0x0e, otp, GDX_OTP_LEN);
++	put_unaligned_le16(2 * GDX_FDT_AREAS, out + 0x4e);
++	put_unaligned_le16(0x24, out + 0x64);
++	put_unaligned_le16(0xa0, out + 0x66);
++	put_unaligned_le32(0x2d00, out + 0x68);
++	put_unaligned_le32(0x0c80, out + 0x6c);
++	if (otp) {
++		put_unaligned_le16(info->tcode, out + 0x70);
++		put_unaligned_le16(info->fdt_delta, out + 0x72);
++	}
++	memcpy(out + 0x7e, version, strnlen(version, 0x3f));
++}
++
++/*
++ * Unpack the image data of a 0x24 packet into width x height samples, row
++ * major, 12 bits each. Every column is scanned three times; average them.
++ */
++static inline int gdx_decode_image(const u8 *data, size_t len, u16 *out)
++{
++	const u8 *raw = data + 5;
++	u16 line[GDX_IMG_HEIGHT];
++	u32 acc[GDX_IMG_HEIGHT];
++	int l, i, row, col;
++
++	if (len != GDX_IMG_DATA_LEN || data[0] || data[1] || data[2] ||
++	    data[3] || data[4])
++		return -EPROTO;
++	for (col = 0; col < GDX_IMG_LINES / 3; col++) {
++		memset(acc, 0, sizeof(acc));
++		for (l = 0; l < 3; l++) {
++			const u8 *b = raw + (3 * col + l) * GDX_IMG_LINE_BYTES;
++
++			for (i = 0; i < GDX_IMG_HEIGHT; i += 4, b += 6) {
++				line[i] = (u16)((b[0] & 0xf) << 8 | b[1]);
++				line[i + 1] = (u16)(b[3] << 4 | b[0] >> 4);
++				line[i + 2] = (u16)((b[5] & 0xf) << 8 | b[2]);
++				line[i + 3] = (u16)(b[4] << 4 | b[5] >> 4);
++			}
++			for (row = 0; row < GDX_IMG_HEIGHT; row++)
++				acc[row] += line[row];
++		}
++		if (col < GDX_IMG_DUMMY_COLUMNS)
++			continue;
++		for (row = 0; row < GDX_IMG_HEIGHT; row++)
++			out[row * GDX_IMG_WIDTH + col - GDX_IMG_DUMMY_COLUMNS] =
++				(u16)((acc[row] + 1) / 3);
++	}
++	return 0;
++}
++
++#endif
+diff --git a/drivers/firmware/qcom/qcom_qseecom_fpcmd.c b/drivers/firmware/qcom/qcom_qseecom_fpcmd.c
+index 6a3514413..81b3ee6f5 100644
+--- a/drivers/firmware/qcom/qcom_qseecom_fpcmd.c
++++ b/drivers/firmware/qcom/qcom_qseecom_fpcmd.c
+@@ -1,6 +1,6 @@
+ // SPDX-License-Identifier: GPL-2.0
+ /*
+- * Gaokun3 FocalTech fingerprint transport over QSEE.
++ * Gaokun3 fingerprint transport over QSEE (FocalTech FTE7001, Goodix GDIX5125).
+  * The misc device exposes a narrow ioctl ABI; insertion alone does not call TA.
+  * Explicit load/wake/probe/capture operations enter secure firmware and may
+  * access SPI or trigger a secure-storage listener.
+@@ -25,13 +25,21 @@
+ #include <linux/hex.h>
+ #include <linux/uaccess.h>
+ #include <linux/string.h>
++#include <linux/crc32.h>
++#include <linux/ktime.h>
++#include <linux/unaligned.h>
+ #include "gaokun3_fpcmd.h"
++#include "gaokun3_fpcmd_goodix.h"
+ 
+ #define FP_IMG_ALIGN (4 * 1024 * 1024)
+ /* This diagnostic path supports the known <4 MiB monolithic sec ELF only. */
+ #define FP_IMG_MAX FP_IMG_ALIGN
+ #define FP_IO_SZ (32 * 1024)
+ #define FP_CAPTURE_MAX (FP_IO_SZ - 12 - 5)
++/* The Goodix image as the UAPI describes it fits the capture buffer. */
++static_assert(GDX_IMG_WIDTH == GAOKUN3_FPCMD_GOODIX_WIDTH);
++static_assert(GDX_IMG_HEIGHT == GAOKUN3_FPCMD_GOODIX_HEIGHT);
++static_assert(GDX_IMG_PIXELS * sizeof(u16) <= FP_CAPTURE_MAX);
+ #define FP_QSEE_SPI_READ 0x8020
+ #define FP_QSEE_SPI_WRITE 0x8021
+ #define FP_TA_ACK 0x5aa5
+@@ -42,6 +50,11 @@ static char *fp_img_path = "/vendor/firmware/fingerpr.mbn";
+ module_param(fp_img_path, charp, 0400);
+ MODULE_PARM_DESC(fp_img_path, "path to the vendor-supplied fingerprint TA image");
+ 
++static char *gdx_cfg_path = "/vendor/firmware/gaokun3-goodix-cfg.bin";
++module_param(gdx_cfg_path, charp, 0400);
++MODULE_PARM_DESC(gdx_cfg_path,
++		 "Goodix sensor type 14 configuration template from gfspi.dll");
++
+ #ifdef GAOKUN3_FPCMD_DEBUG
+ #define fp_dbg(fmt, ...) pr_info("fpcmd: " fmt, ##__VA_ARGS__)
+ #define fp_dbg_dump(prefix, data, len) \
+@@ -61,6 +74,10 @@ static bool fp_shutdown_failed;
+ static size_t fp_rsp_len;
+ static u8 *fp_capture_data;
+ static size_t fp_capture_len;
++static u32 fp_sensor = GAOKUN3_FPCMD_SENSOR_FOCALTECH;
++static bool fp_inited;
++
++static void gdx_reset_state(void);
+ 
+ struct fp_qsee_header {
+ 	__le32 command;
+@@ -174,6 +191,8 @@ static int fp_unload(void)
+ 		return ret;
+ 	}
+ 	fp_loaded = false;
++	fp_inited = false;
++	gdx_reset_state();
+ 	fp_free_io();
+ 	fp_dbg("app_shutdown(%u) ok\n", fp_app_id);
+ 	module_put(THIS_MODULE);
+@@ -650,11 +669,494 @@ static int fp_vendor_probe(void)
+ 	return 0;
+ }
+ 
++/*
++ * Goodix GDIX5125. The same TA drives an MCU that speaks Milan frames (see
++ * gaokun3_fpcmd_goodix.h). Requests use the Goodix TA envelope: type 1 writes
++ * a frame to SPI, type 2 reads the MCU's pending packet, types 3/4 are
++ * REQUEST_INIT_FP_DATA1/2. INIT replays the Windows boot order. The TA opens
++ * its secure-storage files during INIT_FP_DATA; the in-kernel listener answers
++ * those requests with a failure, which the TA treats as a fresh install
++ * ("base available 0") and carries on. Image reads with CMD_TO_DEVICE 9 make
++ * the TA return the whole image packet instead of keeping it for its own
++ * algorithm, which needs the INIT_FP_DATA step to have run.
++ */
++#define GDX_MAGIC		0x00093418
++#define GDX_REQ_HEADER		0x28
++#define GDX_REQ_DATA		0x2c
++#define GDX_RSP_DATA		0x28
++#define GDX_REQ_WRITE		1
++#define GDX_REQ_READ		2
++#define GDX_REQ_INIT1		3
++#define GDX_REQ_INIT2		4
++#define GDX_DEV_DEFAULT		0
++#define GDX_DEV_CAPTURE_IMAGE	9
++#define GDX_RESULT_DONE		2
++/* The TA read nothing from the MCU (no packet pending, or the MCU asleep). */
++#define GDX_RESULT_NO_DATA	3
++#define GDX_READ_CAP		0x60
++#define GDX_IMAGE_CAP		0x7000
++#define GDX_IMAGE_CMD		0x24
++#define GDX_IMG_WAIT_MS		100
++#define GDX_IMG_POLLS		15
++/* The MCU sleeps after ~30 s idle and drops the command that wakes it. */
++#define GDX_IDLE_NOP_MS		5000
++#define GDX_TOUCH_AREAS		2
++/* zlib CRC32 of the 224-byte type 14 template in gfspi.dll 1.1.143.622. */
++#define GDX_CFG_CRC32		0x7aa2ecf5
++
++static struct {
++	u32 txn;
++	ktime_t last_cmd;
++	bool awake;
++	bool ready;
++	u16 base[GDX_FDT_AREAS];
++	u16 threshold;
++} gdx;
++
++static void gdx_reset_state(void)
++{
++	memset(&gdx, 0, sizeof(gdx));
++}
++
++static int gdx_call(u32 type, u32 dev_cmd, const u8 *payload, size_t len,
++		    u32 rsp_cap, const u8 **data, size_t *data_len)
++{
++	u8 *req = fp_req, *rsp = fp_rsp;
++	/* Sizes as the Windows client passes them to the TA. */
++	size_t req_len = (len + GDX_REQ_HEADER + 0x44) & ~0x3f;
++	size_t rsp_len = (rsp_cap + 0x68) & ~0x3f;
++	u32 total, dlen, llen;
++	int ret;
++
++	if (req_len > FP_IO_SZ || rsp_len > FP_IO_SZ)
++		return -E2BIG;
++	memset(req, 0, req_len);
++	put_unaligned_le32(GDX_MAGIC, req);
++	put_unaligned_le32(len + GDX_REQ_HEADER, req + 0x04);
++	put_unaligned_le32(type, req + 0x08);
++	put_unaligned_le32(++gdx.txn, req + 0x10);
++	/* +0x14 control and +0x15 log switch stay 0, as do the log sizes. */
++	put_unaligned_le32(dev_cmd, req + 0x18);
++	put_unaligned_le32(rsp_cap, req + 0x1c);
++	put_unaligned_le32(len, req + 0x28);
++	if (len)
++		memcpy(req + GDX_REQ_DATA, payload, len);
++	memset(rsp, 0, rsp_len);
++	ret = qcom_scm_qseecom_app_send(fp_app_id, req, req_len, rsp, rsp_len);
++	if (ret) {
++		pr_err("fpcmd: goodix secure call type %u failed: %d\n", type, ret);
++		return ret;
++	}
++	total = get_unaligned_le32(rsp);
++	dlen = get_unaligned_le32(rsp + 0x1c);
++	llen = get_unaligned_le32(rsp + 0x24);
++	if (dlen > rsp_cap || llen > rsp_len ||
++	    total != GDX_RSP_DATA + dlen + llen || total > rsp_len ||
++	    get_unaligned_le32(rsp + 0x08) != type ||
++	    get_unaligned_le32(rsp + 0x10) != gdx.txn) {
++		pr_err("fpcmd: goodix TA response rejected (type %u)\n", type);
++		return -EPROTO;
++	}
++	if (type == GDX_REQ_READ &&
++	    get_unaligned_le32(rsp + 0x04) == GDX_RESULT_NO_DATA)
++		return -ENODATA;
++	if (get_unaligned_le32(rsp + 0x04) != GDX_RESULT_DONE) {
++		pr_err("fpcmd: goodix TA result %u (type %u)\n",
++		       get_unaligned_le32(rsp + 0x04), type);
++		return -EIO;
++	}
++	*data = rsp + GDX_RSP_DATA;
++	*data_len = dlen;
++	return 0;
++}
++
++static int gdx_write(u8 cmd0, u8 cmd1, const u8 *data, size_t len)
++{
++	u8 frame[GDX_CFG_LEN + GDX_FRAME_OVERHEAD];
++	const u8 *rd;
++	size_t rl;
++	int n;
++
++	n = gdx_build_frame(frame, sizeof(frame), cmd0, cmd1, data, len);
++	if (n < 0)
++		return n;
++	n = gdx_call(GDX_REQ_WRITE, GDX_DEV_DEFAULT, frame, n, 0, &rd, &rl);
++	if (n) {
++		gdx.awake = false;
++		return n;
++	}
++	gdx.last_cmd = ktime_get_boottime();
++	return 0;
++}
++
++static int gdx_nop(void)
++{
++	static const u8 zero[4];
++	int ret;
++
++	ret = gdx_write(0, 0, zero, sizeof(zero));
++	if (ret)
++		return ret;
++	msleep(10);
++	gdx.awake = true;
++	return 0;
++}
++
++/* Boot time includes suspend, so a resumed system sends the NOP too. */
++static int gdx_wake(void)
++{
++	if (gdx.awake &&
++	    ktime_ms_delta(ktime_get_boottime(), gdx.last_cmd) < GDX_IDLE_NOP_MS)
++		return 0;
++	return gdx_nop();
++}
++
++static int gdx_read(u32 dev_cmd, u32 cap, struct gdx_packet *pkt)
++{
++	const u8 *data;
++	size_t len;
++	int ret;
++
++	ret = gdx_call(GDX_REQ_READ, dev_cmd, NULL, 0, cap, &data, &len);
++	if (ret)
++		return ret;
++	return gdx_parse_packet(data, len, pkt);
++}
++
++/* Send a command and wait for its reply; returns the reply length. */
++static int gdx_command(u8 cmd0, u8 cmd1, const u8 *data, size_t len,
++		       u8 *reply, size_t min_len, size_t cap)
++{
++	u8 want = cmd0 << 4 | cmd1 << 1;
++	struct gdx_packet pkt;
++	int attempt, ret;
++
++	ret = gdx_write(cmd0, cmd1, data, len);
++	if (ret)
++		return ret;
++	for (attempt = 0; attempt < 5; attempt++) {
++		msleep(20);
++		ret = gdx_read(GDX_DEV_DEFAULT, GDX_READ_CAP, &pkt);
++		if (ret == -ENODATA || ret == -EPROTO || ret == -EBADMSG)
++			continue;
++		if (ret)
++			break;
++		if (pkt.cmd != want) {
++			fp_dbg("goodix: packet %#x while waiting for %#x\n",
++			       pkt.cmd, want);
++			ret = -EPROTO;
++			continue;
++		}
++		if (pkt.len < min_len || pkt.len > cap) {
++			ret = -EPROTO;
++			break;
++		}
++		memcpy(reply, pkt.data, pkt.len);
++		return pkt.len;
++	}
++	/*
++	 * Next time, wake the MCU first: it may have slept through this one.
++	 * A missing or garbled reply is reported as -EPROTO; other errors come
++	 * from the secure call itself.
++	 */
++	gdx.awake = false;
++	pr_err("fpcmd: goodix command %u/%u got no valid reply: %d\n",
++	       cmd0, cmd1, ret);
++	return ret == -ENODATA || ret == -EBADMSG ? -EPROTO : ret;
++}
++
++static int gdx_init_data(u32 type, const u8 *payload)
++{
++	const u8 *data;
++	size_t len;
++	int ret;
++
++	ret = gdx_call(type, GDX_DEV_DEFAULT, payload, GDX_INIT_LEN,
++		       GDX_INIT_LEN, &data, &len);
++	if (!ret && len != GDX_INIT_LEN)
++		ret = -EPROTO;
++	if (ret)
++		pr_err("fpcmd: goodix INIT_FP_DATA%u failed: %d\n", type - 2, ret);
++	return ret;
++}
++
++static int gdx_load_config(u8 **cfg)
++{
++	void *buf = NULL;
++	ssize_t ret;
++
++	/* Without a file size, a larger file fails before anything is read. */
++	ret = kernel_read_file_from_path(gdx_cfg_path, 0, &buf, GDX_CFG_LEN,
++					 NULL, READING_FIRMWARE);
++	if (ret < 0) {
++		pr_err("fpcmd: goodix config %s: %zd\n", gdx_cfg_path, ret);
++		return ret;
++	}
++	if (ret != GDX_CFG_LEN ||
++	    (crc32_le(~0, buf, GDX_CFG_LEN) ^ ~0) != GDX_CFG_CRC32) {
++		pr_err("fpcmd: goodix config %s is not the known template\n",
++		       gdx_cfg_path);
++		vfree(buf);
++		return -EINVAL;
++	}
++	*cfg = buf;
++	return 0;
++}
++
++static int gdx_fdt_read(u16 *values)
++{
++	static const u8 manual[2 + 2 * GDX_FDT_AREAS] = { 0x09, 0x01 };
++	u8 reply[GDX_FDT_REPLY_LEN];
++	int i, ret;
++
++	ret = gdx_command(3, 3, manual, sizeof(manual), reply,
++			  GDX_FDT_REPLY_LEN, GDX_FDT_REPLY_LEN);
++	if (ret < 0)
++		return ret;
++	for (i = 0; i < GDX_FDT_AREAS; i++)
++		values[i] = get_unaligned_le16(reply + 4 + 2 * i);
++	return 0;
++}
++
++static int gdx_init(void)
++{
++	static const u8 zero2[2], state_req[] = { 0x55, 0x12, 0x34, 0, 0 };
++	static const u8 idle[] = { 0x01, 0x14 }, mode_idle[] = { 0x14, 0x00 };
++	static const u8 chip_req[] = { 0, 0, 0, 4, 0 };
++	u8 reply[64], otp[GDX_OTP_LEN], dac[8], payload[GDX_INIT_LEN];
++	char version[64] = "";
++	struct gdx_otp_info info;
++	u8 *cfg = NULL;
++	u32 chip;
++	int i, ret;
++
++	gdx_reset_state();
++	/* Read the template before touching the MCU. */
++	ret = gdx_load_config(&cfg);
++	if (ret)
++		return ret;
++
++	/* Windows order: NOP + version, NOP + state, NOP + version, idle. */
++	ret = gdx_nop();
++	if (!ret)
++		ret = gdx_command(10, 4, zero2, 2, reply, 1, sizeof(reply) - 1);
++	if (ret < 0)
++		goto out;
++	memcpy(version, reply, ret);
++	version[ret] = 0;
++	ret = gdx_nop();
++	if (!ret)
++		ret = gdx_command(10, 7, state_req, sizeof(state_req), reply, 1,
++				  sizeof(reply));
++	if (ret >= 0)
++		ret = gdx_nop();
++	if (!ret)
++		ret = gdx_command(10, 4, zero2, 2, reply, 1, sizeof(reply));
++	if (ret >= 0)
++		ret = gdx_command(10, 1, idle, sizeof(idle), reply, 1, sizeof(reply));
++	if (ret < 0)
++		goto out;
++	msleep(2);
++	ret = gdx_command(8, 1, chip_req, sizeof(chip_req), reply, 4, 4);
++	if (ret < 0)
++		goto out;
++	chip = get_unaligned_le16(reply + 1);
++	if (chip != 0x2507 && chip != 0x2508 && chip != 0x2510) {
++		pr_err("fpcmd: goodix chip %#x is not a ChicagoT part\n", chip);
++		ret = -ENODEV;
++		goto out;
++	}
++
++	gdx_init_payload(payload, chip, version, NULL, NULL);
++	ret = gdx_init_data(GDX_REQ_INIT1, payload);
++	if (ret)
++		goto out;
++	ret = gdx_command(10, 3, zero2, 2, otp, GDX_OTP_LEN, GDX_OTP_LEN);
++	if (ret < 0)
++		goto out;
++	ret = gdx_parse_otp(otp, &info);
++	if (ret) {
++		pr_err("fpcmd: goodix OTP has no usable DAC values\n");
++		goto out;
++	}
++	if (!info.cp_ok || !info.ft_ok || !info.mt_ok)
++		pr_warn("fpcmd: goodix OTP CRC cp=%d ft=%d mt=%d\n",
++			info.cp_ok, info.ft_ok, info.mt_ok);
++	ret = gdx_cfg_patch(cfg, &info);
++	if (ret) {
++		pr_err("fpcmd: goodix config template does not fit: %d\n", ret);
++		goto out;
++	}
++	for (i = 0; i < 4; i++)
++		put_unaligned_le16(info.dac[i], dac + 2 * i);
++	fp_dbg("goodix chip %#x '%s' dac %#x/%#x/%#x/%#x tcode %#x delta %#x\n",
++	       chip, version, info.dac[0], info.dac[1], info.dac[2], info.dac[3],
++	       info.tcode, info.fdt_delta);
++
++	ret = gdx_command(10, 1, idle, sizeof(idle), reply, 1, sizeof(reply));
++	if (ret < 0)
++		goto out;
++	/* Mode idle has no reply. */
++	ret = gdx_write(7, 0, mode_idle, sizeof(mode_idle));
++	if (ret)
++		goto out;
++	msleep(50);
++	ret = gdx_command(9, 4, dac, sizeof(dac), reply, 2, 2);
++	if (ret >= 0 && reply[0] != 1)
++		ret = -EIO;
++	if (ret < 0)
++		goto out;
++	ret = gdx_command(9, 0, cfg, GDX_CFG_LEN, reply, 2, 2);
++	if (ret >= 0 && reply[0] != 1)
++		ret = -EIO;
++	if (ret < 0) {
++		pr_err("fpcmd: goodix config download failed: %d\n", ret);
++		goto out;
++	}
++	ret = gdx_nop();
++	if (!ret)
++		ret = gdx_command(10, 7, state_req, sizeof(state_req), reply, 1,
++				  sizeof(reply));
++	if (ret < 0)
++		goto out;
++
++	gdx_init_payload(payload, chip, version, otp, &info);
++	ret = gdx_init_data(GDX_REQ_INIT2, payload);
++	if (ret)
++		goto out;
++
++	/* No-finger reference for the finger detect areas. */
++	ret = gdx_fdt_read(gdx.base);
++	if (ret)
++		goto out;
++	gdx.threshold = 2 * info.fdt_delta;
++	gdx.ready = true;
++	fp_dbg("goodix ready, fdt base %u %u %u %u %u %u %u %u %u %u threshold %u\n",
++	       gdx.base[0], gdx.base[1], gdx.base[2], gdx.base[3], gdx.base[4],
++	       gdx.base[5], gdx.base[6], gdx.base[7], gdx.base[8], gdx.base[9],
++	       gdx.threshold);
++out:
++	vfree(cfg);
++	return ret < 0 ? ret : 0;
++}
++
++/*
++ * Finger presence from the FDT areas. A covered area reads lower than its
++ * no-finger reference by more than twice the OTP FDT delta (the MCU's own
++ * down/up thresholds sit at (v >> 1) -/+ delta). Areas within the threshold
++ * follow slow drift; areas well above it mean the reference was taken with a
++ * finger on the key, so they take the new value.
++ */
++static int gdx_finger_status(u8 *status)
++{
++	u16 cur[GDX_FDT_AREAS];
++	int i, d, down = 0, ret;
++
++	if (!gdx.ready)
++		return -ENODEV;
++	ret = gdx_wake();
++	if (!ret)
++		ret = gdx_fdt_read(cur);
++	if (ret)
++		return ret;
++	for (i = 0; i < GDX_FDT_AREAS; i++)
++		if (gdx.base[i] - cur[i] > gdx.threshold)
++			down++;
++	*status = down >= GDX_TOUCH_AREAS;
++	if (!*status) {
++		for (i = 0; i < GDX_FDT_AREAS; i++) {
++			d = cur[i] - gdx.base[i];
++			if (d > gdx.threshold)
++				gdx.base[i] = cur[i];
++			else if (d >= -gdx.threshold)
++				gdx.base[i] += d / 4;
++		}
++	}
++	fp_dbg("goodix fdt %u %u %u %u %u %u %u %u %u %u down %d\n",
++	       cur[0], cur[1], cur[2], cur[3], cur[4], cur[5], cur[6], cur[7],
++	       cur[8], cur[9], down);
++	return 0;
++}
++
++static int gdx_capture(size_t image_bytes)
++{
++	static const u8 image_req[] = { 0x01, 0x00 };
++	u16 *pixels = (u16 *)fp_capture_data;
++	struct gdx_packet pkt;
++	int attempt, i, ret;
++
++	fp_capture_len = 0;
++	if (image_bytes != GDX_IMG_PIXELS * sizeof(u16))
++		return -EINVAL;
++	if (!gdx.ready)
++		return -ENODEV;
++	ret = gdx_wake();
++	if (!ret)
++		ret = gdx_write(2, 2, image_req, sizeof(image_req));
++	if (ret)
++		return ret;
++	/*
++	 * The image is ready 100-130 ms after the request; until then the TA
++	 * reads nothing and says so. Without the IRQ line, poll for it. Each
++	 * empty poll still clocks the whole capacity over SPI, hence the wait.
++	 */
++	msleep(GDX_IMG_WAIT_MS);
++	for (attempt = 0; attempt < GDX_IMG_POLLS; attempt++) {
++		ret = gdx_read(GDX_DEV_CAPTURE_IMAGE, GDX_IMAGE_CAP, &pkt);
++		if (!ret && pkt.cmd == GDX_IMAGE_CMD)
++			break;
++		/* Keep polling past a late reply to an earlier command. */
++		if (!ret)
++			fp_dbg("goodix: packet %#x while waiting for the image\n",
++			       pkt.cmd);
++		else if (ret != -ENODATA && ret != -EPROTO && ret != -EBADMSG)
++			break;
++		msleep(20);
++	}
++	fp_dbg("goodix image after %d polls: %d\n", attempt + 1, ret);
++	if (attempt == GDX_IMG_POLLS)
++		ret = -ENODATA;
++	if (!ret && pkt.len != GDX_IMG_DATA_LEN)
++		ret = -EPROTO;
++	if (!ret)
++		ret = gdx_decode_image(pkt.data, pkt.len, pixels);
++	/* The raw image is plaintext: do not leave it in the shared buffer. */
++	memzero_explicit(fp_rsp, FP_IO_SZ);
++	if (ret) {
++		gdx.awake = false;
++		pr_err("fpcmd: goodix image read failed: %d\n", ret);
++		/* Like a command without a reply. */
++		return ret == -ENODATA || ret == -EBADMSG ? -EPROTO : ret;
++	}
++	for (i = 0; i < GDX_IMG_PIXELS; i++)
++		cpu_to_le16s(&pixels[i]);
++	fp_capture_len = image_bytes;
++	return 0;
++}
++
++static int gdx_probe(void)
++{
++	static const u8 zero2[2];
++	u8 reply[64];
++	int ret;
++
++	ret = gdx_wake();
++	if (!ret)
++		ret = gdx_command(10, 4, zero2, 2, reply, 1, sizeof(reply));
++	return ret < 0 ? ret : 0;
++}
++
++static bool fp_goodix(void)
++{
++	return fp_sensor == GAOKUN3_FPCMD_SENSOR_GOODIX;
++}
++
+ static long fp_ioctl(struct file *file, unsigned int command,
+ 		     unsigned long argument)
+ {
+ 	void __user *argp = (void __user *)argument;
+ 	struct gaokun3_fpcmd_capture capture;
++	u32 sensor;
+ 	u8 status;
+ 	int ret;
+ 
+@@ -670,23 +1172,45 @@ static long fp_ioctl(struct file *file, unsigned int command,
+ 		ret = fp_unload();
+ 		mutex_unlock(&fp_lock);
+ 		return ret;
++	case GAOKUN3_FPCMD_IOC_SET_SENSOR:
++		if (copy_from_user(&sensor, argp, sizeof(sensor)))
++			return -EFAULT;
++		if (sensor != GAOKUN3_FPCMD_SENSOR_FOCALTECH &&
++		    sensor != GAOKUN3_FPCMD_SENSOR_GOODIX)
++			return -EINVAL;
++		mutex_lock(&fp_lock);
++		ret = fp_inited ? -EBUSY : 0;
++		if (!ret)
++			fp_sensor = sensor;
++		mutex_unlock(&fp_lock);
++		return ret;
+ 	case GAOKUN3_FPCMD_IOC_INIT:
+ 		mutex_lock(&fp_lock);
+-		ret = fp_loaded ? fp_vendor_init() : -ENODEV;
++		if (!fp_loaded)
++			ret = -ENODEV;
++		else
++			ret = fp_goodix() ? gdx_init() : fp_vendor_init();
++		fp_inited = !ret;
+ 		mutex_unlock(&fp_lock);
+ 		if (ret)
+ 			pr_err("fpcmd: sensor initialization failed: %d\n", ret);
+ 		return ret;
+ 	case GAOKUN3_FPCMD_IOC_PROBE:
+ 		mutex_lock(&fp_lock);
+-		ret = fp_loaded ? fp_vendor_probe() : -ENODEV;
++		if (!fp_loaded)
++			ret = -ENODEV;
++		else
++			ret = fp_goodix() ? gdx_probe() : fp_vendor_probe();
+ 		mutex_unlock(&fp_lock);
+ 		if (ret)
+ 			pr_err("fpcmd: sensor probe failed: %d\n", ret);
+ 		return ret;
+ 	case GAOKUN3_FPCMD_IOC_WAKE:
+ 		mutex_lock(&fp_lock);
+-		ret = fp_loaded ? fp_vendor_wake() : -ENODEV;
++		if (!fp_loaded)
++			ret = -ENODEV;
++		else
++			ret = fp_goodix() ? gdx_nop() : fp_vendor_wake();
+ 		mutex_unlock(&fp_lock);
+ 		return ret;
+ 	case GAOKUN3_FPCMD_IOC_CAPTURE:
+@@ -697,16 +1221,26 @@ static long fp_ioctl(struct file *file, unsigned int command,
+ 		mutex_lock(&fp_lock);
+ 		if (!fp_loaded)
+ 			ret = -ENODEV;
++		else if (fp_goodix())
++			ret = gdx_capture(capture.image_bytes);
+ 		else
+ 			ret = fp_capture_raw(capture.image_bytes);
+ 		if (!ret && copy_to_user(u64_to_user_ptr(capture.user_ptr),
+ 					 fp_capture_data, fp_capture_len))
+ 			ret = -EFAULT;
++		/* Goodix images are plaintext; keep no copy of the last one. */
++		memzero_explicit(fp_capture_data, fp_capture_len);
++		fp_capture_len = 0;
+ 		mutex_unlock(&fp_lock);
+ 		return ret;
+ 	case GAOKUN3_FPCMD_IOC_GET_FINGER_STATUS:
+ 		mutex_lock(&fp_lock);
+-		ret = fp_loaded ? fp_read_register(0x1d, 1, &status) : -ENODEV;
++		if (!fp_loaded)
++			ret = -ENODEV;
++		else if (fp_goodix())
++			ret = gdx_finger_status(&status);
++		else
++			ret = fp_read_register(0x1d, 1, &status);
+ 		mutex_unlock(&fp_lock);
+ 		if (ret)
+ 			return ret;
+@@ -739,8 +1273,10 @@ static int fp_release(struct inode *inode, struct file *file)
+ 
+ 	mutex_lock(&fp_lock);
+ 	ret = fp_unload();
+-	if (!ret)
++	if (!ret) {
+ 		fp_opened = false;
++		fp_sensor = GAOKUN3_FPCMD_SENSOR_FOCALTECH;
++	}
+ 	mutex_unlock(&fp_lock);
+ 	return ret;
+ }
+@@ -792,4 +1328,4 @@ static void __exit fpcmd_exit(void)
+ module_init(fpcmd_init);
+ module_exit(fpcmd_exit);
+ MODULE_LICENSE("GPL");
+-MODULE_DESCRIPTION("Gaokun3 FocalTech fingerprint QSEE transport");
++MODULE_DESCRIPTION("Gaokun3 FocalTech/Goodix fingerprint QSEE transport");

@@ -1,0 +1,32 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] arm64: dts: qcom: sc8280xp-huawei-gaokun3: drive touch mode-select gpio174 low
+
+The Himax HX83121A cascade TDDI controller selects its host transport at
+firmware reload time by sampling GPIO 174:
+- GPIO 174 low at reload selects SPI raw-data mode (used by himax-spi);
+- GPIO 174 high at reload selects I2C HID mode (used by UEFI firmware).
+
+Because the device tree did not configure GPIO 174, the pin remained at the
+high level left by UEFI, causing the controller to latch into I2C mode across
+touch or panel resets and leaving himax-spi without touch events. Drive
+GPIO 174 low in the touchscreen default pinctrl state before driver probe and
+firmware reload.
+
+Origin: local
+Upstream-Status: Pending
+---
+--- a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
++++ b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
+@@ -1658,6 +1658,12 @@
+ 	};
+
+ 	ts0_default: ts0-default-state {
++		mode-pins {
++			pins = "gpio174";
++			function = "gpio";
++			output-low;
++		};
++
+ 		int-n-pins {
+ 			pins = "gpio175";
+ 			function = "gpio";

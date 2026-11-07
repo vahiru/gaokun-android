@@ -1,0 +1,44 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: iris: schedule system error recovery on gen1 firmware watchdog interrupt
+
+When the video firmware triggers a watchdog interrupt, iris_hfi_isr_handler()
+leaves the IRQ disabled and expects the response handler to schedule
+sys_error_handler to reload the firmware. On gen1,
+iris_hfi_gen1_handle_response() ignored core->status ==
+IRIS_CORE_ERROR_WATCHDOG, leaving core->state stuck in INIT with the IRQ
+disabled until reboot.
+
+Check for watchdog status in iris_hfi_gen1_handle_response() and transition the
+core to error state while scheduling sys_error_handler, matching gen2.
+
+Origin: local
+Upstream-Status: Pending
+---
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen1_response.c b/drivers/media/platform/qcom/iris/iris_hfi_gen1_response.c
+index 314167f8e..e6c0e97d3 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen1_response.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen1_response.c
+@@ -11,6 +11,7 @@
+ #include "iris_instance.h"
+ #include "iris_vdec.h"
+ #include "iris_vpu_buffer.h"
++#include "iris_vpu_common.h"
+ 
+ static void iris_hfi_gen1_read_changed_params(struct iris_inst *inst,
+ 					      struct hfi_msg_event_notify_pkt *pkt)
+@@ -699,6 +700,15 @@ static void iris_hfi_gen1_flush_debug_queue(struct iris_core *core, u8 *packet)
+ 
+ void iris_hfi_gen1_response_handler(struct iris_core *core)
+ {
++	if (iris_vpu_watchdog(core, core->intr_status)) {
++		struct hfi_msg_event_notify_pkt pkt = {.event_id = HFI_EVENT_SYS_ERROR};
++
++		dev_err(core->dev, "cpu watchdog error received\n");
++		iris_hfi_gen1_sys_event_notify(core, &pkt);
++
++		return;
++	}
++
+ 	memset(core->response_packet, 0, sizeof(struct hfi_pkt_hdr));
+ 	while (!iris_hfi_queue_msg_read(core, core->response_packet)) {
+ 		iris_hfi_gen1_handle_response(core, core->response_packet);

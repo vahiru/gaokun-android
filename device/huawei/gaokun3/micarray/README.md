@@ -22,12 +22,12 @@ Huawei MateBook E Go（gaokun3）配备四颗数字麦克风（`DMIC0`–`DMIC3`
 
 | 文件 / 补丁 | 职责说明 |
 |---|---|
-| `patches/0206-audio-aidl-primary-capture-hook.patch`（及`crdroid-tree-fixes.py`） | 在`StreamPrimary`采集侧引入厂商钩子：按`ro.vendor.audio.primary.capture_hook`加载库，由钩子决定ALSA采集声道数、转换PCM数据块、接收音源变更通知并修正采集时间戳延迟 |
+| `patches/android/hardware-interfaces/0010-audio-aidl-primary-capture-hook.patch`（及`crdroid-tree-fixes.py`） | 在`StreamPrimary`采集侧引入厂商钩子：按`ro.vendor.audio.primary.capture_hook`加载库，由钩子决定ALSA采集声道数、转换PCM数据块、接收音源变更通知并修正采集时间戳延迟 |
 | `micarray.cpp`（`libgaokunmicarray.so`） | 钩子主入口：识别内置麦克风PCM、按音源切换处理模式、动态配置VA混音器、串联AEC3与NPU降噪客户端。安装于`/vendor/lib64/soundfx/` |
 | `beamformer.{h,cpp}` | 48 kHz频域重叠相加（STFT）固定波束成形实现 |
 | [`prebuilt/`](prebuilt/README.md) | 存放从华为Windows驱动提取的波束成形复数权重文件（不入库，安装至`/vendor/etc/micarray/`） |
 | `tplg-four-channel-capture.py` | 将`audioreach-tplg.bin`中内置麦克风（`MultiMedia4 Capture`）的声道上限从`2`修改为`4` |
-| `patches/0203`、`0204`（内核） | `0203`使VA后端在前端请求4声道时保留4路；`0204`按源顺序标记采集声道映射，防止ADSP媒体格式转换模块（MFC）按扬声器声场重混四路麦克风信号 |
+| `patches/kernel/audio/0011`、`0012`（内核） | `0011`使VA后端在前端请求4声道时保留4路；`0012`按源顺序标记采集声道映射，防止ADSP媒体格式转换模块（MFC）按扬声器声场重混四路麦克风信号 |
 | `denoise_protocol.h`、[`../denoise/`](../denoise/README.md) | 采集钩子与NPU降噪守护进程之间的Unix域套接字（`SOCK_SEQPACKET`）协议与服务端实现 |
 | [`../etc/denoise.rc`](../etc/denoise.rc)、`NoiseSuppressionSettingsActivity` | 将「设置 → 声音 → 麦克风降噪」的各场景开关镜像至`vendor.gaokun3.denoise.*` |
 

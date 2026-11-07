@@ -16,7 +16,7 @@ using gaokun::echoref::EchoReference;
 bool EchoReferenceReader::attach(std::string* why) {
     if (mRing != nullptr) return true;
     // The HAL loads speakerfx from this path (device.mk) the first time a speaker stream opens
-    // and keeps it (patches/0117).  Loading it here, from the same namespace, gets that same
+    // and keeps it (patches/android/hardware-interfaces/0009).  Loading it here, from the same namespace, gets that same
     // instance, before or after the HAL does; the handle is kept, so it stays for good.
     char path[PROP_VALUE_MAX] = {0};
     if (__system_property_get("ro.vendor.audio.primary.playback_hook", path) <= 0) {

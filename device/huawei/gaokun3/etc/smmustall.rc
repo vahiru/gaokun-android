@@ -5,7 +5,7 @@
 # 而 SCTLR.CFCFG=1 是 stall-on-fault。于是【任何一次】GPU 页错误都会让
 # SMMU 永久 stall → AHB 总线 stall → CP 断粮 → GMU 看门狗 → cx gdsc 塌不下去
 # → 全系统 VK_ERROR_DEVICE_LOST 崩溃循环，且无法自愈。
-# patches/0004 v3 之后实测 fault 数 66 → 0，但这条链是"错一次就死"，
+# patches/mesa/0001 v3 之后实测 fault 数 66 → 0，但这条链是"错一次就死"，
 # 所以解锁器留着当安全网，代价是一个 100ms 轮询的 shell 循环。
 #
 # ⚠️ 时序：必须早于 SurfaceFlinger 第一次用 GPU（约开机 7s）。

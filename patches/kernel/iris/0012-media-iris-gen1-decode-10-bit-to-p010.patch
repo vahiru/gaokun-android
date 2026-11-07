@@ -1,0 +1,143 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: iris: support 10-bit HEVC and VP9 decoding to P010 on gen1
+
+Add 10-bit decoding support for HEVC Main10 and VP9 Profile 2 on gen1 HFI:
+
+- When HFI_EVENT_DATA_SEQUENCE_CHANGED reports 10-bit depth (0x20002) for HEVC
+  or VP9, update the instance bit depth to BIT_DEPTH_10 and switch the CAPTURE
+  pixel format to V4L2_PIX_FMT_P010 (or back to NV12 when switching to 8-bit).
+- Configure TP10_UBWC for internal DPB buffers (stream 0) and P010 for CAPTURE
+  output buffers (stream 1) in split mode, with 256-byte scanline alignment.
+
+Origin: local
+Upstream-Status: Pending
+---
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c b/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c
+index e8eeb83f0..0240f62ac 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c
+@@ -864,15 +864,28 @@ static int iris_hfi_gen1_set_raw_format(struct iris_inst *inst, u32 plane)
+ 		pixelformat = inst->fmt_dst->fmt.pix_mp.pixelformat;
+ 		if (iris_split_mode_enabled(inst)) {
+ 			fmt.buffer_type = HFI_BUFFER_OUTPUT;
+-			fmt.format = HFI_COLOR_FORMAT_NV12_UBWC;
++			fmt.format = iris_fmt_is_10bit(pixelformat) ?
++				HFI_COLOR_FORMAT_YUV420_TP10_UBWC : HFI_COLOR_FORMAT_NV12_UBWC;
+ 
+ 			ret = hfi_gen1_set_property(inst, ptype, &fmt, sizeof(fmt));
+ 			if (ret)
+ 				return ret;
+ 
+ 			fmt.buffer_type = HFI_BUFFER_OUTPUT2;
+-			fmt.format = pixelformat == V4L2_PIX_FMT_NV12 ?
+-				HFI_COLOR_FORMAT_NV12 : HFI_COLOR_FORMAT_NV12_UBWC;
++			switch (pixelformat) {
++			case V4L2_PIX_FMT_NV12:
++				fmt.format = HFI_COLOR_FORMAT_NV12;
++				break;
++			case V4L2_PIX_FMT_P010:
++				fmt.format = HFI_COLOR_FORMAT_P010;
++				break;
++			case V4L2_PIX_FMT_QC10C:
++				fmt.format = HFI_COLOR_FORMAT_YUV420_TP10_UBWC;
++				break;
++			default:
++				fmt.format = HFI_COLOR_FORMAT_NV12_UBWC;
++				break;
++			}
+ 
+ 			ret = hfi_gen1_set_property(inst, ptype, &fmt, sizeof(fmt));
+ 		} else {
+@@ -897,18 +910,20 @@ static int iris_hfi_gen1_set_format_constraints(struct iris_inst *inst, u32 plan
+ {
+ 	const u32 ptype = HFI_PROPERTY_PARAM_UNCOMPRESSED_PLANE_ACTUAL_CONSTRAINTS_INFO;
+ 	struct hfi_uncompressed_plane_actual_constraints_info pconstraint;
++	u32 pixelformat = inst->fmt_dst->fmt.pix_mp.pixelformat;
++	u32 stride_multiples = pixelformat == V4L2_PIX_FMT_P010 ? 256 : 128;
+ 
+-	if (inst->fmt_dst->fmt.pix_mp.pixelformat == V4L2_PIX_FMT_QC08C)
++	if (pixelformat == V4L2_PIX_FMT_QC08C || pixelformat == V4L2_PIX_FMT_QC10C)
+ 		return 0;
+ 
+ 	pconstraint.buffer_type = HFI_BUFFER_OUTPUT2;
+ 	pconstraint.num_planes = 2;
+-	pconstraint.plane_format[0].stride_multiples = 128;
++	pconstraint.plane_format[0].stride_multiples = stride_multiples;
+ 	pconstraint.plane_format[0].max_stride = 8192;
+ 	pconstraint.plane_format[0].min_plane_buffer_height_multiple = 32;
+ 	pconstraint.plane_format[0].buffer_alignment = 256;
+ 
+-	pconstraint.plane_format[1].stride_multiples = 128;
++	pconstraint.plane_format[1].stride_multiples = stride_multiples;
+ 	pconstraint.plane_format[1].max_stride = 8192;
+ 	pconstraint.plane_format[1].min_plane_buffer_height_multiple = 16;
+ 	pconstraint.plane_format[1].buffer_alignment = 256;
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen1_defines.h b/drivers/media/platform/qcom/iris/iris_hfi_gen1_defines.h
+index 0e4dee192..8ca3b1fc3 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen1_defines.h
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen1_defines.h
+@@ -98,7 +98,12 @@
+ #define HFI_PROPERTY_PARAM_VDEC_COLOUR_SPACE		0x100300a
+ #define HFI_CORE_ID_1					1
+ #define HFI_COLOR_FORMAT_NV12				0x02
++#define HFI_COLOR_FORMAT_P010				0x4003
+ #define HFI_COLOR_FORMAT_NV12_UBWC			0x8002
++#define HFI_COLOR_FORMAT_YUV420_TP10_UBWC		0xc002
++
++#define HFI_BITDEPTH_8					0x0
++#define HFI_BITDEPTH_10					0x20002
+ 
+ #define HFI_MSG_SYS_INIT				0x20001
+ #define HFI_MSG_SYS_SESSION_INIT			0x20006
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen1_response.c b/drivers/media/platform/qcom/iris/iris_hfi_gen1_response.c
+index e6c0e97d3..f60b06b70 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen1_response.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen1_response.c
+@@ -107,9 +107,33 @@ static void iris_hfi_gen1_read_changed_params(struct iris_inst *inst,
+ 	pixmp_ip->width = event.width;
+ 	pixmp_ip->height = event.height;
+ 
+-	pixmp_op->width = ALIGN(event.width, 128);
+-	pixmp_op->height = ALIGN(event.height, 32);
+-	pixmp_op->plane_fmt[0].bytesperline = ALIGN(event.width, 128);
++	if (event.bit_depth == HFI_BITDEPTH_10) {
++		inst->fw_caps[BIT_DEPTH].value = BIT_DEPTH_10;
++		if (!iris_fmt_is_10bit(pixmp_op->pixelformat))
++			pixmp_op->pixelformat = V4L2_PIX_FMT_P010;
++	} else {
++		inst->fw_caps[BIT_DEPTH].value = BIT_DEPTH_8;
++		if (!iris_fmt_is_8bit(pixmp_op->pixelformat))
++			pixmp_op->pixelformat = V4L2_PIX_FMT_NV12;
++	}
++
++	switch (pixmp_op->pixelformat) {
++	case V4L2_PIX_FMT_P010:
++		pixmp_op->width = ALIGN(event.width, 128);
++		pixmp_op->height = ALIGN(event.height, 32);
++		pixmp_op->plane_fmt[0].bytesperline = ALIGN(event.width * 2, 256);
++		break;
++	case V4L2_PIX_FMT_QC10C:
++		pixmp_op->width = roundup(event.width, 192);
++		pixmp_op->height = ALIGN(event.height, 16);
++		pixmp_op->plane_fmt[0].bytesperline = ALIGN(pixmp_op->width * 4 / 3, 256);
++		break;
++	default:
++		pixmp_op->width = ALIGN(event.width, 128);
++		pixmp_op->height = ALIGN(event.height, 32);
++		pixmp_op->plane_fmt[0].bytesperline = ALIGN(event.width, 128);
++		break;
++	}
+ 	pixmp_op->plane_fmt[0].sizeimage = iris_get_buffer_size(inst, BUF_OUTPUT);
+ 
+ 	matrix_coeff =  FIELD_GET(GENMASK(7, 0), event.colour_space);
+@@ -166,7 +190,9 @@ static void iris_hfi_gen1_read_changed_params(struct iris_inst *inst,
+ 	dst_q = v4l2_m2m_get_dst_vq(inst->m2m_ctx);
+ 	dst_q->min_reqbufs_allocation = inst->buffers[BUF_OUTPUT].min_count;
+ 
+-	if (event.bit_depth || !event.pic_struct) {
++	if ((event.bit_depth != HFI_BITDEPTH_8 && event.bit_depth != HFI_BITDEPTH_10) ||
++	    (event.bit_depth == HFI_BITDEPTH_10 && inst->codec == V4L2_PIX_FMT_H264) ||
++	    !event.pic_struct) {
+ 		dev_err(core->dev, "unsupported content, bit depth: %x, pic_struct = %x\n",
+ 			event.bit_depth, event.pic_struct);
+ 		iris_inst_change_state(inst, IRIS_INST_ERROR);

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 一次性抓下触摸驱动的全部可观测状态。需要内核 #23 及以上（patches/0043）。
+# 一次性抓下触摸驱动的全部可观测状态。需要内核 #23 及以上（patches/kernel/input/0007）。
 #
 #   bash scripts/touch/dump-state.sh [输出目录]
 #
@@ -45,7 +45,7 @@ if S "[ -r $DBG/frame_raw ]"; then
         [ "$sz" = 4800 ] || echo "⚠️ $f.bin 是 $sz 字节，应为 4800 —— 传输被改过？"
     done
 else
-    echo "⚠️ $DBG 不存在 —— 跑的不是带 patches/0043 的内核（#23 起）"
+    echo "⚠️ $DBG 不存在 —— 跑的不是带 patches/kernel/input/0007 的内核（#23 起）"
 fi
 
 echo "✓ 已存到 $OUT/"

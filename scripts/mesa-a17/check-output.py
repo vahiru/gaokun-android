@@ -157,7 +157,7 @@ def main():
         (ok if 'tu_knl_drm_msm.cc' in srcs else fail)('srcs 含 tu_knl_drm_msm.cc（msm KMD）')
         for k in ('tu_knl_kgsl.cc', 'tu_knl_drm_virtio.cc'):
             (fail if k in srcs else ok)('srcs 不含 %s' % k)
-        (ok if 'tu_image.cc' in srcs else fail)('srcs 含 tu_image.cc（patches/0004 落在这里）')
+        (ok if 'tu_image.cc' in srcs else fail)('srcs 含 tu_image.cc（patches/mesa/0001 落在这里）')
         # 3. SP-HAL 依赖闭包
         seen, stack, shared = set(), [TURNIP], {}
         while stack:

@@ -1,0 +1,177 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] media: i2c: ov13b10: add OF match table, selection ops, and gaokun3 power sequence
+
+Upstream ov13b10 only provides an ACPI match table and lacks V4L2 subdev
+get_selection support required by libcamera. Add the "ovti,ov13b10" OF match
+entry, implement get_selection (NATIVE_SIZE, CROP_BOUNDS, CROP_DEFAULT, and
+CROP), and update the power-on/off sequence for Huawei MateBook E Go (gaokun3)
+where the 2.8 V analog rail (PM8350C LDO2_B) is shared with the DSI panel's
+1.8 V VDDI rail. Also provide a module parameter (ov13b10.fail_probe) to test
+camss fallback when the rear sensor is absent.
+
+Origin: local
+Upstream-Status: Pending
+---
+diff --git a/drivers/media/i2c/ov13b10.c b/drivers/media/i2c/ov13b10.c
+index b0d3414..41042b3 100644
+--- a/drivers/media/i2c/ov13b10.c
++++ b/drivers/media/i2c/ov13b10.c
+@@ -6,6 +6,7 @@
+ #include <linux/delay.h>
+ #include <linux/gpio/consumer.h>
+ #include <linux/i2c.h>
++#include <linux/mod_devicetable.h>
+ #include <linux/module.h>
+ #include <linux/pm_runtime.h>
+ #include <linux/regulator/consumer.h>
+@@ -700,6 +701,13 @@ static const struct ov13b10_mode supported_2_lanes_modes[] = {
+ 	},
+ };
+ 
++/*
++ * Diagnostic parameter: simulate an absent sensor (as on board variants with an
++ * alternate rear camera module) to test camss notifier fallback.
++ */
++static bool fail_probe;
++module_param(fail_probe, bool, 0444);
++
+ static const char * const ov13b10_supply_names[] = {
+ 	"dovdd",        /* Digital I/O power */
+ 	"avdd",         /* Analog power */
+@@ -1190,6 +1198,7 @@ static int ov13b10_identify_module(struct ov13b10 *ov13b)
+ 		return -EIO;
+ 	}
+ 
++	dev_info(ov13b->dev, "chip id 0x%06x identified\n", val);
+ 	ov13b->identified = true;
+ 
+ 	return 0;
+@@ -1206,6 +1215,12 @@ static int ov13b10_power_off(struct device *dev)
+ 
+ 	clk_disable_unprepare(ov13b10->img_clk);
+ 
++	/*
++	 * gaokun3: AVDD (LDO2_B) is shared with the display panel's VDDI, which
++	 * votes 1.8V. Hand our 2.8V request back so the rail returns to 1.8V.
++	 */
++	regulator_set_voltage(ov13b10->supplies[1].consumer, 1800000, 2800000);
++
+ 	return 0;
+ }
+ 
+@@ -1215,20 +1230,40 @@ static int ov13b10_power_on(struct device *dev)
+ 	struct ov13b10 *ov13b10 = to_ov13b10(sd);
+ 	int ret;
+ 
+-	ret = clk_prepare_enable(ov13b10->img_clk);
++	/*
++	 * gaokun3 (HUAWEI MateBook E Go): follow the board's own power table
++	 * (Windows CAMS_RES_QRD.bin): reset asserted -> rails -> 1ms ->
++	 * reset released -> 10ms -> MCLK. AVDD is LDO2_B, shared with the
++	 * panel's VDDI (1.8V vote); the board raises it to 2.8V for the
++	 * sensor and RPMh takes the max, so request 2.8V here.
++	 */
++	gpiod_set_value_cansleep(ov13b10->reset, 1);
++
++	ret = regulator_set_voltage(ov13b10->supplies[1].consumer, 2800000, 2800000);
+ 	if (ret < 0) {
+-		dev_err(dev, "failed to enable imaging clock: %d", ret);
++		dev_err(dev, "avdd: cannot request 2.8V: %d\n", ret);
+ 		return ret;
+ 	}
++
+ 	ret = regulator_bulk_enable(ARRAY_SIZE(ov13b10_supply_names),
+ 				    ov13b10->supplies);
+ 	if (ret < 0) {
+ 		dev_err(dev, "failed to enable regulators\n");
+-		clk_disable_unprepare(ov13b10->img_clk);
+ 		return ret;
+ 	}
+ 
++	usleep_range(1000, 1500);
+ 	gpiod_set_value_cansleep(ov13b10->reset, 0);
++	usleep_range(10000, 11000);
++
++	ret = clk_prepare_enable(ov13b10->img_clk);
++	if (ret < 0) {
++		dev_err(dev, "failed to enable imaging clock: %d", ret);
++		regulator_bulk_disable(ARRAY_SIZE(ov13b10_supply_names),
++				       ov13b10->supplies);
++		return ret;
++	}
++
+ 	/* 5ms to wait ready after XSHUTDN assert */
+ 	usleep_range(5000, 5500);
+ 
+@@ -1338,8 +1373,41 @@ static const struct v4l2_subdev_video_ops ov13b10_video_ops = {
+ 	.s_stream = ov13b10_set_stream,
+ };
+ 
++/*
++ * Report the 4208x3120 active pixel array for NATIVE_SIZE, CROP_BOUNDS, and
++ * CROP_DEFAULT, and center-crop narrower modes (such as 4160-wide modes)
++ * within the full array for V4L2_SEL_TGT_CROP.
++ */
++static int ov13b10_get_selection(struct v4l2_subdev *sd,
++				 struct v4l2_subdev_state *sd_state,
++				 struct v4l2_subdev_selection *sel)
++{
++	struct ov13b10 *ov13b = to_ov13b10(sd);
++	const struct ov13b10_mode *mode = ov13b->cur_mode;
++
++	switch (sel->target) {
++	case V4L2_SEL_TGT_NATIVE_SIZE:
++	case V4L2_SEL_TGT_CROP_BOUNDS:
++	case V4L2_SEL_TGT_CROP_DEFAULT:
++		sel->r.left = 0;
++		sel->r.top = 0;
++		sel->r.width = 4208;
++		sel->r.height = 3120;
++		return 0;
++	case V4L2_SEL_TGT_CROP:
++		sel->r.left = (4208 - mode->width) / 2;
++		sel->r.top = (3120 - mode->height) / 2;
++		sel->r.width = mode->width;
++		sel->r.height = mode->height;
++		return 0;
++	}
++
++	return -EINVAL;
++}
++
+ static const struct v4l2_subdev_pad_ops ov13b10_pad_ops = {
+ 	.enum_mbus_code = ov13b10_enum_mbus_code,
++	.get_selection = ov13b10_get_selection,
+ 	.get_fmt = ov13b10_get_pad_format,
+ 	.set_fmt = ov13b10_set_pad_format,
+ 	.enum_frame_size = ov13b10_enum_frame_size,
+@@ -1591,6 +1659,10 @@ static int ov13b10_probe(struct i2c_client *client)
+ 	bool full_power;
+ 	int ret;
+ 
++	if (fail_probe)
++		return dev_err_probe(&client->dev, -ENODEV,
++				     "fail_probe set: pretending the sensor is absent\n");
++
+ 	ov13b = devm_kzalloc(&client->dev, sizeof(*ov13b), GFP_KERNEL);
+ 	if (!ov13b)
+ 		return -ENOMEM;
+@@ -1705,11 +1777,18 @@ static const struct acpi_device_id ov13b10_acpi_ids[] = {
+ MODULE_DEVICE_TABLE(acpi, ov13b10_acpi_ids);
+ #endif
+ 
++static const struct of_device_id ov13b10_of_ids[] = {
++	{ .compatible = "ovti,ov13b10" },
++	{ /* sentinel */ }
++};
++MODULE_DEVICE_TABLE(of, ov13b10_of_ids);
++
+ static struct i2c_driver ov13b10_i2c_driver = {
+ 	.driver = {
+ 		.name = "ov13b10",
+ 		.pm = pm_ptr(&ov13b10_pm_ops),
+ 		.acpi_match_table = ACPI_PTR(ov13b10_acpi_ids),
++		.of_match_table = ov13b10_of_ids,
+ 	},
+ 	.probe = ov13b10_probe,
+ 	.remove = ov13b10_remove,

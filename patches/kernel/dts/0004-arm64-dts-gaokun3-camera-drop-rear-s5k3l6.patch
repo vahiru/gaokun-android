@@ -1,0 +1,84 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] arm64: dts: qcom: sc8280xp-huawei-gaokun3: remove non-existent rear s5k3l6 sensor node
+
+The upstream sc8280xp-huawei-gaokun3-camera.dtsi describes a Samsung S5K3L6
+sensor at 0x10 on cci1_i2c0 that has no mainline driver and does not match the
+OmniVision OV13B10 module populated on this board. Leaving the unbound endpoint
+in the CAMSS graph blocks the v4l2-async notifier from completing and prevents
+the working front camera (hi846) from registering its subdev nodes.
+
+Remove the placeholder rear camera@10 node, its csiphy0 endpoint, and its
+unused pinctrl and regulator references before adding the board's OV13B10
+description.
+
+Origin: local
+Upstream-Status: Pending
+---
+diff --git a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3-camera.dtsi b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3-camera.dtsi
+index 69fa4db9b1a1..690db451886c 100644
+--- a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3-camera.dtsi
++++ b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3-camera.dtsi
+@@ -122,15 +122,14 @@ &camss {
+ 	status = "okay";
+ 
+ 	ports {
+-		port@0 {
+-			csiphy0_ep: endpoint@0 {
+-				reg = <0>;
+-
+-				clock-lanes = <7>;
+-				data-lanes = <0 1 2 3>;
+-				remote-endpoint = <&s5k3l6_ep>;
+-			};
+-		};
++		/* port@0 (csiphy0 -> rear s5k3l6) removed: vdda(l2b) is held at
++		 * 1.8V by DSI vddi while S5K3L6 wants 2.8V - sensor NAKs on CCI
++		 * (i2c -6), and v7.2 camss iterates endpoints with
++		 * fwnode_graph_for_each_endpoint (no availability check), so a
++		 * wired-but-never-binding sensor blocks the whole v4l2-async
++		 * notifier - the front camera would get no /dev/v4l-subdev*
++		 * either. Shared-rail conflict needs board-level evidence.
++		 */
+ 
+ 		port@3 {
+ 			csiphy3_ep: endpoint@0 {
+@@ -164,38 +163,7 @@ voice_coil_motor: vcm@c {
+ 	 *
+ 	 * This sensor has never been detected on 2023 model
+ 	 */
+-	camera_rear: camera@10 {
+-		compatible = "samsung,s5k3l6xx";
+-		reg = <0x10>;
+-
+-		pinctrl-0 = <&camr_rgb_default>;
+-		pinctrl-names = "default";
+-
+-		clocks = <&camcc CAMCC_MCLK4_CLK>;
+-		clock-names = "mclk";
+-		clock-frequency = <24000000>;
+-
+-		rstn-gpios = <&tlmm 7 GPIO_ACTIVE_LOW>;
+-
+-		vddio-supply = <&vreg_camr>;
+-		vdda-supply = <&vreg_l2b>; // 2.8v
+-		vddd-supply = <&vreg_l2c>; // 1.8v
+-
+-		leds = <&privacy_led>; // &camera_flash can't be enabled for now
+-		led-names = "privacy";
+-
+-		lens-focus = <&voice_coil_motor>;
+-
+-		orientation = <1>;
+-		rotation = <180>; /* FIXME */
+-
+-		port {
+-			s5k3l6_ep: endpoint {
+-				data-lanes = <1 2 3 4>;
+-				remote-endpoint = <&csiphy0_ep>;
+-			};
+-		};
+-	};
++	/* camera_rear (s5k3l6xx) removed - see camss port@0 note above */
+ 
+ 	// eeprom@50/51 <= l2c
+ };

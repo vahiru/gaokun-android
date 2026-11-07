@@ -1,0 +1,91 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] Input: himax-spi: shorten lost-track hold to track_fw_lost_frames when firmware reports no finger
+
+Unmatched tracks normally wait track_lost_frames (3 frames) before emitting
+touch UP to bridge brief single-frame dropouts. When adaptive baseline tracking
+with baseline_fw_finger is active and the firmware's own finger flag reports no
+finger on the panel, shorten the hold limit to track_fw_lost_frames (default 1
+frame) to reduce lift-off latency.
+
+Origin: local
+Upstream-Status: Pending
+---
+diff --git a/drivers/input/touchscreen/himax-spi-core.c b/drivers/input/touchscreen/himax-spi-core.c
+index 9d9e118..975c00a 100644
+--- a/drivers/input/touchscreen/himax-spi-core.c
++++ b/drivers/input/touchscreen/himax-spi-core.c
+@@ -1125,6 +1125,7 @@ HX_ALGO_ATTR_S32_RW(track_filter_mincutoff);
+ HX_ALGO_ATTR_S32_RW(track_filter_beta);
+ HX_ALGO_ATTR_S32_RW(track_filter_dcutoff);
+ HX_ALGO_ATTR_U8_RW(track_lost_frames);
++HX_ALGO_ATTR_U8_RW(track_fw_lost_frames);
+ HX_ALGO_ATTR_U8_RW(debounce_base);
+ HX_ALGO_ATTR_BOOL_RW(ghost_row_filter);
+ HX_ALGO_ATTR_S32_RW(debounce_strong);
+@@ -1259,6 +1260,7 @@ static struct attribute *hx_algo_attrs[] = {
+ 	&dev_attr_zone_split.attr,
+ 	&dev_attr_track_dist2_max.attr,
+ 	&dev_attr_track_lost_frames.attr,
++	&dev_attr_track_fw_lost_frames.attr,
+ 	&dev_attr_debounce_base.attr,
+ 	&dev_attr_ghost_row_filter.attr,
+ 	&dev_attr_debounce_strong.attr,
+diff --git a/drivers/input/touchscreen/hx-algo.c b/drivers/input/touchscreen/hx-algo.c
+index f752112..c09cf5b 100644
+--- a/drivers/input/touchscreen/hx-algo.c
++++ b/drivers/input/touchscreen/hx-algo.c
+@@ -84,6 +84,7 @@ void hx_algo_init_defaults(struct hx_algo *algo)
+ 	algo->zone_split       = true;
+ 	algo->track_dist2_max   = HIMAX_TRACK_MATCH_DIST2;
+ 	algo->track_lost_frames = HIMAX_TRACK_LOST_FRAMES;
++	algo->track_fw_lost_frames = 1;   /* a lone wrong flag must not cut a touch */
+ 	algo->debounce_base     = HIMAX_NEW_TOUCH_DEBOUNCE;
+ 	algo->ghost_row_filter  = false;
+ 	algo->debounce_strong   = 3000;
+@@ -2278,6 +2279,7 @@ void hx_track_contacts(struct hx_algo *algo,
+ 	struct hx_match_candidate cand[HIMAX_MAX_TOUCH * HIMAX_MAX_TOUCH];
+ 	int cand_cnt = 0;
+ 	int i, j, k;
++	u8 lost;
+ 
+ 	/*
+ 	 * A track reported as a palm last frame has served its purpose; one
+@@ -2433,6 +2435,16 @@ void hx_track_contacts(struct hx_algo *algo,
+ 		det_used[m->det_idx]        = true;
+ 	}
+ 
++	/*
++	 * The wait bridges a contact that drops out under a finger.  A frame the
++	 * firmware calls empty has no finger left to wait for, so the last lift
++	 * of a touch goes out sooner.  The flag covers the whole panel: with
++	 * another finger down a lift still waits.
++	 */
++	lost = algo->track_lost_frames;
++	if (algo->base_mode && algo->baseline_fw_finger && !algo->fw_finger)
++		lost = min(lost, algo->track_fw_lost_frames);
++
+ 	/* Age or release unmatched tracks. */
+ 	for (i = 0; i < HIMAX_MAX_TOUCH; i++) {
+ 		struct hx_track *trk = &algo->tracks[i];
+@@ -2452,7 +2464,7 @@ void hx_track_contacts(struct hx_algo *algo,
+ 		}
+ 
+ 		trk->missed++;
+-		if (trk->missed > algo->track_lost_frames) {
++		if (trk->missed > lost) {
+ 			algo->stats.tracks_lost++;
+ 			hx_reset_track(trk);
+ 			freed |= 1u << i;
+diff --git a/drivers/input/touchscreen/hx-algo.h b/drivers/input/touchscreen/hx-algo.h
+index 75fbfcd..4a7fcc5 100644
+--- a/drivers/input/touchscreen/hx-algo.h
++++ b/drivers/input/touchscreen/hx-algo.h
+@@ -367,6 +367,8 @@ struct hx_algo {
+ 	/* Tracking */
+ 	s32  track_dist2_max;      /* max squared distance for match       */
+ 	u8   track_lost_frames;    /* missed frames before slot release    */
++	u8   track_fw_lost_frames; /* the same while the firmware sees no  */
++				   /* finger; never more than the above    */
+ 	u8   debounce_base;        /* new-slot debounce count              */
+ 	s32  debounce_strong;      /* a new contact with at least this
+ 				    * signal is reported at once, unless

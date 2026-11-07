@@ -1,0 +1,51 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] clk: qcom: camcc-sc8280xp: use clk_rcg2_shared_ops for camnoc_axi and ahb RCGs
+
+During camera streaming, camss switches camcc_camnoc_axi_clk_src,
+camcc_slow_ahb_clk_src, and camcc_fast_ahb_clk_src from bi_tcxo to
+camcc_pll0_out_even / camcc_pll2_out_main. Because these three RCGs used plain
+clk_rcg2_ops with no disable callback, their CFG registers remained pointed at
+the disabled PLL after stream stop. On the subsequent titan_top_gdsc collapse
+and power-up, the GDSC hardware handshake with CAMNOC had no active clock edges
+and timed out with "titan_top_gdsc status stuck at 'off'" (-ETIMEDOUT).
+
+Switch camcc_camnoc_axi_clk_src, camcc_fast_ahb_clk_src, and
+camcc_slow_ahb_clk_src to clk_rcg2_shared_ops (matching camcc-sm8150,
+camcc-sc8180x, and camcc-x1e80100) so clk_rcg2_shared_disable() parks them back
+on bi_tcxo (parent index 0) when disabled.
+
+Fixes: ff93872a9c61 ("clk: qcom: camcc-sc8280xp: Add sc8280xp CAMCC")
+Origin: local
+Upstream-Status: Pending
+---
+diff --git a/drivers/clk/qcom/camcc-sc8280xp.c b/drivers/clk/qcom/camcc-sc8280xp.c
+index e4ec7e3..5ba6e54 100644
+--- a/drivers/clk/qcom/camcc-sc8280xp.c
++++ b/drivers/clk/qcom/camcc-sc8280xp.c
+@@ -667,7 +667,7 @@ static struct clk_rcg2 camcc_camnoc_axi_clk_src = {
+ 		.name = "camcc_camnoc_axi_clk_src",
+ 		.parent_data = camcc_parent_data_2,
+ 		.num_parents = ARRAY_SIZE(camcc_parent_data_2),
+-		.ops = &clk_rcg2_ops,
++		.ops = &clk_rcg2_shared_ops,
+ 	},
+ };
+ 
+@@ -835,7 +835,7 @@ static struct clk_rcg2 camcc_fast_ahb_clk_src = {
+ 		.name = "camcc_fast_ahb_clk_src",
+ 		.parent_data = camcc_parent_data_0,
+ 		.num_parents = ARRAY_SIZE(camcc_parent_data_0),
+-		.ops = &clk_rcg2_ops,
++		.ops = &clk_rcg2_shared_ops,
+ 	},
+ };
+ 
+@@ -1370,7 +1370,7 @@ static struct clk_rcg2 camcc_slow_ahb_clk_src = {
+ 		.name = "camcc_slow_ahb_clk_src",
+ 		.parent_data = camcc_parent_data_0,
+ 		.num_parents = ARRAY_SIZE(camcc_parent_data_0),
+-		.ops = &clk_rcg2_ops,
++		.ops = &clk_rcg2_shared_ops,
+ 	},
+ };
+ 

@@ -21,9 +21,9 @@
 
 | 部分 | 位置 | 说明 |
 |---|---|---|
-| 从片驱动 | `patches/0079` | `drivers/input/touchscreen/himax_hx83121a_pen.c`，帧经`/dev/gk3_pen`交给`gk3pend` |
-| 设备树 | `patches/0080` | 启用`&spi20`与引脚，挂载从片节点`pen@0` |
-| 休眠恢复 | `patches/0169`、`BoardConfig.mk` | `usbhid.quirks=0x12d1:0x10b8:0x21000000`（`HID_QUIRK_IDLE_ON_RESUME`） |
+| 从片驱动 | `patches/kernel/input/0011` | `drivers/input/touchscreen/himax_hx83121a_pen.c`，帧经`/dev/gk3_pen`交给`gk3pend` |
+| 设备树 | `patches/kernel/dts/0013` | 启用`&spi20`与引脚，挂载从片节点`pen@0` |
+| 休眠恢复 | `patches/kernel/input/0022`、`BoardConfig.mk` | `usbhid.quirks=0x12d1:0x10b8:0x21000000`（`HID_QUIRK_IDLE_ON_RESUME`） |
 | 守护进程 | `device/huawei/gaokun3/stylus/` | `gk3pend`（服务`vendor.gk3pend`），解算与系数说明见`stylus/solver.h` |
 | 权限与电量 | `ueventd.gaokun3.rc`、`sepolicy/gk3pend.te`、`genfs_contexts` | `/dev/gk3_pen`、`hidraw`、`uinput`、`usbfs`及`sysfs_gaokun3_pen_battery` |
 
@@ -32,7 +32,7 @@
 * **解算放在用户态**：压感、侧键和电量只能经USB从笔MCU取得，因此内核驱动只负责交出从片原始帧，由`gk3pend`在一处合并解算（沿用EGoTouchRev逆向出的HPP3步骤）。
 * **一欧滤波（One Euro filter）替代直线拟合**：解算出的原始位置每帧有零点几个像素的抖动，慢速书写时放大呈锯齿。`gk3pend`采用截止频率随速度升高的一欧滤波，慢写时多平滑、快划时几乎不增加延迟，并以1/16像素上报亚像素精度。原厂后处理链中的直线拟合（`LinearFilterProcess`）未采用：写字时很少触发，反而会把慢速画出的缓弧拉成折线。
 * **从片跟随复位与空闲降频**：从片没有复位线，主片每次复位（熄屏亮屏、`himax-spi`自恢复）都会使从片丢失配置，因此驱动在帧头异常、连续读失败或亮屏无帧时自动重初始化。无笔超过`idle_after_ms`后关闭中断改为低频轮询，`gk3pend`收到笔MCU报文时写`/dev/gk3_pen`立即恢复中断。
-* **USB休眠恢复**：笔MCU在收到`SET_FEATURE(REMOTE_WAKEUP)`后会按接口扣住IN报文，直到该接口收到`SET_IDLE`或OUT传输才放行。接口0（压感）绑定`hid-generic`，靠`patches/0169`新增的`HID_QUIRK_IDLE_ON_RESUME`在恢复时发送`SET_IDLE`；接口1（侧键与电量）由`gk3pend`在检测到休眠恢复后重新发送查询握手。
+* **USB休眠恢复**：笔MCU在收到`SET_FEATURE(REMOTE_WAKEUP)`后会按接口扣住IN报文，直到该接口收到`SET_IDLE`或OUT传输才放行。接口0（压感）绑定`hid-generic`，靠`patches/kernel/input/0022`新增的`HID_QUIRK_IDLE_ON_RESUME`在恢复时发送`SET_IDLE`；接口1（侧键与电量）由`gk3pend`在检测到休眠恢复后重新发送查询握手。
 * **电量节点挂载方式**：驱动注册的`power_supply`节点`m-pencil`故意不挂父设备——Android `EventHub`为虚拟`/sys/devices/virtual`下的`uinput`设备查找电池时，会将无父设备的设备级电池关联为触控笔电池，并由单独的SELinux类型`sysfs_gaokun3_pen_battery`放行`system_server`读取。
 * **面板列间距、列读出时差与强峰区域**：
   * **列间距**：BOE屏两端变宽、中间变窄，CSOT屏相反。`gk3pend`读取设备树中面板的`compatible`自动选表（日志打印`column pitch boe|csot|even`）。

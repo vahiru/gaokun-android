@@ -67,21 +67,20 @@ OTP修补DAC等寄存器。模板和TA来自同一个Windows驱动包（uup-driv
 ## 内核
 
 沿用 Android 自己的内核基线、配置、DTB 和补丁链，不使用 NixOS/HyperOS 内核替代。
-交接包 QSEE 补丁与本仓 0050 完全相同；0212 添加常驻驱动，0213 在它上面加 Goodix 分支，默认不开启：
+[`patches/kernel/fingerprint/`](../../../../patches/kernel/fingerprint/) 下的 3 个补丁（`0001` QSEECOM、`0002` 常驻驱动、`0003` Goodix 分支）随 `kernel-apply-patches.sh` 一并打入，`CONFIG_GAOKUN3_FPCMD` 默认不开启，由 `configure-kernel.sh` 打开：
 
 ```sh
-bash /path/to/gaokun-android/scripts/kernel-apply-patches.sh /path/to/kernel --with-fp
+bash /path/to/gaokun-android/scripts/kernel-apply-patches.sh /path/to/kernel
 # 在内核源码目录，先跑现有 Android 配置流程，然后：
 bash /path/to/gaokun-android/scripts/fingerprint/configure-kernel.sh /path/to/kernel-output
 make O=/path/to/kernel-output ARCH=arm64 -j8 vmlinuz.efi
 ```
 
 继续使用已有 ARM64 编译器/CROSS_COMPILE 设置。配置脚本只运行 olddefconfig，
-不编译、不插入模块。0050、0212 和 0213 均留在 `--with-fp` 实验补丁链。
-内核缺 0213 时，Goodix 机器上的 HAL 会在日志里报 `Fingerprint kernel driver has no Goodix support`。
+不编译、不插入模块。内核缺 `0003` 时，Goodix 机器上的 HAL 会在日志里报 `Fingerprint kernel driver has no Goodix support`。
 大构建开始前必须核对实际输出文件系统空间，预留镜像、验证副本及至少 2 GiB。
 
-0212 与原交付版本的差异：TA 默认路径 `/vendor/firmware/fingerpr.mbn`；
+`0002` 与原交付版本的差异：TA 默认路径 `/vendor/firmware/fingerpr.mbn`；
 驱动编为 built-in；同一时刻只允许一个 open；HAL 崩溃后 release 请求 shutdown；
 shutdown 一旦失败，保留 DMA 缓冲且拒绝重试和重新 open，重启后才能恢复。
 单次 secure call 仍可能不返回，取消只在两次 ioctl 之间生效，不会异步复位传感器。

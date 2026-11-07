@@ -195,7 +195,7 @@ typeattribute gaokun3_audioroute vendor_executes_system_violators;
 allow gaokun3_audioroute system_file:file rx_file_perms;
 allow gaokun3_audioroute system_file:file execute_no_trans;
 
-# 2026-10-26（patches/0113–0115）：脚本用 `[ -e ]` 看右功放有没有 qcom,port-mapping，
+# 2026-10-26（patches/kernel/audio/0007–0008、patches/kernel/dts/0016）：脚本用 `[ -e ]` 看右功放有没有 qcom,port-mapping，
 #   /sys/firmware/devicetree/base/soc@0/soundwire@3250000/wsa8830-right@0,2/qcom,port-mapping，
 #   实机标签 u:object_r:sysfs:s0（ls -Z 核过）。只要 stat：目录的 search 全局已有
 #   （private/domain.te:255），文件给 getattr 就够。被拒时脚本按旧内核处理（VISENSE 1、数字 84），

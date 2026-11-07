@@ -13,7 +13,7 @@
 get_prop(mediacodec, vendor_minigbm_debug_prop)
 
 # ── 自己的 A/B 开关 vendor.gaokun3.v4l2c2.merge_csd（2026-09-29 第七轮审计）──────────
-# patches/0019 让 v4l2 codec2 读这个属性；它落在 vendor_gaokun3_prop（property_contexts）。
+# patches/android/v4l2-codec2/0001 让 v4l2 codec2 读这个属性；它落在 vendor_gaokun3_prop（property_contexts）。
 # 设备上 policy-query：mediacodec vendor_gaokun3_prop:file read DENY。读不到时取默认 1，解码照样工作，
 # 但开关失效。两边都是 vendor，没有 neverallow。v0.7.0 验收普查里见过 mediacodec 读它被拒。
 get_prop(mediacodec, vendor_gaokun3_prop)

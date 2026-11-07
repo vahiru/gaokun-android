@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """把 himax 驱动导出的 40×60 电容网格画成能一眼看懂的图。
 
-数据来源（内核 #23 起，patches/0043）：
+数据来源（内核 #23 起，patches/kernel/input/0007）：
     /sys/kernel/debug/himax-hx83121a/frame_raw   面板【产出】的（仅去基线）
     /sys/kernel/debug/himax-hx83121a/frame       流水线【判定】的（CMF/边缘增强/IIR 之后）
 各 4800 字节 = 40 行 × 60 列 × s16 小端。
@@ -21,7 +21,7 @@
 import struct, sys
 
 ROWS, COLS = 40, 60
-MACRO_DEFAULT = 280          # hx_algo_init_defaults() 的 macro_threshold（patches/0122 前是 800）
+MACRO_DEFAULT = 280          # hx_algo_init_defaults() 的 macro_threshold（patches/kernel/input/0019 前是 800）
 RAMP = ' .:-=+*#%@'
 
 def load(path):

@@ -1,0 +1,91 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] Input: himax-spi: enable adaptive baseline, zone splitting, tap lock, and One Euro filter by default
+
+Switch the default algorithm parameters to the calibrated EGoTouchRev-rebuild
+detection pipeline, tap lock, and One Euro filter configuration:
+
+- Detection: baseline_mode = 2 (adaptive baseline with pre-gate CMF),
+  baseline_fw_finger = 1, iir_enabled = 0, macro/peak threshold = 280,
+  peak_edge_threshold = 300, peak_drift_limit = 1000, peak_merge_radius = 2,
+  zone_split = 1, debounce_strong = 3000, track_min_signal = 1500.
+- Filtering: track_tap_radius = 20, One Euro filter at 1000 mHz / 15 / 30000,
+  and track_smoothing = 0.
+
+Origin: local
+Upstream-Status: Pending
+---
+diff --git a/drivers/input/touchscreen/hx-algo.c b/drivers/input/touchscreen/hx-algo.c
+index ffdeff5..17fe45d 100644
+--- a/drivers/input/touchscreen/hx-algo.c
++++ b/drivers/input/touchscreen/hx-algo.c
+@@ -41,24 +41,24 @@
+ 
+ void hx_algo_init_defaults(struct hx_algo *algo)
+ {
+-	algo->baseline_mode      = 0;    /* fixed baseline              */
+-	algo->baseline_fw_finger = false;
++	algo->baseline_mode      = 2;    /* adaptive, CMF before the gate */
++	algo->baseline_fw_finger = true;
+ 	algo->baseline_gate      = 305;
+ 	algo->cmf_enabled        = true;
+ 	algo->cmf_mode           = 3;    /* rows and columns            */
+ 	algo->cmf_exclusion      = 250;
+ 	algo->cmf_max_correction = 500;
+-	algo->iir_enabled        = true;
++	algo->iir_enabled        = false;
+ 	algo->iir_decay_weight   = 200;
+ 	algo->iir_decay_step     = 80;
+ 	algo->iir_noise_floor    = 5;
+ 	algo->iir_gate_floor     = 200;
+ 	algo->iir_gate_ratio_q8  = 26;
+-	algo->macro_threshold    = 800;
+-	algo->peak_threshold     = 800;
+-	algo->peak_edge_threshold = 0;
+-	algo->peak_drift_limit   = 0;
+-	algo->peak_merge_radius  = 0;
++	algo->macro_threshold    = 280;
++	algo->peak_threshold     = 280;
++	algo->peak_edge_threshold = 300;
++	algo->peak_drift_limit   = 1000;
++	algo->peak_merge_radius  = 2;
+ 	algo->min_area           = 2;
+ 	algo->iso_nbr_ratio_q8   = 8;    /* legacy (z >> 5) behaviour  */
+ 	algo->edge_min_area      = 1;    /* legacy: border cell exempt */
+@@ -81,19 +81,19 @@ void hx_algo_init_defaults(struct hx_algo *algo)
+ 	algo->edge_blend_q8    = 512;  /* blend over 2 grid cells from edge  */
+ 	algo->edge_comp_mode   = 0;
+ 	algo->edge_peak_mode   = 0;
+-	algo->zone_split       = false;
++	algo->zone_split       = true;
+ 	algo->track_dist2_max   = HIMAX_TRACK_MATCH_DIST2;
+ 	algo->track_lost_frames = HIMAX_TRACK_LOST_FRAMES;
+ 	algo->debounce_base     = HIMAX_NEW_TOUCH_DEBOUNCE;
+ 	algo->ghost_row_filter  = false;
+-	algo->debounce_strong   = 0;
+-	algo->track_min_signal  = 0;
+-	algo->track_smoothing   = true;
++	algo->debounce_strong   = 3000;
++	algo->track_min_signal  = 1500;
++	algo->track_smoothing   = false;  /* the position filter replaces it */
+ 	algo->track_active_guard   = true;
+ 	algo->track_start_debounce = 2;
+ 	algo->track_jump_dist2     = 0;  /* disabled by default */
+-	algo->track_tap_radius     = 0;  /* anchor lock off by default */
+-	algo->track_filter_mincutoff = 0;  /* position filter off by default */
++	algo->track_tap_radius     = 20;   /* ~2 mm */
++	algo->track_filter_mincutoff = 1000;  /* 1 Hz at rest */
+ 	algo->track_filter_beta      = 15;
+ 	algo->track_filter_dcutoff   = 30000;
+ }
+@@ -712,8 +712,9 @@ void hx_reject_palms(struct hx_algo *algo)
+ 		 *
+ 		 * NOTE: inert unless palm_density_low > macro_threshold.  Every
+ 		 * pixel in a zone is >= macro_threshold by BFS construction, so
+-		 * signal_sum >= macro_threshold * area always holds; with the
+-		 * shipped defaults (400 vs 800) this test can never be true.
++		 * signal_sum >= macro_threshold * area always holds.  It was
++		 * inert at the old threshold of 800; at 280 it catches broad,
++		 * weak zones, which in recordings were all resting palms.
+ 		 */
+ 		if (z->area >= 20 &&
+ 		    z->signal_sum < (s32)algo->palm_density_low * z->area) {

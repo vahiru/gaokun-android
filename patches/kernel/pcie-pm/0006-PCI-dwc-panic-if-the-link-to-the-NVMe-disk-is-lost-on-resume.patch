@@ -1,0 +1,86 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] PCI: dwc: panic if the link to the NVMe disk is lost on
+ resume
+
+The system runs from its NVMe disk. If the link to it doesn't come back,
+the reset that follows the resume fails, and blk_mark_disk_dead() shuts
+down ext4 on /data and /metadata. Userspace is left running without them,
+and nvme_suspend() returns -EBUSY for the dead controller, so the system
+can't suspend either. Nothing in the kernel reboots it: ext4 stops
+reporting errors once it is shut down, so errors=panic wouldn't fire.
+
+Panic instead once the retry has failed, so that the system restarts on
+its own after CONFIG_PANIC_TIMEOUT. Do it here rather than from the NVMe
+driver, which would only find out by reading CSTS through the BAR of the
+dead link. That access isn't guarded, and what it does on this SoC hasn't
+been measured.
+
+Do the same if the host can't be initialized at all, which leaves the
+controller unclocked. Limit this to links that were up at suspend with an
+NVMe device behind them. A lost Wi-Fi link or an empty slot doesn't panic
+here, what happens next is up to the driver of the device.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Inappropriate [device-specific policy]
+---
+ .../pci/controller/dwc/pcie-designware-host.c | 32 +++++++++++++++++++
+ 1 file changed, 32 insertions(+)
+
+diff --git a/drivers/pci/controller/dwc/pcie-designware-host.c b/drivers/pci/controller/dwc/pcie-designware-host.c
+index 4431bdff1..dbcd360bb 100644
+--- a/drivers/pci/controller/dwc/pcie-designware-host.c
++++ b/drivers/pci/controller/dwc/pcie-designware-host.c
+@@ -1299,6 +1299,34 @@ int dw_pcie_suspend_noirq(struct dw_pcie *pci)
+ }
+ EXPORT_SYMBOL_GPL(dw_pcie_suspend_noirq);
+ 
++static int dw_pcie_find_nvme(struct pci_dev *pdev, void *data)
++{
++	bool *found = data;
++
++	if (pdev->class == PCI_CLASS_STORAGE_EXPRESS)
++		*found = true;
++
++	return 0;
++}
++
++/*
++ * The system runs from the NVMe disk. Restart now, before anything below the
++ * Root Port is resumed: only the config accesses are guarded against a dead
++ * link, the BARs aren't.
++ */
++static void dw_pcie_resume_link_lost(struct dw_pcie *pci)
++{
++	bool nvme = false;
++
++	if (!pci->link_up_at_suspend)
++		return;
++
++	pci_walk_bus(pci->pp.bridge->bus, dw_pcie_find_nvme, &nvme);
++	if (nvme)
++		panic("%s: link to the NVMe disk lost on resume\n",
++		      dev_name(pci->dev));
++}
++
+ int dw_pcie_resume_noirq(struct dw_pcie *pci)
+ {
+ 	bool retry = pci->link_up_at_suspend;
+@@ -1312,6 +1340,7 @@ int dw_pcie_resume_noirq(struct dw_pcie *pci)
+ 		ret = pci->pp.ops->init(&pci->pp);
+ 		if (ret) {
+ 			dev_err(pci->dev, "Host init failed: %d\n", ret);
++			dw_pcie_resume_link_lost(pci);
+ 			return ret;
+ 		}
+ 	}
+@@ -1340,6 +1369,9 @@ int dw_pcie_resume_noirq(struct dw_pcie *pci)
+ 		goto bring_up;
+ 	}
+ 
++	if (ret)
++		dw_pcie_resume_link_lost(pci);
++
+ 	/*
+ 	 * The PM core resumes the Root Port and its children whatever happens
+ 	 * here, and they reach the controller through the DBI. Keep the host

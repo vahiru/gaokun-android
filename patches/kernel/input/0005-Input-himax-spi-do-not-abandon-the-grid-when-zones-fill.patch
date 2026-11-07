@@ -1,0 +1,88 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] Input: himax-spi: evict the weakest macro zone instead of abandoning the grid scan when full
+
+hx_detect_macro_zones() scans the 40x60 capacitance grid in row-major order and
+previously returned from the function as soon as algo->zone_count reached
+HX_MAX_ZONES (20). Under common-mode noise that creates many small 1-2 cell
+zones near the top of the panel, filling the table caused all real finger
+contacts in the lower portion of the panel to be ignored.
+
+Build candidate zones beyond HX_MAX_ZONES into a spare slot (algo->spare) and
+replace the weakest existing zone if the new zone has a larger signal_sum.
+
+Origin: local
+Upstream-Status: Pending
+---
+diff --git a/drivers/input/touchscreen/hx-algo.c b/drivers/input/touchscreen/hx-algo.c
+--- a/drivers/input/touchscreen/hx-algo.c
++++ b/drivers/input/touchscreen/hx-algo.c
+@@ -343,15 +343,40 @@
+ 		for (c = 0; c < HX_COLS; c++) {
+ 			int idx = r * HX_COLS + c;
+ 			struct hx_macro_zone *zone;
++			u8 weakest = 0;
++			bool full;
+ 
+ 			if (algo->visited[idx])
+ 				continue;
+ 			if (algo->frame[r][c] < algo->macro_threshold)
+ 				continue;
+-			if (algo->zone_count >= HX_MAX_ZONES)
+-				return;
+ 
+-			zone = &algo->zones[algo->zone_count];
++			/*
++			 * Once the table is full, build into the spare slot and keep
++			 * the result only if it beats the weakest zone already held.
++			 *
++			 * The previous code returned from the function here, which
++			 * abandoned the rest of the grid: with enough small noise
++			 * zones ahead of it in scan order -- charger coupling being
++			 * the usual source -- every real contact further down the
++			 * panel was lost outright, and nothing recorded that it had
++			 * happened.  Noise blobs sit just over macro_threshold and
++			 * span a cell or two, so signal_sum separates them from a
++			 * fingertip by an order of magnitude and is a safe key.
++			 */
++			full = algo->zone_count >= HX_MAX_ZONES;
++			if (full) {
++				u8 k;
++
++				for (k = 1; k < HX_MAX_ZONES; k++)
++					if (algo->zones[k].signal_sum <
++					    algo->zones[weakest].signal_sum)
++						weakest = k;
++				zone = &algo->spare;
++			} else {
++				zone = &algo->zones[algo->zone_count];
++			}
++
+ 			zone->area       = 0;
+ 			zone->signal_sum = 0;
+ 			zone->min_r = r;  zone->max_r = r;
+@@ -398,7 +423,11 @@
+ 				}
+ 			}
+ 
+-			algo->zone_count++;
++			if (!full)
++				algo->zone_count++;
++			else if (zone->signal_sum >
++				 algo->zones[weakest].signal_sum)
++				algo->zones[weakest] = *zone;
+ 		}
+ 	}
+ }
+diff --git a/drivers/input/touchscreen/hx-algo.h b/drivers/input/touchscreen/hx-algo.h
+--- a/drivers/input/touchscreen/hx-algo.h
++++ b/drivers/input/touchscreen/hx-algo.h
+@@ -114,6 +114,9 @@
+ 	/* ---- Detection results ---- */
+ 	struct hx_macro_zone zones[HX_MAX_ZONES];
+ 	u8   zone_count;
++	/* Scratch slot used to build a zone once zones[] is full, so a
++	 * late-scanned contact can still displace a weaker one. */
++	struct hx_macro_zone spare;
+ 
+ 	struct hx_peak peaks[HX_MAX_PEAKS];
+ 	u8   peak_count;

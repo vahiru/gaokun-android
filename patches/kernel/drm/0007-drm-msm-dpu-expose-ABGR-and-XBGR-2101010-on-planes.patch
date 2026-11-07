@@ -1,0 +1,35 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] drm/msm/dpu: expose ABGR and XBGR 2101010 on planes
+
+The format table already describes them, but the plane lists stop at the
+ARGB and XRGB orders. Android's RGBA_1010102 maps to ABGR2101010, so
+10-bit buffers cannot be scanned out directly.
+
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/gpu/drm/msm/disp/dpu1/dpu_hw_catalog.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_catalog.c b/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_catalog.c
+index 9a993cdfa..8b075b674 100644
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_catalog.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_catalog.c
+@@ -118,6 +118,8 @@ static const uint32_t plane_formats[] = {
+ 	DRM_FORMAT_XBGR8888,
+ 	DRM_FORMAT_ARGB2101010,
+ 	DRM_FORMAT_XRGB2101010,
++	DRM_FORMAT_ABGR2101010,
++	DRM_FORMAT_XBGR2101010,
+ 	DRM_FORMAT_RGB888,
+ 	DRM_FORMAT_BGR888,
+ 	DRM_FORMAT_RGB565,
+@@ -148,6 +150,8 @@ static const uint32_t plane_formats_yuv[] = {
+ 	DRM_FORMAT_BGRA8888,
+ 	DRM_FORMAT_ARGB2101010,
+ 	DRM_FORMAT_XRGB2101010,
++	DRM_FORMAT_ABGR2101010,
++	DRM_FORMAT_XBGR2101010,
+ 	DRM_FORMAT_XRGB8888,
+ 	DRM_FORMAT_XBGR8888,
+ 	DRM_FORMAT_RGBX8888,

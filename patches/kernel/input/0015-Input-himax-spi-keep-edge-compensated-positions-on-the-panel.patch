@@ -1,0 +1,47 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] Input: himax-spi: clamp edge-compensated coordinates within axis bounds
+
+hx_edge_compensate() clamped the right and bottom Q8 grid coordinates to
+(HX_COLS - 1) * 256 + 256 (15360) and (HX_ROWS - 1) * 256 + 256 (10240), which
+map to output coordinates 2560 and 1600—one unit beyond the maximum axis bounds
+of 2559 and 1599 (and -1 after touchscreen-inverted-x). Android's
+TouchInputMapper drops initial touch frames outside the axis range, delaying
+edge swipes and dropping corner taps.
+
+Clamp the upper Q8 bounds to HX_COLS * 256 - 1 and HX_ROWS * 256 - 1 so output
+coordinates stay within 0..2559 and 0..1599.
+
+Origin: local
+Upstream-Status: Pending
+---
+diff --git a/drivers/input/touchscreen/hx-algo.c b/drivers/input/touchscreen/hx-algo.c
+index a1eff6d..d284481 100644
+--- a/drivers/input/touchscreen/hx-algo.c
++++ b/drivers/input/touchscreen/hx-algo.c
+@@ -1278,11 +1278,15 @@ static void hx_edge_compensate(struct hx_algo *algo, struct hx_contact *ct)
+ 		ct->x = max_t(s32, ct->x - push, 0);
+ 	}
+ 
+-	/* Right boundary: distance from last col center */
++	/*
++	 * Right boundary: distance from last col center.  The push stops
++	 * at the last Q8 position of the grid: one further would report one
++	 * past the axis maximum, and Android ignores a touch while it is there.
++	 */
+ 	dist = (HX_COLS - 1) * 256 + 128 - ct->x;
+ 	if (dist < blend) {
+ 		push = push_max * (blend - dist) / blend;
+-		ct->x = min_t(s32, ct->x + push, (HX_COLS - 1) * 256 + 256);
++		ct->x = min_t(s32, ct->x + push, HX_COLS * 256 - 1);
+ 	}
+ 
+ 	/* Top boundary */
+@@ -1296,7 +1300,7 @@ static void hx_edge_compensate(struct hx_algo *algo, struct hx_contact *ct)
+ 	dist = (HX_ROWS - 1) * 256 + 128 - ct->y;
+ 	if (dist < blend) {
+ 		push = push_max * (blend - dist) / blend;
+-		ct->y = min_t(s32, ct->y + push, (HX_ROWS - 1) * 256 + 256);
++		ct->y = min_t(s32, ct->y + push, HX_ROWS * 256 - 1);
+ 	}
+ }
+ 

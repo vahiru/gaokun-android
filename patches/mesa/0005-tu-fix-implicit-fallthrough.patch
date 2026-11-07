@@ -1,0 +1,35 @@
+From f9a5524b3be7461d3f25231810884db3cde78a4a Mon Sep 17 00:00:00 2001
+From: Gurchetan Singh <gurchetansingh@google.com>
+Date: Fri, 8 May 2026 16:39:07 -0700
+Subject: [PATCH] tu: fix implicit fallthrough
+
+Fixes:
+
+src/freedreno/vulkan/tu_cmd_buffer.cc:2162:10:
+  error: unannotated fall-through between switch labels [-Werror,-Wimplicit-fallthrough]
+
+The other option is the [[fallthrough]] annotation.
+
+Reviewed-by: Valentine Burley <valentine.burley@collabora.com>
+Part-of: <https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/41518>
+Origin: upstream, https://gitlab.freedesktop.org/mesa/mesa/-/commit/f9a5524b3be7461d3f25231810884db3cde78a4a
+Upstream-Status: Backport [https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/41518]
+---
+ src/freedreno/vulkan/tu_cmd_buffer.cc | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/freedreno/vulkan/tu_cmd_buffer.cc b/src/freedreno/vulkan/tu_cmd_buffer.cc
+index 44ebfa2633c1..639d16be9bce 100644
+--- a/src/freedreno/vulkan/tu_cmd_buffer.cc
++++ b/src/freedreno/vulkan/tu_cmd_buffer.cc
+@@ -2174,6 +2174,7 @@ tu6_init_static_regs(struct tu_device *dev, struct tu_cs *cs)
+                     (phys_dev->info->props.enable_tp_ubwc_flag_hint
+                         ? A6XX_TPL1_DBG_ECO_CNTL1_TP_UBWC_FLAG_HINT
+                         : 0);
++            break;
+          case REG_A6XX_SP_CHICKEN_BITS:
+             value = (value & ~A6XX_SP_CHICKEN_BITS_EOLM_ENABLE) |
+                     (phys_dev->info->props.has_eolm_eogm
+-- 
+GitLab
+

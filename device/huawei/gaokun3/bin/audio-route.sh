@@ -45,14 +45,14 @@ while [ ! -e /dev/snd/controlC0 ] && [ $n -lt 60 ]; do sleep 1; n=$((n+1)); done
 #    所以关掉它**不换来任何响度损失**，纯赚。详见 docs #78。
 #
 # ★★ 增益分配（2026-09-08 实测重排，docs #78）：
-#    数字级走**单位增益 84**，响度由 **PA** 出（带 patches/0114 的内核上改为 78，见下）。
+#    数字级走**单位增益 84**，响度由 **PA** 出（带 patches/kernel/audio/0008 的内核上改为 78，见下）。
 #    此前是反过来的（数字 90 = +6 dB、PA 12 = -3 dB），那个组合在 -6 dBFS
 #    素材上实测 THD **-20 dB（约 10% 失真）** —— 数字级 +6 dB 把 -6 dBFS
 #    的内容顶到 0 dBFS，是**削波**，不是压缩器吃掉了增益
 #    （-20 dBFS 素材下同样两档给出满额 +9.07 dB 且 THD -52 dB，这是判据）。
 #    改成 84 之后没有任何混音器设置能削爆数字通路。
 #
-# ★★ 2026-10-26：扬声器有两项设置要跟着内核走（patches/0113–0115）。
+# ★★ 2026-10-26：扬声器有两项设置要跟着内核走（patches/kernel/audio/0007–0008、patches/kernel/dts/0016）。
 #    以 DT 里右功放有没有 qcom,port-mapping（0115 加的）为准；0113–0115 同属一组、
 #    一起发，所以用这一个属性代表三者。
 #    * 有：VISENSE 0、数字 78。
@@ -110,7 +110,7 @@ setprop vendor.gaokun3.audioroute.spkdig "$WSA_DIG" ||
 # ★ PA 音量分两步写，好让**同一份 ROM 在新旧内核上都正确** ——
 #   本项目内核与 ROM 是分开发布的，不能假设两边同步。
 #   上面已写 17（= 0 dB，上游上限，任何内核都接受）。下面试着抬到 PA_TARGET：
-#   打了 patches/0015（上限 17 -> 23）的内核会成功，旧内核直接拒绝、17 留着。
+#   打了 patches/kernel/audio/0001（上限 17 -> 23）的内核会成功，旧内核直接拒绝、17 留着。
 #   ⚠️ 顺序不能反 —— 先写 21 再写 17，新内核上会把音量又压回 0 dB。
 #   ⚠️ 单边成功、另一边失败时要把两边一起退回 17，否则左右声道增益不一致。
 #
@@ -197,7 +197,7 @@ log -t audioroute "耳机麦路由已应用（PCM2 / TX）"
 #   codecs/qcom-lpass/va-macro/DMIC0EnableSeq.conf 与 DMIC1EnableSeq.conf
 #
 # VA_DECn Volume 的刻度是 v-84 dB，所以 112 = +28 dB。数字增益不改变信噪比。
-# ⚠️ 依赖 patches/0165：4.8 MHz 下的脉冲噪声在增益之前，会被一起放大。
+# ⚠️ 依赖 patches/kernel/dts/0019：4.8 MHz 下的脉冲噪声在增益之前，会被一起放大。
 set -- \
     "MultiMedia4 Mixer VA_CODEC_DMA_TX_0" 1 \
     "VA DEC0 MUX" VA_DMIC \
@@ -217,7 +217,7 @@ log -t audioroute "内置麦路由已应用（PCM3 / VA / DMIC0+1）"
 #     一使能，每次流起停都有明显爆音（2026-08-19 A/B 盲听定案）。
 #     ★ 它**不是**功放升压器开关（这个叫法本仓沿用了很久，是错的），而是
 #     SoundWire 端口使能；对稳态电平的影响实测为 ±0.3 dB 以内，即零。
-#   * `SpkrLeft/Right VISENSE Switch`：带 patches/0115 的内核上是 0（与上游一致），
+#   * `SpkrLeft/Right VISENSE Switch`：带 patches/kernel/dts/0016 的内核上是 0（与上游一致），
 #     旧内核上仍是 1；`WSA_RXn Digital Volume` 相应是 78 / 84（低音处理播放时由 speakerfx 临时抬到 84）。
 #   另两处查过是【已经一致】的，不用设：`WSA MODE` 默认就是上游的 0；
 #   ⚠️★ `WSA_RXn Digital Volume` 的上限是【内核机器驱动故意设的】——
@@ -231,5 +231,5 @@ log -t audioroute "内置麦路由已应用（PCM3 / VA / DMIC0+1）"
 #   后者只低 2.12 dB 却干净 19.7 dB。旧注释把缺掉的增益归给"WSA883x 的
 #   压缩器"，也是错的：-20 dBFS 素材下 81->90 给出满额 **+9.07 dB** 且
 #   THD -52.8 dB，压缩器根本没参与，缺的那部分就是削波削掉的。
-#   patches/0015 已改成把上限压在 **84（单位增益）**，让任何混音器设置都
+#   patches/kernel/audio/0001 已改成把上限压在 **84（单位增益）**，让任何混音器设置都
 #   削不爆数字通路；响度改由 PA 出（上限 17 -> 23）。详见 docs #78。

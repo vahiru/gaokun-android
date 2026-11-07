@@ -1,0 +1,188 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] Input: himax-spi: mark palm zones instead of deleting them in place
+
+Instead of compacting zones[] in place inside hx_reject_palms(), tag rejected
+zones with is_palm and record which rule matched in palm_rule (1..4). By default
+hx_detect_peaks() skips zones with is_palm set, preserving identical behaviour,
+while adding two optional sysfs tunables (palm_zone_scan and palm_contact_area,
+both defaulting to 0) for inspecting and tuning palm rejection at the contact
+level.
+
+Origin: local
+Upstream-Status: Pending
+---
+diff --git a/drivers/input/touchscreen/himax-spi-core.c b/drivers/input/touchscreen/himax-spi-core.c
+--- a/drivers/input/touchscreen/himax-spi-core.c
++++ b/drivers/input/touchscreen/himax-spi-core.c
+@@ -1025,6 +1025,8 @@
+ HX_ALGO_ATTR_U16_RW(iso_nbr_ratio_q8);
+ HX_ALGO_ATTR_U8_RW(edge_min_area);
+ HX_ALGO_ATTR_BOOL_RW(palm_enabled);
++HX_ALGO_ATTR_BOOL_RW(palm_zone_scan);
++HX_ALGO_ATTR_U16_RW(palm_contact_area);
+ HX_ALGO_ATTR_U8_RW(palm_area_threshold);
+ HX_ALGO_ATTR_S32_RW(palm_signal_threshold);
+ HX_ALGO_ATTR_S16_RW(palm_density_low);
+@@ -1059,6 +1061,8 @@
+ 	&dev_attr_iso_nbr_ratio_q8.attr,
+ 	&dev_attr_edge_min_area.attr,
+ 	&dev_attr_palm_enabled.attr,
++	&dev_attr_palm_zone_scan.attr,
++	&dev_attr_palm_contact_area.attr,
+ 	&dev_attr_palm_area_threshold.attr,
+ 	&dev_attr_palm_signal_threshold.attr,
+ 	&dev_attr_palm_density_low.attr,
+diff --git a/drivers/input/touchscreen/hx-algo.c b/drivers/input/touchscreen/hx-algo.c
+--- a/drivers/input/touchscreen/hx-algo.c
++++ b/drivers/input/touchscreen/hx-algo.c
+@@ -48,6 +48,8 @@
+ 	algo->iso_nbr_ratio_q8   = 8;    /* legacy (z >> 5) behaviour  */
+ 	algo->edge_min_area      = 1;    /* legacy: border cell exempt */
+ 	algo->palm_enabled       = true;
++	algo->palm_zone_scan     = false;  /* legacy: palm zones yield no peaks */
++	algo->palm_contact_area  = 0;      /* legacy: no per-contact palm test  */
+ 	algo->palm_area_threshold    = 50;
+ 	algo->palm_signal_threshold  = 80000;
+ 	algo->palm_density_low       = 400;
+@@ -379,6 +381,8 @@
+ 
+ 			zone->area       = 0;
+ 			zone->signal_sum = 0;
++			zone->is_palm    = false;
++			zone->palm_rule  = 0;
+ 			zone->min_r = r;  zone->max_r = r;
+ 			zone->min_c = c;  zone->max_c = c;
+ 
+@@ -435,7 +439,14 @@
+ /* ======================================================================== */
+ /* Phase 2B — palm rejection                                                 */
+ /*                                                                           */
+-/* Four integer-only rules.  Any zone matching a rule is discarded.         */
++/* Four integer-only rules.  A matching zone is *marked*, not discarded.    */
++/*                                                                           */
++/* Marking rather than deleting matters because hx_detect_macro_zones()     */
++/* is 8-connected at macro_threshold: a fingertip touching down against     */
++/* the heel of the hand ends up in the same zone as the palm, and deleting  */
++/* the zone took the finger with it, with nothing left to show it had       */
++/* happened.  The zone now survives with is_palm set, so the decision is    */
++/* visible in the counters and reversible at runtime.                       */
+ /* Rule 1: area >= palm_area_threshold                (large footprint)     */
+ /* Rule 2: signal_sum >= palm_signal_threshold         (strong integrated)  */
+ /* Rule 3: area >= 20 && density < palm_density_low   (spread low signal)  */
+@@ -444,7 +455,6 @@
+ 
+ void hx_reject_palms(struct hx_algo *algo)
+ {
+-	u8 dst = 0;
+ 	u8 i;
+ 
+ 	if (!algo->palm_enabled)
+@@ -454,16 +464,19 @@
+ 		struct hx_macro_zone *z = &algo->zones[i];
+ 		u16 bbox_w, bbox_h, max_side, min_side;
+ 		bool reject = false;
++		u8 rule = 0;
+ 
+ 		/* Rule 1 */
+ 		if (z->area >= algo->palm_area_threshold) {
+ 			reject = true;
++			rule = 1;
+ 			goto next;
+ 		}
+ 
+ 		/* Rule 2 */
+ 		if (z->signal_sum >= algo->palm_signal_threshold) {
+ 			reject = true;
++			rule = 2;
+ 			goto next;
+ 		}
+ 
+@@ -478,6 +491,7 @@
+ 		if (z->area >= 20 &&
+ 		    z->signal_sum < (s32)algo->palm_density_low * z->area) {
+ 			reject = true;
++			rule = 3;
+ 			goto next;
+ 		}
+ 
+@@ -487,18 +501,15 @@
+ 		max_side = max(bbox_w, bbox_h);
+ 		min_side = min(bbox_w, bbox_h);
+ 		if (z->area >= 10 && min_side > 0 &&
+-		    (u32)max_side * 256 >= 1024u * min_side)
++		    (u32)max_side * 256 >= 1024u * min_side) {
+ 			reject = true;
++			rule = 4;
++		}
+ 
+ next:
+-		if (!reject) {
+-			if (dst != i)
+-				algo->zones[dst] = *z;
+-			dst++;
+-		}
++		z->is_palm   = reject;
++		z->palm_rule = rule;
+ 	}
+-
+-	algo->zone_count = dst;
+ }
+ 
+ /* ======================================================================== */
+@@ -609,6 +620,17 @@
+ 		struct hx_macro_zone *zone = &algo->zones[zi];
+ 		u16 px_limit = min_t(u16, zone->area, HX_ZONE_PX_MAX);
+ 		u16 pi;
++
++		/*
++		 * A zone the palm rules flagged yields no peaks, which is what
++		 * deleting it used to achieve.  palm_zone_scan lifts that so a
++		 * fingertip merged into a palm blob can still be found; the
++		 * per-contact palm_contact_area test in hx_expand_and_resolve()
++		 * is then what separates the two.  Both default to the old
++		 * behaviour -- this wants a real hand on the panel to tune.
++		 */
++		if (zone->is_palm && !algo->palm_zone_scan)
++			continue;
+ 
+ 		for (pi = 0; pi < px_limit; pi++) {
+ 			int idx = zone->pixels[pi];
+@@ -962,6 +984,17 @@
+ 		clean = hx_expand_single_peak(algo, i, ct);
+ 		if (!clean)
+ 			hx_local_centroid(algo, i, ct);
++
++		/*
++		 * Per-contact palm test.  ct->area counts only cells at or above
++		 * half the peak, so it measures this contact rather than whatever
++		 * it happens to be connected to -- the right granularity for
++		 * telling a fingertip from the heel of a hand beside it.
++		 * 0 disables it, which is the shipped default.
++		 */
++		if (algo->palm_contact_area &&
++		    ct->area >= algo->palm_contact_area)
++			continue;
+ 
+ 		/* Push edge centroids outward toward physical sensor boundary */
+ 		if (ct->is_edge)
+diff --git a/drivers/input/touchscreen/hx-algo.h b/drivers/input/touchscreen/hx-algo.h
+--- a/drivers/input/touchscreen/hx-algo.h
++++ b/drivers/input/touchscreen/hx-algo.h
+@@ -93,6 +93,8 @@
+ 	u8  max_r;
+ 	u8  min_c;
+ 	u8  max_c;
++	bool is_palm;   /* set by hx_reject_palms(); the zone is kept */
++	u8 palm_rule;   /* which rule fired, 1-4; 0 = not a palm      */
+ };
+ 
+ /**
+@@ -148,6 +150,8 @@
+ 	u8   edge_min_area;        /* minimum zone area for an on-edge peak
+ 	                            * (1 = a lone border cell still counts) */
+ 	bool palm_enabled;         /* palm-rejection on/off                */
++	bool palm_zone_scan;       /* also look for peaks inside palm zones */
++	u16  palm_contact_area;    /* per-contact palm test; 0 = disabled   */
+ 	u8   palm_area_threshold;  /* area >= this → palm                  */
+ 	s32  palm_signal_threshold;/* signal_sum >= this → palm            */
+ 	s16  palm_density_low;     /* signal/area < this → palm            */

@@ -1,0 +1,40 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] ASoC: qcom: sc8280xp: let VA capture use four channels
+
+The back-end fixup forces every back end to two channels (the TX codec
+DMA interfaces may also go down to one), so a four-channel capture on
+VA_CODEC_DMA_TX_0 reaches the codec DMA as two channels, whatever the
+front end and the topology allow.
+
+The VA macro has four decimators. When the front end asks for four
+channels, keep four at the back end, one decimator per channel. Other
+boards on this machine driver whose topology lets VA capture use four
+channels, such as the QCM6490 IDP, get four as well; requests for one
+or two channels stay as they were.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+--- a/sound/soc/qcom/sc8280xp.c
++++ b/sound/soc/qcom/sc8280xp.c
+@@ -90,6 +90,7 @@
+ 	struct snd_interval *channels = hw_param_interval(params,
+ 					SNDRV_PCM_HW_PARAM_CHANNELS);
+ 	struct snd_mask *fmt = hw_param_mask(params, SNDRV_PCM_HW_PARAM_FORMAT);
++	unsigned int fe_channels = params_channels(params);
+ 
+ 	rate->min = rate->max = 48000;
+ 	snd_mask_set_format(fmt, SNDRV_PCM_FORMAT_S16_LE);
+@@ -102,6 +103,11 @@
+ 	case TX_CODEC_DMA_TX_3:
+ 		channels->min = 1;
+ 		break;
++	case VA_CODEC_DMA_TX_0:
++		/* Up to four decimators, one per channel, if the FE asks. */
++		if (fe_channels == 4)
++			channels->min = channels->max = 4;
++		break;
+ 	default:
+ 		break;
+ 	}

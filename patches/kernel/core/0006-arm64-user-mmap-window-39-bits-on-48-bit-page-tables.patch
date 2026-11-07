@@ -1,0 +1,71 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] arm64: optionally restrict default 64-bit user mmap window to 39 bits on 48-bit page tables
+
+Android GKI kernels use 39-bit virtual addressing (CONFIG_ARM64_VA_BITS_39=y),
+and several 64-bit Android games (such as Unity il2cpp titles) pack tags into
+the upper bits of user pointers under the assumption that user virtual
+addresses stay below 2^39, crashing immediately on a 48-bit VA kernel.
+
+Add CONFIG_ARM64_USER_MMAP_WINDOW_39 to cap DEFAULT_MAP_WINDOW_64 at (1UL << 39)
+and lower ARCH_MMAP_RND_BITS_MAX to 24 while keeping 48-bit kernel page tables
+(VA_BITS_MIN = 48) and TASK_SIZE_64 = (1UL << 48). Ordinary 64-bit allocations,
+stacks, and PIE base addresses stay below 0x80_0000_0000, while explicit high
+mmap hints and MAP_FIXED above 2^39 remain supported.
+
+Origin: local
+Upstream-Status: Inappropriate [Android-specific]
+---
+diff --git a/arch/arm64/Kconfig b/arch/arm64/Kconfig
+index fc57d90..88ea554 100644
+--- a/arch/arm64/Kconfig
++++ b/arch/arm64/Kconfig
+@@ -301,6 +301,7 @@ config ARCH_MMAP_RND_BITS_MIN
+ # max bits determined by the following formula:
+ #  VA_BITS - PTDESC_TABLE_SHIFT
+ config ARCH_MMAP_RND_BITS_MAX
++	default 24 if ARM64_USER_MMAP_WINDOW_39
+ 	default 19 if ARM64_VA_BITS=36
+ 	default 24 if ARM64_VA_BITS=39
+ 	default 27 if ARM64_VA_BITS=42
+@@ -1500,6 +1501,19 @@ config ARM64_FORCE_52BIT
+ 	  should only enable this configuration option for stress testing userspace
+ 	  memory management code. If unsure say N here.
+ 
++config ARM64_USER_MMAP_WINDOW_39
++	bool "Hand out 39-bit user virtual addresses by default"
++	depends on ARM64_VA_BITS_48 && ARM64_4K_PAGES
++	help
++	  Keep 48-bit page tables, but limit the default mmap window, the stack
++	  top and the PIE load base of 64-bit tasks to 2^39, so userspace sees
++	  the same address layout as an Android GKI kernel (ARM64_VA_BITS_39).
++	  mmap() with a hint above 2^39 still gets the full 48-bit range, exactly
++	  like the 48-bit compatibility window of ARM64_VA_BITS_52.
++	  ARCH_MMAP_RND_BITS_MAX drops to 24 to fit the smaller window.
++
++	  For apps that assume Android's 39-bit layout.  If unsure, say N.
++
+ config ARM64_VA_BITS
+ 	int
+ 	default 36 if ARM64_VA_BITS_36
+diff --git a/arch/arm64/include/asm/processor.h b/arch/arm64/include/asm/processor.h
+index 6dfbcac..81835d9 100644
+--- a/arch/arm64/include/asm/processor.h
++++ b/arch/arm64/include/asm/processor.h
+@@ -52,7 +52,17 @@
+  * TASK_UNMAPPED_BASE - the lower boundary of the mmap VM area.
+  */
+ 
++/*
++ * ARM64_USER_MMAP_WINDOW_39: keep 48-bit page tables but hand out user addresses
++ * below 2^39 unless mmap() is given a higher hint -- the same trick 52-bit VA
++ * uses to stay 48-bit compatible.  Android GKI kernels are 39-bit, so closed-source
++ * apps have only ever seen user pointers below 2^39.
++ */
++#ifdef CONFIG_ARM64_USER_MMAP_WINDOW_39
++#define DEFAULT_MAP_WINDOW_64	(UL(1) << 39)
++#else
+ #define DEFAULT_MAP_WINDOW_64	(UL(1) << VA_BITS_MIN)
++#endif
+ #define TASK_SIZE_64		(UL(1) << vabits_actual)
+ #define TASK_SIZE_MAX		(UL(1) << VA_BITS)
+ 

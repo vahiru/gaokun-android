@@ -1,0 +1,171 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] audio: aidl: primary: pace capture transfers by ALSA data availability
+
+StreamPrimary::transfer() paced capture transfers with the synthetic wall-clock
+sleep originally written for the emulator stub. Because MonoPipe reads are
+non-blocking, the first two transfers after stream start observed an incomplete
+burst and returned zero-filled silence (~170 ms), permanently offsetting live
+audio by two blocks for the lifetime of the stream.
+
+Wait for a full capture burst to arrive in the MonoPipe (up to 500 ms on the
+first block after start and 3 block periods thereafter) before reading, falling
+back to wall-clock silence padding only if the hardware stalls. Also fix
+inputIoThread's partial-write retry loop to advance the source pointer by the
+frames already written.
+
+Origin: local
+Upstream-Status: Pending
+---
+diff --git a/audio/aidl/default/alsa/StreamAlsaMonoPipe.cpp b/audio/aidl/default/alsa/StreamAlsaMonoPipe.cpp
+index d328c90..21cfd3d 100644
+--- a/audio/aidl/default/alsa/StreamAlsaMonoPipe.cpp
++++ b/audio/aidl/default/alsa/StreamAlsaMonoPipe.cpp
+@@ -14,10 +14,13 @@
+  * limitations under the License.
+  */
+ 
++#include <algorithm>
++
+ #define LOG_TAG "AHAL_StreamAlsaMonoPipe"
+ #include <Log.h>
+ 
+ #include <media/AidlConversionCppNdk.h>
++#include <utils/SystemClock.h>
+ 
+ #include "core-impl/StreamAlsaMonoPipe.h"
+ 
+@@ -137,6 +140,7 @@ StreamAlsaMonoPipe::~StreamAlsaMonoPipe() {
+         LOG(VERBOSE) << __func__ << ": reading from sink " << i;
+         ssize_t framesRead = mSources[i]->read(buffer, frameCount);
+         LOG_IF(FATAL, framesRead < 0) << "Error reading from the pipe: " << framesRead;
++        mLastCaptureFramesRead = framesRead > 0 ? static_cast<size_t>(framesRead) : 0;
+         if (ssize_t framesMissing = static_cast<ssize_t>(frameCount) - framesRead;
+             framesMissing > 0) {
+             LOG(WARNING) << __func__ << ": incomplete data received, inserting " << framesMissing
+@@ -165,6 +169,20 @@ StreamAlsaMonoPipe::~StreamAlsaMonoPipe() {
+     return ::android::OK;
+ }
+ 
++ssize_t StreamAlsaMonoPipe::waitForCapturedFrames(size_t frameCount, int64_t deadlineNs) {
++    if (!mIsInput || mSources.empty()) return 0;
++    const size_t i = 0;  // For the input case, only support a single device.
++    ssize_t framesAvailable;
++    while ((framesAvailable = mSources[i]->availableToRead()) >= 0 &&
++           static_cast<size_t>(framesAvailable) < frameCount) {
++        const int64_t nowNs = ::android::uptimeNanos();
++        if (nowNs >= deadlineNs) break;
++        // MonoPipeReader does not have a blocking read, poll at 1 ms like outputIoThread() does.
++        usleep(std::min<int64_t>(1000, (deadlineNs - nowNs + 999) / 1000));
++    }
++    return framesAvailable;
++}
++
+ void StreamAlsaMonoPipe::shutdown() {
+     teardownIo();
+ }
+@@ -185,7 +203,8 @@ void StreamAlsaMonoPipe::inputIoThread(size_t idx) {
+             while (bufferFramesWritten < mBufferSizeFrames) {
+                 if (!mIoThreadIsRunning) return;
+                 ssize_t framesWrittenOrError =
+-                        mSinks[idx]->write(&buffer[0], mBufferSizeFrames - bufferFramesWritten);
++                        mSinks[idx]->write(&buffer[bufferFramesWritten * mFrameSizeBytes],
++                                           mBufferSizeFrames - bufferFramesWritten);
+                 if (framesWrittenOrError >= 0) {
+                     bufferFramesWritten += framesWrittenOrError;
+                 } else {
+diff --git a/audio/aidl/default/include/core-impl/StreamAlsaMonoPipe.h b/audio/aidl/default/include/core-impl/StreamAlsaMonoPipe.h
+index 98f4d3b..6a5ba23 100644
+--- a/audio/aidl/default/include/core-impl/StreamAlsaMonoPipe.h
++++ b/audio/aidl/default/include/core-impl/StreamAlsaMonoPipe.h
+@@ -43,6 +43,16 @@ class StreamAlsaMonoPipe : public StreamAlsaBase {
+                                  int32_t* latencyMs) override;
+     void shutdown() override;
+ 
++  protected:
++    // Capture only: waits until the pipe filled by inputIoThread() holds at least 'frameCount'
++    // frames, or until uptimeNanos() reaches 'deadlineNs'. Returns the number of frames
++    // available to read (may be less than 'frameCount'), or a negative status.
++    ssize_t waitForCapturedFrames(size_t frameCount, int64_t deadlineNs);
++
++    // Capture only: frames actually read from the pipe by the last 'transfer' (the rest is
++    // silence).
++    size_t mLastCaptureFramesRead = 0;
++
+   private:
+     ::android::NBAIO_Format getPipeFormat() const;
+     ::android::sp<::android::MonoPipe> makeSink(bool writeCanBlock);
+diff --git a/audio/aidl/default/include/core-impl/StreamPrimary.h b/audio/aidl/default/include/core-impl/StreamPrimary.h
+index 87dcc3b..87715da 100644
+--- a/audio/aidl/default/include/core-impl/StreamPrimary.h
++++ b/audio/aidl/default/include/core-impl/StreamPrimary.h
+@@ -54,6 +54,8 @@ class StreamPrimary : public StreamAlsaMonoPipe {
+     int64_t mStartTimeNs = 0;
+     long mFramesSinceStart = 0;
+     bool mSkipNextTransfer = false;
++    // Capture only: the latest time at which 'transfer' stops waiting for the next block.
++    int64_t mCaptureDeadlineNs = 0;
+ 
+   private:
+     using AlsaDeviceId = std::pair<int, int>;
+diff --git a/audio/aidl/default/primary/StreamPrimary.cpp b/audio/aidl/default/primary/StreamPrimary.cpp
+index ac0d302..fb9e0ad 100644
+--- a/audio/aidl/default/primary/StreamPrimary.cpp
++++ b/audio/aidl/default/primary/StreamPrimary.cpp
+@@ -39,6 +39,11 @@ using android::base::GetBoolProperty;
+ 
+ namespace aidl::android::hardware::audio::core {
+ 
++namespace {
++// How long the first capture 'transfer' after 'start' waits for the hardware to deliver a block.
++constexpr int64_t kFirstCaptureBlockTimeoutNs = 500 * NANOS_PER_MILLISECOND;
++}  // namespace
++
+ StreamPrimary::StreamPrimary(StreamContext* context, const Metadata& metadata)
+     : StreamAlsaMonoPipe(context, metadata, 3 /*readWriteRetries*/),
+       mIsAsynchronous(!!getContext().getAsyncCallback()),
+@@ -89,6 +94,7 @@ StreamPrimary::StreamPrimary(StreamContext* context, const Metadata& metadata)
+     mStartTimeNs = ::android::uptimeNanos();
+     mFramesSinceStart = 0;
+     mSkipNextTransfer = false;
++    mCaptureDeadlineNs = mStartTimeNs + kFirstCaptureBlockTimeoutNs;
+     return ::android::OK;
+ }
+ 
+@@ -97,6 +103,37 @@ StreamPrimary::StreamPrimary(StreamContext* context, const Metadata& metadata)
+     if (isStubStreamOnWorker()) {
+         return mStubDriver.transfer(buffer, frameCount, actualFrameCount, latencyMs);
+     }
++    if (mIsInput && !mIsAsynchronous) {
++        // Capture is paced by the hardware: inputIoThread() blocks in pcm_read() and pushes each
++        // block into the pipe as soon as ALSA has it, so hand every block over as soon as it is
++        // there. The wall-clock schedule below starts with an empty pipe: it inserts two blocks
++        // of silence right after start() and then keeps the real audio two blocks behind
++        // (170 ms at 4096 frames @ 48 kHz) for as long as the stream stays active, without this
++        // delay being reported anywhere; any stall adds another block that is never recovered.
++        // This relies on the capture pipe holding two blocks (see makeSink()): with a one-block
++        // pipe the writer is throttled below real time and the ALSA buffer overruns.
++        const int64_t blockNs =
++                static_cast<int64_t>(mBufferSizeFrames) * NANOS_PER_SECOND / mSampleRate;
++        // If this thread itself was held up past the deadline, still give inputIoThread() a moment:
++        // it was most likely held up too and is about to push what ALSA has buffered meanwhile.
++        const int64_t deadlineNs =
++                std::max(mCaptureDeadlineNs, ::android::uptimeNanos() + blockNs / 8);
++        waitForCapturedFrames(frameCount, deadlineNs);
++        RETURN_STATUS_IF_ERROR(
++                StreamAlsaMonoPipe::transfer(buffer, frameCount, actualFrameCount, latencyMs));
++        const int64_t nowNs = ::android::uptimeNanos();
++        const bool gotBlock = mLastCaptureFramesRead >= frameCount;
++        if (mFramesSinceStart == 0) {
++            LOG(DEBUG) << __func__ << ": first capture block "
++                       << (gotBlock ? "ready " : "timed out ")
++                       << (nowNs - mStartTimeNs) / NANOS_PER_MILLISECOND << " ms after start";
++        }
++        // With data the next block is due in about one block time, allow three. Without data
++        // (a stalled or dead device) keep inserting silence at the real-time rate.
++        mCaptureDeadlineNs = gotBlock ? nowNs + 3 * blockNs : deadlineNs + blockNs;
++        mFramesSinceStart += *actualFrameCount;
++        return ::android::OK;
++    }
+     // This is a workaround for the emulator implementation which has a host-side buffer
+     // and is not being able to achieve real-time behavior similar to ADSPs (b/302587331).
+     if (!mSkipNextTransfer) {

@@ -1,0 +1,32 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: iris: preserve decoder visible crop across CAPTURE S_FMT
+
+iris_vdec_s_fmt() overwrote inst->crop with the CAPTURE buffer dimensions on
+S_FMT(CAPTURE). Because v4l2_codec2 calls G_FMT, S_FMT, and
+G_SELECTION(V4L2_SEL_TGT_COMPOSE) after receiving V4L2_EVENT_SOURCE_CHANGE,
+resetting inst->crop clobbered the stream's visible crop rectangle reported by
+the firmware in HFI_EVENT_DATA_SEQUENCE_CHANGED (e.g. reporting 1920x1088
+instead of 1920x1080 for 1080p H.264).
+
+Preserve inst->crop across S_FMT(CAPTURE), as it is initialized on
+S_FMT(OUTPUT) and updated by firmware sequence-changed events.
+
+Origin: local
+Upstream-Status: Pending
+---
+diff --git a/drivers/media/platform/qcom/iris/iris_vdec.c b/drivers/media/platform/qcom/iris/iris_vdec.c
+index b638d58c3..55cfd2be0 100644
+--- a/drivers/media/platform/qcom/iris/iris_vdec.c
++++ b/drivers/media/platform/qcom/iris/iris_vdec.c
+@@ -299,11 +299,6 @@ int iris_vdec_s_fmt(struct iris_inst *inst, struct v4l2_format *f)
+ 		fmt->fmt.pix_mp.plane_fmt[0].sizeimage = iris_get_buffer_size(inst, BUF_OUTPUT);
+ 		inst->buffers[BUF_OUTPUT].min_count = iris_vpu_buf_count(inst, BUF_OUTPUT);
+ 		inst->buffers[BUF_OUTPUT].size = fmt->fmt.pix_mp.plane_fmt[0].sizeimage;
+-
+-		inst->crop.top = 0;
+-		inst->crop.left = 0;
+-		inst->crop.width = f->fmt.pix_mp.width;
+-		inst->crop.height = f->fmt.pix_mp.height;
+ 		break;
+ 	default:
+ 		return -EINVAL;

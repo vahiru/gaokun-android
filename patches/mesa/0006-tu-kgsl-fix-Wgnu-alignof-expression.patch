@@ -1,0 +1,37 @@
+From 1084ddd8939d08057ddfde4b3422fa7628e35ed7 Mon Sep 17 00:00:00 2001
+From: Gurchetan Singh <gurchetansingh@google.com>
+Date: Mon, 11 May 2026 16:35:21 -0700
+Subject: [PATCH] tu: kgsl: fix -Wgnu-alignof-expression warning with Clang
+
+Fixes:
+
+src/freedreno/vulkan/tu_knl_kgsl.cc:1455:16:
+  error: 'alignof' applied to an expression is a GNU extension [-Werror,-Wgnu-alignof-expression]
+  alignof(*objs), VK_SYSTEM_ALLOCATION_SCOPE_COMMAND);
+
+Reviewed-by: Eric Engestrom <eric@igalia.com>
+Reviewed-by: Valentine Burley <valentine.burley@collabora.com>
+Part-of: <https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/41518>
+Origin: upstream, https://gitlab.freedesktop.org/mesa/mesa/-/commit/1084ddd8939d08057ddfde4b3422fa7628e35ed7
+Upstream-Status: Backport [https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/41518]
+---
+ src/freedreno/vulkan/tu_knl_kgsl.cc | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/freedreno/vulkan/tu_knl_kgsl.cc b/src/freedreno/vulkan/tu_knl_kgsl.cc
+index 53a94612cf98..97e301cf83bb 100644
+--- a/src/freedreno/vulkan/tu_knl_kgsl.cc
++++ b/src/freedreno/vulkan/tu_knl_kgsl.cc
+@@ -1452,7 +1452,8 @@ kgsl_queue_submit(struct tu_queue *queue, void *_submit,
+ 
+    struct kgsl_command_object *objs = (struct kgsl_command_object *)
+       vk_alloc(&queue->device->vk.alloc, sizeof(*objs) * obj_count,
+-               alignof(*objs), VK_SYSTEM_ALLOCATION_SCOPE_COMMAND);
++               alignof(struct kgsl_command_object),
++               VK_SYSTEM_ALLOCATION_SCOPE_COMMAND);
+ 
+    struct kgsl_cmdbatch_profiling_buffer *profiling_buffer = NULL;
+    uint32_t obj_idx = 0;
+-- 
+GitLab
+

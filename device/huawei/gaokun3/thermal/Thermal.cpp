@@ -15,7 +15,7 @@
  *   这不是真的外壳温度，是一个诚实标注过的代理值。
  *
  * ★ 内核仍是最后一道闸：sc8280xp.dtsi 里 8 个 cpu 温区各有 85 °C passive
- *   （patches/0009 加的 cooling-maps）和 110 °C critical。我们的 SHUTDOWN
+ *   （patches/kernel/dts/0002 加的 cooling-maps）和 110 °C critical。我们的 SHUTDOWN
  *   定在 105，比内核的 critical 低 —— 顺序是对的：先由 Android 有序关机，
  *   真到 110 才轮到内核紧急断电。
  */

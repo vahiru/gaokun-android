@@ -15,7 +15,7 @@
 | `simcmp.py` | 核对离线回放结果与设备录制时的实际上报是否一致 |
 | `outcomes.py` | 按时间段统计到达应用的触摸与被撤回的触摸，用于对比算法改动前后的效果 |
 
-## 驱动侧可观测接口（`patches/0043`、`patches/0082`）
+## 驱动侧可观测接口（`patches/kernel/input/0007`、`patches/kernel/input/0013`）
 
 | 路径 | 内容 |
 |---|---|
@@ -23,12 +23,12 @@
 | `…/algo/contacts_log` | 最近16个触点出生时的`seq x y area signal edge` |
 | `/sys/kernel/debug/himax-hx83121a/frame_raw` | 面板产出的40×60 `s16`原始网格（仅去基线） |
 | `/sys/kernel/debug/himax-hx83121a/frame` | 经过CMF、边缘增强与IIR滤波后的40×60网格 |
-| `…/algo/hand_*` | 手掌位置图参数（`patches/0082`），计数器位于`stats`中，详见[`docs/dev/palm-rejection.md`](../../docs/dev/palm-rejection.md) |
+| `…/algo/hand_*` | 手掌位置图参数（`patches/kernel/input/0013`），计数器位于`stats`中，详见[`docs/dev/palm-rejection.md`](../../docs/dev/palm-rejection.md) |
 
 * 并排对比`frame_raw`与`frame`可区分信号噪声问题与后处理算法问题。
 * 读取二进制网格帧时必须使用`adb exec-out`而**不可使用`adb shell`**（后者会将`\n`转换为`\r\n`破坏二进制数据）。`dump-state.sh`已使用`exec-out`并校验4800字节长度。
 
-## 录制与回放（`patches/0082`）
+## 录制与回放（`patches/kernel/input/0013`）
 
 修改触控或防误触算法时，使用同一份实机录制做离线回放对比，比每次人工重滑更可复现。`gk3trec`在设备上录下网格与输入事件，`hxsim`在宿主机上将网格喂给同一份`hx-algo.c`重跑算法。
 
@@ -88,7 +88,7 @@ python3 scripts/touch/evdev-strokes.py ts_A.bin ts_B.bin
 
 | 状态 | 间隔 <100 ms占比 | 跨间隔隐含速度 | 8秒连续快速甩动轨迹数 |
 |---|---|---|---|
-| 跳点检测修复前（`patches/0038`前） | 35% | 1.01 m/s（等于原限速阈值） | 87条 |
+| 跳点检测修复前（`patches/kernel/input/0002`前） | 35% | 1.01 m/s（等于原限速阈值） | 87条 |
 | 跳点检测修复后 | 0/45（最小间隔124 ms） | — | 6条 |
 
 * **移动手指的信噪比低于静止手指**：快速划动的手指在单次扫描周期内被拖长，电容峰值显著低于静止按压（例如将`peak_threshold`从800抬高到1500时，峰值3000+的静止指尖不受影响，但快速甩动会被切成平均7帧一条的碎片，59%间隔小于100 ms、隐含速度2.61 m/s）。因此上调`macro_threshold`、`peak_threshold`或`iso_nbr_ratio_q8`等任何候选门槛后，**验收必须包含快速连续甩动**并用`evdev-strokes.py`检查间隔分布。

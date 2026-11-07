@@ -1,0 +1,1233 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] Input: add Himax HX83121A cascade slave stylus driver
+
+The Huawei MateBook E Go uses a pair of Himax HX83121A controllers: the primary
+IC on spi6 handles finger touch (driven by himax-spi), while the cascade slave
+IC on spi20 (ACPI THPB / HIMX0002) senses the Huawei M-Pencil active stylus.
+
+Add a dedicated driver (himax_hx83121a_pen) for the cascade slave IC:
+- Initialize the slave IC after verifying the SPI bus and chip ID by writing
+  raw_out_sel = 0xF6 and rawdata address = 0x5AA5.
+- Read 339-byte raw pen frames (TX1/TX2 anchor groups and 9x9 grid) on GPIO 39
+  interrupts and expose changed frames to userspace via /dev/gk3_pen (consumed
+  by the gk3pend daemon), with frame counters and a 1024-frame ring buffer in
+  debugfs.
+- Register a DRM panel follower and a 1-second watchdog to reinitialize the
+  slave IC whenever the primary IC resets across panel blank/unblank or error
+  recovery, and switch from interrupts to low-rate polling after idle_after_ms
+  (default 10 s) without stylus activity.
+- Expose a device-scoped "m-pencil" power_supply class device updated by
+  userspace for stylus battery reporting.
+
+Origin: local
+Upstream-Status: Pending
+---
+diff --git a/drivers/input/touchscreen/Kconfig b/drivers/input/touchscreen/Kconfig
+index 0aa769562..263376618 100644
+--- a/drivers/input/touchscreen/Kconfig
++++ b/drivers/input/touchscreen/Kconfig
+@@ -1430,4 +1430,21 @@ config TOUCHSCREEN_HIMAX_HX83121A_SPI
+ 
+ 	  To compile this driver as a module, choose M here: the
+ 	  module will be called himax_hx83121a_spi.
++
++config TOUCHSCREEN_HIMAX_HX83121A_PEN
++	tristate "Himax HX83121A cascade slave (active pen)"
++	depends on SPI && POWER_SUPPLY
++	depends on DRM || !DRM
++	help
++	  Say Y here to enable the pen-sensing cascade slave of the Himax
++	  HX83121A touch controller in the HUAWEI MateBook E Go (gaokun3).
++	  The driver hands the raw pen frames to userspace through
++	  /dev/gk3_pen, where gk3pend turns them into a stylus, and
++	  registers the pen's battery as a power supply.
++
++	  If unsure, say N.
++
++	  To compile this driver as a module, choose M here: the
++	  module will be called himax_hx83121a_pen.
++
+ endif
+diff --git a/drivers/input/touchscreen/Makefile b/drivers/input/touchscreen/Makefile
+index 329afd486..5c3d544ec 100644
+--- a/drivers/input/touchscreen/Makefile
++++ b/drivers/input/touchscreen/Makefile
+@@ -121,3 +121,4 @@ obj-$(CONFIG_TOUCHSCREEN_ZINITIX)	+= zinitix.o
+ obj-$(CONFIG_TOUCHSCREEN_HIMAX_HX83112B)	+= himax_hx83112b.o
+ obj-$(CONFIG_TOUCHSCREEN_HIMAX_HX83121A_SPI)	+= himax_hx83121a_spi.o
+ himax_hx83121a_spi-y			:= himax-spi-core.o hx-algo.o
++obj-$(CONFIG_TOUCHSCREEN_HIMAX_HX83121A_PEN)	+= himax_hx83121a_pen.o
+diff --git a/drivers/input/touchscreen/himax_hx83121a_pen.c b/drivers/input/touchscreen/himax_hx83121a_pen.c
+new file mode 100644
+index 000000000..f7f513c8c
+--- /dev/null
++++ b/drivers/input/touchscreen/himax_hx83121a_pen.c
+@@ -0,0 +1,1168 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Himax HX83121A cascade slave (active pen) on the HUAWEI MateBook E Go
++ * (gaokun3).
++ *
++ * The panel's touch controller is a pair of HX83121A.  himax-spi drives the
++ * master on spi6 (finger touch); the slave, which senses the M-Pencil, is a
++ * separate SPI device on spi20 (ACPI THPB/HIMX0002).  This driver:
++ *
++ *   1. binds to the slave (the gaokun3 DT enables spi20 and its pins and
++ *      describes the slave), checks the bus and reads the IC ID;
++ *   2. does the two slave writes seen in the Windows THP capture
++ *      (raw_out_sel = 0xF6, rawdata address = 0x5AA5);
++ *   3. reads the 339-byte slave frame (3-byte command + 4-byte IC header +
++ *      TX1/TX2 blocks of anchor row/col + 9x9 s16 grid) by polling, or on the
++ *      GPIO 39 interrupt with use_irq=1;
++ *   4. keeps counters and the last 1024 frames in debugfs (gk3_pen/);
++ *   5. hands every frame whose content changed to userspace through
++ *      /dev/gk3_pen (blocking read / poll, one struct pen_rec per read);
++ *   6. re-initialises the slave when the header stops reading 5a a5 or reads
++ *      keep failing, and, from a 1 s watchdog that follows the panel, when no
++ *      frame arrived for a second while the screen is on.  The slave has no
++ *      reset line: every master reset (screen off/on, himax-spi recovery)
++ *      takes it down too, and an unconfigured slave raises no interrupts at
++ *      all, so in use_irq mode only the watchdog can notice.  The interrupt
++ *      is only requested once an init succeeded (an unconfigured slave could
++ *      hold the level-low line); at boot the driver can probe while himax-spi
++ *      is still reloading the master's firmware, so the first init may fail
++ *      and the watchdog's first good re-init starts the interrupt;
++ *   7. saves wakeups while no pen is around: the slave interrupts ~125 times
++ *      a second even without a pen, so after idle_after_ms with no TX1
++ *      anchor the interrupt is switched off and one frame is read every
++ *      idle_poll_ms instead; the first frame with an anchor switches the
++ *      interrupt back on.  Unread frames are simply overwritten by the
++ *      slave, as with slow polling, and the master keeps running.  Polling
++ *      alone notices a pen too late for a quick tap, so userspace also
++ *      writes to /dev/gk3_pen whenever the pen controller reports activity
++ *      (its reports start as soon as the pen is picked up, before it is
++ *      anywhere near the screen): that switches the interrupt back on at
++ *      once and keeps the slave awake while the pen is in use;
++ *   8. registers the pen's battery as power supply "m-pencil" (scope device,
++ *      so healthd leaves it out of the system battery).  The pen controller
++ *      reports the level (event 0x08, percent) and charging (0x09) to
++ *      userspace, which passes them on with a 3-byte write to /dev/gk3_pen.
++ *      It has no parent device on purpose: Android's EventHub looks for
++ *      batteries in the nearest power_supply directory above an input
++ *      device's sysfs node, which for gk3pend's uinput pen is
++ *      /sys/devices/virtual, so the battery shows up as the stylus's
++ *      (settings, low-battery notice).  The core warns about the missing
++ *      parent once at registration.
++ *
++ * Userspace (gk3pend) turns the frames into a stylus: position, hover and
++ * tilt from the frames, pressure, side double-tap and battery from the pen
++ * controller on USB (12d1:10b8).  That controller holds its reports across
++ * a system suspend until the host talks to it on each interface: usbhid
++ * does it for pressure (HID_QUIRK_IDLE_ON_RESUME), gk3pend for the side
++ * double-tap.  Without it the pen still shows as connected but pressure
++ * stays off.
++ *
++ * It never touches the master, so finger touch is unaffected.
++ *
++ * Bus protocol: same as himax-spi-core.c (himax_spi_read/write,
++ * himax_mcu_register_read/write, himax_mcu_interface_on) with the slave's
++ * function codes F5 (read) / F4 (write) instead of the master's F3 / F2.
++ */
++#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
++
++#include <linux/debugfs.h>
++#include <linux/delay.h>
++#include <linux/freezer.h>
++#include <linux/interrupt.h>
++#include <linux/kref.h>
++#include <linux/kthread.h>
++#include <linux/ktime.h>
++#include <linux/miscdevice.h>
++#include <linux/module.h>
++#include <linux/mutex.h>
++#include <linux/of.h>
++#include <linux/poll.h>
++#include <linux/power_supply.h>
++#include <linux/seq_file.h>
++#include <linux/slab.h>
++#include <linux/spi/spi.h>
++#include <linux/uaccess.h>
++#include <linux/unaligned.h>
++#include <linux/vmalloc.h>
++#include <linux/wait.h>
++#include <linux/workqueue.h>
++
++#include <drm/drm_panel.h>
++
++static int spi_mode = 3;
++module_param(spi_mode, int, 0444);
++MODULE_PARM_DESC(spi_mode, "SPI mode 0..3 (master runs mode 3; ACPI says 0)");
++
++static int speed_hz = 12000000;
++module_param(speed_hz, int, 0444);
++MODULE_PARM_DESC(speed_hz, "SPI clock");
++
++static int poll_hz = 120;
++module_param(poll_hz, int, 0644);
++MODULE_PARM_DESC(poll_hz, "frame polling rate when use_irq=0");
++
++static bool use_irq = true;
++module_param(use_irq, bool, 0444);
++MODULE_PARM_DESC(use_irq, "read frames on the GPIO 39 interrupt (default); 0 = poll at poll_hz");
++
++static bool irq_edge;
++module_param(irq_edge, bool, 0444);
++MODULE_PARM_DESC(irq_edge, "trigger on the falling edge instead of the DT's level-low");
++
++static bool do_init = true;
++module_param(do_init, bool, 0444);
++MODULE_PARM_DESC(do_init, "write raw_out_sel/rawdata_addr after the bus check");
++
++static int idle_after_ms = 10000;	/* longer than a pause while drawing */
++module_param(idle_after_ms, int, 0644);
++MODULE_PARM_DESC(idle_after_ms, "use_irq: switch the interrupt off after this long without a pen and poll instead (0 = never)");
++
++static int idle_poll_ms = 50;
++module_param(idle_poll_ms, int, 0644);
++MODULE_PARM_DESC(idle_poll_ms, "frame polling period while idle");
++
++#define F_READ			0xf5
++#define F_WRITE			0xf4
++
++#define AHB_ADDR_BYTE_0		0x00
++#define AHB_RDATA_BYTE_0	0x08
++#define AHB_ACCESS_DIRECTION	0x0c
++#define AHB_INCR4		0x0d
++#define AHB_CONTI		0x13
++#define AHB_EVENT_STACK		0x30
++
++#define AHB_CMD_CONTI		0x31
++#define AHB_CMD_INCR4		0x10
++#define AHB_CMD_INCR4_ADD_4	0x01
++#define AHB_CMD_DIR_READ	0x00
++
++#define REG_ICID		0x900000d0
++#define REG_RAW_OUT_SEL		0x100072ec	/* EGoTouchRev pfw_op.addr_raw_out_sel */
++#define REG_RAWDATA_ADDR	0x10000000	/* EGoTouchRev psram_op.addr_rawdata_addr */
++
++#define HDR_LEN			3		/* function, command, dummy */
++#define FRAME_LEN		336		/* 4-byte IC header + 166 words */
++#define WORDS_OFF		4
++#define TX2_WORD		83		/* TX1 block = words 0..82 */
++#define GRID			81
++
++#define RING_LEN		1024
++
++/* Header of a slave frame once raw_out_sel/rawdata_addr are in effect. */
++#define HDR_OK(d)		((d)[0] == 0x5a && (d)[1] == 0xa5)
++#define REINIT_AFTER		30		/* bad frames in a row (~250 ms) */
++
++/* Also the record handed out by read() on /dev/gk3_pen. */
++struct pen_rec {
++	u64 t_ns;
++	u32 seq;
++	u32 flags;			/* bit0: TX1 anchor valid */
++	u8 data[FRAME_LEN];
++};
++
++struct gk3_pen {
++	struct kref ref;		/* probe, plus one per open /dev/gk3_pen */
++	struct spi_device *spi;
++	struct mutex lock;		/* SPI access and stats */
++	u8 *xfer;			/* HDR_LEN + FRAME_LEN, kmalloc'd for DMA */
++	struct task_struct *poller;
++	struct dentry *dbg;
++	bool running;
++
++	u8 bus_conti, bus_incr4;
++	u32 icid, raw_out_sel;
++	int bus_ret, init_ret;
++
++	u32 seq, frames, errors, dups, zeros, irqs, hdr_bad;
++	u32 tx1_valid, tx2_valid;
++	u16 tx1_row, tx1_col, tx2_row, tx2_col;
++	s16 tx1_peak, tx1_peak_max, tx2_peak;
++	u8 last[FRAME_LEN];
++	struct pen_rec *ring;
++	u32 ring_head;
++
++	/* newest frame whose content changed, for /dev/gk3_pen */
++	struct pen_rec uniq;
++	u32 uniq_seq;
++	wait_queue_head_t wq;
++	struct miscdevice misc;
++	bool misc_ok, gone;
++
++	u32 bad_frames, reinits;
++	unsigned long last_reinit;
++
++	/* screen state from the panel, and the stall watchdog */
++	struct drm_panel_follower follower;
++	bool follower_ok, panel_on;
++	struct delayed_work watchdog;
++	u32 wd_frames, wd_reinits;
++
++	/* idle: no pen for idle_after_ms, interrupt off, poll every idle_poll_ms */
++	bool idle;
++	unsigned long pen_seen;		/* jiffies of the last frame with a TX1 anchor */
++	u32 pen_frames;			/* complete frames with a TX1 anchor */
++	struct delayed_work idle_poll;
++	u32 idle_enters, idle_polls;
++	u32 hints, hint_wakes;		/* pen-in-use writes, and those that ended idle */
++};
++
++/*
++ * There is one slave; opening the char device finds it here.  Each open
++ * file holds a reference, so the state outlives an unbind (of the parent
++ * SPI controller, say) while gk3pend still has /dev/gk3_pen open.
++ */
++static struct gk3_pen *gk3_pen_dev;
++static DEFINE_MUTEX(gk3_pen_dev_lock);
++
++static void pen_free(struct kref *ref)
++{
++	kfree(container_of(ref, struct gk3_pen, ref));
++}
++
++static void pen_put(void *data)
++{
++	struct gk3_pen *p = data;
++
++	kref_put(&p->ref, pen_free);
++}
++
++/* ---- bus primitives (himax-spi-core.c with F5/F4) ---- */
++
++static int pen_read(struct gk3_pen *p, u8 cmd, u8 *out, u32 len)
++{
++	struct spi_transfer x = {
++		.tx_buf = p->xfer,
++		.rx_buf = p->xfer,
++		.len = HDR_LEN + len,
++	};
++	int ret;
++
++	memset(p->xfer, 0, HDR_LEN + len);
++	p->xfer[0] = F_READ;
++	p->xfer[1] = cmd;
++	ret = spi_sync_transfer(p->spi, &x, 1);
++	if (!ret)
++		memcpy(out, p->xfer + HDR_LEN, len);
++	return ret;
++}
++
++static int pen_write(struct gk3_pen *p, u8 cmd, const u8 *addr, const u8 *data, u32 len)
++{
++	struct spi_transfer x = { .tx_buf = p->xfer };
++	u32 n = 2;
++
++	p->xfer[0] = F_WRITE;
++	p->xfer[1] = cmd;
++	if (addr) {
++		memcpy(p->xfer + n, addr, 4);
++		n += 4;
++	}
++	if (data && len) {
++		memcpy(p->xfer + n, data, len);
++		n += len;
++	}
++	x.len = n;
++	return spi_sync_transfer(p->spi, &x, 1);
++}
++
++static int pen_burst(struct gk3_pen *p, bool add4)
++{
++	u8 v = AHB_CMD_CONTI;
++	int ret;
++
++	ret = pen_write(p, AHB_CONTI, NULL, &v, 1);
++	if (ret)
++		return ret;
++	v = AHB_CMD_INCR4 | (add4 ? AHB_CMD_INCR4_ADD_4 : 0);
++	return pen_write(p, AHB_INCR4, NULL, &v, 1);
++}
++
++static int pen_reg_read(struct gk3_pen *p, u32 addr, u8 *out, u32 len)
++{
++	u8 a[4], dir = AHB_CMD_DIR_READ;
++	int ret;
++
++	put_unaligned_le32(addr, a);
++	ret = pen_burst(p, len > 4);
++	if (ret)
++		return ret;
++	ret = pen_write(p, AHB_ADDR_BYTE_0, a, NULL, 0);
++	if (ret)
++		return ret;
++	ret = pen_write(p, AHB_ACCESS_DIRECTION, NULL, &dir, 1);
++	if (ret)
++		return ret;
++	ret = pen_read(p, AHB_RDATA_BYTE_0, out, len);
++	if (ret)
++		return ret;
++	return pen_burst(p, !(len > 4));
++}
++
++static int pen_reg_write(struct gk3_pen *p, u32 addr, const u8 *data, u32 len)
++{
++	u8 a[4];
++	int ret;
++
++	put_unaligned_le32(addr, a);
++	ret = pen_burst(p, len > 4);
++	if (ret)
++		return ret;
++	ret = pen_write(p, AHB_ADDR_BYTE_0, a, data, len);
++	if (ret)
++		return ret;
++	return pen_burst(p, !(len > 4));
++}
++
++/* himax_mcu_interface_on(): wake the bus, set burst mode, read it back. */
++static int pen_bus_check(struct gk3_pen *p)
++{
++	u8 dummy[4];
++	int i, ret;
++
++	ret = pen_read(p, AHB_RDATA_BYTE_0, dummy, 4);
++	if (ret)
++		return ret;
++	for (i = 0; i < 10; i++) {
++		ret = pen_burst(p, false);
++		if (ret)
++			return ret;
++		ret = pen_read(p, AHB_CONTI, &p->bus_conti, 1);
++		if (ret)
++			return ret;
++		ret = pen_read(p, AHB_INCR4, &p->bus_incr4, 1);
++		if (ret)
++			return ret;
++		if (p->bus_conti == AHB_CMD_CONTI && p->bus_incr4 == AHB_CMD_INCR4)
++			return 0;
++		usleep_range(1000, 1100);
++	}
++	return -EIO;
++}
++
++#define PLOG(v, dev, fmt, ...)					\
++	do {							\
++		if (v)						\
++			dev_info(dev, fmt, ##__VA_ARGS__);	\
++		else						\
++			dev_dbg(dev, fmt, ##__VA_ARGS__);	\
++	} while (0)
++
++static int pen_hw_init(struct gk3_pen *p, bool verbose)
++{
++	struct device *dev = &p->spi->dev;
++	static const u8 raw_sel[4] = { 0xf6, 0x00, 0x00, 0x00 };
++	static const u8 raw_addr[4] = { 0xa5, 0x5a, 0x00, 0x00 };
++	u8 v[4];
++	int i, ret;
++
++	p->bus_ret = pen_bus_check(p);
++	PLOG(verbose, dev, "bus check %d: conti=0x%02x (want 0x31) incr4=0x%02x (want 0x10)\n",
++	     p->bus_ret, p->bus_conti, p->bus_incr4);
++	if (p->bus_ret)
++		return p->bus_ret;
++
++	ret = pen_reg_read(p, REG_ICID, v, 4);
++	p->icid = ret ? 0 : get_unaligned_le32(v);
++	PLOG(verbose, dev, "ICID read %d: 0x%08x (master reads 0x83121a00-ish)\n", ret, p->icid);
++
++	if (!do_init)
++		return 0;
++
++	/* EGoTouchRev himax_switch_data_type(Slave, EGO_RAWDATA): write + verify */
++	ret = -EIO;
++	for (i = 0; i < 50; i++) {
++		if (pen_reg_write(p, REG_RAW_OUT_SEL, raw_sel, 4) == 0 &&
++		    pen_reg_read(p, REG_RAW_OUT_SEL, v, 4) == 0) {
++			p->raw_out_sel = get_unaligned_le32(v);
++			if (v[0] == raw_sel[0]) {
++				ret = 0;
++				break;
++			}
++		}
++		usleep_range(1000, 1100);
++	}
++	PLOG(verbose, dev, "raw_out_sel <- 0xf6: %d after %d tries (read back 0x%08x)\n",
++	     ret, i + 1, p->raw_out_sel);
++	if (ret)
++		return ret;
++
++	/* EGoTouchRev register_write(slave, addr_rawdata_addr, A5 5A 00 00) */
++	ret = pen_reg_write(p, REG_RAWDATA_ADDR, raw_addr, 4);
++	PLOG(verbose, dev, "rawdata_addr <- 0x5aa5: %d\n", ret);
++	return ret;
++}
++
++/* ---- frames ---- */
++
++static s16 grid_peak(const u8 *w, int first_word)
++{
++	s16 peak = S16_MIN;
++	int i;
++
++	for (i = 0; i < GRID; i++) {
++		s16 v = (s16)get_unaligned_le16(w + 2 * (first_word + i));
++
++		if (v > peak)
++			peak = v;
++	}
++	return peak;
++}
++
++static void pen_account(struct gk3_pen *p, const u8 *d, ktime_t t)
++{
++	const u8 *w = d + WORDS_OFF;
++	struct pen_rec *r = &p->ring[p->ring_head];
++	bool valid1, valid2, zero = !memchr_inv(d, 0, FRAME_LEN);
++
++	p->tx1_row = get_unaligned_le16(w);
++	p->tx1_col = get_unaligned_le16(w + 2);
++	p->tx2_row = get_unaligned_le16(w + 2 * TX2_WORD);
++	p->tx2_col = get_unaligned_le16(w + 2 * TX2_WORD + 2);
++	valid1 = !((p->tx1_row & 0xff) == 0xff && (p->tx1_col & 0xff) == 0xff);
++	valid2 = !((p->tx2_row & 0xff) == 0xff && (p->tx2_col & 0xff) == 0xff);
++	p->tx1_peak = grid_peak(w, 2);
++	p->tx2_peak = grid_peak(w, TX2_WORD + 2);
++
++	p->frames++;
++	if (zero)
++		p->zeros++;
++	/*
++	 * Only complete frames go to userspace.  With the pen in range the
++	 * slave runs at ~240 Hz and a read seems to consume the frame: reading
++	 * again before the next one returns zeros, and a read that races the
++	 * update returns a torn buffer.  Both lack the 5a a5 header.
++	 */
++	if (!HDR_OK(d)) {
++		p->hdr_bad++;
++	} else if (!memcmp(d, p->last, FRAME_LEN)) {
++		p->dups++;
++	} else {
++		p->uniq.t_ns = ktime_to_ns(t);
++		p->uniq.seq = p->seq;
++		p->uniq.flags = valid1;
++		memcpy(p->uniq.data, d, FRAME_LEN);
++		WRITE_ONCE(p->uniq_seq, p->uniq_seq + 1);
++		wake_up_interruptible(&p->wq);
++	}
++	if (valid1) {
++		p->tx1_valid++;
++		if (p->tx1_peak > p->tx1_peak_max)
++			p->tx1_peak_max = p->tx1_peak;
++		if (HDR_OK(d)) {
++			p->pen_frames++;
++			p->pen_seen = jiffies;
++		}
++	}
++	if (valid2)
++		p->tx2_valid++;
++	if (HDR_OK(d))
++		memcpy(p->last, d, FRAME_LEN);
++
++	r->t_ns = ktime_to_ns(t);
++	r->seq = p->seq++;
++	r->flags = valid1;
++	memcpy(r->data, d, FRAME_LEN);
++	p->ring_head = (p->ring_head + 1) % RING_LEN;
++
++	if (p->frames <= 3)
++		dev_info(&p->spi->dev, "frame %u hdr %*ph tx1 %04x/%04x peak %d tx2 %04x/%04x\n",
++			 p->frames, 4, d, p->tx1_row, p->tx1_col, p->tx1_peak,
++			 p->tx2_row, p->tx2_col);
++}
++
++static void pen_read_and_account(struct gk3_pen *p)
++{
++	u8 frame[FRAME_LEN];
++	ktime_t t = ktime_get();
++	int ret;
++
++	mutex_lock(&p->lock);
++	ret = pen_read(p, AHB_EVENT_STACK, frame, FRAME_LEN);
++	if (ret)
++		p->errors++;
++	else
++		pen_account(p, frame, t);
++
++	/*
++	 * The slave has no reset line: every master reset (screen off/on,
++	 * himax-spi error recovery) takes it down too and drops our two
++	 * writes.  It then stops prefixing frames with 5a a5 (or stops
++	 * answering), so redo the init, at most once a second.
++	 */
++	if (ret || !HDR_OK(frame))
++		p->bad_frames++;
++	else
++		p->bad_frames = 0;
++	if (p->bad_frames >= REINIT_AFTER && time_after(jiffies, p->last_reinit + HZ)) {
++		p->last_reinit = jiffies;
++		p->reinits++;
++		p->init_ret = pen_hw_init(p, false);
++		dev_info(&p->spi->dev, "re-init #%u after %u bad frames: %d\n",
++			 p->reinits, p->bad_frames, p->init_ret);
++		if (!p->init_ret)
++			p->bad_frames = 0;
++	}
++	mutex_unlock(&p->lock);
++}
++
++static int pen_poll_fn(void *arg)
++{
++	struct gk3_pen *p = arg;
++
++	set_freezable();
++	while (!kthread_should_stop()) {
++		unsigned long period = 1000000UL / clamp(poll_hz, 1, 1000);
++
++		pen_read_and_account(p);
++		usleep_range(period > 200 ? period - 200 : period, period);
++		try_to_freeze();
++	}
++	return 0;
++}
++
++/* ---- idle: interrupt off and slow polling while no pen is in range ---- */
++
++static unsigned long idle_poll_period(void)
++{
++	return msecs_to_jiffies(max(READ_ONCE(idle_poll_ms), 1));
++}
++
++/* p->lock held; idle only ever starts from the interrupt thread */
++static void pen_set_idle(struct gk3_pen *p, bool idle)
++{
++	if (p->idle == idle)
++		return;
++	p->idle = idle;
++	if (idle) {
++		disable_irq_nosync(p->spi->irq);
++		p->idle_enters++;
++		queue_delayed_work(system_freezable_wq, &p->idle_poll, idle_poll_period());
++	} else {
++		enable_irq(p->spi->irq);
++	}
++}
++
++static void pen_idle_poll_fn(struct work_struct *work)
++{
++	struct gk3_pen *p = container_of(to_delayed_work(work), struct gk3_pen, idle_poll);
++	u32 seen;
++
++	mutex_lock(&p->lock);
++	seen = p->pen_frames;
++	mutex_unlock(&p->lock);
++	if (!READ_ONCE(p->idle))
++		return;
++
++	pen_read_and_account(p);
++
++	mutex_lock(&p->lock);
++	p->idle_polls++;
++	if (p->idle) {
++		if (p->pen_frames != seen)
++			pen_set_idle(p, false);
++		else
++			queue_delayed_work(system_freezable_wq, &p->idle_poll, idle_poll_period());
++	}
++	mutex_unlock(&p->lock);
++}
++
++static irqreturn_t pen_irq_fn(int irq, void *arg)
++{
++	struct gk3_pen *p = arg;
++	int after = READ_ONCE(idle_after_ms);
++
++	p->irqs++;
++	pen_read_and_account(p);
++
++	mutex_lock(&p->lock);
++	if (after > 0 && p->panel_on && !p->gone &&
++	    time_after(jiffies, p->pen_seen + msecs_to_jiffies(after)))
++		pen_set_idle(p, true);
++	mutex_unlock(&p->lock);
++	return IRQ_HANDLED;
++}
++
++static int pen_start(struct gk3_pen *p)
++{
++	unsigned long flags = IRQF_ONESHOT | (irq_edge ? IRQF_TRIGGER_FALLING : 0);
++	struct device *dev = &p->spi->dev;
++	int ret;
++
++	/*
++	 * Probe, the watchdog and debugfs reinit can all get here; the lock
++	 * keeps a second caller from starting the interrupt or the poller
++	 * twice.  A handler that fires right away waits for the lock.
++	 */
++	mutex_lock(&p->lock);
++	ret = 0;
++	if (p->running || p->gone)
++		goto out;
++	if (use_irq) {
++		if (p->spi->irq <= 0) {
++			ret = -ENXIO;
++			goto out;
++		}
++		p->pen_seen = jiffies;
++		ret = devm_request_threaded_irq(dev, p->spi->irq, NULL, pen_irq_fn,
++						flags, "himax-hx83121a-pen", p);
++		if (ret)
++			goto out;
++	} else {
++		p->poller = kthread_run(pen_poll_fn, p, "gk3-pen-poll");
++		if (IS_ERR(p->poller)) {
++			ret = PTR_ERR(p->poller);
++			p->poller = NULL;
++			goto out;
++		}
++	}
++	p->running = true;
++	dev_info(dev, "reading frames by %s\n", use_irq ? "interrupt" : "polling");
++out:
++	mutex_unlock(&p->lock);
++	return ret;
++}
++
++/* ---- stall watchdog + panel follower ---- */
++
++#define WD_PERIOD	msecs_to_jiffies(1000)
++
++/*
++ * With the screen on the slave delivers ~130 frames/s even without a pen, so a
++ * second without a single frame means it lost its configuration (a master
++ * reset took it down).  Re-init; if the master is still mid-reset this gets
++ * undone and the next tick tries again.
++ */
++static void pen_watchdog_fn(struct work_struct *work)
++{
++	struct gk3_pen *p = container_of(to_delayed_work(work), struct gk3_pen, watchdog);
++	bool start = false;
++	int ret;
++
++	if (!READ_ONCE(p->panel_on) || READ_ONCE(p->gone))
++		return;
++	mutex_lock(&p->lock);
++	if (p->frames == p->wd_frames) {
++		p->wd_reinits++;
++		p->init_ret = pen_hw_init(p, false);
++		dev_info(&p->spi->dev, "watchdog: no frame for 1 s, re-init #%u: %d\n",
++			 p->wd_reinits, p->init_ret);
++		/* probe skips the interrupt when its init failed (boot race) */
++		start = !p->init_ret && !p->running;
++	}
++	p->wd_frames = p->frames;
++	mutex_unlock(&p->lock);
++	if (start) {
++		ret = pen_start(p);
++		if (ret)
++			dev_err(&p->spi->dev, "start: %d\n", ret);
++	}
++	queue_delayed_work(system_freezable_wq, &p->watchdog, WD_PERIOD);
++}
++
++static int pen_panel_enabled(struct drm_panel_follower *f)
++{
++	struct gk3_pen *p = container_of(f, struct gk3_pen, follower);
++
++	mutex_lock(&p->lock);
++	p->pen_seen = jiffies;
++	mutex_unlock(&p->lock);
++	WRITE_ONCE(p->panel_on, true);
++	mod_delayed_work(system_freezable_wq, &p->watchdog, WD_PERIOD);
++	return 0;
++}
++
++static int pen_panel_disabling(struct drm_panel_follower *f)
++{
++	struct gk3_pen *p = container_of(f, struct gk3_pen, follower);
++
++	WRITE_ONCE(p->panel_on, false);
++	cancel_delayed_work_sync(&p->watchdog);
++	/* back to interrupt mode: with the screen off nothing arrives anyway */
++	mutex_lock(&p->lock);
++	pen_set_idle(p, false);
++	mutex_unlock(&p->lock);
++	cancel_delayed_work_sync(&p->idle_poll);
++	return 0;
++}
++
++static const struct drm_panel_follower_funcs pen_follower_funcs = {
++	.panel_enabled = pen_panel_enabled,
++	.panel_disabling = pen_panel_disabling,
++};
++
++/* ---- debugfs ---- */
++
++static int stats_show(struct seq_file *s, void *unused)
++{
++	struct gk3_pen *p = s->private;
++
++	mutex_lock(&p->lock);
++	seq_printf(s, "spi_mode %d speed_hz %d use_irq %d poll_hz %d running %d irq %d\n",
++		   p->spi->mode & 3, p->spi->max_speed_hz, use_irq, poll_hz, p->running,
++		   p->spi->irq);
++	seq_printf(s, "bus_check %d conti 0x%02x incr4 0x%02x icid 0x%08x init %d raw_out_sel 0x%08x\n",
++		   p->bus_ret, p->bus_conti, p->bus_incr4, p->icid, p->init_ret, p->raw_out_sel);
++	seq_printf(s, "frames %u errors %u dups %u zeros %u irqs %u uniq %u hdr_bad %u bad_run %u reinits %u\n",
++		   p->frames, p->errors, p->dups, p->zeros, p->irqs, p->uniq_seq,
++		   p->hdr_bad, p->bad_frames, p->reinits);
++	seq_printf(s, "tx1_valid %u tx2_valid %u peak_max %d panel_on %d follower %d wd_reinits %u\n",
++		   p->tx1_valid, p->tx2_valid, p->tx1_peak_max, p->panel_on, p->follower_ok,
++		   p->wd_reinits);
++	seq_printf(s, "idle %d enters %u polls %u hints %u hint_wakes %u (idle_after_ms %d idle_poll_ms %d)\n",
++		   p->idle, p->idle_enters, p->idle_polls, p->hints, p->hint_wakes,
++		   idle_after_ms, idle_poll_ms);
++	seq_printf(s, "last hdr %*ph tx1 %04x/%04x peak %d tx2 %04x/%04x peak %d\n",
++		   4, p->last, p->tx1_row, p->tx1_col, p->tx1_peak,
++		   p->tx2_row, p->tx2_col, p->tx2_peak);
++	mutex_unlock(&p->lock);
++	return 0;
++}
++DEFINE_SHOW_ATTRIBUTE(stats);
++
++/* ring: snapshot at open, records oldest to newest */
++static int ring_open(struct inode *inode, struct file *f)
++{
++	struct gk3_pen *p = inode->i_private;
++	size_t rec = sizeof(struct pen_rec);
++	u8 *snap = vmalloc(RING_LEN * rec);
++	u32 i;
++
++	if (!snap)
++		return -ENOMEM;
++	mutex_lock(&p->lock);
++	for (i = 0; i < RING_LEN; i++)
++		memcpy(snap + i * rec, &p->ring[(p->ring_head + i) % RING_LEN], rec);
++	mutex_unlock(&p->lock);
++	f->private_data = snap;
++	return 0;
++}
++
++static ssize_t ring_read(struct file *f, char __user *buf, size_t n, loff_t *pos)
++{
++	return simple_read_from_buffer(buf, n, pos, f->private_data,
++				       RING_LEN * sizeof(struct pen_rec));
++}
++
++static int ring_release(struct inode *inode, struct file *f)
++{
++	vfree(f->private_data);
++	return 0;
++}
++
++static const struct file_operations ring_fops = {
++	.owner = THIS_MODULE,
++	.open = ring_open,
++	.read = ring_read,
++	.release = ring_release,
++	.llseek = default_llseek,
++};
++
++static ssize_t reinit_write(struct file *f, const char __user *buf, size_t n, loff_t *pos)
++{
++	struct gk3_pen *p = f->private_data;
++	int ret;
++
++	mutex_lock(&p->lock);
++	ret = pen_hw_init(p, true);
++	p->init_ret = ret;
++	mutex_unlock(&p->lock);
++	if (!ret)
++		ret = pen_start(p);
++	return ret ? ret : n;
++}
++
++static const struct file_operations reinit_fops = {
++	.owner = THIS_MODULE,
++	.open = simple_open,
++	.write = reinit_write,
++};
++
++/* ---- /dev/gk3_pen: one struct pen_rec per read, newest changed frame ---- */
++
++struct pen_file {
++	struct gk3_pen *p;		/* referenced while the file is open */
++	u32 last;			/* uniq_seq this reader has seen */
++};
++
++static int pen_cdev_open(struct inode *inode, struct file *f)
++{
++	struct pen_file *pf;
++	struct gk3_pen *p;
++
++	pf = kzalloc_obj(*pf, GFP_KERNEL);
++	if (!pf)
++		return -ENOMEM;
++	mutex_lock(&gk3_pen_dev_lock);
++	p = gk3_pen_dev;
++	if (p)
++		kref_get(&p->ref);
++	mutex_unlock(&gk3_pen_dev_lock);
++	if (!p) {
++		kfree(pf);
++		return -ENODEV;
++	}
++	pf->p = p;
++	pf->last = READ_ONCE(p->uniq_seq);
++	f->private_data = pf;
++	return stream_open(inode, f);
++}
++
++static int pen_cdev_release(struct inode *inode, struct file *f)
++{
++	struct pen_file *pf = f->private_data;
++
++	pen_put(pf->p);
++	kfree(pf);
++	return 0;
++}
++
++static ssize_t pen_cdev_read(struct file *f, char __user *buf, size_t n, loff_t *pos)
++{
++	struct pen_file *pf = f->private_data;
++	struct gk3_pen *p = pf->p;
++	struct pen_rec rec;
++	int ret;
++
++	if (READ_ONCE(p->gone))
++		return -ENODEV;
++	if (n < sizeof(rec))
++		return -EINVAL;
++	if (READ_ONCE(p->uniq_seq) == pf->last) {
++		if (f->f_flags & O_NONBLOCK)
++			return -EAGAIN;
++		ret = wait_event_interruptible(p->wq,
++					       READ_ONCE(p->uniq_seq) != pf->last ||
++					       READ_ONCE(p->gone));
++		if (ret)
++			return ret;
++		if (READ_ONCE(p->gone))
++			return -ENODEV;
++	}
++	mutex_lock(&p->lock);
++	rec = p->uniq;
++	pf->last = p->uniq_seq;
++	mutex_unlock(&p->lock);
++	if (copy_to_user(buf, &rec, sizeof(rec)))
++		return -EFAULT;
++	return sizeof(rec);
++}
++
++/* ---- pen battery (see 8. above) ---- */
++
++static int pen_bat_capacity = -1;	/* percent; -1 = not reported yet */
++static int pen_bat_charging = -1;	/* 0/1; -1 = not reported yet */
++static struct power_supply *pen_bat;
++
++static const enum power_supply_property pen_bat_props[] = {
++	POWER_SUPPLY_PROP_STATUS,
++	POWER_SUPPLY_PROP_PRESENT,
++	POWER_SUPPLY_PROP_CAPACITY,
++	POWER_SUPPLY_PROP_SCOPE,
++	POWER_SUPPLY_PROP_MODEL_NAME,
++	POWER_SUPPLY_PROP_MANUFACTURER,
++};
++
++static int pen_bat_get(struct power_supply *psy, enum power_supply_property psp,
++		       union power_supply_propval *val)
++{
++	int cap = READ_ONCE(pen_bat_capacity), chg = READ_ONCE(pen_bat_charging);
++
++	switch (psp) {
++	case POWER_SUPPLY_PROP_STATUS:
++		if (cap < 0 || chg < 0)
++			val->intval = POWER_SUPPLY_STATUS_UNKNOWN;
++		else if (!chg)
++			val->intval = POWER_SUPPLY_STATUS_DISCHARGING;
++		else
++			val->intval = cap >= 100 ? POWER_SUPPLY_STATUS_FULL :
++				      POWER_SUPPLY_STATUS_CHARGING;
++		break;
++	case POWER_SUPPLY_PROP_PRESENT:
++		val->intval = cap >= 0;
++		break;
++	case POWER_SUPPLY_PROP_CAPACITY:
++		if (cap < 0)
++			return -ENODATA;
++		val->intval = cap;
++		break;
++	case POWER_SUPPLY_PROP_SCOPE:
++		val->intval = POWER_SUPPLY_SCOPE_DEVICE;
++		break;
++	case POWER_SUPPLY_PROP_MODEL_NAME:
++		val->strval = "M-Pencil";
++		break;
++	case POWER_SUPPLY_PROP_MANUFACTURER:
++		val->strval = "HUAWEI";
++		break;
++	default:
++		return -EINVAL;
++	}
++	return 0;
++}
++
++static const struct power_supply_desc pen_bat_desc = {
++	.name = "m-pencil",
++	.type = POWER_SUPPLY_TYPE_BATTERY,
++	.properties = pen_bat_props,
++	.num_properties = ARRAY_SIZE(pen_bat_props),
++	.get_property = pen_bat_get,
++};
++
++/*
++ * Nothing about the pen's battery needs to wake the system, and a wakeup
++ * source would put a wakeup/ directory under the supply that inherits its
++ * SELinux label, which system_suspend is then denied reading.
++ */
++static const struct power_supply_config pen_bat_cfg = {
++	.no_wakeup_source = true,
++};
++
++/* 'B', level (0-100), charging (0/1); 0xff leaves that field as it is */
++static void pen_bat_set(const u8 *m)
++{
++	int cap = m[1] <= 100 ? m[1] : READ_ONCE(pen_bat_capacity);
++	int chg = m[2] <= 1 ? m[2] : READ_ONCE(pen_bat_charging);
++
++	if (cap == READ_ONCE(pen_bat_capacity) && chg == READ_ONCE(pen_bat_charging))
++		return;
++	WRITE_ONCE(pen_bat_capacity, cap);
++	WRITE_ONCE(pen_bat_charging, chg);
++	if (pen_bat)
++		power_supply_changed(pen_bat);
++}
++
++/*
++ * A battery message (above), or any other write: the pen is in use (its
++ * controller is reporting), so stay awake.
++ */
++static ssize_t pen_cdev_write(struct file *f, const char __user *buf, size_t n, loff_t *pos)
++{
++	struct pen_file *pf = f->private_data;
++	struct gk3_pen *p = pf->p;
++	u8 m[3];
++
++	if (n == sizeof(m)) {
++		if (copy_from_user(m, buf, sizeof(m)))
++			return -EFAULT;
++		if (m[0] == 'B') {
++			pen_bat_set(m);
++			return n;
++		}
++	}
++	mutex_lock(&p->lock);
++	/* after remove the interrupt is gone; don't touch the hardware */
++	if (p->gone) {
++		mutex_unlock(&p->lock);
++		return -ENODEV;
++	}
++	p->hints++;
++	p->pen_seen = jiffies;
++	if (p->idle) {
++		p->hint_wakes++;
++		pen_set_idle(p, false);
++	}
++	mutex_unlock(&p->lock);
++	return n;
++}
++
++static __poll_t pen_cdev_poll(struct file *f, poll_table *wait)
++{
++	struct pen_file *pf = f->private_data;
++	struct gk3_pen *p = pf->p;
++
++	poll_wait(f, &p->wq, wait);
++	if (READ_ONCE(p->gone))
++		return EPOLLERR | EPOLLHUP;
++	return READ_ONCE(p->uniq_seq) != pf->last ? EPOLLIN | EPOLLRDNORM : 0;
++}
++
++static const struct file_operations pen_cdev_fops = {
++	.owner = THIS_MODULE,
++	.open = pen_cdev_open,
++	.release = pen_cdev_release,
++	.read = pen_cdev_read,
++	.write = pen_cdev_write,
++	.poll = pen_cdev_poll,
++};
++
++/* ---- driver ---- */
++
++static int gk3_pen_probe(struct spi_device *spi)
++{
++	struct device *dev = &spi->dev;
++	struct gk3_pen *p;
++	int ret;
++
++	/* not devm: open files of /dev/gk3_pen keep it beyond the unbind */
++	p = kzalloc_obj(*p, GFP_KERNEL);
++	if (!p)
++		return -ENOMEM;
++	kref_init(&p->ref);
++	ret = devm_add_action_or_reset(dev, pen_put, p);
++	if (ret)
++		return ret;
++	p->xfer = devm_kzalloc(dev, HDR_LEN + FRAME_LEN, GFP_KERNEL);
++	p->ring = devm_kcalloc(dev, RING_LEN, sizeof(*p->ring), GFP_KERNEL);
++	if (!p->xfer || !p->ring)
++		return -ENOMEM;
++
++	/*
++	 * The panel's follower callbacks stop the watchdog and the idle
++	 * polling while the screen is off.  If the panel has not probed yet the
++	 * follower cannot be added and both would keep running for good, so
++	 * defer until it has, before anything is started.  Other lookup
++	 * failures end in the always-on watchdog below.
++	 */
++	if (drm_is_panel_follower(dev)) {
++		struct device_node *np = of_parse_phandle(dev->of_node, "panel", 0);
++		struct drm_panel *panel = of_drm_find_panel(np);
++
++		of_node_put(np);
++		if (panel == ERR_PTR(-EPROBE_DEFER))
++			return dev_err_probe(dev, -EPROBE_DEFER, "waiting for the panel\n");
++	}
++
++	p->spi = spi;
++	p->tx1_peak_max = S16_MIN;
++	mutex_init(&p->lock);
++	INIT_DELAYED_WORK(&p->idle_poll, pen_idle_poll_fn);
++	init_waitqueue_head(&p->wq);
++	spi_set_drvdata(spi, p);
++
++	spi->mode = spi_mode & 3;
++	spi->bits_per_word = 8;
++	spi->max_speed_hz = speed_hz;
++	ret = spi_setup(spi);
++	if (ret)
++		return dev_err_probe(dev, ret, "spi_setup\n");
++
++	p->dbg = debugfs_create_dir("gk3_pen", NULL);
++	debugfs_create_file("stats", 0400, p->dbg, p, &stats_fops);
++	debugfs_create_file("ring", 0400, p->dbg, p, &ring_fops);
++	debugfs_create_file("reinit", 0200, p->dbg, p, &reinit_fops);
++
++	mutex_lock(&p->lock);
++	p->init_ret = pen_hw_init(p, true);
++	mutex_unlock(&p->lock);
++	dev_info(dev, "slave init %d (mode %d, %d Hz, irq %d)\n",
++		 p->init_ret, spi->mode & 3, spi->max_speed_hz, spi->irq);
++
++	mutex_lock(&gk3_pen_dev_lock);
++	gk3_pen_dev = p;
++	mutex_unlock(&gk3_pen_dev_lock);
++	p->misc.minor = MISC_DYNAMIC_MINOR;
++	p->misc.name = "gk3_pen";
++	p->misc.fops = &pen_cdev_fops;
++	p->misc.mode = 0600;
++	ret = misc_register(&p->misc);
++	if (ret)
++		dev_err(dev, "misc_register: %d\n", ret);
++	else
++		p->misc_ok = true;
++
++	/* Stay bound even if the bus check failed: debugfs reinit can retry. */
++	if (!p->init_ret) {
++		ret = pen_start(p);
++		if (ret)
++			dev_err(dev, "start: %d\n", ret);
++	}
++
++	/*
++	 * Follow the panel (the DT sets panel = <&panel>).  The enabled
++	 * callback runs right away if the screen is on, which starts the
++	 * watchdog.  Without a panel, run the watchdog unconditionally.
++	 */
++	INIT_DELAYED_WORK(&p->watchdog, pen_watchdog_fn);
++	p->follower.funcs = &pen_follower_funcs;
++	ret = drm_panel_add_follower(dev, &p->follower);
++	if (ret) {
++		dev_warn(dev, "no panel to follow (%d), watchdog always on\n", ret);
++		pen_panel_enabled(&p->follower);
++	} else {
++		p->follower_ok = true;
++	}
++	return 0;
++}
++
++static void gk3_pen_remove(struct spi_device *spi)
++{
++	struct gk3_pen *p = spi_get_drvdata(spi);
++
++	/* stop the panel from re-arming the watchdog, then stop the watchdog */
++	if (p->follower_ok)
++		drm_panel_remove_follower(&p->follower);
++	mutex_lock(&p->lock);
++	WRITE_ONCE(p->gone, true);
++	pen_set_idle(p, false);
++	mutex_unlock(&p->lock);
++	cancel_delayed_work_sync(&p->watchdog);
++	cancel_delayed_work_sync(&p->idle_poll);
++	wake_up_interruptible(&p->wq);
++	mutex_lock(&gk3_pen_dev_lock);
++	gk3_pen_dev = NULL;
++	mutex_unlock(&gk3_pen_dev_lock);
++	if (p->misc_ok)
++		misc_deregister(&p->misc);
++	if (p->poller)
++		kthread_stop(p->poller);
++	if (use_irq && p->running)
++		devm_free_irq(&spi->dev, spi->irq, p);
++	debugfs_remove_recursive(p->dbg);
++}
++
++static const struct of_device_id gk3_pen_of_match[] = {
++	{ .compatible = "himax,hx83121a-pen-slave" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, gk3_pen_of_match);
++
++static const struct spi_device_id gk3_pen_ids[] = {
++	{ "hx83121a-pen-slave" },
++	{ }
++};
++MODULE_DEVICE_TABLE(spi, gk3_pen_ids);
++
++static struct spi_driver gk3_pen_driver = {
++	.driver = {
++		.name = "himax-hx83121a-pen",
++		.of_match_table = gk3_pen_of_match,
++		/*
++		 * A manual unbind would free the device state while gk3pend
++		 * still has /dev/gk3_pen open.
++		 */
++		.suppress_bind_attrs = true,
++	},
++	.id_table = gk3_pen_ids,
++	.probe = gk3_pen_probe,
++	.remove = gk3_pen_remove,
++};
++
++static int __init gk3_pen_init(void)
++{
++	int ret;
++
++	/* not fatal: the pen works without */
++	pen_bat = power_supply_register(NULL, &pen_bat_desc, &pen_bat_cfg);
++	if (IS_ERR(pen_bat)) {
++		pr_warn("battery not registered: %ld\n", PTR_ERR(pen_bat));
++		pen_bat = NULL;
++	}
++
++	ret = spi_register_driver(&gk3_pen_driver);
++	if (ret && pen_bat)
++		power_supply_unregister(pen_bat);
++	return ret;
++}
++
++static void __exit gk3_pen_exit(void)
++{
++	spi_unregister_driver(&gk3_pen_driver);
++	if (pen_bat)
++		power_supply_unregister(pen_bat);
++}
++
++module_init(gk3_pen_init);
++module_exit(gk3_pen_exit);
++
++MODULE_DESCRIPTION("Himax HX83121A cascade slave (active pen) driver for HUAWEI MateBook E Go");
++MODULE_LICENSE("GPL");

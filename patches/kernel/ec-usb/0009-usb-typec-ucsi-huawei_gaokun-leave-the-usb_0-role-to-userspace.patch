@@ -1,0 +1,38 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] usb: typec: ucsi: huawei_gaokun: leave the usb_0 role switch to userspace
+
+The Huawei MateBook E Go EC always reports the connector partner type as UFP
+(even when nothing is connected) and never sets the USB data capability bit, so
+UCSI cannot determine the true data role of port 0. Once usb_0 is configured as
+OTG with usb-role-switch, UCSI overrides the role on every connector status
+update and breaks userspace role management.
+
+Release the role switch acquired by UCSI in the update_connector hook so UCSI
+continues reporting connector state, power direction, orientation, PD, and DP
+alt-mode while leaving usb_0 role switching to the userspace USB HAL.
+
+Origin: local
+Upstream-Status: Inappropriate [Android-specific]
+---
+diff --git a/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c b/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c
+index 6491e48..13efcae 100644
+--- a/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c
++++ b/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c
+@@ -238,6 +238,17 @@ static void gaokun_ucsi_update_connector(struct ucsi_connector *con)
+ {
+ 	struct gaokun_ucsi *uec = ucsi_get_drvdata(con->ucsi);
+ 
++	/*
++	 * The EC reports partner type UFP in every connector status, even with
++	 * nothing attached, and never sets the USB data flag, so UCSI has no
++	 * basis for a data role. The role of usb_0 (otg on Android, for USB
++	 * device mode) is left to userspace: drop the role switch UCSI has just
++	 * looked up (only usb_0 has one), which turns its role updates into
++	 * no-ops.
++	 */
++	usb_role_switch_put(con->usb_role_sw);
++	con->usb_role_sw = NULL;
++
+ 	if (con->num > uec->num_ports)
+ 		return;
+ 

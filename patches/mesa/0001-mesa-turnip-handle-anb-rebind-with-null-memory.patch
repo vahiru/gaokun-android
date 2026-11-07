@@ -1,0 +1,129 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] tu: implement deferred VkNativeBufferANDROID binding in tu_image_bind()
+
+Android's libvulkan binds swapchain gralloc buffers lazily by calling
+vkBindImageMemory2 with VkBindImageMemoryInfo::memory == VK_NULL_HANDLE and
+passing VkNativeBufferANDROID in the pNext chain, without having passed
+VkNativeBufferANDROID at vkCreateImage time. Turnip's tu_image_bind() left this
+path unimplemented (hitting UNREACHABLE and leaving image->mem NULL and iova 0).
+
+Handle deferred VkNativeBufferANDROID binding in tu_image_bind():
+- Query the gralloc buffer modifier and plane layouts via
+  vk_android_get_anb_layout() and recompute the image layout via
+  tu_image_update_layout().
+- Free any previously imported ANB memory on rebind to avoid leaking dma-bufs
+  across BufferQueue rotation, then import and bind the ANB via
+  vk_android_import_anb().
+- Guard iview->image->mem dereferences in tu_allocate_transient_attachments().
+
+Origin: local
+Upstream-Status: Pending
+---
+diff --git a/src/freedreno/vulkan/tu_cmd_buffer.cc b/src/freedreno/vulkan/tu_cmd_buffer.cc
+index 42a0416..9a2246e 100644
+--- a/src/freedreno/vulkan/tu_cmd_buffer.cc
++++ b/src/freedreno/vulkan/tu_cmd_buffer.cc
+@@ -3679,8 +3679,12 @@ tu_allocate_transient_attachments(struct tu_cmd_buffer *cmd, bool sysmem)
+ 
+    for (unsigned i = 0; i < fb->attachment_count; i++) {
+       const struct tu_image_view *iview = cmd->state.attachments[i];
++      /* An attachment without bound memory (see the NULL-memory bind path in
++       * tu_image_bind) needs no lazy allocation; don't dereference mem.
++       */
+       if (iview && !(iview->image->vk.create_flags &
+                      VK_IMAGE_CREATE_SPARSE_BINDING_BIT) &&
++          iview->image->mem &&
+           !iview->image->mem->bo &&
+           (sysmem || rp->attachments[i].load ||
+            rp->attachments[i].load_stencil ||
+diff --git a/src/freedreno/vulkan/tu_image.cc b/src/freedreno/vulkan/tu_image.cc
+index 88df2a0..e838efd 100644
+--- a/src/freedreno/vulkan/tu_image.cc
++++ b/src/freedreno/vulkan/tu_image.cc
+@@ -1010,8 +1010,84 @@ tu_image_bind(struct tu_device *device,
+ 
+    if (!mem) {
+ #if DETECT_OS_ANDROID
+-      /* TODO handle VkNativeBufferANDROID */
+-      UNREACHABLE("VkBindImageMemoryInfo with no memory");
++      /* Android's libvulkan uses deferred binding for swapchain images: the
++       * image is created without VkNativeBufferANDROID and the gralloc buffer
++       * only arrives here, chained into the VkBindImageMemoryInfo with a NULL
++       * memory handle (observed pNext: NATIVE_BUFFER_ANDROID +
++       * BIND_IMAGE_MEMORY_SWAPCHAIN_INFO_KHR, caller ANGLE -> libvulkan).
++       * Leaving the image unbound means iova == 0 and the GPU writes to
++       * address 0 (SMMU translation faults).
++       */
++      const VkNativeBufferANDROID *anb =
++         vk_find_struct_const(bind_info->pNext, NATIVE_BUFFER_ANDROID);
++      if (anb) {
++         /* Build an equivalent create info pointing at this ANB so the two
++          * runtime helpers (both keyed on VkImageCreateInfo) can be reused.
++          */
++         VkImageCreateInfo anb_ci = {
++            .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
++            .pNext = (const void *) anb,
++            .flags = image->vk.create_flags,
++            .imageType = image->vk.image_type,
++            .format = image->vk.format,
++            .extent = image->vk.extent,
++            .mipLevels = image->vk.mip_levels,
++            .arrayLayers = image->vk.array_layers,
++            .samples = (VkSampleCountFlagBits) image->vk.samples,
++            .tiling = image->vk.tiling,
++            .usage = image->vk.usage,
++            .sharingMode = image->vk.sharing_mode,
++            .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
++         };
++
++         /* Recompute the layout from the gralloc buffer's real modifier and
++          * plane layout: the image defaults to UBWC while gralloc may hand us
++          * LINEAR, and a stale layout means misplaced rendering and
++          * out-of-bounds writes.
++          */
++         VkImageDrmFormatModifierExplicitCreateInfoEXT anb_eci;
++         VkSubresourceLayout anb_plane_layouts[TU_MAX_PLANE_COUNT];
++         result = vk_android_get_anb_layout(&anb_ci, &anb_eci,
++                                            anb_plane_layouts,
++                                            TU_MAX_PLANE_COUNT);
++         if (result != VK_SUCCESS)
++            return result;
++
++         result = TU_CALLX(device, tu_image_update_layout)(
++            device, image, anb_eci.drmFormatModifier, anb_plane_layouts);
++         if (result != VK_SUCCESS)
++            return result;
++
++         /* Import the dma-buf and bind it.  vk_android_import_anb() stores the
++          * dedicated allocation in vk.anb_memory and calls BindImageMemory2
++          * again with a real memory handle, which takes the normal path below
++          * and sets mem/iova.  BufferQueue re-binds the same image, so free
++          * the previous import first or every rotation leaks a dma-buf.
++          */
++         if (image->vk.anb_memory != VK_NULL_HANDLE) {
++            device->vk.dispatch_table.FreeMemory(tu_device_to_handle(device),
++                                                 image->vk.anb_memory, NULL);
++            image->vk.anb_memory = VK_NULL_HANDLE;
++         }
++
++         return vk_android_import_anb(&device->vk, &anb_ci, NULL, &image->vk);
++      }
++
++      if (image->vk.anb_memory != VK_NULL_HANDLE) {
++         /* Re-bind of an image whose ANB was imported at vkCreateImage time. */
++         mem = tu_device_memory_from_handle(image->vk.anb_memory);
++         offset = 0;
++      } else {
++         /* Nothing to bind.  Skip instead of hitting UNREACHABLE (UB in
++          * release builds), but complain: this image will render at iova 0.
++          */
++         static unsigned n_unbindable = 0;
++         if (n_unbindable++ < 8)
++            mesa_logw("NULL-memory bind without VkNativeBufferANDROID or "
++                      "imported ANB memory (#%u), image %p stays unbound",
++                      n_unbindable, (void *) image);
++         return VK_SUCCESS;
++      }
+ #else
+       const VkBindImageMemorySwapchainInfoKHR *swapchain_info =
+          vk_find_struct_const(bind_info->pNext,

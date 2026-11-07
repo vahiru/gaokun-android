@@ -1,0 +1,59 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] drm/msm/dpu: dither 8 bpc panels
+
+The pingpong dither is only set up for 6 bpc, so anything deeper than the
+panel gets truncated on 8 bpc DSI panels: the banding of a 10-bit client
+target stays, and so do the rounding steps the PCC adds to every gradient.
+Dither them as well, spatially, so a static frame stays static.
+
+The panel has to report its depth for this. hx83121a never did, which left
+display_info.bpc at 0.
+
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.c  | 10 ++++++----
+ drivers/gpu/drm/panel/panel-himax-hx83121a.c |  2 ++
+ 2 files changed, 8 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.c b/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.c
+index 1f20695f8..6d95de5f8 100644
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.c
+@@ -393,10 +393,12 @@ static void _dpu_encoder_setup_dither(struct dpu_hw_pingpong *hw_pp, unsigned bp
+ 
+ 	switch (bpc) {
+ 	case 6:
+-		dither_cfg.c0_bitdepth = 6;
+-		dither_cfg.c1_bitdepth = 6;
+-		dither_cfg.c2_bitdepth = 6;
+-		dither_cfg.c3_bitdepth = 6;
++	case 8:
++		/* the pipeline keeps more bits than an 8 bpc panel takes too */
++		dither_cfg.c0_bitdepth = bpc;
++		dither_cfg.c1_bitdepth = bpc;
++		dither_cfg.c2_bitdepth = bpc;
++		dither_cfg.c3_bitdepth = bpc;
+ 		dither_cfg.temporal_en = 0;
+ 		break;
+ 	default:
+diff --git a/drivers/gpu/drm/panel/panel-himax-hx83121a.c b/drivers/gpu/drm/panel/panel-himax-hx83121a.c
+index 392ef1b4b..15bbc1f91 100644
+--- a/drivers/gpu/drm/panel/panel-himax-hx83121a.c
++++ b/drivers/gpu/drm/panel/panel-himax-hx83121a.c
+@@ -767,6 +767,7 @@ static const struct panel_desc boe_ppc357db1_4_desc = {
+ 	.width_mm = 266,
+ 	.height_mm = 166,
+ 	.lanes = 4,
++	.bpc = 8,
+ 	.format = MIPI_DSI_FMT_RGB888,
+ 	.mode_flags = MIPI_DSI_MODE_VIDEO | MIPI_DSI_CLOCK_NON_CONTINUOUS |
+ 		      MIPI_DSI_MODE_LPM,
+@@ -786,6 +787,7 @@ static const struct panel_desc csot_ppc357db1_4_desc = {
+ 	.width_mm = 266,
+ 	.height_mm = 166,
+ 	.lanes = 4,
++	.bpc = 8,
+ 	.format = MIPI_DSI_FMT_RGB888,
+ 	.mode_flags = MIPI_DSI_MODE_VIDEO | MIPI_DSI_CLOCK_NON_CONTINUOUS |
+ 		      MIPI_DSI_MODE_LPM,

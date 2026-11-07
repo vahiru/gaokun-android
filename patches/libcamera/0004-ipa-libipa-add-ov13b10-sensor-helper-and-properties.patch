@@ -1,16 +1,14 @@
-libcamera: 给后摄 OV13B10 补 sensor helper（增益模型）与静态属性
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] libcamera: ipa: libipa: add sensor helper and static properties for OmniVision OV13B10
 
-不补的后果（#106 实测日志）：`Failed to create camera sensor helper for ov13b10` ⇒ 软 ISP 的 AGC
-拿不到"控件值 ↔ 增益倍数"的映射，暗处提不起亮度；`No static properties available for 'ov13b10'`。
+Add a CameraSensorHelper (linear analogue gain model gain = code / 128 and
+10-bit black level 64 scaled to 4096) and CameraSensorProperties entry (1.12 um
+unit cell size and test pattern modes) for the OmniVision OV13B10 rear camera
+sensor.
 
-增益模型**不是量出来的**，是从内核驱动的定义推的：`drivers/media/i2c/ov13b10.c:46-49`
-`OV13B10_ANA_GAIN_MIN 0x80`（默认 = 1×）、`STEP 1` ⇒ gain = code/128，与 libcamera 里 ov5670 等
-OmniVision 传感器用的 `AnalogueGainLinear{ 1, 0, 0, 128 }` 同形。黑电平 64@10bit 是 OV 常见的 BLC 目标，
-**未在本模组上实测**（hi846 那次是量的，见 #94）。像元 1.12 µm 取自 OmniVision 产品简介。
-测试图案：内核菜单 0=Disabled、1-4=竖彩条四种 ⇒ 只映射 Off 与 ColorBars。
-
-⚠️ diff 由 `git diff` 生成（基于构建机上已打过 0001-0003 的 external/libcamera）。
-
+Origin: local
+Upstream-Status: Pending
+---
 diff --git a/src/ipa/libipa/camera_sensor_helper.cpp b/src/ipa/libipa/camera_sensor_helper.cpp
 index ea474ad..dc84ab1 100644
 --- a/src/ipa/libipa/camera_sensor_helper.cpp

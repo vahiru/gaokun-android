@@ -1,0 +1,682 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] Input: himax-spi: track palm regions across frames and cancel palm tracks with MT_TOOL_PALM
+
+Per-frame connected-component palm rules only catch the main palm area; smaller
+fragments from bent fingers, knuckles, or a landing/lifting palm appear as
+finger-sized islands and were reported as MT_TOOL_FINGER taps.
+
+Add a temporal spatial hand map (hand_age[]) and palm cancellation support:
+- Record detected palm zones dilated by hand_margin cells into hand_age[] and
+  retain them for hand_hold_frames frames after lift.
+- Drop peaks falling inside the active hand map before contact expansion and
+  absorb their connected components into the hand map.
+- Within hand_land_frames around a new palm landing, classify nearby peaks,
+  zones, and newly created tracks within hand_land_dist cells as part of the
+  landing hand.
+- Report tracks that were initially emitted as fingers and subsequently
+  classified as palm with ABS_MT_TOOL_TYPE = MT_TOOL_PALM for one frame before
+  releasing them so Android cancels the gesture instead of registering a tap.
+
+Origin: local
+Upstream-Status: Pending
+---
+diff --git a/drivers/input/touchscreen/himax-spi-core.c b/drivers/input/touchscreen/himax-spi-core.c
+index 0089e9be5..78ef03921 100644
+--- a/drivers/input/touchscreen/himax-spi-core.c
++++ b/drivers/input/touchscreen/himax-spi-core.c
+@@ -686,6 +686,14 @@ static int himax_input_dev_config(struct himax_ts_data *ts)
+ 	 */
+ 	input_abs_set_res(ts->input_dev, ABS_MT_POSITION_X, HX_RES_UNITS_PER_MM);
+ 	input_abs_set_res(ts->input_dev, ABS_MT_POSITION_Y, HX_RES_UNITS_PER_MM);
++
++	/*
++	 * Contacts that turn out to be part of a hand are reported once as
++	 * MT_TOOL_PALM before they are released (hx_hand_filter()); without
++	 * the axis the input core would drop that event and the contact would
++	 * end in a plain lift, i.e. a tap.
++	 */
++	input_set_abs_params(ts->input_dev, ABS_MT_TOOL_TYPE, 0, MT_TOOL_MAX, 0, 0);
+ 	// TODO: 根据触点附近数据集建模得到
+ 	if (!disable_pressure) {
+ 		input_set_abs_params(ts->input_dev, ABS_MT_TOUCH_MAJOR, 0, 255, 0, 0);
+@@ -717,6 +725,7 @@ static void himax_release_all_touches(struct himax_ts_data *ts)
+ 		ts->algo->touch_start_frames = 0;
+ 		ts->algo->touch_active = false;
+ 		ts->algo->iir_initialized = false;
++		hx_hand_reset(ts->algo);
+ 	}
+ 
+ 	if (ts->input_dev)
+@@ -1010,6 +1019,30 @@ static ssize_t _name##_store(struct device *dev,			\
+ }									\
+ static DEVICE_ATTR_RW(_name)
+ 
++/* u8 tunable with an upper limit; larger values are rejected */
++#define HX_ALGO_ATTR_U8_MAX_RW(_name, _max)				\
++static ssize_t _name##_show(struct device *dev,				\
++			    struct device_attribute *attr, char *buf)	\
++{									\
++	struct himax_ts_data *ts = dev_get_drvdata(dev);		\
++	return sysfs_emit(buf, "%u\n", (unsigned int)ts->algo->_name);	\
++}									\
++static ssize_t _name##_store(struct device *dev,			\
++			     struct device_attribute *attr,		\
++			     const char *buf, size_t count)		\
++{									\
++	struct himax_ts_data *ts = dev_get_drvdata(dev);		\
++	u8 val;								\
++	int ret = kstrtou8(buf, 0, &val);				\
++	if (ret)							\
++		return ret;						\
++	if (val > (_max))						\
++		return -EINVAL;						\
++	ts->algo->_name = val;						\
++	return count;							\
++}									\
++static DEVICE_ATTR_RW(_name)
++
+ #define HX_ALGO_ATTR_S32_RW(_name)					\
+ static ssize_t _name##_show(struct device *dev,				\
+ 			    struct device_attribute *attr, char *buf)	\
+@@ -1052,6 +1085,12 @@ HX_ALGO_ATTR_U16_RW(palm_contact_area);
+ HX_ALGO_ATTR_U8_RW(palm_area_threshold);
+ HX_ALGO_ATTR_S32_RW(palm_signal_threshold);
+ HX_ALGO_ATTR_S16_RW(palm_density_low);
++/* Hand map */
++HX_ALGO_ATTR_BOOL_RW(hand_enabled);
++HX_ALGO_ATTR_U8_MAX_RW(hand_margin, HX_HAND_MARGIN_MAX);
++HX_ALGO_ATTR_U8_MAX_RW(hand_hold_frames, HX_HAND_HOLD_MAX);
++HX_ALGO_ATTR_U8_MAX_RW(hand_land_frames, HX_HAND_LAND_FRAMES_MAX);
++HX_ALGO_ATTR_U8_MAX_RW(hand_land_dist, HX_HAND_LAND_DIST_MAX);
+ /* Pressure / touch-major reporting */
+ HX_ALGO_ATTR_BOOL_RW(pressure_enabled);
+ /* Edge compensation */
+@@ -1102,6 +1141,10 @@ static ssize_t stats_show(struct device *dev, struct device_attribute *attr,
+ 	n += sysfs_emit_at(buf, n, "tracks_jump       %u\n", st->tracks_jump);
+ 	n += sysfs_emit_at(buf, n, "tracks_guard_kill %u\n", st->tracks_guard_kill);
+ 	n += sysfs_emit_at(buf, n, "tracks_lost       %u\n", st->tracks_lost);
++	n += sysfs_emit_at(buf, n, "hand_lands        %u\n", st->hand_lands);
++	n += sysfs_emit_at(buf, n, "hand_peaks        %u\n", st->hand_peaks);
++	n += sysfs_emit_at(buf, n, "hand_cancel_map   %u\n", st->hand_cancel_map);
++	n += sysfs_emit_at(buf, n, "hand_cancel_land  %u\n", st->hand_cancel_land);
+ 	n += sysfs_emit_at(buf, n, "max_contacts      %u\n", st->max_contacts);
+ 	return n;
+ }
+@@ -1162,6 +1205,11 @@ static struct attribute *hx_algo_attrs[] = {
+ 	&dev_attr_palm_area_threshold.attr,
+ 	&dev_attr_palm_signal_threshold.attr,
+ 	&dev_attr_palm_density_low.attr,
++	&dev_attr_hand_enabled.attr,
++	&dev_attr_hand_margin.attr,
++	&dev_attr_hand_hold_frames.attr,
++	&dev_attr_hand_land_frames.attr,
++	&dev_attr_hand_land_dist.attr,
+ 	&dev_attr_pressure_enabled.attr,
+ 	&dev_attr_edge_comp_enabled.attr,
+ 	&dev_attr_edge_boost_pct.attr,
+@@ -1299,7 +1347,9 @@ static void himax_report_tracked_state(struct himax_ts_data *ts, bool report_on)
+ 			  ts->algo->tracks[i].debounce == 0;
+ 
+ 		input_mt_slot(ts->input_dev, i);
+-		input_mt_report_slot_state(ts->input_dev, MT_TOOL_FINGER, on);
++		input_mt_report_slot_state(ts->input_dev,
++					   ts->algo->tracks[i].palm ?
++					   MT_TOOL_PALM : MT_TOOL_FINGER, on);
+ 		if (!on)
+ 			continue;
+ 
+@@ -1362,7 +1412,9 @@ static irqreturn_t himax_ts_thread(int irq, void *data)
+ 
+ 	hx_detect_macro_zones(algo);
+ 	hx_reject_palms(algo);
++	hx_hand_update(algo);
+ 	hx_detect_peaks(algo);
++	hx_hand_filter(algo);
+ 	hx_expand_and_resolve(algo, pos, &cnt);
+ 	hx_track_contacts(algo, pos, cnt);
+ 	stable_cnt = hx_count_stable_tracks(algo);
+diff --git a/drivers/input/touchscreen/hx-algo.c b/drivers/input/touchscreen/hx-algo.c
+index 0d2b8dbb1..6de0bfe80 100644
+--- a/drivers/input/touchscreen/hx-algo.c
++++ b/drivers/input/touchscreen/hx-algo.c
+@@ -53,6 +53,12 @@ void hx_algo_init_defaults(struct hx_algo *algo)
+ 	algo->palm_area_threshold    = 50;
+ 	algo->palm_signal_threshold  = 80000;
+ 	algo->palm_density_low       = 400;
++	algo->hand_enabled       = true;
++	algo->hand_margin        = 2;   /* ~9 mm around a palm or hand blob  */
++	algo->hand_hold_frames   = 36;  /* ~300 ms at 120 Hz                 */
++	algo->hand_land_frames   = 12;  /* ~100 ms either side of a landing  */
++	algo->hand_land_dist     = 25;  /* ~11 cm: a flat hand's fingertips  */
++	hx_hand_reset(algo);
+ 	algo->pressure_enabled   = false;
+ 	algo->edge_comp_enabled = true;
+ 	algo->edge_boost_pct   = 50;   /* 50% signal boost on border pixels  */
+@@ -342,8 +348,10 @@ void hx_detect_macro_zones(struct hx_algo *algo)
+ 	static const int dc[] = {-1,  0,  1, -1, 1, -1, 0, 1};
+ 	u16 head, tail;
+ 	int r, c, d;
++	u8 next_id = 0;
+ 
+ 	memset(algo->visited, 0, sizeof(algo->visited));
++	memset(algo->zone_of, 0, sizeof(algo->zone_of));
+ 	algo->zone_count = 0;
+ 
+ 	for (r = 0; r < HX_ROWS; r++) {
+@@ -388,6 +396,11 @@ void hx_detect_macro_zones(struct hx_algo *algo)
+ 			zone->signal_sum = 0;
+ 			zone->is_palm    = false;
+ 			zone->palm_rule  = 0;
++			/*
++			 * Ids are unique within the frame, also across eviction;
++			 * past 255 zones the rest share id 0, i.e. "no zone".
++			 */
++			zone->id = next_id < U8_MAX ? ++next_id : 0;
+ 			zone->min_r = r;  zone->max_r = r;
+ 			zone->min_c = c;  zone->max_c = c;
+ 
+@@ -406,6 +419,7 @@ void hx_detect_macro_zones(struct hx_algo *algo)
+ 				if (zone->area < HX_ZONE_PX_MAX)
+ 					zone->pixels[zone->area] = ci;
+ 				zone->area++;
++				algo->zone_of[ci] = zone->id;
+ 				if (sig > 0)
+ 					zone->signal_sum += sig;
+ 
+@@ -524,6 +538,296 @@ void hx_reject_palms(struct hx_algo *algo)
+ 	}
+ }
+ 
++/* ======================================================================== */
++/* Phase 2B½ / 2C½ — hand map                                               */
++/*                                                                           */
++/* The palm rules above only ever catch the heel of the hand.  The rest of  */
++/* a resting hand reaches the panel as fingertip-sized islands -- curled    */
++/* fingers, knuckles, the fingers of a flat hand -- that no per-zone rule   */
++/* can tell from a finger, and the palm itself passes through fingertip     */
++/* size while it lands and while it lifts.  Each of those became a short    */
++/* contact, and a press followed by a lift is a tap.                        */
++/*                                                                           */
++/* hand_age[] remembers where the hand has been: 0 = hand this frame,       */
++/* n = n frames ago, U8_MAX = not within the last 255 frames.  Palm zones   */
++/* are written into it every frame (hx_hand_update), together with the      */
++/* zone of every peak that falls inside it (hx_hand_filter), so a blob      */
++/* that belongs to the hand keeps itself marked for as long as it stays     */
++/* down and for hand_hold_frames after.  A palm appearing after a quiet     */
++/* spell is a landing; peaks and young tracks near it within                */
++/* hand_land_frames belong to the same hand.                                */
++/*                                                                           */
++/* Nothing changes until a palm zone shows up, so finger-only use takes     */
++/* none of these paths.                                                     */
++/* ======================================================================== */
++
++static void hx_reset_track(struct hx_track *trk);
++
++void hx_hand_reset(struct hx_algo *algo)
++{
++	memset(algo->hand_age, U8_MAX, sizeof(algo->hand_age));
++	algo->palm_seen = false;
++}
++
++/*
++ * Zones are collected in mark_id[] and marked in one pass over the grid,
++ * so a frame with many hand blobs costs no more than one with a few.
++ * Id 0 ("no zone") is never set.
++ */
++static inline void hx_want_zone(struct hx_algo *algo, u8 id)
++{
++	if (id)
++		algo->mark_id[id] = 1;
++}
++
++static void hx_mark_wanted(struct hx_algo *algo)
++{
++	int i;
++
++	for (i = 0; i < HX_PIXELS; i++)
++		if (algo->mark_id[algo->zone_of[i]])
++			algo->hand_mark[i] = 1;
++	memset(algo->mark_id, 0, sizeof(algo->mark_id));
++}
++
++/* Mark the square of hand_margin cells around (r, c). */
++static void hx_mark_around(struct hx_algo *algo, int r, int c)
++{
++	int m = algo->hand_margin, dr, dc;
++
++	for (dr = -m; dr <= m; dr++)
++		for (dc = -m; dc <= m; dc++) {
++			int nr = r + dr, nc = c + dc;
++
++			if (nr >= 0 && nr < HX_ROWS && nc >= 0 && nc < HX_COLS)
++				algo->hand_mark[nr * HX_COLS + nc] = 1;
++		}
++}
++
++/* Grow hand_mark[] by hand_margin cells (square), write it to hand_age[]. */
++static void hx_hand_commit(struct hx_algo *algo)
++{
++	int m = algo->hand_margin, r, c, k;
++
++	/* separable max filter: rows into hand_tmp, then columns back */
++	for (r = 0; r < HX_ROWS; r++)
++		for (c = 0; c < HX_COLS; c++) {
++			u8 v = 0;
++
++			for (k = max(c - m, 0); k <= min(c + m, HX_COLS - 1) && !v; k++)
++				v = algo->hand_mark[r * HX_COLS + k];
++			algo->hand_tmp[r * HX_COLS + c] = v;
++		}
++	for (r = 0; r < HX_ROWS; r++)
++		for (c = 0; c < HX_COLS; c++) {
++			u8 v = 0;
++
++			for (k = max(r - m, 0); k <= min(r + m, HX_ROWS - 1) && !v; k++)
++				v = algo->hand_tmp[k * HX_COLS + c];
++			if (v)
++				algo->hand_age[r * HX_COLS + c] = 0;
++		}
++}
++
++/* Within hand_land_dist cells (Chebyshev) of a palm zone's bounding box. */
++static bool hx_near_palm(const struct hx_algo *algo, int r, int c)
++{
++	int d = algo->hand_land_dist;
++	u8 i;
++
++	for (i = 0; i < algo->zone_count; i++) {
++		const struct hx_macro_zone *z = &algo->zones[i];
++
++		if (z->is_palm &&
++		    r >= z->min_r - d && r <= z->max_r + d &&
++		    c >= z->min_c - d && c <= z->max_c + d)
++			return true;
++	}
++	return false;
++}
++
++/* Grid cell under a track; inverse of the mapping in hx_expand_and_resolve(). */
++static void hx_track_cell(const struct hx_track *trk, int *r, int *c)
++{
++	*c = clamp_t(int, (trk->x * 6) >> 8, 0, HX_COLS - 1);
++	*r = clamp_t(int, ((trk->y * 32) / 5) >> 8, 0, HX_ROWS - 1);
++}
++
++/*
++ * A finger that has been down for longer than a landing lasts is left to
++ * the "inside the hand now" test alone.  Without this, resting a palm
++ * while holding a finger, or dragging a finger across the spot a palm
++ * just left, would drop that finger's peaks, and its track would end in
++ * a plain lift.
++ */
++static bool hx_established(const struct hx_algo *algo, const struct hx_track *trk)
++{
++	return trk->active && !trk->palm && !trk->debounce &&
++	       trk->age > algo->hand_land_frames;
++}
++
++static bool hx_near_established(const struct hx_algo *algo, int r, int c)
++{
++	int i;
++
++	for (i = 0; i < HIMAX_MAX_TOUCH; i++) {
++		const struct hx_track *trk = &algo->tracks[i];
++		int tr, tc;
++
++		if (!hx_established(algo, trk))
++			continue;
++		hx_track_cell(trk, &tr, &tc);
++		if (abs(tr - r) <= 2 && abs(tc - c) <= 2)
++			return true;
++	}
++	return false;
++}
++
++void hx_hand_update(struct hx_algo *algo)
++{
++	bool palm_now = false;
++	u8 i;
++	int k;
++
++	algo->frame_seq++;
++	for (k = 0; k < HX_PIXELS; k++)
++		if (algo->hand_age[k] < U8_MAX)
++			algo->hand_age[k]++;
++
++	if (!algo->hand_enabled)
++		return;
++
++	memset(algo->hand_mark, 0, sizeof(algo->hand_mark));
++	for (i = 0; i < algo->zone_count; i++) {
++		if (!algo->zones[i].is_palm)
++			continue;
++		palm_now = true;
++		hx_want_zone(algo, algo->zones[i].id);
++	}
++	if (!palm_now)
++		return;
++
++	if (!algo->palm_seen ||
++	    algo->frame_seq - algo->palm_seen_seq > algo->hand_hold_frames) {
++		algo->palm_land_seq = algo->frame_seq;
++		algo->stats.hand_lands++;
++	}
++	algo->palm_seen = true;
++	algo->palm_seen_seq = algo->frame_seq;
++
++	/*
++	 * While a palm lands, every blob in its reach is the same hand -- the
++	 * fingers of a flat hand come down with it, often before the heel is
++	 * large enough to count as a palm, and later flicker around the peak
++	 * threshold.  Marking them now, peak or not, lets the hand map follow
++	 * them from then on.  A zone holding an established finger is left
++	 * alone.
++	 */
++	if (algo->frame_seq - algo->palm_land_seq <= algo->hand_land_frames) {
++		for (i = 0; i < algo->zone_count; i++) {
++			const struct hx_macro_zone *z = &algo->zones[i];
++			bool keep = false;
++			int j;
++
++			if (z->is_palm ||
++			    !hx_near_palm(algo, (z->min_r + z->max_r) / 2,
++					  (z->min_c + z->max_c) / 2))
++				continue;
++			for (j = 0; j < HIMAX_MAX_TOUCH && !keep; j++) {
++				int tr, tc;
++
++				if (!hx_established(algo, &algo->tracks[j]))
++					continue;
++				hx_track_cell(&algo->tracks[j], &tr, &tc);
++				keep = algo->zone_of[tr * HX_COLS + tc] == z->id;
++			}
++			if (!keep)
++				hx_want_zone(algo, z->id);
++		}
++	}
++	hx_mark_wanted(algo);
++	hx_hand_commit(algo);
++}
++
++void hx_hand_filter(struct hx_algo *algo)
++{
++	bool landing;
++	u8 dst = 0, i;
++
++	if (!algo->hand_enabled)
++		return;
++
++	landing = algo->palm_seen &&
++		  algo->frame_seq - algo->palm_land_seq <= algo->hand_land_frames &&
++		  algo->frame_seq == algo->palm_seen_seq;
++
++	/*
++	 * Peaks: inside the hand now, or -- unless an established finger is
++	 * right there -- inside the remembered hand or near a landing palm.
++	 */
++	memset(algo->hand_mark, 0, sizeof(algo->hand_mark));
++	for (i = 0; i < algo->peak_count; i++) {
++		struct hx_peak *p = &algo->peaks[i];
++		int idx = p->r * HX_COLS + p->c;
++		bool hand;
++
++		if (algo->hand_age[idx] == 0)
++			hand = true;
++		else if (hx_near_established(algo, p->r, p->c))
++			hand = false;
++		else
++			hand = algo->hand_age[idx] <= algo->hand_hold_frames ||
++			       (landing && hx_near_palm(algo, p->r, p->c));
++		if (!hand) {
++			algo->peaks[dst++] = *p;
++			continue;
++		}
++		algo->stats.hand_peaks++;
++		hx_want_zone(algo, p->zone_id);
++	}
++	algo->peak_count = dst;
++	hx_mark_wanted(algo);
++	hx_hand_commit(algo);
++
++	/*
++	 * Tracks: one that now sits in the hand is the contact whose blob just
++	 * grew into a palm or merged with one; a young one near a landing palm
++	 * touched down with it.  Reported tracks are cancelled, the rest are
++	 * dropped before anyone saw them.
++	 */
++	memset(algo->hand_mark, 0, sizeof(algo->hand_mark));
++	for (i = 0; i < HIMAX_MAX_TOUCH; i++) {
++		struct hx_track *trk = &algo->tracks[i];
++		bool land;
++		int r, c;
++
++		if (!trk->active || trk->palm)
++			continue;
++		hx_track_cell(trk, &r, &c);
++		if (landing && trk->age <= algo->hand_land_frames &&
++		    hx_near_palm(algo, r, c)) {
++			land = true;
++			/* keep its blob suppressed from the next frame on */
++			hx_mark_around(algo, r, c);
++		} else if (algo->hand_age[r * HX_COLS + c] == 0) {
++			land = false;
++		} else {
++			continue;
++		}
++
++		if (trk->debounce) {
++			hx_reset_track(trk);
++			continue;
++		}
++		trk->palm = HX_TRK_PALM_NEW;
++		if (land)
++			algo->stats.hand_cancel_land++;
++		else
++			algo->stats.hand_cancel_map++;
++	}
++	hx_hand_commit(algo);
++}
++
+ /* ======================================================================== */
+ /* Phase 2C — peak detection within surviving zones                         */
+ /* ======================================================================== */
+@@ -675,6 +979,7 @@ void hx_detect_peaks(struct hx_algo *algo)
+ 				.z         = v,
+ 				.nbr_sum   = nbr_sum,
+ 				.zone_area = zone->area,
++				.zone_id   = zone->id,
+ 			};
+ 			algo->stats.peaks_raw++;
+ 			hx_insert_peak(algo, &peak);
+@@ -1116,6 +1421,20 @@ void hx_track_contacts(struct hx_algo *algo,
+ 	int cand_cnt = 0;
+ 	int i, j, k;
+ 
++	/*
++	 * A track reported as a palm last frame has served its purpose; one
++	 * flagged this frame is held for exactly one report as a palm.
++	 * Neither takes part in matching.
++	 */
++	for (i = 0; i < HIMAX_MAX_TOUCH; i++) {
++		struct hx_track *trk = &algo->tracks[i];
++
++		if (trk->palm == HX_TRK_PALM_SENT)
++			hx_reset_track(trk);
++		else if (trk->palm == HX_TRK_PALM_NEW)
++			track_matched[i] = true;
++	}
++
+ 	/*
+ 	 * Build a candidate list of (track, detection) pairs within the
+ 	 * maximum allowed squared distance.
+@@ -1123,7 +1442,7 @@ void hx_track_contacts(struct hx_algo *algo,
+ 	for (i = 0; i < HIMAX_MAX_TOUCH; i++) {
+ 		struct hx_track *trk = &algo->tracks[i];
+ 
+-		if (!trk->active)
++		if (!trk->active || trk->palm)
+ 			continue;
+ 
+ 		for (j = 0; j < det_cnt; j++) {
+@@ -1165,7 +1484,7 @@ void hx_track_contacts(struct hx_algo *algo,
+ 			continue;
+ 
+ 		trk = &algo->tracks[m->track_idx];
+-		if (!trk->active)
++		if (!trk->active || trk->palm)
+ 			continue;
+ 
+ 		/* Jump detection: a detection that lands far from where this
+@@ -1291,6 +1610,11 @@ void hx_track_contacts(struct hx_algo *algo,
+ 			algo->newlog_head = (algo->newlog_head + 1) % HX_NEWLOG;
+ 		}
+ 	}
++
++	/* This frame's report carries the palm; the next call releases it. */
++	for (i = 0; i < HIMAX_MAX_TOUCH; i++)
++		if (algo->tracks[i].palm == HX_TRK_PALM_NEW)
++			algo->tracks[i].palm = HX_TRK_PALM_SENT;
+ }
+ 
+ int hx_count_stable_tracks(struct hx_algo *algo)
+diff --git a/drivers/input/touchscreen/hx-algo.h b/drivers/input/touchscreen/hx-algo.h
+index 86dd5012c..0496c74fc 100644
+--- a/drivers/input/touchscreen/hx-algo.h
++++ b/drivers/input/touchscreen/hx-algo.h
+@@ -25,6 +25,18 @@
+ /* Maximum simultaneous reported contacts. */
+ #define HIMAX_MAX_TOUCH 10
+ 
++/*
++ * Upper limits of the hand_* tunables; sysfs rejects larger values.
++ * hand_age saturates at U8_MAX, which reads as "not hand", so the hold has
++ * to stay well below it; the same goes for the landing window, which is
++ * compared with the saturating track age.  Every dilation pass scans up to
++ * 2 * margin + 1 cells per cell.
++ */
++#define HX_HAND_MARGIN_MAX      8       /* cells, ~3.5 cm */
++#define HX_HAND_HOLD_MAX        120     /* frames, ~1 s at 120 Hz */
++#define HX_HAND_LAND_FRAMES_MAX 60      /* frames, ~0.5 s */
++#define HX_HAND_LAND_DIST_MAX   HX_COLS /* cells: the whole panel */
++
+ /**
+  * struct hx_peak - single detected local-maximum candidate.
+  * @r:          row in the grid (0-based)
+@@ -32,6 +44,7 @@
+  * @z:          signal value at the peak
+  * @nbr_sum:    sum of all 8-neighbour signals (used for Z8 filter)
+  * @zone_area:  area of the macro-zone this peak belongs to
++ * @zone_id:    hx_macro_zone::id of that zone
+  */
+ struct hx_peak {
+ 	u8  r;
+@@ -39,6 +52,7 @@ struct hx_peak {
+ 	s16 z;
+ 	s32 nbr_sum;
+ 	u16 zone_area;
++	u8  zone_id;
+ };
+ 
+ /**
+@@ -66,6 +80,7 @@ struct hx_contact {
+  * @age:        frames the slot has been active
+  * @missed:     consecutive frames the slot had no matching detection
+  * @debounce:   remaining debounce frames before the slot is reported
++ * @palm:       HX_TRK_PALM_* once the track turned out to be part of a hand
+  */
+ struct hx_track {
+ 	bool active;
+@@ -77,8 +92,18 @@ struct hx_track {
+ 	u8   age;
+ 	u8   missed;
+ 	u8   debounce;
++	u8   palm;
+ };
+ 
++/*
++ * A reported track that turns out to be part of a hand is not lifted: a
++ * lift after a press is a tap.  It is reported once more with
++ * MT_TOOL_PALM, which userspace takes as "cancel this contact", and
++ * released on the following frame.
++ */
++#define HX_TRK_PALM_NEW   1  /* flagged this frame, report as palm      */
++#define HX_TRK_PALM_SENT  2  /* reported as palm, release on next frame */
++
+ /**
+  * struct hx_macro_zone - contiguous above-threshold region.
+  * @pixels:     1-D indices (r*HX_COLS+c) of up to HX_ZONE_PX_MAX pixels
+@@ -96,6 +121,7 @@ struct hx_macro_zone {
+ 	u8  max_c;
+ 	bool is_palm;   /* set by hx_reject_palms(); the zone is kept */
+ 	u8 palm_rule;   /* which rule fired, 1-4; 0 = not a palm      */
++	u8 id;          /* per-frame id, as stored in hx_algo::zone_of */
+ };
+ 
+ /* Number of recent contact births kept for inspection. */
+@@ -129,6 +155,10 @@ struct hx_stats {
+ 	u32 tracks_jump;        /* released by jump detection              */
+ 	u32 tracks_guard_kill;  /* killed by track_active_guard            */
+ 	u32 tracks_lost;        /* released after track_lost_frames        */
++	u32 hand_lands;         /* a palm appeared after a quiet spell     */
++	u32 hand_peaks;         /* peaks dropped as part of a hand         */
++	u32 hand_cancel_map;    /* tracks cancelled inside the hand map    */
++	u32 hand_cancel_land;   /* tracks cancelled landing with a palm    */
+ 	u8  max_contacts;       /* most simultaneous stable contacts seen  */
+ };
+ 
+@@ -167,6 +197,7 @@ struct hx_algo {
+ 
+ 	/* ---- Scratch buffers (shared between pipeline stages) ---- */
+ 	u8  visited[HX_PIXELS];              /* BFS visited flags           */
++	u8  zone_of[HX_PIXELS];              /* hx_macro_zone::id per pixel */
+ 	u8  zone_map[HX_PIXELS];             /* per-pixel zone-ID map       */
+ 	u16 bfs_queue[HX_PIXELS];            /* ring-buffer BFS queue       */
+ 
+@@ -188,6 +219,16 @@ struct hx_algo {
+ 	bool touch_active;
+ 	u8   touch_start_frames;
+ 
++	/* ---- Hand map (hx_hand_update / hx_hand_filter) ---- */
++	u8   hand_age[HX_PIXELS];  /* frames since the cell was hand; 255 = not */
++	u8   hand_mark[HX_PIXELS]; /* scratch: cells to mark this pass        */
++	u8   mark_id[256];         /* scratch: zone ids to mark this pass     */
++	u8   hand_tmp[HX_PIXELS];  /* scratch for the dilation                */
++	u32  frame_seq;
++	u32  palm_seen_seq;        /* last frame with a palm zone             */
++	u32  palm_land_seq;        /* first frame of the current palm         */
++	bool palm_seen;
++
+ 	/* ---- Tunable parameters (sysfs-writable, atomically updated) ---- */
+ 	/* Preprocessing */
+ 	bool cmf_enabled;          /* CMF on/off (default: true)           */
+@@ -212,6 +253,11 @@ struct hx_algo {
+ 	u8   palm_area_threshold;  /* area >= this → palm                  */
+ 	s32  palm_signal_threshold;/* signal_sum >= this → palm            */
+ 	s16  palm_density_low;     /* signal/area < this → palm            */
++	bool hand_enabled;         /* hand map + palm cancel on/off        */
++	u8   hand_margin;          /* cells added around palm/hand zones   */
++	u8   hand_hold_frames;     /* how long a cell stays hand           */
++	u8   hand_land_frames;     /* window around a palm landing         */
++	u8   hand_land_dist;       /* reach from a landing palm, in cells  */
+ 	/* Pressure / touch-major reporting */
+ 	bool pressure_enabled;     /* report PRESSURE + TOUCH_MAJOR        */
+ 	/* Edge compensation */
+@@ -248,9 +294,18 @@ void hx_detect_macro_zones(struct hx_algo *algo);
+ /* Phase 2B: palm rejection */
+ void hx_reject_palms(struct hx_algo *algo);
+ 
++/* Forget the hand map; with the tracks, on panel reset and power down */
++void hx_hand_reset(struct hx_algo *algo);
++
++/* Phase 2B½: record palm zones in the hand map */
++void hx_hand_update(struct hx_algo *algo);
++
+ /* Phase 2C: peak detection within surviving zones */
+ void hx_detect_peaks(struct hx_algo *algo);
+ 
++/* Phase 2C½: drop hand peaks, flag hand tracks for cancellation */
++void hx_hand_filter(struct hx_algo *algo);
++
+ /* Phase 2D: zone expansion + weighted centroid → contacts → output positions */
+ void hx_expand_and_resolve(struct hx_algo *algo,
+ 			    struct input_mt_pos *pos, int *cnt);

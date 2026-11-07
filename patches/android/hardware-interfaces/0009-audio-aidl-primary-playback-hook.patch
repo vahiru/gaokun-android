@@ -1,0 +1,165 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] audio: aidl: primary: add vendor playback hook before ALSA write
+
+Once FastMixer is enabled on the primary output, AudioFlinger refuses to attach
+non-hardware-accelerated session effects to FAST playback sessions, bypassing
+session-level speaker processing for low-latency game audio.
+
+Add an optional vendor playback hook to StreamPrimary, configured via
+ro.vendor.audio.primary.playback_hook. When set, StreamPrimary dlopens the
+library and invokes playback_hook_open() when the ALSA proxy opens,
+playback_hook_process() in-place on each PCM buffer before
+transferPlaybackDirect(), and playback_hook_close() on standby, shutdown, or
+rerouting.
+
+Origin: local
+Upstream-Status: Inappropriate [device-specific DSP hook]
+---
+diff --git a/audio/aidl/default/include/core-impl/StreamPrimary.h b/audio/aidl/default/include/core-impl/StreamPrimary.h
+index 87715da..da563a7 100644
+--- a/audio/aidl/default/include/core-impl/StreamPrimary.h
++++ b/audio/aidl/default/include/core-impl/StreamPrimary.h
+@@ -72,12 +72,18 @@ class StreamPrimary : public StreamAlsaMonoPipe {
+ 
+     bool isStubStreamOnWorker() const { return mCurrAlsaDeviceId == kStubDeviceId; }
+ 
++    // Playback only: opens / closes the vendor playback hook (see StreamPrimary.cpp) for the
++    // ALSA device the stream has just opened.
++    void openPlaybackHook();
++    void closePlaybackHook();
++
+     DriverStubImpl mStubDriver;
+     mutable std::mutex mLock;
+     AlsaDeviceId mAlsaDeviceId GUARDED_BY(mLock) = kStubDeviceId;
+ 
+     // Used by the worker thread only.
+     AlsaDeviceId mCurrAlsaDeviceId = kStubDeviceId;
++    void* mPlaybackHook = nullptr;
+ };
+ 
+ class StreamInPrimary final : public StreamIn, public StreamPrimary, public StreamInHwGainHelper {
+diff --git a/audio/aidl/default/primary/StreamPrimary.cpp b/audio/aidl/default/primary/StreamPrimary.cpp
+index 3cb5a32..e8fd896 100644
+--- a/audio/aidl/default/primary/StreamPrimary.cpp
++++ b/audio/aidl/default/primary/StreamPrimary.cpp
+@@ -21,6 +21,8 @@
+ #include <cstdio>
+ #include <string>
+ 
++#include <dlfcn.h>
++
+ #include <Log.h>
+ #include <android-base/parseint.h>
+ #include <android-base/properties.h>
+@@ -45,6 +47,49 @@ namespace aidl::android::hardware::audio::core {
+ namespace {
+ // How long the first capture 'transfer' after 'start' waits for the hardware to deliver a block.
+ constexpr int64_t kFirstCaptureBlockTimeoutNs = 500 * NANOS_PER_MILLISECOND;
++
++// A vendor library that sees every playback block right before it goes into ALSA, after
++// AudioFlinger has mixed everything (FAST tracks included, which no software session effect
++// can be attached to). Named by ro.vendor.audio.primary.playback_hook; unset means none.
++//   void* playback_hook_open(int card, int device, int sampleRate, int channelCount,
++//                            int pcmFormat);   // nullptr: not interested in this stream
++//   void playback_hook_process(void* handle, void* buffer, size_t frameCount);  // in place
++//   void playback_hook_close(void* handle);
++// All three are called on the stream's worker thread. The library has to be loadable from
++// this APEX's isolated linker namespace, i.e. from a directory its linker config permits.
++struct PlaybackHookLib {
++    void* (*open)(int, int, int, int, int);
++    void (*process)(void*, void*, size_t);
++    void (*close)(void*);
++};
++
++const PlaybackHookLib* getPlaybackHookLib() {
++    static const PlaybackHookLib* const lib = []() -> const PlaybackHookLib* {
++        const std::string path =
++                ::android::base::GetProperty("ro.vendor.audio.primary.playback_hook", "");
++        if (path.empty()) return nullptr;
++        void* handle = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
++        if (handle == nullptr) {
++            LOG(ERROR) << "playback hook: " << dlerror();
++            return nullptr;
++        }
++        auto* l = new PlaybackHookLib{
++                reinterpret_cast<void* (*)(int, int, int, int, int)>(
++                        dlsym(handle, "playback_hook_open")),
++                reinterpret_cast<void (*)(void*, void*, size_t)>(
++                        dlsym(handle, "playback_hook_process")),
++                reinterpret_cast<void (*)(void*)>(dlsym(handle, "playback_hook_close"))};
++        if (l->open == nullptr || l->process == nullptr || l->close == nullptr) {
++            LOG(ERROR) << "playback hook: " << path << " lacks the playback_hook_* functions";
++            delete l;
++            dlclose(handle);
++            return nullptr;
++        }
++        LOG(INFO) << "playback hook: using " << path;
++        return l;
++    }();
++    return lib;
++}
+ }  // namespace
+ 
+ StreamPrimary::StreamPrimary(StreamContext* context, const Metadata& metadata)
+@@ -75,6 +120,7 @@ StreamPrimary::StreamPrimary(StreamContext* context, const Metadata& metadata)
+ }
+ 
+ ::android::status_t StreamPrimary::standby() {
++    closePlaybackHook();
+     return isStubStreamOnWorker() ? mStubDriver.standby() : StreamAlsaMonoPipe::standby();
+ }
+ 
+@@ -88,6 +134,7 @@ StreamPrimary::StreamPrimary(StreamContext* context, const Metadata& metadata)
+         mCurrAlsaDeviceId = mAlsaDeviceId;
+     }
+     if (shutdownAlsaStream) {
++        closePlaybackHook();
+         StreamAlsaMonoPipe::shutdown();  // Close currently opened ALSA devices.
+     }
+     if (isStub) {
+@@ -95,6 +142,7 @@ StreamPrimary::StreamPrimary(StreamContext* context, const Metadata& metadata)
+     }
+     // Playback writes straight into ALSA (see 'transfer'): no pipe and no output I/O thread.
+     RETURN_STATUS_IF_ERROR(mIsInput ? StreamAlsaMonoPipe::start() : startPlaybackDirect());
++    if (!mIsInput) openPlaybackHook();
+     mStartTimeNs = ::android::uptimeNanos();
+     mFramesSinceStart = 0;
+     mSkipNextTransfer = false;
+@@ -144,6 +192,9 @@ StreamPrimary::StreamPrimary(StreamContext* context, const Metadata& metadata)
+         // for the emulator; on real hardware it throws whole blocks away whenever the client is
+         // late (a stalled AudioFlinger skips 2-3 blocks = 170-256 ms of audio to catch up with
+         // the wall clock), so the audio jumps ahead of the app's own clock.
++        if (mPlaybackHook != nullptr) {
++            getPlaybackHookLib()->process(mPlaybackHook, buffer, frameCount);
++        }
+         return transferPlaybackDirect(buffer, frameCount, actualFrameCount, latencyMs);
+     }
+     // This is a workaround for the emulator implementation which has a host-side buffer
+@@ -190,10 +241,27 @@ StreamPrimary::StreamPrimary(StreamContext* context, const Metadata& metadata)
+ }
+ 
+ void StreamPrimary::shutdown() {
++    closePlaybackHook();
+     StreamAlsaMonoPipe::shutdown();
+     mStubDriver.shutdown();
+ }
+ 
++void StreamPrimary::openPlaybackHook() {
++    // A resume after a pause keeps the hook the stream already has.
++    if (mPlaybackHook != nullptr || !mConfig.has_value()) return;
++    if (const PlaybackHookLib* lib = getPlaybackHookLib(); lib != nullptr) {
++        mPlaybackHook = lib->open(mCurrAlsaDeviceId.first, mCurrAlsaDeviceId.second, mSampleRate,
++                                  static_cast<int>(mConfig->channels),
++                                  static_cast<int>(mConfig->format));
++    }
++}
++
++void StreamPrimary::closePlaybackHook() {
++    if (mPlaybackHook == nullptr) return;
++    getPlaybackHookLib()->close(mPlaybackHook);
++    mPlaybackHook = nullptr;
++}
++
+ ndk::ScopedAStatus StreamPrimary::setConnectedDevices(const ConnectedDevices& devices) {
+     LOG(DEBUG) << __func__ << ": " << ::android::internal::ToString(devices);
+     if (devices.size() > 1) {

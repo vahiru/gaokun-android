@@ -1,0 +1,99 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] Input: himax-spi: initialize pressure_enabled from !disable_pressure and log zone_area in contacts_log
+
+When disable_pressure=0 (the default), the driver registers ABS_MT_TOUCH_MAJOR
+and ABS_MT_PRESSURE, but hx_algo_init_defaults() left pressure_enabled set to
+false, causing himax_report_tracked_state() to report constant values (1 and
+4095) until enabled via sysfs. Initialize ts->algo->pressure_enabled to
+!disable_pressure during probe.
+
+Also propagate each peak's connected-component area (zone_area) into struct
+hx_contact and include it in algo/contacts_log.
+
+Origin: local
+Upstream-Status: Pending
+---
+diff --git a/drivers/input/touchscreen/himax-spi-core.c b/drivers/input/touchscreen/himax-spi-core.c
+--- a/drivers/input/touchscreen/himax-spi-core.c
++++ b/drivers/input/touchscreen/himax-spi-core.c
+@@ -1126,16 +1126,17 @@
+ 	struct hx_algo *algo = ((struct himax_ts_data *)dev_get_drvdata(dev))->algo;
+ 	int n = 0, k;
+ 
+-	n += sysfs_emit_at(buf, n, "  seq      x      y  area   signal edge\n");
++	n += sysfs_emit_at(buf, n, "  seq      x      y  area  zone   signal edge\n");
+ 	for (k = 0; k < HX_NEWLOG; k++) {
+ 		struct hx_newlog *lg =
+ 			&algo->newlog[(algo->newlog_head + k) % HX_NEWLOG];
+ 
+ 		if (!lg->seq)
+ 			continue;
+-		n += sysfs_emit_at(buf, n, "%5u %6d %6d %5u %8d %4u\n",
++		n += sysfs_emit_at(buf, n, "%5u %6d %6d %5u %5u %8d %4u\n",
+ 					   lg->seq, lg->x, lg->y, lg->area,
+-					   lg->signal_sum, lg->is_edge ? 1 : 0);
++					   lg->zone_area, lg->signal_sum,
++					   lg->is_edge ? 1 : 0);
+ 	}
+ 	return n;
+ }
+@@ -1627,6 +1628,13 @@
+ 	if (!ts->algo)
+ 		return -ENOMEM;
+ 	hx_algo_init_defaults(ts->algo);
++	/*
++	 * With the TOUCH_MAJOR/PRESSURE axes registered, reporting the constants
++	 * (1 and 4095) that pressure_enabled=false selects is never what anyone
++	 * wants -- every contact becomes a needle point.  Follow the axes: report
++	 * real values whenever the axes exist.  Still writable through sysfs.
++	 */
++	ts->algo->pressure_enabled = !disable_pressure;
+ 
+ 	spin_lock_init(&ts->irq_lock);
+ 	mutex_init(&ts->op_lock);
+diff --git a/drivers/input/touchscreen/hx-algo.c b/drivers/input/touchscreen/hx-algo.c
+--- a/drivers/input/touchscreen/hx-algo.c
++++ b/drivers/input/touchscreen/hx-algo.c
+@@ -1005,6 +1005,14 @@
+ 		clean = hx_expand_single_peak(algo, i, ct);
+ 		if (!clean)
+ 			hx_local_centroid(algo, i, ct);
++		/*
++		 * ct->area is measured at half the peak and so is roughly the same
++		 * for a fingertip and for a fragment of a palm (measured on the
++		 * panel: 8-20 vs 5-21 cells).  The macro-zone area at the absolute
++		 * threshold is the quantity that can tell them apart; carry it along
++		 * so the contact log can show it.
++		 */
++		ct->zone_area = algo->peaks[i].zone_area;
+ 
+ 		/*
+ 		 * Per-contact palm test.  ct->area counts only cells at or above
+@@ -1267,6 +1275,8 @@
+ 			lg->area       = j < algo->contact_count ?
+ 					     algo->contacts[j].area : 0;
+ 			lg->signal_sum = trk->signal_sum;
++			lg->zone_area  = j < algo->contact_count ?
++					     algo->contacts[j].zone_area : 0;
+ 			lg->is_edge    = j < algo->contact_count &&
+ 					     algo->contacts[j].is_edge;
+ 			if (lg->is_edge)
+diff --git a/drivers/input/touchscreen/hx-algo.h b/drivers/input/touchscreen/hx-algo.h
+--- a/drivers/input/touchscreen/hx-algo.h
++++ b/drivers/input/touchscreen/hx-algo.h
+@@ -54,6 +54,7 @@
+ 	u16  area;
+ 	s32  signal_sum;
+ 	bool is_edge;
++	u16  zone_area;   /* area of the macro-zone this contact came from */
+ };
+ 
+ /**
+@@ -145,6 +146,7 @@
+ 	u16  area;
+ 	s32  signal_sum;
+ 	bool is_edge;
++	u16  zone_area;
+ };
+ 
+ /**

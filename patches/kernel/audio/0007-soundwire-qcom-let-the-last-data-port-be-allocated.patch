@@ -1,0 +1,40 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] soundwire: qcom: let the last data port be allocated
+
+Data ports are numbered from 1 to nports: bit 0 of port_mask is reserved
+and pconfig[1..nports] hold the per-port properties from the DT. Since
+commit 6ccec91c3535 ("soundwire: qcom: Fix port exhaustion check in
+stream_alloc_ports"), qcom_swrm_stream_alloc_ports() rejects any port
+number >= nports, which takes the last port out of use as well: a slave
+whose qcom,port-mapping names it fails hw_params with "All ports busy",
+and the search for a free port never reaches it either.
+
+On a Huawei MateBook E Go the right WSA8835's VI sense output is mapped
+to port 8 of the speaker controller (6 dout and 2 din ports), so with VI
+sense enabled no speaker stream could be started.
+
+Bound the search and the check by nports + 1, which keeps the exhaustion
+check that commit added.
+
+Fixes: 6ccec91c3535 ("soundwire: qcom: Fix port exhaustion check in stream_alloc_ports")
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/soundwire/qcom.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/soundwire/qcom.c b/drivers/soundwire/qcom.c
+index b288218f6..65b92069a 100644
+--- a/drivers/soundwire/qcom.c
++++ b/drivers/soundwire/qcom.c
+@@ -1259,7 +1259,8 @@ static int qcom_swrm_stream_alloc_ports(struct qcom_swrm_ctrl *ctrl,
+ 			continue;
+ 
+ 		port_mask = &ctrl->port_mask;
+-		maxport = ctrl->nports;
++		/* Ports are numbered 1 to nports, bit 0 of port_mask is reserved */
++		maxport = ctrl->nports + 1;
+ 
+ 		list_for_each_entry(s_rt, &m_rt->slave_rt_list, m_rt_node) {
+ 			slave = s_rt->slave;

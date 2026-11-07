@@ -1,0 +1,49 @@
+From: mashen11 <mashen11@users.noreply.github.com>
+Subject: [PATCH] audio: aidl: alsa: double MonoPipe capacity on blocking capture streams
+
+StreamAlsaMonoPipe::makeSink() sizes the MonoPipe to a single transfer burst.
+For blocking writers (capture), MonoPipe's internal OffsetProvider sets its
+throttling setpoint to 11/16 of the ring capacity; whenever a single read burst
+crosses that mark, MonoPipe throttles the capture I/O thread below real-time
+(~87%), causing periodic ALSA capture overruns and dropped blocks.
+
+Double the MonoPipe capacity when writeCanBlock is true so a full capture burst
+fits below the throttling threshold without delaying normal reads.
+
+Origin: local
+Upstream-Status: Pending
+---
+diff --git a/audio/aidl/default/alsa/StreamAlsaMonoPipe.cpp b/audio/aidl/default/alsa/StreamAlsaMonoPipe.cpp
+index 3738f30..d328c90 100644
+--- a/audio/aidl/default/alsa/StreamAlsaMonoPipe.cpp
++++ b/audio/aidl/default/alsa/StreamAlsaMonoPipe.cpp
+@@ -42,7 +42,28 @@ StreamAlsaMonoPipe::~StreamAlsaMonoPipe() {
+ 
+ ::android::sp<::android::MonoPipe> StreamAlsaMonoPipe::makeSink(bool writeCanBlock) {
+     const ::android::NBAIO_Format format = getPipeFormat();
+-    auto sink = ::android::sp<::android::MonoPipe>::make(mBufferSizeFrames, format, writeCanBlock);
++    // A blocking writer (the capture path: inputIoThread() pushes whole mBufferSizeFrames
++    // blocks read from ALSA) gets a pipe of twice the block size.
++    //
++    // MonoPipe::write() throttles a blocking writer against a setpoint of reqFrames * 11 / 16.
++    // With reqFrames == block == 4096 the setpoint is 2816, so one whole block written into an
++    // empty pipe leaves filled == 4096, which is in the "above setpoint" band
++    // (> 5/4 * 2816, <= 3/2 * 2816): the writer then sleeps 1.15x the block duration
++    // (~98 ms for 4096 frames @ 48 kHz, versus 85.3 ms of audio). The capture thread runs at
++    // ~87% of real time and cannot keep up with the hardware, and the reader (transfer())
++    // periodically finds the pipe empty and inserts a whole block of silence.
++    //
++    // With reqFrames == 2 * block the setpoint is 5632 and filled == 4096 lands in the
++    // "below setpoint" band (<= 3/4 * 5632 = 4224), so the writer sleeps 0.75x the block
++    // duration and keeps up. (Any reqFrames >= 7945 would do; MonoPipe rounds the capacity
++    // up to a power of two anyway.)
++    //
++    // A non-blocking writer (the playback path) is never throttled, so none of this applies
++    // to it; a larger pipe there would only allow more unreported latency to build up.
++    const size_t capacityFrames = writeCanBlock ? mBufferSizeFrames * 2 : mBufferSizeFrames;
++    auto sink = ::android::sp<::android::MonoPipe>::make(capacityFrames, format, writeCanBlock);
++    LOG(DEBUG) << __func__ << ": MonoPipe capacity " << capacityFrames << " frames, block "
++               << mBufferSizeFrames << " frames, writeCanBlock " << writeCanBlock;
+     const ::android::NBAIO_Format offers[1] = {format};
+     size_t numCounterOffers = 0;
+     ssize_t index = sink->negotiate(offers, 1, nullptr, numCounterOffers);

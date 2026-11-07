@@ -24,7 +24,7 @@ m vulkan.freedreno
 | 配置文件缺失 | `README.aosp.md`记载的生成命令依赖`hermetic/android/{aosp_mesa3d,platforms,dependencies}.toml`，但上游直到MR !42932（2026-07）才将配置文件合入`src/gfxstream/hermetic/android/`，晚于Android 17快照 |
 | 默认驱动范围 | 树内现成`Android.bp`仅包含`gfxstream`（`vulkan.ranchu`）和`lavapipe`（`vulkan.lvp`），不含`freedreno` / `turnip` |
 | 手写兼容块 | 根`Android.bp:518-701`保留了供`device/generic/goldfish`与`hardware/google/gfxstream`按名引用的手写模块定义 |
-| ANB延迟绑定 | `tu_image.cc:1013`中`VkNativeBufferANDROID`分支仍为`UNREACHABLE`，需继续应用本仓`patches/0004` |
+| ANB延迟绑定 | `tu_image.cc:1013`中`VkNativeBufferANDROID`分支仍为`UNREACHABLE`，需继续应用本仓`patches/mesa/0001` |
 
 ## 2. 生成方案设计
 
@@ -39,7 +39,7 @@ m vulkan.freedreno
 | 1 | 检查`VERSION`为`26.1.*`且`python3 >= 3.11`（需标准库`tomllib`） | [`scripts/mesa-a17/regen.sh`](../../scripts/mesa-a17/regen.sh) |
 | 2 | 按固定SHA浅克隆生成器至`~/.cache/gaokun-mesa/mesonbuild-<SHA>`（或由`--generator`指定本地路径） | 同上 |
 | 3 | 校验根`Android.bp`末尾的`gfxstream`手写兼容块与存档副本逐字一致，生成后原样贴回 | [`device/huawei/gaokun3/mesa/hermetic/android/gfxstream_workaround.txt`](../../device/huawei/gaokun3/mesa/hermetic/android/gfxstream_workaround.txt) |
-| 4 | 幂等应用源码补丁：上游9个backport提交 + [`patches/0004`](../../patches/0004-mesa-turnip-handle-anb-rebind-with-null-memory.patch) + [`patches/0130`](../../patches/0130-mesa-turnip-support-p010.patch) | [`scripts/mesa-a17/backports/`](../../scripts/mesa-a17/backports/) |
+| 4 | 幂等应用源码补丁：[`patches/mesa/0001..0011`](../../patches/mesa/)（含ANB延迟绑定、P010支持与上游9个backport提交） | [`patches/mesa/`](../../patches/mesa/) |
 | 5 | 清理带`The Magma GPU Project`头部的旧生成文件，执行`meson convert` | [`device/huawei/gaokun3/mesa/hermetic/android/`](../../device/huawei/gaokun3/mesa/hermetic/android/aosp_mesa3d.toml) |
 | 6 | 后处理：为`vulkan.freedreno`补齐`compile_multilib: "64"` | [`scripts/mesa-a17/postprocess.py`](../../scripts/mesa-a17/postprocess.py) |
 | 7 | 运行`bpfmt -l`检查语法，运行`check-output.py`验证模块闭合性与编译参数 | [`scripts/mesa-a17/check-output.py`](../../scripts/mesa-a17/check-output.py) |
@@ -54,11 +54,11 @@ m vulkan.freedreno
 
 | 补丁 | 来源 | 作用 |
 | --- | --- | --- |
-| Backport 01–04（`dd47c7c`、`b0e480d`、`f9a5524`、`1084ddd`） | 上游MR !41518 | 修复Soong全局`-Werror`下的编译警告 |
-| Backport 05–06（`1fe5838`、`00261e5`） | 上游MR !41518 | 为寄存器XML `genrule`补齐`depend_files`声明，解决Soong沙箱内找不到`adreno_common.xml`的问题 |
-| Backport 07–09（`cb614dd`、`12a0367`、`b6b0902`） | 上游MR !44278 | 向下游传递`vulkan_runtime`接口依赖，并启用`u_gralloc`的`IMapper5`后端（依赖`libui`） |
-| `patches/0004` | 本仓适配至26.1 | Turnip `VkNativeBufferANDROID`（NULL-memory bind）延迟绑定至首个command buffer提交时导入gralloc buffer（详见[`gpu-turnip.md`](gpu-turnip.md)） |
-| `patches/0130` | 上游MR !45721适配 | Turnip暴露`VK_FORMAT_G10X6_B10X6R10X6_2PLANE_420_UNORM_3PACK16`（P010），配合`minigbm`开启10-bit视频零拷贝渲染 |
+| `patches/mesa/0001` | 本仓适配至26.1 | Turnip `VkNativeBufferANDROID`（NULL-memory bind）延迟绑定至首个command buffer提交时导入gralloc buffer（详见[`gpu-turnip.md`](gpu-turnip.md)） |
+| `patches/mesa/0002` | 上游MR !45721适配 | Turnip暴露`VK_FORMAT_G10X6_B10X6R10X6_2PLANE_420_UNORM_3PACK16`（P010），配合`minigbm`开启10-bit视频零拷贝渲染 |
+| `patches/mesa/0003..0006`（`dd47c7c`、`b0e480d`、`f9a5524`、`1084ddd`） | 上游MR !41518 | 修复Soong全局`-Werror`下的编译警告 |
+| `patches/mesa/0007..0008`（`1fe5838`、`00261e5`） | 上游MR !41518 | 为寄存器XML `genrule`补齐`depend_files`声明，解决Soong沙箱内找不到`adreno_common.xml`的问题 |
+| `patches/mesa/0009..0011`（`cb614dd`、`12a0367`、`b6b0902`） | 上游MR !44278 | 向下游传递`vulkan_runtime`接口依赖，并启用`u_gralloc`的`IMapper5`后端（依赖`libui`） |
 
 ## 4. 构建与实机验证要点
 

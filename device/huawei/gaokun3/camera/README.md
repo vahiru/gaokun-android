@@ -15,7 +15,7 @@
 
 ## 三、闪光灯与手电筒
 
-- **硬件节点**：机背LED连接在PM8350C闪光模块的1+4通道，由内核`patches/0036`暴露为`/sys/class/leds/white:flash`（`ueventd.gaokun3.rc`设置权限为`0664 root camera`，SELinux标为`sysfs_leds`）。
+- **硬件节点**：机背LED连接在PM8350C闪光模块的1+4通道，由内核`patches/kernel/dts/0006`暴露为`/sys/class/leds/white:flash`（`ueventd.gaokun3.rc`设置权限为`0664 root camera`，SELinux标为`sysfs_leds`）。
 - **手电筒模式**：`Device::setTorchMode`直接写入`brightness = max_brightness`；当相机存在活跃拍摄会话时返回`CAMERA_IN_USE`，并在`open()`与会话关闭时通过provider回调更新`TorchModeStatus`。
 - **预闪常亮拍照**：因PMIC LED无硬件帧曝光同步信号，收到`AE_PRECAPTURE_TRIGGER_START`时点亮LED并上报`AE_STATE_PRECAPTURE`供软件ISP的AGC收敛，通过`firedPending_`统计在途拍照请求，直至静态JPEG帧完成采集后再熄灭LED。`ON_AUTO_FLASH`模式基于交付帧采样平均亮度（`kDarkLuma`）启发式判断是否需要开灯。
 

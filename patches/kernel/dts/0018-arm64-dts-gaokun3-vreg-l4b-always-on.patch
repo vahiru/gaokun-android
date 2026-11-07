@@ -1,0 +1,32 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] arm64: dts: qcom: sc8280xp-huawei-gaokun3: mark vreg_l4b regulator-always-on
+
+In sc8280xp-huawei-gaokun3.dts, only usb_1_qmpphy references vreg_l4b
+(0.912 V), which also supplies the port 1 high-speed PHY. When UCSI
+reconfigures the port 1 combo PHY on Type-C orientation or mode changes,
+vreg_l4b briefly powers down and can lock up USB2 detection on port 1 until
+reboot.
+
+Mark vreg_l4b regulator-always-on, matching vreg_l9d on port 0.
+
+Origin: local
+Upstream-Status: Pending
+---
+--- a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
++++ b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
+@@ -440,6 +440,15 @@
+ 			regulator-min-microvolt = <912000>;
+ 			regulator-max-microvolt = <912000>;
+ 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
++			/*
++			 * usb_1_qmpphy is its only consumer here, but port1's
++			 * USB2 side needs it too: mainline also has usb_1_hsphy
++			 * on this rail. Without this, every forced combo PHY
++			 * re-initialisation (orientation or mode switch) turns
++			 * it off, and USB2 on port1 can stop seeing any plug
++			 * or unplug until reboot.
++			 */
++			regulator-always-on;
+ 			// HACK: wrongly voting for LPM may block DP Alt
+ 			// regulator-allow-set-load;
+ 			// regulator-allowed-modes = <RPMH_REGULATOR_MODE_LPM

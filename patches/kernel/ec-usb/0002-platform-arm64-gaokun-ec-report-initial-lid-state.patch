@@ -1,0 +1,64 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] platform: arm64: huawei-gaokun-ec: report initial lid state at probe
+
+The Huawei Gaokun EC driver only reported SW_LID events from its interrupt
+handler and never queried EC_LID_STATE when registering the lid input device,
+leaving the input layer assuming the lid is open if the system boots with the
+cover closed.
+
+Read EC_LID_STATE after input_register_device() and before requesting the EC
+IRQ so the initial SW_LID state is reported at boot without racing the IRQ
+thread.
+
+Origin: local
+Upstream-Status: Pending
+---
+diff --git a/drivers/platform/arm64/huawei-gaokun-ec.c b/drivers/platform/arm64/huawei-gaokun-ec.c
+index e9c4e72..4c74447 100644
+--- a/drivers/platform/arm64/huawei-gaokun-ec.c
++++ b/drivers/platform/arm64/huawei-gaokun-ec.c
+@@ -764,6 +764,32 @@ static irqreturn_t gaokun_ec_irq_handler(int irq, void *data)
+ 	return IRQ_HANDLED;
+ }
+ 
++/*
++ * Report the initial SW_LID state at boot. The driver previously only reported
++ * SW_LID on EC_EVENT_LID interrupts, leaving the input layer assuming the lid
++ * is open when booting with the cover closed. Query EC_LID_STATE before
++ * requesting the IRQ so lid_opened cannot race the IRQ thread.
++ */
++static void gaokun_ec_report_initial_lid(struct gaokun_ec *ec)
++{
++	u8 status;
++	int ret;
++
++	ret = gaokun_ec_psy_read_byte(ec, EC_LID_STATE, &status);
++	if (ret) {
++		dev_warn(&ec->client->dev,
++			 "failed to read initial lid state (%d), assuming open\n", ret);
++		ec->lid_opened = true;
++		return;
++	}
++
++	ec->lid_opened = !!(status & EC_LID_OPEN);
++	input_report_switch(ec->idev, SW_LID, !ec->lid_opened);
++	input_sync(ec->idev);
++	dev_info(&ec->client->dev, "initial lid state: %s (0x%02x)\n",
++		 ec->lid_opened ? "open" : "closed", status);
++}
++
+ static int gaokun_ec_probe(struct i2c_client *client)
+ {
+ 	struct device *dev = &client->dev;
+@@ -802,6 +828,8 @@ static int gaokun_ec_probe(struct i2c_client *client)
+ 	if (ret)
+ 		return dev_err_probe(dev, ret, "Failed to register input device\n");
+ 
++	gaokun_ec_report_initial_lid(ec);
++
+ 	ret = gaokun_aux_init(dev, GAOKUN_DEV_PSY, ec);
+ 	if (ret)
+ 		return ret;
+-- 
+2.50.1 (Apple Git-155)
+

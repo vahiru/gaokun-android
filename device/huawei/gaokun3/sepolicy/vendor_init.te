@@ -28,5 +28,5 @@ allow vendor_init self:global_capability2_class_set block_suspend;
 #   proc_hung_task 没有针对 vendor_init 的 neverallow（llkd 也是同样一条 allow，private/llkd.te:40）。
 allow vendor_init proc_hung_task:file w_file_perms;
 
-# init.gaokun3.rc hands the kernel the release reported to apps (patches/0085).
+# init.gaokun3.rc hands the kernel the release reported to apps (patches/kernel/core/0008).
 allow vendor_init gaokun3_proc_app_osrelease:file w_file_perms;

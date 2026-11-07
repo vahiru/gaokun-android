@@ -1,0 +1,54 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] wifi: ath11k: stay awake for a while after crash recovery
+
+Once crash recovery has finished, the system may suspend at once; on
+Android it did so 3 ms after the recovery. With WoWLAN the WoW suspend
+then runs on firmware that has only just restarted and isn't connected
+yet, and on a WCN6855 that crashed the firmware again, recovery after
+recovery: 478 crashes in three hours.
+
+Keep the recovery wakeup source for ATH11K_RECOVERY_SETTLE_MS (10 s)
+after a successful recovery. This also gives the connection time to
+come back before the system sleeps.
+
+Tested-on: WCN6855 hw2.1 PCI WLAN.HSP.1.1-03125-QCAHSPSWPL_V1_V2_SILICONZ_LITE-3.6510.41
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/net/wireless/ath/ath11k/core.h | 1 +
+ drivers/net/wireless/ath/ath11k/mac.c  | 7 +++++++
+ 2 files changed, 8 insertions(+)
+
+diff --git a/drivers/net/wireless/ath/ath11k/core.h b/drivers/net/wireless/ath/ath11k/core.h
+index 49e032f75..cdc5816ca 100644
+--- a/drivers/net/wireless/ath/ath11k/core.h
++++ b/drivers/net/wireless/ath/ath11k/core.h
+@@ -72,6 +72,7 @@ extern bool ath11k_ftm_mode;
+ #define ATH11K_RECONFIGURE_TIMEOUT_HZ (10 * HZ)
+ #define ATH11K_RECOVER_START_TIMEOUT_HZ (20 * HZ)
+ #define ATH11K_RECOVERY_WAKEUP_MS (60 * MSEC_PER_SEC)
++#define ATH11K_RECOVERY_SETTLE_MS (10 * MSEC_PER_SEC)
+ 
+ enum ath11k_supported_bw {
+ 	ATH11K_BW_20	= 0,
+diff --git a/drivers/net/wireless/ath/ath11k/mac.c b/drivers/net/wireless/ath/ath11k/mac.c
+index 3360299fc..8b8c3eb58 100644
+--- a/drivers/net/wireless/ath/ath11k/mac.c
++++ b/drivers/net/wireless/ath/ath11k/mac.c
+@@ -9293,7 +9293,14 @@ ath11k_mac_op_reconfig_complete(struct ieee80211_hw *hw,
+ 				complete(&ab->reset_complete);
+ 				ab->is_reset = false;
+ 				atomic_set(&ab->fail_cont_count, 0);
++				/*
++				 * Stay awake a little longer: WoW on firmware
++				 * that has only just restarted crashes it again,
++				 * and the connection needs a moment to return.
++				 */
+ 				__pm_relax(ab->recovery_ws);
++				pm_wakeup_ws_event(ab->recovery_ws,
++						   ATH11K_RECOVERY_SETTLE_MS, false);
+ 				ath11k_dbg(ab, ATH11K_DBG_BOOT, "reset success\n");
+ 			}
+ 		}

@@ -174,7 +174,7 @@
                 android:resource="@drawable/ic_stylus" />
         </activity>
 
-        <!-- Kernel version spoofing (patches/0085). Same injection as the touch feel entry. -->
+        <!-- Kernel version spoofing (patches/kernel/core/0008). Same injection as the touch feel entry. -->
         <activity
             android:name="com.huawei.gaokun3.parts.AppKernelSettingsActivity"
             android:exported="true"

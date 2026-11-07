@@ -6,7 +6,7 @@
 
 ## 依赖
 
-* 内核需打入`patches/0050`（`qcom_scm_qseecom_app_load/_shutdown` + 32位TZ内存约束）。上游主线仅包含`LOOKUP`/`SEND`，不包含`LOAD`。
+* 内核需打入`patches/kernel/fingerprint/0001`（`qcom_scm_qseecom_app_load/_shutdown` + 32位TZ内存约束）。上游主线仅包含`LOOKUP`/`SEND`，不包含`LOAD`。
 
 ## 模块行为
 

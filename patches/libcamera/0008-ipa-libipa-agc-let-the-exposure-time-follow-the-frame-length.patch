@@ -1,7 +1,7 @@
 From 1bc6289bb3c51618d4aed2eecad1ab9105376717 Mon Sep 17 00:00:00 2001
 From: Akisaira <akisaira@outlook.com>
 Date: Tue, 3 Nov 2026 22:59:27 +1100
-Subject: [PATCH 08/13] ipa: libipa: agc: Let the exposure time follow the
+Subject: [PATCH] ipa: libipa: agc: Let the exposure time follow the
  frame length
 
 The AGC limits the exposure time to the V4L2_CID_EXPOSURE maximum read
@@ -38,6 +38,9 @@ without a known margin, keep the old limits.
 
 Signed-off-by: Akisaira <akisaira@outlook.com>
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+Origin: local
+Upstream-Status: Pending
 ---
  src/ipa/libipa/agc.cpp                  | 35 ++++++++++++++++++++++---
  src/ipa/libipa/agc.h                    |  1 +

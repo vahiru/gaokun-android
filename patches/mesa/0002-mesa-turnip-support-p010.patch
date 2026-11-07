@@ -1,0 +1,252 @@
+From: Valentine Burley <valentine.burley@collabora.com>
+Subject: [PATCH] tu: add VK_FORMAT_G10X6_B10X6R10X6_2PLANE_420_UNORM_3PACK16 (P010) support
+
+Backport Turnip P010 format support from upstream Mesa MR !45721 (squashed from
+4 commits by Valentine Burley) onto Mesa 26.1.0-devel for Android 17, enabling
+hardware P010 sampling and rendering on Adreno A6xx.
+
+Signed-off-by: Valentine Burley <valentine.burley@collabora.com>
+Signed-off-by: Akisaira <akisaira@outlook.com>
+Origin: backport, https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/45721
+Upstream-Status: Backport [https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/45721]
+---
+diff --git a/src/freedreno/fdl/fd6_format_table.c b/src/freedreno/fdl/fd6_format_table.c
+index 009206d..17d3692 100644
+--- a/src/freedreno/fdl/fd6_format_table.c
++++ b/src/freedreno/fdl/fd6_format_table.c
+@@ -230,6 +230,9 @@ static const struct fd6_format formats[PIPE_FORMAT_COUNT] = {
+    _TC(Z32_FLOAT_S8X24_UINT, 32_FLOAT,          WZYX),
+    _TC(X32_S8X24_UINT,       8_UINT,            WZYX),
+ 
++   _TC(X6R10_UNORM,          P010_Y,            WZYX),
++   _TC(X6R10X6G10_UNORM,     P010_UV,           WZYX),
++
+    /* special format for blits: */
+    _TC(Z24_UNORM_S8_UINT_AS_R8G8B8A8, Z24_UNORM_S8_UINT_AS_R8G8B8A8, WZYX),
+ 
+@@ -379,6 +382,7 @@ static const struct fd6_format formats[PIPE_FORMAT_COUNT] = {
+    _T_(R8_G8B8_420_UNORM, R8_G8B8_2PLANE_420_UNORM, WZYX), /* Gallium NV12 */
+    _T_(G8_B8R8_420_UNORM, R8_G8B8_2PLANE_420_UNORM, WZYX), /* Vulkan NV12 */
+    _T_(G8_B8_R8_420_UNORM, R8_G8_B8_3PLANE_420_UNORM, WZYX),
++   _T_(X6G10_X6B10X6R10_420_UNORM,  P010,       WZYX),
+ };
+ /* clang-format on */
+ 
+diff --git a/src/freedreno/fdl/fd6_layout.c b/src/freedreno/fdl/fd6_layout.c
+index 67491ab..4204dfe 100644
+--- a/src/freedreno/fdl/fd6_layout.c
++++ b/src/freedreno/fdl/fd6_layout.c
+@@ -34,6 +34,12 @@ fdl6_get_ubwc_blockwidth(const struct fdl_layout *layout,
+       {  0, 0 }, /* cpp = 128 */
+    };
+ 
++   if (layout->format == PIPE_FORMAT_X6R10_UNORM) {
++      *blockwidth = 32;
++      *blockheight = 4;
++      return;
++   }
++
+    /* special case for r8g8 and plane 1 of r8_g8b8_420_unorm (NV12) */
+    if (fdl6_is_r8g8_layout(layout) ||
+       ((layout->format == PIPE_FORMAT_R8_G8B8_420_UNORM) && (layout->plane == 1))) {
+diff --git a/src/freedreno/fdl/fd6_view.cc b/src/freedreno/fdl/fd6_view.cc
+index 3a19a2c..903b570 100644
+--- a/src/freedreno/fdl/fd6_view.cc
++++ b/src/freedreno/fdl/fd6_view.cc
+@@ -45,6 +45,7 @@ fdl6_format_swiz(enum pipe_format format, bool has_z24uint_s8uint,
+    case PIPE_FORMAT_B8G8_R8G8_UNORM:
+    case PIPE_FORMAT_G8_B8R8_420_UNORM:
+    case PIPE_FORMAT_G8_B8_R8_420_UNORM:
++   case PIPE_FORMAT_X6G10_X6B10X6R10_420_UNORM:
+       /* These formats are currently only used for Vulkan, and border colors
+        * aren't allowed on these formats in Vulkan because, from the
+        * description of VkImageViewCreateInfo:
+@@ -275,7 +276,8 @@ fdl6_view_init(struct fdl6_view *view, const struct fdl_layout **layouts,
+ 
+       if (args->format == PIPE_FORMAT_R8_G8B8_420_UNORM ||
+           args->format == PIPE_FORMAT_G8_B8R8_420_UNORM ||
+-          args->format == PIPE_FORMAT_G8_B8_R8_420_UNORM) {
++          args->format == PIPE_FORMAT_G8_B8_R8_420_UNORM ||
++          args->format == PIPE_FORMAT_X6G10_X6B10X6R10_420_UNORM) {
+          /* chroma offset re-uses MIPLVLS bits */
+          assert(args->level_count == 1);
+          if (args->chroma_offsets[0] == FDL_CHROMA_LOCATION_MIDPOINT)
+@@ -363,7 +365,8 @@ fdl6_view_init(struct fdl6_view *view, const struct fdl_layout **layouts,
+ 
+       if (args->format == PIPE_FORMAT_R8_G8B8_420_UNORM ||
+           args->format == PIPE_FORMAT_G8_B8R8_420_UNORM ||
+-          args->format == PIPE_FORMAT_G8_B8_R8_420_UNORM) {
++          args->format == PIPE_FORMAT_G8_B8_R8_420_UNORM ||
++          args->format == PIPE_FORMAT_X6G10_X6B10X6R10_420_UNORM) {
+          uint64_t base_addr[3];
+ 
+          if (ubwc_enabled) {
+diff --git a/src/freedreno/fdl/freedreno_layout.h b/src/freedreno/fdl/freedreno_layout.h
+index c745a73..592eb22 100644
+--- a/src/freedreno/fdl/freedreno_layout.h
++++ b/src/freedreno/fdl/freedreno_layout.h
+@@ -341,6 +341,15 @@ void fdl6_get_ubwc_macrotile_size(const struct fdl_layout *layout,
+                                   uint32_t *macrotile_width,
+                                   uint32_t *macrotile_height);
+ 
++static inline bool
++fdl_format_is_r8g8(enum pipe_format format)
++{
++   const struct util_format_description *desc = util_format_description(format);
++
++   return desc->layout == UTIL_FORMAT_LAYOUT_PLAIN && desc->nr_channels == 2 &&
++          desc->channel[0].size == 8 && desc->channel[1].size == 8;
++}
++
+ /* Single-sampled non-mutable R8G8 textures have a special UBWC block layout
+  * that's different from the normal cpp=2 layout. Return true if this layout
+  * is in use.
+@@ -348,8 +357,7 @@ void fdl6_get_ubwc_macrotile_size(const struct fdl_layout *layout,
+ static inline bool
+ fdl6_is_r8g8_layout(const struct fdl_layout *layout)
+ {
+-   return layout->cpp == 2 &&
+-          util_format_get_nr_components(layout->format) == 2 &&
++   return layout->cpp == 2 && fdl_format_is_r8g8(layout->format) &&
+           !layout->is_mutable;
+ }
+ 
+diff --git a/src/freedreno/vulkan/tu_clear_blit.cc b/src/freedreno/vulkan/tu_clear_blit.cc
+index 7b5022c..b6ef6b5 100644
+--- a/src/freedreno/vulkan/tu_clear_blit.cc
++++ b/src/freedreno/vulkan/tu_clear_blit.cc
+@@ -2602,6 +2602,17 @@ copy_compressed(VkFormat format,
+       *height = DIV_ROUND_UP(*height, block_height);
+ }
+ 
++/* It seems we can't use the 2d path to blit to YUV-related formats.
++ */
++static bool
++is_3d_only_format(enum pipe_format format)
++{
++   /* note: could use "R8_UNORM" when no UBWC */
++   return format == PIPE_FORMAT_Y8_UNORM ||
++          format == PIPE_FORMAT_X6R10_UNORM ||
++          format == PIPE_FORMAT_X6R10X6G10_UNORM;
++}
++
+ template <chip CHIP>
+ static void
+ tu_copy_buffer_to_image(struct tu_cmd_buffer *cmd,
+@@ -2625,10 +2636,9 @@ tu_copy_buffer_to_image(struct tu_cmd_buffer *cmd,
+       src_format = PIPE_FORMAT_S8_UINT;
+    }
+ 
+-   /* note: could use "R8_UNORM" when no UBWC */
+    bool has_unaligned = CHIP >= A7XX; /* If unaligned buffer copies are supported. */
+    unsigned blit_param = 0;
+-   if (src_format == PIPE_FORMAT_Y8_UNORM) {
++   if (is_3d_only_format(dst_format)) {
+       ops = &r3d_ops<CHIP>;
+       blit_param = R3D_COPY;
+       has_unaligned = false;
+@@ -2845,9 +2855,8 @@ tu_copy_image_to_buffer(struct tu_cmd_buffer *cmd,
+       dst_format = PIPE_FORMAT_S8_UINT;
+    }
+ 
+-   /* note: could use "R8_UNORM" when no UBWC */
+    unsigned blit_param = 0;
+-   if (dst_format == PIPE_FORMAT_Y8_UNORM) {
++   if (is_3d_only_format(dst_format)) {
+       ops = &r3d_ops<CHIP>;
+       blit_param = R3D_COPY;
+    }
+@@ -3050,7 +3059,7 @@ static bool
+ image_is_r8g8(struct tu_image *image)
+ {
+    return image->layout[0].cpp == 2 &&
+-      vk_format_get_nr_components(image->vk.format) == 2;
++      fdl_format_is_r8g8(vk_format_to_pipe_format(image->vk.format));
+ }
+ 
+ template <chip CHIP>
+@@ -3095,10 +3104,8 @@ tu_copy_image_to_image(struct tu_cmd_buffer *cmd,
+    enum pipe_format dst_format = copy_format(dst_image->vk.format, info->dstSubresource.aspectMask);
+    enum pipe_format src_format = copy_format(src_image->vk.format, info->srcSubresource.aspectMask);
+ 
+-   /* note: could use "R8_UNORM" when no UBWC */
+    unsigned blit_param = 0;
+-   if (dst_format == PIPE_FORMAT_Y8_UNORM ||
+-       src_format == PIPE_FORMAT_Y8_UNORM) {
++   if (is_3d_only_format(dst_format) || is_3d_only_format(src_format)) {
+       ops = &r3d_ops<CHIP>;
+       blit_param = R3D_COPY;
+    }
+@@ -3910,7 +3917,9 @@ clear_image_cp_blit(struct tu_cmd_buffer *cmd,
+       assert(range->baseArrayLayer == 0);
+    }
+ 
+-   const struct blit_ops *ops = image->layout[0].nr_samples > 1 ? &r3d_ops<CHIP> : &r2d_ops<CHIP>;
++   const struct blit_ops *ops =
++      image->layout[0].nr_samples > 1 || is_3d_only_format(format) ?
++      &r3d_ops<CHIP> : &r2d_ops<CHIP>;
+ 
+    ops->setup(cmd, cs, format, format, aspect_mask, 0, true, image->layout[0].ubwc,
+               (VkSampleCountFlagBits) image->layout[0].nr_samples,
+@@ -4054,6 +4063,7 @@ use_generic_clear_for_image_clear(struct tu_cmd_buffer *cmd,
+ {
+    const struct fd_dev_info *info = cmd->device->physical_device->info;
+    return info->props.has_generic_clear &&
++          !is_3d_only_format(vk_format_to_pipe_format(image->vk.format)) &&
+           /* Clearing VK_FORMAT_R8G8_* with fast-clear value, certain
+            * dimensions (e.g. 960x540), and having GMEM renderpass afterwards
+            * may lead to a GPU fault on A7XX.
+diff --git a/src/freedreno/vulkan/tu_formats.cc b/src/freedreno/vulkan/tu_formats.cc
+index 01d5260..8d15e9a 100644
+--- a/src/freedreno/vulkan/tu_formats.cc
++++ b/src/freedreno/vulkan/tu_formats.cc
+@@ -150,6 +150,13 @@ tu_physical_device_get_format_properties(
+    if (msrtss_out)
+       msrtss_out->optimal = true;
+ 
++   /* MSAA rendering with these formats hangs the GPU, and Vulkan doesn't allow
++    * exposing these as single-sample-only color attachments.
++    */
++   if (format == PIPE_FORMAT_X6R10_UNORM ||
++       format == PIPE_FORMAT_X6R10X6G10_UNORM)
++      supported_color = false;
++
+    /* We don't support BufferToImage/ImageToBuffer for npot formats */
+    if (!is_npot)
+       buffer |= VK_FORMAT_FEATURE_2_TRANSFER_SRC_BIT | VK_FORMAT_FEATURE_2_TRANSFER_DST_BIT;
+diff --git a/src/freedreno/vulkan/tu_image.cc b/src/freedreno/vulkan/tu_image.cc
+index e838efd..84c40e5 100644
+--- a/src/freedreno/vulkan/tu_image.cc
++++ b/src/freedreno/vulkan/tu_image.cc
+@@ -122,13 +122,6 @@ tu_format_for_aspect(enum pipe_format format, VkImageAspectFlags aspect_mask)
+    }
+ }
+ 
+-static bool
+-tu_is_r8g8(enum pipe_format format)
+-{
+-   return (util_format_get_blocksize(format) == 2) &&
+-          (util_format_get_nr_components(format) == 2);
+-}
+-
+ static bool
+ tu_is_r8g8_compatible(enum pipe_format format)
+ {
+@@ -441,7 +434,7 @@ format_list_reinterprets_r8g8_r16(enum pipe_format format, const VkImageFormatLi
+    for (uint32_t i = 0; i < fmt_list->viewFormatCount; i++) {
+       enum pipe_format format =
+          vk_format_to_pipe_format(fmt_list->pViewFormats[i]);
+-      if (tu_is_r8g8(format))
++      if (fdl_format_is_r8g8(format))
+          has_r8g8 = true;
+       else
+          has_non_r8g8 = true;
+@@ -502,7 +495,7 @@ tu_image_update_layout(struct tu_device *device, struct tu_image *image,
+    }
+ 
+    /* Whether a view of the image with an R8G8 format could be made. */
+-   bool has_r8g8 = tu_is_r8g8(vk_format_to_pipe_format(image->vk.format));
++   bool has_r8g8 = fdl_format_is_r8g8(vk_format_to_pipe_format(image->vk.format));
+ 
+    /* With AHB, we could be asked to create an image with VK_IMAGE_TILING_LINEAR
+     * but gralloc doesn't know this.  So if we are explicitly told that it is

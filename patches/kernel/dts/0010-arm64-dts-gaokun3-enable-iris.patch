@@ -1,0 +1,25 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] arm64: dts: qcom: sc8280xp-huawei-gaokun3: enable iris video decoder
+
+Enable the &iris node on Huawei MateBook E Go with firmware-name set to
+"qcom/sc8280xp/Huawei/gaokun3/qcvss8280.mbn".
+
+Origin: local
+Upstream-Status: Pending
+---
+diff --git a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
+index 5217333..c42827a 100644
+--- a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
++++ b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
+@@ -795,6 +795,11 @@
+ 	};
+ };
+ 
++&iris {
++	firmware-name = "qcom/sc8280xp/HUAWEI/gaokun3/qcvss8280.mbn";
++	status = "okay";
++};
++
+ &mdss0 {
+ 	status = "okay";
+ };

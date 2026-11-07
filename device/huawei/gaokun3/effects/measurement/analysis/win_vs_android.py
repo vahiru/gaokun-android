@@ -618,7 +618,7 @@ def main():
     # 维护者注（2026-09-27，PR #8 审阅）：下面原来打印的是作者工作区的 tools/_tmp/histen-ab.sh
     # （不在本仓），换成本仓 effect 的旋钮（gaokun_effect.cpp / histen_chain.h）。
     # 另外三处：①基线数据是哪个场景就先切到哪个场景（部署默认是场景 0，EQ 槽的中心频率随场景变）；
-    # ②HPF 低于部署值 150 Hz 时先看 §九 并做 THD；③PA 的建议值不超过内核上限 23（patches/0015）。
+    # ②HPF 低于部署值 150 Hz 时先看 §九 并做 THD；③PA 的建议值不超过内核上限 23（patches/kernel/audio/0001）。
     def knob(name, val):
         print('     adb shell su -c "setprop persist.vendor.gaokun3.histen.%s %s"' % (name, val))
     scene_no = scene.split()[1] if scene.startswith("scene ") and len(scene.split()) > 1 else ""
@@ -647,7 +647,7 @@ def main():
     else:
         print('  3) makeup 保持 +4 dB 不动（本解不需要额外平增益）')
     print()
-    print('  ★ PA Volume：本仓 audio-route.sh 写 21（+6 dB），内核上限 23（+9 dB，patches/0015，')
+    print('  ★ PA Volume：本仓 audio-route.sh 写 21（+6 dB），内核上限 23（+9 dB，patches/kernel/audio/0001，')
     print('     = 器件允许的一半；理由：没有出厂校准、两颗 WSA 的 SoundWire Alert 没人服务、同设置隔几分钟漂 7.5 dB）。')
     print('     PA 在限幅器【之后】：它不吃上面的 %.1f dB 预算，也意味着 −1 dBFS 天花板管不到最终声压，' % a.headroom)
     print('     低频冲程跟着一起涨。要试就在 21..23 之间、先看 /sys/class/hwmon/*/temp1_input：')

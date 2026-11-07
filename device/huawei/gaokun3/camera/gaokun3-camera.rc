@@ -1,6 +1,6 @@
 # ★ 2026-09-14：这里曾经有一段 `on boot` 把 camss 的 runtime PM 钉成 on ——
 #   那是 #87 电源域缺陷（titan_top_gdsc 塌缩过一次就再也上不了电）的【桥】。
-#   缺陷已在内核侧根治（patches/0031：camcc 的 camnoc_axi/slow_ahb/fast_ahb 三个 RCG
+#   缺陷已在内核侧根治（patches/kernel/camera/0002：camcc 的 camnoc_axi/slow_ahb/fast_ahb 三个 RCG
 #   标成 shared，关闭时停靠 XO），见 docs/dev/camera.md。
 #   内核 #14 实测：解钉、自然塌缩、空闲后再用，全部成功 ⇒ 钉住撤掉，相机电源域按 runtime PM 正常起落。
 #   ⚠️ 这一撤【依赖内核带 0031】。如果有人把旧内核（#5 及更早）配上这份 rc，第二次开相机就会回到 #83。

@@ -1,0 +1,175 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] media: iris: keep gen1 decoder session loaded across seek flush
+
+On the SC8280XP gen1 video firmware, tearing down the session with STOP +
+RELEASE_RESOURCES on OUTPUT streamoff and re-issuing LOAD_RESOURCES + START on
+the subsequent streamon during a V4L2 seek (streamoff CAPTURE -> streamoff
+OUTPUT -> streamon OUTPUT -> streamon CAPTURE) triggers a firmware assertion in
+video_decoder_utils.c.
+
+Add a venus-compatible seek path for gen1 decoders (controlled by module
+parameter qcom_iris.seek_mode, default 1): on OUTPUT streamoff while
+LOAD_RESOURCES is active, issue HFI_FLUSH_ALL without stopping the session or
+releasing resources, and resume streaming on the subsequent streamon calls. If
+the instance is closed before restarting streaming, perform the deferred STOP
+and RELEASE_RESOURCES in iris_close().
+
+Origin: local
+Upstream-Status: Inappropriate [firmware workaround]
+---
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c b/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c
+index f00748b..e8eeb83 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c
+@@ -222,7 +222,31 @@ static int iris_hfi_gen1_session_stop(struct iris_inst *inst, u32 plane)
+ 				inst->flush_responses_pending++;
+ 				ret = iris_wait_for_session_response(inst, true);
+ 			}
++		} else if (READ_ONCE(iris_seek_mode) == 1 && V4L2_TYPE_IS_OUTPUT(plane) &&
++			   inst->state == IRIS_INST_INPUT_STREAMING &&
++			   inst->sub_state & IRIS_INST_SUB_LOAD_RESOURCES) {
++			/*
++			 * OUTPUT streamoff after CAPTURE streamoff (a seek, or the first half of
++			 * a stop): flush and keep the session loaded and started, as venus
++			 * vdec_stop_output() does. The next streamon continues it;
++			 * iris_close() stops it if none comes.
++			 */
++			reinit_completion(&inst->flush_completion);
++
++			flush_pkt.shdr.hdr.size = sizeof(struct hfi_session_flush_pkt);
++			flush_pkt.shdr.hdr.pkt_type = HFI_CMD_SESSION_FLUSH;
++			flush_pkt.shdr.session_id = inst->session_id;
++			flush_pkt.flush_type = HFI_FLUSH_ALL;
++
++			ret = iris_hfi_queue_cmd_write(core, &flush_pkt, flush_pkt.shdr.hdr.size);
++			if (!ret) {
++				inst->flush_responses_pending++;
++				ret = iris_wait_for_session_response(inst, true);
++			}
++			if (!ret)
++				inst->seek_resume = true;
+ 		} else if (inst->sub_state & IRIS_INST_SUB_LOAD_RESOURCES) {
++			inst->seek_resume = false;
+ 			reinit_completion(&inst->completion);
+ 			iris_hfi_gen1_packet_session_cmd(inst, &pkt, HFI_CMD_SESSION_STOP);
+ 			ret = iris_hfi_queue_cmd_write(core, &pkt, pkt.shdr.hdr.size);
+diff --git a/drivers/media/platform/qcom/iris/iris_instance.h b/drivers/media/platform/qcom/iris/iris_instance.h
+index 814b608..c157a01 100644
+--- a/drivers/media/platform/qcom/iris/iris_instance.h
++++ b/drivers/media/platform/qcom/iris/iris_instance.h
+@@ -31,6 +31,12 @@ enum iris_fmt_type_cap {
+ 	IRIS_FMT_QC10C,
+ };
+ 
++/*
++ * Controls how a decoder seek (v4l2_codec2 flush: CAPTURE then OUTPUT streamoff,
++ * then both streamon) is carried out; see iris_vdec.c.
++ */
++extern unsigned int iris_seek_mode;
++
+ /**
+  * struct iris_inst - holds per video instance parameters
+  *
+@@ -116,6 +122,7 @@ struct iris_inst {
+ 	bool				last_buffer_dequeued;
+ 	bool				src_change_subscribed;
+ 	bool				seq_event_seen;
++	bool				seek_resume;
+ 	u64				last_buf_ns;
+ 	u32				frame_counter;
+ 	u32				frame_rate;
+diff --git a/drivers/media/platform/qcom/iris/iris_vdec.c b/drivers/media/platform/qcom/iris/iris_vdec.c
+index d1dc09f..f25b7da 100644
+--- a/drivers/media/platform/qcom/iris/iris_vdec.c
++++ b/drivers/media/platform/qcom/iris/iris_vdec.c
+@@ -3,6 +3,7 @@
+  * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+  */
+ 
++#include <linux/moduleparam.h>
+ #include <media/v4l2-event.h>
+ #include <media/v4l2-mem2mem.h>
+ 
+@@ -363,10 +364,33 @@ void iris_vdec_src_change(struct iris_inst *inst)
+ 	v4l2_event_queue_fh(&inst->fh, &event);
+ }
+ 
++/*
++ * v4l2_codec2 seeks by streaming off CAPTURE, then OUTPUT, then streaming both
++ * back on. Upstream gen1 turns the OUTPUT streamoff into STOP +
++ * RELEASE_RESOURCES and the streamon into a full reconfiguration plus LOAD_RESOURCES + START
++ * in the same session; the sc8280xp firmware then asserts (video_decoder_utils.c:3056)
++ * as the output properties arrive.
++ *   1  (default) like venus vdec_stop_output()/vdec_start_output(): flush, keep the session
++ *      loaded and started, and on streamon send neither properties nor internal buffers again
++ *   0  upstream
++ */
++unsigned int iris_seek_mode = 1;
++module_param_named(seek_mode, iris_seek_mode, uint, 0644);
++MODULE_PARM_DESC(seek_mode, "gaokun3: decoder seek (OUTPUT streamoff after CAPTURE streamoff): 1 flush and continue like venus (default), 0 upstream STOP + restart");
++
+ int iris_vdec_streamon_input(struct iris_inst *inst)
+ {
+ 	int ret;
+ 
++	if (inst->seek_resume) {
++		/* seek_mode=1: the session was only flushed, nothing to set up again */
++		inst->frame_counter = 0;
++		ret = iris_process_streamon_input(inst);
++		if (!ret && inst->state == IRIS_INST_STREAMING)
++			inst->seek_resume = false;
++		return ret;
++	}
++
+ 	ret = iris_set_properties(inst, V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE);
+ 	if (ret)
+ 		return ret;
+@@ -399,9 +423,12 @@ int iris_vdec_streamon_output(struct iris_inst *inst)
+ 	const struct iris_hfi_session_ops *hfi_ops = inst->hfi_session_ops;
+ 	int ret;
+ 
+-	ret = hfi_ops->session_set_config_params(inst, V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE);
+-	if (ret)
+-		return ret;
++	/* seek_mode=1: the output port is configured and running, only the DPBs go back */
++	if (!inst->seek_resume) {
++		ret = hfi_ops->session_set_config_params(inst, V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE);
++		if (ret)
++			return ret;
++	}
+ 
+ 	iris_get_internal_buffers(inst, V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE);
+ 
+@@ -421,6 +448,9 @@ int iris_vdec_streamon_output(struct iris_inst *inst)
+ 	if (ret)
+ 		goto error;
+ 
++	if (inst->state == IRIS_INST_STREAMING)
++		inst->seek_resume = false;
++
+ 	return ret;
+ 
+ error:
+diff --git a/drivers/media/platform/qcom/iris/iris_vidc.c b/drivers/media/platform/qcom/iris/iris_vidc.c
+index 477ef19..094a70a 100644
+--- a/drivers/media/platform/qcom/iris/iris_vidc.c
++++ b/drivers/media/platform/qcom/iris/iris_vidc.c
+@@ -299,6 +299,18 @@ int iris_close(struct file *filp)
+ {
+ 	struct iris_inst *inst = iris_get_inst(filp);
+ 
++	/*
++	 * When seek_mode=1, a session flushed at OUTPUT streamoff is still
++	 * loaded and started. Stop it like upstream would have (STOP + RELEASE_RESOURCES)
++	 * while the m2m context, which the stop path returns buffers through, still exists.
++	 */
++	if (inst->seek_resume) {
++		mutex_lock(&inst->lock);
++		inst->hfi_session_ops->session_stop(inst, V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE);
++		inst->seek_resume = false;
++		mutex_unlock(&inst->lock);
++	}
++
+ 	v4l2_ctrl_handler_free(&inst->ctrl_handler);
+ 	v4l2_m2m_ctx_release(inst->m2m_ctx);
+ 	v4l2_m2m_release(inst->m2m_dev);

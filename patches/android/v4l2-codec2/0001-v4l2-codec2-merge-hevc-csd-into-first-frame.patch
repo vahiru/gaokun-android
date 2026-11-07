@@ -1,0 +1,158 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] v4l2_codec2: merge HEVC CSD into the first input frame buffer
+
+When the Qualcomm iris/venus firmware receives an HEVC input buffer containing
+only VPS/SPS/PPS without V4L2_BUF_FLAG_CODECCONFIG, it logs
+H265_CONFIG_FLAG_MISSING and synthesizes a dummy picture that blocks waiting
+for a CAPTURE buffer before V4L2_EVENT_SOURCE_CHANGE has been emitted,
+deadlocking decoder initialization.
+
+Stash incoming HEVC CSD payloads and prepend them to the first frame buffer
+allocated from the default linear dmabuf pool (sized to at least the V4L2
+OUTPUT plane min_length of 8 MiB, with the write view destroyed before
+share()). Can be toggled via vendor.gaokun3.v4l2c2.merge_csd (default 1).
+
+Origin: local
+Upstream-Status: Pending
+---
+diff --git a/components/DecodeComponent.cpp b/components/DecodeComponent.cpp
+index 00880d7..305b1ff 100644
+--- a/components/DecodeComponent.cpp
++++ b/components/DecodeComponent.cpp
+@@ -8,6 +8,8 @@
+ 
+ #include <v4l2_codec2/components/DecodeComponent.h>
+ 
++#include <algorithm>
++
+ #include <inttypes.h>
+ #include <linux/videodev2.h>
+ #include <stdint.h>
+@@ -449,14 +451,101 @@ void DecodeComponent::processCSDWork(const int32_t bitstreamId, const C2Work* wo
+         }
+     }
+ 
++    // HEVC: stash the CSD and prepend it to the first frame buffer instead of
++    // submitting it standalone. When the iris/venus firmware receives a buffer
++    // containing only VPS/SPS/PPS without V4L2_BUF_FLAG_CODECCONFIG, it reports
++    // H265_CONFIG_FLAG_MISSING and synthesizes a dummy picture that blocks
++    // waiting for a CAPTURE buffer while the host is still waiting for
++    // V4L2_EVENT_SOURCE_CHANGE. H.264 is unaffected, so limit this to HEVC.
++    if (mIntfImpl->getVideoCodec() == VideoCodec::HEVC &&
++        property_get_bool("vendor.gaokun3.v4l2c2.merge_csd", 1)) {
++        C2ReadView csdView = linearBlock.map().get();
++        if (csdView.error() == C2_OK && csdView.capacity() > 0) {
++            mPendingCSD.assign(csdView.data(), csdView.data() + csdView.capacity());
++            ALOGI("HEVC: stashed %zu bytes of CSD, will prepend it to the first frame",
++                  mPendingCSD.size());
++            reportWorkIfFinished(bitstreamId);
++            return;
++        }
++        ALOGW("HEVC: cannot map CSD (err=%d); sending it standalone as before",
++              csdView.error());
++    }
++
+     processWorkBuffer(bitstreamId, linearBlock);
+ }
+ 
++// Prepend the stashed CSD to |frame| in a newly allocated linear block.
++// Returns std::nullopt on failure so the caller can fall back to |frame|.
++std::optional<C2ConstLinearBlock> DecodeComponent::mergePendingCSD(
++        const C2ConstLinearBlock& frame) {
++    if (!mCSDMergePool) {
++        auto sharedThis = weak_from_this().lock();
++        if (sharedThis == nullptr) return std::nullopt;
++        // The V4L2 OUTPUT queue uses V4L2_MEMORY_DMABUF and V4L2Decoder reads
++        // handle()->data[0] as the dmabuf fd. Allocate from the platform's
++        // default BASIC_LINEAR pool (the same pool that backs incoming input
++        // buffers) rather than C2PlatformAllocatorStore::BLOB, whose gralloc
++        // handle does not expose a raw dmabuf fd at data[0].
++        //
++        // Note that media_codecs_c2.xml must configure the linear pool mask
++        // appropriately on platforms without legacy ION support so that
++        // BASIC_LINEAR yields valid dmabuf-backed blocks.
++        auto status = GetCodec2BlockPool(C2BlockPool::BASIC_LINEAR, std::move(sharedThis),
++                                         &mCSDMergePool);
++        if (status != C2_OK || !mCSDMergePool) {
++            ALOGW("No linear block pool for the CSD merge: %d", status);
++            return std::nullopt;
++        }
++    }
++
++    C2ReadView fv = frame.map().get();
++    if (fv.error() != C2_OK) return std::nullopt;
++
++    const size_t total = mPendingCSD.size() + fv.capacity();
++    // With V4L2_MEMORY_DMABUF, videobuf2 rejects a dmabuf whose size is smaller
++    // than the V4L2 OUTPUT plane's min_length (e.g. 8 MiB) with EINVAL on
++    // VIDIOC_QBUF. Allocate at least mIntfImpl->getInputBufferSize() while
++    // sharing only the |total| payload range below.
++    const size_t allocSize = std::max(total, mIntfImpl->getInputBufferSize());
++    std::shared_ptr<C2LinearBlock> block;
++    C2MemoryUsage usage = {C2MemoryUsage::CPU_READ, C2MemoryUsage::CPU_WRITE};
++    if (mCSDMergePool->fetchLinearBlock(allocSize, usage, &block) != C2_OK || !block)
++        return std::nullopt;
++
++    // Destroy the C2WriteView before calling share(): sharing a block while its
++    // writable mapping is still live produces a native handle that fails
++    // VIDIOC_QBUF with EFAULT.
++    {
++        C2WriteView wv = block->map().get();
++        if (wv.error() != C2_OK) return std::nullopt;
++        memcpy(wv.data(), mPendingCSD.data(), mPendingCSD.size());
++        memcpy(wv.data() + mPendingCSD.size(), fv.data(), fv.capacity());
++    }
++
++    C2ConstLinearBlock merged = block->share(0, total, C2Fence());
++    const C2Handle* h = merged.handle();
++    ALOGI("HEVC: merged %zu B CSD + %zu B frame -> %zu B block (handle=%p fd=%d numFds=%d)",
++          mPendingCSD.size(), (size_t)fv.capacity(), total, h,
++          h ? h->data[0] : -1, h ? h->numFds : -1);
++    return merged;
++}
++
+ void DecodeComponent::processWork(const int32_t bitstreamId, const C2Work* work) {
+     // If input.buffers is not empty, the buffer should have meaningful content inside.
+     C2ConstLinearBlock linearBlock = work->input.buffers.front()->data().linearBlocks().front();
+     ALOG_ASSERT(linearBlock.size() > 0u, "Input buffer of work(%d) is empty.", bitstreamId);
+ 
++    // Prepend any stashed HEVC CSD to the first input frame buffer.
++    if (!mPendingCSD.empty()) {
++        auto merged = mergePendingCSD(linearBlock);
++        mPendingCSD.clear();
++        if (merged.has_value()) {
++            processWorkBuffer(bitstreamId, merged.value());
++            return;
++        }
++        ALOGW("Failed to merge CSD into the first frame; sending the frame as-is");
++    }
++
+     processWorkBuffer(bitstreamId, linearBlock);
+ }
+ 
+diff --git a/components/include/v4l2_codec2/components/DecodeComponent.h b/components/include/v4l2_codec2/components/DecodeComponent.h
+index 27905c7..94ab8c2 100644
+--- a/components/include/v4l2_codec2/components/DecodeComponent.h
++++ b/components/include/v4l2_codec2/components/DecodeComponent.h
+@@ -7,6 +7,8 @@
+ 
+ #include <atomic>
+ #include <memory>
++#include <optional>
++#include <vector>
+ 
+ #include <C2Component.h>
+ #include <C2ComponentFactory.h>
+@@ -136,6 +138,12 @@ protected:
+     // The record of frame index to update color aspects. Details as above.
+     uint64_t mPendingColorAspectsChangeFrameIndex;
+ 
++    // Prepend stashed HEVC CSD to the first input frame buffer so the firmware
++    // does not synthesize a dummy frame for a standalone config-only buffer.
++    std::optional<C2ConstLinearBlock> mergePendingCSD(const C2ConstLinearBlock& frame);
++    std::vector<uint8_t> mPendingCSD;
++    std::shared_ptr<C2BlockPool> mCSDMergePool;
++
+     // The device task runner and its sequence checker. We should interact with
+     // |mDevice| on this.
+     ::base::Thread mDecoderThread{"DecodeComponentDecoderThread"};

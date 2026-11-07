@@ -1,0 +1,40 @@
+From: mashen11 <mashen11@users.noreply.github.com>
+Subject: [PATCH] audio: aidl: default: preserve explicit built-in mic ALSA address in XsdcConversion
+
+createAudioDevice() unconditionally overwrote the XML address of
+AUDIO_DEVICE_IN_BUILTIN_MIC with "bottom" or "back", discarding any explicit
+ALSA card/device suffix such as "bottom CARD_0_DEV_3" in
+primary_audio_policy_configuration.xml and causing StreamPrimary to fall back
+to hw:0,0 (which is playback-only on SC8280XP Audioreach topologies).
+
+Only apply the default "bottom" address when the policy configuration leaves
+the built-in microphone address empty.
+
+Origin: local
+Upstream-Status: Pending
+---
+diff --git a/audio/aidl/default/XsdcConversion.cpp b/audio/aidl/default/XsdcConversion.cpp
+index 1a5f7f3c9d..2c7cceced5 100644
+--- a/audio/aidl/default/XsdcConversion.cpp
++++ b/audio/aidl/default/XsdcConversion.cpp
+@@ -236,9 +236,18 @@ ConversionResult<AudioDevice> createAudioDevice(
+                                ? AudioDeviceAddress::make<AudioDeviceAddress::Tag::id>(
+                                          xDevicePort.getAddress())
+                                : AudioDeviceAddress{}};
+-    if (device.type.type == AudioDeviceType::IN_MICROPHONE && device.type.connection.empty()) {
++    // Only fall back to the legacy platform default when the audio policy configuration does
++    // not specify an address. Overwriting an explicit address unconditionally makes it
++    // impossible for a device to route its built-in microphone to a dedicated ALSA PCM, because
++    // the address carries the "CARD_<n>_DEV_<m>" selector consumed by
++    // StreamPrimary::getCardAndDeviceId(). When it is lost the primary stream silently falls
++    // back to the default card/device, which on some platforms has no capture PCM at all, so
++    // capture fails to open.
++    const bool addressSpecified = xDevicePort.hasAddress() && !xDevicePort.getAddress().empty();
++    if (!addressSpecified && device.type.type == AudioDeviceType::IN_MICROPHONE &&
++            device.type.connection.empty()) {
+         device.address = "bottom";
+-    } else if (device.type.type == AudioDeviceType::IN_MICROPHONE_BACK &&
++    } else if (!addressSpecified && device.type.type == AudioDeviceType::IN_MICROPHONE_BACK &&
+                device.type.connection.empty()) {
+         device.address = "back";
+     }

@@ -1,0 +1,132 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] drm_hwcomposer: composite dimmed layers on the GPU for HDR backlight boost
+
+During HDR presentation, SurfaceFlinger raises the panel backlight and scales
+down SDR layers via LayerCommand.brightness so their perceived luminance stays
+constant. Because MSM DPU planes do not apply per-layer brightness gain, layers
+left on hardware planes brighten along with the backlight.
+
+Route layers with brightness < 1.0 to client composition in both planners so
+RenderEngine applies the dimming factor, and request a 10-bit client target
+while layers are dimmed to avoid banding in dark gradients. Also restrict
+sysfs backlight binding to internal connector types so external displays do not
+drive the tablet's built-in panel backlight.
+
+Origin: local
+Upstream-Status: Pending
+---
+diff --git a/compositor/GenericCompositionPlanner.cpp b/compositor/GenericCompositionPlanner.cpp
+index 14a8e44..3e37422 100644
+--- a/compositor/GenericCompositionPlanner.cpp
++++ b/compositor/GenericCompositionPlanner.cpp
+@@ -148,7 +148,7 @@ bool GenericCompositionPlanner::IsClientLayer(const ICompositorDisplay* display,
+                                               const HwcLayer* layer) {
+   return !HardwareSupportsLayerType(layer->GetSfType()) ||
+          !layer->IsLayerUsableAsDevice() || display->CtmByGpu() ||
+-         display->ColorConversionByGpu(layer) ||
++         display->ColorConversionByGpu(layer) || layer->NeedsDimming() ||
+          (layer->GetLayerData().pi.RequireScalingOrPhasing() &&
+           display->ForcedScalingWithGpu());
+ }
+diff --git a/compositor/GenericLayerMapperCompositionPlanner.cpp b/compositor/GenericLayerMapperCompositionPlanner.cpp
+index 419d10a..678c696 100644
+--- a/compositor/GenericLayerMapperCompositionPlanner.cpp
++++ b/compositor/GenericLayerMapperCompositionPlanner.cpp
+@@ -228,7 +228,7 @@ bool GenericLayerMapperCompositionPlanner::MustBeClientComposited(
+   // request a change.
+   return !HardwareSupportsLayerType(layer->GetSfType()) ||
+          !layer->IsLayerUsableAsDevice() || display->CtmByGpu() ||
+-         display->ColorConversionByGpu(layer) ||
++         display->ColorConversionByGpu(layer) || layer->NeedsDimming() ||
+          (layer->GetLayerData().pi.RequireScalingOrPhasing() &&
+           display->ForcedScalingWithGpu());
+ }
+diff --git a/hwc/HwcDisplay.cpp b/hwc/HwcDisplay.cpp
+index d20498e..3b712bd 100644
+--- a/hwc/HwcDisplay.cpp
++++ b/hwc/HwcDisplay.cpp
+@@ -747,6 +747,11 @@ bool HwcDisplay::Init() {
+ 
+     // Attempt to initialize backlight
+     auto backlights = SysfsBacklightController::EnumerateBacklights();
++    // sysfs doesn't say which connector a backlight belongs to, but it is never
++    // an external display's: that display's brightness would land on the panel.
++    if (!GetPipe().connector->Get()->IsInternal()) {
++      backlights.clear();
++    }
+     for (const auto &name : backlights) {
+       // TODO(seanpaul): logic to associate backlight with connector
+       backlight_controller_ = SysfsBacklightController::CreateInstanceFromName(
+@@ -1482,8 +1487,10 @@ bool HwcDisplay::NeedsDeepClientTarget() const {
+       layers_.begin(), layers_.end(), [](const auto &pair) {
+         const auto &layer = pair.second;
+         const auto &buffer_info = layer.GetLayerData().bi;
++        // Digital dimming needs the extra precision as much as 10-bit content.
+         return layer.GetValidatedType() == CompositionType::kClient &&
+-               buffer_info.has_value() && IsDeepFormat(buffer_info->format);
++               (layer.NeedsDimming() || (buffer_info.has_value() &&
++                                         IsDeepFormat(buffer_info->format)));
+       });
+ 
+   // The client target is scanned out, so the plane has to accept it.
+diff --git a/hwc/HwcLayer.cpp b/hwc/HwcLayer.cpp
+index ed4a076..82f017b 100644
+--- a/hwc/HwcLayer.cpp
++++ b/hwc/HwcLayer.cpp
+@@ -47,6 +47,9 @@ void HwcLayer::SetLayerProperties(const LayerProperties& layer_properties) {
+   if (layer_properties.sample_range) {
+     sample_range_ = layer_properties.sample_range.value();
+   }
++  if (layer_properties.brightness) {
++    brightness_ = layer_properties.brightness.value();
++  }
+   if (layer_properties.transfer_func) {
+     transfer_func_ = layer_properties.transfer_func.value();
+   }
+diff --git a/hwc/HwcLayer.h b/hwc/HwcLayer.h
+index 59923af..c8aff93 100644
+--- a/hwc/HwcLayer.h
++++ b/hwc/HwcLayer.h
+@@ -48,6 +48,7 @@ class HwcLayer {
+     std::optional<BufferSampleRange> sample_range;
+     std::optional<Colorspace> colorspace;
+     std::optional<TransferFunction> transfer_func;
++    std::optional<float> brightness;
+     std::optional<CompositionType> composition_type;
+     std::optional<DstRectInfo> display_frame;
+     std::optional<float> alpha;
+@@ -101,6 +102,12 @@ class HwcLayer {
+     return transfer_func_;
+   }
+ 
++  // SurfaceFlinger dims SDR layers while the backlight is raised for HDR
++  // content. Planes can't do that, so such a layer has to go through the GPU.
++  bool NeedsDimming() const {
++    return brightness_ < 1.F;
++  }
++
+   const LayerData &GetLayerData() const {
+     return layer_data_;
+   }
+@@ -142,6 +149,7 @@ class HwcLayer {
+   BufferBlendMode blend_mode_{};
+   Colorspace colorspace_{};
+   TransferFunction transfer_func_{};
++  float brightness_ = 1.F;
+ 
+   bool prior_buffer_scanout_flag_{};
+ 
+diff --git a/hwc3/ComposerClient.cpp b/hwc3/ComposerClient.cpp
+index 549c979..12857f3 100644
+--- a/hwc3/ComposerClient.cpp
++++ b/hwc3/ComposerClient.cpp
+@@ -679,6 +679,9 @@ void ComposerClient::DispatchLayerCommand(int64_t display_handle,
+   properties.transform = AidlToLayerTransform(command.transform);
+   properties.z_order = AidlToZOrder(command.z);
+   properties.damage = AidlToDamage(command.damage);
++  if (command.brightness) {
++    properties.brightness = command.brightness->brightness;
++  }
+ 
+   layer->SetLayerProperties(properties);
+ 

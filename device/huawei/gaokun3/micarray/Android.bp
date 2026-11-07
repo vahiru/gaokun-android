@@ -1,9 +1,9 @@
 // Microphone array processing for the Huawei MateBook E Go (gaokun3), loaded by
-// the audio HAL's capture hook (patches/0206, ro.vendor.audio.primary.capture_hook
+// the audio HAL's capture hook (patches/android/hardware-interfaces/0010, ro.vendor.audio.primary.capture_hook
 // in device.mk). See README.md.
 //
 // In /vendor/lib64/soundfx like speakerfx: the only vendor directory the HAL's
-// APEX linker namespace may load from (patches/0068).
+// APEX linker namespace may load from (patches/android/hardware-interfaces/0005).
 cc_library_shared {
     name: "libgaokunmicarray",
     vendor: true,

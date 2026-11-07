@@ -1,0 +1,34 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] arm64: dts: qcom: sc8280xp-huawei-gaokun3: restrict default CMA pool below 4 GiB
+
+Without alloc-ranges, the 128 MiB default linux,cma pool is placed at
+0x878000000 (~34 GiB), outside the 32-bit coherent DMA mask of ath11k. During
+s2idle resume, dma-direct cannot allocate from that CMA pool and falls back to
+the ZONE_DMA buddy allocator for order-7 and order-9 contiguous blocks while
+compaction is disabled, resulting in page allocation failures.
+
+Add alloc-ranges = <0x0 0x80000000 0x0 0x80000000> to linux,cma so the default
+CMA pool is placed below 4 GiB and services 32-bit coherent DMA allocations.
+
+Origin: local
+Upstream-Status: Pending
+---
+--- a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
++++ b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
+@@ -215,6 +215,14 @@
+ 		linux,cma {
+ 			compatible = "shared-dma-pool";
+ 			size = <0x0 0x8000000>;
++			/*
++			 * Keep the default CMA pool below 4 GiB: without this it is
++			 * allocated top-down at 0x878000000, where devices with a
++			 * 32-bit coherent mask (ath11k/MHI) cannot use it and fall
++			 * back to high-order ZONE_DMA buddy allocations on every
++			 * resume.
++			 */
++			alloc-ranges = <0x0 0x80000000 0x0 0x80000000>;
+ 			reusable;
+ 			linux,cma-default;
+ 		};
+-- 
+2.43.0

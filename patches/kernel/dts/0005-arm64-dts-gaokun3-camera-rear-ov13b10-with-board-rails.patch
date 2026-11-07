@@ -1,0 +1,106 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] arm64: dts: qcom: sc8280xp-huawei-gaokun3: add rear OV13B10 camera sensor node
+
+Describe the rear OmniVision OV13B10 sensor at 0x36 on cci1_i2c0 connected to
+csiphy0 (4 lanes, 560 MHz link frequency, 19.2 MHz MCLK4, active-low reset on
+GPIO 7, AVDD on vreg_l2b, DOVDD on vreg_l2c, and DVDD gated by GPIO 92), matching
+the power sequence in Huawei's Windows camera driver package (CAMS_RES_QRD.bin)
+and ACPI DSDT.
+
+Origin: local
+Upstream-Status: Pending
+---
+diff --git a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3-camera.dtsi b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3-camera.dtsi
+index 690db45..937eda9 100644
+--- a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3-camera.dtsi
++++ b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3-camera.dtsi
+@@ -60,6 +60,10 @@
+ 		compatible = "regulator-fixed";
+ 
+ 		regulator-name = "vreg_camr";
++		/* Rear sensor digital core rail, gated by GPIO92 (Windows CAMS_RES_QRD).
++		 * The board LDO sets the real voltage; 1.2V is OV13B10 DVDD nominal. */
++		regulator-min-microvolt = <1200000>;
++		regulator-max-microvolt = <1200000>;
+ 
+ 		gpio = <&tlmm 92 GPIO_ACTIVE_HIGH>;
+ 		enable-active-high;
+@@ -122,14 +126,23 @@
+ 	status = "okay";
+ 
+ 	ports {
+-		/* port@0 (csiphy0 -> rear s5k3l6) removed: vdda(l2b) is held at
+-		 * 1.8V by DSI vddi while S5K3L6 wants 2.8V - sensor NAKs on CCI
+-		 * (i2c -6), and v7.2 camss iterates endpoints with
+-		 * fwnode_graph_for_each_endpoint (no availability check), so a
+-		 * wired-but-never-binding sensor blocks the whole v4l2-async
+-		 * notifier - the front camera would get no /dev/v4l-subdev*
+-		 * either. Shared-rail conflict needs board-level evidence.
++		/*
++		 * port@0: csiphy0 -> rear OV13B10. Powered per the board's
++		 * Windows camera power table (CAMS_RES_QRD.bin): LDO2_B 2.8V
++		 * (vdda), LDO2_C 1.8V (vddio), GPIO92-gated rail (vddd), reset
++		 * GPIO7, MCLK4 19.2MHz. L2B is shared with the panel's vddi
++		 * (1.8V vote); the sensor driver raises it to 2.8V while
++		 * powered, matching Windows.
+ 		 */
++		port@0 {
++			csiphy0_ep: endpoint@0 {
++				reg = <0>;
++
++				clock-lanes = <7>;
++				data-lanes = <0 1 2 3>;
++				remote-endpoint = <&ov13b10_ep>;
++			};
++		};
+ 
+ 		port@3 {
+ 			csiphy3_ep: endpoint@0 {
+@@ -163,7 +176,46 @@
+ 	 *
+ 	 * This sensor has never been detected on 2023 model
+ 	 */
+-	/* camera_rear (s5k3l6xx) removed - see camss port@0 note above */
++	/*
++	 * Rear camera. The board's Windows driver package lists two rear modules
++	 * (ofilm_ov13b10 and lijing_s5k3l6); on OV13B10 units, CCI responds at
++	 * 0x36 (OV13B10) and 0x50 (module EEPROM) once the rails are enabled,
++	 * with nothing at 0x10. Rails from CAMS_RES_QRD.bin: LDO2_B 2.8V (avdd,
++	 * shared with the panel's 1.8V vddi and raised to 2.8V by the sensor
++	 * driver while powered), LDO2_C 1.8V (dovdd), GPIO92-gated core rail
++	 * (dvdd), reset GPIO7, MCLK4.
++	 * The upstream ov13b10 register tables assume a 19.2 MHz MCLK.
++	 */
++	camera_rear: camera@36 {
++		compatible = "ovti,ov13b10";
++		reg = <0x36>;
++
++		pinctrl-0 = <&camr_rgb_default>;
++		pinctrl-names = "default";
++
++		clocks = <&camcc CAMCC_MCLK4_CLK>;
++		assigned-clocks = <&camcc CAMCC_MCLK4_CLK>;
++		assigned-clock-rates = <19200000>;
++
++		reset-gpios = <&tlmm 7 GPIO_ACTIVE_LOW>;
++
++		avdd-supply = <&vreg_l2b>;
++		dovdd-supply = <&vreg_l2c>;
++		dvdd-supply = <&vreg_camr>;
++
++		lens-focus = <&voice_coil_motor>;
++
++		orientation = <1>;
++		rotation = <180>; /* FIXME */
++
++		port {
++			ov13b10_ep: endpoint {
++				data-lanes = <1 2 3 4>;
++				link-frequencies = /bits/ 64 <560000000>;
++				remote-endpoint = <&csiphy0_ep>;
++			};
++		};
++	};
+ 
+ 	// eeprom@50/51 <= l2c
+ };

@@ -68,7 +68,7 @@
              再把 48000 重采样回 App 要的 44100。16000/8000 同理。
              所以上层仍可请求任意低采样率，只是物理层统一在 48 kHz 上工作。
 
-             ⚠️ 采样率这一项只靠本文件就够（HAL 的 patches/0051 修的是"打开哪个 PCM"，
+             ⚠️ 采样率这一项只靠本文件就够（HAL 的 patches/android/hardware-interfaces/0002 修的是"打开哪个 PCM"，
              是另一个根因）。这里列的值会被 HAL 原样交给 ALSA（alsa/UtilsAlsa.cpp:388），开不了
              要到开始录音（StreamAlsaMonoPipe::start() → StreamAlsaBase::openDeviceProxies()）才失败 —— 那时策略早已放行，结果是悄悄录出空文件；
              而 getInputForDevice() 在 open 之后的比对又不允许 HAL 自己换成别的配置 ——
@@ -132,7 +132,7 @@
              扬声器在另一个后端（WSA / MultiMedia2 / hw:0,1），两者不争用，
              切换发生在 PCM 层面。
              ⚠️ 耳机麦要的是 hw:0,2，回落成 (0,0) 会失败 —— 所以 v1.0 AV-10 加了"按设备类型回落"：
-             patches/0077（tree-fix [21]）让 getCardAndDeviceId() 在地址解析失败时先读
+             patches/android/hardware-interfaces/0007（tree-fix [21]）让 getCardAndDeviceId() 在地址解析失败时先读
              ro.vendor.audio.primary.alsa.<类型>（device.mk 只设了 in_headset）；输出两口没设属性，
              仍走上面这个 (0,0) 回落，行为不变。见下面耳机麦那段。
 
@@ -157,7 +157,7 @@
              此前【刻意不声明】：可插拔端口不能带 address（见上面那段守卫），不带 address 时
              HAL 回落到 hw:0,0，那是个【只有播放】的设备（/dev/snd 里只有 pcmC0D0p，没有 pcmC0D0c）
              → 打开必失败，插着耳机录音会从"能用的内置麦"退化成"什么都录不到"。
-             现在 patches/0077 + device.mk 的 ro.vendor.audio.primary.alsa.in_headset=CARD_0_DEV_2
+             现在 patches/android/hardware-interfaces/0007 + device.mk 的 ro.vendor.audio.primary.alsa.in_headset=CARD_0_DEV_2
              让它落到 hw:0,2（TX_CODEC_DMA_TX_3 → MultiMedia3）；混音器 TX 通路 audio-route.sh 开机就摆好了
              （"耳机麦路由已应用（PCM2 / TX）"那段），这里不用再加控件。
              ⚠️ 前提三条，缺一条就会重现上面那个退化（插耳机后录音为空）：

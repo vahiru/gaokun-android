@@ -1,0 +1,44 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] Input: himax-spi: report X/Y axis resolution (10 units/mm)
+
+Set the ABS_MT_POSITION_X and ABS_MT_POSITION_Y resolution to 10 units/mm via
+input_abs_set_res() (2560 x 1600 coordinate space across the 266.0 x 166.3 mm
+12.35-inch 16:10 panel, or 9.62 units/mm) so Android InputReader can compute
+physical touch geometry and gesture thresholds.
+
+Origin: local
+Upstream-Status: Pending
+---
+diff --git a/drivers/input/touchscreen/himax-spi-core.c b/drivers/input/touchscreen/himax-spi-core.c
+--- a/drivers/input/touchscreen/himax-spi-core.c
++++ b/drivers/input/touchscreen/himax-spi-core.c
+@@ -41,6 +41,8 @@
+ /* TP SRAM address size and data size */
+ #define HIMAX_REG_SZ					4U
+ #define HIMAX_MAX_RX					60U
++/* Axis resolution in units per millimetre; see himax_input_dev_config(). */
++#define HX_RES_UNITS_PER_MM				10
+ #define HIMAX_MAX_TX					40U
+ #define HIMAX_HX83121A_SAFE_MODE_PASSWORD		0x9527
+ /* FIXME: this is for hx83120j, ~4928 for hx83121a 40 * 60 * 2 + 128 */
+@@ -667,6 +669,20 @@
+ 			     0, SZ_64K - 1, himax_fuzz, 0);
+ 	input_set_abs_params(ts->input_dev, ABS_MT_POSITION_Y,
+ 			     0, SZ_64K - 1, himax_fuzz, 0);
++
++	/*
++	 * Report the axis resolution in units per millimetre.  Leaving it at
++	 * zero -- which is what a driver that never calls this gets -- tells
++	 * userspace "unknown", and Android then has no way to reason about
++	 * contact geometry in physical units.  hx_expand_and_resolve() maps the
++	 * 60-column grid onto 2560 units and the 40-row grid onto 1600, and the
++	 * panel measures 266.0 x 166.3 mm (12.35" 16:10), so both axes come out
++	 * at 9.62 units/mm; input_absinfo::resolution is an integer, hence 10.
++	 * Both axes share the value, so touchscreen_parse_properties() swapping
++	 * the two absinfo structs below cannot get it wrong.
++	 */
++	input_abs_set_res(ts->input_dev, ABS_MT_POSITION_X, HX_RES_UNITS_PER_MM);
++	input_abs_set_res(ts->input_dev, ABS_MT_POSITION_Y, HX_RES_UNITS_PER_MM);
+ 	// TODO: 根据触点附近数据集建模得到
+ 	if (!disable_pressure) {
+ 		input_set_abs_params(ts->input_dev, ABS_MT_TOUCH_MAJOR, 0, 255, 0, 0);

@@ -1,0 +1,214 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] Input: himax-spi: add fixed-point One Euro filter for reported coordinates
+
+Fixed-step exponential smoothing (track_smoothing) introduces ~3 frames of lag
+during fast flicks, while disabling smoothing leaves visible centroid jitter on
+slow drags.
+
+Implement a per-track fixed-point One Euro filter (Casiez et al., CHI 2012) on
+reported coordinates, controlled via sysfs attributes track_filter_mincutoff
+(in mHz, 0 to disable), track_filter_beta, and track_filter_dcutoff. The cutoff
+frequency scales linearly with low-pass-filtered speed so slow drags are
+smoothed while fast flicks experience minimal lag.
+
+Origin: local
+Upstream-Status: Pending
+---
+diff --git a/drivers/input/touchscreen/himax-spi-core.c b/drivers/input/touchscreen/himax-spi-core.c
+index e764d4d..7599e68 100644
+--- a/drivers/input/touchscreen/himax-spi-core.c
++++ b/drivers/input/touchscreen/himax-spi-core.c
+@@ -1101,6 +1101,9 @@ HX_ALGO_ATTR_S16_RW(edge_blend_q8);
+ /* Tracking */
+ HX_ALGO_ATTR_S32_RW(track_dist2_max);
+ HX_ALGO_ATTR_S32_RW(track_tap_radius);
++HX_ALGO_ATTR_S32_RW(track_filter_mincutoff);
++HX_ALGO_ATTR_S32_RW(track_filter_beta);
++HX_ALGO_ATTR_S32_RW(track_filter_dcutoff);
+ HX_ALGO_ATTR_U8_RW(track_lost_frames);
+ HX_ALGO_ATTR_U8_RW(debounce_base);
+ HX_ALGO_ATTR_BOOL_RW(track_smoothing);
+@@ -1224,6 +1227,9 @@ static struct attribute *hx_algo_attrs[] = {
+ 	&dev_attr_track_start_debounce.attr,
+ 	&dev_attr_track_jump_dist2.attr,
+ 	&dev_attr_track_tap_radius.attr,
++	&dev_attr_track_filter_mincutoff.attr,
++	&dev_attr_track_filter_beta.attr,
++	&dev_attr_track_filter_dcutoff.attr,
+ 	&dev_attr_stats.attr,
+ 	&dev_attr_contacts_log.attr,
+ 	NULL,
+diff --git a/drivers/input/touchscreen/hx-algo.c b/drivers/input/touchscreen/hx-algo.c
+index 81732f8..5946609 100644
+--- a/drivers/input/touchscreen/hx-algo.c
++++ b/drivers/input/touchscreen/hx-algo.c
+@@ -79,6 +79,9 @@ void hx_algo_init_defaults(struct hx_algo *algo)
+ 	algo->track_start_debounce = 2;
+ 	algo->track_jump_dist2     = 0;  /* disabled by default */
+ 	algo->track_tap_radius     = 0;  /* anchor lock off by default */
++	algo->track_filter_mincutoff = 0;  /* position filter off by default */
++	algo->track_filter_beta      = 15;
++	algo->track_filter_dcutoff   = 30000;
+ }
+ 
+ /* ======================================================================== */
+@@ -1423,6 +1426,64 @@ static void hx_reset_track(struct hx_track *trk)
+ 	memset(trk, 0, sizeof(*trk));
+ }
+ 
++/*
++ * Position filter: a One Euro filter (Casiez et al., CHI 2012) per track.
++ *
++ * Without smoothing the centroid wobbles by a few units from frame to
++ * frame, which shows as a shaking point during a slow slide, worse on
++ * battery where the signal is weaker.  track_smoothing's fixed 1/4 step
++ * steadies it but lags about three frames at every speed, which blunts
++ * flicks.  This filter's cutoff rises with speed instead:
++ *
++ *	cutoff = mincutoff + beta * speed
++ *
++ * so a slow slide is smoothed hard and a flick passes almost as measured.
++ * The velocity is how far the measurement is from the filtered position,
++ * per second, low-passed per axis at dcutoff; the speed is its magnitude.
++ * Matching and prediction keep using x/y;
++ * only the reported position is filtered.  It starts on the down position,
++ * so a touch-down is reported without lag.
++ */
++#define HX_FILTER_HZ		120	/* frames per second while touched */
++#define HX_FILTER_MAX_MHZ	10000000
++
++/* One frame of a first-order low-pass at @mhz: w / (1 + w), w = 2 pi f / rate, Q16. */
++static u32 hx_filter_alpha(s64 mhz)
++{
++	u64 w = (u64)clamp_t(s64, mhz, 0, HX_FILTER_MAX_MHZ) * 6283;
++
++	return div64_u64(w << 16, w + (u64)HX_FILTER_HZ * 1000000);
++}
++
++static void hx_filter_reset(struct hx_track *trk)
++{
++	trk->fx = trk->x << 8;
++	trk->fy = trk->y << 8;
++	trk->fvx = 0;
++	trk->fvy = 0;
++}
++
++static void hx_filter_update(const struct hx_algo *algo, struct hx_track *trk)
++{
++	s32 ex = (trk->x << 8) - trk->fx;
++	s32 ey = (trk->y << 8) - trk->fy;
++	u32 speed, a;
++
++	if (algo->track_filter_mincutoff <= 0) {
++		/* Off: follow the measurement, so turning it on does not jump. */
++		hx_filter_reset(trk);
++		return;
++	}
++	a = hx_filter_alpha(algo->track_filter_dcutoff);
++	trk->fvx += ((s64)a * (((s64)ex * HX_FILTER_HZ >> 8) - trk->fvx)) >> 16;
++	trk->fvy += ((s64)a * (((s64)ey * HX_FILTER_HZ >> 8) - trk->fvy)) >> 16;
++	speed = int_sqrt64((s64)trk->fvx * trk->fvx + (s64)trk->fvy * trk->fvy);
++	a = hx_filter_alpha(algo->track_filter_mincutoff +
++			    (s64)max(algo->track_filter_beta, 0) * speed);
++	trk->fx += ((s64)a * ex + (1 << 15)) >> 16;
++	trk->fy += ((s64)a * ey + (1 << 15)) >> 16;
++}
++
+ void hx_track_contacts(struct hx_algo *algo,
+ 		       struct input_mt_pos *det, int det_cnt)
+ {
+@@ -1549,15 +1610,19 @@ void hx_track_contacts(struct hx_algo *algo,
+ 			if (trk->debounce == 0) {
+ 				trk->anchor_x = trk->x;
+ 				trk->anchor_y = trk->y;
++				hx_filter_reset(trk);
++			}
++		} else {
++			if (trk->anchored) {
++				s32 ax = trk->x - trk->anchor_x;
++				s32 ay = trk->y - trk->anchor_y;
++				s32 r  = algo->track_tap_radius;
++
++				/* Released for good once it moves; also when the lock is off. */
++				if (r <= 0 || ax * ax + ay * ay > r * r)
++					trk->anchored = false;
+ 			}
+-		} else if (trk->anchored) {
+-			s32 ax = trk->x - trk->anchor_x;
+-			s32 ay = trk->y - trk->anchor_y;
+-			s32 r  = algo->track_tap_radius;
+-
+-			/* Released for good once it moves; also when the lock is off. */
+-			if (r <= 0 || ax * ax + ay * ay > r * r)
+-				trk->anchored = false;
++			hx_filter_update(algo, trk);
+ 		}
+ 
+ 		track_matched[m->track_idx] = true;
+@@ -1616,6 +1681,7 @@ void hx_track_contacts(struct hx_algo *algo,
+ 		trk->anchored = algo->track_tap_radius > 0;
+ 		trk->anchor_x = det[j].x;
+ 		trk->anchor_y = det[j].y;
++		hx_filter_reset(trk);
+ 		if (j < algo->contact_count)
+ 			trk->signal_sum = algo->contacts[j].signal_sum;
+ 
+diff --git a/drivers/input/touchscreen/hx-algo.h b/drivers/input/touchscreen/hx-algo.h
+index 09aa801..f5de68e 100644
+--- a/drivers/input/touchscreen/hx-algo.h
++++ b/drivers/input/touchscreen/hx-algo.h
+@@ -102,6 +102,14 @@ struct hx_track {
+ 	bool anchored;
+ 	s32  anchor_x;
+ 	s32  anchor_y;
++	/*
++	 * Position filter (track_filter_mincutoff): the filtered position in
++	 * 1/256 units and the low-passed velocity in units per second.
++	 */
++	s32  fx;
++	s32  fy;
++	s32  fvx;
++	s32  fvy;
+ };
+ 
+ /*
+@@ -284,6 +292,9 @@ struct hx_algo {
+ 	s32  track_jump_dist2;     /* position jump → force lift+repress   */
+ 	s32  track_tap_radius;     /* hold the down position until the     */
+ 				   /* track moves this far (0 = off)       */
++	s32  track_filter_mincutoff; /* One Euro cutoff at rest, mHz (0 = off) */
++	s32  track_filter_beta;    /* cutoff added per unit/s of speed, mHz */
++	s32  track_filter_dcutoff; /* cutoff of the speed estimate, mHz    */
+ 
+ 	/* ---- Diagnostics ---- */
+ 	struct hx_stats  stats;
+@@ -324,15 +335,16 @@ void hx_expand_and_resolve(struct hx_algo *algo,
+ /* Phase 3A: greedy tracker update (with velocity prediction) */
+ /*
+  * The position to report for a track: its down position while the anchor
+- * lock holds, its measured position otherwise.
++ * lock holds, otherwise its filtered position when the filter is on, its
++ * measured position when not.
+  *
+  * A finger that taps without moving still drifts as it lifts: the contact
+  * shrinks and weakens over the last one or two frames and its centroid
+  * moves 5-10 units on its own.  Unity starts a drag at 10 px, so a tap on a
+  * scrolling list arrives as a scroll.  Holding the down position until the
+  * touch has really moved keeps such taps still; a flick moves tens of units
+- * in its first frame and is released at once, and a released track reports
+- * every position as measured, so slides are not delayed or stepped.
++ * in its first frame and is released at once, while a slow slide is held
++ * until it is the radius away from where it landed.
+  */
+ static inline void hx_track_report_pos(const struct hx_algo *algo,
+ 				       const struct hx_track *trk,
+@@ -341,6 +353,9 @@ static inline void hx_track_report_pos(const struct hx_algo *algo,
+ 	if (algo->track_tap_radius > 0 && trk->anchored) {
+ 		*x = trk->anchor_x;
+ 		*y = trk->anchor_y;
++	} else if (algo->track_filter_mincutoff > 0) {
++		*x = (trk->fx + 128) >> 8;
++		*y = (trk->fy + 128) >> 8;
+ 	} else {
+ 		*x = trk->x;
+ 		*y = trk->y;

@@ -1,0 +1,37 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] arm64: dts: qcom: sc8280xp-huawei-gaokun3: mark vreg_l9d regulator-always-on
+
+In sc8280xp-huawei-gaokun3.dts, only usb_0_qmpphy references vreg_l9d
+(0.912 V), whereas Windows PEP also votes LDO9_D on for port 0, the multi-port
+USB controller (a400000.usb), and PCIe controllers. When usb_0 suspends in
+device mode or reconfigures its QMP combo PHY on Type-C role/orientation
+changes, disabling vreg_l9d triggers a full-board reset on suspend or leaves
+port 0 DWC3 soft-reset timing out (-ETIMEDOUT) and drops the internal stylus
+MCU on bus 3-3.
+
+Mark vreg_l9d regulator-always-on so LDO9_D stays powered across combo PHY
+transitions and system suspend.
+
+Origin: local
+Upstream-Status: Pending
+---
+--- a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
++++ b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
+@@ -593,6 +593,17 @@
+ 			regulator-min-microvolt = <912000>;
+ 			regulator-max-microvolt = <912000>;
+ 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
++			/*
++			 * usb_0_qmpphy is its only consumer here, but port0's
++			 * USB2 side, the multiport controller and PCIe need it
++			 * too: the Windows PEP votes LDO9_D for URS0, USB2 and
++			 * PCI2-6. Without this, every combo PHY exit
++			 * (orientation or mode switch, device-mode suspend)
++			 * turns it off; port0's dwc3 then fails to soft-reset
++			 * (-110), and suspending with usb_0 in device mode
++			 * resets the board.
++			 */
++			regulator-always-on;
+ 			// HACK: wrongly voting for LPM may block DP Alt
+ 			// regulator-allow-set-load;
+ 			// regulator-allowed-modes = <RPMH_REGULATOR_MODE_LPM

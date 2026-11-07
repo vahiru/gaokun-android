@@ -1,0 +1,231 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] bus: mhi: host: allow retaining firmware and RDDM DMA allocations across power cycles
+
+During s2idle suspend/resume on SC8280XP, ath11k powers down and reloads its
+firmware via MHI while pm_restrict_gfp_mask() forbids __GFP_IO compaction.
+Reallocating order-7 (512 KB) 32-bit GFP_DMA segments for the SBL, fbc_image,
+and rddm_image tables on resume fails under memory fragmentation, causing MHI
+power-up timeouts and DPM watchdog panics.
+
+Add an opt-in reuse_fw_images flag on struct mhi_controller and enable it for
+ath11k so the SBL BHI buffer, fbc_image, and rddm_image DMA allocations are
+retained across MHI power-down/power-up cycles and freed only when the MHI
+controller is unregistered.
+
+Origin: local
+Upstream-Status: Pending
+---
+diff --git a/drivers/bus/mhi/host/boot.c b/drivers/bus/mhi/host/boot.c
+index 19c8491..0de0a56 100644
+--- a/drivers/bus/mhi/host/boot.c
++++ b/drivers/bus/mhi/host/boot.c
+@@ -302,8 +302,8 @@ invalid_pm_state:
+ 	return -EIO;
+ }
+ 
+-static void mhi_free_bhi_buffer(struct mhi_controller *mhi_cntrl,
+-				struct image_info *image_info)
++void mhi_free_bhi_buffer(struct mhi_controller *mhi_cntrl,
++			 struct image_info *image_info)
+ {
+ 	struct mhi_buf *mhi_buf = image_info->mhi_buf;
+ 
+@@ -438,18 +438,28 @@ static enum mhi_fw_load_type mhi_fw_load_type_get(const struct mhi_controller *m
+ 
+ static int mhi_load_image_bhi(struct mhi_controller *mhi_cntrl, const u8 *fw_data, size_t size)
+ {
+-	struct image_info *image;
++	struct image_info *image = mhi_cntrl->bhi_image;
+ 	int ret;
+ 
+-	ret = mhi_alloc_bhi_buffer(mhi_cntrl, &image, size);
+-	if (ret)
+-		return ret;
++	if (image && image->mhi_buf->len != size) {
++		mhi_free_bhi_buffer(mhi_cntrl, image);
++		mhi_cntrl->bhi_image = image = NULL;
++	}
++
++	if (!image) {
++		ret = mhi_alloc_bhi_buffer(mhi_cntrl, &image, size);
++		if (ret)
++			return ret;
++	}
+ 
+ 	/* Load the firmware into BHI vec table */
+ 	memcpy(image->mhi_buf->buf, fw_data, size);
+ 
+ 	ret = mhi_fw_load_bhi(mhi_cntrl, &image->mhi_buf[image->entries - 1]);
+-	mhi_free_bhi_buffer(mhi_cntrl, image);
++	if (mhi_cntrl->reuse_fw_images)
++		mhi_cntrl->bhi_image = image;
++	else
++		mhi_free_bhi_buffer(mhi_cntrl, image);
+ 
+ 	return ret;
+ }
+@@ -577,10 +587,26 @@ skip_req_fw:
+ 			fw_sz -= mhi_cntrl->sbl_size;
+ 		}
+ 
+-		ret = mhi_alloc_bhie_table(mhi_cntrl, &mhi_cntrl->fbc_image, fw_sz);
+-		if (ret) {
+-			release_firmware(firmware);
+-			goto error_fw_load;
++		/*
++		 * A table kept by reuse_fw_images is only reused if it has
++		 * exactly the segment count this image needs: the device reads
++		 * the whole vector table, so stale trailing entries must not
++		 * exist.
++		 */
++		if (mhi_cntrl->fbc_image &&
++		    mhi_cntrl->fbc_image->entries !=
++		    DIV_ROUND_UP(fw_sz, mhi_cntrl->seg_len) + 1) {
++			mhi_free_bhie_table(mhi_cntrl, mhi_cntrl->fbc_image);
++			mhi_cntrl->fbc_image = NULL;
++		}
++
++		if (!mhi_cntrl->fbc_image) {
++			ret = mhi_alloc_bhie_table(mhi_cntrl,
++						   &mhi_cntrl->fbc_image, fw_sz);
++			if (ret) {
++				release_firmware(firmware);
++				goto error_fw_load;
++			}
+ 		}
+ 
+ 		/* Load the firmware into BHIE vec table */
+diff --git a/drivers/bus/mhi/host/init.c b/drivers/bus/mhi/host/init.c
+index 12dcb1a..8aad64b 100644
+--- a/drivers/bus/mhi/host/init.c
++++ b/drivers/bus/mhi/host/init.c
+@@ -1065,6 +1065,20 @@ void mhi_unregister_controller(struct mhi_controller *mhi_cntrl)
+ 	mhi_deinit_free_irq(mhi_cntrl);
+ 	mhi_destroy_debugfs(mhi_cntrl);
+ 
++	/* Images kept across power cycles when reuse_fw_images is set */
++	if (mhi_cntrl->fbc_image) {
++		mhi_free_bhie_table(mhi_cntrl, mhi_cntrl->fbc_image);
++		mhi_cntrl->fbc_image = NULL;
++	}
++	if (mhi_cntrl->rddm_image) {
++		mhi_free_bhie_table(mhi_cntrl, mhi_cntrl->rddm_image);
++		mhi_cntrl->rddm_image = NULL;
++	}
++	if (mhi_cntrl->bhi_image) {
++		mhi_free_bhi_buffer(mhi_cntrl, mhi_cntrl->bhi_image);
++		mhi_cntrl->bhi_image = NULL;
++	}
++
+ 	if (mhi_cntrl->edl_trigger)
+ 		sysfs_remove_file(&mhi_dev->dev.kobj, &dev_attr_trigger_edl.attr);
+ 
+@@ -1158,15 +1172,18 @@ int mhi_prepare_for_power_up(struct mhi_controller *mhi_cntrl)
+ 			  4);
+ 		/*
+ 		 * Allocate RDDM table for debugging purpose if specified
++		 * (it is still there if reuse_fw_images kept it)
+ 		 */
+-		mhi_alloc_bhie_table(mhi_cntrl, &mhi_cntrl->rddm_image,
+-				     mhi_cntrl->rddm_size);
++		if (!mhi_cntrl->rddm_image)
++			mhi_alloc_bhie_table(mhi_cntrl, &mhi_cntrl->rddm_image,
++					     mhi_cntrl->rddm_size);
+ 		if (mhi_cntrl->rddm_image) {
+ 			ret = mhi_rddm_prepare(mhi_cntrl,
+ 					       mhi_cntrl->rddm_image);
+ 			if (ret) {
+ 				mhi_free_bhie_table(mhi_cntrl,
+ 						    mhi_cntrl->rddm_image);
++				mhi_cntrl->rddm_image = NULL;
+ 				goto error_reg_offset;
+ 			}
+ 		}
+@@ -1188,6 +1205,9 @@ EXPORT_SYMBOL_GPL(mhi_prepare_for_power_up);
+ 
+ void mhi_unprepare_after_power_down(struct mhi_controller *mhi_cntrl)
+ {
++	if (mhi_cntrl->reuse_fw_images)
++		goto keep_images;
++
+ 	if (mhi_cntrl->fbc_image) {
+ 		mhi_free_bhie_table(mhi_cntrl, mhi_cntrl->fbc_image);
+ 		mhi_cntrl->fbc_image = NULL;
+@@ -1198,6 +1218,7 @@ void mhi_unprepare_after_power_down(struct mhi_controller *mhi_cntrl)
+ 		mhi_cntrl->rddm_image = NULL;
+ 	}
+ 
++keep_images:
+ 	mhi_cntrl->bhi = NULL;
+ 	mhi_cntrl->bhie = NULL;
+ 
+diff --git a/drivers/bus/mhi/host/internal.h b/drivers/bus/mhi/host/internal.h
+index 7b0ee5e..3144781 100644
+--- a/drivers/bus/mhi/host/internal.h
++++ b/drivers/bus/mhi/host/internal.h
+@@ -323,6 +323,8 @@ void mhi_create_devices(struct mhi_controller *mhi_cntrl);
+ 
+ int mhi_alloc_bhie_table(struct mhi_controller *mhi_cntrl,
+ 			 struct image_info **image_info, size_t alloc_size);
++void mhi_free_bhi_buffer(struct mhi_controller *mhi_cntrl,
++			 struct image_info *image_info);
+ void mhi_free_bhie_table(struct mhi_controller *mhi_cntrl,
+ 			 struct image_info *image_info);
+ 
+diff --git a/drivers/net/wireless/ath/ath11k/mhi.c b/drivers/net/wireless/ath/ath11k/mhi.c
+index a6c9ff1..e678a23 100644
+--- a/drivers/net/wireless/ath/ath11k/mhi.c
++++ b/drivers/net/wireless/ath/ath11k/mhi.c
+@@ -382,6 +382,10 @@ int ath11k_mhi_register(struct ath11k_pci *ab_pci)
+ 	mhi_ctrl->sbl_size = SZ_512K;
+ 	mhi_ctrl->seg_len = SZ_512K;
+ 	mhi_ctrl->fbc_download = true;
++	/* Resume re-downloads the firmware: don't make it depend on finding
++	 * order-7 GFP_DMA blocks with compaction disabled (suspend gfp mask).
++	 */
++	mhi_ctrl->reuse_fw_images = true;
+ 	mhi_ctrl->runtime_get = ath11k_mhi_op_runtime_get;
+ 	mhi_ctrl->runtime_put = ath11k_mhi_op_runtime_put;
+ 	mhi_ctrl->status_cb = ath11k_mhi_op_status_cb;
+diff --git a/include/linux/mhi.h b/include/linux/mhi.h
+index 4b86ae6..7e45087 100644
+--- a/include/linux/mhi.h
++++ b/include/linux/mhi.h
+@@ -328,6 +328,7 @@ struct mhi_controller_config {
+  * @reg_len: Length of the MHI MMIO region (required)
+  * @fbc_image: Points to firmware image buffer
+  * @rddm_image: Points to RAM dump buffer
++ * @bhi_image: Cached BHI (SBL) buffer, only used if @reuse_fw_images is set
+  * @mhi_chan: Points to the channel configuration table
+  * @lpm_chans: List of channels that require LPM notifications
+  * @irq: base irq # to request (required)
+@@ -374,6 +375,10 @@ struct mhi_controller_config {
+  * @index: Index of the MHI controller instance
+  * @bounce_buf: Use of bounce buffer
+  * @fbc_download: MHI host needs to do complete image transfer (optional)
++ * @reuse_fw_images: Keep the BHI / FBC / RDDM DMA buffers across power
++ *                   cycles and only free them in mhi_unregister_controller(),
++ *                   so that resume does not depend on high-order allocations
++ *                   succeeding (optional)
+  * @wake_set: Device wakeup set flag
+  * @irq_flags: irq flags passed to request_irq (optional)
+  * @mru: the default MRU for the MHI device
+@@ -404,6 +409,7 @@ struct mhi_controller {
+ 	size_t reg_len;
+ 	struct image_info *fbc_image;
+ 	struct image_info *rddm_image;
++	struct image_info *bhi_image;
+ 	struct mhi_chan *mhi_chan;
+ 	struct list_head lpm_chans;
+ 	int *irq;
+@@ -459,6 +465,7 @@ struct mhi_controller {
+ 	int index;
+ 	bool bounce_buf;
+ 	bool fbc_download;
++	bool reuse_fw_images;
+ 	bool wake_set;
+ 	unsigned long irq_flags;
+ 	u32 mru;
+-- 
+2.50.1 (Apple Git-155)
+

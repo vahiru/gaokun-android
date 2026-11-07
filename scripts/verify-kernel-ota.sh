@@ -29,7 +29,7 @@ echo "设备: $DEV"
 
 echo
 echo "══ 1. 内核 ══"
-# dmesg's first line is linux_banner, a compile-time constant. Since patches/0085 reports another
+# dmesg's first line is linux_banner, a compile-time constant. Since patches/kernel/core/0008 reports another
 # release to apps only, uname as root is real too, but rc.2 and rc.3 kernels report 6.6.30 to everyone.
 u=$(sh 'dmesg 2>/dev/null | head -1')
 echo "  $u"

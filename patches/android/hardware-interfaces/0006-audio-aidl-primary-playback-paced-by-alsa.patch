@@ -1,0 +1,194 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] audio: aidl: primary: write playback directly to ALSA and report hardware presentation position
+
+StreamPrimary inherited the emulator-oriented MonoPipe + synthetic wall-clock
+pacing path for playback: whenever AudioFlinger woke slightly late,
+StreamPrimary::transfer() logged "skipping transfer" and dropped an entire
+audio block to catch up with the synthetic clock, causing audible dropouts and
+cumulative A/V desynchronization in rhythm games. In addition, refinePosition()
+reported client-submitted frames rather than frames actually consumed by ALSA.
+
+Add direct-playback helpers (startPlaybackDirect, transferPlaybackDirect, and
+refinePlaybackPosition) to StreamAlsaBase and use them in StreamPrimary for
+non-stub output streams: write directly to the ALSA proxy so hardware clock
+backpressure paces the mixer thread, compute latencyMs from the refined ALSA
+buffer size, and derive presentation positions from proxy_get_presentation_position().
+
+Origin: local
+Upstream-Status: Pending
+---
+diff --git a/audio/aidl/default/alsa/StreamAlsaBase.cpp b/audio/aidl/default/alsa/StreamAlsaBase.cpp
+index 9316517..e5914a9 100644
+--- a/audio/aidl/default/alsa/StreamAlsaBase.cpp
++++ b/audio/aidl/default/alsa/StreamAlsaBase.cpp
+@@ -14,6 +14,7 @@
+  * limitations under the License.
+  */
+ 
++#include <algorithm>
+ #include <cmath>
+ #include <limits>
+ 
+@@ -133,4 +134,81 @@ ndk::ScopedAStatus StreamAlsaBase::setGain(float gain) {
+     return ::android::OK;
+ }
+ 
++::android::status_t StreamAlsaBase::startPlaybackDirect() {
++    if (!mAlsaDeviceProxies.empty()) {
++        // This is a resume after a pause.
++        return ::android::OK;
++    }
++    decltype(mAlsaDeviceProxies) alsaDeviceProxies;
++    if (::android::status_t status = openDeviceProxies(&alsaDeviceProxies);
++        status != ::android::OK) {
++        return status;
++    }
++    mAlsaDeviceProxies = std::move(alsaDeviceProxies);
++    mPlaybackFramesAtOpen = getContext().getFrameCount();
++    mPlaybackFramesDropped = 0;
++    mLastPlaybackPresented = mPlaybackFramesAtOpen;
++    return ::android::OK;
++}
++
++::android::status_t StreamAlsaBase::transferPlaybackDirect(void* buffer, size_t frameCount,
++                                                           size_t* actualFrameCount,
++                                                           int32_t* latencyMs) {
++    if (mAlsaDeviceProxies.empty()) {
++        LOG(FATAL) << __func__ << ": no opened devices";
++        return ::android::NO_INIT;
++    }
++    const size_t bytesToTransfer = frameCount * mFrameSizeBytes;
++    unsigned maxLatency = 0;
++    alsa::applyGain(buffer, mGain, bytesToTransfer, mConfig.value().format, mConfig->channels);
++    for (size_t i = 0; i < mAlsaDeviceProxies.size(); ++i) {
++        // Blocks until ALSA has room for the whole buffer. After a stall ALSA underruns (a gap of
++        // silence) and the stream resumes where it stopped, nothing is thrown away.
++        if (int ret = proxy_write_with_retries(mAlsaDeviceProxies[i].get(), buffer,
++                                               bytesToTransfer, mReadWriteRetries);
++            ret != 0) {
++            LOG(WARNING) << __func__ << ": error writing into ALSA device " << i << ": " << ret
++                         << ", dropping " << frameCount << " frames";
++            if (i == 0) mPlaybackFramesDropped += frameCount;
++        }
++        // The data written last waits for at most the whole ALSA buffer (the refined one: the
++        // kernel may round the requested period up, which proxy_get_latency() does not see).
++        const alsa_device_proxy* proxy = mAlsaDeviceProxies[i].get();
++        const unsigned bufferLatencyMs =
++                proxy->pcm != nullptr ? pcm_get_buffer_size(proxy->pcm) * 1000u /
++                                                static_cast<unsigned>(mSampleRate)
++                                      : proxy_get_latency(proxy);
++        maxLatency = std::max(maxLatency, bufferLatencyMs);
++    }
++    *actualFrameCount = frameCount;
++    maxLatency = std::min(maxLatency, static_cast<unsigned>(std::numeric_limits<int32_t>::max()));
++    *latencyMs = maxLatency;
++    return ::android::OK;
++}
++
++::android::status_t StreamAlsaBase::refinePlaybackPosition(StreamDescriptor::Position* position) {
++    // In standby everything the client handed over has been played out or discarded.
++    if (mAlsaDeviceProxies.empty()) return ::android::OK;
++    // Unlike refinePosition(), do not overwrite the proxy's transfer counter with the client's:
++    // the proxy counts what has actually been written since the device was opened, in client
++    // order, so the n-th frame written into ALSA is the n-th frame sent after start() minus the
++    // drops.
++    int64_t presented = mLastPlaybackPresented;
++    uint64_t alsaFrames;
++    struct timespec timestamp;
++    if (proxy_get_presentation_position(mAlsaDeviceProxies[0].get(), &alsaFrames, &timestamp) ==
++        0) {
++        presented = mPlaybackFramesAtOpen + mPlaybackFramesDropped +
++                    static_cast<int64_t>(std::min<uint64_t>(
++                            alsaFrames, std::numeric_limits<int64_t>::max() / 2));
++        position->timeNs = audio_utils_ns_from_timespec(&timestamp);
++    }
++    // Otherwise ALSA is not running (not started yet, or in an underrun): nothing new has been
++    // presented, report the last position at the current time.
++    presented = std::clamp(presented, mLastPlaybackPresented, position->frames);
++    mLastPlaybackPresented = presented;
++    position->frames = presented;
++    return ::android::OK;
++}
++
+ }  // namespace aidl::android::hardware::audio::core
+diff --git a/audio/aidl/default/include/core-impl/StreamAlsaBase.h b/audio/aidl/default/include/core-impl/StreamAlsaBase.h
+index 8d6a85b..765a5c0 100644
+--- a/audio/aidl/default/include/core-impl/StreamAlsaBase.h
++++ b/audio/aidl/default/include/core-impl/StreamAlsaBase.h
+@@ -57,6 +57,17 @@ class StreamAlsaBase : public StreamCommonImpl {
+     // Returns ::android::NO_INIT if no proxies could be opened, ::android::OK otherwise.
+     ::android::status_t openDeviceProxies(std::vector<alsa::DeviceProxy>* proxies);
+ 
++    // Playback only, for a subclass that writes straight into ALSA instead of through a pipe and
++    // an I/O thread (StreamPrimary), so that the hardware clock paces the stream.
++    // Opens the devices (unless this is a resume after a pause) and resets the counters below.
++    ::android::status_t startPlaybackDirect();
++    // Writes the whole buffer into every device, blocking until ALSA has room for it.
++    ::android::status_t transferPlaybackDirect(void* buffer, size_t frameCount,
++                                               size_t* actualFrameCount, int32_t* latencyMs);
++    // Replaces the client-side frame count in 'position' with the frame that is being presented
++    // by the hardware, and the time with the ALSA timestamp of that reading.
++    ::android::status_t refinePlaybackPosition(StreamDescriptor::Position* position);
++
+     const size_t mBufferSizeFrames;
+     const size_t mFrameSizeBytes;
+     const int mSampleRate;
+@@ -68,6 +79,12 @@ class StreamAlsaBase : public StreamCommonImpl {
+ 
+     // Opened ALSA device proxies. Populated by start(), cleared by standby()/shutdown().
+     std::vector<alsa::DeviceProxy> mAlsaDeviceProxies;
++
++    // Playback only (direct path): the client frame count when the ALSA devices were opened,
++    // frames that have not reached ALSA since then (write errors), and the last reported position.
++    int64_t mPlaybackFramesAtOpen = 0;
++    int64_t mPlaybackFramesDropped = 0;
++    int64_t mLastPlaybackPresented = 0;
+ };
+ 
+ }  // namespace aidl::android::hardware::audio::core
+diff --git a/audio/aidl/default/primary/StreamPrimary.cpp b/audio/aidl/default/primary/StreamPrimary.cpp
+index fb9e0ad..a7af4f4 100644
+--- a/audio/aidl/default/primary/StreamPrimary.cpp
++++ b/audio/aidl/default/primary/StreamPrimary.cpp
+@@ -90,7 +90,8 @@ StreamPrimary::StreamPrimary(StreamContext* context, const Metadata& metadata)
+     if (isStub) {
+         return mStubDriver.start();
+     }
+-    RETURN_STATUS_IF_ERROR(StreamAlsaMonoPipe::start());
++    // Playback writes straight into ALSA (see 'transfer'): no pipe and no output I/O thread.
++    RETURN_STATUS_IF_ERROR(mIsInput ? StreamAlsaMonoPipe::start() : startPlaybackDirect());
+     mStartTimeNs = ::android::uptimeNanos();
+     mFramesSinceStart = 0;
+     mSkipNextTransfer = false;
+@@ -134,6 +135,14 @@ StreamPrimary::StreamPrimary(StreamContext* context, const Metadata& metadata)
+         mFramesSinceStart += *actualFrameCount;
+         return ::android::OK;
+     }
++    if (!mIsInput) {
++        // Playback is paced by the hardware: write straight into ALSA and block until there is
++        // room (StreamAlsaBase::transferPlaybackDirect()). The wall-clock schedule below was made
++        // for the emulator; on real hardware it throws whole blocks away whenever the client is
++        // late (a stalled AudioFlinger skips 2-3 blocks = 170-256 ms of audio to catch up with
++        // the wall clock), so the audio jumps ahead of the app's own clock.
++        return transferPlaybackDirect(buffer, frameCount, actualFrameCount, latencyMs);
++    }
+     // This is a workaround for the emulator implementation which has a host-side buffer
+     // and is not being able to achieve real-time behavior similar to ADSPs (b/302587331).
+     if (!mSkipNextTransfer) {
+@@ -167,9 +176,13 @@ StreamPrimary::StreamPrimary(StreamContext* context, const Metadata& metadata)
+     return ::android::OK;
+ }
+ 
+-::android::status_t StreamPrimary::refinePosition(StreamDescriptor::Position*) {
+-    // Since not all data is actually sent to the HAL, use the position maintained by Stream class
+-    // which accounts for all frames passed from / to the client.
++::android::status_t StreamPrimary::refinePosition(StreamDescriptor::Position* position) {
++    // Playback: the position maintained by the Stream class counts every frame the client has
++    // handed over, including the ones still queued in the ALSA buffer (a whole buffer at most).
++    // Report what the hardware is playing instead.
++    if (!mIsInput && !isStubStreamOnWorker()) return refinePlaybackPosition(position);
++    // Capture: since not all data is actually sent to the HAL, use the position maintained by
++    // Stream class which accounts for all frames passed from / to the client.
+     return ::android::OK;
+ }
+ 

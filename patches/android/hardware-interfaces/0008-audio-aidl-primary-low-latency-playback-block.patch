@@ -1,0 +1,50 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] audio: aidl: primary: allow overriding output nominal latency via ro.vendor.audio.primary.out_latency_ms
+
+ModulePrimary::getNominalLatencyMs() hardcodes 85 ms (4096 frames at 48 kHz)
+for non-MMAP streams. Because AudioFlinger only enables FastMixer when the HAL
+period is below 20 ms (kNormalPlaybackPeriodMs), low-latency AAudio/OpenSL ES
+requests are rejected and end-to-end playback latency exceeds 300 ms.
+
+Read ro.vendor.audio.primary.out_latency_ms for output streams in
+ModulePrimary::getNominalLatencyMs() (keeping 85 ms when unset and leaving
+capture streams at 85 ms). Setting the property to 10 ms yields a 480-frame
+HAL transfer block and enables FastMixer on the primary output.
+
+Origin: local
+Upstream-Status: Inappropriate [device-specific tuning]
+---
+diff --git a/audio/aidl/default/ModulePrimary.cpp b/audio/aidl/default/ModulePrimary.cpp
+index 102d2ff..33750f6 100644
+--- a/audio/aidl/default/ModulePrimary.cpp
++++ b/audio/aidl/default/ModulePrimary.cpp
+@@ -19,6 +19,7 @@
+ #define LOG_TAG "AHAL_ModulePrimary"
+ #include <Log.h>
+ #include <Utils.h>
++#include <android-base/properties.h>
+ 
+ #include "core-impl/Configuration.h"
+ #include "core-impl/ModulePrimary.h"
+@@ -192,7 +193,20 @@ int32_t ModulePrimary::getNominalLatencyMs(const AudioPortConfig& portConfig) {
+     // the virtual Android device implementation to pass CTS. Hardware implementations
+     // should have significantly lower latency.
+     static constexpr int32_t kStandardLatencyMs = 85;
+-    return hasMmapFlag(portConfig.flags.value()) ? kLowLatencyMs : kStandardLatencyMs;
++    if (hasMmapFlag(portConfig.flags.value())) return kLowLatencyMs;
++    // gaokun3: the playback block is what AudioFlinger sizes its mixer by. At 85 ms (4096 frames)
++    // there is no FastMixer (it starts only when the HAL buffer is shorter than the 20 ms normal
++    // sink, Threads.cpp kNormalPlaybackPeriodMs), FAST requests from games are denied, and a tap
++    // sound waits behind a 2-block client buffer + 85 ms + the ALSA buffer. Playback writes
++    // straight into ALSA and blocks there (StreamAlsaBase::transferPlaybackDirect()), so a small
++    // block only means more, shorter writes; the ALSA buffer keeps four periods of it (the
++    // q6apm period step is 480 frames, so a 10 ms block gives 4 x 480 frames = 40 ms).
++    // Capture keeps 85 ms: its MonoPipe sizing and data-driven delivery were tuned for 4096.
++    if (portConfig.flags->getTag() == AudioIoFlags::output) {
++        return ::android::base::GetIntProperty("ro.vendor.audio.primary.out_latency_ms",
++                                               kStandardLatencyMs, 1, kStandardLatencyMs);
++    }
++    return kStandardLatencyMs;
+ }
+ 
+ ndk::ScopedAStatus ModulePrimary::getFlushFromFrameSupport(const AudioPortConfig& in_config,

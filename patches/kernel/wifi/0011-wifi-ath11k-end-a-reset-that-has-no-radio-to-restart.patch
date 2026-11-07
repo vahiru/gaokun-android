@@ -1,0 +1,66 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] wifi: ath11k: end a reset that has no radio to restart
+
+A reset ends in ath11k_mac_op_reconfig_complete(), and mac80211 only gets
+there for a radio that restarts. If the radio was off when the firmware
+crashed, or was stopped before the restart finished, is_reset and
+reset_count stay as they are. The next crash then counts as a failed
+recovery, and every firmware load arms recovery_ws in ath11k_core_restart()
+for its full 60 seconds, with nothing to release it. With Wi-Fi off the
+device is powered down in every suspend, so each resume keeps the system
+awake for a minute.
+
+End the reset in ath11k_core_restart() when no radio is restarting.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/net/wireless/ath/ath11k/core.c | 27 ++++++++++++++++++++++++++
+ 1 file changed, 27 insertions(+)
+
+diff --git a/drivers/net/wireless/ath/ath11k/core.c b/drivers/net/wireless/ath/ath11k/core.c
+index 0029500ff..57d2be112 100644
+--- a/drivers/net/wireless/ath/ath11k/core.c
++++ b/drivers/net/wireless/ath/ath11k/core.c
+@@ -2534,6 +2534,31 @@ static void ath11k_core_post_reconfigure_recovery(struct ath11k_base *ab)
+ 	complete(&ab->driver_recovery);
+ }
+ 
++/*
++ * A reset normally ends in ath11k_mac_op_reconfig_complete(), but mac80211 only
++ * gets there for a radio that is restarting. Nothing else would end the reset
++ * of a radio that was off when the firmware crashed, or that was stopped before
++ * the restart finished.
++ */
++static void ath11k_core_end_reset_without_restart(struct ath11k_base *ab)
++{
++	struct ath11k *ar;
++	int i;
++
++	for (i = 0; i < ab->num_radios; i++) {
++		ar = ab->pdevs[i].ar;
++		if (ar && (ar->state == ATH11K_STATE_RESTARTING ||
++			   ar->state == ATH11K_STATE_RESTARTED))
++			return;
++	}
++
++	atomic_dec(&ab->reset_count);
++	complete(&ab->reset_complete);
++	ab->is_reset = false;
++	atomic_set(&ab->fail_cont_count, 0);
++	__pm_relax(ab->recovery_ws);
++}
++
+ static void ath11k_core_restart(struct work_struct *work)
+ {
+ 	struct ath11k_base *ab = container_of(work, struct ath11k_base, restart_work);
+@@ -2553,6 +2578,8 @@ static void ath11k_core_restart(struct work_struct *work)
+ 
+ 	if (!ab->is_reset)
+ 		ath11k_core_post_reconfigure_recovery(ab);
++	else
++		ath11k_core_end_reset_without_restart(ab);
+ 
+ 	complete(&ab->restart_completed);
+ }

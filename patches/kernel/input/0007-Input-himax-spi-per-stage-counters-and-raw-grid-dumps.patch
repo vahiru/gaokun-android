@@ -1,0 +1,508 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] Input: himax-spi: add per-stage pipeline counters, contact birth log, and debugfs frame dumps
+
+Add observability interfaces to the himax-spi touch processing pipeline:
+
+- algo/stats (read/write sysfs attribute): per-stage counters for frames, macro
+  zones, palm rejection rules, peak filters, contacts, and tracker events.
+- algo/contacts_log (read-only sysfs attribute): ring buffer of the last 16
+  newly created tracks recording frame sequence, position, area, signal sum, and
+  edge flag.
+- debugfs binary attributes (/sys/kernel/debug/himax-hx83121a/frame_raw and
+  frame): 4800-byte (40x60 s16 little-endian) snapshots of the baseline-subtracted
+  raw frame and post-filter frame, managed via devm_add_action_or_reset() and
+  synchronized with ts->op_lock.
+
+Origin: local
+Upstream-Status: Pending
+---
+diff --git a/drivers/input/touchscreen/himax-spi-core.c b/drivers/input/touchscreen/himax-spi-core.c
+--- a/drivers/input/touchscreen/himax-spi-core.c
++++ b/drivers/input/touchscreen/himax-spi-core.c
+@@ -11,6 +11,7 @@
+ 
+ #include<linux/dev_printk.h>
+ 
++#include <linux/debugfs.h>
+ #include <linux/delay.h>
+ #include <linux/input/mt.h>
+ #include <linux/input/touchscreen.h>
+@@ -18,6 +19,7 @@
+ #include <linux/limits.h>
+ #include <linux/mutex.h>
+ #include <linux/module.h>
++#include <linux/slab.h>
+ 
+ static bool disable_pressure = true;
+ module_param(disable_pressure, bool, 0444);
+@@ -134,6 +136,7 @@
+ 	struct drm_panel_follower panel_follower;
+ 	struct delayed_work panel_reinit_work;
+ 	struct hx_algo *algo;
++	struct dentry *dbg_dir;
+ };
+ 
+ static void himax_report_tracked_state(struct himax_ts_data *ts, bool report_on);
+@@ -1046,6 +1049,79 @@
+ HX_ALGO_ATTR_U8_RW(track_start_debounce);
+ HX_ALGO_ATTR_S32_RW(track_jump_dist2);
+ 
++/*
++ * Per-stage counters.  Read unlocked on purpose: the only writer is the
++ * IRQ thread, a snapshot torn across fields costs nothing for diagnostics,
++ * and taking op_lock here would let a wedged touch path block the one read
++ * that would explain why it is wedged.
++ */
++static ssize_t stats_show(struct device *dev, struct device_attribute *attr,
++			  char *buf)
++{
++	struct himax_ts_data *ts = dev_get_drvdata(dev);
++	struct hx_stats *st = &ts->algo->stats;
++	int n = 0;
++
++	n += sysfs_emit_at(buf, n, "frames            %u\n", st->frames);
++	n += sysfs_emit_at(buf, n, "frames_reported   %u\n", st->frames_reported);
++	n += sysfs_emit_at(buf, n, "zones             %u\n", st->zones);
++	n += sysfs_emit_at(buf, n, "zones_evicted     %u\n", st->zones_evicted);
++	n += sysfs_emit_at(buf, n, "zones_overflow    %u\n", st->zones_overflow);
++	n += sysfs_emit_at(buf, n, "palm_area         %u\n", st->palm_rule[1]);
++	n += sysfs_emit_at(buf, n, "palm_signal       %u\n", st->palm_rule[2]);
++	n += sysfs_emit_at(buf, n, "palm_density      %u\n", st->palm_rule[3]);
++	n += sysfs_emit_at(buf, n, "palm_aspect       %u\n", st->palm_rule[4]);
++	n += sysfs_emit_at(buf, n, "peaks_raw         %u\n", st->peaks_raw);
++	n += sysfs_emit_at(buf, n, "rej_drift         %u\n", st->rej_drift);
++	n += sysfs_emit_at(buf, n, "rej_isolated      %u\n", st->rej_isolated);
++	n += sysfs_emit_at(buf, n, "rej_minarea       %u\n", st->rej_minarea);
++	n += sysfs_emit_at(buf, n, "rej_edgeweak      %u\n", st->rej_edgeweak);
++	n += sysfs_emit_at(buf, n, "contacts          %u\n", st->contacts);
++	n += sysfs_emit_at(buf, n, "rej_contact_area  %u\n", st->rej_contact_area);
++	n += sysfs_emit_at(buf, n, "tracks_new        %u\n", st->tracks_new);
++	n += sysfs_emit_at(buf, n, "tracks_new_edge   %u\n", st->tracks_new_edge);
++	n += sysfs_emit_at(buf, n, "tracks_jump       %u\n", st->tracks_jump);
++	n += sysfs_emit_at(buf, n, "tracks_guard_kill %u\n", st->tracks_guard_kill);
++	n += sysfs_emit_at(buf, n, "tracks_lost       %u\n", st->tracks_lost);
++	n += sysfs_emit_at(buf, n, "max_contacts      %u\n", st->max_contacts);
++	return n;
++}
++
++static ssize_t stats_store(struct device *dev, struct device_attribute *attr,
++			   const char *buf, size_t count)
++{
++	struct himax_ts_data *ts = dev_get_drvdata(dev);
++
++	memset(&ts->algo->stats, 0, sizeof(ts->algo->stats));
++	memset(ts->algo->newlog, 0, sizeof(ts->algo->newlog));
++	ts->algo->newlog_head = 0;
++	ts->algo->newlog_seq = 0;
++	return count;
++}
++static DEVICE_ATTR_RW(stats);
++
++/* The last HX_NEWLOG contact births, oldest first. */
++static ssize_t contacts_log_show(struct device *dev,
++				 struct device_attribute *attr, char *buf)
++{
++	struct hx_algo *algo = ((struct himax_ts_data *)dev_get_drvdata(dev))->algo;
++	int n = 0, k;
++
++	n += sysfs_emit_at(buf, n, "  seq      x      y  area   signal edge\n");
++	for (k = 0; k < HX_NEWLOG; k++) {
++		struct hx_newlog *lg =
++			&algo->newlog[(algo->newlog_head + k) % HX_NEWLOG];
++
++		if (!lg->seq)
++			continue;
++		n += sysfs_emit_at(buf, n, "%5u %6d %6d %5u %8d %4u\n",
++					   lg->seq, lg->x, lg->y, lg->area,
++					   lg->signal_sum, lg->is_edge ? 1 : 0);
++	}
++	return n;
++}
++static DEVICE_ATTR_RO(contacts_log);
++
+ static struct attribute *hx_algo_attrs[] = {
+ 	&dev_attr_cmf_enabled.attr,
+ 	&dev_attr_cmf_exclusion.attr,
+@@ -1078,6 +1154,8 @@
+ 	&dev_attr_track_active_guard.attr,
+ 	&dev_attr_track_start_debounce.attr,
+ 	&dev_attr_track_jump_dist2.attr,
++	&dev_attr_stats.attr,
++	&dev_attr_contacts_log.attr,
+ 	NULL,
+ };
+ 
+@@ -1086,6 +1164,76 @@
+ 	.attrs = hx_algo_attrs,
+ };
+ 
++/*
++ * Raw grid dumps.  40x60 s16, little-endian, 4800 bytes -- too big for a
++ * sysfs attribute (PAGE_SIZE), hence debugfs.  frame_raw is what the panel
++ * produced; frame is what the pipeline decided.  Comparing the two is the
++ * only way to tell a signal problem from an algorithm problem, and reading
++ * frame_raw with nothing touching the panel is the only way to answer
++ * whether the firmware tracks a per-pixel baseline at all.
++ */
++static ssize_t himax_dbg_grid(struct himax_ts_data *ts, bool raw,
++				char __user *ubuf, size_t count, loff_t *ppos)
++{
++	size_t sz;
++	void *snap;
++	ssize_t ret;
++
++	if (!ts || !ts->algo)
++		return -ENODEV;
++
++	sz = sizeof(ts->algo->frame);
++	snap = kmalloc(sz, GFP_KERNEL);
++	if (!snap)
++		return -ENOMEM;
++
++	/*
++		 * op_lock is taken directly and deliberately: himax_lock() also
++		 * quiesces the interrupt, and himax_unlock() does not bring it back,
++		 * so borrowing that helper here would leave touch dead after a
++		 * diagnostic read.
++		 */
++	mutex_lock(&ts->op_lock);
++	memcpy(snap, raw ? (void *)ts->algo->raw_frame
++			     : (void *)ts->algo->frame, sz);
++	mutex_unlock(&ts->op_lock);
++
++	ret = simple_read_from_buffer(ubuf, count, ppos, snap, sz);
++	kfree(snap);
++	return ret;
++}
++
++static ssize_t himax_dbg_raw_read(struct file *f, char __user *u,
++				  size_t c, loff_t *p)
++{
++	return himax_dbg_grid(f->private_data, true, u, c, p);
++}
++
++static ssize_t himax_dbg_out_read(struct file *f, char __user *u,
++				  size_t c, loff_t *p)
++{
++	return himax_dbg_grid(f->private_data, false, u, c, p);
++}
++
++static const struct file_operations himax_dbg_raw_fops = {
++	.owner  = THIS_MODULE,
++	.open   = simple_open,
++	.read   = himax_dbg_raw_read,
++	.llseek = default_llseek,
++};
++
++static void himax_debugfs_release(void *dir)
++{
++	debugfs_remove_recursive(dir);
++}
++
++static const struct file_operations himax_dbg_out_fops = {
++	.owner  = THIS_MODULE,
++	.open   = simple_open,
++	.read   = himax_dbg_out_read,
++	.llseek = default_llseek,
++};
++
+ static const struct drm_panel_follower_funcs himax_panel_follower_funcs = {
+ 	.panel_prepared = himax_panel_prepared,
+ 	.panel_unpreparing = himax_panel_unpreparing,
+@@ -1198,6 +1346,11 @@
+ 	hx_expand_and_resolve(algo, pos, &cnt);
+ 	hx_track_contacts(algo, pos, cnt);
+ 	stable_cnt = hx_count_stable_tracks(algo);
++	if (stable_cnt > 0) {
++		algo->stats.frames_reported++;
++		if (stable_cnt > algo->stats.max_contacts)
++			algo->stats.max_contacts = stable_cnt;
++	}
+ 
+ 	/* Not final results, touchscreen_report_pos will handle this (x-y swap, y invert) */
+ 	for (int i = 0; i < HIMAX_MAX_TOUCH; ++i) {
+@@ -1490,6 +1643,28 @@
+ 		return ret;
+ 	}
+ 
++	/*
++	 * Tie the debugfs tree to the device with devm rather than unwinding it
++	 * by hand.  devm_drm_panel_add_follower() below can return -EPROBE_DEFER
++	 * (that is why the existing error path uses dev_err_probe()), and a
++	 * hand-rolled create-here / remove-in-.remove() pair leaks the dentry on
++	 * that path.  Worse, the retry then finds the directory name already
++	 * taken: debugfs_create_dir() returns -EEXIST, debugfs_create_file()
++	 * quietly does nothing with that error pointer, and the driver comes up
++	 * with no diagnostic interface at all and nothing said so.
++	 */
++	ts->dbg_dir = debugfs_create_dir("himax-hx83121a", NULL);
++	ret = devm_add_action_or_reset(ts->dev, himax_debugfs_release,
++				      ts->dbg_dir);
++	if (ret) {
++		device_remove_file(ts->dev, &dev_attr_inplace_reset);
++		return ret;
++	}
++	debugfs_create_file("frame_raw", 0400, ts->dbg_dir, ts,
++			    &himax_dbg_raw_fops);
++	debugfs_create_file("frame", 0400, ts->dbg_dir, ts,
++			    &himax_dbg_out_fops);
++
+ 	ts->panel_follower.funcs = &himax_panel_follower_funcs;
+ 	ret = devm_drm_panel_add_follower(ts->dev, &ts->panel_follower);
+ 	if (ret) {
+diff --git a/drivers/input/touchscreen/hx-algo.c b/drivers/input/touchscreen/hx-algo.c
+--- a/drivers/input/touchscreen/hx-algo.c
++++ b/drivers/input/touchscreen/hx-algo.c
+@@ -86,6 +86,10 @@
+ 
+ 	/* pixel [0][0] is always invalid on this panel layout */
+ 	algo->frame[0][0] = 0;
++
++	/* Keep the untouched frame for the diagnostic dump; everything after
++	 * this point (CMF, edge boost, IIR) rewrites frame[] in place. */
++	memcpy(algo->raw_frame, algo->frame, sizeof(algo->frame));
+ }
+ 
+ /* ======================================================================== */
+@@ -278,6 +282,7 @@
+ 
+ void hx_preprocess_frame(struct hx_algo *algo, const u16 *raw)
+ {
++	algo->stats.frames++;
+ 	hx_prepare_frame_baseline(algo, raw);
+ 
+ 	if (algo->cmf_enabled)
+@@ -427,11 +432,16 @@
+ 				}
+ 			}
+ 
+-			if (!full)
+-				algo->zone_count++;
+-			else if (zone->signal_sum >
+-				 algo->zones[weakest].signal_sum)
++			algo->stats.zones++;
++			if (!full) {
++				algo->zone_count++;
++			} else if (zone->signal_sum >
++				   algo->zones[weakest].signal_sum) {
+ 				algo->zones[weakest] = *zone;
++				algo->stats.zones_evicted++;
++			} else {
++				algo->stats.zones_overflow++;
++			}
+ 		}
+ 	}
+ }
+@@ -509,6 +519,8 @@
+ next:
+ 		z->is_palm   = reject;
+ 		z->palm_rule = rule;
++		if (reject)
++			algo->stats.palm_rule[rule]++;
+ 	}
+ }
+ 
+@@ -645,8 +657,10 @@
+ 				continue;
+ 			if (!hx_is_asymmetric_peak(algo, r, c))
+ 				continue;
+-			if (hx_detect_pressure_drift(algo, r, c))
++			if (hx_detect_pressure_drift(algo, r, c)) {
++				algo->stats.rej_drift++;
+ 				continue;
++			}
+ 
+ 			for (dr = -1; dr <= 1; dr++)
+ 				for (dc = -1; dc <= 1; dc++) {
+@@ -662,6 +676,7 @@
+ 				.nbr_sum   = nbr_sum,
+ 				.zone_area = zone->area,
+ 			};
++			algo->stats.peaks_raw++;
+ 			hx_insert_peak(algo, &peak);
+ 		}
+ 	}
+@@ -691,6 +706,8 @@
+ 
+ 			if (have >= need)
+ 				algo->peaks[dst++] = algo->peaks[i];
++			else
++				algo->stats.rej_isolated++;
+ 		}
+ 		algo->peak_count = dst;
+ 	}
+@@ -720,6 +737,8 @@
+ 
+ 			if (algo->peaks[i].zone_area >= min_area)
+ 				algo->peaks[dst++] = algo->peaks[i];
++			else
++				algo->stats.rej_minarea++;
+ 		}
+ 		algo->peak_count = dst;
+ 	}
+@@ -759,6 +778,8 @@
+ 				}
+ 				if (!(on_edge && algo->peaks[i].z < cutoff))
+ 					algo->peaks[dst++] = algo->peaks[i];
++				else
++					algo->stats.rej_edgeweak++;
+ 			}
+ 			algo->peak_count = dst;
+ 		}
+@@ -993,8 +1014,10 @@
+ 		 * 0 disables it, which is the shipped default.
+ 		 */
+ 		if (algo->palm_contact_area &&
+-		    ct->area >= algo->palm_contact_area)
++		    ct->area >= algo->palm_contact_area) {
++			algo->stats.rej_contact_area++;
+ 			continue;
++		}
+ 
+ 		/* Push edge centroids outward toward physical sensor boundary */
+ 		if (ct->is_edge)
+@@ -1028,6 +1051,7 @@
+ 	 * This matches the coordinate range the DT/touchscreen_properties
+ 	 * are calibrated for.
+ 	 */
++	algo->stats.contacts += algo->contact_count;
+ 	*cnt = algo->contact_count;
+ 	for (i = 0; i < *cnt; i++) {
+ 		struct hx_contact *ct = &algo->contacts[i];
+@@ -1150,6 +1174,7 @@
+ 		 */
+ 		if (algo->track_jump_dist2 > 0 && trk->age >= 2 &&
+ 		    m->dist2 > algo->track_jump_dist2) {
++			algo->stats.tracks_jump++;
+ 			hx_reset_track(trk);
+ 			jump_released |= (1u << m->track_idx);
+ 			track_matched[m->track_idx] = true;
+@@ -1191,13 +1216,16 @@
+ 		 * tracks immediately to prevent noise from being reported.
+ 		 */
+ 		if (algo->track_active_guard && !algo->touch_active) {
++			algo->stats.tracks_guard_kill++;
+ 			hx_reset_track(trk);
+ 			continue;
+ 		}
+ 
+ 		trk->missed++;
+-		if (trk->missed > algo->track_lost_frames)
++		if (trk->missed > algo->track_lost_frames) {
++			algo->stats.tracks_lost++;
+ 			hx_reset_track(trk);
++		}
+ 	}
+ 
+ 	/* Create new slots for unmatched detections. */
+@@ -1227,6 +1255,24 @@
+ 		trk->vy       = 0;
+ 		if (j < algo->contact_count)
+ 			trk->signal_sum = algo->contacts[j].signal_sum;
++
++		/* Record what this contact looked like when it was born. */
++		algo->stats.tracks_new++;
++		{
++			struct hx_newlog *lg = &algo->newlog[algo->newlog_head];
++
++			lg->seq        = ++algo->newlog_seq;
++			lg->x          = det[j].x;
++			lg->y          = det[j].y;
++			lg->area       = j < algo->contact_count ?
++					     algo->contacts[j].area : 0;
++			lg->signal_sum = trk->signal_sum;
++			lg->is_edge    = j < algo->contact_count &&
++					     algo->contacts[j].is_edge;
++			if (lg->is_edge)
++				algo->stats.tracks_new_edge++;
++			algo->newlog_head = (algo->newlog_head + 1) % HX_NEWLOG;
++		}
+ 	}
+ }
+ 
+diff --git a/drivers/input/touchscreen/hx-algo.h b/drivers/input/touchscreen/hx-algo.h
+--- a/drivers/input/touchscreen/hx-algo.h
++++ b/drivers/input/touchscreen/hx-algo.h
+@@ -97,7 +97,57 @@
+ 	u8 palm_rule;   /* which rule fired, 1-4; 0 = not a palm      */
+ };
+ 
++/* Number of recent contact births kept for inspection. */
++#define HX_NEWLOG      16
++
+ /**
++ * struct hx_stats - per-stage counters for the frame pipeline.
++ *
++ * Every stage between "a pixel crossed the threshold" and "a contact was
++ * reported" can silently drop or pass a candidate, and until these existed
++ * nothing in the driver could say which one did.  That is the question any
++ * touch complaint turns into, so the counters are cheap and always on.
++ * Free-running; reset by writing anything to the sysfs stats attribute.
++ */
++struct hx_stats {
++	u32 frames;             /* frames processed                        */
++	u32 frames_reported;    /* frames with at least one stable contact */
++	u32 zones;              /* macro-zones found                       */
++	u32 zones_evicted;      /* table full, a weaker zone was displaced */
++	u32 zones_overflow;     /* table full, the new zone lost           */
++	u32 palm_rule[5];       /* [1..4] = how often each palm rule fired */
++	u32 peaks_raw;          /* peak candidates before the filters      */
++	u32 rej_drift;          /* dropped as pressure drift               */
++	u32 rej_isolated;       /* dropped by the isolated-spike gate      */
++	u32 rej_minarea;        /* dropped by the minimum-area filter      */
++	u32 rej_edgeweak;       /* dropped as a weak edge peak             */
++	u32 contacts;           /* contacts handed to the tracker          */
++	u32 rej_contact_area;   /* dropped by the per-contact palm test    */
++	u32 tracks_new;         /* slots created                           */
++	u32 tracks_new_edge;    /* ... of those, born on a grid border     */
++	u32 tracks_jump;        /* released by jump detection              */
++	u32 tracks_guard_kill;  /* killed by track_active_guard            */
++	u32 tracks_lost;        /* released after track_lost_frames        */
++	u8  max_contacts;       /* most simultaneous stable contacts seen  */
++};
++
++/**
++ * struct hx_newlog - what a contact looked like at the moment it was born.
++ *
++ * A ghost and a fingertip both arrive as "a new touch"; they differ in area,
++ * integrated signal and whether they sat on the grid border.  Keeping the
++ * last few makes that difference readable after the fact.
++ */
++struct hx_newlog {
++	u32  seq;
++	s32  x;
++	s32  y;
++	u16  area;
++	s32  signal_sum;
++	bool is_edge;
++};
++
++/**
+  * struct hx_algo - all algorithm state, allocated once in probe.
+  *
+  * Memory budget: ~40 KB.  Never allocate on the stack.
+@@ -105,6 +155,11 @@
+ struct hx_algo {
+ 	/* ---- Frame buffers ---- */
+ 	s16 frame[HX_ROWS][HX_COLS];        /* baseline-subtracted signal  */
++	/* Copy of frame[] straight after baseline subtraction, before CMF,
++	 * edge boost and IIR touch it.  This is the one the panel actually
++	 * produced, so it is the only place a per-pixel baseline problem
++	 * (thermal drift, a charger, water) is still visible. */
++	s16 raw_frame[HX_ROWS][HX_COLS];
+ 	s16 iir_history[HX_ROWS][HX_COLS];  /* IIR temporal-filter history */
+ 	bool iir_initialized;
+ 
+@@ -170,6 +225,12 @@
+ 	bool track_active_guard;   /* kill stray tracks before 1st stable  */
+ 	u8   track_start_debounce; /* frames to confirm touch_active       */
+ 	s32  track_jump_dist2;     /* position jump → force lift+repress   */
++
++	/* ---- Diagnostics ---- */
++	struct hx_stats  stats;
++	struct hx_newlog newlog[HX_NEWLOG];
++	u8   newlog_head;
++	u32  newlog_seq;
+ };
+ 
+ /* ---- Public API ---- */

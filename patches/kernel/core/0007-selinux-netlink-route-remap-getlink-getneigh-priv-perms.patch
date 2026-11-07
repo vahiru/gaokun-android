@@ -1,0 +1,61 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] selinux: map RTM_GETLINK and RTM_GETNEIGH to nlmsg_readpriv and nlmsg_getneigh
+
+AOSP SELinux policy defines fine-grained netlink_route_socket permissions
+(nlmsg_readpriv and nlmsg_getneigh) and denies them to untrusted_app domains so
+unprivileged apps cannot read hardware MAC addresses via RTM_GETLINK or the ARP
+neighbor table via RTM_GETNEIGH. Mainline SELinux lacks these permissions in
+classmap.h and maps RTM_GETLINK, RTM_GETNEIGH, and RTM_GETNEIGHTBL to the
+generic NLMSG_READ permission granted to all netdomain processes.
+
+Add nlmsg_readpriv and nlmsg_getneigh to the netlink_route_socket classmap and
+map RTM_GETLINK to NLMSG_READPRIV and RTM_GETNEIGH / RTM_GETNEIGHTBL to
+NLMSG_GETNEIGH, matching Android Common Kernel's netlink_route_getlink /
+netlink_route_getneigh behavior.
+
+Origin: local
+Upstream-Status: Inappropriate [Android-specific]
+---
+--- a/security/selinux/include/classmap.h
++++ b/security/selinux/include/classmap.h
+@@ -98,7 +98,8 @@
+ 	{ "msgq", { COMMON_IPC_PERMS, "enqueue", NULL } },
+ 	{ "shm", { COMMON_IPC_PERMS, "lock", NULL } },
+ 	{ "ipc", { COMMON_IPC_PERMS, NULL } },
+ 	{ "netlink_route_socket",
+-	  { COMMON_SOCK_PERMS, "nlmsg_read", "nlmsg_write", "nlmsg", NULL } },
++	  { COMMON_SOCK_PERMS, "nlmsg_read", "nlmsg_write", "nlmsg_readpriv",
++	    "nlmsg_getneigh", "nlmsg", NULL } },
+ 	{ "netlink_tcpdiag_socket",
+ 	  { COMMON_SOCK_PERMS, "nlmsg_read", "nlmsg_write", "nlmsg", NULL } },
+ 	{ "netlink_nflog_socket", { COMMON_SOCK_PERMS, NULL } },
+--- a/security/selinux/nlmsgtab.c
++++ b/security/selinux/nlmsgtab.c
+@@ -28,7 +28,7 @@
+ static const struct nlmsg_perm nlmsg_route_perms[] = {
+ 	{ RTM_NEWLINK, NETLINK_ROUTE_SOCKET__NLMSG_WRITE },
+ 	{ RTM_DELLINK, NETLINK_ROUTE_SOCKET__NLMSG_WRITE },
+-	{ RTM_GETLINK, NETLINK_ROUTE_SOCKET__NLMSG_READ },
++	{ RTM_GETLINK, NETLINK_ROUTE_SOCKET__NLMSG_READPRIV },
+ 	{ RTM_SETLINK, NETLINK_ROUTE_SOCKET__NLMSG_WRITE },
+ 	{ RTM_NEWADDR, NETLINK_ROUTE_SOCKET__NLMSG_WRITE },
+ 	{ RTM_DELADDR, NETLINK_ROUTE_SOCKET__NLMSG_WRITE },
+@@ -38,7 +38,7 @@
+ 	{ RTM_GETROUTE, NETLINK_ROUTE_SOCKET__NLMSG_READ },
+ 	{ RTM_NEWNEIGH, NETLINK_ROUTE_SOCKET__NLMSG_WRITE },
+ 	{ RTM_DELNEIGH, NETLINK_ROUTE_SOCKET__NLMSG_WRITE },
+-	{ RTM_GETNEIGH, NETLINK_ROUTE_SOCKET__NLMSG_READ },
++	{ RTM_GETNEIGH, NETLINK_ROUTE_SOCKET__NLMSG_GETNEIGH },
+ 	{ RTM_NEWRULE, NETLINK_ROUTE_SOCKET__NLMSG_WRITE },
+ 	{ RTM_DELRULE, NETLINK_ROUTE_SOCKET__NLMSG_WRITE },
+ 	{ RTM_GETRULE, NETLINK_ROUTE_SOCKET__NLMSG_READ },
+@@ -57,7 +57,7 @@
+ 	{ RTM_GETACTION, NETLINK_ROUTE_SOCKET__NLMSG_READ },
+ 	{ RTM_NEWPREFIX, NETLINK_ROUTE_SOCKET__NLMSG_WRITE },
+ 	{ RTM_GETMULTICAST, NETLINK_ROUTE_SOCKET__NLMSG_READ },
+ 	{ RTM_GETANYCAST, NETLINK_ROUTE_SOCKET__NLMSG_READ },
+-	{ RTM_GETNEIGHTBL, NETLINK_ROUTE_SOCKET__NLMSG_READ },
++	{ RTM_GETNEIGHTBL, NETLINK_ROUTE_SOCKET__NLMSG_GETNEIGH },
+ 	{ RTM_SETNEIGHTBL, NETLINK_ROUTE_SOCKET__NLMSG_WRITE },
+ 	{ RTM_NEWADDRLABEL, NETLINK_ROUTE_SOCKET__NLMSG_WRITE },
+ 	{ RTM_DELADDRLABEL, NETLINK_ROUTE_SOCKET__NLMSG_WRITE },

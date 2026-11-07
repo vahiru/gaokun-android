@@ -1,0 +1,29 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] media: iris: allow V4L2_DEC_CMD_STOP when LOAD_RESOURCES is set alongside DRAIN
+
+Upstream commit 0ac05c4 ("media: iris: Fix bitmask test in iris_allow_cmd()")
+rejects V4L2_DEC_CMD_STOP whenever IRIS_INST_SUB_DRAIN is set in sub_state. On
+gen1 decoders using venus-style seek (where STREAMOFF/STREAMON does not clear
+IRIS_INST_SUB_DRAIN while IRIS_INST_SUB_LOAD_RESOURCES remains set), seeking
+during a drain leaves sub_state as DRAIN | LOAD_RESOURCES, causing subsequent
+STOP commands at end-of-stream to fail with -EBUSY.
+
+Restore the sub_state != IRIS_INST_SUB_DRAIN check in iris_allow_cmd() for
+V4L2_DEC_CMD_STOP.
+
+Origin: local
+Upstream-Status: Inappropriate [firmware workaround]
+---
+diff --git a/drivers/media/platform/qcom/iris/iris_state.c b/drivers/media/platform/qcom/iris/iris_state.c
+index 5552725c614e..e991f34916ec 100644
+--- a/drivers/media/platform/qcom/iris/iris_state.c
++++ b/drivers/media/platform/qcom/iris/iris_state.c
+@@ -269,7 +269,7 @@ bool iris_allow_cmd(struct iris_inst *inst, u32 cmd)
+ 				return true;
+ 	} else if (cmd == V4L2_DEC_CMD_STOP || cmd == V4L2_ENC_CMD_STOP) {
+ 		if (vb2_is_streaming(src_q))
+-			if (!(inst->sub_state & IRIS_INST_SUB_DRAIN))
++			if (inst->sub_state != IRIS_INST_SUB_DRAIN)
+ 				return true;
+ 	}
+ 

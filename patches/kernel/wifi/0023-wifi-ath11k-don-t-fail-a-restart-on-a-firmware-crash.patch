@@ -1,0 +1,329 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] wifi: ath11k: don't fail a restart on a firmware crash
+
+A firmware crash while mac80211 restarts the radio makes the rest of
+ath11k_mac_op_start() or ath11k_mac_op_add_interface() fail with
+-ESHUTDOWN. mac80211 takes that to mean that the hardware is gone: it closes
+every interface, with "Hardware became unavailable during restart" if it was
+op_start, and warns again about each station and channel context it can't
+remove. The reset for the crash then has no radio left to restart, so it
+sits out the 20 s for the restart and another 20 s for recovery_start.
+
+On Android the closed interface is the worst of it. WifiSelfRecovery answers
+"STA interface down" by turning Wi-Fi off, and it stays off until somebody
+turns it on again.
+
+If the firmware crashed, let the restart run to its end, like one where the
+crash comes after these two: the radio stays in RESTARTED for
+reconfig_complete, and the operations that follow fail, with one WARN when
+the stations are restored.
+
+An interface that didn't make it is created by the next restart. Should there
+be none, because the driver gave up on the firmware, it's still on mac80211's
+list, so its removal must find a list entry that it can delete.
+
+That leaves a radio that is ON with nothing behind it, which these paths
+didn't expect:
+
+- reconfig_complete now says "restarted without firmware" and leaves the
+  wakeup source alone, as the recovery isn't over.
+- WoW is declined while the rings are gone, unless a crash is waiting for
+  its reset, so the suspend powers the device down, and the next firmware
+  load brings them back.
+- ath11k_ce_poll_send_completed() skips rings that aren't set up.
+- op_start waits longer for the firmware, because a device that doesn't
+  clear the MHI reset takes over 20 s to power down, and a new reset ends
+  the wait at once.
+- FW_READY only clears the crash flags on a first boot. A restart clears
+  them itself once the rings are back.
+- ath11k_pci_remove() sets UNREGISTERING under base_lock and cancels the
+  reset work after that, so that no reset can start behind its back.
+- ath11k_core_end_reset_without_restart() does everything else before it
+  drops reset_count, so that the next reset finds a finished one.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/net/wireless/ath/ath11k/ce.c   | 10 ++++--
+ drivers/net/wireless/ath/ath11k/core.c | 12 ++++---
+ drivers/net/wireless/ath/ath11k/core.h |  6 +++-
+ drivers/net/wireless/ath/ath11k/mac.c  | 44 ++++++++++++++++++++++----
+ drivers/net/wireless/ath/ath11k/pci.c  |  3 ++
+ drivers/net/wireless/ath/ath11k/qmi.c  |  7 ++--
+ drivers/net/wireless/ath/ath11k/wow.c  | 27 +++++++++++++---
+ 7 files changed, 86 insertions(+), 23 deletions(-)
+
+diff --git a/drivers/net/wireless/ath/ath11k/ce.c b/drivers/net/wireless/ath/ath11k/ce.c
+index c56dd8a86..4c3076289 100644
+--- a/drivers/net/wireless/ath/ath11k/ce.c
++++ b/drivers/net/wireless/ath/ath11k/ce.c
+@@ -701,8 +701,14 @@ void ath11k_ce_poll_send_completed(struct ath11k_base *ab, u8 pipe_id)
+ 	struct ath11k_ce_pipe *pipe = &ab->ce.ce_pipe[pipe_id];
+ 	const struct ce_attr *attr =  &ab->hw_params.host_ce_config[pipe_id];
+ 
+-	if ((pipe->attr_flags & CE_ATTR_DIS_INTR) && attr->src_nentries)
+-		ath11k_ce_tx_process_cb(pipe);
++	if (!(pipe->attr_flags & CE_ATTR_DIS_INTR) || !attr->src_nentries)
++		return;
++
++	/* A recovery that failed early leaves the rings cleared. */
++	if (!ab->hal.srng_list[pipe->src_ring->hal_ring_id].initialized)
++		return;
++
++	ath11k_ce_tx_process_cb(pipe);
+ }
+ EXPORT_SYMBOL(ath11k_ce_per_engine_service);
+ 
+diff --git a/drivers/net/wireless/ath/ath11k/core.c b/drivers/net/wireless/ath/ath11k/core.c
+index 98de10352..5f39aff5e 100644
+--- a/drivers/net/wireless/ath/ath11k/core.c
++++ b/drivers/net/wireless/ath/ath11k/core.c
+@@ -2376,9 +2376,9 @@ static int ath11k_core_reconfigure_on_crash(struct ath11k_base *ab)
+ 	clear_bit(ATH11K_FLAG_CRASH_FLUSH, &ab->dev_flags);
+ 
+ 	/*
+-	 * On failure the HAL stays as it is: the next recovery clears and
+-	 * reuses it like this one did, and it is freed when the device goes
+-	 * away.
++	 * On failure the HAL stays as it is, with the rings that weren't set
++	 * up again cleared: the next recovery tears down around them and reuses
++	 * it like this one did, and it is freed when the device goes away.
+ 	 */
+ 	ret = ath11k_core_qmi_firmware_ready(ab);
+ 	if (ret)
+@@ -2554,10 +2554,10 @@ static void ath11k_core_end_reset_without_restart(struct ath11k_base *ab)
+ 			return;
+ 	}
+ 
+-	atomic_dec(&ab->reset_count);
+-	complete(&ab->reset_complete);
+ 	ab->is_reset = false;
+ 	__pm_relax(ab->recovery_ws);
++	atomic_dec(&ab->reset_count);
++	complete(&ab->reset_complete);
+ }
+ 
+ static void ath11k_core_restart(struct work_struct *work)
+@@ -2727,6 +2727,8 @@ void ath11k_core_schedule_reset(struct ath11k_base *ab)
+ 
+ 	set_bit(ATH11K_FLAG_CRASH_FLUSH, &ab->dev_flags);
+ 	wake_up(&ab->wmi_ab.tx_credits_wq);
++	/* A restart waiting for this firmware has nothing to wait for now. */
++	complete_all(&ab->reconfigure_complete);
+ 	for (i = 0; i < ab->num_radios; i++) {
+ 		ar = ab->pdevs[i].ar;
+ 		if (!ar)
+diff --git a/drivers/net/wireless/ath/ath11k/core.h b/drivers/net/wireless/ath/ath11k/core.h
+index 99b64befb..6355ea0be 100644
+--- a/drivers/net/wireless/ath/ath11k/core.h
++++ b/drivers/net/wireless/ath/ath11k/core.h
+@@ -73,7 +73,11 @@ extern bool ath11k_ftm_mode;
+ #define ATH11K_RESET_LOOP_MAX 6
+ /* Past the free ones, the time from one reset to the next, doubling. */
+ #define ATH11K_RESET_LOOP_BACKOFF_SEC 30
+-#define ATH11K_RECONFIGURE_TIMEOUT_HZ (10 * HZ)
++/*
++ * A device that doesn't clear the MHI reset takes the 20 s of the MHI timeout,
++ * more with the polling, to power down, before the firmware can come back.
++ */
++#define ATH11K_RECONFIGURE_TIMEOUT_HZ (60 * HZ)
+ #define ATH11K_RECOVER_START_TIMEOUT_HZ (20 * HZ)
+ #define ATH11K_RECOVERY_WAKEUP_MS (60 * MSEC_PER_SEC)
+ #define ATH11K_RECOVERY_SETTLE_MS (10 * MSEC_PER_SEC)
+diff --git a/drivers/net/wireless/ath/ath11k/mac.c b/drivers/net/wireless/ath/ath11k/mac.c
+index dd5f5ea15..8516bcacf 100644
+--- a/drivers/net/wireless/ath/ath11k/mac.c
++++ b/drivers/net/wireless/ath/ath11k/mac.c
+@@ -6641,6 +6641,19 @@ static void ath11k_mac_wait_reconfigure(struct ath11k_base *ab)
+ 				    ATH11K_RECONFIGURE_TIMEOUT_HZ);
+ }
+ 
++/*
++ * mac80211 takes a failure of start or add_interface in a restart to mean that
++ * the hardware is gone and closes every interface, and Android turns Wi-Fi off
++ * when that happens. So if the firmware is down, let the restart run to its
++ * end. The radio is ON then, with nothing behind it until the next reset or a
++ * suspend that powers the device down.
++ */
++static bool ath11k_mac_crashed_in_restart(struct ath11k *ar)
++{
++	return ar->state == ATH11K_STATE_RESTARTED &&
++	       test_bit(ATH11K_FLAG_CRASH_FLUSH, &ar->ab->dev_flags);
++}
++
+ static int ath11k_mac_op_start(struct ieee80211_hw *hw)
+ {
+ 	struct ath11k *ar = hw->priv;
+@@ -6768,7 +6781,11 @@ static int ath11k_mac_op_start(struct ieee80211_hw *hw)
+ 	return 0;
+ 
+ err:
+-	ar->state = ATH11K_STATE_OFF;
++	if (ath11k_mac_crashed_in_restart(ar))
++		ret = 0;
++	else
++		ar->state = ATH11K_STATE_OFF;
++
+ 	mutex_unlock(&ar->conf_mutex);
+ 
+ 	return ret;
+@@ -7357,10 +7374,14 @@ static int ath11k_mac_op_add_interface(struct ieee80211_hw *hw,
+ err_vdev_del:
+ 	ath11k_mac_vdev_delete(ar, arvif);
+ 	spin_lock_bh(&ar->data_lock);
+-	list_del(&arvif->list);
++	/* remove_interface may still see this one, see the check below */
++	list_del_init(&arvif->list);
+ 	spin_unlock_bh(&ar->data_lock);
+ 
+ err:
++	if (ath11k_mac_crashed_in_restart(ar))
++		ret = 0;
++
+ 	mutex_unlock(&ar->conf_mutex);
+ 
+ 	return ret;
+@@ -9283,6 +9304,7 @@ ath11k_mac_op_reconfig_complete(struct ieee80211_hw *hw,
+ 	struct ath11k_base *ab = ar->ab;
+ 	int recovery_count;
+ 	struct ath11k_vif *arvif;
++	bool crashed;
+ 
+ 	if (reconfig_type != IEEE80211_RECONFIG_TYPE_RESTART)
+ 		return;
+@@ -9290,8 +9312,13 @@ ath11k_mac_op_reconfig_complete(struct ieee80211_hw *hw,
+ 	mutex_lock(&ar->conf_mutex);
+ 
+ 	if (ar->state == ATH11K_STATE_RESTARTED) {
+-		ath11k_warn(ar->ab, "pdev %d successfully recovered\n",
+-			    ar->pdev->pdev_id);
++		crashed = test_bit(ATH11K_FLAG_CRASH_FLUSH, &ab->dev_flags);
++		if (crashed)
++			ath11k_warn(ab, "pdev %d restarted without firmware\n",
++				    ar->pdev->pdev_id);
++		else
++			ath11k_warn(ab, "pdev %d successfully recovered\n",
++				    ar->pdev->pdev_id);
+ 		ar->state = ATH11K_STATE_ON;
+ 		ieee80211_wake_queues(ar->hw);
+ 
+@@ -9313,9 +9340,12 @@ ath11k_mac_op_reconfig_complete(struct ieee80211_hw *hw,
+ 				 * that has only just restarted crashes it again,
+ 				 * and the connection needs a moment to return.
+ 				 */
+-				__pm_relax(ab->recovery_ws);
+-				pm_wakeup_ws_event(ab->recovery_ws,
+-						   ATH11K_RECOVERY_SETTLE_MS, false);
++				if (!crashed) {
++					__pm_relax(ab->recovery_ws);
++					pm_wakeup_ws_event(ab->recovery_ws,
++							   ATH11K_RECOVERY_SETTLE_MS,
++							   false);
++				}
+ 				atomic_dec(&ab->reset_count);
+ 				complete(&ab->reset_complete);
+ 				ath11k_dbg(ab, ATH11K_DBG_BOOT, "reset success\n");
+diff --git a/drivers/net/wireless/ath/ath11k/pci.c b/drivers/net/wireless/ath/ath11k/pci.c
+index 6a35f5b18..3a95c0130 100644
+--- a/drivers/net/wireless/ath/ath11k/pci.c
++++ b/drivers/net/wireless/ath/ath11k/pci.c
+@@ -1182,6 +1182,7 @@ static void ath11k_pci_remove(struct pci_dev *pdev)
+ 	ath11k_pci_set_irq_affinity_hint(ab_pci, NULL);
+ 
+ 	if (test_bit(ATH11K_FLAG_QMI_FAIL, &ab->dev_flags)) {
++		cancel_delayed_work_sync(&ab->reset_retry_work);
+ 		ath11k_pci_power_down(ab, false);
+ 		ath11k_debugfs_soc_destroy(ab);
+ 		ath11k_qmi_deinit_service(ab);
+@@ -1189,7 +1190,9 @@ static void ath11k_pci_remove(struct pci_dev *pdev)
+ 		goto qmi_fail;
+ 	}
+ 
++	spin_lock_bh(&ab->base_lock);
+ 	set_bit(ATH11K_FLAG_UNREGISTERING, &ab->dev_flags);
++	spin_unlock_bh(&ab->base_lock);
+ 
+ 	cancel_work_sync(&ab->reset_work);
+ 	cancel_delayed_work_sync(&ab->reset_retry_work);
+diff --git a/drivers/net/wireless/ath/ath11k/qmi.c b/drivers/net/wireless/ath/ath11k/qmi.c
+index 7dc07339b..141e13ffe 100644
+--- a/drivers/net/wireless/ath/ath11k/qmi.c
++++ b/drivers/net/wireless/ath/ath11k/qmi.c
+@@ -3291,10 +3291,11 @@ static void ath11k_qmi_driver_event_work(struct work_struct *work)
+ 			if (ab->hw_params.cbcal_restart_fw)
+ 				break;
+ 
+-			clear_bit(ATH11K_FLAG_CRASH_FLUSH,
+-				  &ab->dev_flags);
+-			clear_bit(ATH11K_FLAG_RECOVERY, &ab->dev_flags);
++			/* A restart clears these itself, once the rings are back. */
+ 			if (!test_bit(ATH11K_FLAG_REGISTERED, &ab->dev_flags)) {
++				clear_bit(ATH11K_FLAG_CRASH_FLUSH,
++					  &ab->dev_flags);
++				clear_bit(ATH11K_FLAG_RECOVERY, &ab->dev_flags);
+ 				ret = ath11k_core_qmi_firmware_ready(ab);
+ 				if (ret) {
+ 					set_bit(ATH11K_FLAG_QMI_FAIL, &ab->dev_flags);
+diff --git a/drivers/net/wireless/ath/ath11k/wow.c b/drivers/net/wireless/ath/ath11k/wow.c
+index 79e88d33f..bfd76c302 100644
+--- a/drivers/net/wireless/ath/ath11k/wow.c
++++ b/drivers/net/wireless/ath/ath11k/wow.c
+@@ -699,8 +699,8 @@ static void ath11k_wow_suspend_crashed(struct ath11k *ar)
+ }
+ 
+ /*
+- * The reset disables the interrupts and the restart enables them again, so
+- * it needs them enabled to start with: undo the suspend's disabling.
++ * Undo the suspend's disabling of the interrupts, so that the reset finds them
++ * the way a crash at any other time leaves them.
+  */
+ static void ath11k_wow_resume_crashed(struct ath11k *ar)
+ {
+@@ -726,11 +726,24 @@ static void ath11k_wow_undo_setup(struct ath11k *ar)
+ 	ath11k_dp_rx_pktlog_start(ar->ab);
+ }
+ 
++static bool ath11k_wow_rings_ready(struct ath11k_base *ab)
++{
++	bool ready;
++
++	mutex_lock(&ab->core_lock);
++	ready = !test_bit(ATH11K_FLAG_CRASH_FLUSH, &ab->dev_flags) &&
++		ath11k_dp_rx_mon_status_allocated(ab);
++	mutex_unlock(&ab->core_lock);
++
++	return ready;
++}
++
+ int ath11k_wow_op_suspend(struct ieee80211_hw *hw,
+ 			  struct cfg80211_wowlan *wowlan)
+ {
+ 	struct ath11k *ar = hw->priv;
+ 	bool declined = false;
++	bool rings_ready;
+ 	int ret;
+ 
+ 	ret = ath11k_mac_wait_tx_complete(ar);
+@@ -739,14 +752,18 @@ int ath11k_wow_op_suspend(struct ieee80211_hw *hw,
+ 		return ret;
+ 	}
+ 
++	/* core_lock nests outside conf_mutex in crash recovery */
++	rings_ready = ath11k_wow_rings_ready(ar->ab);
++
+ 	mutex_lock(&ar->conf_mutex);
+ 
+ 	/*
+-	 * Crash recovery frees and rebuilds the rings reaped below. Suspend
+-	 * without WoW instead: mac80211 then stops the device, and
++	 * Crash recovery frees and rebuilds the rings reaped below, and the
++	 * radio can be ON without them when a restart ended on dead firmware.
++	 * Suspend without WoW instead: mac80211 then stops the device, and
+ 	 * ath11k_core_suspend() waits for the recovery.
+ 	 */
+-	if (ar->state != ATH11K_STATE_ON) {
++	if (ar->state != ATH11K_STATE_ON || !rings_ready) {
+ 		ath11k_warn(ar->ab, "device state %d, suspending without wow\n",
+ 			    ar->state);
+ 		ret = -EBUSY;

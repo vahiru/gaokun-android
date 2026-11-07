@@ -1,0 +1,85 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] usb: typec: ucsi: huawei_gaokun: Set the number of ports at probe
+
+gaokun_ucsi_ports_init() sizes the port array by the number of ports
+the EC reports, but uec->num_ports is only set in gaokun_ucsi_refresh(),
+when the first port event arrives. If UCSI registers the connectors
+before that, gaokun_ucsi_update_connector() does not mark them
+orientation aware, gaokun_ucsi_connector_status() warns "set orientation
+out of range" and leaves the orientation unset, and
+gaokun_ucsi_remove() puts none of the mode switches.
+
+gaokun_ucsi_refresh() also bounds the port index by the number it has
+just read rather than by the size of the array. If the read at probe
+failed and left the array empty, the first port event writes past it.
+
+Neither path checks the count itself. The register holds two bytes of
+port data for each of at most two ports, so with a larger count
+gaokun_ucsi_port_update() reads past the copy of the register on the
+stack.
+
+Set uec->num_ports when the array is allocated, clamped to the ports the
+register can describe, and use it as the bound.
+
+Fixes: 00327d7f2c8c ("usb: typec: ucsi: add Huawei Matebook E Go ucsi driver")
+Cc: stable@vger.kernel.org
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c | 15 ++++++++++++---
+ 1 file changed, 12 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c b/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c
+index 57b37fc..04608af 100644
+--- a/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c
++++ b/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c
+@@ -76,6 +76,10 @@ struct gaokun_ucsi_reg {
+ 	u8 reserved;
+ } __packed;
+ 
++#define GAOKUN_UCSI_BYTES_PER_PORT	2
++#define GAOKUN_UCSI_MAX_PORTS \
++	(sizeof_field(struct gaokun_ucsi_reg, port_data) / GAOKUN_UCSI_BYTES_PER_PORT)
++
+ struct gaokun_ucsi_port {
+ 	struct completion usb_ack;
+ 	spinlock_t lock; /* serializing port resource access */
+@@ -217,7 +221,7 @@ static void gaokun_ucsi_port_update(struct gaokun_ucsi_port *port,
+ 				    const u8 *port_data)
+ {
+ 	struct gaokun_ucsi *uec = port->ucsi;
+-	int offset = port->idx * 2; /* every port has 2 Bytes data */
++	int offset = port->idx * GAOKUN_UCSI_BYTES_PER_PORT;
+ 	unsigned long flags;
+ 	u8 dcc, ddi;
+ 
+@@ -282,10 +286,9 @@ static int gaokun_ucsi_refresh(struct gaokun_ucsi *uec)
+ 	if (ret)
+ 		return GAOKUN_UCSI_NO_PORT_UPDATE;
+ 
+-	uec->num_ports = ureg.num_ports;
+ 	idx = GET_IDX(ureg.port_updt);
+ 
+-	if (idx < 0 || idx >= ureg.num_ports)
++	if (idx < 0 || idx >= uec->num_ports)
+ 		return GAOKUN_UCSI_NO_PORT_UPDATE;
+ 
+ 	gaokun_ucsi_port_update(&uec->ports[idx], ureg.port_data);
+@@ -413,10 +416,16 @@ static int gaokun_ucsi_ports_init(struct gaokun_ucsi *uec)
+ 
+ 	gaokun_ec_ucsi_get_reg(uec->ec, &ureg);
+ 	num_ports = ureg.num_ports;
++	if (num_ports > GAOKUN_UCSI_MAX_PORTS) {
++		dev_warn(dev, "EC reports %d ports, the register holds data for %zu\n",
++			 num_ports, GAOKUN_UCSI_MAX_PORTS);
++		num_ports = GAOKUN_UCSI_MAX_PORTS;
++	}
+ 	uec->ports = devm_kcalloc(dev, num_ports, sizeof(*uec->ports),
+ 				  GFP_KERNEL);
+ 	if (!uec->ports)
+ 		return -ENOMEM;
++	uec->num_ports = num_ports;
+ 
+ 	for (i = 0; i < num_ports; ++i) {
+ 		ucsi_port = &uec->ports[i];

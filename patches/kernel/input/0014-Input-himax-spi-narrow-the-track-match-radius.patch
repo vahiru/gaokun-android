@@ -1,0 +1,37 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] Input: himax-spi: narrow default track_dist2_max from 420^2 to 115^2 (~12 mm)
+
+hx_track_contacts() retains lifted tracks for track_lost_frames (3 frames,
+~25 ms) and matches new contacts within track_dist2_max of the predicted
+position. The previous default of 420^2 (~44 mm) caused rapid alternating taps
+from two fingers within 44 mm to be merged into the lifted track as a pointer
+move instead of registering a new touch down.
+
+Lower the default track_dist2_max to 115^2 (~12 mm), which covers the 99.9th
+percentile of single-finger frame-to-frame prediction error (6.1 mm) while
+preventing adjacent alternating taps from being swallowed.
+
+Origin: local
+Upstream-Status: Pending
+---
+diff --git a/drivers/input/touchscreen/hx-algo.c b/drivers/input/touchscreen/hx-algo.c
+index 6de0bfe80..a1eff6de0 100644
+--- a/drivers/input/touchscreen/hx-algo.c
++++ b/drivers/input/touchscreen/hx-algo.c
+@@ -23,8 +23,15 @@
+ /*
+  * Default tracking constants — exposed through hx_algo fields so they can
+  * be overridden at runtime via sysfs without reloading the module.
++ *
++ * A contact within sqrt(HIMAX_TRACK_MATCH_DIST2) of a track's predicted
++ * position (1 unit = 0.104 mm) is taken as the same finger.  A finger stays
++ * within about 6 mm of the prediction from one frame to the next; a wider
++ * radius lets a finger landing near one that has just lifted (whose track
++ * lingers for HIMAX_TRACK_LOST_FRAMES) take over that track, and the tap is
++ * lost.
+  */
+-#define HIMAX_TRACK_MATCH_DIST2   (420 * 420)
++#define HIMAX_TRACK_MATCH_DIST2   (115 * 115)
+ #define HIMAX_TRACK_LOST_FRAMES   3
+ #define HIMAX_NEW_TOUCH_DEBOUNCE  2
+ 

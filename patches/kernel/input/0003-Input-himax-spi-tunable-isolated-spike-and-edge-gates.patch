@@ -1,0 +1,143 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] Input: himax-spi: make isolated spike ratio and edge minimum area runtime-tunable
+
+Expose two noise-rejection thresholds in hx_detect_peaks() as runtime-tunable
+sysfs attributes under algo/ while keeping their existing defaults:
+
+- iso_nbr_ratio_q8 (default 8, equivalent to z >> 5): minimum ratio in Q8 units
+  between the 8-neighbour sum and the peak value (nbr_sum * 256 >= z *
+  iso_nbr_ratio_q8).
+- edge_min_area (default 1): minimum connected-component area required for peaks
+  located on the grid boundary.
+
+Also document the relationship between palm_density_low and macro_threshold in
+hx_reject_palms().
+
+Origin: local
+Upstream-Status: Pending
+---
+diff --git a/drivers/input/touchscreen/himax-spi-core.c b/drivers/input/touchscreen/himax-spi-core.c
+--- a/drivers/input/touchscreen/himax-spi-core.c
++++ b/drivers/input/touchscreen/himax-spi-core.c
+@@ -1015,6 +1015,8 @@
+ /* Detection */
+ HX_ALGO_ATTR_S16_RW(macro_threshold);
+ HX_ALGO_ATTR_S16_RW(peak_threshold);
++HX_ALGO_ATTR_U16_RW(iso_nbr_ratio_q8);
++HX_ALGO_ATTR_U8_RW(edge_min_area);
+ HX_ALGO_ATTR_BOOL_RW(palm_enabled);
+ HX_ALGO_ATTR_U8_RW(palm_area_threshold);
+ HX_ALGO_ATTR_S32_RW(palm_signal_threshold);
+@@ -1047,6 +1049,8 @@
+ 	&dev_attr_iir_gate_ratio_q8.attr,
+ 	&dev_attr_macro_threshold.attr,
+ 	&dev_attr_peak_threshold.attr,
++	&dev_attr_iso_nbr_ratio_q8.attr,
++	&dev_attr_edge_min_area.attr,
+ 	&dev_attr_palm_enabled.attr,
+ 	&dev_attr_palm_area_threshold.attr,
+ 	&dev_attr_palm_signal_threshold.attr,
+diff --git a/drivers/input/touchscreen/hx-algo.c b/drivers/input/touchscreen/hx-algo.c
+--- a/drivers/input/touchscreen/hx-algo.c
++++ b/drivers/input/touchscreen/hx-algo.c
+@@ -45,6 +45,8 @@
+ 	algo->iir_gate_ratio_q8  = 26;
+ 	algo->macro_threshold    = 800;
+ 	algo->peak_threshold     = 800;
++	algo->iso_nbr_ratio_q8   = 8;    /* legacy (z >> 5) behaviour  */
++	algo->edge_min_area      = 1;    /* legacy: border cell exempt */
+ 	algo->palm_enabled       = true;
+ 	algo->palm_area_threshold    = 50;
+ 	algo->palm_signal_threshold  = 80000;
+@@ -437,7 +439,13 @@
+ 		}
+ 
+ 		/* Rule 3: density = signal_sum / area < palm_density_low
+-		 *         Rewritten without division: signal_sum < low * area */
++		 *         Rewritten without division: signal_sum < low * area
++		 *
++		 * NOTE: inert unless palm_density_low > macro_threshold.  Every
++		 * pixel in a zone is >= macro_threshold by BFS construction, so
++		 * signal_sum >= macro_threshold * area always holds; with the
++		 * shipped defaults (400 vs 800) this test can never be true.
++		 */
+ 		if (z->area >= 20 &&
+ 		    z->signal_sum < (s32)algo->palm_density_low * z->area) {
+ 			reject = true;
+@@ -607,18 +615,48 @@
+ 		}
+ 	}
+ 
+-	/* --- Z8 isolation filter: (z >> 5) > nbr_sum → isolated spike --- */
++	/*
++	 * Isolated-spike filter.
++	 *
++	 * A real fingertip lifts its eight neighbours with it, so nbr_sum runs
++	 * a few times the peak value; impulse noise does not.  Express the
++	 * gate as a fraction of the peak in Q8:
++	 *
++	 *	keep when  nbr_sum * 256 >= z * iso_nbr_ratio_q8
++	 *
++	 * The historical test was (z >> 5) <= nbr_sum, i.e. a ratio of 8/256.
++	 * For a peak sitting at the 800 threshold that only rejects a spike
++	 * whose eight neighbours sum to under 25, which ambient noise clears
++	 * easily -- in practice it never fired.  The default below reproduces
++	 * it exactly; raise it (128 = neighbours must carry half the peak) to
++	 * actually reject single-cell contacts.
++	 */
+ 	{
+ 		u8 dst = 0, i;
+ 
+ 		for (i = 0; i < algo->peak_count; i++) {
+-			if ((algo->peaks[i].z >> 5) <= algo->peaks[i].nbr_sum)
++			s64 have = (s64)algo->peaks[i].nbr_sum * 256;
++			s64 need = (s64)algo->peaks[i].z * algo->iso_nbr_ratio_q8;
++
++			if (have >= need)
+ 				algo->peaks[dst++] = algo->peaks[i];
+ 		}
+ 		algo->peak_count = dst;
+ 	}
+ 
+-	/* --- Zone minimum-area filter: area < 2 → reject (except edge peaks) --- */
++	/*
++	 * Minimum-area filter.
++	 *
++	 * Away from the border a contact must occupy at least two cells.  On
++	 * the border the historical code exempted the peak outright, because
++	 * a finger there has half its footprint off-grid -- but that
++	 * exemption is also the cheapest route from one noisy border cell to
++	 * a reported touch, and hx_edge_boost() has just scaled border cells
++	 * by 1 + edge_boost_pct/100 (corners twice, multiplicatively).
++	 * edge_min_area makes the exemption tunable: 1 is the historical
++	 * behaviour, 2 requires a border contact to have at least one
++	 * above-threshold neighbour.
++	 */
+ 	{
+ 		u8 dst = 0, i;
+ 
+@@ -627,8 +665,9 @@
+ 					algo->peaks[i].r == HX_ROWS - 1 ||
+ 					algo->peaks[i].c == 0 ||
+ 					algo->peaks[i].c == HX_COLS - 1);
++			u16 min_area = on_edge ? algo->edge_min_area : 2;
+ 
+-			if (algo->peaks[i].zone_area >= 2 || on_edge)
++			if (algo->peaks[i].zone_area >= min_area)
+ 				algo->peaks[dst++] = algo->peaks[i];
+ 		}
+ 		algo->peak_count = dst;
+diff --git a/drivers/input/touchscreen/hx-algo.h b/drivers/input/touchscreen/hx-algo.h
+--- a/drivers/input/touchscreen/hx-algo.h
++++ b/drivers/input/touchscreen/hx-algo.h
+@@ -140,6 +140,10 @@
+ 	/* Detection */
+ 	s16  macro_threshold;      /* minimum pixel value to seed BFS      */
+ 	s16  peak_threshold;       /* minimum peak signal                  */
++	u16  iso_nbr_ratio_q8;     /* isolated-spike gate: keep a peak only
++	                            * when nbr_sum * 256 >= z * this        */
++	u8   edge_min_area;        /* minimum zone area for an on-edge peak
++	                            * (1 = a lone border cell still counts) */
+ 	bool palm_enabled;         /* palm-rejection on/off                */
+ 	u8   palm_area_threshold;  /* area >= this → palm                  */
+ 	s32  palm_signal_threshold;/* signal_sum >= this → palm            */

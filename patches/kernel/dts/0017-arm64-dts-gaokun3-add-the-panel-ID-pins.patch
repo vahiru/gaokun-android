@@ -1,0 +1,50 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] arm64: dts: qcom: sc8280xp-huawei-gaokun3: add the panel ID
+ pins
+
+The tablet ships with a BOE or a CSOT panel. GPIO 102 and GPIO 91 are the
+board's ID0 and ID1 straps, which its UEFI firmware reads to tell them apart.
+Both are inputs without bias, driven from the board, and nothing else uses
+them.
+
+List them so that the panel driver can pick the panel. The compatible stays
+on the CSOT panel, which is what the driver keeps unless the pins name BOE.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
+index e5be4f8f5..0bd161a13 100644
+--- a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
++++ b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
+@@ -883,10 +883,12 @@ panel: panel@0 {
+ 		compatible = "csot,ppc357db1-4", "himax,hx83121a";
+ 		reg = <0>;
+ 
+-		pinctrl-0 = <&disp_reset_n>, <&mdp_vsync_active>;
++		pinctrl-0 = <&disp_reset_n>, <&mdp_vsync_active>, <&panel_id_default>;
+ 		pinctrl-names = "default";
+ 
+ 		reset-gpios = <&tlmm 38 GPIO_ACTIVE_LOW>;
++		panel-id-gpios = <&tlmm 102 GPIO_ACTIVE_HIGH>,
++				 <&tlmm 91 GPIO_ACTIVE_HIGH>;
+ 
+ 		vddi-supply = <&vreg_l2b>;
+ 		avdd-supply = <&vreg_avdd_5p5>;
+@@ -1631,6 +1633,12 @@ nvme_reg_en: nvme-reg-en-state {
+ 		bias-disable;
+ 	};
+ 
++	panel_id_default: panel-id-default-state {
++		pins = "gpio91", "gpio102";
++		function = "gpio";
++		bias-disable;
++	};
++
+ 	pcie2a_default: pcie2a-default-state {
+ 		clkreq-n-pins {
+ 			pins = "gpio142";

@@ -1,7 +1,7 @@
 From 456c3bd7dae07c580512076fad15b7bf5bbd1b07 Mon Sep 17 00:00:00 2001
 From: Akisaira <akisaira@outlook.com>
 Date: Wed, 4 Nov 2026 01:42:10 +1100
-Subject: [PATCH 11/13] libcamera: software_isp: Correct phase detection pixels
+Subject: [PATCH] libcamera: software_isp: Correct phase detection pixels
  before debayering
 
 The ov13b10 has partly masked phase detection pixels at 16 blue sites of
@@ -33,6 +33,9 @@ the frame rate unchanged at 30 fps.
 
 Signed-off-by: Akisaira <akisaira@outlook.com>
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+Origin: local
+Upstream-Status: Pending
 ---
  .../internal/camera_sensor_properties.h       |   8 ++
  .../internal/software_isp/software_isp.h      |   7 +-

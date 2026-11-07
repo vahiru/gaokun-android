@@ -1,0 +1,100 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] cpuidle: psci: wait after a denied cluster request in s2idle
+
+In s2idle, when the firmware denies (PSCI DENIED) a CPU's request for the
+cluster state, that CPU returns from cpuidle and asks again within
+microseconds. On the Huawei MateBook E Go (SC8280XP), traces show the
+other CPUs still inside CPU_SUSPEND at that point, counted as off by
+genpd, so the returning CPU is the last one again and requests the
+cluster again. Two to eight CPUs keep taking turns like this; about 99%
+of the hops have no interrupt in between, and a ring can last until the
+next wakeup, with the SoC out of its deepest state meanwhile.
+
+Without a wait: 20 rings in a 10.8 h standby night with tracing on,
+about 1,060 s in total, 13 of them lasting until a wakeup, up to about a
+million re-entries in one sleep; 4 rings in a 4.1 h standby run with
+tracing off, one of them about 381,000 re-entries, with 384,128 denials
+(-EPERM) and 49 other failures (-EOPNOTSUPP) in s2idle. With a 3 ms wait
+after every failed request: no ring in about 10.2 h over two runs, with
+20 denials and 69 other failures. The second half of the 4.1 h run was
+the 3.6 h with the wait on the same boot; only time of day differs, and
+about 4 rings would have been expected at the first half's rate.
+
+Busy-wait for 3 ms after a denied cluster request in s2idle, so that the
+other CPUs are back before the next request. The other failures came at
+about the same rate with and without the wait and are not part of the
+rings, so they don't wait: the test kernels did, this change narrows it
+to -EPERM. The normal idle path is not changed. Why the firmware denies
+is not known, a shorter wait was not tried, and the wait applies to
+every PSCI platform with OS-initiated cluster states: not for mainline
+as it is.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/cpuidle/cpuidle-psci.c | 22 +++++++++++++++++++---
+ 1 file changed, 19 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/cpuidle/cpuidle-psci.c b/drivers/cpuidle/cpuidle-psci.c
+index b250d0dde..193373e4a 100644
+--- a/drivers/cpuidle/cpuidle-psci.c
++++ b/drivers/cpuidle/cpuidle-psci.c
+@@ -13,6 +13,7 @@
+ #include <linux/cpuidle.h>
+ #include <linux/cpumask.h>
+ #include <linux/cpu_pm.h>
++#include <linux/delay.h>
+ #include <linux/kernel.h>
+ #include <linux/module.h>
+ #include <linux/of.h>
+@@ -61,6 +62,17 @@ static inline void psci_clear_domain_state(void)
+ 	__this_cpu_write(psci_domain_state.state, 0);
+ }
+ 
++/*
++ * In s2idle, when the firmware denies (PSCI DENIED) a CPU's request for the
++ * cluster state, that CPU returns and asks again within microseconds. Traces
++ * on SC8280XP show the other CPUs still inside CPU_SUSPEND then, counted as off
++ * by genpd, so the CPU is the last one again and asks for the cluster again.
++ * Such a ring can last until the next wakeup. Wait a few milliseconds before
++ * asking again. Other failures, such as a return without powering down
++ * (-EOPNOTSUPP), don't wait.
++ */
++#define PSCI_S2IDLE_DENIED_DELAY_US	3000
++
+ static __cpuidle int __psci_enter_domain_idle_state(struct cpuidle_device *dev,
+ 						    struct cpuidle_driver *drv, int idx,
+ 						    bool s2idle)
+@@ -70,7 +82,7 @@ static __cpuidle int __psci_enter_domain_idle_state(struct cpuidle_device *dev,
+ 	struct device *pd_dev = data->dev;
+ 	struct psci_cpuidle_domain_state *ds;
+ 	u32 state = states[idx];
+-	int ret;
++	int ret, rc;
+ 
+ 	ret = cpu_pm_enter();
+ 	if (ret)
+@@ -87,7 +99,8 @@ static __cpuidle int __psci_enter_domain_idle_state(struct cpuidle_device *dev,
+ 		state = ds->state;
+ 
+ 	trace_psci_domain_idle_enter(dev->cpu, state, s2idle);
+-	ret = psci_cpu_suspend_enter(state) ? -1 : idx;
++	rc = psci_cpu_suspend_enter(state);
++	ret = rc ? -1 : idx;
+ 	trace_psci_domain_idle_exit(dev->cpu, state, s2idle);
+ 
+ 	if (s2idle)
+@@ -98,8 +111,11 @@ static __cpuidle int __psci_enter_domain_idle_state(struct cpuidle_device *dev,
+ 	cpu_pm_exit();
+ 
+ 	/* Correct domain-idlestate statistics if we failed to enter. */
+-	if (ret == -1 && ds->state)
++	if (ret == -1 && ds->state) {
+ 		pm_genpd_inc_rejected(ds->pd, ds->state_idx);
++		if (s2idle && rc == -EPERM)
++			udelay(PSCI_S2IDLE_DENIED_DELAY_US);
++	}
+ 
+ 	/* Clear the domain state to start fresh when back from idle. */
+ 	psci_clear_domain_state();

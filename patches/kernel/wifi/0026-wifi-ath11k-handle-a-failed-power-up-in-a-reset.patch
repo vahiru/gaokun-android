@@ -1,0 +1,94 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] wifi: ath11k: handle a failed power up in a reset
+
+mhi_prepare_for_power_up() frees the device context when it fails, for
+instance on a BHI offset that reads as all ones from a device that is no
+longer on the bus. ath11k_mhi_stop() still calls
+mhi_unprepare_after_power_down() at the next power down, which frees the
+command ring again and then dereferences the NULL mhi_ctxt.
+
+A reset after the PCIe link was lost gets there: ath11k_core_reset()
+ignores the failed power up, and the next suspend that powers the device
+down, the shutdown or the next reset stops MHI. Remember whether MHI was
+prepared, and stop it only then.
+
+The restart that the reset started meanwhile waits in op_start, with the
+rtnl lock held, for firmware that won't come up, the full 40 s. End that
+wait when the power up fails. The restart then runs to its end without
+firmware, as after a crash in it, and the next suspend that powers the
+device down tries again.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/net/wireless/ath/ath11k/core.c | 9 ++++++++-
+ drivers/net/wireless/ath/ath11k/mhi.c  | 8 ++++++++
+ drivers/net/wireless/ath/ath11k/pci.h  | 1 +
+ 3 files changed, 17 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/net/wireless/ath/ath11k/core.c b/drivers/net/wireless/ath/ath11k/core.c
+index 2c46a1292..50e15b17b 100644
+--- a/drivers/net/wireless/ath/ath11k/core.c
++++ b/drivers/net/wireless/ath/ath11k/core.c
+@@ -2673,6 +2673,7 @@ static void ath11k_core_reset(struct work_struct *work)
+ {
+ 	struct ath11k_base *ab = container_of(work, struct ath11k_base, reset_work);
+ 	int reset_count;
++	int ret;
+ 
+ 	if (!(test_bit(ATH11K_FLAG_REGISTERED, &ab->dev_flags))) {
+ 		ath11k_warn(ab, "ignore reset dev flags 0x%lx\n", ab->dev_flags);
+@@ -2734,7 +2735,13 @@ static void ath11k_core_reset(struct work_struct *work)
+ 	ath11k_hif_ce_irq_disable(ab);
+ 
+ 	ath11k_hif_power_down(ab, false);
+-	ath11k_hif_power_up(ab);
++	ret = ath11k_hif_power_up(ab);
++	if (ret) {
++		ath11k_err(ab, "failed to power up for the reset: %d\n", ret);
++		/* No firmware comes up to end the wait in op_start. */
++		complete_all(&ab->reconfigure_complete);
++		return;
++	}
+ 
+ 	ath11k_dbg(ab, ATH11K_DBG_BOOT, "reset started\n");
+ }
+diff --git a/drivers/net/wireless/ath/ath11k/mhi.c b/drivers/net/wireless/ath/ath11k/mhi.c
+index 58109aa28..240814830 100644
+--- a/drivers/net/wireless/ath/ath11k/mhi.c
++++ b/drivers/net/wireless/ath/ath11k/mhi.c
+@@ -446,6 +446,7 @@ int ath11k_mhi_start(struct ath11k_pci *ab_pci)
+ 		ath11k_warn(ab, "failed to prepare mhi: %d", ret);
+ 		return ret;
+ 	}
++	set_bit(ATH11K_PCI_MHI_PREPARED, &ab_pci->flags);
+ 
+ 	ret = mhi_sync_power_up(ab_pci->mhi_ctrl);
+ 	if (ret) {
+@@ -458,6 +459,13 @@ int ath11k_mhi_start(struct ath11k_pci *ab_pci)
+ 
+ void ath11k_mhi_stop(struct ath11k_pci *ab_pci, bool is_suspend)
+ {
++	/*
++	 * A failed mhi_prepare_for_power_up() freed the device context, and
++	 * nothing was powered up.
++	 */
++	if (!test_and_clear_bit(ATH11K_PCI_MHI_PREPARED, &ab_pci->flags))
++		return;
++
+ 	/* During suspend we need to use mhi_power_down_keep_dev()
+ 	 * workaround, otherwise ath11k_core_resume() will timeout
+ 	 * during resume.
+diff --git a/drivers/net/wireless/ath/ath11k/pci.h b/drivers/net/wireless/ath/ath11k/pci.h
+index 1e3005a4b..1e811245c 100644
+--- a/drivers/net/wireless/ath/ath11k/pci.h
++++ b/drivers/net/wireless/ath/ath11k/pci.h
+@@ -55,6 +55,7 @@
+ 
+ enum ath11k_pci_flags {
+ 	ATH11K_PCI_ASPM_RESTORE,
++	ATH11K_PCI_MHI_PREPARED,
+ };
+ 
+ struct ath11k_pci {

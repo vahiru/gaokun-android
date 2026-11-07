@@ -1,0 +1,43 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] arm64: dts: qcom: sc8280xp-huawei-gaokun3: set touchscreen coordinate fuzz to 0
+
+himax-spi sets a default input fuzz of 8 units on ABS_MT_POSITION_X/Y, which
+causes input_defuzz_abs_event() to drop sub-4-unit (~0.4 mm) movements and
+attenuate movements below 16 units, while the measured centroid noise on raw
+idle frames is under 0.5 units peak-to-peak and Android already applies its own
+touch slop and gesture filtering in InputReader.
+
+Set touchscreen-fuzz-x = <0> and touchscreen-fuzz-y = <0> on the touchscreen
+node so touchscreen_parse_properties() overrides the driver default at probe.
+
+Origin: local
+Upstream-Status: Inappropriate [Android-specific]
+---
+diff --git a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
+--- a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
++++ b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
+@@ -668,6 +668,24 @@
+ 		touchscreen-size-y = <1600>;
+ 
+ 		/*
++		 * The driver hard-codes a fuzz of 8, a value picked so that libinput
++		 * would not turn a resting finger into a swipe.  Android applies its
++		 * own touch slop (~24 units here) and the driver runs an IIR filter of
++		 * its own, so on this board that third layer only costs resolution.
++		 *
++		 * Measured on the hardware: with the finger down, perturbing the real
++		 * capacitance frame by the real idle noise (sigma 29.6 counts) moves
++		 * the weighted centroid by sigma 0.16 units in x and 0.10 in y -- less
++		 * than half of one output unit, i.e. below the output quantum.  A fuzz
++		 * of 8 blanks every move under 4 units and damps everything under 16,
++		 * eight to thirty times the noise it is meant to hide.  In an A/B on
++		 * slow drags it left 13.7% of in-contact frames reporting no movement
++		 * at all, against 1.8% with fuzz 0.
++		 */
++		touchscreen-fuzz-x = <0>;
++		touchscreen-fuzz-y = <0>;
++
++		/*
+ 		 * internally handle invert first, two transformations are
+ 		 * non-comutative even if we can swap first.
+ 		 */

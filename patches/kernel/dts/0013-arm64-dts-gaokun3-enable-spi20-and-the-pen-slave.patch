@@ -1,0 +1,111 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] arm64: dts: qcom: sc8280xp-huawei-gaokun3: enable spi20 and HX83121A pen slave
+
+The cascade slave HX83121A IC that senses the Huawei M-Pencil is connected to
+spi20 (QUP2 SE4 at 0x890000, ACPI THPB/HIMX0002) with its interrupt on GPIO 39.
+
+Configure the spi20_default (GPIO 87-90, leaving GPIO 92 for the rear camera
+regulator) and ts1_default (GPIO 39) pinctrl states, enable &spi20, and add the
+pen@0 ("himax,hx83121a-pen-slave") child node following &panel.
+
+Origin: local
+Upstream-Status: Pending
+---
+diff --git a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
+index f7c7c8999e92212e186aad5cff2a92dd4453e69a..9af467840ab5e09d04ad31eb937ed9057064bdc7 100644
+--- a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
++++ b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
+@@ -803,6 +803,33 @@ ucsi1_sbu: endpoint {
+ 	};
+ };
+ 
++&spi20 {
++	pinctrl-0 = <&spi20_default>;
++	pinctrl-names = "default";
++
++	status = "okay";
++
++	/*
++	 * The cascade slave of the panel's HX83121A pair, which senses the
++	 * active pen (ACPI THPB/HIMX0002 on \_SB.SP21).  It has no reset line
++	 * of its own: it is reset together with the master.
++	 */
++	pen@0 {
++		compatible = "himax,hx83121a-pen-slave";
++		reg = <0>;
++
++		interrupts-extended = <&tlmm 39 IRQ_TYPE_LEVEL_LOW>;
++
++		/* re-initialised after the screen comes back on */
++		panel = <&panel>;
++
++		spi-max-frequency = <12000000>;
++
++		pinctrl-0 = <&ts1_default>;
++		pinctrl-names = "default";
++	};
++};
++
+ &iris {
+ 	firmware-name = "qcom/sc8280xp/HUAWEI/gaokun3/qcvss8280.mbn";
+ 	status = "okay";
+@@ -1669,6 +1696,43 @@ perst-n-pins {
+ 		};
+ 	};
+ 
++	/*
++	 * qup20 is gpio87-90 plus gpio92, but gpio92 is the rear camera
++	 * regulator enable on this board: only the four SPI pins are muxed.
++	 */
++	spi20_default: spi20-default-state {
++		miso-n-pins {
++			pins = "gpio87";
++			function = "qup20";
++			drive-strength = <2>;
++			bias-pull-down;
++		};
++
++		mosi-n-pins {
++			pins = "gpio88";
++			function = "qup20";
++			drive-strength = <2>;
++			bias-pull-down;
++			output-high;
++		};
++
++		clk-n-pins {
++			pins = "gpio89";
++			function = "qup20";
++			drive-strength = <2>;
++			bias-pull-down;
++			output-high;
++		};
++
++		cs-n-pins {
++			pins = "gpio90";
++			function = "qup20";
++			drive-strength = <2>;
++			bias-pull-down;
++			output-high;
++		};
++	};
++
+ 	spi6_default: spi6-default-state {
+ 		miso-n-pins {
+ 			pins = "gpio154";
+@@ -1724,6 +1788,15 @@ reset-n-pins {
+ 		};
+ 	};
+ 
++	ts1_default: ts1-default-state {
++		int-n-pins {
++			pins = "gpio39";
++			function = "gpio";
++			drive-strength = <2>;
++			bias-disable;
++		};
++	};
++
+ 	uart2_default: uart2-default-state {
+ 		cts-pins {
+ 			pins = "gpio121";

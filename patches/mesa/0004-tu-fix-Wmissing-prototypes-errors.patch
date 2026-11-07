@@ -1,0 +1,170 @@
+From b0e480d428f06760bf6a41b0d0fae4c3badbfd96 Mon Sep 17 00:00:00 2001
+From: Gurchetan Singh <gurchetansingh@google.com>
+Date: Fri, 8 May 2026 16:13:55 -0700
+Subject: [PATCH] tu: fix -Wmissing-prototypes errors
+
+Fixes:
+
+src/freedreno/vulkan/tu_shader.cc:134:1: error:
+  no previous prototype for function 'tu_init_softfloat32'[-Werror,-Wmissing-prototypes]
+  134 | tu_init_softfloat32(struct tu_device *dev)
+      | ^
+
+Reviewed-by: Valentine Burley <valentine.burley@collabora.com>
+Part-of: <https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/41518>
+Origin: upstream, https://gitlab.freedesktop.org/mesa/mesa/-/commit/b0e480d428f06760bf6a41b0d0fae4c3badbfd96
+Upstream-Status: Backport [https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/41518]
+---
+ src/freedreno/vulkan/tu_acceleration_structure.cc | 2 +-
+ src/freedreno/vulkan/tu_device.cc                 | 6 +++---
+ src/freedreno/vulkan/tu_knl_drm_msm.cc            | 4 ++--
+ src/freedreno/vulkan/tu_knl_drm_virtio.cc         | 2 +-
+ src/freedreno/vulkan/tu_knl_kgsl.cc               | 2 +-
+ src/freedreno/vulkan/tu_nir_lower_ray_query.cc    | 2 +-
+ src/freedreno/vulkan/tu_perfetto.cc               | 2 +-
+ src/freedreno/vulkan/tu_shader.cc                 | 4 ++--
+ 8 files changed, 12 insertions(+), 12 deletions(-)
+
+diff --git a/src/freedreno/vulkan/tu_acceleration_structure.cc b/src/freedreno/vulkan/tu_acceleration_structure.cc
+index 709b7f4581cb..b35966ce09c7 100644
+--- a/src/freedreno/vulkan/tu_acceleration_structure.cc
++++ b/src/freedreno/vulkan/tu_acceleration_structure.cc
+@@ -140,7 +140,7 @@ get_bvh_layout(VkGeometryTypeKHR geometry_type,
+    layout->size = offset;
+ }
+ 
+-VkDeviceSize
++static VkDeviceSize
+ get_bvh_size(VkDevice device,
+              const struct vk_acceleration_structure_build_state *state)
+ {
+diff --git a/src/freedreno/vulkan/tu_device.cc b/src/freedreno/vulkan/tu_device.cc
+index 013500c3a2be..fa4a27c5e3c6 100644
+--- a/src/freedreno/vulkan/tu_device.cc
++++ b/src/freedreno/vulkan/tu_device.cc
+@@ -2491,7 +2491,7 @@ fail:
+    return vk_error(device->instance, VK_ERROR_OUT_OF_HOST_MEMORY);
+ }
+ 
+-void
++static void
+ tu_free_copy_timestamp_data(struct tu_device *device,
+                             struct tu_copy_timestamp_data *data)
+ {
+@@ -2739,7 +2739,7 @@ tu_device_get_timestamp(struct vk_device *vk_device, uint64_t *timestamp)
+    return ret == 0 ? VK_SUCCESS : VK_ERROR_UNKNOWN;
+ }
+ 
+-void
++static void
+ tu_device_destroy_mutexes(struct tu_device *device)
+ {
+    mtx_destroy(&device->bo_mutex);
+@@ -3984,7 +3984,7 @@ tu_get_msrtss_temporary(struct tu_device *dev,
+  * framebuffer with render passes or the command buffer with dynamic
+  * rendering.
+  */
+-VkResult
++static VkResult
+ tu_init_msrtss_attachments(struct tu_device *device,
+                            const struct tu_render_pass *pass,
+                            const struct tu_framebuffer *fb,
+diff --git a/src/freedreno/vulkan/tu_knl_drm_msm.cc b/src/freedreno/vulkan/tu_knl_drm_msm.cc
+index 16e1cb40337c..244b362fabd5 100644
+--- a/src/freedreno/vulkan/tu_knl_drm_msm.cc
++++ b/src/freedreno/vulkan/tu_knl_drm_msm.cc
+@@ -474,7 +474,7 @@ tu_wait_fence(struct tu_device *dev,
+    return VK_SUCCESS;
+ }
+ 
+-VkResult
++static VkResult
+ msm_queue_wait_fence(struct tu_queue *queue, uint32_t fence,
+                      uint64_t timeout_ns)
+ {
+@@ -769,7 +769,7 @@ tu_allocate_iova(struct tu_device *dev,
+    return result;
+ }
+ 
+-void
++static void
+ tu_free_iova(struct tu_device *dev,
+              uint64_t iova,
+              uint64_t size)
+diff --git a/src/freedreno/vulkan/tu_knl_drm_virtio.cc b/src/freedreno/vulkan/tu_knl_drm_virtio.cc
+index ea4d31ab665b..fb38244acc9d 100644
+--- a/src/freedreno/vulkan/tu_knl_drm_virtio.cc
++++ b/src/freedreno/vulkan/tu_knl_drm_virtio.cc
+@@ -443,7 +443,7 @@ out:
+    return VK_ERROR_UNKNOWN;
+ }
+ 
+-VkResult
++static VkResult
+ virtio_queue_wait_fence(struct tu_queue *queue, uint32_t fence,
+                         uint64_t timeout_ns)
+ {
+diff --git a/src/freedreno/vulkan/tu_knl_kgsl.cc b/src/freedreno/vulkan/tu_knl_kgsl.cc
+index c01160ea1f3c..53a94612cf98 100644
+--- a/src/freedreno/vulkan/tu_knl_kgsl.cc
++++ b/src/freedreno/vulkan/tu_knl_kgsl.cc
+@@ -786,7 +786,7 @@ wait_timestamp_safe(int fd,
+    }
+ }
+ 
+-VkResult
++static VkResult
+ kgsl_queue_wait_fence(struct tu_queue *queue, uint32_t fence,
+                       uint64_t timeout_ns)
+ {
+diff --git a/src/freedreno/vulkan/tu_nir_lower_ray_query.cc b/src/freedreno/vulkan/tu_nir_lower_ray_query.cc
+index 6dc3acf79252..a9e600d6abde 100644
+--- a/src/freedreno/vulkan/tu_nir_lower_ray_query.cc
++++ b/src/freedreno/vulkan/tu_nir_lower_ray_query.cc
+@@ -522,7 +522,7 @@ lower_rq_load(nir_builder *b, struct hash_table *ht, nir_intrinsic_instr *intr)
+  */
+ #define TU_BVH_NO_INSTANCE_ROOT 0xfffffffeu
+ 
+-nir_def *
++static nir_def *
+ nir_build_vec3_mat_mult(nir_builder *b, nir_def *vec, nir_def *matrix[], bool translation)
+ {
+    nir_def *result_components[3] = {
+diff --git a/src/freedreno/vulkan/tu_perfetto.cc b/src/freedreno/vulkan/tu_perfetto.cc
+index 34219e15bc8a..8f0e5d28951c 100644
+--- a/src/freedreno/vulkan/tu_perfetto.cc
++++ b/src/freedreno/vulkan/tu_perfetto.cc
+@@ -457,7 +457,7 @@ extern "C" {
+ 
+ static once_flag tu_perfetto_init_once_flag = ONCE_FLAG_INIT;
+ 
+-void
++static void
+ tu_perfetto_init_once()
+ {
+    {
+diff --git a/src/freedreno/vulkan/tu_shader.cc b/src/freedreno/vulkan/tu_shader.cc
+index 7a37e60aab5f..af06245ffb7f 100644
+--- a/src/freedreno/vulkan/tu_shader.cc
++++ b/src/freedreno/vulkan/tu_shader.cc
+@@ -130,7 +130,7 @@ static const uint32_t float32_spv[] = {
+ 
+ #include "float64_spv.h"
+ 
+-void
++static void
+ tu_init_softfloat32(struct tu_device *dev)
+ {
+    if (dev->float32_shader)
+@@ -144,7 +144,7 @@ tu_init_softfloat32(struct tu_device *dev)
+    mtx_unlock(&dev->softfloat_mutex);
+ }
+ 
+-void
++static void
+ tu_init_softfloat64(struct tu_device *dev)
+ {
+    if (dev->float64_shader)
+-- 
+GitLab
+

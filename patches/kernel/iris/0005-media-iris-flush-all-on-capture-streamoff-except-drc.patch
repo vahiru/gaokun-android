@@ -1,0 +1,38 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] media: iris: issue HFI_FLUSH_ALL on decoder CAPTURE streamoff outside DRC
+
+When stopping a gen1 decoder session in STREAMING state, issuing
+HFI_FLUSH_OUTPUT on CAPTURE streamoff causes the Huawei SC8280XP video firmware
+(qcvss8280.mbn) to stop processing the HFI command queue and time out on all
+subsequent session commands.
+
+Match the venus driver's vdec_stop_capture() behaviour on gen1 decoders: issue
+HFI_FLUSH_OUTPUT only when flushing CAPTURE for a dynamic resolution change
+(IRIS_INST_SUB_DRC), and issue HFI_FLUSH_ALL otherwise.
+
+Origin: local
+Upstream-Status: Inappropriate [firmware workaround]
+---
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c b/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c
+index 7674b47..f00748b 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c
+@@ -198,7 +198,17 @@ static int iris_hfi_gen1_session_stop(struct iris_inst *inst, u32 plane)
+ 			if (V4L2_TYPE_IS_OUTPUT(plane))
+ 				flush_type = HFI_FLUSH_ALL;
+ 			else if (V4L2_TYPE_IS_CAPTURE(plane))
+-				flush_type = HFI_FLUSH_OUTPUT;
++				/*
++				 * Only a resolution change keeps the bitstream queued, so only
++				 * then flush the picture side alone. Any other CAPTURE streamoff
++				 * while streaming (stop, seek) drops the OUTPUT queue right after:
++				 * flush everything, as venus vdec_stop_capture() does. On sc8280xp
++				 * the firmware mostly never completes an HFI_FLUSH_OUTPUT sent
++				 * here, and then stops reading the command queue altogether.
++				 */
++				flush_type = inst->sub_state & (IRIS_INST_SUB_DRC |
++								IRIS_INST_SUB_DRC_LAST) ?
++					     HFI_FLUSH_OUTPUT : HFI_FLUSH_ALL;
+ 
+ 			reinit_completion(&inst->flush_completion);
+ 

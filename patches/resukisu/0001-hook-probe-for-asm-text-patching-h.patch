@@ -1,3 +1,14 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] KernelSU: hook: probe for <asm/text-patching.h> with __has_include
+
+Mainline Linux 6.13+ moved aarch64_insn_patch_text() from <asm/patching.h> to
+<asm/text-patching.h>. Probe for <asm/text-patching.h>, <asm/patching.h>, and
+<asm/insn.h> via __has_include in kernel/hook/patch_memory.h before falling back
+to the LINUX_VERSION_CODE check.
+
+Origin: local
+Upstream-Status: Pending
+---
 diff --git a/kernel/hook/patch_memory.h b/kernel/hook/patch_memory.h
 index a5a722e..3d55dba 100644
 --- a/kernel/hook/patch_memory.h

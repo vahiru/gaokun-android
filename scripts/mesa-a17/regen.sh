@@ -16,9 +16,8 @@
 #   3. 核对 gfxstream 手写兼容块：树里根 Android.bp 末尾那段必须与
 #      device/huawei/gaokun3/mesa/hermetic/android/gfxstream_workaround.txt 一致
 #      （生成器原样把这个文件贴回去；上游改了它而我们没跟，会悄悄回退上游的改动）
-#   4. 打源码补丁（幂等）：scripts/mesa-a17/backports/*.patch（上游 mesa 的 9 个提交）
-#      + patches/0004（turnip ANB 延迟绑定 v3）+ patches/0130（turnip P010，上游 MR !45721）。
-#      ⚠️ 不打 patches/0005（已证伪）。
+#   4. 打源码补丁（幂等）：patches/mesa/*.patch（0001 turnip ANB 延迟绑定 v3、0002 turnip P010，
+#      以及 0003..0011 上游 mesa 的 9 个构建与依赖 backport 提交）。
 #   5. 删掉旧的生成 Android.bp（文件头带 "The Magma GPU Project" 的那些），重新生成
 #   6. postprocess.py：vulkan.freedreno 补 compile_multilib: "64"
 #   7. check-output.py：模块名闭合、turnip 用 msm 不用 kgsl、SP-HAL 依赖白名单、无绝对路径
@@ -33,9 +32,7 @@ M2H_SHA=1217e6125d76e87912c71b15d517473c46d7b13f
 HERE=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$HERE/../.." && pwd)
 CFG=$REPO/device/huawei/gaokun3/mesa/hermetic/android
-BACKPORTS=$HERE/backports
-PATCH0004=$REPO/patches/0004-mesa-turnip-handle-anb-rebind-with-null-memory.patch
-PATCH0130=$REPO/patches/0130-mesa-turnip-support-p010.patch
+MESA_PATCHES=$REPO/patches/mesa
 
 die() { echo "✗ $*" >&2; exit 1; }
 usage() { sed -n '2,12p' "$0" >&2; exit 2; }
@@ -119,7 +116,7 @@ fi
 echo "▶ gfxstream 手写块一致"
 
 # ── 4. 源码补丁（幂等）───────────────────────────────────────────────────
-for p in "$BACKPORTS"/*.patch "$PATCH0004" "$PATCH0130"; do
+for p in "$MESA_PATCHES"/*.patch; do
   n=$(basename "$p")
   if (cd "$MESA" && git apply --check -R "$p" 2>/dev/null); then
     echo "  = $n（已打）"
@@ -184,7 +181,7 @@ if [ -n "$EXPORT" ]; then
   # 归档：全部 Android.bp + 补丁动过的源文件（相对 mesa 根），解到干净的 26.1 树上即可复现
   list=$(mktemp)
   (cd "$MESA" && find . -name Android.bp -not -path './.git/*' | sed 's|^\./||') > "$list"
-  cat "$BACKPORTS"/*.patch "$PATCH0004" "$PATCH0130" | sed -n 's|^+++ b/||p' | sort -u >> "$list"
+  cat "$MESA_PATCHES"/*.patch | sed -n 's|^+++ b/||p' | sort -u >> "$list"
   tar -C "$MESA" -czf "$EXPORT" -T "$list"
   rm -f "$list"
   echo "▶ 已打包 $EXPORT（$(wc -c < "$EXPORT") 字节）"

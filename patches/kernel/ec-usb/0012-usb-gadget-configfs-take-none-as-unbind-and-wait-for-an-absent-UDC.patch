@@ -1,0 +1,65 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] usb: gadget: configfs: treat "none" as unbind and allow pending registration for absent UDCs
+
+Android's init.usb.configfs.rc writes "none" to g1/UDC to unbind the gadget
+before reconfiguring USB functions, whereas mainline configfs only treats an
+empty string as unbind and interprets "none" as a literal UDC name. In addition,
+when port 0 is in host mode on sc8280xp-huawei-gaokun3, dwc3 unregisters its UDC
+(a600000.usb); mainline configfs sets match_existing_only and fails UDC writes
+with -EBUSY when the UDC is absent, leaving MTP/PTP unbound after returning to
+device mode.
+
+Update gadget_dev_desc_UDC_store() to:
+- Treat "none" identically to an empty string and unbind the gadget.
+- Clear match_existing_only so writing a UDC name while the UDC is absent queues
+  the gadget driver for binding once the UDC appears.
+- Re-register the gadget driver if the same UDC name is written while the
+  driver is registered in pending state but not yet bound to a UDC.
+
+Origin: local
+Upstream-Status: Inappropriate [Android-specific]
+---
+diff --git a/drivers/usb/gadget/configfs.c b/drivers/usb/gadget/configfs.c
+index dd6d6b111..151b6f1e1 100644
+--- a/drivers/usb/gadget/configfs.c
++++ b/drivers/usb/gadget/configfs.c
+@@ -286,15 +286,28 @@ static ssize_t gadget_dev_desc_UDC_store(struct config_item *item,
+ 
+ 	mutex_lock(&gi->lock);
+ 
+-	if (!strlen(name)) {
++	/* Android's init.usb.configfs.rc writes "none" to unbind. */
++	if (!strlen(name) || !strcmp(name, "none")) {
+ 		ret = unregister_gadget(gi);
+ 		if (ret)
+ 			goto err;
+ 		kfree(name);
+ 	} else {
+ 		if (gi->composite.gadget_driver.udc_name) {
+-			ret = -EBUSY;
+-			goto err;
++			/*
++			 * Registered but not bound to that UDC: it was absent (a
++			 * dual-role controller in host mode), or binding failed
++			 * (a FunctionFS function not ready yet). Register again,
++			 * which binds if the UDC is there now.
++			 */
++			if (gi->composite.gadget_driver.is_bound ||
++			    strcmp(gi->composite.gadget_driver.udc_name, name)) {
++				ret = -EBUSY;
++				goto err;
++			}
++			ret = unregister_gadget(gi);
++			if (ret)
++				goto err;
+ 		}
+ 		gi->composite.gadget_driver.udc_name = name;
+ 		ret = usb_gadget_register_driver(&gi->composite.gadget_driver);
+@@ -1982,7 +1995,6 @@ static const struct usb_gadget_driver configfs_driver_template = {
+ 	.driver = {
+ 		.owner          = THIS_MODULE,
+ 	},
+-	.match_existing_only = 1,
+ };
+ 
+ static struct config_group *gadgets_make(

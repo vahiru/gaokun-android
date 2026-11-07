@@ -1,0 +1,65 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] platform: arm64: huawei-gaokun-ec: disable the EC IRQ across suspend
+
+Once the EC enters standby (EC_STANDBY_ENTER), the threaded IRQ handler cannot
+read events from the EC and previously returned immediately when ec->suspended
+was set. Because the EC interrupt line is level-triggered, leaving a pending
+event unread keeps the line asserted and causes the IRQ thread to spin tens of
+thousands of times on resume before the EC exits standby.
+
+Call disable_irq() in suspend before sending EC_STANDBY_ENTER, and re-enable the
+IRQ in resume after the EC leaves standby, removing the ec->suspended check from
+the IRQ handler. Events queued while suspended remain in the EC and are drained
+on resume, while wakeup functionality is preserved via
+IRQCHIP_ENABLE_WAKEUP_ON_SUSPEND on the PDC irqchip.
+
+Origin: local
+Upstream-Status: Pending
+---
+diff --git a/drivers/platform/arm64/huawei-gaokun-ec.c b/drivers/platform/arm64/huawei-gaokun-ec.c
+index 4c74447..06b9222 100644
+--- a/drivers/platform/arm64/huawei-gaokun-ec.c
++++ b/drivers/platform/arm64/huawei-gaokun-ec.c
+@@ -629,9 +629,22 @@ static int gaokun_ec_suspend(struct device *dev)
+ 	if (ec->suspended)
+ 		return 0;
+ 
++	/*
++	 * The handler cannot read the EC in standby, and the IRQ is level
++	 * triggered: it would fire again as soon as the handler returned.
++	 * Keep it disabled until resume. An event raised meanwhile keeps the
++	 * line asserted, and the handler reads it once resume enables the
++	 * IRQ again. As a wakeup IRQ it still wakes the system: the PDC has
++	 * the irq core enable disabled wakeup IRQs for suspend
++	 * (IRQCHIP_ENABLE_WAKEUP_ON_SUSPEND).
++	 */
++	disable_irq(ec->client->irq);
++
+ 	ret = gaokun_ec_write(ec, ec_req);
+-	if (ret)
++	if (ret) {
++		enable_irq(ec->client->irq);
+ 		return ret;
++	}
+ 
+ 	msleep(100);
+ 	gpiod_set_value(ec->enable_gpio, 0);
+@@ -671,6 +684,7 @@ static int gaokun_ec_resume(struct device *dev)
+ 	ec->lid_opened = true;
+ 
+ 	ec->suspended = false;
++	enable_irq(ec->client->irq);
+ 
+ 	return 0;
+ }
+@@ -735,10 +749,6 @@ static irqreturn_t gaokun_ec_irq_handler(int irq, void *data)
+ 	u8 status, id;
+ 	int ret;
+ 
+-	/* EC IO here before resume will fail at the first time, so ignore it */
+-	if (ec->suspended)
+-		return IRQ_HANDLED;
+-
+ 	ret = gaokun_ec_read_byte(ec, ec_req, &id);
+ 	if (ret)
+ 		return IRQ_HANDLED;

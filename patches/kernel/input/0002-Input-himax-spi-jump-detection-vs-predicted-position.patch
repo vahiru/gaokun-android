@@ -1,0 +1,69 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] Input: himax-spi: compare jump detection against predicted position instead of raw displacement
+
+hx_track_contacts() previously compared the raw per-frame displacement against
+track_jump_dist2 (6400 units^2, or 80 units/frame = 1.0 m/s at 120 Hz). Any
+steady swipe faster than 1.0 m/s exceeded track_jump_dist2 on every frame with
+age >= 2, resetting the track into debounce and fragmenting a single fast swipe
+into dozens of short touch segments or dropping it completely.
+
+Compare the contact position against the velocity-predicted position
+(cand[].dist2 from hx_dist2_predicted()) instead of the previous raw position so
+steady high-speed swipes are not mistaken for contact jumps.
+
+Origin: local
+Upstream-Status: Pending
+---
+diff --git a/drivers/input/touchscreen/hx-algo.c b/drivers/input/touchscreen/hx-algo.c
+--- a/drivers/input/touchscreen/hx-algo.c
++++ b/drivers/input/touchscreen/hx-algo.c
+@@ -1028,24 +1028,32 @@
+ 		if (!trk->active)
+ 			continue;
+ 
+-		/* Jump detection: if the actual (non-predicted) displacement
+-		 * exceeds the jump threshold, this is a finger swap, not a
+-		 * slide.  Release the old slot and let the detection spawn
+-		 * a new track at a *different* slot so that lift + press
+-		 * both appear in the same SYN_REPORT (zero added latency).
++		/* Jump detection: a detection that lands far from where this
++		 * track was heading is a finger swap, not a slide.  Release
++		 * the old slot and let the detection spawn a new track at a
++		 * *different* slot so that lift + press both appear in the
++		 * same SYN_REPORT (zero added latency).
++		 *
++		 * The test is the deviation from the *predicted* position,
++		 * which is what m->dist2 already holds.  Comparing the raw
++		 * displacement instead makes the threshold a disguised speed
++		 * limit: a smooth slide faster than sqrt(track_jump_dist2)
++		 * units per frame trips it every frame, and because the
++		 * replacement track starts at debounce_base and is only
++		 * eligible again at age >= 2, it can never reach debounce 0.
++		 * The contact then stops being reported for as long as the
++		 * finger keeps moving that fast.  With the shipped 6400 that
++		 * limit was 80 units/frame -- about 1 m/s on this panel, well
++		 * inside normal flick-scrolling, and measured on the device as
++		 * one swipe arriving as ~15 separate contacts.
+ 		 */
+-		if (algo->track_jump_dist2 > 0 && trk->age >= 2) {
+-			s32 dx = det[m->det_idx].x - trk->x;
+-			s32 dy = det[m->det_idx].y - trk->y;
+-			s64 actual_d2 = (s64)dx * dx + (s64)dy * dy;
+-
+-			if (actual_d2 > algo->track_jump_dist2) {
+-				hx_reset_track(trk);
+-				jump_released |= (1u << m->track_idx);
+-				track_matched[m->track_idx] = true;
+-				/* det stays unused → picked up by new-slot logic */
+-				continue;
+-			}
++		if (algo->track_jump_dist2 > 0 && trk->age >= 2 &&
++		    m->dist2 > algo->track_jump_dist2) {
++			hx_reset_track(trk);
++			jump_released |= (1u << m->track_idx);
++			track_matched[m->track_idx] = true;
++			/* det stays unused → picked up by new-slot logic */
++			continue;
+ 		}
+ 
+ 		/* Update position: smooth or direct. */

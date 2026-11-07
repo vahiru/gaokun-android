@@ -133,14 +133,14 @@
 /vendor/bin/gaokun3-touch-mode\.sh   u:object_r:gaokun3_touchmode_exec:s0
 
 # ⚠️ bpf-relabel.sh 【故意】不给独立域，继续用 .rc 里的
-#    `seclabel u:r:vendor_init:s0`：它唯一的作用是在【没打 patches/0007 的
+#    `seclabel u:r:vendor_init:s0`：它唯一的作用是在【没打 patches/kernel/core/0002 的
 #    内核上】给 bpffs 子目录 chcon，而 relabel bpffs 是受 neverallow 限制的
 #    动作，只有 vendor_init 拿得到。给它独立域反而会让那条保命通路失效。
 #    （在打了 0007 的内核上它会提前 exit 0，实测 chcon 一次都不跑 —— 见 #60。）
 #    ⚠️★ 2026-09-27 退役（#126）：这段推理漏了一半 —— vendor_init 能 relabel bpffs 不假，
 #    但 vendor_init【进不去】一个 vendor 脚本：vendor_init.te:356 禁 entrypoint、:365 禁
 #    execute_no_trans，都没有豁免。也就是说这条"保命通路"只在 permissive 下存在。
-#    脚本与 rc 已不再装进镜像（device.mk），根治靠内核 patches/0007。
+#    脚本与 rc 已不再装进镜像（device.mk），根治靠内核 patches/kernel/core/0002。
 
 # ⬜ /vendor/bin/tu_debug_loader.sh —— 调试用，不由 init 启动，不给标签。
 #

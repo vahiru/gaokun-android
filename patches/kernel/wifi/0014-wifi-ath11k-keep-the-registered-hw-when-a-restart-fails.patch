@@ -1,0 +1,51 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] wifi: ath11k: keep the registered hw when a restart fails
+
+ath11k_core_start() and ath11k_core_qmi_firmware_ready() call
+ath11k_mac_destroy() on failure to undo ath11k_mac_allocate(). But
+ath11k_mac_allocate() does nothing once the device is registered, so in a
+restart after a firmware crash these paths free the registered hw instead.
+mac80211 is still using it: ath11k_mac_op_start() waits for the restart in
+ath11k_mac_wait_reconfigure() with ar->conf_mutex held, and returns into
+freed memory. The next recovery also finds pdev->ar NULL.
+
+From reading the code, a firmware crash between the WMI init command and
+the unified ready event gets there. It has not been seen on a device.
+
+Only destroy a hw that isn't registered.
+
+Julius Bairaktaris posted the same change as [PATCH ath-next v2 2/5].
+
+Link: https://lists.infradead.org/pipermail/ath11k/2026-October/009366.html
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/net/wireless/ath/ath11k/core.c | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/net/wireless/ath/ath11k/core.c b/drivers/net/wireless/ath/ath11k/core.c
+index 57d2be112..6d67631f5 100644
+--- a/drivers/net/wireless/ath/ath11k/core.c
++++ b/drivers/net/wireless/ath/ath11k/core.c
+@@ -2257,7 +2257,9 @@ static int ath11k_core_start(struct ath11k_base *ab)
+ err_reo_cleanup:
+ 	ath11k_dp_pdev_reo_cleanup(ab);
+ err_mac_destroy:
+-	ath11k_mac_destroy(ab);
++	/* In a restart this is the registered hw, and mac80211 is using it. */
++	if (!test_bit(ATH11K_FLAG_REGISTERED, &ab->dev_flags))
++		ath11k_mac_destroy(ab);
+ err_hif_stop:
+ 	ath11k_hif_stop(ab);
+ err_wmi_detach:
+@@ -2341,7 +2343,8 @@ int ath11k_core_qmi_firmware_ready(struct ath11k_base *ab)
+ 
+ err_core_stop:
+ 	ath11k_core_stop(ab);
+-	ath11k_mac_destroy(ab);
++	if (!test_bit(ATH11K_FLAG_REGISTERED, &ab->dev_flags))
++		ath11k_mac_destroy(ab);
+ err_dp_free:
+ 	ath11k_dp_free(ab);
+ 	mutex_unlock(&ab->core_lock);

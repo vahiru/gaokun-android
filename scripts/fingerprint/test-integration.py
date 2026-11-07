@@ -18,8 +18,8 @@ with tempfile.TemporaryDirectory(prefix='gk3-fp-integration-') as tmp:
     dest.mkdir(parents=True)
     for name in ('Makefile', 'Kconfig'):
         shutil.copyfile(ROOT / 'refs/linux-v7.2-rc2-git/drivers/firmware/qcom' / name, dest / name)
-    for name in ('0212-firmware-qcom-gaokun3-fingerprint-ioctl.patch',
-                 '0213-firmware-qcom-gaokun3-fpcmd-add-the-Goodix-GDIX5125-sensor.patch'):
+    for name in ('kernel/fingerprint/0002-firmware-qcom-gaokun3-fingerprint-ioctl.patch',
+                 'kernel/fingerprint/0003-firmware-qcom-gaokun3-fpcmd-add-the-Goodix-GDIX5125-sensor.patch'):
         patch = ROOT / 'patches' / name
         subprocess.run(['git', 'apply', '--check', str(patch)], cwd=tmp / 'kernel', check=True)
         subprocess.run(['git', 'apply', str(patch)], cwd=tmp / 'kernel', check=True)
@@ -30,7 +30,7 @@ with tempfile.TemporaryDirectory(prefix='gk3-fp-integration-') as tmp:
     assert 'static int fp_open(' in source and 'static int fp_release(' in source
     assert 'fp_shutdown_failed = true;' in source
     assert (dest / 'gaokun3_fpcmd_goodix.h').exists()
-    print('PASS: kernel patch application (0212 + 0213), UAPI equality, exclusive owner/shutdown guard')
+    print('PASS: kernel patch application (fingerprint/0002 + 0003), UAPI equality, exclusive owner/shutdown guard')
 
     # Check implemented methods against the real frozen Android V4 API snapshot.
     api = (ROOT / 'refs/a17/hardware/interfaces/biometrics/fingerprint/aidl/aidl_api'

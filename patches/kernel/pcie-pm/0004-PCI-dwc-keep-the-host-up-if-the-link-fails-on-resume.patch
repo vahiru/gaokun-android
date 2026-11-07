@@ -1,0 +1,59 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] PCI: dwc: keep the host up if the link fails on resume
+
+dw_pcie_resume_noirq() tears the host down when the link times out and
+leaves pci->suspended set. By the code, the PM core goes on to resume the
+Root Port and its children anyway, and they reach the controller through
+the DBI with its clocks off, and on Qualcomm with the CPU-PCIe path off as
+well. The
+next suspend does the same in dw_pcie_suspend_noirq() and disables
+everything a second time. So one link that fails to train can take the
+whole SoC down. This comes from reading the code, it hasn't been seen on
+hardware.
+
+Only -ETIMEDOUT takes this path, -ENODEV and -EIO keep the host up. Keep it
+up for -ETIMEDOUT too. By the code, the Root Port then stays accessible,
+config accesses to its children fail at the link check in
+dw_pcie_other_conf_map_bus(), and the next suspend starts with the host up.
+BAR accesses to the children aren't guarded, the same as after the other
+two errors. The -ETIMEDOUT case hasn't been seen on hardware either.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/pci/controller/dwc/pcie-designware-host.c | 14 ++++++++------
+ 1 file changed, 8 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/pci/controller/dwc/pcie-designware-host.c b/drivers/pci/controller/dwc/pcie-designware-host.c
+index 06722259d..30adfa657 100644
+--- a/drivers/pci/controller/dwc/pcie-designware-host.c
++++ b/drivers/pci/controller/dwc/pcie-designware-host.c
+@@ -1313,9 +1313,14 @@ int dw_pcie_resume_noirq(struct dw_pcie *pci)
+ 	if (ret)
+ 		goto err_deinit;
+ 
+-	ret = dw_pcie_wait_for_link(pci);
+-	if (ret == -ETIMEDOUT)
+-		goto err_stop_link;
++	/*
++	 * The PM core resumes the Root Port and its children whatever happens
++	 * here, and they reach the controller through the DBI. Keep the host
++	 * up if the link failed: config accesses to the children fail at the
++	 * link check in dw_pcie_other_conf_map_bus(), while tearing the host
++	 * down would leave the DBI unclocked.
++	 */
++	dw_pcie_wait_for_link(pci);
+ 
+ 	if (pci->pp.ops->post_init)
+ 		pci->pp.ops->post_init(&pci->pp);
+@@ -1324,9 +1329,6 @@ int dw_pcie_resume_noirq(struct dw_pcie *pci)
+ 
+ 	return 0;
+ 
+-err_stop_link:
+-	dw_pcie_stop_link(pci);
+-
+ err_deinit:
+ 	if (pci->pp.ops->deinit)
+ 		pci->pp.ops->deinit(&pci->pp);

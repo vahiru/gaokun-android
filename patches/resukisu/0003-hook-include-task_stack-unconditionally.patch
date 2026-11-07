@@ -1,19 +1,14 @@
-From: gaokun-android <local>
-Subject: [PATCH] KernelSU: fix task_stack.h version-gated include
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] KernelSU: hook: include <linux/sched/task_stack.h> unconditionally
 
-【本地，2026-10-11 起】syscall_hook_manager.c 把
-`#include <linux/sched/task_stack.h>` 放在
-`#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 7, 0)` 里。
-本机内核 7.2.9（上游 stable）≥ 6.7.0 ⇒ include 被跳过 ⇒
-`task_pt_regs(current)` 展开的 `task_stack_page()` 看不到
-`static __always_inline` 定义 ⇒ 链接报 undefined reference。
+kernel/hook/syscall_hook_manager.c gated #include <linux/sched/task_stack.h> on
+LINUX_VERSION_CODE < KERNEL_VERSION(6, 7, 0), leaving task_stack_page()
+undeclared when expanding task_pt_regs(current) on newer mainline kernels.
+Include <linux/sched/task_stack.h> unconditionally.
 
-把 include 移出版本门控（无条件 include）。
-
+Origin: local
+Upstream-Status: Pending
 ---
- kernel/hook/syscall_hook_manager.c | 2 +-
- 1 file changed, 1 insertion(+), 1 deletion(-)
-
 diff --git a/kernel/hook/syscall_hook_manager.c b/kernel/hook/syscall_hook_manager.c
 --- a/kernel/hook/syscall_hook_manager.c
 +++ b/kernel/hook/syscall_hook_manager.c

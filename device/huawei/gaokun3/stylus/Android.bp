@@ -1,7 +1,7 @@
 //
 // 手写笔（M-Pencil）守护进程，说明见 docs/dev/stylus.md。
 //
-// 读触摸从片驱动（patches/0079，/dev/gk3_pen）交上来的帧，解算位置、悬停和倾斜；
+// 读触摸从片驱动（patches/kernel/input/0011，/dev/gk3_pen）交上来的帧，解算位置、悬停和倾斜；
 // 压感、侧边双击和电量来自笔 MCU（USB 12d1:10b8：接口 0 的 hidraw 报文 0x55，
 // 接口 1 的厂商 bulk 事件）。合成一支 uinput 触控笔交给 Android。
 //

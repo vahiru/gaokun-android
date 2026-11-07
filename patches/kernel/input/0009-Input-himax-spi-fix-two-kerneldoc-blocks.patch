@@ -1,0 +1,48 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] Input: himax-spi: fix kernel-doc warnings on himax_sense_off() and himax_sense_on()
+
+Fix the function names, missing @ts parameter descriptions, and Return: sections
+in the kernel-doc comments for himax_sense_off() and himax_sense_on() to silence
+six W=1 kernel-doc warnings.
+
+Origin: local
+Upstream-Status: Pending
+---
+diff --git a/drivers/input/touchscreen/himax-spi-core.c b/drivers/input/touchscreen/himax-spi-core.c
+--- a/drivers/input/touchscreen/himax-spi-core.c
++++ b/drivers/input/touchscreen/himax-spi-core.c
+@@ -434,11 +434,14 @@
+ }
+ 
+ /**
+- * sense_off: stop MCU
+- * 1. request FW to stop
+- * 2. enter safe mode (and reset TCON for some ICs).
++ * himax_sense_off() - stop the touch MCU
++ * @ts: driver state
++ * @check_en: read back and confirm that the firmware really stopped
+  *
+- * @check_en: confirm if the FW is stopped
++ * Asks the firmware to stop, then enters safe mode (which also resets TCON
++ * on some ICs).
++ *
++ * Return: 0 on success, negative errno otherwise.
+  */
+ static int himax_sense_off(struct himax_ts_data *ts, bool check_en)
+ {
+@@ -528,11 +531,11 @@
+ }
+ 
+ /**
+- * @sw_reset: true for software reset, false for hardware reset
+- *     true: write IC to leave safe mode
+- *     false: pin reset
++ * himax_sense_on() - restart the touch MCU on its firmware
++ * @ts: driver state
++ * @sw_reset: %true writes the IC to leave safe mode, %false pin-resets it
+  *
+- * make MCU restart running the FW
++ * Return: 0 on success, negative errno otherwise.
+  */
+ static int himax_sense_on(struct himax_ts_data *ts, bool sw_reset)
+ {

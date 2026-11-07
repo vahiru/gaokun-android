@@ -61,7 +61,7 @@
 - 补传v0.7.1的内核源码附件；在v0.2到v0.5的发布页说明旧下载链接已失效
 - 核对issue表单的显示效果
 - 构建机上的设备树改为本仓库的checkout
-- 提交到上游：`drm_crtc`的`BUG_ON`问题（`patches/0013`）、[`dev/upstream/`](dev/upstream/README.md)里的内核补丁稿、libcamera补丁、camcc的RCG shared
+- 提交到上游：`drm_crtc`的`BUG_ON`问题（`patches/kernel/drm/0001`）、[`patches/kernel/camera/0001..0004`](../patches/kernel/camera/)里的相机与`camcc`补丁、libcamera补丁
 
 ## 六、搁置
 

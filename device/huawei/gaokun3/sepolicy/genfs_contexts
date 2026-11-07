@@ -37,7 +37,7 @@ genfscon sysfs /devices/platform/soc@0/ae00000.display-subsystem/ae96000.dsi/ae9
 #   留着无害；等一次带 host 切换的 enforcing 试跑确认 system_suspend 没有 sysfs denial 再删。
 genfscon sysfs /devices/platform/soc@0/a6f8800.usb/a600000.usb/xhci-hcd.5.auto/wakeup u:object_r:sysfs_wakeup:s0
 
-# 后摄闪光灯 LED（PM8350C 闪光模块，patches/0036）。/sys/class/leds 只是符号链接，标签要打在
+# 后摄闪光灯 LED（PM8350C 闪光模块，patches/kernel/dts/0006）。/sys/class/leds 只是符号链接，标签要打在
 # 真实 inode 路径上（同 backlight 那条的教训，#77）。打上 sysfs_leds 之后 hal_camera_default.te
 # 里那两条 allow 才有对象。路径来自实机 readlink -f /sys/class/leds/white:flash。
 genfscon sysfs /devices/platform/soc@0/c440000.spmi/spmi-0/0-02/c440000.spmi:pmic@2:led-controller@ee00/leds u:object_r:sysfs_leds:s0
@@ -123,10 +123,10 @@ genfscon sysfs /devices/platform/soc@0/c440000.spmi/spmi-0/0-00/c440000.spmi:pmi
 genfscon efivarfs / u:object_r:gaokun3_efivarfs:s0
 
 # ── 手写笔电量（M-Pencil）───────────────────────────────────────────────
-# 触摸从片驱动（patches/0079）注册的 power supply 故意不挂父设备，所以在 virtual 下：
+# 触摸从片驱动（patches/kernel/input/0011）注册的 power supply 故意不挂父设备，所以在 virtual 下：
 # Android 为输入设备找电池时，从设备节点往上找最近的 power_supply 目录，
 # 而 gk3pend 的 uinput 笔在 /sys/devices/virtual。读它的是 system_server 与 health HAL。
 genfscon sysfs /devices/virtual/power_supply/m-pencil u:object_r:sysfs_gaokun3_pen_battery:s0
 
-# Kernel release reported to apps (patches/0085).
+# Kernel release reported to apps (patches/kernel/core/0008).
 genfscon proc /sys/kernel/app_osrelease u:object_r:gaokun3_proc_app_osrelease:s0

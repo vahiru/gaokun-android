@@ -1,7 +1,7 @@
 From 4baaa45f2ba2b80bda65c1e2beb67951a7be3a4e Mon Sep 17 00:00:00 2001
 From: Akisaira <akisaira@outlook.com>
 Date: Tue, 3 Nov 2026 22:35:21 +1100
-Subject: [PATCH 06/13] ipa: softisp: Update the sensor info on configure
+Subject: [PATCH] ipa: softisp: Update the sensor info on configure
 
 The soft ISP IPA gets the sensor info only once, in init(), when the
 camera is created. It describes whatever mode the sensor was in at that
@@ -21,6 +21,9 @@ other IPAs do, and update the context with it in configure().
 
 Signed-off-by: Akisaira <akisaira@outlook.com>
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+Origin: local
+Upstream-Status: Pending
 ---
  include/libcamera/ipa/softisp.mojom      | 1 +
  src/ipa/softisp/softisp.cpp              | 1 +

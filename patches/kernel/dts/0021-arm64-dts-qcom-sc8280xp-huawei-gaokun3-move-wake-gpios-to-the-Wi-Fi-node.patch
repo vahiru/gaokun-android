@@ -1,0 +1,42 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] arm64: dts: qcom: sc8280xp-huawei-gaokun3: move wake-gpios to the Wi-Fi node
+
+pci_configure_of_wake_gpio() reads the "wake" GPIO from the node of the
+PCI device it is adding, then registers it as that device's wake IRQ.
+Nothing reads wake-gpios from the pcie4 host bridge node, which the
+binding deprecates anyway, so WAKE# from the Wi-Fi card has no handler
+and can't take the system out of suspend.
+
+Move the property to wifi@0, so the IRQ belongs to the device that drives
+the line. The pin configuration stays in pcie4_default.
+
+The ath11k PCI binding doesn't list wake-gpios yet and has
+additionalProperties: false.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
+index 691cbc7f2..bcf77a11b 100644
+--- a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
++++ b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
+@@ -990,7 +990,6 @@ &pcie4 {
+ 	max-link-speed = <2>;
+ 
+ 	perst-gpios = <&tlmm 141 GPIO_ACTIVE_LOW>;
+-	wake-gpios = <&tlmm 139 GPIO_ACTIVE_LOW>;
+ 
+ 	vddpe-3v3-supply = <&vreg_wlan>;
+ 
+@@ -1004,6 +1003,7 @@ &pcie4_port0 {
+ 	wifi@0 {
+ 		compatible = "pci17cb,1103";
+ 		reg = <0x10000 0x0 0x0 0x0 0x0>;
++		wake-gpios = <&tlmm 139 GPIO_ACTIVE_LOW>;
+ 
+ 		vddrfacmn-supply = <&vreg_pmu_rfa_cmn_0p8>;
+ 		vddaon-supply = <&vreg_pmu_aon_0p8>;

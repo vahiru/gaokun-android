@@ -1,0 +1,104 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] audio: aidl: primary: fall back to ro.vendor.audio.primary.alsa.<type> when address has no CARD/DEV
+
+Pluggable analog audio devices (such as wired headsets) cannot declare a fixed
+non-empty address on their devicePort in primary_audio_policy_configuration.xml
+because WiredAccessoryManager reports connections with an empty address string.
+When StreamPrimary::getCardAndDeviceId() sees an empty address, it falls back
+to hw:0,0, which is playback-only on SC8280XP and fails for headset microphone
+capture (hw:0,2).
+
+When the device address carries no CARD_x_DEV_y specification, look up
+ro.vendor.audio.primary.alsa.<lowercase_device_type> (for example,
+ro.vendor.audio.primary.alsa.in_headset=CARD_0_DEV_2) before falling back to
+the default card 0 device 0.
+
+Origin: local
+Upstream-Status: Inappropriate [device-specific HAL workaround]
+---
+diff --git a/audio/aidl/default/primary/StreamPrimary.cpp b/audio/aidl/default/primary/StreamPrimary.cpp
+index a7af4f4..3cb5a32 100644
+--- a/audio/aidl/default/primary/StreamPrimary.cpp
++++ b/audio/aidl/default/primary/StreamPrimary.cpp
+@@ -16,7 +16,10 @@
+ 
+ #define LOG_TAG "AHAL_StreamPrimary"
+ 
++#include <algorithm>
++#include <cctype>
+ #include <cstdio>
++#include <string>
+ 
+ #include <Log.h>
+ #include <android-base/parseint.h>
+@@ -224,23 +227,60 @@ bool StreamPrimary::isStubStream() {
+     return mAlsaDeviceId == kStubDeviceId;
+ }
+ 
++namespace {
++
++// Parses the "CARD_<n>_DEV_<m>" selector at the end of 'address'.
++bool parseCardAndDeviceId(const std::string& address, std::pair<int, int>* cardAndDeviceId) {
++    const size_t suffixPos = address.rfind("CARD_");
++    return suffixPos != std::string::npos &&
++           sscanf(address.c_str() + suffixPos, "CARD_%d_DEV_%d", &cardAndDeviceId->first,
++                  &cardAndDeviceId->second) == 2;
++}
++
++// "ro.vendor.audio.primary.alsa.<device type in lower case>", e.g.
++// "ro.vendor.audio.primary.alsa.in_headset" for AudioDeviceType::IN_HEADSET.
++std::string getFallbackPropertyName(AudioDeviceType type) {
++    std::string name = ::aidl::android::media::audio::common::toString(type);
++    std::transform(name.begin(), name.end(), name.begin(),
++                   [](unsigned char c) { return std::tolower(c); });
++    return "ro.vendor.audio.primary.alsa." + name;
++}
++
++}  // namespace
++
+ // static
+ StreamPrimary::AlsaDeviceId StreamPrimary::getCardAndDeviceId(
+         const std::vector<AudioDevice>& devices) {
+-    if (devices.empty() || devices[0].address.getTag() != AudioDeviceAddress::id) {
++    if (devices.empty()) {
+         return kDefaultCardAndDeviceId;
+     }
+-    std::string deviceAddress = devices[0].address.get<AudioDeviceAddress::id>();
+     AlsaDeviceId cardAndDeviceId;
+-    if (const size_t suffixPos = deviceAddress.rfind("CARD_");
+-        suffixPos == std::string::npos ||
+-        sscanf(deviceAddress.c_str() + suffixPos, "CARD_%d_DEV_%d", &cardAndDeviceId.first,
+-               &cardAndDeviceId.second) != 2) {
+-        return kDefaultCardAndDeviceId;
++    if (devices[0].address.getTag() == AudioDeviceAddress::id &&
++        parseCardAndDeviceId(devices[0].address.get<AudioDeviceAddress::id>(),
++                             &cardAndDeviceId)) {
++        LOG(DEBUG) << __func__ << ": parsed with card id " << cardAndDeviceId.first
++                   << ", device id " << cardAndDeviceId.second;
++        return cardAndDeviceId;
++    }
++    // Removable devices cannot carry the selector in their address: the framework connects
++    // wired (h2w) devices with an empty address, and the audio policy only matches a declared
++    // device port against such a request when the port has no address either. So the only
++    // device information the stream gets for e.g. a headset microphone is its type. Without a
++    // per-type fallback every such device lands on the single module-wide default, which cannot
++    // be right for both directions (on some platforms it has no capture PCM at all, so the
++    // headset microphone fails to open). Let the vendor provide the selector by device type.
++    const std::string propertyName = getFallbackPropertyName(devices[0].type.type);
++    if (const std::string selector = ::android::base::GetProperty(propertyName, "");
++        !selector.empty()) {
++        if (parseCardAndDeviceId(selector, &cardAndDeviceId)) {
++            LOG(DEBUG) << __func__ << ": " << propertyName << " gives card id "
++                       << cardAndDeviceId.first << ", device id " << cardAndDeviceId.second;
++            return cardAndDeviceId;
++        }
++        LOG(WARNING) << __func__ << ": ignoring malformed " << propertyName << "=\"" << selector
++                     << "\", expected \"CARD_<n>_DEV_<m>\"";
+     }
+-    LOG(DEBUG) << __func__ << ": parsed with card id " << cardAndDeviceId.first << ", device id "
+-               << cardAndDeviceId.second;
+-    return cardAndDeviceId;
++    return kDefaultCardAndDeviceId;
+ }
+ 
+ // static

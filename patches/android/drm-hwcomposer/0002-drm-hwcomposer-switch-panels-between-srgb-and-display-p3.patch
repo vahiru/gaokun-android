@@ -1,0 +1,196 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] drm_hwcomposer: switch internal panels between sRGB and Display P3
+
+Allow vendor.hwc.drm.force_p3_support to take effect without requiring plane
+color pipelines when the internal panel connector exposes the DRM Colorspace
+property. Report NATIVE, SRGB, and DISPLAY_P3 color modes to SurfaceFlinger
+and forward the active mode to the connector's Colorspace property.
+
+Since MSM DPU planes do not provide per-plane gamut mapping without a plane
+color pipeline, fall back to GPU composition for layers whose dataspace
+transfer/gamut does not match the active panel color mode, and align the
+client target dataspace with the active color mode. Also return kUnknown
+instead of std::nullopt in AidlToColorspace() and AidlToTransferFunc() for
+unrecognized values so layers do not retain stale color attributes.
+
+Origin: local
+Upstream-Status: Inappropriate [device-specific DPU PCC hook]
+---
+diff --git a/compositor/CompositorTestUtils.h b/compositor/CompositorTestUtils.h
+index f01bfee..de5fb9d 100644
+--- a/compositor/CompositorTestUtils.h
++++ b/compositor/CompositorTestUtils.h
+@@ -42,6 +42,7 @@ class MockCompositorDisplay : public ICompositorDisplay {
+   MOCK_METHOD(bool, TestComposition,
+               (CompositionPlanner::ValidatedComposition&), (const));
+   MOCK_METHOD(bool, CtmByGpu, (), (const));
++  MOCK_METHOD(bool, ColorConversionByGpu, (const HwcLayer *), (const));
+   MOCK_METHOD(bool, ForcedScalingWithGpu, (), (const));
+   MOCK_METHOD((std::pair<uint32_t, uint32_t>), GetSize, (), (const));
+ };
+diff --git a/compositor/GenericCompositionPlanner.cpp b/compositor/GenericCompositionPlanner.cpp
+index 32c7e22..14a8e44 100644
+--- a/compositor/GenericCompositionPlanner.cpp
++++ b/compositor/GenericCompositionPlanner.cpp
+@@ -148,6 +148,7 @@ bool GenericCompositionPlanner::IsClientLayer(const ICompositorDisplay* display,
+                                               const HwcLayer* layer) {
+   return !HardwareSupportsLayerType(layer->GetSfType()) ||
+          !layer->IsLayerUsableAsDevice() || display->CtmByGpu() ||
++         display->ColorConversionByGpu(layer) ||
+          (layer->GetLayerData().pi.RequireScalingOrPhasing() &&
+           display->ForcedScalingWithGpu());
+ }
+diff --git a/compositor/GenericLayerMapperCompositionPlanner.cpp b/compositor/GenericLayerMapperCompositionPlanner.cpp
+index 4171cfc..419d10a 100644
+--- a/compositor/GenericLayerMapperCompositionPlanner.cpp
++++ b/compositor/GenericLayerMapperCompositionPlanner.cpp
+@@ -228,6 +228,7 @@ bool GenericLayerMapperCompositionPlanner::MustBeClientComposited(
+   // request a change.
+   return !HardwareSupportsLayerType(layer->GetSfType()) ||
+          !layer->IsLayerUsableAsDevice() || display->CtmByGpu() ||
++         display->ColorConversionByGpu(layer) ||
+          (layer->GetLayerData().pi.RequireScalingOrPhasing() &&
+           display->ForcedScalingWithGpu());
+ }
+diff --git a/compositor/ICompositorDisplay.h b/compositor/ICompositorDisplay.h
+index 0e6df24..cc3530f 100644
+--- a/compositor/ICompositorDisplay.h
++++ b/compositor/ICompositorDisplay.h
+@@ -47,6 +47,9 @@ class ICompositorDisplay {
+       CompositionPlanner::ValidatedComposition &composition) const = 0;
+ 
+   virtual bool CtmByGpu() const = 0;
++  // True if the layer's color space differs from the output's and the GPU
++  // has to convert it.
++  virtual bool ColorConversionByGpu(const HwcLayer *layer) const = 0;
+   virtual bool ForcedScalingWithGpu() const = 0;
+ 
+   // Returns the currently configured display resolution as {width, height}.
+diff --git a/hwc/HwcDisplay.cpp b/hwc/HwcDisplay.cpp
+index 7a1a9d0..d20498e 100644
+--- a/hwc/HwcDisplay.cpp
++++ b/hwc/HwcDisplay.cpp
+@@ -818,7 +818,19 @@ auto HwcDisplay::DestroyLayer(ILayerId layer_id) -> bool {
+ }
+ 
+ auto HwcDisplay::GetColorModes() -> std::vector<ColorMode> {
+-  if (IsInHeadlessMode() || !hwc_->GetResMan().UseColorPipeline()) {
++  if (IsInHeadlessMode()) {
++    return {ColorMode::kNative};
++  }
++
++  if (!hwc_->GetResMan().UseColorPipeline()) {
++    // The display driver follows the connector's colorspace property. sRGB
++    // has to be listed as well, or SurfaceFlinger would never leave P3, and
++    // every display has to support native.
++    auto *connector = GetPipe().connector->Get();
++    if (connector->IsInternal() && hwc_->GetResMan().ForceP3Support() &&
++        connector->GetColorspaceProperty()) {
++      return {ColorMode::kNative, ColorMode::kSrgb, ColorMode::kDisplayP3};
++    }
+     return {ColorMode::kNative};
+   }
+ 
+@@ -1282,6 +1294,25 @@ std::shared_ptr<BindingOwner<DrmPlane>> HwcDisplay::GetCursorPlane() const {
+   return pipeline_->GetUsablePlanes().second;
+ }
+ 
++bool HwcDisplay::IsP3Output() const {
++  return colorspace_ == Colorspace::kDciP3RgbD65;
++}
++
++bool HwcDisplay::ColorConversionByGpu(const HwcLayer *layer) const {
++  // Planes with a color pipeline convert on their own.
++  if (hwc_->GetResMan().UseColorPipeline()) {
++    return false;
++  }
++
++  // Otherwise there is no per-plane gamut mapping, so scanning out a layer that
++  // isn't already in the output's color space would show the wrong colors.
++  const bool p3_layer = layer->GetColorspace() == Colorspace::kDciP3RgbD65;
++  if (IsP3Output()) {
++    return !p3_layer || layer->GetTransferFunction() != TransferFunction::kSrgb;
++  }
++  return colorspace_ == Colorspace::kBt709Ycc && p3_layer;
++}
++
+ bool HwcDisplay::CtmByGpu() const {
+   if (color_transform_is_identity_)
+     return false;
+diff --git a/hwc/HwcDisplay.h b/hwc/HwcDisplay.h
+index 0576a6e..203b621 100644
+--- a/hwc/HwcDisplay.h
++++ b/hwc/HwcDisplay.h
+@@ -234,6 +234,7 @@ class HwcDisplay : public ICompositorDisplay {
+   std::shared_ptr<BindingOwner<DrmPlane>> GetCursorPlane() const override;
+ 
+   bool CtmByGpu() const override;
++  bool ColorConversionByGpu(const HwcLayer *layer) const override;
+ 
+   bool ForcedScalingWithGpu() const override;
+ 
+@@ -286,6 +287,9 @@ class HwcDisplay : public ICompositorDisplay {
+   // of its layers. Only meaningful after ValidateStagedComposition().
+   bool NeedsDeepClientTarget() const;
+ 
++  // True while the output is in the Display P3 color mode.
++  bool IsP3Output() const;
++
+   std::pair<uint32_t, uint32_t> GetSize() const override;
+ 
+   // Enable or disable the display.
+diff --git a/hwc/HwcLayer.h b/hwc/HwcLayer.h
+index 4f17b1c..59923af 100644
+--- a/hwc/HwcLayer.h
++++ b/hwc/HwcLayer.h
+@@ -93,6 +93,14 @@ class HwcLayer {
+     return z_order_;
+   }
+ 
++  Colorspace GetColorspace() const {
++    return colorspace_;
++  }
++
++  TransferFunction GetTransferFunction() const {
++    return transfer_func_;
++  }
++
+   const LayerData &GetLayerData() const {
+     return layer_data_;
+   }
+diff --git a/hwc3/ComposerClient.cpp b/hwc3/ComposerClient.cpp
+index 445bbaa..549c979 100644
+--- a/hwc3/ComposerClient.cpp
++++ b/hwc3/ComposerClient.cpp
+@@ -132,8 +132,9 @@ std::optional<Colorspace> AidlToColorspace(const common::Dataspace& dataspace) {
+     case static_cast<int32_t>(common::Dataspace::UNKNOWN):
+       return Colorspace::kDefault;
+     default:
++      // Not nullopt, a layer must not keep the color space it had before.
+       ALOGE("Unsupported standard: %d", standard);
+-      return std::nullopt;
++      return Colorspace::kDefault;
+   }
+ }
+ 
+@@ -216,8 +217,9 @@ std::optional<TransferFunction> AidlToTransferFunc(
+     case static_cast<int32_t>(common::Dataspace::UNKNOWN):
+       return TransferFunction::kUnknown;
+     default:
++      // Not nullopt, a layer must not keep the transfer it had before.
+       ALOGE("Unsupported transfer function: %d", transfer_func);
+-      return std::nullopt;
++      return TransferFunction::kUnknown;
+   }
+ }
+ 
+@@ -809,7 +811,8 @@ void ComposerClient::ExecuteDisplayCommand(const DisplayCommand& command) {
+           display_handle,
+           deep_target ? common::PixelFormat::RGBA_1010102
+                       : common::PixelFormat::RGBA_8888,
+-          common::Dataspace::SRGB);
++          display->IsP3Output() ? common::Dataspace::DISPLAY_P3
++                                : common::Dataspace::SRGB);
+     }
+     hwc3_display->deep_client_target = deep_target;
+ 

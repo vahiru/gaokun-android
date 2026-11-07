@@ -1,0 +1,218 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] power: supply: huawei-gaokun-battery: decode status register bitwise and report CAPACITY_LEVEL
+
+The EC battery status byte at 0x82 follows the ACPI _BST state bitmask
+(bit 0 discharging, bit 1 charging, bit 2 critical, bit 3 full), but the driver
+matched only single-bit values (0x01, 0x02, 0x08) and left the previous status
+stale on 0x00 (plugged in, not charging) or combined values such as 0x05
+(discharging + critical). In addition, failing to read 0x82 decoded an
+uninitialized stack variable, and the driver did not expose
+POWER_SUPPLY_PROP_CAPACITY_LEVEL, preventing Android's BatteryService from
+triggering a graceful shutdown when discharging to 0% on a weak power source.
+
+Decode 0x82 bitwise (prioritizing discharging so a stale charging state never
+blocks low-battery shutdown), preserve the previous status on read errors,
+expose POWER_SUPPLY_PROP_CAPACITY_LEVEL with a tunable critical_max_capacity
+threshold, and provide a read-only ec_raw sysfs attribute for diagnostics.
+
+Origin: local
+Upstream-Status: Pending
+---
+diff --git a/drivers/power/supply/huawei-gaokun-battery.c b/drivers/power/supply/huawei-gaokun-battery.c
+index 6212b00..0800d43 100644
+--- a/drivers/power/supply/huawei-gaokun-battery.c
++++ b/drivers/power/supply/huawei-gaokun-battery.c
+@@ -31,6 +31,8 @@
+ #define EC_BAT_CHARGING		BIT(1)
+ #define EC_BAT_CRITICAL		BIT(2) /* Low Battery Level */
+ #define EC_BAT_FULL		BIT(3)
++#define EC_BAT_STATUS_KNOWN	(EC_BAT_DISCHARGING | EC_BAT_CHARGING | \
++				 EC_BAT_CRITICAL | EC_BAT_FULL)
+ 
+ /* -------------------------------------------------------------------------- */
+ /* Word Data Reg */
+@@ -81,6 +83,16 @@
+ #define NO_DELAY_MODE	1
+ #define DELAY_MODE	4
+ 
++/*
++ * Escalate EC_BAT_CRITICAL to CAPACITY_LEVEL_CRITICAL only when the reported
++ * capacity is at or below critical_max_capacity so an early EC critical bit
++ * cannot trigger a premature userspace shutdown (0 = only at 0%).
++ */
++static int critical_max_capacity = 2;
++module_param(critical_max_capacity, int, 0644);
++MODULE_PARM_DESC(critical_max_capacity,
++		 "Report CAPACITY_LEVEL Critical on the EC critical bit only at or below this capacity (%)");
++
+ struct gaokun_psy_bat_status {
+ 	__le16 percentage_now;	/* 0x90 */
+ 	__le16 voltage_now;
+@@ -118,6 +130,7 @@ struct gaokun_psy {
+ 	char battery_vendor[0x10];
+ 
+ 	int charge_now;
++	u8 bat_status_raw;	/* Last successfully read raw 0x82 byte */
+ 	int online;
+ 	int bat_present;
+ };
+@@ -216,25 +229,84 @@ static int gaokun_psy_get_bat_info(struct gaokun_psy *ecbat)
+ 					sizeof(ecbat->info), (u8 *)&ecbat->info);
+ }
+ 
++/*
++ * Decode register 0x82 bitwise. Bits 0..2 match the ACPI _BST state bitmask
++ * (bit 0 discharging, bit 1 charging, bit 2 critical) and bit 3 indicates full.
++ * Matching the whole byte with a switch statement left charge_now stale on 0x00
++ * (plugged in, not charging) or combined states such as 0x05 (discharging +
++ * critical).
++ *
++ * Prioritize discharging over other bits so a stale charging bit never blocks
++ * low-battery shutdown; then check full and charging; if no bit is set, report
++ * NOT_CHARGING when on AC power and DISCHARGING otherwise.
++ */
++static int gaokun_psy_decode_bat_status(struct gaokun_psy *ecbat, u8 raw)
++{
++	if (raw & EC_BAT_DISCHARGING)
++		return POWER_SUPPLY_STATUS_DISCHARGING;
++	if (raw & EC_BAT_FULL)
++		return POWER_SUPPLY_STATUS_FULL;
++	if (raw & EC_BAT_CHARGING)
++		return POWER_SUPPLY_STATUS_CHARGING;
++
++	if (gaokun_psy_get_adp_status(ecbat))
++		return POWER_SUPPLY_STATUS_UNKNOWN;
++
++	return ecbat->online ? POWER_SUPPLY_STATUS_NOT_CHARGING :
++			       POWER_SUPPLY_STATUS_DISCHARGING;
++}
++
+ static void gaokun_psy_update_bat_charge(struct gaokun_psy *ecbat)
+ {
+ 	u8 charge;
+ 
+-	gaokun_ec_psy_read_byte(ecbat->ec, EC_BAT_STATUS, &charge);
++	/* Keep the previous status if the EC read fails */
++	if (gaokun_ec_psy_read_byte(ecbat->ec, EC_BAT_STATUS, &charge))
++		return;
+ 
+-	switch (charge) {
+-	case EC_BAT_CHARGING:
+-		ecbat->charge_now = POWER_SUPPLY_STATUS_CHARGING;
+-		break;
+-	case EC_BAT_DISCHARGING:
+-		ecbat->charge_now = POWER_SUPPLY_STATUS_DISCHARGING;
+-		break;
+-	case EC_BAT_FULL:
+-		ecbat->charge_now = POWER_SUPPLY_STATUS_FULL;
+-		break;
+-	default:
+-		dev_warn(ecbat->dev, "unknown charge state %d\n", charge);
+-	}
++	if (charge & ~EC_BAT_STATUS_KNOWN)
++		dev_warn_once(ecbat->dev, "unknown charge state bits 0x%02x\n", charge);
++
++	ecbat->bat_status_raw = charge;
++	ecbat->charge_now = gaokun_psy_decode_bat_status(ecbat, charge);
++}
++
++/*
++ * When capacity_level is exposed in sysfs, Android's BatteryService shuts down
++ * only when capacity_level == Critical rather than falling back to the legacy
++ * "capacity <= 0 && status != Charging" rule:
++ *
++ *   - Report Critical at 0% unless the EC reports charging and rate_now is
++ *     positive, covering the case where a weak USB power source asserts the
++ *     charging bit while the battery continues to drain to 0%.
++ *   - Report Critical when EC_BAT_CRITICAL is set and capacity is at or below
++ *     critical_max_capacity (unless actively gaining charge), leaving a small
++ *     safety margin for the EC's own low-battery threshold.
++ *
++ * Note: rate_now is treated as signed positive when charging (+15..+106 mA
++ * observed while charging from a host USB port at 92% SOC). If a future EC
++ * firmware revision uses the opposite sign convention, verify both weak-supply
++ * drain and charger attach at 0%.
++ */
++static int gaokun_psy_capacity_level(struct gaokun_psy *ecbat)
++{
++	int cap = le16_to_cpu(ecbat->status.percentage_now);
++	int rate = (s16)le16_to_cpu(ecbat->status.rate_now);
++	u8 raw = ecbat->bat_status_raw;
++	bool gaining = (raw & EC_BAT_CHARGING) && !(raw & EC_BAT_DISCHARGING) &&
++		       rate > 0;
++
++	if (!gaining && (cap <= 0 ||
++			 ((raw & EC_BAT_CRITICAL) && cap <= critical_max_capacity)))
++		return POWER_SUPPLY_CAPACITY_LEVEL_CRITICAL;
++
++	if (ecbat->charge_now == POWER_SUPPLY_STATUS_FULL || cap >= 100)
++		return POWER_SUPPLY_CAPACITY_LEVEL_FULL;
++
++	if (raw & EC_BAT_CRITICAL)
++		return POWER_SUPPLY_CAPACITY_LEVEL_LOW;
++
++	return POWER_SUPPLY_CAPACITY_LEVEL_NORMAL;
+ }
+ 
+ static int gaokun_psy_get_bat_status(struct gaokun_psy *ecbat)
+@@ -347,6 +419,10 @@ static int gaokun_psy_get_bat_property(struct power_supply *psy,
+ 		val->intval = le16_to_cpu(ecbat->status.percentage_now);
+ 		break;
+ 
++	case POWER_SUPPLY_PROP_CAPACITY_LEVEL:
++		val->intval = gaokun_psy_capacity_level(ecbat);
++		break;
++
+ 	case POWER_SUPPLY_PROP_MODEL_NAME:
+ 		val->strval = ecbat->battery_model;
+ 		break;
+@@ -426,6 +502,7 @@ static enum power_supply_property gaokun_psy_bat_props[] = {
+ 	POWER_SUPPLY_PROP_CHARGE_CONTROL_START_THRESHOLD,
+ 	POWER_SUPPLY_PROP_CHARGE_CONTROL_END_THRESHOLD,
+ 	POWER_SUPPLY_PROP_CAPACITY,
++	POWER_SUPPLY_PROP_CAPACITY_LEVEL,
+ 	POWER_SUPPLY_PROP_MODEL_NAME,
+ 	POWER_SUPPLY_PROP_MANUFACTURER,
+ 	POWER_SUPPLY_PROP_SERIAL_NUMBER,
+@@ -549,9 +626,38 @@ static ssize_t smart_charge_delay_store(struct device *dev,
+ 
+ static DEVICE_ATTR_RW(smart_charge_delay);
+ 
++/*
++ * ec_raw: read-only diagnostic attribute exposing the raw 0x82 status byte and
++ * the three undocumented words already fetched by the driver: 0x98 and 0x9C
++ * (from the _BST status block) and 0xA0 (from the _BIX info block), without
++ * issuing extra EC transactions. Useful for inspecting raw EC battery
++ * telemetry during discharge and thermal characterization without extra
++ * I2C traffic.
++ */
++static ssize_t ec_raw_show(struct device *dev, struct device_attribute *attr,
++			   char *buf)
++{
++	struct power_supply *psy = to_power_supply(dev);
++	struct gaokun_psy *ecbat = power_supply_get_drvdata(psy);
++
++	if (!gaokun_psy_bat_present(ecbat))
++		return -ENODEV;
++
++	gaokun_psy_get_bat_status(ecbat);
++
++	return sysfs_emit(buf, "status=0x%02x w98=0x%04x w9c=0x%04x wa0=0x%04x\n",
++			  ecbat->bat_status_raw,
++			  le16_to_cpu(ecbat->status.unknown1),
++			  le16_to_cpu(ecbat->status.unknown2),
++			  le16_to_cpu(ecbat->info.unknown3));
++}
++
++static DEVICE_ATTR_RO(ec_raw);
++
+ static struct attribute *gaokun_psy_features_attrs[] = {
+ 	&dev_attr_battery_adaptive_charge.attr,
+ 	&dev_attr_smart_charge_delay.attr,
++	&dev_attr_ec_raw.attr,
+ 	NULL,
+ };
+ ATTRIBUTE_GROUPS(gaokun_psy_features);
+-- 
+2.50.1 (Apple Git-155)
+

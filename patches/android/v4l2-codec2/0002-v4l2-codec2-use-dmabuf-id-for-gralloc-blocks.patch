@@ -1,0 +1,40 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] v4l2_codec2: use dmabuf inode ID for GRALLOC-backed output blocks
+
+In byte-buffer mode, VideoFramePool::getBufferIdFromGraphicBlock() uses the
+GRALLOC branch, which expects a legacy C2BufferPoolData of TYPE_BUFFERPOOL.
+Blocks fetched from BASIC_GRAPHIC have null pool data (causing a null-pointer
+dereference crash), while AIDL bufferpool2 blocks carry a different pool type
+and fail with "not bufferpool-backed".
+
+Identify GRALLOC-backed blocks by their dmabuf inode number, matching the
+existing BUFFERQUEUE path, so recycled graphic blocks retain stable buffer IDs
+regardless of the backing pool implementation.
+
+Origin: local
+Upstream-Status: Pending
+---
+diff --git a/components/VideoFramePool.cpp b/components/VideoFramePool.cpp
+index ae5cd34..f57f87b 100644
+--- a/components/VideoFramePool.cpp
++++ b/components/VideoFramePool.cpp
+@@ -35,6 +35,10 @@ std::optional<uint32_t> VideoFramePool::getBufferIdFromGraphicBlock(C2BlockPool&
+     ALOGV("%s() blockPool.getAllocatorId() = %u", __func__, blockPool.getAllocatorId());
+ 
+     switch (blockPool.getAllocatorId()) {
++    case C2PlatformAllocatorStore::GRALLOC:
++        // bufferpool2 blocks are not TYPE_BUFFERPOOL and basic pool blocks have no pool data,
++        // so the bufferpool id works for neither. The dmabuf id survives recycling.
++        FALLTHROUGH;
+     case V4L2AllocatorId::SECURE_GRAPHIC:
+         FALLTHROUGH;
+     case C2PlatformAllocatorStore::BUFFERQUEUE: {
+@@ -69,8 +73,6 @@ std::optional<uint32_t> VideoFramePool::getBufferIdFromGraphicBlock(C2BlockPool&
+             return static_cast<uint32_t>(id);
+         }
+     }
+-    case C2PlatformAllocatorStore::GRALLOC:
+-        FALLTHROUGH;
+     case V4L2AllocatorId::SECURE_LINEAR: {
+         std::shared_ptr<_C2BlockPoolData> blockPoolData =
+                 _C2BlockFactory::GetGraphicBlockPoolData(block);

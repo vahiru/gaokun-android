@@ -1,7 +1,7 @@
 #!/vendor/bin/sh
 #
 # ⚠️ 已退役（2026-09-27，#126）。本文件【不再随镜像安装】（见 device.mk 同名一节）。
-#   根治是内核的 patches/0007；而本服务靠 `seclabel u:r:vendor_init:s0` 执行 vendor 脚本，
+#   根治是内核的 patches/kernel/core/0002；而本服务靠 `seclabel u:r:vendor_init:s0` 执行 vendor 脚本，
 #   在 enforcing 下被 vendor_init.te 的两条 neverallow（entrypoint / execute_no_trans）永久堵死。
 #   下面的原文留作记录。
 # 修正 /sys/fs/bpf 各子目录的 SELinux 标签。
@@ -43,7 +43,7 @@
 # 标签命名规律：/sys/fs/bpf/<name> → u:object_r:fs_bpf_<name>:s0
 # （逐条核对过 system/sepolicy/private/genfs_contexts:347-357）
 
-# ★★ 2026-08-22：先检查，再动手 —— 内核带上 patches/0007 之后这个脚本已经多余。
+# ★★ 2026-08-22：先检查，再动手 —— 内核带上 patches/kernel/core/0002 之后这个脚本已经多余。
 #
 # 实测证据（不是推断）：本机 /sys/fs/bpf 下 9 个子目录的标签**本来就是对的**
 # （fs_bpf_net_shared / fs_bpf_netd_shared / …），而临时造一个 zz_probe 会拿到
@@ -67,7 +67,7 @@ if [ "$CUR" = "$WANT" ]; then
     exit 0
 fi
 
-log -t bpfrelabel "标签不对（实际 [$CUR] 期望 [$WANT]）—— 内核多半没带 patches/0007，开始修正"
+log -t bpfrelabel "标签不对（实际 [$CUR] 期望 [$WANT]）—— 内核多半没带 patches/kernel/core/0002，开始修正"
 
 for d in cputimeinstate loader memevents net_private net_shared netd_readonly netd_shared tethering uprobestats vendor; do
     p="/sys/fs/bpf/$d"

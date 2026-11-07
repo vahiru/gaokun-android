@@ -1,0 +1,35 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: iris: configure output parameters on first CAPTURE streamon after an early flush
+
+The gen1 seek_resume path skips session_set_config_params() on CAPTURE streamon
+under the assumption that output port parameters were already configured on an
+earlier CAPTURE streamon. However, if a client flushes the decoder after OUTPUT
+streamon but before the first CAPTURE streamon (while IRIS_INST_SUB_FIRST_IPSC
+is still set), skipping output configuration causes the firmware to fail with
+HFI_ERR_SESSION_INSUFFICIENT_RESOURCES (0x1009).
+
+Always configure output port parameters on CAPTURE streamon when
+IRIS_INST_SUB_FIRST_IPSC is set.
+
+Origin: local
+Upstream-Status: Inappropriate [firmware workaround]
+---
+diff --git a/drivers/media/platform/qcom/iris/iris_vdec.c b/drivers/media/platform/qcom/iris/iris_vdec.c
+index 15e2164d3..b638d58c3 100644
+--- a/drivers/media/platform/qcom/iris/iris_vdec.c
++++ b/drivers/media/platform/qcom/iris/iris_vdec.c
+@@ -432,8 +432,12 @@ int iris_vdec_streamon_output(struct iris_inst *inst)
+ 	const struct iris_hfi_session_ops *hfi_ops = inst->hfi_session_ops;
+ 	int ret;
+ 
+-	/* seek_mode=1: the output port is configured and running, only the DPBs go back */
+-	if (!inst->seek_resume) {
++	/*
++	 * seek_mode=1: the output port is configured and running, only the DPBs go back.
++	 * Not after a source change: a flush before the first CAPTURE streamon leaves
++	 * seek_resume set with an output port that was never configured.
++	 */
++	if (!inst->seek_resume || inst->sub_state & IRIS_INST_SUB_FIRST_IPSC) {
+ 		ret = hfi_ops->session_set_config_params(inst, V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE);
+ 		if (ret)
+ 			return ret;

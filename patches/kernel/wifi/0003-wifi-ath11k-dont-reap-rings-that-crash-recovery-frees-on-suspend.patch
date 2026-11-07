@@ -1,0 +1,159 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] wifi: ath11k: don't reap rings that crash recovery frees on suspend
+
+Crash recovery frees the per-pdev rings and allocates them again under
+ab->core_lock, and ath11k_hal_srng_clear() clears their SRNG state in
+between. A system suspend can run in the middle of it. With the device
+stopped, ath11k_core_suspend() then reaps the monitor status rings and
+dereferences the cleared SRNG:
+
+  PM: suspend entry (s2idle)
+  ...
+  Unable to handle kernel NULL pointer dereference at virtual address 0000000000000000
+  pc : ath11k_hal_srng_access_begin+0xc/0x58
+  lr : ath11k_dp_rx_process_mon_status+0x134/0xba0
+  Call trace:
+   ath11k_hal_srng_access_begin+0xc/0x58 (P)
+   ath11k_dp_rx_process_mon_rings+0x98/0x4ac
+   ath11k_dp_rx_pktlog_stop+0x64/0x11c
+   ath11k_core_suspend+0x4c/0x1f0
+   ath11k_pci_pm_suspend+0x40/0x6c
+   pci_pm_suspend+0x84/0x1ac
+   dpm_run_callback+0x90/0x31c
+   device_suspend+0x188/0x71c
+   async_suspend+0x24/0x3c
+
+The same happens after a recovery that failed and left the rings freed.
+
+Take ab->core_lock in ath11k_core_suspend(), so that a recovery in
+flight finishes first, and leave the rings alone when they are freed.
+
+With WoWLAN, mac80211 suspends through ath11k_wow_op_suspend(), which
+reaps the same rings with conf_mutex held. core_lock can't be taken
+there, as ath11k_spectral_deinit() takes conf_mutex under core_lock.
+While the device isn't on, which it isn't during a recovery, suspend
+without WoW instead: mac80211 then stops the device and
+ath11k_core_suspend() takes over.
+
+Tested-on: WCN6855 hw2.1 PCI WLAN.HSP.1.1-03125-QCAHSPSWPL_V1_V2_SILICONZ_LITE-3.6510.41
+
+Fixes: 88fd03cf51a7 ("wifi: ath11k: support non-WoWLAN mode suspend as well")
+Cc: stable@vger.kernel.org
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/net/wireless/ath/ath11k/core.c  | 22 ++++++++++++++++---
+ drivers/net/wireless/ath/ath11k/dp_rx.c | 28 +++++++++++++++++++++++++
+ drivers/net/wireless/ath/ath11k/dp_rx.h |  1 +
+ drivers/net/wireless/ath/ath11k/wow.c   | 12 +++++++++++
+ 4 files changed, 60 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/net/wireless/ath/ath11k/core.c b/drivers/net/wireless/ath/ath11k/core.c
+index 6e9f10c..0a74791 100644
+--- a/drivers/net/wireless/ath/ath11k/core.c
++++ b/drivers/net/wireless/ath/ath11k/core.c
+@@ -1255,10 +1255,26 @@ int ath11k_core_suspend(struct ath11k_base *ab)
+ 	if (ret <= 0)
+ 		return ret;
+ 
+-	if (ab->actual_pm_policy == ATH11K_PM_WOW)
+-		return ath11k_core_suspend_wow(ab);
++	/*
++	 * Crash recovery frees and rebuilds the rings that the suspend below
++	 * reaps, so wait for one in flight. If one failed, the rings are gone
++	 * and there is nothing to stop. Don't complete restart_completed then
++	 * either: ath11k_core_resume() would restart the reap timer on them.
++	 */
++	mutex_lock(&ab->core_lock);
+ 
+-	return ath11k_core_suspend_default(ab);
++	if (!ath11k_dp_rx_mon_status_allocated(ab)) {
++		ath11k_warn(ab, "rings freed by crash recovery, skipping datapath suspend\n");
++		ret = 0;
++	} else if (ab->actual_pm_policy == ATH11K_PM_WOW) {
++		ret = ath11k_core_suspend_wow(ab);
++	} else {
++		ret = ath11k_core_suspend_default(ab);
++	}
++
++	mutex_unlock(&ab->core_lock);
++
++	return ret;
+ }
+ EXPORT_SYMBOL(ath11k_core_suspend);
+ 
+diff --git a/drivers/net/wireless/ath/ath11k/dp_rx.c b/drivers/net/wireless/ath/ath11k/dp_rx.c
+index 3342570..824acec 100644
+--- a/drivers/net/wireless/ath/ath11k/dp_rx.c
++++ b/drivers/net/wireless/ath/ath11k/dp_rx.c
+@@ -5777,6 +5777,34 @@ int ath11k_dp_rx_pdev_mon_detach(struct ath11k *ar)
+ 	return 0;
+ }
+ 
++/*
++ * Whether the monitor status rings, which ath11k_dp_rx_pktlog_stop() reaps,
++ * are allocated. Crash recovery frees them and allocates them again, both
++ * under ab->core_lock; they stay freed if the recovery fails.
++ */
++bool ath11k_dp_rx_mon_status_allocated(struct ath11k_base *ab)
++{
++	struct dp_srng *ring;
++	struct ath11k *ar;
++	int i, j;
++
++	lockdep_assert_held(&ab->core_lock);
++
++	for (i = 0; i < ab->num_radios; i++) {
++		ar = ab->pdevs[i].ar;
++		if (!ar)
++			return false;
++
++		for (j = 0; j < ab->hw_params.num_rxdma_per_pdev; j++) {
++			ring = &ar->dp.rx_mon_status_refill_ring[j].refill_buf_ring;
++			if (!ring->vaddr_unaligned)
++				return false;
++		}
++	}
++
++	return true;
++}
++
+ int ath11k_dp_rx_pktlog_start(struct ath11k_base *ab)
+ {
+ 	/* start reap timer */
+diff --git a/drivers/net/wireless/ath/ath11k/dp_rx.h b/drivers/net/wireless/ath/ath11k/dp_rx.h
+index f69d930..1b32929 100644
+--- a/drivers/net/wireless/ath/ath11k/dp_rx.h
++++ b/drivers/net/wireless/ath/ath11k/dp_rx.h
+@@ -93,6 +93,7 @@ int ath11k_dp_rx_pdev_mon_detach(struct ath11k *ar);
+ int ath11k_dp_rx_pdev_mon_attach(struct ath11k *ar);
+ int ath11k_peer_rx_frag_setup(struct ath11k *ar, const u8 *peer_mac, int vdev_id);
+ 
++bool ath11k_dp_rx_mon_status_allocated(struct ath11k_base *ab);
+ int ath11k_dp_rx_pktlog_start(struct ath11k_base *ab);
+ int ath11k_dp_rx_pktlog_stop(struct ath11k_base *ab, bool stop_timer);
+ 
+diff --git a/drivers/net/wireless/ath/ath11k/wow.c b/drivers/net/wireless/ath/ath11k/wow.c
+index d6c2725..655a2e8 100644
+--- a/drivers/net/wireless/ath/ath11k/wow.c
++++ b/drivers/net/wireless/ath/ath11k/wow.c
+@@ -685,6 +685,18 @@ int ath11k_wow_op_suspend(struct ieee80211_hw *hw,
+ 
+ 	mutex_lock(&ar->conf_mutex);
+ 
++	/*
++	 * Crash recovery frees and rebuilds the rings reaped below. Suspend
++	 * without WoW instead: mac80211 then stops the device, and
++	 * ath11k_core_suspend() waits for the recovery.
++	 */
++	if (ar->state != ATH11K_STATE_ON) {
++		ath11k_warn(ar->ab, "device state %d, suspending without wow\n",
++			    ar->state);
++		ret = -EBUSY;
++		goto exit;
++	}
++
+ 	ret = ath11k_dp_rx_pktlog_stop(ar->ab, true);
+ 	if (ret) {
+ 		ath11k_warn(ar->ab,

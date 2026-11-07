@@ -1,0 +1,163 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] Input: himax-spi: hold initial touch-down position within track_tap_radius
+
+During a stationary tap, the contact centroid shifts by 5-10 coordinate units
+(0.5-1 mm) over the last 1-2 frames as the finger lifts and the capacitance
+footprint shrinks, which can exceed game engines' 10-pixel drag slop and turn a
+tap into a scroll.
+
+Add a runtime-tunable track_tap_radius sysfs attribute (0 to disable): while a
+track remains within track_tap_radius of its initial reported position, keep
+reporting the initial position; once it moves outside the radius, unlock and
+report live coordinates. Tracking and velocity prediction continue using raw
+measured coordinates.
+
+Origin: local
+Upstream-Status: Pending
+---
+diff --git a/drivers/input/touchscreen/himax-spi-core.c b/drivers/input/touchscreen/himax-spi-core.c
+index 78ef039..e764d4d 100644
+--- a/drivers/input/touchscreen/himax-spi-core.c
++++ b/drivers/input/touchscreen/himax-spi-core.c
+@@ -1100,6 +1100,7 @@ HX_ALGO_ATTR_S16_RW(edge_push_q8);
+ HX_ALGO_ATTR_S16_RW(edge_blend_q8);
+ /* Tracking */
+ HX_ALGO_ATTR_S32_RW(track_dist2_max);
++HX_ALGO_ATTR_S32_RW(track_tap_radius);
+ HX_ALGO_ATTR_U8_RW(track_lost_frames);
+ HX_ALGO_ATTR_U8_RW(debounce_base);
+ HX_ALGO_ATTR_BOOL_RW(track_smoothing);
+@@ -1222,6 +1223,7 @@ static struct attribute *hx_algo_attrs[] = {
+ 	&dev_attr_track_active_guard.attr,
+ 	&dev_attr_track_start_debounce.attr,
+ 	&dev_attr_track_jump_dist2.attr,
++	&dev_attr_track_tap_radius.attr,
+ 	&dev_attr_stats.attr,
+ 	&dev_attr_contacts_log.attr,
+ 	NULL,
+@@ -1337,6 +1339,7 @@ static int hx83121a_gaokun_read_event_stack(struct himax_ts_data *ts)
+ 
+ static void himax_report_tracked_state(struct himax_ts_data *ts, bool report_on)
+ {
++	s32 x, y;
+ 	int i;
+ 
+ 	if (!ts->algo || !ts->input_dev)
+@@ -1353,8 +1356,8 @@ static void himax_report_tracked_state(struct himax_ts_data *ts, bool report_on)
+ 		if (!on)
+ 			continue;
+ 
+-		touchscreen_report_pos(ts->input_dev, &ts->props,
+-				       ts->algo->tracks[i].x, ts->algo->tracks[i].y, true);
++		hx_track_report_pos(ts->algo, &ts->algo->tracks[i], &x, &y);
++		touchscreen_report_pos(ts->input_dev, &ts->props, x, y, true);
+ 		if (!disable_pressure) {
+ 			if (ts->algo->pressure_enabled) {
+ 				input_report_abs(ts->input_dev, ABS_MT_TOUCH_MAJOR,
+diff --git a/drivers/input/touchscreen/hx-algo.c b/drivers/input/touchscreen/hx-algo.c
+index d284481..81732f8 100644
+--- a/drivers/input/touchscreen/hx-algo.c
++++ b/drivers/input/touchscreen/hx-algo.c
+@@ -78,6 +78,7 @@ void hx_algo_init_defaults(struct hx_algo *algo)
+ 	algo->track_active_guard   = true;
+ 	algo->track_start_debounce = 2;
+ 	algo->track_jump_dist2     = 0;  /* disabled by default */
++	algo->track_tap_radius     = 0;  /* anchor lock off by default */
+ }
+ 
+ /* ======================================================================== */
+@@ -1542,8 +1543,22 @@ void hx_track_contacts(struct hx_algo *algo,
+ 			trk->signal_sum = algo->contacts[m->det_idx].signal_sum;
+ 		if (trk->age < U8_MAX)
+ 			trk->age++;
+-		if (trk->debounce > 0)
++		if (trk->debounce > 0) {
+ 			trk->debounce--;
++			/* Reported from now on: this is the down position. */
++			if (trk->debounce == 0) {
++				trk->anchor_x = trk->x;
++				trk->anchor_y = trk->y;
++			}
++		} else if (trk->anchored) {
++			s32 ax = trk->x - trk->anchor_x;
++			s32 ay = trk->y - trk->anchor_y;
++			s32 r  = algo->track_tap_radius;
++
++			/* Released for good once it moves; also when the lock is off. */
++			if (r <= 0 || ax * ax + ay * ay > r * r)
++				trk->anchored = false;
++		}
+ 
+ 		track_matched[m->track_idx] = true;
+ 		det_used[m->det_idx]        = true;
+@@ -1598,6 +1613,9 @@ void hx_track_contacts(struct hx_algo *algo,
+ 		trk->y        = det[j].y;
+ 		trk->vx       = 0;
+ 		trk->vy       = 0;
++		trk->anchored = algo->track_tap_radius > 0;
++		trk->anchor_x = det[j].x;
++		trk->anchor_y = det[j].y;
+ 		if (j < algo->contact_count)
+ 			trk->signal_sum = algo->contacts[j].signal_sum;
+ 
+diff --git a/drivers/input/touchscreen/hx-algo.h b/drivers/input/touchscreen/hx-algo.h
+index 0496c74..09aa801 100644
+--- a/drivers/input/touchscreen/hx-algo.h
++++ b/drivers/input/touchscreen/hx-algo.h
+@@ -93,6 +93,15 @@ struct hx_track {
+ 	u8   missed;
+ 	u8   debounce;
+ 	u8   palm;
++	/*
++	 * Anchor lock (track_tap_radius): until the track has moved more than
++	 * track_tap_radius from where it was first reported (debounce reaching
++	 * 0), that down position is reported instead of x/y.  Matching and
++	 * prediction still use x/y.
++	 */
++	bool anchored;
++	s32  anchor_x;
++	s32  anchor_y;
+ };
+ 
+ /*
+@@ -273,6 +282,8 @@ struct hx_algo {
+ 	bool track_active_guard;   /* kill stray tracks before 1st stable  */
+ 	u8   track_start_debounce; /* frames to confirm touch_active       */
+ 	s32  track_jump_dist2;     /* position jump → force lift+repress   */
++	s32  track_tap_radius;     /* hold the down position until the     */
++				   /* track moves this far (0 = off)       */
+ 
+ 	/* ---- Diagnostics ---- */
+ 	struct hx_stats  stats;
+@@ -311,6 +322,31 @@ void hx_expand_and_resolve(struct hx_algo *algo,
+ 			    struct input_mt_pos *pos, int *cnt);
+ 
+ /* Phase 3A: greedy tracker update (with velocity prediction) */
++/*
++ * The position to report for a track: its down position while the anchor
++ * lock holds, its measured position otherwise.
++ *
++ * A finger that taps without moving still drifts as it lifts: the contact
++ * shrinks and weakens over the last one or two frames and its centroid
++ * moves 5-10 units on its own.  Unity starts a drag at 10 px, so a tap on a
++ * scrolling list arrives as a scroll.  Holding the down position until the
++ * touch has really moved keeps such taps still; a flick moves tens of units
++ * in its first frame and is released at once, and a released track reports
++ * every position as measured, so slides are not delayed or stepped.
++ */
++static inline void hx_track_report_pos(const struct hx_algo *algo,
++				       const struct hx_track *trk,
++				       s32 *x, s32 *y)
++{
++	if (algo->track_tap_radius > 0 && trk->anchored) {
++		*x = trk->anchor_x;
++		*y = trk->anchor_y;
++	} else {
++		*x = trk->x;
++		*y = trk->y;
++	}
++}
++
+ void hx_track_contacts(struct hx_algo *algo,
+ 		       struct input_mt_pos *det, int det_cnt);
+ 

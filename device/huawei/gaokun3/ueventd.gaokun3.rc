@@ -44,7 +44,7 @@
 /dev/v4l-subdev*          0660   media      camera
 
 # ── 后摄闪光灯（#110 / #111）──
-# LED 在 PM8350C 闪光模块上，内核暴露成 /sys/class/leds/white:flash（patches/0036）。
+# LED 在 PM8350C 闪光模块上，内核暴露成 /sys/class/leds/white:flash（patches/kernel/dts/0006）。
 # 相机 HAL 以 cameraserver 跑、在 camera 组里；节点默认 root 0644，HAL 写不了 brightness
 # —— 症状会是应用里有闪光按钮、按了不亮，logcat 只有一条 EACCES。
 # ★ ueventd 按 "/sys/class/<subsystem>/<basename>" 匹配（SysfsPermissions::MatchWithSubsystem），
@@ -54,7 +54,7 @@
 /sys/class/leds/white:flash   flash_strobe       0664   root   camera
 /sys/class/leds/white:flash   flash_timeout      0664   root   camera
 
-# 手写笔（M-Pencil）：触摸从片驱动（patches/0079）交出帧的节点，内核默认 root 独占。
+# 手写笔（M-Pencil）：触摸从片驱动（patches/kernel/input/0011）交出帧的节点，内核默认 root 独占。
 # gk3pend 以 system 跑（stylus/gk3pend.rc）。
 /dev/gk3_pen              0660   system     system
 
@@ -64,7 +64,7 @@
 # （system/core init/devices.cpp：HandleUevent → FixupSysPermissions）。
 /sys/class/usb_role/a600000.usb-role-switch   role           0664   root   system
 /sys/class/udc/a600000.usb                    soft_connect   0220   root   system
-# 同一个 HAL 还把 gadget 的连接状态写给 UsbDeviceManager：patches/0096 的 android_usb 类，state 默认 0644 root。
+# 同一个 HAL 还把 gadget 的连接状态写给 UsbDeviceManager：patches/kernel/ec-usb/0011 的 android_usb 类，state 默认 0644 root。
 /sys/class/android_usb/android0               state          0664   root   system
 # FTE7001: no TA operation occurs until the fingerprint HAL opens the device.
 /dev/gaokun3_fpcmd 0600 system system

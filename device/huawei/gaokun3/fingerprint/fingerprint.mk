@@ -17,7 +17,7 @@ ifneq ($(shell sha256sum $(GAOKUN3_FP_GOODIX_CFG) | cut -d' ' -f1),273537378e759
 $(error Goodix configuration template SHA256 mismatch)
 endif
 ifneq ($(shell cd $(LOCAL_PATH)/prebuilt-boot && sha256sum -c fingerprint-kernel.sha256 >/dev/null 2>&1 && echo ok),ok)
-$(error Fingerprint kernel missing/stale: prepare a kernel with 0050 + 0212 + 0213 and CONFIG_GAOKUN3_FPCMD=y)
+$(error Fingerprint kernel missing/stale: prepare a kernel with patches/kernel/fingerprint/0001..0003 and CONFIG_GAOKUN3_FPCMD=y)
 endif
 PRODUCT_PACKAGES += android.hardware.biometrics.fingerprint-service.gaokun3
 # Starts the unlock ripple at the power key (rro/Gaokun3SystemUIFingerprintOverlay).

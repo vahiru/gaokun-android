@@ -1,0 +1,30 @@
+From 00261e5d0035b7173f896aa568cf6cc8a41b973a Mon Sep 17 00:00:00 2001
+From: Gurchetan Singh <gurchetansingh@google.com>
+Date: Mon, 11 May 2026 17:13:59 -0700
+Subject: [PATCH] freedreno: explicitly declare required depend_files, part 2
+
+See "from freedreno_dev_info import *" statement.
+
+Reviewed-by: Eric Engestrom <eric@igalia.com>
+Part-of: <https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/41518>
+Origin: upstream, https://gitlab.freedesktop.org/mesa/mesa/-/commit/00261e5d0035b7173f896aa568cf6cc8a41b973a
+Upstream-Status: Backport [https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/41518]
+---
+ src/freedreno/common/meson.build | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/freedreno/common/meson.build b/src/freedreno/common/meson.build
+index d1827a7fbd91..f5f0b11b61f9 100644
+--- a/src/freedreno/common/meson.build
++++ b/src/freedreno/common/meson.build
+@@ -10,6 +10,7 @@ freedreno_devices_h = custom_target(
+     '-p', join_paths(meson.project_build_root(), 'src/freedreno/registers/adreno/')
+   ],
+   depends: freedreno_py_header_files,
++  depend_files: [files('freedreno_dev_info.py')],
+   capture: true,
+ )
+ 
+-- 
+GitLab
+

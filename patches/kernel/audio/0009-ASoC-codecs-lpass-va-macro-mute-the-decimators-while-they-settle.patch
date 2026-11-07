@@ -1,0 +1,162 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] ASoC: codecs: lpass-va-macro: mute the decimators while they settle
+
+Every capture starts with a click. A decimator comes up with a step through
+its 150 Hz high-pass filter: a decay of about 1 ms, the same on all
+microphones, that clips at the +16 dB audio-route.sh sets. A shorter transient
+follows within 10 ms. It differs between microphones and its source is unknown.
+
+The PRE_PMU event has the comment "Enable TX PGA Mute" with no code under it,
+and .mute_stream unmutes at prepare, right after the DAPM events. So nothing
+keeps the step out of the capture.
+
+Mute in PRE_PMU and unmute from delayed work 40 ms after POST_PMU, the DMIC
+delay of Qualcomm's downstream va-macro. Drop .mute_stream, which would undo
+that at prepare; the VA DAIs only capture, and PRE_PMD now does the mute it
+did on stop.
+
+The decimator events run before the DMIC clock starts and each takes about
+8 ms, so with two decimators the first is unmuted about 32 ms after the clock
+starts and the second about 40 ms after it. Both transients are gone by 12 ms.
+
+Origin: local
+Upstream-Status: Pending
+---
+diff --git a/sound/soc/codecs/lpass-va-macro.c b/sound/soc/codecs/lpass-va-macro.c
+--- a/sound/soc/codecs/lpass-va-macro.c
++++ b/sound/soc/codecs/lpass-va-macro.c
+@@ -14,6 +14,7 @@
+ #include <linux/pm_runtime.h>
+ #include <linux/regmap.h>
+ #include <linux/regulator/consumer.h>
++#include <linux/workqueue.h>
+ #include <sound/soc.h>
+ #include <sound/soc-dapm.h>
+ #include <sound/tlv.h>
+@@ -170,6 +171,7 @@
+ #define VA_MACRO_TX_PATH_OFFSET 0x80
+ #define VA_MACRO_SWR_MIC_MUX_SEL_MASK 0xF
+ #define VA_MACRO_ADC_MUX_CFG_OFFSET 0x8
++#define VA_MACRO_UNMUTE_DELAY_MS 40
+ 
+ static const DECLARE_TLV_DB_SCALE(digital_gain, -8400, 100, -8400);
+ 
+@@ -203,6 +205,12 @@ enum {
+ 
+ #define VA_NUM_CLKS_MAX		3
+ 
++struct va_mute_work {
++	struct va_macro *va;
++	u8 decimator;
++	struct delayed_work dwork;
++};
++
+ struct va_macro {
+ 	struct device *dev;
+ 	unsigned long active_ch_mask[VA_MACRO_MAX_DAIS];
+@@ -212,6 +220,7 @@ struct va_macro {
+ 	bool has_npl_clk;
+ 
+ 	int dec_mode[VA_MACRO_NUM_DECIMATORS];
++	struct va_mute_work mute_dwork[VA_MACRO_NUM_DECIMATORS];
+ 	struct regmap *regmap;
+ 	struct clk *mclk;
+ 	struct clk *npl;
+@@ -742,6 +751,18 @@ static int va_macro_enable_dmic(struct snd_soc_dapm_widget *w,
+ 	return 0;
+ }
+ 
++static void va_macro_mute_update_callback(struct work_struct *work)
++{
++	struct va_mute_work *mute_work = container_of(to_delayed_work(work),
++						      struct va_mute_work, dwork);
++	u16 tx_vol_ctl_reg = CDC_VA_TX0_TX_PATH_CTL +
++			     VA_MACRO_TX_PATH_OFFSET * mute_work->decimator;
++
++	regmap_update_bits(mute_work->va->regmap, tx_vol_ctl_reg,
++			   CDC_VA_TX_PATH_PGA_MUTE_EN_MASK,
++			   CDC_VA_TX_PATH_PGA_MUTE_DISABLE);
++}
++
+ static int va_macro_enable_dec(struct snd_soc_dapm_widget *w,
+ 			       struct snd_kcontrol *kcontrol, int event)
+ {
+@@ -770,6 +791,9 @@ static int va_macro_enable_dec(struct snd_soc_dapm_widget *w,
+ 			dec_cfg_reg, CDC_VA_ADC_MODE_MASK,
+ 			va->dec_mode[decimator] << CDC_VA_ADC_MODE_SHIFT);
+ 		/* Enable TX PGA Mute */
++		snd_soc_component_update_bits(comp, tx_vol_ctl_reg,
++					      CDC_VA_TX_PATH_PGA_MUTE_EN_MASK,
++					      CDC_VA_TX_PATH_PGA_MUTE_EN);
+ 		break;
+ 	case SND_SOC_DAPM_POST_PMU:
+ 		/* Enable TX CLK */
+@@ -816,6 +840,16 @@ static int va_macro_enable_dec(struct snd_soc_dapm_widget *w,
+ 		/* apply gain after decimator is enabled */
+ 		snd_soc_component_write(comp, tx_gain_ctl_reg,
+ 			snd_soc_component_read(comp, tx_gain_ctl_reg));
++		/* Keep the settling high-pass filter out of the capture */
++		queue_delayed_work(system_freezable_wq,
++				   &va->mute_dwork[decimator].dwork,
++				   msecs_to_jiffies(VA_MACRO_UNMUTE_DELAY_MS));
++		break;
++	case SND_SOC_DAPM_PRE_PMD:
++		cancel_delayed_work_sync(&va->mute_dwork[decimator].dwork);
++		snd_soc_component_update_bits(comp, tx_vol_ctl_reg,
++					      CDC_VA_TX_PATH_PGA_MUTE_EN_MASK,
++					      CDC_VA_TX_PATH_PGA_MUTE_EN);
+ 		break;
+ 	case SND_SOC_DAPM_POST_PMD:
+ 		/* Disable TX CLK */
+@@ -926,33 +960,9 @@ static int va_macro_get_channel_map(const struct snd_soc_dai *dai,
+ 	return 0;
+ }
+ 
+-static int va_macro_digital_mute(struct snd_soc_dai *dai, int mute, int stream)
+-{
+-	struct snd_soc_component *component = dai->component;
+-	struct va_macro *va = snd_soc_component_get_drvdata(component);
+-	u16 tx_vol_ctl_reg, decimator;
+-
+-	for_each_set_bit(decimator, &va->active_ch_mask[dai->id],
+-			 VA_MACRO_DEC_MAX) {
+-		tx_vol_ctl_reg = CDC_VA_TX0_TX_PATH_CTL +
+-					VA_MACRO_TX_PATH_OFFSET * decimator;
+-		if (mute)
+-			snd_soc_component_update_bits(component, tx_vol_ctl_reg,
+-					CDC_VA_TX_PATH_PGA_MUTE_EN_MASK,
+-					CDC_VA_TX_PATH_PGA_MUTE_EN);
+-		else
+-			snd_soc_component_update_bits(component, tx_vol_ctl_reg,
+-					CDC_VA_TX_PATH_PGA_MUTE_EN_MASK,
+-					CDC_VA_TX_PATH_PGA_MUTE_DISABLE);
+-	}
+-
+-	return 0;
+-}
+-
+ static const struct snd_soc_dai_ops va_macro_dai_ops = {
+ 	.hw_params = va_macro_hw_params,
+ 	.get_channel_map = va_macro_get_channel_map,
+-	.mute_stream = va_macro_digital_mute,
+ };
+ 
+ static struct snd_soc_dai_driver va_macro_dais[] = {
+@@ -1331,9 +1341,17 @@ static const struct snd_kcontrol_new va_macro_snd_controls[] = {
+ static int va_macro_component_probe(struct snd_soc_component *component)
+ {
+ 	struct va_macro *va = snd_soc_component_get_drvdata(component);
++	int i;
+ 
+ 	snd_soc_component_init_regmap(component, va->regmap);
+ 
++	for (i = 0; i < VA_MACRO_NUM_DECIMATORS; i++) {
++		va->mute_dwork[i].va = va;
++		va->mute_dwork[i].decimator = i;
++		INIT_DELAYED_WORK(&va->mute_dwork[i].dwork,
++				  va_macro_mute_update_callback);
++	}
++
+ 	return 0;
+ }
+ 

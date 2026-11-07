@@ -1,10 +1,10 @@
 // Speaker processing for the Huawei MateBook E Go (gaokun3), loaded by the
-// audio HAL's playback hook (patches/0117, ro.vendor.audio.primary.playback_hook
+// audio HAL's playback hook (patches/android/hardware-interfaces/0009, ro.vendor.audio.primary.playback_hook
 // in device.mk). See README.md.
 //
 // `relative_install_path: "soundfx"` puts it in /vendor/lib64/soundfx: the
 // audio HAL runs in the com.android.hardware.audio APEX, whose isolated linker
-// namespace may load from that one vendor directory (patches/0068) -- anywhere
+// namespace may load from that one vendor directory (patches/android/hardware-interfaces/0005) -- anywhere
 // else under /vendor the dlopen() is refused.
 cc_library_shared {
     name: "libgaokunspeakerfx",

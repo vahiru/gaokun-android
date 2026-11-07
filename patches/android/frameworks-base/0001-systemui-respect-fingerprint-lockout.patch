@@ -1,0 +1,55 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] SystemUI: respect fingerprint-specific class 1/2 lockout
+
+Avoid restarting fingerprint authentication during its own timed lockout when a
+different biometric modality is unlocked, while preserving the existing
+biometric strength policy.
+
+Origin: local
+Upstream-Status: Pending
+---
+--- a/packages/SystemUI/src/com/android/keyguard/KeyguardUpdateMonitor.java
++++ b/packages/SystemUI/src/com/android/keyguard/KeyguardUpdateMonitor.java
+@@ -1652,7 +1652,10 @@
+             @NonNull BiometricSourceType biometricSourceType) {
+         switch (biometricSourceType) {
+             case FINGERPRINT:
+-                return isUnlockingWithBiometricAllowed(isFingerprintClass3());
++                // A class 1/2 fingerprint lockout applies to this modality even
++                // when another (unlocked) biometric would still be allowed.
++                return !isFingerprintLockedOut()
++                        && isUnlockingWithBiometricAllowed(isFingerprintClass3());
+             case FACE:
+                 return getFaceAuthInteractor() != null
+                         && isUnlockingWithBiometricAllowed(
+--- a/packages/SystemUI/tests/src/com/android/keyguard/KeyguardUpdateMonitorTest.java
++++ b/packages/SystemUI/tests/src/com/android/keyguard/KeyguardUpdateMonitorTest.java
+@@ -1051,6 +1051,28 @@
+     }
+ 
+     @Test
++    public void class1FingerprintTemporaryLockoutDisablesFingerprintAuth() throws RemoteException {
++        setupFingerprintAuth(/* isClass3 */ false);
++        primaryAuthNotRequiredByStrongAuthTracker();
++        fingerprintErrorTemporaryLockOut();
++        Assert.assertFalse(mKeyguardUpdateMonitor.isUnlockingWithFingerprintAllowed());
++    }
++
++    @Test
++    public void class1FingerprintAuthResumesAfterLockoutReset() throws RemoteException {
++        ArgumentCaptor<FingerprintManager.LockoutResetCallback> callback =
++                ArgumentCaptor.forClass(FingerprintManager.LockoutResetCallback.class);
++        verify(mFingerprintManager).addLockoutResetCallback(callback.capture());
++        setupFingerprintAuth(/* isClass3 */ false);
++        primaryAuthNotRequiredByStrongAuthTracker();
++        fingerprintErrorTemporaryLockOut();
++        Assert.assertFalse(mKeyguardUpdateMonitor.isUnlockingWithFingerprintAllowed());
++        callback.getValue().onLockoutReset(FINGERPRINT_SENSOR_ID);
++        mTestableLooper.processAllMessages();
++        Assert.assertTrue(mKeyguardUpdateMonitor.isUnlockingWithFingerprintAllowed());
++    }
++
++    @Test
+     public void trustAgentHasTrust() {
+         // WHEN user has trust
+         mKeyguardUpdateMonitor.onTrustChanged(true, true,

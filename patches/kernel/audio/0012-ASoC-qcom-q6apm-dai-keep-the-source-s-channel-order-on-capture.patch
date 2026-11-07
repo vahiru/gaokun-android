@@ -1,0 +1,52 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] ASoC: qcom: q6apm-dai: keep the source's channel order on capture
+
+The front end sets the output map of the MFC module to the default
+speaker layout, FL FR LS RS for four channels. On SC8280XP the codec DMA
+source labels its four channels FL FR FC LS, in order, so the MFC remixes
+a four-channel capture: the third input is mixed into the first two
+outputs, the fourth input comes out third and the fourth output is
+silent. Three channels get no map at all.
+
+Label capture channels in order, 1..n. Two-channel capture keeps the
+same map, and playback keeps the default layout. Three- and
+four-channel capture changes on every board whose topology allows it,
+among them the upstream X1E80100 CRD and Yoga Slim 7x topologies, and
+whatever the back end (codec DMA, I2S or TDM); only the SC8280XP VA
+codec DMA was tested.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+--- a/sound/soc/qcom/qdsp6/q6apm-dai.c
++++ b/sound/soc/qcom/qdsp6/q6apm-dai.c
+@@ -219,6 +219,7 @@
+ 	struct audioreach_module_config cfg;
+ 	struct device *dev = component->dev;
+ 	struct q6apm_dai_data *pdata;
++	unsigned int i;
+ 	int ret;
+ 
+ 	pdata = snd_soc_component_get_drvdata(component);
+@@ -235,7 +236,19 @@
+ 	cfg.num_channels = runtime->channels;
+ 	cfg.bit_width = prtd->bits_per_sample;
+ 	cfg.fmt = SND_AUDIOCODEC_PCM;
+-	audioreach_set_default_channel_mapping(cfg.channel_map, runtime->channels);
++	/*
++	 * Capture sources number their channels in order, 1..n (seen with
++	 * SC8280XP's VA codec DMA; other back ends untested). The default map is a
++	 * speaker layout (FL FR LS RS for four channels), against which the MFC
++	 * would mix the third channel into the first two and move the fourth.
++	 */
++	if (substream->stream == SNDRV_PCM_STREAM_CAPTURE) {
++		for (i = 0; i < runtime->channels; i++)
++			cfg.channel_map[i] = PCM_CHANNEL_FL + i;
++	} else {
++		audioreach_set_default_channel_mapping(cfg.channel_map,
++						       runtime->channels);
++	}
+ 	if (prtd->state) {
+ 		/* clear the previous setup if any  */
+ 		q6apm_graph_stop(prtd->graph);

@@ -1,0 +1,76 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] Input: himax-spi: reinitialize TX header on SPI read retry and read full event stack in one transfer
+
+Fix two SPI transport issues in himax-spi:
+
+1. himax_spi_read() uses a single full-duplex buffer (ts->xfer_buf) for both TX
+   and RX, so the first spi_sync() call overwrites the 3-byte command header
+   with received data. Move the buffer clear and command header initialization
+   inside the retry loop so retries send a valid read command.
+2. Include HIMAX_BUS_R_HLEN (3 bytes) in ts->spi_xfer_max_sz so the 5132-byte
+   event stack is read in a single SPI transfer instead of splitting the last
+   3 bytes into a second spi_sync() call every frame.
+
+Origin: local
+Upstream-Status: Pending
+---
+diff --git a/drivers/input/touchscreen/himax-spi-core.c b/drivers/input/touchscreen/himax-spi-core.c
+--- a/drivers/input/touchscreen/himax-spi-core.c
++++ b/drivers/input/touchscreen/himax-spi-core.c
+@@ -148,15 +148,10 @@
+  */
+ static int himax_spi_read(struct himax_ts_data *ts, u8 cmd, u8 *buf, u32 len)
+ {
+-	int ret;
++	int ret = -EIO;
+ 	int retry_cnt;
+ 	struct spi_message msg;
+ 
+-	memset(ts->xfer_buf, 0, HIMAX_BUS_R_HLEN + len);
+-	ts->xfer_buf[0] = HIMAX_SPI_FUNCTION_READ;
+-	ts->xfer_buf[1] = cmd;
+-	ts->xfer_buf[2] = 0x00;
+-
+ 	struct spi_transfer xfer = {
+ 		.len = HIMAX_BUS_R_HLEN + len,
+ 		.tx_buf = ts->xfer_buf,
+@@ -168,9 +163,21 @@
+ 	spi_message_add_tail(&xfer, &msg);
+ 
+ 	for (retry_cnt = 0; retry_cnt < HIMAX_BUS_RETRY; retry_cnt++) {
++		/*
++		 * The command header must be laid down before *every* attempt.
++		 * tx_buf and rx_buf are the same buffer, so an attempt that got
++		 * far enough to clock in any data has already overwritten it;
++		 * retrying without rewriting it asks the IC for whatever the
++		 * failed attempt happened to receive.  The data phase is
++		 * re-zeroed for the same reason.
++		 */
++		memset(ts->xfer_buf, 0, HIMAX_BUS_R_HLEN + len);
++		ts->xfer_buf[0] = HIMAX_SPI_FUNCTION_READ;
++		ts->xfer_buf[1] = cmd;
++		ts->xfer_buf[2] = 0x00;
++
+ 		ret = spi_sync(ts->spi, &msg);
+ 		if (ret < 0)
+-			// TODO: 确定一般会不会出现重试的情况
+ 			dev_err(&ts->spi->dev, "spi transfer error, %d, retry: %d", ret, retry_cnt);
+ 		else
+ 			break;
+@@ -1421,7 +1428,15 @@
+ 	spi->cs_setup.value = HIMAX_SPI_CS_SETUP_TIME;
+ 
+ 	ts->spi = spi;
+-	ts->spi_xfer_max_sz = HIMAX_HX83121A_FULL_STACK_SZ;
++	/*
++	 * spi_xfer_max_sz is the largest *total* SPI transfer, header
++	 * included, so max_trunk_sz (which subtracts the header) came out
++	 * three bytes short of one event stack.  Every frame was therefore
++	 * fetched as two transfers: 5129 bytes plus a 3-byte tail that
++	 * lands past the capacitance grid and is never read.  Give the
++	 * buffer room for the header so one transfer covers the stack.
++	 */
++	ts->spi_xfer_max_sz = HIMAX_HX83121A_FULL_STACK_SZ + HIMAX_BUS_R_HLEN;
+ 	ts->xfer_buf_sz = ts->spi_xfer_max_sz;
+ 	ts->event_buf_sz = HIMAX_HX83121A_FULL_STACK_SZ;
+ 	ts->xfer_buf = devm_kzalloc(ts->dev, ts->xfer_buf_sz, GFP_KERNEL);

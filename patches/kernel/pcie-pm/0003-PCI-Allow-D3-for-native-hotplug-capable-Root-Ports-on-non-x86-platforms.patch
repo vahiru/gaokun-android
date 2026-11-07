@@ -1,0 +1,44 @@
+From: Manivannan Sadhasivam <manivannan.sadhasivam@oss.qualcomm.com>
+Subject: [PATCH] PCI: Allow D3 for native hotplug-capable Root Ports on
+ non-x86 platforms
+
+Commit eb3b5bf1a88d ("PCI: Whitelist native hotplug ports for runtime D3"),
+prevented native hotplug-capable Root Ports from entering D3 citing issues
+on old Intel SkyLake Xeon-SP platform.
+
+But there is no reason to restrict D3 for native hotplug-capable Root Ports
+on non-x86 platforms. We recently enabled D3 on non hotplug-capable Root
+Ports on non-x86 platforms (specifically for DT platforms) in commit
+a5fb3ff63287 ("PCI: Allow PCI bridges to go to D3Hot on all non-x86"). So
+do the same for native hotplug-capable Root Ports as well.
+
+Signed-off-by: Manivannan Sadhasivam <manivannan.sadhasivam@oss.qualcomm.com>
+Signed-off-by: Bjorn Helgaas <bhelgaas@google.com>
+Link: https://patch.msgid.link/20260729165005.896725-1-manivannan.sadhasivam@oss.qualcomm.com
+(cherry picked from commit d4c79b63d82d408c81f1629bcdc8cdbeebd85014)
+Origin: backport, commit d4c79b63d82d408c81f1629bcdc8cdbeebd85014
+Upstream-Status: Backport [d4c79b63d82d408c81f1629bcdc8cdbeebd85014]
+---
+ drivers/pci/pci.c | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/pci/pci.c b/drivers/pci/pci.c
+index 350bae907..0941475e7 100644
+--- a/drivers/pci/pci.c
++++ b/drivers/pci/pci.c
+@@ -3020,11 +3020,11 @@ bool pci_bridge_d3_possible(struct pci_dev *bridge)
+ 			return true;
+ 
+ 		/*
+-		 * Hotplug ports handled natively by the OS were not validated
+-		 * by vendors for runtime D3 at least until 2018 because there
+-		 * was no OS support.
++		 * Hotplug ports handled natively by the OS on x86 platforms
++		 * were not validated by vendors for runtime D3 at least until
++		 * 2018 because there was no OS support.
+ 		 */
+-		if (bridge->is_pciehp)
++		if (IS_ENABLED(CONFIG_X86) && bridge->is_pciehp)
+ 			return false;
+ 
+ 		if (dmi_check_system(bridge_d3_blacklist))

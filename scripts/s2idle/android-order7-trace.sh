@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# 抓挂起/恢复期间 order>=7 的页分配及调用栈（kmem:mm_page_alloc + stacktrace），用来 A/B patches/0070
+# 抓挂起/恢复期间 order>=7 的页分配及调用栈（kmem:mm_page_alloc + stacktrace），用来 A/B patches/kernel/wifi/0001
 # 用法（root，先把 android-ath11k-s2loop.sh 也推到 /data/local/tmp/）：setsid nohup sh android-order7-trace.sh <标签> <PEER> &
 TAG=$1; PEER=$2; T=/sys/kernel/tracing; D=/data/local/tmp/mhi-test; O=$D/order7-$TAG.txt
 [ -d $T/events ] || mount -t tracefs tracefs $T

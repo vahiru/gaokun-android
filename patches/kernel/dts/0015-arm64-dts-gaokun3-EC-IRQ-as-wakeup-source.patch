@@ -1,0 +1,25 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] arm64: dts: qcom: sc8280xp-huawei-gaokun3: enable wakeup-source on the EC node
+
+Uncomment wakeup-source on the Huawei Gaokun EC I2C node so the I2C core marks
+the EC interrupt as a wakeup source, allowing charger plug/unplug and lid
+events to wake the system from s2idle.
+
+Origin: local
+Upstream-Status: Pending
+---
+diff --git a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
+index 8e82061..a2c3453 100644
+--- a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
++++ b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
+@@ -732,8 +732,8 @@
+ 		enable-gpios = <&tlmm 173 GPIO_ACTIVE_HIGH>;
+ 		bat-gpios = <&tlmm 41 GPIO_ACTIVE_HIGH>;
+ 
+-		// not stable yet, so comment out it
+-		// wakeup-source;
++		/* EC events, such as plugging in a charger, wake the system. */
++		wakeup-source;
+ 
+ 		pinctrl-0 = <&ec_default>;
+ 		pinctrl-names = "default";
