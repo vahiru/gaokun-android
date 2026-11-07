@@ -410,29 +410,37 @@ class Session final : public BnSession {
                     attempted = true;
                     ++usableProbes;
                     if (pressStart == Clock::time_point{}) pressStart = Clock::now();
-                    // Report the best scoring finger, not the first one over
-                    // the threshold.
-                    // One thread per finger; each touches only its own
-                    // finger's cached features.
+                    // The finger that unlocked last goes first, its frames on
+                    // every core, and the first finger over the threshold is
+                    // the one: other fingers score under 20 against it in all
+                    // collected data, far from kMatchThreshold.
                     const gaokun3::FrameFeatures probe(frame);
-                    std::vector<std::future<std::pair<float,float>>> scores;
-                    for (const auto& e : store_.enrollments)
-                        scores.push_back(std::async(std::launch::async,[&probe,&e] {
-                            float frameScore = 0;
-                            const float s = gaokun3::score(probe,e,&frameScore);
-                            return std::make_pair(s,frameScore);
-                        }));
+                    const unsigned threads = std::max(1u,std::min(8u,std::thread::hardware_concurrency()));
+                    std::vector<size_t> order(store_.enrollments.size());
+                    for (size_t i = 0; i < order.size(); ++i) order[i] = i;
+                    std::stable_sort(order.begin(),order.end(),[this](size_t a, size_t b) {
+                        auto rank = [this](size_t i) {
+                            auto it = std::find(recent_.begin(),recent_.end(),store_.enrollments[i].id);
+                            return it == recent_.end() ? recent_.size() : size_t(it - recent_.begin());
+                        };
+                        return rank(a) < rank(b);
+                    });
                     int32_t bestId = -1;
                     float bestScore = 0, bestFrame = 0;
-                    for (size_t i = 0; i < scores.size(); ++i) {
-                        const auto [s,frameScore] = scores[i].get();
+                    for (size_t i : order) {
+                        if (cancel || closed_) break;
+                        float frameScore = 0;
+                        const float s = gaokun3::score(probe,store_.enrollments[i],&frameScore,threads);
                         if (s > bestScore) { bestScore = s; bestId = store_.enrollments[i].id; bestFrame = frameScore; }
+                        if (bestScore >= gaokun3::kMatchThreshold) break;
                     }
                     if (bestScore >= gaokun3::kMatchThreshold && !cancel && !closed_) {
                         lockout_->reset(); clearLockoutTimer();
                         cb_->onAcquired(AcquiredInfo::GOOD,0);
                         // Empty token: no fabricated MAC, SID or crypto authorization.
                         cb_->onAuthenticationSucceeded(bestId,Hat{});
+                        recent_.erase(std::remove(recent_.begin(),recent_.end(),bestId),recent_.end());
+                        recent_.insert(recent_.begin(),bestId);
                         // The unlock does not wait for learning or the disk. If
                         // this save fails, the failure count stays as stored:
                         // a lockout may come early, never late.
@@ -480,6 +488,8 @@ class Session final : public BnSession {
     std::shared_ptr<std::mutex> hardwareMutex_;
     std::shared_ptr<Session> predecessor_;
     Clock::time_point lockoutDeadline_ = Clock::time_point::max();
+    // Finger ids, the one that authenticated last first.
+    std::vector<int32_t> recent_;
     uint32_t notifiedExpiryFailures_ = 0;
 #ifdef GAOKUN3_FP_TEST
     std::function<void(gaokun3::Transport&, const std::atomic_bool&)> captureForTest_;

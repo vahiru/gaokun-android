@@ -203,14 +203,23 @@ FrameFeatures::~FrameFeatures() { gaokun3_feature_set_free(&fs_); }
 // the same spot (learned frames gather where the finger unlocks) would count
 // one chance match twice.
 static float scoreFeatures(const Gaokun3FeatureSet& p, const std::vector<const Gaokun3FeatureSet*>& frames,
-                           float* bestFrame) {
+                           float* bestFrame, unsigned threads = 1) {
     constexpr size_t kCandidates = 6;
+    // Frames of another geometry never come from this sensor (score -1).
+    std::vector<float> scores(frames.size(), -1.0f);
+    auto work = [&](unsigned t) {
+        for (size_t k = t; k < frames.size(); k += threads)
+            if (p.n_feats > 0 && frames[k]->width == p.width && frames[k]->height == p.height)
+                scores[k] = gaokun3_match_score(&p, frames[k]);
+    };
+    threads = std::max(1u, std::min<unsigned>(threads, unsigned(frames.size())));
+    std::vector<std::future<void>> jobs;
+    for (unsigned t = 1; t < threads; ++t) jobs.push_back(std::async(std::launch::async, work, t));
+    work(0);
+    for (auto& j : jobs) j.get();
     std::vector<std::pair<float, size_t>> ranked;
-    if (p.n_feats > 0)
-        for (size_t k = 0; k < frames.size(); ++k)
-            // Frames of another geometry never come from this sensor.
-            if (frames[k]->width == p.width && frames[k]->height == p.height)
-                ranked.emplace_back(gaokun3_match_score(&p, frames[k]), k);
+    for (size_t k = 0; k < frames.size(); ++k)
+        if (scores[k] >= 0) ranked.emplace_back(scores[k], k);
     std::sort(ranked.begin(), ranked.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
     const float best = ranked.empty() ? 0 : ranked[0].first;
     float second = 0;
@@ -249,11 +258,11 @@ void prepare(const std::vector<Enrollment>& fingers) {
     for (auto& j : jobs) j.get();
 }
 
-float score(const FrameFeatures& probe, const Enrollment& finger, float* bestFrame) {
+float score(const FrameFeatures& probe, const Enrollment& finger, float* bestFrame, unsigned threads) {
     buildFeatures(finger);
     std::vector<const Gaokun3FeatureSet*> frames;
     for (const auto& f : *finger.features) frames.push_back(&f->get());
-    return scoreFeatures(probe.get(), frames, bestFrame);
+    return scoreFeatures(probe.get(), frames, bestFrame, threads);
 }
 
 EnrollFrame checkEnrollFrame(const Gaokun3Frame& frame, const Frames& taken) {

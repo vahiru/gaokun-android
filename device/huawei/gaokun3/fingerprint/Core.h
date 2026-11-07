@@ -75,8 +75,10 @@ bool goodixBaseUsable(const uint16_t* candidate, const uint16_t* current);
 // if given, receives the first alone.
 float score(const Gaokun3Frame& probe, const Frames& enrolled, float* bestFrame = nullptr);
 // The same, with the probe's features extracted once for all fingers and the
-// finger's kept in finger.features.
-float score(const FrameFeatures& probe, const Enrollment& finger, float* bestFrame = nullptr);
+// finger's kept in finger.features; its frames are compared on up to
+// `threads` threads.
+float score(const FrameFeatures& probe, const Enrollment& finger, float* bestFrame = nullptr,
+            unsigned threads = 1);
 // A finger is accepted at this score. Real Goodix captures of six fingers of
 // one person, against templates of 16 to 32 frames of either index finger:
 // other fingers reached 35.6 at most (32-frame templates; 33.5 with 16).
