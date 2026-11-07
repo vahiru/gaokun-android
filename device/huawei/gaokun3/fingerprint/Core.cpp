@@ -193,34 +193,56 @@ bool goodixBaseUsable(const uint16_t* candidate, const uint16_t* current) {
     return c > b;
 }
 
-float score(const Gaokun3Frame& probe, const Frames& enrolled, float* bestFrame) {
-    // A probe usually overlaps several frames of its finger, while a chance
-    // alignment rarely repeats: the best frame and the best one that shows
-    // other skin count together, once the best is beyond chance itself. Two frames of the same spot (learned frames
-    // gather where the finger unlocks) would count one chance match twice.
+FrameFeatures::FrameFeatures(const Gaokun3Frame& frame) : fs_(gaokun3_feature_extract(&frame)) {}
+FrameFeatures::~FrameFeatures() { gaokun3_feature_set_free(&fs_); }
+
+// A probe usually overlaps several frames of its finger, while a chance
+// alignment rarely repeats: the best frame and the best one that shows other
+// skin count together, once the best is beyond chance itself. Two frames of
+// the same spot (learned frames gather where the finger unlocks) would count
+// one chance match twice.
+static float scoreFeatures(const Gaokun3FeatureSet& p, const std::vector<const Gaokun3FeatureSet*>& frames,
+                           float* bestFrame) {
     constexpr size_t kCandidates = 6;
-    auto p = gaokun3_feature_extract(&probe);
-    std::vector<Gaokun3FeatureSet> frames;
     std::vector<std::pair<float, size_t>> ranked;
-    if (p.n_feats > 0) for (const auto& frame : enrolled) {
-        // Frames of another geometry never come from this sensor.
-        if (frame.width != probe.width || frame.height != probe.height) continue;
-        frames.push_back(gaokun3_feature_extract(&frame));
-        ranked.emplace_back(gaokun3_match_score(&p, &frames.back()), frames.size() - 1);
-    }
+    if (p.n_feats > 0)
+        for (size_t k = 0; k < frames.size(); ++k)
+            // Frames of another geometry never come from this sensor.
+            if (frames[k]->width == p.width && frames[k]->height == p.height)
+                ranked.emplace_back(gaokun3_match_score(&p, frames[k]), k);
     std::sort(ranked.begin(), ranked.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
     const float best = ranked.empty() ? 0 : ranked[0].first;
     float second = 0;
     for (size_t k = 1; k < ranked.size() && k < kCandidates && best >= kCorroboratedScore; ++k) {
-        if (gaokun3_match_score(&frames[ranked[k].second], &frames[ranked[0].second]) >= kSameSpotScore)
+        if (gaokun3_match_score(frames[ranked[k].second], frames[ranked[0].second]) >= kSameSpotScore)
             continue;
         second = ranked[k].first;
         break;
     }
-    for (auto& f : frames) gaokun3_feature_set_free(&f);
-    gaokun3_feature_set_free(&p);
     if (bestFrame) *bestFrame = best;
     return best + second;
+}
+
+float score(const Gaokun3Frame& probe, const Frames& enrolled, float* bestFrame) {
+    const FrameFeatures p(probe);
+    std::vector<std::unique_ptr<FrameFeatures>> owned;
+    std::vector<const Gaokun3FeatureSet*> frames;
+    for (const auto& frame : enrolled) {
+        owned.push_back(std::make_unique<FrameFeatures>(frame));
+        frames.push_back(&owned.back()->get());
+    }
+    return scoreFeatures(p.get(), frames, bestFrame);
+}
+
+float score(const FrameFeatures& probe, const Enrollment& finger, float* bestFrame) {
+    if (!finger.features) {
+        auto built = std::make_shared<std::vector<std::unique_ptr<FrameFeatures>>>();
+        for (const auto& frame : finger.frames) built->push_back(std::make_unique<FrameFeatures>(frame));
+        finger.features = std::move(built);
+    }
+    std::vector<const Gaokun3FeatureSet*> frames;
+    for (const auto& f : *finger.features) frames.push_back(&f->get());
+    return scoreFeatures(probe.get(), frames, bestFrame);
 }
 
 EnrollFrame checkEnrollFrame(const Gaokun3Frame& frame, const Frames& taken) {
@@ -234,6 +256,7 @@ EnrollFrame checkEnrollFrame(const Gaokun3Frame& frame, const Frames& taken) {
 
 void learn(Enrollment& e, const Gaokun3Frame& probe) {
     if (e.frames.size() < kStages) return;
+    e.features.reset();
     if (e.frames.size() >= kMaxFrames) e.frames.erase(e.frames.begin() + kStages);
     e.frames.push_back(probe);
 }

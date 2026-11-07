@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <cstddef>
+#include <memory>
 #include <string>
 #include <mutex>
 #include <utility>
@@ -41,9 +42,23 @@ const SensorProfile* profileFromStraps(bool gpio61, bool gpio62);
 
 // Enrolment frames first, then learned frames, oldest first.
 using Frames = std::vector<Gaokun3Frame>;
+// Matcher features of one frame, freed with it.
+class FrameFeatures {
+  public:
+    explicit FrameFeatures(const Gaokun3Frame& frame);
+    ~FrameFeatures();
+    FrameFeatures(const FrameFeatures&) = delete;
+    FrameFeatures& operator=(const FrameFeatures&) = delete;
+    const Gaokun3FeatureSet& get() const { return fs_; }
+  private:
+    Gaokun3FeatureSet fs_;
+};
 struct Enrollment {
     int32_t id;
     Frames frames;
+    // Features of frames, built by score() on first use and dropped by
+    // learn(); one thread at a time may score a given finger.
+    mutable std::shared_ptr<const std::vector<std::unique_ptr<FrameFeatures>>> features;
 };
 int64_t randomId();
 // FocalTech: decrypt and normalise one capture.
@@ -57,6 +72,9 @@ bool goodixBaseUsable(const uint16_t* candidate, const uint16_t* current);
 // of the same spot as it (scores below kSameSpotScore against it); bestFrame,
 // if given, receives the first alone.
 float score(const Gaokun3Frame& probe, const Frames& enrolled, float* bestFrame = nullptr);
+// The same, with the probe's features extracted once for all fingers and the
+// finger's kept in finger.features.
+float score(const FrameFeatures& probe, const Enrollment& finger, float* bestFrame = nullptr);
 // A finger is accepted at this score. Real Goodix captures of six fingers of
 // one person, against templates of 16 to 32 frames of either index finger:
 // other fingers reached 35.6 at most (32-frame templates; 33.5 with 16).

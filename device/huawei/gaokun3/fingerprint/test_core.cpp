@@ -99,6 +99,19 @@ int main() {
         memset(half.pixels,128,size_t(half.width)*half.height/2);
         assert(checkEnrollFrame(half,{}) == EnrollFrame::kPartial);
     }
+    // Cached features score exactly as fresh ones; learning rebuilds them.
+    {
+        Enrollment cached = e;
+        const FrameFeatures probe(e.frames[2]);
+        float f1 = 0, f2 = 0;
+        assert(score(probe,cached,&f1) == score(e.frames[2],e.frames,&f2) && f1 == f2);
+        assert(cached.features && cached.features->size() == e.frames.size());
+        const auto fresh = synthetic(900);
+        learn(cached,fresh);
+        assert(!cached.features);
+        const FrameFeatures again(fresh);
+        assert(score(again,cached) >= kMatchThreshold && cached.features->size() == kStages+1);
+    }
     float sameFrame = 0;
     auto same = score(e.frames[0],e.frames,&sameFrame);
     assert(sameFrame >= kRepeatScore && sameFrame <= same);

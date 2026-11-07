@@ -15,6 +15,7 @@
 #include <condition_variable>
 #include <cstring>
 #include <deque>
+#include <future>
 #include <functional>
 #include <mutex>
 #include <map>
@@ -409,13 +410,21 @@ class Session final : public BnSession {
                     if (pressStart == Clock::time_point{}) pressStart = Clock::now();
                     // Report the best scoring finger, not the first one over
                     // the threshold.
+                    // One thread per finger; each touches only its own
+                    // finger's cached features.
+                    const gaokun3::FrameFeatures probe(frame);
+                    std::vector<std::future<std::pair<float,float>>> scores;
+                    for (const auto& e : store_.enrollments)
+                        scores.push_back(std::async(std::launch::async,[&probe,&e] {
+                            float frameScore = 0;
+                            const float s = gaokun3::score(probe,e,&frameScore);
+                            return std::make_pair(s,frameScore);
+                        }));
                     int32_t bestId = -1;
                     float bestScore = 0, bestFrame = 0;
-                    for (auto& e : store_.enrollments) {
-                        if (cancel || closed_) break;
-                        float frameScore = 0;
-                        const float s = gaokun3::score(frame,e.frames,&frameScore);
-                        if (s > bestScore) { bestScore = s; bestId = e.id; bestFrame = frameScore; }
+                    for (size_t i = 0; i < scores.size(); ++i) {
+                        const auto [s,frameScore] = scores[i].get();
+                        if (s > bestScore) { bestScore = s; bestId = store_.enrollments[i].id; bestFrame = frameScore; }
                     }
                     if (bestScore >= gaokun3::kMatchThreshold && !cancel && !closed_) {
                         if (bestScore >= gaokun3::kLearnThreshold && bestFrame < gaokun3::kRepeatScore)
