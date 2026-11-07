@@ -1,28 +1,21 @@
 From: Akisaira <akisaira@outlook.com>
-Subject: [PATCH] Input: himax-spi: 点击锁定改看信号和步长，flick不用先走完半径
+Subject: [PATCH] Input: himax-spi: release tap lock on per-frame step speed and guard lift-off signal drop
 
-点击锁定（0119）只看距离。半径要盖住抬手时中心的跳动，所以flick也要先走这么远
-才开始上报，而判定flick的游戏看的正是上报的移动。点击和flick其实有两处可以区分：
+Refine tap lock release so fast flicks unlock immediately without waiting to
+cross the full tap radius while lift-off centroid drift stays locked:
 
-- 抬手的跳动发生在信号塌下去的时候。信号低于这次触摸峰值的track_tap_fall%（默认
-  50，0为关）时，只有超过track_tap_hard（默认30，约3毫米，不小于track_tap_radius）
-  才解锁。
-- 落稳之后点击几乎不再移动，所以一帧走过track_tap_speed（默认15，约1.5毫米，0为关）
-  就是手指在动，不用等到半径。
+- Unlock immediately once a single-frame step exceeds track_tap_speed (default
+  15 units, ~1.5 mm) after the contact has settled.
+- When contact signal drops below track_tap_fall% (default 50%) of the track's
+  peak signal during lift-off, require exceeding track_tap_hard (default 30
+  units, ~3 mm) before unlocking.
+- Snap the One Euro filter state to the current contact position and velocity
+  on tap-lock release (track_tap_snap, default 1) and raise default
+  track_filter_beta from 15 to 30.
 
-解锁的那一帧报接触点本身，滤波器从当前位置和速度接着算（track_tap_snap，默认开），
-不再从后面追上来。这同时用于第二帧就走出两倍半径的情况。
-
-track_filter_beta从15提到30，快速移动时滞后减半，代价是慢速滑动的抖动略有增加。
-
-track_tap_speed、track_tap_fall、track_tap_snap都设0，track_filter_beta设回15，
-就是这个补丁之前的行为。
+Origin: local
+Upstream-Status: Pending
 ---
- drivers/input/touchscreen/himax-spi-core.c |  8 +++
- drivers/input/touchscreen/hx-algo.c        | 68 ++++++++++++++++++----
- drivers/input/touchscreen/hx-algo.h        | 22 +++++--
- 3 files changed, 80 insertions(+), 18 deletions(-)
-
 diff --git a/drivers/input/touchscreen/himax-spi-core.c b/drivers/input/touchscreen/himax-spi-core.c
 index 17f8ad0..9d9e118 100644
 --- a/drivers/input/touchscreen/himax-spi-core.c

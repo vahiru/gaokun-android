@@ -1,22 +1,17 @@
-✅ 【已验证，2026-09-14 内核 #18】ov13b10 绑上（chip id 通过）、47 个 subdev、`camtest --rear 2104 1560` 出帧、
-HAL 枚举 2 个相机 —— 已进 KPATCHES。头部下文写"试验补丁"是历史，保留以示来路。
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] media: i2c: ov13b10: add OF match table, selection ops, and gaokun3 power sequence
 
-media: i2c: ov13b10: 加 OF 匹配表 + gaokun3 的上电序列与共用轨处理（⚠️ 试验补丁，随 0032 一起上测试槽）
+Upstream ov13b10 only provides an ACPI match table and lacks V4L2 subdev
+get_selection support required by libcamera. Add the "ovti,ov13b10" OF match
+entry, implement get_selection (NATIVE_SIZE, CROP_BOUNDS, CROP_DEFAULT, and
+CROP), and update the power-on/off sequence for Huawei MateBook E Go (gaokun3)
+where the 2.8 V analog rail (PM8350C LDO2_B) is shared with the DSI panel's
+1.8 V VDDI rail. Also provide a module parameter (ov13b10.fail_probe) to test
+camss fallback when the rear sensor is absent.
 
-上游 `ov13b10.c`（v7.2-rc2）只有 ACPI 匹配表，DT 节点 `ovti,ov13b10` 绑不上 —— 加 `of_device_id`。
-`power_on()` 改成板子自己的序列（`patches/0032` 头部）：先拉住复位 → `avdd` 请求 2.8V → 上轨 → 1ms →
-放开复位 → 10ms → MCLK → 5ms；`power_off()` 把 `avdd` 的请求放回 1.8–2.8V 区间（L2B 与面板 VDDI 共用，
-面板驱动只 enable 不投电压，框架选最低 = 1.8V）。chip id 识别成功时打一行 `dev_info`。
-
-⚠️ diff 由 `git diff` 生成。
-
-**v3（内核 #19）**：
-3. 加 `get_selection`（NATIVE_SIZE / CROP_BOUNDS / CROP_DEFAULT / CROP）—— libcamera 缺它会警告
-   "驱动要修"并把有效区默认成模式尺寸。上游驱动没给含虚拟像素的完整阵列尺寸，按 4208x3120 全幅算、
-   窄模式居中裁切，**这是假设不是手册值**。
-4. 诊断开关 `ov13b10.fail_probe=1`：probe 直接返回 -ENODEV，模拟"这颗传感器不在"，
-   用来验证 `patches/0035` 的 camss 回落。
-
+Origin: local
+Upstream-Status: Pending
+---
 diff --git a/drivers/media/i2c/ov13b10.c b/drivers/media/i2c/ov13b10.c
 index b0d3414..41042b3 100644
 --- a/drivers/media/i2c/ov13b10.c

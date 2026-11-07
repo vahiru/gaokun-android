@@ -1,24 +1,14 @@
-arm64: dts: gaokun3: 后摄闪光灯 —— PMIC（pmc8280c / PM8350C）闪光模块 1+4 路，替掉不亮的 GPIO93
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] arm64: dts: qcom: sc8280xp-huawei-gaokun3: configure rear flash LED on PM8350C channels 1 and 4
 
-**依据（#106 → #110）**：Windows 的 `\_SB.FLSH`（QCOM0627）`_CRS` 是空的（无 GPIO/I2C），驱动包
-`qccamflash_ext8280.inf` 只有 `IrLedCurrentMilliampere=700` 一条注册表 ⇒ 闪光灯走 **PMIC 闪光模块**；
-GPIO93（现役 DT 当成 GPIO LED 的那个）打脉冲实测不亮（用户看的）。`pmc8280c` 是 `qcom,pm8350c`，
-主线 `pm8350c.dtsi` 里就有 `led-controller@ee00`（`qcom,pm8350c-flash-led`），驱动 `leds-qcom-flash`。
+The rear camera flash LED on the Huawei MateBook E Go is driven by channels 1
+and 4 of the PM8350C (pmc8280c) flash LED module rather than GPIO 93. Replace
+the non-functional GPIO 93 flash LED node with a pmc8280c_flash led-0 node
+aggregating channels 1 and 4 (led-sources = <1>, <4>) exposed as white:flash.
 
-**接线是实测出来的，不是抄的**：v1 把 4 路各建一个 LED，内核 #19 上逐路 torch（用户看背面）：
-单路 1 亮、单路 4 亮、2/3 不亮；合并对照 1+4 亮 / 2+3 不亮（2026-09-14 12:10，#110）。
-⇒ 收成一个节点 `led-sources = <1>, <4>`。驱动 `leds-qcom-flash.c:727-735` 按 `led-sources` 个数
-分配通道，≤ max_channels(4) 即可，两路并联是它的正常用法。
-
-**电流上限是保守假设**（模组手册没有）：torch 合计 200 mA、flash 600 mA / 400 ms。
-Windows 那条 `IrLedCurrentMilliampere=700` 是 IR LED 的，不是白光的，没拿来当依据。
-
-**顺带删掉 GPIO93 那个 gpio-led 与它的 pinctrl 状态**：留着会在 `/sys/class/leds/` 下出现一个
-永远不亮的 `white:flash`，与真闪光灯同名，HAL/应用按名字找会找错。
-
-⚠️ 故意**没**在 ov13b10 节点上写 `flash-leds`：那会让 v4l2-async 再多等一个 subdev（#81/#106 的坑）。
-需要 `LEDS_CLASS_FLASH=y LEDS_QCOM_FLASH=y`（kernel-config-android.sh 已断言）。⚠️ diff 由 `git diff` 生成。
-
+Origin: local
+Upstream-Status: Pending
+---
 diff --git a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3-camera.dtsi b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3-camera.dtsi
 index 937eda9..b87f09e 100644
 --- a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3-camera.dtsi

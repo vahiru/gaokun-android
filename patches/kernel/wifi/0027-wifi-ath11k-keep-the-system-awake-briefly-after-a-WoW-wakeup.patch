@@ -18,6 +18,8 @@ Android only: on mainline Linux, userspace decides how long to stay up
 after a wakeup.
 
 Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
 ---
  drivers/net/wireless/ath/ath11k/core.c |  8 ++++++++
  drivers/net/wireless/ath/ath11k/core.h |  2 ++

@@ -1,34 +1,23 @@
-audio AIDL HAL（StreamPrimary）：采集方向加一个厂商钩子——ro.vendor.audio.primary.capture_hook指定的库决定ALSA开几路，读到的每块进管道之前交给它处理
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] audio: aidl: primary: add vendor capture hook for multi-channel microphone array processing
 
-应用到AOSP树的hardware/interfaces，排在0117之后（StreamPrimary的standby / start / shutdown改在0117加的那几行旁边）。
-由scripts/crdroid-tree-fixes.py第38条自动应用（幂等）。⚠️ 别往内核树上打。
+Built-in 4-microphone array processing (beamforming, echo cancellation, and NPU
+denoise) requires opening the underlying ALSA capture PCM in 4-channel mode
+while delivering processed 2-channel frames to the client, along with access
+to the active AudioSource metadata and capture timestamp latency compensation.
 
-为什么要在HAL里做：内置麦克风阵列（device/huawei/gaokun3/micarray）要四路原始输入、交给客户端两路。
-会话音效拿到的已经是两路，改不了ALSA的声道数；包装tinyalsa能改声道数，却看不到录音轨的音源，
-UNPROCESSED也只能跟着一起处理。HAL两样都有。
+Add an optional vendor capture hook to StreamAlsaBase / StreamAlsaMonoPipe /
+StreamPrimary configured via ro.vendor.audio.primary.capture_hook:
+- Query capture_hook_open() before opening built-in ALSA capture proxies so the
+  hook can override the hardware channel count and report its processing delay;
+- Transform each captured hardware PCM block via capture_hook_process() in the
+  capture I/O thread before writing into the MonoPipe;
+- Forward SinkMetadata AudioSource updates via capture_hook_set_sources();
+- Subtract the hook's processing delay in refinePosition().
 
-做法（StreamAlsaBase / StreamAlsaMonoPipe / StreamPrimary，只动采集方向的非stub流）：
-* ro.vendor.audio.primary.capture_hook给出库的绝对路径；不设 = 没有钩子，行为与原来完全相同。
-  第一次用到时dlopen一次，库缺capture_hook_open / _process / _set_sources / _close任一个就当没有，记一行错误。
-* start()打开ALSA之前调open(card, device, 采样率, 声道数, tinyalsa的pcm_format, 音源列表, …)：
-  返回nullptr = 这条流它不管；接管时给出硬件声道数和处理延迟（帧）。ALSA按这个声道数打开
-  （openDeviceProxies新增一个参数，只用于内置设备，其余配置不变）。打不开（比如拓扑不允许这么多声道）就关掉钩子、按原来的声道数重开。
-  恢复（ALSA已经开着）时不再调open。
-* I/O线程每读一块，先经process(句柄, 硬件数据, 输出, 帧数)转成流自己的格式，再写进管道；
-  管道和transfer()都还是客户端的格式。
-* 音源是各录音轨SinkMetadata里的AudioSource。open时带上当前列表，之后updateMetadata经set_sources()通知
-  （Binder线程上；与open / close互斥，可能与process同时）。
-* refinePosition()：采集位置的时间往前挪处理延迟——客户端拿到的帧是这么早录下的。
-* standby()、shutdown()、换设备时，I/O线程停下、ALSA关掉之后调close()。
-* StreamPrimary加了析构函数，在里面停worker：客户端没调close就销毁流时，worker退出时的shutdown()还能关掉钩子
-  （0117的播放钩子在这条路径上原来也会漏掉），I/O线程也不会比这个类活得久。
-* 库必须能从这个APEX隔离的链接器命名空间加载（本机放/vendor/lib64/soundfx，0068放行了这个目录）。
-
-验证：对着rc.3的源码（lineage-24.0 13fc23d + 0010 / 0051 / 0052 / 0063 / 0068 / 0069 / 0077 / 0083 / 0117），
-用Android.bp的编译参数（-Wall -Wextra -Werror -Wthread-safety）做了编译检查，33个编译单元都通过。2026-11-04在ROM树外编出rc.3的HAL加本补丁，替换进APEX在本机跑过（#15内核，强制模式）：
-各音源接管或原样、通话的回声消除和降噪、20次重开、HAL被杀后重启都通过；ROM里还没完整构建过。
-钩子库在rc.3的HAL进程里经tinyalsa包装层按本补丁的调用顺序实测过。
-
+Origin: local
+Upstream-Status: Inappropriate [device-specific DSP hook]
+---
 diff --git a/audio/aidl/default/alsa/StreamAlsaBase.cpp b/audio/aidl/default/alsa/StreamAlsaBase.cpp
 index e5914a9..f1780b0 100644
 --- a/audio/aidl/default/alsa/StreamAlsaBase.cpp

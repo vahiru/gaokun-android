@@ -33,6 +33,8 @@ mac80211 holds the rtnl lock during op_start, so bring its wait down to
 40 s, which still covers a device that takes the slow way to power down.
 
 Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
 ---
  drivers/net/wireless/ath/ath11k/core.c | 44 ++++++++++++++++++++++++--
  drivers/net/wireless/ath/ath11k/core.h |  3 +-

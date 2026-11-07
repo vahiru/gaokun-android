@@ -39,6 +39,8 @@ Reviewed-by: Rameshkumar Sundaram <rameshkumar.sundaram@oss.qualcomm.com>
 Link: https://patch.msgid.link/20260813-ath11k-locking-v2-1-f4113a0bd0f4@gmail.com
 Signed-off-by: Jeff Johnson <jeff.johnson@oss.qualcomm.com>
 (cherry picked from commit c7555d47b1d051e0406474349deccf74b491ae01)
+Origin: backport, commit c7555d47b1d051e0406474349deccf74b491ae01
+Upstream-Status: Backport [c7555d47b1d051e0406474349deccf74b491ae01]
 ---
  drivers/net/wireless/ath/ath11k/dp_rx.c | 19 ++++++++++++-------
  1 file changed, 12 insertions(+), 7 deletions(-)

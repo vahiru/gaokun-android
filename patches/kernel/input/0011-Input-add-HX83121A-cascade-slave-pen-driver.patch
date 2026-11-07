@@ -1,58 +1,27 @@
 From: Akisaira <akisaira@outlook.com>
-Subject: [PATCH] Input: 新增 HX83121A 级联从片（主动笔）驱动
+Subject: [PATCH] Input: add Himax HX83121A cascade slave stylus driver
 
-MateBook E Go 屏幕的触摸控制器是一对 HX83121A：himax-spi 驱动的是 spi6 上的
-主片（手指）；感应 M-Pencil 的是 spi20 上的级联从片（ACPI THPB/HIMX0002），
-之前没有驱动。笔的位置、悬停和倾斜都要从从片取得，在主片的 raw 网格上做
-判断分不开"极近悬停"与"真接触"（见 #21、#22 的讨论）。
+The Huawei MateBook E Go uses a pair of Himax HX83121A controllers: the primary
+IC on spi6 handles finger touch (driven by himax-spi), while the cascade slave
+IC on spi20 (ACPI THPB / HIMX0002) senses the Huawei M-Pencil active stylus.
 
-本驱动只碰从片，不影响手指触摸：
-- 检查总线、读芯片 ID，做 Windows THP 抓包中看到的两次写入
-  （raw_out_sel = 0xF6、rawdata 地址 = 0x5AA5），之后从片开始出帧；
-- 按 GPIO 39 中断读取 339 字节的帧（TX1/TX2 两组锚点与 9×9 网格），内容有
-  变化的帧经 /dev/gk3_pen 交给用户态（read / poll，每次一个 struct pen_rec），
-  由 gk3pend 解算成触控笔；debugfs（gk3_pen/）保留计数和最近 1024 帧；
-- 从片没有复位线，每次主片复位（熄屏亮屏、himax-spi 自恢复）都会把它带掉：
-  帧头错乱或连续读失败时重新初始化，并用跟随面板的 1 秒看门狗在亮屏而无帧
-  时重新初始化；开机时主片固件可能还在加载，首次初始化失败时由看门狗启动
-  中断。熄屏时看门狗和下面的空闲轮询都靠面板的跟随回调停下，所以面板还没
-  注册时 probe 返回 -EPROBE_DEFER；
-- 省电：没有笔时从片每秒仍中断约 125 次，超过 idle_after_ms（默认 10 s）
-  未见笔就关掉中断、每 idle_poll_ms（默认 50 ms）读一帧，见到笔立即恢复；
-  用户态在笔 MCU 有报文时写一下 /dev/gk3_pen，提前唤醒；
-- 把笔的电量注册为 power supply "m-pencil"（作用域为设备），由用户态写入
-  电量与充电状态。它不挂父设备：Android 为输入设备找电池时，从设备节点往上
-  找最近的 power_supply 目录，uinput 笔位于 /sys/devices/virtual，因此会被
-  认作触控笔的电池。它不建唤醒源：笔的电量不需要唤醒系统，而唤醒源会在它
-  下面建 wakeup/ 目录并沿用它的 SELinux 标签，system_suspend 读取时被拒绝；
-- 设备状态带引用计数：probe 持有一个，/dev/gk3_pen 每个打开的文件各持有一个，
-  读写和 poll 都经由文件找到它。上一级 SPI 控制器被解绑时，remove 只标记设备
-  已移除、唤醒等待者，状态等最后一个文件关闭才释放；驱动本身不提供 sysfs 的
-  bind / unbind（suppress_bind_attrs）。
+Add a dedicated driver (himax_hx83121a_pen) for the cascade slave IC:
+- Initialize the slave IC after verifying the SPI bus and chip ID by writing
+  raw_out_sel = 0xF6 and rawdata address = 0x5AA5.
+- Read 339-byte raw pen frames (TX1/TX2 anchor groups and 9x9 grid) on GPIO 39
+  interrupts and expose changed frames to userspace via /dev/gk3_pen (consumed
+  by the gk3pend daemon), with frame counters and a 1024-frame ring buffer in
+  debugfs.
+- Register a DRM panel follower and a 1-second watchdog to reinitialize the
+  slave IC whenever the primary IC resets across panel blank/unblank or error
+  recovery, and switch from interrupts to low-rate polling after idle_after_ms
+  (default 10 s) without stylus activity.
+- Expose a device-scoped "m-pencil" power_supply class device updated by
+  userspace for stylus battery reporting.
 
-依赖写成 DRM || !DRM（与 i2c-hid 相同）：面板跟随的接口编在 DRM 核心模块里，
-DRM=m 时本驱动只能编成模块。
-
-笔 MCU（USB 12d1:10b8）在系统休眠恢复后不再转发压感，只有 USB 端口复位能
-恢复，需要 usbcore.quirks=12d1:10b8:b，由启动参数提供，不在本驱动里处理。
-
-实测：同一份代码以树外模块的形式在 1.0.0-rc.1 上使用（KernelSU 模块，
-见 #26），树内版本只去掉了运行时 DT overlay（改由设备树提供节点）和 USB
-怪癖的处理；已在本仓基线上编译通过，W=1 无警告，checkpatch 无错误、无警告。
-不建唤醒源、等待面板和 suppress_bind_attrs 这三处也先在模块上验证过：
-m-pencil 下不再有 wakeup 目录，system_suspend 不再被拒绝，驱动目录里没有
-bind / unbind，熄屏时空闲轮询停止，笔的各项功能照常。等待面板的那条路径在
-模块上走不到（加载时面板早已注册）。在 gk3pend 开着 /dev/gk3_pen 时解绑、再
-重新绑定上一级 SPI 控制器（890000.spi）：解绑时驱动安全移除，gk3pend 收到
-POLLHUP 后正常退出，内核没有报错；重新绑定后驱动重新初始化，gk3pend 被服务
-重新拉起，笔照常可用。
+Origin: local
+Upstream-Status: Pending
 ---
- drivers/input/touchscreen/Kconfig              |   17 +
- drivers/input/touchscreen/Makefile             |    1 +
- drivers/input/touchscreen/himax_hx83121a_pen.c | 1168 ++++++++++++++++++++++++
- 3 files changed, 1186 insertions(+)
- create mode 100644 drivers/input/touchscreen/himax_hx83121a_pen.c
-
 diff --git a/drivers/input/touchscreen/Kconfig b/drivers/input/touchscreen/Kconfig
 index 0aa769562..263376618 100644
 --- a/drivers/input/touchscreen/Kconfig

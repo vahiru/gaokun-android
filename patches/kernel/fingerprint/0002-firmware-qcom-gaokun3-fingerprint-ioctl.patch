@@ -1,10 +1,16 @@
-From: Gaokun3 Android bring-up
-Subject: [PATCH] firmware: qcom: add restricted Gaokun3 fingerprint transport
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] firmware: qcom: add restricted Gaokun3 fingerprint QSEE transport
 
-Adapted from the 2026-11-01 NixOS driver handoff. Built in for Android;
-use vendor firmware path and exclusive open/release with fail-closed shutdown.
-Depends on 0050. No debugfs or arbitrary QSEE commands.
+Add a restricted misc device (/dev/gaokun3_fpcmd) providing a fixed ioctl ABI
+for communicating with the signed FocalTech fingerprint trusted application on
+sc8280xp-huawei-gaokun3 over QSEECOM (using the QSEECOM app load, shutdown, and
+listener interface). Uses the vendor firmware path and exclusive open/release
+with fail-closed TA shutdown, without debugfs or arbitrary QSEE command
+submission.
 
+Origin: local
+Upstream-Status: Inappropriate [device-specific QSEE transport]
+---
 diff --git a/drivers/firmware/qcom/Makefile b/drivers/firmware/qcom/Makefile
 --- a/drivers/firmware/qcom/Makefile
 +++ b/drivers/firmware/qcom/Makefile

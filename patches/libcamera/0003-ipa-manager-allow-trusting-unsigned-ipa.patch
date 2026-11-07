@@ -1,34 +1,17 @@
-从 libcamera 上游 87c7285663aaad7608fdc18d5216ec6811c685c7 生成。
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] libcamera: ipa_manager: allow running unsigned IPA modules in-process when configured
 
-libcamera: ipa_manager: 允许在无签名校验的构建里信任 IPA 模块
+When built without gnutls/libcrypto (HAVE_IPA_PUBKEY undefined),
+IPAManager::isSignatureValid() unconditionally returns false and forces all IPA
+modules into isolated proxy worker processes.
 
-## 背景
+Allow builds that explicitly define LIBCAMERA_IPA_TRUST_UNSIGNED to treat
+unsigned in-tree IPA modules (such as the software ISP on Android) as trusted so
+they run in-process (T::Threaded) without per-frame IPC overhead.
 
-`IPAManager::createIPA()` 用 `isSignatureValid()` 决定 IPA 走进程内
-（`T::Threaded`）还是独立进程（`T::Isolated`，`ipa_manager.h:44-48`）。
-而构建里没有 gnutls / libcrypto 时（`HAVE_IPA_PUBKEY` 未定义），
-`isSignatureValid()` **无条件 `return false`** ⇒ **一律隔离**。
-
-Android 上这带来两个实际问题：
- 1. 需要额外把 `softisp_ipa_proxy` 这个 worker 可执行体编出来并装进
-    `IPA_PROXY_DIR`，否则报 `Failed to get proxy worker path`，
-    软件 ISP 直接起不来（实测）。
- 2. **软件 ISP 是 CPU 密集的**，每帧再多一次跨进程 IPC 是纯开销。
-
-## 这个补丁做什么
-
-只在**显式定义** `LIBCAMERA_IPA_TRUST_UNSIGNED` 时，把"无法校验签名"
-解释为"信任"，从而走进程内。**默认行为一字未改。**
-
-## ⚠️ 安全权衡（明说，不藏着）
-
-隔离的意义是**沙箱闭源厂商 IPA**。我们这边：IPA 是同一棵树编出来的开源
-softisp，装在只读的 `/vendor` 下，而能往 `/vendor` 写东西的人本来就已经
-拿到 root、也就已经拥有这台设备了。⇒ 在本项目的威胁模型里，隔离买到的
-安全性接近于零，而代价是每帧一次 IPC。
-
-⚠️ **换成闭源 IPA 的项目不要开这个宏。**
-
+Origin: local
+Upstream-Status: Inappropriate [Android-specific]
+---
 diff --git a/src/libcamera/ipa_manager.cpp b/src/libcamera/ipa_manager.cpp
 index 0fd17e5..95e2a0d 100644
 --- a/src/libcamera/ipa_manager.cpp

@@ -14,6 +14,9 @@ Store the coefficients by output channel.
 
 Keep the coefficients in signed 64 bits on the way, so they can be
 combined with another matrix.
+
+Origin: local
+Upstream-Status: Pending
 ---
  drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c | 32 +++++++++++++++---------
  1 file changed, 20 insertions(+), 12 deletions(-)

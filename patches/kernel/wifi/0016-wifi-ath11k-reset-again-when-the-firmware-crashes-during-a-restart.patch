@@ -42,6 +42,8 @@ up, and a suspend can start during the wait. Leave the crash pending for
 PM_POST_SUSPEND then, as for any crash during a suspend.
 
 Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
 ---
  drivers/net/wireless/ath/ath11k/core.c | 36 ++++++++++++++++----------
  drivers/net/wireless/ath/ath11k/mac.c  |  4 +--

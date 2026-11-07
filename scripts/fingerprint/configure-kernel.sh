@@ -4,7 +4,7 @@
 set -euo pipefail
 fp_out=${1:?Usage: configure-kernel.sh <kernel-output-directory>}
 test -f drivers/firmware/qcom/qcom_qseecom_fpcmd.c || {
-    echo 'Apply kernel-apply-patches.sh <tree> --with-fp first.' >&2; exit 1;
+    echo 'Apply kernel-apply-patches.sh <tree> first.' >&2; exit 1;
 }
 ./scripts/config --file "$fp_out/.config" \
     --enable QCOM_SCM --enable QCOM_QSEECOM --enable GAOKUN3_FPCMD \

@@ -14,6 +14,8 @@ with regulator-always-on. The driver's enable and disable calls stay
 balanced and have no effect on the rail.
 
 Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
 ---
  arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts | 5 +++++
  1 file changed, 5 insertions(+)

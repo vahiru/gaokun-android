@@ -23,6 +23,8 @@ Assisted-by: LLM sparse kasan
 Signed-off-by: Zhao Li <enderaoelyther@gmail.com>
 Signed-off-by: Johannes Berg <johannes.berg@intel.com>
 (cherry picked from commit e588e83e5c7a0f6d7a77dbbb58927c8c8cfd598e)
+Origin: backport, commit e588e83e5c7a0f6d7a77dbbb58927c8c8cfd598e
+Upstream-Status: Backport [e588e83e5c7a0f6d7a77dbbb58927c8c8cfd598e]
 ---
  net/mac80211/agg-rx.c | 2 +-
  1 file changed, 1 insertion(+), 1 deletion(-)

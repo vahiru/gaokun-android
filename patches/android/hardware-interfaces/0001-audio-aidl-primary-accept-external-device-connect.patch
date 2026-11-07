@@ -1,14 +1,19 @@
-audio AIDL HAL（ModulePrimary）：primary 模块接受外部设备（模拟耳机）连接
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] audio: aidl: primary: populate profiles from template port on external device connection
 
-应用到 AOSP 树的 hardware/interfaces，由 scripts/crdroid-tree-fixes.py 第 12 条
-自动应用（幂等）。⚠️ 别往内核树上打。
+ModulePrimary inherits the base Module::populateConnectedDevicePort() stub,
+which returns an error for any connectable device port (such as wired
+headphones and headsets) instead of populating dynamic audio profiles. When
+WiredAccessoryManager reports an analog jack connection, setDeviceConnectionState
+fails because the connected port has no profiles.
 
-2026-10-25 在 A17（lineage-24.0 / android-17.0.0_r1）上核过，补丁正文原样能打、不用重做：
-ModulePrimary 仍直接继承 Module、没有覆写 populateConnectedDevicePort（include/core-impl/ModulePrimary.h:23-58）；
-Module::populateConnectedDevicePort() 对 connection 非空的设备仍是纯报错路径（Module.cpp:1822-1836，
-A17 返回的是 EX_ILLEGAL_STATE，补丁注释已跟着改）；connectExternalDevice() 里"情形 2：模拟耳机按扬声器对待"
-那段注释和事后的动态 profile 检查都还在（Module.cpp:743-791）。
+Override populateConnectedDevicePort() in ModulePrimary and copy the static
+profiles declared on the template device port when the connected port's
+profile list is empty.
 
+Origin: local
+Upstream-Status: Pending
+---
 diff --git a/audio/aidl/default/ModulePrimary.cpp b/audio/aidl/default/ModulePrimary.cpp
 index 6648068c93..cb58e31784 100644
 --- a/audio/aidl/default/ModulePrimary.cpp

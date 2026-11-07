@@ -41,6 +41,8 @@ within 50 ms, and all 18 attaches and detaches were handled.
 Fixes: 00327d7f2c8c ("usb: typec: ucsi: add Huawei Matebook E Go ucsi driver")
 Cc: stable@vger.kernel.org
 Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
 ---
  drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c | 86 ++++++++++++++++++++-
  1 file changed, 85 insertions(+), 1 deletion(-)

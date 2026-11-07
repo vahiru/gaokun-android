@@ -1,21 +1,19 @@
 From: Akisaira <akisaira@outlook.com>
-Subject: [PATCH] Input: himax-spi: 边缘补偿不再把坐标推出屏幕
+Subject: [PATCH] Input: himax-spi: clamp edge-compensated coordinates within axis bounds
 
-hx_edge_compensate()把靠边的触点往外推，最多推半格，上限却写在最后一格之外：
-右边界(HX_COLS - 1) * 256 + 256，下边界(HX_ROWS - 1) * 256 + 256，也就是
-15360和10240。换算成输出坐标正好是2560和1600，比轴的最大值2559、1599多1；
-2560经过DT的touchscreen-inverted-x又变成-1。左、上边界的下限是0，没有问题。
+hx_edge_compensate() clamped the right and bottom Q8 grid coordinates to
+(HX_COLS - 1) * 256 + 256 (15360) and (HX_ROWS - 1) * 256 + 256 (10240), which
+map to output coordinates 2560 and 1600—one unit beyond the maximum axis bounds
+of 2559 and 1599 (and -1 after touchscreen-inverted-x). Android's
+TouchInputMapper drops initial touch frames outside the axis range, delaying
+edge swipes and dropping corner taps.
 
-Android的TouchInputMapper在第一根手指落下时检查它是否在轴的范围内，不在就丢掉
-这一帧，下一帧再重新检查。所以手指一直在界外时（这两条边上的角落点击）Android
-收不到，从这两条边开始的滑动（包括全面屏返回手势）要等坐标回到范围内才开始。
+Clamp the upper Q8 bounds to HX_COLS * 256 - 1 and HX_ROWS * 256 - 1 so output
+coordinates stay within 0..2559 and 0..1599.
 
-上限改为网格内最后一个Q8位置HX_COLS * 256 - 1和HX_ROWS * 256 - 1，换算后是
-2559和1599：能报到的最边上的位置不变，只是不再越界。
+Origin: local
+Upstream-Status: Pending
 ---
- drivers/input/touchscreen/hx-algo.c | 10 +++++++---
- 1 file changed, 7 insertions(+), 3 deletions(-)
-
 diff --git a/drivers/input/touchscreen/hx-algo.c b/drivers/input/touchscreen/hx-algo.c
 index a1eff6d..d284481 100644
 --- a/drivers/input/touchscreen/hx-algo.c

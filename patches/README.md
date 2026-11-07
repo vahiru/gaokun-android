@@ -16,7 +16,7 @@
 | [`kernel/audio/`](kernel/audio/) | Linux内核（ASoC `sc8280xp`、LPASS macro、WSA883x、SoundWire、Q6APM） | [`scripts/kernel-apply-patches.sh`](../scripts/kernel-apply-patches.sh)（`KPATCHES`） | LPASS编解码器PM clock运行时电源管理、SoundWire末端口分配、WSA883x动态DRE与增益上限、VA启动消咔哒与高通恢复、四路麦采集 |
 | [`kernel/input/`](kernel/input/) | Linux内核（`himax-spi`触摸屏、HX83121A手写笔从片、`usbhid`） | [`scripts/kernel-apply-patches.sh`](../scripts/kernel-apply-patches.sh)（`KPATCHES`） | 触摸跳点检测、SPI读重试、连通域与掌压/手部位置图、点击锁定与一欧滤波、边缘补偿、级联手写笔从片驱动、键盘/笔HID恢复`SET_IDLE` |
 | [`kernel/dts/`](kernel/dts/) | Linux内核（`sc8280xp.dtsi`与`sc8280xp-huawei-gaokun3.dts`等设备树） | [`scripts/kernel-apply-patches.sh`](../scripts/kernel-apply-patches.sh)（`KPATCHES`） | 温控cooling-maps、USB0 OTG、前后摄与闪光灯/隐私灯、启用`iris`/`videocc`、CMA低于4 GiB、手写笔从片、常开稳压器、DMIC降频、CDSP `dma-coherent`等 |
-| [`kernel/fingerprint/`](kernel/fingerprint/) | Linux内核（QSEECOM与指纹实验驱动） | [`scripts/kernel-apply-patches.sh`](../scripts/kernel-apply-patches.sh)（`--with-fp`） | 仅在带`--with-fp`构建指纹实验内核时应用（`FP_PATCHES`），发版内核不带 |
+| [`kernel/fingerprint/`](kernel/fingerprint/) | Linux内核（QSEECOM与指纹传输驱动） | [`scripts/kernel-apply-patches.sh`](../scripts/kernel-apply-patches.sh)（`KPATCHES`） | QSEECOM TA加载/卸载与listener服务、`/dev/gaokun3_fpcmd`受限指纹传输驱动（FocalTech FTE7001与Goodix GDIX5125，`CONFIG_GAOKUN3_FPCMD`默认关闭） |
 | [`android/hardware-interfaces/`](android/hardware-interfaces/) | AOSP `hardware/interfaces` | [`scripts/crdroid-tree-fixes.py`](../scripts/crdroid-tree-fixes.py) | Audio AIDL primary HAL外设连接、麦克风地址、数据驱动采集、ALSA硬件定拍播放、低延迟块与period数、播放/采集厂商钩子、APEX命名空间 |
 | [`android/drm-hwcomposer/`](android/drm-hwcomposer/) | AOSP `external/drm_hwcomposer` | [`scripts/crdroid-tree-fixes.py`](../scripts/crdroid-tree-fixes.py) | 10-bit客户端目标帧缓冲、内置屏sRGB/Display P3切换、压暗图层走GPU、内置屏HDR10/HLG声明 |
 | [`android/v4l2-codec2/`](android/v4l2-codec2/) | AOSP `external/v4l2_codec2` | [`scripts/crdroid-tree-fixes.py`](../scripts/crdroid-tree-fixes.py) | HEVC CSD合并入首帧、字节缓冲模式使用dmabuf ID、HDR静态元数据传递 |
@@ -29,7 +29,13 @@
 ## 编号与维护规范
 
 1. **子目录内局部编号**：每个子目录内部从`0001`起连续编号，文件名格式为`NNNN-<subsystem-or-topic>.patch`。
-2. **内核补丁正交性**：[`kernel/`](kernel/)下各子系统目录修改的内核源文件互不重叠；同一子系统内存在上下文依赖的补丁按本地序号先后排列，由[`scripts/kernel-apply-patches.sh`](../scripts/kernel-apply-patches.sh)的`KPATCHES`数组显式定义应用顺序。
-3. **验证命令**：
+2. **头部说明与溯源标签（Git Trailers）**：所有补丁采用标准英文mbox头部格式（`From:` / `Subject: [PATCH] ...` / `---`），并在`---`分隔线前附带以下两个Trailer字段（遵循DEP-3与Yocto/OpenEmbedded规范）：
+   - `Origin:`：`local`（本仓库编写）、`backport, <commit / MR / URL>`（自上游主线、维护者队列、MR或ACK回移）或`other, <URL>`（移植或参考自第三方社区树）。
+   - `Upstream-Status:`：
+     - `Backport [<ref>]`：上游已合入或在审的回移补丁，基线升级包含后即可移除。
+     - `Pending`：通用的驱动修复、DTS节点或功能补丁，具备向上游投递的价值。
+     - `Inappropriate [<reason>]`：仅限本地维护的补丁（如`[Android-specific]`、`[firmware workaround]`、`[device-specific policy]`等），不向上游主线投递。
+3. **内核补丁正交性**：[`kernel/`](kernel/)下各子系统目录修改的内核源文件互不重叠；同一子系统内存在上下文依赖的补丁按本地序号先后排列，由[`scripts/kernel-apply-patches.sh`](../scripts/kernel-apply-patches.sh)的`KPATCHES`数组显式定义应用顺序。
+4. **验证命令**：
    - 核对内核树与配方逐字节一致：`bash scripts/kernel-apply-patches.sh <内核树路径> --verify`
    - 核对文档链接完整性：`python3 -I scripts/check-doc-links.py`

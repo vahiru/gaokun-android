@@ -1,16 +1,11 @@
 From: Vahiru <nekovahiru@gmail.com>
-Subject: [PATCH] arm64: dts: gaokun3: 打开 iris，指定华为签名的视频固件
+Subject: [PATCH] arm64: dts: qcom: sc8280xp-huawei-gaokun3: enable iris video decoder
 
-案卷 docs/stage4-findings.md #128。依赖 0053 提供的 `iris` label；
-替代 upstream-venus/0020 与本仓 0011（两者都是 &venus 块，从 iris 切换起都不再列入）。
+Enable the &iris node on Huawei MateBook E Go with firmware-name set to
+"qcom/sc8280xp/Huawei/gaokun3/qcvss8280.mbn".
 
-写法照上游 X13s（sc8280xp-lenovo-thinkpad-x13s.dts:936-940）。firmware-name 必须写：
-高通说 sm8250 的默认镜像 vpu20_p4.mbn 与 SC8280XP 不兼容，而本机只能用华为签名的
-qcvss8280.mbn（HFI gen1，版本串 video-firmware.1.1-e736ad69…，与 X13s 那份同族）。
-iris 的 DT firmware-name 覆盖平台默认名（iris_firmware.c:72-75），PAS id 仍是 9。
-
-⚠️ 与 venus 的一个行为差别：iris 在【第一次 open()】时才加载固件（iris_vidc.c → iris_core_init），
-   不在 probe 时。所以"开机没报错"不等于固件能起来 —— 要看第一次解码时的 dmesg。
+Origin: local
+Upstream-Status: Pending
 ---
 diff --git a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
 index 5217333..c42827a 100644

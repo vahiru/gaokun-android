@@ -1,48 +1,17 @@
 From: Vahiru <nekovahiru@gmail.com>
-Subject: [PATCH] arm64: dts: gaokun3: 把触摸坐标的 fuzz 设为 0（实机量过）
+Subject: [PATCH] arm64: dts: qcom: sc8280xp-huawei-gaokun3: set touchscreen coordinate fuzz to 0
 
-驱动给 `ABS_MT_POSITION_X/Y` 写死 `fuzz = 8`，注释写明理由是
-"prevent libinput from treating 10px drifts as swipes" —— **桌面 Linux 的理由**。
-`touchscreen-fuzz-x/y` 是标准 DT 属性，`drivers/input/touchscreen.c` 的
-`touchscreen_parse_properties()` 会覆盖驱动默认值，所以只改本板行为、不动上游驱动。
+himax-spi sets a default input fuzz of 8 units on ABS_MT_POSITION_X/Y, which
+causes input_defuzz_abs_event() to drop sub-4-unit (~0.4 mm) movements and
+attenuate movements below 16 units, while the measured centroid noise on raw
+idle frames is under 0.5 units peak-to-peak and Android already applies its own
+touch slop and gesture filtering in InputReader.
 
-**为什么是 0，而不是 1 或 2 —— 实机量出来的**（内核 `#23`，案卷 #116）：
+Set touchscreen-fuzz-x = <0> and touchscreen-fuzz-y = <0> on the touchscreen
+node so touchscreen_parse_properties() overrides the driver default at probe.
 
-1. **噪声有多大**：debugfs 导出空载原始帧（仅去基线），整帧 RMS = **29.6** 计数，
-   最差的格子离 `macro_threshold`(800) 还有 11.6 倍余量。
-2. **这些噪声让质心抖多少**：拿实测的手指印子（峰值 3471，5 个格子参与质心）
-   做 4000 次蒙特卡洛，每格加 σ=29.6 的高斯噪声：
-
-       X 方向 σ = 0.156 输出单位 = 0.016 mm
-       Y 方向 σ = 0.096 输出单位 = 0.010 mm
-       峰峰值约 ±3σ ⇒ X ±0.47、Y ±0.29 单位
-
-   **真实抖动不到半个坐标单位** —— 输出是整数量化的，它连一个量化台阶都填不满。
-3. **fuzz=8 压的是什么**：`input_defuzz_abs_event()` 的死区是 **±4 单位**，
-   比它要压制的噪声**大 8 倍**；衰减一直延伸到 ±16 单位，大 30 倍。
-   而 Android 自己的 touch slop 约 24 单位，本来就在做同一件事。
-
-**慢速拖动的 A/B**（各收满约 100 KB 原始 evdev 流）：
-
-| | fuzz=8（出厂） | fuzz=0 |
-|---|---|---|
-| 位移为 0 的帧 | **13.7%** | **1.8%** |
-| Δ=3 出现次数 | **0** | 44 |
-| Δ=9…15 出现次数 | **0** | 235 |
-| 落在"fuzz 清空档位"的样本 | — | **27.3%** |
-
-`input_defuzz_abs_event(fuzz=8)` 的算术预言（Δ=3 与 Δ=9…15 不可能出现）**逐条命中**；
-关掉之后这些档位占 **27.3%**，即**超过四分之一的真实运动数据此前被抹掉或挪位**。
-
-⚠️ `patches/0037` 的模块参数保留 —— 它是**调参工具**（一次重启换无限次实时 A/B），
-这个 DT 属性才是**定案**。两者不冲突：DT 在 probe 时覆盖默认值，
-模块参数仍可在运行时再改。
-
-案卷：`docs/stage4-findings.md` #116。
-
-⚠️ 第一版正文是停机后凭记忆手工构造的，`--verify` 在干净树上打不上（31/32）。
-现在这份是从真实树上反向去掉改动后 `diff -u` 出来的，上下文逐字节真实。
-**补丁正文永远从树上生成，不要手写** —— 哪怕改动只有两行。
+Origin: local
+Upstream-Status: Inappropriate [Android-specific]
 ---
 diff --git a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
 --- a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts

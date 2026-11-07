@@ -1,19 +1,21 @@
 From: Akisaira <akisaira@outlook.com>
-Subject: [PATCH] platform: arm64: huawei-gaokun-ec: 挂起期间关掉EC中断
+Subject: [PATCH] platform: arm64: huawei-gaokun-ec: disable the EC IRQ across suspend
 
-EC进入待机（EC_STANDBY_ENTER）以后，中断处理函数读不了EC，所以碰到
-ec->suspended就直接返回。可这个中断是电平触发的：事件没读走，线一直拉着，
-处理函数一返回，中断马上又进来。从休眠醒来时，EC往往有事件等着报，于是在EC
-恢复之前，这个线程要空转一到三秒、上万次（本机一次开机里7次休眠，累计约9万次）。
+Once the EC enters standby (EC_STANDBY_ENTER), the threaded IRQ handler cannot
+read events from the EC and previously returned immediately when ec->suspended
+was set. Because the EC interrupt line is level-triggered, leaving a pending
+event unread keeps the line asserted and causes the IRQ thread to spin tens of
+thousands of times on resume before the EC exits standby.
 
-改为在suspend里先disable_irq()（它会等正在运行的处理函数结束），resume里EC
-退出待机以后再enable_irq()。期间来的事件留在EC里，恢复后照常读出，不会丢。
-EC中断作为唤醒源时照样能唤醒：PDC带IRQCHIP_ENABLE_WAKEUP_ON_SUSPEND，中断
-核心挂起时会重新打开被关掉的唤醒中断。处理函数里的ec->suspended检查随之去掉。
+Call disable_irq() in suspend before sending EC_STANDBY_ENTER, and re-enable the
+IRQ in resume after the EC leaves standby, removing the ec->suspended check from
+the IRQ handler. Events queued while suspended remain in the EC and are drained
+on resume, while wakeup functionality is preserved via
+IRQCHIP_ENABLE_WAKEUP_ON_SUSPEND on the PDC irqchip.
+
+Origin: local
+Upstream-Status: Pending
 ---
- drivers/platform/arm64/huawei-gaokun-ec.c | 20 +++++++++++++++-----
- 1 file changed, 15 insertions(+), 5 deletions(-)
-
 diff --git a/drivers/platform/arm64/huawei-gaokun-ec.c b/drivers/platform/arm64/huawei-gaokun-ec.c
 index 4c74447..06b9222 100644
 --- a/drivers/platform/arm64/huawei-gaokun-ec.c

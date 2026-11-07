@@ -1,33 +1,21 @@
-staging: android: 从 ACK 移植 ashmem（底本 android15-6.6）
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] staging: android: port ashmem from Android Common Kernel (android15-6.6)
 
-主线没有 ashmem，而 Android 16 的 memfd 兼容探测仍然需要 ACK 的这个 shim
-（缺了它 ioctl 探测失败）。立项证据见 docs/stage2-findings.md 8.5 节第 18 条。
+Port the ashmem staging driver from the android15-6.6 Android Common Kernel
+branch, adapted for Linux 7.2:
+- Replace ACK-specific <linux/page_size_compat.h> and __PAGE_ALIGN() with
+  standard PAGE_ALIGN();
+- Use mm_get_unmapped_area() instead of the removed mm->get_unmapped_area
+  hook;
+- Wrap vm_flags with legacy_to_vma_flags() in shmem_file_setup();
+- Convert the static shrinker to the dynamic shrinker_alloc() /
+  shrinker_register() API;
+- Drop unused is_ashmem_file() and COMPAT_ASHMEM_GET_FILE_ID, and use
+  copy_to_user() for ASHMEM_GET_FILE_ID.
 
-底本：android.googlesource.com/kernel/common，分支 android15-6.6。
-★ 它是【最后一个还带 ashmem 的 ACK 分支】—— android16-6.12 里已经删掉了，
-所以想要更新的底本是没有的。
-
-移植到 v7.2-rc2 需要的适配（原始移植 2026-08-21；本文件是它的入库版，
-2026-09-11 从构建机旧树 ~/gaokun/mainline-linux 原样取回，
-并与 ACK 底本逐行对过，逐字节一致）：
-
- 1. 去掉 #include <linux/page_size_compat.h> —— ACK 专有（16K 页兼容），
-    主线没有这个头；相应地 __PAGE_ALIGN() 换回 PAGE_ALIGN()。
- 2. current->mm->get_unmapped_area(...) → mm_get_unmapped_area(...)
-    —— 主线 6.7 起 get_unmapped_area 不再是 mm_struct 里的函数指针成员。
- 3. shmem_file_setup(..., vma->vm_flags) → 外面套 legacy_to_vma_flags()
-    —— vm_flags 的类型变了。
- 4. shrinker 从静态 struct 改成 shrinker_alloc() / shrinker_register()
-    动态 API（主线 6.7 起 register_shrinker() 已删）；
-    相应地 ashmem_shrink_count/scan 的第一个实参从 &ashmem_shrinker 改成指针。
- 5. 删掉 is_ashmem_file() 及其 EXPORT_SYMBOL_GPL —— 树内没有消费者。
- 6. 删掉 COMPAT_ASHMEM_GET_FILE_ID 兼容 ioctl；ASHMEM_GET_FILE_ID 里
-    put_user() 改成 copy_to_user()。
-
-⚠️ 这份源码此前【只活在构建机的内核树里】，从未入库。后果是实打实的：
-2026-09-08 照本仓配方从干净的 v7.2-rc2 重建的内核在机器上起不来，
-查明原因就是缺它和 xt_quota2（见 docs/stage4-findings.md #79）。
-
+Origin: backport, https://android.googlesource.com/kernel/common (android-mainline)
+Upstream-Status: Inappropriate [Android-specific, ported from ACK android-mainline]
+---
 diff --git a/drivers/staging/Kconfig b/drivers/staging/Kconfig
 index 2f92cd698..3adaf752c 100644
 --- a/drivers/staging/Kconfig

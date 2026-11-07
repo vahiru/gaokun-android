@@ -15,6 +15,9 @@ closed tablet nor puts one in use to sleep.
 
 The IRQ handler ignores the result of the same read, and on failure compares
 an uninitialized status. Android now acts on the lid, so skip the event then.
+
+Origin: local
+Upstream-Status: Pending
 ---
  drivers/platform/arm64/huawei-gaokun-ec.c | 19 ++++++++++++++-----
  1 file changed, 14 insertions(+), 5 deletions(-)

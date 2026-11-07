@@ -38,6 +38,8 @@ cleared and fails to resume the device while runtime PM is still
 disabled ("wake IRQ with no resume: -13").
 
 Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
 ---
  drivers/base/power/main.c | 7 ++++++-
  1 file changed, 6 insertions(+), 1 deletion(-)

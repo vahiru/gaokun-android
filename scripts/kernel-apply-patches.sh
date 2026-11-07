@@ -496,34 +496,15 @@ KPATCHES=(
     # ★ 0022（原 0205）：CDSP的FastRPC上下文（compute-cb）标成dma-coherent，录音降噪服务（DeepFilterNet3在NPU上）要用。
     #    不打的话用户态FastRPC在CDSP上加载skel几乎每次都失败（AEE_EUNABLETOLOAD，与时序有关），降噪服务起不来。
     kernel/dts/0022-arm64-dts-qcom-sc8280xp-mark-the-CDSP-FastRPC-context-banks-dma-coherent.patch
-)
 
-# ★ 指纹实验补丁（v1.0-plan D21，用户 2026-10-04 采纳"只放进实验内核"）：
-#   0001（原 0050，#124/#125）：QSEECOM APP_START/SHUTDOWN + listener，把 TZ 内存约束到 32 位。只碰 drivers/firmware/qcom/qcom_scm.c
-#   与其头文件。2026-09-24 在本机把签名 TA 加载成功（app_id=5），但 client driver / HAL 都还没有 ⇒ 发版内核里它只是
-#   一段没人用的 SMC 通路。v0.6.x–1.0.0-dev.8 的发版内核都带着它（休眠，#125）；从下一次内核构建起不带。
-# 0002 (formerly 0212) adds the fixed-ioctl fingerprint transport (/dev/gaokun3_fpcmd) on top of 0001, and 0003 (formerly 0213) its
-#   Goodix GDIX5125 branch; the HAL needs both. Release kernels carry neither.
-FP_PATCHES=(
+    # ── 指纹传输驱动（QSEECOM + /dev/gaokun3_fpcmd，CONFIG_GAOKUN3_FPCMD 默认 n） ──
+    #   0001（原 0050）：QSEECOM APP_START/SHUTDOWN + listener，把 TZ 内存约束到 32 位。
+    #   0002（原 0212）：固定 ioctl 指纹传输驱动（/dev/gaokun3_fpcmd，FocalTech FTE7001）。
+    #   0003（原 0213）：Goodix GDIX5125 传感器分支。
     kernel/fingerprint/0001-firmware-qcom-scm-qseecom-app-load-shutdown-listener.patch
     kernel/fingerprint/0002-firmware-qcom-gaokun3-fingerprint-ioctl.patch
     kernel/fingerprint/0003-firmware-qcom-gaokun3-fpcmd-add-the-Goodix-GDIX5125-sensor.patch
 )
-WITH_FP=0
-for a in "$@"; do [ "$a" = "--with-fp" ] && WITH_FP=1; done
-if [ "$WITH_FP" = 1 ]; then
-    KPATCHES+=("${FP_PATCHES[@]}")
-    echo "⚠️ --with-fp：指纹实验补丁也会打（${#FP_PATCHES[@]} 个，排在链尾），这不是发版内核"
-else
-    for p in "${FP_PATCHES[@]}"; do
-        f="$REPO/patches/$p"
-        [ -f "$f" ] || continue
-        if git -C "$TREE" apply --check -R "$f" 2>/dev/null; then
-            echo "✗ 指纹实验补丁 $p 还在树里 —— 发版内核不带它（D21）。撤掉：git apply -R patches/${p}；或者这是实验内核，加 --with-fp" >&2
-            exit 1
-        fi
-    done
-fi
 
 # The first version of kernel/core/0008 (formerly 0085) overwrote init_uts_ns in init/version.c. No patch in the table touches
 # that file any more, so --verify would not compare it: a tree still carrying it would report the

@@ -1,23 +1,15 @@
 From: Akisaira <akisaira@outlook.com>
-Subject: [PATCH] Input: himax-spi: 固件看不到手指时提前结束触摸
+Subject: [PATCH] Input: himax-spi: shorten lost-track hold to track_fw_lost_frames when firmware reports no finger
 
-track_lost_frames让没匹配上的跟踪再留3帧，用来接上手指下短暂消失的触点，代价是
-每次抬手的UP都晚这3帧。固件的手指标志（0121）说屏幕上没有手指时，这段等待没有
-意义。
+Unmatched tracks normally wait track_lost_frames (3 frames) before emitting
+touch UP to bridge brief single-frame dropouts. When adaptive baseline tracking
+with baseline_fw_finger is active and the firmware's own finger flag reports no
+finger on the panel, shorten the hold limit to track_fw_lost_frames (default 1
+frame) to reduce lift-off latency.
 
-新增track_fw_lost_frames，这样的帧里用它代替track_lost_frames，默认1。留1帧是因为
-标志看的是固件坐标的低字节是否同为0xff，真实坐标可能撞上；单帧误报不应该切断按住
-的手指。
-
-标志覆盖整块屏幕：还有别的手指按着时，抬手照旧等track_lost_frames。只有
-baseline_fw_finger打开、走自适应基线时才生效，这正是标志把整帧清零的条件。设成不
-小于track_lost_frames的值就是原来的行为。
+Origin: local
+Upstream-Status: Pending
 ---
- drivers/input/touchscreen/himax-spi-core.c |  2 ++
- drivers/input/touchscreen/hx-algo.c        | 14 +++++++++++++-
- drivers/input/touchscreen/hx-algo.h        |  2 ++
- 3 files changed, 17 insertions(+), 1 deletion(-)
-
 diff --git a/drivers/input/touchscreen/himax-spi-core.c b/drivers/input/touchscreen/himax-spi-core.c
 index 9d9e118..975c00a 100644
 --- a/drivers/input/touchscreen/himax-spi-core.c

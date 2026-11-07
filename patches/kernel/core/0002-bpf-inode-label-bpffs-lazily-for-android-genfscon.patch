@@ -1,3 +1,19 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] bpf: inode: skip eager security_inode_init_security() for Android genfscon labeling
+
+Mainline bpffs calls security_inode_init_security() during inode creation in
+bpf_mkdir(), bpf_mkobj_ops(), and bpf_symlink(). On Android, SELinux labels
+/sys/fs/bpf subdirectories and pinned objects via path-based genfscon rules
+rather than xattrs; eager initialization before the dentry is attached assigns
+the parent directory's context to new objects and breaks netd / bpfloader
+SELinux checks.
+
+Skip security_inode_init_security() in bpffs so SELinux falls back to lazy
+genfscon path-based labeling when the dentry is instantiated.
+
+Origin: local
+Upstream-Status: Inappropriate [Android-specific]
+---
 diff --git a/kernel/bpf/inode.c b/kernel/bpf/inode.c
 index 7837968c0842..cc3564630257 100644
 --- a/kernel/bpf/inode.c

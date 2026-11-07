@@ -19,6 +19,8 @@ BAR accesses to the children aren't guarded, the same as after the other
 two errors. The -ETIMEDOUT case hasn't been seen on hardware either.
 
 Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
 ---
  drivers/pci/controller/dwc/pcie-designware-host.c | 14 ++++++++------
  1 file changed, 8 insertions(+), 6 deletions(-)

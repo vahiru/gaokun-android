@@ -1,24 +1,21 @@
-drm_hwcomposer：内置屏在sRGB和Display P3之间切换
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] drm_hwcomposer: switch internal panels between sRGB and Display P3
 
-应用到AOSP树的external/drm_hwcomposer，由scripts/crdroid-tree-fixes.py第32条自动应用（幂等），
-排在0131后面。别往内核树上打。
+Allow vendor.hwc.drm.force_p3_support to take effect without requiring plane
+color pipelines when the internal panel connector exposes the DRM Colorspace
+property. Report NATIVE, SRGB, and DISPLAY_P3 color modes to SurfaceFlinger
+and forward the active mode to the connector's Colorspace property.
 
-vendor.hwc.drm.force_p3_support原来要和color pipeline一起开才生效，而msm没有plane的color
-pipeline，开了反而丢掉CRTC的CTM。这里改成：内置屏的连接器有Colorspace属性时，说明显示驱动
-自己能切色域（内核0134），HWC就报告NATIVE、SRGB和DISPLAY_P3，再由现有的args.colorspace把
-SF选的模式写到连接器上。必须同时报告SRGB：只有P3的话SF没有回到sRGB的路；NATIVE是HWC接口
-要求每个显示器都支持的。
+Since MSM DPU planes do not provide per-plane gamut mapping without a plane
+color pipeline, fall back to GPU composition for layers whose dataspace
+transfer/gamut does not match the active panel color mode, and align the
+client target dataspace with the active color mode. Also return kUnknown
+instead of std::nullopt in AidlToColorspace() and AidlToTransferFunc() for
+unrecognized values so layers do not retain stale color attributes.
 
-几个容易漏的点：
-
-- DPU没有逐图层的色域映射，所以输出是P3时，不是Display P3（含DCI-P3的2.6 gamma）的图层都要
-  交给GPU转换，不能直接上平面；强制sRGB输出时P3图层也一样。两个planner都要改。开了color
-  pipeline的设备由平面自己转换，不受影响。
-- AidlToColorspace、AidlToTransferFunc遇到不支持的值原来返回nullopt，图层会保留上一次的值，
-  前面的判断就读到过期数据。这里改成返回未知。
-- 0131的client target dataspace写死SRGB，SF会照此合成，P3帧就错了，这里改成跟随输出模式。
-- Chromium系浏览器默认不用屏幕广色域，要force-color-profile才走P3，这是浏览器的策略。
-
+Origin: local
+Upstream-Status: Inappropriate [device-specific DPU PCC hook]
+---
 diff --git a/compositor/CompositorTestUtils.h b/compositor/CompositorTestUtils.h
 index f01bfee..de5fb9d 100644
 --- a/compositor/CompositorTestUtils.h

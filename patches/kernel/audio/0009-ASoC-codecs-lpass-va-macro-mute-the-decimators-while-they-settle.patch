@@ -18,6 +18,9 @@ did on stop.
 The decimator events run before the DMIC clock starts and each takes about
 8 ms, so with two decimators the first is unmuted about 32 ms after the clock
 starts and the second about 40 ms after it. Both transients are gone by 12 ms.
+
+Origin: local
+Upstream-Status: Pending
 ---
 diff --git a/sound/soc/codecs/lpass-va-macro.c b/sound/soc/codecs/lpass-va-macro.c
 --- a/sound/soc/codecs/lpass-va-macro.c

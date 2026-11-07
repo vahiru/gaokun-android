@@ -13,6 +13,8 @@ awake for a minute.
 End the reset in ath11k_core_restart() when no radio is restarting.
 
 Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
 ---
  drivers/net/wireless/ath/ath11k/core.c | 27 ++++++++++++++++++++++++++
  1 file changed, 27 insertions(+)

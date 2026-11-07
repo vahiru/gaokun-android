@@ -1,29 +1,18 @@
 From: Vahiru <nekovahiru@gmail.com>
-Subject: [PATCH] media: iris: 解码器在第一次 SOURCE_CHANGE 之前拒绝 CAPTURE 的 G_FMT（与 venus 一致，可运行时关）
+Subject: [PATCH] media: iris: return -EINVAL on decoder CAPTURE G_FMT before first SOURCE_CHANGE
 
-案卷 docs/stage4-findings.md #128。**本地补丁，不打算投上游**（上游 iris 的行为不算错，
-V4L2 stateful 解码规范只说事件之前的查询"不会返回真实值"，没要求报错）。
+Android's v4l2_codec2 HAL expects the venus stateful decoder behaviour where
+VIDIOC_G_FMT on the CAPTURE queue returns -EINVAL until the initial
+V4L2_EVENT_SOURCE_CHANGE event has been generated, deferring output queue
+allocation until the stream dimensions are known.
 
-为什么要它：本机的 Android 硬解（crDroid 的 external/v4l2_codec2）是对着 venus 调通的。
-venus 在收到第一次 SOURCE_CHANGE 之前让 CAPTURE 的 G_FMT 返回 -EINVAL
-（venus/vdec.c vdec_check_src_change()），于是 V4L2Decoder::setupInitialOutput() 失败，
-crdroid-tree-fixes.py 的修复 [5] 把这个失败降成警告，真正的输出队列在第一个事件里建。
-iris 的 G_FMT 从不失败（iris_vidc.c iris_g_fmt_vid_mplane），v4l2_codec2 会改走另一条路：
-先按最小分辨率建输出队列（块数按 MIN_BUFFERS_FOR_CAPTURE 定）并 STREAMON、排入 1 个 EOS 缓冲，
-第一个流信息事件于是变成一次 DRC。那条路在本机从没跑过。
+Return -EINVAL from CAPTURE G_FMT on decoder instances that have subscribed to
+V4L2_EVENT_SOURCE_CHANGE and have not yet received the first source-change
+event, controlled by the module parameter qcom_iris.venus_compat_gfmt (default
+true).
 
-所以默认让 iris 走和 venus 一模一样的那条（已经在本机验过的）路，把"换驱动"与
-"换 Android 侧的状态机路径"拆成两个变量。开关是 0644 模块参数：
-    /sys/module/qcom_iris/parameters/venus_compat_gfmt   （默认 Y）
-写 N 就是原汁原味的上游 iris 行为，不用重编内核就能做 A/B。
-（注：crDroid 的 startOutputQueue 是先 STREAMOFF + 释放缓冲再 S_FMT，
- AOSP main 那份反过来会撞 -EBUSY —— 所以关掉开关大概率也能工作，但要实测。）
-
-判据只在【订阅了 SOURCE_CHANGE 的解码器】上生效，编码器和不订阅事件的客户端行为不变。
-S_FMT(OUTPUT) 清零"见过事件"的标记（换码流 = 重新等事件）。⚠️ 这与 venus【不完全】相同：
-venus 是在两个队列的缓冲都释放、OUTPUT 重新 STREAMON 时回到 INIT 态，而不是在 S_FMT 时。
-对 crDroid 没有差别（它只在 start() 里 S_FMT(OUTPUT) 一次、只在析构时释放全部缓冲），
-但换别的客户端（v4l2-compliance、gst、ffmpeg）调试时别把这里当成与 venus 逐条等价。
+Origin: local
+Upstream-Status: Inappropriate [Android v4l2_codec2 workaround]
 ---
 diff --git a/drivers/media/platform/qcom/iris/iris_instance.h b/drivers/media/platform/qcom/iris/iris_instance.h
 index a770331..814b608 100644

@@ -1,4 +1,4 @@
-From: gaokun-android contributors <nekovahiru@gmail.com>
+From: Vahiru <nekovahiru@gmail.com>
 Subject: [PATCH] ASoC: qcom: sc8280xp: retune the WSA speaker gain ceilings for gaokun3
 
 NOT FOR UPSTREAM -- this raises a limit upstream put in deliberately. It is
@@ -101,6 +101,8 @@ has explained yet. Raising a ceiling is safe; raising the level actually
 written to it should follow a listening check and a look at
 /sys/class/hwmon/*/temp1_input.
 
+Origin: local
+Upstream-Status: Pending
 ---
 --- a/sound/soc/qcom/sc8280xp.c
 +++ b/sound/soc/qcom/sc8280xp.c

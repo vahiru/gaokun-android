@@ -1,27 +1,26 @@
 From: vahiru <nekovahiru@outlook.com>
-Subject: [PATCH] firmware: qcom: scm: QSEECOM APP_START/SHUTDOWN + listener 服务，
- 并把 TZ 内存约束到 32 位（gaokun3 指纹 TA 加载）
+Subject: [PATCH] firmware: qcom: scm: support QSEECOM app load/shutdown, listeners, and 32-bit TZ DMA mask
 
-移植自 Dawid Wróbel / samcday 的 QSEECOM transport（pocketfed，SDM670 真机验证过
-libfprint+fprintd）。上游 mainline 的 qcom_scm 只有 app_get_id(LOOKUP) + app_send，
-无法【加载】一个尚未被引导器预载的 TA。本补丁补上：
+Extend the Qualcomm SCM QSEECOM interface with support for loading and unloading
+trusted applications and servicing normal-world listener callbacks, ported from
+Dawid Wrobel and Sam Day's QSEECOM transport series:
 
-  * qcom_scm_qseecom_app_load()      SMC 0x32000101（owner QSEE_OS + APP_MGR + cmd 1），
-                                     3 个裸值参数 {mdt_len, img_len, 物理地址}，响应 0xEE01→app_id
-  * qcom_scm_qseecom_app_shutdown()  卸载，释放 TZ 内存与占用的名字（否则二次加载被拒、只能重启）
-  * listener 服务                    TA 在 enroll/authenticate 时会回调普通世界读写它的安全存储；
-                                     不应答会让 TZ 卡死、后续 QSEECOM 调用全 -EBUSY、只能断电。
-                                     qcom_scm_qseecom_call() 现在会把 INCOMPLETE 的监听请求跑完再返回。
+- Add qcom_scm_qseecom_app_load() (QSEE_OS / APP_MGR / APP_START, SMC
+  0x32000101) and qcom_scm_qseecom_app_shutdown() (APP_SHUTDOWN). Allow
+  mdt_len == 0 in app_load so single-file secelf images (such as gaokun3's
+  fingerpr.mbn, where QTEE parses the ELF program headers directly) can be
+  loaded alongside split .mdt images.
+- Add listener registration and in-call listener servicing in
+  qcom_scm_qseecom_call() so QSEE applications that return
+  QSEECOM_RESULT_INCOMPLETE requesting normal-world storage callbacks are
+  serviced before returning.
+- Restrict scm->dev's coherent DMA mask to 32 bits in qcom_scm_qseecom_init()
+  because APP_START passes the image physical address as a 32-bit SMC value.
+- Register the qcom_qseecom_tee platform device when CONFIG_TEE_QSEECOM is
+  enabled.
 
-两处 gaokun3 适配（上游 SDM670 内存 <4GB，天然不需要）：
-  1. app_load 允许 mdt_len==0：本机指纹是【单一 secelf】（fingerpr.mbn），整文件一次性传、
-     元数据由 TZ 从 program header 自解析（与 Windows QcTrEE 的 LOAD 一致），不是拼接式 .mdt。
-  2. qcom_scm_qseecom_init() 把 scm->dev 的 coherent DMA mask 收到 32 位：APP_START 把镜像
-     物理地址当 SMC32 裸参数传，高位会被截断；本平台 dma-ranges 是 40 位、内存在 4GB 以上，
-     不约束就可能分到 >4GB 缓冲，LOAD 收到错地址（轻则拒绝，重则整机静默挂死，案卷 #123/#124）。
-
-⚠️ 未在硬件上验证过 LOAD 成功（首次发 LOAD SMC 需人在设备旁，有硬挂风险）。编译通过。
-参考实现：samcday/linux 分支 codex/sargo-fingerprint-kernel11-baseline。
+Origin: other, https://github.com/samcday/linux (codex/sargo-fingerprint-kernel11-baseline)
+Upstream-Status: Pending
 ---
 index 6b601a4b8..dddaf9af5 100644
 --- a/drivers/firmware/qcom/qcom_scm.c

@@ -1,25 +1,16 @@
-v4l2_codec2：声明HDR静态元数据，并随输出帧传下去
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] v4l2_codec2: declare C2StreamHdrStaticInfo and attach it to decoded frames
 
-应用到AOSP树的external/v4l2_codec2，由scripts/crdroid-tree-fixes.py第34条自动应用（幂等），
-排在0019、0128和[30]后面。别往内核树上打。
+Android's Codec2InfoBuilder only advertises HEVC Main10HDR10 profiles when the
+decoder component declares C2StreamHdrStaticInfo::output. Add the parameter to
+V4L2DecodeInterface for HEVC and VP9, and attach the current static HDR
+metadata to each decoded output frame buffer in V4L2DecodeComponent so
+SurfaceFlinger receives the container's mastering display and content light
+level metadata.
 
-框架只有在解码器声明了C2StreamHdrStaticInfo时，才会给HEVC列出Main10 HDR10这个profile
-（Codec2InfoBuilder.cpp），而按profile选片源的应用要看到它才会选HDR10。VP9框架默认算支持。
-这里给HEVC和VP9加上这个参数。
-
-值由客户端设置：容器里的mastering display和content light level经MediaFormat的
-hdr-static-info传进来。CCodecBufferChannel只从输出缓冲上读这份数据，所以每帧都要setInfo，
-SF才能拿到。没有元数据时不附加。
-
-几个容易漏的点：
-
-- ToneMapper13的内容峰值写死成4000尼特，不读这份元数据，所以它现在不改变画面。真正起作用的是声明这个
-  参数：框架靠它列出Main10 HDR10。
-- 只传容器带的元数据，不解析码流里的SEI。系统的MPEG4Extractor不读mdcv和clli，只有Media3这类自己
-  解析容器的播放器才传得进来。
-- HDR10+的动态元数据不支持。
-- 不要照抄C2SoftGav1Dec的字段列表，它把mastering.white.x写了两遍，漏了y。
-
+Origin: local
+Upstream-Status: Pending
+---
 diff --git a/components/DecodeComponent.cpp b/components/DecodeComponent.cpp
 index 305b1ff..d1e9b2b 100644
 --- a/components/DecodeComponent.cpp

@@ -1,31 +1,15 @@
-✅ 【已验证，2026-09-14 内核 #18】ov13b10 绑上（chip id 通过）、47 个 subdev、`camtest --rear 2104 1560` 出帧、
-HAL 枚举 2 个相机 —— 已进 KPATCHES。头部下文写"试验补丁"是历史，保留以示来路。
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] arm64: dts: qcom: sc8280xp-huawei-gaokun3: add rear OV13B10 camera sensor node
 
-arm64: dts: gaokun3: 按板级电源表接回后摄 —— 它是 OV13B10，不是 S5K3L6（⚠️ 试验补丁，叠在 0018 之后）
+Describe the rear OmniVision OV13B10 sensor at 0x36 on cci1_i2c0 connected to
+csiphy0 (4 lanes, 560 MHz link frequency, 19.2 MHz MCLK4, active-low reset on
+GPIO 7, AVDD on vreg_l2b, DOVDD on vreg_l2c, and DVDD gated by GPIO 92), matching
+the power sequence in Huawei's Windows camera driver package (CAMS_RES_QRD.bin)
+and ACPI DSDT.
 
-**依据（#106）**：
-1. 华为 Windows 驱动包 `qccamrearsensor_extension8280.cab` 里的 `CAMS_RES_QRD.bin`（QRD 平台 = 本机）
-   是后摄设备 `\_SB.CAMS` 的电源序列：
-   ```
-   GPIO7 低（复位）  GPIO92 高（核心轨门控）  GPIO93 低（闪光灯）
-   LDO2_B 2.8V   LDO2_C 1.8V   LDO7_B 2.8V（VCM）   延时 1ms
-   GPIO7 高  延时 10ms  cam_cc_mclk4_clk 24 MHz
-   ```
-   同一格式解前摄 `CAMF_RES_QRD.bin`：GPIO15 复位 / LDO11_C 2.8V / LDO2_C 1.8V / GPIO44 高 / MCLK3 24 MHz
-   —— 与现役 DT 里 hi846 的接线**逐项一致**，格式解读由此校准。
-2. 驱动包里后摄有**两个**模组：`ofilm_ov13b10`（"Makena"）与 `lijing_s5k3l6`（"Makena RFC"）。
-   内核 #16 用 S5K3L6 驱动按上面的序列把轨拉起来后**扫整条 CCI 总线**：`0x36`（OV13B10）与 `0x50`
-   （模组 EEPROM）应答，`0x10`（S5K3L6）无人 ⇒ **本机后摄是 OV13B10**。
-3. L2B 共用：DSDT（`refs/matebook-e-go-linux/docs/acpi/DSDT_216.dsl:3200`）显示设备对 LDO2_B 投 1.8V，
-   后摄投 2.8V，RPMh 取最大 ⇒ Windows 下后摄开着时面板 VDDI 在 2.8V。驱动侧对应改动在 `patches/0034`。
-
-**节点**：`ovti,ov13b10` @0x36，`avdd=l2b / dovdd=l2c / dvdd=vreg_camr（GPIO92）`，`reset-gpios` GPIO7 低有效，
-MCLK4 **19.2 MHz**（上游 ov13b10 的寄存器表按 19.2 MHz 写，Windows 模组用 24 MHz 是它自己的表），
-4 lane，`link-frequencies = 560 MHz`（上游驱动唯一支持的一档）。旧 s5k3l6 节点里 vddio/vddd 是接反的。
-
-⚠️ 仍是试验：0018 的理由（sensor 绑不上会卡死 v4l2-async notifier、前摄跟着没）依然成立，只进测试槽；
-后摄 probe 成功（读到 chip id 0x560d42）后再提升。⚠️ diff 由 `git diff` 生成。
-
+Origin: local
+Upstream-Status: Pending
+---
 diff --git a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3-camera.dtsi b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3-camera.dtsi
 index 690db45..937eda9 100644
 --- a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3-camera.dtsi

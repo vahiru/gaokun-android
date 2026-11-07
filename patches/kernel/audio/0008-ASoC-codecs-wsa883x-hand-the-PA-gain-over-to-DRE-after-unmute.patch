@@ -20,6 +20,8 @@ sweep comes out over 34 dB and bass moves the rest by less than 4 dB.
 
 Fixes: cdb09e623143 ("ASoC: codecs: wsa883x: add control, dapm widgets and map")
 Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
 ---
  sound/soc/codecs/wsa883x.c | 14 ++++++++++++++
  1 file changed, 14 insertions(+)

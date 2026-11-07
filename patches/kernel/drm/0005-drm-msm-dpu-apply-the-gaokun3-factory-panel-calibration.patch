@@ -17,6 +17,9 @@ commit has programmed the PCC.
 
 The PCC only runs on commits that carry a CTM, which the Android HWC always
 sends. msm.panel_calibration=0 turns the calibration off, also at runtime.
+
+Origin: local
+Upstream-Status: Pending
 ---
  drivers/gpu/drm/msm/Makefile                  |   1 +
  drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c      |  59 ++++-

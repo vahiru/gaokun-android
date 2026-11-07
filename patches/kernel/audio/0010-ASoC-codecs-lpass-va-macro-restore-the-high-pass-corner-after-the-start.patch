@@ -13,6 +13,9 @@ stops first, restore it in PRE_PMD so that the next capture reads the right
 value. Restoring after the step has decayed leaves a shift of about 0.002 of
 full scale, below the low-frequency background; doing it inside the 40 ms mute
 instead leaves a transient about 9 times larger.
+
+Origin: local
+Upstream-Status: Pending
 ---
 --- a/sound/soc/codecs/lpass-va-macro.c
 +++ b/sound/soc/codecs/lpass-va-macro.c

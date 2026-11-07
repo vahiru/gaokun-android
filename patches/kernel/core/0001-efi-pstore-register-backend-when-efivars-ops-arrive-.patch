@@ -1,5 +1,5 @@
 From 3f88da020ab5c12a25b0bfc454ef76079ecc026e Mon Sep 17 00:00:00 2001
-From: gaokun-android <dev@localhost>
+From: Vahiru <nekovahiru@gmail.com>
 Date: Thu, 13 Aug 2026 16:24:09 +0000
 Subject: [PATCH] efi-pstore: register backend when efivars ops arrive late
 
@@ -17,6 +17,9 @@ the same semaphore.
 
 Also make efivars_pstore_init() idempotent so the notifier path and the
 module_init path cannot double-register.
+
+Origin: local
+Upstream-Status: Pending
 ---
  drivers/firmware/efi/efi-pstore.c | 63 ++++++++++++++++++++++++++++++-
  1 file changed, 61 insertions(+), 2 deletions(-)

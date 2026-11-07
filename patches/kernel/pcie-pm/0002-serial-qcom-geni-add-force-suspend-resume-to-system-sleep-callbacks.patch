@@ -29,6 +29,8 @@ Signed-off-by: Praveen Talari <praveen.talari@oss.qualcomm.com>
 Link: https://patch.msgid.link/20260702-add_force_suspend_resume_to_system_sleep_callbacks-v2-1-b79e254a7015@oss.qualcomm.com
 Signed-off-by: Greg Kroah-Hartman <gregkh@linuxfoundation.org>
 (cherry picked from commit d0cd9c8d0fd59bc7d140f3d60cf02e1d80376dab)
+Origin: backport, commit d0cd9c8d0fd59bc7d140f3d60cf02e1d80376dab
+Upstream-Status: Backport [d0cd9c8d0fd59bc7d140f3d60cf02e1d80376dab]
 ---
  drivers/tty/serial/qcom_geni_serial.c | 19 ++++++++++++++++++-
  1 file changed, 18 insertions(+), 1 deletion(-)

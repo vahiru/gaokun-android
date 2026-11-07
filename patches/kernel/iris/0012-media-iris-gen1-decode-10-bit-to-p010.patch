@@ -1,25 +1,17 @@
 From: Akisaira <akisaira@outlook.com>
-Subject: [PATCH] media: iris: gen1解码器支持10-bit码流，输出P010
+Subject: [PATCH] media: iris: support 10-bit HEVC and VP9 decoding to P010 on gen1
 
-gen1的SEQUENCE_CHANGED里位深不是8-bit就直接判成不支持，所以HEVC Main10和VP9
-Profile 2都解不了。硬件和固件是支持的，缺的只是驱动：
+Add 10-bit decoding support for HEVC Main10 and VP9 Profile 2 on gen1 HFI:
 
-- 固件报0x20002时切到BIT_DEPTH_10，CAPTURE格式换成P010，行宽按每像素2字节算。
-  同一条流从10-bit切回8-bit时换回NV12。
-- split模式下DPB用TP10_UBWC，输出口用P010；这两个格式和venus一致。
-- P010的行宽倍数用256，和驱动的ALIGN(width * 2, 256)保持一致。
-- H.264的10-bit仍判为不支持，保持原有语义。实测High 10走不到这里：会话直接进错误状态，
-  QBUF失败，解码服务和后续解码都不受影响。
+- When HFI_EVENT_DATA_SEQUENCE_CHANGED reports 10-bit depth (0x20002) for HEVC
+  or VP9, update the instance bit depth to BIT_DEPTH_10 and switch the CAPTURE
+  pixel format to V4L2_PIX_FMT_P010 (or back to NV12 when switching to 8-bit).
+- Configure TP10_UBWC for internal DPB buffers (stream 0) and P010 for CAPTURE
+  output buffers (stream 1) in split mode, with 256-byte scanline alignment.
 
-这个补丁必须和Turnip的P010采样、minigbm的P010显示用途一起进ROM，否则10-bit视频
-到不了屏幕。QC10C的映射照gen2写了，v4l2_codec2不用它，没有验证过。
-
+Origin: local
+Upstream-Status: Pending
 ---
- .../qcom/iris/iris_hfi_gen1_command.c         | 27 +++++++++++----
- .../qcom/iris/iris_hfi_gen1_defines.h         |  5 +++
- .../qcom/iris/iris_hfi_gen1_response.c        | 34 ++++++++++++++++---
- 3 files changed, 56 insertions(+), 10 deletions(-)
-
 diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c b/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c
 index e8eeb83f0..0240f62ac 100644
 --- a/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c

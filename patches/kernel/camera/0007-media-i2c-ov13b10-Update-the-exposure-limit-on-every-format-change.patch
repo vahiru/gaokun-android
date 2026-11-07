@@ -13,6 +13,8 @@ libcamera does when it configures, gets the old ones. Set the limit for
 the new height in set_fmt as well.
 
 Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
 ---
  drivers/media/i2c/ov13b10.c | 11 +++++++++++
  1 file changed, 11 insertions(+)

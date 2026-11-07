@@ -1,7 +1,7 @@
 From 6c05b54e2ea1119f55383ce5565f6882b45dfb5d Mon Sep 17 00:00:00 2001
 From: Akisaira <akisaira@outlook.com>
 Date: Tue, 3 Nov 2026 23:01:41 +1100
-Subject: [PATCH 09/13] libcamera: software_isp: Leave saturated pixels out of
+Subject: [PATCH] libcamera: software_isp: Leave saturated pixels out of
  the colour sums
 
 The soft ISP's grey world white balance divides the colour sums of the
@@ -18,6 +18,9 @@ When every pixel is saturated the AWB skips the frame.
 
 Signed-off-by: Akisaira <akisaira@outlook.com>
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+Origin: local
+Upstream-Status: Pending
 ---
  .../internal/software_isp/swisp_stats.h       |  7 +++-
  src/ipa/softisp/algorithms/awb.cpp            |  7 ++--

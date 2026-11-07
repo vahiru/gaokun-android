@@ -31,6 +31,8 @@ the orientation when it has changed, which also saves the uevent.
 Fixes: 00327d7f2c8c ("usb: typec: ucsi: add Huawei Matebook E Go ucsi driver")
 Cc: stable@vger.kernel.org
 Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
 ---
  drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c | 30 ++++++++++++++++++---
  1 file changed, 26 insertions(+), 4 deletions(-)

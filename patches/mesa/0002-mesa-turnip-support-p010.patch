@@ -1,22 +1,14 @@
 From: Valentine Burley <valentine.burley@collabora.com>
-Subject: [PATCH] tu: 支持P010（上游MR !45721，适配到A17的mesa 26.1.0-devel）
+Subject: [PATCH] tu: add VK_FORMAT_G10X6_B10X6R10X6_2PLANE_420_UNORM_3PACK16 (P010) support
 
-取自https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/45721 （源分支tu-p010，
-head 776139d7），4个提交合成一个，原作者Valentine Burley。写这个补丁时MR还没合并；
-等ROM的mesa带上它就删掉这个补丁。
-
-A6xx有原生的FMT6_P010、P010_Y、P010_UV，少的只是格式表和几处特判。MR的基线比A17的
-快照新，适配时改了这些：
-
-- fd6_view.cc：快照里A6xx和A8xx两条路径都写死了三个NV12类格式，这里加上
-  X6G10_X6B10X6R10_420_UNORM。MR的基线已改成通用的multi_plane判断，只打MR的话第二
-  平面地址和色度偏移都不会设置。
-- fd6_layout.c：X6R10的UBWC块大小放到函数开头，上下文和基线不同。
-- tu_clear_blit.cc、tu_formats.cc：内容同MR，上下文手工对齐。
-- 不带MR里的CI失败列表。
+Backport Turnip P010 format support from upstream Mesa MR !45721 (squashed from
+4 commits by Valentine Burley) onto Mesa 26.1.0-devel for Android 17, enabling
+hardware P010 sampling and rendering on Adreno A6xx.
 
 Signed-off-by: Valentine Burley <valentine.burley@collabora.com>
 Signed-off-by: Akisaira <akisaira@outlook.com>
+Origin: backport, https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/45721
+Upstream-Status: Backport [https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/45721]
 ---
 diff --git a/src/freedreno/fdl/fd6_format_table.c b/src/freedreno/fdl/fd6_format_table.c
 index 009206d..17d3692 100644

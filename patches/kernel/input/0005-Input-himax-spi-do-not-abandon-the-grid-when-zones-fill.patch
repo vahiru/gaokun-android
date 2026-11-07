@@ -1,38 +1,17 @@
 From: Vahiru <nekovahiru@gmail.com>
-Subject: [PATCH] Input: himax-spi: 连通域表满了不要放弃扫描整个网格
+Subject: [PATCH] Input: himax-spi: evict the weakest macro zone instead of abandoning the grid scan when full
 
-**问题**：`hx_detect_macro_zones()` 按行列顺序扫 40×60 网格，每遇到一个过阈像素
-就做一次 8-连通 BFS 生成一个 zone。表满了之后它是这样处理的：
+hx_detect_macro_zones() scans the 40x60 capacitance grid in row-major order and
+previously returned from the function as soon as algo->zone_count reached
+HX_MAX_ZONES (20). Under common-mode noise that creates many small 1-2 cell
+zones near the top of the panel, filling the table caused all real finger
+contacts in the lower portion of the panel to be ignored.
 
-    if (algo->zone_count >= HX_MAX_ZONES)
-            return;                    /* ← 从整个函数返回 */
+Build candidate zones beyond HX_MAX_ZONES into a spare slot (algo->spare) and
+replace the weakest existing zone if the new zone has a larger signal_sum.
 
-**`return` 不是 `break`** —— 它放弃的不是这一个像素，而是**网格剩下的全部**。
-`HX_MAX_ZONES` 是 20，而最多只上报 10 个触点，所以正常情况下绰绰有余；
-可一旦噪声制造出一堆一两格大小的 zone（充电器共模耦合是最典型的来源，
-CMF 共模滤波正是为它存在的），20 个名额会被**扫描顺序靠前**的噪声占满，
-于是**屏幕下半部分的真实手指整个消失**，并且**没有任何地方记下这件事发生过**。
-
-这与本仓刚修掉的跳点检测（#114）是同一类故障：症状是"用着用着触摸就不灵了"，
-而且**越是噪声大的场合越坏**，正好是用户最容易碰到的场合。
-
-**改法**：表满之后不再返回，而是把新 zone 建进一个备用槽（`algo->spare`），
-BFS 跑完之后按 `signal_sum` 与当前最弱的 zone 比一比，赢了就顶替它。
-噪声团贴着 `macro_threshold` 只有一两格，而指尖的积分信号高一个数量级，
-所以 `signal_sum` 正好把两者分开 —— 这也是 `hx_insert_peak()` 在峰值那一级
-早就在用的策略，只是 zone 这一级漏了。
-
-代价是 `struct hx_algo` 多一个 `hx_macro_zone`（约 612 字节，它本来就是
-`devm_kzalloc` 出来的 ~40 KB 结构），以及顶替发生时一次 612 字节的拷贝 ——
-而顶替只在表满时发生，正常使用一次都不会走到。
-
-⚠️ 已知取舍：`signal_sum` 大的手掌理论上能顶掉手指。但掌压剔除紧跟在后面
-（而且 `0042` 之后掌压 zone 会被标记、可见），且"手掌 + 20 个以上 zone"
-本身已经是异常场景。`0043` 的 `zones_evicted` / `zones_overflow` 两个计数器
-就是为了让这件事从"理论上可能"变成"实测发生过几次"。
-
-编译：`W=1` 零告警。
-案卷：`docs/stage4-findings.md` #115。
+Origin: local
+Upstream-Status: Pending
 ---
 diff --git a/drivers/input/touchscreen/hx-algo.c b/drivers/input/touchscreen/hx-algo.c
 --- a/drivers/input/touchscreen/hx-algo.c

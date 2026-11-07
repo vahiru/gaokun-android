@@ -1,18 +1,16 @@
 From: Akisaira <akisaira@outlook.com>
-Subject: [PATCH] Input: himax-spi: 峰值多于10个时展开最强的10个
+Subject: [PATCH] Input: himax-spi: expand the strongest peaks when peak_count exceeds HIMAX_MAX_TOUCH
 
-hx_detect_peaks()把峰值按信号从小到大排序，hx_expand_and_resolve()却只展开
-前HIMAX_MAX_TOUCH个，所以峰值一多，被丢掉的正是信号最强的那几个。手指不会
-超过10根，正常使用碰不到；整只手压在屏上时，手的碎块加上另一只手的手指常有
-11到15个峰值，这时就会出现。
+hx_detect_peaks() sorts detected peaks in ascending order of signal strength,
+but hx_expand_and_resolve() previously iterated from index 0 and stopped after
+HIMAX_MAX_TOUCH (10) peaks, dropping the strongest peaks whenever palm fragments
+pushed peak_count above 10.
 
-改成跳过最弱的那几个，其余仍按原来从弱到强的顺序展开。峰值不超过10个时，
-结果与原来逐字节相同。
+Start peak expansion at max(0, peak_count - HIMAX_MAX_TOUCH) so the weakest
+peaks are skipped and the strongest HIMAX_MAX_TOUCH peaks are expanded.
 
-后面"触点多于槽位时按signal_sum保留最强的"那段本来就到不了（展开出的触点
-不会超过HIMAX_MAX_TOUCH个），这里没有动它。
-
-issue #29。
+Origin: local
+Upstream-Status: Pending
 ---
 diff --git a/drivers/input/touchscreen/hx-algo.c b/drivers/input/touchscreen/hx-algo.c
 index acbcd6ac0..0d2b8dbb1 100644

@@ -1,28 +1,19 @@
 From: Akisaira <akisaira@outlook.com>
-Subject: [PATCH] Input: himax-spi: 按速度过滤上报的位置（一欧滤波）
+Subject: [PATCH] Input: himax-spi: add fixed-point One Euro filter for reported coordinates
 
-不做平滑时，触点中心每帧会抖几个单位，慢速滑动时看得出点在颤，用电池时信号更弱，
-抖得更明显。track_smoothing用固定的1/4步长把它压住，但不论快慢都滞后约3帧，
-flick会变钝，所以游戏模式把它关掉了。
+Fixed-step exponential smoothing (track_smoothing) introduces ~3 frames of lag
+during fast flicks, while disabling smoothing leaves visible centroid jitter on
+slow drags.
 
-新增track_filter_mincutoff、_beta、_dcutoff（sysfs，mincutoff为0时关闭）：每个跟踪
-对上报的位置做一欧滤波（One Euro filter，Casiez等，CHI 2012），截止频率随速度升高：
-mincutoff + beta × 速度。速度由实测位置与滤波位置之差按轴低通（dcutoff）后取模。
-配对和预测仍然用实测位置；滤波从按下的位置开始，按下不会变慢；点击锁定生效时，
-锁定优先。定点实现，状态精度1/256单位。
+Implement a per-track fixed-point One Euro filter (Casiez et al., CHI 2012) on
+reported coordinates, controlled via sysfs attributes track_filter_mincutoff
+(in mHz, 0 to disable), track_filter_beta, and track_filter_dcutoff. The cutoff
+frequency scales linearly with low-pass-filtered speed so slow drags are
+smoothed while fast flicks experience minimal lag.
 
-三段PJSK录制的回放（点击锁定20，参数1000 mHz / 15 / 30000），锁定放开后的慢速滑动
-（每帧0.05到0.4毫米）：帧间二阶差分的p90从4.2到6.7降到2.2到2.8个单位，回退2个单位
-以上的帧从0.8%到4.0%降到0到0.1%。flick第一个快帧之后两帧，上报的位移是不滤波时
-的95%（中位数）；移动中的帧滞后0.55到0.6帧（中位数）；甩出时末速度99%（中位数，
-p10为80%到89%）；移动的触摸终点差7到8个单位（中位数）。同样条件下track_smoothing
-分别是47%、2.5帧、差19到48个单位。
+Origin: local
+Upstream-Status: Pending
 ---
- drivers/input/touchscreen/himax-spi-core.c |  6 ++
- drivers/input/touchscreen/hx-algo.c        | 82 +++++++++++++++++++---
- drivers/input/touchscreen/hx-algo.h        | 21 +++++-
- 3 files changed, 98 insertions(+), 11 deletions(-)
-
 diff --git a/drivers/input/touchscreen/himax-spi-core.c b/drivers/input/touchscreen/himax-spi-core.c
 index e764d4d..7599e68 100644
 --- a/drivers/input/touchscreen/himax-spi-core.c

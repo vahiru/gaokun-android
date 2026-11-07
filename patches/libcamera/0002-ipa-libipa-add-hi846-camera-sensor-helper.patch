@@ -1,51 +1,14 @@
-从 libcamera 上游 87c7285663aaad7608fdc18d5216ec6811c685c7 生成。
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] libcamera: ipa: libipa: add CameraSensorHelper for Hynix Hi-846
 
-libcamera: ipa: libipa: 给 hi846 加 CameraSensorHelper
+Add a CameraSensorHelper implementation for the Hynix Hi-846 front camera sensor
+with its linear analogue gain model (gain = 1 + code / 16) and 10-bit black
+level pedestal (64 at 10-bit, scaled to 4096 in 16-bit units) so the software
+ISP AGC can control sensor analogue gain.
 
-没有这条 helper 时，`CameraSensorHelperFactoryBase::create("hi846")` 返回
-nullptr，softisp 的 IPA 打一行 Warning 然后**把模拟增益锁死在 0**
-（实测 40 帧里 `analogue-gain` 一次都没动），弱光下画面停在黑电平。
-⚠️ 注意 hi846 **已经在** `src/libcamera/sensor/camera_sensor_properties.cpp:135
-里** —— 那是另一个数据库（尺寸/测试图案），不提供增益换算。
-
-## 增益模型是【实测】出来的，不是查来的，也不是猜的
-
-内核驱动 `drivers/media/i2c/hi846.c` 的 `hi846_set_ctrl()` 里
-`V4L2_CID_ANALOGUE_GAIN` 分支只有一句
-`hi846_write_reg(hi846, HI846_REG_ANALOG_GAIN, ctrl->val)`
-—— 把值原样写进寄存器 0x0077，**没有公式也没有注释**。
-所以在真机上标定（华为 MateBook E Go，sc8280xp，前摄 hi846）：
-
-固定曝光 120 行、固定光源，扫增益码并量原始拜耳帧的**中位数**
-（场景是"大片暗 + 一个亮斑"，高增益时亮斑先削顶，**均值会被钳住而
-中位数不受影响** —— 同组数据首尾对照：中位数漂 4%，均值漂 21%）。
-⚠️ 每档重复多次取**最大值**：离群值**全是偏低的、没有偏高的**
-（`lctest` 存的是开流后第 0 帧，偶尔不完整），所以最大值才是干净的估计。
-
-    code    0   32   64   96  128  160  192  224
-    中位数  25   44   62   81   99  119  137  154
-    增量        19   18   19   18   20   18   17      ← 几乎完全线性
-
-解得黑电平 15.79（与独立测得的暗场均值 15.97 吻合）、
-每档步进 9.214，即 **gain(code) = 1 + code/16**，满量程 code 240 = **16.0×**。
-
-## 留出验证（这四档没参与拟合，跨越 1.5× 到 16×）
-
-    code      8     16     48    240
-    实测     30     35     53    165
-    预测   29.6   34.2   52.6  163.2
-    误差  +1.4%  +2.3%  +0.8%  +1.1%
-
-## 黑电平
-
-同样实测：最小曝光暗场下，模拟增益 0 / 120 / 240 三档均值恒为 ≈16（10 位的 64），
-**不随增益放大**，只有噪声在展宽（p99 22 → 37 → 51）
-⇒ 基座是增益之后加的数字偏置（与驱动初始化表里的 `HI846_REG_PEDESTAL_EN` 一致）。
-单位沿用本文件 imx219 条目的约定（"From datasheet: 64 at 10bits." → 4096）。
-
-⚠️ 本补丁是 `git diff` 生成的，不是手写的 —— 见 #82：`patches/0003` 从入库
-那天起就打不上，正因为它的 hunk 头是人手敲的散文。
-
+Origin: local
+Upstream-Status: Pending
+---
 diff --git a/src/ipa/libipa/camera_sensor_helper.cpp b/src/ipa/libipa/camera_sensor_helper.cpp
 index c00b997..ea474ad 100644
 --- a/src/ipa/libipa/camera_sensor_helper.cpp

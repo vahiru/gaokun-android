@@ -24,6 +24,8 @@ device like after any other crash.
 Tested-on: WCN6855 hw2.1 PCI WLAN.HSP.1.1-03125-QCAHSPSWPL_V1_V2_SILICONZ_LITE-3.6510.41
 
 Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
 ---
  drivers/net/wireless/ath/ath11k/core.c |  7 +++++++
  drivers/net/wireless/ath/ath11k/mhi.c  | 13 +++++++++++++

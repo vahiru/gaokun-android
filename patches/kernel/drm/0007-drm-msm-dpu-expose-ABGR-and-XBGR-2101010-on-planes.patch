@@ -4,6 +4,9 @@ Subject: [PATCH] drm/msm/dpu: expose ABGR and XBGR 2101010 on planes
 The format table already describes them, but the plane lists stop at the
 ARGB and XRGB orders. Android's RGBA_1010102 maps to ABGR2101010, so
 10-bit buffers cannot be scanned out directly.
+
+Origin: local
+Upstream-Status: Pending
 ---
  drivers/gpu/drm/msm/disp/dpu1/dpu_hw_catalog.c | 4 ++++
  1 file changed, 4 insertions(+)

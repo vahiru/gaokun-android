@@ -15,6 +15,9 @@ Pitch does not change and the level stays within about 1 dB up to 4 kHz.
 
 The microphone part is unknown, so this does not tell whether the limit
 comes from the microphones or from the board.
+
+Origin: local
+Upstream-Status: Pending
 ---
  arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts | 2 +-
  1 file changed, 1 insertion(+), 1 deletion(-)

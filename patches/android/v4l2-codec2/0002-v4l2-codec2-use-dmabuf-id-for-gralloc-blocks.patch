@@ -1,21 +1,19 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] v4l2_codec2: use dmabuf inode ID for GRALLOC-backed output blocks
 
-v4l2_codec2: 字节缓冲模式的GRALLOC块用dmabuf ID
+In byte-buffer mode, VideoFramePool::getBufferIdFromGraphicBlock() uses the
+GRALLOC branch, which expects a legacy C2BufferPoolData of TYPE_BUFFERPOOL.
+Blocks fetched from BASIC_GRAPHIC have null pool data (causing a null-pointer
+dereference crash), while AIDL bufferpool2 blocks carry a different pool type
+and fail with "not bufferpool-backed".
 
-应用到AOSP树的external/v4l2_codec2，由scripts/crdroid-tree-fixes.py第28条自动应用（幂等）。
-别往内核树上打。
+Identify GRALLOC-backed blocks by their dmabuf inode number, matching the
+existing BUFFERQUEUE path, so recycled graphic blocks retain stable buffer IDs
+regardless of the backing pool implementation.
 
-byte-buffer解码器的输出块走GRALLOC分支，这个分支只认bufferpool的ID，有两种情况
-都过不去：基础块池（BASIC_GRAPHIC）的块没有pool data，getType()是空指针解引用，
-解码服务直接崩溃；AIDL的bufferpool2块类型不是TYPE_BUFFERPOOL，报“not
-bufferpool-backed”后拿不到帧。崩溃时seccomp又拦下debuggerd的getppid，所以init
-日志里是SIGSYS，也没有tombstone，别被它带偏。
-
-改成和BUFFERQUEUE一样用dmabuf ID：缓冲回收后ID不变，也不依赖块池类型。
-
-⚠️ 必须和device.mk里的debug.stagefright.c2-poolmask（加GRALLOC，第17位）一起生效。
-基础块池每次fetch都分配新缓冲，ID永远是新的，而VideoFramePool只接受不超过V4L2
-缓冲数的不同ID，缓冲用完后解码就停住，不报错。
-
+Origin: local
+Upstream-Status: Pending
+---
 diff --git a/components/VideoFramePool.cpp b/components/VideoFramePool.cpp
 index ae5cd34..f57f87b 100644
 --- a/components/VideoFramePool.cpp

@@ -25,6 +25,8 @@ share a packet, and hid_report_raw_event() only parses the first, which
 loses a key release.
 
 Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
 ---
  drivers/hid/usbhid/hid-core.c | 14 ++++++++++++++
  include/linux/hid.h           |  2 ++

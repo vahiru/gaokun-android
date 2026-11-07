@@ -1,17 +1,22 @@
-drm_hwcomposer：10-bit图层走GPU合成时请求10-bit帧缓冲
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] drm_hwcomposer: request a 10-bit client target when 10-bit layers use client composition
 
-应用到AOSP树的external/drm_hwcomposer，由scripts/crdroid-tree-fixes.py第31条自动应用（幂等）。
-别往内核树上打。
+SurfaceFlinger defaults its client composition framebuffer to RGBA_8888, which
+truncates 10-bit video layers to 8-bit whenever they fall back to GPU
+composition (such as during display rotation where the DPU cannot rotate in
+hardware).
 
-横屏时图层要旋转，DPU转不了，都走GPU合成，而SurfaceFlinger的帧缓冲写死RGBA_8888，
-10-bit视频到这里就被截成8位。HWC可以用ClientTargetProperty请求别的格式，这里在
-“有10-bit图层走CLIENT，client target在最底层，且主平面支持ABGR2101010”时请求RGBA_1010102。普通界面不受影响，
-旧内核的平面列表里没有这个格式，会保持8位。
+Request RGBA_1010102 via ClientTargetProperty whenever a 10-bit layer is
+assigned to CLIENT composition, the client target sits at the bottommost plane
+slot, and the primary plane advertises ABGR2101010. Explicitly request
+RGBA_8888 when switching back to 8-bit, and force the validate path whenever
+the requested client target format changes so SurfaceFlinger reads the updated
+ClientTargetProperty. Keep the client target at 8-bit when it is blended above
+another plane because RGBA_1010102 only provides 2-bit alpha.
 
-三个容易漏的点：SF收不到属性时保留上次的格式，所以切回8位也要显式请求；属性只在
-走validate时才被读取，格式变化时不能走跳过SF的Presented路径；RGBA_1010102只有2位
-alpha，混合到其他平面上方时半透明会分层，所以client target不在最底层时保持8位。
-
+Origin: local
+Upstream-Status: Pending
+---
 diff --git a/hwc/HwcDisplay.cpp b/hwc/HwcDisplay.cpp
 index 7f3b7ee..7a1a9d0 100644
 --- a/hwc/HwcDisplay.cpp

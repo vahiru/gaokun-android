@@ -1,18 +1,18 @@
-audio AIDL HAL（StreamAlsaMonoPipe）：采集方向的 MonoPipe 容量翻倍 —— 消除周期性的整块静音（约每 8 块丢 1 块，~13%）
+From: mashen11 <mashen11@users.noreply.github.com>
+Subject: [PATCH] audio: aidl: alsa: double MonoPipe capacity on blocking capture streams
 
-应用到 AOSP 树的 hardware/interfaces，由 scripts/crdroid-tree-fixes.py 第 14 条
-自动应用（幂等）。⚠️ 别往内核树上打。
+StreamAlsaMonoPipe::makeSink() sizes the MonoPipe to a single transfer burst.
+For blocking writers (capture), MonoPipe's internal OffsetProvider sets its
+throttling setpoint to 11/16 of the ring capacity; whenever a single read burst
+crosses that mark, MonoPipe throttles the capture I/O thread below real-time
+(~87%), causing periodic ALSA capture overruns and dropped blocks.
 
-来自 PR #10（mashen11，Issue #9）；维护者 2026-09-28 修订：只对阻塞写端（采集）翻倍，
-播放方向保持原样，注释改成真实机制（原注释说 audio_utils_fifo 预留一格、容量 4096 只能用 4095，
-不对：fifo.h 写明 frameCount 就是可用容量）。机制与依据见补丁里的注释。
+Double the MonoPipe capacity when writeCanBlock is true so a full capture burst
+fits below the throttling threshold without delaying normal reads.
 
-2026-10-25 改到 A17（lineage-24.0 / android-17.0.0_r1）上：A17 把原来的 StreamAlsa 拆成
-StreamAlsaBase（公共部分）/ StreamAlsaMonoPipe（管道 + I/O 线程，StreamPrimary 用的就是它）/
-StreamAlsa（直接读写 ALSA，StreamUsb 用）。makeSink() 原样搬到了 alsa/StreamAlsaMonoPipe.cpp:43-51，
-改动内容与 A16 版逐字相同，只换了文件和类名。MonoPipe 的节流常数在 A17 没变
-（frameworks/av/media/libnbaio/MonoPipe.cpp:41 setpoint = reqFrames * 11 / 16，:101-118 各档速率）。
-
+Origin: local
+Upstream-Status: Pending
+---
 diff --git a/audio/aidl/default/alsa/StreamAlsaMonoPipe.cpp b/audio/aidl/default/alsa/StreamAlsaMonoPipe.cpp
 index 3738f30..d328c90 100644
 --- a/audio/aidl/default/alsa/StreamAlsaMonoPipe.cpp

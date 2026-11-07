@@ -1,7 +1,7 @@
 From eb667d0fbdd38d5a800b9e7aafc9a6c14530b9bf Mon Sep 17 00:00:00 2001
 From: Ajay Kumar Nandam <ajay.nandam@oss.qualcomm.com>
 Date: Thu, 2 Jul 2026 00:14:58 +0530
-Subject: ASoC: codecs: lpass-va-macro: Switch to PM clock framework for
+Subject: [PATCH] ASoC: codecs: lpass-va-macro: Switch to PM clock framework for
  runtime PM
 
 Convert the LPASS VA macro codec driver to runtime PM clock management by
@@ -27,6 +27,8 @@ Tested-by: Srinivas Kandagatla <srinivas.kandagatla@oss.qualcomm.com>
 Reviewed-by: Konrad Dybcio <konrad.dybcio@oss.qualcomm.com>
 Link: https://patch.msgid.link/20260702-xo-sd-codec-v7-b4-v8-2-d39d0fdb7859@oss.qualcomm.com
 Signed-off-by: Mark Brown <broonie@kernel.org>
+Origin: backport, https://patch.msgid.link/20260702-xo-sd-codec-v7-b4-v8-2-d39d0fdb7859@oss.qualcomm.com
+Upstream-Status: Backport [https://patch.msgid.link/20260702-xo-sd-codec-v7-b4-v8-2-d39d0fdb7859@oss.qualcomm.com]
 ---
  sound/soc/codecs/Kconfig          |   1 +
  sound/soc/codecs/lpass-va-macro.c | 129 ++++++++++++++++++++------------------

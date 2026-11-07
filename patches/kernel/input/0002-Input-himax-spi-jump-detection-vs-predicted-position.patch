@@ -1,59 +1,18 @@
 From: Vahiru <nekovahiru@gmail.com>
-Subject: [PATCH] Input: himax-spi: 跳点检测要比【与预测位置的偏差】，不是原始位移
+Subject: [PATCH] Input: himax-spi: compare jump detection against predicted position instead of raw displacement
 
-**问题**：`hx_track_contacts()` 的跳点检测拿**原始位移**跟 `track_jump_dist2` 比：
+hx_track_contacts() previously compared the raw per-frame displacement against
+track_jump_dist2 (6400 units^2, or 80 units/frame = 1.0 m/s at 120 Hz). Any
+steady swipe faster than 1.0 m/s exceeded track_jump_dist2 on every frame with
+age >= 2, resetting the track into debounce and fragmenting a single fast swipe
+into dozens of short touch segments or dropping it completely.
 
-    s32 dx = det[m->det_idx].x - trk->x;      /* 这一帧手指走了多远 */
-    if (actual_d2 > algo->track_jump_dist2) { hx_reset_track(trk); ... }
+Compare the contact position against the velocity-predicted position
+(cand[].dist2 from hx_dist2_predicted()) instead of the previous raw position so
+steady high-speed swipes are not mistaken for contact jumps.
 
-于是这个阈值**实际上是一条限速线**，而不是"换手指"判据 —— 匀速直线快滑，位移本来就大。
-更糟的是越过之后**恢复不了**：被复位的轨迹在新槽重建，`debounce = debounce_base`（2），
-而跳点检测又只在 `age >= 2` 时生效，于是
-
-    第 N 帧  age≥2、位移超阈值 → 复位，新槽 age=1 debounce=2   （不上报）
-    第 N+1 帧 age=1 跳过检测 → age=2 debounce=1                （不上报）
-    第 N+2 帧 age=2 又超阈值 → 复位                            （不上报）
-
-`debounce` **永远回不到 0**，而 `himax_report_tracked_state()` 只报 `debounce == 0` 的槽。
-结果是：**只要手指持续快于这条线，驱动就一个点都不上报。**
-
-本机 `track_jump_dist2 = 6400` ⇒ 80 单位/帧；面板 1600×2560、0.1043 mm/单位、120 Hz，
-换算下来是 **1.0 m/s** —— 正常甩列表就在这个区间里。
-
-**实测**（2026-09-14，同一个人、同样的甩动、录 `/dev/input/event7` 原始流）：
-
-    出厂 game 预设  手指在屏 8.0 s、路径 3.99 m → 系统收到 **87 条**轨迹，37% 是 ≤5 帧的碎片
-    jump 关掉      手指在屏 10.3 s、路径 4.07 m → 系统收到 **6 条**，0 碎片，平均 197.8 帧/条
-
-即一次连续滑动被切成了十几次独立触摸。对 Android 每次换 tracking ID 都等于
-"抬手指 + 新手指按下"：滑动惯性被反复清零、手势被判取消，而沿途多出来的那些"按下"
-**就是用户报告的"幽灵触摸"**。两个症状同一个根因。
-
-**改法**：判据换成**与预测位置的偏差**。匹配阶段算的 `cand[].dist2`
-（`hx_dist2_predicted()`，预测位置 = 当前位置 + 速度）正是这个量，直接复用，不多算。
-匀速滑行预测准确 ⇒ 偏差≈0，多快都不触发；真正换手指表现为预测偏差大，照样抓得到。
-
-**仿真验证**（两版逐行对照 `hx_track_contacts()`，跑 120 帧匀速直线）：
-
-    每帧位移   速度      原版上报帧   修正版上报帧
-      80      1.00 m/s     118/120      118/120
-      81      1.01 m/s     **0**/120    118/120
-     400      5.01 m/s     **0**/120    118/120
-
-换手指场景（滑行中突然横向跳开，jump=6400）：
-
-    滑速        原版                    修正版
-    0.25 m/s   ≥100 单位抓到            ≥100 单位抓到
-    1.00 m/s   **连 20 单位都误判**     ≥100 单位抓到
-    1.88 m/s   **全漏**                 ≥100 单位抓到
-    3.75 m/s   **全漏**                 ≥100 单位抓到
-
-原版在中速误触发、在高速完全失效；修正版与速度无关，一致抓 ≥10 mm 的真实换手指。
-
-⚠️ 本补丁**不改任何默认值**，只改判据的含义。`track_jump_dist2` 仍可在
-`/sys/bus/spi/devices/spi0.0/algo/` 运行时改。
-
-案卷：`docs/stage4-findings.md` #114。
+Origin: local
+Upstream-Status: Pending
 ---
 diff --git a/drivers/input/touchscreen/hx-algo.c b/drivers/input/touchscreen/hx-algo.c
 --- a/drivers/input/touchscreen/hx-algo.c

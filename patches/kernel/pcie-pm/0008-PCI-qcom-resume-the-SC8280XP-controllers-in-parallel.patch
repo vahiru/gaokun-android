@@ -19,6 +19,8 @@ the PM list puts it before the controller, and an async controller
 doesn't wait for it.
 
 Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
 ---
  drivers/pci/controller/dwc/pcie-qcom.c | 13 +++++++++++++
  1 file changed, 13 insertions(+)

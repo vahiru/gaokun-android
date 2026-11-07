@@ -1,32 +1,21 @@
-audio AIDL HAL（StreamPrimary）：地址里没有 CARD_/DEV_ 时按设备类型回落（v1.0 AV-10，耳机麦）
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] audio: aidl: primary: fall back to ro.vendor.audio.primary.alsa.<type> when address has no CARD/DEV
 
-应用到 AOSP 树的 hardware/interfaces，由 scripts/crdroid-tree-fixes.py 第 21 条
-自动应用（幂等）。⚠️ 别往内核树上打。上下文不与 0010 / 0051 / 0052 / 0063 / 0069 重叠
-（只动 StreamPrimary.cpp 的头文件区和 getCardAndDeviceId()），顺序无关。
+Pluggable analog audio devices (such as wired headsets) cannot declare a fixed
+non-empty address on their devicePort in primary_audio_policy_configuration.xml
+because WiredAccessoryManager reports connections with an empty address string.
+When StreamPrimary::getCardAndDeviceId() sees an empty address, it falls back
+to hw:0,0, which is playback-only on SC8280XP and fails for headset microphone
+capture (hw:0,2).
 
-为什么要有：可插拔设备的 devicePort 不能写 address（WiredAccessoryManager 报连接时地址
-永远是空串，HwModuleCollection::getDeviceDescriptor() 遇到"声明的地址非空、请求的为空"
-就另造一个没有 profile 的动态设备 ⇒ 连接失败；见 device/huawei/gaokun3/audio/
-primary_audio_policy_configuration.xml 耳机那段）。于是 HAL 拿到的耳机麦只有类型
-IN_HEADSET（CONNECTION_ANALOG，frameworks/av/media/audioaidlconversion/
-AidlConversionCppNdk.cpp:532-535），getCardAndDeviceId() 解析不出地址就回落到模块唯一的
-默认值 (0,0)（primary/PrimaryMixer.h:27-28）—— 本机 hw:0,0 只有播放节点（pcmC0D0p），
-采集打不开。
+When the device address carries no CARD_x_DEV_y specification, look up
+ro.vendor.audio.primary.alsa.<lowercase_device_type> (for example,
+ro.vendor.audio.primary.alsa.in_headset=CARD_0_DEV_2) before falling back to
+the default card 0 device 0.
 
-改法：地址解析失败时读 vendor 属性
-  ro.vendor.audio.primary.alsa.<AudioDeviceType 的 toString() 转小写>
-例如 ro.vendor.audio.primary.alsa.in_headset=CARD_0_DEV_2（device.mk 设）。
-没设属性 = 与上游完全一样（仍回落 (0,0)）；设了但格式不对 = 打一行 WARNING 后同上。
-属性落在 ro.vendor. → vendor_default_prop（system/sepolicy private/property_contexts:285），
-vendor 域可读（private/domain.te:511，compatible_property_only 段），不用加规则。
-（行号是 crDroid 17.0 树的；A16 时引的是 lineage-sepolicy 23.0 的 :271 / :473，规则本身没变。）
-
-2026-10-25 改到 A17（lineage-24.0）上：getCardAndDeviceId() 在 A17 原样未变
-（primary/StreamPrimary.cpp:177-194），只有头文件区的上下文变了（A17 用 <Log.h> 代替 <android-base/logging.h>），
-所以只重做了第一个 hunk 的上下文，改动的行与 A16 版逐字相同。
-
-⬜ 未编译、未上机（2026-10-05）。判据见 docs/TODO.md「1.0 批 2 · 音频」。
-
+Origin: local
+Upstream-Status: Inappropriate [device-specific HAL workaround]
+---
 diff --git a/audio/aidl/default/primary/StreamPrimary.cpp b/audio/aidl/default/primary/StreamPrimary.cpp
 index a7af4f4..3cb5a32 100644
 --- a/audio/aidl/default/primary/StreamPrimary.cpp

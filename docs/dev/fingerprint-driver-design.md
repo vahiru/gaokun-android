@@ -1,6 +1,6 @@
 # 指纹驱动设计（gaokun3 / FocalTech FTE7001、Goodix GDIX5125）
 
-> **当前状态**：厂商签名的指纹TA已能加载进QSEE并收发命令；固定ioctl的内核驱动（补丁0212，Goodix分支0213）和Android HAL（[`device/huawei/gaokun3/fingerprint/`](../../device/huawei/gaokun3/fingerprint/README.md)）在[PR #92](https://github.com/vahiru/gaokun-android/pull/92)中，默认不进镜像（`GAOKUN3_FINGERPRINT=true`），内核补丁只在`--with-fp`实验补丁链里。解码、匹配和模板存储都在HAL里，服务报告`CONVENIENCE`。实机过程见[`fingerprint-machine-check-2026-10-30.md`](fingerprint-machine-check-2026-10-30.md)（M2命令收发与首帧）和[`crdroid-fingerprint-machine-check-2026-11-01.md`](crdroid-fingerprint-machine-check-2026-11-01.md)（crDroid候选）；逐条的逆向记录（D1–D22）见合并前的`docs/fingerprint-driver-design.md`（git历史，提交c902a34）。Windows侧专有二进制的本地逆向笔记说明见[`fingerprint/README.md`](fingerprint/README.md)。
+> **当前状态**：厂商签名的指纹TA已能加载进QSEE并收发命令；固定ioctl的内核驱动（[`patches/kernel/fingerprint/0002`](../../patches/kernel/fingerprint/0002-firmware-qcom-gaokun3-fingerprint-ioctl.patch)，Goodix分支[`0003`](../../patches/kernel/fingerprint/0003-firmware-qcom-gaokun3-fpcmd-add-the-Goodix-GDIX5125-sensor.patch)）和Android HAL（[`device/huawei/gaokun3/fingerprint/`](../../device/huawei/gaokun3/fingerprint/README.md)）在[PR #92](https://github.com/vahiru/gaokun-android/pull/92)中，默认不进镜像（`GAOKUN3_FINGERPRINT=true`，`CONFIG_GAOKUN3_FPCMD`默认关闭）。解码、匹配和模板存储都在HAL里，服务报告`CONVENIENCE`。实机过程见[`fingerprint-machine-check-2026-10-30.md`](fingerprint-machine-check-2026-10-30.md)（M2命令收发与首帧）和[`crdroid-fingerprint-machine-check-2026-11-01.md`](crdroid-fingerprint-machine-check-2026-11-01.md)（crDroid候选）；逐条的逆向记录（D1–D22）见合并前的`docs/fingerprint-driver-design.md`（git历史，提交c902a34）。Windows侧专有二进制的本地逆向笔记说明见[`fingerprint/README.md`](fingerprint/README.md)。
 
 ## 1. 硬件与TrustZone边界
 
@@ -14,8 +14,8 @@ Android FingerprintService
         │  AIDL IFingerprint/ISession
    [指纹HAL（用户态）]  ── 解码、匹配、模板库；报告CONVENIENCE，不签发HAT
         │  固定ioctl，/dev/gaokun3_fpcmd
-   [fpcmd驱动（0212/0213）]  ── LOAD、INIT、CAPTURE、GET_FINGER_STATUS等固定操作
-        │  qcom_scm_qseecom_app_load / _app_send / listener（patch 0050）
+   [fpcmd驱动（fingerprint/0002、0003）]  ── LOAD、INIT、CAPTURE、GET_FINGER_STATUS等固定操作
+        │  qcom_scm_qseecom_app_load / _app_send / listener（fingerprint/0001）
    [QSEECOM / TZ]  ── 验签并映射TA，TA经QSEE-SPI直连传感器MCU
         │
    FocalTech FT9769（或Goodix GDIX5125），中断GPIO181 / 复位GPIO185
@@ -43,10 +43,10 @@ Android FingerprintService
 * **`FF_CMD_TA_CREATE`（`0x1001`）、`FF_CMD_TA_INIT`（`0x1004`）不能当wire命令发**：它们走TA之间的GP内部通道，普通世界设不了那条路径的标志位；把`0x1001`当wire命令发会让TA的状态变量不可逆地进入错误状态。
 * 采图只用`0x8020`/`0x8021`（SPI写/读）和MCU子命令；`0x8029`会写入或删除TA的安全存储文件，`0x802B`会删除已有的模板槽，二者都有副作用，不能当作只读查询。
 
-### 3.2 fpcmd驱动（0212、0213）
+### 3.2 fpcmd驱动（`patches/kernel/fingerprint/0002`、`0003`）
 
-* **`0212`**：字符设备`/dev/gaokun3_fpcmd`（`CONFIG_GAOKUN3_FPCMD`，编为built-in），只提供LOAD、UNLOAD、INIT、PROBE、WAKE、CAPTURE和GET_FINGER_STATUS几个固定操作，没有debugfs，也没有任意QSEE命令的入口。TA从`/vendor/firmware/fingerpr.mbn`读取。同一时刻只允许一个进程打开；进程退出时驱动关闭TA；关闭失败则保留共享缓冲并拒绝再次打开，避免安全环境仍在使用的内存被释放，重启后才能恢复。
-* **`0213`**：在`0212`上加Goodix分支，`SET_SENSOR`在INIT前选型号，不调用时是FocalTech。INIT按Windows驱动开机时的顺序初始化MCU，DAC、tcode和FDT阈值由每台机器的OTP算出；传感器配置模板从`/vendor/firmware/gaokun3-goodix-cfg.bin`读取，只接受已知的那一份。MCU空闲约30秒后会睡眠，唤醒它的那条命令会丢，所以超过5秒没有命令时先发一个NOP。
+* **`0002`**：字符设备`/dev/gaokun3_fpcmd`（`CONFIG_GAOKUN3_FPCMD`，编为built-in），只提供LOAD、UNLOAD、INIT、PROBE、WAKE、CAPTURE和GET_FINGER_STATUS几个固定操作，没有debugfs，也没有任意QSEE命令的入口。TA从`/vendor/firmware/fingerpr.mbn`读取。同一时刻只允许一个进程打开；进程退出时驱动关闭TA；关闭失败则保留共享缓冲并拒绝再次打开，避免安全环境仍在使用的内存被释放，重启后才能恢复。
+* **`0003`**：在`0002`上加Goodix分支，`SET_SENSOR`在INIT前选型号，不调用时是FocalTech。INIT按Windows驱动开机时的顺序初始化MCU，DAC、tcode和FDT阈值由每台机器的OTP算出；传感器配置模板从`/vendor/firmware/gaokun3-goodix-cfg.bin`读取，只接受已知的那一份。MCU空闲约30秒后会睡眠，唤醒它的那条命令会丢，所以超过5秒没有命令时先发一个NOP。
 
 ### 3.3 Android HAL
 
@@ -68,12 +68,12 @@ TA镜像里带有FocalTech的录入和识别算法。在离线装载器里完整
 
 1. **打补丁并构建模块**：
    ```bash
-   bash scripts/kernel-apply-patches.sh <kernel-tree> --with-fp
+   bash scripts/kernel-apply-patches.sh <kernel-tree>
    make -C <kernel-tree> ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- Image modules
    make -C <kernel-tree> M=<repo>/tools/fingerprint-bringup ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- modules
    ```
 2. **准备TA固件**：从`uup-drivers-sc8280xp`发布包的`QcTreeExtOem8280.cab`提取`fingerpr.mbn`（sha256前缀`b081543c7b6ae4`），推送至设备`/data/local/tmp/`。
-3. **一次性启动测试内核**：将带`0050`补丁的内核拷入ESP独立路径并用`bash scripts/boot-oneshot.sh <entry>`单次启动（避免覆盖常规启动槽）。
+3. **一次性启动测试内核**：将带`patches/kernel/fingerprint/0001`补丁的内核拷入ESP独立路径并用`bash scripts/boot-oneshot.sh <entry>`单次启动（避免覆盖常规启动槽）。
 4. **加载并验证**：
    ```bash
    adb push qcom_qseecom_fptest.ko /data/local/tmp/
@@ -81,4 +81,4 @@ TA镜像里带有FocalTech的录入和识别算法。在离线装载器里完整
    adb shell su -c 'echo load > /sys/kernel/debug/gaokun3_fptest/trigger'
    adb shell su -c 'dmesg | grep fptest | tail'
    ```
-   预期日志输出`LOAD 成功，app_id=5`（镜像落于32位物理地址空间且无挂死）。需要驻留会话发送测试帧时使用bring-up目录里的`qcom_qseecom_fpcmd.ko`，通过`/sys/kernel/debug/gaokun3_fpcmd/{load,send_hex}`交互；它与正式驱动0212同名而不同，只用于bring-up。
+   预期日志输出`LOAD 成功，app_id=5`（镜像落于32位物理地址空间且无挂死）。需要驻留会话发送测试帧时使用bring-up目录里的`qcom_qseecom_fpcmd.ko`，通过`/sys/kernel/debug/gaokun3_fpcmd/{load,send_hex}`交互；它与正式驱动`0002`同名而不同，只用于bring-up。

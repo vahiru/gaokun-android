@@ -1,29 +1,15 @@
-从 libcamera 上游 87c7285663aaad7608fdc18d5216ec6811c685c7 生成。
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] libcamera: base: thread: use sched_setaffinity() on Bionic
 
-libcamera: base: thread: 在 bionic 上改用 sched_setaffinity
+Bionic does not provide the glibc extension pthread_setaffinity_np(), causing
+src/libcamera/base/thread.cpp to fail to compile when targeting Android.
 
-把 libcamera 交叉编到 Android aarch64（NDK r27c / API 34）时遇到的
-【唯一一个】移植错误：
+Use pthread_gettid_np() and sched_setaffinity() in
+Thread::setThreadAffinityInternal() when building against Bionic (__BIONIC__).
 
-    ../src/libcamera/base/thread.cpp:465:2: error: use of undeclared
-    identifier 'pthread_setaffinity_np'; did you mean 'sched_setaffinity'?
-
-`pthread_setaffinity_np()` 是 glibc 扩展，bionic 没有。
-NDK r27c sysroot 实查（不凭记忆）：
-  * `pthread_setaffinity_np`  usr/include/*.h 里【一个都没有】
-  * `pthread_gettid_np`       usr/include/pthread.h:189
-  * `sched_setaffinity`       usr/include/sched.h:227
-
-全树只有 `setThreadAffinityInternal()` 这一处用到，改走"取 tid →
-sched_setaffinity"的等价路径。Linux 上线程亲和性本来就是 per-tid 的，
-`pthread_setaffinity_np` 内部做的是同一件事。
-
-⚠️ 这个形态**不适合直接发上游**：上游会要 meson 的 `cc.has_function()`
-探测而不是 `__BIONIC__` 宏。留在本仓是为了让 M1 可复现。
-
-⚠️★ 本补丁是 `git diff` 生成的，不是手写的 —— 见 #82：`patches/0003`
-从入库那天起就打不上，正因为它的 hunk 头是人手敲的。
-
+Origin: local
+Upstream-Status: Inappropriate [Android-specific, upstream prefers meson check]
+---
 diff --git a/src/libcamera/base/thread.cpp b/src/libcamera/base/thread.cpp
 index b204355a5..fbb94337e 100644
 --- a/src/libcamera/base/thread.cpp

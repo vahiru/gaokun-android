@@ -22,6 +22,8 @@ so the station stays counted and its stats stay allocated, as they did
 before this patch. Warn in the log as before and report success.
 
 Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
 ---
  drivers/net/wireless/ath/ath11k/mac.c | 3 +++
  1 file changed, 3 insertions(+)

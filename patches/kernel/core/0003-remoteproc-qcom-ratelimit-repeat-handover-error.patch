@@ -1,4 +1,4 @@
-From: gaokun-android contributors <nekovahiru@gmail.com>
+From: Vahiru <nekovahiru@gmail.com>
 Subject: [PATCH] remoteproc: qcom_q6v5: heavily ratelimit the repeated handover error
 
 q6v5_handover_interrupt() dev_err()s every time a handover is signalled after
@@ -32,6 +32,9 @@ up, and the message can no longer drown out a backtrace. The state is shared
 by all remotes deliberately: it caps the total rate, while still letting
 whichever device hits the condition be the one that reports it.
 
+Origin: local
+Upstream-Status: Pending
+---
 --- a/drivers/remoteproc/qcom_q6v5.c
 +++ b/drivers/remoteproc/qcom_q6v5.c
 @@ -12,6 +12,7 @@

@@ -1,34 +1,18 @@
-From 58771526fd0614fbd6d1c0aaa82bab239248f16d Mon Sep 17 00:00:00 2001
 From: Vahiru <nekovahiru@gmail.com>
-Date: Mon, 5 Oct 2026 06:00:00 +0800
-Subject: [PATCH] =?UTF-8?q?platform:=20arm64:=20huawei-gaokun-ec:=20report?=
- =?UTF-8?q?=20the=20initial=20lid=20state=20at=20probe=EF=BC=88=E6=9C=AC?=
- =?UTF-8?q?=E5=9C=B0=EF=BC=8C1.0=20=E6=89=B9=202=20DISP-1=EF=BC=89?=
-MIME-Version: 1.0
-Content-Type: text/plain; charset=UTF-8
-Content-Transfer-Encoding: 8bit
+Subject: [PATCH] platform: arm64: huawei-gaokun-ec: report initial lid state at probe
 
-案卷：docs/v1.0-plan.md 的 DISP-1（内核那一半，"EC 初始 LID 状态"）。**本地补丁**。
+The Huawei Gaokun EC driver only reported SW_LID events from its interrupt
+handler and never queried EC_LID_STATE when registering the lid input device,
+leaving the input layer assuming the lid is open if the system boots with the
+cover closed.
 
-问题：驱动注册 "LID" 输入设备（SW_LID）时既不读也不报当前状态，只在 EC_EVENT_LID 中断里
-上报。input 层的初值是 0（开着），所以开机时盖子是合着的，输入层和 Android 都会一直以为
-开着，直到下一次开合。现在没人用这个开关所以无害；DISP-1 打开 config_lidControlsSleep 之后
-就会是"合着盖开机、屏幕不灭"。
+Read EC_LID_STATE after input_register_device() and before requesting the EC
+IRQ so the initial SW_LID state is reported at boot without racing the IRQ
+thread.
 
-改法：input_register_device() 之后、申请中断之前，用中断里同一个读法
-（gaokun_ec_psy_read_byte(EC_LID_STATE) & EC_LID_OPEN）读一次，设好 lid_opened 并补报一次
-SW_LID + sync。放在申请中断之前，lid_opened 不会和中断线程抢。读失败就保持原假设（开着），
-只打一条 warn；读成功打一行 info，开机 dmesg 里能直接看到初值。
-
-没动：resume 里"Resume may be unstable, so open lid anyways"（无条件报开）。合着盖被别的唤醒源
-（闹钟等）唤醒时它会报一次"开盖"—— 打开 lidControlsSleep 之后要一起测（DISP-1 的 ROM 一半）。
-
-⬜ 实机（用户在场）：合着盖开机 → dmesg 有 "initial lid state: closed"、`dumpsys input` 里
-LID 那台设备的 SwitchValues 带 SW_LID 位；开着盖开机 → "open"、SwitchValues 0。
+Origin: local
+Upstream-Status: Pending
 ---
- drivers/platform/arm64/huawei-gaokun-ec.c | 28 +++++++++++++++++++++++
- 1 file changed, 28 insertions(+)
-
 diff --git a/drivers/platform/arm64/huawei-gaokun-ec.c b/drivers/platform/arm64/huawei-gaokun-ec.c
 index e9c4e72..4c74447 100644
 --- a/drivers/platform/arm64/huawei-gaokun-ec.c

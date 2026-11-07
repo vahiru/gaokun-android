@@ -1,19 +1,18 @@
-drm_hwcomposer：内置屏声明HDR10和HLG
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] drm_hwcomposer: declare HDR10 and HLG support on internal panels
 
-应用到AOSP树的external/drm_hwcomposer，由scripts/crdroid-tree-fixes.py第35条自动应用（幂等），
-排在0137后面。别往内核树上打。
+Allow internal panels without EDID HDR static metadata to advertise HDR10 and
+HLG capabilities when vendor.hwc.drm.force_hdr_support is enabled, so apps
+querying Display.isHdr() select HDR streams.
 
-应用靠Display.isHdr()判断要不要选HDR片源，它只看显示器声明的HDR类型。这块屏没有HDR元数据，
-但0137之后有提亮，SF也能做色调映射，所以用vendor.hwc.drm.force_hdr_support声明HDR10和HLG。
-亮度留0，SF继续用默认的500尼特目标；上报真实峰值反而会让高光压得太早。
+Because advertising HDR support stops SurfaceFlinger from automatically
+routing HDR layers to RenderEngine, mark PQ and HLG transfer functions for GPU
+composition when the display has no plane color pipeline so SurfaceFlinger
+performs tone mapping into the panel's Display P3 output space.
 
-几个容易漏的点：
-
-- 声明之后SF不再把HDR图层强制交给GPU，而平面做不了色调映射，所以HWC要自己转给GPU。
-  判断放在ColorConversionByGpu，有color pipeline的设备不受影响。
-- HLG原来映射成kUnknown，每帧打一行错误日志，也认不出是HDR，这里加上kHlg。
-- 输出不切BT2100_PQ：HWC没有这个模式，SF按legacy HDR处理，继续输出P3。
-
+Origin: local
+Upstream-Status: Pending
+---
 diff --git a/compositor/LayerData.h b/compositor/LayerData.h
 index 004c17a..86f7f7d 100644
 --- a/compositor/LayerData.h

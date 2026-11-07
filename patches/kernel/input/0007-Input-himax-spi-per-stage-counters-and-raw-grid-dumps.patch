@@ -1,90 +1,20 @@
 From: Vahiru <nekovahiru@gmail.com>
-Subject: [PATCH] Input: himax-spi: 加逐级计数器与原始网格导出 —— 让这个驱动能看见自己
+Subject: [PATCH] Input: himax-spi: add per-stage pipeline counters, contact birth log, and debugfs frame dumps
 
-**问题不是某个参数不对，是【看不见】。**
+Add observability interfaces to the himax-spi touch processing pipeline:
 
-这个驱动不用 IC 固件的触点输出，而是自己读 40×60 原始电容网格，跑一整条
-去基线 → CMF → IIR → BFS 连通域 → 掌压 → 峰值 → 三道过滤 → 质心 → 跟踪 的流水线
-（`hx-algo.c`），27 个参数全部运行时可调。但**从"某个像素过阈"到"上报一个触点"
-之间的每一级都可以悄悄放行或丢弃一个候选，而没有任何东西能说出是哪一级干的。**
+- algo/stats (read/write sysfs attribute): per-stage counters for frames, macro
+  zones, palm rejection rules, peak filters, contacts, and tracker events.
+- algo/contacts_log (read-only sysfs attribute): ring buffer of the last 16
+  newly created tracks recording frame sequence, position, area, signal sum, and
+  edge flag.
+- debugfs binary attributes (/sys/kernel/debug/himax-hx83121a/frame_raw and
+  frame): 4800-byte (40x60 s16 little-endian) snapshots of the baseline-subtracted
+  raw frame and post-filter frame, managed via devm_add_action_or_reset() and
+  synchronized with ts->op_lock.
 
-这不是理论上的不便。2026-09-14 定位"幽灵触摸 + 不灵敏"（#114）时，
-唯一可用的手段是读代码 + 写仿真 + 录 evdev 原始流反推 —— 花了一整晚，
-而且**下次再出问题还得从头来一遍**。原有的 `dump_frame()` 是死代码
-（`__maybe_unused`，从未被调用，而且只往 `pr_info` 里刷）。
-
-**这个补丁加两样东西。**
-
-**① `algo/stats`（可读可写，写任意值清零）—— 逐级计数器**
-
-    frames / frames_reported
-    zones / zones_evicted / zones_overflow
-    palm_area / palm_signal / palm_density / palm_aspect   ← 四条掌压规则各自开火次数
-    peaks_raw / rej_drift / rej_isolated / rej_minarea / rej_edgeweak
-    contacts / rej_contact_area
-    tracks_new / tracks_new_edge / tracks_jump / tracks_guard_kill / tracks_lost
-    max_contacts
-
-★ `tracks_new_edge` 是专门为幽灵准备的：`0039` 的分析指出边缘有两条捷径
-（单像素豁免 + `edge_boost` 把边缘格乘 1.5、四角乘 2.25），但**当时没有证据**
-说用户的幽灵走那里。现在有了 —— 幽灵冒出来时看一眼 `tracks_new_edge`
-占 `tracks_new` 的比例就知道了。
-
-★ `palm_density` 会恒为 0，这不是 bug 而是**在实机上证明** `0039` 注释里那个
-论断：连通域每格都 ≥ `macro_threshold`，所以 `signal_sum ≥ macro_threshold × area`
-恒成立，而出厂 `palm_density_low`(400) < `macro_threshold`(800) ⇒ 规则 3 永远为假。
-
-**② `algo/contacts_log`（只读）—— 最近 16 个触点出生时的样子**
-
-每个新轨迹记一行 `seq / x / y / area / signal / edge`。幽灵和指尖都以
-"一个新触点"的形式到达，但它们在**面积、积分信号、是否贴着网格边界**上不一样。
-出了幽灵之后回头看这张表，就知道它长什么样、在哪儿。
-
-**③ debugfs 的两个整帧导出**
-
-    /sys/kernel/debug/himax-hx83121a/frame_raw    面板【产出】的（仅去基线）
-    /sys/kernel/debug/himax-hx83121a/frame        流水线【判定】的（CMF/边缘增强/IIR 之后）
-
-各 4800 字节（40×60 的 s16 小端）。走 debugfs 是因为 sysfs 属性有 PAGE_SIZE
-（本机 4096）上限，装不下。
-
-★ 对比这两张图是**区分"信号问题"与"算法问题"**的唯一办法。
-★ 而空载读 `frame_raw` 是回答下面这个问题的唯一办法 ——
-**固件到底做不做逐像素基线跟踪？** 驱动侧的基线是个编译期常量
-（`#define HX_BASELINE 0x7ffe`），既没有逐像素基线，也没有任何重新校准的入口；
-如果固件也不做，那么温漂 / 充电器 / 屏上有水造成的偏移就**无法恢复**，
-而 CMF 只去掉行列可分离的部分、还会把 > `cmf_exclusion`(250) 的像素排除在
-均值之外（也就是说一个卡在 900 的坏格子永远修不掉）。这条我此前**答不上来**，
-现在有工具了。
-
-**三个刻意的实现决定：**
-
-* **debugfs 树用 `devm_add_action_or_reset()` 绑生命周期，不手写 create/remove 配对。**
-  ⚠️★ 下面的 `devm_drm_panel_add_follower()` **会返回 `-EPROBE_DEFER`**（现有错误路径
-  用的正是 `dev_err_probe()` —— 那个函数存在的理由就是安静地处理延迟探测）。
-  手写"这里建、在 `.remove()` 里删"的配对在那条路径上会**泄漏 dentry**；
-  更糟的是**重试时目录名已被占用**：`debugfs_create_dir()` 返回 `-EEXIST`，
-  `debugfs_create_file()` 拿着这个错误指针**静默什么都不做**，于是驱动起来了、
-  诊断接口一个都没有、而且**没有任何地方说过这件事**。
-  ★ 这是本补丁自审时抓到的 —— 它会在最需要诊断接口的场合（探测顺序有问题时）
-  恰好让诊断接口消失。
-
-* **计数器读取不加锁。** 唯一的写者是 IRQ 线程，跨字段撕裂的快照对诊断毫无影响；
-  反过来，在这里拿 `op_lock` 会让**触摸路径卡死时，那个唯一能解释它为什么卡死的
-  读操作也跟着卡死**。
-* **整帧导出直接用 `mutex_lock(&ts->op_lock)`，而不是 `himax_lock()`。**
-  ⚠️★ `himax_lock()` 会顺带 `himax_quiesce_irq()` **关掉中断，而 `himax_unlock()`
-  不把它开回来**（调用方各自负责 `himax_int_enable(ts, true)`）。借用那个 helper
-  会让**一次诊断读之后触摸直接死掉**。这个不对称本身就是个陷阱，值得记一笔。
-
-内存代价：`struct hx_algo` 多 4800 字节的 `raw_frame` 加上计数器与环形缓冲
-（约 5 KB，原本 ~40 KB，`devm_kzalloc`）。热路径代价：每帧一次 4800 字节 memcpy
-（120 Hz 下约 576 KB/s）与十几次 u32 自增。
-
-**本补丁不改变任何触摸行为**，只是让行为变得可观测。
-
-编译：`W=1` 零告警。
-案卷：`docs/stage4-findings.md` #115。
+Origin: local
+Upstream-Status: Pending
 ---
 diff --git a/drivers/input/touchscreen/himax-spi-core.c b/drivers/input/touchscreen/himax-spi-core.c
 --- a/drivers/input/touchscreen/himax-spi-core.c

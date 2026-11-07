@@ -29,6 +29,9 @@ Assisted-by: Claude:claude-opus-5-5
 Signed-off-by: Julius Bairaktaris <julius@bairaktaris.de>
 Link: https://lists.infradead.org/pipermail/ath11k/2026-October/009368.html
 [Akisaira: context adjusted for the comment in ath11k_core_reconfigure_on_crash()]
+
+Origin: backport, https://lists.infradead.org/pipermail/ath11k/2026-October/009368.html
+Upstream-Status: Backport [https://lists.infradead.org/pipermail/ath11k/2026-October/009368.html]
 ---
  drivers/net/wireless/ath/ath11k/core.c | 4 ++--
  1 file changed, 2 insertions(+), 2 deletions(-)

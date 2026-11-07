@@ -53,6 +53,8 @@ Reviewed-by: Bartosz Golaszewski <bartosz.golaszewski@oss.qualcomm.com>
 Acked-by: Manivannan Sadhasivam <mani@kernel.org>
 Link: https://patch.msgid.link/20260707-wakeirq_support-v12-1-b4453f5bcc97@oss.qualcomm.com
 (cherry picked from commit 071e245ab749c52338ec4eb7fe0a9bb2cee97492)
+Origin: backport, commit 071e245ab749c52338ec4eb7fe0a9bb2cee97492
+Upstream-Status: Backport [071e245ab749c52338ec4eb7fe0a9bb2cee97492]
 ---
  drivers/pci/of.c       | 79 ++++++++++++++++++++++++++++++++++++++++++
  drivers/pci/pci.c      | 11 ++++++

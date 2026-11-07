@@ -1,4 +1,4 @@
-From: gaokun-android contributors <nekovahiru@gmail.com>
+From: Vahiru <nekovahiru@gmail.com>
 Subject: [PATCH] drm/crtc: drop the racy BUG_ON in fence_to_crtc()
 
 fence_to_crtc() re-checks fence->ops after the caller has already
@@ -66,7 +66,9 @@ period, and both accessors are documented as callable only inside
 rcu_read_lock(), which is what keeps the CRTC itself alive.
 
 Fixes: 541c8f2468b9 ("dma-buf: detach fence ops on signal v3")
-
+Origin: local
+Upstream-Status: Pending
+---
 --- a/drivers/gpu/drm/drm_crtc.c
 +++ b/drivers/gpu/drm/drm_crtc.c
 @@ -158,7 +158,6 @@ static const struct dma_fence_ops drm_crtc_fence_ops;

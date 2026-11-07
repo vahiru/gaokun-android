@@ -1,31 +1,21 @@
-audio AIDL HAL（StreamPrimary）：采集改成数据驱动交付 —— 去掉开头 170 ms 静音与常驻的 2 块采集延迟
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] audio: aidl: primary: pace capture transfers by ALSA data availability
 
-应用到 AOSP 树的 hardware/interfaces，排在 0052 之后，且依赖 0052：采集管道要能放下 2 块；
-只有 1 块时写端会被 MonoPipe 节流到实时的 87%，ALSA 缓冲会溢出。
-由 scripts/crdroid-tree-fixes.py 第 15 条自动应用（幂等）。⚠️ 别往内核树上打。
-2026-09-28 bind-mount A/B 通过后才接进构建（docs/stage4-findings.md #127 §7）。
+StreamPrimary::transfer() paced capture transfers with the synthetic wall-clock
+sleep originally written for the emulator stub. Because MonoPipe reads are
+non-blocking, the first two transfers after stream start observed an incomplete
+burst and returned zero-filled silence (~170 ms), permanently offsetting live
+audio by two blocks for the lifetime of the stream.
 
-原来 StreamPrimary::transfer 对采集也按墙钟定拍（给模拟器写的 workaround，b/302587331），而管道读取是非阻塞的：
-start 之后第 0 次读时管道必然是空的，第 1 次读时第一块又还差一点才到，于是补 2 块静音（8192 帧）。
-这些静音照样计入节拍，所以真实音频在整个流里一直落后 2 块，直到 standby 才清掉。
-这段延迟不上报（observable 包含了静音帧，refinePosition 是空实现）；中途再卡一次，就永久再加 1 块。
-2026-09-28 实机：4 段录音开头都是 170.7 ms 全零，reply 的 observable 等于"墙钟时间 × 采样率"（#127 §5/§6）。
+Wait for a full capture burst to arrive in the MonoPipe (up to 500 ms on the
+first block after start and 3 block periods thereafter) before reading, falling
+back to wall-clock silence padding only if the hardware stalls. Also fix
+inputIoThread's partial-write retry loop to advance the source pointer by the
+frames already written.
 
-现在的做法：采集方向改成等管道里够一块就交付（1 ms 轮询，与 outputIoThread 相同）。
-截止时刻：start 之后的第一块最多等 500 ms；之后每块最多等 3 个块时长。
-超时就照旧补静音，而且按实时速率补 —— 设备卡死时 framework 仍能按节拍拿到数据。
-读端自己被拖住、醒来时截止时刻已过的，也至少再等 1/8 块时长（in_0 多半一起被拖住了，马上会把 ALSA 里攒的写进来）。
-"有没有拿到数据"按管道 transfer 真正读到的帧数判断，不按等待结束时的快照（2026-09-28 审查 F1）。
-播放方向、stub 流不受影响。
-另外修了 inputIoThread 的一个潜伏缺陷：写进管道只写了一部分时，续写应从已写的偏移处接着写，
-原来是从 &buffer[0] 重新写。阻塞写端目前碰不到这条路径。
-
-2026-10-25 改到 A17（lineage-24.0）上：管道、inputIoThread 与采集方向的 transfer 都搬进了
-StreamAlsaMonoPipe（alsa/StreamAlsaMonoPipe.cpp:106-182），StreamPrimary 改为继承它
-（include/core-impl/StreamPrimary.h:30）。所以 waitForCapturedFrames() / mLastCaptureFramesRead
-加在 StreamAlsaMonoPipe（新开一个 protected 段），StreamPrimary 里调 StreamAlsaMonoPipe::transfer；
-行为与 A16 版逐行相同。StreamPrimary::transfer 的墙钟定拍代码在 A17 没变（primary/StreamPrimary.cpp:95-131）。
-
+Origin: local
+Upstream-Status: Pending
+---
 diff --git a/audio/aidl/default/alsa/StreamAlsaMonoPipe.cpp b/audio/aidl/default/alsa/StreamAlsaMonoPipe.cpp
 index d328c90..21cfd3d 100644
 --- a/audio/aidl/default/alsa/StreamAlsaMonoPipe.cpp

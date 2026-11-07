@@ -13,6 +13,9 @@ emergency over-temperature shutdown in userspace.
 Tested on MateBook E Go (SC8280XP): /sys/class/power_supply/gaokun-ec-battery/temp
 and Android dumpsys battery report the battery temperature in 0.1 C
 (e.g. w9c=0x0bb5 -> 266 = 26.6 C).
+
+Origin: local
+Upstream-Status: Pending
 ---
  drivers/power/supply/huawei-gaokun-battery.c | 29 ++++++++++++++++++--
  1 file changed, 26 insertions(+), 3 deletions(-)

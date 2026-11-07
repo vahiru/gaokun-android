@@ -1,7 +1,7 @@
 From 541735571578b84987868c5662089f73bac36895 Mon Sep 17 00:00:00 2001
 From: Ajay Kumar Nandam <ajay.nandam@oss.qualcomm.com>
 Date: Thu, 2 Jul 2026 00:14:59 +0530
-Subject: ASoC: codecs: lpass-wsa-macro: Use devm_clk_hw_register() for MCLK
+Subject: [PATCH] ASoC: codecs: lpass-wsa-macro: Use devm_clk_hw_register() for MCLK
  output
 
 Switch WSA MCLK output registration to devm_clk_hw_register() so the clk
@@ -13,6 +13,8 @@ Reviewed-by: Srinivas Kandagatla <srinivas.kandagatla@oss.qualcomm.com>
 Tested-by: Srinivas Kandagatla <srinivas.kandagatla@oss.qualcomm.com>
 Link: https://patch.msgid.link/20260702-xo-sd-codec-v7-b4-v8-3-d39d0fdb7859@oss.qualcomm.com
 Signed-off-by: Mark Brown <broonie@kernel.org>
+Origin: backport, https://patch.msgid.link/20260702-xo-sd-codec-v7-b4-v8-3-d39d0fdb7859@oss.qualcomm.com
+Upstream-Status: Backport [https://patch.msgid.link/20260702-xo-sd-codec-v7-b4-v8-3-d39d0fdb7859@oss.qualcomm.com]
 ---
  sound/soc/codecs/lpass-wsa-macro.c | 2 +-
  1 file changed, 1 insertion(+), 1 deletion(-)

@@ -18,6 +18,8 @@ Julius Bairaktaris posted the same change as [PATCH ath-next v2 2/5].
 
 Link: https://lists.infradead.org/pipermail/ath11k/2026-October/009366.html
 Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
 ---
  drivers/net/wireless/ath/ath11k/core.c | 7 +++++--
  1 file changed, 5 insertions(+), 2 deletions(-)

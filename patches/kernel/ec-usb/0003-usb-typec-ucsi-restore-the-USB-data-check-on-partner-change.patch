@@ -25,6 +25,8 @@ exception for platforms with the quirk.
 Fixes: 0c8ee850572b ("usb: typec: ucsi: Add UCSI_USB4_IMPLIES_USB quirk for X1E80100")
 Cc: stable@vger.kernel.org
 Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
 ---
  drivers/usb/typec/ucsi/ucsi.c | 12 ++++++++----
  1 file changed, 8 insertions(+), 4 deletions(-)

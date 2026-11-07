@@ -1,51 +1,20 @@
 From: Vahiru <nekovahiru@gmail.com>
-Subject: [PATCH] Input: himax-spi: 把两道形同虚设的噪声闸门做成可调，并标注失效的掌压规则 3
+Subject: [PATCH] Input: himax-spi: make isolated spike ratio and edge minimum area runtime-tunable
 
-这个驱动不走 IC 固件的触点输出，而是自己读 40×60 原始电容网格、自己做
-去基线 / BFS 连通域 / 峰值 / 质心 / 跟踪（`hx-algo.c`）。噪声能不能变成一个
-触点，完全取决于这条流水线上的几道闸门。审下来有三处名存实亡：
+Expose two noise-rejection thresholds in hx_detect_peaks() as runtime-tunable
+sysfs attributes under algo/ while keeping their existing defaults:
 
-**1. Z8 孤立尖峰过滤（`hx_detect_peaks()`）**
+- iso_nbr_ratio_q8 (default 8, equivalent to z >> 5): minimum ratio in Q8 units
+  between the 8-neighbour sum and the peak value (nbr_sum * 256 >= z *
+  iso_nbr_ratio_q8).
+- edge_min_area (default 1): minimum connected-component area required for peaks
+  located on the grid boundary.
 
-    if ((algo->peaks[i].z >> 5) <= algo->peaks[i].nbr_sum)   /* 留下 */
+Also document the relationship between palm_density_low and macro_threshold in
+hx_reject_palms().
 
-`z >> 5` 就是 z/32。峰值刚好卡在阈值 800 时，这一条只会毙掉"八邻域加起来
-不到 **25**"的尖峰 —— 环境噪声轻松越过。**它实际上从来没生效过。**
-真手指的八邻域之和通常是峰值的 2～5 倍，脉冲噪声则接近 0，所以判据应该写成
-峰值的一个比例。改成 Q8 比值 `nbr_sum * 256 >= z * iso_nbr_ratio_q8`，
-**默认 8 与原式逐位等价**；想真正生效就调到 128（邻域至少要担一半）。
-
-**2. 边缘单像素豁免（同一函数）**
-
-    if (algo->peaks[i].zone_area >= 2 || on_edge)            /* 留下 */
-
-非边缘要求连通域至少 2 格，**边缘则完全豁免** —— 一个噪点就够。理由本身成立
-（手指压在边上有一半落在网格外），但这恰好是"单个噪声格 → 上报触点"最短的一条路，
-而且 `hx_edge_boost()` 刚刚把边缘格乘了 `1 + edge_boost_pct/100`（默认 +50%，
-四角**乘两次** = ×2.25）。也就是说边缘噪声先被放大 1.5 倍再去撞阈值，撞过了就直接放行。
-拿平板的手正好扶在四边。改成可调的 `edge_min_area`，**默认 1 = 原行为**，
-设 2 则要求边缘触点至少有一个过阈邻居。
-
-**3. 掌压规则 3 是死代码（`hx_reject_palms()`）**
-
-    if (z->area >= 20 && z->signal_sum < palm_density_low * z->area)
-
-连通域里每一格都 `>= macro_threshold`（BFS 的构造前提），所以恒有
-`signal_sum >= macro_threshold * area`。出厂值 `palm_density_low = 400`、
-`macro_threshold = 800`，**这一条永远为假**。不改行为（改了就是在没实测的情况下
-动掌压），只把这个前提写进注释：要让它生效，`palm_density_low` 必须大于
-`macro_threshold`。
-
-⚠️ 三项默认值全部保持原样，**本补丁单独打上不改变任何行为** —— 要的是那两个旋钮
-和那句注释。和 `0037` 一样的理由：本项目里重启是最贵的资源，旋钮换来的是
-一次重启之后无限次实机 A/B。
-
-⚠️ 目前**没有**证据表明用户报告的幽灵触摸走的是这两条路 —— 2026-09-14 的实测
-把绝大部分症状归到了 `0038` 的跳点检测上（一次滑动碎成十几次触摸，沿途的"按下"
-看起来就是幽灵）。这里修的是**审查发现的、确实存在的**薄弱环节，
-留作幽灵触摸真的在边缘复现时的下一把工具。
-
-案卷：`docs/stage4-findings.md` #114。
+Origin: local
+Upstream-Status: Pending
 ---
 diff --git a/drivers/input/touchscreen/himax-spi-core.c b/drivers/input/touchscreen/himax-spi-core.c
 --- a/drivers/input/touchscreen/himax-spi-core.c

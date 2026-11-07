@@ -21,6 +21,8 @@ was using the same config, so give it a copy without the flag. The other
 SoCs keep icc_disable().
 
 Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
 ---
  drivers/pci/controller/dwc/pcie-qcom.c | 41 +++++++++++++++++++++++---
  1 file changed, 37 insertions(+), 4 deletions(-)

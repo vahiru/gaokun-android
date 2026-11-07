@@ -1,39 +1,16 @@
 From: Vahiru <nekovahiru@gmail.com>
-Subject: [PATCH] Input: himax-spi: 把坐标 fuzz 做成可运行时改的模块参数（Android 上 8 太大）
+Subject: [PATCH] Input: himax-spi: make coordinate fuzz runtime-tunable via module parameter
 
-**问题**：驱动给 `ABS_MT_POSITION_X/Y` 写死 `fuzz = 8`，注释写明理由是
-"prevent libinput from treating 10px drifts as swipes" —— 那是**桌面 Linux** 的理由。
-input 核心的 `input_defuzz_abs_event()`（v7.2-rc2 `drivers/input/input.c`）对 fuzz=8 的处理是：
+The driver hardcodes ABS_MT_POSITION_X/Y fuzz to 8 to suppress 10px desktop
+libinput drift, which causes input_defuzz_abs_event() to drop sub-0.4mm motion
+and attenuate sub-1.6mm motion on the 1600x2560 panel, duplicating Android
+InputReader's own touch slop and motion filtering.
 
-    |Δ| < 4        → 直接返回旧值（**这一帧的移动被整个丢掉**）
-    4 ≤ |Δ| < 8    → 只取 1/4（old*3 + new)/4
-    8 ≤ |Δ| < 16   → 只取 1/2
-    ≥ 16           → 原样通过
+Expose a writable module parameter (/sys/module/himax_hx83121a_spi/parameters/fuzz,
+defaulting to 8) that updates absinfo[ABS_MT_POSITION_X/Y].fuzz at runtime.
 
-本机面板 1600×2560、像素间距约 0.1 mm，于是**慢速拖动时 0.4 mm 以内的位移全部消失、
-1.6 mm 以内被衰减** —— 手感就是"跟不上手指、一格一格地走"。
-
-而 Android 侧本来就有两层同样作用的东西：InputReader 的移动过滤，以及
-`ViewConfiguration.getScaledTouchSlop()`（本机约 24 px）在**手势起点**上的判定。
-再叠一层内核 fuzz 是重复过滤。驱动自己还带 IIR 平滑（`hx-algo.c`，`iir_enabled=1`
-默认开），抖动本来就有人管。
-
-**为什么做成可写的模块参数，而不是直接改成 0**：
-本项目里**重启是最贵的资源**（失败要有人按电源键，见 CLAUDE.md 的操作纪律）。
-`touchscreen-fuzz-x/y` 虽然是标准 DT 属性、改 DTB 就能生效（
-`drivers/input/touchscreen.c:89` 实测会覆盖驱动默认值），但**每试一个值就要重启一次**。
-做成 0644 的模块参数之后，一次重启换来无限次实时 A/B：
-
-    echo 0 > /sys/module/himax_hx83121a_spi/parameters/fuzz
-
-⚠️ 默认值仍是 **8**，即**本补丁单独打上不改变任何行为** —— 要的是那个旋钮，
-不是替用户做决定。调到满意之后再把定案值写进 DT 的 `touchscreen-fuzz-x/y`。
-
-⚠️ 静态指针 `himax_fuzz_ts`：本平台只有一个触摸控制器（`spi0.0`），probe 成功后记一份。
-多实例平台上这个写法只会作用到最后一个 —— 这个驱动的 of_match 只有 `himax,hx83121a-ts`，
-可以接受，但别照抄到别处。
-
-案卷：`docs/stage4-findings.md` #113。
+Origin: local
+Upstream-Status: Pending
 ---
 diff --git a/drivers/input/touchscreen/himax-spi-core.c b/drivers/input/touchscreen/himax-spi-core.c
 --- a/drivers/input/touchscreen/himax-spi-core.c

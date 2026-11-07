@@ -1,50 +1,20 @@
-From 18b67a92d6ff4ae17cf1d275c06c0459264401d9 Mon Sep 17 00:00:00 2001
 From: Vahiru <nekovahiru@gmail.com>
-Date: Sun, 4 Oct 2026 00:20:20 +0800
-Subject: [PATCH] =?UTF-8?q?bus:=20mhi:=20host:=20keep=20firmware=20DMA=20i?=
- =?UTF-8?q?mages=20across=20power=20cycles=20for=20ath11k=EF=BC=88?=
- =?UTF-8?q?=E6=9C=AC=E5=9C=B0=EF=BC=8Cissue=20#16=EF=BC=89?=
-MIME-Version: 1.0
-Content-Type: text/plain; charset=UTF-8
-Content-Transfer-Encoding: 8bit
+Subject: [PATCH] bus: mhi: host: allow retaining firmware and RDDM DMA allocations across power cycles
 
-案卷：docs/TODO.md 的 issue 一节（#16）。**本地补丁**，上游到 v7.3-rc5 都没有对应改动。
+During s2idle suspend/resume on SC8280XP, ath11k powers down and reloads its
+firmware via MHI while pm_restrict_gfp_mask() forbids __GFP_IO compaction.
+Reallocating order-7 (512 KB) 32-bit GFP_DMA segments for the SBL, fbc_image,
+and rddm_image tables on resume fails under memory fragmentation, causing MHI
+power-up timeouts and DPM watchdog panics.
 
-现象：s2idle 第二次恢复时 ath11k 重新下载固件，`mhi_alloc_bhie_table()` 要一串
-512 KB（order 7）的 GFP_DMA 块（ath11k 的 seg_len = sbl_size = SZ_512K、coherent mask
-32 位 ⇒ ZONE_DMA），而挂起/恢复期间 pm_restrict_gfp_mask() 去掉了 __GFP_IO，
-不做 compaction ⇒ 碎片一多就失败：`page allocation failure: order:7`、
-`failed to power up mhi: -110`，随后 resume 阶段干等 20 秒、DPM 看门狗 panic。
+Add an opt-in reuse_fw_images flag on struct mhi_controller and enable it for
+ath11k so the SBL BHI buffer, fbc_image, and rddm_image DMA allocations are
+retained across MHI power-down/power-up cycles and freed only when the MHI
+controller is unregistered.
 
-原因：ath11k 在本机只走断电挂起（WoW 只给 ath11k_pm_quirk_table 里的联想机型），
-ath11k_mhi_stop() → mhi_unprepare_after_power_down() 每次挂起都把 fbc_image
-（固件，约 11 段）和 rddm_image（RDDM，0x420000 ≈ 10 段）释放掉，恢复时重新抢；
-SBL 的 BHI 缓冲（512 KB 单块）也是每次现分配现释放。这几块内存在设备运行期间
-本来就常驻，挂起时放掉等于白白交出去再赌一次。
-
-改法（给 MHI 控制器加一个 opt-in 开关，只有 ath11k 打开）：
-* struct mhi_controller 加 `reuse_fw_images` 与 `bhi_image`；
-* reuse_fw_images 时 mhi_unprepare_after_power_down() 不释放 fbc/rddm 表；
-  三块都在 mhi_unregister_controller() 里释放（非 reuse 时它们此刻已是 NULL）；
-* mhi_prepare_for_power_up()：rddm_image 还在就不再分配，照常 mhi_rddm_prepare()
-  重新编程（它从 mhi_buf 重写整张向量表与 BHIe RX 寄存器）；顺带在 prepare 失败时
-  把指针清 NULL（原来释放后留着悬空指针）；
-* mhi_fw_load_handler()：fbc_image 还在、且段数恰好等于这次镜像需要的段数才复用
-  （设备读整张向量表，不能留多余的旧条目），否则释放重分配；
-* mhi_load_image_bhi()：reuse 时缓存 SBL 缓冲，长度不同才重分配。
-非 reuse 的控制器（pci_generic 的调制解调器等）行为不变，只多了"rddm_image 已在
-就不重复分配"这一条（原来会泄漏）。
-
-代价：每台机器常驻多 512 KB（SBL 缓冲）；fbc/rddm 原本运行时就占着。
-⬜ 实机：多次 s2idle 循环 + 人为制造碎片后恢复；Wi-Fi 崩溃恢复（recovery）路径。
+Origin: local
+Upstream-Status: Pending
 ---
- drivers/bus/mhi/host/boot.c           | 48 +++++++++++++++++++++------
- drivers/bus/mhi/host/init.c           | 25 ++++++++++++--
- drivers/bus/mhi/host/internal.h       |  2 ++
- drivers/net/wireless/ath/ath11k/mhi.c |  4 +++
- include/linux/mhi.h                   |  7 ++++
- 5 files changed, 73 insertions(+), 13 deletions(-)
-
 diff --git a/drivers/bus/mhi/host/boot.c b/drivers/bus/mhi/host/boot.c
 index 19c8491..0de0a56 100644
 --- a/drivers/bus/mhi/host/boot.c

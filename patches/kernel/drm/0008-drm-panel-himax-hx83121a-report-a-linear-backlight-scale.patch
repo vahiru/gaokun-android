@@ -4,6 +4,9 @@ Subject: [PATCH] drm/panel: himax-hx83121a: report a linear backlight scale
 The 12-bit brightness register is linear in panel luminance from at least
 level 256 up. Say so: userspace otherwise applies a perceptual curve of its
 own on top, as drm_hwcomposer does for an unknown or non-linear scale.
+
+Origin: local
+Upstream-Status: Pending
 ---
  drivers/gpu/drm/panel/panel-himax-hx83121a.c | 2 +-
  1 file changed, 1 insertion(+), 1 deletion(-)

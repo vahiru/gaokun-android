@@ -42,6 +42,8 @@ didn't expect:
   drops reset_count, so that the next reset finds a finished one.
 
 Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
 ---
  drivers/net/wireless/ath/ath11k/ce.c   | 10 ++++--
  drivers/net/wireless/ath/ath11k/core.c | 12 ++++---

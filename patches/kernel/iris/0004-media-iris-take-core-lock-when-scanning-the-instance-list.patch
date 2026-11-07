@@ -1,5 +1,5 @@
 From: Dmitry Baryshkov <dmitry.baryshkov@oss.qualcomm.com>
-Subject: [PATCH] media: iris: take core lock when scanning the instance list（上游 media v7.4 队列 backport）
+Subject: [PATCH] media: iris: take core lock when scanning the instance list
 
 iris_check_session_supported() walks core->instances to confirm the
 current instance is registered, but does so without holding core->lock.
@@ -17,15 +17,9 @@ Assisted-by: Claude:claude-opus-4-8
 Signed-off-by: Dmitry Baryshkov <dmitry.baryshkov@oss.qualcomm.com>
 Reviewed-by: Konrad Dybcio <konrad.dybcio@oss.qualcomm.com>
 Signed-off-by: Bryan O'Donoghue <bod@kernel.org>
-
-gaokun3 注（案卷 docs/stage4-findings.md #128）：上游 e2e2bc058a5e，在 Bryan O'Donoghue 的
-venus-iris-next 队列（2026-09-25，v7.4），逐字搬。Android 上 Codec2 HAL 在别的实例解码时
-会反复 open/close 解码节点探能力（V4L2Device::queryDecodingCapabilities），正是这个
-无锁遍历撞上 iris_close() 的场景。
+Origin: backport, commit e2e2bc058a5e
+Upstream-Status: Backport [e2e2bc058a5e]
 ---
- drivers/media/platform/qcom/iris/iris_vb2.c | 6 +++++-
- 1 file changed, 5 insertions(+), 1 deletion(-)
-
 diff --git a/drivers/media/platform/qcom/iris/iris_vb2.c b/drivers/media/platform/qcom/iris/iris_vb2.c
 index a2ea2d67f60d..8faf709c26c1 100644
 --- a/drivers/media/platform/qcom/iris/iris_vb2.c

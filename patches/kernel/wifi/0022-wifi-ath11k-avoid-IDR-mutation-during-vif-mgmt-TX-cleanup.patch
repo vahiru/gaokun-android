@@ -18,6 +18,8 @@ Reviewed-by: Rameshkumar Sundaram <rameshkumar.sundaram@oss.qualcomm.com>
 Link: https://patch.msgid.link/20261003092104.520135-4-yaojiale02@163.com
 Signed-off-by: Jeff Johnson <jeff.johnson@oss.qualcomm.com>
 (cherry picked from commit dc29226dada34a6d19af77b4b51e90f8a3a8de34)
+Origin: backport, commit dc29226dada34a6d19af77b4b51e90f8a3a8de34
+Upstream-Status: Backport [dc29226dada34a6d19af77b4b51e90f8a3a8de34]
 ---
  drivers/net/wireless/ath/ath11k/mac.c | 21 +++++++++++----------
  1 file changed, 11 insertions(+), 10 deletions(-)

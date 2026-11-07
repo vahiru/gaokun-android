@@ -1,7 +1,7 @@
 From 6d5ce8bca93ccef7081b56e9e8ba937bbe052a18 Mon Sep 17 00:00:00 2001
 From: Akisaira <akisaira@outlook.com>
 Date: Tue, 3 Nov 2026 20:55:42 +1100
-Subject: [PATCH 05/13] libipa: camera_sensor_helper: ov13b10: Model the
+Subject: [PATCH] libipa: camera_sensor_helper: ov13b10: Model the
  analogue gain steps
 
 The ov13b10 takes the analogue gain as gain * 128 but keeps only four
@@ -17,6 +17,8 @@ and backed off, twice a second. Round gain codes to the nearest step and
 report the gain the sensor applies.
 
 Signed-off-by: Akisaira <akisaira@outlook.com>
+Origin: local
+Upstream-Status: Pending
 ---
  src/ipa/libipa/camera_sensor_helper.cpp | 33 +++++++++++++++++++++----
  1 file changed, 28 insertions(+), 5 deletions(-)

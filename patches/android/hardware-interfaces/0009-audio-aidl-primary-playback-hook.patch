@@ -1,24 +1,20 @@
-audio AIDL HAL（StreamPrimary）：播放方向加一个厂商钩子 —— 每块数据写进 ALSA 之前原地交给 ro.vendor.audio.primary.playback_hook 指定的库
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] audio: aidl: primary: add vendor playback hook before ALSA write
 
-应用到 AOSP 树的 hardware/interfaces，排在 0083 之后（StreamPrimary.cpp 的上下文依赖 0069 的播放直写）。
-由 scripts/crdroid-tree-fixes.py 第 27 条自动应用（幂等）。⚠️ 别往内核树上打。
+Once FastMixer is enabled on the primary output, AudioFlinger refuses to attach
+non-hardware-accelerated session effects to FAST playback sessions, bypassing
+session-level speaker processing for low-latency game audio.
 
-为什么要在 HAL 里做：扬声器的低音处理（device/huawei/gaokun3/speakerfx）要覆盖所有走扬声器的声音，
-而会话音效覆盖不到游戏 —— rc.2 起（0083）主输出有 FastMixer，AudioFlinger 不许在 FAST 会话上挂
-纯软件 effect（实机 Project SEKAI：`checkEffectCompatibility_l: non HW effect Gaokun Histen on
-playback thread in fast mode`，`addOutputSessionEffects(): failed to create Fx Gaokun Histen on session …`），
-游戏的音乐和打击音全在 FAST 轨上。HAL 拿到的是 AudioFlinger 混好的最终结果，FAST 轨也在里面。
+Add an optional vendor playback hook to StreamPrimary, configured via
+ro.vendor.audio.primary.playback_hook. When set, StreamPrimary dlopens the
+library and invokes playback_hook_open() when the ALSA proxy opens,
+playback_hook_process() in-place on each PCM buffer before
+transferPlaybackDirect(), and playback_hook_close() on standby, shutdown, or
+rerouting.
 
-做法（只动 StreamPrimary，播放方向、非 stub 流）：
-* ro.vendor.audio.primary.playback_hook 给出库的绝对路径；不设 = 没有钩子，行为与原来完全相同。
-  第一次用到时 dlopen 一次，库缺 playback_hook_open / _process / _close 任一个就当没有，记一行错误。
-* start() 打开 ALSA 设备之后调 open(card, device, 采样率, 声道数, tinyalsa 的 pcm_format)，
-  库返回 nullptr = 这条流它不管；暂停后恢复沿用原来的句柄。
-* transfer() 在 transferPlaybackDirect() 之前调 process(句柄, buffer, 帧数)，原地处理。
-* standby()、shutdown()、换设备（start() 里关掉旧设备时）调 close()。
-* 三个调用都在流的 worker 线程上，不加锁。库必须能从这个 APEX 隔离的链接器命名空间加载
-  （本机放 /vendor/lib64/soundfx，0068 放行了这个目录）。
-
+Origin: local
+Upstream-Status: Inappropriate [device-specific DSP hook]
+---
 diff --git a/audio/aidl/default/include/core-impl/StreamPrimary.h b/audio/aidl/default/include/core-impl/StreamPrimary.h
 index 87715da..da563a7 100644
 --- a/audio/aidl/default/include/core-impl/StreamPrimary.h

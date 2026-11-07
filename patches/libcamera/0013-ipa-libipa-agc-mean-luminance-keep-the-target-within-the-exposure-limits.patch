@@ -1,7 +1,7 @@
 From 6e3ac59b8f7994f988cf7f2c6362d4fc99c1233c Mon Sep 17 00:00:00 2001
 From: Akisaira <akisaira@outlook.com>
 Date: Wed, 4 Nov 2026 02:13:35 +1100
-Subject: [PATCH 13/13] ipa: libipa: agc_mean_luminance: Keep the target within
+Subject: [PATCH] ipa: libipa: agc_mean_luminance: Keep the target within
  the exposure limits
 
 In the dark the luminance estimate is near zero and estimateInitialGain()
@@ -30,6 +30,9 @@ brighter scene.
 
 Signed-off-by: Akisaira <akisaira@outlook.com>
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+Origin: local
+Upstream-Status: Pending
 ---
  src/ipa/libipa/agc_mean_luminance.cpp | 33 ++++++++++++++++++++++-----
  1 file changed, 27 insertions(+), 6 deletions(-)

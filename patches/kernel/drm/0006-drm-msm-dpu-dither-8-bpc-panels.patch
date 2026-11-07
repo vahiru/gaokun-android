@@ -8,6 +8,9 @@ Dither them as well, spatially, so a static frame stays static.
 
 The panel has to report its depth for this. hx83121a never did, which left
 display_info.bpc at 0.
+
+Origin: local
+Upstream-Status: Pending
 ---
  drivers/gpu/drm/msm/disp/dpu1/dpu_encoder.c  | 10 ++++++----
  drivers/gpu/drm/panel/panel-himax-hx83121a.c |  2 ++

@@ -1,21 +1,20 @@
-drm_hwcomposer：压暗的图层走GPU，给HDR提亮让路
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] drm_hwcomposer: composite dimmed layers on the GPU for HDR backlight boost
 
-应用到AOSP树的external/drm_hwcomposer，由scripts/crdroid-tree-fixes.py第33条自动应用（幂等），
-排在0132后面。别往内核树上打。
+During HDR presentation, SurfaceFlinger raises the panel backlight and scales
+down SDR layers via LayerCommand.brightness so their perceived luminance stays
+constant. Because MSM DPU planes do not apply per-layer brightness gain, layers
+left on hardware planes brighten along with the backlight.
 
-HDR提亮时背光抬高，SF同时用LayerCommand.brightness把SDR图层压暗，让它们看上去亮度不变。
-现有代码只校验这个值，并不执行，图层留在平面上就会跟着背光一起变亮。DPU的平面不能逐图层调增益，
-所以这里把压暗的图层交给GPU，由RenderEngine压暗。
+Route layers with brightness < 1.0 to client composition in both planners so
+RenderEngine applies the dimming factor, and request a 10-bit client target
+while layers are dimmed to avoid banding in dark gradients. Also restrict
+sysfs backlight binding to internal connector types so external displays do not
+drive the tablet's built-in panel backlight.
 
-几个容易漏的点：
-
-- 两个planner都要改。
-- 压暗期间也要请求10-bit帧缓冲（0131），否则8-bit的界面压暗后层次不够。走到这里图层都在GPU上，
-  client target就在最底层，满足0131的条件。
-- 普通SDR画面brightness是1，不受影响。只有提亮期间才全屏走GPU。
-- sysfs没有说明背光属于哪个连接器，drm_hwcomposer给每个物理显示器都绑了同一个背光（上游的TODO）。
-  HWC接管背光之后，外接显示器的亮度会写到内置屏上，所以这里只给内置屏绑定。
-
+Origin: local
+Upstream-Status: Pending
+---
 diff --git a/compositor/GenericCompositionPlanner.cpp b/compositor/GenericCompositionPlanner.cpp
 index 14a8e44..3e37422 100644
 --- a/compositor/GenericCompositionPlanner.cpp

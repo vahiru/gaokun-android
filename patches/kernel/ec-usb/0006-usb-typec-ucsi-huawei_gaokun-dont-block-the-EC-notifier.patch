@@ -23,6 +23,8 @@ replaces the per-port completions.
 Fixes: 00327d7f2c8c ("usb: typec: ucsi: add Huawei Matebook E Go ucsi driver")
 Cc: stable@vger.kernel.org
 Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
 ---
  drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c | 76 ++++++++++-----------
  1 file changed, 38 insertions(+), 38 deletions(-)

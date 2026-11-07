@@ -1,22 +1,19 @@
 From: Akisaira <akisaira@outlook.com>
-Subject: [PATCH] media: iris: gen1收到固件看门狗中断后走系统错误恢复
+Subject: [PATCH] media: iris: schedule system error recovery on gen1 firmware watchdog interrupt
 
-gen1的响应处理没有看watchdog状态。固件的看门狗中断到来后，iris_hfi_isr_handler()
-按设计不再打开中断，等系统错误处理去重启固件，可是gen1根本不会安排这个处理：
-core->state留在INIT，中断一直关着，固件已经停了。之后每次suspend都报
-“skip power collapse”和“failed to suspend”，新会话“session open failed”，全系统
-硬解要到重启才恢复。解码服务反复崩溃时就可能走到这里。
+When the video firmware triggers a watchdog interrupt, iris_hfi_isr_handler()
+leaves the IRQ disabled and expects the response handler to schedule
+sys_error_handler to reload the firmware. On gen1,
+iris_hfi_gen1_handle_response() ignored core->status ==
+IRIS_CORE_ERROR_WATCHDOG, leaving core->state stuck in INIT with the IRQ
+disabled until reboot.
 
-按gen2的做法处理：看到watchdog就走系统错误路径，标记错误状态并安排
-sys_error_handler重新加载固件。中断的开关计数不用改：iris_vpu_power_off()在
-watchdog时已经不再多关一次，iris_vpu_power_on()的enable_irq()正好配平。
+Check for watchdog status in iris_hfi_gen1_handle_response() and transition the
+core to error state while scheduling sys_error_handler, matching gen2.
 
-调试：HFI_CMD_SYS_TEST_SSR（0x10101）类型3可以让固件主动触发硬件看门狗。
-
+Origin: local
+Upstream-Status: Pending
 ---
- .../media/platform/qcom/iris/iris_hfi_gen1_response.c  | 10 ++++++++++
- 1 file changed, 10 insertions(+)
-
 diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen1_response.c b/drivers/media/platform/qcom/iris/iris_hfi_gen1_response.c
 index 314167f8e..e6c0e97d3 100644
 --- a/drivers/media/platform/qcom/iris/iris_hfi_gen1_response.c

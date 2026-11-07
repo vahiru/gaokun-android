@@ -1,40 +1,23 @@
 From: Akisaira <akisaira@outlook.com>
-Subject: [PATCH] Input: himax-spi: 可选的、与EGoTouchRev-rebuild一致的检测
+Subject: [PATCH] Input: himax-spi: add optional EGoTouchRev-rebuild detection pipeline features
 
-现在的检测流水线移植自EGoTouchRev（经EGoTouchRev-Linux）。它的作者后来在Windows上
-重写了服务（awarson2233/EGoTouchRev-rebuild），检测部分有几处不同。这里把它们做成
-可调参数，默认都保持原来的行为：
+Add runtime-configurable detection and tracking features ported from
+EGoTouchRev-rebuild while keeping existing defaults unchanged:
 
-- baseline_mode 1：逐格的自适应基线。全屏(原始值-基线)的中位数作为共模去掉，
-  超过baseline_gate（305）的格子冻结基线、照常输出，其余格子输出0并让基线跟上；
-  带释放保持和快速恢复阶段。baseline_fw_finger用固件自己的手指标志（网格后的
-  第54、55个字，低字节0xff表示没有手指）在没有手指时快速跟随，stats里的
-  fw_finger_frames统计标志亮着的帧数。baseline_mode 2把CMF放在门限之前、对每一格
-  做：接电脑时，面板经USB地线带上了行列偏移，否则手指旁边的格子会被抬过门限。
-- cmf_mode：只做行、只做列或都做。
-- peak_edge_threshold、peak_drift_limit、min_area：服务的边缘门限、按压漂移尺度
-  和区域面积。
-- peak_merge_radius：同一个连通域里两个峰之间没有真正的低谷时（一个指肚压平后
-  出现两个极大值），丢掉较弱的那个。
-- zone_split：从最弱的峰开始生长区域；吞进了更强峰的区域，用优先级泛洪分给各个
-  峰，各自算中心；原来是较弱的峰拿走整块、较强的只算3×3的中心。
-- edge_peak_mode 1：外侧两列的弱峰按它们最强的格子判断；edge_comp_mode 1：
-  按服务的做法拉伸最外一格（半格以内贴边，到1.005格之间线性展开）。
-- debounce_strong：信号不低于它的新触点第一帧就上报，但离已在屏上的手指不到两倍
-  配对范围的照常防抖（那多半是那根手指这一帧分出的碎片；同一帧一起落下的手指不算）；
-  track_min_signal：更弱的不起跟踪。第一帧就上报的跟踪避开同一帧释放的槽位（否则
-  槽位会沿用原来的tracking id），并从第二帧起量点击锁定的位移，那时触点已经落稳。
-- ghost_row_filter：服务的同行幽灵点规则。
+- Per-cell adaptive baseline tracking (baseline_mode 1 and 2, baseline_gate,
+  and baseline_fw_finger using the firmware finger-present flag).
+- Configurable common-mode filter axis mode (cmf_mode).
+- Configurable peak edge threshold (peak_edge_threshold), press drift limit
+  (peak_drift_limit), minimum zone area (min_area), peak merge radius
+  (peak_merge_radius), and priority flood-fill zone splitting (zone_split).
+- Edge peak and edge compensation modes (edge_peak_mode, edge_comp_mode).
+- Immediate first-frame reporting for strong contacts (debounce_strong,
+  track_min_signal) and same-row ghost filtering (ghost_row_filter).
+- Allocate struct hx_algo with kvzalloc() to accommodate the enlarged state.
 
-算法状态增大到约95 KB，改用kvzalloc分配。
-
-默认设置下，三段PJSK录制和一段刻意静止按住的录制的回放与改动前逐字节相同。
+Origin: other, https://github.com/awarson2233/EGoTouchRev-rebuild
+Upstream-Status: Pending
 ---
- drivers/input/touchscreen/himax-spi-core.c |  64 +-
- drivers/input/touchscreen/hx-algo.c        | 922 +++++++++++++++++++--
- drivers/input/touchscreen/hx-algo.h        |  93 ++-
- 3 files changed, 1017 insertions(+), 62 deletions(-)
-
 diff --git a/drivers/input/touchscreen/himax-spi-core.c b/drivers/input/touchscreen/himax-spi-core.c
 index 7599e68..17f8ad0 100644
 --- a/drivers/input/touchscreen/himax-spi-core.c

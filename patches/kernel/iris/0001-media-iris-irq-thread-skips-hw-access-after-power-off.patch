@@ -1,36 +1,22 @@
 From: Vahiru <nekovahiru@gmail.com>
-Subject: [PATCH] media: iris: 中断线程在拿到锁时若核心已断电，就不再碰寄存器（本地，代替上游 b9c2215）
+Subject: [PATCH] media: iris: guard threaded IRQ handler against register access after power-off
 
-案卷 docs/stage4-findings.md #128。**本地补丁**；取代原先打算搬的上游 v7.3 b9c2215
-"media: iris: use disable_irq() during power-off"。
+All callers of iris_vpu_power_off() hold core->lock, and the threaded IRQ
+handler iris_hfi_isr_handler() also acquires core->lock before calling
+iris_vpu_clear_interrupt(). Using synchronous disable_irq() inside
+iris_vpu_power_off() while holding core->lock can deadlock if the IRQ thread is
+waiting on core->lock, whereas using disable_irq_nosync() without a power-state
+check allows an already-woken IRQ thread to acquire core->lock after power-off
+and read clock-gated VPU registers (causing a synchronous external abort on
+SC8280XP).
 
-两种写法各有一个坑，这里两个都避开：
+Use disable_irq_nosync() in iris_vpu_power_off() and track hardware power state
+via core->hw_powered under core->lock. If core->hw_powered is false when
+iris_hfi_isr_handler() acquires core->lock, skip register and queue accesses and
+only balance the top-half disable_irq_nosync() call.
 
-1. v7.2-rc2 原版（disable_irq_nosync）：中断线程开头要拿 core->lock（iris_hfi_common.c
-   iris_hfi_isr_handler），而断电的所有调用者（runtime suspend、core deinit、core init
-   出错路径）都在持锁时调 iris_vpu_power_off()。于是一个在断电前到达的中断，线程会在
-   断电【之后】拿到锁，接着 iris_vpu_clear_interrupt() 读写已断电的寄存器块。
-   ⚠️ 在这台机器上，读一个被门控的寄存器块就是一次 external abort、内核静默死亡
-   （CLAUDE.md 操作禁忌第 2 条，2026-09-12 camcc 那次）。
-2. 上游 b9c2215（改成 disable_irq()）：disable_irq() 会等线程跑完，可它是在【持锁】时被调的，
-   而线程正卡在同一把锁上 ⇒ 永久死锁。v7.3-rc5 里也是这个写法（iris_vpu_common.c
-   iris_vpu_power_off() 末尾），所以这不是回移时漏了依赖，是上游在这把锁下的缺陷
-   （审查 2026-09-28 从源码推出，未在硬件上复现；可以考虑报给上游 —— 对外发言等用户定）。
-
-做法：保留 disable_irq_nosync()（断电时不等线程 ⇒ 不会死锁），加一个 core->hw_powered，
-只在 core->lock 内读写（上电在 enable_irq 前置位、断电第一步清零）。线程拿到锁后先看它：
-已断电就既不清中断、也不跑响应处理（响应处理里的 iris_hfi_queue_cmd_write 会敲门铃寄存器），
-只做那一次 enable_irq() 来抵消上半部 iris_hfi_isr() 的 disable_irq_nosync()；断电自己的那次
-disable 让中断线一直关到下次上电。看门狗分支与原来的条件完全一致。
-
-正常运行时（核心上电、中断打开）这个标志恒为真，行为与上游逐字相同。
-
-★ rebased onto v7.2.9（2026-10-05，SEC-9）：v7.2.y stable 把上游 b9c2215 收进来了 ——
-   iris_vpu_power_off() 末尾已是 disable_irq(core->irq)，正是上面第 2 条说的持锁死锁写法。
-   这一版因此多一行：把它改回 disable_irq_nosync()（原本就是本补丁成立的前提：断电不等线程，
-   线程靠 hw_powered 自己避开寄存器）。打完之后 iris_vpu_common.c 与 v7.2-rc2 + 旧版 0056
-   逐字节相同（blob 3d7a525），即 #16 上机验过的那份。另外三个文件的 hunk 未变。
-   ⚠️ 在 v7.2-rc2 树上请用本仓 c1062f2 及以前的旧版（那里没有 disable_irq 这一行可改）。
+Origin: local
+Upstream-Status: Pending
 ---
 diff --git a/drivers/media/platform/qcom/iris/iris_core.h b/drivers/media/platform/qcom/iris/iris_core.h
 index 24da60448cf2..b4a9469f6e86 100644

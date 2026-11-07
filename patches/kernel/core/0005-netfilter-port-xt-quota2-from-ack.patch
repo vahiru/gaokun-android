@@ -1,22 +1,16 @@
-netfilter: 从 ACK 移植 xt_quota2（底本 android16-6.12）
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] netfilter: xtables: port xt_quota2 from Android Common Kernel (android16-6.12)
 
-netd 的带宽统计需要 xt_quota2，而它是 ACK 专有的、主线没有。
-缺了它 netd 报 "Extension policy revision 0"。
-立项证据见 docs/stage2-findings.md 8.5 节第 20 条。
+Android's netd BandwidthController requires the netfilter xt_quota2 match
+target to initialize per-interface bandwidth accounting; without it, netd
+aborts during startup and triggers a rescue-party reboot loop.
 
-底本：android.googlesource.com/kernel/common，分支 android16-6.12
-（xt_quota2 在 ACK 各分支里一直都在，取最新的那份）。
+Port net/netfilter/xt_quota2.c and include/linux/netfilter/xt_quota2.h from the
+android16-6.12 Android Common Kernel branch.
 
-相对底本的改动只有一处，在 q2_get_counter() 的错误路径上：
-把两处提前 return NULL 改成 goto out 统一 kfree(e)，
-并去掉 procfs 创建失败时那段 atomic_dec_and_test(&e->ref) 分支。
-
-⚠️ 头文件放在 include/linux/netfilter/xt_quota2.h（不是 uapi/）——
-ACK 自己就是这么放的，iptables 用户态另有一份自己的副本。
-
-⚠️ 这份源码此前【只活在构建机的内核树里】，从未入库。后果见
-docs/stage4-findings.md #79：2026-09-08 重建的内核因此起不来。
-
+Origin: backport, https://android.googlesource.com/kernel/common (android-mainline)
+Upstream-Status: Inappropriate [Android-specific, ported from ACK android-mainline]
+---
 diff --git a/include/linux/netfilter/xt_quota2.h b/include/linux/netfilter/xt_quota2.h
 new file mode 100644
 index 000000000..a3918718c

@@ -1,24 +1,19 @@
 From: Akisaira <akisaira@outlook.com>
-Subject: [PATCH] usb: typec: ucsi: huawei_gaokun: 不把usb_0的角色交给UCSI
+Subject: [PATCH] usb: typec: ucsi: huawei_gaokun: leave the usb_0 role switch to userspace
 
-这台机器的EC在每次连接器状态里都报对端类型为UFP（什么都没插时也一样），
-也从不置"对端支持USB数据"的标志，UCSI据此设出的数据角色没有依据。0012把
-usb_0改成otg + usb-role-switch以后，UCSI核心每次连接变化都会去设a600000.usb
-的角色：主线0c8ee850572b之后一律设成host，拔掉电脑后USB adb就断了；修正那个
-条件以后一律设成NONE，dwc3落回默认的device。两种都不是根据实际插的东西定的，
-还会在每次插拔时盖掉gaokun3-usbrole.sh的决定。
+The Huawei MateBook E Go EC always reports the connector partner type as UFP
+(even when nothing is connected) and never sets the USB data capability bit, so
+UCSI cannot determine the true data role of port 0. Once usb_0 is configured as
+OTG with usb-role-switch, UCSI overrides the role on every connector status
+update and breaks userspace role management.
 
-角色由gaokun3-usbrole.sh按供电方向和实际的枚举结果决定，它还要保证device模
-式不被带进挂起（#52）。这个补丁在update_connector钩子里放掉UCSI刚查到的role
-switch（这个钩子在查找role switch之后、第一次设角色之前调用），此后UCSI对角
-色的设置都成为空操作；连接状态、供电方向、插头方向、PD和DP照常由UCSI报告。
+Release the role switch acquired by UCSI in the update_connector hook so UCSI
+continues reporting connector state, power direction, orientation, PD, and DP
+alt-mode while leaving usb_0 role switching to the userspace USB HAL.
 
-主线的dts里usb_0是dr_mode = "host"，没有role switch，这只是0012带来的情况，
-不进主线。
+Origin: local
+Upstream-Status: Inappropriate [Android-specific]
 ---
- drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c | 11 +++++++++++
- 1 file changed, 11 insertions(+)
-
 diff --git a/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c b/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c
 index 6491e48..13efcae 100644
 --- a/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c

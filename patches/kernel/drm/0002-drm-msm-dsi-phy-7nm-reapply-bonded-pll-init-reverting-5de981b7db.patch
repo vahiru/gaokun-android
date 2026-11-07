@@ -1,19 +1,18 @@
-From: gaokun-android <local>
+From: Vahiru <nekovahiru@gmail.com>
 Subject: [PATCH] drm/msm/dsi/phy/7nm: re-apply "fix PLL init in bonded mode" (revert 5de981b7db)
 
-【本地，v7.2.9 起】撤回 v7.2.y stable 带进来的
-  5de981b7db  Revert "drm/msm: dsi: fix PLL init in bonded mode"（上游 44784327815b，随 v7.2.6 进 stable）
-即恢复 93c97bc8d85d（Neil Armstrong，2025-10）那份修复：绑定（双 DSI）模式下两个 PHY 共用主 PHY 的 PLL，
-PLL 必须在主 PHY 使能之前就初始化；撤回后计数退回"PHY 使能时置 1"的旧逻辑，从副 PHY 设 PLL 时跳过
-时钟初始化 ⇒ 本机（HX83121A，ae94000 + ae96000 双 DSI 绑定 + DSC）面板不出图、背光不亮、TDDI 不扫描
-（触摸中断 0/s），而电源 / PHY / CRTC 在软件侧全显示正常。
+Linux v7.2.6 stable included commit 5de981b7db ("Revert 'drm/msm: dsi: fix PLL
+init in bonded mode'"), which reverted commit 93c97bc8d85d. On dual-DSI bonded
+panels such as the Huawei MateBook E Go's Himax HX83121A (ae94000 + ae96000
+sharing the master PHY's PLL), reverting that fix causes the slave PHY's PLL
+rate configuration to skip PLL initialization before the master PHY is enabled,
+leaving the panel blank and stopping TDDI touch scanning.
 
-上游撤回它的理由是非绑定屏回归（RB3 Gen2 上 720p60 变 30）；本机只有绑定 DSI，碰不到那个副作用。
+Re-apply commit 93c97bc8d85d so the shared PLL is initialized in bonded DSI
+mode.
 
-实测（2026-10-05）：v7.2.9 原版 0/s 黑屏；v7.2.9 + 本补丁 118/s、有画面；#16（rc2，含 93c97bc8d85d）120/s。
-二分记录见 docs/TODO.md「❌→✅ 更正」一节；候选内核在 out/k72y-bisect/。
-上游跟进：等 msm 对绑定模式的正式修法进 7.2.y / 7.3 后去掉本补丁。
-
+Origin: local
+Upstream-Status: Pending
 ---
 diff --git a/drivers/gpu/drm/msm/dsi/phy/dsi_phy.h b/drivers/gpu/drm/msm/dsi/phy/dsi_phy.h
 index f5d3e806f8fd..21a59d66e8dc 100644

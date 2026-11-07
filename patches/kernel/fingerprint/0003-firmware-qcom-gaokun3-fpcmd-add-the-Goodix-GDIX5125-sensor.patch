@@ -39,7 +39,7 @@ reported as -EPROTO.
 
 The protocol helpers are pure functions in gaokun3_fpcmd_goodix.h and are
 tested in user space against frames, replies, OTP, configuration and
-image data recorded on a Goodix unit. On that unit, with 0050 and 0212,
+image data recorded on a Goodix unit. On that unit, with 0001 and 0002,
 the driver loads the TA, initialises the sensor in about 0.7 s, follows
 finger down and lift-off, captures in about 155 ms, and wakes the MCU
 after 40 s idle. The stricter reply checksum, the packet skipping while
@@ -47,6 +47,9 @@ polling, the buffer clearing and the bounded configuration read came
 after those measurements and are tested offline only.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+Origin: local
+Upstream-Status: Inappropriate [device-specific QSEE transport]
 ---
  drivers/firmware/qcom/Kconfig                |   9 +-
  drivers/firmware/qcom/gaokun3_fpcmd.h        |  18 +

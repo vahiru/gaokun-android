@@ -1,4 +1,4 @@
-From: gaokun-android contributors <nekovahiru@gmail.com>
+From: Vahiru <nekovahiru@gmail.com>
 Subject: [PATCH] arm64: dts: qcom: sc8280xp: add CPU cooling maps
 
 The whole of sc8280xp.dtsi contains exactly one cooling-maps block, and it is
@@ -31,7 +31,9 @@ all eight cpuN_alert0 phandles resolve.
 Until this patch the port carried a userspace step-wise governor writing
 /sys/class/thermal/cooling_device*/cur_state to cover the gap.
 
-Signed-off-by: gaokun-android contributors <nekovahiru@gmail.com>
+Signed-off-by: Vahiru <nekovahiru@gmail.com>
+Origin: local
+Upstream-Status: Pending
 ---
 diff --git a/arch/arm64/boot/dts/qcom/sc8280xp.dtsi b/arch/arm64/boot/dts/qcom/sc8280xp.dtsi
 index b563abb4c16a..444e41ef3907 100644

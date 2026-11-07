@@ -1,22 +1,12 @@
 From: Vahiru <nekovahiru@gmail.com>
-Subject: [PATCH] Input: himax-spi: 修好 W=1 报的两处 kerneldoc
+Subject: [PATCH] Input: himax-spi: fix kernel-doc warnings on himax_sense_off() and himax_sense_on()
 
-`make W=1` 在这个驱动上报六条告警，全部出自两段写坏的 kerneldoc：
+Fix the function names, missing @ts parameter descriptions, and Return: sections
+in the kernel-doc comments for himax_sense_off() and himax_sense_on() to silence
+six W=1 kernel-doc warnings.
 
-    Warning: himax-spi-core.c:443 function parameter 'ts' not described in 'himax_sense_off'
-    Warning: himax-spi-core.c:443 expecting prototype for sense_off(). Prototype was for himax_sense_off() instead
-    Warning: himax-spi-core.c:530 Cannot find identifier on line:
-     * @sw_reset: true for software reset, false for hardware reset
-    Warning: himax-spi-core.c:537 function parameter 'ts' not described in 'himax_sense_on'
-    ...
-
-`himax_sense_off()` 的注释头写的是 `sense_off:`（名字不对、也不是 kerneldoc 的
-`name() - 描述` 格式），并且漏掉 `@ts`；`himax_sense_on()` 干脆没有名字那一行，
-直接从 `@sw_reset:` 开始。补齐名字、参数与 `Return:`。
-
-纯注释改动，零功能影响。改完这个驱动 **`W=1` 完全干净**。
-
-案卷：`docs/stage4-findings.md` #115。
+Origin: local
+Upstream-Status: Pending
 ---
 diff --git a/drivers/input/touchscreen/himax-spi-core.c b/drivers/input/touchscreen/himax-spi-core.c
 --- a/drivers/input/touchscreen/himax-spi-core.c

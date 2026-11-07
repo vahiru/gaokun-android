@@ -1,37 +1,22 @@
-audio AIDL HAL（StreamPrimary / StreamAlsaBase）：播放改为直接阻塞写 ALSA、由硬件时钟定拍，位置按硬件真实播出上报 —— 消除卡顿后音乐整块跳走（音游偏移不稳定）
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] audio: aidl: primary: write playback directly to ALSA and report hardware presentation position
 
-应用到 AOSP 树的 hardware/interfaces，排在 0063 之后（StreamPrimary.cpp 的上下文依赖 0063）。
-由 scripts/crdroid-tree-fixes.py 第 17 条自动应用（幂等）。⚠️ 别往内核树上打。
+StreamPrimary inherited the emulator-oriented MonoPipe + synthetic wall-clock
+pacing path for playback: whenever AudioFlinger woke slightly late,
+StreamPrimary::transfer() logged "skipping transfer" and dropped an entire
+audio block to catch up with the synthetic clock, causing audible dropouts and
+cumulative A/V desynchronization in rhythm games. In addition, refinePosition()
+reported client-submitted frames rather than frames actually consumed by ALSA.
 
-原来播放方向沿用给模拟器写的办法（b/302587331）：transfer 把数据丢进非阻塞的 MonoPipe、按墙钟 usleep 定拍，
-另有 outputIoThread 从管道搬进 ALSA；客户端（AudioFlinger）只要晚到，下一块就被 "skipping transfer" 整块扔掉，
-直到追上墙钟。2026-10-04 实机（gaokun3-play-probe，播全零不出声；docs/stage4-findings.md #130）：
-播放中途让 audioserver 停 0.2 s，HAL 连扔 2–3 块（170–256 ms 音乐），之后应用的帧号与硬件永久错开这么多；
-用户此前玩游戏那段的 AudioFlinger 统计 disc=36、jitterMs min=-84.4（= 扔一块）说明正常游玩时也在发生。
-音游按自己交出去的帧推进谱面，下游悄悄扔掉的帧它不知道 ⇒ 每卡一次，音乐相对谱面永久提前一截。
-另外 refinePosition 是空实现：上报的位置 = 客户端交进来的帧数，ALSA 里还压着的那部分（本机 period 1440 × 4
-= 5760 帧 = 120 ms；实测 25–117 ms）不算；上报的 latencyMs 还按请求的 4 × 1024 算成 85 ms。
+Add direct-playback helpers (startPlaybackDirect, transferPlaybackDirect, and
+refinePlaybackPosition) to StreamAlsaBase and use them in StreamPrimary for
+non-stub output streams: write directly to the ALSA proxy so hardware clock
+backpressure paces the mixer thread, compute latencyMs from the refined ALSA
+buffer size, and derive presentation positions from proxy_get_presentation_position().
 
-现在 StreamPrimary 的播放方向（USB 等其它 StreamAlsa* 子类不变）：
-* 不建管道和 outputIoThread，transfer 直接 proxy_write_with_retries，ALSA 满了就阻塞 —— 由硬件时钟定拍，
-  不再按墙钟、不再跳块。卡顿时 ALSA 欠载（一段静音）后从原处接着播，不丢内容；
-* 位置 = 开流时的客户端帧号 + 写失败丢掉的帧 + proxy_get_presentation_position 给的"写进 ALSA 的帧 − ALSA 里没播的帧"，
-  时刻取 ALSA 的 htimestamp；不倒退、不超过客户端帧数；ALSA 没在跑（起播门限前 / 欠载）时沿用上一次的位置；
-  不用 StreamAlsaBase::refinePosition（它把 proxy 的计数改写成客户端的计数，照样把还没播的帧算成已播）；
-* latencyMs 按 kernel refine 之后的 ALSA 缓冲（pcm_get_buffer_size）算。
-采集方向、stub 流不受影响。仍然测不到的：DSP / codec 在 DMA 之后的那一段（固定流水线，应是常数，游戏内校准一次即可）。
-
-2026-10-25 改到 A17（lineage-24.0）上，结构跟着上游的拆分走，行为与 A16 版相同：
-A16 版是在 StreamAlsa（当时管道和直写都在这一个类里）加 writesPlaybackDirectly() 开关、让 start/transfer 分叉。
-A17 把直写单独做成了 StreamAlsa（alsa/StreamAlsa.cpp:39-78，给 StreamUsb 用），管道路径是 StreamAlsaMonoPipe，
-而 StreamPrimary 一个类同时服务采集和播放、只能继承一个（StreamPrimary.h:30 继承 StreamAlsaMonoPipe）。
-所以这里把"播放直写"做成 StreamAlsaBase 里的三个 protected 助手 —— startPlaybackDirect() /
-transferPlaybackDirect() / refinePlaybackPosition() —— StreamPrimary 在播放方向调它们、采集方向照旧走管道；
-StreamAlsaMonoPipe 一行不动（它的 standby / shutdown → teardownIo() 在没有管道和线程时只做 proxy_stop + 关设备，正好适用）。
-与 A16 版的差别只有一处，不影响 StreamPrimary：不再给管道路径记丢帧（A16 里那个计数只有直写路径读）。
-startPlaybackDirect() 先开到局部 vector 再 move —— 这与 A16 的 StreamAlsa::start() 相同；跟它不同的是 A17 上游
-StreamAlsa::start()（直接开进 mAlsaDeviceProxies，部分失败时会留下半开的设备、被下一次 start 误当成"暂停后恢复"），所以没照抄它。
-
+Origin: local
+Upstream-Status: Pending
+---
 diff --git a/audio/aidl/default/alsa/StreamAlsaBase.cpp b/audio/aidl/default/alsa/StreamAlsaBase.cpp
 index 9316517..e5914a9 100644
 --- a/audio/aidl/default/alsa/StreamAlsaBase.cpp

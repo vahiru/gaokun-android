@@ -17,6 +17,8 @@ the port leaves DP alt mode with HPD still reported as connected.
 Fixes: 1c2b66a7d725 ("usb: ucsi: huawei_gaokun: support mode switching")
 Cc: stable@vger.kernel.org
 Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
 ---
  drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c | 22 +++++++++++++++------
  1 file changed, 16 insertions(+), 6 deletions(-)

@@ -1,24 +1,20 @@
-audio AIDL HAL（UtilsAlsa）：内置播放设备的ALSA period数由ro.vendor.audio.primary.out_period_count决定，录音方向不变
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] audio: aidl: alsa: allow overriding built-in output period count via ro.vendor.audio.primary.out_period_count
 
-应用到AOSP树的hardware/interfaces，由scripts/crdroid-tree-fixes.py第40条自动应用（幂等）。⚠️ 别往内核树上打。
-只改audio/aidl/default/alsa/UtilsAlsa.cpp，与其他音频补丁的上下文不重叠。
+alsa_utils derives the ALSA period_count of all built-in devices from a single
+property (ro.hardware.audio.tinyalsa.period_count, default 4), shared by
+playback and capture. Playback can run with 3 periods (3 x 480 frames = 30 ms,
+cutting output latency by ~10 ms), whereas capture requires 4 periods to
+buffer incoming audio while the capture hook runs synchronous IPC.
 
-为什么：alsa_utils给内置设备配ALSA缓冲时，period数统一取ro.hardware.audio.tinyalsa.period_count
-（默认4，system/media/alsa_utils/alsa_device_profile.c的profile_fill_builtin_device_info()），播放和录音共用这一个值。
-0083之后播放是4个480帧的period（40 ms），ALSA里平时压着20–40 ms，是游戏输出延迟里最大的一段，减到3个能少约10 ms。
-录音不能跟着减：采集钩子（0206）在I/O线程里处理85 ms的块，通话降噪的IPC最长约51 ms才回退，这段时间里新来的数据
-全靠ALSA的录音缓冲接住；四声道时4个period约能接60–90 ms，3个只剩30–60 ms。
+Read ro.vendor.audio.primary.out_period_count in openProxyForAttachedDevice()
+for PCM_OUT devices after profile_fill_builtin_device_info(): when set to >= 2,
+keep the total block size (period_size * period_count) unchanged and repartition
+it into the requested number of periods.
 
-做法：openProxyForAttachedDevice()在profile_fill_builtin_device_info()之后、prepare之前，对输出设备读
-ro.vendor.audio.primary.out_period_count。值不小于2时，alsa_utils算出的块（period_size × period_count）保持不变，
-只改成切成这么多个period。内核仍会把period向上取整（q6apm-dai按480帧的步长），所以本机得到3 × 480帧（30 ms）。
-不设或小于2 = 原来的行为。外接设备（openProxyForExternalDevice）不受影响。
-
-验证：2026-11-07在ROM树外编出rc.3的HAL（lineage-24.0 13fc23d + 0010 / 0051 / 0052 / 0063 / 0068 / 0069 / 0077 / 0083 / 0117）
-加本补丁，替换进APEX在本机跑过：不设属性时扬声器为4 × 480帧；设为3后为3 × 480帧，应用按时间戳算的输出延迟
-53.8 → 43.7 ms，HAL只对输出设备<0,1>打出一行日志；录音保持4 × 1920帧，冒烟通过；设为1时被忽略。
-在lineage-24.0加全部音频补丁（到0206）上正向、反向--check都通过。ROM里尚未完整构建过。
-
+Origin: local
+Upstream-Status: Inappropriate [device-specific tuning]
+---
 diff --git a/audio/aidl/default/alsa/UtilsAlsa.cpp b/audio/aidl/default/alsa/UtilsAlsa.cpp
 index 6332fbf..6ac6bc0 100644
 --- a/audio/aidl/default/alsa/UtilsAlsa.cpp

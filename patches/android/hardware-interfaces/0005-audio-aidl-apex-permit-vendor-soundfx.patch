@@ -1,36 +1,17 @@
-audio AIDL APEX（com.android.hardware.audio）：链接器命名空间放行 /vendor/${LIB}/soundfx —— 让 effect HAL 能加载本机的 Histen 效果库
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] audio: aidl: apex: permit dlopen from /vendor/${LIB}/soundfx
 
-应用到 AOSP 树的 hardware/interfaces，与 0010 / 0051 / 0052 / 0063 不碰同一个文件（它们都在 audio/aidl/default/ 下，这条只动 apex/）。
-由 scripts/crdroid-tree-fixes.py 第 16 条自动应用（幂等）。⚠️ 别往内核树上打。
+The com.android.hardware.audio vendor APEX runs in an isolated linker
+namespace that only permits libraries from the APEX itself, /system/${LIB},
+and /system_ext/${LIB}. Vendor audio effect libraries installed in
+/vendor/lib64/soundfx/ cannot be dlopened by EffectFactory.
 
-2026-09-28 v0.7.0 候选版（1790597477）装机验收 B2：设置里的"扬声器增强"开关打开也没效果。
-重启 effect HAL 抓到原话（out/v070-accept/b2-diag/，effects/README.md §九）：
-    AHAL_EffectConfig: parseLibrary gaokun_histen : /vendor/lib64/soundfx//libgaokunhisteneffect.so
-    linker  : library "/vendor/lib64/soundfx//libgaokunhisteneffect.so" ... needed or dlopened by
-              "/apex/com.android.hardware.audio/bin/hw/android.hardware.audio.effect.service-aidl.example"
-              is not accessible for the namespace ...
-    AHAL_EffectFactory: openEffectLibrary: dlopen failed ...
-原因：effect HAL 跑在 vendor APEX 里，linkerconfig 给 APEX 的 default 命名空间是 isolated，
-允许路径只有 APEX 自己、/system/${LIB}、/system_ext/${LIB}（system/linkerconfig/modules/namespace.cc InitializeWithApex）。
-配置文件能读到（/vendor/etc/audio_effects_config.xml，"skipping 0 element(s)"），库路径也能解析到 /vendor/lib64/soundfx，
-但 EffectFactory 用的是普通 dlopen，被命名空间拒掉 ⇒ effect 不注册，music 的 postprocess 挂不上。
-（原作者用 KSU 装在 /system/lib64/soundfx，那里恰好被允许，所以他那边能用。）
+Add a linker.config.pb to com.android.hardware.audio that appends
+/vendor/${LIB}/soundfx to permittedPaths.
 
-做法：APEX 自带的链接配置（etc/linker.config.pb）加一条 permittedPaths —— linkerconfig 读它
-（system/linkerconfig/modules/apex.cc 读 permittedpaths()，namespace.cc InitializeWithApex 逐条 AddPermittedPath），
-build/soong/scripts/conv_linker_config.py 的 --type apex 校验允许这个字段。写法照 device/google/cuttlefish/guest/hals/vulkan
-（linker_config 模块、installable: false、列进 apex 的 prebuilts；file_contexts 把 /etc/linker.config.pb 标成 linkerconfig_file）。
-只放行 soundfx 这一个目录，不是整个 /vendor/${LIB}；库的依赖照旧在 APEX 里解析（NEEDED 的 12 个库 APEX 里都有，2026-09-28 实机逐个核过）。
-Histen 引擎 libhw_histen_processing.so 也在 /vendor/lib64/soundfx，effect 库按绝对路径 dlopen 它，同一个命名空间，一并放行。
-
-2026-10-25 在 A17（lineage-24.0）上核过，补丁正文原样能打、不用重做：APEX 的 Android.bp / file_contexts 与 A16 相同
-（apex/com.android.hardware.audio/Android.bp:47-53 prebuilts 段；file_contexts 末行仍无换行）；
-linker_config 模块类型与 installable 属性还在（build/soong/linkerconfig/linkerconfig.go:38、:47-49）；
-conv_linker_config.py 的 --type apex 仍允许 permittedPaths（build/soong/scripts/conv_linker_config.py:145-155）；
-linkerconfig 仍读 APEX 的 /etc/linker.config.pb 并逐条 AddPermittedPath（构建机 ~/crdroid
-system/linkerconfig/modules/apex.cc:162-176、namespace.cc:57-77 InitializeWithApex；VerifyPath() 接受 ${LIB}，apex.cc:90 起）；
-sepolicy 类型 linkerconfig_file 还在（system/sepolicy/public/file.te:240）。
-
+Origin: local
+Upstream-Status: Inappropriate [device-specific configuration]
+---
 diff --git a/audio/aidl/default/apex/com.android.hardware.audio/Android.bp b/audio/aidl/default/apex/com.android.hardware.audio/Android.bp
 index 510fee5..30c370c 100644
 --- a/audio/aidl/default/apex/com.android.hardware.audio/Android.bp

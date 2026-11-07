@@ -1,22 +1,20 @@
 From: Akisaira <akisaira@outlook.com>
-Subject: [PATCH] Input: himax-spi: 点击时停在按下的位置，直到手指真的移动
+Subject: [PATCH] Input: himax-spi: hold initial touch-down position within track_tap_radius
 
-手指不动地点一下，抬起前的一两帧里触点会缩小、变弱，中心自己移动5到10个单位
-（约0.5到1毫米）。Unity从10像素开始算拖动，所以游戏里滚动列表上的点击经常被当成
-滑动（PJSK的菜单里，15%到23%的静止点击漂移超过10像素）。
+During a stationary tap, the contact centroid shifts by 5-10 coordinate units
+(0.5-1 mm) over the last 1-2 frames as the finger lifts and the capacitance
+footprint shrinks, which can exceed game engines' 10-pixel drag slop and turn a
+tap into a scroll.
 
-新增track_tap_radius（sysfs，0为关闭）：跟踪离开第一次上报的位置超过这个半径之前，
-一直上报那个位置；超过以后逐帧照实上报。配对和预测仍然用实测位置。
+Add a runtime-tunable track_tap_radius sysfs attribute (0 to disable): while a
+track remains within track_tap_radius of its initial reported position, keep
+reporting the initial position; once it moves outside the radius, unlock and
+report live coordinates. Tracking and velocity prediction continue using raw
+measured coordinates.
 
-半径20时，三段PJSK录制的回放中，漂移超过10像素的静止点击降到1.5%到2.9%。flick
-第一帧就移动几十个单位，会立刻放开，位移和不锁定时相同；移动的触摸终点不变，慢速
-滑动最多晚19个单位开始。
+Origin: local
+Upstream-Status: Pending
 ---
- drivers/input/touchscreen/himax-spi-core.c |  7 +++--
- drivers/input/touchscreen/hx-algo.c        | 20 +++++++++++-
- drivers/input/touchscreen/hx-algo.h        | 36 ++++++++++++++++++++++
- 3 files changed, 60 insertions(+), 3 deletions(-)
-
 diff --git a/drivers/input/touchscreen/himax-spi-core.c b/drivers/input/touchscreen/himax-spi-core.c
 index 78ef039..e764d4d 100644
 --- a/drivers/input/touchscreen/himax-spi-core.c

@@ -1,10 +1,13 @@
-From: Gaokun3 Android bring-up
+From: Akisaira <akisaira@outlook.com>
 Subject: [PATCH] SystemUI: respect fingerprint-specific class 1/2 lockout
 
-Avoid restarting fingerprint authentication during its own timed lockout when
-a different modality is unlocked. Keep the existing biometric strength policy.
-Apply in frameworks/base.
+Avoid restarting fingerprint authentication during its own timed lockout when a
+different biometric modality is unlocked, while preserving the existing
+biometric strength policy.
 
+Origin: local
+Upstream-Status: Pending
+---
 --- a/packages/SystemUI/src/com/android/keyguard/KeyguardUpdateMonitor.java
 +++ b/packages/SystemUI/src/com/android/keyguard/KeyguardUpdateMonitor.java
 @@ -1652,7 +1652,10 @@

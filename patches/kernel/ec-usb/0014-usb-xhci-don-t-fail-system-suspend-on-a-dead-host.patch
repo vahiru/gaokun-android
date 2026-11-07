@@ -15,6 +15,8 @@ hcd that stays dead, as HCD_FLAG_DEAD is never cleared.
 
 Signed-off-by: Akisaira <akisaira@outlook.com>
 Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
 ---
  drivers/usb/host/xhci.c | 21 +++++++++++++++++++++
  1 file changed, 21 insertions(+)

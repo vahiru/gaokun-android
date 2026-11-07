@@ -1,3 +1,20 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] tinyalsa: derive buffer_size and sw_params from refined hw_params
+
+In pcm_set_config(), tinyalsa requests SNDRV_PCM_HW_PARAM_PERIOD_SIZE via
+param_set_min(), reads the kernel-refined period_size and period_count into
+pcm->config, but then computes pcm->buffer_size, sparams.avail_min, and
+sparams.stop_threshold from the caller's unrefined config struct.
+
+On SC8280XP Audioreach topologies, the kernel rounds a requested 1024-frame
+period up to 1440 frames (real buffer 5760 frames), leaving stop_threshold at
+4096 frames. ALSA then declares an XRUN as soon as 1664 frames remain queued.
+Compute buffer_size and sw_params thresholds from the refined pcm->config
+fields instead.
+
+Origin: local
+Upstream-Status: Pending
+---
 diff --git a/src/pcm.c b/src/pcm.c
 index 1b2103a..60b99d2 100644
 --- a/src/pcm.c

@@ -1,16 +1,18 @@
-audio AIDL HAL（XsdcConversion）：策略给了内置麦的 address 就别覆盖成 "bottom"
+From: mashen11 <mashen11@users.noreply.github.com>
+Subject: [PATCH] audio: aidl: default: preserve explicit built-in mic ALSA address in XsdcConversion
 
-应用到 AOSP 树的 hardware/interfaces，由 scripts/crdroid-tree-fixes.py 第 13 条
-自动应用（幂等）。⚠️ 别往内核树上打。
+createAudioDevice() unconditionally overwrote the XML address of
+AUDIO_DEVICE_IN_BUILTIN_MIC with "bottom" or "back", discarding any explicit
+ALSA card/device suffix such as "bottom CARD_0_DEV_3" in
+primary_audio_policy_configuration.xml and causing StreamPrimary to fall back
+to hw:0,0 (which is playback-only on SC8280XP Audioreach topologies).
 
-来自 PR #10（mashen11，Issue #9）。本机策略给内置麦的 address 是 "bottom CARD_0_DEV_3"，
-尾部的 CARD_/DEV_ 是 StreamPrimary::getCardAndDeviceId() 选 ALSA 卡 / 设备的唯一依据；
-被覆盖成 "bottom" 后回落到 (0,0)，而本机 card0/dev0 只有播放节点（pcmC0D0p），采集打不开。
-维护者 2026-09-28：注释改成与设备无关的说法（原注释说失败是 -EINVAL —— 那是另一个问题：
-44100 或单声道被 hw_params 拒掉；这里的失败是打不开节点）。
-2026-10-25 在 A17（lineage-24.0）上核过：createAudioDevice() 原样未变（XsdcConversion.cpp:231-246，
-仍无条件把内置麦的 address 覆盖成 "bottom" / "back"），补丁正文原样能打、不用重做。
+Only apply the default "bottom" address when the policy configuration leaves
+the built-in microphone address empty.
 
+Origin: local
+Upstream-Status: Pending
+---
 diff --git a/audio/aidl/default/XsdcConversion.cpp b/audio/aidl/default/XsdcConversion.cpp
 index 1a5f7f3c9d..2c7cceced5 100644
 --- a/audio/aidl/default/XsdcConversion.cpp

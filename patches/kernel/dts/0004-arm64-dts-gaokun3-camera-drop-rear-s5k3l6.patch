@@ -1,28 +1,19 @@
-arm64: dts: gaokun3: 相机 —— 去掉后摄 s5k3l6 节点与 csiphy0 端口
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] arm64: dts: qcom: sc8280xp-huawei-gaokun3: remove non-existent rear s5k3l6 sensor node
 
-前摄 hi846 要工作，后摄的 DT 节点必须拿掉。2026-09-11 用同一内核换两份 dtb
-做的干净 A/B（docs/stage4-findings.md #81）：
+The upstream sc8280xp-huawei-gaokun3-camera.dtsi describes a Samsung S5K3L6
+sensor at 0x10 on cci1_i2c0 that has no mainline driver and does not match the
+OmniVision OV13B10 module populated on this board. Leaving the unbound endpoint
+in the CAMSS graph blocks the v4l2-async notifier from completing and prevents
+the working front camera (hi846) from registering its subdev nodes.
 
-                      dtb 带后摄        dtb 去掉后摄
-  /dev/media0         ✅               ✅
-  hi846 绑定          ✅               ✅
-  /dev/v4l-subdev*    0 个             45 个（hi846 = subdev44）
-  camcc sync_state    pending due to   正常
-                      1-0010
+Remove the placeholder rear camera@10 node, its csiphy0 endpoint, and its
+unused pinctrl and regulator references before adding the board's OV13B10
+description.
 
-机制：后摄 camera@10 在 cci1_i2c0 上没有驱动能绑（本仓不带 s5k3l6xx 驱动，
-上游作者自己在 dtsi 里写明"画质差、不打算提取下游寄存器配置……前摄够开会用了"），
-而 v7.2 的 camss 用 fwnode_graph_for_each_endpoint 遍历端点、不检查可用性，
-一个"接了但永远绑不上"的传感器会卡死整个 v4l2-async notifier，
-subdev 节点一个都出不来。
-
-⚠️ 08-31 原始注释里还记着另一层原因（未由本仓实测，保留原文）：
-后摄 vdda(l2b) 被 DSI vddi 钉在 1.8V 而 S5K3L6 要 2.8V，sensor 在 CCI 上 NAK
-（i2c -6）。所以即使带上驱动也绑不上 —— 供电轨共享的问题要板级证据才能定。
-
-本补丁内容 = 2026-08-31 构建机旧树上的改动原样，09-11 从
-~/gaokun/mainline-linux 捞回（patches/camera-wip/ 曾归档，现提升为正式补丁）。
-
+Origin: local
+Upstream-Status: Pending
+---
 diff --git a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3-camera.dtsi b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3-camera.dtsi
 index 69fa4db9b1a1..690db451886c 100644
 --- a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3-camera.dtsi

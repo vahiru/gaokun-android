@@ -1,24 +1,19 @@
 From: Akisaira <akisaira@outlook.com>
-Subject: [PATCH] usb: gadget: 新增android_usb类，供Android的UsbDeviceManager使用
+Subject: [PATCH] usb: gadget: add android_usb class for Android UsbDeviceManager
 
-Android的UsbService只在/sys/class/android_usb存在时才创建UsbDeviceManager
-（USB用途、MTP/PTP、“USB调试”的状态都由它管）。没有USB gadget HAL时，它在
-启动时从/sys/class/android_usb/android0/state读连接状态，之后跟着这个设备
-带USB_STATE=...的change uevent走。Android的内核由configfs gadget发这些
-uevent，主线既没有这个类，也不发。
+Android's UsbService only instantiates UsbDeviceManager when
+/sys/class/android_usb is present. Without a USB gadget HAL, UsbDeviceManager
+reads the initial connection state from /sys/class/android_usb/android0/state
+and tracks subsequent USB_STATE=... change uevents from that device.
 
-这个补丁建出android0，它的state可写（DISCONNECTED、CONNECTED、CONFIGURED），
-写入新值时发uevent。状态由用户态来写：这台机器的UDC在拔线后状态一直停在
-configured，写的一方还要看EC的适配器在线标志，这件事交给USB端口HAL
-（device/huawei/gaokun3/usb）。
+Add a minimal android_usb class driver that exposes a writable
+/sys/class/android_usb/android0/state attribute (accepting DISCONNECTED,
+CONNECTED, and CONFIGURED) and emits the corresponding USB_STATE uevent on
+state transitions, driven by the userspace USB port HAL.
 
-只给Android用，不进主线。
+Origin: local
+Upstream-Status: Inappropriate [Android-specific]
 ---
- drivers/usb/gadget/Kconfig             | 13 +++++
- drivers/usb/gadget/Makefile            |  2 +
- drivers/usb/gadget/android_usb_state.c | 91 ++++++++++++++++++++++++++++++++++
- 3 files changed, 106 insertions(+)
-
 diff --git a/drivers/usb/gadget/Kconfig b/drivers/usb/gadget/Kconfig
 index 76521555e..b46303c8d 100644
 --- a/drivers/usb/gadget/Kconfig

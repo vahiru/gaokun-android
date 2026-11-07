@@ -1,49 +1,24 @@
 From: Akisaira <akisaira@outlook.com>
-Subject: [PATCH] Input: himax-spi: 手的位置图，误报成手指的手以MT_TOOL_PALM撤回
+Subject: [PATCH] Input: himax-spi: track palm regions across frames and cancel palm tracks with MT_TOOL_PALM
 
-现有的掌压规则逐帧、逐个连通域判断（面积、信号总和、长宽比），只认得出掌根。
-手的其余部分，比如弯着的手指、指节、平放时的手指，在网格上是一块块和指尖一样
-大的孤岛；手掌落下和抬起时，掌根自己也有几帧小于palm_area_threshold。这些都
-被当成手指上报，而且一律是MT_TOOL_FINGER，事后就算认出来也只能让它抬起，而
-按下再抬起就是一次点击。笔在感应范围外时（抬笔换行、落笔之前），Android的笔
-屏蔽也管不到它们。
+Per-frame connected-component palm rules only catch the main palm area; smaller
+fragments from bent fingers, knuckles, or a landing/lifting palm appear as
+finger-sized islands and were reported as MT_TOOL_FINGER taps.
 
-这个补丁给算法加一张"手的位置图"（hand_age[]，每格记着几帧前还是手）：
+Add a temporal spatial hand map (hand_age[]) and palm cancellation support:
+- Record detected palm zones dilated by hand_margin cells into hand_age[] and
+  retain them for hand_hold_frames frames after lift.
+- Drop peaks falling inside the active hand map before contact expansion and
+  absorb their connected components into the hand map.
+- Within hand_land_frames around a new palm landing, classify nearby peaks,
+  zones, and newly created tracks within hand_land_dist cells as part of the
+  landing hand.
+- Report tracks that were initially emitted as fingers and subsequently
+  classified as palm with ABS_MT_TOOL_TYPE = MT_TOOL_PALM for one frame before
+  releasing them so Android cancels the gesture instead of registering a tap.
 
-- 手掌区域外扩hand_margin格写进图里，手离开后再保留hand_hold_frames帧。
-- 落在图里的峰值在展开成触点之前丢掉，它所在的连通域也写进图，所以属于手的
-  碎块会一直被认出来，直到抬起；手的碎块也不再占用触点槽。
-- 屏上在一段空白之后出现手掌，算作"落下"。落下前后hand_land_frames帧内，
-  hand_land_dist格以内的峰值、连通域和刚出生的跟踪都算同一只手：平放时手指
-  往往比掌根早落下几十毫秒。
-- 已经上报、后来才认出是手的跟踪，以MT_TOOL_PALM再报一帧，下一帧释放。
-  Android收到后取消这个指针，只有一个指针时应用收到ACTION_CANCEL，不算点击。
-  为此注册了ABS_MT_TOOL_TYPE轴，否则输入核心会丢掉这个事件。
-- 按下已超过hand_land_frames的手指，只受"现在就在手里"这一条约束：按着手指
-  时放下手掌、手指拖过手掌刚离开的地方，都不会被打断。
-- 屏上没有手掌区域时这些规则都不生效，纯手指操作的行为不变。
-
-为了按区域标记，连通域多了每帧的编号（zone_of[]记录每个像素属于哪一块），
-峰值带上所在区域的编号。熄屏和芯片重新初始化时，位置图随跟踪器一起清空
-（hx_hand_reset()）。
-
-algo/下新增的参数（可运行时修改；超出上限的写入返回-EINVAL）：
-  参数              默认  上限  含义
-  hand_enabled      1     -     总开关
-  hand_margin       2     8     手掌和手的碎块往外扩的格数（约9毫米）
-  hand_hold_frames  36    120   手离开后继续记住的帧数（约300毫秒）
-  hand_land_frames  12    60    "落下"前后的窗口（约100毫秒）
-  hand_land_dist    25    60    落下时算作同一只手的范围（约11厘米）
-
-上限定义在hx-algo.h：hand_age到255表示“不是手”，保留时间要远小于它，否则
-整块屏都会被当成手；落下窗口要和同样封顶在255的跟踪年龄比较，道理相同；外扩
-每一遍要为每格扫描2×hand_margin+1格，太大会拖慢中断线程。
-
-algo/stats新增的计数器：hand_lands（落下次数）、hand_peaks（作为手丢掉的
-峰值）、hand_cancel_map（落进位置图而撤回的跟踪）、hand_cancel_land（和手掌
-一起落下而撤回的跟踪）。
-
-issue #29。
+Origin: local
+Upstream-Status: Pending
 ---
 diff --git a/drivers/input/touchscreen/himax-spi-core.c b/drivers/input/touchscreen/himax-spi-core.c
 index 0089e9be5..78ef03921 100644

@@ -1,23 +1,19 @@
 From: Akisaira <akisaira@outlook.com>
-Subject: [PATCH] arm64: dts: gaokun3: vreg_l9d常开
+Subject: [PATCH] arm64: dts: qcom: sc8280xp-huawei-gaokun3: mark vreg_l9d regulator-always-on
 
-这份设备树里只有usb_0_qmpphy（vdda-pll）用到vreg_l9d（0.912V），可依赖这路
-电的不止这一个PHY：Windows的PEP给URS0（port0）、USB2（多口控制器）和PCI2–6
-都投了LDO9_D 912mV的票，这些用电方设备树里都没有写。于是combo PHY一退出，
-l9d就断电。usb_0在device模式下系统挂起时，dwc3_core_exit会让它退出；UCSI
-工作以后，切换插头方向、切换DP模式也会。断电的后果：
+In sc8280xp-huawei-gaokun3.dts, only usb_0_qmpphy references vreg_l9d
+(0.912 V), whereas Windows PEP also votes LDO9_D on for port 0, the multi-port
+USB controller (a400000.usb), and PCIe controllers. When usb_0 suspends in
+device mode or reconfigures its QMP combo PHY on Type-C role/orientation
+changes, disabling vreg_l9d triggers a full-board reset on suspend or leaves
+port 0 DWC3 soft-reset timing out (-ETIMEDOUT) and drops the internal stylus
+MCU on bus 3-3.
 
-- usb_0在device模式下挂起时，整板复位（案卷#52）；
-- port0的dwc3软复位超时（-110），xhci和gadget都起不来，直到重启（#27一类
-  现象，0048里记的就是它）；同一时刻，多口控制器（a400000）上的笔MCU
-  （usb 3-3）掉线。
+Mark vreg_l9d regulator-always-on so LDO9_D stays powered across combo PHY
+transitions and system suspend.
 
-改成常开以后，这些情况下l9d都不再断电。
-
-没有改用主线的接法（把usb_0_hsphy的vdda-pll也接到l9d上）：device模式挂起时
-port0的两个PHY都会退出，l9d照样会断，而PCIe和多口控制器那时还在用它。
-
-这里的用电映射来自linux-gaokun的20445ba（"dts: add temporarily dts"）。
+Origin: local
+Upstream-Status: Pending
 ---
 --- a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
 +++ b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts

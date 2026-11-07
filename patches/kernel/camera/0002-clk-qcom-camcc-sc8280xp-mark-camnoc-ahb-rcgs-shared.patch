@@ -1,37 +1,22 @@
-clk: qcom: camcc-sc8280xp: 把 camnoc_axi / slow_ahb / fast_ahb 三个 RCG 标成 shared（关闭时停靠 XO）
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] clk: qcom: camcc-sc8280xp: use clk_rcg2_shared_ops for camnoc_axi and ahb RCGs
 
-**这是 camss 电源域缺陷（#83 → #105）的候选根因修复，依据是实测的时钟状态，不是推理。**
+During camera streaming, camss switches camcc_camnoc_axi_clk_src,
+camcc_slow_ahb_clk_src, and camcc_fast_ahb_clk_src from bi_tcxo to
+camcc_pll0_out_even / camcc_pll2_out_main. Because these three RCGs used plain
+clk_rcg2_ops with no disable callback, their CFG registers remained pointed at
+the disabled PLL after stream stop. On the subsequent titan_top_gdsc collapse
+and power-up, the GDSC hardware handshake with CAMNOC had no active clock edges
+and timed out with "titan_top_gdsc status stuck at 'off'" (-ETIMEDOUT).
 
-**实测（内核 #12，域钉住不塌缩，只跑一次 `camtest --stop 4 --noqbuf`）**：
-```
-之前  camcc_camnoc_axi_clk_src  rate=19200000   parent=bi_tcxo              en=0
-之后  camcc_camnoc_axi_clk_src  rate=150000000  parent=camcc_pll0_out_even  en=0
-      camcc_pll0 / camcc_pll0_out_even                                       en=0
-```
-⇒ camss 用完相机、关掉分支时钟后，**CAMNOC AXI 的时钟发生器仍指着一个已经熄灭的 PLL**。
-开机默认它挂在常开的 XO 上 —— 这就是 #102/#104 里"干净塌缩无害、流过之后塌缩必坏"
-两格之间唯一的硬件差别。GDSC 掉电时要与 CAMNOC 握手（clamp/halt），CAMNOC 没有活时钟就
-握不上 ⇒ `CFG_GDSCR` 少 bit 19（脏掉电签名）；上电时同样等不到 ⇒ FSM 冻在 `0xE`。
-塌缩前复位全部 BCR（#104 的 0026）能把 CAMNOC 复位成空闲、让 bit 19 回来，但上电仍需时钟
-⇒ 仍失败 —— 与实测一致。裸翻转 ife_0（#105）不动任何 RCG ⇒ 干净 —— 也一致。
+Switch camcc_camnoc_axi_clk_src, camcc_fast_ahb_clk_src, and
+camcc_slow_ahb_clk_src to clk_rcg2_shared_ops (matching camcc-sm8150,
+camcc-sc8180x, and camcc-x1e80100) so clk_rcg2_shared_disable() parks them back
+on bi_tcxo (parent index 0) when disabled.
 
-**为什么是驱动的问题**：`drivers/clk/qcom/clk-rcg2.c:1448` `clk_rcg2_shared_disable()` 会在
-RCG 关闭时把它**停靠到安全源（XO）**，`clk_rcg2_shared_init()`（:1514）在 probe 时也先停靠；
-普通 `clk_rcg2_ops` 没有 disable 回调，RCG 的 CFG 会一直保留最后一次 set_rate 的源。
-本驱动 43 个 RCG 里 21 个已是 shared（bps/icp/ife*/ipe/jpeg/lrme），但恰好
-**`camnoc_axi_clk_src` / `slow_ahb_clk_src`（= cpas_ahb 的源）/ `fast_ahb_clk_src` 是普通 ops**
-（refs/linux-v7.2-rc2/drivers/clk/qcom/camcc-sc8280xp.c）。对照上游同代驱动：
-`camcc-sm8150.c` 与 `camcc-sc8180x.c`（与本机 GDSC/寄存器偏移逐个相同）**全部 RCG 都是 shared**；
-`camcc-x1e80100.c` 把 `camnoc_axi_rt` / `slow_ahb` / `fast_ahb` / `csid` 标成 shared，
-cci/cphy_rx/csiXphytimer/mclk 保持普通 —— 本补丁照 x1e80100 的口径只改这三个。
-三个 RCG 的 parent_map 索引 0 都是 `P_BI_TCXO`（`safe_src_index` 默认 0 ⇒ 停靠到 XO）。
-
-**判据（预先声明）**：`camtest --stop 4 --noqbuf` 后塌缩 → 探针能上电；再连做 5 次完整
-camtest（各 12 帧）+ 塌缩 + 探针全部成功；`after-OFF` 的 `CFG_GDSCR` 回到 `0x00088000`。
-反向：如果照旧 `0x00008000` + TIMEOUT，则"死源"只是相关量，本补丁作废。
-
-⚠️ diff 由 `git diff` 生成，不是手写 hunk 头。上游化时应连同 0027 一起投。
-
+Origin: local
+Upstream-Status: Pending
+---
 diff --git a/drivers/clk/qcom/camcc-sc8280xp.c b/drivers/clk/qcom/camcc-sc8280xp.c
 index e4ec7e3..5ba6e54 100644
 --- a/drivers/clk/qcom/camcc-sc8280xp.c

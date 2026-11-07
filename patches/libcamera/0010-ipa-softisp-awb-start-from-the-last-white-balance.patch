@@ -1,7 +1,7 @@
 From d18b870d791ebf825880dddebb18c36d0eaa27ff Mon Sep 17 00:00:00 2001
 From: Akisaira <akisaira@outlook.com>
 Date: Tue, 3 Nov 2026 23:01:41 +1100
-Subject: [PATCH 10/13] ipa: softisp: awb: Start from the last white balance
+Subject: [PATCH] ipa: softisp: awb: Start from the last white balance
 
 Each configure() resets the white balance to the tuning default, unit
 gains unless the tuning file has a colourGains calibration.
@@ -17,6 +17,9 @@ tuning default.
 
 Signed-off-by: Akisaira <akisaira@outlook.com>
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+Origin: local
+Upstream-Status: Pending
 ---
  src/ipa/softisp/algorithms/awb.cpp | 18 +++++++++++++++++-
  src/ipa/softisp/algorithms/awb.h   |  5 +++++

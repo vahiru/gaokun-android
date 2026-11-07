@@ -41,6 +41,8 @@ plug-in, lid close and open, and a USB-C device on the other port were
 all reported as before.
 
 Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
 ---
  drivers/platform/arm64/huawei-gaokun-ec.c | 103 ++++++++++++++++++----
  1 file changed, 87 insertions(+), 16 deletions(-)

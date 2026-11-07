@@ -25,6 +25,8 @@ can take until the next resume. TIDs that had no session at suspend aren't
 covered.
 
 Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
 ---
  net/mac80211/agg-rx.c      | 18 ++++++++++++++++++
  net/mac80211/ieee80211_i.h |  1 +

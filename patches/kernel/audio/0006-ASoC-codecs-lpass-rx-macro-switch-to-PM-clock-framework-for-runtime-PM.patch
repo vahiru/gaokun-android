@@ -1,7 +1,7 @@
 From b05482e7ce1b110f86b08a99768ac41e4c9e4dfa Mon Sep 17 00:00:00 2001
 From: Ajay Kumar Nandam <ajay.nandam@oss.qualcomm.com>
 Date: Tue, 7 Jul 2026 15:13:12 +0530
-Subject: ASoC: codecs: lpass-rx-macro: switch to PM clock framework for
+Subject: [PATCH] ASoC: codecs: lpass-rx-macro: switch to PM clock framework for
  runtime PM
 
 Convert the LPASS RX macro codec driver to runtime PM clock management
@@ -29,6 +29,8 @@ Signed-off-by: Ravi Hothi <ravi.hothi@oss.qualcomm.com>
 Signed-off-by: Ajay Kumar Nandam <ajay.nandam@oss.qualcomm.com>
 Link: https://patch.msgid.link/20260707-xo-sd-codec-tx-rx-v2-2-f61b4622f97f@oss.qualcomm.com
 Signed-off-by: Mark Brown <broonie@kernel.org>
+Origin: backport, https://patch.msgid.link/20260707-xo-sd-codec-tx-rx-v2-2-f61b4622f97f@oss.qualcomm.com
+Upstream-Status: Backport [https://patch.msgid.link/20260707-xo-sd-codec-tx-rx-v2-2-f61b4622f97f@oss.qualcomm.com]
 ---
  sound/soc/codecs/lpass-rx-macro.c | 111 ++++++++++++++------------------------
  1 file changed, 40 insertions(+), 71 deletions(-)

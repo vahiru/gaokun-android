@@ -1,42 +1,13 @@
 From: Vahiru <nekovahiru@gmail.com>
-Subject: [PATCH] arm64: dts: qcom: sc8280xp: 加 iris（视频编解码）与 videocc 节点（上游 v7.3 backport）
+Subject: [PATCH] arm64: dts: qcom: sc8280xp: add iris video codec and videocc nodes
 
-案卷 docs/stage4-findings.md #128。替代 patches/upstream-venus/0019（venus 时代的节点，
-从 iris 切换起不再列入 kernel-apply-patches.sh）。
+Backport upstream commit 3a52eef16b97 ("arm64: dts: qcom: sc8280xp: Add Iris
+core") along with the videocc clock controller and pil_video_mem reserved
+memory region to sc8280xp.dtsi so the qcom-iris stateful V4L2 video decoder
+driver can bind on SC8280XP.
 
-**上游原始提交**：3a52eef16b97 "arm64: dts: qcom: sc8280xp: Add Iris core"
-（Dmitry Baryshkov "media: iris: enable SM8350 and SC8280XP support" v7，2026-05-15，
-Bjorn 2026-07-07 收进 v7.3-rc1）。节点正文与 v7.3-rc5 的 sc8280xp.dtsi:4236-4325 逐字相同，
-pil_video_mem 与其 :638-641 相同（上游同一系列里的 "sort reserved memory" 不搬，只按地址序插入）。
-
-★ iris 不需要任何驱动改动就能服务本机：compatible 是
-  "qcom,sc8280xp-iris", "qcom,sm8250-venus"
-后一个串命中 v7.2-rc2 就有的 iris_probe.c:372 → sm8250_data（IRIS2 / HFI gen1 / 4 VPP pipe /
-同一套 cp_* 与带宽表 —— 与我们 venus 时代的 sc8280xp_res 逐项相同）。binding 也已在基线里
-（qcom,sm8250-venus.yaml:20-27）。上游 v4 起就去掉了驱动补丁，理由正是"compatible 已覆盖"。
-
-与 upstream-venus/0019 的区别，前四条每一条都会让 iris probe 失败或跑错电压：
-  1. compatible：0019 是 "qcom,sm8350-venus"（本机实际绑的是它，不是文档写的 sc8280xp-venus），iris 不认。
-  2. resets：0019 只有一个 "core"（而且指向 GCC_VIDEO_AXI0_CLK_ARES）；iris 独占地要
-     "bus" + "core"，真正的 core 是 VIDEO_CC_MVS0C_CLK_ARES（videocc-sm8350.c:491）。
-  3. power-domains：0019 没有 "mmcx"。iris 的 opp_pd 表是 {"mx","mmcx"}，缺 mmcx 会掉进
-     iris_probe.c:67-76 为老 sm8250 DT 留的兼容分支（of_device_is_compatible 对 node 的每个串都查，
-     本机也会命中），于是 MMCX 静默地不投票。
-  4. OPP：0019 是 720/1014/1098/1332 MHz、每项一个 required-opp。iris 要两个（mx, mmcx 的顺序），
-     否则 OPP core 报 -EINVAL；而且 OPP 设在 vcodec0_core（= MVS0，videocc 里 ÷3 的只读分频之后），
-     所以频点要除以 3 —— 这正是 Konrad 在上游 v3 评审里指出的（"You need to div3 all of these"）。
-  5. 其余：去掉 video-llcc 互连（iris 不用它，binding 最多两条）、去掉已被 NAK 的 video-decoder /
-     video-encoder 子节点、iommus 0x2e00 → 0x2a00（掩码 0x400 下两者匹配同一组 SID）、
-     互连加 ACTIVE_ONLY / ALWAYS 标签。videocc 节点与 0019 的相同。
-
-需要三个 #include：sm8350-videocc 的 clock 与 reset 头，以及 interconnect/qcom,icc.h（标签宏）。
-
-⚠️ 上下文是按【构建树】生成的，不是裸 v7.2-rc2：buildbot 的 upstream/0002 在 include 列表里
-   多加了 qcom,scm.h（0019 当年需要 fuzz 就是因为这一行）。在还打着 0019 的树上 git apply 会拒绝它，
-   但 kernel-apply-patches.sh 的 fuzz 回落【能】把它硬打进去（得到两份 videocc / pil_video_mem）——
-   所以脚本在进循环之前就检查 venus 残留并拒绝，打完之后再断言"恰好一个 videocc、一个 iris"。
-⚠️ 频点假设 MVS0 的只读分频就是 ÷3（上游在 X13s 上验过）。本机未实测，上机前先读
-   /sys/kernel/debug/clk/video_cc_mvs0*_clk*/clk_rate（缓存值，无 MMIO）。
+Origin: local
+Upstream-Status: Pending
 ---
 diff --git a/arch/arm64/boot/dts/qcom/sc8280xp.dtsi b/arch/arm64/boot/dts/qcom/sc8280xp.dtsi
 index 444e41e..5d3f972 100644

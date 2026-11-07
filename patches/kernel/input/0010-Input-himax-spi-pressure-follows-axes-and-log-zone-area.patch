@@ -1,28 +1,17 @@
 From: Vahiru <nekovahiru@gmail.com>
-Subject: [PATCH] Input: himax-spi: pressure_enabled 跟着轴走；contacts_log 加 zone_area 列
+Subject: [PATCH] Input: himax-spi: initialize pressure_enabled from !disable_pressure and log zone_area in contacts_log
 
-**① `pressure_enabled` 的默认值是个逻辑缺陷，不是调参项。**
+When disable_pressure=0 (the default), the driver registers ABS_MT_TOUCH_MAJOR
+and ABS_MT_PRESSURE, but hx_algo_init_defaults() left pressure_enabled set to
+false, causing himax_report_tracked_state() to report constant values (1 and
+4095) until enabled via sysfs. Initialize ts->algo->pressure_enabled to
+!disable_pressure during probe.
 
-`disable_pressure=0` 时驱动注册 `ABS_MT_TOUCH_MAJOR` / `ABS_MT_PRESSURE` 两个轴，
-但 `hx_algo_init_defaults()` 把 `pressure_enabled` 无条件设成 `false`，于是
-`himax_report_tracked_state()` 往这两个轴里填的是**常数**（1 和 4095）——
-每个触点都成了"针尖"，**比不注册这两个轴还糟**。实机 `#23` 起来时正是这个状态，
-要手动 `echo 1 > algo/pressure_enabled` 才对。
+Also propagate each peak's connected-component area (zone_area) into struct
+hx_contact and include it in algo/contacts_log.
 
-改成在 probe 里 `ts->algo->pressure_enabled = !disable_pressure`：轴存在就报真值。
-sysfs 旋钮保留，仍可运行时改。
-
-**② `contacts_log` 加 `zone_area` 列 —— 今晚缺的正是它。**
-
-实机量过（案卷 #116）：`ct->area`（"≥峰值一半"的格子数）纯指尖是 8–20，
-手掌压屏时活下来的触点是 5–21，**完全重叠**。原因是构造性的：手掌碎块各有局部峰值，
-50% 等高线和指尖差不多大。能分开两者的是**连通域面积**（在绝对阈值 `macro_threshold`
-上的 8-连通区域，`peaks[].zone_area`），可它没被记进触点里。
-
-给 `struct hx_contact` 加 `zone_area`，`hx_expand_and_resolve()` 从对应峰值抄过来，
-出生记录随之多一列。有了它才能回答"`palm_area_threshold` 该从 50 降到多少"。
-
-案卷：`docs/stage4-findings.md` #116。
+Origin: local
+Upstream-Status: Pending
 ---
 diff --git a/drivers/input/touchscreen/himax-spi-core.c b/drivers/input/touchscreen/himax-spi-core.c
 --- a/drivers/input/touchscreen/himax-spi-core.c

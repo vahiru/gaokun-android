@@ -32,6 +32,8 @@ ATH11K_RESET_LOOP_WINDOW_SEC after the last reset or the give-up, in
 boottime, so sleep counts. A hw-restart from debugfs starts it over too.
 
 Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
 ---
  drivers/net/wireless/ath/ath11k/core.c    | 83 +++++++++++++++++------
  drivers/net/wireless/ath/ath11k/core.h    | 19 ++++--

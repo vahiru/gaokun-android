@@ -1,22 +1,21 @@
-media: qcom: camss: 传感器等不到就别一直等 —— 超时后只带已绑上的传感器完成 notifier
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] media: qcom: camss: complete v4l2-async notifier without never-bound sensors after timeout
 
-**问题**：v4l2-async 要端点上【所有】传感器都绑上才会调 `complete()`（建 subdev 节点）。同一款板子
-出厂有不同的后摄模组（本机 OV13B10，驱动包里另有 S5K3L6），DT 只能写一种；写错的那台机器上那颗
-传感器永远绑不上 ⇒ **前摄也一起消失**（#81 当年为此删掉后摄节点；#106 把它接回来，风险又回来了）。
+v4l2-async only invokes the notifier complete() callback and registers
+/dev/v4l-subdev* nodes once every endpoint in the device tree graph has bound.
+If one camera sensor fails to probe (for example, on board variants carrying an
+alternate rear sensor module), the entire camss media pipeline remains
+incomplete and the working front camera is also lost.
 
-**做法**：probe 后起一个延时工作（模块参数 `camss.sensor_wait_ms`，默认 20000，0 关闭）。到点时若
-notifier 仍未完成：打印哪些传感器没绑上（`%pfw`），把 notifier 注销、清理、重建，只重新加入 `bound()`
-回调里记下过的那些远端端点（比对 `asd->match.fwnode` —— 它就是 `fwnode_graph_get_remote_endpoint(ep)`，
-见 `v4l2-async.c` 的 `__v4l2_async_nf_add_fwnode_remote()`），再注册。已注册的传感器 subdev 会被
-async 核心立刻重新匹配 ⇒ `complete()` ⇒ 节点出现。一个都没绑上时什么也不做（本来就没相机）。
+Schedule a delayed fallback work item (camss.sensor_wait_ms, default 20000 ms;
+0 disables) after registering the async notifier. If the notifier is still
+incomplete when the timer expires and at least one sensor has bound, rebuild
+and re-register the notifier with only the bound sensor endpoints so the
+available cameras remain usable.
 
-**判据**：用 `ov13b10.fail_probe=1`（`patches/0034` 里的诊断开关）模拟后摄不在：20 秒后 dmesg 出现
-"never bound: .../camera@36"，前摄仍有 `/dev/v4l-subdev*`、camtest 出帧、HAL 枚举 1 个相机；
-正常开机（两颗都在）行为不变：47 个 subdev、2 个相机、无警告。
-
-⚠️ 读 `notifier.waiting_list` 时没拿 v4l2-async 的内部锁 —— 只用于打印，可以容忍竞争。
-⚠️ diff 由 `git diff` 生成。
-
+Origin: local
+Upstream-Status: Pending
+---
 diff --git a/drivers/media/platform/qcom/camss/camss.c b/drivers/media/platform/qcom/camss/camss.c
 index 2123f63..747ceec 100644
 --- a/drivers/media/platform/qcom/camss/camss.c

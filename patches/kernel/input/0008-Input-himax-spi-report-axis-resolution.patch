@@ -1,30 +1,13 @@
 From: Vahiru <nekovahiru@gmail.com>
-Subject: [PATCH] Input: himax-spi: 上报坐标轴分辨率（此前是 0 = 未知）
+Subject: [PATCH] Input: himax-spi: report X/Y axis resolution (10 units/mm)
 
-驱动从来没调过 `input_abs_set_res()`，于是 `input_absinfo::resolution` 一直是 0，
-也就是告诉用户态"不知道"。实机印证（`dumpsys input`）：
+Set the ABS_MT_POSITION_X and ABS_MT_POSITION_Y resolution to 10 units/mm via
+input_abs_set_res() (2560 x 1600 coordinate space across the 266.0 x 166.3 mm
+12.35-inch 16:10 panel, or 9.62 units/mm) so Android InputReader can compute
+physical touch geometry and gesture thresholds.
 
-    X: source=TOUCHSCREEN, min=0.000, max=1599.000, flat=0.000, fuzz=8.000, resolution=0.000
-    Y: source=TOUCHSCREEN, min=0.000, max=2559.000, flat=0.000, fuzz=8.000, resolution=0.000
-
-拿不到分辨率，框架就没办法用物理单位去推断触点几何 —— 对 Android 而言这是
-手掌误触抑制与部分手势换算的输入之一。
-
-取值推导：`hx_expand_and_resolve()` 把 60 列映射到 2560 单位、40 行映射到 1600 单位，
-而面板是 12.35" 16:10 ⇒ 266.0 × 166.3 mm。两轴都是
-
-    2560 / 266.0 = 9.62    1600 / 166.3 = 9.62   单位/毫米
-
-`resolution` 是整数，所以取 **10**（偏差约 4%）。两轴同值，因此
-`touchscreen_parse_properties()` 在下面交换两个 `absinfo` 结构时不可能弄错。
-
-⚠️ 不给 `ABS_MT_TOUCH_MAJOR` 设分辨率：这个驱动填进去的是
-`int_sqrt(signal_sum >> 4) * 4`，是个由信号推出来的数，**不是长度**，
-给它标"单位/毫米"等于撒谎。要先有标定（`hx-algo.c` 里那句
-`// TODO: 根据触点附近数据集建模得到` 说的就是这件事）。
-
-编译：`W=1` 零告警。
-案卷：`docs/stage4-findings.md` #115。
+Origin: local
+Upstream-Status: Pending
 ---
 diff --git a/drivers/input/touchscreen/himax-spi-core.c b/drivers/input/touchscreen/himax-spi-core.c
 --- a/drivers/input/touchscreen/himax-spi-core.c

@@ -1,34 +1,20 @@
-v4l2_codec2: HEVC 把 CSD 并进第一个帧缓冲（否则 venus 死锁、一帧不出）
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] v4l2_codec2: merge HEVC CSD into the first input frame buffer
 
-应用到 AOSP 树的 external/v4l2_codec2，由 scripts/crdroid-tree-fixes.py 第 8 条
-自动应用（幂等）。⚠️ 别往内核树上打。
+When the Qualcomm iris/venus firmware receives an HEVC input buffer containing
+only VPS/SPS/PPS without V4L2_BUF_FLAG_CODECCONFIG, it logs
+H265_CONFIG_FLAG_MISSING and synthesizes a dummy picture that blocks waiting
+for a CAPTURE buffer before V4L2_EVENT_SOURCE_CHANGE has been emitted,
+deadlocking decoder initialization.
 
-★ 问题：venus 固件收到"只有 VPS/SPS/PPS、又没打 CODECCONFIG 标志"的缓冲时会报
-  H265_CONFIG_FLAG_MISSING，然后用默认 SPS 编造一张 pic 0；那张图要一块 YUV
-  输出缓冲，而此时主机还在等 SOURCE_CHANGE 才肯分配 —— 死锁，一帧不出。
-  H.264 固件不挑同样形状的缓冲（实测 CONFIG_FLAG_MISSING 0 次），所以只改 HEVC。
+Stash incoming HEVC CSD payloads and prepend them to the first frame buffer
+allocated from the default linear dmabuf pool (sized to at least the V4L2
+OUTPUT plane min_length of 8 MiB, with the write view destroyed before
+share()). Can be toggled via vendor.gaokun3.v4l2c2.merge_csd (default 1).
 
-修法：把 CSD 暂存，合并进第一个帧缓冲再下发。属性
-`vendor.gaokun3.v4l2c2.merge_csd`（默认 1）可关掉做 A/B。
-
-★ 代码注释里记着三个硬啃出来的坑，都是"报错完全看不出真因"的那种：
- 1. 合并用的块必须是 **dmabuf 支撑**的：输入队列走 V4L2_MEMORY_DMABUF，
-    V4L2Decoder 直接取 `handle()->data[0]` 当 fd。本机**没有 ION**，
-    `BASIC_LINEAR` 默认走的就是它 —— 拿到的块没有可用 fd，QBUF 在用户态就失败
-    （内核侧连 VIDIOC_QBUF 都看不到）。BLOB 是 gralloc 支撑的，同样不行。
- 2. 分配尺寸必须 **≥ V4L2 输入队列的 plane 尺寸**（本机实测 8 MiB），不能只按
-    内容大小分配 —— vb2 检查 dmabuf 实际大小 ≥ min_length，否则 QBUF 直接 EINVAL，
-    **报错里看不出是尺寸问题**。
- 3. 写视图必须在 `share()` **之前**析构 —— 映射还挂着时 share 出来的块，
-    其 native handle 在 V4L2 那边用不了（VIDIOC_QBUF 报 EFAULT，
-    strace 连 v4l2_buffer 都解不出来）。
-
-⚠️★ 来源与出处说明：这段代码 **2026-08-24 写在构建机上，从未入库**，
-2026-09-12 抢救回来（连同真温控 HAL、触摸模式、导航栏修复）。
-代码注释里写的"docs/stage4-findings.md #79"**指的不是本仓现在的 #79**
-（本仓 #79 是音量补丁上机失败）—— 那一轮的案卷从来没写过。
-本补丁头上这段就是现存的全部记录，见 docs/stage4-findings.md #82。
-
+Origin: local
+Upstream-Status: Pending
+---
 diff --git a/components/DecodeComponent.cpp b/components/DecodeComponent.cpp
 index 00880d7..305b1ff 100644
 --- a/components/DecodeComponent.cpp

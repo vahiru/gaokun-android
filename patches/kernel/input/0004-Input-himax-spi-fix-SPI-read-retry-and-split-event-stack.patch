@@ -1,50 +1,18 @@
 From: Vahiru <nekovahiru@gmail.com>
-Subject: [PATCH] Input: himax-spi: 修好读重试（重试发的是垃圾）与被切成两次的事件栈读取
+Subject: [PATCH] Input: himax-spi: reinitialize TX header on SPI read retry and read full event stack in one transfer
 
-**① 重试发出去的不是命令，是上一次收到的数据。**
+Fix two SPI transport issues in himax-spi:
 
-`himax_spi_read()` 的 `tx_buf` 与 `rx_buf` 是**同一块** `ts->xfer_buf`（全双工，
-读的时候拿收到的字节原地覆盖发出去的）。而命令头只在进重试循环**之前**写一次：
+1. himax_spi_read() uses a single full-duplex buffer (ts->xfer_buf) for both TX
+   and RX, so the first spi_sync() call overwrites the 3-byte command header
+   with received data. Move the buffer clear and command header initialization
+   inside the retry loop so retries send a valid read command.
+2. Include HIMAX_BUS_R_HLEN (3 bytes) in ts->spi_xfer_max_sz so the 5132-byte
+   event stack is read in a single SPI transfer instead of splitting the last
+   3 bytes into a second spi_sync() call every frame.
 
-    memset(ts->xfer_buf, 0, HIMAX_BUS_R_HLEN + len);
-    ts->xfer_buf[0] = HIMAX_SPI_FUNCTION_READ;
-    ts->xfer_buf[1] = cmd;
-    ...
-    for (retry_cnt = 0; retry_cnt < HIMAX_BUS_RETRY; retry_cnt++) {
-            ret = spi_sync(ts->spi, &msg);      /* 失败 → 再来一次，但头已经没了 */
-
-于是**第一次传输只要推进到时钟出任何数据，命令头就已经被覆盖**，后面两次重试
-是在拿"上一次碰巧收到的字节"当命令问 IC。结果是 `HIMAX_BUS_RETRY = 3` 名义上有
-三次机会，实际只有一次 —— 一次总线抖动就从"重试一下"变成"必然失败"，
-而失败路径会走 `himax_mcu_ic_reset()`，也就是一次全芯片复位。
-
-原作者自己在那行留了 `// TODO: 确定一般会不会出现重试的情况` —— 他也不知道会不会走到。
-
-改法：把 memset 与三个头字节挪进循环里，每次尝试都重新铺一遍。
-正常路径（第一次就成功）**开销完全不变**，仍然只做一次 memset。
-顺便把 `int ret;` 改成 `int ret = -EIO;`，免得读者去数循环边界。
-
-**② 每帧都被切成两次 `spi_sync`，第二次那 3 字节毫无用处。**
-
-    ts->spi_xfer_max_sz = HIMAX_HX83121A_FULL_STACK_SZ;      /* 5132 */
-    ...
-    const u32 max_trunk_sz = ts->spi_xfer_max_sz - HIMAX_BUS_R_HLEN;   /* 5129 */
-
-`spi_xfer_max_sz` 的语义是"一次传输的**总**长度，含 3 字节头"，所以减掉头之后
-每次最多只能搬 5129 字节 —— 而一个事件栈正好是 5132 字节。于是
-`hx83121a_gaokun_read_event_stack()` 的循环每帧跑两次：先 5129 字节，
-再为剩下的 3 字节单独发一次 `spi_sync`（多一次片选翻转 + 一次调度），
-而那 3 字节落在电容网格之外，**从来没有任何代码读过它**。
-
-把 `spi_xfer_max_sz` 加上 `HIMAX_BUS_R_HLEN` 的余量，一次传输就覆盖整个事件栈。
-缓冲区随之从 5132 涨到 5135 字节。
-
-⚠️ 这条只省一次往返，**不改变采样率**：整张 40×60 电容图仍然每帧都要搬，
-12 MHz 下 41080 bit ≈ **3.42 ms**，占 120 Hz 帧预算 8.33 ms 的 41%。
-那是"把触摸算法放进内核"这条路线的固有代价，不是这个补丁能动的。
-
-编译：`W=1` 零告警。
-案卷：`docs/stage4-findings.md` #115。
+Origin: local
+Upstream-Status: Pending
 ---
 diff --git a/drivers/input/touchscreen/himax-spi-core.c b/drivers/input/touchscreen/himax-spi-core.c
 --- a/drivers/input/touchscreen/himax-spi-core.c

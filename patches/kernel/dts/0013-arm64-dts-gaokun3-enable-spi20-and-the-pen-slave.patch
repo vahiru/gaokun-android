@@ -1,23 +1,16 @@
 From: Akisaira <akisaira@outlook.com>
-Subject: [PATCH] arm64: dts: gaokun3: 启用 spi20 与触摸从片（主动笔）
+Subject: [PATCH] arm64: dts: qcom: sc8280xp-huawei-gaokun3: enable spi20 and HX83121A pen slave
 
-感应 M-Pencil 的 HX83121A 级联从片接在 spi20（QUP2 SE4 @ 0x890000）上，
-即 ACPI 中的 THPB/HIMX0002（\_SB.SP21），中断在 GPIO 39，没有复位线。
-gaokun3 的设备树原先没有启用 spi20，也没有它的引脚状态。
+The cascade slave HX83121A IC that senses the Huawei M-Pencil is connected to
+spi20 (QUP2 SE4 at 0x890000, ACPI THPB/HIMX0002) with its interrupt on GPIO 39.
 
-- &spi20：启用，并挂上从片节点 pen@0（compatible "himax,hx83121a-pen-slave"，
-  12 MHz，中断低电平触发）。与主片一样以 panel = <&panel> 跟随面板，亮屏后
-  重新初始化从片。
-- spi20_default：qup20 的 gpio87–90。这一功能组还包括 gpio92，但它在本机是
-  后摄稳压器的使能脚，所以只复用这四个 SPI 引脚。参数照主片的 spi6_default。
-- ts1_default：中断脚 gpio39，参数照主片的中断脚（gpio、bias-disable）。
+Configure the spi20_default (GPIO 87-90, leaving GPIO 92 for the rear camera
+regulator) and ts1_default (GPIO 39) pinctrl states, enable &spi20, and add the
+pen@0 ("himax,hx83121a-pen-slave") child node following &panel.
 
-节点内容与 #26 的 KernelSU 模块在运行时应用的 DT overlay 相同，后者在
-1.0.0-rc.1 上实测可用。
+Origin: local
+Upstream-Status: Pending
 ---
- .../boot/dts/qcom/sc8280xp-huawei-gaokun3.dts      | 73 ++++++++++++++++++++++
- 1 file changed, 73 insertions(+)
-
 diff --git a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
 index f7c7c8999e92212e186aad5cff2a92dd4453e69a..9af467840ab5e09d04ad31eb937ed9057064bdc7 100644
 --- a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts

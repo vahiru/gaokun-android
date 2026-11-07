@@ -16,6 +16,8 @@ Signed-off-by: Manivannan Sadhasivam <manivannan.sadhasivam@oss.qualcomm.com>
 Signed-off-by: Bjorn Helgaas <bhelgaas@google.com>
 Link: https://patch.msgid.link/20260729165005.896725-1-manivannan.sadhasivam@oss.qualcomm.com
 (cherry picked from commit d4c79b63d82d408c81f1629bcdc8cdbeebd85014)
+Origin: backport, commit d4c79b63d82d408c81f1629bcdc8cdbeebd85014
+Upstream-Status: Backport [d4c79b63d82d408c81f1629bcdc8cdbeebd85014]
 ---
  drivers/pci/pci.c | 8 ++++----
  1 file changed, 4 insertions(+), 4 deletions(-)

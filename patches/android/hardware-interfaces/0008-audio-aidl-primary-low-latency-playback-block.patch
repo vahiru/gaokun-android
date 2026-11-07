@@ -1,28 +1,19 @@
-audio AIDL HAL（ModulePrimary）：播放块大小由 ro.vendor.audio.primary.out_latency_ms 决定 —— 让 AudioFlinger 开 FastMixer、游戏拿到 FAST 轨道
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] audio: aidl: primary: allow overriding output nominal latency via ro.vendor.audio.primary.out_latency_ms
 
-应用到 AOSP 树的 hardware/interfaces，由 scripts/crdroid-tree-fixes.py 第 22 条自动应用（幂等）。⚠️ 别往内核树上打。
+ModulePrimary::getNominalLatencyMs() hardcodes 85 ms (4096 frames at 48 kHz)
+for non-MMAP streams. Because AudioFlinger only enables FastMixer when the HAL
+period is below 20 ms (kNormalPlaybackPeriodMs), low-latency AAudio/OpenSL ES
+requests are rejected and end-to-end playback latency exceeds 300 ms.
 
-ModulePrimary::getNominalLatencyMs() 对非 MMAP 流写死 85 ms（注释原文：给模拟器过 CTS 用，真硬件应该低得多），
-经 Module::calculateBufferSizeFramesForPcm 取成 4096 帧。AudioFlinger 只在 HAL 块短于 20 ms 时开 FastMixer
-（Threads.cpp kNormalPlaybackPeriodMs / initFastMixer），于是游戏的 AAudio 低延迟请求一律被拒，
-轨道 8196 帧 + 混音 4096 + ALSA 4 × 1440（120 ms）：应用按时间戳算出的输出延迟中位 317 ms（2026-10-09 实测）。
+Read ro.vendor.audio.primary.out_latency_ms for output streams in
+ModulePrimary::getNominalLatencyMs() (keeping 85 ms when unset and leaving
+capture streams at 85 ms). Setting the property to 10 ms yields a 480-frame
+HAL transfer block and enables FastMixer on the primary output.
 
-改法：只动输出方向。属性没设时仍是 85 ms（行为不变）；device.mk 设 10 ⇒ 480 帧。
-播放由 0069 直接阻塞写 ALSA，块小只是写得更勤；alsa_utils 把块分成 4 个 period（480/4 = 120），
-tinyalsa 用 param_set_min 请求、内核 q6apm-dai 按 480 帧步长上调 ⇒ ALSA 4 × 480 = 40 ms，不用另改。
-采集保持 85 ms：0052 的 MonoPipe 容量与 0063 的数据驱动交付都是按 4096 调的。
-依赖 0069（播放直接写 ALSA）：没有它，小块会落进墙钟定拍 + 非阻塞管道那条路。
-
-2026-10-25 改到 A17（lineage-24.0）上：getNominalLatencyMs() 原样未变（ModulePrimary.cpp:152-159），
-改动的行与 A16 版相同，只是 ① 头文件区上下文换成 A17 的 <Log.h> / <Utils.h>；② 注释里的名字跟着 A17 改：
-FastMixer 门槛在 A17 叫 kNormalPlaybackPeriodMs（frameworks/av/services/audioflinger/Threads.cpp:183-184，
-默认 20 ms，可被 persist.audio.normal_playback_period_ms 改；:3423 起算 normal sink、:5266 initFastMixer = mFrameCount < mNormalFrameCount），
-直写助手在 A17 叫 StreamAlsaBase::transferPlaybackDirect()（见 0069）。数值链在 A17 上逐项核过：
-10 ms → calculateBufferSizeFramesForPcm 取 480 帧（Module.h:223-233，≤ 512 时只按 16 取整）；
-ModulePrimary::calculateBufferSizeFrames 只对压缩 / PCM offload 另算（ModulePrimary.cpp:58-70），PCM 照旧走它；
-alsa_utils 的 period_count 默认 4（system/media/alsa_utils/include/alsa_device_profile.h:38、alsa_device_profile.c:447-455）；
-AudioFlinger 侧 480 帧 < 960 帧 normal sink ⇒ 开 FastMixer。⬜ A17 上的延迟要上机复测（目标同 A16：中位 ≈110 ms）。
-
+Origin: local
+Upstream-Status: Inappropriate [device-specific tuning]
+---
 diff --git a/audio/aidl/default/ModulePrimary.cpp b/audio/aidl/default/ModulePrimary.cpp
 index 102d2ff..33750f6 100644
 --- a/audio/aidl/default/ModulePrimary.cpp

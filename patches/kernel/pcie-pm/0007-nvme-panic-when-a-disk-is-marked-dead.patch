@@ -16,6 +16,8 @@ disk that never came up behaves as before, and neither does an orderly
 removal.
 
 Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Inappropriate [device-specific policy]
 ---
  drivers/nvme/host/core.c | 6 ++++++
  1 file changed, 6 insertions(+)

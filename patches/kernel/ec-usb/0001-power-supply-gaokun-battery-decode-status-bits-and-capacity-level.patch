@@ -1,55 +1,23 @@
-From fa2eeba0a65d1acb2e227dfd85d59a6ef6bbb982 Mon Sep 17 00:00:00 2001
 From: Vahiru <nekovahiru@gmail.com>
-Date: Mon, 5 Oct 2026 06:00:00 +0800
-Subject: [PATCH] =?UTF-8?q?power:=20supply:=20huawei-gaokun-battery:=20dec?=
- =?UTF-8?q?ode=200x82=20by=20bits,=20report=20CAPACITY=5FLEVEL=EF=BC=88?=
- =?UTF-8?q?=E6=9C=AC=E5=9C=B0=EF=BC=8C1.0=20=E6=89=B9=202=20BATT-1/2/3?=
- =?UTF-8?q?=EF=BC=89?=
-MIME-Version: 1.0
-Content-Type: text/plain; charset=UTF-8
-Content-Transfer-Encoding: 8bit
+Subject: [PATCH] power: supply: huawei-gaokun-battery: decode status register bitwise and report CAPACITY_LEVEL
 
-案卷：docs/v1.0-plan.md 的 BATT-1 / BATT-2 / BATT-3（批 2 内核）。**本地补丁**，上游 v7.2-rc2 的
-驱动与 buildbot 版（只改了 _STA / gpio）在这几处都一样。之后可以投上游（docs/upstream/）。
+The EC battery status byte at 0x82 follows the ACPI _BST state bitmask
+(bit 0 discharging, bit 1 charging, bit 2 critical, bit 3 full), but the driver
+matched only single-bit values (0x01, 0x02, 0x08) and left the previous status
+stale on 0x00 (plugged in, not charging) or combined values such as 0x05
+(discharging + critical). In addition, failing to read 0x82 decoded an
+uninitialized stack variable, and the driver did not expose
+POWER_SUPPLY_PROP_CAPACITY_LEVEL, preventing Android's BatteryService from
+triggering a graceful shutdown when discharging to 0% on a weak power source.
 
-问题（都是代码事实，复核核实过）：
-* 0x82（_BST 状态）按整个字节精确匹配，只认 0x01 / 0x02 / 0x08 三个单值；0x00（插着电但不充）
-  和任何组合值（如 0x05 = 放电 + 危急）都走 default：只打一条 dev_warn、status 停在上一次的值。
-  EC_BAT_CRITICAL（bit2）定义了但全文件没用。读 0x82 失败时还会拿未初始化的栈变量去解码。
-* 没有 POWER_SUPPLY_PROP_CAPACITY_LEVEL ⇒ healthd 报 Capacity level: -1。Android 的
-  BatteryService.shouldShutdownLocked()（本机 services.jar 反汇编）在这种情况下只用
-  "电量 <= 0 且 status 不是充电中" 关机 —— 弱电源下 EC 报充电、电量照掉时永远不关机
-  （09-14 那次没有关机画面的断电，BATT-1）。
+Decode 0x82 bitwise (prioritizing discharging so a stale charging state never
+blocks low-battery shutdown), preserve the previous status on read errors,
+expose POWER_SUPPLY_PROP_CAPACITY_LEVEL with a tunable critical_max_capacity
+threshold, and provide a read-only ec_raw sysfs attribute for diagnostics.
 
-改法：
-* 按位解码：放电位压过其他位（0x05 / 0x09 / 矛盾的 0x03 都报放电，不让过时的"充电中"挡住关机）；
-  其次充满、充电；一位都没有时，插着电报 NOT_CHARGING、没插电报放电。高 4 位出现未知位只
-  dev_warn_once。读失败时保留上一次的 status。
-* 新增 CAPACITY_LEVEL。导出它之后框架【只】看它等不等于 Critical，所以这里必须覆盖原规则：
-  - 0%，且不是"EC 说在充、current_now 也确实为正" ⇒ Critical（比原规则多出的正是 BATT-1）；
-  - EC 的 CRITICAL 位且电量 <= critical_max_capacity（0644 模块参数，默认 2）⇒ Critical
-    （同样排除确实在充）。CRITICAL 位在多少电量置位没实测过，若它在 5% 以上就置位，
-    直接用它会过早关机（BATT-3 复核意见），所以加了这道门；参数设 0 就只在 0% 认它。
-  - 充满 / 100% ⇒ Full；CRITICAL 位但没升级 ⇒ Low；其余 Normal。
-* 新增只读 sysfs `ec_raw`：0x82 原始字节和三个含义未知的字（0x98 / 0x9C / 0xA0）。都是驱动
-  本来就在读的，不增加 EC 事务。给 BATT-1 的带负载放电采样、找电池温度（LIVE-11 / PERF-11）用。
-
-没做：温度（POWER_SUPPLY_PROP_TEMP）。EC 协议里有没有电池温度字段没有任何资料（DSDT 2.16 里
-没有电池方法，buildbot 驱动的 0x98 / 0x9C 标着"?"），EC 的 20 路 hwmon 温度哪一路是电池也没标定
-（复核意见：先确认字段再加属性）。猜一个寄存器报错的温度会触发框架的过温关机，比报 0 更糟；
-所以只导出原始字，等实测认出来再加。
-
-⚠️ current_now 的正负约定没有带负载实测过（2026-10-05 插着 Mac USB 口、Charging、92% 时
-7 次采样 5 次为 +15…+106 mA、2 次为 -19 / -57 mA，与"正 = 流入电池"一致，只是旁证）。
-约定若是反的：0% 接着真充电器会被报 Critical（多关一次机），弱电源下掉到 0% 仍不报。
-
-⬜ 实机（用户在场，BATT-1 验收）：插电脑 USB 口带负载放电，每 5 秒记 status / current_now /
-capacity / capacity_level / ec_raw，确认 current_now 正负号、0x82 在掉电时是什么值、CRITICAL 位
-在多少电量置位；dumpsys battery 的 Capacity level 不再是 -1。
+Origin: local
+Upstream-Status: Pending
 ---
- drivers/power/supply/huawei-gaokun-battery.c | 134 +++++++++++++++++--
- 1 file changed, 120 insertions(+), 14 deletions(-)
-
 diff --git a/drivers/power/supply/huawei-gaokun-battery.c b/drivers/power/supply/huawei-gaokun-battery.c
 index 6212b00..0800d43 100644
 --- a/drivers/power/supply/huawei-gaokun-battery.c

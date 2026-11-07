@@ -1,24 +1,19 @@
 From: Akisaira <akisaira@outlook.com>
-Subject: [PATCH] media: iris: 第一次CAPTURE streamon之前flush过时，照常配置输出口（本地，修0066）
+Subject: [PATCH] media: iris: configure output parameters on first CAPTURE streamon after an early flush
 
-0066的seek恢复（seek_resume）假定输出口已经配置过，所以CAPTURE streamon时跳过
-session_set_config_params。OUTPUT streamoff的判断条件只看INPUT_STREAMING和
-LOAD_RESOURCES，而第一次CAPTURE streamon之前的flush也满足这两个条件：播放器开播时
-马上reset解码器（PiliPlus用的mpv就这样），v4l2_codec2的flush就可能赶在处理
-SOURCE_CHANGE之前。这时seek_resume被置位，又因为状态到不了STREAMING而一直留着，
-随后第一次CAPTURE streamon就跳过了从没发过的输出口属性。固件接着报
-HFI_ERR_SESSION_INSUFFICIENT_RESOURCES（0x1009），会话进入错误状态，下一次QBUF失败。
+The gen1 seek_resume path skips session_set_config_params() on CAPTURE streamon
+under the assumption that output port parameters were already configured on an
+earlier CAPTURE streamon. However, if a client flushes the decoder after OUTPUT
+streamon but before the first CAPTURE streamon (while IRIS_INST_SUB_FIRST_IPSC
+is still set), skipping output configuration causes the firmware to fail with
+HFI_ERR_SESSION_INSUFFICIENT_RESOURCES (0x1009).
 
-第一次SOURCE_CHANGE会置FIRST_IPSC，它要到CAPTURE streamon才清掉；seek途中发生的
-分辨率变化同样会置这一位，这时旧配置也不能沿用。所以有FIRST_IPSC时照常发属性。
-venus的处理思路相同：INIT、CAPTURE_SETUP状态下的flush不进入SEEK。
+Always configure output port parameters on CAPTURE streamon when
+IRIS_INST_SUB_FIRST_IPSC is set.
 
-seek_mode=0不能代替这个修复：上游路径在同样的时序下会触发固件断言。
-
+Origin: local
+Upstream-Status: Inappropriate [firmware workaround]
 ---
- drivers/media/platform/qcom/iris/iris_vdec.c | 8 ++++++--
- 1 file changed, 6 insertions(+), 2 deletions(-)
-
 diff --git a/drivers/media/platform/qcom/iris/iris_vdec.c b/drivers/media/platform/qcom/iris/iris_vdec.c
 index 15e2164d3..b638d58c3 100644
 --- a/drivers/media/platform/qcom/iris/iris_vdec.c

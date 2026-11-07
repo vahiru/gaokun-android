@@ -1,37 +1,15 @@
 From: Vahiru <nekovahiru@gmail.com>
-Subject: [PATCH] Input: himax-spi: 掌压剔除改成【标记】而不是删除连通域
+Subject: [PATCH] Input: himax-spi: mark palm zones instead of deleting them in place
 
-**问题**：`hx_detect_macro_zones()` 的 BFS 是 **8-连通、阈值 `macro_threshold`**，
-所以**指尖挨着手掌根部落下时，两者会进同一个 zone**。而 `hx_reject_palms()`
-的处理是把命中规则的 zone 从数组里**整个删掉**（原地压缩 `zones[]`），
-于是 `hx_detect_peaks()` 根本不会去扫它 —— **手指跟着手掌一起消失，
-而且没有留下任何痕迹**。
+Instead of compacting zones[] in place inside hx_reject_palms(), tag rejected
+zones with is_palm and record which rule matched in palm_rule (1..4). By default
+hx_detect_peaks() skips zones with is_palm set, preserving identical behaviour,
+while adding two optional sysfs tunables (palm_zone_scan and palm_contact_area,
+both defaulting to 0) for inspecting and tuning palm rejection at the contact
+level.
 
-规则 1 的阈值是面积 ≥ 50 格 ≈ 925 mm²，手掌 + 手指合成的 zone 轻松越过。
-
-**改法**：不删，改成在 zone 上打 `is_palm` 标记，并记下是**哪一条规则**
-命中的（`palm_rule`，1–4）。`hx_detect_peaks()` 默认跳过被标记的 zone ——
-**这与原来的"删掉"逐位等价**，所以本补丁单独打上不改变任何行为。
-
-真正的价值在于决定变得**可见且可逆**：
-
-* `0043` 的 `palm_area / palm_signal / palm_density / palm_aspect` 四个计数器
-  直接告诉你掌压在什么时候、按哪条规则开火。
-* 新旋钮 `palm_zone_scan`（默认 0）打开后，掌压 zone 里也会找峰值，
-  于是陷在手掌里的指尖能被救回来。
-* 新旋钮 `palm_contact_area`（默认 0 = 关）在**逐触点**这一级再判一次掌压：
-  `ct->area` 只统计"≥ 峰值一半"的格子，量的是**这个触点自己**而不是它
-  碰巧连着的东西 —— 这才是分辨指尖与手掌根部的正确粒度。
-
-★ 为什么默认值一个都不动：这两个旋钮的合适取值**必须拿真实的手在面板上量**，
-而本仓的纪律是不在没实测的情况下改掌压（`bin/gaokun3-touch-mode.sh` 顶部记过）。
-旋钮 + 计数器已经就位，定值是下一次上机的事，不是猜出来的。
-
-顺带修掉一处死代码路径：`hx_reject_palms()` 原先用 `dst` 做原地压缩，
-现在不需要了，一并删掉。
-
-编译：`W=1` 零告警。
-案卷：`docs/stage4-findings.md` #115。
+Origin: local
+Upstream-Status: Pending
 ---
 diff --git a/drivers/input/touchscreen/himax-spi-core.c b/drivers/input/touchscreen/himax-spi-core.c
 --- a/drivers/input/touchscreen/himax-spi-core.c

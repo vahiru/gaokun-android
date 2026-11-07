@@ -1,20 +1,17 @@
 From: Vahiru <nekovahiru@gmail.com>
-Subject: [PATCH] arm64: dts: gaokun3: 把默认 CMA 池限定在 4 GiB 以下（本地，issue #16）
+Subject: [PATCH] arm64: dts: qcom: sc8280xp-huawei-gaokun3: restrict default CMA pool below 4 GiB
 
-案卷 docs/stage4-findings.md #131。
+Without alloc-ranges, the 128 MiB default linux,cma pool is placed at
+0x878000000 (~34 GiB), outside the 32-bit coherent DMA mask of ath11k. During
+s2idle resume, dma-direct cannot allocate from that CMA pool and falls back to
+the ZONE_DMA buddy allocator for order-7 and order-9 contiguous blocks while
+compaction is disabled, resulting in page allocation failures.
 
-gaokun3 的 `linux,cma` 节点（与上游 X13s / CRD 同样写法）只有 size、没有 alloc-ranges，
-于是 128 MiB 的默认 CMA 被自顶向下放在物理 0x878000000（34 GiB 处，dmesg
-"created CMA memory pool at 0x0000000878000000"）。ath11k 的 coherent mask 是 32 位，
-dma-direct 从 CMA 拿到的页过不了 dma_coherent_ok()，只能退回 ZONE_DMA 的伙伴分配器
-去找高阶连续块：每次 s2idle 恢复，MHI 约 20 次 order-7、数据通路 3 次 order-9，
-而挂起期间不做 compaction —— issue #16 的 `page allocation failure: order:7` 就是这么来的。
+Add alloc-ranges = <0x0 0x80000000 0x0 0x80000000> to linux,cma so the default
+CMA pool is placed below 4 GiB and services 32-bit coherent DMA allocations.
 
-加 alloc-ranges = 2–4 GiB 后，实测 CMA 落在 0xf4000000，开机即有约 29 MiB 被 32 位设备用上；
-ftrace（kmem:mm_page_alloc, order>=7）对照三次恢复：原版 69 次 GFP_DMA 高阶伙伴分配
-→ 0070 后 9 次（只剩数据通路）→ 再加本补丁 0 次。挂起/恢复 12/12 通过，
-硬解 AVC/HEVC/VP9、相机冒烟、GPU 均无回归。代价：ZONE_DMA 里 128 MiB 只能放可迁移页。
-⚠️ ROM 用的是 prebuilt-boot 里的 dtb —— 发版时要换成带本补丁编出来的那份。
+Origin: local
+Upstream-Status: Pending
 ---
 --- a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
 +++ b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts

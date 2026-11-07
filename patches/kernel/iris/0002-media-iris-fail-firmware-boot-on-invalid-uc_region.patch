@@ -1,5 +1,5 @@
 From: Dmitry Baryshkov <dmitry.baryshkov@oss.qualcomm.com>
-Subject: [PATCH] media: iris: fail firmware boot on invalid uc_region（上游 media v7.4 队列 backport）
+Subject: [PATCH] media: iris: fail firmware boot on invalid uc_region
 
 iris_vpu_boot_firmware() polls CTRL_STATUS while the firmware boots. When
 the hardware reports an invalid uc_region setting, the poll loop breaks
@@ -17,15 +17,9 @@ Assisted-by: Claude:claude-opus-4-8
 Signed-off-by: Dmitry Baryshkov <dmitry.baryshkov@oss.qualcomm.com>
 Reviewed-by: Konrad Dybcio <konrad.dybcio@oss.qualcomm.com>
 Signed-off-by: Bryan O'Donoghue <bod@kernel.org>
-
-gaokun3 注（案卷 docs/stage4-findings.md #128）：上游 cff20ea46d5d，目前在 Bryan O'Donoghue 的
-venus-iris-next 队列（2026-09-25，v7.4），逐字搬。本机用的是华为签名固件，而上游只在 X13s（联想固件）
-上验过 —— 若 UC_REGION 配置不被接受，原代码会"报告启动成功"然后在后面超时 / 挂死；有了这条，
-失败会停在 dmesg 的 "invalid setting for uc_region" 上，这正是第一次上机要看的那一行。
+Origin: backport, commit cff20ea46d5d
+Upstream-Status: Backport [cff20ea46d5d]
 ---
- drivers/media/platform/qcom/iris/iris_vpu_common.c | 2 +-
- 1 file changed, 1 insertion(+), 1 deletion(-)
-
 diff --git a/drivers/media/platform/qcom/iris/iris_vpu_common.c b/drivers/media/platform/qcom/iris/iris_vpu_common.c
 index b7bf02668bef..f66d2c2012d9 100644
 --- a/drivers/media/platform/qcom/iris/iris_vpu_common.c

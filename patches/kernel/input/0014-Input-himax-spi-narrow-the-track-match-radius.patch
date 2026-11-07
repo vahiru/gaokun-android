@@ -1,26 +1,19 @@
 From: Akisaira <akisaira@outlook.com>
-Subject: [PATCH] Input: himax-spi: 跟踪的配对范围从44毫米收到12毫米
+Subject: [PATCH] Input: himax-spi: narrow default track_dist2_max from 420^2 to 115^2 (~12 mm)
 
-hx_track_contacts()把这一帧的触点配给已有的跟踪时，触点离跟踪的预测位置不超过
-track_dist2_max（默认420²，约44毫米）就算同一根手指。手指抬起后，它的跟踪还要再
-留track_lost_frames（3帧，约25毫秒）才释放，这期间照样参加配对。另一根手指在这段
-时间里、44毫米以内落下，就会被配给这个跟踪：Android收到的是原来那根手指移动了
-过去，没有新的按下，这次点击就丢了。音游里两只手交替点相近的轨道正是这种情况。
+hx_track_contacts() retains lifted tracks for track_lost_frames (3 frames,
+~25 ms) and matches new contacts within track_dist2_max of the predicted
+position. The previous default of 420^2 (~44 mm) caused rapid alternating taps
+from two fingers within 44 mm to be merged into the lifted track as a pointer
+move instead of registering a new touch down.
 
-在PJSK里录了4首歌（gk3trec录网格和事件，hxsim回放，与实机上报99.5%的帧一致）：
-3018次手指落下里有259次（8.6%）被配给了已有的跟踪，其中227次原来那根手指已经
-抬起，跳过去的距离在10到44毫米之间。同一根手指连续两帧配对时，与预测位置的偏差
-99.9百分位是6.1毫米；断开几帧后再配上的142次，中位数是19.6毫米，几乎都是别的手指。
+Lower the default track_dist2_max to 115^2 (~12 mm), which covers the 99.9th
+percentile of single-finger frame-to-frame prediction error (6.1 mm) while
+preventing adjacent alternating taps from being swallowed.
 
-默认值改成115²（约12毫米）。用同一份录制回放，被吞掉的落下从259次降到76次，剩下的
-是快速滑动时一帧移动1到2厘米的同一根手指（45次）和录制漏帧造成的误判（31次），配对
-都是对的；滑动被切成两段的次数是0。8到15毫米之间的结果基本相同。
-
-运行时仍可用algo/track_dist2_max调整。
+Origin: local
+Upstream-Status: Pending
 ---
- drivers/input/touchscreen/hx-algo.c | 9 ++++++++-
- 1 file changed, 8 insertions(+), 1 deletion(-)
-
 diff --git a/drivers/input/touchscreen/hx-algo.c b/drivers/input/touchscreen/hx-algo.c
 index 6de0bfe80..a1eff6de0 100644
 --- a/drivers/input/touchscreen/hx-algo.c
