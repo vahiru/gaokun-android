@@ -15,9 +15,12 @@ extern "C" {
 namespace gaokun3 {
 // Enrolment takes kStages frames per finger. Authentications that score at
 // least kLearnThreshold add their frame, up to kMaxFrames per finger, so the
-// template grows towards the part of the finger used for unlocking.
+// template grows towards the part of the finger used for unlocking. Learning
+// from every press of two index fingers over a day filled 45 and 49 frames;
+// recognising the last session's presses, 48 frames instead of 32 took 13 and
+// 15 of 15 instead of 12 and 13, with no other finger accepted.
 constexpr size_t kStages = 16;
-constexpr size_t kMaxFrames = 32;
+constexpr size_t kMaxFrames = 48;
 constexpr size_t kMaxFingers = 5;
 
 // One image serves both sensor variants; the board straps pick one at run
@@ -81,7 +84,9 @@ float score(const FrameFeatures& probe, const Enrollment& finger, float* bestFra
             unsigned threads = 1);
 // A finger is accepted at this score. Real Goodix captures of six fingers of
 // one person, against templates of 16 to 32 frames of either index finger:
-// other fingers reached 35.6 at most (32-frame templates; 33.5 with 16).
+// other fingers reached 35.6 at most (32-frame templates; 33.5 with 16). With
+// kCorroboratedScore, eight fingers against templates of up to 48 frames of
+// five of them: none reached even 25.
 constexpr float kMatchThreshold = 37.0f;
 // Learning needs a margin over that: a false accept close to the threshold
 // must not become part of the finger.
