@@ -412,6 +412,15 @@ PRODUCT_VENDOR_PROPERTIES += \
     vendor.hwc.drm.force_p3_support=true \
     vendor.hwc.drm.force_hdr_support=true
 
+# 颜色模式默认“鲜艳”（设置 › 显示 › 颜色，两档见 overlay 的 config_availableColorModes，docs/dev/display-color.md）。
+#   用户没选过模式时，ColorDisplayService 按这个属性定模式：1 = COLOR_MODE_SATURATED，SurfaceFlinger 不做颜色管理，
+#   HWC 写默认 Colorspace，内核用工厂 P3 校准显示所有内容。SurfaceFlinger 开机时也读它。
+#   ColorDisplayService 开机设置完成时就把当前模式写进 /data 的持久属性，之后以那里为准，所以改这里只影响新安装。
+#   落 system_ext，理由同上；上下文 surfaceflinger_color_prop。
+#   判据：`dumpsys SurfaceFlinger | grep DisplayColorSetting` = Unmanaged。
+PRODUCT_SYSTEM_EXT_PROPERTIES += \
+    persist.sys.sf.native_mode=1
+
 # Landscape as the default orientation of the built-in display. bootanimation ignores
 # WindowManager and draws in the panel's natural portrait unless
 # ro.bootanim.set_orientation_<physical display id>, or as a fallback

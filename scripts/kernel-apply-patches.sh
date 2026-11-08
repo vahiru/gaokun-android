@@ -120,6 +120,7 @@ KPATCHES=(
     # 0005 依赖 0004 并与 android/drm-hwcomposer/0002（tree-fix [32]）配套；
     # 0007 与 android/drm-hwcomposer/0001（tree-fix [31]）配套。
     # 0016 需要 mesa/0012（Turnip VSC 修正）：内核报告抢占后 Turnip 走 a6xx 抢占路径。
+    # 0018 给 DSPP 加 3D LUT；0019 依赖 0005、0018，把工厂校准从 PCC 矩阵换成 3D LUT 的两个存储体。
     kernel/drm/0001-drm-crtc-drop-racy-BUG_ON-in-fence_to_crtc.patch
     kernel/drm/0002-drm-msm-dsi-phy-7nm-reapply-bonded-pll-init-reverting-5de981b7db.patch
     kernel/drm/0003-drm-panel-himax-hx83121a-read-the-panel-from-the-board-s-ID-pins.patch
@@ -137,6 +138,8 @@ KPATCHES=(
     kernel/drm/0015-drm-msm-a6xx-reset-preemption-records-across-suspend.patch
     kernel/drm/0016-drm-msm-a6xx-enable-preemption-on-a690.patch
     kernel/drm/0017-drm-msm-reset-the-gpu-when-a-preemption-times-out-on-an-idle-ring.patch
+    kernel/drm/0018-drm-msm-dpu-add-the-DSPP-3D-LUT-of-sc8280xp.patch
+    kernel/drm/0019-drm-msm-dpu-load-the-gaokun3-factory-calibration-into-the-3D-LUT.patch
 
     # ─── 6. kernel/iris：qcom-iris 视频解码驱动 ───
     # 配套 DT 见 kernel/dts/0009–0010；需 CONFIG_VIDEO_QCOM_IRIS=y、CONFIG_VIDEO_QCOM_VENUS 不设。

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Settings overlay for gaokun3. Fed to Soong by DEVICE_PACKAGE_OVERLAYS in
+  device.mk; the path mirrors the Settings module's own resource directory.
+-->
+<resources>
+
+    <!--
+      Names of the two color modes the framework overlay offers
+      (config_availableColorModes). Saturated shows everything through the
+      factory P3 calibration here, so call it what it looks like; Natural is
+      the accurate sRGB and P3 calibration.
+    -->
+    <string name="color_mode_option_saturated">Vivid</string>
+    <string name="color_mode_option_natural">Standard</string>
+
+</resources>

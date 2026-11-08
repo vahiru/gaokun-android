@@ -258,4 +258,24 @@
     -->
     <bool name="config_lidControlsSleep">true</bool>
 
+    <!--
+      Color modes in Settings > Display > Colors, see docs/dev/display-color.md.
+
+      2 (Saturated, relabelled Vivid) turns SurfaceFlinger's color management
+      off: content goes out as it is and the kernel shows it through the
+      factory Display P3 calibration, so sRGB content fills the panel's
+      near-P3 gamut, like Windows' P3 mode on this machine.
+      0 (Natural, relabelled Standard) keeps color management: sRGB content
+      through the factory sRGB calibration, wide-gamut content through the
+      P3 one, switched per frame.
+
+      Boosted (1) would only add a saturation matrix on top of Natural, and
+      Adaptive (3) needs an ENHANCE render intent the HWC does not report.
+      The default comes from persist.sys.sf.native_mode in device.mk.
+    -->
+    <integer-array name="config_availableColorModes">
+        <item>2</item>
+        <item>0</item>
+    </integer-array>
+
 </resources>

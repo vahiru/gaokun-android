@@ -1,0 +1,492 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] drm/msm/dpu: load the gaokun3 factory calibration into the 3D
+ LUT
+
+The factory calibration of the gaokun3 panel is a pair of 17x17x17 LUTs,
+one for sRGB and one for Display P3. Reducing them to PCC matrices left
+an average error of 5.6 dE for sRGB, against 1.1 for the LUT itself.
+
+Resample both LUTs to the 13 points of the DSPP 3D LUT, which stays at
+1.1 dE (0.2 dE from the 17-point LUT, panel model of one unit), and keep
+them in its two banks. Each DSPP remembers whether its banks hold them;
+a modeset that leaves the CRTC active clears that and writes them again,
+as it may bring DSPPs that lost power.
+
+The connector colorspace picks the bank per commit: BT709_YCC shows
+sRGB, DCI-P3_RGB_D65 and the default colorspace show P3. A client that
+leaves the colorspace alone therefore gets sRGB content stretched over
+the panel's near-P3 gamut, with the calibrated white and primaries,
+which is how Windows' P3 mode looks on this machine; it used to get the
+sRGB calibration. Switching banks is a single opmode write, so P3
+content coming and going does not tear.
+
+PCC goes back to the CTM alone. It now runs after the calibration, so a
+CTM such as Night Light acts on panel values. A CRTC still gets DSPPs
+only once a CTM or gamma LUT is set, which the Android HWC always does;
+a client that never sets either is not calibrated.
+msm.panel_calibration=0 still turns the calibration off at runtime.
+
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c      |  79 ++++++-----
+ drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.h      |   4 +-
+ drivers/gpu/drm/msm/disp/dpu1/dpu_hw_dspp.h   |   3 +
+ drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c       |   7 +-
+ drivers/gpu/drm/msm/disp/dpu1/dpu_kms.h       |   2 +-
+ drivers/gpu/drm/msm/disp/dpu1/dpu_panel_cal.c | 128 ++++++++++--------
+ drivers/gpu/drm/msm/disp/dpu1/dpu_panel_cal.h |   7 +-
+ 7 files changed, 130 insertions(+), 100 deletions(-)
+
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c b/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c
+index 23c1f8fc8..9fb9977c3 100644
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.c
+@@ -792,7 +792,13 @@ static int _dpu_crtc_check_and_setup_lm_bounds(struct drm_crtc *crtc,
+ 	return 0;
+ }
+ 
+-static const s32 *_dpu_crtc_panel_cal(struct drm_crtc_state *state)
++/*
++ * The 3D LUT bank of the factory calibration for this commit: sRGB for the
++ * BT709_YCC colorspace, Display P3 for DCI-P3_RGB_D65 and for the default
++ * colorspace, which shows content as P3 over the panel's near-P3 gamut.
++ * -1 when the panel has no usable calibration or it is turned off.
++ */
++static int _dpu_crtc_panel_bank(struct drm_crtc_state *state)
+ {
+ 	struct drm_crtc *crtc = state->crtc;
+ 	struct dpu_kms *dpu_kms = _dpu_crtc_get_kms(crtc);
+@@ -800,18 +806,18 @@ static const s32 *_dpu_crtc_panel_cal(struct drm_crtc_state *state)
+ 	struct drm_encoder *encoder;
+ 
+ 	if (!dpu_kms->has_panel_cal || !READ_ONCE(panel_calibration))
+-		return NULL;
++		return -1;
+ 
+ 	drm_for_each_encoder_mask(encoder, crtc->dev, state->encoder_mask) {
+ 		if (encoder->encoder_type != DRM_MODE_ENCODER_DSI)
+ 			continue;
+ 		if (connector &&
+-		    connector->state->colorspace == DRM_MODE_COLORIMETRY_DCI_P3_RGB_D65)
+-			return dpu_kms->panel_cal[DPU_PANEL_CAL_P3];
+-		return dpu_kms->panel_cal[DPU_PANEL_CAL_SRGB];
++		    connector->state->colorspace == DRM_MODE_COLORIMETRY_BT709_YCC)
++			return DPU_PANEL_CAL_SRGB;
++		return DPU_PANEL_CAL_P3;
+ 	}
+ 
+-	return NULL;
++	return -1;
+ }
+ 
+ static u32 _dpu_crtc_pcc_s3_15(s64 val)
+@@ -819,27 +825,8 @@ static u32 _dpu_crtc_pcc_s3_15(s64 val)
+ 	return clamp_t(s64, val, -BIT(17), BIT(17) - 1) & GENMASK(17, 0);
+ }
+ 
+-/* The calibration corrects the panel, so it comes after the CTM */
+-static void _dpu_crtc_apply_panel_cal(const s32 *cal, s64 *m)
+-{
+-	s64 out[DPU_PANEL_CAL_LEN];
+-	int i, r, c;
+-
+-	for (r = 0; r < 3; r++) {
+-		for (c = 0; c < 3; c++) {
+-			s64 sum = 0;
+-
+-			for (i = 0; i < 3; i++)
+-				sum += cal[r * 3 + i] * m[i * 3 + c];
+-			out[r * 3 + c] = sum >> 15;
+-		}
+-	}
+-
+-	memcpy(m, out, sizeof(out));
+-}
+-
+ static void _dpu_crtc_get_pcc_coeff(struct drm_crtc_state *state,
+-		const s32 *cal, struct dpu_hw_pcc_cfg *cfg)
++		struct dpu_hw_pcc_cfg *cfg)
+ {
+ 	struct drm_color_ctm *ctm;
+ 	s64 m[9];
+@@ -855,9 +842,6 @@ static void _dpu_crtc_get_pcc_coeff(struct drm_crtc_state *state,
+ 	for (i = 0; i < ARRAY_SIZE(m); i++)
+ 		m[i] = (s64)drm_color_ctm_s31_32_to_qm_n(ctm->matrix[i], 3, 15);
+ 
+-	if (cal)
+-		_dpu_crtc_apply_panel_cal(cal, m);
+-
+ 	cfg->r.r = _dpu_crtc_pcc_s3_15(m[0]);
+ 	cfg->r.g = _dpu_crtc_pcc_s3_15(m[1]);
+ 	cfg->r.b = _dpu_crtc_pcc_s3_15(m[2]);
+@@ -906,20 +890,20 @@ static void _dpu_crtc_setup_cp_blocks(struct drm_crtc *crtc)
+ 	struct dpu_crtc_state *cstate = to_dpu_crtc_state(crtc->state);
+ 	struct dpu_crtc_mixer *mixer = cstate->mixers;
+ 	struct dpu_crtc *dpu_crtc = to_dpu_crtc(crtc);
+-	const s32 *cal = _dpu_crtc_panel_cal(state);
++	struct dpu_kms *dpu_kms = _dpu_crtc_get_kms(crtc);
++	bool modeset = drm_atomic_crtc_needs_modeset(state);
++	int bank = _dpu_crtc_panel_bank(state);
+ 	struct dpu_hw_pcc_cfg cfg;
+ 	struct dpu_hw_gc_lut *gc_lut;
+ 	struct dpu_hw_ctl *ctl;
+ 	struct dpu_hw_dspp *dspp;
+ 	int i;
+ 
+-
+-	if (!state->color_mgmt_changed && !drm_atomic_crtc_needs_modeset(state) &&
+-	    cal == dpu_crtc->pcc_cal)
++	/* DSPPs change only along with color_mgmt_changed or a modeset */
++	if (!state->color_mgmt_changed && !modeset &&
++	    bank == dpu_crtc->gamut_bank)
+ 		return;
+ 
+-	dpu_crtc->pcc_cal = cal;
+-
+ 	for (i = 0; i < cstate->num_mixers; i++) {
+ 		ctl = mixer[i].lm_ctl;
+ 		dspp = mixer[i].hw_dspp;
+@@ -927,11 +911,31 @@ static void _dpu_crtc_setup_cp_blocks(struct drm_crtc *crtc)
+ 		if (!dspp)
+ 			continue;
+ 
++		/*
++		 * Both banks stay loaded, so switching gamut is one opmode write.
++		 * A modeset may bring DSPPs that lost power; one that turns the
++		 * CRTC off gets the LUTs at the next enable instead.
++		 */
++		if (dspp->ops.select_gamut && state->active) {
++			if (modeset)
++				dspp->gamut_loaded = false;
++			if (bank >= 0 && !dspp->gamut_loaded) {
++				dspp->ops.load_gamut(dspp, DPU_PANEL_CAL_SRGB,
++					&dpu_kms->panel_lut[DPU_PANEL_CAL_SRGB]);
++				dspp->ops.load_gamut(dspp, DPU_PANEL_CAL_P3,
++					&dpu_kms->panel_lut[DPU_PANEL_CAL_P3]);
++				dspp->gamut_loaded = true;
++			}
++			dspp->ops.select_gamut(dspp, bank);
++			ctl->ops.update_pending_flush_dspp(ctl,
++				mixer[i].hw_dspp->idx, DPU_DSPP_GAMUT);
++		}
++
+ 		if (dspp->ops.setup_pcc) {
+ 			if (!state->ctm) {
+ 				dspp->ops.setup_pcc(dspp, NULL);
+ 			} else {
+-				_dpu_crtc_get_pcc_coeff(state, cal, &cfg);
++				_dpu_crtc_get_pcc_coeff(state, &cfg);
+ 				dspp->ops.setup_pcc(dspp, &cfg);
+ 			}
+ 
+@@ -957,6 +961,8 @@ static void _dpu_crtc_setup_cp_blocks(struct drm_crtc *crtc)
+ 				mixer[i].hw_dspp->idx, DPU_DSPP_GC);
+ 		}
+ 	}
++
++	dpu_crtc->gamut_bank = bank;
+ }
+ 
+ static void dpu_crtc_atomic_begin(struct drm_crtc *crtc,
+@@ -1958,6 +1964,7 @@ struct drm_crtc *dpu_crtc_init(struct drm_device *dev, struct drm_plane *plane,
+ 
+ 	spin_lock_init(&dpu_crtc->spin_lock);
+ 	atomic_set(&dpu_crtc->frame_pending, 0);
++	dpu_crtc->gamut_bank = -1;
+ 
+ 	init_completion(&dpu_crtc->frame_done_comp);
+ 
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.h b/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.h
+index c9f5ad157..8fc47e5b3 100644
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.h
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_crtc.h
+@@ -176,8 +176,8 @@ struct dpu_crtc {
+ 	struct list_head frame_event_list;
+ 	spinlock_t spin_lock;
+ 
+-	/* factory panel calibration PCC currently includes, if any */
+-	const s32 *pcc_cal;
++	/* 3D LUT bank of the panel calibration in use, -1 for none */
++	int gamut_bank;
+ 	struct completion frame_done_comp;
+ 
+ 	/* for handling internal event thread */
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_dspp.h b/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_dspp.h
+index 9fe7daaf1..15c89e77e 100644
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_dspp.h
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_dspp.h
+@@ -121,6 +121,9 @@ struct dpu_hw_dspp {
+ 
+ 	/* Ops */
+ 	struct dpu_hw_dspp_ops ops;
++
++	/* both 3D LUT banks hold the panel calibration */
++	bool gamut_loaded;
+ };
+ 
+ /**
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c b/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c
+index 060ea6356..3c0b0c8ce 100644
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.c
+@@ -31,6 +31,7 @@
+ #include "dpu_crtc.h"
+ #include "dpu_encoder.h"
+ #include "dpu_formats.h"
++#include "dpu_hw_dspp.h"
+ #include "dpu_hw_vbif.h"
+ #include "dpu_kms.h"
+ #include "dpu_plane.h"
+@@ -1290,7 +1291,11 @@ static int dpu_kms_hw_init(struct msm_kms *kms)
+ 	/* Disable vblank irqs aggressively for power-saving */
+ 	dev->vblank_disable_immediate = true;
+ 
+-	rc = dpu_panel_cal_load(dpu_kms->panel_cal);
++	dpu_kms->panel_lut = devm_kcalloc(&dpu_kms->pdev->dev,
++					  DPU_PANEL_CAL_GAMUTS,
++					  sizeof(*dpu_kms->panel_lut), GFP_KERNEL);
++	rc = dpu_kms->panel_lut ? dpu_panel_cal_load(dpu_kms->panel_lut) :
++				  -ENOMEM;
+ 	dpu_kms->has_panel_cal = !rc;
+ 	if (rc && rc != -ENODEV)
+ 		DPU_ERROR("factory panel calibration unusable: %d\n", rc);
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.h b/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.h
+index 4dab93625..a214ab106 100644
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.h
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.h
+@@ -83,7 +83,7 @@ struct dpu_kms {
+ 	struct dpu_rm rm;
+ 
+ 	/* factory calibration of the built-in panel, see dpu_panel_cal.c */
+-	s32 panel_cal[DPU_PANEL_CAL_GAMUTS][DPU_PANEL_CAL_LEN];
++	struct dpu_hw_gamut_lut *panel_lut;
+ 	bool has_panel_cal;
+ 	/* picks the gamut, stays valid while the display is off */
+ 	struct drm_connector *panel_connector;
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_panel_cal.c b/drivers/gpu/drm/msm/disp/dpu1/dpu_panel_cal.c
+index 07ec5663c..892614d02 100644
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_panel_cal.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_panel_cal.c
+@@ -7,10 +7,9 @@
+  * device tree here, so ACPI is not parsed, but ACPI reclaim memory stays mapped
+  * and the table can be reached from the EFI configuration table.
+  *
+- * The driver has no 3D LUT support, so reduce each LUT to a 3x3 matrix for the
+- * PCC block. PCC works on gamma-encoded pixels, and near grey the best such
+- * matrix equals the linear-light one: take the LUT response to each primary
+- * into linear light, normalize each row and scale it to the LUT white.
++ * Each record is a 17x17x17 LUT for one gamut. The DSPP 3D LUT has 13 points
++ * per axis in the mode that keeps two banks, so resample both and load them
++ * once: the panel then switches between sRGB and Display P3 per frame.
+  */
+ 
+ #define pr_fmt(fmt)	"[drm:%s:%d] " fmt, __func__, __LINE__
+@@ -18,7 +17,6 @@
+ #include <linux/efi.h>
+ #include <linux/errno.h>
+ #include <linux/io.h>
+-#include <linux/math64.h>
+ #include <linux/mm.h>
+ #include <linux/of.h>
+ #include <linux/pfn.h>
+@@ -29,6 +27,8 @@
+ #include <linux/unaligned.h>
+ #include <linux/vmalloc.h>
+ 
++#include "dpu_kms.h"
++#include "dpu_hw_dspp.h"
+ #include "dpu_panel_cal.h"
+ 
+ #define ACPI_HDR_LEN		36
+@@ -50,19 +50,8 @@
+ #define DLUT_GRID		17
+ #define DLUT_NODES		(DLUT_GRID * DLUT_GRID * DLUT_GRID)
+ #define DLUT_NODE_MAX		16
+-/* High enough to be accurate, low enough to stay clear of gamut clipping */
+-#define DLUT_NODE_MID		12
+ #define DLUT_VAL_MAX		4095
+ 
+-/* (i / 32) ^ 2.2 in Q15, the panel gamma the LUTs are built for */
+-static const u16 dpu_panel_cal_pow[33] = {
+-	0, 16, 74, 179, 338, 552, 824, 1157,
+-	1552, 2011, 2536, 3127, 3787, 4516, 5316, 6188,
+-	7132, 8149, 9241, 10408, 11652, 12972, 14370, 15846,
+-	17401, 19037, 20752, 22549, 24427, 26387, 28431, 30557,
+-	32768,
+-};
+-
+ static int dpu_panel_cal_read(phys_addr_t pa, void *dst, size_t len)
+ {
+ 	if (!pfn_valid(PHYS_PFN(pa)) || !pfn_valid(PHYS_PFN(pa + len - 1)))
+@@ -134,56 +123,82 @@ static void dpu_panel_cal_node(const u8 *rec, u32 r, u32 g, u32 b, u32 *rgb)
+ 	rgb[2] = word & 0xfff;
+ }
+ 
+-static u32 dpu_panel_cal_linearize(u32 val)
+-{
+-	u32 pos = val * 32;
+-	u32 i = min(pos / DLUT_VAL_MAX, 31U);
+-	u32 frac = pos - i * DLUT_VAL_MAX;
+-	u32 low = dpu_panel_cal_pow[i], high = dpu_panel_cal_pow[i + 1];
+-
+-	return low + (high - low) * frac / DLUT_VAL_MAX;
+-}
+-
+-static int dpu_panel_cal_reduce(const u8 *rec, s32 *cal)
++/* Reject tables that cannot be a calibration of this panel */
++static int dpu_panel_cal_check(const u8 *rec)
+ {
+-	u32 white[3], node[3][3];
+-	int r, c;
++	u32 white[3], prim[3];
++	int k;
+ 
+ 	dpu_panel_cal_node(rec, DLUT_NODE_MAX, DLUT_NODE_MAX, DLUT_NODE_MAX, white);
+-	dpu_panel_cal_node(rec, DLUT_NODE_MID, 0, 0, node[0]);
+-	dpu_panel_cal_node(rec, 0, DLUT_NODE_MID, 0, node[1]);
+-	dpu_panel_cal_node(rec, 0, 0, DLUT_NODE_MID, node[2]);
++	for (k = 0; k < 3; k++) {
++		u32 at[3] = { 0, 0, 0 };
+ 
+-	for (r = 0; r < 3; r++) {
+-		u32 row[3], sum = 0;
+-
+-		for (c = 0; c < 3; c++) {
+-			row[c] = dpu_panel_cal_linearize(node[c][r]);
+-			sum += row[c];
+-		}
+-		if (!sum)
+-			return -EINVAL;
+-
+-		for (c = 0; c < 3; c++)
+-			cal[r * 3 + c] = div_u64((u64)row[c] * white[r] * DPU_PANEL_CAL_ONE,
+-						 sum * DLUT_VAL_MAX);
+-
+-		/* A sane calibration keeps every channel dominant in its row */
+-		if (cal[r * 3 + r] < DPU_PANEL_CAL_ONE / 2)
++		at[k] = DLUT_NODE_MAX;
++		dpu_panel_cal_node(rec, at[0], at[1], at[2], prim);
++		if (white[k] < DLUT_VAL_MAX / 2 || prim[k] <= prim[(k + 1) % 3] ||
++		    prim[k] <= prim[(k + 2) % 3])
+ 			return -EINVAL;
+ 	}
+ 
+ 	return 0;
+ }
+ 
++/*
++ * Node n of a 13-point axis sits at 16 n / 12 of the 17-point grid: blend the
++ * eight 17-point nodes around it, with weights in twelfths.
++ */
++static void dpu_panel_cal_resample(const u8 *rec, struct dpu_hw_gamut_lut *lut)
++{
++	u32 n[3], base[3], frac[3], v[3];
++	int c, k;
++
++	for (n[2] = 0; n[2] < DPU_GAMUT_GRID; n[2]++) {
++		for (n[1] = 0; n[1] < DPU_GAMUT_GRID; n[1]++) {
++			for (n[0] = 0; n[0] < DPU_GAMUT_GRID; n[0]++) {
++				u32 acc[3] = { 0, 0, 0 };
++				u16 *out;
++
++				for (k = 0; k < 3; k++) {
++					base[k] = min_t(u32, n[k] * DLUT_NODE_MAX /
++							(DPU_GAMUT_GRID - 1),
++							DLUT_NODE_MAX - 1);
++					frac[k] = n[k] * DLUT_NODE_MAX -
++						  base[k] * (DPU_GAMUT_GRID - 1);
++				}
++
++				for (c = 0; c < 8; c++) {
++					u32 w = 1;
++
++					for (k = 0; k < 3; k++)
++						w *= (c >> k & 1) ? frac[k] :
++						     DPU_GAMUT_GRID - 1 - frac[k];
++					if (!w)
++						continue;
++
++					dpu_panel_cal_node(rec, base[0] + (c & 1),
++							   base[1] + (c >> 1 & 1),
++							   base[2] + (c >> 2 & 1), v);
++					for (k = 0; k < 3; k++)
++						acc[k] += v[k] * w;
++				}
++
++				out = lut->node[(n[2] * DPU_GAMUT_GRID + n[1]) *
++						DPU_GAMUT_GRID + n[0]];
++				for (k = 0; k < 3; k++)
++					out[k] = (acc[k] + 864) / 1728;
++			}
++		}
++	}
++}
++
+ /**
+- * dpu_panel_cal_load - reduce the factory calibration to color matrices
+- * @cal: receives a row-major Q15 matrix per enum dpu_panel_cal_gamut
++ * dpu_panel_cal_load - turn the factory calibration into 3D LUTs
++ * @lut: receives a LUT per enum dpu_panel_cal_gamut
+  *
+  * Return: 0 on success, or a negative errno if this device has no usable
+  * calibration, in which case the panel stays uncorrected.
+  */
+-int dpu_panel_cal_load(s32 (*cal)[DPU_PANEL_CAL_LEN])
++int dpu_panel_cal_load(struct dpu_hw_gamut_lut *lut)
+ {
+ 	phys_addr_t pa;
+ 	u8 *table;
+@@ -217,7 +232,7 @@ int dpu_panel_cal_load(s32 (*cal)[DPU_PANEL_CAL_LEN])
+ 	for (i = 0; i < DLUT_REC_COUNT; i++) {
+ 		const u8 *rec = table + DLUT_HDR_LEN + i * DLUT_REC_STEP;
+ 		enum dpu_panel_cal_gamut gamut;
+-		s32 *m;
++		u32 white[3];
+ 
+ 		if (memcmp(rec + DLUT_REC_MAGIC, "$HUA02", 6))
+ 			continue;
+@@ -229,14 +244,15 @@ int dpu_panel_cal_load(s32 (*cal)[DPU_PANEL_CAL_LEN])
+ 		else
+ 			continue;
+ 
+-		m = cal[gamut];
+-		ret = dpu_panel_cal_reduce(rec, m);
++		ret = dpu_panel_cal_check(rec);
+ 		if (ret)
+ 			goto out;
+ 
++		dpu_panel_cal_resample(rec, &lut[gamut]);
+ 		found |= BIT(gamut);
+-		pr_info("factory calibration %d: %d %d %d, %d %d %d, %d %d %d\n", gamut,
+-			m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8]);
++		dpu_panel_cal_node(rec, DLUT_NODE_MAX, DLUT_NODE_MAX, DLUT_NODE_MAX, white);
++		pr_info("factory calibration %d: white %u %u %u\n", gamut,
++			white[0], white[1], white[2]);
+ 	}
+ 
+ 	ret = found == GENMASK(DPU_PANEL_CAL_GAMUTS - 1, 0) ? 0 : -EINVAL;
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_panel_cal.h b/drivers/gpu/drm/msm/disp/dpu1/dpu_panel_cal.h
+index 2fb2f1daa..b2dc9affd 100644
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_panel_cal.h
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_panel_cal.h
+@@ -5,16 +5,15 @@
+ 
+ #include <linux/types.h>
+ 
+-/* Coefficients are Q15, row-major, in the order of the DRM CTM */
+-#define DPU_PANEL_CAL_ONE	(1 << 15)
+-#define DPU_PANEL_CAL_LEN	9
++struct dpu_hw_gamut_lut;
+ 
++/* the LUT of each gamut, also the 3D LUT bank it is loaded into */
+ enum dpu_panel_cal_gamut {
+ 	DPU_PANEL_CAL_SRGB,
+ 	DPU_PANEL_CAL_P3,
+ 	DPU_PANEL_CAL_GAMUTS,
+ };
+ 
+-int dpu_panel_cal_load(s32 (*cal)[DPU_PANEL_CAL_LEN]);
++int dpu_panel_cal_load(struct dpu_hw_gamut_lut *lut);
+ 
+ #endif /* _DPU_PANEL_CAL_H */
