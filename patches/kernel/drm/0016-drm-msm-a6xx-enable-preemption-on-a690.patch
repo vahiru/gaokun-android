@@ -1,0 +1,364 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] drm/msm/a6xx: Enable preemption on A690
+
+Preemption is wired into a7xx_submit() only, so an A690 runs every queue
+on one ring and a compositor waits behind whatever submit is running. In
+a GPU-bound game at 120 Hz, SurfaceFlinger missed its deadline about 3.6
+times per second, each time after waiting about 4 ms behind a running
+game submit. Switching rings only between submits does not help that
+case; preempting inside the IB list does.
+
+The A690 runs the A660 SQE firmware, and the downstream driver enables
+ring preemption on the A660 family with the same programming the a7xx
+code here uses. Reuse that code on a6xx when there is more than one ring:
+
+- a6xx_submit(): set the pseudo registers, wrap the IB list in IB1LIST
+  markers for queues created with MSM_SUBMITQUEUE_ALLOW_PREEMPT, record
+  last_seqno, end with CP_CONTEXT_SWITCH_YIELD and check whether to
+  preempt, as a7xx_submit() does. Markers are only emitted when there is
+  more than one ring.
+- Unmask CP_SW, which signals that a preemption has completed, when
+  there is more than one ring.
+- a6xx_cp_init(): also send the operation mode (no perfcounter
+  save/restore across preemption) and the register list the CP restores,
+  filled in the a6xx layout from the downstream a6xx and a650-family
+  lists. The IFPC-only part is left out, as this driver runs the A690
+  without IFPC.
+- Leave bv_rptr_addr out of the preemption record on a6xx, which has no
+  BV pipe.
+- Turn protected mode back on after a7xx_preempt_start() on a6xx.
+- Set ADRENO_QUIRK_PREEMPTION on A690 and size its preemption records
+  at 5096K. The A660 SQE saves GMEM starting 600K into the record, which
+  ends at 4696K with 4M of GMEM, past the 4192K default; 5096K is the
+  record size the firmware itself uses for its large configuration.
+
+Only A690 is enabled: the keepalive register written around a preemption,
+GMU_PWR_COL_PREEMPT_KEEPALIVE, is the A660-family one; other a6xx parts
+use GMU_AO_SPARE_CNTL, and only A690 has a register restore list. The
+enable_preemption parameter therefore no longer gives other a6xx parts
+four rings.
+
+Userspace must have Mesa commit ebdcf841e ("tu: Always lazy_init_vsc for
+tiler rendering"). Once the kernel reports preemption, Turnip takes its
+a6xx preemption path, which without that fix emits uninitialised VSC
+addresses for GMEM passes without binning, and the CP faults
+(CP_HW_FAULT 0x13c00000).
+
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/gpu/drm/msm/adreno/a6xx_catalog.c  |  57 ++++++++++-
+ drivers/gpu/drm/msm/adreno/a6xx_gpu.c      | 114 ++++++++++++++++++++-
+ drivers/gpu/drm/msm/adreno/a6xx_preempt.c  |   4 +-
+ drivers/gpu/drm/msm/adreno/adreno_device.c |   2 +-
+ 4 files changed, 169 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/gpu/drm/msm/adreno/a6xx_catalog.c b/drivers/gpu/drm/msm/adreno/a6xx_catalog.c
+index a98d550b7..99f7e4f6b 100644
+--- a/drivers/gpu/drm/msm/adreno/a6xx_catalog.c
++++ b/drivers/gpu/drm/msm/adreno/a6xx_catalog.c
+@@ -670,6 +670,53 @@ static const u32 a690_protect_regs[] = {
+ };
+ DECLARE_ADRENO_PROTECT(a690_protect, 48);
+ 
++/*
++ * Static registers the CP restores around a preemption: the a6xx list plus
++ * the a650-family additions from the downstream driver. A690 has no IFPC in
++ * this driver, so the IFPC-only part of the downstream list is left out.
++ */
++static const u32 a690_pwrup_reglist_regs[] = {
++	REG_A6XX_VSC_ADDR_MODE_CNTL,
++	REG_A6XX_GRAS_ADDR_MODE_CNTL,
++	REG_A6XX_RB_ADDR_MODE_CNTL,
++	REG_A6XX_PC_ADDR_MODE_CNTL,
++	REG_A6XX_HLSQ_ADDR_MODE_CNTL,
++	REG_A6XX_VFD_ADDR_MODE_CNTL,
++	REG_A6XX_VPC_ADDR_MODE_CNTL,
++	REG_A6XX_UCHE_ADDR_MODE_CNTL,
++	REG_A6XX_SP_ADDR_MODE_CNTL,
++	REG_A6XX_TPL1_ADDR_MODE_CNTL,
++	REG_A6XX_UCHE_WRITE_RANGE_MAX,
++	REG_A6XX_UCHE_WRITE_RANGE_MAX + 1,
++	REG_A6XX_UCHE_TRAP_BASE,
++	REG_A6XX_UCHE_TRAP_BASE + 1,
++	REG_A6XX_UCHE_WRITE_THRU_BASE,
++	REG_A6XX_UCHE_WRITE_THRU_BASE + 1,
++	REG_A6XX_UCHE_GMEM_RANGE_MIN,
++	REG_A6XX_UCHE_GMEM_RANGE_MIN + 1,
++	REG_A6XX_UCHE_GMEM_RANGE_MAX,
++	REG_A6XX_UCHE_GMEM_RANGE_MAX + 1,
++	REG_A6XX_UCHE_FILTER_CNTL,
++	REG_A6XX_UCHE_CACHE_WAYS,
++	REG_A6XX_UCHE_MODE_CNTL,
++	REG_A6XX_RB_NC_MODE_CNTL,
++	REG_A6XX_TPL1_NC_MODE_CNTL,
++	REG_A6XX_SP_NC_MODE_CNTL,
++	REG_A6XX_PC_DBG_ECO_CNTL,
++	REG_A6XX_RB_CONTEXT_SWITCH_GMEM_SAVE_RESTORE_ENABLE,
++	REG_A6XX_UCHE_GBIF_GX_CONFIG,
++	REG_A6XX_UCHE_CLIENT_PF,
++	REG_A6XX_TPL1_BICUBIC_WEIGHTS_TABLE(0),
++	REG_A6XX_TPL1_BICUBIC_WEIGHTS_TABLE(1),
++	REG_A6XX_TPL1_BICUBIC_WEIGHTS_TABLE(2),
++	REG_A6XX_TPL1_BICUBIC_WEIGHTS_TABLE(3),
++	REG_A6XX_TPL1_BICUBIC_WEIGHTS_TABLE(4),
++	REG_A6XX_UCHE_CMDQ_CONFIG,
++	REG_A6XX_RBBM_GBIF_CLIENT_QOS_CNTL,
++	REG_A6XX_RBBM_PERFCTR_CNTL,
++};
++DECLARE_ADRENO_REGLIST_LIST(a690_pwrup_reglist);
++
+ static const struct adreno_reglist a640_gbif[] = {
+ 	{ REG_A6XX_GBIF_QSB_SIDE0, 0x00071620 },
+ 	{ REG_A6XX_GBIF_QSB_SIDE1, 0x00071620 },
+@@ -1119,16 +1166,24 @@ static const struct adreno_info a6xx_gpus[] = {
+ 		.gmem = SZ_4M,
+ 		.inactive_period = DRM_MSM_INACTIVE_PERIOD,
+ 		.quirks = ADRENO_QUIRK_HAS_CACHED_COHERENT |
+-			ADRENO_QUIRK_HAS_HW_APRIV,
++			ADRENO_QUIRK_HAS_HW_APRIV |
++			ADRENO_QUIRK_PREEMPTION,
+ 		.funcs = &a6xx_gpu_funcs,
+ 		.zapfw = "a690_zap.mdt",
+ 		.a6xx = &(const struct a6xx_info) {
+ 			.hwcg = a690_hwcg,
+ 			.protect = &a690_protect,
++			.pwrup_reglist = &a690_pwrup_reglist,
+ 			.gbif_cx = a640_gbif,
+ 			.gmu_cgc_mode = 0x00020200,
+ 			.prim_fifo_threshold = 0x00800200,
+ 		},
++		/*
++		 * The A660 SQE saves GMEM from 600K into the record, which takes
++		 * 4696K with 4M of GMEM; 5096K is the firmware's own record size
++		 * for its large configuration.
++		 */
++		.preempt_record_size = 5096 * SZ_1K,
+ 	}
+ };
+ DECLARE_ADRENO_GPULIST(a6xx);
+diff --git a/drivers/gpu/drm/msm/adreno/a6xx_gpu.c b/drivers/gpu/drm/msm/adreno/a6xx_gpu.c
+index 80ee0a5b2..f226e2799 100644
+--- a/drivers/gpu/drm/msm/adreno/a6xx_gpu.c
++++ b/drivers/gpu/drm/msm/adreno/a6xx_gpu.c
+@@ -363,6 +363,13 @@ static void a6xx_submit(struct msm_gpu *gpu, struct msm_gem_submit *submit)
+ 
+ 	a6xx_set_pagetable(a6xx_gpu, ring, submit);
+ 
++	/*
++	 * If preemption is enabled, then set the pseudo register for the save
++	 * sequence
++	 */
++	if (gpu->nr_rings > 1)
++		a6xx_emit_set_pseudo_reg(ring, a6xx_gpu, submit->queue);
++
+ 	get_stats_counter(ring, REG_A6XX_RBBM_PERFCTR_CP(0),
+ 		rbmemptr_stats(ring, index, cpcycles_start));
+ 
+@@ -381,6 +388,11 @@ static void a6xx_submit(struct msm_gpu *gpu, struct msm_gem_submit *submit)
+ 	OUT_PKT7(ring, CP_EVENT_WRITE, 1);
+ 	OUT_RING(ring, CP_EVENT_WRITE_0_EVENT(PC_CCU_INVALIDATE_COLOR));
+ 
++	if (gpu->nr_rings > 1 && (submit->queue->flags & MSM_SUBMITQUEUE_ALLOW_PREEMPT)) {
++		OUT_PKT7(ring, CP_SET_MARKER, 1);
++		OUT_RING(ring, 0x00d); /* IB1LIST start */
++	}
++
+ 	/* Submit the commands */
+ 	for (i = 0; i < submit->nr_cmds; i++) {
+ 		switch (submit->cmd[i].type) {
+@@ -410,6 +422,11 @@ static void a6xx_submit(struct msm_gpu *gpu, struct msm_gem_submit *submit)
+ 			update_shadow_rptr(gpu, ring);
+ 	}
+ 
++	if (gpu->nr_rings > 1 && (submit->queue->flags & MSM_SUBMITQUEUE_ALLOW_PREEMPT)) {
++		OUT_PKT7(ring, CP_SET_MARKER, 1);
++		OUT_RING(ring, 0x00e); /* IB1LIST end */
++	}
++
+ 	get_stats_counter(ring, REG_A6XX_RBBM_PERFCTR_CP(0),
+ 		rbmemptr_stats(ring, index, cpcycles_end));
+ 	get_stats_counter(ring, REG_A6XX_CP_ALWAYS_ON_CONTEXT,
+@@ -419,6 +436,8 @@ static void a6xx_submit(struct msm_gpu *gpu, struct msm_gem_submit *submit)
+ 	OUT_PKT4(ring, REG_A6XX_CP_SCRATCH(2), 1);
+ 	OUT_RING(ring, submit->seqno);
+ 
++	a6xx_gpu->last_seqno[ring->id] = submit->seqno;
++
+ 	/*
+ 	 * Execute a CACHE_FLUSH_TS event. This will ensure that the
+ 	 * timestamp is written to the memory and then triggers the interrupt
+@@ -432,7 +451,11 @@ static void a6xx_submit(struct msm_gpu *gpu, struct msm_gem_submit *submit)
+ 
+ 	trace_msm_gpu_submit_flush(submit, adreno_gpu->funcs->get_timestamp(gpu));
+ 
+-	a6xx_flush(gpu, ring);
++	/* Yields only when preemption is enabled (nr_rings > 1) */
++	a6xx_flush_yield(gpu, ring);
++
++	/* Check to see if we need to start preemption */
++	a6xx_preempt_trigger(gpu);
+ }
+ 
+ void a6xx_emit_set_pseudo_reg(struct msm_ringbuffer *ring,
+@@ -800,6 +823,35 @@ static void a6xx_set_ubwc_config(struct msm_gpu *gpu)
+ 		  qcom_ubwc_macrotile_mode(cfg));
+ }
+ 
++/*
++ * a6xx layout: list_offset is the number of dwords of IFPC-only entries at the
++ * start of the list (none here, A690 runs without IFPC); the CP treats the rest,
++ * list_length dwords in all, as the registers to restore around preemption.
++ */
++static void a6xx_patch_pwrup_reglist(struct msm_gpu *gpu)
++{
++	struct adreno_gpu *adreno_gpu = to_adreno_gpu(gpu);
++	struct a6xx_gpu *a6xx_gpu = to_a6xx_gpu(adreno_gpu);
++	const struct adreno_reglist_list *reglist = adreno_gpu->info->a6xx->pwrup_reglist;
++	struct cpu_gpu_lock *lock = a6xx_gpu->pwrup_reglist_ptr;
++	u32 *dest = (u32 *)&lock->regs[0];
++	int i;
++
++	lock->gpu_req = lock->cpu_req = lock->turn = 0;
++	lock->list_offset = 0;
++	lock->list_length = 0;
++
++	if (!reglist)
++		return;
++
++	for (i = 0; i < reglist->count; i++) {
++		*dest++ = reglist->regs[i];
++		*dest++ = gpu_read(gpu, reglist->regs[i]);
++	}
++
++	lock->list_length = 2 * reglist->count;
++}
++
+ static void a7xx_patch_pwrup_reglist(struct msm_gpu *gpu)
+ {
+ 	struct adreno_gpu *adreno_gpu = to_adreno_gpu(gpu);
+@@ -887,6 +939,12 @@ static int a7xx_preempt_start(struct msm_gpu *gpu)
+ 
+ 	a6xx_emit_set_pseudo_reg(ring, a6xx_gpu, NULL);
+ 
++	/* a6xx submits run in protected mode (a6xx_set_pagetable() relies on it) */
++	if (!adreno_is_a7xx(adreno_gpu) && !adreno_is_a8xx(adreno_gpu)) {
++		OUT_PKT7(ring, CP_SET_PROTECTED_MODE, 1);
++		OUT_RING(ring, 1);
++	}
++
+ 	a6xx_flush_yield(gpu, ring);
+ 
+ 	return a6xx_idle(gpu, ring) ? 0 : -EINVAL;
+@@ -894,8 +952,39 @@ static int a7xx_preempt_start(struct msm_gpu *gpu)
+ 
+ static int a6xx_cp_init(struct msm_gpu *gpu)
+ {
++	struct adreno_gpu *adreno_gpu = to_adreno_gpu(gpu);
++	struct a6xx_gpu *a6xx_gpu = to_a6xx_gpu(adreno_gpu);
+ 	struct msm_ringbuffer *ring = gpu->rb[0];
+ 
++	if (gpu->nr_rings > 1) {
++		/*
++		 * Preemption: same ordinals as below, plus the operation mode
++		 * (no perfcounter save/restore across preemption) and the
++		 * register list the CP restores, guarded by its spinlock.
++		 */
++		OUT_PKT7(ring, CP_ME_INIT, 10);
++		OUT_RING(ring, BIT(0) | BIT(1) | BIT(2) | BIT(3) | BIT(5) |
++			       BIT(6) | BIT(8));
++		/* Enable multiple hardware contexts */
++		OUT_RING(ring, 0x00000003);
++		/* Enable error detection */
++		OUT_RING(ring, 0x20000000);
++		/* Don't enable header dump */
++		OUT_RING(ring, 0x00000000);
++		OUT_RING(ring, 0x00000000);
++		/* No workarounds enabled */
++		OUT_RING(ring, 0x00000000);
++		/* Operation mode */
++		OUT_RING(ring, 0x00000002);
++		/* Register list with spinlock */
++		OUT_RING(ring, lower_32_bits(a6xx_gpu->pwrup_reglist_iova));
++		OUT_RING(ring, upper_32_bits(a6xx_gpu->pwrup_reglist_iova));
++		OUT_RING(ring, 0x00000000);
++
++		a6xx_flush(gpu, ring);
++		return a6xx_idle(gpu, ring) ? 0 : -EINVAL;
++	}
++
+ 	OUT_PKT7(ring, CP_ME_INIT, 8);
+ 
+ 	OUT_RING(ring, 0x0000002f);
+@@ -1425,8 +1514,12 @@ static int hw_init(struct msm_gpu *gpu)
+ 	}
+ 
+ 	/* Enable interrupts */
+-	gpu_write(gpu, REG_A6XX_RBBM_INT_0_MASK,
+-		  adreno_is_a7xx(adreno_gpu) ? A7XX_INT_MASK : A6XX_INT_MASK);
++	if (adreno_is_a7xx(adreno_gpu))
++		gpu_write(gpu, REG_A6XX_RBBM_INT_0_MASK, A7XX_INT_MASK);
++	else
++		/* CP_SW signals that a preemption has completed */
++		gpu_write(gpu, REG_A6XX_RBBM_INT_0_MASK, A6XX_INT_MASK |
++			  (gpu->nr_rings > 1 ? A6XX_RBBM_INT_0_MASK_CP_SW : 0));
+ 
+ 	ret = adreno_hw_init(gpu);
+ 	if (ret)
+@@ -1475,6 +1568,11 @@ static int hw_init(struct msm_gpu *gpu)
+ 	if (adreno_is_a7xx(adreno_gpu) && !a6xx_gpu->pwrup_reglist_emitted) {
+ 		a7xx_patch_pwrup_reglist(gpu);
+ 		a6xx_gpu->pwrup_reglist_emitted = true;
++	} else if (!adreno_is_a7xx(adreno_gpu) && gpu->nr_rings > 1 &&
++		   !a6xx_gpu->pwrup_reglist_emitted) {
++		/* a6xx_cp_init() hands this list to the CP when preempting */
++		a6xx_patch_pwrup_reglist(gpu);
++		a6xx_gpu->pwrup_reglist_emitted = true;
+ 	}
+ 
+ 	ret = adreno_is_a7xx(adreno_gpu) ? a7xx_cp_init(gpu) : a6xx_cp_init(gpu);
+@@ -2737,8 +2835,14 @@ static struct msm_gpu *a6xx_gpu_init(struct drm_device *dev)
+ 		return ERR_PTR(ret);
+ 	}
+ 
+-	if ((enable_preemption == 1) || (enable_preemption == -1 &&
+-	    (info->quirks & ADRENO_QUIRK_PREEMPTION)))
++	/*
++	 * On a6xx only parts marked with the quirk have the setup preemption
++	 * needs (keepalive register, register restore list), so the module
++	 * parameter cannot force it on elsewhere.
++	 */
++	if ((is_a7xx || (info->quirks & ADRENO_QUIRK_PREEMPTION)) &&
++	    ((enable_preemption == 1) || (enable_preemption == -1 &&
++	     (info->quirks & ADRENO_QUIRK_PREEMPTION))))
+ 		nr_rings = 4;
+ 
+ 	ret = adreno_gpu_init(dev, pdev, adreno_gpu, info->funcs, nr_rings);
+diff --git a/drivers/gpu/drm/msm/adreno/a6xx_preempt.c b/drivers/gpu/drm/msm/adreno/a6xx_preempt.c
+index df8d4f3e8..f55c857d9 100644
+--- a/drivers/gpu/drm/msm/adreno/a6xx_preempt.c
++++ b/drivers/gpu/drm/msm/adreno/a6xx_preempt.c
+@@ -150,7 +150,9 @@ void a6xx_preempt_hw_init(struct msm_gpu *gpu)
+ 		record_ptr->rptr_addr = shadowptr(a6xx_gpu, gpu->rb[i]);
+ 		record_ptr->rbase = gpu->rb[i]->iova;
+ 		record_ptr->counter = 0;
+-		record_ptr->bv_rptr_addr = rbmemptr(gpu->rb[i], bv_rptr);
++		/* a6xx has no BV pipe; its record ends at counter */
++		if (adreno_gpu->info->family >= ADRENO_7XX_GEN1)
++			record_ptr->bv_rptr_addr = rbmemptr(gpu->rb[i], bv_rptr);
+ 	}
+ 
+ 	/* Write a 0 to signal that we aren't switching pagetables */
+diff --git a/drivers/gpu/drm/msm/adreno/adreno_device.c b/drivers/gpu/drm/msm/adreno/adreno_device.c
+index 05c77fe27..014eea827 100644
+--- a/drivers/gpu/drm/msm/adreno/adreno_device.c
++++ b/drivers/gpu/drm/msm/adreno/adreno_device.c
+@@ -17,7 +17,7 @@ MODULE_PARM_DESC(snapshot_debugbus, "Include debugbus sections in GPU devcoredum
+ module_param_named(snapshot_debugbus, snapshot_debugbus, bool, 0600);
+ 
+ int enable_preemption = -1;
+-MODULE_PARM_DESC(enable_preemption, "Enable preemption (A7xx+ only) (1=on , 0=disable, -1=auto (default))");
++MODULE_PARM_DESC(enable_preemption, "Enable preemption (A690, A7xx+) (1=on , 0=disable, -1=auto (default))");
+ module_param(enable_preemption, int, 0600);
+ 
+ bool disable_acd;

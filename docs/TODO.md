@@ -45,6 +45,7 @@
 - **蓝牙通话**（[issue #107](https://github.com/vahiru/gaokun-android/issues/107)）：音频策略里没有蓝牙SCO通路，蓝牙耳机的麦克风在通话中无法使用。
 - **相机**（[issue #108](https://github.com/vahiru/gaokun-android/issues/108)）：变焦和曝光补偿；软件ISP降噪；闪光灯照片负向曝光补偿；手电筒亮度档位；libcamera补丁和传感器参数提交到上游。
 - **按网络随机的Wi-Fi MAC地址**：需要同时做一次性迁移，避免老网络的设置突然生效。
+- **GPU最高优先级的权限检查**：目前内核和Turnip都不检查调用者权限。ROM里的ANGLE看到Turnip声明了REALTIME，就会让每个进程都用它，所以用OpenGL ES的游戏和SurfaceFlinger同在ring 0，享受不到抢占。可以参照panthor的`group_priority_permit()`：内核只允许带`CAP_SYS_NICE`的进程或DRM master使用最高一档ring；Turnip在初始化时试建一个最高优先级的队列，建不成就不声明REALTIME。不能让队列创建直接失败，因为ROM的ANGLE遇到`VK_ERROR_NOT_PERMITTED`不会降级重试，GLES应用会无法启动。动手之前先确认两点：SurfaceFlinger在本ROM上带有`CAP_SYS_NICE`；常玩的GLES游戏在现有内核上确实有合成掉帧。代价是SystemUI等界面也会落到ring 2，游戏在前台时下拉通知栏，动画可能变卡。背景见[`dev/gpu-turnip.md`](dev/gpu-turnip.md)的“GPU抢占”一节。
 - **120 Hz无缝降频**
 - **Wi-Fi Direct**；海外地区的Wi-Fi频段设置（regdomain）
 - **在设置里显示Android ID**，方便用户自己登记Google认证

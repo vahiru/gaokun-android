@@ -1,0 +1,186 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] drm/msm: Reset the GPU when a preemption times out on an idle
+ ring
+
+When a preemption times out, a6xx_preempt_timer() moves the preemption
+state to FAULTED and queues recover_work. recover_worker() then looks for
+the hung submit on the active ring, which is the ring being switched away
+from. Switching away from an idle ring is the common case: a compositor
+submits while the game's ring has drained. If nothing else is submitted
+to that ring, there is no submit to blame, so the worker returns without
+calling ->recover() and the state stays FAULTED. From then on a6xx_flush()
+only sets restore_wptr, a6xx_preempt_trigger() can no longer start a
+preemption, and hangcheck only looks at the idle active ring, so every
+ring stays stopped until reboot.
+
+Let the code that saw the GPU wedge ask for a reset whether or not a
+submit can be blamed. On a preemption timeout or a failed preemption, set
+gpu->force_recover before queueing recover_work. recover_worker() then
+resets and replays even when the active ring has nothing pending, and
+still captures the crash state, without a submit.
+
+Two loose ends of the reset path get tied up as well:
+- A preemption timer still pending at reset could fire afterwards and
+  fault a healthy GPU. a6xx_preempt_hw_init() now deletes it, and a
+  request that arrives during the reset is cleared once the reset is done.
+- Replayed submits bypass msm_gpu_submit(), which arms hangcheck. Arm it
+  after the replay.
+
+This covers a7xx too, which uses the same preemption code. The a5xx and
+a8xx preemption timers follow the same pattern and are left unchanged.
+
+If the switched-away ring does get new work while the preemption is
+stuck, hangcheck recovers the GPU as before, but blames that submit,
+which never ran because its WPTR write was held back. That is unchanged
+here.
+
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/gpu/drm/msm/adreno/a6xx_preempt.c |  6 ++++
+ drivers/gpu/drm/msm/msm_gpu.c             | 34 +++++++++++++++++++++--
+ drivers/gpu/drm/msm/msm_gpu.h             |  7 +++++
+ 3 files changed, 44 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/gpu/drm/msm/adreno/a6xx_preempt.c b/drivers/gpu/drm/msm/adreno/a6xx_preempt.c
+index f55c857d9..00e2a4dae 100644
+--- a/drivers/gpu/drm/msm/adreno/a6xx_preempt.c
++++ b/drivers/gpu/drm/msm/adreno/a6xx_preempt.c
+@@ -21,6 +21,8 @@ static void a6xx_preempt_timer(struct timer_list *t)
+ 		return;
+ 
+ 	dev_err(dev->dev, "%s: preemption timed out\n", gpu->name);
++	/* The ring being switched away from may be idle: reset regardless */
++	WRITE_ONCE(gpu->force_recover, true);
+ 	kthread_queue_work(gpu->worker, &gpu->recover_work);
+ }
+ 
+@@ -103,6 +105,7 @@ void a6xx_preempt_irq(struct msm_gpu *gpu)
+ 		set_preempt_state(a6xx_gpu, PREEMPT_FAULTED);
+ 		dev_err(dev->dev, "%s: Preemption failed to complete\n",
+ 			gpu->name);
++		WRITE_ONCE(gpu->force_recover, true);
+ 		kthread_queue_work(gpu->worker, &gpu->recover_work);
+ 		return;
+ 	}
+@@ -137,6 +140,9 @@ void a6xx_preempt_hw_init(struct msm_gpu *gpu)
+ 	if (gpu->nr_rings == 1)
+ 		return;
+ 
++	/* A preemption pending before the reset must not time out after it */
++	timer_delete_sync(&a6xx_gpu->preempt_timer);
++
+ 	for (i = 0; i < gpu->nr_rings; i++) {
+ 		struct a6xx_preempt_record *record_ptr = a6xx_gpu->preempt[i];
+ 
+diff --git a/drivers/gpu/drm/msm/msm_gpu.c b/drivers/gpu/drm/msm/msm_gpu.c
+index 03c057856..4ca8b669b 100644
+--- a/drivers/gpu/drm/msm/msm_gpu.c
++++ b/drivers/gpu/drm/msm/msm_gpu.c
+@@ -461,6 +461,8 @@ static void get_comm_cmdline(struct msm_gem_submit *submit, char **comm, char **
+ 	put_task_struct(task);
+ }
+ 
++static void hangcheck_timer_reset(struct msm_gpu *gpu);
++
+ static void recover_worker(struct kthread_work *work)
+ {
+ 	struct msm_gpu *gpu = container_of(work, struct msm_gpu, recover_work);
+@@ -471,21 +473,37 @@ static void recover_worker(struct kthread_work *work)
+ 	char *comm = NULL, *cmd = NULL;
+ 	unsigned int noreclaim_flag;
+ 	struct task_struct *task;
++	bool forced;
+ 	int i;
+ 
+ 	mutex_lock(&gpu->lock);
+ 
+ 	DRM_DEV_ERROR(dev->dev, "%s: hangcheck recover!\n", gpu->name);
+ 
++	forced = xchg(&gpu->force_recover, false);
++
+ 	submit = find_submit(cur_ring, cur_ring->memptrs->fence + 1);
+ 
+ 	/*
+ 	 * If the submit retired while we were waiting for the worker to run,
+-	 * or waiting to acquire the gpu lock, then nothing more to do.
++	 * or waiting to acquire the gpu lock, then nothing more to do, unless
++	 * the GPU itself is wedged and has to be reset anyway.
+ 	 */
+-	if (!submit)
++	if (!submit && !forced)
+ 		goto out_unlock;
+ 
++	if (!submit) {
++		DRM_DEV_ERROR(dev->dev, "%s: no pending submit on the active ring, resetting anyway\n",
++			      gpu->name);
++
++		noreclaim_flag = memalloc_noreclaim_save();
++		pm_runtime_get_sync(&gpu->pdev->dev);
++		msm_gpu_crashstate_capture(gpu, NULL, NULL, NULL, NULL);
++		memalloc_noreclaim_restore(noreclaim_flag);
++
++		goto reset;
++	}
++
+ 	/* Increment the fault counts */
+ 	submit->queue->faults++;
+ 
+@@ -534,6 +552,7 @@ static void recover_worker(struct kthread_work *work)
+ 	kfree(cmd);
+ 	kfree(comm);
+ 
++reset:
+ 	/*
+ 	 * Update all the rings with the latest and greatest fence.. this
+ 	 * needs to happen after msm_rd_dump_submit() to ensure that the
+@@ -548,7 +567,7 @@ static void recover_worker(struct kthread_work *work)
+ 		 * For the current (faulting?) ring/submit advance the fence by
+ 		 * one more to clear the faulting submit
+ 		 */
+-		if (ring == cur_ring)
++		if (submit && ring == cur_ring)
+ 			ring->memptrs->fence = ++fence;
+ 
+ 		msm_update_fence(ring->fctx, fence);
+@@ -558,6 +577,12 @@ static void recover_worker(struct kthread_work *work)
+ 
+ 	gpu->funcs->recover(gpu);
+ 
++	/*
++	 * A request that arrived while we were resetting (e.g. the preemption
++	 * timer firing meanwhile) has just been served by this reset.
++	 */
++	WRITE_ONCE(gpu->force_recover, false);
++
+ 	/* retire completed submits, plus the one that hung: */
+ 	retire_submits(gpu);
+ 
+@@ -582,6 +607,9 @@ static void recover_worker(struct kthread_work *work)
+ 		spin_unlock_irqrestore(&ring->submit_lock, flags);
+ 	}
+ 
++	/* Replayed work bypasses msm_gpu_submit(), so watch it from here */
++	hangcheck_timer_reset(gpu);
++
+ 	pm_runtime_put(&gpu->pdev->dev);
+ 
+ out_unlock:
+diff --git a/drivers/gpu/drm/msm/msm_gpu.h b/drivers/gpu/drm/msm/msm_gpu.h
+index bc5b31eb1..b9e73b951 100644
+--- a/drivers/gpu/drm/msm/msm_gpu.h
++++ b/drivers/gpu/drm/msm/msm_gpu.h
+@@ -241,6 +241,13 @@ struct msm_gpu {
+ 	/* work for handling GPU recovery: */
+ 	struct kthread_work recover_work;
+ 
++	/*
++	 * Set before queueing recover_work when the GPU itself is wedged and
++	 * must be reset even if the active ring has no pending submit, e.g.
++	 * a preemption that timed out while switching away from an idle ring.
++	 */
++	bool force_recover;
++
+ 	/** retire_event: notified when submits are retired: */
+ 	wait_queue_head_t retire_event;
+ 

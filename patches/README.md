@@ -10,7 +10,7 @@
 | [`kernel/pcie-pm/`](kernel/pcie-pm/) | Linux内核（PCIe、NVMe、cpuidle、系统休眠与唤醒） | [`scripts/kernel-apply-patches.sh`](../scripts/kernel-apply-patches.sh)（`KPATCHES`） | SC8280XP PCIe L2/D3深度待机、并行恢复、链路重试、NVMe死盘panic、PCIe `WAKE#`与唤醒中断管理 |
 | [`kernel/wifi/`](kernel/wifi/) | Linux内核（`ath11k`、`mac80211`、`bus/mhi`） | [`scripts/kernel-apply-patches.sh`](../scripts/kernel-apply-patches.sh)（`KPATCHES`） | MHI固件跨断电保留、WoWLAN挂起/恢复、固件崩溃恢复与退避、扫描与唤醒保持、RX BA会话重建 |
 | [`kernel/ec-usb/`](kernel/ec-usb/) | Linux内核（华为高鲲EC、电池、UCSI、USB Gadget、xHCI） | [`scripts/kernel-apply-patches.sh`](../scripts/kernel-apply-patches.sh)（`KPATCHES`） | EC盖子状态与挂起中断、电池状态位与温度解码、UCSI端口/DP HPD/方向/重试、`android_usb`、configfs UDC等待 |
-| [`kernel/drm/`](kernel/drm/) | Linux内核（DRM核心、MSM DPU、DSI PHY、Himax面板、MSM GPU） | [`scripts/kernel-apply-patches.sh`](../scripts/kernel-apply-patches.sh)（`KPATCHES`） | 双DSI绑定PLL初始化、面板硬件ID引脚识别（CSOT/BOE）、DPU PCC色域转换与出厂3D LUT校准、8 bpc抖动、10-bit平面、线性背光、GPU上下文地址空间延迟创建的空指针与竞争修正（回移） |
+| [`kernel/drm/`](kernel/drm/) | Linux内核（DRM核心、MSM DPU、DSI PHY、Himax面板、MSM GPU） | [`scripts/kernel-apply-patches.sh`](../scripts/kernel-apply-patches.sh)（`KPATCHES`） | 双DSI绑定PLL初始化、面板硬件ID引脚识别（CSOT/BOE）、DPU PCC色域转换与出厂3D LUT校准、8 bpc抖动、10-bit平面、线性背光、GPU上下文地址空间延迟创建的空指针与竞争修正（回移）、GPU队列优先级换算修正与抢占记录挂起重置（回移）、A690 GPU抢占及抢占超时恢复 |
 | [`kernel/iris/`](kernel/iris/) | Linux内核（`media/iris`视频硬件解码） | [`scripts/kernel-apply-patches.sh`](../scripts/kernel-apply-patches.sh)（`KPATCHES`） | `qcom-iris`断电中断并发保护、Venus兼容`G_FMT`/flush/seek/EOS行为、看门狗恢复、裁剪保持、10-bit P010解码 |
 | [`kernel/camera/`](kernel/camera/) | Linux内核（`camcc`、`camss`、`ov13b10`、`hi846`） | [`scripts/kernel-apply-patches.sh`](../scripts/kernel-apply-patches.sh)（`KPATCHES`） | `camcc-sc8280xp` GDSC等待值与共享RCG、`camss`缺席传感器容错、后摄OV13B10板级上电序列、前后摄帧长与曝光上限更新 |
 | [`kernel/audio/`](kernel/audio/) | Linux内核（ASoC `sc8280xp`、LPASS macro、WSA883x、SoundWire、Q6APM） | [`scripts/kernel-apply-patches.sh`](../scripts/kernel-apply-patches.sh)（`KPATCHES`） | LPASS编解码器PM clock运行时电源管理、SoundWire末端口分配、WSA883x动态DRE与增益上限、VA启动消咔哒与高通恢复、四路麦采集 |
@@ -22,7 +22,7 @@
 | [`android/v4l2-codec2/`](android/v4l2-codec2/) | AOSP `external/v4l2_codec2` | [`scripts/crdroid-tree-fixes.py`](../scripts/crdroid-tree-fixes.py) | HEVC CSD合并入首帧、字节缓冲模式使用dmabuf ID、HDR静态元数据传递 |
 | [`android/tinyalsa/`](android/tinyalsa/) | AOSP `external/tinyalsa_new` | [`scripts/crdroid-tree-fixes.py`](../scripts/crdroid-tree-fixes.py) | `sw_params`从refined `hw_params`推导 |
 | [`android/frameworks-base/`](android/frameworks-base/) | AOSP `frameworks/base` | 候选/按需应用 | SystemUI指纹锁定状态处理 |
-| [`mesa/`](mesa/) | AOSP `external/mesa3d`（Turnip Vulkan驱动） | [`scripts/mesa-a17/regen.sh`](../scripts/mesa-a17/regen.sh) | Android Native Buffer空内存重绑定容错、`VK_FORMAT_G10X6_B10X6R10X6_2PLANE_420_UNORM_3PACK16`（P010）支持及Mesa 26.1上游构建与依赖回移（`0003..0011`） |
+| [`mesa/`](mesa/) | AOSP `external/mesa3d`（Turnip Vulkan驱动） | [`scripts/mesa-a17/regen.sh`](../scripts/mesa-a17/regen.sh) | Android Native Buffer空内存重绑定容错、`VK_FORMAT_G10X6_B10X6R10X6_2PLANE_420_UNORM_3PACK16`（P010）支持、Mesa 26.1上游构建与依赖回移（`0003..0011`）、A6xx抢占（`0012`上游VSC修正，`0013`） |
 | [`libcamera/`](libcamera/) | 上游`libcamera`（替换`external/libcamera`） | [`scripts/camera/setup-libcamera-tree.sh`](../scripts/camera/setup-libcamera-tree.sh) | 详见[`libcamera/README.md`](libcamera/README.md) |
 | [`resukisu/`](resukisu/) | 内核树内`KernelSU/`子模块 | [`scripts/kernel-setup-resukisu.sh`](../scripts/kernel-setup-resukisu.sh) | Linux 7.x内核API适配与内置路径调整 |
 

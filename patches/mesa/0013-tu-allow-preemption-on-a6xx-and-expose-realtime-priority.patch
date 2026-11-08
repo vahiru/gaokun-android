@@ -1,0 +1,60 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] tu: Allow preemption on a6xx and expose the realtime queue
+ priority
+
+Turnip sets MSM_SUBMITQUEUE_ALLOW_PREEMPT on a7xx+ only, so on a6xx the
+kernel never preempts inside a queue's IB list even when it runs several
+rings (drm/msm can now preempt on A690). Drop the chip >= 7 check and rely
+on has_preemption, the probe for whether the kernel accepts the flag. The
+a6xx command stream paths that survive preemption are already in place
+for the KGSL backend. (drm/msm also accepts the flag on a single ring when
+preemption is turned off with enable_preemption=0; the queue then simply
+never gets preempted.)
+
+With several rings the kernel exposes nr_rings * 3 priority levels.
+Advertise VK_QUEUE_GLOBAL_PRIORITY_REALTIME when there are at least four
+levels; it maps to the highest ring, so a compositor asking for realtime
+lands above normal apps. With a single ring (three levels) nothing
+changes.
+
+Origin: local
+Upstream-Status: Pending
+---
+ src/freedreno/vulkan/tu_device.cc      | 5 ++++-
+ src/freedreno/vulkan/tu_knl_drm_msm.cc | 7 +++++--
+ 2 files changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/src/freedreno/vulkan/tu_device.cc b/src/freedreno/vulkan/tu_device.cc
+index b42510d..0f84e70 100644
+--- a/src/freedreno/vulkan/tu_device.cc
++++ b/src/freedreno/vulkan/tu_device.cc
+@@ -1954,7 +1954,10 @@ tu_physical_device_get_global_priority_properties(const struct tu_physical_devic
+       return;
+    }
+ 
+-   props->priorityCount = MIN2(pdevice->submitqueue_priority_count, 3);
++   /* REALTIME only makes a difference when the kernel has a higher ring to
++    * put it on, i.e. more than one ring's worth of priority levels.
++    */
++   props->priorityCount = MIN2(pdevice->submitqueue_priority_count, 4);
+    switch (props->priorityCount) {
+    case 1:
+       props->priorities[0] = VK_QUEUE_GLOBAL_PRIORITY_MEDIUM_KHR;
+diff --git a/src/freedreno/vulkan/tu_knl_drm_msm.cc b/src/freedreno/vulkan/tu_knl_drm_msm.cc
+index 7cbc2d5..0e6c6da 100644
+--- a/src/freedreno/vulkan/tu_knl_drm_msm.cc
++++ b/src/freedreno/vulkan/tu_knl_drm_msm.cc
+@@ -341,8 +341,11 @@ msm_submitqueue_new(struct tu_device *dev, struct tu_queue *queue)
+       assert(queue->priority >= 0 &&
+              queue->priority < dev->physical_device->submitqueue_priority_count);
+       struct drm_msm_submitqueue req = {
+-         .flags = (dev->physical_device->info->chip >= 7 &&
+-                   dev->physical_device->has_preemption ?
++         /* The kernel accepts this flag only when it has more than one
++          * ring, i.e. supports preemption; the a6xx paths that keep state
++          * valid across preemption are shared with the KGSL backend.
++          */
++         .flags = (dev->physical_device->has_preemption ?
+                    MSM_SUBMITQUEUE_ALLOW_PREEMPT : 0),
+          .prio = queue->priority,
+       };

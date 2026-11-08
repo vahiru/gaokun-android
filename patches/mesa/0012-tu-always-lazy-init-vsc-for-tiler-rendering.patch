@@ -1,0 +1,73 @@
+From ebdcf84100596a7fe0a7ab605458349ac6c80a41 Mon Sep 17 00:00:00 2001
+From: Danylo Piliaiev <dpiliaiev@igalia.com>
+Date: Fri, 15 May 2026 20:24:51 +0200
+Subject: [PATCH] tu: Always lazy_init_vsc for tiler rendering
+
+Apparently we emitted uninitialized values for VSC in tu6_emit_tile_select
+when HW binning wasn't used, which Adreno 630 doesn't like and hangs.
+
+Instead of adding even more conditions, just always init VSC state,
+the rare cases where initializing it can be skipped - not worth
+the complexity.
+
+Fixes: 49191f46e60 ("tu/a6xx: Emit VSC addresses for each bin to restore after preemption")
+
+Signed-off-by: Danylo Piliaiev <dpiliaiev@igalia.com>
+Part-of: <https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/41604>
+Origin: upstream, https://gitlab.freedesktop.org/mesa/mesa/-/commit/ebdcf84100596a7fe0a7ab605458349ac6c80a41
+Upstream-Status: Backport [https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/41604]
+---
+ src/freedreno/vulkan/tu_cmd_buffer.cc | 18 +++++-------------
+ 1 file changed, 5 insertions(+), 13 deletions(-)
+
+diff --git a/src/freedreno/vulkan/tu_cmd_buffer.cc b/src/freedreno/vulkan/tu_cmd_buffer.cc
+index c0b5586..0277610 100644
+--- a/src/freedreno/vulkan/tu_cmd_buffer.cc
++++ b/src/freedreno/vulkan/tu_cmd_buffer.cc
+@@ -216,6 +216,7 @@ tu6_lazy_init_vsc(struct tu_cmd_buffer *cmd)
+    cmd->vsc_draw_strm_offset = prim_strm_size;
+    cmd->vsc_draw_strm_size_offset = cmd->vsc_draw_strm_offset + draw_strm_size;
+    cmd->vsc_state_offset = cmd->vsc_draw_strm_size_offset + draw_strm_size_size;
++   cmd->vsc_initialized = true;
+ }
+ 
+ static void
+@@ -253,8 +254,6 @@ tu_emit_vsc(struct tu_cmd_buffer *cmd, struct tu_cs *cs)
+       tu_cs_emit(cs, A6XX_CP_SET_PSEUDO_REG__0_PSEUDO_REG(VSC_PIPE_DATA_PRIM_BASE));
+       tu_emit_vis_stream_patchpoint(cmd, cs, cmd->vsc_prim_strm_offset);
+    }
+-
+-   cmd->vsc_initialized = true;
+ }
+ 
+ struct tu_set_render_mode {
+@@ -3418,11 +3417,11 @@ tu6_tile_render_begin(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
+       tu_cs_emit_regs(cs, RB_BIN_FOVEAT(CHIP));
+    }
+ 
+-   if (use_binning) {
+-      if (!cmd->vsc_initialized) {
+-         tu6_lazy_init_vsc(cmd);
+-      }
++   if (!cmd->vsc_initialized) {
++      tu6_lazy_init_vsc(cmd);
++   }
+ 
++   if (use_binning) {
+       /* We always emit VSC before each renderpass, because due to
+        * skipsaverestore the underlying VSC registers may have become
+        * invalid. Normally we'd need to WFI before setting these non-context
+@@ -3483,13 +3482,6 @@ tu6_tile_render_begin(struct tu_cmd_buffer *cmd, struct tu_cs *cs,
+    }
+ 
+    if (vsc->binning_possible) {
+-      /* On a7xx we always need VSC allocated because the VSC state has to go
+-       * together with other stream data. We could allocate just the VSC state
+-       * if binning is disabled but it doesn't seem worth it.
+-       */
+-      if (CHIP >= A7XX && !cmd->vsc_initialized)
+-         tu6_lazy_init_vsc(cmd);
+-
+       /* Upload state regs to memory to be restored on skipsaverestore
+        * preemption. On a7xx this is considered part of the vis stream that
+        * requires a patchpoint.
