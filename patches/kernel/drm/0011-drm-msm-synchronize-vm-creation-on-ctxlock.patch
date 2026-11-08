@@ -1,0 +1,60 @@
+From: Rob Clark <robin.clark@oss.qualcomm.com>
+Subject: [PATCH] drm/msm: Synchronize VM creation on ctxlock
+
+And serialize setting EN_VM_BIND against VM creation.
+
+Signed-off-by: Rob Clark <robin.clark@oss.qualcomm.com>
+Patchwork: https://patchwork.freedesktop.org/patch/743083/
+Message-ID: <20260729155609.20190-4-robin.clark@oss.qualcomm.com>
+(cherry picked from commit 2c26f9e46d39571a11ad8a6c3cdf150af70e4f12)
+Origin: backport, https://git.kernel.org/torvalds/c/2c26f9e46d39571a11ad8a6c3cdf150af70e4f12
+Upstream-Status: Backport [v7.3-rc1, 2c26f9e46d39]
+---
+ drivers/gpu/drm/msm/adreno/adreno_gpu.c | 5 ++++-
+ drivers/gpu/drm/msm/msm_drv.c           | 3 +--
+ 2 files changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/gpu/drm/msm/adreno/adreno_gpu.c b/drivers/gpu/drm/msm/adreno/adreno_gpu.c
+index 29c59899f..3981e5162 100644
+--- a/drivers/gpu/drm/msm/adreno/adreno_gpu.c
++++ b/drivers/gpu/drm/msm/adreno/adreno_gpu.c
+@@ -503,7 +503,9 @@ int adreno_set_param(struct msm_gpu *gpu, struct msm_context *ctx,
+ 		if (!perfmon_capable())
+ 			return UERR(EPERM, drm, "invalid permissions");
+ 		return msm_context_set_sysprof(ctx, gpu, value);
+-	case MSM_PARAM_EN_VM_BIND:
++	case MSM_PARAM_EN_VM_BIND: {
++		guard(rwsem_read)(&ctx->ctxlock);
++
+ 		/* We can only support VM_BIND with per-process pgtables: */
+ 		if (ctx->vm == gpu->vm)
+ 			return UERR(EINVAL, drm, "requires per-process pgtables");
+@@ -518,6 +520,7 @@ int adreno_set_param(struct msm_gpu *gpu, struct msm_context *ctx,
+ 		ctx->userspace_managed_vm = value;
+ 
+ 		return 0;
++	}
+ 	default:
+ 		return UERR(EINVAL, drm, "%s: invalid param: %u", gpu->name, param);
+ 	}
+diff --git a/drivers/gpu/drm/msm/msm_drv.c b/drivers/gpu/drm/msm/msm_drv.c
+index 9ed1d4894..81b05d0e7 100644
+--- a/drivers/gpu/drm/msm/msm_drv.c
++++ b/drivers/gpu/drm/msm/msm_drv.c
+@@ -222,7 +222,6 @@ static void load_gpu(struct drm_device *dev)
+  */
+ struct drm_gpuvm *msm_context_vm(struct drm_device *dev, struct msm_context *ctx)
+ {
+-	static DEFINE_MUTEX(init_lock);
+ 	struct msm_drm_private *priv = dev->dev_private;
+ 	struct drm_gpuvm *vm = smp_load_acquire(&ctx->vm);
+ 
+@@ -230,7 +229,7 @@ struct drm_gpuvm *msm_context_vm(struct drm_device *dev, struct msm_context *ctx
+ 	if (vm)
+ 		return vm;
+ 
+-	guard(mutex)(&init_lock);
++	guard(rwsem_write)(&ctx->ctxlock);
+ 
+ 	if (!ctx->vm) {
+ 		vm = msm_gpu_create_private_vm(

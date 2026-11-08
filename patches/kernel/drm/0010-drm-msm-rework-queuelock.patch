@@ -1,0 +1,110 @@
+From: Rob Clark <robin.clark@oss.qualcomm.com>
+Subject: [PATCH] drm/msm: Rework queuelock
+
+Rename to ctxlock, and use cleanup guards to manage releasing the lock.
+This will let us re-use it for other per-context read/write serial-
+ization, such as VM creation.
+
+Signed-off-by: Rob Clark <robin.clark@oss.qualcomm.com>
+Patchwork: https://patchwork.freedesktop.org/patch/743080/
+Message-ID: <20260729155609.20190-3-robin.clark@oss.qualcomm.com>
+(cherry picked from commit ea69d489d3a6822e2cf10d6806a889dd2e3271f0)
+Origin: backport, https://git.kernel.org/torvalds/c/ea69d489d3a6822e2cf10d6806a889dd2e3271f0
+Upstream-Status: Backport [v7.3-rc1, ea69d489d3a6]
+---
+ drivers/gpu/drm/msm/msm_drv.c         |  2 +-
+ drivers/gpu/drm/msm/msm_gpu.h         |  4 ++--
+ drivers/gpu/drm/msm/msm_submitqueue.c | 14 +++-----------
+ 3 files changed, 6 insertions(+), 14 deletions(-)
+
+diff --git a/drivers/gpu/drm/msm/msm_drv.c b/drivers/gpu/drm/msm/msm_drv.c
+index d8522eeac..9ed1d4894 100644
+--- a/drivers/gpu/drm/msm/msm_drv.c
++++ b/drivers/gpu/drm/msm/msm_drv.c
+@@ -251,7 +251,7 @@ static int context_init(struct drm_device *dev, struct drm_file *file)
+ 		return -ENOMEM;
+ 
+ 	INIT_LIST_HEAD(&ctx->submitqueues);
+-	rwlock_init(&ctx->queuelock);
++	init_rwsem(&ctx->ctxlock);
+ 
+ 	kref_init(&ctx->ref);
+ 	msm_submitqueue_init(dev, ctx);
+diff --git a/drivers/gpu/drm/msm/msm_gpu.h b/drivers/gpu/drm/msm/msm_gpu.h
+index 6c83b8cbb..d27d54bdb 100644
+--- a/drivers/gpu/drm/msm/msm_gpu.h
++++ b/drivers/gpu/drm/msm/msm_gpu.h
+@@ -392,8 +392,8 @@ msm_gpu_sysprof_no_ifpc(struct msm_gpu *gpu)
+  * struct msm_context - per-drm_file context
+  */
+ struct msm_context {
+-	/** @queuelock: synchronizes access to submitqueues list */
+-	rwlock_t queuelock;
++	/** @ctxlock: synchronizes access to submitqueues list, etc */
++	struct rw_semaphore ctxlock;
+ 	/** @submitqueues: list of &msm_gpu_submitqueue created by userspace */
+ 	struct list_head submitqueues;
+ 	/**
+diff --git a/drivers/gpu/drm/msm/msm_submitqueue.c b/drivers/gpu/drm/msm/msm_submitqueue.c
+index 1a5a77b28..8b5980d5a 100644
+--- a/drivers/gpu/drm/msm/msm_submitqueue.c
++++ b/drivers/gpu/drm/msm/msm_submitqueue.c
+@@ -93,18 +93,15 @@ struct msm_gpu_submitqueue *msm_submitqueue_get(struct msm_context *ctx,
+ 	if (!ctx)
+ 		return NULL;
+ 
+-	read_lock(&ctx->queuelock);
++	guard(rwsem_read)(&ctx->ctxlock);
+ 
+ 	list_for_each_entry(entry, &ctx->submitqueues, node) {
+ 		if (entry->id == id) {
+ 			kref_get(&entry->ref);
+-			read_unlock(&ctx->queuelock);
+-
+ 			return entry;
+ 		}
+ 	}
+ 
+-	read_unlock(&ctx->queuelock);
+ 	return NULL;
+ }
+ 
+@@ -237,7 +234,7 @@ int msm_submitqueue_create(struct drm_device *drm, struct msm_context *ctx,
+ 		return ret;
+ 	}
+ 
+-	write_lock(&ctx->queuelock);
++	guard(rwsem_write)(&ctx->ctxlock);
+ 
+ 	queue->ctx = msm_context_get(ctx);
+ 	queue->id = ctx->queueid++;
+@@ -251,8 +248,6 @@ int msm_submitqueue_create(struct drm_device *drm, struct msm_context *ctx,
+ 
+ 	list_add_tail(&queue->node, &ctx->submitqueues);
+ 
+-	write_unlock(&ctx->queuelock);
+-
+ 	return 0;
+ }
+ 
+@@ -335,19 +330,16 @@ int msm_submitqueue_remove(struct msm_context *ctx, u32 id)
+ 	if (!id)
+ 		return -ENOENT;
+ 
+-	write_lock(&ctx->queuelock);
++	guard(rwsem_write)(&ctx->ctxlock);
+ 
+ 	list_for_each_entry(entry, &ctx->submitqueues, node) {
+ 		if (entry->id == id) {
+ 			list_del(&entry->node);
+-			write_unlock(&ctx->queuelock);
+-
+ 			msm_submitqueue_put(entry);
+ 			return 0;
+ 		}
+ 	}
+ 
+-	write_unlock(&ctx->queuelock);
+ 	return -ENOENT;
+ }
+ 

@@ -115,7 +115,7 @@ KPATCHES=(
     kernel/ec-usb/0015-platform-arm64-huawei-gaokun-ec-use-an-edge-triggered-IRQ-while-suspended.patch
     kernel/ec-usb/0016-power-supply-huawei-gaokun-battery-report-temperature.patch
 
-    # ─── 5. kernel/drm：DRM 核心、MSM DPU 色彩与平面、DSI PHY、Himax 面板 ───
+    # ─── 5. kernel/drm：DRM 核心、MSM DPU 色彩与平面、DSI PHY、Himax 面板、MSM GPU ───
     # 显示色彩详见 docs/dev/display-color.md。0003 与 kernel/dts/0017 配套；
     # 0005 依赖 0004 并与 android/drm-hwcomposer/0002（tree-fix [32]）配套；
     # 0007 与 android/drm-hwcomposer/0001（tree-fix [31]）配套。
@@ -127,6 +127,11 @@ KPATCHES=(
     kernel/drm/0006-drm-msm-dpu-dither-8-bpc-panels.patch
     kernel/drm/0007-drm-msm-dpu-expose-ABGR-and-XBGR-2101010-on-planes.patch
     kernel/drm/0008-drm-panel-himax-hx83121a-report-a-linear-backlight-scale.patch
+    kernel/drm/0009-drm-msm-fix-barriers-accessing-ctx-vm.patch
+    kernel/drm/0010-drm-msm-rework-queuelock.patch
+    kernel/drm/0011-drm-msm-synchronize-vm-creation-on-ctxlock.patch
+    kernel/drm/0012-drm-msm-gem-validate-lazy-vm-in-gem_new.patch
+    kernel/drm/0013-drm-msm-allow-lazy-vm-creation-to-fail.patch
 
     # ─── 6. kernel/iris：qcom-iris 视频解码驱动 ───
     # 配套 DT 见 kernel/dts/0009–0010；需 CONFIG_VIDEO_QCOM_IRIS=y、CONFIG_VIDEO_QCOM_VENUS 不设。
