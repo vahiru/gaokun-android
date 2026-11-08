@@ -163,6 +163,9 @@ KPATCHES=(
     kernel/iris/0012-media-iris-gen1-decode-10-bit-to-p010.patch
     # 0013 把编码器 ARP 走 kernel/iommu/0001 建立的 CP 非像素 bank（需先打 iommu/0001；没有该上下文的平台不受影响）。
     kernel/iris/0013-media-iris-route-the-encoder-ARP-through-the-CP-non-pixel-context.patch
+    # 0014/0015 修 gen1 编码器的档次/级别 HFI 值与时间戳单位，与 CP 非像素工作无关，改动文件互不重叠。
+    kernel/iris/0014-media-iris-map-gen1-encoder-profile-and-level-to-HFI-values.patch
+    kernel/iris/0015-media-iris-send-the-gen1-encoder-timestamp-in-microseconds.patch
 
     # ─── 7. kernel/camera：camcc 时钟/GDSC、camss 与前后摄传感器驱动（ov13b10 / hi846）───
     # 0003 与 kernel/dts/0005 配套，需 CONFIG_VIDEO_OV13B10=y 与 CONFIG_VIDEO_DW9714=y；
