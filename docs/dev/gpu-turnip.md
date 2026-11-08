@@ -120,7 +120,8 @@ SC8280XP的GPU SMMU（`3da0000.iommu`，`qcom,sc8280xp-smmu-500`）在`msm_iommu
 - CP在抢占前后恢复的静态寄存器表取自下游驱动的A6xx和A650系列列表，下游驱动没有A690专用的表；IFPC相关的部分没有放进去，因为本驱动在A690上不启用IFPC。
 - 抢占时CP会保存和恢复GMEM，会占用一部分GPU时间。
 - GPU每次运行时挂起都会把4个抢占记录清零（`kernel/drm/0015`，共约20 MB），会占用一些CPU时间。
-- 主线的恢复流程有一个漏洞：抢占超时时如果当前ring是空闲的，`recover_worker()`找不到要怪罪的提交，就不执行恢复，抢占状态停在FAULTED，之后所有ring都不再执行。表现是`dmesg`出现`preemption timed out`后画面全部停住，只能重启。A7xx同样如此，A690开启抢占后也可能遇到。
+- 抢占超时或抢占出错时，GPU会被复位，正在执行的应用可能因此丢失GPU上下文。主线的恢复流程原本在当前ring空闲时（找不到要怪罪的提交）直接跳过，抢占状态停在FAULTED，所有ring都不再执行；`kernel/drm/0017`让这种情况也照常复位并重放，`dmesg`里会多一行`no pending submit on the active ring, resetting anyway`。
+- 如果抢占卡住期间被切走的ring又收到新提交，hangcheck大约1秒后会照常复位GPU，但会把那次提交当作元凶：它其实从没执行过（卡住期间内核不写WPTR）。用VM_BIND的Vulkan应用（Turnip）会因此收到设备丢失。抢占若在某种情况下反复失败，每次都是约10秒卡顿加一次复位，没有计数，也不会自动关闭抢占。
 - 抢占跨整机挂起的情况尚未经实测；GPU运行时挂起（同一个`pm_suspend`回调）之后工作正常。
 - 用OpenGL ES的游戏与SurfaceFlinger同在ring 0，不受益。
 - 内核和Turnip都不检查调用者的权限，任何应用都能申请REALTIME，与SurfaceFlinger同在ring 0。

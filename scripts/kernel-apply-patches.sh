@@ -136,6 +136,7 @@ KPATCHES=(
     kernel/drm/0014-drm-msm-fix-sched_prio-inversion-within-a-ring.patch
     kernel/drm/0015-drm-msm-a6xx-reset-preemption-records-across-suspend.patch
     kernel/drm/0016-drm-msm-a6xx-enable-preemption-on-a690.patch
+    kernel/drm/0017-drm-msm-reset-the-gpu-when-a-preemption-times-out-on-an-idle-ring.patch
 
     # ─── 6. kernel/iris：qcom-iris 视频解码驱动 ───
     # 配套 DT 见 kernel/dts/0009–0010；需 CONFIG_VIDEO_QCOM_IRIS=y、CONFIG_VIDEO_QCOM_VENUS 不设。
