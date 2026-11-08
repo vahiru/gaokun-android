@@ -146,7 +146,7 @@ KPATCHES=(
     kernel/drm/0018-drm-msm-dpu-add-the-DSPP-3D-LUT-of-sc8280xp.patch
     kernel/drm/0019-drm-msm-dpu-load-the-gaokun3-factory-calibration-into-the-3D-LUT.patch
 
-    # ─── 6. kernel/iris：qcom-iris 视频解码驱动 ───
+    # ─── 6. kernel/iris：qcom-iris 视频编解码驱动 ───
     # 配套 DT 见 kernel/dts/0009–0010；需 CONFIG_VIDEO_QCOM_IRIS=y、CONFIG_VIDEO_QCOM_VENUS 不设。
     # 0009 叠在 0006 之上；0012 需与 patches/mesa/0002 及 crdroid-tree-fixes.py [29][30] 一起生效。
     kernel/iris/0001-media-iris-irq-thread-skips-hw-access-after-power-off.patch
@@ -161,6 +161,8 @@ KPATCHES=(
     kernel/iris/0010-media-iris-gen1-recover-from-firmware-watchdog.patch
     kernel/iris/0011-media-iris-keep-decoder-crop-across-capture-s_fmt.patch
     kernel/iris/0012-media-iris-gen1-decode-10-bit-to-p010.patch
+    # 0013 把编码器 ARP 走 kernel/iommu/0001 建立的 CP 非像素 bank（需先打 iommu/0001；没有该上下文的平台不受影响）。
+    kernel/iris/0013-media-iris-route-the-encoder-ARP-through-the-CP-non-pixel-context.patch
 
     # ─── 7. kernel/camera：camcc 时钟/GDSC、camss 与前后摄传感器驱动（ov13b10 / hi846）───
     # 0003 与 kernel/dts/0005 配套，需 CONFIG_VIDEO_OV13B10=y 与 CONFIG_VIDEO_DW9714=y；

@@ -1,6 +1,6 @@
-# 音频子系统与硬件视频解码（Audioreach + `qcom-iris`）
+# 音频子系统与硬件视频编解码（Audioreach + `qcom-iris`）
 
-本文档说明`gaokun3`的LPASS/SoundWire音频拓扑、扬声器/耳机/麦克风通路配置、低延迟播放修复以及基于`qcom-iris`与`v4l2_codec2`的硬件视频解码架构。
+本文档说明`gaokun3`的LPASS/SoundWire音频拓扑、扬声器/耳机/麦克风通路配置、低延迟播放修复以及基于`qcom-iris`与`v4l2_codec2`的硬件视频解码架构和内核侧的硬件视频编码。
 
 ## 一、音频拓扑与内核驱动要求
 
@@ -101,7 +101,7 @@ TX_DEC0 Volume = 102, TX_DEC1 Volume = 102
 4. **播放缓冲只用3个period（`patches/android/hardware-interfaces/0011`）**：
    alsa_utils给内置设备配ALSA缓冲时，period数统一取`ro.hardware.audio.tinyalsa.period_count`（默认4），播放和录音共用。`patches/android/hardware-interfaces/0011`在`openProxyForAttachedDevice()`里只对输出设备改用`ro.vendor.audio.primary.out_period_count`（`device.mk`设3）：块大小不变，只是切成3个period，内核`q6apm-dai`再按480帧向上取整，得到3 × 480帧（30 ms）。录音方向保持4个，因为采集钩子在I/O线程里处理85 ms的块（通话降噪最长约51 ms才回退），这段时间新来的数据要靠录音缓冲接住。播放不能再减到2个：DSP缺数据时会扣着最后一个period不放，ALSA不会报XRUN，FastMixer与轨道的欠载计数也都是0，断音只能在游戏里听出来。
 
-## 五、硬件视频解码（`qcom-iris` + `v4l2_codec2`）
+## 五、硬件视频编解码（`qcom-iris` + `v4l2_codec2`）
 
 ### 1. 从`qcom-venus`迁移至`qcom-iris`
 
@@ -121,4 +121,18 @@ TX_DEC0 Volume = 102, TX_DEC1 Volume = 102
 | `patches/kernel/iris/0001` | `drivers/media/platform/qcom/iris/` | 引入`core->hw_powered`标志，防止解码器下电后残余中断触发未供电寄存器读取导致内核崩溃 |
 | `patches/kernel/iris/0003` | `drivers/media/platform/qcom/iris/` | 允许`v4l2_codec2`在首个`V4L2_EVENT_SOURCE_CHANGE`事件到达前调用`VIDIOC_G_FMT(CAPTURE)`，兼容Android Codec2初始化顺序 |
 | `patches/kernel/iris/0005` | `drivers/media/platform/qcom/iris/` | 在非动态分辨率切换（非DRC）的`CAPTURE streamoff`路径发送`HFI_FLUSH_ALL`而非`HFI_FLUSH_OUTPUT`，修复视频拖动进度条（seek）或关闭播放器时固件等待`HFI_FLUSH_OUTPUT`响应超时导致的卡死 |
+
+### 3. 硬件视频编码（内核侧）
+
+`qcom-iris`的gen1编码路径在SC8280XP上要额外满足一条硬件约束：编码器固件通过内容保护非像素流SID `0x2a04`访问它的ARP（auto-register programming）PERSIST缓冲，而这条流只能经由`apps_smmu`上CBAR VMID为`0xb`（CP_NON_PIXEL）的stage-1上下文bank翻译。ARP若留在`iris`主域（SID `0x2a00`）上，第一次编码就会让整板复位。Windows的`qcsmmu8280.sys`从host侧配置这块bank，主线`arm-smmu`没有secure-VMID支持，所以由下游补丁完成：
+
+- **`patches/kernel/iommu/0001`（`arm-smmu-qcom`）**：`cfg_probe`时预留CB15、写CBAR（VMID `0xb`）、加`0x2a04`的SME。bank号固定为15，与Windows相同：把`0x2a04`绑到另一个VMID相同的bank时启动挂住。页表经io-pgtable的自定义分配器分配，每个表页用`qcom_scm_assign_mem`赋给`{HLOS RW, 0xb R}`。系统resume的reset会清掉这块bank，SoC的reset钩子随后重新编程它。`0x2a04`不能写进`iris`主节点的`iommus`：那样它会被绑到`iris`的HLOS bank，启动时挂住。
+- **`patches/kernel/iris/0013`**：编码器的`BUF_ARP`分配为连续内存，页独占赋给VMID `0xb`（HLOS与`0xb`共享的授予会被hypervisor拒绝），映射进CB15在窗口`0x01000000..0x25800000`内的固定IOVA `0x01000000`，并把该IOVA交给固件；拆除时反向还原，页无法交还HLOS时宁可泄漏也不释放。
+- **`patches/kernel/iris/0014`**：gen1编码器的档次/级别改发HFI位掩码值（原来发V4L2枚举，HEVC Main会被固件当成Main Still Picture）；级别按分辨率和帧率推导。同时修正该属性的payload大小（原来少分配4字节）。
+- **`patches/kernel/iris/0015`**：编码器EMPTY_BUFFER时间戳按微秒发（固件码率控制按微秒读，发纳秒会让码率严重超标），响应侧转回纳秒。
+
+已知限制：
+
+- ARP在固定IOVA，一次只支持一个编码会话；第二个会话在STREAMON时失败。窗口内的另一处IOVA（`0x10000000`）实测可用，支持并发需在窗口上做IOVA分配。
+- 本节只涉及内核；ROM里的硬件编码还需在用户态启用`v4l2_codec2`的编码组件。
 
