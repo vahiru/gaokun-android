@@ -132,6 +132,7 @@ KPATCHES=(
     kernel/drm/0011-drm-msm-synchronize-vm-creation-on-ctxlock.patch
     kernel/drm/0012-drm-msm-gem-validate-lazy-vm-in-gem_new.patch
     kernel/drm/0013-drm-msm-allow-lazy-vm-creation-to-fail.patch
+    kernel/drm/0014-drm-msm-fix-sched_prio-inversion-within-a-ring.patch
 
     # ─── 6. kernel/iris：qcom-iris 视频解码驱动 ───
     # 配套 DT 见 kernel/dts/0009–0010；需 CONFIG_VIDEO_QCOM_IRIS=y、CONFIG_VIDEO_QCOM_VENUS 不设。
