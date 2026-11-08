@@ -266,11 +266,12 @@ bool Device::init()
 	};
 	/*
 	 * Besides the sensor's own aspect ratio, offer the standard sizes (and
-	 * 320x240, which camera2 requires for JPEG on every camera):
-	 * this device has no media_profiles, so CameraX finds video qualities
-	 * by probing 640x480, 1280x720, 1920x1080 and so on, and without them
-	 * a camera gets no video at all (the rear one had only 640x474 and
-	 * 1280x948). deliver() crops to each stream's aspect ratio.
+	 * 320x240, which camera2 requires for JPEG on every camera): CameraX's
+	 * video qualities and the camcorder profiles in
+	 * etc/media_profiles_V1_0.xml map onto 640x480, 1280x720, 1920x1080
+	 * and so on, and without them a camera gets no video at all (the rear
+	 * one had only 640x474 and 1280x948). deliver() crops to each stream's
+	 * aspect ratio.
 	 *
 	 * Also exact 4:3 and 16:9 sizes at full resolution: CameraX takes the
 	 * largest size that matches its aspect ratio within a few pixels. With
