@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Simplified Chinese names of the color modes, see ../values/strings.xml. -->
+<resources>
+
+    <string name="color_mode_option_saturated">鲜艳</string>
+    <string name="color_mode_option_natural">标准</string>
+
+</resources>

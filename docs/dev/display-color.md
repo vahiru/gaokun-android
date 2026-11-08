@@ -8,31 +8,51 @@ BIOS从DPP分区读出每台机器的工厂3D LUT，开机时装成ACPI表`DLUT`
 
 表里有两条记录，间隔`0x6400`，头部是`$HUA02`，记录`+0x50`处的类型字节1 = sRGB、2 = P3（顺序不固定）。记录`+0x90`起是17³的LUT，先是4913个大端`u32`（R低8位、G 12位、B 12位），后面4913字节是R的高4位。LUT在编码域，按gamma 2.2算。
 
-## 怎么用（内核，`patches/kernel/drm/0004–0005`）
+## 怎么用（内核，`patches/kernel/drm/0004–0005`、`0018–0019`）
 
-DPU只有PCC（3×3矩阵）和GC，没有3D LUT，所以`dpu_panel_cal.c`在probe时把每张LUT化简成一个矩阵：取每个基色在节点12的响应换到线性光，按行归一，再缩放到LUT的白点。校准矩阵接在CTM后面，Android自己的色彩变换（夜间模式等）不受影响，外接显示器也不受影响。
+DSPP在PCC前面有一个3D LUT（`0018`）。它的13点模式有两个存储体：写当前没在用的那个不影响画面，切换只写一次opmode，随下一次flush生效，所以按帧换LUT不会撕裂。17点模式只有一个存储体，扫描中重写大约每5次切换撕裂1帧，所以不用。表的格式是在硬件上用CRC一项项测出来的（表不能回读），写在`dpu_hw_dspp.c`的注释里。
 
+`dpu_panel_cal.c`在probe时把两张17点LUT重采样成13点（`0019`）：存储体A放sRGB，B放P3。每个DSPP记着自己的存储体是否已写好。CRTC保持点亮的modeset会清掉这个标记并在同一次commit里重新写入，因为modeset可能换来断过电的DSPP。
+
+- 按连接器的`Colorspace`选存储体：`BT709_YCC`用sRGB，`DCI-P3_RGB_D65`和`Default`用P3。`Default`对应“鲜艳”档，见下文。
+- 13点重采样和工厂17点LUT的平均色差约0.2，按面板模型两者的准确度相同（sRGB平均色差约1.1）。以前化简成3×3 PCC矩阵时是5.6。
+- PCC只做CTM（夜间模式等），排在3D LUT后面，作用在校准后的面板值上。外接显示器不受影响。
+- CRTC要设过CTM或gamma LUT才会分到DSPP。Android的HWC每次都带CTM，所以Android上一直有校准；从没设过这两者的DRM客户端（例如fbcon）没有校准。
+- 不设`Colorspace`的客户端得到的是P3存储体，即“鲜艳”的效果；以前得到的是sRGB校准。
 - `msm.panel_calibration=0`运行时关掉校准，默认打开。
-- PCC只在commit带CTM时才启用。Android的HWC每次都带，所以Android上一直有校准；不写CTM的DRM客户端没有校准。
 - 两张表缺一张、校验失败或者不是这台机器，校准就不启用，也不挂`Colorspace`属性，HWC退回只报告`NATIVE`。
-- PCC工作在编码后的像素上，灰阶附近很准，全饱和色在sRGB模式下仍接近原生色度。P3模式下这类颜色由GPU在线性光里转换，更准。
 
 ## sRGB和P3怎么切换
 
 ```
-应用声明 P3 ─→ SF 选 DISPLAY_P3 ─→ HWC 把模式写成连接器 Colorspace ─→ 内核换 P3 矩阵
+应用声明 P3 ─→ SF 选 DISPLAY_P3 ─→ HWC 把模式写成连接器 Colorspace ─→ 内核换 P3 存储体
 ```
 
-- 默认输出sRGB，有P3图层才切，不需要modeset，矩阵和那一帧同时生效。
+- 这是“标准”档的行为。默认输出sRGB，有P3图层才切，不需要modeset，LUT和那一帧同时生效。
 - 输出是P3时，DPU没有逐图层的色域映射，所以不是Display P3的图层都交给GPU（`patches/android/drm-hwcomposer/0002`）。
 - 需要`ro.surface_flinger.has_wide_color_display`和`vendor.hwc.drm.force_p3_support`（`device.mk`）。
 - Android的广色域是应用自己声明的。Chromium系浏览器默认不用，要在`flags`里把`Force color profile`设成`Display P3 D65`，这是浏览器的策略。
+
+## 鲜艳和标准
+
+设置 › 显示 › 颜色里有两档：
+
+| 档位 | 框架的颜色模式 | SurfaceFlinger | HWC写的`Colorspace` | 3D LUT |
+|---|---|---|---|---|
+| 鲜艳（默认） | `COLOR_MODE_SATURATED`（2） | 不做颜色管理，输出`NATIVE` | `Default` | P3 |
+| 标准 | `COLOR_MODE_NATURAL`（0） | 颜色管理，按内容选`SRGB`或`DISPLAY_P3` | `BT709_YCC`或`DCI-P3_RGB_D65` | sRGB或P3 |
+
+- “鲜艳”把所有内容当成P3显示：sRGB内容铺满面板接近P3的色域，白点和原色按工厂P3校准，和这台机器上Windows的P3模式一样。
+- “标准”下sRGB内容是准确的sRGB，P3内容走P3存储体，同样准确。
+- `persist.sys.sf.native_mode=1`时，WMS不再向应用报告广色域和HDR（`Configuration.colorMode`，见`WindowManagerService.hasWideColorGamutSupport()`），应用按sRGB渲染。`Display.isHdr()`不受影响。
+- 两档列在overlay的`config_availableColorModes`里，设置里的名字在`overlay/packages/apps/Settings`，AOSP原来叫“饱和色”和“自然色”。默认档由`device.mk`的`persist.sys.sf.native_mode=1`决定。ColorDisplayService在开机设置完成时就把当前模式写进`/data`的持久属性，之后以那里为准，所以改`device.mk`里的默认值只影响新安装。
+- 不提供“增强色”（在“自然色”上加饱和度矩阵）和“自动调节”（要HWC报告`ENHANCE`渲染意图）。
 
 ## 10-bit怎么到面板
 
 SF的帧缓冲写死`RGBA_8888`。有10-bit图层走GPU合成时，HWC用`ClientTargetProperty`请求`RGBA_1010102`，图层没了再请求回来（`patches/android/drm-hwcomposer/0001`）。平面列表要有`ABGR2101010`（`patches/kernel/drm/0007`）。`RGBA_1010102`只有2位alpha，所以client target不在最底层时保持8位。
 
-面板只收8 bit，所以PINGPONG的空间抖动把多出来的精度抖下去（`patches/kernel/drm/0006`）。两路PINGPONG各管半屏。抖动也会处理PCC引入的取整。面板描述必须有`.bpc = 8`，否则`display_info.bpc`是0，抖动不会开。
+面板只收8 bit，所以PINGPONG的空间抖动把多出来的精度抖下去（`patches/kernel/drm/0006`）。两路PINGPONG各管半屏。抖动也会处理3D LUT和PCC引入的取整。面板描述必须有`.bpc = 8`，否则`display_info.bpc`是0，抖动不会开。
 
 ## HDR提亮
 
@@ -64,12 +84,14 @@ dumpsys SurfaceFlinger | grep displayBrightnessNits              # 提亮时 dis
 dumpsys SurfaceFlinger | grep 'HWC Support'                      # hdr10=true hlg=true
 dumpsys media.player | grep Main10HDR10                          # HEVC 解码器列出 HDR10 profile
 cat /sys/class/backlight/*/scale                                 # linear
-dmesg | grep 'factory calibration'     # 两行，0 = sRGB，1 = P3，后面是 Q15 矩阵
+dmesg | grep 'factory calibration'     # 两行，0 = sRGB，1 = P3，后面是 LUT 的白点
+dumpsys SurfaceFlinger | grep DisplayColorSetting               # Unmanaged = 鲜艳，Managed = 标准
 dumpsys SurfaceFlinger | grep -E 'Device supports wide color|Current color mode'
-grep -A8 DSI-1 /sys/kernel/debug/dri/1/state | grep colorspace   # BT709_YCC 或 DCI-P3_RGB_D65
+grep -A8 DSI-1 /sys/kernel/debug/dri/1/state | grep colorspace   # Default（鲜艳）、BT709_YCC 或 DCI-P3_RGB_D65（标准）
 grep format= /sys/kernel/debug/dri/1/state                       # AB24 = 8 位，AB30 = 10 位
 cmd activity get-config | grep -o widecg                         # 应用看到的广色域
-service call SurfaceFlinger 1023 i32 0 i32 7                     # 强制 sRGB 输出，P3 图层交给 GPU 转换；i32 0 i32 0 恢复
+service call SurfaceFlinger 1023 i32 0 i32 7                     # 标准档强制 sRGB 输出，P3 图层交给 GPU 转换
+service call SurfaceFlinger 1023 i32 1                           # 临时切到鲜艳；i32 0 i32 0 是标准，设置里的选择不变
 ```
 
 确认某个改动是否改变了输出，用编码器CRC：`/sys/kernel/debug/dri/1/crtc-0/crc`，`control`写`encoder`，`data`每行以NUL开头。注意不要用`devmem`读DPU寄存器，显示掉电时会让整机崩溃。

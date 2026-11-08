@@ -1,0 +1,268 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] drm/msm/dpu: add the DSPP 3D LUT of sc8280xp
+
+The DSPPs of sc8280xp have a 3D LUT block ahead of PCC that the driver
+does not know about. Describe it in the catalog and add its flush bit.
+
+Its 13-point mode keeps two LUT banks and maps each input channel onto
+the grid through a table of breakpoints and slopes. Writing the inactive
+bank does not disturb the picture, and the switch is one opmode write
+that takes effect with the flush, so a LUT can change between two frames
+without tearing. Rewriting the single bank of the 17-point mode while
+scanning out does tear, about one frame in five switches here.
+
+Add ops to load a bank with a uniform input map and to select a bank.
+The layout was worked out on the hardware: the tables cannot be read
+back, so each node's entry was located through the encoder CRC.
+
+Origin: local
+Upstream-Status: Pending
+---
+ .../msm/disp/dpu1/catalog/dpu_8_0_sc8280xp.h  |  8 +-
+ .../gpu/drm/msm/disp/dpu1/dpu_hw_catalog.c    |  9 ++
+ .../gpu/drm/msm/disp/dpu1/dpu_hw_catalog.h    |  4 +
+ drivers/gpu/drm/msm/disp/dpu1/dpu_hw_ctl.c    |  3 +
+ drivers/gpu/drm/msm/disp/dpu1/dpu_hw_dspp.c   | 83 +++++++++++++++++++
+ drivers/gpu/drm/msm/disp/dpu1/dpu_hw_dspp.h   | 29 +++++++
+ 6 files changed, 132 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/catalog/dpu_8_0_sc8280xp.h b/drivers/gpu/drm/msm/disp/dpu1/catalog/dpu_8_0_sc8280xp.h
+index 0ba907711..ae8d77506 100644
+--- a/drivers/gpu/drm/msm/disp/dpu1/catalog/dpu_8_0_sc8280xp.h
++++ b/drivers/gpu/drm/msm/disp/dpu1/catalog/dpu_8_0_sc8280xp.h
+@@ -184,19 +184,19 @@ static const struct dpu_dspp_cfg sc8280xp_dspp[] = {
+ 	{
+ 		.name = "dspp_0", .id = DSPP_0,
+ 		.base = 0x54000, .len = 0x1800,
+-		.sblk = &sdm845_dspp_sblk,
++		.sblk = &sc8280xp_dspp_sblk,
+ 	}, {
+ 		.name = "dspp_1", .id = DSPP_1,
+ 		.base = 0x56000, .len = 0x1800,
+-		.sblk = &sdm845_dspp_sblk,
++		.sblk = &sc8280xp_dspp_sblk,
+ 	}, {
+ 		.name = "dspp_2", .id = DSPP_2,
+ 		.base = 0x58000, .len = 0x1800,
+-		.sblk = &sdm845_dspp_sblk,
++		.sblk = &sc8280xp_dspp_sblk,
+ 	}, {
+ 		.name = "dspp_3", .id = DSPP_3,
+ 		.base = 0x5a000, .len = 0x1800,
+-		.sblk = &sdm845_dspp_sblk,
++		.sblk = &sc8280xp_dspp_sblk,
+ 	},
+ };
+ 
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_catalog.c b/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_catalog.c
+index 8b075b674..a062fc7f7 100644
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_catalog.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_catalog.c
+@@ -429,6 +429,15 @@ static const struct dpu_dspp_sub_blks sdm845_dspp_sblk = {
+ 		.len = 0x40, .version = 0x10008},
+ };
+ 
++static const struct dpu_dspp_sub_blks sc8280xp_dspp_sblk = {
++	.pcc = {.name = "pcc", .base = 0x1700,
++		.len = 0x90, .version = 0x40000},
++	.gc = {.name = "gc", .base = 0x17c0,
++		.len = 0x40, .version = 0x10008},
++	.gamut = {.name = "gamut", .base = 0x1000,
++		.len = 0x1a0},
++};
++
+ static const struct dpu_dspp_sub_blks sm8750_dspp_sblk = {
+ 	.pcc = {.name = "pcc", .base = 0x1700,
+ 		.len = 0x90, .version = 0x60000},
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_catalog.h b/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_catalog.h
+index f45faf873..d51a3f106 100644
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_catalog.h
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_catalog.h
+@@ -78,10 +78,12 @@ enum {
+  * DSPP sub-blocks
+  * @DPU_DSPP_PCC             Panel color correction block
+  * @DPU_DSPP_GC              Gamma correction block
++ * @DPU_DSPP_GAMUT           3D LUT gamut mapping block
+  */
+ enum {
+ 	DPU_DSPP_PCC = 0x1,
+ 	DPU_DSPP_GC,
++	DPU_DSPP_GAMUT,
+ 	DPU_DSPP_MAX
+ };
+ 
+@@ -331,10 +333,12 @@ struct dpu_lm_sub_blks {
+  * struct dpu_dspp_sub_blks: Information of DSPP block
+  * @pcc: pixel color correction block
+  * @gc: gamma correction block
++ * @gamut: 3D LUT gamut mapping block
+  */
+ struct dpu_dspp_sub_blks {
+ 	struct dpu_pp_blk pcc;
+ 	struct dpu_pp_blk gc;
++	struct dpu_pp_blk gamut;
+ };
+ 
+ struct dpu_pingpong_sub_blks {
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_ctl.c b/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_ctl.c
+index e8729fe1c..dd13ead2d 100644
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_ctl.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_ctl.c
+@@ -403,6 +403,9 @@ static void dpu_hw_ctl_update_pending_flush_dspp_sub_blocks(
+ 	case DPU_DSPP_GC:
+ 		ctx->pending_dspp_flush_mask[dspp - DSPP_0] |= BIT(5);
+ 		break;
++	case DPU_DSPP_GAMUT:
++		ctx->pending_dspp_flush_mask[dspp - DSPP_0] |= BIT(3);
++		break;
+ 	default:
+ 		return;
+ 	}
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_dspp.c b/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_dspp.c
+index 23dcbe1ce..9f248a6dd 100644
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_dspp.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_dspp.c
+@@ -36,6 +36,85 @@
+ #define GC_C1_INDEX_OFF 0x10
+ #define GC_C2_INDEX_OFF 0x18
+ 
++/*
++ * DSPP_GAMUT, the 3D LUT ahead of PCC. In its 13-point mode the LUT memory
++ * holds two banks, so a new LUT can be written while the other one is shown
++ * and the switch is a single opmode write, double buffered by the flush.
++ *
++ * Nodes are spread over four tables by node index modulo 4, which keeps the
++ * four corners of an interpolation tetrahedron in different tables. Each
++ * entry is two writes, c2 << 16 | c1 to the lower and c0 to the upper color
++ * register, with c0 = R, c1 = B, c2 = G, 12 bits each. The table select
++ * register picks the table and the start entry, and the writes advance it.
++ * Bank B starts at entry 640 of each table. The tables cannot be read back.
++ *
++ * The 13-point mode needs the input map: per channel 16 segments of
++ * slope << 16 | breakpoint, breakpoints in 12-bit input codes. An input in
++ * segment j reaches grid position j + slope * (x - breakpoint_j) / 2^19.
++ * Bank A uses map A, bank B map B.
++ */
++#define GAMUT_EN		BIT(0)
++#define GAMUT_MAP_EN		BIT(1)
++#define GAMUT_MODE_13A		(2 << 2)
++#define GAMUT_MODE_13B		(3 << 2)
++#define GAMUT_TABLE_SEL_OFF	0x4
++#define GAMUT_UPPER_COLOR_OFF	0x8
++#define GAMUT_LOWER_COLOR_OFF	0xc
++#define GAMUT_MAP_A_OFF		0x10
++#define GAMUT_MAP_B_OFF		0xe0
++#define GAMUT_TABLE0_SEL	BIT(12)
++#define GAMUT_TABLES		4
++#define GAMUT_BANK_B_ENTRY	640
++#define GAMUT_MAP_SEGMENTS	16
++/* 2^19 per node spacing of 4096 / 12 input codes */
++#define GAMUT_MAP_SLOPE		1536
++
++static void dpu_setup_dspp_gamut_load(struct dpu_hw_dspp *ctx, int bank,
++		const struct dpu_hw_gamut_lut *lut)
++{
++	u32 base = ctx->cap->sblk->gamut.base;
++	u32 map = base + (bank ? GAMUT_MAP_B_OFF : GAMUT_MAP_A_OFF);
++	int t, i, ch;
++
++	for (t = 0; t < GAMUT_TABLES; t++) {
++		DPU_REG_WRITE(&ctx->hw, base + GAMUT_TABLE_SEL_OFF,
++			      GAMUT_TABLE0_SEL << t |
++			      (bank ? GAMUT_BANK_B_ENTRY : 0));
++		for (i = t; i < DPU_GAMUT_NODES; i += GAMUT_TABLES) {
++			const u16 *rgb = lut->node[i];
++
++			DPU_REG_WRITE(&ctx->hw, base + GAMUT_LOWER_COLOR_OFF,
++				      rgb[1] << 16 | rgb[2]);
++			DPU_REG_WRITE(&ctx->hw, base + GAMUT_UPPER_COLOR_OFF,
++				      rgb[0]);
++		}
++	}
++
++	/* uniform grid; segments past the last node stay at full scale */
++	for (ch = 0; ch < 3; ch++) {
++		for (i = 0; i < GAMUT_MAP_SEGMENTS; i++) {
++			u32 bp = min_t(u32, (i * 4096 + 6) / (DPU_GAMUT_GRID - 1), 4095);
++
++			DPU_REG_WRITE(&ctx->hw,
++				      map + (ch * GAMUT_MAP_SEGMENTS + i) * 4,
++				      GAMUT_MAP_SLOPE << 16 | bp);
++		}
++	}
++}
++
++static void dpu_setup_dspp_gamut_select(struct dpu_hw_dspp *ctx, int bank)
++{
++	u32 base = ctx->cap->sblk->gamut.base;
++
++	if (bank < 0) {
++		DPU_REG_WRITE(&ctx->hw, base, 0);
++		return;
++	}
++
++	DPU_REG_WRITE(&ctx->hw, base, GAMUT_EN | GAMUT_MAP_EN |
++		      (bank ? GAMUT_MODE_13B : GAMUT_MODE_13A));
++}
++
+ static void dpu_setup_dspp_pcc(struct dpu_hw_dspp *ctx,
+ 		struct dpu_hw_pcc_cfg *cfg)
+ {
+@@ -146,6 +225,10 @@ struct dpu_hw_dspp *dpu_hw_dspp_init(struct drm_device *dev,
+ 		c->ops.setup_pcc = dpu_setup_dspp_pcc;
+ 	if (c->cap->sblk->gc.base)
+ 		c->ops.setup_gc = dpu_setup_dspp_gc;
++	if (c->cap->sblk->gamut.base) {
++		c->ops.load_gamut = dpu_setup_dspp_gamut_load;
++		c->ops.select_gamut = dpu_setup_dspp_gamut_select;
++	}
+ 
+ 	return c;
+ }
+diff --git a/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_dspp.h b/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_dspp.h
+index b47b77880..9fe7daaf1 100644
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_dspp.h
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_dspp.h
+@@ -52,6 +52,19 @@ struct dpu_hw_gc_lut {
+ 	__u32 c2[PGC_TBL_LEN];
+ };
+ 
++#define DPU_GAMUT_GRID		13
++#define DPU_GAMUT_NODES		(DPU_GAMUT_GRID * DPU_GAMUT_GRID * DPU_GAMUT_GRID)
++#define DPU_GAMUT_BANKS		2
++
++/**
++ * struct dpu_hw_gamut_lut - 13x13x13 3D LUT
++ * @node: 12-bit R, G, B output of the node at (b * 13 + g) * 13 + r, where
++ *        node i of an axis sits at input i / 12 of full scale
++ */
++struct dpu_hw_gamut_lut {
++	u16 node[DPU_GAMUT_NODES][3];
++};
++
+ /**
+  * struct dpu_hw_dspp_ops - interface to the dspp hardware driver functions
+  * Caller must call the init function to get the dspp context for each dspp
+@@ -72,6 +85,22 @@ struct dpu_hw_dspp_ops {
+ 	 */
+ 	void (*setup_gc)(struct dpu_hw_dspp *ctx, struct dpu_hw_gc_lut *gc_lut);
+ 
++	/**
++	 * load_gamut - write a 3D LUT into one bank, leaving the active one alone
++	 * @ctx: Pointer to dspp context
++	 * @bank: 0 or 1
++	 * @lut: Pointer to the LUT
++	 */
++	void (*load_gamut)(struct dpu_hw_dspp *ctx, int bank,
++			   const struct dpu_hw_gamut_lut *lut);
++
++	/**
++	 * select_gamut - apply a loaded bank, or disable the 3D LUT
++	 * @ctx: Pointer to dspp context
++	 * @bank: 0 or 1, or -1 to disable
++	 */
++	void (*select_gamut)(struct dpu_hw_dspp *ctx, int bank);
++
+ };
+ 
+ /**
