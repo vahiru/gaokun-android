@@ -97,3 +97,36 @@ SC8280XP的GPU SMMU（`3da0000.iommu`，`qcom,sc8280xp-smmu-500`）在`msm_iommu
   - Android 16使用Mesa树内`meson_to_hermetic`生成`Android.bp`，由`scripts/mesa-tool-fixes.py`与`scripts/mesa-bp-merge.py`修补并合入；同时为`external/deqp-deps/glslang`补充Turnip编译器所需的宿主机`glslangValidator`目标。
   - Android 17切换至重写后的`meson2hermetic`（`build_android_bp.py`），具体适配步骤见[mesa-a17.md](mesa-a17.md)。
 
+
+## 五、GPU抢占（`kernel/drm/0016`、`mesa/0012`、`mesa/0013`）
+
+内屏是竖屏，横屏应用的图层要旋转，HWC做不了，只能由SurfaceFlinger每帧用GPU合成。没有抢占时所有队列共用一个ring，SurfaceFlinger的合成要等正在执行的应用提交跑完；GPU满载的游戏里，这会让合成赶不上刷新，整屏跟着掉帧。
+
+### 1. 各部分如何配合
+
+- **内核**（`kernel/drm/0016`）：主线的抢占代码原本只接在A7xx上，这个补丁让A6xx也走同一套流程，并给A690打开`ADRENO_QUIRK_PREEMPTION`，于是有4个ring。每次提交末尾插入`CP_CONTEXT_SWITCH_YIELD`，在提交之间切换ring；队列创建时带了`MSM_SUBMITQUEUE_ALLOW_PREEMPT`的，内核还用IB1LIST标记包住它的IB列表，CP可以在IB内部的分块边界抢占。只在提交之间切换不够：游戏一帧的GPU工作本身就接近刷新周期，SurfaceFlinger等的正是那次还没跑完的提交。
+- **队列优先级**：用户态优先级由`msm_gpu_convert_priority()`换算成ring号和调度优先级（`kernel/drm/0014`修正了同一ring内方向相反的换算）。有4个ring时内核报告12级（`MSM_PARAM_PRIORITIES`），Turnip（`mesa/0013`）在这种情况下才声明`VK_QUEUE_GLOBAL_PRIORITY_REALTIME`，REALTIME落在最高的ring 0，默认的MEDIUM落在ring 2。
+- **ANGLE**：ROM里的ANGLE看到队列族支持REALTIME时，会给整个进程的设备都用REALTIME。所以SurfaceFlinger和所有通过ANGLE绘制的界面（HWUI的Skia OpenGL）都在ring 0，直接用Vulkan的应用（例如用Unity Vulkan后端的游戏）在ring 2，前者可以抢占后者。用OpenGL ES的游戏也经过ANGLE，与SurfaceFlinger同在ring 0，彼此不抢占。
+- **Turnip的A6xx抢占路径**：Turnip在内核接受`ALLOW_PREEMPT`时（`has_preemption`）就按抢占会丢失状态来生成命令，例如每个分块重新写VSC地址（`tu6_emit_tile_select()`）。这条路径原本为KGSL后端编写，`mesa/0013`让msm上的A6xx队列也声明`ALLOW_PREEMPT`。
+
+### 2. 必须同时带上的修正
+
+`mesa/0012`是上游Mesa的`ebdcf841`（“tu: Always lazy_init_vsc for tiler rendering”）。内核一报告抢占，Turnip就会走上面那条路径；没有这个修正时，不用硬件分块的GMEM渲染会写出未初始化的VSC地址，CP报`CP_HW_FAULT 0x13c00000`并触发GPU恢复，Chromium的合成最容易碰到。因此`kernel/drm/0016`不能单独发布，必须和`mesa/0012`一起。
+
+### 3. 已知限制
+
+- 只给A690开启：抢占时写的GMU保活寄存器`GMU_PWR_COL_PREEMPT_KEEPALIVE`是A660系列的，其他A6xx要改用`GMU_AO_SPARE_CNTL`，也只有A690有寄存器恢复表；`msm.enable_preemption=1`不会在其他A6xx上打开抢占。
+- 抢占记录定为5096K：A660固件从记录内600K处开始保存GMEM，4M的GMEM要用到4696K，超过主线默认的4192K；5096K是固件自己在大配置下使用的记录大小。
+- CP在抢占前后恢复的静态寄存器表取自下游驱动的A6xx和A650系列列表，下游驱动没有A690专用的表；IFPC相关的部分没有放进去，因为本驱动在A690上不启用IFPC。
+- 抢占时CP会保存和恢复GMEM，会占用一部分GPU时间。
+- GPU每次运行时挂起都会把4个抢占记录清零（`kernel/drm/0015`，共约20 MB），会占用一些CPU时间。
+- 主线的恢复流程有一个漏洞：抢占超时时如果当前ring是空闲的，`recover_worker()`找不到要怪罪的提交，就不执行恢复，抢占状态停在FAULTED，之后所有ring都不再执行。表现是`dmesg`出现`preemption timed out`后画面全部停住，只能重启。A7xx同样如此，A690开启抢占后也可能遇到。
+- 抢占跨整机挂起的情况尚未经实测；GPU运行时挂起（同一个`pm_suspend`回调）之后工作正常。
+- 用OpenGL ES的游戏与SurfaceFlinger同在ring 0，不受益。
+- 内核和Turnip都不检查调用者的权限，任何应用都能申请REALTIME，与SurfaceFlinger同在ring 0。
+
+### 4. 排查方法
+
+- `dmesg`里不应出现`preemption timed out`、`preemption faulted`或`CP | HW fault`。
+- tracefs的`drm_msm_gpu/msm_gpu_preemption_trigger`和`msm_gpu_preemption_irq`记录每次切换，两者应一一对应；`msm_gpu_submit`的`ring=`字段显示每次提交进了哪个ring。
+- GPU挂死时用Mesa的`crashdec -f`解码devcoredump（`/sys/class/devcoredump/devcd*/data`，5分钟后自动删除）；A690要先把dump里的`revision: 0 (06090000)`改成`revision: 690 (6.9.0.0)`。

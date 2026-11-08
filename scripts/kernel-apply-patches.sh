@@ -119,6 +119,7 @@ KPATCHES=(
     # 显示色彩详见 docs/dev/display-color.md。0003 与 kernel/dts/0017 配套；
     # 0005 依赖 0004 并与 android/drm-hwcomposer/0002（tree-fix [32]）配套；
     # 0007 与 android/drm-hwcomposer/0001（tree-fix [31]）配套。
+    # 0016 需要 mesa/0012（Turnip VSC 修正）：内核报告抢占后 Turnip 走 a6xx 抢占路径。
     kernel/drm/0001-drm-crtc-drop-racy-BUG_ON-in-fence_to_crtc.patch
     kernel/drm/0002-drm-msm-dsi-phy-7nm-reapply-bonded-pll-init-reverting-5de981b7db.patch
     kernel/drm/0003-drm-panel-himax-hx83121a-read-the-panel-from-the-board-s-ID-pins.patch
@@ -133,6 +134,8 @@ KPATCHES=(
     kernel/drm/0012-drm-msm-gem-validate-lazy-vm-in-gem_new.patch
     kernel/drm/0013-drm-msm-allow-lazy-vm-creation-to-fail.patch
     kernel/drm/0014-drm-msm-fix-sched_prio-inversion-within-a-ring.patch
+    kernel/drm/0015-drm-msm-a6xx-reset-preemption-records-across-suspend.patch
+    kernel/drm/0016-drm-msm-a6xx-enable-preemption-on-a690.patch
 
     # ─── 6. kernel/iris：qcom-iris 视频解码驱动 ───
     # 配套 DT 见 kernel/dts/0009–0010；需 CONFIG_VIDEO_QCOM_IRIS=y、CONFIG_VIDEO_QCOM_VENUS 不设。
