@@ -7,6 +7,7 @@
 | 目录 | 目标源码树 / 子系统 | 消费脚本 / 工具 | 说明 |
 |---|---|---|---|
 | [`kernel/core/`](kernel/core/) | Linux内核（核心、架构、Android基础支撑、通用驱动） | [`scripts/kernel-apply-patches.sh`](../scripts/kernel-apply-patches.sh)（`KPATCHES`） | `efi-pstore`、`bpffs`、`ashmem`、`xt_quota2`、39位地址窗口、SELinux netlink、内核版本上报、FastRPC等 |
+| [`kernel/iommu/`](kernel/iommu/) | Linux内核（`arm-smmu-qcom`） | [`scripts/kernel-apply-patches.sh`](../scripts/kernel-apply-patches.sh)（`KPATCHES`） | SC8280XP `apps_smmu`的CP非像素上下文（CB15、VMID `0xb`、SID `0x2a04`），供`iris`编码器ARP使用 |
 | [`kernel/pcie-pm/`](kernel/pcie-pm/) | Linux内核（PCIe、NVMe、cpuidle、系统休眠与唤醒） | [`scripts/kernel-apply-patches.sh`](../scripts/kernel-apply-patches.sh)（`KPATCHES`） | SC8280XP PCIe L2/D3深度待机、并行恢复、链路重试、NVMe死盘panic、PCIe `WAKE#`与唤醒中断管理 |
 | [`kernel/wifi/`](kernel/wifi/) | Linux内核（`ath11k`、`mac80211`、`bus/mhi`） | [`scripts/kernel-apply-patches.sh`](../scripts/kernel-apply-patches.sh)（`KPATCHES`） | MHI固件跨断电保留、WoWLAN挂起/恢复、固件崩溃恢复与退避、扫描与唤醒保持、RX BA会话重建 |
 | [`kernel/ec-usb/`](kernel/ec-usb/) | Linux内核（华为高鲲EC、电池、UCSI、USB Gadget、xHCI） | [`scripts/kernel-apply-patches.sh`](../scripts/kernel-apply-patches.sh)（`KPATCHES`） | EC盖子状态与挂起中断、电池状态位与温度解码、UCSI端口/DP HPD/方向/重试、`android_usb`、configfs UDC等待 |

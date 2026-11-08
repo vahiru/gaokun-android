@@ -49,6 +49,11 @@ KPATCHES=(
     kernel/core/0008-kernel-report-a-set-release-to-android-apps.patch
     kernel/core/0009-misc-fastrpc-fix-context-leak-and-hang-on-signal-interrupted-invoke.patch
 
+    # ─── 1b. kernel/iommu：arm-smmu-qcom（SC8280XP 的 CP 非像素上下文，供 iris 硬件编码）───
+    # 只改 arm-smmu-qcom.c 并新增 include/linux/qcom_iommu_cp_nonpixel.h，与其它子系统正交。
+    # kernel/iris/0013 依赖这里先建立 CP 非像素 bank；iris 映射 ARP 之前不映射任何东西。
+    kernel/iommu/0001-iommu-arm-smmu-qcom-add-the-SC8280XP-CP-non-pixel-context.patch
+
     # ─── 2. kernel/pcie-pm：PCIe、NVMe、cpuidle、系统休眠与唤醒基础设施 ───
     # 深度待机与 PCIe / NVMe 恢复处理详见 docs/dev/deep-sleep.md。
     # 0003 依赖 0001（L2 下保留 PCIe-MEM active-only 投票）；0011–0012 与 kernel/dts/0021、kernel/wifi/0027 配套。

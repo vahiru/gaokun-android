@@ -1,0 +1,426 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] iommu/arm-smmu-qcom: add the SC8280XP CP non-pixel context
+ for iris encode
+
+The iris hardware video encoder's firmware reaches its ARP (auto-register
+programming) PERSIST buffer through the content-protection non-pixel stream
+SID 0x2a04. That stream has to translate through a stage-1 context bank whose
+CBAR VMID is 0xb (CP_NON_PIXEL) and whose page-table pages are hyp-assigned
+{HLOS RW, 0xb R}. The bank is CB15, as on Windows: binding 0x2a04 to another
+bank with the same VMID (the lowest free one was tried) hung the boot.
+Windows' qcsmmu8280 programs this from the host, and mainline arm-smmu has no
+secure-VMID support, so set it up here for the SC8280XP apps_smmu.
+
+At cfg_probe reserve CB15, write its CBAR (VMID 0xb) and add the SME for
+0x2a04; the bank stays disabled and maps nothing until the iris driver calls
+qcom_iommu_cp_nonpixel_map() for the ARP, which builds a stage-1 table with a
+custom io-pgtable allocator (every table page assigned {HLOS RW, 0xb R}) and
+programs the bank. A system resume reset clears the bank (it has no normal
+cb->cfg), so the SoC reset hook reprograms it; the page table in RAM survives
+suspend, so translation comes back without remapping.
+
+This is SC8280XP-specific and stays downstream: it uses a dedicated impl/match
+data so no other qcom SMMU-500 SoC is affected, and the whole path is inert
+until iris maps an ARP.
+
+Origin: local
+Upstream-Status: Inappropriate [SoC-specific secure-VMID setup, no mainline arm-smmu support]
+---
+diff --git a/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c b/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c
+index e2c914fcc..8fe910cbb 100644
+--- a/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c
++++ b/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c
+@@ -8,8 +8,10 @@
+ #include <linux/delay.h>
+ #include <linux/of_device.h>
+ #include <linux/firmware/qcom/qcom_scm.h>
++#include <linux/interrupt.h>
+ #include <linux/platform_device.h>
+ #include <linux/pm_runtime.h>
++#include <linux/qcom_iommu_cp_nonpixel.h>
+ 
+ #include "arm-smmu.h"
+ #include "arm-smmu-qcom.h"
+@@ -447,6 +449,275 @@ static int qcom_smmu_init_context(struct arm_smmu_domain *smmu_domain,
+ 	return 0;
+ }
+ 
++/*
++ * gaokun3 (SC8280XP) iris hardware video encoder: content-protection
++ * non-pixel context.
++ *
++ * The encoder firmware reaches its ARP (auto-register programming) PERSIST
++ * buffer through the CP non-pixel stream SID 0x2a04. That stream must
++ * translate through a stage-1 context bank whose CBAR VMID is 0xb
++ * (CP_NON_PIXEL) and whose page-table pages are assigned {HLOS RW, 0xb R}.
++ * The bank is CB15, as on Windows: binding 0x2a04 to another bank with the
++ * same VMID (the lowest free one was tried) hung the boot. This apps_smmu has
++ * no 16-bit VMIDs, so the VMID lives in CBAR[7:0] alone. Windows' qcsmmu8280
++ * sets this up from the host; mainline arm-smmu has no secure-VMID support,
++ * so build the bank here for this SoC's apps_smmu and let the iris driver map
++ * its ARP into it with qcom_iommu_cp_nonpixel_map(). The bank maps nothing
++ * until then.
++ */
++#define QCOM_CPNP_CB_IDX	15
++#define QCOM_CPNP_CBAR		0x0001a20b	/* S1 trans, VMID 0xb = CP_NON_PIXEL */
++#define QCOM_CPNP_SID		0x2a04
++#define QCOM_CPNP_SID_MASK	0x0400
++#define QCOM_VMID_CP_NON_PIXEL	0xb
++#define QCOM_CPNP_SMMU_BASE	0x15000000	/* the apps_smmu that serves iris */
++
++static struct {
++	struct arm_smmu_device	*smmu;	/* set once the bank is reserved */
++	struct io_pgtable_ops	*ops;	/* built lazily on the first map */
++	struct io_pgtable_cfg	cfg;
++	struct mutex		lock;
++} qcom_cpnp = { .lock = __MUTEX_INITIALIZER(qcom_cpnp.lock) };
++
++/* Table pages are shared with CP_NON_PIXEL, like qcsmmu8280 does. */
++static void *qcom_cpnp_pt_alloc(void *cookie, size_t size, gfp_t gfp)
++{
++	struct qcom_scm_vmperm perm[2] = {
++		{ QCOM_SCM_VMID_HLOS, QCOM_SCM_PERM_RW },
++		{ QCOM_VMID_CP_NON_PIXEL, QCOM_SCM_PERM_READ },
++	};
++	u64 src = BIT(QCOM_SCM_VMID_HLOS);
++	unsigned int order = get_order(size);
++	void *va;
++
++	va = (void *)__get_free_pages(gfp | __GFP_ZERO, order);
++	if (!va)
++		return NULL;
++	if (qcom_scm_assign_mem(virt_to_phys(va), PAGE_SIZE << order, &src,
++				perm, ARRAY_SIZE(perm))) {
++		free_pages((unsigned long)va, order);
++		return NULL;
++	}
++	return va;
++}
++
++static void qcom_cpnp_pt_free(void *cookie, void *pages, size_t size)
++{
++	struct qcom_scm_vmperm perm = { QCOM_SCM_VMID_HLOS, QCOM_SCM_PERM_RWX };
++	u64 src = BIT(QCOM_SCM_VMID_HLOS) | BIT(QCOM_VMID_CP_NON_PIXEL);
++	unsigned int order = get_order(size);
++
++	if (qcom_scm_assign_mem(virt_to_phys(pages), PAGE_SIZE << order, &src, &perm, 1)) {
++		dev_err(qcom_cpnp.smmu->dev, "cp-nonpixel: leaking table page\n");
++		return;
++	}
++	free_pages((unsigned long)pages, order);
++}
++
++static void qcom_cpnp_tlb_inv(struct arm_smmu_device *smmu)
++{
++	wmb();	/* table updates before the invalidation */
++	arm_smmu_cb_write(smmu, QCOM_CPNP_CB_IDX, ARM_SMMU_CB_S1_TLBIASID, QCOM_CPNP_CB_IDX);
++	qcom_smmu_tlb_sync(smmu, ARM_SMMU_CB(smmu, QCOM_CPNP_CB_IDX),
++			   ARM_SMMU_CB_TLBSYNC, ARM_SMMU_CB_TLBSTATUS);
++}
++
++static void qcom_cpnp_tlb_flush_all(void *cookie)
++{
++	qcom_cpnp_tlb_inv(qcom_cpnp.smmu);
++}
++
++static void qcom_cpnp_tlb_flush_walk(unsigned long iova, size_t size,
++				     size_t granule, void *cookie)
++{
++	qcom_cpnp_tlb_inv(qcom_cpnp.smmu);
++}
++
++static const struct iommu_flush_ops qcom_cpnp_tlb_ops = {
++	.tlb_flush_all	= qcom_cpnp_tlb_flush_all,
++	.tlb_flush_walk	= qcom_cpnp_tlb_flush_walk,
++};
++
++static irqreturn_t qcom_cpnp_fault(int irq, void *data)
++{
++	struct arm_smmu_device *smmu = qcom_cpnp.smmu;
++	u32 fsr = arm_smmu_cb_read(smmu, QCOM_CPNP_CB_IDX, ARM_SMMU_CB_FSR);
++
++	if (!(fsr & ARM_SMMU_CB_FSR_FAULT))
++		return IRQ_NONE;
++	dev_err_ratelimited(smmu->dev,
++			    "cp-nonpixel fault: fsr %#x far %#llx fsynr0 %#x cbfrsynra %#x\n",
++			    fsr, arm_smmu_cb_readq(smmu, QCOM_CPNP_CB_IDX, ARM_SMMU_CB_FAR),
++			    arm_smmu_cb_read(smmu, QCOM_CPNP_CB_IDX, ARM_SMMU_CB_FSYNR0),
++			    arm_smmu_gr1_read(smmu, ARM_SMMU_GR1_CBFRSYNRA(QCOM_CPNP_CB_IDX)));
++	arm_smmu_cb_write(smmu, QCOM_CPNP_CB_IDX, ARM_SMMU_CB_FSR, fsr);
++	return IRQ_HANDLED;
++}
++
++/*
++ * Write the whole bank. Called on the first map and again from the SoC reset
++ * path on every resume: a resume reset clears this bank (it has no normal
++ * cb->cfg), but the page table in RAM survives, so reprogramming the registers
++ * restores translation.
++ */
++static void qcom_cpnp_program(struct arm_smmu_device *smmu)
++{
++	struct io_pgtable_cfg *cfg = &qcom_cpnp.cfg;
++	u32 tcr = arm_smmu_lpae_tcr(cfg);
++	u32 tcr2 = arm_smmu_lpae_tcr2(cfg) | ARM_SMMU_TCR2_AS;
++	u64 asid = FIELD_PREP(ARM_SMMU_TTBRn_ASID, QCOM_CPNP_CB_IDX);
++	u32 sctlr = ARM_SMMU_SCTLR_CFIE | ARM_SMMU_SCTLR_CFRE | ARM_SMMU_SCTLR_AFE |
++		    ARM_SMMU_SCTLR_TRE | ARM_SMMU_SCTLR_M | ARM_SMMU_SCTLR_S1_ASIDPNE;
++
++	arm_smmu_cb_write(smmu, QCOM_CPNP_CB_IDX, ARM_SMMU_CB_SCTLR, 0);
++	arm_smmu_gr1_write(smmu, ARM_SMMU_GR1_CBA2R(QCOM_CPNP_CB_IDX), ARM_SMMU_CBA2R_VA64);
++	arm_smmu_gr1_write(smmu, ARM_SMMU_GR1_CBAR(QCOM_CPNP_CB_IDX), QCOM_CPNP_CBAR);
++	arm_smmu_cb_write(smmu, QCOM_CPNP_CB_IDX, ARM_SMMU_CB_TCR2, tcr2);
++	arm_smmu_cb_write(smmu, QCOM_CPNP_CB_IDX, ARM_SMMU_CB_TCR, tcr);
++	arm_smmu_cb_writeq(smmu, QCOM_CPNP_CB_IDX, ARM_SMMU_CB_TTBR0,
++			   cfg->arm_lpae_s1_cfg.ttbr | asid);
++	arm_smmu_cb_writeq(smmu, QCOM_CPNP_CB_IDX, ARM_SMMU_CB_TTBR1, asid);
++	arm_smmu_cb_write(smmu, QCOM_CPNP_CB_IDX, ARM_SMMU_CB_S1_MAIR0,
++			  lower_32_bits(cfg->arm_lpae_s1_cfg.mair));
++	arm_smmu_cb_write(smmu, QCOM_CPNP_CB_IDX, ARM_SMMU_CB_S1_MAIR1,
++			  upper_32_bits(cfg->arm_lpae_s1_cfg.mair));
++	arm_smmu_cb_write(smmu, QCOM_CPNP_CB_IDX, ARM_SMMU_CB_FSR, ARM_SMMU_CB_FSR_FAULT);
++	qcom_cpnp_tlb_inv(smmu);
++	arm_smmu_cb_write(smmu, QCOM_CPNP_CB_IDX, ARM_SMMU_CB_SCTLR, sctlr);
++}
++
++static int qcom_cpnp_init(struct arm_smmu_device *smmu)
++{
++	struct io_pgtable_cfg *cfg = &qcom_cpnp.cfg;
++	int irq, ret;
++
++	*cfg = (struct io_pgtable_cfg) {
++		.pgsize_bitmap	= smmu->pgsize_bitmap,
++		.ias		= smmu->va_size,
++		.oas		= smmu->ipa_size,
++		.coherent_walk	= smmu->features & ARM_SMMU_FEAT_COHERENT_WALK,
++		.tlb		= &qcom_cpnp_tlb_ops,
++		.iommu_dev	= smmu->dev,
++		.alloc		= qcom_cpnp_pt_alloc,
++		.free		= qcom_cpnp_pt_free,
++	};
++	qcom_cpnp.ops = alloc_io_pgtable_ops(ARM_64_LPAE_S1, cfg, &qcom_cpnp);
++	if (!qcom_cpnp.ops)
++		return -ENOMEM;
++
++	if (QCOM_CPNP_CB_IDX < smmu->num_context_irqs) {
++		irq = smmu->irqs[QCOM_CPNP_CB_IDX];
++		ret = devm_request_irq(smmu->dev, irq, qcom_cpnp_fault, IRQF_SHARED,
++				       "qcom-cp-nonpixel", &qcom_cpnp);
++		if (ret)
++			dev_warn(smmu->dev, "cp-nonpixel: no fault irq %d: %d\n", irq, ret);
++	}
++	return 0;
++}
++
++/* True once the CP non-pixel bank is reserved on this SoC's apps_smmu. */
++bool qcom_iommu_cp_nonpixel_available(void)
++{
++	return qcom_cpnp.smmu != NULL;
++}
++EXPORT_SYMBOL_GPL(qcom_iommu_cp_nonpixel_available);
++
++/*
++ * Map @size bytes of @pa at @iova in the CP non-pixel bank and (re)program the
++ * bank. @iova must lie in the content-protection window; the caller assigns
++ * the pages to CP_NON_PIXEL first. The mapping is removed with the unmap.
++ */
++int qcom_iommu_cp_nonpixel_map(unsigned long iova, phys_addr_t pa, size_t size)
++{
++	struct arm_smmu_device *smmu = qcom_cpnp.smmu;
++	size_t mapped = 0;
++	int ret;
++
++	if (!smmu)
++		return -ENODEV;
++
++	mutex_lock(&qcom_cpnp.lock);
++	if (!qcom_cpnp.ops) {
++		ret = qcom_cpnp_init(smmu);
++		if (ret)
++			goto out;
++	}
++	ret = qcom_cpnp.ops->map_pages(qcom_cpnp.ops, iova, pa, SZ_4K, size / SZ_4K,
++				       IOMMU_READ | IOMMU_WRITE, GFP_KERNEL, &mapped);
++	if (ret) {
++		if (mapped)
++			qcom_cpnp.ops->unmap_pages(qcom_cpnp.ops, iova, SZ_4K,
++						   mapped / SZ_4K, NULL);
++		goto out;
++	}
++	qcom_cpnp_program(smmu);
++out:
++	mutex_unlock(&qcom_cpnp.lock);
++	return ret;
++}
++EXPORT_SYMBOL_GPL(qcom_iommu_cp_nonpixel_map);
++
++void qcom_iommu_cp_nonpixel_unmap(unsigned long iova, size_t size)
++{
++	struct arm_smmu_device *smmu = qcom_cpnp.smmu;
++
++	if (!smmu || !qcom_cpnp.ops)
++		return;
++
++	mutex_lock(&qcom_cpnp.lock);
++	qcom_cpnp.ops->unmap_pages(qcom_cpnp.ops, iova, SZ_4K, size / SZ_4K, NULL);
++	qcom_cpnp_tlb_inv(smmu);
++	mutex_unlock(&qcom_cpnp.lock);
++}
++EXPORT_SYMBOL_GPL(qcom_iommu_cp_nonpixel_unmap);
++
++/* Rewrite the bank after a reset (resume). No-op until an ARP has been mapped. */
++static void qcom_cpnp_resume(struct arm_smmu_device *smmu)
++{
++	if (qcom_cpnp.smmu != smmu)
++		return;
++	mutex_lock(&qcom_cpnp.lock);
++	if (qcom_cpnp.ops)
++		qcom_cpnp_program(smmu);
++	mutex_unlock(&qcom_cpnp.lock);
++}
++
++/*
++ * Reserve CB15 for the CP non-pixel stream and add its SME (written by the
++ * reset, never released). Called from the SC8280XP cfg_probe for the apps_smmu
++ * only. The bank stays disabled until the first map.
++ */
++static void qcom_cpnp_setup(struct arm_smmu_device *smmu)
++{
++	int i;
++
++	if (smmu->ioaddr != QCOM_CPNP_SMMU_BASE ||
++	    smmu->num_context_banks <= QCOM_CPNP_CB_IDX)
++		return;
++
++	set_bit(QCOM_CPNP_CB_IDX, smmu->context_map);
++	arm_smmu_gr1_write(smmu, ARM_SMMU_GR1_CBA2R(QCOM_CPNP_CB_IDX), ARM_SMMU_CBA2R_VA64);
++	arm_smmu_gr1_write(smmu, ARM_SMMU_GR1_CBAR(QCOM_CPNP_CB_IDX), QCOM_CPNP_CBAR);
++
++	for (i = smmu->num_mapping_groups - 1; i >= 0; i--)
++		if (!smmu->smrs[i].valid)
++			break;
++	if (i < 0) {
++		dev_warn(smmu->dev, "cp-nonpixel: no free SME for %#x\n", QCOM_CPNP_SID);
++		return;
++	}
++	smmu->smrs[i].id = QCOM_CPNP_SID;
++	smmu->smrs[i].mask = QCOM_CPNP_SID_MASK;
++	smmu->smrs[i].valid = true;
++	smmu->s2crs[i].type = S2CR_TYPE_TRANS;
++	smmu->s2crs[i].privcfg = S2CR_PRIVCFG_DEFAULT;
++	smmu->s2crs[i].cbndx = QCOM_CPNP_CB_IDX;
++	smmu->s2crs[i].count = 1;	/* never released */
++	qcom_cpnp.smmu = smmu;
++	dev_info(smmu->dev, "cp-nonpixel: CB%d ready for SID %#x (VMID %#x)\n",
++		 QCOM_CPNP_CB_IDX, QCOM_CPNP_SID, QCOM_VMID_CP_NON_PIXEL);
++}
++
+ static int qcom_smmu_cfg_probe(struct arm_smmu_device *smmu)
+ {
+ 	struct qcom_smmu *qsmmu = to_qcom_smmu(smmu);
+@@ -735,6 +1006,49 @@ static const struct qcom_smmu_match_data qcom_smmu_500_impl0_data = {
+ 	.client_match = qcom_smmu_actlr_client_of_match,
+ };
+ 
++/*
++ * SC8280XP needs the CP non-pixel bank (above) set up on its apps_smmu for the
++ * iris hardware video encoder, and reprogrammed on resume. Its own cfg_probe
++ * and reset wrap the shared ones; everything else matches qcom_smmu_500_impl.
++ */
++static int qcom_sc8280xp_smmu_cfg_probe(struct arm_smmu_device *smmu)
++{
++	int ret = qcom_smmu_cfg_probe(smmu);
++
++	if (!ret)
++		qcom_cpnp_setup(smmu);
++	return ret;
++}
++
++static int qcom_sc8280xp_smmu_reset(struct arm_smmu_device *smmu)
++{
++	int ret = arm_mmu500_reset(smmu);
++
++	qcom_cpnp_resume(smmu);
++	return ret;
++}
++
++static const struct arm_smmu_impl sc8280xp_smmu_500_impl = {
++	.init_context = qcom_smmu_init_context,
++	.cfg_probe = qcom_sc8280xp_smmu_cfg_probe,
++	.def_domain_type = qcom_smmu_def_domain_type,
++	.reset = qcom_sc8280xp_smmu_reset,
++	.write_s2cr = qcom_smmu_write_s2cr,
++	.tlb_sync = qcom_smmu_tlb_sync,
++#ifdef CONFIG_ARM_SMMU_QCOM_DEBUG
++	.context_fault = qcom_smmu_context_fault,
++	.context_fault_needs_threaded_irq = true,
++#endif
++};
++
++static const struct qcom_smmu_match_data sc8280xp_smmu_500_data = {
++	.impl = &sc8280xp_smmu_500_impl,
++	.adreno_impl = &qcom_adreno_smmu_500_impl,
++	.cfg = &qcom_smmu_impl0_cfg,
++	.client_match = qcom_smmu_actlr_client_of_match,
++};
++
++
+ /*
+  * Do not add any more qcom,SOC-smmu-500 entries to this list, unless they need
+  * special handling and can not be covered by the qcom,smmu-500 entry.
+@@ -748,7 +1062,7 @@ static const struct of_device_id __maybe_unused qcom_smmu_impl_of_match[] = {
+ 	{ .compatible = "qcom,sc7180-smmu-v2", .data = &qcom_smmu_v2_data },
+ 	{ .compatible = "qcom,sc7280-smmu-500", .data = &qcom_smmu_500_impl0_data },
+ 	{ .compatible = "qcom,sc8180x-smmu-500", .data = &qcom_smmu_500_impl0_data },
+-	{ .compatible = "qcom,sc8280xp-smmu-500", .data = &qcom_smmu_500_impl0_data },
++	{ .compatible = "qcom,sc8280xp-smmu-500", .data = &sc8280xp_smmu_500_data },
+ 	{ .compatible = "qcom,sdm630-smmu-v2", .data = &qcom_smmu_v2_data },
+ 	{ .compatible = "qcom,sdm670-smmu-v2", .data = &qcom_smmu_v2_data },
+ 	{ .compatible = "qcom,sdm845-smmu-v2", .data = &qcom_smmu_v2_data },
+diff --git a/include/linux/qcom_iommu_cp_nonpixel.h b/include/linux/qcom_iommu_cp_nonpixel.h
+new file mode 100644
+index 000000000..5dab092e9
+--- /dev/null
++++ b/include/linux/qcom_iommu_cp_nonpixel.h
+@@ -0,0 +1,42 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/*
++ * Qualcomm SMMU content-protection non-pixel context (SC8280XP).
++ *
++ * The iris hardware video encoder's firmware reaches its ARP (auto-register
++ * programming) PERSIST buffer through the CP non-pixel stream SID 0x2a04,
++ * which must translate through a stage-1 context bank whose CBAR VMID is 0xb
++ * (CP_NON_PIXEL). arm-smmu-qcom owns that bank; the iris driver maps the ARP
++ * into it with these helpers and hands the firmware the returned IOVA.
++ */
++#ifndef __QCOM_IOMMU_CP_NONPIXEL_H
++#define __QCOM_IOMMU_CP_NONPIXEL_H
++
++#include <linux/types.h>
++
++#if IS_ENABLED(CONFIG_ARM_SMMU_QCOM)
++/* True once the platform's CP non-pixel context bank is set up (SC8280XP). */
++bool qcom_iommu_cp_nonpixel_available(void);
++/*
++ * Map @size bytes of @pa at @iova in the CP non-pixel bank. @iova must lie in
++ * the TZ content-protection window 0x01000000..0x25800000. The caller must
++ * have assigned the backing pages to VMID 0xb (CP_NON_PIXEL) first. Returns 0,
++ * or -ENODEV when the platform has no CP non-pixel context.
++ */
++int qcom_iommu_cp_nonpixel_map(unsigned long iova, phys_addr_t pa, size_t size);
++void qcom_iommu_cp_nonpixel_unmap(unsigned long iova, size_t size);
++#else
++static inline bool qcom_iommu_cp_nonpixel_available(void)
++{
++	return false;
++}
++static inline int qcom_iommu_cp_nonpixel_map(unsigned long iova, phys_addr_t pa,
++					     size_t size)
++{
++	return -ENODEV;
++}
++static inline void qcom_iommu_cp_nonpixel_unmap(unsigned long iova, size_t size)
++{
++}
++#endif
++
++#endif /* __QCOM_IOMMU_CP_NONPIXEL_H */
