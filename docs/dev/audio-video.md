@@ -52,14 +52,19 @@
   RX_MACRO RX0 MUX = AIF1_PB, RX_MACRO RX1 MUX = AIF1_PB
   RX INT0_1 MIX1 INP0 = RX0, RX INT1_1 MIX1 INP0 = RX1
   RX INT0 DEM MUX = CLSH_DSM_OUT, RX INT1 DEM MUX = CLSH_DSM_OUT
-  RX_COMP1 Switch = 1, RX_COMP2 Switch = 1
-  HPHL_COMP Switch = 1, HPHR_COMP Switch = 1
+  RX_COMP1 Switch = 0, RX_COMP2 Switch = 0
+  HPHL_COMP Switch = 0, HPHR_COMP Switch = 0
   HPHL_RDAC Switch = 1, HPHR_RDAC Switch = 1
   HPHL Switch = 1, HPHR Switch = 1
   CLSH Switch = 1, LO Switch = 1
+  RX HPH Mode = CLS_AB_LOHIFI, RX_HPH PWR Mode = LOHIFI
   RX_RX0 Digital Volume = 84, RX_RX1 Digital Volume = 84
-  HPHL Volume = 20, HPHR Volume = 20
+  HPHL Volume = 8, HPHR Volume = 8
   ```
+- **压扩器两侧都关**：RX Macro的压扩器（`RX_COMPn`）与WCD938x的HPH压扩器（`HPHx_COMP`）是一对，前者按信号电平给耳放发增益码，同时在数字域补回耳放降掉的增益。只开数字侧时，`wcd938x`把耳放的增益来源固定在寄存器，数字补偿就成了净增益：低于约−22 dBFS的信号被抬高约20 dB，超过后又掉回，听感是很重的压缩。上游alsa-ucm-conf已从耳机序列中去掉`RX_COMPn`（PR #670），这里两侧都显式关闭。
+- **AB类耳放模式**：`RX HPH Mode`与上游sc8280xp的`HeadphoneABEnableSeq.conf`一致，用`CLS_AB_LOHIFI`。H类模式（`CLS_H_ULP`、`CLS_H_LOHIFI`）的电源轨随信号包络升降，耳放增益抬高后在接近满幅时削波；AB类的电源轨固定，HPH 12时到−1 dBFS未见削波，代价是耳机播放时功耗略高（尚未实测）。
+- **耳放增益**：`HPHL/R Volume`的刻度为−30 + 1.5·v dB（`wcd938x.c`的`line_gain`），8即−18 dB。Linux上UCM把它当用户音量，Android的音量在框架里做，这里只设一个固定值。同一档下`CLS_AB_LOHIFI`比`CLS_H_ULP`高约5.6 dB，8的响度与`CLS_H_ULP`下试听合适的12相当，满幅比测过不削波的点低约5 dB。只用一副耳机试听过。
+- **调试注意**：`RX_COMPn Switch`只能在耳机流关闭时改。流开着时由1改为0，`lpass-rx-macro`在流关闭时会跳过关压扩器的步骤，压扩器在硬件里一直开着，直到改回1并再开关一次流，或重启。`HPHx_COMP Switch`由0改为1时，`wcd938x`不会把耳放的增益来源切回压扩器，同样要重启才能生效。
 - **耳机插拔检测与HAL动态端口填充**：
   1. **Framework输入事件检测**：主线内核`wcd938x` MBHC通过`/dev/input/event*`上报`SW_HEADPHONE_INSERT`与`SW_MICROPHONE_INSERT`，不创建旧版`/sys/class/switch/h2w`。设备树overlay必须设置`config_useDevInputEventForAudioJack = true`，`WiredAccessoryManager`才能收到插拔事件。
   2. **策略XML与`ModulePrimary`修复（`patches/android/hardware-interfaces/0001`）**：
