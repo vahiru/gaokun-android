@@ -1,0 +1,858 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] v4l2_codec2: add an HEVC encoder component
+
+Add c2.v4l2.hevc.encoder, enabled through
+ro.vendor.v4l2_codec2.encoder.supported.hevc like the other encoders.
+
+- HEVC.{h,cpp}: Main tier level limits (H.265 Tables A.8 and A.9: maximum
+  luma picture size, luma sample rate and bitrate, plus the A.4.1 bound of
+  sqrt(8 * MaxLumaPs) on each dimension), the C2 to V4L2 level mapping,
+  VPS/SPS/PPS extraction for the codec-specific data, and insertion of
+  the cached parameter sets before IRAP pictures (IDR, CRA) that come
+  without them.
+- EncodeInterface: HEVC profile and level parameter. Only Main is
+  offered: the input is 8-bit 4:2:0 (NV12), Main Still Picture allows a
+  single picture per stream, and Main 10 needs a 10-bit input format.
+  Levels 1 to 5.2, default 4.1. The setter mirrors the H.264 one: it
+  keeps the requested level when that covers the size, frame rate and
+  bitrate, and otherwise moves to the lowest level that does.
+- EncodeComponent: HEVC codec-specific data (VPS, SPS and PPS) and the
+  frame rate limit of the configured level.
+- V4L2Encoder: the HEVC profile is required; level, B-frames, maximum QP
+  and header mode are optional and set one at a time, so that a control
+  the device lacks does not reject the others. The parameter sets go
+  before each IRAP picture through
+  V4L2_CID_MPEG_VIDEO_PREPEND_SPSPPS_TO_IDR when the device exposes it,
+  otherwise the encoder inserts the cached ones, as it already does for
+  H.264 (the Qualcomm iris gen1 encoder has no such control).
+
+Origin: local
+Upstream-Status: Pending
+---
+ common/Android.bp                             |   1 +
+ common/HEVC.cpp                               | 216 ++++++++++++++++++
+ common/include/v4l2_codec2/common/HEVC.h      |  78 +++++++
+ components/EncodeComponent.cpp                |   9 +-
+ components/EncodeInterface.cpp                |  88 +++++++
+ .../v4l2_codec2/components/EncodeInterface.h  |   6 +
+ v4l2/V4L2ComponentCommon.cpp                  |  12 +-
+ v4l2/V4L2ComponentStore.cpp                   |   3 +
+ v4l2/V4L2Device.cpp                           |  15 ++
+ v4l2/V4L2EncodeComponent.cpp                  |  14 +-
+ v4l2/V4L2Encoder.cpp                          |  77 ++++++-
+ .../v4l2_codec2/v4l2/V4L2ComponentCommon.h    |   1 +
+ v4l2/include/v4l2_codec2/v4l2/V4L2Device.h    |   2 +
+ v4l2/include/v4l2_codec2/v4l2/V4L2Encoder.h   |  16 +-
+ 14 files changed, 518 insertions(+), 20 deletions(-)
+ create mode 100644 common/HEVC.cpp
+ create mode 100644 common/include/v4l2_codec2/common/HEVC.h
+
+diff --git a/common/Android.bp b/common/Android.bp
+index 6b571c9..29f5ddd 100644
+--- a/common/Android.bp
++++ b/common/Android.bp
+@@ -22,6 +22,7 @@ cc_library {
+         "Fourcc.cpp",
+         "H264.cpp",
+         "H264NalParser.cpp",
++        "HEVC.cpp",
+         "HEVCNalParser.cpp",
+         "NalParser.cpp",
+         "VideoTypes.cpp",
+diff --git a/common/HEVC.cpp b/common/HEVC.cpp
+new file mode 100644
+index 0000000..7644a5f
+--- /dev/null
++++ b/common/HEVC.cpp
+@@ -0,0 +1,216 @@
++// Copyright 2026 The gaokun-android contributors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++//#define LOG_NDEBUG 0
++#define LOG_TAG "HEVC"
++
++#include <v4l2_codec2/common/HEVC.h>
++
++#include <math.h>
++#include <string.h>
++
++#include <limits>
++
++#include <linux/videodev2.h>
++#include <log/log.h>
++
++#include <v4l2_codec2/common/HEVCNalParser.h>
++
++namespace android {
++
++namespace {
++
++// NAL unit types (Table 7-1 in the H.265 spec).
++constexpr uint8_t kIDRWRADLType = 19;
++constexpr uint8_t kIDRNLPType = 20;
++constexpr uint8_t kCRAType = 21;
++constexpr uint8_t kVPSType = 32;
++constexpr uint8_t kSPSType = 33;
++constexpr uint8_t kPPSType = 34;
++
++// Android frameworks need a 4-byte start code.
++constexpr uint8_t kStartCode[] = {0x00, 0x00, 0x00, 0x01};
++constexpr size_t kStartCodeSize = sizeof(kStartCode);
++
++bool copyNALUPrependingStartCode(const uint8_t* src, size_t srcSize, uint8_t** dst,
++                                 size_t* dstSize) {
++    size_t naluSize = srcSize + kStartCodeSize;
++    if (naluSize > *dstSize) {
++        ALOGE("Couldn't copy NAL unit, not enough space in destination buffer");
++        return false;
++    }
++    memcpy(*dst, kStartCode, kStartCodeSize);
++    memcpy(*dst + kStartCodeSize, src, srcSize);
++    *dst += naluSize;
++    *dstSize -= naluSize;
++    return true;
++}
++
++void cacheNALU(const HEVCNalParser& parser, std::vector<uint8_t>* cache) {
++    cache->assign(parser.data(), parser.data() + parser.length());
++}
++
++bool isIRAP(uint8_t type) {
++    return type == kIDRWRADLType || type == kIDRNLPType || type == kCRAType;
++}
++
++}  // namespace
++
++uint64_t lumaPictureSizeHEVC(const ui::Size& videoSize) {
++    return static_cast<uint64_t>((videoSize.width + 7) & ~7) * ((videoSize.height + 7) & ~7);
++}
++
++bool fitsLevelHEVC(const HEVCLevelLimits& limit, const ui::Size& videoSize, float frameRate,
++                   uint32_t bitrate) {
++    const uint64_t lumaPs = lumaPictureSizeHEVC(videoSize);
++    const double maxDimension = sqrt(static_cast<double>(limit.maxLumaPs) * 8);
++    return lumaPs <= limit.maxLumaPs && videoSize.width <= maxDimension &&
++           videoSize.height <= maxDimension &&
++           static_cast<double>(lumaPs) * frameRate <= static_cast<double>(limit.maxLumaSr) &&
++           bitrate <= limit.maxBR;
++}
++
++uint32_t maxFramerateForLevelHEVC(C2Config::level_t level, const ui::Size& videoSize) {
++    const uint64_t lumaPs = lumaPictureSizeHEVC(videoSize);
++    for (const HEVCLevelLimits& limit : kHEVCLimits) {
++        if (limit.level == level && lumaPs > 0) return limit.maxLumaSr / lumaPs;
++    }
++    ALOGW("%s - failed to find matching HEVC level=%d", __func__, level);
++    return std::numeric_limits<uint32_t>::max();
++}
++
++std::optional<uint8_t> c2LevelToV4L2LevelHEVC(C2Config::level_t level) {
++    switch (level) {
++    case C2Config::LEVEL_HEVC_MAIN_1:
++        return V4L2_MPEG_VIDEO_HEVC_LEVEL_1;
++    case C2Config::LEVEL_HEVC_MAIN_2:
++        return V4L2_MPEG_VIDEO_HEVC_LEVEL_2;
++    case C2Config::LEVEL_HEVC_MAIN_2_1:
++        return V4L2_MPEG_VIDEO_HEVC_LEVEL_2_1;
++    case C2Config::LEVEL_HEVC_MAIN_3:
++        return V4L2_MPEG_VIDEO_HEVC_LEVEL_3;
++    case C2Config::LEVEL_HEVC_MAIN_3_1:
++        return V4L2_MPEG_VIDEO_HEVC_LEVEL_3_1;
++    case C2Config::LEVEL_HEVC_MAIN_4:
++        return V4L2_MPEG_VIDEO_HEVC_LEVEL_4;
++    case C2Config::LEVEL_HEVC_MAIN_4_1:
++        return V4L2_MPEG_VIDEO_HEVC_LEVEL_4_1;
++    case C2Config::LEVEL_HEVC_MAIN_5:
++        return V4L2_MPEG_VIDEO_HEVC_LEVEL_5;
++    case C2Config::LEVEL_HEVC_MAIN_5_1:
++        return V4L2_MPEG_VIDEO_HEVC_LEVEL_5_1;
++    case C2Config::LEVEL_HEVC_MAIN_5_2:
++        return V4L2_MPEG_VIDEO_HEVC_LEVEL_5_2;
++    case C2Config::LEVEL_HEVC_MAIN_6:
++        return V4L2_MPEG_VIDEO_HEVC_LEVEL_6;
++    case C2Config::LEVEL_HEVC_MAIN_6_1:
++        return V4L2_MPEG_VIDEO_HEVC_LEVEL_6_1;
++    case C2Config::LEVEL_HEVC_MAIN_6_2:
++        return V4L2_MPEG_VIDEO_HEVC_LEVEL_6_2;
++    default:
++        ALOGE("Unrecognizable HEVC C2 level (value = 0x%x)...", level);
++        return std::nullopt;
++    }
++}
++
++bool extractParamSetsHEVC(const uint8_t* data, size_t length, std::vector<uint8_t>* vps,
++                          std::vector<uint8_t>* sps, std::vector<uint8_t>* pps) {
++    bool foundVPS = false;
++    bool foundSPS = false;
++    bool foundPPS = false;
++    HEVCNalParser parser(data, length);
++    while (!(foundVPS && foundSPS && foundPPS) && parser.locateNextNal()) {
++        if (parser.length() == 0) continue;
++        switch (parser.type()) {
++        case kVPSType:
++            cacheNALU(parser, vps);
++            foundVPS = true;
++            break;
++        case kSPSType:
++            cacheNALU(parser, sps);
++            foundSPS = true;
++            break;
++        case kPPSType:
++            cacheNALU(parser, pps);
++            foundPPS = true;
++            break;
++        }
++    }
++    return foundVPS && foundSPS && foundPPS;
++}
++
++bool extractCSDInfoHEVC(std::unique_ptr<C2StreamInitDataInfo::output>* const csd,
++                        const uint8_t* data, size_t length) {
++    csd->reset();
++
++    std::vector<uint8_t> vps;
++    std::vector<uint8_t> sps;
++    std::vector<uint8_t> pps;
++    if (!extractParamSetsHEVC(data, length, &vps, &sps, &pps)) {
++        return false;
++    }
++
++    size_t configDataLength = vps.size() + sps.size() + pps.size() + (3u * kStartCodeSize);
++    ALOGV("Extracted codec config data: length=%zu", configDataLength);
++
++    *csd = C2StreamInitDataInfo::output::AllocUnique(configDataLength, 0u);
++    uint8_t* csdBuffer = (*csd)->m.value;
++    return copyNALUPrependingStartCode(vps.data(), vps.size(), &csdBuffer, &configDataLength) &&
++           copyNALUPrependingStartCode(sps.data(), sps.size(), &csdBuffer, &configDataLength) &&
++           copyNALUPrependingStartCode(pps.data(), pps.size(), &csdBuffer, &configDataLength);
++}
++
++size_t prependParamSetsToIRAPHEVC(const uint8_t* src, size_t srcSize, uint8_t* dst, size_t dstSize,
++                                  std::vector<uint8_t>* vps, std::vector<uint8_t>* sps,
++                                  std::vector<uint8_t>* pps) {
++    bool foundParamSets = false;
++    bool injected = false;
++    size_t remainingDstSize = dstSize;
++    HEVCNalParser parser(src, srcSize);
++    while (parser.locateNextNal()) {
++        if (parser.length() == 0) continue;
++        const uint8_t type = parser.type();
++        switch (type) {
++        case kVPSType:
++            cacheNALU(parser, vps);
++            foundParamSets = true;
++            break;
++        case kSPSType:
++            cacheNALU(parser, sps);
++            foundParamSets = true;
++            break;
++        case kPPSType:
++            cacheNALU(parser, pps);
++            foundParamSets = true;
++            break;
++        default:
++            // Only the first slice of the picture gets the parameter sets.
++            if (!isIRAP(type) || foundParamSets || injected) break;
++
++            if (vps->empty() || sps->empty() || pps->empty()) {
++                ALOGE("No cached VPS, SPS or PPS NAL unit available to inject before IRAP");
++                return 0;
++            }
++            if (!copyNALUPrependingStartCode(vps->data(), vps->size(), &dst, &remainingDstSize) ||
++                !copyNALUPrependingStartCode(sps->data(), sps->size(), &dst, &remainingDstSize) ||
++                !copyNALUPrependingStartCode(pps->data(), pps->size(), &dst, &remainingDstSize)) {
++                ALOGE("Not enough space to inject parameter sets before IRAP");
++                return 0;
++            }
++            injected = true;
++            ALOGV("Parameter sets injected before IRAP (type %u)", type);
++            break;
++        }
++
++        // Copy the NAL unit to the new output buffer.
++        if (!copyNALUPrependingStartCode(parser.data(), parser.length(), &dst, &remainingDstSize)) {
++            ALOGE("NAL unit does not fit in the provided output buffer");
++            return 0;
++        }
++    }
++
++    return dstSize - remainingDstSize;
++}
++
++}  // namespace android
+diff --git a/common/include/v4l2_codec2/common/HEVC.h b/common/include/v4l2_codec2/common/HEVC.h
+new file mode 100644
+index 0000000..ac533ed
+--- /dev/null
++++ b/common/include/v4l2_codec2/common/HEVC.h
+@@ -0,0 +1,78 @@
++// Copyright 2026 The gaokun-android contributors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef ANDROID_V4L2_CODEC2_COMMON_HEVC_H
++#define ANDROID_V4L2_CODEC2_COMMON_HEVC_H
++
++#include <memory>
++#include <optional>
++#include <vector>
++
++#include <C2Config.h>
++
++#include <ui/Size.h>
++
++namespace android {
++
++// Tables A.8 and A.9 in the H.265 spec, Main tier. maxBR is CpbBrVclFactor (1000 for the Main
++// profile) times MaxBR.
++struct HEVCLevelLimits {
++    C2Config::level_t level;
++    uint64_t maxLumaPs;  // max luma picture size in samples
++    uint64_t maxLumaSr;  // max luma sample rate in samples per second
++    uint32_t maxBR;      // max video bitrate in bits per second
++};
++
++constexpr HEVCLevelLimits kHEVCLimits[] = {
++        {C2Config::LEVEL_HEVC_MAIN_1, 36864, 552960, 128000},
++        {C2Config::LEVEL_HEVC_MAIN_2, 122880, 3686400, 1500000},
++        {C2Config::LEVEL_HEVC_MAIN_2_1, 245760, 7372800, 3000000},
++        {C2Config::LEVEL_HEVC_MAIN_3, 552960, 16588800, 6000000},
++        {C2Config::LEVEL_HEVC_MAIN_3_1, 983040, 33177600, 10000000},
++        {C2Config::LEVEL_HEVC_MAIN_4, 2228224, 66846720, 12000000},
++        {C2Config::LEVEL_HEVC_MAIN_4_1, 2228224, 133693440, 20000000},
++        {C2Config::LEVEL_HEVC_MAIN_5, 8912896, 267386880, 25000000},
++        {C2Config::LEVEL_HEVC_MAIN_5_1, 8912896, 534773760, 40000000},
++        {C2Config::LEVEL_HEVC_MAIN_5_2, 8912896, 1069547520, 60000000},
++        {C2Config::LEVEL_HEVC_MAIN_6, 35651584, 1069547520, 60000000},
++        {C2Config::LEVEL_HEVC_MAIN_6_1, 35651584, 2139095040, 120000000},
++        {C2Config::LEVEL_HEVC_MAIN_6_2, 35651584, 4278190080, 240000000},
++};
++
++inline bool isHEVCProfile(C2Config::profile_t profile) {
++    return (profile >= C2Config::PROFILE_HEVC_MAIN && profile <= C2Config::PROFILE_HEVC_3D_MAIN);
++}
++
++// Luma samples of the coded picture: the encoder codes whole minimum coding blocks (8x8).
++uint64_t lumaPictureSizeHEVC(const ui::Size& videoSize);
++
++// Whether |videoSize| at |frameRate| and |bitrate| fits |limit|, including the A.4.1 bound on
++// each picture dimension (sqrt(MaxLumaPs * 8)).
++bool fitsLevelHEVC(const HEVCLevelLimits& limit, const ui::Size& videoSize, float frameRate,
++                   uint32_t bitrate);
++
++uint32_t maxFramerateForLevelHEVC(C2Config::level_t level, const ui::Size& videoSize);
++
++// Convert a Main tier C2 level to the V4L2 HEVC level control value.
++std::optional<uint8_t> c2LevelToV4L2LevelHEVC(C2Config::level_t level);
++
++// Find the VPS, SPS and PPS NAL units in |data|. Returns true only if all three are found.
++bool extractParamSetsHEVC(const uint8_t* data, size_t length, std::vector<uint8_t>* vps,
++                          std::vector<uint8_t>* sps, std::vector<uint8_t>* pps);
++
++// Extract the codec-specific data (VPS, SPS and PPS, each with a 4-byte start code) from the first
++// encoded buffer.
++bool extractCSDInfoHEVC(std::unique_ptr<C2StreamInitDataInfo::output>* const csd,
++                        const uint8_t* data, size_t length);
++
++// Copy |src| to |dst|, inserting the cached VPS, SPS and PPS before an IRAP picture (IDR or CRA)
++// that comes without them. Parameter sets found in |src| refresh the cache. Returns the size
++// written to |dst|, or 0 if it doesn't fit or nothing is cached yet.
++size_t prependParamSetsToIRAPHEVC(const uint8_t* src, size_t srcSize, uint8_t* dst, size_t dstSize,
++                                  std::vector<uint8_t>* vps, std::vector<uint8_t>* sps,
++                                  std::vector<uint8_t>* pps);
++
++}  // namespace android
++
++#endif  // ANDROID_V4L2_CODEC2_COMMON_HEVC_H
+diff --git a/components/EncodeComponent.cpp b/components/EncodeComponent.cpp
+index 65de283..e25f33d 100644
+--- a/components/EncodeComponent.cpp
++++ b/components/EncodeComponent.cpp
+@@ -28,6 +28,7 @@
+ #include <v4l2_codec2/common/EncodeHelpers.h>
+ #include <v4l2_codec2/common/FormatConverter.h>
+ #include <v4l2_codec2/common/H264.h>
++#include <v4l2_codec2/common/HEVC.h>
+ #include <v4l2_codec2/components/BitstreamBuffer.h>
+ #include <v4l2_codec2/components/EncodeInterface.h>
+ #include <v4l2_codec2/components/VideoEncoder.h>
+@@ -700,6 +701,9 @@ bool EncodeComponent::updateEncodingParameters() {
+         C2Config::level_t outputLevel = mInterface->getOutputLevel();
+         ui::Size inputSize = mInterface->getInputVisibleSize();
+         mMaxFramerate = maxFramerateForLevelH264(outputLevel, inputSize);
++    } else if (isHEVCProfile(outputProfile)) {
++        mMaxFramerate = maxFramerateForLevelHEVC(mInterface->getOutputLevel(),
++                                                 mInterface->getInputVisibleSize());
+     }
+ 
+     return true;
+@@ -883,7 +887,10 @@ void EncodeComponent::onOutputBufferDone(size_t dataSize, int64_t timestamp, boo
+         ALOGV("No CSD submitted yet, extracting CSD");
+         std::unique_ptr<C2StreamInitDataInfo::output> csd;
+         C2ReadView view = constBlock.map().get();
+-        if (!extractCSDInfo(&csd, view.data(), view.capacity())) {
++        const bool extracted = isHEVCProfile(mInterface->getOutputProfile())
++                                       ? extractCSDInfoHEVC(&csd, view.data(), view.capacity())
++                                       : extractCSDInfo(&csd, view.data(), view.capacity());
++        if (!extracted) {
+             ALOGE("Failed to extract CSD");
+             reportError(C2_CORRUPTED);
+             return;
+diff --git a/components/EncodeInterface.cpp b/components/EncodeInterface.cpp
+index 9e66292..ecf0bb9 100644
+--- a/components/EncodeInterface.cpp
++++ b/components/EncodeInterface.cpp
+@@ -18,6 +18,7 @@
+ 
+ #include <v4l2_codec2/common/Common.h>
+ #include <v4l2_codec2/common/H264.h>
++#include <v4l2_codec2/common/HEVC.h>
+ #include <v4l2_codec2/common/VideoTypes.h>
+ 
+ using android::hardware::graphics::common::V1_0::BufferUsage;
+@@ -45,6 +46,8 @@ constexpr uint32_t kMaxBitrate = 50000000;
+ 
+ //static
+ C2Config::level_t EncodeInterface::lowestConfigLevel = C2Config::LEVEL_UNUSED;
++//static
++C2Config::level_t EncodeInterface::lowestConfigLevelHEVC = C2Config::LEVEL_UNUSED;
+ 
+ // static
+ C2R EncodeInterface::H264ProfileLevelSetter(bool /*mayBlock*/,
+@@ -134,6 +137,62 @@ C2R EncodeInterface::H264ProfileLevelSetter(bool /*mayBlock*/,
+     return C2R::Ok();
+ }
+ 
++// static
++C2R EncodeInterface::HEVCProfileLevelSetter(bool /*mayBlock*/,
++                                            C2P<C2StreamProfileLevelInfo::output>& info,
++                                            const C2P<C2StreamPictureSizeInfo::input>& videoSize,
++                                            const C2P<C2StreamFrameRateInfo::output>& frameRate,
++                                            const C2P<C2StreamBitrateInfo::output>& bitrate) {
++    constexpr C2Config::profile_t minProfile = C2Config::PROFILE_HEVC_MAIN;
++    if (!info.F(info.v.profile).supportsAtAll(info.v.profile)) {
++        if (info.F(info.v.profile).supportsAtAll(minProfile)) {
++            ALOGV("Set profile to default (%u) instead.", minProfile);
++            info.set().profile = minProfile;
++        } else {
++            ALOGE("Unable to set either requested profile (%u) or default profile (%u).",
++                  info.v.profile, minProfile);
++            return C2R(C2SettingResultBuilder::BadValue(info.F(info.v.profile)));
++        }
++    }
++
++    // Same approach as H264ProfileLevelSetter: keep the requested level if it covers the current
++    // size, frame rate and bitrate, otherwise move to the lowest level that does.
++    if (lowestConfigLevelHEVC != C2Config::LEVEL_UNUSED && lowestConfigLevelHEVC < info.v.level) {
++        info.set().level = lowestConfigLevelHEVC;
++    }
++
++    const ui::Size size(videoSize.v.width, videoSize.v.height);
++    bool found = false;
++    bool needsUpdate = !info.F(info.v.level).supportsAtAll(info.v.level);
++    for (const HEVCLevelLimits& limit : kHEVCLimits) {
++        if (!info.F(info.v.level).supportsAtAll(limit.level)) {
++            continue;
++        }
++
++        if (fitsLevelHEVC(limit, size, frameRate.v.value, bitrate.v.value)) {
++            if (needsUpdate) {
++                lowestConfigLevelHEVC = info.v.level;
++                ALOGD("Given level %u does not cover current configuration: "
++                      "adjusting to %u",
++                      info.v.level, limit.level);
++                info.set().level = limit.level;
++            }
++            found = true;
++            break;
++        }
++        if (info.v.level <= limit.level) {
++            needsUpdate = true;
++        }
++    }
++    if (!found) {
++        ALOGE("Unable to find proper level with current config, requested level (%u).",
++              info.v.level);
++        return C2R(C2SettingResultBuilder::BadValue(info.F(info.v.level)));
++    }
++
++    return C2R::Ok();
++}
++
+ C2R EncodeInterface::VP9ProfileLevelSetter(bool /*mayBlock*/,
+                                            C2P<C2StreamProfileLevelInfo::output>& info,
+                                            const C2P<C2StreamPictureSizeInfo::input>& /*videoSize*/,
+@@ -199,6 +258,12 @@ void EncodeInterface::Initialize(const C2String& name, const SupportedCapabiliti
+         if (!isValidProfileForCodec(caps.codec, supportedProfile.profile)) {
+             continue;  // Ignore unrecognizable or unsupported profiles.
+         }
++        // The input is 8-bit 4:2:0 (NV12), which is HEVC Main; Main Still Picture allows a single
++        // picture per stream, and Main 10 would need a 10-bit input format.
++        if (caps.codec == VideoCodec::HEVC &&
++            supportedProfile.profile != C2Config::PROFILE_HEVC_MAIN) {
++            continue;
++        }
+         ALOGV("Queried c2_profile = 0x%x : max_size = %d x %d", supportedProfile.profile,
+               supportedProfile.max_resolution.width, supportedProfile.max_resolution.height);
+         profiles.push_back(static_cast<unsigned int>(supportedProfile.profile));
+@@ -274,6 +339,29 @@ void EncodeInterface::Initialize(const C2String& name, const SupportedCapabiliti
+                                                  C2Config::LEVEL_AVC_5, C2Config::LEVEL_AVC_5_1})})
+                         .withSetter(H264ProfileLevelSetter, mInputVisibleSize, mFrameRate, mBitrate)
+                         .build());
++    } else if (caps.codec == VideoCodec::HEVC) {
++        outputMime = MEDIA_MIMETYPE_VIDEO_HEVC;
++        C2Config::profile_t minProfile = static_cast<C2Config::profile_t>(
++                *std::min_element(profiles.begin(), profiles.end()));
++        addParameter(
++                DefineParam(mProfileLevel, C2_PARAMKEY_PROFILE_LEVEL)
++                        .withDefault(new C2StreamProfileLevelInfo::output(
++                                0u, minProfile, C2Config::LEVEL_HEVC_MAIN_4_1))
++                        .withFields({C2F(mProfileLevel, profile).oneOf(profiles),
++                                     // The largest frame (4096x2176) fits level 5.2 up to 120 fps.
++                                     C2F(mProfileLevel, level)
++                                             .oneOf({C2Config::LEVEL_HEVC_MAIN_1,
++                                                     C2Config::LEVEL_HEVC_MAIN_2,
++                                                     C2Config::LEVEL_HEVC_MAIN_2_1,
++                                                     C2Config::LEVEL_HEVC_MAIN_3,
++                                                     C2Config::LEVEL_HEVC_MAIN_3_1,
++                                                     C2Config::LEVEL_HEVC_MAIN_4,
++                                                     C2Config::LEVEL_HEVC_MAIN_4_1,
++                                                     C2Config::LEVEL_HEVC_MAIN_5,
++                                                     C2Config::LEVEL_HEVC_MAIN_5_1,
++                                                     C2Config::LEVEL_HEVC_MAIN_5_2})})
++                        .withSetter(HEVCProfileLevelSetter, mInputVisibleSize, mFrameRate, mBitrate)
++                        .build());
+     } else if (caps.codec == VideoCodec::VP8) {
+         outputMime = MEDIA_MIMETYPE_VIDEO_VP8;
+         // VP8 doesn't have conventional profiles, we'll use profile0 if the VP8 codec is requested.
+diff --git a/components/include/v4l2_codec2/components/EncodeInterface.h b/components/include/v4l2_codec2/components/EncodeInterface.h
+index e59f58c..fc68b54 100644
+--- a/components/include/v4l2_codec2/components/EncodeInterface.h
++++ b/components/include/v4l2_codec2/components/EncodeInterface.h
+@@ -62,6 +62,10 @@ protected:
+                                       const C2P<C2StreamPictureSizeInfo::input>& videosize,
+                                       const C2P<C2StreamFrameRateInfo::output>& frameRate,
+                                       const C2P<C2StreamBitrateInfo::output>& bitrate);
++    static C2R HEVCProfileLevelSetter(bool mayBlock, C2P<C2StreamProfileLevelInfo::output>& info,
++                                      const C2P<C2StreamPictureSizeInfo::input>& videosize,
++                                      const C2P<C2StreamFrameRateInfo::output>& frameRate,
++                                      const C2P<C2StreamBitrateInfo::output>& bitrate);
+     static C2R VP9ProfileLevelSetter(bool mayBlock, C2P<C2StreamProfileLevelInfo::output>& info,
+                                      const C2P<C2StreamPictureSizeInfo::input>& videosize,
+                                      const C2P<C2StreamFrameRateInfo::output>& frameRate,
+@@ -75,6 +79,8 @@ protected:
+     // Recorded lowest configured level
+     // Is static for the need to use H264ProfileLevelSetter as a setter
+     static C2Config::level_t lowestConfigLevel;
++    // Same for HEVCProfileLevelSetter, kept apart since H.264 and HEVC levels don't compare
++    static C2Config::level_t lowestConfigLevelHEVC;
+ 
+     // Constant parameters
+ 
+diff --git a/v4l2/V4L2ComponentCommon.cpp b/v4l2/V4L2ComponentCommon.cpp
+index 2123bd0..1360550 100644
+--- a/v4l2/V4L2ComponentCommon.cpp
++++ b/v4l2/V4L2ComponentCommon.cpp
+@@ -15,6 +15,7 @@ namespace android {
+ const std::string V4L2ComponentName::kH264Encoder = "c2.v4l2.avc.encoder";
+ const std::string V4L2ComponentName::kVP8Encoder = "c2.v4l2.vp8.encoder";
+ const std::string V4L2ComponentName::kVP9Encoder = "c2.v4l2.vp9.encoder";
++const std::string V4L2ComponentName::kHEVCEncoder = "c2.v4l2.hevc.encoder";
+ 
+ const std::string V4L2ComponentName::kH264Decoder = "c2.v4l2.avc.decoder";
+ const std::string V4L2ComponentName::kVP8Decoder = "c2.v4l2.vp8.decoder";
+@@ -29,16 +30,18 @@ const std::string V4L2ComponentName::kHEVCSecureDecoder = "c2.v4l2.hevc.decoder.
+ // static
+ bool V4L2ComponentName::isValid(const std::string& name) {
+     return name == kH264Encoder || name == kVP8Encoder || name == kVP9Encoder ||
+-           name == kH264Decoder || name == kVP8Decoder || name == kVP9Decoder ||
+-           name == kHEVCDecoder || name == kAV1Decoder || name == kH264SecureDecoder ||
+-           name == kVP8SecureDecoder || name == kVP9SecureDecoder || name == kHEVCSecureDecoder;
++           name == kHEVCEncoder || name == kH264Decoder || name == kVP8Decoder ||
++           name == kVP9Decoder || name == kHEVCDecoder || name == kAV1Decoder ||
++           name == kH264SecureDecoder || name == kVP8SecureDecoder || name == kVP9SecureDecoder ||
++           name == kHEVCSecureDecoder;
+ }
+ 
+ // static
+ bool V4L2ComponentName::isEncoder(const std::string& name) {
+     ALOG_ASSERT(isValid(name));
+ 
+-    return name == kH264Encoder || name == kVP8Encoder || name == kVP9Encoder;
++    return name == kH264Encoder || name == kVP8Encoder || name == kVP9Encoder ||
++           name == kHEVCEncoder;
+ }
+ 
+ // static
+@@ -67,6 +70,7 @@ std::optional<VideoCodec> V4L2ComponentName::getCodec(const std::string& name) {
+             {kVP9Encoder, VideoCodec::VP9},
+ 
+             {kHEVCDecoder, VideoCodec::HEVC}, {kHEVCSecureDecoder, VideoCodec::HEVC},
++            {kHEVCEncoder, VideoCodec::HEVC},
+ 
+             {kAV1Decoder, VideoCodec::AV1},
+     };
+diff --git a/v4l2/V4L2ComponentStore.cpp b/v4l2/V4L2ComponentStore.cpp
+index d5b4901..e00bceb 100644
+--- a/v4l2/V4L2ComponentStore.cpp
++++ b/v4l2/V4L2ComponentStore.cpp
+@@ -47,6 +47,9 @@ std::shared_ptr<C2ComponentStore> V4L2ComponentStore::Create() {
+     if (property_get_bool("ro.vendor.v4l2_codec2.encoder.supported.vp9", false))
+         builder.encoder(V4L2ComponentName::kVP9Encoder, VideoCodec::VP9,
+                         &V4L2ComponentFactory::create);
++    if (property_get_bool("ro.vendor.v4l2_codec2.encoder.supported.hevc", false))
++        builder.encoder(V4L2ComponentName::kHEVCEncoder, VideoCodec::HEVC,
++                        &V4L2ComponentFactory::create);
+ 
+     if (property_get_bool("ro.vendor.v4l2_codec2.decoder.supported.h264", false))
+         builder.decoder(V4L2ComponentName::kH264Decoder, VideoCodec::H264,
+diff --git a/v4l2/V4L2Device.cpp b/v4l2/V4L2Device.cpp
+index 2e4deb0..05be881 100644
+--- a/v4l2/V4L2Device.cpp
++++ b/v4l2/V4L2Device.cpp
+@@ -1821,6 +1821,21 @@ int32_t V4L2Device::c2ProfileToV4L2H264Profile(C2Config::profile_t profile) {
+     }
+ }
+ 
++// static
++int32_t V4L2Device::c2ProfileToV4L2HEVCProfile(C2Config::profile_t profile) {
++    switch (profile) {
++    case C2Config::PROFILE_HEVC_MAIN:
++        return V4L2_MPEG_VIDEO_HEVC_PROFILE_MAIN;
++    case C2Config::PROFILE_HEVC_MAIN_STILL:
++        return V4L2_MPEG_VIDEO_HEVC_PROFILE_MAIN_STILL_PICTURE;
++    case C2Config::PROFILE_HEVC_MAIN_10:
++        return V4L2_MPEG_VIDEO_HEVC_PROFILE_MAIN_10;
++    default:
++        ALOGE("Add more cases as needed");
++        return -1;
++    }
++}
++
+ // static
+ int32_t V4L2Device::h264LevelIdcToV4L2H264Level(uint8_t levelIdc) {
+     switch (levelIdc) {
+diff --git a/v4l2/V4L2EncodeComponent.cpp b/v4l2/V4L2EncodeComponent.cpp
+index e3b9b14..07a6f63 100644
+--- a/v4l2/V4L2EncodeComponent.cpp
++++ b/v4l2/V4L2EncodeComponent.cpp
+@@ -12,6 +12,7 @@
+ #include <cutils/properties.h>
+ 
+ #include <v4l2_codec2/common/H264.h>
++#include <v4l2_codec2/common/HEVC.h>
+ #include <v4l2_codec2/components/BitstreamBuffer.h>
+ #include <v4l2_codec2/components/EncodeInterface.h>
+ #include <v4l2_codec2/v4l2/V4L2Encoder.h>
+@@ -65,12 +66,15 @@ bool V4L2EncodeComponent::initializeEncoder() {
+     // Get the requested profile and level.
+     C2Config::profile_t outputProfile = mInterface->getOutputProfile();
+ 
+-    // CSD only needs to be extracted when using an H.264 profile.
+-    mExtractCSD = isH264Profile(outputProfile);
++    // CSD only needs to be extracted when using an H.264 or HEVC profile.
++    mExtractCSD = isH264Profile(outputProfile) || isHEVCProfile(outputProfile);
+ 
+-    std::optional<uint8_t> h264Level;
++    // The output level as a V4L2 control value of the profile's codec.
++    std::optional<uint8_t> level;
+     if (isH264Profile(outputProfile)) {
+-        h264Level = c2LevelToV4L2Level(mInterface->getOutputLevel());
++        level = c2LevelToV4L2Level(mInterface->getOutputLevel());
++    } else if (isHEVCProfile(outputProfile)) {
++        level = c2LevelToV4L2LevelHEVC(mInterface->getOutputLevel());
+     }
+ 
+     // Get the stride used by the C2 framework, as this might be different from the stride used by
+@@ -95,7 +99,7 @@ bool V4L2EncodeComponent::initializeEncoder() {
+     mBitrate = mInterface->getBitrate();
+ 
+     mEncoder = V4L2Encoder::create(
+-            outputProfile, h264Level, mInterface->getInputVisibleSize(), *stride,
++            outputProfile, level, mInterface->getInputVisibleSize(), *stride,
+             mInterface->getKeyFramePeriod(), mBitrateMode, mBitrate,
+             mBitrate * VideoEncoder::kPeakBitrateMultiplier,
+             ::base::BindRepeating(&V4L2EncodeComponent::fetchOutputBlock, mWeakThis),
+diff --git a/v4l2/V4L2Encoder.cpp b/v4l2/V4L2Encoder.cpp
+index 730827c..97aaa27 100644
+--- a/v4l2/V4L2Encoder.cpp
++++ b/v4l2/V4L2Encoder.cpp
+@@ -19,6 +19,7 @@
+ 
+ #include <v4l2_codec2/common/EncodeHelpers.h>
+ #include <v4l2_codec2/common/Fourcc.h>
++#include <v4l2_codec2/common/HEVC.h>
+ #include <v4l2_codec2/components/BitstreamBuffer.h>
+ #include <v4l2_codec2/v4l2/V4L2Device.h>
+ 
+@@ -589,7 +590,7 @@ bool V4L2Encoder::configureOutputFormat(C2Config::profile_t outputProfile) {
+ }
+ 
+ bool V4L2Encoder::configureDevice(C2Config::profile_t outputProfile,
+-                                  std::optional<const uint8_t> outputH264Level) {
++                                  std::optional<const uint8_t> outputLevel) {
+     ALOGV("%s()", __func__);
+     ALOG_ASSERT(mTaskRunner->RunsTasksInCurrentSequence());
+ 
+@@ -607,10 +608,65 @@ bool V4L2Encoder::configureDevice(C2Config::profile_t outputProfile,
+     mDevice->setExtCtrls(V4L2_CTRL_CLASS_MPEG, {V4L2ExtCtrl(V4L2_CID_MPEG_VIDEO_MB_RC_ENABLE, 1),
+                                                 V4L2ExtCtrl(V4L2_CID_MPEG_VIDEO_GOP_SIZE, 0)});
+ 
+-    // All controls below are H.264-specific, so we can return here if the profile is not H.264.
++    // All controls below are codec-specific.
+     if (outputProfile >= C2Config::PROFILE_AVC_BASELINE &&
+         outputProfile <= C2Config::PROFILE_AVC_ENHANCED_MULTIVIEW_DEPTH_HIGH) {
+-        return configureH264(outputProfile, outputH264Level);
++        return configureH264(outputProfile, outputLevel);
++    }
++    if (isHEVCProfile(outputProfile)) {
++        return configureHEVC(outputProfile, outputLevel);
++    }
++
++    return true;
++}
++
++bool V4L2Encoder::configureHEVC(C2Config::profile_t outputProfile,
++                                std::optional<const uint8_t> outputHEVCLevel) {
++    mIsHEVC = true;
++
++    // As for H.264, the parameter sets go before each IRAP picture: through the device if it
++    // can, otherwise we inject the cached ones ourselves.
++    if (mDevice->isCtrlExposed(V4L2_CID_MPEG_VIDEO_PREPEND_SPSPPS_TO_IDR)) {
++        if (!mDevice->setExtCtrls(V4L2_CTRL_CLASS_MPEG,
++                                  {V4L2ExtCtrl(V4L2_CID_MPEG_VIDEO_PREPEND_SPSPPS_TO_IDR, 1)})) {
++            ALOGE("Failed to configure device to prepend parameter sets to each IDR");
++            return false;
++        }
++        mInjectParamsBeforeIDR = false;
++        ALOGV("Device supports prepending parameter sets to each IDR");
++    } else {
++        mInjectParamsBeforeIDR = true;
++        ALOGV("Device doesn't support prepending parameter sets to IDR, injecting manually.");
++    }
++
++    const int32_t profile = V4L2Device::c2ProfileToV4L2HEVCProfile(outputProfile);
++    if (profile < 0) {
++        ALOGE("Trying to set invalid HEVC profile");
++        return false;
++    }
++    if (!mDevice->setExtCtrls(V4L2_CTRL_CLASS_MPEG,
++                              {V4L2ExtCtrl(V4L2_CID_MPEG_VIDEO_HEVC_PROFILE, profile)})) {
++        ALOGE("Failed setting HEVC profile to %u", outputProfile);
++        return false;
++    }
++
++    // Optional controls, set one by one so that a control the device lacks doesn't take the
++    // others with it.
++    const int32_t level =
++            static_cast<int32_t>(outputHEVCLevel.value_or(V4L2_MPEG_VIDEO_HEVC_LEVEL_4_1));
++    const std::pair<uint32_t, int32_t> optionalCtrls[] = {
++            // No B-frames, for lowest decoding latency.
++            {V4L2_CID_MPEG_VIDEO_B_FRAMES, 0},
++            // Quantization parameter maximum value (for variable bitrate control).
++            {V4L2_CID_MPEG_VIDEO_HEVC_MAX_QP, 51},
++            {V4L2_CID_MPEG_VIDEO_HEVC_LEVEL, level},
++            // Ask not to put the parameter sets into separate bitstream buffers.
++            {V4L2_CID_MPEG_VIDEO_HEADER_MODE, V4L2_MPEG_VIDEO_HEADER_MODE_JOINED_WITH_1ST_FRAME},
++    };
++    for (const auto& [id, value] : optionalCtrls) {
++        if (!mDevice->setExtCtrls(V4L2_CTRL_CLASS_MPEG, {V4L2ExtCtrl(id, value)})) {
++            ALOGW("Failed setting optional HEVC control 0x%x to %d", id, value);
++        }
+     }
+ 
+     return true;
+@@ -950,7 +1006,12 @@ bool V4L2Encoder::dequeueOutputBuffer() {
+             C2ConstLinearBlock constBlock = bitstreamBuffer->dmabuf->share(
+                     bitstreamBuffer->dmabuf->offset(), encodedDataSize, C2Fence());
+             C2ReadView readView = constBlock.map().get();
+-            extractSPSPPS(readView.data(), encodedDataSize, &mCachedSPS, &mCachedPPS);
++            if (mIsHEVC) {
++                extractParamSetsHEVC(readView.data(), encodedDataSize, &mCachedVPS, &mCachedSPS,
++                                     &mCachedPPS);
++            } else {
++                extractSPSPPS(readView.data(), encodedDataSize, &mCachedSPS, &mCachedPPS);
++            }
+             mOutputBufferDoneCb.Run(encodedDataSize, timestamp.InMicroseconds(),
+                                     buffer->isKeyframe(), std::move(bitstreamBuffer));
+         } else {
+@@ -972,8 +1033,12 @@ bool V4L2Encoder::dequeueOutputBuffer() {
+             C2WriteView writeView = prependedBitstreamBuffer->dmabuf->map().get();
+ 
+             // If there is not enough space in the output buffer just return the original buffer.
+-            size_t newSize = prependSPSPPSToIDR(readView.data(), encodedDataSize, writeView.data(),
+-                                                writeView.size(), &mCachedSPS, &mCachedPPS);
++            size_t newSize =
++                    mIsHEVC ? prependParamSetsToIRAPHEVC(readView.data(), encodedDataSize,
++                                                         writeView.data(), writeView.size(),
++                                                         &mCachedVPS, &mCachedSPS, &mCachedPPS)
++                            : prependSPSPPSToIDR(readView.data(), encodedDataSize, writeView.data(),
++                                                 writeView.size(), &mCachedSPS, &mCachedPPS);
+             if (newSize > 0) {
+                 mOutputBufferDoneCb.Run(newSize, timestamp.InMicroseconds(), buffer->isKeyframe(),
+                                         std::move(prependedBitstreamBuffer));
+diff --git a/v4l2/include/v4l2_codec2/v4l2/V4L2ComponentCommon.h b/v4l2/include/v4l2_codec2/v4l2/V4L2ComponentCommon.h
+index 1e7996c..20405d1 100644
+--- a/v4l2/include/v4l2_codec2/v4l2/V4L2ComponentCommon.h
++++ b/v4l2/include/v4l2_codec2/v4l2/V4L2ComponentCommon.h
+@@ -16,6 +16,7 @@ struct V4L2ComponentName {
+     static const std::string kH264Encoder;
+     static const std::string kVP8Encoder;
+     static const std::string kVP9Encoder;
++    static const std::string kHEVCEncoder;
+ 
+     static const std::string kH264Decoder;
+     static const std::string kVP8Decoder;
+diff --git a/v4l2/include/v4l2_codec2/v4l2/V4L2Device.h b/v4l2/include/v4l2_codec2/v4l2/V4L2Device.h
+index b243d47..ec93902 100644
+--- a/v4l2/include/v4l2_codec2/v4l2/V4L2Device.h
++++ b/v4l2/include/v4l2_codec2/v4l2/V4L2Device.h
+@@ -364,6 +364,8 @@ public:
+     // Convert required H264 profile and level to V4L2 enums.
+     static int32_t c2ProfileToV4L2H264Profile(C2Config::profile_t profile);
+     static int32_t h264LevelIdcToV4L2H264Level(uint8_t levelIdc);
++    // Convert a C2 HEVC profile to the V4L2 enum, -1 if V4L2 has none for it.
++    static int32_t c2ProfileToV4L2HEVCProfile(C2Config::profile_t profile);
+     static v4l2_mpeg_video_bitrate_mode c2BitrateModeToV4L2BitrateMode(
+             C2Config::bitrate_mode_t bitrateMode);
+ 
+diff --git a/v4l2/include/v4l2_codec2/v4l2/V4L2Encoder.h b/v4l2/include/v4l2_codec2/v4l2/V4L2Encoder.h
+index d1eb656..99d6221 100644
+--- a/v4l2/include/v4l2_codec2/v4l2/V4L2Encoder.h
++++ b/v4l2/include/v4l2_codec2/v4l2/V4L2Encoder.h
+@@ -95,12 +95,16 @@ private:
+     bool configureInputFormat(VideoPixelFormat inputFormat, uint32_t stride);
+     // Configure output format on the V4L2 device.
+     bool configureOutputFormat(C2Config::profile_t outputProfile);
+-    // Configure required and optional controls on the V4L2 device.
++    // Configure required and optional controls on the V4L2 device. |outputLevel| is a V4L2 level
++    // control value of the profile's codec.
+     bool configureDevice(C2Config::profile_t outputProfile,
+-                         std::optional<const uint8_t> outputH264Level);
++                         std::optional<const uint8_t> outputLevel);
+     // Configure required and optional H.264 controls on the V4L2 device.
+     bool configureH264(C2Config::profile_t outputProfile,
+                        std::optional<const uint8_t> outputH264Level);
++    // Configure required and optional HEVC controls on the V4L2 device.
++    bool configureHEVC(C2Config::profile_t outputProfile,
++                       std::optional<const uint8_t> outputHEVCLevel);
+     // Configure the specified bitrate mode on the V4L2 device.
+     bool configureBitrateMode(C2Config::bitrate_mode_t bitrateMode);
+ 
+@@ -160,9 +164,13 @@ private:
+     // Key frame counter, a key frame will be requested each time it reaches zero.
+     uint32_t mKeyFrameCounter = 0;
+ 
+-    // Whether we need to manually cache and prepend SPS and PPS to IDR frames.
++    // Whether we need to manually cache and prepend SPS and PPS (and the VPS for HEVC) to IDR
++    // frames (all IRAP pictures for HEVC).
+     bool mInjectParamsBeforeIDR = false;
+-    // The latest cached SPS and PPS (without H.264 start code).
++    // Whether the output is HEVC; otherwise the parameter sets are H.264 ones.
++    bool mIsHEVC = false;
++    // The latest cached VPS (HEVC only), SPS and PPS (without start code).
++    std::vector<uint8_t> mCachedVPS;
+     std::vector<uint8_t> mCachedSPS;
+     std::vector<uint8_t> mCachedPPS;
+ 

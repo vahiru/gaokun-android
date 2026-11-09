@@ -1,0 +1,218 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: iris: route the encoder ARP through the CP non-pixel
+ context on SC8280XP
+
+The gen1 encoder firmware reaches its ARP (auto-register programming) PERSIST
+buffer through the content-protection non-pixel stream SID 0x2a04, not the
+main iris stream. On SC8280XP that stream translates through a dedicated
+context bank (CBAR VMID 0xb) that arm-smmu-qcom sets up; left on the main iris
+domain the first encode resets the SoC.
+
+When the CP non-pixel context is available (qcom_iommu_cp_nonpixel_available(),
+true on SC8280XP), allocate the encoder BUF_ARP contiguous, hand its pages to
+VMID 0xb (CP_NON_PIXEL) alone with qcom_scm_assign_mem() (a shared HLOS+0xb
+grant is refused by the hypervisor), map it in the CP non-pixel bank at a fixed
+IOVA in the content-protection window, and give the firmware that IOVA. On
+teardown the mapping is removed, the pages are returned to HLOS, and the
+original iris DMA address is restored so the buffer frees normally. If the
+pages cannot be returned to HLOS they are leaked rather than handed back to the
+allocator while still owned by VMID 0xb. Every other buffer, and every other
+platform, is unchanged.
+
+The CP non-pixel helpers live in arm-smmu-qcom, so iris must not be built in
+while arm-smmu is a module.
+
+One encoder session at a time: the ARP sits at a fixed IOVA. A window allocator
+over 0x01000000..0x25800000 (needed for two concurrent encoders) can come
+later; one other in-window IOVA (0x10000000) was also verified to work.
+
+Origin: local
+Upstream-Status: Inappropriate [depends on the downstream arm-smmu-qcom CP non-pixel helpers]
+---
+diff --git a/drivers/media/platform/qcom/iris/Kconfig b/drivers/media/platform/qcom/iris/Kconfig
+index af78a1775..dbb8afeae 100644
+--- a/drivers/media/platform/qcom/iris/Kconfig
++++ b/drivers/media/platform/qcom/iris/Kconfig
+@@ -2,6 +2,7 @@ config VIDEO_QCOM_IRIS
+         tristate "Qualcomm iris V4L2 decoder driver"
+         depends on VIDEO_DEV
+         depends on ARCH_QCOM || COMPILE_TEST
++        depends on ARM_SMMU || !ARM_SMMU
+         select V4L2_MEM2MEM_DEV
+         select QCOM_MDT_LOADER
+         select QCOM_SCM
+diff --git a/drivers/media/platform/qcom/iris/iris_buffer.c b/drivers/media/platform/qcom/iris/iris_buffer.c
+index 246ad0abb..563b37be6 100644
+--- a/drivers/media/platform/qcom/iris/iris_buffer.c
++++ b/drivers/media/platform/qcom/iris/iris_buffer.c
+@@ -3,6 +3,10 @@
+  * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+  */
+ 
++#include <dt-bindings/firmware/qcom,scm.h>
++#include <linux/firmware/qcom/qcom_scm.h>
++#include <linux/iommu.h>
++#include <linux/qcom_iommu_cp_nonpixel.h>
+ #include <media/v4l2-event.h>
+ #include <media/v4l2-mem2mem.h>
+ 
+@@ -26,6 +30,80 @@
+ #define META_SCANLINE_ALIGNED 16
+ #define NUM_MBS_4K (DIV_ROUND_UP(MAX_WIDTH, 16) * DIV_ROUND_UP(MAX_HEIGHT, 16))
+ 
++/*
++ * SC8280XP: the encoder ARP (BUF_ARP) must be reached by the firmware through
++ * the content-protection non-pixel context (SID 0x2a04, VMID 0xb), not the
++ * main iris stream. Assign its pages exclusively to that VMID and map it in
++ * the CP non-pixel bank at a fixed IOVA in the content-protection window; the
++ * firmware is given that IOVA. One encoder session at a time (fixed IOVA).
++ */
++#define IRIS_ENC_ARP_CP_IOVA	0x01000000
++#define IRIS_VMID_CP_NON_PIXEL	0xb
++
++static int iris_enc_arp_to_cp_nonpixel(struct iris_core *core, struct iris_buffer *buffer)
++{
++	struct iommu_domain *domain = iommu_get_domain_for_dev(core->dev);
++	struct qcom_scm_vmperm to_cp = { IRIS_VMID_CP_NON_PIXEL, QCOM_SCM_PERM_RW };
++	struct qcom_scm_vmperm to_hlos = { QCOM_SCM_VMID_HLOS, QCOM_SCM_PERM_RWX };
++	size_t size = PAGE_ALIGN(buffer->buffer_size);
++	u64 src = BIT(QCOM_SCM_VMID_HLOS);
++	phys_addr_t phys;
++	int ret;
++
++	if (!domain)
++		return -ENODEV;
++	phys = iommu_iova_to_phys(domain, buffer->device_addr);
++	if (!phys)
++		return -EINVAL;
++
++	/* Hand the pages to CP_NON_PIXEL alone (a shared HLOS+0xb grant is refused). */
++	ret = qcom_scm_assign_mem(phys, size, &src, &to_cp, 1);
++	if (ret)
++		return ret;
++
++	ret = qcom_iommu_cp_nonpixel_map(IRIS_ENC_ARP_CP_IOVA, phys, size);
++	if (ret) {
++		src = BIT(IRIS_VMID_CP_NON_PIXEL);
++		if (qcom_scm_assign_mem(phys, size, &src, &to_hlos, 1)) {
++			/*
++			 * The pages are stuck owned by VMID 0xb; -EOWNERDEAD
++			 * tells the caller NOT to free them (leak instead).
++			 */
++			dev_err(core->dev, "enc ARP: stuck in CP_NON_PIXEL, leaking\n");
++			return -EOWNERDEAD;
++		}
++		return ret;
++	}
++
++	buffer->cp_phys = phys;
++	buffer->cp_dma = buffer->device_addr;
++	buffer->device_addr = IRIS_ENC_ARP_CP_IOVA;
++
++	return 0;
++}
++
++/*
++ * Undo the CP non-pixel routing. 0 on success; -EOWNERDEAD if the pages could
++ * not be returned to HLOS, in which case they are still owned by VMID 0xb and
++ * the caller must NOT free them (leak instead of handing firmware-owned memory
++ * back to the allocator).
++ */
++static int iris_enc_arp_from_cp_nonpixel(struct iris_core *core, struct iris_buffer *buffer)
++{
++	struct qcom_scm_vmperm to_hlos = { QCOM_SCM_VMID_HLOS, QCOM_SCM_PERM_RWX };
++	size_t size = PAGE_ALIGN(buffer->buffer_size);
++	u64 src = BIT(IRIS_VMID_CP_NON_PIXEL);
++
++	qcom_iommu_cp_nonpixel_unmap(IRIS_ENC_ARP_CP_IOVA, size);
++	if (qcom_scm_assign_mem(buffer->cp_phys, size, &src, &to_hlos, 1)) {
++		dev_err(core->dev, "enc ARP: stuck in CP_NON_PIXEL, leaking\n");
++		return -EOWNERDEAD;
++	}
++	buffer->device_addr = buffer->cp_dma;	/* restore for dma_free */
++	buffer->cp_dma = 0;
++	return 0;
++}
++
+ /*
+  * NV12:
+  * YUV 4:2:0 image with a plane of 8 bit Y samples followed
+@@ -531,6 +609,8 @@ static int iris_create_internal_buffer(struct iris_inst *inst,
+ 	struct iris_buffers *buffers = &inst->buffers[buffer_type];
+ 	struct iris_core *core = inst->core;
+ 	struct iris_buffer *buffer;
++	bool cp_arp;
++	int ret;
+ 
+ 	if (!buffers->size)
+ 		return 0;
+@@ -539,11 +619,17 @@ static int iris_create_internal_buffer(struct iris_inst *inst,
+ 	if (!buffer)
+ 		return -ENOMEM;
+ 
++	/* The encoder ARP goes through the CP non-pixel bank where available. */
++	cp_arp = inst->domain == ENCODER && buffer_type == BUF_ARP &&
++		 qcom_iommu_cp_nonpixel_available();
++
+ 	INIT_LIST_HEAD(&buffer->list);
+ 	buffer->type = buffer_type;
+ 	buffer->index = index;
+ 	buffer->buffer_size = buffers->size;
+ 	buffer->dma_attrs = DMA_ATTR_WRITE_COMBINE | DMA_ATTR_NO_KERNEL_MAPPING;
++	if (cp_arp)
++		buffer->dma_attrs |= DMA_ATTR_FORCE_CONTIGUOUS;
+ 
+ 	buffer->kvaddr = dma_alloc_attrs(core->dev, buffer->buffer_size,
+ 					 &buffer->device_addr, GFP_KERNEL, buffer->dma_attrs);
+@@ -552,6 +638,19 @@ static int iris_create_internal_buffer(struct iris_inst *inst,
+ 		return -ENOMEM;
+ 	}
+ 
++	if (cp_arp) {
++		ret = iris_enc_arp_to_cp_nonpixel(core, buffer);
++		if (ret) {
++			/* -EOWNERDEAD: pages stuck owned by VMID 0xb, leak them. */
++			if (ret != -EOWNERDEAD)
++				dma_free_attrs(core->dev, buffer->buffer_size,
++					       buffer->kvaddr, buffer->device_addr,
++					       buffer->dma_attrs);
++			kfree(buffer);
++			return ret;
++		}
++	}
++
+ 	list_add_tail(&buffer->list, &buffers->list);
+ 
+ 	return 0;
+@@ -685,6 +784,15 @@ int iris_destroy_internal_buffer(struct iris_inst *inst, struct iris_buffer *buf
+ 	struct iris_core *core = inst->core;
+ 
+ 	list_del(&buffer->list);
++	if (buffer->cp_dma && iris_enc_arp_from_cp_nonpixel(core, buffer)) {
++		/*
++		 * The ARP pages are stuck owned by VMID 0xb; leak them (and only
++		 * free the bookkeeping struct) rather than hand firmware-owned
++		 * memory back to the allocator. Return 0 so teardown continues.
++		 */
++		kfree(buffer);
++		return 0;
++	}
+ 	dma_free_attrs(core->dev, buffer->buffer_size, buffer->kvaddr,
+ 		       buffer->device_addr, buffer->dma_attrs);
+ 	kfree(buffer);
+diff --git a/drivers/media/platform/qcom/iris/iris_buffer.h b/drivers/media/platform/qcom/iris/iris_buffer.h
+index 75bb76776..cbc7678ae 100644
+--- a/drivers/media/platform/qcom/iris/iris_buffer.h
++++ b/drivers/media/platform/qcom/iris/iris_buffer.h
+@@ -99,6 +99,11 @@ struct iris_buffer {
+ 	u32				flags; /* V4L2_BUF_FLAG_* */
+ 	u64				timestamp;
+ 	enum iris_buffer_attributes	attr;
++	/* Encoder ARP routed through the CP non-pixel bank (SC8280XP): the main
++	 * iris DMA address to restore on free, and the phys assigned to VMID 0xb.
++	 */
++	dma_addr_t			cp_dma;
++	phys_addr_t			cp_phys;
+ };
+ 
+ struct iris_buffers {

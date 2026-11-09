@@ -1,0 +1,83 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: iris: send the gen1 encoder timestamp in microseconds
+
+The encoder firmware's rate control reads the EMPTY_BUFFER timestamp as
+microseconds, but iris sent the vb2 timestamp in nanoseconds. That made the
+firmware compute a frame rate ~1000x too low, so the per-frame bit budget
+(bitrate / fps) was ~1000x too high and the output massively overshot the
+target bitrate.
+
+Convert nanoseconds to microseconds on the encoder input (div_u64, like venus
+helpers.c) and back to nanoseconds on the response, so v4l2 still sees ns. The
+decoder keeps the nanosecond pass-through unchanged.
+
+Origin: local
+Upstream-Status: Pending
+---
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c b/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c
+index 458dcf2ff..996f68440 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c
+@@ -3,6 +3,9 @@
+  * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+  */
+ 
++#include <linux/math64.h>
++#include <linux/time64.h>
++
+ #include "iris_hfi_gen1.h"
+ #include "iris_hfi_gen1_defines.h"
+ #include "iris_instance.h"
+@@ -327,12 +330,23 @@ static int iris_hfi_gen1_queue_input_buffer(struct iris_inst *inst, struct iris_
+ 		return iris_hfi_queue_cmd_write(inst->core, &com_ip_pkt,
+ 						com_ip_pkt.shdr.hdr.size);
+ 	} else {
++		/*
++		 * The encoder firmware's rate control reads the timestamp as
++		 * microseconds, but v4l2 timestamps are nanoseconds; sending ns
++		 * makes the computed frame rate ~1000x too low, so the per-frame
++		 * bit budget (bitrate / fps) is ~1000x too high and the output
++		 * overshoots the target bitrate. Send us like venus (helpers.c
++		 * do_div NSEC_PER_USEC); the response path converts back. The
++		 * decoder above keeps the ns pass-through.
++		 */
++		u64 ts_us = div_u64(buf->timestamp, NSEC_PER_USEC);
++
+ 		uncom_ip_pkt.shdr.hdr.size =
+ 			sizeof(struct hfi_session_empty_buffer_uncompressed_pkt);
+ 		uncom_ip_pkt.shdr.hdr.pkt_type = HFI_CMD_SESSION_EMPTY_BUFFER;
+ 		uncom_ip_pkt.shdr.session_id = inst->session_id;
+-		uncom_ip_pkt.time_stamp_hi = upper_32_bits(buf->timestamp);
+-		uncom_ip_pkt.time_stamp_lo = lower_32_bits(buf->timestamp);
++		uncom_ip_pkt.time_stamp_hi = upper_32_bits(ts_us);
++		uncom_ip_pkt.time_stamp_lo = lower_32_bits(ts_us);
+ 		uncom_ip_pkt.view_id = 0;
+ 		uncom_ip_pkt.flags = buf->flags;
+ 		uncom_ip_pkt.mark_target = 0;
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen1_response.c b/drivers/media/platform/qcom/iris/iris_hfi_gen1_response.c
+index 9d5e9fe5b..d41dd8bea 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen1_response.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen1_response.c
+@@ -4,6 +4,7 @@
+  */
+ 
+ #include <linux/bitfield.h>
++#include <linux/time64.h>
+ #include <media/v4l2-mem2mem.h>
+ 
+ #include "iris_hfi_gen1.h"
+@@ -528,7 +529,13 @@ static void iris_hfi_gen1_session_ftb_done(struct iris_inst *inst, void *packet)
+ 			}
+ 		}
+ 	}
+-	buf->timestamp = timestamp_us;
++	/*
++	 * The encoder path sent the input timestamp in us (firmware rate
++	 * control) and the firmware echoes us, so convert back to the ns that
++	 * v4l2 expects. The decoder sent ns and gets ns back unchanged.
++	 */
++	buf->timestamp = inst->domain == ENCODER ?
++			 timestamp_us * NSEC_PER_USEC : timestamp_us;
+ 
+ 	switch (pic_type) {
+ 	case HFI_GEN1_PICTURE_IDR:

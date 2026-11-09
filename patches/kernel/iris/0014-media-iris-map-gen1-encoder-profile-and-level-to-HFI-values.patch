@@ -1,0 +1,146 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: iris: map gen1 encoder profile and level to HFI values
+
+iris_set_profile_level_gen1() passed the raw V4L2 profile/level enums straight
+to the firmware, which wants HFI bitmask values. For H.264 the level was wrong
+(V4L2 level 4.0 = 11 read as a bitmask) and so was the Baseline profile (0,
+which the gen1 handler replaces with High); Main and High happen to share
+their values. For HEVC it was worse: V4L2 HEVC Main = 0, so the gen1 handler
+fell back to HFI 0x4 (Main Still Picture), which the firmware cannot run as a
+multi-frame stream, and 1080p HEVC faulted.
+
+Map profile and level to HFI values like venus (helpers.c). The level is
+derived from the resolution and frame rate (H.264 MB/s + MB/frame tables, HEVC
+luma sample size + rate tables) and clamped up to any higher requested level;
+HEVC tier stays Main.
+
+Also pass sizeof(struct hfi_profile_level) as the payload size:
+hfi_gen1_set_property() sizes the packet from it, and the
+PROFILE_LEVEL_CURRENT packer writes both words of the struct, so sizeof(u32)
+under-allocated the packet by 4 bytes (heap out-of-bounds write).
+
+Origin: local
+Upstream-Status: Pending
+---
+diff --git a/drivers/media/platform/qcom/iris/iris_ctrls.c b/drivers/media/platform/qcom/iris/iris_ctrls.c
+index 391e1fc5f..d33b82c4b 100644
+--- a/drivers/media/platform/qcom/iris/iris_ctrls.c
++++ b/drivers/media/platform/qcom/iris/iris_ctrls.c
+@@ -581,6 +581,93 @@ int iris_set_level(struct iris_inst *inst, enum platform_inst_fw_cap_type cap_id
+ 					     &hfi_value, sizeof(u32));
+ }
+ 
++/*
++ * The gen1 firmware wants the profile and level as HFI bitmask values, not the
++ * raw V4L2 enums. Map them like venus (helpers.c). For HEVC this matters even
++ * for the default: V4L2 HEVC Main = 0, so passing the raw enum made the gen1
++ * handler fall back to HFI 0x4 (Main Still Picture), which the firmware cannot
++ * run as a multi-frame stream (1080p faulted). The level is derived from the
++ * resolution and frame rate and clamped up to the requested level; HEVC tier
++ * stays Main (venus sends the level alone too).
++ */
++static u32 iris_h264_profile_hfi(u32 v4l2)
++{
++	switch (v4l2) {
++	case V4L2_MPEG_VIDEO_H264_PROFILE_BASELINE:		return 0x1;
++	case V4L2_MPEG_VIDEO_H264_PROFILE_MAIN:			return 0x2;
++	case V4L2_MPEG_VIDEO_H264_PROFILE_HIGH:			return 0x4;
++	case V4L2_MPEG_VIDEO_H264_PROFILE_STEREO_HIGH:		return 0x8;
++	case V4L2_MPEG_VIDEO_H264_PROFILE_MULTIVIEW_HIGH:	return 0x10;
++	case V4L2_MPEG_VIDEO_H264_PROFILE_CONSTRAINED_BASELINE:	return 0x20;
++	case V4L2_MPEG_VIDEO_H264_PROFILE_CONSTRAINED_HIGH:	return 0x40;
++	default:						return 0x4;
++	}
++}
++
++static u32 iris_h264_level_hfi(struct iris_inst *inst, u32 v4l2)
++{
++	static const struct { u32 mbps, mbpf; } lim[] = {
++		{ 1485, 99 }, { 1485, 99 }, { 3000, 396 }, { 6000, 396 },
++		{ 11880, 396 }, { 11880, 396 }, { 19800, 792 }, { 20250, 1620 },
++		{ 40500, 1620 }, { 108000, 3600 }, { 216000, 5120 }, { 245760, 8192 },
++		{ 245760, 8192 }, { 522240, 8704 }, { 589824, 22080 }, { 983040, 36864 },
++		{ 2073600, 36864 },
++	};
++	u32 w = inst->fmt_dst->fmt.pix_mp.width, h = inst->fmt_dst->fmt.pix_mp.height;
++	u32 mbpf = DIV_ROUND_UP(w, 16) * DIV_ROUND_UP(h, 16);
++	u32 fps = inst->frame_rate ? inst->frame_rate : 30;
++	u32 need = 0;
++
++	while (need + 1 < ARRAY_SIZE(lim) &&
++	       (lim[need].mbpf < mbpf || lim[need].mbps < mbpf * fps))
++		need++;
++	if (v4l2 > need && v4l2 < ARRAY_SIZE(lim))
++		need = v4l2;
++	return 1U << need;
++}
++
++static u32 iris_hevc_profile_hfi(u32 v4l2)
++{
++	switch (v4l2) {
++	case V4L2_MPEG_VIDEO_HEVC_PROFILE_MAIN:			return 0x1;
++	case V4L2_MPEG_VIDEO_HEVC_PROFILE_MAIN_STILL_PICTURE:	return 0x4;
++	case V4L2_MPEG_VIDEO_HEVC_PROFILE_MAIN_10:		return 0x2;
++	default:						return 0x1;
++	}
++}
++
++static u32 iris_hevc_level_hfi(struct iris_inst *inst, u32 v4l2)
++{
++	/* Main-tier max luma picture size (samples) and sample rate (samples/s) */
++	static const struct { u32 ps; u64 sr; } lim[] = {
++		{ 36864, 552960ULL },		/* L1   */
++		{ 122880, 3686400ULL },		/* L2   */
++		{ 245760, 7372800ULL },		/* L2.1 */
++		{ 552960, 16588800ULL },	/* L3   */
++		{ 983040, 33177600ULL },	/* L3.1 */
++		{ 2228224, 66846720ULL },	/* L4   */
++		{ 2228224, 133693440ULL },	/* L4.1 */
++		{ 8912896, 267386880ULL },	/* L5   */
++		{ 8912896, 534773760ULL },	/* L5.1 */
++		{ 8912896, 1069547520ULL },	/* L5.2 */
++		{ 35651584, 1069547520ULL },	/* L6   */
++		{ 35651584, 2139095040ULL },	/* L6.1 */
++		{ 35651584, 4278190080ULL },	/* L6.2 */
++	};
++	u32 w = inst->fmt_dst->fmt.pix_mp.width, h = inst->fmt_dst->fmt.pix_mp.height;
++	u32 ps = w * h;
++	u32 fps = inst->frame_rate ? inst->frame_rate : 30;
++	u64 sr = (u64)ps * fps;
++	u32 need = 0;
++
++	while (need + 1 < ARRAY_SIZE(lim) &&
++	       (lim[need].ps < ps || lim[need].sr < sr))
++		need++;
++	if (v4l2 > need && v4l2 < ARRAY_SIZE(lim))
++		need = v4l2;
++	return 1U << need;
++}
++
+ int iris_set_profile_level_gen1(struct iris_inst *inst, enum platform_inst_fw_cap_type cap_id)
+ {
+ 	const struct iris_hfi_session_ops *hfi_ops = inst->hfi_session_ops;
+@@ -588,18 +675,18 @@ int iris_set_profile_level_gen1(struct iris_inst *inst, enum platform_inst_fw_ca
+ 	struct hfi_profile_level pl;
+ 
+ 	if (inst->codec == V4L2_PIX_FMT_H264) {
+-		pl.profile = inst->fw_caps[PROFILE_H264].value;
+-		pl.level = inst->fw_caps[LEVEL_H264].value;
++		pl.profile = iris_h264_profile_hfi(inst->fw_caps[PROFILE_H264].value);
++		pl.level = iris_h264_level_hfi(inst, inst->fw_caps[LEVEL_H264].value);
+ 	} else {
+-		pl.profile = inst->fw_caps[PROFILE_HEVC].value;
+-		pl.level = inst->fw_caps[LEVEL_HEVC].value;
++		pl.profile = iris_hevc_profile_hfi(inst->fw_caps[PROFILE_HEVC].value);
++		pl.level = iris_hevc_level_hfi(inst, inst->fw_caps[LEVEL_HEVC].value);
+ 	}
+ 
+ 	return hfi_ops->session_set_property(inst, hfi_id,
+ 					     HFI_HOST_FLAGS_NONE,
+ 					     iris_get_port_info(inst, cap_id),
+ 					     HFI_PAYLOAD_U32_ENUM,
+-					     &pl, sizeof(u32));
++					     &pl, sizeof(pl));
+ }
+ 
+ int iris_set_header_mode_gen1(struct iris_inst *inst, enum platform_inst_fw_cap_type cap_id)

@@ -19,7 +19,7 @@ Modifications to upstream source trees (Linux kernel, AOSP/crDroid repositories,
 ### Organization
 
 - **Hierarchy by target tree and subsystem**:
-  - [`patches/kernel/<subsystem>/`](patches/README.md) (`core`, `pcie-pm`, `wifi`, `ec-usb`, `drm`, `iris`, `camera`, `audio`, `input`, `dts`, `fingerprint`): Kernel patches (`KPATCHES`).
+  - [`patches/kernel/<subsystem>/`](patches/README.md) (`core`, `iommu`, `pcie-pm`, `wifi`, `ec-usb`, `drm`, `iris`, `camera`, `audio`, `input`, `dts`, `fingerprint`): Kernel patches (`KPATCHES`).
   - [`patches/android/<project>/`](patches/README.md) (`hardware-interfaces`, `drm-hwcomposer`, `v4l2-codec2`, `tinyalsa`, `frameworks-base`): Patches applied to AOSP/crDroid subtrees.
   - [`patches/mesa/`](patches/mesa/), [`patches/libcamera/`](patches/libcamera/), [`patches/resukisu/`](patches/resukisu/): Patches for their respective upstream trees.
 - **Local `0001..NNNN` numbering per leaf directory**: Each leaf directory numbers its patches independently from `0001` (`NNNN-<topic>.patch`). Do not use a global cross-directory number sequence.

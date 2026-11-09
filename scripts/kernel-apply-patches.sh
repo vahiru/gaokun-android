@@ -49,6 +49,11 @@ KPATCHES=(
     kernel/core/0008-kernel-report-a-set-release-to-android-apps.patch
     kernel/core/0009-misc-fastrpc-fix-context-leak-and-hang-on-signal-interrupted-invoke.patch
 
+    # ─── 1b. kernel/iommu：arm-smmu-qcom（SC8280XP的CP非像素上下文，供iris硬件编码）───
+    # 只改arm-smmu-qcom.c并新增include/linux/qcom_iommu_cp_nonpixel.h，与其它子系统正交。
+    # kernel/iris/0013依赖这里先建立CP非像素bank；iris映射ARP之前不映射任何东西。
+    kernel/iommu/0001-iommu-arm-smmu-qcom-add-the-SC8280XP-CP-non-pixel-context.patch
+
     # ─── 2. kernel/pcie-pm：PCIe、NVMe、cpuidle、系统休眠与唤醒基础设施 ───
     # 深度待机与 PCIe / NVMe 恢复处理详见 docs/dev/deep-sleep.md。
     # 0003 依赖 0001（L2 下保留 PCIe-MEM active-only 投票）；0011–0012 与 kernel/dts/0021、kernel/wifi/0027 配套。
@@ -141,7 +146,7 @@ KPATCHES=(
     kernel/drm/0018-drm-msm-dpu-add-the-DSPP-3D-LUT-of-sc8280xp.patch
     kernel/drm/0019-drm-msm-dpu-load-the-gaokun3-factory-calibration-into-the-3D-LUT.patch
 
-    # ─── 6. kernel/iris：qcom-iris 视频解码驱动 ───
+    # ─── 6. kernel/iris：qcom-iris视频编解码驱动 ───
     # 配套 DT 见 kernel/dts/0009–0010；需 CONFIG_VIDEO_QCOM_IRIS=y、CONFIG_VIDEO_QCOM_VENUS 不设。
     # 0009 叠在 0006 之上；0012 需与 patches/mesa/0002 及 crdroid-tree-fixes.py [29][30] 一起生效。
     kernel/iris/0001-media-iris-irq-thread-skips-hw-access-after-power-off.patch
@@ -156,6 +161,17 @@ KPATCHES=(
     kernel/iris/0010-media-iris-gen1-recover-from-firmware-watchdog.patch
     kernel/iris/0011-media-iris-keep-decoder-crop-across-capture-s_fmt.patch
     kernel/iris/0012-media-iris-gen1-decode-10-bit-to-p010.patch
+    # 0013把编码器ARP走kernel/iommu/0001建立的CP非像素bank（需先打iommu/0001；没有该上下文的平台不受影响）。
+    kernel/iris/0013-media-iris-route-the-encoder-ARP-through-the-CP-non-pixel-context.patch
+    # 0014/0015修gen1编码器的档次/级别HFI值与时间戳单位，与CP非像素工作无关，改动文件互不重叠。
+    kernel/iris/0014-media-iris-map-gen1-encoder-profile-and-level-to-HFI-values.patch
+    kernel/iris/0015-media-iris-send-the-gen1-encoder-timestamp-in-microseconds.patch
+    # 0016回移主线的强制关键帧控制（v4l2_codec2设不上FORCE_KEY_FRAME就判编码失败）；
+    # 0017让gen1编码器按原始尺寸读输入、按可见尺寸出码流（宽度不是128的倍数时不再带出填充）；
+    # 0018清零gen1的EMPTY_BUFFER包。三者都叠在0013–0015之上。
+    kernel/iris/0016-media-iris-add-request-key-frame-support-for-encoder.patch
+    kernel/iris/0017-media-iris-send-the-raw-and-visible-frame-sizes-to-the-gen1-encoder.patch
+    kernel/iris/0018-media-iris-zero-the-gen1-empty-buffer-packets.patch
 
     # ─── 7. kernel/camera：camcc 时钟/GDSC、camss 与前后摄传感器驱动（ov13b10 / hi846）───
     # 0003 与 kernel/dts/0005 配套，需 CONFIG_VIDEO_OV13B10=y 与 CONFIG_VIDEO_DW9714=y；

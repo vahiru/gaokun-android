@@ -1,0 +1,38 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: iris: zero the gen1 empty-buffer packets
+
+iris_hfi_gen1_queue_input_buffer() builds the compressed (decoder) and
+uncompressed (encoder) EMPTY_BUFFER packets on the stack and fills every
+field except extradata_buffer and data. On a kernel built without
+CONFIG_INIT_STACK_ALL_ZERO the firmware receives stack contents there,
+and extradata_buffer is a device address in HFI: a stale non-zero value
+may make the firmware look for an extradata buffer the driver never
+allocated. The FILL_BUFFER packet next to it already sets both fields to
+0 explicitly.
+
+Zero-initialise both packets, as the driver never attaches extradata to
+an empty buffer. Kernels built with CONFIG_INIT_STACK_ALL_ZERO already
+send zeros, so for them nothing changes.
+
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c b/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c
+index b43d86c57..49911c91a 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c
+@@ -310,8 +310,9 @@ static int iris_hfi_gen1_session_continue(struct iris_inst *inst, u32 plane)
+ 
+ static int iris_hfi_gen1_queue_input_buffer(struct iris_inst *inst, struct iris_buffer *buf)
+ {
+-	struct hfi_session_empty_buffer_compressed_pkt com_ip_pkt;
+-	struct hfi_session_empty_buffer_uncompressed_pkt uncom_ip_pkt;
++	/* extradata_buffer and data are never set below: send zeros, not stack. */
++	struct hfi_session_empty_buffer_compressed_pkt com_ip_pkt = {};
++	struct hfi_session_empty_buffer_uncompressed_pkt uncom_ip_pkt = {};
+ 
+ 	if (inst->domain == DECODER) {
+ 		com_ip_pkt.shdr.hdr.size = sizeof(struct hfi_session_empty_buffer_compressed_pkt);

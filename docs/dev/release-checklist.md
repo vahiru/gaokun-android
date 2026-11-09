@@ -19,7 +19,8 @@ echo $?        # 0 = 无FAIL；1 = 有FAIL；2 = adb不通或中途掉线（不�
 
 * 报告保存在`out/accept/<戳>-<时间>/report.txt`，同目录保存`logcat`、`dmesg`、`dropbox`列表及频率与温度快照，供跨版本对比。
 * `--profile dev`：面向开发构建（故意开启adb免授权与TCP 5555）时安全默认值检查只记录不判失败；发布构建一律使用默认的`release`。
-* `--readonly`：仅执行只读检查（跳过开相机、录音、硬解视频），可在任意时刻运行。
+* `--readonly`：仅执行只读检查（跳过开相机、录音、硬解视频、硬件编码），可在任意时刻运行。
+* A11的真编一段只在屏幕亮着、且内核日志里确认有`cp-nonpixel: CB15 ready`时进行，否则记为SKIP。开机满10分钟时屏幕通常已经熄灭，要验证硬件编码，请先点亮屏幕再运行。
 * **涉及重启的检查项**（启动入口部署与祝福、fastboot执行端查询、BCB分派、稳定Wi-Fi MAC）：重启前需确认有人可在设备旁长按电源键恢复；新候选版首次跑fastboot执行端时需人在场。
 
 ## 2. 无人值守检查
@@ -38,7 +39,7 @@ echo $?        # 0 = 无FAIL；1 = 有FAIL；2 = adb不通或中途掉线（不�
 | Wi-Fi / 热点配置 | `cmd overlay lookup com.android.wifi.resources com.android.wifi.resources:string/config_wifi_tcp_buffers`；`dumpsys connectivity`的`TcpBufferSizes`；`dumpsys wifi`的`config_wifiSaeUpgradeEnabled`；`/vendor/bin/hw/hostapd` | 资源值与活动网络均含`8388608`；SAE升级为`false`；`hostapd`存在 |
 | USB服务 | `service check usb`；`pm list features` | `found`；含`android.hardware.usb.host` |
 | NTP时间同步 | `settings get global ntp_server`；设备与宿主机`date +%s`差值 | `null`；差值≤5秒（5–60秒WARN，>60秒FAIL） |
-| 硬件解码 | `scripts/verify-hw-codec2.sh [视频]` | 失败数为0；传入`--video`时第5步解出有效帧 |
+| 硬件编解码 | `scripts/verify-hw-codec2.sh [视频]` | 失败数为0；传入`--video`时第5步解出有效帧；亮屏、未加`--readonly`且确认了CP非像素上下文时，第5b步由`c2.v4l2.avc.encoder`编出帧 |
 | 相机冒烟 | `/data/local/tmp/gaokun3-ncam-smoke`与`… front` | 前后摄末行均为`RESULT: PASS` |
 | 麦克风冒烟 | `/data/local/tmp/micverify/gaokun3-mic-smoke -r 48000 -c 2 -t 5 -T` | 末行以`RESULT: PASS`开头；`logcat`有`first capture block ready`且无`incomplete data received` |
 | 扬声器音效库加载 | effect HAL进程的`/proc/<pid>/maps`；`logcat` | `maps`含`libgaokunhisteneffect.so`；无音效相关的链接命名空间报错 |

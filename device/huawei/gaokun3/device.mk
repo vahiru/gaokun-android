@@ -1133,7 +1133,7 @@ PRODUCT_COPY_FILES += \
 #   ★ iris（#128）的 gen1 解码格式表只有 H264 / HEVC / VP9（iris_platform_vpu2.c，
 #     iris_instance.h 的 enum 里根本没有 VP8），编码只有 H264 / HEVC。
 #   → VP8 硬解随换驱动【丢了】，门控必须关：开着的话组件建得出来、start() 失败，
-#     应用拿到的是失败而不是回退软解（与下面编码器同一个道理）。VP8 回到 c2.android 软解。
+#     应用拿到的是失败而不是回退软解（组件rank 0x80压过软解的0x200）。VP8回到c2.android软解。
 #   → av1 没有硬件；vp9 编码没有硬件；MPEG-2 v4l2_codec2 没有组件（v4l2/V4L2ComponentCommon.cpp）。
 #   → secure 变体全关：本机没有安全播放。
 PRODUCT_VENDOR_PROPERTIES += \
@@ -1142,25 +1142,24 @@ PRODUCT_VENDOR_PROPERTIES += \
     ro.vendor.v4l2_codec2.decoder.supported.vp9=true \
     ro.vendor.v4l2_codec2.decode_concurrent_instances=8
 
-# 警告：编码器【故意不启用】—— 实测它在 surface 输入路径上根本走不通，而且会让
-#   应用【失败而不是回退到软编】（组件 rank 0x80 压过软编的 0x200）。
-#   实测日志（screenrecord，2026-08-22）：
-#     E EncodeComponent: Unable to parse RGBX_8888 from IMPLEMENTATION_DEFINED
-#     E EncodeComponent: Failed to get input block layout
-#     E ...: Attempted to lock() a buffer that was not allocated with a
-#            BufferUsage::CPU_* usage.
-#   SurfaceFlinger 给的是 RGBX_8888/IMPLEMENTATION_DEFINED，而 Venus 编码器要
-#   NV12，v4l2_codec2 的 EncodeComponent 不做这个转换 —— 不是配置能解决的。
-#   （换成 iris 后编码器同样只收 NV12 / QC08C，这条结论不变。）
-#   录屏/录像继续走软编（能用）。要复测，三处都要动（少一处就会悄悄测成软编）：
-#     ① 把这两行加回上面的属性块：
-#        ro.vendor.v4l2_codec2.encoder.supported.h264=true
-#        ro.vendor.v4l2_codec2.encode_concurrent_instances=8
-#     ② etc/media_codecs_c2.xml 里加回 <Encoders><MediaCodec name="c2.v4l2.avc.encoder" type="video/avc">
-#        （XML 里没有的组件 MediaCodecList 直接跳过，Codec2InfoBuilder.cpp:543）；
-#     ③ scripts/verify-hw-codec2.sh 的"必须没有编码组件"断言那一次要反过来。
-#   ⚠️ iris 没有 VP8 编码；且 v4l2_codec2 首帧会设 FORCE_KEY_FRAME，v7.2-rc2 的 iris 不认这个控件
-#      （上游 v7.3 的 6f62dce 才加）—— 复测编码前先 backport 它，见 #128。
+# 硬件编码：H.264和HEVC（iris gen1编码器）。
+#   ⚠️ 内核必须带patches/kernel/iommu/0001与kernel/iris/0013–0018：编码器固件经内容保护非像素流读写它的
+#      ARP缓冲，没有iommu/0001建立的CP非像素上下文时，第一次编码就会让整板复位。没有这些补丁的内核上
+#      不能设这几条属性。
+#   Codec2一侧要patches/android/v4l2-codec2/0004（输入块带CPU读用途：组件要映射第一块输入读平面布局，
+#   录屏的RGB输入还要在CPU上转成NV12）与0005（HEVC编码组件）。iris没有VP8/VP9编码，那两条保持关闭。
+#   encode_concurrent_instances=1：ARP映射在内容保护窗口里的一个固定IOVA上，同一时刻只能有一个编码会话。
+#   第二个编码请求在分配组件时被拒（资源不足）。MediaCodec先请资源管理器从优先级更低的进程收回一个硬件
+#   编解码器再重试，收不回时才试下一个编码器，也就是c2.android.*软编；所以优先级更高的一方会让正在
+#   编码的应用失去编码器。组件rank 0x80压过软编的0x200，硬件编码器配置失败（例如尺寸和帧率超出它的
+#   级别）时，MediaRecorder（例如系统录屏）会换下一个编码器，自己调用configure的应用拿到错误。
+#   已知限制见docs/dev/audio-video.md。
+#   XML里也要有对应的<Encoders>条目（Codec2InfoBuilder.cpp:543：不在XML里的组件直接跳过），
+#   scripts/verify-hw-codec2.sh按这里的组合做断言。
+PRODUCT_VENDOR_PROPERTIES += \
+    ro.vendor.v4l2_codec2.encoder.supported.h264=true \
+    ro.vendor.v4l2_codec2.encoder.supported.hevc=true \
+    ro.vendor.v4l2_codec2.encode_concurrent_instances=1
 
 # Codec2 的 pool mask：BLOB(19) 那一档加 GRALLOC(17)。见上面第 3 条。
 PRODUCT_VENDOR_PROPERTIES += \
