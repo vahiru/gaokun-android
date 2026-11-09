@@ -39,7 +39,7 @@ echo $?        # 0 = 无FAIL；1 = 有FAIL；2 = adb不通或中途掉线（不�
 | Wi-Fi / 热点配置 | `cmd overlay lookup com.android.wifi.resources com.android.wifi.resources:string/config_wifi_tcp_buffers`；`dumpsys connectivity`的`TcpBufferSizes`；`dumpsys wifi`的`config_wifiSaeUpgradeEnabled`；`/vendor/bin/hw/hostapd` | 资源值与活动网络均含`8388608`；SAE升级为`false`；`hostapd`存在 |
 | USB服务 | `service check usb`；`pm list features` | `found`；含`android.hardware.usb.host` |
 | NTP时间同步 | `settings get global ntp_server`；设备与宿主机`date +%s`差值 | `null`；差值≤5秒（5–60秒WARN，>60秒FAIL） |
-| 硬件编解码 | `scripts/verify-hw-codec2.sh [视频]` | 失败数为0；传入`--video`时第5步解出有效帧；亮屏、未加`--readonly`且确认了CP非像素上下文时，第5b步由`c2.v4l2.avc.encoder`编出帧 |
+| 硬件编解码 | `scripts/verify-hw-codec2.sh [视频]` | 失败数为0；传入`--video`时第5步解出有效帧；亮屏、未加`--readonly`且确认了CP非像素上下文时，第5b步由`c2.v4l2.avc.encoder`在1280x720和640x480各编出帧 |
 | 相机冒烟 | `/data/local/tmp/gaokun3-ncam-smoke`与`… front` | 前后摄末行均为`RESULT: PASS` |
 | 麦克风冒烟 | `/data/local/tmp/micverify/gaokun3-mic-smoke -r 48000 -c 2 -t 5 -T` | 末行以`RESULT: PASS`开头；`logcat`有`first capture block ready`且无`incomplete data received` |
 | 扬声器音效库加载 | effect HAL进程的`/proc/<pid>/maps`；`logcat` | `maps`含`libgaokunhisteneffect.so`；无音效相关的链接命名空间报错 |
