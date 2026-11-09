@@ -1,0 +1,75 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] ASoC: qcom: q6apm-dai: allow 5 ms playback periods
+
+q6apm-dai makes every period and buffer a multiple of 480 frames (10 ms
+at 48 kHz), for playback and capture alike. A user space that writes
+5 ms blocks and keeps three periods queued still gets 3 x 480 frames,
+so the ALSA buffer alone holds up to 30 ms of audio. On gaokun3 this is
+the largest part of the output latency of games.
+
+The SC8280XP ADSP does not need 10 ms playback periods. With 3 x 240
+frames, rhythm game sessions played without audible gaps, and the
+output timestamps still matched an acoustic loopback measurement. What
+the DSP does need is more than two periods queued: 2 x 480 frames gaps
+audibly. The DSP then holds on to its last period and ALSA raises no
+XRUN, so nothing in the driver can see it; user space has to keep at
+least three periods.
+
+Use a 240-frame step for playback. Capture keeps the 480-frame step.
+The step applies to every playback front end. Both gaokun3 playback
+paths were tested: the speaker (WSA codec DMA, fed by MultiMedia2) and
+wired headphones (RX codec DMA, fed by MultiMedia1).
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Inappropriate [tested only with the SC8280XP ADSP firmware]
+---
+ sound/soc/qcom/qdsp6/q6apm-dai.c | 16 +++++++++++++---
+ 1 file changed, 13 insertions(+), 3 deletions(-)
+
+diff --git a/sound/soc/qcom/qdsp6/q6apm-dai.c b/sound/soc/qcom/qdsp6/q6apm-dai.c
+index 8b23cd911..b9c729883 100644
+--- a/sound/soc/qcom/qdsp6/q6apm-dai.c
++++ b/sound/soc/qcom/qdsp6/q6apm-dai.c
+@@ -28,6 +28,13 @@
+ #define CAPTURE_MAX_NUM_PERIODS		8
+ #define CAPTURE_MAX_PERIOD_SIZE		65536
+ #define CAPTURE_MIN_PERIOD_SIZE		6144
++/*
++ * Period and buffer sizes are multiples of this many frames. The SC8280XP
++ * ADSP plays 5 ms periods without gaps when user space keeps three or more
++ * of them queued; capture keeps the original 10 ms step.
++ */
++#define PLAYBACK_PERIOD_STEP		240
++#define CAPTURE_PERIOD_STEP		480
+ #define BUFFER_BYTES_MAX (PLAYBACK_MAX_NUM_PERIODS * PLAYBACK_MAX_PERIOD_SIZE)
+ #define BUFFER_BYTES_MIN (PLAYBACK_MIN_NUM_PERIODS * PLAYBACK_MIN_PERIOD_SIZE)
+ #define COMPR_PLAYBACK_MAX_FRAGMENT_SIZE (128 * 1024)
+@@ -387,6 +394,7 @@ static int q6apm_dai_open(struct snd_soc_component *component,
+ 	struct q6apm_dai_data *pdata;
+ 	struct q6apm_dai_rtd *prtd;
+ 	int graph_id, ret;
++	unsigned int step;
+ 
+ 	graph_id = cpu_dai->driver->id;
+ 
+@@ -430,14 +438,16 @@ static int q6apm_dai_open(struct snd_soc_component *component,
+ 		}
+ 	}
+ 
+-	/* setup 10ms latency to accommodate DSP restrictions */
+-	ret = snd_pcm_hw_constraint_step(runtime, 0, SNDRV_PCM_HW_PARAM_PERIOD_SIZE, 480);
++	/* period step to accommodate DSP restrictions */
++	step = substream->stream == SNDRV_PCM_STREAM_PLAYBACK ?
++	       PLAYBACK_PERIOD_STEP : CAPTURE_PERIOD_STEP;
++	ret = snd_pcm_hw_constraint_step(runtime, 0, SNDRV_PCM_HW_PARAM_PERIOD_SIZE, step);
+ 	if (ret < 0) {
+ 		dev_err(dev, "constraint for period bytes step ret = %d\n", ret);
+ 		goto err;
+ 	}
+ 
+-	ret = snd_pcm_hw_constraint_step(runtime, 0, SNDRV_PCM_HW_PARAM_BUFFER_SIZE, 480);
++	ret = snd_pcm_hw_constraint_step(runtime, 0, SNDRV_PCM_HW_PARAM_BUFFER_SIZE, step);
+ 	if (ret < 0) {
+ 		dev_err(dev, "constraint for buffer bytes step ret = %d\n", ret);
+ 		goto err;

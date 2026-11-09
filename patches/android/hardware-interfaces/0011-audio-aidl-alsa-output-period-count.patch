@@ -3,8 +3,9 @@ Subject: [PATCH] audio: aidl: alsa: allow overriding built-in output period coun
 
 alsa_utils derives the ALSA period_count of all built-in devices from a single
 property (ro.hardware.audio.tinyalsa.period_count, default 4), shared by
-playback and capture. Playback can run with 3 periods (3 x 480 frames = 30 ms,
-cutting output latency by ~10 ms), whereas capture requires 4 periods to
+playback and capture. Playback can run with 3 periods (one period less output
+latency; 3 x 240 frames = 15 ms with 5 ms blocks and the 240-frame playback
+step of kernel/audio/0013), whereas capture requires 4 periods to
 buffer incoming audio while the capture hook runs synchronous IPC.
 
 Read ro.vendor.audio.primary.out_period_count in openProxyForAttachedDevice()
@@ -16,7 +17,7 @@ Origin: local
 Upstream-Status: Inappropriate [device-specific tuning]
 ---
 diff --git a/audio/aidl/default/alsa/UtilsAlsa.cpp b/audio/aidl/default/alsa/UtilsAlsa.cpp
-index 6332fbf..6ac6bc0 100644
+index 6332fbf..5a414c3 100644
 --- a/audio/aidl/default/alsa/UtilsAlsa.cpp
 +++ b/audio/aidl/default/alsa/UtilsAlsa.cpp
 @@ -22,6 +22,7 @@
@@ -27,7 +28,7 @@ index 6332fbf..6ac6bc0 100644
  #include <audio_utils/primitives.h>
  #include <cutils/compiler.h>
  
-@@ -274,6 +275,27 @@ void applyGainToFloatBuffer(float* floatBuffer, const size_t bufferSizeBytes, co
+@@ -274,6 +275,28 @@ void applyGainToFloatBuffer(float* floatBuffer, const size_t bufferSizeBytes, co
      }
  }
  
@@ -36,8 +37,9 @@ index 6332fbf..6ac6bc0 100644
 +// periods than capture needs (the capture hook processes 85 ms blocks while the ALSA buffer keeps
 +// filling), so ro.vendor.audio.primary.out_period_count sets it for output devices only. The block
 +// alsa_utils asked for (period_size * period_count) stays the same; only the number of periods it
-+// is cut into changes. The kernel may still round the period size up (q6apm-dai: multiples of 480
-+// frames). Unset or below 2 keeps alsa_utils' choice.
++// is cut into changes. The kernel may still round the period size up (q6apm-dai: multiples of 240
++// frames for playback, so a 5 ms block cut into 3 gives 3 x 240 frames). Unset or below 2 keeps
++// alsa_utils' choice.
 +void applyOutputPeriodCount(const DeviceProfile& deviceProfile, alsa_device_profile* profile) {
 +    if (deviceProfile.direction != PCM_OUT) return;
 +    const unsigned periodCount = static_cast<unsigned>(
@@ -55,7 +57,7 @@ index 6332fbf..6ac6bc0 100644
  }  // namespace
  
  std::ostream& operator<<(std::ostream& os, const DeviceProfile& device) {
-@@ -412,6 +434,7 @@ DeviceProxy openProxyForAttachedDevice(const DeviceProfile& deviceProfile,
+@@ -412,6 +435,7 @@ DeviceProxy openProxyForAttachedDevice(const DeviceProfile& deviceProfile,
      if (!profile_fill_builtin_device_info(proxy.getProfile(), pcmConfig, bufferFrameCount)) {
          LOG(FATAL) << __func__ << ": failed to init for built-in device, address=" << deviceProfile;
      }

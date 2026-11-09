@@ -187,7 +187,8 @@ KPATCHES=(
 
     # ─── 8. kernel/audio：ASoC sc8280xp、LPASS 编解码宏、WSA883x 功放、SoundWire 与 Q6APM ───
     # 0007–0008 与 kernel/dts/0016 及 device/huawei/gaokun3/bin/audio-route.sh 配套；
-    # 0011–0012 与内置麦克风阵列（device/huawei/gaokun3/micarray/）配套。
+    # 0011–0012 与内置麦克风阵列（device/huawei/gaokun3/micarray/）配套；
+    # 0013 与 device.mk 的 ro.vendor.audio.primary.out_latency_ms=5、out_period_count=3 配套。
     kernel/audio/0001-asoc-sc8280xp-retune-wsa-speaker-gain-ceilings.patch
     kernel/audio/0002-ASoC-codecs-lpass-wsa-macro-Switch-to-PM-clock-framework-for-runtime-PM.patch
     kernel/audio/0003-ASoC-codecs-lpass-va-macro-Switch-to-PM-clock-framework-for-runtime-PM.patch
@@ -200,6 +201,7 @@ KPATCHES=(
     kernel/audio/0010-ASoC-codecs-lpass-va-macro-restore-the-high-pass-corner-after-the-start.patch
     kernel/audio/0011-ASoC-qcom-sc8280xp-let-VA-capture-use-four-channels.patch
     kernel/audio/0012-ASoC-qcom-q6apm-dai-keep-the-source-s-channel-order-on-capture.patch
+    kernel/audio/0013-ASoC-qcom-q6apm-dai-allow-5-ms-playback-periods.patch
 
     # ─── 9. kernel/input：Himax SPI 触摸屏、HX83121A 级联手写笔从片与 USB HID ───
     # 0001–0010、0012–0021 按顺序叠在 drivers/input/touchscreen/himax/ 上，回放工具见 scripts/touch/hxsim；

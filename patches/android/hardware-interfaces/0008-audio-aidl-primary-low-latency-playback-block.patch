@@ -15,7 +15,7 @@ Origin: local
 Upstream-Status: Inappropriate [device-specific tuning]
 ---
 diff --git a/audio/aidl/default/ModulePrimary.cpp b/audio/aidl/default/ModulePrimary.cpp
-index 102d2ff..33750f6 100644
+index 4e16e84..cb6f23f 100644
 --- a/audio/aidl/default/ModulePrimary.cpp
 +++ b/audio/aidl/default/ModulePrimary.cpp
 @@ -19,6 +19,7 @@
@@ -37,8 +37,8 @@ index 102d2ff..33750f6 100644
 +    // sink, Threads.cpp kNormalPlaybackPeriodMs), FAST requests from games are denied, and a tap
 +    // sound waits behind a 2-block client buffer + 85 ms + the ALSA buffer. Playback writes
 +    // straight into ALSA and blocks there (StreamAlsaBase::transferPlaybackDirect()), so a small
-+    // block only means more, shorter writes; the ALSA buffer keeps four periods of it (the
-+    // q6apm period step is 480 frames, so a 10 ms block gives 4 x 480 frames = 40 ms).
++    // block only means more, shorter writes. The ALSA buffer holds a few periods of it, each rounded
++    // up to the q6apm-dai period step (applyOutputPeriodCount() in alsa/UtilsAlsa.cpp).
 +    // Capture keeps 85 ms: its MonoPipe sizing and data-driven delivery were tuned for 4096.
 +    if (portConfig.flags->getTag() == AudioIoFlags::output) {
 +        return ::android::base::GetIntProperty("ro.vendor.audio.primary.out_latency_ms",

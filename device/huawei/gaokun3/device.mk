@@ -234,15 +234,19 @@ PRODUCT_COPY_FILES += \
 PRODUCT_VENDOR_PROPERTIES += \
     ro.vendor.audio.primary.alsa.in_headset=CARD_0_DEV_2
 
-# 音游延迟（2026-10-09）：播放块 10 ms（480 帧）⇒ AudioFlinger 开 FastMixer、游戏的 AAudio 低延迟请求能批下来；
-# ALSA 跟着变成 4 × 480 帧（40 ms）。补丁 0083（tree-fix [22]；原编号 0079 让给了 PR #27）读它；不设 = 原来的 85 ms / 4096 帧。
-# 实测（bind-mount + resetprop）：应用按时间戳算的输出延迟中位 317 → 114 ms，8 核跑满时 FastMixer underruns 0。
+# 音游延迟：播放块5 ms（240帧）⇒ AudioFlinger开FastMixer（混音周期5 ms），游戏的低延迟请求能批下来，
+# 游戏申请的轨道缓冲（通常是两个块）也跟着缩小。补丁hardware-interfaces/0008（tree-fix [22]）读它；
+# 不设 = 原来的85 ms / 4096帧。
+# 必须与内核kernel/audio/0013（q6apm-dai播放period步长240帧）一起改：内核还是480帧步长时，ALSA的period
+# 会被取整到480帧，缓冲并不缩短；反过来内核是240帧、这里却是10 ms时，ALSA是3 × 240帧而HAL一次写两个
+# period，DSP手上可能只剩一个period，与2个period一样有断音风险，尚未经实测。
 PRODUCT_VENDOR_PROPERTIES += \
-    ro.vendor.audio.primary.out_latency_ms=10
+    ro.vendor.audio.primary.out_latency_ms=5
 
-# 游戏音频延迟：播放方向的ALSA缓冲由4个480帧的period减到3个（30 ms），录音方向仍按alsa_utils默认的4个。
-# 补丁0215（tree-fix [40]）读它；不设 = 4个。不要减到2个：DSP缺数据时扣着最后一个period不放，
-# ALSA不会报XRUN，FastMixer和轨道的计数也都是0，只能在游戏里听出断音。
+# 游戏音频延迟：播放方向的ALSA缓冲切成3个period（5 ms块 ⇒ 3 × 240帧 = 15 ms），录音方向仍按alsa_utils
+# 默认的4个。补丁hardware-interfaces/0011（tree-fix [40]）读它；不设 = 4个。不要减到2个：DSP缺数据时扣着
+# 最后一个period不放，ALSA不会报XRUN，FastMixer和轨道的计数也都是0，只能在游戏里听出断音。
+# 发布后若有断音，可先把out_period_count改为4（4 × 240帧，内核不用动）。
 PRODUCT_VENDOR_PROPERTIES += \
     ro.vendor.audio.primary.out_period_count=3
 

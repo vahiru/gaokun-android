@@ -90,16 +90,20 @@ TX_DEC0 Volume = 102, TX_DEC1 Volume = 102
    - AOSP `StreamAlsa`的采集线程每10 ms从ALSA读取480帧写入容量为3840帧（8块）的`MonoPipe`，但其内部的`OffsetProvider`设置`setpoint = capacity / 2`，将写入速率钳制在平均每11.25 ms一块，导致每8块必然溢出丢弃1块。`patches/android/hardware-interfaces/0003`将采集`MonoPipe`容量翻倍。
    - AOSP `StreamPrimary::transfer`原本对采集流也按墙钟休眠（`sleep`）定拍，而非按ALSA硬件就绪数据驱动，造成开头约171 ms全零静音与124 ms交付延迟。`patches/android/hardware-interfaces/0004`将采集方向的`transfer`改为直接在`mAlsaDeviceProxy->read()`上阻塞等待硬件数据就绪，启动静音降至0 ms、单次交付耗时降至约1 ms。
 
-## 四、低延迟音频播放与音游偏移修复（`patches/android/tinyalsa/0001`、`patches/android/hardware-interfaces/0006`、`0011`）
+## 四、低延迟音频播放与音游偏移修复（`patches/android/tinyalsa/0001`、`patches/android/hardware-interfaces/0006`、`0011`、`patches/kernel/audio/0013`）
 
 1. **`tinyalsa`周期重算修复（`patches/android/tinyalsa/0001`）**：
-   AOSP `libaudiohal@aidl`请求打开`hw:0,1`时传入`period_size=1024, period_count=4`，而内核Audioreach拓扑要求30 ms周期对齐，在`SNDRV_PCM_IOCTL_HW_REFINE`中将`period_size`修正为`1440`（`buffer_size=5760`）。然而`external/tinyalsa_new/src/pcm.c`的`pcm_set_config()`仍用修改前的`1024`计算`sw_params.stop_threshold = 4096`。当环形缓冲区剩余帧数达到`5760 - 4096 = 1664`帧时，ALSA立即误判XRUN并中断流，引发持续爆音与断流。`patches/android/tinyalsa/0001`修正`pcm_set_config()`以内核返回的实际`period_size`计算`buffer_size`与`stop_threshold`。
+   AOSP `libaudiohal@aidl`请求打开`hw:0,1`时传入`period_size=1024, period_count=4`，而内核`q6apm-dai`要求period是固定步长的整数倍（当时为480帧），在`SNDRV_PCM_IOCTL_HW_REFINE`中将`period_size`向上取整为`1440`（`buffer_size=5760`）。然而`external/tinyalsa_new/src/pcm.c`的`pcm_set_config()`仍用修改前的`1024`计算`sw_params.stop_threshold = 4096`。当环形缓冲区剩余帧数达到`5760 - 4096 = 1664`帧时，ALSA立即误判XRUN并中断流，引发持续爆音与断流。`patches/android/tinyalsa/0001`修正`pcm_set_config()`以内核返回的实际`period_size`计算`buffer_size`与`stop_threshold`。
 2. **移除假MMAP输出端口**：
    与输入侧同理，从`audio_policy_configuration.xml`中移除`mmap_no_irq_out`（对应的`StreamOutMmapStub`会把走AAudio MMAP路径的游戏音频静默丢弃）。
 3. **播放方向取消墙钟跳帧（`patches/android/hardware-interfaces/0006`）**：
    AOSP示例实现`StreamPrimary::transfer`在播放方向同样维护一条合成墙钟：一旦上层混音线程唤醒稍晚，HAL就打印`skipping transfer`并将整块音频直接丢弃，导致音乐游戏出现严重的节奏漂移与吞音。`patches/android/hardware-interfaces/0006`在播放方向当ALSA proxy就绪时直接调用阻塞式ALSA写入，由声卡硬件时钟自然反压上层混音线程。
 4. **播放缓冲只用3个period（`patches/android/hardware-interfaces/0011`）**：
-   alsa_utils给内置设备配ALSA缓冲时，period数统一取`ro.hardware.audio.tinyalsa.period_count`（默认4），播放和录音共用。`patches/android/hardware-interfaces/0011`在`openProxyForAttachedDevice()`里只对输出设备改用`ro.vendor.audio.primary.out_period_count`（`device.mk`设3）：块大小不变，只是切成3个period，内核`q6apm-dai`再按480帧向上取整，得到3 × 480帧（30 ms）。录音方向保持4个，因为采集钩子在I/O线程里处理85 ms的块（通话降噪最长约51 ms才回退），这段时间新来的数据要靠录音缓冲接住。播放不能再减到2个：DSP缺数据时会扣着最后一个period不放，ALSA不会报XRUN，FastMixer与轨道的欠载计数也都是0，断音只能在游戏里听出来。
+   alsa_utils给内置设备配ALSA缓冲时，period数统一取`ro.hardware.audio.tinyalsa.period_count`（默认4），播放和录音共用。`patches/android/hardware-interfaces/0011`在`openProxyForAttachedDevice()`里只对输出设备改用`ro.vendor.audio.primary.out_period_count`（`device.mk`设3）：块大小不变，只是切成3个period，内核`q6apm-dai`再按播放period步长向上取整。播放块为5 ms（`ro.vendor.audio.primary.out_latency_ms=5`）时得到3 × 240帧（15 ms）。录音方向保持4个，因为采集钩子在I/O线程里处理85 ms的块（通话降噪最长约51 ms才回退），这段时间新来的数据要靠录音缓冲接住。播放不能再减到2个：DSP缺数据时会扣着最后一个period不放，ALSA不会报XRUN，FastMixer与轨道的欠载计数也都是0，断音只能在游戏里听出来。
+5. **播放period步长240帧（`patches/kernel/audio/0013`）**：
+   主线`q6apm-dai`把播放和录音的period与缓冲都限制为480帧（10 ms）的整数倍，注释称是为了适应DSP的限制。这样HAL即使改用5 ms的块，ALSA缓冲仍至少是3 × 480帧。实测SC8280XP的ADSP播放5 ms的period没有问题：扬声器（`MultiMedia2`，WSA codec DMA）和有线耳机（`MultiMedia1`，RX codec DMA）用3 × 240帧在游戏里都没有断音，扬声器上声学回环测得的时间戳误差与10 ms时相同。DSP真正需要的是排队的period多于两个，所以`0011`的3个period仍然必要。录音保持480帧。
+   代价：HAL写入时DSP手上剩两个period，即10 ms，原来是20 ms，FastMixer或HAL写线程偶尔停顿超过10 ms就可能断音，而且没有计数器能看到。primary是唯一的输出，息屏放音乐等所有播放都按5 ms的周期运行，FastMixer和HAL的唤醒次数翻倍，对续航的影响尚未经实测。
+   `0013`必须与`out_latency_ms=5`一起使用：内核还是480帧步长时，period会被取整到480帧，缓冲并不缩短；内核是240帧步长、播放块却是10 ms时，ALSA是3 × 240帧而HAL一次写入两个period，DSP手上可能只剩一个period，有断音风险，尚未经实测。若发布后出现断音，可先把`out_period_count`改为4（4 × 240帧，已测无断音），不必改内核。
 
 ## 五、硬件视频编解码（`qcom-iris` + `v4l2_codec2`）
 

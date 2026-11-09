@@ -1376,9 +1376,9 @@ def main():
         "android/hardware-interfaces/0007-audio-aidl-primary-alsa-fallback-by-device-type.patch",
         covered_by=("android/hardware-interfaces/0009-audio-aidl-primary-playback-hook.patch",
                     "android/hardware-interfaces/0010-audio-aidl-primary-capture-hook.patch")))
-    # 音游延迟：播放块按 ro.vendor.audio.primary.out_latency_ms（device.mk 设 10）⇒ FastMixer 开、游戏拿到 FAST 轨道。
+    # 音游延迟：播放块按 ro.vendor.audio.primary.out_latency_ms（device.mk 设 5）⇒ FastMixer 开、游戏拿到 FAST 轨道。
     # 只动 ModulePrimary.cpp（头文件区与 getNominalLatencyMs()），与 [12]–[21] 不重叠；依赖 [17]（播放直接写 ALSA）。
-    step(" [22] audio AIDL HAL 播放块大小可配（10 ms，开 FastMixer）: ", apply_patch_file(
+    step(" [22] audio AIDL HAL 播放块大小可配（5 ms，开 FastMixer）: ", apply_patch_file(
         tree, "hardware/interfaces",
         "android/hardware-interfaces/0008-audio-aidl-primary-low-latency-playback-block.patch"))
     # 扬声器低音处理（device/huawei/gaokun3/speakerfx）：播放块写进 ALSA 之前交给 ro.vendor.audio.primary.playback_hook 的库。
