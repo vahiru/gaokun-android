@@ -36,7 +36,7 @@
 - **无限暖暖启动即崩溃**（[issue #33](https://github.com/vahiru/gaokun-android/issues/33)）：推测虚幻引擎按ANGLE报告的渲染器名称匹配机型时选了GLES，而游戏只带了Vulkan着色器。下一步：请报告者用`debug.angle.gl_renderer`和`debug.angle.gl_vendor`覆盖渲染器名称后对比。
 - **部分网站里后摄红蓝颠倒或无法打开**：需要网站名称和复现时的日志。
 - **硬件解码的遗留问题**：拖动到更低分辨率后裁剪不更新；字节缓冲模式下分辨率变大时重新分配失败；`SYS_ERROR`之后出现`invalid uc_region`；HAL里POLLPRI空转；`venus_compat_gfmt=N`需要复测。
-- **硬件编码的遗留问题**：熄屏而系统没有休眠时视频硬件会挂起，之后编码可能一直失败到重启；一次只能有一个编码会话（需要在CP非像素窗口上做IOVA分配）；`v4l2_codec2`把`MB_RC_ENABLE`和`GOP_SIZE`放在同一次调用里，gen1不认前者，于是IDR之间还有每30帧一个的I帧；休眠唤醒后偶发一次编码无输出，原因不明；`v4l2_codec2`的编码组件在120x160时申请完缓冲就停住、不报错（ROM原版的库也一样）。见[`dev/audio-video.md`](dev/audio-video.md)的“硬件视频编码”一节。
+- **硬件编码的遗留问题**：熄屏而系统没有休眠时视频硬件会挂起，之后编码可能一直失败到重启；一次只能有一个编码会话（需要在CP非像素窗口上做IOVA分配）；`v4l2_codec2`把`MB_RC_ENABLE`和`GOP_SIZE`放在同一次调用里，gen1不认前者，于是IDR之间还有每30帧一个的I帧；休眠唤醒后偶发一次编码无输出，没有任何报错，原因不明。见[`dev/audio-video.md`](dev/audio-video.md)的“硬件视频编码”一节。
 - **Wi-Fi芯片启动失败时泄漏内存**：`ath11k_mhi_start`失败后没有释放，每次泄漏约4 MB DMA内存（`mhi.c:446-450`）。
 
 ## 四、功能开发

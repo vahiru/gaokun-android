@@ -568,7 +568,7 @@ def apply_patch_file(tree: pathlib.Path, project: str, patch_name: str,
     """把 <repo>/patches/<patch_name> 用 git apply 打进 AOSP 树的 <project>（幂等）。
 
     ★ 为什么要有这个助手：本仓 `patches/android/` 里的 **AOSP 侧**补丁（
-    hardware-interfaces/0001–0011 audio HAL、v4l2-codec2/0001–0005、tinyalsa/0001、drm-hwcomposer/0001–0004）
+    hardware-interfaces/0001–0011 audio HAL、v4l2-codec2/0001–0006、tinyalsa/0001、drm-hwcomposer/0001–0004）
     原先**没有任何消费者** —— 全靠人手动
     `git apply`。而本仓已经为"没有消费者的配置一定会漂"付过三次账
     （M13 的 BOARD_KERNEL_CMDLINE、M17 的上游 Venus 补丁集、以及 2026-09-12
@@ -1441,6 +1441,11 @@ def main():
     step(" [42] v4l2_codec2 HEVC编码组件: ", apply_patch_file(
         tree, "external/v4l2_codec2",
         "android/v4l2-codec2/0005-v4l2-codec2-add-an-hevc-encoder-component.patch"))
+    # 单平面输入的缓冲长度按驱动的sizeimage给：iris把整帧大小补齐到4 KiB的倍数，640x480、352x288这类尺寸原来在第一帧就被拒。
+    # 在[42]打完的树上生成，排在它之后。
+    step(" [43] v4l2_codec2编码器单平面输入按驱动要求的长度送缓冲（640x480等尺寸）: ", apply_patch_file(
+        tree, "external/v4l2_codec2",
+        "android/v4l2-codec2/0006-v4l2-codec2-give-single-planar-encoder-input-the-device-buffer-length.patch"))
     # 游戏环境如实修正：fingerprint 尾部 userdebug→user，与 ro.build.type=user 对齐
     # （Duck Detector system_properties 3 条 danger 的根；运行时改不掉 Build.FINGERPRINT 常量）
     step(" [23] BUILD_FINGERPRINT/THUMBPRINT/SYSTEM_FINGERPRINT 变体段改写成 user（与 ro.build.type 对齐）: ",

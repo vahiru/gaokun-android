@@ -147,13 +147,14 @@ TX_DEC0 Volume = 102, TX_DEC1 Volume = 102
 
 - **`patches/android/v4l2-codec2/0004`**：编码器输入块的用途加上`C2MemoryUsage::CPU_READ`。组件要在CPU上映射第一块输入来读平面布局，录屏送来的RGB还要逐帧在CPU上转成NV12；输入块没有CPU读用途时gralloc拒绝lock，相机录像和录屏在第一帧就失败。`C2StreamUsageTuning`里放的是C2的用途位，不能填gralloc常量：gralloc的`SW_READ_OFTEN`（`0x3`）按C2的位读是`READ_PROTECTED`，录屏会一帧都拿不到。
 - **`patches/android/v4l2-codec2/0005`**：新增`c2.v4l2.hevc.encoder`，由`ro.vendor.v4l2_codec2.encoder.supported.hevc`把守。只提供Main档次：输入是8位NV12，Main Still Picture一个码流只能有一张图，Main 10要10位输入。级别1到5.2，默认4.1，按尺寸、帧率和码率自动抬到够用的最低一级（H.265表A.8、A.9，以及A.4.1对单边长度的限制）。iris gen1没有`V4L2_CID_MPEG_VIDEO_PREPEND_SPSPPS_TO_IDR`，参数集由组件缓存后插到每个IRAP图像前：H.264是SPS/PPS（上游已有），HEVC是VPS/SPS/PPS。
+- **`patches/android/v4l2-codec2/0006`**：单平面输入（NV12而不是NV12M）送缓冲时，长度改按驱动要求的`sizeimage`给。原来按一帧的数据量（步长×按32对齐的高×1.5）给，而iris把整帧大小补齐到4 KiB的倍数。步长是128的奇数倍、对齐后的高是32的奇数倍时（640x480、800x480、854x480、352x288、120x160等），长度差2048字节，第一次`VIDIOC_QBUF`就被videobuf2拒绝，组件随即报错；打开`videobuf2_common`的`debug`参数后，内核日志里能看到`invalid dmabuf length`。多平面分支本来就用驱动给的大小。
 
 #### 设备配置
 
 - `device.mk`：`ro.vendor.v4l2_codec2.encoder.supported.h264`、`.hevc`设为`true`，`ro.vendor.v4l2_codec2.encode_concurrent_instances=1`。VP8/VP9编码iris没有，保持关闭。
 - `media_codecs_c2.xml`：两个编码器的`<Encoders>`条目，`concurrent-instances`为1。尺寸和吞吐量上限按4K30申报，实测只做到1080p 30 fps。
 - 组件rank是0x80，排在软编（0x200）前面。第二个编码请求在分配组件时被拒（`maximum number of instances reached`，返回资源不足）。`MediaCodec`遇到资源不足会先请资源管理器从优先级更低的进程收回一个硬件编解码器再重试，收不回才试下一个编码器，落到`c2.android.*`软编。因此按框架代码，优先级更高的一方会让正在编码的应用失去编码器（`ERROR_RECLAIMED`），例如前台相机录像时从快捷设置启动系统录屏，尚未经实测；优先级不高于对方时，第二路才会直接换软编。原生进程（例如shell里的`screenrecord`）既不会收回别人的编码器，也不会被收回。硬件编码器配置失败时，`MediaRecorder`同样会换下一个编码器；自己调用`configure`的应用拿到的是错误。
-- 验证：`scripts/verify-hw-codec2.sh`检查属性、编码节点属主、`cp-nonpixel: CB15 ready`和组件列表，亮屏时用`screenrecord --codec-name c2.v4l2.avc.encoder`真编一段。
+- 验证：`scripts/verify-hw-codec2.sh`检查属性、编码节点属主、`cp-nonpixel: CB15 ready`和组件列表，亮屏时用`screenrecord --codec-name c2.v4l2.avc.encoder`在1280x720和640x480各真编一段。
 
 #### 已知限制
 
@@ -163,5 +164,4 @@ TX_DEC0 Volume = 102, TX_DEC1 Volume = 102
 - **没有HEVC Main 10和HDR编码**：输入只有8位NV12。
 - **系统录屏会换用软编**：系统录屏按解码器的能力和120 Hz刷新率选尺寸和帧率（横屏约2560x1600@117，竖屏约1360x2176@120），码率约70–96 Mbps，超出H.264 5.1级和组件50 Mbps的码率上限，硬件编码器配置失败，按框架代码会换用软编，尚未经实测。`adb shell screenrecord`不带`--size`时会改用1280x720重试。
 - **很小的尺寸**：宽或高按驱动的对齐（128x32）之后仍小于128时（例如160x90），内核在申请缓冲时拒绝（`current session not supported`），应用在开始编码时拿到错误。原始尺寸小于128、对齐后不小于128的（例如160x120、100x100），固件能正常编码，并在SPS里写明裁剪。
-- **120x160时不出帧**：`v4l2_codec2`的编码组件在这个尺寸下申请完缓冲就停住，既不开流也不报错，换回ROM原版的库也一样，原因不明；相邻的120x120、120x176、136x160都正常，下一次编码不受影响。
 - **唤醒后偶发一次无输出**：休眠唤醒后紧接着编码，偶尔会有一次两个编码器都一帧不出，内核没有任何报错，随后的编码自行恢复。原因不明。

@@ -1,0 +1,50 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] v4l2_codec2: give single-planar encoder input the device's
+ buffer length
+
+For a single-planar input format (NV12 rather than NV12M), enqueueInputBuffer()
+sets the plane length to allocationSize() of the coded size, i.e. the bytes the
+frame occupies (stride x aligned height x 1.5). The device's sizeimage can be
+larger: Qualcomm iris rounds the frame size up to a multiple of 4 KiB.
+videobuf2 rejects a DMABUF plane whose length is below sizeimage, so QBUF fails
+with EINVAL and the component goes to the error state on the first frame. With
+the videobuf2 debug output enabled, 120x160 (stride 128) shows "invalid dmabuf
+length 30720 for plane 0, minimum length 32768". On iris this hits every size
+whose stride is an odd multiple of 128 and whose height, aligned to 32, is an
+odd multiple of 32, e.g. 640x480, 800x480, 854x480, 352x288 and 120x160.
+
+Use the device's size as the length, as the multi-planar branch already does,
+and keep bytesused at the frame size. The gralloc buffers used as encoder input
+are allocated in whole pages and are large enough.
+
+Origin: local
+Upstream-Status: Pending
+---
+ v4l2/V4L2Encoder.cpp | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/v4l2/V4L2Encoder.cpp b/v4l2/V4L2Encoder.cpp
+index 97aaa27..38ec2ce 100644
+--- a/v4l2/V4L2Encoder.cpp
++++ b/v4l2/V4L2Encoder.cpp
+@@ -8,6 +8,7 @@
+ #include <v4l2_codec2/v4l2/V4L2Encoder.h>
+ 
+ #include <stdint.h>
++#include <algorithm>
+ #include <optional>
+ #include <vector>
+ 
+@@ -852,7 +853,11 @@ bool V4L2Encoder::enqueueInputBuffer(std::unique_ptr<InputFrame> frame) {
+         buffer->setPlaneDataOffset(0, planes[0].mOffset);
+         bytesUsed += planes[0].mOffset;
+         // Workaround: filling length should not be needed. This is a bug of videobuf2 library.
+-        buffer->setPlaneSize(0, bytesUsed);
++        // The length must not be below the device's sizeimage, which can exceed the frame's
++        // allocation size (e.g. a device that pads the frame size to whole pages), or the buffer
++        // is rejected. Use the device's size, as for multi-planar formats above.
++        buffer->setPlaneSize(
++                0, std::max(bytesUsed, mInputLayout->mPlanes[0].mSize + planes[0].mOffset));
+         buffer->setPlaneBytesUsed(0, bytesUsed);
+         // We only have one memory plane so we shall submit only one FD. The others are duplicates
+         // of the first one anyway.
