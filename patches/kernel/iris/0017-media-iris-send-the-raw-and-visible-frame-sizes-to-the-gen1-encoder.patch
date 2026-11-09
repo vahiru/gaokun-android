@@ -1,0 +1,84 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: iris: send the raw and visible frame sizes to the gen1
+ encoder
+
+The gen1 encoder set its input frame size from fmt_src, whose width and
+height are the buffer size aligned to 128x32, and its output frame size
+from fmt_dst, which holds that same aligned size after an OUTPUT S_FMT,
+or the requested size aligned to the codec block size after a CAPTURE
+S_FMT or a crop. For a width that is not a multiple of 128 (a 1080x1920
+portrait camera stream) the firmware therefore read a 1152-wide picture,
+stride padding included, and scaled it into a 1088-wide output with no
+SPS cropping: the right edge of every frame showed the zeroed padding as
+a green band and the picture was squeezed.
+
+Send the raw frame size for the input, as the gen2 path does with
+enc_raw_width/height, and the requested output size kept in
+enc_scale_width/height for the output. The stride and scanlines still
+reach the firmware separately in UNCOMPRESSED_PLANE_ACTUAL_INFO. The
+firmware pads the coded picture to whole macroblocks and signals the
+cropping in the SPS.
+
+Frame sizes that are already aligned (1920x1088) are sent unchanged.
+gen1 has no input crop offsets, so a crop smaller than the raw frame is
+still scaled rather than cropped, as before.
+
+Origin: local
+Upstream-Status: Pending
+---
+ .../qcom/iris/iris_hfi_gen1_command.c         | 35 +++++++++++++++----
+ 1 file changed, 28 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c b/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c
+index af8106071..b43d86c57 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c
+@@ -842,20 +842,41 @@ static int iris_hfi_gen1_set_resolution(struct iris_inst *inst, u32 plane)
+ 
+ 	if (!iris_drc_pending(inst) && !(inst->sub_state & IRIS_INST_SUB_FIRST_IPSC)) {
+ 		fs.buffer_type = HFI_BUFFER_INPUT;
+-		fs.width = inst->fmt_src->fmt.pix_mp.width;
+-		fs.height = inst->fmt_src->fmt.pix_mp.height;
++		if (inst->domain == ENCODER) {
++			/*
++			 * The raw frame size, not the 128x32-aligned buffer size in
++			 * fmt_src. The stride and scanlines are sent separately in
++			 * UNCOMPRESSED_PLANE_ACTUAL_INFO; with the aligned size here
++			 * the firmware treats the stride padding as picture and
++			 * scales it into the output.
++			 */
++			fs.width = inst->enc_raw_width;
++			fs.height = inst->enc_raw_height;
++		} else {
++			fs.width = inst->fmt_src->fmt.pix_mp.width;
++			fs.height = inst->fmt_src->fmt.pix_mp.height;
++		}
+ 
+ 		ret = hfi_gen1_set_property(inst, ptype, &fs, sizeof(fs));
+ 		if (ret)
+ 			return ret;
+ 	}
+-	if (inst->domain == DECODER)
++	if (inst->domain == DECODER) {
+ 		fs.buffer_type = HFI_BUFFER_OUTPUT2;
+-	else
++		fs.width = inst->fmt_dst->fmt.pix_mp.width;
++		fs.height = inst->fmt_dst->fmt.pix_mp.height;
++	} else {
++		/*
++		 * The requested output size kept in enc_scale (set by a CAPTURE
++		 * S_FMT or a crop, the raw size by default), not the aligned size
++		 * in fmt_dst: the firmware pads to whole macroblocks itself and
++		 * signals the cropping in the SPS. gen1 has no input crop
++		 * offsets, so a crop smaller than the raw frame is scaled.
++		 */
+ 		fs.buffer_type = HFI_BUFFER_OUTPUT;
+-
+-	fs.width = inst->fmt_dst->fmt.pix_mp.width;
+-	fs.height = inst->fmt_dst->fmt.pix_mp.height;
++		fs.width = inst->enc_scale_width;
++		fs.height = inst->enc_scale_height;
++	}
+ 
+ 	return hfi_gen1_set_property(inst, ptype, &fs, sizeof(fs));
+ }
