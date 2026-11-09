@@ -141,28 +141,46 @@ log -t audioroute "扬声器路由已应用（PCM1 / WSA / 数字=$WSA_DIG / PA=
 #   补齐后实测：tinyplay -D 0 -d 0 rc=0、pcm0p state=RUNNING、
 #   hw_ptr 2 秒前进 97920 帧 = 48960 帧/秒（正好实时 48 kHz），dmesg 零报错。
 #
-# 序列逐条照抄上游 ALSA UCM2（上游 sc8280xp.conf 用 Regex "HUAWEI.*MateBook E.*"
-# 匹配本机并 include LENOVO-X13s.conf，所以 X13s 那套就是本机的官配）：
-#   codecs/wcd938x/HeadphoneEnableSeq.conf
+# 序列以上游ALSA UCM2为准（上游sc8280xp.conf用Regex "HUAWEI.*MateBook E.*"匹配本机，
+# 与X13s共用sc8280xp的HiFi.conf）：
+#   codecs/wcd938x/HeadphoneABEnableSeq.conf（sc8280xp与x1e笔记本用的AB类变体）
 #   codecs/qcom-lpass/rx-macro/HeadphoneEnableSeq.conf
 #   codecs/qcom-lpass/rx-macro/init.conf   (RX_RXn Digital Volume 84)
-#   Qualcomm/sc8280xp/LENOVO-X13s.conf     (HPHL/HPHR Volume 2)
 #
-# ⚠️ HPH 音量为什么是 2 而不是默认的 24 —— 这个方向不能猜，从内核算：
-#   sound/soc/codecs/wcd938x.c:2620
+# ⚠️ 压扩器两侧都关（`RX_COMPn Switch` = 0，`HPHx_COMP Switch` = 0）：
+#   RX宏的压扩器与WCD938x的HPH压扩器是一对。数字侧按信号电平经SoundWire的COMP端口给PA
+#   发增益码，同时在数字域补回PA降掉的增益。
+#   `HPHx_COMP Switch` = 0时，wcd938x在HPH DAC上电时把GAIN_SRC_SEL切到寄存器，PA固定在
+#   `HPHL/R Volume`，不再跟增益码走，数字侧的补偿就成了净增益：低于约−22 dBFS的信号被整体
+#   抬高约20 dB，超过后掉回，要回落到约−45 dBFS以下才再抬高，听起来是很重的压缩感。
+#   上游UCM已把`RX_COMPn Switch`从耳机序列中去掉（alsa-ucm-conf PR #670），这里显式写0。
+#   两侧都开是高通下游的做法，主线上未经验证；而且主线wcd938x在`HPHx_COMP Switch`由0改为1时
+#   不会把GAIN_SRC_SEL切回压扩器，开机后一旦以0放过音就要重启才能生效。
+#   调试时`RX_COMPn Switch`也只能在耳机流关闭时改：流开着时由1改为0，lpass-rx-macro在流关闭时
+#   会跳过关压扩器的步骤，压扩器在硬件里一直开着，直到改回1并再开关一次流，或重启。
+#
+# ⚠️ `RX HPH Mode` = CLS_AB_LOHIFI（与上游sc8280xp的AB类变体一致）：
+#   H类模式下耳放的电源轨随预估的信号包络升降。HPH增益抬高后大摆幅会削波：HPH 12时
+#   CLS_H_ULP在−3/−1 dBFS的二次谐波约为−26/−17 dB，CLS_H_LOHIFI从−6 dBFS起就削波（推测是
+#   电源轨跟不上，rx-macro的class-H系数按16 Ω耳机预设，未证实）。AB类电源轨固定，HPH 12时
+#   到−1 dBFS未见削波。上游的说明是笔记本的耳放按AB类设计，用H类会失真。
+#   代价是耳机播放时功耗略高，尚未实测。同一档HPH音量下CLS_AB_LOHIFI比CLS_H_ULP和CLS_AB
+#   都高约5.6 dB。
+#
+# ⚠️ `HPHL/R Volume` = 8（−18 dB）。刻度从内核算：
 #     SOC_SINGLE_TLV("HPHL Volume", WCD938X_HPH_L_EN, 0, 0x18, 1, line_gain)
-#   sound/soc/codecs/wcd938x.c:192
 #     DECLARE_TLV_DB_SCALE(line_gain, -3000, 150, 0)
-#   → 控件值 v 对应 -30 + 1.5*v dB。默认 24 = 【+6 dB】，直接进耳朵；
-#     上游的 2 = -27 dB。耳机灵敏度远高于喇叭，衰减是对的，而且框架自己
-#     还有一层音量。嫌小就往上调，每 +1 = +1.5 dB（别接近 24）。
+#   → 控件值v对应−30 + 1.5·v dB，24 = +6 dB。Linux上UCM把它当用户音量（开机为2，即−27 dB）；
+#     Android的音量在框架里做，这里只设一个固定值。取8：比CLS_H_ULP下试听合适的12低6 dB，
+#     正好抵消CLS_AB_LOHIFI多出的约5.6 dB，响度与之相当；满幅比上面测过不削波的点低约5 dB。
+#     只用一副耳机试听过。每+1 = +1.5 dB。
 #
 # 扬声器与耳机是两个不同后端（WSA vs RX），互不抢占，切换发生在 PCM 层面，
 # 所以两套路由可以都在开机时摆好；DAPM 按需上电，闲置不耗电。
-set --     "RX_CODEC_DMA_RX_0 Audio Mixer MultiMedia1" 1     "RX_RX0 Digital Volume" 84     "RX_RX1 Digital Volume" 84     "HPHL Volume" 2     "HPHR Volume" 2     "HPHL_RDAC Switch" 1     "HPHR_RDAC Switch" 1     "HPHL Switch" 1     "HPHR Switch" 1     "HPHR_COMP Switch" 0     "HPHL_COMP Switch" 0     "CLSH Switch" 1     "LO Switch" 1     "RX HPH Mode" CLS_H_ULP     "RX_HPH PWR Mode" LOHIFI     "RX_MACRO RX0 MUX" AIF1_PB     "RX_MACRO RX1 MUX" AIF1_PB     "RX INT0_1 MIX1 INP0" RX0     "RX INT1_1 MIX1 INP0" RX1     "RX INT0 DEM MUX" CLSH_DSM_OUT     "RX INT1 DEM MUX" CLSH_DSM_OUT     "RX_COMP1 Switch" 1     "RX_COMP2 Switch" 1
+set --     "RX_CODEC_DMA_RX_0 Audio Mixer MultiMedia1" 1     "RX_RX0 Digital Volume" 84     "RX_RX1 Digital Volume" 84     "HPHL Volume" 8     "HPHR Volume" 8     "HPHL_RDAC Switch" 1     "HPHR_RDAC Switch" 1     "HPHL Switch" 1     "HPHR Switch" 1     "HPHR_COMP Switch" 0     "HPHL_COMP Switch" 0     "CLSH Switch" 1     "LO Switch" 1     "RX HPH Mode" CLS_AB_LOHIFI     "RX_HPH PWR Mode" LOHIFI     "RX_MACRO RX0 MUX" AIF1_PB     "RX_MACRO RX1 MUX" AIF1_PB     "RX INT0_1 MIX1 INP0" RX0     "RX INT1_1 MIX1 INP0" RX1     "RX INT0 DEM MUX" CLSH_DSM_OUT     "RX INT1 DEM MUX" CLSH_DSM_OUT     "RX_COMP1 Switch" 0     "RX_COMP2 Switch" 0
 apply "$@"
 
-log -t audioroute "耳机路由已应用（PCM0 / RX / HPH=-27dB / 含插值器链）"
+log -t audioroute "耳机路由已应用（PCM0 / RX / HPH=-18dB / AB类 / 压扩器关 / 含插值器链）"
 
 # 耳机麦克风（PCM 2 / TX_CODEC_DMA_TX_3 → MultiMedia3）
 #   codecs/wcd938x/HeadphoneMicEnableSeq.conf
@@ -212,7 +230,9 @@ apply "$@"
 
 log -t audioroute "内置麦路由已应用（PCM3 / VA / DMIC0+1）"
 
-# ⚠️ 与上游 UCM 刻意不同的两处，记下来免得以后当成漏配：
+# ⚠️ 与上游UCM刻意不同的三处，记下来免得以后当成漏配：
+#   * `HPHL/R Volume`：上游UCM把它当用户音量（开机为2）；这里固定为8，音量交给Android框架，
+#     原因见耳机一节。
 #   * `SpkrLeft/Right BOOST Switch` 我们是 0，上游是 1 ——
 #     一使能，每次流起停都有明显爆音（2026-08-19 A/B 盲听定案）。
 #     ★ 它**不是**功放升压器开关（这个叫法本仓沿用了很久，是错的），而是
