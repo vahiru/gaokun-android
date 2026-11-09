@@ -1,0 +1,47 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] v4l2_codec2: request CPU read access for encoder input
+ buffers
+
+EncodeInterface declares the input stream usage as VIDEO_ENCODER only, but
+EncodeComponent maps the first input block on the CPU to read its plane
+layout, and converts RGB input (screen recording) to NV12 on the CPU for
+every frame. Gralloc refuses to lock a buffer that was allocated without
+CPU read usage, so with an input surface (camera recording, screenrecord)
+the component fails on the first frame and the app gets an error instead
+of a recording.
+
+Add C2MemoryUsage::CPU_READ to the input usage. C2StreamUsageTuning holds
+C2MemoryUsage bits, which the framework converts to gralloc usage
+(CPU_READ becomes SW_READ_OFTEN). A gralloc constant must not be used
+here: GRALLOC_USAGE_SW_READ_OFTEN (0x3) reads as CPU_READ | READ_PROTECTED
+in C2 terms, so the framework asks gralloc for protected buffers, which
+minigbm cannot allocate for RGBA, and screenrecord gets no frames at all.
+
+Origin: local
+Upstream-Status: Pending
+---
+ components/EncodeInterface.cpp | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/components/EncodeInterface.cpp b/components/EncodeInterface.cpp
+index 12152e6..9e66292 100644
+--- a/components/EncodeInterface.cpp
++++ b/components/EncodeInterface.cpp
+@@ -314,9 +314,16 @@ void EncodeInterface::Initialize(const C2String& name, const SupportedCapabiliti
+                     .withConstValue(new C2StreamBufferTypeSetting::input(0u, C2BufferData::GRAPHIC))
+                     .build());
+ 
++    // CPU_READ: EncodeComponent reads the layout of the first input block through a CPU mapping,
++    // and an RGB input (e.g. screen recording) is converted to NV12 on the CPU every frame.
++    // Without it, gralloc refuses to lock input-surface buffers (camera, SurfaceFlinger) and the
++    // component fails on the first frame instead of encoding. This is a C2MemoryUsage value:
++    // use the C2 CPU_READ bit (converted to gralloc SW_READ_OFTEN), not a gralloc constant:
++    // SW_READ_OFTEN (0x3) would read as CPU_READ | READ_PROTECTED and ask for protected buffers.
+     addParameter(DefineParam(mInputMemoryUsage, C2_PARAMKEY_INPUT_STREAM_USAGE)
+                          .withConstValue(new C2StreamUsageTuning::input(
+-                                 0u, static_cast<uint64_t>(BufferUsage::VIDEO_ENCODER)))
++                                 0u, C2MemoryUsage::CPU_READ |
++                                             static_cast<uint64_t>(BufferUsage::VIDEO_ENCODER)))
+                          .build());
+ 
+     addParameter(
