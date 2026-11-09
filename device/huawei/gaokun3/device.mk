@@ -1128,6 +1128,11 @@ PRODUCT_PACKAGES += \
 PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/etc/media_codecs_c2.xml:$(TARGET_COPY_OUT_VENDOR)/etc/media_codecs_c2.xml
 
+# 录像档位与录像编码能力（MediaProfiles）。没有这个文件时只剩内置的H.263缺省档位，
+# Camera1应用只能录320x240，前摄没有录像档位，详见文件头注释。
+PRODUCT_COPY_FILES += \
+    $(LOCAL_PATH)/etc/media_profiles_V1_0.xml:$(TARGET_COPY_OUT_VENDOR)/etc/media_profiles_V1_0.xml
+
 # ★ 每一条都对应驱动实际能做的事，不是照抄模板：
 #   venus 时代 tools/v4l2-probe 实测：解码器认 H264 VP80 VP90 HEVC MPG2；编码器出 H264 VP80 HEVC。
 #   ★ iris（#128）的 gen1 解码格式表只有 H264 / HEVC / VP9（iris_platform_vpu2.c，
