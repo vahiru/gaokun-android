@@ -3,7 +3,7 @@
 # 在【宿主机】跑，走 adb；以只读检查为主，B / C 档（要人在场、长稳与测量）不在这里。
 #
 #   SER=gaokun3 bash scripts/accept.sh [选项]
-#     --readonly          只做只读检查：跳过相机（A12）、麦克风（A13）与真解视频（A11 的第 5 步）
+#     --readonly          只做只读检查：跳过相机（A12）、麦克风（A13）与真解、真编视频（A11的第5、5b步）
 #     --stamp <戳>        期望的 ro.build.date.utc（候选版的构建戳）；不给就只记录、不判
 #     --profile release   默认。A3（G1 安全默认值）不过判 FAIL
 #     --profile dev       开发构建（adb 免授权、TCP 5555 是故意的）：A3 只记录
@@ -169,12 +169,14 @@ if [ "$DT" -le 5 ]; then pass A10 "设备与宿主机时间差 ${DT} 秒"
 elif [ "$DT" -le 60 ]; then warn A10 "设备与宿主机时间差 ${DT} 秒"
 else fail A10 "设备与宿主机时间差 ${DT} 秒（NTP 没对上）"; fi
 
-# ── A11 硬解 ──
-sect "A11 硬件视频解码（verify-hw-codec2.sh）"
+# ── A11 硬件编解码 ──
+sect "A11 硬件视频编解码（verify-hw-codec2.sh）"
 V=; [ $RO = 0 ] && [ -n "$VIDEO" ] && V=$VIDEO
-SERIAL=$SER bash "$HERE/verify-hw-codec2.sh" $V > "$OUT/verify-hw-codec2.txt" 2>&1; rc=$?
+NOENC=$([ $RO = 1 ] && echo 1) SERIAL=$SER bash "$HERE/verify-hw-codec2.sh" $V > "$OUT/verify-hw-codec2.txt" 2>&1; rc=$?
 info "$(grep '小结' "$OUT/verify-hw-codec2.txt")"
 [ $rc = 0 ] && pass A11 "verify-hw-codec2.sh 全过" || { fail A11 "verify-hw-codec2.sh 有失败项（见 verify-hw-codec2.txt）"; grep FAIL "$OUT/verify-hw-codec2.txt" | sed 's/^/         /' | tee -a "$REPORT"; }
+S5B=$(sed -n '/═══ 5b\./,/═══ 6\./p' "$OUT/verify-hw-codec2.txt" | grep -m1 '\[SKIP\]' | sed 's/.*\[SKIP\] *//')
+[ -n "$S5B" ] && skip A11 "没有真编：$S5B"
 [ -z "$V" ] && skip A11 "没有真解视频（$([ $RO = 1 ] && echo '--readonly' || echo '没给 --video')）—— 组件在列表里不等于能解码"
 
 # ── A12 相机 ──

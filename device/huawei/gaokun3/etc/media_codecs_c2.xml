@@ -17,10 +17,9 @@
     venus 时代（`tools/v4l2-probe` 实测 VIDIOC_ENUM_FMT）：解码 H264 VP80 VP90 HEVC MPG2，编码 H264 VP80 HEVC
     ★ iris gen1（iris_platform_vpu2.c 的格式表，#128）：解码 H264 HEVC VP90，编码 H264 HEVC
   v4l2_codec2 有组件的（v4l2/V4L2ComponentCommon.cpp）：
-    解码 avc / vp8 / vp9 / hevc / av1，编码 avc / vp8 / vp9
-  ⇒ 交集 = 解码 avc/vp9/hevc，编码 avc。
+    解码avc/vp8/vp9/hevc/av1，编码avc/vp8/vp9，加上patches/android/v4l2-codec2/0005的hevc编码
+  ⇒ 交集 = 解码avc/vp9/hevc，编码avc/hevc。
     ⚠️ VP8：iris 不解。这里要是还声明它，rank 压过软解，应用拿到失败而不是回退；
-    ⚠️ HEVC 硬件能编但 v4l2_codec2 没有 HEVC 编码组件；
     ⚠️ AV1、VP9 编码硬件都没有 —— 对应属性必须保持 false。
   ⚠️ 不声明 *.decoder.secure：本机没有安全播放（无 Widevine L1）。
 
@@ -33,10 +32,35 @@
   min 128x128 则是实测值（ENUM_FRAMESIZES 报的下限，比上游模板的 16x16 大得多）。
 -->
 <MediaCodecs>
-    <!-- 编码器故意不声明：实测 surface 输入路径走不通（Venus 要 NV12，而
-         SurfaceFlinger 给 RGBX_8888/IMPLEMENTATION_DEFINED，EncodeComponent
-         不做转换），而组件 rank 0x80 会压过软编的 0x200，于是应用是失败而
-         不是回退。理由与实测日志见 device.mk。 -->
+    <!-- 硬件编码：只能配合带CP非像素上下文的内核（patches/kernel/iommu/0001），条件见device.mk。
+         concurrent-instances 1：编码器的ARP缓冲映射在一个固定IOVA上，同一时刻只有一个编码会话，
+         两个编码器共用ro.vendor.v4l2_codec2.encode_concurrent_instances这一个计数。
+         尺寸下限128x128是iris的帧尺寸下限（iris_platform_vpu2.c）。上限是判断，不是实测：
+         实测做到1080p 30 fps；按4K30申报（3840x2176@30 = 979200块/秒），驱动的核心负载上限是
+         4096x2176@60，编解码共用。码率下限32 kbps是驱动gen1编码器的下限，上限40 Mbps是
+         HEVC 5.1级Main层级的码率上限，H.264取同一个值。
+         码率模式只能由这里声明（Codec2InfoBuilder不向组件查询），不写时应用只看到VBR；
+         组件和iris gen1都支持VBR与CBR。 -->
+    <Encoders>
+        <MediaCodec name="c2.v4l2.avc.encoder" type="video/avc">
+            <Limit name="size" min="128x128" max="4096x2176" />
+            <Limit name="alignment" value="2x2" />
+            <Limit name="block-size" value="16x16" />
+            <Limit name="blocks-per-second" range="1-979200" />
+            <Limit name="bitrate" range="32000-40000000" />
+            <Limit name="concurrent-instances" max="1" />
+            <Feature name="bitrate-modes" value="VBR,CBR" />
+        </MediaCodec>
+        <MediaCodec name="c2.v4l2.hevc.encoder" type="video/hevc">
+            <Limit name="size" min="128x128" max="4096x2176" />
+            <Limit name="alignment" value="2x2" />
+            <Limit name="block-size" value="16x16" />
+            <Limit name="blocks-per-second" range="1-979200" />
+            <Limit name="bitrate" range="32000-40000000" />
+            <Limit name="concurrent-instances" max="1" />
+            <Feature name="bitrate-modes" value="VBR,CBR" />
+        </MediaCodec>
+    </Encoders>
 
     <Decoders>
         <MediaCodec name="c2.v4l2.avc.decoder" type="video/avc">

@@ -84,7 +84,7 @@ SC8280XP在`gaokun3`上启用了3个DWC3控制器，各自的角色能力不同�
 | `qcom/sc8280xp/HUAWEI/gaokun3/qcadsp8280.mbn` + `adsp*.jsn` | ADSP | 音频、电池/UCSI（`pmic_glink`）远端处理器固件 |
 | `qcom/sc8280xp/HUAWEI/gaokun3/qccdsp8280.mbn` + `cdsp*.jsn` | CDSP | 计算DSP远端处理器固件 |
 | `qcom/sc8280xp/HUAWEI/gaokun3/qcslpi8280.mbn` + `slpi*.jsn` | SLPI | 传感器中枢DSP固件（配合`/vendor/etc/sensors/config/`与`sns.reg`使用，见[sensors-ssc-protocol.md](sensors-ssc-protocol.md)） |
-| `qcom/sc8280xp/HUAWEI/gaokun3/qcvss8280.mbn` | 视频解码 | Iris / Venus硬件视频编解码器固件（`VIDEO.VE.6.0-00055-PROD-1`） |
+| `qcom/sc8280xp/HUAWEI/gaokun3/qcvss8280.mbn` | 视频编解码 | Iris / Venus硬件视频编解码器固件（`VIDEO.VE.6.0-00055-PROD-1`） |
 | `qcom/sc8280xp/SC8280XP-HUAWEI-GAOKUN3-tplg.bin` | 音频拓扑 | Audioreach（`q6apm`）声卡拓扑文件 |
 | `ath11k/WCN6855/hw2.1/{amss.bin,m3.bin,board-2.bin,regdb.bin}` | Wi-Fi | WCN6855 PCIe无线网卡固件与板级校准数据 |
 | `qca/wcnhpbtfw21.tlv`、`qca/wcnhpnv21g.bin` | 蓝牙 | WCN6855蓝牙控制器补丁与NVM配置 |

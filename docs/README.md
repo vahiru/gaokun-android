@@ -34,7 +34,7 @@
 | [dev/android-bringup.md](dev/android-bringup.md) | Android系统移植总览：UEFI双阶段启动链路、必选内核Kconfig项、温控/电源/导航栏HAL、Wi-Fi 6E与蓝牙集成、SELinux策略与内置`ReSukiSU` |
 | [dev/gpu-turnip.md](dev/gpu-turnip.md) | Adreno 690 GPU加速架构：Turnip + ANGLE + DPU图形栈、`VkNativeBufferANDROID`延迟绑定修复、GPU SMMU失速死锁处理与P010零拷贝合成 |
 | [dev/mesa-a17.md](dev/mesa-a17.md) | Android 17上的Mesa 26.1 Turnip构建管线（`meson2hermetic`与`scripts/mesa-a17/`） |
-| [dev/audio-video.md](dev/audio-video.md) | 音频与硬件视频编解码：Audioreach/SoundWire拓扑、扬声器增益与防爆音、有线耳机插拔检测、内置麦克风录音、低延迟音频播放、`qcom-iris`视频硬解及内核侧硬件编码 |
+| [dev/audio-video.md](dev/audio-video.md) | 音频与硬件视频编解码：Audioreach/SoundWire拓扑、扬声器增益与防爆音、有线耳机插拔检测、内置麦克风录音、低延迟音频播放及`qcom-iris`视频硬件编解码 |
 | [dev/camera.md](dev/camera.md) | 相机子系统：前后摄（Hi-846 / OV13B10）与闪光灯供电拓扑、`titan_top_gdsc`电源域死锁修复、`libcamera`软件ISP标定及自研AIDL Camera HAL |
 
 ### 2. 专题设计与协议参考

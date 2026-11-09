@@ -45,7 +45,7 @@ The table below shows how the main features work in the current version. See the
 | Sensors | ✅ | Accelerometer and ambient light sensor work, with auto-rotate and auto-brightness; there is no magnetometer |
 | Games | ⚠️ | Genshin Impact runs smoothly at the highest settings, Arknights, Delta Force and others run; League of Legends: Wild Rift starts. **Playing games that come with ACE framework or other anti-cheat mechanisms on this system may get your account banned** |
 | Video playback | ✅ | Hardware decoding, including 10-bit and HDR video |
-| Video encoding | ❌ | Hardware encoding is not available yet, because adapting the encoder component is unfinished; screen and camera recording use software encoding |
+| Video encoding | ⚠️ | H.264 and HEVC hardware encoding, used for camera recording; the built-in screen recorder still uses software encoding; only one stream at a time uses the hardware, and video processed after the screen turns off may come out incomplete |
 | Camera | ⚠️ | Uses a software ISP. Both cameras take photos and record video, the rear camera has autofocus; exposure compensation is not supported yet, dim scenes are noisy, and recording above 720p@30fps may crash the camera app |
 | USB-C | ⚠️ | File transfer and network sharing with a computer, USB flash drives and external displays work; occasionally the USB-C port does not work after a boot until a restart, the cause is still under investigation |
 | Fingerprint | ❌ | Not available yet; the driver and system service are under development |
