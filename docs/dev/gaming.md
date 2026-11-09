@@ -9,8 +9,8 @@
 | 地址空间 | **39位用户虚拟地址窗口**（`patches/kernel/core/0006`） | 主线arm64内核默认给64位进程分配$2^{48}$地址空间，而部分Unity `il2cpp`游戏（如《英雄联盟手游》）假定用户态指针不超过$2^{39}$，启动即崩溃。补丁保持48位页表，将64位进程默认mmap窗口压到39位（`ARM64_USER_MMAP_WINDOW_39`、`ARCH_MMAP_RND_BITS_MAX=24`，与手机一致） | `kernel-apply-patches.sh`、`kernel-config-android.sh` |
 | 内核版本 | **按应用UID伪装`uname`版本**（`patches/kernel/core/0008` + Parts设置） | 部分环境检测只接受4/5/6开头的Android通用内核版本，见到7.x直接判异常。只改变应用进程读到的版本号，系统组件仍读真实版本（见第2节） | `patches/kernel/core/0008`、`init.gaokun3.rc`、Parts `AppKernelSettingsActivity`、`crdroid-tree-fixes.py` |
 | 着色器缓存 | **EGL多文件blob缓存**（`ro.egl.blobcache.multifile=true`） | ANGLE的程序与管线缓存容易超出默认的2 MiB单文件上限，导致大型3D游戏（如《鸣潮》）每次启动都重新编译着色器 | `device.mk` |
-| 音频延迟 | **10 ms FastMixer低延迟通路**（`patches/android/hardware-interfaces/0008` + `crdroid-tree-fixes.py`） | 将应用输出延迟从约317 ms降到约114 ms（`ro.vendor.audio.primary.out_latency_ms=10`，`mixPeriod=10.00 ms`） | `device.mk`、`crdroid-tree-fixes.py` |
-| 音频延迟 | **播放缓冲3个period**（`patches/android/hardware-interfaces/0011`） | ALSA播放缓冲由4个480帧的period减到3个，输出延迟再少约10 ms；录音方向仍为4个，不影响采集钩子与降噪（`ro.vendor.audio.primary.out_period_count=3`） | `device.mk`、`crdroid-tree-fixes.py` |
+| 音频延迟 | **5 ms FastMixer低延迟通路**（`patches/android/hardware-interfaces/0008` + `patches/kernel/audio/0013` + `crdroid-tree-fixes.py`） | 原来85 ms一块时没有FastMixer，游戏的低延迟请求批不下来，应用输出延迟约317 ms。播放块现为5 ms（`ro.vendor.audio.primary.out_latency_ms=5`，`mixPeriod=5.00 ms`），按块数申请缓冲的游戏（如PJSK申请两个块），轨道缓冲也随之缩小；内核`q6apm-dai`的播放period步长同时改为240帧，否则ALSA缓冲不会跟着缩短 | `device.mk`、`kernel-apply-patches.sh`、`crdroid-tree-fixes.py` |
+| 音频延迟 | **播放缓冲3个period**（`patches/android/hardware-interfaces/0011`） | ALSA播放缓冲切成3个period（3 × 240帧 = 15 ms）；录音方向仍为4个，不影响采集钩子与降噪（`ro.vendor.audio.primary.out_period_count=3`）。与上一行合计：按PJSK的申请方式，应用按时间戳算出的输出延迟中位约21.5 ms（10 ms块、3 × 480帧时为43.7 ms），扬声器和有线耳机相同 | `device.mk`、`crdroid-tree-fixes.py` |
 | 触摸响应 | **`game`触摸预设** | 关闭坐标平滑（减少约25 ms稳态滞后）、debounce设为1帧、关闭手掌位置图（避免贴屏幕边缘平放的拇指被当成手掌撤回）。可在"设置 → 显示 → 触摸模式"切换 | `bin/gaokun3-touch-mode.sh`，详见[`palm-rejection.md`](palm-rejection.md) |
 | 调度 | **后台cpuset限在`0-3`** | 将`background`和`system-background`限制在4个能效核，避免后台任务与前台游戏争抢大核 | `device/huawei/gaokun3/` |
 
