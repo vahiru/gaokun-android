@@ -2,7 +2,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:gk3_windows/session.dart';
 import 'package:gk3_windows/ui/run_pages.dart';
+import 'package:gk3_windows/ui/wipe_pages.dart';
 
 import 'helpers.dart';
 
@@ -136,6 +138,58 @@ void main() {
     expect(find.text(l.errRelease), findsOneWidget);
     expect(find.text(l.failUntouched), findsOneWidget);
     expect(s.touched, isFalse);
+  });
+
+  testWidgets('整盘安装：侧栏入口 → 说明 → 检查 → 版本 → 确认；gk3w 还没有 live 命令，准备这一步按失败处理', (t) async {
+    final window = <MethodCall>[];
+    t.binding.defaultBinaryMessenger.setMockMethodCallHandler(const MethodChannel('gk3/window'), (c) async {
+      window.add(c);
+      return null;
+    });
+    addTearDown(() => t.binding.defaultBinaryMessenger.setMockMethodCallHandler(const MethodChannel('gk3/window'), null));
+    final (rec, s) = await pumpApp(t, 'free');
+    await see(t, find.text(l.chkRoom('40 GiB')));
+    expect(enabled(t, l.railWipe), isTrue);
+    await tap(t, find.text(l.railWipe));
+    await see(t, find.text(l.wipeAboutWarn));
+    // 已在整盘安装流程里：入口不可用
+    expect(enabled(t, l.railWipe), isFalse);
+    await tap(t, find.text(l.btnNext));
+    await see(t, find.text(l.wipeCheckSub));
+    expect(find.text(l.chkRoom('40 GiB')), findsOneWidget);
+    expect(find.text(l.chkWipeRoomDetail('2 GiB')), findsOneWidget);
+    await tap(t, find.text(l.btnNext));
+    await see(t, find.text(l.releaseSubWipe));
+    await see(t, find.textContaining('v1.0.0-rc.3'));
+    await tap(t, find.text(l.btnNext));
+    await see(t, find.text(l.wipeConfirmPart('2 GiB')));
+    expect(find.text(l.wipeConfirmErase), findsOneWidget);
+
+    await hold(t, l.holdToPrepare);
+    await waitFor(t, find.byType(FailPage), tries: 400);
+    expect(find.text(l.failPrepareTitle), findsOneWidget);
+    expect(find.text(l.failUntouched), findsOneWidget);
+    expect(rec.calls.where((c) => c.first == 'download').length, 1);
+    final live = rec.calls.singleWhere((c) => c.first == 'live');
+    expect(live, containsAllInOrder(['--disk', '2', '--region-start', '874383360', '--region-end', '958269439']));
+    expect(live, containsAllInOrder(['--release', r'C:\ProgramData\gaokun3\release', '--real-disk']));
+    expect(s.task, WriteTask.prepare);
+    final busy = [for (final c in window) if (c.method == 'setBusy') c.arguments as Map];
+    expect(busy.where((a) => a['busy'] == true).single, {'busy': true, 'power': l.runPrepareTitle, 'shutdown': l.shutdownReasonPrepare});
+    expect(busy.last['busy'], isFalse);
+    // 失败页回到首页后，入口又能用了
+    await tap(t, find.text(l.btnStartOver));
+    await see(t, find.text(l.chkRoom('40 GiB')));
+    expect(enabled(t, l.railWipe), isTrue);
+  });
+
+  testWidgets('整盘安装：没有未分配空间时说明要压缩出多少，不能往下走', (t) async {
+    await pumpApp(t, 'nospace');
+    await tap(t, find.text(l.railWipe));
+    await tap(t, find.text(l.btnNext));
+    await see(t, find.text(l.chkNoRoom('2 GiB')));
+    expect(find.byType(WipeCheckPage), findsOneWidget);
+    expect(enabled(t, l.btnNext), isFalse);
   });
 
   testWidgets('英文界面：检查页上没有中文', (t) async {

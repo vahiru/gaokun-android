@@ -4,7 +4,13 @@ import 'package:gk3_common/backend/protocol.dart';
 
 import 'model.dart';
 
-enum WriteTask { install, uninstall }
+enum WriteTask { install, uninstall, prepare }
+
+/// 整盘安装要在未分配空间里划出多大的 GK3LIVE 分区（LiveCD + 所选版本的安装文件）。
+/// 暂定值：按 scripts/windows/gaokun3-setup.ps1 的算法（内容 ×1.25 + 128 MiB，按 256 MiB 向上取整）
+/// 估 rc.3（LiveCD 约 210 MiB + boot.img 27 MiB + super.img.zst 1290 MiB）。gk3w 还没有写入 LiveCD 的命令，
+/// 做好之后改为问 gk3w（与 plan 一样），按所选版本的实际大小算。
+const kWipeNeedMib = 2048;
 
 /// 一次安装器会话：检查结果、用户的选择、正在跑的任务。界面只读它、调它的方法。
 /// ★ 分区怎么排、够不够，一律问 gk3w（plan / apply），这里不算。
@@ -70,6 +76,12 @@ class Session extends ChangeNotifier {
   }
 
   bool get hasRoom => plans.values.any((p) => p.ok);
+
+  /// 整盘安装：放 GK3LIVE 的那块未分配空间（够大的里面最大的一块；没有 = null）
+  FreeSpan? get wipeRegion {
+    final fits = [for (final f in freeSpans) if (f.sizeMib >= kWipeNeedMib) f];
+    return fits.isEmpty ? null : fits.reduce((a, b) => a.sizeMib >= b.sizeMib ? a : b);
+  }
 
   void selectRegion(FreeSpan f) {
     region = f;
@@ -167,8 +179,28 @@ class Session extends ChangeNotifier {
   }
 
   /// 下载（0–40 %）再安装（40–100 %）；用本地文件时直接安装（0–100 %）
-  Future<bool> install({required String releaseDir}) async {
-    task = WriteTask.install;
+  Future<bool> install({required String releaseDir}) => _downloadThen(WriteTask.install, releaseDir, (dir) {
+        final d = disk!, r = region!;
+        return ('apply', [
+          '--disk', '${d.num}', '--region-start', '${r.start}', '--region-end', '${r.end}',
+          '--release', dir, '--default-os', defaultOs, '--real-disk',
+          if (bitlockerAck) ...['--bitlocker-key', 'yes'],
+        ]);
+      });
+
+  /// 整盘安装在 Windows 端的准备：下载，再把 LiveCD 与安装文件写进 GK3LIVE、配置下一次开机进入 LiveCD。
+  /// gk3w 的 live 命令尚未实现（参数是计划中的样子），演示数据里也就没有它的录制，回放时这一步按失败处理。
+  Future<bool> prepareWipe({required String releaseDir}) => _downloadThen(WriteTask.prepare, releaseDir, (dir) {
+        final d = disk!, r = wipeRegion!;
+        return ('live', [
+          '--disk', '${d.num}', '--region-start', '${r.start}', '--region-end', '${r.end}',
+          '--release', dir, '--real-disk',
+          if (bitlockerAck) ...['--bitlocker-key', 'yes'],
+        ]);
+      });
+
+  Future<bool> _downloadThen(WriteTask t, String releaseDir, (String, List<String>) Function(String dir) command) async {
+    task = t;
     writing = true;
     percent = 0;
     log.clear();
@@ -186,12 +218,8 @@ class Session extends ChangeNotifier {
       }
       dir = dl.first('RELEASE')?['dir'] ?? releaseDir;
     }
-    final d = disk!, r = region!;
-    result = await backend.run('apply', [
-      '--disk', '${d.num}', '--region-start', '${r.start}', '--region-end', '${r.end}',
-      '--release', dir, '--default-os', defaultOs, '--real-disk',
-      if (bitlockerAck) ...['--bitlocker-key', 'yes'],
-    ], (e) => _onEvent(e, base: local ? 0 : 40, span: local ? 100 : 60));
+    final (fn, args) = command(dir);
+    result = await backend.run(fn, args, (e) => _onEvent(e, base: local ? 0 : 40, span: local ? 100 : 60));
     writing = false;
     notifyListeners();
     return result!.ok;

@@ -49,13 +49,14 @@ class DiskBundle extends AssetBundle {
   Future<T> loadStructuredData<T>(String key, Future<T> Function(String value) parser) async => parser(await loadString(key));
 }
 
-Future<(Rec, Session)> pumpApp(WidgetTester t, String scenario, {String language = 'zh'}) async {
+/// [home]：从某一页开始（出图时看那些回放数据走不到的页）
+Future<(Rec, Session)> pumpApp(WidgetTester t, String scenario, {String language = 'zh', Widget? home}) async {
   t.view.physicalSize = const Size(1280, 800);
   t.view.devicePixelRatio = 1;
   addTearDown(t.view.reset);
   final rec = Rec(FixtureBackend(scenario, bundle: DiskBundle(), speed: 0));
   final session = Session(rec, language: language);
-  await t.pumpWidget(WinInstallerApp(session: session));
+  await t.pumpWidget(WinInstallerApp(session: session, home: home));
   await t.runAsync(session.check);
   await settle(t);
   return (rec, session);

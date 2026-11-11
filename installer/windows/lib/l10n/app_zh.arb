@@ -383,5 +383,52 @@
   "shutdownReasonInstall": "正在安装Android。中断安装可能导致磁盘分区处于不完整状态。",
   "shutdownReasonUninstall": "正在卸载Android。中断卸载可能导致磁盘分区处于不完整状态。",
   "runSleepHintInstall": "安装过程中请勿合上键盘或按电源按钮，否则设备将进入睡眠状态，安装将随之暂停。",
-  "runSleepHintUninstall": "卸载过程中请勿合上键盘或按电源按钮，否则设备将进入睡眠状态，卸载将随之暂停。"
+  "runSleepHintUninstall": "卸载过程中请勿合上键盘或按电源按钮，否则设备将进入睡眠状态，卸载将随之暂停。",
+  "railWipe": "清除整个磁盘并安装",
+  "railAbout": "说明",
+  "railPrepare": "准备",
+  "wipeAboutTitle": "清除整个磁盘并安装",
+  "wipeAboutSub": "Android将作为本设备唯一的操作系统，并占用整个系统磁盘。",
+  "wipeAboutSteps": "安装将按以下步骤进行：",
+  "wipeAboutStep1": "本程序在未分配空间中创建GK3LIVE分区，写入LiveCD及所选版本的安装文件。",
+  "wipeAboutStep2": "重启后，设备将进入LiveCD。",
+  "wipeAboutStep3": "经再次确认后，LiveCD将清除整个系统磁盘并安装Android。",
+  "wipeAboutWarn": "系统磁盘中的所有数据都将被清除，包括Windows、恢复分区及全部个人文件，且无法恢复。请先将重要文件备份至其他设备。",
+  "wipeAboutKeepWindows": "如需保留Windows，请返回并使用双系统安装。",
+  "wipeCheckSub": "开始准备之前，请确认当前设备满足以下条件。未满足的条件发生变化后，请点击“重新检查”刷新状态。",
+  "chkWipeRoomDetail": "将使用其中的{need}存放LiveCD及安装文件",
+  "@chkWipeRoomDetail": {
+    "placeholders": {
+      "need": {
+        "type": "String"
+      }
+    }
+  },
+  "releaseSubWipe": "所选版本的安装文件将与LiveCD一并写入磁盘，在LiveCD中安装时无需连接网络。",
+  "wipeConfirmTitle": "确认清除整个磁盘并安装",
+  "wipeConfirmSub": "重启后，LiveCD将清除整个系统磁盘，包括Windows及其中的全部数据。请提前备份重要数据。",
+  "wipeConfirmNow": "安装器将立即执行以下操作：",
+  "wipeConfirmPart": "在未分配空间中创建GK3LIVE分区（{size}），写入LiveCD及安装文件",
+  "@wipeConfirmPart": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "wipeConfirmOnce": "仅将下一次开机设为进入LiveCD",
+  "wipeConfirmAfter": "重启后，LiveCD将：",
+  "wipeConfirmErase": "再次请求确认，随后清除整个系统磁盘（包括Windows、恢复分区及全部个人文件）并安装Android",
+  "wipeConfirmCancel": "如在LiveCD中取消安装，重启后设备将返回Windows，磁盘中的数据不受影响",
+  "holdToPrepare": "按住2秒开始准备",
+  "runPrepareTitle": "正在准备LiveCD",
+  "runSleepHintPrepare": "准备过程中请勿合上键盘或按电源按钮，否则设备将进入睡眠状态，准备工作将随之暂停。",
+  "shutdownReasonPrepare": "正在写入LiveCD。中断写入可能导致磁盘分区处于不完整状态。",
+  "donePrepareTitle": "LiveCD已准备就绪",
+  "donePrepareSub": "重启设备即可进入LiveCD，清除整个磁盘并安装Android。",
+  "donePrepareConfirm": "LiveCD将在清除磁盘之前再次请求确认。",
+  "donePrepareCancel": "如在LiveCD中取消安装，重启后设备将返回Windows。",
+  "donePreparePower": "安装过程中请保持连接电源适配器。",
+  "failPrepareTitle": "准备未完成",
+  "failTouchedPrepare": "磁盘已发生部分更改，但Windows系统不受影响。请返回首页重新检查后重试。"
 }

@@ -3,6 +3,7 @@ import 'package:gk3_common/ui/theme.dart';
 import 'package:gk3_common/ui/widgets.dart';
 
 import '../app.dart';
+import '../l10n/app_localizations.dart';
 import '../model.dart';
 import 'bits.dart';
 import 'install_pages.dart';
@@ -16,33 +17,9 @@ class CheckPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = context.session, l = context.l;
-    final pf = s.preflight, d = s.disk;
-    final rows = <CheckRow>[];
-    var blocked = false;
-    if (!s.checking && s.checkErr != null) {
-      rows.add(CheckRow(state: CheckState.fail, title: l.chkFailed, detail: errText(l, s.checkErr!)));
-      blocked = true;
-    }
-    if (!s.checking && pf != null) {
-      rows.add(pf.modelOk
-          ? CheckRow(state: CheckState.ok, title: l.chkModel, detail: '${pf.manufacturer} ${pf.model}')
-          : CheckRow(state: CheckState.fail, title: l.chkModelBad, detail: l.chkModelBadHow('${pf.manufacturer} ${pf.model}')));
-      rows.add(switch (pf.secureBoot) {
-        'off' => CheckRow(state: CheckState.ok, title: l.chkSecureBootOff),
-        'on' => CheckRow(state: CheckState.fail, title: l.chkSecureBootOn, detail: l.chkSecureBootHow),
-        _ => CheckRow(state: CheckState.warn, title: l.chkSecureBootUnknown, detail: l.chkSecureBootHow),
-      });
-      rows.add(pf.fastStartup == 'on'
-          ? CheckRow(state: CheckState.fail, title: l.chkFastStartupOn, detail: pf.hibernate == 'off' ? l.chkFastStartupHowReg : l.chkFastStartupHow)
-          : CheckRow(state: CheckState.ok, title: l.chkFastStartupOff));
-      rows.add(pf.bitlocker == 'off'
-          ? CheckRow(state: CheckState.ok, title: l.chkBitlockerOff)
-          : CheckRow(state: CheckState.warn, title: pf.bitlocker == 'on' ? l.chkBitlockerOn : l.chkBitlockerUnknown, detail: l.chkBitlockerHow));
-      rows.add(pf.lowBattery
-          ? CheckRow(state: CheckState.fail, title: l.chkBatteryLow, detail: l.chkBatteryLowHow)
-          : CheckRow(state: CheckState.ok, title: l.chkPower, detail: _power(context, pf)));
-      blocked |= !pf.modelOk || pf.secureBoot == 'on' || pf.fastStartup == 'on' || pf.lowBattery;
-    }
+    final d = s.disk;
+    final (rows, blockedByPreflight) = preflightRows(context);
+    var blocked = blockedByPreflight;
     if (!s.checking && s.probe != null) {
       if (d == null) {
         rows.add(CheckRow(state: CheckState.fail, title: l.chkNoSystemDisk));
@@ -85,14 +62,48 @@ class CheckPage extends StatelessWidget {
             ]),
     );
   }
+}
 
-  String _power(BuildContext context, Preflight pf) {
-    final l = context.l;
-    final b = pf.battery == null ? '' : l.chkBatteryPct(pf.battery!);
-    return switch (pf.ac) {
-      'yes' => l.chkOnAc(b),
-      'no' => l.chkOnBattery(b),
-      _ => b,
-    };
+/// 两个流程共用的检查项（检查失败、机型、Secure Boot、快速启动、BitLocker、电源），以及其中有没有挡住继续的项。
+/// 整盘安装同样要求关闭快速启动：在 LiveCD 中取消安装后会回到 Windows，而从 Windows 关机到再次启动之间，
+/// EFI 分区可能被 systemd-boot 或 LiveCD 修改（理由同双系统安装，见 chkFastStartupHow）。
+(List<CheckRow>, bool) preflightRows(BuildContext context) {
+  final s = context.session, l = context.l;
+  final pf = s.preflight;
+  final rows = <CheckRow>[];
+  var blocked = false;
+  if (!s.checking && s.checkErr != null) {
+    rows.add(CheckRow(state: CheckState.fail, title: l.chkFailed, detail: errText(l, s.checkErr!)));
+    blocked = true;
   }
+  if (!s.checking && pf != null) {
+    rows.add(pf.modelOk
+        ? CheckRow(state: CheckState.ok, title: l.chkModel, detail: '${pf.manufacturer} ${pf.model}')
+        : CheckRow(state: CheckState.fail, title: l.chkModelBad, detail: l.chkModelBadHow('${pf.manufacturer} ${pf.model}')));
+    rows.add(switch (pf.secureBoot) {
+      'off' => CheckRow(state: CheckState.ok, title: l.chkSecureBootOff),
+      'on' => CheckRow(state: CheckState.fail, title: l.chkSecureBootOn, detail: l.chkSecureBootHow),
+      _ => CheckRow(state: CheckState.warn, title: l.chkSecureBootUnknown, detail: l.chkSecureBootHow),
+    });
+    rows.add(pf.fastStartup == 'on'
+        ? CheckRow(state: CheckState.fail, title: l.chkFastStartupOn, detail: pf.hibernate == 'off' ? l.chkFastStartupHowReg : l.chkFastStartupHow)
+        : CheckRow(state: CheckState.ok, title: l.chkFastStartupOff));
+    rows.add(pf.bitlocker == 'off'
+        ? CheckRow(state: CheckState.ok, title: l.chkBitlockerOff)
+        : CheckRow(state: CheckState.warn, title: pf.bitlocker == 'on' ? l.chkBitlockerOn : l.chkBitlockerUnknown, detail: l.chkBitlockerHow));
+    rows.add(pf.lowBattery
+        ? CheckRow(state: CheckState.fail, title: l.chkBatteryLow, detail: l.chkBatteryLowHow)
+        : CheckRow(state: CheckState.ok, title: l.chkPower, detail: _power(l, pf)));
+    blocked |= !pf.modelOk || pf.secureBoot == 'on' || pf.fastStartup == 'on' || pf.lowBattery;
+  }
+  return (rows, blocked);
+}
+
+String _power(L10n l, Preflight pf) {
+  final b = pf.battery == null ? '' : l.chkBatteryPct(pf.battery!);
+  return switch (pf.ac) {
+    'yes' => l.chkOnAc(b),
+    'no' => l.chkOnBattery(b),
+    _ => b,
+  };
 }

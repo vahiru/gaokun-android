@@ -8,6 +8,7 @@ import 'l10n/app_localizations.dart';
 import 'session.dart';
 import 'ui/check_page.dart';
 import 'ui/title_bar.dart';
+import 'ui/wipe_pages.dart';
 
 const kAppVersion = '0.1.0-proto';
 
@@ -92,10 +93,14 @@ class WinInstallerApp extends StatelessWidget {
   }
 }
 
-/// 安装流程的六步（左侧步骤栏只是指示）
+/// 双系统安装的六步（左侧步骤栏只是指示）
 enum WinStep { check, region, release, options, confirm, install }
 
-/// 每一步的骨架：gk3_common 的 StepScaffold，填上这六步、侧栏底部的语言切换与版本号
+/// 整盘安装在 Windows 端的五步（侧栏底部的入口进入）；清除磁盘与安装在 LiveCD 里进行
+enum WipeStep { about, check, release, confirm, prepare }
+
+/// 每一步的骨架：gk3_common 的 StepScaffold，填上所在流程的步骤（[WinStep] 或 [WipeStep]）、
+/// 侧栏底部的整盘安装入口、语言切换与版本号
 class WinStepPage extends StatelessWidget {
   const WinStepPage({
     super.key,
@@ -112,7 +117,8 @@ class WinStepPage extends StatelessWidget {
     this.danger = false,
   });
 
-  final WinStep step;
+  /// [WinStep] 或 [WipeStep]：决定侧栏显示哪个流程的步骤
+  final Enum step;
   final String title;
   final String? subtitle;
   final Widget child;
@@ -124,15 +130,26 @@ class WinStepPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    assert(step is WinStep || step is WipeStep);
     final l = context.l, s = context.session;
-    final steps = [
-      RailStep(l.railCheck, Icons.fact_check_outlined, Icons.fact_check),
-      RailStep(l.railRegion, Icons.storage_outlined, Icons.storage),
-      RailStep(l.railRelease, Icons.download_outlined, Icons.download),
-      RailStep(l.railOptions, Icons.tune_outlined, Icons.tune),
-      RailStep(l.railConfirm, Icons.verified_user_outlined, Icons.verified_user),
-      RailStep(l.railInstall, Icons.install_desktop_outlined, Icons.install_desktop),
-    ];
+    final wipe = step is WipeStep;
+    final steps = wipe
+        ? [
+            RailStep(l.railAbout, Icons.info_outline, Icons.info),
+            RailStep(l.railCheck, Icons.fact_check_outlined, Icons.fact_check),
+            RailStep(l.railRelease, Icons.download_outlined, Icons.download),
+            RailStep(l.railConfirm, Icons.verified_user_outlined, Icons.verified_user),
+            RailStep(l.railPrepare, Icons.album_outlined, Icons.album),
+          ]
+        : [
+            RailStep(l.railCheck, Icons.fact_check_outlined, Icons.fact_check),
+            RailStep(l.railRegion, Icons.storage_outlined, Icons.storage),
+            RailStep(l.railRelease, Icons.download_outlined, Icons.download),
+            RailStep(l.railOptions, Icons.tune_outlined, Icons.tune),
+            RailStep(l.railConfirm, Icons.verified_user_outlined, Icons.verified_user),
+            RailStep(l.railInstall, Icons.install_desktop_outlined, Icons.install_desktop),
+          ];
+    final footerButton = TextButton.styleFrom(alignment: Alignment.centerLeft, padding: const EdgeInsets.symmetric(horizontal: 16));
     return StepScaffold(
       steps: steps,
       current: step.index,
@@ -140,8 +157,15 @@ class WinStepPage extends StatelessWidget {
       railIcon: null,
       railSubtitle: l.railSub,
       railFooter: [
+        // 整盘安装的入口：写盘期间、已在整盘安装流程里时不可用
         TextButton.icon(
-          style: TextButton.styleFrom(alignment: Alignment.centerLeft, padding: const EdgeInsets.symmetric(horizontal: 16)),
+          style: footerButton,
+          onPressed: s.writing || wipe ? null : () => go(context, const WipeAboutPage()),
+          icon: const Icon(Icons.delete_sweep_outlined),
+          label: Text(l.railWipe),
+        ),
+        TextButton.icon(
+          style: footerButton,
           onPressed: s.writing ? null : () => s.setLanguage(s.language == 'zh' ? 'en' : 'zh'),
           icon: const Icon(Icons.translate),
           label: Text(l.railLanguage),

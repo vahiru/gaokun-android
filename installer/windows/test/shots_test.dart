@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gk3_common/ui/theme.dart';
 import 'package:gk3_windows/app.dart';
+import 'package:gk3_windows/session.dart';
 import 'package:gk3_windows/ui/run_pages.dart';
 
 import 'helpers.dart';
@@ -100,6 +101,44 @@ void main() {
     await hold(t, l.holdToInstall);
     await waitFor(t, find.byType(FailPage), tries: 400);
     await shot(t, '23-fail');
+  }, skip: !haveFont);
+
+  testWidgets('整盘安装', (t) async {
+    await pumpApp(t, 'free');
+    await tap(t, find.text(l.railWipe));
+    await shot(t, '41-wipe-about');
+    await tap(t, find.text(l.btnNext));
+    await shot(t, '42-wipe-check');
+    await tap(t, find.text(l.btnNext));
+    await waitFor(t, find.textContaining('v1.0.0-rc.3'));
+    await shot(t, '43-wipe-release');
+    await tap(t, find.text(l.btnNext));
+    await shot(t, '44-wipe-confirm');
+    await hold(t, l.holdToPrepare);
+    await waitFor(t, find.byType(FailPage), tries: 400);
+    await shot(t, '45-wipe-fail-no-backend');
+  }, skip: !haveFont);
+
+  testWidgets('整盘安装：没有空间', (t) async {
+    await pumpApp(t, 'nospace');
+    await tap(t, find.text(l.railWipe));
+    await tap(t, find.text(l.btnNext));
+    await shot(t, '46-wipe-nospace');
+  }, skip: !haveFont);
+
+  testWidgets('整盘安装：准备完成（回放数据走不到这一页，直接从这一页开始）', (t) async {
+    await pumpApp(t, 'free', home: const DonePage(task: WriteTask.prepare));
+    await shot(t, '47-wipe-done');
+  }, skip: !haveFont);
+
+  testWidgets('整盘安装：英文', (t) async {
+    await pumpApp(t, 'free', language: 'en');
+    await tap(t, find.text(en.railWipe));
+    await tap(t, find.text(en.btnNext));
+    await tap(t, find.text(en.btnNext));
+    await waitFor(t, find.textContaining('v1.0.0-rc.3'));
+    await tap(t, find.text(en.btnNext));
+    await shot(t, '48-wipe-confirm-en');
   }, skip: !haveFont);
 
   testWidgets('英文', (t) async {

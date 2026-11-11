@@ -170,5 +170,52 @@
   "shutdownReasonInstall": "Installing Android. Interrupting the installation may leave disk partitions in an incomplete state.",
   "shutdownReasonUninstall": "Uninstalling Android. Interrupting the uninstallation may leave disk partitions in an incomplete state.",
   "runSleepHintInstall": "Do not close the keyboard cover or press the power button during installation. Otherwise, the device will enter sleep and the installation will be paused.",
-  "runSleepHintUninstall": "Do not close the keyboard cover or press the power button during uninstallation. Otherwise, the device will enter sleep and the uninstallation will be paused."
+  "runSleepHintUninstall": "Do not close the keyboard cover or press the power button during uninstallation. Otherwise, the device will enter sleep and the uninstallation will be paused.",
+  "railWipe": "Erase disk and install",
+  "railAbout": "Overview",
+  "railPrepare": "Prepare",
+  "wipeAboutTitle": "Erase disk and install",
+  "wipeAboutSub": "Android will become the only operating system on this device and will occupy the entire system disk.",
+  "wipeAboutSteps": "Installation proceeds in the following steps:",
+  "wipeAboutStep1": "This program creates a GK3LIVE partition in unallocated space and writes the LiveCD and the installation files of the selected release to it.",
+  "wipeAboutStep2": "After a restart, the device boots into the LiveCD.",
+  "wipeAboutStep3": "After a further confirmation, the LiveCD erases the entire system disk and installs Android.",
+  "wipeAboutWarn": "All data on the system disk will be erased, including Windows, the recovery partition and all personal files, and cannot be recovered. Back up important files to another device first.",
+  "wipeAboutKeepWindows": "To keep Windows, go back and install Android alongside Windows instead.",
+  "wipeCheckSub": "Before preparation begins, please ensure this device meets the following requirements. After making any changes, click “Check again” to refresh the status.",
+  "chkWipeRoomDetail": "{need} of it will be used to store the LiveCD and installation files",
+  "@chkWipeRoomDetail": {
+    "placeholders": {
+      "need": {
+        "type": "String"
+      }
+    }
+  },
+  "releaseSubWipe": "The installation files of the selected release will be written to the disk together with the LiveCD, so no network connection is required during installation in the LiveCD.",
+  "wipeConfirmTitle": "Confirm erasing the disk and installing",
+  "wipeConfirmSub": "After the restart, the LiveCD will erase the entire system disk, including Windows and all data on it. Back up important data before proceeding.",
+  "wipeConfirmNow": "The installer will now perform the following actions:",
+  "wipeConfirmPart": "Create a GK3LIVE partition ({size}) in unallocated space and write the LiveCD and installation files to it",
+  "@wipeConfirmPart": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "wipeConfirmOnce": "Set only the next boot to start the LiveCD",
+  "wipeConfirmAfter": "After the restart, the LiveCD will:",
+  "wipeConfirmErase": "Ask for confirmation again, then erase the entire system disk (including Windows, the recovery partition and all personal files) and install Android",
+  "wipeConfirmCancel": "If you cancel the installation in the LiveCD, the device returns to Windows after a restart and the data on the disk remains unaffected",
+  "holdToPrepare": "Hold for 2 seconds to start preparation",
+  "runPrepareTitle": "Preparing the LiveCD",
+  "runSleepHintPrepare": "Do not close the keyboard cover or press the power button during preparation. Otherwise, the device will enter sleep and the preparation will be paused.",
+  "shutdownReasonPrepare": "Writing the LiveCD. Interrupting it may leave disk partitions in an incomplete state.",
+  "donePrepareTitle": "The LiveCD is ready",
+  "donePrepareSub": "Restart the device to boot into the LiveCD, which will erase the entire disk and install Android.",
+  "donePrepareConfirm": "The LiveCD will ask for confirmation again before erasing the disk.",
+  "donePrepareCancel": "If you cancel the installation in the LiveCD, the device returns to Windows after a restart.",
+  "donePreparePower": "Keep the power adapter connected during installation.",
+  "failPrepareTitle": "Preparation incomplete",
+  "failTouchedPrepare": "The disk was partially modified, though your Windows installation is unaffected. Return to the start, check again and retry."
 }

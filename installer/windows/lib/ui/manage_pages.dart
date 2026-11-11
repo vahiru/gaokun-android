@@ -4,6 +4,7 @@ import 'package:gk3_common/ui/widgets.dart';
 
 import '../app.dart';
 import '../model.dart';
+import '../session.dart';
 import 'bits.dart';
 import 'install_pages.dart';
 import 'run_pages.dart';
@@ -71,7 +72,7 @@ class UninstallConfirmPage extends StatelessWidget {
             idle: l.holdToUninstall,
             busy: (_) => l.holdKeep,
             enabled: ready,
-            onConfirmed: () => go(context, const RunPage(task: RunTask.uninstall), replace: true),
+            onConfirmed: () => go(context, const RunPage(task: WriteTask.uninstall), replace: true),
           ),
         ),
       ]),

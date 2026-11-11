@@ -4,6 +4,7 @@ import 'package:gk3_common/ui/theme.dart';
 
 import '../app.dart';
 import '../session.dart';
+import 'run_pages.dart';
 
 /// 和 Windows 原生窗口打交道（windows/runner/flutter_window.cpp 里的 gk3/window 通道）：窗口没有系统标题栏，
 /// 拖动、最小化、关闭、选文件夹都由界面发起。浏览器预览与测试里没有这个通道，调用什么都不做。
@@ -57,11 +58,14 @@ class WindowButtons extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = context.session, l = context.l;
-    final install = s.task == WriteTask.install;
     WindowControl.setBusy(
       s.writing,
-      power: install ? l.runInstallTitle : l.runUninstallTitle,
-      shutdown: install ? l.shutdownReasonInstall : l.shutdownReasonUninstall,
+      power: runTitle(l, s.task),
+      shutdown: switch (s.task) {
+        WriteTask.install => l.shutdownReasonInstall,
+        WriteTask.uninstall => l.shutdownReasonUninstall,
+        WriteTask.prepare => l.shutdownReasonPrepare,
+      },
     );
     return Row(mainAxisSize: MainAxisSize.min, children: [
       _CaptionButton(icon: Icons.remove, label: context.l.winMinimize, onPressed: WindowControl.minimize),

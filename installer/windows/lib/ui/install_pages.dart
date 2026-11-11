@@ -4,10 +4,12 @@ import 'package:gk3_common/ui/widgets.dart';
 
 import '../app.dart';
 import '../model.dart';
+import '../session.dart';
 import 'bits.dart';
 import 'messages.dart';
 import 'run_pages.dart';
 import 'title_bar.dart';
+import 'wipe_pages.dart';
 
 /// 系统盘的分区条：已有的分区一律暗灰（muted），只突出空闲区、要装 Android 的那块与已装的 Android
 Widget systemDiskBar(BuildContext context, {FreeSpan? highlight}) {
@@ -93,9 +95,11 @@ class DiskLegend extends StatelessWidget {
   }
 }
 
-/// 第三步：装哪个版本、从哪来：GitHub 的 releases、R2 上的镜像，或者已经下载好的本地文件
+/// 第三步：装哪个版本、从哪来：GitHub 的 releases、R2 上的镜像，或者已经下载好的本地文件。
+/// 整盘安装（[wipe]）也用这一页：所选版本的安装文件随 LiveCD 一起写进 GK3LIVE
 class ReleasePage extends StatefulWidget {
-  const ReleasePage({super.key});
+  const ReleasePage({super.key, this.wipe = false});
+  final bool wipe;
   @override
   State<ReleasePage> createState() => _ReleasePageState();
 }
@@ -118,14 +122,14 @@ class _ReleasePageState extends State<ReleasePage> {
 
   @override
   Widget build(BuildContext context) {
-    final s = context.session, l = context.l;
+    final s = context.session, l = context.l, wipe = widget.wipe;
     return WinStepPage(
-      step: WinStep.release,
+      step: wipe ? WipeStep.release : WinStep.release,
       title: l.releaseTitle,
-      subtitle: s.source == ReleaseSource.local ? l.releaseSubLocal : l.releaseSub,
+      subtitle: wipe ? l.releaseSubWipe : (s.source == ReleaseSource.local ? l.releaseSubLocal : l.releaseSub),
       onBack: () => Navigator.pop(context),
       nextLabel: l.btnNext,
-      onNext: s.releaseReady ? () => go(context, const OptionsPage()) : null,
+      onNext: s.releaseReady ? () => go(context, wipe ? const WipeConfirmPage() : const OptionsPage()) : null,
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Align(
           alignment: Alignment.centerLeft,
@@ -273,7 +277,7 @@ class ConfirmPage extends StatelessWidget {
             idle: l.holdToInstall,
             busy: (_) => l.holdKeep,
             enabled: ready,
-            onConfirmed: () => go(context, RunPage(task: RunTask.install, releaseDir: kReleaseDir), replace: true),
+            onConfirmed: () => go(context, RunPage(task: WriteTask.install, releaseDir: kReleaseDir), replace: true),
           ),
         ),
       ]),
