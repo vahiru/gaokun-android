@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <fcntl.h>
+#include <map>
 #include <unistd.h>
 
 #include <aidl/android/hardware/camera/common/CameraResourceCost.h>
@@ -16,6 +17,8 @@
 #include <aidl/android/hardware/camera/device/ICameraInjectionSession.h>
 #include <log/log.h>
 
+#include <libcamera/control_ids.h>
+#include <libcamera/formats.h>
 #include <libcamera/property_ids.h>
 #include <libcamera/stream.h>
 
@@ -301,6 +304,7 @@ bool Device::init()
 	 * crashes when switching to video if no range reaches 24 or 30 fps.
 	 */
 	facts_.minFrameDurationNs = 33333333;   /* 30 fps */
+	probeFrameDurations();
 
 	characteristics_ = buildCharacteristics(facts_);
 	if (characteristics_.empty()) {
@@ -316,6 +320,71 @@ bool Device::init()
 	      facts_.flashLed.empty() ? "" : "（带闪光灯）",
 	      facts_.hasAf ? "（带自动对焦）" : "");
 	return true;
+}
+
+/*
+ * 硬件 ISP 路径上，每种输出尺寸的帧率取决于会话为它要的画面
+ * （Session::hwIspFrameSize()）让 libcamera 选中的传感器模式：ov13b10 的合并
+ * 模式能到 60 fps，全尺寸模式 30 fps。把画面复制到各路流跟得上 60 fps。
+ * 软件 ISP 的 CPU 去马赛克仍是 30 fps。做法：每种不同的画面尺寸配置一次相机，
+ * 读 libcamera 允许的最短帧长；失败的尺寸按 30 fps。不开流。
+ */
+void Device::probeFrameDurations()
+{
+	facts_.minFrameDurationsNs.clear();
+
+	auto probe = cam_->generateConfiguration({ libcamera::StreamRole::Viewfinder });
+	if (!probe || probe->empty())
+		return;
+	const auto fmts = probe->at(0).formats().pixelformats();
+	auto has = [&](const libcamera::PixelFormat &f) {
+		return std::find(fmts.begin(), fmts.end(), f) != fmts.end();
+	};
+	if (!has(libcamera::formats::NV12) || has(libcamera::formats::RGB888))
+		return;
+
+	if (cam_->acquire()) {
+		ALOGW("%s: camera busy, frame rates not probed (30 fps)", name_.c_str());
+		return;
+	}
+
+	std::map<std::pair<unsigned int, unsigned int>, int64_t> byFrame;
+	for (const auto &s : facts_.outputSizes) {
+		const libcamera::Size frame = Session::hwIspFrameSize(facts_, s.first, s.second);
+		const auto key = std::make_pair(frame.width, frame.height);
+		auto it = byFrame.find(key);
+		if (it == byFrame.end()) {
+			int64_t ns = facts_.minFrameDurationNs;
+			auto cfg = cam_->generateConfiguration({ libcamera::StreamRole::Viewfinder });
+			if (cfg && !cfg->empty()) {
+				cfg->at(0).size = frame;
+				cfg->at(0).pixelFormat = libcamera::formats::NV12;
+				cfg->at(0).bufferCount = 4;
+				if (cfg->validate() != libcamera::CameraConfiguration::Invalid &&
+				    !cam_->configure(cfg.get())) {
+					const auto &ctrls = cam_->controls();
+					auto ci = ctrls.find(&libcamera::controls::FrameDurationLimits);
+					if (ci != ctrls.end()) {
+						/*
+						 * 单位微秒。最高按 60 fps；离 60 fps 不超过 1%
+						 * 就算 60 fps，传感器的标称也是这么算的（ov13b10
+						 * 合并模式最短帧 16.78 ms）。
+						 */
+						const int64_t us = ci->second.min().get<int64_t>();
+						ns = us * 1000 <= kMinFrameDuration60Ns * 101 / 100
+							     ? kMinFrameDuration60Ns
+							     : std::min(us * 1000, facts_.minFrameDurationNs);
+					}
+				}
+			}
+			it = byFrame.emplace(key, ns).first;
+			ALOGI("%s: frame %ux%u: shortest frame %.2f ms", name_.c_str(), frame.width,
+			      frame.height, ns / 1e6);
+		}
+		facts_.minFrameDurationsNs.push_back(it->second);
+	}
+
+	cam_->release();
 }
 
 ndk::ScopedAStatus Device::getCameraCharacteristics(CameraMetadata *out)

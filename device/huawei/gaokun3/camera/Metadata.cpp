@@ -94,10 +94,12 @@ void addStreamConfigs(camera_metadata_t **m, const SensorFacts &f)
 	std::vector<int64_t> dur, st;
 	for (int32_t fmt : kFormats) {
 		for (const auto &s : f.outputSizes) {
+			const size_t i = &s - f.outputSizes.data();
 			dur.push_back(fmt);
 			dur.push_back(s.first);
 			dur.push_back(s.second);
-			dur.push_back(f.minFrameDurationNs);
+			dur.push_back(i < f.minFrameDurationsNs.size() ? f.minFrameDurationsNs[i]
+								       : f.minFrameDurationNs);
 
 			st.push_back(fmt);
 			st.push_back(s.first);
@@ -229,16 +231,19 @@ std::vector<uint8_t> buildCharacteristics(const SensorFacts &f)
 	add_camera_metadata_entry(m, ANDROID_CONTROL_AWB_LOCK_AVAILABLE, &awbLockAvail, 1);
 
 	/*
-	 * The HAL passes the requested range to libcamera as
-	 * FrameDurationLimits (see processCaptureRequest), which sets the
-	 * sensor's frame length from it. The modes the HAL asks for run at up
-	 * to 60 fps (ov13b10 binned) or 30 fps (full size, hi846 binned), so
-	 * 30 fps is always reachable. Delivery is slower only when processing
-	 * falls behind (see the frame duration in Device.cpp).
+	 * HAL 把请求的帧率范围作为 FrameDurationLimits 交给 libcamera（见
+	 * processCaptureRequest），由它据此设置传感器的帧长。HAL 要的模式最高
+	 * 60 fps（ov13b10 合并模式）或 30 fps（全尺寸、hi846 合并模式），所以
+	 * 30 fps 总能达到。只有某个尺寸能到 60 fps 时才声明 60 fps 的范围
+	 * （Device::init()），具体哪些尺寸由最短帧长告诉应用。
 	 */
-	const int32_t fpsRanges[] = { 15, 30, 30, 30 };
+	std::vector<int32_t> fpsRanges = { 15, 30, 30, 30 };
+	const bool has60 = std::any_of(f.minFrameDurationsNs.begin(), f.minFrameDurationsNs.end(),
+				       [](int64_t d) { return d <= kMinFrameDuration60Ns; });
+	if (has60)
+		fpsRanges.insert(fpsRanges.end(), { 30, 60, 60, 60 });
 	add_camera_metadata_entry(m, ANDROID_CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES,
-				  fpsRanges, 4);
+				  fpsRanges.data(), fpsRanges.size());
 
 	/* AE/AWB 不支持区域；AF 在有马达的后摄上支持一个区域（AutoFocus::setRegion）。 */
 	const int32_t maxRegions[] = { 0, 0, f.hasAf ? 1 : 0 };

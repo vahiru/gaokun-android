@@ -18,6 +18,9 @@
 
 namespace gaokun3 {
 
+/* 60 fps */
+constexpr int64_t kMinFrameDuration60Ns = 16666667;
+
 /* 从 libcamera 那边拿到的、构造 characteristics 需要的硬件事实。 */
 struct SensorFacts {
 	int32_t pixelArrayW = 0;
@@ -56,6 +59,8 @@ struct SensorFacts {
 	int64_t minFrameDurationNs = 33333333;
 	/* 我们打算对外声明的输出尺寸（软件 ISP 产出，见 Provider.cpp 的说明）。 */
 	std::vector<std::pair<int32_t, int32_t>> outputSizes;
+	/* 每种输出尺寸各自的最短帧长；没有时都按 minFrameDurationNs。 */
+	std::vector<int64_t> minFrameDurationsNs;
 };
 
 /*

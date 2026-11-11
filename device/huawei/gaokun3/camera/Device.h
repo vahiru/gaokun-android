@@ -60,6 +60,8 @@ public:
 	std::shared_ptr<libcamera::Camera> camera() const { return cam_; }
 
 private:
+	/* 填写 facts_.minFrameDurationsNs，见 Device.cpp。 */
+	void probeFrameDurations();
 	/* 会话关闭时由 Session 回调：相机不再占用，手电筒重新可用。 */
 	void onSessionClosed();
 	/* 写 LED 的 brightness（torch 档 = max_brightness）。没有闪光灯时返回 false。 */

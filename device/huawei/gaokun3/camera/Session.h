@@ -34,6 +34,12 @@ public:
 
 	bool init();
 
+	/*
+	 * 输出流最大 maxW×maxH 时向硬件 ISP 要的 NV12 画面：传感器的宽高比，
+	 * 盖住所有的流。
+	 */
+	static libcamera::Size hwIspFrameSize(const SensorFacts &f, int64_t maxW, int64_t maxH);
+
 	::ndk::ScopedAStatus close() override;
 	::ndk::ScopedAStatus configureStreams(
 		const aidl::android::hardware::camera::device::StreamConfiguration &in_cfg,

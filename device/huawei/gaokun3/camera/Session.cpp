@@ -382,20 +382,7 @@ ndk::ScopedAStatus Session::configureStreams(const StreamConfiguration &cfg,
 	auto setUp = [&](bool raw) {
 		libcamera::StreamConfiguration &vc = config_->at(0);
 		if (srcNv12_) {
-			/*
-			 * 硬件 ISP 缩放不占 CPU：要一幅与传感器阵列同宽高比、刚好盖住每一路流的画面，
-			 * 流与它同宽或同高时 deliver() 只需裁剪、拆分色度。宽按 16 对齐（IFE 写出的单位），
-			 * 超出单个 IFE 能处理的尺寸时由管线处理器调小。
-			 */
-			int64_t w = std::max<int64_t>(
-				maxW, (static_cast<int64_t>(maxH) * facts_.activeW + facts_.activeH - 1) /
-					      facts_.activeH);
-			w = (w + 15) & ~15;
-			int64_t h = std::max<int64_t>(
-				maxH, (w * facts_.activeH + facts_.activeW - 1) / facts_.activeW);
-			h = (h + 1) & ~1;
-			vc.size = libcamera::Size(static_cast<unsigned int>(w),
-						  static_cast<unsigned int>(h));
+			vc.size = hwIspFrameSize(facts_, maxW, maxH);
 			vc.pixelFormat = libcamera::formats::NV12;
 		} else {
 			vc.size = fullSize ? libcamera::Size(facts_.activeW, facts_.activeH)
@@ -973,6 +960,20 @@ void Session::dropAllCaches()
 	for (auto &kv : bufferCache_)
 		android::GraphicBufferMapper::get().freeBuffer(kv.second);
 	bufferCache_.clear();
+}
+
+libcamera::Size Session::hwIspFrameSize(const SensorFacts &f, int64_t maxW, int64_t maxH)
+{
+	/*
+	 * 硬件 ISP 缩放不占 CPU：要一幅与传感器阵列同宽高比、刚好盖住每一路流的画面，
+	 * 流与它同宽或同高时 deliver() 只需裁剪、拆分色度。宽按 16 对齐（IFE 写出的单位），
+	 * 超出单个 IFE 能处理的尺寸时由管线处理器调小。
+	 */
+	int64_t w = std::max<int64_t>(maxW, (maxH * f.activeW + f.activeH - 1) / f.activeH);
+	w = (w + 15) & ~15;
+	int64_t h = std::max<int64_t>(maxH, (w * f.activeH + f.activeW - 1) / f.activeW);
+	h = (h + 1) & ~1;
+	return libcamera::Size(static_cast<unsigned int>(w), static_cast<unsigned int>(h));
 }
 
 Session::Crop Session::cropFor(int32_t dstW, int32_t dstH) const
