@@ -3,7 +3,7 @@
 #
 #   bash scripts/live/test-in-container.sh scripts/live/test-apply.sh
 #   GK3_TEST_BOOTIMG=/repo/out/v0.6.2/boot.img bash scripts/live/test-in-container.sh scripts/live/test-apply.sh
-#   GK3_TEST_FIXTURES=/repo/live/installer-flutter/testdata  …（顺带把探测输出存成界面的 fixture）
+#   GK3_TEST_FIXTURES=/repo/installer/live/testdata  …（顺带把探测输出存成界面的 fixture）
 #
 # 必须 root + loop 设备 + 能看见新出现的分区节点 —— 容器入口替你安排好了。
 # ⚠️ 只动 colima 虚拟机里的 loop 设备（背后是容器里 /tmp 下的稀疏文件）。

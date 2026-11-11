@@ -33,14 +33,14 @@ if ! docker image inspect "$TAG" >/dev/null 2>&1; then
     docker rm gk3-flutter-prep >/dev/null
 fi
 
-# MD3 的两个字体打包进应用（live/installer-flutter/lib/ui/theme.dart）；文件不入库，先取
+# MD3 的两个字体打包进应用（installer/live/lib/ui/theme.dart）；文件不入库，先取
 for f in Roboto-VF.ttf NotoSansSC-VF.otf; do
-    [ -f "$REPO/live/installer-flutter/assets/fonts/$f" ] \
-        || die "缺字体 assets/fonts/${f}（cd live/installer-flutter && python3 tool/fetch-fonts.py —— 要连着设备，或 --from <目录>）"
+    [ -f "$REPO/installer/live/assets/fonts/$f" ] \
+        || die "缺字体 assets/fonts/${f}（cd installer/live && python3 tool/fetch-fonts.py —— 要连着设备，或 --from <目录>）"
 done
 say "flutter build linux --release"
 rm -rf "$OUT"; mkdir -p "$OUT"
-docker run --rm -v "$REPO/live/installer-flutter:/src:ro" -v "$OUT:/out" "$TAG" bash -euo pipefail -c '
+docker run --rm -v "$REPO/installer/live:/src:ro" -v "$OUT:/out" "$TAG" bash -euo pipefail -c '
     mkdir /build && cd /src && tar --exclude=./build --exclude=./.dart_tool --exclude=./test/shots --exclude=./test/fonts -cf - . | tar -C /build -xf -
     cd /build
     flutter pub get >/dev/null

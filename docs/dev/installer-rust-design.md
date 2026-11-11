@@ -8,7 +8,7 @@
 
 `scripts/live/installer-lib.sh`（约2700行、75个函数）在演化过程中暴露出的缺陷几乎都源于shell的静默失败特性：管道只取末段退出码、`2>/dev/null`吞掉外部工具报错、`$(...)`子shell吞掉返回值或将标准输出混入控制流、`shift`在参数不足时不移位导致死循环。
 
-Rust后端的目标是在不动Flutter前端（[`live/installer-flutter/`](../../live/installer-flutter/README.md)）的前提下，用类型系统消除静默失败，并支持按函数粒度逐步替换：
+Rust后端的目标是在不动Flutter前端（[`installer/live/`](../../installer/live/README.md)）的前提下，用类型系统消除静默失败，并支持按函数粒度逐步替换：
 1. **编译期零隐式崩溃**：`Cargo.toml`开启`#[forbid(unsafe_code)]`，并将`clippy::unwrap_used`、`expect_used`、`panic`、`todo`、`unimplemented`、`unreachable`、`indexing_slicing`、`print_stdout`、`print_stderr`、`let_underscore_must_use`、`exit`、`unused_must_use`全部设为`deny`；发布构建开启`overflow-checks = true`。忽略结果必须显式调用`discard(r)`并注释原因。
 2. **协议逐字节兼容**：stdout记录、stderr上的`PROGRESS` / `ERR` / `JOB`行及退出码与shell版保持一致，前端`shell_backend.dart`与`protocol.dart`无需改动。
 3. **单静态二进制**：编译为`aarch64-unknown-linux-musl`完全静态链接ELF（约540 KiB，无外部C交叉工具链依赖，使用`rust-lld`），部署方式与`gk3-misc`相同。

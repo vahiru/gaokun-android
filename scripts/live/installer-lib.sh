@@ -1,6 +1,6 @@
 # gaokun3 安装器后端。被两个前端共用：
 #   * scripts/install-gaokun3.sh   命令行
-#   * live/installer-flutter/      图形安装器（LiveCD）
+#   * installer/live/      图形安装器（LiveCD）
 #
 # ★ 一套实现两个前端，是因为本仓反复吃过"两份拷贝各自漂移"的亏。
 #   ⚠️ 这句话写下之后很长时间里并不成立：install-gaokun3.sh 根本没 source 这个
@@ -14,7 +14,7 @@
 #   ERR code=<代码> [k=v …]            失败的原因（紧接着还有一行给人看、给日志的 `!! <说明>`）
 # ★ 2026-10-05 起（v1.0 计划 INST-10）后端【不再】给界面送中文：英文界面里原先夹着这里写死的中文进度与报错。
 #   `!! …` 与普通日志仍是中文 —— 它们给日志、给命令行版看；界面只把它们放进"详情"。
-#   进度代码与 ERR 代码的全集 = live/installer-flutter/lib/ui/messages.dart 里的两个 switch（新加一个要两边一起加）。
+#   进度代码与 ERR 代码的全集 = installer/live/lib/ui/messages.dart 里的两个 switch（新加一个要两边一起加）。
 #   ERR 为什么也走 stderr：`x=$(gk3__…)` 会把 stdout 吞掉，报错跟着丢；stderr 不会。
 # stdout 上另有一种记录：`NOTE code=<代码> [k=v …]` —— gk3_apply 成功了，但有件事要在完成页告诉用户
 #   （2026-10-05 S10：loadervar-stuck name= value= = EFI 变量删不掉）。前端 session.notes 收集、DonePage 按代码说。

@@ -1,5 +1,5 @@
 # live profile 额外的包：图形安装器（Flutter，GTK embedder）+ cage。
-# 决定见 live/installer-flutter/README.md：渲染 = 官方 flutter_linux（GTK）+ cage。
+# 决定见 installer/live/README.md：渲染 = 官方 flutter_linux（GTK）+ cage。
 #   scripts/live/render-test.Dockerfile 是这份清单的预演 —— 那边能跑，这边就该能跑。
 cage
 # ★ 旋转与缩放：cage 0.2.0 没有旋转参数，起来之后用 wlr-randr 设（gk3-installer-session）

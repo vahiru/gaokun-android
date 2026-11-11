@@ -4,7 +4,7 @@
 #   bash scripts/live/test-in-container.sh scripts/live/gen-fixtures.sh
 #   GK3_TEST_BOOTIMG=/repo/out/…/boot.img …   （用真发版 boot.img，进度里的大小更像真的）
 #
-# 产物：live/installer-flutter/testdata/<场景>/{index.txt, *.txt}，格式见 record-fixture.py。
+# 产物：installer/live/testdata/<场景>/{index.txt, *.txt}，格式见 record-fixture.py。
 #
 # ★ 为什么录而不是手写：手写的 fixture 是"界面对着一份想象中的协议开发"。
 #   本仓协议里有好几处不显然（百分号编码、PLANERR 走 stdout、PROGRESS 走 stderr、
@@ -26,7 +26,7 @@ cd "$(dirname "$0")/../.."
 [ "$(id -u)" = 0 ] || { echo "要 root（用 scripts/live/test-in-container.sh 跑）"; exit 2; }
 . scripts/live/installer-lib.sh
 export GK3_ALLOW_LOOP=1 GK3_MACHINE_ID=0123456789abcdef0123456789abcdef
-OUT=live/installer-flutter/testdata
+OUT=installer/live/testdata
 W=$(mktemp -d /tmp/gk3-fix.XXXX)
 LOOPS=()
 cleanup() {

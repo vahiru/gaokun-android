@@ -69,7 +69,7 @@ H=$(shasum -a 256 "$REPO/scripts/live/live-build.Dockerfile" 2>/dev/null || sha2
 TAG="gk3-live-build:${H:0:12}"
 docker image inspect "$TAG" >/dev/null 2>&1 || { say "构建 live 构建环境 ${TAG}"; docker build -q -t "$TAG" -f "$REPO/scripts/live/live-build.Dockerfile" "$REPO/scripts/live" >/dev/null; }
 
-# M0 的变体启动项（见 live/installer-flutter/README.md）：
+# M0 的变体启动项（见 installer/live/README.md）：
 #   渲染后端两条都要测（Impeller 是 3.47.2 的默认，#192915 说它在弱 GPU 上闪）；浸泡要持续出帧、
 #   RSS 每 5 秒记到 U 盘的 gaokun3/diag/soak-*.log；旋转方向是推理出来的，反方向也放一个
 #   ⚠️ 标题用 ASCII：开机菜单由 UEFI 固件的字体画，一般不含中文（见 build-usb.sh）
@@ -89,8 +89,8 @@ ENTRIES_FILE=$REPO/out/live/.entries
 # 版本信息（2026-09-27）：安装器版本只从 pubspec.yaml 读（界面上的常量由 test/version_test.dart 核对与它一致）；
 # 另记 git 提交（工作区有改动就带 -dirty）与内核来源 boot.img 的 sha256 —— 进镜像的 /etc/gaokun3-release、
 # U 盘上的 gaokun3/release.txt 与 Windows 安装包，bug 报告与发布说明都按它对版本
-GK3_VERSION=$(sed -n 's/^version:[[:space:]]*\([^+[:space:]]*\).*/\1/p' "$REPO/live/installer-flutter/pubspec.yaml")
-[ -n "$GK3_VERSION" ] || die "读不到 live/installer-flutter/pubspec.yaml 的 version"
+GK3_VERSION=$(sed -n 's/^version:[[:space:]]*\([^+[:space:]]*\).*/\1/p' "$REPO/installer/live/pubspec.yaml")
+[ -n "$GK3_VERSION" ] || die "读不到 installer/live/pubspec.yaml 的 version"
 GK3_GIT=$(git -C "$REPO" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 [ -z "$(git -C "$REPO" status --porcelain 2>/dev/null)" ] || GK3_GIT="$GK3_GIT-dirty"
 GK3_BOOTSHA=$(shasum -a 256 "$BOOTIMG" 2>/dev/null | cut -d' ' -f1 || sha256sum "$BOOTIMG" | cut -d' ' -f1)

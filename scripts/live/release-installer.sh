@@ -50,8 +50,8 @@ WANT=$(awk '$2=="boot.img"{print $1}' "$ARTS")
 # 发出去的东西必须对应一个提交：工作区有改动就停（镜像里的 GK3_GIT 会带 -dirty，发布说明对不上号）
 [ -z "$(git -C "$REPO" status --porcelain)" ] || die "工作区有没提交的改动 —— 先提交（发出去的镜像要对应一个提交）"
 
-VER=$(sed -n 's/^version:[[:space:]]*\([^+[:space:]]*\).*/\1/p' "$REPO/live/installer-flutter/pubspec.yaml")
-[ -n "$VER" ] || die "读不到安装器版本（live/installer-flutter/pubspec.yaml）"
+VER=$(sed -n 's/^version:[[:space:]]*\([^+[:space:]]*\).*/\1/p' "$REPO/installer/live/pubspec.yaml")
+[ -n "$VER" ] || die "读不到安装器版本（installer/live/pubspec.yaml）"
 OUT=$REPO/out/release-installer/$VER
 say "安装器 ${VER}（随 ROM ${ROM}）· git $(git -C "$REPO" rev-parse --short=12 HEAD)"
 

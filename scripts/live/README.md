@@ -5,7 +5,7 @@
 | Profile | 包含内容 | 部署位置 |
 |---|---|---|
 | `rescue` | 无图形界面：`sshd`、Wi-Fi连接服务及分区/文件系统维护工具 | 内置NVMe磁盘的`gk3rescue`小分区（约1 GiB） |
-| `live` | 在`rescue`基础上集成图形安装器（[`live/installer-flutter/`](../../live/installer-flutter/README.md) + `cage` Wayland合成器） | USB启动盘或免U盘双系统安装的`GK3LIVE`分区 |
+| `live` | 在`rescue`基础上集成图形安装器（[`installer/live/`](../../installer/live/README.md) + `cage` Wayland合成器） | USB启动盘或免U盘双系统安装的`GK3LIVE`分区 |
 
 ## 一、构建命令
 
