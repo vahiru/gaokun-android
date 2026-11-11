@@ -1203,8 +1203,10 @@ int Session::scaleNv12(const uint8_t *sy, int ss, const uint8_t *suv, int suvs, 
 const uint8_t *Session::renderNv12(const SrcFrame &src, int32_t dstW, int32_t dstH,
 				   int chromaBlur)
 {
+	const bool sharpen = sharpen_.radius > 0;
 	for (const RenderedNv12 &r : rendered_)
-		if (r.frame == renderFrame_ && r.w == dstW && r.h == dstH && r.blur == chromaBlur)
+		if (r.frame == renderFrame_ && r.w == dstW && r.h == dstH && r.blur == chromaBlur &&
+		    r.sharpened == sharpen)
 			return r.data.data();
 
 	/* 取一个不属于这一帧的槽位 */
@@ -1212,16 +1214,23 @@ const uint8_t *Session::renderNv12(const SrcFrame &src, int32_t dstW, int32_t ds
 	const int cw = (dstW + 1) / 2, chh = (dstH + 1) / 2;
 	r.data.resize(static_cast<size_t>(dstW) * dstH + static_cast<size_t>(cw) * 2 * chh);
 	uint8_t *uv = r.data.data() + static_cast<size_t>(dstW) * dstH;
-	if (toNv12(src, dstW, dstH, r.data.data(), dstW, uv, cw * 2) != 0) {
+	/* 锐化时亮度先缩放到暂存区，再锐化写进缓存 */
+	if (sharpen)
+		lumaScratch_.resize(static_cast<size_t>(dstW) * dstH);
+	uint8_t *y = sharpen ? lumaScratch_.data() : r.data.data();
+	if (toNv12(src, dstW, dstH, y, dstW, uv, cw * 2) != 0) {
 		r.frame = 0;
 		return nullptr;
 	}
 	if (chromaBlur > 0)
 		boxBlur(uv, cw * 2, chh, cw * 2, 2, chromaBlur);
+	if (sharpen)
+		sharpenLuma(y, dstW, r.data.data(), dstW, dstW, dstH, sharpen_, sharpenScratch_);
 	r.frame = renderFrame_;
 	r.w = dstW;
 	r.h = dstH;
 	r.blur = chromaBlur;
+	r.sharpened = sharpen;
 	return r.data.data();
 }
 
@@ -1258,7 +1267,7 @@ bool Session::deliver(const SrcFrame &src, buffer_handle_t dst,
 		 * 换序，或者这一帧另有一路流也要这个尺寸时，先渲染一次再复制。
 		 */
 		uint8_t *ouv = nv12 ? ocb : ocr;
-		if (nv12 && chromaBlur <= 0 && !shared) {
+		if (nv12 && chromaBlur <= 0 && !shared && sharpen_.radius == 0) {
 			rc = toNv12(src, dstW, dstH, oy, ys, ouv, cs);
 		} else if (const uint8_t *r = renderNv12(src, dstW, dstH, chromaBlur)) {
 			const uint8_t *uv = r + static_cast<size_t>(dstW) * dstH;
@@ -1271,14 +1280,21 @@ bool Session::deliver(const SrcFrame &src, buffer_handle_t dst,
 		} else {
 			rc = -1;
 		}
-	} else if (planar && chromaBlur <= 0) {
+	} else if (planar && chromaBlur <= 0 && sharpen_.radius == 0) {
 		rc = toJ420(src, dstW, dstH, oy, ys, ocb, ocr, cs);
 	} else {
-		/* 经平面暂存区：RGB 来源，或者要做滤波 */
+		/* 经平面暂存区：RGB 来源，或者要做滤波、锐化 */
 		planeScratch_.resize(static_cast<size_t>(cw) * chh * 2);
 		uint8_t *du = planeScratch_.data();
 		uint8_t *dv = du + static_cast<size_t>(cw) * chh;
-		rc = toJ420(src, dstW, dstH, oy, ys, du, dv, cw);
+		const bool sharpen = sharpen_.radius > 0;
+		if (sharpen)
+			lumaScratch_.resize(static_cast<size_t>(dstW) * dstH);
+		rc = toJ420(src, dstW, dstH, sharpen ? lumaScratch_.data() : oy, sharpen ? dstW : ys,
+			    du, dv, cw);
+		if (rc == 0 && sharpen)
+			sharpenLuma(lumaScratch_.data(), dstW, oy, ys, dstW, dstH, sharpen_,
+				    sharpenScratch_);
 		if (rc == 0 && chromaBlur > 0) {
 			/* 色度降噪：U/V 只有 1/4 分辨率，盒式模糊几乎免费，而彩色噪点正是最难看的那种。 */
 			boxBlur(du, cw, chh, cw, 1, chromaBlur);
@@ -1654,6 +1670,37 @@ bool Session::deliverJpegNv12(const SrcFrame &src, buffer_handle_t dst,
 	if (rc != 0) {
 		ALOGE("deliverJpegNv12: crop, scale or rotation failed: %d", rc);
 		return false;
+	}
+	/*
+	 * 拍照的降噪（硬件 ISP 本身没有）：亮度做 3×3 ε 滤波，门限为噪声估计的 3.2 倍，
+	 * 平坦处的颗粒抹掉、边缘保留；色度做 5×5 盒式模糊，对付成片的色斑。只在拍照时做，
+	 * 1300 万像素约多 0.1–0.2 秒。门限由 11-10 照片盲测定（室内灯光，ISO 144–194）：
+	 * 3.2 倍优于 2 倍和不降噪，也优于 4.8 倍（开始抹掉小字）。调试属性
+	 * debug.gaokun3.camera.denoise 乘在门限上（0 = 关）。
+	 */
+	std::vector<uint8_t> denY;
+	{
+		char v[PROP_VALUE_MAX] = {};
+		const double dn = __system_property_get("debug.gaokun3.camera.denoise", v) > 0
+					  ? atof(v)
+					  : 1.0;
+		if (dn > 0.0) {
+			const double sigma = estimateNoise(oy, ys, outW, outH);
+			const int t = std::max(1, static_cast<int>(std::lround(3.2 * dn * sigma)));
+			denY.resize(static_cast<size_t>(ys) * outH);
+			denoiseLuma(oy, ys, denY.data(), ys, outW, outH, t);
+			oy = denY.data();
+			boxBlur(ou, ocw, och, cs, 1, 2);
+			boxBlur(ov, ocw, och, cs, 1, 2);
+			ALOGI("JPEG denoise: luma noise %.2f, epsilon threshold %d, chroma box 5x5", sigma, t);
+		}
+	}
+	/* 锐化在缩放、旋转、降噪之后，按输出分辨率（核是对称的，旋转前后一样） */
+	std::vector<uint8_t> sharpY;
+	if (sharpen_.radius > 0) {
+		sharpY.resize(static_cast<size_t>(ys) * outH);
+		sharpenLuma(oy, ys, sharpY.data(), ys, outW, outH, sharpen_, sharpenScratch_);
+		oy = sharpY.data();
 	}
 
 	/* 补出的列复制行末像素：填 0 会把右边缘那一列 8×8 块拉暗。 */
@@ -2456,6 +2503,16 @@ void Session::onRequestCompleted(libcamera::Request *req)
 	if (jpegQuality > 100)
 		jpegQuality = 100;
 
+	/* 这一帧的锐化参数：请求的 EDGE_MODE（没有时按 FAST）、这一帧的增益、调试属性的倍数 */
+	{
+		const auto edge = static_cast<uint8_t>(
+			requestEntryInt(pend.settings, ANDROID_EDGE_MODE, ANDROID_EDGE_MODE_FAST));
+		char v[PROP_VALUE_MAX] = {};
+		const double scale = __system_property_get("debug.gaokun3.camera.sharpen", v) > 0
+					     ? atof(v)
+					     : 1.0;
+		sharpen_ = sharpenParams(edge, sensitivity > 0 ? sensitivity / 100.0 : 1.0, scale);
+	}
 	std::vector<bool> okv;
 	renderFrame_++;
 	std::copy(pend.crop, pend.crop + 4, cropRegion_);

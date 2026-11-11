@@ -23,6 +23,7 @@
 
 #include "AutoFocus.h"
 #include "Exif.h"
+#include "Sharpen.h"
 #include "Lens.h"
 #include "Metadata.h"
 
@@ -230,10 +231,18 @@ private:
 		uint64_t frame = 0;     /* 所属的 renderFrame_，0 = 无 */
 		int32_t w = 0, h = 0;
 		int blur = 0;
+		bool sharpened = false;
 		std::vector<uint8_t> data;
 	};
 	RenderedNv12 rendered_[2];
 	uint64_t renderFrame_ = 0;
+	/*
+	 * 这一帧的亮度锐化（按请求的 ANDROID_EDGE_MODE 与这一帧的增益，见 Sharpen.h），
+	 * 只在完成回调线程上用。lumaScratch_：锐化前的亮度。
+	 */
+	SharpenParams sharpen_;
+	std::vector<uint8_t> lumaScratch_;
+	std::vector<uint16_t> sharpenScratch_;
 
 	/*
 	 * libcamera 缓冲的 mmap()，按 dmabuf fd 记，第一次用到时映射，保留到缓冲

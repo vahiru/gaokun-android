@@ -407,8 +407,10 @@ std::vector<uint8_t> buildCharacteristics(const SensorFacts &f)
 	const uint8_t noiseModes[] = { ANDROID_NOISE_REDUCTION_MODE_OFF };
 	add_camera_metadata_entry(m, ANDROID_NOISE_REDUCTION_AVAILABLE_NOISE_REDUCTION_MODES,
 				  noiseModes, 1);
-	const uint8_t edgeModes[] = { ANDROID_EDGE_MODE_OFF };
-	add_camera_metadata_entry(m, ANDROID_EDGE_AVAILABLE_EDGE_MODES, edgeModes, 1);
+	/* 亮度锐化（Sharpen.h）：FAST 3×3，HIGH_QUALITY 5×5 */
+	const uint8_t edgeModes[] = { ANDROID_EDGE_MODE_OFF, ANDROID_EDGE_MODE_FAST,
+				      ANDROID_EDGE_MODE_HIGH_QUALITY };
+	add_camera_metadata_entry(m, ANDROID_EDGE_AVAILABLE_EDGE_MODES, edgeModes, 3);
 	const uint8_t abModes[] = { ANDROID_COLOR_CORRECTION_ABERRATION_MODE_OFF };
 	add_camera_metadata_entry(m, ANDROID_COLOR_CORRECTION_AVAILABLE_ABERRATION_MODES,
 				  abModes, 1);
@@ -447,6 +449,7 @@ std::vector<uint8_t> buildCharacteristics(const SensorFacts &f)
 		ANDROID_JPEG_GPS_PROCESSING_METHOD,
 		ANDROID_JPEG_GPS_TIMESTAMP,
 		ANDROID_SCALER_CROP_REGION,
+		ANDROID_EDGE_MODE,
 	};
 	if (f.hasAf) {
 		reqKeys.push_back(ANDROID_CONTROL_AF_MODE);
@@ -801,6 +804,11 @@ std::vector<uint8_t> buildDefaultRequest(int templateId, const SensorFacts &f)
 	 * 应用真的要单次对焦时才由它发。 */
 	const uint8_t afTrigger = ANDROID_CONTROL_AF_TRIGGER_IDLE;
 	add_camera_metadata_entry(m, ANDROID_CONTROL_AF_TRIGGER, &afTrigger, 1);
+	/* 拍照用 HIGH_QUALITY（5×5，照片细节），其余用 FAST */
+	const uint8_t edgeMode = tmpl == RequestTemplate::STILL_CAPTURE
+					 ? ANDROID_EDGE_MODE_HIGH_QUALITY
+					 : ANDROID_EDGE_MODE_FAST;
+	add_camera_metadata_entry(m, ANDROID_EDGE_MODE, &edgeMode, 1);
 	const uint8_t flashMode = ANDROID_FLASH_MODE_OFF;
 	add_camera_metadata_entry(m, ANDROID_FLASH_MODE, &flashMode, 1);
 	/* Recording templates get a fixed range, the others a variable one. */
