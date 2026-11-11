@@ -81,7 +81,8 @@ int gk3w_exists(const wchar_t *path);
 typedef struct {
     char manufacturer[64], model[64];
     int secure_boot;            /* 1 开、0 关、-1 读不到 */
-    int fast_startup;           /* HiberbootEnabled */
+    int fast_startup;           /* HiberbootEnabled 为 1 且休眠没关（关了休眠快速启动也就没了） */
+    int hibernate;              /* Control\Power\HibernateEnabled：1 开、0 关、-1 读不到 */
     int hiberfil;               /* 系统盘上有 hiberfil.sys */
     int bitlocker;              /* 系统卷：0 关、1 开、2 锁定、-1 读不到 */
     int ac;                     /* 1 插着电源、0 没插、-1 不知道 */
@@ -90,9 +91,14 @@ typedef struct {
 } gk3w_sys;
 void gk3w_sys_read(gk3w_sys *s);
 int gk3w_model_ok(const gk3w_sys *s);
-int gk3w_sys_gate(const gk3w_sys *s, int bitlocker_ok);
-/* 删 systemd-boot 的 EFI 变量（LoaderEntryDefault 等）：0 = 删了或本来就没有；-1 = 读不到 / 删不掉（已记日志） */
-int gk3w_loader_var_delete(const wchar_t *name);
+/* 写真实磁盘之前的把关；拒绝时已报 ERR（touched=no），返回 -1。
+ * GK3W_GATE_APPLY：机型、Secure Boot、快速启动、BitLocker、电量。GK3W_GATE_UNINSTALL：机型、BitLocker、电量
+ * （卸载之后不再有 Android 写 ESP，Secure Boot 与快速启动无关）。bitlocker_ok：用户确认过拿到了恢复密钥。 */
+typedef enum { GK3W_GATE_APPLY, GK3W_GATE_UNINSTALL } gk3w_gate_mode;
+int gk3w_sys_gate(const gk3w_sys *s, int bitlocker_ok, gk3w_gate_mode mode);
+/* 删 systemd-boot 的 EFI 变量（LoaderEntryDefault 等）：0 = 删了、本来就没有，或 ours 不认这个值而留着；
+ * -1 = 读不到 / 删不掉（已记日志）。ours 为 NULL 时不看值、一律删。 */
+int gk3w_loader_var_delete(const wchar_t *name, int (*ours)(const char *value));
 
 /* ── 散列与随机数 ── */
 int gk3w_sha256(const void *data, size_t len, uint8_t out[32]);

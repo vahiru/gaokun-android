@@ -1,8 +1,9 @@
-/* 主机单测：协议编码、空闲区计算（与平台无关的部分）。make test 用 ASan/UBSan 跑。 */
+/* 主机单测：协议编码、空闲区计算、启动项名字与分区内容的识别（与平台无关的部分）。make test 用 ASan/UBSan 跑。 */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "../src/esp.h"
 #include "../src/layout.h"
 #include "../src/proto.h"
 
@@ -131,8 +132,70 @@ static void test_free_edges(void)
     CHECK(gk3w_span_bytes((gk3w_span){5, 4}, 512) == 0);
 }
 
+static void test_entry_names(void)
+{
+    static const char *const ours[] = {
+        "0123456789abcdef0123456789abcdef-android-a.conf", "0123456789ABCDEF0123456789abcdef-Android-B.conf",
+        "0123456789abcdef0123456789abcdef-rescue.conf", "0123456789abcdef0123456789abcdef-recovery-b.conf",
+        "0123456789abcdef0123456789abcdef-android-a+3.conf", "0123456789abcdef0123456789abcdef-android-a+0-3.conf",
+        "0123456789abcdef0123456789abcdef-android-b.conf.disabled", "gk3boot-android-a.conf", "gk3-windows.conf",
+        "gk3prev-android-b+2-1.conf", "gaokun3-live.conf", "gaokun3-live-2.conf", "GAOKUN3-LIVE-10.CONF",
+    };
+    static const char *const theirs[] = {
+        "arch.conf", "0123456789abcdef0123456789abcdef-6.12.0.conf", "0123456789abcdef0123456789abcde-android-a.conf",
+        "0123456789abcdef0123456789abcdeg-android-a.conf", "0123456789abcdef0123456789abcdef-android-c.conf",
+        "0123456789abcdef0123456789abcdef-android-a", "gaokun3-live-x.conf", "gaokun3-livecd.conf", "gk3.efi",
+        "0123456789abcdef0123456789abcdef-android-a+.conf", "0123456789abcdef0123456789abcdef-android-a+1-.conf",
+        "", ".conf", "fedora-android-a.conf",
+    };
+    for (size_t i = 0; i < sizeof ours / sizeof ours[0]; i++)
+        CHECK(gk3w_our_entry_name(ours[i]));
+    for (size_t i = 0; i < sizeof theirs / sizeof theirs[0]; i++)
+        CHECK(!gk3w_our_entry_name(theirs[i]));
+    CHECK(gk3w_our_var_value("auto-windows") && gk3w_our_var_value("AUTO-Windows") && gk3w_our_var_value("gk3-windows.conf"));
+    CHECK(gk3w_our_var_value("*-android-a.conf") && gk3w_our_var_value("0123456789abcdef0123456789abcdef-android-b.conf"));
+    CHECK(gk3w_our_var_value("gk3boot-tools.conf"));
+    CHECK(!gk3w_our_var_value("arch.conf") && !gk3w_our_var_value("auto-windows ") && !gk3w_our_var_value("") &&
+          !gk3w_our_var_value("x/-android-a.conf") && !gk3w_our_var_value("@saved"));
+}
+
+static void test_content_kind(void)
+{
+    static uint8_t b[8192];
+    memset(b, 0, sizeof b);
+    CHECK(gk3w_content_kind_of(b, sizeof b) == GK3W_KIND_EMPTY);
+    memcpy(b + 3, "NTFS    ", 8);
+    CHECK(gk3w_content_kind_of(b, sizeof b) == GK3W_KIND_NTFS);
+    memcpy(b + 3, "-FVE-FS-", 8);
+    CHECK(gk3w_content_kind_of(b, sizeof b) == GK3W_KIND_BITLOCKER);
+    memcpy(b + 3, "EXFAT   ", 8);
+    CHECK(gk3w_content_kind_of(b, sizeof b) == GK3W_KIND_EXFAT);
+    memset(b, 0, sizeof b);
+    memcpy(b + 82, "FAT32   ", 8);
+    CHECK(gk3w_content_kind_of(b, sizeof b) == GK3W_KIND_FAT);
+    memset(b, 0, sizeof b);
+    memcpy(b + 54, "FAT16   ", 8);
+    CHECK(gk3w_content_kind_of(b, sizeof b) == GK3W_KIND_FAT);
+    memset(b, 0, sizeof b);
+    memcpy(b, "ANDROID!", 8);
+    CHECK(gk3w_content_kind_of(b, sizeof b) == GK3W_KIND_ANDROID_BOOT);
+    memset(b, 0, sizeof b);
+    b[1080] = 0x53;
+    b[1081] = 0xEF;
+    CHECK(gk3w_content_kind_of(b, sizeof b) == GK3W_KIND_EXT4);
+    CHECK(gk3w_content_kind_of(b, 1081) == GK3W_KIND_UNKNOWN);
+    memset(b, 0, sizeof b);
+    b[4096] = 0x67, b[4097] = 0x44, b[4098] = 0x6c, b[4099] = 0x61;
+    CHECK(gk3w_content_kind_of(b, sizeof b) == GK3W_KIND_LP);
+    b[4099] = 0;
+    CHECK(gk3w_content_kind_of(b, sizeof b) == GK3W_KIND_UNKNOWN);
+    CHECK(!strcmp(gk3w_content_kind_name(GK3W_KIND_LP), "lp") && !strcmp(gk3w_content_kind_name((gk3w_content_kind)99), "unknown"));
+}
+
 int main(void)
 {
+    test_entry_names();
+    test_content_kind();
     test_enc();
     test_line();
     test_free_factory();

@@ -10,6 +10,114 @@ const char gk3w_loader_conf[] = "timeout 5\n"
                                 "editor no\n"
                                 "default *-android-a.conf\n";
 
+static char lower_ascii(char c)
+{
+    return (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
+}
+
+static int is_digit(char c)
+{
+    return c >= '0' && c <= '9';
+}
+
+static int ends_with(const char *s, size_t n, const char *suf)
+{
+    size_t k = strlen(suf);
+    return n >= k && !memcmp(s + n - k, suf, k);
+}
+
+int gk3w_our_entry_name(const char *name)
+{
+    char n[256];
+    size_t len = strlen(name), i;
+    if (!len || len >= sizeof n)
+        return 0;
+    for (i = 0; i < len; i++)
+        n[i] = lower_ascii(name[i]);
+    n[len] = 0;
+    if (ends_with(n, len, ".disabled"))
+        n[len -= 9] = 0;
+    if (!ends_with(n, len, ".conf"))
+        return 0;
+    n[len -= 5] = 0;
+    {
+        /* 启动计数后缀：结尾的 +N 或 +N-M */
+        char *plus = strrchr(n, '+');
+        if (plus && is_digit(plus[1])) {
+            const char *q = plus + 1;
+            while (is_digit(*q))
+                q++;
+            if (*q == '-' && is_digit(q[1]))
+                for (q++; is_digit(*q); q++)
+                    ;
+            if (!*q) {
+                *plus = 0;
+                len = (size_t)(plus - n);
+            }
+        }
+    }
+    if (!strncmp(n, "gk3", 3))
+        return 1;
+    if (!strncmp(n, "gaokun3-live", 12)) {
+        const char *q = n + 12;
+        if (!*q)
+            return 1;
+        if (*q != '-' || !is_digit(q[1]))
+            return 0;
+        for (q++; is_digit(*q); q++)
+            ;
+        return !*q;
+    }
+    if (len > 33 && n[32] == '-') {
+        static const char *const kinds[] = {"android", "rescue", "recovery"};
+        char mid[33];
+        memcpy(mid, n, 32);
+        mid[32] = 0;
+        if (!gk3w_is_machine_id(mid))
+            return 0;
+        for (size_t k = 0; k < 3; k++) {
+            size_t kl = strlen(kinds[k]);
+            const char *q = n + 33;
+            if (strncmp(q, kinds[k], kl))
+                continue;
+            q += kl;
+            if (!*q || (q[0] == '-' && (q[1] == 'a' || q[1] == 'b') && !q[2]))
+                return 1;
+        }
+    }
+    return 0;
+}
+
+static int ieq_ascii(const char *a, const char *b)
+{
+    for (; *a && *b; a++, b++)
+        if (lower_ascii(*a) != lower_ascii(*b))
+            return 0;
+    return *a == *b;
+}
+
+int gk3w_our_var_value(const char *v)
+{
+    size_t len = strlen(v), i;
+    char tail[16];
+    if (ieq_ascii(v, "auto-windows") || ieq_ascii(v, "gk3-windows.conf"))
+        return 1;
+    /* ^[0-9A-Za-z*?._+-]*-android-[ab]\.conf$（PowerShell 的 -match 不分大小写） */
+    for (i = 0; i < len; i++) {
+        char c = v[i];
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || strchr("*?._+-", c)))
+            break;
+    }
+    if (i == len && len >= 15) {
+        for (i = 0; i < 15; i++)
+            tail[i] = lower_ascii(v[len - 15 + i]);
+        tail[15] = 0;
+        if (!strcmp(tail, "-android-a.conf") || !strcmp(tail, "-android-b.conf"))
+            return 1;
+    }
+    return gk3w_our_entry_name(v);
+}
+
 int gk3w_is_machine_id(const char *s)
 {
     size_t n = 0;

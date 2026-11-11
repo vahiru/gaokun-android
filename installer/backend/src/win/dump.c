@@ -257,7 +257,9 @@ int gk3w_cmd_readpart(int argc, wchar_t **argv)
     buf = _aligned_malloc(CHUNK, 4096);
     o = CreateFileW(outp, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (!buf || o == INVALID_HANDLE_VALUE) {
-        rc = gk3w_err(GK3W_TOUCHED_NA, "file-open", "cannot create the output file", GetLastError());
+        rc = gk3w_err(GK3W_TOUCHED_NA, buf ? "file-open" : "nomem", buf ? "cannot create the output file" : "out of memory", GetLastError());
+        if (o != INVALID_HANDLE_VALUE)
+            CloseHandle(o);
         goto out;
     }
     for (uint64_t done = 0, len = (uint64_t)hit->PartitionLength.QuadPart; done < len; done += CHUNK) {

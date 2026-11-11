@@ -19,16 +19,14 @@
  * 在后台清零（lazy_itable_init=0 会把块组标成已清零，那就是谎报）。没给 --mke2fs 时退回清零（metadata 整个、
  * userdata 开头 16 MiB），由 fstab 的 formattable 在首次开机格式化（尚未上机验证）。
  *
- * ESP：写任何东西之前先放 <mid>/android/gk3w-install.txt，记下 loader/ 与 EFI/systemd/ 是不是这次装才有的 ——
- * uninstall 靠它认出这一套安装（中途失败、启动项还没写也认得出）、决定能不能连 loader/ 一起删。
+ * ESP：原件的 .before-gaokun3 备份先写到 .tmp、读回核对后再改名 —— 中途失败不会留下一份残缺的“备份”。
  *
  * 默认只对 VHD 虚拟盘动手。--real-disk 才写真实磁盘，而且只认 Windows 所在的那块系统盘、机型必须是 MateBook E Go，
  * 先过安装前检查（gk3w_sys_gate：Secure Boot、快速启动、BitLocker、电量），写完 ESP 后删 LoaderEntryDefault（同 gk3_apply）。
  *
  * 与 LiveCD 的差别（原型阶段）：
  *   - VHD 测试时 EFI 变量不碰 —— 那是这台 PC 自己的固件变量。
- *   - ESP 上已经有我们的启动项时拒绝（重新安装不在原型范围内）；不带救援分区。
- *   - <mid>/android/ 下多一个 gk3w-install.txt（与 LiveCD 对拍 ESP 时要除开它）。 */
+ *   - ESP 上已经有我们的启动项时拒绝（重新安装不在原型范围内）；不带救援分区。 */
 #include <windows.h>
 #include <winioctl.h>
 #include <rpc.h>
@@ -429,6 +427,26 @@ static int esp_write(const esp_ctx *e, const char *rel, const uint8_t *data, siz
     return 0;
 }
 
+/* 先写 <rel>.tmp、读回核对，再改名成 <rel>：中途失败或掉电时 <rel> 要么不在、要么完整。失败时删掉 .tmp。 */
+static int esp_write_renamed(const esp_ctx *e, const char *rel, const uint8_t *data, size_t len)
+{
+    char tmp[200];
+    wchar_t pt[MAX_PATH * 2], pf[MAX_PATH * 2];
+    snprintf(tmp, sizeof tmp, "%s.tmp", rel);
+    esp_path(e, tmp, pt, MAX_PATH * 2);
+    esp_path(e, rel, pf, MAX_PATH * 2);
+    if (esp_write(e, tmp, data, len)) {
+        DeleteFileW(pt);
+        return -1;
+    }
+    if (!MoveFileExW(pt, pf, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        DWORD err = GetLastError();
+        DeleteFileW(pt);
+        return gk3w_err_kv(GK3W_TOUCHED_YES, "esp-write", "file", rel, "renaming a file on the EFI system partition failed", err);
+    }
+    return 0;
+}
+
 /* ── apply ────────────────────────────────────────────────────────── */
 
 int gk3w_cmd_apply(int argc, wchar_t **argv)
@@ -471,7 +489,7 @@ int gk3w_cmd_apply(int argc, wchar_t **argv)
     if (real) {
         gk3w_sys sys;
         gk3w_sys_read(&sys);
-        if (gk3w_sys_gate(&sys, blkey && !wcscmp(blkey, L"yes")))
+        if (gk3w_sys_gate(&sys, blkey && !wcscmp(blkey, L"yes"), GK3W_GATE_APPLY))
             return 1;
     }
     if (defos_arg && wcscmp(defos_arg, L"android") && wcscmp(defos_arg, L"windows"))
@@ -969,26 +987,11 @@ int gk3w_cmd_apply(int argc, wchar_t **argv)
         size_t sz[3] = {bi.b.kernel_size, bi.b.dtb_size, bi.b.ramdisk_size};
         static const char *const backups[2] = {"EFI/BOOT/BOOTAA64.EFI", "loader/loader.conf"};
         char relp[160], entry[GK3_BOOT_ARGS_SIZE + GK3_BOOT_EXTRA_ARGS_SIZE + 512];
-        {
-            /* 先放标记：uninstall 靠它认出这一套安装（中途失败、启动项还没写也认得出），并且只删这次装才有的目录 */
-            char marker[256];
-            wchar_t pl[MAX_PATH * 2], ps[MAX_PATH * 2];
-            int n;
-            esp_path(&esp, "loader", pl, MAX_PATH * 2);
-            esp_path(&esp, "EFI/systemd", ps, MAX_PATH * 2);
-            n = snprintf(marker, sizeof marker,
-                         "gk3w install marker: the Android boot files of this install live in this directory.\n"
-                         "created_loader=%d\ncreated_systemd=%d\n",
-                         !gk3w_exists(pl), !gk3w_exists(ps));
-            snprintf(relp, sizeof relp, "%s/android/gk3w-install.txt", esp.mid);
-            if (esp_write(&esp, relp, (const uint8_t *)marker, (size_t)n))
-                goto out;
-        }
         for (int k = 0; k < 2; k++) {
             if (!orig[k])
                 continue;
             snprintf(relp, sizeof relp, "%s.before-gaokun3", backups[k]);
-            if (esp_write(&esp, relp, orig[k], orig_len[k]))
+            if (esp_write_renamed(&esp, relp, orig[k], orig_len[k]))
                 goto out;
             gk3w_log("backed up the original %s as %s", backups[k], relp);
         }
@@ -1023,7 +1026,7 @@ int gk3w_cmd_apply(int argc, wchar_t **argv)
     /* LoaderEntryDefault 优先于 loader.conf 的 default：装完还在的话，第一次重启进的就不是新装的 Android（同 gk3_apply）。
      * 删不掉只提醒：盘上的东西都已写好。VHD 测试时这是 PC 自己的固件变量，不碰。 */
     if (real) {
-        gk3w_loader_var_delete(L"LoaderEntryDefault");
+        gk3w_loader_var_delete(L"LoaderEntryDefault", NULL);
     } else {
         gk3w_line l = {0};
         gk3w_line_begin(&l, "NOTE");

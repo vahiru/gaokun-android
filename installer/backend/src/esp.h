@@ -19,6 +19,15 @@ extern const char gk3w_loader_conf[];
 /* mid 是不是 32 位小写十六进制（ESP 根目录下 <machine-id>/ 的名字） */
 int gk3w_is_machine_id(const char *s);
 
+/* loader/entries 里的这个文件名是不是我们写的，与 scripts/windows/gaokun3-setup.ps1 的 Test-OurEntryName 相同：
+ * gaokun3-live[-N]、gk3*（统一启动入口与双系统的 gk3-windows.conf）、<mid>-android|rescue|recovery[-a|-b]；
+ * 可带启动计数后缀 +N[-M]、可带 .disabled；ASCII 不分大小写。 */
+int gk3w_our_entry_name(const char *name);
+
+/* 共用 ESP 上卸载时，这个 Loader 变量值算不算我们写的（Test-OurVarValue）：auto-windows、gk3-windows.conf
+ * （同 gk3_defvar_classify），指向某个槽的 *-android-<a|b>.conf，或 gk3w_our_entry_name 认得的条目名 */
+int gk3w_our_var_value(const char *v);
+
 /* loader/entries/<mid>-android-<slot>.conf 的全文。返回写入的长度，out 不够返回 -1。 */
 int gk3w_esp_android_entry(char *out, size_t cap, const char *mid, char slot, const char *cmdline);
 

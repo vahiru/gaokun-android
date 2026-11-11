@@ -1,22 +1,27 @@
-/* Windows：从一块盘上卸载 gk3w apply（或 LiveCD 安装器）装上去的那一套 Android，留下空闲空间。
+/* Windows：从一块盘上卸载 Android，回到只有 Windows。顺序与规则同 scripts/windows/gaokun3-setup.ps1 的
+ * -RemoveAndroid（Invoke-RemoveAndroid）：
  *
  *   gk3w uninstall --disk N --backup-dir DIR [--real-disk [--bitlocker-key yes]]
  *
- * 分区：misc、metadata、boot_a、boot_b、super、gk3rescue、userdata 里盘上有的那些。每个名字至多一个、必须是 Linux 数据类型，
- *   否则整个拒绝（有歧义不猜）。别的分区一个都不碰。
- * ESP：只清这一套安装自己的东西 ——
- *   - <mid>/android/ 与 <mid>/rescue/；<mid>/ 本身只在空了时删（它可能也是别的系统的 BLS 目录，见 gk3__esp_pick_mid）；
- *   - loader/entries/<mid>-android-{a,b}.conf、<mid>-recovery-{a,b}.conf、<mid>-rescue.conf、<mid>-rescue-b.conf，
- *     统一启动入口的 gk3boot-android-*.conf、gk3prev-android-*.conf、gk3boot-tools.conf；EFI/gk3boot/ 整个目录；
- *   - EFI/BOOT/BOOTAA64.EFI 与 loader/loader.conf：有 .before-gaokun3 备份就换回原件、删掉备份；
- *   - loader/ 与 EFI/systemd/：只在 apply 的标记（<mid>/android/gk3w-install.txt）说它们是那次装才有的、并且
- *     loader/entries 里已经没有别的 .conf 时才删。没有标记（LiveCD 装的）就一律留着。
- *   <mid>：ESP 根目录下带 android/ 子目录的 32 位十六进制目录（恰好一个）；没有的话退回按 *-android-a.conf 的前缀找。
- *   先删目录、最后删启动项：中途失败时启动项还在，再跑一次 uninstall 仍认得出这一套。
- * 真实磁盘：删 LoaderEntryDefault 与 LoaderEntryOneShot（它们可能指着刚删掉的启动项）。
+ * 0 预检（只读；不过就什么都不改）：
+ *   - 分区：misc、metadata、boot_a、boot_b、super、gk3rescue、userdata 中盘上有的。每个名字至多一个、必须是 Linux 数据
+ *     类型；开头 8 KiB 是 NTFS / BitLocker / FAT / exFAT 的拒绝；misc 不大于 GK3W_MISC_MIB；boot_a、boot_b、super 里
+ *     至少一个认得出（ANDROID! / LP 元数据）—— 同 Test-RemovalCandidates。
+ *   - ESP：loader/entries 里有不是我们写的 .conf（gk3w_our_entry_name），或 EFI/Linux 下有 .efi（UKI），就算 ESP 上
+ *     还有别的系统（foreign）。没有 foreign 时，ESP 上要有 EFI/Microsoft/Boot/bootmgfw.efi 或 BOOTAA64.EFI 的
+ *     .before-gaokun3 备份，否则删完没有东西能启动。
+ * 1 还原引导（没有 foreign 时）：EFI/BOOT/BOOTAA64.EFI ← 【当前的】bootmgfw.efi；没有它才用 .before-gaokun3
+ *   （装机那天的拷贝，Windows 之后更新过的启动管理器只在 EFI/Microsoft/Boot 里）。必须在删分区之前：反过来的话
+ *   systemd-boot 仍默认进一个已经不存在的 Android。
+ * 2 删 ESP 上我们的东西：我们的启动项；含 android/ 或 rescue/ 的 <mid>/ 里的这两个目录（<mid>/ 空了才删）；
+ *   EFI/gk3boot、EFI/gaokun3；没有 foreign 时再删 loader/、EFI/systemd/ 与 BOOTAA64.EFI.before-gaokun3。
+ *   有 foreign 时这三样留着、回落路径也不动（放谁由用户决定），只把 loader.conf 从 .before-gaokun3 换回来。
+ * 3 删变量（真实磁盘）：LoaderEntryDefault、LoaderEntryOneShot；有 foreign 时只删看得出是我们写的值。
+ * 4 删分区：先重读分区表、与预检时的逐项比对，变过就停（不能拿旧表盖掉别的程序刚做的改动）。
+ * 中途失败时再跑一次：每一步都按 ESP 与分区表的现状来认，做过的步骤再做一遍结果不变。
  *
- * ★ 先清 ESP、再删分区：中途失败时，前者留下的是“开机直接进 Windows、盘上多几个没用的分区”，
- *   后者留下的是“开机默认去启动一个已经不存在的 Android”。 */
+ * 与 -RemoveAndroid 的差别（原型阶段）：GK3LIVE 不删、C: 不扩、BitLocker 不暂停（改为要求 --bitlocker-key yes）；
+ * <mid>/ 不整个删（它也可能是别的系统的 BLS 目录）；EFI/Linux 下的 UKI 也算 foreign。 */
 #include <windows.h>
 #include <winioctl.h>
 
@@ -26,6 +31,7 @@
 
 #include "../esp.h"
 #include "../layout.h"
+#include "../plan.h"
 #include "../proto.h"
 #include "disk.h"
 #include "gk3core.h"
@@ -33,8 +39,19 @@
 
 static const wchar_t *const OUR_NAMES[] = {L"misc", L"metadata", L"boot_a", L"boot_b", L"super", L"gk3rescue", L"userdata"};
 #define N_OURS (sizeof OUR_NAMES / sizeof OUR_NAMES[0])
+#define HEAD_BYTES 8192u
 
-static void note_removed(const char *what, const wchar_t *rel)
+static const wchar_t FALLBACK[] = L"EFI\\BOOT\\BOOTAA64.EFI";
+static const wchar_t FALLBACK_BAK[] = L"EFI\\BOOT\\BOOTAA64.EFI.before-gaokun3";
+static const wchar_t BOOTMGFW[] = L"EFI\\Microsoft\\Boot\\bootmgfw.efi";
+
+typedef struct {
+    const wchar_t *root;        /* \\?\Volume{…}\ */
+    DWORD first_err;            /* 第一次失败的 Win32 错误码 */
+    int bad;
+} esp_ctx;
+
+static void note(const char *what, const wchar_t *rel)
 {
     gk3w_line l = {0};
     char r[MAX_PATH * 3];
@@ -45,18 +62,41 @@ static void note_removed(const char *what, const wchar_t *rel)
     gk3w_line_free(&l);
 }
 
+static void fail(esp_ctx *e, const char *what, const wchar_t *rel)
+{
+    DWORD err = GetLastError();
+    char r[MAX_PATH * 3];
+    gk3w_w2u(rel, r, sizeof r);
+    gk3w_log("cannot %s %s (%lu)", what, r, (unsigned long)err);
+    if (!e->bad)
+        e->first_err = err;
+    e->bad = 1;
+}
+
+static void full_path(const esp_ctx *e, const wchar_t *rel, wchar_t *out)
+{
+    _snwprintf(out, MAX_PATH * 2, L"%ls%ls", e->root, rel);
+    out[MAX_PATH * 2 - 1] = 0;
+}
+
+static int is_dir(const wchar_t *p)
+{
+    DWORD a = GetFileAttributesW(p);
+    return a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY);
+}
+
 /* 删一个文件；本来就没有不算错 */
-static int rm_file(const wchar_t *root, const wchar_t *rel)
+static void rm_file(esp_ctx *e, const wchar_t *rel)
 {
     wchar_t p[MAX_PATH * 2];
-    _snwprintf(p, MAX_PATH * 2, L"%ls%ls", root, rel);
+    full_path(e, rel, p);
     if (!gk3w_exists(p))
-        return 0;
+        return;
     SetFileAttributesW(p, FILE_ATTRIBUTE_NORMAL);
     if (!DeleteFileW(p))
-        return -1;
-    note_removed("esp-file", rel);
-    return 0;
+        fail(e, "remove", rel);
+    else
+        note("esp-file", rel);
 }
 
 /* 整个目录删掉（不跟随重解析点）；本来就没有不算错 */
@@ -67,16 +107,18 @@ static int rm_tree(const wchar_t *dir)
     HANDLE h;
     int rc = 0;
     _snwprintf(pat, MAX_PATH * 2, L"%ls\\*", dir);
+    pat[MAX_PATH * 2 - 1] = 0;
     h = FindFirstFileW(pat, &fd);
     if (h == INVALID_HANDLE_VALUE) {
-        DWORD e = GetLastError();
-        return (e == ERROR_FILE_NOT_FOUND || e == ERROR_PATH_NOT_FOUND) ? 0 : -1;
+        DWORD err = GetLastError();
+        return (err == ERROR_FILE_NOT_FOUND || err == ERROR_PATH_NOT_FOUND) ? 0 : -1;
     }
     do {
         wchar_t child[MAX_PATH * 2];
         if (!wcscmp(fd.cFileName, L".") || !wcscmp(fd.cFileName, L".."))
             continue;
         _snwprintf(child, MAX_PATH * 2, L"%ls\\%ls", dir, fd.cFileName);
+        child[MAX_PATH * 2 - 1] = 0;
         if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && !(fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
             if (rm_tree(child))
                 rc = -1;
@@ -92,189 +134,229 @@ static int rm_tree(const wchar_t *dir)
     return rc;
 }
 
-/* ESP 根目录下带 android/ 子目录的 32 位十六进制目录：0 = 没有；1 = 恰好一个（写进 mid）；-1 = 不止一个 */
-static int find_install_dir(const wchar_t *root, wchar_t mid[33])
-{
-    wchar_t pat[MAX_PATH * 2];
-    WIN32_FIND_DATAW fd;
-    HANDLE h;
-    int n = 0;
-    _snwprintf(pat, MAX_PATH * 2, L"%ls*", root);
-    h = FindFirstFileW(pat, &fd);
-    if (h == INVALID_HANDLE_VALUE)
-        return 0;
-    do {
-        wchar_t sub[MAX_PATH * 2];
-        char u[MAX_PATH * 3];
-        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
-            continue;
-        gk3w_w2u(fd.cFileName, u, sizeof u);
-        if (!gk3w_is_machine_id(u))
-            continue;
-        _snwprintf(sub, MAX_PATH * 2, L"%ls%ls\\android", root, fd.cFileName);
-        if (!(GetFileAttributesW(sub) != INVALID_FILE_ATTRIBUTES && (GetFileAttributesW(sub) & FILE_ATTRIBUTE_DIRECTORY)))
-            continue;
-        if (n)
-            n = -1000;
-        wcscpy(mid, fd.cFileName);
-        n++;
-    } while (FindNextFileW(h, &fd));
-    FindClose(h);
-    return n < 0 ? -1 : n;
-}
-
-/* apply 的标记里 key=1 吗（没有标记或没有这一行都算 0） */
-static int marker_flag(const wchar_t *root, const wchar_t *mid, const char *key)
+static void rm_dir(esp_ctx *e, const wchar_t *rel)
 {
     wchar_t p[MAX_PATH * 2];
-    uint8_t *data;
-    size_t len;
-    char want[64];
-    int hit = 0;
-    _snwprintf(p, MAX_PATH * 2, L"%ls%ls\\android\\gk3w-install.txt", root, mid);
-    if (gk3w_read_file(p, &data, &len, 4096))
-        return 0;
-    snprintf(want, sizeof want, "\n%s=1", key);
-    data[len] = 0;
-    hit = strstr((const char *)data, want) != NULL;
-    free(data);
-    return hit;
-}
-
-/* loader/entries 里还有没有 .conf（我们的清完之后，别人的启动项） */
-static int entries_left(const wchar_t *root)
-{
-    wchar_t pat[MAX_PATH * 2];
-    WIN32_FIND_DATAW fd;
-    HANDLE h;
-    _snwprintf(pat, MAX_PATH * 2, L"%lsloader\\entries\\*.conf", root);
-    h = FindFirstFileW(pat, &fd);
-    if (h == INVALID_HANDLE_VALUE)
-        return 0;
-    FindClose(h);
-    return 1;
-}
-
-static int rm_dir(const wchar_t *root, const wchar_t *rel)
-{
-    wchar_t p[MAX_PATH * 2];
-    _snwprintf(p, MAX_PATH * 2, L"%ls%ls", root, rel);
+    full_path(e, rel, p);
     if (!gk3w_exists(p))
-        return 0;
+        return;
     if (rm_tree(p))
-        return -1;
-    note_removed("esp-dir", rel);
-    return 0;
+        fail(e, "remove", rel);
+    else
+        note("esp-dir", rel);
 }
 
-/* 有 <rel>.before-gaokun3 就把原件换回来、删掉备份 */
-static int restore_backup(const wchar_t *root, const wchar_t *rel)
+/* 32 位十六进制（不分大小写，同 PS1 的 '^[0-9a-fA-F]{32}$'） */
+static int is_hex32(const wchar_t *s)
+{
+    size_t n = 0;
+    for (; s[n]; n++)
+        if (!((s[n] >= L'0' && s[n] <= L'9') || (s[n] >= L'a' && s[n] <= L'f') || (s[n] >= L'A' && s[n] <= L'F')))
+            return 0;
+    return n == 32;
+}
+
+/* <mid>/ 里有 android/ 或 rescue/ 吗 */
+static int is_install_dir(const esp_ctx *e, const wchar_t *mid)
+{
+    wchar_t rel[MAX_PATH], p[MAX_PATH * 2];
+    _snwprintf(rel, MAX_PATH, L"%ls\\android", mid);
+    full_path(e, rel, p);
+    if (is_dir(p))
+        return 1;
+    _snwprintf(rel, MAX_PATH, L"%ls\\rescue", mid);
+    full_path(e, rel, p);
+    return is_dir(p);
+}
+
+/* ESP 现状（只读）：我们的启动项、安装目录、别的系统的启动项 */
+typedef struct {
+    unsigned our_entries, install_dirs, foreign;
+    int bootmgfw, fallback_bak, gk3boot, gaokun3;
+} esp_scan;
+
+static void scan_esp(const esp_ctx *e, esp_scan *s)
+{
+    wchar_t pat[MAX_PATH * 2], p[MAX_PATH * 2];
+    WIN32_FIND_DATAW fd;
+    HANDLE h;
+    memset(s, 0, sizeof *s);
+    full_path(e, L"loader\\entries\\*", pat);
+    h = FindFirstFileW(pat, &fd);
+    if (h != INVALID_HANDLE_VALUE) {
+        do {
+            char u[MAX_PATH * 3];
+            size_t n;
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+                continue;
+            gk3w_w2u(fd.cFileName, u, sizeof u);
+            n = strlen(u);
+            if (gk3w_our_entry_name(u))
+                s->our_entries++;
+            else if (n >= 5 && !_stricmp(u + n - 5, ".conf")) {   /* 同 PS1：只有 .conf 算别人的启动项 */
+                s->foreign++;
+                gk3w_log("boot entry of another system: loader/entries/%s", u);
+            }
+        } while (FindNextFileW(h, &fd));
+        FindClose(h);
+    }
+    full_path(e, L"EFI\\Linux\\*.efi", pat);
+    h = FindFirstFileW(pat, &fd);
+    if (h != INVALID_HANDLE_VALUE) {
+        do {
+            char u[MAX_PATH * 3];
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+                continue;
+            gk3w_w2u(fd.cFileName, u, sizeof u);
+            s->foreign++;
+            gk3w_log("unified kernel image of another system: EFI/Linux/%s", u);
+        } while (FindNextFileW(h, &fd));
+        FindClose(h);
+    }
+    full_path(e, L"*", pat);
+    h = FindFirstFileW(pat, &fd);
+    if (h != INVALID_HANDLE_VALUE) {
+        do {
+            if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && is_hex32(fd.cFileName) && is_install_dir(e, fd.cFileName))
+                s->install_dirs++;
+        } while (FindNextFileW(h, &fd));
+        FindClose(h);
+    }
+    full_path(e, BOOTMGFW, p);
+    s->bootmgfw = gk3w_exists(p);
+    full_path(e, FALLBACK_BAK, p);
+    s->fallback_bak = gk3w_exists(p);
+    full_path(e, L"EFI\\gk3boot", p);
+    s->gk3boot = gk3w_exists(p);
+    full_path(e, L"EFI\\gaokun3", p);
+    s->gaokun3 = gk3w_exists(p);
+}
+
+/* 第 2 步的前半：我们的启动项、<mid>/android|rescue */
+static void rm_entries_and_dirs(esp_ctx *e)
+{
+    wchar_t pat[MAX_PATH * 2];
+    WIN32_FIND_DATAW fd;
+    HANDLE h;
+    full_path(e, L"loader\\entries\\*", pat);
+    h = FindFirstFileW(pat, &fd);
+    if (h != INVALID_HANDLE_VALUE) {
+        do {
+            char u[MAX_PATH * 3];
+            wchar_t rel[MAX_PATH];
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+                continue;
+            gk3w_w2u(fd.cFileName, u, sizeof u);
+            if (!gk3w_our_entry_name(u))
+                continue;
+            _snwprintf(rel, MAX_PATH, L"loader\\entries\\%ls", fd.cFileName);
+            rel[MAX_PATH - 1] = 0;
+            rm_file(e, rel);
+        } while (FindNextFileW(h, &fd));
+        FindClose(h);
+    }
+    full_path(e, L"*", pat);
+    h = FindFirstFileW(pat, &fd);
+    if (h != INVALID_HANDLE_VALUE) {
+        do {
+            wchar_t rel[MAX_PATH], p[MAX_PATH * 2];
+            int was_bad = e->bad;
+            if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || !is_hex32(fd.cFileName) || !is_install_dir(e, fd.cFileName))
+                continue;
+            _snwprintf(rel, MAX_PATH, L"%ls\\android", fd.cFileName);
+            rm_dir(e, rel);
+            _snwprintf(rel, MAX_PATH, L"%ls\\rescue", fd.cFileName);
+            rm_dir(e, rel);
+            full_path(e, fd.cFileName, p);
+            if (e->bad == was_bad && RemoveDirectoryW(p))   /* 空了才删得掉：里面还有别的系统的东西就留着 */
+                note("esp-dir", fd.cFileName);
+        } while (FindNextFileW(h, &fd));
+        FindClose(h);
+    }
+}
+
+/* 有 <rel>.before-gaokun3 就把它换回 <rel>、删掉备份（有 foreign 时的 loader.conf） */
+static void restore_backup(esp_ctx *e, const wchar_t *rel)
 {
     wchar_t p[MAX_PATH * 2], b[MAX_PATH * 2];
     uint8_t *data;
     size_t len;
-    _snwprintf(p, MAX_PATH * 2, L"%ls%ls", root, rel);
-    _snwprintf(b, MAX_PATH * 2, L"%ls%ls.before-gaokun3", root, rel);
+    full_path(e, rel, p);
+    _snwprintf(b, MAX_PATH * 2, L"%ls.before-gaokun3", p);
+    b[MAX_PATH * 2 - 1] = 0;
     if (!gk3w_exists(b))
-        return 0;
-    if (gk3w_read_file(b, &data, &len, 64u << 20))
-        return -1;
+        return;
+    if (gk3w_read_file(b, &data, &len, 64u << 20)) {
+        fail(e, "read the backup of", rel);
+        return;
+    }
     if (gk3w_write_file_verify(p, data, len)) {
         free(data);
-        return -1;
+        fail(e, "restore", rel);
+        return;
     }
     free(data);
+    note("esp-restored", rel);
     SetFileAttributesW(b, FILE_ATTRIBUTE_NORMAL);
     if (!DeleteFileW(b))
+        fail(e, "remove the backup of", rel);
+}
+
+/* 分区开头 HEAD_BYTES 字节认内容；读不了返回 -1 */
+static int read_kind(gk3w_disk *d, const PARTITION_INFORMATION_EX *p, uint8_t *buf, gk3w_content_kind *k)
+{
+    uint64_t len = (uint64_t)p->PartitionLength.QuadPart;
+    DWORD n = len < HEAD_BYTES ? (DWORD)(len / d->bs * d->bs) : HEAD_BYTES;
+    if (!n || gk3w_pread(d->h, buf, n, (uint64_t)p->StartingOffset.QuadPart))
         return -1;
-    note_removed("esp-restored", rel);
+    *k = gk3w_content_kind_of(buf, n);
     return 0;
-}
-
-/* ESP 上 loader/entries/<mid>-android-a.conf 的 <mid>：0 = 没有；1 = 恰好一个（写进 mid）；-1 = 不止一个 */
-static int find_mid(const wchar_t *root, wchar_t mid[33])
-{
-    wchar_t pat[MAX_PATH * 2];
-    WIN32_FIND_DATAW fd;
-    HANDLE h;
-    int n = 0;
-    _snwprintf(pat, MAX_PATH * 2, L"%lsloader\\entries\\*-android-a.conf", root);
-    h = FindFirstFileW(pat, &fd);
-    if (h == INVALID_HANDLE_VALUE)
-        return 0;
-    do {
-        wchar_t *dash = wcsstr(fd.cFileName, L"-android-a.conf");
-        char u[64];
-        if (!dash || dash - fd.cFileName != 32 || dash[15] != 0)
-            continue;
-        *dash = 0;
-        gk3w_w2u(fd.cFileName, u, sizeof u);
-        if (!gk3w_is_machine_id(u))
-            continue;
-        if (n && wcscmp(mid, fd.cFileName))
-            n = -1000;   /* 两个不同的 mid */
-        wcscpy(mid, fd.cFileName);
-        n++;
-    } while (FindNextFileW(h, &fd));
-    FindClose(h);
-    return n < 0 ? -1 : n > 0;
-}
-
-/* 统一启动入口的条目：gk3boot-android-*.conf、gk3prev-android-*.conf、gk3boot-tools.conf */
-static int rm_gk3boot_entries(const wchar_t *root)
-{
-    static const wchar_t *const pats[] = {L"gk3boot-android-*", L"gk3prev-android-*"};
-    int rc = rm_file(root, L"loader\\entries\\gk3boot-tools.conf");
-    for (size_t k = 0; k < 2; k++) {
-        wchar_t pat[MAX_PATH * 2];
-        WIN32_FIND_DATAW fd;
-        HANDLE h;
-        _snwprintf(pat, MAX_PATH * 2, L"%lsloader\\entries\\%ls", root, pats[k]);
-        h = FindFirstFileW(pat, &fd);
-        if (h == INVALID_HANDLE_VALUE)
-            continue;
-        do {
-            wchar_t rel[MAX_PATH];
-            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
-                continue;
-            _snwprintf(rel, MAX_PATH, L"loader\\entries\\%ls", fd.cFileName);
-            if (rm_file(root, rel))
-                rc = -1;
-        } while (FindNextFileW(h, &fd));
-        FindClose(h);
-    }
-    return rc;
 }
 
 int gk3w_cmd_uninstall(int argc, wchar_t **argv)
 {
     uint64_t num;
     const wchar_t *backup_dir = gk3w_arg(argc, argv, L"--backup-dir"), *blkey = gk3w_arg(argc, argv, L"--bitlocker-key");
-    int real = gk3w_flag(argc, argv, L"--real-disk"), rc = 1, n_esp = 0, have_mid;
+    int real = gk3w_flag(argc, argv, L"--real-disk"), rc = 1, n_esp = 0, confirmed = 0;
     gk3w_touched T = GK3W_TOUCHED_NO;
     gk3w_disk d;
     GUID ids[N_OURS];
     size_t n_ids = 0;
     const PARTITION_INFORMATION_EX *esp_part = NULL;
-    wchar_t root[MAX_PATH], mid[33] = L"";
+    DRIVE_LAYOUT_INFORMATION_EX *snap = NULL;
+    uint8_t *head = NULL, *winboot = NULL;
+    size_t winboot_len = 0;
+    wchar_t root[MAX_PATH];
+    esp_ctx e = {root, 0, 0};
+    esp_scan s;
 
     if (gk3w_arg_u64(argc, argv, L"--disk", &num) || num > 255 || !backup_dir)
         return gk3w_err(T, "usage", "usage: uninstall --disk N --backup-dir DIR [--real-disk [--bitlocker-key yes]]", 0);
     if (real) {
         gk3w_sys sys;
         gk3w_sys_read(&sys);
-        if (gk3w_sys_gate(&sys, blkey && !wcscmp(blkey, L"yes")))
+        if (gk3w_sys_gate(&sys, blkey && !wcscmp(blkey, L"yes"), GK3W_GATE_UNINSTALL))
             return 1;
     }
     if (gk3w_disk_open((DWORD)num, real, &d, T))
         return 1;
+    snap = malloc(d.laysz);
+    head = _aligned_malloc(HEAD_BYTES, 4096);
+    if (!snap || !head) {
+        gk3w_err(T, "nomem", "out of memory", 0);
+        goto out;
+    }
+    memcpy(snap, d.lay, d.laysz);
 
-    /* ── 认分区：每个名字至多一个、必须是 Linux 数据类型 ── */
+    /* ── 0 预检：分区 ── */
     for (size_t k = 0; k < N_OURS; k++) {
         int hits = 0;
+        char nm[32];
+        gk3w_w2u(OUR_NAMES[k], nm, sizeof nm);
         for (DWORD i = 0; i < d.lay->PartitionCount; i++) {
             const PARTITION_INFORMATION_EX *p = &d.lay->PartitionEntry[i];
             wchar_t wn[GK3_GPT_NAME_CHARS + 1];
+            gk3w_content_kind kind;
             if (p->PartitionStyle != PARTITION_STYLE_GPT || !p->PartitionLength.QuadPart)
                 continue;
             memcpy(wn, p->Gpt.Name, sizeof p->Gpt.Name);
@@ -282,22 +364,38 @@ int gk3w_cmd_uninstall(int argc, wchar_t **argv)
             if (wcscmp(wn, OUR_NAMES[k]))
                 continue;
             if (memcmp(&p->Gpt.PartitionType, &GK3W_LINUX_DATA, sizeof(GUID))) {
-                char nm[32];
-                gk3w_w2u(OUR_NAMES[k], nm, sizeof nm);
                 gk3w_err_kv(T, "bad-part-type", "name", nm, "a partition with this name is not of the Linux data type, so it is not ours; leaving it (disk not touched)", 0);
                 goto out;
             }
-            ids[n_ids] = p->Gpt.PartitionId;
+            if (hits) {
+                gk3w_err_kv(T, "partlabel-conflict", "names", nm, "more than one partition has this name; cannot tell which one to remove (disk not touched)", 0);
+                goto out;
+            }
+            if (read_kind(&d, p, head, &kind)) {
+                gk3w_err_kv(T, "disk-read", "name", nm, "cannot read the start of the partition (disk not touched)", GetLastError());
+                goto out;
+            }
+            gk3w_log("partition %s: %llu MiB, content %s", nm, (unsigned long long)(p->PartitionLength.QuadPart >> 20), gk3w_content_kind_name(kind));
+            if (kind == GK3W_KIND_NTFS || kind == GK3W_KIND_BITLOCKER || kind == GK3W_KIND_FAT || kind == GK3W_KIND_EXFAT) {
+                gk3w_err_kv(T, "foreign-content", "name", nm, "this partition holds a Windows file system, so it is not an Android partition (disk not touched)", 0);
+                goto out;
+            }
+            if (k == 0 && (uint64_t)p->PartitionLength.QuadPart > ((uint64_t)GK3W_MISC_MIB << 20)) {
+                gk3w_err_kv(T, "misc-too-big", "name", nm, "misc is larger than the installer ever creates it (disk not touched)", 0);
+                goto out;
+            }
+            if (((k == 2 || k == 3) && kind == GK3W_KIND_ANDROID_BOOT) || (k == 4 && kind == GK3W_KIND_LP))
+                confirmed++;
+            ids[n_ids++] = p->Gpt.PartitionId;
             hits++;
         }
-        if (hits > 1) {
-            char nm[32];
-            gk3w_w2u(OUR_NAMES[k], nm, sizeof nm);
-            gk3w_err_kv(T, "partlabel-conflict", "names", nm, "more than one partition has this name; cannot tell which one to remove (disk not touched)", 0);
-            goto out;
-        }
-        n_ids += (size_t)hits;
     }
+    if (n_ids && !confirmed) {
+        gk3w_err(T, "android-unconfirmed", "none of boot_a, boot_b and super holds an Android boot image or LP metadata; refusing to remove partitions by name alone (disk not touched)", 0);
+        goto out;
+    }
+
+    /* ── 0 预检：ESP ── */
     for (DWORD i = 0; i < d.lay->PartitionCount; i++) {
         const PARTITION_INFORMATION_EX *p = &d.lay->PartitionEntry[i];
         if (p->PartitionStyle == PARTITION_STYLE_GPT && p->PartitionLength.QuadPart &&
@@ -314,78 +412,100 @@ int gk3w_cmd_uninstall(int argc, wchar_t **argv)
         gk3w_err(T, "esp-mount", "cannot find the volume of the EFI system partition (disk not touched)", 0);
         goto out;
     }
-    have_mid = find_install_dir(root, mid);
-    if (!have_mid)
-        have_mid = find_mid(root, mid);
-    if (have_mid < 0) {
-        gk3w_err(T, "esp-multiple-installs", "the EFI system partition holds more than one Android install; cannot tell which one to remove (disk not touched)", 0);
-        goto out;
-    }
-    if (!n_ids && !have_mid) {
-        gk3w_log("no Android partitions on the disk and no Android install on the EFI system partition: nothing to uninstall");
+    esp_part = NULL;
+    scan_esp(&e, &s);
+    if (!n_ids && !s.our_entries && !s.install_dirs && !s.gk3boot && !s.gaokun3 && !s.fallback_bak) {
+        gk3w_log("no Android partitions on the disk and no Android files on the EFI system partition: nothing to uninstall");
         rc = 0;
         goto out;
     }
-    {
-        char m8[64] = "(none)";
-        if (have_mid)
-            gk3w_w2u(mid, m8, sizeof m8);
-        gk3w_log("%u partitions to remove; install directory on the ESP: %s", (unsigned)n_ids, m8);
+    if (!s.foreign) {
+        wchar_t p[MAX_PATH * 2];
+        if (!s.bootmgfw && !s.fallback_bak) {
+            gk3w_err(T, "no-windows-boot", "the EFI system partition has neither the Windows Boot Manager nor the .before-gaokun3 backup: nothing would be left to boot (disk not touched)", 0);
+            goto out;
+        }
+        full_path(&e, s.bootmgfw ? BOOTMGFW : FALLBACK_BAK, p);
+        if (gk3w_read_file(p, &winboot, &winboot_len, 64u << 20)) {
+            gk3w_err(T, "esp-unreadable", "cannot read the Windows Boot Manager on the EFI system partition (disk not touched)", GetLastError());
+            goto out;
+        }
+    } else {
+        gk3w_log("the EFI system partition is shared with another system: our entries are removed; loader/, EFI/systemd and the fallback EFI/BOOT/BOOTAA64.EFI stay as they are");
     }
+    gk3w_log("%u partitions to remove; %u of our boot entries, %u install directories on the ESP", (unsigned)n_ids, s.our_entries, s.install_dirs);
     if (gk3w_gpt_backup(&d, backup_dir, L"uninstall", T))
         goto out;
 
-    /* ══ 从这里起开始动盘：先清 ESP ══ */
+    /* ══ 从这里起开始动盘 ══ */
     T = GK3W_TOUCHED_YES;
-    {
-        int bad = 0, created_loader = 0, created_systemd = 0;
-        if (have_mid) {
-            static const wchar_t *const sfx[] = {L"-android-a.conf", L"-android-b.conf", L"-recovery-a.conf",
-                                                 L"-recovery-b.conf", L"-rescue.conf",    L"-rescue-b.conf"};
-            wchar_t rel[MAX_PATH], full[MAX_PATH * 2];
-            created_loader = marker_flag(root, mid, "created_loader");
-            created_systemd = marker_flag(root, mid, "created_systemd");
-            /* 先删文件目录，最后删启动项 */
-            _snwprintf(rel, MAX_PATH, L"%ls\\android", mid);
-            bad |= rm_dir(root, rel);
-            _snwprintf(rel, MAX_PATH, L"%ls\\rescue", mid);
-            bad |= rm_dir(root, rel);
-            _snwprintf(full, MAX_PATH * 2, L"%ls%ls", root, mid);
-            if (!bad && RemoveDirectoryW(full))   /* 空了才删得掉：里面还有别的系统的东西就留着 */
-                note_removed("esp-dir", mid);
-            for (size_t k = 0; k < sizeof sfx / sizeof sfx[0]; k++) {
-                _snwprintf(rel, MAX_PATH, L"loader\\entries\\%ls%ls", mid, sfx[k]);
-                bad |= rm_file(root, rel);
+
+    /* ── 1 还原引导 ── */
+    if (!s.foreign) {
+        wchar_t p[MAX_PATH * 2], dir[MAX_PATH * 2];
+        uint8_t *cur = NULL;
+        size_t cur_len = 0;
+        full_path(&e, FALLBACK, p);
+        if (gk3w_exists(p) && !gk3w_read_file(p, &cur, &cur_len, 64u << 20) && cur_len == winboot_len && !memcmp(cur, winboot, cur_len)) {
+            gk3w_log("EFI/BOOT/BOOTAA64.EFI is already the Windows Boot Manager");
+        } else {
+            full_path(&e, L"EFI\\BOOT", dir);
+            if (gk3w_mkdirs(dir, wcslen(root)) || gk3w_write_file_verify(p, winboot, winboot_len)) {
+                DWORD err = GetLastError();
+                free(cur);
+                gk3w_err(T, "esp-write", "restoring EFI/BOOT/BOOTAA64.EFI failed (nothing else changed yet; run uninstall again)", err);
+                goto out;
             }
+            note("esp-restored", FALLBACK);
+            gk3w_log("EFI/BOOT/BOOTAA64.EFI = Windows Boot Manager (from %s)", s.bootmgfw ? "EFI/Microsoft/Boot/bootmgfw.efi" : "the .before-gaokun3 copy made at install time");
         }
-        bad |= rm_gk3boot_entries(root);
-        bad |= rm_dir(root, L"EFI\\gk3boot");
-        bad |= restore_backup(root, L"EFI\\BOOT\\BOOTAA64.EFI");
-        bad |= restore_backup(root, L"loader\\loader.conf");
-        if (!bad && !entries_left(root)) {
-            if (created_loader)
-                bad |= rm_dir(root, L"loader");
-            if (created_systemd)
-                bad |= rm_dir(root, L"EFI\\systemd");
-        }
-        if (bad) {
-            gk3w_err(T, "esp-write", "cleaning the EFI system partition failed: a file could not be removed or restored (partitions not removed yet)", GetLastError());
-            goto out;
-        }
+        free(cur);
     }
 
-    /* ── 再删分区 ── */
+    /* ── 2 删 ESP 上我们的东西 ── */
+    rm_entries_and_dirs(&e);
+    rm_dir(&e, L"EFI\\gk3boot");
+    rm_dir(&e, L"EFI\\gaokun3");
+    if (!s.foreign) {
+        rm_dir(&e, L"loader");
+        rm_dir(&e, L"EFI\\systemd");
+        rm_file(&e, FALLBACK_BAK);
+        rm_file(&e, L"EFI\\BOOT\\BOOTAA64.EFI.before-gaokun3.tmp");
+    } else {
+        restore_backup(&e, L"loader\\loader.conf");
+        rm_file(&e, L"loader\\loader.conf.before-gaokun3.tmp");
+    }
+    if (e.bad) {
+        gk3w_err(T, "esp-write", "cleaning the EFI system partition failed: a file could not be removed or restored (partitions not removed yet; run uninstall again)", e.first_err);
+        goto out;
+    }
+
+    /* ── 3 删变量（真实磁盘）：可能指着刚删掉的启动项 ── */
+    if (real) {
+        int (*ours)(const char *) = s.foreign ? gk3w_our_var_value : NULL;
+        gk3w_loader_var_delete(L"LoaderEntryDefault", ours);
+        gk3w_loader_var_delete(L"LoaderEntryOneShot", ours);
+    }
+
+    /* ── 4 删分区 ── */
     if (n_ids) {
         DWORD count = 0;
-        DRIVE_LAYOUT_INFORMATION_EX *lay = calloc(1, d.laysz);
+        DRIVE_LAYOUT_INFORMATION_EX *lay;
+        if (gk3w_disk_read_layout(&d) || d.lay->PartitionCount != snap->PartitionCount ||
+            memcmp(&d.lay->Gpt, &snap->Gpt, sizeof snap->Gpt) ||
+            memcmp(d.lay->PartitionEntry, snap->PartitionEntry, snap->PartitionCount * sizeof(PARTITION_INFORMATION_EX))) {
+            gk3w_err(T, "layout-changed", "the partition table changed during the uninstall; run uninstall again (EFI system partition already cleaned, partitions not removed)", 0);
+            goto out;
+        }
+        lay = calloc(1, d.laysz);
         if (!lay) {
             gk3w_err(T, "nomem", "out of memory", 0);
             goto out;
         }
         lay->PartitionStyle = PARTITION_STYLE_GPT;
-        lay->Gpt = d.lay->Gpt;
-        for (DWORD i = 0; i < d.lay->PartitionCount; i++) {
-            const PARTITION_INFORMATION_EX *p = &d.lay->PartitionEntry[i];
+        lay->Gpt = snap->Gpt;
+        for (DWORD i = 0; i < snap->PartitionCount; i++) {
+            const PARTITION_INFORMATION_EX *p = &snap->PartitionEntry[i];
             int ours = 0;
             if (p->PartitionStyle != PARTITION_STYLE_GPT || !p->PartitionLength.QuadPart)
                 continue;
@@ -410,12 +530,6 @@ int gk3w_cmd_uninstall(int argc, wchar_t **argv)
                 goto out;
             }
         gk3w_log("removed %u partitions", (unsigned)n_ids);
-    }
-
-    /* ── EFI 变量（真实磁盘）：可能指着刚删掉的启动项 ── */
-    if (real) {
-        gk3w_loader_var_delete(L"LoaderEntryDefault");
-        gk3w_loader_var_delete(L"LoaderEntryOneShot");
     }
 
     /* ── 报告现在的空闲区（给接下来的 apply 选） ── */
@@ -444,6 +558,9 @@ int gk3w_cmd_uninstall(int argc, wchar_t **argv)
     }
     rc = 0;
 out:
+    free(snap);
+    free(winboot);
+    _aligned_free(head);
     gk3w_disk_close(&d);
     return rc;
 }

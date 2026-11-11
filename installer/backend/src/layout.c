@@ -1,6 +1,8 @@
 /* 分区布局计算（说明见 layout.h）。 */
 #include "layout.h"
 
+#include <string.h>
+
 uint64_t gk3w_span_bytes(gk3w_span s, uint32_t sector_bytes)
 {
     uint64_t n;
@@ -68,4 +70,36 @@ gk3w_layout_err gk3w_free_spans(uint64_t usable_first, uint64_t usable_last, con
     }
     *n_out = found;
     return GK3W_LAYOUT_OK;
+}
+
+gk3w_content_kind gk3w_content_kind_of(const uint8_t *h, size_t len)
+{
+    if (len >= 11) {
+        if (!memcmp(h + 3, "NTFS    ", 8))
+            return GK3W_KIND_NTFS;
+        if (!memcmp(h + 3, "-FVE-FS-", 8))
+            return GK3W_KIND_BITLOCKER;
+        if (!memcmp(h + 3, "EXFAT   ", 8))
+            return GK3W_KIND_EXFAT;
+    }
+    if (len >= 8 && !memcmp(h, "ANDROID!", 8))
+        return GK3W_KIND_ANDROID_BOOT;
+    if (len >= 90 && !memcmp(h + 82, "FAT32   ", 8))
+        return GK3W_KIND_FAT;
+    if (len >= 62 && (!memcmp(h + 54, "FAT16   ", 8) || !memcmp(h + 54, "FAT12   ", 8)))
+        return GK3W_KIND_FAT;
+    if (len >= 1082 && h[1080] == 0x53 && h[1081] == 0xEF)
+        return GK3W_KIND_EXT4;
+    if (len >= 4100 && h[4096] == 0x67 && h[4097] == 0x44 && h[4098] == 0x6c && h[4099] == 0x61)   /* 0x616c4467 小端 */
+        return GK3W_KIND_LP;
+    for (size_t i = 0; i < len; i++)
+        if (h[i])
+            return GK3W_KIND_UNKNOWN;
+    return GK3W_KIND_EMPTY;
+}
+
+const char *gk3w_content_kind_name(gk3w_content_kind k)
+{
+    static const char *const names[] = {"empty", "unknown", "ntfs", "bitlocker", "exfat", "fat", "android-boot", "ext4", "lp"};
+    return (unsigned)k < sizeof names / sizeof names[0] ? names[k] : "unknown";
 }
