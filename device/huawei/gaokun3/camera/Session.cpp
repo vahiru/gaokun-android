@@ -15,6 +15,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
+#include <span>
 #include <thread>
 #include <unistd.h>
 
@@ -32,7 +33,9 @@
 #include <jpeglib.h>
 #include <hardware/gralloc.h>
 #include <libyuv.h>
+#include <linux/dma-buf.h>
 #include <log/log.h>
+#include <sys/ioctl.h>
 #include <sys/mman.h>
 /* ⚠️ 不要在这里直接 #include <system/camera_metadata_tags.h>！
  * 该文件【没有 include guard】也没有 #pragma once（system/media/camera/include/system/），
@@ -75,6 +78,32 @@ namespace {
 ndk::ScopedAStatus err(Status s)
 {
 	return ndk::ScopedAStatus::fromServiceSpecificError(static_cast<int32_t>(s));
+}
+
+/*
+ * 把 jpeg_mem_dest 产出的 JPEG 放进 BLOB 缓冲 raw（blobSize 字节），末尾写 CameraBlob。
+ * jpeg_mem_dest 超出给定大小时会自己 malloc 新缓冲，那时 out 不再指向 raw：拷回并释放。
+ */
+bool finishJpegBlob(void *raw, int32_t blobSize, unsigned char *out, size_t jpegLen)
+{
+	const size_t maxJpeg = static_cast<size_t>(blobSize) - sizeof(CameraBlob);
+	bool ok = false;
+	if (jpegLen > 0 && jpegLen <= maxJpeg) {
+		if (out != raw)
+			memcpy(raw, out, jpegLen);
+		CameraBlob blob;
+		blob.blobId = CameraBlobId::JPEG;
+		blob.blobSizeBytes = static_cast<int32_t>(jpegLen);
+		memcpy(static_cast<uint8_t *>(raw) + blobSize - sizeof(CameraBlob),
+		       &blob, sizeof(CameraBlob));
+		ok = true;
+	} else {
+		ALOGE("JPEG of %zu bytes is empty or larger than the BLOB buffer (%zu bytes)",
+		      jpegLen, maxJpeg);
+	}
+	if (out != raw)
+		free(out);
+	return ok;
 }
 
 /*
@@ -312,13 +341,29 @@ ndk::ScopedAStatus Session::configureStreams(const StreamConfiguration &cfg,
 	lastSettings_.clear();
 	lastAfState_ = 0xff;
 
+	/*
+	 * 硬件 ISP（qcom-ife 管线）输出 NV12，另可配 RAW 流（RDI 写出的传感器原始帧）；软件 ISP
+	 * （simple 管线）输出 RGB888。按 libcamera 给出的格式选路径：两者都给时仍走软件 ISP 的
+	 * RGB888。
+	 */
+	{
+		auto probe = cam_->generateConfiguration({ libcamera::StreamRole::Viewfinder });
+		std::vector<libcamera::PixelFormat> fmts;
+		if (probe && !probe->empty())
+			fmts = probe->at(0).formats().pixelformats();
+		auto has = [&](const libcamera::PixelFormat &f) {
+			return std::find(fmts.begin(), fmts.end(), f) != fmts.end();
+		};
+		srcNv12_ = has(libcamera::formats::NV12) && !has(libcamera::formats::RGB888);
+	}
+
 	const int32_t halfW = (facts_.activeW / 2 - 8) & ~7;
 	const int32_t halfH = facts_.activeH / 2;
 	const bool fullSize = !(maxW <= halfW && maxH <= halfH);
 	/*
-	 * Phase detection needs the RAW frame, and the ov13b10 has its PD pixels
-	 * in the full-size mode only (PhaseDetect.h): ask for it alongside. It is
-	 * the soft ISP's input, so libcamera captures into it without a copy.
+	 * 相位对焦要 RAW 帧，而 ov13b10 只在全尺寸模式里有 PD 像素（见 PhaseDetect.h）：一并
+	 * 要一路 RAW。软件 ISP 下它就是去拜耳的输入，libcamera 直接采到里面、不多拷一次；
+	 * 硬件 ISP 下它来自像素通路旁边的 RDI，是同一帧传感器数据。
 	 */
 	bool withRaw = fullSize && facts_.hasAf;
 
@@ -336,11 +381,29 @@ ndk::ScopedAStatus Session::configureStreams(const StreamConfiguration &cfg,
 	 */
 	auto setUp = [&](bool raw) {
 		libcamera::StreamConfiguration &vc = config_->at(0);
-		vc.size = fullSize ? libcamera::Size(facts_.activeW, facts_.activeH)
-				   : libcamera::Size(halfW, halfH);
-		/* 固定要 RGB888。⚠️ 用 3 字节的 RGB888 而不是 4 字节的 ABGR8888：
-		 * 8 MP 下每帧少搬 8 MB，而软件去拜耳本来就是 CPU 瓶颈。 */
-		vc.pixelFormat = libcamera::formats::RGB888;
+		if (srcNv12_) {
+			/*
+			 * 硬件 ISP 缩放不占 CPU：要一幅与传感器阵列同宽高比、刚好盖住每一路流的画面，
+			 * 流与它同宽或同高时 deliver() 只需裁剪、拆分色度。宽按 16 对齐（IFE 写出的单位），
+			 * 超出单个 IFE 能处理的尺寸时由管线处理器调小。
+			 */
+			int64_t w = std::max<int64_t>(
+				maxW, (static_cast<int64_t>(maxH) * facts_.activeW + facts_.activeH - 1) /
+					      facts_.activeH);
+			w = (w + 15) & ~15;
+			int64_t h = std::max<int64_t>(
+				maxH, (w * facts_.activeH + facts_.activeW - 1) / facts_.activeW);
+			h = (h + 1) & ~1;
+			vc.size = libcamera::Size(static_cast<unsigned int>(w),
+						  static_cast<unsigned int>(h));
+			vc.pixelFormat = libcamera::formats::NV12;
+		} else {
+			vc.size = fullSize ? libcamera::Size(facts_.activeW, facts_.activeH)
+					   : libcamera::Size(halfW, halfH);
+			/* 固定要 RGB888。⚠️ 用 3 字节的 RGB888 而不是 4 字节的 ABGR8888：
+			 * 8 MP 下每帧少搬 8 MB，而软件去拜耳本来就是 CPU 瓶颈。 */
+			vc.pixelFormat = libcamera::formats::RGB888;
+		}
 		vc.bufferCount = 4;
 		if (raw) {
 			libcamera::StreamConfiguration &rc = config_->at(1);
@@ -375,16 +438,32 @@ ndk::ScopedAStatus Session::configureStreams(const StreamConfiguration &cfg,
 	if (st == libcamera::CameraConfiguration::Adjusted)
 		ALOGW("配置被调整为 %s", sc.toString().c_str());
 
+	/* 管线有硬件对焦统计时，AF 区域交给它 */
+	afFov_.reset();
+	if (facts_.hasAf && cam_->controls().count(&libcamera::controls::AfWindows) &&
+	    cam_->controls().count(&libcamera::controls::AfMetering)) {
+		if (auto fov = cam_->properties().get(libcamera::properties::ScalerCropMaximum);
+		    fov && !fov->isNull())
+			afFov_ = *fov;
+	}
+
 
 	/* The frame is read everywhere as packed RGB888, with no row padding. */
-	if (sc.stride != sc.size.width * 3) {
+	if (!srcNv12_ && sc.stride != sc.size.width * 3) {
 		ALOGE("RGB888 行有填充（%s，stride %u），不支持", sc.size.toString().c_str(), sc.stride);
+		return err(Status::INTERNAL_ERROR);
+	}
+	/* NV12：裁剪偏移和色度成对取样要求偶数尺寸，行宽至少是画面宽度。 */
+	if (srcNv12_ && (sc.stride < sc.size.width || (sc.size.width | sc.size.height) & 1)) {
+		ALOGE("NV12 stream %s with stride %u is not supported", sc.size.toString().c_str(),
+		      sc.stride);
 		return err(Status::INTERNAL_ERROR);
 	}
 
 	stream_ = sc.stream();
 	srcWidth_ = sc.size.width;
 	srcHeight_ = sc.size.height;
+	srcStride_ = static_cast<int32_t>(sc.stride);
 	rawStream_ = nullptr;
 	rawForPhase_ = false;
 	if (withRaw) {
@@ -486,10 +565,10 @@ ndk::ScopedAStatus Session::configureStreams(const StreamConfiguration &cfg,
 	 *   应用只看到"无法连接相机"。v0.6.0 正式镜像就是这样死的（IPA 装错目录）。
 	 *   这里把它变成一条能读懂的错误。
 	 */
-	if (sc.pixelFormat != libcamera::formats::RGB888) {
-		ALOGE("libcamera 配置出来的不是 RGB888 而是 %s —— 软件 ISP 没建起来？"
-		      "看 libcamera.log 里有没有 'No IPA found' / 'Creating IPA for software ISP failed'",
-		      sc.pixelFormat.toString().c_str());
+	if (sc.pixelFormat != (srcNv12_ ? libcamera::formats::NV12 : libcamera::formats::RGB888)) {
+		ALOGE("libcamera configured %s instead of %s: with the software ISP, look in "
+		      "libcamera.log for 'No IPA found' or 'Creating IPA for software ISP failed'",
+		      sc.pixelFormat.toString().c_str(), srcNv12_ ? "NV12" : "RGB888");
 		return err(Status::INTERNAL_ERROR);
 	}
 
@@ -747,6 +826,21 @@ ndk::ScopedAStatus Session::processCaptureRequest(const std::vector<CaptureReque
 					     { static_cast<int64_t>(1000000 / fpsMax),
 					       static_cast<int64_t>(1000000 / fpsMin) });
 
+		/* AF 区域交给对焦统计（输入是画面的比例） */
+		if (afFov_) {
+			float rg[4];
+			af_.region(rg);
+			const libcamera::Rectangle win(
+				afFov_->x + static_cast<int>(rg[0] * afFov_->width),
+				afFov_->y + static_cast<int>(rg[1] * afFov_->height),
+				static_cast<unsigned int>((rg[2] - rg[0]) * afFov_->width),
+				static_cast<unsigned int>((rg[3] - rg[1]) * afFov_->height));
+			lreq->controls().set(libcamera::controls::AfMetering,
+					     libcamera::controls::AfMeteringWindows);
+			lreq->controls().set(libcamera::controls::AfWindows,
+					     std::span<const libcamera::Rectangle>(&win, 1));
+		}
+
 		const bool fired = p.flashFired;
 		pending_[key] = std::move(p);
 
@@ -901,11 +995,72 @@ Session::Crop Session::cropFor(int32_t dstW, int32_t dstH) const
 	return { ((srcWidth_ - w) / 2) & ~1, ((srcHeight_ - h) / 2) & ~1, w, h };
 }
 
-bool Session::deliver(const uint8_t *rgb, buffer_handle_t dst,
+int Session::toJ420(const SrcFrame &src, int32_t dstW, int32_t dstH,
+		    uint8_t *dy, int ys, uint8_t *du, uint8_t *dv, int cs) const
+{
+	const Crop c = cropFor(dstW, dstH);
+	const int cw = (dstW + 1) / 2, chh = (dstH + 1) / 2;
+
+	if (srcNv12_) {
+		/*
+		 * IFE 的颜色转换按全范围 BT.601 编程，NV12 与 J420 是同一色彩空间：
+		 * 只裁剪、缩放、把交错的 CbCr 拆成两个平面，不做颜色转换。
+		 * cropFor() 给的坐标都是偶数，色度按 2×2 对齐。
+		 */
+		const uint8_t *sy = src.data + static_cast<size_t>(c.y) * src.stride + c.x;
+		const uint8_t *suv = src.uv + static_cast<size_t>(c.y / 2) * src.stride + c.x;
+		if (dstW == c.w && dstH == c.h)
+			return libyuv::NV12ToI420(sy, src.stride, suv, src.stride, dy, ys, du, cs,
+						  dv, cs, dstW, dstH);
+		/* 先缩放 NV12（只有一个交错的色度平面要处理），再拆平面。 */
+		std::vector<uint8_t> t(static_cast<size_t>(dstW) * dstH +
+				       static_cast<size_t>(cw) * 2 * chh);
+		uint8_t *ty = t.data();
+		uint8_t *tuv = ty + static_cast<size_t>(dstW) * dstH;
+		int rc = libyuv::NV12Scale(sy, src.stride, suv, src.stride, c.w, c.h, ty, dstW, tuv,
+					   cw * 2, dstW, dstH, libyuv::kFilterBox);
+		if (rc == 0)
+			rc = libyuv::NV12ToI420(ty, dstW, tuv, cw * 2, dy, ys, du, cs, dv, cs, dstW,
+						dstH);
+		return rc;
+	}
+
+	/*
+	 * ★★ 用 J420（全范围）而不是 I420（限制范围 16–235）。
+	 *   Android 相机输出的 YUV_420_888 按约定是全范围 BT.601；
+	 *   给限制范围会让预览发灰发闷（对比度被压掉约 13%）。
+	 *   libyuv 的命名：I420 = 限制范围，J420 = 全范围（JPEG 范围）。
+	 *   ⚠️ 这一条是【假说】，靠前后截图 A/B 验证，不是从文档抄来的。
+	 *   字节序照旧：convert.h:959 注释明写 "RGB little endian (bgr in
+	 *   memory) to J420"，与 libcamera 的 RGB888(=BGR24) 对得上。
+	 */
+	const uint8_t *crop = src.data + static_cast<size_t>(c.y) * src.stride +
+			      static_cast<size_t>(c.x) * 3;
+	if (dstW == c.w && dstH == c.h)
+		return libyuv::RGB24ToJ420(crop, src.stride, dy, ys, du, cs, dv, cs, dstW, dstH);
+
+	/*
+	 * 需要缩放：先在源尺寸上转成 I420，再缩放到目标尺寸。
+	 * ⚠️ 顺序不能反 —— libyuv 没有"RGB24 直接缩放到 I420"的接口，
+	 *    而先缩放 RGB 再转会多搬一次 3 字节/像素的数据。
+	 * ⬜ 这条路每帧多一次全图拷贝；多路预览时值得再优化。
+	 */
+	const int scw = (c.w + 1) / 2, schh = (c.h + 1) / 2;
+	std::vector<uint8_t> tmp(static_cast<size_t>(c.w) * c.h +
+				 static_cast<size_t>(scw) * schh * 2);
+	uint8_t *sy = tmp.data();
+	uint8_t *su = sy + static_cast<size_t>(c.w) * c.h;
+	uint8_t *sv = su + static_cast<size_t>(scw) * schh;
+	int rc = libyuv::RGB24ToJ420(crop, src.stride, sy, c.w, su, scw, sv, scw, c.w, c.h);
+	if (rc == 0)
+		rc = libyuv::I420Scale(sy, c.w, su, scw, sv, scw, c.w, c.h,
+				       dy, ys, du, cs, dv, cs, dstW, dstH, libyuv::kFilterBox);
+	return rc;
+}
+
+bool Session::deliver(const SrcFrame &src, buffer_handle_t dst,
 		      int32_t dstW, int32_t dstH, int chromaBlur)
 {
-	const int srcStride = srcWidth_ * 3;
-
 	auto &mapper = android::GraphicBufferMapper::get();
 	android_ycbcr ycbcr = {};
 	android::status_t st = mapper.lockYCbCr(dst, GRALLOC_USAGE_SW_WRITE_OFTEN,
@@ -923,42 +1078,7 @@ bool Session::deliver(const uint8_t *rgb, buffer_handle_t dst,
 	uint8_t *du = dy + static_cast<size_t>(dstW) * dstH;
 	uint8_t *dv = du + static_cast<size_t>(cw) * chh;
 
-	/*
-	 * ★★ 用 J420（全范围）而不是 I420（限制范围 16–235）。
-	 *   Android 相机输出的 YUV_420_888 按约定是全范围 BT.601；
-	 *   给限制范围会让预览发灰发闷（对比度被压掉约 13%）。
-	 *   libyuv 的命名：I420 = 限制范围，J420 = 全范围（JPEG 范围）。
-	 *   ⚠️ 这一条是【假说】，靠前后截图 A/B 验证，不是从文档抄来的。
-	 *   字节序照旧：convert.h:959 注释明写 "RGB little endian (bgr in
-	 *   memory) to J420"，与 libcamera 的 RGB888(=BGR24) 对得上。
-	 */
-	const Crop c = cropFor(dstW, dstH);
-	const uint8_t *crop = rgb + static_cast<size_t>(c.y) * srcStride +
-			      static_cast<size_t>(c.x) * 3;
-	int rc;
-	if (dstW == c.w && dstH == c.h) {
-		rc = libyuv::RGB24ToJ420(crop, srcStride, dy, dstW, du, cw, dv, cw,
-					 dstW, dstH);
-	} else {
-		/*
-		 * 需要缩放：先在源尺寸上转成 I420，再缩放到目标尺寸。
-		 * ⚠️ 顺序不能反 —— libyuv 没有"RGB24 直接缩放到 I420"的接口，
-		 *    而先缩放 RGB 再转会多搬一次 3 字节/像素的数据。
-		 * ⬜ 这条路每帧多一次全图拷贝；多路预览时值得再优化。
-		 */
-		const int scw = (c.w + 1) / 2, schh = (c.h + 1) / 2;
-		std::vector<uint8_t> src(static_cast<size_t>(c.w) * c.h +
-					 static_cast<size_t>(scw) * schh * 2);
-		uint8_t *sy = src.data();
-		uint8_t *su = sy + static_cast<size_t>(c.w) * c.h;
-		uint8_t *sv = su + static_cast<size_t>(scw) * schh;
-		rc = libyuv::RGB24ToJ420(crop, srcStride, sy, c.w, su, scw, sv, scw,
-					 c.w, c.h);
-		if (rc == 0)
-			rc = libyuv::I420Scale(sy, c.w, su, scw, sv, scw, c.w, c.h,
-					       dy, dstW, du, cw, dv, cw,
-					       dstW, dstH, libyuv::kFilterBox);
-	}
+	const int rc = toJ420(src, dstW, dstH, dy, dstW, du, dv, cw);
 
 	if (rc == 0 && chromaBlur > 0) {
 		/* 色度降噪：U/V 只有 1/4 分辨率，盒式模糊几乎免费，而彩色噪点正是最难看的那种。 */
@@ -1005,9 +1125,18 @@ bool Session::deliver(const uint8_t *rgb, buffer_handle_t dst,
  * ★★ 2026-09-19：补上 JPEG 旋转（照片方向不对的根因就在这一处）。
  *   见下面 "旋转" 那一段的说明。
  */
-bool Session::deliverJpeg(const uint8_t *rgb, buffer_handle_t dst,
+bool Session::deliverJpeg(const SrcFrame &src, buffer_handle_t dst,
 			  int32_t dstW, int32_t dstH, int32_t blobSize,
 			  int quality, int32_t jpegOrientation)
+{
+	return srcNv12_ ? deliverJpegNv12(src, dst, dstW, dstH, blobSize, quality, jpegOrientation)
+			: deliverJpegRgb(src.data, dst, dstW, dstH, blobSize, quality,
+					 jpegOrientation);
+}
+
+bool Session::deliverJpegRgb(const uint8_t *rgb, buffer_handle_t dst,
+			     int32_t dstW, int32_t dstH, int32_t blobSize,
+			     int quality, int32_t jpegOrientation)
 {
 	auto &mapper = android::GraphicBufferMapper::get();
 	void *raw = nullptr;
@@ -1136,25 +1265,126 @@ bool Session::deliverJpeg(const uint8_t *rgb, buffer_handle_t dst,
 	const size_t jpegLen = outSize;
 	jpeg_destroy_compress(&cinfo);
 
-	bool ok = false;
-	if (jpegLen > 0 && jpegLen <= maxJpeg) {
-		/* jpeg_mem_dest 可能自己 malloc 了新缓冲（超出我们给的大小时），
-		 * 那种情况下 out 不再指向 gralloc，要拷回去。 */
-		if (out != raw)
-			memcpy(raw, out, jpegLen);
-		CameraBlob blob;
-		blob.blobId = CameraBlobId::JPEG;
-		blob.blobSizeBytes = static_cast<int32_t>(jpegLen);
-		memcpy(static_cast<uint8_t *>(raw) + blobSize - sizeof(CameraBlob),
-		       &blob, sizeof(CameraBlob));
-		ok = true;
+	const bool ok = finishJpegBlob(raw, blobSize, out, jpegLen);
+	if (ok)
 		ALOGD("JPEG %dx%d（请求 %dx%d，旋转 %d°）质量%d → %zu 字节",
 		      outW, outH, dstW, dstH, jpegOrientation, quality, jpegLen);
+
+	mapper.unlock(dst);
+	return ok;
+}
+
+bool Session::deliverJpegNv12(const SrcFrame &src, buffer_handle_t dst,
+			      int32_t dstW, int32_t dstH, int32_t blobSize,
+			      int quality, int32_t jpegOrientation)
+{
+	/* 旋转的约定同 deliverJpegRgb()：把像素转正，不写 EXIF 方向标记。 */
+	const libyuv::RotationMode rotMode = toLibyuvRotation(jpegOrientation);
+	const bool swapDims = rotMode == libyuv::kRotate90 || rotMode == libyuv::kRotate270;
+	const int32_t outW = swapDims ? dstH : dstW;
+	const int32_t outH = swapDims ? dstW : dstH;
+
+	/*
+	 * JPEG 的 YCbCr 就是全范围 BT.601，与 NV12 拆出来的 J420 相同：以原始数据交给 libjpeg，
+	 * 全程不经过 RGB。原始数据输入时 libjpeg 每行按分量读满 8 的整数倍个样本，
+	 * 所以平面行宽补齐到 16（亮度）和 8（色度）。
+	 */
+	const int cw = (dstW + 1) / 2, chh = (dstH + 1) / 2;
+	const int ocw = (outW + 1) / 2, och = (outH + 1) / 2;
+	const int ys = (outW + 15) & ~15, cs = (ocw + 7) & ~7;
+	std::vector<uint8_t> img(static_cast<size_t>(ys) * outH + static_cast<size_t>(cs) * och * 2);
+	uint8_t *oy = img.data();
+	uint8_t *ou = oy + static_cast<size_t>(ys) * outH;
+	uint8_t *ov = ou + static_cast<size_t>(cs) * och;
+
+	int rc;
+	if (rotMode == libyuv::kRotate0) {
+		rc = toJ420(src, dstW, dstH, oy, ys, ou, ov, cs);
 	} else {
-		ALOGE("deliverJpeg: JPEG 长度异常 %zu（上限 %zu）", jpegLen, maxJpeg);
+		std::vector<uint8_t> t(static_cast<size_t>(dstW) * dstH +
+				       static_cast<size_t>(cw) * chh * 2);
+		uint8_t *ty = t.data();
+		uint8_t *tu = ty + static_cast<size_t>(dstW) * dstH;
+		uint8_t *tv = tu + static_cast<size_t>(cw) * chh;
+		rc = toJ420(src, dstW, dstH, ty, dstW, tu, tv, cw);
+		if (rc == 0)
+			rc = libyuv::I420Rotate(ty, dstW, tu, cw, tv, cw, oy, ys, ou, cs, ov, cs,
+						dstW, dstH, rotMode);
 	}
-	if (out != raw)
-		free(out);
+	if (rc != 0) {
+		ALOGE("deliverJpegNv12: crop, scale or rotation failed: %d", rc);
+		return false;
+	}
+
+	/* 补出的列复制行末像素：填 0 会把右边缘那一列 8×8 块拉暗。 */
+	auto padRows = [](uint8_t *p, int stride, int w, int h) {
+		for (int y = 0; y < h && stride > w; y++) {
+			uint8_t *row = p + static_cast<size_t>(y) * stride;
+			memset(row + w, row[w - 1], stride - w);
+		}
+	};
+	padRows(oy, ys, outW, outH);
+	padRows(ou, cs, ocw, och);
+	padRows(ov, cs, ocw, och);
+
+	auto &mapper = android::GraphicBufferMapper::get();
+	void *raw = nullptr;
+	android::status_t st = mapper.lock(dst, GRALLOC_USAGE_SW_WRITE_OFTEN,
+					   android::Rect(blobSize, 1), &raw);
+	if (st != android::OK || !raw) {
+		ALOGE("deliverJpegNv12: lock failed: %d", st);
+		return false;
+	}
+
+	struct jpeg_compress_struct cinfo;
+	struct jpeg_error_mgr jerr;
+	cinfo.err = jpeg_std_error(&jerr);
+	jpeg_create_compress(&cinfo);
+
+	/* 直接写进 gralloc 缓冲；留出末尾 8 字节给 CameraBlob。 */
+	unsigned char *out = static_cast<unsigned char *>(raw);
+	unsigned long outSize = static_cast<size_t>(blobSize) - sizeof(CameraBlob);
+	jpeg_mem_dest(&cinfo, &out, &outSize);
+
+	cinfo.image_width = outW;
+	cinfo.image_height = outH;
+	cinfo.input_components = 3;
+	cinfo.in_color_space = JCS_YCbCr;
+	jpeg_set_defaults(&cinfo);
+	jpeg_set_colorspace(&cinfo, JCS_YCbCr);
+	cinfo.raw_data_in = TRUE;
+	cinfo.comp_info[0].h_samp_factor = 2;
+	cinfo.comp_info[0].v_samp_factor = 2;
+	for (int i = 1; i < 3; i++) {
+		cinfo.comp_info[i].h_samp_factor = 1;
+		cinfo.comp_info[i].v_samp_factor = 1;
+	}
+	jpeg_set_quality(&cinfo, quality, TRUE);
+	jpeg_start_compress(&cinfo, TRUE);
+
+	/* 每次一个 iMCU 行：亮度 16 行、色度 8 行；图像下方不足的行重复最后一行。 */
+	JSAMPROW yRows[16], uRows[8], vRows[8];
+	JSAMPARRAY planes[3] = { yRows, uRows, vRows };
+	while (cinfo.next_scanline < cinfo.image_height) {
+		const int y0 = static_cast<int>(cinfo.next_scanline);
+		for (int i = 0; i < 16; i++)
+			yRows[i] = oy + static_cast<size_t>(std::min(y0 + i, outH - 1)) * ys;
+		for (int i = 0; i < 8; i++) {
+			const int r = std::min(y0 / 2 + i, och - 1);
+			uRows[i] = ou + static_cast<size_t>(r) * cs;
+			vRows[i] = ov + static_cast<size_t>(r) * cs;
+		}
+		if (jpeg_write_raw_data(&cinfo, planes, 16) != 16)
+			break;
+	}
+	jpeg_finish_compress(&cinfo);
+	const size_t jpegLen = outSize;
+	jpeg_destroy_compress(&cinfo);
+
+	const bool ok = finishJpegBlob(raw, blobSize, out, jpegLen);
+	if (ok)
+		ALOGD("JPEG %dx%d from NV12 (stream %dx%d, rotation %d), quality %d: %zu bytes",
+		      outW, outH, dstW, dstH, jpegOrientation, quality, jpegLen);
 
 	mapper.unlock(dst);
 	return ok;
@@ -1357,38 +1587,90 @@ void Session::onRequestCompleted(libcamera::Request *req)
 		returnToPool(std::move(owned));
 		return;
 	}
+	/*
+	 * 驱动标为出错的帧（硬件 ISP 写坏或没写完，例如双 IFE 一侧的条带出错）不能当成好帧
+	 * 交给应用、编成 JPEG 或拿去做 AF/曝光：整个请求按出错上报。
+	 */
+	if (fb->metadata().status != libcamera::FrameMetadata::FrameSuccess) {
+		ALOGW("frame=%d: libcamera frame status %d, request reported as failed",
+		      pend.frameNumber, static_cast<int>(fb->metadata().status));
+		reportRequestError(pend);
+		std::lock_guard<std::mutex> lk(mutex_);
+		flashRequestDone(pend);
+		returnToPool(std::move(owned));
+		return;
+	}
 	const int64_t timestamp = fb->metadata().timestamp;
 
-	/* mmap 一次，分发给所有流。 */
+	/* mmap 一次，分发给所有流。libcamera 把单个 dmabuf 里的 NV12 描述成同一 fd 上的两个平面。 */
 	const auto &planes = fb->planes();
-	const uint8_t *rgb = nullptr;
+	SrcFrame src;
 	void *srcMap = MAP_FAILED;
 	size_t srcLen = 0;
+	int srcFd = -1;
 	if (!planes.empty()) {
-		srcLen = planes[0].offset + planes[0].length;
-		srcMap = mmap(nullptr, srcLen, PROT_READ, MAP_SHARED,
-			      planes[0].fd.get(), 0);
-		if (srcMap != MAP_FAILED)
-			rgb = static_cast<const uint8_t *>(srcMap) + planes[0].offset;
-		else
+		srcFd = planes[0].fd.get();
+		for (const auto &p : planes) {
+			if (p.fd.get() == srcFd)
+				srcLen = std::max<size_t>(srcLen, p.offset + p.length);
+		}
+		srcMap = mmap(nullptr, srcLen, PROT_READ, MAP_SHARED, srcFd, 0);
+		if (srcMap != MAP_FAILED) {
+			/*
+			 * 硬件 ISP 用 DMA 写帧，CPU 读之前要让缓存失效，否则会读到旧的缓存行：
+			 * 画面里出现 64 字节一段的旧数据（实测为黑段和绿段）。软件 ISP 的帧由 CPU
+			 * 写成，同步只是多一次空操作。
+			 */
+			struct dma_buf_sync sync = { DMA_BUF_SYNC_START | DMA_BUF_SYNC_READ };
+			if (ioctl(srcFd, DMA_BUF_IOCTL_SYNC, &sync) < 0 && !syncWarned_) {
+				ALOGW("DMA_BUF_IOCTL_SYNC failed: %s", strerror(errno));
+				syncWarned_ = true;
+			}
+			const uint8_t *base = static_cast<const uint8_t *>(srcMap);
+			src.data = base + planes[0].offset;
+			src.stride = srcStride_;
+		} else {
 			ALOGE("mmap libcamera 帧失败: %s", strerror(errno));
-		/* 第二道保险（#109）：帧不够 RGB24 的尺寸就整帧报 ERROR_BUFFER，绝不越界读。 */
-		if (rgb && planes[0].length < static_cast<size_t>(srcWidth_) * srcHeight_ * 3) {
+		}
+		/* 第二道保险（#109）：帧不够配置的尺寸就整帧报 ERROR_BUFFER，绝不越界读。 */
+		if (src.data && srcNv12_) {
+			const size_t ySize = static_cast<size_t>(srcStride_) * srcHeight_;
+			const size_t uvOffset = planes.size() > 1 && planes[1].fd.get() == srcFd
+							? planes[1].offset
+							: planes[0].offset + ySize;
+			if (planes[0].offset + ySize > srcLen || uvOffset + ySize / 2 > srcLen) {
+				ALOGE("NV12 frame of %zu bytes is too small for %dx%d, dropped", srcLen,
+				      srcWidth_, srcHeight_);
+				src.data = nullptr;
+			} else {
+				src.uv = static_cast<const uint8_t *>(srcMap) + uvOffset;
+			}
+		} else if (src.data &&
+			   planes[0].length < static_cast<size_t>(srcWidth_) * srcHeight_ * 3) {
 			ALOGE("libcamera 帧只有 %zu 字节，不够 %dx%d 的 RGB24 —— 丢弃这一帧",
 			      static_cast<size_t>(planes[0].length), srcWidth_, srcHeight_);
-			rgb = nullptr;
+			src.data = nullptr;
 		}
 	}
+	const uint8_t *rgb = srcNv12_ ? nullptr : src.data;
 
 	/* 采样平均亮度（每 16 行 × 每 16 列），给 AUTO 闪光当"太暗"判据。软件 ISP 的 IPA
 	 * 不往结果元数据里写曝光/增益，这是我们唯一现成的亮度信号。
 	 * ★ 同一个信号还给自动对焦当"AE 已收敛"判据（见 AutoFocus.h 的 sceneStable）。 */
 	int lumaStableFor = 0;
-	if (rgb) {
+	if (src.data) {
 		uint64_t sum = 0;
 		uint32_t n = 0;
 		for (int y = 0; y < srcHeight_; y += 16) {
-			const uint8_t *px = rgb + static_cast<size_t>(y) * srcWidth_ * 3;
+			const uint8_t *px = src.data + static_cast<size_t>(y) * srcStride_;
+			if (srcNv12_) {
+				/* NV12 的 Y 平面本身就是亮度，按 4 倍累加与 RGB 的 R+2G+B 同一量程 */
+				for (int x = 0; x < srcWidth_; x += 16, px += 16) {
+					sum += 4u * px[0];
+					n++;
+				}
+				continue;
+			}
 			for (int x = 0; x < srcWidth_; x += 16, px += 48) {
 				sum += px[0] + 2u * px[1] + px[2];
 				n++;
@@ -1409,24 +1691,41 @@ void Session::onRequestCompleted(libcamera::Request *req)
 	 *   到那时新位置已经写进马达，所以"下一帧的分数"确实属于新位置 —— 等价于
 	 *   每帧采一个点。（[#95] 时每帧70–130 ms；现在全尺寸约33 ms。）
 	 */
-	if (rgb && facts_.hasAf) {
+	if (src.data && facts_.hasAf) {
 		/* The RAW frame of the same request, for phase detection. */
 		const libcamera::FrameBuffer *rawFb =
 			rawForPhase_ && af_.wantsRaw() ? req->findBuffer(rawStream_) : nullptr;
 		void *rawMap = MAP_FAILED;
 		size_t rawLen = 0;
+		int rawFd = -1;
 		RawFrame raw{};
 		if (rawFb && rawFb->metadata().status == libcamera::FrameMetadata::FrameSuccess &&
 		    !rawFb->planes().empty()) {
 			const auto &rp = rawFb->planes()[0];
 			rawLen = rp.offset + rp.length;
-			rawMap = mmap(nullptr, rawLen, PROT_READ, MAP_SHARED, rp.fd.get(), 0);
+			rawFd = rp.fd.get();
+			rawMap = mmap(nullptr, rawLen, PROT_READ, MAP_SHARED, rawFd, 0);
 			if (rawMap != MAP_FAILED &&
-			    rp.length >= static_cast<size_t>(rawStride_) * rawHeight_)
+			    rp.length >= static_cast<size_t>(rawStride_) * rawHeight_) {
+				/*
+				 * 这帧由 RDI 写入，之前没有 CPU 读过（软件 ISP 时代有）：
+				 * 先丢掉 CPU 缓存里的旧数据。
+				 */
+				struct dma_buf_sync sync = { DMA_BUF_SYNC_START | DMA_BUF_SYNC_READ };
+				ioctl(rawFd, DMA_BUF_IOCTL_SYNC, &sync);
 				raw = { static_cast<const uint8_t *>(rawMap) + rp.offset,
 					static_cast<int>(rawStride_), rawWidth_, rawHeight_ };
+			}
 		}
-		af_.onFrame(rgb, srcWidth_, srcHeight_, lumaStableFor >= 2, raw.data ? &raw : nullptr);
+		/* 硬件 ISP 在 AF 区域上算出的清晰度分数（有的话） */
+		const auto fom = req->metadata().get(libcamera::controls::FocusFoM);
+		af_.onFrame(src.data, srcWidth_, srcHeight_, srcStride_, srcNv12_ ? 1 : 3,
+			    lumaStableFor >= 2, raw.data ? &raw : nullptr,
+			    fom ? static_cast<double>(*fom) : -1.0);
+		if (raw.data) {
+			struct dma_buf_sync sync = { DMA_BUF_SYNC_END | DMA_BUF_SYNC_READ };
+			ioctl(rawFd, DMA_BUF_IOCTL_SYNC, &sync);
+		}
 		if (rawMap != MAP_FAILED)
 			munmap(rawMap, rawLen);
 	}
@@ -1453,7 +1752,8 @@ void Session::onRequestCompleted(libcamera::Request *req)
 	const int denoiseT = denoiseThreshold();
 	const int chromaBlur = chromaBlurRadius();
 	std::vector<uint8_t> denoised;
-	const uint8_t *rgbStill = rgb;
+	/* ε 滤波只用于软件 ISP 的 RGB；硬件 ISP 的降噪以后放到 IFE 里做。 */
+	SrcFrame still = src;
 	if (rgb && denoiseT > 0) {
 		bool hasBlob = false;
 		for (const auto &pb : pend.buffers)
@@ -1461,7 +1761,7 @@ void Session::onRequestCompleted(libcamera::Request *req)
 		if (hasBlob) {
 			denoised.resize(static_cast<size_t>(srcWidth_) * srcHeight_ * 3);
 			epsilonFilterRgb(rgb, denoised.data(), srcWidth_, srcHeight_, denoiseT);
-			rgbStill = denoised.data();
+			still.data = denoised.data();
 			ALOGD("静态照片降噪：增益 %.2f → ε=%d", lastGain_, denoiseT);
 		}
 	}
@@ -1496,10 +1796,10 @@ void Session::onRequestCompleted(libcamera::Request *req)
 
 	std::vector<bool> okv;
 	for (auto &pb : pend.buffers) {
-		bool ok = rgb && (pb.isBlob
-				  ? deliverJpeg(rgbStill, pb.handle, pb.width, pb.height,
-						pb.blobSize, jpegQuality, jpegOrientation)
-				  : deliver(rgb, pb.handle, pb.width, pb.height, chromaBlur));
+		bool ok = src.data && (pb.isBlob
+				       ? deliverJpeg(still, pb.handle, pb.width, pb.height,
+						     pb.blobSize, jpegQuality, jpegOrientation)
+				       : deliver(src, pb.handle, pb.width, pb.height, chromaBlur));
 		okv.push_back(ok);
 		if (!ok) {
 			NotifyMsg emsg;
@@ -1514,8 +1814,11 @@ void Session::onRequestCompleted(libcamera::Request *req)
 		}
 	}
 
-	if (srcMap != MAP_FAILED)
+	if (srcMap != MAP_FAILED) {
+		struct dma_buf_sync sync = { DMA_BUF_SYNC_END | DMA_BUF_SYNC_READ };
+		ioctl(srcFd, DMA_BUF_IOCTL_SYNC, &sync);
 		munmap(srcMap, srcLen);
+	}
 
 	/*
 	 * ★ req 到这里才算用完（buffers()/metadata() 都读过了、帧已 munmap）⇒ 先还池，再交结果：

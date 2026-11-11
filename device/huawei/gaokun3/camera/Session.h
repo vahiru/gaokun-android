@@ -15,6 +15,8 @@
 #include <aidl/android/hardware/camera/device/BnCameraDeviceSession.h>
 #include <cutils/native_handle.h>
 #include <fmq/AidlMessageQueue.h>
+#include <optional>
+
 #include <libcamera/libcamera.h>
 
 #include "AutoFocus.h"
@@ -99,10 +101,25 @@ private:
 			aidl::android::hardware::camera::device::BufferCache> &caches);
 	void dropAllCaches();
 
-	/* 把一帧 RGB（源尺寸 srcWidth_×srcHeight_）交付到一个 gralloc 缓冲，
+	/*
+	 * libcamera 输出的一帧。软件 ISP（simple 管线）给打包的 RGB888（内存里是 B,G,R）；
+	 * 硬件 ISP（qcom-ife 管线）给全范围 BT.601 的 NV12：data 是 Y 平面，uv 是交错的
+	 * CbCr 平面。各平面的行宽都是 stride 字节。
+	 */
+	struct SrcFrame {
+		const uint8_t *data = nullptr;
+		const uint8_t *uv = nullptr;
+		int stride = 0;
+	};
+
+	/* 把一帧（源尺寸 srcWidth_×srcHeight_）交付到一个 gralloc 缓冲，
 	 * 必要时裁成该路流的宽高比、再缩放到它的尺寸。 */
-	bool deliver(const uint8_t *rgb, buffer_handle_t dst,
+	bool deliver(const SrcFrame &src, buffer_handle_t dst,
 		     int32_t dstW, int32_t dstH, int chromaBlur);
+	/* 裁成 dstW×dstH 的宽高比、缩放后写成全范围的 4:2:0 平面（J420），
+	 * Y 行宽 ys、色度行宽 cs。返回 libyuv 的结果，0 为成功。 */
+	int toJ420(const SrcFrame &src, int32_t dstW, int32_t dstH,
+		   uint8_t *dy, int ys, uint8_t *du, uint8_t *dv, int cs) const;
 	/* Centre crop of the source frame with the aspect ratio of dstW x dstH,
 	 * even-aligned. */
 	struct Crop {
@@ -115,9 +132,16 @@ private:
 	 * ⚠️ 90/270 时交付的 JPEG 实际宽高与流声明的 (dstW, dstH) 互换 ——
 	 *    BLOB 流只声明缓冲字节数，这是 Android 允许且常见的行为。
 	 */
-	bool deliverJpeg(const uint8_t *rgb, buffer_handle_t dst,
+	bool deliverJpeg(const SrcFrame &src, buffer_handle_t dst,
 			 int32_t dstW, int32_t dstH, int32_t blobSize,
 			 int quality, int32_t jpegOrientation);
+	bool deliverJpegRgb(const uint8_t *rgb, buffer_handle_t dst,
+			    int32_t dstW, int32_t dstH, int32_t blobSize,
+			    int quality, int32_t jpegOrientation);
+	/* NV12 不经过 RGB：裁剪缩放旋转成 J420，再以 YCbCr 原始数据交给 libjpeg。 */
+	bool deliverJpegNv12(const SrcFrame &src, buffer_handle_t dst,
+			     int32_t dstW, int32_t dstH, int32_t blobSize,
+			     int quality, int32_t jpegOrientation);
 
 	/*
 	 * ── 闪光灯（#110 / #111）──
@@ -194,6 +218,11 @@ private:
 	/* Full-size RAW stream for phase detection (rear camera in full-size mode). */
 	libcamera::Stream *rawStream_ = nullptr;
 	bool rawForPhase_ = false;
+	/*
+	 * 输出画面的视场在像素阵列坐标里的位置（ScalerCropMaximum），仅当管线接受 AfWindows
+	 * 时才有：AF 区域按它换算后交给对焦统计。
+	 */
+	std::optional<libcamera::Rectangle> afFov_;
 	unsigned int rawStride_ = 0;
 	int32_t rawWidth_ = 0, rawHeight_ = 0;
 
@@ -201,7 +230,8 @@ private:
 	 * 配置好的 Android 流。
 	 * ★ 相机应用【一定】会配多路（预览 + 拍照，实测 Aperture 要 2 路）。
 	 *   libcamera 这边只开一路（一个传感器模式的完整画面），再用 libyuv 裁剪缩放分发到每一路
-	 *   —— 软件 ISP 是 CPU 瓶颈，开多路等于把同一份拜耳去马赛克多次。
+	 *   —— 软件 ISP 是 CPU 瓶颈，开多路等于把同一份拜耳去马赛克多次；硬件 ISP 的 IFE
+	 *   也只输出一路 NV12。
 	 */
 	struct HalStreamInfo {
 		int32_t id = -1;
@@ -212,6 +242,12 @@ private:
 	std::vector<HalStreamInfo> halStreams_;
 	/* libcamera 实际输出的尺寸：一个传感器模式的完整画面（见 configureStreams）。 */
 	int32_t srcWidth_ = 0, srcHeight_ = 0;
+	/* 源帧的行宽（字节）。 */
+	int32_t srcStride_ = 0;
+	/* libcamera 输出 NV12（硬件 ISP）还是 RGB888（软件 ISP），见 configureStreams。 */
+	bool srcNv12_ = false;
+	/* DMA_BUF_IOCTL_SYNC 失败时只记一次日志。 */
+	bool syncWarned_ = false;
 
 	/* 空闲的 libcamera 请求。 */
 	std::deque<std::unique_ptr<libcamera::Request>> freeRequests_;

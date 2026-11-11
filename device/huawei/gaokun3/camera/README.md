@@ -1,6 +1,6 @@
 # gaokun3相机HAL（AIDL，基于`libcamera`）
 
-本模块将`libcamera`的`simple`流水线与软件ISP接入Android相机框架（实现`android.hardware.camera.provider-V3`）。相机子系统的端到端架构、板级供电与传感器标定详见[`docs/dev/camera.md`](../../../../docs/dev/camera.md)。
+本模块将`libcamera`接入Android相机框架（实现`android.hardware.camera.provider-V3`），按`libcamera`给出的输出格式选择路径：硬件ISP（`qcom-ife`流水线，IFE输出NV12，另可配RAW流）或`simple`流水线与软件ISP（输出RGB888）。相机子系统的端到端架构、板级供电与传感器标定详见[`docs/dev/camera.md`](../../../../docs/dev/camera.md)。
 
 ## 一、为何采用自研AIDL HAL
 
@@ -12,6 +12,7 @@
 
 - **`libcamera`同树Soong构建**：由于Android NDK的`std::__ndk1`与AOSP平台的`std::__1` C++ ABI不兼容，`libcamera`通过[`patches/libcamera/libcamera-Android.bp`](../../../../patches/libcamera/README.md)在AOSP树内编译为`libcamera_base_gk3`、`libcamera_gk3`与`libcamera_ipa_softisp_gk3`（安装于`/vendor/lib64/libcamera/ipa/`）。
 - **调优配置**：`hi846.yaml`、`ov13b10.yaml`与`uncalibrated.yaml`安装至`/vendor/etc/libcamera/ipa/softisp/`。
+- **硬件ISP路径**：`qcom-ife`流水线与IPA（及其调优配置）尚未接入同树构建；本模块在`libcamera`给出NV12输出时走该路径，传感器模式与视场由流水线选择。
 
 ## 三、闪光灯与手电筒
 

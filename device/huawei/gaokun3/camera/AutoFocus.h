@@ -2,10 +2,11 @@
 /*
  * gaokun3 相机 HAL —— 自动对焦（对比度检测 CDAF，全尺寸模式下加相位检测）。
  *
- * ★ 没有现成的 AF 统计：内核只把马达当 v4l2 子设备暴露，软件 ISP（simple
- *   pipeline + softisp）的 IPA 只有 AGC/AWB，libcamera 也不产 AF 统计。
- *   所以信号由 HAL 自己算：【帧本身的清晰度】（任何模式），以及全尺寸 RAW 里
- *   ov13b10 的 PD 像素算出的相位错位（见下面 Phase detection 一段）。
+ * ★ 软件 ISP（simple pipeline + softisp）没有 AF 统计：内核只把马达当 v4l2 子设备
+ *   暴露，它的 IPA 只有 AGC/AWB。所以信号由 HAL 自己算：【帧本身的清晰度】（任何模式），
+ *   以及全尺寸 RAW 里 ov13b10 的 PD 像素算出的相位错位（见下面 Phase detection 一段）。
+ *   硬件 ISP（qcom-ife）单 IFE 的模式里，libcamera 报 IFE 对焦统计算出的 FocusFoM，
+ *   用它代替帧本身的清晰度（见 onFrame()）；双 IFE 的全尺寸模式没有，仍用帧本身。
  *
  * ★ 判据（与曝光无关）：
  *   降采样亮度网格的拉普拉斯能量 / 亮度总和，再乘 1000（见 sharpness()）。
@@ -76,18 +77,28 @@ public:
 	/* ANDROID_CONTROL_AF_TRIGGER_*；START 起一次单次对焦，CANCEL 取消锁定。 */
 	void trigger(uint8_t androidAfTrigger);
 
-	/* 喂一帧 RGB24（libcamera 的输出，srcWidth_×srcHeight_）。
+	/* 喂一帧（libcamera 的输出，srcWidth_×srcHeight_，行宽 stride 字节）：
+	 * bytesPerPixel 为 3 时是软件 ISP 的 RGB24，为 1 时是硬件 ISP 输出的 NV12 的 Y 平面。
 	 * sceneStable：AE 是否已经收敛（由会话按"连续 N 帧亮度稳定"给出）。
 	 * ⚠️ 为什么必须等它：我们唯一的信号就是帧本身，AGC 还在爬的时候整帧的
 	 *    gamma/对比度都在变，锐度分数会跟着漂 —— 实测同一马达位置（1020）
 	 *   在 AGC 收敛前后能差 3 倍（612 → 211），那样的"曲线"里根本没有焦点信息。 */
-	void onFrame(const uint8_t *rgb, int w, int h, bool sceneStable,
-		     const RawFrame *raw = nullptr);
+	/*
+	 * hwScore：硬件 ISP 对焦统计在 AF 区域（region()）上算出的这一帧的 FocusFoM，没有时为
+	 * 负数。有它就用它代替帧本身的清晰度（那时不再计算）。它的量纲不同，离焦时也有一层
+	 * 残余噪声的底，所以用它时“可对焦”指峰值至少是最低采样点（不低于 kHwFloor）的
+	 * kHwMinRise 倍，而不是高于 kMinScore；重扫按相对变化，绝对下限为 kHwFloor。
+	 * 连续 kHwSourceFrames 帧换了来源才切换并重新搜索，偶尔一帧缺统计只跳过那一帧。
+	 */
+	void onFrame(const uint8_t *pixels, int w, int h, int stride, int bytesPerPixel,
+		     bool sceneStable, const RawFrame *raw = nullptr, double hwScore = -1.0);
 
 	/* AF region as fractions of the frame (x0, y0, x1, y1), or none: the
 	 * central 70%. A change starts a new search. */
 	void setRegion(float x0, float y0, float x1, float y1);
 	void clearRegion();
+	/* 当前的 AF 区域 (x0, y0, x1, y1)，画面的比例。 */
+	void region(float out[4]) const;
 
 	/* 结果元数据。 */
 	uint8_t afState() const;
@@ -113,14 +124,18 @@ private:
 
 	bool shouldScan() const;          /* 当前模式下该不该跑搜索 */
 	void startScan();
-	void finishScan();
+	/* byPhase：相位错位收敛了（这本身要求场景有纹理）。 */
+	void finishScan(bool byPhase = false);
+	/* 最高分能否说明这个场景可以对焦。 */
+	bool focusable(double best) const;
 	bool apply(int pos);              /* 挪马达并记 justMoved_；失败返回 false */
 	bool moveTo(int pos);             /* apply() in steps of at most kMaxJump */
 	/* tap: the app's own region (a tap), not the default one */
 	void regionChanged(bool tap);
 	void applyRegion(float x0, float y0, float x1, float y1, bool tap);
 
-	double sharpness(const uint8_t *rgb, int w, int h, const float region[4]);
+	double sharpness(const uint8_t *pixels, int w, int h, int stride, int bytesPerPixel,
+			 const float region[4]);
 	void buildSweep();
 
 	/* 搜索参数。 */
@@ -153,6 +168,14 @@ private:
 	static constexpr double kPdDone = 0.06;     /* about 20-40 codes */
 	static constexpr double kPdRescan = 0.15;   /* about 45-100 codes */
 	static constexpr int kPdMaxSteps = 4;
+	/* 硬件分数：峰值至少是最低采样点的这么多倍。后摄 11-10 实测：室内场景约 2.4 倍，
+	 * 有纹理的目标约 5 倍；平坦场景尚未经实测。 */
+	static constexpr double kHwMinRise = 1.25;
+	/* 硬件分数的绝对下限：最低采样点按不低于它算（全为 0 的曲线不能算合焦），也是连续
+	 * 模式重扫的绝对下限。暂定值，白墙、天空、暗处的分数尚未经实测。 */
+	static constexpr double kHwFloor = 10.0;
+	/* 分数来源连续换了这么多帧才切换。 */
+	static constexpr int kHwSourceFrames = 3;
 	static constexpr double kMinScore = 20.0;   /* "这场景没法对焦"（白墙）的下限；
 						     ⚠️ 量纲随指标变（拉普拉斯/亮度）。实测本机
 						     标准卡场景：真峰 347、远端平坦区 33、
@@ -212,6 +235,8 @@ private:
 	double pdLastD_ = 0.0;
 	bool pdRescanOk_ = true;         /* the last phase search settled: trust it for rescans */
 	int moveTarget_ = -1;            /* where a stepped move is heading, -1 = none */
+	bool hwMetric_ = false;          /* 分数是硬件的 FocusFoM */
+	int otherSource_ = 0;            /* 连续几帧的分数来自另一种来源 */
 	/* AF region in fractions of the frame; default the central 70%. */
 	float region_[4] = { 0.15f, 0.15f, 0.85f, 0.85f };
 	/* ★ 调试口：`debug.gaokun3.camera.af.hold <pos>` 把马达钉在某个位置、不搜对焦。

@@ -219,12 +219,24 @@ bool AutoFocus::moveTo(int pos)
 }
 
 /* 调用者必须已持锁。 */
-void AutoFocus::finishScan()
+bool AutoFocus::focusable(double best) const
+{
+	if (!hwMetric_)
+		return best >= kMinScore;
+	if (samples_.size() < 2)
+		return false;
+	double lowest = best;
+	for (const auto &[pos, score] : samples_)
+		lowest = std::min(lowest, score);
+	return best >= kHwMinRise * std::max(lowest, kHwFloor);
+}
+
+/* 调用者必须已持锁。 */
+void AutoFocus::finishScan(bool byPhase)
 {
 	scanning_ = false;
-	converged_ = bestScore_ >= kMinScore;
-	/* Peak between samples: vertex of the parabola through the best sample
-	 * and its two neighbours kFineStep away, when both were sampled. */
+	converged_ = (hwMetric_ && byPhase) || focusable(bestScore_);
+	/* 峰在采样点之间：两侧相距 kFineStep 的点都采过时，取过最佳点和这两点的抛物线顶点。 */
 	const auto l = samples_.find(bestPos_ - kFineStep);
 	const auto r = samples_.find(bestPos_ + kFineStep);
 	if (converged_ && l != samples_.end() && r != samples_.end()) {
@@ -250,7 +262,8 @@ void AutoFocus::finishScan()
 	      moves_);
 }
 
-double AutoFocus::sharpness(const uint8_t *rgb, int w, int h, const float region[4])
+double AutoFocus::sharpness(const uint8_t *pixels, int w, int h, int stride,
+			    int bytesPerPixel, const float region[4])
 {
 	/*
 	 * 指标 = 网格亮度图的拉普拉斯能量 / 亮度总和。
@@ -278,7 +291,6 @@ double AutoFocus::sharpness(const uint8_t *rgb, int w, int h, const float region
 
 	grid_.assign(static_cast<size_t>(gw) * gh, 0.0f);
 
-	const size_t rowBytes = static_cast<size_t>(w) * 3;
 	const int off = kBlock / 2 - kAvg / 2;     /* 每格中心取的 kAvg×kAvg 小块 */
 	for (int gy = 0; gy < gh; gy++) {
 		const int cy = y0 + gy * kBlock + off;
@@ -286,10 +298,11 @@ double AutoFocus::sharpness(const uint8_t *rgb, int w, int h, const float region
 			const int cx = x0 + gx * kBlock + off;
 			uint32_t acc = 0;
 			for (int j = 0; j < kAvg; j++) {
-				const uint8_t *p = rgb + static_cast<size_t>(cy + j) * rowBytes +
-						   static_cast<size_t>(cx) * 3;
-				for (int i = 0; i < kAvg; i++, p += 3)
-					acc += static_cast<uint32_t>(lumaAt(p));
+				const uint8_t *p = pixels + static_cast<size_t>(cy + j) * stride +
+						   static_cast<size_t>(cx) * bytesPerPixel;
+				/* RGB24 按 lumaAt() 折成亮度；NV12 的 Y 平面本身就是亮度 */
+				for (int i = 0; i < kAvg; i++, p += bytesPerPixel)
+					acc += static_cast<uint32_t>(bytesPerPixel == 3 ? lumaAt(p) : *p);
 			}
 			grid_[static_cast<size_t>(gy) * gw + gx] =
 				static_cast<float>(acc) / static_cast<float>(kAvg * kAvg);
@@ -312,10 +325,10 @@ double AutoFocus::sharpness(const uint8_t *rgb, int w, int h, const float region
 	return 1000.0 * lap / lum;
 }
 
-void AutoFocus::onFrame(const uint8_t *rgb, int w, int h, bool sceneStable,
-			const RawFrame *raw)
+void AutoFocus::onFrame(const uint8_t *pixels, int w, int h, int stride, int bytesPerPixel,
+			bool sceneStable, const RawFrame *raw, double hwScore)
 {
-	if (!rgb || w <= 0 || h <= 0)
+	if (!pixels || w <= 0 || h <= 0)
 		return;
 	/* setRegion() writes region_ under the lock from the request thread. */
 	float region[4];
@@ -323,7 +336,8 @@ void AutoFocus::onFrame(const uint8_t *rgb, int w, int h, bool sceneStable,
 		std::lock_guard<std::mutex> lk(m_);
 		std::copy(region_, region_ + 4, region);
 	}
-	const double score = sharpness(rgb, w, h, region);
+	const bool hw = hwScore >= 0.0;
+	const double score = hw ? hwScore : sharpness(pixels, w, h, stride, bytesPerPixel, region);
 
 	std::lock_guard<std::mutex> lk(m_);
 
@@ -341,6 +355,25 @@ void AutoFocus::onFrame(const uint8_t *rgb, int w, int h, bool sceneStable,
 	 * 这一帧还没走到位 ⇒ MOVING；再下一帧起 STATIONARY。 */
 	lensState_ = justMoved_ ? ANDROID_LENS_STATE_MOVING : ANDROID_LENS_STATE_STATIONARY;
 	justMoved_ = false;
+
+	/*
+	 * 两种来源的分数量纲不同，不能放进同一条曲线比较。另一种来源只出现一两帧（例如某帧
+	 * 统计出错、没有 FocusFoM）就跳过这几帧；连续 kHwSourceFrames 帧都是另一种来源才切换，
+	 * 并重新搜索。
+	 */
+	if (hw != hwMetric_) {
+		if (++otherSource_ < kHwSourceFrames)
+			return;
+		otherSource_ = 0;
+		hwMetric_ = hw;
+		ALOGI("AF score source: %s",
+		      hw ? "hardware focus statistics (FocusFoM)" : "Laplacian energy of the frame luma");
+		refScore_ = -1.0;
+		if (scanning_)
+			startScan();
+	} else {
+		otherSource_ = 0;
+	}
 
 	if (!lens_ || !lens_->usable())
 		return;
@@ -464,7 +497,7 @@ void AutoFocus::onFrame(const uint8_t *rgb, int w, int h, bool sceneStable,
 			return;
 		}
 		const double delta = std::fabs(score - refScore_);
-		if (delta > std::max(refScore_ * kRescanRel, kRescanAbs)) {
+		if (delta > std::max(refScore_ * kRescanRel, hwMetric_ ? kHwFloor : kRescanAbs)) {
 			if (++stable_ >= kRescanFrames) {
 				ALOGI("AF 画面变化（基准 %.1f → %.1f），重新搜索", refScore_, score);
 				startScan();
@@ -550,7 +583,7 @@ void AutoFocus::onFrame(const uint8_t *rgb, int w, int h, bool sceneStable,
 				bestPos_ = cur;
 				bestScore_ = score;
 				pdRescanOk_ = true;
-				finishScan();
+				finishScan(true);
 				return;
 			}
 			if (target != cur && pdSteps_ < kPdMaxSteps) {
@@ -586,7 +619,7 @@ void AutoFocus::onFrame(const uint8_t *rgb, int w, int h, bool sceneStable,
 		if (score > coarseBest_) {
 			coarseBest_ = score;
 			drops_ = 0;
-		} else if (coarseBest_ >= kMinScore && score < coarseBest_ * kDropRatio) {
+		} else if (focusable(coarseBest_) && score < coarseBest_ * kDropRatio) {
 			drops_++;
 		} else {
 			drops_ = 0;
@@ -674,6 +707,12 @@ void AutoFocus::applyRegion(float x0, float y0, float x1, float y1, bool tap)
 	std::copy(region, region + 4, region_);
 	ALOGI("AF 区域 (%.2f,%.2f)-(%.2f,%.2f)", region_[0], region_[1], region_[2], region_[3]);
 	regionChanged(tap);
+}
+
+void AutoFocus::region(float out[4]) const
+{
+	std::lock_guard<std::mutex> lk(m_);
+	std::copy(region_, region_ + 4, out);
 }
 
 /* Back to the default region is not a tap: a CONTINUOUS_VIDEO START during
