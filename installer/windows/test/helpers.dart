@@ -11,7 +11,6 @@ import 'package:gk3_common/ui/widgets.dart';
 import 'package:gk3_windows/app.dart';
 import 'package:gk3_windows/l10n/app_localizations.dart';
 import 'package:gk3_windows/session.dart';
-import 'package:gk3_windows/ui/title_bar.dart';
 
 /// 包一层 FixtureBackend：记下每一次调用与重启
 class Rec extends Gk3Backend {
@@ -51,8 +50,7 @@ class DiskBundle extends AssetBundle {
 }
 
 Future<(Rec, Session)> pumpApp(WidgetTester t, String scenario, {String language = 'zh'}) async {
-  // 逻辑画布 1280×800，上面再加自绘标题栏的高度：画布按 1:1 出图
-  t.view.physicalSize = const Size(1280, 800 + WinTitleBar.height);
+  t.view.physicalSize = const Size(1280, 800);
   t.view.devicePixelRatio = 1;
   addTearDown(t.view.reset);
   final rec = Rec(FixtureBackend(scenario, bundle: DiskBundle(), speed: 0));

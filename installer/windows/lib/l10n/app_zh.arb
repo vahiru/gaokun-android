@@ -9,7 +9,7 @@
       }
     }
   },
-  "railSub": "在Windows里安装Android",
+  "railSub": "Windows Installer",
   "railCheck": "检查",
   "railRegion": "位置",
   "railRelease": "版本",
@@ -376,6 +376,8 @@
   },
   "winMinimize": "最小化",
   "winClose": "关闭",
-  "winCloseBusy": "正在写盘，现在不能关闭",
-  "releaseSubLocal": "安装器会先核对这些文件，然后才开始写盘。"
+  "releaseSubLocal": "安装器会先核对这些文件，然后才开始写盘。",
+  "railTitle": "Gaokun Android",
+  "releaseAlpha": "早期测试版，不建议使用",
+  "btnBrowse": "浏览…"
 }

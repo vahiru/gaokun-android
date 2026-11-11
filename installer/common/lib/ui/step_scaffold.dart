@@ -18,6 +18,8 @@ class StepScaffold extends StatelessWidget {
     super.key,
     required this.steps,
     required this.current,
+    this.railTitle = 'gaokun3',
+    this.railIcon = Icons.android,
     required this.railSubtitle,
     this.railFooter = const [],
     required this.backLabel,
@@ -38,6 +40,10 @@ class StepScaffold extends StatelessWidget {
 
   /// 当前是第几步（steps 的下标）
   final int current;
+
+  /// 侧栏顶上的主标题、副标题与左边圆里的图标（null = 不要图标，文字照原来的边距靠左）
+  final String railTitle;
+  final IconData? railIcon;
   final String railSubtitle;
 
   /// 侧栏底部（在一个 Spacer 之后，按顺序排）
@@ -68,7 +74,7 @@ class StepScaffold extends StatelessWidget {
       body: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _StepRail(steps: steps, current: current, subtitle: railSubtitle, footer: railFooter),
+          _StepRail(steps: steps, current: current, title: railTitle, icon: railIcon, subtitle: railSubtitle, footer: railFooter),
           Expanded(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(48, 40, 48, 28),
@@ -144,9 +150,11 @@ class _DangerBanner extends StatelessWidget {
 
 /// 左侧的步骤栏：MD3 标准导航抽屉的样子（当前项是 secondary-container 的胶囊指示），但不可点
 class _StepRail extends StatelessWidget {
-  const _StepRail({required this.steps, required this.current, required this.subtitle, required this.footer});
+  const _StepRail({required this.steps, required this.current, required this.title, required this.icon, required this.subtitle, required this.footer});
   final List<RailStep> steps;
   final int current;
+  final String title;
+  final IconData? icon;
   final String subtitle;
   final List<Widget> footer;
 
@@ -164,18 +172,20 @@ class _StepRail extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Row(
               children: [
-                Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(color: cs.primaryContainer, shape: BoxShape.circle),
-                  child: Icon(Icons.android, color: cs.onPrimaryContainer),
-                ),
-                const SizedBox(width: 14),
+                if (icon != null) ...[
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(color: cs.primaryContainer, shape: BoxShape.circle),
+                    child: Icon(icon, color: cs.onPrimaryContainer),
+                  ),
+                  const SizedBox(width: 14),
+                ],
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('gaokun3', style: tt.titleMedium),
+                      Text(title, style: tt.titleMedium),
                       Text(subtitle, style: tt.bodySmall),
                     ],
                   ),

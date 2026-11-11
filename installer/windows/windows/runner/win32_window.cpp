@@ -155,6 +155,8 @@ bool Win32Window::Create(const std::wstring& title,
   const DWORD kCornerPreference = 33;  // DWMWA_WINDOW_CORNER_PREFERENCE（Windows 11 SDK）
   const DWORD kRound = 2;              // DWMWCP_ROUND
   DwmSetWindowAttribute(window, kCornerPreference, &kRound, sizeof(kRound));
+  // 让系统按上面的 WM_NCCALCSIZE 重算一次框架
+  SetWindowPos(window, nullptr, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
 
   return OnCreate();
 }
@@ -190,11 +192,9 @@ Win32Window::MessageHandler(HWND hwnd,
                             LPARAM const lparam) noexcept {
   switch (message) {
     case WM_NCCALCSIZE:
-      // 整个窗口都是客户区：系统标题栏与边框不画（gaokun3）
-      if (wparam == TRUE) {
-        return 0;
-      }
-      break;
+      // 整个窗口都是客户区：系统标题栏与边框不画（gaokun3）。两种 wParam 都要处理：创建窗口时发来的是
+      // FALSE，只处理 TRUE 的话标题栏会一直留着
+      return 0;
 
     case WM_DESTROY:
       window_handle_ = nullptr;

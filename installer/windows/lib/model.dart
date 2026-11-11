@@ -120,6 +120,10 @@ class Variant {
 
   /// GitHub 上标成预发布的版本
   bool get pre => r.yes('pre');
+
+  /// 版本号里带 alpha 的（v0.7.1-alpha 之类）：早期的测试版，界面提醒不建议使用
+  bool get alpha => _alpha.hasMatch(id);
+  static final _alpha = RegExp(r'^v?\d+(\.\d+)*-alpha\b', caseSensitive: false);
 }
 
 /// 发布文件从哪来

@@ -2,7 +2,7 @@
   "@@locale": "en",
   "appTitle": "gaokun3 Installer",
   "fixtureBadge": "Demo data: {scenario}",
-  "railSub": "Install Android from Windows",
+  "railSub": "Windows Installer",
   "railCheck": "Check",
   "railRegion": "Location",
   "railRelease": "Release",
@@ -163,6 +163,8 @@
   "confirmLocal": "Use the installation files in {dir} after verifying them",
   "winMinimize": "Minimize",
   "winClose": "Close",
-  "winCloseBusy": "Writing to the disk; can’t close now",
-  "releaseSubLocal": "The installer verifies these files before writing anything."
+  "releaseSubLocal": "The installer verifies these files before writing anything.",
+  "railTitle": "Gaokun Android",
+  "releaseAlpha": "Early test build, not recommended",
+  "btnBrowse": "Browse…"
 }

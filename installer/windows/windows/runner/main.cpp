@@ -25,21 +25,21 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   project.set_dart_entrypoint_arguments(std::move(command_line_arguments));
 
-  // gaokun3：窗口按主屏工作区算大小，保持界面的比例（1280×800 的画布 + 40 的自绘标题栏，lib/app.dart），
+  // gaokun3：窗口按主屏工作区算大小，保持界面 1280×800 的比例（lib/app.dart 的画布，最小化与关闭也画在画布里），
   // 放不下 1:1 时等比缩小 —— 平板在 200% 缩放下工作区只有约 1280×752 逻辑像素
   RECT work;
   SystemParametersInfo(SPI_GETWORKAREA, 0, &work, 0);
   const POINT top_left = {work.left, work.top};
   const double scale = FlutterDesktopGetDpiForMonitor(MonitorFromPoint(top_left, MONITOR_DEFAULTTOPRIMARY)) / 96.0;
   const double work_w = (work.right - work.left) / scale, work_h = (work.bottom - work.top) / scale;
-  double h = 840, w = 1280;
+  double h = 800, w = 1280;
   if (h > work_h * 0.94) {
     h = work_h * 0.94;
-    w = h * 1280 / 840;
+    w = h * 1280 / 800;
   }
   if (w > work_w * 0.96) {
     w = work_w * 0.96;
-    h = w * 840 / 1280;
+    h = w * 800 / 1280;
   }
   FlutterWindow window(project);
   Win32Window::Point origin(static_cast<unsigned int>(work.left / scale + (work_w - w) / 2),

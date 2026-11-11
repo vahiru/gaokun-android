@@ -7,6 +7,7 @@ import '../model.dart';
 import 'bits.dart';
 import 'messages.dart';
 import 'run_pages.dart';
+import 'title_bar.dart';
 
 /// 系统盘的分区条：已有的分区一律暗灰（muted），只突出空闲区、要装 Android 的那块与已装的 Android
 Widget systemDiskBar(BuildContext context, {FreeSpan? highlight}) {
@@ -169,8 +170,8 @@ class _ReleasePageState extends State<ReleasePage> {
             icon: Icons.android,
             title: v.name,
             body: l.releaseMeta(v.date, fmtMib(v.sizeMib)),
-            good: v.latest ? l.releaseLatest : null,
-            warn: v.pre && !v.latest ? l.releasePre : null,
+            good: v.latest && !v.alpha ? l.releaseLatest : null,
+            warn: v.alpha ? l.releaseAlpha : (v.pre && !v.latest ? l.releasePre : null),
             selected: identical(v, s.variant),
             onTap: () => s.selectVariant(v),
           ),
@@ -183,16 +184,27 @@ class _ReleasePageState extends State<ReleasePage> {
   Widget _local(BuildContext context) {
     final s = context.session, l = context.l;
     return ListView(children: [
-      TextField(
-        controller: _dir,
-        onChanged: s.setLocalDir,
-        decoration: InputDecoration(
-          labelText: l.localDirLabel,
-          hintText: r'D:\Downloads\gaokun3-v1.0.0-rc.3',
-          border: const OutlineInputBorder(),
-          prefixIcon: const Icon(Icons.folder_outlined),
+      Row(children: [
+        Expanded(
+          child: TextField(
+            controller: _dir,
+            onChanged: s.setLocalDir,
+            decoration: InputDecoration(
+              labelText: l.localDirLabel,
+              hintText: r'D:\Downloads\gaokun3-v1.0.0-rc.3',
+              border: const OutlineInputBorder(),
+              prefixIcon: const Icon(Icons.folder_outlined),
+            ),
+          ),
         ),
-      ),
+        const SizedBox(width: 12),
+        Btn(l.btnBrowse, kind: BtnKind.secondary, onPressed: () async {
+          final d = await WindowControl.pickFolder(title: l.localDirLabel);
+          if (d == null || !context.mounted) return;
+          _dir.text = d;
+          s.setLocalDir(d);
+        }),
+      ]),
       const SizedBox(height: 20),
       Text(l.localNeed, style: context.tt.titleMedium),
       const SizedBox(height: 4),

@@ -5,8 +5,46 @@
 #include <variant>
 
 #include <flutter/standard_method_codec.h>
+#include <shobjidl.h>
 
 #include "flutter/generated_plugin_registrant.h"
+#include "utils.h"
+
+namespace {
+
+// 系统的"选择文件夹"对话框（gk3/window 的 pickFolder）。取消或失败时返回空串
+std::string PickFolder(HWND owner, const std::string& title_utf8) {
+  std::string out;
+  IFileOpenDialog* dlg = nullptr;
+  if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dlg)))) {
+    return out;
+  }
+  DWORD opts = 0;
+  dlg->GetOptions(&opts);
+  dlg->SetOptions(opts | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST);
+  if (!title_utf8.empty()) {
+    int n = MultiByteToWideChar(CP_UTF8, 0, title_utf8.c_str(), -1, nullptr, 0);
+    std::wstring title(n > 0 ? n : 0, L'\0');
+    if (n > 0 && MultiByteToWideChar(CP_UTF8, 0, title_utf8.c_str(), -1, title.data(), n) > 0) {
+      dlg->SetTitle(title.c_str());
+    }
+  }
+  if (SUCCEEDED(dlg->Show(owner))) {
+    IShellItem* item = nullptr;
+    if (SUCCEEDED(dlg->GetResult(&item))) {
+      PWSTR path = nullptr;
+      if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &path))) {
+        out = Utf8FromUtf16(path);
+        CoTaskMemFree(path);
+      }
+      item->Release();
+    }
+  }
+  dlg->Release();
+  return out;
+}
+
+}  // namespace
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
@@ -49,6 +87,15 @@ bool FlutterWindow::OnCreate() {
           // 把这次按下交给 Windows 当作拖动标题栏（系统的移动循环接管鼠标，松开时结束）
           ReleaseCapture();
           SendMessage(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0);
+        } else if (m == "pickFolder") {
+          const auto* t = std::get_if<std::string>(call.arguments());
+          std::string path = PickFolder(hwnd, t ? *t : std::string());
+          if (path.empty()) {
+            result->Success();
+          } else {
+            result->Success(flutter::EncodableValue(path));
+          }
+          return;
         } else if (m == "setBusy") {
           const auto* b = std::get_if<bool>(call.arguments());
           busy_ = b != nullptr && *b;
