@@ -154,14 +154,17 @@ std::string formatOffset(long gmtoff)
 	return buf;
 }
 
-/* 度换成度、分、秒（秒精确到 1/10000） */
+/*
+ * 度换成度、分、秒（秒精确到 1/10000）。先整体换成 1/10000 秒再拆：分别取整时，151.2 这类
+ * 二进制里略小于整数分的值会写成 11'60"。
+ */
 std::vector<std::pair<uint32_t, uint32_t>> dms(double deg)
 {
-	deg = std::fabs(deg);
-	const uint32_t d = static_cast<uint32_t>(deg);
-	const double minutes = (deg - d) * 60.0;
-	const uint32_t m = static_cast<uint32_t>(minutes);
-	const uint32_t s = static_cast<uint32_t>(std::lround((minutes - m) * 60.0 * 10000.0));
+	/* 应用给的值只保证有限：夹到 180 度，换算不会溢出 */
+	const long long t = std::llround(std::min(std::fabs(deg), 180.0) * 3600.0 * 10000.0);
+	const uint32_t d = static_cast<uint32_t>(t / 36000000);
+	const uint32_t m = static_cast<uint32_t>(t / 600000 % 60);
+	const uint32_t s = static_cast<uint32_t>(t % 600000);
 	return { { d, 1 }, { m, 1 }, { s, 10000 } };
 }
 
