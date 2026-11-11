@@ -2,6 +2,7 @@
 # 版本由本目录的 pubspec.lock 统一钉死（已入库）。成员：
 #   common  gk3_common：共用的行协议、后端接口、fixture 回放、主题与通用控件、字体（common/README.md）
 #   live    LiveCD 上的图形安装器（live/README.md）
+#   windows 在 Windows 里运行的安装器（windows/README.md）
 name: gk3_installer_workspace
 publish_to: 'none'
 
@@ -11,3 +12,4 @@ environment:
 workspace:
   - common
   - live
+  - windows

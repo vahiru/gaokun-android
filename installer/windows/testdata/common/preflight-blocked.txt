@@ -1,0 +1,3 @@
+D 249
+O PREFLIGHT manufacturer=LENOVO model=21TK model_ok=no secure_boot=on bitlocker=on fast_startup=on hibernate=unknown hiberfil=yes ac=yes battery=93
+X 0

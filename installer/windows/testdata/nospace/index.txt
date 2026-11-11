@@ -1,0 +1,3 @@
+# 场景：系统盘没有空闲区 —— 这台 PC 真跑的 probe，去掉了挂着的 VHDX；系统盘（disk1）上没有空闲区
+# preflight 用 common 里平板的（这台 PC 自己的会被机型拦下）
+probe                     probe.txt

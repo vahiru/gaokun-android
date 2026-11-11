@@ -1,0 +1,362 @@
+{
+  "@@locale": "zh",
+  "appTitle": "gaokun3 安装器",
+  "fixtureBadge": "演示数据：{scenario}",
+  "@fixtureBadge": {
+    "placeholders": {
+      "scenario": {
+        "type": "String"
+      }
+    }
+  },
+  "railSub": "在 Windows 里安装 Android",
+  "railCheck": "检查",
+  "railRegion": "位置",
+  "railRelease": "版本",
+  "railOptions": "选项",
+  "railConfirm": "确认",
+  "railInstall": "安装",
+  "railLanguage": "English",
+  "railFooter": "安装器 {version}",
+  "@railFooter": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
+  "btnBack": "返回",
+  "btnNext": "下一步",
+  "btnRecheck": "重新检查",
+  "btnManage": "管理",
+  "btnRetry": "重试",
+  "btnLater": "稍后重启",
+  "btnRebootNow": "现在重启",
+  "btnStartOver": "回到开始",
+  "checkTitle": "检查这台电脑",
+  "checkSub": "安装之前，先确认这台电脑满足条件。标红的项处理好之后，点“重新检查”。",
+  "checking": "正在检查……",
+  "chkFailed": "检查没能完成",
+  "chkModel": "机型：华为 MateBook E Go",
+  "chkModelBad": "机型不对",
+  "chkModelBadHow": "这个安装器只适用于华为 MateBook E Go（GK-W7X），这台电脑是 {model}。",
+  "@chkModelBadHow": {
+    "placeholders": {
+      "model": {
+        "type": "String"
+      }
+    }
+  },
+  "chkSecureBootOff": "Secure Boot 已关闭",
+  "chkSecureBootOn": "Secure Boot 开着",
+  "chkSecureBootUnknown": "读不到 Secure Boot 的状态",
+  "chkSecureBootHow": "Android 的引导程序没有微软签名，Secure Boot 开着时无法启动。请在固件设置（BIOS）里关闭 Secure Boot，回到 Windows 后重新检查。",
+  "chkFastStartupOff": "快速启动已关闭",
+  "chkFastStartupOn": "Windows 的快速启动开着",
+  "chkFastStartupHow": "开着快速启动时，“关机”实际上是休眠，Windows 醒来后可能把 Android 写过的 EFI 分区改坏。请在“控制面板 → 电源选项 → 选择电源按钮的功能”里取消“启用快速启动”。",
+  "chkFastStartupHowReg": "开着快速启动时，“关机”实际上是休眠，Windows 醒来后可能把 Android 写过的 EFI 分区改坏。现在休眠关着，控制面板里看不到这个选项；请以管理员身份运行：reg add \"HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Power\" /v HiberbootEnabled /t REG_DWORD /d 0 /f",
+  "chkBitlockerOff": "BitLocker 没有开启",
+  "chkBitlockerOn": "BitLocker 开着",
+  "chkBitlockerUnknown": "读不到 BitLocker 的状态",
+  "chkBitlockerHow": "安装会替换 EFI 分区上的回落引导文件，之后进 Windows 时可能要输入 48 位恢复密钥。请先在 https://aka.ms/myrecoverykey 确认能找到恢复密钥。",
+  "chkBatteryLow": "电量太低",
+  "chkBatteryLowHow": "电量低于 15% 且没有接电源，写盘中途断电会留下装了一半的磁盘。请先接上电源。",
+  "chkPower": "电源",
+  "chkBatteryPct": "电量 {pct}%",
+  "@chkBatteryPct": {
+    "placeholders": {
+      "pct": {
+        "type": "int"
+      }
+    }
+  },
+  "chkOnAc": "已接电源，{battery}",
+  "@chkOnAc": {
+    "placeholders": {
+      "battery": {
+        "type": "String"
+      }
+    }
+  },
+  "chkOnBattery": "使用电池，{battery}",
+  "@chkOnBattery": {
+    "placeholders": {
+      "battery": {
+        "type": "String"
+      }
+    }
+  },
+  "chkNoSystemDisk": "找不到 Windows 所在的磁盘",
+  "chkInstalled": "这台电脑上已经装了 Android",
+  "chkInstalledHow": "点“管理”查看或卸载。要重新安装，先卸载。",
+  "chkNoRoom": "空闲空间不够（至少需要 {need}）",
+  "@chkNoRoom": {
+    "placeholders": {
+      "need": {
+        "type": "String"
+      }
+    }
+  },
+  "chkNoRoomNone": "系统盘上没有未分配的空间。",
+  "chkNoRoomBiggest": "系统盘上最大的一块未分配空间是 {size}。",
+  "@chkNoRoomBiggest": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "chkNoRoomHow": "在“磁盘管理”里右键 C: 盘，选“压缩卷”，压缩出至少 {need} 的未分配空间，再回来重新检查。",
+  "@chkNoRoomHow": {
+    "placeholders": {
+      "need": {
+        "type": "String"
+      }
+    }
+  },
+  "chkRoom": "有 {size} 的空闲空间",
+  "@chkRoom": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "chkRoomDetail": "系统盘：{model}，{size}",
+  "@chkRoomDetail": {
+    "placeholders": {
+      "model": {
+        "type": "String"
+      },
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "chkBlockedNote": "标红的项处理好之前不能安装。安装器写盘之前还会再检查一遍。",
+  "regionTitle": "装在哪里",
+  "regionSub": "Android 会装进系统盘（{model}，{size}）上的一块未分配空间，不改动现有的分区。",
+  "@regionSub": {
+    "placeholders": {
+      "model": {
+        "type": "String"
+      },
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "regionFree": "未分配空间 {size}",
+  "@regionFree": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "regionData": "装好后，Android 的数据分区约 {size}",
+  "@regionData": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "regionTooSmall": "太小，至少需要 {need}",
+  "@regionTooSmall": {
+    "placeholders": {
+      "need": {
+        "type": "String"
+      }
+    }
+  },
+  "regionNote": "Android 的系统分区固定占用约 12 GiB，其余都给数据分区。",
+  "legendEsp": "EFI 分区",
+  "legendRecovery": "恢复分区",
+  "legendOther": "其他",
+  "releaseTitle": "选择版本",
+  "releaseSub": "安装器会下载这个版本并核对文件，然后才开始写盘。",
+  "releaseLoading": "正在获取版本列表……",
+  "releaseNone": "没有拿到版本列表，请检查网络连接。",
+  "releaseSize": "下载 {size}",
+  "@releaseSize": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "releaseLatest": "最新版本",
+  "releaseNote": "下载的文件存放在 C:\\ProgramData\\gaokun3，装好后可以删除。",
+  "optionsTitle": "开机时默认进哪个系统",
+  "optionsSub": "开机时会显示启动菜单，几秒内不选就进默认的系统。以后可以在 Android 的设置里改。",
+  "optDefaultAndroid": "Android",
+  "optDefaultAndroidBody": "默认进 Android，需要时在启动菜单里选 Windows。",
+  "optDefaultWindows": "Windows",
+  "optDefaultWindowsBody": "默认进 Windows，需要时在启动菜单里选 Android。",
+  "confirmTitle": "确认安装",
+  "confirmSub": "接下来会改写这台电脑的磁盘与引导文件。请先备份重要数据。",
+  "confirmWill": "安装器会：",
+  "confirmParts": "在 {size} 的未分配空间里新建 Android 的分区（数据分区约 {data}）",
+  "@confirmParts": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      },
+      "data": {
+        "type": "String"
+      }
+    }
+  },
+  "confirmDownload": "下载 {name}（{size}）并核对文件",
+  "@confirmDownload": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "confirmBoot": "在 EFI 分区上放入启动菜单（systemd-boot），原来的回落引导文件会备份",
+  "confirmDefaultAndroid": "开机默认进 Android",
+  "confirmDefaultWindows": "开机默认进 Windows",
+  "confirmWindowsSafe": "Windows 与 C: 盘里的文件不会被改动",
+  "confirmBitlocker": "BitLocker 开着：之后进 Windows 时可能要输入 48 位恢复密钥。",
+  "confirmBitlockerAck": "我已经确认能找到恢复密钥",
+  "holdToInstall": "按住 2 秒开始安装",
+  "holdToUninstall": "按住 2 秒开始卸载",
+  "holdKeep": "继续按住（{pct}%）",
+  "runInstallTitle": "正在安装 Android",
+  "runUninstallTitle": "正在卸载 Android",
+  "runSub": "请不要关机或拔掉电源，也不要关闭这个窗口。",
+  "runStarting": "正在开始……",
+  "doneInstallTitle": "Android 已经装好",
+  "doneInstallSub": "重启这台电脑就能进入 Android。",
+  "doneInstallMenu": "开机时会先看到启动菜单，可以在 Android 和 Windows 之间选择。",
+  "doneInstallFirstBoot": "第一次进 Android 要准备几分钟，请耐心等待。",
+  "doneInstallWindows": "Windows 照常可用；回 Windows 时请用“重启”，不要用“关机”。",
+  "doneUninstallTitle": "Android 已经卸载",
+  "doneUninstallSub": "空出了 {size} 的未分配空间。",
+  "@doneUninstallSub": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "doneUninstallExtend": "可以在“磁盘管理”里右键 C: 盘，选“扩展卷”，把这块空间并回 C: 盘。",
+  "doneUninstallBoot": "开机会直接进入 Windows。",
+  "failInstallTitle": "安装没有完成",
+  "failUninstallTitle": "卸载没有完成",
+  "failUntouched": "磁盘没有被改动，Windows 不受影响，可以处理好原因后重试。",
+  "failTouchedInstall": "磁盘已经被部分改动，但 Windows 不受影响。可以回到开始，用“管理 → 卸载”清理装了一半的 Android，然后重试。",
+  "failTouchedUninstall": "卸载做了一部分。Windows 不受影响，可以回到开始再卸载一次。",
+  "errUnknown": "原因不明，请查看下面的日志。",
+  "manageTitle": "这台电脑上已经装了 Android",
+  "manageSub": "Android 的分区一共占用 {size}。",
+  "@manageSub": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "manageParts": "Android 的分区",
+  "manageUninstall": "卸载 Android",
+  "manageUninstallBody": "删除 Android 的分区与启动菜单，开机直接进 Windows。Android 里的数据会全部丢失。",
+  "manageReinstallNote": "要重新安装或换一个版本，先卸载，再回到开始安装。",
+  "uninstallTitle": "确认卸载 Android",
+  "uninstallSub": "Android 里的所有数据都会丢失，请先备份。",
+  "uninstallParts": "删除 Android 的 {count} 个分区（共 {size}）",
+  "@uninstallParts": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "uninstallBoot": "把 EFI 分区上的引导还原成 Windows 启动管理器，删除启动菜单",
+  "uninstallFree": "删除后的空间留作未分配，可以在“磁盘管理”里并回 C: 盘",
+  "errRelease": "下载的文件不完整或已损坏，请重新下载。",
+  "errInstalled": "这台电脑上已经装了 Android。要重新安装，请先卸载。",
+  "errPlan": "选的空闲空间不够装 Android。",
+  "errLayoutChanged": "准备安装期间，磁盘的分区被别的程序改动了。请回到开始重新检查。",
+  "errFallbackConflict": "EFI 分区上有另一个系统的引导程序，安装会覆盖它。安装器没有动磁盘，请先处理那个系统的引导。",
+  "errNoBootmgr": "EFI 分区上找不到 Windows 启动管理器，Windows 的引导文件不完整。请先修复 Windows 的引导。",
+  "errWrongModel": "这台电脑不是华为 MateBook E Go。",
+  "errSecureBoot": "Secure Boot 开着，请先在固件设置里关闭。",
+  "errFastStartup": "Windows 的快速启动开着，请先关闭。",
+  "errBitlocker": "BitLocker 开着，需要先确认能找到恢复密钥。",
+  "errLowBattery": "电量太低且没有接电源。",
+  "errEspFull": "EFI 分区的空间不够。",
+  "errPartsUnclear": "磁盘上有同名但认不出是 Android 的分区，为安全起见没有删除任何东西。",
+  "errDisk": "打不开 Windows 所在的磁盘。",
+  "errOther": "安装器报告了错误：{code}",
+  "@errOther": {
+    "placeholders": {
+      "code": {
+        "type": "String"
+      }
+    }
+  },
+  "prVerify": "正在核对发布文件",
+  "prPlan": "正在规划分区",
+  "prGpt": "正在写入分区表",
+  "prFormat": "正在格式化",
+  "prSuperMib": "正在写入系统分区（{done} / {total} MiB）",
+  "@prSuperMib": {
+    "placeholders": {
+      "done": {
+        "type": "String"
+      },
+      "total": {
+        "type": "String"
+      }
+    }
+  },
+  "prSuper": "正在写入系统分区",
+  "prBoot": "正在写入启动分区",
+  "prBootloader": "正在安装启动菜单",
+  "prDone": "完成",
+  "prDlSums": "正在获取校验和",
+  "prDlPct": "正在下载 {name}（{pct}%）",
+  "@prDlPct": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "pct": {
+        "type": "String"
+      }
+    }
+  },
+  "prDl": "正在下载 {name}",
+  "@prDl": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "prDlVerify": "正在核对 {name}",
+  "@prDlVerify": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "prDlDone": "下载完成",
+  "@holdKeep": {
+    "placeholders": {
+      "pct": {
+        "type": "int"
+      }
+    }
+  }
+}

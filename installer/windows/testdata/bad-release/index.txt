@@ -1,0 +1,4 @@
+# 场景：发布文件不完整 —— apply 是 VHDX 上真跑的（super.img.zst 截断：zst-corrupt，盘没动过）
+# probe：PC 上仿出厂布局的 VHDX（Data 缩出 40 GiB），只留这块盘、标成系统盘，型号 / 总线换成平板的（321JN0256GB / nvme）；其余行原样
+probe                     probe.txt
+apply *                   apply.txt

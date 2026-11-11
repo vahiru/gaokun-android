@@ -1,0 +1,12 @@
+E PROGRESS 0 dl-sums
+E PROGRESS 0 dl-start name=boot.img
+E PROGRESS 4 dl name=boot.img pct=100 speed=433M
+E PROGRESS 4 dl-verify name=boot.img
+E PROGRESS 5 dl-done name=boot.img
+E PROGRESS 5 dl-start name=super.img.zst
+E PROGRESS 90 dl name=super.img.zst pct=100 speed=2370M
+E PROGRESS 95 dl-verify name=super.img.zst
+E PROGRESS 100 dl-done name=super.img.zst
+E PROGRESS 100 dl-ready
+O RELEASE dir=C:%5CProgramData%5Cgaokun3%5Crelease source=net
+X 0

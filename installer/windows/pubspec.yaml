@@ -1,0 +1,38 @@
+name: gk3_windows
+description: "gaokun3 (MateBook E Go) Android installer for Windows"
+publish_to: 'none'
+version: 0.1.0+1
+resolution: workspace
+
+# ⚠️ 与 live 一样，依赖只用 Flutter SDK 自带的（本地化）与工作区里的 gk3_common（理由见 ../live/pubspec.yaml 顶上）。
+#    版本由工作区根上的 ../pubspec.lock 钉死。
+environment:
+  sdk: ^3.13.2
+  flutter: 3.47.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  intl: any          # 版本跟 flutter_localizations 走（它钉死了 intl）
+  gk3_common:
+    path: ../common
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  generate: true     # lib/l10n/*.arb → gen-l10n
+  # 演示数据：真 gk3w 的录制（testdata/<场景>/index.txt 的头注释写明来源与替换）。
+  # Chrome 预览与界面测试回放它们；Windows 上连真后端时不用，体积可以忽略。
+  assets:
+    - testdata/common/
+    - testdata/free/
+    - testdata/installed/
+    - testdata/nospace/
+    - testdata/blocked/
+    - testdata/bad-release/
