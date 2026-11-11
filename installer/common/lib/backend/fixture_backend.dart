@@ -77,7 +77,7 @@ class FixtureBackend extends Gk3Backend {
   Stream<Gk3Event> call(String fn, [List<String> args = const []]) async* {
     final file = await _lookup(fn, args);
     if (file == null) {
-      yield Gk3Log('!! 演示数据里没有这个调用：${[fn, ...args].join(' ')}');
+      yield Gk3Log('!! no recorded output for this call in the demo data: ${[fn, ...args].join(' ')}');
       yield const Gk3Exit(127);
       return;
     }

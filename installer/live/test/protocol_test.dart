@@ -168,7 +168,7 @@ void main() {
     test('fixture 里没有的调用：失败（127），而不是编一个结果', () async {
       final r = await b('blank').run('gk3_no_such_function');
       expect(r.exitCode, 127);
-      expect(r.error, contains('演示数据里没有'));
+      expect(r.error, contains('no recorded output'));
     });
     test('发布目录与网络下载', () async {
       final rel = Release((await b('blank').run('gk3_release_info')).first('RELEASE')!);

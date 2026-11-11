@@ -32,7 +32,7 @@ case "$TARGET" in
     x64) HOST=x86_64-w64-mingw32 ;;
     arm64) HOST=aarch64-w64-mingw32 ;;
     native) HOST= ;;
-    *) die "用法：$0 x64|arm64|native" ;;
+    *) die "usage: $0 x64|arm64|native" ;;
 esac
 
 B=$HERE/../build

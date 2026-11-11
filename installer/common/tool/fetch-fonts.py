@@ -58,7 +58,7 @@ for name, (path, want) in FILES.items():
     if src:
         f = os.path.join(src, os.path.basename(path))
         if not os.path.isfile(f):
-            print("!! %s 里没有 %s" % (src, os.path.basename(path)))
+            print("!! %s not found in %s" % (os.path.basename(path), src))
             bad = True
             continue
         data = open(f, "rb").read()
@@ -66,10 +66,10 @@ for name, (path, want) in FILES.items():
         data = fetch(path)
     h = hashlib.sha256(data).hexdigest()
     if h != want:
-        print("!! %s 的 sha256 不对：%s（期望 %s）—— 换了来源？确认之后改 FILES" % (name, h, want))
+        print("!! %s: sha256 %s, expected %s - did the source change? Check it, then update FILES" % (name, h, want))
         bad = True
         continue
     open(os.path.join(OUT, name), "wb").write(data)
-    axes = ", ".join("%s %g..%g（默认 %g）" % (a, lo, hi, dflt) for a, lo, dflt, hi in fvar(data))
-    print("→ assets/fonts/%s  %d 字节  sha256 %s  %s" % (name, len(data), h, axes))
+    axes = ", ".join("%s %g..%g (default %g)" % (a, lo, hi, dflt) for a, lo, dflt, hi in fvar(data))
+    print("-> assets/fonts/%s  %d bytes  sha256 %s  %s" % (name, len(data), h, axes))
 sys.exit(1 if bad else 0)
