@@ -609,13 +609,51 @@ int gk3w_cmd_apply(int argc, wchar_t **argv)
         memcpy(esp.mid, mid_fb, 33);
     {
         /* 原件留一份（gk3_apply 同一条规矩）：只在第一次装时留，且与这份 systemd-boot 不同时才留。
-         * 文件在而读不了（共享冲突、读错误）就在这里拒绝 —— 不能跳过备份再去覆盖它 */
+         * 文件在而读不了（共享冲突、读错误）就在这里拒绝 —— 不能跳过备份再去覆盖它。
+         * 回落路径另有一条（gk3w_install_backup_decide）：已有备份、而现在回落路径上是别的系统的引导程序（上次卸载
+         * 之后别的系统放的）时，备份删了不丢就用现在的换掉它，两份都是别人的原件就拒绝 —— 不能覆盖任何一份 */
         static const char *const names[2] = {"EFI/BOOT/BOOTAA64.EFI", "loader/loader.conf"};
         for (int k = 0; k < 2; k++) {
             char relb[96];
             wchar_t pth[MAX_PATH * 2];
             snprintf(relb, sizeof relb, "%s.before-gaokun3", names[k]);
             esp_path(&esp, names[k], pth, MAX_PATH * 2);
+            if (k == 0) {
+                static const char *const rels[2] = {"EFI/Microsoft/Boot/bootmgfw.efi", "EFI/BOOT/BOOTAA64.EFI.before-gaokun3"};
+                uint8_t *cur = NULL, *wb[2] = {NULL, NULL};
+                size_t cur_len = 0, wb_len[2] = {0, 0};
+                int bad = 0;
+                if (gk3w_exists(pth) && gk3w_read_file(pth, &cur, &cur_len, 64u << 20))
+                    bad = 1;
+                for (int j = 0; j < 2 && !bad; j++) {
+                    wchar_t pj[MAX_PATH * 2];
+                    esp_path(&esp, rels[j], pj, MAX_PATH * 2);
+                    if (gk3w_exists(pj) && gk3w_read_file(pj, &wb[j], &wb_len[j], 64u << 20))
+                        bad = 1;
+                }
+                if (bad) {
+                    free(cur), free(wb[0]), free(wb[1]);
+                    gk3w_err_kv(T, "esp-unreadable", "file", names[k], "cannot read a file on the EFI system partition that must be checked or backed up first (disk not touched)", GetLastError());
+                    goto out;
+                }
+                switch (gk3w_install_backup_decide(cur, cur_len, wb[0], wb_len[0], wb[1], wb_len[1], sdboot, sdboot_len)) {
+                case GK3W_BK_SAVE:
+                    orig[0] = cur, orig_len[0] = cur_len, cur = NULL;
+                    break;
+                case GK3W_BK_REPLACE:
+                    gk3w_log("EFI/BOOT/BOOTAA64.EFI now holds another system's boot loader, and its .before-gaokun3 can go without loss: keeping the current file as .before-gaokun3 instead");
+                    orig[0] = cur, orig_len[0] = cur_len, cur = NULL;
+                    break;
+                case GK3W_BK_CONFLICT:
+                    free(cur), free(wb[0]), free(wb[1]);
+                    gk3w_err(T, "fallback-conflict", "EFI/BOOT/BOOTAA64.EFI holds another system's boot loader, and EFI/BOOT/BOOTAA64.EFI.before-gaokun3 holds a different one that is not Windows: installing would lose one of them (disk not touched)", 0);
+                    goto out;
+                case GK3W_BK_NONE:
+                    break;
+                }
+                free(cur), free(wb[0]), free(wb[1]);
+                continue;
+            }
             if (esp_size_of(&esp, relb) >= 0 || !gk3w_exists(pth))
                 continue;
             if (gk3w_read_file(pth, &orig[k], &orig_len[k], 64u << 20)) {

@@ -46,6 +46,22 @@ typedef enum {
 gk3w_fallback_action gk3w_fallback_decide(const uint8_t *cur, size_t cur_len, const uint8_t *w, size_t w_len,
                                           const uint8_t *bak, size_t bak_len);
 
+/* .before-gaokun3 删了会不会丢东西：它是 systemd-boot（我们早先装的，或没有配置的），或者它是 Windows 启动管理器
+ * 而 EFI/Microsoft/Boot/bootmgfw.efi 还在 —— 这两种删了都不丢 */
+int gk3w_fallback_bak_disposable(const uint8_t *bak, size_t bak_len, const uint8_t *w, size_t w_len);
+
+/* 安装时回落路径的原件怎么留（apply 写 systemd-boot 之前）。cur = 现在的 EFI/BOOT/BOOTAA64.EFI，w = bootmgfw.efi，
+ * bak = 已有的 .before-gaokun3，sd = 要写的 systemd-boot；不存在的给 NULL。 */
+typedef enum {
+    GK3W_BK_NONE = 0,           /* 不用留：回落路径不存在，或已有备份而现在的文件覆盖了也不丢（systemd-boot、
+                                 * Windows 启动管理器、或就是备份本身） */
+    GK3W_BK_SAVE,               /* 还没有备份：把现在的文件留成 .before-gaokun3（与要写的 systemd-boot 相同时不留） */
+    GK3W_BK_REPLACE,            /* 已有的备份删了不丢，现在的是别的系统的引导程序：用现在的换掉备份 */
+    GK3W_BK_CONFLICT,           /* 现在的是别的系统的引导程序，已有的备份也是：两份都不能丢，拒绝安装 */
+} gk3w_backup_action;
+gk3w_backup_action gk3w_install_backup_decide(const uint8_t *cur, size_t cur_len, const uint8_t *w, size_t w_len,
+                                              const uint8_t *bak, size_t bak_len, const uint8_t *sd, size_t sd_len);
+
 /* 这个 EFI 程序是不是 systemd-boot：带 "#### LoaderInfo: systemd-boot "（systemd-boot 自己留的版本标记） */
 int gk3w_is_systemd_boot(const uint8_t *b, size_t n);
 

@@ -249,11 +249,33 @@ static void test_fallback_decide(void)
     CHECK(FB(W, W, N) == GK3W_FB_UNTOUCHED);        /* 备份也删了 */
     CHECK(FB(W0, W, N) == GK3W_FB_UNTOUCHED);       /* 旧的 Windows 启动管理器：不是我们放的，不动 */
     /* 回落路径不存在 */
-    CHECK(FB(N, W, N) == GK3W_FB_UNTOUCHED);
+    CHECK(FB(N, W, N) == GK3W_FB_USE_W);            /* 放回 Windows 启动管理器（同 PS1） */
+    CHECK(FB(N, W, SD2) == GK3W_FB_USE_W);
     CHECK(FB(N, W, W0) == GK3W_FB_USE_W);
     CHECK(FB(N, W, G) == GK3W_FB_RESTORE_ORIGINAL);
     CHECK(FB(N, N, N) == GK3W_FB_UNTOUCHED);
 #undef FB
+    /* 备份删了丢不丢 */
+#define DIS(b, w) gk3w_fallback_bak_disposable(b, (b) ? sizeof(b) : 0, w, (w) ? sizeof(w) : 0)
+    CHECK(DIS(SD2, N) && DIS(W, W) && DIS(W0, W) && DIS(N, N));
+    CHECK(!DIS(W0, N) && !DIS(G, W) && !DIS(G, N));
+#undef DIS
+    /* 安装时怎么留原件 */
+#define BK(c, w, b) gk3w_install_backup_decide(c, (c) ? sizeof(c) : 0, w, (w) ? sizeof(w) : 0, b, (b) ? sizeof(b) : 0, SD, sizeof SD)
+    CHECK(BK(N, W, N) == GK3W_BK_NONE);
+    CHECK(BK(W, W, N) == GK3W_BK_SAVE && BK(G, W, N) == GK3W_BK_SAVE && BK(SD2, W, N) == GK3W_BK_SAVE);
+    CHECK(BK(SD, W, N) == GK3W_BK_NONE);            /* 已经是这份 systemd-boot */
+    CHECK(BK(SD, W, W) == GK3W_BK_NONE && BK(SD2, W, G) == GK3W_BK_NONE);
+    CHECK(BK(G, W, G) == GK3W_BK_NONE);             /* 备份就是它 */
+    CHECK(BK(W0, W, G) == GK3W_BK_NONE && BK(W, W, G) == GK3W_BK_NONE);   /* 现在是 Windows：覆盖不丢 */
+    CHECK(BK(G, W, W) == GK3W_BK_REPLACE && BK(G, W, SD2) == GK3W_BK_REPLACE && BK(G, N, SD2) == GK3W_BK_REPLACE);
+    CHECK(BK(G, N, W0) == GK3W_BK_CONFLICT);        /* 备份是 Windows 但 bootmgfw.efi 不在：备份是唯一的一份 */
+    {
+        static uint8_t G2[32];
+        memset(G2, 6, sizeof G2);
+        CHECK(BK(G2, W, G) == GK3W_BK_CONFLICT);    /* 两份不同的别的引导程序 */
+    }
+#undef BK
 }
 
 static void test_content_kind(void)

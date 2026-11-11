@@ -184,7 +184,29 @@ gk3w_fallback_action gk3w_fallback_decide(const uint8_t *cur, size_t cur_len, co
         return GK3W_FB_RESTORE_ORIGINAL;
     if (bak_ok || cur_sd)
         return w ? GK3W_FB_USE_W : bak_ok ? GK3W_FB_USE_BAK : GK3W_FB_NO_WINDOWS;
+    if (!cur && w)
+        return GK3W_FB_USE_W;   /* 回落路径不见了（例如改名替换时掉电）：放回 Windows 启动管理器，同 PS1 */
     return GK3W_FB_UNTOUCHED;
+}
+
+int gk3w_fallback_bak_disposable(const uint8_t *bak, size_t bak_len, const uint8_t *w, size_t w_len)
+{
+    if (!bak)
+        return 1;
+    return gk3w_is_systemd_boot(bak, bak_len) || (w && (same_bytes(bak, bak_len, w, w_len) || gk3w_is_windows_boot_manager(bak, bak_len)));
+}
+
+gk3w_backup_action gk3w_install_backup_decide(const uint8_t *cur, size_t cur_len, const uint8_t *w, size_t w_len,
+                                              const uint8_t *bak, size_t bak_len, const uint8_t *sd, size_t sd_len)
+{
+    if (!cur)
+        return GK3W_BK_NONE;
+    if (!bak)
+        return same_bytes(cur, cur_len, sd, sd_len) ? GK3W_BK_NONE : GK3W_BK_SAVE;
+    if (gk3w_is_systemd_boot(cur, cur_len) || same_bytes(cur, cur_len, bak, bak_len) ||
+        gk3w_is_windows_boot_manager(cur, cur_len) || same_bytes(cur, cur_len, w, w_len))
+        return GK3W_BK_NONE;
+    return gk3w_fallback_bak_disposable(bak, bak_len, w, w_len) ? GK3W_BK_REPLACE : GK3W_BK_CONFLICT;
 }
 
 int gk3w_is_machine_id(const char *s)

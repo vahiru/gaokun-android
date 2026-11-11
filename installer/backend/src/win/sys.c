@@ -136,7 +136,14 @@ void gk3w_sys_read(gk3w_sys *s)
     s->fast_startup = !reg_dword(L"SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Power", L"HiberbootEnabled", &d) && d == 1;
     s->system_drive = GetSystemWindowsDirectoryW(win, MAX_PATH) && win[1] == L':' ? win[0] : L'C';
     _snwprintf(hib, 16, L"%lc:\\hiberfil.sys", s->system_drive);
-    s->hiberfil = GetFileAttributesW(hib) != INVALID_FILE_ATTRIBUTES;
+    {
+        /* hiberfil.sys 被系统独占打开，GetFileAttributesW 会因共享冲突失败；目录项总读得到 */
+        WIN32_FIND_DATAW fd;
+        HANDLE fh = FindFirstFileW(hib, &fd);
+        s->hiberfil = fh != INVALID_HANDLE_VALUE;
+        if (fh != INVALID_HANDLE_VALUE)
+            FindClose(fh);
+    }
     s->bitlocker = bitlocker_protection(s->system_drive);
     if (s->bitlocker < 0) {
         /* WMI 读不到：按盘上签名判断；签名也读不到就保持 -1，由 gk3w_sys_gate 当作开着处理 */

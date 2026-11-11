@@ -15,19 +15,20 @@
  *   B = BOOTAA64.EFI.before-gaokun3（apply 覆盖回落路径前留的原件；B 是 systemd-boot 时当作没有：那是我们自己
  *   早先装的，或者一个已经没有配置的 systemd-boot，换回去只会得到一个空菜单）。按顺序取第一条成立的：
  *   a. 有 .before-gaokun3（不论是不是 systemd-boot），而 cur 既不是 systemd-boot、也不是 Windows 启动管理器、也不
- *      等于 W 或 B：装完之后别的系统换上了自己的引导程序（例如 grub-install --removable）—— 回落路径与备份都留着。
- *      没有 .before-gaokun3 时同样的 cur 归 d。
+ *      等于 W 或 B：装完之后别的系统换上了自己的引导程序（例如 grub-install --removable）—— 回落路径留着。
+ *      .before-gaokun3 删了不丢（systemd-boot，或 Windows 启动管理器而 W 还在）就删，否则下次安装不会再留 cur 的
+ *      原件；是别的系统的原件就也留着（下次安装见到这种情况会拒绝，见 apply.c）。没有 .before-gaokun3 时同样的 cur 归 d。
  *   b. B 不是 Windows 启动管理器（与 W 不同、版本资源也不是）：装之前回落路径上是别的系统的引导程序 —— 换回 B，
  *      不能把它唯一的一份删掉。
  *   c. 有 B，或 cur 是 systemd-boot：换成【当前的】W（Windows 之后更新过的启动管理器只在 EFI/Microsoft/Boot 里，
  *      B 是装机那天的拷贝）；没有 W 才用 B；两样都没有就拒绝（删完没有东西能启动）。
- *   d. 其余（没有 B，cur 不存在或已经是 Windows 启动管理器）：这一套安装没动过回落路径（例如 apply 在写 ESP 之前
- *      就中断了），原样留着。PS1 则一律换成 W。
+ *   d. cur 不存在而有 W（例如改名替换时掉电）：放回 W，同 PS1。其余（没有可用的 B，cur 已经是 Windows 启动管理器
+ *      或别的引导程序）：这一套安装没动过回落路径（例如 apply 在写 ESP 之前就中断了），原样留着；PS1 则一律换成 W。
  *   回落路径上已经是要换的那个文件时不写；要写时先查 ESP 空闲够不够，写成 .tmp 再改名。
  *   必须在删分区之前：反过来的话 systemd-boot 仍默认进一个已经不存在的 Android。
  * 2 删 ESP 上我们的东西：我们的启动项；含 android/ 或 rescue/ 的 <mid>/ 里的这两个目录（<mid>/ 空了才删）；
- *   EFI/gk3boot、EFI/gaokun3；没有 foreign 时再删 loader/、EFI/systemd/，最后、并且前面全部成功、回落路径也不是
- *   1a 的情况时才删 BOOTAA64.EFI.before-gaokun3（中途失败时它还在，重跑仍有还原的来源）。
+ *   EFI/gk3boot、EFI/gaokun3；没有 foreign 时再删 loader/、EFI/systemd/，最后、并且前面全部成功时才删
+ *   BOOTAA64.EFI.before-gaokun3（中途失败时它还在，重跑仍有还原的来源；1a 里它是别的系统的原件时不删）。
  *   有 foreign 时这三样留着、回落路径也不动（放谁由用户决定），只把 loader.conf 从 .before-gaokun3 换回来。
  * 3 删变量（真实磁盘）：LoaderEntryDefault、LoaderEntryOneShot；有 foreign 时只删看得出是我们写的值。
  * 4 删分区：先重读分区表、与预检时的逐项比对，变过就停（不能拿旧表盖掉别的程序刚做的改动）。
@@ -367,7 +368,7 @@ int gk3w_cmd_uninstall(int argc, wchar_t **argv)
 {
     uint64_t num;
     const wchar_t *backup_dir = gk3w_arg(argc, argv, L"--backup-dir"), *blkey = gk3w_arg(argc, argv, L"--bitlocker-key");
-    int real = gk3w_flag(argc, argv, L"--real-disk"), rc = 1, n_esp = 0, confirmed = 0, have[N_OURS] = {0}, keep_bak = 0, need_restore = 0, leave_fallback = 0;
+    int real = gk3w_flag(argc, argv, L"--real-disk"), rc = 1, n_esp = 0, confirmed = 0, have[N_OURS] = {0}, restore_original = 0, need_restore = 0, keep_bak_file = 0;
     uint64_t pfirst[N_OURS] = {0}, pbytes[N_OURS] = {0};
     gk3w_touched T = GK3W_TOUCHED_NO;
     gk3w_disk d;
@@ -508,11 +509,13 @@ int gk3w_cmd_uninstall(int argc, wchar_t **argv)
             size_t target_len = 0;
             switch (gk3w_fallback_decide(cur, cur_len, winboot, winboot_len, bak, bak_len)) {
             case GK3W_FB_LEAVE_OTHER:
-                leave_fallback = 1;
-                gk3w_log("EFI/BOOT/BOOTAA64.EFI now holds another boot loader (neither systemd-boot nor the Windows Boot Manager): left as it is, and so is its .before-gaokun3 copy");
+                /* .before-gaokun3 删了不丢就删（否则下次安装不会再留现在这个引导程序的原件）；是别人的原件就留着 */
+                keep_bak_file = !gk3w_fallback_bak_disposable(bak, bak_len, winboot, winboot_len);
+                gk3w_log("EFI/BOOT/BOOTAA64.EFI now holds another system's boot loader (neither systemd-boot nor the Windows Boot Manager): left as it is%s",
+                         keep_bak_file ? "; EFI/BOOT/BOOTAA64.EFI.before-gaokun3 (the different loader that was there before the install) is kept too" : "");
                 break;
             case GK3W_FB_RESTORE_ORIGINAL:
-                keep_bak = 1;
+                restore_original = 1;
                 target = bak, target_len = bak_len;
                 gk3w_log("before the install, EFI/BOOT/BOOTAA64.EFI was not the Windows Boot Manager (another system's boot loader?): restoring that original file");
                 break;
@@ -529,7 +532,7 @@ int gk3w_cmd_uninstall(int argc, wchar_t **argv)
                 goto out;
             case GK3W_FB_UNTOUCHED:
                 if (cur)
-                    gk3w_log("EFI/BOOT/BOOTAA64.EFI was not changed by the install: left as it is");
+                    gk3w_log("EFI/BOOT/BOOTAA64.EFI is not a file this install put there: left as it is");
                 break;
             }
             /* 之后 winboot 就是要写进回落路径的内容（NULL = 不写） */
@@ -578,7 +581,7 @@ int gk3w_cmd_uninstall(int argc, wchar_t **argv)
                 goto out;
             }
             note("esp-restored", FALLBACK);
-            if (keep_bak)
+            if (restore_original)
                 gk3w_log("EFI/BOOT/BOOTAA64.EFI = the file it held before the install (from the .before-gaokun3 copy)");
             else
                 gk3w_log("EFI/BOOT/BOOTAA64.EFI = Windows Boot Manager (from %s)", s.bootmgfw ? "EFI/Microsoft/Boot/bootmgfw.efi" : "the .before-gaokun3 copy made at install time");
@@ -596,7 +599,7 @@ int gk3w_cmd_uninstall(int argc, wchar_t **argv)
     if (!s.foreign) {
         rm_dir(&e, L"loader");
         rm_dir(&e, L"EFI\\systemd");
-        if (!e.bad && !leave_fallback)   /* 最后删：前面有一步失败时留着它，重跑仍有还原的来源 */
+        if (!e.bad && !keep_bak_file)   /* 最后删：前面有一步失败时留着它，重跑仍有还原的来源 */
             rm_file(&e, FALLBACK_BAK);
     } else {
         restore_backup(&e, L"loader\\loader.conf");
