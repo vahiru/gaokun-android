@@ -379,5 +379,9 @@
   "releaseSubLocal": "安装器将先校验本地文件的完整性，随后再写入磁盘。",
   "railTitle": "Gaokun Android",
   "releaseAlpha": "早期测试版，不建议使用",
-  "btnBrowse": "浏览…"
+  "btnBrowse": "浏览…",
+  "shutdownReasonInstall": "正在安装Android。中断安装可能导致磁盘分区处于不完整状态。",
+  "shutdownReasonUninstall": "正在卸载Android。中断卸载可能导致磁盘分区处于不完整状态。",
+  "runSleepHintInstall": "安装过程中请勿合上键盘或按电源按钮，否则设备将进入睡眠状态，安装将随之暂停。",
+  "runSleepHintUninstall": "卸载过程中请勿合上键盘或按电源按钮，否则设备将进入睡眠状态，卸载将随之暂停。"
 }

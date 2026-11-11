@@ -1,5 +1,6 @@
 // 各演示场景从头走到尾（回放 testdata/ 里真 gk3w 的录制）
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gk3_windows/ui/run_pages.dart';
 
@@ -7,6 +8,13 @@ import 'helpers.dart';
 
 void main() {
   testWidgets('有空闲区：检查 → 位置 → 版本 → 选项 → 确认 → 安装完成', (t) async {
+    // 原生窗口的通道：记下安装期间的 setBusy（阻止关机与睡眠）
+    final window = <MethodCall>[];
+    t.binding.defaultBinaryMessenger.setMockMethodCallHandler(const MethodChannel('gk3/window'), (c) async {
+      window.add(c);
+      return null;
+    });
+    addTearDown(() => t.binding.defaultBinaryMessenger.setMockMethodCallHandler(const MethodChannel('gk3/window'), null));
     final (rec, s) = await pumpApp(t, 'free');
     await see(t, find.text(l.chkModel));
     await see(t, find.text(l.chkRoom('40 GiB')));
@@ -34,6 +42,9 @@ void main() {
     expect(apply, containsAllInOrder(['--default-os', 'windows', '--real-disk']));
     expect(apply, isNot(contains('--bitlocker-key')));
     expect(s.percent, 100);
+    final busy = [for (final c in window) if (c.method == 'setBusy') c.arguments as Map];
+    expect(busy.where((a) => a['busy'] == true).single, {'busy': true, 'power': l.runInstallTitle, 'shutdown': l.shutdownReasonInstall});
+    expect(busy.last['busy'], isFalse);
 
     await tap(t, find.text(l.btnRebootNow));
     expect(rec.reboots, 1);

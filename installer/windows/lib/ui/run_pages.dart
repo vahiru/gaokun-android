@@ -65,6 +65,8 @@ class _RunPageState extends State<RunPage> {
             Text('${s.percent}%', style: context.tt.bodySmall),
           ],
           const SizedBox(height: 20),
+          NoteBox(text: install ? l.runSleepHintInstall : l.runSleepHintUninstall),
+          const SizedBox(height: 16),
           Expanded(child: LogView(s.log, controller: _scroll)),
         ]),
       ),

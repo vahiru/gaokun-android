@@ -390,6 +390,8 @@ int gk3w_cmd_uninstall(int argc, wchar_t **argv)
         if (gk3w_sys_gate(&sys, blkey && !wcscmp(blkey, L"yes"), GK3W_GATE_UNINSTALL))
             return 1;
     }
+    /* 卸载期间阻止系统因空闲进入睡眠状态（图形界面另有电源请求与阻止关机）；进程退出时自动撤销 */
+    SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED);
     if (gk3w_disk_open((DWORD)num, real, &d, T))
         return 1;
     snap = malloc(d.laysz);

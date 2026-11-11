@@ -490,6 +490,8 @@ int gk3w_cmd_apply(int argc, wchar_t **argv)
         if (gk3w_sys_gate(&sys, blkey && !wcscmp(blkey, L"yes"), GK3W_GATE_APPLY))
             return 1;
     }
+    /* 安装期间阻止系统因空闲进入睡眠状态（图形界面另有电源请求与阻止关机）；进程退出时自动撤销 */
+    SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED);
     if (defos_arg && wcscmp(defos_arg, L"android") && wcscmp(defos_arg, L"windows"))
         return gk3w_err(T, "usage", "--default-os must be android or windows", 0);
     defos_windows = defos_arg && !wcscmp(defos_arg, L"windows");

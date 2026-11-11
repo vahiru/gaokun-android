@@ -12,6 +12,17 @@
 
 namespace {
 
+std::wstring Utf16FromUtf8(const std::string& s) {
+  int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
+  if (n <= 1) {
+    return std::wstring();
+  }
+  std::wstring w(n, L'\0');
+  MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, w.data(), n);
+  w.resize(n - 1);
+  return w;
+}
+
 // 系统的"选择文件夹"对话框（gk3/window 的 pickFolder）。取消或失败时返回空串
 std::string PickFolder(HWND owner, const std::string& title_utf8) {
   std::string out;
@@ -23,11 +34,7 @@ std::string PickFolder(HWND owner, const std::string& title_utf8) {
   dlg->GetOptions(&opts);
   dlg->SetOptions(opts | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST);
   if (!title_utf8.empty()) {
-    int n = MultiByteToWideChar(CP_UTF8, 0, title_utf8.c_str(), -1, nullptr, 0);
-    std::wstring title(n > 0 ? n : 0, L'\0');
-    if (n > 0 && MultiByteToWideChar(CP_UTF8, 0, title_utf8.c_str(), -1, title.data(), n) > 0) {
-      dlg->SetTitle(title.c_str());
-    }
+    dlg->SetTitle(Utf16FromUtf8(title_utf8).c_str());
   }
   if (SUCCEEDED(dlg->Show(owner))) {
     IShellItem* item = nullptr;
@@ -97,8 +104,21 @@ bool FlutterWindow::OnCreate() {
           }
           return;
         } else if (m == "setBusy") {
-          const auto* b = std::get_if<bool>(call.arguments());
-          busy_ = b != nullptr && *b;
+          // 参数：{busy: bool, power: 电源请求的原因, shutdown: 阻止关机的原因}
+          const auto* args = std::get_if<flutter::EncodableMap>(call.arguments());
+          auto str = [args](const char* key) {
+            if (args == nullptr) return std::string();
+            auto it = args->find(flutter::EncodableValue(key));
+            const auto* v = it == args->end() ? nullptr : std::get_if<std::string>(&it->second);
+            return v ? *v : std::string();
+          };
+          bool busy = false;
+          if (args != nullptr) {
+            auto it = args->find(flutter::EncodableValue("busy"));
+            const auto* b = it == args->end() ? nullptr : std::get_if<bool>(&it->second);
+            busy = b != nullptr && *b;
+          }
+          SetBusy(busy, Utf16FromUtf8(str("power")), Utf16FromUtf8(str("shutdown")));
         } else {
           result->NotImplemented();
           return;
@@ -118,7 +138,39 @@ bool FlutterWindow::OnCreate() {
   return true;
 }
 
+void FlutterWindow::SetBusy(bool busy, const std::wstring& power_reason, const std::wstring& shutdown_reason) {
+  HWND hwnd = GetHandle();
+  if (busy && !busy_) {
+    // 电源请求：系统不因空闲而进入睡眠状态，屏幕保持开启（powercfg /requests 中显示原因）。
+    // 合上键盘或按电源按钮进入的睡眠无法由应用阻止，进度页另有提示
+    std::wstring reason = power_reason.empty() ? std::wstring(L"Gaokun Android") : power_reason;
+    REASON_CONTEXT ctx = {};
+    ctx.Version = POWER_REQUEST_CONTEXT_VERSION;
+    ctx.Flags = POWER_REQUEST_CONTEXT_SIMPLE_STRING;
+    ctx.Reason.SimpleReasonString = reason.data();
+    power_request_ = PowerCreateRequest(&ctx);
+    if (power_request_ == INVALID_HANDLE_VALUE) {
+      power_request_ = nullptr;
+    } else {
+      PowerSetRequest(power_request_, PowerRequestSystemRequired);
+      PowerSetRequest(power_request_, PowerRequestDisplayRequired);
+    }
+    // 关机、重启、注销时 Windows 在"以下应用正在阻止关机"中显示这个原因（配合 WM_QUERYENDSESSION 返回 FALSE）
+    ShutdownBlockReasonCreate(hwnd, shutdown_reason.empty() ? reason.c_str() : shutdown_reason.c_str());
+  } else if (!busy && busy_) {
+    if (power_request_ != nullptr) {
+      PowerClearRequest(power_request_, PowerRequestSystemRequired);
+      PowerClearRequest(power_request_, PowerRequestDisplayRequired);
+      CloseHandle(power_request_);
+      power_request_ = nullptr;
+    }
+    ShutdownBlockReasonDestroy(hwnd);
+  }
+  busy_ = busy;
+}
+
 void FlutterWindow::OnDestroy() {
+  SetBusy(false, std::wstring(), std::wstring());
   window_channel_ = nullptr;
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
@@ -131,10 +183,15 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
-  // 正在写盘时不让关（WM_CLOSE 来自 Alt+F4、任务栏、PostMessage）
+  // 安装或卸载期间不关闭窗口（WM_CLOSE 来自 Alt+F4、任务栏、PostMessage）
   if (message == WM_CLOSE && busy_) {
     MessageBeep(MB_ICONWARNING);
     return 0;
+  }
+  // 安装或卸载期间阻止关机、重启、注销：返回 FALSE，Windows 显示 ShutdownBlockReasonCreate 设置的原因。
+  // 用户仍可选择强制关机，这一点无法阻止
+  if (message == WM_QUERYENDSESSION && busy_) {
+    return FALSE;
   }
 
   // Give Flutter, including plugins, an opportunity to handle window messages.

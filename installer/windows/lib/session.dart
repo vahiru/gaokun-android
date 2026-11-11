@@ -4,6 +4,8 @@ import 'package:gk3_common/backend/protocol.dart';
 
 import 'model.dart';
 
+enum WriteTask { install, uninstall }
+
 /// 一次安装器会话：检查结果、用户的选择、正在跑的任务。界面只读它、调它的方法。
 /// ★ 分区怎么排、够不够，一律问 gk3w（plan / apply），这里不算。
 class Session extends ChangeNotifier {
@@ -137,6 +139,8 @@ class Session extends ChangeNotifier {
   }
 
   // ── 正在跑的任务（下载 + 安装 / 卸载） ──
+  /// 正在进行安装还是卸载（写盘期间阻止关机时，原因按它写）
+  WriteTask task = WriteTask.install;
   bool writing = false;
   int percent = 0;
   Gk3Progress? lastProgress;
@@ -164,6 +168,7 @@ class Session extends ChangeNotifier {
 
   /// 下载（0–40 %）再安装（40–100 %）；用本地文件时直接安装（0–100 %）
   Future<bool> install({required String releaseDir}) async {
+    task = WriteTask.install;
     writing = true;
     percent = 0;
     log.clear();
@@ -194,6 +199,7 @@ class Session extends ChangeNotifier {
 
   /// 卸载：gk3w uninstall 不报百分比，界面显示一条不定长的进度
   Future<bool> uninstall() async {
+    task = WriteTask.uninstall;
     writing = true;
     percent = 0;
     log.clear();

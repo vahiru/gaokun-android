@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:gk3_common/ui/theme.dart';
 
 import '../app.dart';
+import '../session.dart';
 
 /// 和 Windows 原生窗口打交道（windows/runner/flutter_window.cpp 里的 gk3/window 通道）：窗口没有系统标题栏，
 /// 拖动、最小化、关闭、选文件夹都由界面发起。浏览器预览与测试里没有这个通道，调用什么都不做。
@@ -24,11 +25,12 @@ class WindowControl {
   /// 按住顶上一行时调用：把这次按下交给 Windows 当作拖动标题栏
   static Future<void> startDrag() => _call<void>('startDrag');
 
-  /// 正在写盘时原生窗口拒绝关闭（Alt+F4、任务栏上的关闭都不行），写完再放开
-  static void setBusy(bool busy) {
+  /// 安装或卸载期间：原生窗口拒绝关闭，阻止关机（Windows 显示 [shutdown] 作为原因），并创建电源请求阻止系统
+  /// 进入睡眠状态、保持屏幕开启（[power] 是 powercfg /requests 中显示的原因）。结束后撤销
+  static void setBusy(bool busy, {String power = '', String shutdown = ''}) {
     if (_busy == busy) return;
     _busy = busy;
-    _call<void>('setBusy', busy);
+    _call<void>('setBusy', {'busy': busy, 'power': power, 'shutdown': shutdown});
   }
 
   /// 系统的"选择文件夹"对话框（IFileOpenDialog）；取消或没有原生窗口时为 null
@@ -54,8 +56,13 @@ class WindowButtons extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final s = context.session;
-    WindowControl.setBusy(s.writing);
+    final s = context.session, l = context.l;
+    final install = s.task == WriteTask.install;
+    WindowControl.setBusy(
+      s.writing,
+      power: install ? l.runInstallTitle : l.runUninstallTitle,
+      shutdown: install ? l.shutdownReasonInstall : l.shutdownReasonUninstall,
+    );
     return Row(mainAxisSize: MainAxisSize.min, children: [
       _CaptionButton(icon: Icons.remove, label: context.l.winMinimize, onPressed: WindowControl.minimize),
       _CaptionButton(icon: Icons.close, label: context.l.winClose, danger: true, onPressed: s.writing ? null : WindowControl.close),

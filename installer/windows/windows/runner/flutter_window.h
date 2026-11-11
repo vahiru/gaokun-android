@@ -34,8 +34,14 @@ class FlutterWindow : public Win32Window {
   // gaokun3：界面自绘标题栏，拖动 / 最小化 / 关闭经这个通道（lib/ui/title_bar.dart 的 WindowControl）
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> window_channel_;
 
-  // 正在写盘：拒绝关闭（自绘的关闭键、Alt+F4、任务栏上的关闭都不行）
+  // 正在安装或卸载：拒绝关闭窗口（自绘的关闭键、Alt+F4、任务栏上的关闭），阻止关机与系统睡眠
   bool busy_ = false;
+
+  // 安装或卸载期间的电源请求（阻止系统进入睡眠状态、保持屏幕开启）；不在进行时为 nullptr
+  HANDLE power_request_ = nullptr;
+
+  // 开始或结束一次安装或卸载：设置或撤销电源请求与阻止关机的原因
+  void SetBusy(bool busy, const std::wstring& power_reason, const std::wstring& shutdown_reason);
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

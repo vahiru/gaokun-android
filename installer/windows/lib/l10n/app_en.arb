@@ -166,5 +166,9 @@
   "releaseSubLocal": "The installer will verify the integrity of the local files before writing to the disk.",
   "railTitle": "Gaokun Android",
   "releaseAlpha": "Early test build, not recommended",
-  "btnBrowse": "Browse…"
+  "btnBrowse": "Browse…",
+  "shutdownReasonInstall": "Installing Android. Interrupting the installation may leave disk partitions in an incomplete state.",
+  "shutdownReasonUninstall": "Uninstalling Android. Interrupting the uninstallation may leave disk partitions in an incomplete state.",
+  "runSleepHintInstall": "Do not close the keyboard cover or press the power button during installation. Otherwise, the device will enter sleep and the installation will be paused.",
+  "runSleepHintUninstall": "Do not close the keyboard cover or press the power button during uninstallation. Otherwise, the device will enter sleep and the uninstallation will be paused."
 }
