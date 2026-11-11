@@ -10,7 +10,7 @@
 
 ## 二、构建与依赖
 
-- **`libcamera`同树Soong构建**：由于Android NDK的`std::__ndk1`与AOSP平台的`std::__1` C++ ABI不兼容，`libcamera`通过[`patches/libcamera/libcamera-Android.bp`](../../../../patches/libcamera/README.md)在AOSP树内编译为`libcamera_base_gk3`、`libcamera_gk3`与`qcom-ife`流水线的IPA模块（安装于`/vendor/lib64/libcamera/ipa/`）。
+- **`libcamera`同树Soong构建**：由于Android NDK的`std::__ndk1`与AOSP平台的`std::__1` C++ ABI不兼容，`libcamera`通过[`patches/libcamera/libcamera-Android.bp`](../../../../patches/libcamera/README.md)在AOSP树内编译为`libcamera_base_gk3`、`libcamera_gk3`与`qcom-ife`流水线的IPA模块`libcamera_ipa_qcom_ife_gk3`（安装于`/vendor/lib64/libcamera/ipa/`）。
 - **调优配置**：`ipa-data/qcom-ife/`下的`ov13b10.yaml`、`hi846.yaml`与`uncalibrated.yaml`安装至`/vendor/etc/libcamera/ipa/qcom-ife/`。
 - **流水线能力**：本模块要求流水线给出NV12；不给时不探测帧率与3A控制，配置流时报错。其余依赖的流水线行为（两路输出、`ScalerCrop`、`FocusFoM`、时间戳、出错恢复）见`docs/dev/camera.md`。
 

@@ -150,18 +150,29 @@ Android NDK的`libc++`使用内联命名空间`std::__ndk1`，而AOSP平台源�
 
 ## 五、自研AIDL Camera HAL（`device/huawei/gaokun3/camera/`）
 
-HAL实现`android.hardware.camera.provider-V3`，源码结构详见[`device/huawei/gaokun3/camera/README.md`](../../device/huawei/gaokun3/camera/README.md)。核心实现要点如下：
+HAL实现`android.hardware.camera.provider-V3`，组件说明详见[`device/huawei/gaokun3/camera/README.md`](../../device/huawei/gaokun3/camera/README.md)。核心实现要点如下：
 
 1. **枚举顺序固定**：`Provider.cpp`按`Location`排序（后摄`BACK`固定为`device@1.1/internal/0`，前摄`FRONT`固定为`internal/1`），避免因内核media节点探测先后波动导致相机ID翻转。
-2. **色彩空间与格式转换**：软件ISP输出`RGB888`，HAL使用`libyuv::RGB24ToJ420`转换至**全范围（Full-range 0–255，BT.601）**I420（若误用限制范围16–235的`RGB24ToI420`会导致画面严重偏绿和对比度压缩），再打包为`NV21`写入预览Gralloc缓冲，或交由`libjpeg-turbo`编码为拍照`BLOB`（末尾附8字节`CameraBlob`尾标）。
-3. **AIDL缓冲缓存契约与Gralloc导入**：
+2. **画面与格式**：`qcom-ife`流水线输出全范围BT.601的NV12。HAL按各路流的尺寸向流水线要一幅与传感器阵列同宽高比、刚好覆盖它们的画面，传感器模式由流水线选，IFE缩放；YUV流由CPU裁剪、缩放后直接写进Gralloc缓冲（半平面布局按行复制，平面布局写J420），不做颜色转换；JPEG由J420以YCbCr原始数据交给`libjpeg-turbo`编码（末尾附8字节`CameraBlob`尾标），并写入EXIF与缩略图。
+3. **拍照模式两路输出**：JPEG比其余各路大得多时，向流水线要显示路径（`Viewfinder`）与FULL（`StillCapture`）两路NV12，需要相位对焦时再加`Raw`。显示路径由IFE缩放器缩小，给预览、录像与对焦；FULL只加在带JPEG的请求里，JPEG在单独的线程上从FULL编码，预览与结果元数据照常先交付。两路时数码变焦交给显示路径的`ScalerCrop`，HAL按元数据里实际显示的矩形换算裁剪区域与对焦区域。
+4. **依赖的流水线行为**（流水线一侧的说明见第四节第3部分）：
+   - 两路时显示路径的尺寸调成FULL视场的宽高比（宽度16对齐），只缩小不放大；请求可以不带FULL与RAW；同一请求的各路缓冲来自同一帧，请求按入队顺序完成。
+   - `ScalerCrop`按请求下发（坐标相对`ScalerCropMaximum`），只作用于显示路径，元数据报实际显示的矩形。
+   - `FocusFoM`每帧输出，`AfWindows`按请求下发；RAW取最大的传感器模式（只有它带相位像素），读出变换为HVFlip时HAL才做相位对焦。
+   - 同一帧的图像缓冲都打该帧开始（SOE）的时刻，不随变焦与是否带FULL变化；HAL以显示路径（单路时就是那一路）的时间戳作快门与`SENSOR_TIMESTAMP`，不用RAW的时间戳。
+   - 帧状态不是`FrameSuccess`时HAL把整个请求按出错上报；写主出错后由流水线重启流并取消在途请求。`Camera::stop()`返回前所有完成回调都已返回，HAL只在此之后解除帧缓冲的映射。
+   - 帧缓冲是可`mmap()`的dma-buf，CPU读之前做`DMA_BUF_IOCTL_SYNC`。
+5. **对焦**：后摄`dw9714`马达由HAL经v4l2子设备直接驱动（`libcamera`不驱动镜头）。全尺寸模式下先按RAW里的相位像素对焦，再在相位结果两侧各采一个对比度点精调；对比度分数在增益不高时取AF区域亮度的梯度能量，暗处（增益≥10）取`FocusFoM`。
+6. **3A控制**：曝光补偿、AE/AWB锁定、手动曝光（`MANUAL_SENSOR`）、手动对焦、白平衡预设与手动白平衡、防频闪（50 Hz/60 Hz，AUTO按50 Hz）都换成`libipa`的对应控制；能力按流水线实际接受的控制声明。帧率按探测到的传感器模式声明（后摄合并模式60 fps）。
+7. **画质**：IFE不做锐化与降噪。HAL在输出分辨率上做带门限的亮度锐化（`EDGE_MODE`），照片另做亮度ε滤波与色度模糊，强度按噪声估计；预览、录像在增益高时只模糊色度。
+8. **AIDL缓冲缓存契约与Gralloc导入**：
    - 遵循`StreamBuffer.aidl`规范：框架对同一`(streamId, bufferId)`仅在首次请求时携带非空`buffer`句柄，后续请求句柄为空。`Session.cpp`维护`(streamId, bufferId) -> buffer_handle_t`映射表，并在`processCaptureRequest`中按`cachesToRemove`及时释放已淘汰缓冲。
    - 使用`GraphicBufferMapper::importBufferNoValidate()`导入缓冲，避免因框架内部附加的私有`usage`位与HAL侧声明不一致而触发`BAD_BUFFER(2)`错误。
-4. **FMQ请求设置读取**：`AidlCamera3Device`优先通过Fast Message Queue（`requestQueue_`）传递每帧capture settings（此时`r.settings.metadata`为空，`fmqSettingsSize > 0`），HAL同时支持从FMQ与内联metadata读取请求参数。
-5. **手电筒与预闪拍照状态机**：
-   - `ICameraDevice::setTorchMode`直接控制`/sys/class/leds/white:flash/brightness`，并在相机打开会话期间自动互斥并回调`TorchModeStatus::NOT_AVAILABLE`。
-   - 因PMIC LED无硬件帧同步信号，拍照闪光采用预闪常亮策略：收到`AE_PRECAPTURE_TRIGGER_START`时点亮LED并上报`AE_STATE_PRECAPTURE`让软件ISP的AGC收敛，通过`firedPending_`计数在途拍照请求，直至静态JPEG帧曝光完成才熄灭LED。
-6. **传感器朝向与天生竖屏面板几何（`Device.cpp`）**：
-   - `gaokun3`的物理面板为`1600×2560`（短边在前），Android WindowManager将其视为**天生竖屏设备**：横向握持（摄像头位于长边顶部中央）时`Display.getRotation()`为`ROTATION_90`（或`ROTATION_270`），竖向握持时为`ROTATION_0`。
-   - 按照Android相机坐标公式，为使横向正常握持平板时预览与成像方向正立，`Device.cpp`将静态元数据`ANDROID_SENSOR_ORIENTATION`设为`0`（配合`camera.dtsi`中的`rotation = <0>`），并在JPEG编码前根据框架通过FMQ下发的`ANDROID_JPEG_ORIENTATION`调用`libyuv::I420Rotate`旋转I420平面。
-
+9. **FMQ请求设置读取**：`AidlCamera3Device`优先通过Fast Message Queue（`requestQueue_`）传递每帧capture settings（此时`r.settings.metadata`为空，`fmqSettingsSize > 0`），HAL同时支持从FMQ与内联metadata读取请求参数。
+10. **手电筒与预闪拍照状态机**：
+    - `ICameraDevice::setTorchMode`直接控制`/sys/class/leds/white:flash/brightness`，并在相机打开会话期间自动互斥并回调`TorchModeStatus::NOT_AVAILABLE`。
+    - 因PMIC LED无硬件帧同步信号，拍照闪光采用预闪常亮策略：收到`AE_PRECAPTURE_TRIGGER_START`时点亮LED并上报`AE_STATE_PRECAPTURE`让AGC收敛，通过`firedPending_`计数在途拍照请求，直至静态JPEG帧曝光完成才熄灭LED。
+11. **传感器朝向（`Device.cpp`）**：
+    - 设备树按横屏使用的方向写安装角：后摄180、前摄0。Android把`1600×2560`的面板视为天生竖屏，接键盘横放时显示旋转为`ROTATION_90`。
+    - `ANDROID_SENSOR_ORIENTATION`相对竖屏计算，并扣掉`libcamera`已用翻转消掉的部分（后摄ov13b10的180°由水平加垂直翻转读出消掉）：后摄为90，前摄为270。接键盘横放时应用算出的JPEG角为0，交付的画面横放时本来就是正的。
+    - JPEG按应用下发的`ANDROID_JPEG_ORIENTATION`转像素；转过时EXIF方向写0（未定义），0°时写1。
