@@ -472,6 +472,11 @@ int gk3w_cmd_uninstall(int argc, wchar_t **argv)
     }
     esp_part = NULL;
     scan_esp(&e, &s);
+    /* 真实磁盘：同 apply —— gk3w 运行在这块盘上已经启动的 Windows 里，bootmgfw.efi 不在说明 Windows 引导不完整 */
+    if (real && !s.bootmgfw) {
+        gk3w_err(T, "no-windows-bootmgr", "EFI/Microsoft/Boot/bootmgfw.efi is missing from the EFI system partition: the Windows boot files of this disk are incomplete; repair them first (disk not touched)", 0);
+        goto out;
+    }
     if (!n_ids && !s.our_entries && !s.install_dirs && !s.gk3boot && !s.gaokun3 && !s.fallback_bak) {
         gk3w_log("no Android partitions on the disk and no Android files on the EFI system partition: nothing to uninstall");
         rc = 0;

@@ -427,23 +427,21 @@ static int esp_write(const esp_ctx *e, const char *rel, const uint8_t *data, siz
     return 0;
 }
 
-/* 先写 <rel>.tmp、读回核对，再改名成 <rel>：中途失败或掉电时 <rel> 要么不在、要么完整。失败时删掉 .tmp。 */
+/* 写成 <rel>.tmp、读回核对，再改名覆盖 <rel>（gk3w_replace_file_verify，保留 <rel> 原来的属性）：中途失败或掉电时
+ * <rel> 要么是原来的、要么是完整的新文件。 */
 static int esp_write_renamed(const esp_ctx *e, const char *rel, const uint8_t *data, size_t len)
 {
-    char tmp[200];
-    wchar_t pt[MAX_PATH * 2], pf[MAX_PATH * 2];
-    snprintf(tmp, sizeof tmp, "%s.tmp", rel);
-    esp_path(e, tmp, pt, MAX_PATH * 2);
+    wchar_t pf[MAX_PATH * 2], dir[MAX_PATH * 2], *slash;
     esp_path(e, rel, pf, MAX_PATH * 2);
-    if (esp_write(e, tmp, data, len)) {
-        DeleteFileW(pt);
-        return -1;
+    wcscpy(dir, pf);
+    slash = wcsrchr(dir, L'\\');
+    if (slash && (size_t)(slash - dir) > e->root_len) {
+        *slash = 0;
+        if (gk3w_mkdirs(dir, e->root_len))
+            return gk3w_err_kv(GK3W_TOUCHED_YES, "esp-write", "file", rel, "cannot create a directory on the EFI system partition", GetLastError());
     }
-    if (!MoveFileExW(pt, pf, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-        DWORD err = GetLastError();
-        DeleteFileW(pt);
-        return gk3w_err_kv(GK3W_TOUCHED_YES, "esp-write", "file", rel, "renaming a file on the EFI system partition failed", err);
-    }
+    if (gk3w_replace_file_verify(pf, data, len))
+        return gk3w_err_kv(GK3W_TOUCHED_YES, "esp-write", "file", rel, "writing the EFI system partition failed: out of space, a media error, or the file did not read back identically", GetLastError());
     return 0;
 }
 
@@ -601,6 +599,12 @@ int gk3w_cmd_apply(int argc, wchar_t **argv)
         gk3w_err(T, "default-os-no-windows", "there is no Windows boot manager on the EFI system partition, so Windows cannot be the default (disk not touched)", 0);
         goto out;
     }
+    /* 真实磁盘：gk3w 运行在这块盘上已经启动的 Windows 里，Windows 靠的就是 EFI/Microsoft/Boot/bootmgfw.efi。
+     * 它不在说明这块盘的 Windows 引导不完整，回落路径上的文件该不该留也就无从判断：不装 */
+    if (real && !esp.windows) {
+        gk3w_err(T, "no-windows-bootmgr", "EFI/Microsoft/Boot/bootmgfw.efi is missing from the EFI system partition: the Windows boot files of this disk are incomplete; repair them first (disk not touched)", 0);
+        goto out;
+    }
     if (esp_has_android_entries(&esp)) {
         gk3w_err(T, "esp-has-android", "the EFI system partition already has Android boot entries; run uninstall first (disk not touched)", 0);
         goto out;
@@ -622,18 +626,19 @@ int gk3w_cmd_apply(int argc, wchar_t **argv)
                 static const char *const rels[2] = {"EFI/Microsoft/Boot/bootmgfw.efi", "EFI/BOOT/BOOTAA64.EFI.before-gaokun3"};
                 uint8_t *cur = NULL, *wb[2] = {NULL, NULL};
                 size_t cur_len = 0, wb_len[2] = {0, 0};
-                int bad = 0;
+                const char *bad = NULL;
+                DWORD bad_err = 0;
                 if (gk3w_exists(pth) && gk3w_read_file(pth, &cur, &cur_len, 64u << 20))
-                    bad = 1;
+                    bad = names[k], bad_err = GetLastError();
                 for (int j = 0; j < 2 && !bad; j++) {
                     wchar_t pj[MAX_PATH * 2];
                     esp_path(&esp, rels[j], pj, MAX_PATH * 2);
                     if (gk3w_exists(pj) && gk3w_read_file(pj, &wb[j], &wb_len[j], 64u << 20))
-                        bad = 1;
+                        bad = rels[j], bad_err = GetLastError();
                 }
                 if (bad) {
                     free(cur), free(wb[0]), free(wb[1]);
-                    gk3w_err_kv(T, "esp-unreadable", "file", names[k], "cannot read a file on the EFI system partition that must be checked or backed up first (disk not touched)", GetLastError());
+                    gk3w_err_kv(T, "esp-unreadable", "file", bad, "cannot read a file on the EFI system partition that must be checked or backed up first (disk not touched)", bad_err);
                     goto out;
                 }
                 switch (gk3w_install_backup_decide(cur, cur_len, wb[0], wb_len[0], wb[1], wb_len[1], sdboot, sdboot_len)) {
@@ -682,8 +687,11 @@ int gk3w_cmd_apply(int argc, wchar_t **argv)
                 snprintf(rel_path, sizeof rel_path, "%s/android/slot_%c/%s", esp.mid, sl, fn[k]);
                 need += esp_delta(&esp, rel_path, sizes[k]);
             }
-        if (aa >= 0 && esp_size_of(&esp, "EFI/BOOT/BOOTAA64.EFI.before-gaokun3") < 0 &&
-            !esp_same(&esp, "EFI/BOOT/BOOTAA64.EFI", sdboot, sdboot_len))
+        /* 要新写的备份（第一次留，或换掉可丢的旧备份：写成 .tmp 时旧备份还在）；回落路径也写成 .tmp 再改名，
+         * 改名之前旧文件还占着空间。比 LiveCD 的算法多算后两项（几百 KiB 到几 MiB） */
+        if (orig[0])
+            need += (int64_t)orig_len[0] / 1024 + 4;
+        if (aa >= 0 && !esp_same(&esp, "EFI/BOOT/BOOTAA64.EFI", sdboot, sdboot_len))
             need += aa / 1024 + 4;
         if (!GetDiskFreeSpaceExW(esp.root, &avail, NULL, NULL)) {
             gk3w_err(T, "esp-mount", "cannot read the free space of the EFI system partition (disk not touched)", GetLastError());
@@ -1033,12 +1041,13 @@ int gk3w_cmd_apply(int argc, wchar_t **argv)
                 goto out;
             gk3w_log("backed up the original %s as %s", backups[k], relp);
         }
-        /* 只在字节不同时写（BitLocker 量的是固件每次加载的这个文件） */
+        /* 只在字节不同时写（BitLocker 量的是固件每次加载的这个文件）。回落路径写成 .tmp 再改名：中途断电或写错时
+         * 它要么还是原来的文件、要么是完整的 systemd-boot，不会是半个文件（卸载会把半个文件当成别的系统的引导程序） */
         for (int k = 0; k < 2; k++) {
             const char *t = k ? "EFI/systemd/systemd-bootaa64.efi" : "EFI/BOOT/BOOTAA64.EFI";
             if (esp_same(&esp, t, sdboot, sdboot_len))
                 gk3w_log("%s is already this systemd-boot, not rewritten", t);
-            else if (esp_write(&esp, t, sdboot, sdboot_len))
+            else if (k ? esp_write(&esp, t, sdboot, sdboot_len) : esp_write_renamed(&esp, t, sdboot, sdboot_len))
                 goto out;
         }
         for (char sl = 'a'; sl <= 'b'; sl++) {
