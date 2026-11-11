@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <iterator>
 
 #include <aidl/android/hardware/camera/device/RequestTemplate.h>
 #include <log/log.h>
@@ -34,6 +35,37 @@ std::vector<uint8_t> pack(const camera_metadata_t *m)
 		out.clear();
 	}
 	return out;
+}
+
+namespace {
+
+const camera_metadata_ro_entry_t *findEntry(const std::vector<uint8_t> &requestSettings,
+					    uint32_t tag, uint8_t type,
+					    camera_metadata_ro_entry_t *e)
+{
+	if (requestSettings.empty())
+		return nullptr;
+	const camera_metadata_t *m =
+		reinterpret_cast<const camera_metadata_t *>(requestSettings.data());
+	if (find_camera_metadata_ro_entry(m, tag, e) != 0 || !e->count || e->type != type)
+		return nullptr;
+	return e;
+}
+
+} /* namespace */
+
+int64_t requestEntryInt64(const std::vector<uint8_t> &requestSettings, uint32_t tag, int64_t def)
+{
+	camera_metadata_ro_entry_t e;
+	return findEntry(requestSettings, tag, TYPE_INT64, &e) ? e.data.i64[0] : def;
+}
+
+float requestEntryFloat(const std::vector<uint8_t> &requestSettings, uint32_t tag, float def,
+			size_t index)
+{
+	camera_metadata_ro_entry_t e;
+	return findEntry(requestSettings, tag, TYPE_FLOAT, &e) && e.count > index ? e.data.f[index]
+										   : def;
 }
 
 int32_t requestEntryInt(const std::vector<uint8_t> &requestSettings,
@@ -165,15 +197,28 @@ std::vector<uint8_t> buildCharacteristics(const SensorFacts &f)
 	/* ── 流配置 ── */
 	addStreamConfigs(&m, f);
 
-	const int64_t maxFrameDuration = 1000000000LL;   /* 1 s，与最长曝光一致 */
+	/* 每种配置下 libcamera 都允许的最长帧（探测过时） */
+	const int64_t maxFrameDuration = f.manualSensor ? f.maxFrameDurationNs : 1000000000LL;
 	add_camera_metadata_entry(m, ANDROID_SENSOR_INFO_MAX_FRAME_DURATION,
 				  &maxFrameDuration, 1);
+	if (f.manualSensor) {
+		const int64_t expRange[] = { f.exposureMinNs, f.exposureMaxNs };
+		add_camera_metadata_entry(m, ANDROID_SENSOR_INFO_EXPOSURE_TIME_RANGE, expRange, 2);
+		const int32_t isoRange[] = { f.isoMin, f.isoMax };
+		add_camera_metadata_entry(m, ANDROID_SENSOR_INFO_SENSITIVITY_RANGE, isoRange, 2);
+		/* 全是模拟增益 */
+		add_camera_metadata_entry(m, ANDROID_SENSOR_MAX_ANALOG_SENSITIVITY, &f.isoMax, 1);
+	}
 
 	/* ── 能力声明：只做 BACKWARD_COMPATIBLE，硬件等级 LIMITED ──
 	 * ⚠️ 不要声明 LEGACY：LEGACY 走的是框架里那条兼容路径，对 HAL 的
 	 *    行为假设更多更旧；LIMITED 才是"实现了 camera2 基本面"的正确说法。 */
-	const uint8_t caps[] = { ANDROID_REQUEST_AVAILABLE_CAPABILITIES_BACKWARD_COMPATIBLE };
-	add_camera_metadata_entry(m, ANDROID_REQUEST_AVAILABLE_CAPABILITIES, caps, 1);
+	/* MANUAL_SENSOR 总是带着 READ_SENSOR_SETTINGS（能力的定义）：结果里报实际的传感器与镜头设置 */
+	const uint8_t caps[] = { ANDROID_REQUEST_AVAILABLE_CAPABILITIES_BACKWARD_COMPATIBLE,
+				 ANDROID_REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR,
+				 ANDROID_REQUEST_AVAILABLE_CAPABILITIES_READ_SENSOR_SETTINGS };
+	add_camera_metadata_entry(m, ANDROID_REQUEST_AVAILABLE_CAPABILITIES, caps,
+				  f.manualSensor ? 3 : 1);
 	const uint8_t level = ANDROID_INFO_SUPPORTED_HARDWARE_LEVEL_LIMITED;
 	add_camera_metadata_entry(m, ANDROID_INFO_SUPPORTED_HARDWARE_LEVEL, &level, 1);
 
@@ -192,13 +237,31 @@ std::vector<uint8_t> buildCharacteristics(const SensorFacts &f)
 	/* 有闪光灯的相机（后摄，#110）才声明两个闪光 AE 模式：框架规定 FLASH_INFO_AVAILABLE=true
 	 * 时 AE 模式必须含 ON_AUTO_FLASH / ON_ALWAYS_FLASH。 */
 	const bool hasFlash = !f.flashLed.empty();
-	const uint8_t aeModes[] = { ANDROID_CONTROL_AE_MODE_ON,
-				    ANDROID_CONTROL_AE_MODE_ON_AUTO_FLASH,
-				    ANDROID_CONTROL_AE_MODE_ON_ALWAYS_FLASH };
-	add_camera_metadata_entry(m, ANDROID_CONTROL_AE_AVAILABLE_MODES, aeModes,
-				  hasFlash ? 3 : 1);
-	const uint8_t awbModes[] = { ANDROID_CONTROL_AWB_MODE_AUTO };
-	add_camera_metadata_entry(m, ANDROID_CONTROL_AWB_AVAILABLE_MODES, awbModes, 1);
+	std::vector<uint8_t> aeModes = { ANDROID_CONTROL_AE_MODE_ON };
+	if (hasFlash)
+		aeModes.insert(aeModes.end(), { ANDROID_CONTROL_AE_MODE_ON_AUTO_FLASH,
+						ANDROID_CONTROL_AE_MODE_ON_ALWAYS_FLASH });
+	if (f.manualSensor)
+		aeModes.push_back(ANDROID_CONTROL_AE_MODE_OFF);
+	add_camera_metadata_entry(m, ANDROID_CONTROL_AE_AVAILABLE_MODES, aeModes.data(),
+				  aeModes.size());
+	std::vector<uint8_t> awbModes = { ANDROID_CONTROL_AWB_MODE_AUTO };
+	if (f.awbPresets)
+		awbModes.insert(awbModes.end(), { ANDROID_CONTROL_AWB_MODE_INCANDESCENT,
+						  ANDROID_CONTROL_AWB_MODE_WARM_FLUORESCENT,
+						  ANDROID_CONTROL_AWB_MODE_FLUORESCENT,
+						  ANDROID_CONTROL_AWB_MODE_DAYLIGHT,
+						  ANDROID_CONTROL_AWB_MODE_CLOUDY_DAYLIGHT,
+						  ANDROID_CONTROL_AWB_MODE_SHADE });
+	/*
+	 * OFF：用应用给的白平衡增益（COLOR_CORRECTION_GAINS，见
+	 * Session::apply3aControls()）。色彩矩阵仍取调优里的、按关掉 AWB 时的
+	 * 色温插值；不应用 COLOR_CORRECTION_TRANSFORM。
+	 */
+	if (f.awbLock)
+		awbModes.push_back(ANDROID_CONTROL_AWB_MODE_OFF);
+	add_camera_metadata_entry(m, ANDROID_CONTROL_AWB_AVAILABLE_MODES, awbModes.data(),
+				  awbModes.size());
 	/* 只声明我们真实现的四种：OFF / AUTO（单次）/ CONTINUOUS_PICTURE / CONTINUOUS_VIDEO。
 	 * ⚠️ 不声明 MACRO 和 EDOF：MACRO 在 AOSP 里是"近距单次对焦"，我们的 CDAF
 	 *    不区分行程区间，声明了就得额外实现一套近距优先逻辑，容易出假报。 */
@@ -209,8 +272,10 @@ std::vector<uint8_t> buildCharacteristics(const SensorFacts &f)
 	const uint8_t afModesOff[] = { ANDROID_CONTROL_AF_MODE_OFF };
 	add_camera_metadata_entry(m, ANDROID_CONTROL_AF_AVAILABLE_MODES,
 				  f.hasAf ? afModesOn : afModesOff, f.hasAf ? 4 : 1);
-	const uint8_t controlModes[] = { ANDROID_CONTROL_MODE_AUTO };
-	add_camera_metadata_entry(m, ANDROID_CONTROL_AVAILABLE_MODES, controlModes, 1);
+	/* OFF 配合手动曝光：AE、AF 关，AWB 保持（Session::apply3aControls()） */
+	const uint8_t controlModes[] = { ANDROID_CONTROL_MODE_AUTO, ANDROID_CONTROL_MODE_OFF };
+	add_camera_metadata_entry(m, ANDROID_CONTROL_AVAILABLE_MODES, controlModes,
+				  f.manualSensor ? 2 : 1);
 	const uint8_t sceneModes[] = { ANDROID_CONTROL_SCENE_MODE_DISABLED };
 	add_camera_metadata_entry(m, ANDROID_CONTROL_AVAILABLE_SCENE_MODES, sceneModes, 1);
 	const uint8_t effects[] = { ANDROID_CONTROL_EFFECT_MODE_OFF };
@@ -221,13 +286,20 @@ std::vector<uint8_t> buildCharacteristics(const SensorFacts &f)
 	const uint8_t vstabModes[] = { ANDROID_CONTROL_VIDEO_STABILIZATION_MODE_OFF };
 	add_camera_metadata_entry(m, ANDROID_CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES,
 				  vstabModes, 1);
-	const int32_t aeCompRange[] = { 0, 0 };
+	/*
+	 * 曝光补偿按 1/3 档，±2 EV（libcamera 接受 ±8；camera2 要求支持补偿时
+	 * 至少 ±2）。
+	 */
+	const int32_t aeCompRange[] = { f.evCompensation ? -kEvStepsPerStop * 2 : 0,
+					f.evCompensation ? kEvStepsPerStop * 2 : 0 };
 	add_camera_metadata_entry(m, ANDROID_CONTROL_AE_COMPENSATION_RANGE, aeCompRange, 2);
-	const camera_metadata_rational aeCompStep = { 1, 1 };
+	const camera_metadata_rational aeCompStep = { 1, f.evCompensation ? kEvStepsPerStop : 1 };
 	add_camera_metadata_entry(m, ANDROID_CONTROL_AE_COMPENSATION_STEP, &aeCompStep, 1);
-	const uint8_t aeLockAvail = ANDROID_CONTROL_AE_LOCK_AVAILABLE_FALSE;
+	const uint8_t aeLockAvail = f.aeLock ? ANDROID_CONTROL_AE_LOCK_AVAILABLE_TRUE
+					     : ANDROID_CONTROL_AE_LOCK_AVAILABLE_FALSE;
 	add_camera_metadata_entry(m, ANDROID_CONTROL_AE_LOCK_AVAILABLE, &aeLockAvail, 1);
-	const uint8_t awbLockAvail = ANDROID_CONTROL_AWB_LOCK_AVAILABLE_FALSE;
+	const uint8_t awbLockAvail = f.awbLock ? ANDROID_CONTROL_AWB_LOCK_AVAILABLE_TRUE
+					       : ANDROID_CONTROL_AWB_LOCK_AVAILABLE_FALSE;
 	add_camera_metadata_entry(m, ANDROID_CONTROL_AWB_LOCK_AVAILABLE, &awbLockAvail, 1);
 
 	/*
@@ -253,12 +325,12 @@ std::vector<uint8_t> buildCharacteristics(const SensorFacts &f)
 	const uint8_t flashAvailable = hasFlash ? ANDROID_FLASH_INFO_AVAILABLE_TRUE
 					       : ANDROID_FLASH_INFO_AVAILABLE_FALSE;
 	add_camera_metadata_entry(m, ANDROID_FLASH_INFO_AVAILABLE, &flashAvailable, 1);
-	/* ⚠️ 占位值，未测。Camera1 rebuilds the view angles from it and
-	 * SENSOR_INFO_PHYSICAL_SIZE, so those are made up too. */
-	const float focalLengths[] = { 3.0f };
+	/* Camera1 rebuilds the view angles from it and SENSOR_INFO_PHYSICAL_SIZE. */
+	const LensParams &lens = lensParams(f.frontFacing);
+	const float focalLengths[] = { lens.focalLengthMm };
 	add_camera_metadata_entry(m, ANDROID_LENS_INFO_AVAILABLE_FOCAL_LENGTHS,
 				  focalLengths, 1);
-	const float apertures[] = { 2.2f };          /* ⚠️ 占位值，未测 */
+	const float apertures[] = { lens.fNumber };
 	add_camera_metadata_entry(m, ANDROID_LENS_INFO_AVAILABLE_APERTURES, apertures, 1);
 	const float filterDensities[] = { 0.0f };
 	add_camera_metadata_entry(m, ANDROID_LENS_INFO_AVAILABLE_FILTER_DENSITIES,
@@ -353,14 +425,46 @@ std::vector<uint8_t> buildCharacteristics(const SensorFacts &f)
 		reqKeys.push_back(ANDROID_CONTROL_AF_TRIGGER);
 		reqKeys.push_back(ANDROID_CONTROL_AF_REGIONS);
 	}
+	if (f.evCompensation)
+		reqKeys.push_back(ANDROID_CONTROL_AE_EXPOSURE_COMPENSATION);
+	if (f.aeLock)
+		reqKeys.push_back(ANDROID_CONTROL_AE_LOCK);
+	if (f.awbLock) {
+		reqKeys.push_back(ANDROID_CONTROL_AWB_LOCK);
+		reqKeys.push_back(ANDROID_COLOR_CORRECTION_MODE);
+		reqKeys.push_back(ANDROID_COLOR_CORRECTION_GAINS);
+	}
+	/* 手动对焦：AF_MODE_OFF 加对焦距离 */
+	if (f.hasAf)
+		reqKeys.push_back(ANDROID_LENS_FOCUS_DISTANCE);
+	if (f.manualSensor) {
+		for (int32_t k : { ANDROID_SENSOR_EXPOSURE_TIME, ANDROID_SENSOR_SENSITIVITY,
+				   ANDROID_SENSOR_FRAME_DURATION, ANDROID_BLACK_LEVEL_LOCK })
+			reqKeys.push_back(k);
+	}
 	std::vector<int32_t> resKeys = reqKeys;
 	for (int32_t k : { ANDROID_SENSOR_TIMESTAMP, ANDROID_REQUEST_PIPELINE_DEPTH,
+			   ANDROID_SENSOR_FRAME_DURATION,
 			   ANDROID_CONTROL_AE_STATE, ANDROID_CONTROL_AWB_STATE, ANDROID_FLASH_STATE,
 			   ANDROID_SENSOR_EXPOSURE_TIME, ANDROID_SENSOR_SENSITIVITY,
-			   ANDROID_CONTROL_AF_STATE, ANDROID_LENS_STATE })
+			   ANDROID_CONTROL_AF_STATE, ANDROID_LENS_STATE,
+			   ANDROID_LENS_APERTURE, ANDROID_LENS_FOCAL_LENGTH,
+			   ANDROID_LENS_FILTER_DENSITY, ANDROID_LENS_OPTICAL_STABILIZATION_MODE,
+			   ANDROID_LENS_FOCUS_RANGE })
 		resKeys.push_back(k);
-	if (f.hasAf)
+	if (f.manualSensor)
+		resKeys.push_back(ANDROID_BLACK_LEVEL_LOCK);
+	/* 声明了 COLOR_CORRECTION_MODE：结果里报实际的增益与色彩矩阵 */
+	if (f.awbLock)
+		resKeys.push_back(ANDROID_COLOR_CORRECTION_TRANSFORM);
+	/* 定焦相机声明了 READ_SENSOR_SETTINGS 也要报对焦距离（恒为 0） */
+	if ((f.hasAf || f.manualSensor) &&
+	    std::find(resKeys.begin(), resKeys.end(), ANDROID_LENS_FOCUS_DISTANCE) ==
+			       resKeys.end())
 		resKeys.push_back(ANDROID_LENS_FOCUS_DISTANCE);
+	/* 请求键会回显；每个结果键只留一次 */
+	std::sort(resKeys.begin(), resKeys.end());
+	resKeys.erase(std::unique(resKeys.begin(), resKeys.end()), resKeys.end());
 	add_camera_metadata_entry(m, ANDROID_REQUEST_AVAILABLE_REQUEST_KEYS, reqKeys.data(),
 				  reqKeys.size());
 	add_camera_metadata_entry(m, ANDROID_REQUEST_AVAILABLE_RESULT_KEYS, resKeys.data(),
@@ -406,7 +510,7 @@ std::vector<uint8_t> buildResult(const std::vector<uint8_t> &requestSettings,
 	 */
 	const camera_metadata_t *req =
 		reinterpret_cast<const camera_metadata_t *>(requestSettings.data());
-	size_t entries = 16, data = 1024;
+	size_t entries = 28, data = 1024;
 	if (!requestSettings.empty()) {
 		entries += get_camera_metadata_entry_count(req);
 		data += get_camera_metadata_data_count(req);
@@ -425,21 +529,52 @@ std::vector<uint8_t> buildResult(const std::vector<uint8_t> &requestSettings,
 	add_camera_metadata_entry(m, ANDROID_CONTROL_AE_STATE, &fr.aeState, 1);
 	setOrAdd(m, ANDROID_CONTROL_AE_MODE, &fr.aeMode, 1);
 	setOrAdd(m, ANDROID_FLASH_MODE, &fr.flashMode, 1);
-	const uint8_t awbState = ANDROID_CONTROL_AWB_STATE_CONVERGED;
-	add_camera_metadata_entry(m, ANDROID_CONTROL_AWB_STATE, &awbState, 1);
+	add_camera_metadata_entry(m, ANDROID_CONTROL_AWB_STATE, &fr.awbState, 1);
 	add_camera_metadata_entry(m, ANDROID_FLASH_STATE, &fr.flashState, 1);
 	if (fr.exposureNs > 0)
 		setOrAdd(m, ANDROID_SENSOR_EXPOSURE_TIME, &fr.exposureNs, 1);
 	if (fr.sensitivity > 0)
 		setOrAdd(m, ANDROID_SENSOR_SENSITIVITY, &fr.sensitivity, 1);
+	if (fr.frameDurationNs > 0)
+		setOrAdd(m, ANDROID_SENSOR_FRAME_DURATION, &fr.frameDurationNs, 1);
 
 	add_camera_metadata_entry(m, ANDROID_CONTROL_AF_STATE, &fr.afState, 1);
 	add_camera_metadata_entry(m, ANDROID_LENS_STATE, &fr.lensState, 1);
 	/* LENS_FOCUS_DISTANCE 与 AF_STATE 是同一个"对焦结果组"：
 	 * 应用（CameraX 的 FocusMeteringControl）会在收到 FOCUSED_LOCKED 时读它。
-	 * 定焦相机不写这条（保持"没有这个能力"的语义）。 */
-	if (fr.hasAf)
-		setOrAdd(m, ANDROID_LENS_FOCUS_DISTANCE, &fr.focusDistance, 1);
+	 * 定焦相机只在声明了 READ_SENSOR_SETTINGS 时报（恒为 0，见特性的
+	 * LENS_INFO_MINIMUM_FOCUS_DISTANCE）。 */
+	if (fr.hasAf || fr.manualSensor) {
+		const float fd = fr.hasAf ? fr.focusDistance : 0.0f;
+		setOrAdd(m, ANDROID_LENS_FOCUS_DISTANCE, &fd, 1);
+	}
+
+	/* 镜头的固定参数，READ_SENSOR_SETTINGS 要求每帧报；景深没有标定，按对焦距离报 */
+	setOrAdd(m, ANDROID_LENS_APERTURE, &fr.lens.fNumber, 1);
+	setOrAdd(m, ANDROID_LENS_FOCAL_LENGTH, &fr.lens.focalLengthMm, 1);
+	const float filterDensity = 0.0f;
+	setOrAdd(m, ANDROID_LENS_FILTER_DENSITY, &filterDensity, 1);
+	const uint8_t ois = ANDROID_LENS_OPTICAL_STABILIZATION_MODE_OFF;
+	setOrAdd(m, ANDROID_LENS_OPTICAL_STABILIZATION_MODE, &ois, 1);
+	const float focusRange[2] = { fr.hasAf ? fr.focusDistance : 0.0f,
+				      fr.hasAf ? fr.focusDistance : 0.0f };
+	setOrAdd(m, ANDROID_LENS_FOCUS_RANGE, focusRange, 2);
+	if (fr.hasCcGains)
+		setOrAdd(m, ANDROID_COLOR_CORRECTION_GAINS, fr.ccGains.data(), 4);
+	if (fr.hasCcTransform) {
+		camera_metadata_rational_t t[9];
+		for (int i = 0; i < 9; i++)
+			t[i] = { static_cast<int32_t>(std::lround(fr.ccTransform[i] * 10000.0f)), 10000 };
+		setOrAdd(m, ANDROID_COLOR_CORRECTION_TRANSFORM, t, 9);
+	}
+	/* 黑电平由 libcamera 的调优固定，本来就不变：回显请求，没有时报 OFF */
+	if (fr.manualSensor) {
+		camera_metadata_entry_t e;
+		if (find_camera_metadata_entry(m, ANDROID_BLACK_LEVEL_LOCK, &e) != 0) {
+			const uint8_t bll = ANDROID_BLACK_LEVEL_LOCK_OFF;
+			add_camera_metadata_entry(m, ANDROID_BLACK_LEVEL_LOCK, &bll, 1);
+		}
+	}
 
 	std::vector<uint8_t> out = pack(m);
 	free_camera_metadata(m);
@@ -507,11 +642,13 @@ std::vector<uint8_t> stripTriggers(const std::vector<uint8_t> &settings)
 	return out;
 }
 
-bool templateSupported(int templateId)
+bool templateSupported(int templateId, const SensorFacts &f)
 {
 	const auto tmpl = static_cast<RequestTemplate>(templateId);
 
-	return tmpl != RequestTemplate::ZERO_SHUTTER_LAG && tmpl != RequestTemplate::MANUAL;
+	/* MANUAL 随 MANUAL_SENSOR 能力提供 */
+	return tmpl != RequestTemplate::ZERO_SHUTTER_LAG &&
+	       (tmpl != RequestTemplate::MANUAL || f.manualSensor);
 }
 
 std::vector<uint8_t> buildDefaultRequest(int templateId, const SensorFacts &f)
@@ -520,8 +657,30 @@ std::vector<uint8_t> buildDefaultRequest(int templateId, const SensorFacts &f)
 	if (!m)
 		return {};
 
-	const uint8_t controlMode = ANDROID_CONTROL_MODE_AUTO;
+	const auto tmplId = static_cast<RequestTemplate>(templateId);
+	const bool manual = tmplId == RequestTemplate::MANUAL;
+	const uint8_t controlMode = manual ? ANDROID_CONTROL_MODE_OFF : ANDROID_CONTROL_MODE_AUTO;
 	add_camera_metadata_entry(m, ANDROID_CONTROL_MODE, &controlMode, 1);
+	/*
+	 * 声明了 MANUAL_SENSOR 时，每个模板都要带这几项手动传感器设置（CTS
+	 * CameraDeviceTest 逐模板检查）；只有 MANUAL 模板关掉 AE 用它们，
+	 * 其余模板里它们不起作用。
+	 */
+	if (f.manualSensor) {
+		/* 30 fps 的帧里 10 ms、ISO 100，限在范围内 */
+		const int64_t exposure = std::clamp<int64_t>(10000000, f.exposureMinNs, f.exposureMaxNs);
+		add_camera_metadata_entry(m, ANDROID_SENSOR_EXPOSURE_TIME, &exposure, 1);
+		const int32_t iso = std::clamp(100, f.isoMin, f.isoMax);
+		add_camera_metadata_entry(m, ANDROID_SENSOR_SENSITIVITY, &iso, 1);
+		const int64_t frameDuration = 33333333;
+		add_camera_metadata_entry(m, ANDROID_SENSOR_FRAME_DURATION, &frameDuration, 1);
+		const uint8_t blackLevelLock = ANDROID_BLACK_LEVEL_LOCK_OFF;
+		add_camera_metadata_entry(m, ANDROID_BLACK_LEVEL_LOCK, &blackLevelLock, 1);
+		if (f.hasAf) {
+			const float focus = 0.0f;
+			add_camera_metadata_entry(m, ANDROID_LENS_FOCUS_DISTANCE, &focus, 1);
+		}
+	}
 	/* ★ 模板一律按 AIDL 的枚举名比较，不写数字：PR #6 的初版把 ZSL/MANUAL 的编号记错了
 	 *   （RequestTemplate.aidl：PREVIEW=1 STILL_CAPTURE=2 VIDEO_RECORD=3 VIDEO_SNAPSHOT=4
 	 *    ZERO_SHUTTER_LAG=5 MANUAL=6）。 */
@@ -544,18 +703,35 @@ std::vector<uint8_t> buildDefaultRequest(int templateId, const SensorFacts &f)
 	case RequestTemplate::VIDEO_SNAPSHOT:
 		intent = ANDROID_CONTROL_CAPTURE_INTENT_VIDEO_SNAPSHOT;
 		break;
-	default:   /* PREVIEW; ZERO_SHUTTER_LAG and MANUAL are refused */
+	case RequestTemplate::MANUAL:
+		intent = ANDROID_CONTROL_CAPTURE_INTENT_MANUAL;
+		break;
+	default:   /* PREVIEW；ZERO_SHUTTER_LAG 不提供 */
 		break;
 	}
 	add_camera_metadata_entry(m, ANDROID_CONTROL_CAPTURE_INTENT, &intent, 1);
 	/* 有闪光灯时，静态拍照模板默认 ON_AUTO_FLASH，与 CameraCharacteristics 文档对模板的
 	 * 约定一致；其余模板不闪。 */
-	const uint8_t aeMode = (!f.flashLed.empty() && tmpl == RequestTemplate::STILL_CAPTURE)
+	const uint8_t aeMode = manual ? ANDROID_CONTROL_AE_MODE_OFF
+			       : (!f.flashLed.empty() && tmpl == RequestTemplate::STILL_CAPTURE)
 				       ? ANDROID_CONTROL_AE_MODE_ON_AUTO_FLASH
 				       : ANDROID_CONTROL_AE_MODE_ON;
 	add_camera_metadata_entry(m, ANDROID_CONTROL_AE_MODE, &aeMode, 1);
-	const uint8_t awbMode = ANDROID_CONTROL_AWB_MODE_AUTO;
+	/* MANUAL 模板关掉 AWB：没给增益时沿用当时 AWB 的增益（Session::apply3aControls()） */
+	const uint8_t awbMode = manual && f.awbLock ? ANDROID_CONTROL_AWB_MODE_OFF
+						    : ANDROID_CONTROL_AWB_MODE_AUTO;
 	add_camera_metadata_entry(m, ANDROID_CONTROL_AWB_MODE, &awbMode, 1);
+	if (f.awbLock) {
+		/* HAL 不应用 COLOR_CORRECTION_TRANSFORM，色彩矩阵总是调优的：各模板都报 FAST */
+		const uint8_t ccMode = ANDROID_COLOR_CORRECTION_MODE_FAST;
+		add_camera_metadata_entry(m, ANDROID_COLOR_CORRECTION_MODE, &ccMode, 1);
+	}
+	const int32_t evComp = 0;
+	add_camera_metadata_entry(m, ANDROID_CONTROL_AE_EXPOSURE_COMPENSATION, &evComp, 1);
+	const uint8_t aeLock = ANDROID_CONTROL_AE_LOCK_OFF;
+	add_camera_metadata_entry(m, ANDROID_CONTROL_AE_LOCK, &aeLock, 1);
+	const uint8_t awbLock = ANDROID_CONTROL_AWB_LOCK_OFF;
+	add_camera_metadata_entry(m, ANDROID_CONTROL_AWB_LOCK, &awbLock, 1);
 	/*
 	 * AF 模式按模板给（AOSP 对模板的约定）：
 	 *   PREVIEW / STILL_CAPTURE / ZERO_SHUTTER_LAG → CONTINUOUS_PICTURE

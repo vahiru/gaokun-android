@@ -97,6 +97,11 @@ public:
 	 * central 70%. A change starts a new search. */
 	void setRegion(float x0, float y0, float x1, float y1);
 	void clearRegion();
+	/*
+	 * 手动对焦（AF 模式 OFF）：镜头移到这个距离（屈光度，LENS_FOCUS_DISTANCE），
+	 * 刻度同 focusDistance()，像搜索一样分步移动。
+	 */
+	void setManualFocus(float diopters);
 	/* 当前的 AF 区域 (x0, y0, x1, y1)，画面的比例。 */
 	void region(float out[4]) const;
 
@@ -235,6 +240,7 @@ private:
 	double pdLastD_ = 0.0;
 	bool pdRescanOk_ = true;         /* the last phase search settled: trust it for rescans */
 	int moveTarget_ = -1;            /* where a stepped move is heading, -1 = none */
+	int manualPos_ = -1;             /* AF 模式 OFF 时要求的镜头位置，-1 = 无 */
 	bool hwMetric_ = false;          /* 分数是硬件的 FocusFoM */
 	int otherSource_ = 0;            /* 连续几帧的分数来自另一种来源 */
 	/* AF region in fractions of the frame; default the central 70%. */

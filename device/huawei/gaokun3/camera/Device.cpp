@@ -4,6 +4,8 @@
 #include "Session.h"
 
 #include <algorithm>
+#include <cstdint>
+#include <cmath>
 #include <cstdlib>
 #include <fcntl.h>
 #include <map>
@@ -304,7 +306,7 @@ bool Device::init()
 	 * crashes when switching to video if no range reaches 24 or 30 fps.
 	 */
 	facts_.minFrameDurationNs = 33333333;   /* 30 fps */
-	probeFrameDurations();
+	probeCamera();
 
 	characteristics_ = buildCharacteristics(facts_);
 	if (characteristics_.empty()) {
@@ -323,15 +325,23 @@ bool Device::init()
 }
 
 /*
- * 硬件 ISP 路径上，每种输出尺寸的帧率取决于会话为它要的画面
+ * libcamera 配置好之后这个相机能做什么；不开流。
+ *
+ * 帧率：硬件 ISP 路径上，每种输出尺寸的帧率取决于会话为它要的画面
  * （Session::hwIspFrameSize()）让 libcamera 选中的传感器模式：ov13b10 的合并
  * 模式能到 60 fps，全尺寸模式 30 fps。把画面复制到各路流跟得上 60 fps。
  * 软件 ISP 的 CPU 去马赛克仍是 30 fps。做法：每种不同的画面尺寸配置一次相机，
- * 读 libcamera 允许的最短帧长；失败的尺寸按 30 fps。不开流。
+ * 读 libcamera 允许的最短帧长；失败的尺寸按 30 fps。
+ *
+ * 3A 控制：IPA 配置之后才列出它们，所以软件 ISP 也按默认流配置一次。
+ * acquire 或配置失败的相机一个都不声明。
  */
-void Device::probeFrameDurations()
+void Device::probeCamera()
 {
 	facts_.minFrameDurationsNs.clear();
+	facts_.evCompensation = facts_.aeLock = facts_.awbLock = facts_.awbPresets = false;
+	facts_.manualSensor = false;
+	ManualLimits limits;
 
 	auto probe = cam_->generateConfiguration({ libcamera::StreamRole::Viewfinder });
 	if (!probe || probe->empty())
@@ -340,11 +350,43 @@ void Device::probeFrameDurations()
 	auto has = [&](const libcamera::PixelFormat &f) {
 		return std::find(fmts.begin(), fmts.end(), f) != fmts.end();
 	};
-	if (!has(libcamera::formats::NV12) || has(libcamera::formats::RGB888))
-		return;
+	const bool hwIsp = has(libcamera::formats::NV12) && !has(libcamera::formats::RGB888);
 
 	if (cam_->acquire()) {
-		ALOGW("%s: camera busy, frame rates not probed (30 fps)", name_.c_str());
+		ALOGW("%s: camera busy, frame rates and 3A controls not probed", name_.c_str());
+		return;
+	}
+
+	auto finish = [&]() {
+		/*
+		 * 手动曝光：用 AE 锁定的那套手动模式，范围取每种配置都满足的。
+		 * ISO 100 对应单位增益。
+		 */
+		if (facts_.aeLock && limits.seen && limits.expMaxUs > limits.expMinUs &&
+		    limits.gainMax >= limits.gainMin && limits.frameMaxUs < INT64_MAX) {
+			facts_.maxFrameDurationNs = limits.frameMaxUs * 1000;
+			facts_.exposureMinNs = std::max<int64_t>(limits.expMinUs, 1) * 1000;
+			facts_.exposureMaxNs =
+				std::min(limits.expMaxUs * 1000, facts_.maxFrameDurationNs);
+			facts_.isoMin = static_cast<int32_t>(std::ceil(limits.gainMin * 100.0));
+			facts_.isoMax = static_cast<int32_t>(std::floor(limits.gainMax * 100.0));
+			facts_.manualSensor = facts_.exposureMaxNs > facts_.exposureMinNs &&
+					      facts_.isoMax >= facts_.isoMin;
+		}
+		ALOGI("%s: manual sensor %d: exposure %lld-%lld ns, ISO %d-%d, frame up to %lld ns",
+		      name_.c_str(), facts_.manualSensor, (long long)facts_.exposureMinNs,
+		      (long long)facts_.exposureMaxNs, facts_.isoMin, facts_.isoMax,
+		      (long long)facts_.maxFrameDurationNs);
+		cam_->release();
+	};
+
+	if (!hwIsp) {
+		if (probe->validate() != libcamera::CameraConfiguration::Invalid &&
+		    !cam_->configure(probe.get())) {
+			probe3aControls();
+			accumulateLimits(limits);
+		}
+		finish();
 		return;
 	}
 
@@ -362,6 +404,7 @@ void Device::probeFrameDurations()
 				cfg->at(0).bufferCount = 4;
 				if (cfg->validate() != libcamera::CameraConfiguration::Invalid &&
 				    !cam_->configure(cfg.get())) {
+					accumulateLimits(limits);
 					const auto &ctrls = cam_->controls();
 					auto ci = ctrls.find(&libcamera::controls::FrameDurationLimits);
 					if (ci != ctrls.end()) {
@@ -383,8 +426,52 @@ void Device::probeFrameDurations()
 		}
 		facts_.minFrameDurationsNs.push_back(it->second);
 	}
+	probe3aControls();
+	finish();
+}
 
-	cam_->release();
+void Device::accumulateLimits(ManualLimits &l)
+{
+	const auto &ctrls = cam_->controls();
+	auto e = ctrls.find(&libcamera::controls::ExposureTime);
+	auto g = ctrls.find(&libcamera::controls::AnalogueGain);
+	auto f = ctrls.find(&libcamera::controls::FrameDurationLimits);
+	if (e == ctrls.end() || g == ctrls.end() || f == ctrls.end())
+		return;
+	l.expMinUs = std::max<int64_t>(l.expMinUs, e->second.min().get<int32_t>());
+	l.expMaxUs = std::min<int64_t>(l.expMaxUs, e->second.max().get<int32_t>());
+	l.gainMin = std::max<double>(l.gainMin, g->second.min().get<float>());
+	l.gainMax = std::min<double>(l.gainMax, g->second.max().get<float>());
+	l.frameMaxUs = std::min(l.frameMaxUs, f->second.max().get<int64_t>());
+	l.seen = true;
+}
+
+/* 相机已配置：看 libcamera 接受哪些 3A 控制 */
+void Device::probe3aControls()
+{
+	const auto &ctrls = cam_->controls();
+	auto takes = [&](const libcamera::ControlId &id, int32_t value) {
+		auto it = ctrls.find(&id);
+		if (it == ctrls.end())
+			return false;
+		for (const auto &v : it->second.values())
+			if (v.get<int32_t>() == value)
+				return true;
+		return false;
+	};
+
+	facts_.evCompensation = ctrls.count(&libcamera::controls::ExposureValue);
+	facts_.aeLock = takes(libcamera::controls::ExposureTimeMode,
+			      libcamera::controls::ExposureTimeModeManual) &&
+			takes(libcamera::controls::AnalogueGainMode,
+			      libcamera::controls::AnalogueGainModeManual);
+	facts_.awbLock = ctrls.count(&libcamera::controls::AwbEnable) &&
+			 ctrls.count(&libcamera::controls::ColourGains);
+	facts_.awbPresets = ctrls.count(&libcamera::controls::AwbEnable) &&
+			    ctrls.count(&libcamera::controls::ColourTemperature);
+	ALOGI("%s: 3A controls: exposure compensation %d, AE lock %d, AWB lock %d, AWB presets %d",
+	      name_.c_str(), facts_.evCompensation, facts_.aeLock, facts_.awbLock,
+	      facts_.awbPresets);
 }
 
 ndk::ScopedAStatus Device::getCameraCharacteristics(CameraMetadata *out)
@@ -506,7 +593,7 @@ ndk::ScopedAStatus Device::getTorchStrengthLevel(int32_t *)
 ndk::ScopedAStatus Device::constructDefaultRequestSettings(RequestTemplate type,
 							   CameraMetadata *out)
 {
-	if (!templateSupported(static_cast<int>(type)))
+	if (!templateSupported(static_cast<int>(type), facts_))
 		return err(Status::ILLEGAL_ARGUMENT);
 	out->metadata = buildDefaultRequest(static_cast<int>(type), facts_);
 	if (out->metadata.empty())

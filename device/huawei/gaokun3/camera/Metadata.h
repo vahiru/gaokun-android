@@ -9,6 +9,7 @@
  */
 #pragma once
 
+#include <array>
 #include <memory>
 #include <string>
 #include <vector>
@@ -20,6 +21,49 @@ namespace gaokun3 {
 
 /* 60 fps */
 constexpr int64_t kMinFrameDuration60Ns = 16666667;
+
+/* 曝光补偿每档的步数（ANDROID_CONTROL_AE_COMPENSATION_STEP） */
+constexpr int32_t kEvStepsPerStop = 3;
+/*
+ * 镜头参数，取自华为 Windows 相机拍的照片的 EXIF。特性、每帧结果和 JPEG 的 EXIF 用同一份，
+ * 应用和 CTS 会核对它们是否一致。
+ */
+struct LensParams {
+	float focalLengthMm;
+	float fNumber;
+};
+constexpr LensParams kLensBack = { 4.0f, 1.8f };     /* ov13b10 */
+constexpr LensParams kLensFront = { 3.0f, 2.0f };    /* hi846 */
+constexpr const LensParams &lensParams(bool frontFacing)
+{
+	return frontFacing ? kLensFront : kLensBack;
+}
+/* JPEG 缩略图尺寸（宽、高成对，0x0 = 不要缩略图） */
+constexpr int32_t kThumbnailSizes[] = { 0, 0, 160, 90, 160, 120 };
+
+/*
+ * AWB 预设模式的色温（K）；AUTO 和没有色温的模式为 0。libcamera 按调优里的
+ * 曲线换算成增益。
+ */
+constexpr int32_t awbPresetKelvin(int32_t awbMode)
+{
+	switch (awbMode) {
+	case ANDROID_CONTROL_AWB_MODE_INCANDESCENT:
+		return 2856;    /* CIE 标准光源 A */
+	case ANDROID_CONTROL_AWB_MODE_WARM_FLUORESCENT:
+		return 3000;
+	case ANDROID_CONTROL_AWB_MODE_FLUORESCENT:
+		return 4000;
+	case ANDROID_CONTROL_AWB_MODE_DAYLIGHT:
+		return 5500;
+	case ANDROID_CONTROL_AWB_MODE_CLOUDY_DAYLIGHT:
+		return 6500;
+	case ANDROID_CONTROL_AWB_MODE_SHADE:
+		return 7500;
+	default:
+		return 0;
+	}
+}
 
 /* 从 libcamera 那边拿到的、构造 characteristics 需要的硬件事实。 */
 struct SensorFacts {
@@ -61,6 +105,24 @@ struct SensorFacts {
 	std::vector<std::pair<int32_t, int32_t>> outputSizes;
 	/* 每种输出尺寸各自的最短帧长；没有时都按 minFrameDurationNs。 */
 	std::vector<int64_t> minFrameDurationsNs;
+	/*
+	 * libcamera 对这个相机接受的 3A 控制（Device::probeCamera()）：曝光补偿
+	 * （ExposureValue）、AE 锁定（曝光时间与增益的手动模式）、AWB 锁定
+	 * （AwbEnable 与 ColourGains）。
+	 */
+	bool evCompensation = false;
+	bool aeLock = false;
+	bool awbLock = false;
+	/* AWB 预设：按色温的手动白平衡 */
+	bool awbPresets = false;
+	/*
+	 * 手动曝光（MANUAL_SENSOR）：每种配置都接受的曝光时间、增益与帧长范围
+	 * （Device::probeCamera()）。
+	 */
+	bool manualSensor = false;
+	int64_t exposureMinNs = 0, exposureMaxNs = 0;
+	int32_t isoMin = 0, isoMax = 0;
+	int64_t maxFrameDurationNs = 1000000000;
 };
 
 /*
@@ -77,6 +139,7 @@ std::vector<uint8_t> buildCharacteristics(const SensorFacts &f);
 struct FrameResultFacts {
 	uint8_t flashState = ANDROID_FLASH_STATE_UNAVAILABLE;
 	uint8_t aeState = ANDROID_CONTROL_AE_STATE_CONVERGED;
+	uint8_t awbState = ANDROID_CONTROL_AWB_STATE_CONVERGED;
 	/* 请求里可能不带这两项（沿用上一帧），结果里要按会话的粘滞值回显。 */
 	uint8_t aeMode = ANDROID_CONTROL_AE_MODE_ON;
 	uint8_t flashMode = ANDROID_FLASH_MODE_OFF;
@@ -84,11 +147,19 @@ struct FrameResultFacts {
 	 * 0 = 这一帧没有。ISO 按 100 × 模拟增益折算（软件 ISP 没有别的定义）。 */
 	int64_t exposureNs = 0;
 	int32_t sensitivity = 0;
+	int64_t frameDurationNs = 0;    /* 0 = 没报 */
 	/* ── 对焦（#AF）：定焦相机恒为 INACTIVE / STATIONARY / 0。 ── */
 	uint8_t afState = ANDROID_CONTROL_AF_STATE_INACTIVE;
 	uint8_t lensState = ANDROID_LENS_STATE_STATIONARY;
 	float focusDistance = 0.0f;     /* 屈光度；UNCALIBRATED ⇒ 只保证单调 */
 	bool hasAf = false;             /* false 时不写 AF 相关动态条目（保持定焦语义） */
+	bool manualSensor = false;      /* 声明了 MANUAL_SENSOR：结果里要有 BLACK_LEVEL_LOCK */
+	LensParams lens = kLensBack;    /* 这个相机的镜头参数（lensParams()） */
+	/* 这一帧实际的白平衡增益（R、G偶、G奇、B）与色彩矩阵（行优先），libcamera 报了才有 */
+	bool hasCcGains = false;
+	std::array<float, 4> ccGains{};
+	bool hasCcTransform = false;
+	std::array<float, 9> ccTransform{};
 };
 std::vector<uint8_t> buildResult(const std::vector<uint8_t> &requestSettings,
 				 int64_t timestampNs, uint8_t pipelineDepth,
@@ -110,7 +181,7 @@ std::vector<uint8_t> buildDefaultRequest(int templateId, const SensorFacts &f);
  * PRIVATE/YUV_REPROCESSING and MANUAL_SENSOR capabilities, which it doesn't
  * declare, so those must be refused with ILLEGAL_ARGUMENT.
  */
-bool templateSupported(int templateId);
+bool templateSupported(int templateId, const SensorFacts &f);
 
 /*
  * 从【请求设置】里读一个整型条目的第 index 个值，读不到就给 def。
@@ -122,6 +193,10 @@ bool templateSupported(int templateId);
  */
 int32_t requestEntryInt(const std::vector<uint8_t> &requestSettings,
 			uint32_t tag, int32_t def, size_t index = 0);
+/* 同上，int64（曝光时间、帧长）与浮点的条目。 */
+int64_t requestEntryInt64(const std::vector<uint8_t> &requestSettings, uint32_t tag, int64_t def);
+float requestEntryFloat(const std::vector<uint8_t> &requestSettings, uint32_t tag, float def,
+			size_t index = 0);
 
 /*
  * 这套 HAL 能不能交付这组流？Device::isStreamCombinationSupported 与

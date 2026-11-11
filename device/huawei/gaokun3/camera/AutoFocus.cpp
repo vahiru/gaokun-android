@@ -86,6 +86,8 @@ void AutoFocus::setMode(uint8_t androidAfMode)
 			   nm == Mode::Auto &&
 			   (mode_ == Mode::ContinuousPicture || mode_ == Mode::ContinuousVideo);
 	mode_ = nm;
+	/* 手动对焦的位置只在这一段 OFF 里有效：再进 OFF 时没给距离就不动镜头 */
+	manualPos_ = -1;
 	if (carry) {
 		ALOGI("AF 带着触发进入 AUTO（%s）", scanning_ ? "继续扫" : "保持锁定");
 		return;
@@ -431,8 +433,14 @@ void AutoFocus::onFrame(const uint8_t *pixels, int w, int h, int stride, int byt
 			startScan();
 	}
 
-	if (mode_ == Mode::Off)
+	if (mode_ == Mode::Off) {
+		/* 手动对焦：继续分步移动，或者开始一次 */
+		if (moveTarget_ >= 0)
+			moveTo(moveTarget_);
+		else if (manualPos_ >= 0 && lens_->position() != manualPos_)
+			moveTo(manualPos_);
 		return;
+	}
 
 	/* A stepped move continues every frame, whatever else is going on. */
 	if (moveTarget_ >= 0) {
@@ -777,6 +785,26 @@ uint8_t AutoFocus::lensState() const
 {
 	std::lock_guard<std::mutex> lk(m_);
 	return lensState_;
+}
+
+void AutoFocus::setManualFocus(float diopters)
+{
+	std::lock_guard<std::mutex> lk(m_);
+	if (!lens_ || !lens_->usable())
+		return;
+	const int lo = lens_->minPos();
+	const int hi = lens_->maxPos();
+	if (hi <= lo)
+		return;
+	/* focusDistance() 的反函数 */
+	const float t = std::clamp(diopters / kMinFocusDiopters, 0.0f, 1.0f);
+	const int pos = lo + static_cast<int>(std::lround(t * (hi - lo)));
+	if (pos != manualPos_) {
+		manualPos_ = pos;
+		/* 正在进行的移动改去新位置 */
+		if (moveTarget_ >= 0 && mode_ == Mode::Off)
+			moveTarget_ = pos;
+	}
 }
 
 float AutoFocus::focusDistance() const

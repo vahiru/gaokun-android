@@ -3,6 +3,7 @@
 
 #include <functional>
 #include <string>
+#include <array>
 #include <atomic>
 #include <condition_variable>
 #include <deque>
@@ -190,6 +191,7 @@ private:
 	uint8_t flashMode_ = ANDROID_FLASH_MODE_OFF;
 	bool flashArmed_ = false;       /* 预闪触发后 → 到静态拍照完成为止保持点亮 */
 	bool precaptureActive_ = false; /* 预闪进行中（报 AE_STATE_PRECAPTURE） */
+	bool precaptureLocked_ = false; /* 这次预拍触发时 AE 已经锁定：状态保持 LOCKED */
 	int precaptureFrames_ = 0;
 	int lumaStable_ = 0;            /* 连续几帧亮度变化 < kLumaStableDelta */
 	int firedPending_ = 0;          /* 在途的、点着灯的请求数 */
@@ -352,10 +354,41 @@ private:
 		bool flashFired = false;
 		bool endsFlash = false;
 		uint8_t aeState = ANDROID_CONTROL_AE_STATE_CONVERGED;
+		uint8_t awbState = ANDROID_CONTROL_AWB_STATE_CONVERGED;
 		uint8_t aeMode = ANDROID_CONTROL_AE_MODE_ON;
 		uint8_t flashMode = ANDROID_FLASH_MODE_OFF;
+		int32_t evSteps = 0;    /* 这个请求的曝光补偿（kEvStepsPerStop 档） */
+		bool sentGains = false; /* 这个请求给 libcamera 下发了手动的 ColourGains */
 	};
 	std::map<libcamera::Request *, Pending> pending_;
+
+	/*
+	 * ── AE/AWB 锁定与曝光补偿（持有 mutex_）──
+	 * AE 锁定：曝光时间与增益切到手动，并显式下发最后报的值
+	 * （lockedExposureUs_、lockedGain_），因为锁定期间曝光补偿照样生效
+	 * （CaptureRequest 文档），要按它缩放。libcamera 的 AWB 进手动模式时从
+	 * 单位增益开始，所以锁定时下发最后报的增益。
+	 */
+	void apply3aControls(Pending &p, libcamera::ControlList &ctrls);
+	bool aeLocked_ = false;
+	int32_t lockEvSteps_ = 0;
+	int32_t lockedExposureUs_ = 0;
+	double lockedGain_ = 0.0;
+	/* 上一个完成的帧所属请求的曝光补偿：它报的曝光是在这个补偿下测的 */
+	int32_t lastEvSteps_ = 0;
+	bool awbLocked_ = false;
+	std::array<float, 2> lockedColourGains_{};
+	std::optional<std::array<float, 2>> lastColourGains_;
+	/*
+	 * 锁定时的色温，与增益一起下发：libipa 的 CCM 在 AWB 非自动时用手动矩阵，
+	 * 只按 ColourTemperature 更新；不给的话矩阵会跳回配置时的 5000 K 或上次
+	 * 预设的。AWB 有增益时不看色温。
+	 */
+	int32_t lockedColourTemp_ = 0;
+	int32_t lastColourTemp_ = 0;
+	/* 这个配置的曝光时间（微秒）与模拟增益范围 */
+	int32_t expMinUs_ = 0, expMaxUs_ = 0;
+	float gainMin_ = 1.0f, gainMax_ = 1.0f;
 
 	/* (streamId, bufferId) → 已导入的句柄。见 getBuffer() 的说明。 */
 	std::map<std::pair<int32_t, int64_t>, buffer_handle_t> bufferCache_;

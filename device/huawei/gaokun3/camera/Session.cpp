@@ -12,6 +12,8 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
+#include <limits>
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
@@ -485,6 +487,26 @@ ndk::ScopedAStatus Session::configureStreams(const StreamConfiguration &cfg,
 	 * 换 allocator 之前先清掉，别让新旧两代混在一个池里。此时没有在途请求（streaming_ 为假）。 */
 	freeRequests_.clear();
 	configRequests_.clear();
+
+	/* 这个配置的曝光与增益范围，AE 锁定时用 */
+	{
+		const auto &ctrls = cam_->controls();
+		auto e = ctrls.find(&libcamera::controls::ExposureTime);
+		auto g = ctrls.find(&libcamera::controls::AnalogueGain);
+		if (e != ctrls.end()) {
+			expMinUs_ = e->second.min().get<int32_t>();
+			expMaxUs_ = e->second.max().get<int32_t>();
+		}
+		if (g != ctrls.end()) {
+			gainMin_ = g->second.min().get<float>();
+			gainMax_ = g->second.max().get<float>();
+		}
+	}
+	/*
+	 * 锁定状态跨重新配置保留（拍照与录像之间切换时锁还在）：锁定时每个请求都
+	 * 重新下发锁住的曝光、增益与色温，IPA 重新配置后照样生效。
+	 */
+
 	allocator_ = std::make_unique<libcamera::FrameBufferAllocator>(cam_);
 	if (allocator_->allocate(stream_) < 0 ||
 	    (rawStream_ && allocator_->allocate(rawStream_) < 0)) {
@@ -577,7 +599,7 @@ ndk::ScopedAStatus Session::configureStreamsV2(
 ndk::ScopedAStatus Session::constructDefaultRequestSettings(RequestTemplate type,
 							    CameraMetadata *out)
 {
-	if (!templateSupported(static_cast<int>(type)))
+	if (!templateSupported(static_cast<int>(type), facts_))
 		return err(Status::ILLEGAL_ARGUMENT);
 	out->metadata = buildDefaultRequest(static_cast<int>(type), facts_);
 	return ndk::ScopedAStatus::ok();
@@ -712,12 +734,19 @@ ndk::ScopedAStatus Session::processCaptureRequest(const std::vector<CaptureReque
 				/* "暗" = 画面均值低，或 AGC 已把模拟增益推到 kDarkGain 以上（后者更可靠：
 				 * AGC 会把能救的场景拉亮，增益高就是它在硬撑）。 */
 				const bool dark = lastLuma_ < kDarkLuma || lastGain_ >= kDarkGain;
+				/* CONTROL_MODE_OFF 时 AE 也关了：闪光按 AE 模式 OFF 处理 */
+				const bool ctrlOff = facts_.manualSensor &&
+						     requestEntryInt(p.settings, ANDROID_CONTROL_MODE,
+								     ANDROID_CONTROL_MODE_AUTO) ==
+							     ANDROID_CONTROL_MODE_OFF;
+				const uint8_t aeMode = ctrlOff ? ANDROID_CONTROL_AE_MODE_OFF : aeMode_;
 				const bool flashAe =
-					aeMode_ == ANDROID_CONTROL_AE_MODE_ON_ALWAYS_FLASH ||
-					(aeMode_ == ANDROID_CONTROL_AE_MODE_ON_AUTO_FLASH && dark);
+					aeMode == ANDROID_CONTROL_AE_MODE_ON_ALWAYS_FLASH ||
+					(aeMode == ANDROID_CONTROL_AE_MODE_ON_AUTO_FLASH && dark);
 				if (trigger == ANDROID_CONTROL_AE_PRECAPTURE_TRIGGER_START) {
 					flashArmed_ = flashAe;
 					precaptureActive_ = true;
+					precaptureLocked_ = aeLocked_;
 					precaptureFrames_ = 0;
 					lumaStable_ = 0;
 				} else if (trigger == ANDROID_CONTROL_AE_PRECAPTURE_TRIGGER_CANCEL) {
@@ -727,7 +756,11 @@ ndk::ScopedAStatus Session::processCaptureRequest(const std::vector<CaptureReque
 				const bool still = hasBlob ||
 						   intent == ANDROID_CONTROL_CAPTURE_INTENT_STILL_CAPTURE ||
 						   flashMode_ == ANDROID_FLASH_MODE_SINGLE;
-				const bool fire = torch || (flashAe && (flashArmed_ || still));
+				/* FLASH_MODE_SINGLE 在 AE 为 ON 或 OFF 时单独闪，带闪光的 AE 模式下不单独闪 */
+				const bool single = flashMode_ == ANDROID_FLASH_MODE_SINGLE &&
+						    (aeMode == ANDROID_CONTROL_AE_MODE_ON ||
+						     aeMode == ANDROID_CONTROL_AE_MODE_OFF);
+				const bool fire = torch || single || (flashAe && (flashArmed_ || still));
 				if (fire) {
 					setLed(true);
 					firedPending_++;
@@ -769,9 +802,22 @@ ndk::ScopedAStatus Session::processCaptureRequest(const std::vector<CaptureReque
 		 *    AF_TRIGGER_IDLE），不能用 0 兜底。
 		 */
 		if (facts_.hasAf) {
-			const int32_t afMode = requestEntryInt(p.settings, ANDROID_CONTROL_AF_MODE, -1);
+			/* CONTROL_MODE_OFF 时不管 AF_MODE 是什么，AF 都关 */
+			const bool controlOff =
+				facts_.manualSensor &&
+				requestEntryInt(p.settings, ANDROID_CONTROL_MODE,
+						ANDROID_CONTROL_MODE_AUTO) == ANDROID_CONTROL_MODE_OFF;
+			const int32_t afMode = controlOff
+						       ? ANDROID_CONTROL_AF_MODE_OFF
+						       : requestEntryInt(p.settings, ANDROID_CONTROL_AF_MODE, -1);
 			if (afMode >= 0)
 				af_.setMode(static_cast<uint8_t>(afMode));
+			/* 手动对焦 */
+			if (afMode == ANDROID_CONTROL_AF_MODE_OFF) {
+				const float d = requestEntryFloat(p.settings, ANDROID_LENS_FOCUS_DISTANCE, -1.0f);
+				if (d >= 0.0f)
+					af_.setManualFocus(d);
+			}
 			const int32_t afTrig = requestEntryInt(p.settings, ANDROID_CONTROL_AF_TRIGGER, -1);
 			/*
 			 * AF region (at most one, see Metadata.cpp): active array
@@ -829,6 +875,8 @@ ndk::ScopedAStatus Session::processCaptureRequest(const std::vector<CaptureReque
 			lreq->controls().set(libcamera::controls::AfWindows,
 					     std::span<const libcamera::Rectangle>(&win, 1));
 		}
+
+		apply3aControls(p, lreq->controls());
 
 		const bool fired = p.flashFired;
 		pending_[key] = std::move(p);
@@ -1708,6 +1756,174 @@ void Session::returnToPool(std::unique_ptr<libcamera::Request> r)
 	}
 }
 
+void Session::apply3aControls(Pending &p, libcamera::ControlList &ctrls)
+{
+	const int32_t ev =
+		facts_.evCompensation
+			? std::clamp(requestEntryInt(p.settings, ANDROID_CONTROL_AE_EXPOSURE_COMPENSATION, 0),
+				     -kEvStepsPerStop * 2, kEvStepsPerStop * 2)
+			: 0;
+	const bool aeLock = facts_.aeLock &&
+			    requestEntryInt(p.settings, ANDROID_CONTROL_AE_LOCK,
+					    ANDROID_CONTROL_AE_LOCK_OFF) == ANDROID_CONTROL_AE_LOCK_ON;
+	const bool awbLock = facts_.awbLock &&
+			     requestEntryInt(p.settings, ANDROID_CONTROL_AWB_LOCK,
+					     ANDROID_CONTROL_AWB_LOCK_OFF) == ANDROID_CONTROL_AWB_LOCK_ON;
+
+	if (facts_.evCompensation)
+		ctrls.set(libcamera::controls::ExposureValue,
+			  static_cast<float>(ev) / kEvStepsPerStop);
+
+	/* 手动曝光：AE 模式 OFF，或整个 3A 关（CONTROL_MODE_OFF） */
+	const bool controlOff = facts_.manualSensor &&
+				requestEntryInt(p.settings, ANDROID_CONTROL_MODE,
+						ANDROID_CONTROL_MODE_AUTO) == ANDROID_CONTROL_MODE_OFF;
+	const bool manualAe =
+		facts_.manualSensor && (controlOff || aeMode_ == ANDROID_CONTROL_AE_MODE_OFF);
+
+	if (manualAe) {
+		const int64_t expNs = requestEntryInt64(p.settings, ANDROID_SENSOR_EXPOSURE_TIME,
+							static_cast<int64_t>(lastExposureUs_) * 1000);
+		const int32_t iso = requestEntryInt(p.settings, ANDROID_SENSOR_SENSITIVITY,
+						    static_cast<int32_t>(std::lround(lastGain_ * 100.0)));
+		const int64_t frameNs = requestEntryInt64(p.settings, ANDROID_SENSOR_FRAME_DURATION, 0);
+		const int64_t expUs = std::clamp<int64_t>(expNs / 1000, std::max(expMinUs_, 1),
+							  std::max(expMaxUs_, std::max(expMinUs_, 1)));
+		ctrls.set(libcamera::controls::ExposureTimeMode,
+			  libcamera::controls::ExposureTimeModeManual);
+		ctrls.set(libcamera::controls::ExposureTime, static_cast<int32_t>(expUs));
+		ctrls.set(libcamera::controls::AnalogueGainMode,
+			  libcamera::controls::AnalogueGainModeManual);
+		ctrls.set(libcamera::controls::AnalogueGain,
+			  std::clamp(iso / 100.0f, gainMin_, std::max(gainMax_, gainMin_)));
+		/* 按要求的帧长，至少与曝光一样长 */
+		const int64_t frameUs = std::max<int64_t>(frameNs / 1000, expUs);
+		ctrls.set(libcamera::controls::FrameDurationLimits, { frameUs, frameUs });
+		aeLocked_ = false;
+		p.aeState = ANDROID_CONTROL_AE_STATE_INACTIVE;
+	} else if (facts_.aeLock) {
+		/*
+		 * 还没有一帧报过曝光（会话刚打开）时先不锁，AE 照常跑，等有了值再锁：
+		 * 不带值的手动模式会让 libipa 停在配置时的默认曝光。
+		 */
+		/*
+		 * 没锁时开始的预拍（预闪）进行中也先不锁：等 AE 在闪光下收敛、预拍
+		 * 做完再锁，否则锁住的是没开灯时测的曝光，闪光照片过曝。
+		 */
+		const bool lockNow =
+			aeLock && (aeLocked_ || (lastExposureUs_ > 0 && lastGain_ > 0 &&
+						 !(precaptureActive_ && !precaptureLocked_)));
+		if (lockNow && !aeLocked_) {
+			/* 锁住的曝光是在上一个完成帧的补偿下测的，补偿从那里算起 */
+			lockEvSteps_ = lastEvSteps_;
+			lockedExposureUs_ = lastExposureUs_;
+			lockedGain_ = lastGain_;
+			ALOGI("AE locked: exposure %d us, gain %.2f, EV %d/%d", lockedExposureUs_,
+			      lockedGain_, lockEvSteps_, kEvStepsPerStop);
+		}
+		aeLocked_ = lockNow;
+		ctrls.set(libcamera::controls::ExposureTimeMode,
+			  lockNow ? libcamera::controls::ExposureTimeModeManual
+				  : libcamera::controls::ExposureTimeModeAuto);
+		ctrls.set(libcamera::controls::AnalogueGainMode,
+			  lockNow ? libcamera::controls::AnalogueGainModeManual
+				  : libcamera::controls::AnalogueGainModeAuto);
+		if (lockNow) {
+			/*
+			 * 锁住的曝光按锁定以来的补偿缩放：先改曝光时间（不超过帧率
+			 * 范围允许的帧长），不够再改增益。
+			 */
+			const double scale = std::exp2(static_cast<double>(ev - lockEvSteps_) /
+						       kEvStepsPerStop);
+			const int32_t fpsMin =
+				requestEntryInt(p.settings, ANDROID_CONTROL_AE_TARGET_FPS_RANGE, 0, 0);
+			double maxUs = expMaxUs_ > 0 ? expMaxUs_ : lockedExposureUs_ * 4.0;
+			if (fpsMin > 0)
+				maxUs = std::min(maxUs, 1e6 / fpsMin);
+			const double total = lockedExposureUs_ * lockedGain_ * scale;
+			const double exposure = std::clamp(lockedExposureUs_ * scale,
+							   static_cast<double>(std::max(expMinUs_, 1)),
+							   std::max(maxUs, 1.0));
+			const double gain = std::clamp(total / exposure, static_cast<double>(gainMin_),
+						       static_cast<double>(std::max(gainMax_, gainMin_)));
+			/*
+			 * libcamera 报的曝光是截断到微秒的整数，libipa 换回行数时又截断：
+			 * 原样下发会少一行（亮处曝光只有几行时差出百分之十几）。加 1 us
+			 * 落回原来的行数（行长大于 1 us）。
+			 */
+			const int32_t expUs = std::min<int32_t>(
+				static_cast<int32_t>(exposure) + 1,
+				expMaxUs_ > 0 ? expMaxUs_ : std::numeric_limits<int32_t>::max());
+			ctrls.set(libcamera::controls::ExposureTime, expUs);
+			ctrls.set(libcamera::controls::AnalogueGain, static_cast<float>(gain));
+		}
+	}
+
+	const int32_t awbMode =
+		requestEntryInt(p.settings, ANDROID_CONTROL_AWB_MODE, ANDROID_CONTROL_AWB_MODE_AUTO);
+	/* AWB 预设：按它的色温手动白平衡 */
+	const int32_t presetK = facts_.awbPresets && !controlOff ? awbPresetKelvin(awbMode) : 0;
+	/*
+	 * AWB 关（或整个 3A 关）：用应用给的增益（R、Geven、Godd、B），换算成
+	 * R、B 相对 G 的值；没给时保持最后的增益。
+	 */
+	const bool manualWb = facts_.awbLock && (controlOff || awbMode == ANDROID_CONTROL_AWB_MODE_OFF);
+	const float cgR = requestEntryFloat(p.settings, ANDROID_COLOR_CORRECTION_GAINS, -1.0f, 0);
+	const float cgGe = requestEntryFloat(p.settings, ANDROID_COLOR_CORRECTION_GAINS, -1.0f, 1);
+	const float cgGo = requestEntryFloat(p.settings, ANDROID_COLOR_CORRECTION_GAINS, -1.0f, 2);
+	const float cgB = requestEntryFloat(p.settings, ANDROID_COLOR_CORRECTION_GAINS, -1.0f, 3);
+	const float cgG = (cgGe + cgGo) / 2.0f;
+	if (manualWb && cgR > 0.0f && cgB > 0.0f && cgG > 0.0f) {
+		const std::array<float, 2> gains = { cgR / cgG, cgB / cgG };
+		if (!awbLocked_)
+			lockedColourTemp_ = lastColourTemp_;
+		ctrls.set(libcamera::controls::AwbEnable, false);
+		ctrls.set(libcamera::controls::ColourGains, std::span<const float, 2>(gains));
+		p.sentGains = true;
+		if (lockedColourTemp_ > 0)
+			ctrls.set(libcamera::controls::ColourTemperature, lockedColourTemp_);
+		/* 之后不再给增益时保持 */
+		lockedColourGains_ = gains;
+		awbLocked_ = true;
+	} else if (presetK) {
+		ctrls.set(libcamera::controls::AwbEnable, false);
+		ctrls.set(libcamera::controls::ColourTemperature, presetK);
+		awbLocked_ = false;
+	} else if (facts_.awbLock) {
+		/* 有增益报回来之后才锁；AWB 关或整个 3A 关时也保持 */
+		if ((awbLock || manualWb) && !awbLocked_ && lastColourGains_) {
+			lockedColourGains_ = *lastColourGains_;
+			lockedColourTemp_ = lastColourTemp_;
+			awbLocked_ = true;
+			ALOGI("AWB locked: gains R %.3f B %.3f, %d K", lockedColourGains_[0],
+			      lockedColourGains_[1], lockedColourTemp_);
+		} else if (!awbLock && !manualWb) {
+			awbLocked_ = false;
+		}
+		ctrls.set(libcamera::controls::AwbEnable, !awbLocked_);
+		if (awbLocked_) {
+			ctrls.set(libcamera::controls::ColourGains,
+				  std::span<const float, 2>(lockedColourGains_));
+			p.sentGains = true;
+			if (lockedColourTemp_ > 0)
+				ctrls.set(libcamera::controls::ColourTemperature, lockedColourTemp_);
+		}
+	}
+
+	/*
+	 * AE 锁上之后报 LOCKED（还没锁上时照常报，那几帧曝光还在变）。预拍触发
+	 * 时已经锁着：状态保持 LOCKED（状态表：触发被忽略），闪光照常可以闪。
+	 * 预拍进行中才锁上：预拍做完之前报 PRECAPTURE。
+	 */
+	if (aeLocked_ && (precaptureLocked_ || p.aeState != ANDROID_CONTROL_AE_STATE_PRECAPTURE))
+		p.aeState = ANDROID_CONTROL_AE_STATE_LOCKED;
+	p.evSteps = ev;
+	/* 不在 AUTO 模式时报 AWB_STATE_INACTIVE */
+	p.awbState = manualWb || presetK ? ANDROID_CONTROL_AWB_STATE_INACTIVE
+		     : awbLocked_		 ? ANDROID_CONTROL_AWB_STATE_LOCKED
+						 : ANDROID_CONTROL_AWB_STATE_CONVERGED;
+}
+
 const uint8_t *Session::mapFrame(int fd, size_t len)
 {
 	auto it = frameMaps_.find(fd);
@@ -1928,11 +2144,31 @@ void Session::onRequestCompleted(libcamera::Request *req)
 	/* libcamera（libipa 的 Agc::fillMetadata）每帧报实际曝光与模拟增益：回填结果、驱动降噪强度与闪光判据。 */
 	int64_t exposureNs = 0;
 	int32_t sensitivity = 0;
+	int64_t frameDurationNs = 0;
+	std::array<float, 4> ccGains{};
+	std::array<float, 9> ccTransform{};
+	bool haveCcGains = false, haveCcTransform = false;
 	{
 		const libcamera::ControlList &md = req->metadata();
 		auto gain = md.get(libcamera::controls::AnalogueGain);
 		auto expo = md.get(libcamera::controls::ExposureTime);
+		auto cg = md.get(libcamera::controls::ColourGains);
+		auto ct = md.get(libcamera::controls::ColourTemperature);
+		auto ccm = md.get(libcamera::controls::ColourCorrectionMatrix);
+		auto fd = md.get(libcamera::controls::FrameDuration);
+		if (fd && *fd > 0)
+			frameDurationNs = *fd * 1000;
 		std::lock_guard<std::mutex> lk(mutex_);
+		if (cg && (*cg)[0] > 0 && (*cg)[1] > 0)
+			lastColourGains_ = std::array<float, 2>{ (*cg)[0], (*cg)[1] };
+		/*
+		 * 请求带了手动增益（AWB 锁定、AWB 关）的帧不取色温：这时 libipa 报的
+		 * 是手动状态里留下的色温（配置时的 5000 K 或上次的预设），不是画面的。
+		 * 预设模式的帧报的就是预设的色温，照取。
+		 */
+		if (ct && *ct > 0 && !pend.sentGains)
+			lastColourTemp_ = *ct;
+		lastEvSteps_ = pend.evSteps;
 		if (gain && *gain > 0)
 			lastGain_ = *gain;
 		if (expo && *expo > 0)
@@ -1941,6 +2177,15 @@ void Session::onRequestCompleted(libcamera::Request *req)
 			sensitivity = static_cast<int32_t>(*gain * 100.0f + 0.5f);
 		if (expo)
 			exposureNs = static_cast<int64_t>(*expo) * 1000;
+		/* 结果报这一帧实际用的白平衡增益与色彩矩阵（声明了 COLOR_CORRECTION_MODE） */
+		if (cg && (*cg)[0] > 0 && (*cg)[1] > 0) {
+			ccGains = { (*cg)[0], 1.0f, 1.0f, (*cg)[1] };
+			haveCcGains = true;
+		}
+		if (ccm) {
+			std::copy(ccm->begin(), ccm->end(), ccTransform.begin());
+			haveCcTransform = true;
+		}
 	}
 
 	/* 降噪：静态照片走 RGB ε 滤波（有 BLOB 流且增益够高才算，13 MP 不便宜）；预览只模糊色度。 */
@@ -2042,9 +2287,11 @@ void Session::onRequestCompleted(libcamera::Request *req)
 	fr.flashState = flashLed_.empty() ? ANDROID_FLASH_STATE_UNAVAILABLE
 			: (pend.flashFired ? ANDROID_FLASH_STATE_FIRED : ANDROID_FLASH_STATE_READY);
 	fr.aeState = pend.aeState;
+	fr.awbState = pend.awbState;
 	fr.aeMode = pend.aeMode;
 	fr.flashMode = pend.flashMode;
 	fr.exposureNs = exposureNs;
+	fr.frameDurationNs = frameDurationNs;
 	fr.sensitivity = sensitivity;
 	/*
 	 * ★ 对焦结果组：应用（CameraX 的 FocusMeteringControl、各家相机的拍照前 AF）等的是
@@ -2052,6 +2299,12 @@ void Session::onRequestCompleted(libcamera::Request *req)
 	 *   于是马达扫到了峰、应用却永远只看到 INACTIVE。
 	 */
 	fr.hasAf = facts_.hasAf;
+	fr.manualSensor = facts_.manualSensor;
+	fr.lens = lensParams(facts_.frontFacing);
+	fr.hasCcGains = haveCcGains;
+	fr.ccGains = ccGains;
+	fr.hasCcTransform = haveCcTransform;
+	fr.ccTransform = ccTransform;
 	if (facts_.hasAf) {
 		fr.afState = af_.afState();
 		fr.lensState = af_.lensState();

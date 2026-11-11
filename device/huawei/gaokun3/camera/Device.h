@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -60,8 +61,17 @@ public:
 	std::shared_ptr<libcamera::Camera> camera() const { return cam_; }
 
 private:
-	/* 填写 facts_.minFrameDurationsNs，见 Device.cpp。 */
-	void probeFrameDurations();
+	/* 填写 facts_.minFrameDurationsNs 和 3A 控制的标志，见 Device.cpp。 */
+	void probeCamera();
+	void probe3aControls();
+	/* 每种探测过的配置都接受的曝光、增益与帧长范围 */
+	struct ManualLimits {
+		int64_t expMinUs = 0, expMaxUs = INT64_MAX;
+		double gainMin = 0.0, gainMax = 1e9;
+		int64_t frameMaxUs = INT64_MAX;
+		bool seen = false;
+	};
+	void accumulateLimits(ManualLimits &l);
 	/* 会话关闭时由 Session 回调：相机不再占用，手电筒重新可用。 */
 	void onSessionClosed();
 	/* 写 LED 的 brightness（torch 档 = max_brightness）。没有闪光灯时返回 false。 */
