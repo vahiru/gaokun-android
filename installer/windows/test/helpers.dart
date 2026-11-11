@@ -19,13 +19,27 @@ class Rec extends Gk3Backend {
   final calls = <List<String>>[];
   var reboots = 0;
 
+  /// 函数 → 换掉它的输出（模拟录制里没有的失败：进程被结束、崩溃）
+  final replace = <String, Stream<Gk3Event> Function(List<String>)>{};
+
+  /// 只换掉第一次调用的输出
+  final replaceFirst = <String, Stream<Gk3Event> Function(List<String>)>{};
+
+  /// 函数 → 改写它的每个事件（在真实录制上改一个字段）
+  final map = <String, Gk3Event Function(Gk3Event)>{};
+
   @override
   String? get demoLabel => inner.demoLabel;
 
   @override
   Stream<Gk3Event> call(String fn, [List<String> args = const []]) {
     calls.add([fn, ...args]);
-    return inner.call(fn, args);
+    final once = replaceFirst.remove(fn);
+    if (once != null) return once(args);
+    final r = replace[fn];
+    if (r != null) return r(args);
+    final m = map[fn];
+    return m == null ? inner.call(fn, args) : inner.call(fn, args).map(m);
   }
 
   @override
@@ -50,11 +64,15 @@ class DiskBundle extends AssetBundle {
 }
 
 /// [home]：从某一页开始（出图时看那些回放数据走不到的页）
-Future<(Rec, Session)> pumpApp(WidgetTester t, String scenario, {String language = 'zh', Widget? home, int? testDisk}) async {
+Future<(Rec, Session)> pumpApp(WidgetTester t, String scenario,
+    {String language = 'zh', Widget? home, int? testDisk, Map<String, Gk3Event Function(Gk3Event)> map = const {},
+    Map<String, Stream<Gk3Event> Function(List<String>)> replaceFirst = const {}}) async {
   t.view.physicalSize = const Size(1280, 800);
   t.view.devicePixelRatio = 1;
   addTearDown(t.view.reset);
-  final rec = Rec(FixtureBackend(scenario, bundle: DiskBundle(), speed: 0));
+  final rec = Rec(FixtureBackend(scenario, bundle: DiskBundle(), speed: 0))
+    ..map.addAll(map)
+    ..replaceFirst.addAll(replaceFirst);
   final session = Session(rec, language: language, testDisk: testDisk);
   await t.pumpWidget(WinInstallerApp(session: session, home: home));
   await t.runAsync(session.check);

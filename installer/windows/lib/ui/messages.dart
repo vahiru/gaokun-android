@@ -1,13 +1,15 @@
 import 'package:gk3_common/backend/protocol.dart';
 
 import '../l10n/app_localizations.dart';
+import '../model.dart';
 
 /// gk3w 的 ERR code=… → 给用户看的一句话（代码定义在 installer/backend/src/win/*.c）。
 /// 没收录的代码照原样报出，用户截图时也能对上日志。
 String errText(L10n l, Gk3Record err) {
   final code = err['code'];
   return switch (code) {
-    'zst-corrupt' || 'sha-mismatch' || 'release-no-boot' || 'release-no-super' || 'bootimg-unpack' => l.errRelease,
+    'zst-corrupt' || 'sha-mismatch' || 'bootimg-unpack' => l.errRelease,
+    'release-no-boot' || 'release-no-super' => l.errReleaseMissing,
     'esp-has-android' => l.errInstalled,
     'plan' || 'bad-region' => l.errPlan,
     'layout-changed' => l.errLayoutChanged,
@@ -24,6 +26,9 @@ String errText(L10n l, Gk3Record err) {
     'manifest-unavailable' => l.releaseNone,
     'dl-sums' || 'dl-sums-missing' || 'dl-failed' || 'dl-http' => l.errDownload,
     'dl-write' => l.errDownloadWrite,
+    'dl-space' => l.errDownloadSpace(fmtMib(err.intOf('need_mib'))),
+    'backend-failed' => l.errBackendFailed,
+    'internal' => l.errUnknown,
     'backend-missing' || 'tool-missing' => l.errBackendMissing,
     'hash-failed' => l.errRelease,
     'not-admin' => l.errNotAdmin,

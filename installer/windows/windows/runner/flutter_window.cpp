@@ -104,7 +104,8 @@ bool FlutterWindow::OnCreate() {
           }
           return;
         } else if (m == "setBusy") {
-          // 参数：{busy: bool, power: 电源请求的原因, shutdown: 阻止关机的原因}
+          // 参数：{busy: 拒绝关闭、阻止关机（gk3w 写盘期间）, awake: 保持唤醒与亮屏（整个任务期间，含下载）,
+          //        power: 电源请求的原因, shutdown: 阻止关机的原因}
           const auto* args = std::get_if<flutter::EncodableMap>(call.arguments());
           auto str = [args](const char* key) {
             if (args == nullptr) return std::string();
@@ -112,13 +113,14 @@ bool FlutterWindow::OnCreate() {
             const auto* v = it == args->end() ? nullptr : std::get_if<std::string>(&it->second);
             return v ? *v : std::string();
           };
-          bool busy = false;
-          if (args != nullptr) {
-            auto it = args->find(flutter::EncodableValue("busy"));
+          auto flag = [args](const char* key, bool fallback) {
+            if (args == nullptr) return fallback;
+            auto it = args->find(flutter::EncodableValue(key));
             const auto* b = it == args->end() ? nullptr : std::get_if<bool>(&it->second);
-            busy = b != nullptr && *b;
-          }
-          SetBusy(busy, Utf16FromUtf8(str("power")), Utf16FromUtf8(str("shutdown")));
+            return b == nullptr ? fallback : *b;
+          };
+          const bool busy = flag("busy", false);
+          SetBusy(busy, flag("awake", busy), Utf16FromUtf8(str("power")), Utf16FromUtf8(str("shutdown")));
         } else {
           result->NotImplemented();
           return;
@@ -138,39 +140,41 @@ bool FlutterWindow::OnCreate() {
   return true;
 }
 
-void FlutterWindow::SetBusy(bool busy, const std::wstring& power_reason, const std::wstring& shutdown_reason) {
+void FlutterWindow::SetBusy(bool busy, bool awake, const std::wstring& power_reason, const std::wstring& shutdown_reason) {
   HWND hwnd = GetHandle();
-  if (busy && !busy_) {
-    // 电源请求：系统不因空闲而进入睡眠状态，屏幕保持开启（powercfg /requests 中显示原因）。
-    // 合上键盘或按电源按钮进入的睡眠无法由应用阻止，进度页另有提示
-    std::wstring reason = power_reason.empty() ? std::wstring(L"Gaokun Android") : power_reason;
+  std::wstring reason = power_reason.empty() ? std::wstring(L"Gaokun Android") : power_reason;
+  awake = awake || busy;
+  if (awake && power_request_ == nullptr) {
+    // 电源请求：系统不因空闲而进入睡眠状态，屏幕保持开启（powercfg /requests 中显示原因）。下载期间也要：
+    // 这台是现代待机设备，熄屏后桌面程序被挂起，下载会停住。合上键盘或按电源按钮进入的睡眠无法由应用阻止，进度页另有提示
     REASON_CONTEXT ctx = {};
     ctx.Version = POWER_REQUEST_CONTEXT_VERSION;
     ctx.Flags = POWER_REQUEST_CONTEXT_SIMPLE_STRING;
     ctx.Reason.SimpleReasonString = reason.data();
-    power_request_ = PowerCreateRequest(&ctx);
-    if (power_request_ == INVALID_HANDLE_VALUE) {
-      power_request_ = nullptr;
-    } else {
+    HANDLE h = PowerCreateRequest(&ctx);
+    if (h != INVALID_HANDLE_VALUE) {
+      power_request_ = h;
       PowerSetRequest(power_request_, PowerRequestSystemRequired);
       PowerSetRequest(power_request_, PowerRequestDisplayRequired);
     }
-    // 关机、重启、注销时 Windows 在"以下应用正在阻止关机"中显示这个原因（配合 WM_QUERYENDSESSION 返回 FALSE）
+  } else if (!awake && power_request_ != nullptr) {
+    PowerClearRequest(power_request_, PowerRequestSystemRequired);
+    PowerClearRequest(power_request_, PowerRequestDisplayRequired);
+    CloseHandle(power_request_);
+    power_request_ = nullptr;
+  }
+  if (busy && !busy_) {
+    // 只在 gk3w 写盘期间：关机、重启、注销时 Windows 在"以下应用正在阻止关机"中显示这个原因（配合 WM_QUERYENDSESSION
+    // 返回 FALSE），窗口拒绝关闭。下载期间不挡：关掉了 .part 还在，下次接着下
     ShutdownBlockReasonCreate(hwnd, shutdown_reason.empty() ? reason.c_str() : shutdown_reason.c_str());
   } else if (!busy && busy_) {
-    if (power_request_ != nullptr) {
-      PowerClearRequest(power_request_, PowerRequestSystemRequired);
-      PowerClearRequest(power_request_, PowerRequestDisplayRequired);
-      CloseHandle(power_request_);
-      power_request_ = nullptr;
-    }
     ShutdownBlockReasonDestroy(hwnd);
   }
   busy_ = busy;
 }
 
 void FlutterWindow::OnDestroy() {
-  SetBusy(false, std::wstring(), std::wstring());
+  SetBusy(false, false, std::wstring(), std::wstring());
   window_channel_ = nullptr;
   if (flutter_controller_) {
     flutter_controller_ = nullptr;

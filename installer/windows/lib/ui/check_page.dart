@@ -79,13 +79,17 @@ class CheckPage extends StatelessWidget {
     rows.add(pf.modelOk
         ? CheckRow(state: CheckState.ok, title: l.chkModel, detail: '${pf.manufacturer} ${pf.model}')
         : CheckRow(state: CheckState.fail, title: l.chkModelBad, detail: l.chkModelBadHow('${pf.manufacturer} ${pf.model}')));
+    // 已经装了 Android（只会去管理 / 卸载）：Secure Boot 与快速启动不挡 —— gk3w 卸载的闸门本来就不查这两项
+    // （sys.c 的 GK3W_GATE_UNINSTALL），显示成提醒（审查 11-12 第 5 条）
+    final inst = s.installed;
     rows.add(switch (pf.secureBoot) {
       'off' => CheckRow(state: CheckState.ok, title: l.chkSecureBootOff),
-      'on' => CheckRow(state: CheckState.fail, title: l.chkSecureBootOn, detail: l.chkSecureBootHow),
+      'on' => CheckRow(state: inst ? CheckState.warn : CheckState.fail, title: l.chkSecureBootOn, detail: l.chkSecureBootHow),
       _ => CheckRow(state: CheckState.warn, title: l.chkSecureBootUnknown, detail: l.chkSecureBootHow),
     });
     rows.add(pf.fastStartup == 'on'
-        ? CheckRow(state: CheckState.fail, title: l.chkFastStartupOn, detail: pf.hibernate == 'off' ? l.chkFastStartupHowReg : l.chkFastStartupHow)
+        ? CheckRow(state: inst ? CheckState.warn : CheckState.fail, title: l.chkFastStartupOn,
+            detail: pf.hibernate == 'off' ? l.chkFastStartupHowReg : l.chkFastStartupHow)
         : CheckRow(state: CheckState.ok, title: l.chkFastStartupOff));
     rows.add(pf.bitlocker == 'off'
         ? CheckRow(state: CheckState.ok, title: l.chkBitlockerOff)
@@ -94,7 +98,7 @@ class CheckPage extends StatelessWidget {
         ? CheckRow(state: CheckState.fail, title: l.chkBatteryLow, detail: l.chkBatteryLowHow)
         : CheckRow(state: CheckState.ok, title: l.chkPower, detail: _power(l, pf)));
     // 测试模式（对着一块 VHD）：本机的检查项照样显示，但不挡住
-    if (!s.testMode) blocked |= !pf.modelOk || pf.secureBoot == 'on' || pf.fastStartup == 'on' || pf.lowBattery;
+    if (!s.testMode) blocked |= !pf.modelOk || pf.lowBattery || (!inst && (pf.secureBoot == 'on' || pf.fastStartup == 'on'));
   }
   return (rows, blocked);
 }

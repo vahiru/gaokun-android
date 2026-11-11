@@ -6,8 +6,23 @@
 #include "flutter_window.h"
 #include "utils.h"
 
+// 窗口标题，也用来找已经开着的那一个
+static const wchar_t kTitle[] = L"Gaokun Android Installer";
+
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
+  // 只开一个：UAC 弹得慢时连点两下会开出两个，两个同时下载会往同一个 .part 里写（审查 11-12 第 12 条）。
+  // 已经开着时把那个窗口提到前面、自己退出。互斥量在进程退出时由系统释放，不用手动关
+  HANDLE single = ::CreateMutexW(nullptr, TRUE, L"Local\\GaokunAndroidInstaller");
+  if (single != nullptr && ::GetLastError() == ERROR_ALREADY_EXISTS) {
+    HWND other = ::FindWindowW(L"FLUTTER_RUNNER_WIN32_WINDOW", kTitle);
+    if (other != nullptr) {
+      ::ShowWindow(other, ::IsIconic(other) ? SW_RESTORE : SW_SHOW);
+      ::SetForegroundWindow(other);
+    }
+    return EXIT_SUCCESS;
+  }
+
   // Attach to console when present (e.g., 'flutter run') or create a
   // new console when running with a debugger.
   if (!::AttachConsole(ATTACH_PARENT_PROCESS) && ::IsDebuggerPresent()) {
@@ -45,7 +60,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   Win32Window::Point origin(static_cast<unsigned int>(work.left / scale + (work_w - w) / 2),
                             static_cast<unsigned int>(work.top / scale + (work_h - h) / 2));
   Win32Window::Size size(static_cast<unsigned int>(w), static_cast<unsigned int>(h));
-  if (!window.Create(L"Gaokun Android Installer", origin, size)) {
+  if (!window.Create(kTitle, origin, size)) {
     return EXIT_FAILURE;
   }
   window.SetQuitOnClose(true);

@@ -2,9 +2,14 @@ import 'package:flutter/foundation.dart';
 import 'package:gk3_common/backend/backend.dart';
 import 'package:gk3_common/backend/protocol.dart';
 
+import 'backend/platform.dart';
 import 'model.dart';
 
 enum WriteTask { install, uninstall, media }
+
+/// 任务失败时盘有没有被动过。unknown：写盘的 gk3w 非零退出却没报 ERR（被安全软件或任务管理器结束、崩溃），
+/// 不能说"磁盘未被修改"（审查 11-12 第 3 条）。下载失败一定有 ERR（net.dart 的 _guard）
+enum Touched { no, yes, unknown }
 
 /// 安装介质（LiveCD + 所选版本的安装文件）要占多大：U 盘至少这么大，写到本机时在未分配空间里划出这么大的 GK3LIVE。
 /// 暂定值：按 scripts/windows/gaokun3-setup.ps1 的算法（内容 ×1.25 + 128 MiB，按 256 MiB 向上取整）
@@ -41,20 +46,34 @@ class Session extends ChangeNotifier {
   Future<void> check() async {
     checking = true;
     checkErr = null;
+    // 一次确认只用于一次写盘：重新检查之后要重新勾选（审查 11-12 第 11 条）
+    bitlockerAck = false;
     notifyListeners();
-    final pf = await backend.run('preflight');
-    final pr = await backend.run('probe');
-    preflight = pf.ok && pf.first('PREFLIGHT') != null ? Preflight(pf.first('PREFLIGHT')!) : null;
-    probe = pr.ok ? Probe(pr) : null;
-    checkErr = !pf.ok ? pf.err : (!pr.ok ? pr.err : null);
-    plans.clear();
-    region = null;
-    mediaTarget = null;
-    mediaRegion = _defaultMediaRegion();
-    if (disk != null && !installed) await _loadPlans();
-    checking = false;
-    notifyListeners();
+    try {
+      final pf = await backend.run('preflight');
+      final pr = await backend.run('probe');
+      final pfRec = pf.ok ? pf.first('PREFLIGHT') : null;
+      preflight = pfRec == null ? null : Preflight(pfRec);
+      probe = pr.ok ? Probe(pr) : null;
+      // 失败原因：先用后端报的 ERR —— preflight 没报 ERR 的失败不能盖住 probe 报的（例如 not-admin）；
+      // 失败了却谁都没报（进程崩溃、被结束）、或 preflight 缺了记录：backend-failed，检查页挡住（审查 11-12 第 8 条）
+      checkErr = (pf.ok ? null : pf.err) ?? (pr.ok ? null : pr.err) ??
+          (pfRec == null ? _failed('preflight') : (pr.ok ? null : _failed('probe')));
+      plans.clear();
+      region = null;
+      mediaTarget = null;
+      mediaRegion = _defaultMediaRegion();
+      if (disk != null && !installed) await _loadPlans();
+    } catch (e) {
+      checkErr = _failed('check');
+      log.add('!! $e');
+    } finally {
+      checking = false;
+      notifyListeners();
+    }
   }
+
+  static Gk3Record _failed(String fn) => Gk3Record('ERR', {'code': 'backend-failed', 'fn': fn});
 
   WinDisk? get disk => probe?.systemDisk;
   bool get installed => disk != null && probe!.androidOn(disk!).isNotEmpty;
@@ -121,7 +140,9 @@ class Session extends ChangeNotifier {
   final Map<ReleaseSource, List<Variant>> _variants = {};
   final Map<ReleaseSource, Gk3Record?> _variantsErr = {};
   final Map<ReleaseSource, LiveCd?> _liveCd = {};
-  bool loadingVariants = false;
+  /// 正在取版本列表的来源（按来源分别记：一个来源还在取时切到另一个，另一个也要去取 —— 审查 11-12 第 10 条）
+  final Set<ReleaseSource> _loading = {};
+  bool get loadingVariants => _loading.contains(source);
   Variant? variant;
 
   /// 用本地文件时的目录（boot.img、super.img.zst、install-artifacts.sha256 放在一起）
@@ -143,15 +164,22 @@ class Session extends ChangeNotifier {
   /// 取一个来源的版本列表（GitHub 的 releases / R2 上的 OTA 清单），取过就不再取
   Future<void> loadVariants({bool force = false}) async {
     final src = source;
-    if (src == ReleaseSource.local || loadingVariants || (!force && _variants.containsKey(src))) return;
-    loadingVariants = true;
+    if (src == ReleaseSource.local || _loading.contains(src) || (!force && _variants.containsKey(src))) return;
+    _loading.add(src);
     notifyListeners();
-    final res = await backend.run('releases', ['--source', src.name]);
-    _variants[src] = [for (final r in res.ofType('VARIANT')) Variant(r)];
-    _variantsErr[src] = res.ok ? null : res.err;
-    final lc = res.first('LIVECD');
-    _liveCd[src] = lc == null ? null : LiveCd(lc);
-    loadingVariants = false;
+    try {
+      final res = await backend.run('releases', ['--source', src.name]);
+      _variants[src] = [for (final r in res.ofType('VARIANT')) Variant(r)];
+      _variantsErr[src] = res.ok ? null : (res.err ?? const Gk3Record('ERR', {'code': 'manifest-unavailable'}));
+      final lc = res.first('LIVECD');
+      _liveCd[src] = lc == null ? null : LiveCd(lc);
+    } catch (e) {
+      // 后端的流出错也不能让页面一直转圈（审查 11-12 第 4 条）
+      _variants[src] = const [];
+      _variantsErr[src] = const Gk3Record('ERR', {'code': 'manifest-unavailable'});
+    } finally {
+      _loading.remove(src);
+    }
     if (source == src) variant = variants.where((v) => v.latest).firstOrNull ?? variants.firstOrNull;
     notifyListeners();
   }
@@ -161,12 +189,18 @@ class Session extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 资源管理器的"复制文件地址"带一对双引号：去掉（原先 gk3w 收到带引号的路径，按住确认之后才报找不到文件 —— 审查 11-12 第 14 条）
   void setLocalDir(String d) {
-    localDir = d.trim();
+    var t = d.trim();
+    if (t.length >= 2 && t.startsWith('"') && t.endsWith('"')) t = t.substring(1, t.length - 1).trim();
+    localDir = t;
     notifyListeners();
   }
 
-  bool get releaseReady => source == ReleaseSource.local ? localDir.isNotEmpty : variant != null;
+  /// 本地目录里缺的必需文件（Windows 上查；进入下一步之前就说清楚）
+  List<String> get localMissing => missingReleaseFiles(localDir);
+
+  bool get releaseReady => source == ReleaseSource.local ? localDir.isNotEmpty && localMissing.isEmpty : variant != null;
 
   // ── 选项 ──
   /// android / windows：开机默认进哪个（gk3w apply --default-os）
@@ -187,14 +221,49 @@ class Session extends ChangeNotifier {
   // ── 正在跑的任务（下载 + 安装 / 卸载） ──
   /// 正在进行安装还是卸载（写盘期间阻止关机时，原因按它写）
   WriteTask task = WriteTask.install;
+
+  /// 任务进行中（下载 + 写盘）：界面不能返回、不能切换语言，系统保持唤醒
   bool writing = false;
+
+  /// gk3w 正在写盘（apply / uninstall / media）：只有这段时间不许关闭窗口、阻止关机。下载期间可以关掉
+  /// （.part 留着，下次接着下）—— 原先下载一开始就挡住关闭与关机，网慢时只能强制结束（审查 11-12 第 2 条）
+  bool diskBusy = false;
   int percent = 0;
   Gk3Progress? lastProgress;
   final List<String> log = [];
   CallResult? result;
 
-  /// 盘有没有被动过：任务失败时，ERR 记录的 touched=
-  bool get touched => result?.err?['touched'] == 'yes';
+  /// 盘有没有被动过：任务失败时看 ERR 记录的 touched=；没有 ERR 的失败 → 不知道（见 [Touched]）
+  Touched get touched {
+    final r = result;
+    if (r == null || r.ok) return Touched.no;
+    final err = r.err;
+    if (err == null) return Touched.unknown;
+    return err['touched'] == 'yes' ? Touched.yes : Touched.no;
+  }
+
+  /// 任务开始：状态清零。lastProgress 也清掉 —— 原先先装后卸时，卸载全程显示上一次的"已完成"（审查 11-12 第 6 条）
+  void _begin(WriteTask t) {
+    task = t;
+    writing = true;
+    percent = 0;
+    lastProgress = null;
+    log.clear();
+    result = null;
+    notifyListeners();
+  }
+
+  /// 任务结束（成功、失败或出了异常都走这里）：不然 writing / diskBusy 卡在 true，窗口关不掉、关机被挡（审查 11-12 第 4 条）
+  void _end() {
+    writing = false;
+    diskBusy = false;
+    bitlockerAck = false;
+    notifyListeners();
+  }
+
+  /// 任务里出了异常（不该有）：写盘中出的算"不知道动没动过盘"（没有 ERR），之前出的算没动
+  CallResult _crashed(Object e) =>
+      CallResult(diskBusy ? const [] : const [Gk3Record('ERR', {'code': 'internal'})], [Gk3Log('!! $e')], 1);
 
   void _onEvent(Gk3Event e, {int base = 0, int span = 100}) {
     switch (e) {
@@ -246,45 +315,47 @@ class Session extends ChangeNotifier {
   MediaTarget? mediaWritten;
 
   Future<bool> _downloadThen(WriteTask t, String releaseDir, (String, List<String>) Function(String dir) command) async {
-    task = t;
-    writing = true;
-    percent = 0;
-    log.clear();
-    result = null;
-    notifyListeners();
+    _begin(t);
     final local = source == ReleaseSource.local;
-    var dir = localDir;
-    if (!local) {
-      final dl = await backend.run('download', [variant!.base, releaseDir], (e) => _onEvent(e, span: 40));
-      if (!dl.ok) {
-        result = dl;
-        writing = false;
-        notifyListeners();
-        return false;
+    try {
+      var dir = localDir;
+      if (!local) {
+        final dl = await backend.run('download', [variant!.base, releaseDir], (e) => _onEvent(e, span: 40));
+        if (!dl.ok) {
+          result = dl;
+          return false;
+        }
+        dir = dl.first('RELEASE')?['dir'] ?? releaseDir;
       }
-      dir = dl.first('RELEASE')?['dir'] ?? releaseDir;
+      final (fn, args) = command(dir);
+      diskBusy = true;
+      notifyListeners();
+      result = await backend.run(fn, args, (e) => _onEvent(e, base: local ? 0 : 40, span: local ? 100 : 60));
+      // 装好了：下载的 1.3 GiB 没有用了，删掉（本地文件是用户自己的，不动；失败时留着，下次续传）
+      if (result!.ok && t == WriteTask.install && !local) deleteDownloadedRelease(dir);
+    } catch (e) {
+      result = _crashed(e);
+    } finally {
+      _end();
     }
-    final (fn, args) = command(dir);
-    result = await backend.run(fn, args, (e) => _onEvent(e, base: local ? 0 : 40, span: local ? 100 : 60));
-    writing = false;
-    notifyListeners();
     return result!.ok;
   }
 
   /// 卸载：gk3w uninstall 不报百分比，界面显示一条不定长的进度
   Future<bool> uninstall() async {
-    task = WriteTask.uninstall;
-    writing = true;
-    percent = 0;
-    log.clear();
-    result = null;
+    _begin(WriteTask.uninstall);
+    diskBusy = true;
     notifyListeners();
-    result = await backend.run('uninstall', [
-      '--disk', '${disk!.num}', '--real-disk',
-      if (bitlockerAck) ...['--bitlocker-key', 'yes'],
-    ], _onEvent);
-    writing = false;
-    notifyListeners();
+    try {
+      result = await backend.run('uninstall', [
+        '--disk', '${disk!.num}', '--real-disk',
+        if (bitlockerAck) ...['--bitlocker-key', 'yes'],
+      ], _onEvent);
+    } catch (e) {
+      result = _crashed(e);
+    } finally {
+      _end();
+    }
     return result!.ok;
   }
 

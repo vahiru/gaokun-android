@@ -222,6 +222,10 @@ class _ReleasePageState extends State<ReleasePage> {
           s.setLocalDir(d);
         }),
       ]),
+      if (s.localDir.isNotEmpty && s.localMissing.isNotEmpty) ...[
+        const SizedBox(height: 12),
+        NoteBox(warn: true, text: l.localMissing(s.localMissing.join(s.language == 'zh' ? '、' : ', '))),
+      ],
       const SizedBox(height: 20),
       Text(l.localNeed, style: context.tt.titleMedium),
       const SizedBox(height: 4),

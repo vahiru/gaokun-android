@@ -73,11 +73,15 @@ class _RunPageState extends State<RunPage> {
             Text('${s.percent}%', style: context.tt.bodySmall),
           ],
           const SizedBox(height: 20),
-          NoteBox(text: switch (task) {
-            WriteTask.install => l.runSleepHintInstall,
-            WriteTask.uninstall => l.runSleepHintUninstall,
-            WriteTask.media => (s.mediaWritten?.usb ?? false) ? '${l.runSleepHintMedia}${l.runMediaUsbHint}' : l.runSleepHintMedia,
-          }),
+          NoteBox(text: [
+            switch (task) {
+              WriteTask.install => l.runSleepHintInstall,
+              WriteTask.uninstall => l.runSleepHintUninstall,
+              WriteTask.media => (s.mediaWritten?.usb ?? false) ? '${l.runSleepHintMedia}${l.runMediaUsbHint}' : l.runSleepHintMedia,
+            },
+            // 下载期间可以关闭窗口（只有 gk3w 写盘时才挡住）：说一声，免得用户以为只能干等
+            if (s.writing && !s.diskBusy && task != WriteTask.uninstall) l.runDownloadCloseHint,
+          ].join('\n')),
           const SizedBox(height: 16),
           Expanded(child: LogView(s.log, controller: _scroll)),
         ]),
@@ -159,14 +163,17 @@ class FailPage extends StatelessWidget {
       ]),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         NoteBox(
-          warn: s.touched,
-          text: !s.touched
-              ? l.failUntouched
-              : switch (task) {
-                  WriteTask.install => l.failTouchedInstall,
-                  WriteTask.uninstall => l.failTouchedUninstall,
-                  WriteTask.media => (s.mediaWritten?.usb ?? false) ? l.failTouchedMediaUsb : l.failTouchedMediaInternal,
-                },
+          warn: s.touched != Touched.no,
+          text: switch (s.touched) {
+            Touched.no => l.failUntouched,
+            // gk3w 没报原因就退出了（被结束、崩溃）：不知道动没动过盘，让用户重新检查看实际状态
+            Touched.unknown => l.failUnknownTouched,
+            Touched.yes => switch (task) {
+                WriteTask.install => l.failTouchedInstall,
+                WriteTask.uninstall => l.failTouchedUninstall,
+                WriteTask.media => (s.mediaWritten?.usb ?? false) ? l.failTouchedMediaUsb : l.failTouchedMediaInternal,
+              },
+          },
         ),
         const SizedBox(height: 16),
         Expanded(child: LogView(s.log)),

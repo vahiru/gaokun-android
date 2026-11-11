@@ -10,7 +10,7 @@ import 'run_pages.dart';
 /// 拖动、最小化、关闭、选文件夹都由界面发起。浏览器预览与测试里没有这个通道，调用什么都不做。
 class WindowControl {
   static const _ch = MethodChannel('gk3/window');
-  static bool? _busy;
+  static (bool, bool)? _busy;
 
   static Future<T?> _call<T>(String m, [Object? arg]) async {
     try {
@@ -26,12 +26,14 @@ class WindowControl {
   /// 按住顶上一行时调用：把这次按下交给 Windows 当作拖动标题栏
   static Future<void> startDrag() => _call<void>('startDrag');
 
-  /// 安装或卸载期间：原生窗口拒绝关闭，阻止关机（Windows 显示 [shutdown] 作为原因），并创建电源请求阻止系统
-  /// 进入睡眠状态、保持屏幕开启（[power] 是 powercfg /requests 中显示的原因）。结束后撤销
-  static void setBusy(bool busy, {String power = '', String shutdown = ''}) {
-    if (_busy == busy) return;
-    _busy = busy;
-    _call<void>('setBusy', {'busy': busy, 'power': power, 'shutdown': shutdown});
+  /// [busy]（gk3w 写盘期间）：原生窗口拒绝关闭，阻止关机（Windows 显示 [shutdown] 作为原因）。
+  /// [awake]（整个任务期间，含下载）：电源请求阻止系统因空闲进入睡眠、保持屏幕开启（[power] 是 powercfg /requests
+  /// 中显示的原因）—— 这台是现代待机设备，熄屏后桌面程序会被挂起，下载会停住。结束后撤销
+  static void setBusy(bool busy, {bool awake = false, String power = '', String shutdown = ''}) {
+    final state = (busy, awake || busy);
+    if (_busy == state) return;
+    _busy = state;
+    _call<void>('setBusy', {'busy': busy, 'awake': awake || busy, 'power': power, 'shutdown': shutdown});
   }
 
   /// 系统的"选择文件夹"对话框（IFileOpenDialog）；取消或没有原生窗口时为 null
@@ -50,7 +52,7 @@ class DragStrip extends StatelessWidget {
       );
 }
 
-/// 右上角的最小化与关闭（Windows 11 的尺寸；关闭键悬停是 #C42B1C 底、白字）。正在写盘时关闭键禁用
+/// 右上角的最小化与关闭（Windows 11 的尺寸；关闭键悬停是 #C42B1C 底、白字）。gk3w 写盘时关闭键禁用（下载期间可以关）
 class WindowButtons extends StatelessWidget {
   const WindowButtons({super.key});
   static const width = 2 * _CaptionButton.width;
@@ -59,7 +61,8 @@ class WindowButtons extends StatelessWidget {
   Widget build(BuildContext context) {
     final s = context.session, l = context.l;
     WindowControl.setBusy(
-      s.writing,
+      s.diskBusy,
+      awake: s.writing,
       power: runTitle(l, s.task),
       shutdown: switch (s.task) {
         WriteTask.install => l.shutdownReasonInstall,
@@ -69,7 +72,7 @@ class WindowButtons extends StatelessWidget {
     );
     return Row(mainAxisSize: MainAxisSize.min, children: [
       _CaptionButton(icon: Icons.remove, label: context.l.winMinimize, onPressed: WindowControl.minimize),
-      _CaptionButton(icon: Icons.close, label: context.l.winClose, danger: true, onPressed: s.writing ? null : WindowControl.close),
+      _CaptionButton(icon: Icons.close, label: context.l.winClose, danger: true, onPressed: s.diskBusy ? null : WindowControl.close),
     ]);
   }
 }

@@ -7,6 +7,9 @@ import 'package:gk3_common/backend/protocol.dart';
 
 import 'net.dart';
 
+/// 随程序分发、缺一不可的后端文件（CMake 打包进程序目录的 backend\）
+const kBackendFiles = ['gk3w.exe', 'mke2fs.exe', 'mke2fs.conf', 'systemd-bootaa64.efi'];
+
 /// 真后端：gk3w.exe（installer/backend）做检查、分区方案、写盘与卸载；版本列表与下载在 Dart 里做（net.dart）。
 /// 参数按 argv 传（Process.start 不经过 shell），不拼命令行。
 ///
@@ -42,7 +45,7 @@ class WinBackend extends Gk3Backend {
   ///   —— 第一次在 VHD 上端到端跑就死在第二次调用上（每次调用结束时 flush，没有 await）
   final RandomAccessFile? log;
 
-  static const _gk3wCommands = {'preflight', 'probe', 'plan', 'apply', 'uninstall', 'hash'};
+  static const _gk3wCommands = {'preflight', 'probe', 'plan', 'apply', 'uninstall', 'hash', 'space'};
 
   /// 写盘的调用：测试模式下去掉 --real-disk / --bitlocker-key
   static const _writes = {'apply', 'uninstall'};
@@ -64,17 +67,16 @@ class WinBackend extends Gk3Backend {
     }
   }
 
-  /// 按 [gk3w] 所在目录找：程序目录下的 backend\gk3w.exe（CMake 打包进去的），或环境变量 GK3W 指的那个
-  static WinBackend? locate({int? testDisk}) {
+  /// 找后端：程序目录下的 backend\（CMake 打包进去的），或环境变量 GK3W 指的 gk3w.exe 所在的目录。
+  /// [kBackendFiles] 缺任何一个都返回 [MissingBackend]（检查页报"安装器文件不完整"）：原先缺 mke2fs 时悄悄不传
+  /// --mke2fs、改走尚未上机验证的清零路径，缺 systemd-boot 要下载完才报错（审查 11-12 第 9 条）
+  static Gk3Backend locate({int? testDisk}) {
     final exeDir = File(Platform.resolvedExecutable).parent.path;
-    final gk3w = [Platform.environment['GK3W'], '$exeDir\\backend\\gk3w.exe']
-        .whereType<String>()
-        .where((f) => File(f).existsSync())
-        .firstOrNull;
-    if (gk3w == null) return null;
-    final dir = File(gk3w).parent.path;
-    final mk = '$dir\\mke2fs.exe';
-    final hasMk = File(mk).existsSync() && File('$dir\\mke2fs.conf').existsSync();
+    final env = Platform.environment['GK3W'];
+    final dir = env != null && env.isNotEmpty ? File(env).parent.path : '$exeDir\\backend';
+    final missing = [for (final f in kBackendFiles) if (!File('$dir\\$f').existsSync()) f];
+    if (missing.isNotEmpty) return MissingBackend('$dir: ${missing.join(', ')}');
+    final gk3w = '$dir\\gk3w.exe', mk = '$dir\\mke2fs.exe';
     final base = Platform.environment['ProgramData'] ?? r'C:\ProgramData';
     RandomAccessFile? log;
     String? logPath;
@@ -87,13 +89,14 @@ class WinBackend extends Gk3Backend {
     } on FileSystemException {
       log = null;
     }
-    log?.writeStringSync('gaokun3 Windows installer: gk3w=$gk3w mke2fs=${hasMk ? mk : '(none)'} test_disk=${testDisk ?? '(none)'}\n');
+    log?.writeStringSync('gaokun3 Windows installer: backend=$dir test_disk=${testDisk ?? '(none)'}\n');
     return WinBackend(
       gk3w: gk3w,
       sdboot: '$dir\\systemd-bootaa64.efi',
       backupDir: '$base\\gaokun3\\backup',
-      mke2fs: hasMk ? mk : null,
+      mke2fs: mk,
       testDisk: testDisk,
+      net: Net(proxy: windowsSystemProxy),
       log: log,
       logPath: logPath,
     );
@@ -109,21 +112,26 @@ class WinBackend extends Gk3Backend {
     if (fn == 'releases') {
       src = _net.releases(args);
     } else if (fn == 'download') {
-      src = _net.download(args, hash);
+      src = _net.download(args, hash, space: space);
     } else if (_gk3wCommands.contains(fn)) {
       src = _run(fn, argv);
     } else {
       src = Stream.fromIterable([Gk3Log('!! unknown backend function: $fn'), const Gk3Exit(127)]);
     }
-    // 日志：下载的进度只记每 10 %，别的照抄
+    // 日志：下载的进度每个文件只记每 10 %（换了文件重新算），别的照抄
     var lastDl = -10;
+    var dlName = '';
     return src.map((e) {
       switch (e) {
         case Gk3Progress(code: 'dl'):
           final pct = int.tryParse(e['pct']) ?? 0;
+          if (e['name'] != dlName) {
+            dlName = e['name'];
+            lastDl = -10;
+          }
           if (pct >= lastDl + 10) {
             lastDl = pct;
-            _w('   PROGRESS ${e.percent} ${e.text}');
+            _w('[${_ts()}] PROGRESS ${e.percent} ${e.text}');
           }
         case Gk3Progress():
           _w('   PROGRESS ${e.percent} ${e.text}');
@@ -193,6 +201,13 @@ class WinBackend extends Gk3Backend {
     return ctl.stream;
   }
 
+  /// 目录所在卷的可用字节（gk3w space；下载前用）。查不了 → null（不挡，写满时照样报 dl-write）
+  Future<int?> space(String dir) async {
+    final r = await run('space', [dir]);
+    final v = r.first('SPACE')?['avail'];
+    return r.ok && v != null ? int.tryParse(v) : null;
+  }
+
   /// 一个文件的 sha256（gk3w hash；下载核对用）
   Future<String> hash(String path) async {
     final r = await run('hash', [path]);
@@ -234,7 +249,7 @@ class MissingBackend extends Gk3Backend {
   @override
   Stream<Gk3Event> call(String fn, [List<String> args = const []]) => Stream.fromIterable([
         const Gk3Record('ERR', {'code': 'backend-missing'}),
-        Gk3Log('!! gk3w.exe not found ($where)'),
+        Gk3Log('!! installer files missing ($where)'),
         const Gk3Exit(127),
       ]);
 

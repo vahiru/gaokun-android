@@ -2,7 +2,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:gk3_common/backend/protocol.dart';
 import 'package:gk3_windows/app.dart';
+import 'package:gk3_windows/session.dart';
 import 'package:gk3_windows/ui/media_pages.dart';
 import 'package:gk3_windows/ui/run_pages.dart';
 
@@ -46,9 +48,12 @@ void main() {
     expect(apply, containsAllInOrder(['--default-os', 'windows', '--real-disk']));
     expect(apply, isNot(contains('--bitlocker-key')));
     expect(s.percent, 100);
+    // 下载期间只保持唤醒、不挡关闭与关机；gk3w 写盘时才挡；结束后都撤销（审查 11-12 第 2 条）
     final busy = [for (final c in window) if (c.method == 'setBusy') c.arguments as Map];
-    expect(busy.where((a) => a['busy'] == true).single, {'busy': true, 'power': l.runInstallTitle, 'shutdown': l.shutdownReasonInstall});
-    expect(busy.last['busy'], isFalse);
+    expect(busy.firstWhere((a) => a['awake'] == true), {'busy': false, 'awake': true, 'power': l.runInstallTitle, 'shutdown': l.shutdownReasonInstall});
+    expect(busy.where((a) => a['busy'] == true).single, {'busy': true, 'awake': true, 'power': l.runInstallTitle, 'shutdown': l.shutdownReasonInstall});
+    expect(busy.last, containsPair('busy', false));
+    expect(busy.last, containsPair('awake', false));
 
     await tap(t, find.text(l.btnRebootNow));
     expect(rec.reboots, 1);
@@ -139,7 +144,7 @@ void main() {
     await waitFor(t, find.byType(FailPage), tries: 400);
     expect(find.text(l.errRelease), findsOneWidget);
     expect(find.text(l.failUntouched), findsOneWidget);
-    expect(s.touched, isFalse);
+    expect(s.touched, Touched.no);
   });
 
   testWidgets('安装介质写入U盘：侧栏入口 → 说明 → 目标 → 版本 → 确认；gk3w 还没有 media 命令，写入这一步按失败处理', (t) async {
@@ -174,15 +179,16 @@ void main() {
     await hold(t, l.holdToWrite);
     await waitFor(t, find.byType(FailPage), tries: 400);
     expect(find.text(l.failMediaTitle), findsOneWidget);
-    expect(find.text(l.failUntouched), findsOneWidget);
+    // 回放数据里没有 gk3w media：退出码 127、没有 ERR —— 与 gk3w 被结束时一样，按"不知道动没动过盘"说
+    expect(find.text(l.failUnknownTouched), findsOneWidget);
     expect(rec.calls.where((c) => c.first == 'download').length, 1);
     final media = rec.calls.singleWhere((c) => c.first == 'media');
     expect(media, containsAllInOrder(['--target', 'usb', '--disk', '3', '--release', r'C:\ProgramData\gaokun3\release']));
     expect(media, containsAllInOrder(['--livecd', 'https://github.com/vahiru/gaokun-android/releases/download/v1.0.0-rc.2/gaokun3-installer-0.2.0-rc.2-windows.zip']));
     expect(media, isNot(contains('--real-disk')));
     final busy = [for (final c in window) if (c.method == 'setBusy') c.arguments as Map];
-    expect(busy.where((a) => a['busy'] == true).single, {'busy': true, 'power': l.runMediaTitle, 'shutdown': l.shutdownReasonMedia});
-    expect(busy.last['busy'], isFalse);
+    expect(busy.where((a) => a['busy'] == true).single, {'busy': true, 'awake': true, 'power': l.runMediaTitle, 'shutdown': l.shutdownReasonMedia});
+    expect(busy.last, containsPair('busy', false));
     // 返回首页后，入口又能用了；重新检查清掉了之前选的目标
     await tap(t, find.text(l.btnStartOver));
     await see(t, find.text(l.chkRoom('40 GiB')));
@@ -285,6 +291,55 @@ void main() {
     expect(find.byType(DonePage), findsOneWidget);
     expect(rec.calls.singleWhere((c) => c.first == 'apply'), containsAllInOrder(['--bitlocker-key', 'yes']));
   });
+
+  testWidgets('gk3w 写盘时没报原因就退出（被结束、崩溃）：失败页不说"磁盘未被修改"，而是请用户重新检查', (t) async {
+    final (rec, s) = await pumpApp(t, 'free');
+    rec.replace['apply'] = (args) => Stream.fromIterable([const Gk3Log('PROGRESS 30 write-super'), const Gk3Exit(1)]);
+    await tap(t, find.text(l.btnNext));
+    await tap(t, find.text(l.btnNext));
+    await see(t, find.textContaining('v1.0.0-rc.3'));
+    await tap(t, find.text(l.srcLocal));
+    await t.enterText(find.byType(TextField), r'D:\gk3\rc3');
+    await settle(t);
+    await tap(t, find.text(l.btnNext));
+    await tap(t, find.text(l.btnNext));
+    await hold(t, l.holdToInstall);
+    await waitFor(t, find.byType(FailPage), tries: 400);
+    expect(s.touched, Touched.unknown);
+    expect(find.text(l.failUnknownTouched), findsOneWidget);
+    expect(find.text(l.failUntouched), findsNothing);
+    expect(s.writing, isFalse);
+    expect(s.diskBusy, isFalse);
+  });
+
+  testWidgets('已安装时 Secure Boot / 快速启动开着也能去管理、卸载；没装时挡住', (t) async {
+    sbOn(Gk3Event e) => e is Gk3Record && e.type == 'PREFLIGHT'
+        ? Gk3Record('PREFLIGHT', {...e.fields, 'secure_boot': 'on', 'fast_startup': 'on'})
+        : e;
+    final (rec, s) = await pumpApp(t, 'installed', map: {'preflight': sbOn});
+    await see(t, find.text(l.chkInstalled));
+    expect(find.text(l.chkSecureBootOn), findsOneWidget);
+    expect(enabled(t, l.btnManage), isTrue);
+    expect(rec.calls.first.first, 'preflight');
+  });
+
+  testWidgets('没装时 Secure Boot 开着照样挡住', (t) async {
+    final (_, s) = await pumpApp(t, 'free', map: {
+      'preflight': (e) => e is Gk3Record && e.type == 'PREFLIGHT' ? Gk3Record('PREFLIGHT', {...e.fields, 'secure_boot': 'on'}) : e,
+    });
+    await see(t, find.text(l.chkSecureBootOn));
+    expect(s.installed, isFalse);
+    expect(enabled(t, l.btnNext), isFalse);
+  });
+
+  testWidgets('检查调用失败却没报原因：检查页挡住并说明（不再空着页面放行）', (t) async {
+    final (rec, s) = await pumpApp(t, 'free', replaceFirst: {'preflight': (_) => Stream.fromIterable([const Gk3Exit(1)])});
+    await see(t, find.text(l.chkFailed));
+    expect(s.checkErr!['code'], 'backend-failed');
+    expect(find.text(l.errBackendFailed), findsOneWidget);
+    expect(enabled(t, l.btnNext), isFalse);
+  });
+
 
   testWidgets('英文界面：检查页上没有中文', (t) async {
     await pumpApp(t, 'blocked', language: 'en');

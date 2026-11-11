@@ -250,6 +250,68 @@ void main() {
     expect(r.err!['code'], 'dl-sums');
   });
 
+  test('续传时服务器从错的位置开始回 206：丢掉、删 .part，从头重下（不写错位的数据）', () async {
+    File('${dir.path}/super.img.zst.part').writeAsBytesSync(sup.sublist(0, 1000));
+    var n = 0;
+    srv.hooks['super.img.zst'] = (req) async {
+      if (n++ > 0 || req.headers.value('range') == null) return false;
+      final resp = req.response;
+      resp.statusCode = 206;
+      resp.headers.set(HttpHeaders.contentRangeHeader, 'bytes 1500-${sup.length - 1}/${sup.length}');
+      resp.contentLength = sup.length - 1500;
+      resp.add(sup.sublist(1500));
+      await resp.close();
+      return true;
+    };
+    final r = await collect(dl());
+    expect(r.ok, isTrue, reason: '${r.log.map((l) => l.line)}');
+    expect(File('${dir.path}/super.img.zst').readAsBytesSync(), sup);
+    expect(srv.requests.where((q) => q.startsWith('GET super.img.zst')), ['GET super.img.zst bytes=1000-', 'GET super.img.zst']);
+  });
+
+  test('放不下：开始下载前报 dl-space，不把盘写满', () async {
+    final r = await collect(Net(cfg: fast).download([srv.base, dir.path], sha256sum, space: (_) async => 1 << 20));
+    expect(r.ok, isFalse);
+    expect(r.err!['code'], 'dl-space');
+    expect(r.err!['name'], 'boot.img');
+    expect(File('${dir.path}/boot.img.part').existsSync(), isFalse);
+  });
+
+  test('放得下：照常下载', () async {
+    final r = await collect(Net(cfg: fast).download([srv.base, dir.path], sha256sum, space: (_) async => 10 << 30));
+    expect(r.ok, isTrue);
+  });
+
+  test('版本列表格式不对（response 是空的）：报 manifest-unavailable，不让流出错', () async {
+    srv.files['ota/gaokun3.json'] = utf8.encode('{"response": []}');
+    final r = await collect(Net(cfg: NetConfig(otaJson: '${srv.base}ota/gaokun3.json')).releases(['--source', 'r2']));
+    expect(r.ok, isFalse);
+    expect(r.err!['code'], 'manifest-unavailable');
+  });
+
+  test('代理：每次请求前问一次，请求经由代理发出', () async {
+    var asked = 0;
+    final net = Net(cfg: fast, proxy: () async {
+      asked++;
+      return parseProxyServer('http://127.0.0.1:${Uri.parse(srv.base).port}/');
+    });
+    // 不存在的主机名：只有经由代理（本地服务）才拿得到
+    final r = await collect(net.download(['http://gk3.invalid/', dir.path], sha256sum));
+    expect(r.ok, isTrue, reason: '${r.log.map((l) => l.line)}');
+    expect(asked, greaterThanOrEqualTo(3));
+  });
+
+  test('ProxyServer 的几种写法', () {
+    expect(parseProxyServer('127.0.0.1:7890'), '127.0.0.1:7890');
+    expect(parseProxyServer('http://127.0.0.1:7890'), '127.0.0.1:7890');
+    expect(parseProxyServer('http://127.0.0.1:7890/'), '127.0.0.1:7890');
+    expect(parseProxyServer('http=127.0.0.1:7890;https=127.0.0.1:7891;ftp=x:1'), '127.0.0.1:7891');
+    expect(parseProxyServer('http=http://127.0.0.1:7890'), '127.0.0.1:7890');
+    expect(parseProxyServer('socks=127.0.0.1:7891'), isNull);
+    expect(parseProxyServer(''), isNull);
+  });
+
+
   test('GitHub 的版本列表与回放数据（testdata/common/releases-github.txt）相同', () {
     final list = (jsonDecode(File('test/data/github-releases.json').readAsStringSync()) as List).cast<Map<String, dynamic>>();
     final got = [for (final r in githubVariants(list)) '${r.type} ${r.fields}'];

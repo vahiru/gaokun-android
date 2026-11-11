@@ -41,7 +41,7 @@ class FlutterWindow : public Win32Window {
   HANDLE power_request_ = nullptr;
 
   // 开始或结束一次安装或卸载：设置或撤销电源请求与阻止关机的原因
-  void SetBusy(bool busy, const std::wstring& power_reason, const std::wstring& shutdown_reason);
+  void SetBusy(bool busy, bool awake, const std::wstring& power_reason, const std::wstring& shutdown_reason);
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

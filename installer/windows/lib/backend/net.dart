@@ -52,6 +52,7 @@ class _Transient implements Exception {
 
 /// 系统代理（Windows 的"设置 → 网络 → 代理 → 手动设置代理"，Clash 之类"设为系统代理"写的就是它）。
 /// 没有设置、或读不到 → null，按环境变量（http_proxy 等）或直连。自动配置脚本（PAC）不支持。
+/// 每次联网前重读（[Net.proxy]）：用户可能在打开安装器之后才开代理。
 Future<String?> windowsSystemProxy() async {
   if (!Platform.isWindows) return null;
   try {
@@ -61,33 +62,50 @@ Future<String?> windowsSystemProxy() async {
     final enable = RegExp(r'ProxyEnable\s+REG_DWORD\s+0x(\d+)').firstMatch(out)?.group(1);
     final server = RegExp(r'ProxyServer\s+REG_SZ\s+(\S+)').firstMatch(out)?.group(1);
     if (enable != '1' || server == null) return null;
-    // "host:port"，或按协议分开的 "http=host:port;https=host:port;…"（取 https 的，没有就取 http 的）
-    if (!server.contains('=')) return server;
-    final m = {for (final p in server.split(';')) if (p.contains('=')) p.split('=')[0].toLowerCase(): p.split('=')[1]};
-    return m['https'] ?? m['http'];
+    return parseProxyServer(server);
   } on ProcessException {
     return null;
   }
+}
+
+/// Internet Settings 的 ProxyServer → "host:port"（给 HttpClient 的 "PROXY host:port"）；用不了 → null。
+///   "127.0.0.1:7890"、"http://127.0.0.1:7890"、"http=127.0.0.1:7890;https=127.0.0.1:7890;socks=…"（取 https 的，没有取 http 的）。
+/// ⚠️ 前缀 http:// 要去掉：Dart 会把 "http://127.0.0.1" 整个当成主机名，连不上就按 "PROXY …; DIRECT" 悄悄直连（核实 11-12）。
+/// 只有 socks= 时返回 null（HttpClient 不支持 SOCKS），按环境变量或直连。
+String? parseProxyServer(String server) {
+  String? clean(String? v) {
+    if (v == null) return null;
+    final t = v.trim().replaceFirst(RegExp(r'^[a-zA-Z][a-zA-Z0-9+.-]*://'), '').replaceFirst(RegExp(r'/+$'), '');
+    return t.isEmpty ? null : t;
+  }
+
+  if (!server.contains('=')) return clean(server);
+  final m = <String, String>{};
+  for (final p in server.split(';')) {
+    final eq = p.indexOf('=');
+    if (eq > 0) m[p.substring(0, eq).trim().toLowerCase()] = p.substring(eq + 1);
+  }
+  return clean(m['https']) ?? clean(m['http']);
 }
 
 class Net {
   Net({this.cfg = const NetConfig(), this.proxy});
   final NetConfig cfg;
 
-  /// "host:port"；null = 按环境变量或直连
-  final String? proxy;
+  /// 每次联网前问一次代理（"host:port"；null = 按环境变量或直连）。Windows 上是 [windowsSystemProxy]
+  final Future<String?> Function()? proxy;
 
-  HttpClient _client() {
+  Future<HttpClient> _client() async {
     final c = HttpClient()
       ..connectionTimeout = cfg.connectTimeout
       ..userAgent = cfg.userAgent;
-    final p = proxy;
+    final p = await proxy?.call();
     c.findProxy = p == null ? HttpClient.findProxyFromEnvironment : (_) => 'PROXY $p; DIRECT';
     return c;
   }
 
   Future<(int, String)> _getText(String url, {Map<String, String> headers = const {}}) async {
-    final c = _client();
+    final c = await _client();
     try {
       final req = await c.getUrl(Uri.parse(url));
       headers.forEach(req.headers.set);
@@ -101,7 +119,7 @@ class Net {
 
   /// HEAD：(状态码, Content-Length 或 -1)
   Future<(int, int)> _head(String url) async {
-    final c = _client();
+    final c = await _client();
     try {
       final req = await c.headUrl(Uri.parse(url));
       final resp = await req.close().timeout(cfg.stallWindow);
@@ -174,8 +192,11 @@ class Net {
   // ── 下载 ──
 
   /// `download <base-url> <目录>`：校验清单、boot.img、super.img.zst，核对后报 RELEASE dir=… source=net。
-  /// [hash] 算一个文件的 sha256（小写 hex；Windows 上是 gk3w hash），算不了就抛异常
-  Stream<Gk3Event> download(List<String> args, Future<String> Function(String path) hash) => _guard(() async* {
+  /// [hash] 算一个文件的 sha256（小写 hex；Windows 上是 gk3w hash），算不了就抛异常。
+  /// [space] 目录所在卷的可用字节（Windows 上是 gk3w space；null = 不查）：每个文件开始下载前确认放得下，
+  /// 不把 C 盘写满了才失败（审查 11-12 第 7 条）
+  Stream<Gk3Event> download(List<String> args, Future<String> Function(String path) hash, {Future<int?> Function(String dir)? space}) =>
+      _guard(() async* {
         if (args.length != 2) throw NetError('usage', 'usage: download <base-url> <dir>');
         final base = args[0].endsWith('/') ? args[0] : '${args[0]}/';
         final dir = args[1];
@@ -197,7 +218,7 @@ class Net {
               if (await x.exists()) await x.delete();
             }
           }
-          await for (final e in _fetch('$base$name', dir, name, want, lo, span, hash)) {
+          await for (final e in _fetch('$base$name', dir, name, want, lo, span, hash, space)) {
             yield e;
           }
         }
@@ -225,7 +246,8 @@ class Net {
 
   static bool _transientHttp(int s) => s == 408 || s == 429 || (s >= 500 && s < 600);
 
-  Stream<Gk3Event> _fetch(String url, String dir, String name, String want, int lo, int span, Future<String> Function(String) hash) async* {
+  Stream<Gk3Event> _fetch(String url, String dir, String name, String want, int lo, int span, Future<String> Function(String) hash,
+      Future<int?> Function(String)? space) async* {
     final sep = Platform.pathSeparator;
     final dst = File('$dir$sep$name'), part = File('$dir$sep$name.part');
     yield _prog(lo, 'dl-start', {'name': name});
@@ -241,7 +263,7 @@ class Net {
     }
     for (var t = 1;; t++) {
       try {
-        await for (final e in _get(url, part, name, lo, span)) {
+        await for (final e in _get(url, dir, part, name, lo, span, space)) {
           yield e;
         }
         break;
@@ -266,8 +288,8 @@ class Net {
   }
 
   /// 一次 GET（按 .part 现有的长度续传）。暂时的失败抛 [_Transient]，别的抛 [NetError]
-  Stream<Gk3Event> _get(String url, File part, String name, int lo, int span) async* {
-    final c = _client();
+  Stream<Gk3Event> _get(String url, String dir, File part, String name, int lo, int span, Future<int?> Function(String)? space) async* {
+    final c = await _client();
     RandomAccessFile? out;
     try {
       var offset = await part.exists() ? await part.length() : 0;
@@ -294,12 +316,29 @@ class Net {
         if (_transientHttp(st)) throw _Transient('HTTP $st');
         throw NetError('dl-http', 'cannot download $url (HTTP $st)', {'name': name, 'http': '$st'});
       }
-      // 206 但起点不对、或服务器不认 Range（200）：从头下
-      if (st == 200 || !(resp.headers.value(HttpHeaders.contentRangeHeader) ?? '').startsWith('bytes $offset-')) {
-        if (offset > 0) yield Gk3Log('$name: the server did not resume at byte $offset, starting over');
+      // 206 但起点不对：这次的正文不是从 offset 开始的，写进哪里都是错位的数据（原先截断 .part 从头写，必然校验不符）。
+      // 丢掉这次响应、删掉 .part，按暂时的失败重试 —— 下一次不带 Range，从头下（审查 11-12 第 13 条）
+      if (st == 206 && !(resp.headers.value(HttpHeaders.contentRangeHeader) ?? '').startsWith('bytes $offset-')) {
+        await resp.drain<void>();
+        if (await part.exists()) await part.delete();
+        throw _Transient('the server resumed at the wrong offset (asked for byte $offset)');
+      }
+      // 服务器不认 Range（回 200）：从头下
+      if (st == 200 && offset > 0) {
+        yield Gk3Log('$name: the server did not resume at byte $offset, starting over');
         offset = 0;
       }
       final total = resp.contentLength < 0 ? -1 : offset + resp.contentLength;
+      // 放得下吗：还要下的字节 + 64 MiB 余量（.part 已经占着的不再算）
+      if (space != null && total > 0) {
+        final avail = await space(dir);
+        final need = total - offset + (64 << 20);
+        if (avail != null && avail < need) {
+          await resp.drain<void>().catchError((Object _) {});
+          throw NetError('dl-space', 'not enough free space for $name in $dir: ${need >> 20} MiB needed, ${avail >> 20} MiB available',
+              {'name': name, 'need_mib': '${need >> 20}', 'avail_mib': '${avail >> 20}'});
+        }
+      }
       out = await part.open(mode: offset == 0 ? FileMode.write : FileMode.append);
       var done = offset;
       var winStart = DateTime.now(), winBytes = 0, lastProg = DateTime.fromMillisecondsSinceEpoch(0), lastPct = -1;
@@ -358,7 +397,9 @@ class Net {
       yield Gk3Record('ERR', {'code': e.code, ...e.fields});
       yield Gk3Log('!! ${e.human}');
       yield const Gk3Exit(1);
-    } on Exception catch (e) {
+    } catch (e) {
+      // 兜底：解析出错（TypeError、空列表上取 .first 的 StateError）也必须报成一次失败的调用，不能让流出错 ——
+      // 否则调用方的 run() 抛出，界面一直转圈（审查 11-12 第 4 条，response: [] 实验复现）
       yield Gk3Record('ERR', {'code': failCode});
       yield Gk3Log('!! $e');
       yield const Gk3Exit(1);

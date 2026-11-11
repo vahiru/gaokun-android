@@ -65,7 +65,9 @@ static int bitlocker_protection(wchar_t drive)
     query = SysAllocString(q);
     if (FAILED(IWbemServices_ExecQuery(svc, lang, query, WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY, NULL, &en)))
         goto out;
-    if (IEnumWbemClassObject_Next(en, (LONG)WBEM_INFINITE, 1, &obj, &n) != WBEM_S_NO_ERROR || n != 1)
+    /* 最多等 30 秒：WMI 服务卡住时不能让 preflight 一直不返回（检查页会一直转圈、"重新检查"也点不了）。
+     * 超时（WBEM_S_TIMEDOUT）按"读不到"处理：界面显示 BitLocker 状态未知，要求确认恢复密钥 */
+    if (IEnumWbemClassObject_Next(en, 30000, 1, &obj, &n) != WBEM_S_NO_ERROR || n != 1)
         goto out;
     VariantInit(&v);
     if (SUCCEEDED(IWbemClassObject_Get(obj, L"ProtectionStatus", 0, &v, NULL, NULL))) {
