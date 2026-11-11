@@ -626,6 +626,49 @@ int gk3w_sha256(const void *data, size_t len, uint8_t out[32])
     return gk3w_sha256_end(c, out);
 }
 
+/* 整个文件的 sha256（小写 hex），size 非空时顺带报文件长度。读到一半出错（ReadFile 失败）算失败 ——
+ * 原先 apply 里的那份读失败时照样返回 0，等于把半个文件的散列当成整个文件的 */
+int gk3w_file_sha256(const wchar_t *path, char out[65], uint64_t *size)
+{
+    enum { CHUNK = 4u << 20 };
+    HANDLE h = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+    gk3w_sha256_ctx *c;
+    uint8_t *buf, d[32];
+    uint64_t total = 0;
+    DWORD got;
+    int rc = 0;
+    if (h == INVALID_HANDLE_VALUE)
+        return -1;
+    buf = malloc(CHUNK);
+    c = gk3w_sha256_begin();
+    if (!buf || !c) {
+        free(buf);
+        if (c)
+            gk3w_sha256_end(c, d);
+        CloseHandle(h);
+        return -1;
+    }
+    for (;;) {
+        if (!ReadFile(h, buf, CHUNK, &got, NULL)) {
+            rc = -1;
+            break;
+        }
+        if (!got)
+            break;
+        total += got;
+        if (gk3w_sha256_update(c, buf, got))
+            rc = -1;
+    }
+    if (gk3w_sha256_end(c, d))
+        rc = -1;
+    gk3w_hex(d, 32, out);
+    if (size)
+        *size = total;
+    free(buf);
+    CloseHandle(h);
+    return rc;
+}
+
 void gk3w_hex(const uint8_t *b, size_t n, char *out)
 {
     static const char hx[] = "0123456789abcdef";

@@ -109,6 +109,8 @@ typedef struct gk3w_sha256_ctx gk3w_sha256_ctx;
 gk3w_sha256_ctx *gk3w_sha256_begin(void);
 int gk3w_sha256_update(gk3w_sha256_ctx *c, const void *data, size_t len);
 int gk3w_sha256_end(gk3w_sha256_ctx *c, uint8_t out[32]);
+/* 整个文件的 sha256（小写 hex）与长度；0 = 成功，-1 = 打不开 / 读失败 / CNG 出错 */
+int gk3w_file_sha256(const wchar_t *path, char out[65], uint64_t *size);
 void gk3w_hex(const uint8_t *b, size_t n, char *out);
 int gk3w_random(void *buf, size_t n);
 

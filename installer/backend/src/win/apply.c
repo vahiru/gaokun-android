@@ -106,35 +106,6 @@ static int manifest_hash(const uint8_t *m, size_t len, const char *name, char ou
     return -1;
 }
 
-static int file_sha256(const wchar_t *path, char out[65])
-{
-    HANDLE h = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
-    gk3w_sha256_ctx *c;
-    uint8_t *buf, d[32];
-    DWORD got;
-    int rc = 0;
-    if (h == INVALID_HANDLE_VALUE)
-        return -1;
-    buf = malloc(IO_CHUNK);
-    c = gk3w_sha256_begin();
-    if (!buf || !c) {
-        free(buf);
-        if (c)
-            gk3w_sha256_end(c, d);
-        CloseHandle(h);
-        return -1;
-    }
-    while (ReadFile(h, buf, IO_CHUNK, &got, NULL) && got)
-        if (gk3w_sha256_update(c, buf, got))
-            rc = -1;
-    if (gk3w_sha256_end(c, d))
-        rc = -1;
-    gk3w_hex(d, 32, out);
-    free(buf);
-    CloseHandle(h);
-    return rc;
-}
-
 /* ── super：zstd → sparse → 盘 ─────────────────────────────────────── */
 
 typedef struct {
@@ -527,7 +498,7 @@ int gk3w_cmd_apply(int argc, wchar_t **argv)
             char want[65], got[65];
             if (manifest_hash(man, man_len, names[i], want))
                 continue;
-            if (file_sha256(paths[i], got) || strcmp(want, got)) {
+            if (gk3w_file_sha256(paths[i], got, NULL) || strcmp(want, got)) {
                 gk3w_err_kv(T, "sha-mismatch", "file", names[i], "a downloaded file does not match the sha256 in the release manifest; download it again (disk not touched)", 0);
                 goto out;
             }

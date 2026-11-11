@@ -5,6 +5,7 @@
 #   make win-arm64   ARM64 版（平板）
 #   make mke2fs      Windows 版 mke2fs.exe（x64 与 ARM64，mke2fs/build.sh：Debian e2fsprogs 源码 + patches/e2fsprogs）
 #   make mke2fs-align 本仓编的 mke2fs 与 Debian mkfs.ext4 对拍（要 docker）
+#   make sdboot      Windows 安装器随程序分发的 systemd-bootaa64.efi（sdboot/fetch.sh：Debian 的包，按 sha256 钉死）
 #   make host-tools  主机上的辅助工具（build/host/unsparse：用同一份 zstd + sparse 代码把 super.img.zst 展开成文件，
 #                    与 gk3-unsparse.py 的结果对拍）
 #
@@ -30,7 +31,7 @@ WINFLAGS  := -std=gnu11 -O2 $(WARN) -Werror -municode -DUNICODE -D_UNICODE -I$(C
 ZSTDFLAGS := -O2 -w
 WINLIBS   := -static -lrpcrt4 -lbcrypt -lole32 -loleaut32 -lwbemuuid
 
-.PHONY: all test win-x64 win-arm64 host-tools mke2fs mke2fs-align clean
+.PHONY: all test win-x64 win-arm64 host-tools mke2fs mke2fs-align sdboot clean
 all: test win-x64 win-arm64 host-tools
 
 test: $(B)/test_host $(B)/test_stage2
@@ -80,3 +81,6 @@ mke2fs-align:
 
 clean:
 	rm -rf $(B)
+
+sdboot:
+	bash sdboot/fetch.sh
