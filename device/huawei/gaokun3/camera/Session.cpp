@@ -1013,9 +1013,9 @@ int Session::toJ420(const SrcFrame &src, int32_t dstW, int32_t dstH,
 			return libyuv::NV12ToI420(sy, src.stride, suv, src.stride, dy, ys, du, cs,
 						  dv, cs, dstW, dstH);
 		/* 先缩放 NV12（只有一个交错的色度平面要处理），再拆平面。 */
-		std::vector<uint8_t> t(static_cast<size_t>(dstW) * dstH +
-				       static_cast<size_t>(cw) * 2 * chh);
-		uint8_t *ty = t.data();
+		scaleScratch_.resize(static_cast<size_t>(dstW) * dstH +
+				     static_cast<size_t>(cw) * 2 * chh);
+		uint8_t *ty = scaleScratch_.data();
 		uint8_t *tuv = ty + static_cast<size_t>(dstW) * dstH;
 		int rc = libyuv::NV12Scale(sy, src.stride, suv, src.stride, c.w, c.h, ty, dstW, tuv,
 					   cw * 2, dstW, dstH, libyuv::kFilterBox);
@@ -1058,6 +1058,22 @@ int Session::toJ420(const SrcFrame &src, int32_t dstW, int32_t dstH,
 	return rc;
 }
 
+int Session::toNv12(const SrcFrame &src, int32_t dstW, int32_t dstH,
+		    uint8_t *dy, int ys, uint8_t *duv, int cs) const
+{
+	const Crop c = cropFor(dstW, dstH);
+	const uint8_t *sy = src.data + static_cast<size_t>(c.y) * src.stride + c.x;
+	const uint8_t *suv = src.uv + static_cast<size_t>(c.y / 2) * src.stride + c.x;
+
+	if (dstW == c.w && dstH == c.h) {
+		libyuv::CopyPlane(sy, src.stride, dy, ys, dstW, dstH);
+		libyuv::CopyPlane(suv, src.stride, duv, cs, (dstW + 1) / 2 * 2, (dstH + 1) / 2);
+		return 0;
+	}
+	return libyuv::NV12Scale(sy, src.stride, suv, src.stride, c.w, c.h, dy, ys, duv, cs,
+				 dstW, dstH, libyuv::kFilterBox);
+}
+
 bool Session::deliver(const SrcFrame &src, buffer_handle_t dst,
 		      int32_t dstW, int32_t dstH, int chromaBlur)
 {
@@ -1070,44 +1086,79 @@ bool Session::deliver(const SrcFrame &src, buffer_handle_t dst,
 		return false;
 	}
 
-	bool ok = false;
+	uint8_t *oy = static_cast<uint8_t *>(ycbcr.y);
+	uint8_t *ocb = static_cast<uint8_t *>(ycbcr.cb);
+	uint8_t *ocr = static_cast<uint8_t *>(ycbcr.cr);
+	const int ys = static_cast<int>(ycbcr.ystride), cs = static_cast<int>(ycbcr.cstride);
 	const int cw = (dstW + 1) / 2, chh = (dstH + 1) / 2;
-	std::vector<uint8_t> i420(static_cast<size_t>(dstW) * dstH +
-				  static_cast<size_t>(cw) * chh * 2);
-	uint8_t *dy = i420.data();
-	uint8_t *du = dy + static_cast<size_t>(dstW) * dstH;
-	uint8_t *dv = du + static_cast<size_t>(cw) * chh;
+	/* 半平面布局：CbCr（NV12）或 CrCb（NV21）成对存在一个平面里 */
+	const bool nv12 = ycbcr.chroma_step == 2 && ocr == ocb + 1;
+	const bool nv21 = ycbcr.chroma_step == 2 && ocb == ocr + 1;
+	const bool planar = ycbcr.chroma_step == 1;
+	int rc;
 
-	const int rc = toJ420(src, dstW, dstH, dy, dstW, du, dv, cw);
-
-	if (rc == 0 && chromaBlur > 0) {
-		/* 色度降噪：U/V 只有 1/4 分辨率，盒式模糊几乎免费，而彩色噪点正是最难看的那种。 */
-		boxBlurPlane(du, cw, chh, cw, chromaBlur);
-		boxBlurPlane(dv, cw, chh, cw, chromaBlur);
-	}
-
-	if (rc == 0) {
-		for (int y = 0; y < dstH; y++)
-			memcpy(static_cast<uint8_t *>(ycbcr.y) + y * ycbcr.ystride,
-			       dy + static_cast<size_t>(y) * dstW, dstW);
-		/* 按 chroma_step 同时支持平面(I420)与半平面(NV12/NV21)。 */
-		for (int y = 0; y < chh; y++) {
-			uint8_t *cb = static_cast<uint8_t *>(ycbcr.cb) + y * ycbcr.cstride;
-			uint8_t *cr = static_cast<uint8_t *>(ycbcr.cr) + y * ycbcr.cstride;
-			const uint8_t *su2 = du + static_cast<size_t>(y) * cw;
-			const uint8_t *sv2 = dv + static_cast<size_t>(y) * cw;
-			for (int x = 0; x < cw; x++) {
-				cb[x * ycbcr.chroma_step] = su2[x];
-				cr[x * ycbcr.chroma_step] = sv2[x];
+	/*
+	 * 缓冲只写一次、从不读：gralloc 给 CPU 的映射可能不带缓存。滤波和换序
+	 * 都先在暂存区里做。
+	 */
+	if (srcNv12_ && (nv12 || nv21)) {
+		/* The hardware ISP's NV12 goes in as it is, cropped and scaled */
+		uint8_t *ouv = nv12 ? ocb : ocr;
+		if (nv12 && chromaBlur <= 0) {
+			rc = toNv12(src, dstW, dstH, oy, ys, ouv, cs);
+		} else {
+			planeScratch_.resize(static_cast<size_t>(cw) * 2 * chh);
+			uint8_t *uv = planeScratch_.data();
+			rc = toNv12(src, dstW, dstH, oy, ys, uv, cw * 2);
+			if (rc == 0 && chromaBlur > 0) {
+				boxBlurChannel(uv, cw, chh, cw * 2, 2, chromaBlur);
+				boxBlurChannel(uv + 1, cw, chh, cw * 2, 2, chromaBlur);
+			}
+			if (rc == 0 && nv12)
+				libyuv::CopyPlane(uv, cw * 2, ouv, cs, cw * 2, chh);
+			else if (rc == 0)
+				libyuv::SwapUVPlane(uv, cw * 2, ouv, cs, cw, chh);
+		}
+	} else if (planar && chromaBlur <= 0) {
+		rc = toJ420(src, dstW, dstH, oy, ys, ocb, ocr, cs);
+	} else {
+		/* 经平面暂存区：RGB 来源，或者要做滤波 */
+		planeScratch_.resize(static_cast<size_t>(cw) * chh * 2);
+		uint8_t *du = planeScratch_.data();
+		uint8_t *dv = du + static_cast<size_t>(cw) * chh;
+		rc = toJ420(src, dstW, dstH, oy, ys, du, dv, cw);
+		if (rc == 0 && chromaBlur > 0) {
+			/* 色度降噪：U/V 只有 1/4 分辨率，盒式模糊几乎免费，而彩色噪点正是最难看的那种。 */
+			boxBlurChannel(du, cw, chh, cw, 1, chromaBlur);
+			boxBlurChannel(dv, cw, chh, cw, 1, chromaBlur);
+		}
+		if (rc == 0 && planar) {
+			libyuv::CopyPlane(du, cw, ocb, cs, cw, chh);
+			libyuv::CopyPlane(dv, cw, ocr, cs, cw, chh);
+		} else if (rc == 0 && nv12) {
+			libyuv::MergeUVPlane(du, cw, dv, cw, ocb, cs, cw, chh);
+		} else if (rc == 0 && nv21) {
+			libyuv::MergeUVPlane(dv, cw, du, cw, ocr, cs, cw, chh);
+		} else if (rc == 0) {
+			/* 其他色度步长 */
+			for (int y = 0; y < chh; y++) {
+				uint8_t *cb = ocb + static_cast<size_t>(y) * cs;
+				uint8_t *cr = ocr + static_cast<size_t>(y) * cs;
+				const uint8_t *su = du + static_cast<size_t>(y) * cw;
+				const uint8_t *sv = dv + static_cast<size_t>(y) * cw;
+				for (int x = 0; x < cw; x++) {
+					cb[x * ycbcr.chroma_step] = su[x];
+					cr[x * ycbcr.chroma_step] = sv[x];
+				}
 			}
 		}
-		ok = true;
-	} else {
-		ALOGE("deliver: 色彩转换/缩放失败 rc=%d", rc);
 	}
 
+	if (rc != 0)
+		ALOGE("deliver: colour conversion/scaling failed, rc=%d", rc);
+
 	mapper.unlock(dst);
-	return ok;
+	return rc == 0;
 }
 
 /*
@@ -1450,29 +1501,51 @@ void Session::epsilonFilterRgb(const uint8_t *src, uint8_t *dst, int w, int h, i
 		t.join();
 }
 
-/* 可分离盒式模糊（先横后纵），半径 radius，边界夹紧。用在 1/4 分辩率的色度平面上。 */
-void Session::boxBlurPlane(uint8_t *plane, int w, int h, int stride, int radius)
+/*
+ * Separable box blur (horizontal, then vertical), edges clamped, with running
+ * sums in both passes and the rows visited in order. Used on the chroma, which
+ * has a quarter of the pixels.
+ */
+void Session::boxBlurChannel(uint8_t *p, int w, int h, int stride, int step, int radius)
 {
 	if (radius <= 0 || w <= 0 || h <= 0)
 		return;
-	std::vector<uint8_t> tmp(static_cast<size_t>(w) * h);
 	const int win = 2 * radius + 1;
+	const uint32_t area = static_cast<uint32_t>(win) * win;
+
+	blurRows_.resize(static_cast<size_t>(w) * h);
 	for (int y = 0; y < h; y++) {
-		const uint8_t *row = plane + static_cast<size_t>(y) * stride;
-		uint8_t *out = tmp.data() + static_cast<size_t>(y) * w;
+		const uint8_t *row = p + static_cast<size_t>(y) * stride;
+		uint16_t *out = blurRows_.data() + static_cast<size_t>(y) * w;
+		auto at = [&](int x) { return row[static_cast<size_t>(std::clamp(x, 0, w - 1)) * step]; };
+		uint32_t sum = 0;
+		for (int k = -radius; k <= radius; k++)
+			sum += at(k);
 		for (int x = 0; x < w; x++) {
-			int sum = 0;
-			for (int k = -radius; k <= radius; k++)
-				sum += row[std::clamp(x + k, 0, w - 1)];
-			out[x] = static_cast<uint8_t>((sum + win / 2) / win);
+			out[x] = static_cast<uint16_t>(sum);
+			sum += at(x + radius + 1);
+			sum -= at(x - radius);
 		}
 	}
-	for (int x = 0; x < w; x++) {
-		for (int y = 0; y < h; y++) {
-			int sum = 0;
-			for (int k = -radius; k <= radius; k++)
-				sum += tmp[static_cast<size_t>(std::clamp(y + k, 0, h - 1)) * w + x];
-			plane[static_cast<size_t>(y) * stride + x] = static_cast<uint8_t>((sum + win / 2) / win);
+
+	blurCols_.assign(w, 0);
+	auto rowAt = [&](int y) {
+		return blurRows_.data() + static_cast<size_t>(std::clamp(y, 0, h - 1)) * w;
+	};
+	for (int k = -radius; k <= radius; k++) {
+		const uint16_t *r = rowAt(k);
+		for (int x = 0; x < w; x++)
+			blurCols_[x] += r[x];
+	}
+	for (int y = 0; y < h; y++) {
+		uint8_t *out = p + static_cast<size_t>(y) * stride;
+		const uint16_t *add = rowAt(y + radius + 1);
+		const uint16_t *sub = rowAt(y - radius);
+		for (int x = 0; x < w; x++) {
+			out[static_cast<size_t>(x) * step] =
+				static_cast<uint8_t>((blurCols_[x] + area / 2) / area);
+			blurCols_[x] += add[x];
+			blurCols_[x] -= sub[x];
 		}
 	}
 }

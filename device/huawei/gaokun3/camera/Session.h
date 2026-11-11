@@ -11,6 +11,7 @@
 #include <mutex>
 #include <set>
 #include <thread>
+#include <vector>
 
 #include <aidl/android/hardware/camera/device/BnCameraDeviceSession.h>
 #include <cutils/native_handle.h>
@@ -120,6 +121,12 @@ private:
 	 * Y 行宽 ys、色度行宽 cs。返回 libyuv 的结果，0 为成功。 */
 	int toJ420(const SrcFrame &src, int32_t dstW, int32_t dstH,
 		   uint8_t *dy, int ys, uint8_t *du, uint8_t *dv, int cs) const;
+	/*
+	 * 同上，但写成半平面（CbCr 成对交错在一个平面里，即 NV12），只接受 NV12
+	 * 来源：裁剪，尺寸不同时再缩放，不做格式转换。
+	 */
+	int toNv12(const SrcFrame &src, int32_t dstW, int32_t dstH,
+		   uint8_t *dy, int ys, uint8_t *duv, int cs) const;
 	/* Centre crop of the source frame with the aspect ratio of dstW x dstH,
 	 * even-aligned. */
 	struct Crop {
@@ -183,10 +190,24 @@ private:
 	 */
 	static constexpr double kDenoiseGain = 2.0;
 	static void epsilonFilterRgb(const uint8_t *src, uint8_t *dst, int w, int h, int threshold);
-	static void boxBlurPlane(uint8_t *plane, int w, int h, int stride, int radius);
+	/*
+	 * Box blur of one chroma channel, w x h samples step bytes apart in a row,
+	 * rows stride bytes apart: step 1 for a plane, 2 for a channel of an
+	 * interleaved CbCr plane.
+	 */
+	void boxBlurChannel(uint8_t *p, int w, int h, int stride, int step, int radius);
 	int denoiseThreshold() const;   /* 0 = 不降噪 */
 	int chromaBlurRadius() const;   /* 0 = 不模糊 */
 	std::function<void()> onClosed_;
+
+	/*
+	 * 交付路径的每帧暂存区，跨帧保留：几 MB 的缓冲由 mmap() 分配，每帧重新
+	 * 分配的话每 4 KB 一次缺页。只在 libcamera 的完成回调线程上使用。
+	 */
+	mutable std::vector<uint8_t> planeScratch_;   /* 复制前的 J420 或 CbCr */
+	mutable std::vector<uint8_t> scaleScratch_;   /* toJ420()：缩放后的 NV12 */
+	std::vector<uint16_t> blurRows_;
+	std::vector<uint32_t> blurCols_;
 
 	/*
 	 * ── 自动对焦（后摄 only）──
