@@ -22,6 +22,7 @@
 #include <libcamera/libcamera.h>
 
 #include "AutoFocus.h"
+#include "Exif.h"
 #include "Lens.h"
 #include "Metadata.h"
 
@@ -365,6 +366,20 @@ private:
 	std::map<libcamera::Request *, Pending> pending_;
 	/* 正在交付的帧的裁剪区域（cropFor()）；w 为 0 = 整幅 */
 	int32_t cropRegion_[4] = {};
+	/*
+	 * 正在交付的帧的 EXIF（onRequestCompleted()）：尺寸和缩略图除外，那两项
+	 * 由 JPEG 路径补上（exifApp1()）。
+	 */
+	ExifInfo exifFrame_;
+	int32_t thumbW_ = 0, thumbH_ = 0;   /* 请求的尺寸，旋转之前；0 = 不要 */
+	int thumbQuality_ = 85;
+	int32_t thumbMade_[2] = { -1, -1 }; /* 做出的尺寸，旋转之后 */
+	std::string exifMake_, exifModel_;
+	/* JPEG（outW×outH，rotated：像素转过）的 APP1 内容；thumb 是缩略图的 B,G,R,A 像素 */
+	std::vector<uint8_t> exifApp1(int32_t outW, int32_t outH, bool rotated,
+				      const std::vector<uint8_t> &thumb, int32_t tw, int32_t th);
+	/* 旋转 rotation 度的 JPEG 的缩略图尺寸（0x0：不要） */
+	void thumbnailSize(int32_t rotation, int32_t *tw, int32_t *th) const;
 	/* 应用给了 AF 区域；没给时区域跟着变焦走 */
 	bool afAppRegion_ = false;
 

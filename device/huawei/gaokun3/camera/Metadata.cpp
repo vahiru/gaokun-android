@@ -10,6 +10,7 @@
 #include "Metadata.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <iterator>
 
@@ -53,6 +54,23 @@ const camera_metadata_ro_entry_t *findEntry(const std::vector<uint8_t> &requestS
 }
 
 } /* namespace */
+
+double requestEntryDouble(const std::vector<uint8_t> &requestSettings, uint32_t tag, size_t index)
+{
+	camera_metadata_ro_entry_t e;
+	return findEntry(requestSettings, tag, TYPE_DOUBLE, &e) && e.count > index ? e.data.d[index]
+										  : NAN;
+}
+
+std::string requestEntryBytes(const std::vector<uint8_t> &requestSettings, uint32_t tag)
+{
+	camera_metadata_ro_entry_t e;
+	if (!findEntry(requestSettings, tag, TYPE_BYTE, &e))
+		return {};
+	std::string s(reinterpret_cast<const char *>(e.data.u8), e.count);
+	s.erase(std::find(s.begin(), s.end(), '\0'), s.end());
+	return s;
+}
 
 int64_t requestEntryInt64(const std::vector<uint8_t> &requestSettings, uint32_t tag, int64_t def)
 {
@@ -353,8 +371,9 @@ std::vector<uint8_t> buildCharacteristics(const SensorFacts &f)
 	add_camera_metadata_entry(m, ANDROID_SCALER_CROPPING_TYPE, &croppingType, 1);
 
 	/* ── JPEG ── */
-	const int32_t thumbSizes[] = { 0, 0, 160, 120 };
-	add_camera_metadata_entry(m, ANDROID_JPEG_AVAILABLE_THUMBNAIL_SIZES, thumbSizes, 4);
+	/* 16:9 与 4:3 两种 JPEG 的缩略图，放在 EXIF 里（Exif.h） */
+	add_camera_metadata_entry(m, ANDROID_JPEG_AVAILABLE_THUMBNAIL_SIZES, kThumbnailSizes,
+				  std::size(kThumbnailSizes));
 	const int32_t maxJpegSize = f.fovW * f.fovH * 3 / 2 + 65536;
 	add_camera_metadata_entry(m, ANDROID_JPEG_MAX_SIZE, &maxJpegSize, 1);
 
@@ -418,6 +437,11 @@ std::vector<uint8_t> buildCharacteristics(const SensorFacts &f)
 		ANDROID_FLASH_MODE,
 		ANDROID_JPEG_ORIENTATION,
 		ANDROID_JPEG_QUALITY,
+		ANDROID_JPEG_THUMBNAIL_SIZE,
+		ANDROID_JPEG_THUMBNAIL_QUALITY,
+		ANDROID_JPEG_GPS_COORDINATES,
+		ANDROID_JPEG_GPS_PROCESSING_METHOD,
+		ANDROID_JPEG_GPS_TIMESTAMP,
 		ANDROID_SCALER_CROP_REGION,
 	};
 	if (f.hasAf) {
@@ -539,6 +563,9 @@ std::vector<uint8_t> buildResult(const std::vector<uint8_t> &requestSettings,
 		setOrAdd(m, ANDROID_SENSOR_FRAME_DURATION, &fr.frameDurationNs, 1);
 	if (fr.cropRegion[2] > 0)
 		setOrAdd(m, ANDROID_SCALER_CROP_REGION, fr.cropRegion, 4);
+	/* 报实际做出的缩略图尺寸：随图像旋转（CaptureResult 文档） */
+	if (fr.thumbnailSize[0] >= 0)
+		setOrAdd(m, ANDROID_JPEG_THUMBNAIL_SIZE, fr.thumbnailSize, 2);
 
 	add_camera_metadata_entry(m, ANDROID_CONTROL_AF_STATE, &fr.afState, 1);
 	add_camera_metadata_entry(m, ANDROID_LENS_STATE, &fr.lensState, 1);
@@ -774,6 +801,10 @@ std::vector<uint8_t> buildDefaultRequest(int templateId, const SensorFacts &f)
 	add_camera_metadata_entry(m, ANDROID_SCALER_CROP_REGION, cropRegion, 4);
 	const uint8_t jpegQuality = 90;
 	add_camera_metadata_entry(m, ANDROID_JPEG_QUALITY, &jpegQuality, 1);
+	const int32_t thumbSize[] = { 160, 120 };
+	add_camera_metadata_entry(m, ANDROID_JPEG_THUMBNAIL_SIZE, thumbSize, 2);
+	const uint8_t thumbQuality = 85;
+	add_camera_metadata_entry(m, ANDROID_JPEG_THUMBNAIL_QUALITY, &thumbQuality, 1);
 
 	std::vector<uint8_t> out = pack(m);
 	free_camera_metadata(m);

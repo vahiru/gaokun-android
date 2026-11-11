@@ -159,6 +159,7 @@ struct FrameResultFacts {
 	uint8_t lensState = ANDROID_LENS_STATE_STATIONARY;
 	float focusDistance = 0.0f;     /* 屈光度；UNCALIBRATED ⇒ 只保证单调 */
 	int32_t cropRegion[4] = {};     /* 实际用的裁剪区域 (x, y, w, h)；w 为 0 = 没设 */
+	int32_t thumbnailSize[2] = { -1, -1 };  /* 做出的 JPEG 缩略图尺寸，旋转之后；-1 = 没有 JPEG */
 	bool hasAf = false;             /* false 时不写 AF 相关动态条目（保持定焦语义） */
 	bool manualSensor = false;      /* 声明了 MANUAL_SENSOR：结果里要有 BLACK_LEVEL_LOCK */
 	LensParams lens = kLensBack;    /* 这个相机的镜头参数（lensParams()） */
@@ -200,6 +201,9 @@ bool templateSupported(int templateId, const SensorFacts &f);
  */
 int32_t requestEntryInt(const std::vector<uint8_t> &requestSettings,
 			uint32_t tag, int32_t def, size_t index = 0);
+/* 同上，double（没有时为 NaN）与字节串（定位方式）。 */
+double requestEntryDouble(const std::vector<uint8_t> &requestSettings, uint32_t tag, size_t index);
+std::string requestEntryBytes(const std::vector<uint8_t> &requestSettings, uint32_t tag);
 /* 同上，int64（曝光时间、帧长）与浮点的条目。 */
 int64_t requestEntryInt64(const std::vector<uint8_t> &requestSettings, uint32_t tag, int64_t def);
 float requestEntryFloat(const std::vector<uint8_t> &requestSettings, uint32_t tag, float def,

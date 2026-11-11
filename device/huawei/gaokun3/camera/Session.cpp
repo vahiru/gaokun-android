@@ -16,9 +16,11 @@
 #include <limits>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <fcntl.h>
 #include <span>
 #include <thread>
+#include <sys/system_properties.h>
 #include <unistd.h>
 
 #include <aidl/android/hardware/camera/common/Status.h>
@@ -211,6 +213,12 @@ Session::~Session()
 
 bool Session::init()
 {
+	/* EXIF 的厂商与型号，取 vendor 分区给设备的名字 */
+	{
+		char v[PROP_VALUE_MAX] = {};
+		exifMake_ = __system_property_get("ro.product.vendor.manufacturer", v) > 0 ? v : "HUAWEI";
+		exifModel_ = __system_property_get("ro.product.vendor.model", v) > 0 ? v : "gaokun3";
+	}
 	if (cam_->acquire()) {
 		ALOGE("libcamera Camera::acquire 失败（是不是已经被别人占了）");
 		return false;
@@ -1320,6 +1328,129 @@ bool Session::deliver(const SrcFrame &src, buffer_handle_t dst,
  * ★★ 2026-09-19：补上 JPEG 旋转（照片方向不对的根因就在这一处）。
  *   见下面 "旋转" 那一段的说明。
  */
+namespace {
+
+/* 从 w×h 的中间裁出 tw×th 的宽高比 */
+void thumbCrop(int w, int h, int tw, int th, int *cx, int *cy, int *cw, int *ch)
+{
+	*cw = w;
+	*ch = h;
+	if (static_cast<int64_t>(w) * th > static_cast<int64_t>(h) * tw)
+		*cw = static_cast<int>(static_cast<int64_t>(h) * tw / th) & ~1;
+	else
+		*ch = static_cast<int>(static_cast<int64_t>(w) * th / tw) & ~1;
+	*cx = ((w - *cw) / 2) & ~1;
+	*cy = ((h - *ch) / 2) & ~1;
+}
+
+/*
+ * 从每像素 bpp（3 或 4）字节、B,G,R(,A) 顺序的图像做 tw×th 的缩略图
+ * （B,G,R,A）：按块平均（隔一个像素取一个），不为 19200 个像素把 13 MP 的
+ * 图整幅转一遍。
+ */
+std::vector<uint8_t> thumbFromPacked(const uint8_t *p, int stride, int bpp, int w, int h,
+				     int tw, int th)
+{
+	int cx, cy, cw, ch;
+	thumbCrop(w, h, tw, th, &cx, &cy, &cw, &ch);
+	std::vector<uint8_t> out(static_cast<size_t>(tw) * th * 4);
+	for (int ty = 0; ty < th; ty++) {
+		const int y0 = cy + ty * ch / th, y1 = std::max(y0 + 1, cy + (ty + 1) * ch / th);
+		for (int tx = 0; tx < tw; tx++) {
+			const int x0 = cx + tx * cw / tw, x1 = std::max(x0 + 1, cx + (tx + 1) * cw / tw);
+			uint32_t s[3] = {}, n = 0;
+			for (int y = y0; y < y1; y += 2) {
+				const uint8_t *row = p + static_cast<size_t>(y) * stride;
+				for (int x = x0; x < x1; x += 2, n++)
+					for (int c = 0; c < 3; c++)
+						s[c] += row[static_cast<size_t>(x) * bpp + c];
+			}
+			uint8_t *o = &out[(static_cast<size_t>(ty) * tw + tx) * 4];
+			for (int c = 0; c < 3; c++)
+				o[c] = static_cast<uint8_t>((s[c] + n / 2) / std::max(n, 1u));
+			o[3] = 255;
+		}
+	}
+	return out;
+}
+
+/* 从全范围 4:2:0 平面做 tw×th 的缩略图（B,G,R,A） */
+std::vector<uint8_t> thumbFromJ420(const uint8_t *y, int ys, const uint8_t *u, const uint8_t *v,
+				   int cs, int w, int h, int tw, int th)
+{
+	int cx, cy, cw, ch;
+	thumbCrop(w, h, tw, th, &cx, &cy, &cw, &ch);
+	const int tcw = (tw + 1) / 2, tch = (th + 1) / 2;
+	std::vector<uint8_t> j(static_cast<size_t>(tw) * th + static_cast<size_t>(tcw) * tch * 2);
+	uint8_t *ty = j.data(), *tu = ty + static_cast<size_t>(tw) * th, *tv = tu + tcw * tch;
+	std::vector<uint8_t> out(static_cast<size_t>(tw) * th * 4);
+	if (libyuv::I420Scale(y + static_cast<size_t>(cy) * ys + cx, ys,
+			      u + static_cast<size_t>(cy / 2) * cs + cx / 2, cs,
+			      v + static_cast<size_t>(cy / 2) * cs + cx / 2, cs, cw, ch,
+			      ty, tw, tu, tcw, tv, tcw, tw, th, libyuv::kFilterBox) != 0 ||
+	    libyuv::J420ToARGB(ty, tw, tu, tcw, tv, tcw, out.data(), tw * 4, tw, th) != 0)
+		return {};
+	return out;
+}
+
+/* 把 B,G,R,A 像素编成 JPEG */
+std::vector<uint8_t> encodeThumbnail(const std::vector<uint8_t> &bgra, int w, int h, int quality)
+{
+	if (bgra.empty())
+		return {};
+	struct jpeg_compress_struct cinfo;
+	struct jpeg_error_mgr jerr;
+	cinfo.err = jpeg_std_error(&jerr);
+	jpeg_create_compress(&cinfo);
+	unsigned char *out = nullptr;
+	unsigned long outSize = 0;
+	jpeg_mem_dest(&cinfo, &out, &outSize);
+	cinfo.image_width = w;
+	cinfo.image_height = h;
+	cinfo.input_components = 4;
+	cinfo.in_color_space = JCS_EXT_BGRA;
+	jpeg_set_defaults(&cinfo);
+	jpeg_set_quality(&cinfo, std::clamp(quality, 1, 100), TRUE);
+	/* 缩略图不带 JFIF 头（EXIF 2.32，4.5.8） */
+	cinfo.write_JFIF_header = FALSE;
+	jpeg_start_compress(&cinfo, TRUE);
+	while (cinfo.next_scanline < cinfo.image_height) {
+		JSAMPROW row = const_cast<JSAMPROW>(
+			bgra.data() + static_cast<size_t>(cinfo.next_scanline) * w * 4);
+		jpeg_write_scanlines(&cinfo, &row, 1);
+	}
+	jpeg_finish_compress(&cinfo);
+	jpeg_destroy_compress(&cinfo);
+	std::vector<uint8_t> jpeg(out, out + outSize);
+	free(out);
+	return jpeg;
+}
+
+} /* namespace */
+
+void Session::thumbnailSize(int32_t rotation, int32_t *tw, int32_t *th) const
+{
+	const bool swap = rotation == 90 || rotation == 270;
+	*tw = swap ? thumbH_ : thumbW_;
+	*th = swap ? thumbW_ : thumbH_;
+}
+
+std::vector<uint8_t> Session::exifApp1(int32_t outW, int32_t outH, bool rotated,
+				       const std::vector<uint8_t> &thumb, int32_t tw, int32_t th)
+{
+	ExifInfo info = exifFrame_;
+	info.width = outW;
+	info.height = outH;
+	info.rotated = rotated;
+	info.thumbnail = encodeThumbnail(thumb, tw, th, thumbQuality_);
+	bool withThumb = false;
+	std::vector<uint8_t> app1 = buildExifApp1(info, &withThumb);
+	/* 结果报实际放进去的缩略图：超出 64 KB 被丢掉时报 0x0 */
+	thumbMade_[0] = withThumb ? tw : 0;
+	thumbMade_[1] = withThumb ? th : 0;
+	return app1;
+}
+
 bool Session::deliverJpeg(const SrcFrame &src, buffer_handle_t dst,
 			  int32_t dstW, int32_t dstH, int32_t blobSize,
 			  int quality, int32_t jpegOrientation)
@@ -1450,7 +1581,21 @@ bool Session::deliverJpegRgb(const uint8_t *rgb, buffer_handle_t dst,
 	cinfo.in_color_space = colorSpace;
 	jpeg_set_defaults(&cinfo);
 	jpeg_set_quality(&cinfo, quality, TRUE);
+	/* 用 EXIF 代替 JFIF：SOI 后紧跟 APP1 段 */
+	cinfo.write_JFIF_header = FALSE;
 	jpeg_start_compress(&cinfo, TRUE);
+	{
+		int32_t tw, th;
+		thumbnailSize(jpegOrientation, &tw, &th);
+		const std::vector<uint8_t> thumb =
+			tw > 0 && th > 0 ? thumbFromPacked(src, srcStride, components, outW, outH, tw, th)
+					 : std::vector<uint8_t>();
+		const std::vector<uint8_t> app1 =
+			exifApp1(outW, outH, rotMode != libyuv::kRotate0, thumb, tw, th);
+		/* 超过一个段的上限时 libjpeg 的默认错误处理会 exit()：宁可不写 EXIF */
+		if (app1.size() <= 65533)
+			jpeg_write_marker(&cinfo, JPEG_APP0 + 1, app1.data(), app1.size());
+	}
 	while (cinfo.next_scanline < cinfo.image_height) {
 		JSAMPROW row = const_cast<JSAMPROW>(
 			src + static_cast<size_t>(cinfo.next_scanline) * srcStride);
@@ -1555,7 +1700,21 @@ bool Session::deliverJpegNv12(const SrcFrame &src, buffer_handle_t dst,
 		cinfo.comp_info[i].v_samp_factor = 1;
 	}
 	jpeg_set_quality(&cinfo, quality, TRUE);
+	/* 用 EXIF 代替 JFIF（jpeg_set_colorspace() 又把 JFIF 打开了） */
+	cinfo.write_JFIF_header = FALSE;
 	jpeg_start_compress(&cinfo, TRUE);
+	{
+		int32_t tw, th;
+		thumbnailSize(jpegOrientation, &tw, &th);
+		const std::vector<uint8_t> thumb =
+			tw > 0 && th > 0 ? thumbFromJ420(oy, ys, ou, ov, cs, outW, outH, tw, th)
+					 : std::vector<uint8_t>();
+		const std::vector<uint8_t> app1 =
+			exifApp1(outW, outH, rotMode != libyuv::kRotate0, thumb, tw, th);
+		/* 超过一个段的上限时 libjpeg 的默认错误处理会 exit()：宁可不写 EXIF */
+		if (app1.size() <= 65533)
+			jpeg_write_marker(&cinfo, JPEG_APP0 + 1, app1.data(), app1.size());
+	}
 
 	/* 每次一个 iMCU 行：亮度 16 行、色度 8 行；图像下方不足的行重复最后一行。 */
 	JSAMPROW yRows[16], uRows[8], vRows[8];
@@ -2261,6 +2420,85 @@ void Session::onRequestCompleted(libcamera::Request *req)
 	std::vector<bool> okv;
 	renderFrame_++;
 	std::copy(pend.crop, pend.crop + 4, cropRegion_);
+
+	/* 这一帧的 EXIF，给它的 JPEG 流用 */
+	{
+		exifFrame_ = {};
+		exifFrame_.make = exifMake_;
+		exifFrame_.model = exifModel_;
+		struct timespec now = {};
+		clock_gettime(CLOCK_REALTIME, &now);
+		exifFrame_.captureTime = now.tv_sec;
+		exifFrame_.subsecMs = static_cast<int32_t>(now.tv_nsec / 1000000);
+		exifFrame_.focalLengthMm = lensParams(facts_.frontFacing).focalLengthMm;
+		exifFrame_.fNumber = lensParams(facts_.frontFacing).fNumber;
+		exifFrame_.exposureNs = exposureNs;
+		exifFrame_.iso = sensitivity;
+		exifFrame_.hasFlash = !flashLed_.empty();
+		exifFrame_.flashFired = pend.flashFired;
+		/* EXIF 闪光模式：1 强制闪（手电筒也算），2 强制不闪，3 自动 */
+		exifFrame_.flashMode = pend.aeMode == ANDROID_CONTROL_AE_MODE_ON_AUTO_FLASH ? 3
+				       : pend.aeMode == ANDROID_CONTROL_AE_MODE_ON_ALWAYS_FLASH ||
+						       pend.flashMode == ANDROID_FLASH_MODE_SINGLE ||
+						       pend.flashMode == ANDROID_FLASH_MODE_TORCH
+					       ? 1
+					       : 2;
+		const bool controlOff = requestEntryInt(pend.settings, ANDROID_CONTROL_MODE,
+							ANDROID_CONTROL_MODE_AUTO) ==
+					ANDROID_CONTROL_MODE_OFF;
+		exifFrame_.manualExposure = controlOff || pend.aeMode == ANDROID_CONTROL_AE_MODE_OFF;
+		exifFrame_.manualWhiteBalance =
+			controlOff || requestEntryInt(pend.settings, ANDROID_CONTROL_AWB_MODE,
+						      ANDROID_CONTROL_AWB_MODE_AUTO) !=
+					      ANDROID_CONTROL_AWB_MODE_AUTO;
+		/* 位置：应用要求记录时才写 */
+		const double lat = requestEntryDouble(pend.settings, ANDROID_JPEG_GPS_COORDINATES, 0);
+		const double lon = requestEntryDouble(pend.settings, ANDROID_JPEG_GPS_COORDINATES, 1);
+		const double alt = requestEntryDouble(pend.settings, ANDROID_JPEG_GPS_COORDINATES, 2);
+		if (std::isfinite(lat) && std::isfinite(lon)) {
+			ExifGps g;
+			g.latitude = lat;
+			g.longitude = lon;
+			g.altitude = std::isfinite(alt) ? alt : 0.0;
+			g.timestamp = requestEntryInt64(pend.settings, ANDROID_JPEG_GPS_TIMESTAMP,
+							exifFrame_.captureTime);
+			g.method = requestEntryBytes(pend.settings, ANDROID_JPEG_GPS_PROCESSING_METHOD);
+			exifFrame_.gps = g;
+		}
+		thumbW_ = std::max(requestEntryInt(pend.settings, ANDROID_JPEG_THUMBNAIL_SIZE, 0, 0), 0);
+		thumbH_ = std::max(requestEntryInt(pend.settings, ANDROID_JPEG_THUMBNAIL_SIZE, 0, 1), 0);
+		/*
+		 * 只做声明过的尺寸（kThumbnailSizes）：别的尺寸按宽高比取最接近的
+		 * 一个，免得按应用给的任意大小分配内存。
+		 */
+		if (thumbW_ == 0 || thumbH_ == 0) {
+			thumbW_ = thumbH_ = 0;
+		} else {
+			int32_t bw = 0, bh = 0;
+			double best = 1e9;
+			for (size_t i = 0; i + 1 < std::size(kThumbnailSizes); i += 2) {
+				const int32_t w = kThumbnailSizes[i], h = kThumbnailSizes[i + 1];
+				if (w == thumbW_ && h == thumbH_) {
+					bw = w;
+					bh = h;
+					break;
+				}
+				const double d = w > 0 && h > 0
+							 ? std::fabs(std::log(static_cast<double>(w) * thumbH_ /
+									       (static_cast<double>(h) * thumbW_)))
+							 : 1e9;
+				if (d < best) {
+					best = d;
+					bw = w;
+					bh = h;
+				}
+			}
+			thumbW_ = bw;
+			thumbH_ = bh;
+		}
+		thumbQuality_ = requestEntryInt(pend.settings, ANDROID_JPEG_THUMBNAIL_QUALITY, 85);
+		thumbMade_[0] = thumbMade_[1] = -1;
+	}
 	for (auto &pb : pend.buffers) {
 		const bool shared = std::count_if(pend.buffers.begin(), pend.buffers.end(),
 						  [&](const PendingBuffer &o) {
@@ -2318,6 +2556,7 @@ void Session::onRequestCompleted(libcamera::Request *req)
 	fr.exposureNs = exposureNs;
 	fr.frameDurationNs = frameDurationNs;
 	std::copy(pend.crop, pend.crop + 4, fr.cropRegion);
+	std::copy(thumbMade_, thumbMade_ + 2, fr.thumbnailSize);
 	fr.sensitivity = sensitivity;
 	/*
 	 * ★ 对焦结果组：应用（CameraX 的 FocusMeteringControl、各家相机的拍照前 AF）等的是
