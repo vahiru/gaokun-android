@@ -395,8 +395,8 @@ ndk::ScopedAStatus Session::configureStreams(const StreamConfiguration &cfg,
 	 * 硬件 ISP 能同时出两路 NV12：大的一路走 FULL，给 JPEG；小的一路走显示路径，由 IFE
 	 * 自带的缩放器缩小，给预览、录像和 YUV 流。拍照模式下预览就不必每帧由 CPU 从全尺寸
 	 * 缩小，不拍照的帧也不用映射、同步全尺寸那一路。只在 JPEG 比其余各路大得多时用：
-	 * 显示路径的画面不到 FULL 的一半大。管线做不到时（例如双 IFE）会去掉显示流、返回
-	 * Adjusted，下面按实际的配置结果退回单路。
+	 * 显示路径的画面不到 FULL 的一半大。管线不给两路时（没有显示路径）退回单路，见下面的
+	 * 回退顺序。
 	 */
 	int32_t dispW = 0, dispH = 0;
 	bool anyBlob = false;
@@ -407,14 +407,6 @@ ndk::ScopedAStatus Session::configureStreams(const StreamConfiguration &cfg,
 		}
 		dispW = std::max(dispW, s2.width);
 		dispH = std::max(dispH, s2.height);
-	}
-	/*
-	 * 有对焦马达时显示路径至少按 1280x960 要：低增益时对焦的梯度能量在显示路径上算，
-	 * 预览很小（如 320x240）时不能拿那么小的画面对焦。
-	 */
-	if (facts_.hasAf && dispW > 0) {
-		dispW = std::max(dispW, 1280);
-		dispH = std::max(dispH, 960);
 	}
 	/*
 	 * 显示路径的尺寸：与 hwIspFrameSize() 相同，但高度按宽度向下取整。validate 按高度
@@ -455,50 +447,54 @@ ndk::ScopedAStatus Session::configureStreams(const StreamConfiguration &cfg,
 		}
 	};
 
-	/* Without RAW if libcamera refuses it: phase detection is optional, the stream is not. */
-	libcamera::CameraConfiguration::Status st;
-	for (;;) {
+	/*
+	 * libcamera 不接受时依次退：两路 + RAW → 两路 → 单路 + RAW → 单路。两路和 RAW 都不是
+	 * 必需的（少了它们只是预览改由 CPU 缩小、不做相位对焦），各自被拒时保住另一个。validate 删掉了
+	 * 流也算不接受：剩下的流不一定是下面按角色认的那几路。
+	 */
+	std::vector<std::pair<bool, bool>> tries;
+	for (const bool two : { true, false })
+		for (const bool raw : { true, false })
+			if ((!two || twoYuv) && (!raw || withRaw))
+				tries.emplace_back(two, raw);
+	libcamera::CameraConfiguration::Status st = libcamera::CameraConfiguration::Invalid;
+	bool configured = false;
+	for (const auto &[two, raw] : tries) {
 		std::vector<libcamera::StreamRole> roles = { libcamera::StreamRole::Viewfinder };
-		if (twoYuv)
+		if (two)
 			roles.push_back(libcamera::StreamRole::StillCapture);
-		if (withRaw)
+		if (raw)
 			roles.push_back(libcamera::StreamRole::Raw);
 		config_ = cam_->generateConfiguration(roles);
 		if (!config_ || config_->size() != roles.size()) {
-			ALOGW("generateConfiguration gave %zu of %zu streams",
-			      config_ ? config_->size() : 0, roles.size());
-		} else {
-			setUp(twoYuv, withRaw);
-			std::string asked;
-			for (const libcamera::StreamConfiguration &c : *config_)
-				asked += " " + c.toString();
-			st = config_->validate();
-			int ret = -1;
-			if (st != libcamera::CameraConfiguration::Invalid)
-				ret = cam_->configure(config_.get());
-			if (!ret)
-				break;
-			ALOGW("libcamera %s:%s", st == libcamera::CameraConfiguration::Invalid
-							 ? "rejected the configuration"
-							 : "could not configure",
-			      asked.c_str());
-		}
-		if (twoYuv) {
-			ALOGW("libcamera did not take two NV12 streams, using one");
-			twoYuv = false;
+			ALOGW("generateConfiguration gave %zu of %zu streams (%s%s)",
+			      config_ ? config_->size() : 0, roles.size(), two ? "two NV12" : "one NV12",
+			      raw ? " + RAW" : "");
 			continue;
 		}
-		if (!withRaw) {
-			ALOGE("generateConfiguration/validate/configure 失败");
-			return err(Status::INTERNAL_ERROR);
+		setUp(two, raw);
+		std::string asked;
+		for (const libcamera::StreamConfiguration &c : *config_)
+			asked += " " + c.toString();
+		st = config_->validate();
+		if (st != libcamera::CameraConfiguration::Invalid && config_->size() == roles.size() &&
+		    !cam_->configure(config_.get())) {
+			configured = true;
+			twoYuv = two;
+			break;
 		}
-		ALOGW("libcamera 不接受 RAW 流：只用 Viewfinder，不做相位对焦");
-		withRaw = false;
+		const char *what = "could not configure";
+		if (st == libcamera::CameraConfiguration::Invalid)
+			what = "rejected";
+		else if (config_->size() != roles.size())
+			what = "dropped streams from";
+		ALOGW("libcamera %s:%s", what, asked.c_str());
 	}
-	/*
-	 * 按配置结果认流：validate 可能去掉了显示流。NV12 里大的是 FULL、小的是显示路径；
-	 * 其余的是 RAW。
-	 */
+	if (!configured) {
+		ALOGE("libcamera took none of the stream configurations");
+		return err(Status::INTERNAL_ERROR);
+	}
+	/* 按配置结果认流：NV12 里大的是 FULL、小的是显示路径；其余的是 RAW。 */
 	const libcamera::PixelFormat procFmt = libcamera::formats::NV12;
 	const libcamera::StreamConfiguration *yuvCfg[2] = {};
 	const libcamera::StreamConfiguration *rawCfg = nullptr;
@@ -1221,6 +1217,15 @@ void Session::dropAllCaches()
 
 libcamera::Size Session::hwIspFrameSize(const SensorFacts &f, int64_t maxW, int64_t maxH)
 {
+	/*
+	 * 有对焦马达时至少按 1280x960 要：低增益时对焦的梯度能量在这幅画面（两路时是显示
+	 * 路径）上算，流很小（如 320x240）时不能拿那么小的画面对焦。Device 探测帧率也按这里
+	 * 算画面，两边一致。
+	 */
+	if (f.hasAf) {
+		maxW = std::max<int64_t>(maxW, 1280);
+		maxH = std::max<int64_t>(maxH, 960);
+	}
 	/*
 	 * 硬件 ISP 缩放不占 CPU：要一幅与传感器阵列同宽高比、刚好盖住每一路流的画面，
 	 * 流与它同宽或同高时 deliver() 只需裁剪、拆分色度。宽按 16 对齐（IFE 写出的单位），

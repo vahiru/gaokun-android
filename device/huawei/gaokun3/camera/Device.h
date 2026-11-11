@@ -63,6 +63,9 @@ public:
 private:
 	/* 填写 facts_.minFrameDurationsNs 和 3A 控制的标志，见 Device.cpp。 */
 	void probeCamera();
+	/* 探测时相机被占用：最多再试这么多次，间隔 kAcquireRetryUs（共约 1 s） */
+	static constexpr int kAcquireRetries = 5;
+	static constexpr unsigned int kAcquireRetryUs = 200000;
 	void probe3aControls();
 	/* 每种探测过的配置都接受的曝光、增益与帧长范围 */
 	struct ManualLimits {

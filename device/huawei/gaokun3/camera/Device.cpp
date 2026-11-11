@@ -353,8 +353,19 @@ void Device::probeCamera()
 		return;
 	}
 
-	if (cam_->acquire()) {
-		ALOGW("%s: camera busy, frame rates and 3A controls not probed", name_.c_str());
+	/*
+	 * 另一个进程（例如调试用的 libcamera 工具）占着相机时等一会儿：探测只在 provider 启动
+	 * 时做一次，cameraserver 读过特性之后就不能再改，没探测到的能力一直缺到 provider 重启。
+	 */
+	int busy = cam_->acquire();
+	for (int i = 0; busy && i < kAcquireRetries; i++) {
+		usleep(kAcquireRetryUs);
+		busy = cam_->acquire();
+	}
+	if (busy) {
+		ALOGE("%s: camera busy, frame rates and 3A controls not probed until the provider "
+		      "restarts",
+		      name_.c_str());
 		return;
 	}
 
