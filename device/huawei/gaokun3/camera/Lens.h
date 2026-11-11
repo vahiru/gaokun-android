@@ -5,7 +5,7 @@
  * ★ 为什么是"直驱"而不是走 libcamera：
  *   libcamera 侧的 LensPosition 控制【只有定义、没有实现】——
  *   全树 grep 只命中 src/libcamera/control_ids_core.yaml，
- *   src/libcamera/ 里没有任何 pipeline 处理它（simple pipeline 连 lens 字样都没有）。
+ *   src/libcamera/ 里没有任何 pipeline 处理它（qcom-ife 管线与 IPA 都不驱动镜头）。
  *   也就是说 libcamera 不会替我们把镜头位置写下去。
  *   而内核已经把马达暴露成一个独立的 v4l2 子设备：
  *       /sys/class/video4linux/v4l-subdevN/name = "dw9714 1-000c"

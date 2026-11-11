@@ -116,9 +116,8 @@ namespace {
 
 /* 我们对外声明支持的像素格式。
  *
- * ★ 软件 ISP 只出 RGB 族（libcamera debayer_cpu.cpp:436-441），
- *   Android 要的是 YUV_420_888 / JPEG / IMPLEMENTATION_DEFINED，
- *   所以这一层的色彩转换由本 HAL 用 libyuv 做，JPEG 用 libjpeg 做。
+ * ★ libcamera 只出 NV12，Android 要的是 YUV_420_888 / JPEG / IMPLEMENTATION_DEFINED：
+ *   裁剪、缩放由本 HAL 用 libyuv 做，JPEG 用 libjpeg 做。
  *   ⇒ 这里声明的是【我们能交付的】格式，不是 libcamera 直接产出的格式。
  */
 constexpr int32_t kFormats[] = {
@@ -245,7 +244,7 @@ std::vector<uint8_t> buildCharacteristics(const SensorFacts &f)
 	const uint8_t pipelineDepth = 4;
 	add_camera_metadata_entry(m, ANDROID_REQUEST_PIPELINE_MAX_DEPTH, &pipelineDepth, 1);
 
-	/* ── 3A：软件 ISP 只有 AE/AWB；AF 是【马达有才有】（后摄 dw9714，见 Lens.h） ──
+	/* ── 3A：AE/AWB 由 IPA 做；AF 是【马达有才有】（后摄 dw9714，见 Lens.h） ──
 	 * ⚠️ AF 的两处声明必须同时成立，否则框架会陷入"等一个永不到来的对焦结果"：
 	 *    ① AF_AVAILABLE_MODES 里除了 OFF 还有别的值；
 	 *    ② LENS_INFO_MINIMUM_FOCUS_DISTANCE > 0。
@@ -557,7 +556,7 @@ std::vector<uint8_t> buildResult(const std::vector<uint8_t> &requestSettings,
 	add_camera_metadata_entry(m, ANDROID_SENSOR_TIMESTAMP, &timestampNs, 1);
 	add_camera_metadata_entry(m, ANDROID_REQUEST_PIPELINE_DEPTH, &pipelineDepth, 1);
 
-	/* 3A 状态：AE/AWB 由软件 ISP 的 IPA 在跑；AF 由本 HAL 自己爬山（见 AutoFocus.cpp）。
+	/* 3A 状态：AE/AWB 由 IPA 在跑；AF 由本 HAL 自己搜索（见 AutoFocus.cpp）。
 	 * fr.afState/lensState/focusDistance 由会话每帧填。 */
 	add_camera_metadata_entry(m, ANDROID_CONTROL_AE_STATE, &fr.aeState, 1);
 	setOrAdd(m, ANDROID_CONTROL_AE_MODE, &fr.aeMode, 1);

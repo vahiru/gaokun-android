@@ -112,7 +112,7 @@ struct SensorFacts {
 	 * 并把 FOCUS_DISTANCE_CALIBRATION 报成 UNCALIBRATED —— 不谎称已标定。 */
 	float minFocusDiopters = 10.0f;
 	int64_t minFrameDurationNs = 33333333;
-	/* 我们打算对外声明的输出尺寸（软件 ISP 产出，见 Provider.cpp 的说明）。 */
+	/* 我们打算对外声明的输出尺寸（见 Provider.cpp 的说明）。 */
 	std::vector<std::pair<int32_t, int32_t>> outputSizes;
 	/* 每种输出尺寸各自的最短帧长；没有时都按 minFrameDurationNs。 */
 	std::vector<int64_t> minFrameDurationsNs;
@@ -156,8 +156,8 @@ struct FrameResultFacts {
 	/* 请求里可能不带这两项（沿用上一帧），结果里要按会话的粘滞值回显。 */
 	uint8_t aeMode = ANDROID_CONTROL_AE_MODE_ON;
 	uint8_t flashMode = ANDROID_FLASH_MODE_OFF;
-	/* libcamera 报回来的实际曝光/增益（软件 ISP 的 libipa Agc 每帧填 ExposureTime/AnalogueGain）。
-	 * 0 = 这一帧没有。ISO 按 100 × 模拟增益折算（软件 ISP 没有别的定义）。 */
+	/* libcamera 报回来的实际曝光/增益（libipa 的 Agc 每帧填 ExposureTime/AnalogueGain）。
+	 * 0 = 这一帧没有。ISO 按 100 × 模拟增益折算。 */
 	int64_t exposureNs = 0;
 	int32_t sensitivity = 0;
 	int64_t frameDurationNs = 0;    /* 0 = 没报 */
@@ -220,7 +220,7 @@ float requestEntryFloat(const std::vector<uint8_t> &requestSettings, uint32_t ta
  * 这套 HAL 能不能交付这组流？Device::isStreamCombinationSupported 与
  * Session::configureStreams 用的是【同一个】判据，与静态元数据一致：
  *   MAX_NUM_OUTPUT_STREAMS = {0 RAW, 2 非停顿(YUV/IMPL_DEFINED), 1 停顿(BLOB/JPEG)}，
- *   格式只限 kFormats 那三种（软件 ISP 出 RGB，由我们转 YUV / 编 JPEG，别的格式交付不了），
+ *   格式只限 kFormats 那三种（由我们从 NV12 裁剪缩放、编 JPEG，别的格式交付不了），
  *   只接受输出流、不旋转、尺寸不超过有效阵列。
  * why 不为空时写入拒绝理由（给日志）。
  */

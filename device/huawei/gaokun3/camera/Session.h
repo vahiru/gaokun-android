@@ -112,9 +112,8 @@ private:
 	void dropAllCaches();
 
 	/*
-	 * libcamera 输出的一帧。软件 ISP（simple 管线）给打包的 RGB888（内存里是 B,G,R）；
-	 * 硬件 ISP（qcom-ife 管线）给全范围 BT.601 的 NV12：data 是 Y 平面，uv 是交错的
-	 * CbCr 平面。各平面的行宽都是 stride 字节，画面 w×h。
+	 * libcamera 输出的一帧：qcom-ife 管线给全范围 BT.601 的 NV12，data 是 Y 平面，uv 是
+	 * 交错的 CbCr 平面。各平面的行宽都是 stride 字节，画面 w×h。
 	 */
 	struct SrcFrame {
 		const uint8_t *data = nullptr;
@@ -187,24 +186,14 @@ private:
 	/* 同上，裁剪区域（SCALER_CROP_REGION，视场坐标）由调用方给 */
 	Crop cropIn(const SrcFrame &src, const int32_t region[4], int32_t dstW, int32_t dstH) const;
 	/*
-	 * JPEG 流：把 RGB 编码成 JPEG 写进 BLOB 缓冲。
-	 * jpegOrientation 是应用给的【顺时针】校正角（ANDROID_JPEG_ORIENTATION）。
-	 * ⚠️ 90/270 时交付的 JPEG 实际宽高与流声明的 (dstW, dstH) 互换 ——
-	 *    BLOB 流只声明缓冲字节数，这是 Android 允许且常见的行为。
+	 * JPEG 流：NV12 裁剪、缩放、旋转成 J420，再以 YCbCr 原始数据交给 libjpeg，写进 BLOB 缓冲。
+	 * jpegOrientation 是应用给的【顺时针】校正角（ANDROID_JPEG_ORIENTATION）；90/270 时交付的
+	 * JPEG 实际宽高与流声明的 (dstW, dstH) 互换。只读配置时定下的成员，可以在 JPEG 工作线程
+	 * 上调用（暂存区用调用方给的 s）。
 	 */
 	bool deliverJpeg(const SrcFrame &src, buffer_handle_t dst,
 			 int32_t dstW, int32_t dstH, int32_t blobSize,
 			 int quality, int32_t jpegOrientation, StillParams &sp, Scratch &s);
-	bool deliverJpegRgb(const uint8_t *rgb, buffer_handle_t dst,
-			    int32_t dstW, int32_t dstH, int32_t blobSize,
-			    int quality, int32_t jpegOrientation, StillParams &sp);
-	/*
-	 * NV12 不经过 RGB：裁剪缩放旋转成 J420，再以 YCbCr 原始数据交给 libjpeg。
-	 * 只读配置时定下的成员，可以在 JPEG 工作线程上调用（暂存区用调用方给的 s）。
-	 */
-	bool deliverJpegNv12(const SrcFrame &src, buffer_handle_t dst,
-			     int32_t dstW, int32_t dstH, int32_t blobSize,
-			     int quality, int32_t jpegOrientation, StillParams &sp, Scratch &s);
 
 	/*
 	 * ── 闪光灯（#110 / #111）──
@@ -220,7 +209,7 @@ private:
 	static constexpr int kDarkLuma = 50;          /* AUTO 闪光的"太暗"判据之一（0..255 采样均值） */
 	static constexpr double kDarkGain = 4.0;      /* 之二：模拟增益 ≥ 4x 就算暗（libcamera 报的） */
 	/* 预闪：至少 kPrecaptureMin 帧、且亮度连续 2 帧稳定才报收敛；最多等 kPrecaptureMax 帧。
-	 * ★ 2026-09-14 第一版固定 4 帧，用户拍出来白墙全过曝：软件 ISP 的 AGC 要十几帧才收敛。 */
+	 * AGC 要十来帧才能适应灯光，固定 4 帧时白墙照片会过曝。 */
 	static constexpr int kPrecaptureMin = 8;
 	static constexpr int kPrecaptureMax = 15;
 	static constexpr int kLumaStableDelta = 8;
@@ -240,19 +229,16 @@ private:
 	int32_t lastExposureUs_ = 0;
 
 	/*
-	 * ── 降噪（#112）：软件 ISP 里一个降噪算法都没有，高增益下噪点直接进照片 ──
-	 * 静态照片（BLOB）：RGB 域 3×3 ε 滤波（只平均与中心差 ≤ T 的邻居，T 随增益走），多线程分行。
-	 * 预览（YUV）：只对 U/V 平面做盒式模糊 —— 彩色噪点最难看、色度平面又只有 1/4 分辨率，几乎免费。
-	 * 增益 < kDenoiseGain 一律不动：白天的图别被磨掉细节。
+	 * ── 预览、录像的色度降噪（IFE 没有降噪）──
+	 * 只对 U/V 平面做盒式模糊：彩色噪点最难看，色度平面又只有 1/4 分辨率，几乎免费。增益
+	 * < kDenoiseGain 一律不动，白天的图别被磨掉细节。照片的降噪在 deliverJpeg() 里。
 	 */
 	static constexpr double kDenoiseGain = 2.0;
-	static void epsilonFilterRgb(const uint8_t *src, uint8_t *dst, int w, int h, int threshold);
 	/*
 	 * 盒式模糊：h 行，每行 n 字节，行距 stride 字节；各通道交错，相隔 step
 	 * 字节：单独的平面 step 为 1，NV12 的 CbCr 平面为 2（两个通道一起做）。
 	 */
 	static void boxBlur(uint8_t *p, int n, int h, int stride, int step, int radius, Scratch &s);
-	int denoiseThreshold() const;   /* 0 = 不降噪 */
 	int chromaBlurRadius() const;   /* 0 = 不模糊 */
 	std::function<void()> onClosed_;
 
@@ -397,9 +383,8 @@ private:
 	/*
 	 * 配置好的 Android 流。
 	 * ★ 相机应用【一定】会配多路（预览 + 拍照，实测 Aperture 要 2 路）。
-	 *   libcamera 这边只开一路（一个传感器模式的完整画面），再用 libyuv 裁剪缩放分发到每一路
-	 *   —— 软件 ISP 是 CPU 瓶颈，开多路等于把同一份拜耳去马赛克多次；硬件 ISP 的 IFE
-	 *   也只输出一路 NV12。
+	 *   libcamera 这边只开一路画面（拍照模式加一路 FULL，见 fullStream_），再用 libyuv
+	 *   裁剪缩放分发到每一路。
 	 */
 	struct HalStreamInfo {
 		int32_t id = -1;
@@ -412,8 +397,6 @@ private:
 	int32_t srcWidth_ = 0, srcHeight_ = 0;
 	/* 源帧的行宽（字节）。 */
 	int32_t srcStride_ = 0;
-	/* libcamera 输出 NV12（硬件 ISP）还是 RGB888（软件 ISP），见 configureStreams。 */
-	bool srcNv12_ = false;
 	/* DMA_BUF_IOCTL_SYNC 失败时只记一次日志。 */
 	bool syncWarned_ = false;
 

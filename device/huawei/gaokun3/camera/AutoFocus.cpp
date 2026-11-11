@@ -11,16 +11,6 @@
 
 namespace gaokun3 {
 
-namespace {
-
-/* RGB24 取亮度，整数近似 0.25R + 0.5G + 0.25B（移位实现，避免每像素浮点）。 */
-inline int lumaAt(const uint8_t *p)
-{
-	return (static_cast<int>(p[0]) + 2 * static_cast<int>(p[1]) + p[2]) >> 2;
-}
-
-} /* namespace */
-
 void AutoFocus::attach(Lens *lens)
 {
 	std::lock_guard<std::mutex> lk(m_);
@@ -229,8 +219,6 @@ bool AutoFocus::moveTo(int pos)
 /* 调用者必须已持锁。 */
 bool AutoFocus::focusable(double best) const
 {
-	if (!hwMetric_)
-		return best >= kMinScore;
 	if (samples_.size() < 2)
 		return false;
 	double lowest = best;
@@ -243,7 +231,7 @@ bool AutoFocus::focusable(double best) const
 void AutoFocus::finishScan(bool byPhase)
 {
 	scanning_ = false;
-	converged_ = (hwMetric_ && byPhase) || focusable(bestScore_);
+	converged_ = byPhase || focusable(bestScore_);
 	/* 峰在采样点之间：两侧相距 kFineStep 的点都采过时，取过最佳点和这两点的抛物线顶点。 */
 	const int sampledBest = bestPos_;
 	const auto l = samples_.find(bestPos_ - kFineStep);
@@ -328,72 +316,8 @@ double AutoFocus::gradientEnergy(const uint8_t *y, int w, int h, int stride, con
 	return mean < 1.0 ? 0.0 : static_cast<double>(g) / n / (mean * mean) * 1e4;
 }
 
-double AutoFocus::sharpness(const uint8_t *pixels, int w, int h, int stride,
-			    int bytesPerPixel, const float region[4])
-{
-	/*
-	 * 指标 = 网格亮度图的拉普拉斯能量 / 亮度总和。
-	 *
-	 * ★ 两处都是踩过坑才定下来的：
-	 *   ① 【块平均】而不是单点采样 —— 每格取 kAvg×kAvg 的平均。单像素带着
-	 *      全部传感器噪声，而噪声在位置之间是随机的：早先"每 16 像素只取
-	 *      1 个像素"的版本量出来的曲线被噪声主导（同一场景下 pos1023 的分数
-	 *      反而高于 pos512，与眼睛看到的相反）。对焦模糊的尺度远大于 4 像素，
-	 *      4×4 平均不会削掉对焦信息。
-	 *   ② 【拉普拉斯】而不是原始梯度 —— 二阶导只留细节，压掉画面里的大块
-	 *      明暗结构（黑白测试卡、灰阶梯那种大面积高对比会把一阶梯度吃满，
-	 *      对焦信号被淹没）。
-	 *   最后除以亮度总和：AGC 改变曝光/增益时分子分母同比例变化，分数不动
-	 *   —— 否则爬山会往"最亮"跑而不是往"最清晰"跑。
-	 */
-	const int x0 = static_cast<int>(w * region[0]);
-	const int x1 = static_cast<int>(w * region[2]);
-	const int y0 = static_cast<int>(h * region[1]);
-	const int y1 = static_cast<int>(h * region[3]);
-	const int gw = (x1 - x0) / kBlock;
-	const int gh = (y1 - y0) / kBlock;
-	if (gw < 3 || gh < 3)
-		return 0.0;
-
-	grid_.assign(static_cast<size_t>(gw) * gh, 0.0f);
-
-	const int off = kBlock / 2 - kAvg / 2;     /* 每格中心取的 kAvg×kAvg 小块 */
-	for (int gy = 0; gy < gh; gy++) {
-		const int cy = y0 + gy * kBlock + off;
-		for (int gx = 0; gx < gw; gx++) {
-			const int cx = x0 + gx * kBlock + off;
-			uint32_t acc = 0;
-			for (int j = 0; j < kAvg; j++) {
-				const uint8_t *p = pixels + static_cast<size_t>(cy + j) * stride +
-						   static_cast<size_t>(cx) * bytesPerPixel;
-				/* RGB24 按 lumaAt() 折成亮度；NV12 的 Y 平面本身就是亮度 */
-				for (int i = 0; i < kAvg; i++, p += bytesPerPixel)
-					acc += static_cast<uint32_t>(bytesPerPixel == 3 ? lumaAt(p) : *p);
-			}
-			grid_[static_cast<size_t>(gy) * gw + gx] =
-				static_cast<float>(acc) / static_cast<float>(kAvg * kAvg);
-		}
-	}
-
-	double lap = 0.0;
-	double lum = 0.0;
-	for (int gy = 1; gy < gh - 1; gy++) {
-		for (int gx = 1; gx < gw - 1; gx++) {
-			const size_t o = static_cast<size_t>(gy) * gw + gx;
-			const float c = grid_[o];
-			lap += std::fabs(4.0f * c - grid_[o - 1] - grid_[o + 1] -
-					 grid_[o - gw] - grid_[o + gw]);
-			lum += c;
-		}
-	}
-	if (lum <= 0.0)
-		return 0.0;
-	return 1000.0 * lap / lum;
-}
-
-void AutoFocus::onFrame(const uint8_t *pixels, int w, int h, int stride, int bytesPerPixel,
-			bool sceneStable, const RawFrame *raw, double hwScore, double gain,
-			const float *view)
+void AutoFocus::onFrame(const uint8_t *pixels, int w, int h, int stride, bool sceneStable,
+			const RawFrame *raw, double hwScore, double gain, const float *view)
 {
 	if (!pixels || w <= 0 || h <= 0)
 		return;
@@ -428,18 +352,14 @@ void AutoFocus::onFrame(const uint8_t *pixels, int w, int h, int stride, int byt
 	 * 差分距离按登记过的视场（lastView_）取，不按这一帧：每边不到 kViewEps 的小幅变焦
 	 * 不算视场变化，d 却可能跳档、分数跟着跳。视场一变就跳过几帧、重取基准。
 	 */
-	/* 增益高（暗处）用 FocusFoM，否则硬件 ISP 的 NV12 用梯度能量（见 AutoFocus.h） */
+	/* 增益高（暗处）且有 FocusFoM 时用它，否则用梯度能量（见 AutoFocus.h） */
 	if (gain >= kFoMGainOn)
 		highGain_ = true;
 	else if (gain <= kFoMGainOff)
 		highGain_ = false;
-	const int source = bytesPerPixel == 1 && (hwScore < 0.0 || !highGain_) ? 2
-			   : hwScore >= 0.0				   ? 1
-									   : 0;
-	const bool hw = source != 0;
-	const double score = source == 1   ? hwScore
-			     : source == 2 ? gradientEnergy(pixels, w, h, stride, imgRegion, viewW)
-					   : sharpness(pixels, w, h, stride, bytesPerPixel, imgRegion);
+	const int source = hwScore >= 0.0 && highGain_ ? 1 : 2;
+	const double score =
+		source == 1 ? hwScore : gradientEnergy(pixels, w, h, stride, imgRegion, viewW);
 
 	std::lock_guard<std::mutex> lk(m_);
 
@@ -468,11 +388,8 @@ void AutoFocus::onFrame(const uint8_t *pixels, int w, int h, int stride, int byt
 			return;
 		otherSource_ = 0;
 		scoreSource_ = source;
-		hwMetric_ = hw;
-		ALOGI("AF score source: %s",
-		      source == 1   ? "hardware focus statistics (FocusFoM)"
-		      : source == 2 ? "luma gradient energy of the AF region"
-				    : "Laplacian energy of the frame luma");
+		ALOGI("AF score source: %s", source == 1 ? "hardware focus statistics (FocusFoM)"
+							 : "luma gradient energy of the AF region");
 		refScore_ = -1.0;
 		if (scanning_) {
 			/* 重新搜索仍是点按的那一次：保留点按标记（startScan() 会清掉），照常精调 */
@@ -486,7 +403,7 @@ void AutoFocus::onFrame(const uint8_t *pixels, int w, int h, int stride, int byt
 	}
 
 	/*
-	 * IFE 变焦改变了打分画面的视场：梯度能量、拉普拉斯换了画面，不能和之前的分数比
+	 * IFE 变焦改变了打分画面的视场：梯度能量换了画面，不能和之前的分数比
 	 * （FocusFoM 按整个视场统计，不受影响）。不在搜索时重取基准（变焦本身不触发重扫）；
 	 * 在搜索时等视场连续 kViewSettleFrames 帧不变后重新开始这次搜索，保留点按标记。
 	 */
@@ -650,7 +567,7 @@ void AutoFocus::onFrame(const uint8_t *pixels, int w, int h, int stride, int byt
 		 *   变差（被摄物移动/换景）—— 旧实现只看这一个方向，而且是跟【扫描时】的峰值比；
 		 *   变好（比如对着白墙收敛成"未合焦"、分数 15，再转向有纹理的物体：失焦的新物体
 		 *   分数照样高于 0.7×15，旧实现永远不重扫，停在 PASSIVE_UNFOCUSED）。
-		 * 阈值 = max(相对 kRescanRel，绝对 kRescanAbs)：绝对下限挡住低分场景的噪声，
+		 * 阈值 = max(相对 kRescanRel，绝对 kHwFloor)：绝对下限挡住低分场景的噪声，
 		 * 也让 refScore_≈0（全平场景、或钉住后刚放开）时照样能触发。
 		 */
 		/*
@@ -666,7 +583,7 @@ void AutoFocus::onFrame(const uint8_t *pixels, int w, int h, int stride, int byt
 			return;
 		}
 		const double delta = std::fabs(score - refScore_);
-		if (delta > std::max(refScore_ * kRescanRel, hwMetric_ ? kHwFloor : kRescanAbs)) {
+		if (delta > std::max(refScore_ * kRescanRel, kHwFloor)) {
 			if (++stable_ >= kRescanFrames) {
 				ALOGI("AF 画面变化（基准 %.1f → %.1f），重新搜索", refScore_, score);
 				startScan();

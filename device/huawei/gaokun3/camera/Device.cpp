@@ -182,7 +182,7 @@ bool Device::init()
 	 *     加 270°。
 	 *
 	 *   ★ 还要扣掉 libcamera 已经转掉的部分：会话不设 CameraConfiguration::orientation，
-	 *     默认要 Rotate0，simple 流水线用 CameraSensor::computeTransform() 去凑。180 能靠
+	 *     默认要 Rotate0，管线用 CameraSensor::computeTransform() 去凑。180 能靠
 	 *     水平 + 垂直翻转消掉，后摄 ov13b10 支持翻转，就是被翻转读出的（日志里
 	 *     transform hvflip）；90 / 270 要转置，消不掉。前摄 hi846 没有翻转控件。
 	 *
@@ -209,7 +209,7 @@ bool Device::init()
 	 * 不设 orientation（会话哪天要设，这里也得跟着改）。validate() 之后 orientation
 	 * 还是 Rotate0，就是设备树的角度整个被消掉了；消不掉时它会把 orientation 改成
 	 * 安装方向，不翻转。
-	 * 不看 validate() 的返回值：simple 流水线一开头就算 orientation，后面即使因为
+	 * 不看 validate() 的返回值：管线在检查格式和尺寸之前就算好 orientation，即使因为
 	 * 格式返回 Invalid，这个结果也已经定了，和会话用的格式无关。
 	 */
 	int32_t undone = 0;
@@ -327,14 +327,13 @@ bool Device::init()
 /*
  * libcamera 配置好之后这个相机能做什么；不开流。
  *
- * 帧率：硬件 ISP 路径上，每种输出尺寸的帧率取决于会话为它要的画面
- * （Session::hwIspFrameSize()）让 libcamera 选中的传感器模式：ov13b10 的合并
- * 模式能到 60 fps，全尺寸模式 30 fps。把画面复制到各路流跟得上 60 fps。
- * 软件 ISP 的 CPU 去马赛克仍是 30 fps。做法：每种不同的画面尺寸配置一次相机，
- * 读 libcamera 允许的最短帧长；失败的尺寸按 30 fps。
+ * 帧率：每种输出尺寸的帧率取决于会话为它要的画面（Session::hwIspFrameSize()）让
+ * libcamera 选中的传感器模式：ov13b10 的合并模式能到 60 fps，全尺寸模式 30 fps。把画面
+ * 复制到各路流跟得上 60 fps。做法：每种不同的画面尺寸配置一次相机，读 libcamera 允许的
+ * 最短帧长；失败的尺寸按 30 fps。
  *
- * 3A 控制：IPA 配置之后才列出它们，所以软件 ISP 也按默认流配置一次。
- * acquire 或配置失败的相机一个都不声明。
+ * 3A 控制：IPA 配置之后才列出它们。管线不给 NV12（不是 qcom-ife）、acquire 失败的相机
+ * 一个都不声明。
  */
 void Device::probeCamera()
 {
@@ -347,10 +346,11 @@ void Device::probeCamera()
 	if (!probe || probe->empty())
 		return;
 	const auto fmts = probe->at(0).formats().pixelformats();
-	auto has = [&](const libcamera::PixelFormat &f) {
-		return std::find(fmts.begin(), fmts.end(), f) != fmts.end();
-	};
-	const bool hwIsp = has(libcamera::formats::NV12) && !has(libcamera::formats::RGB888);
+	if (std::find(fmts.begin(), fmts.end(), libcamera::formats::NV12) == fmts.end()) {
+		ALOGW("%s: no NV12 output (the qcom-ife pipeline is required), nothing probed",
+		      name_.c_str());
+		return;
+	}
 
 	if (cam_->acquire()) {
 		ALOGW("%s: camera busy, frame rates and 3A controls not probed", name_.c_str());
@@ -379,16 +379,6 @@ void Device::probeCamera()
 		      (long long)facts_.maxFrameDurationNs);
 		cam_->release();
 	};
-
-	if (!hwIsp) {
-		if (probe->validate() != libcamera::CameraConfiguration::Invalid &&
-		    !cam_->configure(probe.get())) {
-			probe3aControls();
-			accumulateLimits(limits);
-		}
-		finish();
-		return;
-	}
 
 	std::map<std::pair<unsigned int, unsigned int>, int64_t> byFrame;
 	for (const auto &s : facts_.outputSizes) {
@@ -494,7 +484,7 @@ ndk::ScopedAStatus Device::getPhysicalCameraCharacteristics(const std::string &,
 
 ndk::ScopedAStatus Device::getResourceCost(CameraResourceCost *out)
 {
-	out->resourceCost = 100;     /* 软件 ISP 吃 CPU，如实报满 */
+	out->resourceCost = 100;     /* 两个相机共用一条 libcamera 管线，同一时间只能开一个 */
 	out->conflictingDevices.clear();
 	return ndk::ScopedAStatus::ok();
 }

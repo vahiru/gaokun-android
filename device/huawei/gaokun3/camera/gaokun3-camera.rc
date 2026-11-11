@@ -11,7 +11,7 @@ service vendor.camera-provider-gaokun3 /vendor/bin/hw/android.hardware.camera.pr
     group audio camera input drmrpc graphics media
     ioprio rt 4
     # libcamera 自己的日志默认走 stderr，对 init 服务等于丢弃。
-    # 留一条出口：软件 ISP 的失败因果链很长，没有它根本查不动（见 #97）。
+    # 留一条出口：管线和 IPA 的失败因果链很长，没有它根本查不动（见 #97）。
     setenv LIBCAMERA_LOG_FILE /data/vendor/camera/libcamera.log
     setenv LIBCAMERA_LOG_LEVELS *:INFO
 

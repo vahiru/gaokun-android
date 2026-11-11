@@ -2,15 +2,11 @@
 /*
  * gaokun3 相机 HAL —— 自动对焦（对比度检测 CDAF，全尺寸模式下加相位检测）。
  *
- * ★ 软件 ISP（simple pipeline + softisp）没有 AF 统计：内核只把马达当 v4l2 子设备
- *   暴露，它的 IPA 只有 AGC/AWB。所以信号由 HAL 自己算：【帧本身的清晰度】（任何模式），
- *   以及全尺寸 RAW 里 ov13b10 的 PD 像素算出的相位错位（见下面 Phase detection 一段）。
- *   硬件 ISP（qcom-ife）单 IFE 的模式里，libcamera 报 IFE 对焦统计算出的 FocusFoM，
- *   用它代替帧本身的清晰度（见 onFrame()）；双 IFE 的全尺寸模式没有，仍用帧本身。
+ * ★ 信号：马达是内核暴露的 v4l2 子设备（dw9714），由 HAL 自己搜索。清晰度分数取 AF 区域里
+ *   亮度的梯度能量，或者 libcamera 从 IFE 对焦统计算出的 FocusFoM（见 onFrame()）；全尺寸
+ *   模式下另有 RAW 里 ov13b10 的 PD 像素算出的相位错位（见下面 Phase detection 一段）。
  *
- * ★ 判据（与曝光无关）：
- *   降采样亮度网格的拉普拉斯能量 / 亮度总和，再乘 1000（见 sharpness()）。
- *   亮度整体伸缩（AGC 换曝光/增益）时分子分母同比例变，比值不动 ——
+ * ★ 判据与曝光无关：梯度能量除以亮度均值的平方，AGC 换曝光、增益时比值不动 ——
  *   否则"越亮越清晰"会把马达一路推到曝光最好而画面最糊的位置。
  *
  * ★ 搜索：**确定性扫描**（不是爬山）。按 kCoarseStep 粗扫搜索范围，
@@ -77,8 +73,7 @@ public:
 	/* ANDROID_CONTROL_AF_TRIGGER_*；START 起一次单次对焦，CANCEL 取消锁定。 */
 	void trigger(uint8_t androidAfTrigger);
 
-	/* 喂一帧（libcamera 的输出，srcWidth_×srcHeight_，行宽 stride 字节）：
-	 * bytesPerPixel 为 3 时是软件 ISP 的 RGB24，为 1 时是硬件 ISP 输出的 NV12 的 Y 平面。
+	/* 喂一帧（libcamera 输出的 NV12 的 Y 平面，w×h，行宽 stride 字节）。
 	 * sceneStable：AE 是否已经收敛（由会话按"连续 N 帧亮度稳定"给出）。
 	 * ⚠️ 为什么必须等它：我们唯一的信号就是帧本身，AGC 还在爬的时候整帧的
 	 *    gamma/对比度都在变，锐度分数会跟着漂 —— 实测同一马达位置（1020）
@@ -89,12 +84,10 @@ public:
 	 *   增益高（≥ kFoMGainOn，回到 ≤ kFoMGainOff 才换回）且有 FocusFoM 时用 hwScore，
 	 *   即硬件 ISP 对焦统计在 AF 区域上算出的 FocusFoM。11-10 逐点钉住马达实测：亮处
 	 *   文字上梯度能量偏离峰 20 码低 7–9%，FocusFoM 只低 2–3%；暗处（ISO 1550）白墙上
-	 *   没有焦点信号，梯度能量被噪声主导，画面一变就跳 2–3 倍，FocusFoM 约 1.4 倍。
-	 *   原来的块平均拉普拉斯（sharpness()）对文字只差约 5%，块平均把细节平均掉了。
-	 * - 软件 ISP 的 RGB：块平均的拉普拉斯能量（sharpness()）。
-	 * 前两种量纲不同，离焦时也有一层噪声的底，所以“可对焦”指峰值至少是最低采样点（不低
-	 * 于 kHwFloor）的 kHwMinRise 倍，而不是高于 kMinScore；重扫按相对变化，绝对下限为
-	 * kHwFloor。连续 kHwSourceFrames 帧换了来源才切换并重新搜索，偶尔一帧缺统计只跳过
+	 *   没有焦点信号，梯度能量被噪声主导，画面一变就跳 2–3 倍，FocusFoM 约 1.4 倍。块平均
+	 *   的拉普拉斯对文字只差约 5%（块平均把细节平均掉了），不用。
+	 * 两种量纲不同，离焦时也有一层噪声的底，所以“可对焦”指峰值至少是最低采样点（不低于
+	 * kHwFloor）的 kHwMinRise 倍；重扫按相对变化，绝对下限为 kHwFloor。连续 kHwSourceFrames 帧换了来源才切换并重新搜索，偶尔一帧缺统计只跳过
 	 * 那一帧。
 	 */
 	/*
@@ -102,9 +95,9 @@ public:
 	 * IFE 变焦时显示路径只显示视场里的一块，AF 区域（按整个视场给）在打分前换算到这幅
 	 * 画面上；相位（RAW）与 FocusFoM 按整个视场，不受影响。
 	 */
-	void onFrame(const uint8_t *pixels, int w, int h, int stride, int bytesPerPixel,
-		     bool sceneStable, const RawFrame *raw = nullptr, double hwScore = -1.0,
-		     double gain = 1.0, const float *view = nullptr);
+	void onFrame(const uint8_t *pixels, int w, int h, int stride, bool sceneStable,
+		     const RawFrame *raw = nullptr, double hwScore = -1.0, double gain = 1.0,
+		     const float *view = nullptr);
 
 	/* AF region as fractions of the frame (x0, y0, x1, y1), or none: the
 	 * central 70%. A change starts a new search. */
@@ -156,8 +149,6 @@ private:
 	void regionChanged(bool tap);
 	void applyRegion(float x0, float y0, float x1, float y1, bool tap);
 
-	double sharpness(const uint8_t *pixels, int w, int h, int stride, int bytesPerPixel,
-			 const float region[4]);
 	/* viewW：画面宽度占整个视场的比例（IFE 变焦时 < 1），差分距离按整个视场的等效宽度取 */
 	static double gradientEnergy(const uint8_t *y, int w, int h, int stride,
 				     const float region[4], double viewW = 1.0);
@@ -229,15 +220,9 @@ private:
 	static constexpr double kFoMGainOff = 6.0;
 	/* gradientEnergy() 在 AF 区域里最多抽这么多个样本（全尺寸画面也不到 1 ms） */
 	static constexpr long kGradSamples = 100000;
-	static constexpr double kMinScore = 20.0;   /* "这场景没法对焦"（白墙）的下限；
-						     ⚠️ 量纲随指标变（拉普拉斯/亮度）。实测本机
-						     标准卡场景：真峰 347、远端平坦区 33、
-						     近端 87 ⇒ 取 20 能把"平坦低分平台"
-						     判成未合焦。要按实测再校准。 */
-	/* 连续模式重扫：相对收敛后基准分数变化超过 30%（涨跌都算），且至少 kRescanAbs，
-	 * 连续 kRescanFrames 帧。绝对下限 = kMinScore/2，挡住低分场景里的噪声。 */
+	/* 连续模式重扫：相对收敛后基准分数变化超过 30%（涨跌都算），且至少 kHwFloor，
+	 * 连续 kRescanFrames 帧。 */
 	static constexpr double kRescanRel = 0.30;
-	static constexpr double kRescanAbs = kMinScore / 2;
 	static constexpr int kRescanFrames = 4;
 	/*
 	 * Requests after a START in a continuous mode within which a switch to AUTO
@@ -248,11 +233,6 @@ private:
 	 */
 	static constexpr int kStartCarryRequests = 3;
 	static constexpr float kMinFocusDiopters = 10.0f;  /* 与 Metadata.cpp 声明一致 */
-	/* 降采样：网格步长 16 像素、每格内部再 4×4 平均。
-	 * ⚠️ 曾经是"每 16 像素只取 1 个像素"，那样单像素噪声全进来 —— 实测噪声
-	 * 比细节还大，曲线被噪声主导（同一场景 1023 的分数反而高于 512）。 */
-	static constexpr int kBlock = 16;
-	static constexpr int kAvg = 4;
 	/* ⚠️ 流水线延迟：setPosition 之后相机流水线里还有 3–4 帧是旧位置曝的，
 	 * 立刻用下一帧的分数就等于把"位置"和"分数"错配。必须等几帧再采样。 */
 	/* 4: after moves of 50 codes or more the score was often still rising on the third frame. */
@@ -319,8 +299,7 @@ private:
 	int pdDonePos_ = -1;             /* 相位判定合焦的位置，-1 = 没有 */
 	int moveTarget_ = -1;            /* where a stepped move is heading, -1 = none */
 	int manualPos_ = -1;             /* AF 模式 OFF 时要求的镜头位置，-1 = 无 */
-	bool hwMetric_ = false;          /* 分数是相对量纲的（FocusFoM 或梯度能量） */
-	int scoreSource_ = 0;            /* 0 拉普拉斯，1 FocusFoM，2 梯度能量 */
+	int scoreSource_ = 0;            /* 0 还没定，1 FocusFoM，2 梯度能量 */
 	bool highGain_ = false;          /* 增益高：有 FocusFoM 时用它 */
 	int otherSource_ = 0;            /* 连续几帧的分数来自另一种来源 */
 	/* AF region in fractions of the frame; default the central 70%. */
@@ -333,7 +312,6 @@ private:
 	int holdPos_ = -1;
 	int stableSeen_ = 0;
 	int settle_ = 0;                 /* 还要等几帧才能采信这一帧的分数 */
-	std::vector<float> grid_;        /* 降采样后的亮度网格（复用，避免每帧分配） */
 	int moves_ = 0;
 	double bestScore_ = 0.0;
 	int bestPos_ = 0;
