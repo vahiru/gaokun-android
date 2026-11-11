@@ -8,10 +8,11 @@
 //   ⇒ 跨工具链混链 C++ 的前提是 ABI 相同，NDK 与平台恰恰不同。见 #96。
 //
 // 源文件清单是从【已跑通的 meson 构建】用 `meson introspect --targets`
-// 抽出来的，不是手抄：libcamera-base 20 + libcamera 69 + ipa_softisp 7。
+// 抽出来的，不是手抄：libcamera-base 20 + libcamera 69 + ipa_qcom_ife 13
+// （meson 选项 -Dpipelines=qcom-ife -Dipas=qcom-ife；硬件 ISP，软件 ISP 不再编译）。
 //
 // ⚠️ 生成文件（control_ids.cpp / property_ids.cpp / version.cpp /
-//   ipa_pub_key.cpp / 两个 softisp proxy）由 libcamera 自带的 Python 生成器
+//   ipa_pub_key.cpp / qcom-ife 的 IPA proxy）由 libcamera 自带的 Python 生成器
 //   产出，见 generated/ 目录与 scripts/camera/gen-libcamera-sources.sh。
 
 package {
@@ -46,8 +47,8 @@ cc_defaults {
         // ★ 让 IPA 跑在【进程内】而不是独立进程。见 patches/libcamera/0003-*：
         //   没有 gnutls/libcrypto 时 isSignatureValid() 恒为 false ⇒ 强制隔离，
         //   那样既要多编一个 proxy worker 可执行体（否则报
-        //   "Failed to get proxy worker path"、软件 ISP 起不来），
-        //   又要为 CPU 密集的软件 ISP 每帧付一次 IPC。
+        //   "Failed to get proxy worker path"、IPA 起不来），
+        //   又要每帧多付一次 IPC。
         //   ⚠️ 安全权衡见该补丁的说明：换闭源 IPA 的项目不要开这个宏。
         "-DLIBCAMERA_IPA_TRUST_UNSIGNED",
     ],
@@ -60,7 +61,7 @@ cc_defaults {
         "include",
         "src",
         "src/ipa",
-        "src/ipa/softisp",
+        "src/ipa/qcom-ife",
         "src/ipa/libipa",
         "generated/include",
         "generated/include/libcamera",
@@ -159,22 +160,17 @@ cc_library_shared {
         "src/libcamera/converter/converter_dw100.cpp",
         "src/libcamera/converter/converter_dw100_vertexmap.cpp",
         "src/libcamera/converter/converter_v4l2_m2m.cpp",
-        "src/libcamera/pipeline/simple/simple.cpp",
+        "src/libcamera/pipeline/qcom-ife/qcom_ife.cpp",
         "src/libcamera/sensor/camera_sensor.cpp",
         "src/libcamera/sensor/camera_sensor_legacy.cpp",
         "src/libcamera/sensor/camera_sensor_properties.cpp",
         "src/libcamera/sensor/camera_sensor_raw.cpp",
-        "src/libcamera/software_isp/benchmark.cpp",
-        "src/libcamera/software_isp/debayer.cpp",
-        "src/libcamera/software_isp/debayer_cpu.cpp",
-        "src/libcamera/software_isp/software_isp.cpp",
-        "src/libcamera/software_isp/swstats_cpu.cpp",
         // ── 生成的源（见头部说明）──
         "generated/src/control_ids.cpp",
         "generated/src/property_ids.cpp",
         "generated/src/version.cpp",
         "generated/src/ipa_pub_key.cpp",
-        "generated/src/softisp_ipa_proxy.cpp",
+        "generated/src/qcom-ife_ipa_proxy.cpp",
     ],
     shared_libs: [
         "liblog",
@@ -225,22 +221,27 @@ cc_library_static {
 }
 
 cc_library_shared {
-    name: "libcamera_ipa_softisp_gk3",
+    name: "libcamera_ipa_qcom_ife_gk3",
     defaults: ["libcamera_gaokun3_defaults"],
     // ⚠️★ 必须装到 libcamera 编译进去的 IPA_MODULE_DIR（config.h：/vendor/lib64/libcamera/ipa），
-    //   否则 IPAManager 报 "No IPA found in '/vendor/lib64/libcamera/ipa'"，软件 ISP 建不起来，
-    //   libcamera 把裸拜耳交给 HAL，HAL 当 RGB24 喂 libyuv 直接 SIGSEGV —— v0.6.0 正式镜像上
-    //   相机打不开就是它（#109）。开发期是手动 push 到那个目录的，overlay 一拆就露馅。
+    //   否则 IPAManager 报 "No IPA found in '/vendor/lib64/libcamera/ipa'"，qcom-ife 管线建不起来。
+    //   调优文件由 device.mk 装到 IPA_CONFIG_DIR 下的 qcom-ife/（/vendor/etc/libcamera/ipa/qcom-ife/）。
     relative_install_path: "libcamera/ipa",
     static_libs: ["libcamera_ipa_gk3"],
     srcs: [
-        "src/ipa/softisp/ipa_context.cpp",
-        "src/ipa/softisp/softisp.cpp",
-        "src/ipa/softisp/algorithms/adjust.cpp",
-        "src/ipa/softisp/algorithms/awb.cpp",
-        "src/ipa/softisp/algorithms/agc.cpp",
-        "src/ipa/softisp/algorithms/blc.cpp",
-        "src/ipa/softisp/algorithms/ccm.cpp",
+        "src/ipa/qcom-ife/ipa_context.cpp",
+        "src/ipa/qcom-ife/qcom-ife.cpp",
+        "src/ipa/qcom-ife/stats.cpp",
+        "src/ipa/qcom-ife/algorithms/abf.cpp",
+        "src/ipa/qcom-ife/algorithms/agc.cpp",
+        "src/ipa/qcom-ife/algorithms/awb.cpp",
+        "src/ipa/qcom-ife/algorithms/bf.cpp",
+        "src/ipa/qcom-ife/algorithms/blc.cpp",
+        "src/ipa/qcom-ife/algorithms/bpc.cpp",
+        "src/ipa/qcom-ife/algorithms/ccm.cpp",
+        "src/ipa/qcom-ife/algorithms/gamma.cpp",
+        "src/ipa/qcom-ife/algorithms/lsc.cpp",
+        "src/ipa/qcom-ife/algorithms/pdpc.cpp",
     ],
     shared_libs: [
         "liblog",

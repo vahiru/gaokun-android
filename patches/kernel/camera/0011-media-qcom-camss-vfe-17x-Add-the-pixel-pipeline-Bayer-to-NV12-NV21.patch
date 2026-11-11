@@ -1,0 +1,776 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: qcom: camss: vfe-17x: Add the pixel pipeline (Bayer to NV12/NV21)
+
+Upstream drives only the RDI write masters of Titan 17x. Add a fixed
+parameter pixel pipeline on VFE_LINE_PIX for VFEs that describe pixel
+pipeline output formats:
+
+  CSID IPP -> CAMIF -> DEMUX -> DEMOSAIC (+WB) -> CST (BT.601 full range)
+  -> FULL path MNDS (luma at compose size, chroma 4:2:0) -> CROP ->
+  ROUND/CLAMP (8 bit) -> FULL Y (WM3) and FULL C (WM4)
+
+Both write masters form bus composite group 0, so a frame completes
+once, through the composite done IRQ, and their per master done bits
+are ignored. The CAMIF reg update (command bit 0, done in status0 bit
+4) latches the pipeline configuration and the buffer addresses of each
+frame.
+
+White balance gains are unity, directional demosaic interpolation is
+off because it needs per sensor weights, and lens shading, colour
+correction and gamma are bypassed.
+
+Register offsets and field layouts come from the Titan 17x register
+packing of the SC8280XP Windows camera stack (CamX rel 10.6
+QcDeviceMFT8280.dll and the qccamisp8280.sys ISP driver). The CST
+matrix is the one of the S5K3L6 chromatix tuning.
+
+While at it, fix two issues in the ISR:
+- Read the three bus IRQ status registers instead of line_num of them.
+  With line_num == 4 the loop read VFE_BUS_IRQ_STATUS(3), which is
+  VFE_BUS_IRQ_CLEAR_GLOBAL, and wrote VFE_BUS_IRQ_CLEAR(3), which is
+  VFE_BUS_IRQ_STATUS(0).
+- Report VFE violations. vfe_violation_read() had no caller.
+
+Co-developed-by: dezige131 <2643591270@qq.com>
+Signed-off-by: dezige131 <2643591270@qq.com>
+Signed-off-by: Akisaira <akisaira@outlook.com>
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ .../media/platform/qcom/camss/camss-vfe-17x.c | 600 +++++++++++++++++-
+ 1 file changed, 583 insertions(+), 17 deletions(-)
+
+diff --git a/drivers/media/platform/qcom/camss/camss-vfe-17x.c b/drivers/media/platform/qcom/camss/camss-vfe-17x.c
+index e5ee7e717..a24f1c9eb 100644
+--- a/drivers/media/platform/qcom/camss/camss-vfe-17x.c
++++ b/drivers/media/platform/qcom/camss/camss-vfe-17x.c
+@@ -32,12 +32,25 @@
+ #define		GLOBAL_RESET_CMD_VFE_DOMAIN	BIT(30)
+ #define		GLOBAL_RESET_CMD_RESET_BYPASS	BIT(31)
+ 
++/* Pixel pipeline module enables */
++#define VFE_MODULE_LENS_EN			(0x040)
++#define		MODULE_LENS_EN_DEMUX		BIT(2)
++#define		MODULE_LENS_EN_DEMOSAIC		BIT(10)
++#define VFE_MODULE_STATS_EN			(0x044)
++#define VFE_MODULE_COLOR_EN			(0x048)
++#define VFE_MODULE_ZOOM_EN			(0x04c)
++#define		MODULE_ZOOM_EN_CST		BIT(0)
++#define		MODULE_ZOOM_EN_SCALE_FULL	BIT(3)
++#define		MODULE_ZOOM_EN_CROP_FULL	BIT(4)
++
+ #define VFE_CORE_CFG				(0x050)
+ #define		CFG_PIXEL_PATTERN_YCBYCR	(0x4)
+ #define		CFG_PIXEL_PATTERN_YCRYCB	(0x5)
+ #define		CFG_PIXEL_PATTERN_CBYCRY	(0x6)
+ #define		CFG_PIXEL_PATTERN_CRYCBY	(0x7)
+ #define		CFG_COMPOSITE_REG_UPDATE_EN	BIT(4)
++/* Set by the Windows SC8280XP ISP driver on every IFE start, unnamed */
++#define		CFG_BIT24			BIT(24)
+ 
+ #define VFE_IRQ_CMD				(0x058)
+ #define		CMD_GLOBAL_CLEAR		BIT(0)
+@@ -62,6 +75,7 @@
+ 
+ #define VFE_IRQ_STATUS_0				(0x06c)
+ #define		STATUS_0_CAMIF_SOF			BIT(0)
++#define		STATUS_0_CAMIF_REG_UPDATE		BIT(4)
+ #define		STATUS_0_RDI_REG_UPDATE(n)		BIT((n) + 5)
+ #define		STATUS_0_IMAGE_MASTER_PING_PONG(n)	BIT((n) + 8)
+ #define		STATUS_0_IMAGE_COMPOSITE_DONE(n)	BIT((n) + 25)
+@@ -93,8 +107,111 @@
+ #define		CFG_RAW_CROP_EN			BIT(22)
+ 
+ #define VFE_REG_UPDATE_CMD			(0x4ac)
++#define		REG_UPDATE_PIX			BIT(0)
+ #define		REG_UPDATE_RDI(n)		BIT(1 + (n))
+ 
++/*
++ * Pixel pipeline (CAMIF -> DEMUX -> DEMOSAIC/WB -> CST -> MNDS -> CROP ->
++ * ROUND/CLAMP -> FULL Y/C write masters). Offsets and field layouts come
++ * from the Titan 17x register packing in the SC8280XP Windows camera stack
++ * (CamX rel 10.6, QcDeviceMFT8280.dll) and its ISP kernel driver.
++ */
++#define VFE_CAMIF_LINE_SKIP_PATTERN		(0x488)
++#define VFE_CAMIF_PIXEL_SKIP_PATTERN		(0x48c)
++#define VFE_CAMIF_SKIP_PERIOD			(0x490)
++#define		CAMIF_SKIP_PERIOD_DEFAULT	0xf0f
++#define VFE_CAMIF_IRQ_SUBSAMPLE_PATTERN		(0x49c)
++
++#define VFE_CAMIF_RAW_CROP_WIDTH_CFG		(0xce4)
++#define VFE_CAMIF_RAW_CROP_HEIGHT_CFG		(0xce8)
++#define		RAW_CROP_FIRST			16
++#define		RAW_CROP_LAST			0
++#define		RAW_CROP_MASK			0x3fff
++
++#define VFE_DEMUX_CFG				(0x560)
++#define		DEMUX_CFG_PERIOD		0
++#define VFE_DEMUX_GAIN(n)			(0x564 + (n) * 4)
++#define		DEMUX_GAIN_CH0			0
++#define		DEMUX_GAIN_CH1			16
++#define		DEMUX_GAIN_UNITY		0x400	/* Q10 */
++#define VFE_DEMUX_EVEN_CFG			(0x574)
++#define VFE_DEMUX_ODD_CFG			(0x578)
++
++#define VFE_DEMOSAIC_CFG			(0x6f8)
++#define		DEMOSAIC_CFG_DIR_G_INTERP_DIS	BIT(0)
++#define		DEMOSAIC_CFG_DIR_RB_INTERP_DIS	BIT(1)
++#define VFE_DEMOSAIC_INTERP_COEFF_0		(0x71c)
++#define VFE_DEMOSAIC_INTERP_COEFF_1		(0x720)
++
++/* White balance gains, applied by the demosaic block */
++#define VFE_WB_CFG_0				(0x6fc)
++#define		WB_CFG_0_G_GAIN			0
++#define		WB_CFG_0_B_GAIN			16
++#define VFE_WB_CFG_1				(0x700)
++#define		WB_CFG_1_R_GAIN			0
++#define VFE_WB_OFFSET_CFG_0			(0x704)
++#define VFE_WB_OFFSET_CFG_1			(0x708)
++#define		WB_GAIN_UNITY			0x80	/* Q7 */
++
++/* RGB to YCbCr colour space transform, one 4 register block per channel */
++#define VFE_CST_CH_CFG(ch, n)			(0xf30 + (ch) * 0x10 + (n) * 4)
++#define		CST_M0				0	/* reg 0, bits 12:0 */
++#define		CST_M1				16	/* reg 0, bits 28:16 */
++#define		CST_M2				0	/* reg 1, bits 12:0 */
++#define		CST_OFFSET_IN			0	/* reg 2, bits 10:0 */
++#define		CST_OFFSET_OUT			16	/* reg 2, bits 26:16 */
++#define		CST_CLAMP_MIN			0	/* reg 3, bits 9:0 */
++#define		CST_CLAMP_MAX			16	/* reg 3, bits 25:16 */
++#define		CST_COEFF_MASK			0x1fff
++
++/* MNDS16 scaler of the FULL output path, luma at 0xa3c, chroma at 0xa68 */
++#define VFE_SCALE_FULL_Y_BASE			(0xa3c)
++#define VFE_SCALE_FULL_C_BASE			(0xa68)
++#define		SCALE_CFG			0x00
++#define			SCALE_CFG_H_EN		BIT(0)
++#define			SCALE_CFG_V_EN		BIT(1)
++#define		SCALE_H_IMAGE_SIZE		0x04
++#define		SCALE_H_PHASE			0x08
++#define			SCALE_PHASE_MULT	0
++#define			SCALE_PHASE_MULT_MASK	0x3fffff
++#define			SCALE_PHASE_INTERP	28
++#define		SCALE_H_STRIPE			0x0c
++#define		SCALE_H_INIT_PHASE		0x10
++#define		SCALE_H_PAD			0x14
++#define		SCALE_V_IMAGE_SIZE		0x18
++#define		SCALE_V_PHASE			0x1c
++#define		SCALE_V_STRIPE			0x20
++#define		SCALE_V_INIT_PHASE		0x24
++#define		SCALE_V_PAD			0x28
++#define		SCALE_SIZE_IN			0
++#define		SCALE_SIZE_OUT			16
++#define		SCALE_SIZE_MASK			0x3fff
++
++/* Crop / round / clamp of the FULL output path */
++#define VFE_FULL_Y_MODULE_CFG			(0xe0c)
++#define VFE_FULL_C_MODULE_CFG			(0xe2c)
++#define		FULL_MODULE_CFG_CROP_EN		BIT(9)
++#define		FULL_MODULE_CFG_ROUND_EN	BIT(10)
++#define		FULL_MODULE_CFG_CLAMP_EN	BIT(11)
++#define VFE_FULL_Y_CROP_LINE_CFG		(0xe10)
++#define VFE_FULL_Y_CROP_PIXEL_CFG		(0xe14)
++#define VFE_FULL_Y_CLAMP_CFG			(0xe18)
++#define VFE_FULL_Y_ROUND_CFG			(0xe1c)
++#define VFE_FULL_C_CROP_LINE_CFG		(0xe30)
++#define VFE_FULL_C_CROP_PIXEL_CFG		(0xe34)
++#define VFE_FULL_C_CLAMP_CFG			(0xe38)
++#define VFE_FULL_C_ROUND_CFG			(0xe3c)
++#define		CROP_FIRST			16
++#define		CROP_LAST			0
++#define		CROP_LINE_MASK			0x3fff
++#define		CROP_PIXEL_MASK			0x1fff
++/* 10 bit pipeline clamped to 0..255 and rounded to 8 bit, as CamX does */
++#define		CLAMP_CFG_8BIT			0x0ff00000
++#define		ROUND_CFG_Y_8BIT		0x16
++#define		ROUND_CFG_C_8BIT		0x17
++
++/* Last register of the pixel pipeline IQ window */
++
+ #define VFE_BUS_IRQ_MASK(n)		(0x2044 + (n) * 4)
+ #define VFE_BUS_IRQ_CLEAR(n)		(0x2050 + (n) * 4)
+ #define VFE_BUS_IRQ_STATUS(n)		(0x205c + (n) * 4)
+@@ -174,6 +291,15 @@
+ #define VFE_BUS_WM_FRAME_INC(n)			(0x2258 + (n) * 0x100)
+ #define VFE_BUS_WM_BURST_LIMIT(n)		(0x225c + (n) * 0x100)
+ 
++/* Composite group 0 completes when both FULL masters are done */
++#define VFE_BUS_COMP_MASK(n)			(0x2010 + (n) * 4)
++#define		PIX_COMP_GROUP			0
++
++/* FULL output path write masters, fixed in hardware */
++#define VFE_WM_PIX_FULL_Y			3
++#define VFE_WM_PIX_FULL_C			4
++#define		PACKER_FMT_PLAIN_8_LSB_MSB_10	0xe
++
+ static inline void vfe_reg_set(struct vfe_device *vfe, u32 reg, u32 set_bits)
+ {
+ 	u32 bits = readl_relaxed(vfe->base + reg);
+@@ -204,7 +330,7 @@ static void vfe_global_reset(struct vfe_device *vfe)
+ 	writel_relaxed(reset_bits, vfe->base + VFE_GLOBAL_RESET_CMD);
+ }
+ 
+-static void vfe_wm_start(struct vfe_device *vfe, u8 wm, struct vfe_line *line)
++static void vfe_bus_init(struct vfe_device *vfe)
+ {
+ 	u32 val;
+ 
+@@ -225,6 +351,13 @@ static void vfe_wm_start(struct vfe_device *vfe, u8 wm, struct vfe_line *line)
+ 	/* if addr_no_sync has default value then config the addr no sync reg */
+ 	val = WM_ADDR_NO_SYNC_DEFAULT_VAL;
+ 	writel_relaxed(val, vfe->base + VFE_BUS_WM_ADDR_SYNC_NO_SYNC);
++}
++
++static void vfe_wm_start(struct vfe_device *vfe, u8 wm, struct vfe_line *line)
++{
++	u32 val;
++
++	vfe_bus_init(vfe);
+ 
+ 	writel_relaxed(0xf, vfe->base + VFE_BUS_WM_BURST_LIMIT(wm));
+ 
+@@ -253,20 +386,17 @@ static void vfe_wm_stop(struct vfe_device *vfe, u8 wm)
+ 	writel_relaxed(0, vfe->base + VFE_BUS_WM_CFG(wm));
+ }
+ 
+-static void vfe_wm_update(struct vfe_device *vfe, u8 wm, u32 addr,
+-			  struct vfe_line *line)
++static u32 vfe_reg_update_bit(struct vfe_device *vfe, enum vfe_line_id line_id)
+ {
+-	struct v4l2_pix_format_mplane *pix =
+-		&line->video_out.active_fmt.fmt.pix_mp;
+-	u32 stride = pix->plane_fmt[0].bytesperline;
++	if (vfe_line_has_pix_pipeline(vfe, line_id))
++		return REG_UPDATE_PIX;
+ 
+-	writel_relaxed(addr, vfe->base + VFE_BUS_WM_IMAGE_ADDR(wm));
+-	writel_relaxed(stride * pix->height, vfe->base + VFE_BUS_WM_FRAME_INC(wm));
++	return REG_UPDATE_RDI(line_id);
+ }
+ 
+ static void vfe_reg_update(struct vfe_device *vfe, enum vfe_line_id line_id)
+ {
+-	vfe->reg_update |= REG_UPDATE_RDI(line_id);
++	vfe->reg_update |= vfe_reg_update_bit(vfe, line_id);
+ 
+ 	/* Enforce ordering between previous reg writes and reg update */
+ 	wmb();
+@@ -280,7 +410,391 @@ static void vfe_reg_update(struct vfe_device *vfe, enum vfe_line_id line_id)
+ static inline void vfe_reg_update_clear(struct vfe_device *vfe,
+ 					enum vfe_line_id line_id)
+ {
+-	vfe->reg_update &= ~REG_UPDATE_RDI(line_id);
++	vfe->reg_update &= ~vfe_reg_update_bit(vfe, line_id);
++}
++
++/*
++ * Pixel pipeline of the full VFE (VFE_LINE_PIX): CSID IPP -> CAMIF -> DEMUX
++ * -> DEMOSAIC (+WB) -> CST -> FULL path MNDS -> CROP -> ROUND/CLAMP -> FULL
++ * Y and C write masters, producing NV12 or NV21. Linearization, lens
++ * shading, colour correction, tone mapping, gamma and statistics stay
++ * disabled: this is a fixed parameter pipeline without 3A.
++ */
++
++/* Bayer order as used by VFE_CORE_CFG and the demux channel tables */
++enum vfe_bayer_pattern {
++	VFE_BAYER_RGGB = 0,
++	VFE_BAYER_GRBG = 1,
++	VFE_BAYER_BGGR = 2,
++	VFE_BAYER_GBRG = 3,
++};
++
++static int vfe_pix_bayer_pattern(u32 code)
++{
++	switch (code) {
++	case MEDIA_BUS_FMT_SRGGB8_1X8:
++	case MEDIA_BUS_FMT_SRGGB10_1X10:
++	case MEDIA_BUS_FMT_SRGGB12_1X12:
++	case MEDIA_BUS_FMT_SRGGB14_1X14:
++		return VFE_BAYER_RGGB;
++	case MEDIA_BUS_FMT_SGRBG8_1X8:
++	case MEDIA_BUS_FMT_SGRBG10_1X10:
++	case MEDIA_BUS_FMT_SGRBG12_1X12:
++	case MEDIA_BUS_FMT_SGRBG14_1X14:
++		return VFE_BAYER_GRBG;
++	case MEDIA_BUS_FMT_SBGGR8_1X8:
++	case MEDIA_BUS_FMT_SBGGR10_1X10:
++	case MEDIA_BUS_FMT_SBGGR12_1X12:
++	case MEDIA_BUS_FMT_SBGGR14_1X14:
++		return VFE_BAYER_BGGR;
++	case MEDIA_BUS_FMT_SGBRG8_1X8:
++	case MEDIA_BUS_FMT_SGBRG10_1X10:
++	case MEDIA_BUS_FMT_SGBRG12_1X12:
++	case MEDIA_BUS_FMT_SGBRG14_1X14:
++		return VFE_BAYER_GBRG;
++	default:
++		return -EINVAL;
++	}
++}
++
++/* Demux channel select of even and odd lines, per Bayer pattern (CamX) */
++static const u8 vfe_demux_line_cfg[4][2] = {
++	[VFE_BAYER_RGGB] = { 0xc9, 0xac },
++	[VFE_BAYER_GRBG] = { 0x9c, 0xca },
++	[VFE_BAYER_BGGR] = { 0xca, 0x9c },
++	[VFE_BAYER_GBRG] = { 0xac, 0xc9 },
++};
++
++/*
++ * RGB to YCbCr, BT.601 full range, 10 bit, as in the CST12 block of the
++ * S5K3L6 chromatix tuning. Matrix columns are in G, B, R order (Q10).
++ */
++static const struct {
++	s16 m[3];
++	u16 offset_out;
++} vfe_cst_bt601_full[3] = {
++	{ {  601,  117,  306 },   0 },	/* Y */
++	{ { -338,  510, -172 }, 512 },	/* Cb */
++	{ { -427,  -83,  510 }, 512 },	/* Cr */
++};
++
++static void vfe_pix_cst_config(struct vfe_device *vfe, bool crcb)
++{
++	unsigned int ch;
++
++	for (ch = 0; ch < 3; ch++) {
++		/* NV21 stores Cr first: swap the two chroma channels */
++		unsigned int row = (crcb && ch) ? 3 - ch : ch;
++		const s16 *m = vfe_cst_bt601_full[row].m;
++		u32 val;
++
++		val = ((u32)m[0] & CST_COEFF_MASK) << CST_M0;
++		val |= ((u32)m[1] & CST_COEFF_MASK) << CST_M1;
++		writel_relaxed(val, vfe->base + VFE_CST_CH_CFG(ch, 0));
++
++		val = ((u32)m[2] & CST_COEFF_MASK) << CST_M2;
++		writel_relaxed(val, vfe->base + VFE_CST_CH_CFG(ch, 1));
++
++		val = (u32)vfe_cst_bt601_full[row].offset_out << CST_OFFSET_OUT;
++		val |= 0 << CST_OFFSET_IN;
++		writel_relaxed(val, vfe->base + VFE_CST_CH_CFG(ch, 2));
++
++		val = 0 << CST_CLAMP_MIN;
++		val |= 1023 << CST_CLAMP_MAX;
++		writel_relaxed(val, vfe->base + VFE_CST_CH_CFG(ch, 3));
++	}
++}
++
++static void vfe_pix_demux_demosaic_config(struct vfe_device *vfe,
++					  enum vfe_bayer_pattern pattern)
++{
++	u32 gain = DEMUX_GAIN_UNITY << DEMUX_GAIN_CH0 |
++		   DEMUX_GAIN_UNITY << DEMUX_GAIN_CH1;
++	unsigned int i;
++
++	/* One pixel pair per period, no black level change */
++	writel_relaxed(1 << DEMUX_CFG_PERIOD, vfe->base + VFE_DEMUX_CFG);
++	for (i = 0; i < 4; i++)
++		writel_relaxed(gain, vfe->base + VFE_DEMUX_GAIN(i));
++	writel_relaxed(vfe_demux_line_cfg[pattern][0], vfe->base + VFE_DEMUX_EVEN_CFG);
++	writel_relaxed(vfe_demux_line_cfg[pattern][1], vfe->base + VFE_DEMUX_ODD_CFG);
++
++	/*
++	 * Directional interpolation needs sensor specific edge weights from
++	 * the tuning data. Disable it, which leaves non-directional
++	 * interpolation that does not depend on those weights.
++	 */
++	writel_relaxed(DEMOSAIC_CFG_DIR_G_INTERP_DIS |
++		       DEMOSAIC_CFG_DIR_RB_INTERP_DIS,
++		       vfe->base + VFE_DEMOSAIC_CFG);
++	writel_relaxed(0, vfe->base + VFE_DEMOSAIC_INTERP_COEFF_0);
++	writel_relaxed(0, vfe->base + VFE_DEMOSAIC_INTERP_COEFF_1);
++
++	/* The WB gains have no enable bit, always program unity gains */
++	writel_relaxed(WB_GAIN_UNITY << WB_CFG_0_G_GAIN |
++		       WB_GAIN_UNITY << WB_CFG_0_B_GAIN,
++		       vfe->base + VFE_WB_CFG_0);
++	writel_relaxed(WB_GAIN_UNITY << WB_CFG_1_R_GAIN,
++		       vfe->base + VFE_WB_CFG_1);
++	writel_relaxed(0, vfe->base + VFE_WB_OFFSET_CFG_0);
++	writel_relaxed(0, vfe->base + VFE_WB_OFFSET_CFG_1);
++}
++
++static void vfe_pix_camif_config(struct vfe_device *vfe, u32 width, u32 height)
++{
++	u32 val;
++
++	writel_relaxed(CMD_CLEAR_CAMIF_STATUS, vfe->base + VFE_CAMIF_CMD);
++
++	/* No PDAF line/pixel skipping, interrupt on every frame */
++	writel_relaxed(0, vfe->base + VFE_CAMIF_LINE_SKIP_PATTERN);
++	writel_relaxed(0, vfe->base + VFE_CAMIF_PIXEL_SKIP_PATTERN);
++	writel_relaxed(CAMIF_SKIP_PERIOD_DEFAULT, vfe->base + VFE_CAMIF_SKIP_PERIOD);
++	writel_relaxed(1, vfe->base + VFE_CAMIF_IRQ_SUBSAMPLE_PATTERN);
++
++	/* Raw crop window: the whole sensor frame */
++	val = 0 << RAW_CROP_FIRST | ((width - 1) & RAW_CROP_MASK) << RAW_CROP_LAST;
++	writel_relaxed(val, vfe->base + VFE_CAMIF_RAW_CROP_WIDTH_CFG);
++	val = 0 << RAW_CROP_FIRST | ((height - 1) & RAW_CROP_MASK) << RAW_CROP_LAST;
++	writel_relaxed(val, vfe->base + VFE_CAMIF_RAW_CROP_HEIGHT_CFG);
++
++	writel_relaxed(CFG_VFE_OUTPUT_EN | CFG_BUS_OUTPUT_EN | CFG_RAW_CROP_EN,
++		       vfe->base + VFE_CAMIF_CFG);
++}
++
++/* MNDS16 interpolation resolution for a downscale ratio (CamX) */
++static u32 vfe_scale_interp_reso(u32 in, u32 out)
++{
++	u32 ratio = in / out;
++
++	if (ratio < 4)
++		return 3;
++	if (ratio < 8)
++		return 2;
++	if (ratio < 16)
++		return 1;
++	return 0;
++}
++
++static void vfe_pix_scale_config(struct vfe_device *vfe, u32 base,
++				 u32 in_w, u32 in_h, u32 out_w, u32 out_h)
++{
++	u32 reso, phase, val;
++
++	writel_relaxed(SCALE_CFG_H_EN | SCALE_CFG_V_EN, vfe->base + base + SCALE_CFG);
++
++	val = ((in_w - 1) & SCALE_SIZE_MASK) << SCALE_SIZE_IN;
++	val |= ((out_w - 1) & SCALE_SIZE_MASK) << SCALE_SIZE_OUT;
++	writel_relaxed(val, vfe->base + base + SCALE_H_IMAGE_SIZE);
++	reso = vfe_scale_interp_reso(in_w, out_w);
++	phase = (in_w << (reso + 14)) / out_w;
++	val = (phase & SCALE_PHASE_MULT_MASK) << SCALE_PHASE_MULT;
++	val |= reso << SCALE_PHASE_INTERP;
++	writel_relaxed(val, vfe->base + base + SCALE_H_PHASE);
++	writel_relaxed(0, vfe->base + base + SCALE_H_STRIPE);
++	writel_relaxed(0, vfe->base + base + SCALE_H_INIT_PHASE);
++	writel_relaxed((in_w - 1) & SCALE_SIZE_MASK, vfe->base + base + SCALE_H_PAD);
++
++	val = ((in_h - 1) & SCALE_SIZE_MASK) << SCALE_SIZE_IN;
++	val |= ((out_h - 1) & SCALE_SIZE_MASK) << SCALE_SIZE_OUT;
++	writel_relaxed(val, vfe->base + base + SCALE_V_IMAGE_SIZE);
++	reso = vfe_scale_interp_reso(in_h, out_h);
++	phase = (in_h << (reso + 14)) / out_h;
++	val = (phase & SCALE_PHASE_MULT_MASK) << SCALE_PHASE_MULT;
++	val |= reso << SCALE_PHASE_INTERP;
++	writel_relaxed(val, vfe->base + base + SCALE_V_PHASE);
++	writel_relaxed(0, vfe->base + base + SCALE_V_STRIPE);
++	writel_relaxed(0, vfe->base + base + SCALE_V_INIT_PHASE);
++	writel_relaxed((in_h - 1) & SCALE_SIZE_MASK, vfe->base + base + SCALE_V_PAD);
++}
++
++/*
++ * Crop the scaler output. The chroma plane has the luma width in samples
++ * (interleaved CbCr) and half the lines.
++ */
++static void vfe_pix_crop_config(struct vfe_device *vfe, const struct v4l2_rect *crop)
++{
++	u32 first_pixel = crop->left;
++	u32 last_pixel = crop->left + crop->width - 1;
++	u32 val;
++
++	val = (crop->top & CROP_LINE_MASK) << CROP_FIRST;
++	val |= ((crop->top + crop->height - 1) & CROP_LINE_MASK) << CROP_LAST;
++	writel_relaxed(val, vfe->base + VFE_FULL_Y_CROP_LINE_CFG);
++	val = (first_pixel & CROP_PIXEL_MASK) << CROP_FIRST;
++	val |= (last_pixel & CROP_PIXEL_MASK) << CROP_LAST;
++	writel_relaxed(val, vfe->base + VFE_FULL_Y_CROP_PIXEL_CFG);
++
++	val = ((crop->top / 2) & CROP_LINE_MASK) << CROP_FIRST;
++	val |= (((crop->top + crop->height) / 2 - 1) & CROP_LINE_MASK) << CROP_LAST;
++	writel_relaxed(val, vfe->base + VFE_FULL_C_CROP_LINE_CFG);
++	val = (first_pixel & CROP_PIXEL_MASK) << CROP_FIRST;
++	val |= (last_pixel & CROP_PIXEL_MASK) << CROP_LAST;
++	writel_relaxed(val, vfe->base + VFE_FULL_C_CROP_PIXEL_CFG);
++
++	writel_relaxed(CLAMP_CFG_8BIT, vfe->base + VFE_FULL_Y_CLAMP_CFG);
++	writel_relaxed(ROUND_CFG_Y_8BIT, vfe->base + VFE_FULL_Y_ROUND_CFG);
++	writel_relaxed(CLAMP_CFG_8BIT, vfe->base + VFE_FULL_C_CLAMP_CFG);
++	writel_relaxed(ROUND_CFG_C_8BIT, vfe->base + VFE_FULL_C_ROUND_CFG);
++
++	val = FULL_MODULE_CFG_CROP_EN | FULL_MODULE_CFG_ROUND_EN | FULL_MODULE_CFG_CLAMP_EN;
++	writel_relaxed(val, vfe->base + VFE_FULL_Y_MODULE_CFG);
++	writel_relaxed(val, vfe->base + VFE_FULL_C_MODULE_CFG);
++}
++
++/* Line based write master of the FULL path, left disabled */
++static void vfe_pix_wm_config(struct vfe_device *vfe, u8 wm, u32 width,
++			      u32 height, u32 stride)
++{
++	/* Keep every frame */
++	writel_relaxed(0, vfe->base + VFE_BUS_WM_IRQ_SUBSAMPLE_PERIOD(wm));
++	writel_relaxed(1, vfe->base + VFE_BUS_WM_IRQ_SUBSAMPLE_PATTERN(wm));
++	writel_relaxed(0, vfe->base + VFE_BUS_WM_FRAMEDROP_PERIOD(wm));
++	writel_relaxed(1, vfe->base + VFE_BUS_WM_FRAMEDROP_PATTERN(wm));
++
++	writel_relaxed(width, vfe->base + VFE_BUS_WM_BUFFER_WIDTH_CFG(wm));
++	writel_relaxed(height, vfe->base + VFE_BUS_WM_BUFFER_HEIGHT_CFG(wm));
++	writel_relaxed(PACKER_FMT_PLAIN_8_LSB_MSB_10, vfe->base + VFE_BUS_WM_PACKER_CFG(wm));
++	writel_relaxed(stride, vfe->base + VFE_BUS_WM_STRIDE(wm));
++	writel_relaxed(0, vfe->base + VFE_BUS_WM_IMAGE_ADDR_OFFSET(wm));
++	writel_relaxed(stride * height, vfe->base + VFE_BUS_WM_FRAME_INC(wm));
++	writel_relaxed(0xf, vfe->base + VFE_BUS_WM_BURST_LIMIT(wm));
++	writel_relaxed(0, vfe->base + VFE_BUS_WM_CFG(wm));
++}
++
++static void vfe_pix_wm_enable(struct vfe_device *vfe)
++{
++	u32 val = 1 << WM_CFG_EN | MODE_QCOM_PLAIN << WM_CFG_MODE;
++
++	writel_relaxed(val, vfe->base + VFE_BUS_WM_CFG(VFE_WM_PIX_FULL_Y));
++	writel_relaxed(val, vfe->base + VFE_BUS_WM_CFG(VFE_WM_PIX_FULL_C));
++}
++
++/* Program both planes of a single buffer NV12/NV21 frame */
++static void vfe_pix_wm_update(struct vfe_device *vfe, u32 addr,
++			      struct vfe_line *line)
++{
++	struct v4l2_pix_format_mplane *pix =
++		&line->video_out.active_fmt.fmt.pix_mp;
++	u32 stride = pix->plane_fmt[0].bytesperline;
++
++	writel_relaxed(addr, vfe->base + VFE_BUS_WM_IMAGE_ADDR(VFE_WM_PIX_FULL_Y));
++	writel_relaxed(addr + stride * pix->height,
++		       vfe->base + VFE_BUS_WM_IMAGE_ADDR(VFE_WM_PIX_FULL_C));
++}
++
++static int vfe_pix_configure(struct vfe_device *vfe, struct vfe_line *line)
++{
++	struct v4l2_mbus_framefmt *sink = &line->fmt[MSM_VFE_PAD_SINK];
++	struct v4l2_mbus_framefmt *src = &line->fmt[MSM_VFE_PAD_SRC];
++	struct v4l2_pix_format_mplane *pix = &line->video_out.active_fmt.fmt.pix_mp;
++	const struct v4l2_rect *compose = &line->compose;
++	const struct v4l2_rect *crop = &line->crop;
++	u32 stride = pix->plane_fmt[0].bytesperline;
++	bool crcb = src->code == MEDIA_BUS_FMT_YVYU8_1_5X8;
++	int pattern;
++
++	pattern = vfe_pix_bayer_pattern(sink->code);
++	if (pattern < 0) {
++		dev_err(vfe->camss->dev, "VFE%d: pixel path needs Bayer input, got 0x%04x\n",
++			vfe->id, sink->code);
++		return pattern;
++	}
++
++	vfe_bus_init(vfe);
++
++	writel_relaxed(pattern | CFG_BIT24, vfe->base + VFE_CORE_CFG);
++
++	vfe_pix_camif_config(vfe, sink->width, sink->height);
++	vfe_pix_demux_demosaic_config(vfe, pattern);
++	vfe_pix_cst_config(vfe, crcb);
++
++	/* 4:4:4 in, luma at compose size, chroma at half size in both axes */
++	vfe_pix_scale_config(vfe, VFE_SCALE_FULL_Y_BASE, sink->width, sink->height,
++			     compose->width, compose->height);
++	vfe_pix_scale_config(vfe, VFE_SCALE_FULL_C_BASE, sink->width, sink->height,
++			     compose->width / 2, compose->height / 2);
++	vfe_pix_crop_config(vfe, crop);
++
++	writel_relaxed(MODULE_LENS_EN_DEMUX | MODULE_LENS_EN_DEMOSAIC,
++		       vfe->base + VFE_MODULE_LENS_EN);
++	writel_relaxed(0, vfe->base + VFE_MODULE_STATS_EN);
++	writel_relaxed(0, vfe->base + VFE_MODULE_COLOR_EN);
++	writel_relaxed(MODULE_ZOOM_EN_CST | MODULE_ZOOM_EN_SCALE_FULL |
++		       MODULE_ZOOM_EN_CROP_FULL, vfe->base + VFE_MODULE_ZOOM_EN);
++
++	vfe_pix_wm_config(vfe, VFE_WM_PIX_FULL_Y, crop->width, crop->height, stride);
++	vfe_pix_wm_config(vfe, VFE_WM_PIX_FULL_C, crop->width, crop->height / 2, stride);
++	writel_relaxed(BIT(VFE_WM_PIX_FULL_Y) | BIT(VFE_WM_PIX_FULL_C),
++		       vfe->base + VFE_BUS_COMP_MASK(PIX_COMP_GROUP));
++
++
++	return 0;
++}
++
++static int vfe_pix_enable_output(struct vfe_line *line)
++{
++	struct vfe_device *vfe = to_vfe(line);
++	struct vfe_output *output = &line->output;
++	unsigned long flags;
++	unsigned int i;
++	int ret;
++
++	spin_lock_irqsave(&vfe->output_lock, flags);
++
++	vfe_reg_update_clear(vfe, line->id);
++
++	if (output->state > VFE_OUTPUT_RESERVED) {
++		dev_err(vfe->camss->dev, "Output is not in reserved state %d\n",
++			output->state);
++		ret = -EINVAL;
++		goto out_unlock;
++	}
++
++	WARN_ON(output->gen2.active_num);
++
++	ret = vfe_pix_configure(vfe, line);
++	if (ret < 0)
++		goto out_unlock;
++
++	output->state = VFE_OUTPUT_ON;
++	output->sequence = 0;
++	output->wait_reg_update = 0;
++	reinit_completion(&output->reg_update);
++
++	for (i = 0; i < CAMSS_INIT_BUF_COUNT; i++) {
++		output->buf[i] = vfe_buf_get_pending(output);
++		if (!output->buf[i])
++			break;
++		output->gen2.active_num++;
++		vfe_pix_wm_update(vfe, output->buf[i]->addr[0], line);
++	}
++
++	vfe_pix_wm_enable(vfe);
++
++	/* Latch the pipeline configuration and the first buffers */
++	vfe_reg_update(vfe, line->id);
++
++out_unlock:
++	spin_unlock_irqrestore(&vfe->output_lock, flags);
++
++	return ret;
++}
++
++static void vfe_wm_update(struct vfe_device *vfe, u8 wm, u32 addr,
++			  struct vfe_line *line)
++{
++	struct v4l2_pix_format_mplane *pix =
++		&line->video_out.active_fmt.fmt.pix_mp;
++	u32 stride = pix->plane_fmt[0].bytesperline;
++
++	if (vfe_line_has_pix_pipeline(vfe, line->id)) {
++		vfe_pix_wm_update(vfe, addr, line);
++		return;
++	}
++
++	writel_relaxed(addr, vfe->base + VFE_BUS_WM_IMAGE_ADDR(wm));
++	writel_relaxed(stride * pix->height, vfe->base + VFE_BUS_WM_FRAME_INC(wm));
+ }
+ 
+ static void vfe_enable_irq_common(struct vfe_device *vfe)
+@@ -318,6 +832,22 @@ static void vfe_violation_read(struct vfe_device *vfe)
+ 	pr_err_ratelimited("VFE: violation = 0x%08x\n", violation);
+ }
+ 
++/* Status 0 bit reporting a completed reg update of a line */
++static u32 vfe_reg_update_done_bit(struct vfe_device *vfe, enum vfe_line_id line_id)
++{
++	if (vfe_line_has_pix_pipeline(vfe, line_id))
++		return STATUS_0_CAMIF_REG_UPDATE;
++
++	return STATUS_0_RDI_REG_UPDATE(line_id);
++}
++
++/* The FULL masters complete through composite group 0, not per master */
++static bool vfe_wm_is_pix(struct vfe_device *vfe, u8 wm)
++{
++	return (wm == VFE_WM_PIX_FULL_Y || wm == VFE_WM_PIX_FULL_C) &&
++	       vfe_line_has_pix_pipeline(vfe, VFE_LINE_PIX);
++}
++
+ /*
+  * vfe_isr - VFE module interrupt handler
+  * @irq: Interrupt line
+@@ -328,7 +858,7 @@ static void vfe_violation_read(struct vfe_device *vfe)
+ static irqreturn_t vfe_isr(int irq, void *dev)
+ {
+ 	struct vfe_device *vfe = dev;
+-	u32 status0, status1, vfe_bus_status[VFE_LINE_NUM_MAX];
++	u32 status0, status1, vfe_bus_status[3];
+ 	int i, wm;
+ 
+ 	status0 = readl_relaxed(vfe->base + VFE_IRQ_STATUS_0);
+@@ -337,7 +867,8 @@ static irqreturn_t vfe_isr(int irq, void *dev)
+ 	writel_relaxed(status0, vfe->base + VFE_IRQ_CLEAR_0);
+ 	writel_relaxed(status1, vfe->base + VFE_IRQ_CLEAR_1);
+ 
+-	for (i = VFE_LINE_RDI0; i < vfe->res->line_num; i++) {
++	/* The bus has three IRQ status registers, independent of line_num */
++	for (i = 0; i < ARRAY_SIZE(vfe_bus_status); i++) {
+ 		vfe_bus_status[i] = readl_relaxed(vfe->base + VFE_BUS_IRQ_STATUS(i));
+ 		writel_relaxed(vfe_bus_status[i], vfe->base + VFE_BUS_IRQ_CLEAR(i));
+ 	}
+@@ -351,8 +882,11 @@ static irqreturn_t vfe_isr(int irq, void *dev)
+ 	if (status0 & STATUS_0_RESET_ACK)
+ 		vfe->isr_ops.reset_ack(vfe);
+ 
++	if (status1 & STATUS_1_VIOLATION)
++		vfe_violation_read(vfe);
++
+ 	for (i = VFE_LINE_RDI0; i < vfe->res->line_num; i++)
+-		if (status0 & STATUS_0_RDI_REG_UPDATE(i))
++		if (status0 & vfe_reg_update_done_bit(vfe, i))
+ 			vfe->isr_ops.reg_update(vfe, i);
+ 
+ 	for (i = VFE_LINE_RDI0; i < vfe->res->line_num; i++)
+@@ -365,7 +899,8 @@ static irqreturn_t vfe_isr(int irq, void *dev)
+ 
+ 	for (wm = 0; wm < MSM_VFE_IMAGE_MASTERS_NUM; wm++)
+ 		if (status0 & BIT(9))
+-			if (vfe_bus_status[1] & STATUS1_WM_CLIENT_BUF_DONE(wm))
++			if ((vfe_bus_status[1] & STATUS1_WM_CLIENT_BUF_DONE(wm)) &&
++			    !vfe_wm_is_pix(vfe, wm))
+ 				vfe->isr_ops.wm_done(vfe, wm);
+ 
+ 	return IRQ_HANDLED;
+@@ -400,6 +935,26 @@ static int vfe_get_output(struct vfe_line *line)
+ 
+ 	output->wm_num = 1;
+ 
++	if (vfe_line_has_pix_pipeline(vfe, line->id)) {
++		/* NV12/NV21 use both FULL path masters, fixed in hardware */
++		if (vfe->wm_output_map[VFE_WM_PIX_FULL_Y] != VFE_LINE_NONE ||
++		    vfe->wm_output_map[VFE_WM_PIX_FULL_C] != VFE_LINE_NONE) {
++			dev_err(vfe->camss->dev, "FULL path write masters are busy\n");
++			goto error;
++		}
++
++		output->wm_num = 2;
++		output->wm_idx[0] = VFE_WM_PIX_FULL_Y;
++		output->wm_idx[1] = VFE_WM_PIX_FULL_C;
++		vfe->wm_output_map[VFE_WM_PIX_FULL_Y] = line->id;
++		vfe->wm_output_map[VFE_WM_PIX_FULL_C] = line->id;
++		output->drop_update_idx = 0;
++
++		spin_unlock_irqrestore(&vfe->output_lock, flags);
++
++		return 0;
++	}
++
+ 	wm_idx = vfe_reserve_wm(vfe, line->id);
+ 	if (wm_idx < 0) {
+ 		dev_err(vfe->camss->dev, "Can not reserve wm\n");
+@@ -446,7 +1001,10 @@ static int vfe_enable(struct vfe_line *line)
+ 	if (ret < 0)
+ 		goto error_get_output;
+ 
+-	ret = vfe_enable_output_v2(line);
++	if (vfe_line_has_pix_pipeline(vfe, line->id))
++		ret = vfe_pix_enable_output(line);
++	else
++		ret = vfe_enable_output_v2(line);
+ 	if (ret < 0)
+ 		goto error_enable_output;
+ 
+@@ -540,10 +1098,18 @@ static void vfe_isr_wm_done(struct vfe_device *vfe, u8 wm)
+ 
+ 	output->buf[index] = vfe_buf_get_pending(output);
+ 
+-	if (output->buf[index])
++	if (output->buf[index]) {
+ 		vfe_wm_update(vfe, output->wm_idx[0], output->buf[index]->addr[0], line);
+-	else
++		/*
++		 * The pixel path latches its double buffered registers on a
++		 * CAMIF reg update, issued for every frame like the vendor
++		 * driver does.
++		 */
++		if (vfe_line_has_pix_pipeline(vfe, line->id))
++			vfe_reg_update(vfe, line->id);
++	} else {
+ 		output->gen2.active_num--;
++	}
+ 
+ 	spin_unlock_irqrestore(&vfe->output_lock, flags);
+ 

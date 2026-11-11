@@ -1,0 +1,233 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: qcom: camss: vfe: Allow a pixel pipeline with its own output formats
+
+The PIX line of a VFE either passes its input through like an RDI or,
+on the gen1 VFEs, converts YUV 4:2:2 input. A Titan 17x IFE pixel
+pipeline demosaics Bayer input into YUV 4:2:0, so its sink and source
+pads carry different kinds of formats.
+
+Add formats_pix_out to the VFE resources. If it is set for a full VFE,
+the PIX line accepts formats_pix on its sink pad, offers
+formats_pix_out on its source pad independently of the Bayer order of
+the sink, and its video node uses formats_pix_out. The sink pad falls
+back to its first supported code instead of UYVY, and compose and crop
+keep the chroma sample alignment of 4:2:0.
+
+Add the SC8280XP Bayer input and NV12/NV21 output tables. Nothing uses
+them yet.
+
+Co-developed-by: dezige131 <2643591270@qq.com>
+Signed-off-by: dezige131 <2643591270@qq.com>
+Signed-off-by: Akisaira <akisaira@outlook.com>
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/media/platform/qcom/camss/camss-vfe.c | 112 +++++++++++++++++-
+ drivers/media/platform/qcom/camss/camss-vfe.h |  23 ++++
+ 2 files changed, 134 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/media/platform/qcom/camss/camss-vfe.c b/drivers/media/platform/qcom/camss/camss-vfe.c
+index 319d19158..f6e23d230 100644
+--- a/drivers/media/platform/qcom/camss/camss-vfe.c
++++ b/drivers/media/platform/qcom/camss/camss-vfe.c
+@@ -283,11 +283,105 @@ const struct camss_formats vfe_formats_pix_845 = {
+ 	.formats = formats_rdi_845
+ };
+ 
++/* Bayer input of the SC8280XP IFE pixel pipeline (CSID IPP -> CAMIF) */
++static const struct camss_format_info formats_pix_8280xp[] = {
++	{ MEDIA_BUS_FMT_SBGGR8_1X8, 8, V4L2_PIX_FMT_SBGGR8, 1,
++	  PER_PLANE_DATA(0, 1, 1, 1, 1, 8) },
++	{ MEDIA_BUS_FMT_SGBRG8_1X8, 8, V4L2_PIX_FMT_SGBRG8, 1,
++	  PER_PLANE_DATA(0, 1, 1, 1, 1, 8) },
++	{ MEDIA_BUS_FMT_SGRBG8_1X8, 8, V4L2_PIX_FMT_SGRBG8, 1,
++	  PER_PLANE_DATA(0, 1, 1, 1, 1, 8) },
++	{ MEDIA_BUS_FMT_SRGGB8_1X8, 8, V4L2_PIX_FMT_SRGGB8, 1,
++	  PER_PLANE_DATA(0, 1, 1, 1, 1, 8) },
++	{ MEDIA_BUS_FMT_SBGGR10_1X10, 10, V4L2_PIX_FMT_SBGGR10P, 1,
++	  PER_PLANE_DATA(0, 1, 1, 1, 1, 10) },
++	{ MEDIA_BUS_FMT_SGBRG10_1X10, 10, V4L2_PIX_FMT_SGBRG10P, 1,
++	  PER_PLANE_DATA(0, 1, 1, 1, 1, 10) },
++	{ MEDIA_BUS_FMT_SGRBG10_1X10, 10, V4L2_PIX_FMT_SGRBG10P, 1,
++	  PER_PLANE_DATA(0, 1, 1, 1, 1, 10) },
++	{ MEDIA_BUS_FMT_SRGGB10_1X10, 10, V4L2_PIX_FMT_SRGGB10P, 1,
++	  PER_PLANE_DATA(0, 1, 1, 1, 1, 10) },
++	{ MEDIA_BUS_FMT_SBGGR12_1X12, 12, V4L2_PIX_FMT_SBGGR12P, 1,
++	  PER_PLANE_DATA(0, 1, 1, 1, 1, 12) },
++	{ MEDIA_BUS_FMT_SGBRG12_1X12, 12, V4L2_PIX_FMT_SGBRG12P, 1,
++	  PER_PLANE_DATA(0, 1, 1, 1, 1, 12) },
++	{ MEDIA_BUS_FMT_SGRBG12_1X12, 12, V4L2_PIX_FMT_SGRBG12P, 1,
++	  PER_PLANE_DATA(0, 1, 1, 1, 1, 12) },
++	{ MEDIA_BUS_FMT_SRGGB12_1X12, 12, V4L2_PIX_FMT_SRGGB12P, 1,
++	  PER_PLANE_DATA(0, 1, 1, 1, 1, 12) },
++	{ MEDIA_BUS_FMT_SBGGR14_1X14, 14, V4L2_PIX_FMT_SBGGR14P, 1,
++	  PER_PLANE_DATA(0, 1, 1, 1, 1, 14) },
++	{ MEDIA_BUS_FMT_SGBRG14_1X14, 14, V4L2_PIX_FMT_SGBRG14P, 1,
++	  PER_PLANE_DATA(0, 1, 1, 1, 1, 14) },
++	{ MEDIA_BUS_FMT_SGRBG14_1X14, 14, V4L2_PIX_FMT_SGRBG14P, 1,
++	  PER_PLANE_DATA(0, 1, 1, 1, 1, 14) },
++	{ MEDIA_BUS_FMT_SRGGB14_1X14, 14, V4L2_PIX_FMT_SRGGB14P, 1,
++	  PER_PLANE_DATA(0, 1, 1, 1, 1, 14) },
++};
++
++/* YUV 4:2:0 output of the SC8280XP IFE pixel pipeline (FULL Y/C masters) */
++static const struct camss_format_info formats_pix_out_8280xp[] = {
++	{ MEDIA_BUS_FMT_YUYV8_1_5X8, 8, V4L2_PIX_FMT_NV12, 1,
++	  PER_PLANE_DATA(0, 1, 1, 2, 3, 8) },
++	{ MEDIA_BUS_FMT_YVYU8_1_5X8, 8, V4L2_PIX_FMT_NV21, 1,
++	  PER_PLANE_DATA(0, 1, 1, 2, 3, 8) },
++};
++
++const struct camss_formats vfe_formats_pix_8280xp = {
++	.nformats = ARRAY_SIZE(formats_pix_8280xp),
++	.formats = formats_pix_8280xp
++};
++
++const struct camss_formats vfe_formats_pix_out_8280xp = {
++	.nformats = ARRAY_SIZE(formats_pix_out_8280xp),
++	.formats = formats_pix_out_8280xp
++};
++
++/*
++ * vfe_pix_out_code - Pick a source pad code of a pixel pipeline
++ * @vfe: VFE device
++ * @index: index of the requested code, used if @req_code is 0
++ * @req_code: requested code
++ *
++ * The source codes do not depend on the Bayer order of the sink.
++ *
++ * Return a media bus code or 0 if @index is out of range
++ */
++static u32 vfe_pix_out_code(struct vfe_device *vfe, unsigned int index,
++			    u32 req_code)
++{
++	const struct camss_formats *out = vfe->res->formats_pix_out;
++	unsigned int i, j, n = 0;
++
++	if (req_code) {
++		for (i = 0; i < out->nformats; i++)
++			if (out->formats[i].code == req_code)
++				return req_code;
++
++		return out->formats[0].code;
++	}
++
++	for (i = 0; i < out->nformats; i++) {
++		for (j = 0; j < i; j++)
++			if (out->formats[j].code == out->formats[i].code)
++				break;
++		if (j < i)
++			continue;
++		if (n++ == index)
++			return out->formats[i].code;
++	}
++
++	return 0;
++}
++
+ static u32 vfe_src_pad_code(struct vfe_line *line, u32 sink_code,
+ 			    unsigned int index, u32 src_req_code)
+ {
+ 	struct vfe_device *vfe = to_vfe(line);
+ 
++	if (vfe_line_has_pix_pipeline(vfe, line->id))
++		return vfe_pix_out_code(vfe, index, src_req_code);
++
+ 	switch (vfe->camss->res->version) {
+ 	case CAMSS_8x16:
+ 	case CAMSS_8x39:
+@@ -1349,7 +1443,8 @@ static void vfe_try_format(struct vfe_line *line,
+ 
+ 		/* If not found, use UYVY as default */
+ 		if (i >= line->nformats)
+-			fmt->code = MEDIA_BUS_FMT_UYVY8_1X16;
++			fmt->code = vfe_line_has_pix_pipeline(to_vfe(line), line->id) ?
++				    line->formats[0].code : MEDIA_BUS_FMT_UYVY8_1X16;
+ 
+ 		fmt->width = clamp_t(u32, fmt->width, 1, 8191);
+ 		fmt->height = clamp_t(u32, fmt->height, 1, 8191);
+@@ -1420,6 +1515,10 @@ static void vfe_try_compose(struct vfe_line *line,
+ 
+ 	if (rect->height < 4)
+ 		rect->height = 4;
++
++	/* The chroma scaler halves the compose size for YUV 4:2:0 */
++	if (vfe_line_has_pix_pipeline(to_vfe(line), line->id))
++		rect->height &= ~0x1;
+ }
+ 
+ /*
+@@ -1454,6 +1553,13 @@ static void vfe_try_crop(struct vfe_line *line,
+ 	rect->left += (rect->width & 0xf) >> 1;
+ 	rect->width &= ~0xf;
+ 
++	/* Keep the crop window on chroma sample boundaries for YUV 4:2:0 */
++	if (vfe_line_has_pix_pipeline(to_vfe(line), line->id)) {
++		rect->left &= ~0x1;
++		rect->top &= ~0x1;
++		rect->height &= ~0x1;
++	}
++
+ 	if (rect->width < 16) {
+ 		rect->left = 0;
+ 		rect->width = 16;
+@@ -2117,6 +2223,10 @@ int msm_vfe_register_entities(struct vfe_device *vfe,
+ 
+ 		video_out->nformats = vfe->line[i].nformats;
+ 		video_out->formats = vfe->line[i].formats;
++		if (vfe_line_has_pix_pipeline(vfe, i)) {
++			video_out->nformats = vfe->res->formats_pix_out->nformats;
++			video_out->formats = vfe->res->formats_pix_out->formats;
++		}
+ 
+ 		snprintf(name, ARRAY_SIZE(name), "%s%d_%s%d",
+ 			 MSM_VFE_NAME, vfe->id, "video", i);
+diff --git a/drivers/media/platform/qcom/camss/camss-vfe.h b/drivers/media/platform/qcom/camss/camss-vfe.h
+index ae9dad353..344aacd99 100644
+--- a/drivers/media/platform/qcom/camss/camss-vfe.h
++++ b/drivers/media/platform/qcom/camss/camss-vfe.h
+@@ -141,6 +141,12 @@ struct vfe_subdev_resources {
+ 	const struct vfe_hw_ops *hw_ops;
+ 	const struct camss_formats *formats_rdi;
+ 	const struct camss_formats *formats_pix;
++	/*
++	 * Output formats of a pixel processing pipeline (demosaic, colour
++	 * conversion, scaler). If set, the PIX line sink accepts
++	 * @formats_pix and its source pad and video node use these formats.
++	 */
++	const struct camss_formats *formats_pix_out;
+ };
+ 
+ struct vfe_device {
+@@ -240,6 +246,8 @@ extern const struct camss_formats vfe_formats_rdi_8x96;
+ extern const struct camss_formats vfe_formats_pix_8x96;
+ extern const struct camss_formats vfe_formats_rdi_845;
+ extern const struct camss_formats vfe_formats_pix_845;
++extern const struct camss_formats vfe_formats_pix_8280xp;
++extern const struct camss_formats vfe_formats_pix_out_8280xp;
+ 
+ extern const struct vfe_hw_ops vfe_ops_4_1;
+ extern const struct vfe_hw_ops vfe_ops_4_7;
+@@ -263,6 +271,21 @@ void vfe_put(struct vfe_device *vfe);
+  */
+ bool vfe_is_lite(struct vfe_device *vfe);
+ 
++/*
++ * vfe_line_has_pix_pipeline - Return if a line runs the pixel pipeline
++ * @vfe: VFE Device
++ * @line_id: VFE line
++ *
++ * True for the PIX line of a full VFE whose resources describe the output
++ * formats of the pixel pipeline (Bayer in, YUV out).
++ */
++static inline bool vfe_line_has_pix_pipeline(const struct vfe_device *vfe,
++					     enum vfe_line_id line_id)
++{
++	return line_id == VFE_LINE_PIX && !vfe->res->is_lite &&
++	       vfe->res->formats_pix_out;
++}
++
+ /*
+  * vfe_hw_version - Process write master done interrupt
+  * @vfe: VFE Device

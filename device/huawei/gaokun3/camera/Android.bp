@@ -27,6 +27,8 @@ cc_binary {
         "Lens.cpp",          // VCM 直驱（libcamera 不实现 LensPosition，见 Lens.h）
         "AutoFocus.cpp",     // 对比度检测 AF
         "PhaseDetect.cpp",   // 后摄 PD 像素的相位检测（全尺寸模式）
+        "Exif.cpp",          // JPEG 的 EXIF（APP1）与缩略图
+        "Sharpen.cpp",       // 亮度锐化（EDGE_MODE）
     ],
 
     // libcamera 的公开头 + 我们为 Soong 写的 config.h/生成头。

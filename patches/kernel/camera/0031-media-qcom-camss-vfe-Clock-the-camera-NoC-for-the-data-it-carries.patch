@@ -1,0 +1,145 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: qcom: camss: vfe: Clock the camera NoC for the data it carries
+
+The VFE picks the camnoc_axi rate like its core clock: the pixel path's
+pixel rate. The core clocks a pixel per cycle, but the NoC carries the
+data the write masters write, of all lines together: at 4208x3120 30 fps
+the pixel rate asked for 480 MHz, which on SC8280XP needs the MMCX rail
+at TURBO, for some 1.5 GB/s.
+
+Give the camera NoC the sum of the lines' data rates instead, the pixel
+path counted at 16 bits per pixel, the most it writes, and the RDI lines
+as before. The core clocks keep the rate of the busiest line.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/media/platform/qcom/camss/camss-vfe.c | 89 +++++++++----------
+ 1 file changed, 44 insertions(+), 45 deletions(-)
+
+diff --git a/drivers/media/platform/qcom/camss/camss-vfe.c b/drivers/media/platform/qcom/camss/camss-vfe.c
+index 3d9f128da..fa74e0cc2 100644
+--- a/drivers/media/platform/qcom/camss/camss-vfe.c
++++ b/drivers/media/platform/qcom/camss/camss-vfe.c
+@@ -1049,6 +1049,47 @@ static bool vfe_check_clock_levels(struct camss_clock *clock)
+ 	return false;
+ }
+ 
++/*
++ * vfe_min_clock_rate - The lowest rate of a VFE clock for its lines
++ *
++ * The VFE core clocks a pixel of the pixel path per cycle, and the data of
++ * an RDI line in 64 bit words: the rate the busiest line needs. The camera
++ * NoC carries the data of all lines to memory: the sum of their rates, the
++ * pixel path counted at 16 bits per pixel, the most it writes. Both with the
++ * clock margin.
++ */
++static u64 vfe_min_clock_rate(struct vfe_device *vfe, struct camss_clock *clock,
++			      const u64 *pixel_clock)
++{
++	bool noc = !strcmp(clock->name, "camnoc_axi") ||
++		   !strcmp(clock->name, "camnoc_rt_axi");
++	u64 min_rate = 0;
++	int j;
++
++	for (j = VFE_LINE_RDI0; j < vfe->res->line_num; j++) {
++		u64 tmp;
++
++		if (j == VFE_LINE_PIX) {
++			tmp = noc ? pixel_clock[j] * 16 / 64 : pixel_clock[j];
++		} else {
++			struct vfe_line *l = &vfe->line[j];
++			u8 bpp = camss_format_get_bpp(l->formats, l->nformats,
++						      l->fmt[MSM_VFE_PAD_SINK].code);
++
++			tmp = pixel_clock[j] * bpp / 64;
++		}
++
++		if (noc)
++			min_rate += tmp;
++		else if (min_rate < tmp)
++			min_rate = tmp;
++	}
++
++	camss_add_clock_margin(&min_rate);
++
++	return min_rate;
++}
++
+ /*
+  * vfe_set_clock_rates - Calculate and set clock rates on VFE module
+  * @vfe: VFE device
+@@ -1073,30 +1114,9 @@ static int vfe_set_clock_rates(struct vfe_device *vfe)
+ 		struct camss_clock *clock = &vfe->clock[i];
+ 
+ 		if (vfe_match_clock_names(vfe, clock) && vfe_check_clock_levels(clock)) {
+-			u64 min_rate = 0;
++			u64 min_rate = vfe_min_clock_rate(vfe, clock, pixel_clock);
+ 			long rate;
+ 
+-			for (j = VFE_LINE_RDI0; j < vfe->res->line_num; j++) {
+-				u32 tmp;
+-				u8 bpp;
+-
+-				if (j == VFE_LINE_PIX) {
+-					tmp = pixel_clock[j];
+-				} else {
+-					struct vfe_line *l = &vfe->line[j];
+-
+-					bpp = camss_format_get_bpp(l->formats,
+-								   l->nformats,
+-								   l->fmt[MSM_VFE_PAD_SINK].code);
+-					tmp = pixel_clock[j] * bpp / 64;
+-				}
+-
+-				if (min_rate < tmp)
+-					min_rate = tmp;
+-			}
+-
+-			camss_add_clock_margin(&min_rate);
+-
+ 			for (j = 0; j < clock->nfreqs; j++)
+ 				if (min_rate < clock->freq[j])
+ 					break;
+@@ -1140,7 +1160,7 @@ static int vfe_set_clock_rates(struct vfe_device *vfe)
+ static int vfe_check_clock_rates(struct vfe_device *vfe)
+ {
+ 	u64 pixel_clock[VFE_LINE_NUM_MAX];
+-	int i, j;
++	int i;
+ 	int ret;
+ 
+ 	for (i = VFE_LINE_RDI0; i < vfe->res->line_num; i++) {
+@@ -1154,30 +1174,9 @@ static int vfe_check_clock_rates(struct vfe_device *vfe)
+ 		struct camss_clock *clock = &vfe->clock[i];
+ 
+ 		if (vfe_match_clock_names(vfe, clock) && vfe_check_clock_levels(clock)) {
+-			u64 min_rate = 0;
++			u64 min_rate = vfe_min_clock_rate(vfe, clock, pixel_clock);
+ 			unsigned long rate;
+ 
+-			for (j = VFE_LINE_RDI0; j < vfe->res->line_num; j++) {
+-				u32 tmp;
+-				u8 bpp;
+-
+-				if (j == VFE_LINE_PIX) {
+-					tmp = pixel_clock[j];
+-				} else {
+-					struct vfe_line *l = &vfe->line[j];
+-
+-					bpp = camss_format_get_bpp(l->formats,
+-								   l->nformats,
+-								   l->fmt[MSM_VFE_PAD_SINK].code);
+-					tmp = pixel_clock[j] * bpp / 64;
+-				}
+-
+-				if (min_rate < tmp)
+-					min_rate = tmp;
+-			}
+-
+-			camss_add_clock_margin(&min_rate);
+-
+ 			rate = clk_get_rate(clock->clk);
+ 			if (rate < min_rate)
+ 				return -EBUSY;

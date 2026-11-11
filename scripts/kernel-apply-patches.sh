@@ -184,6 +184,37 @@ KPATCHES=(
     kernel/camera/0006-media-i2c-hi846-Keep-the-VBLANK-frame-length-when-setting-the-exposure.patch
     kernel/camera/0007-media-i2c-ov13b10-Update-the-exposure-limit-on-every-format-change.patch
     kernel/camera/0008-media-i2c-hi846-Update-the-exposure-limit-on-every-format-change.patch
+    # 0009–0036：IFE硬件ISP（像素通路、参数与统计节点、双IFE、显示输出、BHIST等），UAPI为
+    # include/uapi/linux/media/qcom/ife17x-config.h，须与patches/libcamera中同名头文件一致；
+    # 0030与kernel/dts/0023、0032与kernel/dts/0024配套。详见docs/dev/camera.md。
+    kernel/camera/0009-media-qcom-camss-csid-gen2-Add-the-IPP-path-of-the-full-CSID.patch
+    kernel/camera/0010-media-qcom-camss-vfe-Allow-a-pixel-pipeline-with-its-own-output-formats.patch
+    kernel/camera/0011-media-qcom-camss-vfe-17x-Add-the-pixel-pipeline-Bayer-to-NV12-NV21.patch
+    kernel/camera/0012-media-qcom-camss-sc8280xp-Enable-the-CSID-IPP-and-VFE-pixel-pipeline.patch
+    kernel/camera/0013-media-qcom-camss-vfe-17x-Add-gamma-black-level-and-white-balance-to-the-pixel-pipeline.patch
+    kernel/camera/0014-media-qcom-camss-video-Allow-single-plane-NV12-taller-than-2730-lines.patch
+    kernel/camera/0015-media-qcom-camss-vfe-17x-Add-parameters-and-statistics-nodes-to-the-pixel-path.patch
+    kernel/camera/0016-media-qcom-camss-Share-the-upstream-subdevs-between-video-nodes.patch
+    kernel/camera/0017-media-qcom-camss-csid-gen2-Crop-the-IPP-output.patch
+    kernel/camera/0018-media-qcom-camss-vfe-17x-Add-the-phase-detection-pixel-correction.patch
+    kernel/camera/0019-media-qcom-camss-csiphy-Feed-several-CSIDs-without-a-clock-mux.patch
+    kernel/camera/0020-media-qcom-camss-Add-dual-IFE-pixel-paths.patch
+    kernel/camera/0021-media-qcom-camss-Report-VFE-and-CSID-errors-fail-the-queues-of-a-wedged-VFE.patch
+    kernel/camera/0022-media-qcom-camss-Vote-the-rail-level-the-clock-rates-need.patch
+    kernel/camera/0023-pmdomain-qcom-rpmhpd-Keep-MX-at-or-above-MMCX-on-SC8280XP.patch
+    kernel/camera/0024-media-qcom-camss-vfe-17x-Keep-the-buffers-of-a-frame-on-one-frame-number.patch
+    kernel/camera/0025-media-qcom-camss-vfe-17x-Add-the-focus-statistics.patch
+    kernel/camera/0026-media-qcom-camss-vfe-17x-Add-the-adaptive-Bayer-filter.patch
+    kernel/camera/0027-media-qcom-camss-vfe-17x-Add-the-bad-pixel-correction.patch
+    kernel/camera/0028-media-qcom-camss-vfe-17x-Add-the-lens-shading-correction.patch
+    kernel/camera/0029-media-i2c-ov13b10-Report-the-crop-of-the-binned-modes.patch
+    kernel/camera/0030-media-qcom-camss-sc8280xp-Power-the-CSIPHYs-from-their-own-supplies.patch
+    kernel/camera/0031-media-qcom-camss-vfe-Clock-the-camera-NoC-for-the-data-it-carries.patch
+    kernel/camera/0032-clk-qcom-camcc-sc8280xp-Vote-MX-for-the-PLLs.patch
+    kernel/camera/0033-media-qcom-camss-vfe-17x-Add-the-display-output-of-the-pixel-path.patch
+    kernel/camera/0034-media-qcom-camss-vfe-17x-Stamp-buffers-with-the-frame-start.patch
+    kernel/camera/0035-media-qcom-camss-vfe-17x-Add-the-Bayer-histogram-statistics.patch
+    kernel/camera/0036-media-qcom-camss-Quiet-the-stop-flag-the-timestamps.patch
 
     # ─── 8. kernel/audio：ASoC sc8280xp、LPASS 编解码宏、WSA883x 功放、SoundWire 与 Q6APM ───
     # 0007–0008 与 kernel/dts/0016 及 device/huawei/gaokun3/bin/audio-route.sh 配套；
@@ -254,6 +285,8 @@ KPATCHES=(
     kernel/dts/0020-arm64-dts-qcom-sc8280xp-huawei-gaokun3-keep-VCC_WLAN_3R9-on.patch
     kernel/dts/0021-arm64-dts-qcom-sc8280xp-huawei-gaokun3-move-wake-gpios-to-the-Wi-Fi-node.patch
     kernel/dts/0022-arm64-dts-qcom-sc8280xp-mark-the-CDSP-FastRPC-context-banks-dma-coherent.patch
+    kernel/dts/0023-arm64-dts-qcom-sc8280xp-huawei-gaokun3-Power-the-CSIPHYs-from-their-own-supplies.patch
+    kernel/dts/0024-arm64-dts-qcom-sc8280xp-Give-the-camera-clock-controller-its-MX-domain.patch
 
     # ─── 11. kernel/fingerprint：QSEECOM 与指纹传输驱动（/dev/gaokun3_fpcmd，CONFIG_GAOKUN3_FPCMD 默认 n）───
     kernel/fingerprint/0001-firmware-qcom-scm-qseecom-app-load-shutdown-listener.patch

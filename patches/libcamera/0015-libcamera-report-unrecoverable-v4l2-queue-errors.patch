@@ -1,0 +1,108 @@
+From 47d6777c1a4636ee98331100814f6b6b9e46e089 Mon Sep 17 00:00:00 2001
+From: Akisaira <akisaira@outlook.com>
+Date: Wed, 11 Nov 2026 18:27:41 +1100
+Subject: [PATCH] libcamera: Report unrecoverable V4L2 queue errors
+
+A driver that flags its queue as broken (vb2_queue_error()) makes poll()
+report POLLERR and VIDIOC_DQBUF fail with -EIO until the queue is
+stopped. The poll event dispatcher only passed POLLIN, POLLOUT and
+POLLPRI to the notifiers, so poll() then returned at once forever with
+nobody told.
+
+Pass POLLERR to the read and write notifiers, whose owner finds the
+error on its next read or write. In V4L2VideoDevice, on -EIO from
+VIDIOC_DQBUF, or -ENODEV from a device gone, stop polling the device and
+emit a new queueError signal, so that the pipeline handler can restart
+the streams.
+
+Signed-off-by: Akisaira <akisaira@outlook.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+Origin: local
+Upstream-Status: Pending
+---
+ include/libcamera/internal/v4l2_videodevice.h |  2 ++
+ src/libcamera/base/event_dispatcher_poll.cpp  | 12 +++++++++-
+ src/libcamera/v4l2_videodevice.cpp            | 23 +++++++++++++++++++
+ 3 files changed, 36 insertions(+), 1 deletion(-)
+
+diff --git a/include/libcamera/internal/v4l2_videodevice.h b/include/libcamera/internal/v4l2_videodevice.h
+index f63d7487..2950afcf 100644
+--- a/include/libcamera/internal/v4l2_videodevice.h
++++ b/include/libcamera/internal/v4l2_videodevice.h
+@@ -227,6 +227,8 @@ public:
+ 	void setDequeueTimeout(utils::Duration timeout);
+ 	Signal<> dequeueTimeout;
+ 
++	Signal<> queueError;
++
+ 	static std::unique_ptr<V4L2VideoDevice>
+ 	fromEntityName(const MediaDevice *media, const std::string &entity);
+ 
+diff --git a/src/libcamera/base/event_dispatcher_poll.cpp b/src/libcamera/base/event_dispatcher_poll.cpp
+index 006e223f..9cfa5ce4 100644
+--- a/src/libcamera/base/event_dispatcher_poll.cpp
++++ b/src/libcamera/base/event_dispatcher_poll.cpp
+@@ -276,7 +276,17 @@ void EventDispatcherPoll::processNotifiers(const std::vector<struct pollfd> &pol
+ 				continue;
+ 			}
+ 
+-			if (pfd.revents & event.events)
++			/*
++			 * POLLERR is reported whatever was asked for: pass it
++			 * to the read and write notifiers, whose owner finds
++			 * the error on the next read or write. Ignoring it
++			 * leaves poll() returning at once forever.
++			 */
++			short mask = event.events;
++			if (event.type != EventNotifier::Exception)
++				mask |= POLLERR;
++
++			if (pfd.revents & mask)
+ 				notifier->activated.emit();
+ 		}
+ 
+diff --git a/src/libcamera/v4l2_videodevice.cpp b/src/libcamera/v4l2_videodevice.cpp
+index 41dc5d0f..a20fc1f4 100644
+--- a/src/libcamera/v4l2_videodevice.cpp
++++ b/src/libcamera/v4l2_videodevice.cpp
+@@ -1849,6 +1849,19 @@ FrameBuffer *V4L2VideoDevice::dequeueBuffer()
+ 	if (ret < 0) {
+ 		LOG(V4L2, Error)
+ 			<< "Failed to dequeue buffer: " << strerror(-ret);
++
++		/*
++		 * The driver flagged the queue as broken, or the device is
++		 * gone: nothing more comes until it is stopped. Stop polling
++		 * it, as it now reports an error at once, and let the owner
++		 * restart it.
++		 */
++		if (ret == -EIO || ret == -ENODEV) {
++			fdBufferNotifier_->setEnabled(false);
++			watchdog_.stop();
++			queueError.emit();
++		}
++
+ 		return nullptr;
+ 	}
+ 
+@@ -2085,6 +2098,16 @@ void V4L2VideoDevice::setDequeueTimeout(utils::Duration timeout)
+  * \brief A Signal emitted when the dequeue watchdog timer expires
+  */
+ 
++/**
++ * \var V4L2VideoDevice::queueError
++ * \brief A Signal emitted when the device reports an unrecoverable error
++ *
++ * The driver flagged the queue as broken (VIDIOC_DQBUF returns -EIO, see
++ * vb2_queue_error()): no more buffers complete until the device is stopped
++ * with streamOff() and started again. The buffers still queued are returned,
++ * cancelled, by streamOff().
++ */
++
+ /**
+  * \brief Slot to handle an expired dequeue timer
+  *
+-- 
+2.53.0
+

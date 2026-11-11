@@ -1,0 +1,211 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] clk: qcom: camcc-sc8280xp: Vote MX for the PLLs
+
+The camera PLLs run on the MX rail, at a level that grows with their
+rate: SVS at 800 MHz, SVS_L1 at 1116 MHz (the PLL of a 558 MHz IFE), NOM
+at 1520 MHz. The clock controller votes only MMCX, at LOW_SVS, so
+nothing of the camera kept MX up; with the display on, it did. A 558 MHz
+IFE with 400 MHz CSIDs, the full size rear stream, votes MMCX at SVS,
+which MX follows, one level short of its PLL.
+
+Take MX as a second power domain at SVS_L1, like the newer camera clock
+controllers. 1520 MHz only runs for a 760 MHz IFE, whose MMCX vote at
+NOM MX follows. The probe resumed the device and configured the PLLs
+before a second domain could be attached; let the common probe do it in
+order, with the PLL configurations in the descriptor.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ .../bindings/clock/qcom,sa8775p-camcc.yaml    | 13 +--
+ drivers/clk/qcom/camcc-sc8280xp.c             | 80 +++++++++----------
+ 2 files changed, 45 insertions(+), 48 deletions(-)
+
+diff --git a/Documentation/devicetree/bindings/clock/qcom,sa8775p-camcc.yaml b/Documentation/devicetree/bindings/clock/qcom,sa8775p-camcc.yaml
+index f42ccb662..4a6bf7508 100644
+--- a/Documentation/devicetree/bindings/clock/qcom,sa8775p-camcc.yaml
++++ b/Documentation/devicetree/bindings/clock/qcom,sa8775p-camcc.yaml
+@@ -34,13 +34,16 @@ properties:
+       - description: Sleep clock source
+ 
+   power-domains:
+-    maxItems: 1
+-    description: MMCX power domain
++    minItems: 1
++    items:
++      - description: MMCX power domain
++      - description: MX power domain, for the PLLs
+ 
+   required-opps:
+-    description:
+-      OPP node describing required MMCX performance point.
+-    maxItems: 1
++    minItems: 1
++    items:
++      - description: MMCX performance point
++      - description: MX performance point
+ 
+ required:
+   - compatible
+diff --git a/drivers/clk/qcom/camcc-sc8280xp.c b/drivers/clk/qcom/camcc-sc8280xp.c
+index 5ba6e5474..be8b78a74 100644
+--- a/drivers/clk/qcom/camcc-sc8280xp.c
++++ b/drivers/clk/qcom/camcc-sc8280xp.c
+@@ -68,6 +68,7 @@ static struct alpha_pll_config camcc_pll0_config = {
+ 
+ static struct clk_alpha_pll camcc_pll0 = {
+ 	.offset = 0x0,
++	.config = &camcc_pll0_config,
+ 	.vco_table = lucid_vco,
+ 	.num_vco = ARRAY_SIZE(lucid_vco),
+ 	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_LUCID],
+@@ -143,6 +144,7 @@ static struct alpha_pll_config camcc_pll1_config = {
+ 
+ static struct clk_alpha_pll camcc_pll1 = {
+ 	.offset = 0x1000,
++	.config = &camcc_pll1_config,
+ 	.vco_table = lucid_vco,
+ 	.num_vco = ARRAY_SIZE(lucid_vco),
+ 	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_LUCID],
+@@ -190,6 +192,7 @@ static struct alpha_pll_config camcc_pll2_config = {
+ 
+ static struct clk_alpha_pll camcc_pll2 = {
+ 	.offset = 0x2000,
++	.config = &camcc_pll2_config,
+ 	.vco_table = zonda_vco,
+ 	.num_vco = ARRAY_SIZE(zonda_vco),
+ 	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_ZONDA],
+@@ -221,6 +224,7 @@ static struct alpha_pll_config camcc_pll3_config = {
+ 
+ static struct clk_alpha_pll camcc_pll3 = {
+ 	.offset = 0x3000,
++	.config = &camcc_pll3_config,
+ 	.vco_table = lucid_vco,
+ 	.num_vco = ARRAY_SIZE(lucid_vco),
+ 	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_LUCID],
+@@ -274,6 +278,7 @@ static struct alpha_pll_config camcc_pll4_config = {
+ 
+ static struct clk_alpha_pll camcc_pll4 = {
+ 	.offset = 0x4000,
++	.config = &camcc_pll4_config,
+ 	.vco_table = lucid_vco,
+ 	.num_vco = ARRAY_SIZE(lucid_vco),
+ 	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_LUCID],
+@@ -327,6 +332,7 @@ static struct alpha_pll_config camcc_pll5_config = {
+ 
+ static struct clk_alpha_pll camcc_pll5 = {
+ 	.offset = 0x10000,
++	.config = &camcc_pll5_config,
+ 	.vco_table = lucid_vco,
+ 	.num_vco = ARRAY_SIZE(lucid_vco),
+ 	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_LUCID],
+@@ -380,6 +386,7 @@ static struct alpha_pll_config camcc_pll6_config = {
+ 
+ static struct clk_alpha_pll camcc_pll6 = {
+ 	.offset = 0x11000,
++	.config = &camcc_pll6_config,
+ 	.vco_table = lucid_vco,
+ 	.num_vco = ARRAY_SIZE(lucid_vco),
+ 	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_LUCID],
+@@ -433,6 +440,7 @@ static struct alpha_pll_config camcc_pll7_config = {
+ 
+ static struct clk_alpha_pll camcc_pll7 = {
+ 	.offset = 0x12000,
++	.config = &camcc_pll7_config,
+ 	.vco_table = lucid_vco,
+ 	.num_vco = ARRAY_SIZE(lucid_vco),
+ 	.regs = clk_alpha_pll_regs[CLK_ALPHA_PLL_TYPE_LUCID],
+@@ -2991,6 +2999,28 @@ static const struct regmap_config camcc_sc8280xp_regmap_config = {
+ 	.fast_io = true,
+ };
+ 
++static struct clk_alpha_pll *camcc_sc8280xp_plls[] = {
++	&camcc_pll0,
++	&camcc_pll1,
++	&camcc_pll2,
++	&camcc_pll3,
++	&camcc_pll4,
++	&camcc_pll5,
++	&camcc_pll6,
++	&camcc_pll7,
++};
++
++static const u32 camcc_sc8280xp_critical_cbcrs[] = {
++	0xc1e4, /* CAMCC_GDSC_CLK */
++};
++
++static const struct qcom_cc_driver_data camcc_sc8280xp_driver_data = {
++	.alpha_plls = camcc_sc8280xp_plls,
++	.num_alpha_plls = ARRAY_SIZE(camcc_sc8280xp_plls),
++	.clk_cbcrs = camcc_sc8280xp_critical_cbcrs,
++	.num_clk_cbcrs = ARRAY_SIZE(camcc_sc8280xp_critical_cbcrs),
++};
++
+ static const struct qcom_cc_desc camcc_sc8280xp_desc = {
+ 	.config = &camcc_sc8280xp_regmap_config,
+ 	.clks = camcc_sc8280xp_clocks,
+@@ -2999,6 +3029,8 @@ static const struct qcom_cc_desc camcc_sc8280xp_desc = {
+ 	.num_resets = ARRAY_SIZE(camcc_sc8280xp_resets),
+ 	.gdscs = camcc_sc8280xp_gdscs,
+ 	.num_gdscs = ARRAY_SIZE(camcc_sc8280xp_gdscs),
++	.use_rpm = true,
++	.driver_data = &camcc_sc8280xp_driver_data,
+ };
+ 
+ static const struct of_device_id camcc_sc8280xp_match_table[] = {
+@@ -3009,49 +3041,11 @@ MODULE_DEVICE_TABLE(of, camcc_sc8280xp_match_table);
+ 
+ static int camcc_sc8280xp_probe(struct platform_device *pdev)
+ {
+-	struct regmap *regmap;
+-	int ret;
+-
+-	ret = devm_pm_runtime_enable(&pdev->dev);
+-	if (ret)
+-		return ret;
+-
+-	ret = pm_runtime_resume_and_get(&pdev->dev);
+-	if (ret)
+-		return ret;
+-
+-	regmap = qcom_cc_map(pdev, &camcc_sc8280xp_desc);
+-	if (IS_ERR(regmap)) {
+-		ret = PTR_ERR(regmap);
+-		goto err_put_rpm;
+-	}
+-
+-	clk_lucid_pll_configure(&camcc_pll0, regmap, &camcc_pll0_config);
+-	clk_lucid_pll_configure(&camcc_pll1, regmap, &camcc_pll1_config);
+-	clk_zonda_pll_configure(&camcc_pll2, regmap, &camcc_pll2_config);
+-	clk_lucid_pll_configure(&camcc_pll3, regmap, &camcc_pll3_config);
+-	clk_lucid_pll_configure(&camcc_pll4, regmap, &camcc_pll4_config);
+-	clk_lucid_pll_configure(&camcc_pll5, regmap, &camcc_pll5_config);
+-	clk_lucid_pll_configure(&camcc_pll6, regmap, &camcc_pll6_config);
+-	clk_lucid_pll_configure(&camcc_pll7, regmap, &camcc_pll7_config);
+-
+-	/* Keep some clocks always-on */
+-	qcom_branch_set_clk_en(regmap, 0xc1e4); /* CAMCC_GDSC_CLK */
+-
+-	ret = qcom_cc_really_probe(&pdev->dev, &camcc_sc8280xp_desc, regmap);
+-	if (ret)
+-		goto err_disable;
+-
+-	pm_runtime_put(&pdev->dev);
+-
+-	return 0;
+-
+-err_disable:
+-	regmap_update_bits(regmap, 0xc1e4, BIT(0), 0);
+-err_put_rpm:
+-	pm_runtime_put_sync(&pdev->dev);
+-
+-	return ret;
++	/*
++	 * The common probe attaches the power domains, MMCX and MX, before it
++	 * resumes the device and configures the PLLs.
++	 */
++	return qcom_cc_probe(pdev, &camcc_sc8280xp_desc);
+ }
+ 
+ static struct platform_driver camcc_sc8280xp_driver = {

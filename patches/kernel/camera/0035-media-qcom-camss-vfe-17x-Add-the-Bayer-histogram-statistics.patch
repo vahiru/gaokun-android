@@ -1,0 +1,441 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: qcom: camss: vfe-17x: Add the Bayer histogram statistics
+
+The exposure algorithm has no histogram of the frame but one put
+together from the AWB grid, where the pixels of a region below the
+thresholds count at the region mean and the others at full scale. Its
+brightest part jumps when pixels cross the thresholds, and the exposure
+the constraints on it ask for swings from frame to frame on a small
+metering window.
+
+Add the IFE's Bayer histogram (BHistStats14, write master 16): 1024 bins
+over the 14 bit range of one channel (Y, R, Gr, Gb or B) inside a window
+of the frame, set per frame by a parameters block and written after the
+focus records in the statistics buffer. With two IFEs each counts the
+part of the window in its stripe, into a histogram of its own; a stripe
+the window misses counts a 2 by 2 window in its last rows. The histogram
+RAM holds garbage from power up and keeps its counts over a reset, which
+the first frame added to: clear it at every stream start, like the
+Windows driver. The write master completes when the window ends: a
+window ending near the epoch 0 line would complete with or before the
+frame's epoch, as a frame earlier, so it is stretched down to an eighth
+of the frame. The register layout and the channel numbers were checked
+on the hardware against the AWB grid means and the pixel counts of
+windows.
+
+The slave of a dual IFE pair writes its histogram when its window ends,
+which can be early in the frame, while its grid ends the frame: group
+its write masters by the time of the grid, and drop a grid whose frame
+had no histogram, rather than pairing the grid of a frame with the
+histogram of the next one.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ .../platform/qcom/camss/camss-vfe-17x-meta.c  | 155 ++++++++++++++++--
+ include/uapi/linux/media/qcom/ife17x-config.h |  56 ++++++-
+ 2 files changed, 199 insertions(+), 12 deletions(-)
+
+diff --git a/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.c b/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.c
+index 870d5d921..db64deaa3 100644
+--- a/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.c
++++ b/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.c
+@@ -16,6 +16,7 @@
+  * buffer instead, so it never writes memory userspace got back.
+  */
+ 
++#include <linux/bitfield.h>
+ #include <linux/dma-mapping.h>
+ #include <linux/io.h>
+ #include <linux/slab.h>
+@@ -44,6 +45,7 @@
+ #define VFE_MODULE_STATS_EN		0x044
+ #define		STATS_EN_BF		BIT(2)
+ #define		STATS_EN_AWB_BG		BIT(3)
++#define		STATS_EN_BHIST		BIT(4)
+ #define VFE_MODULE_COLOR_EN		0x048
+ #define		COLOR_EN_CC		BIT(1)
+ #define		COLOR_EN_GAMMA		BIT(3)
+@@ -136,7 +138,14 @@
+ #define VFE_PDPC_DMI_BANK		0x0b
+ 
+ #define VFE_STATS_CFG			0xaac
++#define		STATS_CFG_BHIST_UNIFORM	BIT(4)
+ #define		STATS_CFG_FIXED		BIT(6)
++#define		STATS_CFG_BHIST_CHANNEL	GENMASK(23, 21)
++/* BHistStats14: [12:0] left, [29:16] top; [11:0] width / 2 - 1, [28:16] height / 2 - 1 */
++#define VFE_BHIST_OFFSET		0xbe4
++#define VFE_BHIST_SIZE			0xbe8
++/* The histogram RAM, one 32-bit count per bin */
++#define VFE_BHIST_DMI_BANK		0x3a
+ #define VFE_AWB_BG_OFFSET		0xbc8
+ #define VFE_AWB_BG_NUM			0xbcc
+ #define VFE_AWB_BG_SIZE			0xbd0
+@@ -180,7 +189,8 @@ static const u16 vfe_bf_v_iir[5] = { 0xb40, 0xb44, 0xb48, 0xc9c, 0xca0 };
+ /* Bus write masters of the focus statistics and the AWB grid, frame based, PLAIN64 */
+ #define VFE_WM_BF			14
+ #define VFE_WM_AWB_BG			15
+-#define IFE_STATS_WMS			(BIT(VFE_WM_BF) | BIT(VFE_WM_AWB_BG))
++#define VFE_WM_BHIST			16
++#define IFE_STATS_WMS			(BIT(VFE_WM_BF) | BIT(VFE_WM_AWB_BG) | BIT(VFE_WM_BHIST))
+ #define VFE_BUS_WM_CFG(n)		(0x2208 + (n) * 0x100)
+ #define VFE_BUS_WM_IMAGE_ADDR(n)	(0x2214 + (n) * 0x100)
+ #define VFE_BUS_WM_BUFFER_WIDTH_CFG(n)	(0x221c + (n) * 0x100)
+@@ -309,6 +319,9 @@ struct vfe_pix_meta {
+ 	u32 frame_x;		/* frame column of input column 0 */
+ 	u32 slave_stats_off;	/* master: byte offset of the slave's grid */
+ 	u64 slave_stats_ts;	/* master: when the slave last wrote a grid */
++	/* Slave, under the master's lock: write masters done, and when its grid was */
++	u32 slave_got;
++	u64 slave_grid_ts;
+ 	unsigned int nheld;	/* master: buffers waiting for the slave's grid */
+ 	struct {
+ 		struct ife_stats_buf *buf;
+@@ -346,7 +359,8 @@ static void ife_stats_enable(struct vfe_pix_meta *meta, u32 bit, bool on)
+ static u32 ife_stats_wms(struct vfe_pix_meta *meta)
+ {
+ 	return (meta->stats_en & STATS_EN_AWB_BG ? BIT(VFE_WM_AWB_BG) : 0) |
+-	       (meta->stats_en & STATS_EN_BF ? BIT(VFE_WM_BF) : 0);
++	       (meta->stats_en & STATS_EN_BF ? BIT(VFE_WM_BF) : 0) |
++	       (meta->stats_en & STATS_EN_BHIST ? BIT(VFE_WM_BHIST) : 0);
+ }
+ 
+ /* -----------------------------------------------------------------------------
+@@ -367,6 +381,7 @@ union ife_params_block {
+ 	const struct ife17x_params_lsc *lsc;
+ 	const struct ife17x_params_outputs *outputs;
+ 	const struct ife17x_params_display_window *window;
++	const struct ife17x_params_bhist *bhist;
+ 	const u8 *data;
+ };
+ 
+@@ -944,6 +959,56 @@ static void ife_params_display_window(struct vfe_pix_meta *meta, union ife_param
+ {
+ }
+ 
++/*
++ * Bayer histogram over a window of the frame. With two IFEs each counts the
++ * part of the window in its stripe, in its own input columns (frame_x); one
++ * whose stripe the window misses counts a 2 by 2 window at the start of the
++ * stripe's last rows, so that both always write the buffer, at the end of the
++ * frame like the grid. The write master completes when the window ends: a
++ * window ending near the epoch 0 line could complete before the frame's
++ * epoch, or be handled with it in one interrupt, as a frame earlier, so it is
++ * stretched down to an eighth of the frame, milliseconds after the epoch.
++ */
++static void ife_params_bhist(struct vfe_pix_meta *meta, union ife_params_block block)
++{
++	const struct ife17x_params_bhist *h = block.bhist;
++	struct vfe_device *vfe = meta->vfe;
++	u32 sx = meta->stripe_x & ~1U, ex = (meta->stripe_x + meta->stripe_w) & ~1U;
++	u32 x0, x1, y0, y1;
++
++	if (ife_block_disabled(block)) {
++		ife_stats_enable(meta, STATS_EN_BHIST, false);
++		return;
++	}
++	if (h->channel > IFE17X_BHIST_CHANNEL_B) {
++		dev_warn_ratelimited(vfe->camss->dev, "VFE%d: no histogram channel %u\n",
++				     vfe->id, h->channel);
++		ife_stats_enable(meta, STATS_EN_BHIST, false);
++		return;
++	}
++
++	/* Frame columns to this IFE's input columns, inside its stripe */
++	x0 = clamp_t(s64, (s64)(h->left & ~1U) - meta->frame_x, sx, ex);
++	x1 = clamp_t(s64, (s64)((h->left + h->width) & ~1U) - meta->frame_x, sx, ex);
++	y0 = min_t(u32, h->top & ~1U, meta->height & ~1U);
++	y1 = min_t(u32, max_t(u32, (h->top + h->height) & ~1U, (meta->height / 8) & ~1U),
++		   meta->height & ~1U);
++	if (x1 < x0 + 2 || y1 < y0 + 2) {
++		x0 = sx;
++		x1 = sx + 2;
++		y1 = meta->height & ~1U;
++		y0 = y1 - 2;
++	}
++
++	writel_relaxed(x0 | y0 << 16, vfe->base + VFE_BHIST_OFFSET);
++	writel_relaxed(((x1 - x0) / 2 - 1) | ((y1 - y0) / 2 - 1) << 16,
++		       vfe->base + VFE_BHIST_SIZE);
++	vfe_rmw(vfe, VFE_STATS_CFG, STATS_CFG_BHIST_CHANNEL,
++		FIELD_PREP(STATS_CFG_BHIST_CHANNEL, h->channel) | STATS_CFG_BHIST_UNIFORM |
++		STATS_CFG_FIXED);
++	ife_stats_enable(meta, STATS_EN_BHIST, true);
++}
++
+ static const ife_params_handler ife_params_handlers[] = {
+ 	[IFE17X_PARAMS_BLOCK_BLS] = ife_params_bls,
+ 	[IFE17X_PARAMS_BLOCK_WB] = ife_params_wb,
+@@ -957,6 +1022,7 @@ static const ife_params_handler ife_params_handlers[] = {
+ 	[IFE17X_PARAMS_BLOCK_LSC] = ife_params_lsc,
+ 	[IFE17X_PARAMS_BLOCK_OUTPUTS] = ife_params_outputs,
+ 	[IFE17X_PARAMS_BLOCK_DISPLAY_WINDOW] = ife_params_display_window,
++	[IFE17X_PARAMS_BLOCK_BHIST] = ife_params_bhist,
+ };
+ 
+ static const struct v4l2_isp_params_block_type_info ife_params_block_types[] = {
+@@ -974,6 +1040,7 @@ static const struct v4l2_isp_params_block_type_info ife_params_block_types[] = {
+ 	[IFE17X_PARAMS_BLOCK_DISPLAY_WINDOW] = {
+ 		.size = sizeof(struct ife17x_params_display_window)
+ 	},
++	[IFE17X_PARAMS_BLOCK_BHIST] = { .size = sizeof(struct ife17x_params_bhist) },
+ };
+ 
+ static_assert(ARRAY_SIZE(ife_params_handlers) == ARRAY_SIZE(ife_params_block_types));
+@@ -1073,6 +1140,13 @@ static void ife_stats_set_addr(struct vfe_pix_meta *meta, dma_addr_t addr, u32 w
+ 				       s + VFE_BUS_WM_IMAGE_ADDR(VFE_WM_AWB_BG));
+ 			writel_relaxed(IFE_STATS_SIZE, s + VFE_BUS_WM_FRAME_INC(VFE_WM_AWB_BG));
+ 
++			if (meta->dual_slave->stats_en & STATS_EN_BHIST) {
++				writel_relaxed(lower_32_bits(addr) +
++					       offsetof(struct ife17x_stats_buffer, bhist[1]),
++					       s + VFE_BUS_WM_IMAGE_ADDR(VFE_WM_BHIST));
++				writel_relaxed(IFE_STATS_SIZE,
++					       s + VFE_BUS_WM_FRAME_INC(VFE_WM_BHIST));
++			}
+ 			if (meta->dual_slave->stats_en & STATS_EN_BF) {
+ 				writel_relaxed(lower_32_bits(addr) +
+ 					       offsetof(struct ife17x_stats_buffer, bf_header) +
+@@ -1090,6 +1164,12 @@ static void ife_stats_set_addr(struct vfe_pix_meta *meta, dma_addr_t addr, u32 w
+ 			       vfe->base + VFE_BUS_WM_IMAGE_ADDR(VFE_WM_BF));
+ 		writel_relaxed(IFE_STATS_SIZE, vfe->base + VFE_BUS_WM_FRAME_INC(VFE_WM_BF));
+ 	}
++	if (wms & BIT(VFE_WM_BHIST)) {
++		writel_relaxed(lower_32_bits(addr) +
++			       offsetof(struct ife17x_stats_buffer, bhist[0]),
++			       vfe->base + VFE_BUS_WM_IMAGE_ADDR(VFE_WM_BHIST));
++		writel_relaxed(IFE_STATS_SIZE, vfe->base + VFE_BUS_WM_FRAME_INC(VFE_WM_BHIST));
++	}
+ }
+ 
+ /*
+@@ -1171,6 +1251,7 @@ static void ife_stats_finish(struct vfe_pix_meta *meta, struct ife_stats_buf *bu
+ 		/* Paired by completion time, not by the frame start time */
+ 		meta->held[meta->nheld].buf = buf;
+ 		meta->held[meta->nheld].ts = ktime_get_ns();
++
+ 		meta->nheld++;
+ 		wake_up(&meta->stats_wq);
+ 		return;
+@@ -1197,7 +1278,7 @@ static void ife_stats_return(struct vfe_pix_meta *meta)
+ 
+ static void ife_stats_wm_init(struct vfe_pix_meta *meta, bool written)
+ {
+-	static const u8 wms[] = { VFE_WM_BF, VFE_WM_AWB_BG };
++	static const u8 wms[] = { VFE_WM_BF, VFE_WM_AWB_BG, VFE_WM_BHIST };
+ 	struct vfe_device *vfe = meta->vfe;
+ 	unsigned int i;
+ 
+@@ -1257,6 +1338,8 @@ void vfe17x_meta_start(struct vfe_device *vfe, u32 width, u32 height, bool writt
+ 	meta->frame_x = 0;
+ 	meta->slave_stats_off = 0;
+ 	meta->slave_stats_ts = 0;
++	meta->slave_got = 0;
++	meta->slave_grid_ts = 0;
+ 	meta->nheld = 0;
+ 	meta->dual_slave = NULL;
+ 	meta->dual_master = NULL;
+@@ -1292,6 +1375,16 @@ void vfe17x_meta_start(struct vfe_device *vfe, u32 width, u32 height, bool writt
+ 	meta->bf_valid = false;
+ 	meta->bf_bank = 0;
+ 	meta->stats_en = 0;
++	/*
++	 * The histogram RAM keeps its counts over the reset, and from power up
++	 * holds garbage: the first frame's histogram would add to it. Clear it,
++	 * like the Windows driver does.
++	 */
++	writel_relaxed(VFE_BHIST_DMI_BANK | DMI_CFG_AUTO_INC, vfe->base + VFE_DMI_CFG);
++	writel_relaxed(0, vfe->base + VFE_DMI_ADDR);
++	for (unsigned int i = 0; i < IFE17X_BHIST_BINS; i++)
++		writel_relaxed(0, vfe->base + VFE_DMI_DATA_LO);
++	writel_relaxed(0, vfe->base + VFE_DMI_CFG);
+ 	writel_relaxed(CAMIF_EPOCH_CFG(height), vfe->base + VFE_CAMIF_EPOCH_IRQ);
+ 
+ 	if (meta->awb_bg_pending) {
+@@ -1323,10 +1416,11 @@ void vfe17x_meta_stop(struct vfe_device *vfe)
+ 	 * would go on: stop them and their write masters before their
+ 	 * buffers go back to the queue.
+ 	 */
+-	ife_stats_enable(meta, STATS_EN_AWB_BG | STATS_EN_BF, false);
++	ife_stats_enable(meta, STATS_EN_AWB_BG | STATS_EN_BF | STATS_EN_BHIST, false);
+ 	writel_relaxed(REG_UPDATE_PIX, vfe->base + VFE_REG_UPDATE_CMD);
+ 	writel_relaxed(0, vfe->base + VFE_BUS_WM_CFG(VFE_WM_BF));
+ 	writel_relaxed(0, vfe->base + VFE_BUS_WM_CFG(VFE_WM_AWB_BG));
++	writel_relaxed(0, vfe->base + VFE_BUS_WM_CFG(VFE_WM_BHIST));
+ 	ife_stats_return(meta);
+ 	ife_dual_end(meta);
+ 	wake_up(&meta->stats_wq);
+@@ -1672,17 +1766,48 @@ void vfe17x_meta_bus(struct vfe_device *vfe, u32 bus_status1)
+ 	if (!meta || !wms)
+ 		return;
+ 
+-	/* Dual IFE slave: its grid went into the master's buffer */
++	/*
++	 * Dual IFE slave: its grid, and its histogram when on, went into the
++	 * master's buffer. The grid completes at the end of the frame, its
++	 * focus records before; the histogram when its window ends, earlier
++	 * in the frame or, with a window down to the bottom, just after the
++	 * grid. A histogram VFE_DUAL_MATCH_NS or more after the grid is of a
++	 * later frame: the grid's frame had none (the histogram turned on
++	 * after it). The slave's part of a frame is written once both are
++	 * done, and pairs with the master's by the time of its grid. What it
++	 * waits for is the setup of the frame after the grid's, applied at
++	 * the grid frame's epoch 0: the frame before the histogram turns on
++	 * is dropped, and the one before it turns off may complete before the
++	 * slave's histogram is written.
++	 */
+ 	master = READ_ONCE(meta->dual_master);
+ 	if (master) {
+-		if (!(wms & BIT(VFE_WM_AWB_BG)))
+-			return;
++		u64 now = ktime_get_ns();
++
+ 		spin_lock(&master->lock);
+ 		if (master->dual_slave == meta) {
+-			u64 ts = ktime_get_ns();
+-
+-			master->slave_stats_ts = ts;
+-			ife_stats_dual_collect(master, ts);
++			u32 expect = ife_stats_wms(meta) &
++				     (BIT(VFE_WM_AWB_BG) | BIT(VFE_WM_BHIST));
++
++			if (wms & BIT(VFE_WM_BHIST)) {
++				if (meta->slave_got & BIT(VFE_WM_AWB_BG) &&
++				    now >= meta->slave_grid_ts + VFE_DUAL_MATCH_NS)
++					meta->slave_got = 0;
++				meta->slave_got |= BIT(VFE_WM_BHIST);
++			}
++			if (wms & BIT(VFE_WM_AWB_BG)) {
++				/* An earlier grid's frame never completed */
++				if (meta->slave_got & BIT(VFE_WM_AWB_BG))
++					meta->slave_got = 0;
++				meta->slave_got |= BIT(VFE_WM_AWB_BG);
++				meta->slave_grid_ts = now;
++			}
++			if (expect & BIT(VFE_WM_AWB_BG) &&
++			    (meta->slave_got & expect) == expect) {
++				meta->slave_got = 0;
++				master->slave_stats_ts = meta->slave_grid_ts;
++				ife_stats_dual_collect(master, meta->slave_grid_ts);
++			}
+ 		}
+ 		spin_unlock(&master->lock);
+ 		return;
+@@ -2116,6 +2241,14 @@ static int ife_params_check(struct vfe_pix_meta *meta, struct device *dev,
+ 		    block.outputs->reserved)
+ 			goto invalid;
+ 		break;
++	case IFE17X_PARAMS_BLOCK_BHIST:
++		if (block.bhist->channel > IFE17X_BHIST_CHANNEL_B ||
++		    block.bhist->width < 2 || block.bhist->height < 2 ||
++		    (block.bhist->left | block.bhist->top | block.bhist->width |
++		     block.bhist->height) & 1 ||
++		    block.bhist->reserved0 || block.bhist->reserved)
++			goto invalid;
++		break;
+ 	case IFE17X_PARAMS_BLOCK_BPC:
+ 		for (i = 0; i < 4; i++)
+ 			if (block.bpc->wb_ratio[i] > 0x1ffff)
+diff --git a/include/uapi/linux/media/qcom/ife17x-config.h b/include/uapi/linux/media/qcom/ife17x-config.h
+index 74ca9eba1..8a04ca095 100644
+--- a/include/uapi/linux/media/qcom/ife17x-config.h
++++ b/include/uapi/linux/media/qcom/ife17x-config.h
+@@ -36,6 +36,7 @@
+  * @IFE17X_PARAMS_BLOCK_LSC: lens shading correction (LSC34)
+  * @IFE17X_PARAMS_BLOCK_OUTPUTS: the outputs that write the frame
+  * @IFE17X_PARAMS_BLOCK_DISPLAY_WINDOW: the display output's window of the frame
++ * @IFE17X_PARAMS_BLOCK_BHIST: Bayer histogram statistics (BHistStats14)
+  */
+ enum ife17x_params_block_type {
+ 	IFE17X_PARAMS_BLOCK_BLS,
+@@ -50,6 +51,7 @@ enum ife17x_params_block_type {
+ 	IFE17X_PARAMS_BLOCK_LSC,
+ 	IFE17X_PARAMS_BLOCK_OUTPUTS,
+ 	IFE17X_PARAMS_BLOCK_DISPLAY_WINDOW,
++	IFE17X_PARAMS_BLOCK_BHIST,
+ };
+ 
+ /**
+@@ -507,6 +509,53 @@ struct ife17x_params_display_window {
+ 	__u32 reserved[2];
+ } __attribute__((aligned(8)));
+ 
++#define IFE17X_BHIST_BINS		1024
++
++#define IFE17X_BHIST_CHANNEL_Y		0
++#define IFE17X_BHIST_CHANNEL_R		1
++#define IFE17X_BHIST_CHANNEL_GR		2
++#define IFE17X_BHIST_CHANNEL_GB		3
++#define IFE17X_BHIST_CHANNEL_B		4
++
++/**
++ * struct ife17x_params_bhist - Bayer histogram statistics configuration
++ * @header: block header, type IFE17X_PARAMS_BLOCK_BHIST
++ * @channel: the channel counted, IFE17X_BHIST_CHANNEL_*
++ * @reserved0: must be zero
++ * @left: left edge of the window, in frame pixels (with two IFEs the frame of
++ *	  both stripes), even
++ * @top: top edge of the window, even
++ * @width: width of the window, even, at least 2
++ * @height: height of the window, even, at least 2
++ * @reserved: must be zero
++ *
++ * The histogram counts the pixels of the channel inside the window into
++ * IFE17X_BHIST_BINS bins of equal width over the 14 bit range: per 2 by 2
++ * pixel block one count, of its pixel of the channel or, for the Y channel,
++ * of its luminance before the white balance gains. The window is clamped to
++ * the frame, and stretched down to end at least an eighth of the frame down. The statistics
++ * are taken at the same place as the AWB grid's, after the black level
++ * subtraction. V4L2_ISP_PARAMS_FL_BLOCK_DISABLE stops them.
++ *
++ * With two IFEs each IFE counts the part of the window in its stripe: the
++ * left one into bhist[0], the right one into bhist[1] (struct
++ * ife17x_stats_buffer). The left stripe ends and the right one starts at the
++ * column the right stripe's output starts from. An IFE whose stripe the
++ * window misses, by less than 2 columns of it once the edges are made even,
++ * counts a 2 by 2 pixel window in the last rows of its stripe, which the
++ * histogram of the window does not include.
++ */
++struct ife17x_params_bhist {
++	struct v4l2_isp_params_block_header header;
++	__u16 channel;
++	__u16 reserved0;
++	__u16 left;
++	__u16 top;
++	__u16 width;
++	__u16 height;
++	__u32 reserved;
++} __attribute__((aligned(8)));
++
+ #define IFE17X_PARAMS_MAX_SIZE					\
+ 	(sizeof(struct ife17x_params_bls) +			\
+ 	 sizeof(struct ife17x_params_wb) +			\
+@@ -519,7 +568,8 @@ struct ife17x_params_display_window {
+ 	 sizeof(struct ife17x_params_bpc) +			\
+ 	 sizeof(struct ife17x_params_lsc) +			\
+ 	 sizeof(struct ife17x_params_outputs) +			\
+-	 sizeof(struct ife17x_params_display_window))
++	 sizeof(struct ife17x_params_display_window) +		\
++	 sizeof(struct ife17x_params_bhist))
+ 
+ /**
+  * struct ife17x_awb_bg_region - AWB Bayer grid record, as the hardware
+@@ -555,6 +605,9 @@ struct ife17x_bf_record {
+  *	two IFEs the left stripe's records start at bf[0] and the right
+  *	stripe's at bf[IFE17X_BF_DUAL_RIGHT]: the header the right stripe
+  *	writes before its records ends bf[IFE17X_BF_DUAL_RIGHT - 1]
++ * @bhist: Bayer histogram, counts in bits [24:0] of each bin (struct
++ *	   ife17x_params_bhist); bhist[1] only with two IFEs, for the right
++ *	   stripe; undefined without the histogram
+  *
+  * The buffer sequence number is the frame sequence number of the image the
+  * statistics describe.
+@@ -563,6 +616,7 @@ struct ife17x_stats_buffer {
+ 	struct ife17x_awb_bg_region awb_bg[IFE17X_AWB_BG_MAX_H * IFE17X_AWB_BG_MAX_V];
+ 	__u64 bf_header;
+ 	struct ife17x_bf_record bf[IFE17X_BF_MAX_ROIS];
++	__u32 bhist[2][IFE17X_BHIST_BINS] __attribute__((aligned(64)));
+ };
+ 
+ #endif /* __UAPI_QCOM_IFE17X_CONFIG_H */

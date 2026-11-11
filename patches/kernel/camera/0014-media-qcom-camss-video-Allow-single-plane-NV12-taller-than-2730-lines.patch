@@ -1,0 +1,60 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: qcom: camss: video: Allow single plane NV12 taller than 2730 lines
+
+The line based sizeimage clamp counts at most 4096 lines per plane, but a
+single plane NV12 frame has height * 3 / 2 lines. At 4208x3120 the buffer
+came out 4208 x 4096 bytes and the chroma write master wrote past its end
+(SMMU context faults at buffer + 0x1070000). Let the clamp take 1.5
+times the maximum height in lines, the size of a single plane 4:2:0
+frame of the largest height, and keep the height of line based formats
+to that maximum (4096), which VIDIOC_ENUM_FRAMESIZES already reports.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/media/platform/qcom/camss/camss-video.c | 10 +++++++---
+ 1 file changed, 7 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/media/platform/qcom/camss/camss-video.c b/drivers/media/platform/qcom/camss/camss-video.c
+index 0852eb6f1..fc990ae29 100644
+--- a/drivers/media/platform/qcom/camss/camss-video.c
++++ b/drivers/media/platform/qcom/camss/camss-video.c
+@@ -23,6 +23,8 @@
+ #define CAMSS_FRAME_MIN_HEIGHT		1
+ #define CAMSS_FRAME_MAX_HEIGHT_RDI	8191
+ #define CAMSS_FRAME_MAX_HEIGHT_PIX	4096
++/* Lines of a line based plane: single plane YUV 4:2:0 adds half the height */
++#define CAMSS_FRAME_MAX_LINES_PIX	(CAMSS_FRAME_MAX_HEIGHT_PIX * 3 / 2)
+ 
+ /* -----------------------------------------------------------------------------
+  * Helper functions
+@@ -481,7 +483,7 @@ static int __video_try_fmt(struct camss_video *video, struct v4l2_format *f)
+ 						  1, 65528);
+ 			sizeimage[i] = clamp_t(u32, p->sizeimage,
+ 					       bytesperline[i],
+-					       bytesperline[i] * CAMSS_FRAME_MAX_HEIGHT_PIX);
++					       bytesperline[i] * CAMSS_FRAME_MAX_LINES_PIX);
+ 		}
+ 
+ 	for (j = 0; j < video->nformats; j++)
+@@ -502,7 +504,9 @@ static int __video_try_fmt(struct camss_video *video, struct v4l2_format *f)
+ 
+ 	pix_mp->pixelformat = fi->pixelformat;
+ 	pix_mp->width = clamp_t(u32, width, 1, CAMSS_FRAME_MAX_WIDTH);
+-	pix_mp->height = clamp_t(u32, height, 1, CAMSS_FRAME_MAX_HEIGHT_RDI);
++	/* A line based plane holds at most CAMSS_FRAME_MAX_LINES_PIX lines */
++	pix_mp->height = clamp_t(u32, height, 1, video->line_based ?
++				 CAMSS_FRAME_MAX_HEIGHT_PIX : CAMSS_FRAME_MAX_HEIGHT_RDI);
+ 	pix_mp->num_planes = fi->planes;
+ 	for (i = 0; i < pix_mp->num_planes; i++) {
+ 		bpl = pix_mp->width / fi->hsub[i].numerator *
+@@ -528,7 +532,7 @@ static int __video_try_fmt(struct camss_video *video, struct v4l2_format *f)
+ 						  1, 65528);
+ 			p->sizeimage = clamp_t(u32, p->sizeimage,
+ 					       p->bytesperline,
+-					       p->bytesperline * CAMSS_FRAME_MAX_HEIGHT_PIX);
++					       p->bytesperline * CAMSS_FRAME_MAX_LINES_PIX);
+ 			lines = p->sizeimage / p->bytesperline;
+ 
+ 			if (p->bytesperline < bytesperline[i])

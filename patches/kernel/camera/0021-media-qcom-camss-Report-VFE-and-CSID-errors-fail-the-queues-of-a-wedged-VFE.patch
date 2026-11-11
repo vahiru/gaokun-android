@@ -1,0 +1,691 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: qcom: camss: Report VFE and CSID errors, fail the queues of a wedged VFE
+
+Decode the error interrupts the vendor driver takes on Titan 175: VFE
+status 0 0x3fc00 and status 1 0xefff7e80, bus composite error,
+overwrite, overflow and violation, and on the CSID the D-PHY receiver
+errors and the IPP and RDI FIFO overflows, which camss left masked or
+ignored. Each marks the buffer of the frame being written with
+VB2_BUF_STATE_ERROR; a dual IFE slave passes its stripe's error on to
+the master's buffer of that frame. More than 16 within 100 ms turn the
+error interrupts off until the next stream start, as a wedged write
+master raises them continuously.
+
+After one frame with a bus error the pixel path writes nothing more
+until the stream restarts: the hardware does not recover by itself, as
+in the vendor driver. Make every queue a wedged VFE feeds fail with
+vb2_queue_error(): its lines' video nodes, the parameters and statistics
+nodes, and with dual IFE the master's queues when the slave wedges.
+Userspace sees EPOLLERR and -EIO, stops and starts the streams, which
+resets the VFE. The VFE error interrupts and the CSID FIFO overflows (or
+a storm of CSID errors) are fatal this way; CSI2 receiver CRC and ECC
+errors only fail their frame.
+
+Tested with a write master's buffer height halved for one frame (single
+IFE, dual IFE with the master or the slave faulted) and with CSID
+receiver errors set by software: the streams restart within 60-70 ms
+and frames continue.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ .../platform/qcom/camss/camss-csid-gen2.c     | 106 +++++++++++++-
+ .../media/platform/qcom/camss/camss-csid.c    |  35 +++++
+ .../media/platform/qcom/camss/camss-csid.h    |  10 ++
+ .../platform/qcom/camss/camss-vfe-17x-meta.c  |  14 ++
+ .../platform/qcom/camss/camss-vfe-17x-meta.h  |   1 +
+ .../media/platform/qcom/camss/camss-vfe-17x.c | 132 +++++++++++++++++-
+ drivers/media/platform/qcom/camss/camss-vfe.c |  35 +++++
+ drivers/media/platform/qcom/camss/camss-vfe.h |  18 +++
+ 8 files changed, 338 insertions(+), 13 deletions(-)
+
+diff --git a/drivers/media/platform/qcom/camss/camss-csid-gen2.c b/drivers/media/platform/qcom/camss/camss-csid-gen2.c
+index 774bf6e06..fcb103b33 100644
+--- a/drivers/media/platform/qcom/camss/camss-csid-gen2.c
++++ b/drivers/media/platform/qcom/camss/camss-csid-gen2.c
+@@ -10,6 +10,7 @@
+ #include <linux/interrupt.h>
+ #include <linux/io.h>
+ #include <linux/kernel.h>
++#include <linux/moduleparam.h>
+ #include <linux/of.h>
+ 
+ #include "camss-csid.h"
+@@ -33,6 +34,7 @@
+ #define CSID_PORT_IPP			3
+ 
+ #define CSID_IPP_IRQ_STATUS		0x30
++#define CSID_IPP_IRQ_MASK		0x34
+ #define CSID_IPP_IRQ_CLEAR		0x38
+ #define CSID_IPP_CFG0			0x200
+ #define		IPP_CFG0_CROP_H_EN	5
+@@ -56,6 +58,22 @@
+ #define CSID_CSI2_RX_IRQ_STATUS	0x20
+ #define	CSID_CSI2_RX_IRQ_MASK	0x24
+ #define CSID_CSI2_RX_IRQ_CLEAR	0x28
++/* Receiver errors the vendor driver takes, D-PHY ones */
++#define		RX_ERR_LANE_FIFO_OVERFLOW	GENMASK(18, 15)
++#define		RX_ERR_CRC			BIT(19)
++#define		RX_ERR_ECC			BIT(20)
++#define		RX_ERR_STREAM_UNDERFLOW		BIT(23)
++#define		RX_ERR_UNBOUNDED_FRAME		BIT(24)
++#define		RX_ERR_TG_FIFO_OVERFLOW		BIT(26)
++#define		RX_ERR_ALL			(RX_ERR_LANE_FIFO_OVERFLOW | RX_ERR_CRC | \
++						 RX_ERR_ECC | RX_ERR_STREAM_UNDERFLOW | \
++						 RX_ERR_UNBOUNDED_FRAME | RX_ERR_TG_FIFO_OVERFLOW)
++/* IPP and RDI path interrupt bits */
++#define		PATH_ERR_FIFO_OVERFLOW		BIT(2)
++
++/* More error interrupts than this in CSID_ERR_WINDOW_NS turn them off */
++#define CSID_ERR_STORM		16
++#define CSID_ERR_WINDOW_NS	(100 * NSEC_PER_MSEC)
+ 
+ #define CSID_CSI2_RDIN_IRQ_STATUS(rdi)		((csid_is_lite(csid) ? 0x30 : 0x40) \
+ 						 + 0x10 * (rdi))
+@@ -444,11 +462,30 @@ static void __csid_configure_ipp_stream(struct csid_device *csid, u8 enable, u8
+ 	writel_relaxed(val, csid->base + CSID_IPP_CFG0);
+ }
+ 
++/* Error interrupts of the receiver and of the paths in use */
++static void csid_error_irqs(struct csid_device *csid, bool enable)
++{
++	u8 i;
++
++	writel_relaxed(enable ? RX_ERR_ALL : 0, csid->base + CSID_CSI2_RX_IRQ_MASK);
++	for (i = 0; i < MSM_CSID_MAX_SRC_STREAMS; i++) {
++		if (!(csid->phy.en_vc & BIT(i)))
++			continue;
++		writel_relaxed(enable ? PATH_ERR_FIFO_OVERFLOW : 0,
++			       csid->base + (csid_port_is_ipp(csid, i) ?
++					     CSID_IPP_IRQ_MASK : CSID_CSI2_RDIN_IRQ_MASK(i)));
++	}
++}
++
+ static void csid_configure_stream(struct csid_device *csid, u8 enable)
+ {
+ 	struct csid_testgen_config *tg = &csid->testgen;
+ 	u8 i;
+ 
++	if (enable)
++		memset(&csid->errors, 0, sizeof(csid->errors));
++	csid_error_irqs(csid, enable);
++
+ 	/* Loop through all enabled ports and configure a stream for each */
+ 	for (i = 0; i < MSM_CSID_MAX_SRC_STREAMS; i++)
+ 		if (csid->phy.en_vc & BIT(i)) {
+@@ -482,10 +519,61 @@ static int csid_configure_testgen_pattern(struct csid_device *csid, s32 val)
+  *
+  * Return IRQ_HANDLED on success
+  */
++/*
++ * A receiver error corrupts the frame of every port, a path FIFO overflow
++ * that of its port. FIFO overflows stop the path (the vendor driver treats
++ * them as fatal), as does a storm of errors, which then turns the error
++ * interrupts off until the next stream start: the streams must restart.
++ */
++static void csid_isr_error(struct csid_device *csid, u32 rx, u32 ports)
++{
++	u64 now = ktime_get_ns();
++	bool fatal;
++	u8 i;
++
++	csid->errors.count++;
++	dev_err_ratelimited(csid->camss->dev,
++			    "CSID%d: error irq rx %08x%s%s%s%s%s%s, path fifo overflow on ports %x\n",
++			    csid->id, rx,
++			    rx & RX_ERR_LANE_FIFO_OVERFLOW ? " lane-fifo-overflow" : "",
++			    rx & RX_ERR_CRC ? " crc" : "",
++			    rx & RX_ERR_ECC ? " ecc" : "",
++			    rx & RX_ERR_STREAM_UNDERFLOW ? " stream-underflow" : "",
++			    rx & RX_ERR_UNBOUNDED_FRAME ? " unbounded-frame" : "",
++			    rx & RX_ERR_TG_FIFO_OVERFLOW ? " tg-fifo-overflow" : "",
++			    ports);
++
++	for (i = 0; i < MSM_CSID_MAX_SRC_STREAMS; i++)
++		if ((csid->phy.en_vc & BIT(i)) && (rx || (ports & BIT(i))))
++			csid_frame_error(csid, i);
++
++	fatal = ports || (rx & (RX_ERR_LANE_FIFO_OVERFLOW | RX_ERR_TG_FIFO_OVERFLOW));
++
++	if (now - csid->errors.window > CSID_ERR_WINDOW_NS) {
++		csid->errors.window = now;
++		csid->errors.window_count = 0;
++	}
++	if (++csid->errors.window_count > CSID_ERR_STORM && !csid->errors.off) {
++		csid->errors.off = true;
++		fatal = true;
++		csid_error_irqs(csid, false);
++		dev_err(csid->camss->dev,
++			"CSID%d: %u error interrupts within %u ms, turned off until the next start (%u so far)\n",
++			csid->id, csid->errors.window_count,
++			(u32)(CSID_ERR_WINDOW_NS / NSEC_PER_MSEC), csid->errors.count);
++	}
++
++	if (fatal)
++		for (i = 0; i < MSM_CSID_MAX_SRC_STREAMS; i++)
++			if ((csid->phy.en_vc & BIT(i)) &&
++			    (ports & BIT(i) || !ports))
++				csid_fatal_error(csid, i);
++}
++
+ static irqreturn_t csid_isr(int irq, void *dev)
+ {
+ 	struct csid_device *csid = dev;
+-	u32 val;
++	u32 val, rx, ports = 0;
+ 	u8 reset_done;
+ 	int i;
+ 
+@@ -493,8 +581,8 @@ static irqreturn_t csid_isr(int irq, void *dev)
+ 	writel_relaxed(val, csid->base + CSID_TOP_IRQ_CLEAR);
+ 	reset_done = val & BIT(TOP_IRQ_STATUS_RESET_DONE);
+ 
+-	val = readl_relaxed(csid->base + CSID_CSI2_RX_IRQ_STATUS);
+-	writel_relaxed(val, csid->base + CSID_CSI2_RX_IRQ_CLEAR);
++	rx = readl_relaxed(csid->base + CSID_CSI2_RX_IRQ_STATUS);
++	writel_relaxed(rx, csid->base + CSID_CSI2_RX_IRQ_CLEAR);
+ 
+ 	/* Read and clear IRQ status for each enabled RDI channel */
+ 	for (i = 0; i < MSM_CSID_MAX_SRC_STREAMS; i++)
+@@ -502,11 +590,12 @@ static irqreturn_t csid_isr(int irq, void *dev)
+ 			if (csid_port_is_ipp(csid, i)) {
+ 				val = readl_relaxed(csid->base + CSID_IPP_IRQ_STATUS);
+ 				writel_relaxed(val, csid->base + CSID_IPP_IRQ_CLEAR);
+-				continue;
++			} else {
++				val = readl_relaxed(csid->base + CSID_CSI2_RDIN_IRQ_STATUS(i));
++				writel_relaxed(val, csid->base + CSID_CSI2_RDIN_IRQ_CLEAR(i));
+ 			}
+-
+-			val = readl_relaxed(csid->base + CSID_CSI2_RDIN_IRQ_STATUS(i));
+-			writel_relaxed(val, csid->base + CSID_CSI2_RDIN_IRQ_CLEAR(i));
++			if (val & PATH_ERR_FIFO_OVERFLOW)
++				ports |= BIT(i);
+ 		}
+ 
+ 	val = 1 << IRQ_CMD_CLEAR;
+@@ -515,6 +604,9 @@ static irqreturn_t csid_isr(int irq, void *dev)
+ 	if (reset_done)
+ 		complete(&csid->reset_complete);
+ 
++	if ((rx & RX_ERR_ALL) || ports)
++		csid_isr_error(csid, rx & RX_ERR_ALL, ports);
++
+ 	return IRQ_HANDLED;
+ }
+ 
+diff --git a/drivers/media/platform/qcom/camss/camss-csid.c b/drivers/media/platform/qcom/camss/camss-csid.c
+index d7fa2d51d..dae938e89 100644
+--- a/drivers/media/platform/qcom/camss/camss-csid.c
++++ b/drivers/media/platform/qcom/camss/camss-csid.c
+@@ -757,6 +757,41 @@ static int csid_set_power(struct v4l2_subdev *sd, int on)
+  *
+  * Return 0 on success or a negative error code otherwise
+  */
++/*
++ * csid_frame_error - A port of the CSID received a corrupt frame
++ * @csid: CSID device
++ * @port: source port
++ *
++ * The VFE line it feeds marks the buffer of that frame. Interrupt context;
++ * the links do not change while streaming.
++ */
++void csid_frame_error(struct csid_device *csid, u8 port)
++{
++	struct media_pad *pad;
++
++	pad = media_pad_remote_pad_first(&csid->pads[MSM_CSID_PAD_FIRST_SRC + port]);
++	if (!pad || !is_media_entity_v4l2_subdev(pad->entity))
++		return;
++	vfe_line_frame_error(v4l2_get_subdevdata(media_entity_to_v4l2_subdev(pad->entity)));
++}
++
++/*
++ * csid_fatal_error - A port of the CSID stopped delivering frames
++ * @csid: CSID device
++ * @port: source port
++ *
++ * The streams of the VFE line it feeds must restart. Interrupt context.
++ */
++void csid_fatal_error(struct csid_device *csid, u8 port)
++{
++	struct media_pad *pad;
++
++	pad = media_pad_remote_pad_first(&csid->pads[MSM_CSID_PAD_FIRST_SRC + port]);
++	if (!pad || !is_media_entity_v4l2_subdev(pad->entity))
++		return;
++	vfe_line_fatal_error(v4l2_get_subdevdata(media_entity_to_v4l2_subdev(pad->entity)));
++}
++
+ /*
+  * Dual IFE: the CSIDs feeding the two pixel paths of a VFE pair start and
+  * stop on the same frame boundary, the one of the master VFE driving the
+diff --git a/drivers/media/platform/qcom/camss/camss-csid.h b/drivers/media/platform/qcom/camss/camss-csid.h
+index e41d997fb..0811d4d37 100644
+--- a/drivers/media/platform/qcom/camss/camss-csid.h
++++ b/drivers/media/platform/qcom/camss/camss-csid.h
+@@ -173,6 +173,13 @@ struct csid_device {
+ 	/* Dual IFE: this IPP starts and stops with the one of another CSID */
+ 	enum { CSID_IPP_SYNC_NONE, CSID_IPP_SYNC_MASTER, CSID_IPP_SYNC_SLAVE } ipp_sync;
+ 	u8 ipp_master;		/* slave: the master CSID */
++	/* Error interrupts since the stream start */
++	struct {
++		u32 count;
++		u64 window;	/* start of the current storm window */
++		u32 window_count;
++		bool off;	/* turned off after a storm */
++	} errors;
+ 	struct v4l2_ctrl_handler ctrls;
+ 	struct v4l2_ctrl *testgen_mode;
+ 	const struct csid_subdev_resources *res;
+@@ -257,4 +264,7 @@ u32 csid_hw_version(struct csid_device *csid);
+ u32 csid_src_pad_code(struct csid_device *csid, u32 sink_code,
+ 		      unsigned int match_format_idx, u32 match_code);
+ 
++void csid_frame_error(struct csid_device *csid, u8 port);
++void csid_fatal_error(struct csid_device *csid, u8 port);
++
+ #endif /* QC_MSM_CAMSS_CSID_H */
+diff --git a/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.c b/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.c
+index 620d83554..3be3e569e 100644
+--- a/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.c
++++ b/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.c
+@@ -637,6 +637,20 @@ void vfe17x_meta_stop(struct vfe_device *vfe)
+ 	}
+ }
+ 
++/* The pixel path is wedged: the parameters and statistics queues must restart */
++void vfe17x_meta_fatal(struct vfe_device *vfe)
++{
++	struct vfe_pix_meta *meta = vfe->pix_meta;
++
++	if (!meta)
++		return;
++
++	if (vb2_is_streaming(&meta->stats_q))
++		vb2_queue_error(&meta->stats_q);
++	if (vb2_is_streaming(&meta->params_q))
++		vb2_queue_error(&meta->params_q);
++}
++
+ /*
+  * CAMIF epoch 0 interrupt: program the parameters of a later frame. Returns
+  * true if registers changed and need a PIX register update.
+diff --git a/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.h b/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.h
+index 51dbf2fb2..74dc1dc20 100644
+--- a/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.h
++++ b/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.h
+@@ -17,6 +17,7 @@ int vfe17x_meta_register(struct vfe_device *vfe, struct v4l2_device *v4l2_dev);
+ void vfe17x_meta_unregister(struct vfe_device *vfe);
+ void vfe17x_meta_start(struct vfe_device *vfe, u32 width, u32 height);
+ void vfe17x_meta_stop(struct vfe_device *vfe);
++void vfe17x_meta_fatal(struct vfe_device *vfe);
+ bool vfe17x_meta_epoch(struct vfe_device *vfe);
+ void vfe17x_meta_bus(struct vfe_device *vfe, u32 bus_status1);
+ void vfe17x_meta_sequence(struct vfe_device *vfe, u32 *sequence);
+diff --git a/drivers/media/platform/qcom/camss/camss-vfe-17x.c b/drivers/media/platform/qcom/camss/camss-vfe-17x.c
+index 9b2d3a58a..9c19d43e4 100644
+--- a/drivers/media/platform/qcom/camss/camss-vfe-17x.c
++++ b/drivers/media/platform/qcom/camss/camss-vfe-17x.c
+@@ -265,6 +265,22 @@
+ #define		STATUS2_DUAL_COMP_OVERWRITE		BIT(7)
+ 
+ #define VFE_BUS_IRQ_CLEAR_GLOBAL		(0x2068)
++#define VFE_BUS_COMP_ERROR_STATUS		(0x206c)
++#define VFE_BUS_COMP_OVERWRITE_STATUS		(0x2070)
++#define VFE_BUS_DEBUG_STATUS0			(0x2270)
++
++/* The error interrupts, as the vendor driver for Titan 175 takes them */
++#define VFE_ERR_MASK_0				0x0003fc00
++#define VFE_ERR_MASK_1				0xefff7e80
++#define VFE_BUS_ERR_MASK_0			(STATUS0_COMP_ERROR | \
++						 STATUS0_COMP_OVERWRITE | \
++						 STATUS0_OVERFLOW | \
++						 STATUS0_VIOLATION)
++#define VFE_BUS_ERR_MASK_2			(STATUS2_DUAL_COMP_ERROR | \
++						 STATUS2_DUAL_COMP_OVERWRITE)
++/* More error interrupts than this in VFE_ERR_WINDOW_NS turn them off */
++#define VFE_ERR_STORM				16
++#define VFE_ERR_WINDOW_NS			(100 * NSEC_PER_MSEC)
+ 
+ #define VFE_BUS_WM_DEBUG_STATUS_CFG		(0x226c)
+ #define		DEBUG_STATUS_CFG_STATUS0(n)	BIT(n)
+@@ -855,6 +871,9 @@ static struct vfe_line *vfe_pix_dual_master(struct vfe_line *line)
+ static unsigned int vfe_pix_dual_collect(struct vfe_pix_dual *d, u64 ts,
+ 					 struct camss_buffer **done, bool *error)
+ {
++	/* error[] comes in as the error state of the slave's stripe */
++	bool stripe_error = error[0];
++
+ 	unsigned int i = 0, n = 0;
+ 
+ 	while (i < d->nheld) {
+@@ -862,7 +881,7 @@ static unsigned int vfe_pix_dual_collect(struct vfe_pix_dual *d, u64 ts,
+ 
+ 		if (t + VFE_DUAL_MATCH_NS > ts) {
+ 			if (t < ts + VFE_DUAL_MATCH_NS) {
+-				error[n] = false;
++				error[n] = d->held[i].error || stripe_error;
+ 				done[n++] = d->held[i].buf;
+ 			} else {
+ 				i++;
+@@ -903,11 +922,15 @@ static void vfe_pix_dual_slave_done(struct vfe_device *vfe)
+ 	u64 ts = ktime_get_ns();
+ 
+ 	spin_lock_irqsave(&vfe->output_lock, flags);
++	/* A corrupt stripe makes the master's buffer of that frame corrupt */
++	error[0] = vfe->line[VFE_LINE_PIX].output.error;
++	vfe->line[VFE_LINE_PIX].output.error = false;
+ 	master = vfe->dual.peer;
+ 	if (master) {
+ 		spin_lock_nested(&master->output_lock, SINGLE_DEPTH_NESTING);
+ 		if (master->dual.peer == vfe) {
+ 			master->dual.slave_ts = ts;
++			master->dual.slave_error = error[0];
+ 			n = vfe_pix_dual_collect(&master->dual, ts, done, error);
+ 		}
+ 		spin_unlock(&master->output_lock);
+@@ -917,7 +940,7 @@ static void vfe_pix_dual_slave_done(struct vfe_device *vfe)
+ 	for (i = 0; i < n; i++) {
+ 		if (error[i])
+ 			dev_dbg_ratelimited(vfe->camss->dev,
+-					    "VFE%d: no stripe for frame %u\n", vfe->id,
++					    "VFE%d: frame %u incomplete or corrupt\n", vfe->id,
+ 					    done[i]->vb.sequence);
+ 		vb2_buffer_done(&done[i]->vb.vb2_buf,
+ 				error[i] ? VB2_BUF_STATE_ERROR : VB2_BUF_STATE_DONE);
+@@ -1025,6 +1048,7 @@ static int vfe_pix_enable_output(struct vfe_line *line)
+ 		if (ret < 0)
+ 			goto out_unlock;
+ 		output->state = VFE_OUTPUT_ON;
++		output->error = false;
+ 		output->sequence = 0;
+ 		vfe_reg_update(vfe, line->id);
+ 		dev_dbg(vfe->camss->dev, "VFE%d: pixel path stripe of VFE%d at %u\n",
+@@ -1037,6 +1061,7 @@ static int vfe_pix_enable_output(struct vfe_line *line)
+ 		goto out_unlock;
+ 
+ 	output->state = VFE_OUTPUT_ON;
++	output->error = false;
+ 	output->sequence = 0;
+ 	output->wait_reg_update = 0;
+ 	reinit_completion(&output->reg_update);
+@@ -1113,6 +1138,89 @@ static void vfe_violation_read(struct vfe_device *vfe)
+ 	pr_err_ratelimited("VFE: violation = 0x%08x\n", violation);
+ }
+ 
++/*
++ * The VFE is wedged, measured on SC8280XP: after one frame with a bus error
++ * the pixel path writes nothing more until the stream restarts. Make every
++ * queue it feeds fail, once per stream start, so that userspace restarts
++ * them; with dual IFE, the master's queues hold both stripes.
++ */
++static void vfe17x_fatal_error(struct vfe_device *vfe)
++{
++	struct vfe_device *master = NULL;
++	unsigned long flags;
++	unsigned int i;
++	bool first;
++
++	spin_lock_irqsave(&vfe->output_lock, flags);
++	first = !vfe->errors.fatal;
++	vfe->errors.fatal = true;
++	if (first) {
++		for (i = 0; i < vfe->res->line_num; i++)
++			if (vfe->line[i].output.state == VFE_OUTPUT_ON)
++				vb2_queue_error(&vfe->line[i].video_out.vb2_q);
++		if (vfe->dual.peer && !vfe->dual.master)
++			master = vfe->dual.peer;
++	}
++	spin_unlock_irqrestore(&vfe->output_lock, flags);
++
++	if (!first)
++		return;
++
++	vfe17x_meta_fatal(vfe);
++	dev_err(vfe->camss->dev, "VFE%d: wedged, the streams must restart\n", vfe->id);
++	if (master)
++		vfe17x_fatal_error(master);
++}
++
++/*
++ * An error interrupt: the frames being written are corrupt and the VFE is
++ * wedged (see vfe17x_fatal_error()). Every line streaming marks its buffer.
++ * A storm of them turns the error interrupts off until the next stream
++ * start.
++ */
++static void vfe_isr_error(struct vfe_device *vfe, u32 err0, u32 err1,
++			  u32 bus0, u32 bus2)
++{
++	struct vfe_errors *e = &vfe->errors;
++	u64 now = ktime_get_ns();
++	unsigned int i;
++
++	for (i = 0; i < vfe->res->line_num; i++)
++		vfe_line_frame_error(&vfe->line[i]);
++	vfe17x_fatal_error(vfe);
++
++	e->count++;
++	dev_err_ratelimited(vfe->camss->dev,
++			    "VFE%d: error irq %08x %08x bus %08x %08x, violation %08x debug %08x comp error %08x overwrite %08x, wm %08x %08x\n",
++			    vfe->id, err0, err1, bus0, bus2,
++			    readl_relaxed(vfe->base + VFE_VIOLATION_STATUS),
++			    readl_relaxed(vfe->base + VFE_BUS_DEBUG_STATUS0),
++			    readl_relaxed(vfe->base + VFE_BUS_COMP_ERROR_STATUS),
++			    readl_relaxed(vfe->base + VFE_BUS_COMP_OVERWRITE_STATUS),
++			    readl_relaxed(vfe->base + VFE_BUS_WM_STATUS0(VFE_WM_PIX_FULL_Y)),
++			    readl_relaxed(vfe->base + VFE_BUS_WM_STATUS1(VFE_WM_PIX_FULL_Y)));
++
++	if (now - e->window > VFE_ERR_WINDOW_NS) {
++		e->window = now;
++		e->window_count = 0;
++	}
++	if (++e->window_count > VFE_ERR_STORM && !e->off) {
++		e->off = true;
++		writel_relaxed(readl_relaxed(vfe->base + VFE_IRQ_MASK_0) & ~VFE_ERR_MASK_0,
++			       vfe->base + VFE_IRQ_MASK_0);
++		writel_relaxed(readl_relaxed(vfe->base + VFE_IRQ_MASK_1) & ~VFE_ERR_MASK_1,
++			       vfe->base + VFE_IRQ_MASK_1);
++		writel_relaxed(readl_relaxed(vfe->base + VFE_BUS_IRQ_MASK(0)) & ~VFE_BUS_ERR_MASK_0,
++			       vfe->base + VFE_BUS_IRQ_MASK(0));
++		writel_relaxed(readl_relaxed(vfe->base + VFE_BUS_IRQ_MASK(2)) & ~VFE_BUS_ERR_MASK_2,
++			       vfe->base + VFE_BUS_IRQ_MASK(2));
++		dev_err(vfe->camss->dev,
++			"VFE%d: %u error interrupts within %u ms, turned off until the next start (%u so far)\n",
++			vfe->id, e->window_count, (u32)(VFE_ERR_WINDOW_NS / NSEC_PER_MSEC),
++			e->count);
++	}
++}
++
+ /* Status 0 bit reporting a completed reg update of a line */
+ static u32 vfe_reg_update_done_bit(struct vfe_device *vfe, enum vfe_line_id line_id)
+ {
+@@ -1163,8 +1271,12 @@ static irqreturn_t vfe_isr(int irq, void *dev)
+ 	if (status0 & STATUS_0_RESET_ACK)
+ 		vfe->isr_ops.reset_ack(vfe);
+ 
+-	if (status1 & STATUS_1_VIOLATION)
+-		vfe_violation_read(vfe);
++	if ((status0 & VFE_ERR_MASK_0) || (status1 & VFE_ERR_MASK_1) ||
++	    (vfe_bus_status[0] & VFE_BUS_ERR_MASK_0) ||
++	    (vfe_bus_status[2] & VFE_BUS_ERR_MASK_2))
++		vfe_isr_error(vfe, status0 & VFE_ERR_MASK_0, status1 & VFE_ERR_MASK_1,
++			      vfe_bus_status[0] & VFE_BUS_ERR_MASK_0,
++			      vfe_bus_status[2] & VFE_BUS_ERR_MASK_2);
+ 
+ 	/* Epoch 0 of the pixel path: program the next frame's parameters */
+ 	if ((status0 & STATUS_0_CAMIF_EPOCH0) && vfe17x_meta_epoch(vfe)) {
+@@ -1280,8 +1392,10 @@ static int vfe_enable(struct vfe_line *line)
+ 
+ 	mutex_lock(&vfe->stream_lock);
+ 
+-	if (!vfe->stream_count)
++	if (!vfe->stream_count) {
++		memset(&vfe->errors, 0, sizeof(vfe->errors));
+ 		vfe_enable_irq_common(vfe);
++	}
+ 
+ 	vfe->stream_count++;
+ 
+@@ -1361,7 +1475,7 @@ static void vfe_isr_wm_done(struct vfe_device *vfe, u8 wm)
+ 	struct vfe_output *output;
+ 	unsigned long flags;
+ 	unsigned int i, ndone = 0;
+-	bool dual;
++	bool dual, bad;
+ 	u32 index;
+ 	u64 ts = ktime_get_ns();
+ 
+@@ -1392,6 +1506,8 @@ static void vfe_isr_wm_done(struct vfe_device *vfe, u8 wm)
+ 	ready_buf->vb.sequence = output->sequence++;
+ 	if (line->id == VFE_LINE_PIX)
+ 		vfe17x_meta_sequence(vfe, &ready_buf->vb.sequence);
++	bad = output->error;
++	output->error = false;
+ 
+ 	index = 0;
+ 	output->buf[0] = output->buf[1];
+@@ -1425,6 +1541,7 @@ static void vfe_isr_wm_done(struct vfe_device *vfe, u8 wm)
+ 		struct vfe_pix_dual *d = &vfe->dual;
+ 
+ 		if (d->slave_ts + VFE_DUAL_MATCH_NS > ts) {
++			error[ndone] = bad || d->slave_error;
+ 			done[ndone++] = ready_buf;
+ 		} else {
+ 			if (d->nheld == VFE_DUAL_HELD) {
+@@ -1435,9 +1552,11 @@ static void vfe_isr_wm_done(struct vfe_device *vfe, u8 wm)
+ 			}
+ 			d->held[d->nheld].buf = ready_buf;
+ 			d->held[d->nheld].ts = ts;
++			d->held[d->nheld].error = bad;
+ 			d->nheld++;
+ 		}
+ 	} else {
++		error[ndone] = bad;
+ 		done[ndone++] = ready_buf;
+ 	}
+ 
+@@ -1529,4 +1648,5 @@ const struct vfe_hw_ops vfe_ops_170 = {
+ 	.vfe_wm_update = vfe_wm_update,
+ 	.meta_register = vfe17x_meta_register,
+ 	.meta_unregister = vfe17x_meta_unregister,
++	.fatal_error = vfe17x_fatal_error,
+ };
+diff --git a/drivers/media/platform/qcom/camss/camss-vfe.c b/drivers/media/platform/qcom/camss/camss-vfe.c
+index d8e998db7..2fcef2e56 100644
+--- a/drivers/media/platform/qcom/camss/camss-vfe.c
++++ b/drivers/media/platform/qcom/camss/camss-vfe.c
+@@ -633,6 +633,7 @@ int vfe_enable_output_v2(struct vfe_line *line)
+ 	WARN_ON(output->gen2.active_num);
+ 
+ 	output->state = VFE_OUTPUT_ON;
++	output->error = false;
+ 
+ 	output->sequence = 0;
+ 	output->wait_reg_update = 0;
+@@ -1268,6 +1269,40 @@ void vfe_put(struct vfe_device *vfe)
+ 	mutex_unlock(&vfe->power_lock);
+ }
+ 
++
++/*
++ * vfe_line_fatal_error - The VFE a line belongs to is wedged
++ * @line: VFE line
++ *
++ * Its streams produce nothing more until restarted: the queues report the
++ * error to userspace, which stops and starts them again. Interrupt context.
++ */
++void vfe_line_fatal_error(struct vfe_line *line)
++{
++	struct vfe_device *vfe = to_vfe(line);
++
++	if (vfe->res->hw_ops->fatal_error)
++		vfe->res->hw_ops->fatal_error(vfe);
++}
++
++/*
++ * vfe_line_frame_error - The frame a line is writing came in corrupt
++ * @line: VFE line
++ *
++ * Its buffer completes with VB2_BUF_STATE_ERROR; a dual IFE slave passes
++ * it on to the master's buffer with its stripe. Called in interrupt context,
++ * by the VFE and by the CSID feeding it.
++ */
++void vfe_line_frame_error(struct vfe_line *line)
++{
++	struct vfe_device *vfe = to_vfe(line);
++	unsigned long flags;
++
++	spin_lock_irqsave(&vfe->output_lock, flags);
++	if (line->output.state == VFE_OUTPUT_ON)
++		line->output.error = true;
++	spin_unlock_irqrestore(&vfe->output_lock, flags);
++}
+ /*
+  * vfe_flush_buffers - Return all vb2 buffers
+  * @vid: Video device structure
+diff --git a/drivers/media/platform/qcom/camss/camss-vfe.h b/drivers/media/platform/qcom/camss/camss-vfe.h
+index 2610e04dd..16b070087 100644
+--- a/drivers/media/platform/qcom/camss/camss-vfe.h
++++ b/drivers/media/platform/qcom/camss/camss-vfe.h
+@@ -77,6 +77,7 @@ struct vfe_output {
+ 	};
+ 	enum vfe_output_state state;
+ 	unsigned int sequence;
++	bool error;		/* the frame being written came in corrupt */
+ 
+ 	int wait_reg_update;
+ 	struct completion sof;
+@@ -123,6 +124,8 @@ struct vfe_hw_ops {
+ 	/* Optional parameters and statistics nodes of the pixel pipeline */
+ 	int (*meta_register)(struct vfe_device *vfe, struct v4l2_device *v4l2_dev);
+ 	void (*meta_unregister)(struct vfe_device *vfe);
++	/* Optional: the streams must restart, tell their queues */
++	void (*fatal_error)(struct vfe_device *vfe);
+ };
+ 
+ struct vfe_pix_meta;
+@@ -169,13 +172,24 @@ struct vfe_pix_dual {
+ 	bool master;
+ 	u32 x_offset;		/* master: byte offset of the slave stripe */
+ 	u64 slave_ts;		/* master: when the slave last wrote a stripe */
++	bool slave_error;	/* master: that stripe came in corrupt */
+ 	unsigned int nheld;	/* master: buffers waiting for the slave */
+ 	struct {
+ 		struct camss_buffer *buf;
+ 		u64 ts;
++		bool error;
+ 	} held[VFE_DUAL_HELD];
+ };
+ 
++/* Error interrupts of a VFE, from its first stream start on */
++struct vfe_errors {
++	u32 count;		/* error interrupts */
++	u64 window;		/* start of the current storm window */
++	u32 window_count;	/* error interrupts in it */
++	bool off;		/* turned off after a storm */
++	bool fatal;		/* the queues were told to restart */
++};
++
+ struct vfe_device {
+ 	struct camss *camss;
+ 	u8 id;
+@@ -197,6 +211,7 @@ struct vfe_device {
+ 	u32 reg_update;
+ 	struct vfe_pix_meta *pix_meta;
+ 	struct vfe_pix_dual dual;
++	struct vfe_errors errors;
+ 	u8 was_streaming;
+ 	const struct vfe_subdev_resources *res;
+ 	const struct vfe_hw_ops_gen1 *ops_gen1;
+@@ -229,6 +244,9 @@ struct camss_buffer *vfe_buf_get_pending(struct vfe_output *output);
+ 
+ int vfe_flush_buffers(struct camss_video *vid, enum vb2_buffer_state state);
+ 
++void vfe_line_frame_error(struct vfe_line *line);
++void vfe_line_fatal_error(struct vfe_line *line);
++
+ /*
+  * vfe_isr_comp_done - Process composite image done interrupt
+  * @vfe: VFE Device

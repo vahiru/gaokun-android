@@ -1,13 +1,13 @@
 # 相机V4L2 / Media Controller诊断与ISP标定工具
 
-本目录包含不依赖`media-ctl`/`v4l2-ctl`的最小化V4L2/Media Controller诊断程序（直接使用内核UAPI头文件构建），以及从华为Windows驱动调校包提取SoftISP色彩矫正矩阵（CCM）与自动白平衡（AWB）先验数据的生成脚本。相机子系统完整架构详见[`../../docs/dev/camera.md`](../../docs/dev/camera.md)与[`../../device/huawei/gaokun3/camera/README.md`](../../device/huawei/gaokun3/camera/README.md)。
+本目录包含不依赖`media-ctl`/`v4l2-ctl`的最小化V4L2/Media Controller诊断程序（直接使用内核UAPI头文件构建），以及从华为Windows驱动调校包提取色彩矫正矩阵（CCM）与自动白平衡（AWB）先验数据的生成脚本。相机子系统完整架构详见[`../../docs/dev/camera.md`](../../docs/dev/camera.md)与[`../../device/huawei/gaokun3/camera/README.md`](../../device/huawei/gaokun3/camera/README.md)。
 
 | 工具 | 用途 |
 |---|---|
 | `mediatopo` | 转储`/dev/media0`的entity、pad、link拓扑及启用状态（等效于`media-ctl -p`） |
 | `camtest` | 建立media link、沿管道配置格式并采集RAW帧（依次测试默认曝光、满增益、传感器测试彩条与分辨率图案） |
-| `gen-ov13b10-ccm.py` | 从Windows驱动调校文件`com.qti.tuned.ofilm_ov13b10.bin`生成后摄`ov13b10.yaml` |
-| `gen-hi846-ccm.py` | 结合Windows驱动调校文件`com.qti.tuned.hlt_hi846.bin`与实测白点生成前摄`hi846.yaml` |
+| `gen-ov13b10-ccm.py` | 从Windows驱动调校文件`com.qti.tuned.ofilm_ov13b10.bin`生成后摄调校的AWB与CCM数据 |
+| `gen-hi846-ccm.py` | 结合Windows驱动调校文件`com.qti.tuned.hlt_hi846.bin`与实测白点生成前摄调校的AWB与CCM数据 |
 
 编译C诊断工具：`bash scripts/camera/build.sh <内核源码树路径>`（生成静态链接二进制，`adb push`至`/data/local/tmp/`以root运行）。
 
@@ -30,7 +30,9 @@ msm_vfe0_rdi0:1 -> msm_vfe0_video0   [固定连接] => /dev/videoN
 
 `camtest`第3轮开启传感器彩条模式（Test Pattern 2）后，从原始Bayer帧解出的色带序列应严格为**黄、青、绿、品、红、蓝**（R/G/B通道满量程`1023`或`0`，相邻行像素差为`0`）。
 
-## 三、SoftISP标定配置生成
+## 三、AWB与CCM数据生成
+
+两个脚本输出的是软件ISP格式的完整调校文件（最早给软件ISP用）。硬件ISP（qcom-ife）的调校文件[`../../device/huawei/gaokun3/camera/ipa-data/qcom-ife/`](../../device/huawei/gaokun3/camera/ipa-data/qcom-ife/)原样采用其中的`Awb`与`Ccm`两段；该目录须与`patches/libcamera`里`src/ipa/qcom-ife/data/`的同名文件一致。
 
 ### 后摄（`ov13b10`）：`gen-ov13b10-ccm.py`
 
@@ -41,7 +43,7 @@ msm_vfe0_rdi0:1 -> msm_vfe0_video0   [固定连接] => /dev/videoN
 
 ```bash
 python3 scripts/camera/gen-ov13b10-ccm.py com.qti.tuned.ofilm_ov13b10.bin \
-    > device/huawei/gaokun3/camera/ipa-data/softisp/ov13b10.yaml
+    > /tmp/ov13b10-softisp.yaml   # 取其中的Awb与Ccm段
 ```
 
 ### 前摄（`hi846` / `ov5675`）：`gen-hi846-ccm.py`
@@ -50,5 +52,5 @@ python3 scripts/camera/gen-ov13b10-ccm.py com.qti.tuned.ofilm_ov13b10.bin \
 
 ```bash
 python3 scripts/camera/gen-hi846-ccm.py com.qti.tuned.hlt_hi846.bin \
-    > device/huawei/gaokun3/camera/ipa-data/softisp/hi846.yaml
+    > /tmp/hi846-softisp.yaml     # 取其中的Awb与Ccm段
 ```

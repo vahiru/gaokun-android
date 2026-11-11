@@ -76,6 +76,21 @@ bool Provider::init()
 		ALOGI("  %s  ←  %s", name.c_str(), c->id().c_str());
 		idx++;
 	}
+	/*
+	 * 在注册服务之前建好每个相机的 Device：Device::init() 要按每种画面尺寸
+	 * 配置一遍 libcamera、读最短帧长。两个相机共用一个流水线，
+	 * 同一时间只能 acquire 一个；注册之后再探测，可能撞上另一个相机的会话或
+	 * 别的 libcamera 进程，探测失败的相机就一直只声明 30 fps。这样也不用在
+	 * binder 调用里持着 mutex_ 做十来次 configure。失败的留到
+	 * getCameraDeviceInterface() 再试。
+	 */
+	for (const auto &kv : cameras_) {
+		auto dev = ndk::SharedRefBase::make<Device>(kv.second, kv.first, this);
+		if (dev->init())
+			devices_[kv.first] = dev;
+		else
+			ALOGW("Device init failed for %s, will retry on first use", kv.first.c_str());
+	}
 	/* ⚠️ 一个相机都没有时【不要】报成功：provider 注册上去但列表为空，
 	 *    框架只会显示"没有相机"，而真正的失败原因（camss 没 probe /
 	 *    缺 DTB）就被埋掉了。宁可让服务起不来，日志里看得见。 */

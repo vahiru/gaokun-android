@@ -4,8 +4,11 @@
 #include "Session.h"
 
 #include <algorithm>
+#include <cstdint>
+#include <cmath>
 #include <cstdlib>
 #include <fcntl.h>
+#include <map>
 #include <unistd.h>
 
 #include <aidl/android/hardware/camera/common/CameraResourceCost.h>
@@ -16,6 +19,8 @@
 #include <aidl/android/hardware/camera/device/ICameraInjectionSession.h>
 #include <log/log.h>
 
+#include <libcamera/control_ids.h>
+#include <libcamera/formats.h>
 #include <libcamera/property_ids.h>
 #include <libcamera/stream.h>
 
@@ -177,7 +182,7 @@ bool Device::init()
 	 *     加 270°。
 	 *
 	 *   ★ 还要扣掉 libcamera 已经转掉的部分：会话不设 CameraConfiguration::orientation，
-	 *     默认要 Rotate0，simple 流水线用 CameraSensor::computeTransform() 去凑。180 能靠
+	 *     默认要 Rotate0，管线用 CameraSensor::computeTransform() 去凑。180 能靠
 	 *     水平 + 垂直翻转消掉，后摄 ov13b10 支持翻转，就是被翻转读出的（日志里
 	 *     transform hvflip）；90 / 270 要转置，消不掉。前摄 hi846 没有翻转控件。
 	 *
@@ -204,7 +209,7 @@ bool Device::init()
 	 * 不设 orientation（会话哪天要设，这里也得跟着改）。validate() 之后 orientation
 	 * 还是 Rotate0，就是设备树的角度整个被消掉了；消不掉时它会把 orientation 改成
 	 * 安装方向，不翻转。
-	 * 不看 validate() 的返回值：simple 流水线一开头就算 orientation，后面即使因为
+	 * 不看 validate() 的返回值：管线在检查格式和尺寸之前就算好 orientation，即使因为
 	 * 格式返回 Invalid，这个结果也已经定了，和会话用的格式无关。
 	 */
 	int32_t undone = 0;
@@ -255,9 +260,8 @@ bool Device::init()
 
 	/*
 	 * ── 对外声明的输出尺寸 ──
-	 * ⚠️★ 不要只报满分辨率：流都不超过半个阵列时 HAL 向 libcamera 要合并模式的完整画面，
-	 *    否则要全尺寸，每个输出流还要从整帧各转换一次（[#95] 时帧间隔约 130 ms；
-	 *    2026-11 多线程去拜耳下全尺寸约 33 ms）。
+	 * ⚠️★ 不要只报满分辨率：会话按最大的那路流向流水线要画面（Session::hwIspFrameSize()），
+	 *    流都不超过半个阵列时流水线选合并模式（后摄 60 fps），否则全尺寸模式（30 fps）。
 	 *    这里给一组【降采样】的尺寸 + 满分辨率（留给静态拍照）。
 	 */
 	auto ratio = [&](int w) {
@@ -294,13 +298,14 @@ bool Device::init()
 	}
 
 	/*
-	 * 30 fps: the multithreaded CPU debayer keeps up with the sensor's
-	 * 30 fps full-size mode (the preview was measured at about 29 fps at
-	 * 4200x3120). Each extra output stream adds a conversion of the full
-	 * frame in deliver(), which can lower the delivered rate. Aperture
-	 * crashes when switching to video if no range reaches 24 or 30 fps.
+	 * 30 fps unless probed: the full-size modes of both sensors run at 30 fps;
+	 * probeCamera() takes the minimum frame duration of each output size from
+	 * the sensor mode libcamera picks for it (the rear binned mode reaches
+	 * 60 fps). Aperture crashes when switching to video if no range reaches
+	 * 24 or 30 fps.
 	 */
 	facts_.minFrameDurationNs = 33333333;   /* 30 fps */
+	probeCamera();
 
 	characteristics_ = buildCharacteristics(facts_);
 	if (characteristics_.empty()) {
@@ -316,6 +321,164 @@ bool Device::init()
 	      facts_.flashLed.empty() ? "" : "（带闪光灯）",
 	      facts_.hasAf ? "（带自动对焦）" : "");
 	return true;
+}
+
+/*
+ * libcamera 配置好之后这个相机能做什么；不开流。
+ *
+ * 帧率：每种输出尺寸的帧率取决于会话为它要的画面（Session::hwIspFrameSize()）让
+ * libcamera 选中的传感器模式：ov13b10 的合并模式能到 60 fps，全尺寸模式 30 fps。把画面
+ * 复制到各路流跟得上 60 fps。做法：每种不同的画面尺寸配置一次相机，读 libcamera 允许的
+ * 最短帧长；失败的尺寸按 30 fps。
+ *
+ * 3A 控制：IPA 配置之后才列出它们。管线不给 NV12（不是 qcom-ife）、acquire 失败的相机
+ * 一个都不声明。
+ */
+void Device::probeCamera()
+{
+	facts_.minFrameDurationsNs.clear();
+	facts_.evCompensation = facts_.aeLock = facts_.awbLock = facts_.awbPresets = false;
+	facts_.manualCcm = false;
+	facts_.manualSensor = false;
+	ManualLimits limits;
+
+	auto probe = cam_->generateConfiguration({ libcamera::StreamRole::Viewfinder });
+	if (!probe || probe->empty())
+		return;
+	const auto fmts = probe->at(0).formats().pixelformats();
+	if (std::find(fmts.begin(), fmts.end(), libcamera::formats::NV12) == fmts.end()) {
+		ALOGW("%s: no NV12 output (the qcom-ife pipeline is required), nothing probed",
+		      name_.c_str());
+		return;
+	}
+
+	/*
+	 * 另一个进程（例如调试用的 libcamera 工具）占着相机时等一会儿：探测只在 provider 启动
+	 * 时做一次，cameraserver 读过特性之后就不能再改，没探测到的能力一直缺到 provider 重启。
+	 */
+	int busy = cam_->acquire();
+	for (int i = 0; busy && i < kAcquireRetries; i++) {
+		usleep(kAcquireRetryUs);
+		busy = cam_->acquire();
+	}
+	if (busy) {
+		ALOGE("%s: camera busy, frame rates and 3A controls not probed until the provider "
+		      "restarts",
+		      name_.c_str());
+		return;
+	}
+
+	auto finish = [&]() {
+		/*
+		 * 手动曝光：用 AE 锁定的那套手动模式，范围取每种配置都满足的。
+		 * ISO 100 对应单位增益。
+		 */
+		if (facts_.aeLock && limits.seen && limits.expMaxUs > limits.expMinUs &&
+		    limits.gainMax >= limits.gainMin && limits.frameMaxUs < INT64_MAX) {
+			facts_.maxFrameDurationNs = limits.frameMaxUs * 1000;
+			facts_.exposureMinNs = std::max<int64_t>(limits.expMinUs, 1) * 1000;
+			facts_.exposureMaxNs =
+				std::min(limits.expMaxUs * 1000, facts_.maxFrameDurationNs);
+			facts_.isoMin = static_cast<int32_t>(std::ceil(limits.gainMin * 100.0));
+			facts_.isoMax = static_cast<int32_t>(std::floor(limits.gainMax * 100.0));
+			facts_.manualSensor = facts_.exposureMaxNs > facts_.exposureMinNs &&
+					      facts_.isoMax >= facts_.isoMin;
+		}
+		ALOGI("%s: manual sensor %d: exposure %lld-%lld ns, ISO %d-%d, frame up to %lld ns",
+		      name_.c_str(), facts_.manualSensor, (long long)facts_.exposureMinNs,
+		      (long long)facts_.exposureMaxNs, facts_.isoMin, facts_.isoMax,
+		      (long long)facts_.maxFrameDurationNs);
+		cam_->release();
+	};
+
+	std::map<std::pair<unsigned int, unsigned int>, int64_t> byFrame;
+	for (const auto &s : facts_.outputSizes) {
+		const libcamera::Size frame = Session::hwIspFrameSize(facts_, s.first, s.second);
+		const auto key = std::make_pair(frame.width, frame.height);
+		auto it = byFrame.find(key);
+		if (it == byFrame.end()) {
+			int64_t ns = facts_.minFrameDurationNs;
+			auto cfg = cam_->generateConfiguration({ libcamera::StreamRole::Viewfinder });
+			if (cfg && !cfg->empty()) {
+				cfg->at(0).size = frame;
+				cfg->at(0).pixelFormat = libcamera::formats::NV12;
+				cfg->at(0).bufferCount = 4;
+				if (cfg->validate() != libcamera::CameraConfiguration::Invalid &&
+				    !cam_->configure(cfg.get())) {
+					accumulateLimits(limits);
+					const auto &ctrls = cam_->controls();
+					auto ci = ctrls.find(&libcamera::controls::FrameDurationLimits);
+					if (ci != ctrls.end()) {
+						/*
+						 * 单位微秒。最高按 60 fps；离 60 fps 不超过 1%
+						 * 就算 60 fps，传感器的标称也是这么算的（ov13b10
+						 * 合并模式最短帧 16.78 ms）。
+						 */
+						const int64_t us = ci->second.min().get<int64_t>();
+						ns = us * 1000 <= kMinFrameDuration60Ns * 101 / 100
+							     ? kMinFrameDuration60Ns
+							     : std::min(us * 1000, facts_.minFrameDurationNs);
+					}
+				}
+			}
+			it = byFrame.emplace(key, ns).first;
+			ALOGI("%s: frame %ux%u: shortest frame %.2f ms", name_.c_str(), frame.width,
+			      frame.height, ns / 1e6);
+		}
+		facts_.minFrameDurationsNs.push_back(it->second);
+	}
+	probe3aControls();
+	finish();
+}
+
+void Device::accumulateLimits(ManualLimits &l)
+{
+	const auto &ctrls = cam_->controls();
+	auto e = ctrls.find(&libcamera::controls::ExposureTime);
+	auto g = ctrls.find(&libcamera::controls::AnalogueGain);
+	auto f = ctrls.find(&libcamera::controls::FrameDurationLimits);
+	if (e == ctrls.end() || g == ctrls.end() || f == ctrls.end())
+		return;
+	l.expMinUs = std::max<int64_t>(l.expMinUs, e->second.min().get<int32_t>());
+	l.expMaxUs = std::min<int64_t>(l.expMaxUs, e->second.max().get<int32_t>());
+	l.gainMin = std::max<double>(l.gainMin, g->second.min().get<float>());
+	l.gainMax = std::min<double>(l.gainMax, g->second.max().get<float>());
+	l.frameMaxUs = std::min(l.frameMaxUs, f->second.max().get<int64_t>());
+	l.seen = true;
+}
+
+/* 相机已配置：看 libcamera 接受哪些 3A 控制 */
+void Device::probe3aControls()
+{
+	const auto &ctrls = cam_->controls();
+	auto takes = [&](const libcamera::ControlId &id, int32_t value) {
+		auto it = ctrls.find(&id);
+		if (it == ctrls.end())
+			return false;
+		for (const auto &v : it->second.values())
+			if (v.get<int32_t>() == value)
+				return true;
+		return false;
+	};
+
+	facts_.evCompensation = ctrls.count(&libcamera::controls::ExposureValue);
+	facts_.aeLock = takes(libcamera::controls::ExposureTimeMode,
+			      libcamera::controls::ExposureTimeModeManual) &&
+			takes(libcamera::controls::AnalogueGainMode,
+			      libcamera::controls::AnalogueGainModeManual);
+	facts_.awbLock = ctrls.count(&libcamera::controls::AwbEnable) &&
+			 ctrls.count(&libcamera::controls::ColourGains);
+	facts_.manualCcm = facts_.awbLock &&
+			   ctrls.count(&libcamera::controls::ColourCorrectionMatrix);
+	facts_.awbPresets = ctrls.count(&libcamera::controls::AwbEnable) &&
+			    ctrls.count(&libcamera::controls::ColourTemperature);
+	facts_.antibanding = takes(libcamera::controls::AeFlickerMode,
+				   libcamera::controls::FlickerManual) &&
+			     ctrls.count(&libcamera::controls::AeFlickerPeriod);
+	ALOGI("%s: 3A controls: exposure compensation %d, AE lock %d, AWB lock %d, AWB presets %d, "
+	      "antibanding %d",
+	      name_.c_str(), facts_.evCompensation, facts_.aeLock, facts_.awbLock,
+	      facts_.awbPresets, facts_.antibanding);
 }
 
 ndk::ScopedAStatus Device::getCameraCharacteristics(CameraMetadata *out)
@@ -334,7 +497,7 @@ ndk::ScopedAStatus Device::getPhysicalCameraCharacteristics(const std::string &,
 
 ndk::ScopedAStatus Device::getResourceCost(CameraResourceCost *out)
 {
-	out->resourceCost = 100;     /* 软件 ISP 吃 CPU，如实报满 */
+	out->resourceCost = 100;     /* 两个相机共用一条 libcamera 管线，同一时间只能开一个 */
 	out->conflictingDevices.clear();
 	return ndk::ScopedAStatus::ok();
 }
@@ -437,7 +600,7 @@ ndk::ScopedAStatus Device::getTorchStrengthLevel(int32_t *)
 ndk::ScopedAStatus Device::constructDefaultRequestSettings(RequestTemplate type,
 							   CameraMetadata *out)
 {
-	if (!templateSupported(static_cast<int>(type)))
+	if (!templateSupported(static_cast<int>(type), facts_))
 		return err(Status::ILLEGAL_ARGUMENT);
 	out->metadata = buildDefaultRequest(static_cast<int>(type), facts_);
 	if (out->metadata.empty())

@@ -1,0 +1,313 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: qcom: camss: vfe-17x: Add the lens shading correction
+
+Add a parameters block for LSC34, the IFE's lens shading correction,
+with the layout of the Windows driver: a grid of up to 16 x 12 blocks
+whose nodes hold the R, Gr, Gb and B gains in Q10, in DMI banks 14 (R,
+Gr) and 15 (B, Gb) or 18 and 19, selected by bit 16 of 0x6bc; the block
+count, block and subgrid sizes, the interpolation steps, and where the
+input starts in the grid. The module enable is bit 8 of MODULE_LENS_EN.
+
+The gains go to the inactive banks, like the gamma curves. Both IFEs of
+a dual IFE stream take the frame's grid; the right one starts at its
+first input column, computed like the Windows driver's striping. The
+Windows driver writes the second (_r) register group like the first; so
+does this. The block start column must fall on a block boundary of the
+right stripe; the driver warns once when it does not.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ .../platform/qcom/camss/camss-vfe-17x-meta.c  | 130 +++++++++++++++++-
+ include/uapi/linux/media/qcom/ife17x-config.h |  51 ++++++-
+ 2 files changed, 179 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.c b/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.c
+index f63f69d48..ec58d4135 100644
+--- a/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.c
++++ b/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.c
+@@ -37,6 +37,7 @@
+ #define VFE_MODULE_LENS_EN		0x040
+ #define		LENS_EN_BPC		BIT(6)
+ #define		LENS_EN_ABF		BIT(7)
++#define		LENS_EN_LSC		BIT(8)
+ #define		LENS_EN_BLS		BIT(11)
+ #define		LENS_EN_PDPC		BIT(13)
+ #define VFE_MODULE_STATS_EN		0x044
+@@ -89,6 +90,17 @@
+ /* The squared distance register is 28 bits wide */
+ #define ABF_R2_MAX			GENMASK(27, 0)
+ 
++/*
++ * LSC34, from the Windows driver: the grid of the left (_l) and the right
++ * (_r) group, the gains in DMI banks 14 (R, Gr) and 15 (B, Gb), or 18 and 19
++ * with 0x6bc bit 16. The Windows driver writes both groups alike.
++ */
++#define VFE_LSC_CFG			0x6bc	/* blocks across [23:18], down [29:24] */
++#define		LSC_CFG_BANK		BIT(16)
++#define VFE_LSC_GRID(g, i)		(0x6c0 + (g) * 0xc + (i) * 4)
++#define VFE_LSC_START(g, i)		(0x6d8 + (g) * 8 + (i) * 4)
++#define VFE_LSC_DMI_BANK		14
++
+ #define VFE_BLS_CFG			0x6b0
+ #define		BLS_CFG_SCALE		15
+ #define VFE_BLS_THRESHOLD_0		0x6b4
+@@ -263,6 +275,7 @@ struct vfe_pix_meta {
+ 	u64 period_ns;		/* between the last two epochs 0 */
+ 	u8 gamma_bank;		/* LUT banks in use: 0 even, 1 odd */
+ 	u8 abf_bank;		/* ABF noise LUT bank in use */
++	u8 lsc_bank;		/* LSC gain banks in use */
+ 	bool awb_bg_pending;	/* AWB block seen before the stream start */
+ 	struct ife17x_params_awb_bg awb_bg;
+ 	bool pdpc_mask_valid;	/* the PDPC mask bank holds pdpc_mask */
+@@ -337,6 +350,7 @@ union ife_params_block {
+ 	const struct ife17x_params_bf *bf;
+ 	const struct ife17x_params_abf *abf;
+ 	const struct ife17x_params_bpc *bpc;
++	const struct ife17x_params_lsc *lsc;
+ 	const u8 *data;
+ };
+ 
+@@ -821,6 +835,89 @@ static void ife_params_bpc(struct vfe_pix_meta *meta, union ife_params_block blo
+ 	vfe_rmw(vfe, VFE_MODULE_LENS_EN, 0, LENS_EN_BPC);
+ }
+ 
++/*
++ * Where an IFE's input starts in the LSC grid, x quads from the grid's left
++ * edge and y from its top: the block, the subgrid inside it and the quad
++ * inside that, and the vertical interpolation phase there.
++ */
++static void ife_lsc_start(const struct ife17x_params_lsc *lsc, u32 x, u32 y, u32 delta_y,
++			  u32 *start0, u32 *start1)
++{
++	u32 sub_w = lsc->block_width >> lsc->subgrid_shift;
++	u32 sub_h = lsc->block_height >> lsc->subgrid_shift;
++	u32 bx = x % lsc->block_width, by = y % lsc->block_height;
++
++	*start0 = (x / lsc->block_width) | (y / lsc->block_height) << 6 |
++		  ((by % sub_h) * delta_y & 0xfffff) << 12;
++	*start1 = (bx % sub_w) | (by % sub_h) << 12 | (bx / sub_w) << 24 |
++		  (by / sub_h) << 28;
++}
++
++/*
++ * Lens shading correction. The gains go to the inactive LUT banks, like the
++ * gamma curves. Both IFEs take the frame's grid: the right one starts at its
++ * first input column, frame_x.
++ */
++static void ife_params_lsc(struct vfe_pix_meta *meta, union ife_params_block block)
++{
++	const struct ife17x_params_lsc *lsc = block.lsc;
++	struct vfe_device *vfe = meta->vfe;
++	u32 nodes, sub_w, sub_h, delta_x, delta_y;
++	u32 grid[3], start[2], x;
++	u8 bank = !meta->lsc_bank;
++	unsigned int i, t;
++
++	/* A disabled block may be its header alone */
++	if (ife_block_disabled(block)) {
++		vfe_rmw(vfe, VFE_MODULE_LENS_EN, LENS_EN_LSC, 0);
++		return;
++	}
++
++	nodes = (lsc->h_blocks + 1) * (lsc->v_blocks + 1);
++	sub_w = lsc->block_width >> lsc->subgrid_shift;
++	sub_h = lsc->block_height >> lsc->subgrid_shift;
++	delta_x = 0x100000 / sub_w;
++	delta_y = 0x100000 / sub_h;
++
++	for (t = 0; t < 2; t++) {
++		/* R and Gr, then B and Gb */
++		const u16 *lo = lsc->gain[t ? 3 : 0], *hi = lsc->gain[t ? 2 : 1];
++
++		writel_relaxed((VFE_LSC_DMI_BANK + 4 * bank + t) | DMI_CFG_AUTO_INC,
++			       vfe->base + VFE_DMI_CFG);
++		writel_relaxed(0, vfe->base + VFE_DMI_ADDR);
++		for (i = 0; i < nodes; i++)
++			writel_relaxed(lo[i] | (u32)hi[i] << 13, vfe->base + VFE_DMI_DATA_LO);
++	}
++	writel_relaxed(0, vfe->base + VFE_DMI_CFG);
++
++	grid[0] = (lsc->block_width - 1) | (lsc->block_height - 1) << 16;
++	grid[1] = (sub_h - 1) | delta_y << 12 | lsc->subgrid_shift << 30;
++	grid[2] = (sub_w - 1) | delta_x << 12;
++	for (t = 0; t < 2; t++)
++		for (i = 0; i < 3; i++)
++			writel_relaxed(grid[i], vfe->base + VFE_LSC_GRID(t, i));
++
++	/* The right group as the Windows driver writes it: the frame's start */
++	ife_lsc_start(lsc, lsc->start_x, lsc->start_y, delta_y, &start[0], &start[1]);
++	for (i = 0; i < 2; i++)
++		writel_relaxed(start[i], vfe->base + VFE_LSC_START(1, i));
++
++	x = lsc->start_x + meta->frame_x / 2;
++	if (lsc->block_width - x % lsc->block_width <= 17 || sub_w - x % sub_w <= 8)
++		dev_warn_once(vfe->camss->dev,
++			      "VFE%d: LSC: input column %u starts too late in a block\n",
++			      vfe->id, meta->frame_x);
++	ife_lsc_start(lsc, x, lsc->start_y, delta_y, &start[0], &start[1]);
++	for (i = 0; i < 2; i++)
++		writel_relaxed(start[i], vfe->base + VFE_LSC_START(0, i));
++
++	writel_relaxed((bank ? LSC_CFG_BANK : 0) | (lsc->h_blocks - 1) << 18 |
++		       (lsc->v_blocks - 1) << 24, vfe->base + VFE_LSC_CFG);
++	meta->lsc_bank = bank;
++	vfe_rmw(vfe, VFE_MODULE_LENS_EN, 0, LENS_EN_LSC);
++}
++
+ static const ife_params_handler ife_params_handlers[] = {
+ 	[IFE17X_PARAMS_BLOCK_BLS] = ife_params_bls,
+ 	[IFE17X_PARAMS_BLOCK_WB] = ife_params_wb,
+@@ -831,6 +928,7 @@ static const ife_params_handler ife_params_handlers[] = {
+ 	[IFE17X_PARAMS_BLOCK_BF] = ife_params_bf,
+ 	[IFE17X_PARAMS_BLOCK_ABF] = ife_params_abf,
+ 	[IFE17X_PARAMS_BLOCK_BPC] = ife_params_bpc,
++	[IFE17X_PARAMS_BLOCK_LSC] = ife_params_lsc,
+ };
+ 
+ static const struct v4l2_isp_params_block_type_info ife_params_block_types[] = {
+@@ -843,6 +941,7 @@ static const struct v4l2_isp_params_block_type_info ife_params_block_types[] = {
+ 	[IFE17X_PARAMS_BLOCK_BF] = { .size = sizeof(struct ife17x_params_bf) },
+ 	[IFE17X_PARAMS_BLOCK_ABF] = { .size = sizeof(struct ife17x_params_abf) },
+ 	[IFE17X_PARAMS_BLOCK_BPC] = { .size = sizeof(struct ife17x_params_bpc) },
++	[IFE17X_PARAMS_BLOCK_LSC] = { .size = sizeof(struct ife17x_params_lsc) },
+ };
+ 
+ static_assert(ARRAY_SIZE(ife_params_handlers) == ARRAY_SIZE(ife_params_block_types));
+@@ -1129,8 +1228,9 @@ void vfe17x_meta_start(struct vfe_device *vfe, u32 width, u32 height)
+ 	}
+ 	/* The default setup filled every gamma bank and selected bank 0 */
+ 	meta->gamma_bank = 0;
+-	/* The VFE was reset: ABF is off and selects bank 12 */
++	/* The VFE was reset: ABF is off and selects bank 12, LSC 14 and 15 */
+ 	meta->abf_bank = 0;
++	meta->lsc_bank = 0;
+ 	/* The VFE was reset: the mask bank must be written again */
+ 	meta->pdpc_mask_valid = false;
+ 	/* Likewise the focus statistics, and no statistics are on */
+@@ -1775,6 +1875,32 @@ static int ife_abf_check(struct device *dev, const struct ife17x_params_abf *abf
+ 	return -EINVAL;
+ }
+ 
++static int ife_lsc_check(struct device *dev, const struct ife17x_params_lsc *lsc)
++{
++	unsigned int nodes = (lsc->h_blocks + 1) * (lsc->v_blocks + 1);
++	unsigned int c, i, f = lsc->subgrid_shift;
++
++	if (!lsc->h_blocks || !lsc->v_blocks || lsc->h_blocks > IFE17X_LSC_MAX_H_BLOCKS ||
++	    lsc->v_blocks > IFE17X_LSC_MAX_V_BLOCKS || nodes > IFE17X_LSC_MAX_NODES || f > 3 ||
++	    lsc->block_width < 18 || lsc->block_width > 2048 ||
++	    lsc->block_height < 9 || lsc->block_height > 1024 ||
++	    lsc->block_width & ((1 << f) - 1) || lsc->block_height & ((1 << f) - 1) ||
++	    lsc->block_width >> f < 9 || lsc->block_height >> f < 9 ||
++	    lsc->start_x >= lsc->block_width * lsc->h_blocks ||
++	    lsc->start_y >= lsc->block_height * lsc->v_blocks ||
++	    lsc->reserved0 || lsc->reserved)
++		goto invalid;
++	for (c = 0; c < 4; c++)
++		for (i = 0; i < nodes; i++)
++			if (lsc->gain[c][i] > 8191)
++				goto invalid;
++	return 0;
++
++invalid:
++	dev_dbg(dev, "invalid lens shading correction parameters\n");
++	return -EINVAL;
++}
++
+ static int ife_params_check(struct device *dev, union ife_params_block block)
+ {
+ 	unsigned int i, j;
+@@ -1843,6 +1969,8 @@ static int ife_params_check(struct device *dev, union ife_params_block block)
+ 		return ife_bf_check(dev, block.bf);
+ 	case IFE17X_PARAMS_BLOCK_ABF:
+ 		return ife_abf_check(dev, block.abf);
++	case IFE17X_PARAMS_BLOCK_LSC:
++		return ife_lsc_check(dev, block.lsc);
+ 	case IFE17X_PARAMS_BLOCK_BPC:
+ 		for (i = 0; i < 4; i++)
+ 			if (block.bpc->wb_ratio[i] > 0x1ffff)
+diff --git a/include/uapi/linux/media/qcom/ife17x-config.h b/include/uapi/linux/media/qcom/ife17x-config.h
+index fea948514..ece1dd884 100644
+--- a/include/uapi/linux/media/qcom/ife17x-config.h
++++ b/include/uapi/linux/media/qcom/ife17x-config.h
+@@ -33,6 +33,7 @@
+  * @IFE17X_PARAMS_BLOCK_BF: focus statistics (BFStats23)
+  * @IFE17X_PARAMS_BLOCK_ABF: adaptive Bayer filter (ABF34)
+  * @IFE17X_PARAMS_BLOCK_BPC: bad pixel and bad cluster correction (BPCBCC50)
++ * @IFE17X_PARAMS_BLOCK_LSC: lens shading correction (LSC34)
+  */
+ enum ife17x_params_block_type {
+ 	IFE17X_PARAMS_BLOCK_BLS,
+@@ -44,6 +45,7 @@ enum ife17x_params_block_type {
+ 	IFE17X_PARAMS_BLOCK_BF,
+ 	IFE17X_PARAMS_BLOCK_ABF,
+ 	IFE17X_PARAMS_BLOCK_BPC,
++	IFE17X_PARAMS_BLOCK_LSC,
+ };
+ 
+ /**
+@@ -399,6 +401,52 @@ struct ife17x_params_bpc {
+ 	__u32 reserved;
+ } __attribute__((aligned(8)));
+ 
++/* At most 16 x 12 blocks: 17 x 13 nodes */
++#define IFE17X_LSC_MAX_H_BLOCKS		16
++#define IFE17X_LSC_MAX_V_BLOCKS		12
++#define IFE17X_LSC_MAX_NODES		221
++
++/**
++ * struct ife17x_params_lsc - lens shading correction
++ * @header: block header, type IFE17X_PARAMS_BLOCK_LSC
++ * @gain: gains of the red, green on red rows, green on blue rows and blue
++ *	  pixels at the grid nodes, row by row from the top left, unsigned Q10
++ *	  from 1024 to 8191; (h_blocks + 1) * (v_blocks + 1) nodes are used
++ * @h_blocks: blocks across the grid, 1 to 16
++ * @v_blocks: blocks down the grid, 1 to 12
++ * @subgrid_shift: each block holds 2^subgrid_shift x 2^subgrid_shift
++ *		   subgrids, 0..3
++ * @reserved0: must be zero
++ * @block_width: block width in Bayer quads (2 x 2 pixels), 18..2048, a
++ *		 multiple of 2^subgrid_shift whose subgrids are 9 quads or
++ *		 wider
++ * @block_height: block height in quads, 9..1024, likewise with subgrids of 9
++ *		  quads or more
++ * @start_x: quads from the grid's left edge to the frame's first column
++ * @start_y: quads from the grid's top edge to the frame's first row
++ * @reserved: must be zero
++ *
++ * The grid covers the frame, in the units of the IFE input. The layout comes
++ * from the Windows driver; the hardware behaviour is not verified. The
++ * driver loads the gains into the inactive LUT banks and switches banks with
++ * the next register update. With two IFEs, both take the frame's grid and the
++ * driver starts the right one at its first column.
++ * V4L2_ISP_PARAMS_FL_BLOCK_DISABLE bypasses the block.
++ */
++struct ife17x_params_lsc {
++	struct v4l2_isp_params_block_header header;
++	__u16 gain[4][IFE17X_LSC_MAX_NODES];
++	__u8 h_blocks;
++	__u8 v_blocks;
++	__u8 subgrid_shift;
++	__u8 reserved0;
++	__u16 block_width;
++	__u16 block_height;
++	__u16 start_x;
++	__u16 start_y;
++	__u32 reserved;
++} __attribute__((aligned(8)));
++
+ #define IFE17X_PARAMS_MAX_SIZE					\
+ 	(sizeof(struct ife17x_params_bls) +			\
+ 	 sizeof(struct ife17x_params_wb) +			\
+@@ -408,7 +456,8 @@ struct ife17x_params_bpc {
+ 	 sizeof(struct ife17x_params_pdpc) +			\
+ 	 sizeof(struct ife17x_params_bf) +			\
+ 	 sizeof(struct ife17x_params_abf) +			\
+-	 sizeof(struct ife17x_params_bpc))
++	 sizeof(struct ife17x_params_bpc) +			\
++	 sizeof(struct ife17x_params_lsc))
+ 
+ /**
+  * struct ife17x_awb_bg_region - AWB Bayer grid record, as the hardware

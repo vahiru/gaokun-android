@@ -3,6 +3,7 @@
 
 #include <functional>
 #include <string>
+#include <array>
 #include <atomic>
 #include <condition_variable>
 #include <deque>
@@ -11,13 +12,18 @@
 #include <mutex>
 #include <set>
 #include <thread>
+#include <vector>
 
 #include <aidl/android/hardware/camera/device/BnCameraDeviceSession.h>
 #include <cutils/native_handle.h>
 #include <fmq/AidlMessageQueue.h>
+#include <optional>
+
 #include <libcamera/libcamera.h>
 
 #include "AutoFocus.h"
+#include "Exif.h"
+#include "Sharpen.h"
 #include "Lens.h"
 #include "Metadata.h"
 
@@ -30,6 +36,12 @@ public:
 	~Session() override;
 
 	bool init();
+
+	/*
+	 * 输出流最大 maxW×maxH 时向硬件 ISP 要的 NV12 画面：传感器的宽高比，
+	 * 盖住所有的流。
+	 */
+	static libcamera::Size hwIspFrameSize(const SensorFacts &f, int64_t maxW, int64_t maxH);
 
 	::ndk::ScopedAStatus close() override;
 	::ndk::ScopedAStatus configureStreams(
@@ -99,25 +111,89 @@ private:
 			aidl::android::hardware::camera::device::BufferCache> &caches);
 	void dropAllCaches();
 
-	/* 把一帧 RGB（源尺寸 srcWidth_×srcHeight_）交付到一个 gralloc 缓冲，
+	/*
+	 * libcamera 输出的一帧：qcom-ife 管线给全范围 BT.601 的 NV12，data 是 Y 平面，uv 是
+	 * 交错的 CbCr 平面。各平面的行宽都是 stride 字节，画面 w×h。
+	 */
+	struct SrcFrame {
+		const uint8_t *data = nullptr;
+		const uint8_t *uv = nullptr;
+		int stride = 0;
+		int w = 0, h = 0;
+		/*
+		 * IFE 变焦（ScalerCrop）时：请求的区域在这幅画面里的位置（x、y、宽、高，画面像素，
+		 * 可以超出画面），由元数据里实际显示的矩形换算；hasWin 为假时按整个视场居中。
+		 * view：这幅画面显示的是整个视场（ScalerCropMaximum）的哪一块（x0、y0、x1、y1，
+		 * 比例），给对焦换算 AF 区域。
+		 */
+		bool hasWin = false;
+		double win[4] = {};
+		float view[4] = { 0.0f, 0.0f, 1.0f, 1.0f };
+	};
+	/*
+	 * 交付路径的暂存区，跨帧保留：几 MB 的缓冲由 mmap() 分配，每帧重新分配的话每 4 KB
+	 * 一次缺页。完成回调线程用 scratch_，JPEG 工作线程用自己的一份。
+	 */
+	struct Scratch {
+		std::vector<uint8_t> scale;    /* toJ420()：缩放后的 NV12 */
+		std::vector<uint8_t> half[2];  /* scaleNv12()：减半后的 NV12 */
+		std::vector<uint16_t> sharpen; /* sharpenLuma() */
+		std::vector<uint8_t> blurSrc;  /* boxBlur() */
+		std::vector<uint16_t> blurCols;
+	};
+	/*
+	 * 一张照片按帧取的参数（完成回调里从这一帧的请求取）：裁剪区域、锐化、EXIF 与缩略图。
+	 * JPEG 在工作线程上编码时随任务带走，编码时不读会被下一帧改掉的成员。
+	 */
+	struct StillParams {
+		int32_t crop[4] = {};
+		SharpenParams sharpen;
+		ExifInfo exif;                     /* 尺寸和缩略图除外，由 exifApp1() 补上 */
+		int32_t thumbW = 0, thumbH = 0;    /* 请求的尺寸，旋转之前；0 = 不要 */
+		int thumbQuality = 85;
+		int32_t thumbMade[2] = { -1, -1 }; /* 做出的尺寸，旋转之后 */
+	};
+
+	/* 把一帧交付到一个 gralloc 缓冲，
 	 * 必要时裁成该路流的宽高比、再缩放到它的尺寸。 */
-	bool deliver(const uint8_t *rgb, buffer_handle_t dst,
-		     int32_t dstW, int32_t dstH, int chromaBlur);
+	/* shared：这一帧另有一路流尺寸相同 */
+	bool deliver(const SrcFrame &src, buffer_handle_t dst,
+		     int32_t dstW, int32_t dstH, int chromaBlur, bool shared);
+	/*
+	 * 把硬件 ISP 的画面转成一种输出尺寸的 NV12，每帧每种尺寸只裁剪、缩放、
+	 * 降噪一次：先 Y（dstW×dstH），紧接着 CbCr 平面。失败返回 nullptr。
+	 */
+	const uint8_t *renderNv12(const SrcFrame &src, int32_t dstW, int32_t dstH, int chromaBlur);
+	/* 裁成 dstW×dstH 的宽高比、缩放后写成全范围的 4:2:0 平面（J420），
+	 * Y 行宽 ys、色度行宽 cs。返回 libyuv 的结果，0 为成功。 */
+	int toJ420(const SrcFrame &src, const int32_t crop[4], int32_t dstW, int32_t dstH,
+		   uint8_t *dy, int ys, uint8_t *du, uint8_t *dv, int cs, Scratch &s) const;
+	/*
+	 * 同上，但写成半平面（CbCr 成对交错在一个平面里，即 NV12），只接受 NV12
+	 * 来源：裁剪，尺寸不同时再缩放，不做格式转换。
+	 */
+	int toNv12(const SrcFrame &src, int32_t dstW, int32_t dstH,
+		   uint8_t *dy, int ys, uint8_t *duv, int cs) const;
+	/* NV12 缩放成另一尺寸的 NV12，倍数大时分级 */
+	int scaleNv12(const uint8_t *sy, int ss, const uint8_t *suv, int suvs, int sw, int sh,
+		      uint8_t *dy, int ds, uint8_t *duv, int duvs, int dw, int dh, Scratch &s) const;
 	/* Centre crop of the source frame with the aspect ratio of dstW x dstH,
 	 * even-aligned. */
 	struct Crop {
 		int x, y, w, h;
 	};
-	Crop cropFor(int32_t dstW, int32_t dstH) const;
+	Crop cropFor(const SrcFrame &src, int32_t dstW, int32_t dstH) const;
+	/* 同上，裁剪区域（SCALER_CROP_REGION，视场坐标）由调用方给 */
+	Crop cropIn(const SrcFrame &src, const int32_t region[4], int32_t dstW, int32_t dstH) const;
 	/*
-	 * JPEG 流：把 RGB 编码成 JPEG 写进 BLOB 缓冲。
-	 * jpegOrientation 是应用给的【顺时针】校正角（ANDROID_JPEG_ORIENTATION）。
-	 * ⚠️ 90/270 时交付的 JPEG 实际宽高与流声明的 (dstW, dstH) 互换 ——
-	 *    BLOB 流只声明缓冲字节数，这是 Android 允许且常见的行为。
+	 * JPEG 流：NV12 裁剪、缩放、旋转成 J420，再以 YCbCr 原始数据交给 libjpeg，写进 BLOB 缓冲。
+	 * jpegOrientation 是应用给的【顺时针】校正角（ANDROID_JPEG_ORIENTATION）；90/270 时交付的
+	 * JPEG 实际宽高与流声明的 (dstW, dstH) 互换。只读配置时定下的成员，可以在 JPEG 工作线程
+	 * 上调用（暂存区用调用方给的 s）。
 	 */
-	bool deliverJpeg(const uint8_t *rgb, buffer_handle_t dst,
+	bool deliverJpeg(const SrcFrame &src, buffer_handle_t dst,
 			 int32_t dstW, int32_t dstH, int32_t blobSize,
-			 int quality, int32_t jpegOrientation);
+			 int quality, int32_t jpegOrientation, StillParams &sp, Scratch &s);
 
 	/*
 	 * ── 闪光灯（#110 / #111）──
@@ -133,7 +209,7 @@ private:
 	static constexpr int kDarkLuma = 50;          /* AUTO 闪光的"太暗"判据之一（0..255 采样均值） */
 	static constexpr double kDarkGain = 4.0;      /* 之二：模拟增益 ≥ 4x 就算暗（libcamera 报的） */
 	/* 预闪：至少 kPrecaptureMin 帧、且亮度连续 2 帧稳定才报收敛；最多等 kPrecaptureMax 帧。
-	 * ★ 2026-09-14 第一版固定 4 帧，用户拍出来白墙全过曝：软件 ISP 的 AGC 要十几帧才收敛。 */
+	 * AGC 要十来帧才能适应灯光，固定 4 帧时白墙照片会过曝。 */
 	static constexpr int kPrecaptureMin = 8;
 	static constexpr int kPrecaptureMax = 15;
 	static constexpr int kLumaStableDelta = 8;
@@ -144,6 +220,7 @@ private:
 	uint8_t flashMode_ = ANDROID_FLASH_MODE_OFF;
 	bool flashArmed_ = false;       /* 预闪触发后 → 到静态拍照完成为止保持点亮 */
 	bool precaptureActive_ = false; /* 预闪进行中（报 AE_STATE_PRECAPTURE） */
+	bool precaptureLocked_ = false; /* 这次预拍触发时 AE 已经锁定：状态保持 LOCKED */
 	int precaptureFrames_ = 0;
 	int lumaStable_ = 0;            /* 连续几帧亮度变化 < kLumaStableDelta */
 	int firedPending_ = 0;          /* 在途的、点着灯的请求数 */
@@ -152,17 +229,54 @@ private:
 	int32_t lastExposureUs_ = 0;
 
 	/*
-	 * ── 降噪（#112）：软件 ISP 里一个降噪算法都没有，高增益下噪点直接进照片 ──
-	 * 静态照片（BLOB）：RGB 域 3×3 ε 滤波（只平均与中心差 ≤ T 的邻居，T 随增益走），多线程分行。
-	 * 预览（YUV）：只对 U/V 平面做盒式模糊 —— 彩色噪点最难看、色度平面又只有 1/4 分辨率，几乎免费。
-	 * 增益 < kDenoiseGain 一律不动：白天的图别被磨掉细节。
+	 * ── 预览、录像的色度降噪（IFE 没有降噪）──
+	 * 只对 U/V 平面做盒式模糊：彩色噪点最难看，色度平面又只有 1/4 分辨率，几乎免费。增益
+	 * < kDenoiseGain 一律不动，白天的图别被磨掉细节。照片的降噪在 deliverJpeg() 里。
 	 */
 	static constexpr double kDenoiseGain = 2.0;
-	static void epsilonFilterRgb(const uint8_t *src, uint8_t *dst, int w, int h, int threshold);
-	static void boxBlurPlane(uint8_t *plane, int w, int h, int stride, int radius);
-	int denoiseThreshold() const;   /* 0 = 不降噪 */
+	/*
+	 * 盒式模糊：h 行，每行 n 字节，行距 stride 字节；各通道交错，相隔 step
+	 * 字节：单独的平面 step 为 1，NV12 的 CbCr 平面为 2（两个通道一起做）。
+	 */
+	static void boxBlur(uint8_t *p, int n, int h, int stride, int step, int radius, Scratch &s);
 	int chromaBlurRadius() const;   /* 0 = 不模糊 */
 	std::function<void()> onClosed_;
+
+	/* 完成回调线程的暂存区（见 Scratch） */
+	mutable std::vector<uint8_t> planeScratch_;   /* 复制前的 J420 或 CbCr */
+	mutable Scratch scratch_;
+	struct RenderedNv12 {
+		uint64_t frame = 0;     /* 所属的 renderFrame_，0 = 无 */
+		int32_t w = 0, h = 0;
+		int blur = 0;
+		bool sharpened = false;
+		std::vector<uint8_t> data;
+	};
+	RenderedNv12 rendered_[2];
+	uint64_t renderFrame_ = 0;
+	/*
+	 * 这一帧的亮度锐化（按请求的 ANDROID_EDGE_MODE 与这一帧的增益，见 Sharpen.h），
+	 * 只在完成回调线程上用。lumaScratch_：锐化前的亮度。
+	 */
+	SharpenParams sharpen_;
+	std::vector<uint8_t> lumaScratch_;
+
+	/*
+	 * libcamera 缓冲的 mmap()，按 dmabuf fd 记，第一次用到时映射，保留到缓冲
+	 * 释放：20 MB 的全尺寸帧每帧映射、解除映射要占单核的百分之几。完成回调
+	 * 线程读帧时持有 frameMapMutex_。
+	 *
+	 * 锁顺序：完成回调先拿 frameMapMutex_ 再拿 mutex_；close() 和
+	 * configureStreams() 持着 mutex_ 调 unmapFrames()，顺序相反。不会死锁的
+	 * 前提是 cam_->stop() 返回之后不再有完成回调：libcamera 在 CameraManager
+	 * 线程上直接调用回调，stop() 也在这个线程上阻塞执行，返回前所有请求都已
+	 * 完成或取消。所以 unmapFrames() 只能在 stop() 之后调用。
+	 */
+	std::map<int, std::pair<void *, size_t>> frameMaps_;
+	std::mutex frameMapMutex_;
+	/* 调用方持有 frameMapMutex_；mmap() 失败返回 nullptr */
+	const uint8_t *mapFrame(int fd, size_t len);
+	void unmapFrames();
 
 	/*
 	 * ── 自动对焦（后摄 only）──
@@ -188,20 +302,89 @@ private:
 	bool streaming_ = false;
 	bool closed_ = false;
 
+	/*
+	 * ── 两路输出时 JPEG 在工作线程上编码 ──
+	 * 照片从 FULL 那一路编码，13 MP 加降噪、锐化约 0.1–0.2 秒。放在完成回调线程上时，
+	 * 这段时间里请求回不到池、后面的完成回调也排着队，管线没有请求可接，每拍一张预览
+	 * 就断 150–190 ms。所以完成回调照常交付预览、录像与结果元数据，请求立刻还池；
+	 * FULL 缓冲留给任务（记在 fullHeld_，returnToPool() 不收），JPEG 缓冲由工作线程
+	 * 编码后另发一次只带这个缓冲的结果，再把 FULL 还回 fullFree_。
+	 * 在途的 JPEG（libcamera 里加任务里）不超过 JPEG 流的 maxBuffers，FULL 缓冲数与它
+	 * 相同，所以带 JPEG 的请求照样总能拿到 FULL；只为预览要 FULL 的请求（不支持 ScalerCrop
+	 * 时的变焦）拿不到就不带，预览退回显示路径。两路输出时每个 JPEG（包括 FULL 不能用、
+	 * 要报错的）都经任务队列交付，JPEG 流的缓冲因此按帧号顺序返回。
+	 * stillInFlight_、fullHeld_ 受 mutex_ 保护，任务队列受 stillMutex_ 保护。
+	 * configureStreams() 与 close() 先等任务做完（waitStillJobs()），再解除映射、释放缓冲。
+	 * 单路输出时 JPEG 的来源是请求自己的缓冲，仍在完成回调里同步编码。
+	 */
+	struct StillJob {
+		SrcFrame src;                               /* FULL 的画面，映射在 frameMaps_ 里 */
+		libcamera::FrameBuffer *fullBuf = nullptr;
+		int fullFd = -1;
+		int32_t frameNumber = 0;
+		int32_t streamId = -1;
+		int64_t bufferId = 0;
+		buffer_handle_t handle = nullptr;           /* 缓存里的，不拥有 */
+		int32_t width = 0, height = 0, blobSize = 0;
+		int quality = 90;
+		int32_t orientation = 0;
+		StillParams params;
+		bool requestError = false;  /* 整帧报错（reportRequestError()）：只按顺序还 JPEG 缓冲 */
+	};
+	void stillWorker();
+	/*
+	 * processCaptureResult 同一时间只能有一次调用（ICameraDeviceCallback.aidl）：完成回调与
+	 * JPEG 工作线程都经这里发。resultMutex_ 是叶子锁，持有时不拿别的锁。
+	 */
+	void sendResults(std::vector<aidl::android::hardware::camera::device::CaptureResult> &results);
+	std::mutex resultMutex_;
+	/* 调用方持 mutex_（lk），等到没有在途的任务 */
+	void waitStillJobs(std::unique_lock<std::mutex> &lk);
+	std::thread stillThread_;
+	std::mutex stillMutex_;
+	std::condition_variable stillCv_;
+	std::deque<StillJob> stillJobs_;
+	bool stillStop_ = false;
+	int stillInFlight_ = 0;
+	std::set<libcamera::FrameBuffer *> fullHeld_;
+
 	std::unique_ptr<libcamera::CameraConfiguration> config_;
 	std::unique_ptr<libcamera::FrameBufferAllocator> allocator_;
+	/* 预览、录像、YUV 流和对焦用的那一路（两路输出时是显示路径） */
 	libcamera::Stream *stream_ = nullptr;
+	/*
+	 * 两路输出时的 FULL 路径（全尺寸，只给 JPEG），否则为空。见 configureStreams。
+	 * 只有带 JPEG 的请求、变焦后预览要从 FULL 出的请求（Pending::previewFromFull）才带它的
+	 * 缓冲（见 fullFree_），IFE 只在这些帧写全尺寸画面。
+	 */
+	libcamera::Stream *fullStream_ = nullptr;
+	int32_t fullWidth_ = 0, fullHeight_ = 0, fullStride_ = 0;
+	/*
+	 * 两路输出时管线支持 ScalerCrop：变焦交给 IFE 的显示路径（只缩小，最多放大到显示路径
+	 * 等于输入里对应的像素数，超出的部分 CPU 再放大）；FULL 保持整个视场，照片的变焦仍由
+	 * HAL 裁。scalerCropMax_ 是 ScalerCropMaximum，变焦区域按它换算到像素阵列坐标。
+	 */
+	bool ifeZoom_ = false;
+	bool zoomMetaWarned_ = false;   /* 拿不到元数据 ScalerCrop 的警告只打一次 */
+	libcamera::Rectangle scalerCropMax_;
+	/* 裁剪区域（SCALER_CROP_REGION，视场坐标）换算成像素阵列坐标的 ScalerCrop */
+	libcamera::Rectangle scalerCropFor(const int32_t crop[4]) const;
 	/* Full-size RAW stream for phase detection (rear camera in full-size mode). */
 	libcamera::Stream *rawStream_ = nullptr;
 	bool rawForPhase_ = false;
+	/*
+	 * 输出画面的视场在像素阵列坐标里的位置（ScalerCropMaximum），仅当管线接受 AfWindows
+	 * 时才有：AF 区域按它换算后交给对焦统计。
+	 */
+	std::optional<libcamera::Rectangle> afFov_;
 	unsigned int rawStride_ = 0;
 	int32_t rawWidth_ = 0, rawHeight_ = 0;
 
 	/*
 	 * 配置好的 Android 流。
 	 * ★ 相机应用【一定】会配多路（预览 + 拍照，实测 Aperture 要 2 路）。
-	 *   libcamera 这边只开一路（一个传感器模式的完整画面），再用 libyuv 裁剪缩放分发到每一路
-	 *   —— 软件 ISP 是 CPU 瓶颈，开多路等于把同一份拜耳去马赛克多次。
+	 *   libcamera 这边只开一路画面（拍照模式加一路 FULL，见 fullStream_），再用 libyuv
+	 *   裁剪缩放分发到每一路。
 	 */
 	struct HalStreamInfo {
 		int32_t id = -1;
@@ -210,14 +393,26 @@ private:
 		int32_t blobSize = 0;       /* Stream::bufferSize */
 	};
 	std::vector<HalStreamInfo> halStreams_;
-	/* libcamera 实际输出的尺寸：一个传感器模式的完整画面（见 configureStreams）。 */
+	/* stream_ 的尺寸：单路时是 hwIspFrameSize() 要的画面，两路时是显示路径（见 configureStreams）。 */
 	int32_t srcWidth_ = 0, srcHeight_ = 0;
+	/* 源帧的行宽（字节）。 */
+	int32_t srcStride_ = 0;
+	/* DMA_BUF_IOCTL_SYNC 失败时只记一次日志。 */
+	bool syncWarned_ = false;
 
 	/* 空闲的 libcamera 请求。 */
 	std::deque<std::unique_ptr<libcamera::Request>> freeRequests_;
 	/* 本次 configureStreams 建的 Request（裸指针，只作身份判断）。重配置后迟到的上一代
 	 * Request 不在这里 ⇒ returnToPool() 直接释放，不会混进新池子。 */
 	std::set<libcamera::Request *> configRequests_;
+	/*
+	 * 每个 Request 固定带的缓冲（显示路径或单路画面，以及 RAW），按配置时的下标配对。
+	 * 每次复用都先清空再按这里重新加：FULL 的缓冲不固定，只在带 JPEG 的请求、变焦后预览
+	 * 要从 FULL 出的请求里从 fullFree_ 取一个加上，完成后经 returnToPool() 还回 fullFree_。
+	 */
+	std::map<libcamera::Request *, std::vector<std::pair<libcamera::Stream *, libcamera::FrameBuffer *>>>
+		reqBuffers_;
+	std::vector<libcamera::FrameBuffer *> fullFree_;
 	/* 池子暂空时 processCaptureRequest 最多等多久（正常不会空，见那里的说明）。 */
 	static constexpr int kPoolWaitMs = 1000;
 	/* 上一个【带设置】的请求的设置，已去掉一次性触发（stripTriggers）。
@@ -255,10 +450,81 @@ private:
 		bool flashFired = false;
 		bool endsFlash = false;
 		uint8_t aeState = ANDROID_CONTROL_AE_STATE_CONVERGED;
+		uint8_t awbState = ANDROID_CONTROL_AWB_STATE_CONVERGED;
 		uint8_t aeMode = ANDROID_CONTROL_AE_MODE_ON;
 		uint8_t flashMode = ANDROID_FLASH_MODE_OFF;
+		int32_t evSteps = 0;    /* 这个请求的曝光补偿（kEvStepsPerStop 档） */
+		bool sentGains = false; /* 这个请求给 libcamera 下发了手动的 ColourGains */
+		bool ccModeFast = false; /* 请求的 TRANSFORM_MATRIX 被忽略（AWB 开着），结果报 FAST */
+		/* 数码变焦：实际用的裁剪区域，有效阵列坐标 */
+		int32_t crop[4] = {};
+		/*
+		 * 两路输出时，变焦裁剪在显示路径上已不够这个请求的非 JPEG 流（要放大）：这个请求
+		 * 也带 FULL，预览等非 JPEG 流从 FULL 出。
+		 */
+		bool previewFromFull = false;
 	};
 	std::map<libcamera::Request *, Pending> pending_;
+	/* 正在交付的帧的裁剪区域（cropFor()）；w 为 0 = 整幅 */
+	int32_t cropRegion_[4] = {};
+	std::string exifMake_, exifModel_;
+	/*
+	 * JPEG（outW×outH，rotated：像素转过）的 APP1 内容；thumb 是缩略图的 B,G,R,A 像素。
+	 * 做出的缩略图尺寸记进 sp.thumbMade。
+	 */
+	static std::vector<uint8_t> exifApp1(StillParams &sp, int32_t outW, int32_t outH,
+					     bool rotated, const std::vector<uint8_t> &thumb,
+					     int32_t tw, int32_t th);
+	/* 旋转 rotation 度的 JPEG 的缩略图尺寸（0x0：不要） */
+	static void thumbnailSize(const StillParams &sp, int32_t rotation, int32_t *tw,
+				  int32_t *th);
+	/* 应用给了 AF 区域；没给时区域跟着变焦走 */
+	bool afAppRegion_ = false;
+	/* 应用最后给的 AF 区域（视场坐标 x0、y0、x1、y1），每个请求都和裁剪区域比一次 */
+	int32_t afAppRect_[4] = {};
+
+	/*
+	 * ── AE/AWB 锁定与曝光补偿（持有 mutex_）──
+	 * AE 锁定：曝光时间与增益切到手动，并显式下发最后报的值
+	 * （lockedExposureUs_、lockedGain_），因为锁定期间曝光补偿照样生效
+	 * （CaptureRequest 文档），要按它缩放。libcamera 的 AWB 进手动模式时从
+	 * 单位增益开始，所以锁定时下发最后报的增益。
+	 */
+	void apply3aControls(Pending &p, libcamera::ControlList &ctrls);
+	bool aeLocked_ = false;
+	int32_t lockEvSteps_ = 0;
+	int32_t lockedExposureUs_ = 0;
+	double lockedGain_ = 0.0;
+	/* 上一个完成的帧所属请求的曝光补偿：它报的曝光是在这个补偿下测的 */
+	int32_t lastEvSteps_ = 0;
+	/*
+	 * AE 转向新目标后报 SEARCHING：aeSearchFrom_ 是这次搜索报 SEARCHING 的第一帧（-1 = 不在
+	 * 搜索），aeSearchLast_ 是最近一次改动所在的帧（搜索中又改时从它重新计帧），判据见
+	 * onRequestCompleted()。
+	 */
+	int32_t aeSearchFrom_ = -1;
+	int32_t aeSearchLast_ = -1;
+	double lastAeProduct_ = 0.0;    /* 上一个完成帧的曝光（us）× 模拟增益 */
+	int aeSteady_ = 0;              /* 连续几帧曝光 × 增益变化不到 kAeSteadyRel */
+	static constexpr double kAeSteadyRel = 0.02;
+	static constexpr int kAeSteadyFrames = 3;
+	static constexpr int kAeSearchMinFrames = 8;
+	static constexpr int kAeSearchMaxFrames = 45;
+	int32_t reqEvSteps_ = 0;        /* 上一个请求的曝光补偿 */
+	bool reqAutoAe_ = true;         /* 上一个请求时 AE 在自动运行（没锁、不是手动曝光） */
+	bool awbLocked_ = false;
+	std::array<float, 2> lockedColourGains_{};
+	std::optional<std::array<float, 2>> lastColourGains_;
+	/*
+	 * 锁定时的色温，与增益一起下发：libipa 的 CCM 在 AWB 非自动时用手动矩阵，
+	 * 只按 ColourTemperature 更新；不给的话矩阵会跳回配置时的 5000 K 或上次
+	 * 预设的。AWB 有增益时不看色温。
+	 */
+	int32_t lockedColourTemp_ = 0;
+	int32_t lastColourTemp_ = 0;
+	/* 这个配置的曝光时间（微秒）与模拟增益范围 */
+	int32_t expMinUs_ = 0, expMaxUs_ = 0;
+	float gainMin_ = 1.0f, gainMax_ = 1.0f;
 
 	/* (streamId, bufferId) → 已导入的句柄。见 getBuffer() 的说明。 */
 	std::map<std::pair<int32_t, int64_t>, buffer_handle_t> bufferCache_;

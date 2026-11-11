@@ -1,0 +1,3258 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: qcom: camss: vfe-17x: Add the display output of the pixel path
+
+The Titan 175 IFE has a second processed image output beside FULL, the
+display path: an MNDS16 of its own (luma 0x1040, chroma 0x106c, laid out
+like the FULL ones), crop and round/clamp (0x1134..0x1158), enabled by
+bits 3 and 4 of 0xfb0, written by write masters 20 (Y) and 21 (CbCr). It
+takes the frame after CST at the CAMIF size, like FULL, in the same NV12
+or NV21 order, so one sensor frame comes out in two sizes, for instance
+a preview beside a full size still.
+
+Give each full VFE with a pixel pipeline a display output: a subdev
+msm_vfeN_pix_disp and a video node msm_vfeN_video_disp, with the formats
+of the pixel line's video node. Links:
+
+  msm_vfeN_pix:1 -> msm_vfeN_pix_disp:0     (created off)
+  msm_vfeN_pix_disp:1 -> msm_vfeN_video_disp (immutable)
+
+The sink pad takes the frame the display path scales (the CAMIF frame;
+with dual IFE the whole frame of both stripes). The sink compose
+rectangle is the scaler output: even, no larger than the sink and at
+most 16 times smaller per axis; the source crop is the part of it
+written, the size of the source pad and the buffers. The FULL node
+starts the pixel path; the display node starts only its subdev, and
+needs a running pixel path, the link on and the formats matching.
+
+With the display link on, the display output is required: a frame is
+written only when the FULL and the display output can both take a
+buffer for it, and both are armed for it together, so the two images of
+a request come from one frame. Frames are numbered from the first one
+written, for all buffers and the frame start events.
+
+A request may leave out the FULL or the RDI buffer. The parameters
+buffer comes one per written frame, taken in order, so let it name the
+frame's outputs: the block IFE17X_PARAMS_BLOCK_OUTPUTS lists FULL,
+DISPLAY and RDI, at least one image output. The next frame is decided
+once, from the parameters buffer at the head of the queue; it is written
+once every named output can take a buffer, and exactly those get one.
+Without the block the FULL output decides as before. Whether an output
+has a buffer for the next frame is tracked (armed_next, armed_ahead)
+instead of guessed from the buffers out.
+
+With dual IFE the master's display output stands for the whole frame.
+The MNDS stripe registers do not behave as documented, so both display
+scalers start at phase 0 at their first column and step by the frame's
+ratio; the slave's stripe starts at the even column nearest its input
+offset over the step, and the seam is the column nearest the split
+whose offset in the buffer is a multiple of 16 bytes (or 8, 4, 2).
+Userspace chooses the split to keep the residual small (about 0.1
+display pixel at the common sizes). A display buffer completes once
+both display composite groups have, paired by time.
+
+The block IFE17X_PARAMS_BLOCK_DISPLAY_WINDOW sets the scaler output and
+the crop position per frame, for digital zoom on the display output; the
+output size stays fixed. The window is programmed when its frame is
+settled and latches with the frame's register update; with dual IFE the
+stripes are recomputed for it, and a window within one stripe's reach is
+written by that IFE alone. The write masters' widths latch at the frame
+boundary.
+
+A corrupt frame of the pixel line, from a VFE error interrupt or a CSID
+receiver error, fails the display buffer of that frame too.
+
+A write master disabled with an address queued keeps it for the next
+start, so a display stop gives it no more buffers, waits until the
+frames it has addresses for are written, then turns the path off. The
+pixel path stop does the same first; a display start is refused while
+the pixel path stops. The camss stop walk changes to fit: the subdev
+that feeds the node stops with it; a subdev that directly feeds another
+streaming video node counts as shared.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/media/platform/qcom/camss/Makefile    |    1 +
+ .../platform/qcom/camss/camss-vfe-17x-disp.c  |  508 ++++++
+ .../platform/qcom/camss/camss-vfe-17x-disp.h  |  124 ++
+ .../platform/qcom/camss/camss-vfe-17x-meta.c  |  184 +-
+ .../platform/qcom/camss/camss-vfe-17x-meta.h  |    6 +-
+ .../media/platform/qcom/camss/camss-vfe-17x.c | 1522 +++++++++++++++--
+ drivers/media/platform/qcom/camss/camss-vfe.c |   16 +-
+ drivers/media/platform/qcom/camss/camss-vfe.h |   22 +-
+ .../media/platform/qcom/camss/camss-video.c   |   38 +-
+ include/uapi/linux/media/qcom/ife17x-config.h |   64 +-
+ 10 files changed, 2334 insertions(+), 151 deletions(-)
+ create mode 100644 drivers/media/platform/qcom/camss/camss-vfe-17x-disp.c
+ create mode 100644 drivers/media/platform/qcom/camss/camss-vfe-17x-disp.h
+
+diff --git a/drivers/media/platform/qcom/camss/Makefile b/drivers/media/platform/qcom/camss/Makefile
+index f2f68be44..3f7347ccc 100644
+--- a/drivers/media/platform/qcom/camss/Makefile
++++ b/drivers/media/platform/qcom/camss/Makefile
+@@ -23,6 +23,7 @@ qcom-camss-objs += \
+ 		camss-vfe-4-8.o \
+ 		camss-vfe-17x.o \
+ 		camss-vfe-17x-meta.o \
++		camss-vfe-17x-disp.o \
+ 		camss-vfe-340.o \
+ 		camss-vfe-480.o \
+ 		camss-vfe-680.o \
+diff --git a/drivers/media/platform/qcom/camss/camss-vfe-17x-disp.c b/drivers/media/platform/qcom/camss/camss-vfe-17x-disp.c
+new file mode 100644
+index 000000000..8f9574651
+--- /dev/null
++++ b/drivers/media/platform/qcom/camss/camss-vfe-17x-disp.c
+@@ -0,0 +1,508 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * camss-vfe-17x-disp.c
++ *
++ * Qualcomm MSM Camera Subsystem - VFE (Titan 17x) display output of the pixel
++ * pipeline: its subdev and video node. The hardware side and the buffers are
++ * in camss-vfe-17x.c.
++ *
++ * Media graph, per full VFE N:
++ *
++ *   msm_vfeN_pix:1 -> msm_vfeN_video3         (immutable, FULL output)
++ *   msm_vfeN_pix:1 -> msm_vfeN_pix_disp:0     (off until enabled)
++ *   msm_vfeN_pix_disp:1 -> msm_vfeN_video_disp (immutable)
++ *
++ * As on the pixel line, the sink compose rectangle is the scaler output and the
++ * source crop rectangle the part of it written: the crop matches the field of
++ * view of the FULL output, which crops after its own scaler.
++ *
++ * The FULL node starts the pixel path; the display node then starts only its
++ * output (video_start_streaming() stops at the streaming pixel line). With the
++ * link on at that start, every frame written needs a FULL and a display buffer
++ * both, so no frame is written until the display node streams too, and the
++ * two buffers of a request take the same frame; the parameters of a frame may
++ * name its outputs instead (struct ife17x_params_outputs). Stopping the FULL
++ * node stops the pixel path and with it the display output.
++ */
++
++#include <linux/device.h>
++#include <linux/slab.h>
++#include <media/media-entity.h>
++#include <media/v4l2-device.h>
++#include <media/v4l2-subdev.h>
++
++#include "camss.h"
++#include "camss-vfe.h"
++#include "camss-vfe-17x-disp.h"
++
++#define VFE_DISP_MAX_SIZE		8190
++
++static struct v4l2_mbus_framefmt *
++vfe_disp_format(struct vfe_pix_disp *disp, struct v4l2_subdev_state *state,
++		unsigned int pad, enum v4l2_subdev_format_whence which)
++{
++	if (which == V4L2_SUBDEV_FORMAT_TRY)
++		return v4l2_subdev_state_get_format(state, pad);
++
++	return &disp->fmt[pad];
++}
++
++static struct v4l2_rect *
++vfe_disp_compose(struct vfe_pix_disp *disp, struct v4l2_subdev_state *state,
++		 enum v4l2_subdev_format_whence which)
++{
++	if (which == V4L2_SUBDEV_FORMAT_TRY)
++		return v4l2_subdev_state_get_compose(state, MSM_VFE_PAD_SINK);
++
++	return &disp->compose;
++}
++
++static struct v4l2_rect *
++vfe_disp_crop(struct vfe_pix_disp *disp, struct v4l2_subdev_state *state,
++	      enum v4l2_subdev_format_whence which)
++{
++	if (which == V4L2_SUBDEV_FORMAT_TRY)
++		return v4l2_subdev_state_get_crop(state, MSM_VFE_PAD_SRC);
++
++	return &disp->crop;
++}
++
++static bool vfe_disp_code_valid(struct vfe_pix_disp *disp, u32 code)
++{
++	const struct camss_formats *out = disp->vfe->res->formats_pix_out;
++	unsigned int i;
++
++	for (i = 0; i < out->nformats; i++)
++		if (out->formats[i].code == code)
++			return true;
++
++	return false;
++}
++
++/*
++ * Sink: the pixel path frame after CST, at the CAMIF size, in the YUV order of
++ * the pixel path source pad (link validation checks both).
++ */
++static void vfe_disp_try_sink(struct vfe_pix_disp *disp, struct v4l2_mbus_framefmt *fmt)
++{
++	if (!vfe_disp_code_valid(disp, fmt->code))
++		fmt->code = disp->vfe->res->formats_pix_out->formats[0].code;
++
++	fmt->width = clamp_t(u32, fmt->width, VFE_DISP_MIN_WIDTH, VFE_DISP_MAX_SIZE) & ~1;
++	fmt->height = clamp_t(u32, fmt->height, VFE_DISP_MIN_HEIGHT, VFE_DISP_MAX_SIZE) & ~1;
++	fmt->field = V4L2_FIELD_NONE;
++	fmt->colorspace = V4L2_COLORSPACE_SRGB;
++	fmt->ycbcr_enc = V4L2_YCBCR_ENC_DEFAULT;
++	fmt->quantization = V4L2_QUANTIZATION_DEFAULT;
++	fmt->xfer_func = V4L2_XFER_FUNC_DEFAULT;
++}
++
++/*
++ * Compose on the sink: the scaled size. Even in both axes (NV12 chroma), no
++ * larger than the sink and at most VFE_DISP_RATIO_MAX times smaller. The
++ * aspect ratio is free.
++ */
++static void vfe_disp_try_compose(const struct v4l2_mbus_framefmt *sink, struct v4l2_rect *r)
++{
++	u32 min_w = ALIGN(max_t(u32, DIV_ROUND_UP(sink->width, VFE_DISP_RATIO_MAX),
++				VFE_DISP_MIN_WIDTH), 2);
++	u32 min_h = ALIGN(max_t(u32, DIV_ROUND_UP(sink->height, VFE_DISP_RATIO_MAX),
++				VFE_DISP_MIN_HEIGHT), 2);
++
++	r->left = 0;
++	r->top = 0;
++	r->width = clamp_t(u32, r->width & ~1, min_w, sink->width);
++	r->height = clamp_t(u32, r->height & ~1, min_h, sink->height);
++}
++
++/*
++ * Crop on the source: the part of the scaled frame the write masters take,
++ * inside the compose rectangle. Even position and size (NV12 chroma), at
++ * least VFE_DISP_MIN_WIDTH x VFE_DISP_MIN_HEIGHT.
++ */
++static void vfe_disp_try_crop(const struct v4l2_rect *compose, struct v4l2_rect *r)
++{
++	r->width = clamp_t(u32, r->width & ~1, VFE_DISP_MIN_WIDTH, compose->width);
++	r->height = clamp_t(u32, r->height & ~1, VFE_DISP_MIN_HEIGHT, compose->height);
++	r->left = clamp_t(s32, r->left & ~1, 0, compose->width - r->width);
++	r->top = clamp_t(s32, r->top & ~1, 0, compose->height - r->height);
++}
++
++/*
++ * Whether the scaler output @compose and the crop @crop of it are a window the
++ * display output can take, with the sink @sink: the compose rectangle within
++ * the limits of vfe_disp_try_compose(), the crop inside it, all even.
++ */
++bool vfe17x_disp_window_valid(const struct v4l2_mbus_framefmt *sink,
++			      const struct v4l2_rect *compose, const struct v4l2_rect *crop)
++{
++	struct v4l2_rect r = *compose;
++
++	vfe_disp_try_compose(sink, &r);
++	if (r.width != compose->width || r.height != compose->height)
++		return false;
++
++	return crop->left >= 0 && crop->top >= 0 && !(crop->left & 1) && !(crop->top & 1) &&
++	       !(crop->width & 1) && !(crop->height & 1) &&
++	       crop->left + crop->width <= compose->width &&
++	       crop->top + crop->height <= compose->height;
++}
++
++/* Source: the sink format at the crop size */
++static void vfe_disp_update_source(struct vfe_pix_disp *disp, struct v4l2_subdev_state *state,
++				   enum v4l2_subdev_format_whence which)
++{
++	struct v4l2_mbus_framefmt *sink = vfe_disp_format(disp, state, MSM_VFE_PAD_SINK, which);
++	struct v4l2_mbus_framefmt *src = vfe_disp_format(disp, state, MSM_VFE_PAD_SRC, which);
++	struct v4l2_rect *crop = vfe_disp_crop(disp, state, which);
++
++	*src = *sink;
++	src->width = crop->width;
++	src->height = crop->height;
++}
++
++/* A new compose rectangle: the crop takes all of it again */
++static void vfe_disp_reset_crop(struct vfe_pix_disp *disp, struct v4l2_subdev_state *state,
++				enum v4l2_subdev_format_whence which)
++{
++	*vfe_disp_crop(disp, state, which) = *vfe_disp_compose(disp, state, which);
++	vfe_disp_update_source(disp, state, which);
++}
++
++static int vfe_disp_enum_mbus_code(struct v4l2_subdev *sd, struct v4l2_subdev_state *state,
++				   struct v4l2_subdev_mbus_code_enum *code)
++{
++	struct vfe_pix_disp *disp = v4l2_get_subdevdata(sd);
++	const struct camss_formats *out = disp->vfe->res->formats_pix_out;
++
++	if (code->pad == MSM_VFE_PAD_SINK) {
++		if (code->index >= out->nformats)
++			return -EINVAL;
++		code->code = out->formats[code->index].code;
++		return 0;
++	}
++
++	/* The source keeps the sink code: the CST orders the chroma for both paths */
++	if (code->index)
++		return -EINVAL;
++	code->code = vfe_disp_format(disp, state, MSM_VFE_PAD_SINK, code->which)->code;
++
++	return 0;
++}
++
++static int vfe_disp_enum_frame_size(struct v4l2_subdev *sd, struct v4l2_subdev_state *state,
++				    struct v4l2_subdev_frame_size_enum *fse)
++{
++	struct vfe_pix_disp *disp = v4l2_get_subdevdata(sd);
++	struct v4l2_mbus_framefmt *sink;
++
++	if (fse->index)
++		return -EINVAL;
++
++	if (fse->pad == MSM_VFE_PAD_SINK) {
++		if (!vfe_disp_code_valid(disp, fse->code))
++			return -EINVAL;
++		fse->min_width = VFE_DISP_MIN_WIDTH;
++		fse->min_height = VFE_DISP_MIN_HEIGHT;
++		fse->max_width = VFE_DISP_MAX_SIZE;
++		fse->max_height = VFE_DISP_MAX_SIZE;
++		return 0;
++	}
++
++	/* From the smallest crop up to the sink, neither scaled nor cropped */
++	sink = vfe_disp_format(disp, state, MSM_VFE_PAD_SINK, fse->which);
++	if (fse->code != sink->code)
++		return -EINVAL;
++	fse->min_width = VFE_DISP_MIN_WIDTH;
++	fse->min_height = VFE_DISP_MIN_HEIGHT;
++	fse->max_width = sink->width;
++	fse->max_height = sink->height;
++
++	return 0;
++}
++
++static int vfe_disp_get_fmt(struct v4l2_subdev *sd, struct v4l2_subdev_state *state,
++			    struct v4l2_subdev_format *fmt)
++{
++	struct vfe_pix_disp *disp = v4l2_get_subdevdata(sd);
++
++	fmt->format = *vfe_disp_format(disp, state, fmt->pad, fmt->which);
++
++	return 0;
++}
++
++static int vfe_disp_set_fmt(struct v4l2_subdev *sd, struct v4l2_subdev_state *state,
++			    struct v4l2_subdev_format *fmt)
++{
++	struct vfe_pix_disp *disp = v4l2_get_subdevdata(sd);
++	struct v4l2_rect *compose;
++
++	if (fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE && sd->s_stream_enabled)
++		return -EBUSY;
++
++	/* The source follows the sink and the crop rectangle */
++	if (fmt->pad == MSM_VFE_PAD_SRC) {
++		fmt->format = *vfe_disp_format(disp, state, MSM_VFE_PAD_SRC, fmt->which);
++		return 0;
++	}
++
++	vfe_disp_try_sink(disp, &fmt->format);
++	*vfe_disp_format(disp, state, MSM_VFE_PAD_SINK, fmt->which) = fmt->format;
++
++	/* No scaling and no crop until rectangles are set */
++	compose = vfe_disp_compose(disp, state, fmt->which);
++	compose->width = fmt->format.width;
++	compose->height = fmt->format.height;
++	vfe_disp_try_compose(&fmt->format, compose);
++	vfe_disp_reset_crop(disp, state, fmt->which);
++
++	return 0;
++}
++
++static int vfe_disp_get_selection(struct v4l2_subdev *sd, struct v4l2_subdev_state *state,
++				  struct v4l2_subdev_selection *sel)
++{
++	struct vfe_pix_disp *disp = v4l2_get_subdevdata(sd);
++	struct v4l2_mbus_framefmt *sink;
++
++	if (sel->pad == MSM_VFE_PAD_SRC) {
++		switch (sel->target) {
++		case V4L2_SEL_TGT_CROP:
++			sel->r = *vfe_disp_crop(disp, state, sel->which);
++			return 0;
++		case V4L2_SEL_TGT_CROP_BOUNDS:
++		case V4L2_SEL_TGT_CROP_DEFAULT:
++			sel->r = *vfe_disp_compose(disp, state, sel->which);
++			return 0;
++		default:
++			return -EINVAL;
++		}
++	}
++
++	switch (sel->target) {
++	case V4L2_SEL_TGT_COMPOSE:
++		sel->r = *vfe_disp_compose(disp, state, sel->which);
++		return 0;
++	case V4L2_SEL_TGT_COMPOSE_BOUNDS:
++	case V4L2_SEL_TGT_COMPOSE_DEFAULT:
++		sink = vfe_disp_format(disp, state, MSM_VFE_PAD_SINK, sel->which);
++		sel->r.left = 0;
++		sel->r.top = 0;
++		sel->r.width = sink->width;
++		sel->r.height = sink->height;
++		return 0;
++	default:
++		return -EINVAL;
++	}
++}
++
++static int vfe_disp_set_selection(struct v4l2_subdev *sd, struct v4l2_subdev_state *state,
++				  struct v4l2_subdev_selection *sel)
++{
++	struct vfe_pix_disp *disp = v4l2_get_subdevdata(sd);
++
++	if (sel->which == V4L2_SUBDEV_FORMAT_ACTIVE && sd->s_stream_enabled)
++		return -EBUSY;
++
++	if (sel->pad == MSM_VFE_PAD_SINK && sel->target == V4L2_SEL_TGT_COMPOSE) {
++		vfe_disp_try_compose(vfe_disp_format(disp, state, MSM_VFE_PAD_SINK, sel->which),
++				     &sel->r);
++		*vfe_disp_compose(disp, state, sel->which) = sel->r;
++		vfe_disp_reset_crop(disp, state, sel->which);
++		return 0;
++	}
++
++	if (sel->pad == MSM_VFE_PAD_SRC && sel->target == V4L2_SEL_TGT_CROP) {
++		vfe_disp_try_crop(vfe_disp_compose(disp, state, sel->which), &sel->r);
++		*vfe_disp_crop(disp, state, sel->which) = sel->r;
++		vfe_disp_update_source(disp, state, sel->which);
++		return 0;
++	}
++
++	return -EINVAL;
++}
++
++/*
++ * The display path takes the frame after CST, before the FULL scaler and crop:
++ * its sink has the size of the pixel line sink (the CAMIF frame) and the code
++ * of the pixel line source. With dual IFE it stands for the whole frame,
++ * wider than the master's stripe; the pixel paths pair only at their start,
++ * so the exact width is checked then (vfe17x_disp_start()).
++ */
++static int vfe_disp_link_validate(struct v4l2_subdev *sd, struct media_link *link,
++				  struct v4l2_subdev_format *source_fmt,
++				  struct v4l2_subdev_format *sink_fmt)
++{
++	struct vfe_pix_disp *disp = v4l2_get_subdevdata(sd);
++	struct vfe_line *pix = &disp->vfe->line[VFE_LINE_PIX];
++	const struct v4l2_mbus_framefmt *in = &pix->fmt[MSM_VFE_PAD_SINK];
++
++	if (link->source->entity != &pix->subdev.entity)
++		return -EPIPE;
++
++	if (sink_fmt->format.code != source_fmt->format.code ||
++	    sink_fmt->format.width < in->width || sink_fmt->format.height != in->height) {
++		dev_dbg(disp->vfe->camss->dev,
++			"%s: sink %ux%u 0x%04x, the pixel path gives %ux%u 0x%04x\n",
++			sd->name, sink_fmt->format.width, sink_fmt->format.height,
++			sink_fmt->format.code, in->width, in->height, source_fmt->format.code);
++		return -EPIPE;
++	}
++
++	return 0;
++}
++
++static int vfe_disp_s_stream(struct v4l2_subdev *sd, int enable)
++{
++	struct vfe_pix_disp *disp = v4l2_get_subdevdata(sd);
++
++	if (enable) {
++		struct media_pad *remote;
++
++		/* Its node can start without the link, when that is off */
++		remote = media_pad_remote_pad_first(&disp->pads[MSM_VFE_PAD_SINK]);
++		if (!remote || remote->entity != &disp->vfe->line[VFE_LINE_PIX].subdev.entity)
++			return -ENOLINK;
++
++		return vfe17x_disp_start(disp);
++	}
++
++	vfe17x_disp_stop(disp);
++
++	return 0;
++}
++
++static int vfe_disp_init_formats(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
++{
++	struct v4l2_subdev_format format = {
++		.pad = MSM_VFE_PAD_SINK,
++		.which = fh ? V4L2_SUBDEV_FORMAT_TRY : V4L2_SUBDEV_FORMAT_ACTIVE,
++		.format = {
++			.code = MEDIA_BUS_FMT_YUYV8_1_5X8,
++			.width = 1920,
++			.height = 1080,
++		},
++	};
++
++	return vfe_disp_set_fmt(sd, fh ? fh->state : NULL, &format);
++}
++
++static const struct v4l2_subdev_video_ops vfe_disp_video_ops = {
++	.s_stream = vfe_disp_s_stream,
++};
++
++static const struct v4l2_subdev_pad_ops vfe_disp_pad_ops = {
++	.enum_mbus_code = vfe_disp_enum_mbus_code,
++	.enum_frame_size = vfe_disp_enum_frame_size,
++	.get_fmt = vfe_disp_get_fmt,
++	.set_fmt = vfe_disp_set_fmt,
++	.get_selection = vfe_disp_get_selection,
++	.set_selection = vfe_disp_set_selection,
++	.link_validate = vfe_disp_link_validate,
++};
++
++static const struct v4l2_subdev_ops vfe_disp_ops = {
++	.video = &vfe_disp_video_ops,
++	.pad = &vfe_disp_pad_ops,
++};
++
++static const struct v4l2_subdev_internal_ops vfe_disp_internal_ops = {
++	.open = vfe_disp_init_formats,
++};
++
++static const struct media_entity_operations vfe_disp_media_ops = {
++	.link_validate = v4l2_subdev_link_validate,
++};
++
++int vfe17x_disp_register(struct vfe_device *vfe, struct v4l2_device *v4l2_dev)
++{
++	struct device *dev = vfe->camss->dev;
++	struct vfe_line *pix = &vfe->line[VFE_LINE_PIX];
++	struct vfe_pix_disp *disp;
++	struct camss_video *video;
++	struct v4l2_subdev *sd;
++	char name[32];
++	int ret;
++
++	/* Embeds a video node: lives as long as those of the lines */
++	disp = devm_kzalloc(dev, sizeof(*disp), GFP_KERNEL);
++	if (!disp)
++		return -ENOMEM;
++	disp->vfe = vfe;
++	disp->output.state = VFE_OUTPUT_OFF;
++	INIT_LIST_HEAD(&disp->output.pending_bufs);
++	init_waitqueue_head(&disp->drain_wq);
++
++	sd = &disp->subdev;
++	v4l2_subdev_init(sd, &vfe_disp_ops);
++	sd->internal_ops = &vfe_disp_internal_ops;
++	sd->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
++	snprintf(sd->name, sizeof(sd->name), "msm_vfe%d_pix_disp", vfe->id);
++	v4l2_set_subdevdata(sd, disp);
++
++	ret = vfe_disp_init_formats(sd, NULL);
++	if (ret < 0)
++		goto err_free;
++
++	disp->pads[MSM_VFE_PAD_SINK].flags = MEDIA_PAD_FL_SINK;
++	disp->pads[MSM_VFE_PAD_SRC].flags = MEDIA_PAD_FL_SOURCE;
++	sd->entity.function = MEDIA_ENT_F_PROC_VIDEO_SCALER;
++	sd->entity.ops = &vfe_disp_media_ops;
++	ret = media_entity_pads_init(&sd->entity, MSM_VFE_PADS_NUM, disp->pads);
++	if (ret < 0)
++		goto err_free;
++
++	ret = v4l2_device_register_subdev(v4l2_dev, sd);
++	if (ret < 0)
++		goto err_entity;
++
++	video = &disp->video;
++	video->camss = vfe->camss;
++	video->type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
++	video->ops = &vfe17x_disp_video_ops;
++	video->bpl_alignment = pix->video_out.bpl_alignment;
++	video->line_based = 1;
++	video->nformats = vfe->res->formats_pix_out->nformats;
++	video->formats = vfe->res->formats_pix_out->formats;
++	snprintf(name, sizeof(name), "msm_vfe%d_video_disp", vfe->id);
++	ret = msm_video_register(video, v4l2_dev, name);
++	if (ret < 0)
++		goto err_subdev;
++
++	ret = media_create_pad_link(&sd->entity, MSM_VFE_PAD_SRC, &video->vdev.entity, 0,
++				    MEDIA_LNK_FL_IMMUTABLE | MEDIA_LNK_FL_ENABLED);
++	if (ret < 0)
++		goto err_video;
++
++	ret = media_create_pad_link(&pix->subdev.entity, MSM_VFE_PAD_SRC,
++				    &sd->entity, MSM_VFE_PAD_SINK, 0);
++	if (ret < 0)
++		goto err_video;
++
++	vfe->pix_disp = disp;
++
++	return 0;
++
++err_video:
++	msm_video_unregister(video);
++err_subdev:
++	v4l2_device_unregister_subdev(sd);
++err_entity:
++	media_entity_cleanup(&sd->entity);
++err_free:
++	devm_kfree(dev, disp);
++	return ret;
++}
++
++void vfe17x_disp_unregister(struct vfe_device *vfe)
++{
++	struct vfe_pix_disp *disp = vfe->pix_disp;
++
++	if (!disp)
++		return;
++
++	vfe->pix_disp = NULL;
++	msm_video_unregister(&disp->video);
++	v4l2_device_unregister_subdev(&disp->subdev);
++	media_entity_cleanup(&disp->subdev.entity);
++}
+diff --git a/drivers/media/platform/qcom/camss/camss-vfe-17x-disp.h b/drivers/media/platform/qcom/camss/camss-vfe-17x-disp.h
+new file mode 100644
+index 000000000..89982c439
+--- /dev/null
++++ b/drivers/media/platform/qcom/camss/camss-vfe-17x-disp.h
+@@ -0,0 +1,124 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * camss-vfe-17x-disp.h
++ *
++ * Qualcomm MSM Camera Subsystem - VFE (Titan 17x) display output of the pixel
++ * pipeline: a second, scaled output beside FULL.
++ */
++#ifndef QC_MSM_CAMSS_VFE_17X_DISP_H
++#define QC_MSM_CAMSS_VFE_17X_DISP_H
++
++#include <linux/wait.h>
++#include <media/media-entity.h>
++#include <media/v4l2-subdev.h>
++
++#include "camss-vfe.h"
++#include "camss-video.h"
++
++/*
++ * The display output path of a full VFE: it takes the pixel path's frame after
++ * the colour space transform, at the CAMIF size, and scales it with its own
++ * MNDS, crop and round/clamp into write masters 20 (Y) and 21 (CbCr), in the
++ * NV12 or NV21 order of the pixel path. It writes only while the pixel path
++ * runs; the pixel path's own (FULL) output decides which frames are written.
++ *
++ * Sink pad: the pixel path frame (CAMIF size, YUV code of the pixel path
++ * source pad). Compose on the sink pad: the scaler output size. Crop on the
++ * source pad: the part of the scaled frame written, which lets it match the
++ * field of view of the FULL output after the FULL crop. Source pad: the crop
++ * size.
++ *
++ * With dual IFE, the master's display output stands for the whole frame: its
++ * sink is the frame (the master's output width plus the slave's), compose and
++ * crop are the frame's, and the driver splits them between the two display
++ * paths (struct vfe_disp_stripe). The slave's own display output stays off.
++ */
++
++/* Downscale limit per axis; the MNDS16 was measured up to about 13 */
++#define VFE_DISP_RATIO_MAX		16
++/* The smallest output, as for the FULL path */
++#define VFE_DISP_MIN_WIDTH		16
++#define VFE_DISP_MIN_HEIGHT		4
++
++/* The VFEs that write a display frame with dual IFE */
++#define VFE_DISP_MASTER			BIT(0)
++#define VFE_DISP_SLAVE			BIT(1)
++
++/*
++ * The part one VFE's display path takes of the display output: its scaler
++ * input and output columns, the crop of its scaler output, and the byte
++ * offset of its columns in the buffer.
++ */
++struct vfe_disp_stripe {
++	u32 in_w;
++	u32 out_w;
++	struct v4l2_rect crop;
++	u32 offset;
++};
++
++struct vfe_pix_disp {
++	struct vfe_device *vfe;
++	struct v4l2_subdev subdev;
++	struct media_pad pads[MSM_VFE_PADS_NUM];
++	struct v4l2_mbus_framefmt fmt[MSM_VFE_PADS_NUM];
++	struct v4l2_rect compose;
++	struct v4l2_rect crop;
++	struct camss_video video;
++	/* Buffers and state, protected by the VFE's output_lock */
++	struct vfe_output output;
++	/*
++	 * Its link was on when the pixel path started, which was not a dual
++	 * IFE pair: without a list of outputs from the parameters, every
++	 * frame the pixel path writes needs a display buffer too, and no
++	 * frame is written while the display output is off; a list may name
++	 * it. Links do not change while the pixel path streams.
++	 */
++	bool required;
++	/* Started, the setup not latched yet: no buffer for the next frame */
++	bool starting;
++	/*
++	 * The window of the frame last settled, as compose and crop
++	 * rectangles of the whole frame: the subdev's from the start on, and
++	 * then those the parameters set (struct ife17x_params_display_window).
++	 * @stripe: the master's part of it, and with dual IFE the slave's;
++	 * @writers: the VFEs that write it (VFE_DISP_MASTER, VFE_DISP_SLAVE),
++	 * one only when the seam falls outside the crop. @slave: the slave
++	 * VFE, until its pixel path stops. @pair: buffers the master wrote,
++	 * waiting for the slave's stripe (only its slave_ts, slave_error,
++	 * nheld and held are used). @buf_writers: the writers of the buffers
++	 * out, as output.buf.
++	 */
++	struct v4l2_rect win_compose;
++	struct v4l2_rect win_crop;
++	struct vfe_disp_stripe stripe[2];
++	u8 writers;
++	bool dual;
++	/*
++	 * Dual IFE, set at the start: the stripes' input columns (master,
++	 * slave), the frame column where the master's output ends, and the
++	 * column of the slave's stripe where its output begins.
++	 */
++	struct {
++		u32 wm;
++		u32 ws;
++		u32 split;
++		u32 pad;
++	} geo;
++	struct vfe_device *slave;
++	struct vfe_pix_dual pair;
++	u8 buf_writers[2];
++	/* A stop waits for the frames given buffers to be written */
++	wait_queue_head_t drain_wq;
++};
++
++bool vfe17x_disp_window_valid(const struct v4l2_mbus_framefmt *sink,
++			      const struct v4l2_rect *compose, const struct v4l2_rect *crop);
++int vfe17x_disp_register(struct vfe_device *vfe, struct v4l2_device *v4l2_dev);
++void vfe17x_disp_unregister(struct vfe_device *vfe);
++
++/* camss-vfe-17x.c */
++extern const struct camss_video_ops vfe17x_disp_video_ops;
++int vfe17x_disp_start(struct vfe_pix_disp *disp);
++void vfe17x_disp_stop(struct vfe_pix_disp *disp);
++
++#endif /* QC_MSM_CAMSS_VFE_17X_DISP_H */
+diff --git a/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.c b/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.c
+index ec58d4135..52f475532 100644
+--- a/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.c
++++ b/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.c
+@@ -31,6 +31,7 @@
+ 
+ #include "camss.h"
+ #include "camss-vfe.h"
++#include "camss-vfe-17x-disp.h"
+ #include "camss-vfe-17x-meta.h"
+ 
+ /* Module enables, double buffered */
+@@ -207,6 +208,11 @@ struct ife_params_buf {
+ 	struct vb2_v4l2_buffer vb;
+ 	struct list_head queue;
+ 	struct v4l2_isp_params_buffer *config;
++	/* The outputs that write its frame (IFE17X_OUTPUT_*), 0 without the block */
++	u32 outputs;
++	/* The display output's window from its frame on, if it sets one */
++	bool window_set;
++	struct ife17x_params_display_window window;
+ };
+ 
+ struct ife_stats_buf {
+@@ -271,6 +277,14 @@ struct vfe_pix_meta {
+ 	u32 width;
+ 	u32 height;
+ 	u32 frame;		/* epochs since the stream start */
++	/*
++	 * Frames are numbered from the first one the image path writes, as
++	 * userspace expects of a stream: frame seq_base is frame 0. Frames
++	 * before it (the display output not on yet) are not the stream's and
++	 * have no frame start event. seq_based: that frame is known.
++	 */
++	u32 seq_base;
++	bool seq_based;
+ 	u64 epoch_ns;		/* time of the last epoch 0 */
+ 	u64 period_ns;		/* between the last two epochs 0 */
+ 	u8 gamma_bank;		/* LUT banks in use: 0 even, 1 odd */
+@@ -351,6 +365,8 @@ union ife_params_block {
+ 	const struct ife17x_params_abf *abf;
+ 	const struct ife17x_params_bpc *bpc;
+ 	const struct ife17x_params_lsc *lsc;
++	const struct ife17x_params_outputs *outputs;
++	const struct ife17x_params_display_window *window;
+ 	const u8 *data;
+ };
+ 
+@@ -918,6 +934,16 @@ static void ife_params_lsc(struct vfe_pix_meta *meta, union ife_params_block blo
+ 	vfe_rmw(vfe, VFE_MODULE_LENS_EN, 0, LENS_EN_LSC);
+ }
+ 
++/* The outputs decide the frame's buffers (vfe17x_meta_next_outputs_locked()) */
++static void ife_params_outputs(struct vfe_pix_meta *meta, union ife_params_block block)
++{
++}
++
++/* Set with the frame's buffers too (vfe17x_meta_next_window_locked()) */
++static void ife_params_display_window(struct vfe_pix_meta *meta, union ife_params_block block)
++{
++}
++
+ static const ife_params_handler ife_params_handlers[] = {
+ 	[IFE17X_PARAMS_BLOCK_BLS] = ife_params_bls,
+ 	[IFE17X_PARAMS_BLOCK_WB] = ife_params_wb,
+@@ -929,6 +955,8 @@ static const ife_params_handler ife_params_handlers[] = {
+ 	[IFE17X_PARAMS_BLOCK_ABF] = ife_params_abf,
+ 	[IFE17X_PARAMS_BLOCK_BPC] = ife_params_bpc,
+ 	[IFE17X_PARAMS_BLOCK_LSC] = ife_params_lsc,
++	[IFE17X_PARAMS_BLOCK_OUTPUTS] = ife_params_outputs,
++	[IFE17X_PARAMS_BLOCK_DISPLAY_WINDOW] = ife_params_display_window,
+ };
+ 
+ static const struct v4l2_isp_params_block_type_info ife_params_block_types[] = {
+@@ -942,10 +970,32 @@ static const struct v4l2_isp_params_block_type_info ife_params_block_types[] = {
+ 	[IFE17X_PARAMS_BLOCK_ABF] = { .size = sizeof(struct ife17x_params_abf) },
+ 	[IFE17X_PARAMS_BLOCK_BPC] = { .size = sizeof(struct ife17x_params_bpc) },
+ 	[IFE17X_PARAMS_BLOCK_LSC] = { .size = sizeof(struct ife17x_params_lsc) },
++	[IFE17X_PARAMS_BLOCK_OUTPUTS] = { .size = sizeof(struct ife17x_params_outputs) },
++	[IFE17X_PARAMS_BLOCK_DISPLAY_WINDOW] = {
++		.size = sizeof(struct ife17x_params_display_window)
++	},
+ };
+ 
+ static_assert(ARRAY_SIZE(ife_params_handlers) == ARRAY_SIZE(ife_params_block_types));
+ 
++/*
++ * The frame number of the epoch count @frame (struct vfe_pix_meta): 0 for the
++ * first frame written. Lock held.
++ */
++static u32 ife_seq(const struct vfe_pix_meta *meta, u32 frame)
++{
++	return meta->seq_based && frame >= meta->seq_base ? frame - meta->seq_base : 0;
++}
++
++/* The next frame, @meta->frame, is the first one written. Lock held. */
++static void ife_seq_first_written(struct vfe_pix_meta *meta)
++{
++	if (!meta->seq_based) {
++		meta->seq_base = meta->frame;
++		meta->seq_based = true;
++	}
++}
++
+ /* Apply the next queued parameters buffer; called with the lock held */
+ static bool ife_params_apply_next(struct vfe_pix_meta *meta, u32 sequence)
+ {
+@@ -1144,7 +1194,7 @@ static void ife_stats_return(struct vfe_pix_meta *meta)
+ 	meta->next_set = false;
+ }
+ 
+-static void ife_stats_wm_init(struct vfe_pix_meta *meta)
++static void ife_stats_wm_init(struct vfe_pix_meta *meta, bool written)
+ {
+ 	static const u8 wms[] = { VFE_WM_BF, VFE_WM_AWB_BG };
+ 	struct vfe_device *vfe = meta->vfe;
+@@ -1165,7 +1215,7 @@ static void ife_stats_wm_init(struct vfe_pix_meta *meta)
+ 	/* Frame 0 */
+ 	meta->next_set = false;
+ 	meta->next_got = 0;
+-	ife_stats_settle(meta, true);
++	ife_stats_settle(meta, written);
+ 	meta->stats_cur = meta->stats_next;
+ 	meta->cur_wms = meta->next_wms;
+ 	meta->cur_got = 0;
+@@ -1181,9 +1231,11 @@ static void ife_stats_wm_init(struct vfe_pix_meta *meta)
+ 
+ /*
+  * Stream start, from vfe_pix_configure() with the output lock held and
+- * interrupts off, before the first register update.
++ * interrupts off, before the first register update. @written: the image path
++ * writes frame 0, which then takes the first parameters and statistics
++ * buffers; otherwise they wait for the first frame it writes.
+  */
+-void vfe17x_meta_start(struct vfe_device *vfe, u32 width, u32 height)
++void vfe17x_meta_start(struct vfe_device *vfe, u32 width, u32 height, bool written)
+ {
+ 	struct vfe_pix_meta *meta = vfe->pix_meta;
+ 
+@@ -1194,8 +1246,10 @@ void vfe17x_meta_start(struct vfe_device *vfe, u32 width, u32 height)
+ 	meta->width = width;
+ 	meta->height = height;
+ 	meta->frame = 0;
++	meta->seq_base = 0;
++	meta->seq_based = written;
+ 	meta->wedged = false;
+-	meta->next_written = true;
++	meta->next_written = written;
+ 	meta->join_open = false;
+ 	meta->stripe_x = 0;
+ 	meta->stripe_w = width;
+@@ -1244,8 +1298,9 @@ void vfe17x_meta_start(struct vfe_device *vfe, u32 width, u32 height)
+ 		if (meta->dual_slave)
+ 			ife_awb_bg_program(meta->dual_slave, &meta->awb_bg);
+ 	}
+-	ife_params_apply_next(meta, 0);
+-	ife_stats_wm_init(meta);
++	if (written)
++		ife_params_apply_next(meta, 0);
++	ife_stats_wm_init(meta, written);
+ 	meta->running = true;
+ 	spin_unlock(&meta->lock);
+ }
+@@ -1381,8 +1436,44 @@ bool vfe17x_meta_join_open_locked(struct vfe_device *vfe)
+ }
+ 
+ /*
+- * The image path got a buffer for the next frame after epoch 0, before epoch
+- * 1 of the current frame: the next frame belongs to a request after all.
++ * The outputs the parameters buffer the next frame written takes names
++ * (struct ife17x_params_outputs), 0 without the block or without a buffer.
++ * Lock held (vfe17x_meta_lock()).
++ */
++u32 vfe17x_meta_next_outputs_locked(struct vfe_device *vfe)
++{
++	struct vfe_pix_meta *meta = vfe->pix_meta;
++	struct ife_params_buf *buf;
++
++	if (!meta)
++		return 0;
++
++	buf = list_first_entry_or_null(&meta->params_queue, struct ife_params_buf, queue);
++
++	return buf ? buf->outputs : 0;
++}
++
++/*
++ * The display window the parameters buffer the next frame written takes sets
++ * (struct ife17x_params_display_window), or NULL. Lock held.
++ */
++const struct ife17x_params_display_window *
++vfe17x_meta_next_window_locked(struct vfe_device *vfe)
++{
++	struct vfe_pix_meta *meta = vfe->pix_meta;
++	struct ife_params_buf *buf;
++
++	if (!meta)
++		return NULL;
++
++	buf = list_first_entry_or_null(&meta->params_queue, struct ife_params_buf, queue);
++
++	return buf && buf->window_set ? &buf->window : NULL;
++}
++
++/*
++ * The outputs the next frame needs got their buffers after epoch 0, before
++ * epoch 1 of the current frame: the next frame belongs to a request after all.
+  * Apply its parameters and queue its statistics buffer now, before the next
+  * frame starts. Returns true if registers need a PIX register update.
+  */
+@@ -1395,7 +1486,8 @@ bool vfe17x_meta_join_locked(struct vfe_device *vfe)
+ 		return false;
+ 
+ 	meta->next_written = true;
+-	applied = ife_params_apply_next(meta, meta->frame);
++	ife_seq_first_written(meta);
++	applied = ife_params_apply_next(meta, ife_seq(meta, meta->frame));
+ 	ife_stats_settle(meta, true);
+ 	return applied;
+ }
+@@ -1415,7 +1507,7 @@ bool vfe17x_meta_epoch(struct vfe_device *vfe, bool next_written)
+ 		return false;
+ 
+ 	struct v4l2_event ev = { .type = V4L2_EVENT_FRAME_SYNC };
+-	bool running;
++	bool running, event = false;
+ 
+ 	spin_lock(&meta->lock);
+ 	running = meta->running;
+@@ -1449,7 +1541,8 @@ bool vfe17x_meta_epoch(struct vfe_device *vfe, bool next_written)
+ 		meta->next_set = false;
+ 	}
+ 	if (running) {
+-		ev.u.frame_sync.frame_sequence = meta->frame;
++		u32 frame = meta->frame;
++
+ 		{
+ 			u64 now = ktime_get_ns();
+ 
+@@ -1461,15 +1554,19 @@ bool vfe17x_meta_epoch(struct vfe_device *vfe, bool next_written)
+ 		meta->next_written = next_written;
+ 		meta->join_open = true;
+ 		if (next_written) {
+-			applied = ife_params_apply_next(meta, meta->frame);
++			ife_seq_first_written(meta);
++			applied = ife_params_apply_next(meta, ife_seq(meta, meta->frame));
+ 			if (!meta->dual_master)
+ 				ife_stats_settle(meta, true);
+ 		}
++		/* Not before the first frame written: not one of the stream */
++		event = meta->seq_based && frame >= meta->seq_base;
++		ev.u.frame_sync.frame_sequence = ife_seq(meta, frame);
+ 	}
+ 	spin_unlock(&meta->lock);
+ 
+ 	/* Frame start for the sensor control timing in userspace */
+-	if (running)
++	if (event)
+ 		v4l2_event_queue(vfe->line[VFE_LINE_PIX].subdev.devnode, &ev);
+ 
+ 	return applied;
+@@ -1552,7 +1649,7 @@ void vfe17x_meta_sequence(struct vfe_device *vfe, u32 *sequence)
+ 
+ 	spin_lock_irqsave(&meta->lock, flags);
+ 	if (meta->running && meta->frame)
+-		*sequence = meta->frame - 1;
++		*sequence = ife_seq(meta, meta->frame - 1);
+ 	spin_unlock_irqrestore(&meta->lock, flags);
+ }
+ 
+@@ -1617,7 +1714,7 @@ void vfe17x_meta_bus(struct vfe_device *vfe, u32 bus_status1)
+ 		 * and k + 1: number them from the epochs, so they match the
+ 		 * image even if they were turned on after the stream start.
+ 		 */
+-		done->vb.sequence = meta->frame - 1;
++		done->vb.sequence = ife_seq(meta, meta->frame - 1);
+ 		done->vb.vb2_buf.timestamp = ktime_get_ns();
+ 		ife_stats_finish(meta, done, true);
+ 	}
+@@ -1901,7 +1998,34 @@ static int ife_lsc_check(struct device *dev, const struct ife17x_params_lsc *lsc
+ 	return -EINVAL;
+ }
+ 
+-static int ife_params_check(struct device *dev, union ife_params_block block)
++/*
++ * A display window: even values and the smallest compose rectangle always;
++ * the rest against the display subdev's sink and crop size once they are
++ * fixed, while it streams. Else vfe17x_disp_next_window() checks it.
++ */
++static bool ife_display_window_valid(struct vfe_pix_meta *meta,
++				     const struct ife17x_params_display_window *w)
++{
++	struct vfe_pix_disp *disp = meta->vfe->pix_disp;
++	struct v4l2_rect compose = { 0, 0, w->compose_width, w->compose_height };
++	struct v4l2_rect crop;
++
++	if (w->reserved[0] || w->reserved[1] ||
++	    (w->compose_width | w->compose_height | w->crop_left |
++			    w->crop_top) & 1 ||
++	    w->compose_width < VFE_DISP_MIN_WIDTH || w->compose_height < VFE_DISP_MIN_HEIGHT)
++		return false;
++	if (!disp || !READ_ONCE(disp->subdev.s_stream_enabled))
++		return true;
++
++	crop = (struct v4l2_rect){ w->crop_left, w->crop_top, disp->crop.width,
++				   disp->crop.height };
++
++	return vfe17x_disp_window_valid(&disp->fmt[MSM_VFE_PAD_SINK], &compose, &crop);
++}
++
++static int ife_params_check(struct vfe_pix_meta *meta, struct device *dev,
++			    union ife_params_block block)
+ {
+ 	unsigned int i, j;
+ 
+@@ -1971,6 +2095,17 @@ static int ife_params_check(struct device *dev, union ife_params_block block)
+ 		return ife_abf_check(dev, block.abf);
+ 	case IFE17X_PARAMS_BLOCK_LSC:
+ 		return ife_lsc_check(dev, block.lsc);
++	case IFE17X_PARAMS_BLOCK_DISPLAY_WINDOW:
++		if (!ife_display_window_valid(meta, block.window))
++			goto invalid;
++		break;
++	case IFE17X_PARAMS_BLOCK_OUTPUTS:
++		if (block.outputs->outputs & ~(IFE17X_OUTPUT_FULL | IFE17X_OUTPUT_DISPLAY |
++					       IFE17X_OUTPUT_RDI) ||
++		    !(block.outputs->outputs & (IFE17X_OUTPUT_FULL | IFE17X_OUTPUT_DISPLAY)) ||
++		    block.outputs->reserved)
++			goto invalid;
++		break;
+ 	case IFE17X_PARAMS_BLOCK_BPC:
+ 		for (i = 0; i < 4; i++)
+ 			if (block.bpc->wb_ratio[i] > 0x1ffff)
+@@ -2013,13 +2148,21 @@ static int ife_params_buf_prepare(struct vb2_buffer *vb)
+ 		return ret;
+ 
+ 	/* The values of the enabled blocks; a disabled one may be a bare header */
++	buf->outputs = 0;
++	buf->window_set = false;
+ 	while (off < buf->config->data_size) {
+ 		union ife_params_block block = { .data = &buf->config->data[off] };
+ 
+ 		if (!ife_block_disabled(block)) {
+-			ret = ife_params_check(dev, block);
++			ret = ife_params_check(meta, dev, block);
+ 			if (ret)
+ 				return ret;
++			if (block.header->type == IFE17X_PARAMS_BLOCK_OUTPUTS)
++				buf->outputs = block.outputs->outputs;
++			if (block.header->type == IFE17X_PARAMS_BLOCK_DISPLAY_WINDOW) {
++				buf->window = *block.window;
++				buf->window_set = true;
++			}
+ 		}
+ 		off += block.header->size;
+ 	}
+@@ -2036,6 +2179,11 @@ static void ife_params_buf_queue(struct vb2_buffer *vb)
+ 	/* Before the stream starts the frame size is unknown: keep the grid */
+ 	if (!meta->running)
+ 		ife_params_scan_awb(meta, buf->config);
++	/*
++	 * Its outputs decide the next frame it is first in the queue for. A
++	 * frame not yet written does not join now even if its image buffers
++	 * are all there: it waits for the next epoch 0.
++	 */
+ 	list_add_tail(&buf->queue, &meta->params_queue);
+ 	spin_unlock_irqrestore(&meta->lock, flags);
+ }
+diff --git a/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.h b/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.h
+index 8da9b8472..ac4e50338 100644
+--- a/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.h
++++ b/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.h
+@@ -10,12 +10,13 @@
+ 
+ #include <linux/types.h>
+ 
++struct ife17x_params_display_window;
+ struct v4l2_device;
+ struct vfe_device;
+ 
+ int vfe17x_meta_register(struct vfe_device *vfe, struct v4l2_device *v4l2_dev);
+ void vfe17x_meta_unregister(struct vfe_device *vfe);
+-void vfe17x_meta_start(struct vfe_device *vfe, u32 width, u32 height);
++void vfe17x_meta_start(struct vfe_device *vfe, u32 width, u32 height, bool written);
+ void vfe17x_meta_stop(struct vfe_device *vfe);
+ void vfe17x_meta_fatal(struct vfe_device *vfe);
+ bool vfe17x_meta_frame_started(struct vfe_device *vfe);
+@@ -28,6 +29,9 @@ void vfe17x_meta_lock(struct vfe_device *vfe);
+ void vfe17x_meta_unlock(struct vfe_device *vfe);
+ bool vfe17x_meta_join_open_locked(struct vfe_device *vfe);
+ bool vfe17x_meta_join_locked(struct vfe_device *vfe);
++u32 vfe17x_meta_next_outputs_locked(struct vfe_device *vfe);
++const struct ife17x_params_display_window *
++vfe17x_meta_next_window_locked(struct vfe_device *vfe);
+ void vfe17x_meta_bus(struct vfe_device *vfe, u32 bus_status1);
+ void vfe17x_meta_epoch1(struct vfe_device *vfe, bool late);
+ void vfe17x_meta_sequence(struct vfe_device *vfe, u32 *sequence);
+diff --git a/drivers/media/platform/qcom/camss/camss-vfe-17x.c b/drivers/media/platform/qcom/camss/camss-vfe-17x.c
+index 35a184ee6..71de6bc55 100644
+--- a/drivers/media/platform/qcom/camss/camss-vfe-17x.c
++++ b/drivers/media/platform/qcom/camss/camss-vfe-17x.c
+@@ -10,9 +10,13 @@
+ #include <linux/interrupt.h>
+ #include <linux/io.h>
+ #include <linux/iopoll.h>
++#include <linux/math64.h>
++#include <media/v4l2-rect.h>
++#include <uapi/linux/media/qcom/ife17x-config.h>
+ 
+ #include "camss.h"
+ #include "camss-vfe.h"
++#include "camss-vfe-17x-disp.h"
+ #include "camss-vfe-17x-meta.h"
+ 
+ #define VFE_GLOBAL_RESET_CMD			(0x018)
+@@ -207,20 +211,41 @@
+ #define		SCALE_SIZE_OUT			16
+ #define		SCALE_SIZE_MASK			0x3fff
+ 
+-/* Crop / round / clamp of the FULL output path */
+-#define VFE_FULL_Y_MODULE_CFG			(0xe0c)
+-#define VFE_FULL_C_MODULE_CFG			(0xe2c)
++/*
++ * Display output path: an MNDS16 of its own taking the same 4:4:4 data after
++ * CST, luma at 0x1040 and chroma at 0x106c with the layout of the FULL ones,
++ * then crop and round/clamp, into write masters 20 and 21. Its module enables
++ * are bits 3 (MNDS) and 4 (crop) of 0xfb0, as those of FULL in 0x4c.
++ */
++#define VFE_SCALE_DISP_Y_BASE			(0x1040)
++#define VFE_SCALE_DISP_C_BASE			(0x106c)
++#define VFE_MODULE_DISP_EN			(0xfb0)
++#define		MODULE_DISP_EN_SCALE		BIT(3)
++#define		MODULE_DISP_EN_CROP		BIT(4)
++
++/*
++ * Crop / round / clamp of an output path: module config, crop lines, crop
++ * pixels, clamp and round, for luma and chroma.
++ */
+ #define		FULL_MODULE_CFG_CROP_EN		BIT(9)
+ #define		FULL_MODULE_CFG_ROUND_EN	BIT(10)
+ #define		FULL_MODULE_CFG_CLAMP_EN	BIT(11)
+-#define VFE_FULL_Y_CROP_LINE_CFG		(0xe10)
+-#define VFE_FULL_Y_CROP_PIXEL_CFG		(0xe14)
+-#define VFE_FULL_Y_CLAMP_CFG			(0xe18)
+-#define VFE_FULL_Y_ROUND_CFG			(0xe1c)
+-#define VFE_FULL_C_CROP_LINE_CFG		(0xe30)
+-#define VFE_FULL_C_CROP_PIXEL_CFG		(0xe34)
+-#define VFE_FULL_C_CLAMP_CFG			(0xe38)
+-#define VFE_FULL_C_ROUND_CFG			(0xe3c)
++
++struct vfe_pix_out_regs {
++	u32 y_cfg, y_line, y_pixel, y_clamp, y_round;
++	u32 c_cfg, c_line, c_pixel, c_clamp, c_round;
++};
++
++static const struct vfe_pix_out_regs vfe_pix_full_regs = {
++	.y_cfg = 0xe0c, .y_line = 0xe10, .y_pixel = 0xe14, .y_clamp = 0xe18, .y_round = 0xe1c,
++	.c_cfg = 0xe2c, .c_line = 0xe30, .c_pixel = 0xe34, .c_clamp = 0xe38, .c_round = 0xe3c,
++};
++
++static const struct vfe_pix_out_regs vfe_pix_disp_regs = {
++	.y_cfg = 0x1134, .y_line = 0x1138, .y_pixel = 0x113c, .y_clamp = 0x1140, .y_round = 0x1144,
++	.c_cfg = 0x1148, .c_line = 0x114c, .c_pixel = 0x1150, .c_clamp = 0x1154, .c_round = 0x1158,
++};
++
+ #define		CROP_FIRST			16
+ #define		CROP_LAST			0
+ #define		CROP_LINE_MASK			0x3fff
+@@ -327,13 +352,19 @@
+ #define VFE_BUS_WM_FRAME_INC(n)			(0x2258 + (n) * 0x100)
+ #define VFE_BUS_WM_BURST_LIMIT(n)		(0x225c + (n) * 0x100)
+ 
+-/* Composite group 0 completes when both FULL masters are done */
++/*
++ * Composite group 0 completes when both FULL masters are done, group 1 when
++ * both display masters are. The statistics complete per master.
++ */
+ #define VFE_BUS_COMP_MASK(n)			(0x2010 + (n) * 4)
+ #define		PIX_COMP_GROUP			0
++#define		DISP_COMP_GROUP			1
+ 
+-/* FULL output path write masters, fixed in hardware */
++/* FULL and display output path write masters, fixed in hardware */
+ #define VFE_WM_PIX_FULL_Y			3
+ #define VFE_WM_PIX_FULL_C			4
++#define VFE_WM_PIX_DISP_Y			20
++#define VFE_WM_PIX_DISP_C			21
+ #define		PACKER_FMT_PLAIN_8_LSB_MSB_10	0xe
+ 
+ /*
+@@ -720,8 +751,14 @@ static u32 vfe_scale_interp_reso(u32 in, u32 out)
+ 	return 0;
+ }
+ 
+-static void vfe_pix_scale_config(struct vfe_device *vfe, u32 base,
+-				 u32 in_w, u32 in_h, u32 out_w, u32 out_h)
++/*
++ * The horizontal step is that of @step_in columns to @step_out, which differs
++ * from @in_w to @out_w for a stripe of a frame split between two IFEs: both
++ * stripes scale from their first column with the step of the whole frame.
++ */
++static void vfe_pix_scale_config_step(struct vfe_device *vfe, u32 base,
++				      u32 in_w, u32 in_h, u32 out_w, u32 out_h,
++				      u32 step_in, u32 step_out)
+ {
+ 	u32 reso, phase, val;
+ 
+@@ -730,8 +767,8 @@ static void vfe_pix_scale_config(struct vfe_device *vfe, u32 base,
+ 	val = ((in_w - 1) & SCALE_SIZE_MASK) << SCALE_SIZE_IN;
+ 	val |= ((out_w - 1) & SCALE_SIZE_MASK) << SCALE_SIZE_OUT;
+ 	writel_relaxed(val, vfe->base + base + SCALE_H_IMAGE_SIZE);
+-	reso = vfe_scale_interp_reso(in_w, out_w);
+-	phase = (in_w << (reso + 14)) / out_w;
++	reso = vfe_scale_interp_reso(step_in, step_out);
++	phase = (step_in << (reso + 14)) / step_out;
+ 	val = (phase & SCALE_PHASE_MULT_MASK) << SCALE_PHASE_MULT;
+ 	val |= reso << SCALE_PHASE_INTERP;
+ 	writel_relaxed(val, vfe->base + base + SCALE_H_PHASE);
+@@ -752,11 +789,18 @@ static void vfe_pix_scale_config(struct vfe_device *vfe, u32 base,
+ 	writel_relaxed((in_h - 1) & SCALE_SIZE_MASK, vfe->base + base + SCALE_V_PAD);
+ }
+ 
++static void vfe_pix_scale_config(struct vfe_device *vfe, u32 base,
++				 u32 in_w, u32 in_h, u32 out_w, u32 out_h)
++{
++	vfe_pix_scale_config_step(vfe, base, in_w, in_h, out_w, out_h, in_w, out_w);
++}
++
+ /*
+- * Crop the scaler output. The chroma plane has the luma width in samples
+- * (interleaved CbCr) and half the lines.
++ * Crop the scaler output of an output path. The chroma plane has the luma
++ * width in samples (interleaved CbCr) and half the lines.
+  */
+-static void vfe_pix_crop_config(struct vfe_device *vfe, const struct v4l2_rect *crop)
++static void vfe_pix_crop_config(struct vfe_device *vfe, const struct vfe_pix_out_regs *r,
++				const struct v4l2_rect *crop)
+ {
+ 	u32 first_pixel = crop->left;
+ 	u32 last_pixel = crop->left + crop->width - 1;
+@@ -764,29 +808,29 @@ static void vfe_pix_crop_config(struct vfe_device *vfe, const struct v4l2_rect *
+ 
+ 	val = (crop->top & CROP_LINE_MASK) << CROP_FIRST;
+ 	val |= ((crop->top + crop->height - 1) & CROP_LINE_MASK) << CROP_LAST;
+-	writel_relaxed(val, vfe->base + VFE_FULL_Y_CROP_LINE_CFG);
++	writel_relaxed(val, vfe->base + r->y_line);
+ 	val = (first_pixel & CROP_PIXEL_MASK) << CROP_FIRST;
+ 	val |= (last_pixel & CROP_PIXEL_MASK) << CROP_LAST;
+-	writel_relaxed(val, vfe->base + VFE_FULL_Y_CROP_PIXEL_CFG);
++	writel_relaxed(val, vfe->base + r->y_pixel);
+ 
+ 	val = ((crop->top / 2) & CROP_LINE_MASK) << CROP_FIRST;
+ 	val |= (((crop->top + crop->height) / 2 - 1) & CROP_LINE_MASK) << CROP_LAST;
+-	writel_relaxed(val, vfe->base + VFE_FULL_C_CROP_LINE_CFG);
++	writel_relaxed(val, vfe->base + r->c_line);
+ 	val = (first_pixel & CROP_PIXEL_MASK) << CROP_FIRST;
+ 	val |= (last_pixel & CROP_PIXEL_MASK) << CROP_LAST;
+-	writel_relaxed(val, vfe->base + VFE_FULL_C_CROP_PIXEL_CFG);
++	writel_relaxed(val, vfe->base + r->c_pixel);
+ 
+-	writel_relaxed(CLAMP_CFG_8BIT, vfe->base + VFE_FULL_Y_CLAMP_CFG);
+-	writel_relaxed(ROUND_CFG_Y_8BIT, vfe->base + VFE_FULL_Y_ROUND_CFG);
+-	writel_relaxed(CLAMP_CFG_8BIT, vfe->base + VFE_FULL_C_CLAMP_CFG);
+-	writel_relaxed(ROUND_CFG_C_8BIT, vfe->base + VFE_FULL_C_ROUND_CFG);
++	writel_relaxed(CLAMP_CFG_8BIT, vfe->base + r->y_clamp);
++	writel_relaxed(ROUND_CFG_Y_8BIT, vfe->base + r->y_round);
++	writel_relaxed(CLAMP_CFG_8BIT, vfe->base + r->c_clamp);
++	writel_relaxed(ROUND_CFG_C_8BIT, vfe->base + r->c_round);
+ 
+ 	val = FULL_MODULE_CFG_CROP_EN | FULL_MODULE_CFG_ROUND_EN | FULL_MODULE_CFG_CLAMP_EN;
+-	writel_relaxed(val, vfe->base + VFE_FULL_Y_MODULE_CFG);
+-	writel_relaxed(val, vfe->base + VFE_FULL_C_MODULE_CFG);
++	writel_relaxed(val, vfe->base + r->y_cfg);
++	writel_relaxed(val, vfe->base + r->c_cfg);
+ }
+ 
+-/* Line based write master of the FULL path, left disabled */
++/* Line based write master of an output path, left disabled */
+ static void vfe_pix_wm_config(struct vfe_device *vfe, u8 wm, u32 width,
+ 			      u32 height, u32 stride)
+ {
+@@ -837,6 +881,137 @@ static void vfe_pix_wm_update(struct vfe_device *vfe, u32 addr,
+ 	}
+ }
+ 
++/*
++ * One VFE's display path, output lock held (with dual IFE the master's; the
++ * slave is written through it, as the FULL path's). Its scaler takes the
++ * frame after CST, at the CAMIF size (the pixel line sink), whatever the
++ * FULL path scales or crops, with the step of the whole frame (@frame_w to
++ * @compose); its crop then keeps the stripe's rectangle, which the write
++ * masters take. The setup latches with a PIX register update.
++ */
++static void vfe_disp_stripe_on(struct vfe_device *hw, const struct vfe_disp_stripe *st,
++			       u32 frame_w, const struct v4l2_rect *compose, u32 in_h,
++			       u32 stride)
++{
++	u32 val = 1 << WM_CFG_EN | MODE_QCOM_PLAIN << WM_CFG_MODE;
++
++	/* 4:4:4 in, luma at compose size, chroma at half size in both axes */
++	vfe_pix_scale_config_step(hw, VFE_SCALE_DISP_Y_BASE, st->in_w, in_h, st->out_w,
++				  compose->height, frame_w, compose->width);
++	vfe_pix_scale_config_step(hw, VFE_SCALE_DISP_C_BASE, st->in_w, in_h, st->out_w / 2,
++				  compose->height / 2, frame_w, compose->width / 2);
++	vfe_pix_crop_config(hw, &vfe_pix_disp_regs, &st->crop);
++	writel_relaxed(MODULE_DISP_EN_SCALE | MODULE_DISP_EN_CROP, hw->base + VFE_MODULE_DISP_EN);
++
++	vfe_pix_wm_config(hw, VFE_WM_PIX_DISP_Y, st->crop.width, st->crop.height, stride);
++	vfe_pix_wm_config(hw, VFE_WM_PIX_DISP_C, st->crop.width, st->crop.height / 2, stride);
++	writel_relaxed(BIT(VFE_WM_PIX_DISP_Y) | BIT(VFE_WM_PIX_DISP_C),
++		       hw->base + VFE_BUS_COMP_MASK(DISP_COMP_GROUP));
++	writel_relaxed(val, hw->base + VFE_BUS_WM_CFG(VFE_WM_PIX_DISP_Y));
++	writel_relaxed(val, hw->base + VFE_BUS_WM_CFG(VFE_WM_PIX_DISP_C));
++}
++
++static void vfe_disp_hw_on(struct vfe_device *vfe, struct vfe_pix_disp *disp)
++{
++	const struct v4l2_pix_format_mplane *pix = &disp->video.active_fmt.fmt.pix_mp;
++	u32 in_h = vfe->line[VFE_LINE_PIX].fmt[MSM_VFE_PAD_SINK].height;
++	u32 frame_w = disp->fmt[MSM_VFE_PAD_SINK].width;
++	u32 stride = pix->plane_fmt[0].bytesperline;
++
++	vfe_disp_stripe_on(vfe, &disp->stripe[0], frame_w, &disp->compose, in_h, stride);
++	if (disp->slave)
++		vfe_disp_stripe_on(disp->slave, &disp->stripe[1], frame_w, &disp->compose,
++				   in_h, stride);
++}
++
++/*
++ * A new window for the next frame, while the display path runs: the scalers
++ * and the crop, which latch with the PIX register update of that frame, and
++ * the write masters' width when the stripe's changed (dual IFE).
++ *
++ * The vendor driver for this bus (Titan 175, bus version 2) takes the stripe
++ * widths and offsets of dual IFE with every request and writes the write
++ * masters' width and address with the frame's other registers, during the
++ * frame before it, ahead of its register update, as here: the width is
++ * taken to latch at the frame boundary. That it does is not measured.
++ */
++static void vfe_disp_stripe_update(struct vfe_device *hw, const struct vfe_disp_stripe *st,
++				   const struct vfe_disp_stripe *old, u32 frame_w,
++				   const struct v4l2_rect *compose, u32 in_h)
++{
++	vfe_pix_scale_config_step(hw, VFE_SCALE_DISP_Y_BASE, st->in_w, in_h, st->out_w,
++				  compose->height, frame_w, compose->width);
++	vfe_pix_scale_config_step(hw, VFE_SCALE_DISP_C_BASE, st->in_w, in_h, st->out_w / 2,
++				  compose->height / 2, frame_w, compose->width / 2);
++	vfe_pix_crop_config(hw, &vfe_pix_disp_regs, &st->crop);
++	if (st->crop.width != old->crop.width) {
++		writel_relaxed(st->crop.width,
++			       hw->base + VFE_BUS_WM_BUFFER_WIDTH_CFG(VFE_WM_PIX_DISP_Y));
++		writel_relaxed(st->crop.width,
++			       hw->base + VFE_BUS_WM_BUFFER_WIDTH_CFG(VFE_WM_PIX_DISP_C));
++	}
++}
++
++/*
++ * Display write masters off, and the path from the next PIX register update.
++ * The composite group is left to the caller.
++ */
++static void vfe_disp_hw_off(struct vfe_device *vfe)
++{
++	writel_relaxed(0, vfe->base + VFE_BUS_WM_CFG(VFE_WM_PIX_DISP_Y));
++	writel_relaxed(0, vfe->base + VFE_BUS_WM_CFG(VFE_WM_PIX_DISP_C));
++	writel_relaxed(0, vfe->base + VFE_MODULE_DISP_EN);
++}
++
++/*
++ * The VFEs that write the next frame's display buffer, as its window says;
++ * a slave whose pixel path stopped writes no more.
++ */
++static u8 vfe_disp_next_writers(struct vfe_pix_disp *disp)
++{
++	return disp->writers & (disp->slave ? VFE_DISP_MASTER | VFE_DISP_SLAVE : VFE_DISP_MASTER);
++}
++
++/*
++ * The stripes that write the next frame write their columns of both planes of
++ * the buffer at @addr; a write master without an address skips the frame.
++ */
++static void vfe_disp_wm_update(struct vfe_device *vfe, struct vfe_pix_disp *disp, u32 addr)
++{
++	const struct v4l2_pix_format_mplane *pix = &disp->video.active_fmt.fmt.pix_mp;
++	u32 stride = pix->plane_fmt[0].bytesperline;
++	u8 writers = vfe_disp_next_writers(disp);
++	u32 off = disp->stripe[0].offset;
++
++	if (writers & VFE_DISP_MASTER) {
++		writel_relaxed(addr + off, vfe->base + VFE_BUS_WM_IMAGE_ADDR(VFE_WM_PIX_DISP_Y));
++		writel_relaxed(addr + stride * pix->height + off,
++			       vfe->base + VFE_BUS_WM_IMAGE_ADDR(VFE_WM_PIX_DISP_C));
++	}
++
++	if (writers & VFE_DISP_SLAVE) {
++		void __iomem *sb = disp->slave->base;
++
++		off = disp->stripe[1].offset;
++		writel_relaxed(addr + off, sb + VFE_BUS_WM_IMAGE_ADDR(VFE_WM_PIX_DISP_Y));
++		writel_relaxed(addr + stride * pix->height + off,
++			       sb + VFE_BUS_WM_IMAGE_ADDR(VFE_WM_PIX_DISP_C));
++	}
++}
++
++/* Output lock held: the oldest display buffer out is done with */
++static void vfe_disp_shift(struct vfe_pix_disp *disp)
++{
++	struct vfe_output *output = &disp->output;
++
++	output->buf[0] = output->buf[1];
++	output->buf[1] = NULL;
++	disp->buf_writers[0] = disp->buf_writers[1];
++	disp->buf_writers[1] = 0;
++	if (output->gen2.active_num)
++		output->gen2.active_num--;
++}
++
+ /*
+  * Dual IFE: a pixel line whose output is also linked to the video node of
+  * another VFE's pixel line writes its stripe into that node's buffers.
+@@ -948,7 +1123,9 @@ static void vfe_pix_dual_slave_done(struct vfe_device *vfe)
+ 	}
+ }
+ 
+-static int vfe_pix_configure(struct vfe_device *vfe, struct vfe_line *line)
++/* @first_written: frame 0 has buffers, it takes the first parameters */
++static int vfe_pix_configure(struct vfe_device *vfe, struct vfe_line *line,
++			     bool first_written)
+ {
+ 	struct v4l2_mbus_framefmt *sink = &line->fmt[MSM_VFE_PAD_SINK];
+ 	struct v4l2_mbus_framefmt *src = &line->fmt[MSM_VFE_PAD_SRC];
+@@ -987,7 +1164,7 @@ static int vfe_pix_configure(struct vfe_device *vfe, struct vfe_line *line)
+ 			     compose->width, compose->height);
+ 	vfe_pix_scale_config(vfe, VFE_SCALE_FULL_C_BASE, sink->width, sink->height,
+ 			     compose->width / 2, compose->height / 2);
+-	vfe_pix_crop_config(vfe, crop);
++	vfe_pix_crop_config(vfe, &vfe_pix_full_regs, crop);
+ 
+ 	writel_relaxed(MODULE_LENS_EN_DEMUX | MODULE_LENS_EN_DEMOSAIC |
+ 		       MODULE_LENS_EN_BLS, vfe->base + VFE_MODULE_LENS_EN);
+@@ -995,24 +1172,107 @@ static int vfe_pix_configure(struct vfe_device *vfe, struct vfe_line *line)
+ 	writel_relaxed(MODULE_COLOR_EN_GAMMA, vfe->base + VFE_MODULE_COLOR_EN);
+ 	writel_relaxed(MODULE_ZOOM_EN_CST | MODULE_ZOOM_EN_SCALE_FULL |
+ 		       MODULE_ZOOM_EN_CROP_FULL, vfe->base + VFE_MODULE_ZOOM_EN);
++	/* The display output starts later, on its own */
++	vfe_disp_hw_off(vfe);
++	writel_relaxed(0, vfe->base + VFE_BUS_COMP_MASK(DISP_COMP_GROUP));
+ 
+ 	vfe_pix_wm_config(vfe, VFE_WM_PIX_FULL_Y, crop->width, crop->height, stride);
+ 	vfe_pix_wm_config(vfe, VFE_WM_PIX_FULL_C, crop->width, crop->height / 2, stride);
+ 	writel_relaxed(BIT(VFE_WM_PIX_FULL_Y) | BIT(VFE_WM_PIX_FULL_C),
+ 		       vfe->base + VFE_BUS_COMP_MASK(PIX_COMP_GROUP));
+ 
+-	vfe17x_meta_start(vfe, sink->width, sink->height);
++	vfe17x_meta_start(vfe, sink->width, sink->height, first_written);
+ 
+ 	return 0;
+ }
+ 
++/*
++ * Whether the display output link is on: then the display output is required
++ * for every frame the pixel path writes. Only with the parameters and
++ * statistics nodes, whose epochs settle the frames.
++ */
++static bool vfe_disp_linked(struct vfe_device *vfe)
++{
++	struct vfe_pix_disp *disp = vfe->pix_disp;
++	struct media_pad *remote;
++
++	if (!disp || !vfe->pix_meta)
++		return false;
++
++	remote = media_pad_remote_pad_first(&disp->pads[MSM_VFE_PAD_SINK]);
++
++	return remote && remote->entity == &vfe->line[VFE_LINE_PIX].subdev.entity;
++}
++
++/* The RDI lines with their link on, by line id */
++static u8 vfe_rdi_linked(struct vfe_device *vfe)
++{
++	unsigned int i;
++	u8 linked = 0;
++
++	for (i = 0; i < vfe->res->line_num; i++)
++		if (i != VFE_LINE_PIX &&
++		    media_pad_remote_pad_first(&vfe->line[i].pads[MSM_VFE_PAD_SINK]))
++			linked |= BIT(i);
++
++	return linked;
++}
++
++/*
++ * The pixel path starts while RDI lines of the VFE stream: their queued
++ * addresses go to the next frames, which are frames 0 and 1 of the pixel path.
++ * Output lock held.
++ */
++static void vfe_rdi_pix_start(struct vfe_device *vfe)
++{
++	unsigned int i;
++
++	for (i = 0; i < vfe->res->line_num; i++) {
++		struct vfe_output *output = &vfe->line[i].output;
++
++		if (i == VFE_LINE_PIX || output->state != VFE_OUTPUT_ON)
++			continue;
++		output->armed_next = output->gen2.active_num > 0;
++		output->armed_ahead = output->gen2.active_num > 1;
++	}
++}
++
++/*
++ * Without a list of outputs from the parameters (struct ife17x_params_outputs):
++ * the FULL output decides, with the display output when required, and the RDI
++ * lines, and a display output not required, follow it.
++ */
++#define VFE_OUTPUTS_FOLLOW		BIT(31)
++
++static u32 vfe17x_next_outputs(struct vfe_device *vfe);
++static bool vfe17x_outputs_ready(struct vfe_device *vfe, u32 outputs);
++static void vfe17x_arm_outputs(struct vfe_device *vfe, u32 outputs);
++
++/*
++ * Whether frame 0 can be written with the outputs @outputs, at the pixel path
++ * start: the FULL output, not on yet, when it has a buffer queued; the display
++ * output cannot be on yet.
++ */
++static bool vfe17x_first_ready(struct vfe_device *vfe, u32 outputs)
++{
++	if ((outputs & IFE17X_OUTPUT_FULL) &&
++	    list_empty(&vfe->line[VFE_LINE_PIX].output.pending_bufs))
++		return false;
++
++	return vfe17x_outputs_ready(vfe, outputs & ~IFE17X_OUTPUT_FULL);
++}
++
+ static int vfe_pix_enable_output(struct vfe_line *line)
+ {
+ 	struct vfe_device *vfe = to_vfe(line);
+ 	struct vfe_output *output = &line->output;
++	bool disp_linked = vfe_disp_linked(vfe);
++	u8 rdi_linked = vfe_rdi_linked(vfe);
+ 	struct vfe_line *mline;
+ 	unsigned long flags;
++	bool disp_required, first;
+ 	unsigned int i;
++	u32 outputs;
+ 	int ret;
+ 
+ 	spin_lock_irqsave(&vfe->output_lock, flags);
+@@ -1028,6 +1288,10 @@ static int vfe_pix_enable_output(struct vfe_line *line)
+ 
+ 	WARN_ON(output->gen2.active_num);
+ 
++	vfe->pix_next_outputs = 0;
++	vfe->pix_rdi_linked = rdi_linked;
++	vfe->pix_stopping = false;
++
+ 	/*
+ 	 * Dual IFE slave: pair with the master before configuring, and leave
+ 	 * the write masters off: the master gives them its buffers.
+@@ -1045,11 +1309,15 @@ static int vfe_pix_enable_output(struct vfe_line *line)
+ 		mvfe->dual.x_offset = mline->crop.width;
+ 		spin_unlock(&mvfe->output_lock);
+ 
+-		ret = vfe_pix_configure(vfe, line);
++		/* The master's display output covers the slave's stripe */
++		if (vfe->pix_disp)
++			vfe->pix_disp->required = false;
++		ret = vfe_pix_configure(vfe, line, true);
+ 		if (ret < 0)
+ 			goto out_unlock;
+ 		output->state = VFE_OUTPUT_ON;
+ 		output->armed_next = false;
++		output->armed_ahead = false;
+ 		output->error = false;
+ 		output->sequence = 0;
+ 		vfe_reg_update(vfe, line->id);
+@@ -1058,24 +1326,57 @@ static int vfe_pix_enable_output(struct vfe_line *line)
+ 		goto out_unlock;
+ 	}
+ 
+-	ret = vfe_pix_configure(vfe, line);
++	/*
++	 * With its link on, the display output is required; with dual IFE (a
++	 * master, its slave started first) it covers both stripes.
++	 */
++	disp_required = disp_linked;
++	if (vfe->pix_disp)
++		vfe->pix_disp->required = disp_required;
++	vfe_rdi_pix_start(vfe);
++
++	/*
++	 * Frame 0 takes the outputs the first parameters buffer names, if
++	 * they can all take it; else no frame is written before the next
++	 * epoch decides. Without a list, the FULL output takes frames 0 and
++	 * 1, unless the display output is required: it is not on yet.
++	 */
++	vfe17x_meta_lock(vfe);
++	outputs = vfe17x_next_outputs(vfe);
++	vfe17x_meta_unlock(vfe);
++	if (outputs & VFE_OUTPUTS_FOLLOW)
++		first = !disp_required;
++	else
++		first = vfe17x_first_ready(vfe, outputs);
++
++	ret = vfe_pix_configure(vfe, line, first);
+ 	if (ret < 0)
+ 		goto out_unlock;
+ 
+ 	output->state = VFE_OUTPUT_ON;
+ 	output->armed_next = false;
++	output->armed_ahead = false;
+ 	output->error = false;
+ 	output->sequence = 0;
+ 	output->wait_reg_update = 0;
+ 	reinit_completion(&output->reg_update);
+ 
+-	for (i = 0; i < CAMSS_INIT_BUF_COUNT; i++) {
+-		output->buf[i] = vfe_buf_get_pending(output);
+-		if (!output->buf[i])
+-			break;
+-		output->gen2.active_num++;
+-		vfe_pix_wm_update(vfe, output->buf[i]->addr[0], line);
++	if (outputs & VFE_OUTPUTS_FOLLOW) {
++		for (i = 0; !disp_required && i < CAMSS_INIT_BUF_COUNT; i++) {
++			output->buf[i] = vfe_buf_get_pending(output);
++			if (!output->buf[i])
++				break;
++			output->gen2.active_num++;
++			vfe_pix_wm_update(vfe, output->buf[i]->addr[0], line);
++		}
++		/* Before the first epoch, frame 0 is the next one */
++		output->armed_next = output->gen2.active_num > 0;
++		output->armed_ahead = output->gen2.active_num > 1;
++	} else if (first) {
++		vfe17x_arm_outputs(vfe, outputs);
+ 	}
++	if (first)
++		vfe->pix_next_outputs = outputs;
+ 
+ 	vfe_pix_wm_enable(vfe);
+ 	if (vfe->dual.master && vfe->dual.peer)
+@@ -1149,6 +1450,7 @@ static void vfe_violation_read(struct vfe_device *vfe)
+  */
+ static void vfe17x_fatal_error(struct vfe_device *vfe)
+ {
++	struct vfe_pix_disp *disp = vfe->pix_disp;
+ 	struct vfe_device *master = NULL;
+ 	unsigned long flags;
+ 	unsigned int i;
+@@ -1167,6 +1469,10 @@ static void vfe17x_fatal_error(struct vfe_device *vfe)
+ 			if (vfe->line[i].output.state == VFE_OUTPUT_ON &&
+ 			    vb2_start_streaming_called(&vfe->line[i].video_out.vb2_q))
+ 				vb2_queue_error(&vfe->line[i].video_out.vb2_q);
++		/* The display output takes the frames of the pixel path */
++		if (disp && disp->output.state == VFE_OUTPUT_ON &&
++		    vb2_start_streaming_called(&disp->video.vb2_q))
++			vb2_queue_error(&disp->video.vb2_q);
+ 		if (vfe->dual.peer && !vfe->dual.master)
+ 			master = vfe->dual.peer;
+ 	}
+@@ -1181,9 +1487,30 @@ static void vfe17x_fatal_error(struct vfe_device *vfe)
+ 		vfe17x_fatal_error(master);
+ }
+ 
++/* The display frame being written is corrupt, like those of the lines */
++static void vfe_disp_frame_error(struct vfe_device *vfe)
++{
++	struct vfe_pix_disp *disp = vfe->pix_disp;
++	unsigned long flags;
++
++	if (!disp)
++		return;
++
++	/*
++	 * A dual IFE slave's display path writes a stripe of the master's
++	 * buffers: its own flag marks that stripe (vfe17x_disp_slave_done()).
++	 */
++	spin_lock_irqsave(&vfe->output_lock, flags);
++	if (disp->output.state == VFE_OUTPUT_ON || disp->output.state == VFE_OUTPUT_STOPPING ||
++	    (vfe->dual.peer && !vfe->dual.master))
++		disp->output.error = true;
++	spin_unlock_irqrestore(&vfe->output_lock, flags);
++}
++
+ /*
+  * An error interrupt: the frames being written are corrupt and the VFE is
+- * wedged (see vfe17x_fatal_error()). Every line streaming marks its buffer.
++ * wedged (see vfe17x_fatal_error()). Every line streaming marks its buffer,
++ * and so does the display output (with the pixel line).
+  * A storm of them turns the error interrupts off until the next stream
+  * start.
+  */
+@@ -1269,45 +1596,169 @@ static bool vfe17x_arm_line(struct vfe_device *vfe, struct vfe_line *line)
+ 	return true;
+ }
+ 
++/* As vfe17x_arm_line(), for the display output */
++static void vfe17x_arm_disp(struct vfe_device *vfe)
++{
++	struct vfe_pix_disp *disp = vfe->pix_disp;
++	struct vfe_output *output;
++	struct camss_buffer *buf;
++
++	if (!disp || disp->output.state != VFE_OUTPUT_ON || disp->starting)
++		return;
++
++	output = &disp->output;
++	if (output->armed_next || output->gen2.active_num >= 2)
++		return;
++	buf = vfe_buf_get_pending(output);
++	if (!buf)
++		return;
++
++	disp->buf_writers[output->gen2.active_num] = vfe_disp_next_writers(disp);
++	output->buf[output->gen2.active_num++] = buf;
++	vfe_disp_wm_update(vfe, disp, buf->addr[0]);
++	vfe_reg_update(vfe, VFE_LINE_PIX);
++	output->armed_next = true;
++}
++
++/*
++ * The outputs the next frame needs, all of them, to be written
++ * (IFE17X_OUTPUT_*): those its parameters buffer names, less the outputs not
++ * linked when the pixel path started, with FULL when no image output is left;
++ * without a list, the FULL output and the display output when its link was
++ * on at the pixel path start (vfe_pix_enable_output()), with
++ * VFE_OUTPUTS_FOLLOW. Output and meta locks held.
++ */
++static u32 vfe17x_next_outputs(struct vfe_device *vfe)
++{
++	bool disp = vfe->pix_disp && vfe->pix_disp->required;
++	u32 outputs = vfe17x_meta_next_outputs_locked(vfe);
++
++	if (!outputs)
++		return IFE17X_OUTPUT_FULL | (disp ? IFE17X_OUTPUT_DISPLAY : 0) |
++		       VFE_OUTPUTS_FOLLOW;
++
++	if (!disp)
++		outputs &= ~IFE17X_OUTPUT_DISPLAY;
++	if (!vfe->pix_rdi_linked)
++		outputs &= ~IFE17X_OUTPUT_RDI;
++	if (!(outputs & (IFE17X_OUTPUT_FULL | IFE17X_OUTPUT_DISPLAY)))
++		outputs |= IFE17X_OUTPUT_FULL;
++
++	return outputs;
++}
++
++/* Whether an output has, or can take, a buffer for the next frame */
++static bool vfe_output_can_take(const struct vfe_output *output)
++{
++	if (output->state != VFE_OUTPUT_ON)
++		return false;
++
++	return output->armed_next ||
++	       (output->gen2.active_num < 2 && !list_empty(&output->pending_bufs));
++}
++
++/*
++ * Whether all outputs in @outputs can take the next frame. RDI: every RDI
++ * line linked at the pixel path start, so one not streaming yet makes the
++ * frame wait.
++ */
++static bool vfe17x_outputs_ready(struct vfe_device *vfe, u32 outputs)
++{
++	struct vfe_pix_disp *disp = vfe->pix_disp;
++	unsigned int i;
++
++	if ((outputs & IFE17X_OUTPUT_FULL) &&
++	    !vfe_output_can_take(&vfe->line[VFE_LINE_PIX].output))
++		return false;
++	/* Not the frame its setup latches with (vfe17x_disp_start()) */
++	if ((outputs & IFE17X_OUTPUT_DISPLAY) &&
++	    (!disp || disp->starting || !vfe_output_can_take(&disp->output)))
++		return false;
++	if (outputs & IFE17X_OUTPUT_RDI)
++		for (i = 0; i < vfe->res->line_num; i++)
++			if ((vfe->pix_rdi_linked & BIT(i)) &&
++			    !vfe_output_can_take(&vfe->line[i].output))
++				return false;
++
++	return true;
++}
++
++/* Arm the outputs in @outputs for the next frame, all ready. Output lock held. */
++static void vfe17x_arm_outputs(struct vfe_device *vfe, u32 outputs)
++{
++	unsigned int i;
++
++	if (outputs & IFE17X_OUTPUT_FULL)
++		vfe17x_arm_line(vfe, &vfe->line[VFE_LINE_PIX]);
++	if (outputs & IFE17X_OUTPUT_DISPLAY)
++		vfe17x_arm_disp(vfe);
++	if (outputs & IFE17X_OUTPUT_RDI)
++		for (i = 0; i < vfe->res->line_num; i++)
++			if (vfe->pix_rdi_linked & BIT(i))
++				vfe17x_arm_line(vfe, &vfe->line[i]);
++}
++
++static void vfe17x_disp_next_window(struct vfe_device *vfe);
++
+ /*
+- * The buffers of the next frame. The image path decides: the RDI lines of the
+- * VFE get one only for a frame the image path writes, so that the RAW and
+- * the processed image of a request are one frame. Output lock held. Returns
+- * whether the image path writes the next frame.
++ * The buffers of the next frame. The outputs it needs decide
++ * (vfe17x_next_outputs()): once they can all take it, they all get a buffer
++ * for it and the frame is written, else none does. With a list from the
++ * parameters, only the outputs named get one. Without, the RDI lines of the
++ * VFE, and the display output when not needed, follow: they get a buffer,
++ * also later in the join window, for a frame the FULL output writes. The RAW
++ * and the images of a request so take one frame. Output and meta locks held.
++ * Returns whether the next frame is written.
+  */
+ static bool vfe17x_arm_next(struct vfe_device *vfe)
+ {
+ 	struct vfe_line *pix = &vfe->line[VFE_LINE_PIX];
+-	bool pix_next = false;
++	u32 outputs = vfe->pix_next_outputs;
+ 	unsigned int i;
+ 
+-	if (pix->output.state == VFE_OUTPUT_ON) {
+-		vfe17x_arm_line(vfe, pix);
+-		pix_next = pix->output.armed_next;
++	if (pix->output.state != VFE_OUTPUT_ON)
++		return false;
++
++	/*
++	 * Decided once per frame, with the parameters buffer it takes: its
++	 * outputs, and the display window before the display buffer goes in.
++	 */
++	if (!outputs) {
++		outputs = vfe17x_next_outputs(vfe);
++		if (!vfe17x_outputs_ready(vfe, outputs))
++			return false;
++		vfe17x_disp_next_window(vfe);
++		vfe17x_arm_outputs(vfe, outputs);
++		vfe->pix_next_outputs = outputs;
+ 	}
+ 
++	if (!(outputs & VFE_OUTPUTS_FOLLOW))
++		return true;
++
+ 	for (i = 0; i < vfe->res->line_num; i++) {
+ 		struct vfe_line *line = &vfe->line[i];
+ 
+-		if (line->id != VFE_LINE_PIX && line->output.state == VFE_OUTPUT_ON &&
+-		    pix_next)
++		if (line->id != VFE_LINE_PIX && line->output.state == VFE_OUTPUT_ON)
+ 			vfe17x_arm_line(vfe, line);
+ 	}
++	if (!(outputs & IFE17X_OUTPUT_DISPLAY))
++		vfe17x_arm_disp(vfe);
+ 
+-	return pix_next;
++	return true;
+ }
+ 
+ /*
+  * Epoch 0 of frame k of the pixel path: settle the buffers of frame k + 1, as
+  * its parameters go in now too. While the pixel path runs, buffers are queued
+  * for a frame only here or, until epoch 1 of frame k, when they come
+- * (vfe17x_queue_buffer()): a frame the image path skips for want of a buffer
+- * then takes no request's buffers, and the parameters, statistics, image and
+- * RDI buffers of a request stay on one frame. Returns whether the image path
+- * writes frame k + 1.
++ * (vfe17x_queue_buffer()): a frame not written, for want of a buffer in an
++ * output it needs, then takes no request's buffers, and the parameters,
++ * statistics, image and RDI buffers of a request stay on one frame. Returns
++ * whether frame k + 1 is written.
+  */
+ static bool vfe17x_epoch_refill(struct vfe_device *vfe)
+ {
++	struct vfe_pix_disp *disp = vfe->pix_disp;
+ 	bool next_written;
+ 	unsigned int i;
+ 
+@@ -1317,10 +1768,27 @@ static bool vfe17x_epoch_refill(struct vfe_device *vfe)
+ 		spin_unlock(&vfe->output_lock);
+ 		return false;
+ 	}
+-	/* Frame k uses one buffer: a second one out is frame k + 1's */
+-	for (i = 0; i < vfe->res->line_num; i++)
+-		vfe->line[i].output.armed_next = vfe->line[i].output.gen2.active_num == 2;
++	/*
++	 * Frame k + 1 is the next one now. The buffers armed for frame k are
++	 * being written; one armed ahead at the stream start is frame k + 1's.
++	 * The count of buffers out does not tell, outputs skip frames.
++	 */
++	for (i = 0; i < vfe->res->line_num; i++) {
++		struct vfe_output *output = &vfe->line[i].output;
++
++		output->armed_next = output->armed_ahead;
++		output->armed_ahead = false;
++	}
++	if (disp) {
++		disp->output.armed_next = false;
++		/* A display setup latches with frame k + 1 at the latest */
++		disp->starting = false;
++	}
++	vfe->pix_next_outputs = 0;
++
++	vfe17x_meta_lock(vfe);
+ 	next_written = vfe17x_arm_next(vfe);
++	vfe17x_meta_unlock(vfe);
+ 	spin_unlock(&vfe->output_lock);
+ 
+ 	return next_written;
+@@ -1329,13 +1797,14 @@ static bool vfe17x_epoch_refill(struct vfe_device *vfe)
+ /*
+  * While the pixel path runs, a buffer goes to its line for the next frame
+  * when that frame still lacks one and can still take it (until epoch 1 of the
+- * current frame), and otherwise at the next epoch 0.
++ * current frame), and otherwise at the next epoch 0. The frame takes it once
++ * every image output it needs has a buffer (vfe17x_arm_next()): the last of
++ * them to come lets it join.
+  */
+ static int vfe17x_queue_buffer(struct camss_video *vid, struct camss_buffer *buf)
+ {
+ 	struct vfe_line *line = container_of(vid, struct vfe_line, video_out);
+ 	struct vfe_device *vfe = to_vfe(line);
+-	struct vfe_line *pix = &vfe->line[VFE_LINE_PIX];
+ 	unsigned long flags;
+ 
+ 	/*
+@@ -1351,9 +1820,9 @@ static int vfe17x_queue_buffer(struct camss_video *vid, struct camss_buffer *buf
+ 		vfe_buf_add_pending(&line->output, buf);
+ 		if (!(vfe->dual.peer && !vfe->dual.master) &&
+ 		    vfe17x_meta_join_open_locked(vfe)) {
+-			bool was_next = pix->output.armed_next;
++			bool was_written = vfe->pix_next_outputs;
+ 
+-			if (vfe17x_arm_next(vfe) && !was_next && vfe17x_meta_join_locked(vfe))
++			if (vfe17x_arm_next(vfe) && !was_written && vfe17x_meta_join_locked(vfe))
+ 				vfe_reg_update(vfe, VFE_LINE_PIX);
+ 		}
+ 	}
+@@ -1364,64 +1833,775 @@ static int vfe17x_queue_buffer(struct camss_video *vid, struct camss_buffer *buf
+ }
+ 
+ /*
+- * vfe_isr - VFE module interrupt handler
+- * @irq: Interrupt line
+- * @dev: VFE device
+- *
+- * Return IRQ_HANDLED on success
++ * Display output buffers, as those of the lines (vfe17x_queue_buffer()): while
++ * its output is on, the pixel path runs and the buffer goes to the next frame
++ * if that can still take one and the other image outputs it needs have one.
+  */
+-static irqreturn_t vfe_isr(int irq, void *dev)
++static int vfe17x_disp_queue_buffer(struct camss_video *vid, struct camss_buffer *buf)
+ {
+-	struct vfe_device *vfe = dev;
+-	u32 status0, status1, vfe_bus_status[3];
+-	int i, wm;
+-
+-	status0 = readl_relaxed(vfe->base + VFE_IRQ_STATUS_0);
+-	status1 = readl_relaxed(vfe->base + VFE_IRQ_STATUS_1);
++	struct vfe_pix_disp *disp = container_of(vid, struct vfe_pix_disp, video);
++	struct vfe_device *vfe = disp->vfe;
++	unsigned long flags;
+ 
+-	writel_relaxed(status0, vfe->base + VFE_IRQ_CLEAR_0);
+-	writel_relaxed(status1, vfe->base + VFE_IRQ_CLEAR_1);
++	spin_lock_irqsave(&vfe->output_lock, flags);
++	vfe17x_meta_lock(vfe);
++	vfe_buf_add_pending(&disp->output, buf);
++	if (disp->output.state == VFE_OUTPUT_ON && vfe17x_meta_join_open_locked(vfe)) {
++		bool was_written = vfe->pix_next_outputs;
+ 
+-	/* The bus has three IRQ status registers, independent of line_num */
+-	for (i = 0; i < ARRAY_SIZE(vfe_bus_status); i++) {
+-		vfe_bus_status[i] = readl_relaxed(vfe->base + VFE_BUS_IRQ_STATUS(i));
+-		writel_relaxed(vfe_bus_status[i], vfe->base + VFE_BUS_IRQ_CLEAR(i));
++		if (vfe17x_arm_next(vfe) && !was_written && vfe17x_meta_join_locked(vfe))
++			vfe_reg_update(vfe, VFE_LINE_PIX);
+ 	}
++	vfe17x_meta_unlock(vfe);
++	spin_unlock_irqrestore(&vfe->output_lock, flags);
+ 
+-	/* Enforce ordering between IRQ reading and interpretation */
+-	wmb();
++	return 0;
++}
+ 
+-	writel_relaxed(CMD_GLOBAL_CLEAR, vfe->base + VFE_IRQ_CMD);
+-	writel_relaxed(1, vfe->base + VFE_BUS_IRQ_CLEAR_GLOBAL);
++/* Return the display output buffers; it is off or stopped */
++static void vfe_disp_flush(struct vfe_pix_disp *disp, enum vb2_buffer_state state)
++{
++	struct vfe_output *output = &disp->output;
++	struct vfe_device *vfe = disp->vfe;
++	struct camss_buffer *buf, *tmp;
++	unsigned long flags;
++	unsigned int i;
+ 
+-	if (status0 & STATUS_0_RESET_ACK)
+-		vfe->isr_ops.reset_ack(vfe);
++	spin_lock_irqsave(&vfe->output_lock, flags);
++	list_for_each_entry_safe(buf, tmp, &output->pending_bufs, queue) {
++		list_del(&buf->queue);
++		vb2_buffer_done(&buf->vb.vb2_buf, state);
++	}
++	for (i = 0; i < ARRAY_SIZE(output->buf); i++) {
++		if (output->buf[i])
++			vb2_buffer_done(&output->buf[i]->vb.vb2_buf, state);
++		output->buf[i] = NULL;
++	}
++	/* Dual IFE: those still waiting for the slave's stripe */
++	for (i = 0; i < disp->pair.nheld; i++)
++		vb2_buffer_done(&disp->pair.held[i].buf->vb.vb2_buf, state);
++	memset(&disp->pair, 0, sizeof(disp->pair));
++	disp->slave = NULL;
++	disp->dual = false;
++	disp->buf_writers[0] = 0;
++	disp->buf_writers[1] = 0;
++	output->gen2.active_num = 0;
++	output->armed_next = false;
++	output->state = VFE_OUTPUT_OFF;
++	/* A stop that waits for them is over too */
++	wake_up(&disp->drain_wq);
++	spin_unlock_irqrestore(&vfe->output_lock, flags);
++}
+ 
+-	if ((status0 & VFE_ERR_MASK_0) || (status1 & VFE_ERR_MASK_1) ||
+-	    (vfe_bus_status[0] & VFE_BUS_ERR_MASK_0) ||
+-	    (vfe_bus_status[2] & VFE_BUS_ERR_MASK_2))
+-		vfe_isr_error(vfe, status0 & VFE_ERR_MASK_0, status1 & VFE_ERR_MASK_1,
+-			      vfe_bus_status[0] & VFE_BUS_ERR_MASK_0,
+-			      vfe_bus_status[2] & VFE_BUS_ERR_MASK_2);
++/* Let the frame that disabled write masters still write end: two frame periods */
++static void vfe17x_wait_frame_end(struct vfe_device *vfe)
++{
++	u64 period = vfe17x_meta_period_ns(vfe);
++	unsigned int ms = period ? clamp_t(u64, 2 * div_u64(period, NSEC_PER_MSEC), 34, 500) : 100;
+ 
+-	/*
+-	 * The bus status registers were read and cleared whatever status 0
+-	 * said: a done that came after status 0 was read is in them too, and
+-	 * would be lost if handled only with bit 9 of status 0.
+-	 */
+-	vfe17x_meta_bus(vfe, vfe_bus_status[1]);
++	msleep(ms);
++}
+ 
+-	for (i = VFE_LINE_RDI0; i < vfe->res->line_num; i++)
+-		if (status0 & vfe_reg_update_done_bit(vfe, i))
+-			vfe->isr_ops.reg_update(vfe, i);
++static bool vfe_disp_idle(struct vfe_pix_disp *disp)
++{
++	unsigned long flags;
++	bool idle;
++
++	spin_lock_irqsave(&disp->vfe->output_lock, flags);
++	idle = !disp->output.gen2.active_num && !disp->pair.nheld;
++	spin_unlock_irqrestore(&disp->vfe->output_lock, flags);
++
++	return idle;
++}
++
++/*
++ * Stop the display output: its write masters get no more buffers, and once
++ * they wrote the frames they have addresses of, they and the path turn off.
++ * A write master disabled with an address queued keeps it, and the next start
++ * would write that frame into a buffer long returned. Those frames come while
++ * the pixel path runs, which it does until it stopped the display output;
++ * when they do not (a wedged VFE), the addresses stay until the VFE is reset.
++ * With dual IFE, both stripes of those frames. Another stop may be at it too:
++ * then this one waits as well.
++ */
++static void vfe_disp_drain(struct vfe_pix_disp *disp)
++{
++	struct vfe_device *vfe = disp->vfe;
++	u64 period = vfe17x_meta_period_ns(vfe);
++	unsigned int ms = period ? clamp_t(u64, 4 * div_u64(period, NSEC_PER_MSEC),
++					   100, 1000) : 200;
++	unsigned long flags;
++	bool stopping, idle;
++
++	spin_lock_irqsave(&vfe->output_lock, flags);
++	if (disp->output.state == VFE_OUTPUT_ON)
++		disp->output.state = VFE_OUTPUT_STOPPING;
++	stopping = disp->output.state == VFE_OUTPUT_STOPPING;
++	spin_unlock_irqrestore(&vfe->output_lock, flags);
++	if (!stopping)
++		return;
++
++	idle = wait_event_timeout(disp->drain_wq, vfe_disp_idle(disp), msecs_to_jiffies(ms));
++
++	spin_lock_irqsave(&vfe->output_lock, flags);
++	if (disp->output.state == VFE_OUTPUT_STOPPING) {
++		vfe_disp_hw_off(vfe);
++		writel_relaxed(0, vfe->base + VFE_BUS_COMP_MASK(DISP_COMP_GROUP));
++		if (disp->slave) {
++			vfe_disp_hw_off(disp->slave);
++			writel_relaxed(0, disp->slave->base + VFE_BUS_COMP_MASK(DISP_COMP_GROUP));
++		}
++		vfe_reg_update(vfe, VFE_LINE_PIX);
++	}
++	spin_unlock_irqrestore(&vfe->output_lock, flags);
++
++	if (!idle) {
++		dev_warn(vfe->camss->dev, "VFE%d: display frames not written within %u ms\n",
++			 vfe->id, ms);
++		vfe17x_wait_frame_end(vfe);
++	}
++}
++
++static int vfe17x_disp_flush_buffers(struct camss_video *vid, enum vb2_buffer_state state)
++{
++	struct vfe_pix_disp *disp = container_of(vid, struct vfe_pix_disp, video);
++
++	/* Stopped already when the stream stops (vfe17x_disp_stop()) */
++	vfe_disp_drain(disp);
++	vfe_disp_flush(disp, state);
++
++	return 0;
++}
++
++const struct camss_video_ops vfe17x_disp_video_ops = {
++	.queue_buffer = vfe17x_disp_queue_buffer,
++	.flush_buffers = vfe17x_disp_flush_buffers,
++};
++
++/*
++ * The stripes of the display output for the window @compose, @crop of the
++ * whole frame, into @st; returns the VFEs that write it, 0 when it does not
++ * fit. One IFE: the window as it is.
++ *
++ * Dual IFE: the master's display path takes the frame's columns [0, Wm), the
++ * slave's [x0, x0 + Ws) with x0 = split - pad: the slave's pixel line crop
++ * starts pad columns into its stripe, at the frame's column split where the
++ * master's output ends (struct vfe_pix_disp geo).
++ *
++ * Both scalers start at their first column and step by the frame's step
++ * s = W / cw (frame columns per compose column), so the slave's output column
++ * k lies at the frame's output column k + x0 / s: a fraction off a whole
++ * column unless the split was chosen for it. The slave's columns are taken as
++ * k + off, off the even number nearest x0 / s, so that the chroma, with half
++ * the columns, lines up too.
++ *
++ * Each display path keeps 16 input columns off the inner edge of its stripe,
++ * where the demosaic lacks neighbours. A crop within the master's reach
++ * (cx + dw) * s <= Wm - 16 is the master's alone; else one within the
++ * slave's, (cx - off) * s >= 16, the slave's alone, from its column cx - off;
++ * the other VFE's stripe is left as it is. Else the master writes the
++ * frame's output columns [cx, Jb) of the crop, the slave [Jb, cx + dw) from
++ * its own column Jb - off: the seam Jb satisfies both margins (Jb * s <= Wm -
++ * 16, (Jb - off) * s >= 16) and is the column nearest split / s for which the
++ * master's part, the slave's offset in the buffer, is a multiple of 16 bytes,
++ * or else of the largest power of two down to 2 that fits. The slave scales
++ * up to the last column the crop takes, whose sample point lies inside its
++ * stripe.
++ *
++ * Output lock held. @slave: NULL once the slave's pixel path stopped.
++ */
++static u8 vfe_disp_stripes(struct vfe_pix_disp *disp, struct vfe_device *slave,
++			   const struct v4l2_rect *compose, const struct v4l2_rect *crop,
++			   struct vfe_disp_stripe *st)
++{
++	u64 w = disp->fmt[MSM_VFE_PAD_SINK].width;
++	u64 cw = compose->width;
++	u64 wm = disp->geo.wm, ws = disp->geo.ws;
++	u64 split = disp->geo.split, pad = disp->geo.pad;
++	u64 cx = crop->left, end = crop->left + crop->width;
++	u64 x0, off, kmin, lo, hi, last, target, jb = 0;
++	unsigned int align;
++
++	if (!disp->dual) {
++		st[0] = (struct vfe_disp_stripe) {
++			.in_w = w, .out_w = cw, .crop = *crop, .offset = 0,
++		};
++		return VFE_DISP_MASTER;
++	}
++
++	if (pad > split || wm <= 16 || end < 2)
++		return 0;
++	x0 = split - pad;
++	off = 2 * div64_u64(x0 * cw + w, 2 * w);
++	kmin = DIV64_U64_ROUND_UP(16 * cw, w);
++
++	/* Within the master's reach */
++	if (end * w <= (wm - 16) * cw) {
++		st[0] = (struct vfe_disp_stripe) {
++			.in_w = wm, .out_w = div64_u64(wm * cw, w), .crop = *crop, .offset = 0,
++		};
++		return VFE_DISP_MASTER;
++	}
++
++	/* The last column the slave scales: its sample point in the stripe */
++	if (!slave || end - 1 < off)
++		return 0;
++	last = end - 1 - off;
++	if (last * w >= ws * cw)
++		return 0;
++
++	/* Within the slave's reach */
++	if (cx >= off + kmin) {
++		st[1] = (struct vfe_disp_stripe) {
++			.in_w = ws,
++			.out_w = max(div64_u64(ws * cw, w), last + 1),
++			.crop = { cx - off, crop->top, crop->width, crop->height },
++			.offset = 0,
++		};
++		return VFE_DISP_SLAVE;
++	}
++
++	lo = max(cx + 1, off + kmin);
++	hi = min(end - 1, div64_u64((wm - 16) * cw, w));
++	target = split * cw;
++	for (align = 16; align >= 2 && !jb; align /= 2) {
++		u64 nlo, nhi, n;
++
++		if (lo > hi)
++			break;
++		nlo = DIV64_U64_ROUND_UP(lo - cx, align);
++		nhi = div64_u64(hi - cx, align);
++		if (nlo > nhi)
++			continue;
++		/* Nearest to split / s */
++		n = target > cx * w ? div64_u64(target - cx * w + w * align / 2, w * align) : 0;
++		n = clamp(n, nlo, nhi);
++		jb = cx + n * align;
++	}
++	if (!jb)
++		return 0;
++
++	st[0] = (struct vfe_disp_stripe) {
++		.in_w = wm,
++		.out_w = div64_u64(wm * cw, w),
++		.crop = { cx, crop->top, jb - cx, crop->height },
++		.offset = 0,
++	};
++	st[1] = (struct vfe_disp_stripe) {
++		.in_w = ws,
++		.out_w = max(div64_u64(ws * cw, w), last + 1),
++		.crop = { jb - off, crop->top, end - jb, crop->height },
++		.offset = jb - cx,
++	};
++
++	return VFE_DISP_MASTER | VFE_DISP_SLAVE;
++}
++
++/* How the window @compose, @crop is split, at debug level */
++static void vfe_disp_stripes_dbg(struct vfe_device *vfe, struct vfe_pix_disp *disp,
++				 const char *what, const struct v4l2_rect *compose,
++				 const struct v4l2_rect *crop)
++{
++	const struct vfe_disp_stripe *st = disp->stripe;
++	u64 w = disp->fmt[MSM_VFE_PAD_SINK].width;
++	s64 residual;
++
++	if (!disp->dual) {
++		dev_dbg(vfe->camss->dev, "VFE%d: display %s %ux%u, crop %ux%u@%d,%d\n",
++			vfe->id, what, compose->width, compose->height, crop->width,
++			crop->height, crop->left, crop->top);
++		return;
++	}
++
++	/* The slave's column k is the frame's k + off */
++	residual = (s64)div64_u64((u64)(disp->geo.split - disp->geo.pad) * compose->width *
++				  1000, w) -
++		   (s64)((disp->writers & VFE_DISP_MASTER ?
++			  st[0].crop.left + st[0].crop.width : crop->left) -
++			 st[1].crop.left) * 1000;
++	dev_dbg(vfe->camss->dev,
++		"VFE%d: display %s %ux%u, crop %ux%u@%d,%d: master %u columns, slave %u from its column %d at offset %u, residual %lld/1000 columns\n",
++		vfe->id, what, compose->width, compose->height, crop->width, crop->height,
++		crop->left, crop->top,
++		disp->writers & VFE_DISP_MASTER ? st[0].crop.width : 0,
++		disp->writers & VFE_DISP_SLAVE ? st[1].crop.width : 0,
++		disp->writers & VFE_DISP_SLAVE ? st[1].crop.left : 0,
++		disp->writers & VFE_DISP_SLAVE ? st[1].offset : 0,
++		disp->writers & VFE_DISP_SLAVE ? residual : 0LL);
++}
++
++/*
++ * A stripe of a VFE that does not write the window: a valid setup that
++ * writes nothing, until a window needs it.
++ */
++static void vfe_disp_idle_stripe(struct vfe_disp_stripe *st, u32 in_w, u64 w,
++				 const struct v4l2_rect *compose, const struct v4l2_rect *crop)
++{
++	*st = (struct vfe_disp_stripe) {
++		.in_w = in_w,
++		.out_w = div64_u64((u64)in_w * compose->width, w),
++		.crop = { 0, crop->top, VFE_DISP_MIN_WIDTH, crop->height },
++		.offset = 0,
++	};
++}
++
++/*
++ * The window of the next frame, from the parameters buffer that frame takes
++ * when it sets one (struct ife17x_params_display_window): program the display
++ * scalers and crops for it, and with dual IFE the stripes, before the frame's
++ * display buffer goes in, at the offset of the slave's part. They latch with
++ * the PIX register update of that frame, with its parameters. A window the
++ * display output cannot take is ignored; the frame keeps the previous one.
++ * Output and meta locks held.
++ */
++static void vfe17x_disp_next_window(struct vfe_device *vfe)
++{
++	struct vfe_pix_disp *disp = vfe->pix_disp;
++	const struct ife17x_params_display_window *w;
++	const struct v4l2_mbus_framefmt *sink;
++	struct vfe_disp_stripe st[2];
++	struct v4l2_rect compose, crop;
++	u32 in_h;
++	u8 writers;
++
++	if (!disp || disp->output.state != VFE_OUTPUT_ON)
++		return;
++	w = vfe17x_meta_next_window_locked(vfe);
++	if (!w)
++		return;
++
++	sink = &disp->fmt[MSM_VFE_PAD_SINK];
++	compose = (struct v4l2_rect){ 0, 0, w->compose_width, w->compose_height };
++	crop = (struct v4l2_rect){ w->crop_left, w->crop_top, disp->crop.width,
++				   disp->crop.height };
++	if (v4l2_rect_equal(&compose, &disp->win_compose) &&
++	    v4l2_rect_equal(&crop, &disp->win_crop))
++		return;
++
++	memcpy(st, disp->stripe, sizeof(st));
++	writers = vfe17x_disp_window_valid(sink, &compose, &crop) ?
++		  vfe_disp_stripes(disp, disp->slave, &compose, &crop, st) : 0;
++	if (!writers) {
++		dev_dbg(vfe->camss->dev,
++			"VFE%d: display window %ux%u, crop %ux%u@%d,%d ignored\n", vfe->id,
++			compose.width, compose.height, crop.width, crop.height, crop.left,
++			crop.top);
++		return;
++	}
++
++	in_h = vfe->line[VFE_LINE_PIX].fmt[MSM_VFE_PAD_SINK].height;
++	if (writers & VFE_DISP_MASTER)
++		vfe_disp_stripe_update(vfe, &st[0], &disp->stripe[0], sink->width, &compose,
++				       in_h);
++	if (writers & VFE_DISP_SLAVE)
++		vfe_disp_stripe_update(disp->slave, &st[1], &disp->stripe[1], sink->width,
++				       &compose, in_h);
++	memcpy(disp->stripe, st, sizeof(st));
++	disp->writers = writers;
++	disp->win_compose = compose;
++	disp->win_crop = crop;
++	vfe_reg_update(vfe, VFE_LINE_PIX);
++
++	vfe_disp_stripes_dbg(vfe, disp, "window", &compose, &crop);
++}
++
++/*
++ * Start the display output, on a running pixel path: of one IFE, or of the
++ * master of a dual IFE pair, whose display output then stands for the frame.
++ * Its setup latches at the next frame; it gets its first buffer at the epoch
++ * 0 after, for a frame that starts with that setup.
++ */
++int vfe17x_disp_start(struct vfe_pix_disp *disp)
++{
++	struct vfe_device *vfe = disp->vfe;
++	struct vfe_line *pix = &vfe->line[VFE_LINE_PIX];
++	const struct v4l2_mbus_framefmt *sink = &disp->fmt[MSM_VFE_PAD_SINK];
++	struct vfe_output *output = &disp->output;
++	struct vfe_device *slave = NULL;
++	unsigned long flags;
++	u32 width;
++	int ret = 0;
++
++	spin_lock_irqsave(&vfe->output_lock, flags);
++	/* A dual IFE slave's display path writes a stripe of the master's */
++	if (pix->output.state != VFE_OUTPUT_ON || vfe->pix_stopping ||
++	    (vfe->dual.peer && !vfe->dual.master) || output->state != VFE_OUTPUT_OFF) {
++		ret = -EBUSY;
++		goto out_unlock;
++	}
++
++	width = pix->fmt[MSM_VFE_PAD_SINK].width;
++	if (vfe->dual.master && vfe->dual.peer) {
++		const struct vfe_line *spix;
++
++		slave = vfe->dual.peer;
++		spix = &slave->line[VFE_LINE_PIX];
++		/* The slave's own display path writes its stripe */
++		if (spix->output.state != VFE_OUTPUT_ON || READ_ONCE(slave->pix_stopping) ||
++		    !slave->pix_disp) {
++			ret = -EBUSY;
++			goto out_unlock;
++		}
++		/*
++		 * The stripes' input columns are the frame's (vfe_disp_stripes()):
++		 * the master's crop starts at its first column, neither pixel
++		 * path scales.
++		 */
++		if (pix->crop.left ||
++		    pix->compose.width != pix->fmt[MSM_VFE_PAD_SINK].width ||
++		    pix->compose.height != pix->fmt[MSM_VFE_PAD_SINK].height ||
++		    spix->compose.width != spix->fmt[MSM_VFE_PAD_SINK].width ||
++		    spix->compose.height != spix->fmt[MSM_VFE_PAD_SINK].height) {
++			ret = -EPIPE;
++			goto out_unlock;
++		}
++		/* The frame: the master's output columns and the slave's */
++		width = vfe->dual.x_offset + slave->line[VFE_LINE_PIX].crop.width;
++	}
++	/* The formats may have changed since the pipeline was validated */
++	if (sink->width != width || sink->height != pix->fmt[MSM_VFE_PAD_SINK].height ||
++	    sink->code != pix->fmt[MSM_VFE_PAD_SRC].code ||
++	    (slave && slave->line[VFE_LINE_PIX].fmt[MSM_VFE_PAD_SINK].height != sink->height)) {
++		ret = -EPIPE;
++		goto out_unlock;
++	}
++
++	memset(&disp->pair, 0, sizeof(disp->pair));
++	disp->dual = !!slave;
++	if (slave) {
++		disp->geo.wm = pix->fmt[MSM_VFE_PAD_SINK].width;
++		disp->geo.ws = slave->line[VFE_LINE_PIX].fmt[MSM_VFE_PAD_SINK].width;
++		disp->geo.split = vfe->dual.x_offset;
++		disp->geo.pad = slave->line[VFE_LINE_PIX].crop.left;
++		vfe_disp_idle_stripe(&disp->stripe[0], disp->geo.wm, sink->width,
++				     &disp->compose, &disp->crop);
++		vfe_disp_idle_stripe(&disp->stripe[1], disp->geo.ws, sink->width,
++				     &disp->compose, &disp->crop);
++	}
++	disp->writers = vfe_disp_stripes(disp, slave, &disp->compose, &disp->crop,
++					 disp->stripe);
++	if (!disp->writers) {
++		disp->dual = false;
++		ret = -EINVAL;
++		goto out_unlock;
++	}
++	/* Its stripe's error flag (vfe_disp_frame_error()) */
++	if (slave)
++		slave->pix_disp->output.error = false;
++	disp->slave = slave;
++	disp->win_compose = disp->compose;
++	disp->win_crop = disp->crop;
++	disp->buf_writers[0] = 0;
++	disp->buf_writers[1] = 0;
++
++	WARN_ON(output->gen2.active_num);
++	output->sequence = 0;
++	output->error = false;
++	output->armed_next = false;
++	/*
++	 * No buffer for the next frame, which may start before the setup
++	 * latches; when the display output is required, no frame is written
++	 * until then (vfe17x_outputs_ready()).
++	 */
++	disp->starting = true;
++	vfe_disp_hw_on(vfe, disp);
++	output->state = VFE_OUTPUT_ON;
++	vfe_reg_update(vfe, VFE_LINE_PIX);
++
++out_unlock:
++	spin_unlock_irqrestore(&vfe->output_lock, flags);
++
++	if (ret)
++		dev_dbg(vfe->camss->dev, "VFE%d: display output not started: %d\n", vfe->id, ret);
++	else
++		vfe_disp_stripes_dbg(vfe, disp, "output", &disp->compose, &disp->crop);
++
++	return ret;
++}
++
++/*
++ * Stop the display output and return its buffers. From its own stream stop,
++ * while the pixel path goes on, and from the pixel path stop, before it stops.
++ */
++void vfe17x_disp_stop(struct vfe_pix_disp *disp)
++{
++	vfe_disp_drain(disp);
++	vfe_disp_flush(disp, VB2_BUF_STATE_ERROR);
++}
++
++/*
++ * Master's output lock held: number a display buffer done at @ts by the
++ * epochs, like the image path's (vfe_isr_wm_done()).
++ */
++static void vfe_disp_number(struct vfe_device *master, struct vfe_pix_disp *disp,
++			    struct camss_buffer *buf, u64 ts)
++{
++	buf->vb.vb2_buf.timestamp = ts;
++	buf->vb.sequence = disp->output.sequence++;
++	vfe17x_meta_sequence(master, &buf->vb.sequence);
++}
++
++/*
++ * Dual IFE: the slave's display path wrote its stripe of a frame, into a
++ * buffer of the master's display output (see vfe_pix_dual_slave_done()).
++ * A buffer the master wrote within VFE_DUAL_MATCH_NS is that frame's, older
++ * ones lack the slave's stripe. Without one, the stripe is that of the
++ * oldest buffer out if only the slave writes it (its window lies on the
++ * slave's side), else of a buffer whose master stripe is still to come.
++ */
++static void vfe17x_disp_slave_done(struct vfe_device *vfe)
++{
++	struct camss_buffer *done[VFE_DUAL_HELD + 1];
++	bool error[VFE_DUAL_HELD + 1];
++	struct vfe_device *master;
++	unsigned long flags;
++	unsigned int i, n = 0;
++	u64 ts = ktime_get_ns();
++	bool stripe_error;
++
++	spin_lock_irqsave(&vfe->output_lock, flags);
++	/* A corrupt stripe makes the master's buffer of that frame corrupt */
++	stripe_error = vfe->pix_disp && vfe->pix_disp->output.error;
++	if (vfe->pix_disp)
++		vfe->pix_disp->output.error = false;
++	master = vfe->dual.peer;
++	if (master) {
++		struct vfe_pix_disp *disp;
++
++		spin_lock_nested(&master->output_lock, SINGLE_DEPTH_NESTING);
++		disp = master->pix_disp;
++		if (disp && disp->slave == vfe &&
++		    (disp->output.state == VFE_OUTPUT_ON ||
++		     disp->output.state == VFE_OUTPUT_STOPPING)) {
++			struct vfe_pix_dual *d = &disp->pair;
++			struct vfe_output *output = &disp->output;
++			bool matched = false;
++
++			i = 0;
++			while (i < d->nheld) {
++				u64 t = d->held[i].ts;
++
++				if (t + VFE_DUAL_MATCH_NS > ts && t < ts + VFE_DUAL_MATCH_NS) {
++					error[n] = d->held[i].error || stripe_error;
++					matched = true;
++				} else if (t + VFE_DUAL_MATCH_NS <= ts) {
++					error[n] = true;
++				} else {
++					i++;
++					continue;
++				}
++				done[n++] = d->held[i].buf;
++				memmove(&d->held[i], &d->held[i + 1],
++					(--d->nheld - i) * sizeof(d->held[0]));
++			}
++
++			if (!matched && output->buf[0] &&
++			    disp->buf_writers[0] == VFE_DISP_SLAVE) {
++				vfe_disp_number(master, disp, output->buf[0], ts);
++				error[n] = stripe_error;
++				done[n++] = output->buf[0];
++				vfe_disp_shift(disp);
++			} else if (!matched) {
++				d->slave_ts = ts;
++				d->slave_error = stripe_error;
++			}
++			if (!d->nheld && !output->gen2.active_num)
++				wake_up(&disp->drain_wq);
++		}
++		spin_unlock(&master->output_lock);
++	}
++	spin_unlock_irqrestore(&vfe->output_lock, flags);
++
++	for (i = 0; i < n; i++)
++		vb2_buffer_done(&done[i]->vb.vb2_buf,
++				error[i] ? VB2_BUF_STATE_ERROR : VB2_BUF_STATE_DONE);
++}
++
++/*
++ * Composite group of the display write masters: a display frame is written.
++ * It is numbered like the image path's (vfe_isr_wm_done()), by the epochs.
++ * With dual IFE, a buffer both VFEs write is done once the slave wrote its
++ * stripe of the same frame too, which completes within VFE_DUAL_MATCH_NS; one
++ * only the master writes is done now.
++ */
++static void vfe17x_disp_done(struct vfe_device *vfe)
++{
++	struct vfe_pix_disp *disp = vfe->pix_disp;
++	struct camss_buffer *ready_buf, *done[4];
++	bool error[4] = { };
++	struct vfe_output *output;
++	unsigned long flags;
++	unsigned int i, ndone = 0;
++	u64 ts = ktime_get_ns();
++	u8 writers;
++	bool bad;
++
++	if (!disp)
++		return;
++
++	if (vfe->dual.peer && !vfe->dual.master) {
++		vfe17x_disp_slave_done(vfe);
++		return;
++	}
++
++	spin_lock_irqsave(&vfe->output_lock, flags);
++	output = &disp->output;
++	/* Stopping, the frames already given buffers are still written */
++	if (output->state != VFE_OUTPUT_ON && output->state != VFE_OUTPUT_STOPPING)
++		goto out_unlock;
++
++	/*
++	 * Dual IFE: buffers out before this frame's that only the slave
++	 * writes lack their stripe, which comes before the master's next
++	 * one.
++	 */
++	while (disp->dual && output->buf[0] && !(disp->buf_writers[0] & VFE_DISP_MASTER) &&
++	       ndone < 2) {
++		vfe_disp_number(vfe, disp, output->buf[0], ts);
++		error[ndone] = true;
++		done[ndone++] = output->buf[0];
++		vfe_disp_shift(disp);
++	}
++
++	ready_buf = output->buf[0];
++	if (!ready_buf) {
++		dev_err_ratelimited(vfe->camss->dev, "VFE%d: display done without a buffer\n",
++				    vfe->id);
++		goto out_done;
++	}
++	writers = disp->buf_writers[0];
++
++	/* A frame that began before the stream: write the buffer again later */
++	if (!vfe17x_meta_frame_started(vfe)) {
++		output->buf[0] = output->buf[1];
++		disp->buf_writers[0] = disp->buf_writers[1];
++		if (output->buf[0]) {
++			output->buf[1] = ready_buf;
++			disp->buf_writers[1] = writers;
++		} else {
++			output->buf[0] = ready_buf;
++			disp->buf_writers[0] = writers;
++		}
++		vfe_disp_wm_update(vfe, disp, ready_buf->addr[0]);
++		vfe_reg_update(vfe, VFE_LINE_PIX);
++		goto out_done;
++	}
++
++	vfe_disp_number(vfe, disp, ready_buf, ts);
++	bad = output->error;
++	output->error = false;
++
++	/* The next buffers go in at the epochs of the pixel path */
++	vfe_disp_shift(disp);
++
++	if (disp->dual && (writers & VFE_DISP_SLAVE)) {
++		struct vfe_pix_dual *d = &disp->pair;
++
++		if (!disp->slave) {
++			/* The slave's pixel path stopped: its stripe is missing */
++			error[ndone] = true;
++			done[ndone++] = ready_buf;
++		} else if (d->slave_ts + VFE_DUAL_MATCH_NS > ts) {
++			error[ndone] = bad || d->slave_error;
++			done[ndone++] = ready_buf;
++		} else {
++			if (d->nheld == VFE_DUAL_HELD) {
++				error[ndone] = true;
++				done[ndone++] = d->held[0].buf;
++				memmove(&d->held[0], &d->held[1], --d->nheld * sizeof(d->held[0]));
++			}
++			d->held[d->nheld].buf = ready_buf;
++			d->held[d->nheld].ts = ts;
++			d->held[d->nheld].error = bad;
++			d->nheld++;
++		}
++	} else {
++		error[ndone] = bad;
++		done[ndone++] = ready_buf;
++	}
++
++out_done:
++	if (!output->gen2.active_num && !disp->pair.nheld)
++		wake_up(&disp->drain_wq);
++	spin_unlock_irqrestore(&vfe->output_lock, flags);
++
++	for (i = 0; i < ndone; i++) {
++		if (error[i])
++			dev_dbg_ratelimited(vfe->camss->dev, "VFE%d: display frame %u corrupt\n",
++					    vfe->id, done[i]->vb.sequence);
++		vb2_buffer_done(&done[i]->vb.vb2_buf,
++				error[i] ? VB2_BUF_STATE_ERROR : VB2_BUF_STATE_DONE);
++	}
++	return;
++
++out_unlock:
++	spin_unlock_irqrestore(&vfe->output_lock, flags);
++}
++
++/*
++ * vfe_isr - VFE module interrupt handler
++ * @irq: Interrupt line
++ * @dev: VFE device
++ *
++ * Return IRQ_HANDLED on success
++ */
++static irqreturn_t vfe_isr(int irq, void *dev)
++{
++	struct vfe_device *vfe = dev;
++	u32 status0, status1, vfe_bus_status[3];
++	int i, wm;
++
++	status0 = readl_relaxed(vfe->base + VFE_IRQ_STATUS_0);
++	status1 = readl_relaxed(vfe->base + VFE_IRQ_STATUS_1);
++
++	writel_relaxed(status0, vfe->base + VFE_IRQ_CLEAR_0);
++	writel_relaxed(status1, vfe->base + VFE_IRQ_CLEAR_1);
++
++	/* The bus has three IRQ status registers, independent of line_num */
++	for (i = 0; i < ARRAY_SIZE(vfe_bus_status); i++) {
++		vfe_bus_status[i] = readl_relaxed(vfe->base + VFE_BUS_IRQ_STATUS(i));
++		writel_relaxed(vfe_bus_status[i], vfe->base + VFE_BUS_IRQ_CLEAR(i));
++	}
++
++	/* Enforce ordering between IRQ reading and interpretation */
++	wmb();
++
++	writel_relaxed(CMD_GLOBAL_CLEAR, vfe->base + VFE_IRQ_CMD);
++	writel_relaxed(1, vfe->base + VFE_BUS_IRQ_CLEAR_GLOBAL);
++
++	if (status0 & STATUS_0_RESET_ACK)
++		vfe->isr_ops.reset_ack(vfe);
++
++	if ((status0 & VFE_ERR_MASK_0) || (status1 & VFE_ERR_MASK_1) ||
++	    (vfe_bus_status[0] & VFE_BUS_ERR_MASK_0) ||
++	    (vfe_bus_status[2] & VFE_BUS_ERR_MASK_2))
++		vfe_isr_error(vfe, status0 & VFE_ERR_MASK_0, status1 & VFE_ERR_MASK_1,
++			      vfe_bus_status[0] & VFE_BUS_ERR_MASK_0,
++			      vfe_bus_status[2] & VFE_BUS_ERR_MASK_2);
++
++	/*
++	 * The bus status registers were read and cleared whatever status 0
++	 * said: a done that came after status 0 was read is in them too, and
++	 * would be lost if handled only with bit 9 of status 0.
++	 */
++	vfe17x_meta_bus(vfe, vfe_bus_status[1]);
++
++	for (i = VFE_LINE_RDI0; i < vfe->res->line_num; i++)
++		if (status0 & vfe_reg_update_done_bit(vfe, i))
++			vfe->isr_ops.reg_update(vfe, i);
+ 
+ 	for (i = VFE_LINE_RDI0; i < vfe->res->line_num; i++)
+ 		if (status0 & STATUS_1_RDI_SOF(i))
+ 			vfe->isr_ops.sof(vfe, i);
+ 
+-	for (i = 0; i < MSM_VFE_COMPOSITE_IRQ_NUM; i++)
+-		if (vfe_bus_status[0] & STATUS0_COMP_BUF_DONE(i))
++	for (i = 0; i < MSM_VFE_COMPOSITE_IRQ_NUM; i++) {
++		if (!(vfe_bus_status[0] & STATUS0_COMP_BUF_DONE(i)))
++			continue;
++		if (i == DISP_COMP_GROUP)
++			vfe17x_disp_done(vfe);
++		else
+ 			vfe->isr_ops.comp_done(vfe, i);
++	}
+ 
+ 	for (wm = 0; wm < MSM_VFE_IMAGE_MASTERS_NUM; wm++)
+ 		if ((vfe_bus_status[1] & STATUS1_WM_CLIENT_BUF_DONE(wm)) &&
+@@ -1524,6 +2704,53 @@ static int vfe_get_output(struct vfe_line *line)
+ 	return -EINVAL;
+ }
+ 
++/*
++ * An RDI line starting while the pixel path of the VFE runs gets its buffers
++ * at the frames the pixel path writes (vfe17x_arm_next()), from the next epoch
++ * 0 on, not straight away for whatever frames come next: the RAW and the
++ * images of a request take one frame from the first one. A dual IFE slave's
++ * RDI lines start as without a pixel path.
++ */
++static int vfe17x_rdi_enable_output(struct vfe_line *line)
++{
++	struct vfe_device *vfe = to_vfe(line);
++	struct vfe_output *output = &line->output;
++	unsigned long flags;
++	bool pix_runs;
++	int ret = 0;
++
++	spin_lock_irqsave(&vfe->output_lock, flags);
++	vfe17x_meta_lock(vfe);
++	pix_runs = vfe17x_meta_running_locked(vfe) && !(vfe->dual.peer && !vfe->dual.master);
++	vfe17x_meta_unlock(vfe);
++	if (!pix_runs) {
++		spin_unlock_irqrestore(&vfe->output_lock, flags);
++		return vfe_enable_output_v2(line);
++	}
++
++	vfe_reg_update_clear(vfe, line->id);
++	if (output->state > VFE_OUTPUT_RESERVED) {
++		dev_err(vfe->camss->dev, "Output is not in reserved state %d\n", output->state);
++		ret = -EINVAL;
++		goto out_unlock;
++	}
++	WARN_ON(output->gen2.active_num);
++
++	output->state = VFE_OUTPUT_ON;
++	output->armed_next = false;
++	output->armed_ahead = false;
++	output->error = false;
++	output->sequence = 0;
++	output->wait_reg_update = 0;
++	reinit_completion(&output->reg_update);
++	vfe_wm_start(vfe, output->wm_idx[0], line);
++
++out_unlock:
++	spin_unlock_irqrestore(&vfe->output_lock, flags);
++
++	return ret;
++}
++
+ /*
+  * vfe_enable - Enable streaming on VFE line
+  * @line: VFE line
+@@ -1553,7 +2780,7 @@ static int vfe_enable(struct vfe_line *line)
+ 	if (vfe_line_has_pix_pipeline(vfe, line->id))
+ 		ret = vfe_pix_enable_output(line);
+ 	else
+-		ret = vfe_enable_output_v2(line);
++		ret = vfe17x_rdi_enable_output(line);
+ 	if (ret < 0)
+ 		goto error_enable_output;
+ 
+@@ -1765,17 +2992,62 @@ static void vfe_subdev_init(struct device *dev, struct vfe_device *vfe)
+ 	vfe->video_ops = vfe_video_ops_170;
+ }
+ 
+-/* Stop the pixel path statistics before the generic disable resets the VFE */
++/*
++ * Dual IFE slave stopping, both locks held: its display path no longer writes
++ * the master's display output. The master's buffers waiting for its stripe
++ * go into @done, failed, and the frames still to come lack that stripe.
++ */
++static unsigned int vfe_disp_slave_leave(struct vfe_device *vfe, struct vfe_device *master,
++					 struct camss_buffer **done)
++{
++	struct vfe_pix_disp *disp = master->pix_disp;
++	unsigned int i, n;
++
++	if (!disp || disp->slave != vfe)
++		return 0;
++
++	vfe_disp_hw_off(vfe);
++	writel_relaxed(0, vfe->base + VFE_BUS_COMP_MASK(DISP_COMP_GROUP));
++	disp->slave = NULL;
++	n = disp->pair.nheld;
++	for (i = 0; i < n; i++)
++		done[i] = disp->pair.held[i].buf;
++	disp->pair.nheld = 0;
++	/* Buffers out that only the slave writes */
++	while (disp->output.buf[0] && disp->buf_writers[0] == VFE_DISP_SLAVE) {
++		done[n++] = disp->output.buf[0];
++		vfe_disp_shift(disp);
++	}
++	if (!disp->output.gen2.active_num)
++		wake_up(&disp->drain_wq);
++
++	return n;
++}
++
++/*
++ * Stop the pixel path display output and statistics before the generic
++ * disable resets the VFE
++ */
+ static int vfe17x_disable(struct vfe_line *line)
+ {
+ 	struct vfe_device *vfe = to_vfe(line);
+-	struct camss_buffer *done[VFE_DUAL_HELD];
++	struct camss_buffer *done[2 * VFE_DUAL_HELD + 2];
+ 	unsigned int i, n = 0;
+ 	unsigned long flags;
+ 	bool last;
+ 	int ret;
+ 
+ 	if (vfe_line_has_pix_pipeline(vfe, line->id)) {
++		/*
++		 * The display output takes its frames from the pixel path: a
++		 * display node starting while it stops would find it running
++		 * until the VFE is reset (vfe17x_disp_start()).
++		 */
++		spin_lock_irqsave(&vfe->output_lock, flags);
++		vfe->pix_stopping = true;
++		spin_unlock_irqrestore(&vfe->output_lock, flags);
++		if (vfe->pix_disp)
++			vfe17x_disp_stop(vfe->pix_disp);
+ 		vfe17x_meta_stop(vfe);
+ 
+ 		/*
+@@ -1792,6 +3064,7 @@ static int vfe17x_disable(struct vfe_line *line)
+ 			spin_lock_nested(&m->output_lock, SINGLE_DEPTH_NESTING);
+ 			if (m->dual.peer == vfe)
+ 				n = vfe_pix_dual_end(m, done);
++			n += vfe_disp_slave_leave(vfe, m, done + n);
+ 			spin_unlock(&m->output_lock);
+ 			memset(&vfe->dual, 0, sizeof(vfe->dual));
+ 		}
+@@ -1814,17 +3087,31 @@ static int vfe17x_disable(struct vfe_line *line)
+ 	 * killed client released the RAW node while the pixel path ran).
+ 	 * Let that frame end: two frame periods.
+ 	 */
+-	if (!last) {
+-		u64 period = vfe17x_meta_period_ns(vfe);
+-		unsigned int ms = period ? clamp_t(u64, 2 * div_u64(period, NSEC_PER_MSEC),
+-						   34, 500) : 100;
++	if (!last)
++		vfe17x_wait_frame_end(vfe);
+ 
+-		msleep(ms);
+-	}
++	return ret;
++}
++
++/* Nodes of the pixel pipeline besides its own: parameters, statistics, display */
++static int vfe17x_pix_register(struct vfe_device *vfe, struct v4l2_device *v4l2_dev)
++{
++	int ret, err;
++
++	ret = vfe17x_meta_register(vfe, v4l2_dev);
++	err = vfe17x_disp_register(vfe, v4l2_dev);
++	if (err < 0)
++		dev_warn(vfe->camss->dev, "VFE%d: no display output: %d\n", vfe->id, err);
+ 
+ 	return ret;
+ }
+ 
++static void vfe17x_pix_unregister(struct vfe_device *vfe)
++{
++	vfe17x_meta_unregister(vfe);
++	vfe17x_disp_unregister(vfe);
++}
++
+ const struct vfe_hw_ops vfe_ops_170 = {
+ 	.global_reset = vfe_global_reset,
+ 	.hw_version = vfe_hw_version,
+@@ -1842,7 +3129,8 @@ const struct vfe_hw_ops vfe_ops_170 = {
+ 	.vfe_wm_start = vfe_wm_start,
+ 	.vfe_wm_stop = vfe_wm_stop,
+ 	.vfe_wm_update = vfe_wm_update,
+-	.meta_register = vfe17x_meta_register,
+-	.meta_unregister = vfe17x_meta_unregister,
++	.meta_register = vfe17x_pix_register,
++	.meta_unregister = vfe17x_pix_unregister,
+ 	.fatal_error = vfe17x_fatal_error,
++	.pix_frame_error = vfe_disp_frame_error,
+ };
+diff --git a/drivers/media/platform/qcom/camss/camss-vfe.c b/drivers/media/platform/qcom/camss/camss-vfe.c
+index fa74e0cc2..cca637f35 100644
+--- a/drivers/media/platform/qcom/camss/camss-vfe.c
++++ b/drivers/media/platform/qcom/camss/camss-vfe.c
+@@ -634,6 +634,7 @@ int vfe_enable_output_v2(struct vfe_line *line)
+ 
+ 	output->state = VFE_OUTPUT_ON;
+ 	output->armed_next = false;
++	output->armed_ahead = false;
+ 	output->error = false;
+ 
+ 	output->sequence = 0;
+@@ -1299,7 +1300,8 @@ void vfe_line_fatal_error(struct vfe_line *line)
+  *
+  * Its buffer completes with VB2_BUF_STATE_ERROR; a dual IFE slave passes
+  * it on to the master's buffer with its stripe. Called in interrupt context,
+- * by the VFE and by the CSID feeding it.
++ * by the VFE and by the CSID feeding it. The pixel line's frame is also the
++ * frame of its display output.
+  */
+ void vfe_line_frame_error(struct vfe_line *line)
+ {
+@@ -1310,7 +1312,11 @@ void vfe_line_frame_error(struct vfe_line *line)
+ 	if (line->output.state == VFE_OUTPUT_ON)
+ 		line->output.error = true;
+ 	spin_unlock_irqrestore(&vfe->output_lock, flags);
++
++	if (line->id == VFE_LINE_PIX && vfe->res->hw_ops->pix_frame_error)
++		vfe->res->hw_ops->pix_frame_error(vfe);
+ }
++
+ /*
+  * vfe_flush_buffers - Return all vb2 buffers
+  * @vid: Video device structure
+@@ -2121,11 +2127,11 @@ static int vfe_link_setup(struct media_entity *entity,
+ 			  const struct media_pad *remote, u32 flags)
+ {
+ 	/*
+-	 * Dual IFE: besides its own video node, a pixel path output may feed
+-	 * the video node of another pixel path.
++	 * Besides its own video node, a pixel path output may feed the video
++	 * node of another pixel path (dual IFE) and the display output of its
++	 * VFE.
+ 	 */
+-	if ((local->flags & MEDIA_PAD_FL_SOURCE) &&
+-	    is_media_entity_v4l2_video_device(remote->entity))
++	if (local->flags & MEDIA_PAD_FL_SOURCE)
+ 		return 0;
+ 
+ 	if (flags & MEDIA_LNK_FL_ENABLED)
+diff --git a/drivers/media/platform/qcom/camss/camss-vfe.h b/drivers/media/platform/qcom/camss/camss-vfe.h
+index b8ac47435..21fdb4daa 100644
+--- a/drivers/media/platform/qcom/camss/camss-vfe.h
++++ b/drivers/media/platform/qcom/camss/camss-vfe.h
+@@ -78,7 +78,12 @@ struct vfe_output {
+ 	enum vfe_output_state state;
+ 	unsigned int sequence;
+ 	bool error;		/* the frame being written came in corrupt */
+-	bool armed_next;	/* vfe-17x: a buffer waits for the next frame */
++	/*
++	 * vfe-17x: the next frame has a buffer of this output, and the one
++	 * after has one too (only from a stream start that armed two)
++	 */
++	bool armed_next;
++	bool armed_ahead;
+ 
+ 	int wait_reg_update;
+ 	struct completion sof;
+@@ -122,14 +127,20 @@ struct vfe_hw_ops {
+ 	void (*vfe_buf_done)(struct vfe_device *vfe, int port_id);
+ 	void (*vfe_wm_update)(struct vfe_device *vfe, u8 wm, u32 addr,
+ 			      struct vfe_line *line);
+-	/* Optional parameters and statistics nodes of the pixel pipeline */
++	/*
++	 * Optional nodes of the pixel pipeline besides its own output:
++	 * parameters, statistics, a second (display) output
++	 */
+ 	int (*meta_register)(struct vfe_device *vfe, struct v4l2_device *v4l2_dev);
+ 	void (*meta_unregister)(struct vfe_device *vfe);
+ 	/* Optional: the streams must restart, tell their queues */
+ 	void (*fatal_error)(struct vfe_device *vfe);
++	/* Optional: the pixel line's frame is corrupt, so is its display frame */
++	void (*pix_frame_error)(struct vfe_device *vfe);
+ };
+ 
+ struct vfe_pix_meta;
++struct vfe_pix_disp;
+ 
+ struct vfe_isr_ops {
+ 	void (*reset_ack)(struct vfe_device *vfe);
+@@ -211,6 +222,13 @@ struct vfe_device {
+ 	struct vfe_line line[VFE_LINE_NUM_MAX];
+ 	u32 reg_update;
+ 	struct vfe_pix_meta *pix_meta;
++	struct vfe_pix_disp *pix_disp;
++	/* vfe-17x: the outputs of the next frame once it is written, 0 before */
++	u32 pix_next_outputs;
++	/* vfe-17x: the RDI lines linked when the pixel path started, by line id */
++	u8 pix_rdi_linked;
++	/* vfe-17x: the pixel path is stopping, no display output may start */
++	bool pix_stopping;
+ 	struct vfe_pix_dual dual;
+ 	struct vfe_errors errors;
+ 	u8 was_streaming;
+diff --git a/drivers/media/platform/qcom/camss/camss-video.c b/drivers/media/platform/qcom/camss/camss-video.c
+index 769e84b92..96d74a1f3 100644
+--- a/drivers/media/platform/qcom/camss/camss-video.c
++++ b/drivers/media/platform/qcom/camss/camss-video.c
+@@ -310,8 +310,10 @@ static bool video_chain_has(struct camss_video *video, struct media_entity *enti
+ 
+ /*
+  * Video nodes can share the subdevs upstream of a VFE line: the pixel path and
+- * an RDI fed by the same CSID run from the same sensor stream. Whether another
+- * enabled link leads from @entity to a streaming subdev other than @from.
++ * an RDI fed by the same CSID run from the same sensor stream, and the display
++ * output of a VFE takes its frames from the pixel path, whose own video node
++ * streams too. Whether another enabled link leads from @entity to a streaming
++ * subdev or video node other than @from.
+  */
+ static bool video_entity_shared(struct media_entity *entity,
+ 				struct media_entity *from)
+@@ -322,11 +324,17 @@ static bool video_entity_shared(struct media_entity *entity,
+ 		struct media_entity *sink = link->sink->entity;
+ 
+ 		if (link->source->entity != entity ||
+-		    !(link->flags & MEDIA_LNK_FL_ENABLED) || sink == from ||
+-		    !is_media_entity_v4l2_subdev(sink))
++		    !(link->flags & MEDIA_LNK_FL_ENABLED) || sink == from)
+ 			continue;
+-		if (media_entity_to_v4l2_subdev(sink)->s_stream_enabled)
++		if (is_media_entity_v4l2_subdev(sink) &&
++		    media_entity_to_v4l2_subdev(sink)->s_stream_enabled)
+ 			return true;
++		if (is_media_entity_v4l2_video_device(sink)) {
++			struct video_device *vdev = media_entity_to_video_device(sink);
++
++			if (vdev->queue && vb2_start_streaming_called(vdev->queue))
++				return true;
++		}
+ 	}
+ 
+ 	return false;
+@@ -452,6 +460,7 @@ static void video_stop_streaming(struct vb2_queue *q)
+ 	struct media_pad *pad;
+ 	struct v4l2_subdev *subdev;
+ 	struct media_entity *from;
++	bool first = true;
+ 	int ret;
+ 
+ 	entity = &vdev->entity;
+@@ -468,10 +477,25 @@ static void video_stop_streaming(struct vb2_queue *q)
+ 		entity = pad->entity;
+ 		subdev = media_entity_to_v4l2_subdev(entity);
+ 
+-		/* Still feeding another streaming node: keep it and upstream */
+-		if (video_entity_shared(entity, from))
++		/*
++		 * Stopped already by the node that started it (the pixel path
++		 * of a display output, by its own node): what streams upstream
++		 * streams for other nodes.
++		 */
++		if (!subdev->s_stream_enabled)
+ 			break;
+ 
++		/*
++		 * The subdev that feeds this node was started by it (see
++		 * video_start_streaming()) and stops with it, together with
++		 * what it feeds besides: the pixel path stops its display
++		 * output. Upstream, a subdev still feeding another streaming
++		 * node keeps running, and all upstream of it.
++		 */
++		if (!first && video_entity_shared(entity, from))
++			break;
++		first = false;
++
+ 		ret = v4l2_subdev_call(subdev, video, s_stream, 0);
+ 
+ 		if (ret) {
+diff --git a/include/uapi/linux/media/qcom/ife17x-config.h b/include/uapi/linux/media/qcom/ife17x-config.h
+index ece1dd884..74ca9eba1 100644
+--- a/include/uapi/linux/media/qcom/ife17x-config.h
++++ b/include/uapi/linux/media/qcom/ife17x-config.h
+@@ -34,6 +34,8 @@
+  * @IFE17X_PARAMS_BLOCK_ABF: adaptive Bayer filter (ABF34)
+  * @IFE17X_PARAMS_BLOCK_BPC: bad pixel and bad cluster correction (BPCBCC50)
+  * @IFE17X_PARAMS_BLOCK_LSC: lens shading correction (LSC34)
++ * @IFE17X_PARAMS_BLOCK_OUTPUTS: the outputs that write the frame
++ * @IFE17X_PARAMS_BLOCK_DISPLAY_WINDOW: the display output's window of the frame
+  */
+ enum ife17x_params_block_type {
+ 	IFE17X_PARAMS_BLOCK_BLS,
+@@ -46,6 +48,8 @@ enum ife17x_params_block_type {
+ 	IFE17X_PARAMS_BLOCK_ABF,
+ 	IFE17X_PARAMS_BLOCK_BPC,
+ 	IFE17X_PARAMS_BLOCK_LSC,
++	IFE17X_PARAMS_BLOCK_OUTPUTS,
++	IFE17X_PARAMS_BLOCK_DISPLAY_WINDOW,
+ };
+ 
+ /**
+@@ -447,6 +451,62 @@ struct ife17x_params_lsc {
+ 	__u32 reserved;
+ } __attribute__((aligned(8)));
+ 
++#define IFE17X_OUTPUT_FULL		(1U << 0)
++#define IFE17X_OUTPUT_DISPLAY		(1U << 1)
++#define IFE17X_OUTPUT_RDI		(1U << 2)
++
++/**
++ * struct ife17x_params_outputs - the outputs that write the frame
++ * @header: block header, type IFE17X_PARAMS_BLOCK_OUTPUTS
++ * @outputs: IFE17X_OUTPUT_* flags, at least IFE17X_OUTPUT_FULL or
++ *	     IFE17X_OUTPUT_DISPLAY
++ * @reserved: must be zero
++ *
++ * The frame these parameters apply to is written once every output named has
++ * a buffer for it, and only those get one, so a request can leave out the
++ * full output or the RDI. Outputs not linked when the pixel path started are
++ * left out of the list. Without the block the full output decides, with the
++ * display output when its link is on, and the RDI lines follow.
++ * V4L2_ISP_PARAMS_FL_BLOCK_DISABLE means no block.
++ */
++struct ife17x_params_outputs {
++	struct v4l2_isp_params_block_header header;
++	__u32 outputs;
++	__u32 reserved;
++} __attribute__((aligned(8)));
++
++/**
++ * struct ife17x_params_display_window - the display output's window of the
++ * frame
++ * @header: block header, type IFE17X_PARAMS_BLOCK_DISPLAY_WINDOW
++ * @compose_width: width of the whole frame scaled, as the display subdev's
++ *		   sink compose rectangle (with dual IFE the whole frame of both
++ *		   stripes)
++ * @compose_height: height of the whole frame scaled, likewise
++ * @crop_left: left edge of the display output in the scaled frame; its size
++ *	       is that of the display subdev's source crop rectangle, which
++ *	       does not change while streaming
++ * @crop_top: top edge of the display output in the scaled frame
++ * @reserved: must be zero
++ *
++ * The window holds from the frame these parameters apply to until another
++ * block changes it; at stream start it is the display subdev's compose and
++ * crop rectangles. A window the driver cannot take (a compose rectangle
++ * outside the scaler limits: larger than the sink or more than 16 times
++ * smaller; odd values; the crop not inside the compose rectangle) makes the
++ * buffer invalid when the driver can tell as it is queued, and is ignored
++ * otherwise: the frame keeps the previous window.
++ * V4L2_ISP_PARAMS_FL_BLOCK_DISABLE means no block.
++ */
++struct ife17x_params_display_window {
++	struct v4l2_isp_params_block_header header;
++	__u16 compose_width;
++	__u16 compose_height;
++	__u16 crop_left;
++	__u16 crop_top;
++	__u32 reserved[2];
++} __attribute__((aligned(8)));
++
+ #define IFE17X_PARAMS_MAX_SIZE					\
+ 	(sizeof(struct ife17x_params_bls) +			\
+ 	 sizeof(struct ife17x_params_wb) +			\
+@@ -457,7 +517,9 @@ struct ife17x_params_lsc {
+ 	 sizeof(struct ife17x_params_bf) +			\
+ 	 sizeof(struct ife17x_params_abf) +			\
+ 	 sizeof(struct ife17x_params_bpc) +			\
+-	 sizeof(struct ife17x_params_lsc))
++	 sizeof(struct ife17x_params_lsc) +			\
++	 sizeof(struct ife17x_params_outputs) +			\
++	 sizeof(struct ife17x_params_display_window))
+ 
+ /**
+  * struct ife17x_awb_bg_region - AWB Bayer grid record, as the hardware

@@ -1,0 +1,31 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] arm64: dts: qcom: sc8280xp-huawei-gaokun3: Power the CSIPHYs from their own supplies
+
+CSIPHY0 and CSIPHY1, the rear camera's, run from l6d (0.88 V) and l4d
+(1.2 V), CSIPHY2 and CSIPHY3, the front camera's, from l6b and l3b, as
+the comments of the camera board file say. Name them for each pair,
+so that the CSIPHYs keep their rails on themselves rather than through
+the USB and PCIe PHYs that share them.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3-camera.dtsi | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3-camera.dtsi b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3-camera.dtsi
+index d41f2ec66..8e13e07f7 100644
+--- a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3-camera.dtsi
++++ b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3-camera.dtsi
+@@ -142,6 +142,10 @@ &camss {
+ 
+ 	vdda-phy-supply = <&vreg_l6b>;
+ 	vdda-pll-supply = <&vreg_l3b>;
++	vdd-csiphy01-0p88-supply = <&vreg_l6d>;
++	vdd-csiphy01-1p2-supply = <&vreg_l4d>;
++	vdd-csiphy23-0p88-supply = <&vreg_l6b>;
++	vdd-csiphy23-1p2-supply = <&vreg_l3b>;
+ 
+ 	status = "okay";
+ 

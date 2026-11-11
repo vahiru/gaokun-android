@@ -8,7 +8,7 @@
 # 为什么要有这个脚本：
 #   相机 HAL（device/huawei/gaokun3/camera/Android.bp）依赖 libcamera_gk3 / libcamera_base_gk3，
 #   它们定义在 patches/libcamera/libcamera-Android.bp 里，而那份 bp 要放进【上游】libcamera
-#   源码树（AOSP 的 external/libcamera 没有 softisp）。A16 时这一步一直是手工做的、没入库：
+#   源码树（AOSP 的 external/libcamera 没有 qcom-ife）。A16 时这一步一直是手工做的、没入库：
 #   2026-10-25 A17 迁移时 reset 了树，第一次冷编在 Soong 阶段报
 #     "android.hardware.camera.provider-service.gaokun3" depends on undefined module "libcamera_gk3"
 #   才发现。现在把它写死在这里。
@@ -41,7 +41,7 @@ git -C "$UP" cat-file -e "$PIN^{commit}" 2>/dev/null || die "$UP 里没有 $PIN�
 echo "── 1. 上游 $PIN → $LC"
 find "$LC" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
 git -C "$UP" archive "$PIN" | tar -x -C "$LC"
-[ -d "$LC/src/ipa/softisp" ] || die "铺完没有 src/ipa/softisp"
+[ -f "$LC/meson.build" ] || die "铺完没有 meson.build"
 
 echo "── 2. 补丁"
 for p in "$PD"/0*.patch; do
@@ -49,6 +49,7 @@ for p in "$PD"/0*.patch; do
     (cd "$LC" && patch -p1 -s < "$p") || die "应用失败：$(basename "$p")"
     echo "  ✓ $(basename "$p")"
 done
+[ -d "$LC/src/ipa/qcom-ife" ] || die "打完补丁没有 src/ipa/qcom-ife"
 
 echo "── 3. Android.bp"
 cp "$PD/libcamera-Android.bp" "$LC/Android.bp"

@@ -1,0 +1,97 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: qcom: camss: sc8280xp: Enable the CSID IPP and VFE pixel pipeline
+
+Mark the four full CSIDs as having an IPP, and give the four full VFEs
+the Bayer input and NV12/NV21 output formats of their pixel pipeline.
+The VFE lites keep their RDI only PIX line.
+
+Before this change the PIX line of the full VFEs used the RDI format
+table, and the CSID programmed RDI registers for port 3, which a full
+CSID does not have.
+
+Co-developed-by: dezige131 <2643591270@qq.com>
+Signed-off-by: dezige131 <2643591270@qq.com>
+Signed-off-by: Akisaira <akisaira@outlook.com>
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/media/platform/qcom/camss/camss.c | 16 ++++++++++++----
+ 1 file changed, 12 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/media/platform/qcom/camss/camss.c b/drivers/media/platform/qcom/camss/camss.c
+index cfb002bf5..8bb9801e2 100644
+--- a/drivers/media/platform/qcom/camss/camss.c
++++ b/drivers/media/platform/qcom/camss/camss.c
+@@ -2667,6 +2667,7 @@ static const struct camss_subdev_resources csid_res_sc8280xp[] = {
+ 		.reg = { "csid0" },
+ 		.interrupt = { "csid0" },
+ 		.csid = {
++			.has_ipp = true,
+ 			.hw_ops = &csid_ops_gen2,
+ 			.parent_dev_ops = &vfe_parent_dev_ops,
+ 			.formats = &csid_formats_gen2
+@@ -2686,6 +2687,7 @@ static const struct camss_subdev_resources csid_res_sc8280xp[] = {
+ 		.reg = { "csid1" },
+ 		.interrupt = { "csid1" },
+ 		.csid = {
++			.has_ipp = true,
+ 			.hw_ops = &csid_ops_gen2,
+ 			.parent_dev_ops = &vfe_parent_dev_ops,
+ 			.formats = &csid_formats_gen2
+@@ -2705,6 +2707,7 @@ static const struct camss_subdev_resources csid_res_sc8280xp[] = {
+ 		.reg = { "csid2" },
+ 		.interrupt = { "csid2" },
+ 		.csid = {
++			.has_ipp = true,
+ 			.hw_ops = &csid_ops_gen2,
+ 			.parent_dev_ops = &vfe_parent_dev_ops,
+ 			.formats = &csid_formats_gen2
+@@ -2724,6 +2727,7 @@ static const struct camss_subdev_resources csid_res_sc8280xp[] = {
+ 		.reg = { "csid3" },
+ 		.interrupt = { "csid3" },
+ 		.csid = {
++			.has_ipp = true,
+ 			.hw_ops = &csid_ops_gen2,
+ 			.parent_dev_ops = &vfe_parent_dev_ops,
+ 			.formats = &csid_formats_gen2
+@@ -2825,7 +2829,8 @@ static const struct camss_subdev_resources vfe_res_sc8280xp[] = {
+ 			.pd_name = "ife0",
+ 			.hw_ops = &vfe_ops_170,
+ 			.formats_rdi = &vfe_formats_rdi_845,
+-			.formats_pix = &vfe_formats_pix_845
++			.formats_pix = &vfe_formats_pix_8280xp,
++			.formats_pix_out = &vfe_formats_pix_out_8280xp
+ 		}
+ 	},
+ 	/* VFE1 */
+@@ -2845,7 +2850,8 @@ static const struct camss_subdev_resources vfe_res_sc8280xp[] = {
+ 			.pd_name = "ife1",
+ 			.hw_ops = &vfe_ops_170,
+ 			.formats_rdi = &vfe_formats_rdi_845,
+-			.formats_pix = &vfe_formats_pix_845
++			.formats_pix = &vfe_formats_pix_8280xp,
++			.formats_pix_out = &vfe_formats_pix_out_8280xp
+ 		}
+ 	},
+ 	/* VFE2 */
+@@ -2865,7 +2871,8 @@ static const struct camss_subdev_resources vfe_res_sc8280xp[] = {
+ 			.pd_name = "ife2",
+ 			.hw_ops = &vfe_ops_170,
+ 			.formats_rdi = &vfe_formats_rdi_845,
+-			.formats_pix = &vfe_formats_pix_845
++			.formats_pix = &vfe_formats_pix_8280xp,
++			.formats_pix_out = &vfe_formats_pix_out_8280xp
+ 		}
+ 	},
+ 	/* VFE3 */
+@@ -2885,7 +2892,8 @@ static const struct camss_subdev_resources vfe_res_sc8280xp[] = {
+ 			.pd_name = "ife3",
+ 			.hw_ops = &vfe_ops_170,
+ 			.formats_rdi = &vfe_formats_rdi_845,
+-			.formats_pix = &vfe_formats_pix_845
++			.formats_pix = &vfe_formats_pix_8280xp,
++			.formats_pix_out = &vfe_formats_pix_out_8280xp
+ 		}
+ 	},
+ 	/* VFE_LITE_0 */

@@ -1,0 +1,68 @@
+From e208d713d20f346e461515fe13a3fbce7fa09795 Mon Sep 17 00:00:00 2001
+From: Akisaira <akisaira@outlook.com>
+Date: Wed, 11 Nov 2026 18:27:41 +1100
+Subject: [PATCH] libcamera: sensor: Add the exposure and gain delays of the hi846 and ov13b10
+
+Without them the defaults apply, a gain delay of one frame. Measured on
+the Huawei MateBook E Go through the IFE pixel path, with the controls
+written early in a frame and the AWB grid of each frame:
+
+- hi846: exposure, analogue gain and VBLANK all take effect two frames
+  later; HBLANK is read only.
+- ov13b10, 2104x1560 mode: exposure, analogue gain and VBLANK all take
+  effect two frames later.
+
+Signed-off-by: Akisaira <akisaira@outlook.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+Origin: local
+Upstream-Status: Pending
+---
+ .../sensor/camera_sensor_properties.cpp       | 24 ++++++++++++++++++-
+ 1 file changed, 23 insertions(+), 1 deletion(-)
+
+diff --git a/src/libcamera/sensor/camera_sensor_properties.cpp b/src/libcamera/sensor/camera_sensor_properties.cpp
+index 893c3098..dc67c7fe 100644
+--- a/src/libcamera/sensor/camera_sensor_properties.cpp
++++ b/src/libcamera/sensor/camera_sensor_properties.cpp
+@@ -172,6 +172,17 @@ const CameraSensorProperties *CameraSensorProperties::get(const std::string &sen
+ 				 * libcamera equivalent.
+ 				 */
+ 			},
++			/*
++			 * Measured on the Huawei MateBook E Go (2104x1560 mode):
++			 * exposure, gain and VBLANK written early in frame N
++			 * take effect from frame N + 2. HBLANK is not measured.
++			 */
++			.sensorDelays = {
++				.exposureDelay = 2,
++				.gainDelay = 2,
++				.vblankDelay = 2,
++				.hblankDelay = 2
++			},
+ 			/*
+ 			 * Measured on RAW frames of the 4208x3120 mode, read out
+ 			 * with both flips (the rear camera of the Huawei MateBook
+@@ -209,7 +220,18 @@ const CameraSensorProperties *CameraSensorProperties::get(const std::string &sen
+ 				 * 9: "Resolution Pattern"
+ 				 */
+ 			},
+-			.sensorDelays = { },
++			/*
++			 * Measured on the Huawei MateBook E Go: the sensor
++			 * latches exposure, gain and frame length at frame
++			 * start. Written during frame N, they take effect from
++			 * frame N + 2. HBLANK is read-only.
++			 */
++			.sensorDelays = {
++				.exposureDelay = 2,
++				.gainDelay = 2,
++				.vblankDelay = 2,
++				.hblankDelay = 2
++			},
+ 		} },
+ 		{ "hm1246", {
+ 			.unitCellSize = { 3000, 3000 },
+-- 
+2.53.0
+

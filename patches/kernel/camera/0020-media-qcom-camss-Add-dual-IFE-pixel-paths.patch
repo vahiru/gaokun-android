@@ -1,0 +1,941 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: qcom: camss: Add dual IFE pixel paths
+
+A frame wider than one IFE line (3840 pixels on Titan 175) can be split
+between two pixel paths, each fed by its own CSID crop of the same
+CSIPHY stream. Link the second pixel path to the video node of the
+first: that master owns the buffers, the slave writes its stripe at the
+master's output width into them with the master's stride, and latches
+together with it. The video node starts the slave chain first, up to
+what it shares with the master chain, so the CSIPHY and the sensor start
+last and both CSIDs take the first frame.
+
+The two CSIDs use the IPP halt modes the vendor driver uses on Titan
+175: the master CSID runs in master mode and resumes at a frame
+boundary, the slave in slave mode naming the master, without a command
+of its own, so it follows the master's resume and halt and the stripes
+start and stop on the same frame. The roles come from the VFE pairing,
+which the slave's pixel path sets up before its CSID starts.
+
+The master applies each parameter block to the slave too, and splits the
+AWB grid: its own columns over the left stripe, the others over the
+slave's stripe after its crop, written after the master's records into
+the same statistics buffer.
+
+An image or a statistics buffer completes once both halves are written.
+The halves are matched by completion time, within VFE_DUAL_MATCH_NS of
+each other, rather than by count, so a frame one side skips (for want of
+a buffer, or at the start) does not shift every later pair; a buffer
+whose other half never came completes with VB2_BUF_STATE_ERROR. Without
+a buffer the write masters skip a frame and write nothing.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ .../platform/qcom/camss/camss-csid-gen2.c     |  21 ++
+ .../media/platform/qcom/camss/camss-csid.c    |  37 +++
+ .../media/platform/qcom/camss/camss-csid.h    |   3 +
+ .../platform/qcom/camss/camss-vfe-17x-meta.c  | 160 ++++++++++++-
+ .../media/platform/qcom/camss/camss-vfe-17x.c | 226 +++++++++++++++++-
+ drivers/media/platform/qcom/camss/camss-vfe.c |   8 +
+ drivers/media/platform/qcom/camss/camss-vfe.h |  23 ++
+ .../media/platform/qcom/camss/camss-video.c   |  93 +++++++
+ drivers/media/platform/qcom/camss/camss.c     |  24 ++
+ 9 files changed, 588 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/media/platform/qcom/camss/camss-csid-gen2.c b/drivers/media/platform/qcom/camss/camss-csid-gen2.c
+index bed84962e..774bf6e06 100644
+--- a/drivers/media/platform/qcom/camss/camss-csid-gen2.c
++++ b/drivers/media/platform/qcom/camss/camss-csid-gen2.c
+@@ -355,6 +355,11 @@ static bool csid_port_is_ipp(struct csid_device *csid, u8 port)
+ 	return csid->res->has_ipp && port == CSID_PORT_IPP;
+ }
+ 
++/* IPP halt modes and master index, downstream cam_ife_csid_core.c for 175 */
++#define		IPP_CTRL_HALT_MODE_MASTER	2
++#define		IPP_CTRL_HALT_MODE_SLAVE	3
++#define		IPP_CTRL_MASTER_IDX		4
++
+ static void __csid_ctrl_ipp(struct csid_device *csid, int enable)
+ {
+ 	u32 val;
+@@ -363,6 +368,22 @@ static void __csid_ctrl_ipp(struct csid_device *csid, int enable)
+ 		val = HALT_CMD_RESUME_AT_FRAME_BOUNDARY << RDI_CTRL_HALT_CMD;
+ 	else
+ 		val = HALT_CMD_HALT_AT_FRAME_BOUNDARY << RDI_CTRL_HALT_CMD;
++
++	/*
++	 * Dual IFE: the slave follows the master's resume and halt, so the
++	 * two stripes start and stop on the same frame.
++	 */
++	switch (csid->ipp_sync) {
++	case CSID_IPP_SYNC_MASTER:
++		val |= IPP_CTRL_HALT_MODE_MASTER << RDI_CTRL_HALT_MODE;
++		break;
++	case CSID_IPP_SYNC_SLAVE:
++		val = IPP_CTRL_HALT_MODE_SLAVE << RDI_CTRL_HALT_MODE |
++		      csid->ipp_master << IPP_CTRL_MASTER_IDX;
++		break;
++	default:
++		break;
++	}
+ 	writel_relaxed(val, csid->base + CSID_IPP_CTRL);
+ }
+ 
+diff --git a/drivers/media/platform/qcom/camss/camss-csid.c b/drivers/media/platform/qcom/camss/camss-csid.c
+index 1fc88a875..d7fa2d51d 100644
+--- a/drivers/media/platform/qcom/camss/camss-csid.c
++++ b/drivers/media/platform/qcom/camss/camss-csid.c
+@@ -757,6 +757,40 @@ static int csid_set_power(struct v4l2_subdev *sd, int on)
+  *
+  * Return 0 on success or a negative error code otherwise
+  */
++/*
++ * Dual IFE: the CSIDs feeding the two pixel paths of a VFE pair start and
++ * stop on the same frame boundary, the one of the master VFE driving the
++ * other. The VFEs paired when the slave's pixel path started, before its
++ * CSID.
++ */
++static void csid_ipp_dual_role(struct csid_device *csid)
++{
++	struct media_pad *pad = media_pad_remote_pad_first(&csid->pads[MSM_CSID_PAD_IPP]);
++	struct csid_device *master;
++	struct vfe_device *vfe;
++	struct vfe_line *line;
++
++	csid->ipp_sync = CSID_IPP_SYNC_NONE;
++	if (!pad || !is_media_entity_v4l2_subdev(pad->entity))
++		return;
++
++	line = v4l2_get_subdevdata(media_entity_to_v4l2_subdev(pad->entity));
++	vfe = to_vfe(line);
++	if (!vfe->dual.peer)
++		return;
++	if (vfe->dual.master) {
++		csid->ipp_sync = CSID_IPP_SYNC_MASTER;
++		return;
++	}
++
++	pad = media_pad_remote_pad_first(&vfe->dual.peer->line[VFE_LINE_PIX].pads[MSM_VFE_PAD_SINK]);
++	if (!pad || !is_media_entity_v4l2_subdev(pad->entity))
++		return;
++	master = v4l2_get_subdevdata(media_entity_to_v4l2_subdev(pad->entity));
++	csid->ipp_master = master->id;
++	csid->ipp_sync = CSID_IPP_SYNC_SLAVE;
++}
++
+ static int csid_set_stream(struct v4l2_subdev *sd, int enable)
+ {
+ 	struct csid_device *csid = v4l2_get_subdevdata(sd);
+@@ -777,6 +811,9 @@ static int csid_set_stream(struct v4l2_subdev *sd, int enable)
+ 			return -ENOLINK;
+ 	}
+ 
++	if (enable && csid->res->has_ipp)
++		csid_ipp_dual_role(csid);
++
+ 	if (csid->phy.need_vc_update) {
+ 		csid->res->hw_ops->configure_stream(csid, enable);
+ 		csid->phy.need_vc_update = false;
+diff --git a/drivers/media/platform/qcom/camss/camss-csid.h b/drivers/media/platform/qcom/camss/camss-csid.h
+index 277e2368a..e41d997fb 100644
+--- a/drivers/media/platform/qcom/camss/camss-csid.h
++++ b/drivers/media/platform/qcom/camss/camss-csid.h
+@@ -170,6 +170,9 @@ struct csid_device {
+ 	struct v4l2_mbus_framefmt fmt[MSM_CSID_PADS_NUM];
+ 	/* Crop of the IPP output within the sink format (active format only) */
+ 	struct v4l2_rect ipp_crop;
++	/* Dual IFE: this IPP starts and stops with the one of another CSID */
++	enum { CSID_IPP_SYNC_NONE, CSID_IPP_SYNC_MASTER, CSID_IPP_SYNC_SLAVE } ipp_sync;
++	u8 ipp_master;		/* slave: the master CSID */
+ 	struct v4l2_ctrl_handler ctrls;
+ 	struct v4l2_ctrl *testgen_mode;
+ 	const struct csid_subdev_resources *res;
+diff --git a/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.c b/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.c
+index 21ec09a93..620d83554 100644
+--- a/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.c
++++ b/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.c
+@@ -153,6 +153,23 @@ struct vfe_pix_meta {
+ 	struct ife17x_params_awb_bg awb_bg;
+ 	bool pdpc_mask_valid;	/* the PDPC mask bank holds pdpc_mask */
+ 	u32 pdpc_mask[IFE17X_PDPC_MASK_ROWS];
++
++	/*
++	 * Dual IFE, under the master's lock: the master applies its parameters
++	 * to the slave too, and the two grids share the statistics buffers.
++	 */
++	struct vfe_pix_meta *dual_slave;	/* master */
++	struct vfe_pix_meta *dual_master;	/* slave */
++	u32 stripe_x;		/* first input column the grid covers */
++	u32 stripe_w;		/* input columns the grid covers */
++	u32 frame_x;		/* frame column of input column 0 */
++	u32 slave_stats_off;	/* master: byte offset of the slave's grid */
++	u64 slave_stats_ts;	/* master: when the slave last wrote a grid */
++	unsigned int nheld;	/* master: buffers waiting for the slave's grid */
++	struct {
++		struct ife_stats_buf *buf;
++		u64 ts;
++	} held[4];
+ };
+ 
+ static inline struct ife_params_buf *to_params_buf(struct vb2_v4l2_buffer *vbuf)
+@@ -333,11 +350,23 @@ static void ife_awb_bg_program(struct vfe_pix_meta *meta,
+ 	struct vfe_device *vfe = meta->vfe;
+ 	u32 hn = clamp_t(u32, cfg->h_num, 1, IFE17X_AWB_BG_MAX_H);
+ 	u32 vn = clamp_t(u32, cfg->v_num, 1, IFE17X_AWB_BG_MAX_V);
+-	u32 rw = clamp_t(u32, (meta->width / hn) & ~1U, 6, 390);
+-	u32 rh = clamp_t(u32, (meta->height / vn) & ~1U, 2, 512);
++	u32 rw, rh = clamp_t(u32, (meta->height / vn) & ~1U, 2, 512);
+ 	const u16 *t = cfg->threshold;
+ 
+-	writel_relaxed(0, vfe->base + VFE_AWB_BG_OFFSET);
++	/*
++	 * Dual IFE: the master takes the left half of the grid columns over
++	 * its stripe, the slave the right half over its own, and the slave's
++	 * records follow the master's in the buffer.
++	 */
++	if (meta->dual_slave && hn > 1) {
++		hn /= 2;
++		meta->slave_stats_off = hn * vn * sizeof(struct ife17x_awb_bg_region);
++	} else if (meta->dual_master && hn > 1) {
++		hn -= hn / 2;
++	}
++	rw = clamp_t(u32, (meta->stripe_w / hn) & ~1U, 6, 390);
++
++	writel_relaxed(meta->stripe_x & ~1U, vfe->base + VFE_AWB_BG_OFFSET);
+ 	writel_relaxed((hn - 1) | (vn - 1) << 16, vfe->base + VFE_AWB_BG_NUM);
+ 	writel_relaxed((rw - 1) | (rh - 1) << 16, vfe->base + VFE_AWB_BG_SIZE);
+ 	writel_relaxed((t[0] & 0x3fff) | (t[2] & 0x3fff) << 16,
+@@ -399,6 +428,8 @@ static bool ife_params_apply_next(struct vfe_pix_meta *meta, u32 sequence)
+ 
+ 		/* Validated in .buf_prepare() */
+ 		ife_params_handlers[block.header->type](meta, block);
++		if (meta->dual_slave)
++			ife_params_handlers[block.header->type](meta->dual_slave, block);
+ 		off += block.header->size;
+ 	}
+ 
+@@ -436,6 +467,49 @@ static void ife_stats_set_addr(struct vfe_pix_meta *meta, dma_addr_t addr)
+ 
+ 	writel_relaxed(lower_32_bits(addr), vfe->base + VFE_BUS_WM_IMAGE_ADDR(VFE_WM_AWB_BG));
+ 	writel_relaxed(IFE_STATS_SIZE, vfe->base + VFE_BUS_WM_FRAME_INC(VFE_WM_AWB_BG));
++
++	/* Dual IFE: the slave's grid goes after the master's */
++	if (meta->dual_slave) {
++		void __iomem *s = meta->dual_slave->vfe->base;
++
++		writel_relaxed(lower_32_bits(addr) + meta->slave_stats_off,
++			       s + VFE_BUS_WM_IMAGE_ADDR(VFE_WM_AWB_BG));
++		writel_relaxed(IFE_STATS_SIZE, s + VFE_BUS_WM_FRAME_INC(VFE_WM_AWB_BG));
++	}
++}
++
++/*
++ * Master's lock held, the slave wrote a grid at @ts: the held buffer of that
++ * frame is complete, older ones lack the slave's grid.
++ */
++static void ife_stats_dual_collect(struct vfe_pix_meta *meta, u64 ts)
++{
++	unsigned int i = 0;
++
++	while (i < meta->nheld) {
++		struct ife_stats_buf *buf = meta->held[i].buf;
++		u64 t = meta->held[i].ts;
++		bool ok = t + VFE_DUAL_MATCH_NS > ts && t < ts + VFE_DUAL_MATCH_NS;
++
++		if (t + VFE_DUAL_MATCH_NS > ts && !ok) {
++			i++;
++			continue;
++		}
++		meta->nheld--;
++		memmove(&meta->held[i], &meta->held[i + 1],
++			(meta->nheld - i) * sizeof(meta->held[0]));
++		vb2_buffer_done(&buf->vb.vb2_buf, ok ? VB2_BUF_STATE_DONE : VB2_BUF_STATE_ERROR);
++	}
++}
++
++/* Master's lock held: end the pairing, give waiting buffers back to the queue */
++static void ife_dual_end(struct vfe_pix_meta *meta)
++{
++	while (meta->nheld)
++		list_add(&meta->held[--meta->nheld].buf->queue, &meta->stats_queue);
++	if (meta->dual_slave)
++		meta->dual_slave->dual_master = NULL;
++	meta->dual_slave = NULL;
+ }
+ 
+ /* Take the next queued stats buffer as the write target; lock held */
+@@ -486,14 +560,46 @@ void vfe17x_meta_start(struct vfe_device *vfe, u32 width, u32 height)
+ 	meta->width = width;
+ 	meta->height = height;
+ 	meta->frame = 0;
++	meta->stripe_x = 0;
++	meta->stripe_w = width;
++	meta->frame_x = 0;
++	meta->slave_stats_off = 0;
++	meta->slave_stats_ts = 0;
++	meta->nheld = 0;
++	meta->dual_slave = NULL;
++	meta->dual_master = NULL;
++
++	/*
++	 * Dual IFE master (the slave started first): the master's grid and
++	 * parameters cover the left stripe up to its output width, the slave's
++	 * the right stripe from its crop.
++	 */
++	if (vfe->dual.master && vfe->dual.peer && vfe->dual.peer->pix_meta) {
++		struct vfe_pix_meta *slave = vfe->dual.peer->pix_meta;
++		const struct v4l2_rect *sc = &vfe->dual.peer->line[VFE_LINE_PIX].crop;
++
++		meta->stripe_w = vfe->dual.x_offset;
++		slave->stripe_x = sc->left;
++		slave->stripe_w = sc->width;
++		slave->frame_x = vfe->dual.x_offset - sc->left;
++		if (slave->frame_x % IFE17X_PDPC_MASK_ROWS)
++			dev_warn(vfe->camss->dev,
++				 "VFE%d: dual stripe at column %u: PDPC tiles not aligned\n",
++				 vfe->dual.peer->id, slave->frame_x);
++		slave->dual_master = meta;
++		meta->dual_slave = slave;
++	}
+ 	/* The default setup filled every gamma bank and selected bank 0 */
+ 	meta->gamma_bank = 0;
+ 	/* The VFE was reset: the mask bank must be written again */
+ 	meta->pdpc_mask_valid = false;
+ 	writel_relaxed(CAMIF_EPOCH_CFG, vfe->base + VFE_CAMIF_EPOCH_IRQ);
+ 
+-	if (meta->awb_bg_pending)
++	if (meta->awb_bg_pending) {
+ 		ife_awb_bg_program(meta, &meta->awb_bg);
++		if (meta->dual_slave)
++			ife_awb_bg_program(meta->dual_slave, &meta->awb_bg);
++	}
+ 	ife_params_apply_next(meta, 0);
+ 	ife_stats_wm_init(meta);
+ 	meta->running = true;
+@@ -504,6 +610,7 @@ void vfe17x_meta_start(struct vfe_device *vfe, u32 width, u32 height)
+ void vfe17x_meta_stop(struct vfe_device *vfe)
+ {
+ 	struct vfe_pix_meta *meta = vfe->pix_meta;
++	struct vfe_pix_meta *master;
+ 	unsigned long flags;
+ 
+ 	if (!meta)
+@@ -516,7 +623,18 @@ void vfe17x_meta_stop(struct vfe_device *vfe)
+ 		list_add(&meta->stats_cur->queue, &meta->stats_queue);
+ 		meta->stats_cur = NULL;
+ 	}
++	ife_dual_end(meta);
+ 	spin_unlock_irqrestore(&meta->lock, flags);
++
++	/* Dual IFE slave: leave the master's pairing */
++	master = READ_ONCE(meta->dual_master);
++	if (master) {
++		spin_lock_irqsave(&master->lock, flags);
++		if (master->dual_slave == meta)
++			ife_dual_end(master);
++		meta->dual_master = NULL;
++		spin_unlock_irqrestore(&master->lock, flags);
++	}
+ }
+ 
+ /*
+@@ -572,11 +690,26 @@ void vfe17x_meta_sequence(struct vfe_device *vfe, u32 *sequence)
+ void vfe17x_meta_bus(struct vfe_device *vfe, u32 bus_status1)
+ {
+ 	struct vfe_pix_meta *meta = vfe->pix_meta;
++	struct vfe_pix_meta *master;
+ 	struct ife_stats_buf *done;
+ 
+ 	if (!meta || !(bus_status1 & BIT(VFE_WM_AWB_BG)))
+ 		return;
+ 
++	/* Dual IFE slave: its grid went into the master's buffer */
++	master = READ_ONCE(meta->dual_master);
++	if (master) {
++		spin_lock(&master->lock);
++		if (master->dual_slave == meta) {
++			u64 ts = ktime_get_ns();
++
++			master->slave_stats_ts = ts;
++			ife_stats_dual_collect(master, ts);
++		}
++		spin_unlock(&master->lock);
++		return;
++	}
++
+ 	spin_lock(&meta->lock);
+ 	if (!meta->running) {
+ 		spin_unlock(&meta->lock);
+@@ -584,6 +717,25 @@ void vfe17x_meta_bus(struct vfe_device *vfe, u32 bus_status1)
+ 	}
+ 	done = meta->stats_cur;
+ 	ife_stats_next(meta);
++	/* Dual IFE: wait for the slave's grid of the same frame */
++	if (done && meta->dual_slave &&
++	    meta->slave_stats_ts + VFE_DUAL_MATCH_NS <= ktime_get_ns()) {
++		if (meta->nheld == ARRAY_SIZE(meta->held)) {
++			struct ife_stats_buf *old = meta->held[0].buf;
++
++			meta->nheld--;
++			memmove(&meta->held[0], &meta->held[1],
++				meta->nheld * sizeof(meta->held[0]));
++			vb2_buffer_done(&old->vb.vb2_buf, VB2_BUF_STATE_ERROR);
++		}
++		done->vb.sequence = meta->frame ? meta->frame - 1 : 0;
++		done->vb.vb2_buf.timestamp = ktime_get_ns();
++		vb2_set_plane_payload(&done->vb.vb2_buf, 0, IFE_STATS_SIZE);
++		meta->held[meta->nheld].buf = done;
++		meta->held[meta->nheld].ts = done->vb.vb2_buf.timestamp;
++		meta->nheld++;
++		done = NULL;
++	}
+ 	if (done) {
+ 		/*
+ 		 * The grid of frame k completes at its end, after the epoch of
+diff --git a/drivers/media/platform/qcom/camss/camss-vfe-17x.c b/drivers/media/platform/qcom/camss/camss-vfe-17x.c
+index 045eb7423..9b2d3a58a 100644
+--- a/drivers/media/platform/qcom/camss/camss-vfe-17x.c
++++ b/drivers/media/platform/qcom/camss/camss-vfe-17x.c
+@@ -515,6 +515,10 @@ static void vfe_reg_update(struct vfe_device *vfe, enum vfe_line_id line_id)
+ 
+ 	writel_relaxed(vfe->reg_update, vfe->base + VFE_REG_UPDATE_CMD);
+ 
++	/* Dual IFE: the slave latches together with the master */
++	if (line_id == VFE_LINE_PIX && vfe->dual.master && vfe->dual.peer)
++		writel_relaxed(REG_UPDATE_PIX, vfe->dual.peer->base + VFE_REG_UPDATE_CMD);
++
+ 	/* Enforce ordering between reg update and subsequent reg writes */
+ 	wmb();
+ }
+@@ -804,6 +808,120 @@ static void vfe_pix_wm_update(struct vfe_device *vfe, u32 addr,
+ 	writel_relaxed(addr, vfe->base + VFE_BUS_WM_IMAGE_ADDR(VFE_WM_PIX_FULL_Y));
+ 	writel_relaxed(addr + stride * pix->height,
+ 		       vfe->base + VFE_BUS_WM_IMAGE_ADDR(VFE_WM_PIX_FULL_C));
++
++	/* Dual IFE: the slave writes its stripe into the same buffer */
++	if (vfe->dual.master && vfe->dual.peer) {
++		void __iomem *s = vfe->dual.peer->base;
++		u32 off = vfe->dual.x_offset;
++
++		writel_relaxed(addr + off, s + VFE_BUS_WM_IMAGE_ADDR(VFE_WM_PIX_FULL_Y));
++		writel_relaxed(addr + stride * pix->height + off,
++			       s + VFE_BUS_WM_IMAGE_ADDR(VFE_WM_PIX_FULL_C));
++	}
++}
++
++/*
++ * Dual IFE: a pixel line whose output is also linked to the video node of
++ * another VFE's pixel line writes its stripe into that node's buffers.
++ */
++static struct vfe_line *vfe_pix_dual_master(struct vfe_line *line)
++{
++	struct media_entity *entity = &line->subdev.entity;
++	struct media_link *link;
++
++	for_each_media_entity_data_link(entity, link) {
++		struct media_entity *sink = link->sink->entity;
++		struct camss_video *video;
++
++		if (link->source->entity != entity ||
++		    !(link->flags & MEDIA_LNK_FL_ENABLED) ||
++		    !is_media_entity_v4l2_video_device(sink))
++			continue;
++		video = container_of(media_entity_to_video_device(sink),
++				     struct camss_video, vdev);
++		if (video != &line->video_out)
++			return container_of(video, struct vfe_line, video_out);
++	}
++
++	return NULL;
++}
++
++/*
++ * Master's output_lock held, the slave wrote a stripe at @ts: the held buffer
++ * of that frame is complete, older ones lack the slave's stripe (it dropped
++ * the frame). Pairing by time keeps the frames matched after a drop on
++ * either side.
++ */
++static unsigned int vfe_pix_dual_collect(struct vfe_pix_dual *d, u64 ts,
++					 struct camss_buffer **done, bool *error)
++{
++	unsigned int i = 0, n = 0;
++
++	while (i < d->nheld) {
++		u64 t = d->held[i].ts;
++
++		if (t + VFE_DUAL_MATCH_NS > ts) {
++			if (t < ts + VFE_DUAL_MATCH_NS) {
++				error[n] = false;
++				done[n++] = d->held[i].buf;
++			} else {
++				i++;
++				continue;
++			}
++		} else {
++			error[n] = true;
++			done[n++] = d->held[i].buf;
++		}
++		memmove(&d->held[i], &d->held[i + 1], (--d->nheld - i) * sizeof(d->held[0]));
++	}
++
++	return n;
++}
++
++/* Master's output_lock held: end the pairing, return what was waiting */
++static unsigned int vfe_pix_dual_end(struct vfe_device *master,
++				     struct camss_buffer **done)
++{
++	struct vfe_pix_dual *d = &master->dual;
++	unsigned int i, n = d->nheld;
++
++	for (i = 0; i < n; i++)
++		done[i] = d->held[i].buf;
++	memset(d, 0, sizeof(*d));
++
++	return n;
++}
++
++/* The slave wrote its stripe of a frame */
++static void vfe_pix_dual_slave_done(struct vfe_device *vfe)
++{
++	struct camss_buffer *done[VFE_DUAL_HELD];
++	bool error[VFE_DUAL_HELD];
++	struct vfe_device *master;
++	unsigned long flags;
++	unsigned int i, n = 0;
++	u64 ts = ktime_get_ns();
++
++	spin_lock_irqsave(&vfe->output_lock, flags);
++	master = vfe->dual.peer;
++	if (master) {
++		spin_lock_nested(&master->output_lock, SINGLE_DEPTH_NESTING);
++		if (master->dual.peer == vfe) {
++			master->dual.slave_ts = ts;
++			n = vfe_pix_dual_collect(&master->dual, ts, done, error);
++		}
++		spin_unlock(&master->output_lock);
++	}
++	spin_unlock_irqrestore(&vfe->output_lock, flags);
++
++	for (i = 0; i < n; i++) {
++		if (error[i])
++			dev_dbg_ratelimited(vfe->camss->dev,
++					    "VFE%d: no stripe for frame %u\n", vfe->id,
++					    done[i]->vb.sequence);
++		vb2_buffer_done(&done[i]->vb.vb2_buf,
++				error[i] ? VB2_BUF_STATE_ERROR : VB2_BUF_STATE_DONE);
++	}
+ }
+ 
+ static int vfe_pix_configure(struct vfe_device *vfe, struct vfe_line *line)
+@@ -817,6 +935,11 @@ static int vfe_pix_configure(struct vfe_device *vfe, struct vfe_line *line)
+ 	bool crcb = src->code == MEDIA_BUS_FMT_YVYU8_1_5X8;
+ 	int pattern;
+ 
++	/* Dual IFE slave: the buffers are those of the master's video node */
++	if (vfe->dual.peer && !vfe->dual.master)
++		stride = vfe->dual.peer->line[VFE_LINE_PIX].video_out.active_fmt.fmt.pix_mp
++				.plane_fmt[0].bytesperline;
++
+ 	pattern = vfe_pix_bayer_pattern(sink->code);
+ 	if (pattern < 0) {
+ 		dev_err(vfe->camss->dev, "VFE%d: pixel path needs Bayer input, got 0x%04x\n",
+@@ -863,6 +986,7 @@ static int vfe_pix_enable_output(struct vfe_line *line)
+ {
+ 	struct vfe_device *vfe = to_vfe(line);
+ 	struct vfe_output *output = &line->output;
++	struct vfe_line *mline;
+ 	unsigned long flags;
+ 	unsigned int i;
+ 	int ret;
+@@ -880,6 +1004,34 @@ static int vfe_pix_enable_output(struct vfe_line *line)
+ 
+ 	WARN_ON(output->gen2.active_num);
+ 
++	/*
++	 * Dual IFE slave: pair with the master before configuring, and leave
++	 * the write masters off: the master gives them its buffers.
++	 */
++	mline = vfe_pix_dual_master(line);
++	if (mline) {
++		struct vfe_device *mvfe = to_vfe(mline);
++
++		memset(&vfe->dual, 0, sizeof(vfe->dual));
++		vfe->dual.peer = mvfe;
++		spin_lock_nested(&mvfe->output_lock, SINGLE_DEPTH_NESTING);
++		memset(&mvfe->dual, 0, sizeof(mvfe->dual));
++		mvfe->dual.peer = vfe;
++		mvfe->dual.master = true;
++		mvfe->dual.x_offset = mline->crop.width;
++		spin_unlock(&mvfe->output_lock);
++
++		ret = vfe_pix_configure(vfe, line);
++		if (ret < 0)
++			goto out_unlock;
++		output->state = VFE_OUTPUT_ON;
++		output->sequence = 0;
++		vfe_reg_update(vfe, line->id);
++		dev_dbg(vfe->camss->dev, "VFE%d: pixel path stripe of VFE%d at %u\n",
++			vfe->id, mvfe->id, mvfe->dual.x_offset);
++		goto out_unlock;
++	}
++
+ 	ret = vfe_pix_configure(vfe, line);
+ 	if (ret < 0)
+ 		goto out_unlock;
+@@ -898,6 +1050,8 @@ static int vfe_pix_enable_output(struct vfe_line *line)
+ 	}
+ 
+ 	vfe_pix_wm_enable(vfe);
++	if (vfe->dual.master && vfe->dual.peer)
++		vfe_pix_wm_enable(vfe->dual.peer);
+ 
+ 	/* Latch the pipeline configuration and the first buffers */
+ 	vfe_reg_update(vfe, line->id);
+@@ -1202,12 +1356,20 @@ static void vfe_isr_reg_update(struct vfe_device *vfe, enum vfe_line_id line_id)
+ static void vfe_isr_wm_done(struct vfe_device *vfe, u8 wm)
+ {
+ 	struct vfe_line *line = &vfe->line[vfe->wm_output_map[wm]];
+-	struct camss_buffer *ready_buf;
++	struct camss_buffer *ready_buf, *done[VFE_DUAL_HELD + 1];
++	bool error[VFE_DUAL_HELD + 1] = { };
+ 	struct vfe_output *output;
+ 	unsigned long flags;
++	unsigned int i, ndone = 0;
++	bool dual;
+ 	u32 index;
+ 	u64 ts = ktime_get_ns();
+ 
++	if (vfe->wm_output_map[wm] == VFE_LINE_PIX && vfe->dual.peer && !vfe->dual.master) {
++		vfe_pix_dual_slave_done(vfe);
++		return;
++	}
++
+ 	spin_lock_irqsave(&vfe->output_lock, flags);
+ 
+ 	if (vfe->wm_output_map[wm] == VFE_LINE_NONE) {
+@@ -1217,6 +1379,8 @@ static void vfe_isr_wm_done(struct vfe_device *vfe, u8 wm)
+ 	}
+ 	output = &vfe->line[vfe->wm_output_map[wm]].output;
+ 
++	dual = line->id == VFE_LINE_PIX && vfe->dual.master && vfe->dual.peer;
++
+ 	ready_buf = output->buf[0];
+ 	if (!ready_buf) {
+ 		dev_err_ratelimited(vfe->camss->dev,
+@@ -1246,12 +1410,42 @@ static void vfe_isr_wm_done(struct vfe_device *vfe, u8 wm)
+ 		if (vfe_line_has_pix_pipeline(vfe, line->id))
+ 			vfe_reg_update(vfe, line->id);
+ 	} else {
++		/*
++		 * The write masters take one queued address per frame and skip
++		 * the frames they have none for, without a done interrupt.
++		 */
+ 		output->gen2.active_num--;
+ 	}
+ 
++	/*
++	 * Dual IFE master: the buffer is done once the slave wrote its stripe
++	 * of the same frame, which completes within VFE_DUAL_MATCH_NS.
++	 */
++	if (dual) {
++		struct vfe_pix_dual *d = &vfe->dual;
++
++		if (d->slave_ts + VFE_DUAL_MATCH_NS > ts) {
++			done[ndone++] = ready_buf;
++		} else {
++			if (d->nheld == VFE_DUAL_HELD) {
++				error[ndone] = true;
++				done[ndone++] = d->held[0].buf;
++				memmove(&d->held[0], &d->held[1],
++					--d->nheld * sizeof(d->held[0]));
++			}
++			d->held[d->nheld].buf = ready_buf;
++			d->held[d->nheld].ts = ts;
++			d->nheld++;
++		}
++	} else {
++		done[ndone++] = ready_buf;
++	}
++
+ 	spin_unlock_irqrestore(&vfe->output_lock, flags);
+ 
+-	vb2_buffer_done(&ready_buf->vb.vb2_buf, VB2_BUF_STATE_DONE);
++	for (i = 0; i < ndone; i++)
++		vb2_buffer_done(&done[i]->vb.vb2_buf,
++				error[i] ? VB2_BUF_STATE_ERROR : VB2_BUF_STATE_DONE);
+ 
+ 	return;
+ 
+@@ -1283,10 +1477,36 @@ static void vfe_subdev_init(struct device *dev, struct vfe_device *vfe)
+ static int vfe17x_disable(struct vfe_line *line)
+ {
+ 	struct vfe_device *vfe = to_vfe(line);
++	struct camss_buffer *done[VFE_DUAL_HELD];
++	unsigned int i, n = 0;
++	unsigned long flags;
+ 
+-	if (vfe_line_has_pix_pipeline(vfe, line->id))
++	if (vfe_line_has_pix_pipeline(vfe, line->id)) {
+ 		vfe17x_meta_stop(vfe);
+ 
++		/*
++		 * Dual IFE: end the pairing before this VFE stops or powers
++		 * off, so the master no longer writes the slave's registers.
++		 * Lock order slave, then master.
++		 */
++		spin_lock_irqsave(&vfe->output_lock, flags);
++		if (vfe->dual.master) {
++			n = vfe_pix_dual_end(vfe, done);
++		} else if (vfe->dual.peer) {
++			struct vfe_device *m = vfe->dual.peer;
++
++			spin_lock_nested(&m->output_lock, SINGLE_DEPTH_NESTING);
++			if (m->dual.peer == vfe)
++				n = vfe_pix_dual_end(m, done);
++			spin_unlock(&m->output_lock);
++			memset(&vfe->dual, 0, sizeof(vfe->dual));
++		}
++		spin_unlock_irqrestore(&vfe->output_lock, flags);
++
++		for (i = 0; i < n; i++)
++			vb2_buffer_done(&done[i]->vb.vb2_buf, VB2_BUF_STATE_ERROR);
++	}
++
+ 	return vfe_disable(line);
+ }
+ 
+diff --git a/drivers/media/platform/qcom/camss/camss-vfe.c b/drivers/media/platform/qcom/camss/camss-vfe.c
+index 9323406df..d8e998db7 100644
+--- a/drivers/media/platform/qcom/camss/camss-vfe.c
++++ b/drivers/media/platform/qcom/camss/camss-vfe.c
+@@ -2072,6 +2072,14 @@ static int vfe_link_setup(struct media_entity *entity,
+ 			  const struct media_pad *local,
+ 			  const struct media_pad *remote, u32 flags)
+ {
++	/*
++	 * Dual IFE: besides its own video node, a pixel path output may feed
++	 * the video node of another pixel path.
++	 */
++	if ((local->flags & MEDIA_PAD_FL_SOURCE) &&
++	    is_media_entity_v4l2_video_device(remote->entity))
++		return 0;
++
+ 	if (flags & MEDIA_LNK_FL_ENABLED)
+ 		if (media_pad_remote_pad_first(local))
+ 			return -EBUSY;
+diff --git a/drivers/media/platform/qcom/camss/camss-vfe.h b/drivers/media/platform/qcom/camss/camss-vfe.h
+index d006d5822..2610e04dd 100644
+--- a/drivers/media/platform/qcom/camss/camss-vfe.h
++++ b/drivers/media/platform/qcom/camss/camss-vfe.h
+@@ -154,6 +154,28 @@ struct vfe_subdev_resources {
+ 	const struct camss_formats *formats_pix_out;
+ };
+ 
++/*
++ * Two pixel paths writing the halves of one frame wider than an IFE line:
++ * the master owns the buffers of its video node, the slave writes its stripe
++ * at x_offset into them. Protected by the master's output_lock, and on the
++ * slave also by its own.
++ */
++#define VFE_DUAL_HELD 4
++/* The two stripes of a frame complete within this time of each other */
++#define VFE_DUAL_MATCH_NS (8 * NSEC_PER_MSEC)
++
++struct vfe_pix_dual {
++	struct vfe_device *peer;
++	bool master;
++	u32 x_offset;		/* master: byte offset of the slave stripe */
++	u64 slave_ts;		/* master: when the slave last wrote a stripe */
++	unsigned int nheld;	/* master: buffers waiting for the slave */
++	struct {
++		struct camss_buffer *buf;
++		u64 ts;
++	} held[VFE_DUAL_HELD];
++};
++
+ struct vfe_device {
+ 	struct camss *camss;
+ 	u8 id;
+@@ -174,6 +196,7 @@ struct vfe_device {
+ 	struct vfe_line line[VFE_LINE_NUM_MAX];
+ 	u32 reg_update;
+ 	struct vfe_pix_meta *pix_meta;
++	struct vfe_pix_dual dual;
+ 	u8 was_streaming;
+ 	const struct vfe_subdev_resources *res;
+ 	const struct vfe_hw_ops_gen1 *ops_gen1;
+diff --git a/drivers/media/platform/qcom/camss/camss-video.c b/drivers/media/platform/qcom/camss/camss-video.c
+index 82ad60131..bb651146c 100644
+--- a/drivers/media/platform/qcom/camss/camss-video.c
++++ b/drivers/media/platform/qcom/camss/camss-video.c
+@@ -208,11 +208,15 @@ static void video_buf_queue(struct vb2_buffer *vb)
+ 	video->ops->queue_buffer(video, buffer);
+ }
+ 
++static struct v4l2_subdev *video_extra_source(struct camss_video *video, u32 *pad);
++
+ static int video_check_format(struct camss_video *video)
+ {
+ 	struct v4l2_pix_format_mplane *pix = &video->active_fmt.fmt.pix_mp;
+ 	struct v4l2_format format;
+ 	struct v4l2_pix_format_mplane *sd_pix = &format.fmt.pix_mp;
++	struct v4l2_subdev_format extra_fmt = { 0 };
++	struct v4l2_subdev *extra;
+ 	int ret;
+ 
+ 	sd_pix->pixelformat = pix->pixelformat;
+@@ -220,6 +224,18 @@ static int video_check_format(struct camss_video *video)
+ 	if (ret < 0)
+ 		return ret;
+ 
++	/* Dual IFE: the frame is the two stripes side by side */
++	extra = video_extra_source(video, &extra_fmt.pad);
++	if (extra) {
++		extra_fmt.which = V4L2_SUBDEV_FORMAT_ACTIVE;
++		ret = v4l2_subdev_call(extra, pad, get_fmt, NULL, &extra_fmt);
++		if (ret)
++			return ret;
++		if (extra_fmt.format.height != sd_pix->height)
++			return -EPIPE;
++		sd_pix->width += extra_fmt.format.width;
++	}
++
+ 	dev_dbg(video->camss->dev,
+ 		"%s: format is (%ux%u %p4cc/%up field:%u), trying (%ux%u %p4cc/%up field:%u)",
+ 		 video->vdev.name, sd_pix->width, sd_pix->height, &sd_pix->pixelformat,
+@@ -251,6 +267,47 @@ static int video_prepare_streaming(struct vb2_queue *q)
+ 	return ret;
+ }
+ 
++/*
++ * A second pixel path linked to this video node (dual IFE): the subdev that
++ * writes the other stripe, or NULL.
++ */
++static struct v4l2_subdev *video_extra_source(struct camss_video *video, u32 *pad)
++{
++	struct media_pad *first = media_pad_remote_pad_first(&video->pad);
++	struct media_link *link;
++
++	for_each_media_entity_data_link(&video->vdev.entity, link) {
++		if (link->sink != &video->pad || !(link->flags & MEDIA_LNK_FL_ENABLED) ||
++		    link->source == first ||
++		    !is_media_entity_v4l2_subdev(link->source->entity))
++			continue;
++		if (pad)
++			*pad = link->source->index;
++		return media_entity_to_v4l2_subdev(link->source->entity);
++	}
++
++	return NULL;
++}
++
++/* Whether @entity is upstream of the video node through its first link */
++static bool video_chain_has(struct camss_video *video, struct media_entity *entity)
++{
++	struct media_entity *e = &video->vdev.entity;
++	struct media_pad *pad;
++
++	while (1) {
++		pad = &e->pads[0];
++		if (!(pad->flags & MEDIA_PAD_FL_SINK))
++			return false;
++		pad = media_pad_remote_pad_first(pad);
++		if (!pad || !is_media_entity_v4l2_subdev(pad->entity))
++			return false;
++		e = pad->entity;
++		if (e == entity)
++			return true;
++	}
++}
++
+ /*
+  * Video nodes can share the subdevs upstream of a VFE line: the pixel path and
+  * an RDI fed by the same CSID run from the same sensor stream. Whether another
+@@ -294,6 +351,26 @@ static int video_start_streaming(struct vb2_queue *q, unsigned int count)
+ 	if (ret < 0)
+ 		goto error;
+ 
++	/*
++	 * Dual IFE: start the other stripe's pixel path and CSID first, up to
++	 * what it shares with this chain, so that the CSIPHY and the sensor
++	 * start last and both CSIDs see the first frame.
++	 */
++	subdev = video_extra_source(video, NULL);
++	while (subdev) {
++		entity = &subdev->entity;
++		if (video_chain_has(video, entity) || subdev->s_stream_enabled)
++			break;
++		ret = v4l2_subdev_call(subdev, video, s_stream, 1);
++		if (ret < 0 && ret != -ENOIOCTLCMD)
++			goto error;
++		pad = media_pad_remote_pad_first(&entity->pads[0]);
++		if (!(entity->pads[0].flags & MEDIA_PAD_FL_SINK) || !pad ||
++		    !is_media_entity_v4l2_subdev(pad->entity))
++			break;
++		subdev = media_entity_to_v4l2_subdev(pad->entity);
++	}
++
+ 	entity = &vdev->entity;
+ 	while (1) {
+ 		pad = &entity->pads[0];
+@@ -363,6 +440,22 @@ static void video_stop_streaming(struct vb2_queue *q)
+ 		}
+ 	}
+ 
++	/* Dual IFE: then the other stripe's chain, up to what still streams */
++	subdev = video_extra_source(video, NULL);
++	from = &vdev->entity;
++	while (subdev && subdev->s_stream_enabled) {
++		entity = &subdev->entity;
++		if (video_entity_shared(entity, from))
++			break;
++		v4l2_subdev_call(subdev, video, s_stream, 0);
++		pad = media_pad_remote_pad_first(&entity->pads[0]);
++		if (!(entity->pads[0].flags & MEDIA_PAD_FL_SINK) || !pad ||
++		    !is_media_entity_v4l2_subdev(pad->entity))
++			break;
++		from = entity;
++		subdev = media_entity_to_v4l2_subdev(pad->entity);
++	}
++
+ 	video_device_pipeline_stop(vdev);
+ 
+ 	video->ops->flush_buffers(video, VB2_BUF_STATE_ERROR);
+diff --git a/drivers/media/platform/qcom/camss/camss.c b/drivers/media/platform/qcom/camss/camss.c
+index 8bb9801e2..2ee824159 100644
+--- a/drivers/media/platform/qcom/camss/camss.c
++++ b/drivers/media/platform/qcom/camss/camss.c
+@@ -5060,6 +5060,30 @@ static int camss_link_entities(struct camss *camss)
+ 						return ret;
+ 					}
+ 				}
++
++		/*
++		 * Pixel path to the video node of another pixel path: the two
++		 * write the halves of a frame wider than one IFE takes.
++		 */
++		for (i = 0; i < camss->res->vfe_num; i++)
++			for (k = 0; k < camss->res->vfe_num; k++) {
++				struct vfe_device *a = &camss->vfe[i], *b = &camss->vfe[k];
++
++				if (i == k || !vfe_line_has_pix_pipeline(a, VFE_LINE_PIX) ||
++				    !vfe_line_has_pix_pipeline(b, VFE_LINE_PIX))
++					continue;
++				ret = media_create_pad_link(&a->line[VFE_LINE_PIX].subdev.entity,
++							    MSM_VFE_PAD_SRC,
++							    &b->line[VFE_LINE_PIX].video_out.vdev.entity,
++							    0, 0);
++				if (ret < 0) {
++					camss_link_err(camss,
++						       a->line[VFE_LINE_PIX].subdev.entity.name,
++						       b->line[VFE_LINE_PIX].video_out.vdev.name,
++						       ret);
++					return ret;
++				}
++			}
+ 	}
+ 
+ 	return 0;

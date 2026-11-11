@@ -1,0 +1,212 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: qcom: camss: vfe-17x: Add the phase detection pixel correction
+
+Add a parameters block for the PDPC11 module of the pixel path, which
+corrects the phase detection pixels of a sensor from a mask of their
+positions, so that full size modes of PDAF sensors come out of the IFE
+without their dot grid. The register layout and the mask format were
+taken from the Windows driver; the mask goes to its DMI bank only when
+it changes.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ .../platform/qcom/camss/camss-vfe-17x-meta.c  | 62 +++++++++++++++++++
+ include/uapi/linux/media/qcom/ife17x-config.h | 42 ++++++++++++-
+ 2 files changed, 103 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.c b/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.c
+index 278a5c382..21ec09a93 100644
+--- a/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.c
++++ b/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.c
+@@ -36,6 +36,7 @@
+ /* Module enables, double buffered */
+ #define VFE_MODULE_LENS_EN		0x040
+ #define		LENS_EN_BLS		BIT(11)
++#define		LENS_EN_PDPC		BIT(13)
+ #define VFE_MODULE_STATS_EN		0x044
+ #define		STATS_EN_AWB_BG		BIT(3)
+ #define VFE_MODULE_COLOR_EN		0x048
+@@ -68,6 +69,17 @@
+ #define VFE_DMI_DATA_LO			0xc30
+ #define GAMMA_ENTRIES			64
+ 
++/* PDPC11, from the Windows driver (Titan17x CreateCmdList and PackIQ) */
++#define VFE_PDPC_CFG			0xcb4	/* [0] on, [1] HDR, [19:8] black */
++#define VFE_PDPC_HDR_RATIO		0xcb8	/* [8:0] 1/ratio Q8, [30:16] ratio Q10 */
++#define VFE_PDPC_T2_OFFSET		0xcbc	/* [14:0] red/blue, [30:16] green */
++#define VFE_PDPC_LIMITS			0xcc0	/* [7:0] fmax, [15:8] fmin */
++#define VFE_PDPC_OFFSET			0xcc4	/* [14:0] red/blue, [30:16] green */
++#define VFE_PDPC_WB_RATIO(n)		(0xcc8 + 4 * (n))
++#define VFE_PDPC_TILE_OFFSET		0xcd8	/* [13:0] x, [29:16] y */
++#define VFE_PDPC_END			0xcdc	/* [13:0] x, [29:16] y */
++#define VFE_PDPC_DMI_BANK		0x0b
++
+ #define VFE_STATS_CFG			0xaac
+ #define		STATS_CFG_FIXED		BIT(6)
+ #define VFE_AWB_BG_OFFSET		0xbc8
+@@ -139,6 +151,8 @@ struct vfe_pix_meta {
+ 	u8 gamma_bank;		/* LUT banks in use: 0 even, 1 odd */
+ 	bool awb_bg_pending;	/* AWB block seen before the stream start */
+ 	struct ife17x_params_awb_bg awb_bg;
++	bool pdpc_mask_valid;	/* the PDPC mask bank holds pdpc_mask */
++	u32 pdpc_mask[IFE17X_PDPC_MASK_ROWS];
+ };
+ 
+ static inline struct ife_params_buf *to_params_buf(struct vb2_v4l2_buffer *vbuf)
+@@ -168,6 +182,7 @@ union ife_params_block {
+ 	const struct ife17x_params_ccm *ccm;
+ 	const struct ife17x_params_gamma *gamma;
+ 	const struct ife17x_params_awb_bg *awb_bg;
++	const struct ife17x_params_pdpc *pdpc;
+ 	const u8 *data;
+ };
+ 
+@@ -269,6 +284,49 @@ static void ife_params_gamma(struct vfe_pix_meta *meta, union ife_params_block b
+ 	vfe_rmw(vfe, VFE_MODULE_COLOR_EN, 0, COLOR_EN_GAMMA);
+ }
+ 
++static void ife_params_pdpc(struct vfe_pix_meta *meta, union ife_params_block block)
++{
++	const struct ife17x_params_pdpc *p = block.pdpc;
++	struct vfe_device *vfe = meta->vfe;
++	unsigned int i;
++
++	if (ife_block_disabled(block)) {
++		vfe_rmw(vfe, VFE_MODULE_LENS_EN, LENS_EN_PDPC, 0);
++		return;
++	}
++
++	/* One mask bank: rewrite it only when it changes */
++	if (!meta->pdpc_mask_valid || memcmp(meta->pdpc_mask, p->mask, sizeof(p->mask))) {
++		writel_relaxed(VFE_PDPC_DMI_BANK | DMI_CFG_AUTO_INC, vfe->base + VFE_DMI_CFG);
++		writel_relaxed(0, vfe->base + VFE_DMI_ADDR);
++		for (i = 0; i < IFE17X_PDPC_MASK_ROWS; i++)
++			writel_relaxed(p->mask[i], vfe->base + VFE_DMI_DATA_LO);
++		writel_relaxed(0, vfe->base + VFE_DMI_CFG);
++		memcpy(meta->pdpc_mask, p->mask, sizeof(p->mask));
++		meta->pdpc_mask_valid = true;
++	}
++
++	/* No HDR: exposure ratio 1.0 */
++	writel_relaxed(BIT(0) | min_t(u32, p->black_level, 0xfff) << 8,
++		       vfe->base + VFE_PDPC_CFG);
++	writel_relaxed(0x400 << 16 | 0x100, vfe->base + VFE_PDPC_HDR_RATIO);
++	writel_relaxed(min_t(u32, p->t2_bp_offset[1], 0x7fff) |
++		       min_t(u32, p->t2_bp_offset[0], 0x7fff) << 16,
++		       vfe->base + VFE_PDPC_T2_OFFSET);
++	writel_relaxed(p->fmax | p->fmin << 8, vfe->base + VFE_PDPC_LIMITS);
++	writel_relaxed(min_t(u32, p->bp_offset[1], 0x7fff) |
++		       min_t(u32, p->bp_offset[0], 0x7fff) << 16,
++		       vfe->base + VFE_PDPC_OFFSET);
++	for (i = 0; i < 4; i++)
++		writel_relaxed(min_t(u32, p->wb_ratio[i], 0x1ffff),
++			       vfe->base + VFE_PDPC_WB_RATIO(i));
++	/* The mask tile starts at the top left corner of the input */
++	writel_relaxed(0, vfe->base + VFE_PDPC_TILE_OFFSET);
++	writel_relaxed((meta->height - 1) << 16 | (meta->width - 1),
++		       vfe->base + VFE_PDPC_END);
++	vfe_rmw(vfe, VFE_MODULE_LENS_EN, 0, LENS_EN_PDPC);
++}
++
+ static void ife_awb_bg_program(struct vfe_pix_meta *meta,
+ 			       const struct ife17x_params_awb_bg *cfg)
+ {
+@@ -309,6 +367,7 @@ static const ife_params_handler ife_params_handlers[] = {
+ 	[IFE17X_PARAMS_BLOCK_CCM] = ife_params_ccm,
+ 	[IFE17X_PARAMS_BLOCK_GAMMA] = ife_params_gamma,
+ 	[IFE17X_PARAMS_BLOCK_AWB_BG] = ife_params_awb_bg,
++	[IFE17X_PARAMS_BLOCK_PDPC] = ife_params_pdpc,
+ };
+ 
+ static const struct v4l2_isp_params_block_type_info ife_params_block_types[] = {
+@@ -317,6 +376,7 @@ static const struct v4l2_isp_params_block_type_info ife_params_block_types[] = {
+ 	[IFE17X_PARAMS_BLOCK_CCM] = { .size = sizeof(struct ife17x_params_ccm) },
+ 	[IFE17X_PARAMS_BLOCK_GAMMA] = { .size = sizeof(struct ife17x_params_gamma) },
+ 	[IFE17X_PARAMS_BLOCK_AWB_BG] = { .size = sizeof(struct ife17x_params_awb_bg) },
++	[IFE17X_PARAMS_BLOCK_PDPC] = { .size = sizeof(struct ife17x_params_pdpc) },
+ };
+ 
+ static_assert(ARRAY_SIZE(ife_params_handlers) == ARRAY_SIZE(ife_params_block_types));
+@@ -428,6 +488,8 @@ void vfe17x_meta_start(struct vfe_device *vfe, u32 width, u32 height)
+ 	meta->frame = 0;
+ 	/* The default setup filled every gamma bank and selected bank 0 */
+ 	meta->gamma_bank = 0;
++	/* The VFE was reset: the mask bank must be written again */
++	meta->pdpc_mask_valid = false;
+ 	writel_relaxed(CAMIF_EPOCH_CFG, vfe->base + VFE_CAMIF_EPOCH_IRQ);
+ 
+ 	if (meta->awb_bg_pending)
+diff --git a/include/uapi/linux/media/qcom/ife17x-config.h b/include/uapi/linux/media/qcom/ife17x-config.h
+index 79e82efeb..bd9e0cdb6 100644
+--- a/include/uapi/linux/media/qcom/ife17x-config.h
++++ b/include/uapi/linux/media/qcom/ife17x-config.h
+@@ -25,6 +25,7 @@
+  * @IFE17X_PARAMS_BLOCK_CCM: colour correction matrix (CC12)
+  * @IFE17X_PARAMS_BLOCK_GAMMA: gamma curves (Gamma16)
+  * @IFE17X_PARAMS_BLOCK_AWB_BG: AWB Bayer grid statistics (AWBBGStats14)
++ * @IFE17X_PARAMS_BLOCK_PDPC: phase detection pixel correction (PDPC11)
+  */
+ enum ife17x_params_block_type {
+ 	IFE17X_PARAMS_BLOCK_BLS,
+@@ -32,6 +33,7 @@ enum ife17x_params_block_type {
+ 	IFE17X_PARAMS_BLOCK_CCM,
+ 	IFE17X_PARAMS_BLOCK_GAMMA,
+ 	IFE17X_PARAMS_BLOCK_AWB_BG,
++	IFE17X_PARAMS_BLOCK_PDPC,
+ };
+ 
+ /**
+@@ -128,12 +130,50 @@ struct ife17x_params_awb_bg {
+ 	__u32 reserved;
+ } __attribute__((aligned(8)));
+ 
++#define IFE17X_PDPC_MASK_ROWS		64
++
++/**
++ * struct ife17x_params_pdpc - phase detection pixel correction
++ * @header: block header, type IFE17X_PARAMS_BLOCK_PDPC
++ * @black_level: black level of the input in the 14 bit pipeline units (a 10
++ *		 bit level of 64 is 1024), at most 4095
++ * @fmax: upper limit of a phase detection pixel against its neighbours,
++ *	  unsigned Q6
++ * @fmin: lower limit, unsigned Q6
++ * @bp_offset: offsets for the green [0] and the red and blue [1] pixels, at
++ *	       most 32767
++ * @t2_bp_offset: second offsets, same order, at most 32767
++ * @wb_ratio: white balance gain ratios R/G, B/G, G/R and G/B, unsigned Q12,
++ *	      at most 131071
++ * @mask: phase detection pixels of a 64x64 pixel tile repeated over the
++ *	  frame from its top left corner: bit (31 - x / 2) of row y marks the
++ *	  pixel pair at columns x & ~1 and x | 1 that holds one
++ * @reserved: must be zero
++ *
++ * Corrects the pixels the mask marks over the whole frame. The field meanings
++ * follow the calculation of the Windows driver; the tested values are those
++ * of its ov13b10 tuning: fmax 80, fmin 32, offsets 128.
++ * V4L2_ISP_PARAMS_FL_BLOCK_DISABLE bypasses the block.
++ */
++struct ife17x_params_pdpc {
++	struct v4l2_isp_params_block_header header;
++	__u16 black_level;
++	__u8 fmax;
++	__u8 fmin;
++	__u16 bp_offset[2];
++	__u16 t2_bp_offset[2];
++	__u32 wb_ratio[4];
++	__u32 mask[IFE17X_PDPC_MASK_ROWS];
++	__u32 reserved;
++} __attribute__((aligned(8)));
++
+ #define IFE17X_PARAMS_MAX_SIZE					\
+ 	(sizeof(struct ife17x_params_bls) +			\
+ 	 sizeof(struct ife17x_params_wb) +			\
+ 	 sizeof(struct ife17x_params_ccm) +			\
+ 	 sizeof(struct ife17x_params_gamma) +			\
+-	 sizeof(struct ife17x_params_awb_bg))
++	 sizeof(struct ife17x_params_awb_bg) +			\
++	 sizeof(struct ife17x_params_pdpc))
+ 
+ /**
+  * struct ife17x_awb_bg_region - AWB Bayer grid record, as the hardware

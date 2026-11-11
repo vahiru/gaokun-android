@@ -1,0 +1,267 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: qcom: camss: Quiet the stop, flag the timestamps
+
+A stream stops from the VFE up: between the VFE's stop and the CSID's,
+the frames the sensor still sends overflow the CSID path FIFOs and then
+the receiver, which reported CRC and FIFO errors and marked the VFE
+wedged on most stops. Ignore CSID errors while no VFE line it feeds
+takes frames.
+
+The pixel path, display and statistics buffers carry the frame start
+time: flag their queues V4L2_BUF_FLAG_TSTAMP_SRC_SOE. RDI buffers keep
+their completion time, which their default flags describe, also while
+the pixel path numbers them. A wedged pixel path writes no more display
+frames: do not wait for them when stopping.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ .../platform/qcom/camss/camss-csid-gen2.c     | 17 +++++++++-
+ .../media/platform/qcom/camss/camss-csid.c    | 14 +++++++++
+ .../media/platform/qcom/camss/camss-csid.h    |  1 +
+ .../platform/qcom/camss/camss-vfe-17x-disp.c  |  3 ++
+ .../platform/qcom/camss/camss-vfe-17x-meta.c  | 31 +++++++++++++++----
+ .../platform/qcom/camss/camss-vfe-17x-meta.h  |  1 +
+ .../media/platform/qcom/camss/camss-vfe-17x.c | 21 +++++++++++--
+ drivers/media/platform/qcom/camss/camss-vfe.c | 18 +++++++++++
+ drivers/media/platform/qcom/camss/camss-vfe.h |  1 +
+ 9 files changed, 97 insertions(+), 10 deletions(-)
+
+diff --git a/drivers/media/platform/qcom/camss/camss-csid-gen2.c b/drivers/media/platform/qcom/camss/camss-csid-gen2.c
+index fcb103b33..70f0b6986 100644
+--- a/drivers/media/platform/qcom/camss/camss-csid-gen2.c
++++ b/drivers/media/platform/qcom/camss/camss-csid-gen2.c
+@@ -528,9 +528,24 @@ static int csid_configure_testgen_pattern(struct csid_device *csid, s32 val)
+ static void csid_isr_error(struct csid_device *csid, u32 rx, u32 ports)
+ {
+ 	u64 now = ktime_get_ns();
+-	bool fatal;
++	bool fatal, running = false;
+ 	u8 i;
+ 
++	/*
++	 * A stream stops from the VFE up: between the VFE's stop and the
++	 * CSID's, the frames the sensor still sends have nowhere to go and
++	 * overflow the path FIFOs, then the receiver. No VFE line takes them.
++	 */
++	for (i = 0; i < MSM_CSID_MAX_SRC_STREAMS; i++)
++		if ((csid->phy.en_vc & BIT(i)) && csid_port_running(csid, i))
++			running = true;
++	if (!running) {
++		dev_dbg(csid->camss->dev,
++			"CSID%d: error irq rx %08x, path fifo overflow on ports %x, with the VFE stopped\n",
++			csid->id, rx, ports);
++		return;
++	}
++
+ 	csid->errors.count++;
+ 	dev_err_ratelimited(csid->camss->dev,
+ 			    "CSID%d: error irq rx %08x%s%s%s%s%s%s, path fifo overflow on ports %x\n",
+diff --git a/drivers/media/platform/qcom/camss/camss-csid.c b/drivers/media/platform/qcom/camss/camss-csid.c
+index 765dd4d8d..0cb6c5555 100644
+--- a/drivers/media/platform/qcom/camss/camss-csid.c
++++ b/drivers/media/platform/qcom/camss/camss-csid.c
+@@ -765,6 +765,20 @@ static int csid_set_power(struct v4l2_subdev *sd, int on)
+  * The VFE line it feeds marks the buffer of that frame. Interrupt context;
+  * the links do not change while streaming.
+  */
++/*
++ * csid_port_running - Whether the VFE line a source port feeds takes frames.
++ * Interrupt context; the links do not change while streaming.
++ */
++bool csid_port_running(struct csid_device *csid, u8 port)
++{
++	struct media_pad *pad;
++
++	pad = media_pad_remote_pad_first(&csid->pads[MSM_CSID_PAD_FIRST_SRC + port]);
++	if (!pad || !is_media_entity_v4l2_subdev(pad->entity))
++		return false;
++	return vfe_line_running(v4l2_get_subdevdata(media_entity_to_v4l2_subdev(pad->entity)));
++}
++
+ void csid_frame_error(struct csid_device *csid, u8 port)
+ {
+ 	struct media_pad *pad;
+diff --git a/drivers/media/platform/qcom/camss/camss-csid.h b/drivers/media/platform/qcom/camss/camss-csid.h
+index 0811d4d37..71e576b9c 100644
+--- a/drivers/media/platform/qcom/camss/camss-csid.h
++++ b/drivers/media/platform/qcom/camss/camss-csid.h
+@@ -264,6 +264,7 @@ u32 csid_hw_version(struct csid_device *csid);
+ u32 csid_src_pad_code(struct csid_device *csid, u32 sink_code,
+ 		      unsigned int match_format_idx, u32 match_code);
+ 
++bool csid_port_running(struct csid_device *csid, u8 port);
+ void csid_frame_error(struct csid_device *csid, u8 port);
+ void csid_fatal_error(struct csid_device *csid, u8 port);
+ 
+diff --git a/drivers/media/platform/qcom/camss/camss-vfe-17x-disp.c b/drivers/media/platform/qcom/camss/camss-vfe-17x-disp.c
+index 8f9574651..7293e7f01 100644
+--- a/drivers/media/platform/qcom/camss/camss-vfe-17x-disp.c
++++ b/drivers/media/platform/qcom/camss/camss-vfe-17x-disp.c
+@@ -468,6 +468,9 @@ int vfe17x_disp_register(struct vfe_device *vfe, struct v4l2_device *v4l2_dev)
+ 	ret = msm_video_register(video, v4l2_dev, name);
+ 	if (ret < 0)
+ 		goto err_subdev;
++	/* Its buffers take the time of the frame start, like the pixel path's */
++	video->vb2_q.timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC |
++				       V4L2_BUF_FLAG_TSTAMP_SRC_SOE;
+ 
+ 	ret = media_create_pad_link(&sd->entity, MSM_VFE_PAD_SRC, &video->vdev.entity, 0,
+ 				    MEDIA_LNK_FL_IMMUTABLE | MEDIA_LNK_FL_ENABLED);
+diff --git a/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.c b/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.c
+index db64deaa3..5d80e7e31 100644
+--- a/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.c
++++ b/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.c
+@@ -1483,6 +1483,23 @@ bool vfe17x_meta_running(struct vfe_device *vfe)
+ }
+ 
+ /* Time between the last two epochs 0 of the pixel path, 0 if unknown */
++/* The pixel path is wedged until the next start (vfe17x_meta_fatal()) */
++bool vfe17x_meta_wedged(struct vfe_device *vfe)
++{
++	struct vfe_pix_meta *meta = vfe->pix_meta;
++	unsigned long flags;
++	bool wedged;
++
++	if (!meta)
++		return false;
++
++	spin_lock_irqsave(&meta->lock, flags);
++	wedged = meta->wedged;
++	spin_unlock_irqrestore(&meta->lock, flags);
++
++	return wedged;
++}
++
+ u64 vfe17x_meta_period_ns(struct vfe_device *vfe)
+ {
+ 	struct vfe_pix_meta *meta = vfe->pix_meta;
+@@ -1733,11 +1750,11 @@ bool vfe17x_meta_before_first_frame(struct vfe_device *vfe)
+  * Number a completed image of the pixel path, or of an RDI line of the same
+  * VFE while the pixel path runs, by the epochs like the statistics, so images,
+  * statistics and parameters keep the same frame numbers when the driver runs
+- * out of image buffers. Stamp it with the start of its frame (epoch 0, line
+- * CAMIF_EPOCH0_LINE) rather than its completion: the outputs of a frame end at
+- * different times (the display output ends early on a window that leaves out
+- * the bottom of the frame), and every buffer of a frame should carry the same
+- * time.
++ * out of image buffers. @timestamp: the start of the frame (epoch 0, line
++ * CAMIF_EPOCH0_LINE), for the pixel path's buffers rather than their
++ * completion: its outputs of a frame end at different times (the display
++ * output ends early on a window that leaves out the bottom of the frame), and
++ * all should carry the same time.
+  */
+ void vfe17x_meta_frame(struct vfe_device *vfe, u32 *sequence, u64 *timestamp)
+ {
+@@ -2491,7 +2508,9 @@ static int ife_register_node(struct vfe_pix_meta *meta, struct v4l2_device *v4l2
+ 	q->ops = output ? &ife_params_vb2_ops : &ife_stats_vb2_ops;
+ 	q->buf_struct_size = output ? sizeof(struct ife_params_buf) :
+ 				      sizeof(struct ife_stats_buf);
+-	q->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
++	/* Statistics take the time of their frame's start, like the images */
++	q->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC |
++			     (output ? 0 : V4L2_BUF_FLAG_TSTAMP_SRC_SOE);
+ 	q->lock = lock;
+ 	q->dev = vfe->camss->dev;
+ 	ret = vb2_queue_init(q);
+diff --git a/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.h b/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.h
+index a151f4ac9..d3a436ce7 100644
+--- a/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.h
++++ b/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.h
+@@ -25,6 +25,7 @@ bool vfe17x_meta_epoch(struct vfe_device *vfe, bool next_written, u64 now);
+ bool vfe17x_meta_running(struct vfe_device *vfe);
+ bool vfe17x_meta_running_locked(struct vfe_device *vfe);
+ u64 vfe17x_meta_period_ns(struct vfe_device *vfe);
++bool vfe17x_meta_wedged(struct vfe_device *vfe);
+ void vfe17x_meta_lock(struct vfe_device *vfe);
+ void vfe17x_meta_unlock(struct vfe_device *vfe);
+ bool vfe17x_meta_join_open_locked(struct vfe_device *vfe);
+diff --git a/drivers/media/platform/qcom/camss/camss-vfe-17x.c b/drivers/media/platform/qcom/camss/camss-vfe-17x.c
+index c175b3231..e0f17d04e 100644
+--- a/drivers/media/platform/qcom/camss/camss-vfe-17x.c
++++ b/drivers/media/platform/qcom/camss/camss-vfe-17x.c
+@@ -1941,7 +1941,9 @@ static void vfe_disp_drain(struct vfe_pix_disp *disp)
+ 	if (!stopping)
+ 		return;
+ 
+-	idle = wait_event_timeout(disp->drain_wq, vfe_disp_idle(disp), msecs_to_jiffies(ms));
++	/* A wedged pixel path writes no more frames: nothing to wait for */
++	idle = vfe17x_meta_wedged(vfe) ||
++	       wait_event_timeout(disp->drain_wq, vfe_disp_idle(disp), msecs_to_jiffies(ms));
+ 
+ 	spin_lock_irqsave(&vfe->output_lock, flags);
+ 	if (disp->output.state == VFE_OUTPUT_STOPPING) {
+@@ -2903,9 +2905,18 @@ static void vfe_isr_wm_done(struct vfe_device *vfe, u8 wm)
+ 	/*
+ 	 * While the pixel path runs, the RDI lines of the same VFE number
+ 	 * their frames by its epochs too, so that RAW and processed buffers of
+-	 * one sensor frame carry the same sequence and timestamp.
++	 * one sensor frame carry the same sequence. The pixel path's buffers
++	 * take the frame's start time; an RDI line's keep their completion
++	 * time, which its queue's timestamp flags describe whether or not
++	 * the pixel path runs.
+ 	 */
+-	vfe17x_meta_frame(vfe, &ready_buf->vb.sequence, &ready_buf->vb.vb2_buf.timestamp);
++	{
++		u64 frame_ts = ts;
++
++		vfe17x_meta_frame(vfe, &ready_buf->vb.sequence, &frame_ts);
++		if (line->id == VFE_LINE_PIX)
++			ready_buf->vb.vb2_buf.timestamp = frame_ts;
++	}
+ 	bad = output->error;
+ 	output->error = false;
+ 
+@@ -3100,6 +3111,10 @@ static int vfe17x_pix_register(struct vfe_device *vfe, struct v4l2_device *v4l2_
+ {
+ 	int ret, err;
+ 
++	/* Its buffers take the time of the frame start (vfe17x_meta_frame()) */
++	vfe->line[VFE_LINE_PIX].video_out.vb2_q.timestamp_flags =
++		V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC | V4L2_BUF_FLAG_TSTAMP_SRC_SOE;
++
+ 	ret = vfe17x_meta_register(vfe, v4l2_dev);
+ 	err = vfe17x_disp_register(vfe, v4l2_dev);
+ 	if (err < 0)
+diff --git a/drivers/media/platform/qcom/camss/camss-vfe.c b/drivers/media/platform/qcom/camss/camss-vfe.c
+index cca637f35..1694a0821 100644
+--- a/drivers/media/platform/qcom/camss/camss-vfe.c
++++ b/drivers/media/platform/qcom/camss/camss-vfe.c
+@@ -1294,6 +1294,24 @@ void vfe_line_fatal_error(struct vfe_line *line)
+ 		vfe->res->hw_ops->fatal_error(vfe);
+ }
+ 
++/*
++ * vfe_line_running - Whether a line takes frames: streaming, and for the pixel
++ * path not stopping. Interrupt context, by the CSID feeding it.
++ */
++bool vfe_line_running(struct vfe_line *line)
++{
++	struct vfe_device *vfe = to_vfe(line);
++	unsigned long flags;
++	bool running;
++
++	spin_lock_irqsave(&vfe->output_lock, flags);
++	running = line->output.state == VFE_OUTPUT_ON &&
++		  !(line->id == VFE_LINE_PIX && vfe->pix_stopping);
++	spin_unlock_irqrestore(&vfe->output_lock, flags);
++
++	return running;
++}
++
+ /*
+  * vfe_line_frame_error - The frame a line is writing came in corrupt
+  * @line: VFE line
+diff --git a/drivers/media/platform/qcom/camss/camss-vfe.h b/drivers/media/platform/qcom/camss/camss-vfe.h
+index 21fdb4daa..83e2e98dd 100644
+--- a/drivers/media/platform/qcom/camss/camss-vfe.h
++++ b/drivers/media/platform/qcom/camss/camss-vfe.h
+@@ -263,6 +263,7 @@ struct camss_buffer *vfe_buf_get_pending(struct vfe_output *output);
+ 
+ int vfe_flush_buffers(struct camss_video *vid, enum vb2_buffer_state state);
+ 
++bool vfe_line_running(struct vfe_line *line);
+ void vfe_line_frame_error(struct vfe_line *line);
+ void vfe_line_fatal_error(struct vfe_line *line);
+ 
