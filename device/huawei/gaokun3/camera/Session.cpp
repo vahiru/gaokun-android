@@ -17,6 +17,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <pthread.h>
 #include <fcntl.h>
 #include <span>
 #include <thread>
@@ -250,6 +251,7 @@ bool Session::init()
 			lens_.reset();
 		}
 	}
+	stillThread_ = std::thread([this] { stillWorker(); });
 	return true;
 }
 
@@ -269,10 +271,13 @@ ndk::ScopedAStatus Session::close()
 			lk.lock();
 		}
 		cam_->requestCompleted.disconnect(this, &Session::onRequestCompleted);
+		/* JPEG 任务还在读 FULL 的映射、写缓存里的 JPEG 缓冲：等它们做完 */
+		waitStillJobs(lk);
 		freeRequests_.clear();
 		configRequests_.clear();
 		reqBuffers_.clear();
 		fullFree_.clear();
+		fullHeld_.clear();
 		pending_.clear();
 		dropAllCaches();
 		unmapFrames();
@@ -288,6 +293,14 @@ ndk::ScopedAStatus Session::close()
 		}
 		ALOGI("会话已关闭");
 	}
+	/* 任务都做完了（见上），工作线程空闲，在锁外停下 */
+	{
+		std::lock_guard<std::mutex> g(stillMutex_);
+		stillStop_ = true;
+	}
+	stillCv_.notify_all();
+	if (stillThread_.joinable())
+		stillThread_.join();
 	/* 在锁外通知 Device（它会拿自己的锁）。 */
 	if (onClosed_)
 		onClosed_();
@@ -346,10 +359,12 @@ ndk::ScopedAStatus Session::configureStreams(const StreamConfiguration &cfg,
 			if (!drained)
 				ALOGW("stop 后 %zu 个在途请求仍未完成，强制清理", pending_.size());
 		}
+		waitStillJobs(lk);
 		freeRequests_.clear();
 		configRequests_.clear();
 		reqBuffers_.clear();
 		fullFree_.clear();
+		fullHeld_.clear();
 		pending_.clear();
 		unmapFrames();
 		allocator_.reset();
@@ -1088,12 +1103,15 @@ ndk::ScopedAStatus Session::processCaptureRequest(const std::vector<CaptureReque
 
 		apply3aControls(p, lreq->controls());
 
-		/* 带 JPEG 的请求、预览要从 FULL 出的请求，再加一个 FULL 缓冲 */
+		/*
+		 * 带 JPEG 的请求、预览要从 FULL 出的请求，再加一个 FULL 缓冲。只为预览要的不等：
+		 * FULL 可能正被 JPEG 任务占着，拿不到时预览退回显示路径（放大，画质差些）。
+		 */
 		libcamera::FrameBuffer *fullBuf = nullptr;
-		if (fullStream_ && (p.previewFromFull ||
-				    std::any_of(p.buffers.begin(), p.buffers.end(),
-						[](const PendingBuffer &b) { return b.isBlob; }))) {
-			if (fullFree_.empty() &&
+		const bool wantsBlob = std::any_of(p.buffers.begin(), p.buffers.end(),
+						   [](const PendingBuffer &b) { return b.isBlob; });
+		if (fullStream_ && (p.previewFromFull || wantsBlob)) {
+			if (fullFree_.empty() && wantsBlob &&
 			    !freeCv_.wait_for(lk, std::chrono::milliseconds(kPoolWaitMs),
 					      [&] { return !fullFree_.empty() || !streaming_; })) {
 				ALOGE("frame=%d: no free full-size buffer within %d ms", r.frameNumber,
@@ -1341,10 +1359,10 @@ Session::Crop Session::cropIn(const SrcFrame &src, const int32_t region[4], int3
 	return { x, y, w, h };
 }
 
-int Session::toJ420(const SrcFrame &src, int32_t dstW, int32_t dstH,
-		    uint8_t *dy, int ys, uint8_t *du, uint8_t *dv, int cs) const
+int Session::toJ420(const SrcFrame &src, const int32_t crop[4], int32_t dstW, int32_t dstH,
+		    uint8_t *dy, int ys, uint8_t *du, uint8_t *dv, int cs, Scratch &s) const
 {
-	const Crop c = cropFor(src, dstW, dstH);
+	const Crop c = cropIn(src, crop, dstW, dstH);
 	const int cw = (dstW + 1) / 2, chh = (dstH + 1) / 2;
 
 	if (srcNv12_) {
@@ -1359,12 +1377,11 @@ int Session::toJ420(const SrcFrame &src, int32_t dstW, int32_t dstH,
 			return libyuv::NV12ToI420(sy, src.stride, suv, src.stride, dy, ys, du, cs,
 						  dv, cs, dstW, dstH);
 		/* 先缩放 NV12（只有一个交错的色度平面要处理），再拆平面。 */
-		scaleScratch_.resize(static_cast<size_t>(dstW) * dstH +
-				     static_cast<size_t>(cw) * 2 * chh);
-		uint8_t *ty = scaleScratch_.data();
+		s.scale.resize(static_cast<size_t>(dstW) * dstH + static_cast<size_t>(cw) * 2 * chh);
+		uint8_t *ty = s.scale.data();
 		uint8_t *tuv = ty + static_cast<size_t>(dstW) * dstH;
 		int rc = scaleNv12(sy, src.stride, suv, src.stride, c.w, c.h, ty, dstW, tuv, cw * 2,
-				   dstW, dstH);
+				   dstW, dstH, s);
 		if (rc == 0)
 			rc = libyuv::NV12ToI420(ty, dstW, tuv, cw * 2, dy, ys, du, cs, dv, cs, dstW,
 						dstH);
@@ -1380,10 +1397,10 @@ int Session::toJ420(const SrcFrame &src, int32_t dstW, int32_t dstH,
 	 *   字节序照旧：convert.h:959 注释明写 "RGB little endian (bgr in
 	 *   memory) to J420"，与 libcamera 的 RGB888(=BGR24) 对得上。
 	 */
-	const uint8_t *crop = src.data + static_cast<size_t>(c.y) * src.stride +
-			      static_cast<size_t>(c.x) * 3;
+	const uint8_t *cropped = src.data + static_cast<size_t>(c.y) * src.stride +
+				 static_cast<size_t>(c.x) * 3;
 	if (dstW == c.w && dstH == c.h)
-		return libyuv::RGB24ToJ420(crop, src.stride, dy, ys, du, cs, dv, cs, dstW, dstH);
+		return libyuv::RGB24ToJ420(cropped, src.stride, dy, ys, du, cs, dv, cs, dstW, dstH);
 
 	/*
 	 * 需要缩放：先在源尺寸上转成 I420，再缩放到目标尺寸。
@@ -1397,7 +1414,7 @@ int Session::toJ420(const SrcFrame &src, int32_t dstW, int32_t dstH,
 	uint8_t *sy = tmp.data();
 	uint8_t *su = sy + static_cast<size_t>(c.w) * c.h;
 	uint8_t *sv = su + static_cast<size_t>(scw) * schh;
-	int rc = libyuv::RGB24ToJ420(crop, src.stride, sy, c.w, su, scw, sv, scw, c.w, c.h);
+	int rc = libyuv::RGB24ToJ420(cropped, src.stride, sy, c.w, su, scw, sv, scw, c.w, c.h);
 	if (rc == 0)
 		rc = libyuv::I420Scale(sy, c.w, su, scw, sv, scw, c.w, c.h,
 				       dy, ys, du, cs, dv, cs, dstW, dstH, libyuv::kFilterBox);
@@ -1416,11 +1433,12 @@ int Session::toNv12(const SrcFrame &src, int32_t dstW, int32_t dstH,
 		libyuv::CopyPlane(suv, src.stride, duv, cs, (dstW + 1) / 2 * 2, (dstH + 1) / 2);
 		return 0;
 	}
-	return scaleNv12(sy, src.stride, suv, src.stride, c.w, c.h, dy, ys, duv, cs, dstW, dstH);
+	return scaleNv12(sy, src.stride, suv, src.stride, c.w, c.h, dy, ys, duv, cs, dstW, dstH,
+			 scratch_);
 }
 
 int Session::scaleNv12(const uint8_t *sy, int ss, const uint8_t *suv, int suvs, int sw, int sh,
-		       uint8_t *dy, int ds, uint8_t *duv, int duvs, int dw, int dh) const
+		       uint8_t *dy, int ds, uint8_t *duv, int duvs, int dw, int dh, Scratch &s) const
 {
 	/*
 	 * 设备上的 libyuv 缩小超过 2 倍时，盒式滤波走 C（全尺寸画面缩到 1280x960
@@ -1429,7 +1447,7 @@ int Session::scaleNv12(const uint8_t *sy, int ss, const uint8_t *suv, int suvs, 
 	 */
 	for (int pass = 0; sw >= 2 * dw && sh >= 2 * dh && sw % 4 == 0 && sh % 4 == 0; pass++) {
 		const int hw = sw / 2, hh = sh / 2;
-		std::vector<uint8_t> &t = halfScratch_[pass & 1];
+		std::vector<uint8_t> &t = s.half[pass & 1];
 		t.resize(static_cast<size_t>(hw) * hh * 3 / 2);
 		uint8_t *ty = t.data();
 		uint8_t *tuv = ty + static_cast<size_t>(hw) * hh;
@@ -1470,9 +1488,9 @@ const uint8_t *Session::renderNv12(const SrcFrame &src, int32_t dstW, int32_t ds
 		return nullptr;
 	}
 	if (chromaBlur > 0)
-		boxBlur(uv, cw * 2, chh, cw * 2, 2, chromaBlur);
+		boxBlur(uv, cw * 2, chh, cw * 2, 2, chromaBlur, scratch_);
 	if (sharpen)
-		sharpenLuma(y, dstW, r.data.data(), dstW, dstW, dstH, sharpen_, sharpenScratch_);
+		sharpenLuma(y, dstW, r.data.data(), dstW, dstW, dstH, sharpen_, scratch_.sharpen);
 	r.frame = renderFrame_;
 	r.w = dstW;
 	r.h = dstH;
@@ -1528,7 +1546,7 @@ bool Session::deliver(const SrcFrame &src, buffer_handle_t dst,
 			rc = -1;
 		}
 	} else if (planar && chromaBlur <= 0 && sharpen_.radius == 0) {
-		rc = toJ420(src, dstW, dstH, oy, ys, ocb, ocr, cs);
+		rc = toJ420(src, cropRegion_, dstW, dstH, oy, ys, ocb, ocr, cs, scratch_);
 	} else {
 		/* 经平面暂存区：RGB 来源，或者要做滤波、锐化 */
 		planeScratch_.resize(static_cast<size_t>(cw) * chh * 2);
@@ -1537,15 +1555,15 @@ bool Session::deliver(const SrcFrame &src, buffer_handle_t dst,
 		const bool sharpen = sharpen_.radius > 0;
 		if (sharpen)
 			lumaScratch_.resize(static_cast<size_t>(dstW) * dstH);
-		rc = toJ420(src, dstW, dstH, sharpen ? lumaScratch_.data() : oy, sharpen ? dstW : ys,
-			    du, dv, cw);
+		rc = toJ420(src, cropRegion_, dstW, dstH, sharpen ? lumaScratch_.data() : oy,
+			    sharpen ? dstW : ys, du, dv, cw, scratch_);
 		if (rc == 0 && sharpen)
 			sharpenLuma(lumaScratch_.data(), dstW, oy, ys, dstW, dstH, sharpen_,
-				    sharpenScratch_);
+				    scratch_.sharpen);
 		if (rc == 0 && chromaBlur > 0) {
 			/* 色度降噪：U/V 只有 1/4 分辨率，盒式模糊几乎免费，而彩色噪点正是最难看的那种。 */
-			boxBlur(du, cw, chh, cw, 1, chromaBlur);
-			boxBlur(dv, cw, chh, cw, 1, chromaBlur);
+			boxBlur(du, cw, chh, cw, 1, chromaBlur, scratch_);
+			boxBlur(dv, cw, chh, cw, 1, chromaBlur, scratch_);
 		}
 		if (rc == 0 && planar) {
 			libyuv::CopyPlane(du, cw, ocb, cs, cw, chh);
@@ -1691,41 +1709,42 @@ std::vector<uint8_t> encodeThumbnail(const std::vector<uint8_t> &bgra, int w, in
 
 } /* namespace */
 
-void Session::thumbnailSize(int32_t rotation, int32_t *tw, int32_t *th) const
+void Session::thumbnailSize(const StillParams &sp, int32_t rotation, int32_t *tw, int32_t *th)
 {
 	const bool swap = rotation == 90 || rotation == 270;
-	*tw = swap ? thumbH_ : thumbW_;
-	*th = swap ? thumbW_ : thumbH_;
+	*tw = swap ? sp.thumbH : sp.thumbW;
+	*th = swap ? sp.thumbW : sp.thumbH;
 }
 
-std::vector<uint8_t> Session::exifApp1(int32_t outW, int32_t outH, bool rotated,
+std::vector<uint8_t> Session::exifApp1(StillParams &sp, int32_t outW, int32_t outH, bool rotated,
 				       const std::vector<uint8_t> &thumb, int32_t tw, int32_t th)
 {
-	ExifInfo info = exifFrame_;
+	ExifInfo info = sp.exif;
 	info.width = outW;
 	info.height = outH;
 	info.rotated = rotated;
-	info.thumbnail = encodeThumbnail(thumb, tw, th, thumbQuality_);
+	info.thumbnail = encodeThumbnail(thumb, tw, th, sp.thumbQuality);
 	bool withThumb = false;
 	std::vector<uint8_t> app1 = buildExifApp1(info, &withThumb);
 	/* 结果报实际放进去的缩略图：超出 64 KB 被丢掉时报 0x0 */
-	thumbMade_[0] = withThumb ? tw : 0;
-	thumbMade_[1] = withThumb ? th : 0;
+	sp.thumbMade[0] = withThumb ? tw : 0;
+	sp.thumbMade[1] = withThumb ? th : 0;
 	return app1;
 }
 
 bool Session::deliverJpeg(const SrcFrame &src, buffer_handle_t dst,
 			  int32_t dstW, int32_t dstH, int32_t blobSize,
-			  int quality, int32_t jpegOrientation)
+			  int quality, int32_t jpegOrientation, StillParams &sp, Scratch &s)
 {
-	return srcNv12_ ? deliverJpegNv12(src, dst, dstW, dstH, blobSize, quality, jpegOrientation)
+	return srcNv12_ ? deliverJpegNv12(src, dst, dstW, dstH, blobSize, quality, jpegOrientation,
+					  sp, s)
 			: deliverJpegRgb(src.data, dst, dstW, dstH, blobSize, quality,
-					 jpegOrientation);
+					 jpegOrientation, sp);
 }
 
 bool Session::deliverJpegRgb(const uint8_t *rgb, buffer_handle_t dst,
 			     int32_t dstW, int32_t dstH, int32_t blobSize,
-			     int quality, int32_t jpegOrientation)
+			     int quality, int32_t jpegOrientation, StillParams &sp)
 {
 	auto &mapper = android::GraphicBufferMapper::get();
 	void *raw = nullptr;
@@ -1772,7 +1791,7 @@ bool Session::deliverJpegRgb(const uint8_t *rgb, buffer_handle_t dst,
 	frame.stride = srcWidth_ * 3;
 	frame.w = srcWidth_;
 	frame.h = srcHeight_;
-	const Crop c = cropFor(frame, dstW, dstH);
+	const Crop c = cropIn(frame, sp.crop, dstW, dstH);
 	const uint8_t *crop = rgb + static_cast<size_t>(c.y) * srcWidth_ * 3 +
 			      static_cast<size_t>(c.x) * 3;
 	const bool needScale = dstW != c.w || dstH != c.h;
@@ -1854,12 +1873,12 @@ bool Session::deliverJpegRgb(const uint8_t *rgb, buffer_handle_t dst,
 	jpeg_start_compress(&cinfo, TRUE);
 	{
 		int32_t tw, th;
-		thumbnailSize(jpegOrientation, &tw, &th);
+		thumbnailSize(sp, jpegOrientation, &tw, &th);
 		const std::vector<uint8_t> thumb =
 			tw > 0 && th > 0 ? thumbFromPacked(src, srcStride, components, outW, outH, tw, th)
 					 : std::vector<uint8_t>();
 		const std::vector<uint8_t> app1 =
-			exifApp1(outW, outH, rotMode != libyuv::kRotate0, thumb, tw, th);
+			exifApp1(sp, outW, outH, rotMode != libyuv::kRotate0, thumb, tw, th);
 		/* 超过一个段的上限时 libjpeg 的默认错误处理会 exit()：宁可不写 EXIF */
 		if (app1.size() <= 65533)
 			jpeg_write_marker(&cinfo, JPEG_APP0 + 1, app1.data(), app1.size());
@@ -1884,7 +1903,7 @@ bool Session::deliverJpegRgb(const uint8_t *rgb, buffer_handle_t dst,
 
 bool Session::deliverJpegNv12(const SrcFrame &src, buffer_handle_t dst,
 			      int32_t dstW, int32_t dstH, int32_t blobSize,
-			      int quality, int32_t jpegOrientation)
+			      int quality, int32_t jpegOrientation, StillParams &sp, Scratch &s)
 {
 	/* 旋转的约定同 deliverJpegRgb()：把像素转正，不写 EXIF 方向标记。 */
 	const libyuv::RotationMode rotMode = toLibyuvRotation(jpegOrientation);
@@ -1907,14 +1926,14 @@ bool Session::deliverJpegNv12(const SrcFrame &src, buffer_handle_t dst,
 
 	int rc;
 	if (rotMode == libyuv::kRotate0) {
-		rc = toJ420(src, dstW, dstH, oy, ys, ou, ov, cs);
+		rc = toJ420(src, sp.crop, dstW, dstH, oy, ys, ou, ov, cs, s);
 	} else {
 		std::vector<uint8_t> t(static_cast<size_t>(dstW) * dstH +
 				       static_cast<size_t>(cw) * chh * 2);
 		uint8_t *ty = t.data();
 		uint8_t *tu = ty + static_cast<size_t>(dstW) * dstH;
 		uint8_t *tv = tu + static_cast<size_t>(cw) * chh;
-		rc = toJ420(src, dstW, dstH, ty, dstW, tu, tv, cw);
+		rc = toJ420(src, sp.crop, dstW, dstH, ty, dstW, tu, tv, cw, s);
 		if (rc == 0)
 			rc = libyuv::I420Rotate(ty, dstW, tu, cw, tv, cw, oy, ys, ou, cs, ov, cs,
 						dstW, dstH, rotMode);
@@ -1942,16 +1961,16 @@ bool Session::deliverJpegNv12(const SrcFrame &src, buffer_handle_t dst,
 			denY.resize(static_cast<size_t>(ys) * outH);
 			denoiseLuma(oy, ys, denY.data(), ys, outW, outH, t);
 			oy = denY.data();
-			boxBlur(ou, ocw, och, cs, 1, 2);
-			boxBlur(ov, ocw, och, cs, 1, 2);
+			boxBlur(ou, ocw, och, cs, 1, 2, s);
+			boxBlur(ov, ocw, och, cs, 1, 2, s);
 			ALOGI("JPEG denoise: luma noise %.2f, epsilon threshold %d, chroma box 5x5", sigma, t);
 		}
 	}
 	/* 锐化在缩放、旋转、降噪之后，按输出分辨率（核是对称的，旋转前后一样） */
 	std::vector<uint8_t> sharpY;
-	if (sharpen_.radius > 0) {
+	if (sp.sharpen.radius > 0) {
 		sharpY.resize(static_cast<size_t>(ys) * outH);
-		sharpenLuma(oy, ys, sharpY.data(), ys, outW, outH, sharpen_, sharpenScratch_);
+		sharpenLuma(oy, ys, sharpY.data(), ys, outW, outH, sp.sharpen, s.sharpen);
 		oy = sharpY.data();
 	}
 
@@ -2004,12 +2023,12 @@ bool Session::deliverJpegNv12(const SrcFrame &src, buffer_handle_t dst,
 	jpeg_start_compress(&cinfo, TRUE);
 	{
 		int32_t tw, th;
-		thumbnailSize(jpegOrientation, &tw, &th);
+		thumbnailSize(sp, jpegOrientation, &tw, &th);
 		const std::vector<uint8_t> thumb =
 			tw > 0 && th > 0 ? thumbFromJ420(oy, ys, ou, ov, cs, outW, outH, tw, th)
 					 : std::vector<uint8_t>();
 		const std::vector<uint8_t> app1 =
-			exifApp1(outW, outH, rotMode != libyuv::kRotate0, thumb, tw, th);
+			exifApp1(sp, outW, outH, rotMode != libyuv::kRotate0, thumb, tw, th);
 		/* 超过一个段的上限时 libjpeg 的默认错误处理会 exit()：宁可不写 EXIF */
 		if (app1.size() <= 65533)
 			jpeg_write_marker(&cinfo, JPEG_APP0 + 1, app1.data(), app1.size());
@@ -2138,7 +2157,7 @@ void columnSums(const uint8_t *const *rows, uint16_t *col, int n)
  * 可分离的盒式模糊，边缘取边上的值：每个输出行先算窗口内的列和，再沿行
  * 滑动窗口。读平面的副本，写回平面。用在色度上，像素只有四分之一。
  */
-void Session::boxBlur(uint8_t *p, int n, int h, int stride, int step, int radius)
+void Session::boxBlur(uint8_t *p, int n, int h, int stride, int step, int radius, Scratch &s)
 {
 	if (radius <= 0 || n <= 0 || h <= 0 || (step != 1 && step != 2))
 		return;
@@ -2148,15 +2167,15 @@ void Session::boxBlur(uint8_t *p, int n, int h, int stride, int step, int radius
 	const uint32_t recip = (65536u + win * win / 2) / (win * win);
 	const int pad = radius * step;
 
-	blurSrc_.resize(static_cast<size_t>(n) * h);
-	libyuv::CopyPlane(p, stride, blurSrc_.data(), n, n, h);
-	blurCols_.resize(static_cast<size_t>(n) + 2 * pad);
-	uint16_t *col = blurCols_.data() + pad;
+	s.blurSrc.resize(static_cast<size_t>(n) * h);
+	libyuv::CopyPlane(p, stride, s.blurSrc.data(), n, n, h);
+	s.blurCols.resize(static_cast<size_t>(n) + 2 * pad);
+	uint16_t *col = s.blurCols.data() + pad;
 
 	for (int y = 0; y < h; y++) {
 		const uint8_t *rows[5];
 		for (int k = 0; k < win; k++)
-			rows[k] = blurSrc_.data() +
+			rows[k] = s.blurSrc.data() +
 				  static_cast<size_t>(std::clamp(y + k - radius, 0, h - 1)) * n;
 		if (radius == 1)
 			columnSums<1>(rows, col, n);
@@ -2190,6 +2209,9 @@ void Session::reportRequestError(const Pending &p)
 	 * produced for this request"，但缓冲仍要带 ERROR 状态还回去，框架据此把这一帧移出在途表。
 	 * 不发 shutter —— 这一帧没有曝光时间戳，而 shutter 必须按帧号递增，乱发反而是设备错误。
 	 * ★ 只在完成回调里调用：libcamera 按入队顺序完成请求，报错因此天然按帧序。
+	 *   两路输出时前面的照片可能还在工作线程上编码：JPEG 缓冲也经任务队列返回（整帧
+	 *   报错的任务，不另发 ERROR_BUFFER），才按帧号顺序；不在这里等，免得 CameraManager
+	 *   线程停住、管线跟着停。
 	 */
 	NotifyMsg msg;
 	ErrorMsg e;
@@ -2205,7 +2227,16 @@ void Session::reportRequestError(const Pending &p)
 	result.frameNumber = p.frameNumber;
 	result.fmqResultSize = 0;
 	result.partialResult = 0;   /* 只还缓冲、没有元数据 */
+	std::optional<StillJob> job;
 	for (const auto &b : p.buffers) {
+		if (b.isBlob && fullStream_ && srcNv12_ && !job) {
+			job.emplace();
+			job->requestError = true;
+			job->frameNumber = p.frameNumber;
+			job->streamId = b.streamId;
+			job->bufferId = b.bufferId;
+			continue;
+		}
 		StreamBuffer sb;
 		sb.streamId = b.streamId;
 		sb.bufferId = b.bufferId;
@@ -2214,8 +2245,28 @@ void Session::reportRequestError(const Pending &p)
 	}
 	result.inputBuffer.streamId = -1;
 	result.inputBuffer.bufferId = 0;
-	std::vector<CaptureResult> results;
-	results.push_back(std::move(result));
+	/* 不带缓冲也不带元数据的结果不合法（只有 JPEG 一路时全交给了任务） */
+	if (!result.outputBuffers.empty()) {
+		std::vector<CaptureResult> results;
+		results.push_back(std::move(result));
+		sendResults(results);
+	}
+	if (job) {
+		{
+			std::lock_guard<std::mutex> lk(mutex_);
+			stillInFlight_++;
+		}
+		{
+			std::lock_guard<std::mutex> g(stillMutex_);
+			stillJobs_.push_back(std::move(*job));
+		}
+		stillCv_.notify_one();
+	}
+}
+
+void Session::sendResults(std::vector<CaptureResult> &results)
+{
+	std::lock_guard<std::mutex> g(resultMutex_);
 	cb_->processCaptureResult(results);
 }
 
@@ -2229,14 +2280,101 @@ void Session::flashRequestDone(const Pending &p)
 		setLed(false);
 }
 
+void Session::waitStillJobs(std::unique_lock<std::mutex> &lk)
+{
+	if (stillInFlight_ == 0)
+		return;
+	/* 编码不依赖 libcamera 和框架之外的东西，每张不到 1 秒，所以不设超时：没做完就解除映射会崩 */
+	ALOGI("Waiting for %d JPEG encode(s)", stillInFlight_);
+	drainCv_.wait(lk, [&] { return stillInFlight_ == 0; });
+}
+
+void Session::stillWorker()
+{
+	pthread_setname_np(pthread_self(), "gk3cam-jpeg");
+	Scratch s;
+	std::unique_lock<std::mutex> lk(stillMutex_);
+	for (;;) {
+		stillCv_.wait(lk, [&] { return stillStop_ || !stillJobs_.empty(); });
+		if (stillJobs_.empty())
+			return;   /* 要停，且没有剩下的任务 */
+		StillJob job = std::move(stillJobs_.front());
+		stillJobs_.pop_front();
+		lk.unlock();
+
+		/* src 为空：这一帧没有能用的 FULL（或整帧报错），只是按顺序把 JPEG 缓冲报成出错 */
+		bool ok = false;
+		if (job.src.data) {
+			int32_t tw = 0, th = 0;
+			thumbnailSize(job.params, job.orientation, &tw, &th);
+			ok = deliverJpegNv12(job.src, job.handle, job.width, job.height, job.blobSize,
+					     job.quality, job.orientation, job.params, s);
+			if (ok && tw > 0 && th > 0 && job.params.thumbMade[0] == 0)
+				ALOGW("frame=%d: the thumbnail did not fit into the EXIF segment, but the "
+				      "result already reported %dx%d", job.frameNumber, tw, th);
+		}
+		if (job.fullBuf) {
+			struct dma_buf_sync sync = { DMA_BUF_SYNC_END | DMA_BUF_SYNC_READ };
+			ioctl(job.fullFd, DMA_BUF_IOCTL_SYNC, &sync);
+			/* FULL 先还：框架拿回 JPEG 缓冲后可能立刻发下一张 */
+			std::lock_guard<std::mutex> g(mutex_);
+			if (fullHeld_.erase(job.fullBuf))
+				fullFree_.push_back(job.fullBuf);
+			freeCv_.notify_all();
+		}
+
+		/* 整帧报错的请求已发过 ERROR_REQUEST，不能再发单独的 ERROR_BUFFER */
+		if (!ok && !job.requestError) {
+			NotifyMsg emsg;
+			ErrorMsg e;
+			e.frameNumber = job.frameNumber;
+			e.errorStreamId = job.streamId;
+			e.errorCode = ErrorCode::ERROR_BUFFER;
+			emsg.set<NotifyMsg::Tag::error>(e);
+			std::vector<NotifyMsg> emsgs;
+			emsgs.push_back(std::move(emsg));
+			cb_->notify(emsgs);
+		}
+		/*
+		 * 只带这一个缓冲的结果（partialResult 0 = 不带元数据）。元数据由完成回调按帧号顺序发，
+		 * 多半已经发过；先于它到达也合合同（同一请求的元数据与缓冲不分先后）。
+		 */
+		CaptureResult result;
+		result.frameNumber = job.frameNumber;
+		result.fmqResultSize = 0;
+		result.partialResult = 0;
+		StreamBuffer sb;
+		sb.streamId = job.streamId;
+		sb.bufferId = job.bufferId;
+		sb.status = ok ? BufferStatus::OK : BufferStatus::ERROR;
+		result.outputBuffers.push_back(std::move(sb));
+		result.inputBuffer.streamId = -1;
+		result.inputBuffer.bufferId = 0;
+		std::vector<CaptureResult> results;
+		results.push_back(std::move(result));
+		sendResults(results);
+
+		{
+			std::lock_guard<std::mutex> g(mutex_);
+			if (--stillInFlight_ == 0)
+				drainCv_.notify_all();
+		}
+		lk.lock();
+	}
+}
+
 /* 调用者持 mutex_。只收【本次配置】建的 Request；上一代的（重配置后迟到的）直接释放。 */
 void Session::returnToPool(std::unique_ptr<libcamera::Request> r)
 {
 	if (configRequests_.count(r.get())) {
-		/* 这个请求带过的 FULL 缓冲还回去（帧已交付、DMA 同步已结束） */
+		/*
+		 * 这个请求带过的 FULL 缓冲还回去（帧已交付、DMA 同步已结束）；交给 JPEG 任务的
+		 * 由工作线程编码完再还。
+		 */
 		if (fullStream_)
 			if (libcamera::FrameBuffer *fb = r->findBuffer(fullStream_))
-				fullFree_.push_back(fb);
+				if (!fullHeld_.count(fb))
+					fullFree_.push_back(fb);
 		freeRequests_.push_back(std::move(r));
 		/* 等请求的和等 FULL 缓冲的可能是不同的线程 */
 		freeCv_.notify_all();
@@ -2760,7 +2898,9 @@ void Session::onRequestCompleted(libcamera::Request *req)
 		const libcamera::FrameBuffer *ffb = req->findBuffer(fullStream_);
 		if (!ffb || ffb->metadata().status != libcamera::FrameMetadata::FrameSuccess ||
 		    ffb->planes().empty()) {
-			ALOGW("frame=%d: no usable full-size frame", pend.frameNumber);
+			/* 只为预览要 FULL 而没拿到时（见 processCaptureRequest）不算异常 */
+			if (hasBlob || ffb)
+				ALOGW("frame=%d: no usable full-size frame", pend.frameNumber);
 		} else {
 			const auto &fp = ffb->planes();
 			fullFd = fp[0].fd.get();
@@ -2847,33 +2987,36 @@ void Session::onRequestCompleted(libcamera::Request *req)
 	renderFrame_++;
 	std::copy(pend.crop, pend.crop + 4, cropRegion_);
 
-	/* 这一帧的 EXIF，给它的 JPEG 流用 */
+	/* 这一帧的照片参数（裁剪、锐化、EXIF、缩略图），给它的 JPEG 流用 */
+	StillParams sp;
+	std::copy(pend.crop, pend.crop + 4, sp.crop);
+	sp.sharpen = sharpen_;
 	{
-		exifFrame_ = {};
-		exifFrame_.make = exifMake_;
-		exifFrame_.model = exifModel_;
+		ExifInfo &exif = sp.exif;
+		exif.make = exifMake_;
+		exif.model = exifModel_;
 		struct timespec now = {};
 		clock_gettime(CLOCK_REALTIME, &now);
-		exifFrame_.captureTime = now.tv_sec;
-		exifFrame_.subsecMs = static_cast<int32_t>(now.tv_nsec / 1000000);
-		exifFrame_.focalLengthMm = lensParams(facts_.frontFacing).focalLengthMm;
-		exifFrame_.fNumber = lensParams(facts_.frontFacing).fNumber;
-		exifFrame_.exposureNs = exposureNs;
-		exifFrame_.iso = sensitivity;
-		exifFrame_.hasFlash = !flashLed_.empty();
-		exifFrame_.flashFired = pend.flashFired;
+		exif.captureTime = now.tv_sec;
+		exif.subsecMs = static_cast<int32_t>(now.tv_nsec / 1000000);
+		exif.focalLengthMm = lensParams(facts_.frontFacing).focalLengthMm;
+		exif.fNumber = lensParams(facts_.frontFacing).fNumber;
+		exif.exposureNs = exposureNs;
+		exif.iso = sensitivity;
+		exif.hasFlash = !flashLed_.empty();
+		exif.flashFired = pend.flashFired;
 		/* EXIF 闪光模式：1 强制闪（手电筒也算），2 强制不闪，3 自动 */
-		exifFrame_.flashMode = pend.aeMode == ANDROID_CONTROL_AE_MODE_ON_AUTO_FLASH ? 3
-				       : pend.aeMode == ANDROID_CONTROL_AE_MODE_ON_ALWAYS_FLASH ||
-						       pend.flashMode == ANDROID_FLASH_MODE_SINGLE ||
-						       pend.flashMode == ANDROID_FLASH_MODE_TORCH
-					       ? 1
-					       : 2;
+		exif.flashMode = pend.aeMode == ANDROID_CONTROL_AE_MODE_ON_AUTO_FLASH ? 3
+				 : pend.aeMode == ANDROID_CONTROL_AE_MODE_ON_ALWAYS_FLASH ||
+						 pend.flashMode == ANDROID_FLASH_MODE_SINGLE ||
+						 pend.flashMode == ANDROID_FLASH_MODE_TORCH
+					 ? 1
+					 : 2;
 		const bool controlOff = requestEntryInt(pend.settings, ANDROID_CONTROL_MODE,
 							ANDROID_CONTROL_MODE_AUTO) ==
 					ANDROID_CONTROL_MODE_OFF;
-		exifFrame_.manualExposure = controlOff || pend.aeMode == ANDROID_CONTROL_AE_MODE_OFF;
-		exifFrame_.manualWhiteBalance =
+		exif.manualExposure = controlOff || pend.aeMode == ANDROID_CONTROL_AE_MODE_OFF;
+		exif.manualWhiteBalance =
 			controlOff || requestEntryInt(pend.settings, ANDROID_CONTROL_AWB_MODE,
 						      ANDROID_CONTROL_AWB_MODE_AUTO) !=
 					      ANDROID_CONTROL_AWB_MODE_AUTO;
@@ -2887,31 +3030,31 @@ void Session::onRequestCompleted(libcamera::Request *req)
 			g.longitude = lon;
 			g.altitude = std::isfinite(alt) ? alt : 0.0;
 			g.timestamp = requestEntryInt64(pend.settings, ANDROID_JPEG_GPS_TIMESTAMP,
-							exifFrame_.captureTime);
+							exif.captureTime);
 			g.method = requestEntryBytes(pend.settings, ANDROID_JPEG_GPS_PROCESSING_METHOD);
-			exifFrame_.gps = g;
+			exif.gps = g;
 		}
-		thumbW_ = std::max(requestEntryInt(pend.settings, ANDROID_JPEG_THUMBNAIL_SIZE, 0, 0), 0);
-		thumbH_ = std::max(requestEntryInt(pend.settings, ANDROID_JPEG_THUMBNAIL_SIZE, 0, 1), 0);
+		sp.thumbW = std::max(requestEntryInt(pend.settings, ANDROID_JPEG_THUMBNAIL_SIZE, 0, 0), 0);
+		sp.thumbH = std::max(requestEntryInt(pend.settings, ANDROID_JPEG_THUMBNAIL_SIZE, 0, 1), 0);
 		/*
 		 * 只做声明过的尺寸（kThumbnailSizes）：别的尺寸按宽高比取最接近的
 		 * 一个，免得按应用给的任意大小分配内存。
 		 */
-		if (thumbW_ == 0 || thumbH_ == 0) {
-			thumbW_ = thumbH_ = 0;
+		if (sp.thumbW == 0 || sp.thumbH == 0) {
+			sp.thumbW = sp.thumbH = 0;
 		} else {
 			int32_t bw = 0, bh = 0;
 			double best = 1e9;
 			for (size_t i = 0; i + 1 < std::size(kThumbnailSizes); i += 2) {
 				const int32_t w = kThumbnailSizes[i], h = kThumbnailSizes[i + 1];
-				if (w == thumbW_ && h == thumbH_) {
+				if (w == sp.thumbW && h == sp.thumbH) {
 					bw = w;
 					bh = h;
 					break;
 				}
 				const double d = w > 0 && h > 0
-							 ? std::fabs(std::log(static_cast<double>(w) * thumbH_ /
-									       (static_cast<double>(h) * thumbW_)))
+							 ? std::fabs(std::log(static_cast<double>(w) * sp.thumbH /
+									       (static_cast<double>(h) * sp.thumbW)))
 							 : 1e9;
 				if (d < best) {
 					best = d;
@@ -2919,22 +3062,56 @@ void Session::onRequestCompleted(libcamera::Request *req)
 					bh = h;
 				}
 			}
-			thumbW_ = bw;
-			thumbH_ = bh;
+			sp.thumbW = bw;
+			sp.thumbH = bh;
 		}
-		thumbQuality_ = requestEntryInt(pend.settings, ANDROID_JPEG_THUMBNAIL_QUALITY, 85);
-		thumbMade_[0] = thumbMade_[1] = -1;
+		sp.thumbQuality = requestEntryInt(pend.settings, ANDROID_JPEG_THUMBNAIL_QUALITY, 85);
 	}
-	for (auto &pb : pend.buffers) {
+	/*
+	 * 两路输出、JPEG 从 FULL 编码时交给工作线程（见 Session.h 的 StillJob）：这里只记下任务，
+	 * 请求还池之后再入队；FULL 那一路的预览（previewFromFull）在下面同步交付完。
+	 */
+	std::optional<StillJob> job;
+	size_t jobIndex = SIZE_MAX;
+	for (size_t i = 0; i < pend.buffers.size(); i++) {
+		const PendingBuffer &pb = pend.buffers[i];
 		const bool shared = std::count_if(pend.buffers.begin(), pend.buffers.end(),
 						  [&](const PendingBuffer &o) {
 							  return !o.isBlob && o.width == pb.width &&
 								 o.height == pb.height;
 						  }) > 1;
-		bool ok = pb.isBlob ? still.data && deliverJpeg(still, pb.handle, pb.width, pb.height,
-								 pb.blobSize, jpegQuality, jpegOrientation)
-				    : view.data && deliver(view, pb.handle, pb.width, pb.height, chromaBlur,
-							   shared);
+		bool ok;
+		if (pb.isBlob && srcNv12_ && fullStream_ && !job) {
+			/*
+			 * 两路输出时每个 JPEG 都经任务队列交付，FULL 不能用时也是（src 为空，工作线程按
+			 * 出错交付）：同一路流的缓冲必须按帧号顺序返回（ICameraDeviceCallback.aidl），
+			 * 这里直接报错会抢在前一张还在编码的照片前面，框架随后把那张也当成丢失。
+			 */
+			job.emplace();
+			job->src = full;
+			if (full.data) {
+				job->fullBuf = req->findBuffer(fullStream_);
+				job->fullFd = fullFd;
+			}
+			job->frameNumber = pend.frameNumber;
+			job->streamId = pb.streamId;
+			job->bufferId = pb.bufferId;
+			job->handle = pb.handle;
+			job->width = pb.width;
+			job->height = pb.height;
+			job->blobSize = pb.blobSize;
+			job->quality = jpegQuality;
+			job->orientation = jpegOrientation;
+			job->params = sp;
+			jobIndex = i;
+			ok = true;   /* 缓冲由工作线程编码后另发 */
+		} else {
+			ok = pb.isBlob ? still.data && deliverJpeg(still, pb.handle, pb.width, pb.height,
+								   pb.blobSize, jpegQuality,
+								   jpegOrientation, sp, scratch_)
+				       : view.data && deliver(view, pb.handle, pb.width, pb.height,
+							      chromaBlur, shared);
+		}
 		okv.push_back(ok);
 		if (!ok) {
 			NotifyMsg emsg;
@@ -2953,7 +3130,8 @@ void Session::onRequestCompleted(libcamera::Request *req)
 		struct dma_buf_sync sync = { DMA_BUF_SYNC_END | DMA_BUF_SYNC_READ };
 		ioctl(srcFd, DMA_BUF_IOCTL_SYNC, &sync);
 	}
-	if (fullMap) {
+	/* 交给任务的 FULL 由工作线程编码完再结束同步 */
+	if (fullMap && !job) {
 		struct dma_buf_sync sync = { DMA_BUF_SYNC_END | DMA_BUF_SYNC_READ };
 		ioctl(fullFd, DMA_BUF_IOCTL_SYNC, &sync);
 	}
@@ -2966,9 +3144,53 @@ void Session::onRequestCompleted(libcamera::Request *req)
 	 *   ⚠️ 也不能更早：还回去之后 processCaptureRequest 可能立刻取走并 reuse()
 	 *   （实测崩过：tid name=CameraManager，栈顶 onRequestCompleted+1428）。
 	 */
+	bool staleJob = false;
 	{
 		std::lock_guard<std::mutex> lk(mutex_);
+		/*
+		 * 请求已不属于当前配置（drain 超时后强制清理过，映射可能已解除）：不交给工作线程，
+		 * JPEG 按出错交付。
+		 */
+		if (job && !configRequests_.count(req)) {
+			job.reset();
+			staleJob = true;
+		}
+		/* 先登记，returnToPool() 就不会把任务的 FULL 收回 fullFree_ */
+		if (job) {
+			if (job->fullBuf)
+				fullHeld_.insert(job->fullBuf);
+			stillInFlight_++;
+		}
 		returnToPool(std::move(owned));
+	}
+	if (staleJob) {
+		okv[jobIndex] = false;
+		NotifyMsg emsg;
+		ErrorMsg e;
+		e.frameNumber = pend.frameNumber;
+		e.errorStreamId = pend.buffers[jobIndex].streamId;
+		e.errorCode = ErrorCode::ERROR_BUFFER;
+		emsg.set<NotifyMsg::Tag::error>(e);
+		std::vector<NotifyMsg> emsgs;
+		emsgs.push_back(std::move(emsg));
+		cb_->notify(emsgs);
+		jobIndex = SIZE_MAX;
+	}
+	/*
+	 * 结果里的缩略图尺寸：同步编码时是实际做出的；交给任务时按要做的报（结果元数据必须按帧号
+	 * 顺序发，不能等编码）。缩略图超过 EXIF 段的上限被丢掉时两者不同，工作线程会记一条警告。
+	 */
+	int32_t thumbSize[2] = { sp.thumbMade[0], sp.thumbMade[1] };
+	if (job) {
+		int32_t tw = 0, th = 0;
+		thumbnailSize(sp, jpegOrientation, &tw, &th);
+		thumbSize[0] = tw > 0 && th > 0 ? tw : 0;
+		thumbSize[1] = tw > 0 && th > 0 ? th : 0;
+		{
+			std::lock_guard<std::mutex> g(stillMutex_);
+			stillJobs_.push_back(std::move(*job));
+		}
+		stillCv_.notify_one();
 	}
 
 	CaptureResult result;
@@ -2985,7 +3207,7 @@ void Session::onRequestCompleted(libcamera::Request *req)
 	fr.exposureNs = exposureNs;
 	fr.frameDurationNs = frameDurationNs;
 	std::copy(pend.crop, pend.crop + 4, fr.cropRegion);
-	std::copy(thumbMade_, thumbMade_ + 2, fr.thumbnailSize);
+	std::copy(thumbSize, thumbSize + 2, fr.thumbnailSize);
 	fr.sensitivity = sensitivity;
 	/*
 	 * ★ 对焦结果组：应用（CameraX 的 FocusMeteringControl、各家相机的拍照前 AF）等的是
@@ -3012,6 +3234,8 @@ void Session::onRequestCompleted(libcamera::Request *req)
 	result.result.metadata = buildResult(pend.settings, timestamp, /*pipelineDepth=*/4, fr);
 
 	for (size_t i = 0; i < pend.buffers.size(); i++) {
+		if (i == jobIndex)
+			continue;   /* JPEG 由工作线程交付 */
 		StreamBuffer sb;
 		sb.streamId = pend.buffers[i].streamId;
 		sb.bufferId = pend.buffers[i].bufferId;
@@ -3025,7 +3249,7 @@ void Session::onRequestCompleted(libcamera::Request *req)
 
 	std::vector<CaptureResult> results;
 	results.push_back(std::move(result));
-	cb_->processCaptureResult(results);
+	sendResults(results);
 
 	/* 闪光灯：点过灯的请求都完成了、而且没人还要灯，才灭。 */
 	std::lock_guard<std::mutex> lk(mutex_);

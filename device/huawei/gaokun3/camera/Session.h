@@ -131,6 +131,29 @@ private:
 		double win[4] = {};
 		float view[4] = { 0.0f, 0.0f, 1.0f, 1.0f };
 	};
+	/*
+	 * 交付路径的暂存区，跨帧保留：几 MB 的缓冲由 mmap() 分配，每帧重新分配的话每 4 KB
+	 * 一次缺页。完成回调线程用 scratch_，JPEG 工作线程用自己的一份。
+	 */
+	struct Scratch {
+		std::vector<uint8_t> scale;    /* toJ420()：缩放后的 NV12 */
+		std::vector<uint8_t> half[2];  /* scaleNv12()：减半后的 NV12 */
+		std::vector<uint16_t> sharpen; /* sharpenLuma() */
+		std::vector<uint8_t> blurSrc;  /* boxBlur() */
+		std::vector<uint16_t> blurCols;
+	};
+	/*
+	 * 一张照片按帧取的参数（完成回调里从这一帧的请求取）：裁剪区域、锐化、EXIF 与缩略图。
+	 * JPEG 在工作线程上编码时随任务带走，编码时不读会被下一帧改掉的成员。
+	 */
+	struct StillParams {
+		int32_t crop[4] = {};
+		SharpenParams sharpen;
+		ExifInfo exif;                     /* 尺寸和缩略图除外，由 exifApp1() 补上 */
+		int32_t thumbW = 0, thumbH = 0;    /* 请求的尺寸，旋转之前；0 = 不要 */
+		int thumbQuality = 85;
+		int32_t thumbMade[2] = { -1, -1 }; /* 做出的尺寸，旋转之后 */
+	};
 
 	/* 把一帧交付到一个 gralloc 缓冲，
 	 * 必要时裁成该路流的宽高比、再缩放到它的尺寸。 */
@@ -144,8 +167,8 @@ private:
 	const uint8_t *renderNv12(const SrcFrame &src, int32_t dstW, int32_t dstH, int chromaBlur);
 	/* 裁成 dstW×dstH 的宽高比、缩放后写成全范围的 4:2:0 平面（J420），
 	 * Y 行宽 ys、色度行宽 cs。返回 libyuv 的结果，0 为成功。 */
-	int toJ420(const SrcFrame &src, int32_t dstW, int32_t dstH,
-		   uint8_t *dy, int ys, uint8_t *du, uint8_t *dv, int cs) const;
+	int toJ420(const SrcFrame &src, const int32_t crop[4], int32_t dstW, int32_t dstH,
+		   uint8_t *dy, int ys, uint8_t *du, uint8_t *dv, int cs, Scratch &s) const;
 	/*
 	 * 同上，但写成半平面（CbCr 成对交错在一个平面里，即 NV12），只接受 NV12
 	 * 来源：裁剪，尺寸不同时再缩放，不做格式转换。
@@ -154,7 +177,7 @@ private:
 		   uint8_t *dy, int ys, uint8_t *duv, int cs) const;
 	/* NV12 缩放成另一尺寸的 NV12，倍数大时分级 */
 	int scaleNv12(const uint8_t *sy, int ss, const uint8_t *suv, int suvs, int sw, int sh,
-		      uint8_t *dy, int ds, uint8_t *duv, int duvs, int dw, int dh) const;
+		      uint8_t *dy, int ds, uint8_t *duv, int duvs, int dw, int dh, Scratch &s) const;
 	/* Centre crop of the source frame with the aspect ratio of dstW x dstH,
 	 * even-aligned. */
 	struct Crop {
@@ -171,14 +194,17 @@ private:
 	 */
 	bool deliverJpeg(const SrcFrame &src, buffer_handle_t dst,
 			 int32_t dstW, int32_t dstH, int32_t blobSize,
-			 int quality, int32_t jpegOrientation);
+			 int quality, int32_t jpegOrientation, StillParams &sp, Scratch &s);
 	bool deliverJpegRgb(const uint8_t *rgb, buffer_handle_t dst,
 			    int32_t dstW, int32_t dstH, int32_t blobSize,
-			    int quality, int32_t jpegOrientation);
-	/* NV12 不经过 RGB：裁剪缩放旋转成 J420，再以 YCbCr 原始数据交给 libjpeg。 */
+			    int quality, int32_t jpegOrientation, StillParams &sp);
+	/*
+	 * NV12 不经过 RGB：裁剪缩放旋转成 J420，再以 YCbCr 原始数据交给 libjpeg。
+	 * 只读配置时定下的成员，可以在 JPEG 工作线程上调用（暂存区用调用方给的 s）。
+	 */
 	bool deliverJpegNv12(const SrcFrame &src, buffer_handle_t dst,
 			     int32_t dstW, int32_t dstH, int32_t blobSize,
-			     int quality, int32_t jpegOrientation);
+			     int quality, int32_t jpegOrientation, StillParams &sp, Scratch &s);
 
 	/*
 	 * ── 闪光灯（#110 / #111）──
@@ -225,20 +251,14 @@ private:
 	 * 盒式模糊：h 行，每行 n 字节，行距 stride 字节；各通道交错，相隔 step
 	 * 字节：单独的平面 step 为 1，NV12 的 CbCr 平面为 2（两个通道一起做）。
 	 */
-	void boxBlur(uint8_t *p, int n, int h, int stride, int step, int radius);
+	static void boxBlur(uint8_t *p, int n, int h, int stride, int step, int radius, Scratch &s);
 	int denoiseThreshold() const;   /* 0 = 不降噪 */
 	int chromaBlurRadius() const;   /* 0 = 不模糊 */
 	std::function<void()> onClosed_;
 
-	/*
-	 * 交付路径的每帧暂存区，跨帧保留：几 MB 的缓冲由 mmap() 分配，每帧重新
-	 * 分配的话每 4 KB 一次缺页。只在 libcamera 的完成回调线程上使用。
-	 */
+	/* 完成回调线程的暂存区（见 Scratch） */
 	mutable std::vector<uint8_t> planeScratch_;   /* 复制前的 J420 或 CbCr */
-	mutable std::vector<uint8_t> scaleScratch_;   /* toJ420()：缩放后的 NV12 */
-	mutable std::vector<uint8_t> halfScratch_[2]; /* scaleNv12()：减半后的 NV12 */
-	std::vector<uint8_t> blurSrc_;
-	std::vector<uint16_t> blurCols_;
+	mutable Scratch scratch_;
 	struct RenderedNv12 {
 		uint64_t frame = 0;     /* 所属的 renderFrame_，0 = 无 */
 		int32_t w = 0, h = 0;
@@ -254,7 +274,6 @@ private:
 	 */
 	SharpenParams sharpen_;
 	std::vector<uint8_t> lumaScratch_;
-	std::vector<uint16_t> sharpenScratch_;
 
 	/*
 	 * libcamera 缓冲的 mmap()，按 dmabuf fd 记，第一次用到时映射，保留到缓冲
@@ -296,6 +315,52 @@ private:
 	std::condition_variable freeCv_;
 	bool streaming_ = false;
 	bool closed_ = false;
+
+	/*
+	 * ── 两路输出时 JPEG 在工作线程上编码 ──
+	 * 照片从 FULL 那一路编码，13 MP 加降噪、锐化约 0.1–0.2 秒。放在完成回调线程上时，
+	 * 这段时间里请求回不到池、后面的完成回调也排着队，管线没有请求可接，每拍一张预览
+	 * 就断 150–190 ms。所以完成回调照常交付预览、录像与结果元数据，请求立刻还池；
+	 * FULL 缓冲留给任务（记在 fullHeld_，returnToPool() 不收），JPEG 缓冲由工作线程
+	 * 编码后另发一次只带这个缓冲的结果，再把 FULL 还回 fullFree_。
+	 * 在途的 JPEG（libcamera 里加任务里）不超过 JPEG 流的 maxBuffers，FULL 缓冲数与它
+	 * 相同，所以带 JPEG 的请求照样总能拿到 FULL；只为预览要 FULL 的请求（不支持 ScalerCrop
+	 * 时的变焦）拿不到就不带，预览退回显示路径。两路输出时每个 JPEG（包括 FULL 不能用、
+	 * 要报错的）都经任务队列交付，JPEG 流的缓冲因此按帧号顺序返回。
+	 * stillInFlight_、fullHeld_ 受 mutex_ 保护，任务队列受 stillMutex_ 保护。
+	 * configureStreams() 与 close() 先等任务做完（waitStillJobs()），再解除映射、释放缓冲。
+	 * 单路输出时 JPEG 的来源是请求自己的缓冲，仍在完成回调里同步编码。
+	 */
+	struct StillJob {
+		SrcFrame src;                               /* FULL 的画面，映射在 frameMaps_ 里 */
+		libcamera::FrameBuffer *fullBuf = nullptr;
+		int fullFd = -1;
+		int32_t frameNumber = 0;
+		int32_t streamId = -1;
+		int64_t bufferId = 0;
+		buffer_handle_t handle = nullptr;           /* 缓存里的，不拥有 */
+		int32_t width = 0, height = 0, blobSize = 0;
+		int quality = 90;
+		int32_t orientation = 0;
+		StillParams params;
+		bool requestError = false;  /* 整帧报错（reportRequestError()）：只按顺序还 JPEG 缓冲 */
+	};
+	void stillWorker();
+	/*
+	 * processCaptureResult 同一时间只能有一次调用（ICameraDeviceCallback.aidl）：完成回调与
+	 * JPEG 工作线程都经这里发。resultMutex_ 是叶子锁，持有时不拿别的锁。
+	 */
+	void sendResults(std::vector<aidl::android::hardware::camera::device::CaptureResult> &results);
+	std::mutex resultMutex_;
+	/* 调用方持 mutex_（lk），等到没有在途的任务 */
+	void waitStillJobs(std::unique_lock<std::mutex> &lk);
+	std::thread stillThread_;
+	std::mutex stillMutex_;
+	std::condition_variable stillCv_;
+	std::deque<StillJob> stillJobs_;
+	bool stillStop_ = false;
+	int stillInFlight_ = 0;
+	std::set<libcamera::FrameBuffer *> fullHeld_;
 
 	std::unique_ptr<libcamera::CameraConfiguration> config_;
 	std::unique_ptr<libcamera::FrameBufferAllocator> allocator_;
@@ -418,20 +483,17 @@ private:
 	std::map<libcamera::Request *, Pending> pending_;
 	/* 正在交付的帧的裁剪区域（cropFor()）；w 为 0 = 整幅 */
 	int32_t cropRegion_[4] = {};
-	/*
-	 * 正在交付的帧的 EXIF（onRequestCompleted()）：尺寸和缩略图除外，那两项
-	 * 由 JPEG 路径补上（exifApp1()）。
-	 */
-	ExifInfo exifFrame_;
-	int32_t thumbW_ = 0, thumbH_ = 0;   /* 请求的尺寸，旋转之前；0 = 不要 */
-	int thumbQuality_ = 85;
-	int32_t thumbMade_[2] = { -1, -1 }; /* 做出的尺寸，旋转之后 */
 	std::string exifMake_, exifModel_;
-	/* JPEG（outW×outH，rotated：像素转过）的 APP1 内容；thumb 是缩略图的 B,G,R,A 像素 */
-	std::vector<uint8_t> exifApp1(int32_t outW, int32_t outH, bool rotated,
-				      const std::vector<uint8_t> &thumb, int32_t tw, int32_t th);
+	/*
+	 * JPEG（outW×outH，rotated：像素转过）的 APP1 内容；thumb 是缩略图的 B,G,R,A 像素。
+	 * 做出的缩略图尺寸记进 sp.thumbMade。
+	 */
+	static std::vector<uint8_t> exifApp1(StillParams &sp, int32_t outW, int32_t outH,
+					     bool rotated, const std::vector<uint8_t> &thumb,
+					     int32_t tw, int32_t th);
 	/* 旋转 rotation 度的 JPEG 的缩略图尺寸（0x0：不要） */
-	void thumbnailSize(int32_t rotation, int32_t *tw, int32_t *th) const;
+	static void thumbnailSize(const StillParams &sp, int32_t rotation, int32_t *tw,
+				  int32_t *th);
 	/* 应用给了 AF 区域；没给时区域跟着变焦走 */
 	bool afAppRegion_ = false;
 	/* 应用最后给的 AF 区域（视场坐标 x0、y0、x1、y1），每个请求都和裁剪区域比一次 */
