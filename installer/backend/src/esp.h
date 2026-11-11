@@ -33,6 +33,19 @@ int gk3w_our_var_value(const char *v);
  * （auto-windows 菜单项的标题）。 */
 int gk3w_is_windows_boot_manager(const uint8_t *b, size_t n);
 
+/* 卸载时回落路径 EFI/BOOT/BOOTAA64.EFI 怎么办（判断表见 src/win/uninstall.c 开头的 1a–1d）。
+ * cur = 现在的回落文件，w = EFI/Microsoft/Boot/bootmgfw.efi，bak = BOOTAA64.EFI.before-gaokun3；不存在的给 NULL。 */
+typedef enum {
+    GK3W_FB_LEAVE_OTHER = 0,    /* 1a：有备份，但装完之后别的系统换上了自己的引导程序：回落路径与备份都留着 */
+    GK3W_FB_RESTORE_ORIGINAL,   /* 1b：换回备份（装之前那里是别的系统的引导程序） */
+    GK3W_FB_USE_W,              /* 1c：换成当前的 bootmgfw.efi */
+    GK3W_FB_USE_BAK,            /* 1c：没有 bootmgfw.efi，用装机那天的 Windows 拷贝 */
+    GK3W_FB_NO_WINDOWS,         /* 1c：该换却没有可换的，拒绝 */
+    GK3W_FB_UNTOUCHED,          /* 1d：这一套安装没动过回落路径，留着 */
+} gk3w_fallback_action;
+gk3w_fallback_action gk3w_fallback_decide(const uint8_t *cur, size_t cur_len, const uint8_t *w, size_t w_len,
+                                          const uint8_t *bak, size_t bak_len);
+
 /* 这个 EFI 程序是不是 systemd-boot：带 "#### LoaderInfo: systemd-boot "（systemd-boot 自己留的版本标记） */
 int gk3w_is_systemd_boot(const uint8_t *b, size_t n);
 

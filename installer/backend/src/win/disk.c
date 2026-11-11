@@ -331,22 +331,33 @@ static int io_once(HANDLE h, void *buf, DWORD len, uint64_t off, int write)
 
 static int io_retry(HANDLE h, void *buf, DWORD len, uint64_t off, int write)
 {
+    int verifies = 0;
     for (int attempt = 1;; attempt++) {
         int r = io_once(h, buf, len, off, write);
         DWORD got = 0, err;
         if (!r)
             return 0;
-        if (attempt == 4)
-            return -1;
         if (r == 1) {
-            /* 确认介质：这一次读写本身没有发生，确认之后重做 */
+            /* 确认介质：这一次读写本身没有发生，确认之后重做。分区表刚改过、磁盘还没稳定下来时会连着出现
+             * （VHDX 上见过同一处连续三次；分区表写完先等 30 s 再写则一次也没有），所以连着出现时逐次多等
+             * 100 ms、每次最多 1 s，共 40 次（约 35 s） */
+            if (++verifies > 40) {
+                gk3w_log("the disk kept asking for a media verify at off=%llu; giving up", (unsigned long long)off);
+                SetLastError(ERROR_MEDIA_CHANGED);
+                return -1;
+            }
             if (!DeviceIoControl(h, IOCTL_DISK_CHECK_VERIFY, NULL, 0, NULL, 0, &got, NULL))
                 gk3w_log("the disk asked for a media verify; IOCTL_DISK_CHECK_VERIFY failed (%lu), retrying anyway", (unsigned long)GetLastError());
             else
-                gk3w_log("the disk asked for a media verify (STATUS_VERIFY_REQUIRED, off=%llu); verified, redoing the %s",
-                         (unsigned long long)off, write ? "write" : "read");
+                gk3w_log("the disk asked for a media verify (STATUS_VERIFY_REQUIRED, off=%llu, %d); verified, redoing the %s",
+                         (unsigned long long)off, verifies, write ? "write" : "read");
+            if (verifies > 1)
+                Sleep(verifies > 11 ? 1000u : 100u * (DWORD)(verifies - 1));
+            attempt--;   /* 确认介质不占普通失败的重试次数 */
             continue;
         }
+        if (attempt == 4)
+            return -1;
         err = GetLastError();
         Sleep(500 * attempt);
         SetLastError(err);

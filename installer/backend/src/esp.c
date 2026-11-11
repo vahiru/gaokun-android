@@ -164,6 +164,29 @@ int gk3w_is_systemd_boot(const uint8_t *b, size_t n)
     return 0;
 }
 
+static int same_bytes(const uint8_t *a, size_t al, const uint8_t *b, size_t bl)
+{
+    return a && b && al == bl && !memcmp(a, b, al);
+}
+
+gk3w_fallback_action gk3w_fallback_decide(const uint8_t *cur, size_t cur_len, const uint8_t *w, size_t w_len,
+                                          const uint8_t *bak, size_t bak_len)
+{
+    /* systemd-boot 的备份当作没有：那是我们早先装的，或者一个已经没有配置的 systemd-boot */
+    int bak_ok = bak && !gk3w_is_systemd_boot(bak, bak_len);
+    int bak_win = bak_ok && (same_bytes(bak, bak_len, w, w_len) || gk3w_is_windows_boot_manager(bak, bak_len));
+    int cur_sd = cur && gk3w_is_systemd_boot(cur, cur_len);
+    int cur_known = !cur || cur_sd || gk3w_is_windows_boot_manager(cur, cur_len) || same_bytes(cur, cur_len, w, w_len) ||
+                    same_bytes(cur, cur_len, bak, bak_len);
+    if (!cur_known)
+        return bak ? GK3W_FB_LEAVE_OTHER : GK3W_FB_UNTOUCHED;   /* 没有备份：我们根本没动过回落路径 */
+    if (bak_ok && !bak_win)
+        return GK3W_FB_RESTORE_ORIGINAL;
+    if (bak_ok || cur_sd)
+        return w ? GK3W_FB_USE_W : bak_ok ? GK3W_FB_USE_BAK : GK3W_FB_NO_WINDOWS;
+    return GK3W_FB_UNTOUCHED;
+}
+
 int gk3w_is_machine_id(const char *s)
 {
     size_t n = 0;

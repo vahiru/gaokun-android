@@ -208,6 +208,54 @@ static void test_windows_boot_manager(void)
     }
 }
 
+static void test_fallback_decide(void)
+{
+    /* 假文件：W = Windows 启动管理器（当前版本），W0 = 较旧的 Windows 启动管理器，SD = systemd-boot，
+     * SD2 = 另一版 systemd-boot，G = 别的系统的引导程序（GRUB） */
+    static uint8_t W[256], W0[256], SD[64], SD2[64], G[32];
+    size_t n;
+    memset(W, 1, sizeof W);
+    n = put_vs(W, "CompanyName", "Microsoft Corporation", 0);
+    put_vs(W + n, "FileDescription", "Boot Manager", 2);
+    memcpy(W0, W, sizeof W);
+    W0[255] = 2;
+    memset(SD, 3, sizeof SD);
+    memcpy(SD + 4, "#### LoaderInfo: systemd-boot 257 ####", 38);
+    memcpy(SD2, SD, sizeof SD);
+    SD2[63] = 4;
+    memset(G, 5, sizeof G);
+#define FB(c, w, b) gk3w_fallback_decide(c, (c) ? sizeof(c) : 0, w, (w) ? sizeof(w) : 0, b, (b) ? sizeof(b) : 0)
+    static const uint8_t *const N = NULL;
+    /* 正常装过：回落路径是 systemd-boot */
+    CHECK(FB(SD, W, W) == GK3W_FB_USE_W);           /* 备份是装机那天的 Windows */
+    CHECK(FB(SD, W, W0) == GK3W_FB_USE_W);          /* Windows 之后更新过：用当前的，不用旧拷贝 */
+    CHECK(FB(SD, N, W0) == GK3W_FB_USE_BAK);        /* 没有 bootmgfw.efi：用备份 */
+    CHECK(FB(SD, W, G) == GK3W_FB_RESTORE_ORIGINAL);/* 装之前是 GRUB：换回它 */
+    CHECK(FB(SD, N, G) == GK3W_FB_RESTORE_ORIGINAL);
+    CHECK(FB(SD, W, N) == GK3W_FB_USE_W);           /* 装之前那里没有文件 */
+    CHECK(FB(SD, N, N) == GK3W_FB_NO_WINDOWS);
+    CHECK(FB(SD, W, SD2) == GK3W_FB_USE_W);         /* 备份是我们早先的 systemd-boot：当作没有 */
+    CHECK(FB(SD, N, SD2) == GK3W_FB_NO_WINDOWS);
+    /* 装完之后别的系统换了回落路径 */
+    CHECK(FB(G, W, W) == GK3W_FB_LEAVE_OTHER);
+    CHECK(FB(G, W, SD2) == GK3W_FB_LEAVE_OTHER);
+    CHECK(FB(G, W, N) == GK3W_FB_UNTOUCHED);         /* 没有备份：我们没动过回落路径 */
+    CHECK(FB(G, N, N) == GK3W_FB_UNTOUCHED);
+    /* apply 留了备份、还没写回落路径就中断：cur 就是备份 */
+    CHECK(FB(G, W, G) == GK3W_FB_RESTORE_ORIGINAL); /* 内容相同，调用方不会再写 */
+    CHECK(FB(W, W, W) == GK3W_FB_USE_W);
+    /* 重跑：第 1 步已经做完 */
+    CHECK(FB(W, W, W0) == GK3W_FB_USE_W);           /* 已是 W，调用方不会再写 */
+    CHECK(FB(W, W, N) == GK3W_FB_UNTOUCHED);        /* 备份也删了 */
+    CHECK(FB(W0, W, N) == GK3W_FB_UNTOUCHED);       /* 旧的 Windows 启动管理器：不是我们放的，不动 */
+    /* 回落路径不存在 */
+    CHECK(FB(N, W, N) == GK3W_FB_UNTOUCHED);
+    CHECK(FB(N, W, W0) == GK3W_FB_USE_W);
+    CHECK(FB(N, W, G) == GK3W_FB_RESTORE_ORIGINAL);
+    CHECK(FB(N, N, N) == GK3W_FB_UNTOUCHED);
+#undef FB
+}
+
 static void test_content_kind(void)
 {
     static uint8_t b[8192];
@@ -246,6 +294,7 @@ int main(void)
     test_entry_names();
     test_content_kind();
     test_windows_boot_manager();
+    test_fallback_decide();
     test_enc();
     test_line();
     test_free_factory();

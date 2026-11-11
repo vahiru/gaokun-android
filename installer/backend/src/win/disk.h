@@ -84,7 +84,7 @@ int gk3w_exists(const wchar_t *path);
 typedef struct {
     char manufacturer[64], model[64];
     int secure_boot;            /* 1 开、0 关、-1 读不到 */
-    int fast_startup;           /* HiberbootEnabled 为 1 且休眠没关（关了休眠快速启动也就没了） */
+    int fast_startup;           /* HiberbootEnabled 为 1（休眠关着时暂不生效，打开休眠就回来，所以不管休眠） */
     int hibernate;              /* Control\Power\HibernateEnabled：1 开、0 关、-1 读不到 */
     int hiberfil;               /* 系统盘上有 hiberfil.sys */
     int bitlocker;              /* 系统卷：0 关、1 开、2 未知（ProtectionStatus 2）、-1 读不到 */
