@@ -1,16 +1,20 @@
 /* Windows：装 Android 到一段空闲空间（双系统），对应 installer-lib.sh 的 gk3_apply --mode alongside。
  *
  *   gk3w apply --disk N --region-start LBA --region-end LBA --release DIR --sdboot FILE --backup-dir DIR
- *              [--machine-id HEX32] [--default-os android|windows] [--userdata-mib N]
+ *              [--mke2fs PATH] [--machine-id HEX32] [--default-os android|windows] [--userdata-mib N]
  *
  * 发布目录：boot.img、super.img.zst，可选 install-artifacts.sha256（有就逐个核对）。
  * 步骤与进度代码同 gk3_apply：1 check / verify-sha / test-zst → 2 plan → 5 write-gpt → 15 format → 30 write-super
  * → 70 write-boot → 80 bootloader → 100 done。★ 所有输入在第一次写盘之前验完（boot.img 拆得开、super 完整试解一遍、
  * ESP 空间够、区间确实空闲、分区名不重），之后 ERR 一律带 touched=yes。
  *
+ * metadata / userdata 的格式化：给了 --mke2fs（Android platform-tools 里的 mke2fs.exe，同目录要有 mke2fs.conf）时，
+ * 与 fastboot -w 的做法相同：动盘之前用 mke2fs -E android_sparse 按分区大小各生成一个 sparse 镜像（参数照
+ * fastboot/fs.cpp generate_ext4_image，另加 LiveCD 的卷标与 userdata 的 -m 0、两者都 -I 256），格式化那一步用与 super
+ * 同一套 sparse 写入写进去，写完核对 ext4 魔数与卷标。没给时退回清零（metadata 整个、userdata 开头 16 MiB），
+ * 由 fstab 的 formattable 在首次开机格式化（尚未上机验证）。
+ *
  * 与 LiveCD 的差别（原型阶段）：
- *   - metadata / userdata 不 mkfs：metadata 整个清零、userdata 开头 16 MiB 清零，首次开机由 fstab 的 formattable 格式化
- *     （尚未上机验证）。
  *   - 只对 VHD 动手；EFI 变量（LoaderEntryDefault）不碰 —— VHD 测试时那是这台 PC 自己的固件变量。
  *   - ESP 上已经有我们的启动项时拒绝（重新安装不在原型范围内）；不带救援分区。 */
 #include <windows.h>
@@ -155,9 +159,9 @@ static int ss_fill(void *ctx, uint64_t off, uint64_t len, uint32_t pattern)
     return 0;
 }
 
-/* 把 super.img.zst 解码并展开。sink 为 NULL 时只校验（动盘之前的完整试解）。
+/* 把 sparse 镜像（zst = 1 时先 zstd 解码）展开写出去。sink 为 NULL 时只校验（动盘之前的完整试解）。
  * prog：0 = 不报进度；否则按读入的压缩字节报 30→70。返回 0 成功，失败时 *why 是原因。 */
-static int run_super(const wchar_t *path, uint64_t limit, const gk3w_sparse_sink *sink, int prog, const char **why)
+static int run_image(const wchar_t *path, int zst, uint64_t limit, const gk3w_sparse_sink *sink, int prog, const char **why)
 {
     HANDLE f = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
     LARGE_INTEGER fsz;
@@ -177,17 +181,24 @@ static int run_super(const wchar_t *path, uint64_t limit, const gk3w_sparse_sink
     in = malloc(IO_CHUNK);
     out = malloc(IO_CHUNK);
     sbuf = _aligned_malloc(IO_CHUNK, 4096);
-    dc = ZSTD_createDCtx();
-    if (!in || !out || !sbuf || !dc)
+    dc = zst ? ZSTD_createDCtx() : NULL;
+    if (!in || !out || !sbuf || (zst && !dc))
         goto out;
     /* release.sh 用 -19 --long 压：解码时放宽窗口上限（同 installer-lib.sh 的 zstd -dc --long=31） */
-    ZSTD_DCtx_setParameter(dc, ZSTD_d_windowLogMax, 31);
+    if (dc)
+        ZSTD_DCtx_setParameter(dc, ZSTD_d_windowLogMax, 31);
     if (gk3w_sparse_init(&s, limit, sbuf, IO_CHUNK))
         goto out;
+    if (!zst)
+        r = 0;
     while (ReadFile(f, in, IO_CHUNK, &got, NULL) && got) {
         ZSTD_inBuffer ib = {in, got, 0};
         read_total += got;
-        while (ib.pos < ib.size) {
+        if (!zst && gk3w_sparse_feed(&s, in, got, sink)) {
+            *why = s.err;
+            goto out;
+        }
+        while (zst && ib.pos < ib.size) {
             ZSTD_outBuffer ob = {out, IO_CHUNK, 0};
             r = ZSTD_decompressStream(dc, &ob, &ib);
             if (ZSTD_isError(r)) {
@@ -237,6 +248,62 @@ out:
     if (f != INVALID_HANDLE_VALUE)
         CloseHandle(f);
     return rc;
+}
+
+/* ── ext4（mke2fs.exe） ──────────────────────────────────────────── */
+
+/* 用 platform-tools 的 mke2fs.exe 生成一个 android_sparse 格式的 ext4 镜像（fastboot -w 的同一种做法）。
+ * mke2fs 的输出转到我们的 stderr（stdout 只留给协议记录）。 */
+static int make_ext4(const wchar_t *exe, const wchar_t *out, uint64_t blocks, const wchar_t *label, int no_reserve)
+{
+    wchar_t conf[MAX_PATH], cmd[MAX_PATH * 3], *slash;
+    STARTUPINFOW si;
+    PROCESS_INFORMATION pi;
+    SECURITY_ATTRIBUTES sa = {sizeof sa, NULL, TRUE};
+    HANDLE herr = NULL, hnul;
+    DWORD code = 1;
+    if (wcslen(exe) >= MAX_PATH)
+        return -1;
+    wcscpy(conf, exe);
+    slash = wcsrchr(conf, L'\\');
+    if (!slash)
+        return -1;
+    wcscpy(slash + 1, L"mke2fs.conf");
+    if (!gk3w_exists(conf) || !SetEnvironmentVariableW(L"MKE2FS_CONFIG", conf))
+        return -1;
+    DeleteFileW(out);
+    _snwprintf(cmd, MAX_PATH * 3, L"\"%ls\" -q -t ext4 -b 4096 -I 256 -E android_sparse -O uninit_bg %ls-L %ls \"%ls\" %llu", exe,
+               no_reserve ? L"-m 0 " : L"", label, out, (unsigned long long)blocks);
+    hnul = CreateFileW(L"NUL", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa, OPEN_EXISTING, 0, NULL);
+    if (!DuplicateHandle(GetCurrentProcess(), GetStdHandle(STD_ERROR_HANDLE), GetCurrentProcess(), &herr, 0, TRUE,
+                         DUPLICATE_SAME_ACCESS))
+        herr = NULL;
+    memset(&si, 0, sizeof si);
+    si.cb = sizeof si;
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdInput = hnul;
+    si.hStdOutput = herr ? herr : hnul;
+    si.hStdError = herr ? herr : hnul;
+    if (CreateProcessW(exe, cmd, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
+        if (WaitForSingleObject(pi.hProcess, 300000) != WAIT_OBJECT_0)
+            TerminateProcess(pi.hProcess, 1);
+        GetExitCodeProcess(pi.hProcess, &code);
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+    }
+    if (herr)
+        CloseHandle(herr);
+    if (hnul != INVALID_HANDLE_VALUE)
+        CloseHandle(hnul);
+    return code == 0 && gk3w_exists(out) ? 0 : -1;
+}
+
+/* 分区开头是不是一个卷标为 label 的 ext4（超级块在 1024：魔数 0xEF53 @0x38、卷标 @0x78） */
+static int check_ext4(HANDLE h, uint64_t off, const char *label, uint8_t *buf4k)
+{
+    if (gk3w_pread(h, buf4k, 4096, off))
+        return -1;
+    return buf4k[1024 + 0x38] == 0x53 && buf4k[1024 + 0x39] == 0xEF && !strncmp((char *)buf4k + 1024 + 0x78, label, 16) ? 0 : -1;
 }
 
 /* ── ESP ──────────────────────────────────────────────────────────── */
@@ -354,7 +421,8 @@ int gk3w_cmd_apply(int argc, wchar_t **argv)
     uint64_t num, rstart, rend, ud_mib = 0;
     const wchar_t *rel = gk3w_arg(argc, argv, L"--release"), *sdboot_path = gk3w_arg(argc, argv, L"--sdboot"),
                   *backup_dir = gk3w_arg(argc, argv, L"--backup-dir"), *mid_arg = gk3w_arg(argc, argv, L"--machine-id"),
-                  *defos_arg = gk3w_arg(argc, argv, L"--default-os");
+                  *defos_arg = gk3w_arg(argc, argv, L"--default-os"), *mke2fs = gk3w_arg(argc, argv, L"--mke2fs");
+    wchar_t img_meta[MAX_PATH] = L"", img_data[MAX_PATH] = L"";
     wchar_t p_boot[MAX_PATH], p_super[MAX_PATH], p_sha[MAX_PATH];
     bootimg bi;
     uint8_t *sdboot = NULL, *man = NULL, *zero = NULL, *chk = NULL, *bootbuf = NULL;
@@ -377,7 +445,7 @@ int gk3w_cmd_apply(int argc, wchar_t **argv)
         (gk3w_arg(argc, argv, L"--userdata-mib") && gk3w_arg_u64(argc, argv, L"--userdata-mib", &ud_mib)))
         return gk3w_err(T, "usage",
                         "用法：apply --disk N --region-start LBA --region-end LBA --release DIR --sdboot FILE --backup-dir DIR "
-                        "[--machine-id HEX32] [--default-os android|windows] [--userdata-mib N]",
+                        "[--mke2fs PATH] [--machine-id HEX32] [--default-os android|windows] [--userdata-mib N]",
                         0);
     if (defos_arg && wcscmp(defos_arg, L"android") && wcscmp(defos_arg, L"windows"))
         return gk3w_err(T, "usage", "--default-os 只能是 android 或 windows", 0);
@@ -426,7 +494,7 @@ int gk3w_cmd_apply(int argc, wchar_t **argv)
     if (load_boot(p_boot, &bi))
         goto out;
     gk3w_progress(1, "test-zst");
-    if (run_super(p_super, (uint64_t)GK3W_SUPER_MIB << 20, NULL, 0, &why)) {
+    if (run_image(p_super, 1, (uint64_t)GK3W_SUPER_MIB << 20, NULL, 0, &why)) {
         gk3w_err_kv(T, "zst-corrupt", "why", why, "super.img.zst 不完整或不是一份合法的 sparse 镜像 —— 重新下载（盘还没动过）", 0);
         goto out;
     }
@@ -589,6 +657,34 @@ int gk3w_cmd_apply(int argc, wchar_t **argv)
         }
     }
 
+    /* ── metadata / userdata 的 ext4 镜像：也在动盘之前生成并完整试解 ── */
+    if (mke2fs) {
+        wchar_t tmp[MAX_PATH];
+        struct {
+            const char *name;
+            wchar_t *img;
+            const wchar_t *label;
+            int no_reserve;
+        } fs[2] = {{"metadata", img_meta, L"metadata", 0}, {"userdata", img_data, L"userdata", 1}};
+        if (!GetTempPathW(MAX_PATH, tmp)) {
+            gk3w_err(T, "mkfs", "取不到临时目录（盘还没动过）", GetLastError());
+            goto out;
+        }
+        for (int k = 0; k < 2; k++) {
+            uint64_t bytes = 0;
+            for (size_t i = 0; i < plan.n; i++)
+                if (!strcmp(plan.parts[i].name, fs[k].name))
+                    bytes = (plan.parts[i].last - plan.parts[i].first + 1) * d.bs;
+            _snwprintf(fs[k].img, MAX_PATH, L"%lsgk3w-%lu-%ls.simg", tmp, (unsigned long)GetCurrentProcessId(), fs[k].label);
+            if (!bytes || make_ext4(mke2fs, fs[k].img, bytes / 4096, fs[k].label, fs[k].no_reserve) ||
+                run_image(fs[k].img, 0, bytes, NULL, 0, &why)) {
+                gk3w_err_kv(T, "mkfs", "part", fs[k].name, "用 mke2fs 生成 ext4 镜像失败（盘还没动过）", GetLastError());
+                goto out;
+            }
+        }
+        gk3w_log("mke2fs：metadata 与 userdata 的 ext4 镜像已生成并试解通过");
+    }
+
     /* ── 分区表备份（GPT 主表区 + 备份表区，原样） ── */
     zero = _aligned_malloc(IO_CHUNK, 4096);
     chk = _aligned_malloc(IO_CHUNK, 4096);
@@ -714,7 +810,8 @@ int gk3w_cmd_apply(int argc, wchar_t **argv)
                 size_t idx;
                 uint64_t bytes;
             } z[] = {{i_misc, (uint64_t)GK3W_MISC_MIB << 20}, {i_meta, (uint64_t)GK3W_METADATA_MIB << 20}, {i_data, ZERO_HEAD}};
-            for (size_t k = 0; k < sizeof z / sizeof z[0]; k++)
+            /* 用 mke2fs 时 userdata 不先清零：镜像里没写的块与 fastboot -w 一样留着（ext4 用不到它们） */
+            for (size_t k = 0; k < sizeof z / sizeof z[0] - (mke2fs ? 1 : 0); k++)
                 for (uint64_t off = 0; off < z[k].bytes; off += IO_CHUNK) {
                     DWORD n = (DWORD)(z[k].bytes - off < IO_CHUNK ? z[k].bytes - off : IO_CHUNK);
                     int w = gk3w_write_verify(d.h, zero, n, poff[z[k].idx] + off, chk);
@@ -724,7 +821,28 @@ int gk3w_cmd_apply(int argc, wchar_t **argv)
                         goto out;
                     }
                 }
-            gk3w_log("metadata 整个清零、userdata 开头 %u MiB 清零：首次开机由 fstab 的 formattable 格式化", ZERO_HEAD >> 20);
+            if (!mke2fs)
+                gk3w_log("metadata 整个清零、userdata 开头 %u MiB 清零：首次开机由 fstab 的 formattable 格式化", ZERO_HEAD >> 20);
+        }
+        if (mke2fs) {
+            struct {
+                size_t idx;
+                const wchar_t *img;
+                const char *label;
+            } fs[2] = {{i_meta, img_meta, "metadata"}, {i_data, img_data, "userdata"}};
+            for (int k = 0; k < 2; k++) {
+                super_sink ss = {d.h, poff[fs[k].idx], chk, _aligned_malloc(IO_CHUNK, 4096), 0};
+                gk3w_sparse_sink sink = {&ss, ss_write, ss_fill};
+                uint64_t bytes = (plan.parts[fs[k].idx].last - plan.parts[fs[k].idx].first + 1) * d.bs;
+                int r = ss.pat ? run_image(fs[k].img, 0, bytes, &sink, 0, &why) : -1;
+                _aligned_free(ss.pat);
+                if (r || check_ext4(d.h, poff[fs[k].idx], fs[k].label, zero)) {
+                    gk3w_err_kv(T, "mkfs", "part", fs[k].label, r ? "写 ext4 镜像失败" : "写完之后分区开头不是预期的 ext4", GetLastError());
+                    goto out;
+                }
+            }
+            memset(zero, 0, IO_CHUNK);
+            gk3w_log("metadata、userdata：ext4 已写入（mke2fs 生成，写后读回核对、超级块魔数与卷标正确）");
         }
         {
             uint8_t head[GK3_MISC_INIT_HEAD_SIZE], rec[GK3_REC_SIZE];
@@ -759,7 +877,7 @@ int gk3w_cmd_apply(int argc, wchar_t **argv)
                 gk3w_err(T, "nomem", "内存不足", 0);
                 goto out;
             }
-            if (run_super(p_super, (uint64_t)GK3W_SUPER_MIB << 20, &sink, 1, &why)) {
+            if (run_image(p_super, 1, (uint64_t)GK3W_SUPER_MIB << 20, &sink, 1, &why)) {
                 _aligned_free(ss.pat);
                 gk3w_err_kv(T, "super-write", "why", why, ss.failed == -2 ? "super 写后读回不一致" : "super 写入失败", GetLastError());
                 goto out;
@@ -866,6 +984,10 @@ int gk3w_cmd_apply(int argc, wchar_t **argv)
     gk3w_progress(100, "done");
     rc = 0;
 out:
+    if (img_meta[0])
+        DeleteFileW(img_meta);
+    if (img_data[0])
+        DeleteFileW(img_data);
     if (opened)
         gk3w_disk_close(&d);
     free(bi.img);
