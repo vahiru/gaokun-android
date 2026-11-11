@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:gk3_common/ui/step_scaffold.dart';
 import 'package:gk3_common/ui/theme.dart';
 import 'package:gk3_common/ui/widgets.dart';
 
@@ -32,7 +33,7 @@ extension on Gk3Step {
   };
 }
 
-/// 每一步的骨架（MD3 大屏布局）：左侧导航栏标出步骤；右侧标题、说明、内容、底栏（返回 / 下一步）
+/// 每一步的骨架：gk3_common 的 StepScaffold，填上 LiveCD 的七步、侧栏底部的重启 / 关机与版本号
 class StepPage extends StatelessWidget {
   const StepPage({
     super.key,
@@ -61,170 +62,36 @@ class StepPage extends StatelessWidget {
   /// 替换整条底栏（确认页的"按住 2 秒"、进度页的空底栏）
   final Widget? bottom;
 
-  /// 标题换成 error-container 的警示横幅（大警告图标 + 标题 + 说明）：写盘前的风险确认页（screens_risk.dart）
+  /// 标题换成 error-container 的警示横幅：写盘前的风险确认页（screens_risk.dart）
   final bool danger;
 
   @override
   Widget build(BuildContext context) {
     final l = L10n.of(context);
-    return Scaffold(
-      body: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _StepRail(current: step),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(48, 40, 48, 28),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (danger)
-                    _DangerBanner(title: title, subtitle: subtitle)
-                  else ...[
-                    Text(title, style: context.tt.headlineMedium),
-                    if (subtitle != null) ...[
-                      const SizedBox(height: 8),
-                      Text(subtitle!, style: context.tt.bodyLarge!.copyWith(color: context.cs.onSurfaceVariant)),
-                    ],
-                  ],
-                  SizedBox(height: danger ? 20 : 28),
-                  Expanded(child: child),
-                  const SizedBox(height: 20),
-                  bottom ??
-                      Row(
-                        children: [
-                          if (onBack != null) Btn(l.btnBack, onPressed: onBack, kind: BtnKind.text, icon: Icons.arrow_back),
-                          if (bottomLeft != null) ...[const SizedBox(width: 12), bottomLeft!],
-                          const Spacer(),
-                          if (nextLabel != null || onNext != null)
-                            Btn(nextLabel ?? l.btnNext, onPressed: onNext, kind: nextDanger ? BtnKind.danger : BtnKind.primary),
-                        ],
-                      ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// 风险确认页的标题：MD3 的 error-container 横幅，左边一个 error 色的圆、里面是大号警告图标。
-/// 整页最醒目的东西 —— 用户 2026-10-06："用最醒目的方式告诉用户，这玩意儿可能会损坏数据"
-class _DangerBanner extends StatelessWidget {
-  const _DangerBanner({required this.title, this.subtitle});
-  final String title;
-  final String? subtitle;
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = context.cs, tt = context.tt;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 18, 24, 18),
-      decoration: BoxDecoration(color: cs.errorContainer, borderRadius: BorderRadius.circular(24)),
-      child: Row(children: [
-        Container(
-          width: 72,
-          height: 72,
-          decoration: BoxDecoration(color: cs.error, shape: BoxShape.circle),
-          child: Icon(Icons.warning_amber_rounded, size: 44, color: cs.onError),
+    return StepScaffold(
+      steps: [for (final s in Gk3Step.values) RailStep(s.label(l), s.icons.$1, s.icons.$2)],
+      current: step.index,
+      railSubtitle: l.railSub,
+      railFooter: [
+        const _PowerButtons(),
+        const SizedBox(height: 16),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Text(l.railFooter(kInstallerVersion), style: context.tt.bodySmall),
         ),
-        const SizedBox(width: 20),
-        Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(title, style: tt.headlineMedium!.copyWith(color: cs.onErrorContainer)),
-            if (subtitle != null) ...[
-              const SizedBox(height: 6),
-              Text(subtitle!, style: tt.bodyLarge!.copyWith(color: cs.onErrorContainer)),
-            ],
-          ]),
-        ),
-      ]),
-    );
-  }
-}
-
-/// 左侧的步骤栏：MD3 标准导航抽屉的样子（当前项是 secondary-container 的胶囊指示），但不可点
-class _StepRail extends StatelessWidget {
-  const _StepRail({required this.current});
-  final Gk3Step current;
-
-  @override
-  Widget build(BuildContext context) {
-    final l = L10n.of(context), cs = context.cs, tt = context.tt;
-    return Container(
-      width: 272,
-      color: cs.surfaceContainerLow,
-      padding: const EdgeInsets.fromLTRB(12, 32, 12, 24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Row(
-              children: [
-                Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(color: cs.primaryContainer, shape: BoxShape.circle),
-                  child: Icon(Icons.android, color: cs.onPrimaryContainer),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('gaokun3', style: tt.titleMedium),
-                      Text(l.railSub, style: tt.bodySmall),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 28),
-          for (final s in Gk3Step.values) _RailItem(step: s, state: s.index.compareTo(current.index)),
-          const Spacer(),
-          const _PowerButtons(),
-          const SizedBox(height: 16),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Text(l.railFooter(kInstallerVersion), style: tt.bodySmall),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _RailItem extends StatelessWidget {
-  const _RailItem({required this.step, required this.state});
-  final Gk3Step step;
-
-  /// < 0 已完成，0 当前，> 0 还没到
-  final int state;
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = context.cs, tt = context.tt;
-    final (outline, filled) = step.icons;
-    final cur = state == 0, done = state < 0;
-    final fg = cur ? cs.onSecondaryContainer : (done ? cs.onSurface : cs.onSurfaceVariant);
-    return Container(
-      height: 56,
-      margin: const EdgeInsets.only(bottom: 2),
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      decoration: ShapeDecoration(shape: const StadiumBorder(), color: cur ? cs.secondaryContainer : Colors.transparent),
-      child: Row(
-        children: [
-          Icon(done ? Icons.check_circle : (cur ? filled : outline), size: 24, color: done ? cs.primary : fg),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(step.label(L10n.of(context)), style: tt.labelLarge!.copyWith(color: fg)),
-          ),
-        ],
-      ),
+      ],
+      backLabel: l.btnBack,
+      defaultNextLabel: l.btnNext,
+      title: title,
+      subtitle: subtitle,
+      onBack: onBack,
+      onNext: onNext,
+      nextLabel: nextLabel,
+      nextDanger: nextDanger,
+      bottomLeft: bottomLeft,
+      bottom: bottom,
+      danger: danger,
+      child: child,
     );
   }
 }
