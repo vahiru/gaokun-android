@@ -14,6 +14,7 @@
 
 #include "../layout.h"
 #include "../proto.h"
+#include "disk.h"
 #include "gk3core.h"
 #include "win.h"
 
@@ -251,7 +252,7 @@ static int probe_disk(DWORD n, int system_disk, gk3w_line *l)
         gk3w_line_kv(l, "code", e == ERROR_ACCESS_DENIED ? "not-admin" : "disk-open");
         gk3w_line_u64(l, "disk", n);
         gk3w_line_u64(l, "winerr", e);
-        return gk3w_fail(l, GK3W_TOUCHED_NA, e == ERROR_ACCESS_DENIED ? "需要以管理员身份运行" : "无法打开磁盘");
+        return gk3w_fail(l, GK3W_TOUCHED_NA, e == ERROR_ACCESS_DENIED ? "must run as administrator" : "cannot open the disk");
     }
 
     memset(&q, 0, sizeof q);
@@ -291,7 +292,7 @@ static int probe_disk(DWORD n, int system_disk, gk3w_line *l)
         gk3w_line_kv(l, "code", "disk-sector");
         gk3w_line_u64(l, "disk", n);
         gk3w_line_u64(l, "sector", bs);
-        return gk3w_fail(l, GK3W_TOUCHED_NA, "磁盘的扇区大小既不是 512 也不是 4096 字节");
+        return gk3w_fail(l, GK3W_TOUCHED_NA, "the disk sector size is neither 512 nor 4096 bytes");
     }
     if (!DeviceIoControl(h, IOCTL_DISK_GET_LENGTH_INFO, NULL, 0, &li, sizeof li, &got, NULL)) {
         DWORD e = GetLastError();
@@ -300,7 +301,7 @@ static int probe_disk(DWORD n, int system_disk, gk3w_line *l)
         gk3w_line_kv(l, "code", "disk-size");
         gk3w_line_u64(l, "disk", n);
         gk3w_line_u64(l, "winerr", e);
-        return gk3w_fail(l, GK3W_TOUCHED_NA, "读不到磁盘容量");
+        return gk3w_fail(l, GK3W_TOUCHED_NA, "cannot read the disk size");
     }
     size = (uint64_t)li.Length.QuadPart;
 
@@ -403,7 +404,7 @@ static int probe_disk(DWORD n, int system_disk, gk3w_line *l)
             gk3w_line_kv(l, "code", "disk-layout");
             gk3w_line_kv(l, "disk", disk_id);
             gk3w_line_u64(l, "why", le);
-            gk3w_fail(l, GK3W_TOUCHED_NA, "分区表里有越界或相互重叠的分区");
+            gk3w_fail(l, GK3W_TOUCHED_NA, "the partition table has out-of-range or overlapping partitions");
             rc = -1;
         }
         for (size_t i = 0; i < nf && i < sizeof free_spans / sizeof free_spans[0]; i++) {
@@ -422,32 +423,10 @@ static int probe_disk(DWORD n, int system_disk, gk3w_line *l)
     return rc;
 }
 
-/* 系统卷（Windows 目录所在的卷）在哪块盘上；找不到返回 -1 */
-static long system_disk_number(void)
-{
-    wchar_t win[MAX_PATH], dev[8];
-    HANDLE h;
-    VOLUME_DISK_EXTENTS e;
-    DWORD got = 0;
-    if (!GetSystemWindowsDirectoryW(win, MAX_PATH) || win[1] != L':')
-        return -1;
-    _snwprintf(dev, 8, L"\\\\.\\%c:", win[0]);
-    h = CreateFileW(dev, 0, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
-    if (h == INVALID_HANDLE_VALUE)
-        return -1;
-    /* 系统卷跨盘（动态卷）时这个调用会因缓冲区不够失败：这种布局本来就不支持 */
-    if (!DeviceIoControl(h, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS, NULL, 0, &e, sizeof e, &got, NULL)) {
-        CloseHandle(h);
-        return -1;
-    }
-    CloseHandle(h);
-    return e.NumberOfDiskExtents == 1 ? (long)e.Extents[0].DiskNumber : -1;
-}
-
 int gk3w_cmd_probe(int argc, wchar_t **argv)
 {
     gk3w_line l = {0};
-    long sysdisk = system_disk_number();
+    long sysdisk = gk3w_system_disk_number();
     int rc = 0;
     (void)argc;
     (void)argv;

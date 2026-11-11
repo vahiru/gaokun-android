@@ -25,6 +25,14 @@ const wchar_t *gk3w_arg(int argc, wchar_t **argv, const wchar_t *key)
     return NULL;
 }
 
+int gk3w_flag(int argc, wchar_t **argv, const wchar_t *key)
+{
+    for (int i = 0; i < argc; i++)
+        if (!wcscmp(argv[i], key))
+            return 1;
+    return 0;
+}
+
 int gk3w_arg_u64(int argc, wchar_t **argv, const wchar_t *key, uint64_t *out)
 {
     const wchar_t *v = gk3w_arg(argc, argv, key);
@@ -133,7 +141,55 @@ int gk3w_disk_read_layout(gk3w_disk *d)
     }
 }
 
+long gk3w_system_disk_number(void)
+{
+    wchar_t win[MAX_PATH], dev[8];
+    HANDLE h;
+    VOLUME_DISK_EXTENTS e;
+    DWORD got = 0;
+    if (!GetSystemWindowsDirectoryW(win, MAX_PATH) || win[1] != L':')
+        return -1;
+    _snwprintf(dev, 8, L"\\\\.\\%lc:", win[0]);
+    h = CreateFileW(dev, 0, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+    if (h == INVALID_HANDLE_VALUE)
+        return -1;
+    /* 系统卷跨盘（动态卷）时这个调用会因缓冲区不够失败：这种布局本来就不支持 */
+    if (!DeviceIoControl(h, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS, NULL, 0, &e, sizeof e, &got, NULL)) {
+        CloseHandle(h);
+        return -1;
+    }
+    CloseHandle(h);
+    return e.NumberOfDiskExtents == 1 ? (long)e.Extents[0].DiskNumber : -1;
+}
+
+static int disk_open_any(DWORD num, gk3w_disk *d, gk3w_touched t);
+
 int gk3w_disk_open_vhd(DWORD num, gk3w_disk *d, gk3w_touched t)
+{
+    memset(d, 0, sizeof *d);
+    d->num = num;
+    d->h = INVALID_HANDLE_VALUE;
+    /* 先查类型、再以读写方式打开：真实磁盘连写句柄都不拿 */
+    if (!gk3w_disk_is_vhd(num))
+        return gk3w_err(t, "not-vhd", "this disk is not a VHD; writing a real disk requires --real-disk", 0), -1;
+    return disk_open_any(num, d, t);
+}
+
+int gk3w_disk_open(DWORD num, int real, gk3w_disk *d, gk3w_touched t)
+{
+    long sys;
+    if (!real)
+        return gk3w_disk_open_vhd(num, d, t);
+    memset(d, 0, sizeof *d);
+    d->num = num;
+    d->h = INVALID_HANDLE_VALUE;
+    sys = gk3w_system_disk_number();
+    if (sys < 0 || (DWORD)sys != num || gk3w_disk_is_vhd(num))
+        return gk3w_err(t, "not-system-disk", "--real-disk only accepts the disk that holds Windows; this is not it", 0), -1;
+    return disk_open_any(num, d, t);
+}
+
+static int disk_open_any(DWORD num, gk3w_disk *d, gk3w_touched t)
 {
     wchar_t path[40];
     STORAGE_PROPERTY_QUERY q;
@@ -141,37 +197,38 @@ int gk3w_disk_open_vhd(DWORD num, gk3w_disk *d, gk3w_touched t)
     GET_LENGTH_INFORMATION li;
     DWORD got = 0;
 
-    memset(d, 0, sizeof *d);
-    d->num = num;
-    d->h = INVALID_HANDLE_VALUE;
-    if (!gk3w_disk_is_vhd(num))
-        return gk3w_err(t, "not-vhd", "原型只对 VHD 虚拟盘写入，这块盘不是 VHD", 0), -1;
     _snwprintf(path, 40, L"\\\\.\\PhysicalDrive%lu", (unsigned long)num);
     d->h = CreateFileW(path, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
                        FILE_FLAG_NO_BUFFERING | FILE_FLAG_WRITE_THROUGH, NULL);
     if (d->h == INVALID_HANDLE_VALUE)
-        return gk3w_err(t, "disk-open", "无法以读写方式打开磁盘", GetLastError()), -1;
+        return gk3w_err(t, "disk-open", "cannot open the disk for reading and writing", GetLastError()), -1;
     memset(&q, 0, sizeof q);
     q.QueryType = PropertyStandardQuery;
     q.PropertyId = StorageAccessAlignmentProperty;
-    d->bs = 512;
+    d->bs = 0;
     if (DeviceIoControl(d->h, IOCTL_STORAGE_QUERY_PROPERTY, &q, sizeof q, &align, sizeof align, &got, NULL) &&
         got >= sizeof align)
         d->bs = align.BytesPerLogicalSector;
+    if (!d->bs) {
+        /* 不支持对齐属性的盘：与 probe 一样退回几何信息，不猜 512（4Kn 盘上猜错会把区间整个解读错） */
+        DISK_GEOMETRY_EX geo;
+        if (DeviceIoControl(d->h, IOCTL_DISK_GET_DRIVE_GEOMETRY_EX, NULL, 0, &geo, sizeof geo, &got, NULL))
+            d->bs = geo.Geometry.BytesPerSector;
+    }
     if (d->bs != 512 && d->bs != 4096) {
         gk3w_disk_close(d);
-        return gk3w_err(t, "disk-sector", "扇区大小既不是 512 也不是 4096 字节", 0), -1;
+        return gk3w_err(t, "disk-sector", "the sector size is neither 512 nor 4096 bytes", 0), -1;
     }
     if (!DeviceIoControl(d->h, IOCTL_DISK_GET_LENGTH_INFO, NULL, 0, &li, sizeof li, &got, NULL)) {
         DWORD e = GetLastError();
         gk3w_disk_close(d);
-        return gk3w_err(t, "disk-size", "读不到磁盘容量", e), -1;
+        return gk3w_err(t, "disk-size", "cannot read the disk size", e), -1;
     }
     d->size = (uint64_t)li.Length.QuadPart;
     if (gk3w_disk_read_layout(d) || d->lay->PartitionStyle != PARTITION_STYLE_GPT) {
         DWORD e = GetLastError();
         gk3w_disk_close(d);
-        return gk3w_err(t, "disk-not-gpt", "读不到 GPT 分区表", e), -1;
+        return gk3w_err(t, "disk-not-gpt", "cannot read a GPT partition table", e), -1;
     }
     return 0;
 }
@@ -184,9 +241,9 @@ int gk3w_disk_set_layout(gk3w_disk *d, DRIVE_LAYOUT_INFORMATION_EX *lay, DWORD c
     for (DWORD i = 0; i < count; i++)
         lay->PartitionEntry[i].RewritePartition = TRUE;
     if (!DeviceIoControl(d->h, IOCTL_DISK_SET_DRIVE_LAYOUT_EX, lay, sz, NULL, 0, &got, NULL))
-        return gk3w_err(t, "set-layout", "写分区表失败", GetLastError()), -1;
+        return gk3w_err(t, "set-layout", "writing the partition table failed", GetLastError()), -1;
     if (!DeviceIoControl(d->h, IOCTL_DISK_UPDATE_PROPERTIES, NULL, 0, NULL, 0, &got, NULL))
-        return gk3w_err(t, "update-properties", "分区表已写，但分区管理器没能重读", GetLastError()), -1;
+        return gk3w_err(t, "update-properties", "the partition table was written but the partition manager did not re-read it", GetLastError()), -1;
     /* 此后的读写可能遇到 STATUS_VERIFY_REQUIRED，由 io_retry 处理 */
     return 0;
 }
@@ -200,6 +257,41 @@ PARTITION_INFORMATION_EX *gk3w_disk_find_part(gk3w_disk *d, const GUID *id)
             return p;
     }
     return NULL;
+}
+
+int gk3w_gpt_backup(gk3w_disk *d, const wchar_t *dir, const wchar_t *tag, gk3w_touched t)
+{
+    uint64_t uf, ul, total = d->size / d->bs, head, tail;
+    wchar_t bpath[MAX_PATH * 2];
+    SYSTEMTIME st;
+    uint8_t *gb;
+    char b8[MAX_PATH * 3];
+    int w;
+    gk3w_disk_usable(d, &uf, &ul);
+    head = uf;
+    tail = total - (ul + 1);
+    if ((head + tail) * d->bs > (4u << 20))
+        return gk3w_err(t, "gpt-backup", "the partition table area is unusually large; refusing to continue", 0), -1;
+    gb = _aligned_malloc((size_t)((head + tail) * d->bs), 4096);
+    if (!gb)
+        return gk3w_err(t, "nomem", "out of memory", 0), -1;
+    if (gk3w_pread(d->h, gb, (DWORD)(head * d->bs), 0) ||
+        gk3w_pread(d->h, gb + head * d->bs, (DWORD)(tail * d->bs), (ul + 1) * d->bs)) {
+        _aligned_free(gb);
+        return gk3w_err(t, "gpt-backup", "reading the partition table area failed", GetLastError()), -1;
+    }
+    GetLocalTime(&st);
+    _snwprintf(bpath, MAX_PATH * 2, L"%ls\\gpt-before-%ls-disk%lu-%04u%02u%02u-%02u%02u%02u-head%llu-tail%llu.bin", dir, tag,
+               (unsigned long)d->num, st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond,
+               (unsigned long long)head, (unsigned long long)tail);
+    gk3w_mkdirs(dir, (dir[0] && dir[1] == L':') ? 2 : 0);
+    w = gk3w_write_file_verify(bpath, gb, (size_t)((head + tail) * d->bs));
+    _aligned_free(gb);
+    if (w)
+        return gk3w_err(t, "gpt-backup", "writing the partition table backup failed", GetLastError()), -1;
+    gk3w_w2u(bpath, b8, sizeof b8);
+    gk3w_log("partition table backup: %s", b8);
+    return 0;
 }
 
 void gk3w_disk_usable(const gk3w_disk *d, uint64_t *first, uint64_t *last)
@@ -231,7 +323,7 @@ static int io_once(HANDLE h, void *buf, DWORD len, uint64_t off, int write)
         return 1;
     if (ok)
         SetLastError(ERROR_WRITE_FAULT);
-    gk3w_log("%s 失败：off=%llu len=%lu got=%lu ok=%d err=%lu status=0x%08llx", write ? "WriteFile" : "ReadFile",
+    gk3w_log("%s failed: off=%llu len=%lu got=%lu ok=%d err=%lu status=0x%08llx", write ? "WriteFile" : "ReadFile",
              (unsigned long long)off, (unsigned long)len, (unsigned long)got, ok, (unsigned long)GetLastError(),
              (unsigned long long)ov.Internal);
     return -1;
@@ -249,10 +341,10 @@ static int io_retry(HANDLE h, void *buf, DWORD len, uint64_t off, int write)
         if (r == 1) {
             /* 确认介质：这一次读写本身没有发生，确认之后重做 */
             if (!DeviceIoControl(h, IOCTL_DISK_CHECK_VERIFY, NULL, 0, NULL, 0, &got, NULL))
-                gk3w_log("磁盘要求确认介质，IOCTL_DISK_CHECK_VERIFY 失败（%lu），仍然重试", (unsigned long)GetLastError());
+                gk3w_log("the disk asked for a media verify; IOCTL_DISK_CHECK_VERIFY failed (%lu), retrying anyway", (unsigned long)GetLastError());
             else
-                gk3w_log("磁盘要求确认介质（STATUS_VERIFY_REQUIRED，off=%llu），已确认，重做这次%s",
-                         (unsigned long long)off, write ? "写入" : "读取");
+                gk3w_log("the disk asked for a media verify (STATUS_VERIFY_REQUIRED, off=%llu); verified, redoing the %s",
+                         (unsigned long long)off, write ? "write" : "read");
             continue;
         }
         err = GetLastError();
@@ -355,11 +447,18 @@ int gk3w_read_file(const wchar_t *path, uint8_t **data, size_t *len, size_t max)
 
 int gk3w_write_file_verify(const wchar_t *path, const uint8_t *data, size_t len)
 {
-    HANDLE h = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-    size_t done = 0;
-    uint8_t *back = NULL;
-    size_t blen = 0;
+    DWORD attrs = GetFileAttributesW(path), keep = 0;
+    HANDLE h;
+    size_t done = 0, cap;
+    uint8_t *back;
     int ok;
+    /* CREATE_ALWAYS 遇到带隐藏 / 系统 / 只读属性的现有文件会以 ERROR_ACCESS_DENIED 失败：先清掉，写完再还原 */
+    if (attrs != INVALID_FILE_ATTRIBUTES) {
+        keep = attrs & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM | FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_ARCHIVE);
+        if (keep & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM | FILE_ATTRIBUTE_READONLY))
+            SetFileAttributesW(path, FILE_ATTRIBUTE_NORMAL);
+    }
+    h = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (h == INVALID_HANDLE_VALUE)
         return -1;
     while (done < len) {
@@ -375,10 +474,36 @@ int gk3w_write_file_verify(const wchar_t *path, const uint8_t *data, size_t len)
         return -1;
     }
     CloseHandle(h);
-    if (gk3w_read_file(path, &back, &blen, len + 1))
+    if (keep & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM | FILE_ATTRIBUTE_READONLY))
+        SetFileAttributesW(path, keep);
+
+    /* 读回绕过缓存（FILE_FLAG_NO_BUFFERING）：读到的才是介质上的字节。无缓冲读要按扇区整读，缓冲区按 4096 对齐 */
+    cap = (len + 4096) / 4096 * 4096;
+    back = _aligned_malloc(cap, 4096);
+    if (!back)
         return -1;
-    ok = blen == len && !memcmp(back, data, len);
-    free(back);
+    h = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_FLAG_NO_BUFFERING, NULL);
+    if (h == INVALID_HANDLE_VALUE) {
+        _aligned_free(back);
+        return -1;
+    }
+    done = 0;
+    for (;;) {
+        DWORD got = 0, want = (DWORD)(cap - done > (1u << 24) ? (1u << 24) : cap - done);
+        if (!want)
+            break;
+        if (!ReadFile(h, back + done, want, &got, NULL)) {
+            CloseHandle(h);
+            _aligned_free(back);
+            return -1;
+        }
+        done += got;
+        if (got < want)
+            break;   /* 到文件尾 */
+    }
+    CloseHandle(h);
+    ok = done == len && !memcmp(back, data, len);
+    _aligned_free(back);
     return ok ? 0 : -2;
 }
 

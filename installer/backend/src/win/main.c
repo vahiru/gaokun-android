@@ -2,7 +2,9 @@
  *
  *   gk3w probe        列出磁盘、分区、空闲区（只读，要管理员权限）
  *   gk3w apply ...    装到一段空闲空间（双系统），对应 gk3_apply --mode alongside（见 apply.c；原型只对 VHD 动手）
- *   gk3w dump|esp-tree  把装好的盘摘要成文本，与 LiveCD 的结果对拍（只读，见 dump.c）
+ *   gk3w uninstall ...  卸载 apply 装上去的那一套，留下空闲空间（见 uninstall.c）
+ *   gk3w preflight      安装前检查要看的系统状态（只读，见 sys.c）
+ *   gk3w dump|esp-tree|readpart  把装好的盘摘要成文本或导出小分区，与 LiveCD 的结果对拍（只读，见 dump.c）
  *   gk3w mkpart|rmpart|write|esp-ls|esp-put   阶段 1 的写盘验证命令，只对 VHD 动手（见 write.c）
  *   gk3w --version
  *
@@ -46,7 +48,7 @@ int wmain(int argc, wchar_t **argv)
     SetConsoleOutputCP(CP_UTF8);
 
     if (argc < 2) {
-        fprintf(stderr, "!! 用法：gk3w probe|apply|dump|esp-tree|mkpart|rmpart|write|esp-ls|esp-put|--version\n");
+        fprintf(stderr, "!! usage: gk3w probe|preflight|apply|uninstall|dump|esp-tree|readpart|mkpart|rmpart|write|esp-ls|esp-put|--version\n");
         return 2;
     }
     if (!wcscmp(argv[1], L"--version")) {
@@ -61,6 +63,7 @@ int wmain(int argc, wchar_t **argv)
             {L"probe", gk3w_cmd_probe},   {L"mkpart", gk3w_cmd_mkpart}, {L"rmpart", gk3w_cmd_rmpart},
             {L"write", gk3w_cmd_write},   {L"esp-ls", gk3w_cmd_esp_ls}, {L"esp-put", gk3w_cmd_esp_put},
             {L"apply", gk3w_cmd_apply},   {L"dump", gk3w_cmd_dump},     {L"esp-tree", gk3w_cmd_esp_tree},
+            {L"readpart", gk3w_cmd_readpart}, {L"uninstall", gk3w_cmd_uninstall}, {L"preflight", gk3w_cmd_preflight},
         };
         for (size_t i = 0; i < sizeof cmds / sizeof cmds[0]; i++)
             if (!wcscmp(argv[1], cmds[i].name))
@@ -74,7 +77,7 @@ int wmain(int argc, wchar_t **argv)
         gk3w_line_begin(&l, "ERR");
         gk3w_line_kv(&l, "code", "usage");
         gk3w_line_kv(&l, "cmd", cmd);
-        gk3w_fail(&l, GK3W_TOUCHED_NA, "不认识的命令");
+        gk3w_fail(&l, GK3W_TOUCHED_NA, "unknown command");
         gk3w_line_free(&l);
     }
     return 127;

@@ -2,7 +2,8 @@
  *
  *   gk3w dump --disk N [--hash a,b,…]   每个 GPT 分区一行 DUMPPART（名字、起止、类型、属性），
  *                                       --hash 里列出的分区再带整个分区内容的 sha256
- *   gk3w esp-tree --vol \\?\Volume{…}\  ESP 上每个文件一行 ESPFILE（相对路径用 /、大小、sha256），按路径排序 */
+ *   gk3w esp-tree --vol \\?\Volume{…}\  ESP 上每个文件一行 ESPFILE（相对路径用 /、大小、sha256），按路径排序
+ *   gk3w readpart --disk N --name NAME --out FILE   把一个分区（按 GPT 名字，恰好一个）整个读出来存成文件，至多 1 GiB */
 #include <windows.h>
 #include <winioctl.h>
 
@@ -44,13 +45,13 @@ int gk3w_cmd_dump(int argc, wchar_t **argv)
     int rc = 0;
 
     if (gk3w_arg_u64(argc, argv, L"--disk", &num) || num > 255)
-        return gk3w_err(GK3W_TOUCHED_NA, "usage", "用法：dump --disk N [--hash a,b,…]", 0);
+        return gk3w_err(GK3W_TOUCHED_NA, "usage", "usage: dump --disk N [--hash a,b,...]", 0);
     if (hw)
         gk3w_w2u(hw, hash_list, sizeof hash_list);
     _snwprintf(path, 40, L"\\\\.\\PhysicalDrive%lu", (unsigned long)num);
     h = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_FLAG_NO_BUFFERING, NULL);
     if (h == INVALID_HANDLE_VALUE)
-        return gk3w_err(GK3W_TOUCHED_NA, "disk-open", "无法打开磁盘", GetLastError());
+        return gk3w_err(GK3W_TOUCHED_NA, "disk-open", "cannot open the disk", GetLastError());
     {
         STORAGE_PROPERTY_QUERY q = {StorageAccessAlignmentProperty, PropertyStandardQuery, {0}};
         STORAGE_ACCESS_ALIGNMENT_DESCRIPTOR a;
@@ -69,7 +70,7 @@ int gk3w_cmd_dump(int argc, wchar_t **argv)
     }
     buf = _aligned_malloc(CHUNK, 4096);
     if (!lay || !buf) {
-        rc = gk3w_err(GK3W_TOUCHED_NA, "disk-layout", "读不到分区表", GetLastError());
+        rc = gk3w_err(GK3W_TOUCHED_NA, "disk-layout", "cannot read the partition table", GetLastError());
         goto out;
     }
     for (DWORD i = 0; i < lay->PartitionCount; i++) {
@@ -103,7 +104,7 @@ int gk3w_cmd_dump(int argc, wchar_t **argv)
             }
             if (!c || gk3w_sha256_end(c, dg)) {
                 gk3w_line_free(&l);
-                rc = gk3w_err(GK3W_TOUCHED_NA, "disk-read", "读分区失败", GetLastError());
+                rc = gk3w_err(GK3W_TOUCHED_NA, "disk-read", "reading the partition failed", GetLastError());
                 goto out;
             }
             gk3w_hex(dg, 32, hex);
@@ -170,7 +171,7 @@ int gk3w_cmd_esp_tree(int argc, wchar_t **argv)
     const wchar_t *vol = gk3w_arg(argc, argv, L"--vol");
     strvec files = {0};
     if (!vol)
-        return gk3w_err(GK3W_TOUCHED_NA, "usage", "用法：esp-tree --vol \\\\?\\Volume{…}\\", 0);
+        return gk3w_err(GK3W_TOUCHED_NA, "usage", "usage: esp-tree --vol \\\\?\\Volume{...}\\", 0);
     walk(vol, L"", &files);
     qsort(files.v, files.n, sizeof *files.v, cmp_str);
     for (size_t i = 0; i < files.n; i++) {
@@ -201,4 +202,77 @@ int gk3w_cmd_esp_tree(int argc, wchar_t **argv)
     }
     free(files.v);
     return 0;
+}
+
+/* ── readpart ── */
+
+int gk3w_cmd_readpart(int argc, wchar_t **argv)
+{
+    uint64_t num;
+    const wchar_t *wname = gk3w_arg(argc, argv, L"--name"), *outp = gk3w_arg(argc, argv, L"--out");
+    wchar_t path[40];
+    HANDLE h, o;
+    DRIVE_LAYOUT_INFORMATION_EX *lay = NULL;
+    DWORD sz = sizeof(DRIVE_LAYOUT_INFORMATION_EX) + 128 * sizeof(PARTITION_INFORMATION_EX), got = 0;
+    const PARTITION_INFORMATION_EX *hit = NULL;
+    uint8_t *buf = NULL;
+    int found = 0, rc = 0;
+
+    if (gk3w_arg_u64(argc, argv, L"--disk", &num) || num > 255 || !wname || !outp)
+        return gk3w_err(GK3W_TOUCHED_NA, "usage", "usage: readpart --disk N --name NAME --out FILE", 0);
+    _snwprintf(path, 40, L"\\\\.\\PhysicalDrive%lu", (unsigned long)num);
+    h = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_FLAG_NO_BUFFERING, NULL);
+    if (h == INVALID_HANDLE_VALUE)
+        return gk3w_err(GK3W_TOUCHED_NA, "disk-open", "cannot open the disk", GetLastError());
+    for (;;) {
+        lay = calloc(1, sz);
+        if (!lay || DeviceIoControl(h, IOCTL_DISK_GET_DRIVE_LAYOUT_EX, NULL, 0, lay, sz, &got, NULL))
+            break;
+        free(lay);
+        lay = NULL;
+        if (GetLastError() != ERROR_INSUFFICIENT_BUFFER || sz > (1u << 24))
+            break;
+        sz *= 2;
+    }
+    if (!lay) {
+        CloseHandle(h);
+        return gk3w_err(GK3W_TOUCHED_NA, "disk-layout", "cannot read the partition table", GetLastError());
+    }
+    for (DWORD i = 0; i < lay->PartitionCount; i++) {
+        const PARTITION_INFORMATION_EX *p = &lay->PartitionEntry[i];
+        wchar_t wn[GK3_GPT_NAME_CHARS + 1];
+        if (p->PartitionStyle != PARTITION_STYLE_GPT || !p->PartitionLength.QuadPart)
+            continue;
+        memcpy(wn, p->Gpt.Name, sizeof p->Gpt.Name);
+        wn[GK3_GPT_NAME_CHARS] = 0;
+        if (!wcscmp(wn, wname)) {
+            hit = p;
+            found++;
+        }
+    }
+    if (found != 1 || (uint64_t)hit->PartitionLength.QuadPart > (1ull << 30)) {
+        rc = gk3w_err(GK3W_TOUCHED_NA, "bad-part", "no partition with this name, the name is not unique, or the partition is larger than 1 GiB", 0);
+        goto out;
+    }
+    buf = _aligned_malloc(CHUNK, 4096);
+    o = CreateFileW(outp, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (!buf || o == INVALID_HANDLE_VALUE) {
+        rc = gk3w_err(GK3W_TOUCHED_NA, "file-open", "cannot create the output file", GetLastError());
+        goto out;
+    }
+    for (uint64_t done = 0, len = (uint64_t)hit->PartitionLength.QuadPart; done < len; done += CHUNK) {
+        DWORD n = (DWORD)(len - done < CHUNK ? len - done : CHUNK), w = 0;
+        if (gk3w_pread(h, buf, n, (uint64_t)hit->StartingOffset.QuadPart + done) || !WriteFile(o, buf, n, &w, NULL) || w != n) {
+            rc = gk3w_err(GK3W_TOUCHED_NA, "disk-read", "reading the partition or writing the output file failed", GetLastError());
+            break;
+        }
+    }
+    CloseHandle(o);
+    if (!rc)
+        printf("READPART bytes=%llu\n", (unsigned long long)hit->PartitionLength.QuadPart);
+out:
+    _aligned_free(buf);
+    free(lay);
+    CloseHandle(h);
+    return rc ? 1 : 0;
 }

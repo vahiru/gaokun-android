@@ -65,13 +65,13 @@ int gk3w_cmd_mkpart(int argc, wchar_t **argv)
     if (gk3w_arg_u64(argc, argv, L"--disk", &num) || gk3w_arg_u64(argc, argv, L"--start", &start) ||
         gk3w_arg_u64(argc, argv, L"--size-mib", &mib) || !name || !*name || wcslen(name) > GK3_GPT_NAME_CHARS ||
         num > 255 || !mib || mib > (1ull << 32))
-        return gk3w_err(GK3W_TOUCHED_NA, "usage", "用法：mkpart --disk N --start LBA --size-mib M --name NAME", 0);
+        return gk3w_err(GK3W_TOUCHED_NA, "usage", "usage: mkpart --disk N --start LBA --size-mib M --name NAME", 0);
     if (gk3w_disk_open_vhd((DWORD)num, &d, GK3W_TOUCHED_NA))
         return 1;
     len_sectors = (mib << 20) / d.bs;
     if (start % ((1u << 20) / d.bs) || start > UINT64_MAX - len_sectors) {
         gk3w_disk_close(&d);
-        return gk3w_err(GK3W_TOUCHED_NA, "bad-region", "起点没有按 1 MiB 对齐", 0);
+        return gk3w_err(GK3W_TOUCHED_NA, "bad-region", "the start is not aligned to 1 MiB", 0);
     }
     want.first = start;
     want.last = start + len_sectors - 1;
@@ -87,19 +87,19 @@ int gk3w_cmd_mkpart(int argc, wchar_t **argv)
     }
     if (gk3w_free_spans(ufirst, ulast, parts, np, d.bs, 0, spans, GK3W_MAX_PARTS + 1, &nf) != GK3W_LAYOUT_OK) {
         gk3w_disk_close(&d);
-        return gk3w_err(GK3W_TOUCHED_NA, "disk-layout", "现有分区表有越界或重叠", 0);
+        return gk3w_err(GK3W_TOUCHED_NA, "disk-layout", "the existing partition table has out-of-range or overlapping entries", 0);
     }
     for (size_t i = 0; i < nf && i < GK3W_MAX_PARTS + 1; i++)
         if (want.first >= spans[i].first && want.last <= spans[i].last)
             inside = 1;
     if (!inside || count >= d.lay->Gpt.MaxPartitionCount) {
         gk3w_disk_close(&d);
-        return gk3w_err(GK3W_TOUCHED_NA, "bad-region", "这段区间不在任何一段空闲区里（或分区表已满）", 0);
+        return gk3w_err(GK3W_TOUCHED_NA, "bad-region", "this range is not inside a free region (or the partition table is full)", 0);
     }
     lay = calloc(1, offsetof(DRIVE_LAYOUT_INFORMATION_EX, PartitionEntry) + (count + 1) * sizeof(PARTITION_INFORMATION_EX));
     if (!lay) {
         gk3w_disk_close(&d);
-        return gk3w_err(GK3W_TOUCHED_NA, "nomem", "内存不足", 0);
+        return gk3w_err(GK3W_TOUCHED_NA, "nomem", "out of memory", 0);
     }
     lay->PartitionStyle = PARTITION_STYLE_GPT;
     lay->Gpt = d.lay->Gpt;
@@ -118,7 +118,7 @@ int gk3w_cmd_mkpart(int argc, wchar_t **argv)
     if (UuidCreate(&e->Gpt.PartitionId) != RPC_S_OK) {
         free(lay);
         gk3w_disk_close(&d);
-        return gk3w_err(GK3W_TOUCHED_NA, "uuid", "生成分区 GUID 失败", 0);
+        return gk3w_err(GK3W_TOUCHED_NA, "uuid", "cannot generate a partition GUID", 0);
     }
     wcsncpy(e->Gpt.Name, name, GK3_GPT_NAME_CHARS);
     rc = gk3w_disk_set_layout(&d, lay, count, GK3W_TOUCHED_YES) ? 1 : 0;
@@ -126,7 +126,7 @@ int gk3w_cmd_mkpart(int argc, wchar_t **argv)
         GUID id = e->Gpt.PartitionId;
         const PARTITION_INFORMATION_EX *p;
         if (gk3w_disk_read_layout(&d) || !(p = gk3w_disk_find_part(&d, &id)))
-            rc = gk3w_err(GK3W_TOUCHED_YES, "verify-layout", "写完分区表后重读，找不到新分区", 0);
+            rc = gk3w_err(GK3W_TOUCHED_YES, "verify-layout", "after writing the partition table, the new partition is missing", 0);
         else
             emit_part("MKPART", &d, p);
     }
@@ -146,18 +146,18 @@ int gk3w_cmd_rmpart(int argc, wchar_t **argv)
     int rc;
 
     if (gk3w_arg_u64(argc, argv, L"--disk", &num) || num > 255 || parse_guid(gk3w_arg(argc, argv, L"--uuid"), &id))
-        return gk3w_err(GK3W_TOUCHED_NA, "usage", "用法：rmpart --disk N --uuid GUID", 0);
+        return gk3w_err(GK3W_TOUCHED_NA, "usage", "usage: rmpart --disk N --uuid GUID", 0);
     if (gk3w_disk_open_vhd((DWORD)num, &d, GK3W_TOUCHED_NA))
         return 1;
     victim = gk3w_disk_find_part(&d, &id);
     if (!victim || memcmp(&victim->Gpt.PartitionType, &GK3W_LINUX_DATA, sizeof(GUID))) {
         gk3w_disk_close(&d);
-        return gk3w_err(GK3W_TOUCHED_NA, "bad-part", "找不到这个分区，或它不是 Linux 数据类型（原型只删自己建的分区）", 0);
+        return gk3w_err(GK3W_TOUCHED_NA, "bad-part", "partition not found, or not of the Linux data type (only our own partitions are removed)", 0);
     }
     lay = calloc(1, d.laysz);
     if (!lay) {
         gk3w_disk_close(&d);
-        return gk3w_err(GK3W_TOUCHED_NA, "nomem", "内存不足", 0);
+        return gk3w_err(GK3W_TOUCHED_NA, "nomem", "out of memory", 0);
     }
     lay->PartitionStyle = PARTITION_STYLE_GPT;
     lay->Gpt = d.lay->Gpt;
@@ -169,7 +169,7 @@ int gk3w_cmd_rmpart(int argc, wchar_t **argv)
     rc = gk3w_disk_set_layout(&d, lay, count, GK3W_TOUCHED_YES) ? 1 : 0;
     if (!rc) {
         if (gk3w_disk_read_layout(&d) || gk3w_disk_find_part(&d, &id))
-            rc = gk3w_err(GK3W_TOUCHED_YES, "verify-layout", "删完重读，分区还在", 0);
+            rc = gk3w_err(GK3W_TOUCHED_YES, "verify-layout", "after removing and re-reading, a partition is still there", 0);
         else
             printf("RMPART disk=%lu ok\n", (unsigned long)num);
     }
@@ -192,30 +192,30 @@ int gk3w_cmd_write(int argc, wchar_t **argv)
 
     if (gk3w_arg_u64(argc, argv, L"--disk", &num) || num > 255 || parse_guid(gk3w_arg(argc, argv, L"--uuid"), &id) ||
         !file)
-        return gk3w_err(GK3W_TOUCHED_NA, "usage", "用法：write --disk N --uuid GUID --file PATH", 0);
+        return gk3w_err(GK3W_TOUCHED_NA, "usage", "usage: write --disk N --uuid GUID --file PATH", 0);
     if (gk3w_disk_open_vhd((DWORD)num, &d, GK3W_TOUCHED_NA))
         return 1;
     p = gk3w_disk_find_part(&d, &id);
     if (!p || memcmp(&p->Gpt.PartitionType, &GK3W_LINUX_DATA, sizeof(GUID))) {
         gk3w_disk_close(&d);
-        return gk3w_err(GK3W_TOUCHED_NA, "bad-part", "找不到这个分区，或它不是 Linux 数据类型", 0);
+        return gk3w_err(GK3W_TOUCHED_NA, "bad-part", "partition not found, or not of the Linux data type", 0);
     }
     part_off = (uint64_t)p->StartingOffset.QuadPart;
     part_len = (uint64_t)p->PartitionLength.QuadPart;
     f = CreateFileW(file, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
     if (f == INVALID_HANDLE_VALUE) {
         gk3w_disk_close(&d);
-        return gk3w_err(GK3W_TOUCHED_NA, "file-open", "打不开镜像文件", GetLastError());
+        return gk3w_err(GK3W_TOUCHED_NA, "file-open", "cannot open the image file", GetLastError());
     }
     if (!GetFileSizeEx(f, &fl) || (fsize = (uint64_t)fl.QuadPart) > part_len) {
         CloseHandle(f);
         gk3w_disk_close(&d);
-        return gk3w_err(GK3W_TOUCHED_NA, "file-too-big", "镜像比分区大", 0);
+        return gk3w_err(GK3W_TOUCHED_NA, "file-too-big", "the image is larger than the partition", 0);
     }
     buf = _aligned_malloc(CHUNK, 4096);
     chk = _aligned_malloc(CHUNK, 4096);
     if (!buf || !chk) {
-        rc = gk3w_err(GK3W_TOUCHED_NA, "nomem", "内存不足", 0);
+        rc = gk3w_err(GK3W_TOUCHED_NA, "nomem", "out of memory", 0);
         goto out;
     }
     gk3w_progress(0, "write");
@@ -223,7 +223,7 @@ int gk3w_cmd_write(int argc, wchar_t **argv)
         DWORD want = (DWORD)(fsize - done < CHUNK ? fsize - done : CHUNK), got = 0, padded;
         int w;
         if (!ReadFile(f, buf, want, &got, NULL) || got != want) {
-            rc = gk3w_err(GK3W_TOUCHED_YES, "file-read", "读镜像文件失败", GetLastError());
+            rc = gk3w_err(GK3W_TOUCHED_YES, "file-read", "reading the image file failed", GetLastError());
             goto out;
         }
         padded = (want + d.bs - 1) / d.bs * d.bs;
@@ -231,7 +231,7 @@ int gk3w_cmd_write(int argc, wchar_t **argv)
         w = gk3w_write_verify(d.h, buf, padded, part_off + done, chk);
         if (w) {
             rc = gk3w_err(GK3W_TOUCHED_YES, w == -1 ? "disk-write" : "disk-verify",
-                          w == -1 ? "写分区失败" : "写后读回不一致", GetLastError());
+                          w == -1 ? "writing the partition failed" : "data did not read back identically", GetLastError());
             goto out;
         }
         done += want;
@@ -281,11 +281,11 @@ int gk3w_cmd_esp_ls(int argc, wchar_t **argv)
     WIN32_FIND_DATAW fd;
     HANDLE h;
     if (!vol)
-        return gk3w_err(GK3W_TOUCHED_NA, "usage", "用法：esp-ls --vol \\\\?\\Volume{…}\\ [--dir SUB]", 0);
+        return gk3w_err(GK3W_TOUCHED_NA, "usage", "usage: esp-ls --vol \\\\?\\Volume{...}\\ [--dir SUB]", 0);
     _snwprintf(pat, MAX_PATH * 2, L"%ls%ls%ls*", vol, sub ? sub : L"", sub ? L"\\" : L"");
     h = FindFirstFileW(pat, &fd);
     if (h == INVALID_HANDLE_VALUE)
-        return gk3w_err(GK3W_TOUCHED_NA, "esp-list", "列不出 ESP 目录", GetLastError());
+        return gk3w_err(GK3W_TOUCHED_NA, "esp-list", "cannot list the ESP directory", GetLastError());
     do {
         gk3w_line l = {0};
         char name[MAX_PATH * 3];
@@ -310,11 +310,11 @@ int gk3w_cmd_esp_put(int argc, wchar_t **argv)
     size_t len = 0;
     int w;
     if (!vol || !file || !dest)
-        return gk3w_err(GK3W_TOUCHED_NA, "usage", "用法：esp-put --vol \\\\?\\Volume{…}\\ --file PATH --dest SUB\\NAME", 0);
+        return gk3w_err(GK3W_TOUCHED_NA, "usage", "usage: esp-put --vol \\\\?\\Volume{...}\\ --file PATH --dest SUB\\NAME", 0);
     if (!volume_on_vhd(vol))
-        return gk3w_err(GK3W_TOUCHED_NA, "not-vhd", "原型只往 VHD 上的 ESP 写", 0);
+        return gk3w_err(GK3W_TOUCHED_NA, "not-vhd", "only an ESP on a VHD is written by this test command", 0);
     if (gk3w_read_file(file, &data, &len, 64u << 20))
-        return gk3w_err(GK3W_TOUCHED_NA, "file-read", "读源文件失败（或大于 64 MiB）", GetLastError());
+        return gk3w_err(GK3W_TOUCHED_NA, "file-read", "reading the source file failed (or it is larger than 64 MiB)", GetLastError());
     _snwprintf(path, MAX_PATH * 2, L"%ls%ls", vol, dest);
     wcscpy(dir, path);
     slash = wcsrchr(dir, L'\\');
@@ -322,14 +322,14 @@ int gk3w_cmd_esp_put(int argc, wchar_t **argv)
         *slash = 0;
         if (gk3w_mkdirs(dir, wcslen(vol))) {
             free(data);
-            return gk3w_err(GK3W_TOUCHED_NA, "esp-mkdir", "在 ESP 上建目录失败", GetLastError());
+            return gk3w_err(GK3W_TOUCHED_NA, "esp-mkdir", "cannot create a directory on the EFI system partition", GetLastError());
         }
     }
     w = gk3w_write_file_verify(path, data, len);
     free(data);
     if (w)
         return gk3w_err(GK3W_TOUCHED_NA, w == -1 ? "esp-write" : "esp-verify",
-                        w == -1 ? "写 ESP 文件失败" : "ESP 文件读回不一致", GetLastError());
+                        w == -1 ? "writing the ESP file failed" : "the ESP file did not read back identically", GetLastError());
     printf("ESPPUT bytes=%zu verified=yes\n", len);
     return 0;
 }

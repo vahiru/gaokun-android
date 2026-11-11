@@ -14,7 +14,7 @@ static int g_fail, g_run;
         g_run++;                                                              \
         if (!(c)) {                                                           \
             g_fail++;                                                         \
-            fprintf(stderr, "%s:%d: 失败：%s\n", __FILE__, __LINE__, #c);     \
+            fprintf(stderr, "%s:%d: FAIL: %s\n", __FILE__, __LINE__, #c);     \
         }                                                                     \
     } while (0)
 
@@ -372,6 +372,6 @@ int main(void)
     test_plan_fixture();
     test_plan_edges();
     test_esp();
-    printf("阶段 2：%d 项检查，失败 %d 项\n", g_run, g_fail);
+    printf("stage 2: %d checks, %d failed\n", g_run, g_fail);
     return g_fail ? 1 : 0;
 }

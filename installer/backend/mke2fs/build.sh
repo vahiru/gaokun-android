@@ -18,7 +18,7 @@ HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO=$(cd "$HERE/../../.." && pwd)
 TARGET=${1:-}
 LLVM_MINGW=${LLVM_MINGW:-$HOME/opt/llvm-mingw-20261104-ucrt-ubuntu-22.04-x86_64}
-die() { echo "✗ $*" >&2; exit 1; }
+die() { echo "FAIL: $*" >&2; exit 1; }
 
 VER=1.47.2
 DEBREV=3
@@ -43,8 +43,8 @@ mkdir -p "$DL"
 
 fetch() {   # $1=文件 $2=sha256
     if [ ! -f "$DL/$1" ] || ! echo "$2  $DL/$1" | sha256sum -c --quiet - 2>/dev/null; then
-        curl -fsSL --max-time 600 -o "$DL/$1.part" "$BASE/$1" || die "下载失败：$1"
-        echo "$2  $DL/$1.part" | sha256sum -c --quiet - || die "sha256 不对：$1"
+        curl -fsSL --max-time 600 -o "$DL/$1.part" "$BASE/$1" || die "download failed: $1"
+        echo "$2  $DL/$1.part" | sha256sum -c --quiet - || die "sha256 mismatch: $1"
         mv "$DL/$1.part" "$DL/$1"
     fi
 }
@@ -59,10 +59,10 @@ SRC=$W/e2fsprogs-$VER
 tar xJf "$DL/$DEB" -C "$SRC"
 while read -r p; do
     case "$p" in ''|'#'*) continue ;; esac
-    patch -d "$SRC" -p1 -s < "$SRC/debian/patches/$p" || die "Debian 补丁打不上：$p"
+    patch -d "$SRC" -p1 -s < "$SRC/debian/patches/$p" || die "Debian patch does not apply: $p"
 done < "$SRC/debian/patches/series"
 for p in "$REPO"/patches/e2fsprogs/*.patch; do
-    patch -d "$SRC" -p1 -s < "$p" || die "补丁打不上：${p##*/}"
+    patch -d "$SRC" -p1 -s < "$p" || die "patch does not apply: ${p##*/}"
 done
 
 SHIM=$HERE/sparse_shim
@@ -82,22 +82,22 @@ cd "$W/obj"
 "$SRC/configure" ${CONF_HOST[@]+"${CONF_HOST[@]}"} CC="$CC" --disable-nls --disable-fuse2fs --disable-uuidd \
     --disable-defrag --disable-debugfs --disable-imager --disable-resizer --disable-e2initrd-helper --disable-tls \
     --disable-backtrace --without-pthread --disable-fsck --disable-elf-shlibs > configure.log 2>&1 \
-    || { tail -20 configure.log; die "configure 失败"; }
+    || { tail -20 configure.log; die "configure failed"; }
 $CC $F -c -o sparse_shim.o "$SHIM/sparse_shim.c"
 # 构建时在本机跑的小工具（util/subst 等）用本机的 cc，且不能带 configure 给目标加的 -I include/mingw
 MK=(BUILD_CC=cc "BUILD_CFLAGS=-g -O2 -I." "CFLAGS=$F" "CFLAGS_STLIB=$F")
-make subs "${MK[@]}" > make.log 2>&1 || { tail -20 make.log; die "make subs 失败"; }
+make subs "${MK[@]}" > make.log 2>&1 || { tail -20 make.log; die "make subs failed"; }
 # 只编 mke2fs 用到的库（lib/ss 是 debugfs 用的，在 mingw 下编不过）
 for d in lib/et lib/uuid lib/blkid lib/e2p lib/support lib/ext2fs; do
     [ -d "$d" ] || continue
-    make -C "$d" -j"$(nproc)" "${MK[@]}" >> make.log 2>&1 || { tail -20 make.log; die "编 $d 失败"; }
+    make -C "$d" -j"$(nproc)" "${MK[@]}" >> make.log 2>&1 || { tail -20 make.log; die "building $d failed"; }
 done
 make -C misc mke2fs "${MK[@]}" "SYSLIBS=$W/obj/sparse_shim.o" "ALL_LDFLAGS=$LD" >> make.log 2>&1 \
-    || { tail -20 make.log; die "编 mke2fs 失败"; }
+    || { tail -20 make.log; die "building mke2fs failed"; }
 
 rm -rf "${OUT:?}"
 mkdir -p "$OUT"
 if [ -n "$HOST" ]; then cp misc/mke2fs.exe "$OUT/"; else cp misc/mke2fs "$OUT/"; fi
 cp "$SRC/misc/mke2fs.conf.in" "$OUT/mke2fs.conf"
 ( cd "$OUT" && sha256sum * )
-echo "✓ $OUT"
+echo "OK: $OUT"

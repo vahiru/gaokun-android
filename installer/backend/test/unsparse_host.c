@@ -57,11 +57,11 @@ int main(int argc, char **argv)
     int eof = 0;
 
     if (argc != 3)
-        return fprintf(stderr, "用法：unsparse <super.img.zst> <输出文件>\n"), 2;
+        return fprintf(stderr, "usage: unsparse <super.img.zst> <output file>\n"), 2;
     fi = fopen(argv[1], "rb");
     fd_out = open(argv[2], O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (!fi || fd_out < 0)
-        return fprintf(stderr, "打不开：%s\n", strerror(errno)), 2;
+        return fprintf(stderr, "cannot open: %s\n", strerror(errno)), 2;
     dc = ZSTD_createDCtx();
     /* release.sh 用 -19 --long 压：解码时放宽窗口上限（同 installer-lib.sh 的 zstd -dc --long=31） */
     ZSTD_DCtx_setParameter(dc, ZSTD_d_windowLogMax, 31);
@@ -75,9 +75,9 @@ int main(int argc, char **argv)
             ZSTD_outBuffer ob = {out, sizeof out, 0};
             r = ZSTD_decompressStream(dc, &ob, &ib);
             if (ZSTD_isError(r))
-                return fprintf(stderr, "zstd：%s\n", ZSTD_getErrorName(r)), 1;
+                return fprintf(stderr, "zstd: %s\n", ZSTD_getErrorName(r)), 1;
             if (gk3w_sparse_feed(&s, out, ob.pos, &sink))
-                return fprintf(stderr, "sparse：%s\n", s.err), 1;
+                return fprintf(stderr, "sparse: %s\n", s.err), 1;
         }
     }
     /* 输入读完但帧没结束（r != 0）= 下载不完整 */
@@ -88,17 +88,17 @@ int main(int argc, char **argv)
             break;
         r = ZSTD_decompressStream(dc, &ob, &ib);
         if (ZSTD_isError(r) || ob.pos == 0) {
-            fprintf(stderr, "zstd：输入提前结束\n");
+            fprintf(stderr, "zstd: input ended early\n");
             return 1;
         }
         if (gk3w_sparse_feed(&s, out, ob.pos, &sink))
-            return fprintf(stderr, "sparse：%s\n", s.err), 1;
+            return fprintf(stderr, "sparse: %s\n", s.err), 1;
     }
     if (gk3w_sparse_finish(&s, &sink))
-        return fprintf(stderr, "sparse：%s\n", s.err), 1;
+        return fprintf(stderr, "sparse: %s\n", s.err), 1;
     if (ftruncate(fd_out, (off_t)gk3w_sparse_total(&s)) || close(fd_out))
-        return fprintf(stderr, "截断 / 关闭失败：%s\n", strerror(errno)), 1;
-    printf("展开 %llu 字节\n", (unsigned long long)gk3w_sparse_total(&s));
+        return fprintf(stderr, "truncate / close failed: %s\n", strerror(errno)), 1;
+    printf("expanded %llu bytes\n", (unsigned long long)gk3w_sparse_total(&s));
     ZSTD_freeDCtx(dc);
     fclose(fi);
     return 0;

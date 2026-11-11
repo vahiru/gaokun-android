@@ -32,8 +32,8 @@ for spec in metadata:33554432: userdata:29892804608:-m0; do
     sbs=$(grep -c "superblock at" deb.txt)
     bytes=$(cmp -l deb.raw ours.raw | wc -l)
     e2fsck -fn ours.raw >/dev/null 2>&1; fsck=$?
-    echo "$n：dumpe2fs 其余行不同 $other 处；字节差 $bytes（上限 $((sbs * 6))，超级块 $sbs 份）；e2fsck 退出码 $fsck"
+    echo "$n: $other other dumpe2fs lines differ; $bytes bytes differ (limit $((sbs * 6)), $sbs superblocks); e2fsck exit $fsck"
     [ "$other" = 0 ] && [ "$bytes" -le $((sbs * 6)) ] && [ "$fsck" = 0 ] || fail=1
     rm -f deb.raw ours.raw
 done
-exit $fail' && echo "✓ 与 Debian mkfs.ext4 一致（只差写入量计数与超级块校验和）"
+exit $fail' && echo "OK: matches Debian mkfs.ext4 (only the write counters and superblock checksums differ)"

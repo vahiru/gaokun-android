@@ -12,6 +12,8 @@
 
 /* ── 参数 ── */
 const wchar_t *gk3w_arg(int argc, wchar_t **argv, const wchar_t *key);
+/* 不带值的开关参数在不在 */
+int gk3w_flag(int argc, wchar_t **argv, const wchar_t *key);
 /* 十进制非负整数；没有或格式不对返回 -1 */
 int gk3w_arg_u64(int argc, wchar_t **argv, const wchar_t *key, uint64_t *out);
 
@@ -38,13 +40,21 @@ typedef struct {
 
 /* 这块盘是不是 VHD 虚拟盘（只查不报） */
 int gk3w_disk_is_vhd(DWORD num);
-/* 以读写方式打开一块 VHD（原型只对 VHD 动手：先查类型，真实磁盘连写句柄都不拿）。失败已报 ERR，返回 -1。 */
+/* Windows 目录所在卷的那块盘；找不到返回 -1 */
+long gk3w_system_disk_number(void);
+/* 以读写方式打开一块 VHD（先查类型，真实磁盘连写句柄都不拿）。失败已报 ERR，返回 -1。 */
 int gk3w_disk_open_vhd(DWORD num, gk3w_disk *d, gk3w_touched t);
+/* real = 0：同 gk3w_disk_open_vhd。real = 1（--real-disk）：只认 Windows 所在的那块系统盘（VHD 也不认）；
+ * 机型与安装前检查由调用方先用 gk3w_sys_gate 把关。 */
+int gk3w_disk_open(DWORD num, int real, gk3w_disk *d, gk3w_touched t);
 void gk3w_disk_close(gk3w_disk *d);
 int gk3w_disk_read_layout(gk3w_disk *d);
 /* 以 lay 的前 count 个表项设置分区表，并让分区管理器重读。失败已报 ERR，返回 -1。 */
 int gk3w_disk_set_layout(gk3w_disk *d, DRIVE_LAYOUT_INFORMATION_EX *lay, DWORD count, gk3w_touched t);
 PARTITION_INFORMATION_EX *gk3w_disk_find_part(gk3w_disk *d, const GUID *id);
+/* 分区表备份：GPT 主表区（LBA 0 到 usable 起点）与备份表区（usable 终点之后到盘尾）原样存进
+ * <dir>\gpt-before-<tag>-disk<N>-<时间>-head<扇区数>-tail<扇区数>.bin，写完读回比对。失败已报 ERR（touched 照 t），返回 -1。 */
+int gk3w_gpt_backup(gk3w_disk *d, const wchar_t *dir, const wchar_t *tag, gk3w_touched t);
 /* usable 区间（含两端，逻辑扇区） */
 void gk3w_disk_usable(const gk3w_disk *d, uint64_t *first, uint64_t *last);
 
@@ -66,6 +76,23 @@ int gk3w_write_file_verify(const wchar_t *path, const uint8_t *data, size_t len)
 /* 逐级建目录（path 是目录本身）；已存在不算错 */
 int gk3w_mkdirs(const wchar_t *path, size_t root_len);
 int gk3w_exists(const wchar_t *path);
+
+/* ── 系统状态（sys.c） ── */
+typedef struct {
+    char manufacturer[64], model[64];
+    int secure_boot;            /* 1 开、0 关、-1 读不到 */
+    int fast_startup;           /* HiberbootEnabled */
+    int hiberfil;               /* 系统盘上有 hiberfil.sys */
+    int bitlocker;              /* 系统卷：0 关、1 开、2 锁定、-1 读不到 */
+    int ac;                     /* 1 插着电源、0 没插、-1 不知道 */
+    int battery;                /* 电量百分比，-1 不知道 */
+    wchar_t system_drive;
+} gk3w_sys;
+void gk3w_sys_read(gk3w_sys *s);
+int gk3w_model_ok(const gk3w_sys *s);
+int gk3w_sys_gate(const gk3w_sys *s, int bitlocker_ok);
+/* 删 systemd-boot 的 EFI 变量（LoaderEntryDefault 等）：0 = 删了或本来就没有；-1 = 读不到 / 删不掉（已记日志） */
+int gk3w_loader_var_delete(const wchar_t *name);
 
 /* ── 散列与随机数 ── */
 int gk3w_sha256(const void *data, size_t len, uint8_t out[32]);
