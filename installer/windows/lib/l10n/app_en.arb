@@ -171,51 +171,124 @@
   "shutdownReasonUninstall": "Uninstalling Android. Interrupting the uninstallation may leave disk partitions in an incomplete state.",
   "runSleepHintInstall": "Do not close the keyboard cover or press the power button during installation. Otherwise, the device will enter sleep and the installation will be paused.",
   "runSleepHintUninstall": "Do not close the keyboard cover or press the power button during uninstallation. Otherwise, the device will enter sleep and the uninstallation will be paused.",
-  "railWipe": "Erase disk and install",
   "railAbout": "Overview",
-  "railPrepare": "Prepare",
-  "wipeAboutTitle": "Erase disk and install",
-  "wipeAboutSub": "Android will become the only operating system on this device and will occupy the entire system disk.",
-  "wipeAboutSteps": "Installation proceeds in the following steps:",
-  "wipeAboutStep1": "This program creates a GK3LIVE partition in unallocated space and writes the LiveCD and the installation files of the selected release to it.",
-  "wipeAboutStep2": "After a restart, the device boots into the LiveCD.",
-  "wipeAboutStep3": "After a further confirmation, the LiveCD erases the entire system disk and installs Android.",
-  "wipeAboutWarn": "All data on the system disk will be erased, including Windows, the recovery partition and all personal files, and cannot be recovered. Back up important files to another device first.",
-  "wipeAboutKeepWindows": "To keep Windows, go back and install Android alongside Windows instead.",
-  "wipeCheckSub": "Before preparation begins, please ensure this device meets the following requirements. After making any changes, click “Check again” to refresh the status.",
-  "chkWipeRoomDetail": "{need} of it will be used to store the LiveCD and installation files",
-  "@chkWipeRoomDetail": {
+  "railMedia": "Create installation media",
+  "railTarget": "Target",
+  "railWrite": "Write",
+  "mediaAboutTitle": "Create installation media",
+  "mediaAboutSub": "Write the LiveCD to a USB drive or to this device's disk. Booting from the installation media starts the graphical installer independently of Windows.",
+  "mediaAboutUses": "With the installation media, you can:",
+  "mediaUseWipe": "Erase the entire disk and install Android (Windows will be removed)",
+  "mediaUseAlong": "Keep the existing system and install Android in unallocated space",
+  "mediaUseReinstall": "Reinstall Android to repair the system or change the release",
+  "mediaAboutTargets": "The LiveCD can be written to:",
+  "mediaAboutUsb": "A USB drive: all data on the drive will be erased. It can be used on any MateBook E Go.",
+  "mediaAboutInternal": "This device's disk: a GK3LIVE partition is created in unallocated space on the system disk and the LiveCD is added to the boot menu, so no USB drive is needed. It can only be used on this device.",
+  "mediaAboutNote": "The installation method is chosen in the LiveCD, which asks for confirmation again before writing to the disk. Before booting from the installation media, disable Secure Boot in the target device's UEFI firmware settings.",
+  "mediaTargetTitle": "Choose a target",
+  "mediaTargetSub": "The LiveCD and the installation files of the selected release require about {need}.",
+  "@mediaTargetSub": {
     "placeholders": {
       "need": {
         "type": "String"
       }
     }
   },
-  "releaseSubWipe": "The installation files of the selected release will be written to the disk together with the LiveCD, so no network connection is required during installation in the LiveCD.",
-  "wipeConfirmTitle": "Confirm erasing the disk and installing",
-  "wipeConfirmSub": "After the restart, the LiveCD will erase the entire system disk, including Windows and all data on it. Back up important data before proceeding.",
-  "wipeConfirmNow": "The installer will now perform the following actions:",
-  "wipeConfirmPart": "Create a GK3LIVE partition ({size}) in unallocated space and write the LiveCD and installation files to it",
-  "@wipeConfirmPart": {
+  "btnRedetect": "Detect again",
+  "mediaUsbHeader": "USB drives",
+  "mediaUsbNone": "No USB drive detected. Insert a USB drive, then click “Detect again”.",
+  "mediaUsbTitle": "{model} ({size})",
+  "@mediaUsbTitle": {
+    "placeholders": {
+      "model": {
+        "type": "String"
+      },
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaUsbBody": "All data on this drive will be erased",
+  "mediaUsbTooSmall": "Insufficient capacity; at least {need} is required",
+  "@mediaUsbTooSmall": {
+    "placeholders": {
+      "need": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaInternalHeader": "This device",
+  "mediaInternalTitle": "Unallocated space on the system disk ({size})",
+  "@mediaInternalTitle": {
     "placeholders": {
       "size": {
         "type": "String"
       }
     }
   },
-  "wipeConfirmOnce": "Set only the next boot to start the LiveCD",
-  "wipeConfirmAfter": "After the restart, the LiveCD will:",
-  "wipeConfirmErase": "Ask for confirmation again, then erase the entire system disk (including Windows, the recovery partition and all personal files) and install Android",
-  "wipeConfirmCancel": "If you cancel the installation in the LiveCD, the device returns to Windows after a restart and the data on the disk remains unaffected",
-  "holdToPrepare": "Hold for 2 seconds to start preparation",
-  "runPrepareTitle": "Preparing the LiveCD",
-  "runSleepHintPrepare": "Do not close the keyboard cover or press the power button during preparation. Otherwise, the device will enter sleep and the preparation will be paused.",
-  "shutdownReasonPrepare": "Writing the LiveCD. Interrupting it may leave disk partitions in an incomplete state.",
-  "donePrepareTitle": "The LiveCD is ready",
-  "donePrepareSub": "Restart the device to boot into the LiveCD, which will erase the entire disk and install Android.",
-  "donePrepareConfirm": "The LiveCD will ask for confirmation again before erasing the disk.",
-  "donePrepareCancel": "If you cancel the installation in the LiveCD, the device returns to Windows after a restart.",
-  "donePreparePower": "Keep the power adapter connected during installation.",
-  "failPrepareTitle": "Preparation incomplete",
-  "failTouchedPrepare": "The disk was partially modified, though your Windows installation is unaffected. Return to the start, check again and retry."
+  "mediaInternalTitleNone": "Unallocated space on the system disk",
+  "mediaInternalBody": "Creates a GK3LIVE partition and adds the LiveCD to the boot menu; existing partitions and their data are not affected",
+  "mediaInternalBlocked": "The following requirements are not met. See the check on the start page for details:",
+  "releaseSubMedia": "The installation files of the selected release will be written to the installation media together with the LiveCD, so no network connection is required to install from the LiveCD.",
+  "releaseLiveCd": "The LiveCD will use the latest installer, {version} (download size {size}).",
+  "@releaseLiveCd": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      },
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "releaseNoLiveCd": "No LiveCD is available from this source. Choose another source.",
+  "localLiveCd": "gaokun3-installer-<version>-windows.zip (LiveCD)",
+  "mediaConfirmTitle": "Confirm writing the installation media",
+  "mediaConfirmSubUsb": "All data on the USB drive ({model}, {size}) will be permanently erased and cannot be recovered.",
+  "@mediaConfirmSubUsb": {
+    "placeholders": {
+      "model": {
+        "type": "String"
+      },
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaConfirmSubInternal": "The disk partition table and EFI boot files will be modified. Back up important data before proceeding.",
+  "mediaConfirmLiveDl": "Download the LiveCD (installer {version}, {size}) and verify file integrity",
+  "@mediaConfirmLiveDl": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      },
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaConfirmUsb": "Remove all partitions on the USB drive, create a GK3LIVE partition and write the LiveCD and installation files to it",
+  "mediaConfirmPart": "Create a GK3LIVE partition ({size}) in unallocated space and write the LiveCD and installation files to it",
+  "@mediaConfirmPart": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaConfirmEntry": "Add the LiveCD to the boot menu",
+  "holdToWrite": "Hold for 2 seconds to start writing",
+  "runMediaTitle": "Writing installation media",
+  "runSleepHintMedia": "Do not close the keyboard cover or press the power button while writing. Otherwise, the device will enter sleep and writing will be paused.",
+  "runMediaUsbHint": " Do not remove the USB drive until writing is complete.",
+  "shutdownReasonMedia": "Writing installation media. Interrupting it may leave disk partitions in an incomplete state.",
+  "doneMediaTitle": "Installation media created",
+  "doneMediaSubUsb": "You can now boot a MateBook E Go from this USB drive into the LiveCD.",
+  "doneMediaSubInternal": "Restart the device and choose the LiveCD in the boot menu.",
+  "doneMediaInstall": "The installation method is chosen in the LiveCD, which asks for confirmation again before writing to the disk.",
+  "doneMediaSecureBoot": "Before booting from the USB drive, disable Secure Boot in the target device's UEFI firmware settings.",
+  "doneMediaStays": "The LiveCD remains in the boot menu until the entire disk is erased and reinstalled.",
+  "failMediaTitle": "Writing incomplete",
+  "failTouchedMediaUsb": "The USB drive was partially modified and its data may have been erased. Return to the start and try again.",
+  "failTouchedMediaInternal": "The disk was partially modified, though your Windows installation is unaffected. Return to the start, check again and retry."
 }

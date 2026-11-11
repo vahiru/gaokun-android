@@ -9,7 +9,7 @@ import 'bits.dart';
 import 'messages.dart';
 import 'run_pages.dart';
 import 'title_bar.dart';
-import 'wipe_pages.dart';
+import 'media_pages.dart';
 
 /// 系统盘的分区条：已有的分区一律暗灰（muted），只突出空闲区、要装 Android 的那块与已装的 Android
 Widget systemDiskBar(BuildContext context, {FreeSpan? highlight}) {
@@ -96,10 +96,10 @@ class DiskLegend extends StatelessWidget {
 }
 
 /// 第三步：装哪个版本、从哪来：GitHub 的 releases、R2 上的镜像，或者已经下载好的本地文件。
-/// 整盘安装（[wipe]）也用这一页：所选版本的安装文件随 LiveCD 一起写进 GK3LIVE
+/// 制作安装介质（[media]）也用这一页：所选版本的安装文件随最新的 LiveCD 一起写入介质
 class ReleasePage extends StatefulWidget {
-  const ReleasePage({super.key, this.wipe = false});
-  final bool wipe;
+  const ReleasePage({super.key, this.media = false});
+  final bool media;
   @override
   State<ReleasePage> createState() => _ReleasePageState();
 }
@@ -122,14 +122,16 @@ class _ReleasePageState extends State<ReleasePage> {
 
   @override
   Widget build(BuildContext context) {
-    final s = context.session, l = context.l, wipe = widget.wipe;
+    final s = context.session, l = context.l, media = widget.media;
+    // 制作安装介质还要这个来源上有 LiveCD（本地文件时 LiveCD 也在那个目录里）
+    final ready = s.releaseReady && (!media || s.source == ReleaseSource.local || s.liveCd != null);
     return WinStepPage(
-      step: wipe ? WipeStep.release : WinStep.release,
+      step: media ? MediaStep.release : WinStep.release,
       title: l.releaseTitle,
-      subtitle: wipe ? l.releaseSubWipe : (s.source == ReleaseSource.local ? l.releaseSubLocal : l.releaseSub),
+      subtitle: media ? l.releaseSubMedia : (s.source == ReleaseSource.local ? l.releaseSubLocal : l.releaseSub),
       onBack: () => Navigator.pop(context),
       nextLabel: l.btnNext,
-      onNext: s.releaseReady ? () => go(context, wipe ? const WipeConfirmPage() : const OptionsPage()) : null,
+      onNext: ready ? () => go(context, media ? const MediaConfirmPage() : const OptionsPage()) : null,
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Align(
           alignment: Alignment.centerLeft,
@@ -144,6 +146,13 @@ class _ReleasePageState extends State<ReleasePage> {
             onSelectionChanged: (v) => s.setSource(v.first),
           ),
         ),
+        // 制作安装介质：写入的是哪个 LiveCD（放在列表上面，不必滚动就能看到）
+        if (media && s.source != ReleaseSource.local && !s.loadingVariants) ...[
+          const SizedBox(height: 16),
+          s.liveCd == null
+              ? NoteBox(warn: true, text: l.releaseNoLiveCd)
+              : NoteBox(text: l.releaseLiveCd(s.liveCd!.id, fmtMib(s.liveCd!.sizeMib))),
+        ],
         const SizedBox(height: 20),
         Expanded(child: s.source == ReleaseSource.local ? _local(context) : _online(context)),
       ]),
@@ -215,6 +224,7 @@ class _ReleasePageState extends State<ReleasePage> {
       Bullet(l.localBoot, icon: Icons.insert_drive_file_outlined),
       Bullet(l.localSuper, icon: Icons.insert_drive_file_outlined),
       Bullet(l.localSums, icon: Icons.verified_outlined),
+      if (widget.media) Bullet(l.localLiveCd, icon: Icons.album_outlined),
       const SizedBox(height: 12),
       NoteBox(text: l.localNote),
     ]);

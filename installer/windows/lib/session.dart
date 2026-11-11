@@ -4,13 +4,13 @@ import 'package:gk3_common/backend/protocol.dart';
 
 import 'model.dart';
 
-enum WriteTask { install, uninstall, prepare }
+enum WriteTask { install, uninstall, media }
 
-/// 整盘安装要在未分配空间里划出多大的 GK3LIVE 分区（LiveCD + 所选版本的安装文件）。
+/// 安装介质（LiveCD + 所选版本的安装文件）要占多大：U 盘至少这么大，写到本机时在未分配空间里划出这么大的 GK3LIVE。
 /// 暂定值：按 scripts/windows/gaokun3-setup.ps1 的算法（内容 ×1.25 + 128 MiB，按 256 MiB 向上取整）
-/// 估 rc.3（LiveCD 约 210 MiB + boot.img 27 MiB + super.img.zst 1290 MiB）。gk3w 还没有写入 LiveCD 的命令，
+/// 估 rc.3（LiveCD 约 210 MiB + boot.img 27 MiB + super.img.zst 1290 MiB）。gk3w 还没有写入安装介质的命令，
 /// 做好之后改为问 gk3w（与 plan 一样），按所选版本的实际大小算。
-const kWipeNeedMib = 2048;
+const kMediaNeedMib = 2048;
 
 /// 一次安装器会话：检查结果、用户的选择、正在跑的任务。界面只读它、调它的方法。
 /// ★ 分区怎么排、够不够，一律问 gk3w（plan / apply），这里不算。
@@ -44,6 +44,7 @@ class Session extends ChangeNotifier {
     checkErr = !pf.ok ? pf.err : (!pr.ok ? pr.err : null);
     plans.clear();
     region = null;
+    mediaTarget = null;
     if (disk != null && !installed) await _loadPlans();
     checking = false;
     notifyListeners();
@@ -77,10 +78,20 @@ class Session extends ChangeNotifier {
 
   bool get hasRoom => plans.values.any((p) => p.ok);
 
-  /// 整盘安装：放 GK3LIVE 的那块未分配空间（够大的里面最大的一块；没有 = null）
-  FreeSpan? get wipeRegion {
-    final fits = [for (final f in freeSpans) if (f.sizeMib >= kWipeNeedMib) f];
+  /// 写入本机时放 GK3LIVE 的那块未分配空间（够大的里面最大的一块；没有 = null）
+  FreeSpan? get mediaRegion {
+    final fits = [for (final f in freeSpans) if (f.sizeMib >= kMediaNeedMib) f];
     return fits.isEmpty ? null : fits.reduce((a, b) => a.sizeMib >= b.sizeMib ? a : b);
+  }
+
+  /// 插着的 U 盘（probe 的 DISK 记录里 USB 总线或可移动、且不是系统盘的）
+  List<WinDisk> get usbDisks => [for (final d in probe?.disks ?? const <WinDisk>[]) if (d.usbStick) d];
+
+  /// 安装介质写到哪（目标页选的）；重新检查后清空
+  MediaTarget? mediaTarget;
+  void selectMediaTarget(MediaTarget t) {
+    mediaTarget = t;
+    notifyListeners();
   }
 
   void selectRegion(FreeSpan f) {
@@ -92,6 +103,7 @@ class Session extends ChangeNotifier {
   ReleaseSource source = ReleaseSource.github;
   final Map<ReleaseSource, List<Variant>> _variants = {};
   final Map<ReleaseSource, Gk3Record?> _variantsErr = {};
+  final Map<ReleaseSource, LiveCd?> _liveCd = {};
   bool loadingVariants = false;
   Variant? variant;
 
@@ -100,6 +112,9 @@ class Session extends ChangeNotifier {
 
   List<Variant> get variants => _variants[source] ?? const [];
   Gk3Record? get variantsErr => _variantsErr[source];
+
+  /// 这个来源上最新的安装器（LiveCD）；本地文件时为 null（LiveCD 也从那个目录取）
+  LiveCd? get liveCd => _liveCd[source];
 
   void setSource(ReleaseSource s) {
     source = s;
@@ -117,6 +132,8 @@ class Session extends ChangeNotifier {
     final res = await backend.run('releases', ['--source', src.name]);
     _variants[src] = [for (final r in res.ofType('VARIANT')) Variant(r)];
     _variantsErr[src] = res.ok ? null : res.err;
+    final lc = res.first('LIVECD');
+    _liveCd[src] = lc == null ? null : LiveCd(lc);
     loadingVariants = false;
     if (source == src) variant = variants.where((v) => v.latest).firstOrNull ?? variants.firstOrNull;
     notifyListeners();
@@ -188,16 +205,28 @@ class Session extends ChangeNotifier {
         ]);
       });
 
-  /// 整盘安装在 Windows 端的准备：下载，再把 LiveCD 与安装文件写进 GK3LIVE、配置下一次开机进入 LiveCD。
-  /// gk3w 的 live 命令尚未实现（参数是计划中的样子），演示数据里也就没有它的录制，回放时这一步按失败处理。
-  Future<bool> prepareWipe({required String releaseDir}) => _downloadThen(WriteTask.prepare, releaseDir, (dir) {
-        final d = disk!, r = wipeRegion!;
-        return ('live', [
-          '--disk', '${d.num}', '--region-start', '${r.start}', '--region-end', '${r.end}',
-          '--release', dir, '--real-disk',
-          if (bitlockerAck) ...['--bitlocker-key', 'yes'],
-        ]);
-      });
+  /// 制作安装介质：下载所选版本，再由 gk3w 写入 LiveCD 与安装文件 —— U 盘整个清除后写入；本机则在未分配空间里建
+  /// GK3LIVE、在 ESP 里放 LiveCD 的启动文件与启动项。--livecd 是 LiveCD 的下载地址，本地文件时是那个目录。
+  /// gk3w 的 media 命令尚未实现（参数是计划中的样子），演示数据里也就没有它的录制，回放时这一步按失败处理。
+  Future<bool> writeMedia({required String releaseDir}) {
+    mediaWritten = mediaTarget;
+    return _downloadThen(WriteTask.media, releaseDir, (dir) {
+      final t = mediaWritten!;
+      final live = source == ReleaseSource.local ? dir : liveCd!.url;
+      if (t.usb) {
+        return ('media', ['--target', 'usb', '--disk', '${t.disk!.num}', '--release', dir, '--livecd', live]);
+      }
+      final d = disk!, r = mediaRegion!;
+      return ('media', [
+        '--target', 'internal', '--disk', '${d.num}', '--region-start', '${r.start}', '--region-end', '${r.end}',
+        '--release', dir, '--livecd', live, '--real-disk',
+        if (bitlockerAck) ...['--bitlocker-key', 'yes'],
+      ]);
+    });
+  }
+
+  /// 最近一次写入的安装介质目标：进度页、完成页、失败页按它措辞（重新检查会清空 [mediaTarget]，这个不清）
+  MediaTarget? mediaWritten;
 
   Future<bool> _downloadThen(WriteTask t, String releaseDir, (String, List<String>) Function(String dir) command) async {
     task = t;

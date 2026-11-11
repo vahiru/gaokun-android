@@ -37,3 +37,4 @@ flutter:
     - testdata/blocked/
     - testdata/bad-release/
     - testdata/multi/
+    - testdata/usb/

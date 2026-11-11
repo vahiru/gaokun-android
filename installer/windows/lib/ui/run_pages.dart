@@ -9,8 +9,8 @@ import '../session.dart';
 import 'bits.dart';
 import 'messages.dart';
 
-/// 侧栏标在哪一步：双系统安装与卸载在"安装"，整盘安装的准备在"准备"
-Enum _railStep(WriteTask t) => t == WriteTask.prepare ? WipeStep.prepare : WinStep.install;
+/// 侧栏标在哪一步：双系统安装与卸载在"安装"，制作安装介质在"写入"
+Enum _railStep(WriteTask t) => t == WriteTask.media ? MediaStep.write : WinStep.install;
 
 /// 正在写盘：进度条、当前在做什么、日志。跑完换成完成页或失败页（不能"返回"到确认页）
 class RunPage extends StatefulWidget {
@@ -32,7 +32,7 @@ class _RunPageState extends State<RunPage> {
       final ok = switch (widget.task) {
         WriteTask.install => await s.install(releaseDir: widget.releaseDir),
         WriteTask.uninstall => await s.uninstall(),
-        WriteTask.prepare => await s.prepareWipe(releaseDir: widget.releaseDir),
+        WriteTask.media => await s.writeMedia(releaseDir: widget.releaseDir),
       };
       if (!mounted) return;
       go(context, ok ? DonePage(task: widget.task) : FailPage(task: widget.task), replace: true);
@@ -76,7 +76,7 @@ class _RunPageState extends State<RunPage> {
           NoteBox(text: switch (task) {
             WriteTask.install => l.runSleepHintInstall,
             WriteTask.uninstall => l.runSleepHintUninstall,
-            WriteTask.prepare => l.runSleepHintPrepare,
+            WriteTask.media => (s.mediaWritten?.usb ?? false) ? '${l.runSleepHintMedia}${l.runMediaUsbHint}' : l.runSleepHintMedia,
           }),
           const SizedBox(height: 16),
           Expanded(child: LogView(s.log, controller: _scroll)),
@@ -86,7 +86,7 @@ class _RunPageState extends State<RunPage> {
   }
 }
 
-/// 装好了 / 卸载好了 / LiveCD 准备好了
+/// 装好了 / 卸载好了 / 安装介质做好了
 class DonePage extends StatelessWidget {
   const DonePage({super.key, required this.task});
   final WriteTask task;
@@ -94,22 +94,26 @@ class DonePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = context.session, l = context.l;
+    // U 盘做好了不必重启：只有"返回首页"
+    final usb = task == WriteTask.media && (s.mediaWritten?.usb ?? false);
     return WinStepPage(
       step: _railStep(task),
       title: switch (task) {
         WriteTask.install => l.doneInstallTitle,
         WriteTask.uninstall => l.doneUninstallTitle,
-        WriteTask.prepare => l.donePrepareTitle,
+        WriteTask.media => l.doneMediaTitle,
       },
       subtitle: switch (task) {
         WriteTask.install => l.doneInstallSub,
         WriteTask.uninstall => l.doneUninstallSub(fmtMib(s.freedMib)),
-        WriteTask.prepare => l.donePrepareSub,
+        WriteTask.media => usb ? l.doneMediaSubUsb : l.doneMediaSubInternal,
       },
       bottom: Row(children: [
-        Btn(l.btnLater, onPressed: () => restart(context), kind: BtnKind.text),
+        if (!usb) Btn(l.btnLater, onPressed: () => restart(context), kind: BtnKind.text),
         const Spacer(),
-        Btn(l.btnRebootNow, icon: Icons.restart_alt, onPressed: () => s.backend.reboot()),
+        usb
+            ? Btn(l.btnStartOver, icon: Icons.home_outlined, onPressed: () => restart(context))
+            : Btn(l.btnRebootNow, icon: Icons.restart_alt, onPressed: () => s.backend.reboot()),
       ]),
       child: ListView(children: switch (task) {
         WriteTask.install => [
@@ -121,10 +125,10 @@ class DonePage extends StatelessWidget {
             Bullet(l.doneUninstallExtend, icon: Icons.open_in_full),
             Bullet(l.doneUninstallBoot, icon: Icons.window),
           ],
-        WriteTask.prepare => [
-            Bullet(l.donePrepareConfirm, icon: Icons.verified_user_outlined),
-            Bullet(l.donePrepareCancel, icon: Icons.window),
-            Bullet(l.donePreparePower, icon: Icons.power_outlined),
+        WriteTask.media => [
+            Bullet(l.doneMediaInstall, icon: Icons.verified_user_outlined),
+            if (usb) Bullet(l.doneMediaSecureBoot, icon: Icons.security)
+            else Bullet(l.doneMediaStays, icon: Icons.menu_open),
           ],
       }),
     );
@@ -146,7 +150,7 @@ class FailPage extends StatelessWidget {
       title: switch (task) {
         WriteTask.install => l.failInstallTitle,
         WriteTask.uninstall => l.failUninstallTitle,
-        WriteTask.prepare => l.failPrepareTitle,
+        WriteTask.media => l.failMediaTitle,
       },
       subtitle: why,
       bottom: Row(children: [
@@ -161,7 +165,7 @@ class FailPage extends StatelessWidget {
               : switch (task) {
                   WriteTask.install => l.failTouchedInstall,
                   WriteTask.uninstall => l.failTouchedUninstall,
-                  WriteTask.prepare => l.failTouchedPrepare,
+                  WriteTask.media => (s.mediaWritten?.usb ?? false) ? l.failTouchedMediaUsb : l.failTouchedMediaInternal,
                 },
         ),
         const SizedBox(height: 16),
@@ -175,5 +179,5 @@ class FailPage extends StatelessWidget {
 String runTitle(L10n l, WriteTask t) => switch (t) {
       WriteTask.install => l.runInstallTitle,
       WriteTask.uninstall => l.runUninstallTitle,
-      WriteTask.prepare => l.runPrepareTitle,
+      WriteTask.media => l.runMediaTitle,
     };

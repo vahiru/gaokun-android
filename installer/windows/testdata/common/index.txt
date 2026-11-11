@@ -2,6 +2,7 @@
 # preflight-ok：平板（GK-W7X）真跑的结果，平板测试包抓的原样输出，没有时间信息
 # preflight-blocked：这台 PC（联想 21TK）以管理员真跑的结果：机型不对、Secure Boot、BitLocker、快速启动都开着
 # releases：由 GitHub API（vahiru/gaokun-android 的 releases）与 R2 上 OTA 清单的真实返回整理成 VARIANT 记录（2026-11-11 取的；只列挂着 boot.img、super.img.zst、install-artifacts.sha256 的版本）；真后端按同样的格式输出
+# releases 的 LIVECD：最新的安装器（LiveCD，不带系统的 windows.zip）。GitHub 取自同一份 API 返回；R2 是 2026-11-12 对 installer/0.2.0-rc.2/ 的真实 HEAD（R2 没有安装器的列表，版本号照 GitHub 的；真后端怎样在 R2 上找最新的尚未确定）
 # download：LiveCD 的录制（installer/live/testdata/common），Windows 版按同一个行协议输出；去掉了 LiveCD 自己的中文日志行，RELEASE 的目录换成 Windows 路径
 # plan：真跑的 gk3w plan（40 GiB 的区间 / 12508 MiB 的区间 / 空区间：界面用它问"至少要多大"，录的是 --disk 2）
 # apply、uninstall：PC 上的 VHDX 真跑（磁盘号 2），带真实的时间；uninstall 的 FREE 记录按之后修正的格式（disk=disk2，与 probe 相同）替换过

@@ -64,9 +64,8 @@ class CheckPage extends StatelessWidget {
   }
 }
 
-/// 两个流程共用的检查项（检查失败、机型、Secure Boot、快速启动、BitLocker、电源），以及其中有没有挡住继续的项。
-/// 整盘安装同样要求关闭快速启动：在 LiveCD 中取消安装后会回到 Windows，而从 Windows 关机到再次启动之间，
-/// EFI 分区可能被 systemd-boot 或 LiveCD 修改（理由同双系统安装，见 chkFastStartupHow）。
+/// 首页的检查项（检查失败、机型、Secure Boot、快速启动、BitLocker、电源），以及其中有没有挡住继续的项。
+/// 写入本机磁盘的安装介质也要满足这些（media_pages.dart 的 _internalBlockers 按同样的条件判断）。
 (List<CheckRow>, bool) preflightRows(BuildContext context) {
   final s = context.session, l = context.l;
   final pf = s.preflight;

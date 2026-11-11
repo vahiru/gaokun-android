@@ -7,4 +7,5 @@ O VARIANT id=v0.7.0-alpha name=v0.7.0-alpha%20—%20New%20video%20decoder%20driv
 O VARIANT id=v0.6.2-alpha name=v0.6.2-alpha%20—%20Touch:%20fast%20swipes%20no%20longer%20break%20up,%20fuzz%20measured%20to%200,%20contact%20size%20reported date=2026-09-16 base=https://github.com/vahiru/gaokun-android/releases/download/v0.6.2-alpha/ size_mib=1247 pre=no latest=no source=github
 O VARIANT id=v0.6.1-alpha name=v0.6.1-alpha%20—%20camera%20crash%20fix,%20rear-camera%20exposure%20and%20flash,%20a%20missing%20sensor%20no%20longer%20kills%20the%20front%20camera date=2026-09-14 base=https://github.com/vahiru/gaokun-android/releases/download/v0.6.1-alpha/ size_mib=1247 pre=no latest=no source=github
 O VARIANT id=v0.6.0-alpha name=v0.6.0-alpha%20—%20Cameras%20(front%20and%20rear),%20the%20power-domain%20fix,%20speaker%20and%20thermal date=2026-09-13 base=https://github.com/vahiru/gaokun-android/releases/download/v0.6.0-alpha/ size_mib=1247 pre=no latest=no source=github
+O LIVECD id=0.2.0-rc.2 rom=v1.0.0-rc.2 date=2026-10-25 url=https://github.com/vahiru/gaokun-android/releases/download/v1.0.0-rc.2/gaokun3-installer-0.2.0-rc.2-windows.zip size_mib=225 source=github
 X 0

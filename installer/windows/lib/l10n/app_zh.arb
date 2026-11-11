@@ -384,51 +384,124 @@
   "shutdownReasonUninstall": "正在卸载Android。中断卸载可能导致磁盘分区处于不完整状态。",
   "runSleepHintInstall": "安装过程中请勿合上键盘或按电源按钮，否则设备将进入睡眠状态，安装将随之暂停。",
   "runSleepHintUninstall": "卸载过程中请勿合上键盘或按电源按钮，否则设备将进入睡眠状态，卸载将随之暂停。",
-  "railWipe": "清除整个磁盘并安装",
   "railAbout": "说明",
-  "railPrepare": "准备",
-  "wipeAboutTitle": "清除整个磁盘并安装",
-  "wipeAboutSub": "Android将作为本设备唯一的操作系统，并占用整个系统磁盘。",
-  "wipeAboutSteps": "安装将按以下步骤进行：",
-  "wipeAboutStep1": "本程序在未分配空间中创建GK3LIVE分区，写入LiveCD及所选版本的安装文件。",
-  "wipeAboutStep2": "重启后，设备将进入LiveCD。",
-  "wipeAboutStep3": "经再次确认后，LiveCD将清除整个系统磁盘并安装Android。",
-  "wipeAboutWarn": "系统磁盘中的所有数据都将被清除，包括Windows、恢复分区及全部个人文件，且无法恢复。请先将重要文件备份至其他设备。",
-  "wipeAboutKeepWindows": "如需保留Windows，请返回并使用双系统安装。",
-  "wipeCheckSub": "开始准备之前，请确认当前设备满足以下条件。未满足的条件发生变化后，请点击“重新检查”刷新状态。",
-  "chkWipeRoomDetail": "将使用其中的{need}存放LiveCD及安装文件",
-  "@chkWipeRoomDetail": {
+  "railMedia": "制作独立安装介质",
+  "railTarget": "目标",
+  "railWrite": "写入",
+  "mediaAboutTitle": "制作独立安装介质",
+  "mediaAboutSub": "将LiveCD写入U盘或本机磁盘。从安装介质启动后即可运行图形安装器，不依赖Windows。",
+  "mediaAboutUses": "通过安装介质可以：",
+  "mediaUseWipe": "清除整个磁盘并安装Android（Windows将被删除）",
+  "mediaUseAlong": "保留现有系统，在未分配空间中安装Android",
+  "mediaUseReinstall": "重新安装Android，以修复系统或更换版本",
+  "mediaAboutTargets": "可写入以下位置：",
+  "mediaAboutUsb": "U盘：U盘中的所有数据将被清除。可在任意一台MateBook E Go上使用。",
+  "mediaAboutInternal": "本机磁盘：在系统磁盘的未分配空间中创建GK3LIVE分区，并将LiveCD添加至启动菜单，无需U盘。仅可在本设备上使用。",
+  "mediaAboutNote": "安装方式在LiveCD中选择，写入磁盘前LiveCD将再次请求确认。从安装介质启动前，请在目标设备的UEFI固件设置中关闭Secure Boot。",
+  "mediaTargetTitle": "选择写入位置",
+  "mediaTargetSub": "LiveCD及所选版本的安装文件约需{need}空间。",
+  "@mediaTargetSub": {
     "placeholders": {
       "need": {
         "type": "String"
       }
     }
   },
-  "releaseSubWipe": "所选版本的安装文件将与LiveCD一并写入磁盘，在LiveCD中安装时无需连接网络。",
-  "wipeConfirmTitle": "确认清除整个磁盘并安装",
-  "wipeConfirmSub": "重启后，LiveCD将清除整个系统磁盘，包括Windows及其中的全部数据。请提前备份重要数据。",
-  "wipeConfirmNow": "安装器将立即执行以下操作：",
-  "wipeConfirmPart": "在未分配空间中创建GK3LIVE分区（{size}），写入LiveCD及安装文件",
-  "@wipeConfirmPart": {
+  "btnRedetect": "重新检测",
+  "mediaUsbHeader": "U盘",
+  "mediaUsbNone": "未检测到U盘。插入U盘后，请点击“重新检测”。",
+  "mediaUsbTitle": "{model}（{size}）",
+  "@mediaUsbTitle": {
+    "placeholders": {
+      "model": {
+        "type": "String"
+      },
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaUsbBody": "U盘中的所有数据将被清除",
+  "mediaUsbTooSmall": "容量不足，至少需要{need}",
+  "@mediaUsbTooSmall": {
+    "placeholders": {
+      "need": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaInternalHeader": "本机磁盘",
+  "mediaInternalTitle": "系统磁盘的未分配空间（{size}）",
+  "@mediaInternalTitle": {
     "placeholders": {
       "size": {
         "type": "String"
       }
     }
   },
-  "wipeConfirmOnce": "仅将下一次开机设为进入LiveCD",
-  "wipeConfirmAfter": "重启后，LiveCD将：",
-  "wipeConfirmErase": "再次请求确认，随后清除整个系统磁盘（包括Windows、恢复分区及全部个人文件）并安装Android",
-  "wipeConfirmCancel": "如在LiveCD中取消安装，重启后设备将返回Windows，磁盘中的数据不受影响",
-  "holdToPrepare": "按住2秒开始准备",
-  "runPrepareTitle": "正在准备LiveCD",
-  "runSleepHintPrepare": "准备过程中请勿合上键盘或按电源按钮，否则设备将进入睡眠状态，准备工作将随之暂停。",
-  "shutdownReasonPrepare": "正在写入LiveCD。中断写入可能导致磁盘分区处于不完整状态。",
-  "donePrepareTitle": "LiveCD已准备就绪",
-  "donePrepareSub": "重启设备即可进入LiveCD，清除整个磁盘并安装Android。",
-  "donePrepareConfirm": "LiveCD将在清除磁盘之前再次请求确认。",
-  "donePrepareCancel": "如在LiveCD中取消安装，重启后设备将返回Windows。",
-  "donePreparePower": "安装过程中请保持连接电源适配器。",
-  "failPrepareTitle": "准备未完成",
-  "failTouchedPrepare": "磁盘已发生部分更改，但Windows系统不受影响。请返回首页重新检查后重试。"
+  "mediaInternalTitleNone": "系统磁盘的未分配空间",
+  "mediaInternalBody": "创建GK3LIVE分区并将LiveCD添加至启动菜单，现有分区及其中的数据不受影响",
+  "mediaInternalBlocked": "以下条件未满足，详情请查看首页的安装环境检查：",
+  "releaseSubMedia": "所选版本的安装文件将与LiveCD一并写入安装介质，在LiveCD中安装时无需连接网络。",
+  "releaseLiveCd": "LiveCD将使用最新的安装器{version}（下载大小{size}）。",
+  "@releaseLiveCd": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      },
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "releaseNoLiveCd": "该来源中未找到可用的LiveCD，请选择其他来源。",
+  "localLiveCd": "gaokun3-installer-<版本>-windows.zip（LiveCD）",
+  "mediaConfirmTitle": "确认写入安装介质",
+  "mediaConfirmSubUsb": "U盘（{model}，{size}）中的所有数据将被永久清除且无法恢复。",
+  "@mediaConfirmSubUsb": {
+    "placeholders": {
+      "model": {
+        "type": "String"
+      },
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaConfirmSubInternal": "即将修改磁盘分区表与EFI引导文件，请提前备份重要数据。",
+  "mediaConfirmLiveDl": "下载LiveCD（安装器{version}，{size}）并校验文件完整性",
+  "@mediaConfirmLiveDl": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      },
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaConfirmUsb": "清除U盘中的所有分区，创建GK3LIVE分区，写入LiveCD及安装文件",
+  "mediaConfirmPart": "在未分配空间中创建GK3LIVE分区（{size}），写入LiveCD及安装文件",
+  "@mediaConfirmPart": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaConfirmEntry": "将LiveCD添加至启动菜单",
+  "holdToWrite": "按住2秒开始写入",
+  "runMediaTitle": "正在写入安装介质",
+  "runSleepHintMedia": "写入过程中请勿合上键盘或按电源按钮，否则设备将进入睡眠状态，写入将随之暂停。",
+  "runMediaUsbHint": "写入完成前请勿拔出U盘。",
+  "shutdownReasonMedia": "正在写入安装介质。中断写入可能导致磁盘分区处于不完整状态。",
+  "doneMediaTitle": "安装介质制作完成",
+  "doneMediaSubUsb": "可从该U盘启动MateBook E Go，进入LiveCD。",
+  "doneMediaSubInternal": "重启设备，在启动菜单中选择LiveCD即可进入。",
+  "doneMediaInstall": "安装方式在LiveCD中选择，写入磁盘前LiveCD将再次请求确认。",
+  "doneMediaSecureBoot": "从U盘启动前，请在目标设备的UEFI固件设置中关闭Secure Boot。",
+  "doneMediaStays": "清除整个磁盘重新安装之前，LiveCD将一直保留在启动菜单中。",
+  "failMediaTitle": "写入未完成",
+  "failTouchedMediaUsb": "U盘已发生部分更改，其中的数据可能已被清除。请返回首页后重试。",
+  "failTouchedMediaInternal": "磁盘已发生部分更改，但Windows系统不受影响。请返回首页重新检查后重试。"
 }

@@ -34,6 +34,13 @@ class WinDisk {
   int get sector => r.intOf('sector', 512);
   String get model => r['model'];
   bool get system => r.yes('system');
+
+  /// nvme / usb / sd / vhd …（probe.c 的 bus_name）
+  String get bus => r['bus'];
+  bool get removable => r['removable'] == '1';
+
+  /// 可以写入安装介质的 U 盘：USB 总线或可移动介质，且不是系统盘
+  bool get usbStick => !system && (bus == 'usb' || removable);
 }
 
 /// gk3w probe 的 PART 记录
@@ -124,6 +131,25 @@ class Variant {
   /// 版本号里带 alpha 的（v0.7.1-alpha 之类）：早期的测试版，界面提醒不建议使用
   bool get alpha => _alpha.hasMatch(id);
   static final _alpha = RegExp(r'^v?\d+(\.\d+)*-alpha\b', caseSensitive: false);
+}
+
+/// 最新的安装器（LiveCD）：gk3w releases 的 LIVECD 记录，只含 LiveCD、不带系统（gaokun3-installer-<版本>-windows.zip）
+class LiveCd {
+  LiveCd(this.r);
+  final Gk3Record r;
+  String get id => r['id'];
+  String get url => r['url'];
+  int get sizeMib => r.intOf('size_mib');
+}
+
+/// 安装介质写到哪：一个 U 盘（整个清除），或系统盘的未分配空间（[disk] 为 null）
+class MediaTarget {
+  const MediaTarget.usb(WinDisk this.disk);
+  const MediaTarget.internal() : disk = null;
+  final WinDisk? disk;
+  bool get usb => disk != null;
+
+  bool same(MediaTarget o) => usb ? identical(disk, o.disk) : !o.usb;
 }
 
 /// 发布文件从哪来

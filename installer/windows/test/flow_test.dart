@@ -2,9 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:gk3_windows/session.dart';
 import 'package:gk3_windows/ui/run_pages.dart';
-import 'package:gk3_windows/ui/wipe_pages.dart';
 
 import 'helpers.dart';
 
@@ -140,56 +138,97 @@ void main() {
     expect(s.touched, isFalse);
   });
 
-  testWidgets('整盘安装：侧栏入口 → 说明 → 检查 → 版本 → 确认；gk3w 还没有 live 命令，准备这一步按失败处理', (t) async {
+  testWidgets('安装介质写入U盘：侧栏入口 → 说明 → 目标 → 版本 → 确认；gk3w 还没有 media 命令，写入这一步按失败处理', (t) async {
     final window = <MethodCall>[];
     t.binding.defaultBinaryMessenger.setMockMethodCallHandler(const MethodChannel('gk3/window'), (c) async {
       window.add(c);
       return null;
     });
     addTearDown(() => t.binding.defaultBinaryMessenger.setMockMethodCallHandler(const MethodChannel('gk3/window'), null));
-    final (rec, s) = await pumpApp(t, 'free');
+    final (rec, s) = await pumpApp(t, 'usb');
     await see(t, find.text(l.chkRoom('40 GiB')));
-    expect(enabled(t, l.railWipe), isTrue);
-    await tap(t, find.text(l.railWipe));
-    await see(t, find.text(l.wipeAboutWarn));
-    // 已在整盘安装流程里：入口不可用
-    expect(enabled(t, l.railWipe), isFalse);
+    expect(enabled(t, l.railMedia), isTrue);
+    await tap(t, find.text(l.railMedia));
+    await see(t, find.text(l.mediaUseWipe));
+    // 已在这个流程里：入口不可用
+    expect(enabled(t, l.railMedia), isFalse);
     await tap(t, find.text(l.btnNext));
-    await see(t, find.text(l.wipeCheckSub));
-    expect(find.text(l.chkRoom('40 GiB')), findsOneWidget);
-    expect(find.text(l.chkWipeRoomDetail('2 GiB')), findsOneWidget);
+    await see(t, find.text(l.mediaUsbTitle('Generic Flash Disk', '29.4 GiB')));
+    expect(find.text(l.mediaInternalTitle('40 GiB')), findsOneWidget);
+    expect(enabled(t, l.btnNext), isFalse);
+    await tap(t, find.text(l.mediaUsbTitle('Generic Flash Disk', '29.4 GiB')));
+    expect(s.mediaTarget!.usb, isTrue);
     await tap(t, find.text(l.btnNext));
-    await see(t, find.text(l.releaseSubWipe));
-    await see(t, find.textContaining('v1.0.0-rc.3'));
+    await see(t, find.text(l.releaseSubMedia));
+    await see(t, find.text(l.releaseLiveCd('0.2.0-rc.2', '225 MiB')));
     await tap(t, find.text(l.btnNext));
-    await see(t, find.text(l.wipeConfirmPart('2 GiB')));
-    expect(find.text(l.wipeConfirmErase), findsOneWidget);
+    await see(t, find.text(l.mediaConfirmSubUsb('Generic Flash Disk', '29.4 GiB')));
+    expect(find.text(l.mediaConfirmUsb), findsOneWidget);
+    expect(find.text(l.mediaConfirmLiveDl('0.2.0-rc.2', '225 MiB')), findsOneWidget);
+    expect(find.text(l.confirmBoot), findsNothing);
 
-    await hold(t, l.holdToPrepare);
+    await hold(t, l.holdToWrite);
     await waitFor(t, find.byType(FailPage), tries: 400);
-    expect(find.text(l.failPrepareTitle), findsOneWidget);
+    expect(find.text(l.failMediaTitle), findsOneWidget);
     expect(find.text(l.failUntouched), findsOneWidget);
     expect(rec.calls.where((c) => c.first == 'download').length, 1);
-    final live = rec.calls.singleWhere((c) => c.first == 'live');
-    expect(live, containsAllInOrder(['--disk', '2', '--region-start', '874383360', '--region-end', '958269439']));
-    expect(live, containsAllInOrder(['--release', r'C:\ProgramData\gaokun3\release', '--real-disk']));
-    expect(s.task, WriteTask.prepare);
+    final media = rec.calls.singleWhere((c) => c.first == 'media');
+    expect(media, containsAllInOrder(['--target', 'usb', '--disk', '3', '--release', r'C:\ProgramData\gaokun3\release']));
+    expect(media, containsAllInOrder(['--livecd', 'https://github.com/vahiru/gaokun-android/releases/download/v1.0.0-rc.2/gaokun3-installer-0.2.0-rc.2-windows.zip']));
+    expect(media, isNot(contains('--real-disk')));
     final busy = [for (final c in window) if (c.method == 'setBusy') c.arguments as Map];
-    expect(busy.where((a) => a['busy'] == true).single, {'busy': true, 'power': l.runPrepareTitle, 'shutdown': l.shutdownReasonPrepare});
+    expect(busy.where((a) => a['busy'] == true).single, {'busy': true, 'power': l.runMediaTitle, 'shutdown': l.shutdownReasonMedia});
     expect(busy.last['busy'], isFalse);
-    // 失败页回到首页后，入口又能用了
+    // 返回首页后，入口又能用了；重新检查清掉了之前选的目标
     await tap(t, find.text(l.btnStartOver));
     await see(t, find.text(l.chkRoom('40 GiB')));
-    expect(enabled(t, l.railWipe), isTrue);
+    expect(enabled(t, l.railMedia), isTrue);
+    expect(s.mediaTarget, isNull);
   });
 
-  testWidgets('整盘安装：没有未分配空间时说明要压缩出多少，不能往下走', (t) async {
-    await pumpApp(t, 'nospace');
-    await tap(t, find.text(l.railWipe));
+  testWidgets('安装介质写入本机磁盘：没有U盘时提示，写到未分配空间', (t) async {
+    final (rec, s) = await pumpApp(t, 'free');
+    await tap(t, find.text(l.railMedia));
     await tap(t, find.text(l.btnNext));
-    await see(t, find.text(l.chkNoRoom('2 GiB')));
-    expect(find.byType(WipeCheckPage), findsOneWidget);
+    await see(t, find.text(l.mediaUsbNone));
+    await tap(t, find.text(l.mediaInternalTitle('40 GiB')));
+    expect(s.mediaTarget!.usb, isFalse);
+    await tap(t, find.text(l.btnNext));
+    await see(t, find.textContaining('v1.0.0-rc.3'));
+    await tap(t, find.text(l.btnNext));
+    await see(t, find.text(l.mediaConfirmPart('2 GiB')));
+    expect(find.text(l.confirmBoot), findsOneWidget);
+    expect(find.text(l.mediaConfirmEntry), findsOneWidget);
+    await hold(t, l.holdToWrite);
+    await waitFor(t, find.byType(FailPage), tries: 400);
+    final media = rec.calls.singleWhere((c) => c.first == 'media');
+    expect(media, containsAllInOrder(['--target', 'internal', '--disk', '2', '--region-start', '874383360', '--region-end', '958269439']));
+    expect(media, contains('--real-disk'));
+  });
+
+  testWidgets('安装介质：本机不满足条件时本机磁盘不能选，列出未满足的条件', (t) async {
+    final (_, s) = await pumpApp(t, 'blocked');
+    await tap(t, find.text(l.railMedia));
+    await tap(t, find.text(l.btnNext));
+    await see(t, find.textContaining(l.mediaInternalBlocked));
+    expect(find.textContaining(l.chkModelBad), findsOneWidget);
+    expect(find.textContaining(l.chkSecureBootOn), findsOneWidget);
+    await tap(t, find.text(l.mediaInternalTitle('40 GiB')));
+    expect(s.mediaTarget, isNull);
     expect(enabled(t, l.btnNext), isFalse);
+  });
+
+  testWidgets('安装介质：R2 也有 LiveCD；本地文件时目录里还要有 LiveCD', (t) async {
+    final (_, s) = await pumpApp(t, 'usb');
+    await tap(t, find.text(l.railMedia));
+    await tap(t, find.text(l.btnNext));
+    await tap(t, find.text(l.mediaUsbTitle('Generic Flash Disk', '29.4 GiB')));
+    await tap(t, find.text(l.btnNext));
+    await tap(t, find.text(l.srcR2));
+    await see(t, find.text('crDroid 13.0'));
+    expect(s.liveCd!.url, startsWith('https://ota.072172.xyz/installer/0.2.0-rc.2/'));
+    await tap(t, find.text(l.srcLocal));
+    await see(t, find.text(l.localLiveCd));
   });
 
   testWidgets('英文界面：检查页上没有中文', (t) async {

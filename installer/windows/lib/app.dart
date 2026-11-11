@@ -8,7 +8,7 @@ import 'l10n/app_localizations.dart';
 import 'session.dart';
 import 'ui/check_page.dart';
 import 'ui/title_bar.dart';
-import 'ui/wipe_pages.dart';
+import 'ui/media_pages.dart';
 
 const kAppVersion = '0.1.0-proto';
 
@@ -96,11 +96,11 @@ class WinInstallerApp extends StatelessWidget {
 /// 双系统安装的六步（左侧步骤栏只是指示）
 enum WinStep { check, region, release, options, confirm, install }
 
-/// 整盘安装在 Windows 端的五步（侧栏底部的入口进入）；清除磁盘与安装在 LiveCD 里进行
-enum WipeStep { about, check, release, confirm, prepare }
+/// 制作独立安装介质的五步（侧栏底部的入口进入）：把 LiveCD 写入 U 盘或本机磁盘，安装方式在 LiveCD 里选
+enum MediaStep { about, target, release, confirm, write }
 
-/// 每一步的骨架：gk3_common 的 StepScaffold，填上所在流程的步骤（[WinStep] 或 [WipeStep]）、
-/// 侧栏底部的整盘安装入口、语言切换与版本号
+/// 每一步的骨架：gk3_common 的 StepScaffold，填上所在流程的步骤（[WinStep] 或 [MediaStep]）、
+/// 侧栏底部的安装介质入口、语言切换与版本号
 class WinStepPage extends StatelessWidget {
   const WinStepPage({
     super.key,
@@ -117,7 +117,7 @@ class WinStepPage extends StatelessWidget {
     this.danger = false,
   });
 
-  /// [WinStep] 或 [WipeStep]：决定侧栏显示哪个流程的步骤
+  /// [WinStep] 或 [MediaStep]：决定侧栏显示哪个流程的步骤
   final Enum step;
   final String title;
   final String? subtitle;
@@ -130,16 +130,16 @@ class WinStepPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    assert(step is WinStep || step is WipeStep);
+    assert(step is WinStep || step is MediaStep);
     final l = context.l, s = context.session;
-    final wipe = step is WipeStep;
-    final steps = wipe
+    final media = step is MediaStep;
+    final steps = media
         ? [
             RailStep(l.railAbout, Icons.info_outline, Icons.info),
-            RailStep(l.railCheck, Icons.fact_check_outlined, Icons.fact_check),
+            RailStep(l.railTarget, Icons.storage_outlined, Icons.storage),
             RailStep(l.railRelease, Icons.download_outlined, Icons.download),
             RailStep(l.railConfirm, Icons.verified_user_outlined, Icons.verified_user),
-            RailStep(l.railPrepare, Icons.album_outlined, Icons.album),
+            RailStep(l.railWrite, Icons.album_outlined, Icons.album),
           ]
         : [
             RailStep(l.railCheck, Icons.fact_check_outlined, Icons.fact_check),
@@ -157,12 +157,12 @@ class WinStepPage extends StatelessWidget {
       railIcon: null,
       railSubtitle: l.railSub,
       railFooter: [
-        // 整盘安装的入口：写盘期间、已在整盘安装流程里时不可用
+        // 制作独立安装介质的入口：写盘期间、已在这个流程里时不可用
         TextButton.icon(
           style: footerButton,
-          onPressed: s.writing || wipe ? null : () => go(context, const WipeAboutPage()),
-          icon: const Icon(Icons.delete_sweep_outlined),
-          label: Text(l.railWipe),
+          onPressed: s.writing || media ? null : () => go(context, const MediaAboutPage()),
+          icon: const Icon(Icons.album_outlined),
+          label: Text(l.railMedia),
         ),
         TextButton.icon(
           style: footerButton,
