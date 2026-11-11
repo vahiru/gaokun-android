@@ -12,6 +12,10 @@ import 'ui/media_pages.dart';
 
 const kAppVersion = '0.1.0-proto';
 
+/// 侧栏底部"制作独立安装介质"的入口。0.1.0 只发布在 Windows 上安装 / 卸载 Android，入口先不注册；
+/// 页面与测试保留（测试里打开它），等 LiveCD 改好、0.2.0 时打开（用户 2026-11-12）
+bool mediaEntryEnabled = false;
+
 /// 给子树提供 Session，并在它变化时重建依赖它的部分
 class SessionScope extends InheritedNotifier<Session> {
   const SessionScope({super.key, required Session session, required super.child}) : super(notifier: session);
@@ -77,11 +81,13 @@ class WinInstallerApp extends StatelessWidget {
             child: Stack(children: [
               child!,
               const Positioned(left: 0, top: 0, right: 0, height: DragStrip.height, child: DragStrip()),
-              if (session.backend.demoLabel != null)
+              if (session.testMode || session.backend.demoLabel != null)
                 Positioned(
                   right: WindowButtons.width + 12,
                   top: 12,
-                  child: DemoBadge(L10n.of(context).fixtureBadge(session.backend.demoLabel!)),
+                  child: DemoBadge(session.testMode
+                      ? L10n.of(context).testBadge('${session.testDisk}')
+                      : L10n.of(context).fixtureBadge(session.backend.demoLabel!)),
                 ),
               const Positioned(right: 0, top: 0, child: WindowButtons()),
             ]),
@@ -159,12 +165,13 @@ class WinStepPage extends StatelessWidget {
       railSubtitle: l.railSub,
       railFooter: [
         // 制作独立安装介质的入口：写盘期间、已在这个流程里时不可用
-        TextButton.icon(
-          style: footerButton,
-          onPressed: s.writing || media ? null : () => go(context, const MediaAboutPage()),
-          icon: const Icon(Icons.album_outlined),
-          label: Text(l.railMedia),
-        ),
+        if (mediaEntryEnabled)
+          TextButton.icon(
+            style: footerButton,
+            onPressed: s.writing || media ? null : () => go(context, const MediaAboutPage()),
+            icon: const Icon(Icons.album_outlined),
+            label: Text(l.railMedia),
+          ),
         TextButton.icon(
           style: footerButton,
           onPressed: s.writing ? null : () => s.setLanguage(s.language == 'zh' ? 'en' : 'zh'),

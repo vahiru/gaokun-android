@@ -102,6 +102,29 @@ install(CODE "
 install(DIRECTORY "${PROJECT_BUILD_DIR}/${FLUTTER_ASSET_DIR_NAME}"
   DESTINATION "${INSTALL_BUNDLE_DATA_DIR}" COMPONENT Runtime)
 
+# 安装器的后端：gk3w.exe、mke2fs.exe + mke2fs.conf（installer/backend 交叉编译的：make win-x64|win-arm64、make mke2fs）
+# 与 systemd-bootaa64.efi（make sdboot：Debian 的那份，不分 x64 / ARM64）放进程序目录的 backend\
+# （lib/backend/win_backend.dart 的 WinBackend.locate 在那里找）。
+# 没编好就只警告：这样的程序检查页报"安装器文件不完整"，回放演示数据（GK3_FIXTURE）不受影响。
+if(FLUTTER_TARGET_PLATFORM STREQUAL "windows-arm64")
+  set(GK3_BACKEND_ARCH "arm64")
+else()
+  set(GK3_BACKEND_ARCH "x64")
+endif()
+set(GK3_BACKEND_BUILD "${CMAKE_CURRENT_SOURCE_DIR}/../../backend/build" CACHE PATH "installer/backend/build")
+set(GK3_BACKEND_FILES
+  "${GK3_BACKEND_BUILD}/${GK3_BACKEND_ARCH}/gk3w.exe"
+  "${GK3_BACKEND_BUILD}/mke2fs-${GK3_BACKEND_ARCH}/mke2fs.exe"
+  "${GK3_BACKEND_BUILD}/mke2fs-${GK3_BACKEND_ARCH}/mke2fs.conf"
+  "${GK3_BACKEND_BUILD}/sdboot/systemd-bootaa64.efi")
+foreach(f ${GK3_BACKEND_FILES})
+  if(EXISTS "${f}")
+    install(FILES "${f}" DESTINATION "${CMAKE_INSTALL_PREFIX}/backend" COMPONENT Runtime)
+  else()
+    message(WARNING "gaokun3: ${f} not built; the installer will report its backend as missing")
+  endif()
+endforeach()
+
 # Install the AOT library on non-Debug builds only.
 install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   CONFIGURATIONS Profile;Release

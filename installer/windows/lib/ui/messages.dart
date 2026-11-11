@@ -21,6 +21,12 @@ String errText(L10n l, Gk3Record err) {
     'esp-full' || 'esp-full-min' || 'esp-ota-room' || 'esp-win-reserve' || 'esp-too-small' => l.errEspFull,
     'partlabel-conflict' || 'android-unconfirmed' || 'foreign-content' || 'bad-part-type' => l.errPartsUnclear,
     'not-system-disk' || 'not-vhd' || 'disk-open' => l.errDisk,
+    'manifest-unavailable' => l.releaseNone,
+    'dl-sums' || 'dl-sums-missing' || 'dl-failed' || 'dl-http' => l.errDownload,
+    'dl-write' => l.errDownloadWrite,
+    'backend-missing' || 'tool-missing' => l.errBackendMissing,
+    'hash-failed' => l.errRelease,
+    'not-admin' => l.errNotAdmin,
     _ => l.errOther(code),
   };
 }

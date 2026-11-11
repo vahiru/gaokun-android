@@ -15,9 +15,14 @@ const kMediaNeedMib = 2048;
 /// 一次安装器会话：检查结果、用户的选择、正在跑的任务。界面只读它、调它的方法。
 /// ★ 分区怎么排、够不够，一律问 gk3w（plan / apply），这里不算。
 class Session extends ChangeNotifier {
-  Session(this.backend, {String? language}) : language = language ?? 'zh';
+  Session(this.backend, {String? language, this.testDisk}) : language = language ?? 'zh';
 
   final Gk3Backend backend;
+
+  /// 测试模式：真后端对着这块 VHD（win_backend.dart 的 WinBackend.testDisk）。检查页照样显示本机的检查项，
+  /// 但不因它们挡住（这台 PC 不是 MateBook E Go）；角上标出测试模式
+  final int? testDisk;
+  bool get testMode => testDisk != null;
   String language;
 
   void setLanguage(String lang) {

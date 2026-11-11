@@ -303,5 +303,17 @@
       }
     }
   },
-  "legendLive": "GK3LIVE partition"
+  "legendLive": "GK3LIVE partition",
+  "testBadge": "Test mode: disk {disk}",
+  "errDownload": "The download did not complete. Check your network connection and try again; the downloaded part is kept and the download will resume.",
+  "errDownloadWrite": "The downloaded file could not be saved. Make sure drive C: has enough free space.",
+  "errBackendMissing": "The installer files are incomplete (gk3w.exe not found). Download the installer again.",
+  "errNotAdmin": "The installer must be run as administrator.",
+  "@testBadge": {
+    "placeholders": {
+      "disk": {
+        "type": "String"
+      }
+    }
+  }
 }

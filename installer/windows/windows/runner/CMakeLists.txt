@@ -33,6 +33,10 @@ target_compile_definitions(${BINARY_NAME} PRIVATE "NOMINMAX")
 # Add dependency libraries and include directories. Add any application-specific
 # dependencies here.
 target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)
+
+# 管理员权限写在 runner.exe.manifest 的 trustInfo 里（requireAdministrator）。链接器默认还会自己生成一段
+# requestedExecutionLevel（asInvoker），两段合并时 mt.exe 报错（LNK1327）：让链接器不生成它
+target_link_options(${BINARY_NAME} PRIVATE "/MANIFESTUAC:NO")
 target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 

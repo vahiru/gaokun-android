@@ -516,5 +516,17 @@
       }
     }
   },
-  "legendLive": "GK3LIVE分区"
+  "legendLive": "GK3LIVE分区",
+  "testBadge": "测试模式：磁盘{disk}",
+  "errDownload": "下载未完成，请检查网络连接后重试。已下载的部分将保留，重试时继续下载。",
+  "errDownloadWrite": "无法保存下载的文件，请确认C盘有足够的可用空间。",
+  "errBackendMissing": "安装器文件不完整（未找到gk3w.exe），请重新下载安装器。",
+  "errNotAdmin": "安装器需要以管理员身份运行。",
+  "@testBadge": {
+    "placeholders": {
+      "disk": {
+        "type": "String"
+      }
+    }
+  }
 }

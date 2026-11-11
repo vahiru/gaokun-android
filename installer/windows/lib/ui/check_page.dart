@@ -93,7 +93,8 @@ class CheckPage extends StatelessWidget {
     rows.add(pf.lowBattery
         ? CheckRow(state: CheckState.fail, title: l.chkBatteryLow, detail: l.chkBatteryLowHow)
         : CheckRow(state: CheckState.ok, title: l.chkPower, detail: _power(l, pf)));
-    blocked |= !pf.modelOk || pf.secureBoot == 'on' || pf.fastStartup == 'on' || pf.lowBattery;
+    // 测试模式（对着一块 VHD）：本机的检查项照样显示，但不挡住
+    if (!s.testMode) blocked |= !pf.modelOk || pf.secureBoot == 'on' || pf.fastStartup == 'on' || pf.lowBattery;
   }
   return (rows, blocked);
 }

@@ -225,12 +225,17 @@ class MediaConfirmPage extends StatelessWidget {
           NoteBox(
             warn: true,
             text: l.confirmBitlocker,
-            child: CheckboxListTile(
-              contentPadding: EdgeInsets.zero,
-              controlAffinity: ListTileControlAffinity.leading,
-              value: s.bitlockerAck,
-              onChanged: (v) => s.setBitlockerAck(v ?? false),
-              title: Text(l.confirmBitlockerAck, style: context.tt.bodyLarge!.copyWith(color: cs.onSurface)),
+            // ListTile 的底色与水波纹画在最近的 Material 上：NoteBox 的底色会挡住它们（Debug 下还会报断言），
+            // 中间垫一层透明的 Material
+            child: Material(
+              type: MaterialType.transparency,
+              child: CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                controlAffinity: ListTileControlAffinity.leading,
+                value: s.bitlockerAck,
+                onChanged: (v) => s.setBitlockerAck(v ?? false),
+                title: Text(l.confirmBitlockerAck, style: context.tt.bodyLarge!.copyWith(color: cs.onSurface)),
+              ),
             ),
           ),
         ],

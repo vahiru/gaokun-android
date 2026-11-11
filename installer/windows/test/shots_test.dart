@@ -28,6 +28,8 @@ Future<void> shot(WidgetTester t, String name) async {
 }
 
 void main() {
+  // 安装介质的入口在 0.1.0 里不注册（app.dart 的 mediaEntryEnabled）；页面照样测
+  setUpAll(() => mediaEntryEnabled = true);
   final haveFont = _fonts.values.every((f) => File(f).existsSync());
   setUpAll(() async {
     if (!haveFont) return;

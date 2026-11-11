@@ -2,12 +2,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:gk3_windows/app.dart';
 import 'package:gk3_windows/ui/media_pages.dart';
 import 'package:gk3_windows/ui/run_pages.dart';
 
 import 'helpers.dart';
 
 void main() {
+  // 安装介质的入口在 0.1.0 里不注册（app.dart 的 mediaEntryEnabled）；页面照样测
+  setUpAll(() => mediaEntryEnabled = true);
   testWidgets('有空闲区：检查 → 位置 → 版本 → 选项 → 确认 → 安装完成', (t) async {
     // 原生窗口的通道：记下安装期间的 setBusy（阻止关机与睡眠）
     final window = <MethodCall>[];
@@ -256,6 +259,31 @@ void main() {
     expect(s.liveCd!.url, startsWith('https://ota.072172.xyz/installer/0.2.0-rc.2/'));
     await tap(t, find.text(l.srcLocal));
     await see(t, find.text(l.localLiveCd));
+  });
+
+  testWidgets('测试模式：本机检查不过也能继续（角上标出）；BitLocker 已开启时要勾选才能按住开始', (t) async {
+    // blocked 的 preflight 是一台 PC 的真实结果：机型不对、Secure Boot、快速启动、BitLocker 都开着
+    final (rec, s) = await pumpApp(t, 'blocked', testDisk: 2);
+    await see(t, find.text(l.chkModelBad));
+    expect(find.text(l.testBadge('2')), findsOneWidget);
+    expect(find.text(l.chkBlockedNote), findsNothing);
+    expect(enabled(t, l.btnNext), isTrue);
+    await tap(t, find.text(l.btnNext));
+    await tap(t, find.text(l.btnNext));
+    await see(t, find.textContaining('v1.0.0-rc.3'));
+    await tap(t, find.text(l.btnNext));
+    await tap(t, find.text(l.btnNext));
+    await see(t, find.text(l.confirmBitlockerAck));
+    // 没勾选：按住不起作用
+    await hold(t, l.holdToInstall);
+    expect(find.byType(DonePage), findsNothing);
+    expect(rec.calls.where((c) => c.first == 'apply'), isEmpty);
+    await tap(t, find.text(l.confirmBitlockerAck));
+    expect(s.bitlockerAck, isTrue);
+    await hold(t, l.holdToInstall);
+    await waitFor(t, find.byType(DonePage), tries: 400);
+    expect(find.byType(DonePage), findsOneWidget);
+    expect(rec.calls.singleWhere((c) => c.first == 'apply'), containsAllInOrder(['--bitlocker-key', 'yes']));
   });
 
   testWidgets('英文界面：检查页上没有中文', (t) async {

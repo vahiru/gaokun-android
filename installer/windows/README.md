@@ -2,7 +2,34 @@
 
 在已经启动的Windows里把Android装到系统盘的空闲空间上，不需要U盘与LiveCD。界面是Flutter，写盘由C后端`gk3w.exe`（[../backend](../backend/)）完成；两者之间是与LiveCD相同的行协议（[../common](../common/README.md)）。
 
-现在还是原型：界面只回放演示数据，真后端（调用`gk3w.exe`、下载发布文件）尚未接上。Windows版在x64上构建过（`flutter build windows`），ARM64要在Windows ARM64的机器上构建。
+Windows版在x64上构建过（`flutter build windows`），ARM64要在Windows ARM64的机器上构建。
+
+## 后端
+
+`lib/backend/win_backend.dart`：检查、分区方案、安装与卸载调用程序目录`backend\`里的`gk3w.exe`，参数按argv传递；`--sdboot`、`--mke2fs`、`--backup-dir`由它补上，界面不需要知道这些文件在哪里。版本列表与下载在Dart中实现（`lib/backend/net.dart`），输出与LiveCD的`gk3_net_manifest`、`gk3_net_release`相同；下载的规则沿用LiveCD的`gk3_net_fetch`（断点续传、停滞判定、只重试暂时性错误、换版本时丢弃旧文件），完成后用`gk3w hash`校验sha256。每次调用的参数与输出写入`%ProgramData%\gaokun3\logs\`。
+
+程序清单要求以管理员身份运行（`windows/runner/runner.exe.manifest`），启动时出现一次UAC提示。
+
+构建前先编好后端（在Linux上交叉编译，见[../backend](../backend/)）：
+
+```sh
+make -C ../backend win-x64 win-arm64 mke2fs sdboot   # gk3w.exe、mke2fs.exe + mke2fs.conf、systemd-bootaa64.efi
+flutter build windows                               # CMake把它们放进程序目录的 backend\
+```
+
+缺少这些文件时构建只给出警告，这样的程序会在检查页报告“安装器文件不完整”。
+
+## 测试模式与端到端测试
+
+`GK3_TEST_DISK=<磁盘号>`：把那块VHD当作系统盘。此时`gk3w`不带`--real-disk`（只允许写VHD），检查页显示本机的检查项但不因它们阻止继续，“立即重启”不执行，右上角标出测试模式。
+
+`integration_test/vhd_test.dart`驱动真实界面与真实后端，在VHD上走完安装、管理、卸载。需要管理员权限，在已提权的终端中运行：
+
+```bat
+set GK3_TEST_DISK=<VHD的磁盘号>
+set GK3_TEST_RELEASE=<本地发布目录>   :: 可选；不设置则从GitHub下载默认选中的版本
+flutter test integration_test\vhd_test.dart -d windows
+```
 
 窗口没有系统标题栏：标题栏由界面自绘（`lib/ui/title_bar.dart`），拖动、最小化、关闭经`gk3/window`通道交给原生窗口（`windows/runner/flutter_window.cpp`）；正在写盘时拒绝关闭。窗口大小按屏幕工作区算，内容按窗口等比缩放。
 
@@ -23,6 +50,7 @@ crDroid的荷鲁斯之眼（蓝色、透明底），取自crDroid设置应用的
 ```sh
 flutter run -d chrome --web-browser-flag=--window-size=1280,800   # ?scenario=<场景>&lang=zh|en
 flutter test test/flow_test.dart                                   # 各场景从头走到尾
+flutter test test/net_test.dart test/win_backend_test.dart         # 下载（本机HTTP服务）、版本列表、gk3w的参数
 flutter test test/shots_test.dart                                  # 出图到 test/shots/（不入库，字体见 ../common）
 ```
 
