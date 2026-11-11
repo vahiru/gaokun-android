@@ -1,0 +1,40 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: qcom: camss: csiphy: Feed several CSIDs without a clock mux
+
+Only CSIPHYs with a clock mux, on the older SoCs, drive a single CSID.
+Elsewhere each CSID selects its PHY, so let the source pad link to
+several CSIDs, for instance two pixel paths that share a frame wider
+than one IFE can take.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/media/platform/qcom/camss/camss-csiphy.c | 11 ++++++++---
+ 1 file changed, 8 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/media/platform/qcom/camss/camss-csiphy.c b/drivers/media/platform/qcom/camss/camss-csiphy.c
+index 539ac4888..55c15caeb 100644
+--- a/drivers/media/platform/qcom/camss/camss-csiphy.c
++++ b/drivers/media/platform/qcom/camss/camss-csiphy.c
+@@ -728,12 +728,17 @@ static int csiphy_link_setup(struct media_entity *entity,
+ 		struct csiphy_device *csiphy;
+ 		struct csid_device *csid;
+ 
+-		if (media_pad_remote_pad_first(local))
+-			return -EBUSY;
+-
+ 		sd = media_entity_to_v4l2_subdev(entity);
+ 		csiphy = v4l2_get_subdevdata(sd);
+ 
++		/*
++		 * A CSIPHY with a clock mux drives one CSID. Without it, each
++		 * CSID selects its PHY and several can take the same stream,
++		 * e.g. two pixel paths sharing a wide frame.
++		 */
++		if (csiphy->base_clk_mux && media_pad_remote_pad_first(local))
++			return -EBUSY;
++
+ 		sd = media_entity_to_v4l2_subdev(remote->entity);
+ 		csid = v4l2_get_subdevdata(sd);
+ 

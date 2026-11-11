@@ -1,0 +1,101 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: qcom: camss: sc8280xp: Power the CSIPHYs from their own supplies
+
+The SC8280XP camss binding has one vdda-phy and one vdda-pll supply,
+which the driver hands to the CSIDs; the CSIPHYs list none. The PHYs sit
+on two pairs of rails, though: CSIPHY0 and CSIPHY1 on one 0.88 V and one
+1.2 V LDO, CSIPHY2 and CSIPHY3 on another pair. On the MateBook E Go the
+board supplies name the CSIPHY2/3 pair, so the rear camera's CSIPHY0
+ran only because the USB and PCIe PHYs on the same LDOs kept them on.
+
+Give each CSIPHY its pair's supplies, as the newer platforms do, with
+the loads of the SM8250 CSIPHY. Boards without them get dummy
+regulators, as before.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ .../bindings/media/qcom,sc8280xp-camss.yaml   | 16 +++++++++++++++
+ drivers/media/platform/qcom/camss/camss.c     | 20 +++++++++++++++----
+ 2 files changed, 32 insertions(+), 4 deletions(-)
+
+diff --git a/Documentation/devicetree/bindings/media/qcom,sc8280xp-camss.yaml b/Documentation/devicetree/bindings/media/qcom,sc8280xp-camss.yaml
+index 354130aba..ffb70a01f 100644
+--- a/Documentation/devicetree/bindings/media/qcom,sc8280xp-camss.yaml
++++ b/Documentation/devicetree/bindings/media/qcom,sc8280xp-camss.yaml
+@@ -270,6 +270,22 @@ properties:
+     description:
+       1.2V supply to CSIPHY IP blocks.
+ 
++  vdd-csiphy01-0p88-supply:
++    description:
++      0.88V supply to CSIPHY0 and CSIPHY1.
++
++  vdd-csiphy01-1p2-supply:
++    description:
++      1.2V supply to CSIPHY0 and CSIPHY1.
++
++  vdd-csiphy23-0p88-supply:
++    description:
++      0.88V supply to CSIPHY2 and CSIPHY3.
++
++  vdd-csiphy23-1p2-supply:
++    description:
++      1.2V supply to CSIPHY2 and CSIPHY3.
++
+ required:
+   - clock-names
+   - clocks
+diff --git a/drivers/media/platform/qcom/camss/camss.c b/drivers/media/platform/qcom/camss/camss.c
+index 16ee16864..2f98035f3 100644
+--- a/drivers/media/platform/qcom/camss/camss.c
++++ b/drivers/media/platform/qcom/camss/camss.c
+@@ -2599,7 +2599,10 @@ static const struct resources_icc icc_res_sc7280[] = {
+ static const struct camss_subdev_resources csiphy_res_sc8280xp[] = {
+ 	/* CSIPHY0 */
+ 	{
+-		.regulators = {},
++		.regulators = {
++			{ .supply = "vdd-csiphy01-0p88", .init_load_uA = 17500 },
++			{ .supply = "vdd-csiphy01-1p2", .init_load_uA = 10000 }
++		},
+ 		.clock = { "csiphy0", "csiphy0_timer" },
+ 		.clock_rate = { { 400000000 },
+ 				{ 300000000 } },
+@@ -2613,7 +2616,10 @@ static const struct camss_subdev_resources csiphy_res_sc8280xp[] = {
+ 	},
+ 	/* CSIPHY1 */
+ 	{
+-		.regulators = {},
++		.regulators = {
++			{ .supply = "vdd-csiphy01-0p88", .init_load_uA = 17500 },
++			{ .supply = "vdd-csiphy01-1p2", .init_load_uA = 10000 }
++		},
+ 		.clock = { "csiphy1", "csiphy1_timer" },
+ 		.clock_rate = { { 400000000 },
+ 				{ 300000000 } },
+@@ -2627,7 +2633,10 @@ static const struct camss_subdev_resources csiphy_res_sc8280xp[] = {
+ 	},
+ 	/* CSIPHY2 */
+ 	{
+-		.regulators = {},
++		.regulators = {
++			{ .supply = "vdd-csiphy23-0p88", .init_load_uA = 17500 },
++			{ .supply = "vdd-csiphy23-1p2", .init_load_uA = 10000 }
++		},
+ 		.clock = { "csiphy2", "csiphy2_timer" },
+ 		.clock_rate = { { 400000000 },
+ 				{ 300000000 } },
+@@ -2641,7 +2650,10 @@ static const struct camss_subdev_resources csiphy_res_sc8280xp[] = {
+ 	},
+ 	/* CSIPHY3 */
+ 	{
+-		.regulators = {},
++		.regulators = {
++			{ .supply = "vdd-csiphy23-0p88", .init_load_uA = 17500 },
++			{ .supply = "vdd-csiphy23-1p2", .init_load_uA = 10000 }
++		},
+ 		.clock = { "csiphy3", "csiphy3_timer" },
+ 		.clock_rate = { { 400000000 },
+ 				{ 300000000 } },

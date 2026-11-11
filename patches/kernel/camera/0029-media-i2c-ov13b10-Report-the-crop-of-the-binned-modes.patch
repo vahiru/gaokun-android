@@ -1,0 +1,154 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: i2c: ov13b10: Report the crop of the binned modes
+
+V4L2_SEL_TGT_CROP centred the frame size in the active array, which
+holds for the full and the cropped modes but not for the 2x2 binned
+ones: 2080x1170 reads 4160x2340 pixels, 2104x1560 the whole array.
+libcamera took the binned modes for unbinned crops of the centre, and
+the IFE's lens shading correction placed its grid on the wrong part of
+the sensor.
+
+Give each mode the part of the array it reads, from its read window and
+output offset registers, and report that.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/media/i2c/ov13b10.c | 60 +++++++++++++++++++++++++++++++++----
+ 1 file changed, 54 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/media/i2c/ov13b10.c b/drivers/media/i2c/ov13b10.c
+index 323df74b4..d286fb775 100644
+--- a/drivers/media/i2c/ov13b10.c
++++ b/drivers/media/i2c/ov13b10.c
+@@ -107,6 +107,15 @@ struct ov13b10_mode {
+ 	/* Frame height */
+ 	u32 height;
+ 
++	/*
++	 * Pixels of the 4208x3120 active array the frame comes from: the read
++	 * window (0x3800-0x3807) moved by the output offset (0x3810-0x3813),
++	 * twice the frame size in the binned modes. The active array starts at
++	 * window pixel (15, 17), where the full size mode's output does. The
++	 * binned 2104x1560 frame reaches a pixel past it and reports the array.
++	 */
++	struct v4l2_rect crop;
++
+ 	/* V-timing */
+ 	u32 vts_def;
+ 	u32 vts_min;
+@@ -613,6 +622,12 @@ static const struct ov13b10_mode supported_4_lanes_modes[] = {
+ 	{
+ 		.width = 4208,
+ 		.height = 3120,
++		.crop = {
++			.left = 0,
++			.top = 0,
++			.width = 4208,
++			.height = 3120,
++		},
+ 		.vts_def = OV13B10_VTS_30FPS,
+ 		.vts_min = OV13B10_VTS_30FPS,
+ 		.ppl = 4704,
+@@ -625,6 +640,12 @@ static const struct ov13b10_mode supported_4_lanes_modes[] = {
+ 	{
+ 		.width = 4160,
+ 		.height = 3120,
++		.crop = {
++			.left = 24,
++			.top = 0,
++			.width = 4160,
++			.height = 3120,
++		},
+ 		.vts_def = OV13B10_VTS_30FPS,
+ 		.vts_min = OV13B10_VTS_30FPS,
+ 		.ppl = 4704,
+@@ -637,6 +658,12 @@ static const struct ov13b10_mode supported_4_lanes_modes[] = {
+ 	{
+ 		.width = 4160,
+ 		.height = 2340,
++		.crop = {
++			.left = 24,
++			.top = 390,
++			.width = 4160,
++			.height = 2340,
++		},
+ 		.vts_def = OV13B10_VTS_30FPS,
+ 		.vts_min = OV13B10_VTS_30FPS,
+ 		.ppl = 4704,
+@@ -649,6 +676,12 @@ static const struct ov13b10_mode supported_4_lanes_modes[] = {
+ 	{
+ 		.width = 2104,
+ 		.height = 1560,
++		.crop = {
++			.left = 0,
++			.top = 0,
++			.width = 4208,
++			.height = 3120,
++		},
+ 		.vts_def = OV13B10_VTS_60FPS,
+ 		.vts_min = OV13B10_VTS_60FPS,
+ 		.ppl = 4704,
+@@ -661,6 +694,12 @@ static const struct ov13b10_mode supported_4_lanes_modes[] = {
+ 	{
+ 		.width = 2080,
+ 		.height = 1170,
++		.crop = {
++			.left = 23,
++			.top = 393,
++			.width = 4160,
++			.height = 2340,
++		},
+ 		.vts_def = OV13B10_VTS_60FPS,
+ 		.vts_min = OV13B10_VTS_60FPS,
+ 		.ppl = 4704,
+@@ -673,6 +712,12 @@ static const struct ov13b10_mode supported_4_lanes_modes[] = {
+ 	{
+ 		.width = 1364,
+ 		.height = 768,
++		.crop = {
++			.left = 739,
++			.top = 837,
++			.width = 2728,
++			.height = 1536,
++		},
+ 		.vts_def = OV13B10_VTS_120FPS,
+ 		.vts_min = OV13B10_VTS_120FPS,
+ 		.link_freq_index = OV13B10_LINK_FREQ_INDEX_0,
+@@ -689,6 +734,12 @@ static const struct ov13b10_mode supported_2_lanes_modes[] = {
+ 	{
+ 		.width = 2104,
+ 		.height = 1560,
++		.crop = {
++			.left = 0,
++			.top = 0,
++			.width = 4208,
++			.height = 3120,
++		},
+ 		.vts_def = OV13B10_VTS_60FPS,
+ 		.vts_min = OV13B10_VTS_60FPS,
+ 		.link_freq_index = OV13B10_LINK_FREQ_INDEX_0,
+@@ -1386,8 +1437,8 @@ static const struct v4l2_subdev_video_ops ov13b10_video_ops = {
+ 
+ /*
+  * Report the 4208x3120 active pixel array for NATIVE_SIZE, CROP_BOUNDS, and
+- * CROP_DEFAULT, and center-crop narrower modes (such as 4160-wide modes)
+- * within the full array for V4L2_SEL_TGT_CROP.
++ * CROP_DEFAULT, and for V4L2_SEL_TGT_CROP the part of it the mode reads: the
++ * frame size, or twice it in the binned modes.
+  */
+ static int ov13b10_get_selection(struct v4l2_subdev *sd,
+ 				 struct v4l2_subdev_state *sd_state,
+@@ -1406,10 +1457,7 @@ static int ov13b10_get_selection(struct v4l2_subdev *sd,
+ 		sel->r.height = 3120;
+ 		return 0;
+ 	case V4L2_SEL_TGT_CROP:
+-		sel->r.left = (4208 - mode->width) / 2;
+-		sel->r.top = (3120 - mode->height) / 2;
+-		sel->r.width = mode->width;
+-		sel->r.height = mode->height;
++		sel->r = mode->crop;
+ 		return 0;
+ 	}
+ 

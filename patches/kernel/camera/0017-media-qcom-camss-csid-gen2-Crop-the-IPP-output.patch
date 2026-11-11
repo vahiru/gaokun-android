@@ -1,0 +1,193 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: qcom: camss: csid-gen2: Crop the IPP output
+
+The single IFE pixel pipeline takes lines up to 3840 pixels, less than
+the 4208 of a 13 MP sensor. Let the IPP source pad of a full CSID crop
+its output through the V4L2 crop selection, programmed in the IPP
+horizontal and vertical crop registers with early end of frame, as the
+downstream driver does for Titan 175.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ .../platform/qcom/camss/camss-csid-gen2.c     | 18 +++++
+ .../media/platform/qcom/camss/camss-csid.c    | 72 +++++++++++++++++++
+ .../media/platform/qcom/camss/camss-csid.h    |  4 ++
+ 3 files changed, 94 insertions(+)
+
+diff --git a/drivers/media/platform/qcom/camss/camss-csid-gen2.c b/drivers/media/platform/qcom/camss/camss-csid-gen2.c
+index a427333c2..bed84962e 100644
+--- a/drivers/media/platform/qcom/camss/camss-csid-gen2.c
++++ b/drivers/media/platform/qcom/camss/camss-csid-gen2.c
+@@ -35,7 +35,10 @@
+ #define CSID_IPP_IRQ_STATUS		0x30
+ #define CSID_IPP_IRQ_CLEAR		0x38
+ #define CSID_IPP_CFG0			0x200
++#define		IPP_CFG0_CROP_H_EN	5
++#define		IPP_CFG0_CROP_V_EN	6
+ #define		IPP_CFG0_PIX_STORE_EN	7
++#define		IPP_CFG0_EARLY_EOF_EN	29
+ #define CSID_IPP_CFG1			0x204
+ #define CSID_IPP_CTRL			0x208
+ #define CSID_IPP_FRM_DROP_PATTERN	0x20c
+@@ -46,6 +49,9 @@
+ #define CSID_IPP_PIX_DROP_PERIOD	0x228
+ #define CSID_IPP_LINE_DROP_PATTERN	0x22c
+ #define CSID_IPP_LINE_DROP_PERIOD	0x230
++/* Crops: last << 16 | first, inclusive (downstream cam_ife_csid175.h) */
++#define CSID_IPP_HCROP			0x21c
++#define CSID_IPP_VCROP			0x220
+ 
+ #define CSID_CSI2_RX_IRQ_STATUS	0x20
+ #define	CSID_CSI2_RX_IRQ_MASK	0x24
+@@ -370,6 +376,8 @@ static void __csid_configure_ipp_stream(struct csid_device *csid, u8 enable, u8
+ {
+ 	struct v4l2_mbus_framefmt *input_format =
+ 		&csid->fmt[MSM_CSID_PAD_FIRST_SRC + CSID_PORT_IPP];
++	const struct v4l2_mbus_framefmt *sink = &csid->fmt[MSM_CSID_PAD_SINK];
++	const struct v4l2_rect *crop = &csid->ipp_crop;
+ 	const struct csid_format_info *format = csid_get_fmt_entry(csid->res->formats->formats,
+ 								   csid->res->formats->nformats,
+ 								   input_format->code);
+@@ -384,6 +392,16 @@ static void __csid_configure_ipp_stream(struct csid_device *csid, u8 enable, u8
+ 	val |= format->data_type << RDI_CFG0_DATA_TYPE;
+ 	val |= vc << RDI_CFG0_VIRTUAL_CHANNEL;
+ 	val |= dt_id << RDI_CFG0_DT_ID;
++
++	/* Crop, with the end of frame at the crop end like downstream */
++	if (crop->width && (crop->width != sink->width || crop->height != sink->height)) {
++		val |= BIT(IPP_CFG0_CROP_H_EN) | BIT(IPP_CFG0_CROP_V_EN) |
++		       BIT(IPP_CFG0_EARLY_EOF_EN);
++		writel_relaxed((crop->left + crop->width - 1) << 16 | crop->left,
++			       csid->base + CSID_IPP_HCROP);
++		writel_relaxed((crop->top + crop->height - 1) << 16 | crop->top,
++			       csid->base + CSID_IPP_VCROP);
++	}
+ 	writel_relaxed(val, csid->base + CSID_IPP_CFG0);
+ 
+ 	/* CSID_TIMESTAMP_STB_POST_IRQ */
+diff --git a/drivers/media/platform/qcom/camss/camss-csid.c b/drivers/media/platform/qcom/camss/camss-csid.c
+index 48459b46a..1fc88a875 100644
+--- a/drivers/media/platform/qcom/camss/camss-csid.c
++++ b/drivers/media/platform/qcom/camss/camss-csid.c
+@@ -870,6 +870,18 @@ static void csid_try_format(struct csid_device *csid,
+ 			fmt->field = V4L2_FIELD_NONE;
+ 		}
+ 		break;
++
++	case MSM_CSID_PAD_IPP:
++		if (!csid->res->has_ipp)
++			break;
++
++		/* The IPP passes the sink format, cropped */
++		*fmt = *__csid_get_format(csid, sd_state, MSM_CSID_PAD_SINK, which);
++		if (which == V4L2_SUBDEV_FORMAT_ACTIVE && csid->ipp_crop.width) {
++			fmt->width = csid->ipp_crop.width;
++			fmt->height = csid->ipp_crop.height;
++		}
++		break;
+ 	}
+ 
+ 	fmt->colorspace = V4L2_COLORSPACE_SRGB;
+@@ -1003,6 +1015,10 @@ static int csid_set_format(struct v4l2_subdev *sd,
+ 
+ 	/* Propagate the format from sink to source pads */
+ 	if (fmt->pad == MSM_CSID_PAD_SINK) {
++		/* A new sink format resets the IPP crop to the whole frame */
++		if (fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE)
++			csid->ipp_crop = (struct v4l2_rect){ 0, 0, fmt->format.width,
++							     fmt->format.height };
+ 		for (i = MSM_CSID_PAD_FIRST_SRC; i < MSM_CSID_PADS_NUM; ++i) {
+ 			format = __csid_get_format(csid, sd_state, i, fmt->which);
+ 
+@@ -1325,11 +1341,67 @@ static const struct v4l2_subdev_video_ops csid_video_ops = {
+ 	.s_stream = csid_set_stream,
+ };
+ 
++/*
++ * The IPP of a full CSID can crop its output. Only the active configuration
++ * is kept: the crop is programmed at stream start.
++ */
++static int csid_get_selection(struct v4l2_subdev *sd,
++			      struct v4l2_subdev_state *sd_state,
++			      struct v4l2_subdev_selection *sel)
++{
++	struct csid_device *csid = v4l2_get_subdevdata(sd);
++	const struct v4l2_mbus_framefmt *sink = &csid->fmt[MSM_CSID_PAD_SINK];
++
++	if (!csid->res->has_ipp || sel->pad != MSM_CSID_PAD_IPP ||
++	    sel->which != V4L2_SUBDEV_FORMAT_ACTIVE)
++		return -EINVAL;
++
++	switch (sel->target) {
++	case V4L2_SEL_TGT_CROP_BOUNDS:
++	case V4L2_SEL_TGT_CROP_DEFAULT:
++		sel->r = (struct v4l2_rect){ 0, 0, sink->width, sink->height };
++		return 0;
++	case V4L2_SEL_TGT_CROP:
++		sel->r = csid->ipp_crop;
++		return 0;
++	}
++
++	return -EINVAL;
++}
++
++static int csid_set_selection(struct v4l2_subdev *sd,
++			      struct v4l2_subdev_state *sd_state,
++			      struct v4l2_subdev_selection *sel)
++{
++	struct csid_device *csid = v4l2_get_subdevdata(sd);
++	const struct v4l2_mbus_framefmt *sink = &csid->fmt[MSM_CSID_PAD_SINK];
++	struct v4l2_rect *r = &sel->r;
++
++	if (!csid->res->has_ipp || sel->pad != MSM_CSID_PAD_IPP ||
++	    sel->which != V4L2_SUBDEV_FORMAT_ACTIVE ||
++	    sel->target != V4L2_SEL_TGT_CROP)
++		return -EINVAL;
++
++	/* Even offsets and sizes keep the Bayer order */
++	r->left = clamp_t(s32, r->left, 0, sink->width - 2) & ~1;
++	r->top = clamp_t(s32, r->top, 0, sink->height - 2) & ~1;
++	r->width = clamp_t(u32, r->width, 2, sink->width - r->left) & ~1;
++	r->height = clamp_t(u32, r->height, 2, sink->height - r->top) & ~1;
++
++	csid->ipp_crop = *r;
++	csid->fmt[MSM_CSID_PAD_IPP].width = r->width;
++	csid->fmt[MSM_CSID_PAD_IPP].height = r->height;
++
++	return 0;
++}
++
+ static const struct v4l2_subdev_pad_ops csid_pad_ops = {
+ 	.enum_mbus_code = csid_enum_mbus_code,
+ 	.enum_frame_size = csid_enum_frame_size,
+ 	.get_fmt = csid_get_format,
+ 	.set_fmt = csid_set_format,
++	.get_selection = csid_get_selection,
++	.set_selection = csid_set_selection,
+ };
+ 
+ static const struct v4l2_subdev_ops csid_v4l2_ops = {
+diff --git a/drivers/media/platform/qcom/camss/camss-csid.h b/drivers/media/platform/qcom/camss/camss-csid.h
+index cfc5601eb..277e2368a 100644
+--- a/drivers/media/platform/qcom/camss/camss-csid.h
++++ b/drivers/media/platform/qcom/camss/camss-csid.h
+@@ -23,6 +23,8 @@
+ #define MSM_CSID_PADS_NUM 5
+ 
+ #define MSM_CSID_PAD_SRC (MSM_CSID_PAD_FIRST_SRC)
++/* Source pad of the IPP on a full CSID with a pixel path (port 3) */
++#define MSM_CSID_PAD_IPP (MSM_CSID_PAD_FIRST_SRC + 3)
+ 
+ /* CSID hardware can demultiplex up to 4 outputs */
+ #define MSM_CSID_MAX_SRC_STREAMS	4
+@@ -166,6 +168,8 @@ struct csid_device {
+ 	bool tpg_linked;
+ 	struct csid_phy_config phy;
+ 	struct v4l2_mbus_framefmt fmt[MSM_CSID_PADS_NUM];
++	/* Crop of the IPP output within the sink format (active format only) */
++	struct v4l2_rect ipp_crop;
+ 	struct v4l2_ctrl_handler ctrls;
+ 	struct v4l2_ctrl *testgen_mode;
+ 	const struct csid_subdev_resources *res;

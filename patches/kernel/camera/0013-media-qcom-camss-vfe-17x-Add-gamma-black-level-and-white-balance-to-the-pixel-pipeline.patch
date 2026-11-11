@@ -1,0 +1,248 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: qcom: camss: vfe-17x: Add gamma, black level and white balance to the pixel pipeline
+
+Without a gamma curve the NV12 output is dark and flat, the sensor black
+level lifts dark areas to about a sixth of full scale after gamma, and
+unity white balance gains give a strong green cast.
+
+Load the Gamma16 LUT through the DMI port and enable the module. The LUT
+has 64 entries per channel: bits 9:0 are the curve node and bits 19:10
+the signed delta to the next node. The curve is the gamma16_ife curve of
+the Samsung S5K3L6 tuning data, the same for all three channels. The
+Windows driver alternates between two banks per channel (26/27, 28/29,
+30/31), selected by 0x798; fill all six banks with the curve and leave
+0x798 at 0, so the bank choice does not matter.
+
+The DMI writes only reach the LUT memories with the clock gating
+overrides set: read back without them, all six banks keep their power-up
+contents. The Windows camera stack (CamX Titan175IFE::FillCGCConfig)
+writes all ones to 0x02c..0x03c and 1 to 0xfac before the IQ setup of
+every request and never clears them; do the same before loading the LUT.
+
+Enable the BLS12 block after the demux. Its offset is in 14 bit units,
+the internal width of the pipeline with the sensor data MSB aligned, and
+the scale 16383 / (16383 - offset) (Q11) stretches the remaining range
+back to full scale, as the Windows camera stack computes it. With the 10
+bit black level of 64 (offset 1024) a covered Hynix Hi-846 gives Y = 0
+instead of 44. Program fixed white balance gains as well: red 302, blue
+194 (Q7), measured with the Hi-846 on a white target under indoor light.
+These are the values a stream starts with.
+
+Co-developed-by: dezige131 <2643591270@qq.com>
+Signed-off-by: dezige131 <2643591270@qq.com>
+Signed-off-by: Akisaira <akisaira@outlook.com>
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ .../media/platform/qcom/camss/camss-vfe-17x.c | 144 ++++++++++++++++--
+ 1 file changed, 134 insertions(+), 10 deletions(-)
+
+diff --git a/drivers/media/platform/qcom/camss/camss-vfe-17x.c b/drivers/media/platform/qcom/camss/camss-vfe-17x.c
+index a24f1c9eb..67174b7c8 100644
+--- a/drivers/media/platform/qcom/camss/camss-vfe-17x.c
++++ b/drivers/media/platform/qcom/camss/camss-vfe-17x.c
+@@ -36,8 +36,10 @@
+ #define VFE_MODULE_LENS_EN			(0x040)
+ #define		MODULE_LENS_EN_DEMUX		BIT(2)
+ #define		MODULE_LENS_EN_DEMOSAIC		BIT(10)
++#define		MODULE_LENS_EN_BLS		BIT(11)
+ #define VFE_MODULE_STATS_EN			(0x044)
+ #define VFE_MODULE_COLOR_EN			(0x048)
++#define		MODULE_COLOR_EN_GAMMA		BIT(3)
+ #define VFE_MODULE_ZOOM_EN			(0x04c)
+ #define		MODULE_ZOOM_EN_CST		BIT(0)
+ #define		MODULE_ZOOM_EN_SCALE_FULL	BIT(3)
+@@ -152,6 +154,21 @@
+ #define VFE_WB_OFFSET_CFG_0			(0x704)
+ #define VFE_WB_OFFSET_CFG_1			(0x708)
+ #define		WB_GAIN_UNITY			0x80	/* Q7 */
++#define		WB_GAIN_MASK			0xfff
++
++/*
++ * Black level subtraction (BLS12), after the demux: out = (in - offset) * scale
++ * with scale = 16383 / (16383 - offset) in Q11, so the remaining range is
++ * stretched back to full scale. The pixel pipeline works on 14 bit values with
++ * the sensor data MSB aligned, so a 10 bit black level of 64 is 1024 here.
++ */
++#define VFE_BLS_CFG				(0x6b0)
++#define		BLS_CFG_OFFSET			0
++#define		BLS_CFG_OFFSET_MASK		0x3fff
++#define		BLS_CFG_SCALE			15
++#define VFE_BLS_THRESHOLD_0			(0x6b4)
++#define VFE_BLS_THRESHOLD_1			(0x6b8)
++#define VFE_PIX_MAX				16383	/* 14 bit */
+ 
+ /* RGB to YCbCr colour space transform, one 4 register block per channel */
+ #define VFE_CST_CH_CFG(ch, n)			(0xf30 + (ch) * 0x10 + (n) * 4)
+@@ -300,6 +317,99 @@
+ #define VFE_WM_PIX_FULL_C			4
+ #define		PACKER_FMT_PLAIN_8_LSB_MSB_10	0xe
+ 
++/*
++ * Clock gating overrides. The Windows camera stack (CamX Titan175IFE) sets all
++ * of them before the IQ module setup of every request and never clears them.
++ * Without the overrides, DMI writes do not reach the LUT memories: the Gamma16
++ * banks keep their power-up contents. The names follow the downstream VFE
++ * drivers; the Windows stack only uses the offsets.
++ */
++#define VFE_CGC_OVERRIDE_LENS			(0x02c)
++#define VFE_CGC_OVERRIDE_STATS			(0x030)
++#define VFE_CGC_OVERRIDE_COLOR			(0x034)
++#define VFE_CGC_OVERRIDE_ZOOM			(0x038)
++#define VFE_CGC_OVERRIDE_BUS			(0x03c)
++#define VFE_CGC_OVERRIDE_ALL			(~0u)
++#define VFE_CGC_OVERRIDE_DMI			(0xfac)
++
++static void vfe_pix_cgc_config(struct vfe_device *vfe)
++{
++	writel_relaxed(VFE_CGC_OVERRIDE_ALL, vfe->base + VFE_CGC_OVERRIDE_LENS);
++	writel_relaxed(VFE_CGC_OVERRIDE_ALL, vfe->base + VFE_CGC_OVERRIDE_STATS);
++	writel_relaxed(VFE_CGC_OVERRIDE_ALL, vfe->base + VFE_CGC_OVERRIDE_COLOR);
++	writel_relaxed(VFE_CGC_OVERRIDE_ALL, vfe->base + VFE_CGC_OVERRIDE_ZOOM);
++	writel_relaxed(VFE_CGC_OVERRIDE_ALL, vfe->base + VFE_CGC_OVERRIDE_BUS);
++	writel_relaxed(1, vfe->base + VFE_CGC_OVERRIDE_DMI);
++}
++
++/*
++ * Gamma16: three curves of 64 linear segments, loaded through the DMI port.
++ * The Windows driver writes one LUT bank per channel for every frame and
++ * alternates between two banks per channel (26/27, 28/29, 30/31); the bank the
++ * hardware reads is chosen by VFE_GAMMA_CFG. Fill all six banks with the same
++ * curve and leave VFE_GAMMA_CFG at 0, so the bank choice does not matter.
++ *
++ * Entry i = node[i] | (node[i + 1] - node[i]) << 10, nodes 0..1023 and the
++ * delta a signed 10 bit value. The curve is the gamma16_ife curve of the
++ * Samsung S5K3L6 tuning data (all three channels use the same one).
++ */
++#define VFE_GAMMA_CFG				(0x798)
++#define VFE_DMI_CFG				(0xc24)
++#define		DMI_CFG_AUTO_INC		BIT(8)
++#define VFE_DMI_ADDR				(0xc28)
++/* 0xc2c takes the upper half of 64 bit entries, not needed for 32 bit LUTs */
++#define VFE_DMI_DATA_LO				(0xc30)
++#define VFE_GAMMA_BANK_FIRST			26
++#define VFE_GAMMA_BANK_COUNT			6
++#define VFE_GAMMA_LUT_ENTRIES			64
++
++static const u32 vfe_gamma16_lut[VFE_GAMMA_LUT_ENTRIES] = {
++	0x00010000, 0x0000b040, 0x0000906c, 0x00008090,
++	0x000074b0, 0x00006ccd, 0x000068e8, 0x00006102,
++	0x0000591a, 0x00005930, 0x00005546, 0x0000515b,
++	0x00004d6f, 0x00004d82, 0x00004995, 0x000049a7,
++	0x000045b9, 0x000045ca, 0x000041db, 0x000041eb,
++	0x000041fb, 0x00003e0b, 0x00003e1a, 0x00003e29,
++	0x00003e38, 0x00003a47, 0x00003a55, 0x00003a63,
++	0x00003671, 0x0000367e, 0x00003a8b, 0x00003699,
++	0x000032a6, 0x000036b2, 0x000032bf, 0x000036cb,
++	0x000032d8, 0x000032e4, 0x000032f0, 0x00002efc,
++	0x00003307, 0x00002f13, 0x0000331e, 0x00002f2a,
++	0x00002f35, 0x00002f40, 0x00002f4b, 0x00002f56,
++	0x00002b61, 0x00002f6b, 0x00002b76, 0x00002f80,
++	0x00002b8b, 0x00002b95, 0x00002b9f, 0x00002ba9,
++	0x00002bb3, 0x00002bbd, 0x00002bc7, 0x00002bd1,
++	0x000027db, 0x00002be4, 0x000027ee, 0x000023f7,
++};
++
++static void vfe_pix_gamma_config(struct vfe_device *vfe)
++{
++	unsigned int bank, i;
++
++	for (bank = VFE_GAMMA_BANK_FIRST;
++	     bank < VFE_GAMMA_BANK_FIRST + VFE_GAMMA_BANK_COUNT; bank++) {
++		writel_relaxed(bank | DMI_CFG_AUTO_INC, vfe->base + VFE_DMI_CFG);
++		writel_relaxed(0, vfe->base + VFE_DMI_ADDR);
++		/* Zero entries have to be written too */
++		for (i = 0; i < VFE_GAMMA_LUT_ENTRIES; i++)
++			writel_relaxed(vfe_gamma16_lut[i], vfe->base + VFE_DMI_DATA_LO);
++	}
++	writel_relaxed(0, vfe->base + VFE_DMI_CFG);
++
++	writel_relaxed(0, vfe->base + VFE_GAMMA_CFG);
++}
++
++/*
++ * Image parameters of a stream start, until userspace sets its own through the
++ * parameters node. The black level is in 14 bit units: 1024 is the usual 64 of
++ * 10 bit sensors. The white balance gains (Q7, green = 1.0) were measured with
++ * the Hynix Hi-846 of the Huawei MateBook E Go on a white target under indoor
++ * lighting.
++ */
++#define VFE_PIX_BLACK_LEVEL			1024
++#define VFE_PIX_WB_GAIN_R			302
++#define VFE_PIX_WB_GAIN_B			194
++
+ static inline void vfe_reg_set(struct vfe_device *vfe, u32 reg, u32 set_bits)
+ {
+ 	u32 bits = readl_relaxed(vfe->base + reg);
+@@ -415,10 +525,10 @@ static inline void vfe_reg_update_clear(struct vfe_device *vfe,
+ 
+ /*
+  * Pixel pipeline of the full VFE (VFE_LINE_PIX): CSID IPP -> CAMIF -> DEMUX
+- * -> DEMOSAIC (+WB) -> CST -> FULL path MNDS -> CROP -> ROUND/CLAMP -> FULL
+- * Y and C write masters, producing NV12 or NV21. Linearization, lens
+- * shading, colour correction, tone mapping, gamma and statistics stay
+- * disabled: this is a fixed parameter pipeline without 3A.
++ * -> BLS -> DEMOSAIC (+WB) -> GAMMA -> CST -> FULL path MNDS -> CROP ->
++ * ROUND/CLAMP -> FULL Y and C write masters, producing NV12 or NV21.
++ * Linearization, lens shading, colour correction, tone mapping and statistics
++ * stay disabled: this is a fixed parameter pipeline without 3A.
+  */
+ 
+ /* Bayer order as used by VFE_CORE_CFG and the demux channel tables */
+@@ -530,16 +640,27 @@ static void vfe_pix_demux_demosaic_config(struct vfe_device *vfe,
+ 	writel_relaxed(0, vfe->base + VFE_DEMOSAIC_INTERP_COEFF_0);
+ 	writel_relaxed(0, vfe->base + VFE_DEMOSAIC_INTERP_COEFF_1);
+ 
+-	/* The WB gains have no enable bit, always program unity gains */
++	/* The WB gains have no enable bit, green stays at unity */
+ 	writel_relaxed(WB_GAIN_UNITY << WB_CFG_0_G_GAIN |
+-		       WB_GAIN_UNITY << WB_CFG_0_B_GAIN,
++		       VFE_PIX_WB_GAIN_B << WB_CFG_0_B_GAIN,
+ 		       vfe->base + VFE_WB_CFG_0);
+-	writel_relaxed(WB_GAIN_UNITY << WB_CFG_1_R_GAIN,
++	writel_relaxed(VFE_PIX_WB_GAIN_R << WB_CFG_1_R_GAIN,
+ 		       vfe->base + VFE_WB_CFG_1);
+ 	writel_relaxed(0, vfe->base + VFE_WB_OFFSET_CFG_0);
+ 	writel_relaxed(0, vfe->base + VFE_WB_OFFSET_CFG_1);
+ }
+ 
++static void vfe_pix_bls_config(struct vfe_device *vfe)
++{
++	u32 offset = VFE_PIX_BLACK_LEVEL;
++	u32 scale = (2048 * VFE_PIX_MAX) / (VFE_PIX_MAX - offset);
++
++	writel_relaxed((offset & BLS_CFG_OFFSET_MASK) << BLS_CFG_OFFSET |
++		       scale << BLS_CFG_SCALE, vfe->base + VFE_BLS_CFG);
++	writel_relaxed(0, vfe->base + VFE_BLS_THRESHOLD_0);
++	writel_relaxed(0, vfe->base + VFE_BLS_THRESHOLD_1);
++}
++
+ static void vfe_pix_camif_config(struct vfe_device *vfe, u32 width, u32 height)
+ {
+ 	u32 val;
+@@ -707,7 +828,10 @@ static int vfe_pix_configure(struct vfe_device *vfe, struct vfe_line *line)
+ 
+ 	vfe_pix_camif_config(vfe, sink->width, sink->height);
+ 	vfe_pix_demux_demosaic_config(vfe, pattern);
++	vfe_pix_bls_config(vfe);
+ 	vfe_pix_cst_config(vfe, crcb);
++	vfe_pix_cgc_config(vfe);
++	vfe_pix_gamma_config(vfe);
+ 
+ 	/* 4:4:4 in, luma at compose size, chroma at half size in both axes */
+ 	vfe_pix_scale_config(vfe, VFE_SCALE_FULL_Y_BASE, sink->width, sink->height,
+@@ -716,10 +840,10 @@ static int vfe_pix_configure(struct vfe_device *vfe, struct vfe_line *line)
+ 			     compose->width / 2, compose->height / 2);
+ 	vfe_pix_crop_config(vfe, crop);
+ 
+-	writel_relaxed(MODULE_LENS_EN_DEMUX | MODULE_LENS_EN_DEMOSAIC,
+-		       vfe->base + VFE_MODULE_LENS_EN);
++	writel_relaxed(MODULE_LENS_EN_DEMUX | MODULE_LENS_EN_DEMOSAIC |
++		       MODULE_LENS_EN_BLS, vfe->base + VFE_MODULE_LENS_EN);
+ 	writel_relaxed(0, vfe->base + VFE_MODULE_STATS_EN);
+-	writel_relaxed(0, vfe->base + VFE_MODULE_COLOR_EN);
++	writel_relaxed(MODULE_COLOR_EN_GAMMA, vfe->base + VFE_MODULE_COLOR_EN);
+ 	writel_relaxed(MODULE_ZOOM_EN_CST | MODULE_ZOOM_EN_SCALE_FULL |
+ 		       MODULE_ZOOM_EN_CROP_FULL, vfe->base + VFE_MODULE_ZOOM_EN);
+ 

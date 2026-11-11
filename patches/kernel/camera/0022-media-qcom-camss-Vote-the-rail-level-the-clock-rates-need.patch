@@ -1,0 +1,435 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: qcom: camss: Vote the rail level the clock rates need
+
+CAMSS sets its clock rates but never votes the rail level they need, so
+MMCX stays at the LOW_SVS camcc votes for itself. On SC8280XP the IFE at
+558 MHz needs SVS and camnoc_axi, which the VFE sets alongside, needs
+TURBO at 480 MHz. With the display on, the display controller holds MMCX
+at TURBO_L1 and hides this; with the display off, the full size pixel
+path overflows from the first frame and has also reset the SoC.
+
+Let platforms list the rail level per clock rate. camss_enable_clocks()
+votes the highest level the subdevice's clocks need at their set rates
+before enabling them, camss_disable_clocks() drops the vote after
+disabling them; the votes of all subdevices are aggregated and set as
+the performance state of the CAMSS power domain, which the GDSCs pass
+on to MMCX. camss_disable_clocks() takes the device for this, like
+camss_enable_clocks().
+
+SC8280XP's levels are the same in the Windows PEP clock plan
+(qcpep8280.sys) and in the vendor's camcc-direwolf.c, whose camcc has
+the same RCG offsets and frequency tables as camcc-sc8280xp.c.
+
+Tested with the display off: full size single and dual IFE, binned,
+still and front streams; MMCX at 384 while the full size path streams,
+back to 0 after; the RDI path at 400/150 MHz stays at LOW_SVS.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ .../media/platform/qcom/camss/camss-csid.c    |   4 +-
+ .../media/platform/qcom/camss/camss-csiphy.c  |   2 +-
+ .../media/platform/qcom/camss/camss-ispif.c   |   7 +-
+ drivers/media/platform/qcom/camss/camss-tpg.c |   2 +-
+ drivers/media/platform/qcom/camss/camss-vfe.c |   4 +-
+ drivers/media/platform/qcom/camss/camss.c     | 156 +++++++++++++++++-
+ drivers/media/platform/qcom/camss/camss.h     |  26 ++-
+ 7 files changed, 190 insertions(+), 11 deletions(-)
+
+diff --git a/drivers/media/platform/qcom/camss/camss-csid.c b/drivers/media/platform/qcom/camss/camss-csid.c
+index dae938e89..765dd4d8d 100644
+--- a/drivers/media/platform/qcom/camss/camss-csid.c
++++ b/drivers/media/platform/qcom/camss/camss-csid.c
+@@ -728,7 +728,7 @@ static int csid_set_power(struct v4l2_subdev *sd, int on)
+ 		ret = csid->res->hw_ops->reset(csid);
+ 		if (ret < 0) {
+ 			disable_irq(csid->irq);
+-			camss_disable_clocks(csid->nclocks, csid->clock);
++			camss_disable_clocks(csid->nclocks, csid->clock, csid->camss->dev);
+ 			regulator_bulk_disable(csid->num_supplies,
+ 					       csid->supplies);
+ 			pm_runtime_put_sync(dev);
+@@ -738,7 +738,7 @@ static int csid_set_power(struct v4l2_subdev *sd, int on)
+ 		csid->res->hw_ops->hw_version(csid);
+ 	} else {
+ 		disable_irq(csid->irq);
+-		camss_disable_clocks(csid->nclocks, csid->clock);
++		camss_disable_clocks(csid->nclocks, csid->clock, csid->camss->dev);
+ 		regulator_bulk_disable(csid->num_supplies,
+ 				       csid->supplies);
+ 		pm_runtime_put_sync(dev);
+diff --git a/drivers/media/platform/qcom/camss/camss-csiphy.c b/drivers/media/platform/qcom/camss/camss-csiphy.c
+index 55c15caeb..d52530257 100644
+--- a/drivers/media/platform/qcom/camss/camss-csiphy.c
++++ b/drivers/media/platform/qcom/camss/camss-csiphy.c
+@@ -243,7 +243,7 @@ static int csiphy_set_power(struct v4l2_subdev *sd, int on)
+ 	} else {
+ 		disable_irq(csiphy->irq);
+ 
+-		camss_disable_clocks(csiphy->nclocks, csiphy->clock);
++		camss_disable_clocks(csiphy->nclocks, csiphy->clock, csiphy->camss->dev);
+ 
+ 		regulator_bulk_disable(csiphy->num_supplies, csiphy->supplies);
+ 
+diff --git a/drivers/media/platform/qcom/camss/camss-ispif.c b/drivers/media/platform/qcom/camss/camss-ispif.c
+index aaf3caa42..589522843 100644
+--- a/drivers/media/platform/qcom/camss/camss-ispif.c
++++ b/drivers/media/platform/qcom/camss/camss-ispif.c
+@@ -341,7 +341,8 @@ static int ispif_reset(struct ispif_device *ispif, u8 vfe_id)
+ 	if (ret)
+ 		dev_dbg(camss->dev, "ISPIF Reset failed\n");
+ 
+-	camss_disable_clocks(ispif->nclocks_for_reset, ispif->clock_for_reset);
++	camss_disable_clocks(ispif->nclocks_for_reset, ispif->clock_for_reset,
++			     ispif->camss->dev);
+ 
+ 	camss_pm_domain_off(camss, PM_DOMAIN_VFE0);
+ 	camss_pm_domain_off(camss, PM_DOMAIN_VFE1);
+@@ -385,7 +386,7 @@ static int ispif_set_power(struct v4l2_subdev *sd, int on)
+ 		ret = ispif_reset(ispif, line->vfe_id);
+ 		if (ret < 0) {
+ 			pm_runtime_put_sync(dev);
+-			camss_disable_clocks(ispif->nclocks, ispif->clock);
++			camss_disable_clocks(ispif->nclocks, ispif->clock, ispif->camss->dev);
+ 			goto exit;
+ 		}
+ 
+@@ -398,7 +399,7 @@ static int ispif_set_power(struct v4l2_subdev *sd, int on)
+ 			dev_err(dev, "ispif power off on power_count == 0\n");
+ 			goto exit;
+ 		} else if (ispif->power_count == 1) {
+-			camss_disable_clocks(ispif->nclocks, ispif->clock);
++			camss_disable_clocks(ispif->nclocks, ispif->clock, ispif->camss->dev);
+ 			pm_runtime_put_sync(dev);
+ 		}
+ 
+diff --git a/drivers/media/platform/qcom/camss/camss-tpg.c b/drivers/media/platform/qcom/camss/camss-tpg.c
+index c5b75132a..a9c951434 100644
+--- a/drivers/media/platform/qcom/camss/camss-tpg.c
++++ b/drivers/media/platform/qcom/camss/camss-tpg.c
+@@ -180,7 +180,7 @@ static int tpg_set_power(struct v4l2_subdev *sd, int on)
+ 
+ 		tpg->res->hw_ops->hw_version(tpg);
+ 	} else {
+-		camss_disable_clocks(tpg->nclocks, tpg->clock);
++		camss_disable_clocks(tpg->nclocks, tpg->clock, tpg->camss->dev);
+ 
+ 		pm_runtime_put_sync(dev);
+ 	}
+diff --git a/drivers/media/platform/qcom/camss/camss-vfe.c b/drivers/media/platform/qcom/camss/camss-vfe.c
+index 2fcef2e56..547580b6e 100644
+--- a/drivers/media/platform/qcom/camss/camss-vfe.c
++++ b/drivers/media/platform/qcom/camss/camss-vfe.c
+@@ -1229,7 +1229,7 @@ int vfe_get(struct vfe_device *vfe)
+ 	return 0;
+ 
+ error_reset:
+-	camss_disable_clocks(vfe->nclocks, vfe->clock);
++	camss_disable_clocks(vfe->nclocks, vfe->clock, vfe->camss->dev);
+ 
+ error_pm_runtime_get:
+ 	pm_runtime_put_sync(vfe->camss->dev);
+@@ -1258,7 +1258,7 @@ void vfe_put(struct vfe_device *vfe)
+ 			vfe->was_streaming = 0;
+ 			vfe->res->hw_ops->vfe_halt(vfe);
+ 		}
+-		camss_disable_clocks(vfe->nclocks, vfe->clock);
++		camss_disable_clocks(vfe->nclocks, vfe->clock, vfe->camss->dev);
+ 		pm_runtime_put_sync(vfe->camss->dev);
+ 		vfe->res->hw_ops->pm_domain_off(vfe);
+ 	}
+diff --git a/drivers/media/platform/qcom/camss/camss.c b/drivers/media/platform/qcom/camss/camss.c
+index 2ee824159..aff759d8e 100644
+--- a/drivers/media/platform/qcom/camss/camss.c
++++ b/drivers/media/platform/qcom/camss/camss.c
+@@ -8,6 +8,7 @@
+  * Copyright (C) 2015-2018 Linaro Ltd.
+  */
+ #include <linux/clk.h>
++#include <linux/ctype.h>
+ #include <linux/interconnect.h>
+ #include <linux/media-bus-format.h>
+ #include <linux/media.h>
+@@ -28,6 +29,8 @@
+ #include <media/v4l2-mc.h>
+ #include <media/v4l2-fwnode.h>
+ 
++#include <dt-bindings/power/qcom,rpmhpd.h>
++
+ #include "camss.h"
+ 
+ /*
+@@ -4569,20 +4572,131 @@ inline void camss_add_clock_margin(u64 *rate)
+ 	*rate = div_u64(*rate, CAMSS_CLOCK_MARGIN_DENOMINATOR);
+ }
+ 
++static bool camss_clock_name_match(const char *pattern, const char *name)
++{
++	for (; *pattern && *name; pattern++, name++)
++		if (*pattern != *name && !(*pattern == '#' && isdigit(*name)))
++			return false;
++
++	return !*pattern && !*name;
++}
++
++/* The rail level a clock needs at its current rate, 0 if not listed */
++static u32 camss_clock_level(struct camss *camss, const struct camss_clock *clock)
++{
++	const struct camss_resources *res = camss->res;
++	u32 level = 0, best = U32_MAX, top = 0;
++	unsigned long rate;
++	unsigned int i;
++	bool listed = false;
++
++	rate = clk_get_rate(clock->clk);
++	for (i = 0; i < res->clock_levels_num; i++) {
++		const struct camss_clock_level *l = &res->clock_levels[i];
++
++		if (!camss_clock_name_match(l->clock, clock->name))
++			continue;
++		listed = true;
++		top = max(top, l->level);
++		if (rate <= l->rate && l->rate < best) {
++			best = l->rate;
++			level = l->level;
++		}
++	}
++
++	if (listed && !level) {
++		dev_warn_once(camss->dev, "%s at %lu Hz is above its rail levels\n",
++			      clock->name, rate);
++		level = top;
++	}
++
++	return level;
++}
++
++/*
++ * Vote the rail level of one subdevice's clocks (@key, 0 to drop the vote) on
++ * the CAMSS power domain, which passes it on to the rail (MMCX).
++ */
++static int camss_vote_level(struct camss *camss, const struct camss_clock *key,
++			    u32 level)
++{
++	struct device *pd = camss->genpd ?: camss->dev;
++	unsigned int i, free = CAMSS_LEVEL_VOTES, added = CAMSS_LEVEL_VOTES;
++	u32 max = 0;
++	int ret = 0;
++
++	mutex_lock(&camss->level_lock);
++	for (i = 0; i < CAMSS_LEVEL_VOTES; i++) {
++		if (camss->level_votes[i].key == key) {
++			camss->level_votes[i].level = level;
++			if (!level)
++				camss->level_votes[i].key = NULL;
++			break;
++		}
++		if (!camss->level_votes[i].key && free == CAMSS_LEVEL_VOTES)
++			free = i;
++	}
++	if (i == CAMSS_LEVEL_VOTES && level) {
++		if (free == CAMSS_LEVEL_VOTES) {
++			ret = -ENOSPC;
++			goto out;
++		}
++		camss->level_votes[free].key = key;
++		camss->level_votes[free].level = level;
++		added = free;
++	}
++
++	for (i = 0; i < CAMSS_LEVEL_VOTES; i++)
++		if (camss->level_votes[i].key)
++			max = max(max, camss->level_votes[i].level);
++
++	if (max != camss->level) {
++		ret = dev_pm_genpd_set_performance_state(pd, max);
++		if (!ret) {
++			dev_dbg(camss->dev, "rail level %u -> %u\n", camss->level, max);
++			camss->level = max;
++		} else if (added < CAMSS_LEVEL_VOTES) {
++			/* The caller fails and never drops this vote */
++			camss->level_votes[added].key = NULL;
++		}
++	}
++out:
++	mutex_unlock(&camss->level_lock);
++	if (ret)
++		dev_err(camss->dev, "rail level %u: %d\n", max, ret);
++
++	return ret;
++}
++
+ /*
+  * camss_enable_clocks - Enable multiple clocks
+  * @nclocks: Number of clocks in clock array
+  * @clock: Clock array
+  * @dev: Device
+  *
++ * The rates are set: the rail level they need is voted for first, on
++ * platforms that list it.
++ *
+  * Return 0 on success or a negative error code otherwise
+  */
+ int camss_enable_clocks(int nclocks, struct camss_clock *clock,
+ 			struct device *dev)
+ {
++	struct camss *camss = dev_get_drvdata(dev);
++	u32 level = 0;
+ 	int ret;
+ 	int i;
+ 
++	if (camss && camss->res->clock_levels) {
++		for (i = 0; i < nclocks; i++)
++			level = max(level, camss_clock_level(camss, &clock[i]));
++		if (level) {
++			ret = camss_vote_level(camss, clock, level);
++			if (ret)
++				return ret;
++		}
++	}
++
+ 	for (i = 0; i < nclocks; i++) {
+ 		ret = clk_prepare_enable(clock[i].clk);
+ 		if (ret) {
+@@ -4596,6 +4710,8 @@ int camss_enable_clocks(int nclocks, struct camss_clock *clock,
+ error:
+ 	for (i--; i >= 0; i--)
+ 		clk_disable_unprepare(clock[i].clk);
++	if (level)
++		camss_vote_level(camss, clock, 0);
+ 
+ 	return ret;
+ }
+@@ -4604,13 +4720,21 @@ int camss_enable_clocks(int nclocks, struct camss_clock *clock,
+  * camss_disable_clocks - Disable multiple clocks
+  * @nclocks: Number of clocks in clock array
+  * @clock: Clock array
++ * @dev: Device
++ *
++ * Then drop their rail level vote.
+  */
+-void camss_disable_clocks(int nclocks, struct camss_clock *clock)
++void camss_disable_clocks(int nclocks, struct camss_clock *clock,
++			  struct device *dev)
+ {
++	struct camss *camss = dev_get_drvdata(dev);
+ 	int i;
+ 
+ 	for (i = nclocks - 1; i >= 0; i--)
+ 		clk_disable_unprepare(clock[i].clk);
++
++	if (camss && camss->res->clock_levels)
++		camss_vote_level(camss, clock, 0);
+ }
+ 
+ /*
+@@ -5481,6 +5605,7 @@ static int camss_probe(struct platform_device *pdev)
+ 
+ 	atomic_set(&camss->ref_count, 0);
+ 	camss->dev = dev;
++	mutex_init(&camss->level_lock);
+ 	platform_set_drvdata(pdev, camss);
+ 
+ 	camss->csiphy = devm_kcalloc(dev, camss->res->csiphy_num,
+@@ -5792,6 +5917,33 @@ static const struct camss_resources sm8250_resources = {
+ 	.vfe_num = ARRAY_SIZE(vfe_res_8250),
+ };
+ 
++/*
++ * SC8280XP camcc rail levels (MMCX), the same in the Windows PEP clock plan
++ * (qcpep8280.sys) and in the vendor's camcc-direwolf.c. Clocks only ever at
++ * LOW_SVS here are left to camcc's own vote.
++ */
++static const struct camss_clock_level clock_levels_sc8280xp[] = {
++	{ "vfe#", 400000000, RPMH_REGULATOR_LEVEL_LOW_SVS },
++	{ "vfe#", 558000000, RPMH_REGULATOR_LEVEL_SVS },
++	{ "vfe#", 637000000, RPMH_REGULATOR_LEVEL_SVS_L1 },
++	{ "vfe#", 760000000, RPMH_REGULATOR_LEVEL_NOM },
++	{ "vfe_lite#", 320000000, RPMH_REGULATOR_LEVEL_LOW_SVS },
++	{ "vfe_lite#", 400000000, RPMH_REGULATOR_LEVEL_SVS },
++	{ "vfe_lite#", 480000000, RPMH_REGULATOR_LEVEL_SVS_L1 },
++	{ "vfe_lite#", 600000000, RPMH_REGULATOR_LEVEL_NOM },
++	{ "vfe#_csid", 400000000, RPMH_REGULATOR_LEVEL_LOW_SVS },
++	{ "vfe#_csid", 480000000, RPMH_REGULATOR_LEVEL_SVS_L1 },
++	{ "vfe#_csid", 600000000, RPMH_REGULATOR_LEVEL_NOM },
++	{ "vfe_lite#_csid", 400000000, RPMH_REGULATOR_LEVEL_LOW_SVS },
++	{ "vfe_lite#_csid", 480000000, RPMH_REGULATOR_LEVEL_SVS_L1 },
++	{ "vfe_lite#_csid", 600000000, RPMH_REGULATOR_LEVEL_NOM },
++	{ "camnoc_axi", 150000000, RPMH_REGULATOR_LEVEL_LOW_SVS },
++	{ "camnoc_axi", 266666667, RPMH_REGULATOR_LEVEL_SVS },
++	{ "camnoc_axi", 320000000, RPMH_REGULATOR_LEVEL_SVS_L1 },
++	{ "camnoc_axi", 400000000, RPMH_REGULATOR_LEVEL_NOM },
++	{ "camnoc_axi", 480000000, RPMH_REGULATOR_LEVEL_TURBO },
++};
++
+ static const struct camss_resources sc8280xp_resources = {
+ 	.version = CAMSS_8280XP,
+ 	.pd_name = "top",
+@@ -5804,6 +5956,8 @@ static const struct camss_resources sc8280xp_resources = {
+ 	.csiphy_num = ARRAY_SIZE(csiphy_res_sc8280xp),
+ 	.csid_num = ARRAY_SIZE(csid_res_sc8280xp),
+ 	.vfe_num = ARRAY_SIZE(vfe_res_sc8280xp),
++	.clock_levels = clock_levels_sc8280xp,
++	.clock_levels_num = ARRAY_SIZE(clock_levels_sc8280xp),
+ };
+ 
+ static const struct camss_resources sc7280_resources = {
+diff --git a/drivers/media/platform/qcom/camss/camss.h b/drivers/media/platform/qcom/camss/camss.h
+index 3a35b9ec7..8b3a08a6a 100644
+--- a/drivers/media/platform/qcom/camss/camss.h
++++ b/drivers/media/platform/qcom/camss/camss.h
+@@ -104,6 +104,20 @@ enum icc_count {
+ 	ICC_SM8250_COUNT = 4,
+ };
+ 
++/*
++ * The rail level (RPMh corner) a clock needs: up to @rate, @level. Clocks a
++ * platform lists here are voted for on its power domain while enabled.
++ * '#' in @clock matches one digit.
++ */
++struct camss_clock_level {
++	const char *clock;
++	u32 rate;
++	u32 level;
++};
++
++/* Subdevices with clocks enabled at once, each with its own rail vote */
++#define CAMSS_LEVEL_VOTES	32
++
+ struct camss_resources {
+ 	enum camss_version version;
+ 	const char *pd_name;
+@@ -119,6 +133,8 @@ struct camss_resources {
+ 	const unsigned int tpg_num;
+ 	const unsigned int csid_num;
+ 	const unsigned int vfe_num;
++	const struct camss_clock_level *clock_levels;
++	const unsigned int clock_levels_num;
+ };
+ 
+ struct camss {
+@@ -139,6 +155,13 @@ struct camss {
+ 	void __iomem *csid_wrapper_base;
+ 	atomic_t ref_count;
+ 	int genpd_num;
++	/* Rail level votes of the subdevices with clocks enabled */
++	struct mutex level_lock;
++	struct {
++		const struct camss_clock *key;
++		u32 level;
++	} level_votes[CAMSS_LEVEL_VOTES];
++	u32 level;
+ 	struct device *genpd;
+ 	struct device_link *genpd_link;
+ 	struct icc_path *icc_path[ICC_SM8250_COUNT];
+@@ -171,7 +194,8 @@ struct parent_dev_ops {
+ void camss_add_clock_margin(u64 *rate);
+ int camss_enable_clocks(int nclocks, struct camss_clock *clock,
+ 			struct device *dev);
+-void camss_disable_clocks(int nclocks, struct camss_clock *clock);
++void camss_disable_clocks(int nclocks, struct camss_clock *clock,
++			  struct device *dev);
+ struct media_pad *camss_find_sensor_pad(struct media_entity *entity);
+ s64 camss_get_link_freq(struct media_entity *entity, unsigned int bpp,
+ 			unsigned int lanes);

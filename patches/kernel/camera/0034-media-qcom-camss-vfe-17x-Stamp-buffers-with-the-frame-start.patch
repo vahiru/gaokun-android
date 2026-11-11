@@ -1,0 +1,210 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: qcom: camss: vfe-17x: Stamp buffers with the frame start
+
+The buffers of the pixel path were stamped when their write master
+completed. The outputs of one frame complete at different times: the
+display output with a zoom window that leaves out the bottom of the
+frame ends up to a third of a frame early, so the timestamp of a request
+moved with the zoom (8 ms at 2x, 10 ms at 3x on the rear camera) and
+with whether it carried a full resolution buffer.
+
+Stamp the image, display and statistics buffers with the time of epoch 0
+of their frame, which already numbers them, taken at the entry of the
+interrupt. Pair the dual IFE statistics buffers by their completion
+time, which the timestamp no longer is.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ .../platform/qcom/camss/camss-vfe-17x-meta.c  | 48 +++++++++++--------
+ .../platform/qcom/camss/camss-vfe-17x-meta.h  |  4 +-
+ .../media/platform/qcom/camss/camss-vfe-17x.c | 14 +++---
+ 3 files changed, 39 insertions(+), 27 deletions(-)
+
+diff --git a/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.c b/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.c
+index 52f475532..870d5d921 100644
+--- a/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.c
++++ b/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.c
+@@ -285,7 +285,7 @@ struct vfe_pix_meta {
+ 	 */
+ 	u32 seq_base;
+ 	bool seq_based;
+-	u64 epoch_ns;		/* time of the last epoch 0 */
++	u64 epoch_ns;		/* time of the last epoch 0: the frame's start */
+ 	u64 period_ns;		/* between the last two epochs 0 */
+ 	u8 gamma_bank;		/* LUT banks in use: 0 even, 1 odd */
+ 	u8 abf_bank;		/* ABF noise LUT bank in use */
+@@ -1168,8 +1168,9 @@ static void ife_stats_finish(struct vfe_pix_meta *meta, struct ife_stats_buf *bu
+ 				meta->nheld * sizeof(meta->held[0]));
+ 			vb2_buffer_done(&old->vb.vb2_buf, VB2_BUF_STATE_ERROR);
+ 		}
++		/* Paired by completion time, not by the frame start time */
+ 		meta->held[meta->nheld].buf = buf;
+-		meta->held[meta->nheld].ts = buf->vb.vb2_buf.timestamp;
++		meta->held[meta->nheld].ts = ktime_get_ns();
+ 		meta->nheld++;
+ 		wake_up(&meta->stats_wq);
+ 		return;
+@@ -1498,7 +1499,11 @@ bool vfe17x_meta_join_locked(struct vfe_device *vfe)
+  * next parameters nor a statistics buffer, which stay with the frame of
+  * their request.
+  */
+-bool vfe17x_meta_epoch(struct vfe_device *vfe, bool next_written)
++/*
++ * Epoch 0 of the pixel path, at time @now: the interrupt's entry, not this
++ * call, which comes after the buffers done in the same interrupt.
++ */
++bool vfe17x_meta_epoch(struct vfe_device *vfe, bool next_written, u64 now)
+ {
+ 	struct vfe_pix_meta *meta = vfe->pix_meta;
+ 	bool applied = false;
+@@ -1543,13 +1548,9 @@ bool vfe17x_meta_epoch(struct vfe_device *vfe, bool next_written)
+ 	if (running) {
+ 		u32 frame = meta->frame;
+ 
+-		{
+-			u64 now = ktime_get_ns();
+-
+-			if (meta->frame)
+-				meta->period_ns = now - meta->epoch_ns;
+-			meta->epoch_ns = now;
+-		}
++		if (meta->frame)
++			meta->period_ns = now - meta->epoch_ns;
++		meta->epoch_ns = now;
+ 		meta->frame++;
+ 		meta->next_written = next_written;
+ 		meta->join_open = true;
+@@ -1596,11 +1597,6 @@ void vfe17x_meta_epoch1(struct vfe_device *vfe, bool late)
+ 	spin_unlock(&meta->lock);
+ }
+ 
+-/*
+- * Number a completed image of the pixel path by the epochs, like the stats, so
+- * images, statistics and parameters keep the same frame numbers when the
+- * driver runs out of image buffers.
+- */
+ /*
+  * Whether the first frame of the stream started (its epoch came). A buffer
+  * that completes before belongs to a frame that began before the stream:
+@@ -1639,7 +1635,17 @@ bool vfe17x_meta_before_first_frame(struct vfe_device *vfe)
+ 	return before;
+ }
+ 
+-void vfe17x_meta_sequence(struct vfe_device *vfe, u32 *sequence)
++/*
++ * Number a completed image of the pixel path, or of an RDI line of the same
++ * VFE while the pixel path runs, by the epochs like the statistics, so images,
++ * statistics and parameters keep the same frame numbers when the driver runs
++ * out of image buffers. Stamp it with the start of its frame (epoch 0, line
++ * CAMIF_EPOCH0_LINE) rather than its completion: the outputs of a frame end at
++ * different times (the display output ends early on a window that leaves out
++ * the bottom of the frame), and every buffer of a frame should carry the same
++ * time.
++ */
++void vfe17x_meta_frame(struct vfe_device *vfe, u32 *sequence, u64 *timestamp)
+ {
+ 	struct vfe_pix_meta *meta = vfe->pix_meta;
+ 	unsigned long flags;
+@@ -1648,8 +1654,10 @@ void vfe17x_meta_sequence(struct vfe_device *vfe, u32 *sequence)
+ 		return;
+ 
+ 	spin_lock_irqsave(&meta->lock, flags);
+-	if (meta->running && meta->frame)
++	if (meta->running && meta->frame) {
+ 		*sequence = ife_seq(meta, meta->frame - 1);
++		*timestamp = meta->epoch_ns;
++	}
+ 	spin_unlock_irqrestore(&meta->lock, flags);
+ }
+ 
+@@ -1712,10 +1720,12 @@ void vfe17x_meta_bus(struct vfe_device *vfe, u32 bus_status1)
+ 		/*
+ 		 * Frame k's statistics complete between epochs 0 of frames k
+ 		 * and k + 1: number them from the epochs, so they match the
+-		 * image even if they were turned on after the stream start.
++		 * image even if they were turned on after the stream start,
++		 * and stamp them with the start of the frame like the images
++		 * (vfe17x_meta_frame()).
+ 		 */
+ 		done->vb.sequence = ife_seq(meta, meta->frame - 1);
+-		done->vb.vb2_buf.timestamp = ktime_get_ns();
++		done->vb.vb2_buf.timestamp = meta->epoch_ns;
+ 		ife_stats_finish(meta, done, true);
+ 	}
+ 	spin_unlock(&meta->lock);
+diff --git a/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.h b/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.h
+index ac4e50338..a151f4ac9 100644
+--- a/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.h
++++ b/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.h
+@@ -21,7 +21,7 @@ void vfe17x_meta_stop(struct vfe_device *vfe);
+ void vfe17x_meta_fatal(struct vfe_device *vfe);
+ bool vfe17x_meta_frame_started(struct vfe_device *vfe);
+ bool vfe17x_meta_before_first_frame(struct vfe_device *vfe);
+-bool vfe17x_meta_epoch(struct vfe_device *vfe, bool next_written);
++bool vfe17x_meta_epoch(struct vfe_device *vfe, bool next_written, u64 now);
+ bool vfe17x_meta_running(struct vfe_device *vfe);
+ bool vfe17x_meta_running_locked(struct vfe_device *vfe);
+ u64 vfe17x_meta_period_ns(struct vfe_device *vfe);
+@@ -34,6 +34,6 @@ const struct ife17x_params_display_window *
+ vfe17x_meta_next_window_locked(struct vfe_device *vfe);
+ void vfe17x_meta_bus(struct vfe_device *vfe, u32 bus_status1);
+ void vfe17x_meta_epoch1(struct vfe_device *vfe, bool late);
+-void vfe17x_meta_sequence(struct vfe_device *vfe, u32 *sequence);
++void vfe17x_meta_frame(struct vfe_device *vfe, u32 *sequence, u64 *timestamp);
+ 
+ #endif /* QC_MSM_CAMSS_VFE_17X_META_H */
+diff --git a/drivers/media/platform/qcom/camss/camss-vfe-17x.c b/drivers/media/platform/qcom/camss/camss-vfe-17x.c
+index 71de6bc55..c175b3231 100644
+--- a/drivers/media/platform/qcom/camss/camss-vfe-17x.c
++++ b/drivers/media/platform/qcom/camss/camss-vfe-17x.c
+@@ -2330,15 +2330,16 @@ void vfe17x_disp_stop(struct vfe_pix_disp *disp)
+ }
+ 
+ /*
+- * Master's output lock held: number a display buffer done at @ts by the
+- * epochs, like the image path's (vfe_isr_wm_done()).
++ * Master's output lock held: number and stamp a display buffer by the epochs,
++ * like the image path's (vfe_isr_wm_done()); @ts, its completion time, only
++ * when the pixel path does not run.
+  */
+ static void vfe_disp_number(struct vfe_device *master, struct vfe_pix_disp *disp,
+ 			    struct camss_buffer *buf, u64 ts)
+ {
+ 	buf->vb.vb2_buf.timestamp = ts;
+ 	buf->vb.sequence = disp->output.sequence++;
+-	vfe17x_meta_sequence(master, &buf->vb.sequence);
++	vfe17x_meta_frame(master, &buf->vb.sequence, &buf->vb.vb2_buf.timestamp);
+ }
+ 
+ /*
+@@ -2548,6 +2549,7 @@ static void vfe17x_disp_done(struct vfe_device *vfe)
+ static irqreturn_t vfe_isr(int irq, void *dev)
+ {
+ 	struct vfe_device *vfe = dev;
++	u64 now = ktime_get_ns();
+ 	u32 status0, status1, vfe_bus_status[3];
+ 	int i, wm;
+ 
+@@ -2623,7 +2625,7 @@ static irqreturn_t vfe_isr(int irq, void *dev)
+ 	if (status0 & STATUS_0_CAMIF_EPOCH0) {
+ 		bool next_written = vfe17x_epoch_refill(vfe);
+ 
+-		if (vfe17x_meta_epoch(vfe, next_written)) {
++		if (vfe17x_meta_epoch(vfe, next_written, now)) {
+ 			spin_lock(&vfe->output_lock);
+ 			vfe_reg_update(vfe, VFE_LINE_PIX);
+ 			spin_unlock(&vfe->output_lock);
+@@ -2901,9 +2903,9 @@ static void vfe_isr_wm_done(struct vfe_device *vfe, u8 wm)
+ 	/*
+ 	 * While the pixel path runs, the RDI lines of the same VFE number
+ 	 * their frames by its epochs too, so that RAW and processed buffers of
+-	 * one sensor frame carry the same sequence.
++	 * one sensor frame carry the same sequence and timestamp.
+ 	 */
+-	vfe17x_meta_sequence(vfe, &ready_buf->vb.sequence);
++	vfe17x_meta_frame(vfe, &ready_buf->vb.sequence, &ready_buf->vb.vb2_buf.timestamp);
+ 	bad = output->error;
+ 	output->error = false;
+ 

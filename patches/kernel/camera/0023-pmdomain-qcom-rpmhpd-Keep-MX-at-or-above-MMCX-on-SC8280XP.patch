@@ -1,0 +1,62 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] pmdomain: qcom: rpmhpd: Keep MX at or above MMCX on SC8280XP
+
+The memories of the multimedia blocks run from MX, so MX must not sit
+below MMCX. The Windows PEP for this SoC (qcpep8280.sys) makes its MMCX
+node depend on MX and raises MX to the same level before MMCX; Linux
+leaves MX to whatever the other subsystems vote, which can be low with
+the display off while the camera runs MMCX at TURBO.
+
+Give SC8280XP's MMCX (and its active-only peer) MX as parent, as
+cx_w_mx_parent does for CX elsewhere. SA8540P shares the table indexes
+but is left alone here, untested.
+
+Tested: boots, display on with MX following MMCX at 416; with the
+display off, the camera full size path streams with MMCX and MX both at
+384, both back to 0 when idle.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/pmdomain/qcom/rpmhpd.c | 20 ++++++++++++++++++--
+ 1 file changed, 18 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/pmdomain/qcom/rpmhpd.c b/drivers/pmdomain/qcom/rpmhpd.c
+index 63120e703..355842c95 100644
+--- a/drivers/pmdomain/qcom/rpmhpd.c
++++ b/drivers/pmdomain/qcom/rpmhpd.c
+@@ -167,6 +167,22 @@ static struct rpmhpd mmcx_ao_w_cx_parent = {
+ 	.res_name = "mmcx.lvl",
+ };
+ 
++static struct rpmhpd mmcx_ao_w_mx_parent;
++static struct rpmhpd mmcx_w_mx_parent = {
++	.pd = { .name = "mmcx", },
++	.peer = &mmcx_ao_w_mx_parent,
++	.parent = &mx.pd,
++	.res_name = "mmcx.lvl",
++};
++
++static struct rpmhpd mmcx_ao_w_mx_parent = {
++	.pd = { .name = "mmcx_ao", },
++	.active_only = true,
++	.peer = &mmcx_w_mx_parent,
++	.parent = &mx_ao.pd,
++	.res_name = "mmcx.lvl",
++};
++
+ static struct rpmhpd mss = {
+ 	.pd = { .name = "mss", },
+ 	.res_name = "mss.lvl",
+@@ -788,8 +804,8 @@ static struct rpmhpd *sc8280xp_rpmhpds[] = {
+ 	[SC8280XP_GFX] = &gfx,
+ 	[SC8280XP_LCX] = &lcx,
+ 	[SC8280XP_LMX] = &lmx,
+-	[SC8280XP_MMCX] = &mmcx,
+-	[SC8280XP_MMCX_AO] = &mmcx_ao,
++	[SC8280XP_MMCX] = &mmcx_w_mx_parent,
++	[SC8280XP_MMCX_AO] = &mmcx_ao_w_mx_parent,
+ 	[SC8280XP_MX] = &mx,
+ 	[SC8280XP_MX_AO] = &mx_ao,
+ 	[SC8280XP_MXC] = &mxc,

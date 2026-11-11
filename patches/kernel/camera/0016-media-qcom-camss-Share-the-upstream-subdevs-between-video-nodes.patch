@@ -1,0 +1,119 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: qcom: camss: Share the upstream subdevs between video nodes
+
+The pixel path and an RDI fed by the same CSID run from the same sensor
+stream. Starting the second video node called .s_stream(1) again on the
+CSID, the CSIPHY and the sensor, and stopping either node stopped them
+for both.
+
+Stop walking upstream at a subdev that streams already when starting,
+and at one that still feeds another streaming subdev through an enabled
+link when stopping.
+
+Disabling a line also reset the whole VFE, which stopped its other lines
+too: stopping an RDI stopped the pixel path running from the same CSID.
+Leave the reset to the last streaming line.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/media/platform/qcom/camss/camss-vfe.c |  8 ++++-
+ .../media/platform/qcom/camss/camss-video.c   | 34 +++++++++++++++++++
+ 2 files changed, 41 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/media/platform/qcom/camss/camss-vfe.c b/drivers/media/platform/qcom/camss/camss-vfe.c
+index f3e7a82d6..9323406df 100644
+--- a/drivers/media/platform/qcom/camss/camss-vfe.c
++++ b/drivers/media/platform/qcom/camss/camss-vfe.c
+@@ -909,6 +909,7 @@ static int vfe_disable_output(struct vfe_line *line)
+ 	struct vfe_output *output = &line->output;
+ 	unsigned long flags;
+ 	unsigned int i;
++	bool last;
+ 
+ 	spin_lock_irqsave(&vfe->output_lock, flags);
+ 	for (i = 0; i < output->wm_num; i++)
+@@ -916,7 +917,12 @@ static int vfe_disable_output(struct vfe_line *line)
+ 	output->gen2.active_num = 0;
+ 	spin_unlock_irqrestore(&vfe->output_lock, flags);
+ 
+-	return vfe_reset(vfe);
++	/* The reset stops every line of the VFE: leave it to the last one */
++	mutex_lock(&vfe->stream_lock);
++	last = vfe->stream_count == 1;
++	mutex_unlock(&vfe->stream_lock);
++
++	return last ? vfe_reset(vfe) : 0;
+ }
+ 
+ /*
+diff --git a/drivers/media/platform/qcom/camss/camss-video.c b/drivers/media/platform/qcom/camss/camss-video.c
+index fc990ae29..82ad60131 100644
+--- a/drivers/media/platform/qcom/camss/camss-video.c
++++ b/drivers/media/platform/qcom/camss/camss-video.c
+@@ -251,6 +251,30 @@ static int video_prepare_streaming(struct vb2_queue *q)
+ 	return ret;
+ }
+ 
++/*
++ * Video nodes can share the subdevs upstream of a VFE line: the pixel path and
++ * an RDI fed by the same CSID run from the same sensor stream. Whether another
++ * enabled link leads from @entity to a streaming subdev other than @from.
++ */
++static bool video_entity_shared(struct media_entity *entity,
++				struct media_entity *from)
++{
++	struct media_link *link;
++
++	for_each_media_entity_data_link(entity, link) {
++		struct media_entity *sink = link->sink->entity;
++
++		if (link->source->entity != entity ||
++		    !(link->flags & MEDIA_LNK_FL_ENABLED) || sink == from ||
++		    !is_media_entity_v4l2_subdev(sink))
++			continue;
++		if (media_entity_to_v4l2_subdev(sink)->s_stream_enabled)
++			return true;
++	}
++
++	return false;
++}
++
+ static int video_start_streaming(struct vb2_queue *q, unsigned int count)
+ {
+ 	struct camss_video *video = vb2_get_drv_priv(q);
+@@ -283,6 +307,10 @@ static int video_start_streaming(struct vb2_queue *q, unsigned int count)
+ 		entity = pad->entity;
+ 		subdev = media_entity_to_v4l2_subdev(entity);
+ 
++		/* Shared with a node that streams already, as is all upstream */
++		if (subdev->s_stream_enabled)
++			break;
++
+ 		ret = v4l2_subdev_call(subdev, video, s_stream, 1);
+ 		if (ret < 0 && ret != -ENOIOCTLCMD)
+ 			goto error;
+@@ -306,6 +334,7 @@ static void video_stop_streaming(struct vb2_queue *q)
+ 	struct media_entity *entity;
+ 	struct media_pad *pad;
+ 	struct v4l2_subdev *subdev;
++	struct media_entity *from;
+ 	int ret;
+ 
+ 	entity = &vdev->entity;
+@@ -318,9 +347,14 @@ static void video_stop_streaming(struct vb2_queue *q)
+ 		if (!pad || !is_media_entity_v4l2_subdev(pad->entity))
+ 			break;
+ 
++		from = entity;
+ 		entity = pad->entity;
+ 		subdev = media_entity_to_v4l2_subdev(entity);
+ 
++		/* Still feeding another streaming node: keep it and upstream */
++		if (video_entity_shared(entity, from))
++			break;
++
+ 		ret = v4l2_subdev_call(subdev, video, s_stream, 0);
+ 
+ 		if (ret) {
