@@ -14,8 +14,8 @@
 #  2. 需要 python 模块 **ply**（生成 IPA 接口代码用）。缺了报
 #     `ERROR: Problem encountered: Python module 'ply' not found`，
 #     在 configure 的最后一步才炸。Debian 上是 `python3-ply`。
-#  3. 选项名不能猜：是 **`-Dipas=softisp`** 不是 `simple`
-#     （`meson_options.txt:49-53` 的 choices 里没有 simple）。
+#  3. 选项名不能猜：照 `meson_options.txt` 的 choices 写（现在是
+#     `-Dpipelines=qcom-ife -Dipas=qcom-ife`，qcom-ife 由 patches/libcamera 加入）。
 #  4. ⚠️★ 没有 gnutls/libcrypto 时 `isSignatureValid()` **无条件返回 false**
 #     （`src/libcamera/ipa_manager.cpp:313` 的 `#else return false`），
 #     于是 **IPA 一律跑在独立进程里**（Isolated 而非 Threaded）。
@@ -65,7 +65,7 @@ rm -rf "$BUILD"
 # prefix 用设备上的路径：libcamera 会把它编进去找 IPA 模块/配置文件。
 meson setup "$BUILD" --cross-file "$CROSS" \
     --buildtype=release --prefix=/data/local/tmp/lc \
-    -Dandroid=disabled -Dpipelines=simple -Dipas=softisp \
+    -Dandroid=disabled -Dpipelines=qcom-ife -Dipas=qcom-ife \
     -Dcam=disabled -Dqcam=disabled -Dgstreamer=disabled \
     -Dlc-compliance=disabled -Dpycamera=disabled -Dv4l2=disabled \
     -Dudev=disabled -Ddocumentation=disabled -Dtracing=disabled \
@@ -75,4 +75,4 @@ meson setup "$BUILD" --cross-file "$CROSS" \
 
 ninja -C "$BUILD" -j"$(nproc)"
 echo "✅ 编译完成，产物："
-find "$BUILD" -name "libcamera*.so*" -o -name "*ipa_soft*" | head
+find "$BUILD" -name "libcamera*.so*" -o -name "*ipa_qcom_ife*" | head

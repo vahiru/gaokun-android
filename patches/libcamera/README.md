@@ -22,10 +22,16 @@
 | `0011-libcamera-software-isp-correct-phase-detection-pixels-before-debayering.patch` | 在去拜耳前插值修补OV13B10全尺寸模式下的PDAF相位检测像素，消除成片中32像素周期的蓝点网格 |
 | `0012-ipa-libipa-agc-filter-over-the-frames-between-statistics.patch` | 软件ISP每4帧统计一次亮度，AGC滤波按统计间隔帧数折算收敛速度 |
 | `0013-ipa-libipa-agc-mean-luminance-keep-the-target-within-the-exposure-limits.patch` | 将AGC有效目标值钳制在最大曝光×最大增益可达范围内，防止从极暗环境回到亮处时长时间过曝 |
+| `0014-libcamera-sensor-add-the-exposure-and-gain-delays-of-the-hi846-and-ov13b10.patch` | 前后摄曝光、增益与`VBLANK`的生效延迟（实测均为2帧） |
+| `0015-libcamera-report-unrecoverable-v4l2-queue-errors.patch` | 驱动把队列标为出错（`vb2_queue_error()`）后，`V4L2VideoDevice`停止轮询并发出`queueError`信号，供管线重启数据流 |
+| `0016-ipa-libipa-agc-avoid-light-flicker.patch` | 通用AGC支持`AeFlickerMode`/`AeFlickerPeriod`（关闭、手动），曝光取整到闪烁周期的整数倍（默认10 ms，对应50 Hz市电） |
+| `0017-include-linux-add-the-qualcomm-ife-17x-isp-header.patch` | IFE参数与统计缓冲区的UAPI头`ife17x-config.h`（须与内核`patches/kernel/camera`中的同名头一致）及两个meta格式 |
+| `0018-libcamera-add-the-qcom-ife-pipeline-handler-and-ipa.patch` | `qcom-ife`管线与IPA：IFE硬件ISP出NV12、双IFE、显示输出与`ScalerCrop`、RDI原始流（相位对焦）、出错重启；IPA做AGC（拜耳直方图约束、防闪烁）、AWB、CCM、黑电平、伽马、镜头阴影、坏点与PD像素修正、ABF降噪表、对焦统计；含前后摄调校文件 |
 | `libcamera-Android.bp` | AOSP Soong构建定义（复制到`external/libcamera/Android.bp`） |
 | `config.h` | 替代meson生成的`config.h`，将IPA与配置文件路径指向`/vendor/`对应目录 |
 
 ## 二、构建说明
 
 1. **必须在AOSP树内由Soong编译**：Android NDK的`libc++`使用`std::__ndk1`内联命名空间，而AOSP平台使用`std::__1`。跨工具链预编译会导致所有含标准库类型参数的C++符号无法链接。
-2. **生成源码准备**：Soong构建消费的6个生成源文件（`control_ids.cpp`、`property_ids.cpp`、`version.cpp`、`ipa_pub_key.cpp`、`softisp_ipa_proxy.cpp`及`generated/include/libcamera/**`）由`scripts/camera/build-libcamera-android.sh`运行meson生成后拷入`external/libcamera/`。
+2. **生成源码准备**：Soong构建消费的5个生成源文件（`control_ids.cpp`、`property_ids.cpp`、`version.cpp`、`ipa_pub_key.cpp`、`qcom-ife_ipa_proxy.cpp`）与`generated/include/libcamera/**`由[`scripts/camera/gen-libcamera-sources.sh`](../../scripts/camera/gen-libcamera-sources.sh)运行meson生成后放入`external/libcamera/generated/`。[`scripts/camera/setup-libcamera-tree.sh`](../../scripts/camera/setup-libcamera-tree.sh)一次完成铺上游源码、打补丁、放置`Android.bp`、生成与`config.h`。
+3. **只编`qcom-ife`**：`libcamera-Android.bp`编出`libcamera_base_gk3`、`libcamera_gk3`（管线只有`qcom-ife`）与`libcamera_ipa_qcom_ife_gk3`，调校文件由`device.mk`从`device/huawei/gaokun3/camera/ipa-data/qcom-ife/`安装到`/vendor/etc/libcamera/ipa/qcom-ife/`，须与`0018`中`src/ipa/qcom-ife/data/`的同名文件一致。软件ISP（`simple`管线与`softisp` IPA）不再编译；`0006`、`0007`、`0009`–`0011`只改软件ISP，保留在补丁集中以便后续`0014`起的补丁按原顺序打上。

@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Generate device/huawei/gaokun3/camera/ipa-data/softisp/ov13b10.yaml.
+"""Generate the Awb and Ccm data of the ov13b10 tuning.
+
+This prints a whole tuning file in the format of the software ISP, which used
+it first. The qcom-ife tuning (device/huawei/gaokun3/camera/ipa-data/qcom-ife/
+ov13b10.yaml, the same file as src/ipa/qcom-ife/data/ov13b10.yaml of
+patches/libcamera) takes its Awb and Ccm sections unchanged.
 
 The colour correction matrices come from the tuning Huawei's Windows camera
 driver ships for this camera module: com.qti.tuned.ofilm_ov13b10.bin in

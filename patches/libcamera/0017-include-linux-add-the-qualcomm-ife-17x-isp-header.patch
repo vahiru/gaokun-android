@@ -1,0 +1,666 @@
+From 18685bccd3900ea72afe2c073abd19637282e5d5 Mon Sep 17 00:00:00 2001
+From: Akisaira <akisaira@outlook.com>
+Date: Wed, 11 Nov 2026 18:27:41 +1100
+Subject: [PATCH] include: linux: Add the Qualcomm IFE 17x ISP header
+
+The parameters and statistics buffers of the CAMSS IFE pixel path on
+Titan 17x (SC8280XP): ife17x-config.h, identical to the kernel UAPI
+header of the same name, and the two meta formats in videodev2.h.
+
+Signed-off-by: Akisaira <akisaira@outlook.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+Origin: local
+Upstream-Status: Pending
+---
+ include/linux/media/qcom/ife17x-config.h | 622 +++++++++++++++++++++++
+ include/linux/videodev2.h                |   4 +
+ 2 files changed, 626 insertions(+)
+ create mode 100644 include/linux/media/qcom/ife17x-config.h
+
+diff --git a/include/linux/media/qcom/ife17x-config.h b/include/linux/media/qcom/ife17x-config.h
+new file mode 100644
+index 00000000..8a04ca09
+--- /dev/null
++++ b/include/linux/media/qcom/ife17x-config.h
+@@ -0,0 +1,622 @@
++/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
++/*
++ * Qualcomm CAMSS Titan 17x IFE pixel pipeline - parameters and statistics
++ *
++ * The parameters buffer uses the V4L2 extensible ISP parameters format
++ * (struct v4l2_isp_params_buffer): a sequence of the blocks below, each
++ * starting with a struct v4l2_isp_params_block_header. Blocks not present in
++ * a buffer keep their previous configuration while the stream runs. The IFE
++ * is reset when streaming starts: the blocks are then back to the driver's
++ * defaults until a buffer sets them, so the first buffer of a stream should
++ * carry the full configuration. Out of range values and non-zero reserved
++ * fields make the buffer invalid.
++ *
++ * Register layouts were derived from the SC8280XP Windows camera stack and
++ * measured on hardware; see the comments of each block.
++ */
++
++#ifndef __UAPI_QCOM_IFE17X_CONFIG_H
++#define __UAPI_QCOM_IFE17X_CONFIG_H
++
++#include <linux/types.h>
++#include <linux/media/v4l2-isp.h>
++
++/**
++ * enum ife17x_params_block_type - IFE parameter block types
++ *
++ * @IFE17X_PARAMS_BLOCK_BLS: black level subtraction (BLS12)
++ * @IFE17X_PARAMS_BLOCK_WB: white balance gains (WB12)
++ * @IFE17X_PARAMS_BLOCK_CCM: colour correction matrix (CC12)
++ * @IFE17X_PARAMS_BLOCK_GAMMA: gamma curves (Gamma16)
++ * @IFE17X_PARAMS_BLOCK_AWB_BG: AWB Bayer grid statistics (AWBBGStats14)
++ * @IFE17X_PARAMS_BLOCK_PDPC: phase detection pixel correction (PDPC11)
++ * @IFE17X_PARAMS_BLOCK_BF: focus statistics (BFStats23)
++ * @IFE17X_PARAMS_BLOCK_ABF: adaptive Bayer filter (ABF34)
++ * @IFE17X_PARAMS_BLOCK_BPC: bad pixel and bad cluster correction (BPCBCC50)
++ * @IFE17X_PARAMS_BLOCK_LSC: lens shading correction (LSC34)
++ * @IFE17X_PARAMS_BLOCK_OUTPUTS: the outputs that write the frame
++ * @IFE17X_PARAMS_BLOCK_DISPLAY_WINDOW: the display output's window of the frame
++ * @IFE17X_PARAMS_BLOCK_BHIST: Bayer histogram statistics (BHistStats14)
++ */
++enum ife17x_params_block_type {
++	IFE17X_PARAMS_BLOCK_BLS,
++	IFE17X_PARAMS_BLOCK_WB,
++	IFE17X_PARAMS_BLOCK_CCM,
++	IFE17X_PARAMS_BLOCK_GAMMA,
++	IFE17X_PARAMS_BLOCK_AWB_BG,
++	IFE17X_PARAMS_BLOCK_PDPC,
++	IFE17X_PARAMS_BLOCK_BF,
++	IFE17X_PARAMS_BLOCK_ABF,
++	IFE17X_PARAMS_BLOCK_BPC,
++	IFE17X_PARAMS_BLOCK_LSC,
++	IFE17X_PARAMS_BLOCK_OUTPUTS,
++	IFE17X_PARAMS_BLOCK_DISPLAY_WINDOW,
++	IFE17X_PARAMS_BLOCK_BHIST,
++};
++
++/**
++ * struct ife17x_params_bls - black level subtraction
++ * @header: block header, type IFE17X_PARAMS_BLOCK_BLS
++ * @offset: black level in the 14 bit pipeline units (sensor data MSB
++ *	    aligned: a 10 bit black level of 64 is 1024), at most 8191. The
++ *	    driver scales the remaining range back to full scale.
++ * @reserved: must be zero
++ *
++ * V4L2_ISP_PARAMS_FL_BLOCK_DISABLE bypasses the block.
++ */
++struct ife17x_params_bls {
++	struct v4l2_isp_params_block_header header;
++	__u16 offset;
++	__u16 reserved[3];
++} __attribute__((aligned(8)));
++
++/**
++ * struct ife17x_params_wb - white balance gains
++ * @header: block header, type IFE17X_PARAMS_BLOCK_WB
++ * @gain: red, green and blue gains, unsigned Q5.7 (1.0 = 128), at most 4095
++ * @reserved: must be zero
++ *
++ * The gains apply after the AWB statistics tap. V4L2_ISP_PARAMS_FL_BLOCK_DISABLE
++ * sets them to 1.0.
++ */
++struct ife17x_params_wb {
++	struct v4l2_isp_params_block_header header;
++	__u16 gain[3];
++	__u16 reserved;
++} __attribute__((aligned(8)));
++
++/**
++ * struct ife17x_params_ccm - colour correction matrix
++ * @header: block header, type IFE17X_PARAMS_BLOCK_CCM
++ * @coeff: matrix, rows are the red, green and blue outputs, columns the red,
++ *	   green and blue inputs; signed 12 bit (-2048..2047), 1.0 = 128 << @shift
++ * @offset: red, green and blue output offsets, signed 11 bit (-1024..1023)
++ * @shift: fractional bits beyond 7, 0..3
++ * @reserved: must be zero
++ *
++ * V4L2_ISP_PARAMS_FL_BLOCK_DISABLE bypasses the block.
++ */
++struct ife17x_params_ccm {
++	struct v4l2_isp_params_block_header header;
++	__s16 coeff[3][3];
++	__s16 offset[3];
++	__u8 shift;
++	__u8 reserved[7];
++} __attribute__((aligned(8)));
++
++#define IFE17X_GAMMA_NODES		65
++
++/**
++ * struct ife17x_params_gamma - gamma curves
++ * @header: block header, type IFE17X_PARAMS_BLOCK_GAMMA
++ * @curve: red, green and blue curves, 65 nodes evenly spaced over the input
++ *	   range, output 0..1023; the last node may be 1024; a node differs
++ *	   from the next one by -512..511
++ * @reserved: must be zero
++ *
++ * The driver loads the curves into the inactive LUT banks and switches banks
++ * with the next register update. V4L2_ISP_PARAMS_FL_BLOCK_DISABLE bypasses the
++ * block.
++ */
++struct ife17x_params_gamma {
++	struct v4l2_isp_params_block_header header;
++	__u16 curve[3][IFE17X_GAMMA_NODES];
++	__u16 reserved[5];
++} __attribute__((aligned(8)));
++
++#define IFE17X_AWB_BG_MAX_H		160
++#define IFE17X_AWB_BG_MAX_V		90
++
++/**
++ * struct ife17x_params_awb_bg - AWB Bayer grid statistics configuration
++ * @header: block header, type IFE17X_PARAMS_BLOCK_AWB_BG
++ * @h_num: regions per row, 1..160
++ * @v_num: region rows, 1..90
++ * @threshold: per channel high thresholds in 14 bit units (at most 16383), in
++ *	       the order red, blue, green on red rows, green on blue rows;
++ *	       pixels above are not counted
++ * @reserved: must be zero
++ *
++ * The grid covers the frame from its top left corner; regions are
++ * (width / h_num) & ~1 by (height / v_num) & ~1 pixels, clamped to 6..390 by
++ * 2..512. The statistics are taken after the black level subtraction and
++ * before the white balance gains. V4L2_ISP_PARAMS_FL_BLOCK_DISABLE stops them.
++ *
++ * With two IFEs (frames wider than 3840 pixels, processed in a left and a
++ * right stripe) each IFE covers its stripe: the left one with h_num / 2
++ * regions per row, the right one with the rest, h_num 1 counting as 2. The
++ * records of the left stripe come first, in row order, then those of the
++ * right stripe.
++ *
++ * A grid queued while the stream is stopped is also applied at every later
++ * stream start, until the parameters node stops streaming.
++ */
++struct ife17x_params_awb_bg {
++	struct v4l2_isp_params_block_header header;
++	__u16 h_num;
++	__u16 v_num;
++	__u16 threshold[4];
++	__u32 reserved;
++} __attribute__((aligned(8)));
++
++#define IFE17X_PDPC_MASK_ROWS		64
++
++/**
++ * struct ife17x_params_pdpc - phase detection pixel correction
++ * @header: block header, type IFE17X_PARAMS_BLOCK_PDPC
++ * @black_level: black level of the input in the 14 bit pipeline units (a 10
++ *		 bit level of 64 is 1024), at most 4095
++ * @fmax: upper limit of a phase detection pixel against its neighbours,
++ *	  unsigned Q6
++ * @fmin: lower limit, unsigned Q6
++ * @bp_offset: offsets for the green [0] and the red and blue [1] pixels, at
++ *	       most 32767
++ * @t2_bp_offset: second offsets, same order, at most 32767
++ * @wb_ratio: white balance gain ratios R/G, B/G, G/R and G/B, unsigned Q12,
++ *	      at most 131071
++ * @mask: phase detection pixels of a 64x64 pixel tile repeated over the
++ *	  frame from its top left corner: bit (31 - x / 2) of row y marks the
++ *	  pixel pair at columns x & ~1 and x | 1 that holds one
++ * @reserved: must be zero
++ *
++ * Corrects the pixels the mask marks over the whole frame. The field meanings
++ * follow the calculation of the Windows driver; the tested values are those
++ * of its ov13b10 tuning: fmax 80, fmin 32, offsets 128.
++ * V4L2_ISP_PARAMS_FL_BLOCK_DISABLE bypasses the block.
++ */
++struct ife17x_params_pdpc {
++	struct v4l2_isp_params_block_header header;
++	__u16 black_level;
++	__u8 fmax;
++	__u8 fmin;
++	__u16 bp_offset[2];
++	__u16 t2_bp_offset[2];
++	__u32 wb_ratio[4];
++	__u32 mask[IFE17X_PDPC_MASK_ROWS];
++	__u32 reserved;
++} __attribute__((aligned(8)));
++
++/* The ROI table has 180 entries, with an empty one before and after the regions */
++#define IFE17X_BF_MAX_ROIS		178
++/*
++ * With two IFEs the right stripe's records start at a fixed slot, after the
++ * left stripe's and the header the right stripe writes before its own.
++ */
++#define IFE17X_BF_DUAL_RIGHT		89
++#define IFE17X_BF_DUAL_LEFT_MAX		(IFE17X_BF_DUAL_RIGHT - 1)
++#define IFE17X_BF_DUAL_RIGHT_MAX	(IFE17X_BF_MAX_ROIS - IFE17X_BF_DUAL_RIGHT)
++#define IFE17X_BF_IIR_COEFFS		10
++#define IFE17X_BF_CORING_POINTS		17
++#define IFE17X_BF_GAMMA_POINTS		32
++
++/**
++ * struct ife17x_bf_roi - focus statistics region
++ * @left: first column, even, at least 76
++ * @top: first row, even, at least 36
++ * @width: columns, even, 6 to half the frame width
++ * @height: rows, even, 8 to half the frame height
++ *
++ * left + width is at most the frame width - 12, top + height the frame height
++ * - 4. Regions do not overlap and are listed in raster order of their bottom
++ * right corners, which are at least 6 columns apart from one region to the
++ * next; at most 21 start on one row. A grid of equal regions listed row by
++ * row fits.
++ */
++struct ife17x_bf_roi {
++	__u16 left;
++	__u16 top;
++	__u16 width;
++	__u16 height;
++};
++
++/**
++ * struct ife17x_bf_filter - one of the two focus filters
++ * @iir: two cascaded biquads, b0 b1 b2 a1 a2 for the first then the second,
++ *	 signed Q14, each H(z) = (b0 + b1 z^-1 + b2 z^-2) / (1 - a1 z^-1 - a2 z^-2)
++ * @shift: right shift of the filter output, 0 to 15
++ * @coring_gain: gain of the cored output, 0 to 1023 (16 in the tuning)
++ * @coring_threshold: coring threshold, 0 to 131071
++ * @coring: coring curve, 0 to 31
++ * @reserved: must be zero
++ */
++struct ife17x_bf_filter {
++	__s16 iir[IFE17X_BF_IIR_COEFFS];
++	__u8 shift;
++	__u8 reserved0;
++	__u16 coring_gain;
++	__u32 coring_threshold;
++	__u8 coring[IFE17X_BF_CORING_POINTS];
++	__u8 reserved[3];
++};
++
++/**
++ * struct ife17x_params_bf - focus statistics configuration
++ * @header: block header, type IFE17X_PARAMS_BLOCK_BF
++ * @num_rois: regions in @rois, 1 to IFE17X_BF_MAX_ROIS
++ * @green: green pixels the filters take, 0 or 1 (the tuning uses 0)
++ * @gamma_enable: map the input through @gamma first
++ * @num_left: with two IFEs, the regions the left stripe measures, from the
++ *	      start of @rois; the right stripe measures the others. Zero with
++ *	      one IFE
++ * @reserved: must be zero
++ * @gamma: gamma curve, 32 points of 14 bits; the slope after the last one
++ *	   reaches 0x8000, as the Windows driver programs it
++ * @h1: horizontal filter
++ * @v: vertical filter
++ * @rois: regions, in input pixels of the pixel path (the frame with two
++ *	  IFEs); the record of each one carries its index in this array
++ *
++ * With two IFEs each stripe measures its own regions, which must lie inside
++ * its input as the regions of one IFE lie inside the frame: the left stripe
++ * runs from column 0, the right stripe from the split minus the padding of
++ * the stripes (see the pipeline). The left stripe takes at most
++ * IFE17X_BF_DUAL_LEFT_MAX regions and the right one at most
++ * IFE17X_BF_DUAL_RIGHT_MAX; the regions of each part follow the order rules
++ * on their own. V4L2_ISP_PARAMS_FL_BLOCK_DISABLE stops the statistics.
++ *
++ * The defaults of the Windows ov13b10 tuning: green 0, gamma on and linear,
++ * both filters the IIR b {2926, 0, -2926}, a {28241, -13251}, b {5120, 0,
++ * -5120}, a {18960, -9991}, shift 3, coring gain 16, threshold 400, curve
++ * 0 0 0 0 0 0 1 1 2 3 4 5 7 9 11 13 16.
++ */
++struct ife17x_params_bf {
++	struct v4l2_isp_params_block_header header;
++	__u16 num_rois;
++	__u8 green;
++	__u8 gamma_enable;
++	__u16 num_left;
++	__u16 reserved;
++	__u16 gamma[IFE17X_BF_GAMMA_POINTS];
++	struct ife17x_bf_filter h1;
++	struct ife17x_bf_filter v;
++	struct ife17x_bf_roi rois[IFE17X_BF_MAX_ROIS];
++} __attribute__((aligned(8)));
++
++#define IFE17X_ABF_NOISE_NODES		65
++
++#define IFE17X_ABF_FL_FILTER		(1U << 0)
++#define IFE17X_ABF_FL_RADIAL		(1U << 1)
++#define IFE17X_ABF_FL_BPC		(1U << 2)
++
++/**
++ * struct ife17x_params_abf - adaptive Bayer filter
++ * @header: block header, type IFE17X_PARAMS_BLOCK_ABF
++ * @noise: inverse noise levels, 65 nodes evenly spaced over the input range,
++ *	   0..511, none above the one before it. CamX sets 8192 / (noise
++ *	   standard deviation * edge softness), limited to 511.
++ * @flags: IFE17X_ABF_FL_FILTER turns the filter on, IFE17X_ABF_FL_RADIAL the
++ *	   adjustment by the distance from the optical centre,
++ *	   IFE17X_ABF_FL_BPC the single bad pixel correction
++ * @pixel_match: 0..4 each
++ * @distance_ker: two sets of kernel weights, 1..4, 0..2 and 0..1
++ * @curve_offset: per Bayer channel, 0..64
++ * @bpc_fmax: 0..63
++ * @bpc_fmin: 0..63
++ * @bpc_max_shift: 0..14
++ * @bpc_min_shift: 0..14
++ * @bpc_offset: 0..4095
++ * @black_level: black level still in the data, 14 bit pipeline units like
++ *		 struct ife17x_params_bls, 0..4095
++ * @noise_prsv_anchor: start of the noise preservation ramp, 0..1023
++ * @noise_prsv_gap: length of the ramp, 0..1023
++ * @noise_prsv_lo: noise preserved before the ramp, in 1/256, 0..256, for
++ *		   two channels
++ * @noise_prsv_slope: slope of the ramp, -256..256
++ * @noise_prsv_shift: right shift of the slope, 0..10
++ * @radial_anchor: squared distances where the four radial segments start,
++ *		   0..4095, ascending
++ * @radial_gain: two radial curves: value at the start of each segment, 0..255
++ * @radial_slope: slope of each segment, 0..255
++ * @radial_shift: right shift of each segment's slope, 0..15
++ * @radial_x: column of the frame's left edge from the optical centre,
++ *	      -8192..8191
++ * @radial_y: row of the frame's top edge from the optical centre,
++ *	      -8192..8191
++ * @radial_r2_shift: right shift taking squared distances to the anchors'
++ *		     scale, 0..15
++ * @reserved: must be zero
++ *
++ * The field meanings are those of the Windows driver, where it names them; the
++ * hardware behaviour of most is not verified. The driver loads the noise
++ * table into the inactive LUT bank and switches banks with the next register
++ * update. With two IFEs, it gives the right one the distances of its own
++ * columns. V4L2_ISP_PARAMS_FL_BLOCK_DISABLE bypasses the block.
++ */
++struct ife17x_params_abf {
++	struct v4l2_isp_params_block_header header;
++	__u16 noise[IFE17X_ABF_NOISE_NODES];
++	__u16 flags;
++	__u8 pixel_match[2];
++	__u8 distance_ker[2][3];
++	__u8 curve_offset[4];
++	__u8 bpc_fmax;
++	__u8 bpc_fmin;
++	__u8 bpc_max_shift;
++	__u8 bpc_min_shift;
++	__u16 bpc_offset;
++	__u16 black_level;
++	__u16 noise_prsv_anchor;
++	__u16 noise_prsv_gap;
++	__u16 noise_prsv_lo[2];
++	__s16 noise_prsv_slope[2];
++	__u8 noise_prsv_shift[2];
++	__u16 radial_anchor[4];
++	__u8 radial_gain[2][4];
++	__u8 radial_slope[2][4];
++	__u8 radial_shift[2][4];
++	__s16 radial_x;
++	__s16 radial_y;
++	__u8 radial_r2_shift;
++	__u8 reserved[5];
++} __attribute__((aligned(8)));
++
++#define IFE17X_BPC_FL_HOT_OFF		(1U << 0)
++#define IFE17X_BPC_FL_COLD_OFF		(1U << 1)
++#define IFE17X_BPC_FL_SAME_CHANNEL	(1U << 2)
++
++/**
++ * struct ife17x_params_bpc - bad pixel and bad cluster correction
++ * @header: block header, type IFE17X_PARAMS_BLOCK_BPC
++ * @wb_ratio: white balance gain ratios R/G, B/G, G/R and G/B in unsigned Q12,
++ *	      at most 0x1ffff, to compare neighbours of other colours
++ * @flags: IFE17X_BPC_FL_HOT_OFF and IFE17X_BPC_FL_COLD_OFF leave hot and cold
++ *	   pixels; IFE17X_BPC_FL_SAME_CHANNEL compares neighbours of the same
++ *	   colour only
++ * @black_level: black level still in the data, 14 bit pipeline units like
++ *		 struct ife17x_params_bls, at most 4095
++ * @bpc_offset: offset for single bad pixels, at most 0x7fff
++ * @bcc_offset: offset for bad clusters, at most 0x7fff
++ * @threshold: correction threshold, at most 8191
++ * @fmax: upper limit of a pixel against its neighbours, unsigned Q6, 64..127
++ * @fmin: lower limit, unsigned Q6, at most 64
++ * @reserved: must be zero
++ *
++ * The field meanings are those of the Windows driver, where it names them; the
++ * flag names are inferred. V4L2_ISP_PARAMS_FL_BLOCK_DISABLE bypasses the block.
++ */
++struct ife17x_params_bpc {
++	struct v4l2_isp_params_block_header header;
++	__u32 wb_ratio[4];
++	__u16 flags;
++	__u16 black_level;
++	__u16 bpc_offset;
++	__u16 bcc_offset;
++	__u16 threshold;
++	__u8 fmax;
++	__u8 fmin;
++	__u32 reserved;
++} __attribute__((aligned(8)));
++
++/* At most 16 x 12 blocks: 17 x 13 nodes */
++#define IFE17X_LSC_MAX_H_BLOCKS		16
++#define IFE17X_LSC_MAX_V_BLOCKS		12
++#define IFE17X_LSC_MAX_NODES		221
++
++/**
++ * struct ife17x_params_lsc - lens shading correction
++ * @header: block header, type IFE17X_PARAMS_BLOCK_LSC
++ * @gain: gains of the red, green on red rows, green on blue rows and blue
++ *	  pixels at the grid nodes, row by row from the top left, unsigned Q10
++ *	  from 1024 to 8191; (h_blocks + 1) * (v_blocks + 1) nodes are used
++ * @h_blocks: blocks across the grid, 1 to 16
++ * @v_blocks: blocks down the grid, 1 to 12
++ * @subgrid_shift: each block holds 2^subgrid_shift x 2^subgrid_shift
++ *		   subgrids, 0..3
++ * @reserved0: must be zero
++ * @block_width: block width in Bayer quads (2 x 2 pixels), 18..2048, a
++ *		 multiple of 2^subgrid_shift whose subgrids are 9 quads or
++ *		 wider
++ * @block_height: block height in quads, 9..1024, likewise with subgrids of 9
++ *		  quads or more
++ * @start_x: quads from the grid's left edge to the frame's first column
++ * @start_y: quads from the grid's top edge to the frame's first row
++ * @reserved: must be zero
++ *
++ * The grid covers the frame, in the units of the IFE input. The layout comes
++ * from the Windows driver; the hardware behaviour is not verified. The
++ * driver loads the gains into the inactive LUT banks and switches banks with
++ * the next register update. With two IFEs, both take the frame's grid and the
++ * driver starts the right one at its first column.
++ * V4L2_ISP_PARAMS_FL_BLOCK_DISABLE bypasses the block.
++ */
++struct ife17x_params_lsc {
++	struct v4l2_isp_params_block_header header;
++	__u16 gain[4][IFE17X_LSC_MAX_NODES];
++	__u8 h_blocks;
++	__u8 v_blocks;
++	__u8 subgrid_shift;
++	__u8 reserved0;
++	__u16 block_width;
++	__u16 block_height;
++	__u16 start_x;
++	__u16 start_y;
++	__u32 reserved;
++} __attribute__((aligned(8)));
++
++#define IFE17X_OUTPUT_FULL		(1U << 0)
++#define IFE17X_OUTPUT_DISPLAY		(1U << 1)
++#define IFE17X_OUTPUT_RDI		(1U << 2)
++
++/**
++ * struct ife17x_params_outputs - the outputs that write the frame
++ * @header: block header, type IFE17X_PARAMS_BLOCK_OUTPUTS
++ * @outputs: IFE17X_OUTPUT_* flags, at least IFE17X_OUTPUT_FULL or
++ *	     IFE17X_OUTPUT_DISPLAY
++ * @reserved: must be zero
++ *
++ * The frame these parameters apply to is written once every output named has
++ * a buffer for it, and only those get one, so a request can leave out the
++ * full output or the RDI. Outputs not linked when the pixel path started are
++ * left out of the list. Without the block the full output decides, with the
++ * display output when its link is on, and the RDI lines follow.
++ * V4L2_ISP_PARAMS_FL_BLOCK_DISABLE means no block.
++ */
++struct ife17x_params_outputs {
++	struct v4l2_isp_params_block_header header;
++	__u32 outputs;
++	__u32 reserved;
++} __attribute__((aligned(8)));
++
++/**
++ * struct ife17x_params_display_window - the display output's window of the
++ * frame
++ * @header: block header, type IFE17X_PARAMS_BLOCK_DISPLAY_WINDOW
++ * @compose_width: width of the whole frame scaled, as the display subdev's
++ *		   sink compose rectangle (with dual IFE the whole frame of both
++ *		   stripes)
++ * @compose_height: height of the whole frame scaled, likewise
++ * @crop_left: left edge of the display output in the scaled frame; its size
++ *	       is that of the display subdev's source crop rectangle, which
++ *	       does not change while streaming
++ * @crop_top: top edge of the display output in the scaled frame
++ * @reserved: must be zero
++ *
++ * The window holds from the frame these parameters apply to until another
++ * block changes it; at stream start it is the display subdev's compose and
++ * crop rectangles. A window the driver cannot take (a compose rectangle
++ * outside the scaler limits: larger than the sink or more than 16 times
++ * smaller; odd values; the crop not inside the compose rectangle) makes the
++ * buffer invalid when the driver can tell as it is queued, and is ignored
++ * otherwise: the frame keeps the previous window.
++ * V4L2_ISP_PARAMS_FL_BLOCK_DISABLE means no block.
++ */
++struct ife17x_params_display_window {
++	struct v4l2_isp_params_block_header header;
++	__u16 compose_width;
++	__u16 compose_height;
++	__u16 crop_left;
++	__u16 crop_top;
++	__u32 reserved[2];
++} __attribute__((aligned(8)));
++
++#define IFE17X_BHIST_BINS		1024
++
++#define IFE17X_BHIST_CHANNEL_Y		0
++#define IFE17X_BHIST_CHANNEL_R		1
++#define IFE17X_BHIST_CHANNEL_GR		2
++#define IFE17X_BHIST_CHANNEL_GB		3
++#define IFE17X_BHIST_CHANNEL_B		4
++
++/**
++ * struct ife17x_params_bhist - Bayer histogram statistics configuration
++ * @header: block header, type IFE17X_PARAMS_BLOCK_BHIST
++ * @channel: the channel counted, IFE17X_BHIST_CHANNEL_*
++ * @reserved0: must be zero
++ * @left: left edge of the window, in frame pixels (with two IFEs the frame of
++ *	  both stripes), even
++ * @top: top edge of the window, even
++ * @width: width of the window, even, at least 2
++ * @height: height of the window, even, at least 2
++ * @reserved: must be zero
++ *
++ * The histogram counts the pixels of the channel inside the window into
++ * IFE17X_BHIST_BINS bins of equal width over the 14 bit range: per 2 by 2
++ * pixel block one count, of its pixel of the channel or, for the Y channel,
++ * of its luminance before the white balance gains. The window is clamped to
++ * the frame, and stretched down to end at least an eighth of the frame down. The statistics
++ * are taken at the same place as the AWB grid's, after the black level
++ * subtraction. V4L2_ISP_PARAMS_FL_BLOCK_DISABLE stops them.
++ *
++ * With two IFEs each IFE counts the part of the window in its stripe: the
++ * left one into bhist[0], the right one into bhist[1] (struct
++ * ife17x_stats_buffer). The left stripe ends and the right one starts at the
++ * column the right stripe's output starts from. An IFE whose stripe the
++ * window misses, by less than 2 columns of it once the edges are made even,
++ * counts a 2 by 2 pixel window in the last rows of its stripe, which the
++ * histogram of the window does not include.
++ */
++struct ife17x_params_bhist {
++	struct v4l2_isp_params_block_header header;
++	__u16 channel;
++	__u16 reserved0;
++	__u16 left;
++	__u16 top;
++	__u16 width;
++	__u16 height;
++	__u32 reserved;
++} __attribute__((aligned(8)));
++
++#define IFE17X_PARAMS_MAX_SIZE					\
++	(sizeof(struct ife17x_params_bls) +			\
++	 sizeof(struct ife17x_params_wb) +			\
++	 sizeof(struct ife17x_params_ccm) +			\
++	 sizeof(struct ife17x_params_gamma) +			\
++	 sizeof(struct ife17x_params_awb_bg) +			\
++	 sizeof(struct ife17x_params_pdpc) +			\
++	 sizeof(struct ife17x_params_bf) +			\
++	 sizeof(struct ife17x_params_abf) +			\
++	 sizeof(struct ife17x_params_bpc) +			\
++	 sizeof(struct ife17x_params_lsc) +			\
++	 sizeof(struct ife17x_params_outputs) +			\
++	 sizeof(struct ife17x_params_display_window) +		\
++	 sizeof(struct ife17x_params_bhist))
++
++/**
++ * struct ife17x_awb_bg_region - AWB Bayer grid record, as the hardware
++ * writes it
++ * @sum: sums of the counted pixels: red, blue, green on red rows, green on
++ *	 blue rows
++ * @count: counted pixels, same order
++ */
++struct ife17x_awb_bg_region {
++	__u32 sum[4];
++	__u16 count[4];
++};
++
++/**
++ * struct ife17x_bf_record - focus statistics of a region, as the hardware
++ * writes it
++ * @w: w[0] [36:0] H1 sum, [61:39] H1 count, [63] region type;
++ *     w[1] [39:0] H1 sharpness, [61:54] region index (of the configured list);
++ *     w[2] [36:0] V sum, [61:39] V count; w[3] [39:0] V sharpness
++ */
++struct ife17x_bf_record {
++	__u64 w[4];
++};
++
++/**
++ * struct ife17x_stats_buffer - statistics of one frame
++ * @awb_bg: AWB grid, h_num * v_num records in row order (with two IFEs, the
++ *	    left stripe's grid and then the right stripe's, see struct
++ *	    ife17x_params_awb_bg); the rest of the array is undefined
++ * @bf_header: written by the hardware before the focus records
++ * @bf: focus records of the configured regions, in an order of their own:
++ *	the region index tells which; undefined without focus statistics. With
++ *	two IFEs the left stripe's records start at bf[0] and the right
++ *	stripe's at bf[IFE17X_BF_DUAL_RIGHT]: the header the right stripe
++ *	writes before its records ends bf[IFE17X_BF_DUAL_RIGHT - 1]
++ * @bhist: Bayer histogram, counts in bits [24:0] of each bin (struct
++ *	   ife17x_params_bhist); bhist[1] only with two IFEs, for the right
++ *	   stripe; undefined without the histogram
++ *
++ * The buffer sequence number is the frame sequence number of the image the
++ * statistics describe.
++ */
++struct ife17x_stats_buffer {
++	struct ife17x_awb_bg_region awb_bg[IFE17X_AWB_BG_MAX_H * IFE17X_AWB_BG_MAX_V];
++	__u64 bf_header;
++	struct ife17x_bf_record bf[IFE17X_BF_MAX_ROIS];
++	__u32 bhist[2][IFE17X_BHIST_BINS] __attribute__((aligned(64)));
++};
++
++#endif /* __UAPI_QCOM_IFE17X_CONFIG_H */
+diff --git a/include/linux/videodev2.h b/include/linux/videodev2.h
+index 8bccad84..7145db2f 100644
+--- a/include/linux/videodev2.h
++++ b/include/linux/videodev2.h
+@@ -864,6 +864,10 @@ struct v4l2_pix_format {
+ #define V4L2_META_FMT_MALI_C55_PARAMS	v4l2_fourcc('C', '5', '5', 'P') /* ARM Mali-C55 Parameters */
+ #define V4L2_META_FMT_MALI_C55_STATS	v4l2_fourcc('C', '5', '5', 'S') /* ARM Mali-C55 3A Statistics */
+ 
++/* Vendor specific - used for Qualcomm CAMSS Titan 17x IFE pixel pipeline */
++#define V4L2_META_FMT_QCOM_IFE17X_PARAMS	v4l2_fourcc('Q', 'I', '7', 'P') /* Qualcomm IFE 17x Parameters */
++#define V4L2_META_FMT_QCOM_IFE17X_STATS	v4l2_fourcc('Q', 'I', '7', 'S') /* Qualcomm IFE 17x 3A Statistics */
++
+ /*
+  * Line-based metadata formats. Remember to update v4l_fill_fmtdesc() when
+  * adding new ones!
+-- 
+2.53.0
+

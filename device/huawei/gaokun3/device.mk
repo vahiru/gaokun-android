@@ -645,7 +645,7 @@ PRODUCT_SOONG_NAMESPACES += device/generic/goldfish
 PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/wifi/wpa_supplicant.conf:$(TARGET_COPY_OUT_VENDOR)/etc/wifi/wpa_supplicant.conf
 
-# ─── 相机 HAL（AIDL，基于 libcamera 的软件 ISP）───
+# ─── 相机 HAL（AIDL，基于 libcamera 与 IFE 硬件 ISP）───
 # 背景：三条便宜路都走不通，只能自己写 AIDL（docs/dev/camera.md）：
 #   ❌ HIDL + 上游 provider@2.4-legacy —— 本机 hwservicemanager 根本不存在，
 #      且 FCM 202504 的兼容性矩阵里 camera.provider 只剩 format="aidl"
@@ -659,7 +659,7 @@ PRODUCT_PACKAGES += \
     android.hardware.camera.provider-service.gaokun3 \
     libcamera_gk3 \
     libcamera_base_gk3 \
-    libcamera_ipa_softisp_gk3
+    libcamera_ipa_qcom_ife_gk3
 
 # ⚠️★★ 相机设备节点的权限**并进 ueventd.gaokun3.rc**，不要另开一个文件往
 #   /vendor/etc/ueventd.rc 拷 —— 那个目标只能有一份，另拷一份会把原有的
@@ -668,16 +668,15 @@ PRODUCT_PACKAGES += \
 #    PRODUCT_COPY_FILES 目标重复。）
 PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/camera/gaokun3-camera-features.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/gaokun3-camera-features.xml \
-    $(LOCAL_PATH)/camera/ipa-data/softisp/hi846.yaml:$(TARGET_COPY_OUT_VENDOR)/etc/libcamera/ipa/softisp/hi846.yaml \
-    $(LOCAL_PATH)/camera/ipa-data/softisp/ov13b10.yaml:$(TARGET_COPY_OUT_VENDOR)/etc/libcamera/ipa/softisp/ov13b10.yaml \
-    $(LOCAL_PATH)/camera/ipa-data/softisp/uncalibrated.yaml:$(TARGET_COPY_OUT_VENDOR)/etc/libcamera/ipa/softisp/uncalibrated.yaml
+    $(LOCAL_PATH)/camera/ipa-data/qcom-ife/hi846.yaml:$(TARGET_COPY_OUT_VENDOR)/etc/libcamera/ipa/qcom-ife/hi846.yaml \
+    $(LOCAL_PATH)/camera/ipa-data/qcom-ife/ov13b10.yaml:$(TARGET_COPY_OUT_VENDOR)/etc/libcamera/ipa/qcom-ife/ov13b10.yaml \
+    $(LOCAL_PATH)/camera/ipa-data/qcom-ife/uncalibrated.yaml:$(TARGET_COPY_OUT_VENDOR)/etc/libcamera/ipa/qcom-ife/uncalibrated.yaml
 
-# ⚠️★ 软件 ISP 的 IPA 【必须】能读到调优文件，否则 IPASoftIsp::init() 直接返回
-#   错误 → "Failed to create software ISP, disabling software debayering"
-#   → libcamera 退回原始拜耳 → 我们要的 RGB888 不可用 → configure 被调整成
-#   SGBRG10_CSI2P/RAW → STREAMON 失败。整条因果链里**没有一处提到调优文件**。
+# ⚠️★ qcom-ife 的 IPA【必须】能读到调优文件（<传感器型号>.yaml，没有则用
+#   uncalibrated.yaml），否则 IPA 初始化失败，这颗摄像头不会注册。
 #   路径布局是 <IPA_CONFIG_DIR>/<ipa名>/<文件名>（libcamera ipa_proxy.cpp:57），
 #   而 IPA_CONFIG_DIR 由我们自己的 config.h 定成 /vendor/etc/libcamera/ipa。
+#   这三份文件须与 patches/libcamera 里 src/ipa/qcom-ife/data/ 的同名文件一致。
 
 # ─── Stage 4: 蓝牙（WCN6855 / hci_qca，AOSP 原装 HAL 直接可用）───
 # ⚠️ 2026-08-19 发现：#34 记了"把这个 HAL 推进 vendor 即可"，但那句话

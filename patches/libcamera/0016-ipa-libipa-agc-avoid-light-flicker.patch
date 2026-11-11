@@ -1,0 +1,359 @@
+From 08f1fe63590ee0caf3ff039141d42885e4334044 Mon Sep 17 00:00:00 2001
+From: Akisaira <akisaira@outlook.com>
+Date: Wed, 11 Nov 2026 18:27:41 +1100
+Subject: [PATCH] ipa: libipa: agc: Avoid light flicker
+
+Lights on AC mains flicker at twice the mains frequency. With a rolling
+shutter, an exposure time that is not a whole number of flicker periods
+lets each line integrate a different amount of light, and the frame shows
+horizontal bands that move from frame to frame.
+
+Support the AeFlickerMode (Off, Manual) and AeFlickerPeriod controls in
+the common AGC algorithm with the mean luminance implementation. With a
+manual flicker period, ExposureModeHelper::splitExposure() shortens an
+exposure time of at least one period to a whole number of periods and
+raises the gain to keep the exposure value. Shorter exposure times are
+kept as they are, as no exposure time avoids the bands there.
+
+The default period of 10 ms matches 50 Hz mains. Flicker detection is
+not implemented, so AeFlickerMode does not offer FlickerAuto.
+
+Signed-off-by: Akisaira <akisaira@outlook.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+Origin: local
+Upstream-Status: Pending
+---
+ src/ipa/libipa/agc.cpp                  | 58 +++++++++++++++++++++++++
+ src/ipa/libipa/agc.h                    |  4 ++
+ src/ipa/libipa/agc_mean_luminance.cpp   | 21 +++++++--
+ src/ipa/libipa/agc_mean_luminance.h     |  1 +
+ src/ipa/libipa/exposure_mode_helper.cpp | 32 +++++++++++++-
+ src/ipa/libipa/exposure_mode_helper.h   |  6 ++-
+ 6 files changed, 116 insertions(+), 6 deletions(-)
+
+diff --git a/src/ipa/libipa/agc.cpp b/src/ipa/libipa/agc.cpp
+index adcc6cbb..d141c299 100644
+--- a/src/ipa/libipa/agc.cpp
++++ b/src/ipa/libipa/agc.cpp
+@@ -39,6 +39,18 @@ using namespace std::chrono_literals;
+ 
+ LOG_DEFINE_CATEGORY(Agc)
+ 
++namespace {
++
++/*
++ * Flicker periods the AeFlickerPeriod control accepts. The default is the
++ * 100 Hz flicker of lights on 50 Hz mains.
++ */
++constexpr utils::Duration kMinFlickerPeriod = 100us;
++constexpr utils::Duration kMaxFlickerPeriod = 1s;
++constexpr utils::Duration kDefaultFlickerPeriod = 10ms;
++
++} /* namespace */
++
+ namespace agc {
+ 
+ /**
+@@ -167,6 +179,12 @@ namespace agc {
+  * \var ActiveState::exposureMode
+  * \brief Exposure mode as set by the AeExposureMode control
+  *
++ * \var ActiveState::flickerMode
++ * \brief Flicker avoidance mode as set by the AeFlickerMode control
++ *
++ * \var ActiveState::flickerPeriod
++ * \brief Flicker period as set by the AeFlickerPeriod control
++ *
+  * \var ActiveState::minFrameDuration
+  * \brief Minimum frame duration as set by the FrameDurationLimits control
+  *
+@@ -210,6 +228,12 @@ namespace agc {
+  * \var FrameContext::exposureMode
+  * \brief Exposure mode as set by the AeExposureMode control
+  *
++ * \var FrameContext::flickerMode
++ * \brief Flicker avoidance mode as set by the AeFlickerMode control
++ *
++ * \var FrameContext::flickerPeriod
++ * \brief Flicker period as set by the AeFlickerPeriod control
++ *
+  * \var FrameContext::minFrameDuration
+  * \brief Minimum frame duration as set by the FrameDurationLimits control
+  *
+@@ -483,6 +507,8 @@ int AgcAlgorithm::configure(agc::Session &session, agc::ActiveState &state,
+ 	state.autoExposureEnabled = session.autoAllowed;
+ 	state.autoGainEnabled = session.autoAllowed;
+ 	state.exposureValue = 0;
++	state.flickerMode = controls::FlickerOff;
++	state.flickerPeriod = kDefaultFlickerPeriod;
+ 	if (config.setsFrameLength) {
+ 		state.minFrameDuration = frameHeights[2] * session.lineDuration;
+ 		state.maxFrameDuration = frameHeights[2] * session.lineDuration;
+@@ -500,6 +526,8 @@ int AgcAlgorithm::configure(agc::Session &session, agc::ActiveState &state,
+ 	config.ctrlMap.erase(&controls::ExposureValue);
+ 	config.ctrlMap.erase(&controls::AeConstraintMode);
+ 	config.ctrlMap.erase(&controls::AeExposureMode);
++	config.ctrlMap.erase(&controls::AeFlickerMode);
++	config.ctrlMap.erase(&controls::AeFlickerPeriod);
+ 
+ 	/* \todo Move this to the `Camera` class. */
+ 	config.ctrlMap[&controls::AeEnable] = ControlInfo{
+@@ -583,6 +611,15 @@ int AgcAlgorithm::configure(agc::Session &session, agc::ActiveState &state,
+ 			for (const auto &[id, _] : impl.exposureModeHelpers())
+ 				options.emplace_back(id);
+ 			config.ctrlMap[&controls::AeExposureMode] = ControlInfo(options);
++
++			config.ctrlMap[&controls::AeFlickerMode] = ControlInfo(
++				std::array{ ControlValue(controls::FlickerOff),
++					    ControlValue(controls::FlickerManual) },
++				ControlValue(controls::FlickerOff));
++			config.ctrlMap[&controls::AeFlickerPeriod] = ControlInfo(
++				static_cast<int32_t>(kMinFlickerPeriod.get<std::micro>()),
++				static_cast<int32_t>(kMaxFlickerPeriod.get<std::micro>()),
++				static_cast<int32_t>(kDefaultFlickerPeriod.get<std::micro>()));
+ 		},
+ 	}, impl_);
+ 
+@@ -683,6 +720,17 @@ void AgcAlgorithm::queueRequest(const agc::Session &session, agc::ActiveState &s
+ 			static_cast<controls::AeConstraintModeEnum>(*constraintMode);
+ 	frameContext.constraintMode = state.constraintMode;
+ 
++	const auto &flickerMode = controls.get(controls::AeFlickerMode);
++	if (flickerMode)
++		state.flickerMode = static_cast<controls::AeFlickerModeEnum>(*flickerMode);
++	const auto &flickerPeriod = controls.get(controls::AeFlickerPeriod);
++	if (flickerPeriod)
++		state.flickerPeriod = std::clamp<utils::Duration>(
++			std::chrono::microseconds(*flickerPeriod),
++			kMinFlickerPeriod, kMaxFlickerPeriod);
++	frameContext.flickerMode = state.flickerMode;
++	frameContext.flickerPeriod = state.flickerPeriod;
++
+ 	const auto &exposureValue = controls.get(controls::ExposureValue);
+ 	if (exposureValue)
+ 		state.exposureValue = *exposureValue;
+@@ -869,6 +917,9 @@ void AgcAlgorithm::process(const agc::Session &session, agc::ActiveState &state,
+ 				.lux = params->lux,
+ 				.exposureCompensation = std::pow(2.0, frameContext.exposureValue),
+ 				.frames = params->frames,
++				.flickerPeriod = frameContext.flickerMode == controls::FlickerManual
++						 ? frameContext.flickerPeriod
++						 : utils::Duration{},
+ 			});
+ 
+ 			/* Update the estimated exposure and gain. */
+@@ -963,6 +1014,13 @@ void AgcAlgorithm::fillMetadata(const agc::Session &session,
+ 
+ 	metadata.set(controls::AeExposureMode, frameContext.exposureMode);
+ 	metadata.set(controls::AeConstraintMode, frameContext.constraintMode);
++	/* Only the mean luminance implementation avoids flicker */
++	if (std::holds_alternative<AgcMeanLuminance>(impl_)) {
++		metadata.set(controls::AeFlickerMode, frameContext.flickerMode);
++		if (frameContext.flickerMode == controls::FlickerManual)
++			metadata.set(controls::AeFlickerPeriod,
++				     static_cast<int32_t>(frameContext.flickerPeriod.get<std::micro>()));
++	}
+ 	metadata.set(controls::ExposureValue, frameContext.exposureValue);
+ }
+ 
+diff --git a/src/ipa/libipa/agc.h b/src/ipa/libipa/agc.h
+index 95852b08..f50e4ff9 100644
+--- a/src/ipa/libipa/agc.h
++++ b/src/ipa/libipa/agc.h
+@@ -72,6 +72,8 @@ struct ActiveState {
+ 	double exposureValue;
+ 	controls::AeConstraintModeEnum constraintMode;
+ 	controls::AeExposureModeEnum exposureMode;
++	controls::AeFlickerModeEnum flickerMode;
++	utils::Duration flickerPeriod;
+ 	utils::Duration minFrameDuration;
+ 	utils::Duration maxFrameDuration;
+ };
+@@ -87,6 +89,8 @@ struct FrameContext {
+ 	bool autoGainEnabled;
+ 	controls::AeConstraintModeEnum constraintMode;
+ 	controls::AeExposureModeEnum exposureMode;
++	controls::AeFlickerModeEnum flickerMode;
++	utils::Duration flickerPeriod;
+ 	utils::Duration minFrameDuration;
+ 	utils::Duration maxFrameDuration;
+ 	utils::Duration frameDuration;
+diff --git a/src/ipa/libipa/agc_mean_luminance.cpp b/src/ipa/libipa/agc_mean_luminance.cpp
+index 4ed0e1bd..11195e0a 100644
+--- a/src/ipa/libipa/agc_mean_luminance.cpp
++++ b/src/ipa/libipa/agc_mean_luminance.cpp
+@@ -648,6 +648,11 @@ utils::Duration AgcMeanLuminance::filterExposure(utils::Duration exposureValue,
+  * The exposure value moves towards the target as far as calculations on each
+  * of these frames would have moved it, for pipelines that compute statistics
+  * on some frames only.
++ *
++ * \var AgcMeanLuminance::Params::flickerPeriod
++ * \brief The period of the light flicker the exposure time avoids, 0 for none
++ *
++ * \sa ExposureModeHelper::splitExposure()
+  */
+ 
+ /**
+@@ -692,7 +697,7 @@ AgcMeanLuminance::calculateNewEv(const Params &params)
+ 		 * doesn't get stuck with 0 in case the sensor driver allows a
+ 		 * min exposure of 0.
+ 		 */
+-		return { exposureModeHelper.splitExposure(10ms), yTarget };
++		return { exposureModeHelper.splitExposure(10ms, params.flickerPeriod), yTarget };
+ 	}
+ 
+ 	double gain = estimateInitialGain(params.traits, yTarget);
+@@ -716,8 +721,17 @@ AgcMeanLuminance::calculateNewEv(const Params &params)
+ 	 */
+ 	const utils::Duration minExposureValue =
+ 		exposureModeHelper.minExposureTime() * exposureModeHelper.minGain();
++	/* Avoiding flicker, the exposure time takes whole periods at most. */
++	utils::Duration maxExposureTime = exposureModeHelper.maxExposureTime();
++	if (params.flickerPeriod && maxExposureTime >= params.flickerPeriod) {
++		const utils::Duration periods =
++			static_cast<long>(maxExposureTime / params.flickerPeriod) *
++			params.flickerPeriod;
++		if (periods >= exposureModeHelper.minExposureTime())
++			maxExposureTime = periods;
++	}
+ 	const utils::Duration maxExposureValue =
+-		exposureModeHelper.maxExposureTime() * exposureModeHelper.maxGain();
++		maxExposureTime * exposureModeHelper.maxGain();
+ 	newExposureValue = std::clamp(newExposureValue, minExposureValue, maxExposureValue);
+ 	/* The limits change with the frame duration and manual controls too. */
+ 	if (frameCount_)
+@@ -731,7 +745,8 @@ AgcMeanLuminance::calculateNewEv(const Params &params)
+ 	newExposureValue = filterExposure(newExposureValue, params.frames);
+ 
+ 	frameCount_++;
+-	return { exposureModeHelper.splitExposure(newExposureValue), yTarget };
++	return { exposureModeHelper.splitExposure(newExposureValue, params.flickerPeriod),
++		 yTarget };
+ }
+ 
+ } /* namespace ipa */
+diff --git a/src/ipa/libipa/agc_mean_luminance.h b/src/ipa/libipa/agc_mean_luminance.h
+index 0083df09..8545b4f6 100644
+--- a/src/ipa/libipa/agc_mean_luminance.h
++++ b/src/ipa/libipa/agc_mean_luminance.h
+@@ -70,6 +70,7 @@ public:
+ 		double lux = 0;
+ 		double exposureCompensation = 1;
+ 		unsigned int frames = 1;
++		utils::Duration flickerPeriod = {};
+ 	};
+ 
+ 	struct Result : ExposureModeHelper::Result {
+diff --git a/src/ipa/libipa/exposure_mode_helper.cpp b/src/ipa/libipa/exposure_mode_helper.cpp
+index b3e75f63..ee1d6fe1 100644
+--- a/src/ipa/libipa/exposure_mode_helper.cpp
++++ b/src/ipa/libipa/exposure_mode_helper.cpp
+@@ -141,6 +141,26 @@ utils::Duration ExposureModeHelper::clampExposureTime(utils::Duration exposureTi
+ 	return exp;
+ }
+ 
++/*
++ * Shorten an exposure time to a whole number of flicker periods, so that every
++ * line integrates the same amount of light from a flickering source. An
++ * exposure time shorter than one period, or one the limits do not allow to
++ * shorten, is kept: the bands are then unavoidable.
++ */
++utils::Duration ExposureModeHelper::avoidFlicker(utils::Duration exposureTime,
++						 utils::Duration flickerPeriod,
++						 double *quantizationGain) const
++{
++	if (!flickerPeriod || exposureTime < flickerPeriod)
++		return exposureTime;
++
++	utils::Duration periods = static_cast<long>(exposureTime / flickerPeriod) * flickerPeriod;
++	if (periods < minExposureTime_)
++		return exposureTime;
++
++	return clampExposureTime(periods, quantizationGain);
++}
++
+ double ExposureModeHelper::clampGain(double gain, double *quantizationGain) const
+ {
+ 	double clamped = std::clamp(gain, minGain_, maxGain_);
+@@ -173,6 +193,7 @@ double ExposureModeHelper::clampGain(double gain, double *quantizationGain) cons
+ /**
+  * \brief Split exposure into exposure time and gain
+  * \param[in] exposure Exposure value
++ * \param[in] flickerPeriod Period of the light flicker to avoid, 0 for none
+  *
+  * This function divides a given exposure into exposure time, analogue and
+  * digital gain by iterating through stages of exposure time and gain limits.
+@@ -199,6 +220,10 @@ double ExposureModeHelper::clampGain(double gain, double *quantizationGain) cons
+  * required exposure, the helper falls-back to simply maximising the exposure
+  * time first, followed by analogue gain, followed by digital gain.
+  *
++ * When \a flickerPeriod is set, an exposure time of at least one period is
++ * shortened to a whole number of periods and the gain makes up for it, so that
++ * a light source flickering with that period lights all lines alike.
++ *
+  * During the calculations the gain missed due to quantization is recorded and
+  * returned as quantization gain. The quantization gain is not included in the
+  * digital gain. So to exactly apply the given exposure, both quantization gain
+@@ -208,7 +233,8 @@ double ExposureModeHelper::clampGain(double gain, double *quantizationGain) cons
+  * gain
+  */
+ ExposureModeHelper::Result
+-ExposureModeHelper::splitExposure(utils::Duration exposure) const
++ExposureModeHelper::splitExposure(utils::Duration exposure,
++				  utils::Duration flickerPeriod) const
+ {
+ 	ASSERT(maxExposureTime_);
+ 	ASSERT(maxGain_);
+@@ -252,6 +278,7 @@ ExposureModeHelper::splitExposure(utils::Duration exposure) const
+ 		/* Clamp the gain to lastStageGain and regulate exposureTime. */
+ 		if (stageExposureTime * lastStageGain >= exposure) {
+ 			exposureTime = clampExposureTime(exposure / lastStageGain, &quantGain);
++			exposureTime = avoidFlicker(exposureTime, flickerPeriod, &quantGain);
+ 			gain = clampGain(exposure / exposureTime, &quantGain2);
+ 			quantGain *= quantGain2;
+ 
+@@ -261,7 +288,7 @@ ExposureModeHelper::splitExposure(utils::Duration exposure) const
+ 
+ 		/* Clamp the exposureTime to stageExposureTime and regulate gain. */
+ 		if (stageExposureTime * stageGain >= exposure) {
+-			exposureTime = stageExposureTime;
++			exposureTime = avoidFlicker(stageExposureTime, flickerPeriod, &quantGain);
+ 			gain = clampGain(exposure / exposureTime, &quantGain2);
+ 			quantGain *= quantGain2;
+ 
+@@ -280,6 +307,7 @@ ExposureModeHelper::splitExposure(utils::Duration exposure) const
+ 	 * exposure time is maxed before gain is touched at all.
+ 	 */
+ 	exposureTime = clampExposureTime(exposure / stageGain, &quantGain);
++	exposureTime = avoidFlicker(exposureTime, flickerPeriod, &quantGain);
+ 	gain = clampGain(exposure / exposureTime, &quantGain2);
+ 	quantGain *= quantGain2;
+ 
+diff --git a/src/ipa/libipa/exposure_mode_helper.h b/src/ipa/libipa/exposure_mode_helper.h
+index a56e1906..dd80ecdf 100644
+--- a/src/ipa/libipa/exposure_mode_helper.h
++++ b/src/ipa/libipa/exposure_mode_helper.h
+@@ -36,7 +36,8 @@ public:
+ 		double digitalGain;
+ 	};
+ 
+-	[[nodiscard]] Result splitExposure(utils::Duration exposure) const;
++	[[nodiscard]] Result splitExposure(utils::Duration exposure,
++					   utils::Duration flickerPeriod = {}) const;
+ 
+ 	utils::Duration minExposureTime() const { return minExposureTime_; }
+ 	utils::Duration maxExposureTime() const { return maxExposureTime_; }
+@@ -47,6 +48,9 @@ private:
+ 	utils::Duration clampExposureTime(utils::Duration exposureTime,
+ 					  double *quantizationGain = nullptr) const;
+ 	double clampGain(double gain, double *quantizationGain = nullptr) const;
++	utils::Duration avoidFlicker(utils::Duration exposureTime,
++				     utils::Duration flickerPeriod,
++				     double *quantizationGain) const;
+ 
+ 	std::vector<utils::Duration> exposureTimes_;
+ 	std::vector<double> gains_;
+-- 
+2.53.0
+

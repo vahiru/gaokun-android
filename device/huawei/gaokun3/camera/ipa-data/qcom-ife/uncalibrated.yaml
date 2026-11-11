@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: CC0-1.0
+%YAML 1.1
+---
+version: 1
+algorithms:
+  - BlackLevel:
+  - Agc:
+  - Awb:
+  - Gamma:
+...

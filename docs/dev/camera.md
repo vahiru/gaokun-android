@@ -1,26 +1,43 @@
-# 相机子系统架构（CAMSS + `libcamera`软件ISP + AIDL HAL）
+# 相机子系统架构（CAMSS + IFE硬件ISP + `libcamera` + AIDL HAL）
 
-本文档说明`gaokun3`前后置相机的板级供电拓扑、Qualcomm CAMSS电源域与时钟修复、`libcamera`软件ISP移植与传感器标定，以及自研AIDL Camera HAL（`device/huawei/gaokun3/camera/`）的设计。
+本文档说明`gaokun3`前后置相机的板级供电拓扑、Qualcomm CAMSS电源域与时钟修复、IFE硬件ISP的内核驱动、`libcamera`的`qcom-ife`流水线与IPA及传感器标定，以及自研AIDL Camera HAL（`device/huawei/gaokun3/camera/`）的设计。
 
 ## 一、端到端流水线概览
 
-由于主线内核`qcom-camss`的VFE（Video Front End）仅支持将CSI-2原始拜耳帧（10-bit Packed Bayer）通过RDI（Raw Dump Interface）直接DMA输出至内存（`msm_vfe0_pix`源pad同样只输出`MEDIA_BUS_FMT_SGBRG10_1X10`/`SGRBG10_1X10`，不做硬件去马赛克），本项目采用`libcamera`的`simple`流水线配合CPU软件ISP完成去拜耳、自动曝光（AGC）与自动白平衡（AWB），再由自研AIDL Camera HAL向Android框架提供标准相机服务：
+主线内核`qcom-camss`在Titan 17x上只驱动RDI（Raw Dump Interface），把CSI-2原始拜耳帧原样写入内存，不做任何图像处理。本项目在内核中补上IFE（VFE的像素通路）硬件ISP（`patches/kernel/camera/0009`–`0036`），由`libcamera`的`qcom-ife`流水线与IPA（`patches/libcamera/0014`–`0018`）按帧下发ISP参数、读取统计并运行3A，再由自研AIDL Camera HAL向Android框架提供相机服务：
 
 ```
-前摄 Hi-846 (2-0020, SGBRG10) ──► CSIPHY3 ──┐
-                                            ├──► CSID0 ──► VFE0 RDI0 (/dev/video0)
-后摄 OV13B10 (1-0036, SGRBG10) ─► CSIPHY0 ──┘                    │
-                                                                 ▼
-                                            libcamera (SimplePipeline + SoftwareIsp)
-                                            [去拜耳 + 黑电平扣除 + AGC + 灰度世界AWB]
-                                                                 │ (RGB888)
-                                                                 ▼
-                                            libyuv (RGB24ToJ420 全范围BT.601 + 缩放/旋转)
-                                                                 │
-                                                                 ▼
-                                            android.hardware.camera.provider-V3-gaokun3-service
-                                            (预览NV21 Gralloc缓冲 / 拍照libjpeg-turbo BLOB)
+前摄 Hi-846 (2-0020) ──► CSIPHY3 ──┐
+                                   ├──► CSID0 ─┬─ IPP ─► VFE0像素通路（IFE）─┬─► FULL输出（NV12）
+后摄 OV13B10 (1-0036) ─► CSIPHY0 ──┤           │          ▲ 每帧ISP参数       ├─► 显示输出（NV12，缩放、变焦）
+                                   │           │                              └─► 统计（AWB网格、对焦、拜耳直方图）
+                                   │           └─ RDI0 ─► VFE0 RDI0 ─► 原始拜耳（相位对焦）
+                                   └──► CSID1 ── IPP ─► VFE1像素通路（后摄全尺寸时处理右半幅，双IFE）
+                                                   │
+                          libcamera qcom-ife流水线 + IPA（AGC/AWB/CCM、镜头阴影、降噪、对焦统计）
+                                                   │
+                          android.hardware.camera.provider-service.gaokun3（预览、录像、YUV、JPEG）
 ```
+
+### 1. IFE像素通路（内核）
+
+- **处理模块**：CSID的IPP把CSI-2数据解成像素送入IFE。用到的模块有相位对焦像素修正（PDPC）、坏点修正（BPC）与拜耳降噪（ABF）（这三者处理时数据里仍含黑电平），黑电平扣除（BLS）、镜头阴影（LSC）、去马赛克与白平衡、颜色校正（CC12）、伽马、色彩空间转换（BT.601全范围）、缩放与裁剪，输出NV12。寄存器布局取自SC8280XP的Windows相机栈并经实机核对。
+- **输出**：每个全功能VFE有FULL与显示两路图像输出，同一传感器帧可同时出两种尺寸（如全尺寸拍照与预览）；显示输出可按帧设置缩放窗口，用于数码变焦。
+- **参数与统计节点**：`msm_vfeN_pix_params`（META_OUTPUT）接收V4L2可扩展ISP参数缓冲，`msm_vfeN_pix_stats`（META_CAPTURE）输出AWB网格、对焦统计（BFStats23）与拜耳直方图（BHistStats14）。格式定义在UAPI头`include/uapi/linux/media/qcom/ife17x-config.h`，`patches/libcamera`中有同名的一份，两者须一致。
+- **帧编号与时间戳**：参数在CAMIF epoch 0（第20行）中断时应用到下一帧；图像、参数、统计与RDI原始帧按epoch统一编号，同一请求的各路缓冲始终属于同一传感器帧。像素通路、显示与统计缓冲的时间戳取该帧epoch 0的中断时刻（队列标记`V4L2_BUF_FLAG_TSTAMP_SRC_SOE`），RDI缓冲仍为写完时刻。
+- **双IFE**：单个IFE一行最多3840像素，后摄全尺寸（4208×3120）由两个CSID各裁一半送两个IFE，主IFE持有缓冲，从IFE按主IFE的步幅写右半幅；参数同时下发两侧，统计按条带拆分后合入同一统计缓冲。
+- **出错恢复**：VFE总线错误或CSID FIFO溢出后，像素通路不会自行恢复，内核以`vb2_queue_error()`使相关队列全部失败，用户态收到`EPOLLERR`/`-EIO`后重启数据流（实测60–70 ms恢复出帧）；CSI-2 CRC/ECC错误只使当帧的FULL与显示缓冲失败。
+- **供电与时钟**：CAMSS按各时钟频率投MMCX电压档（屏幕关闭时显示控制器不再抬高MMCX，未投票会导致全尺寸通路溢出甚至整机复位）；`rpmhpd`使MX不低于MMCX，`camcc`为PLL投MX；各CSIPHY使用自己的供电（`patches/kernel/dts/0023`、`0024`）。
+
+### 2. 视频节点
+
+| 节点 | 作用 |
+|---|---|
+| `msm_vfe0_video3`（`msm_vfe0_pix`） | FULL输出，NV12 |
+| `msm_vfe0_video_disp`（`msm_vfe0_pix_disp`） | 显示输出，NV12，链接`msm_vfe0_pix:1 -> msm_vfe0_pix_disp:0`默认关闭 |
+| `msm_vfe0_pix_params` / `msm_vfe0_pix_stats` | ISP参数与统计 |
+| `msm_vfe0_video0`（`msm_vfe0_rdi0`） | 原始拜耳帧，供HAL做相位对焦 |
+| `msm_vfe1_pix` | 双IFE的从通路，链接到`msm_vfe0_video3`，不单独出图 |
 
 ## 二、板级硬件拓扑与上电序列
 
@@ -87,18 +104,49 @@ Android NDK的`libc++`使用内联命名空间`std::__ndk1`，而AOSP平台源�
 
 因此`libcamera`必须通过`patches/libcamera/libcamera-Android.bp`放进AOSP树内由Soong统一编译：
 
-- **编译产物**：`libcamera_base_gk3.so`、`libcamera_gk3.so`以及IPA模块`libcamera_ipa_softisp_gk3.so`。
-- **IPA安装路径**：`config.h`将`IPA_MODULE_DIR`定为`/vendor/lib64/libcamera/ipa`，因此`libcamera_ipa_softisp_gk3`必须设置`relative_install_path: "libcamera/ipa"`（若缺失该模块，`SimplePipeline`会静默退回原始拜耳格式）。
-- **免签名进程内IPA加载（`patches/libcamera/0001`）**：支持环境变量`LIBCAMERA_IPA_TRUST_UNSIGNED=1`，使`IPAManager`在不依赖`.sign`签名与openssl构建期的情况下将`ipa_softisp`直接加载到HAL进程内线程运行。
+- **编译产物**：`libcamera_base_gk3.so`、`libcamera_gk3.so`（只含`qcom-ife`流水线）以及IPA模块`libcamera_ipa_qcom_ife_gk3.so`。软件ISP（`simple`流水线与`softisp` IPA）不再编译。
+- **IPA安装路径**：`config.h`将`IPA_MODULE_DIR`定为`/vendor/lib64/libcamera/ipa`，因此`libcamera_ipa_qcom_ife_gk3`必须设置`relative_install_path: "libcamera/ipa"`（缺失该模块时流水线无法创建IPA，摄像头不会注册）。
+- **免签名进程内IPA加载（`patches/libcamera/0003`）**：编译宏`LIBCAMERA_IPA_TRUST_UNSIGNED`使`IPAManager`在没有`.sign`签名的情况下将IPA直接加载到HAL进程内线程运行。
+- **生成文件**：`scripts/camera/setup-libcamera-tree.sh`铺上游源码、打补丁、放置`Android.bp`，并调用`scripts/camera/gen-libcamera-sources.sh`由meson产出`control_ids.cpp`、`qcom-ife_ipa_proxy.cpp`等生成文件，详见[`patches/libcamera/README.md`](../../patches/libcamera/README.md)。
 
 ### 2. 传感器增益与黑电平标定（`patches/libcamera/0002`、`0004`）
 
-内核传感器驱动（`hi846.c`、`ov13b10.c`）仅将`V4L2_CID_ANALOGUE_GAIN`原样写入传感器寄存器，不包含物理增益换算公式；若`libcamera`的`CameraSensorHelper`未收录该传感器，软件ISP的AGC会将`analogue-gain`锁死在`0`，导致画面接近全黑。
+内核传感器驱动（`hi846.c`、`ov13b10.c`）仅将`V4L2_CID_ANALOGUE_GAIN`原样写入传感器寄存器，不包含物理增益换算公式；若`libcamera`的`CameraSensorHelper`未收录该传感器，AGC会将`analogue-gain`锁死在`0`，导致画面接近全黑。曝光、模拟增益与`VBLANK`的生效延迟（前后摄均为2帧，`patches/libcamera/0014`）经IFE统计逐帧实测。
 
 | 传感器 | 黑电平（16位归一化） | 模拟增益模型 | 说明 |
 |---|---|---|---|
 | `hi846` | `blackLevel_ = 4096`（10位下为64，位于模拟增益之后的数字偏置） | `AnalogueGainLinear{1, 16, 0, 16}`，即$\text{gain} = 1 + \frac{\text{code}}{16}$ | 经固定曝光留出法实测标定（`code=0..240`对应`1.0×..16.0×`，留出验证误差<2.3%） |
-| `ov13b10` | `blackLevel_ = 4096`（10位下为64） | `AnalogueGainLinear{1, 0, 0, 128}`，即$\text{gain} = \frac{\text{code}}{128}$ | 匹配OmniVision寄存器线性步进定义，配合`ov13b10.yaml`调优文件 |
+| `ov13b10` | `blackLevel_ = 4096`（10位下为64） | $\text{gain} = \frac{\text{code}}{128}$，按传感器实际保留的档位取整：1×–2×步长1/16，2×–4×为1/8，4×–8×为1/4，8×–15.5×为1/2（`patches/libcamera/0005`） | 档位经实机增益扫描测得，避免AGC在相邻档位间来回跳变 |
+
+### 3. `qcom-ife`流水线（`patches/libcamera/0018`）
+
+- **传感器模式与双IFE**：前摄最大3264×2448，单IFE；后摄全尺寸4208×3120走双IFE，流水线按镜头阴影网格允许的起点、并使显示输出的接缝尽量落在整列上来选分割列；2104×1560等合并模式走单IFE。
+- **数据流**：
+  - 一路处理流来自FULL输出；配两路时（取景与拍照），较大的一路来自FULL，另一路来自显示输出，两路视场相同。
+  - RAW流取自RDI，固定为最大模式，供HAL做相位对焦。
+  - 请求可以不带FULL或RAW缓冲：每个参数缓冲写明该帧要写的输出，同一请求的所有缓冲取参数缓冲的帧号。
+  - `ScalerCrop`按帧作用于显示输出，元数据回报实际显示的区域。
+  - 内核报队列出错（`patches/libcamera/0015`）后，流水线重启数据流并重发IPA的完整参数。
+
+### 4. IPA与调校文件
+
+- **算法**（每帧基于统计运行）：
+  - AGC：以`AfWindows`为测光窗口在AWB网格上计亮度均值，亮度约束基于同一窗口的拜耳直方图。`AeFlickerMode`设为手动时曝光按闪烁周期取整（周期默认10 ms，对应50 Hz市电；默认关闭，`patches/libcamera/0016`）。传感器拿到的是由最新统计算出的曝光，与在途请求数无关。
+  - AWB：`libipa`的灰度世界或贝叶斯算法（由调校文件选择），CCM按色温插值。
+  - 黑电平、伽马、镜头阴影、坏点与PD像素修正、ABF降噪表（按增益）。
+  - 对焦：在`AfWindows`区域内由对焦统计算出`FocusFoM`，对焦算法在HAL中。
+  - 帧长由`FrameDurationLimits`设定。
+- **调校文件**：`device/huawei/gaokun3/camera/ipa-data/qcom-ife/{hi846,ov13b10,uncalibrated}.yaml`，安装到`/vendor/etc/libcamera/ipa/qcom-ife/`，与`0018`中`src/ipa/qcom-ife/data/`的同名文件一致。数据来自华为Windows相机驱动的模组调校与实机标定；`Awb`与`Ccm`两段由`scripts/camera/gen-*-ccm.py`生成（见[`scripts/camera/README.md`](../../scripts/camera/README.md)）。缺少调校文件时IPA初始化失败，该摄像头不会注册。
+
+### 5. 已知限制（内核与`libcamera`）
+
+- **AE响应**：统计在帧末才可用，曝光与增益又要2帧后生效，亮度突变后约3帧画面才开始变化。
+- **防闪烁**：只有手动闪烁周期（默认对应50 Hz市电），未实现自动检测。
+- **双IFE几何**：显示输出在两个条带接缝处有约0.1个显示像素的残差；变焦窗口的几何误差最多约1个显示像素。
+- **拜耳直方图**：2104宽的整幅窗口实测只统计2096列，对AE约束的影响可忽略。
+- **快速重复上电**：VFE在毫秒级的断电再上电后偶发复位超时，重试也无法消除；`libcamera`正常的启停不会触发。
+- **只按`libcamera`的用法验证**：`libcamera`总是一起启停所有节点。单独重启某一个节点（例如显示节点继续推流时只重启FULL，或只重启共用同一VFE的RDI）可能使数据流停住而不报错；双IFE时VFE1上的RDI、关闭AWB网格的统计都不受支持。
+- **CSI-2错误的标记**：CRC/ECC错误落在某路输出不写的帧上时，该输出写的下一帧会被标为出错。
 
 ## 五、自研AIDL Camera HAL（`device/huawei/gaokun3/camera/`）
 

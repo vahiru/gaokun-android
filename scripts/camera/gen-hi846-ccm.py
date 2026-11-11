@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Generate device/huawei/gaokun3/camera/ipa-data/softisp/hi846.yaml.
+"""Generate the Awb and Ccm data of the hi846 tuning.
+
+This prints a whole tuning file in the format of the software ISP, which used
+it first. The qcom-ife tuning (device/huawei/gaokun3/camera/ipa-data/qcom-ife/
+hi846.yaml, the same file as src/ipa/qcom-ife/data/hi846.yaml of
+patches/libcamera) takes its Awb and Ccm sections unchanged.
 
 The colour correction matrices come from the tuning Huawei's Windows camera
 driver ships for the front camera: com.qti.tuned.hlt_hi846.bin in
