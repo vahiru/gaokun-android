@@ -62,7 +62,7 @@ class MediaTargetPage extends StatelessWidget {
       onBack: () => Navigator.pop(context),
       bottomLeft: Btn(l.btnRedetect, onPressed: s.checking ? null : s.check, kind: BtnKind.secondary, icon: Icons.refresh),
       nextLabel: l.btnNext,
-      onNext: s.checking || t == null ? null : () => go(context, const ReleasePage(media: true)),
+      onNext: s.checking || t == null ? null : () => go(context, t.usb ? const ReleasePage(media: true) : const MediaRegionPage()),
       child: s.checking
           ? Center(
               child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -92,7 +92,7 @@ class MediaTargetPage extends StatelessWidget {
               const SizedBox(height: 8),
               ChoiceCard(
                 icon: Icons.storage_outlined,
-                title: s.mediaRegion == null ? l.mediaInternalTitleNone : l.mediaInternalTitle(fmtMib(s.mediaRegion!.sizeMib)),
+                title: l.mediaInternalTitle,
                 body: blockers.isEmpty ? l.mediaInternalBody : null,
                 reason: blockers.isEmpty ? null : '${l.mediaInternalBlocked}\n${blockers.join('\n')}',
                 selected: t != null && t.same(const MediaTarget.internal()),
@@ -113,6 +113,65 @@ class MediaTargetPage extends StatelessWidget {
       if (pf.lowBattery) l.chkBatteryLow,
       if (s.disk == null) l.chkNoSystemDisk else if (s.mediaRegion == null) l.chkNoRoom(fmtMib(kMediaNeedMib)),
     ];
+  }
+}
+
+/// 写入本机时（仍是"目标"这一步）：GK3LIVE 建在哪块未分配空间的末尾（理由见 Session.mediaRegion）。
+/// 分区条上标出它的位置，与双系统安装的选位置页相同
+class MediaRegionPage extends StatelessWidget {
+  const MediaRegionPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final s = context.session, l = context.l, r = s.mediaRegion;
+    final need = fmtMib(kMediaNeedMib);
+    return WinStepPage(
+      step: MediaStep.target,
+      title: l.mediaRegionTitle,
+      subtitle: l.mediaRegionSub(need),
+      onBack: () => Navigator.pop(context),
+      nextLabel: l.btnNext,
+      onNext: r == null ? null : () => go(context, const ReleasePage(media: true)),
+      child: ListView(children: [
+        _liveDiskBar(context, r),
+        const SizedBox(height: 8),
+        const DiskLegend(live: true),
+        const SizedBox(height: 24),
+        for (final f in s.freeSpans)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: ChoiceCard(
+              icon: Icons.crop_free,
+              title: l.regionFree(fmtMib(f.sizeMib)),
+              body: s.mediaFits(f) ? l.mediaRegionRest(fmtMib(f.sizeMib - kMediaNeedMib)) : null,
+              reason: s.mediaFits(f) ? null : l.regionTooSmall(need),
+              selected: identical(f, r),
+              onTap: s.mediaFits(f) ? () => s.selectMediaRegion(f) : null,
+            ),
+          ),
+      ]),
+    );
+  }
+
+  /// 系统盘的分区条：所选空闲区的末尾画成将要创建的 GK3LIVE，前面的部分仍是空闲区
+  Widget _liveDiskBar(BuildContext context, FreeSpan? r) {
+    final s = context.session, d = s.disk!;
+    final restSectors = r == null ? 0 : (r.sizeMib - kMediaNeedMib) * 1024 * 1024 ~/ d.sector;
+    return DiskBar(
+      height: 28,
+      muted: true,
+      parts: [
+        for (final p in s.probe!.partsOf(d)) (start: p.start, sizeMib: p.sizeMib, os: p.os.isEmpty ? 'other' : p.os),
+        if (r != null) (start: r.start + restSectors, sizeMib: kMediaNeedMib, os: DiskBar.planned),
+      ],
+      free: [
+        for (final f in s.freeSpans)
+          if (!identical(f, r))
+            (start: f.start, sizeMib: f.sizeMib)
+          else if (f.sizeMib > kMediaNeedMib)
+            (start: f.start, sizeMib: f.sizeMib - kMediaNeedMib),
+      ],
+    );
   }
 }
 
@@ -155,7 +214,7 @@ class MediaConfirmPage extends StatelessWidget {
         if (t.usb)
           Bullet(l.mediaConfirmUsb)
         else ...[
-          Bullet(l.mediaConfirmPart(fmtMib(kMediaNeedMib))),
+          Bullet(l.mediaConfirmPart(fmtMib(s.mediaRegion!.sizeMib), fmtMib(kMediaNeedMib))),
           Bullet(l.confirmBoot),
           Bullet(l.mediaConfirmEntry),
           const SizedBox(height: 12),

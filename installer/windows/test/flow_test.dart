@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:gk3_windows/ui/media_pages.dart';
 import 'package:gk3_windows/ui/run_pages.dart';
 
 import 'helpers.dart';
@@ -154,7 +155,7 @@ void main() {
     expect(enabled(t, l.railMedia), isFalse);
     await tap(t, find.text(l.btnNext));
     await see(t, find.text(l.mediaUsbTitle('Generic Flash Disk', '29.4 GiB')));
-    expect(find.text(l.mediaInternalTitle('40 GiB')), findsOneWidget);
+    expect(find.text(l.mediaInternalTitle), findsOneWidget);
     expect(enabled(t, l.btnNext), isFalse);
     await tap(t, find.text(l.mediaUsbTitle('Generic Flash Disk', '29.4 GiB')));
     expect(s.mediaTarget!.usb, isTrue);
@@ -191,12 +192,17 @@ void main() {
     await tap(t, find.text(l.railMedia));
     await tap(t, find.text(l.btnNext));
     await see(t, find.text(l.mediaUsbNone));
-    await tap(t, find.text(l.mediaInternalTitle('40 GiB')));
+    await tap(t, find.text(l.mediaInternalTitle));
     expect(s.mediaTarget!.usb, isFalse);
+    await tap(t, find.text(l.btnNext));
+    // 位置页：GK3LIVE 建在所选未分配空间的开头
+    await see(t, find.text(l.mediaRegionTitle));
+    expect(find.text(l.mediaRegionRest('38 GiB')), findsOneWidget);
+    expect(find.byType(MediaRegionPage), findsOneWidget);
     await tap(t, find.text(l.btnNext));
     await see(t, find.textContaining('v1.0.0-rc.3'));
     await tap(t, find.text(l.btnNext));
-    await see(t, find.text(l.mediaConfirmPart('2 GiB')));
+    await see(t, find.text(l.mediaConfirmPart('40 GiB', '2 GiB')));
     expect(find.text(l.confirmBoot), findsOneWidget);
     expect(find.text(l.mediaConfirmEntry), findsOneWidget);
     await hold(t, l.holdToWrite);
@@ -206,6 +212,27 @@ void main() {
     expect(media, contains('--real-disk'));
   });
 
+  testWidgets('安装介质写入本机磁盘：几块未分配空间时默认选最大的一块（LiveCD 保留现有系统时也装进最大的），可以换', (t) async {
+    final (rec, s) = await pumpApp(t, 'multi');
+    await tap(t, find.text(l.railMedia));
+    await tap(t, find.text(l.btnNext));
+    await tap(t, find.text(l.mediaInternalTitle));
+    await tap(t, find.text(l.btnNext));
+    await see(t, find.text(l.mediaRegionTitle));
+    expect(s.mediaRegion!.sizeMib, 26624);
+    expect(find.text(l.mediaRegionRest('24 GiB')), findsOneWidget);
+    await tap(t, find.text(l.regionFree('15 GiB')));
+    expect(s.mediaRegion!.sizeMib, 15360);
+    await tap(t, find.text(l.btnNext));
+    await see(t, find.textContaining('v1.0.0-rc.3'));
+    await tap(t, find.text(l.btnNext));
+    await see(t, find.text(l.mediaConfirmPart('15 GiB', '2 GiB')));
+    await hold(t, l.holdToWrite);
+    await waitFor(t, find.byType(FailPage), tries: 400);
+    final media = rec.calls.singleWhere((c) => c.first == 'media');
+    expect(media, containsAllInOrder(['--region-start', '${s.mediaRegion!.start}', '--region-end', '${s.mediaRegion!.end}']));
+  });
+
   testWidgets('安装介质：本机不满足条件时本机磁盘不能选，列出未满足的条件', (t) async {
     final (_, s) = await pumpApp(t, 'blocked');
     await tap(t, find.text(l.railMedia));
@@ -213,7 +240,7 @@ void main() {
     await see(t, find.textContaining(l.mediaInternalBlocked));
     expect(find.textContaining(l.chkModelBad), findsOneWidget);
     expect(find.textContaining(l.chkSecureBootOn), findsOneWidget);
-    await tap(t, find.text(l.mediaInternalTitle('40 GiB')));
+    await tap(t, find.text(l.mediaInternalTitle));
     expect(s.mediaTarget, isNull);
     expect(enabled(t, l.btnNext), isFalse);
   });

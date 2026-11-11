@@ -125,11 +125,22 @@ void main() {
     await pumpApp(t, 'free');
     await tap(t, find.text(l.railMedia));
     await tap(t, find.text(l.btnNext));
-    await tap(t, find.text(l.mediaInternalTitle('40 GiB')));
+    await tap(t, find.text(l.mediaInternalTitle));
+    await tap(t, find.text(l.btnNext));
+    await shot(t, '46a-media-region');
     await tap(t, find.text(l.btnNext));
     await waitFor(t, find.textContaining('v1.0.0-rc.3'));
     await tap(t, find.text(l.btnNext));
     await shot(t, '46-media-confirm-internal');
+  }, skip: !haveFont);
+
+  testWidgets('安装介质：几块未分配空间', (t) async {
+    await pumpApp(t, 'multi');
+    await tap(t, find.text(l.railMedia));
+    await tap(t, find.text(l.btnNext));
+    await tap(t, find.text(l.mediaInternalTitle));
+    await tap(t, find.text(l.btnNext));
+    await shot(t, '46b-media-region-multi');
   }, skip: !haveFont);
 
   testWidgets('安装介质：本机不满足条件', (t) async {

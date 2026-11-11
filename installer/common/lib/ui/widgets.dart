@@ -206,13 +206,16 @@ class DiskBar extends StatelessWidget {
   /// 大片的 Windows 分区按 [colorOf] 上色时太抢眼（Windows 安装器的"选位置"页）
   final bool muted;
 
+  /// [parts] 里 os 为它的一段：将要创建的分区（Windows 安装器写入本机的 GK3LIVE），与强调的空闲区同色
+  static const planned = 'planned';
+
   static Color colorOf(BuildContext context, String os) {
     final cs = context.cs, gk = context.gk;
     return switch (os) {
       'windows' => cs.primary,
       'winre' || 'msr' => cs.primaryContainer,
       'esp' || 'fat' => gk.warning,
-      'android' => gk.success,
+      'android' || planned => gk.success,
       'linux' || 'luks' => cs.tertiary,
       _ => cs.outline,
     };
@@ -221,14 +224,16 @@ class DiskBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = context.cs, gk = context.gk;
-    final segs = <(int, int, Color)>[]; // start, size, color
+    final segs = <(int, int, Color, int)>[]; // start, size, color, 最小宽度（千分之几）
     for (final p in parts) {
-      segs.add((p.start, p.sizeMib, muted && p.os != 'android' ? cs.surfaceContainerHighest : colorOf(context, p.os)));
+      final keep = p.os == 'android' || p.os == planned;
+      // 将要创建的分区画宽一些：2 GiB 的 GK3LIVE 在 476 GiB 的盘上按比例只有几个像素，看不出位置
+      segs.add((p.start, p.sizeMib, muted && !keep ? cs.surfaceContainerHighest : colorOf(context, p.os), p.os == planned ? 24 : 4));
     }
     for (final (i, f) in free.indexed) {
       // 高亮用明亮的 success（与 Android 分区同色："这块将是 Android 的"）；深色的 container 在深色背景上像个洞
       final idle = muted ? gk.success.withValues(alpha: 0.35) : cs.surfaceContainerHighest;
-      segs.add((f.start, f.sizeMib, i == highlightFree ? gk.success : idle));
+      segs.add((f.start, f.sizeMib, i == highlightFree ? gk.success : idle, 4));
     }
     segs.sort((a, b) => a.$1.compareTo(b.$1));
     final total = segs.fold<int>(0, (a, s) => a + s.$2);
@@ -247,7 +252,7 @@ class DiskBar extends StatelessWidget {
             for (final (i, s) in segs.indexed)
               Expanded(
                 // 小分区至少占一点点宽度，不然 300 MiB 的 ESP 在 476 GiB 的盘上看不见
-                flex: (s.$2 * 1000 ~/ total).clamp(4, 1000),
+                flex: (s.$2 * 1000 ~/ total).clamp(s.$4, 1000),
                 child: Container(
                   margin: EdgeInsets.only(right: i == segs.length - 1 ? 0 : 2),
                   color: s.$3,

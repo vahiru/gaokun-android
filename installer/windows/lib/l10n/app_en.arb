@@ -218,15 +218,7 @@
     }
   },
   "mediaInternalHeader": "This device",
-  "mediaInternalTitle": "Unallocated space on the system disk ({size})",
-  "@mediaInternalTitle": {
-    "placeholders": {
-      "size": {
-        "type": "String"
-      }
-    }
-  },
-  "mediaInternalTitleNone": "Unallocated space on the system disk",
+  "mediaInternalTitle": "Unallocated space on the system disk",
   "mediaInternalBody": "Creates a GK3LIVE partition and adds the LiveCD to the boot menu; existing partitions and their data are not affected",
   "mediaInternalBlocked": "The following requirements are not met. See the check on the start page for details:",
   "releaseSubMedia": "The installation files of the selected release will be written to the installation media together with the LiveCD, so no network connection is required to install from the LiveCD.",
@@ -268,9 +260,12 @@
     }
   },
   "mediaConfirmUsb": "Remove all partitions on the USB drive, create a GK3LIVE partition and write the LiveCD and installation files to it",
-  "mediaConfirmPart": "Create a GK3LIVE partition ({size}) in unallocated space and write the LiveCD and installation files to it",
+  "mediaConfirmPart": "Create a GK3LIVE partition ({size}) at the end of the {region} of unallocated space and write the LiveCD and installation files to it",
   "@mediaConfirmPart": {
     "placeholders": {
+      "region": {
+        "type": "String"
+      },
       "size": {
         "type": "String"
       }
@@ -290,5 +285,23 @@
   "doneMediaStays": "The LiveCD remains in the boot menu until the entire disk is erased and reinstalled.",
   "failMediaTitle": "Writing incomplete",
   "failTouchedMediaUsb": "The USB drive was partially modified and its data may have been erased. Return to the start and try again.",
-  "failTouchedMediaInternal": "The disk was partially modified, though your Windows installation is unaffected. Return to the start, check again and retry."
+  "failTouchedMediaInternal": "The disk was partially modified, though your Windows installation is unaffected. Return to the start, check again and retry.",
+  "mediaRegionTitle": "Choose a location for the GK3LIVE partition",
+  "mediaRegionSub": "The GK3LIVE partition ({size}) will be created at the end of the selected unallocated space. Existing partitions are not affected.",
+  "@mediaRegionSub": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaRegionRest": "{size} of unallocated space will remain after the GK3LIVE partition is created",
+  "@mediaRegionRest": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "legendLive": "GK3LIVE partition"
 }

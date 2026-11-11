@@ -431,15 +431,7 @@
     }
   },
   "mediaInternalHeader": "本机磁盘",
-  "mediaInternalTitle": "系统磁盘的未分配空间（{size}）",
-  "@mediaInternalTitle": {
-    "placeholders": {
-      "size": {
-        "type": "String"
-      }
-    }
-  },
-  "mediaInternalTitleNone": "系统磁盘的未分配空间",
+  "mediaInternalTitle": "系统磁盘的未分配空间",
   "mediaInternalBody": "创建GK3LIVE分区并将LiveCD添加至启动菜单，现有分区及其中的数据不受影响",
   "mediaInternalBlocked": "以下条件未满足，详情请查看首页的安装环境检查：",
   "releaseSubMedia": "所选版本的安装文件将与LiveCD一并写入安装介质，在LiveCD中安装时无需连接网络。",
@@ -481,9 +473,12 @@
     }
   },
   "mediaConfirmUsb": "清除U盘中的所有分区，创建GK3LIVE分区，写入LiveCD及安装文件",
-  "mediaConfirmPart": "在未分配空间中创建GK3LIVE分区（{size}），写入LiveCD及安装文件",
+  "mediaConfirmPart": "在{region}未分配空间的末尾创建GK3LIVE分区（{size}），写入LiveCD及安装文件",
   "@mediaConfirmPart": {
     "placeholders": {
+      "region": {
+        "type": "String"
+      },
       "size": {
         "type": "String"
       }
@@ -503,5 +498,23 @@
   "doneMediaStays": "清除整个磁盘重新安装之前，LiveCD将一直保留在启动菜单中。",
   "failMediaTitle": "写入未完成",
   "failTouchedMediaUsb": "U盘已发生部分更改，其中的数据可能已被清除。请返回首页后重试。",
-  "failTouchedMediaInternal": "磁盘已发生部分更改，但Windows系统不受影响。请返回首页重新检查后重试。"
+  "failTouchedMediaInternal": "磁盘已发生部分更改，但Windows系统不受影响。请返回首页重新检查后重试。",
+  "mediaRegionTitle": "选择GK3LIVE分区的位置",
+  "mediaRegionSub": "GK3LIVE分区（{size}）将创建在所选未分配空间的末尾，现有分区不受影响。",
+  "@mediaRegionSub": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaRegionRest": "创建GK3LIVE分区后，剩余{size}未分配空间",
+  "@mediaRegionRest": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "legendLive": "GK3LIVE分区"
 }

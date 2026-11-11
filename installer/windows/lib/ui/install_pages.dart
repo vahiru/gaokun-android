@@ -68,10 +68,10 @@ class RegionPage extends StatelessWidget {
 
 /// 分区条下面的图例（与 [systemDiskBar] 的 muted 配色对应）
 class DiskLegend extends StatelessWidget {
-  const DiskLegend({super.key, this.target = false, this.android = false});
+  const DiskLegend({super.key, this.target = false, this.android = false, this.live = false});
 
-  /// 有没有"要装 Android 的位置"（选位置页）、"已装的 Android"（管理页）
-  final bool target, android;
+  /// 有没有"要装 Android 的位置"（选位置页）、"已装的 Android"（管理页）、"要建的 GK3LIVE"（安装介质的位置页）
+  final bool target, android, live;
 
   @override
   Widget build(BuildContext context) {
@@ -91,6 +91,10 @@ class DiskLegend extends StatelessWidget {
         item(gk.success, l.legendTarget),
       ],
       if (android) item(gk.success, 'Android'),
+      if (live) ...[
+        item(gk.success.withValues(alpha: 0.35), l.legendFree),
+        item(gk.success, l.legendLive),
+      ],
     ]);
   }
 }

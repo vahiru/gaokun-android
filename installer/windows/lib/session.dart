@@ -45,6 +45,7 @@ class Session extends ChangeNotifier {
     plans.clear();
     region = null;
     mediaTarget = null;
+    mediaRegion = _defaultMediaRegion();
     if (disk != null && !installed) await _loadPlans();
     checking = false;
     notifyListeners();
@@ -78,10 +79,21 @@ class Session extends ChangeNotifier {
 
   bool get hasRoom => plans.values.any((p) => p.ok);
 
-  /// 写入本机时放 GK3LIVE 的那块未分配空间（够大的里面最大的一块；没有 = null）
-  FreeSpan? get mediaRegion {
-    final fits = [for (final f in freeSpans) if (f.sizeMib >= kMediaNeedMib) f];
+  /// 写入本机时放 GK3LIVE 的那块未分配空间；没有放得下的 = null。
+  /// GK3LIVE 建在它的【末尾】：之后在 LiveCD 里保留现有系统安装 Android 时，Android 装在它前面、userdata 排在最后，
+  /// 正好紧挨着 GK3LIVE —— 装完删掉 GK3LIVE 就能把空间并进 userdata（放在开头的话，空出来的在 misc 前面，并不进去）
+  FreeSpan? mediaRegion;
+  bool mediaFits(FreeSpan f) => f.sizeMib >= kMediaNeedMib;
+
+  /// 默认选最大的一块：LiveCD 保留现有系统时也装进最大的空闲区（live 的 DiskInfo.largestFree）
+  FreeSpan? _defaultMediaRegion() {
+    final fits = [for (final f in freeSpans) if (mediaFits(f)) f];
     return fits.isEmpty ? null : fits.reduce((a, b) => a.sizeMib >= b.sizeMib ? a : b);
+  }
+
+  void selectMediaRegion(FreeSpan f) {
+    mediaRegion = f;
+    notifyListeners();
   }
 
   /// 插着的 U 盘（probe 的 DISK 记录里 USB 总线或可移动、且不是系统盘的）
@@ -205,8 +217,8 @@ class Session extends ChangeNotifier {
         ]);
       });
 
-  /// 制作安装介质：下载所选版本，再由 gk3w 写入 LiveCD 与安装文件 —— U 盘整个清除后写入；本机则在未分配空间里建
-  /// GK3LIVE、在 ESP 里放 LiveCD 的启动文件与启动项。--livecd 是 LiveCD 的下载地址，本地文件时是那个目录。
+  /// 制作安装介质：下载所选版本，再由 gk3w 写入 LiveCD 与安装文件 —— U 盘整个清除后写入；本机则在所选未分配空间的
+  /// 末尾建 GK3LIVE（见 [mediaRegion]）、在 ESP 里放 LiveCD 的启动文件与启动项。--livecd 是 LiveCD 的下载地址，本地文件时是那个目录。
   /// gk3w 的 media 命令尚未实现（参数是计划中的样子），演示数据里也就没有它的录制，回放时这一步按失败处理。
   Future<bool> writeMedia({required String releaseDir}) {
     mediaWritten = mediaTarget;
