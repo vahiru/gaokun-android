@@ -1,6 +1,6 @@
 // 离线出图：每一屏、每个关键状态渲染成 1280×800 的 PNG（与真机上的逻辑画布同尺寸）。
 //
-//   python3 tool/fetch-fonts.py         # 第一次：取打包进应用的两个字体（与设备上同一份）
+//   python3 tool/fetch-fonts.py         # 第一次：取打包进应用的两个字体
 //   flutter test test/shots_test.dart   # → test/shots/*.png
 //
 // ★ 这是 C 版 `make shots` 的等价物，也是本仓那条铁律："目标机器同时是作者的日用平板，
@@ -22,9 +22,9 @@ import 'helpers.dart';
 // 测试里不会自动加载 pubspec 声明的字体，这里按同样的族名注册 —— 出的图与设备上同一份字形。
 const _fonts = {
   'Roboto': 'assets/fonts/Roboto-VF.ttf',
-  'Noto Sans SC': 'assets/fonts/NotoSansSC-VF.otf',
+  'Noto Sans SC': 'assets/fonts/NotoSansSC-VF.ttf',
   // 日志区的 monospace：设备上是系统的等宽字体，出图时用 Noto 顶上（不然是方块）
-  'monospace': 'assets/fonts/NotoSansSC-VF.otf',
+  'monospace': 'assets/fonts/NotoSansSC-VF.ttf',
 };
 
 Future<void> shot(WidgetTester t, String name) async {

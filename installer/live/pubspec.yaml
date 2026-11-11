@@ -45,4 +45,4 @@ flutter:
         - asset: assets/fonts/Roboto-VF.ttf
     - family: Noto Sans SC
       fonts:
-        - asset: assets/fonts/NotoSansSC-VF.otf
+        - asset: assets/fonts/NotoSansSC-VF.ttf

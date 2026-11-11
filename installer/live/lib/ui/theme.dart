@@ -5,8 +5,8 @@ import 'package:material_color_utilities/material_color_utilities.dart';
 ///
 /// * 颜色：一个种子色（沿用 C 版的强调蓝）→ `ColorScheme.fromSeed` 生成整套 MD3 角色；
 ///   界面里只用角色（primary / secondaryContainer / surfaceContainerLow / error …），不写死颜色。
-/// * 字体：MD3 的两套 —— 拉丁 Roboto、中文 Noto Sans CJK SC，都【打包进应用】
-///   （pubspec 的 fonts；tool/fetch-fonts.py 取）。不再靠系统字体回退：2026-09-25 真机上
+/// * 字体：MD3 的两套 —— 拉丁 Roboto、中文 Noto Sans SC（思源黑体简中），都【打包进应用】
+///   （pubspec 的 fonts；tool/fetch-fonts.py 从 google/fonts 取）。不再靠系统字体回退：2026-09-25 真机上
 ///   中文全是方块，就是 fontconfig 查得到、Flutter 却没回退过去。
 /// * 字号：MD3 的 type scale 原样用（Flutter 的 M3 默认值）。
 const kSeed = Color(0xFF4DA3FF);
@@ -77,7 +77,8 @@ ThemeData buildTheme({Brightness brightness = Brightness.dark}) {
   final base = ThemeData(useMaterial3: true, colorScheme: cs, fontFamily: 'Roboto', fontFamilyFallback: kFontFallback);
 
   // ★ 两个字体都是可变字重（wght 轴）。Flutter 不会自己把 fontWeight 映射到轴上 ——
-  //   不给 FontVariation 的话，标题的 500 与正文的 400 渲染成同一个粗细，MD3 的层次就没了。
+  //   不给 FontVariation 的话，标题的 500 与正文的 400 渲染成同一个粗细，MD3 的层次就没了；
+  //   Noto Sans SC 的默认实例还是 100（Thin），自己新建的 TextStyle 也要给 fontVariations。
   TextStyle? w(TextStyle? s) => s?.copyWith(fontVariations: [FontVariation.weight((s.fontWeight ?? FontWeight.w400).value.toDouble())]);
   final t0 = base.textTheme;
   final t = t0.copyWith(

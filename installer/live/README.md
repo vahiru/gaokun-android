@@ -19,7 +19,7 @@ testdata/         由真实后端在容器内录制的各场景输出fixture
 ## 二、本地开发与测试
 
 ```sh
-python3 tool/fetch-fonts.py               # 首次运行：准备打包所需的Roboto与Noto Sans CJK SC字体
+python3 tool/fetch-fonts.py               # 首次运行：从google/fonts下载打包所需的Roboto与Noto Sans SC字体
 flutter test                              # 运行全部单元测试（协议解析、导航流转、多语言文案与截图测试）
 flutter test test/shots_test.dart         # 生成全流程界面截图 → test/shots/*.png
 flutter run -d chrome --web-browser-flag=--window-size=1280,800   # 浏览器交互预览（支持 ?scenario=factory|windows-free|blank|android&lang=zh|en）
@@ -40,7 +40,7 @@ bash scripts/live/test-in-container.sh scripts/live/gen-fixtures.sh
 
 ## 三、交互与安全设计要点
 
-- **Material Design 3主题**：基于`ColorScheme.fromSeed`动态派生配色，内嵌可变字重Roboto与Noto Sans CJK SC字体（在`buildTheme()`中显式绑定`FontVariation('wght', ...)`）。
+- **Material Design 3主题**：基于`ColorScheme.fromSeed`动态派生配色，内嵌可变字重Roboto与Noto Sans SC字体（在`buildTheme()`中显式绑定`FontVariation('wght', ...)`）。
 - **强制风险确认页**（`lib/ui/screens_risk.dart`）：任何修改磁盘的操作（整盘清空、双系统、覆盖重装、缩小分区、手动调整分区）执行前均需经过风险确认页（滚动到底部、倒计时阅读并勾选确认；整盘清空或含Windows磁盘的手动调整还需输入`ERASE`），最后一步按钮需长按2秒触发（支持触控长按或键盘按住回车/空格）。
 - **不可用选项显式说明原因**：无法选择的磁盘或安装模式（如当前正在运行的Live USB介质、加密卷等）保持展示并注明不可用原因，而非直接隐藏。
 - **多语言与文案校验**：后端只输出结构化进度码（`PROGRESS <代码>`）与错误码（`ERR code=<代码>`），由前端`lib/ui/messages.dart`映射为中英文文案。修改`lib/l10n/*.arb`后需运行`flutter gen-l10n`，`test/messages_test.dart`会自动校验`installer-lib.sh`中的所有状态码均具备中英文翻译。

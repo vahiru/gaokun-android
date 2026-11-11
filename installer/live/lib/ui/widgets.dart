@@ -659,6 +659,8 @@ class LogView extends StatelessWidget {
           style: TextStyle(
             fontFamily: 'monospace',
             fontFamilyFallback: kFontFallback,
+            // 中文回退到打包的 Noto Sans SC：它是可变字体、默认实例是 100（Thin），要显式给字重（见 theme.dart 的 w()）
+            fontVariations: [FontVariation.weight(400)],
             fontSize: 13,
             height: 1.45,
             color: lines[i].startsWith('!! ') ? cs.error : (lines[i].startsWith('+ ') ? cs.onSurfaceVariant : cs.onSurface),
