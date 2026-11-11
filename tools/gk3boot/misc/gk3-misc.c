@@ -319,16 +319,9 @@ static int init_misc(int argc, char **argv)
         return 2;
     }
 
-    /* 0–2080：BCB 清零 + BCAB；8192–10240：GK3 记录 */
-    unsigned char head[GK3_MISC_BCAB_OFF + GK3_MISC_BCAB_SIZE], rec[GK3_REC_SIZE];
-    memset(head, 0, sizeof(head));
-    gk3_bcab_init_install(head + GK3_MISC_BCAB_OFF, slot);
-    gk3_rec_init(rec);
-    gk3_rec_migrate(rec, head /* 全零的 BCB */, GK3_DISPATCH_VER);
-    if (def != GK3_SETDEF_NONE)
-        gk3_rec_put_set_default_req(rec, def);
-    gk3_rec_seal(rec);
-    if (gk3_bcab_validate(head + GK3_MISC_BCAB_OFF) || gk3_rec_validate(rec)) {   /* 自己造的都不过 = 库坏了 */
+    /* 0–2080：BCB 清零 + BCAB；8192–10240：GK3 记录（组装规则在 libgk3core，Windows 安装器用同一个函数） */
+    unsigned char head[GK3_MISC_INIT_HEAD_SIZE], rec[GK3_REC_SIZE];
+    if (gk3_misc_build_install(head, rec, slot, def)) {
         fprintf(stderr, "内部错误：造出来的 BCAB / GK3 记录自己都不合法\n");
         close(fd);
         return 1;
