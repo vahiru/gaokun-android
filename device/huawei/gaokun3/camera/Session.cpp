@@ -271,6 +271,8 @@ ndk::ScopedAStatus Session::close()
 		cam_->requestCompleted.disconnect(this, &Session::onRequestCompleted);
 		freeRequests_.clear();
 		configRequests_.clear();
+		reqBuffers_.clear();
+		fullFree_.clear();
 		pending_.clear();
 		dropAllCaches();
 		unmapFrames();
@@ -346,6 +348,8 @@ ndk::ScopedAStatus Session::configureStreams(const StreamConfiguration &cfg,
 		}
 		freeRequests_.clear();
 		configRequests_.clear();
+		reqBuffers_.clear();
+		fullFree_.clear();
 		pending_.clear();
 		unmapFrames();
 		allocator_.reset();
@@ -380,6 +384,50 @@ ndk::ScopedAStatus Session::configureStreams(const StreamConfiguration &cfg,
 	bool withRaw = fullSize && facts_.hasAf;
 
 	/*
+	 * 硬件 ISP 能同时出两路 NV12：大的一路走 FULL，给 JPEG；小的一路走显示路径，由 IFE
+	 * 自带的缩放器缩小，给预览、录像和 YUV 流。拍照模式下预览就不必每帧由 CPU 从全尺寸
+	 * 缩小，不拍照的帧也不用映射、同步全尺寸那一路。只在 JPEG 比其余各路大得多时用：
+	 * 显示路径的画面不到 FULL 的一半大。管线做不到时（例如双 IFE）会去掉显示流、返回
+	 * Adjusted，下面按实际的配置结果退回单路。
+	 */
+	int32_t dispW = 0, dispH = 0;
+	bool anyBlob = false;
+	for (const auto &s2 : cfg.streams) {
+		if (s2.format == aidl::android::hardware::graphics::common::PixelFormat::BLOB) {
+			anyBlob = true;
+			continue;
+		}
+		dispW = std::max(dispW, s2.width);
+		dispH = std::max(dispH, s2.height);
+	}
+	/*
+	 * 有对焦马达时显示路径至少按 1280x960 要：低增益时对焦的梯度能量在显示路径上算，
+	 * 预览很小（如 320x240）时不能拿那么小的画面对焦。
+	 */
+	if (facts_.hasAf && dispW > 0) {
+		dispW = std::max(dispW, 1280);
+		dispH = std::max(dispH, 960);
+	}
+	/*
+	 * 显示路径的尺寸：与 hwIspFrameSize() 相同，但高度按宽度向下取整。validate 按高度
+	 * 推宽度后再 16 对齐，向上取整多出的一行会让宽度多出 16（1296x962 → 1312x972），
+	 * 裁出的流比要的大 1% 以上，每帧多缩放一次。
+	 */
+	auto dispSize = [&]() {
+		libcamera::Size sz = hwIspFrameSize(facts_, dispW, dispH);
+		const int64_t hf = static_cast<int64_t>(sz.width) * facts_.activeH / facts_.activeW;
+		sz.height = static_cast<unsigned int>(std::max<int64_t>(dispH, hf) & ~1);
+		return sz;
+	};
+	bool twoYuv = false;
+	if (srcNv12_ && anyBlob && dispW > 0) {
+		const libcamera::Size f = hwIspFrameSize(facts_, maxW, maxH);
+		const libcamera::Size d = dispSize();
+		twoYuv = static_cast<uint64_t>(d.width) * d.height * 2 <=
+			 static_cast<uint64_t>(f.width) * f.height;
+	}
+
+	/*
 	 * libcamera's software ISP crops, it does not scale: an output smaller
 	 * than the sensor mode is a window out of its middle, with less field
 	 * of view than the stills. Ask for the whole image of a mode and scale
@@ -391,10 +439,10 @@ ndk::ScopedAStatus Session::configureStreams(const StreamConfiguration &cfg,
 	 * smallest mode that holds the output, off a 16:9 mode for 4:3 streams.
 	 * A multiple of 8 keeps the RGB888 rows packed (checked below).
 	 */
-	auto setUp = [&](bool raw) {
+	auto setUp = [&](bool two, bool raw) {
 		libcamera::StreamConfiguration &vc = config_->at(0);
 		if (srcNv12_) {
-			vc.size = hwIspFrameSize(facts_, maxW, maxH);
+			vc.size = two ? dispSize() : hwIspFrameSize(facts_, maxW, maxH);
 			vc.pixelFormat = libcamera::formats::NV12;
 		} else {
 			vc.size = fullSize ? libcamera::Size(facts_.activeW, facts_.activeH)
@@ -404,8 +452,15 @@ ndk::ScopedAStatus Session::configureStreams(const StreamConfiguration &cfg,
 			vc.pixelFormat = libcamera::formats::RGB888;
 		}
 		vc.bufferCount = 4;
+		size_t next = 1;
+		if (two) {
+			libcamera::StreamConfiguration &fc = config_->at(next++);
+			fc.size = hwIspFrameSize(facts_, maxW, maxH);
+			fc.pixelFormat = libcamera::formats::NV12;
+			fc.bufferCount = vc.bufferCount;
+		}
 		if (raw) {
-			libcamera::StreamConfiguration &rc = config_->at(1);
+			libcamera::StreamConfiguration &rc = config_->at(next);
 			rc.size = libcamera::Size(facts_.activeW, facts_.activeH);
 			rc.bufferCount = vc.bufferCount;
 		}
@@ -416,15 +471,34 @@ ndk::ScopedAStatus Session::configureStreams(const StreamConfiguration &cfg,
 	libcamera::CameraConfiguration::Status st;
 	for (;;) {
 		std::vector<libcamera::StreamRole> roles = { libcamera::StreamRole::Viewfinder };
+		if (twoYuv)
+			roles.push_back(libcamera::StreamRole::StillCapture);
 		if (withRaw)
 			roles.push_back(libcamera::StreamRole::Raw);
 		config_ = cam_->generateConfiguration(roles);
-		if (config_ && config_->size() == roles.size()) {
-			setUp(withRaw);
+		if (!config_ || config_->size() != roles.size()) {
+			ALOGW("generateConfiguration gave %zu of %zu streams",
+			      config_ ? config_->size() : 0, roles.size());
+		} else {
+			setUp(twoYuv, withRaw);
+			std::string asked;
+			for (const libcamera::StreamConfiguration &c : *config_)
+				asked += " " + c.toString();
 			st = config_->validate();
-			if (st != libcamera::CameraConfiguration::Invalid &&
-			    !cam_->configure(config_.get()))
+			int ret = -1;
+			if (st != libcamera::CameraConfiguration::Invalid)
+				ret = cam_->configure(config_.get());
+			if (!ret)
 				break;
+			ALOGW("libcamera %s:%s", st == libcamera::CameraConfiguration::Invalid
+							 ? "rejected the configuration"
+							 : "could not configure",
+			      asked.c_str());
+		}
+		if (twoYuv) {
+			ALOGW("libcamera did not take two NV12 streams, using one");
+			twoYuv = false;
+			continue;
 		}
 		if (!withRaw) {
 			ALOGE("generateConfiguration/validate/configure 失败");
@@ -433,9 +507,48 @@ ndk::ScopedAStatus Session::configureStreams(const StreamConfiguration &cfg,
 		ALOGW("libcamera 不接受 RAW 流：只用 Viewfinder，不做相位对焦");
 		withRaw = false;
 	}
-	libcamera::StreamConfiguration &sc = config_->at(0);
+	/*
+	 * 按配置结果认流：validate 可能去掉了显示流。处理过的画面（NV12 或 RGB888）里大的
+	 * 是 FULL、小的是显示路径；其余的是 RAW。
+	 */
+	const libcamera::PixelFormat procFmt =
+		srcNv12_ ? libcamera::formats::NV12 : libcamera::formats::RGB888;
+	const libcamera::StreamConfiguration *yuvCfg[2] = {};
+	const libcamera::StreamConfiguration *rawCfg = nullptr;
+	size_t nYuv = 0;
+	for (const libcamera::StreamConfiguration &c : *config_) {
+		if (c.pixelFormat == procFmt && nYuv < 2)
+			yuvCfg[nYuv++] = &c;
+		else if (c.pixelFormat != procFmt)
+			rawCfg = &c;
+	}
+	/*
+	 * ★ 2026-09-14（#109）：libcamera 若没能建起软件 ISP（IPA 模块找不到、调优文件缺失……），
+	 *   simple 流水线会"disabling software debayering"，然后把【裸拜耳】当成配置结果交回来；
+	 *   deliver() 把它当 RGB24 喂 libyuv，越界读 ⇒ provider SIGSEGV 循环重启，
+	 *   应用只看到"无法连接相机"。v0.6.0 正式镜像就是这样死的（IPA 装错目录）。
+	 *   这里把它变成一条能读懂的错误。
+	 */
+	if (nYuv == 0) {
+		ALOGE("libcamera configured %s instead of %s: with the software ISP, look in "
+		      "libcamera.log for 'No IPA found' or 'Creating IPA for software ISP failed'",
+		      config_->at(0).pixelFormat.toString().c_str(), procFmt.toString().c_str());
+		return err(Status::INTERNAL_ERROR);
+	}
+	const libcamera::StreamConfiguration *fullCfg = nullptr;
+	if (nYuv == 2) {
+		const auto area = [](const libcamera::StreamConfiguration *c) {
+			return static_cast<uint64_t>(c->size.width) * c->size.height;
+		};
+		if (area(yuvCfg[0]) > area(yuvCfg[1]))
+			std::swap(yuvCfg[0], yuvCfg[1]);
+		fullCfg = yuvCfg[1];
+	}
+	withRaw = rawCfg != nullptr;
+	const libcamera::StreamConfiguration &sc = *yuvCfg[0];
 	if (st == libcamera::CameraConfiguration::Adjusted)
-		ALOGW("配置被调整为 %s", sc.toString().c_str());
+		ALOGW("Configuration adjusted to %s%s%s", sc.toString().c_str(),
+		      fullCfg ? " + " : "", fullCfg ? fullCfg->toString().c_str() : "");
 
 	/* 管线有硬件对焦统计时，AF 区域交给它 */
 	afFov_.reset();
@@ -453,20 +566,27 @@ ndk::ScopedAStatus Session::configureStreams(const StreamConfiguration &cfg,
 		return err(Status::INTERNAL_ERROR);
 	}
 	/* NV12：裁剪偏移和色度成对取样要求偶数尺寸，行宽至少是画面宽度。 */
-	if (srcNv12_ && (sc.stride < sc.size.width || (sc.size.width | sc.size.height) & 1)) {
-		ALOGE("NV12 stream %s with stride %u is not supported", sc.size.toString().c_str(),
-		      sc.stride);
-		return err(Status::INTERNAL_ERROR);
+	for (const libcamera::StreamConfiguration *c : { &sc, fullCfg }) {
+		if (srcNv12_ && c &&
+		    (c->stride < c->size.width || (c->size.width | c->size.height) & 1)) {
+			ALOGE("NV12 stream %s with stride %u is not supported",
+			      c->size.toString().c_str(), c->stride);
+			return err(Status::INTERNAL_ERROR);
+		}
 	}
 
 	stream_ = sc.stream();
 	srcWidth_ = sc.size.width;
 	srcHeight_ = sc.size.height;
 	srcStride_ = static_cast<int32_t>(sc.stride);
+	fullStream_ = fullCfg ? fullCfg->stream() : nullptr;
+	fullWidth_ = fullCfg ? static_cast<int32_t>(fullCfg->size.width) : 0;
+	fullHeight_ = fullCfg ? static_cast<int32_t>(fullCfg->size.height) : 0;
+	fullStride_ = fullCfg ? static_cast<int32_t>(fullCfg->stride) : 0;
 	rawStream_ = nullptr;
 	rawForPhase_ = false;
 	if (withRaw) {
-		const libcamera::StreamConfiguration &rc = config_->at(1);
+		const libcamera::StreamConfiguration &rc = *rawCfg;
 		rawStream_ = rc.stream();
 		rawStride_ = rc.stride;
 		rawWidth_ = rc.size.width;
@@ -495,6 +615,8 @@ ndk::ScopedAStatus Session::configureStreams(const StreamConfiguration &cfg,
 	 * 换 allocator 之前先清掉，别让新旧两代混在一个池里。此时没有在途请求（streaming_ 为假）。 */
 	freeRequests_.clear();
 	configRequests_.clear();
+	reqBuffers_.clear();
+	fullFree_.clear();
 
 	/* 这个配置的曝光与增益范围，AE 锁定时用 */
 	{
@@ -516,26 +638,40 @@ ndk::ScopedAStatus Session::configureStreams(const StreamConfiguration &cfg,
 	 */
 
 	allocator_ = std::make_unique<libcamera::FrameBufferAllocator>(cam_);
-	if (allocator_->allocate(stream_) < 0 ||
-	    (rawStream_ && allocator_->allocate(rawStream_) < 0)) {
-		ALOGE("分配 libcamera 缓冲失败");
-		return err(Status::INTERNAL_ERROR);
+	std::vector<libcamera::Stream *> streams = { stream_ };
+	if (fullStream_)
+		streams.push_back(fullStream_);
+	if (rawStream_)
+		streams.push_back(rawStream_);
+	size_t nbufs = SIZE_MAX;
+	for (libcamera::Stream *s2 : streams) {
+		if (allocator_->allocate(s2) < 0) {
+			ALOGE("分配 libcamera 缓冲失败");
+			return err(Status::INTERNAL_ERROR);
+		}
+		nbufs = std::min(nbufs, allocator_->buffers(s2).size());
 	}
-	/* Each request carries a buffer of each stream, paired by index. */
-	const auto &bufs = allocator_->buffers(stream_);
-	const size_t nbufs = rawStream_ ? std::min(bufs.size(), allocator_->buffers(rawStream_).size())
-					: bufs.size();
+	/*
+	 * 每个请求固定带显示路径（或单路画面）与 RAW 的一个缓冲，按下标配对。FULL 的缓冲
+	 * 放进 fullFree_，只在带 JPEG 的请求、变焦后预览要从 FULL 出的请求里加（管线允许请求不带
+	 * FULL，只要至少带一路图像）。
+	 */
 	for (size_t i = 0; i < nbufs; i++) {
 		auto r = cam_->createRequest();
-		if (!r || r->addBuffer(stream_, bufs[i].get()) ||
-		    (rawStream_ &&
-		     r->addBuffer(rawStream_, allocator_->buffers(rawStream_)[i].get()))) {
+		if (!r) {
 			ALOGE("建 libcamera 请求失败");
 			return err(Status::INTERNAL_ERROR);
 		}
+		auto &fixed = reqBuffers_[r.get()];
+		for (libcamera::Stream *s2 : streams)
+			if (s2 != fullStream_)
+				fixed.emplace_back(s2, allocator_->buffers(s2)[i].get());
 		configRequests_.insert(r.get());
 		freeRequests_.push_back(std::move(r));
 	}
+	if (fullStream_)
+		for (const auto &b : allocator_->buffers(fullStream_))
+			fullFree_.push_back(b.get());
 
 	ALOGI("空闲请求池已建：%zu 个（bufferCount=%d，allocator 缓冲=%zu 个）",
 	      freeRequests_.size(), sc.bufferCount, allocator_->buffers(stream_).size());
@@ -577,23 +713,14 @@ ndk::ScopedAStatus Session::configureStreams(const StreamConfiguration &cfg,
 		out->push_back(hs);
 	}
 
-	/*
-	 * ★ 2026-09-14（#109）：libcamera 若没能建起软件 ISP（IPA 模块找不到、调优文件缺失……），
-	 *   simple 流水线会"disabling software debayering"，然后把【裸拜耳】当成配置结果交回来；
-	 *   下面的 deliver() 把它当 RGB24 喂 libyuv，越界读 ⇒ provider SIGSEGV 循环重启，
-	 *   应用只看到"无法连接相机"。v0.6.0 正式镜像就是这样死的（IPA 装错目录）。
-	 *   这里把它变成一条能读懂的错误。
-	 */
-	if (sc.pixelFormat != (srcNv12_ ? libcamera::formats::NV12 : libcamera::formats::RGB888)) {
-		ALOGE("libcamera configured %s instead of %s: with the software ISP, look in "
-		      "libcamera.log for 'No IPA found' or 'Creating IPA for software ISP failed'",
-		      sc.pixelFormat.toString().c_str(), srcNv12_ ? "NV12" : "RGB888");
-		return err(Status::INTERNAL_ERROR);
-	}
-
-	ALOGI("流已配置：%zu 路，libcamera 源 %dx%d 输出 %s",
-	      halStreams_.size(), srcWidth_, srcHeight_,
-	      sc.pixelFormat.toString().c_str());
+	if (fullStream_)
+		ALOGI("Streams configured: %zu, libcamera display path %dx%d + full %dx%d %s",
+		      halStreams_.size(), srcWidth_, srcHeight_, fullWidth_, fullHeight_,
+		      sc.pixelFormat.toString().c_str());
+	else
+		ALOGI("流已配置：%zu 路，libcamera 源 %dx%d 输出 %s",
+		      halStreams_.size(), srcWidth_, srcHeight_,
+		      sc.pixelFormat.toString().c_str());
 	return ndk::ScopedAStatus::ok();
 }
 
@@ -690,7 +817,10 @@ ndk::ScopedAStatus Session::processCaptureRequest(const std::vector<CaptureReque
 		auto lreq = std::move(freeRequests_.front());
 		freeRequests_.pop_front();
 
-		lreq->reuse(libcamera::Request::ReuseBuffers);
+		/* 先清空上一次的缓冲（可能带过 FULL），再加这个请求固定的那几路 */
+		lreq->reuse();
+		for (const auto &[st2, fb2] : reqBuffers_[lreq.get()])
+			lreq->addBuffer(st2, fb2);
 		libcamera::Request *key = lreq.get();
 		Pending p;
 		p.frameNumber = r.frameNumber;
@@ -825,6 +955,24 @@ ndk::ScopedAStatus Session::processCaptureRequest(const std::vector<CaptureReque
 			p.crop[2] = w;
 			p.crop[3] = h;
 		}
+		/*
+		 * 两路输出时，变焦后的裁剪在显示路径上比某路非 JPEG 流小（要放大）：这个请求也带
+		 * FULL，这些流改从 FULL 裁剪、缩小，画质与单路时相同。
+		 */
+		if (fullStream_) {
+			SrcFrame disp;
+			disp.w = srcWidth_;
+			disp.h = srcHeight_;
+			for (const auto &b : p.buffers) {
+				if (b.isBlob)
+					continue;
+				const Crop c = cropIn(disp, p.crop, b.width, b.height);
+				if (c.w < b.width || c.h < b.height) {
+					p.previewFromFull = true;
+					break;
+				}
+			}
+		}
 
 		if (facts_.hasAf) {
 			/* CONTROL_MODE_OFF 时不管 AF_MODE 是什么，AF 都关 */
@@ -909,6 +1057,24 @@ ndk::ScopedAStatus Session::processCaptureRequest(const std::vector<CaptureReque
 
 		apply3aControls(p, lreq->controls());
 
+		/* 带 JPEG 的请求、预览要从 FULL 出的请求，再加一个 FULL 缓冲 */
+		libcamera::FrameBuffer *fullBuf = nullptr;
+		if (fullStream_ && (p.previewFromFull ||
+				    std::any_of(p.buffers.begin(), p.buffers.end(),
+						[](const PendingBuffer &b) { return b.isBlob; }))) {
+			if (fullFree_.empty() &&
+			    !freeCv_.wait_for(lk, std::chrono::milliseconds(kPoolWaitMs),
+					      [&] { return !fullFree_.empty() || !streaming_; })) {
+				ALOGE("frame=%d: no free full-size buffer within %d ms", r.frameNumber,
+				      kPoolWaitMs);
+			}
+			if (!fullFree_.empty() && streaming_) {
+				fullBuf = fullFree_.back();
+				fullFree_.pop_back();
+				lreq->addBuffer(fullStream_, fullBuf);
+			}
+		}
+
 		const bool fired = p.flashFired;
 		pending_[key] = std::move(p);
 
@@ -918,6 +1084,8 @@ ndk::ScopedAStatus Session::processCaptureRequest(const std::vector<CaptureReque
 			if (fired && --firedPending_ == 0 && !flashArmed_ &&
 			    flashMode_ != ANDROID_FLASH_MODE_TORCH)
 				setLed(false);
+			if (fullBuf)
+				fullFree_.push_back(fullBuf);
 			freeRequests_.push_front(std::move(lreq));
 			return err(Status::INTERNAL_ERROR);
 		}
@@ -1063,7 +1231,13 @@ libcamera::Size Session::hwIspFrameSize(const SensorFacts &f, int64_t maxW, int6
 	return libcamera::Size(static_cast<unsigned int>(w), static_cast<unsigned int>(h));
 }
 
-Session::Crop Session::cropFor(int32_t dstW, int32_t dstH) const
+Session::Crop Session::cropFor(const SrcFrame &src, int32_t dstW, int32_t dstH) const
+{
+	return cropIn(src, cropRegion_, dstW, dstH);
+}
+
+Session::Crop Session::cropIn(const SrcFrame &src, const int32_t region[4], int32_t dstW,
+			      int32_t dstH) const
 {
 	/*
 	 * The largest centred crop with the output's aspect ratio of the active
@@ -1073,10 +1247,10 @@ Session::Crop Session::cropFor(int32_t dstW, int32_t dstH) const
 	 * the scale.
 	 */
 	/* 变焦时取画面中间、裁剪区域大小的那部分 */
-	const int64_t cw = cropRegion_[2] > 0 ? cropRegion_[2] : facts_.fovW;
-	const int64_t ch = cropRegion_[3] > 0 ? cropRegion_[3] : facts_.fovH;
-	int w = static_cast<int>(std::min<int64_t>(srcWidth_, cw * srcHeight_ / facts_.activeH)) & ~1;
-	int h = static_cast<int>(std::min<int64_t>(srcHeight_, ch * srcHeight_ / facts_.activeH)) & ~1;
+	const int64_t cw = region[2] > 0 ? region[2] : facts_.fovW;
+	const int64_t ch = region[3] > 0 ? region[3] : facts_.fovH;
+	int w = static_cast<int>(std::min<int64_t>(src.w, cw * src.h / facts_.activeH)) & ~1;
+	int h = static_cast<int>(std::min<int64_t>(src.h, ch * src.h / facts_.activeH)) & ~1;
 	if (static_cast<int64_t>(w) * dstH > static_cast<int64_t>(h) * dstW)
 		w = static_cast<int>(static_cast<int64_t>(h) * dstW / dstH) & ~1;
 	else
@@ -1091,13 +1265,13 @@ Session::Crop Session::cropFor(int32_t dstW, int32_t dstH) const
 		w = dstW;
 		h = dstH;
 	}
-	return { ((srcWidth_ - w) / 2) & ~1, ((srcHeight_ - h) / 2) & ~1, w, h };
+	return { ((src.w - w) / 2) & ~1, ((src.h - h) / 2) & ~1, w, h };
 }
 
 int Session::toJ420(const SrcFrame &src, int32_t dstW, int32_t dstH,
 		    uint8_t *dy, int ys, uint8_t *du, uint8_t *dv, int cs) const
 {
-	const Crop c = cropFor(dstW, dstH);
+	const Crop c = cropFor(src, dstW, dstH);
 	const int cw = (dstW + 1) / 2, chh = (dstH + 1) / 2;
 
 	if (srcNv12_) {
@@ -1160,7 +1334,7 @@ int Session::toJ420(const SrcFrame &src, int32_t dstW, int32_t dstH,
 int Session::toNv12(const SrcFrame &src, int32_t dstW, int32_t dstH,
 		    uint8_t *dy, int ys, uint8_t *duv, int cs) const
 {
-	const Crop c = cropFor(dstW, dstH);
+	const Crop c = cropFor(src, dstW, dstH);
 	const uint8_t *sy = src.data + static_cast<size_t>(c.y) * src.stride + c.x;
 	const uint8_t *suv = src.uv + static_cast<size_t>(c.y / 2) * src.stride + c.x;
 
@@ -1520,7 +1694,12 @@ bool Session::deliverJpegRgb(const uint8_t *rgb, buffer_handle_t dst,
 	 *    在内存里是 B,G,R,A，正好对上 libjpeg 的 JCS_EXT_BGRA，不用再转回
 	 *    3 通道，也正好对上 ARGBScale / ARGBRotate 的入参。
 	 */
-	const Crop c = cropFor(dstW, dstH);
+	SrcFrame frame;
+	frame.data = rgb;
+	frame.stride = srcWidth_ * 3;
+	frame.w = srcWidth_;
+	frame.h = srcHeight_;
+	const Crop c = cropFor(frame, dstW, dstH);
 	const uint8_t *crop = rgb + static_cast<size_t>(c.y) * srcWidth_ * 3 +
 			      static_cast<size_t>(c.x) * 3;
 	const bool needScale = dstW != c.w || dstH != c.h;
@@ -1981,8 +2160,13 @@ void Session::flashRequestDone(const Pending &p)
 void Session::returnToPool(std::unique_ptr<libcamera::Request> r)
 {
 	if (configRequests_.count(r.get())) {
+		/* 这个请求带过的 FULL 缓冲还回去（帧已交付、DMA 同步已结束） */
+		if (fullStream_)
+			if (libcamera::FrameBuffer *fb = r->findBuffer(fullStream_))
+				fullFree_.push_back(fb);
 		freeRequests_.push_back(std::move(r));
-		freeCv_.notify_one();
+		/* 等请求的和等 FULL 缓冲的可能是不同的线程 */
+		freeCv_.notify_all();
 	}
 }
 
@@ -2316,6 +2500,8 @@ void Session::onRequestCompleted(libcamera::Request *req)
 			}
 			src.data = srcMap + planes[0].offset;
 			src.stride = srcStride_;
+			src.w = srcWidth_;
+			src.h = srcHeight_;
 		}
 		/* 第二道保险（#109）：帧不够配置的尺寸就整帧报 ERROR_BUFFER，绝不越界读。 */
 		if (src.data && srcNv12_) {
@@ -2457,16 +2643,58 @@ void Session::onRequestCompleted(libcamera::Request *req)
 		}
 	}
 
+	bool hasBlob = false;
+	for (const auto &pb : pend.buffers)
+		hasBlob = hasBlob || pb.isBlob;
+
+	/*
+	 * 两路输出时的 FULL 那一路：只有带 JPEG 的请求、预览要从 FULL 出的请求（变焦）才带它的
+	 * 缓冲，这里映射、同步。JPEG 从它编码；previewFromFull 时非 JPEG 流也从它出。
+	 */
+	SrcFrame full;
+	const uint8_t *fullMap = nullptr;
+	int fullFd = -1;
+	if (fullStream_ && (hasBlob || pend.previewFromFull)) {
+		const libcamera::FrameBuffer *ffb = req->findBuffer(fullStream_);
+		if (!ffb || ffb->metadata().status != libcamera::FrameMetadata::FrameSuccess ||
+		    ffb->planes().empty()) {
+			ALOGW("frame=%d: no usable full-size frame", pend.frameNumber);
+		} else {
+			const auto &fp = ffb->planes();
+			fullFd = fp[0].fd.get();
+			size_t fullLen = 0;
+			for (const auto &p : fp)
+				if (p.fd.get() == fullFd)
+					fullLen = std::max<size_t>(fullLen, p.offset + p.length);
+			const size_t ySize = static_cast<size_t>(fullStride_) * fullHeight_;
+			const size_t uvOffset = fp.size() > 1 && fp[1].fd.get() == fullFd
+							? fp[1].offset
+							: fp[0].offset + ySize;
+			if (fp[0].offset + ySize > fullLen || uvOffset + ySize / 2 > fullLen) {
+				ALOGE("full-size NV12 frame of %zu bytes is too small for %dx%d", fullLen,
+				      fullWidth_, fullHeight_);
+			} else if ((fullMap = mapFrame(fullFd, fullLen))) {
+				struct dma_buf_sync sync = { DMA_BUF_SYNC_START | DMA_BUF_SYNC_READ };
+				ioctl(fullFd, DMA_BUF_IOCTL_SYNC, &sync);
+				full.data = fullMap + fp[0].offset;
+				full.uv = fullMap + uvOffset;
+				full.stride = fullStride_;
+				full.w = fullWidth_;
+				full.h = fullHeight_;
+			}
+		}
+	}
+	/* JPEG 的来源；两路输出却没拿到 FULL 时为空，JPEG 报 ERROR_BUFFER */
+	SrcFrame still = fullStream_ ? full : src;
+	/* 非 JPEG 流的来源：FULL 拿不到时退回显示路径（放大，画质差些，但有画面） */
+	const SrcFrame &view = pend.previewFromFull && full.data ? full : src;
+
 	/* 降噪：静态照片走 RGB ε 滤波（有 BLOB 流且增益够高才算，13 MP 不便宜）；预览只模糊色度。 */
 	const int denoiseT = denoiseThreshold();
 	const int chromaBlur = chromaBlurRadius();
 	std::vector<uint8_t> denoised;
 	/* ε 滤波只用于软件 ISP 的 RGB；硬件 ISP 的降噪以后放到 IFE 里做。 */
-	SrcFrame still = src;
 	if (rgb && denoiseT > 0) {
-		bool hasBlob = false;
-		for (const auto &pb : pend.buffers)
-			hasBlob = hasBlob || pb.isBlob;
 		if (hasBlob) {
 			denoised.resize(static_cast<size_t>(srcWidth_) * srcHeight_ * 3);
 			epsilonFilterRgb(rgb, denoised.data(), srcWidth_, srcHeight_, denoiseT);
@@ -2601,11 +2829,10 @@ void Session::onRequestCompleted(libcamera::Request *req)
 							  return !o.isBlob && o.width == pb.width &&
 								 o.height == pb.height;
 						  }) > 1;
-		bool ok = src.data && (pb.isBlob
-				       ? deliverJpeg(still, pb.handle, pb.width, pb.height,
-						     pb.blobSize, jpegQuality, jpegOrientation)
-				       : deliver(src, pb.handle, pb.width, pb.height, chromaBlur,
-						 shared));
+		bool ok = pb.isBlob ? still.data && deliverJpeg(still, pb.handle, pb.width, pb.height,
+								 pb.blobSize, jpegQuality, jpegOrientation)
+				    : view.data && deliver(view, pb.handle, pb.width, pb.height, chromaBlur,
+							   shared);
 		okv.push_back(ok);
 		if (!ok) {
 			NotifyMsg emsg;
@@ -2623,6 +2850,10 @@ void Session::onRequestCompleted(libcamera::Request *req)
 	if (srcMap) {
 		struct dma_buf_sync sync = { DMA_BUF_SYNC_END | DMA_BUF_SYNC_READ };
 		ioctl(srcFd, DMA_BUF_IOCTL_SYNC, &sync);
+	}
+	if (fullMap) {
+		struct dma_buf_sync sync = { DMA_BUF_SYNC_END | DMA_BUF_SYNC_READ };
+		ioctl(fullFd, DMA_BUF_IOCTL_SYNC, &sync);
 	}
 	mapLock.unlock();
 

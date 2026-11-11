@@ -114,15 +114,16 @@ private:
 	/*
 	 * libcamera 输出的一帧。软件 ISP（simple 管线）给打包的 RGB888（内存里是 B,G,R）；
 	 * 硬件 ISP（qcom-ife 管线）给全范围 BT.601 的 NV12：data 是 Y 平面，uv 是交错的
-	 * CbCr 平面。各平面的行宽都是 stride 字节。
+	 * CbCr 平面。各平面的行宽都是 stride 字节，画面 w×h。
 	 */
 	struct SrcFrame {
 		const uint8_t *data = nullptr;
 		const uint8_t *uv = nullptr;
 		int stride = 0;
+		int w = 0, h = 0;
 	};
 
-	/* 把一帧（源尺寸 srcWidth_×srcHeight_）交付到一个 gralloc 缓冲，
+	/* 把一帧交付到一个 gralloc 缓冲，
 	 * 必要时裁成该路流的宽高比、再缩放到它的尺寸。 */
 	/* shared：这一帧另有一路流尺寸相同 */
 	bool deliver(const SrcFrame &src, buffer_handle_t dst,
@@ -150,7 +151,9 @@ private:
 	struct Crop {
 		int x, y, w, h;
 	};
-	Crop cropFor(int32_t dstW, int32_t dstH) const;
+	Crop cropFor(const SrcFrame &src, int32_t dstW, int32_t dstH) const;
+	/* 同上，裁剪区域（SCALER_CROP_REGION，视场坐标）由调用方给 */
+	Crop cropIn(const SrcFrame &src, const int32_t region[4], int32_t dstW, int32_t dstH) const;
 	/*
 	 * JPEG 流：把 RGB 编码成 JPEG 写进 BLOB 缓冲。
 	 * jpegOrientation 是应用给的【顺时针】校正角（ANDROID_JPEG_ORIENTATION）。
@@ -287,7 +290,15 @@ private:
 
 	std::unique_ptr<libcamera::CameraConfiguration> config_;
 	std::unique_ptr<libcamera::FrameBufferAllocator> allocator_;
+	/* 预览、录像、YUV 流和对焦用的那一路（两路输出时是显示路径） */
 	libcamera::Stream *stream_ = nullptr;
+	/*
+	 * 两路输出时的 FULL 路径（全尺寸，只给 JPEG），否则为空。见 configureStreams。
+	 * 只有带 JPEG 的请求、变焦后预览要从 FULL 出的请求（Pending::previewFromFull）才带它的
+	 * 缓冲（见 fullFree_），IFE 只在这些帧写全尺寸画面。
+	 */
+	libcamera::Stream *fullStream_ = nullptr;
+	int32_t fullWidth_ = 0, fullHeight_ = 0, fullStride_ = 0;
 	/* Full-size RAW stream for phase detection (rear camera in full-size mode). */
 	libcamera::Stream *rawStream_ = nullptr;
 	bool rawForPhase_ = false;
@@ -313,7 +324,7 @@ private:
 		int32_t blobSize = 0;       /* Stream::bufferSize */
 	};
 	std::vector<HalStreamInfo> halStreams_;
-	/* libcamera 实际输出的尺寸：一个传感器模式的完整画面（见 configureStreams）。 */
+	/* stream_ 的尺寸：一个传感器模式的完整画面，或它缩小后的显示路径（见 configureStreams）。 */
 	int32_t srcWidth_ = 0, srcHeight_ = 0;
 	/* 源帧的行宽（字节）。 */
 	int32_t srcStride_ = 0;
@@ -327,6 +338,14 @@ private:
 	/* 本次 configureStreams 建的 Request（裸指针，只作身份判断）。重配置后迟到的上一代
 	 * Request 不在这里 ⇒ returnToPool() 直接释放，不会混进新池子。 */
 	std::set<libcamera::Request *> configRequests_;
+	/*
+	 * 每个 Request 固定带的缓冲（显示路径或单路画面，以及 RAW），按配置时的下标配对。
+	 * 每次复用都先清空再按这里重新加：FULL 的缓冲不固定，只在带 JPEG 的请求、变焦后预览
+	 * 要从 FULL 出的请求里从 fullFree_ 取一个加上，完成后经 returnToPool() 还回 fullFree_。
+	 */
+	std::map<libcamera::Request *, std::vector<std::pair<libcamera::Stream *, libcamera::FrameBuffer *>>>
+		reqBuffers_;
+	std::vector<libcamera::FrameBuffer *> fullFree_;
 	/* 池子暂空时 processCaptureRequest 最多等多久（正常不会空，见那里的说明）。 */
 	static constexpr int kPoolWaitMs = 1000;
 	/* 上一个【带设置】的请求的设置，已去掉一次性触发（stripTriggers）。
@@ -371,6 +390,11 @@ private:
 		bool sentGains = false; /* 这个请求给 libcamera 下发了手动的 ColourGains */
 		/* 数码变焦：实际用的裁剪区域，有效阵列坐标 */
 		int32_t crop[4] = {};
+		/*
+		 * 两路输出时，变焦裁剪在显示路径上已不够这个请求的非 JPEG 流（要放大）：这个请求
+		 * 也带 FULL，预览等非 JPEG 流从 FULL 出。
+		 */
+		bool previewFromFull = false;
 	};
 	std::map<libcamera::Request *, Pending> pending_;
 	/* 正在交付的帧的裁剪区域（cropFor()）；w 为 0 = 整幅 */

@@ -12,7 +12,7 @@
 
 - **`libcamera`同树Soong构建**：由于Android NDK的`std::__ndk1`与AOSP平台的`std::__1` C++ ABI不兼容，`libcamera`通过[`patches/libcamera/libcamera-Android.bp`](../../../../patches/libcamera/README.md)在AOSP树内编译为`libcamera_base_gk3`、`libcamera_gk3`与`libcamera_ipa_softisp_gk3`（安装于`/vendor/lib64/libcamera/ipa/`）。
 - **调优配置**：`hi846.yaml`、`ov13b10.yaml`与`uncalibrated.yaml`安装至`/vendor/etc/libcamera/ipa/softisp/`。
-- **硬件ISP路径**：`qcom-ife`流水线与IPA（及其调优配置）尚未接入同树构建；本模块在`libcamera`给出NV12输出时走该路径，传感器模式与视场由流水线选择。
+- **硬件ISP路径**：`qcom-ife`流水线与IPA（及其调优配置）尚未接入同树构建；本模块在`libcamera`给出NV12输出时走该路径，传感器模式与视场由流水线选择。JPEG比其余各路大得多时（拍照模式），向流水线要两路NV12：显示路径由IFE缩放器缩小，给预览、录像与YUV流；FULL路径给JPEG，只有带JPEG的请求才带它的缓冲，IFE只在这些帧写出全尺寸画面；数码变焦后显示路径上的裁剪比预览小（要放大）时，请求也带FULL，预览等非JPEG流改从FULL裁剪、缩小。两路视场相同；流水线不支持两路时（如双IFE）退回单路，由CPU从同一幅画面裁剪、缩放出各路流。
 
 ## 三、闪光灯与手电筒
 
