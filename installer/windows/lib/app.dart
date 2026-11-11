@@ -155,6 +155,7 @@ class WinStepPage extends StatelessWidget {
       current: step.index,
       railTitle: l.railTitle,
       railIcon: null,
+      railLogo: Image.asset('assets/logo.png', width: 24, height: 24, filterQuality: FilterQuality.medium),
       railSubtitle: l.railSub,
       railFooter: [
         // 制作独立安装介质的入口：写盘期间、已在这个流程里时不可用

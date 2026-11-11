@@ -1,6 +1,6 @@
 {
   "@@locale": "en",
-  "appTitle": "gaokun3 Installer",
+  "appTitle": "Gaokun Android Installer",
   "fixtureBadge": "Demo data: {scenario}",
   "railSub": "Windows Installer",
   "railCheck": "Check",

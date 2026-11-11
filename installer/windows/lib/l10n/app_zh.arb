@@ -1,6 +1,6 @@
 {
   "@@locale": "zh",
-  "appTitle": "gaokun3安装器",
+  "appTitle": "Gaokun Android Installer",
   "fixtureBadge": "演示数据：{scenario}",
   "@fixtureBadge": {
     "placeholders": {

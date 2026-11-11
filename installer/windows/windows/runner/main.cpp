@@ -45,7 +45,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   Win32Window::Point origin(static_cast<unsigned int>(work.left / scale + (work_w - w) / 2),
                             static_cast<unsigned int>(work.top / scale + (work_h - h) / 2));
   Win32Window::Size size(static_cast<unsigned int>(w), static_cast<unsigned int>(h));
-  if (!window.Create(L"gaokun3", origin, size)) {
+  if (!window.Create(L"Gaokun Android Installer", origin, size)) {
     return EXIT_FAILURE;
   }
   window.SetQuitOnClose(true);

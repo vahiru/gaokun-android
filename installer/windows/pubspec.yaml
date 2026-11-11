@@ -30,6 +30,7 @@ flutter:
   # 演示数据：真 gk3w 的录制（testdata/<场景>/index.txt 的头注释写明来源与替换）。
   # Chrome 预览与界面测试回放它们；Windows 上连真后端时不用，体积可以忽略。
   assets:
+    - assets/logo.png        # 侧栏的标志（tool/icon/make-icon.sh 生成）
     - testdata/common/
     - testdata/free/
     - testdata/installed/
