@@ -23,7 +23,8 @@ env:
   FLUTTER_VERSION: '3.47.2'
   # 脚本的输出有中文与"→"：Windows 运行器的控制台是 cp1252，Python 不按 UTF-8 输出就在 print 上报 UnicodeEncodeError
   PYTHONUTF8: '1'
-  LLVM_MINGW: llvm-mingw-20261104-ucrt-ubuntu-22.04-x86_64
+  # 目录名。⚠️ 不能叫 LLVM_MINGW：Makefile 与 mke2fs/build.sh 把 LLVM_MINGW 当作工具链的完整路径
+  LLVM_MINGW_NAME: llvm-mingw-20261104-ucrt-ubuntu-22.04-x86_64
   LLVM_MINGW_SHA256: 919380403de87dca3c581c2053230cd298af5e891286628ba0613b7fed370926
 
 jobs:
@@ -35,14 +36,15 @@ jobs:
       - name: llvm-mingw
         run: |
           curl -fsSL --retry 3 -o /tmp/llvm-mingw.tar.xz \
-            "https://github.com/mstorsjo/llvm-mingw/releases/download/20261104/$LLVM_MINGW.tar.xz"
+            "https://github.com/mstorsjo/llvm-mingw/releases/download/20261104/$LLVM_MINGW_NAME.tar.xz"
           echo "$LLVM_MINGW_SHA256  /tmp/llvm-mingw.tar.xz" | sha256sum -c
           mkdir -p "$HOME/opt" && tar -C "$HOME/opt" -xf /tmp/llvm-mingw.tar.xz
+          echo "LLVM_MINGW=$HOME/opt/$LLVM_MINGW_NAME" >> "$GITHUB_ENV"
       - name: host unit tests
         run: make -C installer/backend test
       - name: build
         run: |
-          make -C installer/backend win-arm64 sdboot LLVM_MINGW="$HOME/opt/$LLVM_MINGW"
+          make -C installer/backend win-arm64 sdboot
           bash installer/backend/mke2fs/build.sh arm64
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
