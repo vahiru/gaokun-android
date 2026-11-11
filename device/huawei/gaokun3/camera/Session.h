@@ -359,8 +359,14 @@ private:
 		uint8_t flashMode = ANDROID_FLASH_MODE_OFF;
 		int32_t evSteps = 0;    /* 这个请求的曝光补偿（kEvStepsPerStop 档） */
 		bool sentGains = false; /* 这个请求给 libcamera 下发了手动的 ColourGains */
+		/* 数码变焦：实际用的裁剪区域，有效阵列坐标 */
+		int32_t crop[4] = {};
 	};
 	std::map<libcamera::Request *, Pending> pending_;
+	/* 正在交付的帧的裁剪区域（cropFor()）；w 为 0 = 整幅 */
+	int32_t cropRegion_[4] = {};
+	/* 应用给了 AF 区域；没给时区域跟着变焦走 */
+	bool afAppRegion_ = false;
 
 	/*
 	 * ── AE/AWB 锁定与曝光补偿（持有 mutex_）──

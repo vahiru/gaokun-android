@@ -347,7 +347,7 @@ std::vector<uint8_t> buildCharacteristics(const SensorFacts &f)
 				  &focusCalib, 1);
 
 	/* ── 缩放 / 裁剪 ── */
-	const float maxZoom = 1.0f;
+	const float maxZoom = static_cast<float>(kMaxDigitalZoom);
 	add_camera_metadata_entry(m, ANDROID_SCALER_AVAILABLE_MAX_DIGITAL_ZOOM, &maxZoom, 1);
 	const uint8_t croppingType = ANDROID_SCALER_CROPPING_TYPE_CENTER_ONLY;
 	add_camera_metadata_entry(m, ANDROID_SCALER_CROPPING_TYPE, &croppingType, 1);
@@ -537,6 +537,8 @@ std::vector<uint8_t> buildResult(const std::vector<uint8_t> &requestSettings,
 		setOrAdd(m, ANDROID_SENSOR_SENSITIVITY, &fr.sensitivity, 1);
 	if (fr.frameDurationNs > 0)
 		setOrAdd(m, ANDROID_SENSOR_FRAME_DURATION, &fr.frameDurationNs, 1);
+	if (fr.cropRegion[2] > 0)
+		setOrAdd(m, ANDROID_SCALER_CROP_REGION, fr.cropRegion, 4);
 
 	add_camera_metadata_entry(m, ANDROID_CONTROL_AF_STATE, &fr.afState, 1);
 	add_camera_metadata_entry(m, ANDROID_LENS_STATE, &fr.lensState, 1);

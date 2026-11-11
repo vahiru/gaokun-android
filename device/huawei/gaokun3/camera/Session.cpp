@@ -801,6 +801,23 @@ ndk::ScopedAStatus Session::processCaptureRequest(const std::vector<CaptureReque
 		 *    用 -1 当"没带"的哨兵 —— 0 是合法值（AF_MODE_OFF /
 		 *    AF_TRIGGER_IDLE），不能用 0 兜底。
 		 */
+		/*
+		 * 数码变焦：裁剪区域的大小限在视场的四分之一到全部之间，居中
+		 * （SCALER_CROPPING_TYPE_CENTER_ONLY）。
+		 */
+		{
+			const int32_t w = std::clamp(
+				requestEntryInt(p.settings, ANDROID_SCALER_CROP_REGION, facts_.fovW, 2),
+				facts_.fovW / kMaxDigitalZoom, facts_.fovW) & ~1;
+			const int32_t h = std::clamp(
+				requestEntryInt(p.settings, ANDROID_SCALER_CROP_REGION, facts_.fovH, 3),
+				facts_.fovH / kMaxDigitalZoom, facts_.fovH) & ~1;
+			p.crop[0] = ((facts_.fovW - w) / 2) & ~1;
+			p.crop[1] = ((facts_.fovH - h) / 2) & ~1;
+			p.crop[2] = w;
+			p.crop[3] = h;
+		}
+
 		if (facts_.hasAf) {
 			/* CONTROL_MODE_OFF 时不管 AF_MODE 是什么，AF 都关 */
 			const bool controlOff =
@@ -831,14 +848,20 @@ ndk::ScopedAStatus Session::processCaptureRequest(const std::vector<CaptureReque
 				const int32_t rx1 = requestEntryInt(p.settings, ANDROID_CONTROL_AF_REGIONS, -1, 2);
 				const int32_t ry1 = requestEntryInt(p.settings, ANDROID_CONTROL_AF_REGIONS, -1, 3);
 				const int32_t rw = requestEntryInt(p.settings, ANDROID_CONTROL_AF_REGIONS, 0, 4);
-				if (rw > 0 && rx1 > rx0 && ry1 > ry0)
+				afAppRegion_ = rw > 0 && rx1 > rx0 && ry1 > ry0;
+				if (afAppRegion_)
 					af_.setRegion(static_cast<float>(facts_.fovX + rx0) / facts_.activeW,
 						      static_cast<float>(facts_.fovY + ry0) / facts_.activeH,
 						      static_cast<float>(facts_.fovX + rx1) / facts_.activeW,
 						      static_cast<float>(facts_.fovY + ry1) / facts_.activeH);
-				else
-					af_.clearRegion();
 			}
+			/* 应用没给区域：用画面的可见部分 */
+			if (!afAppRegion_)
+				af_.clearRegion(
+					static_cast<float>(facts_.fovX + p.crop[0]) / facts_.activeW,
+					static_cast<float>(facts_.fovY + p.crop[1]) / facts_.activeH,
+					static_cast<float>(facts_.fovX + p.crop[0] + p.crop[2]) / facts_.activeW,
+					static_cast<float>(facts_.fovY + p.crop[1] + p.crop[3]) / facts_.activeH);
 			if (afTrig > 0)   /* 1=START 2=CANCEL；0=IDLE 不必下发 */
 				af_.trigger(static_cast<uint8_t>(afTrig));
 		}
@@ -1041,10 +1064,11 @@ Session::Crop Session::cropFor(int32_t dstW, int32_t dstH) const
 	 * or not, less a few border columns of the debayer, so its height gives
 	 * the scale.
 	 */
-	int w = static_cast<int>(std::min<int64_t>(
-		srcWidth_, static_cast<int64_t>(facts_.fovW) * srcHeight_ / facts_.activeH)) & ~1;
-	int h = static_cast<int>(std::min<int64_t>(
-		srcHeight_, static_cast<int64_t>(facts_.fovH) * srcHeight_ / facts_.activeH)) & ~1;
+	/* 变焦时取画面中间、裁剪区域大小的那部分 */
+	const int64_t cw = cropRegion_[2] > 0 ? cropRegion_[2] : facts_.fovW;
+	const int64_t ch = cropRegion_[3] > 0 ? cropRegion_[3] : facts_.fovH;
+	int w = static_cast<int>(std::min<int64_t>(srcWidth_, cw * srcHeight_ / facts_.activeH)) & ~1;
+	int h = static_cast<int>(std::min<int64_t>(srcHeight_, ch * srcHeight_ / facts_.activeH)) & ~1;
 	if (static_cast<int64_t>(w) * dstH > static_cast<int64_t>(h) * dstW)
 		w = static_cast<int>(static_cast<int64_t>(h) * dstW / dstH) & ~1;
 	else
@@ -2236,6 +2260,7 @@ void Session::onRequestCompleted(libcamera::Request *req)
 
 	std::vector<bool> okv;
 	renderFrame_++;
+	std::copy(pend.crop, pend.crop + 4, cropRegion_);
 	for (auto &pb : pend.buffers) {
 		const bool shared = std::count_if(pend.buffers.begin(), pend.buffers.end(),
 						  [&](const PendingBuffer &o) {
@@ -2292,6 +2317,7 @@ void Session::onRequestCompleted(libcamera::Request *req)
 	fr.flashMode = pend.flashMode;
 	fr.exposureNs = exposureNs;
 	fr.frameDurationNs = frameDurationNs;
+	std::copy(pend.crop, pend.crop + 4, fr.cropRegion);
 	fr.sensitivity = sensitivity;
 	/*
 	 * ★ 对焦结果组：应用（CameraX 的 FocusMeteringControl、各家相机的拍照前 AF）等的是

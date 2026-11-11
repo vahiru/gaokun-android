@@ -712,7 +712,20 @@ void AutoFocus::applyRegion(float x0, float y0, float x1, float y1, bool tap)
 	std::lock_guard<std::mutex> lk(m_);
 	if (std::equal(region, region + 4, region_))
 		return;
+	if (!tap && defaultRegion_) {
+		/*
+		 * 默认区域跟着变焦走（clearRegion() 每个请求都调）。数码变焦不改变
+		 * 物距，不必重新搜索，只换分数的基准；搜索进行中先不换，免得一次
+		 * 搜索的分数来自不同的区域，等下一个请求再换。
+		 */
+		if (scanning_)
+			return;
+		std::copy(region, region + 4, region_);
+		refScore_ = -1.0;
+		return;
+	}
 	std::copy(region, region + 4, region_);
+	defaultRegion_ = !tap;
 	ALOGI("AF 区域 (%.2f,%.2f)-(%.2f,%.2f)", region_[0], region_[1], region_[2], region_[3]);
 	regionChanged(tap);
 }
@@ -725,9 +738,11 @@ void AutoFocus::region(float out[4]) const
 
 /* Back to the default region is not a tap: a CONTINUOUS_VIDEO START during
  * that scan locks at once. */
-void AutoFocus::clearRegion()
+/* 默认区域取 (x0, y0)–(x1, y1)（变焦后的可见部分）中间的 70%。 */
+void AutoFocus::clearRegion(float x0, float y0, float x1, float y1)
 {
-	applyRegion(0.15f, 0.15f, 0.85f, 0.85f, false);
+	const float mx = (x1 - x0) * 0.15f, my = (y1 - y0) * 0.15f;
+	applyRegion(x0 + mx, y0 + my, x1 - mx, y1 - my, false);
 }
 
 /* Caller holds the lock. In AUTO the app's next trigger searches the new

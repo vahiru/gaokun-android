@@ -96,7 +96,11 @@ public:
 	/* AF region as fractions of the frame (x0, y0, x1, y1), or none: the
 	 * central 70%. A change starts a new search. */
 	void setRegion(float x0, float y0, float x1, float y1);
-	void clearRegion();
+	/*
+	 * 应用没给区域：取画面可见部分（x0, y0, x1, y1，画面的比例；不变焦时是
+	 * 整幅）中间的 70%。
+	 */
+	void clearRegion(float x0 = 0.0f, float y0 = 0.0f, float x1 = 1.0f, float y1 = 1.0f);
 	/*
 	 * 手动对焦（AF 模式 OFF）：镜头移到这个距离（屈光度，LENS_FOCUS_DISTANCE），
 	 * 刻度同 focusDistance()，像搜索一样分步移动。
@@ -245,6 +249,7 @@ private:
 	int otherSource_ = 0;            /* 连续几帧的分数来自另一种来源 */
 	/* AF region in fractions of the frame; default the central 70%. */
 	float region_[4] = { 0.15f, 0.15f, 0.85f, 0.85f };
+	bool defaultRegion_ = true;      /* region_ 是默认区域，不是应用给的 */
 	/* ★ 调试口：`debug.gaokun3.camera.af.hold <pos>` 把马达钉在某个位置、不搜对焦。
 	 *   标定"这个马达到底动没动 / 焦点在哪"必须靠它 —— 自动搜索的曲线分不清
 	 *   "焦点变了"和"AGC 漂了"。置 -1 或空串恢复正常 AF（见 AutoFocus.cpp）。 */

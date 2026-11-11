@@ -22,6 +22,12 @@ namespace gaokun3 {
 /* 60 fps */
 constexpr int64_t kMinFrameDuration60Ns = 16666667;
 
+/*
+ * 数码变焦：裁剪区域（SCALER_CROP_REGION）每个方向最小到视场的四分之一。
+ * 用 CONTROL_ZOOM_RATIO 的应用由相机服务把倍率换算成裁剪区域。
+ */
+constexpr int32_t kMaxDigitalZoom = 4;
+
 /* 曝光补偿每档的步数（ANDROID_CONTROL_AE_COMPENSATION_STEP） */
 constexpr int32_t kEvStepsPerStop = 3;
 /*
@@ -152,6 +158,7 @@ struct FrameResultFacts {
 	uint8_t afState = ANDROID_CONTROL_AF_STATE_INACTIVE;
 	uint8_t lensState = ANDROID_LENS_STATE_STATIONARY;
 	float focusDistance = 0.0f;     /* 屈光度；UNCALIBRATED ⇒ 只保证单调 */
+	int32_t cropRegion[4] = {};     /* 实际用的裁剪区域 (x, y, w, h)；w 为 0 = 没设 */
 	bool hasAf = false;             /* false 时不写 AF 相关动态条目（保持定焦语义） */
 	bool manualSensor = false;      /* 声明了 MANUAL_SENSOR：结果里要有 BLACK_LEVEL_LOCK */
 	LensParams lens = kLensBack;    /* 这个相机的镜头参数（lensParams()） */
