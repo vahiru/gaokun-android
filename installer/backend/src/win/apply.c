@@ -8,10 +8,12 @@
  * → 70 write-boot → 80 bootloader → 100 done。★ 所有输入在第一次写盘之前验完（boot.img 拆得开、super 完整试解一遍、
  * ESP 空间够、区间确实空闲、分区名不重），之后 ERR 一律带 touched=yes。
  *
- * metadata / userdata 的格式化：给了 --mke2fs（Android platform-tools 里的 mke2fs.exe，同目录要有 mke2fs.conf）时，
- * 与 fastboot -w 的做法相同：动盘之前用 mke2fs -E android_sparse 按分区大小各生成一个 sparse 镜像（参数照
- * fastboot/fs.cpp generate_ext4_image，另加 LiveCD 的卷标与 userdata 的 -m 0、两者都 -I 256），格式化那一步用与 super
- * 同一套 sparse 写入写进去，写完核对 ext4 魔数与卷标。没给时退回清零（metadata 整个、userdata 开头 16 MiB），
+ * metadata / userdata 的格式化：给了 --mke2fs（本仓 mke2fs/build.sh 编的 mke2fs.exe，同目录要有 mke2fs.conf）时，
+ * 照 fastboot -w 的做法：动盘之前用 mke2fs -E android_sparse 按分区大小各生成一个 sparse 镜像并完整试解，格式化那一步
+ * 用与 super 同一套 sparse 写入写进去，写完核对 ext4 魔数与卷标。参数同 LiveCD（installer-lib.sh：-L 卷标、userdata
+ * 加 -m 0），配置是 Debian 13 的同一份 mke2fs.conf，所以特性、块大小（metadata 1 KiB）与 LiveCD 相同
+ * （mke2fs/test-align.sh 对拍）。另加 lazy_itable_init=0：装的时候就把 inode 表清零（Windows 上 mke2fs 本来也
+ * 这样，这里写明），不靠首次开机的后台清零。没给 --mke2fs 时退回清零（metadata 整个、userdata 开头 16 MiB），
  * 由 fstab 的 formattable 在首次开机格式化（尚未上机验证）。
  *
  * 与 LiveCD 的差别（原型阶段）：
@@ -252,9 +254,9 @@ out:
 
 /* ── ext4（mke2fs.exe） ──────────────────────────────────────────── */
 
-/* 用 platform-tools 的 mke2fs.exe 生成一个 android_sparse 格式的 ext4 镜像（fastboot -w 的同一种做法）。
+/* 用 mke2fs.exe 生成一个 android_sparse 格式的 ext4 镜像（fastboot -w 的同一种做法），大小 kib KiB。
  * mke2fs 的输出转到我们的 stderr（stdout 只留给协议记录）。 */
-static int make_ext4(const wchar_t *exe, const wchar_t *out, uint64_t blocks, const wchar_t *label, int no_reserve)
+static int make_ext4(const wchar_t *exe, const wchar_t *out, uint64_t kib, const wchar_t *label, int no_reserve)
 {
     wchar_t conf[MAX_PATH], cmd[MAX_PATH * 3], *slash;
     STARTUPINFOW si;
@@ -272,8 +274,8 @@ static int make_ext4(const wchar_t *exe, const wchar_t *out, uint64_t blocks, co
     if (!gk3w_exists(conf) || !SetEnvironmentVariableW(L"MKE2FS_CONFIG", conf))
         return -1;
     DeleteFileW(out);
-    _snwprintf(cmd, MAX_PATH * 3, L"\"%ls\" -q -t ext4 -b 4096 -I 256 -E android_sparse -O uninit_bg %ls-L %ls \"%ls\" %llu", exe,
-               no_reserve ? L"-m 0 " : L"", label, out, (unsigned long long)blocks);
+    _snwprintf(cmd, MAX_PATH * 3, L"\"%ls\" -q -t ext4 -E android_sparse,lazy_itable_init=0 %ls-L %ls \"%ls\" %lluk", exe,
+               no_reserve ? L"-m 0 " : L"", label, out, (unsigned long long)kib);
     hnul = CreateFileW(L"NUL", GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa, OPEN_EXISTING, 0, NULL);
     if (!DuplicateHandle(GetCurrentProcess(), GetStdHandle(STD_ERROR_HANDLE), GetCurrentProcess(), &herr, 0, TRUE,
                          DUPLICATE_SAME_ACCESS))
@@ -676,7 +678,7 @@ int gk3w_cmd_apply(int argc, wchar_t **argv)
                 if (!strcmp(plan.parts[i].name, fs[k].name))
                     bytes = (plan.parts[i].last - plan.parts[i].first + 1) * d.bs;
             _snwprintf(fs[k].img, MAX_PATH, L"%lsgk3w-%lu-%ls.simg", tmp, (unsigned long)GetCurrentProcessId(), fs[k].label);
-            if (!bytes || make_ext4(mke2fs, fs[k].img, bytes / 4096, fs[k].label, fs[k].no_reserve) ||
+            if (!bytes || make_ext4(mke2fs, fs[k].img, bytes / 1024, fs[k].label, fs[k].no_reserve) ||
                 run_image(fs[k].img, 0, bytes, NULL, 0, &why)) {
                 gk3w_err_kv(T, "mkfs", "part", fs[k].name, "用 mke2fs 生成 ext4 镜像失败（盘还没动过）", GetLastError());
                 goto out;

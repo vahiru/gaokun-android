@@ -3,6 +3,8 @@
 #   make test        主机单测（clang + ASan/UBSan）：协议编码、空闲区、sparse 展开、分区方案、ESP 文本与空间检查
 #   make win-x64     x86_64 版（PC 上对着 VHDX 测）
 #   make win-arm64   ARM64 版（平板）
+#   make mke2fs      Windows 版 mke2fs.exe（x64 与 ARM64，mke2fs/build.sh：Debian e2fsprogs 源码 + patches/e2fsprogs）
+#   make mke2fs-align 本仓编的 mke2fs 与 Debian mkfs.ext4 对拍（要 docker）
 #   make host-tools  主机上的辅助工具（build/host/unsparse：用同一份 zstd + sparse 代码把 super.img.zst 展开成文件，
 #                    与 gk3-unsparse.py 的结果对拍）
 #
@@ -28,7 +30,7 @@ WINFLAGS  := -std=gnu11 -O2 $(WARN) -Werror -municode -DUNICODE -D_UNICODE -I$(C
 ZSTDFLAGS := -O2 -w
 WINLIBS   := -static -lrpcrt4 -lbcrypt
 
-.PHONY: all test win-x64 win-arm64 host-tools clean
+.PHONY: all test win-x64 win-arm64 host-tools mke2fs mke2fs-align clean
 all: test win-x64 win-arm64 host-tools
 
 test: $(B)/test_host $(B)/test_stage2
@@ -68,6 +70,13 @@ $(B)/x64/gk3w.exe: $(PORTABLE) $(WIN_SRC) $(CORE_SRC) $(HEADERS) $(B)/x64/zstd.o
 
 $(B)/arm64/gk3w.exe: $(PORTABLE) $(WIN_SRC) $(CORE_SRC) $(HEADERS) $(B)/arm64/zstd.o
 	$(LLVM_MINGW)/bin/aarch64-w64-mingw32-clang $(WINFLAGS) -o $@ $(PORTABLE) $(WIN_SRC) $(CORE_SRC) $(B)/arm64/zstd.o $(WINLIBS)
+
+mke2fs:
+	bash mke2fs/build.sh x64
+	bash mke2fs/build.sh arm64
+
+mke2fs-align:
+	bash mke2fs/test-align.sh
 
 clean:
 	rm -rf $(B)
