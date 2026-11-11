@@ -6,6 +6,10 @@
 
 窗口没有系统标题栏：标题栏由界面自绘（`lib/ui/title_bar.dart`），拖动、最小化、关闭经`gk3/window`通道交给原生窗口（`windows/runner/flutter_window.cpp`）；正在写盘时拒绝关闭。窗口大小按屏幕工作区算，内容按窗口等比缩放。
 
+## 图标
+
+crDroid的荷鲁斯之眼（蓝色、透明底），取自crDroid设置应用的`ic_crdroid_logo.xml`（Apache-2.0；图形本身是crDroid的标志，许可证不含商标使用权）。源文件与来源说明在`tool/icon/crdroid-eye.svg`，改了之后运行`bash tool/icon/make-icon.sh`重新生成Windows的`app_icon.ico`与网页图标。
+
 ## 页面
 
 检查（机型、Secure Boot、快速启动、BitLocker、电源、空闲空间）→ 选位置 → 选版本 → 开机默认的系统 → 确认（按住2秒）→ 安装进度 → 完成或失败。已经装过时从检查页进入管理页，可以卸载。
