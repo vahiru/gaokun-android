@@ -124,6 +124,8 @@ struct SensorFacts {
 	bool evCompensation = false;
 	bool aeLock = false;
 	bool awbLock = false;
+	/* 手动白平衡时 libcamera 接受色彩矩阵（ColourCorrectionMatrix）：COLOR_CORRECTION_TRANSFORM */
+	bool manualCcm = false;
 	/* AWB 预设：按色温的手动白平衡 */
 	bool awbPresets = false;
 	/* 防频闪：libcamera 接受 AeFlickerMode（Manual）与 AeFlickerPeriod */
@@ -175,6 +177,11 @@ struct FrameResultFacts {
 	std::array<float, 4> ccGains{};
 	bool hasCcTransform = false;
 	std::array<float, 9> ccTransform{};
+	/*
+	 * 请求了 COLOR_CORRECTION_MODE_TRANSFORM_MATRIX，但 AWB 开着或请求没给有效矩阵，
+	 * 矩阵被忽略：结果报 FAST
+	 */
+	bool ccModeFast = false;
 };
 std::vector<uint8_t> buildResult(const std::vector<uint8_t> &requestSettings,
 				 int64_t timestampNs, uint8_t pipelineDepth,
@@ -215,6 +222,9 @@ std::string requestEntryBytes(const std::vector<uint8_t> &requestSettings, uint3
 int64_t requestEntryInt64(const std::vector<uint8_t> &requestSettings, uint32_t tag, int64_t def);
 float requestEntryFloat(const std::vector<uint8_t> &requestSettings, uint32_t tag, float def,
 			size_t index = 0);
+/* 有理数条目换成浮点（色彩矩阵）；条目数不是 n 时返回 false */
+bool requestEntryRationals(const std::vector<uint8_t> &requestSettings, uint32_t tag, float *out,
+			   size_t n);
 
 /*
  * 这套 HAL 能不能交付这组流？Device::isStreamCombinationSupported 与

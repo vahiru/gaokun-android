@@ -2246,6 +2246,25 @@ void Session::apply3aControls(Pending &p, libcamera::ControlList &ctrls)
 	}
 
 	/*
+	 * COLOR_CORRECTION_MODE_TRANSFORM_MATRIX：手动白平衡（AWB 关）时按应用给的色彩矩阵，
+	 * qcom-ife 的 IPA 在 AWB 关时接受 ColourCorrectionMatrix（行优先）。AWB 开着（自动、
+	 * 锁定、预设）时按规范忽略这个矩阵，结果报 FAST。之后不带矩阵、AWB 关的请求会下发锁定
+	 * 时的色温（拿到过色温时），IPA 的手动矩阵随之换回调优的。
+	 */
+	if (facts_.awbLock &&
+	    requestEntryInt(p.settings, ANDROID_COLOR_CORRECTION_MODE,
+			    ANDROID_COLOR_CORRECTION_MODE_FAST) ==
+		    ANDROID_COLOR_CORRECTION_MODE_TRANSFORM_MATRIX) {
+		float m[9];
+		if (facts_.manualCcm && manualWb && awbLocked_ &&
+		    requestEntryRationals(p.settings, ANDROID_COLOR_CORRECTION_TRANSFORM, m, 9))
+			ctrls.set(libcamera::controls::ColourCorrectionMatrix,
+				  std::span<const float, 9>(m));
+		else
+			p.ccModeFast = true;
+	}
+
+	/*
 	 * AE 锁上之后报 LOCKED（还没锁上时照常报，那几帧曝光还在变）。预拍触发
 	 * 时已经锁着：状态保持 LOCKED（状态表：触发被忽略），闪光照常可以闪。
 	 * 预拍进行中才锁上：预拍做完之前报 PRECAPTURE。
@@ -2838,6 +2857,7 @@ void Session::onRequestCompleted(libcamera::Request *req)
 	result.fmqResultSize = 0;
 	result.partialResult = 1;
 	FrameResultFacts fr;
+	fr.ccModeFast = pend.ccModeFast;
 	fr.flashState = flashLed_.empty() ? ANDROID_FLASH_STATE_UNAVAILABLE
 			: (pend.flashFired ? ANDROID_FLASH_STATE_FIRED : ANDROID_FLASH_STATE_READY);
 	fr.aeState = pend.aeState;

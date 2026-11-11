@@ -339,6 +339,7 @@ void Device::probeCamera()
 {
 	facts_.minFrameDurationsNs.clear();
 	facts_.evCompensation = facts_.aeLock = facts_.awbLock = facts_.awbPresets = false;
+	facts_.manualCcm = false;
 	facts_.manualSensor = false;
 	ManualLimits limits;
 
@@ -457,6 +458,8 @@ void Device::probe3aControls()
 			      libcamera::controls::AnalogueGainModeManual);
 	facts_.awbLock = ctrls.count(&libcamera::controls::AwbEnable) &&
 			 ctrls.count(&libcamera::controls::ColourGains);
+	facts_.manualCcm = facts_.awbLock &&
+			   ctrls.count(&libcamera::controls::ColourCorrectionMatrix);
 	facts_.awbPresets = ctrls.count(&libcamera::controls::AwbEnable) &&
 			    ctrls.count(&libcamera::controls::ColourTemperature);
 	facts_.antibanding = takes(libcamera::controls::AeFlickerMode,

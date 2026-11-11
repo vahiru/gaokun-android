@@ -455,6 +455,7 @@ private:
 		uint8_t flashMode = ANDROID_FLASH_MODE_OFF;
 		int32_t evSteps = 0;    /* 这个请求的曝光补偿（kEvStepsPerStop 档） */
 		bool sentGains = false; /* 这个请求给 libcamera 下发了手动的 ColourGains */
+		bool ccModeFast = false; /* 请求的 TRANSFORM_MATRIX 被忽略（AWB 开着），结果报 FAST */
 		/* 数码变焦：实际用的裁剪区域，有效阵列坐标 */
 		int32_t crop[4] = {};
 		/*

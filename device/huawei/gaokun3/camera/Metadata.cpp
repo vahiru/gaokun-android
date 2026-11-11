@@ -86,6 +86,21 @@ float requestEntryFloat(const std::vector<uint8_t> &requestSettings, uint32_t ta
 										   : def;
 }
 
+bool requestEntryRationals(const std::vector<uint8_t> &requestSettings, uint32_t tag, float *out,
+			   size_t n)
+{
+	camera_metadata_ro_entry_t e;
+	if (!findEntry(requestSettings, tag, TYPE_RATIONAL, &e) || e.count != n)
+		return false;
+	for (size_t i = 0; i < n; i++) {
+		if (e.data.r[i].denominator == 0)
+			return false;
+		out[i] = static_cast<float>(e.data.r[i].numerator) /
+			 static_cast<float>(e.data.r[i].denominator);
+	}
+	return true;
+}
+
 int32_t requestEntryInt(const std::vector<uint8_t> &requestSettings,
 			uint32_t tag, int32_t def, size_t index)
 {
@@ -272,8 +287,8 @@ std::vector<uint8_t> buildCharacteristics(const SensorFacts &f)
 						  ANDROID_CONTROL_AWB_MODE_SHADE });
 	/*
 	 * OFF：用应用给的白平衡增益（COLOR_CORRECTION_GAINS，见
-	 * Session::apply3aControls()）。色彩矩阵仍取调优里的、按关掉 AWB 时的
-	 * 色温插值；不应用 COLOR_CORRECTION_TRANSFORM。
+	 * Session::apply3aControls()）。COLOR_CORRECTION_MODE 为 TRANSFORM_MATRIX 时也用应用给的
+	 * 色彩矩阵，否则色彩矩阵取调优里的、按关掉 AWB 时的色温插值。
 	 */
 	if (f.awbLock)
 		awbModes.push_back(ANDROID_CONTROL_AWB_MODE_OFF);
@@ -465,6 +480,8 @@ std::vector<uint8_t> buildCharacteristics(const SensorFacts &f)
 		reqKeys.push_back(ANDROID_CONTROL_AWB_LOCK);
 		reqKeys.push_back(ANDROID_COLOR_CORRECTION_MODE);
 		reqKeys.push_back(ANDROID_COLOR_CORRECTION_GAINS);
+		if (f.manualCcm)
+			reqKeys.push_back(ANDROID_COLOR_CORRECTION_TRANSFORM);
 	}
 	/* 手动对焦：AF_MODE_OFF 加对焦距离 */
 	if (f.hasAf)
@@ -489,6 +506,8 @@ std::vector<uint8_t> buildCharacteristics(const SensorFacts &f)
 	/* 声明了 COLOR_CORRECTION_MODE：结果里报实际的增益与色彩矩阵 */
 	if (f.awbLock)
 		resKeys.push_back(ANDROID_COLOR_CORRECTION_TRANSFORM);
+	/* 没有闪烁检测：每帧报 NONE（声明了防频闪的设备 CTS 要求结果里有这一项） */
+	resKeys.push_back(ANDROID_STATISTICS_SCENE_FLICKER);
 	/* 定焦相机声明了 READ_SENSOR_SETTINGS 也要报对焦距离（恒为 0） */
 	if ((f.hasAf || f.manualSensor) &&
 	    std::find(resKeys.begin(), resKeys.end(), ANDROID_LENS_FOCUS_DISTANCE) ==
@@ -598,6 +617,12 @@ std::vector<uint8_t> buildResult(const std::vector<uint8_t> &requestSettings,
 	setOrAdd(m, ANDROID_LENS_FOCUS_RANGE, focusRange, 2);
 	if (fr.hasCcGains)
 		setOrAdd(m, ANDROID_COLOR_CORRECTION_GAINS, fr.ccGains.data(), 4);
+	if (fr.ccModeFast) {
+		const uint8_t ccMode = ANDROID_COLOR_CORRECTION_MODE_FAST;
+		setOrAdd(m, ANDROID_COLOR_CORRECTION_MODE, &ccMode, 1);
+	}
+	const uint8_t sceneFlicker = ANDROID_STATISTICS_SCENE_FLICKER_NONE;
+	setOrAdd(m, ANDROID_STATISTICS_SCENE_FLICKER, &sceneFlicker, 1);
 	if (fr.hasCcTransform) {
 		camera_metadata_rational_t t[9];
 		for (int i = 0; i < 9; i++)
@@ -759,7 +784,7 @@ std::vector<uint8_t> buildDefaultRequest(int templateId, const SensorFacts &f)
 						    : ANDROID_CONTROL_AWB_MODE_AUTO;
 	add_camera_metadata_entry(m, ANDROID_CONTROL_AWB_MODE, &awbMode, 1);
 	if (f.awbLock) {
-		/* HAL 不应用 COLOR_CORRECTION_TRANSFORM，色彩矩阵总是调优的：各模板都报 FAST */
+		/* 各模板都用调优的色彩矩阵（FAST）；应用要自己的矩阵时设 TRANSFORM_MATRIX 并关 AWB */
 		const uint8_t ccMode = ANDROID_COLOR_CORRECTION_MODE_FAST;
 		add_camera_metadata_entry(m, ANDROID_COLOR_CORRECTION_MODE, &ccMode, 1);
 	}
