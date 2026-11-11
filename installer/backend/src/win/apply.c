@@ -760,31 +760,10 @@ int gk3w_cmd_apply(int argc, wchar_t **argv)
         req.region = (gk3w_span){rstart, rend};
         req.userdata_mib = ud_mib;
         req.rescue = 0;
-        pe = gk3w_plan_alongside(&req, &plan);
+        pe = gk3w_plan_print(&req, d.num, &plan, stdout);
         if (pe != GK3W_PLAN_OK) {
-            gk3w_line l = {0};
-            gk3w_line_begin(&l, "PLANERR");
-            gk3w_line_kv(&l, "msg", gk3w_plan_strerror(pe));
-            gk3w_line_u64(&l, "avail_mib", plan.avail_mib);
-            gk3w_line_u64(&l, "need_mib", plan.need_mib);
-            gk3w_line_u64(&l, "fixed_mib", plan.fixed_mib);
-            (void)gk3w_line_emit(&l, stdout);
-            gk3w_line_free(&l);
             gk3w_err_kv(T, "plan", "why", gk3w_plan_strerror(pe), "the selected free space is too small (disk not touched)", 0);
             goto out;
-        }
-        for (size_t i = 0; i < plan.n; i++) {
-            gk3w_line l = {0};
-            gk3w_line_begin(&l, "PLAN");
-            gk3w_line_kv(&l, "op", "mkpart");
-            gk3w_line_u64(&l, "disk", d.num);
-            gk3w_line_kv(&l, "name", plan.parts[i].name);
-            gk3w_line_u64(&l, "start", plan.parts[i].first);
-            gk3w_line_u64(&l, "end", plan.parts[i].last);
-            gk3w_line_u64(&l, "size_mib", plan.parts[i].mib);
-            gk3w_line_kv(&l, "type", "8300");
-            (void)gk3w_line_emit(&l, stdout);
-            gk3w_line_free(&l);
         }
     }
 

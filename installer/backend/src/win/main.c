@@ -48,7 +48,7 @@ int wmain(int argc, wchar_t **argv)
     SetConsoleOutputCP(CP_UTF8);
 
     if (argc < 2) {
-        fprintf(stderr, "!! usage: gk3w probe|preflight|apply|uninstall|dump|esp-tree|readpart|mkpart|rmpart|write|esp-ls|esp-put|--version\n");
+        fprintf(stderr, "!! usage: gk3w probe|preflight|plan|apply|uninstall|dump|esp-tree|readpart|mkpart|rmpart|write|esp-ls|esp-put|--version\n");
         return 2;
     }
     if (!wcscmp(argv[1], L"--version")) {
@@ -63,7 +63,7 @@ int wmain(int argc, wchar_t **argv)
             {L"probe", gk3w_cmd_probe},   {L"mkpart", gk3w_cmd_mkpart}, {L"rmpart", gk3w_cmd_rmpart},
             {L"write", gk3w_cmd_write},   {L"esp-ls", gk3w_cmd_esp_ls}, {L"esp-put", gk3w_cmd_esp_put},
             {L"apply", gk3w_cmd_apply},   {L"dump", gk3w_cmd_dump},     {L"esp-tree", gk3w_cmd_esp_tree},
-            {L"readpart", gk3w_cmd_readpart}, {L"uninstall", gk3w_cmd_uninstall}, {L"preflight", gk3w_cmd_preflight},
+            {L"readpart", gk3w_cmd_readpart}, {L"uninstall", gk3w_cmd_uninstall}, {L"preflight", gk3w_cmd_preflight}, {L"plan", gk3w_cmd_plan},
         };
         for (size_t i = 0; i < sizeof cmds / sizeof cmds[0]; i++)
             if (!wcscmp(argv[1], cmds[i].name))

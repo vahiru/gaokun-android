@@ -1,6 +1,8 @@
 /* 分区方案（说明见 plan.h）。 */
 #include "plan.h"
 
+#include "proto.h"
+
 #include <stdio.h>
 #include <string.h>
 
@@ -73,4 +75,39 @@ gk3w_plan_err gk3w_plan_alongside(const gk3w_plan_req *r, gk3w_plan *out)
         return GK3W_PLAN_EINVAL;
     }
     return GK3W_PLAN_OK;
+}
+
+gk3w_plan_err gk3w_plan_print(const gk3w_plan_req *r, uint64_t disk, gk3w_plan *out, FILE *fp)
+{
+    gk3w_plan_err pe = gk3w_plan_alongside(r, out);
+    gk3w_line l = {0};
+    if (pe != GK3W_PLAN_OK) {
+        gk3w_line_begin(&l, "PLANERR");
+        gk3w_line_kv(&l, "msg", gk3w_plan_strerror(pe));
+        gk3w_line_u64(&l, "avail_mib", out->avail_mib);
+        gk3w_line_u64(&l, "need_mib", out->need_mib);
+        gk3w_line_u64(&l, "fixed_mib", out->fixed_mib);
+        (void)gk3w_line_emit(&l, fp);
+        gk3w_line_free(&l);
+        return pe;
+    }
+    for (size_t i = 0; i < out->n; i++) {
+        gk3w_line_begin(&l, "PLAN");
+        gk3w_line_kv(&l, "op", "mkpart");
+        gk3w_line_u64(&l, "disk", disk);
+        gk3w_line_kv(&l, "name", out->parts[i].name);
+        gk3w_line_u64(&l, "start", out->parts[i].first);
+        gk3w_line_u64(&l, "end", out->parts[i].last);
+        gk3w_line_u64(&l, "size_mib", out->parts[i].mib);
+        gk3w_line_kv(&l, "type", "8300");
+        (void)gk3w_line_emit(&l, fp);
+        gk3w_line_free(&l);
+    }
+    gk3w_line_begin(&l, "PLANSUM");
+    gk3w_line_u64(&l, "avail_mib", out->avail_mib);
+    gk3w_line_u64(&l, "fixed_mib", out->fixed_mib);
+    gk3w_line_u64(&l, "userdata_mib", out->userdata_mib);
+    (void)gk3w_line_emit(&l, fp);
+    gk3w_line_free(&l);
+    return pe;
 }
