@@ -44,6 +44,11 @@ constexpr const LensParams &lensParams(bool frontFacing)
 {
 	return frontFacing ? kLensFront : kLensBack;
 }
+/*
+ * 防频闪 AUTO 按这个闪烁周期（微秒）处理：没有闪烁检测，取本地电网的频率。
+ * 50 Hz 电网的灯每 10 ms 闪一次（中国大陆、澳大利亚、欧洲）。
+ */
+constexpr int32_t kAntibandingAutoPeriodUs = 10000;
 /* JPEG 缩略图尺寸（宽、高成对，0x0 = 不要缩略图） */
 constexpr int32_t kThumbnailSizes[] = { 0, 0, 160, 90, 160, 120 };
 
@@ -121,6 +126,8 @@ struct SensorFacts {
 	bool awbLock = false;
 	/* AWB 预设：按色温的手动白平衡 */
 	bool awbPresets = false;
+	/* 防频闪：libcamera 接受 AeFlickerMode（Manual）与 AeFlickerPeriod */
+	bool antibanding = false;
 	/*
 	 * 手动曝光（MANUAL_SENSOR）：每种配置都接受的曝光时间、增益与帧长范围
 	 * （Device::probeCamera()）。

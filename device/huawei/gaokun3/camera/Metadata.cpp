@@ -298,9 +298,13 @@ std::vector<uint8_t> buildCharacteristics(const SensorFacts &f)
 	add_camera_metadata_entry(m, ANDROID_CONTROL_AVAILABLE_SCENE_MODES, sceneModes, 1);
 	const uint8_t effects[] = { ANDROID_CONTROL_EFFECT_MODE_OFF };
 	add_camera_metadata_entry(m, ANDROID_CONTROL_AVAILABLE_EFFECTS, effects, 1);
-	const uint8_t antibanding[] = { ANDROID_CONTROL_AE_ANTIBANDING_MODE_OFF };
+	/* 50HZ/60HZ/AUTO：libcamera 的 AE 把曝光取整到闪烁周期（Session::apply3aControls()） */
+	const uint8_t antibanding[] = { ANDROID_CONTROL_AE_ANTIBANDING_MODE_OFF,
+					ANDROID_CONTROL_AE_ANTIBANDING_MODE_50HZ,
+					ANDROID_CONTROL_AE_ANTIBANDING_MODE_60HZ,
+					ANDROID_CONTROL_AE_ANTIBANDING_MODE_AUTO };
 	add_camera_metadata_entry(m, ANDROID_CONTROL_AE_AVAILABLE_ANTIBANDING_MODES,
-				  antibanding, 1);
+				  antibanding, f.antibanding ? 4 : 1);
 	const uint8_t vstabModes[] = { ANDROID_CONTROL_VIDEO_STABILIZATION_MODE_OFF };
 	add_camera_metadata_entry(m, ANDROID_CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES,
 				  vstabModes, 1);
@@ -451,6 +455,8 @@ std::vector<uint8_t> buildCharacteristics(const SensorFacts &f)
 	}
 	if (f.evCompensation)
 		reqKeys.push_back(ANDROID_CONTROL_AE_EXPOSURE_COMPENSATION);
+	if (f.antibanding)
+		reqKeys.push_back(ANDROID_CONTROL_AE_ANTIBANDING_MODE);
 	if (f.aeLock)
 		reqKeys.push_back(ANDROID_CONTROL_AE_LOCK);
 	if (f.awbLock) {
@@ -757,6 +763,11 @@ std::vector<uint8_t> buildDefaultRequest(int templateId, const SensorFacts &f)
 	}
 	const int32_t evComp = 0;
 	add_camera_metadata_entry(m, ANDROID_CONTROL_AE_EXPOSURE_COMPENSATION, &evComp, 1);
+	/* 有 AUTO 时模板都用 AUTO（CTS 的模板检查） */
+	if (f.antibanding) {
+		const uint8_t ab = ANDROID_CONTROL_AE_ANTIBANDING_MODE_AUTO;
+		add_camera_metadata_entry(m, ANDROID_CONTROL_AE_ANTIBANDING_MODE, &ab, 1);
+	}
 	const uint8_t aeLock = ANDROID_CONTROL_AE_LOCK_OFF;
 	add_camera_metadata_entry(m, ANDROID_CONTROL_AE_LOCK, &aeLock, 1);
 	const uint8_t awbLock = ANDROID_CONTROL_AWB_LOCK_OFF;

@@ -469,9 +469,13 @@ void Device::probe3aControls()
 			 ctrls.count(&libcamera::controls::ColourGains);
 	facts_.awbPresets = ctrls.count(&libcamera::controls::AwbEnable) &&
 			    ctrls.count(&libcamera::controls::ColourTemperature);
-	ALOGI("%s: 3A controls: exposure compensation %d, AE lock %d, AWB lock %d, AWB presets %d",
+	facts_.antibanding = takes(libcamera::controls::AeFlickerMode,
+				   libcamera::controls::FlickerManual) &&
+			     ctrls.count(&libcamera::controls::AeFlickerPeriod);
+	ALOGI("%s: 3A controls: exposure compensation %d, AE lock %d, AWB lock %d, AWB presets %d, "
+	      "antibanding %d",
 	      name_.c_str(), facts_.evCompensation, facts_.aeLock, facts_.awbLock,
-	      facts_.awbPresets);
+	      facts_.awbPresets, facts_.antibanding);
 }
 
 ndk::ScopedAStatus Device::getCameraCharacteristics(CameraMetadata *out)

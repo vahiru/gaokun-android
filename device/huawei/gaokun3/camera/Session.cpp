@@ -1957,6 +1957,36 @@ void Session::apply3aControls(Pending &p, libcamera::ControlList &ctrls)
 		ctrls.set(libcamera::controls::ExposureValue,
 			  static_cast<float>(ev) / kEvStepsPerStop);
 
+	/*
+	 * 防频闪：交流供电的灯按电网频率的两倍闪烁，曝光时间是闪烁周期的整数倍时画面
+	 * 没有条纹。50HZ/60HZ 让 libcamera 的 AE 把不短于一个周期的曝光向下取整到
+	 * 10 ms / 8.333 ms 的整数倍、增益补足；AUTO 没有检测，按 kAntibandingAutoPeriodUs。
+	 * 手动曝光不受影响；AE 锁定时锁住的曝光按补偿缩放后由下面自己取整（libipa 对手动
+	 * 曝光不取整）。
+	 */
+	int32_t periodUs = 0;
+	if (facts_.antibanding) {
+		switch (requestEntryInt(p.settings, ANDROID_CONTROL_AE_ANTIBANDING_MODE,
+					ANDROID_CONTROL_AE_ANTIBANDING_MODE_AUTO)) {
+		case ANDROID_CONTROL_AE_ANTIBANDING_MODE_50HZ:
+			periodUs = 10000;
+			break;
+		case ANDROID_CONTROL_AE_ANTIBANDING_MODE_60HZ:
+			periodUs = 8333;
+			break;
+		case ANDROID_CONTROL_AE_ANTIBANDING_MODE_AUTO:
+			periodUs = kAntibandingAutoPeriodUs;
+			break;
+		default:
+			break;
+		}
+		ctrls.set(libcamera::controls::AeFlickerMode,
+			  periodUs > 0 ? libcamera::controls::FlickerManual
+				       : libcamera::controls::FlickerOff);
+		if (periodUs > 0)
+			ctrls.set(libcamera::controls::AeFlickerPeriod, periodUs);
+	}
+
 	/* 手动曝光：AE 模式 OFF，或整个 3A 关（CONTROL_MODE_OFF） */
 	const bool controlOff = facts_.manualSensor &&
 				requestEntryInt(p.settings, ANDROID_CONTROL_MODE,
@@ -2024,9 +2054,18 @@ void Session::apply3aControls(Pending &p, libcamera::ControlList &ctrls)
 			if (fpsMin > 0)
 				maxUs = std::min(maxUs, 1e6 / fpsMin);
 			const double total = lockedExposureUs_ * lockedGain_ * scale;
-			const double exposure = std::clamp(lockedExposureUs_ * scale,
-							   static_cast<double>(std::max(expMinUs_, 1)),
-							   std::max(maxUs, 1.0));
+			double exposure = std::clamp(lockedExposureUs_ * scale,
+						     static_cast<double>(std::max(expMinUs_, 1)),
+						     std::max(maxUs, 1.0));
+			/*
+			 * 防频闪：缩放后的曝光不再是闪烁周期的整数倍（例如 30 ms 加 1/3 档成
+			 * 37.8 ms），向下取整到整数倍、差额由增益补足。锁住的曝光本身就是整数倍，
+			 * 但报回来的值截断到了微秒（29997 us），留 1% 的余量，免得少一个周期。
+			 */
+			if (periodUs > 0 && exposure >= periodUs) {
+				const double n = std::floor(exposure / periodUs + 0.01);
+				exposure = std::max(n, 1.0) * periodUs;
+			}
 			const double gain = std::clamp(total / exposure, static_cast<double>(gainMin_),
 						       static_cast<double>(std::max(gainMax_, gainMin_)));
 			/*
