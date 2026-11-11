@@ -5,7 +5,7 @@
 //!   其余 stderr 行是给人看的日志（前端只放进"详情"）
 //! * 值里不许有空格：自由文本一律经 [`enc`] 做百分号编码（`%`→`%25`、空格→`%20`、制表符→`%09`，installer-lib.sh:119）
 //!
-//! 前端的解析器是 `installer/live/lib/backend/protocol.dart`：按空格切、每个值 %-解码。
+//! 前端的解析器是 `installer/common/lib/backend/protocol.dart`：按空格切、每个值 %-解码。
 //!
 //! ★ 所有写出都返回 `io::Result` —— 不用 `println!`（遇到 EPIPE 会 panic，Cargo.toml 的 lint 禁了它），
 //!   也不吞写失败：前端没收到的记录，等于没发生。

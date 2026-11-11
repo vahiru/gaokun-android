@@ -1,4 +1,4 @@
-/* 行协议的输出端。格式见 scripts/live/installer-lib.sh 文件头，前端解析器是 installer/live/lib/backend/protocol.dart：
+/* 行协议的输出端。格式见 scripts/live/installer-lib.sh 文件头，前端解析器是 installer/common/lib/backend/protocol.dart：
  *   stdout：一行一条记录 `TYPE k=v k=v …`；
  *   stderr：`PROGRESS <百分比> <代码> [k=v …]`、`ERR code=<代码> [k=v …]`，以及以 `!! ` 开头给人看的说明。
  * 值一律做百分号编码。比 shell 版的 gk3__enc 多编码换行、回车和其他控制字符（否则卷标里的换行会把一条记录断成两行）；
