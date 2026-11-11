@@ -121,8 +121,14 @@ private:
 
 	/* 把一帧（源尺寸 srcWidth_×srcHeight_）交付到一个 gralloc 缓冲，
 	 * 必要时裁成该路流的宽高比、再缩放到它的尺寸。 */
+	/* shared：这一帧另有一路流尺寸相同 */
 	bool deliver(const SrcFrame &src, buffer_handle_t dst,
-		     int32_t dstW, int32_t dstH, int chromaBlur);
+		     int32_t dstW, int32_t dstH, int chromaBlur, bool shared);
+	/*
+	 * 把硬件 ISP 的画面转成一种输出尺寸的 NV12，每帧每种尺寸只裁剪、缩放、
+	 * 降噪一次：先 Y（dstW×dstH），紧接着 CbCr 平面。失败返回 nullptr。
+	 */
+	const uint8_t *renderNv12(const SrcFrame &src, int32_t dstW, int32_t dstH, int chromaBlur);
 	/* 裁成 dstW×dstH 的宽高比、缩放后写成全范围的 4:2:0 平面（J420），
 	 * Y 行宽 ys、色度行宽 cs。返回 libyuv 的结果，0 为成功。 */
 	int toJ420(const SrcFrame &src, int32_t dstW, int32_t dstH,
@@ -133,6 +139,9 @@ private:
 	 */
 	int toNv12(const SrcFrame &src, int32_t dstW, int32_t dstH,
 		   uint8_t *dy, int ys, uint8_t *duv, int cs) const;
+	/* NV12 缩放成另一尺寸的 NV12，倍数大时分级 */
+	int scaleNv12(const uint8_t *sy, int ss, const uint8_t *suv, int suvs, int sw, int sh,
+		      uint8_t *dy, int ds, uint8_t *duv, int duvs, int dw, int dh) const;
 	/* Centre crop of the source frame with the aspect ratio of dstW x dstH,
 	 * even-aligned. */
 	struct Crop {
@@ -197,11 +206,10 @@ private:
 	static constexpr double kDenoiseGain = 2.0;
 	static void epsilonFilterRgb(const uint8_t *src, uint8_t *dst, int w, int h, int threshold);
 	/*
-	 * Box blur of one chroma channel, w x h samples step bytes apart in a row,
-	 * rows stride bytes apart: step 1 for a plane, 2 for a channel of an
-	 * interleaved CbCr plane.
+	 * 盒式模糊：h 行，每行 n 字节，行距 stride 字节；各通道交错，相隔 step
+	 * 字节：单独的平面 step 为 1，NV12 的 CbCr 平面为 2（两个通道一起做）。
 	 */
-	void boxBlurChannel(uint8_t *p, int w, int h, int stride, int step, int radius);
+	void boxBlur(uint8_t *p, int n, int h, int stride, int step, int radius);
 	int denoiseThreshold() const;   /* 0 = 不降噪 */
 	int chromaBlurRadius() const;   /* 0 = 不模糊 */
 	std::function<void()> onClosed_;
@@ -212,8 +220,34 @@ private:
 	 */
 	mutable std::vector<uint8_t> planeScratch_;   /* 复制前的 J420 或 CbCr */
 	mutable std::vector<uint8_t> scaleScratch_;   /* toJ420()：缩放后的 NV12 */
-	std::vector<uint16_t> blurRows_;
-	std::vector<uint32_t> blurCols_;
+	mutable std::vector<uint8_t> halfScratch_[2]; /* scaleNv12()：减半后的 NV12 */
+	std::vector<uint8_t> blurSrc_;
+	std::vector<uint16_t> blurCols_;
+	struct RenderedNv12 {
+		uint64_t frame = 0;     /* 所属的 renderFrame_，0 = 无 */
+		int32_t w = 0, h = 0;
+		int blur = 0;
+		std::vector<uint8_t> data;
+	};
+	RenderedNv12 rendered_[2];
+	uint64_t renderFrame_ = 0;
+
+	/*
+	 * libcamera 缓冲的 mmap()，按 dmabuf fd 记，第一次用到时映射，保留到缓冲
+	 * 释放：20 MB 的全尺寸帧每帧映射、解除映射要占单核的百分之几。完成回调
+	 * 线程读帧时持有 frameMapMutex_。
+	 *
+	 * 锁顺序：完成回调先拿 frameMapMutex_ 再拿 mutex_；close() 和
+	 * configureStreams() 持着 mutex_ 调 unmapFrames()，顺序相反。不会死锁的
+	 * 前提是 cam_->stop() 返回之后不再有完成回调：libcamera 在 CameraManager
+	 * 线程上直接调用回调，stop() 也在这个线程上阻塞执行，返回前所有请求都已
+	 * 完成或取消。所以 unmapFrames() 只能在 stop() 之后调用。
+	 */
+	std::map<int, std::pair<void *, size_t>> frameMaps_;
+	std::mutex frameMapMutex_;
+	/* 调用方持有 frameMapMutex_；mmap() 失败返回 nullptr */
+	const uint8_t *mapFrame(int fd, size_t len);
+	void unmapFrames();
 
 	/*
 	 * ── 自动对焦（后摄 only）──

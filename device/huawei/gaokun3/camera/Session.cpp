@@ -263,6 +263,7 @@ ndk::ScopedAStatus Session::close()
 		configRequests_.clear();
 		pending_.clear();
 		dropAllCaches();
+		unmapFrames();
 		allocator_.reset();
 		config_.reset();
 		cam_->release();
@@ -336,6 +337,7 @@ ndk::ScopedAStatus Session::configureStreams(const StreamConfiguration &cfg,
 		freeRequests_.clear();
 		configRequests_.clear();
 		pending_.clear();
+		unmapFrames();
 		allocator_.reset();
 	}
 	lastSettings_.clear();
@@ -969,8 +971,14 @@ libcamera::Size Session::hwIspFrameSize(const SensorFacts &f, int64_t maxW, int6
 	 * 流与它同宽或同高时 deliver() 只需裁剪、拆分色度。宽按 16 对齐（IFE 写出的单位），
 	 * 超出单个 IFE 能处理的尺寸时由管线处理器调小。
 	 */
-	int64_t w = std::max<int64_t>(maxW, (maxH * f.activeW + f.activeH - 1) / f.activeH);
-	w = (w + 15) & ~15;
+	/*
+	 * 各路流是视场的裁剪（cropFor()），视场可能比画面窄：按视场缩放画面，
+	 * 让视场以 1:1 盖住最大的那路流，这路流就不用再缩放。
+	 */
+	const int64_t fw = f.fovW > 0 ? f.fovW : f.activeW, fh = f.fovH > 0 ? f.fovH : f.activeH;
+	int64_t w = maxW * fh >= maxH * fw ? (maxW * f.activeW + fw - 1) / fw
+					   : (maxH * f.activeW + fh - 1) / fh;
+	w = (std::max<int64_t>(w, maxW) + 15) & ~15;
 	int64_t h = std::max<int64_t>(maxH, (w * f.activeH + f.activeW - 1) / f.activeW);
 	h = (h + 1) & ~1;
 	return libcamera::Size(static_cast<unsigned int>(w), static_cast<unsigned int>(h));
@@ -993,6 +1001,16 @@ Session::Crop Session::cropFor(int32_t dstW, int32_t dstH) const
 		w = static_cast<int>(static_cast<int64_t>(h) * dstW / dstH) & ~1;
 	else
 		h = static_cast<int>(static_cast<int64_t>(w) * dstH / dstW) & ~1;
+	/*
+	 * 裁剪比流大不超过 1% 时，直接裁成流的尺寸，不把整幅画面缩小不到 1%。
+	 * 代价：这路流的视场比同宽高比的最大居中裁剪少不到 1%（后摄 1920x1080
+	 * 约 0.5%，每边约 10 列传感器像素），和同一会话里同宽高比、从别的画面
+	 * 出的流（比如全尺寸 JPEG）不再逐像素对齐，肉眼看不出；换来的是纯复制。
+	 */
+	if (w >= dstW && h >= dstH && w * 100 <= dstW * 101 && h * 100 <= dstH * 101) {
+		w = dstW;
+		h = dstH;
+	}
 	return { ((srcWidth_ - w) / 2) & ~1, ((srcHeight_ - h) / 2) & ~1, w, h };
 }
 
@@ -1018,8 +1036,8 @@ int Session::toJ420(const SrcFrame &src, int32_t dstW, int32_t dstH,
 				     static_cast<size_t>(cw) * 2 * chh);
 		uint8_t *ty = scaleScratch_.data();
 		uint8_t *tuv = ty + static_cast<size_t>(dstW) * dstH;
-		int rc = libyuv::NV12Scale(sy, src.stride, suv, src.stride, c.w, c.h, ty, dstW, tuv,
-					   cw * 2, dstW, dstH, libyuv::kFilterBox);
+		int rc = scaleNv12(sy, src.stride, suv, src.stride, c.w, c.h, ty, dstW, tuv, cw * 2,
+				   dstW, dstH);
 		if (rc == 0)
 			rc = libyuv::NV12ToI420(ty, dstW, tuv, cw * 2, dy, ys, du, cs, dv, cs, dstW,
 						dstH);
@@ -1071,12 +1089,64 @@ int Session::toNv12(const SrcFrame &src, int32_t dstW, int32_t dstH,
 		libyuv::CopyPlane(suv, src.stride, duv, cs, (dstW + 1) / 2 * 2, (dstH + 1) / 2);
 		return 0;
 	}
-	return libyuv::NV12Scale(sy, src.stride, suv, src.stride, c.w, c.h, dy, ys, duv, cs,
-				 dstW, dstH, libyuv::kFilterBox);
+	return scaleNv12(sy, src.stride, suv, src.stride, c.w, c.h, dy, ys, duv, cs, dstW, dstH);
+}
+
+int Session::scaleNv12(const uint8_t *sy, int ss, const uint8_t *suv, int suvs, int sw, int sh,
+		       uint8_t *dy, int ds, uint8_t *duv, int duvs, int dw, int dh) const
+{
+	/*
+	 * 设备上的 libyuv 缩小超过 2 倍时，盒式滤波走 C（全尺寸画面缩到 1280x960
+	 * 预览约占单核 40%）。两个方向都还剩至少 2 倍时，先用 NEON 的 2x2 盒式
+	 * 精确减半，剩下的用双线性。
+	 */
+	for (int pass = 0; sw >= 2 * dw && sh >= 2 * dh && sw % 4 == 0 && sh % 4 == 0; pass++) {
+		const int hw = sw / 2, hh = sh / 2;
+		std::vector<uint8_t> &t = halfScratch_[pass & 1];
+		t.resize(static_cast<size_t>(hw) * hh * 3 / 2);
+		uint8_t *ty = t.data();
+		uint8_t *tuv = ty + static_cast<size_t>(hw) * hh;
+		const int rc = libyuv::NV12Scale(sy, ss, suv, suvs, sw, sh, ty, hw, tuv, hw, hw, hh,
+						 libyuv::kFilterBox);
+		if (rc != 0)
+			return rc;
+		sy = ty;
+		suv = tuv;
+		ss = suvs = hw;
+		sw = hw;
+		sh = hh;
+	}
+	return libyuv::NV12Scale(sy, ss, suv, suvs, sw, sh, dy, ds, duv, duvs, dw, dh,
+				 libyuv::kFilterBox);
+}
+
+const uint8_t *Session::renderNv12(const SrcFrame &src, int32_t dstW, int32_t dstH,
+				   int chromaBlur)
+{
+	for (const RenderedNv12 &r : rendered_)
+		if (r.frame == renderFrame_ && r.w == dstW && r.h == dstH && r.blur == chromaBlur)
+			return r.data.data();
+
+	/* 取一个不属于这一帧的槽位 */
+	RenderedNv12 &r = rendered_[0].frame == renderFrame_ ? rendered_[1] : rendered_[0];
+	const int cw = (dstW + 1) / 2, chh = (dstH + 1) / 2;
+	r.data.resize(static_cast<size_t>(dstW) * dstH + static_cast<size_t>(cw) * 2 * chh);
+	uint8_t *uv = r.data.data() + static_cast<size_t>(dstW) * dstH;
+	if (toNv12(src, dstW, dstH, r.data.data(), dstW, uv, cw * 2) != 0) {
+		r.frame = 0;
+		return nullptr;
+	}
+	if (chromaBlur > 0)
+		boxBlur(uv, cw * 2, chh, cw * 2, 2, chromaBlur);
+	r.frame = renderFrame_;
+	r.w = dstW;
+	r.h = dstH;
+	r.blur = chromaBlur;
+	return r.data.data();
 }
 
 bool Session::deliver(const SrcFrame &src, buffer_handle_t dst,
-		      int32_t dstW, int32_t dstH, int chromaBlur)
+		      int32_t dstW, int32_t dstH, int chromaBlur, bool shared)
 {
 	auto &mapper = android::GraphicBufferMapper::get();
 	android_ycbcr ycbcr = {};
@@ -1103,22 +1173,23 @@ bool Session::deliver(const SrcFrame &src, buffer_handle_t dst,
 	 * 都先在暂存区里做。
 	 */
 	if (srcNv12_ && (nv12 || nv21)) {
-		/* The hardware ISP's NV12 goes in as it is, cropped and scaled */
+		/*
+		 * 硬件 ISP 的 NV12 原样裁剪、缩放后写入：直接写进缓冲；要降噪、
+		 * 换序，或者这一帧另有一路流也要这个尺寸时，先渲染一次再复制。
+		 */
 		uint8_t *ouv = nv12 ? ocb : ocr;
-		if (nv12 && chromaBlur <= 0) {
+		if (nv12 && chromaBlur <= 0 && !shared) {
 			rc = toNv12(src, dstW, dstH, oy, ys, ouv, cs);
-		} else {
-			planeScratch_.resize(static_cast<size_t>(cw) * 2 * chh);
-			uint8_t *uv = planeScratch_.data();
-			rc = toNv12(src, dstW, dstH, oy, ys, uv, cw * 2);
-			if (rc == 0 && chromaBlur > 0) {
-				boxBlurChannel(uv, cw, chh, cw * 2, 2, chromaBlur);
-				boxBlurChannel(uv + 1, cw, chh, cw * 2, 2, chromaBlur);
-			}
-			if (rc == 0 && nv12)
+		} else if (const uint8_t *r = renderNv12(src, dstW, dstH, chromaBlur)) {
+			const uint8_t *uv = r + static_cast<size_t>(dstW) * dstH;
+			libyuv::CopyPlane(r, dstW, oy, ys, dstW, dstH);
+			if (nv12)
 				libyuv::CopyPlane(uv, cw * 2, ouv, cs, cw * 2, chh);
-			else if (rc == 0)
+			else
 				libyuv::SwapUVPlane(uv, cw * 2, ouv, cs, cw, chh);
+			rc = 0;
+		} else {
+			rc = -1;
 		}
 	} else if (planar && chromaBlur <= 0) {
 		rc = toJ420(src, dstW, dstH, oy, ys, ocb, ocr, cs);
@@ -1130,8 +1201,8 @@ bool Session::deliver(const SrcFrame &src, buffer_handle_t dst,
 		rc = toJ420(src, dstW, dstH, oy, ys, du, dv, cw);
 		if (rc == 0 && chromaBlur > 0) {
 			/* 色度降噪：U/V 只有 1/4 分辨率，盒式模糊几乎免费，而彩色噪点正是最难看的那种。 */
-			boxBlurChannel(du, cw, chh, cw, 1, chromaBlur);
-			boxBlurChannel(dv, cw, chh, cw, 1, chromaBlur);
+			boxBlur(du, cw, chh, cw, 1, chromaBlur);
+			boxBlur(dv, cw, chh, cw, 1, chromaBlur);
 		}
 		if (rc == 0 && planar) {
 			libyuv::CopyPlane(du, cw, ocb, cs, cw, chh);
@@ -1502,52 +1573,83 @@ void Session::epsilonFilterRgb(const uint8_t *src, uint8_t *dst, int w, int h, i
 		t.join();
 }
 
+namespace {
+
 /*
- * Separable box blur (horizontal, then vertical), edges clamped, with running
- * sums in both passes and the rows visited in order. Used on the chroma, which
- * has a quarter of the pixels.
+ * 半径 R、通道相隔 S 字节的盒式模糊的一行：输入是窗口内各行的列和（两侧各
+ * 预填充 R * S 项边缘值），输出每 R * 2 + 1 个列和的平均。整行无分支，便于
+ * 向量化。
  */
-void Session::boxBlurChannel(uint8_t *p, int w, int h, int stride, int step, int radius)
+template<int R, int S>
+void boxBlurRow(const uint16_t *col, uint8_t *out, int n, uint32_t recip)
 {
-	if (radius <= 0 || w <= 0 || h <= 0)
-		return;
-	const int win = 2 * radius + 1;
-	const uint32_t area = static_cast<uint32_t>(win) * win;
-
-	blurRows_.resize(static_cast<size_t>(w) * h);
-	for (int y = 0; y < h; y++) {
-		const uint8_t *row = p + static_cast<size_t>(y) * stride;
-		uint16_t *out = blurRows_.data() + static_cast<size_t>(y) * w;
-		auto at = [&](int x) { return row[static_cast<size_t>(std::clamp(x, 0, w - 1)) * step]; };
+	for (int i = 0; i < n; i++) {
 		uint32_t sum = 0;
-		for (int k = -radius; k <= radius; k++)
-			sum += at(k);
-		for (int x = 0; x < w; x++) {
-			out[x] = static_cast<uint16_t>(sum);
-			sum += at(x + radius + 1);
-			sum -= at(x - radius);
-		}
+		for (int k = -R; k <= R; k++)
+			sum += col[i + k * S];
+		out[i] = static_cast<uint8_t>((sum * recip + 32768) >> 16);
 	}
+}
 
-	blurCols_.assign(w, 0);
-	auto rowAt = [&](int y) {
-		return blurRows_.data() + static_cast<size_t>(std::clamp(y, 0, h - 1)) * w;
-	};
-	for (int k = -radius; k <= radius; k++) {
-		const uint16_t *r = rowAt(k);
-		for (int x = 0; x < w; x++)
-			blurCols_[x] += r[x];
+template<int R>
+void columnSums(const uint8_t *const *rows, uint16_t *col, int n)
+{
+	for (int i = 0; i < n; i++) {
+		uint16_t sum = 0;
+		for (int k = 0; k <= 2 * R; k++)
+			sum += rows[k][i];
+		col[i] = sum;
 	}
+}
+
+} /* namespace */
+
+/*
+ * 可分离的盒式模糊，边缘取边上的值：每个输出行先算窗口内的列和，再沿行
+ * 滑动窗口。读平面的副本，写回平面。用在色度上，像素只有四分之一。
+ */
+void Session::boxBlur(uint8_t *p, int n, int h, int stride, int step, int radius)
+{
+	if (radius <= 0 || n <= 0 || h <= 0 || (step != 1 && step != 2))
+		return;
+	radius = std::min(radius, 2);
+	const int win = 2 * radius + 1;
+	/* 窗口面积的 Q16 倒数：和不超过 255 * 25 */
+	const uint32_t recip = (65536u + win * win / 2) / (win * win);
+	const int pad = radius * step;
+
+	blurSrc_.resize(static_cast<size_t>(n) * h);
+	libyuv::CopyPlane(p, stride, blurSrc_.data(), n, n, h);
+	blurCols_.resize(static_cast<size_t>(n) + 2 * pad);
+	uint16_t *col = blurCols_.data() + pad;
+
 	for (int y = 0; y < h; y++) {
-		uint8_t *out = p + static_cast<size_t>(y) * stride;
-		const uint16_t *add = rowAt(y + radius + 1);
-		const uint16_t *sub = rowAt(y - radius);
-		for (int x = 0; x < w; x++) {
-			out[static_cast<size_t>(x) * step] =
-				static_cast<uint8_t>((blurCols_[x] + area / 2) / area);
-			blurCols_[x] += add[x];
-			blurCols_[x] -= sub[x];
+		const uint8_t *rows[5];
+		for (int k = 0; k < win; k++)
+			rows[k] = blurSrc_.data() +
+				  static_cast<size_t>(std::clamp(y + k - radius, 0, h - 1)) * n;
+		if (radius == 1)
+			columnSums<1>(rows, col, n);
+		else
+			columnSums<2>(rows, col, n);
+
+		/* 每个通道的边缘值重复填进预留区 */
+		for (int q = 1; q <= radius; q++) {
+			for (int c = 0; c < step; c++) {
+				col[-q * step + c] = col[c];
+				col[n - step + c + q * step] = col[n - step + c];
+			}
 		}
+
+		uint8_t *out = p + static_cast<size_t>(y) * stride;
+		if (radius == 1 && step == 1)
+			boxBlurRow<1, 1>(col, out, n, recip);
+		else if (radius == 1)
+			boxBlurRow<1, 2>(col, out, n, recip);
+		else if (step == 1)
+			boxBlurRow<2, 1>(col, out, n, recip);
+		else
+			boxBlurRow<2, 2>(col, out, n, recip);
 	}
 }
 
@@ -1604,6 +1706,32 @@ void Session::returnToPool(std::unique_ptr<libcamera::Request> r)
 		freeRequests_.push_back(std::move(r));
 		freeCv_.notify_one();
 	}
+}
+
+const uint8_t *Session::mapFrame(int fd, size_t len)
+{
+	auto it = frameMaps_.find(fd);
+	if (it != frameMaps_.end() && it->second.second >= len)
+		return static_cast<const uint8_t *>(it->second.first);
+	if (it != frameMaps_.end()) {
+		munmap(it->second.first, it->second.second);
+		frameMaps_.erase(it);
+	}
+	void *p = mmap(nullptr, len, PROT_READ, MAP_SHARED, fd, 0);
+	if (p == MAP_FAILED) {
+		ALOGE("mmap of a libcamera frame failed: %s", strerror(errno));
+		return nullptr;
+	}
+	frameMaps_[fd] = { p, len };
+	return static_cast<const uint8_t *>(p);
+}
+
+void Session::unmapFrames()
+{
+	std::lock_guard<std::mutex> lk(frameMapMutex_);
+	for (auto &[fd, m] : frameMaps_)
+		munmap(m.first, m.second);
+	frameMaps_.clear();
 }
 
 void Session::onRequestCompleted(libcamera::Request *req)
@@ -1676,10 +1804,11 @@ void Session::onRequestCompleted(libcamera::Request *req)
 	}
 	const int64_t timestamp = fb->metadata().timestamp;
 
-	/* mmap 一次，分发给所有流。libcamera 把单个 dmabuf 里的 NV12 描述成同一 fd 上的两个平面。 */
+	/* 映射一次，分发给所有流。libcamera 把单个 dmabuf 里的 NV12 描述成同一 fd 上的两个平面。 */
+	std::unique_lock<std::mutex> mapLock(frameMapMutex_);
 	const auto &planes = fb->planes();
 	SrcFrame src;
-	void *srcMap = MAP_FAILED;
+	const uint8_t *srcMap = nullptr;
 	size_t srcLen = 0;
 	int srcFd = -1;
 	if (!planes.empty()) {
@@ -1688,8 +1817,8 @@ void Session::onRequestCompleted(libcamera::Request *req)
 			if (p.fd.get() == srcFd)
 				srcLen = std::max<size_t>(srcLen, p.offset + p.length);
 		}
-		srcMap = mmap(nullptr, srcLen, PROT_READ, MAP_SHARED, srcFd, 0);
-		if (srcMap != MAP_FAILED) {
+		srcMap = mapFrame(srcFd, srcLen);
+		if (srcMap) {
 			/*
 			 * 硬件 ISP 用 DMA 写帧，CPU 读之前要让缓存失效，否则会读到旧的缓存行：
 			 * 画面里出现 64 字节一段的旧数据（实测为黑段和绿段）。软件 ISP 的帧由 CPU
@@ -1700,11 +1829,8 @@ void Session::onRequestCompleted(libcamera::Request *req)
 				ALOGW("DMA_BUF_IOCTL_SYNC failed: %s", strerror(errno));
 				syncWarned_ = true;
 			}
-			const uint8_t *base = static_cast<const uint8_t *>(srcMap);
-			src.data = base + planes[0].offset;
+			src.data = srcMap + planes[0].offset;
 			src.stride = srcStride_;
-		} else {
-			ALOGE("mmap libcamera 帧失败: %s", strerror(errno));
 		}
 		/* 第二道保险（#109）：帧不够配置的尺寸就整帧报 ERROR_BUFFER，绝不越界读。 */
 		if (src.data && srcNv12_) {
@@ -1717,7 +1843,7 @@ void Session::onRequestCompleted(libcamera::Request *req)
 				      srcWidth_, srcHeight_);
 				src.data = nullptr;
 			} else {
-				src.uv = static_cast<const uint8_t *>(srcMap) + uvOffset;
+				src.uv = srcMap + uvOffset;
 			}
 		} else if (src.data &&
 			   planes[0].length < static_cast<size_t>(srcWidth_) * srcHeight_ * 3) {
@@ -1769,25 +1895,22 @@ void Session::onRequestCompleted(libcamera::Request *req)
 		/* The RAW frame of the same request, for phase detection. */
 		const libcamera::FrameBuffer *rawFb =
 			rawForPhase_ && af_.wantsRaw() ? req->findBuffer(rawStream_) : nullptr;
-		void *rawMap = MAP_FAILED;
-		size_t rawLen = 0;
+		const uint8_t *rawMap = nullptr;
 		int rawFd = -1;
 		RawFrame raw{};
 		if (rawFb && rawFb->metadata().status == libcamera::FrameMetadata::FrameSuccess &&
 		    !rawFb->planes().empty()) {
 			const auto &rp = rawFb->planes()[0];
-			rawLen = rp.offset + rp.length;
 			rawFd = rp.fd.get();
-			rawMap = mmap(nullptr, rawLen, PROT_READ, MAP_SHARED, rawFd, 0);
-			if (rawMap != MAP_FAILED &&
-			    rp.length >= static_cast<size_t>(rawStride_) * rawHeight_) {
+			rawMap = mapFrame(rawFd, rp.offset + rp.length);
+			if (rawMap && rp.length >= static_cast<size_t>(rawStride_) * rawHeight_) {
 				/*
 				 * 这帧由 RDI 写入，之前没有 CPU 读过（软件 ISP 时代有）：
 				 * 先丢掉 CPU 缓存里的旧数据。
 				 */
 				struct dma_buf_sync sync = { DMA_BUF_SYNC_START | DMA_BUF_SYNC_READ };
 				ioctl(rawFd, DMA_BUF_IOCTL_SYNC, &sync);
-				raw = { static_cast<const uint8_t *>(rawMap) + rp.offset,
+				raw = { rawMap + rp.offset,
 					static_cast<int>(rawStride_), rawWidth_, rawHeight_ };
 			}
 		}
@@ -1800,8 +1923,6 @@ void Session::onRequestCompleted(libcamera::Request *req)
 			struct dma_buf_sync sync = { DMA_BUF_SYNC_END | DMA_BUF_SYNC_READ };
 			ioctl(rawFd, DMA_BUF_IOCTL_SYNC, &sync);
 		}
-		if (rawMap != MAP_FAILED)
-			munmap(rawMap, rawLen);
 	}
 
 	/* libcamera（libipa 的 Agc::fillMetadata）每帧报实际曝光与模拟增益：回填结果、驱动降噪强度与闪光判据。 */
@@ -1869,11 +1990,18 @@ void Session::onRequestCompleted(libcamera::Request *req)
 		jpegQuality = 100;
 
 	std::vector<bool> okv;
+	renderFrame_++;
 	for (auto &pb : pend.buffers) {
+		const bool shared = std::count_if(pend.buffers.begin(), pend.buffers.end(),
+						  [&](const PendingBuffer &o) {
+							  return !o.isBlob && o.width == pb.width &&
+								 o.height == pb.height;
+						  }) > 1;
 		bool ok = src.data && (pb.isBlob
 				       ? deliverJpeg(still, pb.handle, pb.width, pb.height,
 						     pb.blobSize, jpegQuality, jpegOrientation)
-				       : deliver(src, pb.handle, pb.width, pb.height, chromaBlur));
+				       : deliver(src, pb.handle, pb.width, pb.height, chromaBlur,
+						 shared));
 		okv.push_back(ok);
 		if (!ok) {
 			NotifyMsg emsg;
@@ -1888,14 +2016,14 @@ void Session::onRequestCompleted(libcamera::Request *req)
 		}
 	}
 
-	if (srcMap != MAP_FAILED) {
+	if (srcMap) {
 		struct dma_buf_sync sync = { DMA_BUF_SYNC_END | DMA_BUF_SYNC_READ };
 		ioctl(srcFd, DMA_BUF_IOCTL_SYNC, &sync);
-		munmap(srcMap, srcLen);
 	}
+	mapLock.unlock();
 
 	/*
-	 * ★ req 到这里才算用完（buffers()/metadata() 都读过了、帧已 munmap）⇒ 先还池，再交结果：
+	 * ★ req 到这里才算用完（buffers()/metadata() 都读过了、帧的 DMA 同步已结束）⇒ 先还池，再交结果：
 	 *   框架拿回 buffer 会立刻发下一个请求，池子必须已经有位置（PR #6 初版在
 	 *   processCaptureResult 之后才还，于是框架的下一个请求常常撞上空池）。
 	 *   ⚠️ 也不能更早：还回去之后 processCaptureRequest 可能立刻取走并 reuse()
