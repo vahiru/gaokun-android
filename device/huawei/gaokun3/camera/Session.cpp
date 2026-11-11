@@ -2317,7 +2317,7 @@ void Session::onRequestCompleted(libcamera::Request *req)
 		const auto fom = req->metadata().get(libcamera::controls::FocusFoM);
 		af_.onFrame(src.data, srcWidth_, srcHeight_, srcStride_, srcNv12_ ? 1 : 3,
 			    lumaStableFor >= 2, raw.data ? &raw : nullptr,
-			    fom ? static_cast<double>(*fom) : -1.0);
+			    fom ? static_cast<double>(*fom) : -1.0, lastGain_);
 		if (raw.data) {
 			struct dma_buf_sync sync = { DMA_BUF_SYNC_END | DMA_BUF_SYNC_READ };
 			ioctl(rawFd, DMA_BUF_IOCTL_SYNC, &sync);

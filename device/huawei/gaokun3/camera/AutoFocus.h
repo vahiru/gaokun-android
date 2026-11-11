@@ -84,14 +84,22 @@ public:
 	 *    gamma/对比度都在变，锐度分数会跟着漂 —— 实测同一马达位置（1020）
 	 *   在 AGC 收敛前后能差 3 倍（612 → 211），那样的"曲线"里根本没有焦点信息。 */
 	/*
-	 * hwScore：硬件 ISP 对焦统计在 AF 区域（region()）上算出的这一帧的 FocusFoM，没有时为
-	 * 负数。有它就用它代替帧本身的清晰度（那时不再计算）。它的量纲不同，离焦时也有一层
-	 * 残余噪声的底，所以用它时“可对焦”指峰值至少是最低采样点（不低于 kHwFloor）的
-	 * kHwMinRise 倍，而不是高于 kMinScore；重扫按相对变化，绝对下限为 kHwFloor。
-	 * 连续 kHwSourceFrames 帧换了来源才切换并重新搜索，偶尔一帧缺统计只跳过那一帧。
+	 * 分数的来源：
+	 * - 硬件 ISP 的 NV12：增益不高时用 AF 区域里亮度的梯度能量（gradientEnergy()），
+	 *   增益高（≥ kFoMGainOn，回到 ≤ kFoMGainOff 才换回）且有 FocusFoM 时用 hwScore，
+	 *   即硬件 ISP 对焦统计在 AF 区域上算出的 FocusFoM。11-10 逐点钉住马达实测：亮处
+	 *   文字上梯度能量偏离峰 20 码低 7–9%，FocusFoM 只低 2–3%；暗处（ISO 1550）白墙上
+	 *   没有焦点信号，梯度能量被噪声主导，画面一变就跳 2–3 倍，FocusFoM 约 1.4 倍。
+	 *   原来的块平均拉普拉斯（sharpness()）对文字只差约 5%，块平均把细节平均掉了。
+	 * - 软件 ISP 的 RGB：块平均的拉普拉斯能量（sharpness()）。
+	 * 前两种量纲不同，离焦时也有一层噪声的底，所以“可对焦”指峰值至少是最低采样点（不低
+	 * 于 kHwFloor）的 kHwMinRise 倍，而不是高于 kMinScore；重扫按相对变化，绝对下限为
+	 * kHwFloor。连续 kHwSourceFrames 帧换了来源才切换并重新搜索，偶尔一帧缺统计只跳过
+	 * 那一帧。
 	 */
 	void onFrame(const uint8_t *pixels, int w, int h, int stride, int bytesPerPixel,
-		     bool sceneStable, const RawFrame *raw = nullptr, double hwScore = -1.0);
+		     bool sceneStable, const RawFrame *raw = nullptr, double hwScore = -1.0,
+		     double gain = 1.0);
 
 	/* AF region as fractions of the frame (x0, y0, x1, y1), or none: the
 	 * central 70%. A change starts a new search. */
@@ -145,11 +153,16 @@ private:
 
 	double sharpness(const uint8_t *pixels, int w, int h, int stride, int bytesPerPixel,
 			 const float region[4]);
+	static double gradientEnergy(const uint8_t *y, int w, int h, int stride,
+				     const float region[4]);
 	void buildSweep();
 
 	/* 搜索参数。 */
-	/* Sweep range and steps (lens codes). */
-	static constexpr int kLensLow = 100;
+	/*
+	 * 扫描范围与步长（马达码值）。后摄马达在 0–128 推不动（弹簧预压，11-10 实测这一段
+	 * FoM 完全相同），从 128 起扫，第一个点才真的动了镜头。
+	 */
+	static constexpr int kLensLow = 128;
 	static constexpr int kLensHigh = 900;
 	static constexpr int kCoarseStep = 100;
 	static constexpr int kFineStep = 25;
@@ -177,14 +190,39 @@ private:
 	static constexpr double kPdDone = 0.06;     /* about 20-40 codes */
 	static constexpr double kPdRescan = 0.15;   /* about 45-100 codes */
 	static constexpr int kPdMaxSteps = 4;
-	/* 硬件分数：峰值至少是最低采样点的这么多倍。后摄 11-10 实测：室内场景约 2.4 倍，
-	 * 有纹理的目标约 5 倍；平坦场景尚未经实测。 */
-	static constexpr double kHwMinRise = 1.25;
-	/* 硬件分数的绝对下限：最低采样点按不低于它算（全为 0 的曲线不能算合焦），也是连续
-	 * 模式重扫的绝对下限。暂定值，白墙、天空、暗处的分数尚未经实测。 */
+	/*
+	 * 相位判定合焦后用对比度精调（混合对焦）：相位的容差 kPdDone 约合 20–40 码，而屏幕
+	 * 文字上偏离峰 20 码清晰度就掉约 25%（11-10 逐点钉住马达实测），只靠相位拍出来发虚。
+	 * 在相位的结果两侧各采一个点（±kFineStep），峰不在中间就沿更高的一侧细扫到峰，
+	 * 再抛物线细调。三点里最好的不比最差的高出 kPdConfirmRise 倍（没有纹理，比如
+	 * 白墙）：对比度靠不住，停在相位的结果。连续模式里因画面变化而重搜、相位在原位置
+	 * 就判定合焦时不精调：镜头不动，放着不动时不会反复前后挪。
+	 */
+	static constexpr double kPdConfirmRise = 1.04;
+	/*
+	 * 硬件分数：峰值至少是最低采样点的这么多倍才算可对焦。后摄 11-10 实测（FocusFoM，
+	 * 1920x1080）：没有纹理时只有噪声，逐帧比值 1.02–1.03，扫描中 AE 漂移时可到约
+	 * 1.1；光滑乳胶漆白墙 1.23–1.36（看最低采样点落在哪）；室内场景约 2.4 倍，文字页
+	 * 约 5.3 倍。取 1.15，在噪声与弱纹理之间。
+	 */
+	static constexpr double kHwMinRise = 1.15;
+	/*
+	 * 硬件分数的绝对下限：最低采样点按不低于它算（全为 0 的曲线不能算合焦），也是连续
+	 * 模式重扫的绝对下限。实测的噪声底都远高于它（暗处增益 15.5 时 272–279，白纸贴住
+	 * 镜头 90–92，白墙 36–40），只在 FoM 约为 0（过曝、没有统计）时起作用。
+	 */
 	static constexpr double kHwFloor = 10.0;
 	/* 分数来源连续换了这么多帧才切换。 */
 	static constexpr int kHwSourceFrames = 3;
+	/*
+	 * 改用 FocusFoM / 换回梯度能量的模拟增益，带回差。只有真正暗（约 ISO 1000 以上）才
+	 * 改用 FocusFoM：11-10 先试 4.5/3.5，室内灯光下增益正落在附近，十几秒里来回切了
+	 * 五六次，每次都重新搜索。
+	 */
+	static constexpr double kFoMGainOn = 10.0;
+	static constexpr double kFoMGainOff = 6.0;
+	/* gradientEnergy() 在 AF 区域里最多抽这么多个样本（全尺寸画面也不到 1 ms） */
+	static constexpr long kGradSamples = 100000;
 	static constexpr double kMinScore = 20.0;   /* "这场景没法对焦"（白墙）的下限；
 						     ⚠️ 量纲随指标变（拉普拉斯/亮度）。实测本机
 						     标准卡场景：真峰 347、远端平坦区 33、
@@ -243,9 +281,24 @@ private:
 	int pdLastPos_ = -1;             /* last phase measurement: lens position, disparity */
 	double pdLastD_ = 0.0;
 	bool pdRescanOk_ = true;         /* the last phase search settled: trust it for rescans */
+	/*
+	 * 镜头停下的位置上的相位错位：按相位重扫看错位离它多远，而不是离 0 多远。精调可以
+	 * 把镜头停在离相位零点几十码的对比度峰上，那里错位并不为零；拿 0 比，停在峰上时相位
+	 * 一直报失焦、一轮接一轮地重扫。
+	 * 取自把镜头放到这里的那次搜索：搜索中每个采样点量到的可信错位记在 pdAt_，
+	 * finishScan() 取最终位置的值（抛物线挪到两点之间时线性插值）。不能等收敛后再量：
+	 * 那时画面可能已经变了（转向、锁定期间重新构图），失焦的错位成了基准就不再重扫。
+	 * 搜索没量到最终位置的错位时（没按相位收敛、被 START 打断）取 0。
+	 */
+	double pdRef_ = 0.0;
+	std::map<int, double> pdAt_;     /* 这次搜索在各采样位置量到的可信错位 */
+	bool pdConfirm_ = false;         /* 这次搜索在用对比度确认相位的结果 */
+	int pdDonePos_ = -1;             /* 相位判定合焦的位置，-1 = 没有 */
 	int moveTarget_ = -1;            /* where a stepped move is heading, -1 = none */
 	int manualPos_ = -1;             /* AF 模式 OFF 时要求的镜头位置，-1 = 无 */
-	bool hwMetric_ = false;          /* 分数是硬件的 FocusFoM */
+	bool hwMetric_ = false;          /* 分数是相对量纲的（FocusFoM 或梯度能量） */
+	int scoreSource_ = 0;            /* 0 拉普拉斯，1 FocusFoM，2 梯度能量 */
+	bool highGain_ = false;          /* 增益高：有 FocusFoM 时用它 */
 	int otherSource_ = 0;            /* 连续几帧的分数来自另一种来源 */
 	/* AF region in fractions of the frame; default the central 70%. */
 	float region_[4] = { 0.15f, 0.15f, 0.85f, 0.85f };

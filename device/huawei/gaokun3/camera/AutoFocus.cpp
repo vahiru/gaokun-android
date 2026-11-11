@@ -130,7 +130,9 @@ void AutoFocus::trigger(uint8_t androidAfTrigger)
 			startScan();
 		} else if (scanning_ && mode_ == Mode::ContinuousVideo &&
 			   !(regionScan_ && regionAge_ <= kStartCarryRequests)) {
-			finishScan();          /* 视频：立刻停在目前最好的位置并锁 */
+			/* 视频：立刻停在目前最好的位置并锁。相位已判合焦、正在用对比度精调时，
+			 * 按相位的结果算合焦（与精调走完时一样）。 */
+			finishScan(pdDonePos_ >= 0);
 		}
 		/* A tap (a scan started by the app's new region, the START within
 		 * kStartCarryRequests requests of it) runs to its end and then
@@ -167,6 +169,9 @@ void AutoFocus::startScan()
 	pdOff_ = 0;
 	pdGain_ = kPdCodesPerUnit;
 	pdLastPos_ = -1;
+	pdConfirm_ = false;
+	pdDonePos_ = -1;
+	pdAt_.clear();
 	noRaw_ = 0;
 	regionScan_ = false;
 	buildSweep();
@@ -239,6 +244,7 @@ void AutoFocus::finishScan(bool byPhase)
 	scanning_ = false;
 	converged_ = (hwMetric_ && byPhase) || focusable(bestScore_);
 	/* 峰在采样点之间：两侧相距 kFineStep 的点都采过时，取过最佳点和这两点的抛物线顶点。 */
+	const int sampledBest = bestPos_;
 	const auto l = samples_.find(bestPos_ - kFineStep);
 	const auto r = samples_.find(bestPos_ + kFineStep);
 	if (converged_ && l != samples_.end() && r != samples_.end()) {
@@ -259,9 +265,63 @@ void AutoFocus::finishScan(bool byPhase)
 	if (lens_ && lens_->position() != bestPos_)
 		moveTo(bestPos_);
 	refScore_ = -1.0;
+	/* 相位重扫的基准：这次搜索在最终位置量到的错位，没量到为 0（见 pdRef_） */
+	pdRef_ = 0.0;
+	if (byPhase) {
+		const auto at = pdAt_.find(sampledBest);
+		if (at != pdAt_.end()) {
+			pdRef_ = at->second;
+			const int nb = bestPos_ > sampledBest ? sampledBest + kFineStep
+							      : sampledBest - kFineStep;
+			const auto nbAt = pdAt_.find(nb);
+			if (bestPos_ != sampledBest && nbAt != pdAt_.end())
+				pdRef_ += (nbAt->second - pdRef_) * (bestPos_ - sampledBest) /
+					  static_cast<double>(nb - sampledBest);
+		}
+	}
 	ALOGI("AF 搜索结束：最佳位置 %d 分数 %.1f（%s）共 %d 次移动",
 	      bestPos_, bestScore_, converged_ ? "已合焦" : "未合焦（场景对比度太低）",
 	      moves_);
+}
+
+/*
+ * AF 区域里亮度的梯度能量：相邻像素差的平方和的均值，除以亮度均值的平方（与曝光、
+ * 增益基本无关），乘 1e4。在区域里按 step 抽样，每个样本只用它和右边、下边的像素，
+ * 全分辨率的细节都算进去，样本数不超过约 kGradSamples。
+ */
+double AutoFocus::gradientEnergy(const uint8_t *y, int w, int h, int stride, const float region[4])
+{
+	if (w < 4 || h < 4)
+		return 0.0;
+	/*
+	 * 差分距离随画面宽度：相邻像素差在全尺寸画面上反映的是最细一级的细节和噪声，
+	 * 失焦对它影响小。11-10 对着文字逐点钉住马达：4208 宽的画面隔 1 像素时偏离峰
+	 * 20 码只低 3%，隔 4 像素低 7%；1952 宽的画面隔 1–2 像素低 9%。
+	 */
+	const int d = std::max(1, (w + 500) / 1000);
+	if (w < d + 2 || h < d + 2)
+		return 0.0;
+	const int x0 = std::clamp(static_cast<int>(region[0] * w), 0, w - d - 1);
+	const int x1 = std::clamp(static_cast<int>(region[2] * w), x0 + 1, w - d);
+	const int y0 = std::clamp(static_cast<int>(region[1] * h), 0, h - d - 1);
+	const int y1 = std::clamp(static_cast<int>(region[3] * h), y0 + 1, h - d);
+	const double area = static_cast<double>(x1 - x0) * (y1 - y0);
+	const int step = std::max(1, static_cast<int>(std::ceil(std::sqrt(area / kGradSamples))));
+	uint64_t g = 0, m = 0, n = 0;
+	for (int yy = y0; yy < y1; yy += step) {
+		const uint8_t *r0 = y + static_cast<size_t>(yy) * stride;
+		const uint8_t *r1 = r0 + static_cast<size_t>(d) * stride;
+		for (int xx = x0; xx < x1; xx += step) {
+			const int dx = r0[xx + d] - r0[xx], dy = r1[xx] - r0[xx];
+			g += static_cast<uint64_t>(dx * dx + dy * dy);
+			m += r0[xx];
+			n++;
+		}
+	}
+	if (!n)
+		return 0.0;
+	const double mean = static_cast<double>(m) / n;
+	return mean < 1.0 ? 0.0 : static_cast<double>(g) / n / (mean * mean) * 1e4;
 }
 
 double AutoFocus::sharpness(const uint8_t *pixels, int w, int h, int stride,
@@ -328,7 +388,7 @@ double AutoFocus::sharpness(const uint8_t *pixels, int w, int h, int stride,
 }
 
 void AutoFocus::onFrame(const uint8_t *pixels, int w, int h, int stride, int bytesPerPixel,
-			bool sceneStable, const RawFrame *raw, double hwScore)
+			bool sceneStable, const RawFrame *raw, double hwScore, double gain)
 {
 	if (!pixels || w <= 0 || h <= 0)
 		return;
@@ -338,8 +398,18 @@ void AutoFocus::onFrame(const uint8_t *pixels, int w, int h, int stride, int byt
 		std::lock_guard<std::mutex> lk(m_);
 		std::copy(region_, region_ + 4, region);
 	}
-	const bool hw = hwScore >= 0.0;
-	const double score = hw ? hwScore : sharpness(pixels, w, h, stride, bytesPerPixel, region);
+	/* 增益高（暗处）用 FocusFoM，否则硬件 ISP 的 NV12 用梯度能量（见 AutoFocus.h） */
+	if (gain >= kFoMGainOn)
+		highGain_ = true;
+	else if (gain <= kFoMGainOff)
+		highGain_ = false;
+	const int source = bytesPerPixel == 1 && (hwScore < 0.0 || !highGain_) ? 2
+			   : hwScore >= 0.0				   ? 1
+									   : 0;
+	const bool hw = source != 0;
+	const double score = source == 1   ? hwScore
+			     : source == 2 ? gradientEnergy(pixels, w, h, stride, region)
+					   : sharpness(pixels, w, h, stride, bytesPerPixel, region);
 
 	std::lock_guard<std::mutex> lk(m_);
 
@@ -359,20 +429,27 @@ void AutoFocus::onFrame(const uint8_t *pixels, int w, int h, int stride, int byt
 	justMoved_ = false;
 
 	/*
-	 * 两种来源的分数量纲不同，不能放进同一条曲线比较。另一种来源只出现一两帧（例如某帧
+	 * 不同来源的分数量纲不同，不能放进同一条曲线比较。另一种来源只出现一两帧（例如某帧
 	 * 统计出错、没有 FocusFoM）就跳过这几帧；连续 kHwSourceFrames 帧都是另一种来源才切换，
 	 * 并重新搜索。
 	 */
-	if (hw != hwMetric_) {
+	if (source != scoreSource_) {
 		if (++otherSource_ < kHwSourceFrames)
 			return;
 		otherSource_ = 0;
+		scoreSource_ = source;
 		hwMetric_ = hw;
 		ALOGI("AF score source: %s",
-		      hw ? "hardware focus statistics (FocusFoM)" : "Laplacian energy of the frame luma");
+		      source == 1   ? "hardware focus statistics (FocusFoM)"
+		      : source == 2 ? "luma gradient energy of the AF region"
+				    : "Laplacian energy of the frame luma");
 		refScore_ = -1.0;
-		if (scanning_)
+		if (scanning_) {
+			/* 重新搜索仍是点按的那一次：保留点按标记（startScan() 会清掉） */
+			const bool tap = regionScan_;
 			startScan();
+			regionScan_ = tap;
+		}
 	} else {
 		otherSource_ = 0;
 	}
@@ -496,11 +573,15 @@ void AutoFocus::onFrame(const uint8_t *pixels, int w, int h, int stride, int byt
 		 * 阈值 = max(相对 kRescanRel，绝对 kRescanAbs)：绝对下限挡住低分场景的噪声，
 		 * 也让 refScore_≈0（全平场景、或钉住后刚放开）时照样能触发。
 		 */
-		/* Out of focus by the PD disparity: search again. */
+		/*
+		 * Out of focus by the PD disparity: search again. 比较的是错位相对 pdRef_
+		 * （这次搜索在最终位置量到的错位）的变化。
+		 */
 		const PhaseResult ph = pdRescanOk_ && raw ? measure() : PhaseResult{};
-		pdOff_ = trusted(ph) && std::fabs(ph.disparity) > kPdRescan ? pdOff_ + 1 : 0;
+		pdOff_ = trusted(ph) && std::fabs(ph.disparity - pdRef_) > kPdRescan ? pdOff_ + 1 : 0;
 		if (pdOff_ >= kRescanFrames) {
-			ALOGI("AF 相位显示失焦（错位 %+.3f），重新搜索", ph.disparity);
+			ALOGI("AF phase shows defocus (disparity %+.3f, %+.3f when settled), searching again",
+			      ph.disparity, pdRef_);
 			startScan();
 			return;
 		}
@@ -562,6 +643,8 @@ void AutoFocus::onFrame(const uint8_t *pixels, int w, int h, int stride, int byt
 	if (phaseMode_) {
 		const PhaseResult ph = measure();
 		const bool phaseOk = trusted(ph);
+		if (phaseOk)
+			pdAt_[cur] = ph.disparity;
 		const int lo = std::max(lens_->minPos(), kLensLow);
 		const int hi = std::min(lens_->maxPos(), kLensHigh);
 		/* A real sample: an interrupted or fallen-back search keeps it. */
@@ -587,33 +670,66 @@ void AutoFocus::onFrame(const uint8_t *pixels, int w, int h, int stride, int byt
 			const int target = std::clamp(want, lo, hi);
 			ALOGI("AF 相位 pos=%d 错位=%+.3f 可信度=%.2f 分数=%.1f 系数=%.0f → %d", cur,
 			      ph.disparity, ph.confidence, score, pdGain_, target);
-			if (std::fabs(ph.disparity) <= kPdDone) {
+			if (std::fabs(ph.disparity) <= kPdDone && pdSteps_ == 0 && !triggered_ &&
+			    !regionScan_) {
+				/* 连续模式的重搜，相位在原位置就判定合焦：镜头不动（见 kPdConfirmRise） */
 				bestPos_ = cur;
 				bestScore_ = score;
 				pdRescanOk_ = true;
 				finishScan(true);
 				return;
 			}
-			if (target != cur && pdSteps_ < kPdMaxSteps) {
+			if (std::fabs(ph.disparity) <= kPdDone) {
+				/* 相位说合焦了：两侧各采一个点，用对比度精调（见 kPdConfirmRise） */
+				bestPos_ = cur;
+				bestScore_ = score;
+				pdDonePos_ = cur;
+				pdConfirm_ = true;
+				/*
+				 * 精调只看相位结果附近新采的点：相位步进时留下的旧样本若正好落在
+				 * pdDonePos_ ± k·kFineStep 上，爬坡会把它当成已采过而不去，最后停在峰前一步。
+				 */
+				samples_.clear();
+				samples_[cur] = score;
+				phaseMode_ = false;
+				sweep_.clear();
+				for (int k : { 1, -1 }) {
+					const int p = std::clamp(cur + k * kFineStep, lo, hi);
+					if (p != cur)
+						sweep_.push_back(p);
+				}
+				sweepIdx_ = 0;
+				fineDone_ = true;
+				ALOGI("AF phase settled at %d, checking contrast around it", cur);
+			} else if (target != cur && pdSteps_ < kPdMaxSteps) {
 				pdSteps_++;
 				moves_++;
 				if (!moveTo(target))
 					finishScan();
 				return;
+			} else {
+				why = target == cur ? "目标在扫描范围之外" : "步数用完";
 			}
-			why = target == cur ? "目标在扫描范围之外" : "步数用完";
 		}
-		ALOGI("AF 相位不可用（%s，可信度 %.2f），改用对比度扫描", why, ph.confidence);
-		phaseMode_ = false;
-		pdRescanOk_ = false;
-		/* Sweep from where the phase steps left the lens. */
-		buildSweep();
+		if (!pdConfirm_) {
+			ALOGI("AF 相位不可用（%s，可信度 %.2f），改用对比度扫描", why, ph.confidence);
+			phaseMode_ = false;
+			pdRescanOk_ = false;
+			/* Sweep from where the phase steps left the lens. */
+			buildSweep();
+		}
 	}
 
 	/* 每个采样点都打一行（pos + 分数）——"马达到底动没动 / 焦点落在哪"的客观证据。 */
 	ALOGI("AF 采样 pos=%d 分数=%.1f（当前最佳 %d / %.1f）",
 	      cur, score, bestPos_, bestScore_);
 	samples_[cur] = score;
+	/* 精调的采样点也量一次相位：镜头可能停在这里，重扫的基准要用它（见 pdAt_） */
+	if (pdDonePos_ >= 0 && raw) {
+		const PhaseResult ph = measure();
+		if (trusted(ph))
+			pdAt_[cur] = ph.disparity;
+	}
 	if (score > bestScore_) {
 		bestScore_ = score;
 		bestPos_ = cur;
@@ -659,6 +775,40 @@ void AutoFocus::onFrame(const uint8_t *pixels, int w, int h, int stride, int byt
 				finishScan();
 			return;
 		}
+		if (pdConfirm_) {
+			/*
+			 * 精调相位的结果：两侧的点都采过了。三点平坦 ⇒ 对比度靠不住，停在相位的
+			 * 结果附近（finishScan() 仍按这三点的抛物线细调，最多半步：曲线真实但较平时
+			 * 它往真峰挪）；有峰 ⇒ 在最好的点附近细扫（下面 fineDone_ 的分支）。
+			 */
+			double hiS = 0.0, loS = 0.0;
+			bool first = true;
+			for (int p : { pdDonePos_ - kFineStep, pdDonePos_, pdDonePos_ + kFineStep }) {
+				const auto it = samples_.find(std::clamp(p, std::max(lens_->minPos(), kLensLow),
+									 std::min(lens_->maxPos(), kLensHigh)));
+				if (it == samples_.end())
+					continue;
+				hiS = first ? it->second : std::max(hiS, it->second);
+				loS = first ? it->second : std::min(loS, it->second);
+				first = false;
+			}
+			const double rise = loS > 0.0 ? hiS / loS : 0.0;
+			pdConfirm_ = false;
+			if (rise < kPdConfirmRise) {
+				ALOGI("AF contrast flat around the phase result %d (rise %.3f): keeping it, "
+				      "parabola only",
+				      pdDonePos_, rise);
+				bestPos_ = pdDonePos_;
+				const auto it = samples_.find(bestPos_);
+				if (it != samples_.end())
+					bestScore_ = it->second;
+				pdRescanOk_ = true;
+				finishScan(true);
+				return;
+			}
+			ALOGI("AF contrast around the phase result %d rises %.3f: refining near %d",
+			      pdDonePos_, rise, bestPos_);
+		}
 		if (fineDone_) {   /* 细扫也走完 → 收敛到最佳点 */
 			/* A fine point won: go on outward in kFineStep steps until the
 			 * best point's neighbours on both sides are sampled, so that
@@ -671,6 +821,18 @@ void AutoFocus::onFrame(const uint8_t *pixels, int w, int h, int stride, int byt
 				moves_++;
 				if (!moveTo(p))
 					finishScan();
+				return;
+			}
+			if (pdDonePos_ >= 0) {
+				/*
+				 * 相位的结果经对比度确认过：合焦（抛物线细调在 finishScan()）。峰离
+				 * 相位的结果超过两个细扫步长时，相位对这个场景有偏差，之后不按相位
+				 * 重扫（否则停在对比度峰上时相位一直报失焦，扫个不停）。
+				 */
+				pdRescanOk_ = std::abs(bestPos_ - pdDonePos_) <= 2 * kFineStep;
+				ALOGI("AF contrast peak %d, phase result %d%s", bestPos_, pdDonePos_,
+				      pdRescanOk_ ? "" : ": phase biased here, no phase rescans");
+				finishScan(true);
 				return;
 			}
 			finishScan();
