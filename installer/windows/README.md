@@ -2,7 +2,9 @@
 
 在已经启动的Windows里把Android装到系统盘的空闲空间上，不需要U盘与LiveCD。界面是Flutter，写盘由C后端`gk3w.exe`（[../backend](../backend/)）完成；两者之间是与LiveCD相同的行协议（[../common](../common/README.md)）。
 
-现在还是原型：界面只回放演示数据，真后端（调用`gk3w.exe`、下载发布文件）尚未接上，也尚未构建Windows版。
+现在还是原型：界面只回放演示数据，真后端（调用`gk3w.exe`、下载发布文件）尚未接上。Windows版在x64上构建过（`flutter build windows`），ARM64要在Windows ARM64的机器上构建。
+
+窗口没有系统标题栏：标题栏由界面自绘（`lib/ui/title_bar.dart`），拖动、最小化、关闭经`gk3/window`通道交给原生窗口（`windows/runner/flutter_window.cpp`）；正在写盘时拒绝关闭。窗口大小按屏幕工作区算，内容按窗口等比缩放。
 
 ## 页面
 
