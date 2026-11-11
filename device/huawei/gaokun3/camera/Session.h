@@ -497,6 +497,21 @@ private:
 	double lockedGain_ = 0.0;
 	/* 上一个完成的帧所属请求的曝光补偿：它报的曝光是在这个补偿下测的 */
 	int32_t lastEvSteps_ = 0;
+	/*
+	 * AE 转向新目标后报 SEARCHING：aeSearchFrom_ 是这次搜索报 SEARCHING 的第一帧（-1 = 不在
+	 * 搜索），aeSearchLast_ 是最近一次改动所在的帧（搜索中又改时从它重新计帧），判据见
+	 * onRequestCompleted()。
+	 */
+	int32_t aeSearchFrom_ = -1;
+	int32_t aeSearchLast_ = -1;
+	double lastAeProduct_ = 0.0;    /* 上一个完成帧的曝光（us）× 模拟增益 */
+	int aeSteady_ = 0;              /* 连续几帧曝光 × 增益变化不到 kAeSteadyRel */
+	static constexpr double kAeSteadyRel = 0.02;
+	static constexpr int kAeSteadyFrames = 3;
+	static constexpr int kAeSearchMinFrames = 8;
+	static constexpr int kAeSearchMaxFrames = 45;
+	int32_t reqEvSteps_ = 0;        /* 上一个请求的曝光补偿 */
+	bool reqAutoAe_ = true;         /* 上一个请求时 AE 在自动运行（没锁、不是手动曝光） */
 	bool awbLocked_ = false;
 	std::array<float, 2> lockedColourGains_{};
 	std::optional<std::array<float, 2>> lastColourGains_;

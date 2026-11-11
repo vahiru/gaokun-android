@@ -2265,6 +2265,18 @@ void Session::apply3aControls(Pending &p, libcamera::ControlList &ctrls)
 	}
 
 	/*
+	 * 曝光补偿改了、AE 解锁或从手动曝光回到自动：记下这一帧，从它起的结果报 SEARCHING，
+	 * 直到曝光稳定（出结果时判断，见 aeSearchFrom_）。
+	 */
+	const bool autoAe = !manualAe && !aeLocked_;
+	if (autoAe && (!reqAutoAe_ || ev != reqEvSteps_)) {
+		if (aeSearchFrom_ < 0)
+			aeSearchFrom_ = p.frameNumber;
+		aeSearchLast_ = p.frameNumber;
+	}
+	reqAutoAe_ = autoAe;
+	reqEvSteps_ = ev;
+	/*
 	 * AE 锁上之后报 LOCKED（还没锁上时照常报，那几帧曝光还在变）。预拍触发
 	 * 时已经锁着：状态保持 LOCKED（状态表：触发被忽略），闪光照常可以闪。
 	 * 预拍进行中才锁上：预拍做完之前报 PRECAPTURE。
@@ -2511,6 +2523,7 @@ void Session::onRequestCompleted(libcamera::Request *req)
 	int64_t exposureNs = 0;
 	int32_t sensitivity = 0;
 	int64_t frameDurationNs = 0;
+	bool aeSearching = false;
 	std::array<float, 4> ccGains{};
 	std::array<float, 9> ccTransform{};
 	bool haveCcGains = false, haveCcTransform = false;
@@ -2539,6 +2552,27 @@ void Session::onRequestCompleted(libcamera::Request *req)
 			lastGain_ = *gain;
 		if (expo && *expo > 0)
 			lastExposureUs_ = *expo;
+		/*
+		 * AE 转向新目标后报 SEARCHING，直到这一帧的曝光 × 增益已连续 kAeSteadyFrames 帧
+		 * 变化不到 kAeSteadyRel。libipa 的 AGC 每帧只走剩余差距的一部分，画面亮度是慢慢
+		 * 爬上去的，所以按实际曝光判断，而不按亮度的帧间差。改动那一帧之后的几帧还是旧的
+		 * 曝光（传感器的生效延迟），至少等 kAeSearchMinFrames 帧；最多 kAeSearchMaxFrames 帧。
+		 */
+		if (gain && expo && *gain > 0 && *expo > 0) {
+			const double product = *expo * static_cast<double>(*gain);
+			const double change =
+				lastAeProduct_ > 0.0 ? std::fabs(product / lastAeProduct_ - 1.0) : 1.0;
+			aeSteady_ = change < kAeSteadyRel ? aeSteady_ + 1 : 0;
+			lastAeProduct_ = product;
+		}
+		if (aeSearchFrom_ >= 0 && pend.frameNumber >= aeSearchFrom_) {
+			const int32_t since = pend.frameNumber - aeSearchLast_;
+			if (since >= kAeSearchMaxFrames ||
+			    (since >= kAeSearchMinFrames && aeSteady_ >= kAeSteadyFrames))
+				aeSearchFrom_ = -1;
+			else
+				aeSearching = true;
+		}
 		if (gain)
 			sensitivity = static_cast<int32_t>(*gain * 100.0f + 0.5f);
 		if (expo)
@@ -2860,7 +2894,9 @@ void Session::onRequestCompleted(libcamera::Request *req)
 	fr.ccModeFast = pend.ccModeFast;
 	fr.flashState = flashLed_.empty() ? ANDROID_FLASH_STATE_UNAVAILABLE
 			: (pend.flashFired ? ANDROID_FLASH_STATE_FIRED : ANDROID_FLASH_STATE_READY);
-	fr.aeState = pend.aeState;
+	fr.aeState = aeSearching && pend.aeState == ANDROID_CONTROL_AE_STATE_CONVERGED
+			     ? ANDROID_CONTROL_AE_STATE_SEARCHING
+			     : pend.aeState;
 	fr.awbState = pend.awbState;
 	fr.aeMode = pend.aeMode;
 	fr.flashMode = pend.flashMode;
