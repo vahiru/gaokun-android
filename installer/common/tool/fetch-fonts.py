@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 # 取安装器界面打包进应用的两个字体（Material Design 3：拉丁用 Roboto，中文用 Noto Sans SC，即思源黑体简体中文）。
+# 字体在 gk3_common（installer/common）里声明，各个安装器应用共用这一份。
 #
-#   python3 tool/fetch-fonts.py              # 从 google/fonts 的固定提交下载
+#   python3 tool/fetch-fonts.py              # 在 installer/common/ 下；从 google/fonts 的固定提交下载
 #   python3 tool/fetch-fonts.py --from DIR   # 已经下好的 NotoSansSC[wght].ttf / Roboto[wdth,wght].ttf
-#   → assets/fonts/NotoSansSC-VF.ttf、assets/fonts/Roboto-VF.ttf（不入库，见 .gitignore；许可证见 assets/fonts/README.md）
+#   → assets/fonts/NotoSansSC-VF.ttf、assets/fonts/Roboto-VF.ttf（相对 installer/common/，与从哪里运行无关；
+#     不入库，见 .gitignore；许可证见 assets/fonts/README.md）
 #
 # ★ 为什么打包进应用、不再靠系统字体回退：2026-09-25 真机上中文全是方块 —— fontconfig 查得到
 #   文泉驿，Flutter 却没回退过去。字体跟着应用走，离线出图、测试、设备三处渲染就是同一份。

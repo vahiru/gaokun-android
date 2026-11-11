@@ -2,15 +2,16 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:gk3_common/backend/protocol.dart';
+import 'package:gk3_common/ui/theme.dart';
+import 'package:gk3_common/ui/widgets.dart';
 
 import '../app.dart';
-import '../backend/protocol.dart';
 import '../model/model.dart';
 import '../session.dart';
 import 'messages.dart';
 import 'screens_finish.dart';
 import 'soft_keyboard.dart';
-import 'theme.dart';
 import 'widgets.dart';
 
 class SourcePage extends StatelessWidget {

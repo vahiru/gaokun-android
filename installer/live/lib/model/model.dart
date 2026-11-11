@@ -4,8 +4,8 @@
 //    一律问 gk3_plan（backend.dart 顶上那条规矩）。
 import 'dart:convert';
 
-import '../backend/backend.dart';
-import '../backend/protocol.dart';
+import 'package:gk3_common/backend/backend.dart';
+import 'package:gk3_common/backend/protocol.dart';
 
 const espTypeGuid = 'C12A7328-F81F-11D2-BA4B-00A0C93EC93B';
 

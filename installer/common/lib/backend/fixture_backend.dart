@@ -3,19 +3,23 @@ import 'package:flutter/services.dart';
 import 'backend.dart';
 import 'protocol.dart';
 
-/// 回放 testdata/<场景>/ 里录好的后端输出（scripts/live/gen-fixtures.sh 用真后端录的）。
+/// 回放 [root]/<场景>/ 里录好的后端输出。录像是应用自己的资源：放在应用的目录里、写进应用 pubspec 的
+/// assets（LiveCD：live/testdata/，scripts/live/gen-fixtures.sh 用真后端录的）。本类不认识任何场景名，
+/// 有哪些场景、默认用哪个，由应用自己定。
 ///
+/// 目录约定：每个场景一个目录，里面的 index.txt 是"调用串 → 文件名"的索引；[root]/common/ 放各场景共用的录像。
 /// 查找顺序：[overrides] → 场景里的精确调用 → 场景里的 `<函数> *` → common/ 里同样两步。
 /// 索引里的 `@next <函数> <场景>`：这个函数成功之后换到另一个场景接着回放
-/// （factory 上缩完分区 → windows-free，那份就是同一块盘缩完之后录的）。
+/// （LiveCD 的 factory 上缩完分区 → windows-free，那份就是同一块盘缩完之后录的）。
 /// 找不到就当作一次失败的调用（退出码 127），而不是编一个结果 —— 界面对着
 /// "fixture 里没有"的状态也得能画出来。
 class FixtureBackend extends Gk3Backend {
-  FixtureBackend(String scenario, {AssetBundle? bundle, this.speed = 1.0, this.overrides = const {}})
+  FixtureBackend(String scenario, {AssetBundle? bundle, this.speed = 1.0, this.overrides = const {}, this.root = 'testdata'})
       : _scenario = scenario,
         _bundle = bundle ?? rootBundle;
 
-  static const scenarios = ['factory', 'windows-free', 'windows-live', 'windows-setup', 'windows-setup-shrunk', 'blank', 'android'];
+  /// 录像的根目录（资源键的前缀）
+  final String root;
 
   String _scenario;
   String get scenario => _scenario;
@@ -36,7 +40,7 @@ class FixtureBackend extends Gk3Backend {
         final map = <String, String>{};
         final String text;
         try {
-          text = await _bundle.loadString('testdata/$dir/index.txt');
+          text = await _bundle.loadString('$root/$dir/index.txt');
         } catch (_) {
           return map;
         }
@@ -52,7 +56,7 @@ class FixtureBackend extends Gk3Backend {
           if (line.isEmpty || line.startsWith('#')) continue;
           final sp = line.lastIndexOf(' ');
           if (sp < 0) continue;
-          map[line.substring(0, sp).trim()] = 'testdata/$dir/${line.substring(sp + 1)}';
+          map[line.substring(0, sp).trim()] = '$root/$dir/${line.substring(sp + 1)}';
         }
         return map;
       });
@@ -60,7 +64,7 @@ class FixtureBackend extends Gk3Backend {
   Future<String?> _lookup(String fn, List<String> args) async {
     final key = [fn, ...args].join(' ');
     final o = overrides[key] ?? overrides[fn];
-    if (o != null) return 'testdata/common/$o';
+    if (o != null) return '$root/common/$o';
     for (final dir in [scenario, 'common']) {
       final idx = await _load(dir);
       final hit = idx[key] ?? idx['$fn *'];

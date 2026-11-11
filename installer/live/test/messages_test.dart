@@ -5,7 +5,7 @@ import 'dart:io';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:gk3_installer/backend/protocol.dart';
+import 'package:gk3_common/backend/protocol.dart';
 import 'package:gk3_installer/l10n/app_localizations.dart';
 import 'package:gk3_installer/ui/messages.dart';
 

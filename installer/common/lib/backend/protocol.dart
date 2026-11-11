@@ -33,7 +33,7 @@ final class Gk3Progress extends Gk3Event {
   /// 原样的说明（新后端里就是 "代码 k=v…"；旧后端 / 旧 fixture 里是一句中文）
   final String text;
 
-  /// 进度代码（`write-super`、`dl` …）；旧格式（一句话）时为 null。界面按它查 l10n（ui/messages.dart）
+  /// 进度代码（`write-super`、`dl` …）；旧格式（一句话）时为 null。界面按它查 l10n（LiveCD：live 的 ui/messages.dart）
   final String? code;
   final Map<String, String> fields;
 

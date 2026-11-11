@@ -4,13 +4,13 @@
 // 后端 gk3_log_targets 列出能写的 FAT / exFAT（另插的 U 盘在前、启动介质最后并标 esp=yes），
 // gk3_save_logs <分区> 写一个 gaokun3-logs-<时间>/（不含 WiFi 配置）。这里只是让人挑一个、告诉人存到哪了。
 import 'package:flutter/material.dart';
+import 'package:gk3_common/backend/backend.dart';
+import 'package:gk3_common/backend/protocol.dart';
+import 'package:gk3_common/ui/widgets.dart';
 
 import '../app.dart';
-import '../backend/backend.dart';
-import '../backend/protocol.dart';
 import '../model/model.dart';
 import 'messages.dart';
-import 'widgets.dart';
 
 class SaveLogsButton extends StatelessWidget {
   const SaveLogsButton({super.key});

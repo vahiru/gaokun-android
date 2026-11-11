@@ -1,5 +1,6 @@
+import 'package:gk3_common/backend/backend.dart';
+
 import '../session.dart';
-import 'backend.dart';
 
 Gk3Backend? locateShellBackend() => null;
 

@@ -1,8 +1,8 @@
 // 协议解析与 fixture 回放的单元测试。
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:gk3_installer/backend/fixture_backend.dart';
-import 'package:gk3_installer/backend/protocol.dart';
+import 'package:gk3_common/backend/fixture_backend.dart';
+import 'package:gk3_common/backend/protocol.dart';
 import 'package:gk3_installer/model/model.dart';
 
 void main() {

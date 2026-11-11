@@ -8,3 +8,5 @@
 | `Roboto-VF.ttf` | Roboto（可变字重100–900、字宽75–100） | SIL Open Font License 1.1 | <https://github.com/google/fonts/tree/main/ofl/roboto> |
 
 两份字体取自Google Fonts的发布仓库`google/fonts`，提交号与SHA-256钉在`tool/fetch-fonts.py`里，对应Material Design 3的拉丁字母与中日韩正文字体规范。Noto Sans SC的默认实例是100（Thin），界面里每个文字样式都要显式给出`wght`轴（见`lib/ui/theme.dart`）。
+
+字体在`gk3_common`的`pubspec.yaml`里声明，随这个包打包进每个依赖它的应用（产物里位于`flutter_assets/packages/gk3_common/assets/fonts/`），族名带`packages/gk3_common/`前缀（`lib/ui/theme.dart`的`kFontLatin`、`kFontCjk`）。

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-
-import 'theme.dart';
+import 'package:gk3_common/ui/theme.dart';
 
 /// 屏幕软键盘。Linux 桌面 embedder 不提供输入法面板，平板又可能没接键盘盖，
 /// 所以 WiFi 密码这种东西只能自己画一个。

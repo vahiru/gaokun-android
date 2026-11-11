@@ -2,8 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'backend.dart';
-import 'protocol.dart';
+import 'package:gk3_common/backend/backend.dart';
+import 'package:gk3_common/backend/protocol.dart';
 
 /// 真后端：`bash -c '. "$0" && "$@"' <installer-lib.sh> <函数> <参数…>`
 ///

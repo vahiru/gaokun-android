@@ -4,8 +4,9 @@
 //   这里按代码查 l10n。代码的全集就是下面两个 switch —— 后端新加一个代码，这里要一起加
 //   （installer-lib.sh 文件头写着同一句）。认不出的代码不抛、不编：进度显示"正在进行：<代码>"，
 //   报错显示"出错了（代码 …）"，具体的去看日志。
-import '../backend/backend.dart';
-import '../backend/protocol.dart';
+import 'package:gk3_common/backend/backend.dart';
+import 'package:gk3_common/backend/protocol.dart';
+
 import '../l10n/app_localizations.dart';
 import '../model/model.dart';
 import '../session.dart' show kRiskUnackedCode;

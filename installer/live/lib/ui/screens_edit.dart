@@ -5,12 +5,13 @@
 // ★ 界面只负责"让人选、让人确认"。能不能做、做到多大，都由后端判（installer-lib.sh 的 gk3_part_*）：
 //   ESP 不动、挂着的不动、越界的不做，后端会自己再验一遍；界面上的禁用只是先把原因说出来。
 import 'package:flutter/material.dart';
+import 'package:gk3_common/backend/protocol.dart';
+import 'package:gk3_common/ui/theme.dart';
+import 'package:gk3_common/ui/widgets.dart';
 
 import '../app.dart';
-import '../backend/protocol.dart';
 import '../model/model.dart';
 import 'messages.dart';
-import 'theme.dart';
 import 'widgets.dart';
 
 enum _Op { resize, format, delete, create }
@@ -109,7 +110,7 @@ class _DiskEditPageState extends State<DiskEditPage> {
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Text('${d.path} · ${fmtMib(d.sizeMib)}', style: tt.titleMedium),
             const SizedBox(height: 10),
-            DiskBar(disk: d),
+            diskBar(d),
             const SizedBox(height: 16),
             Expanded(
               child: ListView.separated(

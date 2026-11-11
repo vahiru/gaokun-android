@@ -3,8 +3,7 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
-
-import 'theme.dart';
+import 'package:gk3_common/ui/theme.dart';
 
 /// 浸泡页：持续出帧，屏幕上显示帧率与光栅化耗时，每 5 秒往 stdout 打一行。
 ///

@@ -1,12 +1,12 @@
 import 'protocol.dart';
 
-/// 安装器后端。唯一的真实现是 ShellBackend（调 installer-lib.sh）；
-/// FixtureBackend 回放录好的输出，给 Mac 上开发和出图用。
+/// 安装器后端。真实现由各应用自己提供（LiveCD：live 的 ShellBackend，调 installer-lib.sh）；
+/// FixtureBackend（fixture_backend.dart）回放录好的输出，给开发和出图用。
 ///
 /// ★ 界面里【不许】有任何分区逻辑 —— 连"userdata 能给多大"都问 gk3_plan。
 ///   一旦在 Dart 里再算一遍，就是本仓反复吃过的"两份拷贝各自漂移"。
 abstract class Gk3Backend {
-  /// 调 installer-lib.sh 里的一个函数。事件按到达顺序，最后一个一定是 [Gk3Exit]。
+  /// 调后端的一个函数（LiveCD 上是 installer-lib.sh 里的函数）。事件按到达顺序，最后一个一定是 [Gk3Exit]。
   Stream<Gk3Event> call(String fn, [List<String> args = const []]);
 
   /// 给界面角落的小字：现在连的是真后端还是演示数据
@@ -14,9 +14,9 @@ abstract class Gk3Backend {
 
   Future<void> reboot();
 
-  /// 关机（侧栏的"关机"：不装了、或者要回 Windows 关快速启动 —— v1.0 计划 GUI-3）
+  /// 关机（LiveCD 侧栏的"关机"：不装了、或者要回 Windows 关快速启动 —— v1.0 计划 GUI-3）
   Future<void> poweroff();
-  /// 切到 tty2 的命令行。成功返回 null，失败返回原因（界面拿去告诉用户 —— 不能点了没反应）
+  /// 切到命令行（LiveCD：tty2）。成功返回 null，失败返回原因（界面拿去告诉用户 —— 不能点了没反应）
   Future<String?> openShell();
 
   /// 跑完并收集结果
@@ -56,7 +56,7 @@ class CallResult {
     return null;
   }
 
-  /// 后端报的失败原因（最后一条 ERR code=…）。界面按 code 查 l10n（ui/messages.dart 的 errText）
+  /// 后端报的失败原因（最后一条 ERR code=…）。界面按 code 查 l10n（LiveCD：live 的 ui/messages.dart 的 errText）
   Gk3Record? get err {
     for (final r in records.reversed) {
       if (r.type == 'ERR') return r;

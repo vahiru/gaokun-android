@@ -4,7 +4,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:gk3_installer/backend/protocol.dart';
+import 'package:gk3_common/backend/protocol.dart';
 import 'package:gk3_installer/backend/shell_backend.dart';
 
 void main() {

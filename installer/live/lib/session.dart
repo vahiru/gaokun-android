@@ -7,9 +7,9 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:gk3_common/backend/backend.dart';
+import 'package:gk3_common/backend/protocol.dart';
 
-import 'backend/backend.dart';
-import 'backend/protocol.dart';
 import 'model/model.dart';
 
 /// reinstall：盘上已经有我们的 Android 时，复用现有分区重新安装（用户 2026-09-25）

@@ -6,13 +6,18 @@ import 'package:material_color_utilities/material_color_utilities.dart';
 /// * 颜色：一个种子色（沿用 C 版的强调蓝）→ `ColorScheme.fromSeed` 生成整套 MD3 角色；
 ///   界面里只用角色（primary / secondaryContainer / surfaceContainerLow / error …），不写死颜色。
 /// * 字体：MD3 的两套 —— 拉丁 Roboto、中文 Noto Sans SC（思源黑体简中），都【打包进应用】
-///   （pubspec 的 fonts；tool/fetch-fonts.py 从 google/fonts 取）。不再靠系统字体回退：2026-09-25 真机上
-///   中文全是方块，就是 fontconfig 查得到、Flutter 却没回退过去。
+///   （gk3_common 的 pubspec 声明，随这个包进每个用它的应用；tool/fetch-fonts.py 从 google/fonts 取）。
+///   不再靠系统字体回退：2026-09-25 真机上中文全是方块，就是 fontconfig 查得到、Flutter 却没回退过去。
 /// * 字号：MD3 的 type scale 原样用（Flutter 的 M3 默认值）。
 const kSeed = Color(0xFF4DA3FF);
 
+/// 打包字体的族名。字体声明在包（gk3_common）里，Flutter 给它的族名加上 `packages/gk3_common/` 前缀；
+/// 不用 TextStyle 的 package: 参数 —— 它会把回退列表里的系统字体也加上前缀，兜底就失效了
+const kFontLatin = 'packages/gk3_common/Roboto';
+const kFontCjk = 'packages/gk3_common/Noto Sans SC';
+
 /// 中文按这个顺序回退：打包的那份在前；后两个只在"没取字体就构建"时兜底（有它们总比方块好）
-const kFontFallback = ['Noto Sans SC', 'Noto Sans CJK SC', 'WenQuanYi Micro Hei'];
+const kFontFallback = [kFontCjk, 'Noto Sans CJK SC', 'WenQuanYi Micro Hei'];
 
 /// ★ 触摸目标。MD3 的下限是 48 dp；本机面板 266 mm 宽（wlr-randr 实测）、画布 1280 逻辑像素
 ///   ⇒ 1 逻辑像素 ≈ 0.208 mm ≈ 1.31 dp，48 dp ≈ 37 逻辑像素。按钮取 MD3（2025）的中号 56，
@@ -74,7 +79,7 @@ extension ThemeX on BuildContext {
 
 ThemeData buildTheme({Brightness brightness = Brightness.dark}) {
   final cs = ColorScheme.fromSeed(seedColor: kSeed, brightness: brightness, dynamicSchemeVariant: DynamicSchemeVariant.tonalSpot);
-  final base = ThemeData(useMaterial3: true, colorScheme: cs, fontFamily: 'Roboto', fontFamilyFallback: kFontFallback);
+  final base = ThemeData(useMaterial3: true, colorScheme: cs, fontFamily: kFontLatin, fontFamilyFallback: kFontFallback);
 
   // ★ 两个字体都是可变字重（wght 轴）。Flutter 不会自己把 fontWeight 映射到轴上 ——
   //   不给 FontVariation 的话，标题的 500 与正文的 400 渲染成同一个粗细，MD3 的层次就没了；

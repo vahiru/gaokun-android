@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:gk3_common/backend/backend.dart';
+import 'package:gk3_common/backend/fixture_backend.dart';
 
 import 'app.dart';
-import 'backend/backend.dart';
-import 'backend/fixture_backend.dart';
 import 'backend/platform.dart';
 import 'session.dart';
 import 'ui/soak.dart';
 import 'version.dart';
+
+/// 演示场景：testdata/<场景>/（scripts/live/gen-fixtures.sh 用真后端录的，pubspec 的 assets 里逐个列出）。
+/// gk3_common 的 FixtureBackend 不认识场景名，有哪些、默认用哪个由应用自己定
+const kScenarios = ['factory', 'windows-free', 'windows-live', 'windows-setup', 'windows-setup-shrunk', 'blank', 'android'];
 
 /// 真机：找 installer-lib.sh，走真后端。
 /// 开发：GK3_FIXTURE=<场景>（Linux）或 ?scenario=<场景>（Chrome）回放录好的输出；
@@ -16,6 +20,6 @@ void main() {
   debugPrint('gk3_installer $kInstallerVersion');
   final scenario = requestedScenario();
   Gk3Backend? backend = scenario == null ? locateShellBackend() : null;
-  backend ??= FixtureBackend(FixtureBackend.scenarios.contains(scenario) ? scenario! : 'windows-free');
+  backend ??= FixtureBackend(kScenarios.contains(scenario) ? scenario! : 'windows-free');
   runApp(InstallerApp(session: Session(backend, prefs: platformLangPrefs()), home: soakRequested() ? const SoakPage() : null));
 }

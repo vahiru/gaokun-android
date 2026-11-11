@@ -3,14 +3,14 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:gk3_installer/backend/fixture_backend.dart';
-import 'package:gk3_installer/backend/protocol.dart';
+import 'package:gk3_common/backend/fixture_backend.dart';
+import 'package:gk3_common/backend/protocol.dart';
+import 'package:gk3_common/ui/widgets.dart';
 import 'package:gk3_installer/l10n/app_localizations.dart';
 import 'package:gk3_installer/model/model.dart';
 import 'package:gk3_installer/session.dart';
 import 'package:gk3_installer/ui/messages.dart';
 import 'package:gk3_installer/ui/screens_risk.dart';
-import 'package:gk3_installer/ui/widgets.dart';
 
 import 'helpers.dart';
 

@@ -2,9 +2,11 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:gk3_common/backend/protocol.dart';
+import 'package:gk3_common/ui/theme.dart';
+import 'package:gk3_common/ui/widgets.dart';
 
 import '../app.dart';
-import '../backend/protocol.dart';
 import '../model/model.dart';
 import '../session.dart';
 import 'screens_edit.dart';
@@ -12,7 +14,6 @@ import 'screens_finish.dart';
 import 'screens_risk.dart';
 import 'messages.dart';
 import 'screens_source.dart';
-import 'theme.dart';
 import 'widgets.dart';
 
 class WelcomePage extends StatefulWidget {
@@ -217,7 +218,7 @@ class _DiskPageState extends State<DiskPage> {
             note: d.medium && !d.external ? l.diskMediumInternal : null,
             selected: identical(_picked, d),
             onTap: () => setState(() => _picked = d),
-            extra: DiskBar(disk: d),
+            extra: diskBar(d),
           );
         },
       );
@@ -342,7 +343,7 @@ class _ModePageState extends State<ModePage> {
           reason: reason,
           selected: _pick == _Pick.along,
           onTap: () => setState(() => _pick = _Pick.along),
-          extra: a is AlongOk ? DiskBar(disk: s.disk!, highlightFree: a.region) : null,
+          extra: a is AlongOk ? diskBar(s.disk!, highlightFree: a.region) : null,
         ),
         if (a is AlongNoRoom && s.canShrink) ...[
           const SizedBox(height: 14),

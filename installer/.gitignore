@@ -1,0 +1,2 @@
+# pub 工作区：package_config.json 等解析结果在根上的 .dart_tool/ 里（pubspec.lock 入库）
+.dart_tool/

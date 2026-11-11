@@ -2,10 +2,11 @@ name: gk3_installer
 description: "gaokun3 (MateBook E Go) Android installer"
 publish_to: 'none'
 version: 0.2.0-rc.2+3
+resolution: workspace
 
-# ⚠️ 依赖刻意只有 Flutter SDK 自带的两个（本地化）。本仓其余代码都不拉网络依赖
+# ⚠️ 依赖刻意只有 Flutter SDK 自带的两个（本地化）与工作区里的 gk3_common。本仓其余代码都不拉网络依赖
 #    （scripts/r2-upload.py 的文件头），这是第一个要 pub 的子项目 —— 每加一个包都要
-#    能说出"为什么 SDK 自带的不够"。版本由 pubspec.lock 钉死（已入库）。
+#    能说出"为什么 SDK 自带的不够"。版本由工作区根上的 pubspec.lock 钉死（../pubspec.lock，已入库）。
 environment:
   sdk: ^3.13.2
   flutter: 3.47.2
@@ -16,8 +17,9 @@ dependencies:
   flutter_localizations:
     sdk: flutter
   intl: any          # 版本跟 flutter_localizations 走（它钉死了 intl）
-  # MD3 自定义颜色的调和（Blend.harmonize）。flutter SDK 自己就依赖它并钉死了版本，这里跟着走
-  material_color_utilities: any
+  # 共用的行协议、后端接口、fixture 回放、主题、通用控件与字体（../common/README.md）
+  gk3_common:
+    path: ../common
 
 dev_dependencies:
   flutter_test:
@@ -38,11 +40,4 @@ flutter:
     - testdata/windows-setup-shrunk/
     - testdata/blank/
     - testdata/android/
-  # ★ MD3 的两套字体打包进应用（lib/ui/theme.dart 的说明）。文件不入库：python3 tool/fetch-fonts.py
-  fonts:
-    - family: Roboto
-      fonts:
-        - asset: assets/fonts/Roboto-VF.ttf
-    - family: Noto Sans SC
-      fonts:
-        - asset: assets/fonts/NotoSansSC-VF.ttf
+  # MD3 的两套字体在 gk3_common 里声明（../common/pubspec.yaml），随这个依赖一起打包进应用

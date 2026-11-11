@@ -52,6 +52,3 @@ app.*.map.json
 /lib/l10n/app_localizations*.dart
 # 离线出图（flutter test test/shots_test.dart）：按需生成，不入库
 /test/shots/
-# 打包进应用的字体（tool/fetch-fonts.py 取，sha256 钉在脚本里；许可证说明 assets/fonts/README.md 入库）
-/assets/fonts/*.otf
-/assets/fonts/*.ttf

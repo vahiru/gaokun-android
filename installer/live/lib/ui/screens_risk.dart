@@ -20,12 +20,13 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:gk3_common/ui/theme.dart';
+import 'package:gk3_common/ui/widgets.dart';
 
 import '../app.dart';
 import '../session.dart';
 import 'screens_finish.dart' show isOnekey;
 import 'soft_keyboard.dart';
-import 'theme.dart';
 import 'widgets.dart';
 
 /// 风险确认页的路由名：失败页"返回修改"按它跳过这一页、直接回到选项页

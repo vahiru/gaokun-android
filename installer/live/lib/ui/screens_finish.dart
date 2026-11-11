@@ -2,17 +2,18 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:gk3_common/backend/backend.dart';
+import 'package:gk3_common/backend/protocol.dart';
+import 'package:gk3_common/ui/theme.dart';
+import 'package:gk3_common/ui/widgets.dart';
 
 import '../app.dart';
-import '../backend/backend.dart';
-import '../backend/protocol.dart';
 import '../model/model.dart';
 import '../session.dart';
 import 'messages.dart';
 import 'save_logs.dart';
 import 'screens_risk.dart';
 import 'screens_start.dart';
-import 'theme.dart';
 import 'widgets.dart';
 
 class OptsPage extends StatefulWidget {
@@ -221,7 +222,7 @@ class ConfirmPage extends StatelessWidget {
           child: ListView(children: [
             Text('${d.model.isNotEmpty ? d.model : (d.external ? l.diskExternal : l.diskInternal)} · ${d.path} · ${fmtMib(d.sizeMib)}', style: tt.titleMedium),
             const SizedBox(height: 10),
-            DiskBar(disk: d, highlightFree: a is AlongOk && !wipe ? a.region : null),
+            diskBar(d, highlightFree: a is AlongOk && !wipe ? a.region : null),
             const SizedBox(height: 18),
             if (wipe) ...[
               Text(l.confirmWipeHead, style: tt.titleMedium!.copyWith(color: context.cs.error)),

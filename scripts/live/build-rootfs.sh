@@ -266,7 +266,7 @@ if [ "$PROFILE" = live ]; then
     if in_ch 'ldd /usr/lib/gaokun3/installer/gk3_installer /usr/lib/gaokun3/installer/lib/*.so | grep -q "not found"'; then
         echo "   ✗ 安装器有解析不了的动态库："; ch sh -c 'ldd /usr/lib/gaokun3/installer/gk3_installer /usr/lib/gaokun3/installer/lib/*.so | grep "not found"' | sort -u | sed 's/^/       /'; BAD=1
     else ok "安装器的动态库全部可解析（ldd 无 not found）"; fi
-    # 中文字体：主题里是【按名字】回退的（lib/ui/theme.dart 的 fontFamilyFallback）——
+    # 中文字体：主题里是【按名字】回退的（installer/common/lib/ui/theme.dart 的 kFontFallback）——
     #   Flutter 在 Linux 上不按字符回退系统字体（容器里实测中文全是方块，见 installer/live/README.md）
     if in_ch 'fc-list : family | grep -q "WenQuanYi Micro Hei"'; then ok "字体 WenQuanYi Micro Hei（主题按这个名字回退）"
     else echo "   ✗ 没有 WenQuanYi Micro Hei —— 界面上的中文会全是方块"; BAD=1; fi

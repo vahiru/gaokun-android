@@ -1,0 +1,30 @@
+name: gk3_common
+description: "gaokun3 安装器各前端共用的部分（行协议、后端接口、fixture 回放、MD3 主题与通用控件、字体）"
+publish_to: 'none'
+resolution: workspace
+
+# ⚠️ 与 live 一样，依赖只用 Flutter SDK 自带的（理由见 live/pubspec.yaml 顶上）。版本由工作区根上的
+#    pubspec.lock 钉死。
+environment:
+  sdk: ^3.13.2
+  flutter: 3.47.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # MD3 自定义颜色的调和（Blend.harmonize）。flutter SDK 自己就依赖它并钉死了版本，这里跟着走
+  material_color_utilities: any
+
+dev_dependencies:
+  flutter_lints: ^6.0.0
+
+flutter:
+  # ★ MD3 的两套字体打包进使用本包的应用（lib/ui/theme.dart 的说明）。文件不入库：python3 tool/fetch-fonts.py
+  #   包里声明的字体，族名带 `packages/gk3_common/` 前缀（theme.dart 的 kFontLatin / kFontCjk）
+  fonts:
+    - family: Roboto
+      fonts:
+        - asset: assets/fonts/Roboto-VF.ttf
+    - family: Noto Sans SC
+      fonts:
+        - asset: assets/fonts/NotoSansSC-VF.ttf

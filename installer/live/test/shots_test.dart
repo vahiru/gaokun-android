@@ -1,7 +1,7 @@
 // 离线出图：每一屏、每个关键状态渲染成 1280×800 的 PNG（与真机上的逻辑画布同尺寸）。
 //
-//   python3 tool/fetch-fonts.py         # 第一次：取打包进应用的两个字体
-//   flutter test test/shots_test.dart   # → test/shots/*.png
+//   python3 ../common/tool/fetch-fonts.py   # 第一次：取打包进应用的两个字体（放在 gk3_common 里）
+//   flutter test test/shots_test.dart       # → test/shots/*.png
 //
 // ★ 这是 C 版 `make shots` 的等价物，也是本仓那条铁律："目标机器同时是作者的日用平板，
 //   经常拿不到。没有离线渲染，改一行文案都要排队等上机"（C 版 README.md:13-14；C 版已删，git show 445e978:live/installer/README.md）。
@@ -13,18 +13,20 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart' show Scrollable;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:gk3_common/ui/theme.dart';
 import 'package:gk3_installer/app.dart';
 import 'package:gk3_installer/ui/screens_risk.dart';
 
 import 'helpers.dart';
 
-// 打包进应用的那两个字体（pubspec 的 fonts；python3 tool/fetch-fonts.py 取）。
-// 测试里不会自动加载 pubspec 声明的字体，这里按同样的族名注册 —— 出的图与设备上同一份字形。
+// 打包进应用的那两个字体（gk3_common 的 pubspec 声明；python3 ../common/tool/fetch-fonts.py 取）。
+// 测试里不会自动加载 pubspec 声明的字体，这里按同样的族名（带包前缀，见 theme.dart）注册 —— 出的图与设备上同一份字形。
+// 路径相对 live/（flutter test 的工作目录）
 const _fonts = {
-  'Roboto': 'assets/fonts/Roboto-VF.ttf',
-  'Noto Sans SC': 'assets/fonts/NotoSansSC-VF.ttf',
+  kFontLatin: '../common/assets/fonts/Roboto-VF.ttf',
+  kFontCjk: '../common/assets/fonts/NotoSansSC-VF.ttf',
   // 日志区的 monospace：设备上是系统的等宽字体，出图时用 Noto 顶上（不然是方块）
-  'monospace': 'assets/fonts/NotoSansSC-VF.ttf',
+  'monospace': '../common/assets/fonts/NotoSansSC-VF.ttf',
 };
 
 Future<void> shot(WidgetTester t, String name) async {
