@@ -650,7 +650,7 @@ void AutoFocus::onFrame(const uint8_t *pixels, int w, int h, int stride, bool sc
 			bestScore_ = score;
 			bestPos_ = cur;
 		}
-		const char *why = "不可信";
+		const char *why = "untrusted";
 		if (phaseOk) {
 			/* Secant: codes per unit from the last two measurements. */
 			if (pdLastPos_ >= 0 && cur != pdLastPos_) {
@@ -705,11 +705,12 @@ void AutoFocus::onFrame(const uint8_t *pixels, int w, int h, int stride, bool sc
 					finishScan();
 				return;
 			} else {
-				why = target == cur ? "目标在扫描范围之外" : "步数用完";
+				why = target == cur ? "target outside the sweep range" : "out of steps";
 			}
 		}
 		if (!pdConfirm_) {
-			ALOGI("AF 相位不可用（%s，可信度 %.2f），改用对比度扫描", why, ph.confidence);
+			ALOGI("AF phase unusable (%s, confidence %.2f), contrast sweep instead", why,
+			      ph.confidence);
 			phaseMode_ = false;
 			pdRescanOk_ = false;
 			/* Sweep from where the phase steps left the lens. */

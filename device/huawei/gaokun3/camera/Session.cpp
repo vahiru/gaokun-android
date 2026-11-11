@@ -631,7 +631,7 @@ ndk::ScopedAStatus Session::configureStreams(const StreamConfiguration &cfg,
 	size_t nbufs = SIZE_MAX;
 	for (libcamera::Stream *s2 : streams) {
 		if (allocator_->allocate(s2) < 0) {
-			ALOGE("分配 libcamera 缓冲失败");
+			ALOGE("Allocating libcamera buffers failed");
 			return err(Status::INTERNAL_ERROR);
 		}
 		nbufs = std::min(nbufs, allocator_->buffers(s2).size());
@@ -703,9 +703,8 @@ ndk::ScopedAStatus Session::configureStreams(const StreamConfiguration &cfg,
 		      halStreams_.size(), srcWidth_, srcHeight_, fullWidth_, fullHeight_,
 		      sc.pixelFormat.toString().c_str());
 	else
-		ALOGI("流已配置：%zu 路，libcamera 源 %dx%d 输出 %s",
-		      halStreams_.size(), srcWidth_, srcHeight_,
-		      sc.pixelFormat.toString().c_str());
+		ALOGI("Streams configured: %zu, libcamera frame %dx%d %s", halStreams_.size(),
+		      srcWidth_, srcHeight_, sc.pixelFormat.toString().c_str());
 	return ndk::ScopedAStatus::ok();
 }
 
