@@ -20,6 +20,8 @@ permissions:
 
 env:
   FLUTTER_VERSION: '3.47.2'
+  # 脚本的输出有中文与"→"：Windows 运行器的控制台是 cp1252，Python 不按 UTF-8 输出就在 print 上报 UnicodeEncodeError
+  PYTHONUTF8: '1'
   LLVM_MINGW: llvm-mingw-20261104-ucrt-ubuntu-22.04-x86_64
   LLVM_MINGW_SHA256: 919380403de87dca3c581c2053230cd298af5e891286628ba0613b7fed370926
 
