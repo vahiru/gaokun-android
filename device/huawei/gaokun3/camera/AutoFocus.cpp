@@ -254,18 +254,26 @@ void AutoFocus::finishScan(bool byPhase)
 	if (lens_ && lens_->position() != bestPos_)
 		moveTo(bestPos_);
 	refScore_ = -1.0;
-	/* 相位重扫的基准：这次搜索在最终位置量到的错位，没量到为 0（见 pdRef_） */
+	/*
+	 * 相位重扫的基准（见 pdRef_）：这次搜索在最终位置量到的错位；最终位置落在两个读数之间
+	 * （抛物线挪过）时按两侧最近的读数插值。夹不住（两侧读数相距超过两个细扫步长，或一侧
+	 * 没有读数）时取最佳采样点的读数，抛物线最多挪半步，偏差不大；它也没有读数时，这次不
+	 * 按相位重扫：拿 0 当基准，停在离相位零点几十码的对比度峰上时会多重扫一次。
+	 */
 	pdRef_ = 0.0;
 	if (byPhase) {
-		const auto at = pdAt_.find(sampledBest);
-		if (at != pdAt_.end()) {
+		const auto hi = pdAt_.lower_bound(bestPos_);
+		if (hi != pdAt_.end() && hi->first == bestPos_) {
+			pdRef_ = hi->second;
+		} else if (hi != pdAt_.end() && hi != pdAt_.begin() &&
+			   hi->first - std::prev(hi)->first <= 2 * kFineStep) {
+			const auto lo = std::prev(hi);
+			pdRef_ = lo->second + (hi->second - lo->second) * (bestPos_ - lo->first) /
+						      static_cast<double>(hi->first - lo->first);
+		} else if (const auto at = pdAt_.find(sampledBest); at != pdAt_.end()) {
 			pdRef_ = at->second;
-			const int nb = bestPos_ > sampledBest ? sampledBest + kFineStep
-							      : sampledBest - kFineStep;
-			const auto nbAt = pdAt_.find(nb);
-			if (bestPos_ != sampledBest && nbAt != pdAt_.end())
-				pdRef_ += (nbAt->second - pdRef_) * (bestPos_ - sampledBest) /
-					  static_cast<double>(nb - sampledBest);
+		} else {
+			pdRescanOk_ = false;
 		}
 	}
 	ALOGI("AF 搜索结束：最佳位置 %d 分数 %.1f（%s）共 %d 次移动",
@@ -890,6 +898,11 @@ void AutoFocus::applyRegion(float x0, float y0, float x1, float y1, bool tap)
 		std::copy(region, region + 4, region_);
 		hasPendingDefault_ = false;
 		refScore_ = -1.0;
+		/*
+		 * FocusFoM 按请求给的窗口统计：在途的几帧还按旧窗口，等它们过去再取基准，
+		 * 否则两块窗口的纹理差超过 kRescanRel 时会多重扫一次。
+		 */
+		settle_ = std::max(settle_, kSettleFrames);
 		return;
 	}
 	std::copy(region, region + 4, region_);
@@ -986,8 +999,9 @@ void AutoFocus::setManualFocus(float diopters)
 	std::lock_guard<std::mutex> lk(m_);
 	if (!lens_ || !lens_->usable())
 		return;
-	const int lo = lens_->minPos();
-	const int hi = lens_->maxPos();
+	/* 与搜索范围一致：低端以下镜头不动，高端到行程尽头会撞止位（见 kLensLow） */
+	const int lo = std::max(lens_->minPos(), kLensLow);
+	const int hi = std::min(lens_->maxPos(), kLensHigh);
 	if (hi <= lo)
 		return;
 	/* focusDistance() 的反函数 */
@@ -1006,14 +1020,17 @@ float AutoFocus::focusDistance() const
 	std::lock_guard<std::mutex> lk(m_);
 	if (!lens_ || !lens_->usable())
 		return 0.0f;
-	const int lo = lens_->minPos();
-	const int hi = lens_->maxPos();
+	const int lo = std::max(lens_->minPos(), kLensLow);
+	const int hi = std::min(lens_->maxPos(), kLensHigh);
 	if (hi <= lo)
 		return 0.0f;
-	/* 标称映射（UNCALIBRATED）：行程低端 = 无穷远(0 屈光度)，高端 = 最近。
-	 * 声明为 UNCALIBRATED 后应用不该依赖它的绝对值，只要单调即可。 */
-	return kMinFocusDiopters *
-	       static_cast<float>(lens_->position() - lo) / static_cast<float>(hi - lo);
+	/*
+	 * 标称映射（UNCALIBRATED）：搜索范围的低端 = 无穷远（0 屈光度），高端 = 最近；范围外
+	 * （af.hold 钉住时可能）按端点报。声明为 UNCALIBRATED 后应用不该依赖它的绝对值，
+	 * 只要单调即可。
+	 */
+	const int pos = std::clamp(lens_->position(), lo, hi);
+	return kMinFocusDiopters * static_cast<float>(pos - lo) / static_cast<float>(hi - lo);
 }
 
 } /* namespace gaokun3 */
