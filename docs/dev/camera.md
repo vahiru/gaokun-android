@@ -164,7 +164,7 @@ HAL实现`android.hardware.camera.provider-V3`，组件说明详见[`device/huaw
    - 帧缓冲是可`mmap()`的dma-buf，CPU读之前做`DMA_BUF_IOCTL_SYNC`。
 5. **对焦**：后摄`dw9714`马达由HAL经v4l2子设备直接驱动（`libcamera`不驱动镜头）。全尺寸模式下先按RAW里的相位像素对焦，再在相位结果两侧各采一个对比度点精调；对比度分数在增益不高时取AF区域亮度的梯度能量，暗处（增益≥10）取`FocusFoM`。
 6. **3A控制**：曝光补偿、AE/AWB锁定、手动曝光（`MANUAL_SENSOR`）、手动对焦、白平衡预设与手动白平衡、防频闪（50 Hz/60 Hz，AUTO按50 Hz）都换成`libipa`的对应控制；能力按流水线实际接受的控制声明。帧率按探测到的传感器模式声明（后摄合并模式60 fps）。
-7. **画质**：IFE不做锐化与降噪。HAL在输出分辨率上做带门限的亮度锐化（`EDGE_MODE`），照片另做亮度ε滤波与色度模糊，强度按噪声估计；预览、录像在增益高时只模糊色度。
+7. **画质**：IFE不做锐化，降噪只有拜耳域的ABF（见第一节）。HAL在输出分辨率上做带门限的亮度锐化（`EDGE_MODE`），照片另做亮度ε滤波（门限按噪声估计）与固定强度的色度模糊；预览、录像在增益高时只模糊色度。
 8. **AIDL缓冲缓存契约与Gralloc导入**：
    - 遵循`StreamBuffer.aidl`规范：框架对同一`(streamId, bufferId)`仅在首次请求时携带非空`buffer`句柄，后续请求句柄为空。`Session.cpp`维护`(streamId, bufferId) -> buffer_handle_t`映射表，并在`processCaptureRequest`中按`cachesToRemove`及时释放已淘汰缓冲。
    - 使用`GraphicBufferMapper::importBufferNoValidate()`导入缓冲，避免因框架内部附加的私有`usage`位与HAL侧声明不一致而触发`BAD_BUFFER(2)`错误。

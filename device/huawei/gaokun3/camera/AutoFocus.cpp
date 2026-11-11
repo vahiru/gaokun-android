@@ -293,7 +293,7 @@ double AutoFocus::gradientEnergy(const uint8_t *y, int w, int h, int stride, con
 		return 0.0;
 	/*
 	 * 差分距离随画面宽度：相邻像素差在全尺寸画面上反映的是最细一级的细节和噪声，
-	 * 失焦对它影响小。11-10 对着文字逐点钉住马达：4208 宽的画面隔 1 像素时偏离峰
+	 * 失焦对它影响小。对着文字逐点钉住马达测得：4208 宽的画面隔 1 像素时偏离峰
 	 * 20 码只低 3%，隔 4 像素低 7%；1952 宽的画面隔 1–2 像素低 9%。
 	 */
 	/* IFE 变焦时画面只是视场的一部分：按整个视场的等效宽度取（放大到 1:1 传感器像素时与全尺寸画面相同） */
@@ -832,8 +832,8 @@ void AutoFocus::onFrame(const uint8_t *pixels, int w, int h, int stride, bool sc
 			if (pdDonePos_ >= 0) {
 				/*
 				 * 相位的结果经对比度确认过：合焦（抛物线细调在 finishScan()）。峰离
-				 * 相位的结果超过两个细扫步长时，相位对这个场景有偏差，之后不按相位
-				 * 重扫（否则停在对比度峰上时相位一直报失焦，扫个不停）。
+				 * 相位的结果超过两个细扫步长时，相位对这个场景偏差大，它的读数不当真：
+				 * 之后不按相位重扫，只靠对比度。
 				 */
 				pdRescanOk_ = std::abs(bestPos_ - pdDonePos_) <= 2 * kFineStep;
 				ALOGI("AF contrast peak %d, phase result %d%s", bestPos_, pdDonePos_,

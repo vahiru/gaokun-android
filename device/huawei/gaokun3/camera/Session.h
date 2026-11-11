@@ -393,7 +393,7 @@ private:
 		int32_t blobSize = 0;       /* Stream::bufferSize */
 	};
 	std::vector<HalStreamInfo> halStreams_;
-	/* stream_ 的尺寸：一个传感器模式的完整画面，或它缩小后的显示路径（见 configureStreams）。 */
+	/* stream_ 的尺寸：单路时是 hwIspFrameSize() 要的画面，两路时是显示路径（见 configureStreams）。 */
 	int32_t srcWidth_ = 0, srcHeight_ = 0;
 	/* 源帧的行宽（字节）。 */
 	int32_t srcStride_ = 0;

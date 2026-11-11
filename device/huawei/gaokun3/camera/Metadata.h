@@ -199,9 +199,10 @@ std::vector<uint8_t> stripTriggers(const std::vector<uint8_t> &settings);
 std::vector<uint8_t> buildDefaultRequest(int templateId, const SensorFacts &f);
 
 /*
- * Whether the HAL serves this template. ZERO_SHUTTER_LAG and MANUAL need the
- * PRIVATE/YUV_REPROCESSING and MANUAL_SENSOR capabilities, which it doesn't
- * declare, so those must be refused with ILLEGAL_ARGUMENT.
+ * Whether the HAL serves this template. ZERO_SHUTTER_LAG needs the
+ * PRIVATE/YUV_REPROCESSING capability, which it doesn't declare, so it must be
+ * refused with ILLEGAL_ARGUMENT; MANUAL is served when the camera declares
+ * MANUAL_SENSOR (SensorFacts::manualSensor).
  */
 bool templateSupported(int templateId, const SensorFacts &f);
 

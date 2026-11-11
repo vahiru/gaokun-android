@@ -260,9 +260,8 @@ bool Device::init()
 
 	/*
 	 * ── 对外声明的输出尺寸 ──
-	 * ⚠️★ 不要只报满分辨率：流都不超过半个阵列时 HAL 向 libcamera 要合并模式的完整画面，
-	 *    否则要全尺寸，每个输出流还要从整帧各转换一次（[#95] 时帧间隔约 130 ms；
-	 *    2026-11 多线程去拜耳下全尺寸约 33 ms）。
+	 * ⚠️★ 不要只报满分辨率：会话按最大的那路流向流水线要画面（Session::hwIspFrameSize()），
+	 *    流都不超过半个阵列时流水线选合并模式（后摄 60 fps），否则全尺寸模式（30 fps）。
 	 *    这里给一组【降采样】的尺寸 + 满分辨率（留给静态拍照）。
 	 */
 	auto ratio = [&](int w) {
@@ -299,11 +298,11 @@ bool Device::init()
 	}
 
 	/*
-	 * 30 fps: the multithreaded CPU debayer keeps up with the sensor's
-	 * 30 fps full-size mode (the preview was measured at about 29 fps at
-	 * 4200x3120). Each extra output stream adds a conversion of the full
-	 * frame in deliver(), which can lower the delivered rate. Aperture
-	 * crashes when switching to video if no range reaches 24 or 30 fps.
+	 * 30 fps unless probed: the full-size modes of both sensors run at 30 fps;
+	 * probeCamera() takes the minimum frame duration of each output size from
+	 * the sensor mode libcamera picks for it (the rear binned mode reaches
+	 * 60 fps). Aperture crashes when switching to video if no range reaches
+	 * 24 or 30 fps.
 	 */
 	facts_.minFrameDurationNs = 33333333;   /* 30 fps */
 	probeCamera();

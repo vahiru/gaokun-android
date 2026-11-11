@@ -43,9 +43,12 @@
  * the contrast sweep, from where the lens is, when the disparity is not
  * trustworthy (featureless scene), the target is outside the sweep range, or
  * it does not settle within kPdMaxSteps moves. In the continuous modes a
- * disparity above kPdRescan also starts a new search, unless the last phase
- * search fell back for one of those three reasons (running out of RAW frames,
- * e.g. in a binned configuration, does not count).
+ * disparity that moved more than kPdRescan away from the one measured where
+ * the last search left the lens (pdRef_) also starts a new search, unless
+ * phase is not trusted there: that search fell back for one of those three
+ * reasons (running out of RAW frames, e.g. in a binned configuration, does not
+ * count), its contrast peak ended more than two fine steps from the phase
+ * result, or no reading brackets the final position.
  */
 #pragma once
 
@@ -82,7 +85,7 @@ public:
 	 * 分数的来源：
 	 * - 硬件 ISP 的 NV12：增益不高时用 AF 区域里亮度的梯度能量（gradientEnergy()），
 	 *   增益高（≥ kFoMGainOn，回到 ≤ kFoMGainOff 才换回）且有 FocusFoM 时用 hwScore，
-	 *   即硬件 ISP 对焦统计在 AF 区域上算出的 FocusFoM。11-10 逐点钉住马达实测：亮处
+	 *   即硬件 ISP 对焦统计在 AF 区域上算出的 FocusFoM。逐点钉住马达测得：亮处
 	 *   文字上梯度能量偏离峰 20 码低 7–9%，FocusFoM 只低 2–3%；暗处（ISO 1550）白墙上
 	 *   没有焦点信号，梯度能量被噪声主导，画面一变就跳 2–3 倍，FocusFoM 约 1.4 倍。块平均
 	 *   的拉普拉斯对文字只差约 5%（块平均把细节平均掉了），不用。
@@ -156,8 +159,8 @@ private:
 
 	/* 搜索参数。 */
 	/*
-	 * 扫描范围与步长（马达码值）。后摄马达在 0–128 推不动（弹簧预压，11-10 实测这一段
-	 * FoM 完全相同），从 128 起扫，第一个点才真的动了镜头。
+	 * 扫描范围与步长（马达码值）。后摄马达在 0–128 推不动（弹簧预压，这一段 FoM
+	 * 完全相同），从 128 起扫，第一个点才真的动了镜头。
 	 */
 	static constexpr int kLensLow = 128;
 	static constexpr int kLensHigh = 900;
@@ -189,15 +192,16 @@ private:
 	static constexpr int kPdMaxSteps = 4;
 	/*
 	 * 相位判定合焦后用对比度精调（混合对焦）：相位的容差 kPdDone 约合 20–40 码，而屏幕
-	 * 文字上偏离峰 20 码清晰度就掉约 25%（11-10 逐点钉住马达实测），只靠相位拍出来发虚。
+	 * 文字上偏离峰 20 码清晰度就掉约 25%（逐点钉住马达测得），只靠相位拍出来发虚。
 	 * 在相位的结果两侧各采一个点（±kFineStep），峰不在中间就沿更高的一侧细扫到峰，
 	 * 再抛物线细调。三点里最好的不比最差的高出 kPdConfirmRise 倍（没有纹理，比如
-	 * 白墙）：对比度靠不住，停在相位的结果。连续模式里因画面变化而重搜、相位在原位置
+	 * 白墙）：对比度靠不住，不再细扫，停在相位的结果附近（仍按这三点的抛物线细调，
+	 * 最多半步）。连续模式里因画面变化而重搜、相位在原位置
 	 * 就判定合焦时不精调：镜头不动，放着不动时不会反复前后挪。
 	 */
 	static constexpr double kPdConfirmRise = 1.04;
 	/*
-	 * 硬件分数：峰值至少是最低采样点的这么多倍才算可对焦。后摄 11-10 实测（FocusFoM，
+	 * 硬件分数：峰值至少是最低采样点的这么多倍才算可对焦。后摄实测（FocusFoM，
 	 * 1920x1080）：没有纹理时只有噪声，逐帧比值 1.02–1.03，扫描中 AE 漂移时可到约
 	 * 1.1；光滑乳胶漆白墙 1.23–1.36（看最低采样点落在哪）；室内场景约 2.4 倍，文字页
 	 * 约 5.3 倍。取 1.15，在噪声与弱纹理之间。
@@ -213,8 +217,8 @@ private:
 	static constexpr int kHwSourceFrames = 3;
 	/*
 	 * 改用 FocusFoM / 换回梯度能量的模拟增益，带回差。只有真正暗（约 ISO 1000 以上）才
-	 * 改用 FocusFoM：11-10 先试 4.5/3.5，室内灯光下增益正落在附近，十几秒里来回切了
-	 * 五六次，每次都重新搜索。
+	 * 改用 FocusFoM：取 4.5/3.5 时室内灯光下的增益正落在附近，十几秒里来回切五六次，
+	 * 每次都重新搜索。
 	 */
 	static constexpr double kFoMGainOn = 10.0;
 	static constexpr double kFoMGainOff = 6.0;

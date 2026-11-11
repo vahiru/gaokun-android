@@ -27,8 +27,8 @@ SharpenParams sharpenParams(uint8_t edgeMode, double gain, double debugScale)
 	/*
 	 * 增益 1 时 FAST 强度 2.0、HIGH_QUALITY 2.4，门限 2 级；增益每加 1，强度按
 	 * 1/(1 + 0.15·(g − 1)) 减弱、门限加 0.75 级：ISO 1550 时强度约为三分之一、门限约 13 级。
-	 * 强度由 11-10 盲测定（Aperture 预览，亮处文字）：1.0 与不锐化分不出，2.5 过头，
-	 * 2.0 优于 1.5，2.0 与 1.7 分不出；暗处 2.0 与不锐化分不出（噪点都多）。
+	 * 强度的依据（Aperture 预览，亮处文字）：1.0 与不锐化分不出，2.5 过头，2.0 优于 1.5，
+	 * 2.0 与 1.7 分不出；暗处 2.0 与不锐化分不出（噪点都多）。
 	 */
 	const double g = std::max(gain, 1.0);
 	const double amount = (hq ? 2.4 : 2.0) * debugScale / (1.0 + 0.15 * (g - 1.0));

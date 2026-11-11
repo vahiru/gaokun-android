@@ -1018,7 +1018,7 @@ ndk::ScopedAStatus Session::processCaptureRequest(const std::vector<CaptureReque
 
 		/*
 		 * Frame rate: pass the requested AE target FPS range to libcamera
-		 * as FrameDurationLimits. The soft ISP IPA sets the sensor's
+		 * as FrameDurationLimits. The qcom-ife IPA sets the sensor's
 		 * VBLANK from it, and its AGC may expose up to the maximum frame
 		 * duration, so a {15, 30} range slows down to 15 fps in the dark. reuse()
 		 * clears the controls; p.settings holds the full settings of this
@@ -1271,9 +1271,9 @@ Session::Crop Session::cropIn(const SrcFrame &src, const int32_t region[4], int3
 	/*
 	 * The largest centred crop with the output's aspect ratio of the active
 	 * array declared to Android (SensorFacts::fovW/fovH), which can be
-	 * narrower than the frame. The frame is the libcamera active area, binned
-	 * or not, less a few border columns of the debayer, so its height gives
-	 * the scale.
+	 * narrower than the frame. The frame is the active area scaled by the IFE
+	 * to the size asked for (hwIspFrameSize(): the array's aspect ratio, the
+	 * width rounded up to 16), so its height gives the scale.
 	 */
 	/*
 	 * 要裁的范围（画面像素）：IFE 变焦时是请求的区域在这幅画面里的位置（SrcFrame::win，
@@ -1673,8 +1673,8 @@ bool Session::deliverJpeg(const SrcFrame &src, buffer_handle_t dst,
 	/*
 	 * 拍照的降噪（硬件 ISP 本身没有）：亮度做 3×3 ε 滤波，门限为噪声估计的 3.2 倍，
 	 * 平坦处的颗粒抹掉、边缘保留；色度做 5×5 盒式模糊，对付成片的色斑。只在拍照时做，
-	 * 1300 万像素约多 0.1–0.2 秒。门限由 11-10 照片盲测定（室内灯光，ISO 144–194）：
-	 * 3.2 倍优于 2 倍和不降噪，也优于 4.8 倍（开始抹掉小字）。调试属性
+	 * 1300 万像素约多 0.1–0.2 秒。门限低于 3.2 倍时颗粒残留，到 4.8 倍时开始抹掉小字
+	 * （室内灯光，ISO 144–194 的照片）。调试属性
 	 * debug.gaokun3.camera.denoise 乘在门限上（0 = 关）。
 	 */
 	std::vector<uint8_t> denY;
@@ -2449,7 +2449,7 @@ void Session::onRequestCompleted(libcamera::Request *req)
 				}
 			}
 		}
-		/* 第二道保险（#109）：帧不够配置的尺寸就整帧报 ERROR_BUFFER，绝不越界读。 */
+		/* 第二道保险：帧不够配置的尺寸就整帧报 ERROR_BUFFER，绝不越界读。 */
 		if (src.data) {
 			const size_t ySize = static_cast<size_t>(srcStride_) * srcHeight_;
 			const size_t uvOffset = planes.size() > 1 && planes[1].fd.get() == srcFd
