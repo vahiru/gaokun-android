@@ -28,6 +28,14 @@ int gk3w_our_entry_name(const char *name);
  * （同 gk3_defvar_classify），指向某个槽的 *-android-<a|b>.conf，或 gk3w_our_entry_name 认得的条目名 */
 int gk3w_our_var_value(const char *v);
 
+/* 这个 EFI 程序是不是 Windows 启动管理器：PE 版本资源里 CompanyName 为 "Microsoft Corporation"、FileDescription 为
+ * "Boot Manager"（bootmgfw.efi 的版本信息）。不能只找 UTF-16 的 "Windows Boot Manager"：systemd-boot 里也有这串
+ * （auto-windows 菜单项的标题）。 */
+int gk3w_is_windows_boot_manager(const uint8_t *b, size_t n);
+
+/* 这个 EFI 程序是不是 systemd-boot：带 "#### LoaderInfo: systemd-boot "（systemd-boot 自己留的版本标记） */
+int gk3w_is_systemd_boot(const uint8_t *b, size_t n);
+
 /* loader/entries/<mid>-android-<slot>.conf 的全文。返回写入的长度，out 不够返回 -1。 */
 int gk3w_esp_android_entry(char *out, size_t cap, const char *mid, char slot, const char *cmdline);
 

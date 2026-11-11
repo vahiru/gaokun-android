@@ -159,6 +159,55 @@ static void test_entry_names(void)
           !gk3w_our_var_value("x/-android-a.conf") && !gk3w_our_var_value("@saved"));
 }
 
+/* 拼一段版本资源：每个 key 后面补 pad 个 0 字节再接值 */
+static size_t put_vs(uint8_t *b, const char *key, const char *val, int pad)
+{
+    size_t n = 0;
+    for (const char *p = key;; p++) {
+        b[n++] = (uint8_t)*p, b[n++] = 0;
+        if (!*p)
+            break;
+    }
+    for (int i = 0; i < pad; i++)
+        b[n++] = 0;
+    for (const char *p = val;; p++) {
+        b[n++] = (uint8_t)*p, b[n++] = 0;
+        if (!*p)
+            break;
+    }
+    return n;
+}
+
+static void test_windows_boot_manager(void)
+{
+    static uint8_t b[512];
+    size_t n;
+    memset(b, 0x5a, sizeof b);
+    n = 16 + put_vs(b + 16, "CompanyName", "Microsoft Corporation", 0);
+    n += put_vs(b + n, "FileDescription", "Boot Manager", 2);
+    CHECK(gk3w_is_windows_boot_manager(b, n));
+    CHECK(!gk3w_is_windows_boot_manager(b, n - 2));                 /* 值的结尾 NUL 被截掉 */
+    memset(b, 0x5a, sizeof b);
+    n = put_vs(b, "CompanyName", "Microsoft Corporation", 2);
+    n += put_vs(b + n, "FileDescription", "Windows Boot Manager", 0);   /* 不是 bootmgfw 的描述 */
+    CHECK(!gk3w_is_windows_boot_manager(b, n));
+    memset(b, 0x5a, sizeof b);
+    n = put_vs(b, "CompanyName", "Someone Else", 0);
+    n += put_vs(b + n, "FileDescription", "Boot Manager", 0);
+    CHECK(!gk3w_is_windows_boot_manager(b, n));
+    memset(b, 0x5a, sizeof b);
+    n = put_vs(b, "CompanyName", "Microsoft Corporation", 4);         /* 补 4 个字节不是合法的对齐 */
+    n += put_vs(b + n, "FileDescription", "Boot Manager", 0);
+    CHECK(!gk3w_is_windows_boot_manager(b, n));
+    CHECK(!gk3w_is_windows_boot_manager(b, 0));
+    {
+        static const char sd[] = "xx#### LoaderInfo: systemd-boot 257.13-1~deb13u1 ####yy";
+        CHECK(gk3w_is_systemd_boot((const uint8_t *)sd, sizeof sd - 1));
+        CHECK(!gk3w_is_systemd_boot((const uint8_t *)sd, 30));       /* 标记被截断 */
+        CHECK(!gk3w_is_systemd_boot((const uint8_t *)"#### LoaderInfo: systemd-stub 257 ####", 38));
+    }
+}
+
 static void test_content_kind(void)
 {
     static uint8_t b[8192];
@@ -196,6 +245,7 @@ int main(void)
 {
     test_entry_names();
     test_content_kind();
+    test_windows_boot_manager();
     test_enc();
     test_line();
     test_free_factory();

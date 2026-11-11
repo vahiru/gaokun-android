@@ -36,7 +36,7 @@ static void reg_str(const wchar_t *key, const wchar_t *val, char *out, size_t ca
         gk3w_w2u(w, out, cap);
 }
 
-/* 系统卷的 BitLocker 保护状态（WMI Win32_EncryptableVolume.ProtectionStatus）：0 关、1 开、2 锁定；查不到 -1 */
+/* 系统卷的 BitLocker 保护状态（WMI Win32_EncryptableVolume.ProtectionStatus）：0 关、1 开、2 未知（卷锁着时就是这个值）；查不到 -1 */
 static int bitlocker_protection(wchar_t drive)
 {
     IWbemLocator *loc = NULL;
@@ -131,9 +131,9 @@ void gk3w_sys_read(gk3w_sys *s)
     reg_str(L"HARDWARE\\DESCRIPTION\\System\\BIOS", L"SystemProductName", s->model, sizeof s->model);
     s->secure_boot = reg_dword(L"SYSTEM\\CurrentControlSet\\Control\\SecureBoot\\State", L"UEFISecureBootEnabled", &d) ? -1 : (int)d;
     s->hibernate = reg_dword(L"SYSTEM\\CurrentControlSet\\Control\\Power", L"HibernateEnabled", &d) ? -1 : !!d;
-    /* 快速启动靠休眠实现：powercfg /hibernate off 之后 HiberbootEnabled 常常还是 1，但关机已经不再休眠 */
-    s->fast_startup = !reg_dword(L"SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Power", L"HiberbootEnabled", &d) && d == 1 &&
-                      s->hibernate != 0;
+    /* 只看 HiberbootEnabled，不管休眠开没开：休眠关着时快速启动暂时不起作用，但以后一打开休眠（powercfg /h on）
+     * 它就悄悄回来了，那时 Android 写 ESP 正好撞上 Windows 休眠 */
+    s->fast_startup = !reg_dword(L"SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Power", L"HiberbootEnabled", &d) && d == 1;
     s->system_drive = GetSystemWindowsDirectoryW(win, MAX_PATH) && win[1] == L':' ? win[0] : L'C';
     _snwprintf(hib, 16, L"%lc:\\hiberfil.sys", s->system_drive);
     s->hiberfil = GetFileAttributesW(hib) != INVALID_FILE_ATTRIBUTES;
@@ -169,7 +169,10 @@ int gk3w_sys_gate(const gk3w_sys *s, int bitlocker_ok, gk3w_gate_mode mode)
         return gk3w_err(GK3W_TOUCHED_NO, "secure-boot-on", "Secure Boot is on: Android would not boot. Turn Secure Boot off in the firmware setup first (disk not touched)", 0), -1;
     if (mode == GK3W_GATE_APPLY && s->fast_startup == 1)
         return gk3w_err(GK3W_TOUCHED_NO, "fast-startup-on",
-                        "Windows Fast Startup is on: shutting down actually hibernates, and Windows may corrupt the EFI system partition after Android writes to it. Turn Fast Startup off in Power Options first (disk not touched)", 0), -1;
+                        s->hibernate == 0
+                            ? "Windows Fast Startup is set (HiberbootEnabled=1); hibernation is off now, but Fast Startup returns as soon as it is turned back on, and then Windows may corrupt the EFI system partition after Android writes to it. Turn it off first: reg add \"HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Power\" /v HiberbootEnabled /t REG_DWORD /d 0 /f (disk not touched)"
+                            : "Windows Fast Startup is on: shutting down actually hibernates, and Windows may corrupt the EFI system partition after Android writes to it. Turn Fast Startup off in Power Options first (disk not touched)",
+                        0), -1;
     /* 只有确认关着才放行（读不到、状态未知都当作开着）：宁可多要一次确认，也不能让没拿恢复密钥的人改 BOOTAA64.EFI */
     if (s->bitlocker != 0 && !bitlocker_ok)
         return gk3w_err(GK3W_TOUCHED_NO, "bitlocker-key-unconfirmed",
@@ -193,7 +196,7 @@ int gk3w_cmd_preflight(int argc, wchar_t **argv)
     gk3w_line_kv(&l, "model", s.model);
     gk3w_line_kv(&l, "model_ok", gk3w_model_ok(&s) ? "yes" : "no");
     gk3w_line_kv(&l, "secure_boot", s.secure_boot < 0 ? "unknown" : s.secure_boot ? "on" : "off");
-    gk3w_line_kv(&l, "bitlocker", s.bitlocker < 0 ? "unknown" : s.bitlocker == 1 ? "on" : s.bitlocker == 2 ? "locked" : "off");
+    gk3w_line_kv(&l, "bitlocker", s.bitlocker < 0 ? "unknown" : s.bitlocker == 1 ? "on" : s.bitlocker == 2 ? "unknown" : "off");
     gk3w_line_kv(&l, "fast_startup", s.fast_startup ? "on" : "off");
     gk3w_line_kv(&l, "hibernate", s.hibernate < 0 ? "unknown" : s.hibernate ? "on" : "off");
     gk3w_line_kv(&l, "hiberfil", s.hiberfil ? "yes" : "no");

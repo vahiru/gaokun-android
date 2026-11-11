@@ -507,6 +507,38 @@ int gk3w_write_file_verify(const wchar_t *path, const uint8_t *data, size_t len)
     return ok ? 0 : -2;
 }
 
+int gk3w_replace_file_verify(const wchar_t *path, const uint8_t *data, size_t len)
+{
+    wchar_t tmp[MAX_PATH * 2];
+    DWORD attr = GetFileAttributesW(path), err;
+    if (wcslen(path) + 5 >= MAX_PATH * 2) {
+        SetLastError(ERROR_FILENAME_EXCED_RANGE);
+        return -1;
+    }
+    _snwprintf(tmp, MAX_PATH * 2, L"%ls.tmp", path);
+    tmp[MAX_PATH * 2 - 1] = 0;
+    if (gk3w_write_file_verify(tmp, data, len)) {
+        err = GetLastError();
+        DeleteFileW(tmp);
+        SetLastError(err);
+        return -1;
+    }
+    /* 只读的目标 MoveFileEx 覆盖不了：先清掉属性，换好再还原 */
+    if (attr != INVALID_FILE_ATTRIBUTES)
+        SetFileAttributesW(path, FILE_ATTRIBUTE_NORMAL);
+    if (!MoveFileExW(tmp, path, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        err = GetLastError();
+        DeleteFileW(tmp);
+        if (attr != INVALID_FILE_ATTRIBUTES)
+            SetFileAttributesW(path, attr);
+        SetLastError(err);
+        return -1;
+    }
+    if (attr != INVALID_FILE_ATTRIBUTES)
+        SetFileAttributesW(path, attr);
+    return 0;
+}
+
 int gk3w_mkdirs(const wchar_t *path, size_t root_len)
 {
     wchar_t buf[MAX_PATH * 2];

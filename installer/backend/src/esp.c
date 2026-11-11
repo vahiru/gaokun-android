@@ -118,6 +118,52 @@ int gk3w_our_var_value(const char *v)
     return gk3w_our_entry_name(v);
 }
 
+/* 版本资源里 key 的值是不是 value：UTF-16LE 的 "key\0"，按 4 字节对齐补 0 或 2 个字节，再接 UTF-16LE 的 "value\0" */
+static int vs_string_is(const uint8_t *b, size_t n, const char *key, const char *value)
+{
+    uint8_t k[64], v[64];
+    size_t kl = 0, vl = 0;
+    for (const char *p = key;; p++) {
+        k[kl++] = (uint8_t)*p;
+        k[kl++] = 0;
+        if (!*p)
+            break;
+    }
+    for (const char *p = value;; p++) {
+        v[vl++] = (uint8_t)*p;
+        v[vl++] = 0;
+        if (!*p)
+            break;
+    }
+    for (size_t i = 0; i + kl + 2 + vl <= n; i++) {
+        if (memcmp(b + i, k, kl))
+            continue;
+        for (size_t pad = 0; pad <= 2; pad += 2) {
+            const uint8_t *q = b + i + kl;
+            if (pad && (q[0] || q[1]))
+                continue;
+            if (!memcmp(q + pad, v, vl))
+                return 1;
+        }
+    }
+    return 0;
+}
+
+int gk3w_is_windows_boot_manager(const uint8_t *b, size_t n)
+{
+    return vs_string_is(b, n, "CompanyName", "Microsoft Corporation") && vs_string_is(b, n, "FileDescription", "Boot Manager");
+}
+
+int gk3w_is_systemd_boot(const uint8_t *b, size_t n)
+{
+    static const char tag[] = "#### LoaderInfo: systemd-boot ";
+    const size_t tl = sizeof tag - 1;
+    for (size_t i = 0; i + tl <= n; i++)
+        if (b[i] == '#' && !memcmp(b + i, tag, tl))
+            return 1;
+    return 0;
+}
+
 int gk3w_is_machine_id(const char *s)
 {
     size_t n = 0;

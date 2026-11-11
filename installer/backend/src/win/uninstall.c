@@ -6,22 +6,31 @@
  * 0 预检（只读；不过就什么都不改）：
  *   - 分区：misc、metadata、boot_a、boot_b、super、gk3rescue、userdata 中盘上有的。每个名字至多一个、必须是 Linux 数据
  *     类型；开头 8 KiB 是 NTFS / BitLocker / FAT / exFAT 的拒绝；misc 不大于 GK3W_MISC_MIB；boot_a、boot_b、super 里
- *     至少一个认得出（ANDROID! / LP 元数据）—— 同 Test-RemovalCandidates。
+ *     至少一个认得出（ANDROID! / LP 元数据）—— 同 Test-RemovalCandidates。都认不出时，只在名字、先后、大小与相邻关系
+ *     和安装器排出来的一模一样时才删（apply 建好分区、还没写 super / boot 就中断了：内容还认不出，但这样一组分区
+ *     不可能是别人的）。
  *   - ESP：loader/entries 里有不是我们写的 .conf（gk3w_our_entry_name），或 EFI/Linux 下有 .efi（UKI），就算 ESP 上
  *     还有别的系统（foreign）。没有 foreign 时，ESP 上要有 EFI/Microsoft/Boot/bootmgfw.efi 或 BOOTAA64.EFI 的
  *     .before-gaokun3 备份，否则删完没有东西能启动。
- * 1 还原引导（没有 foreign 时）：EFI/BOOT/BOOTAA64.EFI ← 【当前的】bootmgfw.efi；没有它才用 .before-gaokun3
- *   （装机那天的拷贝，Windows 之后更新过的启动管理器只在 EFI/Microsoft/Boot 里）。必须在删分区之前：反过来的话
- *   systemd-boot 仍默认进一个已经不存在的 Android。
+ * 1 还原引导（没有 foreign 时）：EFI/BOOT/BOOTAA64.EFI ← 【当前的】bootmgfw.efi；没有它才用 .before-gaokun3。
+ *   没有 .before-gaokun3 时，只在回落路径上是 systemd-boot（我们放的）时才换；不是就原样留着（apply 没写到 ESP
+ *   就中断了，或者装的时候那里本来就没东西可备份），PS1 则一律换成 bootmgfw.efi
+ *   （装机那天的拷贝，Windows 之后更新过的启动管理器只在 EFI/Microsoft/Boot 里）。例外：.before-gaokun3 不是
+ *   Windows 启动管理器（与 bootmgfw.efi 不同、版本资源也不是，例如另一个系统用 grub-install --removable 放的 GRUB）
+ *   时，换回它 —— 装之前回落路径上就是它，不能把别的系统唯一的引导程序删掉。先查 ESP 空闲够不够，写成 .tmp 再改名。
+ *   必须在删分区之前：反过来的话 systemd-boot 仍默认进一个已经不存在的 Android。
  * 2 删 ESP 上我们的东西：我们的启动项；含 android/ 或 rescue/ 的 <mid>/ 里的这两个目录（<mid>/ 空了才删）；
- *   EFI/gk3boot、EFI/gaokun3；没有 foreign 时再删 loader/、EFI/systemd/ 与 BOOTAA64.EFI.before-gaokun3。
+ *   EFI/gk3boot、EFI/gaokun3；没有 foreign 时再删 loader/、EFI/systemd/，最后、并且前面全部成功时才删
+ *   BOOTAA64.EFI.before-gaokun3（中途失败时它还在，重跑仍有还原的来源）。
  *   有 foreign 时这三样留着、回落路径也不动（放谁由用户决定），只把 loader.conf 从 .before-gaokun3 换回来。
  * 3 删变量（真实磁盘）：LoaderEntryDefault、LoaderEntryOneShot；有 foreign 时只删看得出是我们写的值。
  * 4 删分区：先重读分区表、与预检时的逐项比对，变过就停（不能拿旧表盖掉别的程序刚做的改动）。
  * 中途失败时再跑一次：每一步都按 ESP 与分区表的现状来认，做过的步骤再做一遍结果不变。
  *
- * 与 -RemoveAndroid 的差别（原型阶段）：GK3LIVE 不删、C: 不扩、BitLocker 不暂停（改为要求 --bitlocker-key yes）；
- * <mid>/ 不整个删（它也可能是别的系统的 BLS 目录）；EFI/Linux 下的 UKI 也算 foreign。 */
+ * 与 -RemoveAndroid 的差别（原型阶段）：GK3LIVE 不删、C: 不扩、BitLocker 不暂停（改为要求 --bitlocker-key yes，
+ * 共用 ESP、不动回落路径时也要求）；免 U 盘安装旧版留下的 BCD 启动项不删（EFI/gaokun3 照样删）；
+ * 盘上没有 Android 分区时也清 ESP（PS1 拒绝）；<mid>/ 不整个删（它也可能是别的系统的 BLS 目录）；EFI/Linux 下的
+ * UKI 也算 foreign；装机时的分区组也认（见上）；回落路径原来不是 Windows 时换回原件（见上）。 */
 #include <windows.h>
 #include <winioctl.h>
 
@@ -290,7 +299,7 @@ static void restore_backup(esp_ctx *e, const wchar_t *rel)
         fail(e, "read the backup of", rel);
         return;
     }
-    if (gk3w_write_file_verify(p, data, len)) {
+    if (gk3w_replace_file_verify(p, data, len)) {
         free(data);
         fail(e, "restore", rel);
         return;
@@ -313,11 +322,41 @@ static int read_kind(gk3w_disk *d, const PARTITION_INFORMATION_EX *p, uint8_t *b
     return 0;
 }
 
+/* 我们的分区按起点排好后，是不是正好是安装器排出来的那一组（plan.c 的 gk3w_plan_alongside）：misc、metadata、
+ * boot_a、boot_b、super、[gk3rescue、]userdata 依次首尾相接，前面几个大小分毫不差，userdata 不小于下限，misc 起点按
+ * 1 MiB 对齐。have / first / bytes 按 OUR_NAMES 的下标。 */
+static int apply_shaped(const int *have, const uint64_t *first, const uint64_t *bytes)
+{
+    /* OUR_NAMES 的下标：misc 0、metadata 1、boot_a 2、boot_b 3、super 4、gk3rescue 5、userdata 6 */
+    static const unsigned order[] = {0, 1, 2, 3, 4, 5, 6};
+    static const uint64_t mib[] = {GK3W_MISC_MIB, GK3W_METADATA_MIB, GK3W_BOOT_MIB, GK3W_BOOT_MIB, GK3W_SUPER_MIB, GK3W_RESCUE_MIB, 0};
+    uint64_t next = 0;
+    int started = 0;
+    for (size_t i = 0; i < sizeof order / sizeof order[0]; i++) {
+        unsigned k = order[i];
+        if (!have[k]) {
+            if (k == 5)
+                continue;   /* gk3rescue 可有可无 */
+            return 0;
+        }
+        if (started && first[k] != next)
+            return 0;
+        if (!started && (first[k] & ((1u << 20) - 1)))
+            return 0;
+        if (mib[k] ? bytes[k] != (mib[k] << 20) : bytes[k] < ((uint64_t)GK3W_USERDATA_MIN_MIB << 20))
+            return 0;
+        next = first[k] + bytes[k];
+        started = 1;
+    }
+    return 1;
+}
+
 int gk3w_cmd_uninstall(int argc, wchar_t **argv)
 {
     uint64_t num;
     const wchar_t *backup_dir = gk3w_arg(argc, argv, L"--backup-dir"), *blkey = gk3w_arg(argc, argv, L"--bitlocker-key");
-    int real = gk3w_flag(argc, argv, L"--real-disk"), rc = 1, n_esp = 0, confirmed = 0;
+    int real = gk3w_flag(argc, argv, L"--real-disk"), rc = 1, n_esp = 0, confirmed = 0, have[N_OURS] = {0}, keep_bak = 0, need_restore = 0;
+    uint64_t pfirst[N_OURS] = {0}, pbytes[N_OURS] = {0};
     gk3w_touched T = GK3W_TOUCHED_NO;
     gk3w_disk d;
     GUID ids[N_OURS];
@@ -387,12 +426,18 @@ int gk3w_cmd_uninstall(int argc, wchar_t **argv)
             if (((k == 2 || k == 3) && kind == GK3W_KIND_ANDROID_BOOT) || (k == 4 && kind == GK3W_KIND_LP))
                 confirmed++;
             ids[n_ids++] = p->Gpt.PartitionId;
+            have[k] = 1;
+            pfirst[k] = (uint64_t)p->StartingOffset.QuadPart;
+            pbytes[k] = (uint64_t)p->PartitionLength.QuadPart;
             hits++;
         }
     }
     if (n_ids && !confirmed) {
-        gk3w_err(T, "android-unconfirmed", "none of boot_a, boot_b and super holds an Android boot image or LP metadata; refusing to remove partitions by name alone (disk not touched)", 0);
-        goto out;
+        if (!apply_shaped(have, pfirst, pbytes)) {
+            gk3w_err(T, "android-unconfirmed", "none of boot_a, boot_b and super holds an Android boot image or LP metadata, and the partitions are not laid out the way the installer creates them; refusing to remove partitions by name alone (disk not touched)", 0);
+            goto out;
+        }
+        gk3w_log("no Android content found yet, but the partitions are laid out exactly as the installer creates them (an interrupted install): removing them");
     }
 
     /* ── 0 预检：ESP ── */
@@ -421,14 +466,66 @@ int gk3w_cmd_uninstall(int argc, wchar_t **argv)
     }
     if (!s.foreign) {
         wchar_t p[MAX_PATH * 2];
-        if (!s.bootmgfw && !s.fallback_bak) {
-            gk3w_err(T, "no-windows-boot", "the EFI system partition has neither the Windows Boot Manager nor the .before-gaokun3 backup: nothing would be left to boot (disk not touched)", 0);
+        uint8_t *bak = NULL, *cur = NULL;
+        size_t bak_len = 0, cur_len = 0;
+        ULARGE_INTEGER avail;
+        full_path(&e, FALLBACK, p);
+        if (gk3w_exists(p) && gk3w_read_file(p, &cur, &cur_len, 64u << 20)) {
+            gk3w_err(T, "esp-unreadable", "cannot read EFI/BOOT/BOOTAA64.EFI (disk not touched)", GetLastError());
             goto out;
         }
-        full_path(&e, s.bootmgfw ? BOOTMGFW : FALLBACK_BAK, p);
-        if (gk3w_read_file(p, &winboot, &winboot_len, 64u << 20)) {
-            gk3w_err(T, "esp-unreadable", "cannot read the Windows Boot Manager on the EFI system partition (disk not touched)", GetLastError());
-            goto out;
+        if (s.bootmgfw) {
+            full_path(&e, BOOTMGFW, p);
+            if (gk3w_read_file(p, &winboot, &winboot_len, 64u << 20)) {
+                gk3w_err(T, "esp-unreadable", "cannot read the Windows Boot Manager on the EFI system partition (disk not touched)", GetLastError());
+                free(cur);
+                goto out;
+            }
+        }
+        if (s.fallback_bak) {
+            full_path(&e, FALLBACK_BAK, p);
+            if (gk3w_read_file(p, &bak, &bak_len, 64u << 20)) {
+                free(cur);
+                gk3w_err(T, "esp-unreadable", "cannot read EFI/BOOT/BOOTAA64.EFI.before-gaokun3 (disk not touched)", GetLastError());
+                goto out;
+            }
+            /* 装之前回落路径上不是 Windows 启动管理器（与现在的 bootmgfw.efi 不同、版本资源也不是）：换回原件 */
+            if (!(winboot && bak_len == winboot_len && !memcmp(bak, winboot, bak_len)) && !gk3w_is_windows_boot_manager(bak, bak_len)) {
+                keep_bak = 1;
+                gk3w_log("before the install, EFI/BOOT/BOOTAA64.EFI was not the Windows Boot Manager (another system's boot loader?): restoring that original file");
+            }
+            if (keep_bak || !winboot) {
+                free(winboot);
+                winboot = bak;
+                winboot_len = bak_len;
+                bak = NULL;
+            }
+            free(bak);
+        } else if (cur && gk3w_is_systemd_boot(cur, cur_len)) {
+            /* 没有备份：装的时候那里原来没有文件，或者原来就是同一份 systemd-boot */
+            if (!winboot) {
+                free(cur);
+                gk3w_err(T, "no-windows-boot", "EFI/BOOT/BOOTAA64.EFI is systemd-boot, and the EFI system partition has neither the Windows Boot Manager nor a .before-gaokun3 backup to put back: nothing would be left to boot (disk not touched)", 0);
+                goto out;
+            }
+        } else {
+            /* 没有备份、回落路径上也不是 systemd-boot：这一套安装没动过它（例如 apply 在写 ESP 之前就中断了），原样留着 */
+            free(winboot);
+            winboot = NULL;
+            winboot_len = 0;
+            if (cur)
+                gk3w_log("EFI/BOOT/BOOTAA64.EFI was not changed by the install: left as it is");
+        }
+        /* 回落路径上已经是要换回的那个文件（重跑时）就不用写 */
+        need_restore = winboot && !(cur && cur_len == winboot_len && !memcmp(cur, winboot, cur_len));
+        free(cur);
+        /* .tmp 与旧文件要同时放得下；不够就什么都不改 */
+        if (need_restore) {
+            BOOL ok = GetDiskFreeSpaceExW(root, &avail, NULL, NULL);
+            if (!ok || avail.QuadPart < (ULONGLONG)winboot_len + (1u << 20)) {
+                gk3w_err(T, "esp-full", "not enough free space on the EFI system partition to restore EFI/BOOT/BOOTAA64.EFI (disk not touched)", ok ? 0 : GetLastError());
+                goto out;
+            }
         }
     } else {
         gk3w_log("the EFI system partition is shared with another system: our entries are removed; loader/, EFI/systemd and the fallback EFI/BOOT/BOOTAA64.EFI stay as they are");
@@ -443,37 +540,40 @@ int gk3w_cmd_uninstall(int argc, wchar_t **argv)
     /* ── 1 还原引导 ── */
     if (!s.foreign) {
         wchar_t p[MAX_PATH * 2], dir[MAX_PATH * 2];
-        uint8_t *cur = NULL;
-        size_t cur_len = 0;
         full_path(&e, FALLBACK, p);
-        if (gk3w_exists(p) && !gk3w_read_file(p, &cur, &cur_len, 64u << 20) && cur_len == winboot_len && !memcmp(cur, winboot, cur_len)) {
-            gk3w_log("EFI/BOOT/BOOTAA64.EFI is already the Windows Boot Manager");
+        if (!need_restore) {
+            if (winboot)
+                gk3w_log("EFI/BOOT/BOOTAA64.EFI already holds the file to restore");
         } else {
             full_path(&e, L"EFI\\BOOT", dir);
-            if (gk3w_mkdirs(dir, wcslen(root)) || gk3w_write_file_verify(p, winboot, winboot_len)) {
+            if (gk3w_mkdirs(dir, wcslen(root)) || gk3w_replace_file_verify(p, winboot, winboot_len)) {
                 DWORD err = GetLastError();
-                free(cur);
                 gk3w_err(T, "esp-write", "restoring EFI/BOOT/BOOTAA64.EFI failed (nothing else changed yet; run uninstall again)", err);
                 goto out;
             }
             note("esp-restored", FALLBACK);
-            gk3w_log("EFI/BOOT/BOOTAA64.EFI = Windows Boot Manager (from %s)", s.bootmgfw ? "EFI/Microsoft/Boot/bootmgfw.efi" : "the .before-gaokun3 copy made at install time");
+            if (keep_bak)
+                gk3w_log("EFI/BOOT/BOOTAA64.EFI = the file it held before the install (from the .before-gaokun3 copy)");
+            else
+                gk3w_log("EFI/BOOT/BOOTAA64.EFI = Windows Boot Manager (from %s)", s.bootmgfw ? "EFI/Microsoft/Boot/bootmgfw.efi" : "the .before-gaokun3 copy made at install time");
         }
-        free(cur);
     }
 
     /* ── 2 删 ESP 上我们的东西 ── */
     rm_entries_and_dirs(&e);
     rm_dir(&e, L"EFI\\gk3boot");
     rm_dir(&e, L"EFI\\gaokun3");
+    /* 中断留下的临时文件（apply 写备份、本命令换回落路径时的 .tmp） */
+    rm_file(&e, L"EFI\\BOOT\\BOOTAA64.EFI.before-gaokun3.tmp");
+    rm_file(&e, L"EFI\\BOOT\\BOOTAA64.EFI.tmp");
+    rm_file(&e, L"loader\\loader.conf.before-gaokun3.tmp");
     if (!s.foreign) {
         rm_dir(&e, L"loader");
         rm_dir(&e, L"EFI\\systemd");
-        rm_file(&e, FALLBACK_BAK);
-        rm_file(&e, L"EFI\\BOOT\\BOOTAA64.EFI.before-gaokun3.tmp");
+        if (!e.bad)   /* 最后删：前面有一步失败时留着它，重跑仍有还原的来源 */
+            rm_file(&e, FALLBACK_BAK);
     } else {
         restore_backup(&e, L"loader\\loader.conf");
-        rm_file(&e, L"loader\\loader.conf.before-gaokun3.tmp");
     }
     if (e.bad) {
         gk3w_err(T, "esp-write", "cleaning the EFI system partition failed: a file could not be removed or restored (partitions not removed yet; run uninstall again)", e.first_err);
@@ -491,7 +591,11 @@ int gk3w_cmd_uninstall(int argc, wchar_t **argv)
     if (n_ids) {
         DWORD count = 0;
         DRIVE_LAYOUT_INFORMATION_EX *lay;
-        if (gk3w_disk_read_layout(&d) || d.lay->PartitionCount != snap->PartitionCount ||
+        if (gk3w_disk_read_layout(&d)) {
+            gk3w_err(T, "verify-layout", "re-reading the partition table before removing partitions failed (EFI system partition already cleaned, partitions not removed)", GetLastError());
+            goto out;
+        }
+        if (d.lay->PartitionCount != snap->PartitionCount ||
             memcmp(&d.lay->Gpt, &snap->Gpt, sizeof snap->Gpt) ||
             memcmp(d.lay->PartitionEntry, snap->PartitionEntry, snap->PartitionCount * sizeof(PARTITION_INFORMATION_EX))) {
             gk3w_err(T, "layout-changed", "the partition table changed during the uninstall; run uninstall again (EFI system partition already cleaned, partitions not removed)", 0);

@@ -73,6 +73,9 @@ int gk3w_find_volume(DWORD disk, uint64_t offset, wchar_t *out, size_t cap);
 int gk3w_read_file(const wchar_t *path, uint8_t **data, size_t *len, size_t max);
 /* 写一个文件（CREATE_ALWAYS + 落到介质），再读回比对 */
 int gk3w_write_file_verify(const wchar_t *path, const uint8_t *data, size_t len);
+/* 先写 <path>.tmp、读回核对，再改名覆盖 <path>（保留 <path> 原来的属性）：中途失败或掉电时 <path> 要么是旧的、要么是
+ * 完整的新文件。失败时删掉 .tmp；返回 -1，GetLastError() 是失败那一步的错误码。 */
+int gk3w_replace_file_verify(const wchar_t *path, const uint8_t *data, size_t len);
 /* 逐级建目录（path 是目录本身）；已存在不算错 */
 int gk3w_mkdirs(const wchar_t *path, size_t root_len);
 int gk3w_exists(const wchar_t *path);
@@ -84,7 +87,7 @@ typedef struct {
     int fast_startup;           /* HiberbootEnabled 为 1 且休眠没关（关了休眠快速启动也就没了） */
     int hibernate;              /* Control\Power\HibernateEnabled：1 开、0 关、-1 读不到 */
     int hiberfil;               /* 系统盘上有 hiberfil.sys */
-    int bitlocker;              /* 系统卷：0 关、1 开、2 锁定、-1 读不到 */
+    int bitlocker;              /* 系统卷：0 关、1 开、2 未知（ProtectionStatus 2）、-1 读不到 */
     int ac;                     /* 1 插着电源、0 没插、-1 不知道 */
     int battery;                /* 电量百分比，-1 不知道 */
     wchar_t system_drive;
