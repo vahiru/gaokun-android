@@ -24,6 +24,8 @@ class ManagePage extends StatelessWidget {
       onBack: () => Navigator.pop(context),
       child: ListView(children: [
         systemDiskBar(context),
+        const SizedBox(height: 8),
+        const DiskLegend(android: true),
         const SizedBox(height: 20),
         Text(l.manageParts, style: context.tt.titleMedium),
         const SizedBox(height: 8),
@@ -67,7 +69,7 @@ class UninstallConfirmPage extends StatelessWidget {
         Expanded(
           child: HoldToConfirm(
             idle: l.holdToUninstall,
-            busy: l.holdKeep,
+            busy: (_) => l.holdKeep,
             enabled: ready,
             onConfirmed: () => go(context, const RunPage(task: RunTask.uninstall), replace: true),
           ),

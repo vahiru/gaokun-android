@@ -105,16 +105,25 @@ class Plan {
   int get needMib => _err?.intOf('need_mib') ?? 0;
 }
 
-/// 发布清单里的一个版本（VARIANT 记录，与 LiveCD 的 gk3_net_manifest 同一个格式）
+/// 可以下载安装的一个版本（VARIANT 记录：LiveCD 的 gk3_net_manifest 的格式，另加 date / pre / source）
 class Variant {
   Variant(this.r);
   final Gk3Record r;
   String get id => r['id'];
   String get name => r['name'];
+
+  /// 安装文件所在的目录（boot.img、super.img.zst、install-artifacts.sha256 都在它下面）
   String get base => r['base'];
   int get sizeMib => r.intOf('size_mib');
+  String get date => r['date'];
   bool get latest => r.yes('latest');
+
+  /// GitHub 上标成预发布的版本
+  bool get pre => r.yes('pre');
 }
+
+/// 发布文件从哪来
+enum ReleaseSource { github, r2, local }
 
 String fmtMib(int mib) {
   if (mib < 1024) return '$mib MiB';

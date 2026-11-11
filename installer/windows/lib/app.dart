@@ -7,6 +7,7 @@ import 'package:gk3_common/ui/theme.dart';
 import 'l10n/app_localizations.dart';
 import 'session.dart';
 import 'ui/check_page.dart';
+import 'ui/title_bar.dart';
 
 const kAppVersion = '0.1.0-proto';
 
@@ -15,6 +16,9 @@ class SessionScope extends InheritedNotifier<Session> {
   const SessionScope({super.key, required Session session, required super.child}) : super(notifier: session);
 
   static Session of(BuildContext context) => context.dependOnInheritedWidgetOfExactType<SessionScope>()!.notifier!;
+
+  /// 不建立依赖的读取（initState 里用）
+  static Session read(BuildContext context) => context.getInheritedWidgetOfExactType<SessionScope>()!.notifier!;
 }
 
 extension SessionX on BuildContext {
@@ -67,13 +71,19 @@ class WinInstallerApp extends StatelessWidget {
             GlobalWidgetsLocalizations.delegate,
             GlobalCupertinoLocalizations.delegate,
           ],
-          builder: (context, child) => LogicalCanvas(
-            child: Stack(children: [
-              child!,
-              if (session.backend.demoLabel != null)
-                Positioned(right: 16, top: 12, child: DemoBadge(L10n.of(context).fixtureBadge(session.backend.demoLabel!))),
-            ]),
-          ),
+          // 标题栏在缩放画布之外：窗口多宽它就多宽，高度固定（像系统标题栏一样不随窗口缩放）
+          builder: (context, child) => Column(children: [
+            const WinTitleBar(),
+            Expanded(
+              child: LogicalCanvas(
+                child: Stack(children: [
+                  child!,
+                  if (session.backend.demoLabel != null)
+                    Positioned(right: 16, top: 12, child: DemoBadge(L10n.of(context).fixtureBadge(session.backend.demoLabel!))),
+                ]),
+              ),
+            ),
+          ]),
           home: home ?? const CheckPage(),
         ),
       ),

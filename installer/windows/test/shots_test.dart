@@ -45,7 +45,7 @@ void main() {
     await tap(t, find.text(l.btnNext));
     await shot(t, '02-region');
     await tap(t, find.text(l.btnNext));
-    await waitFor(t, find.textContaining('crDroid'));
+    await waitFor(t, find.textContaining('v1.0.0-rc.3'));
     await shot(t, '03-release');
     await tap(t, find.text(l.btnNext));
     await shot(t, '04-options');
@@ -54,6 +54,19 @@ void main() {
     await hold(t, l.holdToInstall);
     await waitFor(t, find.byType(DonePage), tries: 400);
     await shot(t, '06-done');
+  }, skip: !haveFont);
+
+  testWidgets('几块空闲区、本地文件、R2', (t) async {
+    await pumpApp(t, 'multi');
+    await tap(t, find.text(l.btnNext));
+    await shot(t, '07-region-multi');
+    await tap(t, find.text(l.btnNext));
+    await waitFor(t, find.textContaining('v1.0.0-rc.3'));
+    await tap(t, find.text(l.srcR2));
+    await waitFor(t, find.text('crDroid 13.0'));
+    await shot(t, '08-release-r2');
+    await tap(t, find.text(l.srcLocal));
+    await shot(t, '09-release-local');
   }, skip: !haveFont);
 
   testWidgets('已装：管理与卸载', (t) async {
@@ -82,7 +95,7 @@ void main() {
     await pumpApp(t, 'bad-release');
     for (var i = 0; i < 4; i++) {
       await tap(t, find.text(l.btnNext));
-      await waitFor(t, find.textContaining('crDroid'));
+      await waitFor(t, find.textContaining('v1.0.0-rc.3'));
     }
     await hold(t, l.holdToInstall);
     await waitFor(t, find.byType(FailPage), tries: 400);

@@ -194,13 +194,17 @@ typedef DiskBarFree = ({int start, int sizeMib});
 /// 一块盘的布局条：分区按大小占宽度，颜色按系统（都取自 MD3 的角色 + 两个自定义色）。
 /// 只吃起点 / 大小 / 系统这几个数，不认识应用自己的磁盘模型（LiveCD：live 的 widgets.dart 的 diskBar() 负责转换）
 class DiskBar extends StatelessWidget {
-  const DiskBar({super.key, required this.parts, this.free = const [], this.height = 20, this.highlightFree});
+  const DiskBar({super.key, required this.parts, this.free = const [], this.height = 20, this.highlightFree, this.muted = false});
   final List<DiskBarPart> parts;
   final List<DiskBarFree> free;
   final double height;
 
   /// 强调 [free] 里的第几块（双系统时 Android 要装进去的那块）；null 或不在范围内 = 不强调
   final int? highlightFree;
+
+  /// 只突出空闲区与 Android：已有系统的分区一律画成暗灰，没选中的空闲区画成淡的 success。
+  /// 大片的 Windows 分区按 [colorOf] 上色时太抢眼（Windows 安装器的"选位置"页）
+  final bool muted;
 
   static Color colorOf(BuildContext context, String os) {
     final cs = context.cs, gk = context.gk;
@@ -219,11 +223,12 @@ class DiskBar extends StatelessWidget {
     final cs = context.cs, gk = context.gk;
     final segs = <(int, int, Color)>[]; // start, size, color
     for (final p in parts) {
-      segs.add((p.start, p.sizeMib, colorOf(context, p.os)));
+      segs.add((p.start, p.sizeMib, muted && p.os != 'android' ? cs.surfaceContainerHighest : colorOf(context, p.os)));
     }
     for (final (i, f) in free.indexed) {
       // 高亮用明亮的 success（与 Android 分区同色："这块将是 Android 的"）；深色的 container 在深色背景上像个洞
-      segs.add((f.start, f.sizeMib, i == highlightFree ? gk.success : cs.surfaceContainerHighest));
+      final idle = muted ? gk.success.withValues(alpha: 0.35) : cs.surfaceContainerHighest;
+      segs.add((f.start, f.sizeMib, i == highlightFree ? gk.success : idle));
     }
     segs.sort((a, b) => a.$1.compareTo(b.$1));
     final total = segs.fold<int>(0, (a, s) => a + s.$2);

@@ -8,7 +8,7 @@ import 'bits.dart';
 import 'messages.dart';
 import 'run_pages.dart';
 
-/// 系统盘的分区条：Windows 的分区按 gk3w probe 给的 os 上色，空闲区画成虚线框，选中的那块高亮
+/// 系统盘的分区条：已有的分区一律暗灰（muted），只突出空闲区、要装 Android 的那块与已装的 Android
 Widget systemDiskBar(BuildContext context, {FreeSpan? highlight}) {
   final s = context.session, d = s.disk!;
   final free = s.freeSpans;
@@ -17,6 +17,7 @@ Widget systemDiskBar(BuildContext context, {FreeSpan? highlight}) {
     parts: [for (final p in s.probe!.partsOf(d)) (start: p.start, sizeMib: p.sizeMib, os: p.os.isEmpty ? 'other' : p.os)],
     free: [for (final f in free) (start: f.start, sizeMib: f.sizeMib)],
     highlightFree: highlight == null ? null : free.indexOf(highlight),
+    muted: true,
   );
 }
 
@@ -32,11 +33,12 @@ class RegionPage extends StatelessWidget {
       title: l.regionTitle,
       subtitle: l.regionSub(d.model, fmtMib(d.sizeMib)),
       onBack: () => Navigator.pop(context),
+      nextLabel: l.btnNext,
       onNext: s.region == null ? null : () => go(context, const ReleasePage()),
       child: ListView(children: [
         systemDiskBar(context, highlight: s.region),
         const SizedBox(height: 8),
-        _Legend(),
+        const DiskLegend(target: true),
         const SizedBox(height: 24),
         for (final f in s.freeSpans)
           Padding(
@@ -61,29 +63,36 @@ class RegionPage extends StatelessWidget {
   }
 }
 
-class _Legend extends StatelessWidget {
+/// 分区条下面的图例（与 [systemDiskBar] 的 muted 配色对应）
+class DiskLegend extends StatelessWidget {
+  const DiskLegend({super.key, this.target = false, this.android = false});
+
+  /// 有没有"要装 Android 的位置"（选位置页）、"已装的 Android"（管理页）
+  final bool target, android;
+
   @override
   Widget build(BuildContext context) {
-    final l = context.l;
-    Widget item(String os, String label) => Padding(
+    final l = context.l, cs = context.cs, gk = context.gk;
+    Widget item(Color c, String label) => Padding(
           padding: const EdgeInsets.only(right: 20),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Container(width: 12, height: 12, decoration: BoxDecoration(color: DiskBar.colorOf(context, os), borderRadius: BorderRadius.circular(3))),
+            Container(width: 12, height: 12, decoration: BoxDecoration(color: c, borderRadius: BorderRadius.circular(3))),
             const SizedBox(width: 6),
             Text(label, style: context.tt.bodySmall),
           ]),
         );
     return Wrap(children: [
-      item('windows', 'Windows'),
-      item('esp', l.legendEsp),
-      item('winre', l.legendRecovery),
-      item('android', 'Android'),
-      item('other', l.legendOther),
+      item(cs.surfaceContainerHighest, l.legendExisting),
+      if (target) ...[
+        item(gk.success.withValues(alpha: 0.35), l.legendFree),
+        item(gk.success, l.legendTarget),
+      ],
+      if (android) item(gk.success, 'Android'),
     ]);
   }
 }
 
-/// 第三步：装哪个版本（发布清单，与 LiveCD 的网络安装同一份）
+/// 第三步：装哪个版本、从哪来：GitHub 的 releases、R2 上的镜像，或者已经下载好的本地文件
 class ReleasePage extends StatefulWidget {
   const ReleasePage({super.key});
   @override
@@ -91,10 +100,19 @@ class ReleasePage extends StatefulWidget {
 }
 
 class _ReleasePageState extends State<ReleasePage> {
+  final _dir = TextEditingController();
+
   @override
   void initState() {
     super.initState();
+    _dir.text = SessionScope.read(context).localDir;
     WidgetsBinding.instance.addPostFrameCallback((_) => context.session.loadVariants());
+  }
+
+  @override
+  void dispose() {
+    _dir.dispose();
+    super.dispose();
   }
 
   @override
@@ -103,38 +121,87 @@ class _ReleasePageState extends State<ReleasePage> {
     return WinStepPage(
       step: WinStep.release,
       title: l.releaseTitle,
-      subtitle: l.releaseSub,
+      subtitle: s.source == ReleaseSource.local ? l.releaseSubLocal : l.releaseSub,
       onBack: () => Navigator.pop(context),
-      onNext: s.variant == null ? null : () => go(context, const OptionsPage()),
-      child: s.loadingVariants
-          ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-              const CircularProgressIndicator(),
-              const SizedBox(height: 16),
-              Text(l.releaseLoading, style: context.tt.bodyLarge),
-            ]))
-          : ListView(children: [
-              if (s.variants.isEmpty)
-                NoteBox(
-                  warn: true,
-                  text: s.variantsErr == null ? l.releaseNone : errText(l, s.variantsErr!),
-                  child: Btn(l.btnRetry, kind: BtnKind.secondary, onPressed: s.loadVariants),
-                ),
-              for (final v in s.variants)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: ChoiceCard(
-                    icon: Icons.android,
-                    title: v.name,
-                    body: l.releaseSize(fmtMib(v.sizeMib)),
-                    good: v.latest ? l.releaseLatest : null,
-                    selected: identical(v, s.variant),
-                    onTap: () => s.selectVariant(v),
-                  ),
-                ),
-              const SizedBox(height: 8),
-              NoteBox(text: l.releaseNote),
-            ]),
+      nextLabel: l.btnNext,
+      onNext: s.releaseReady ? () => go(context, const OptionsPage()) : null,
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Align(
+          alignment: Alignment.centerLeft,
+          child: SegmentedButton<ReleaseSource>(
+            segments: [
+              ButtonSegment(value: ReleaseSource.github, label: Text(l.srcGithub), icon: const Icon(Icons.cloud_download_outlined)),
+              ButtonSegment(value: ReleaseSource.r2, label: Text(l.srcR2), icon: const Icon(Icons.cloud_outlined)),
+              ButtonSegment(value: ReleaseSource.local, label: Text(l.srcLocal), icon: const Icon(Icons.folder_open_outlined)),
+            ],
+            selected: {s.source},
+            showSelectedIcon: false,
+            onSelectionChanged: (v) => s.setSource(v.first),
+          ),
+        ),
+        const SizedBox(height: 20),
+        Expanded(child: s.source == ReleaseSource.local ? _local(context) : _online(context)),
+      ]),
     );
+  }
+
+  Widget _online(BuildContext context) {
+    final s = context.session, l = context.l;
+    if (s.loadingVariants) {
+      return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+        const CircularProgressIndicator(),
+        const SizedBox(height: 16),
+        Text(l.releaseLoading, style: context.tt.bodyLarge),
+      ]));
+    }
+    return ListView(children: [
+      if (s.variants.isEmpty)
+        NoteBox(
+          warn: true,
+          text: s.variantsErr == null ? l.releaseNone : errText(l, s.variantsErr!),
+          child: Btn(l.btnRetry, kind: BtnKind.secondary, onPressed: () => s.loadVariants(force: true)),
+        ),
+      for (final v in s.variants)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: ChoiceCard(
+            dense: true,
+            icon: Icons.android,
+            title: v.name,
+            body: l.releaseMeta(v.date, fmtMib(v.sizeMib)),
+            good: v.latest ? l.releaseLatest : null,
+            warn: v.pre && !v.latest ? l.releasePre : null,
+            selected: identical(v, s.variant),
+            onTap: () => s.selectVariant(v),
+          ),
+        ),
+      const SizedBox(height: 8),
+      NoteBox(text: s.source == ReleaseSource.r2 ? l.releaseNoteR2 : l.releaseNote),
+    ]);
+  }
+
+  Widget _local(BuildContext context) {
+    final s = context.session, l = context.l;
+    return ListView(children: [
+      TextField(
+        controller: _dir,
+        onChanged: s.setLocalDir,
+        decoration: InputDecoration(
+          labelText: l.localDirLabel,
+          hintText: r'D:\Downloads\gaokun3-v1.0.0-rc.3',
+          border: const OutlineInputBorder(),
+          prefixIcon: const Icon(Icons.folder_outlined),
+        ),
+      ),
+      const SizedBox(height: 20),
+      Text(l.localNeed, style: context.tt.titleMedium),
+      const SizedBox(height: 4),
+      Bullet(l.localBoot, icon: Icons.insert_drive_file_outlined),
+      Bullet(l.localSuper, icon: Icons.insert_drive_file_outlined),
+      Bullet(l.localSums, icon: Icons.verified_outlined),
+      const SizedBox(height: 12),
+      NoteBox(text: l.localNote),
+    ]);
   }
 }
 
@@ -179,7 +246,7 @@ class ConfirmPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = context.session, l = context.l, cs = context.cs;
-    final r = s.region!, p = s.plans[r]!, v = s.variant!;
+    final r = s.region!, p = s.plans[r]!, v = s.variant;
     final ready = !s.needBitlockerAck || s.bitlockerAck;
     return WinStepPage(
       step: WinStep.confirm,
@@ -192,7 +259,7 @@ class ConfirmPage extends StatelessWidget {
         Expanded(
           child: HoldToConfirm(
             idle: l.holdToInstall,
-            busy: l.holdKeep,
+            busy: (_) => l.holdKeep,
             enabled: ready,
             onConfirmed: () => go(context, RunPage(task: RunTask.install, releaseDir: kReleaseDir), replace: true),
           ),
@@ -202,7 +269,7 @@ class ConfirmPage extends StatelessWidget {
         Text(l.confirmWill, style: context.tt.titleMedium),
         const SizedBox(height: 4),
         Bullet(l.confirmParts(fmtMib(r.sizeMib), fmtMib(p.userdataMib))),
-        Bullet(l.confirmDownload(v.name, fmtMib(v.sizeMib))),
+        Bullet(s.source == ReleaseSource.local ? l.confirmLocal(s.localDir) : l.confirmDownload(v!.name, fmtMib(v.sizeMib))),
         Bullet(l.confirmBoot),
         Bullet(s.defaultOs == 'android' ? l.confirmDefaultAndroid : l.confirmDefaultWindows),
         const SizedBox(height: 12),

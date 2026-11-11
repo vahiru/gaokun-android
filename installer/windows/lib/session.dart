@@ -75,20 +75,36 @@ class Session extends ChangeNotifier {
   }
 
   // ── 发布文件 ──
-  List<Variant> variants = const [];
-  Variant? variant;
+  ReleaseSource source = ReleaseSource.github;
+  final Map<ReleaseSource, List<Variant>> _variants = {};
+  final Map<ReleaseSource, Gk3Record?> _variantsErr = {};
   bool loadingVariants = false;
-  Gk3Record? variantsErr;
+  Variant? variant;
 
-  Future<void> loadVariants() async {
-    if (variants.isNotEmpty || loadingVariants) return;
+  /// 用本地文件时的目录（boot.img、super.img.zst、install-artifacts.sha256 放在一起）
+  String localDir = '';
+
+  List<Variant> get variants => _variants[source] ?? const [];
+  Gk3Record? get variantsErr => _variantsErr[source];
+
+  void setSource(ReleaseSource s) {
+    source = s;
+    variant = variants.where((v) => v.latest).firstOrNull ?? variants.firstOrNull;
+    notifyListeners();
+    if (s != ReleaseSource.local) loadVariants();
+  }
+
+  /// 取一个来源的版本列表（GitHub 的 releases / R2 上的 OTA 清单），取过就不再取
+  Future<void> loadVariants({bool force = false}) async {
+    final src = source;
+    if (src == ReleaseSource.local || loadingVariants || (!force && _variants.containsKey(src))) return;
     loadingVariants = true;
     notifyListeners();
-    final res = await backend.run('manifest');
-    variants = [for (final r in res.ofType('VARIANT')) Variant(r)];
-    variantsErr = res.ok ? null : res.err;
-    variant ??= variants.where((v) => v.latest).firstOrNull ?? variants.firstOrNull;
+    final res = await backend.run('releases', ['--source', src.name]);
+    _variants[src] = [for (final r in res.ofType('VARIANT')) Variant(r)];
+    _variantsErr[src] = res.ok ? null : res.err;
     loadingVariants = false;
+    if (source == src) variant = variants.where((v) => v.latest).firstOrNull ?? variants.firstOrNull;
     notifyListeners();
   }
 
@@ -96,6 +112,13 @@ class Session extends ChangeNotifier {
     variant = v;
     notifyListeners();
   }
+
+  void setLocalDir(String d) {
+    localDir = d.trim();
+    notifyListeners();
+  }
+
+  bool get releaseReady => source == ReleaseSource.local ? localDir.isNotEmpty : variant != null;
 
   // ── 选项 ──
   /// android / windows：开机默认进哪个（gk3w apply --default-os）
@@ -139,28 +162,31 @@ class Session extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 下载（0–40 %）再安装（40–100 %）
+  /// 下载（0–40 %）再安装（40–100 %）；用本地文件时直接安装（0–100 %）
   Future<bool> install({required String releaseDir}) async {
     writing = true;
     percent = 0;
     log.clear();
     result = null;
     notifyListeners();
-    final v = variant!;
-    final dl = await backend.run('download', [v.base, releaseDir], (e) => _onEvent(e, span: 40));
-    if (!dl.ok) {
-      result = dl;
-      writing = false;
-      notifyListeners();
-      return false;
+    final local = source == ReleaseSource.local;
+    var dir = localDir;
+    if (!local) {
+      final dl = await backend.run('download', [variant!.base, releaseDir], (e) => _onEvent(e, span: 40));
+      if (!dl.ok) {
+        result = dl;
+        writing = false;
+        notifyListeners();
+        return false;
+      }
+      dir = dl.first('RELEASE')?['dir'] ?? releaseDir;
     }
-    final dir = dl.first('RELEASE')?['dir'] ?? releaseDir;
     final d = disk!, r = region!;
     result = await backend.run('apply', [
       '--disk', '${d.num}', '--region-start', '${r.start}', '--region-end', '${r.end}',
       '--release', dir, '--default-os', defaultOs, '--real-disk',
       if (bitlockerAck) ...['--bitlocker-key', 'yes'],
-    ], (e) => _onEvent(e, base: 40, span: 60));
+    ], (e) => _onEvent(e, base: local ? 0 : 40, span: local ? 100 : 60));
     writing = false;
     notifyListeners();
     return result!.ok;
