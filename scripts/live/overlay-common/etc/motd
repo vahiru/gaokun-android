@@ -1,11 +1,10 @@
+  gaokun3 rescue system  (Debian 13, changes are kept in RAM only)
 
-  gaokun3 救援系统 / rescue  (Debian 13, 改动只在内存里)
+  This is not an installed system: the root is a read-only squashfs with a
+  tmpfs overlay, and changes are lost on reboot. The boot medium is mounted
+  at /media/gk3.
 
-  这不是装在盘上的系统：根是只读 squashfs + tmpfs overlay，
-  改动重启即失。启动介质挂在 /media/gk3。
-
-  分区/文件系统工具：sgdisk parted resize2fs ntfsresize mkfs.* simg2img
-  安装 Android：     bash -c '. /usr/share/gaokun3/installer-lib.sh && gk3_preflight'
-  下次开机进 Android 的某个槽：gk3-boot-android a|b [--reboot]（--list 看条目）
-  启动证据：         /media/gk3/gaokun3/diag/（gk3-diag 开机 45 秒后写）
-
+  Partition and file system tools: sgdisk parted resize2fs ntfsresize mkfs.* simg2img
+  Install Android:      bash -c '. /usr/share/gaokun3/installer-lib.sh && gk3_preflight'
+  Boot an Android slot next time: gk3-boot-android a|b [--reboot]  (--list shows the entries)
+  Boot evidence:        /media/gk3/gaokun3/diag/  (written by gk3-diag 45 s after boot)
