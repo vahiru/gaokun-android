@@ -117,7 +117,8 @@ static const char *bus_name(STORAGE_BUS_TYPE t)
 
 static const char *guess_os(const char *name, const char *type, const char *fs)
 {
-    static const char *const android[] = {"super", "userdata", "metadata", "misc", "boot_a", "boot_b"};
+    /* 与 uninstall.c 的 OUR_NAMES 相同：安装器会建、卸载会删的分区 */
+    static const char *const android[] = {"super", "userdata", "metadata", "misc", "boot_a", "boot_b", "gk3rescue"};
     if (!strcmp(name, "esp"))
         return "esp";
     for (size_t i = 0; i < sizeof android / sizeof android[0]; i++)

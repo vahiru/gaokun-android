@@ -16,6 +16,6 @@ O UNINSTALL esp-dir=5a555ed5c660ed0f7d2f2fd4eb11babf
 O UNINSTALL esp-dir=loader
 O UNINSTALL esp-dir=EFI\systemd
 O UNINSTALL esp-file=EFI\BOOT\BOOTAA64.EFI.before-gaokun3
-O FREE disk=2 start=874383360 end=958269439 size_mib=40960
+O FREE disk=disk2 start=874383360 end=958269439 size_mib=40960
 E removed 6 partitions
 X 0

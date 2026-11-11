@@ -42,6 +42,9 @@ void gk3w_guid_upper(const GUID *g, char *out)
 
 int wmain(int argc, wchar_t **argv)
 {
+    /* 标准输出不缓冲：记录行本来就逐行 fflush（gk3w_line_emit），这里管住其余直接 printf 的输出，
+     * 进程被中途结束时也不会丢。Windows 的 C 运行库里 _IOLBF 等同于全缓冲，所以用 _IONBF */
+    setvbuf(stdout, NULL, _IONBF, 0);
     /* 记录行里不能出现 \r\n：stdout / stderr 切成二进制模式 */
     _setmode(_fileno(stdout), _O_BINARY);
     _setmode(_fileno(stderr), _O_BINARY);

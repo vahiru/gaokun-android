@@ -1,3 +1,4 @@
 # 场景：已经装了 Android —— 平板（GK-W7X）真跑的 probe（2026-11-11 17:37，LiveCD 装的那一套，带 GK3LIVE 与 gk3rescue） → 管理页
 # uninstall 用 common 里 VHDX 上的录制（分区编号与平板不同，界面只看它打的记录）
+# gk3rescue 的 os= 原为空（当时的 probe 没认它），按修正后的 probe 填成 android
 probe                     probe.txt

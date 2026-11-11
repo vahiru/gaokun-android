@@ -687,8 +687,11 @@ int gk3w_cmd_uninstall(int argc, wchar_t **argv)
         if (gk3w_free_spans(uf, ul, parts, np, d.bs, 16u << 20, spans, GK3W_MAX_PARTS + 1, &nf) == GK3W_LAYOUT_OK)
             for (size_t i = 0; i < nf && i < GK3W_MAX_PARTS + 1; i++) {
                 gk3w_line l = {0};
+                char id[16];
+                /* 与 probe 的 FREE 记录相同：disk=disk<N> */
+                snprintf(id, sizeof id, "disk%lu", (unsigned long)d.num);
                 gk3w_line_begin(&l, "FREE");
-                gk3w_line_u64(&l, "disk", d.num);
+                gk3w_line_kv(&l, "disk", id);
                 gk3w_line_u64(&l, "start", spans[i].first);
                 gk3w_line_u64(&l, "end", spans[i].last);
                 gk3w_line_u64(&l, "size_mib", gk3w_span_bytes(spans[i], d.bs) >> 20);
