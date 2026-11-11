@@ -121,6 +121,15 @@ private:
 		const uint8_t *uv = nullptr;
 		int stride = 0;
 		int w = 0, h = 0;
+		/*
+		 * IFE 变焦（ScalerCrop）时：请求的区域在这幅画面里的位置（x、y、宽、高，画面像素，
+		 * 可以超出画面），由元数据里实际显示的矩形换算；hasWin 为假时按整个视场居中。
+		 * view：这幅画面显示的是整个视场（ScalerCropMaximum）的哪一块（x0、y0、x1、y1，
+		 * 比例），给对焦换算 AF 区域。
+		 */
+		bool hasWin = false;
+		double win[4] = {};
+		float view[4] = { 0.0f, 0.0f, 1.0f, 1.0f };
 	};
 
 	/* 把一帧交付到一个 gralloc 缓冲，
@@ -299,6 +308,16 @@ private:
 	 */
 	libcamera::Stream *fullStream_ = nullptr;
 	int32_t fullWidth_ = 0, fullHeight_ = 0, fullStride_ = 0;
+	/*
+	 * 两路输出时管线支持 ScalerCrop：变焦交给 IFE 的显示路径（只缩小，最多放大到显示路径
+	 * 等于输入里对应的像素数，超出的部分 CPU 再放大）；FULL 保持整个视场，照片的变焦仍由
+	 * HAL 裁。scalerCropMax_ 是 ScalerCropMaximum，变焦区域按它换算到像素阵列坐标。
+	 */
+	bool ifeZoom_ = false;
+	bool zoomMetaWarned_ = false;   /* 拿不到元数据 ScalerCrop 的警告只打一次 */
+	libcamera::Rectangle scalerCropMax_;
+	/* 裁剪区域（SCALER_CROP_REGION，视场坐标）换算成像素阵列坐标的 ScalerCrop */
+	libcamera::Rectangle scalerCropFor(const int32_t crop[4]) const;
 	/* Full-size RAW stream for phase detection (rear camera in full-size mode). */
 	libcamera::Stream *rawStream_ = nullptr;
 	bool rawForPhase_ = false;
@@ -415,6 +434,8 @@ private:
 	void thumbnailSize(int32_t rotation, int32_t *tw, int32_t *th) const;
 	/* 应用给了 AF 区域；没给时区域跟着变焦走 */
 	bool afAppRegion_ = false;
+	/* 应用最后给的 AF 区域（视场坐标 x0、y0、x1、y1），每个请求都和裁剪区域比一次 */
+	int32_t afAppRect_[4] = {};
 
 	/*
 	 * ── AE/AWB 锁定与曝光补偿（持有 mutex_）──

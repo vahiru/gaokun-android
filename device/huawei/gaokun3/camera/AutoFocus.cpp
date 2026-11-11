@@ -172,6 +172,7 @@ void AutoFocus::startScan()
 	pdConfirm_ = false;
 	pdDonePos_ = -1;
 	pdAt_.clear();
+	restarted_ = false;
 	noRaw_ = 0;
 	regionScan_ = false;
 	buildSweep();
@@ -289,7 +290,8 @@ void AutoFocus::finishScan(bool byPhase)
  * 增益基本无关），乘 1e4。在区域里按 step 抽样，每个样本只用它和右边、下边的像素，
  * 全分辨率的细节都算进去，样本数不超过约 kGradSamples。
  */
-double AutoFocus::gradientEnergy(const uint8_t *y, int w, int h, int stride, const float region[4])
+double AutoFocus::gradientEnergy(const uint8_t *y, int w, int h, int stride, const float region[4],
+				 double viewW)
 {
 	if (w < 4 || h < 4)
 		return 0.0;
@@ -298,7 +300,9 @@ double AutoFocus::gradientEnergy(const uint8_t *y, int w, int h, int stride, con
 	 * 失焦对它影响小。11-10 对着文字逐点钉住马达：4208 宽的画面隔 1 像素时偏离峰
 	 * 20 码只低 3%，隔 4 像素低 7%；1952 宽的画面隔 1–2 像素低 9%。
 	 */
-	const int d = std::max(1, (w + 500) / 1000);
+	/* IFE 变焦时画面只是视场的一部分：按整个视场的等效宽度取（放大到 1:1 传感器像素时与全尺寸画面相同） */
+	const double fullW = w / std::clamp(viewW, 0.05, 1.0);
+	const int d = std::max(1, static_cast<int>(std::lround(fullW / 1000.0)));
 	if (w < d + 2 || h < d + 2)
 		return 0.0;
 	const int x0 = std::clamp(static_cast<int>(region[0] * w), 0, w - d - 1);
@@ -388,16 +392,42 @@ double AutoFocus::sharpness(const uint8_t *pixels, int w, int h, int stride,
 }
 
 void AutoFocus::onFrame(const uint8_t *pixels, int w, int h, int stride, int bytesPerPixel,
-			bool sceneStable, const RawFrame *raw, double hwScore, double gain)
+			bool sceneStable, const RawFrame *raw, double hwScore, double gain,
+			const float *view)
 {
 	if (!pixels || w <= 0 || h <= 0)
 		return;
 	/* setRegion() writes region_ under the lock from the request thread. */
 	float region[4];
+	double viewW = 1.0;
 	{
 		std::lock_guard<std::mutex> lk(m_);
 		std::copy(region_, region_ + 4, region);
+		viewW = lastView_[2] - lastView_[0];
 	}
+	/* 画面只显示视场里的一块时，打分用的区域换算到这幅画面上（见 onFrame() 的说明） */
+	float imgRegion[4];
+	std::copy(region, region + 4, imgRegion);
+	if (view && view[2] > view[0] && view[3] > view[1] &&
+	    (view[0] > 0.0f || view[1] > 0.0f || view[2] < 1.0f || view[3] < 1.0f)) {
+		for (int i = 0; i < 4; i++) {
+			const int a = i & 1;   /* 0 = x，1 = y */
+			imgRegion[i] = std::clamp((region[i] - view[a]) / (view[a + 2] - view[a]),
+						  0.0f, 1.0f);
+		}
+		/*
+		 * 区域（几乎）整个落在可见部分之外（例如点按边缘后放大）：Android 规定这样的区域
+		 * 应当忽略，打分改用可见部分中间 70%，与默认区域相同。
+		 */
+		if (imgRegion[2] - imgRegion[0] < 0.02f || imgRegion[3] - imgRegion[1] < 0.02f) {
+			imgRegion[0] = imgRegion[1] = 0.15f;
+			imgRegion[2] = imgRegion[3] = 0.85f;
+		}
+	}
+	/*
+	 * 差分距离按登记过的视场（lastView_）取，不按这一帧：每边不到 kViewEps 的小幅变焦
+	 * 不算视场变化，d 却可能跳档、分数跟着跳。视场一变就跳过几帧、重取基准。
+	 */
 	/* 增益高（暗处）用 FocusFoM，否则硬件 ISP 的 NV12 用梯度能量（见 AutoFocus.h） */
 	if (gain >= kFoMGainOn)
 		highGain_ = true;
@@ -408,8 +438,8 @@ void AutoFocus::onFrame(const uint8_t *pixels, int w, int h, int stride, int byt
 									   : 0;
 	const bool hw = source != 0;
 	const double score = source == 1   ? hwScore
-			     : source == 2 ? gradientEnergy(pixels, w, h, stride, region)
-					   : sharpness(pixels, w, h, stride, bytesPerPixel, region);
+			     : source == 2 ? gradientEnergy(pixels, w, h, stride, imgRegion, viewW)
+					   : sharpness(pixels, w, h, stride, bytesPerPixel, imgRegion);
 
 	std::lock_guard<std::mutex> lk(m_);
 
@@ -445,13 +475,60 @@ void AutoFocus::onFrame(const uint8_t *pixels, int w, int h, int stride, int byt
 				    : "Laplacian energy of the frame luma");
 		refScore_ = -1.0;
 		if (scanning_) {
-			/* 重新搜索仍是点按的那一次：保留点按标记（startScan() 会清掉） */
+			/* 重新搜索仍是点按的那一次：保留点按标记（startScan() 会清掉），照常精调 */
 			const bool tap = regionScan_;
 			startScan();
 			regionScan_ = tap;
+			restarted_ = true;
 		}
 	} else {
 		otherSource_ = 0;
+	}
+
+	/*
+	 * IFE 变焦改变了打分画面的视场：梯度能量、拉普拉斯换了画面，不能和之前的分数比
+	 * （FocusFoM 按整个视场统计，不受影响）。不在搜索时重取基准（变焦本身不触发重扫）；
+	 * 在搜索时等视场连续 kViewSettleFrames 帧不变后重新开始这次搜索，保留点按标记。
+	 */
+	bool viewSkip = false;
+	{
+		const float v[4] = { view ? view[0] : 0.0f, view ? view[1] : 0.0f,
+				     view ? view[2] : 1.0f, view ? view[3] : 1.0f };
+		bool changed = false;
+		for (int i = 0; i < 4; i++)
+			changed = changed || std::fabs(v[i] - lastView_[i]) > kViewEps;
+		if (changed) {
+			std::copy(v, v + 4, lastView_);
+			viewSettle_ = kViewSettleFrames;
+			if (source != 1) {
+				refScore_ = -1.0;
+				stable_ = 0;
+			}
+			/*
+			 * FocusFoM 由 IFE 在请求给的窗口里算，不随画面视场变，本不必重新开始；
+			 * 但搜索中推迟了新的默认区域时，不重新开始的话整次搜索都按看不见的旧区域测。
+			 */
+			if (scanning_ && (source != 1 || hasPendingDefault_))
+				viewRestart_ = true;
+		}
+		if (viewSettle_ > 0) {
+			viewSettle_--;
+			/* 跳过的是打分（在 shouldScan() 之后）：分步移动、手动对焦、调试钉住照常 */
+			viewSkip = source != 1;
+		} else if (viewRestart_) {
+			viewRestart_ = false;
+			if (scanning_) {
+				ALOGI("AF view changed by zoom, searching again");
+				const bool tap = regionScan_;
+				/* 搜索中推迟的默认区域（新的可见部分）先换上 */
+				if (hasPendingDefault_ && defaultRegion_)
+					std::copy(pendingDefault_, pendingDefault_ + 4, region_);
+				hasPendingDefault_ = false;
+				startScan();
+				regionScan_ = tap;
+				restarted_ = true;
+			}
+		}
 	}
 
 	if (!lens_ || !lens_->usable())
@@ -529,6 +606,9 @@ void AutoFocus::onFrame(const uint8_t *pixels, int w, int h, int stride, int byt
 		scanning_ = false;
 		return;
 	}
+	/* 视场刚变（IFE 变焦），这几帧的分数不能用（见上） */
+	if (viewSkip)
+		return;
 
 	/*
 	 * AE 未收敛：这一帧的分数不可信（整帧 gamma 在变 ⇒ 锐度分数跟着漂）。
@@ -670,7 +750,7 @@ void AutoFocus::onFrame(const uint8_t *pixels, int w, int h, int stride, int byt
 			const int target = std::clamp(want, lo, hi);
 			ALOGI("AF 相位 pos=%d 错位=%+.3f 可信度=%.2f 分数=%.1f 系数=%.0f → %d", cur,
 			      ph.disparity, ph.confidence, score, pdGain_, target);
-			if (std::fabs(ph.disparity) <= kPdDone && pdSteps_ == 0 && !triggered_ &&
+			if (std::fabs(ph.disparity) <= kPdDone && pdSteps_ == 0 && !triggered_ && !restarted_ &&
 			    !regionScan_) {
 				/* 连续模式的重搜，相位在原位置就判定合焦：镜头不动（见 kPdConfirmRise） */
 				bestPos_ = cur;
@@ -872,22 +952,31 @@ void AutoFocus::applyRegion(float x0, float y0, float x1, float y1, bool tap)
 	const float region[4] = { left, top, left + w, top + h };
 
 	std::lock_guard<std::mutex> lk(m_);
-	if (std::equal(region, region + 4, region_))
+	if (std::equal(region, region + 4, region_)) {
+		/* 又变回了现在用的默认区域：搜索中记下的另一个倍数的默认区域作废 */
+		if (!tap && defaultRegion_)
+			hasPendingDefault_ = false;
 		return;
+	}
 	if (!tap && defaultRegion_) {
 		/*
 		 * 默认区域跟着变焦走（clearRegion() 每个请求都调）。数码变焦不改变
 		 * 物距，不必重新搜索，只换分数的基准；搜索进行中先不换，免得一次
 		 * 搜索的分数来自不同的区域，等下一个请求再换。
 		 */
-		if (scanning_)
+		if (scanning_) {
+			std::copy(region, region + 4, pendingDefault_);
+			hasPendingDefault_ = true;
 			return;
+		}
 		std::copy(region, region + 4, region_);
+		hasPendingDefault_ = false;
 		refScore_ = -1.0;
 		return;
 	}
 	std::copy(region, region + 4, region_);
 	defaultRegion_ = !tap;
+	hasPendingDefault_ = false;
 	ALOGI("AF 区域 (%.2f,%.2f)-(%.2f,%.2f)", region_[0], region_[1], region_[2], region_[3]);
 	regionChanged(tap);
 }
@@ -916,6 +1005,16 @@ void AutoFocus::regionChanged(bool tap)
 		startScan();
 		regionScan_ = tap;
 		regionAge_ = 0;
+	} else if (scanning_) {
+		/*
+		 * 已触发的搜索（AUTO 点按、连续模式 START 后）进行中换了区域（例如变焦后点按处
+		 * 移出、移回可见部分）：从头再搜，免得前后采样点的分数来自两块区域。触发与点按
+		 * 标记保留，搜完照样锁定。
+		 */
+		const bool wasTap = regionScan_;
+		startScan();
+		regionScan_ = wasTap || tap;
+		restarted_ = true;
 	}
 }
 

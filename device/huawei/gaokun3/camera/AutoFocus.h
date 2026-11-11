@@ -97,9 +97,14 @@ public:
 	 * kHwFloor。连续 kHwSourceFrames 帧换了来源才切换并重新搜索，偶尔一帧缺统计只跳过
 	 * 那一帧。
 	 */
+	/*
+	 * view：pixels 显示的是整个视场的哪一块（x0、y0、x1、y1，比例；nullptr = 整个）。
+	 * IFE 变焦时显示路径只显示视场里的一块，AF 区域（按整个视场给）在打分前换算到这幅
+	 * 画面上；相位（RAW）与 FocusFoM 按整个视场，不受影响。
+	 */
 	void onFrame(const uint8_t *pixels, int w, int h, int stride, int bytesPerPixel,
 		     bool sceneStable, const RawFrame *raw = nullptr, double hwScore = -1.0,
-		     double gain = 1.0);
+		     double gain = 1.0, const float *view = nullptr);
 
 	/* AF region as fractions of the frame (x0, y0, x1, y1), or none: the
 	 * central 70%. A change starts a new search. */
@@ -153,8 +158,9 @@ private:
 
 	double sharpness(const uint8_t *pixels, int w, int h, int stride, int bytesPerPixel,
 			 const float region[4]);
+	/* viewW：画面宽度占整个视场的比例（IFE 变焦时 < 1），差分距离按整个视场的等效宽度取 */
 	static double gradientEnergy(const uint8_t *y, int w, int h, int stride,
-				     const float region[4]);
+				     const float region[4], double viewW = 1.0);
 	void buildSweep();
 
 	/* 搜索参数。 */
@@ -292,6 +298,23 @@ private:
 	 */
 	double pdRef_ = 0.0;
 	std::map<int, double> pdAt_;     /* 这次搜索在各采样位置量到的可信错位 */
+	/*
+	 * 打分画面显示的是整个视场的哪一块（IFE 变焦，见 onFrame()）：变了以后画面的分数不能
+	 * 再和之前的比。viewSettle_：还要等几帧视场不变；viewRestart_：等完重新开始这次搜索。
+	 */
+	float lastView_[4] = { 0.0f, 0.0f, 1.0f, 1.0f };
+	int viewSettle_ = 0;
+	bool viewRestart_ = false;
+	/*
+	 * 这次搜索是中途重新开始的（变焦或分数来源变了）：不是“已合焦时的连续重扫”，
+	 * 不走“相位在原位判合焦就不动镜头”的捷径，照常精调。startScan() 清零。
+	 */
+	bool restarted_ = false;
+	/* 搜索中推迟的默认区域（跟着变焦走），重新开始搜索前先换上 */
+	float pendingDefault_[4] = {};
+	bool hasPendingDefault_ = false;
+	static constexpr float kViewEps = 0.005f;
+	static constexpr int kViewSettleFrames = 2;
 	bool pdConfirm_ = false;         /* 这次搜索在用对比度确认相位的结果 */
 	int pdDonePos_ = -1;             /* 相位判定合焦的位置，-1 = 没有 */
 	int moveTarget_ = -1;            /* where a stepped move is heading, -1 = none */

@@ -583,6 +583,16 @@ ndk::ScopedAStatus Session::configureStreams(const StreamConfiguration &cfg,
 	fullWidth_ = fullCfg ? static_cast<int32_t>(fullCfg->size.width) : 0;
 	fullHeight_ = fullCfg ? static_cast<int32_t>(fullCfg->size.height) : 0;
 	fullStride_ = fullCfg ? static_cast<int32_t>(fullCfg->stride) : 0;
+	ifeZoom_ = false;
+	zoomMetaWarned_ = false;
+	scalerCropMax_ = {};
+	if (fullStream_ && cam_->controls().count(&libcamera::controls::ScalerCrop)) {
+		if (auto m = cam_->properties().get(libcamera::properties::ScalerCropMaximum);
+		    m && !m->isNull()) {
+			scalerCropMax_ = *m;
+			ifeZoom_ = true;
+		}
+	}
 	rawStream_ = nullptr;
 	rawForPhase_ = false;
 	if (withRaw) {
@@ -959,7 +969,7 @@ ndk::ScopedAStatus Session::processCaptureRequest(const std::vector<CaptureReque
 		 * 两路输出时，变焦后的裁剪在显示路径上比某路非 JPEG 流小（要放大）：这个请求也带
 		 * FULL，这些流改从 FULL 裁剪、缩小，画质与单路时相同。
 		 */
-		if (fullStream_) {
+		if (fullStream_ && !ifeZoom_) {
 			SrcFrame disp;
 			disp.w = srcWidth_;
 			disp.h = srcHeight_;
@@ -1005,14 +1015,28 @@ ndk::ScopedAStatus Session::processCaptureRequest(const std::vector<CaptureReque
 				const int32_t ry1 = requestEntryInt(p.settings, ANDROID_CONTROL_AF_REGIONS, -1, 3);
 				const int32_t rw = requestEntryInt(p.settings, ANDROID_CONTROL_AF_REGIONS, 0, 4);
 				afAppRegion_ = rw > 0 && rx1 > rx0 && ry1 > ry0;
-				if (afAppRegion_)
-					af_.setRegion(static_cast<float>(facts_.fovX + rx0) / facts_.activeW,
-						      static_cast<float>(facts_.fovY + ry0) / facts_.activeH,
-						      static_cast<float>(facts_.fovX + rx1) / facts_.activeW,
-						      static_cast<float>(facts_.fovY + ry1) / facts_.activeH);
+				afAppRect_[0] = rx0;
+				afAppRect_[1] = ry0;
+				afAppRect_[2] = rx1;
+				afAppRect_[3] = ry1;
 			}
-			/* 应用没给区域：用画面的可见部分 */
-			if (!afAppRegion_)
+			/*
+			 * Android 规定落在 SCALER_CROP_REGION 之外的部分忽略：区域裁到与这个请求的
+			 * 裁剪区域（变焦后的可见部分）的交集，相位、FocusFoM 与对比度都用这一块；
+			 * 交集为空时按没有区域处理。变焦回来时重新用它（applyRegion() 对相同区域不做事）。
+			 */
+			const int32_t ax0 = std::max(afAppRect_[0], p.crop[0]);
+			const int32_t ay0 = std::max(afAppRect_[1], p.crop[1]);
+			const int32_t ax1 = std::min(afAppRect_[2], p.crop[0] + p.crop[2]);
+			const int32_t ay1 = std::min(afAppRect_[3], p.crop[1] + p.crop[3]);
+			const bool appRegion = afAppRegion_ && ax1 > ax0 && ay1 > ay0;
+			if (appRegion)
+				af_.setRegion(static_cast<float>(facts_.fovX + ax0) / facts_.activeW,
+					      static_cast<float>(facts_.fovY + ay0) / facts_.activeH,
+					      static_cast<float>(facts_.fovX + ax1) / facts_.activeW,
+					      static_cast<float>(facts_.fovY + ay1) / facts_.activeH);
+			/* 应用没给区域（或在可见部分之外）：用画面的可见部分 */
+			if (!appRegion)
 				af_.clearRegion(
 					static_cast<float>(facts_.fovX + p.crop[0]) / facts_.activeW,
 					static_cast<float>(facts_.fovY + p.crop[1]) / facts_.activeH,
@@ -1054,6 +1078,13 @@ ndk::ScopedAStatus Session::processCaptureRequest(const std::vector<CaptureReque
 			lreq->controls().set(libcamera::controls::AfWindows,
 					     std::span<const libcamera::Rectangle>(&win, 1));
 		}
+
+		/*
+		 * IFE 变焦：裁剪区域（视场坐标，居中）换算到像素阵列坐标，每个请求都下发（不设时
+		 * 管线沿用上一次）；不变焦时就是整个视场。
+		 */
+		if (ifeZoom_)
+			lreq->controls().set(libcamera::controls::ScalerCrop, scalerCropFor(p.crop));
 
 		apply3aControls(p, lreq->controls());
 
@@ -1236,6 +1267,22 @@ Session::Crop Session::cropFor(const SrcFrame &src, int32_t dstW, int32_t dstH) 
 	return cropIn(src, cropRegion_, dstW, dstH);
 }
 
+libcamera::Rectangle Session::scalerCropFor(const int32_t crop[4]) const
+{
+	/* 视场坐标 → 有效区的比例 → ScalerCropMaximum（像素阵列坐标），与 AF 区域的换算相同 */
+	const int32_t cw = crop[2] > 0 ? crop[2] : facts_.fovW;
+	const int32_t ch = crop[3] > 0 ? crop[3] : facts_.fovH;
+	const double fx0 = static_cast<double>(facts_.fovX + crop[0]) / facts_.activeW;
+	const double fy0 = static_cast<double>(facts_.fovY + crop[1]) / facts_.activeH;
+	const double fw = static_cast<double>(cw) / facts_.activeW;
+	const double fh = static_cast<double>(ch) / facts_.activeH;
+	const auto &m = scalerCropMax_;
+	return libcamera::Rectangle(m.x + static_cast<int>(std::lround(fx0 * m.width)),
+				    m.y + static_cast<int>(std::lround(fy0 * m.height)),
+				    static_cast<unsigned int>(std::lround(fw * m.width)),
+				    static_cast<unsigned int>(std::lround(fh * m.height)));
+}
+
 Session::Crop Session::cropIn(const SrcFrame &src, const int32_t region[4], int32_t dstW,
 			      int32_t dstH) const
 {
@@ -1246,11 +1293,25 @@ Session::Crop Session::cropIn(const SrcFrame &src, const int32_t region[4], int3
 	 * or not, less a few border columns of the debayer, so its height gives
 	 * the scale.
 	 */
-	/* 变焦时取画面中间、裁剪区域大小的那部分 */
-	const int64_t cw = region[2] > 0 ? region[2] : facts_.fovW;
-	const int64_t ch = region[3] > 0 ? region[3] : facts_.fovH;
-	int w = static_cast<int>(std::min<int64_t>(src.w, cw * src.h / facts_.activeH)) & ~1;
-	int h = static_cast<int>(std::min<int64_t>(src.h, ch * src.h / facts_.activeH)) & ~1;
+	/*
+	 * 要裁的范围（画面像素）：IFE 变焦时是请求的区域在这幅画面里的位置（SrcFrame::win，
+	 * 由实际显示的矩形换算，中心随它）；否则取画面中间、裁剪区域大小的那部分。
+	 */
+	double cx = src.w / 2.0, cy = src.h / 2.0;
+	int w, h;
+	if (src.hasWin) {
+		cx = src.win[0] + src.win[2] / 2.0;
+		cy = src.win[1] + src.win[3] / 2.0;
+		w = static_cast<int>(std::min<double>(src.w, src.win[2])) & ~1;
+		h = static_cast<int>(std::min<double>(src.h, src.win[3])) & ~1;
+	} else {
+		const int64_t cw = region[2] > 0 ? region[2] : facts_.fovW;
+		const int64_t ch = region[3] > 0 ? region[3] : facts_.fovH;
+		w = static_cast<int>(std::min<int64_t>(src.w, cw * src.h / facts_.activeH)) & ~1;
+		h = static_cast<int>(std::min<int64_t>(src.h, ch * src.h / facts_.activeH)) & ~1;
+	}
+	w = std::max(w, 2);
+	h = std::max(h, 2);
 	if (static_cast<int64_t>(w) * dstH > static_cast<int64_t>(h) * dstW)
 		w = static_cast<int>(static_cast<int64_t>(h) * dstW / dstH) & ~1;
 	else
@@ -1265,7 +1326,19 @@ Session::Crop Session::cropIn(const SrcFrame &src, const int32_t region[4], int3
 		w = dstW;
 		h = dstH;
 	}
-	return { ((src.w - w) / 2) & ~1, ((src.h - h) / 2) & ~1, w, h };
+	/*
+	 * IFE 变焦：请求的区域换算到画面上常常比流小一两个像素（管线按高度定缩放，宽度
+	 * 1279.4 截成 1278）。差不超过 1% 且画面装得下时也直接用流的尺寸，否则每帧都要整幅放大。
+	 */
+	if (src.hasWin && dstW <= src.w && dstH <= src.h && w * 100 >= dstW * 99 &&
+	    h * 100 >= dstH * 99 && w * 100 <= dstW * 101 && h * 100 <= dstH * 101) {
+		w = dstW;
+		h = dstH;
+	}
+	/* 以要裁的范围的中心为中心，不出画面 */
+	const int x = std::clamp(static_cast<int>(std::lround(cx - w / 2.0)) & ~1, 0, (src.w - w) & ~1);
+	const int y = std::clamp(static_cast<int>(std::lround(cy - h / 2.0)) & ~1, 0, (src.h - h) & ~1);
+	return { x, y, w, h };
 }
 
 int Session::toJ420(const SrcFrame &src, int32_t dstW, int32_t dstH,
@@ -2502,6 +2575,35 @@ void Session::onRequestCompleted(libcamera::Request *req)
 			src.stride = srcStride_;
 			src.w = srcWidth_;
 			src.h = srcHeight_;
+			/*
+			 * IFE 变焦：这一帧显示路径实际显示的矩形（元数据 ScalerCrop，像素阵列坐标）。
+			 * 请求的区域按它换算到画面像素：(want − shown.xy) × 画面尺寸 / shown 的宽高，
+			 * 取整偏差、宽高比差异、超出 IFE 上限都在这一步里处理。
+			 */
+			if (ifeZoom_ && !scalerCropMax_.isNull()) {
+				const auto shown = req->metadata().get(libcamera::controls::ScalerCrop);
+				if (!shown && !zoomMetaWarned_) {
+					ALOGW("No ScalerCrop in the metadata: zoom falls back to a centred crop");
+					zoomMetaWarned_ = true;
+				}
+				if (shown && shown->width > 0 && shown->height > 0) {
+					const libcamera::Rectangle want = scalerCropFor(pend.crop);
+					const double sx = static_cast<double>(src.w) / shown->width;
+					const double sy = static_cast<double>(src.h) / shown->height;
+					src.hasWin = true;
+					src.win[0] = (want.x - shown->x) * sx;
+					src.win[1] = (want.y - shown->y) * sy;
+					src.win[2] = want.width * sx;
+					src.win[3] = want.height * sy;
+					const auto &m = scalerCropMax_;
+					src.view[0] = static_cast<float>(shown->x - m.x) / m.width;
+					src.view[1] = static_cast<float>(shown->y - m.y) / m.height;
+					src.view[2] = static_cast<float>(shown->x + static_cast<int>(shown->width) - m.x) /
+						      m.width;
+					src.view[3] = static_cast<float>(shown->y + static_cast<int>(shown->height) - m.y) /
+						      m.height;
+				}
+			}
 		}
 		/* 第二道保险（#109）：帧不够配置的尺寸就整帧报 ERROR_BUFFER，绝不越界读。 */
 		if (src.data && srcNv12_) {
@@ -2589,7 +2691,7 @@ void Session::onRequestCompleted(libcamera::Request *req)
 		const auto fom = req->metadata().get(libcamera::controls::FocusFoM);
 		af_.onFrame(src.data, srcWidth_, srcHeight_, srcStride_, srcNv12_ ? 1 : 3,
 			    lumaStableFor >= 2, raw.data ? &raw : nullptr,
-			    fom ? static_cast<double>(*fom) : -1.0, lastGain_);
+			    fom ? static_cast<double>(*fom) : -1.0, lastGain_, src.view);
 		if (raw.data) {
 			struct dma_buf_sync sync = { DMA_BUF_SYNC_END | DMA_BUF_SYNC_READ };
 			ioctl(rawFd, DMA_BUF_IOCTL_SYNC, &sync);
