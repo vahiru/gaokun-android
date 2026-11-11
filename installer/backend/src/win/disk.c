@@ -187,6 +187,7 @@ int gk3w_disk_set_layout(gk3w_disk *d, DRIVE_LAYOUT_INFORMATION_EX *lay, DWORD c
         return gk3w_err(t, "set-layout", "写分区表失败", GetLastError()), -1;
     if (!DeviceIoControl(d->h, IOCTL_DISK_UPDATE_PROPERTIES, NULL, 0, NULL, 0, &got, NULL))
         return gk3w_err(t, "update-properties", "分区表已写，但分区管理器没能重读", GetLastError()), -1;
+    /* 此后的读写可能遇到 STATUS_VERIFY_REQUIRED，由 io_retry 处理 */
     return 0;
 }
 
@@ -207,24 +208,67 @@ void gk3w_disk_usable(const gk3w_disk *d, uint64_t *first, uint64_t *last)
     *last = ((uint64_t)d->lay->Gpt.StartingUsableOffset.QuadPart + (uint64_t)d->lay->Gpt.UsableLength.QuadPart) / d->bs - 1;
 }
 
-int gk3w_pwrite(HANDLE h, const void *buf, DWORD len, uint64_t off)
+/* 一次读或写。0 = 成功；1 = 设备要求先确认介质（STATUS_VERIFY_REQUIRED）；-1 = 失败（last error 已设）。
+ *
+ * ★ 2026-11-11 VHDX 上实测：分区表改动之后（IOCTL_DISK_SET_DRIVE_LAYOUT_EX），之后某一次读写会以 NTSTATUS
+ *   0x80000010（STATUS_VERIFY_REQUIRED，警告级）完成 —— WriteFile 返回 TRUE、传了 0 字节，五轮里每轮一次，
+ *   位置不固定（新分区开头附近）。平时由文件系统去确认介质，直接读写裸盘就得自己来：发 IOCTL_DISK_CHECK_VERIFY
+ *   再重做这一次。 */
+#define GK3W_STATUS_VERIFY_REQUIRED ((ULONG_PTR)0x80000010)
+
+static int io_once(HANDLE h, void *buf, DWORD len, uint64_t off, int write)
 {
     OVERLAPPED ov;
     DWORD got = 0;
+    BOOL ok;
     memset(&ov, 0, sizeof ov);
     ov.Offset = (DWORD)off;
     ov.OffsetHigh = (DWORD)(off >> 32);
-    return WriteFile(h, buf, len, &got, &ov) && got == len ? 0 : -1;
+    ok = write ? WriteFile(h, buf, len, &got, &ov) : ReadFile(h, buf, len, &got, &ov);
+    if (ok && got == len)
+        return 0;
+    if (ok && ov.Internal == GK3W_STATUS_VERIFY_REQUIRED)
+        return 1;
+    if (ok)
+        SetLastError(ERROR_WRITE_FAULT);
+    gk3w_log("%s 失败：off=%llu len=%lu got=%lu ok=%d err=%lu status=0x%08llx", write ? "WriteFile" : "ReadFile",
+             (unsigned long long)off, (unsigned long)len, (unsigned long)got, ok, (unsigned long)GetLastError(),
+             (unsigned long long)ov.Internal);
+    return -1;
+}
+
+static int io_retry(HANDLE h, void *buf, DWORD len, uint64_t off, int write)
+{
+    for (int attempt = 1;; attempt++) {
+        int r = io_once(h, buf, len, off, write);
+        DWORD got = 0, err;
+        if (!r)
+            return 0;
+        if (attempt == 4)
+            return -1;
+        if (r == 1) {
+            /* 确认介质：这一次读写本身没有发生，确认之后重做 */
+            if (!DeviceIoControl(h, IOCTL_DISK_CHECK_VERIFY, NULL, 0, NULL, 0, &got, NULL))
+                gk3w_log("磁盘要求确认介质，IOCTL_DISK_CHECK_VERIFY 失败（%lu），仍然重试", (unsigned long)GetLastError());
+            else
+                gk3w_log("磁盘要求确认介质（STATUS_VERIFY_REQUIRED，off=%llu），已确认，重做这次%s",
+                         (unsigned long long)off, write ? "写入" : "读取");
+            continue;
+        }
+        err = GetLastError();
+        Sleep(500 * attempt);
+        SetLastError(err);
+    }
+}
+
+int gk3w_pwrite(HANDLE h, const void *buf, DWORD len, uint64_t off)
+{
+    return io_retry(h, (void *)(uintptr_t)buf, len, off, 1);
 }
 
 int gk3w_pread(HANDLE h, void *buf, DWORD len, uint64_t off)
 {
-    OVERLAPPED ov;
-    DWORD got = 0;
-    memset(&ov, 0, sizeof ov);
-    ov.Offset = (DWORD)off;
-    ov.OffsetHigh = (DWORD)(off >> 32);
-    return ReadFile(h, buf, len, &got, &ov) && got == len ? 0 : -1;
+    return io_retry(h, buf, len, off, 0);
 }
 
 int gk3w_write_verify(HANDLE h, const void *buf, DWORD len, uint64_t off, void *chk)
