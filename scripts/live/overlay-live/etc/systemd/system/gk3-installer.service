@@ -7,7 +7,7 @@
 # 拿 DRM 与输入设备走 libseat → seatd（Wants/After seatd）。
 # 安装器崩了或被退出，cage 跟着退出，这里 2 秒后拉起来；tty2 始终有 getty 备用。
 [Unit]
-Description=gaokun3 图形安装器（cage）
+Description=gaokun3 graphical installer (cage)
 After=systemd-user-sessions.service seatd.service systemd-udev-settle.service gk3-wifi.service
 Wants=seatd.service
 Conflicts=getty@tty1.service

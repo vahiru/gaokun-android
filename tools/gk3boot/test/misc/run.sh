@@ -61,8 +61,8 @@ cmp -s <(tail -c +65537 "$W/a.img") <(python3 -c 'import sys; sys.stdout.buffer.
 printf '%s' "$OUT" | grep -qE '^MISCINIT slot=a default=none bcab=5f610000424341420102000' && printf '%s' "$OUT" | grep -q ' rest=nonzero ' \
     && ok "输出：$OUT" || bad "输出不对：$OUT"
 D=$("$T" dump "$W/a.img")
-printf '%s' "$D" | grep -q '_a priority=15 tries=6 successful=0' && printf '%s' "$D" | grep -q '_b priority=0 tries=0 successful=0 .*不可启动' \
-  && printf '%s' "$D" | grep -q 'GK3      有效  migrated=1 boot_streak=0' && printf '%s' "$D" | grep -q '#1 migrated slot=255 aux=1' \
+printf '%s' "$D" | grep -q '_a priority=15 tries=6 successful=0' && printf '%s' "$D" | grep -q '_b priority=0 tries=0 successful=0 .*-> unbootable' \
+  && printf '%s' "$D" | grep -q 'GK3      valid  migrated=1 boot_streak=0' && printf '%s' "$D" | grep -q '#1 migrated slot=255 aux=1' \
   && printf '%s' "$D" | grep -q 'set_default=none' \
     && ok "gk3-misc dump 读得回来：_a 15/6 未成功、_b 0/0 不可启动、已迁移、事件 migrated" || { bad "dump 不对"; printf '%s\n' "$D" | sed 's/^/      /'; }
 

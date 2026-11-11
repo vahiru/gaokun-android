@@ -27,6 +27,15 @@ VAR=$EFIVARS/LoaderEntryOneShot-$GUID
 ESP_TYPE=c12a7328-f81f-11d2-ba4b-00a0c93ec93b
 die() { echo "!! $*" >&2; exit 1; }
 say() { echo "$*" >&2; }
+usage() {
+    cat <<'EOF'
+Boot a given Android slot on the next boot only (writes LoaderEntryOneShot for systemd-boot).
+
+  gk3-boot-android [a|b] [--reboot]   set the one-shot entry (no slot: the slot of the loader.conf default)
+  gk3-boot-android --list             show the ESP, its entries, the default and the current one-shot entry
+  gk3-boot-android --clear            remove a one-shot entry written earlier
+EOF
+}
 
 SLOT= ACT=set REBOOT=
 for a in "$@"; do
@@ -35,8 +44,8 @@ for a in "$@"; do
         --reboot|-r) REBOOT=1 ;;
         --list|-l) ACT=list ;;
         --clear) ACT=clear ;;
-        -h|--help) sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-        *) die "不认识的参数：${a}（用法：gk3-boot-android [a|b] [--reboot] | --list | --clear）" ;;
+        -h|--help) usage; exit 0 ;;
+        *) die "unknown argument: ${a} (usage: gk3-boot-android [a|b] [--reboot] | --list | --clear)" ;;
     esac
 done
 
@@ -55,19 +64,19 @@ find_esp() {
         [ "$t" = "$ESP_TYPE" ] || [ "${GK3_ANY_FAT:-0}" = 1 ] || continue
         m=$(findmnt -rno TARGET -S "$dev" 2>/dev/null | head -1)
         if [ -n "$m" ]; then
-            ls "$m"/loader/entries/*-android-*.conf >/dev/null 2>&1 && { MNT=$m; say "ESP：${dev}（已挂在 ${m}）"; return 0; }
+            ls "$m"/loader/entries/*-android-*.conf >/dev/null 2>&1 && { MNT=$m; say "ESP: ${dev} (mounted at ${m})"; return 0; }
             continue
         fi
         m=$(mktemp -d /tmp/gk3-esp.XXXX)
         if mount -o ro -t vfat "$dev" "$m" 2>/dev/null; then
-            if ls "$m"/loader/entries/*-android-*.conf >/dev/null 2>&1; then MNT=$m; OWN=1; say "ESP：$dev"; return 0; fi
+            if ls "$m"/loader/entries/*-android-*.conf >/dev/null 2>&1; then MNT=$m; OWN=1; say "ESP: $dev"; return 0; fi
             umount "$m"
         fi
         rmdir "$m"
     done
     return 1
 }
-find_esp || die "找不到装着 Android 启动项的 ESP（FAT、EFI System 类型、loader/entries/ 下有 *-android-*.conf）"
+find_esp || die "no ESP with Android boot entries found (FAT, EFI System type, *-android-*.conf under loader/entries/)"
 ENT=$MNT/loader/entries
 
 # 直连条目：<32 位小写十六进制>-android-<槽>[+N[-M]].conf（与 postinstall 的 is_direct_entry、gk3boot.efi 的 direct_cb 同一规则，
@@ -93,50 +102,50 @@ efivars_ready() {
 
 case "$ACT" in
 list)
-    echo "── ESP 上的启动项（${ENT}）"
+    echo "-- boot entries on the ESP (${ENT})"
     ls "$ENT" 2>/dev/null | sed 's/^/  /'
-    echo "── loader.conf：$(grep -E '^default' "$MNT/loader/loader.conf" 2>/dev/null || echo '（没有 default 行）')"
-    for s in a b; do echo "── 槽 $s 的直连条目：$(direct_entries "$s" | tr '\n' ' ')"; done
-    echo "── 现在的 LoaderEntryOneShot：$(read_var || true)"
+    echo "-- loader.conf: $(grep -E '^default' "$MNT/loader/loader.conf" 2>/dev/null || echo '(no default line)')"
+    for s in a b; do echo "-- direct entries for slot $s: $(direct_entries "$s" | tr '\n' ' ')"; done
+    echo "-- current LoaderEntryOneShot: $(read_var || true)"
     exit 0 ;;
 clear)
-    efivars_ready || die "efivarfs 不可用（${EFIVARS}）"
-    [ -e "$VAR" ] || { echo "没有 OneShot，不用撤"; exit 0; }
+    efivars_ready || die "efivarfs is not available (${EFIVARS})"
+    [ -e "$VAR" ] || { echo "No one-shot entry is set; nothing to clear"; exit 0; }
     chattr -i "$VAR" 2>/dev/null; rm -f "$VAR"
-    [ -e "$VAR" ] && die "没撤掉 $VAR"
-    echo "✓ OneShot 已撤掉（下次开机照常走 default）"; exit 0 ;;
+    [ -e "$VAR" ] && die "could not remove $VAR"
+    echo "One-shot entry removed (the next boot uses the default entry)"; exit 0 ;;
 esac
 
 [ -n "$SLOT" ] || SLOT=$(default_slot)
-[ -n "$SLOT" ] || die "没给槽，loader.conf 里也读不出 default 是哪个槽 —— 用 gk3-boot-android a 或 b"
+[ -n "$SLOT" ] || die "no slot given and the default slot cannot be read from loader.conf; use gk3-boot-android a or b"
 # shellcheck disable=SC2207  # 文件名按上面的正则只含 [0-9a-f+.-] 与字母，不会被空白切开
 CAND=($(direct_entries "$SLOT"))
 case ${#CAND[@]} in
     1) ;;
-    0) die "ESP 上没有槽 $SLOT 的直连条目（<machine-id>-android-$SLOT.conf）。看一眼：gk3-boot-android --list" ;;
-    *) die "槽 $SLOT 的直连条目不止一个（${CAND[*]}）—— 不知道该进哪个。多出来的那个是以前装机留下的，改名成 .conf.disabled 再来" ;;
+    0) die "no direct entry for slot $SLOT on the ESP (<machine-id>-android-$SLOT.conf); see gk3-boot-android --list" ;;
+    *) die "more than one direct entry for slot $SLOT (${CAND[*]}); cannot tell which one to boot. The extra one is left over from an earlier installation: rename it to .conf.disabled and retry" ;;
 esac
 FILE=${CAND[0]}; ID=$(entry_id "$FILE")
 # 条目指的内核与 dtb 必须真在 ESP 上：不然写了 OneShot 也只是换一个起不来的开机
 for k in linux devicetree; do
     p=$(sed -n "s/^$k[[:space:]][[:space:]]*//p" "$ENT/$FILE" | head -1 | tr -d '\r' | sed 's/[[:space:]]*$//')
-    [ -n "$p" ] && [ -f "$MNT$p" ] || die "$FILE 的 $k 行指向 '${p}'，ESP 上没有这个文件 —— 这样开机会失败，不写"
+    [ -n "$p" ] && [ -f "$MNT$p" ] || die "the $k line of $FILE points to '${p}', which is not on the ESP; booting it would fail, not writing"
 done
 
-efivars_ready || die "efivarfs 不可用（${EFIVARS} 挂不上）—— 只能在开机菜单里手选 $FILE"
+efivars_ready || die "efivarfs is not available (cannot mount ${EFIVARS}); select $FILE in the boot menu instead"
 TMP=$(mktemp /tmp/gk3-oneshot.XXXX)
 { printf '\007\000\000\000'; for ((i = 0; i < ${#ID}; i++)); do printf '%s\000' "${ID:i:1}"; done; printf '\000\000'; } > "$TMP"
 [ -e "$VAR" ] && chattr -i "$VAR" 2>/dev/null
 # 一次 write 写完（efivarfs 要求整个变量一次写入；cat 对几十字节就是一次 write）
 cat "$TMP" > "$VAR" 2>/dev/null; rc=$?
 rm -f "$TMP"
-[ "$rc" = 0 ] || die "写 $VAR 失败 —— 只能在开机菜单里手选 $FILE"
+[ "$rc" = 0 ] || die "writing $VAR failed; select $FILE in the boot menu instead"
 GOT=$(read_var)
-[ "$GOT" = "$ID" ] || die "回读是 '${GOT}'，期望 '${ID}' —— OneShot 没写对，先别重启（gk3-boot-android --clear 撤掉）"
-echo "✓ 下一次开机进槽 ${SLOT}：LoaderEntryOneShot = ${ID}（回读一致；只管这一次，之后照常走 default）"
+[ "$GOT" = "$ID" ] || die "read back '${GOT}', expected '${ID}'; the one-shot entry is wrong, do not reboot yet (remove it with gk3-boot-android --clear)"
+echo "The next boot goes to slot ${SLOT}: LoaderEntryOneShot = ${ID} (read back OK; applies to that boot only, later boots use the default entry)"
 if [ -n "$REBOOT" ]; then
     cleanup; OWN=
     sync; systemctl reboot 2>/dev/null || reboot
 else
-    echo "  现在重启：reboot"
+    echo "  To reboot now: reboot"
 fi

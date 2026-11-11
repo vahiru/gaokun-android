@@ -40,17 +40,17 @@ mkesp b; rm -f "$W/efi/$VARN"; run
 mkesp a; mv "$W/esp/loader/entries/$MID-android-a.conf" "$W/esp/loader/entries/$MID-android-a+2-1.conf"; run a
 [ "$RC" = 0 ] && [ "$(got_bytes)" = "$(want_bytes "$MID-android-a.conf")" ] && ok "带启动计数的文件名（+2-1）：写去掉计数后的 ID（systemd-boot 按它匹配）" || bad "计数后缀处理不对（rc=${RC}）：$OUT"
 mkesp a; cp "$W/esp/loader/entries/$MID-android-a.conf" "$W/esp/loader/entries/fedcba9876543210fedcba9876543210-android-a.conf"; rm -f "$W/efi/$VARN"; run a
-[ "$RC" != 0 ] && echo "$OUT" | grep -q '不止一个' && [ ! -e "$W/efi/$VARN" ] && ok "同一个槽两个直连条目：拒绝、不写" || bad "重复条目没拒绝（rc=${RC}）"
+[ "$RC" != 0 ] && echo "$OUT" | grep -q 'more than one direct entry for slot a' && [ ! -e "$W/efi/$VARN" ] && ok "同一个槽两个直连条目：拒绝、不写" || bad "重复条目没拒绝（rc=${RC}）"
 mv "$W/esp/loader/entries/fedcba9876543210fedcba9876543210-android-a.conf" "$W/esp/loader/entries/fedcba9876543210fedcba9876543210-android-a.conf.disabled"; run a
 [ "$RC" = 0 ] && ok "另一个改名成 .conf.disabled 之后：放行" || bad ".disabled 没被忽略（rc=${RC}）：$OUT"
 mkesp a; rm -f "$W/esp/loader/entries/$MID-android-b.conf" "$W/efi/$VARN"; run b
-[ "$RC" != 0 ] && echo "$OUT" | grep -q '没有槽 b 的直连条目' && [ ! -e "$W/efi/$VARN" ] && ok "槽 b 没有直连条目（只有 gk3boot-android-b.conf）：拒绝、不写" || bad "缺条目没拒绝（rc=${RC}）"
+[ "$RC" != 0 ] && echo "$OUT" | grep -q 'no direct entry for slot b' && [ ! -e "$W/efi/$VARN" ] && ok "槽 b 没有直连条目（只有 gk3boot-android-b.conf）：拒绝、不写" || bad "缺条目没拒绝（rc=${RC}）"
 mkesp a; rm -f "$W/esp/$MID/android/slot_b/Image"; run b
-[ "$RC" != 0 ] && echo "$OUT" | grep -q 'ESP 上没有这个文件' && [ ! -e "$W/efi/$VARN" ] && ok "条目指的内核不在 ESP 上：拒绝、不写" || bad "缺内核没拒绝（rc=${RC}）"
+[ "$RC" != 0 ] && echo "$OUT" | grep -q 'which is not on the ESP' && [ ! -e "$W/efi/$VARN" ] && ok "条目指的内核不在 ESP 上：拒绝、不写" || bad "缺内核没拒绝（rc=${RC}）"
 mkesp a; run a; run --clear
 [ "$RC" = 0 ] && [ ! -e "$W/efi/$VARN" ] && ok "--clear 撤掉 OneShot" || bad "--clear 不对（rc=${RC}）"
 run --list
-[ "$RC" = 0 ] && echo "$OUT" | grep -q "槽 a 的直连条目：$MID-android-a.conf" && ok "--list 列出两个槽的直连条目" || bad "--list 不对：$OUT"
+[ "$RC" = 0 ] && echo "$OUT" | grep -q "direct entries for slot a: $MID-android-a.conf" && ok "--list 列出两个槽的直连条目" || bad "--list 不对：$OUT"
 run c
 [ "$RC" != 0 ] && ok "不认识的参数：拒绝" || bad "坏参数没拒绝"
 

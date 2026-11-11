@@ -1,6 +1,6 @@
 # 把启动诊断写回启动介质（没有串口的机器上，救援系统必须自己留证据）。逻辑与理由见脚本。
 [Unit]
-Description=gaokun3 启动诊断写回启动介质
+Description=gaokun3 boot diagnostics to the boot medium
 After=gk3-wifi.service ssh.service
 
 [Service]
