@@ -2,7 +2,7 @@
 
 在已经启动的Windows里把Android装到系统盘的空闲空间上，不需要U盘与LiveCD。界面是Flutter，写盘由C后端`gk3w.exe`（[../backend](../backend/)）完成；两者之间是与LiveCD相同的行协议（[../common](../common/README.md)）。
 
-ARM64版（平板）由GitHub Actions构建（`.github/workflows/installer-windows.yml`，产物是可以直接运行的程序目录）；x64版只用于在PC上对着VHD测试，在本地构建（`flutter build windows`）。
+ARM64版（平板）由GitHub Actions构建（`.github/workflows/installer-windows.yml`）：推送`windows-installer-vX.Y.Z`标签时做发布构建，版本号取自标签，打包后建一个草稿Release（发布时不要设为最新版本，Latest留给ROM的Release）；也可以在Actions页面手动运行，产物是可以直接运行的程序目录。x64版只用于在PC上对着VHD测试，在本地构建（`flutter build windows`）。
 
 ## 后端
 

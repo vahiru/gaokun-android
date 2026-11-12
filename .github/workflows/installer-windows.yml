@@ -2,6 +2,11 @@
 # 产物是可以直接运行的程序目录（gk3_windows.exe + backend\ 里的 gk3w、mke2fs、systemd-boot），作为 Actions 的工件下载。
 # x64 版只在 PC 上对着 VHD 测试时用，本地构建（installer/windows/README.md）；以后要在别的电脑上制作安装介质时再加回来。
 #
+# 什么时候跑（用户 11-12：进上游之后不随每次推送跑）：
+#   - 推送 windows-installer-vX.Y.Z[-pre] 标签：发布构建。版本号取自标签（界面上显示的、exe 的版本资源），
+#     打包成 zip 建一个【草稿】Release，维护者改好说明再发布。发布时不要设为最新版本（Latest 要留给 ROM 的 Release）
+#   - 手动（Actions 页面的 Run workflow，可选分支）：测试构建，版本号显示为 dev-<提交>，产物是 Actions 的工件
+#
 # 版本都钉死：llvm-mingw 按 GitHub 给的 sha256，Flutter 与仓库里的 pubspec 相同（3.47.2），actions 按提交；
 # mke2fs、systemd-boot、字体由各自的脚本按 sha256 下载（installer/backend/mke2fs/build.sh、sdboot/fetch.sh、
 # installer/common/tool/fetch-fonts.py）。
@@ -9,11 +14,8 @@ name: Windows installer
 
 on:
   push:
-    paths:
-      - 'installer/**'
-      - 'tools/gk3boot/core/**'
-      - 'patches/e2fsprogs/**'
-      - '.github/workflows/installer-windows.yml'
+    tags:
+      - 'windows-installer-v*'
   workflow_dispatch:
 
 permissions:
@@ -31,7 +33,27 @@ jobs:
   backend:
     name: gk3w + mke2fs + systemd-boot
     runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      build_name: ${{ steps.version.outputs.build_name }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
     steps:
+      - name: version
+        id: version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/windows-installer-v* ]]; then
+            v=${GITHUB_REF#refs/tags/windows-installer-v}
+            [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] \
+              || { echo "::error::the tag must look like windows-installer-v1.2.3 or windows-installer-v1.2.3-rc.1"; exit 1; }
+            # exe 的版本资源只认 X.Y.Z：预发布的后缀只进界面上显示的版本号
+            echo "version=$v" >> "$GITHUB_OUTPUT"
+            echo "build_name=${v%%-*}" >> "$GITHUB_OUTPUT"
+            [[ "$v" == *-* ]] && echo "prerelease=yes" >> "$GITHUB_OUTPUT" || echo "prerelease=no" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=dev-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+            echo "build_name=" >> "$GITHUB_OUTPUT"
+            echo "prerelease=no" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: llvm-mingw
         run: |
@@ -96,11 +118,17 @@ jobs:
       - name: build
         shell: pwsh
         working-directory: installer/windows
+        env:
+          GK3_VERSION: ${{ needs.backend.outputs.version }}
+          GK3_BUILD_NAME: ${{ needs.backend.outputs.build_name }}
         run: |
           flutter --disable-analytics
           flutter config --enable-windows-desktop
           flutter pub get
-          flutter build windows --release
+          # 界面上显示的版本号（lib/app.dart 的 kAppVersion）；发布构建另把 X.Y.Z 写进 exe 的版本资源
+          $a = @('build', 'windows', '--release', "--dart-define=GK3_VERSION=$env:GK3_VERSION")
+          if ($env:GK3_BUILD_NAME) { $a += "--build-name=$env:GK3_BUILD_NAME" }
+          flutter @a
       - name: check the bundle
         shell: pwsh
         run: |
@@ -120,3 +148,33 @@ jobs:
           name: gaokun-android-installer-windows-arm64
           if-no-files-found: error
           path: installer/windows/build/windows/arm64/runner/Release/
+
+  release:
+    name: draft release
+    if: startsWith(github.ref, 'refs/tags/windows-installer-v')
+    needs: [backend, test, app]
+    runs-on: ubuntu-24.04
+    # 只有这个任务要写：建草稿 Release、上传附件
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: gaokun-android-installer-windows-arm64
+          path: app
+      - name: draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VER: ${{ needs.backend.outputs.version }}
+          PRE: ${{ needs.backend.outputs.prerelease }}
+        run: |
+          # 文件名与 LiveCD 的 gaokun3-installer-<版本>-windows.zip 分开（安装器按那个名字认 LiveCD）
+          name="gaokun-android-windows-installer-$VER-arm64"
+          mv app "$name"
+          zip -qr "$name.zip" "$name"
+          sha256sum "$name.zip" > "$name.zip.sha256"
+          flags=(--draft --latest=false --verify-tag)
+          [ "$PRE" = yes ] && flags+=(--prerelease)
+          gh release create "$GITHUB_REF_NAME" "$name.zip" "$name.zip.sha256" -R "$GITHUB_REPOSITORY" "${flags[@]}" \
+            --title "Windows installer $VER" \
+            --notes "Draft created by CI from $GITHUB_REF_NAME ($GITHUB_SHA). Replace these notes, then publish it without setting it as the latest release: Latest stays with the ROM release."

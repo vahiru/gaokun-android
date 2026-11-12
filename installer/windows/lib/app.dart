@@ -10,7 +10,9 @@ import 'ui/check_page.dart';
 import 'ui/title_bar.dart';
 import 'ui/media_pages.dart';
 
-const kAppVersion = '0.1.0-proto';
+/// 界面上显示的版本号：发布构建由 CI 从 windows-installer-vX.Y.Z 标签传入（--dart-define=GK3_VERSION），
+/// 手动构建是 dev-<提交>，本地构建是 dev
+const kAppVersion = String.fromEnvironment('GK3_VERSION', defaultValue: 'dev');
 
 /// MaterialApp 的导航器：原生转来的关闭请求（下载中途按 Alt+F4）要在这里弹确认框
 final kNavigatorKey = GlobalKey<NavigatorState>();
