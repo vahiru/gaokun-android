@@ -176,7 +176,7 @@
   "releaseLoading": "正在获取版本列表……",
   "releaseNone": "无法获取版本列表，请检查网络连接后重试。",
   "releaseLatest": "最新版本",
-  "releaseNote": "下载的文件暂存在C:\\ProgramData\\gaokun3目录中，安装完成后将自动删除。",
+  "releaseNote": "下载的文件保存在“下载”文件夹的Gaokun Android目录中，安装完成后可选择删除。",
   "optionsTitle": "选择默认启动系统",
   "optionsSub": "开机时将显示启动菜单，倒计时结束后自动进入默认系统。安装完成后也可随时在Android系统设置中更改。",
   "optDefaultAndroid": "Android",
@@ -359,7 +359,7 @@
     }
   },
   "releasePre": "预发布版",
-  "releaseNoteR2": "R2镜像源仅提供最新版本。下载的文件暂存在C:\\ProgramData\\gaokun3目录中，安装完成后将自动删除。",
+  "releaseNoteR2": "R2镜像源仅提供最新版本。下载的文件保存在“下载”文件夹的Gaokun Android目录中，安装完成后可选择删除。",
   "localDirLabel": "安装文件所在目录",
   "localNeed": "该目录中需包含以下文件：",
   "localBoot": "boot.img",
@@ -553,5 +553,13 @@
   "quitDownloadContinue": "继续下载",
   "quitDownloadExit": "退出",
   "winMaximize": "最大化",
-  "winRestore": "向下还原"
+  "winRestore": "向下还原",
+  "doneDeleteDownloads": "退出时删除下载的安装文件（{size}）",
+  "@doneDeleteDownloads": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
+  }
 }

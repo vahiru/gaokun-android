@@ -239,6 +239,40 @@ class Session extends ChangeNotifier {
   /// 正在下载：这时关闭窗口先问一句，确认后停止下载、删掉已下载的文件（[cancelDownload]）
   bool downloading = false;
 
+  /// 当前用户的"下载"文件夹（Windows 的已知文件夹，由 main.dart 接到原生上）；null = 拿不到，用 [_releaseDir] 传进来的
+  Future<String?> Function()? downloadsDir;
+
+  /// 删掉一个下载目录里的安装文件。回放演示数据时什么都不删（录制里的目录是开发机上真实的下载目录）；
+  /// 测试里换成记录调用的
+  late void Function(String dir) deleteFiles = backend.demoLabel == null ? deleteDownloadedRelease : (_) {};
+
+  /// 这次安装下载的文件所在的目录（装好之后由用户决定退出时删不删：[deleteOnExit]）
+  String? downloadedDir;
+
+  /// 完成页上"退出时删除下载的安装文件"（默认不删：文件在用户自己的"下载"文件夹里，以后重装可以直接用）
+  bool deleteOnExit = false;
+  void setDeleteOnExit(bool v) {
+    deleteOnExit = v;
+    notifyListeners();
+  }
+
+  /// 退出（关闭窗口、立即重启）之前要做的：勾了"删除"就删掉下载的安装文件
+  bool get exitCleanupPending => deleteOnExit && downloadedDir != null;
+  void runExitCleanup() {
+    final d = downloadedDir;
+    if (deleteOnExit && d != null) deleteFiles(d);
+    downloadedDir = null;
+  }
+
+  /// 下载到哪：当前用户"下载"文件夹下的 Gaokun Android\<版本>\（用户看得到，以后可以在"本地文件"里直接选这个目录；
+  /// 用户 11-12）。拿不到"下载"文件夹时用调用方给的目录
+  Future<String> _releaseDir(String fallback) async {
+    final base = await downloadsDir?.call();
+    if (base == null || base.isEmpty) return fallback;
+    final id = variant!.id.replaceAll(RegExp(r'[<>:"/\\|?*\x00-\x1f]'), '_');
+    return '$base\\Gaokun Android\\$id';
+  }
+
   /// 下载那次调用的订阅与结果（[cancelDownload] 取消它）
   StreamSubscription<Gk3Event>? _dlSub;
   Completer<CallResult>? _dlDone;
@@ -254,7 +288,7 @@ class Session extends ChangeNotifier {
     if (!done.isCompleted) {
       done.complete(const CallResult([Gk3Record('ERR', {'code': 'cancelled'})], [Gk3Log('!! download cancelled')], 130));
     }
-    if (backend.demoLabel == null) deleteDownloadedRelease(_dlDir);
+    deleteFiles(_dlDir);
   }
 
   /// 订阅一次下载，收集结果（同 Gk3Backend.run，只是留着订阅，可以取消）
@@ -391,7 +425,7 @@ class Session extends ChangeNotifier {
         notifyListeners();
         final CallResult dl;
         try {
-          dl = await _download([variant!.base, releaseDir]);
+          dl = await _download([variant!.base, await _releaseDir(releaseDir)]);
         } finally {
           downloading = false;
           _dlSub = null;
@@ -405,9 +439,11 @@ class Session extends ChangeNotifier {
       final (fn, args) = command(dir);
       await _startDiskWrite();
       result = await backend.run(fn, args, (e) => _onEvent(e, base: local ? 0 : 40, span: local ? 100 : 60));
-      // 装好了：下载的 1.3 GiB 没有用了，删掉（本地文件是用户自己的，不动；失败时留着，下次续传）。
-      // 回放演示数据时不删：录制里的目录是开发机上真实的下载目录
-      if (result!.ok && t == WriteTask.install && !local && backend.demoLabel == null) deleteDownloadedRelease(dir);
+      // 装好了：下载的文件删不删由用户在完成页上选（退出时删）；本地文件是用户自己的，不动；失败时留着，下次续传
+      if (result!.ok && t == WriteTask.install && !local) {
+        downloadedDir = dir;
+        deleteOnExit = false;
+      }
     } catch (e) {
       result = _crashed(e);
     } finally {

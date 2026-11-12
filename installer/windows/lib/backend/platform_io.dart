@@ -31,15 +31,23 @@ List<String> missingReleaseFiles(String dir) {
   return [for (final f in const ['boot.img', 'super.img.zst']) if (!File('$dir\\$f').existsSync()) f];
 }
 
-/// 安装成功之后删掉下载的安装文件（只删我们下载的那几个，不删目录本身；删不掉就算了）
+/// 删掉一个下载目录里的安装文件（只删我们下载的那几个；删不掉就算了）。目录空了就连目录一起删，
+/// 它的上一级（"下载"里的 Gaokun Android）空了也删 —— 用户自己放进去的东西不动
 void deleteDownloadedRelease(String dir) {
-  if (!Platform.isWindows) return;
+  if (!Platform.isWindows || dir.isEmpty) return;
   for (final f in const ['boot.img', 'super.img.zst', 'install-artifacts.sha256', 'boot.img.part', 'super.img.zst.part']) {
     try {
       final x = File('$dir\\$f');
       if (x.existsSync()) x.deleteSync();
     } on FileSystemException {
       // 留着也不影响什么
+    }
+  }
+  for (final d in [Directory(dir), Directory(dir).parent]) {
+    try {
+      if (d.existsSync() && d.listSync().isEmpty && d.path.contains('Gaokun Android')) d.deleteSync();
+    } on FileSystemException {
+      // 同上
     }
   }
 }

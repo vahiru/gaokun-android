@@ -55,7 +55,7 @@ class WindowControl {
   /// [busy]（gk3w 写盘期间）：原生窗口拒绝关闭，阻止关机（Windows 显示 [shutdown] 作为原因）。
   /// [awake]（整个任务期间，含下载）：电源请求阻止系统因空闲进入睡眠、保持屏幕开启（[power] 是 powercfg /requests
   /// 中显示的原因）—— 这台是现代待机设备，熄屏后桌面程序会被挂起，下载会停住。结束后撤销
-  /// [confirmClose]（下载期间）：关闭窗口先问一句（原生发 closeRequested，界面确认后 [forceClose]）
+  /// [confirmClose]（下载期间，或退出前要删下载的文件）：关闭窗口先交给界面（原生发 closeRequested，界面处理完 [forceClose]）
   static void setBusy(bool busy, {bool awake = false, bool confirmClose = false, String power = '', String shutdown = ''}) {
     final state = (busy, awake || busy, confirmClose);
     if (_busy == state) return;
@@ -72,6 +72,9 @@ class WindowControl {
     await WidgetsBinding.instance.endOfFrame;
     await _pending;
   }
+
+  /// 当前用户的"下载"文件夹（Windows 的已知文件夹）；没有原生窗口时为 null
+  static Future<String?> downloadsDir() => _call<String>('downloadsDir');
 
   /// 系统的"选择文件夹"对话框（IFileOpenDialog）；取消或没有原生窗口时为 null
   static Future<String?> pickFolder({String? title}) => _call<String>('pickFolder', title);
@@ -110,10 +113,16 @@ class _CaptionReporterState extends State<_CaptionReporter> {
   Widget build(BuildContext context) => const SizedBox.expand();
 }
 
-/// 下载中途关闭窗口（自绘的关闭键，或原生转来的 Alt+F4 / 任务栏关闭）：先问；确认退出就停止下载、删掉已下载的文件
-/// （下载阶段还没有动盘，只有这些文件要撤回），再关窗口。用户 11-12：直接关掉不对，一定要退出就先撤回再退出
-Future<void> confirmQuitDuringDownload(BuildContext context, Session s) async {
-  if (!s.downloading) return WindowControl.close();
+/// 关闭窗口（自绘的关闭键，或原生转来的 Alt+F4 / 任务栏关闭）：
+/// - 下载中途：先问；确认退出就停止下载、删掉已下载的文件（下载阶段还没有动盘，只有这些文件要撤回），再关窗口。
+///   用户 11-12：直接关掉不对，一定要退出就先撤回再退出
+/// - 装好之后在完成页勾了"退出时删除下载的安装文件"：先删，再关
+Future<void> handleCloseRequest(BuildContext context, Session s) async {
+  if (!s.downloading) {
+    if (!s.exitCleanupPending) return WindowControl.close();
+    s.runExitCleanup();
+    return WindowControl.forceClose();
+  }
   // 关闭键在 MaterialApp 的 builder 里、Navigator 的外面：弹框要用导航器自己的 context
   final ctx = kNavigatorKey.currentContext;
   if (ctx == null) return;
@@ -140,7 +149,7 @@ Future<void> confirmQuitDuringDownload(BuildContext context, Session s) async {
 }
 
 /// 右上角的最小化、最大化与关闭（Windows 11 的尺寸；关闭键悬停是 #C42B1C 底、白字）。
-/// gk3w 写盘时关闭键禁用；下载期间按关闭先问（[confirmQuitDuringDownload]）
+/// gk3w 写盘时关闭键禁用；下载期间按关闭先问（[handleCloseRequest]）
 class WindowButtons extends StatelessWidget {
   const WindowButtons({super.key});
   static const width = 3 * _CaptionButton.width;
@@ -151,7 +160,7 @@ class WindowButtons extends StatelessWidget {
     WindowControl.setBusy(
       s.diskBusy,
       awake: s.writing,
-      confirmClose: s.downloading,
+      confirmClose: s.downloading || s.exitCleanupPending,
       power: runTitle(l, s.task),
       shutdown: switch (s.task) {
         WriteTask.install => l.shutdownReasonInstall,
@@ -174,7 +183,7 @@ class WindowButtons extends StatelessWidget {
         icon: Icons.close,
         label: context.l.winClose,
         danger: true,
-        onPressed: s.diskBusy ? null : () => confirmQuitDuringDownload(context, s),
+        onPressed: s.diskBusy ? null : () => handleCloseRequest(context, s),
       ),
     ]);
   }

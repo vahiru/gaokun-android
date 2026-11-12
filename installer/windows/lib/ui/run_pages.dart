@@ -113,13 +113,32 @@ class DonePage extends StatelessWidget {
         const Spacer(),
         usb
             ? Btn(l.btnStartOver, icon: Icons.home_outlined, onPressed: () => restart(context))
-            : Btn(l.btnRebootNow, icon: Icons.restart_alt, onPressed: () => s.backend.reboot()),
+            : Btn(l.btnRebootNow, icon: Icons.restart_alt, onPressed: () {
+                // 立即重启也是退出：勾了"删除下载的安装文件"就先删
+                s.runExitCleanup();
+                s.backend.reboot();
+              }),
       ]),
       child: ListView(children: switch (task) {
         WriteTask.install => [
             Bullet(l.doneInstallMenu, icon: Icons.menu_open),
             Bullet(l.doneInstallFirstBoot, icon: Icons.hourglass_bottom),
             Bullet(l.doneInstallWindows, icon: Icons.window),
+            // 下载的安装文件在用户的"下载"文件夹里：退出时删不删由用户选（用户 11-12），默认留着
+            if (s.downloadedDir != null) ...[
+              const SizedBox(height: 16),
+              Material(
+                type: MaterialType.transparency,
+                child: CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  value: s.deleteOnExit,
+                  onChanged: (v) => s.setDeleteOnExit(v ?? false),
+                  title: Text(l.doneDeleteDownloads(fmtMib(s.variant?.sizeMib ?? 0)), style: context.tt.bodyLarge),
+                  subtitle: Text(s.downloadedDir!, style: context.tt.bodySmall),
+                ),
+              ),
+            ],
           ],
         WriteTask.uninstall => [
             Bullet(l.doneUninstallExtend, icon: Icons.open_in_full),

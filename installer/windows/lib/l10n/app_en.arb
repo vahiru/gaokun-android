@@ -65,7 +65,7 @@
   "releaseLoading": "Fetching release list…",
   "releaseNone": "Unable to fetch the release list. Please check your network connection and try again.",
   "releaseLatest": "Latest",
-  "releaseNote": "Downloaded files are kept in C:\\ProgramData\\gaokun3 temporarily and are deleted automatically after installation.",
+  "releaseNote": "Downloaded files are saved in the Gaokun Android folder in your Downloads folder; you can choose to delete them after installation.",
   "optionsTitle": "Select default operating system",
   "optionsSub": "A boot menu will be shown at startup, and the default operating system will boot automatically once the countdown finishes. You can also change this later at any time in Android Settings.",
   "optDefaultAndroid": "Android",
@@ -153,7 +153,7 @@
   "srcLocal": "Local files",
   "releaseMeta": "Released {date} · Download size: {size}",
   "releasePre": "Pre-release",
-  "releaseNoteR2": "The R2 mirror only provides the latest release. Downloaded files are kept in C:\\ProgramData\\gaokun3 temporarily and are deleted automatically after installation.",
+  "releaseNoteR2": "The R2 mirror only provides the latest release. Downloaded files are saved in the Gaokun Android folder in your Downloads folder; you can choose to delete them after installation.",
   "localDirLabel": "Directory containing installation files",
   "localNeed": "This directory must contain the following files:",
   "localBoot": "boot.img",
@@ -340,5 +340,13 @@
   "quitDownloadContinue": "Continue downloading",
   "quitDownloadExit": "Exit",
   "winMaximize": "Maximize",
-  "winRestore": "Restore Down"
+  "winRestore": "Restore Down",
+  "doneDeleteDownloads": "Delete the downloaded installation files ({size}) when exiting",
+  "@doneDeleteDownloads": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
+  }
 }

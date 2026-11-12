@@ -7,6 +7,7 @@
 #include <variant>
 
 #include <flutter/standard_method_codec.h>
+#include <shlobj.h>
 #include <shobjidl.h>
 
 #include "flutter/generated_plugin_registrant.h"
@@ -124,6 +125,21 @@ bool FlutterWindow::OnCreate() {
           // 把这次按下交给 Windows 当作拖动标题栏（系统的移动循环接管鼠标，松开时结束）
           ReleaseCapture();
           SendMessage(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0);
+        } else if (m == "downloadsDir") {
+          // 当前用户的"下载"文件夹（已知文件夹：用户把它挪到别的盘时也对，不拼 %USERPROFILE%\Downloads）。
+          // 下载的安装文件放在它下面的 Gaokun Android\<版本>\（lib/session.dart 的 Session.downloadsDir）
+          PWSTR path = nullptr;
+          std::string out;
+          if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Downloads, KF_FLAG_DEFAULT, nullptr, &path)) && path != nullptr) {
+            out = Utf8FromUtf16(path);
+          }
+          CoTaskMemFree(path);
+          if (out.empty()) {
+            result->Success();
+          } else {
+            result->Success(flutter::EncodableValue(out));
+          }
+          return;
         } else if (m == "pickFolder") {
           const auto* t = std::get_if<std::string>(call.arguments());
           std::string path = PickFolder(hwnd, t ? *t : std::string());

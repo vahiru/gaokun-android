@@ -411,6 +411,63 @@ void main() {
   });
 
 
+  testWidgets('下载到"下载"文件夹的 Gaokun Android\\<版本>；装好后勾选"退出时删除"，关闭窗口时先删再关', (t) async {
+    final window = <MethodCall>[];
+    t.binding.defaultBinaryMessenger.setMockMethodCallHandler(const MethodChannel('gk3/window'), (c) async {
+      window.add(c);
+      return null;
+    });
+    addTearDown(() => t.binding.defaultBinaryMessenger.setMockMethodCallHandler(const MethodChannel('gk3/window'), null));
+    final (rec, s) = await pumpApp(t, 'free');
+    final deleted = <String>[];
+    s
+      ..downloadsDir = (() async => r'D:\Users\me\Downloads')
+      ..deleteFiles = deleted.add;
+    for (var i = 0; i < 4; i++) {
+      await tap(t, find.text(l.btnNext));
+    }
+    await hold(t, l.holdToInstall);
+    await waitFor(t, find.byType(DonePage), tries: 400);
+    expect(rec.calls.singleWhere((c) => c.first == 'download').last, r'D:\Users\me\Downloads\Gaokun Android\v1.0.0-rc.3');
+    // 默认不删
+    final box = find.text(l.doneDeleteDownloads('1.3 GiB'));
+    await see(t, box);
+    expect(s.deleteOnExit, isFalse);
+    await tap(t, box);
+    expect(s.deleteOnExit, isTrue);
+    expect([for (final c in window) if (c.method == 'setBusy') c.arguments as Map].last, containsPair('confirmClose', true));
+    // "稍后重启"回到首页：还没退出，不删
+    await tap(t, find.text(l.btnLater));
+    expect(deleted, isEmpty);
+    // 关闭窗口：先删，再关
+    await tap(t, find.bySemanticsLabel(l.winClose));
+    // 删的是下载报告的 RELEASE 目录（真后端就是传进去的那个；回放数据里是录制时的目录）
+    expect(deleted, [r'C:\ProgramData\gaokun3\release']);
+    expect(window.where((c) => c.method == 'forceClose'), hasLength(1));
+  });
+
+  testWidgets('装好后不勾选：关闭窗口时什么都不删，直接关', (t) async {
+    final window = <MethodCall>[];
+    t.binding.defaultBinaryMessenger.setMockMethodCallHandler(const MethodChannel('gk3/window'), (c) async {
+      window.add(c);
+      return null;
+    });
+    addTearDown(() => t.binding.defaultBinaryMessenger.setMockMethodCallHandler(const MethodChannel('gk3/window'), null));
+    final (_, s) = await pumpApp(t, 'free');
+    final deleted = <String>[];
+    s.deleteFiles = deleted.add;
+    for (var i = 0; i < 4; i++) {
+      await tap(t, find.text(l.btnNext));
+    }
+    await hold(t, l.holdToInstall);
+    await waitFor(t, find.byType(DonePage), tries: 400);
+    await tap(t, find.bySemanticsLabel(l.winClose));
+    expect(deleted, isEmpty);
+    expect(window.where((c) => c.method == 'close'), hasLength(1));
+    expect(window.where((c) => c.method == 'forceClose'), isEmpty);
+  });
+
+
   testWidgets('英文界面：检查页上没有中文', (t) async {
     await pumpApp(t, 'blocked', language: 'en');
     await see(t, find.text(en.chkModelBad));

@@ -332,5 +332,5 @@ class ConfirmPage extends StatelessWidget {
   }
 }
 
-/// 下载的发布文件放在这里（真后端接上时由它决定；演示数据里只是回显）
+/// 拿不到当前用户的"下载"文件夹时，下载的安装文件放在这里（平时放在"下载"\Gaokun Android\<版本>\：Session._releaseDir）
 const kReleaseDir = r'C:\ProgramData\gaokun3\release';
