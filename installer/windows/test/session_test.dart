@@ -160,6 +160,11 @@ void main() {
     expect(k(r'\$Mft::$DATA'), ShrinkBlocker.ntfsMeta);
     expect(k(r'\$LogFile::$DATA'), ShrinkBlocker.ntfsMeta);
     expect(k(r'\MEMORY.DMP::$DATA'), ShrinkBlocker.memoryDump);
+    expect(k(r'\Windows\MEMORY.DMP::$DATA'), ShrinkBlocker.memoryDump);
+    expect(k(r'\$Extend\$ObjId:$O:$INDEX_ALLOCATION'), ShrinkBlocker.ntfsMeta);
+    // 以 $ 开头的普通目录不是 NTFS 元数据
+    expect(k(r'\$Recycle.Bin\S-1-5-21-1\$R0ABC12.vhdx::$DATA'), ShrinkBlocker.other);
+    expect(k(r'\$WINDOWS.~BT\Sources\install.esd::$DATA'), ShrinkBlocker.other);
     expect(k(r'\Windows\Minidump\111225-1.dmp::$DATA'), ShrinkBlocker.memoryDump);
     expect(k(r'\Users\a\big.vhdx::$DATA'), ShrinkBlocker.other);
     final i = ShrinkInfo(const Gk3Record('SHRINK', {'drive': 'C:', 'max_shrink_mib': '2528', 'file': r'\pagefile.sys::$DATA'}));

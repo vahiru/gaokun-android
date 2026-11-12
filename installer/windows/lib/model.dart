@@ -49,6 +49,16 @@ class ShrinkInfo {
   String get drive => r['drive'];
   int get maxShrinkMib => r.intOf('max_shrink_mib');
 
+  /// C 盘之后紧挨着的未分配空间：压缩出来的空间与它连成一片
+  int get adjacentMib => r.intOf('adjacent_mib');
+
+  /// 压缩 C 盘最多能得到的连续未分配空间
+  int get totalMib => maxShrinkMib + adjacentMib;
+  int get freeMib => r.intOf('free_mib');
+
+  /// 压缩停在已用空间上（C 盘太满），而不是停在事件里的那个文件上
+  bool get limitedBySpace => r['limit'] == 'space';
+
   /// 最后一个不可移动的文件（卷内路径，去掉了 ::$DATA 之类的流名）；没找到为 null
   String? get file {
     final f = r['file'];
@@ -73,8 +83,13 @@ ShrinkBlocker classifyShrinkBlocker(String path) {
   // 卷影副本（还原点）的差异文件：{GUID}{3808876b-c176-4e48-b7ae-04046e6cc752}
   if (p.startsWith(svi) && p.contains('{3808876b-c176-4e48-b7ae-04046e6cc752}')) return ShrinkBlocker.restorePoint;
   if (p.startsWith(r'\$extend\$usnjrnl')) return ShrinkBlocker.usnJournal;
-  if (p.startsWith(r'\$')) return ShrinkBlocker.ntfsMeta;
-  if (p == r'\memory.dmp' || p.startsWith(r'\windows\minidump\') || p.startsWith(r'\windows\livekernelreports\')) {
+  // NTFS 的元数据：根目录下以 $ 开头的单个文件（$Mft、$LogFile、$Bitmap …）或 $Extend 里的；
+  // \$Recycle.Bin\…、\$WINDOWS.~BT\… 这类以 $ 开头的普通目录不算
+  if (RegExp(r'^\\\$[^\\]+$').hasMatch(p) || p.startsWith(r'\$extend\')) return ShrinkBlocker.ntfsMeta;
+  if (p == r'\memory.dmp' ||
+      p == r'\windows\memory.dmp' ||
+      p.startsWith(r'\windows\minidump\') ||
+      p.startsWith(r'\windows\livekernelreports\')) {
     return ShrinkBlocker.memoryDump;
   }
   return ShrinkBlocker.other;

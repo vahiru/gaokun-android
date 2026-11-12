@@ -37,8 +37,9 @@ class CheckPage extends StatelessWidget {
           state: CheckState.fail,
           title: l.chkNoRoom(fmtMib(s.minNeedMib)),
           detail: '${biggest == 0 ? l.chkNoRoomNone : l.chkNoRoomBiggest(fmtMib(biggest))}\n${l.chkNoRoomHow(fmtMib(s.minNeedMib))}',
-          // C 盘压缩不出足够的空间时，查是哪个文件挡住了、怎么处理（结果在这一行下面：ShrinkGuide）
-          trailing: const ShrinkAnalyzeButton(),
+          // C 盘压缩不出足够的空间时，查是哪个文件挡住了、怎么处理（结果在这一行下面：ShrinkGuide）。
+          // 测试模式装到 VHD 上，分析这台电脑的 C 盘没有意义
+          trailing: s.testMode ? null : const ShrinkAnalyzeButton(),
         ));
         blocked = true;
       } else {
@@ -66,7 +67,7 @@ class CheckPage extends StatelessWidget {
             )
           : ListView(children: [
               ...rows,
-              if (!s.checking && d != null && !s.installed && !s.hasRoom) const ShrinkGuide(),
+              if (!s.checking && d != null && !s.installed && !s.hasRoom && !s.testMode) const ShrinkGuide(),
               if (suspendFirst) ...[
                 const SizedBox(height: 12),
                 BitlockerKeyBox(text: l.chkBitlockerSuspendBox, suspendReboots: 2),

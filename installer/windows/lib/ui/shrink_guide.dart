@@ -40,11 +40,14 @@ class ShrinkGuide extends StatelessWidget {
     } else if (err != null) {
       body = NoteBox(warn: true, text: '${l.shrinkFailed}${errText(l, err)}');
     } else if (info != null) {
-      final max = fmtMib(info.maxShrinkMib), need = fmtMib(s.minNeedMib);
+      // 压缩出来的空间与 C 盘之后已有的未分配空间连成一片，按两者之和比较
+      final max = fmtMib(info.totalMib), need = fmtMib(s.minNeedMib);
       final file = info.file, kind = info.blocker;
       final fg = gk.onWarningContainer;
-      if (info.maxShrinkMib >= s.minNeedMib) {
+      if (info.totalMib >= s.minNeedMib) {
         body = NoteBox(text: l.shrinkEnough(max, need));
+      } else if (info.limitedBySpace) {
+        body = NoteBox(warn: true, text: l.shrinkFull(max, need, fmtMib(info.freeMib)));
       } else if (file == null || kind == null) {
         body = NoteBox(warn: true, text: l.shrinkNoFile(max, need));
       } else {

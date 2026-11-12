@@ -153,9 +153,24 @@ void main() {
     reply = shrink({'max_shrink_mib': '1024'});
     await tap(t, find.text(l.shrinkReanalyze));
     await see(t, find.text(l.shrinkNoFile('1 GiB', need)));
+    // C 盘之后已有 10 GiB 未分配空间：再压缩出 15 GiB 就连成 25 GiB，够了
+    reply = shrink({'max_shrink_mib': '15360', 'adjacent_mib': '10240', 'file': r'\pagefile.sys::$DATA', 'limit': 'file'});
+    await tap(t, find.text(l.shrinkReanalyze));
+    await see(t, find.text(l.shrinkEnough('25 GiB', need)));
+    // 压缩停在已用空间上（C 盘太满）：请用户清理 C 盘，不去怪事件里的文件
+    reply = shrink({'max_shrink_mib': '3072', 'free_mib': '4096', 'file': r'\pagefile.sys::$DATA', 'limit': 'space'});
+    await tap(t, find.text(l.shrinkReanalyze));
+    await see(t, find.text(l.shrinkFull('3 GiB', need, '4 GiB')));
+    expect(find.text(l.sbPagefile), findsNothing);
     reply = Stream.fromIterable([const Gk3Record('ERR', {'code': 'shrink-query'}), const Gk3Exit(1)]);
     await tap(t, find.text(l.shrinkReanalyze));
     await see(t, find.text('${l.shrinkFailed}${l.errShrinkQuery}'));
+  });
+
+  testWidgets('测试模式不分析这台电脑的 C 盘', (t) async {
+    await pumpApp(t, 'nospace', testDisk: 2);
+    await see(t, find.text(l.chkNoRoom('20.2 GiB')));
+    expect(find.text(l.shrinkAnalyze), findsNothing);
   });
 
   testWidgets('系统盘没有空闲区：说明要压缩出多少，不能往下走', (t) async {

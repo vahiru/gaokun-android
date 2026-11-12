@@ -55,6 +55,9 @@ class Session extends ChangeNotifier {
     // 恢复密钥只用于一次写盘：重新检查之后要重新输入
     _bitlockerKey = null;
     bitlockerErr = null;
+    // 压缩分析的结果对应的是检查之前的 C 盘（在这之后才结束的分析照样填进来）
+    shrinkInfo = null;
+    shrinkErr = null;
     notifyListeners();
     try {
       final pf = await backend.run('preflight');
@@ -69,9 +72,6 @@ class Session extends ChangeNotifier {
           (pfRec == null ? _failed('preflight') : (pr.ok ? null : _failed('probe')));
       plans.clear();
       region = null;
-      // 压缩分析的结果对应的是上一次检查时的 C 盘
-      shrinkInfo = null;
-      shrinkErr = null;
       mediaTarget = null;
       mediaRegion = _defaultMediaRegion();
       if (disk != null && !installed) await _loadPlans();
