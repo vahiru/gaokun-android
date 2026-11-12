@@ -51,7 +51,7 @@
   "chkSecureBootOn": "Secure Boot未关闭",
   "chkSecureBootUnknown": "无法读取Secure Boot状态",
   "chkSecureBootHow": "请在UEFI固件设置中关闭Secure Boot，返回Windows后重新检查。",
-  "chkSecureBootHowBitlocker": "BitLocker已开启：直接关闭Secure Boot会导致Windows下次启动时要求输入恢复密钥。请先按下方说明暂停BitLocker保护，再在UEFI固件设置中关闭Secure Boot，返回Windows后重新检查。",
+  "chkSecureBootHowBitlocker": "检测到BitLocker已开启：直接关闭Secure Boot会导致Windows在下次启动时要求输入恢复密钥。请先在下方校验恢复密钥并暂停BitLocker保护，再进入UEFI固件设置关闭Secure Boot，返回Windows后重新检查。",
   "chkFastStartupOff": "快速启动已关闭",
   "chkFastStartupOn": "快速启动未关闭",
   "chkFastStartupHow": "快速启动开启时，若在Windows关机期间EFI分区被修改，再次启动Windows可能永久损坏EFI分区，导致平板无法启动。请在“控制面板 → 电源选项 → 选择电源按钮的功能”中取消勾选“启用快速启动”。",
@@ -59,15 +59,15 @@
   "chkBitlockerOff": "BitLocker未开启",
   "chkBitlockerOn": "BitLocker已开启",
   "chkBitlockerUnknown": "无法读取BitLocker状态",
-  "chkBitlockerHow": "安装会更改EFI分区中的默认引导文件（BOOTAA64.EFI），卸载需要还原该文件时也会更改它。开始前，需要输入系统盘的48位BitLocker恢复密钥并通过校验；需要更改该文件时，安装器会在写入磁盘前暂停BitLocker保护，Windows下次启动时自动恢复。恢复密钥可在https://aka.ms/myrecoverykey获取。",
-  "chkBitlockerHowSecureBoot": "关闭Secure Boot之前，需要先暂停BitLocker保护，见下方说明。",
+  "chkBitlockerHow": "修改EFI引导文件前，安装器会自动暂停BitLocker保护（Windows下次启动后自动恢复），但引导变更仍可能导致Windows在启动时要求输入恢复密钥。我们需要您稍后输入正确的BitLocker恢复密钥以确认您届时有可用的密钥用于解锁系统。恢复密钥可在https://aka.ms/myrecoverykey获取，建议提前保存在手机等其他设备上备用。",
+  "chkBitlockerHowSecureBoot": "关闭Secure Boot前，请先在下方校验恢复密钥并暂停BitLocker保护。",
   "chkBitlockerConverting": "BitLocker正在加密或解密系统盘",
-  "chkBitlockerConvertingHow": "加密或解密完成之前，无法确认更改启动文件后Windows是否会要求输入恢复密钥。请等待操作完成（可在“设置 → 隐私和安全性 → 设备加密”或控制面板的“BitLocker驱动器加密”中查看进度），然后重新检查。设备使用电池供电时加密可能暂停，请连接电源适配器。",
+  "chkBitlockerConvertingHow": "加密或解密完成前，无法判断修改引导文件后Windows是否会要求输入恢复密钥。请等待转换完成（可在“设置 → 隐私和安全性 → 设备加密”或控制面板“BitLocker驱动器加密”中查看进度）后再重新检查。使用电池供电时加密可能自动暂停，建议连接电源适配器。",
   "chkBitlockerSuspended": "BitLocker保护已暂停",
   "chkBitlockerSuspendedHow": "系统盘已加密，但保护处于暂停或等待激活状态，Windows下次启动时不会要求输入恢复密钥。",
-  "chkBitlockerNoKey": "系统盘未设置BitLocker恢复密钥",
-  "chkBitlockerNoKeyHow": "由于系统盘未设置恢复密钥，无法进行校验，安装与卸载均无法继续。请以管理员身份运行“manage-bde -protectors -add C: -RecoveryPassword”添加恢复密钥并妥善保存，然后重新检查。",
-  "chkBitlockerSuspendBox": "关闭Secure Boot之前，请输入系统盘的48位BitLocker恢复密钥。通过校验后，安装器将暂停BitLocker保护，Windows重新启动两次后自动恢复。恢复密钥可在https://aka.ms/myrecoverykey获取。",
+  "chkBitlockerNoKey": "系统盘未配置BitLocker恢复密钥",
+  "chkBitlockerNoKeyHow": "系统盘已加密但未配置BitLocker恢复密钥；一旦Windows在启动时进入BitLocker恢复界面，将无法解锁系统盘。为避免无法进入Windows，请先以管理员身份运行“manage-bde -protectors -add C: -RecoveryPassword”生成恢复密钥并保存在其他设备上，随后重新检查。",
+  "chkBitlockerSuspendBox": "校验通过后，安装器将暂停BitLocker保护（Windows重启两次后自动恢复）；但更改固件设置或额外重启仍可能导致Windows要求输入恢复密钥。我们需要您在此输入正确的BitLocker恢复密钥以确认您届时有可用的密钥用于解锁系统。恢复密钥可在https://aka.ms/myrecoverykey获取，建议提前保存在手机等其他设备上备用。",
   "blKeyLabel": "BitLocker恢复密钥",
   "blKeyIds": "恢复密钥ID：{ids}（在Microsoft账户中按此ID查找对应的密钥）",
   "@blKeyIds": {
@@ -138,9 +138,9 @@
   },
   "shrinkAnalyze": "分析可压缩空间",
   "shrinkReanalyze": "重新分析",
-  "shrinkAnalyzing": "正在分析C盘可压缩的空间，可能需要几分钟……",
-  "shrinkFailed": "无法分析C盘的可压缩空间。",
-  "shrinkEnough": "压缩C盘最多可得到{max}的连续未分配空间，足以安装Android（至少需要{need}）。请在“磁盘管理”中压缩C盘，然后重新检查。",
+  "shrinkAnalyzing": "正在分析C盘可压缩空间，可能需要数分钟……",
+  "shrinkFailed": "无法分析C盘可压缩空间：",
+  "shrinkEnough": "压缩C盘最多可腾出{max}的连续未分配空间，足以安装Android（至少需要{need}）。请在“磁盘管理”中压缩C盘后重新检查。",
   "@shrinkEnough": {
     "placeholders": {
       "max": {
@@ -151,7 +151,7 @@
       }
     }
   },
-  "shrinkNotEnough": "压缩C盘最多只能得到{max}的连续未分配空间，安装Android至少需要{need}。压缩无法越过以下文件：",
+  "shrinkNotEnough": "压缩C盘最多只能腾出{max}的连续未分配空间，而安装Android至少需要{need}。受以下不可移动文件位置限制，无法进一步压缩：",
   "@shrinkNotEnough": {
     "placeholders": {
       "max": {
@@ -162,8 +162,8 @@
       }
     }
   },
-  "shrinkNoFile": "压缩C盘最多只能得到{max}的连续未分配空间，安装Android至少需要{need}。未能确定限制压缩的文件，请重启电脑后再次分析。",
-  "shrinkFull": "压缩C盘最多只能得到{max}的连续未分配空间，安装Android至少需要{need}。限制压缩的是C盘上已用的空间（可用空间为{free}），而不是某个无法移动的文件：请先清理C盘上的文件（例如使用“磁盘清理”或“设置 → 系统 → 存储”），然后重新分析。",
+  "shrinkNoFile": "压缩C盘最多只能腾出{max}的连续未分配空间，而安装Android至少需要{need}。未能定位阻碍压缩的文件，请重启设备后重新分析。",
+  "shrinkFull": "压缩C盘最多只能腾出{max}的连续未分配空间，而安装Android至少需要{need}。当前受限于C盘剩余可用空间不足（仅剩{free}），而非不可移动文件阻碍。请先清理C盘文件（例如通过“磁盘清理”或“设置 → 系统 → 存储”），随后重新分析。",
   "@shrinkFull": {
     "placeholders": {
       "max": {
@@ -187,8 +187,8 @@
       }
     }
   },
-  "shrinkNext": "处理完成后请重新分析：压缩可能会停在下一个无法移动的文件。",
-  "shrinkMore": "压缩C盘最多还能得到{total}的连续未分配空间。如需为数据分区留出更多空间，请在“磁盘管理”中压缩C盘，然后重新检查。",
+  "shrinkNext": "处理完成后请重新分析，届时可能仍需处理下一个阻碍压缩的不可移动文件。",
+  "shrinkMore": "压缩C盘最多可腾出{total}的连续未分配空间。如需为Android数据分区分配更多容量，请在“磁盘管理”中压缩C盘后重新检查。",
   "@shrinkMore": {
     "placeholders": {
       "total": {
@@ -196,7 +196,7 @@
       }
     }
   },
-  "shrinkMoreAdjacent": "压缩C盘最多还能得到{total}的连续未分配空间（含C盘之后已有的{adjacent}）。如需为数据分区留出更多空间，请在“磁盘管理”中压缩C盘，然后重新检查。",
+  "shrinkMoreAdjacent": "压缩C盘后最多可获得共{total}的连续未分配空间（含C盘后方现有的{adjacent}）。如需为Android数据分区分配更多容量，请在“磁盘管理”中压缩C盘后重新检查。",
   "@shrinkMoreAdjacent": {
     "placeholders": {
       "total": {
@@ -207,8 +207,8 @@
       }
     }
   },
-  "shrinkMoreLimit": "继续压缩会停在以下文件，处理后可以压缩出更多空间：",
-  "shrinkMoreFull": "限制压缩的是C盘上已用的空间（可用空间为{free}）：清理C盘上的文件后，可以压缩出更多空间。",
+  "shrinkMoreLimit": "进一步压缩受限于以下不可移动文件，处理后可腾出更多空间：",
+  "shrinkMoreFull": "当前可压缩空间受限于C盘剩余可用空间（剩余{free}）；清理C盘文件后可腾出更多空间。",
   "@shrinkMoreFull": {
     "placeholders": {
       "free": {
@@ -216,25 +216,25 @@
       }
     }
   },
-  "sbPagefile": "虚拟内存的分页文件",
-  "sbPagefileHow": "1. 按Win+R，输入“SystemPropertiesPerformance”并确定，在“高级”选项卡的“虚拟内存”中点击“更改”。\n2. 取消勾选“自动管理所有驱动器的分页文件大小”，选中C盘，选择“无分页文件”，点击“设置”，在弹出的提示中点击“是”，然后点击“确定”。\n3. 重启电脑，在“磁盘管理”中压缩C盘。\n4. 压缩完成后，重新勾选“自动管理所有驱动器的分页文件大小”并重启。",
-  "sbHiberfil": "休眠文件",
-  "sbHiberfilHow": "1. 以管理员身份打开“终端”，运行“powercfg /h off”关闭休眠，休眠文件将随之删除。\n2. 在“磁盘管理”中压缩C盘。\n3. 如需继续使用休眠，压缩完成后运行“powercfg /h on”重新开启；快速启动需保持关闭。",
+  "sbPagefile": "虚拟内存分页文件",
+  "sbPagefileHow": "1. 按Win+R，输入“SystemPropertiesPerformance”并确定，在“高级”选项卡的“虚拟内存”下点击“更改”。\n2. 取消勾选“自动管理所有驱动器的分页文件大小”，选中C盘，选择“无分页文件”并点击“设置”，在弹出的提示中点击“是”，最后点击“确定”。\n3. 重启设备，在“磁盘管理”中压缩C盘。\n4. 压缩完成后，重新勾选“自动管理所有驱动器的分页文件大小”并重启设备。",
+  "sbHiberfil": "系统休眠文件",
+  "sbHiberfilHow": "1. 以管理员身份打开“终端”，运行“powercfg /h off”关闭休眠，休眠文件将随之删除。\n2. 在“磁盘管理”中压缩C盘。\n3. 如需继续使用休眠功能，可在压缩完成后运行“powercfg /h on”重新开启（注意保持“快速启动”处于关闭状态）。",
   "sbRestore": "系统还原点（卷影副本）",
-  "sbRestoreHow": "1. 按Win+R，输入“SystemPropertiesProtection”并确定，打开“系统保护”。\n2. 选中C盘，点击“配置”，再点击“删除”，删除该驱动器的所有还原点。\n3. 在“磁盘管理”中压缩C盘。删除后将无法还原到这些还原点。",
+  "sbRestoreHow": "1. 按Win+R，输入“SystemPropertiesProtection”并确定，打开“系统保护”。\n2. 选中C盘，点击“配置”，再点击“删除”以清除该驱动器上的所有还原点。\n3. 在“磁盘管理”中压缩C盘（注意：已删除的还原点无法恢复）。",
   "sbBitlocker": "BitLocker元数据",
-  "sbBitlockerHow": "BitLocker在系统盘上保存的元数据在加密状态下无法移动。如需压缩出更多空间，请在Windows中关闭BitLocker（设备加密），等待解密完成后压缩C盘，再重新开启。重新开启后会生成新的恢复密钥，请妥善保存。",
+  "sbBitlockerHow": "系统盘处于加密状态时，BitLocker元数据无法移动。如需腾出更多空间，请在Windows中关闭BitLocker（设备加密），待解密完成后压缩C盘，随后再重新开启加密。重新开启后会生成新的恢复密钥，请妥善保存。",
   "sbUsn": "NTFS更改日志（USN日志）",
-  "sbUsnHow": "1. 以管理员身份打开“终端”，运行“fsutil usn deletejournal /d C:”删除更改日志。\n2. 在“磁盘管理”中压缩C盘。Windows会在需要时自动重新创建更改日志。",
+  "sbUsnHow": "1. 以管理员身份打开“终端”，运行“fsutil usn deletejournal /d C:”删除更改日志。\n2. 在“磁盘管理”中压缩C盘（Windows会在需要时自动重建更改日志）。",
   "sbMft": "NTFS主文件表（MFT）",
-  "sbMftHow": "MFT的部分片段位于C盘靠后的位置。安装器可以使用Windows的碎片整理接口，将这些片段移至C盘前部的可用空间，然后重新分析。",
+  "sbMftHow": "MFT的部分片段位于C盘靠后位置。安装器可将这些片段前移至C盘前部的可用空间，随后自动重新分析。",
   "mftMoveBtn": "移动MFT",
   "mftConfirmTitle": "移动MFT",
-  "mftConfirmBody": "安装器将使用Windows的碎片整理接口，把MFT位于C盘靠后位置的片段移至前部的可用空间。移动期间无法关闭安装器，请勿关闭电脑或断开电源。根据MFT的大小，可能需要几分钟。",
-  "mftConfirmOk": "移动",
+  "mftConfirmBody": "即将把C盘靠后位置的MFT片段前移至前部的可用空间。操作期间无法关闭安装器，请勿关机或断开电源。此过程可能需要数分钟。",
+  "mftConfirmOk": "开始移动",
   "mftConfirmCancel": "取消",
-  "mftMoving": "正在移动MFT，可能需要几分钟……",
-  "mftMoved": "已移动{moved}。MFT末尾距C盘开头的位置由{before}变为{after}。",
+  "mftMoving": "正在移动MFT，可能需要数分钟……",
+  "mftMoved": "已移动{moved}，MFT末尾距C盘起始处的位置已由{before}前移至{after}。",
   "@mftMoved": {
     "placeholders": {
       "moved": {
@@ -248,10 +248,10 @@
       }
     }
   },
-  "mftStuck": "MFT开头的系统记录必须留在原处，C盘只能压缩到当前的上限。",
-  "mftUnplaced": "另有{size}未能移至更低的位置：C盘前部没有足够大的连续可用空间。可先删除C盘上不需要的文件，再次移动后重新分析。",
-  "mftNothing": "MFT中没有可以移至更低位置的片段。",
-  "mftAgain": "MFT仍有片段位于C盘靠后的位置（例如移动期间MFT有所增长），可以再次移动。",
+  "mftStuck": "MFT起始处的系统元数据记录无法移动，C盘目前已达可压缩空间上限。",
+  "mftUnplaced": "另有{size}因C盘前部缺乏足够的连续可用空间而未能前移。可先清理C盘中不需要的文件，再重新执行移动与分析。",
+  "mftNothing": "MFT中没有可进一步前移的片段。",
+  "mftAgain": "MFT仍有部分片段位于C盘靠后位置（例如移动期间MFT有所增长），可再次执行移动。",
   "@mftUnplaced": {
     "placeholders": {
       "size": {
@@ -259,14 +259,14 @@
       }
     }
   },
-  "mftFailed": "移动MFT时出错，已移动的部分仍然有效，可以再次尝试。",
+  "mftFailed": "移动MFT未完成（已移动的部分仍然有效）：",
   "shutdownReasonMft": "正在移动C盘的MFT",
   "sbNtfs": "NTFS元数据",
-  "sbNtfsHow": "这是NTFS自身的元数据，Windows在运行时无法移动它，C盘只能压缩到当前的上限。",
-  "sbDump": "内存转储文件",
-  "sbDumpHow": "1. 打开“磁盘清理”，选择C盘，点击“清理系统文件”。\n2. 勾选“系统错误内存转储文件”与“系统错误小型转储文件”后删除。\n3. 在“磁盘管理”中压缩C盘。",
+  "sbNtfsHow": "该文件属于NTFS文件系统元数据，Windows运行期间无法移动，C盘目前已达可压缩空间上限。",
+  "sbDump": "系统内存转储文件",
+  "sbDumpHow": "1. 打开“磁盘清理”，选择C盘，点击“清理系统文件”。\n2. 勾选“系统错误内存转储文件”与“系统错误小型转储文件”并执行清理。\n3. 在“磁盘管理”中压缩C盘。",
   "sbOther": "其他文件",
-  "sbOtherHow": "该文件当前无法移动，可能正由程序使用或被系统锁定。请重启电脑后再次分析；如果压缩仍停在同一文件，请根据路径确认它所属的程序，暂时关闭或卸载该程序后再试。",
+  "sbOtherHow": "该文件当前无法移动，可能正被程序占用或被系统锁定。请先重启设备后重新分析；若仍受阻于同一文件，请根据路径确认其所属程序，暂时退出或卸载该程序后再试。",
   "chkRoom": "可用未分配空间：{size}",
   "@chkRoom": {
     "placeholders": {
@@ -286,7 +286,7 @@
       }
     }
   },
-  "chkBlockedNote": "请先解决上述未通过的检查项，再继续安装。正式写入磁盘前，安装器将再次执行检查。",
+  "chkBlockedNote": "请先解决上述未通过的检查项，再继续安装。",
   "regionTitle": "选择安装位置",
   "regionSub": "Android将安装至系统磁盘（{model}，{size}）的未分配空间中，不会修改现有分区。",
   "@regionSub": {
@@ -329,7 +329,7 @@
   "releaseLoading": "正在获取版本列表……",
   "releaseNone": "无法获取版本列表，请检查网络连接后重试。",
   "releaseLatest": "最新版本",
-  "releaseNote": "下载的文件保存在“下载”文件夹的Gaokun Android目录中，安装完成后可选择删除。",
+  "releaseNote": "下载的文件保存在“下载”文件夹的Gaokun Android目录中。",
   "optionsTitle": "选择默认启动系统",
   "optionsSub": "开机时将显示启动菜单，倒计时结束后自动进入默认系统。安装完成后也可随时在Android系统设置中更改。",
   "optDefaultAndroid": "Android",
@@ -365,8 +365,8 @@
   "confirmDefaultAndroid": "将开机默认启动系统设为Android",
   "confirmDefaultWindows": "将开机默认启动系统设为Windows",
   "confirmWindowsSafe": "保留现有Windows系统及C盘中的文件，不做修改",
-  "confirmAntivirus": "部分安全软件（如火绒）可能在写入磁盘时拦截安装器的后端程序（gk3w.exe）。如出现拦截提示，请选择允许；拦截可能导致操作中断，使磁盘分区处于不完整状态。",
-  "confirmBitlocker": "BitLocker已开启：请输入系统盘的48位恢复密钥，通过校验后才能开始。需要更改默认引导文件时，安装器会在写入磁盘前暂停BitLocker保护，Windows下次启动时自动恢复；如果之后Windows仍要求输入恢复密钥，请输入同一个密钥。恢复密钥可在https://aka.ms/myrecoverykey获取。",
+  "confirmAntivirus": "部分安全软件可能会在写入磁盘时拦截安装器后端程序（gk3w.exe）。若弹出拦截提示，请选择允许；中途拦截可能导致写入中断，使磁盘分区处于不完整状态。",
+  "confirmBitlocker": "检测到BitLocker已开启：修改默认引导文件前，安装器会自动暂停BitLocker保护，并在Windows下次启动后自动恢复；但引导变更仍可能导致Windows在启动时要求输入恢复密钥。我们需要您在此输入正确的BitLocker恢复密钥以确认您届时有可用的密钥用于解锁系统。恢复密钥可在https://aka.ms/myrecoverykey获取，建议提前保存在手机等其他设备上备用。",
   "holdToInstall": "按住2秒开始安装",
   "holdToUninstall": "按住2秒开始卸载",
   "holdKeep": "请继续按住",
@@ -431,11 +431,11 @@
   "errFallbackConflict": "EFI分区中的默认引导文件属于其他操作系统，继续安装将覆盖该引导程序。安装器未对磁盘做任何修改，请先处理现有引导配置。",
   "errNoBootmgr": "未在EFI分区中找到Windows启动管理器（bootmgfw.efi），Windows引导文件不完整。请先修复Windows引导。",
   "errWrongModel": "当前设备并非华为MateBook E Go（GK-W7X）。",
-  "errSecureBoot": "Secure Boot处于开启状态，请先在UEFI固件设置（BIOS）中将其关闭。",
+  "errSecureBoot": "Secure Boot处于开启状态，请先在UEFI固件设置中将其关闭。",
   "errFastStartup": "Windows快速启动处于开启状态，请先将其关闭。",
-  "errBitlocker": "BitLocker处于开启状态，但未提供恢复密钥。请返回首页重新检查，按提示输入恢复密钥后再试。",
+  "errBitlocker": "BitLocker处于开启状态，尚未完成恢复密钥校验。请返回首页重新检查，按提示校验恢复密钥后再试。",
   "errBitlockerFormat": "恢复密钥格式不正确：应为48位数字，分为8组，每组6位。",
-  "errBitlockerGroup": "恢复密钥的第{group}组未通过校验，请检查该组是否输入正确。",
+  "errBitlockerGroup": "恢复密钥的第{group}组未通过校验，请检查该组数字是否输入有误。",
   "@errBitlockerGroup": {
     "placeholders": {
       "group": {
@@ -443,14 +443,14 @@
       }
     }
   },
-  "errBitlockerWrong": "恢复密钥与本机系统盘的BitLocker恢复密钥不一致。请根据恢复密钥ID确认所用的是本机系统盘的密钥。",
-  "errBitlockerNoKey": "系统盘未设置BitLocker恢复密钥，无法进行校验。请以管理员身份运行“manage-bde -protectors -add C: -RecoveryPassword”添加恢复密钥并妥善保存。",
-  "errBitlockerUnverifiable": "无法读取系统盘的BitLocker恢复密钥信息，因此无法进行校验。请重新检查；如果问题仍然存在，请在Windows中关闭BitLocker（设备加密）后再继续。",
-  "errBitlockerSuspend": "无法暂停BitLocker保护。请重新检查后再试。",
-  "errBitlockerConverting": "BitLocker正在加密或解密系统盘，请等待操作完成后重新检查。",
-  "errShrinkQuery": "请稍后重新分析；如果仍然失败，可在“磁盘管理”中右键点击C盘，选择“压缩卷”查看可压缩的空间。",
-  "errMftFailed": "连续多次移动失败，已停止。",
-  "errMftRead": "无法读取C盘的MFT布局或可用空间信息。",
+  "errBitlockerWrong": "输入的恢复密钥与当前系统盘不匹配。请对照恢复密钥ID，确认使用的是本机系统盘对应的密钥。",
+  "errBitlockerNoKey": "系统盘未配置BitLocker恢复密钥；为避免触发BitLocker恢复后无法解锁系统盘，请先以管理员身份运行“manage-bde -protectors -add C: -RecoveryPassword”生成恢复密钥并保存在其他设备上。",
+  "errBitlockerUnverifiable": "无法读取系统盘的BitLocker恢复密钥信息，因此无法完成校验。请重新检查；若问题持续存在，请先在Windows中关闭BitLocker（设备加密）后再继续。",
+  "errBitlockerSuspend": "无法暂停BitLocker保护，请重新检查后再试。",
+  "errBitlockerConverting": "BitLocker正在加密或解密系统盘，请等待转换完成后重新检查。",
+  "errShrinkQuery": "请稍后重试；若仍然失败，可在“磁盘管理”中右键点击C盘并选择“压缩卷”查看可压缩空间。",
+  "errMftFailed": "连续多次移动失败，操作已中止，可稍后重试。",
+  "errMftRead": "无法读取C盘的MFT布局或可用空间位图。",
   "errVolumeOpen": "无法打开C盘。",
   "errLowBattery": "设备电量过低且未连接电源适配器。",
   "errEspFull": "EFI系统分区剩余空间不足。",
@@ -530,13 +530,13 @@
     }
   },
   "releasePre": "预发布版",
-  "releaseNoteR2": "R2镜像源仅提供最新版本。下载的文件保存在“下载”文件夹的Gaokun Android目录中，安装完成后可选择删除。",
+  "releaseNoteR2": "R2镜像源仅提供最新版本。下载的文件保存在“下载”文件夹的Gaokun Android目录中。",
   "localDirLabel": "安装文件所在目录",
   "localNeed": "该目录中需包含以下文件：",
   "localBoot": "boot.img",
   "localSuper": "super.img.zst",
-  "localSums": "install-artifacts.sha256（用于校验上述镜像文件的完整性）",
-  "localNote": "上述三个文件均可在GitHub对应版本的Release页面下载。启动管理器（systemd-boot）已内置于安装器中，无需单独准备。",
+  "localSums": "install-artifacts.sha256",
+  "localNote": "上述文件均可在项目GitHub的Releases页面下载。",
   "confirmLocal": "校验并使用{dir}目录中的本地安装文件",
   "@confirmLocal": {
     "placeholders": {
@@ -553,24 +553,24 @@
   "btnBrowse": "浏览…",
   "shutdownReasonInstall": "正在安装Android。中断安装可能导致磁盘分区处于不完整状态。",
   "shutdownReasonUninstall": "正在卸载Android。中断卸载可能导致磁盘分区处于不完整状态。",
-  "runSleepHintInstall": "安装过程中请勿合上键盘或按电源按钮，否则设备将进入睡眠状态，安装将随之暂停。",
-  "runSleepHintUninstall": "卸载过程中请勿合上键盘或按电源按钮，否则设备将进入睡眠状态，卸载将随之暂停。",
+  "runSleepHintInstall": "安装期间请勿合上键盘盖或按电源键，否则设备进入睡眠后安装将暂停。",
+  "runSleepHintUninstall": "卸载期间请勿合上键盘盖或按电源键，否则设备进入睡眠后卸载将暂停。",
   "railAbout": "说明",
   "railMedia": "制作独立安装介质",
   "railTarget": "目标",
   "railWrite": "写入",
   "mediaAboutTitle": "制作独立安装介质",
-  "mediaAboutSub": "将LiveCD写入U盘或本机磁盘。从安装介质启动后即可运行图形安装器，不依赖Windows。",
-  "mediaAboutUses": "通过安装介质可以：",
+  "mediaAboutSub": "将独立安装环境（LiveCD）写入U盘或本机磁盘。从安装介质启动后即可脱离Windows运行完整的图形安装器。",
+  "mediaAboutUses": "通过独立安装介质可以：",
   "mediaUseWipe": "清除整个磁盘并安装Android（Windows将被删除）",
   "mediaUseAlong": "保留现有系统，在未分配空间中安装Android",
-  "mediaUseReinstall": "重新安装Android，以修复系统或更换版本",
+  "mediaUseReinstall": "重新安装Android，用于修复系统或更换版本",
   "mediaAboutTargets": "可写入以下位置：",
-  "mediaAboutUsb": "U盘：U盘中的所有数据将被清除。可在任意一台MateBook E Go上使用。",
-  "mediaAboutInternal": "本机磁盘：在系统磁盘的未分配空间中创建GK3LIVE分区，并将LiveCD添加至启动菜单，无需U盘。仅可在本设备上使用。",
-  "mediaAboutNote": "安装方式在LiveCD中选择，写入磁盘前LiveCD将再次请求确认。从安装介质启动前，请在目标设备的UEFI固件设置中关闭Secure Boot。",
+  "mediaAboutUsb": "U盘：将清空该U盘中的所有数据；制作完成后可用于任意MateBook E Go设备。",
+  "mediaAboutInternal": "本机磁盘：在系统磁盘的未分配空间中创建GK3LIVE分区，并将LiveCD添加至启动菜单。",
+  "mediaAboutNote": "具体安装方式将在进入LiveCD后选择。从安装介质启动前，请先在目标设备的UEFI固件设置中关闭Secure Boot。",
   "mediaTargetTitle": "选择写入位置",
-  "mediaTargetSub": "LiveCD及所选版本的安装文件约需{need}空间。",
+  "mediaTargetSub": "LiveCD及所选版本的系统安装文件共需约{need}空间。",
   "@mediaTargetSub": {
     "placeholders": {
       "need": {
@@ -592,7 +592,7 @@
       }
     }
   },
-  "mediaUsbBody": "U盘中的所有数据将被清除",
+  "mediaUsbBody": "该U盘中的所有数据将被清空",
   "mediaUsbTooSmall": "容量不足，至少需要{need}",
   "@mediaUsbTooSmall": {
     "placeholders": {
@@ -604,9 +604,9 @@
   "mediaInternalHeader": "本机磁盘",
   "mediaInternalTitle": "系统磁盘的未分配空间",
   "mediaInternalBody": "创建GK3LIVE分区并将LiveCD添加至启动菜单，现有分区及其中的数据不受影响",
-  "mediaInternalBlocked": "以下条件未满足，详情请查看首页的安装环境检查：",
-  "releaseSubMedia": "所选版本的安装文件将与LiveCD一并写入安装介质，在LiveCD中安装时无需连接网络。",
-  "releaseLiveCd": "LiveCD将使用最新的安装器{version}（下载大小{size}）。",
+  "mediaInternalBlocked": "以下条件尚未满足（详情请返回首页查看安装环境检查）：",
+  "releaseSubMedia": "所选版本的系统安装文件将与LiveCD一并写入安装介质，进入LiveCD安装时无需联网。",
+  "releaseLiveCd": "LiveCD将使用最新版安装器{version}（下载大小{size}）。",
   "@releaseLiveCd": {
     "placeholders": {
       "version": {
@@ -617,8 +617,8 @@
       }
     }
   },
-  "releaseNoLiveCd": "该来源中未找到可用的LiveCD，请选择其他来源。",
-  "localLiveCd": "gaokun3-installer-<版本>-windows.zip（LiveCD）",
+  "releaseNoLiveCd": "当前下载源未提供LiveCD镜像，请切换至其他来源。",
+  "localLiveCd": "gaokun3-installer-<版本>-windows.zip（含LiveCD镜像）",
   "mediaConfirmTitle": "确认写入安装介质",
   "mediaConfirmSubUsb": "U盘（{model}，{size}）中的所有数据将被永久清除且无法恢复。",
   "@mediaConfirmSubUsb": {
@@ -643,8 +643,8 @@
       }
     }
   },
-  "mediaConfirmUsb": "清除U盘中的所有分区，创建GK3LIVE分区，写入LiveCD及安装文件",
-  "mediaConfirmPart": "在{region}未分配空间的末尾创建GK3LIVE分区（{size}），写入LiveCD及安装文件",
+  "mediaConfirmUsb": "清空U盘中的所有分区，创建GK3LIVE分区并写入LiveCD及系统安装文件",
+  "mediaConfirmPart": "在{region}未分配空间的末尾创建GK3LIVE分区（{size}），并写入LiveCD及系统安装文件",
   "@mediaConfirmPart": {
     "placeholders": {
       "region": {
@@ -658,19 +658,19 @@
   "mediaConfirmEntry": "将LiveCD添加至启动菜单",
   "holdToWrite": "按住2秒开始写入",
   "runMediaTitle": "正在写入安装介质",
-  "runSleepHintMedia": "写入过程中请勿合上键盘或按电源按钮，否则设备将进入睡眠状态，写入将随之暂停。",
+  "runSleepHintMedia": "写入期间请勿合上键盘盖或按电源键，否则设备进入睡眠后写入将暂停。",
   "runMediaUsbHint": "写入完成前请勿拔出U盘。",
   "shutdownReasonMedia": "正在写入安装介质。中断写入可能导致磁盘分区处于不完整状态。",
   "doneMediaTitle": "安装介质制作完成",
-  "doneMediaSubUsb": "可从该U盘启动MateBook E Go，进入LiveCD。",
-  "doneMediaSubInternal": "重启设备，在启动菜单中选择LiveCD即可进入。",
-  "doneMediaInstall": "安装方式在LiveCD中选择，写入磁盘前LiveCD将再次请求确认。",
-  "doneMediaSecureBoot": "从U盘启动前，请在目标设备的UEFI固件设置中关闭Secure Boot。",
-  "doneMediaStays": "清除整个磁盘重新安装之前，LiveCD将一直保留在启动菜单中。",
+  "doneMediaSubUsb": "现在可使用该U盘引导MateBook E Go进入LiveCD安装环境。",
+  "doneMediaSubInternal": "重启设备并在启动菜单中选择LiveCD即可进入安装环境。",
+  "doneMediaInstall": "具体安装方式将在进入LiveCD后选择。",
+  "doneMediaSecureBoot": "从U盘启动前，请先在目标设备的UEFI固件设置中关闭Secure Boot。",
+  "doneMediaStays": "除非执行“清除整个磁盘”或移除启动菜单，否则LiveCD入口将一直保留在启动菜单中。",
   "failMediaTitle": "写入未完成",
-  "failTouchedMediaUsb": "U盘已发生部分更改，其中的数据可能已被清除。请返回首页后重试。",
+  "failTouchedMediaUsb": "U盘已发生部分更改，其中的原有数据可能已被清除。请返回首页后重试。",
   "failTouchedMediaInternal": "磁盘已发生部分更改，但Windows系统不受影响。请返回首页重新检查后重试。",
-  "mediaRegionTitle": "选择GK3LIVE分区的位置",
+  "mediaRegionTitle": "选择GK3LIVE分区位置",
   "mediaRegionSub": "GK3LIVE分区（{size}）将创建在所选未分配空间的末尾，现有分区不受影响。",
   "@mediaRegionSub": {
     "placeholders": {
@@ -679,7 +679,7 @@
       }
     }
   },
-  "mediaRegionRest": "创建GK3LIVE分区后，剩余{size}未分配空间",
+  "mediaRegionRest": "创建GK3LIVE分区后，仍剩余{size}未分配空间",
   "@mediaRegionRest": {
     "placeholders": {
       "size": {
@@ -689,10 +689,10 @@
   },
   "legendLive": "GK3LIVE分区",
   "testBadge": "测试模式：磁盘{disk}",
-  "errDownload": "下载未完成，请检查网络连接后重试。已下载的部分将保留，重试时继续下载。",
-  "errDownloadWrite": "无法保存下载的文件，请确认C盘有足够的可用空间。",
-  "errBackendMissing": "安装器文件不完整，请重新下载安装器。",
-  "errNotAdmin": "安装器需要以管理员身份运行。",
+  "errDownload": "下载未完成，请检查网络连接后重试。已下载的部分将保留，重试时自动断点续传。",
+  "errDownloadWrite": "无法写入下载文件，请确认C盘剩余空间充足。",
+  "errBackendMissing": "安装器组件文件缺失或不完整，请重新下载安装器。",
+  "errNotAdmin": "请以管理员身份运行本安装器。",
   "@testBadge": {
     "placeholders": {
       "disk": {
@@ -700,8 +700,8 @@
       }
     }
   },
-  "errReleaseMissing": "所选目录中未找到安装文件（boot.img、super.img.zst）。",
-  "errDownloadSpace": "C盘可用空间不足，下载还需要{need}。请释放空间后重试，已下载的部分将保留。",
+  "errReleaseMissing": "所选目录中未找到系统镜像文件（boot.img、super.img.zst）。",
+  "errDownloadSpace": "C盘剩余空间不足，本次下载还需至少{need}。请清理空间后重试，已下载的部分将保留。",
   "@errDownloadSpace": {
     "placeholders": {
       "need": {
@@ -709,9 +709,9 @@
       }
     }
   },
-  "errBackendFailed": "安装器组件意外退出，请点击“重新检查”。",
-  "failUnknownTouched": "无法确认磁盘是否已被修改，后端程序可能被安全软件拦截或结束。请在安全软件中允许安装器运行，然后返回首页重新检查，检查结果将显示磁盘的当前状态。",
-  "localMissing": "该目录中缺少：{files}",
+  "errBackendFailed": "安装器后端组件意外退出，请重试或返回首页重新检查。",
+  "failUnknownTouched": "后端程序异常终止（可能被安全软件拦截或强制结束），无法确认磁盘是否已被修改。请在安全软件中允许安装器运行，随后返回首页重新检查以确认当前磁盘状态。",
+  "localMissing": "该目录中缺少以下文件：{files}",
   "@localMissing": {
     "placeholders": {
       "files": {
@@ -720,7 +720,7 @@
     }
   },
   "quitDownloadTitle": "下载尚未完成",
-  "quitDownloadBody": "确定要退出吗？退出后，已下载的文件将被删除。",
+  "quitDownloadBody": "确定要退出安装器吗？退出后，本次已下载的文件将被删除。",
   "quitDownloadContinue": "继续下载",
   "quitDownloadExit": "退出",
   "winMaximize": "最大化",
