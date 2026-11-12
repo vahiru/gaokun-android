@@ -44,7 +44,13 @@ class CheckPage extends StatelessWidget {
         blocked = true;
       } else {
         final r = s.region!;
-        rows.add(CheckRow(state: CheckState.ok, title: l.chkRoom(fmtMib(r.sizeMib)), detail: l.chkRoomDetail(d.model, fmtMib(d.sizeMib))));
+        rows.add(CheckRow(
+          state: CheckState.ok,
+          title: l.chkRoom(fmtMib(r.sizeMib)),
+          detail: l.chkRoomDetail(d.model, fmtMib(d.sizeMib)),
+          // 空间够用时也能看还能再压缩出多少（想给数据分区多留一些）
+          trailing: s.testMode ? null : const ShrinkAnalyzeButton(),
+        ));
       }
     }
     return WinStepPage(
@@ -68,7 +74,7 @@ class CheckPage extends StatelessWidget {
             )
           : ListView(children: [
               ...rows,
-              if (!s.checking && d != null && !s.installed && !s.hasRoom && !s.testMode) const ShrinkGuide(),
+              if (!s.checking && d != null && !s.installed && !s.testMode) const ShrinkGuide(),
               if (suspendFirst) ...[
                 const SizedBox(height: 12),
                 BitlockerKeyBox(text: l.chkBitlockerSuspendBox, suspendReboots: 2),

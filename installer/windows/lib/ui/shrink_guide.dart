@@ -49,43 +49,28 @@ class ShrinkGuide extends StatelessWidget {
       body = NoteBox(warn: true, text: '${l.shrinkFailed}${errText(l, err)}');
     } else if (info != null) {
       // 压缩出来的空间与 C 盘之后已有的未分配空间连成一片，按两者之和比较
-      final max = fmtMib(info.totalMib), need = fmtMib(s.minNeedMib);
+      final total = fmtMib(info.totalMib), need = fmtMib(s.minNeedMib);
       final file = info.file, kind = info.blocker;
-      final fg = gk.onWarningContainer;
-      if (info.totalMib >= s.minNeedMib) {
-        body = NoteBox(text: l.shrinkEnough(max, need));
+      // 已经有够用的未分配空间（"可用未分配空间"一行上按的）：说还能再压缩出多少，挡住的文件处理后可以更多
+      final more = s.hasRoom;
+      final head = !more
+          ? null
+          : info.adjacentMib > 0
+              ? l.shrinkMoreAdjacent(total, fmtMib(info.adjacentMib))
+              : l.shrinkMore(total);
+      final fg = more ? context.cs.onSurface : gk.onWarningContainer;
+      if (!more && info.totalMib >= s.minNeedMib) {
+        body = NoteBox(text: l.shrinkEnough(total, need));
       } else if (info.limitedBySpace) {
-        body = NoteBox(warn: true, text: l.shrinkFull(max, need, fmtMib(info.freeMib)));
+        body = NoteBox(
+            warn: !more, text: more ? '$head\n${l.shrinkMoreFull(fmtMib(info.freeMib))}' : l.shrinkFull(total, need, fmtMib(info.freeMib)));
       } else if (file == null || kind == null) {
-        body = NoteBox(warn: true, text: l.shrinkNoFile(max, need));
-      } else if (kind == ShrinkBlocker.mft) {
-        body = NoteBox(
-          warn: true,
-          text: l.shrinkNotEnough(max, need),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            SelectableText('${info.drive}$file',
-                style: context.tt.bodyLarge!.copyWith(color: fg, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 12),
-            Text(l.sbMft, style: context.tt.titleSmall!.copyWith(color: fg)),
-            const SizedBox(height: 4),
-            ..._mftBody(context),
-          ]),
-        );
+        body = more ? NoteBox(text: head!) : NoteBox(warn: true, text: l.shrinkNoFile(total, need));
       } else {
-        final (title, how) = blockerText(l, kind);
         body = NoteBox(
-          warn: true,
-          text: l.shrinkNotEnough(max, need),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            SelectableText('${info.drive}$file',
-                style: context.tt.bodyLarge!.copyWith(color: fg, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 12),
-            Text(title, style: context.tt.titleSmall!.copyWith(color: fg)),
-            const SizedBox(height: 4),
-            SelectableText(how, style: context.tt.bodyLarge!.copyWith(color: fg)),
-            const SizedBox(height: 12),
-            Text(l.shrinkNext, style: context.tt.bodyMedium!.copyWith(color: fg)),
-          ]),
+          warn: !more,
+          text: more ? '$head\n${l.shrinkMoreLimit}' : l.shrinkNotEnough(total, need),
+          child: _blocker(context, '${info.drive}$file', kind, fg),
         );
       }
     } else {
@@ -95,9 +80,28 @@ class ShrinkGuide extends StatelessWidget {
     return Padding(padding: const EdgeInsets.only(left: 44, top: 4, bottom: 8), child: body);
   }
 
+  /// 挡住压缩的文件：路径、类别与处理方法（MFT 另有"移动 MFT"）。[fg] 跟着外面方框的底色
+  Widget _blocker(BuildContext context, String path, ShrinkBlocker kind, Color fg) {
+    final l = context.l;
+    final (title, how) = blockerText(l, kind);
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      SelectableText(path, style: context.tt.bodyLarge!.copyWith(color: fg, fontWeight: FontWeight.w600)),
+      const SizedBox(height: 12),
+      Text(title, style: context.tt.titleSmall!.copyWith(color: fg)),
+      const SizedBox(height: 4),
+      if (kind == ShrinkBlocker.mft)
+        ..._mftBody(context, fg)
+      else ...[
+        SelectableText(how, style: context.tt.bodyLarge!.copyWith(color: fg)),
+        const SizedBox(height: 12),
+        Text(l.shrinkNext, style: context.tt.bodyMedium!.copyWith(color: fg)),
+      ],
+    ]);
+  }
+
   /// 压缩停在 MFT 上：没挪过就说明并提供"移动 MFT"；挪过了还停在它上面，说明为什么不能再多
-  List<Widget> _mftBody(BuildContext context) {
-    final s = context.session, l = context.l, fg = context.gk.onWarningContainer;
+  List<Widget> _mftBody(BuildContext context, Color fg) {
+    final s = context.session, l = context.l;
     final style = context.tt.bodyLarge!.copyWith(color: fg);
     final done = s.mftResult;
     if (done != null) {

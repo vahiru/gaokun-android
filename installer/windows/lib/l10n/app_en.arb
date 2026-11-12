@@ -125,6 +125,34 @@
     }
   },
   "shrinkNext": "After handling it, analyze again: shrinking may stop at the next unmovable file.",
+  "shrinkMore": "Shrinking drive C: can produce up to {total} more contiguous unallocated space. To leave more space for the data partition, shrink drive C: in Disk Management, then check again.",
+  "@shrinkMore": {
+    "placeholders": {
+      "total": {
+        "type": "String"
+      }
+    }
+  },
+  "shrinkMoreAdjacent": "Shrinking drive C: can produce up to {total} of contiguous unallocated space (including the {adjacent} already after drive C:). To leave more space for the data partition, shrink drive C: in Disk Management, then check again.",
+  "@shrinkMoreAdjacent": {
+    "placeholders": {
+      "total": {
+        "type": "String"
+      },
+      "adjacent": {
+        "type": "String"
+      }
+    }
+  },
+  "shrinkMoreLimit": "Shrinking further stops at the following file; handling it frees more space:",
+  "shrinkMoreFull": "Shrinking is limited by the space already used on drive C: ({free} free). Free up space on drive C: to shrink it further.",
+  "@shrinkMoreFull": {
+    "placeholders": {
+      "free": {
+        "type": "String"
+      }
+    }
+  },
   "sbPagefile": "Virtual memory paging file",
   "sbPagefileHow": "1. Press Win+R, enter “SystemPropertiesPerformance”, and on the Advanced tab click Change under Virtual memory.\n2. Clear “Automatically manage paging file size for all drives”, select drive C:, choose “No paging file”, click Set, click Yes in the warning that appears, then click OK.\n3. Restart the computer and shrink drive C: in Disk Management.\n4. After shrinking, select “Automatically manage paging file size for all drives” again and restart.",
   "sbHiberfil": "Hibernation file",

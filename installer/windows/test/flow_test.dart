@@ -208,6 +208,31 @@ void main() {
     expect(find.textContaining(l.mftFailed), findsOneWidget);
   });
 
+  testWidgets('空间够用时也能分析：说还能再压缩出多少，挡住的文件照样给出处理方法', (t) async {
+    final (rec, _) = await pumpApp(t, 'free');
+    await see(t, find.text(l.chkRoom('40 GiB')));
+    await tap(t, find.text(l.shrinkAnalyze));
+    await waitFor(t, find.text(l.sbPagefile), tries: 400);
+    expect(find.text('${l.shrinkMore('2.5 GiB')}\n${l.shrinkMoreLimit}'), findsOneWidget);
+    expect(find.text(l.sbPagefileHow), findsOneWidget);
+    expect(rec.calls.where((c) => c.first == 'shrink-info'), hasLength(1));
+    // 下一步照常可以按
+    expect(enabled(t, l.btnNext), isTrue);
+  });
+
+  testWidgets('空间够用时：C 盘之后已有未分配空间、C 盘太满两种写法', (t) async {
+    Stream<Gk3Event> shrink(Map<String, String> f) =>
+        Stream.fromIterable([Gk3Record('SHRINK', {'drive': 'C:', 'size_mib': '170000', ...f}), const Gk3Exit(0)]);
+    var reply = shrink({'max_shrink_mib': '5120', 'adjacent_mib': '40960'});
+    final (_, s) = await pumpApp(t, 'free', respond: {'shrink-info': (args, input) => reply});
+    await tap(t, find.text(l.shrinkAnalyze));
+    await see(t, find.text(l.shrinkMoreAdjacent('45 GiB', '40 GiB')));
+    reply = shrink({'max_shrink_mib': '1024', 'free_mib': '2048', 'file': r'\pagefile.sys::$DATA', 'limit': 'space'});
+    await tap(t, find.text(l.shrinkReanalyze));
+    await see(t, find.text('${l.shrinkMore('1 GiB')}\n${l.shrinkMoreFull('2 GiB')}'));
+    expect(s.hasRoom, isTrue);
+  });
+
   testWidgets('测试模式不分析这台电脑的 C 盘', (t) async {
     await pumpApp(t, 'nospace', testDisk: 2);
     await see(t, find.text(l.chkNoRoom('20.2 GiB')));

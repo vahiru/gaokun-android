@@ -233,4 +233,11 @@ void main() {
     await t.drag(find.byType(ListView).first, const Offset(0, -400));
     await shot(t, '41-shrink-mft-moved');
   }, skip: !haveFont);
+
+  testWidgets('空间够用时分析还能压缩出多少', (t) async {
+    await pumpApp(t, 'free');
+    await tap(t, find.text(l.shrinkAnalyze));
+    await waitFor(t, find.text(l.sbPagefile), tries: 400);
+    await shot(t, '42-shrink-more');
+  }, skip: !haveFont);
 }
