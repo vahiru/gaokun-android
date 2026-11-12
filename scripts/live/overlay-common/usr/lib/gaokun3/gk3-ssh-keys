@@ -17,7 +17,7 @@ install -d -m 700 /root/.ssh
 # 去掉 \r：公钥可能是在 Windows 上写进 U 盘的
 tr -d '\r' < "$SRC" | while IFS= read -r l; do
     case "$l" in ''|'#'*) continue ;; esac
-    grep -qxF -- "$l" "$DST" || { printf '%s\n' "$l" >> "$DST"; echo "并入 $(echo "$l" | awk '{print $NF}')"; }
+    grep -qxF -- "$l" "$DST" || { printf '%s\n' "$l" >> "$DST"; echo "Added key $(echo "$l" | awk '{print $NF}')"; }
 done
 chmod 600 "$DST"
 exit 0

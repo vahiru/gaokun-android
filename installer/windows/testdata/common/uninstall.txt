@@ -1,0 +1,21 @@
+E partition misc: 4 MiB, content unknown
+E partition metadata: 32 MiB, content ext4
+E partition boot_a: 64 MiB, content android-boot
+E partition boot_b: 64 MiB, content android-boot
+E partition super: 12288 MiB, content lp
+D 20
+E partition userdata: 28508 MiB, content ext4
+E 6 partitions to remove; 2 of our boot entries, 1 install directories on the ESP
+E partition table backup: D:\gk3-proto\backup\gpt-before-uninstall-disk2-20261111-221811-head34-tail33.bin
+E EFI/BOOT/BOOTAA64.EFI = Windows Boot Manager (from EFI/Microsoft/Boot/bootmgfw.efi)
+O UNINSTALL esp-restored=EFI\BOOT\BOOTAA64.EFI
+O UNINSTALL esp-file=loader\entries\5a555ed5c660ed0f7d2f2fd4eb11babf-android-a.conf
+O UNINSTALL esp-file=loader\entries\5a555ed5c660ed0f7d2f2fd4eb11babf-android-b.conf
+O UNINSTALL esp-dir=5a555ed5c660ed0f7d2f2fd4eb11babf\android
+O UNINSTALL esp-dir=5a555ed5c660ed0f7d2f2fd4eb11babf
+O UNINSTALL esp-dir=loader
+O UNINSTALL esp-dir=EFI\systemd
+O UNINSTALL esp-file=EFI\BOOT\BOOTAA64.EFI.before-gaokun3
+O FREE disk=disk2 start=874383360 end=958269439 size_mib=40960
+E removed 6 partitions
+X 0

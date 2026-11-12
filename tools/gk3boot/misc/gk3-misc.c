@@ -81,31 +81,32 @@ static int dump(const unsigned char *m, size_t n)
     gk3_vab v;
     gk3_err e;
     if (n < GK3_MISC_READ_SIZE) {
-        fprintf(stderr, "misc 镜像不足 64 KiB\n");
+        fprintf(stderr, "misc image is smaller than 64 KiB\n");
         return 2;
     }
     gk3_bcb_classify(m, &bi);
-    printf("BCB      kind=%s%s\n", gk3_bcb_kind_name(bi.kind), gk3_is_zero(m, 2048) ? "（2 KiB 全零）" : "");
+    printf("BCB      kind=%s%s\n", gk3_bcb_kind_name(bi.kind), gk3_is_zero(m, 2048) ? " (2 KiB all zero)" : "");
     printable("         command=", m, 32);
     printable("         recovery=", m + 64, 768);
 
     e = gk3_bcab_validate(m + 2048);
-    printf("BCAB     %s  suffix=", e ? gk3_strerror(e) : "有效");
+    printf("BCAB     %s  suffix=", e ? gk3_strerror(e) : "valid");
     printable("", m + 2048, 4);
-    printf("         nb_slot=%u recovery_tries=%u merge_status=%u crc(盘上字节)=%02x %02x %02x %02x\n",
+    printf("         nb_slot=%u recovery_tries=%u merge_status=%u crc(on-disk bytes)=%02x %02x %02x %02x\n",
            gk3_bcab_nb_slot(m + 2048), gk3_bcab_recovery_tries(m + 2048), gk3_bcab_merge_status(m + 2048),
            m[2076], m[2077], m[2078], m[2079]);
     for (unsigned i = 0; i < 2; i++) {
         gk3_slot_info s;
         gk3_bcab_get_slot(m + 2048, i, &s);
-        printf("         _%c priority=%u tries=%u successful=%u verity_corrupted=%u → %s\n", 'a' + i, s.priority,
-               s.tries, s.successful, s.verity_corrupted, gk3_slot_bootable(&s) ? "可启动" : "不可启动");
+        printf("         _%c priority=%u tries=%u successful=%u verity_corrupted=%u -> %s\n", 'a' + i, s.priority,
+               s.tries, s.successful, s.verity_corrupted, gk3_slot_bootable(&s) ? "bootable" : "unbootable");
     }
 
     e = gk3_rec_validate(m + GK3_MISC_GK3_OFF);
     if (e) {
-        printf("GK3      无记录（%s）%s\n", gk3_strerror(e),
-               gk3_is_zero(m + GK3_MISC_GK3_OFF, GK3_REC_SIZE) ? "，8 KiB 处 2 KiB 全零" : "，⚠️ 8 KiB 处有非零内容");
+        printf("GK3      no record (%s)%s\n", gk3_strerror(e),
+               gk3_is_zero(m + GK3_MISC_GK3_OFF, GK3_REC_SIZE) ? ", 2 KiB at 8 KiB all zero"
+                                                               : ", WARNING: nonzero data at 8 KiB");
     } else {
         const unsigned char *r = m + GK3_MISC_GK3_OFF;
         gk3_event ev[GK3_EV_N];
@@ -114,27 +115,27 @@ static int dump(const unsigned char *m, size_t n)
         gk3_next_kind nk = gk3_rec_next(r, &ns);
         char cmd[33];
         gk3_rec_migrated_command(r, cmd);
-        printf("GK3      有效  migrated=%u boot_streak=%u next=%u/%u dispatch_count=%u migrated_command=\"%s\"\n",
+        printf("GK3      valid  migrated=%u boot_streak=%u next=%u/%u dispatch_count=%u migrated_command=\"%s\"\n",
                gk3_rec_migrated(r), gk3_rec_boot_streak(r), nk, ns, gk3_rec_dispatch_count(r), cmd);
         {
             static const char *const os[] = {"unknown", "android", "windows"}, *const sd[] = {"none", "windows", "android"};
-            printf("         双系统：default_os=%s set_default=%s clean_poweroff=%u\n", os[gk3_rec_default_os(r)],
+            printf("         dual-boot: default_os=%s set_default=%s clean_poweroff=%u\n", os[gk3_rec_default_os(r)],
                    sd[gk3_rec_set_default_req(r)], gk3_rec_clean_poweroff(r));
         }
         for (uint32_t i = 0; i < k && i < GK3_EV_N; i++)
             printf("         #%u %s slot=%u aux=%u%s\n", ev[i].seq, gk3_ev_name((gk3_ev_code)ev[i].code), ev[i].slot,
-                   ev[i].aux, ev[i].flags & GK3_EVF_NOTIFIED ? "（已通知）" : "");
+                   ev[i].aux, ev[i].flags & GK3_EVF_NOTIFIED ? " (notified)" : "");
     }
 
     gk3_vab_parse(m + GK3_MISC_SYSTEM_OFF, &v);
-    printf("VAB      %s version=%u magic=%08x merge_status=%u source_slot=%u\n", v.valid ? "有效" : "无效",
+    printf("VAB      %s version=%u magic=%08x merge_status=%u source_slot=%u\n", v.valid ? "valid" : "invalid",
            v.version, v.magic, v.merge_status, v.source_slot);
     /* GK3 记录（8 KiB 处 2 KiB）不算"其他" */
-    printf("其他     2K+32..8K、10K..32K %s\n",
+    printf("other    2K+32..8K, 10K..32K %s\n",
            gk3_is_zero(m + 2080, GK3_MISC_GK3_OFF - 2080) &&
                    gk3_is_zero(m + GK3_MISC_GK3_OFF + GK3_REC_SIZE, 32768 - GK3_MISC_GK3_OFF - GK3_REC_SIZE)
-               ? "全零"
-               : "有非零内容");
+               ? "all zero"
+               : "nonzero data");
     return 0;
 }
 
@@ -147,11 +148,11 @@ static int sel(unsigned char *m, unsigned hint)
     gk3_vab_parse(m + GK3_MISC_SYSTEM_OFF, &v);
     memcpy(bc, m + 2048, 32);
     gk3_select_slot(bc, hint, v.valid ? v.merge_status : GK3_MERGE_UNKNOWN, &s);
-    printf("决定 %s：slot=_%c active=_%c fallback=%u 扣 tries=%u（%u→%u）%s%s\n", k[s.kind], 'a' + s.slot,
+    printf("decision %s: slot=_%c active=_%c fallback=%u decrement=%u (tries %u->%u)%s%s\n", k[s.kind], 'a' + s.slot,
            'a' + s.active, s.fallback, s.decremented, s.tries_before, s.tries_after,
            s.kind == GK3_SEL_BCAB_INVALID ? " bcab=" : "", s.kind == GK3_SEL_BCAB_INVALID ? gk3_strerror(s.bcab_err) : "");
     if (s.decremented)
-        printf("（入口会把 BCAB 写回 misc+2048，这里没写）\n");
+        printf("(gk3boot would write the BCAB back to misc+2048; not written here)\n");
     return 0;
 }
 
@@ -164,7 +165,7 @@ static int gpt(const unsigned char *d, size_t n, unsigned bs)
     static const char *const six[] = {"misc", "boot_a", "boot_b", "super", "userdata", "metadata"};
     const char *bad = NULL;
     if (n < 2 * bs) {
-        fprintf(stderr, "太短\n");
+        fprintf(stderr, "image too short\n");
         return 2;
     }
     e = gk3_gpt_parse_header(d + bs, bs, &g);
@@ -173,11 +174,11 @@ static int gpt(const unsigned char *d, size_t n, unsigned bs)
     if (!e)
         e = gk3_gpt_parse_mem(d + bs, bs, d + g.entries_lba * bs, n - g.entries_lba * bs, &g);
     if (e) {
-        printf("GPT 无效：%s\n", gk3_strerror(e));
+        printf("GPT invalid: %s\n", gk3_strerror(e));
         return 1;
     }
     gk3_guid_str(g.disk_guid, gs);
-    printf("GPT  disk=%s  表项 %u×%u @LBA %llu  usable %llu–%llu  已用 %u\n", gs, g.num_entries, g.entry_size,
+    printf("GPT  disk=%s  entries %ux%u @LBA %llu  usable %llu-%llu  used %u\n", gs, g.num_entries, g.entry_size,
            (unsigned long long)g.entries_lba, (unsigned long long)g.first_usable, (unsigned long long)g.last_usable,
            gk3_gpt_count(&g));
     for (uint32_t i = 0; i < g.num_entries; i++) {
@@ -188,7 +189,7 @@ static int gpt(const unsigned char *d, size_t n, unsigned bs)
                (unsigned long long)p.last_lba, (unsigned long long)p.attrs, gs);
     }
     e = gk3_gpt_require_unique(&g, six, 6, &bad);
-    printf("六个名字各恰好一次：%s%s%s\n", e ? gk3_strerror(e) : "是", e ? " —— " : "", e ? bad : "");
+    printf("each of the six names exactly once: %s%s%s\n", e ? gk3_strerror(e) : "yes", e ? ": " : "", e ? bad : "");
     return e ? 1 : 0;
 }
 
@@ -199,7 +200,7 @@ static int bootimg(const unsigned char *d, size_t n)
     char cmd[2048];
     gk3_err e = gk3_bootimg_parse(d, n, 0, &b);
     if (e) {
-        printf("boot.img 无效：%s\n", gk3_strerror(e));
+        printf("boot.img invalid: %s\n", gk3_strerror(e));
         return 1;
     }
     printf("boot.img v%u page=%u kernel=%u ramdisk=%u second=%u recovery_dtbo=%u dtb=%u total=%llu\n", b.version,
@@ -209,7 +210,7 @@ static int bootimg(const unsigned char *d, size_t n)
     printf("id ");
     for (int i = 0; i < 20; i++)
         printf("%02x", b.id[i]);
-    printf("  复算 %s\n", e == GK3_OK ? "一致" : gk3_strerror(e));
+    printf("  recomputed: %s\n", e == GK3_OK ? "match" : gk3_strerror(e));
     if (gk3_bootimg_cmdline(&b, cmd, sizeof(cmd)) >= 0)
         printf("cmdline \"%s\"\n", cmd);
     return e ? 1 : 0;
@@ -221,13 +222,14 @@ static int edit(const char *path, unsigned char *m, size_t n, const char *cmd, c
     unsigned char *r = m + GK3_MISC_GK3_OFF;
     FILE *f;
     if (n < GK3_MISC_GK3_OFF + GK3_REC_SIZE || gk3_rec_validate(r) != GK3_OK) {
-        fprintf(stderr, "%s：8 KiB 处没有有效的 GK3 记录（入口还没在动作模式下跑过？）—— 不建\n", path);
+        fprintf(stderr, "%s: no valid GK3 record at 8 KiB (gk3boot has not run in action mode yet?); "
+                        "not creating one\n", path);
         return 1;
     }
     if (!strcmp(cmd, "mark-poweroff")) {
         if (!gk3_rec_mark_poweroff(r, arg)) {
-            printf("不写：sys.powerctl=\"%s\"，实际默认%s Windows\n", arg,
-                   gk3_rec_effective_default_windows(r) ? "是" : "不是");
+            printf("not written: sys.powerctl=\"%s\", effective default is %sWindows\n", arg,
+                   gk3_rec_effective_default_windows(r) ? "" : "not ");
             return 0;
         }
     } else if (!strcmp(cmd, "set-next")) {
@@ -255,7 +257,7 @@ static int edit(const char *path, unsigned char *m, size_t n, const char *cmd, c
         perror(path);
         return 1;
     }
-    printf("已写：%s %s\n", cmd, arg);
+    printf("written: %s %s\n", cmd, arg);
     return 0;
 }
 
@@ -306,35 +308,30 @@ static int init_misc(int argc, char **argv)
             else if (strcmp(v, "none"))
                 return fprintf(stderr, "--default windows|android|none\n"), 2;
         } else
-            return fprintf(stderr, "用法：gk3-misc init <misc 分区或镜像> [--slot a|b] [--default windows|android|none]\n"), 2;
+            return fprintf(stderr, "usage: gk3-misc init <misc partition or image> [--slot a|b] "
+                                   "[--default windows|android|none]\n"), 2;
     }
 
     int fd = open(path, O_RDWR);
     if (fd < 0)
-        return fprintf(stderr, "%s：%s\n", path, strerror(errno)), 2;
+        return fprintf(stderr, "%s: %s\n", path, strerror(errno)), 2;
     off_t size = lseek(fd, 0, SEEK_END);
     if (size < (off_t)GK3_MISC_READ_SIZE) {
-        fprintf(stderr, "%s：只有 %lld 字节，misc 至少要 64 KiB（入口一次读 0–64 KiB）\n", path, (long long)size);
+        fprintf(stderr, "%s: only %lld bytes; misc must be at least 64 KiB (gk3boot reads 0-64 KiB in one go)\n",
+                path, (long long)size);
         close(fd);
         return 2;
     }
 
-    /* 0–2080：BCB 清零 + BCAB；8192–10240：GK3 记录 */
-    unsigned char head[GK3_MISC_BCAB_OFF + GK3_MISC_BCAB_SIZE], rec[GK3_REC_SIZE];
-    memset(head, 0, sizeof(head));
-    gk3_bcab_init_install(head + GK3_MISC_BCAB_OFF, slot);
-    gk3_rec_init(rec);
-    gk3_rec_migrate(rec, head /* 全零的 BCB */, GK3_DISPATCH_VER);
-    if (def != GK3_SETDEF_NONE)
-        gk3_rec_put_set_default_req(rec, def);
-    gk3_rec_seal(rec);
-    if (gk3_bcab_validate(head + GK3_MISC_BCAB_OFF) || gk3_rec_validate(rec)) {   /* 自己造的都不过 = 库坏了 */
-        fprintf(stderr, "内部错误：造出来的 BCAB / GK3 记录自己都不合法\n");
+    /* 0–2080：BCB 清零 + BCAB；8192–10240：GK3 记录（组装规则在 libgk3core，Windows 安装器用同一个函数） */
+    unsigned char head[GK3_MISC_INIT_HEAD_SIZE], rec[GK3_REC_SIZE];
+    if (gk3_misc_build_install(head, rec, slot, def)) {
+        fprintf(stderr, "internal error: the generated BCAB / GK3 record does not validate\n");
         close(fd);
         return 1;
     }
     if (full_pwrite(fd, head, sizeof(head), 0) || full_pwrite(fd, rec, sizeof(rec), GK3_MISC_GK3_OFF) || fsync(fd)) {
-        fprintf(stderr, "%s：写失败：%s\n", path, strerror(errno));
+        fprintf(stderr, "%s: write failed: %s\n", path, strerror(errno));
         close(fd);
         return 1;
     }
@@ -344,7 +341,7 @@ static int init_misc(int argc, char **argv)
     unsigned char *m = NULL;
     int direct = 0;
     if (posix_memalign((void **)&m, 4096, GK3_MISC_READ_SIZE))
-        return fprintf(stderr, "内存不够\n"), 1;
+        return fprintf(stderr, "out of memory\n"), 1;
 #ifdef O_DIRECT
     fd = open(path, O_RDONLY | O_DIRECT);
     if (fd >= 0) {
@@ -361,13 +358,13 @@ static int init_misc(int argc, char **argv)
             close(fd);
         fd = open(path, O_RDONLY);
         if (fd < 0 || full_pread(fd, m, GK3_MISC_READ_SIZE, 0)) {
-            fprintf(stderr, "%s：读回失败：%s\n", path, strerror(errno));
+            fprintf(stderr, "%s: read-back failed: %s\n", path, strerror(errno));
             if (fd >= 0)
                 close(fd);
             free(m);
             return 1;
         }
-        fprintf(stderr, "（%s 不支持 O_DIRECT，读回走的是页缓存）\n", path);
+        fprintf(stderr, "(%s does not support O_DIRECT; read back through the page cache)\n", path);
     }
     close(fd);
     int bad = memcmp(m, head, sizeof(head)) || memcmp(m + GK3_MISC_GK3_OFF, rec, sizeof(rec)) ||
@@ -375,7 +372,7 @@ static int init_misc(int argc, char **argv)
     int rest = gk3_is_zero(m + sizeof(head), GK3_MISC_GK3_OFF - sizeof(head)) &&
                gk3_is_zero(m + GK3_MISC_GK3_OFF + GK3_REC_SIZE, GK3_MISC_READ_SIZE - GK3_MISC_GK3_OFF - GK3_REC_SIZE);
     if (bad) {
-        fprintf(stderr, "%s：读回来的 BCB / BCAB / GK3 记录与写下去的不一致\n", path);
+        fprintf(stderr, "%s: the BCB / BCAB / GK3 record read back differs from what was written\n", path);
         free(m);
         return 1;
     }
@@ -394,7 +391,8 @@ int main(int argc, char **argv)
     size_t n;
     unsigned char *d;
     if (argc < 3) {
-        fprintf(stderr, "用法：gk3-misc dump|select|gpt|bootimg|init|mark-poweroff|set-next|set-default <文件> [参数]\n");
+        fprintf(stderr,
+                "usage: gk3-misc dump|select|gpt|bootimg|init|mark-poweroff|set-next|set-default <file> [args]\n");
         return 2;
     }
     if (!strcmp(argv[1], "init"))
@@ -410,9 +408,9 @@ int main(int argc, char **argv)
         return bootimg(d, n);
     if (!strcmp(argv[1], "mark-poweroff") || !strcmp(argv[1], "set-next") || !strcmp(argv[1], "set-default")) {
         if (argc < 4)
-            return fprintf(stderr, "用法：gk3-misc %s <misc 镜像> <值>\n", argv[1]), 2;
+            return fprintf(stderr, "usage: gk3-misc %s <misc image> <value>\n", argv[1]), 2;
         return edit(argv[2], d, n, argv[1], argv[3]);
     }
-    fprintf(stderr, "不认识的子命令 %s\n", argv[1]);
+    fprintf(stderr, "unknown subcommand %s\n", argv[1]);
     return 2;
 }

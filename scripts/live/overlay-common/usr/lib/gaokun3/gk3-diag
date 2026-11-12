@@ -11,40 +11,40 @@ OUT=$MEDIA/gaokun3/diag
 #    installer.log 与浸泡日志。在它之后改回只读，最好的情况是 EBUSY 失败（有文件开着写），
 #    差一点就是浸泡日志从第 45 秒起全部 EROFS —— M0 要的恰恰是那条 10 分钟曲线。
 WAS=$(awk -v m="$MEDIA" '$2 == m { split($4, o, ","); r = o[1] } END { print r }' /proc/mounts)
-mount -o remount,rw "$MEDIA" 2>/dev/null || { echo "介质挂不成读写，跳过（U 盘写保护？）"; exit 0; }
+mount -o remount,rw "$MEDIA" 2>/dev/null || { echo "Cannot remount the boot medium read-write (write-protected USB drive?); skipping"; exit 0; }
 mkdir -p "$OUT" 2>/dev/null
 F=$OUT/boot-$(date +%Y%m%d-%H%M%S).log
 {
-    echo "=== 时间 / 内核 ==="; date; uname -a; cat /proc/cmdline
-    echo; echo "=== 失败的单元 ==="; systemctl --failed --no-pager 2>&1
-    echo; echo "=== 我们的服务 ==="
+    echo "=== Time / kernel ==="; date; uname -a; cat /proc/cmdline
+    echo; echo "=== Failed units ==="; systemctl --failed --no-pager 2>&1
+    echo; echo "=== gaokun3 services ==="
     systemctl status --no-pager -l gk3-wifi ssh gk3-installer seatd avahi-daemon 2>&1 | head -80
-    echo; echo "=== 挂载 ==="; findmnt -o TARGET,SOURCE,FSTYPE,OPTIONS 2>&1 | head -40
-    echo; echo "=== 网络接口 ==="; ip -br addr 2>&1; ip route 2>&1
-    echo; echo "=== 无线 ==="; iw dev 2>&1 | head -20
+    echo; echo "=== Mounts ==="; findmnt -o TARGET,SOURCE,FSTYPE,OPTIONS 2>&1 | head -40
+    echo; echo "=== Network interfaces ==="; ip -br addr 2>&1; ip route 2>&1
+    echo; echo "=== Wireless ==="; iw dev 2>&1 | head -20
         for n in /sys/class/net/*; do [ -d "$n/wireless" ] && { echo "--- ${n##*/}"; iw dev "${n##*/}" link 2>&1; }; done
-    echo; echo "=== wpa_supplicant 配置来源 ==="
+    echo; echo "=== wpa_supplicant configuration sources ==="
     for f in /media/gk3/gaokun3/wpa_supplicant.conf /etc/wpa_supplicant/wpa_supplicant.conf; do
-        [ -f "$f" ] && echo "  有: $f" || echo "  无: $f"
+        [ -f "$f" ] && echo "  present: $f" || echo "  absent:  $f"
     done
-    echo; echo "=== 显示输出（DRM）==="
+    echo; echo "=== Display outputs (DRM) ==="
     for c in /sys/class/drm/card*-*; do
         [ -e "$c/status" ] || continue
         echo "  $(basename "$c"): $(cat "$c/status" 2>/dev/null)"
         [ -f "$c/modes" ] && sed "s/^/    mode /" "$c/modes" 2>/dev/null | head -4
     done
-    echo; echo "=== GPU / 渲染节点（freedreno 是 M0 的头号风险）==="
+    echo; echo "=== GPU / render nodes ==="
     ls -la /dev/dri/ 2>&1; dmesg 2>/dev/null | grep -iE "msm|adreno|a6xx|a690|gpu" | tail -20
-    echo; echo "=== 输入设备（触摸/键盘）==="; grep -E "^N:|^H:" /proc/bus/input/devices 2>/dev/null | head -20
-    echo; echo "=== 安装器日志 ==="; tail -60 "$OUT/installer.log" 2>/dev/null
-    echo; echo "=== 进程 ==="; ps -eo pid,rss,args 2>&1 | head -50
-    echo; echo "=== sshd 生效配置 ==="
+    echo; echo "=== Input devices (touch / keyboard) ==="; grep -E "^N:|^H:" /proc/bus/input/devices 2>/dev/null | head -20
+    echo; echo "=== Installer log ==="; tail -60 "$OUT/installer.log" 2>/dev/null
+    echo; echo "=== Processes ==="; ps -eo pid,rss,args 2>&1 | head -50
+    echo; echo "=== Effective sshd configuration ==="
     /usr/sbin/sshd -T 2>&1 | grep -iE "^(port|permitrootlogin|pubkeyauth|passwordauth|authorizedkeysfile|usepam|strictmodes)"
-    echo; echo "=== root 账户 ==="; getent passwd root; grep '^root:' /etc/shadow | cut -c1-12
+    echo; echo "=== root account ==="; getent passwd root; grep '^root:' /etc/shadow | cut -c1-12
     echo; echo "=== authorized_keys ==="; ls -la /root/.ssh/ 2>&1; wc -c /root/.ssh/authorized_keys 2>&1
-    echo; echo "=== ath11k / 固件 ==="; dmesg 2>/dev/null | grep -iE "ath11k|firmware" | tail -20
-    echo; echo "=== dmesg 尾部 ==="; dmesg 2>/dev/null | tail -60
-    echo; echo "=== journal（本次启动，警告以上）==="; journalctl -b -p warning --no-pager 2>&1 | tail -120
+    echo; echo "=== ath11k / firmware ==="; dmesg 2>/dev/null | grep -iE "ath11k|firmware" | tail -20
+    echo; echo "=== dmesg tail ==="; dmesg 2>/dev/null | tail -60
+    echo; echo "=== journal (this boot, warning and above) ==="; journalctl -b -p warning --no-pager 2>&1 | tail -120
 } > "$F" 2>&1
 # 屏幕：装机失败时一张截图胜过一段描述（live 才有 grim 和合成器）
 if command -v grim >/dev/null && [ -S /run/gk3-installer/wayland-0 ]; then
@@ -52,4 +52,4 @@ if command -v grim >/dev/null && [ -S /run/gk3-installer/wayland-0 ]; then
 fi
 sync
 [ "$WAS" = ro ] && mount -o remount,ro "$MEDIA" 2>/dev/null
-echo "诊断已写到 $F"
+echo "Diagnostics written to $F"

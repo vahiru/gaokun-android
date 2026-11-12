@@ -1,0 +1,105 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] libext2fs: sparse_io: handle partial I/O that spans several
+ blocks
+
+A negative count passed to the sparse I/O manager is a byte count. The
+partial read and write paths copy it into or out of the single sparse
+block that holds the first byte, so a byte range that crosses a block
+boundary overflows that block's buffer.
+
+mke2fs -E android_sparse hits this whenever the file system block size
+is smaller than 4096: zap_sector() switches the channel to 512-byte
+blocks and writes six sectors (3072 bytes) starting at offset 1024,
+which with a 1k block size is three sparse blocks. AddressSanitizer
+reports a heap-buffer-overflow in sparse_write_blk64(), and a Windows
+build exits with a random status before writing the image. A 4k block
+size, which is what fastboot uses, happens to keep the range inside
+block 0.
+
+Walk the byte range one sparse block at a time in both directions, and
+fail a partial write that runs past the end of the image instead of
+writing beyond the block array.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ lib/ext2fs/sparse_io.c | 57 +++++++++++++++++++++++++++++++-----------
+ 1 file changed, 43 insertions(+), 14 deletions(-)
+
+diff --git a/lib/ext2fs/sparse_io.c b/lib/ext2fs/sparse_io.c
+index f287e76..d4e8418 100644
+--- a/lib/ext2fs/sparse_io.c
++++ b/lib/ext2fs/sparse_io.c
+@@ -387,12 +387,28 @@ static errcode_t sparse_read_blk64(io_channel channel, blk64_t block,
+ 		return EXT2_ET_UNEXPECTED_BLOCK_SIZE;
+ 
+ 	if (count < 0) { //partial read
+-		count = -count;
+-		cur_block = block_to_sparse_block(block, &offset, channel, sm);
+-		if (sm->blocks[cur_block])
+-			memcpy(out, (sm->blocks[cur_block]) + offset, count);
+-		else
+-			memset(out, 0, count);
++		/*
++		 * A byte count may span several sparse blocks (e.g. mke2fs's
++		 * zap_sector() reads and writes 512-byte sectors on a file
++		 * system with a 1k block size), so walk it block by block.
++		 */
++		uint64_t pos = (uint64_t)block * channel->block_size;
++		size_t left = -(ssize_t)count, n;
++
++		while (left) {
++			cur_block = pos / sm->block_size;
++			offset = pos % sm->block_size;
++			n = sm->block_size - offset;
++			if (n > left)
++				n = left;
++			if (cur_block < sm->blocks_count && sm->blocks[cur_block])
++				memcpy(out, sm->blocks[cur_block] + offset, n);
++			else
++				memset(out, 0, n);
++			out += n;
++			pos += n;
++			left -= n;
++		}
+ 	} else {
+ 		for (i = 0; i < count; ++i) {
+ 			cur_block = block_to_sparse_block(block + i, &offset,
+@@ -427,15 +443,28 @@ static errcode_t sparse_write_blk64(io_channel channel, blk64_t block,
+ 		return EXT2_ET_UNEXPECTED_BLOCK_SIZE;
+ 
+ 	if (count < 0) { //partial write
+-		count = -count;
+-		cur_block = block_to_sparse_block(block, &offset, channel,
+-						  sm);
+-		if (!sm->blocks[cur_block]) {
+-			sm->blocks[cur_block] = calloc(1, sm->block_size);
+-			if (!sm->blocks[cur_block])
+-				return EXT2_ET_NO_MEMORY;
++		/* May span several sparse blocks: see sparse_read_blk64() */
++		uint64_t pos = (uint64_t)block * channel->block_size;
++		size_t left = -(ssize_t)count, n;
++
++		while (left) {
++			cur_block = pos / sm->block_size;
++			offset = pos % sm->block_size;
++			if (cur_block >= sm->blocks_count)
++				return EXT2_ET_SHORT_WRITE;
++			n = sm->block_size - offset;
++			if (n > left)
++				n = left;
++			if (!sm->blocks[cur_block]) {
++				sm->blocks[cur_block] = calloc(1, sm->block_size);
++				if (!sm->blocks[cur_block])
++					return EXT2_ET_NO_MEMORY;
++			}
++			memcpy(sm->blocks[cur_block] + offset, in, n);
++			in += n;
++			pos += n;
++			left -= n;
+ 		}
+-		memcpy(sm->blocks[cur_block] + offset, in, count);
+ 	} else {
+ 		for (i = 0; i < count; ++i) {
+ 			if (block + i >= sm->blocks_count)

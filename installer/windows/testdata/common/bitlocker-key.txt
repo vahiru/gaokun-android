@@ -1,0 +1,4 @@
+D 180
+E BitLocker: the recovery key matches volume C:
+O BITLOCKER volume=C: key=ok
+X 0

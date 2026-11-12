@@ -1,0 +1,4 @@
+# 场景：安装前检查不过 —— preflight 是这台 PC 以管理员真跑的（机型、Secure Boot、BitLocker、快速启动）
+# probe：PC 上仿出厂布局的 VHDX（Data 缩出 40 GiB），只留这块盘、标成系统盘，型号 / 总线换成平板的（321JN0256GB / nvme）；其余行原样
+probe                     probe.txt
+preflight                 preflight.txt

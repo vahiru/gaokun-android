@@ -1,0 +1,9 @@
+D 27
+O PLAN op=mkpart disk=2 name=misc start=903743488 end=903751679 size_mib=4 type=8300
+O PLAN op=mkpart disk=2 name=metadata start=903751680 end=903817215 size_mib=32 type=8300
+O PLAN op=mkpart disk=2 name=boot_a start=903817216 end=903948287 size_mib=64 type=8300
+O PLAN op=mkpart disk=2 name=boot_b start=903948288 end=904079359 size_mib=64 type=8300
+O PLAN op=mkpart disk=2 name=super start=904079360 end=929245183 size_mib=12288 type=8300
+O PLAN op=mkpart disk=2 name=userdata start=929245184 end=958269439 size_mib=14172 type=8300
+O PLANSUM avail_mib=26624 fixed_mib=12452 userdata_mib=14172
+X 0

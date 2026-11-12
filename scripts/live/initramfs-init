@@ -26,18 +26,18 @@ DEBUG=
 say()  { echo "[gk3] $*"; }
 fail() {
     echo
-    echo "================ gaokun3 rescue: 起不来 ================"
-    echo "原因: $*"
+    echo "============= gaokun3 rescue: boot failed ============="
+    echo "Reason: $*"
     echo
-    echo "已知的块设备:"
+    echo "Known block devices:"
     ls /sys/class/block 2>/dev/null | tr '\n' ' '; echo
     echo "cmdline: $(cat /proc/cmdline 2>/dev/null)"
     echo "======================================================="
     if [ -n "$DEBUG" ]; then
-        echo "gk3.debug 已给 —— 进 shell。exit 之后会重启。"
+        echo "gk3.debug is set: starting a shell. The system reboots after exit."
         sh
     else
-        echo "60 秒后重启（回到启动菜单；加 gk3.debug 可以停在这里）"
+        echo "Rebooting in 60 seconds (back to the boot menu; add gk3.debug to stop here instead)"
         sleep 60
     fi
     reboot -f
@@ -46,8 +46,8 @@ fail() {
 }
 
 mkdir -p /proc /sys /dev /mnt /lower /upper /newroot
-mount -t proc     proc     /proc  || fail "挂 /proc 失败"
-mount -t sysfs    sysfs    /sys   || fail "挂 /sys 失败"
+mount -t proc     proc     /proc  || fail "mounting /proc failed"
+mount -t sysfs    sysfs    /sys   || fail "mounting /sys failed"
 mount -t devtmpfs devtmpfs /dev 2>/dev/null || mount -t tmpfs tmpfs /dev
 
 for arg in $(cat /proc/cmdline); do
@@ -61,7 +61,7 @@ done
 # devtmpfs 已经把节点建好了；没有的话用 mdev 兜底
 [ -e /dev/null ] || /bin/busybox mdev -s
 
-say "找 $SQUASH"
+say "looking for $SQUASH"
 
 MEDIA=
 try_dev() {
@@ -69,7 +69,7 @@ try_dev() {
     [ -b "$d" ] || return 1
     mount -o ro "$d" /mnt 2>/dev/null || return 1
     if [ -f "/mnt$SQUASH" ]; then
-        say "找到了：$d"
+        say "found on $d"
         MEDIA=$d
         return 0
     fi
@@ -82,8 +82,8 @@ try_dev() {
 #   原先两条路都只看一眼就下结论 —— Alpine 版 M0 靠扫描找到了 p3，可能只是时序碰巧。
 if [ -n "$FORCE_DEV" ]; then
     i=0; while [ ! -b "$FORCE_DEV" ] && [ $i -lt 15 ]; do sleep 1; i=$((i + 1)); done
-    [ -b "$FORCE_DEV" ] || fail "等了 15 秒，gk3.dev=$FORCE_DEV 还不是块设备"
-    try_dev "$FORCE_DEV" || fail "gk3.dev=$FORCE_DEV 上没有 $SQUASH"
+    [ -b "$FORCE_DEV" ] || fail "gk3.dev=$FORCE_DEV is still not a block device after 15 seconds"
+    try_dev "$FORCE_DEV" || fail "$SQUASH not found on gk3.dev=$FORCE_DEV"
 else
     # ★ 先试可移动介质（U 盘），再试内置盘。
     #   理由：插着 LiveCD 启动时，用户想要的是【U 盘上那一份】，
@@ -91,7 +91,7 @@ else
     # 扫一遍没找到就等 2 秒再扫，最多 5 遍（理由见上面强制设备那一支）
     tries=0
     while [ -z "$MEDIA" ] && [ $tries -lt 5 ]; do
-        [ $tries -gt 0 ] && { say "还没找到，2 秒后再扫（第 $((tries + 1)) 遍）"; sleep 2; }
+        [ $tries -gt 0 ] && { say "not found yet, scanning again in 2 seconds (pass $((tries + 1)))"; sleep 2; }
         for pass in removable fixed; do
             [ -n "$MEDIA" ] && break
             for sysdev in /sys/class/block/*; do
@@ -114,28 +114,28 @@ else
     done
 fi
 
-[ -n "$MEDIA" ] || fail "所有分区上都没有 $SQUASH"
+[ -n "$MEDIA" ] || fail "$SQUASH not found on any partition"
 
-mount -o ro,loop "/mnt$SQUASH" /lower || fail "挂 squashfs 失败（内核缺 CONFIG_SQUASHFS？）"
+mount -o ro,loop "/mnt$SQUASH" /lower || fail "mounting the squashfs failed (kernel without CONFIG_SQUASHFS?)"
 
 # 整个系统跑在内存里：改动落在 tmpfs，介质保持只读。
 # ⚠️ 这台机器 15.7 GiB 内存，50% 上限足够，而且留了一半给安装过程用。
-mount -t tmpfs -o size=50%,mode=0755 tmpfs /upper || fail "挂 tmpfs 失败"
+mount -t tmpfs -o size=50%,mode=0755 tmpfs /upper || fail "mounting the tmpfs failed"
 mkdir -p /upper/rw /upper/work
 mount -t overlay overlay \
       -o lowerdir=/lower,upperdir=/upper/rw,workdir=/upper/work /newroot \
-      || fail "挂 overlayfs 失败（内核缺 CONFIG_OVERLAY_FS？）"
+      || fail "mounting the overlayfs failed (kernel without CONFIG_OVERLAY_FS?)"
 
 # 把介质本身也带进去：安装器要从 U 盘上读 super.img / boot.img
 mkdir -p /newroot/media/gk3
-mount --move /mnt /newroot/media/gk3 2>/dev/null || say "警告：介质没能移进新根"
+mount --move /mnt /newroot/media/gk3 2>/dev/null || say "warning: could not move the boot medium into the new root"
 
 mkdir -p /newroot/proc /newroot/sys /newroot/dev
 mount --move /proc /newroot/proc
 mount --move /sys  /newroot/sys
 mount --move /dev  /newroot/dev
 
-[ -x /newroot/sbin/init ] || fail "新根里没有 /sbin/init"
+[ -x /newroot/sbin/init ] || fail "/sbin/init not found in the new root"
 say "switch_root"
 exec switch_root /newroot /sbin/init
-fail "switch_root 没成功"
+fail "switch_root failed"

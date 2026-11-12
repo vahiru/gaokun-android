@@ -9,7 +9,7 @@ This repository contains the Android device tree, custom HALs and system service
 - [`device/huawei/gaokun3/`](device/huawei/gaokun3/): Android device configuration, custom AIDL HALs (camera, sensors, light, USB, boot control, audio hooks/mic array/NPU denoise/speaker effects), stylus daemon, Parts settings app, and SELinux policies.
 - [`patches/`](patches/README.md): Patch queues organized by target tree and subsystem (`kernel/`, `android/`, `mesa/`, `libcamera/`, `resukisu/`), applied by [`scripts/kernel-apply-patches.sh`](scripts/kernel-apply-patches.sh), [`scripts/crdroid-tree-fixes.py`](scripts/crdroid-tree-fixes.py), [`scripts/mesa-a17/regen.sh`](scripts/mesa-a17/regen.sh), [`scripts/camera/setup-libcamera-tree.sh`](scripts/camera/setup-libcamera-tree.sh), and [`scripts/kernel-setup-resukisu.sh`](scripts/kernel-setup-resukisu.sh).
 - [`scripts/crdroid-tree-fixes.py`](scripts/crdroid-tree-fixes.py): Modifications applied to other AOSP/crDroid repositories. Register any AOSP change outside `device/huawei/gaokun3/` here.
-- [`tools/`](tools/) and [`live/`](live/): Self-contained subprojects — [`tools/gk3boot/`](tools/gk3boot/README.md) (UEFI boot manager `gk3boot.efi` and `fastboot` executor), [`tools/gk3-installer/`](tools/gk3-installer/Cargo.toml) (Rust installer backend), and [`live/installer-flutter/`](live/installer-flutter/README.md) (Flutter graphical installer frontend, built via [`scripts/live/`](scripts/live/README.md)).
+- [`tools/`](tools/) and [`installer/`](installer/): Self-contained subprojects — [`tools/gk3boot/`](tools/gk3boot/README.md) (UEFI boot manager `gk3boot.efi` and `fastboot` executor), [`tools/gk3-installer/`](tools/gk3-installer/Cargo.toml) (Rust installer backend), and [`installer/live/`](installer/live/README.md) (Flutter graphical installer frontend, built via [`scripts/live/`](scripts/live/README.md)).
 - `refs/` (git-ignored, fetched via `bash scripts/clone-refs.sh`): Read-only reference trees (`linux-gaokun`, `gaokun-buildbot`, `aospm-*`, `lineage-sepolicy`).
 
 ## 2. Patch Queue Workflow & Format (`patches/`)
@@ -53,7 +53,7 @@ Modifications to upstream source trees (Linux kernel, AOSP/crDroid repositories,
 - **Local verification commands**:
   - Boot manager & fastboot: `make -C tools/gk3boot/core test`; container tests: `bash scripts/gk3boot/test-{boot,probe,fastbootd,executor}.sh`
   - Installer backend: `bash tools/gk3-installer/build.sh test` and `lint`; container differential tests: `bash scripts/live/test-in-container.sh scripts/live/test-{duel,apply}.sh`
-  - Installer frontend: `flutter test` inside `live/installer-flutter/`
+  - Installer frontend: `flutter test` inside `installer/live/`
   - Kernel patches & config: `bash scripts/kernel-apply-patches.sh <kernel-tree> --check`, `bash scripts/kernel-config-android.sh <kout>`
   - Documentation links: `python3 -I scripts/check-doc-links.py`
   - On-device release acceptance: `SER=gaokun3 bash scripts/accept.sh` (see [`docs/dev/release-checklist.md`](docs/dev/release-checklist.md))
@@ -70,7 +70,7 @@ Modifications to upstream source trees (Linux kernel, AOSP/crDroid repositories,
 
 1. **Document hierarchy**:
    - [`docs/`](docs/) top level: User- and contributor-facing documents only (`INSTALL`, `FAQ`, `known-limitations`, `BUILDING`, `TODO`, `relnotes/`). Do not place developer design docs or planning files at the top level of `docs/`.
-   - Component `README.md` (`device/huawei/gaokun3/<module>/`, `tools/<tool>/`, `scripts/<dir>/`, `live/`): Document single-component usage, interfaces, parameters, and verification next to the code.
+   - Component `README.md` (`device/huawei/gaokun3/<module>/`, `tools/<tool>/`, `scripts/<dir>/`, `installer/<app>/`): Document single-component usage, interfaces, parameters, and verification next to the code.
    - [`docs/dev/`](docs/dev/): Cross-layer and subsystem architecture documentation. Prefer updating existing files; create a new file under `docs/dev/` only when introducing a distinct new subsystem, and register it in [`docs/README.md`](docs/README.md).
 2. **Content & tone**:
    - Document **current architecture, design rationale (why), build/verification steps, and known limitations**. Code comments should explain non-obvious hardware or framework constraints, not change history.

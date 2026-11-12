@@ -413,6 +413,15 @@ gk3_setdef gk3_rec_set_default_req(const uint8_t *rec);
 void gk3_rec_put_set_default_req(uint8_t *rec, gk3_setdef v);
 gk3_os gk3_rec_default_os(const uint8_t *rec);
 void gk3_rec_put_default_os(uint8_t *rec, gk3_os v);
+
+/* 安装器写进 misc 的初始状态（gk3-misc init 与 Windows 安装器共用这一份）：
+ *   head = misc 偏移 0 起的 GK3_MISC_INIT_HEAD_SIZE 字节：BCB 清零 + bootloader_control（gk3_bcab_init_install）；
+ *   rec  = misc 偏移 GK3_MISC_GK3_OFF 的 GK3 记录：gk3_rec_init + 在全零 BCB 上做首跑迁移，def 不是 NONE 时再放一个
+ *          set_default 请求，最后 seal。
+ * slot 0/1 是装进去的那一槽。两份都用 gk3_bcab_validate / gk3_rec_validate 自检过才返回 GK3_OK。 */
+#define GK3_MISC_INIT_HEAD_SIZE (GK3_MISC_BCAB_OFF + GK3_MISC_BCAB_SIZE)
+gk3_err gk3_misc_build_install(uint8_t head[GK3_MISC_INIT_HEAD_SIZE], uint8_t rec[GK3_REC_SIZE], unsigned slot,
+                               gk3_setdef def);
 bool gk3_rec_clean_poweroff(const uint8_t *rec);
 /* "现在实际上默认是不是 Windows"：有 set_default 请求就按请求（入口下次运行时先应用它，§4.9.3 b），否则看缓存。
  * HAL 的 mark-poweroff 与 Parts 的显示都用这一条规则。 */

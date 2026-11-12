@@ -34,7 +34,7 @@ ip link set lo up 2>/dev/null
 #   （内建 ath11k 在 initramfs 阶段 t≈1.19s 就 probe，所以固件也打进了 initramfs，
 #    见 scripts/live/README.md。这里是第二道保险。）
 if [ -z "$IFACE" ]; then
-    echo "没有无线网卡 —— 试着重新绑定 ath11k_pci"
+    echo "No wireless interface; trying to rebind ath11k_pci"
     DRV=/sys/bus/pci/drivers/ath11k_pci
     if [ -d "$DRV" ]; then
         for dev in /sys/bus/pci/devices/*; do
@@ -45,18 +45,18 @@ if [ -z "$IFACE" ]; then
             case "$(cat "$dev/class" 2>/dev/null)" in 0x0280*) ;; *) continue ;; esac
             echo "$(basename "$dev")" > "$DRV/unbind" 2>/dev/null
             echo "$(basename "$dev")" > "$DRV/bind" 2>/dev/null
-            echo "  重绑 $(basename "$dev")"
+            echo "  rebound $(basename "$dev")"
         done
         i=0; while [ -z "$IFACE" ] && [ $i -lt 15 ]; do sleep 1; i=$((i+1)); IFACE=$(wifi_if); done
     else
-        echo "  连 $DRV 都没有 —— 驱动没编进内核？"
+        echo "  $DRV does not exist; is the driver built into the kernel?"
     fi
 fi
 if [ -z "$IFACE" ]; then
-    echo "还是没有无线网卡。看 /media/gk3/gaokun3/diag/ 里 gk3-diag 写的日志"
+    echo "Still no wireless interface. See the gk3-diag report in /media/gk3/gaokun3/diag/"
     exit 1
 fi
-echo "无线网卡：$IFACE"
+echo "Wireless interface: $IFACE"
 
 CONF=
 [ -f "$MEDIA_CONF" ] && CONF=$MEDIA_CONF
@@ -67,9 +67,9 @@ mkdir -p /run/gaokun3
 chmod 600 "$RUN_CONF"
 if [ -z "$CONF" ]; then
     # 没有凭据也照样起 wpa_supplicant（只带控制接口）：安装器的 WiFi 页要用它扫描、连网
-    echo "找不到 wpa_supplicant.conf —— 只起控制接口，等人在安装器里连（或放一份到 $MEDIA_CONF 再重启）"
+    echo "No wpa_supplicant.conf found; starting the control interface only. Connect from the installer, or put a configuration at $MEDIA_CONF and reboot"
 else
-    echo "启动 WiFi（配置来自 ${CONF}）"
+    echo "Starting Wi-Fi (configuration from ${CONF})"
 fi
 ip link set "$IFACE" up
 wpa_supplicant -B -i "$IFACE" -c "$RUN_CONF" -P /run/wpa_supplicant.pid || exit 1

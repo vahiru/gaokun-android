@@ -1,0 +1,12 @@
+E PROGRESS 1 check
+D 21
+E no install-artifacts.sha256 in the release directory, skipping the sha256 check
+D 24
+E   Image         16015872 bytes
+E   ramdisk.img   13158233 bytes
+E   gaokun3.dtb     174298 bytes
+E PROGRESS 1 test-zst
+D 191
+E ERR code=zst-corrupt why=zst-truncated touched=no
+E !! super.img.zst is incomplete or not a valid sparse image; download it again (disk not touched)
+X 1

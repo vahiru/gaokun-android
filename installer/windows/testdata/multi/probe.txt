@@ -1,0 +1,15 @@
+D 30
+O DISK path=disk2 num=2 size_mib=488387 sector=512 physsector=4096 model=321JN0256GB bus=nvme removable=0 system=yes table=gpt rawgpt=ok
+O PART path=disk2p1 disk=disk2 num=1 idx=1 start=2048 end=616447 size_mib=300 size_kib=307200 type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B uuid=FEAB9451-D5DC-4B6B-A1D4-FC108EB770AB attrs=0x0000000000000000 name=EFI%20system%20partition fs=FAT32 fslabel=SYSTEM letter= vol=\\?\Volume{feab9451-d5dc-4b6b-a1d4-fc108eb770ab}\ os=esp
+O PART path=disk2p2 disk=disk2 num=2 idx=2 start=616448 end=649215 size_mib=16 size_kib=16384 type=E3C9E316-0B5C-4DB8-817D-F92DF00215AE uuid=D3F26AB8-B686-4AF0-B05B-70ABE40FE9B0 attrs=0x0000000000000000 name=Microsoft%20reserved%20partition fs= fslabel= letter= vol= os=msr
+O PART path=disk2p3 disk=disk2 num=3 idx=3 start=649216 end=252307455 size_mib=122880 size_kib=125829120 type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7 uuid=87B88359-2F60-49D0-B1F0-560921324AD1 attrs=0x0000000000000000 name=Basic%20data%20partition fs=NTFS fslabel=Windows letter= vol=\\?\Volume{87b88359-2f60-49d0-b1f0-560921324ad1}\ os=windows
+O PART path=disk2p4 disk=disk2 num=4 idx=4 start=252307456 end=811468799 size_mib=273028 size_kib=279580672 type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7 uuid=AE07CF13-4FD1-406E-AD82-B0AF4BBFF310 attrs=0x0000000000000000 name=Basic%20data%20partition fs=NTFS fslabel=Data letter= vol=\\?\Volume{ae07cf13-4fd1-406e-ad82-b0af4bbff310}\ os=windows
+O PART path=disk2p5 disk=disk2 num=5 idx=5 start=958269440 end=960366591 size_mib=1024 size_kib=1048576 type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7 uuid=61581E99-D261-4E0F-8C29-7DD35E14FC88 attrs=0x0000000000000000 name=Basic%20data%20partition fs=FAT32 fslabel=WINPE letter= vol=\\?\Volume{61581e99-d261-4e0f-8c29-7dd35e14fc88}\ os=fat
+O PART path=disk2p6 disk=disk2 num=6 idx=6 start=960366592 end=998115327 size_mib=18432 size_kib=18874368 type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7 uuid=F384DA97-C41B-45E0-AA82-3CBF6557760F attrs=0x0000000000000000 name=Basic%20data%20partition fs=NTFS fslabel=Onekey letter= vol=\\?\Volume{f384da97-c41b-45e0-aa82-3cbf6557760f}\ os=windows
+O PART path=disk2p7 disk=disk2 num=7 idx=7 start=998115328 end=1000214527 size_mib=1025 size_kib=1049600 type=DE94BBA4-06D1-4D40-A16A-BFD50179D6AC uuid=F464734C-CC15-4FA9-AB31-042AF3BB58DF attrs=0x8000000000000001 name=Basic%20data%20partition fs=NTFS fslabel=WinRE letter= vol=\\?\Volume{f464734c-cc15-4fa9-ab31-042af3bb58df}\ os=winre
+O PART path=disk2p8 disk=disk2 num=8 idx=8 start=842926080 end=847120383 size_mib=2048 size_kib=2097152 type=0FC63DAF-8483-4772-8E79-3D69D8477DE4 uuid=57500F37-5D64-44BA-9D7B-7E7B6564A6C6 attrs=0x0000000000000000 name=spacer1 fs= fslabel= letter= vol= os=
+O PART path=disk2p9 disk=disk2 num=9 idx=9 start=899549184 end=903743487 size_mib=2048 size_kib=2097152 type=0FC63DAF-8483-4772-8E79-3D69D8477DE4 uuid=6EEA0727-9FC3-4EA8-A626-2C25B68F654B attrs=0x0000000000000000 name=spacer2 fs= fslabel= letter= vol= os=
+O FREE disk=disk2 start=811468800 end=842926079 size_mib=15360
+O FREE disk=disk2 start=847120384 end=899549183 size_mib=25600
+O FREE disk=disk2 start=903743488 end=958269439 size_mib=26624
+X 0

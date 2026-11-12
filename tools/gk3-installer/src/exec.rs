@@ -9,7 +9,7 @@
 //! 每次执行都留下完整命令行、退出状态、耗时、stdout / stderr 的长度（[`Output`]），调用方决定怎么报；
 //! 宿主（host.rs）另把它们写进追踪日志（`GK3_TRACE`）。
 //!
-//! ⚠️ 子进程【不】另开进程组：前端取消下载时是按进程组发 TERM 的（live/installer-flutter/lib/backend/shell_backend.dart:30-35、
+//! ⚠️ 子进程【不】另开进程组：前端取消下载时是按进程组发 TERM 的（installer/live/lib/backend/shell_backend.dart:30-35、
 //!    :127-129），另开进程组的子进程会成为孤儿、照样往盘上写。所以超时只杀子进程本身（我们调的 sgdisk / blkid /
 //!    lsblk / findmnt 都不再 fork）。将来要跑管道（zstd | unsparse）时，每一段都是这里的一个 Cmd，各自被看管。
 

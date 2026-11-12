@@ -1,0 +1,4 @@
+# 场景：同 nospace-mft，MFT 挪到前部之后：分析仍停在 MFT 开头的系统记录上（同一测试卷挪完之后真跑的，盘符换成 C:）
+# probe：同 nospace；preflight 用 common 里平板的
+probe                     probe.txt
+shrink-info *             shrink-info.txt

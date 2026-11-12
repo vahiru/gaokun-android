@@ -1,0 +1,3 @@
+D 249
+O PREFLIGHT manufacturer=HUAWEI model=GK-W7X model_ok=yes secure_boot=on bitlocker=on bitlocker_key_ids=3F2A9C41 fast_startup=off hibernate=on hiberfil=yes ac=yes battery=95
+X 0

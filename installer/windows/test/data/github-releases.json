@@ -1,0 +1,668 @@
+[
+ {
+  "tag_name": "v1.0.0-rc.3",
+  "name": "v1.0.0-rc.3 — EFI pstore fix · Android 17",
+  "published_at": "2026-10-30T02:40:31Z",
+  "prerelease": true,
+  "draft": false,
+  "assets": [
+   {
+    "name": "boot.img",
+    "size": 29353984,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v1.0.0-rc.3/boot.img",
+    "updated_at": "2026-10-30T02:36:36Z"
+   },
+   {
+    "name": "crdroid-manifest.xml",
+    "size": 308029,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v1.0.0-rc.3/crdroid-manifest.xml",
+    "updated_at": "2026-10-30T02:38:21Z"
+   },
+   {
+    "name": "crDroidAndroid-17.0-20261030-gaokun3-v13.0.zip",
+    "size": 1413650404,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v1.0.0-rc.3/crDroidAndroid-17.0-20261030-gaokun3-v13.0.zip",
+    "updated_at": "2026-10-30T02:36:16Z"
+   },
+   {
+    "name": "install-artifacts.sha256",
+    "size": 268,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v1.0.0-rc.3/install-artifacts.sha256",
+    "updated_at": "2026-10-30T02:38:18Z"
+   },
+   {
+    "name": "kernel-base-patches.tar.gz",
+    "size": 45237,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v1.0.0-rc.3/kernel-base-patches.tar.gz",
+    "updated_at": "2026-10-30T02:38:20Z"
+   },
+   {
+    "name": "kernel-config.txt",
+    "size": 218785,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v1.0.0-rc.3/kernel-config.txt",
+    "updated_at": "2026-10-30T02:38:19Z"
+   },
+   {
+    "name": "kernel-source.txt",
+    "size": 17471,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v1.0.0-rc.3/kernel-source.txt",
+    "updated_at": "2026-10-30T02:38:18Z"
+   },
+   {
+    "name": "super.img.zst",
+    "size": 1353391738,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v1.0.0-rc.3/super.img.zst",
+    "updated_at": "2026-10-30T02:38:16Z"
+   }
+  ]
+ },
+ {
+  "tag_name": "v1.0.0-rc.2",
+  "name": "v1.0.0-rc.2 (release candidate)",
+  "published_at": "2026-10-25T09:31:07Z",
+  "prerelease": true,
+  "draft": false,
+  "assets": [
+   {
+    "name": "boot.img",
+    "size": 29274112,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v1.0.0-rc.2/boot.img",
+    "updated_at": "2026-10-25T09:07:22Z"
+   },
+   {
+    "name": "crdroid-manifest.xml",
+    "size": 289557,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v1.0.0-rc.2/crdroid-manifest.xml",
+    "updated_at": "2026-10-25T09:30:57Z"
+   },
+   {
+    "name": "gaokun3-installer-0.2.0-rc.2-release.txt",
+    "size": 267,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v1.0.0-rc.2/gaokun3-installer-0.2.0-rc.2-release.txt",
+    "updated_at": "2026-10-25T09:07:15Z"
+   },
+   {
+    "name": "gaokun3-installer-0.2.0-rc.2-SHA256SUMS",
+    "size": 585,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v1.0.0-rc.2/gaokun3-installer-0.2.0-rc.2-SHA256SUMS",
+    "updated_at": "2026-10-25T09:07:15Z"
+   },
+   {
+    "name": "gaokun3-installer-0.2.0-rc.2-usb.img.xz",
+    "size": 1590635020,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v1.0.0-rc.2/gaokun3-installer-0.2.0-rc.2-usb.img.xz",
+    "updated_at": "2026-10-25T09:18:18Z"
+   },
+   {
+    "name": "gaokun3-installer-0.2.0-rc.2-windows.zip",
+    "size": 236798199,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v1.0.0-rc.2/gaokun3-installer-0.2.0-rc.2-windows.zip",
+    "updated_at": "2026-10-25T09:08:48Z"
+   },
+   {
+    "name": "initramfs.img",
+    "size": 4189517,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v1.0.0-rc.2/initramfs.img",
+    "updated_at": "2026-10-25T09:07:17Z"
+   },
+   {
+    "name": "install-artifacts.sha256",
+    "size": 269,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v1.0.0-rc.2/install-artifacts.sha256",
+    "updated_at": "2026-10-25T09:07:14Z"
+   },
+   {
+    "name": "kernel-base-patches.tar.gz",
+    "size": 45243,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v1.0.0-rc.2/kernel-base-patches.tar.gz",
+    "updated_at": "2026-10-25T09:30:54Z"
+   },
+   {
+    "name": "kernel-config.txt",
+    "size": 218796,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v1.0.0-rc.2/kernel-config.txt",
+    "updated_at": "2026-10-25T09:30:51Z"
+   },
+   {
+    "name": "kernel-source.txt",
+    "size": 16118,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v1.0.0-rc.2/kernel-source.txt",
+    "updated_at": "2026-10-25T09:30:48Z"
+   },
+   {
+    "name": "rescue.squashfs",
+    "size": 212566016,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v1.0.0-rc.2/rescue.squashfs",
+    "updated_at": "2026-10-25T09:08:08Z"
+   },
+   {
+    "name": "super.img.zst",
+    "size": 1332240775,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v1.0.0-rc.2/super.img.zst",
+    "updated_at": "2026-10-25T09:14:24Z"
+   }
+  ]
+ },
+ {
+  "tag_name": "v1.0.0-rc.1",
+  "name": "v1.0.0-rc.1 (release candidate)",
+  "published_at": "2026-10-06T12:52:46Z",
+  "prerelease": true,
+  "draft": false,
+  "assets": [
+   {
+    "name": "boot.img",
+    "size": 29255680,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v1.0.0-rc.1/boot.img",
+    "updated_at": "2026-10-06T12:53:21Z"
+   },
+   {
+    "name": "gaokun3-installer-0.2.0-rc.1-release.txt",
+    "size": 267,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v1.0.0-rc.1/gaokun3-installer-0.2.0-rc.1-release.txt",
+    "updated_at": "2026-10-06T12:53:08Z"
+   },
+   {
+    "name": "gaokun3-installer-0.2.0-rc.1-SHA256SUMS",
+    "size": 585,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v1.0.0-rc.1/gaokun3-installer-0.2.0-rc.1-SHA256SUMS",
+    "updated_at": "2026-10-06T12:53:06Z"
+   },
+   {
+    "name": "gaokun3-installer-0.2.0-rc.1-usb.img.xz",
+    "size": 1590358516,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v1.0.0-rc.1/gaokun3-installer-0.2.0-rc.1-usb.img.xz",
+    "updated_at": "2026-10-06T13:08:09Z"
+   },
+   {
+    "name": "gaokun3-installer-0.2.0-rc.1-windows.zip",
+    "size": 236779139,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v1.0.0-rc.1/gaokun3-installer-0.2.0-rc.1-windows.zip",
+    "updated_at": "2026-10-06T12:55:16Z"
+   },
+   {
+    "name": "initramfs.img",
+    "size": 4189518,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v1.0.0-rc.1/initramfs.img",
+    "updated_at": "2026-10-06T12:53:13Z"
+   },
+   {
+    "name": "install-artifacts.sha256",
+    "size": 269,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v1.0.0-rc.1/install-artifacts.sha256",
+    "updated_at": "2026-10-06T12:52:57Z"
+   },
+   {
+    "name": "kernel-base-patches.tar.gz",
+    "size": 45243,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v1.0.0-rc.1/kernel-base-patches.tar.gz",
+    "updated_at": "2026-10-06T12:53:04Z"
+   },
+   {
+    "name": "kernel-config.txt",
+    "size": 218681,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v1.0.0-rc.1/kernel-config.txt",
+    "updated_at": "2026-10-06T12:53:02Z"
+   },
+   {
+    "name": "kernel-source.txt",
+    "size": 11221,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v1.0.0-rc.1/kernel-source.txt",
+    "updated_at": "2026-10-06T12:52:59Z"
+   },
+   {
+    "name": "rescue.squashfs",
+    "size": 212566016,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v1.0.0-rc.1/rescue.squashfs",
+    "updated_at": "2026-10-06T12:54:07Z"
+   },
+   {
+    "name": "super.img.zst",
+    "size": 1332018736,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v1.0.0-rc.1/super.img.zst",
+    "updated_at": "2026-10-06T13:01:25Z"
+   }
+  ]
+ },
+ {
+  "tag_name": "v0.7.1-alpha",
+  "name": "v0.7.1-alpha — Standby no longer hangs, Wi-Fi hotspot, USB apps, rhythm games in sync",
+  "published_at": "2026-10-04T07:35:30Z",
+  "prerelease": false,
+  "draft": false,
+  "assets": [
+   {
+    "name": "boot.img",
+    "size": 28848128,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.7.1-alpha/boot.img",
+    "updated_at": "2026-10-04T07:22:23Z"
+   },
+   {
+    "name": "crDroidAndroid-16.0-20261003-gaokun3-v12.11.zip",
+    "size": 1349526777,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.7.1-alpha/crDroidAndroid-16.0-20261003-gaokun3-v12.11.zip",
+    "updated_at": "2026-10-04T07:35:18Z"
+   },
+   {
+    "name": "gaokun3.json",
+    "size": 792,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.7.1-alpha/gaokun3.json",
+    "updated_at": "2026-10-04T07:21:58Z"
+   },
+   {
+    "name": "install-artifacts.sha256",
+    "size": 269,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.7.1-alpha/install-artifacts.sha256",
+    "updated_at": "2026-10-04T07:21:58Z"
+   },
+   {
+    "name": "super.img.zst",
+    "size": 1285335134,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.7.1-alpha/super.img.zst",
+    "updated_at": "2026-10-04T07:29:48Z"
+   }
+  ]
+ },
+ {
+  "tag_name": "v0.7.0-alpha",
+  "name": "v0.7.0-alpha — New video decoder driver, working microphone, rear-camera autofocus, installer preview",
+  "published_at": "2026-09-28T17:06:18Z",
+  "prerelease": false,
+  "draft": false,
+  "assets": [
+   {
+    "name": "boot.img",
+    "size": 28848128,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.7.0-alpha/boot.img",
+    "updated_at": "2026-09-28T16:41:33Z"
+   },
+   {
+    "name": "crDroidAndroid-16.0-20260928-gaokun3-v12.11.zip",
+    "size": 1349268996,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.7.0-alpha/crDroidAndroid-16.0-20260928-gaokun3-v12.11.zip",
+    "updated_at": "2026-09-28T16:44:33Z"
+   },
+   {
+    "name": "gaokun3-installer-0.1.0-preview-release.txt",
+    "size": 189,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.7.0-alpha/gaokun3-installer-0.1.0-preview-release.txt",
+    "updated_at": "2026-09-28T16:47:03Z"
+   },
+   {
+    "name": "gaokun3-installer-0.1.0-preview-SHA256SUMS",
+    "size": 435,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.7.0-alpha/gaokun3-installer-0.1.0-preview-SHA256SUMS",
+    "updated_at": "2026-09-28T16:47:02Z"
+   },
+   {
+    "name": "gaokun3-installer-0.1.0-preview-usb.img.xz",
+    "size": 230595904,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.7.0-alpha/gaokun3-installer-0.1.0-preview-usb.img.xz",
+    "updated_at": "2026-09-28T16:57:51Z"
+   },
+   {
+    "name": "gaokun3-installer-0.1.0-preview-windows.zip",
+    "size": 235887043,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.7.0-alpha/gaokun3-installer-0.1.0-preview-windows.zip",
+    "updated_at": "2026-09-28T16:57:59Z"
+   },
+   {
+    "name": "gaokun3.json",
+    "size": 792,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.7.0-alpha/gaokun3.json",
+    "updated_at": "2026-09-28T16:41:30Z"
+   },
+   {
+    "name": "install-artifacts.sha256",
+    "size": 269,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.7.0-alpha/install-artifacts.sha256",
+    "updated_at": "2026-09-28T16:41:29Z"
+   },
+   {
+    "name": "super.img.zst",
+    "size": 1285035193,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.7.0-alpha/super.img.zst",
+    "updated_at": "2026-09-28T16:42:56Z"
+   }
+  ]
+ },
+ {
+  "tag_name": "v0.6.2-alpha",
+  "name": "v0.6.2-alpha — Touch: fast swipes no longer break up, fuzz measured to 0, contact size reported",
+  "published_at": "2026-09-16T15:50:00Z",
+  "prerelease": false,
+  "draft": false,
+  "assets": [
+   {
+    "name": "boot.img",
+    "size": 28856320,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.6.2-alpha/boot.img",
+    "updated_at": "2026-09-16T15:39:51Z"
+   },
+   {
+    "name": "crDroidAndroid-16.0-20260916-gaokun3-v12.11.zip",
+    "size": 1346837764,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.6.2-alpha/crDroidAndroid-16.0-20260916-gaokun3-v12.11.zip",
+    "updated_at": "2026-09-16T15:49:50Z"
+   },
+   {
+    "name": "gaokun3.json",
+    "size": 792,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.6.2-alpha/gaokun3.json",
+    "updated_at": "2026-09-16T15:39:47Z"
+   },
+   {
+    "name": "install-artifacts.sha256",
+    "size": 269,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.6.2-alpha/install-artifacts.sha256",
+    "updated_at": "2026-09-16T15:39:47Z"
+   },
+   {
+    "name": "super.img.zst",
+    "size": 1279429535,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.6.2-alpha/super.img.zst",
+    "updated_at": "2026-09-16T15:47:00Z"
+   }
+  ]
+ },
+ {
+  "tag_name": "v0.6.1-alpha",
+  "name": "v0.6.1-alpha — camera crash fix, rear-camera exposure and flash, a missing sensor no longer kills the front camera",
+  "published_at": "2026-09-14T09:52:41Z",
+  "prerelease": false,
+  "draft": false,
+  "assets": [
+   {
+    "name": "boot.img",
+    "size": 28852224,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.6.1-alpha/boot.img",
+    "updated_at": "2026-09-14T09:52:40Z"
+   },
+   {
+    "name": "crDroidAndroid-16.0-20260914-gaokun3-v12.11.zip",
+    "size": 1346834440,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.6.1-alpha/crDroidAndroid-16.0-20260914-gaokun3-v12.11.zip",
+    "updated_at": "2026-09-14T10:03:02Z"
+   },
+   {
+    "name": "gaokun3.json",
+    "size": 792,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.6.1-alpha/gaokun3.json",
+    "updated_at": "2026-09-14T09:52:31Z"
+   },
+   {
+    "name": "install-artifacts.sha256",
+    "size": 269,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.6.1-alpha/install-artifacts.sha256",
+    "updated_at": "2026-09-14T09:55:26Z"
+   },
+   {
+    "name": "super.img.zst",
+    "size": 1279449558,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.6.1-alpha/super.img.zst",
+    "updated_at": "2026-09-14T10:09:12Z"
+   }
+  ]
+ },
+ {
+  "tag_name": "v0.6.0-alpha",
+  "name": "v0.6.0-alpha — Cameras (front and rear), the power-domain fix, speaker and thermal",
+  "published_at": "2026-09-13T23:02:32Z",
+  "prerelease": false,
+  "draft": false,
+  "assets": [
+   {
+    "name": "boot.img",
+    "size": 28844032,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.6.0-alpha/boot.img",
+    "updated_at": "2026-09-13T23:02:32Z"
+   },
+   {
+    "name": "crDroidAndroid-16.0-20260913-gaokun3-v12.11.zip",
+    "size": 1347492856,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.6.0-alpha/crDroidAndroid-16.0-20260913-gaokun3-v12.11.zip",
+    "updated_at": "2026-09-13T23:13:53Z"
+   },
+   {
+    "name": "gaokun3.json",
+    "size": 835,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.6.0-alpha/gaokun3.json",
+    "updated_at": "2026-09-13T23:02:16Z"
+   },
+   {
+    "name": "install-artifacts.sha256",
+    "size": 269,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.6.0-alpha/install-artifacts.sha256",
+    "updated_at": "2026-09-13T23:02:16Z"
+   },
+   {
+    "name": "super.img.zst",
+    "size": 1279466409,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.6.0-alpha/super.img.zst",
+    "updated_at": "2026-09-13T23:20:05Z"
+   }
+  ]
+ },
+ {
+  "tag_name": "v0.5.0-alpha",
+  "name": "v0.5.0-alpha — HEVC decode, Bluetooth audio, and the back gesture",
+  "published_at": "2026-08-24T11:14:47Z",
+  "prerelease": false,
+  "draft": false,
+  "assets": [
+   {
+    "name": "boot.img",
+    "size": 28745728,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.5.0-alpha/boot.img",
+    "updated_at": "2026-08-24T11:14:46Z"
+   },
+   {
+    "name": "install-artifacts.sha256",
+    "size": 383,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.5.0-alpha/install-artifacts.sha256",
+    "updated_at": "2026-08-24T11:14:41Z"
+   },
+   {
+    "name": "ReSukiSU_v4.2.0-rc1_35061-arm64-v8a-release.apk",
+    "size": 8555894,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.5.0-alpha/ReSukiSU_v4.2.0-rc1_35061-arm64-v8a-release.apk",
+    "updated_at": "2026-08-24T11:14:42Z"
+   }
+  ]
+ },
+ {
+  "tag_name": "v0.4.0-alpha",
+  "name": "v0.4.0-alpha — hardware video decode, and Google apps",
+  "published_at": "2026-08-22T18:00:11Z",
+  "prerelease": true,
+  "draft": false,
+  "assets": [
+   {
+    "name": "boot.img",
+    "size": 27508736,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.4.0-alpha/boot.img",
+    "updated_at": "2026-08-22T18:00:11Z"
+   },
+   {
+    "name": "gaokun3.json",
+    "size": 792,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.4.0-alpha/gaokun3.json",
+    "updated_at": "2026-08-22T18:00:07Z"
+   },
+   {
+    "name": "install-artifacts.sha256",
+    "size": 269,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.4.0-alpha/install-artifacts.sha256",
+    "updated_at": "2026-08-22T18:00:07Z"
+   }
+  ]
+ },
+ {
+  "tag_name": "v0.3.0-alpha",
+  "name": "v0.3.0-alpha — the machine can sleep, and the headphone jack works",
+  "published_at": "2026-08-21T18:44:05Z",
+  "prerelease": true,
+  "draft": false,
+  "assets": [
+   {
+    "name": "boot.img",
+    "size": 27504640,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.3.0-alpha/boot.img",
+    "updated_at": "2026-08-21T18:44:04Z"
+   },
+   {
+    "name": "gaokun3.json",
+    "size": 988,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.3.0-alpha/gaokun3.json",
+    "updated_at": "2026-08-21T18:44:00Z"
+   },
+   {
+    "name": "install-artifacts.sha256",
+    "size": 269,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.3.0-alpha/install-artifacts.sha256",
+    "updated_at": "2026-08-21T18:44:01Z"
+   }
+  ]
+ },
+ {
+  "tag_name": "v0.2.0-alpha",
+  "name": "v0.2.0-alpha — sensors work, and the kernel now ships over OTA",
+  "published_at": "2026-08-20T12:49:23Z",
+  "prerelease": true,
+  "draft": false,
+  "assets": [
+   {
+    "name": "boot.img",
+    "size": 27277312,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.2.0-alpha/boot.img",
+    "updated_at": "2026-08-20T12:49:44Z"
+   },
+   {
+    "name": "gaokun3.json",
+    "size": 1170,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.2.0-alpha/gaokun3.json",
+    "updated_at": "2026-08-20T12:49:37Z"
+   },
+   {
+    "name": "install-artifacts.sha256",
+    "size": 155,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.2.0-alpha/install-artifacts.sha256",
+    "updated_at": "2026-08-20T12:49:37Z"
+   }
+  ]
+ },
+ {
+  "tag_name": "v0.1.1-alpha",
+  "name": "v0.1.1-alpha — 系统内 OTA 可用 / In-system updates work",
+  "published_at": "2026-08-20T03:15:58Z",
+  "prerelease": true,
+  "draft": false,
+  "assets": [
+   {
+    "name": "crDroidAndroid-16.0-20260820-gaokun3-v12.11.zip",
+    "size": 1061086069,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.1.1-alpha/crDroidAndroid-16.0-20260820-gaokun3-v12.11.zip",
+    "updated_at": "2026-08-20T03:20:05Z"
+   },
+   {
+    "name": "crDroidAndroid-16.0-20260820-gaokun3-v12.11.zip.sha256sum",
+    "size": 114,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.1.1-alpha/crDroidAndroid-16.0-20260820-gaokun3-v12.11.zip.sha256sum",
+    "updated_at": "2026-08-20T03:16:09Z"
+   },
+   {
+    "name": "gaokun3.json",
+    "size": 1170,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.1.1-alpha/gaokun3.json",
+    "updated_at": "2026-08-20T03:16:10Z"
+   },
+   {
+    "name": "Image",
+    "size": 39422464,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.1.1-alpha/Image",
+    "updated_at": "2026-08-20T03:16:48Z"
+   },
+   {
+    "name": "install-artifacts.sha256",
+    "size": 324,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.1.1-alpha/install-artifacts.sha256",
+    "updated_at": "2026-08-20T03:16:08Z"
+   },
+   {
+    "name": "ramdisk.img",
+    "size": 13080354,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.1.1-alpha/ramdisk.img",
+    "updated_at": "2026-08-20T03:16:24Z"
+   },
+   {
+    "name": "sc8280xp-huawei-gaokun3.dtb",
+    "size": 169150,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.1.1-alpha/sc8280xp-huawei-gaokun3.dtb",
+    "updated_at": "2026-08-20T03:16:09Z"
+   },
+   {
+    "name": "super.img.zst",
+    "size": 1284700339,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.1.1-alpha/super.img.zst",
+    "updated_at": "2026-08-20T03:22:40Z"
+   }
+  ]
+ },
+ {
+  "tag_name": "v0.1.0-alpha",
+  "name": "v0.1.0-alpha — Android 16 on the MateBook E Go",
+  "published_at": "2026-08-20T01:00:11Z",
+  "prerelease": true,
+  "draft": false,
+  "assets": [
+   {
+    "name": "crDroidAndroid-16.0-20260820-gaokun3-v12.11.zip",
+    "size": 1061087197,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.1.0-alpha/crDroidAndroid-16.0-20260820-gaokun3-v12.11.zip",
+    "updated_at": "2026-08-20T01:04:12Z"
+   },
+   {
+    "name": "crDroidAndroid-16.0-20260820-gaokun3-v12.11.zip.sha256sum",
+    "size": 114,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.1.0-alpha/crDroidAndroid-16.0-20260820-gaokun3-v12.11.zip.sha256sum",
+    "updated_at": "2026-08-20T01:00:26Z"
+   },
+   {
+    "name": "gaokun3.json",
+    "size": 1186,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.1.0-alpha/gaokun3.json",
+    "updated_at": "2026-08-20T01:00:27Z"
+   },
+   {
+    "name": "Image",
+    "size": 39422464,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.1.0-alpha/Image",
+    "updated_at": "2026-08-20T01:01:03Z"
+   },
+   {
+    "name": "install-artifacts.sha256",
+    "size": 324,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.1.0-alpha/install-artifacts.sha256",
+    "updated_at": "2026-08-20T01:00:25Z"
+   },
+   {
+    "name": "ramdisk.img",
+    "size": 13080354,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.1.0-alpha/ramdisk.img",
+    "updated_at": "2026-08-20T01:00:38Z"
+   },
+   {
+    "name": "sc8280xp-huawei-gaokun3.dtb",
+    "size": 169150,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.1.0-alpha/sc8280xp-huawei-gaokun3.dtb",
+    "updated_at": "2026-08-20T01:00:25Z"
+   },
+   {
+    "name": "super.img.zst",
+    "size": 1322740927,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/v0.1.0-alpha/super.img.zst",
+    "updated_at": "2026-08-20T01:06:52Z"
+   }
+  ]
+ }
+]

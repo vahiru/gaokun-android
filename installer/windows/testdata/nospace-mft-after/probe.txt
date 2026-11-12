@@ -1,0 +1,9 @@
+D 20
+O DISK path=disk0 num=0 size_mib=1907729 sector=512 physsector=4096 model=KIOXIA-EXCERIA%20PLUS%20G3%20SSD bus=nvme removable=0 system=no table=gpt rawgpt=ok
+O PART path=disk0p1 disk=disk0 num=1 idx=1 start=34 end=32767 size_mib=15 size_kib=16367 type=E3C9E316-0B5C-4DB8-817D-F92DF00215AE uuid=8FCF017F-E156-443A-9854-D1660A3A7B21 attrs=0x0000000000000000 name=Microsoft%20reserved%20partition fs= fslabel= letter= vol= os=msr
+O PART path=disk0p2 disk=disk0 num=2 idx=2 start=32768 end=3907029134 size_mib=1907713 size_kib=1953498183 type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7 uuid=F70605DA-1701-419E-BE77-FB022DA66073 attrs=0x0000000000000000 name=Basic%20data%20partition fs=exFAT fslabel= letter=D vol=\\?\Volume{f70605da-1701-419e-be77-fb022da66073}\ os=
+O DISK path=disk1 num=1 size_mib=976762 sector=512 physsector=4096 model=UMIS%20RPJYJ1T24RLS1QWY bus=nvme removable=0 system=yes table=gpt rawgpt=ok
+O PART path=disk1p1 disk=disk1 num=1 idx=1 start=2048 end=1050623 size_mib=512 size_kib=524288 type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B uuid=C29B3833-B8D9-46B0-A44E-1488A05A1995 attrs=0x8000000000000000 name=EFI%20system%20partition fs=FAT32 fslabel= letter= vol=\\?\Volume{c29b3833-b8d9-46b0-a44e-1488a05a1995}\ os=esp
+O PART path=disk1p2 disk=disk1 num=2 idx=2 start=1050624 end=1083391 size_mib=16 size_kib=16384 type=E3C9E316-0B5C-4DB8-817D-F92DF00215AE uuid=A19B4B3B-1E1D-4065-9645-694A0AA9D5C6 attrs=0x8000000000000000 name=Microsoft%20reserved%20partition fs= fslabel= letter= vol= os=msr
+O PART path=disk1p3 disk=disk1 num=3 idx=3 start=1083392 end=2000408575 size_mib=976233 size_kib=999662592 type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7 uuid=0F34ADBB-9D35-43CF-9984-AAFBE374093D attrs=0x0000000000000000 name=Basic%20data%20partition fs=NTFS fslabel= letter=C vol=\\?\Volume{0f34adbb-9d35-43cf-9984-aafbe374093d}\ os=windows
+X 0

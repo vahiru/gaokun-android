@@ -1,7 +1,7 @@
 <!--
   Maintenance notes (not rendered):
   * Mirrors docs/INSTALL.zh-CN.md; change both together.
-  * Installer labels follow live/installer-flutter/lib/l10n/app_en.arb; boot menu entries are quoted as they appear.
+  * Installer labels follow installer/live/lib/l10n/app_en.arb; boot menu entries are quoted as they appear.
   * The installer's risk page (riskExpBody) refers to the section "What has been tested on real hardware";
     if you rename it, update app_en.arb and app_zh.arb too.
 -->

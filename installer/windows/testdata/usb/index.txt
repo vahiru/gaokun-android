@@ -1,0 +1,4 @@
+# 场景：插着一个 U 盘 —— 制作独立安装介质时可选 U 盘或本机磁盘
+# probe：PC 上仿出厂布局的 VHDX（Data 缩出 40 GiB），只留这块盘、标成系统盘，型号 / 总线换成平板的（321JN0256GB / nvme）；其余行原样
+# ⚠️ U 盘那一行（disk3，Generic Flash Disk）是虚构的：还没有插着真 U 盘的录制，有了就换成真的
+probe                     probe.txt

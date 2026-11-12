@@ -1,0 +1,245 @@
+/* Windows：安装前检查要看的系统状态、systemd-boot 的 EFI 变量。
+ *
+ *   gk3w preflight     一行 PREFLIGHT：机型、Secure Boot、BitLocker（系统卷：保护状态、恢复密钥的 ID）、快速启动、
+ *                      休眠文件、电源（只读）
+ *
+ * 判断规则（哪些拒绝、哪些只提醒）在 gk3w_sys_gate，apply / uninstall 写真实磁盘之前调用；VHD 测试不调。 */
+#include <windows.h>
+
+#include <stdio.h>
+#include <string.h>
+#include <wchar.h>
+
+#include "../proto.h"
+#include "disk.h"
+#include "win.h"
+
+/* 允许写真实磁盘的机型（SMBIOS 的 SystemProductName）：华为 MateBook E Go（gaokun3） */
+static const char *const MODELS[] = {"GK-W7X"};
+
+/* systemd-boot 的厂商 GUID（LoaderEntryDefault 等变量所在的命名空间） */
+#define LOADER_GUID L"{4a67b082-0a4c-41cf-b6c7-440b29bb8c4f}"
+
+static int reg_dword(const wchar_t *key, const wchar_t *val, DWORD *out)
+{
+    DWORD sz = sizeof *out;
+    return RegGetValueW(HKEY_LOCAL_MACHINE, key, val, RRF_RT_REG_DWORD, NULL, out, &sz) == ERROR_SUCCESS ? 0 : -1;
+}
+
+static void reg_str(const wchar_t *key, const wchar_t *val, char *out, size_t cap)
+{
+    wchar_t w[128];
+    DWORD sz = sizeof w;
+    out[0] = 0;
+    if (RegGetValueW(HKEY_LOCAL_MACHINE, key, val, RRF_RT_REG_SZ, NULL, w, &sz) == ERROR_SUCCESS)
+        gk3w_w2u(w, out, cap);
+}
+
+/* 从物理盘直接读系统卷的引导扇区（在 BitLocker 过滤驱动之下）：加密卷的 OEM ID 是 "-FVE-FS-"。
+ * 1 = 加密卷；0 = 不是；-1 = 读不到。不依赖 WMI 服务（LiveCD 版用 blkid 按盘上签名判断，同一个思路）。 */
+static int fve_signature(wchar_t drive)
+{
+    wchar_t dev[8], path[40];
+    HANDLE h;
+    VOLUME_DISK_EXTENTS e;
+    DWORD got = 0;
+    uint8_t *buf;
+    int r = -1;
+    _snwprintf(dev, 8, L"\\\\.\\%lc:", drive);
+    h = CreateFileW(dev, 0, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+    if (h == INVALID_HANDLE_VALUE)
+        return -1;
+    if (!DeviceIoControl(h, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS, NULL, 0, &e, sizeof e, &got, NULL) || e.NumberOfDiskExtents != 1) {
+        CloseHandle(h);
+        return -1;
+    }
+    CloseHandle(h);
+    _snwprintf(path, 40, L"\\\\.\\PhysicalDrive%lu", (unsigned long)e.Extents[0].DiskNumber);
+    h = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_FLAG_NO_BUFFERING, NULL);
+    if (h == INVALID_HANDLE_VALUE)
+        return -1;
+    buf = _aligned_malloc(4096, 4096);
+    if (buf && !gk3w_pread(h, buf, 4096, (uint64_t)e.Extents[0].StartingOffset.QuadPart))
+        r = !memcmp(buf + 3, "-FVE-FS-", 8);
+    _aligned_free(buf);
+    CloseHandle(h);
+    return r;
+}
+
+void gk3w_sys_read(gk3w_sys *s)
+{
+    wchar_t win[MAX_PATH], hib[16];
+    DWORD d;
+    SYSTEM_POWER_STATUS ps;
+    memset(s, 0, sizeof *s);
+    reg_str(L"HARDWARE\\DESCRIPTION\\System\\BIOS", L"SystemManufacturer", s->manufacturer, sizeof s->manufacturer);
+    reg_str(L"HARDWARE\\DESCRIPTION\\System\\BIOS", L"SystemProductName", s->model, sizeof s->model);
+    s->secure_boot = reg_dword(L"SYSTEM\\CurrentControlSet\\Control\\SecureBoot\\State", L"UEFISecureBootEnabled", &d) ? -1 : (int)d;
+    s->hibernate = reg_dword(L"SYSTEM\\CurrentControlSet\\Control\\Power", L"HibernateEnabled", &d) ? -1 : !!d;
+    /* 只看 HiberbootEnabled，不管休眠开没开：休眠关着时快速启动暂时不起作用，但以后一打开休眠（powercfg /h on）
+     * 它就悄悄回来了，那时 Android 写 ESP 正好撞上 Windows 休眠 */
+    s->fast_startup = !reg_dword(L"SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Power", L"HiberbootEnabled", &d) && d == 1;
+    s->system_drive = GetSystemWindowsDirectoryW(win, MAX_PATH) && win[1] == L':' ? win[0] : L'C';
+    _snwprintf(hib, 16, L"%lc:\\hiberfil.sys", s->system_drive);
+    {
+        /* hiberfil.sys 被系统独占打开，GetFileAttributesW 会因共享冲突失败；目录项总读得到 */
+        WIN32_FIND_DATAW fd;
+        HANDLE fh = FindFirstFileW(hib, &fd);
+        s->hiberfil = fh != INVALID_HANDLE_VALUE;
+        if (fh != INVALID_HANDLE_VALUE)
+            FindClose(fh);
+    }
+    {
+        int conv, fve = -1;
+        int prot = gk3w_bitlocker_status(s->system_drive, s->bitlocker_key_ids, sizeof s->bitlocker_key_ids, &s->bitlocker_ids_known, &conv);
+        /* 盘上签名只在需要时读（见 gk3w_bl_state） */
+        if (prot < 0 || (prot == 0 && conv < 0))
+            fve = fve_signature(s->system_drive);
+        s->bitlocker = gk3w_bl_state(prot, conv, fve);
+    }
+    s->ac = -1;
+    s->battery = -1;
+    if (GetSystemPowerStatus(&ps)) {
+        s->ac = ps.ACLineStatus == 255 ? -1 : ps.ACLineStatus;
+        s->battery = ps.BatteryLifePercent == 255 ? -1 : ps.BatteryLifePercent;
+    }
+}
+
+int gk3w_model_ok_now(void)
+{
+    gk3w_sys s;
+    memset(&s, 0, sizeof s);
+    reg_str(L"HARDWARE\\DESCRIPTION\\System\\BIOS", L"SystemProductName", s.model, sizeof s.model);
+    return gk3w_model_ok(&s);
+}
+
+int gk3w_model_ok(const gk3w_sys *s)
+{
+    for (size_t i = 0; i < sizeof MODELS / sizeof MODELS[0]; i++)
+        if (!strcmp(s->model, MODELS[i]))
+            return 1;
+    return 0;
+}
+
+int gk3w_sys_bitlocker_on(const gk3w_sys *s)
+{
+    return s->bitlocker != GK3W_BL_STATE_OFF && s->bitlocker != GK3W_BL_STATE_SUSPENDED && s->bitlocker != GK3W_BL_STATE_CONVERTING;
+}
+
+/* 说明见 disk.h */
+int gk3w_sys_gate(const gk3w_sys *s, const char *bitlocker_key, gk3w_gate_mode mode)
+{
+    if (!gk3w_model_ok(s))
+        return gk3w_err_kv(GK3W_TOUCHED_NO, "wrong-model", "model", s->model, "this computer is not a Huawei MateBook E Go (gaokun3); refusing to write a real disk", 0), -1;
+    if (mode == GK3W_GATE_APPLY && s->secure_boot == 1)
+        return gk3w_err(GK3W_TOUCHED_NO, "secure-boot-on", "Secure Boot is on: Android would not boot. Turn Secure Boot off in the firmware setup first (disk not touched)", 0), -1;
+    if (mode == GK3W_GATE_APPLY && s->fast_startup == 1)
+        return gk3w_err(GK3W_TOUCHED_NO, "fast-startup-on",
+                        s->hibernate == 0
+                            ? "Windows Fast Startup is set (HiberbootEnabled=1); hibernation is off now, but Fast Startup returns as soon as it is turned back on, and then Windows may corrupt the EFI system partition after Android writes to it. Turn it off first: reg add \"HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Power\" /v HiberbootEnabled /t REG_DWORD /d 0 /f (disk not touched)"
+                            : "Windows Fast Startup is on: shutting down actually hibernates, and Windows may corrupt the EFI system partition after Android writes to it. Turn Fast Startup off in Power Options first (disk not touched)",
+                        0), -1;
+    /* 只有确认保护关着才不要密钥（读不到、状态未知都当作开着）：写入前会暂停保护，但重新绑定仍可能失败，
+     * 那时 Windows 要求输入恢复密钥 —— 不能让手里没有正确密钥的人改动启动链 */
+    if (s->bitlocker == GK3W_BL_STATE_CONVERTING)
+        return gk3w_err(GK3W_TOUCHED_NO, "bitlocker-converting",
+                        "BitLocker is encrypting or decrypting the system volume; whether Windows would ask for the recovery key after the boot chain changes cannot be ruled out. Wait for the conversion to finish, then run the check again (disk not touched)", 0), -1;
+    if (gk3w_sys_bitlocker_on(s)) {
+        int group = 0;
+        gk3w_bl_result r;
+        if (!bitlocker_key)
+            return gk3w_err(GK3W_TOUCHED_NO, "bitlocker-key-required",
+                            "BitLocker protection is on (or its state is unknown) and the boot chain will change. Pass the 48-digit recovery key on standard input (--bitlocker-key -) so it can be checked against the system volume first (disk not touched)", 0), -1;
+        r = gk3w_bitlocker_verify(s->system_drive, bitlocker_key, &group);
+        if (r != GK3W_BL_OK)
+            return gk3w_bitlocker_err(r, group, GK3W_TOUCHED_NO), -1;
+        gk3w_log("BitLocker: the recovery key matches the system volume");
+    }
+    if (s->ac == 0 && s->battery >= 0 && s->battery < 15)
+        return gk3w_err(GK3W_TOUCHED_NO, "low-battery", "battery below 15% and not on AC power: losing power midway leaves a half-installed disk. Plug in the charger first (disk not touched)", 0), -1;
+    if (mode == GK3W_GATE_APPLY && s->hiberfil)
+        gk3w_log("note: a hibernation file exists (Fast Startup is off). Do not start Android while Windows is hibernated");
+    return 0;
+}
+
+int gk3w_cmd_preflight(int argc, wchar_t **argv)
+{
+    gk3w_sys s;
+    gk3w_line l = {0};
+    (void)argc;
+    (void)argv;
+    gk3w_sys_read(&s);
+    gk3w_line_begin(&l, "PREFLIGHT");
+    gk3w_line_kv(&l, "gk3w", gk3w_version);
+    gk3w_line_kv(&l, "manufacturer", s.manufacturer);
+    gk3w_line_kv(&l, "model", s.model);
+    gk3w_line_kv(&l, "model_ok", gk3w_model_ok(&s) ? "yes" : "no");
+    gk3w_line_kv(&l, "secure_boot", s.secure_boot < 0 ? "unknown" : s.secure_boot ? "on" : "off");
+    gk3w_line_kv(&l, "bitlocker", s.bitlocker == GK3W_BL_STATE_OFF ? "off" : s.bitlocker == GK3W_BL_STATE_ON ? "on" : s.bitlocker == GK3W_BL_STATE_SUSPENDED ? "suspended" : s.bitlocker == GK3W_BL_STATE_CONVERTING ? "converting" : "unknown");
+    if (s.bitlocker_ids_known)
+        gk3w_line_kv(&l, "bitlocker_key_ids", s.bitlocker_key_ids);
+    gk3w_line_kv(&l, "fast_startup", s.fast_startup ? "on" : "off");
+    gk3w_line_kv(&l, "hibernate", s.hibernate < 0 ? "unknown" : s.hibernate ? "on" : "off");
+    gk3w_line_kv(&l, "hiberfil", s.hiberfil ? "yes" : "no");
+    gk3w_line_kv(&l, "ac", s.ac < 0 ? "unknown" : s.ac ? "yes" : "no");
+    if (s.battery >= 0)
+        gk3w_line_u64(&l, "battery", (uint64_t)s.battery);
+    (void)gk3w_line_emit(&l, stdout);
+    gk3w_line_free(&l);
+    return 0;
+}
+
+/* ── EFI 变量 ── */
+
+static int enable_privilege(void)
+{
+    HANDLE tok;
+    TOKEN_PRIVILEGES tp;
+    int ok;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &tok))
+        return -1;
+    tp.PrivilegeCount = 1;
+    tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
+    ok = LookupPrivilegeValueW(NULL, SE_SYSTEM_ENVIRONMENT_NAME, &tp.Privileges[0].Luid) &&
+         AdjustTokenPrivileges(tok, FALSE, &tp, 0, NULL, NULL) && GetLastError() == ERROR_SUCCESS;
+    CloseHandle(tok);
+    return ok ? 0 : -1;
+}
+
+int gk3w_loader_var_delete(const wchar_t *name, int (*ours)(const char *value))
+{
+    BYTE old[512];
+    DWORD n;
+    char nm[64], val[256] = "";
+    gk3w_w2u(name, nm, sizeof nm);
+    if (enable_privilege()) {
+        gk3w_log("cannot get SeSystemEnvironmentPrivilege, %s not checked", nm);
+        return -1;
+    }
+    n = GetFirmwareEnvironmentVariableW(name, LOADER_GUID, old, sizeof old - 2);
+    if (!n) {
+        if (GetLastError() == ERROR_ENVVAR_NOT_FOUND)
+            return 0;
+        gk3w_log("cannot read EFI variable %s (%lu)", nm, (unsigned long)GetLastError());
+        return -1;
+    }
+    old[n] = old[n + 1] = 0;   /* systemd-boot 存的是 UTF-16 */
+    gk3w_w2u((const wchar_t *)old, val, sizeof val);
+    if (ours && !ours(val)) {
+        gk3w_log("EFI variable %s=%s is not ours, kept", nm, val);
+        return 0;
+    }
+    if (!SetFirmwareEnvironmentVariableW(name, LOADER_GUID, NULL, 0)) {
+        gk3w_line l = {0};
+        gk3w_line_begin(&l, "NOTE");
+        gk3w_line_kv(&l, "code", "loadervar-stuck");
+        gk3w_line_kv(&l, "name", nm);
+        gk3w_line_kv(&l, "value", val);
+        (void)gk3w_line_emit(&l, stdout);
+        gk3w_line_free(&l);
+        gk3w_log("cannot delete EFI variable %s=%s (%lu)", nm, val, (unsigned long)GetLastError());
+        return -1;
+    }
+    gk3w_log("deleted EFI variable %s (was %s)", nm, val);
+    return 0;
+}

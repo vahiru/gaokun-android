@@ -1,0 +1,125 @@
+D 25
+E PROGRESS 1 check
+E PROGRESS 1 verify-sha
+D 23
+E boot.img: sha256 matches the release manifest
+D 665
+E super.img.zst: sha256 matches the release manifest
+D 21
+E   Image         16015872 bytes
+E   ramdisk.img   13158233 bytes
+E   gaokun3.dtb     174298 bytes
+E PROGRESS 1 test-zst
+D 5642
+E super.img.zst: full test decode passed
+E ESP: using directory 5a555ed5c660ed0f7d2f2fd4eb11babf; 56 MiB to write (net of files overwritten), 295 MiB free; Windows boot manager present: yes
+E PROGRESS 2 plan
+O PLAN op=mkpart disk=2 name=misc start=874383360 end=874391551 size_mib=4 type=8300
+O PLAN op=mkpart disk=2 name=metadata start=874391552 end=874457087 size_mib=32 type=8300
+O PLAN op=mkpart disk=2 name=boot_a start=874457088 end=874588159 size_mib=64 type=8300
+O PLAN op=mkpart disk=2 name=boot_b start=874588160 end=874719231 size_mib=64 type=8300
+O PLAN op=mkpart disk=2 name=super start=874719232 end=899885055 size_mib=12288 type=8300
+O PLAN op=mkpart disk=2 name=userdata start=899885056 end=958269439 size_mib=28508 type=8300
+D 173
+E mke2fs: metadata and userdata ext4 images created and test-decoded
+E partition table backup: D:\gk3-proto\backup\gpt-before-apply-disk2-20261111-221754-head34-tail33.bin
+E PROGRESS 5 write-gpt
+E PROGRESS 15 format
+D 111
+E the disk asked for a media verify (STATUS_VERIFY_REQUIRED, off=460745494528, 1); verified, redoing the write
+D 228
+E metadata, userdata: ext4 written (from mke2fs, read back and verified; superblock magic and label correct)
+E misc: MISCINIT slot=a default=android bcab=5f61000042434142010200006f0000000000000000000000000000000ad6c368
+E PROGRESS 30 write-super
+D 27
+E PROGRESS 30 write-super done_mib=5 total_mib=12288
+D 71
+E PROGRESS 31 write-super done_mib=37 total_mib=12288
+D 101
+E PROGRESS 32 write-super done_mib=78 total_mib=12288
+D 196
+E PROGRESS 33 write-super done_mib=146 total_mib=12288
+D 51
+E PROGRESS 34 write-super done_mib=179 total_mib=12288
+D 92
+E PROGRESS 35 write-super done_mib=224 total_mib=12288
+D 131
+E PROGRESS 36 write-super done_mib=278 total_mib=12288
+D 279
+E PROGRESS 37 write-super done_mib=379 total_mib=12288
+D 207
+E PROGRESS 38 write-super done_mib=446 total_mib=12288
+D 177
+E PROGRESS 39 write-super done_mib=511 total_mib=12288
+D 265
+E PROGRESS 40 write-super done_mib=617 total_mib=12288
+D 224
+E PROGRESS 41 write-super done_mib=703 total_mib=12288
+D 284
+E PROGRESS 42 write-super done_mib=821 total_mib=12288
+D 282
+E PROGRESS 43 write-super done_mib=934 total_mib=12288
+D 325
+E PROGRESS 44 write-super done_mib=1074 total_mib=12288
+D 191
+E PROGRESS 45 write-super done_mib=1176 total_mib=12288
+D 281
+E PROGRESS 46 write-super done_mib=1312 total_mib=12288
+D 214
+E PROGRESS 47 write-super done_mib=1403 total_mib=12288
+D 180
+E PROGRESS 48 write-super done_mib=1488 total_mib=12288
+D 280
+E PROGRESS 49 write-super done_mib=1617 total_mib=12288
+D 194
+E PROGRESS 50 write-super done_mib=1703 total_mib=12288
+D 312
+E PROGRESS 51 write-super done_mib=1821 total_mib=12288
+D 141
+E PROGRESS 52 write-super done_mib=1886 total_mib=12288
+D 158
+E PROGRESS 53 write-super done_mib=1935 total_mib=12288
+D 134
+E PROGRESS 54 write-super done_mib=1982 total_mib=12288
+D 118
+E PROGRESS 55 write-super done_mib=2037 total_mib=12288
+D 44
+E PROGRESS 56 write-super done_mib=2069 total_mib=12288
+D 197
+E PROGRESS 57 write-super done_mib=2149 total_mib=12288
+D 168
+E PROGRESS 58 write-super done_mib=2220 total_mib=12288
+D 313
+E PROGRESS 59 write-super done_mib=2314 total_mib=12288
+D 317
+E PROGRESS 60 write-super done_mib=2415 total_mib=12288
+D 242
+E PROGRESS 61 write-super done_mib=2496 total_mib=12288
+D 197
+E PROGRESS 62 write-super done_mib=2567 total_mib=12288
+D 92
+E PROGRESS 63 write-super done_mib=2621 total_mib=12288
+D 267
+E PROGRESS 64 write-super done_mib=2719 total_mib=12288
+D 389
+E PROGRESS 65 write-super done_mib=2828 total_mib=12288
+D 222
+E PROGRESS 66 write-super done_mib=2912 total_mib=12288
+D 476
+E PROGRESS 67 write-super done_mib=3038 total_mib=12288
+D 122
+E PROGRESS 68 write-super done_mib=3096 total_mib=12288
+D 172
+E PROGRESS 69 write-super done_mib=3183 total_mib=12288
+D 237
+E PROGRESS 70 write-super done_mib=12288 total_mib=12288
+E super: LP geometry magic correct
+E PROGRESS 70 write-boot
+D 98
+E PROGRESS 80 bootloader
+E backed up the original EFI/BOOT/BOOTAA64.EFI as EFI/BOOT/BOOTAA64.EFI.before-gaokun3
+D 140
+O NOTE code=efivars-skipped why=vhd
+E ESP: systemd-boot, kernel / dtb / ramdisk for both slots, both entries and loader.conf written and verified
+E PROGRESS 100 done
+X 0

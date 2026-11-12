@@ -1,0 +1,7 @@
+# 场景：系统盘上有三块空闲区 —— 15 GiB（不够）、25 GiB、26 GiB（都够，默认选最大的）
+# probe：PC 上的仿出厂 VHDX，Data 用 diskpart 缩掉 30 GiB、与原来的 40 GiB 连成一块，再用 gk3w mkpart 在中间放两个 2 GiB 的占位分区（spacer1、spacer2）切开；只留这块盘、标成系统盘，型号 / 总线换成平板的
+# plan：每块空闲区真跑的 gk3w plan
+probe                     probe.txt
+plan --sector 512 --region-start 811468800 --region-end 842926079 --disk 2 plan-811468800.txt
+plan --sector 512 --region-start 847120384 --region-end 899549183 --disk 2 plan-847120384.txt
+plan --sector 512 --region-start 903743488 --region-end 958269439 --disk 2 plan-903743488.txt

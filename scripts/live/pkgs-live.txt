@@ -1,5 +1,5 @@
 # live profile 额外的包：图形安装器（Flutter，GTK embedder）+ cage。
-# 决定见 live/installer-flutter/README.md：渲染 = 官方 flutter_linux（GTK）+ cage。
+# 决定见 installer/live/README.md：渲染 = 官方 flutter_linux（GTK）+ cage。
 #   scripts/live/render-test.Dockerfile 是这份清单的预演 —— 那边能跑，这边就该能跑。
 cage
 # ★ 旋转与缩放：cage 0.2.0 没有旋转参数，起来之后用 wlr-randr 设（gk3-installer-session）
@@ -14,7 +14,7 @@ libegl-mesa0
 libgles2
 libepoxy0
 # ★ 中文字体。⚠️ Flutter 在 Linux 上不按字符回退系统字体，主题里是按名字
-#   "WenQuanYi Micro Hei" 回退的（lib/ui/theme.dart）—— 换字体包就要一起改，build-rootfs.sh 断言它在
+#   "WenQuanYi Micro Hei" 回退的（installer/common/lib/ui/theme.dart）—— 换字体包就要一起改，build-rootfs.sh 断言它在
 fonts-wqy-microhei
 fontconfig
 # 截屏：gk3-diag 在装机失败时把屏幕存到介质上

@@ -1,6 +1,6 @@
 # 开机 45 秒后写一次：那时 WiFi/DHCP、sshd、安装器都该起来了（起不来的那一个正是要记下的）。
 [Unit]
-Description=开机 45 秒后写一次启动诊断
+Description=Write gaokun3 boot diagnostics 45 s after boot
 
 [Timer]
 OnBootSec=45s

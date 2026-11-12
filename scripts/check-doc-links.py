@@ -18,7 +18,7 @@
   非 .md 目标的锚点（如源码的 `#L12`）。
 
 默认扫 `git ls-files -co --exclude-standard` 里的全部 *.md（不在 git 里时退回目录遍历），
-排除 refs/、out/、.claude/、node_modules/、live/installer-flutter/build/ 等第三方或生成物。
+排除 refs/、out/、.claude/、node_modules/、installer/live/build/ 等第三方或生成物。
 输出每条一行：`文件:行 → 目标  原因`。
 """
 import argparse
@@ -32,8 +32,8 @@ import unicodedata
 from urllib.parse import unquote
 
 EXCLUDE_PREFIXES = (
-    "refs/", "out/", ".claude/", ".git/", "live/installer-flutter/build/",
-    "live/installer-flutter/.dart_tool/",
+    "refs/", "out/", ".claude/", ".git/", "installer/live/build/",
+    "installer/live/.dart_tool/",
 )
 EXCLUDE_PARTS = ("node_modules", ".dart_tool", "__pycache__")
 

@@ -1,0 +1,6 @@
+D 180
+E BitLocker: the recovery key matches volume C:
+D 60
+E BitLocker: protection of C: suspended; Windows resumes it after 2 restart(s)
+O BITLOCKER volume=C: key=ok suspended=2
+X 0

@@ -21,17 +21,17 @@ LOG=/run/gk3-installer/installer.log
 if mount -o remount,rw /media/gk3 2>/dev/null; then
     mkdir -p /media/gk3/gaokun3/diag 2>/dev/null && LOG=/media/gk3/gaokun3/diag/installer.log
 fi
-echo "=== $(date) 会话开始 · $(tr '\n' ' ' < /etc/gaokun3-release 2>/dev/null)· $(cat /proc/cmdline)" >> "$LOG"
+echo "=== $(date) session start | $(tr '\n' ' ' < /etc/gaokun3-release 2>/dev/null)| $(cat /proc/cmdline)" >> "$LOG"
 
 OUTNAME=$(wlr-randr 2>>"$LOG" | awk 'NR==1{print $1}')
 ROT=$(arg gk3.rotate); SCALE=$(arg gk3.scale)
 if [ -n "$OUTNAME" ]; then
     wlr-randr --output "$OUTNAME" --transform "${ROT:-270}" --scale "${SCALE:-2}" >>"$LOG" 2>&1 \
-        && echo "输出 ${OUTNAME}：transform ${ROT:-270} scale ${SCALE:-2}" >>"$LOG" \
-        || echo "⚠️ wlr-randr 设不了 $OUTNAME 的旋转/缩放" >>"$LOG"
+        && echo "output ${OUTNAME}: transform ${ROT:-270} scale ${SCALE:-2}" >>"$LOG" \
+        || echo "WARNING: wlr-randr could not set the rotation / scale of $OUTNAME" >>"$LOG"
     wlr-randr >>"$LOG" 2>&1
 else
-    echo "⚠️ wlr-randr 列不出输出" >>"$LOG"
+    echo "WARNING: wlr-randr lists no outputs" >>"$LOG"
 fi
 
 [ "$(arg gk3.renderer)" = skia ] && export GK3_RENDERER=skia

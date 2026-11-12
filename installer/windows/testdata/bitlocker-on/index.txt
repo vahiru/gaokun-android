@@ -1,0 +1,5 @@
+# 场景：Secure Boot 已关闭、BitLocker 保护开着 —— 确认页要输入恢复密钥（演示数据里任何格式正确的密钥都按通过回放）
+# preflight：common 里平板的 preflight-ok 改写（bitlocker=on，恢复密钥 ID 是编的）
+# probe：同 free（PC 上仿出厂布局的 VHDX）
+probe                     probe.txt
+preflight                 preflight.txt

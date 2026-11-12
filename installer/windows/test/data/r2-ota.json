@@ -1,0 +1,30 @@
+{
+  "response": [
+    {
+      "maintainer": "",
+      "oem": "",
+      "device": "",
+      "filename": "crDroidAndroid-17.0-20261030-gaokun3-v13.0.zip",
+      "download": "https://ota.072172.xyz/builds/crDroidAndroid-17.0-20261030-gaokun3-v13.0.zip",
+      "timestamp": 1793322048,
+      "md5": "9472a9e1079c8be107cd0b58cf766dc0",
+      "sha256": "f03d7dbecaae84ebf2f127ebbb95dbfb5fedb63757f08f84d4aad54266f8d522",
+      "size": 1413650404,
+      "version": "13.0",
+      "os_patch_level": "2026-10-01",
+      "os_sdk_level": 36,
+      "buildtype": "",
+      "forum": "",
+      "gapps": "",
+      "firmware": "",
+      "modem": "",
+      "bootloader": "",
+      "recovery": "",
+      "paypal": "",
+      "telegram": "",
+      "dt": "",
+      "common-dt": "",
+      "kernel": ""
+    }
+  ]
+}

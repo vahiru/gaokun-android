@@ -1,0 +1,523 @@
+{
+  "@@locale": "en",
+  "appTitle": "Gaokun Android Installer",
+  "fixtureBadge": "Demo data: {scenario}",
+  "railSub": "Windows Installer",
+  "railCheck": "Check",
+  "railRegion": "Location",
+  "railRelease": "Release",
+  "railOptions": "Options",
+  "railConfirm": "Confirm",
+  "railInstall": "Install",
+  "railLanguage": "中文",
+  "railFooter": "Installer {version}",
+  "btnBack": "Back",
+  "btnNext": "Next",
+  "btnRecheck": "Check again",
+  "btnManage": "Manage",
+  "btnRetry": "Retry",
+  "btnLater": "Restart later",
+  "btnRebootNow": "Restart now",
+  "btnStartOver": "Back to start",
+  "checkTitle": "Environment check",
+  "checkSub": "Before installing, please ensure this device meets the following requirements. After making any changes, click “Check again” to refresh the status.",
+  "checking": "Checking…",
+  "chkFailed": "Environment check could not be completed",
+  "chkModel": "Huawei MateBook E Go",
+  "chkModelBad": "Unsupported device",
+  "chkModelBadHow": "Gaokun Android only supports the 2022/2023 Huawei MateBook E Go (GK-W7X). Current device model: {model}.",
+  "chkSecureBootOff": "Secure Boot is disabled",
+  "chkSecureBootOn": "Secure Boot is enabled",
+  "chkSecureBootUnknown": "Unable to read Secure Boot status",
+  "chkSecureBootHow": "Please disable Secure Boot in the UEFI firmware settings, then boot back into Windows and check again.",
+  "chkSecureBootHowBitlocker": "BitLocker is enabled: disabling Secure Boot directly will cause Windows to prompt for your recovery key on its next boot. Please verify your recovery key and suspend BitLocker protection below first, then disable Secure Boot in the UEFI firmware settings, boot back into Windows, and check again.",
+  "chkFastStartupOff": "Fast Startup is disabled",
+  "chkFastStartupOn": "Fast Startup is enabled",
+  "chkFastStartupHow": "When Fast Startup is enabled, modifying the EFI partition while Windows is shut down may permanently corrupt the EFI partition on the next Windows boot and leave the tablet unbootable. Uncheck “Turn on fast startup” under Control Panel → Power Options → Choose what the power buttons do.",
+  "chkFastStartupHowReg": "When Fast Startup is enabled, modifying the EFI partition while Windows is shut down may permanently corrupt the EFI partition on the next Windows boot and leave the tablet unbootable. Run the following command as Administrator to disable Fast Startup: reg add \"HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Power\" /v HiberbootEnabled /t REG_DWORD /d 0 /f",
+  "chkBitlockerOff": "BitLocker is disabled",
+  "chkBitlockerOn": "BitLocker is enabled",
+  "chkBitlockerUnknown": "Unable to read BitLocker status",
+  "chkBitlockerHow": "Before modifying EFI boot files, the installer automatically suspends BitLocker protection (Windows resumes it on its next boot), though boot changes may still cause Windows to prompt for your recovery key. We will require you to enter the correct BitLocker recovery key at a later step to confirm that you will have a working key to unlock Windows if needed. You can retrieve your recovery key at https://aka.ms/myrecoverykey; saving a copy in advance on another device, such as your phone, is recommended.",
+  "chkBitlockerHowSecureBoot": "Before disabling Secure Boot, please verify your recovery key and suspend BitLocker protection below.",
+  "chkBitlockerConverting": "BitLocker is encrypting or decrypting the system drive",
+  "chkBitlockerConvertingHow": "Until the conversion finishes, the installer cannot determine whether Windows will prompt for a recovery key after boot files are modified. Please wait for the operation to finish (check progress in Settings → Privacy & security → Device encryption, or under BitLocker Drive Encryption in Control Panel), then check again. Encryption may pause on battery power, so connecting the power adapter is recommended.",
+  "chkBitlockerSuspended": "BitLocker protection is suspended",
+  "chkBitlockerSuspendedHow": "The system drive is encrypted, but BitLocker protection is currently suspended or awaiting activation. Windows will not prompt for a recovery key on its next boot.",
+  "chkBitlockerNoKey": "No BitLocker recovery key configured for the system drive",
+  "chkBitlockerNoKeyHow": "The system drive is encrypted, but no BitLocker recovery key is configured; if Windows enters BitLocker recovery at startup, you will not be able to unlock the system drive. To avoid being locked out of Windows, run “manage-bde -protectors -add C: -RecoveryPassword” as Administrator to generate a recovery key, save it on another device, and check again.",
+  "chkBitlockerSuspendBox": "Once verified, the installer will suspend BitLocker protection (Windows automatically resumes protection after two restarts); however, firmware changes or extra restarts may still cause Windows to prompt for your recovery key. We require you to enter the correct BitLocker recovery key here to confirm that you will have a working key to unlock Windows if needed. You can retrieve your recovery key at https://aka.ms/myrecoverykey; saving a copy in advance on another device, such as your phone, is recommended.",
+  "blKeyLabel": "BitLocker recovery key",
+  "blKeyIds": "Recovery key ID: {ids} (use this ID to find the matching key in your Microsoft account)",
+  "@blKeyIds": {
+    "placeholders": {
+      "ids": {
+        "type": "String"
+      }
+    }
+  },
+  "blVerify": "Verify key",
+  "blVerifySuspend": "Verify and suspend protection",
+  "blChecking": "Verifying the recovery key…",
+  "blOk": "The recovery key has been verified",
+  "chkBatteryLow": "Battery level too low",
+  "chkBatteryLowHow": "Battery level is below 15% and AC power is not connected. A power loss during installation may leave disk partitions in an incomplete state. Please connect the power adapter first.",
+  "chkPower": "Power",
+  "chkBatteryPct": "battery at {pct}%",
+  "chkOnAc": "Connected to AC power, {battery}",
+  "chkOnBattery": "On battery power, {battery}",
+  "chkNoSystemDisk": "Could not find the Windows system disk",
+  "chkInstalled": "Android is already installed on this device",
+  "chkInstalledHow": "Click “Manage” to view partition details or uninstall the system. To reinstall, please uninstall the existing Android installation first.",
+  "chkNoRoom": "Insufficient unallocated space (at least {need} required)",
+  "chkNoRoomNone": "There is no unallocated space on the system disk.",
+  "chkNoRoomBiggest": "The largest contiguous unallocated space on the system disk is {size}.",
+  "chkNoRoomHow": "In Windows Disk Management, right-click the C: volume and select “Shrink Volume” to free up at least {need} of unallocated space, then return here and check again.",
+  "shrinkAnalyze": "Analyze shrinkable space",
+  "shrinkReanalyze": "Analyze again",
+  "shrinkAnalyzing": "Analyzing shrinkable space on the C: volume. This may take a few minutes…",
+  "shrinkFailed": "Unable to analyze shrinkable space on the C: volume: ",
+  "shrinkEnough": "Shrinking the C: volume can free up to {max} of contiguous unallocated space, which is sufficient for Android (at least {need} required). Shrink the C: volume in Disk Management, then check again.",
+  "@shrinkEnough": {
+    "placeholders": {
+      "max": {
+        "type": "String"
+      },
+      "need": {
+        "type": "String"
+      }
+    }
+  },
+  "shrinkNotEnough": "Shrinking the C: volume can free at most {max} of contiguous unallocated space, whereas Android requires at least {need}. Further shrinking is blocked by the location of the following unmovable file:",
+  "@shrinkNotEnough": {
+    "placeholders": {
+      "max": {
+        "type": "String"
+      },
+      "need": {
+        "type": "String"
+      }
+    }
+  },
+  "shrinkNoFile": "Shrinking the C: volume can free at most {max} of contiguous unallocated space, whereas Android requires at least {need}. Unable to identify the file restricting the shrink operation; please restart the device and analyze again.",
+  "shrinkFull": "Shrinking the C: volume can free at most {max} of contiguous unallocated space, whereas Android requires at least {need}. Shrinking is limited by remaining free space on C: ({free} free) rather than by an unmovable file. Free up disk space on C: (for example via Disk Cleanup or Settings → System → Storage), then analyze again.",
+  "@shrinkFull": {
+    "placeholders": {
+      "max": {
+        "type": "String"
+      },
+      "need": {
+        "type": "String"
+      },
+      "free": {
+        "type": "String"
+      }
+    }
+  },
+  "@shrinkNoFile": {
+    "placeholders": {
+      "max": {
+        "type": "String"
+      },
+      "need": {
+        "type": "String"
+      }
+    }
+  },
+  "shrinkNext": "After resolving this item, analyze again — another unmovable file may still restrict further shrinking.",
+  "shrinkMore": "Shrinking the C: volume can free up to {total} of contiguous unallocated space. To allocate more space to the Android data partition, shrink C: in Disk Management and check again.",
+  "@shrinkMore": {
+    "placeholders": {
+      "total": {
+        "type": "String"
+      }
+    }
+  },
+  "shrinkMoreAdjacent": "Shrinking the C: volume can provide up to {total} of contiguous unallocated space in total (including the {adjacent} already following C:). To allocate more space to the Android data partition, shrink C: in Disk Management and check again.",
+  "@shrinkMoreAdjacent": {
+    "placeholders": {
+      "total": {
+        "type": "String"
+      },
+      "adjacent": {
+        "type": "String"
+      }
+    }
+  },
+  "shrinkMoreLimit": "Further shrinking is restricted by the following unmovable file; resolving it will allow freeing more space:",
+  "shrinkMoreFull": "Further shrinking is limited by remaining free space on C: ({free} free). Freeing up disk space on C: will allow shrinking it further.",
+  "@shrinkMoreFull": {
+    "placeholders": {
+      "free": {
+        "type": "String"
+      }
+    }
+  },
+  "sbPagefile": "Virtual memory paging file",
+  "sbPagefileHow": "1. Press Win+R, enter “SystemPropertiesPerformance”, and under Virtual memory on the Advanced tab click Change.\n2. Uncheck “Automatically manage paging file size for all drives”, select C:, choose “No paging file”, click Set, confirm with Yes, and click OK.\n3. Restart the device and shrink the C: volume in Disk Management.\n4. After shrinking, re-enable “Automatically manage paging file size for all drives” and restart the device.",
+  "sbHiberfil": "System hibernation file",
+  "sbHiberfilHow": "1. Open Terminal as Administrator and run “powercfg /h off” to disable hibernation and remove the hibernation file.\n2. Shrink the C: volume in Disk Management.\n3. If you wish to re-enable hibernation afterwards, run “powercfg /h on” (ensure Fast Startup remains disabled).",
+  "sbRestore": "System restore points (shadow copies)",
+  "sbRestoreHow": "1. Press Win+R and enter “SystemPropertiesProtection” to open System Protection.\n2. Select C:, click Configure, then click Delete to remove all restore points on this drive.\n3. Shrink the C: volume in Disk Management (deleted restore points cannot be recovered).",
+  "sbBitlocker": "BitLocker metadata",
+  "sbBitlockerHow": "BitLocker metadata on the system drive cannot be relocated while the drive is encrypted. To free more space, turn off BitLocker (device encryption) in Windows, wait for decryption to finish, shrink the C: volume, and re-enable encryption afterwards. Re-enabling encryption generates a new recovery key — please save it securely.",
+  "sbUsn": "NTFS change journal (USN journal)",
+  "sbUsnHow": "1. Open Terminal as Administrator and run “fsutil usn deletejournal /d C:” to delete the change journal.\n2. Shrink the C: volume in Disk Management (Windows automatically recreates the journal when needed).",
+  "sbMft": "NTFS Master File Table (MFT)",
+  "sbMftHow": "Some MFT fragments are located near the end of the C: volume. The installer can relocate them to free space near the beginning of the volume and then re-analyze automatically.",
+  "mftMoveBtn": "Move MFT",
+  "mftConfirmTitle": "Move MFT",
+  "mftConfirmBody": "MFT fragments near the end of the C: volume will be relocated to free space near the beginning. The installer cannot be closed during this operation; do not shut down the device or disconnect power. This may take a few minutes.",
+  "mftConfirmOk": "Start move",
+  "mftConfirmCancel": "Cancel",
+  "mftMoving": "Moving the MFT. This may take a few minutes…",
+  "mftMoved": "Relocated {moved}. The end of the MFT moved from {before} to {after} from the start of the C: volume.",
+  "@mftMoved": {
+    "placeholders": {
+      "moved": {
+        "type": "String"
+      },
+      "before": {
+        "type": "String"
+      },
+      "after": {
+        "type": "String"
+      }
+    }
+  },
+  "mftStuck": "System metadata records at the start of the MFT cannot be moved; the C: volume has reached its maximum shrink limit.",
+  "mftUnplaced": "Another {size} could not be moved closer to the start of the C: volume due to insufficient contiguous free space. Delete unnecessary files on C:, then move the MFT and analyze again.",
+  "mftNothing": "No MFT fragments can be moved closer to the start of the volume.",
+  "mftAgain": "Some MFT fragments still remain near the end of the C: volume (for example, if the MFT grew during the operation). You may run the move again.",
+  "@mftUnplaced": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "mftFailed": "Moving the MFT did not complete (already relocated fragments remain valid): ",
+  "shutdownReasonMft": "Moving the MFT of drive C:",
+  "sbNtfs": "NTFS metadata",
+  "sbNtfsHow": "This file is internal NTFS filesystem metadata that Windows cannot relocate while running; the C: volume has reached its maximum shrink limit.",
+  "sbDump": "System memory dump file",
+  "sbDumpHow": "1. Open Disk Cleanup, select drive C:, and click Clean up system files.\n2. Check “System error memory dump files” and “System error minidump files” and delete them.\n3. Shrink the C: volume in Disk Management.",
+  "sbOther": "Other file",
+  "sbOtherHow": "This file cannot be moved right now because it may be in use by an application or locked by the system. Restart the device and analyze again; if shrinking is still blocked by the same file, identify the application from its path and close or temporarily uninstall it before retrying.",
+  "chkRoom": "Available unallocated space: {size}",
+  "chkRoomDetail": "System disk: {model}, {size}",
+  "chkBlockedNote": "Please resolve the failed checks above before continuing.",
+  "regionTitle": "Select installation location",
+  "regionSub": "Android will be installed into unallocated space on the system disk ({model}, {size}). Existing partitions will not be modified.",
+  "regionFree": "Unallocated space ({size})",
+  "regionData": "Android data partition after installation: approx. {size}",
+  "regionTooSmall": "Insufficient space (at least {need} required)",
+  "regionNote": "Android system partitions occupy a fixed 12 GiB; all remaining space will be allocated to the data partition.",
+  "releaseTitle": "Select system release",
+  "releaseSub": "The installer will download the selected release and verify file integrity before writing to the disk.",
+  "releaseLoading": "Fetching release list…",
+  "releaseNone": "Unable to fetch the release list. Please check your network connection and try again.",
+  "releaseLatest": "Latest",
+  "releaseNote": "Downloaded files are saved in the Gaokun Android folder in your Downloads folder.",
+  "optionsTitle": "Select default operating system",
+  "optionsSub": "A boot menu will be shown at startup, and the default operating system will boot automatically once the countdown finishes. You can also change this later at any time in Android Settings.",
+  "optDefaultAndroid": "Android",
+  "optDefaultAndroidBody": "Boot into Android by default; select Windows from the boot menu when needed.",
+  "optDefaultWindows": "Windows",
+  "optDefaultWindowsBody": "Boot into Windows by default; select Android from the boot menu when needed.",
+  "confirmTitle": "Confirm installation",
+  "confirmSub": "The disk partition table and EFI boot files are about to be modified. Please back up important data before proceeding.",
+  "confirmWill": "The installer will perform the following actions:",
+  "confirmParts": "Create the required Android partitions in {size} of unallocated space (data partition approx. {data})",
+  "confirmDownload": "Download {name} ({size}) and verify file integrity",
+  "confirmBoot": "Install the boot manager (systemd-boot) to the EFI partition and back up the original default boot file (BOOTAA64.EFI)",
+  "confirmDefaultAndroid": "Set Android as the default operating system at startup",
+  "confirmDefaultWindows": "Set Windows as the default operating system at startup",
+  "confirmWindowsSafe": "Leave the existing Windows installation and files on drive C: untouched",
+  "confirmAntivirus": "Some security software may block the installer's backend process (gk3w.exe) while writing to the disk. If prompted, please allow it; blocking the process may interrupt the operation and leave disk partitions in an incomplete state.",
+  "confirmBitlocker": "BitLocker is enabled: the installer will automatically suspend BitLocker protection before modifying the default boot file and Windows will resume it on its next boot, though boot changes may still cause Windows to prompt for your recovery key. We require you to enter the correct BitLocker recovery key here to confirm that you will have a working key to unlock Windows if needed. You can retrieve your recovery key at https://aka.ms/myrecoverykey; saving a copy in advance on another device, such as your phone, is recommended.",
+  "holdToInstall": "Hold for 2 seconds to install",
+  "holdToUninstall": "Hold for 2 seconds to uninstall",
+  "holdKeep": "Keep holding",
+  "runInstallTitle": "Installing Android",
+  "runUninstallTitle": "Uninstalling Android",
+  "runSub": "Do not shut down the device, disconnect power, or close this window while the operation is in progress.",
+  "runStarting": "Preparing…",
+  "doneInstallTitle": "Android installation complete",
+  "doneInstallSub": "Restart the device to boot into Android.",
+  "doneInstallMenu": "A boot menu will appear at startup, allowing you to choose between Android and Windows.",
+  "doneInstallFirstBoot": "The initial boot of Android may take a few minutes to initialize. Please wait patiently.",
+  "doneInstallWindows": "Windows remains available as usual; use “Restart” rather than “Shut down” when switching operating systems.",
+  "doneUninstallTitle": "Android uninstallation complete",
+  "doneUninstallSub": "{size} of unallocated space has been freed.",
+  "doneUninstallExtend": "In Windows Disk Management, right-click the C: volume and select “Extend Volume” to merge this unallocated space back into the C: volume.",
+  "doneUninstallBoot": "The Android boot entries have been removed. The device will start from the default boot file on the EFI partition (usually Windows).",
+  "failInstallTitle": "Installation incomplete",
+  "failUninstallTitle": "Uninstallation incomplete",
+  "failUntouched": "No changes were made to the disk, and your Windows installation is unaffected. Please resolve the issue and try again.",
+  "failTouchedInstall": "The disk was partially modified, though your Windows installation is unaffected. Return to the start and use “Manage → Uninstall” to clean up the incomplete Android installation before trying again.",
+  "failTouchedUninstall": "The uninstallation only completed partially, though your Windows installation is unaffected. Return to the start and run the uninstallation again.",
+  "errUnknown": "An unknown error occurred. Please review the log below for details.",
+  "manageTitle": "Android is installed on this device",
+  "manageSub": "Android partitions occupy {size} of disk space in total.",
+  "manageParts": "Android partitions",
+  "manageUninstall": "Uninstall Android",
+  "manageUninstallBody": "Deletes all Android partitions and removes the boot menu so the device boots directly into Windows. All user data in Android will be permanently erased.",
+  "manageReinstallNote": "To reinstall Android or switch to another release, uninstall the existing system first, then return to the start to install again.",
+  "uninstallTitle": "Confirm Android uninstallation",
+  "uninstallSub": "All data in Android will be permanently erased and cannot be recovered. Please back up important data first.",
+  "uninstallParts": "Delete all {count} Android partitions ({size} in total)",
+  "uninstallBoot": "Remove the Android boot entries and restore the default EFI boot file to its state before installation (usually Windows Boot Manager; boot settings of other systems on the EFI partition are kept)",
+  "uninstallFree": "Leave the freed space unallocated so it can be merged back into drive C: in Disk Management",
+  "errRelease": "The installation image files are incomplete or failed verification. Please download them again.",
+  "errInstalled": "Android is already installed on this device. Please uninstall it before reinstalling.",
+  "errPlan": "The selected unallocated space is insufficient to install Android.",
+  "errLayoutChanged": "The disk partition layout changed while preparing for installation. Please return to the start and check again.",
+  "errFallbackConflict": "The default boot file on the EFI partition belongs to another operating system and would be overwritten by installation. No changes were made to the disk; please address the existing boot configuration first.",
+  "errNoBootmgr": "Windows Boot Manager (bootmgfw.efi) was not found on the EFI partition; Windows boot files are incomplete. Please repair the Windows boot configuration first.",
+  "errWrongModel": "This device is not a Huawei MateBook E Go (GK-W7X).",
+  "errSecureBoot": "Secure Boot is enabled. Please disable it in the UEFI firmware settings first.",
+  "errFastStartup": "Windows Fast Startup is enabled. Please disable it first.",
+  "errBitlocker": "BitLocker is enabled, but the recovery key has not been verified. Please return to the start, check again, and verify your recovery key when prompted.",
+  "errBitlockerFormat": "Invalid recovery key format: expected 48 digits in 8 groups of 6.",
+  "errBitlockerGroup": "Group {group} of the recovery key failed verification. Please check that this group was entered correctly.",
+  "@errBitlockerGroup": {
+    "placeholders": {
+      "group": {
+        "type": "String"
+      }
+    }
+  },
+  "errBitlockerWrong": "The recovery key does not match this device's system drive. Check the recovery key ID to make sure you are entering the key for this system drive.",
+  "errBitlockerNoKey": "No BitLocker recovery key is configured for the system drive. To avoid being unable to unlock the drive if BitLocker recovery is triggered, run “manage-bde -protectors -add C: -RecoveryPassword” as Administrator to generate a recovery key and save it on another device.",
+  "errBitlockerUnverifiable": "Unable to read BitLocker recovery key metadata from the system drive, so verification cannot be performed. Check again; if the issue persists, disable BitLocker (device encryption) in Windows before continuing.",
+  "errBitlockerSuspend": "Unable to suspend BitLocker protection. Please check again and retry.",
+  "errBitlockerConverting": "BitLocker is currently encrypting or decrypting the system drive. Wait for the conversion to complete, then check again.",
+  "errShrinkQuery": "Please try analyzing again shortly. If it continues to fail, right-click the C: volume in Disk Management and select “Shrink Volume” to check the available shrinkable space.",
+  "errMftFailed": "Several move attempts failed, so the operation was stopped; you may try again later.",
+  "errMftRead": "Unable to read the MFT layout or free-space bitmap of the C: volume.",
+  "errVolumeOpen": "Unable to open the C: volume.",
+  "errLowBattery": "Battery level is too low and the power adapter is not connected.",
+  "errEspFull": "Insufficient free space on the EFI system partition.",
+  "errPartsUnclear": "Partitions with Android partition names were found on the disk, but their contents could not be recognized. Operation aborted to prevent data loss.",
+  "errDisk": "Unable to open the Windows system disk.",
+  "errOther": "The installer reported an error: {code}",
+  "prVerify": "Verifying installation files",
+  "prPlan": "Planning partition layout",
+  "prGpt": "Writing partition table",
+  "prFormat": "Formatting partitions",
+  "prSuperMib": "Writing system partition ({done} / {total} MiB)",
+  "prSuper": "Writing system partition",
+  "prBoot": "Writing boot partitions",
+  "prBootloader": "Configuring boot manager",
+  "prDone": "Completed",
+  "prDlSums": "Fetching checksums",
+  "prDlPct": "Downloading {name} ({pct}%)",
+  "prDl": "Downloading {name}",
+  "prDlVerify": "Verifying {name}",
+  "prDlDone": "Download complete",
+  "legendExisting": "Existing partitions",
+  "legendFree": "Unallocated space",
+  "legendTarget": "Installation target",
+  "srcGithub": "GitHub",
+  "srcR2": "R2 mirror",
+  "srcLocal": "Local files",
+  "releaseMeta": "Released {date} · Download size: {size}",
+  "releasePre": "Pre-release",
+  "releaseNoteR2": "The R2 mirror only provides the latest release. Downloaded files are saved in the Gaokun Android folder in your Downloads folder.",
+  "localDirLabel": "Directory containing installation files",
+  "localNeed": "This directory must contain the following files:",
+  "localBoot": "boot.img",
+  "localSuper": "super.img.zst",
+  "localSums": "install-artifacts.sha256",
+  "localNote": "The required files above can be downloaded from the project's GitHub Releases page.",
+  "confirmLocal": "Verify and use the local installation files in {dir}",
+  "winMinimize": "Minimize",
+  "winClose": "Close",
+  "releaseSubLocal": "The installer will verify the integrity of the local files before writing to the disk.",
+  "railTitle": "Gaokun Android",
+  "releaseAlpha": "Early test build, not recommended",
+  "btnBrowse": "Browse…",
+  "shutdownReasonInstall": "Installing Android. Interrupting the installation may leave disk partitions in an incomplete state.",
+  "shutdownReasonUninstall": "Uninstalling Android. Interrupting the uninstallation may leave disk partitions in an incomplete state.",
+  "runSleepHintInstall": "Do not close the keyboard cover or press the power button during installation, or the device will enter sleep and pause the installation.",
+  "runSleepHintUninstall": "Do not close the keyboard cover or press the power button during uninstallation, or the device will enter sleep and pause the uninstallation.",
+  "railAbout": "Overview",
+  "railMedia": "Create installation media",
+  "railTarget": "Target",
+  "railWrite": "Write",
+  "mediaAboutTitle": "Create standalone installation media",
+  "mediaAboutSub": "Write the standalone installer environment (LiveCD) to a USB drive or to this device's disk, allowing you to boot into the full graphical installer independently of Windows.",
+  "mediaAboutUses": "With standalone installation media, you can:",
+  "mediaUseWipe": "Erase the entire disk and install Android (Windows will be removed)",
+  "mediaUseAlong": "Keep the existing system and install Android into unallocated space",
+  "mediaUseReinstall": "Reinstall Android to repair the system or switch to another release",
+  "mediaAboutTargets": "Available target locations:",
+  "mediaAboutUsb": "USB drive: erases all existing data on the USB drive; can be used on any MateBook E Go.",
+  "mediaAboutInternal": "Internal disk: creates a GK3LIVE partition in unallocated space on the system disk and adds the LiveCD to the boot menu.",
+  "mediaAboutNote": "You will select the installation mode inside the LiveCD. Before booting from the installation media, ensure Secure Boot is disabled in the target device's UEFI firmware settings.",
+  "mediaTargetTitle": "Select target location",
+  "mediaTargetSub": "The LiveCD and installation files for the selected release require approximately {need}.",
+  "@mediaTargetSub": {
+    "placeholders": {
+      "need": {
+        "type": "String"
+      }
+    }
+  },
+  "btnRedetect": "Detect again",
+  "mediaUsbHeader": "USB drives",
+  "mediaUsbNone": "No USB drive detected. Insert a USB drive and click “Detect again”.",
+  "mediaUsbTitle": "{model} ({size})",
+  "@mediaUsbTitle": {
+    "placeholders": {
+      "model": {
+        "type": "String"
+      },
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaUsbBody": "All existing data on this USB drive will be erased",
+  "mediaUsbTooSmall": "Insufficient capacity (at least {need} required)",
+  "@mediaUsbTooSmall": {
+    "placeholders": {
+      "need": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaInternalHeader": "Internal disk",
+  "mediaInternalTitle": "Unallocated space on the system disk",
+  "mediaInternalBody": "Creates a GK3LIVE partition and adds the LiveCD to the boot menu; existing partitions and their data are unaffected",
+  "mediaInternalBlocked": "The following requirements are not met (return to the start page for details):",
+  "releaseSubMedia": "The installation files for the selected release will be written alongside the LiveCD so installation can proceed offline.",
+  "releaseLiveCd": "The LiveCD will use the latest installer ({version}, download size: {size}).",
+  "@releaseLiveCd": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      },
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "releaseNoLiveCd": "No LiveCD image is available from the selected source. Please switch to another source.",
+  "localLiveCd": "gaokun3-installer-<version>-windows.zip (contains LiveCD image)",
+  "mediaConfirmTitle": "Confirm writing installation media",
+  "mediaConfirmSubUsb": "All data on the USB drive ({model}, {size}) will be permanently erased and cannot be recovered.",
+  "@mediaConfirmSubUsb": {
+    "placeholders": {
+      "model": {
+        "type": "String"
+      },
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaConfirmSubInternal": "The disk partition table and EFI boot files are about to be modified. Please back up important data before proceeding.",
+  "mediaConfirmLiveDl": "Download the LiveCD (installer {version}, {size}) and verify file integrity",
+  "@mediaConfirmLiveDl": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      },
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaConfirmUsb": "Erase all partitions on the USB drive, create a GK3LIVE partition, and write the LiveCD and system installation files",
+  "mediaConfirmPart": "Create a GK3LIVE partition ({size}) at the end of the {region} unallocated space and write the LiveCD and system installation files",
+  "@mediaConfirmPart": {
+    "placeholders": {
+      "region": {
+        "type": "String"
+      },
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaConfirmEntry": "Add the LiveCD to the boot menu",
+  "holdToWrite": "Hold for 2 seconds to start writing",
+  "runMediaTitle": "Writing installation media",
+  "runSleepHintMedia": "Do not close the keyboard cover or press the power button while writing, or the device will enter sleep and pause the operation.",
+  "runMediaUsbHint": " Do not unplug the USB drive until writing is complete.",
+  "shutdownReasonMedia": "Writing installation media. Interrupting the operation may leave disk partitions in an incomplete state.",
+  "doneMediaTitle": "Installation media created",
+  "doneMediaSubUsb": "You can now boot a MateBook E Go from this USB drive into the LiveCD environment.",
+  "doneMediaSubInternal": "Restart the device and select the LiveCD in the boot menu to enter the installer environment.",
+  "doneMediaInstall": "You will select the installation mode inside the LiveCD.",
+  "doneMediaSecureBoot": "Before booting from the USB drive, ensure Secure Boot is disabled in the target device's UEFI firmware settings.",
+  "doneMediaStays": "The LiveCD entry will remain in the boot menu unless the entire disk is erased or the boot menu is removed.",
+  "failMediaTitle": "Writing incomplete",
+  "failTouchedMediaUsb": "The USB drive was partially modified and its existing data may have been erased. Return to the start and try again.",
+  "failTouchedMediaInternal": "The disk was partially modified, though your Windows installation is unaffected. Return to the start, check again, and retry.",
+  "mediaRegionTitle": "Select GK3LIVE partition location",
+  "mediaRegionSub": "The GK3LIVE partition ({size}) will be created at the end of the selected unallocated space. Existing partitions will not be modified.",
+  "@mediaRegionSub": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "mediaRegionRest": "{size} of unallocated space will remain after creating the GK3LIVE partition",
+  "@mediaRegionRest": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "legendLive": "GK3LIVE partition",
+  "testBadge": "Test mode: disk {disk}",
+  "errDownload": "Download incomplete. Check your network connection and try again; already downloaded data will be kept and resumed automatically.",
+  "errDownloadWrite": "Unable to save the downloaded file. Please ensure sufficient free space on the C: volume.",
+  "errBackendMissing": "Installer component files are missing or incomplete. Please re-download the installer.",
+  "errNotAdmin": "Please run this installer as Administrator.",
+  "@testBadge": {
+    "placeholders": {
+      "disk": {
+        "type": "String"
+      }
+    }
+  },
+  "errReleaseMissing": "System image files (boot.img, super.img.zst) were not found in the selected directory.",
+  "errDownloadSpace": "Insufficient free space on the C: volume; at least {need} more is required for this download. Free up space and retry — already downloaded data will be kept.",
+  "@errDownloadSpace": {
+    "placeholders": {
+      "need": {
+        "type": "String"
+      }
+    }
+  },
+  "errBackendFailed": "An installer backend component exited unexpectedly. Please retry or return to the start and check again.",
+  "failUnknownTouched": "The backend process terminated unexpectedly (possibly blocked or killed by security software), so it could not be confirmed whether the disk was modified. Allow the installer in your security software, then return to the start and check again to inspect the current disk state.",
+  "localMissing": "Missing files in this directory: {files}",
+  "@localMissing": {
+    "placeholders": {
+      "files": {
+        "type": "String"
+      }
+    }
+  },
+  "quitDownloadTitle": "Download in progress",
+  "quitDownloadBody": "Are you sure you want to exit the installer? Files downloaded during this session will be deleted.",
+  "quitDownloadContinue": "Continue downloading",
+  "quitDownloadExit": "Exit",
+  "winMaximize": "Maximize",
+  "winRestore": "Restore Down",
+  "doneDeleteDownloads": "Delete the downloaded installation files ({size}) when exiting",
+  "@doneDeleteDownloads": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
+  }
+}

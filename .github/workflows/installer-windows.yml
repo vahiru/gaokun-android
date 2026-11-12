@@ -1,0 +1,180 @@
+# Windows 安装器（installer/windows）：后端在 Linux 上交叉编译，界面在 Windows ARM64 上构建（平板是 ARM64）。
+# 产物是可以直接运行的程序目录（gk3_windows.exe + backend\ 里的 gk3w、mke2fs、systemd-boot），作为 Actions 的工件下载。
+# x64 版只在 PC 上对着 VHD 测试时用，本地构建（installer/windows/README.md）；以后要在别的电脑上制作安装介质时再加回来。
+#
+# 什么时候跑（不随每次推送跑）：
+#   - 推送 windows-installer-vX.Y.Z[-pre] 标签：发布构建。版本号取自标签（界面上显示的、exe 的版本资源），
+#     打包成 zip 建一个【草稿】Release，维护者改好说明再发布。发布时不要设为最新版本（Latest 要留给 ROM 的 Release）
+#   - 手动（Actions 页面的 Run workflow，可选分支）：测试构建，版本号显示为 dev-<提交>，产物是 Actions 的工件
+#
+# 版本都钉死：llvm-mingw 按 GitHub 给的 sha256，Flutter 与仓库里的 pubspec 相同（3.47.2），actions 按提交；
+# mke2fs、systemd-boot、字体由各自的脚本按 sha256 下载（installer/backend/mke2fs/build.sh、sdboot/fetch.sh、
+# installer/common/tool/fetch-fonts.py）。
+name: Windows installer
+
+on:
+  push:
+    tags:
+      - 'windows-installer-v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FLUTTER_VERSION: '3.47.2'
+  # 脚本的输出有中文与"→"：Windows 运行器的控制台是 cp1252，Python 不按 UTF-8 输出就在 print 上报 UnicodeEncodeError
+  PYTHONUTF8: '1'
+  # 目录名。⚠️ 不能叫 LLVM_MINGW：Makefile 与 mke2fs/build.sh 把 LLVM_MINGW 当作工具链的完整路径
+  LLVM_MINGW_NAME: llvm-mingw-20261104-ucrt-ubuntu-22.04-x86_64
+  LLVM_MINGW_SHA256: 919380403de87dca3c581c2053230cd298af5e891286628ba0613b7fed370926
+
+jobs:
+  backend:
+    name: gk3w + mke2fs + systemd-boot
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      build_name: ${{ steps.version.outputs.build_name }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - name: version
+        id: version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/windows-installer-v* ]]; then
+            v=${GITHUB_REF#refs/tags/windows-installer-v}
+            [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] \
+              || { echo "::error::the tag must look like windows-installer-v1.2.3 or windows-installer-v1.2.3-rc.1"; exit 1; }
+            # exe 的版本资源只认 X.Y.Z：预发布的后缀只进界面上显示的版本号
+            echo "version=$v" >> "$GITHUB_OUTPUT"
+            echo "build_name=${v%%-*}" >> "$GITHUB_OUTPUT"
+            [[ "$v" == *-* ]] && echo "prerelease=yes" >> "$GITHUB_OUTPUT" || echo "prerelease=no" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=dev-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+            echo "build_name=" >> "$GITHUB_OUTPUT"
+            echo "prerelease=no" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: llvm-mingw
+        run: |
+          curl -fsSL --retry 3 -o /tmp/llvm-mingw.tar.xz \
+            "https://github.com/mstorsjo/llvm-mingw/releases/download/20261104/$LLVM_MINGW_NAME.tar.xz"
+          echo "$LLVM_MINGW_SHA256  /tmp/llvm-mingw.tar.xz" | sha256sum -c
+          mkdir -p "$HOME/opt" && tar -C "$HOME/opt" -xf /tmp/llvm-mingw.tar.xz
+          echo "LLVM_MINGW=$HOME/opt/$LLVM_MINGW_NAME" >> "$GITHUB_ENV"
+      - name: host unit tests
+        run: make -C installer/backend test
+      - name: build
+        run: |
+          make -C installer/backend win-arm64 sdboot GK3W_VERSION='${{ steps.version.outputs.version }}'
+          bash installer/backend/mke2fs/build.sh arm64
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: backend
+          if-no-files-found: error
+          path: |
+            installer/backend/build/arm64/gk3w.exe
+            installer/backend/build/mke2fs-arm64/mke2fs.exe
+            installer/backend/build/mke2fs-arm64/mke2fs.conf
+            installer/backend/build/sdboot/systemd-bootaa64.efi
+
+  test:
+    name: flutter analyze + test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: flutter
+        run: |
+          git clone --quiet --depth 1 --branch "$FLUTTER_VERSION" https://github.com/flutter/flutter.git "$HOME/flutter"
+          echo "$HOME/flutter/bin" >> "$GITHUB_PATH"
+      - name: fonts
+        run: python3 installer/common/tool/fetch-fonts.py
+      - name: analyze and test
+        working-directory: installer/windows
+        run: |
+          flutter --disable-analytics
+          flutter pub get
+          flutter analyze
+          flutter test
+
+  app:
+    name: app (arm64)
+    needs: backend
+    runs-on: windows-11-arm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: backend
+          path: installer/backend/build
+      - name: flutter
+        shell: pwsh
+        run: |
+          git clone --quiet --depth 1 --branch $env:FLUTTER_VERSION https://github.com/flutter/flutter.git C:\flutter
+          "C:\flutter\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: fonts
+        shell: pwsh
+        run: python installer/common/tool/fetch-fonts.py
+      - name: build
+        shell: pwsh
+        working-directory: installer/windows
+        env:
+          GK3_VERSION: ${{ needs.backend.outputs.version }}
+          GK3_BUILD_NAME: ${{ needs.backend.outputs.build_name }}
+        run: |
+          flutter --disable-analytics
+          flutter config --enable-windows-desktop
+          flutter pub get
+          # 界面上显示的版本号（lib/app.dart 的 kAppVersion）；发布构建另把 X.Y.Z 写进 exe 的版本资源
+          $a = @('build', 'windows', '--release', "--dart-define=GK3_VERSION=$env:GK3_VERSION")
+          if ($env:GK3_BUILD_NAME) { $a += "--build-name=$env:GK3_BUILD_NAME" }
+          flutter @a
+      - name: check the bundle
+        shell: pwsh
+        run: |
+          $rel = "installer/windows/build/windows/arm64/runner/Release"
+          foreach ($f in 'gk3_windows.exe', 'backend/gk3w.exe', 'backend/mke2fs.exe', 'backend/mke2fs.conf', 'backend/systemd-bootaa64.efi') {
+            if (-not (Test-Path "$rel/$f")) { throw "missing $rel/$f" }
+          }
+          # 程序与后端都要是 ARM64 的（带了 x64 的会在平板上靠模拟跑，测试测不出来）
+          foreach ($f in 'gk3_windows.exe', 'backend/gk3w.exe', 'backend/mke2fs.exe') {
+            $m = [System.IO.File]::ReadAllBytes((Resolve-Path "$rel/$f"))
+            $machine = [BitConverter]::ToUInt16($m, [BitConverter]::ToInt32($m, 0x3c) + 4)
+            if ($machine -ne 0xAA64) { throw ("{0}: machine 0x{1:X4}, want 0xAA64" -f $f, $machine) }
+          }
+          Get-ChildItem -Recurse $rel | Select-Object FullName, Length | Format-Table -AutoSize | Out-String -Width 200
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gaokun-android-installer-windows-arm64
+          if-no-files-found: error
+          path: installer/windows/build/windows/arm64/runner/Release/
+
+  release:
+    name: draft release
+    if: startsWith(github.ref, 'refs/tags/windows-installer-v')
+    needs: [backend, test, app]
+    runs-on: ubuntu-24.04
+    # 只有这个任务要写：建草稿 Release、上传附件
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: gaokun-android-installer-windows-arm64
+          path: app
+      - name: draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VER: ${{ needs.backend.outputs.version }}
+          PRE: ${{ needs.backend.outputs.prerelease }}
+        run: |
+          # 文件名与 LiveCD 的 gaokun3-installer-<版本>-windows.zip 分开（安装器按那个名字认 LiveCD）
+          name="gaokun-android-windows-installer-$VER-arm64"
+          mv app "$name"
+          zip -qr "$name.zip" "$name"
+          sha256sum "$name.zip" > "$name.zip.sha256"
+          flags=(--draft --latest=false --verify-tag)
+          [ "$PRE" = yes ] && flags+=(--prerelease)
+          gh release create "$GITHUB_REF_NAME" "$name.zip" "$name.zip.sha256" -R "$GITHUB_REPOSITORY" "${flags[@]}" \
+            --title "Windows installer $VER" \
+            --notes "Draft created by CI from $GITHUB_REF_NAME ($GITHUB_SHA). Replace these notes, then publish it without setting it as the latest release: Latest stays with the ROM release."

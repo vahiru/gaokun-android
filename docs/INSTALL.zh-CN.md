@@ -1,7 +1,7 @@
 <!--
   维护说明（不显示）：
   * 与docs/INSTALL.md内容对应，改一份就改另一份。
-  * 安装器界面上的文字以live/installer-flutter/lib/l10n/app_zh.arb为准；开机菜单条目只有英文，原样保留。
+  * 安装器界面上的文字以installer/live/lib/l10n/app_zh.arb为准；开机菜单条目只有英文，原样保留。
   * 安装器的风险提示页（riskExpBody）引用了本文"在真机上测过什么"一节，改标题时要一并改app_zh.arb和app_en.arb。
   * scripts/release.sh会把本文件上传到R2的relnotes/INSTALL.md，系统更新里"无法更新（版本不受支持）"的说明链接指向那里。
 -->
