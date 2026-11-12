@@ -60,7 +60,8 @@ Future<String?> windowsSystemProxy() async {
     if (r.exitCode != 0) return null;
     final out = '${r.stdout}';
     final enable = RegExp(r'ProxyEnable\s+REG_DWORD\s+0x(\d+)').firstMatch(out)?.group(1);
-    final server = RegExp(r'ProxyServer\s+REG_SZ\s+(\S+)').firstMatch(out)?.group(1);
+    // [ \t]+ 而不是 \s+：\s 会跨行，ProxyServer 为空时取到下一行的 ProxyOverride（修复审查 11-12 第 2 条）
+    final server = RegExp(r'ProxyServer[ \t]+REG_SZ[ \t]+(\S+)').firstMatch(out)?.group(1);
     if (enable != '1' || server == null) return null;
     return parseProxyServer(server);
   } on ProcessException {
@@ -69,6 +70,7 @@ Future<String?> windowsSystemProxy() async {
 }
 
 /// Internet Settings 的 ProxyServer → "host:port"（给 HttpClient 的 "PROXY host:port"）；用不了 → null。
+/// 没写端口时补 :80（WinINet 也按 80 算）：Dart 遇到不带端口的项直接抛 Invalid proxy configuration，连 DIRECT 都不试。
 ///   "127.0.0.1:7890"、"http://127.0.0.1:7890"、"http=127.0.0.1:7890;https=127.0.0.1:7890;socks=…"（取 https 的，没有取 http 的）。
 /// ⚠️ 前缀 http:// 要去掉：Dart 会把 "http://127.0.0.1" 整个当成主机名，连不上就按 "PROXY …; DIRECT" 悄悄直连（核实 11-12）。
 /// 只有 socks= 时返回 null（HttpClient 不支持 SOCKS），按环境变量或直连。
@@ -76,7 +78,10 @@ String? parseProxyServer(String server) {
   String? clean(String? v) {
     if (v == null) return null;
     final t = v.trim().replaceFirst(RegExp(r'^[a-zA-Z][a-zA-Z0-9+.-]*://'), '').replaceFirst(RegExp(r'/+$'), '');
-    return t.isEmpty ? null : t;
+    // host:port（port 是数字）；没写端口补 :80；别的样子（空的、端口不是数字、含空白）不用
+    final m = RegExp(r'^([^\s:/]+|\[[0-9a-fA-F:]+\])(?::(\d{1,5}))?$').firstMatch(t);
+    if (m == null) return null;
+    return '${m.group(1)}:${m.group(2) ?? '80'}';
   }
 
   if (!server.contains('=')) return clean(server);
@@ -306,35 +311,32 @@ class Net {
         throw _Transient(e.message);
       }
       final st = resp.statusCode;
+      // ⚠️ 下面不要的响应一律不读完（drain）就丢：drain 没有超时、会把剩下的正文整个读完 —— 空间不足时先下完 1.2 GiB
+      //   才报错、服务器停住时卡死（修复审查 11-12 第 1 条）。finally 里的 close(force: true) 断开连接
       // 续传一个已经下完的文件：服务器回 416（LiveCD 那边 curl 当成功）—— 交给 sha256 裁决
-      if (st == 416 && offset > 0) {
-        await resp.drain<void>();
-        return;
-      }
+      if (st == 416 && offset > 0) return;
       if (st != 200 && st != 206) {
-        await resp.drain<void>();
         if (_transientHttp(st)) throw _Transient('HTTP $st');
         throw NetError('dl-http', 'cannot download $url (HTTP $st)', {'name': name, 'http': '$st'});
       }
-      // 206 但起点不对：这次的正文不是从 offset 开始的，写进哪里都是错位的数据（原先截断 .part 从头写，必然校验不符）。
-      // 丢掉这次响应、删掉 .part，按暂时的失败重试 —— 下一次不带 Range，从头下（审查 11-12 第 13 条）
-      if (st == 206 && !(resp.headers.value(HttpHeaders.contentRangeHeader) ?? '').startsWith('bytes $offset-')) {
-        await resp.drain<void>();
-        if (await part.exists()) await part.delete();
-        throw _Transient('the server resumed at the wrong offset (asked for byte $offset)');
-      }
-      // 服务器不认 Range（回 200）：从头下
-      if (st == 200 && offset > 0) {
+      final range = resp.headers.value(HttpHeaders.contentRangeHeader) ?? '';
+      // 服务器不认 Range（回 200，或回 206 却从 0 开始）：这份正文是整个文件，从头写
+      final old = offset;
+      if (offset > 0 && (st == 200 || range.startsWith('bytes 0-'))) {
         yield Gk3Log('$name: the server did not resume at byte $offset, starting over');
         offset = 0;
+      } else if (st == 206 && !range.startsWith('bytes $offset-')) {
+        // 206 但起点既不是 offset 也不是 0：写进哪里都是错位的数据（原先截断 .part 从头写，必然校验不符）。
+        // 删掉 .part，按暂时的失败重试 —— 下一次不带 Range，从头下（审查 11-12 第 13 条）
+        if (await part.exists()) await part.delete();
+        throw _Transient('the server resumed at the wrong offset (asked for byte $offset, got "$range")');
       }
       final total = resp.contentLength < 0 ? -1 : offset + resp.contentLength;
-      // 放得下吗：还要下的字节 + 64 MiB 余量（.part 已经占着的不再算）
+      // 放得下吗：还要下的字节 + 64 MiB 余量。.part 已经占着的不算；要从头写时它将被截断，那部分也算可用
       if (space != null && total > 0) {
         final avail = await space(dir);
         final need = total - offset + (64 << 20);
-        if (avail != null && avail < need) {
-          await resp.drain<void>().catchError((Object _) {});
+        if (avail != null && avail + (offset == 0 ? old : 0) < need) {
           throw NetError('dl-space', 'not enough free space for $name in $dir: ${need >> 20} MiB needed, ${avail >> 20} MiB available',
               {'name': name, 'need_mib': '${need >> 20}', 'avail_mib': '${avail >> 20}'});
         }

@@ -6,7 +6,8 @@
 //   set GK3_TEST_RELEASE=<本地发布目录>     可选：给了就选"本地文件"；不给就从 GitHub 下载默认选中的版本
 //   flutter test integration_test\vhd_test.dart -d windows
 //
-// gk3w 等后端文件：程序目录的 backend\（CMake 打包），或 GK3W 指向 gk3w.exe（同目录要有 systemd-bootaa64.efi）。
+// 后端文件：程序目录的 backend\（CMake 打包），或 GK3W 指向 gk3w.exe —— 同目录要有 mke2fs.exe、mke2fs.conf、
+// systemd-bootaa64.efi（kBackendFiles，缺一个就是 MissingBackend）。
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -48,8 +49,8 @@ Future<void> hold(WidgetTester t) async {
   await t.pump();
 }
 
-/// BitLocker 已开启（或读不到）时勾选"我已确认可获取恢复密钥"。勾选状态在会话里一直保留：安装时勾过的，
-/// 到卸载确认页还是勾着的 —— 再点一次就取消了，按钮变灰（2026-11-12 第一次端到端就卡在这里）
+/// BitLocker 已开启（或读不到）时勾选"我已确认可获取恢复密钥"。现在每次写盘之后都会复位，但还是先看一眼再点：
+/// 勾着的再点一次就取消了，按钮变灰（2026-11-12 第一次端到端就卡在这里）
 Future<void> ackBitlocker(WidgetTester t, Session s) async {
   if (s.needBitlockerAck && !s.bitlockerAck) await tap(t, find.text(l.confirmBitlockerAck));
   expect(!s.needBitlockerAck || s.bitlockerAck, isTrue);

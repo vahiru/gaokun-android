@@ -4,6 +4,7 @@ import 'package:gk3_common/backend/fixture_backend.dart';
 import 'app.dart';
 import 'backend/platform.dart';
 import 'session.dart';
+import 'ui/title_bar.dart';
 
 /// 演示场景：testdata/<场景>/（真 gk3w 的录制，来源与替换写在各自的 index.txt 里；pubspec 的 assets 逐个列出）
 const kScenarios = ['free', 'multi', 'installed', 'nospace', 'blocked', 'bad-release', 'usb'];
@@ -14,7 +15,8 @@ void main() {
   final scenario = requestedScenario();
   final real = scenario == null ? locateRealBackend() : null;
   final backend = real ?? FixtureBackend(kScenarios.contains(scenario) ? scenario! : kScenarios.first);
-  final session = Session(backend, language: requestedLanguage(), testDisk: real == null ? null : requestedTestDisk());
+  final session = Session(backend, language: requestedLanguage(), testDisk: real == null ? null : requestedTestDisk())
+    ..beforeDiskWrite = WindowControl.settleBusy;
   runApp(WinInstallerApp(session: session));
   session.check();
 }

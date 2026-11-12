@@ -56,7 +56,8 @@ static int bitlocker_protection(wchar_t drive)
     if (FAILED(CoCreateInstance(&CLSID_WbemLocator, NULL, CLSCTX_INPROC_SERVER, &IID_IWbemLocator, (void **)&loc)))
         goto out;
     ns = SysAllocString(L"ROOT\\CIMV2\\Security\\MicrosoftVolumeEncryption");
-    if (FAILED(IWbemLocator_ConnectServer(loc, ns, NULL, NULL, NULL, 0, NULL, NULL, &svc)))
+    /* WBEM_FLAG_CONNECT_USE_MAX_WAIT：WMI 服务卡住时连接最多等 2 分钟（Windows 的上限），不无限等（修复审查 11-12 第 6 条） */
+    if (FAILED(IWbemLocator_ConnectServer(loc, ns, NULL, NULL, NULL, WBEM_FLAG_CONNECT_USE_MAX_WAIT, NULL, NULL, &svc)))
         goto out;
     CoSetProxyBlanket((IUnknown *)svc, RPC_C_AUTHN_WINNT, RPC_C_AUTHZ_NONE, NULL, RPC_C_AUTHN_LEVEL_CALL,
                       RPC_C_IMP_LEVEL_IMPERSONATE, NULL, EOAC_NONE);
@@ -65,8 +66,8 @@ static int bitlocker_protection(wchar_t drive)
     query = SysAllocString(q);
     if (FAILED(IWbemServices_ExecQuery(svc, lang, query, WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY, NULL, &en)))
         goto out;
-    /* 最多等 30 秒：WMI 服务卡住时不能让 preflight 一直不返回（检查页会一直转圈、"重新检查"也点不了）。
-     * 超时（WBEM_S_TIMEDOUT）按"读不到"处理：界面显示 BitLocker 状态未知，要求确认恢复密钥 */
+    /* 查询结果最多等 30 秒：WMI 服务卡住时不能让 preflight 一直不返回（检查页会一直转圈、"重新检查"也点不了）。
+     * 超时（WBEM_S_TIMEDOUT）返回 -1，调用方再看卷上的 FVE 签名；签名也读不到时界面显示 BitLocker 状态未知 */
     if (IEnumWbemClassObject_Next(en, 30000, 1, &obj, &n) != WBEM_S_NO_ERROR || n != 1)
         goto out;
     VariantInit(&v);

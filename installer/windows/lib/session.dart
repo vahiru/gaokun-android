@@ -228,6 +228,20 @@ class Session extends ChangeNotifier {
   /// gk3w 正在写盘（apply / uninstall / media）：只有这段时间不许关闭窗口、阻止关机。下载期间可以关掉
   /// （.part 留着，下次接着下）—— 原先下载一开始就挡住关闭与关机，网慢时只能强制结束（审查 11-12 第 2 条）
   bool diskBusy = false;
+
+  /// 开始写盘之前等它返回：原生窗口确认已经挡住关闭与关机，才启动 gk3w。由 main.dart 接到 WindowControl 上；
+  /// 原先只靠下一帧 WindowButtons 重建时发出 setBusy，gk3w 可能先起来，这一瞬间关掉窗口它就没人看着地写盘
+  /// （修复审查 11-12 第 3 条）。测试里为 null
+  Future<void> Function()? beforeDiskWrite;
+
+  /// 正在下载（进度页的说明换成"下载期间可以关闭本窗口"）
+  bool downloading = false;
+
+  Future<void> _startDiskWrite() async {
+    diskBusy = true;
+    notifyListeners();
+    await beforeDiskWrite?.call();
+  }
   int percent = 0;
   Gk3Progress? lastProgress;
   final List<String> log = [];
@@ -261,9 +275,12 @@ class Session extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 任务里出了异常（不该有）：写盘中出的算"不知道动没动过盘"（没有 ERR），之前出的算没动
-  CallResult _crashed(Object e) =>
-      CallResult(diskBusy ? const [] : const [Gk3Record('ERR', {'code': 'internal'})], [Gk3Log('!! $e')], 1);
+  /// 任务里出了异常（不该有）：写盘中出的算"不知道动没动过盘"（没有 ERR），之前出的算没动。
+  /// 异常的内容进日志区（失败页显示的就是它），用户截图时看得到
+  CallResult _crashed(Object e) {
+    log.add('!! $e');
+    return CallResult(diskBusy ? const [] : const [Gk3Record('ERR', {'code': 'internal'})], [Gk3Log('!! $e')], 1);
+  }
 
   void _onEvent(Gk3Event e, {int base = 0, int span = 100}) {
     switch (e) {
@@ -320,7 +337,13 @@ class Session extends ChangeNotifier {
     try {
       var dir = localDir;
       if (!local) {
-        final dl = await backend.run('download', [variant!.base, releaseDir], (e) => _onEvent(e, span: 40));
+        downloading = true;
+        final CallResult dl;
+        try {
+          dl = await backend.run('download', [variant!.base, releaseDir], (e) => _onEvent(e, span: 40));
+        } finally {
+          downloading = false;
+        }
         if (!dl.ok) {
           result = dl;
           return false;
@@ -328,11 +351,11 @@ class Session extends ChangeNotifier {
         dir = dl.first('RELEASE')?['dir'] ?? releaseDir;
       }
       final (fn, args) = command(dir);
-      diskBusy = true;
-      notifyListeners();
+      await _startDiskWrite();
       result = await backend.run(fn, args, (e) => _onEvent(e, base: local ? 0 : 40, span: local ? 100 : 60));
-      // 装好了：下载的 1.3 GiB 没有用了，删掉（本地文件是用户自己的，不动；失败时留着，下次续传）
-      if (result!.ok && t == WriteTask.install && !local) deleteDownloadedRelease(dir);
+      // 装好了：下载的 1.3 GiB 没有用了，删掉（本地文件是用户自己的，不动；失败时留着，下次续传）。
+      // 回放演示数据时不删：录制里的目录是开发机上真实的下载目录
+      if (result!.ok && t == WriteTask.install && !local && backend.demoLabel == null) deleteDownloadedRelease(dir);
     } catch (e) {
       result = _crashed(e);
     } finally {
@@ -344,9 +367,8 @@ class Session extends ChangeNotifier {
   /// 卸载：gk3w uninstall 不报百分比，界面显示一条不定长的进度
   Future<bool> uninstall() async {
     _begin(WriteTask.uninstall);
-    diskBusy = true;
-    notifyListeners();
     try {
+      await _startDiskWrite();
       result = await backend.run('uninstall', [
         '--disk', '${disk!.num}', '--real-disk',
         if (bitlockerAck) ...['--bitlocker-key', 'yes'],

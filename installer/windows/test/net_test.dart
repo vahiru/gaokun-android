@@ -282,6 +282,67 @@ void main() {
     expect(r.ok, isTrue);
   });
 
+  /// 慢慢发、一直发的服务器（每 50 ms 发 64 KiB）：不该把它读完才报错
+  Future<bool> slow(HttpRequest req, List<int> body, {int from = 0, String? range}) async {
+    final resp = req.response;
+    resp.statusCode = range == null ? 200 : 206;
+    if (range != null) resp.headers.set(HttpHeaders.contentRangeHeader, range);
+    resp.contentLength = body.length - from;
+    try {
+      for (var i = from; i < body.length; i += 65536) {
+        resp.add(body.sublist(i, i + 65536 > body.length ? body.length : i + 65536));
+        await resp.flush();
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+      await resp.close();
+    } catch (_) {
+      // 客户端断开
+    }
+    return true;
+  }
+
+  test('放不下时马上报错，不先把整个响应读完（服务器还在慢慢发）', () async {
+    // 4 MiB 按每 50 ms 64 KiB 要 3 秒多才发完（boot.img 本身只有 300 KiB，太小了抓不住"先读完再报错"）
+    final big = blob(4 << 20, 5);
+    srv.hooks['boot.img'] = (req) => slow(req, big);
+    final sw = Stopwatch()..start();
+    final r = await collect(Net(cfg: fast).download([srv.base, dir.path], sha256sum, space: (_) async => 1 << 20));
+    expect(r.err!['code'], 'dl-space');
+    expect(sw.elapsedMilliseconds, lessThan(1500));
+  });
+
+  test('206 起点不对时马上丢掉重试，不先读完这份错位的正文', () async {
+    File('${dir.path}/super.img.zst.part').writeAsBytesSync(sup.sublist(0, 1000));
+    var n = 0;
+    srv.hooks['super.img.zst'] = (req) async {
+      if (n++ > 0 || req.headers.value('range') == null) return false;
+      return slow(req, sup, from: 1500, range: 'bytes 1500-${sup.length - 1}/${sup.length}');
+    };
+    final sw = Stopwatch()..start();
+    final r = await collect(dl());
+    expect(r.ok, isTrue, reason: '${r.log.map((l) => l.line)}');
+    // 一份 3 MiB 的错位正文按每 50 ms 64 KiB 要 2.5 秒才发完
+    expect(sw.elapsedMilliseconds, lessThan(2000));
+  });
+
+  test('续传时服务器回 206 却从 0 开始：当作整个文件从头写，不必重连', () async {
+    File('${dir.path}/super.img.zst.part').writeAsBytesSync(sup.sublist(0, 1000));
+    srv.hooks['super.img.zst'] = (req) async {
+      final resp = req.response;
+      resp.statusCode = 206;
+      resp.headers.set(HttpHeaders.contentRangeHeader, 'bytes 0-${sup.length - 1}/${sup.length}');
+      resp.contentLength = sup.length;
+      resp.add(sup);
+      await resp.close();
+      return true;
+    };
+    final r = await collect(dl());
+    expect(r.ok, isTrue, reason: '${r.log.map((l) => l.line)}');
+    expect(File('${dir.path}/super.img.zst').readAsBytesSync(), sup);
+    expect(srv.requests.where((q) => q.startsWith('GET super.img.zst')), hasLength(1));
+  });
+
+
   test('版本列表格式不对（response 是空的）：报 manifest-unavailable，不让流出错', () async {
     srv.files['ota/gaokun3.json'] = utf8.encode('{"response": []}');
     final r = await collect(Net(cfg: NetConfig(otaJson: '${srv.base}ota/gaokun3.json')).releases(['--source', 'r2']));
@@ -309,6 +370,11 @@ void main() {
     expect(parseProxyServer('http=http://127.0.0.1:7890'), '127.0.0.1:7890');
     expect(parseProxyServer('socks=127.0.0.1:7891'), isNull);
     expect(parseProxyServer(''), isNull);
+    // 没写端口补 :80（Dart 对不带端口的项直接抛 Invalid proxy configuration，连 DIRECT 都不试）
+    expect(parseProxyServer('127.0.0.1'), '127.0.0.1:80');
+    expect(parseProxyServer('http=proxy.corp'), 'proxy.corp:80');
+    expect(parseProxyServer('127.0.0.1:abc'), isNull);
+    expect(parseProxyServer('a b:1'), isNull);
   });
 
 

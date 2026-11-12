@@ -33,7 +33,16 @@ class WindowControl {
     final state = (busy, awake || busy);
     if (_busy == state) return;
     _busy = state;
-    _call<void>('setBusy', {'busy': busy, 'awake': awake || busy, 'power': power, 'shutdown': shutdown});
+    _pending = _call<void>('setBusy', {'busy': busy, 'awake': awake || busy, 'power': power, 'shutdown': shutdown});
+  }
+
+  /// 最近一次 setBusy 的原生调用（Session.beforeDiskWrite 等它返回）
+  static Future<void>? _pending;
+
+  /// 等界面按最新状态发出 setBusy、原生窗口处理完：下一帧 WindowButtons 重建时发出，再等那次调用返回
+  static Future<void> settleBusy() async {
+    await WidgetsBinding.instance.endOfFrame;
+    await _pending;
   }
 
   /// 系统的"选择文件夹"对话框（IFileOpenDialog）；取消或没有原生窗口时为 null
