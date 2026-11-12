@@ -96,8 +96,17 @@ static int blw_open(blw *w, wchar_t drive)
     }
     w->path = v.bstrVal;   /* 接管，不 VariantClear */
     cls = SysAllocString(L"Win32_EncryptableVolume");
-    if (FAILED(IWbemServices_GetObject(w->svc, cls, 0, NULL, &w->cls, NULL)))
-        goto out;
+    {
+        /* 半同步取类定义，最多等 30 秒（同上：WMI 服务卡住时检查不能一直不返回） */
+        IWbemCallResult *cr = NULL;
+        HRESULT hr = IWbemServices_GetObject(w->svc, cls, WBEM_FLAG_RETURN_IMMEDIATELY, NULL, NULL, &cr);
+        if (SUCCEEDED(hr))
+            hr = IWbemCallResult_GetResultObject(cr, 30000, &w->cls);
+        if (cr)
+            IWbemCallResult_Release(cr);
+        if (hr != WBEM_S_NO_ERROR || !w->cls)
+            goto out;
+    }
     rc = 0;
 out:
     if (obj)
@@ -111,8 +120,8 @@ out:
     return rc;
 }
 
-/* 调这个卷的一个方法，入参至多一个（pname 为 NULL 时不带）。返回方法的 ReturnValue（0 = 成功，
- * 否则是 FVE_E_* 之类的 HRESULT），调用本身失败时返回调用的 HRESULT；成功时 *out 由调用方释放 */
+/* 调这个卷的一个方法，入参至多一个（pname 为 NULL 时不带）。方法的 ReturnValue 不是 0 就算失败（返回它，
+ * 不是负数时换成 E_FAIL）；调用本身失败或 60 秒没有结果时返回调用的 HRESULT。成功时 *out 由调用方释放 */
 static HRESULT blw_call(blw *w, const wchar_t *method, const wchar_t *pname, VARIANT *pval, IWbemClassObject **out)
 {
     IWbemClassObject *def = NULL, *in = NULL;
@@ -128,12 +137,22 @@ static HRESULT blw_call(blw *w, const wchar_t *method, const wchar_t *pname, VAR
         if (SUCCEEDED(hr))
             hr = IWbemClassObject_Put(in, pname, 0, pval, 0);
     }
-    if (SUCCEEDED(hr))
-        hr = IWbemServices_ExecMethod(w->svc, w->path, m, 0, NULL, in, out, NULL);
+    if (SUCCEEDED(hr)) {
+        /* 半同步调用，最多等 60 秒：提供程序卡住时不能让检查或安装一直不返回 */
+        IWbemCallResult *cr = NULL;
+        hr = IWbemServices_ExecMethod(w->svc, w->path, m, WBEM_FLAG_RETURN_IMMEDIATELY, NULL, in, NULL, &cr);
+        if (SUCCEEDED(hr)) {
+            hr = IWbemCallResult_GetResultObject(cr, 60000, out);
+            if (hr == WBEM_S_TIMEDOUT)
+                hr = WBEM_E_TIMED_OUT;
+        }
+        if (cr)
+            IWbemCallResult_Release(cr);
+    }
     if (SUCCEEDED(hr)) {
         VariantInit(&rv);
         if (*out && SUCCEEDED(IWbemClassObject_Get(*out, L"ReturnValue", 0, &rv, NULL, NULL)) && (rv.vt == VT_I4 || rv.vt == VT_UI4))
-            hr = (HRESULT)rv.lVal;
+            hr = rv.lVal == 0 ? S_OK : FAILED((HRESULT)rv.lVal) ? (HRESULT)rv.lVal : E_FAIL;
         else
             hr = E_UNEXPECTED;
         VariantClear(&rv);
@@ -189,7 +208,7 @@ static int blw_password_ids(blw *w, SAFEARRAY **ids, LONG *lo)
     return n;
 }
 
-int gk3w_bitlocker_status(wchar_t drive, char *ids, size_t cap, int *ids_known)
+int gk3w_bitlocker_status(wchar_t drive, char *ids, size_t cap, int *ids_known, int *conversion)
 {
     blw w;
     int status;
@@ -197,12 +216,29 @@ int gk3w_bitlocker_status(wchar_t drive, char *ids, size_t cap, int *ids_known)
     if (cap)
         ids[0] = 0;
     *ids_known = 0;
+    *conversion = -1;
     if (blw_open(&w, drive)) {
         status = w.protection;
         blw_close(&w);
         return status;
     }
     status = w.protection;
+    {
+        /* 加密或解密进行到哪一步（ConversionStatus：0 完全解密、1 完全加密、2 正在加密、3 正在解密、4 加密已暂停、
+         * 5 解密已暂停）：保护状态 0 也可能是加密还没完成，那时 TPM 保护器照样在用 */
+        IWbemClassObject *out = NULL;
+        HRESULT hr = blw_call(&w, L"GetConversionStatus", NULL, NULL, &out);
+        if (SUCCEEDED(hr)) {
+            VARIANT v;
+            VariantInit(&v);
+            if (SUCCEEDED(IWbemClassObject_Get(out, L"ConversionStatus", 0, &v, NULL, NULL)) && (v.vt == VT_I4 || v.vt == VT_UI4))
+                *conversion = (int)v.lVal;
+            VariantClear(&v);
+            IWbemClassObject_Release(out);
+        } else {
+            gk3w_log("BitLocker: GetConversionStatus failed (0x%08lx)", (unsigned long)hr);
+        }
+    }
     if (status == 1 || status == 2) {
         SAFEARRAY *arr;
         LONG lo;
@@ -322,7 +358,8 @@ int gk3w_bitlocker_suspend(wchar_t drive, unsigned reboots)
     VariantInit(&c);
     c.vt = VT_I4;
     c.lVal = (LONG)reboots;
-    hr = blw_call(&w, L"DisableKeyProtectors", L"RebootCount", &c, &out);
+    /* WMI 里这个参数叫 DisableCount（Suspend-BitLocker 的 -RebootCount、manage-bde 的 -RebootCount 都映射到它） */
+    hr = blw_call(&w, L"DisableKeyProtectors", L"DisableCount", &c, &out);
     if (SUCCEEDED(hr)) {
         IWbemClassObject_Release(out);
         gk3w_log("BitLocker: protection of %c: suspended; Windows resumes it after %u restart(s)", (char)drive, reboots);
@@ -348,7 +385,7 @@ int gk3w_bitlocker_err(gk3w_bl_result r, int bad_group, gk3w_touched t)
         snprintf(human, sizeof human, "the recovery key is not valid: it must be 48 digits in 8 groups of 6%s", tail);
         return gk3w_err(t, "bitlocker-key-format", human, 0);
     case GK3W_BL_WRONG:
-        snprintf(human, sizeof human, "the recovery key does not match any BitLocker recovery key of the system volume%s", tail);
+        snprintf(human, sizeof human, "the recovery key does not match any BitLocker recovery key of the volume%s", tail);
         return gk3w_err(t, "bitlocker-key-wrong", human, 0);
     case GK3W_BL_NO_PASSWORD:
         snprintf(human, sizeof human,
@@ -368,6 +405,8 @@ int gk3w_read_key_stdin(char *buf, size_t cap)
     size_t n;
     if (!cap)
         return -1;
+    /* 不经 C 运行库的缓冲区：那里的一份清不掉 */
+    setvbuf(stdin, NULL, _IONBF, 0);
     if (!fgets(buf, cap > 0x7fffffff ? 0x7fffffff : (int)cap, stdin)) {
         buf[0] = 0;
         return -1;
@@ -392,6 +431,9 @@ int gk3w_cmd_bitlocker_key(int argc, wchar_t **argv)
         (vol && (!iswalpha(vol[0]) || vol[1] != L':' || vol[2])))
         return gk3w_err(GK3W_TOUCHED_NA, "usage", "usage: bitlocker-key [--suspend 1-15] [--volume X:]  (the recovery key is read from standard input)", 0);
     drive = vol ? towupper(vol[0]) : (GetSystemWindowsDirectoryW(win, MAX_PATH) && win[1] == L':' ? towupper(win[0]) : L'C');
+    /* 暂停系统卷的保护只为在这台平板上安装：别的电脑上不动它（--volume 是对着测试卷用的） */
+    if (reboots && !vol && !gk3w_model_ok_now())
+        return gk3w_err(GK3W_TOUCHED_NA, "wrong-model", "this computer is not a Huawei MateBook E Go (gaokun3); not suspending its BitLocker protection", 0);
     if (gk3w_read_key_stdin(key, sizeof key)) {
         gk3w_wipe(key, sizeof key);
         return gk3w_err(GK3W_TOUCHED_NA, "bitlocker-key-required", "no recovery key on standard input", 0);

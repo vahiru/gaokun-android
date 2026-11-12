@@ -89,15 +89,23 @@ void gk3w_sys_read(gk3w_sys *s)
         if (fh != INVALID_HANDLE_VALUE)
             FindClose(fh);
     }
-    s->bitlocker = gk3w_bitlocker_status(s->system_drive, s->bitlocker_key_ids, sizeof s->bitlocker_key_ids, &s->bitlocker_ids_known);
-    if (s->bitlocker < 0) {
-        /* WMI 读不到：按盘上签名判断（有签名当作保护开着）；签名也读不到就保持 -1，由 gk3w_sys_gate 当作开着处理 */
-        int f = fve_signature(s->system_drive);
-        if (f >= 0)
-            s->bitlocker = f ? GK3W_BL_STATE_ON : GK3W_BL_STATE_OFF;
-    } else if (s->bitlocker == 0 && fve_signature(s->system_drive) == 1) {
-        /* 保护关着而卷是加密的：暂停了保护（Suspend-BitLocker / 安装器暂停的），或设备加密尚未激活 */
-        s->bitlocker = GK3W_BL_STATE_SUSPENDED;
+    {
+        int conv;
+        s->bitlocker = gk3w_bitlocker_status(s->system_drive, s->bitlocker_key_ids, sizeof s->bitlocker_key_ids, &s->bitlocker_ids_known, &conv);
+        if (s->bitlocker < 0) {
+            /* WMI 读不到：按盘上签名判断（有签名当作保护开着）；签名也读不到就保持 -1，由 gk3w_sys_gate 当作开着处理 */
+            int f = fve_signature(s->system_drive);
+            if (f >= 0)
+                s->bitlocker = f ? GK3W_BL_STATE_ON : GK3W_BL_STATE_OFF;
+        } else if (conv >= 2 && conv <= 5) {
+            /* 正在加密或解密：保护状态这时是 0，但 TPM 保护器可能在用（例如登录 Microsoft 账户之后的设备加密），
+             * 改了启动链 Windows 就会要求输入恢复密钥，而这时可能还没有可以校验的恢复密钥 —— 等转换完成 */
+            s->bitlocker = GK3W_BL_STATE_CONVERTING;
+        } else if (s->bitlocker == 0 && (conv == 1 || (conv < 0 && fve_signature(s->system_drive) == 1))) {
+            /* 保护关着而卷已完全加密：暂停了保护（Suspend-BitLocker / 安装器暂停的），或设备加密尚未激活。
+             * 转换状态查不到而卷上有 BitLocker 签名：不能排除正在加密，当作状态不明（要恢复密钥） */
+            s->bitlocker = conv == 1 ? GK3W_BL_STATE_SUSPENDED : GK3W_BL_STATE_UNKNOWN;
+        }
     }
     s->ac = -1;
     s->battery = -1;
@@ -105,6 +113,14 @@ void gk3w_sys_read(gk3w_sys *s)
         s->ac = ps.ACLineStatus == 255 ? -1 : ps.ACLineStatus;
         s->battery = ps.BatteryLifePercent == 255 ? -1 : ps.BatteryLifePercent;
     }
+}
+
+int gk3w_model_ok_now(void)
+{
+    gk3w_sys s;
+    memset(&s, 0, sizeof s);
+    reg_str(L"HARDWARE\\DESCRIPTION\\System\\BIOS", L"SystemProductName", s.model, sizeof s.model);
+    return gk3w_model_ok(&s);
 }
 
 int gk3w_model_ok(const gk3w_sys *s)
@@ -117,7 +133,7 @@ int gk3w_model_ok(const gk3w_sys *s)
 
 int gk3w_sys_bitlocker_on(const gk3w_sys *s)
 {
-    return s->bitlocker != GK3W_BL_STATE_OFF && s->bitlocker != GK3W_BL_STATE_SUSPENDED;
+    return s->bitlocker != GK3W_BL_STATE_OFF && s->bitlocker != GK3W_BL_STATE_SUSPENDED && s->bitlocker != GK3W_BL_STATE_CONVERTING;
 }
 
 /* 说明见 disk.h */
@@ -135,6 +151,9 @@ int gk3w_sys_gate(const gk3w_sys *s, const char *bitlocker_key, gk3w_gate_mode m
                         0), -1;
     /* 只有确认保护关着才不要密钥（读不到、状态未知都当作开着）：写入前会暂停保护，但重新绑定仍可能失败，
      * 那时 Windows 要求输入恢复密钥 —— 不能让手里没有正确密钥的人改动启动链 */
+    if (s->bitlocker == GK3W_BL_STATE_CONVERTING)
+        return gk3w_err(GK3W_TOUCHED_NO, "bitlocker-converting",
+                        "BitLocker is encrypting or decrypting the system volume; whether Windows would ask for the recovery key after the boot chain changes cannot be ruled out. Wait for the conversion to finish, then run the check again (disk not touched)", 0), -1;
     if (gk3w_sys_bitlocker_on(s)) {
         int group = 0;
         gk3w_bl_result r;
@@ -165,7 +184,7 @@ int gk3w_cmd_preflight(int argc, wchar_t **argv)
     gk3w_line_kv(&l, "model", s.model);
     gk3w_line_kv(&l, "model_ok", gk3w_model_ok(&s) ? "yes" : "no");
     gk3w_line_kv(&l, "secure_boot", s.secure_boot < 0 ? "unknown" : s.secure_boot ? "on" : "off");
-    gk3w_line_kv(&l, "bitlocker", s.bitlocker == GK3W_BL_STATE_OFF ? "off" : s.bitlocker == GK3W_BL_STATE_ON ? "on" : s.bitlocker == GK3W_BL_STATE_SUSPENDED ? "suspended" : "unknown");
+    gk3w_line_kv(&l, "bitlocker", s.bitlocker == GK3W_BL_STATE_OFF ? "off" : s.bitlocker == GK3W_BL_STATE_ON ? "on" : s.bitlocker == GK3W_BL_STATE_SUSPENDED ? "suspended" : s.bitlocker == GK3W_BL_STATE_CONVERTING ? "converting" : "unknown");
     if (s.bitlocker_ids_known)
         gk3w_line_kv(&l, "bitlocker_key_ids", s.bitlocker_key_ids);
     gk3w_line_kv(&l, "fast_startup", s.fast_startup ? "on" : "off");

@@ -44,3 +44,4 @@ flutter:
     - testdata/usb/
     - testdata/bitlocker/
     - testdata/bitlocker-suspended/
+    - testdata/bitlocker-on/

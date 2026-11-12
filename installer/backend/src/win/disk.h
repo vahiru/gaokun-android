@@ -85,7 +85,8 @@ int gk3w_exists(const wchar_t *path);
 #define GK3W_BL_STATE_OFF 0         /* 没有加密 */
 #define GK3W_BL_STATE_ON 1          /* 保护已开启（或 WMI 读不到、而卷上有 BitLocker 签名） */
 #define GK3W_BL_STATE_UNKNOWN 2     /* ProtectionStatus 2 */
-#define GK3W_BL_STATE_SUSPENDED 3   /* 已加密，保护已暂停或尚未激活：Windows 下次启动不会要求输入恢复密钥 */
+#define GK3W_BL_STATE_SUSPENDED 3   /* 已完全加密，保护已暂停或尚未激活：Windows 下次启动不会要求输入恢复密钥 */
+#define GK3W_BL_STATE_CONVERTING 4  /* 正在加密或解密（含已暂停）：此时保护状态为 0，但 TPM 保护器可能在用，不改动启动链 */
 #define GK3W_BL_STATE_UNREADABLE (-1)
 typedef struct {
     char manufacturer[64], model[64];
@@ -102,6 +103,8 @@ typedef struct {
 } gk3w_sys;
 void gk3w_sys_read(gk3w_sys *s);
 int gk3w_model_ok(const gk3w_sys *s);
+/* 同上，现读注册表（不读其余系统状态） */
+int gk3w_model_ok_now(void);
 /* 系统卷的 BitLocker 保护开着（或状态不明）：改动启动链之前要校验恢复密钥、暂停保护 */
 int gk3w_sys_bitlocker_on(const gk3w_sys *s);
 /* 写真实磁盘之前的把关；拒绝时已报 ERR（touched=no），返回 -1。
@@ -119,9 +122,9 @@ typedef enum {
     GK3W_BL_NO_PASSWORD,        /* 卷上没有恢复密钥（数字密码保护器） */
     GK3W_BL_QUERY,              /* WMI 查不了，无法校验 */
 } gk3w_bl_result;
-/* 保护状态（ProtectionStatus：0 关、1 开、2 未知；WMI 不可用 -1）。保护开着或未知时顺带查恢复密钥的 ID
- * （逗号分隔，各取前 8 位），查到了 *ids_known = 1 */
-int gk3w_bitlocker_status(wchar_t drive, char *ids, size_t cap, int *ids_known);
+/* 保护状态（ProtectionStatus：0 关、1 开、2 未知；WMI 不可用 -1）与 *conversion（ConversionStatus 0–5，查不到 -1）。
+ * 保护开着或未知时顺带查恢复密钥的 ID（逗号分隔，各取前 8 位），查到了 *ids_known = 1 */
+int gk3w_bitlocker_status(wchar_t drive, char *ids, size_t cap, int *ids_known, int *conversion);
 /* 用户输入的恢复密钥与卷上的是否一致；GK3W_BL_FORMAT 时 *bad_group 是校验不过的那一组（1–8），位数不对为 0 */
 gk3w_bl_result gk3w_bitlocker_verify(wchar_t drive, const char *key, int *bad_group);
 /* 暂停卷的 BitLocker 保护，Windows 再启动 reboots 次后自动恢复。成功 0，失败 -1（已写日志） */

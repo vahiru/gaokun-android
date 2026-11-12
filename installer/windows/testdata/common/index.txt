@@ -5,7 +5,7 @@
 # releases 的 LIVECD：最新的安装器（LiveCD，不带系统的 windows.zip）。GitHub 取自同一份 API 返回；R2 是 2026-11-12 对 installer/0.2.0-rc.2/ 的真实 HEAD（R2 没有安装器的列表，版本号照 GitHub 的；真后端怎样在 R2 上找最新的尚未确定）
 # download：LiveCD 的录制（installer/live/testdata/common），Windows 版按同一个行协议输出；去掉了 LiveCD 自己的中文日志行，RELEASE 的目录换成 Windows 路径
 # plan：真跑的 gk3w plan（40 GiB 的区间 / 12508 MiB 的区间 / 空区间：界面用它问"至少要多大"，录的是 --disk 2）
-# bitlocker-key：按 gk3w bitlocker-key 的输出格式写的（校验通过；带 --suspend 2 时另有暂停保护的一行）
+# bitlocker-key：PC 上对一个开启了 BitLocker 的测试卷（数据卷 Q:）真跑的输出，盘符换成 C:，时间是估的；带 --suspend 2 的那份按同样的格式补了暂停保护的一行（数据卷不能按重启次数暂停，录不到）
 # apply、uninstall：PC 上的 VHDX 真跑（磁盘号 2），带真实的时间；uninstall 的 FREE 记录按之后修正的格式（disk=disk2，与 probe 相同）替换过
 preflight                 preflight-ok.txt
 releases --source github  releases-github.txt

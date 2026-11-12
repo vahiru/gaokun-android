@@ -25,6 +25,7 @@ String errText(L10n l, Gk3Record err) {
     'bitlocker-no-recovery-key' => l.errBitlockerNoKey,
     'bitlocker-unverifiable' => l.errBitlockerUnverifiable,
     'bitlocker-suspend-failed' => l.errBitlockerSuspend,
+    'bitlocker-converting' => l.errBitlockerConverting,
     'low-battery' => l.errLowBattery,
     'esp-full' || 'esp-full-min' || 'esp-ota-room' || 'esp-win-reserve' || 'esp-too-small' => l.errEspFull,
     'partlabel-conflict' || 'android-unconfirmed' || 'foreign-content' || 'bad-part-type' => l.errPartsUnclear,

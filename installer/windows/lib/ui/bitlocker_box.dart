@@ -11,6 +11,45 @@ import 'messages.dart';
 /// 输入框的占位文字：恢复密钥的样子（8 组、每组 6 位）
 const kRecoveryKeyHint = '000000-000000-000000-000000-000000-000000-000000-000000';
 
+/// 恢复密钥输入框的格式：只留数字，每 6 位自动加连字符，最多 48 位。粘贴来的密钥（带连字符或空格）照样整理成这个样子；
+/// 光标按它前面的数字个数放回原处
+class RecoveryKeyFormatter extends TextInputFormatter {
+  static String _digits(String s) => s.replaceAll(RegExp(r'[^0-9]'), '');
+
+  @override
+  TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) {
+    final text = newValue.text;
+    final end = newValue.selection.isValid ? newValue.selection.extentOffset.clamp(0, text.length) : text.length;
+    var digits = _digits(text);
+    var before = _digits(text.substring(0, end)).length;
+    // 只删掉了一个自动加的连字符：退格改为删它前面的那位数字，Delete 改为删它后面的那位
+    // （不然连字符马上又补回来，按键看起来没有反应）
+    if (digits == _digits(oldValue.text) &&
+        text.length == oldValue.text.length - 1 &&
+        oldValue.selection.isCollapsed &&
+        newValue.selection.isCollapsed) {
+      if (newValue.selection.extentOffset < oldValue.selection.extentOffset) {
+        if (before > 0) {
+          digits = digits.substring(0, before - 1) + digits.substring(before);
+          before--;
+        }
+      } else if (before < digits.length) {
+        digits = digits.substring(0, before) + digits.substring(before + 1);
+      }
+    }
+    if (digits.length > 48) digits = digits.substring(0, 48);
+    if (before > digits.length) before = digits.length;
+    final b = StringBuffer();
+    var cursor = 0;
+    for (var i = 0; i < digits.length; i++) {
+      if (i > 0 && i % 6 == 0) b.write('-');
+      b.write(digits[i]);
+      if (i + 1 == before) cursor = b.length;
+    }
+    return TextEditingValue(text: b.toString(), selection: TextSelection.collapsed(offset: cursor));
+  }
+}
+
 /// 输入并校验 BitLocker 恢复密钥（确认页；检查页上关闭 Secure Boot 之前暂停保护也用它）。
 /// 密钥交给 gk3w 与系统盘的恢复密钥比对（Session.verifyBitlockerKey），界面上不显示系统保存的密钥。
 /// [suspendReboots] 大于 0：按钮是"校验并暂停保护"，通过之后暂停保护这么多次重启
@@ -89,8 +128,7 @@ class _BitlockerKeyBoxState extends State<BitlockerKeyBox> {
               keyboardType: TextInputType.number,
               autocorrect: false,
               enableSuggestions: false,
-              // 数字、连字符与空格（Microsoft 账户页面上复制来的密钥带连字符，有时带空格）
-              inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9 \-]')), LengthLimitingTextInputFormatter(64)],
+              inputFormatters: [RecoveryKeyFormatter()],
               style: context.tt.bodyLarge!.copyWith(fontFeatures: const [FontFeature.tabularFigures()]),
               decoration: InputDecoration(
                 labelText: l.blKeyLabel,

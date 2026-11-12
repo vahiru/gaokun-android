@@ -7,7 +7,7 @@ import 'session.dart';
 import 'ui/title_bar.dart';
 
 /// 演示场景：testdata/<场景>/（真 gk3w 的录制，来源与替换写在各自的 index.txt 里；pubspec 的 assets 逐个列出）
-const kScenarios = ['free', 'multi', 'installed', 'nospace', 'blocked', 'bad-release', 'usb', 'bitlocker', 'bitlocker-suspended'];
+const kScenarios = ['free', 'multi', 'installed', 'nospace', 'blocked', 'bad-release', 'usb', 'bitlocker', 'bitlocker-suspended', 'bitlocker-on'];
 
 /// Windows：调程序目录里的 gk3w.exe（backend/platform_io.dart）；GK3_FIXTURE=<场景> 回放演示数据，
 /// GK3_TEST_DISK=<磁盘号> 是对着一块 VHD 的测试模式。浏览器预览：?scenario=<场景>&lang=zh|en

@@ -21,10 +21,9 @@ class CheckPage extends StatelessWidget {
     final d = s.disk;
     final (rows, blockedByPreflight) = preflightRows(context);
     var blocked = blockedByPreflight;
-    final pf = s.preflight;
     // 还要关闭 Secure Boot、而 BitLocker 保护开着：关闭之前先校验恢复密钥、暂停保护（Windows 重启两次后自动恢复：
-    // 进固件设置关闭 Secure Boot 一次，装好后重启一次），不然关闭之后启动 Windows 就要求输入恢复密钥
-    final suspendFirst = !s.checking && pf != null && pf.secureBoot == 'on' && !s.installed && s.needBitlockerKey && !s.bitlockerNoKey;
+    // 进固件设置关闭 Secure Boot 一次，装好后重启一次）
+    final suspendFirst = !s.checking && s.bitlockerSuspendFirst;
     if (!s.checking && s.probe != null) {
       if (d == null) {
         rows.add(CheckRow(state: CheckState.fail, title: l.chkNoSystemDisk));
@@ -48,7 +47,8 @@ class CheckPage extends StatelessWidget {
       step: WinStep.check,
       title: l.checkTitle,
       subtitle: l.checkSub,
-      bottomLeft: Btn(l.btnRecheck, onPressed: s.checking ? null : s.check, kind: BtnKind.secondary, icon: Icons.refresh),
+      // 校验恢复密钥（并暂停保护）期间不能重新检查：它做完会自己重新检查
+      bottomLeft: Btn(l.btnRecheck, onPressed: s.checking || s.bitlockerChecking ? null : s.check, kind: BtnKind.secondary, icon: Icons.refresh),
       nextLabel: s.installed ? l.btnManage : l.btnNext,
       onNext: s.checking || blocked || (s.probe == null)
           ? null
@@ -97,18 +97,20 @@ class CheckPage extends StatelessWidget {
       'on' => CheckRow(
           state: inst ? CheckState.warn : CheckState.fail,
           title: l.chkSecureBootOn,
-          detail: !inst && s.needBitlockerKey && !s.bitlockerNoKey ? l.chkSecureBootHowBitlocker : l.chkSecureBootHow),
+          detail: s.bitlockerSuspendFirst ? l.chkSecureBootHowBitlocker : l.chkSecureBootHow),
       _ => CheckRow(state: CheckState.warn, title: l.chkSecureBootUnknown, detail: l.chkSecureBootHow),
     });
     rows.add(pf.fastStartup == 'on'
         ? CheckRow(state: inst ? CheckState.warn : CheckState.fail, title: l.chkFastStartupOn,
             detail: pf.hibernate == 'off' ? l.chkFastStartupHowReg : l.chkFastStartupHow)
         : CheckRow(state: CheckState.ok, title: l.chkFastStartupOff));
-    // 恢复密钥 ID：检查页下方有输入框时（先暂停保护再关闭 Secure Boot）写在框里，这里不重复
-    final ids = pf.secureBoot == 'on' && !inst && s.needBitlockerKey ? null : pf.bitlockerKeyIds;
+    final ids = pf.bitlockerKeyIds;
     rows.add(switch (pf.bitlocker) {
       'off' => CheckRow(state: CheckState.ok, title: l.chkBitlockerOff),
       'suspended' => CheckRow(state: CheckState.ok, title: l.chkBitlockerSuspended, detail: l.chkBitlockerSuspendedHow),
+      'converting' => CheckRow(state: s.testMode ? CheckState.warn : CheckState.fail, title: l.chkBitlockerConverting, detail: l.chkBitlockerConvertingHow),
+      // 下方有恢复密钥框（先暂停保护再关闭 Secure Boot）：说明与密钥 ID 都在框里
+      _ when s.bitlockerSuspendFirst => CheckRow(state: CheckState.warn, title: l.chkBitlockerOn, detail: l.chkBitlockerHowSecureBoot),
       // 系统盘上没有恢复密钥：无从校验，安装与卸载都不能继续（测试模式不要密钥，不挡）
       _ when s.bitlockerNoKey => CheckRow(state: CheckState.fail, title: l.chkBitlockerNoKey, detail: l.chkBitlockerNoKeyHow),
       _ => CheckRow(
@@ -120,7 +122,9 @@ class CheckPage extends StatelessWidget {
         ? CheckRow(state: CheckState.fail, title: l.chkBatteryLow, detail: l.chkBatteryLowHow)
         : CheckRow(state: CheckState.ok, title: l.chkPower, detail: _power(l, pf)));
     // 测试模式（对着一块 VHD）：本机的检查项照样显示，但不挡住
-    if (!s.testMode) blocked |= !pf.modelOk || pf.lowBattery || s.bitlockerNoKey || (!inst && (pf.secureBoot == 'on' || pf.fastStartup == 'on'));
+    if (!s.testMode) {
+      blocked |= !pf.modelOk || pf.lowBattery || s.bitlockerNoKey || s.bitlockerConverting || (!inst && (pf.secureBoot == 'on' || pf.fastStartup == 'on'));
+    }
   }
   return (rows, blocked);
 }

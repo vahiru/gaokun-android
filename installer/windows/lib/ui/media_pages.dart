@@ -112,6 +112,7 @@ class MediaTargetPage extends StatelessWidget {
       if (pf.secureBoot == 'on') l.chkSecureBootOn,
       if (pf.fastStartup == 'on') l.chkFastStartupOn,
       if (s.bitlockerNoKey) l.chkBitlockerNoKey,
+      if (s.bitlockerConverting) l.chkBitlockerConverting,
       if (pf.lowBattery) l.chkBatteryLow,
       if (s.disk == null) l.chkNoSystemDisk else if (s.mediaRegion == null) l.chkNoRoom(fmtMib(kMediaNeedMib)),
     ];

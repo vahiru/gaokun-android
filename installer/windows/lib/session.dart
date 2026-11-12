@@ -45,7 +45,11 @@ class Session extends ChangeNotifier {
   /// 检查本身失败（gk3w 跑不起来、不是管理员 …）：给用户看的说明在 checkErr
   Gk3Record? checkErr;
 
+  /// 第几次检查：重新检查时上一次可能还没返回（例如校验恢复密钥并暂停保护期间），晚到的旧结果不能盖住新的
+  int _checkGen = 0;
+
   Future<void> check() async {
+    final gen = ++_checkGen;
     checking = true;
     checkErr = null;
     // 恢复密钥只用于一次写盘：重新检查之后要重新输入
@@ -55,6 +59,7 @@ class Session extends ChangeNotifier {
     try {
       final pf = await backend.run('preflight');
       final pr = await backend.run('probe');
+      if (gen != _checkGen) return;
       final pfRec = pf.ok ? pf.first('PREFLIGHT') : null;
       preflight = pfRec == null ? null : Preflight(pfRec);
       probe = pr.ok ? Probe(pr) : null;
@@ -68,12 +73,15 @@ class Session extends ChangeNotifier {
       mediaRegion = _defaultMediaRegion();
       if (disk != null && !installed) await _loadPlans();
     } catch (e) {
+      logNote?.call('!! $e');
+      if (gen != _checkGen) return;
       checkErr = _failed('check');
       log.add('!! $e');
-      logNote?.call('!! $e');
     } finally {
-      checking = false;
-      notifyListeners();
+      if (gen == _checkGen) {
+        checking = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -219,7 +227,18 @@ class Session extends ChangeNotifier {
   /// 系统盘的 BitLocker 保护已开启（或状态不明）：安装、卸载前要输入恢复密钥，由 gk3w 与系统盘的恢复密钥比对，
   /// 写入磁盘前再由它暂停保护。保护已暂停或尚未激活时不要（Windows 下次启动不会要求输入恢复密钥）。
   /// 测试模式不写本机系统盘，也不要
-  bool get needBitlockerKey => !testMode && preflight != null && !const {'off', 'suspended'}.contains(preflight!.bitlocker);
+  bool get needBitlockerKey => !testMode && preflight != null && !const {'off', 'suspended', 'converting'}.contains(preflight!.bitlocker);
+
+  /// 正在加密或解密系统盘：这时改动启动链，Windows 可能要求输入恢复密钥，而可能还没有可以校验的密钥 —— 等转换完成。
+  /// 测试模式不写本机系统盘，不挡
+  bool get bitlockerConverting => !testMode && preflight?.bitlocker == 'converting';
+
+  /// 出厂状态：还要关闭 Secure Boot，而 BitLocker 保护开着 —— 检查页先校验恢复密钥、暂停保护（两次重启），
+  /// 不然关闭之后启动 Windows 就要求输入恢复密钥。只在这台平板上、还没装 Android 时（别的电脑上不动它的 BitLocker）
+  bool get bitlockerSuspendFirst {
+    final pf = preflight;
+    return pf != null && pf.secureBoot == 'on' && pf.modelOk && disk != null && !installed && needBitlockerKey && !bitlockerNoKey;
+  }
 
   /// 系统盘上没有恢复密钥（只有 TPM 之类的保护器）：无从校验，不能继续
   bool get bitlockerNoKey => needBitlockerKey && (preflight!.bitlockerKeyIds?.isEmpty ?? false);
@@ -258,11 +277,14 @@ class Session extends ChangeNotifier {
     bitlockerChecking = true;
     bitlockerErr = null;
     notifyListeners();
+    final gen = _checkGen;
     var ok = false;
     try {
       final r = await Gk3Backend.collect(
           backend.callWithInput('bitlocker-key', [if (suspendReboots > 0) ...['--suspend', '$suspendReboots']], '$key\n'));
       ok = r.ok && r.first('BITLOCKER')?['key'] == 'ok';
+      // 校验期间重新检查过：结果对应的已不是当前的检查，要重新输入
+      if (gen != _checkGen) return false;
       if (ok) {
         _bitlockerKey = key;
       } else {

@@ -139,6 +139,9 @@ void main() {
     expect(find.text(l.chkFastStartupOn), findsOneWidget);
     expect(find.text(l.chkBitlockerOn), findsOneWidget);
     expect(enabled(t, l.btnNext), isFalse);
+    // 不是这台平板：不提供暂停这台电脑的 BitLocker 保护
+    expect(find.text(l.chkBitlockerSuspendBox), findsNothing);
+    expect(find.text(l.chkSecureBootHow), findsOneWidget);
   });
 
   testWidgets('发布文件损坏：失败页说清楚原因，盘没动过', (t) async {
@@ -325,10 +328,13 @@ void main() {
     await t.enterText(find.byType(TextField), kGoodKey.replaceAll('-', ' '));
     await tapShown(t, find.text(l.blVerify));
     await see(t, find.text(l.blOk));
-    await t.enterText(find.byType(TextField), '${kGoodKey.replaceAll('-', ' ')} ');
+    // 输入框自动整理成连字符分组
+    expect(t.widget<TextField>(find.byType(TextField)).controller!.text, kGoodKey);
+    await t.enterText(find.byType(TextField), kGoodKey.substring(0, 20));
     await settle(t);
     expect(s.bitlockerVerified, isFalse);
     expect(find.text(l.blOk), findsNothing);
+    await t.enterText(find.byType(TextField), kGoodKey);
     await tapShown(t, find.text(l.blVerify));
     await see(t, find.text(l.blOk));
     await hold(t, l.holdToInstall);
@@ -369,6 +375,31 @@ void main() {
     expect(find.text(l.chkBitlockerSuspendBox), findsNothing);
     expect(s.needBitlockerKey, isFalse);
     expect(enabled(t, l.btnNext), isFalse);
+  });
+
+  testWidgets('正在加密或解密系统盘：标红挡住，不要密钥', (t) async {
+    await pumpApp(t, 'free', map: {
+      'preflight': (e) => e is Gk3Record && e.type == 'PREFLIGHT' ? Gk3Record('PREFLIGHT', {...e.fields, 'bitlocker': 'converting'}) : e,
+    });
+    await see(t, find.text(l.chkBitlockerConverting));
+    expect(enabled(t, l.btnNext), isFalse);
+    expect(find.text(l.chkBitlockerSuspendBox), findsNothing);
+  });
+
+  testWidgets('校验并暂停保护期间不能重新检查', (t) async {
+    final gate = StreamController<Gk3Event>();
+    final (_, s) = await pumpApp(t, 'bitlocker', respond: {'bitlocker-key': (args, input) => gate.stream});
+    await t.enterText(find.byType(TextField), kGoodKey);
+    await tapShown(t, find.text(l.blVerifySuspend));
+    expect(s.bitlockerChecking, isTrue);
+    expect(enabled(t, l.btnRecheck), isFalse);
+    gate
+      ..add(const Gk3Record('ERR', {'code': 'bitlocker-key-wrong'}))
+      ..add(const Gk3Exit(1));
+    await gate.close();
+    await settle(t);
+    expect(s.bitlockerChecking, isFalse);
+    expect(enabled(t, l.btnRecheck), isTrue);
   });
 
   testWidgets('系统盘没有恢复密钥：无从校验，标红挡住', (t) async {
