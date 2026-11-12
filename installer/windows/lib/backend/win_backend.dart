@@ -13,8 +13,8 @@ const kBackendFiles = ['gk3w.exe', 'mke2fs.exe', 'mke2fs.conf', 'systemd-bootaa6
 /// 真后端：gk3w.exe（installer/backend）做检查、分区方案、写盘与卸载；版本列表与下载在 Dart 里做（net.dart）。
 /// 参数按 argv 传（Process.start 不经过 shell），不拼命令行。
 ///
-/// ★ 每次调用的参数、输出与退出码照抄进日志文件（[logPath]，%ProgramData%\gaokun3\logs\）：装坏的那一次
-///   不能只剩"屏幕上好像报了个错"（LiveCD 的 ShellBackend 记着 2026-09-26 那一次的教训）。
+/// ★ 每次调用的参数、输出与退出码照抄进日志文件（[logPath]，%ProgramData%\gaokun3\logs\）：装坏了的时候，
+///   能拿来查的不能只有屏幕上的日志区。
 ///
 /// ★ 测试模式（[testDisk]，环境变量 GK3_TEST_DISK）：在 PC 上对着一块 VHD 走完整个流程。
 ///   probe 的结果里把那块 VHD 标成系统盘（别的盘标成不是），apply / uninstall 去掉 --real-disk 与
@@ -41,8 +41,8 @@ class WinBackend extends Gk3Backend {
   final Net _net;
 
   /// 日志文件（[logPath]）；null = 不记。
-  /// ⚠️ 同步写（RandomAccessFile），不用 IOSink：IOSink.flush() 没完成时再 writeln 会抛 "StreamSink is bound to a stream"
-  ///   —— 第一次在 VHD 上端到端跑就死在第二次调用上（每次调用结束时 flush，没有 await）
+  /// ⚠️ 同步写（RandomAccessFile），不用 IOSink：IOSink.flush() 没完成时再 writeln 会抛 "StreamSink is bound to a stream"，
+  ///   而每次调用结束时都要 flush
   final RandomAccessFile? log;
 
   static const _gk3wCommands = {'preflight', 'probe', 'plan', 'apply', 'uninstall', 'hash', 'space'};
@@ -68,8 +68,8 @@ class WinBackend extends Gk3Backend {
   }
 
   /// 找后端：程序目录下的 backend\（CMake 打包进去的），或环境变量 GK3W 指的 gk3w.exe 所在的目录。
-  /// [kBackendFiles] 缺任何一个都返回 [MissingBackend]（检查页报"安装器文件不完整"）：原先缺 mke2fs 时悄悄不传
-  /// --mke2fs、改走尚未上机验证的清零路径，缺 systemd-boot 要下载完才报错（审查 11-12 第 9 条）
+  /// [kBackendFiles] 缺任何一个都返回 [MissingBackend]（检查页报"安装器文件不完整"）：缺 mke2fs 时不能悄悄不传
+  /// --mke2fs、改走不格式化的路径，缺 systemd-boot 也不能等下载完才报错
   static Gk3Backend locate({int? testDisk}) {
     final exeDir = File(Platform.resolvedExecutable).parent.path;
     final env = Platform.environment['GK3W'];

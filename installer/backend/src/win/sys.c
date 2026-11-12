@@ -56,7 +56,7 @@ static int bitlocker_protection(wchar_t drive)
     if (FAILED(CoCreateInstance(&CLSID_WbemLocator, NULL, CLSCTX_INPROC_SERVER, &IID_IWbemLocator, (void **)&loc)))
         goto out;
     ns = SysAllocString(L"ROOT\\CIMV2\\Security\\MicrosoftVolumeEncryption");
-    /* WBEM_FLAG_CONNECT_USE_MAX_WAIT：WMI 服务卡住时连接最多等 2 分钟（Windows 的上限），不无限等（修复审查 11-12 第 6 条） */
+    /* WBEM_FLAG_CONNECT_USE_MAX_WAIT：WMI 服务卡住时连接最多等 2 分钟（Windows 的上限），不无限等 */
     if (FAILED(IWbemLocator_ConnectServer(loc, ns, NULL, NULL, NULL, WBEM_FLAG_CONNECT_USE_MAX_WAIT, NULL, NULL, &svc)))
         goto out;
     CoSetProxyBlanket((IUnknown *)svc, RPC_C_AUTHN_WINNT, RPC_C_AUTHZ_NONE, NULL, RPC_C_AUTHN_LEVEL_CALL,

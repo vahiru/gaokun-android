@@ -10,7 +10,7 @@ import 'model.dart';
 enum WriteTask { install, uninstall, media }
 
 /// 任务失败时盘有没有被动过。unknown：写盘的 gk3w 非零退出却没报 ERR（被安全软件或任务管理器结束、崩溃），
-/// 不能说"磁盘未被修改"（审查 11-12 第 3 条）。下载失败一定有 ERR（net.dart 的 _guard）
+/// 不能说"磁盘未被修改"。下载失败一定有 ERR（net.dart 的 _guard）
 enum Touched { no, yes, unknown }
 
 /// 安装介质（LiveCD + 所选版本的安装文件）要占多大：U 盘至少这么大，写到本机时在未分配空间里划出这么大的 GK3LIVE。
@@ -48,7 +48,7 @@ class Session extends ChangeNotifier {
   Future<void> check() async {
     checking = true;
     checkErr = null;
-    // 一次确认只用于一次写盘：重新检查之后要重新勾选（审查 11-12 第 11 条）
+    // 一次确认只用于一次写盘：重新检查之后要重新勾选
     bitlockerAck = false;
     notifyListeners();
     try {
@@ -58,7 +58,7 @@ class Session extends ChangeNotifier {
       preflight = pfRec == null ? null : Preflight(pfRec);
       probe = pr.ok ? Probe(pr) : null;
       // 失败原因：先用后端报的 ERR —— preflight 没报 ERR 的失败不能盖住 probe 报的（例如 not-admin）；
-      // 失败了却谁都没报（进程崩溃、被结束）、或 preflight 缺了记录：backend-failed，检查页挡住（审查 11-12 第 8 条）
+      // 失败了却谁都没报（进程崩溃、被结束）、或 preflight 缺了记录：backend-failed，检查页挡住
       checkErr = (pf.ok ? null : pf.err) ?? (pr.ok ? null : pr.err) ??
           (pfRec == null ? _failed('preflight') : (pr.ok ? null : _failed('probe')));
       plans.clear();
@@ -142,7 +142,7 @@ class Session extends ChangeNotifier {
   final Map<ReleaseSource, List<Variant>> _variants = {};
   final Map<ReleaseSource, Gk3Record?> _variantsErr = {};
   final Map<ReleaseSource, LiveCd?> _liveCd = {};
-  /// 正在取版本列表的来源（按来源分别记：一个来源还在取时切到另一个，另一个也要去取 —— 审查 11-12 第 10 条）
+  /// 正在取版本列表的来源（按来源分别记：一个来源还在取时切到另一个，另一个也要去取）
   final Set<ReleaseSource> _loading = {};
   bool get loadingVariants => _loading.contains(source);
   Variant? variant;
@@ -176,7 +176,7 @@ class Session extends ChangeNotifier {
       final lc = res.first('LIVECD');
       _liveCd[src] = lc == null ? null : LiveCd(lc);
     } catch (e) {
-      // 后端的流出错也不能让页面一直转圈（审查 11-12 第 4 条）
+      // 后端的流出错也不能让页面一直转圈
       _variants[src] = const [];
       _variantsErr[src] = const Gk3Record('ERR', {'code': 'manifest-unavailable'});
     } finally {
@@ -191,7 +191,7 @@ class Session extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 资源管理器的"复制文件地址"带一对双引号：去掉（原先 gk3w 收到带引号的路径，按住确认之后才报找不到文件 —— 审查 11-12 第 14 条）
+  /// 资源管理器的"复制文件地址"带一对双引号：去掉（gk3w 会把引号当成路径的一部分，找不到文件）
   void setLocalDir(String d) {
     var t = d.trim();
     if (t.length >= 2 && t.startsWith('"') && t.endsWith('"')) t = t.substring(1, t.length - 1).trim();
@@ -227,13 +227,13 @@ class Session extends ChangeNotifier {
   /// 任务进行中（下载 + 写盘）：界面不能返回、不能切换语言，系统保持唤醒
   bool writing = false;
 
-  /// gk3w 正在写盘（apply / uninstall / media）：只有这段时间不许关闭窗口、阻止关机。下载期间可以关掉
-  /// （.part 留着，下次接着下）—— 原先下载一开始就挡住关闭与关机，网慢时只能强制结束（审查 11-12 第 2 条）
+  /// gk3w 正在写盘（apply / uninstall / media）：只有这段时间不许关闭窗口、阻止关机。下载期间关闭窗口先问
+  /// （[downloading]），网慢时用户仍然可以退出
   bool diskBusy = false;
 
-  /// 开始写盘之前等它返回：原生窗口确认已经挡住关闭与关机，才启动 gk3w。由 main.dart 接到 WindowControl 上；
-  /// 原先只靠下一帧 WindowButtons 重建时发出 setBusy，gk3w 可能先起来，这一瞬间关掉窗口它就没人看着地写盘
-  /// （修复审查 11-12 第 3 条）。测试里为 null
+  /// 开始写盘之前等它返回：原生窗口确认已经挡住关闭与关机，才启动 gk3w。由 main.dart 接到 WindowControl 上。
+  /// 只靠下一帧 WindowButtons 重建时发出 setBusy 的话，gk3w 可能先起来，这一瞬间关掉窗口它就没人看着地写盘。
+  /// 测试里为 null
   Future<void> Function()? beforeDiskWrite;
 
   /// 正在下载：这时关闭窗口先问一句，确认后停止下载、删掉已下载的文件（[cancelDownload]）
@@ -264,8 +264,8 @@ class Session extends ChangeNotifier {
     downloadedDir = null;
   }
 
-  /// 下载到哪：当前用户"下载"文件夹下的 Gaokun Android\<版本>\（用户看得到，以后可以在"本地文件"里直接选这个目录；
-  /// 用户 11-12）。拿不到"下载"文件夹时用调用方给的目录
+  /// 下载到哪：当前用户"下载"文件夹下的 Gaokun Android\<版本>\（用户看得到，以后可以在"本地文件"里直接选这个目录）。
+  /// 拿不到"下载"文件夹时用调用方给的目录
   Future<String> _releaseDir(String fallback) async {
     final base = await downloadsDir?.call();
     if (base == null || base.isEmpty) return fallback;
@@ -279,7 +279,7 @@ class Session extends ChangeNotifier {
   String _dlDir = '';
 
   /// 下载中途退出：停止下载（取消订阅：WinBackend 断开连接、不再重试），等它收拾完（.part 关闭），再删掉
-  /// 这次下载目录里的安装文件 —— 下载阶段还没有动盘，撤回就是删掉这些文件（用户 11-12）
+  /// 这次下载目录里的安装文件 —— 下载阶段还没有动盘，撤回就是删掉这些文件
   Future<void> cancelDownload() async {
     final sub = _dlSub, done = _dlDone;
     if (sub == null || done == null) return;
@@ -340,7 +340,7 @@ class Session extends ChangeNotifier {
     return err['touched'] == 'yes' ? Touched.yes : Touched.no;
   }
 
-  /// 任务开始：状态清零。lastProgress 也清掉 —— 原先先装后卸时，卸载全程显示上一次的"已完成"（审查 11-12 第 6 条）
+  /// 任务开始：状态清零。lastProgress 也清掉：gk3w uninstall 不报进度，不清的话卸载全程显示上一个任务的最后一条
   void _begin(WriteTask t) {
     task = t;
     writing = true;
@@ -351,7 +351,7 @@ class Session extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 任务结束（成功、失败或出了异常都走这里）：不然 writing / diskBusy 卡在 true，窗口关不掉、关机被挡（审查 11-12 第 4 条）
+  /// 任务结束（成功、失败或出了异常都走这里）：不然 writing / diskBusy 卡在 true，窗口关不掉、关机被挡
   void _end() {
     writing = false;
     diskBusy = false;

@@ -6,7 +6,7 @@
 #
 # 源码：Debian 的 e2fsprogs 1.47.2-3（与 LiveCD 的 Debian 13 同一版本：scripts/live/packages-live.lock），
 #   上游 1.47.2 原始源码 + Debian 的补丁 + 本仓 patches/e2fsprogs/。下载的两个包按 sha256 钉死。
-# mke2fs.conf 取自源码的 misc/mke2fs.conf.in：与 Debian 13 的 /etc/mke2fs.conf 一字不差（2026-11-11 核对），
+# mke2fs.conf 取自源码的 misc/mke2fs.conf.in：与 Debian 13 的 /etc/mke2fs.conf 一字不差，
 #   所以格式化出来的特性、块大小、inode 大小与 LiveCD 的 mkfs.ext4 相同。
 # -E android_sparse 要 AOSP 的 libsparse，那份是 Apache-2.0、与 GPLv2 的 mke2fs 不兼容：换成 sparse_shim/（自写，MIT）。
 # native：同一份源码编成 Linux 本机版（ASan/UBSan），对拍 Debian 的 mkfs.ext4 用（Windows 版在 mingw 下读不到

@@ -114,8 +114,7 @@ class _CaptionReporterState extends State<_CaptionReporter> {
 }
 
 /// 关闭窗口（自绘的关闭键，或原生转来的 Alt+F4 / 任务栏关闭）：
-/// - 下载中途：先问；确认退出就停止下载、删掉已下载的文件（下载阶段还没有动盘，只有这些文件要撤回），再关窗口。
-///   用户 11-12：直接关掉不对，一定要退出就先撤回再退出
+/// - 下载中途：先问；确认退出就停止下载、删掉已下载的文件（下载阶段还没有动盘，只有这些文件要撤回），再关窗口
 /// - 装好之后在完成页勾了"退出时删除下载的安装文件"：先删，再关
 Future<void> handleCloseRequest(BuildContext context, Session s) async {
   if (!s.downloading) {

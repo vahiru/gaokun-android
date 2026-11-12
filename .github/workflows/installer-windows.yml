@@ -2,7 +2,7 @@
 # 产物是可以直接运行的程序目录（gk3_windows.exe + backend\ 里的 gk3w、mke2fs、systemd-boot），作为 Actions 的工件下载。
 # x64 版只在 PC 上对着 VHD 测试时用，本地构建（installer/windows/README.md）；以后要在别的电脑上制作安装介质时再加回来。
 #
-# 什么时候跑（用户 11-12：进上游之后不随每次推送跑）：
+# 什么时候跑（不随每次推送跑）：
 #   - 推送 windows-installer-vX.Y.Z[-pre] 标签：发布构建。版本号取自标签（界面上显示的、exe 的版本资源），
 #     打包成 zip 建一个【草稿】Release，维护者改好说明再发布。发布时不要设为最新版本（Latest 要留给 ROM 的 Release）
 #   - 手动（Actions 页面的 Run workflow，可选分支）：测试构建，版本号显示为 dev-<提交>，产物是 Actions 的工件

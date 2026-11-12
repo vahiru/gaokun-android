@@ -124,7 +124,7 @@ class DonePage extends StatelessWidget {
             Bullet(l.doneInstallMenu, icon: Icons.menu_open),
             Bullet(l.doneInstallFirstBoot, icon: Icons.hourglass_bottom),
             Bullet(l.doneInstallWindows, icon: Icons.window),
-            // 下载的安装文件在用户的"下载"文件夹里：退出时删不删由用户选（用户 11-12），默认留着
+            // 下载的安装文件在用户的"下载"文件夹里：退出时删不删由用户选，默认留着
             if (s.downloadedDir != null) ...[
               const SizedBox(height: 16),
               Material(

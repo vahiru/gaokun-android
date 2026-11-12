@@ -302,10 +302,9 @@ void gk3w_disk_usable(const gk3w_disk *d, uint64_t *first, uint64_t *last)
 
 /* 一次读或写。0 = 成功；1 = 设备要求先确认介质（STATUS_VERIFY_REQUIRED）；-1 = 失败（last error 已设）。
  *
- * ★ 2026-11-11 VHDX 上实测：分区表改动之后（IOCTL_DISK_SET_DRIVE_LAYOUT_EX），之后某一次读写会以 NTSTATUS
- *   0x80000010（STATUS_VERIFY_REQUIRED，警告级）完成 —— WriteFile 返回 TRUE、传了 0 字节，五轮里每轮一次，
- *   位置不固定（新分区开头附近）。平时由文件系统去确认介质，直接读写裸盘就得自己来：发 IOCTL_DISK_CHECK_VERIFY
- *   再重做这一次。 */
+ * ★ 分区表改动之后（IOCTL_DISK_SET_DRIVE_LAYOUT_EX），之后的读写可能以 NTSTATUS 0x80000010
+ *   （STATUS_VERIFY_REQUIRED，警告级）完成 —— WriteFile 返回 TRUE、传了 0 字节，位置不固定（新分区开头附近）。
+ *   平时由文件系统去确认介质，直接读写裸盘就得自己来：发 IOCTL_DISK_CHECK_VERIFY 再重做这一次。 */
 #define GK3W_STATUS_VERIFY_REQUIRED ((ULONG_PTR)0x80000010)
 
 static int io_once(HANDLE h, void *buf, DWORD len, uint64_t off, int write)

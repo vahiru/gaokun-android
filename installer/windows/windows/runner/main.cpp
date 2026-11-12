@@ -11,9 +11,9 @@ static const wchar_t kTitle[] = L"Gaokun Android Installer";
 
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
-  // 只开一个：UAC 弹得慢时连点两下会开出两个，两个同时下载会往同一个 .part 里写（审查 11-12 第 12 条）。
+  // 只开一个：UAC 弹得慢时连点两下会开出两个，两个同时下载会往同一个 .part 里写。
   // 已经开着时把那个窗口提到前面、自己退出。互斥量在进程退出时由系统释放，不用手动关。
-  // Debug 版（flutter run、integration_test）不查：开着一个 Release 版时它们会直接退出（修复审查 11-12 第 7 条）
+  // Debug 版（flutter run、integration_test）不查：开着一个 Release 版时它们会直接退出
 #ifdef NDEBUG
   HANDLE single = ::CreateMutexW(nullptr, TRUE, L"Local\\GaokunAndroidInstaller");
   if (single != nullptr && ::GetLastError() == ERROR_ALREADY_EXISTS) {

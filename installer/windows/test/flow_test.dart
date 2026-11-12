@@ -51,7 +51,7 @@ void main() {
     expect(apply, containsAllInOrder(['--default-os', 'windows', '--real-disk']));
     expect(apply, isNot(contains('--bitlocker-key')));
     expect(s.percent, 100);
-    // 下载期间只保持唤醒、不挡关闭与关机；gk3w 写盘时才挡；结束后都撤销（审查 11-12 第 2 条）
+    // 下载期间只保持唤醒、不挡关闭与关机；gk3w 写盘时才挡；结束后都撤销
     final busy = [for (final c in window) if (c.method == 'setBusy') c.arguments as Map];
     // 下载期间关闭先问（confirmClose），写盘时不许关（busy）
     expect(busy.firstWhere((a) => a['awake'] == true),

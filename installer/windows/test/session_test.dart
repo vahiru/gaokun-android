@@ -1,4 +1,4 @@
-// Session 里不经过界面也能测的几件事（审查 11-12 的第 10、11、14 条）
+// Session 里不经过界面也能测的几件事：按来源取版本列表、重新检查后的 BitLocker 确认、本地目录的引号
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gk3_common/backend/fixture_backend.dart';
 import 'package:gk3_windows/model.dart';

@@ -1,6 +1,6 @@
 // 版本列表与下载（lib/backend/net.dart）：对着本机的 HTTP 服务测续传、停滞、重试、换版本、校验不符。
-// 散列用 sha256sum（Windows 上是 gk3w hash）。test/data/ 是 2026-11-11 取的真实返回：GitHub API 的 releases
-// （只留用到的字段）与 R2 上的 OTA 清单。
+// 散列用 sha256sum（Windows 上是 gk3w hash）。test/data/ 是真实的返回：GitHub API 的 releases（只留用到的字段）
+// 与 R2 上的 OTA 清单。
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';

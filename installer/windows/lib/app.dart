@@ -18,7 +18,7 @@ const kAppVersion = String.fromEnvironment('GK3_VERSION', defaultValue: 'dev');
 final kNavigatorKey = GlobalKey<NavigatorState>();
 
 /// 侧栏底部"制作独立安装介质"的入口。0.1.0 只发布在 Windows 上安装 / 卸载 Android，入口先不注册；
-/// 页面与测试保留（测试里打开它），等 LiveCD 改好、0.2.0 时打开（用户 2026-11-12）
+/// 页面与测试保留（测试里打开它），等 LiveCD 能写入安装介质时打开
 bool mediaEntryEnabled = false;
 
 /// 给子树提供 Session，并在它变化时重建依赖它的部分

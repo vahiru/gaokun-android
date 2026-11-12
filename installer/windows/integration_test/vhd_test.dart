@@ -49,8 +49,7 @@ Future<void> hold(WidgetTester t) async {
   await t.pump();
 }
 
-/// BitLocker 已开启（或读不到）时勾选"我已确认可获取恢复密钥"。现在每次写盘之后都会复位，但还是先看一眼再点：
-/// 勾着的再点一次就取消了，按钮变灰（2026-11-12 第一次端到端就卡在这里）
+/// BitLocker 已开启（或读不到）时勾选"我已确认可获取恢复密钥"。先看一眼再点：勾着的再点一次就取消了，按钮变灰
 Future<void> ackBitlocker(WidgetTester t, Session s) async {
   if (s.needBitlockerAck && !s.bitlockerAck) await tap(t, find.text(l.confirmBitlockerAck));
   expect(!s.needBitlockerAck || s.bitlockerAck, isTrue);

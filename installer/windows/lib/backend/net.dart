@@ -60,7 +60,7 @@ Future<String?> windowsSystemProxy() async {
     if (r.exitCode != 0) return null;
     final out = '${r.stdout}';
     final enable = RegExp(r'ProxyEnable\s+REG_DWORD\s+0x(\d+)').firstMatch(out)?.group(1);
-    // [ \t]+ 而不是 \s+：\s 会跨行，ProxyServer 为空时取到下一行的 ProxyOverride（修复审查 11-12 第 2 条）
+    // [ \t]+ 而不是 \s+：\s 会跨行，ProxyServer 为空时取到下一行的 ProxyOverride
     final server = RegExp(r'ProxyServer[ \t]+REG_SZ[ \t]+(\S+)').firstMatch(out)?.group(1);
     if (enable != '1' || server == null) return null;
     return parseProxyServer(server);
@@ -72,7 +72,7 @@ Future<String?> windowsSystemProxy() async {
 /// Internet Settings 的 ProxyServer → "host:port"（给 HttpClient 的 "PROXY host:port"）；用不了 → null。
 /// 没写端口时补 :80（WinINet 也按 80 算）：Dart 遇到不带端口的项直接抛 Invalid proxy configuration，连 DIRECT 都不试。
 ///   "127.0.0.1:7890"、"http://127.0.0.1:7890"、"http=127.0.0.1:7890;https=127.0.0.1:7890;socks=…"（取 https 的，没有取 http 的）。
-/// ⚠️ 前缀 http:// 要去掉：Dart 会把 "http://127.0.0.1" 整个当成主机名，连不上就按 "PROXY …; DIRECT" 悄悄直连（核实 11-12）。
+/// ⚠️ 前缀 http:// 要去掉：Dart 会把 "http://127.0.0.1" 整个当成主机名，连不上就按 "PROXY …; DIRECT" 悄悄直连。
 /// 只有 socks= 时返回 null（HttpClient 不支持 SOCKS），按环境变量或直连。
 String? parseProxyServer(String server) {
   String? clean(String? v) {
@@ -215,7 +215,7 @@ class Net {
   /// `download <base-url> <目录>`：校验清单、boot.img、super.img.zst，核对后报 RELEASE dir=… source=net。
   /// [hash] 算一个文件的 sha256（小写 hex；Windows 上是 gk3w hash），算不了就抛异常。
   /// [space] 目录所在卷的可用字节（Windows 上是 gk3w space；null = 不查）：每个文件开始下载前确认放得下，
-  /// 不把 C 盘写满了才失败（审查 11-12 第 7 条）
+  /// 不把盘写满了才失败
   Stream<Gk3Event> download(List<String> args, Future<String> Function(String path) hash, {Future<int?> Function(String dir)? space}) =>
       _guard(() async* {
         if (args.length != 2) throw NetError('usage', 'usage: download <base-url> <dir>');
@@ -331,8 +331,8 @@ class Net {
         throw _Transient(e.message);
       }
       final st = resp.statusCode;
-      // ⚠️ 下面不要的响应一律不读完（drain）就丢：drain 没有超时、会把剩下的正文整个读完 —— 空间不足时先下完 1.2 GiB
-      //   才报错、服务器停住时卡死（修复审查 11-12 第 1 条）。finally 里的 close(force: true) 断开连接
+      // ⚠️ 下面不要的响应一律不读完（drain）就丢：drain 没有超时、会把剩下的正文整个读完 —— 空间不足时要先下完整个
+      //   文件才报错，服务器停住时卡死。finally 里的 close(force: true) 断开连接
       // 续传一个已经下完的文件：服务器回 416（LiveCD 那边 curl 当成功）—— 交给 sha256 裁决
       if (st == 416 && offset > 0) return;
       if (st != 200 && st != 206) {
@@ -346,8 +346,8 @@ class Net {
         yield Gk3Log('$name: the server did not resume at byte $offset, starting over');
         offset = 0;
       } else if (st == 206 && !range.startsWith('bytes $offset-')) {
-        // 206 但起点既不是 offset 也不是 0：写进哪里都是错位的数据（原先截断 .part 从头写，必然校验不符）。
-        // 删掉 .part，按暂时的失败重试 —— 下一次不带 Range，从头下（审查 11-12 第 13 条）
+        // 206 但起点既不是 offset 也不是 0：写进哪里都是错位的数据，必然校验不符。
+        // 删掉 .part，按暂时的失败重试 —— 下一次不带 Range，从头下
         if (await part.exists()) await part.delete();
         throw _Transient('the server resumed at the wrong offset (asked for byte $offset, got "$range")');
       }
@@ -422,7 +422,7 @@ class Net {
       yield const Gk3Exit(1);
     } catch (e) {
       // 兜底：解析出错（TypeError、空列表上取 .first 的 StateError）也必须报成一次失败的调用，不能让流出错 ——
-      // 否则调用方的 run() 抛出，界面一直转圈（审查 11-12 第 4 条，response: [] 实验复现）
+      // 否则调用方的 run() 抛出，界面一直转圈
       yield Gk3Record('ERR', {'code': failCode});
       yield Gk3Log('!! $e');
       yield const Gk3Exit(1);
