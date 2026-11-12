@@ -17,6 +17,11 @@ void main() {
   final backend = real ?? FixtureBackend(kScenarios.contains(scenario) ? scenario! : kScenarios.first);
   final session = Session(backend, language: requestedLanguage(), testDisk: real == null ? null : requestedTestDisk())
     ..beforeDiskWrite = WindowControl.settleBusy;
+  // 下载中途按 Alt+F4 或任务栏上的关闭：原生先交给界面问（ui/title_bar.dart 的 confirmQuitDuringDownload）
+  WindowControl.init(onCloseRequested: () async {
+    final ctx = kNavigatorKey.currentContext;
+    if (ctx != null) await confirmQuitDuringDownload(ctx, session);
+  });
   runApp(WinInstallerApp(session: session));
   session.check();
 }

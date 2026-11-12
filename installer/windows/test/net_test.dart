@@ -74,6 +74,14 @@ Future<String> sumOfBytes(List<int> b) async {
   return h;
 }
 
+Future<void> waitUntil(bool Function() ok, {Duration timeout = const Duration(seconds: 5)}) async {
+  final end = DateTime.now().add(timeout);
+  while (!ok()) {
+    if (DateTime.now().isAfter(end)) throw TimeoutException('waitUntil');
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+  }
+}
+
 List<int> blob(int n, int seed) => List<int>.generate(n, (i) => (i * 31 + seed * 7 + (i >> 9)) & 0xff);
 
 const fast = NetConfig(
@@ -340,6 +348,27 @@ void main() {
     expect(r.ok, isTrue, reason: '${r.log.map((l) => l.line)}');
     expect(File('${dir.path}/super.img.zst').readAsBytesSync(), sup);
     expect(srv.requests.where((q) => q.startsWith('GET super.img.zst')), hasLength(1));
+  });
+
+
+  test('中途停止（abort）：断开连接、不再重试，很快结束', () async {
+    final big = blob(8 << 20, 6);
+    srv.hooks['super.img.zst'] = (req) => slow(req, big);
+    final net = Net(cfg: fast);
+    final events = <Gk3Event>[];
+    final done = Completer<void>();
+    final sub = net.download([srv.base, dir.path], sha256sum).listen(events.add, onDone: done.complete);
+    await waitUntil(() => File('${dir.path}/super.img.zst.part').existsSync());
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    final sw = Stopwatch()..start();
+    net.abort();
+    await sub.cancel();
+    expect(sw.elapsedMilliseconds, lessThan(1000));
+    final n = srv.requests.where((q) => q.startsWith('GET super.img.zst')).length;
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+    expect(srv.requests.where((q) => q.startsWith('GET super.img.zst')).length, n, reason: 'no retry after abort');
+    // .part 已经关掉，可以删
+    File('${dir.path}/super.img.zst.part').deleteSync();
   });
 
 

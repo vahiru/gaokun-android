@@ -1,5 +1,7 @@
 #include "flutter_window.h"
 
+#include <windowsx.h>
+
 #include <optional>
 #include <string>
 #include <variant>
@@ -76,6 +78,13 @@ bool FlutterWindow::OnCreate() {
   RegisterPlugins(flutter_controller_->engine());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
+  // 自绘标题栏的拖动：子窗口的命中测试先过 ChildProc（见 flutter_window.h）。this 用窗口属性存，
+  // 不占 GWLP_USERDATA（那是 Flutter 自己的）
+  HWND child = flutter_controller_->view()->GetNativeWindow();
+  SetPropW(child, L"gk3.window", this);
+  child_proc_ = reinterpret_cast<WNDPROC>(
+      SetWindowLongPtrW(child, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(&FlutterWindow::ChildProc)));
+
   window_channel_ = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
       flutter_controller_->engine()->messenger(), "gk3/window",
       &flutter::StandardMethodCodec::GetInstance());
@@ -90,6 +99,27 @@ bool FlutterWindow::OnCreate() {
           if (!busy_) {
             PostMessage(hwnd, WM_CLOSE, 0, 0);
           }
+        } else if (m == "forceClose") {
+          // 界面已经问过、收拾好了（下载中途退出）：不再问。写盘期间（busy_）仍然不关
+          if (!busy_) {
+            force_close_ = true;
+            PostMessage(hwnd, WM_CLOSE, 0, 0);
+          }
+        } else if (m == "maximize") {
+          ShowWindow(hwnd, IsZoomed(hwnd) ? SW_RESTORE : SW_MAXIMIZE);
+        } else if (m == "setCaption") {
+          // 参数：{canvasW, canvasH, strip, buttons}（界面的逻辑像素，见 flutter_window.h 的 canvas_w_ 等）
+          const auto* args = std::get_if<flutter::EncodableMap>(call.arguments());
+          auto num = [args](const char* key, double fallback) {
+            if (args == nullptr) return fallback;
+            auto it = args->find(flutter::EncodableValue(key));
+            const auto* v = it == args->end() ? nullptr : std::get_if<double>(&it->second);
+            return v ? *v : fallback;
+          };
+          canvas_w_ = num("canvasW", canvas_w_);
+          canvas_h_ = num("canvasH", canvas_h_);
+          strip_ = num("strip", strip_);
+          buttons_ = num("buttons", buttons_);
         } else if (m == "startDrag") {
           // 把这次按下交给 Windows 当作拖动标题栏（系统的移动循环接管鼠标，松开时结束）
           ReleaseCapture();
@@ -120,6 +150,7 @@ bool FlutterWindow::OnCreate() {
             return b == nullptr ? fallback : *b;
           };
           const bool busy = flag("busy", false);
+          confirm_close_ = flag("confirmClose", false);
           SetBusy(busy, flag("awake", busy), Utf16FromUtf8(str("power")), Utf16FromUtf8(str("shutdown")));
         } else {
           result->NotImplemented();
@@ -173,6 +204,35 @@ void FlutterWindow::SetBusy(bool busy, bool awake, const std::wstring& power_rea
   busy_ = busy;
 }
 
+bool FlutterWindow::InCaption(POINT client) {
+  if (strip_ <= 0 || canvas_w_ <= 0 || canvas_h_ <= 0) return false;
+  RECT rc;
+  if (!GetClientRect(GetHandle(), &rc)) return false;
+  const double w = rc.right - rc.left, h = rc.bottom - rc.top;
+  // 与 LogicalCanvas（FittedBox + Center）相同：等比缩放、居中
+  const double s = (w / canvas_w_ < h / canvas_h_) ? w / canvas_w_ : h / canvas_h_;
+  const double x0 = (w - canvas_w_ * s) / 2, y0 = (h - canvas_h_ * s) / 2;
+  if (client.y < 0 || client.y >= y0 + strip_ * s) return false;
+  return client.x >= x0 && client.x < x0 + (canvas_w_ - buttons_) * s;
+}
+
+// static
+LRESULT CALLBACK FlutterWindow::ChildProc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {
+  auto* self = static_cast<FlutterWindow*>(GetPropW(hwnd, L"gk3.window"));
+  if (self == nullptr) return DefWindowProcW(hwnd, message, wparam, lparam);
+  if (message == WM_NCHITTEST) {
+    POINT pt = {GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+    ScreenToClient(self->GetHandle(), &pt);
+    if (self->InCaption(pt)) return HTTRANSPARENT;
+  } else if (message == WM_NCDESTROY) {
+    WNDPROC old = self->child_proc_;
+    SetWindowLongPtrW(hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(old));
+    RemovePropW(hwnd, L"gk3.window");
+    return CallWindowProcW(old, hwnd, message, wparam, lparam);
+  }
+  return CallWindowProcW(self->child_proc_, hwnd, message, wparam, lparam);
+}
+
 void FlutterWindow::OnDestroy() {
   SetBusy(false, false, std::wstring(), std::wstring());
   window_channel_ = nullptr;
@@ -191,6 +251,25 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   if (message == WM_CLOSE && busy_) {
     MessageBeep(MB_ICONWARNING);
     return 0;
+  }
+  // 下载中途：先交给界面问"确定要退出吗"（确认后界面删掉下载的文件，再调 forceClose）
+  if (message == WM_CLOSE && confirm_close_ && !force_close_ && window_channel_) {
+    window_channel_->InvokeMethod("closeRequested", nullptr);
+    return 0;
+  }
+  // 标题栏区域（子窗口在这里返回 HTTRANSPARENT，命中测试落到本窗口）：由系统拖动、双击最大化
+  if (message == WM_NCHITTEST) {
+    POINT pt = {GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+    ScreenToClient(hwnd, &pt);
+    if (InCaption(pt)) return HTCAPTION;
+  }
+  // 最大化 / 还原：告诉界面换按钮的图标（双击标题栏、Win+↑ 也走这里）
+  if (message == WM_SIZE && window_channel_ && (wparam == SIZE_MAXIMIZED || wparam == SIZE_RESTORED)) {
+    const int maximized = wparam == SIZE_MAXIMIZED ? 1 : 0;
+    if (maximized != last_maximized_) {
+      last_maximized_ = maximized;
+      window_channel_->InvokeMethod("maximized", std::make_unique<flutter::EncodableValue>(maximized == 1));
+    }
   }
   // 安装或卸载期间阻止关机、重启、注销：返回 FALSE，Windows 显示 ShutdownBlockReasonCreate 设置的原因。
   // 用户仍可选择强制关机，这一点无法阻止

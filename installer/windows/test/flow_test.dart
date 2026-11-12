@@ -1,3 +1,5 @@
+import 'dart:async';
+
 // 各演示场景从头走到尾（回放 testdata/ 里真 gk3w 的录制）
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -7,6 +9,7 @@ import 'package:gk3_windows/app.dart';
 import 'package:gk3_windows/session.dart';
 import 'package:gk3_windows/ui/media_pages.dart';
 import 'package:gk3_windows/ui/run_pages.dart';
+import 'package:gk3_windows/ui/title_bar.dart';
 
 import 'helpers.dart';
 
@@ -50,8 +53,11 @@ void main() {
     expect(s.percent, 100);
     // 下载期间只保持唤醒、不挡关闭与关机；gk3w 写盘时才挡；结束后都撤销（审查 11-12 第 2 条）
     final busy = [for (final c in window) if (c.method == 'setBusy') c.arguments as Map];
-    expect(busy.firstWhere((a) => a['awake'] == true), {'busy': false, 'awake': true, 'power': l.runInstallTitle, 'shutdown': l.shutdownReasonInstall});
-    expect(busy.where((a) => a['busy'] == true).single, {'busy': true, 'awake': true, 'power': l.runInstallTitle, 'shutdown': l.shutdownReasonInstall});
+    // 下载期间关闭先问（confirmClose），写盘时不许关（busy）
+    expect(busy.firstWhere((a) => a['awake'] == true),
+        {'busy': false, 'awake': true, 'confirmClose': true, 'power': l.runInstallTitle, 'shutdown': l.shutdownReasonInstall});
+    expect(busy.where((a) => a['busy'] == true).single,
+        {'busy': true, 'awake': true, 'confirmClose': false, 'power': l.runInstallTitle, 'shutdown': l.shutdownReasonInstall});
     expect(busy.last, containsPair('busy', false));
     expect(busy.last, containsPair('awake', false));
 
@@ -187,7 +193,8 @@ void main() {
     expect(media, containsAllInOrder(['--livecd', 'https://github.com/vahiru/gaokun-android/releases/download/v1.0.0-rc.2/gaokun3-installer-0.2.0-rc.2-windows.zip']));
     expect(media, isNot(contains('--real-disk')));
     final busy = [for (final c in window) if (c.method == 'setBusy') c.arguments as Map];
-    expect(busy.where((a) => a['busy'] == true).single, {'busy': true, 'awake': true, 'power': l.runMediaTitle, 'shutdown': l.shutdownReasonMedia});
+    expect(busy.where((a) => a['busy'] == true).single,
+        {'busy': true, 'awake': true, 'confirmClose': false, 'power': l.runMediaTitle, 'shutdown': l.shutdownReasonMedia});
     expect(busy.last, containsPair('busy', false));
     // 返回首页后，入口又能用了；重新检查清掉了之前选的目标
     await tap(t, find.text(l.btnStartOver));
@@ -338,6 +345,69 @@ void main() {
     expect(s.checkErr!['code'], 'backend-failed');
     expect(find.text(l.errBackendFailed), findsOneWidget);
     expect(enabled(t, l.btnNext), isFalse);
+  });
+
+
+  testWidgets('下载中途按关闭：先问；继续下载就不关，确认退出就停止下载、再关窗口', (t) async {
+    final window = <MethodCall>[];
+    t.binding.defaultBinaryMessenger.setMockMethodCallHandler(const MethodChannel('gk3/window'), (c) async {
+      window.add(c);
+      return null;
+    });
+    addTearDown(() => t.binding.defaultBinaryMessenger.setMockMethodCallHandler(const MethodChannel('gk3/window'), null));
+    final (rec, s) = await pumpApp(t, 'free');
+    // 一直下不完的下载；记下它有没有被取消
+    var cancelled = false;
+    rec.replace['download'] = (_) {
+      final c = StreamController<Gk3Event>();
+      c.onCancel = () => cancelled = true;
+      c.add(Gk3Progress(3, 'dl name=super.img.zst pct=10', code: 'dl', fields: const {'name': 'super.img.zst', 'pct': '10'}));
+      return c.stream;
+    };
+    for (var i = 0; i < 4; i++) {
+      await tap(t, find.text(l.btnNext));
+    }
+    await hold(t, l.holdToInstall);
+    await waitFor(t, find.byType(RunPage));
+    await settle(t);
+    expect(s.downloading, isTrue);
+    expect([for (final c in window) if (c.method == 'setBusy') c.arguments as Map].last,
+        containsPair('confirmClose', true));
+
+    await tap(t, find.bySemanticsLabel(l.winClose));
+    await see(t, find.text(l.quitDownloadTitle));
+    await tap(t, find.text(l.quitDownloadContinue));
+    expect(find.text(l.quitDownloadTitle), findsNothing);
+    expect(cancelled, isFalse);
+    expect(window.where((c) => c.method == 'forceClose' || c.method == 'close'), isEmpty);
+
+    await tap(t, find.bySemanticsLabel(l.winClose));
+    await tap(t, find.text(l.quitDownloadExit));
+    await settle(t);
+    expect(cancelled, isTrue);
+    expect(window.where((c) => c.method == 'forceClose'), hasLength(1));
+    expect(rec.calls.where((c) => c.first == 'apply'), isEmpty);
+  });
+
+  testWidgets('最大化按钮：调原生的 maximize；原生报告最大化之后换成"向下还原"', (t) async {
+    final window = <MethodCall>[];
+    t.binding.defaultBinaryMessenger.setMockMethodCallHandler(const MethodChannel('gk3/window'), (c) async {
+      window.add(c);
+      return null;
+    });
+    addTearDown(() {
+      t.binding.defaultBinaryMessenger.setMockMethodCallHandler(const MethodChannel('gk3/window'), null);
+      WindowControl.maximized.value = false;
+    });
+    await pumpApp(t, 'free');
+    await tap(t, find.bySemanticsLabel(l.winMaximize));
+    expect(window.where((c) => c.method == 'maximize'), hasLength(1));
+    WindowControl.maximized.value = true;
+    await settle(t);
+    expect(find.bySemanticsLabel(l.winRestore), findsOneWidget);
+    // 画出来之后告诉原生标题栏在哪（让系统拖动：鼠标、触摸、手写笔）
+    expect(window.where((c) => c.method == 'setCaption').map((c) => c.arguments),
+        anyElement(equals({'canvasW': 1280.0, 'canvasH': 800.0, 'strip': 32.0, 'buttons': 138.0})));
   });
 
 

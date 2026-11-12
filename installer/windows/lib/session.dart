@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:gk3_common/backend/backend.dart';
 import 'package:gk3_common/backend/protocol.dart';
@@ -234,8 +236,56 @@ class Session extends ChangeNotifier {
   /// （修复审查 11-12 第 3 条）。测试里为 null
   Future<void> Function()? beforeDiskWrite;
 
-  /// 正在下载（进度页的说明换成"下载期间可以关闭本窗口"）
+  /// 正在下载：这时关闭窗口先问一句，确认后停止下载、删掉已下载的文件（[cancelDownload]）
   bool downloading = false;
+
+  /// 下载那次调用的订阅与结果（[cancelDownload] 取消它）
+  StreamSubscription<Gk3Event>? _dlSub;
+  Completer<CallResult>? _dlDone;
+  String _dlDir = '';
+
+  /// 下载中途退出：停止下载（取消订阅：WinBackend 断开连接、不再重试），等它收拾完（.part 关闭），再删掉
+  /// 这次下载目录里的安装文件 —— 下载阶段还没有动盘，撤回就是删掉这些文件（用户 11-12）
+  Future<void> cancelDownload() async {
+    final sub = _dlSub, done = _dlDone;
+    if (sub == null || done == null) return;
+    _dlSub = null;
+    await sub.cancel();
+    if (!done.isCompleted) {
+      done.complete(const CallResult([Gk3Record('ERR', {'code': 'cancelled'})], [Gk3Log('!! download cancelled')], 130));
+    }
+    if (backend.demoLabel == null) deleteDownloadedRelease(_dlDir);
+  }
+
+  /// 订阅一次下载，收集结果（同 Gk3Backend.run，只是留着订阅，可以取消）
+  Future<CallResult> _download(List<String> args) {
+    final records = <Gk3Record>[], logs = <Gk3Log>[];
+    var code = -1;
+    final done = _dlDone = Completer<CallResult>();
+    _dlDir = args[1];
+    _dlSub = backend.call('download', args).listen(
+      (e) {
+        _onEvent(e, span: 40);
+        switch (e) {
+          case Gk3Record():
+            records.add(e);
+          case Gk3Log():
+            logs.add(e);
+          case Gk3Exit():
+            code = e.code;
+          case Gk3Progress():
+            break;
+        }
+      },
+      onError: (Object e) {
+        if (!done.isCompleted) done.complete(CallResult(const [Gk3Record('ERR', {'code': 'dl-failed'})], [Gk3Log('!! $e')], 1));
+      },
+      onDone: () {
+        if (!done.isCompleted) done.complete(CallResult(records, logs, code));
+      },
+    );
+    return done.future;
+  }
 
   Future<void> _startDiskWrite() async {
     diskBusy = true;
@@ -338,11 +388,13 @@ class Session extends ChangeNotifier {
       var dir = localDir;
       if (!local) {
         downloading = true;
+        notifyListeners();
         final CallResult dl;
         try {
-          dl = await backend.run('download', [variant!.base, releaseDir], (e) => _onEvent(e, span: 40));
+          dl = await _download([variant!.base, releaseDir]);
         } finally {
           downloading = false;
+          _dlSub = null;
         }
         if (!dl.ok) {
           result = dl;

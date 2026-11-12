@@ -327,7 +327,6 @@
   },
   "errBackendFailed": "An installer component exited unexpectedly. Click “Check again”.",
   "failUnknownTouched": "It could not be determined whether the disk was modified. Return to the start and check again; the check shows the current state of the disk.",
-  "runDownloadCloseHint": "You can close this window during the download; the next installation resumes where it stopped.",
   "localMissing": "Missing from this directory: {files}",
   "@localMissing": {
     "placeholders": {
@@ -335,5 +334,11 @@
         "type": "String"
       }
     }
-  }
+  },
+  "quitDownloadTitle": "The download is not finished",
+  "quitDownloadBody": "Are you sure you want to exit? The downloaded files will be deleted.",
+  "quitDownloadContinue": "Continue downloading",
+  "quitDownloadExit": "Exit",
+  "winMaximize": "Maximize",
+  "winRestore": "Restore Down"
 }

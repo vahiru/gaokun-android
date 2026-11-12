@@ -59,8 +59,7 @@ class _RunPageState extends State<RunPage> {
       child: WinStepPage(
         step: _railStep(task),
         title: runTitle(l, task),
-        // 下载期间可以关闭窗口（只有 gk3w 写盘时才挡住）：这时不能再说"请勿关闭本窗口"（修复审查 11-12 第 4 条）
-        subtitle: s.downloading ? l.runDownloadCloseHint : l.runSub,
+        subtitle: l.runSub,
         bottom: const SizedBox(height: 40),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Text(p == null ? l.runStarting : progressText(l, p), style: context.tt.titleMedium),

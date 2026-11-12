@@ -106,7 +106,21 @@ class Net {
       ..userAgent = cfg.userAgent;
     final p = await proxy?.call();
     c.findProxy = p == null ? HttpClient.findProxyFromEnvironment : (_) => 'PROXY $p; DIRECT';
+    _clients.add(c);
     return c;
+  }
+
+  /// 正在用的连接（[abort] 把它们都断掉）
+  final _clients = <HttpClient>{};
+  bool _aborted = false;
+
+  /// 停止正在进行的下载：断开连接，不再重试（下载中途退出时，WinBackend 在下载的订阅被取消时调用）。
+  /// 断开之后读数据的那一步出错、走到重试那里，看到 [_aborted] 就结束，finally 里关掉 .part
+  void abort() {
+    _aborted = true;
+    for (final c in _clients.toList()) {
+      c.close(force: true);
+    }
   }
 
   Future<(int, String)> _getText(String url, {Map<String, String> headers = const {}}) async {
@@ -118,6 +132,7 @@ class Net {
       final body = await resp.transform(utf8.decoder).join().timeout(cfg.stallWindow);
       return (resp.statusCode, body);
     } finally {
+      _clients.remove(c);
       c.close(force: true);
     }
   }
@@ -131,6 +146,7 @@ class Net {
       await resp.drain<void>();
       return (resp.statusCode, resp.contentLength);
     } finally {
+      _clients.remove(c);
       c.close(force: true);
     }
   }
@@ -203,6 +219,7 @@ class Net {
   Stream<Gk3Event> download(List<String> args, Future<String> Function(String path) hash, {Future<int?> Function(String dir)? space}) =>
       _guard(() async* {
         if (args.length != 2) throw NetError('usage', 'usage: download <base-url> <dir>');
+        _aborted = false;
         final base = args[0].endsWith('/') ? args[0] : '${args[0]}/';
         final dir = args[1];
         await Directory(dir).create(recursive: true);
@@ -213,6 +230,7 @@ class Net {
         await sumsFile.writeAsString(sums, flush: true);
         // 先小后大：boot.img 失败的话，不必先等 1.2 GiB 下完才知道。进度：boot.img 占 0–5 %，super 占 5–100 %
         for (final (name, lo, span) in const [('boot.img', 0, 5), ('super.img.zst', 5, 95)]) {
+          if (_aborted) throw NetError('cancelled', 'download cancelled', {'name': name});
           final want = sumOf(sums, name);
           if (want == null) throw NetError('dl-sums-missing', 'install-artifacts.sha256 has no line for $name', {'name': name});
           final ow = old == null ? null : sumOf(old, name);
@@ -273,6 +291,7 @@ class Net {
         }
         break;
       } on _Transient catch (e) {
+        if (_aborted) throw NetError('cancelled', 'download of $name cancelled', {'name': name});
         if (t >= cfg.tries) {
           final kept = await part.exists() ? (await part.length()) >> 20 : 0;
           throw NetError('dl-failed', 'downloading $name failed after $t attempts ($e); $kept MiB kept, the next attempt resumes',
@@ -294,6 +313,7 @@ class Net {
 
   /// 一次 GET（按 .part 现有的长度续传）。暂时的失败抛 [_Transient]，别的抛 [NetError]
   Stream<Gk3Event> _get(String url, String dir, File part, String name, int lo, int span, Future<int?> Function(String)? space) async* {
+    if (_aborted) throw NetError('cancelled', 'download of $name cancelled', {'name': name});
     final c = await _client();
     RandomAccessFile? out;
     try {
@@ -380,6 +400,7 @@ class Net {
       if (total > 0 && done < total) throw _Transient('the connection closed at $done of $total bytes');
     } finally {
       await out?.close();
+      _clients.remove(c);
       c.close(force: true);
     }
   }

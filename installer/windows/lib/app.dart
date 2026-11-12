@@ -12,6 +12,9 @@ import 'ui/media_pages.dart';
 
 const kAppVersion = '0.1.0-proto';
 
+/// MaterialApp 的导航器：原生转来的关闭请求（下载中途按 Alt+F4）要在这里弹确认框
+final kNavigatorKey = GlobalKey<NavigatorState>();
+
 /// 侧栏底部"制作独立安装介质"的入口。0.1.0 只发布在 Windows 上安装 / 卸载 Android，入口先不注册；
 /// 页面与测试保留（测试里打开它），等 LiveCD 改好、0.2.0 时打开（用户 2026-11-12）
 bool mediaEntryEnabled = false;
@@ -65,6 +68,7 @@ class WinInstallerApp extends StatelessWidget {
       child: ListenableBuilder(
         listenable: session,
         builder: (context, _) => MaterialApp(
+          navigatorKey: kNavigatorKey,
           debugShowCheckedModeBanner: false,
           onGenerateTitle: (c) => L10n.of(c).appTitle,
           theme: buildTheme(),

@@ -134,11 +134,12 @@ bool Win32Window::Create(const std::wstring& title,
   UINT dpi = FlutterDesktopGetDpiForMonitor(monitor);
   double scale_factor = dpi / 96.0;
 
-  // gaokun3：没有系统标题栏（界面自绘，lib/ui/title_bar.dart），大小固定（内容按窗口等比缩放）。
+  // gaokun3：没有系统标题栏（界面自绘，lib/ui/title_bar.dart），大小固定、可以最大化（内容按窗口等比缩放）。
   // 保留 WS_CAPTION：任务栏、Alt+Tab、最小化动画与 DWM 阴影都按"有标题栏的窗口"处理；标题栏本身由
-  // WM_NCCALCSIZE 去掉。不要 WS_THICKFRAME / WS_MAXIMIZEBOX：Flutter 的子窗口盖满客户区，边缘拖不动
+  // WM_NCCALCSIZE 去掉。WS_MAXIMIZEBOX：自绘的最大化按钮、双击标题栏、Win+↑。不要 WS_THICKFRAME：
+  // Flutter 的子窗口盖满客户区，边缘拖不动
   HWND window = CreateWindow(
-      window_class, title.c_str(), WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
+      window_class, title.c_str(), WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX,
       Scale(origin.x, scale_factor), Scale(origin.y, scale_factor),
       Scale(size.width, scale_factor), Scale(size.height, scale_factor),
       nullptr, nullptr, GetModuleHandle(nullptr), this);
@@ -193,7 +194,14 @@ Win32Window::MessageHandler(HWND hwnd,
   switch (message) {
     case WM_NCCALCSIZE:
       // 整个窗口都是客户区：系统标题栏与边框不画（gaokun3）。两种 wParam 都要处理：创建窗口时发来的是
-      // FALSE，只处理 TRUE 的话标题栏会一直留着
+      // FALSE，只处理 TRUE 的话标题栏会一直留着。
+      // 最大化时系统把窗口放得比屏幕大一圈（边框那么宽），客户区等于整个窗口就会伸出屏幕：改成显示器的工作区
+      if (wparam == TRUE && IsZoomed(hwnd)) {
+        MONITORINFO mi = {sizeof(mi)};
+        if (GetMonitorInfo(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mi)) {
+          reinterpret_cast<NCCALCSIZE_PARAMS*>(lparam)->rgrc[0] = mi.rcWork;
+        }
+      }
       return 0;
 
     case WM_DESTROY:

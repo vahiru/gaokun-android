@@ -112,7 +112,7 @@ class WinBackend extends Gk3Backend {
     if (fn == 'releases') {
       src = _net.releases(args);
     } else if (fn == 'download') {
-      src = _net.download(args, hash, space: space);
+      src = _abortable(_net.download(args, hash, space: space), _net.abort);
     } else if (_gk3wCommands.contains(fn)) {
       src = _run(fn, argv);
     } else {
@@ -145,6 +145,19 @@ class WinBackend extends Gk3Backend {
       }
       return e;
     });
+  }
+
+  /// 订阅被取消时（下载中途退出）先 [abort]：断开连接、不再重试，生成器才能很快走到结束、关掉 .part；
+  /// 取消返回的 Future 等它收拾完（之后才能删文件 —— Windows 上删不掉打开着的文件）
+  static Stream<Gk3Event> _abortable(Stream<Gk3Event> s, void Function() abort) {
+    StreamSubscription<Gk3Event>? sub;
+    final c = StreamController<Gk3Event>();
+    c.onListen = () => sub = s.listen(c.add, onError: c.addError, onDone: c.close);
+    c.onCancel = () async {
+      abort();
+      await sub?.cancel();
+    };
+    return c.stream;
   }
 
   /// 界面只传它关心的参数；随程序分发的文件与目录在这里补上（界面不必知道它们在哪）

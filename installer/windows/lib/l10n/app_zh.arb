@@ -540,7 +540,6 @@
   },
   "errBackendFailed": "安装器组件意外退出，请点击“重新检查”。",
   "failUnknownTouched": "无法确认磁盘是否已被修改。请返回首页重新检查，检查结果将显示磁盘的当前状态。",
-  "runDownloadCloseHint": "下载期间可以关闭本窗口，再次安装时将从中断处继续下载。",
   "localMissing": "该目录中缺少：{files}",
   "@localMissing": {
     "placeholders": {
@@ -548,5 +547,11 @@
         "type": "String"
       }
     }
-  }
+  },
+  "quitDownloadTitle": "下载尚未完成",
+  "quitDownloadBody": "确定要退出吗？退出后，已下载的文件将被删除。",
+  "quitDownloadContinue": "继续下载",
+  "quitDownloadExit": "退出",
+  "winMaximize": "最大化",
+  "winRestore": "向下还原"
 }
