@@ -83,7 +83,9 @@ class WinInstallerApp extends StatelessWidget {
             GlobalCupertinoLocalizations.delegate,
           ],
           // 窗口没有系统标题栏：画布最上面一行用来拖动窗口，右上角是最小化与关闭（ui/title_bar.dart）
+          // 窗口最大化时工作区不是 16:10：画布顺着多出来的方向加宽，不在两边留空
           builder: (context, child) => LogicalCanvas(
+            extend: true,
             child: Stack(children: [
               child!,
               const Positioned(left: 0, top: 0, right: 0, height: DragStrip.height, child: DragStrip()),

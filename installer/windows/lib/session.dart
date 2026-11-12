@@ -262,6 +262,38 @@ class Session extends ChangeNotifier {
     final d = downloadedDir;
     if (deleteOnExit && d != null) deleteFiles(d);
     downloadedDir = null;
+    // 原生的 confirmClose 跟着撤掉（WindowButtons 重建时发 setBusy）
+    notifyListeners();
+  }
+
+  /// 写一行到后端的日志文件（WinBackend 的 note；没有日志文件时为 null）
+  late void Function(String line)? logNote = backendLogNote(backend);
+
+  // ── 下载中途退出的确认框 ──
+
+  Completer<bool>? _quitPrompt;
+  Completer<void>? _quitAfterDownload;
+
+  /// 确认框正在显示：不再弹第二个；这时下载结束了也先不写盘，等答案（[_downloadThen]）
+  bool get quitPromptOpen => _quitPrompt != null;
+  void openQuitPrompt() {
+    _quitPrompt = Completer<bool>();
+    notifyListeners();
+  }
+
+  /// 确认框关上了。[quit] 为真就撤回这次下载：还在下，停止并删掉；刚下完、正等着这个答案，由 [_downloadThen]
+  /// 删掉。删完才返回（之后才能关窗口）
+  Future<void> closeQuitPrompt(bool quit) async {
+    final c = _quitPrompt;
+    _quitPrompt = null;
+    c?.complete(quit);
+    notifyListeners();
+    if (!quit) return;
+    if (downloading) {
+      await cancelDownload();
+    } else {
+      await _quitAfterDownload?.future;
+    }
   }
 
   /// 下载到哪：当前用户"下载"文件夹下的 Gaokun Android\<版本>\（用户看得到，以后可以在"本地文件"里直接选这个目录）。
@@ -280,16 +312,20 @@ class Session extends ChangeNotifier {
 
   /// 下载中途退出：停止下载（取消订阅：WinBackend 断开连接、不再重试），等它收拾完（.part 关闭），再删掉
   /// 这次下载目录里的安装文件 —— 下载阶段还没有动盘，撤回就是删掉这些文件
-  Future<void> cancelDownload() async {
+  /// 同时调了两次（第二次确认退出）：等同一个取消做完，不能先返回让窗口关掉、文件还没删
+  Future<void> cancelDownload() => _cancelling ??= _cancel().whenComplete(() => _cancelling = null);
+  Future<void>? _cancelling;
+
+  Future<void> _cancel() async {
     final sub = _dlSub, done = _dlDone;
     if (sub == null || done == null) return;
-    _dlSub = null;
     await sub.cancel();
-    if (!done.isCompleted) {
-      done.complete(const CallResult([Gk3Record('ERR', {'code': 'cancelled'})], [Gk3Log('!! download cancelled')], 130));
-    }
+    _dlSub = null;
+    if (!done.isCompleted) done.complete(_cancelledResult);
     deleteFiles(_dlDir);
   }
+
+  static const _cancelledResult = CallResult([Gk3Record('ERR', {'code': 'cancelled'})], [Gk3Log('!! download cancelled')], 130);
 
   /// 订阅一次下载，收集结果（同 Gk3Backend.run，只是留着订阅，可以取消）
   Future<CallResult> _download(List<String> args) {
@@ -363,6 +399,7 @@ class Session extends ChangeNotifier {
   /// 异常的内容进日志区（失败页显示的就是它），用户截图时看得到
   CallResult _crashed(Object e) {
     log.add('!! $e');
+    logNote?.call('!! $e');
     return CallResult(diskBusy ? const [] : const [Gk3Record('ERR', {'code': 'internal'})], [Gk3Log('!! $e')], 1);
   }
 
@@ -435,6 +472,23 @@ class Session extends ChangeNotifier {
           return false;
         }
         dir = dl.first('RELEASE')?['dir'] ?? releaseDir;
+        // 退出确认框还开着时下载结束了：先等答案再写盘。选了退出就当作撤回（删掉刚下完的文件），不写盘；
+        // 不然用户点的"退出"没有任何作用，安装照样开始写盘
+        final prompt = _quitPrompt;
+        if (prompt != null) {
+          final after = _quitAfterDownload = Completer<void>();
+          try {
+            if (await prompt.future) {
+              logNote?.call('download cancelled by the user after it finished');
+              deleteFiles(dir);
+              result = _cancelledResult;
+              return false;
+            }
+          } finally {
+            after.complete();
+            _quitAfterDownload = null;
+          }
+        }
       }
       final (fn, args) = command(dir);
       await _startDiskWrite();

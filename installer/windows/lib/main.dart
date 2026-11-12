@@ -18,14 +18,8 @@ void main() {
   final scenario = requestedScenario();
   final real = scenario == null ? locateRealBackend() : null;
   final backend = real ?? FixtureBackend(kScenarios.contains(scenario) ? scenario! : kScenarios.first);
-  final session = Session(backend, language: requestedLanguage(), testDisk: real == null ? null : requestedTestDisk())
-    ..beforeDiskWrite = WindowControl.settleBusy
-    ..downloadsDir = WindowControl.downloadsDir;
-  // 下载中途、或退出前要删下载的文件时按 Alt+F4 或任务栏上的关闭：原生先交给界面（ui/title_bar.dart 的 handleCloseRequest）
-  WindowControl.init(onCloseRequested: () async {
-    final ctx = kNavigatorKey.currentContext;
-    if (ctx != null) await handleCloseRequest(ctx, session);
-  });
+  final session = Session(backend, language: requestedLanguage(), testDisk: real == null ? null : requestedTestDisk());
+  attachWindow(session);
   runApp(WinInstallerApp(session: session));
   session.check();
 }

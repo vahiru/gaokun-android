@@ -113,12 +113,26 @@ class _CaptionReporterState extends State<_CaptionReporter> {
   Widget build(BuildContext context) => const SizedBox.expand();
 }
 
+/// 把 [s] 接到原生窗口上（main 与 integration_test/vhd_test.dart 共用）：写盘前等原生挡住关闭、下载到"下载"文件夹、
+/// 下载中途或退出前要删文件时按 Alt+F4 或任务栏上的关闭先交给界面（[handleCloseRequest]）
+void attachWindow(Session s) {
+  s
+    ..beforeDiskWrite = WindowControl.settleBusy
+    ..downloadsDir = WindowControl.downloadsDir;
+  WindowControl.init(onCloseRequested: () async {
+    final ctx = kNavigatorKey.currentContext;
+    if (ctx != null) await handleCloseRequest(ctx, s);
+  });
+}
+
 /// 关闭窗口（自绘的关闭键，或原生转来的 Alt+F4 / 任务栏关闭）：
 /// - 下载中途：先问；确认退出就停止下载、删掉已下载的文件（下载阶段还没有动盘，只有这些文件要撤回），再关窗口
 /// - 装好之后在完成页勾了"退出时删除下载的安装文件"：先删，再关
 Future<void> handleCloseRequest(BuildContext context, Session s) async {
+  // 已经在问了（关闭键、Alt+F4、任务栏又点了一次）：不叠第二个框
+  if (s.quitPromptOpen) return;
   if (!s.downloading) {
-    if (!s.exitCleanupPending) return WindowControl.close();
+    // 不用问：直接关。用 forceClose 而不是 close：原生的 confirmClose 还没跟上界面时，close 会被原生转回来，来回不停
     s.runExitCleanup();
     return WindowControl.forceClose();
   }
@@ -126,6 +140,7 @@ Future<void> handleCloseRequest(BuildContext context, Session s) async {
   final ctx = kNavigatorKey.currentContext;
   if (ctx == null) return;
   final l = ctx.l;
+  s.openQuitPrompt();
   final quit = await showDialog<bool>(
     context: ctx,
     builder: (c) => AlertDialog(
@@ -141,10 +156,9 @@ Future<void> handleCloseRequest(BuildContext context, Session s) async {
       ],
     ),
   );
-  // 问的时候下载可能已经结束、开始写盘了：那就不关（写盘期间原生也不会关）
-  if (quit != true || !s.downloading) return;
-  await s.cancelDownload();
-  await WindowControl.forceClose();
+  // 问的时候下载可能已经结束：Session 一直等着这个答案、没有开始写盘（Session.closeQuitPrompt）
+  await s.closeQuitPrompt(quit == true);
+  if (quit == true) await WindowControl.forceClose();
 }
 
 /// 右上角的最小化、最大化与关闭（Windows 11 的尺寸；关闭键悬停是 #C42B1C 底、白字）。
@@ -159,7 +173,7 @@ class WindowButtons extends StatelessWidget {
     WindowControl.setBusy(
       s.diskBusy,
       awake: s.writing,
-      confirmClose: s.downloading || s.exitCleanupPending,
+      confirmClose: s.downloading || s.exitCleanupPending || s.quitPromptOpen,
       power: runTitle(l, s.task),
       shutdown: switch (s.task) {
         WriteTask.install => l.shutdownReasonInstall,

@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:gk3_common/backend/protocol.dart';
 import 'package:gk3_windows/app.dart';
 import 'package:gk3_windows/session.dart';
+import 'package:gk3_windows/ui/check_page.dart';
 import 'package:gk3_windows/ui/media_pages.dart';
 import 'package:gk3_windows/ui/run_pages.dart';
 import 'package:gk3_windows/ui/title_bar.dart';
@@ -356,6 +357,8 @@ void main() {
     });
     addTearDown(() => t.binding.defaultBinaryMessenger.setMockMethodCallHandler(const MethodChannel('gk3/window'), null));
     final (rec, s) = await pumpApp(t, 'free');
+    final deleted = <String>[];
+    s.deleteFiles = deleted.add;
     // 一直下不完的下载；记下它有没有被取消
     var cancelled = false;
     rec.replace['download'] = (_) {
@@ -379,14 +382,130 @@ void main() {
     await tap(t, find.text(l.quitDownloadContinue));
     expect(find.text(l.quitDownloadTitle), findsNothing);
     expect(cancelled, isFalse);
+    expect(deleted, isEmpty);
     expect(window.where((c) => c.method == 'forceClose' || c.method == 'close'), isEmpty);
 
     await tap(t, find.bySemanticsLabel(l.winClose));
     await tap(t, find.text(l.quitDownloadExit));
     await settle(t);
     expect(cancelled, isTrue);
+    // 撤回：删掉这次下载的目录里的文件，再关
+    expect(deleted, [rec.calls.singleWhere((c) => c.first == 'download').last]);
     expect(window.where((c) => c.method == 'forceClose'), hasLength(1));
     expect(rec.calls.where((c) => c.first == 'apply'), isEmpty);
+  });
+
+  /// 开始安装，停在下载这一步（下载由测试结束）；返回原生通道收到的调用与结束下载的办法
+  Future<(Rec, Session, List<MethodCall>, void Function())> startPendingDownload(WidgetTester t) async {
+    final window = <MethodCall>[];
+    t.binding.defaultBinaryMessenger.setMockMethodCallHandler(const MethodChannel('gk3/window'), (c) async {
+      window.add(c);
+      return null;
+    });
+    addTearDown(() => t.binding.defaultBinaryMessenger.setMockMethodCallHandler(const MethodChannel('gk3/window'), null));
+    final (rec, s) = await pumpApp(t, 'free');
+    final c = StreamController<Gk3Event>();
+    var dir = '';
+    rec.replace['download'] = (args) {
+      dir = args.last;
+      c.add(Gk3Progress(3, 'dl name=super.img.zst pct=10', code: 'dl', fields: const {'name': 'super.img.zst', 'pct': '10'}));
+      return c.stream;
+    };
+    for (var i = 0; i < 4; i++) {
+      await tap(t, find.text(l.btnNext));
+    }
+    await hold(t, l.holdToInstall);
+    await waitFor(t, find.byType(RunPage));
+    await settle(t);
+    expect(s.downloading, isTrue);
+    return (
+      rec,
+      s,
+      window,
+      () {
+        c
+          ..add(Gk3Record('RELEASE', {'dir': dir, 'source': 'net'}))
+          ..add(const Gk3Exit(0));
+        c.close();
+      }
+    );
+  }
+
+  testWidgets('确认框开着时下载完了：先不写盘、等答案；选退出就删掉刚下完的文件，不写盘，关窗口', (t) async {
+    final (rec, s, window, finish) = await startPendingDownload(t);
+    final deleted = <String>[];
+    s.deleteFiles = deleted.add;
+    await tap(t, find.bySemanticsLabel(l.winClose));
+    await see(t, find.text(l.quitDownloadTitle));
+    finish();
+    await settle(t);
+    expect(s.downloading, isFalse);
+    expect(rec.calls.where((c) => c.first == 'apply'), isEmpty);
+    // 框还开着：原生那边仍然先问（Alt+F4 不会直接关掉）
+    expect([for (final c in window) if (c.method == 'setBusy') c.arguments as Map].last, containsPair('confirmClose', true));
+    await tap(t, find.text(l.quitDownloadExit));
+    await settle(t);
+    expect(rec.calls.where((c) => c.first == 'apply'), isEmpty);
+    expect(deleted, [rec.calls.singleWhere((c) => c.first == 'download').last]);
+    expect(window.where((c) => c.method == 'forceClose'), hasLength(1));
+  });
+
+  testWidgets('确认框开着时下载完了：选继续就接着安装', (t) async {
+    final (rec, s, window, finish) = await startPendingDownload(t);
+    final deleted = <String>[];
+    s.deleteFiles = deleted.add;
+    await tap(t, find.bySemanticsLabel(l.winClose));
+    finish();
+    await settle(t);
+    expect(rec.calls.where((c) => c.first == 'apply'), isEmpty);
+    await tap(t, find.text(l.quitDownloadContinue));
+    await waitFor(t, find.byType(DonePage), tries: 400);
+    expect(rec.calls.where((c) => c.first == 'apply'), hasLength(1));
+    expect(deleted, isEmpty);
+    expect(window.where((c) => c.method == 'forceClose' || c.method == 'close'), isEmpty);
+  });
+
+  testWidgets('确认框只弹一个：按了关闭键之后又按 Alt+F4（原生转来 closeRequested）', (t) async {
+    final (_, s, window, _) = await startPendingDownload(t);
+    await tap(t, find.bySemanticsLabel(l.winClose));
+    await see(t, find.text(l.quitDownloadTitle));
+    unawaited(handleCloseRequest(kNavigatorKey.currentContext!, s));
+    await settle(t);
+    expect(find.text(l.quitDownloadTitle), findsOneWidget);
+    await tap(t, find.text(l.quitDownloadContinue));
+    expect(find.text(l.quitDownloadTitle), findsNothing);
+    expect(s.downloading, isTrue);
+    expect(window.where((c) => c.method == 'forceClose'), isEmpty);
+  });
+
+  testWidgets('两次取消下载同时进行：第二次也等文件删完才返回（之后才关窗口）', (t) async {
+    final (rec, s) = await pumpApp(t, 'free');
+    final deleted = <String>[];
+    s.deleteFiles = deleted.add;
+    final gate = Completer<void>();
+    rec.replace['download'] = (_) {
+      final c = StreamController<Gk3Event>();
+      // 取消要过一会儿才收拾完（真的下载要断开连接、关掉 .part）
+      c.onCancel = () => gate.future;
+      return c.stream;
+    };
+    for (var i = 0; i < 4; i++) {
+      await tap(t, find.text(l.btnNext));
+    }
+    await hold(t, l.holdToInstall);
+    await waitFor(t, find.byType(RunPage));
+    await settle(t);
+    expect(s.downloading, isTrue);
+    var a = false, b = false;
+    unawaited(s.cancelDownload().then((_) => a = true));
+    unawaited(s.cancelDownload().then((_) => b = true));
+    await settle(t, 5);
+    expect((a, b), (false, false));
+    expect(deleted, isEmpty);
+    gate.complete();
+    await settle(t, 5);
+    expect((a, b), (true, true));
+    expect(deleted, hasLength(1));
   });
 
   testWidgets('最大化按钮：调原生的 maximize；原生报告最大化之后换成"向下还原"', (t) async {
@@ -410,6 +529,18 @@ void main() {
         anyElement(equals({'canvasW': 1280.0, 'canvasH': 800.0, 'strip': 32.0, 'buttons': 138.0})));
   });
 
+
+  testWidgets('窗口不是 16:10（最大化后的工作区）：画布顺着多出来的方向加宽、铺满窗口，两边不留空', (t) async {
+    await pumpApp(t, 'free');
+    // 平板 200 % 缩放下最大化：工作区 1280×752 逻辑像素
+    t.view.physicalSize = const Size(2560, 1504);
+    t.view.devicePixelRatio = 2;
+    await settle(t);
+    expect(t.getTopRight(find.byType(WindowButtons)).dx, closeTo(1280, 0.5));
+    expect(t.getTopLeft(find.byType(DragStrip)).dx, closeTo(0, 0.5));
+    expect(t.getBottomLeft(find.byType(CheckPage)).dy, closeTo(752, 0.5));
+    expect(t.takeException(), isNull);
+  });
 
   testWidgets('下载到"下载"文件夹的 Gaokun Android\\<版本>；装好后勾选"退出时删除"，关闭窗口时先删再关', (t) async {
     final window = <MethodCall>[];
@@ -463,8 +594,34 @@ void main() {
     await waitFor(t, find.byType(DonePage), tries: 400);
     await tap(t, find.bySemanticsLabel(l.winClose));
     expect(deleted, isEmpty);
-    expect(window.where((c) => c.method == 'close'), hasLength(1));
-    expect(window.where((c) => c.method == 'forceClose'), isEmpty);
+    expect(window.where((c) => c.method == 'forceClose'), hasLength(1));
+    expect(window.where((c) => c.method == 'close'), isEmpty);
+  });
+
+  testWidgets('勾了"退出时删除"后按立即重启却没有重启（被别的程序拦下、测试模式）：文件已删，原生不再先问，关窗口直接关', (t) async {
+    final window = <MethodCall>[];
+    t.binding.defaultBinaryMessenger.setMockMethodCallHandler(const MethodChannel('gk3/window'), (c) async {
+      window.add(c);
+      return null;
+    });
+    addTearDown(() => t.binding.defaultBinaryMessenger.setMockMethodCallHandler(const MethodChannel('gk3/window'), null));
+    final (_, s) = await pumpApp(t, 'free');
+    final deleted = <String>[];
+    s.deleteFiles = deleted.add;
+    for (var i = 0; i < 4; i++) {
+      await tap(t, find.text(l.btnNext));
+    }
+    await hold(t, l.holdToInstall);
+    await waitFor(t, find.byType(DonePage), tries: 400);
+    await tap(t, find.text(l.doneDeleteDownloads('1.3 GiB')));
+    // 回放后端的 reboot 什么都不做：就是"没有重启"
+    await tap(t, find.text(l.btnRebootNow));
+    expect(deleted, hasLength(1));
+    expect([for (final c in window) if (c.method == 'setBusy') c.arguments as Map].last, containsPair('confirmClose', false));
+    await tap(t, find.bySemanticsLabel(l.winClose));
+    expect(deleted, hasLength(1));
+    expect(window.where((c) => c.method == 'forceClose'), hasLength(1));
+    expect(window.where((c) => c.method == 'close'), isEmpty);
   });
 
 

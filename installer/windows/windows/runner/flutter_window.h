@@ -47,8 +47,9 @@ class FlutterWindow : public Win32Window {
   bool confirm_close_ = false;
   bool force_close_ = false;
 
-  // 自绘标题栏的几何（界面的画布 canvas_w × canvas_h 按窗口等比缩放、居中；最上面 strip 高的一行是标题栏，
-  // 右上角 buttons 宽的一段是最小化 / 最大化 / 关闭按钮）。setCaption 之前 strip 为 0：没有标题栏区域
+  // 自绘标题栏的几何（界面按 canvas_w × canvas_h 放得下的比例缩放，多出来的方向把画布加宽或加高、铺满窗口；
+  // 最上面 strip 高的一行是标题栏，右上角 buttons 宽的一段是最小化 / 最大化 / 关闭按钮）。
+  // setCaption 之前 strip 为 0：没有标题栏区域
   double canvas_w_ = 1280, canvas_h_ = 800, strip_ = 0, buttons_ = 0;
 
   // 客户区坐标的这一点是不是标题栏（拖动窗口、双击最大化的区域，不含按钮）

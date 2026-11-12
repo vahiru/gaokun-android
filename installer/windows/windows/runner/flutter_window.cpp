@@ -225,11 +225,10 @@ bool FlutterWindow::InCaption(POINT client) {
   RECT rc;
   if (!GetClientRect(GetHandle(), &rc)) return false;
   const double w = rc.right - rc.left, h = rc.bottom - rc.top;
-  // 与 LogicalCanvas（FittedBox + Center）相同：等比缩放、居中
+  // 与 LogicalCanvas(extend: true) 相同：按画布放得下的比例缩放，多出来的方向把画布加宽或加高，铺满窗口
   const double s = (w / canvas_w_ < h / canvas_h_) ? w / canvas_w_ : h / canvas_h_;
-  const double x0 = (w - canvas_w_ * s) / 2, y0 = (h - canvas_h_ * s) / 2;
-  if (client.y < 0 || client.y >= y0 + strip_ * s) return false;
-  return client.x >= x0 && client.x < x0 + (canvas_w_ - buttons_) * s;
+  if (client.y < 0 || client.y >= strip_ * s) return false;
+  return client.x >= 0 && client.x < w - buttons_ * s;
 }
 
 // static

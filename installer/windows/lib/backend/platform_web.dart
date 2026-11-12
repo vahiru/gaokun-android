@@ -3,6 +3,8 @@ import 'package:gk3_common/backend/backend.dart';
 /// Web 上没有真后端
 Gk3Backend? locateRealBackend() => null;
 
+void Function(String line)? backendLogNote(Gk3Backend b) => null;
+
 /// http://localhost:xxxx/?scenario=installed
 String? requestedScenario() => Uri.base.queryParameters['scenario'];
 

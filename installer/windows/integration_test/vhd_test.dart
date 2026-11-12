@@ -18,6 +18,7 @@ import 'package:gk3_windows/backend/win_backend.dart';
 import 'package:gk3_windows/l10n/app_localizations.dart';
 import 'package:gk3_windows/session.dart';
 import 'package:gk3_windows/ui/run_pages.dart';
+import 'package:gk3_windows/ui/title_bar.dart';
 import 'package:gk3_common/ui/widgets.dart';
 import 'package:integration_test/integration_test.dart';
 
@@ -67,6 +68,7 @@ void main() {
     final backend = locateRealBackend();
     expect(backend, isA<WinBackend>(), reason: 'gk3w.exe not found next to the app or via GK3W');
     final session = Session(backend!, language: 'zh', testDisk: disk);
+    attachWindow(session);
     await t.pumpWidget(WinInstallerApp(session: session));
     await session.check();
     await t.pump();

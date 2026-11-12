@@ -6,6 +6,9 @@ import 'win_backend.dart';
 
 /// 真后端：Windows 上调程序目录里的 gk3w.exe（后端文件不全时每次调用都报 backend-missing，
 /// 检查页上说清楚，不悄悄回放演示数据）。别的平台（Linux 上跑测试）没有真后端，回放演示数据。
+/// 后端的日志文件（只有 WinBackend 有）：界面这一侧的事也记进去
+void Function(String line)? backendLogNote(Gk3Backend b) => b is WinBackend ? b.note : null;
+
 Gk3Backend? locateRealBackend() {
   if (!Platform.isWindows) return null;
   return WinBackend.locate(testDisk: requestedTestDisk());

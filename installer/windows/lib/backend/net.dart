@@ -106,6 +106,11 @@ class Net {
       ..userAgent = cfg.userAgent;
     final p = await proxy?.call();
     c.findProxy = p == null ? HttpClient.findProxyFromEnvironment : (_) => 'PROXY $p; DIRECT';
+    // 查代理的时候 [abort] 了：这个连接还不在 _clients 里、断不到，不能再交出去
+    if (_aborted) {
+      c.close(force: true);
+      throw NetError('cancelled', 'download cancelled');
+    }
     _clients.add(c);
     return c;
   }
@@ -252,6 +257,7 @@ class Net {
   Future<String> _fetchSums(String url) async {
     Object? last;
     for (var t = 1; t <= 3; t++) {
+      if (_aborted) throw NetError('cancelled', 'download cancelled');
       try {
         final (status, body) = await _getText(url);
         if (status == 200) return body;
@@ -262,6 +268,7 @@ class Net {
       } on Exception catch (e) {
         last = e;
       }
+      if (_aborted) throw NetError('cancelled', 'download cancelled');
       if (t < 3) await Future<void>.delayed(cfg.retryDelay);
     }
     throw NetError('dl-sums', 'cannot fetch $url ($last)');

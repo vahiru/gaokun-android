@@ -112,7 +112,11 @@ class WinBackend extends Gk3Backend {
     if (fn == 'releases') {
       src = _net.releases(args);
     } else if (fn == 'download') {
-      src = _abortable(_net.download(args, hash, space: space), _net.abort);
+      src = _abortable(_net.download(args, hash, space: space), () {
+        _net.abort();
+        _w('[${_ts()}] << $fn cancelled (${DateTime.now().difference(t0).inMilliseconds / 1000} s)');
+        _flush();
+      });
     } else if (_gk3wCommands.contains(fn)) {
       src = _run(fn, argv);
     } else {
@@ -148,16 +152,28 @@ class WinBackend extends Gk3Backend {
   }
 
   /// 订阅被取消时（下载中途退出）先 [abort]：断开连接、不再重试，生成器才能很快走到结束、关掉 .part；
-  /// 取消返回的 Future 等它收拾完（之后才能删文件 —— Windows 上删不掉打开着的文件）
+  /// 取消返回的 Future 等它收拾完（之后才能删文件 —— Windows 上删不掉打开着的文件）。
+  /// 正常结束后控制器同样会回调 onCancel：那不是取消，不调 [abort]
   static Stream<Gk3Event> _abortable(Stream<Gk3Event> s, void Function() abort) {
     StreamSubscription<Gk3Event>? sub;
+    var done = false;
     final c = StreamController<Gk3Event>();
-    c.onListen = () => sub = s.listen(c.add, onError: c.addError, onDone: c.close);
+    c.onListen = () => sub = s.listen(c.add, onError: c.addError, onDone: () {
+          done = true;
+          c.close();
+        });
     c.onCancel = () async {
+      if (done) return;
       abort();
       await sub?.cancel();
     };
     return c.stream;
+  }
+
+  /// 写一行到日志文件（界面这一侧的事：程序出错、用户撤回下载）
+  void note(String line) {
+    _w('[${_ts()}] $line');
+    _flush();
   }
 
   /// 界面只传它关心的参数；随程序分发的文件与目录在这里补上（界面不必知道它们在哪）

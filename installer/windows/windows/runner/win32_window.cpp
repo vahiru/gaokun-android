@@ -1,6 +1,9 @@
 #include "win32_window.h"
 
 #include <dwmapi.h>
+#include <shellapi.h>
+
+#include <initializer_list>
 #include <flutter_windows.h>
 
 #include "resource.h"
@@ -197,9 +200,25 @@ Win32Window::MessageHandler(HWND hwnd,
       // FALSE，只处理 TRUE 的话标题栏会一直留着。
       // 最大化时系统把窗口放得比屏幕大一圈（边框那么宽），客户区等于整个窗口就会伸出屏幕：改成显示器的工作区
       if (wparam == TRUE && IsZoomed(hwnd)) {
+        RECT& r = reinterpret_cast<NCCALCSIZE_PARAMS*>(lparam)->rgrc[0];
+        // 按新的位置取显示器：跨显示器最大化、从最小化还原成最大化时，窗口原来的位置不在要去的那块屏幕上
         MONITORINFO mi = {sizeof(mi)};
-        if (GetMonitorInfo(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mi)) {
-          reinterpret_cast<NCCALCSIZE_PARAMS*>(lparam)->rgrc[0] = mi.rcWork;
+        if (GetMonitorInfo(MonitorFromRect(&r, MONITOR_DEFAULTTONEAREST), &mi)) {
+          r = mi.rcWork;
+          // 任务栏自动隐藏时工作区就是整块屏幕，窗口盖住那条边，鼠标移过去唤不出任务栏：那一边让出 2 像素
+          const LONG kAutohideGap = 2;
+          APPBARDATA ab = {sizeof(ab)};
+          ab.rc = mi.rcMonitor;
+          for (UINT edge : {ABE_LEFT, ABE_TOP, ABE_RIGHT, ABE_BOTTOM}) {
+            ab.uEdge = edge;
+            if (!SHAppBarMessage(ABM_GETAUTOHIDEBAREX, &ab)) continue;
+            switch (edge) {
+              case ABE_LEFT: r.left += kAutohideGap; break;
+              case ABE_TOP: r.top += kAutohideGap; break;
+              case ABE_RIGHT: r.right -= kAutohideGap; break;
+              case ABE_BOTTOM: r.bottom -= kAutohideGap; break;
+            }
+          }
         }
       }
       return 0;

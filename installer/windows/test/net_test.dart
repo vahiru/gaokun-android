@@ -351,24 +351,80 @@ void main() {
   });
 
 
-  test('中途停止（abort）：断开连接、不再重试，很快结束', () async {
-    final big = blob(8 << 20, 6);
-    srv.hooks['super.img.zst'] = (req) => slow(req, big);
-    final net = Net(cfg: fast);
-    final events = <Gk3Event>[];
-    final done = Completer<void>();
-    final sub = net.download([srv.base, dir.path], sha256sum).listen(events.add, onDone: done.complete);
-    await waitUntil(() => File('${dir.path}/super.img.zst.part').existsSync());
-    await Future<void>.delayed(const Duration(milliseconds: 200));
+  // 停滞判定放长到 10 秒：服务器卡住时，只有 abort 断开连接才能很快结束（不靠停滞超时）
+  const patient = NetConfig(
+    connectTimeout: Duration(seconds: 2),
+    stallWindow: Duration(seconds: 10),
+    stallMinBytesPerSecond: 1,
+    tries: 3,
+    retryDelay: Duration(milliseconds: 50),
+    progressInterval: Duration.zero,
+  );
+
+  /// 本进程打开着的文件里有没有 [path]（Linux 的 /proc/self/fd）
+  bool isOpen(String path) => Directory('/proc/self/fd').listSync().any((l) {
+        try {
+          return Link(l.path).targetSync() == path;
+        } on FileSystemException {
+          return false;
+        }
+      });
+
+  /// 先发一段，然后卡住不再发（也不断开；tearDown 关服务器时才断）
+  Future<bool> stuck(HttpRequest req, List<int> body) async {
+    final resp = req.response;
+    resp.contentLength = body.length;
+    resp.add(body.sublist(0, 100000));
+    await resp.flush();
+    await Completer<void>().future;
+    return true;
+  }
+
+  test('中途停止（abort）：服务器卡住时也马上断开、不再重试，.part 关掉', () async {
+    srv.hooks['super.img.zst'] = (req) => stuck(req, sup);
+    final net = Net(cfg: patient);
+    final sub = net.download([srv.base, dir.path], sha256sum).listen((_) {});
+    final part = '${dir.path}/super.img.zst.part';
+    await waitUntil(() => File(part).existsSync() && File(part).lengthSync() >= 100000);
+    expect(isOpen(part), isTrue);
     final sw = Stopwatch()..start();
     net.abort();
     await sub.cancel();
     expect(sw.elapsedMilliseconds, lessThan(1000));
+    expect(isOpen(part), isFalse);
     final n = srv.requests.where((q) => q.startsWith('GET super.img.zst')).length;
-    await Future<void>.delayed(const Duration(milliseconds: 500));
+    await Future<void>.delayed(const Duration(milliseconds: 300));
     expect(srv.requests.where((q) => q.startsWith('GET super.img.zst')).length, n, reason: 'no retry after abort');
-    // .part 已经关掉，可以删
-    File('${dir.path}/super.img.zst.part').deleteSync();
+  });
+
+  test('取校验清单时停止：服务器卡住也马上结束，不再重试', () async {
+    // 收到请求，一直不回
+    srv.hooks['install-artifacts.sha256'] = (req) => Completer<bool>().future;
+    final net = Net(cfg: patient);
+    final done = Completer<void>();
+    net.download([srv.base, dir.path], sha256sum).listen((_) {}, onDone: done.complete);
+    await waitUntil(() => srv.requests.isNotEmpty);
+    final sw = Stopwatch()..start();
+    net.abort();
+    await done.future.timeout(const Duration(seconds: 5));
+    expect(sw.elapsedMilliseconds, lessThan(1000));
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    expect(srv.requests, hasLength(1), reason: 'no retry after abort');
+  });
+
+  test('查代理的时候停止：不再发出请求，报 cancelled', () async {
+    final asked = Completer<void>(), answer = Completer<String?>();
+    final net = Net(cfg: patient, proxy: () {
+      if (!asked.isCompleted) asked.complete();
+      return answer.future;
+    });
+    final r = collect(net.download([srv.base, dir.path], sha256sum));
+    await asked.future;
+    net.abort();
+    answer.complete(null);
+    final res = await r.timeout(const Duration(seconds: 5));
+    expect(res.err!['code'], 'cancelled');
+    expect(srv.requests, isEmpty);
   });
 
 
