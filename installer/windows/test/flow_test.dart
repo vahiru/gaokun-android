@@ -9,6 +9,7 @@ import 'package:gk3_windows/app.dart';
 import 'package:gk3_windows/session.dart';
 import 'package:gk3_windows/ui/check_page.dart';
 import 'package:gk3_windows/ui/media_pages.dart';
+import 'package:gk3_windows/ui/messages.dart';
 import 'package:gk3_windows/ui/run_pages.dart';
 import 'package:gk3_windows/ui/title_bar.dart';
 
@@ -275,29 +276,124 @@ void main() {
     await see(t, find.text(l.localLiveCd));
   });
 
-  testWidgets('测试模式：本机检查不过也能继续（角上标出）；BitLocker 已开启时要勾选才能按住开始', (t) async {
+  testWidgets('测试模式：本机检查不过也能继续（角上标出）；不写本机系统盘，不要 BitLocker 恢复密钥', (t) async {
     // blocked 的 preflight 是一台 PC 的真实结果：机型不对、Secure Boot、快速启动、BitLocker 都开着
     final (rec, s) = await pumpApp(t, 'blocked', testDisk: 2);
     await see(t, find.text(l.chkModelBad));
     expect(find.text(l.testBadge('2')), findsOneWidget);
     expect(find.text(l.chkBlockedNote), findsNothing);
+    expect(find.text(l.chkBitlockerSuspendBox), findsNothing);
     expect(enabled(t, l.btnNext), isTrue);
     await tap(t, find.text(l.btnNext));
     await tap(t, find.text(l.btnNext));
     await see(t, find.textContaining('v1.0.0-rc.3'));
     await tap(t, find.text(l.btnNext));
     await tap(t, find.text(l.btnNext));
-    await see(t, find.text(l.confirmBitlockerAck));
-    // 没勾选：按住不起作用
-    await hold(t, l.holdToInstall);
-    expect(find.byType(DonePage), findsNothing);
-    expect(rec.calls.where((c) => c.first == 'apply'), isEmpty);
-    await tap(t, find.text(l.confirmBitlockerAck));
-    expect(s.bitlockerAck, isTrue);
+    await see(t, find.text(l.confirmAntivirus));
+    expect(find.text(l.confirmBitlocker), findsNothing);
     await hold(t, l.holdToInstall);
     await waitFor(t, find.byType(DonePage), tries: 400);
     expect(find.byType(DonePage), findsOneWidget);
-    expect(rec.calls.singleWhere((c) => c.first == 'apply'), containsAllInOrder(['--bitlocker-key', 'yes']));
+    final i = rec.calls.indexWhere((c) => c.first == 'apply');
+    expect(rec.calls[i], isNot(contains('--bitlocker-key')));
+    expect(rec.inputs[i], isNull);
+    expect(rec.calls.where((c) => c.first == 'bitlocker-key'), isEmpty);
+  });
+
+  testWidgets('BitLocker 保护开着：恢复密钥通过校验后才能按住开始；密钥经标准输入交给 apply，用过即清除', (t) async {
+    final (rec, s) = await pumpApp(t, 'free', map: {'preflight': bitlockerOn()}, respond: {'bitlocker-key': fakeBitlockerKey});
+    await see(t, find.text(l.chkBitlockerOn));
+    expect(find.textContaining('3F2A9C41'), findsWidgets);
+    await tap(t, find.text(l.btnNext));
+    await tap(t, find.text(l.btnNext));
+    await see(t, find.textContaining('v1.0.0-rc.3'));
+    await tap(t, find.text(l.btnNext));
+    await tap(t, find.text(l.btnNext));
+    await see(t, find.text(l.confirmBitlocker));
+    expect(find.text(l.confirmAntivirus), findsOneWidget);
+    // 位数不够：校验按钮不能按
+    await t.enterText(find.byType(TextField), '123456-123456');
+    await settle(t);
+    expect(enabled(t, l.blVerify), isFalse);
+    // 对不上：说明原因，按住不起作用
+    await t.enterText(find.byType(TextField), kOtherKey);
+    await tapShown(t, find.text(l.blVerify));
+    await see(t, find.text(l.errBitlockerWrong));
+    await hold(t, l.holdToInstall);
+    expect(rec.calls.where((c) => c.first == 'apply'), isEmpty);
+    // 正确的（空格分组）：通过；之后改了内容就要重新校验
+    await t.enterText(find.byType(TextField), kGoodKey.replaceAll('-', ' '));
+    await tapShown(t, find.text(l.blVerify));
+    await see(t, find.text(l.blOk));
+    await t.enterText(find.byType(TextField), '${kGoodKey.replaceAll('-', ' ')} ');
+    await settle(t);
+    expect(s.bitlockerVerified, isFalse);
+    expect(find.text(l.blOk), findsNothing);
+    await tapShown(t, find.text(l.blVerify));
+    await see(t, find.text(l.blOk));
+    await hold(t, l.holdToInstall);
+    await waitFor(t, find.byType(DonePage), tries: 400);
+    expect(find.byType(DonePage), findsOneWidget);
+    final i = rec.calls.indexWhere((c) => c.first == 'apply');
+    expect(rec.calls[i], containsAllInOrder(['--real-disk', '--bitlocker-key', '-']));
+    expect(rec.inputs[i], '$kGoodKey\n');
+    // 校验的调用也只经标准输入传密钥
+    for (final c in rec.calls.where((c) => c.first == 'bitlocker-key')) {
+      expect(c, ['bitlocker-key']);
+    }
+    expect(s.bitlockerVerified, isFalse);
+  });
+
+  testWidgets('恢复密钥某一组校验不过：指出是第几组', (t) async {
+    final (_, s) = await pumpApp(t, 'free', map: {'preflight': bitlockerOn()}, respond: {
+      'bitlocker-key': (args, input) => Stream.fromIterable([const Gk3Record('ERR', {'code': 'bitlocker-key-format', 'group': '3'}), const Gk3Exit(1)]),
+    });
+    await t.runAsync(() => s.verifyBitlockerKey(kGoodKey));
+    expect(errText(l, s.bitlockerErr!), l.errBitlockerGroup('3'));
+  });
+
+  testWidgets('出厂状态（Secure Boot 与 BitLocker 都开着）：先校验恢复密钥并暂停保护，再去关闭 Secure Boot', (t) async {
+    final (rec, s) = await pumpApp(t, 'bitlocker');
+    await see(t, find.text(l.chkSecureBootHowBitlocker));
+    expect(find.text(l.chkBitlockerSuspendBox), findsOneWidget);
+    expect(enabled(t, l.btnNext), isFalse);
+    await t.enterText(find.byType(TextField), kGoodKey);
+    await tapShown(t, find.text(l.blVerifySuspend));
+    await see(t, find.text(l.chkBitlockerSuspended));
+    final i = rec.calls.indexWhere((c) => c.first == 'bitlocker-key');
+    expect(rec.calls[i], ['bitlocker-key', '--suspend', '2']);
+    expect(rec.inputs[i], '$kGoodKey\n');
+    // 暂停之后重新检查过：Secure Boot 一项回到普通的说明，不再要密钥
+    expect(rec.calls.where((c) => c.first == 'preflight'), hasLength(2));
+    expect(find.text(l.chkSecureBootHow), findsOneWidget);
+    expect(find.text(l.chkBitlockerSuspendBox), findsNothing);
+    expect(s.needBitlockerKey, isFalse);
+    expect(enabled(t, l.btnNext), isFalse);
+  });
+
+  testWidgets('系统盘没有恢复密钥：无从校验，标红挡住', (t) async {
+    await pumpApp(t, 'free', map: {'preflight': bitlockerOn(ids: '')});
+    await see(t, find.text(l.chkBitlockerNoKey));
+    expect(find.text(l.chkBitlockerNoKeyHow), findsOneWidget);
+    expect(enabled(t, l.btnNext), isFalse);
+  });
+
+  testWidgets('卸载也要恢复密钥：通过之后经标准输入交给 uninstall', (t) async {
+    final (rec, _) = await pumpApp(t, 'installed', map: {'preflight': bitlockerOn()}, respond: {'bitlocker-key': fakeBitlockerKey});
+    await tap(t, find.text(l.btnManage));
+    await tap(t, find.text(l.manageUninstall));
+    await see(t, find.text(l.confirmBitlocker));
+    expect(find.text(l.confirmAntivirus), findsOneWidget);
+    await hold(t, l.holdToUninstall);
+    expect(rec.calls.where((c) => c.first == 'uninstall'), isEmpty);
+    await t.enterText(find.byType(TextField), kGoodKey);
+    await tapShown(t, find.text(l.blVerify));
+    await see(t, find.text(l.blOk));
+    await hold(t, l.holdToUninstall);
+    await waitFor(t, find.byType(DonePage), tries: 400);
+    final i = rec.calls.indexWhere((c) => c.first == 'uninstall');
+    expect(rec.calls[i], containsAllInOrder(['--real-disk', '--bitlocker-key', '-']));
+    expect(rec.inputs[i], '$kGoodKey\n');
   });
 
   testWidgets('gk3w 写盘时没报原因就退出（被结束、崩溃）：失败页不说"磁盘未被修改"，而是请用户重新检查', (t) async {

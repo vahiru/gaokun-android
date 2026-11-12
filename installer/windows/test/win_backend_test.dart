@@ -2,6 +2,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:gk3_common/backend/backend.dart';
 import 'package:gk3_windows/backend/win_backend.dart';
 
 void main() {
@@ -22,6 +23,10 @@ case "\$1" in
     echo "PROGRESS 50 scan" >&2 ;;
   hash) echo "HASH file=\$2 size=3 sha256=\$(printf %064d 7)" ;;
   apply) echo "ERR code=plan touched=no" >&2; echo "!! too small" >&2; exit 1 ;;
+  bitlocker-key)
+    read -r k
+    printf '%s\\n' "\$k" > "${d.path}/stdin"
+    echo "BITLOCKER volume=C: key=ok" ;;
 esac
 ''');
     Process.runSync('chmod', ['+x', fake]);
@@ -30,14 +35,14 @@ esac
 
   test('apply 补上 --sdboot、--mke2fs、--backup-dir，uninstall 补上 --backup-dir，其余参数原样', () async {
     final b = WinBackend(gk3w: fake, sdboot: r'C:\gk3\backend\systemd-bootaa64.efi', mke2fs: r'C:\gk3\backend\mke2fs.exe', backupDir: r'C:\ProgramData\gaokun3\backup');
-    final r = await b.run('apply', ['--disk', '1', '--real-disk', '--bitlocker-key', 'yes']);
+    final r = await b.run('apply', ['--disk', '1', '--real-disk', '--bitlocker-key', '-']);
     expect(r.ok, isFalse);
     expect(r.err!['code'], 'plan');
     expect(r.error, 'too small');
     await b.run('uninstall', ['--disk', '1', '--real-disk']);
     await b.run('plan', ['--sector', '512']);
     expect(argsLog.readAsLinesSync(), [
-      r'apply --disk 1 --real-disk --bitlocker-key yes --sdboot C:\gk3\backend\systemd-bootaa64.efi --mke2fs C:\gk3\backend\mke2fs.exe --backup-dir C:\ProgramData\gaokun3\backup',
+      r'apply --disk 1 --real-disk --bitlocker-key - --sdboot C:\gk3\backend\systemd-bootaa64.efi --mke2fs C:\gk3\backend\mke2fs.exe --backup-dir C:\ProgramData\gaokun3\backup',
       r'uninstall --disk 1 --real-disk --backup-dir C:\ProgramData\gaokun3\backup',
       'plan --sector 512',
     ]);
@@ -68,8 +73,24 @@ esac
     expect(p.ok, isTrue);
     expect({for (final r in p.ofType('DISK')) r['num']: r['system']}, {'1': 'no', '2': 'yes'});
     expect(p.ofType('DISK').last['model'], 'Msft Virtual Disk');
-    await b.run('uninstall', ['--disk', '2', '--real-disk', '--bitlocker-key', 'yes']);
+    await b.run('uninstall', ['--disk', '2', '--real-disk', '--bitlocker-key', '-']);
     expect(argsLog.readAsLinesSync().last, 'uninstall --disk 2');
+    // 不动这台 PC 自己的 BitLocker：校验照常，暂停去掉
+    await Gk3Backend.collect(b.callWithInput('bitlocker-key', ['--suspend', '2'], 'x\n'));
+    expect(argsLog.readAsLinesSync().last, 'bitlocker-key');
+  });
+
+  test('恢复密钥经标准输入交给 gk3w，日志里只记"有标准输入"', () async {
+    final f = File('${d.path}/installer.log');
+    final b = WinBackend(gk3w: fake, log: f.openSync(mode: FileMode.append));
+    final r = await Gk3Backend.collect(b.callWithInput('bitlocker-key', [], '135795-000000-720885-111111-222222-333333-444444-555555\n'));
+    expect(r.ok, isTrue);
+    expect(r.first('BITLOCKER')!['key'], 'ok');
+    expect(File('${d.path}/stdin').readAsStringSync(), '135795-000000-720885-111111-222222-333333-444444-555555\n');
+    expect(argsLog.readAsLinesSync().last, 'bitlocker-key');
+    final log = f.readAsStringSync();
+    expect(log, contains('>> bitlocker-key (+ stdin, not logged)'));
+    expect(log, isNot(contains('135795')));
   });
 
   test('测试模式只认 VHD：磁盘号对上但不是 VHD 的盘不标成系统盘', () async {

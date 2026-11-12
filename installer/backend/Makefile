@@ -19,7 +19,7 @@ B          := build
 
 CORE      := ../../tools/gk3boot/core
 CORE_SRC  := $(wildcard $(CORE)/src/*.c)
-PORTABLE  := src/proto.c src/layout.c src/sparse.c src/plan.c src/esp.c
+PORTABLE  := src/proto.c src/layout.c src/sparse.c src/plan.c src/esp.c src/blkey.c
 WIN_SRC   := $(wildcard src/win/*.c)
 HEADERS   := $(wildcard src/*.h src/win/*.h) $(CORE)/include/gk3core.h
 ZSTD      := third_party/zstd/zstd_dec.c

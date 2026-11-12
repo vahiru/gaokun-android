@@ -5,6 +5,7 @@ import 'package:gk3_common/ui/widgets.dart';
 import '../app.dart';
 import '../model.dart';
 import '../session.dart';
+import 'bitlocker_box.dart';
 import 'bits.dart';
 import 'messages.dart';
 import 'run_pages.dart';
@@ -279,9 +280,9 @@ class ConfirmPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final s = context.session, l = context.l, cs = context.cs;
+    final s = context.session, l = context.l;
     final r = s.region!, p = s.plans[r]!, v = s.variant;
-    final ready = !s.needBitlockerAck || s.bitlockerAck;
+    final ready = s.bitlockerReady;
     return WinStepPage(
       step: WinStep.confirm,
       danger: true,
@@ -308,25 +309,8 @@ class ConfirmPage extends StatelessWidget {
         Bullet(s.defaultOs == 'android' ? l.confirmDefaultAndroid : l.confirmDefaultWindows),
         const SizedBox(height: 12),
         Bullet(l.confirmWindowsSafe, icon: Icons.shield_outlined, color: context.gk.success),
-        if (s.needBitlockerAck) ...[
-          const SizedBox(height: 16),
-          NoteBox(
-            warn: true,
-            text: l.confirmBitlocker,
-            // ListTile 的底色与水波纹画在最近的 Material 上：NoteBox 的底色会挡住它们（Debug 下还会报断言），
-            // 中间垫一层透明的 Material
-            child: Material(
-              type: MaterialType.transparency,
-              child: CheckboxListTile(
-                contentPadding: EdgeInsets.zero,
-                controlAffinity: ListTileControlAffinity.leading,
-                value: s.bitlockerAck,
-                onChanged: (v) => s.setBitlockerAck(v ?? false),
-                title: Text(l.confirmBitlockerAck, style: context.tt.bodyLarge!.copyWith(color: cs.onSurface)),
-              ),
-            ),
-          ),
-        ],
+        Bullet(l.confirmAntivirus, icon: Icons.gpp_maybe_outlined, color: context.gk.warning),
+        if (s.needBitlockerKey) ...[const SizedBox(height: 16), BitlockerKeyBox(text: l.confirmBitlocker)],
       ]),
     );
   }

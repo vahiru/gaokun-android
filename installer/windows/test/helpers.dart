@@ -31,9 +31,23 @@ class Rec extends Gk3Backend {
   @override
   String? get demoLabel => inner.demoLabel;
 
+  /// 每次调用的标准输入，与 [calls] 一一对应（没有输入为 null）
+  final inputs = <String?>[];
+
+  /// 函数 → 按参数与标准输入给出输出（恢复密钥对不对）
+  final respond = <String, Stream<Gk3Event> Function(List<String> args, String? input)>{};
+
   @override
-  Stream<Gk3Event> call(String fn, [List<String> args = const []]) {
+  Stream<Gk3Event> call(String fn, [List<String> args = const []]) => _call(fn, args, null);
+
+  @override
+  Stream<Gk3Event> callWithInput(String fn, List<String> args, String input) => _call(fn, args, input);
+
+  Stream<Gk3Event> _call(String fn, List<String> args, String? input) {
     calls.add([fn, ...args]);
+    inputs.add(input);
+    final by = respond[fn];
+    if (by != null) return by(args, input);
     final once = replaceFirst.remove(fn);
     if (once != null) return once(args);
     final r = replace[fn];
@@ -66,13 +80,15 @@ class DiskBundle extends AssetBundle {
 /// [home]：从某一页开始（出图时看那些回放数据走不到的页）
 Future<(Rec, Session)> pumpApp(WidgetTester t, String scenario,
     {String language = 'zh', Widget? home, int? testDisk, Map<String, Gk3Event Function(Gk3Event)> map = const {},
-    Map<String, Stream<Gk3Event> Function(List<String>)> replaceFirst = const {}}) async {
+    Map<String, Stream<Gk3Event> Function(List<String>)> replaceFirst = const {},
+    Map<String, Stream<Gk3Event> Function(List<String>, String?)> respond = const {}}) async {
   t.view.physicalSize = const Size(1280, 800);
   t.view.devicePixelRatio = 1;
   addTearDown(t.view.reset);
   final rec = Rec(FixtureBackend(scenario, bundle: DiskBundle(), speed: 0))
     ..map.addAll(map)
-    ..replaceFirst.addAll(replaceFirst);
+    ..replaceFirst.addAll(replaceFirst)
+    ..respond.addAll(respond);
   final session = Session(rec, language: language, testDisk: testDisk);
   await t.pumpWidget(WinInstallerApp(session: session, home: home));
   await t.runAsync(session.check);
@@ -105,6 +121,15 @@ Future<void> tap(WidgetTester t, Finder f) async {
   await settle(t);
 }
 
+/// 先滚动到看得见再点（页面下方的内容可能被底栏挡住）
+Future<void> tapShown(WidgetTester t, Finder f) async {
+  await waitFor(t, f);
+  await t.ensureVisible(f.first);
+  await settle(t);
+  await t.tap(f.first);
+  await settle(t);
+}
+
 /// 底栏的按钮能不能点
 bool enabled(WidgetTester t, String label) =>
     t.widget<ButtonStyleButton>(find.ancestor(of: find.text(label), matching: find.byWidgetPredicate((w) => w is ButtonStyleButton)).first).onPressed != null;
@@ -132,4 +157,24 @@ List<String> cjkOnScreen(WidgetTester t) {
     if (cjk.hasMatch(s)) out.add(s);
   }
   return out;
+}
+
+/// 一个格式正确的恢复密钥（每组是 11 的倍数）与另一个格式也正确、但对不上的
+const kGoodKey = '135795-000000-720885-111111-222222-333333-444444-555555';
+const kOtherKey = '111111-222222-333333-444444-555555-000000-720885-135795';
+
+/// 把 preflight 改成 BitLocker 保护开着（可另改 Secure Boot），恢复密钥 ID 是编的
+Gk3Event Function(Gk3Event) bitlockerOn({String secureBoot = 'off', String ids = '3F2A9C41'}) => (e) => e is Gk3Record && e.type == 'PREFLIGHT'
+    ? Gk3Record('PREFLIGHT', {...e.fields, 'bitlocker': 'on', 'secure_boot': secureBoot, 'bitlocker_key_ids': ids})
+    : e;
+
+/// 假的 gk3w bitlocker-key：标准输入是 [kGoodKey] 就通过（带 --suspend 时报暂停了几次），否则报对不上
+Stream<Gk3Event> fakeBitlockerKey(List<String> args, String? input) {
+  final i = args.indexOf('--suspend');
+  return Stream.fromIterable(input?.trim() == kGoodKey
+      ? [
+          Gk3Record('BITLOCKER', {'volume': 'C:', 'key': 'ok', if (i >= 0) 'suspended': args[i + 1]}),
+          const Gk3Exit(0),
+        ]
+      : [const Gk3Record('ERR', {'code': 'bitlocker-key-wrong'}), const Gk3Log('!! the recovery key does not match'), const Gk3Exit(1)]);
 }

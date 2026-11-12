@@ -5,6 +5,7 @@ import 'package:gk3_common/ui/widgets.dart';
 import '../app.dart';
 import '../l10n/app_localizations.dart';
 import '../model.dart';
+import 'bitlocker_box.dart';
 import 'bits.dart';
 import 'install_pages.dart';
 import 'manage_pages.dart';
@@ -20,6 +21,10 @@ class CheckPage extends StatelessWidget {
     final d = s.disk;
     final (rows, blockedByPreflight) = preflightRows(context);
     var blocked = blockedByPreflight;
+    final pf = s.preflight;
+    // 还要关闭 Secure Boot、而 BitLocker 保护开着：关闭之前先校验恢复密钥、暂停保护（Windows 重启两次后自动恢复：
+    // 进固件设置关闭 Secure Boot 一次，装好后重启一次），不然关闭之后启动 Windows 就要求输入恢复密钥
+    final suspendFirst = !s.checking && pf != null && pf.secureBoot == 'on' && !s.installed && s.needBitlockerKey && !s.bitlockerNoKey;
     if (!s.checking && s.probe != null) {
       if (d == null) {
         rows.add(CheckRow(state: CheckState.fail, title: l.chkNoSystemDisk));
@@ -58,6 +63,10 @@ class CheckPage extends StatelessWidget {
             )
           : ListView(children: [
               ...rows,
+              if (suspendFirst) ...[
+                const SizedBox(height: 12),
+                BitlockerKeyBox(text: l.chkBitlockerSuspendBox, suspendReboots: 2),
+              ],
               if (blocked) ...[const SizedBox(height: 12), NoteBox(text: l.chkBlockedNote, warn: true)],
             ]),
     );
@@ -84,21 +93,34 @@ class CheckPage extends StatelessWidget {
     final inst = s.installed;
     rows.add(switch (pf.secureBoot) {
       'off' => CheckRow(state: CheckState.ok, title: l.chkSecureBootOff),
-      'on' => CheckRow(state: inst ? CheckState.warn : CheckState.fail, title: l.chkSecureBootOn, detail: l.chkSecureBootHow),
+      // BitLocker 保护开着时，先暂停保护再关闭 Secure Boot（检查页下方的恢复密钥框）
+      'on' => CheckRow(
+          state: inst ? CheckState.warn : CheckState.fail,
+          title: l.chkSecureBootOn,
+          detail: !inst && s.needBitlockerKey && !s.bitlockerNoKey ? l.chkSecureBootHowBitlocker : l.chkSecureBootHow),
       _ => CheckRow(state: CheckState.warn, title: l.chkSecureBootUnknown, detail: l.chkSecureBootHow),
     });
     rows.add(pf.fastStartup == 'on'
         ? CheckRow(state: inst ? CheckState.warn : CheckState.fail, title: l.chkFastStartupOn,
             detail: pf.hibernate == 'off' ? l.chkFastStartupHowReg : l.chkFastStartupHow)
         : CheckRow(state: CheckState.ok, title: l.chkFastStartupOff));
-    rows.add(pf.bitlocker == 'off'
-        ? CheckRow(state: CheckState.ok, title: l.chkBitlockerOff)
-        : CheckRow(state: CheckState.warn, title: pf.bitlocker == 'on' ? l.chkBitlockerOn : l.chkBitlockerUnknown, detail: l.chkBitlockerHow));
+    // 恢复密钥 ID：检查页下方有输入框时（先暂停保护再关闭 Secure Boot）写在框里，这里不重复
+    final ids = pf.secureBoot == 'on' && !inst && s.needBitlockerKey ? null : pf.bitlockerKeyIds;
+    rows.add(switch (pf.bitlocker) {
+      'off' => CheckRow(state: CheckState.ok, title: l.chkBitlockerOff),
+      'suspended' => CheckRow(state: CheckState.ok, title: l.chkBitlockerSuspended, detail: l.chkBitlockerSuspendedHow),
+      // 系统盘上没有恢复密钥：无从校验，安装与卸载都不能继续（测试模式不要密钥，不挡）
+      _ when s.bitlockerNoKey => CheckRow(state: CheckState.fail, title: l.chkBitlockerNoKey, detail: l.chkBitlockerNoKeyHow),
+      _ => CheckRow(
+          state: CheckState.warn,
+          title: pf.bitlocker == 'on' ? l.chkBitlockerOn : l.chkBitlockerUnknown,
+          detail: ids == null || ids.isEmpty ? l.chkBitlockerHow : '${l.chkBitlockerHow}\n${l.blKeyIds(ids.join(' / '))}'),
+    });
     rows.add(pf.lowBattery
         ? CheckRow(state: CheckState.fail, title: l.chkBatteryLow, detail: l.chkBatteryLowHow)
         : CheckRow(state: CheckState.ok, title: l.chkPower, detail: _power(l, pf)));
     // 测试模式（对着一块 VHD）：本机的检查项照样显示，但不挡住
-    if (!s.testMode) blocked |= !pf.modelOk || pf.lowBattery || (!inst && (pf.secureBoot == 'on' || pf.fastStartup == 'on'));
+    if (!s.testMode) blocked |= !pf.modelOk || pf.lowBattery || s.bitlockerNoKey || (!inst && (pf.secureBoot == 'on' || pf.fastStartup == 'on'));
   }
   return (rows, blocked);
 }

@@ -50,11 +50,8 @@ Future<void> hold(WidgetTester t) async {
   await t.pump();
 }
 
-/// BitLocker 已开启（或读不到）时勾选"我已确认可获取恢复密钥"。先看一眼再点：勾着的再点一次就取消了，按钮变灰
-Future<void> ackBitlocker(WidgetTester t, Session s) async {
-  if (s.needBitlockerAck && !s.bitlockerAck) await tap(t, find.text(l.confirmBitlockerAck));
-  expect(!s.needBitlockerAck || s.bitlockerAck, isTrue);
-}
+/// 测试模式只写 VHD、不写本机系统盘：这台 PC 的 BitLocker 开着也不要恢复密钥
+void expectNoBitlockerKey(Session s) => expect(s.bitlockerReady, isTrue);
 
 /// 失败时把日志区的内容带进失败信息
 String logOf(Session s) => s.log.join('\n');
@@ -90,7 +87,7 @@ void main() {
     }
     await tap(t, find.text(l.btnNext)); // 选项
     await tap(t, find.text(l.btnNext)); // 确认
-    await ackBitlocker(t, session);
+    expectNoBitlockerKey(session);
     await hold(t);
     await waitFor(t, find.byWidgetPredicate((w) => w is DonePage || w is FailPage), timeout: const Duration(minutes: 40));
     expect(find.byType(DonePage), findsOneWidget, reason: 'install failed: ${session.result?.err}\n${logOf(session)}');
@@ -102,7 +99,7 @@ void main() {
     expect(session.installed, isTrue);
     await tap(t, find.text(l.btnManage));
     await tap(t, find.text(l.manageUninstall));
-    await ackBitlocker(t, session);
+    expectNoBitlockerKey(session);
     await hold(t);
     await waitFor(t, find.byWidgetPredicate((w) => w is DonePage || w is FailPage), timeout: const Duration(minutes: 10));
     expect(find.byType(DonePage), findsOneWidget, reason: 'uninstall failed: ${session.result?.err}\n${logOf(session)}');

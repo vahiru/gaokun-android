@@ -30,6 +30,7 @@
   "chkSecureBootOn": "Secure Boot is enabled",
   "chkSecureBootUnknown": "Unable to read Secure Boot status",
   "chkSecureBootHow": "Please disable Secure Boot in the UEFI firmware settings, then boot back into Windows and check again.",
+  "chkSecureBootHowBitlocker": "BitLocker is enabled: disabling Secure Boot directly makes Windows ask for the recovery key at its next startup. Suspend BitLocker protection as described below first, then disable Secure Boot in the UEFI firmware settings, boot back into Windows and check again.",
   "chkFastStartupOff": "Fast Startup is disabled",
   "chkFastStartupOn": "Fast Startup is enabled",
   "chkFastStartupHow": "When Fast Startup is enabled, modifying the EFI partition while Windows is shut down may permanently corrupt the EFI partition on the next Windows boot and leave the tablet unbootable. Uncheck “Turn on fast startup” under Control Panel → Power Options → Choose what the power buttons do.",
@@ -37,7 +38,25 @@
   "chkBitlockerOff": "BitLocker is disabled",
   "chkBitlockerOn": "BitLocker is enabled",
   "chkBitlockerUnknown": "Unable to read BitLocker status",
-  "chkBitlockerHow": "Installation replaces the default boot file (BOOTAA64.EFI) on the EFI partition, which may prompt Windows to ask for your 48-digit BitLocker recovery key on its next boot. Please verify that you can access your recovery key at https://aka.ms/myrecoverykey before proceeding.",
+  "chkBitlockerHow": "Installing and uninstalling both change the default boot file (BOOTAA64.EFI) on the EFI partition. Before you start, you must enter the 48-digit BitLocker recovery key of the system drive and pass verification. The installer suspends BitLocker protection before writing to the disk, and Windows resumes it at its next startup. You can find your recovery key at https://aka.ms/myrecoverykey.",
+  "chkBitlockerSuspended": "BitLocker protection is suspended",
+  "chkBitlockerSuspendedHow": "The system drive is encrypted, but its protection is suspended or awaiting activation. Windows will not ask for the recovery key at its next startup.",
+  "chkBitlockerNoKey": "The system drive has no BitLocker recovery key",
+  "chkBitlockerNoKeyHow": "Because the system drive has no recovery key, verification is not possible, so installation and uninstallation cannot continue. Run “manage-bde -protectors -add C: -RecoveryPassword” as an administrator to add a recovery key, store it safely, and then check again.",
+  "chkBitlockerSuspendBox": "Before disabling Secure Boot, enter the 48-digit BitLocker recovery key of the system drive. Once it passes verification, the installer suspends BitLocker protection, and Windows resumes it after two restarts. You can find your recovery key at https://aka.ms/myrecoverykey.",
+  "blKeyLabel": "BitLocker recovery key",
+  "blKeyIds": "Recovery key ID: {ids} (use this ID to find the matching key in your Microsoft account)",
+  "@blKeyIds": {
+    "placeholders": {
+      "ids": {
+        "type": "String"
+      }
+    }
+  },
+  "blVerify": "Verify key",
+  "blVerifySuspend": "Verify and suspend protection",
+  "blChecking": "Verifying the recovery key…",
+  "blOk": "The recovery key has been verified",
   "chkBatteryLow": "Battery level too low",
   "chkBatteryLowHow": "Battery level is below 15% and AC power is not connected. A power loss during installation may leave disk partitions in an incomplete state. Please connect the power adapter first.",
   "chkPower": "Power",
@@ -81,8 +100,8 @@
   "confirmDefaultAndroid": "Set Android as the default operating system at startup",
   "confirmDefaultWindows": "Set Windows as the default operating system at startup",
   "confirmWindowsSafe": "Leave the existing Windows installation and files on drive C: untouched",
-  "confirmBitlocker": "BitLocker is enabled: Windows may prompt for your 48-digit recovery key on its next boot.",
-  "confirmBitlockerAck": "I have confirmed that I can access my BitLocker recovery key",
+  "confirmAntivirus": "Some security software (such as Huorong) may block the installer's back-end program (gk3w.exe) while it writes to the disk. If a prompt appears, choose to allow it; blocking it may interrupt the operation and leave disk partitions in an incomplete state.",
+  "confirmBitlocker": "BitLocker is enabled: enter the 48-digit recovery key of the system drive. You can start only after it passes verification. The installer suspends BitLocker protection before writing to the disk, and Windows resumes it at its next startup. If Windows still asks for a recovery key afterwards, enter this same key. You can find your recovery key at https://aka.ms/myrecoverykey.",
   "holdToInstall": "Hold for 2 seconds to install",
   "holdToUninstall": "Hold for 2 seconds to uninstall",
   "holdKeep": "Keep holding",
@@ -125,7 +144,20 @@
   "errWrongModel": "This device is not a Huawei MateBook E Go (GK-W7X).",
   "errSecureBoot": "Secure Boot is enabled. Please disable it in the UEFI firmware settings first.",
   "errFastStartup": "Windows Fast Startup is enabled. Please disable it first.",
-  "errBitlocker": "BitLocker is enabled. Please confirm that you can access your recovery key first.",
+  "errBitlocker": "BitLocker is enabled, but no recovery key was provided.",
+  "errBitlockerFormat": "The recovery key is not valid: it must be 48 digits in 8 groups of 6.",
+  "errBitlockerGroup": "Group {group} of the recovery key is not valid. Check it for typing errors.",
+  "@errBitlockerGroup": {
+    "placeholders": {
+      "group": {
+        "type": "String"
+      }
+    }
+  },
+  "errBitlockerWrong": "The recovery key does not match the BitLocker recovery key of this device's system drive. Use the recovery key ID to make sure you are using the key of this system drive.",
+  "errBitlockerNoKey": "The system drive has no BitLocker recovery key, so verification is not possible. Run “manage-bde -protectors -add C: -RecoveryPassword” as an administrator to add a recovery key and store it safely.",
+  "errBitlockerUnverifiable": "Unable to read the BitLocker recovery key information of the system drive, so the key cannot be verified. Check again; if the problem persists, turn off BitLocker (device encryption) in Windows before continuing.",
+  "errBitlockerSuspend": "Unable to suspend BitLocker protection. Check again and retry.",
   "errLowBattery": "Battery level is too low and the power adapter is not connected.",
   "errEspFull": "Insufficient free space on the EFI system partition.",
   "errPartsUnclear": "Partitions with Android partition names were found on the disk, but their contents could not be recognized. Operation aborted to prevent data loss.",
@@ -326,7 +358,7 @@
     }
   },
   "errBackendFailed": "An installer component exited unexpectedly. Click “Check again”.",
-  "failUnknownTouched": "It could not be determined whether the disk was modified. Return to the start and check again; the check shows the current state of the disk.",
+  "failUnknownTouched": "It could not be determined whether the disk was modified; the back-end program may have been blocked or terminated by security software. Allow the installer in your security software, then return to the start and check again; the check shows the current state of the disk.",
   "localMissing": "Missing from this directory: {files}",
   "@localMissing": {
     "placeholders": {

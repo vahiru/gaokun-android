@@ -1,0 +1,7 @@
+# 场景：出厂状态 —— Secure Boot 与 BitLocker（设备加密）都开着：检查页先要求校验恢复密钥、暂停保护，再去关闭 Secure Boot
+# preflight：common 里平板的 preflight-ok 改写（secure_boot=on、bitlocker=on，恢复密钥 ID 是编的）
+# probe：同 free（PC 上仿出厂布局的 VHDX）
+# 暂停成功之后换到 bitlocker-suspended（同一台机器暂停了保护、还没去关 Secure Boot）
+@next bitlocker-key bitlocker-suspended
+probe                     probe.txt
+preflight                 preflight.txt

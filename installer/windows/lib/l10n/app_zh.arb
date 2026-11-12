@@ -51,6 +51,7 @@
   "chkSecureBootOn": "Secure Boot未关闭",
   "chkSecureBootUnknown": "无法读取Secure Boot状态",
   "chkSecureBootHow": "请在UEFI固件设置中关闭Secure Boot，返回Windows后重新检查。",
+  "chkSecureBootHowBitlocker": "BitLocker已开启：直接关闭Secure Boot会导致Windows下次启动时要求输入恢复密钥。请先按下方说明暂停BitLocker保护，再在UEFI固件设置中关闭Secure Boot，返回Windows后重新检查。",
   "chkFastStartupOff": "快速启动已关闭",
   "chkFastStartupOn": "快速启动未关闭",
   "chkFastStartupHow": "快速启动开启时，若在Windows关机期间EFI分区被修改，再次启动Windows可能永久损坏EFI分区，导致平板无法启动。请在“控制面板 → 电源选项 → 选择电源按钮的功能”中取消勾选“启用快速启动”。",
@@ -58,7 +59,25 @@
   "chkBitlockerOff": "BitLocker未开启",
   "chkBitlockerOn": "BitLocker已开启",
   "chkBitlockerUnknown": "无法读取BitLocker状态",
-  "chkBitlockerHow": "安装过程将替换EFI分区中的默认引导文件（BOOTAA64.EFI），此后首次启动Windows时可能需要输入48位BitLocker恢复密钥。请先访问https://aka.ms/myrecoverykey确认可获取恢复密钥。",
+  "chkBitlockerHow": "安装与卸载都会更改EFI分区中的默认引导文件（BOOTAA64.EFI）。开始前，需要输入系统盘的48位BitLocker恢复密钥并通过校验；写入磁盘前，安装器会暂停BitLocker保护，Windows下次启动时自动恢复。恢复密钥可在https://aka.ms/myrecoverykey获取。",
+  "chkBitlockerSuspended": "BitLocker保护已暂停",
+  "chkBitlockerSuspendedHow": "系统盘已加密，但保护处于暂停或等待激活状态，Windows下次启动时不会要求输入恢复密钥。",
+  "chkBitlockerNoKey": "系统盘没有BitLocker恢复密钥",
+  "chkBitlockerNoKeyHow": "由于系统盘没有恢复密钥，无法进行校验，安装与卸载均无法继续。请以管理员身份运行“manage-bde -protectors -add C: -RecoveryPassword”添加恢复密钥并妥善保存，然后重新检查。",
+  "chkBitlockerSuspendBox": "关闭Secure Boot之前，请输入系统盘的48位BitLocker恢复密钥。通过校验后，安装器将暂停BitLocker保护，Windows重新启动两次后自动恢复。恢复密钥可在https://aka.ms/myrecoverykey获取。",
+  "blKeyLabel": "BitLocker恢复密钥",
+  "blKeyIds": "恢复密钥ID：{ids}（在Microsoft账户中按此ID查找对应的密钥）",
+  "@blKeyIds": {
+    "placeholders": {
+      "ids": {
+        "type": "String"
+      }
+    }
+  },
+  "blVerify": "校验密钥",
+  "blVerifySuspend": "校验并暂停保护",
+  "blChecking": "正在校验恢复密钥…",
+  "blOk": "恢复密钥已通过校验",
   "chkBatteryLow": "电量过低",
   "chkBatteryLowHow": "当前电量低于15%且未连接电源。安装过程中断电可能导致磁盘分区处于不完整状态，请先连接电源适配器。",
   "chkPower": "电源",
@@ -212,8 +231,8 @@
   "confirmDefaultAndroid": "将开机默认启动系统设为Android",
   "confirmDefaultWindows": "将开机默认启动系统设为Windows",
   "confirmWindowsSafe": "保留现有Windows系统及C盘中的文件，不做修改",
-  "confirmBitlocker": "检测到BitLocker已开启：此后首次启动Windows时可能需要输入48位恢复密钥。",
-  "confirmBitlockerAck": "我已确认可获取BitLocker恢复密钥",
+  "confirmAntivirus": "部分安全软件（如火绒）可能在写入磁盘时拦截安装器的后端程序（gk3w.exe）。如出现拦截提示，请选择允许；拦截可能导致操作中断，使磁盘分区处于不完整状态。",
+  "confirmBitlocker": "BitLocker已开启：请输入系统盘的48位恢复密钥，通过校验后才能开始。写入磁盘前，安装器会暂停BitLocker保护，Windows下次启动时自动恢复；如果之后Windows仍要求输入恢复密钥，请输入同一个密钥。恢复密钥可在https://aka.ms/myrecoverykey获取。",
   "holdToInstall": "按住2秒开始安装",
   "holdToUninstall": "按住2秒开始卸载",
   "holdKeep": "请继续按住",
@@ -280,7 +299,20 @@
   "errWrongModel": "当前设备并非华为MateBook E Go（GK-W7X）。",
   "errSecureBoot": "Secure Boot处于开启状态，请先在UEFI固件设置（BIOS）中将其关闭。",
   "errFastStartup": "Windows快速启动处于开启状态，请先将其关闭。",
-  "errBitlocker": "BitLocker处于开启状态，请先确认可获取恢复密钥。",
+  "errBitlocker": "BitLocker处于开启状态，但未提供恢复密钥。",
+  "errBitlockerFormat": "恢复密钥格式不正确：应为48位数字，分为8组，每组6位。",
+  "errBitlockerGroup": "恢复密钥的第{group}组有误，请检查是否输入有误。",
+  "@errBitlockerGroup": {
+    "placeholders": {
+      "group": {
+        "type": "String"
+      }
+    }
+  },
+  "errBitlockerWrong": "恢复密钥与本机系统盘的BitLocker恢复密钥不一致。请根据恢复密钥ID确认所用的是本机系统盘的密钥。",
+  "errBitlockerNoKey": "系统盘没有BitLocker恢复密钥，无法进行校验。请以管理员身份运行“manage-bde -protectors -add C: -RecoveryPassword”添加恢复密钥并妥善保存。",
+  "errBitlockerUnverifiable": "无法读取系统盘的BitLocker恢复密钥信息，因此无法进行校验。请重新检查；如果问题仍然存在，请在Windows中关闭BitLocker（设备加密）后再继续。",
+  "errBitlockerSuspend": "无法暂停BitLocker保护。请重新检查后再试。",
   "errLowBattery": "设备电量过低且未连接电源适配器。",
   "errEspFull": "EFI系统分区剩余空间不足。",
   "errPartsUnclear": "磁盘中存在与Android分区同名但内容无法识别的分区；为避免误删数据，操作已中止。",
@@ -539,7 +571,7 @@
     }
   },
   "errBackendFailed": "安装器组件意外退出，请点击“重新检查”。",
-  "failUnknownTouched": "无法确认磁盘是否已被修改。请返回首页重新检查，检查结果将显示磁盘的当前状态。",
+  "failUnknownTouched": "无法确认磁盘是否已被修改，后端程序可能被安全软件拦截或结束。请在安全软件中允许安装器运行，然后返回首页重新检查，检查结果将显示磁盘的当前状态。",
   "localMissing": "该目录中缺少：{files}",
   "@localMissing": {
     "placeholders": {

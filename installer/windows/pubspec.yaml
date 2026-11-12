@@ -42,3 +42,5 @@ flutter:
     - testdata/bad-release/
     - testdata/multi/
     - testdata/usb/
+    - testdata/bitlocker/
+    - testdata/bitlocker-suspended/

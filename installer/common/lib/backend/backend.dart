@@ -19,12 +19,20 @@ abstract class Gk3Backend {
   /// 切到命令行（LiveCD：tty2）。成功返回 null，失败返回原因（界面拿去告诉用户 —— 不能点了没反应）
   Future<String?> openShell();
 
+  /// 带标准输入的调用：恢复密钥之类不能放进参数的内容（真后端把参数原样记进日志）。
+  /// 只有 Windows 的 gk3w 用得上；回放演示数据、LiveCD 的后端不读输入，默认忽略它
+  Stream<Gk3Event> callWithInput(String fn, List<String> args, String input) => call(fn, args);
+
   /// 跑完并收集结果
-  Future<CallResult> run(String fn, [List<String> args = const [], void Function(Gk3Event)? onEvent]) async {
+  Future<CallResult> run(String fn, [List<String> args = const [], void Function(Gk3Event)? onEvent]) =>
+      collect(call(fn, args), onEvent);
+
+  /// 收集一次调用的事件（[run] 与 [callWithInput] 共用）
+  static Future<CallResult> collect(Stream<Gk3Event> events, [void Function(Gk3Event)? onEvent]) async {
     final records = <Gk3Record>[];
     final log = <Gk3Log>[];
     var code = -1;
-    await for (final e in call(fn, args)) {
+    await for (final e in events) {
       onEvent?.call(e);
       switch (e) {
         case Gk3Record():

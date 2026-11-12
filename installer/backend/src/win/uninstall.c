@@ -1,7 +1,7 @@
 /* Windows：从一块盘上卸载 Android，回到只有 Windows。顺序与规则同 scripts/windows/gaokun3-setup.ps1 的
  * -RemoveAndroid（Invoke-RemoveAndroid）：
  *
- *   gk3w uninstall --disk N --backup-dir DIR [--real-disk [--bitlocker-key yes]]
+ *   gk3w uninstall --disk N --backup-dir DIR [--real-disk [--bitlocker-key -]]
  *
  * 0 预检（只读；不过就什么都不改）：
  *   - 分区：misc、metadata、boot_a、boot_b、super、gk3rescue、userdata 中盘上有的。每个名字至多一个、必须是 Linux 数据
@@ -34,8 +34,10 @@
  * 4 删分区：先重读分区表、与预检时的逐项比对，变过就停（不能拿旧表盖掉别的程序刚做的改动）。
  * 中途失败时再跑一次：每一步都按 ESP 与分区表的现状来认，做过的步骤再做一遍结果不变。
  *
- * 与 -RemoveAndroid 的差别（原型阶段）：GK3LIVE 不删、C: 不扩、BitLocker 不暂停（改为要求 --bitlocker-key yes，
- * 共用 ESP、不动回落路径时也要求）；免 U 盘安装旧版留下的 BCD 启动项不删（EFI/gaokun3 照样删）；
+ * BitLocker 保护开着时（同 apply）：--bitlocker-key - 从标准输入读恢复密钥，与系统卷的比对，一致才继续（共用 ESP、
+ * 不动回落路径时也要求）；要换回落路径时，第一次写盘之前暂停保护到下次重启。
+ *
+ * 与 -RemoveAndroid 的差别（原型阶段）：GK3LIVE 不删、C: 不扩；免 U 盘安装旧版留下的 BCD 启动项不删（EFI/gaokun3 照样删）；
  * 盘上没有 Android 分区时也清 ESP（PS1 拒绝）；<mid>/ 不整个删（它也可能是别的系统的 BLS 目录）；EFI/Linux 下的
  * UKI 也算 foreign；装机时的分区组也认（见上）；回落路径原来不是 Windows 时换回原件（见上）。 */
 #include <windows.h>
@@ -45,6 +47,7 @@
 #include <string.h>
 #include <wchar.h>
 
+#include "../blkey.h"
 #include "../esp.h"
 #include "../layout.h"
 #include "../plan.h"
@@ -368,6 +371,8 @@ int gk3w_cmd_uninstall(int argc, wchar_t **argv)
 {
     uint64_t num;
     const wchar_t *backup_dir = gk3w_arg(argc, argv, L"--backup-dir"), *blkey = gk3w_arg(argc, argv, L"--bitlocker-key");
+    char key[128] = "";
+    gk3w_sys sys;
     int real = gk3w_flag(argc, argv, L"--real-disk"), rc = 1, n_esp = 0, confirmed = 0, have[N_OURS] = {0}, restore_original = 0, need_restore = 0, keep_bak_file = 0;
     uint64_t pfirst[N_OURS] = {0}, pbytes[N_OURS] = {0};
     gk3w_touched T = GK3W_TOUCHED_NO;
@@ -383,13 +388,21 @@ int gk3w_cmd_uninstall(int argc, wchar_t **argv)
     esp_scan s;
 
     if (gk3w_arg_u64(argc, argv, L"--disk", &num) || num > 255 || !backup_dir)
-        return gk3w_err(T, "usage", "usage: uninstall --disk N --backup-dir DIR [--real-disk [--bitlocker-key yes]]", 0);
-    if (real) {
-        gk3w_sys sys;
-        gk3w_sys_read(&sys);
-        if (gk3w_sys_gate(&sys, blkey && !wcscmp(blkey, L"yes"), GK3W_GATE_UNINSTALL))
-            return 1;
+        return gk3w_err(T, "usage", "usage: uninstall --disk N --backup-dir DIR [--real-disk [--bitlocker-key -]]", 0);
+    /* 恢复密钥只从标准输入读：参数会原样记进安装日志 */
+    if (blkey && (wcscmp(blkey, L"-") || gk3w_read_key_stdin(key, sizeof key))) {
+        gk3w_wipe(key, sizeof key);
+        return gk3w_err(T, "usage", "--bitlocker-key takes - and reads the recovery key from standard input", 0);
     }
+    memset(&sys, 0, sizeof sys);
+    if (real) {
+        gk3w_sys_read(&sys);
+        if (gk3w_sys_gate(&sys, blkey ? key : NULL, GK3W_GATE_UNINSTALL)) {
+            gk3w_wipe(key, sizeof key);
+            return 1;
+        }
+    }
+    gk3w_wipe(key, sizeof key);
     /* 卸载期间阻止系统因空闲进入睡眠状态（图形界面另有电源请求与阻止关机）；进程退出时自动撤销 */
     SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED);
     if (gk3w_disk_open((DWORD)num, real, &d, T))
@@ -569,6 +582,11 @@ int gk3w_cmd_uninstall(int argc, wchar_t **argv)
     gk3w_log("%u partitions to remove; %u of our boot entries, %u install directories on the ESP", (unsigned)n_ids, s.our_entries, s.install_dirs);
     if (gk3w_gpt_backup(&d, backup_dir, L"uninstall", T))
         goto out;
+    /* 回落路径要换回 Windows 启动管理器：启动链变了，同 apply，先暂停 BitLocker 保护到下次重启；暂停不了就不动盘 */
+    if (real && !s.foreign && need_restore && gk3w_sys_bitlocker_on(&sys) && gk3w_bitlocker_suspend(sys.system_drive, 1)) {
+        gk3w_err(T, "bitlocker-suspend-failed", "cannot suspend BitLocker protection of the system volume; Windows would ask for the recovery key after the boot chain changes (disk not touched)", 0);
+        goto out;
+    }
 
     /* ══ 从这里起开始动盘 ══ */
     T = GK3W_TOUCHED_YES;

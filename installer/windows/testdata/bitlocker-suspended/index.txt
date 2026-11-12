@@ -1,0 +1,5 @@
+# 场景：BitLocker 保护已暂停、Secure Boot 还开着（bitlocker 场景暂停成功之后）
+# preflight：common 里平板的 preflight-ok 改写（secure_boot=on、bitlocker=suspended）
+# probe：同 free（PC 上仿出厂布局的 VHDX）
+probe                     probe.txt
+preflight                 preflight.txt

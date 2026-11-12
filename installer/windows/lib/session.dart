@@ -48,8 +48,9 @@ class Session extends ChangeNotifier {
   Future<void> check() async {
     checking = true;
     checkErr = null;
-    // 一次确认只用于一次写盘：重新检查之后要重新勾选
-    bitlockerAck = false;
+    // 恢复密钥只用于一次写盘：重新检查之后要重新输入
+    _bitlockerKey = null;
+    bitlockerErr = null;
     notifyListeners();
     try {
       final pf = await backend.run('preflight');
@@ -214,13 +215,74 @@ class Session extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// BitLocker 开着（或读不到）时，用户确认手上有恢复密钥（gk3w 的 --bitlocker-key yes）
-  bool bitlockerAck = false;
-  bool get needBitlockerAck => preflight != null && preflight!.bitlocker != 'off';
-  void setBitlockerAck(bool v) {
-    bitlockerAck = v;
+  // ── BitLocker ──
+  /// 系统盘的 BitLocker 保护已开启（或状态不明）：安装、卸载前要输入恢复密钥，由 gk3w 与系统盘的恢复密钥比对，
+  /// 写入磁盘前再由它暂停保护。保护已暂停或尚未激活时不要（Windows 下次启动不会要求输入恢复密钥）。
+  /// 测试模式不写本机系统盘，也不要
+  bool get needBitlockerKey => !testMode && preflight != null && !const {'off', 'suspended'}.contains(preflight!.bitlocker);
+
+  /// 系统盘上没有恢复密钥（只有 TPM 之类的保护器）：无从校验，不能继续
+  bool get bitlockerNoKey => needBitlockerKey && (preflight!.bitlockerKeyIds?.isEmpty ?? false);
+
+  /// 通过校验的恢复密钥：只在内存里，写盘时经标准输入交给 gk3w；重新检查、任务结束后清掉
+  String? _bitlockerKey;
+  bool get bitlockerVerified => _bitlockerKey != null;
+
+  /// 可以开始写盘了：不需要密钥，或者密钥已通过校验
+  bool get bitlockerReady => !needBitlockerKey || bitlockerVerified;
+
+  /// 正在校验（gk3w bitlocker-key 还没返回）
+  bool bitlockerChecking = false;
+
+  /// 上一次校验失败的原因（gk3w 的 ERR）
+  Gk3Record? bitlockerErr;
+
+  /// 输入框的内容变了：之前的校验结果作废
+  void clearBitlockerKey() {
+    if (_bitlockerKey == null && bitlockerErr == null) return;
+    _bitlockerKey = null;
+    bitlockerErr = null;
     notifyListeners();
   }
+
+  /// 校验用户输入的恢复密钥（gk3w bitlocker-key，密钥经标准输入）。[suspendReboots] 大于 0：通过之后由 gk3w
+  /// 暂停 BitLocker 保护，Windows 重启这么多次后自动恢复（关闭 Secure Boot 之前用），然后重新检查
+  Future<bool> verifyBitlockerKey(String input, {int suspendReboots = 0}) async {
+    final key = normalizeRecoveryKey(input);
+    _bitlockerKey = null;
+    if (key == null) {
+      bitlockerErr = const Gk3Record('ERR', {'code': 'bitlocker-key-format'});
+      notifyListeners();
+      return false;
+    }
+    bitlockerChecking = true;
+    bitlockerErr = null;
+    notifyListeners();
+    var ok = false;
+    try {
+      final r = await Gk3Backend.collect(
+          backend.callWithInput('bitlocker-key', [if (suspendReboots > 0) ...['--suspend', '$suspendReboots']], '$key\n'));
+      ok = r.ok && r.first('BITLOCKER')?['key'] == 'ok';
+      if (ok) {
+        _bitlockerKey = key;
+      } else {
+        bitlockerErr = r.err ?? _failed('bitlocker-key');
+      }
+    } catch (e) {
+      logNote?.call('!! bitlocker-key: $e');
+      bitlockerErr = _failed('bitlocker-key');
+    } finally {
+      bitlockerChecking = false;
+      notifyListeners();
+    }
+    // 保护暂停了：重新检查，BitLocker 一项显示为已暂停，Secure Boot 一项恢复普通的说明
+    if (ok && suspendReboots > 0) await check();
+    return ok;
+  }
+
+  /// 写盘调用的 BitLocker 参数与标准输入（不需要密钥时都为空）
+  List<String> get _bitlockerArgs => needBitlockerKey && _bitlockerKey != null ? const ['--bitlocker-key', '-'] : const [];
+  String? get _bitlockerInput => needBitlockerKey && _bitlockerKey != null ? '$_bitlockerKey\n' : null;
 
   // ── 正在跑的任务（下载 + 安装 / 卸载） ──
   /// 正在进行安装还是卸载（写盘期间阻止关机时，原因按它写）
@@ -402,7 +464,7 @@ class Session extends ChangeNotifier {
   void _end() {
     writing = false;
     diskBusy = false;
-    bitlockerAck = false;
+    _bitlockerKey = null;
     notifyListeners();
   }
 
@@ -435,9 +497,8 @@ class Session extends ChangeNotifier {
         final d = disk!, r = region!;
         return ('apply', [
           '--disk', '${d.num}', '--region-start', '${r.start}', '--region-end', '${r.end}',
-          '--release', dir, '--default-os', defaultOs, '--real-disk',
-          if (bitlockerAck) ...['--bitlocker-key', 'yes'],
-        ]);
+          '--release', dir, '--default-os', defaultOs, '--real-disk', ..._bitlockerArgs,
+        ], _bitlockerInput);
       });
 
   /// 制作安装介质：下载所选版本，再由 gk3w 写入 LiveCD 与安装文件 —— U 盘整个清除后写入；本机则在所选未分配空间的
@@ -449,21 +510,21 @@ class Session extends ChangeNotifier {
       final t = mediaWritten!;
       final live = source == ReleaseSource.local ? dir : liveCd!.url;
       if (t.usb) {
-        return ('media', ['--target', 'usb', '--disk', '${t.disk!.num}', '--release', dir, '--livecd', live]);
+        return ('media', ['--target', 'usb', '--disk', '${t.disk!.num}', '--release', dir, '--livecd', live], null);
       }
       final d = disk!, r = mediaRegion!;
       return ('media', [
         '--target', 'internal', '--disk', '${d.num}', '--region-start', '${r.start}', '--region-end', '${r.end}',
-        '--release', dir, '--livecd', live, '--real-disk',
-        if (bitlockerAck) ...['--bitlocker-key', 'yes'],
-      ]);
+        '--release', dir, '--livecd', live, '--real-disk', ..._bitlockerArgs,
+      ], _bitlockerInput);
     });
   }
 
   /// 最近一次写入的安装介质目标：进度页、完成页、失败页按它措辞（重新检查会清空 [mediaTarget]，这个不清）
   MediaTarget? mediaWritten;
 
-  Future<bool> _downloadThen(WriteTask t, String releaseDir, (String, List<String>) Function(String dir) command) async {
+  /// [command]：下载完之后的写盘调用（函数、参数、标准输入）
+  Future<bool> _downloadThen(WriteTask t, String releaseDir, (String, List<String>, String?) Function(String dir) command) async {
     _begin(t);
     final local = source == ReleaseSource.local;
     try {
@@ -501,9 +562,10 @@ class Session extends ChangeNotifier {
           }
         }
       }
-      final (fn, args) = command(dir);
+      final (fn, args, input) = command(dir);
       await _startDiskWrite();
-      result = await backend.run(fn, args, (e) => _onEvent(e, base: local ? 0 : 40, span: local ? 100 : 60));
+      result = await Gk3Backend.collect(input == null ? backend.call(fn, args) : backend.callWithInput(fn, args, input),
+          (e) => _onEvent(e, base: local ? 0 : 40, span: local ? 100 : 60));
       // 装好了：下载的文件删不删由用户在完成页上选（退出时删）；本地文件是用户自己的，不动；失败时留着，下次续传
       if (result!.ok && t == WriteTask.install && !local) {
         downloadedDir = dir;
@@ -522,10 +584,9 @@ class Session extends ChangeNotifier {
     _begin(WriteTask.uninstall);
     try {
       await _startDiskWrite();
-      result = await backend.run('uninstall', [
-        '--disk', '${disk!.num}', '--real-disk',
-        if (bitlockerAck) ...['--bitlocker-key', 'yes'],
-      ], _onEvent);
+      final args = ['--disk', '${disk!.num}', '--real-disk', ..._bitlockerArgs], input = _bitlockerInput;
+      result = await Gk3Backend.collect(
+          input == null ? backend.call('uninstall', args) : backend.callWithInput('uninstall', args, input), _onEvent);
     } catch (e) {
       result = _crashed(e);
     } finally {

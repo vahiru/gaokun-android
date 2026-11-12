@@ -2,7 +2,7 @@
  *
  *   gk3w apply --disk N --region-start LBA --region-end LBA --release DIR --sdboot FILE --backup-dir DIR
  *              [--mke2fs PATH] [--machine-id HEX32] [--default-os android|windows] [--userdata-mib N]
- *              [--real-disk [--bitlocker-key yes]]
+ *              [--real-disk [--bitlocker-key -]]
  *
  * 发布目录：boot.img、super.img.zst，可选 install-artifacts.sha256（有就逐个核对）。
  * 步骤与进度代码同 gk3_apply：1 check / verify-sha / test-zst → 2 plan → 5 write-gpt → 15 format → 30 write-super
@@ -23,6 +23,8 @@
  *
  * 默认只对 VHD 虚拟盘动手。--real-disk 才写真实磁盘，而且只认 Windows 所在的那块系统盘、机型必须是 MateBook E Go，
  * 先过安装前检查（gk3w_sys_gate：Secure Boot、快速启动、BitLocker、电量），写完 ESP 后删 LoaderEntryDefault（同 gk3_apply）。
+ * 系统卷的 BitLocker 保护开着时，--bitlocker-key - 从标准输入读恢复密钥，与系统卷的恢复密钥比对；一致才继续，
+ * 并在第一次写盘之前暂停保护到下次重启（Windows 下次启动时按新的启动链重新绑定 TPM，不再要求输入恢复密钥）。
  *
  * 与 LiveCD 的差别（原型阶段）：
  *   - VHD 测试时 EFI 变量不碰 —— 那是这台 PC 自己的固件变量。
@@ -36,6 +38,7 @@
 #include <string.h>
 #include <wchar.h>
 
+#include "../blkey.h"
 #include "../esp.h"
 #include "../layout.h"
 #include "../plan.h"
@@ -442,25 +445,35 @@ int gk3w_cmd_apply(int argc, wchar_t **argv)
     const char *why = NULL;
     int defos_windows = 0, rc = 1, opened = 0, real = gk3w_flag(argc, argv, L"--real-disk");
     const wchar_t *blkey = gk3w_arg(argc, argv, L"--bitlocker-key");
+    char key[128] = "";
+    gk3w_sys sys;
     char mid_fb[33];
     gk3w_touched T = GK3W_TOUCHED_NO;
     const PARTITION_INFORMATION_EX *esp_part = NULL;
 
     memset(&bi, 0, sizeof bi);
     memset(&esp, 0, sizeof esp);
+    memset(&sys, 0, sizeof sys);
     if (gk3w_arg_u64(argc, argv, L"--disk", &num) || num > 255 || gk3w_arg_u64(argc, argv, L"--region-start", &rstart) ||
         gk3w_arg_u64(argc, argv, L"--region-end", &rend) || !rel || !sdboot_path || !backup_dir ||
         (gk3w_arg(argc, argv, L"--userdata-mib") && gk3w_arg_u64(argc, argv, L"--userdata-mib", &ud_mib)))
         return gk3w_err(T, "usage",
                         "usage: apply --disk N --region-start LBA --region-end LBA --release DIR --sdboot FILE --backup-dir DIR "
-                        "[--mke2fs PATH] [--machine-id HEX32] [--default-os android|windows] [--userdata-mib N] [--real-disk [--bitlocker-key yes]]",
+                        "[--mke2fs PATH] [--machine-id HEX32] [--default-os android|windows] [--userdata-mib N] [--real-disk [--bitlocker-key -]]",
                         0);
-    if (real) {
-        gk3w_sys sys;
-        gk3w_sys_read(&sys);
-        if (gk3w_sys_gate(&sys, blkey && !wcscmp(blkey, L"yes"), GK3W_GATE_APPLY))
-            return 1;
+    /* 恢复密钥只从标准输入读：参数会原样记进安装日志 */
+    if (blkey && (wcscmp(blkey, L"-") || gk3w_read_key_stdin(key, sizeof key))) {
+        gk3w_wipe(key, sizeof key);
+        return gk3w_err(T, "usage", "--bitlocker-key takes - and reads the recovery key from standard input", 0);
     }
+    if (real) {
+        gk3w_sys_read(&sys);
+        if (gk3w_sys_gate(&sys, blkey ? key : NULL, GK3W_GATE_APPLY)) {
+            gk3w_wipe(key, sizeof key);
+            return 1;
+        }
+    }
+    gk3w_wipe(key, sizeof key);
     /* 安装期间阻止系统因空闲进入睡眠状态（图形界面另有电源请求与阻止关机）；进程退出时自动撤销 */
     SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED);
     if (defos_arg && wcscmp(defos_arg, L"android") && wcscmp(defos_arg, L"windows"))
@@ -786,6 +799,12 @@ int gk3w_cmd_apply(int argc, wchar_t **argv)
     esp_part = NULL;   /* 指向的是重读之前的表，已经释放 */
     if (gk3w_gpt_backup(&d, backup_dir, L"apply", T))
         goto out;
+    /* 回落路径要换成 systemd-boot：启动链变了，BitLocker 保护开着的话 Windows 下次启动会要求输入恢复密钥。
+     * 暂停到下次重启，Windows 那时按新的启动链重新绑定；暂停不了就不动盘 */
+    if (real && gk3w_sys_bitlocker_on(&sys) && gk3w_bitlocker_suspend(sys.system_drive, 1)) {
+        gk3w_err(T, "bitlocker-suspend-failed", "cannot suspend BitLocker protection of the system volume; Windows would ask for the recovery key after the boot chain changes (disk not touched)", 0);
+        goto out;
+    }
 
     /* ══ 从这里起开始动盘 ══ */
     T = GK3W_TOUCHED_YES;

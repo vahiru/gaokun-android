@@ -25,6 +25,7 @@ int gk3w_cmd_preflight(int argc, wchar_t **argv);
 int gk3w_cmd_plan(int argc, wchar_t **argv);
 int gk3w_cmd_hash(int argc, wchar_t **argv);
 int gk3w_cmd_space(int argc, wchar_t **argv);
+int gk3w_cmd_bitlocker_key(int argc, wchar_t **argv);
 int gk3w_cmd_mkpart(int argc, wchar_t **argv);
 int gk3w_cmd_rmpart(int argc, wchar_t **argv);
 int gk3w_cmd_write(int argc, wchar_t **argv);

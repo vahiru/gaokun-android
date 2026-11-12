@@ -5,6 +5,7 @@ import 'package:gk3_common/ui/widgets.dart';
 import '../app.dart';
 import '../model.dart';
 import '../session.dart';
+import 'bitlocker_box.dart';
 import 'bits.dart';
 import 'install_pages.dart';
 import 'run_pages.dart';
@@ -110,6 +111,7 @@ class MediaTargetPage extends StatelessWidget {
       if (!pf.modelOk) l.chkModelBad,
       if (pf.secureBoot == 'on') l.chkSecureBootOn,
       if (pf.fastStartup == 'on') l.chkFastStartupOn,
+      if (s.bitlockerNoKey) l.chkBitlockerNoKey,
       if (pf.lowBattery) l.chkBatteryLow,
       if (s.disk == null) l.chkNoSystemDisk else if (s.mediaRegion == null) l.chkNoRoom(fmtMib(kMediaNeedMib)),
     ];
@@ -181,10 +183,10 @@ class MediaConfirmPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final s = context.session, l = context.l, cs = context.cs;
+    final s = context.session, l = context.l;
     final t = s.mediaTarget!, v = s.variant, lc = s.liveCd;
     final local = s.source == ReleaseSource.local;
-    final ready = t.usb || !s.needBitlockerAck || s.bitlockerAck;
+    final ready = t.usb || s.bitlockerReady;
     return WinStepPage(
       step: MediaStep.confirm,
       danger: true,
@@ -220,25 +222,8 @@ class MediaConfirmPage extends StatelessWidget {
           const SizedBox(height: 12),
           Bullet(l.confirmWindowsSafe, icon: Icons.shield_outlined, color: context.gk.success),
         ],
-        if (!t.usb && s.needBitlockerAck) ...[
-          const SizedBox(height: 16),
-          NoteBox(
-            warn: true,
-            text: l.confirmBitlocker,
-            // ListTile 的底色与水波纹画在最近的 Material 上：NoteBox 的底色会挡住它们（Debug 下还会报断言），
-            // 中间垫一层透明的 Material
-            child: Material(
-              type: MaterialType.transparency,
-              child: CheckboxListTile(
-                contentPadding: EdgeInsets.zero,
-                controlAffinity: ListTileControlAffinity.leading,
-                value: s.bitlockerAck,
-                onChanged: (v) => s.setBitlockerAck(v ?? false),
-                title: Text(l.confirmBitlockerAck, style: context.tt.bodyLarge!.copyWith(color: cs.onSurface)),
-              ),
-            ),
-          ),
-        ],
+        Bullet(l.confirmAntivirus, icon: Icons.gpp_maybe_outlined, color: context.gk.warning),
+        if (!t.usb && s.needBitlockerKey) ...[const SizedBox(height: 16), BitlockerKeyBox(text: l.confirmBitlocker)],
       ]),
     );
   }

@@ -16,10 +16,12 @@ const kBackendFiles = ['gk3w.exe', 'mke2fs.exe', 'mke2fs.conf', 'systemd-bootaa6
 /// ★ 每次调用的参数、输出与退出码照抄进日志文件（[logPath]，%ProgramData%\gaokun3\logs\）：装坏了的时候，
 ///   能拿来查的不能只有屏幕上的日志区。
 ///
+/// ★ BitLocker 恢复密钥经标准输入交给 gk3w（[callWithInput]），不进参数、不进日志。
+///
 /// ★ 测试模式（[testDisk]，环境变量 GK3_TEST_DISK）：在 PC 上对着一块 VHD 走完整个流程。
 ///   probe 的结果里把那块 VHD 标成系统盘（别的盘标成不是），apply / uninstall 去掉 --real-disk 与
 ///   --bitlocker-key —— gk3w 不带 --real-disk 时本来就只肯写 VHD（disk.c 的 VHD 检查），真盘碰不到；
-///   "立即重启"什么都不做。界面在角上标出测试模式。
+///   bitlocker-key 去掉 --suspend（不动这台 PC 自己的 BitLocker）；"立即重启"什么都不做。界面在角上标出测试模式。
 class WinBackend extends Gk3Backend {
   WinBackend({required this.gk3w, this.sdboot, this.backupDir, this.mke2fs, this.testDisk, Net? net, this.log, this.logPath})
       : _net = net ?? Net();
@@ -45,7 +47,7 @@ class WinBackend extends Gk3Backend {
   ///   而每次调用结束时都要 flush
   final RandomAccessFile? log;
 
-  static const _gk3wCommands = {'preflight', 'probe', 'plan', 'apply', 'uninstall', 'hash', 'space'};
+  static const _gk3wCommands = {'preflight', 'probe', 'plan', 'apply', 'uninstall', 'hash', 'space', 'bitlocker-key'};
 
   /// 写盘的调用：测试模式下去掉 --real-disk / --bitlocker-key
   static const _writes = {'apply', 'uninstall'};
@@ -103,11 +105,19 @@ class WinBackend extends Gk3Backend {
   }
 
   @override
-  Stream<Gk3Event> call(String fn, [List<String> args = const []]) {
+  Stream<Gk3Event> call(String fn, [List<String> args = const []]) => _call(fn, args, null);
+
+  @override
+  Stream<Gk3Event> callWithInput(String fn, List<String> args, String input) => _call(fn, args, input);
+
+  Stream<Gk3Event> _call(String fn, List<String> args, String? input) {
     final t0 = DateTime.now();
     // 记的是真正交给 gk3w 的参数（补上的文件路径、测试模式去掉的 --real-disk 都看得见），不是界面传进来的
     final argv = _gk3wCommands.contains(fn) ? _argsFor(fn, args) : args;
-    _w('[${_ts()}] >> $fn ${argv.join(' ')}'.trimRight());
+    // 测试模式下写盘的调用去掉了 --bitlocker-key，gk3w 不读输入，也就不给
+    if (testDisk != null && _writes.contains(fn)) input = null;
+    // 标准输入的内容（恢复密钥）不记
+    _w('[${_ts()}] >> ${[fn, ...argv].join(' ')}${input == null ? '' : ' (+ stdin, not logged)'}');
     final Stream<Gk3Event> src;
     if (fn == 'releases') {
       src = _net.releases(args);
@@ -118,7 +128,7 @@ class WinBackend extends Gk3Backend {
         _flush();
       });
     } else if (_gk3wCommands.contains(fn)) {
-      src = _run(fn, argv);
+      src = _run(fn, argv, input);
     } else {
       src = Stream.fromIterable([Gk3Log('!! unknown backend function: $fn'), const Gk3Exit(127)]);
     }
@@ -196,6 +206,10 @@ class WinBackend extends Gk3Backend {
       }
       a = out;
     }
+    if (testDisk != null && fn == 'bitlocker-key') {
+      final i = a.indexOf('--suspend');
+      if (i >= 0) a = [...a.take(i), ...a.skip(i + 2)];
+    }
     return a;
   }
 
@@ -206,7 +220,7 @@ class WinBackend extends Gk3Backend {
     return Gk3Record('DISK', {...e.fields, 'system': mine ? 'yes' : 'no'});
   }
 
-  Stream<Gk3Event> _run(String fn, List<String> args) {
+  Stream<Gk3Event> _run(String fn, List<String> args, String? input) {
     final ctl = StreamController<Gk3Event>();
     () async {
       final Process p;
@@ -219,6 +233,14 @@ class WinBackend extends Gk3Backend {
           ..add(const Gk3Exit(127));
         await ctl.close();
         return;
+      }
+      if (input != null) {
+        try {
+          p.stdin.write(input);
+          await p.stdin.close();
+        } catch (_) {
+          // gk3w 没读输入就退出了（例如参数有误）：结果照常由它的输出与退出码说明
+        }
       }
       const dec = Utf8Decoder(allowMalformed: true);
       final out = p.stdout.transform(dec).transform(const LineSplitter()).listen((l) => ctl.add(_rewrite(fn, parseStdoutLine(l)))).asFuture<void>();

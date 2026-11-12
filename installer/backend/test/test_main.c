@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "../src/blkey.h"
 #include "../src/esp.h"
 #include "../src/layout.h"
 #include "../src/proto.h"
@@ -311,8 +312,33 @@ static void test_content_kind(void)
     CHECK(!strcmp(gk3w_content_kind_name(GK3W_KIND_LP), "lp") && !strcmp(gk3w_content_kind_name((gk3w_content_kind)99), "unknown"));
 }
 
+static void test_blkey(void)
+{
+    char out[GK3W_BLKEY_TEXT];
+    static const char *const ok = "135795-000000-720885-111111-222222-333333-444444-555555";
+    CHECK(gk3w_blkey_normalize(ok, out) == 0);
+    CHECK(!strcmp(out, ok));
+    /* 空格、连字符、不分组都可以 */
+    CHECK(gk3w_blkey_normalize("135795000000720885111111222222333333444444555555", out) == 0 && !strcmp(out, ok));
+    CHECK(gk3w_blkey_normalize(" 135795 000000 720885 111111-222222-333333-444444-555555 ", out) == 0 && !strcmp(out, ok));
+    /* 位数不对、别的字符 */
+    CHECK(gk3w_blkey_normalize("135795-000000-720885-111111-222222-333333-444444-55555", out) == -1 && !out[0]);
+    CHECK(gk3w_blkey_normalize("135795-000000-720885-111111-222222-333333-444444-5555555", out) == -1);
+    CHECK(gk3w_blkey_normalize("135795-000000-720885-111111-222222-333333-444444-55555a", out) == -1);
+    CHECK(gk3w_blkey_normalize("135795_000000-720885-111111-222222-333333-444444-555555", out) == -1);
+    CHECK(gk3w_blkey_normalize("", out) == -1);
+    /* 校验：第 3 组不是 11 的倍数；第 8 组 720896 = 11 × 65536 超出 16 位 */
+    CHECK(gk3w_blkey_normalize("135795-000000-720886-111111-222222-333333-444444-555555", out) == 3 && !out[0]);
+    CHECK(gk3w_blkey_normalize("135795-000000-720885-111111-222222-333333-444444-720896", out) == 8);
+    /* 比较：分组写法不同算同一个；格式不对的算不同 */
+    CHECK(gk3w_blkey_equal(ok, "135795 000000 720885 111111 222222 333333 444444 555555"));
+    CHECK(!gk3w_blkey_equal(ok, "135795-000000-720885-111111-222222-333333-444444-000000"));
+    CHECK(!gk3w_blkey_equal("x", "x"));
+}
+
 int main(void)
 {
+    test_blkey();
     test_entry_names();
     test_content_kind();
     test_windows_boot_manager();

@@ -81,24 +81,55 @@ int gk3w_mkdirs(const wchar_t *path, size_t root_len);
 int gk3w_exists(const wchar_t *path);
 
 /* ── 系统状态（sys.c） ── */
+/* gk3w_sys.bitlocker：系统卷的 BitLocker */
+#define GK3W_BL_STATE_OFF 0         /* 没有加密 */
+#define GK3W_BL_STATE_ON 1          /* 保护已开启（或 WMI 读不到、而卷上有 BitLocker 签名） */
+#define GK3W_BL_STATE_UNKNOWN 2     /* ProtectionStatus 2 */
+#define GK3W_BL_STATE_SUSPENDED 3   /* 已加密，保护已暂停或尚未激活：Windows 下次启动不会要求输入恢复密钥 */
+#define GK3W_BL_STATE_UNREADABLE (-1)
 typedef struct {
     char manufacturer[64], model[64];
     int secure_boot;            /* 1 开、0 关、-1 读不到 */
     int fast_startup;           /* HiberbootEnabled 为 1（休眠关着时暂不生效，打开休眠就回来，所以不管休眠） */
     int hibernate;              /* Control\Power\HibernateEnabled：1 开、0 关、-1 读不到 */
     int hiberfil;               /* 系统盘上有 hiberfil.sys */
-    int bitlocker;              /* 系统卷：0 关、1 开、2 未知（ProtectionStatus 2）、-1 读不到 */
+    int bitlocker;              /* GK3W_BL_STATE_* */
+    int bitlocker_ids_known;    /* 下面的 ID 查到了（0 个也算查到） */
+    char bitlocker_key_ids[128]; /* 恢复密钥的 ID（前 8 位，逗号分隔）：用户据此在 Microsoft 账户里找对应的密钥 */
     int ac;                     /* 1 插着电源、0 没插、-1 不知道 */
     int battery;                /* 电量百分比，-1 不知道 */
     wchar_t system_drive;
 } gk3w_sys;
 void gk3w_sys_read(gk3w_sys *s);
 int gk3w_model_ok(const gk3w_sys *s);
+/* 系统卷的 BitLocker 保护开着（或状态不明）：改动启动链之前要校验恢复密钥、暂停保护 */
+int gk3w_sys_bitlocker_on(const gk3w_sys *s);
 /* 写真实磁盘之前的把关；拒绝时已报 ERR（touched=no），返回 -1。
  * GK3W_GATE_APPLY：机型、Secure Boot、快速启动、BitLocker、电量。GK3W_GATE_UNINSTALL：机型、BitLocker、电量
- * （卸载之后不再有 Android 写 ESP，Secure Boot 与快速启动无关）。bitlocker_ok：用户确认过拿到了恢复密钥。 */
+ * （卸载之后不再有 Android 写 ESP，Secure Boot 与快速启动无关）。
+ * bitlocker_key：用户输入的恢复密钥（NULL = 没给）；BitLocker 保护开着时必须给，并与系统卷的恢复密钥一致。 */
 typedef enum { GK3W_GATE_APPLY, GK3W_GATE_UNINSTALL } gk3w_gate_mode;
-int gk3w_sys_gate(const gk3w_sys *s, int bitlocker_ok, gk3w_gate_mode mode);
+int gk3w_sys_gate(const gk3w_sys *s, const char *bitlocker_key, gk3w_gate_mode mode);
+
+/* ── BitLocker（bitlocker.c） ── */
+typedef enum {
+    GK3W_BL_OK = 0,
+    GK3W_BL_FORMAT,             /* 不是 48 位数字，或某一组校验不过 */
+    GK3W_BL_WRONG,              /* 与卷上的恢复密钥都不一致 */
+    GK3W_BL_NO_PASSWORD,        /* 卷上没有恢复密钥（数字密码保护器） */
+    GK3W_BL_QUERY,              /* WMI 查不了，无法校验 */
+} gk3w_bl_result;
+/* 保护状态（ProtectionStatus：0 关、1 开、2 未知；WMI 不可用 -1）。保护开着或未知时顺带查恢复密钥的 ID
+ * （逗号分隔，各取前 8 位），查到了 *ids_known = 1 */
+int gk3w_bitlocker_status(wchar_t drive, char *ids, size_t cap, int *ids_known);
+/* 用户输入的恢复密钥与卷上的是否一致；GK3W_BL_FORMAT 时 *bad_group 是校验不过的那一组（1–8），位数不对为 0 */
+gk3w_bl_result gk3w_bitlocker_verify(wchar_t drive, const char *key, int *bad_group);
+/* 暂停卷的 BitLocker 保护，Windows 再启动 reboots 次后自动恢复。成功 0，失败 -1（已写日志） */
+int gk3w_bitlocker_suspend(wchar_t drive, unsigned reboots);
+/* 校验失败的 ERR（bitlocker-key-format / -key-wrong / no-recovery-key / unverifiable）。返回 1 */
+int gk3w_bitlocker_err(gk3w_bl_result r, int bad_group, gk3w_touched t);
+/* 从标准输入读一行（恢复密钥），去掉行尾。读不到或空行返回 -1 */
+int gk3w_read_key_stdin(char *buf, size_t cap);
 /* 删 systemd-boot 的 EFI 变量（LoaderEntryDefault 等）：0 = 删了、本来就没有，或 ours 不认这个值而留着；
  * -1 = 读不到 / 删不掉（已记日志）。ours 为 NULL 时不看值、一律删。 */
 int gk3w_loader_var_delete(const wchar_t *name, int (*ours)(const char *value));

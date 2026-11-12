@@ -6,6 +6,7 @@
 // ★ 是"出图"，不是像素比对：每次都重写 PNG。行为由 flow_test.dart 管。没有字体时整组跳过。
 import 'dart:io';
 
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gk3_common/ui/theme.dart';
@@ -173,5 +174,42 @@ void main() {
   testWidgets('英文', (t) async {
     await pumpApp(t, 'blocked', language: 'en');
     await shot(t, '31-blocked-en');
+  }, skip: !haveFont);
+
+  testWidgets('BitLocker：出厂状态先暂停保护；确认页输入恢复密钥', (t) async {
+    final (_, s) = await pumpApp(t, 'bitlocker');
+    await shot(t, '31-bitlocker-check');
+    await t.enterText(find.byType(TextField), kGoodKey);
+    await tapShown(t, find.text(l.blVerifySuspend));
+    await see(t, find.text(l.chkBitlockerSuspended));
+    await shot(t, '32-bitlocker-suspended');
+    expect(s.needBitlockerKey, isFalse);
+  }, skip: !haveFont);
+
+  testWidgets('BitLocker：确认页', (t) async {
+    await pumpApp(t, 'free', map: {'preflight': bitlockerOn()}, respond: {'bitlocker-key': fakeBitlockerKey});
+    await shot(t, '33-bitlocker-check-sb-off');
+    for (var i = 0; i < 4; i++) {
+      await tap(t, find.text(l.btnNext));
+    }
+    await see(t, find.text(l.confirmBitlocker));
+    await shot(t, '34-bitlocker-confirm');
+    await t.enterText(find.byType(TextField), kOtherKey);
+    await tapShown(t, find.text(l.blVerify));
+    await shot(t, '35-bitlocker-confirm-wrong');
+    await t.enterText(find.byType(TextField), kGoodKey);
+    await tapShown(t, find.text(l.blVerify));
+    await shot(t, '36-bitlocker-confirm-ok');
+  }, skip: !haveFont);
+
+  testWidgets('BitLocker：英文确认页', (t) async {
+    await pumpApp(t, 'free', language: 'en', map: {'preflight': bitlockerOn()}, respond: {'bitlocker-key': fakeBitlockerKey});
+    for (var i = 0; i < 4; i++) {
+      await tap(t, find.text(en.btnNext));
+    }
+    await see(t, find.text(en.confirmBitlocker));
+    await t.enterText(find.byType(TextField), kGoodKey);
+    await tapShown(t, find.text(en.blVerify));
+    await shot(t, '37-bitlocker-confirm-ok-en');
   }, skip: !haveFont);
 }

@@ -1,11 +1,10 @@
 /* Windows：安装前检查要看的系统状态、systemd-boot 的 EFI 变量。
  *
- *   gk3w preflight     一行 PREFLIGHT：机型、Secure Boot、BitLocker（系统卷）、快速启动、休眠文件、电源（只读）
+ *   gk3w preflight     一行 PREFLIGHT：机型、Secure Boot、BitLocker（系统卷：保护状态、恢复密钥的 ID）、快速启动、
+ *                      休眠文件、电源（只读）
  *
  * 判断规则（哪些拒绝、哪些只提醒）在 gk3w_sys_gate，apply / uninstall 写真实磁盘之前调用；VHD 测试不调。 */
-#define COBJMACROS
 #include <windows.h>
-#include <wbemidl.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -34,63 +33,6 @@ static void reg_str(const wchar_t *key, const wchar_t *val, char *out, size_t ca
     out[0] = 0;
     if (RegGetValueW(HKEY_LOCAL_MACHINE, key, val, RRF_RT_REG_SZ, NULL, w, &sz) == ERROR_SUCCESS)
         gk3w_w2u(w, out, cap);
-}
-
-/* 系统卷的 BitLocker 保护状态（WMI Win32_EncryptableVolume.ProtectionStatus）：0 关、1 开、2 未知（卷锁着时就是这个值）；查不到 -1 */
-static int bitlocker_protection(wchar_t drive)
-{
-    IWbemLocator *loc = NULL;
-    IWbemServices *svc = NULL;
-    IEnumWbemClassObject *en = NULL;
-    IWbemClassObject *obj = NULL;
-    BSTR ns = NULL, lang = NULL, query = NULL;
-    wchar_t q[128];
-    ULONG n = 0;
-    VARIANT v;
-    int status = -1;
-    HRESULT init = CoInitializeEx(NULL, COINIT_MULTITHREADED);
-
-    /* 进程里已经有人设过安全参数时这里会失败，不影响后面 */
-    CoInitializeSecurity(NULL, -1, NULL, NULL, RPC_C_AUTHN_LEVEL_DEFAULT, RPC_C_IMP_LEVEL_IMPERSONATE, NULL, EOAC_NONE,
-                         NULL);
-    if (FAILED(CoCreateInstance(&CLSID_WbemLocator, NULL, CLSCTX_INPROC_SERVER, &IID_IWbemLocator, (void **)&loc)))
-        goto out;
-    ns = SysAllocString(L"ROOT\\CIMV2\\Security\\MicrosoftVolumeEncryption");
-    /* WBEM_FLAG_CONNECT_USE_MAX_WAIT：WMI 服务卡住时连接最多等 2 分钟（Windows 的上限），不无限等 */
-    if (FAILED(IWbemLocator_ConnectServer(loc, ns, NULL, NULL, NULL, WBEM_FLAG_CONNECT_USE_MAX_WAIT, NULL, NULL, &svc)))
-        goto out;
-    CoSetProxyBlanket((IUnknown *)svc, RPC_C_AUTHN_WINNT, RPC_C_AUTHZ_NONE, NULL, RPC_C_AUTHN_LEVEL_CALL,
-                      RPC_C_IMP_LEVEL_IMPERSONATE, NULL, EOAC_NONE);
-    _snwprintf(q, 128, L"SELECT ProtectionStatus FROM Win32_EncryptableVolume WHERE DriveLetter='%lc:'", drive);
-    lang = SysAllocString(L"WQL");
-    query = SysAllocString(q);
-    if (FAILED(IWbemServices_ExecQuery(svc, lang, query, WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY, NULL, &en)))
-        goto out;
-    /* 查询结果最多等 30 秒：WMI 服务卡住时不能让 preflight 一直不返回（检查页会一直转圈、"重新检查"也点不了）。
-     * 超时（WBEM_S_TIMEDOUT）返回 -1，调用方再看卷上的 FVE 签名；签名也读不到时界面显示 BitLocker 状态未知 */
-    if (IEnumWbemClassObject_Next(en, 30000, 1, &obj, &n) != WBEM_S_NO_ERROR || n != 1)
-        goto out;
-    VariantInit(&v);
-    if (SUCCEEDED(IWbemClassObject_Get(obj, L"ProtectionStatus", 0, &v, NULL, NULL))) {
-        if (v.vt == VT_I4 || v.vt == VT_UI4)
-            status = (int)v.lVal;
-        VariantClear(&v);
-    }
-out:
-    if (obj)
-        IWbemClassObject_Release(obj);
-    if (en)
-        IEnumWbemClassObject_Release(en);
-    if (svc)
-        IWbemServices_Release(svc);
-    if (loc)
-        IWbemLocator_Release(loc);
-    SysFreeString(ns);
-    SysFreeString(lang);
-    SysFreeString(query);
-    if (SUCCEEDED(init))
-        CoUninitialize();
-    return status;
 }
 
 /* 从物理盘直接读系统卷的引导扇区（在 BitLocker 过滤驱动之下）：加密卷的 OEM ID 是 "-FVE-FS-"。
@@ -147,12 +89,15 @@ void gk3w_sys_read(gk3w_sys *s)
         if (fh != INVALID_HANDLE_VALUE)
             FindClose(fh);
     }
-    s->bitlocker = bitlocker_protection(s->system_drive);
+    s->bitlocker = gk3w_bitlocker_status(s->system_drive, s->bitlocker_key_ids, sizeof s->bitlocker_key_ids, &s->bitlocker_ids_known);
     if (s->bitlocker < 0) {
-        /* WMI 读不到：按盘上签名判断；签名也读不到就保持 -1，由 gk3w_sys_gate 当作开着处理 */
+        /* WMI 读不到：按盘上签名判断（有签名当作保护开着）；签名也读不到就保持 -1，由 gk3w_sys_gate 当作开着处理 */
         int f = fve_signature(s->system_drive);
         if (f >= 0)
-            s->bitlocker = f;
+            s->bitlocker = f ? GK3W_BL_STATE_ON : GK3W_BL_STATE_OFF;
+    } else if (s->bitlocker == 0 && fve_signature(s->system_drive) == 1) {
+        /* 保护关着而卷是加密的：暂停了保护（Suspend-BitLocker / 安装器暂停的），或设备加密尚未激活 */
+        s->bitlocker = GK3W_BL_STATE_SUSPENDED;
     }
     s->ac = -1;
     s->battery = -1;
@@ -170,8 +115,13 @@ int gk3w_model_ok(const gk3w_sys *s)
     return 0;
 }
 
-/* 说明见 disk.h。bitlocker_ok 同 LiveCD 的 --bitlocker-key yes。 */
-int gk3w_sys_gate(const gk3w_sys *s, int bitlocker_ok, gk3w_gate_mode mode)
+int gk3w_sys_bitlocker_on(const gk3w_sys *s)
+{
+    return s->bitlocker != GK3W_BL_STATE_OFF && s->bitlocker != GK3W_BL_STATE_SUSPENDED;
+}
+
+/* 说明见 disk.h */
+int gk3w_sys_gate(const gk3w_sys *s, const char *bitlocker_key, gk3w_gate_mode mode)
 {
     if (!gk3w_model_ok(s))
         return gk3w_err_kv(GK3W_TOUCHED_NO, "wrong-model", "model", s->model, "this computer is not a Huawei MateBook E Go (gaokun3); refusing to write a real disk", 0), -1;
@@ -183,10 +133,19 @@ int gk3w_sys_gate(const gk3w_sys *s, int bitlocker_ok, gk3w_gate_mode mode)
                             ? "Windows Fast Startup is set (HiberbootEnabled=1); hibernation is off now, but Fast Startup returns as soon as it is turned back on, and then Windows may corrupt the EFI system partition after Android writes to it. Turn it off first: reg add \"HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Power\" /v HiberbootEnabled /t REG_DWORD /d 0 /f (disk not touched)"
                             : "Windows Fast Startup is on: shutting down actually hibernates, and Windows may corrupt the EFI system partition after Android writes to it. Turn Fast Startup off in Power Options first (disk not touched)",
                         0), -1;
-    /* 只有确认关着才放行（读不到、状态未知都当作开着）：宁可多要一次确认，也不能让没拿恢复密钥的人改 BOOTAA64.EFI */
-    if (s->bitlocker != 0 && !bitlocker_ok)
-        return gk3w_err(GK3W_TOUCHED_NO, "bitlocker-key-unconfirmed",
-                        "BitLocker is on (or its state is unknown) and EFI/BOOT/BOOTAA64.EFI will be rewritten: Windows may ask for the 48-digit recovery key next time. Confirm you have the recovery key (--bitlocker-key yes) first (disk not touched)", 0), -1;
+    /* 只有确认保护关着才不要密钥（读不到、状态未知都当作开着）：写入前会暂停保护，但重新绑定仍可能失败，
+     * 那时 Windows 要求输入恢复密钥 —— 不能让手里没有正确密钥的人改动启动链 */
+    if (gk3w_sys_bitlocker_on(s)) {
+        int group = 0;
+        gk3w_bl_result r;
+        if (!bitlocker_key)
+            return gk3w_err(GK3W_TOUCHED_NO, "bitlocker-key-required",
+                            "BitLocker protection is on (or its state is unknown) and the boot chain will change. Pass the 48-digit recovery key on standard input (--bitlocker-key -) so it can be checked against the system volume first (disk not touched)", 0), -1;
+        r = gk3w_bitlocker_verify(s->system_drive, bitlocker_key, &group);
+        if (r != GK3W_BL_OK)
+            return gk3w_bitlocker_err(r, group, GK3W_TOUCHED_NO), -1;
+        gk3w_log("BitLocker: the recovery key matches the system volume");
+    }
     if (s->ac == 0 && s->battery >= 0 && s->battery < 15)
         return gk3w_err(GK3W_TOUCHED_NO, "low-battery", "battery below 15% and not on AC power: losing power midway leaves a half-installed disk. Plug in the charger first (disk not touched)", 0), -1;
     if (mode == GK3W_GATE_APPLY && s->hiberfil)
@@ -206,7 +165,9 @@ int gk3w_cmd_preflight(int argc, wchar_t **argv)
     gk3w_line_kv(&l, "model", s.model);
     gk3w_line_kv(&l, "model_ok", gk3w_model_ok(&s) ? "yes" : "no");
     gk3w_line_kv(&l, "secure_boot", s.secure_boot < 0 ? "unknown" : s.secure_boot ? "on" : "off");
-    gk3w_line_kv(&l, "bitlocker", s.bitlocker < 0 ? "unknown" : s.bitlocker == 1 ? "on" : s.bitlocker == 2 ? "unknown" : "off");
+    gk3w_line_kv(&l, "bitlocker", s.bitlocker == GK3W_BL_STATE_OFF ? "off" : s.bitlocker == GK3W_BL_STATE_ON ? "on" : s.bitlocker == GK3W_BL_STATE_SUSPENDED ? "suspended" : "unknown");
+    if (s.bitlocker_ids_known)
+        gk3w_line_kv(&l, "bitlocker_key_ids", s.bitlocker_key_ids);
     gk3w_line_kv(&l, "fast_startup", s.fast_startup ? "on" : "off");
     gk3w_line_kv(&l, "hibernate", s.hibernate < 0 ? "unknown" : s.hibernate ? "on" : "off");
     gk3w_line_kv(&l, "hiberfil", s.hiberfil ? "yes" : "no");

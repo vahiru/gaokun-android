@@ -12,7 +12,16 @@ class Preflight {
 
   /// on / off / unknown
   String get secureBoot => r['secure_boot'];
+
+  /// on / off / suspended（已加密，保护已暂停或尚未激活）/ unknown
   String get bitlocker => r['bitlocker'];
+
+  /// 系统盘恢复密钥的 ID（各取前 8 位，用户据此在 Microsoft 账户里找对应的密钥）；null = 没查到
+  List<String>? get bitlockerKeyIds {
+    final v = r.fields['bitlocker_key_ids'];
+    return v == null ? null : [for (final id in v.split(',')) if (id.isNotEmpty) id];
+  }
+
   String get fastStartup => r['fast_startup'];
   String get hibernate => r['hibernate'];
 
@@ -22,6 +31,14 @@ class Preflight {
 
   /// gk3w apply / uninstall 的 --real-disk 检查同一套条件（sys.c 的 gk3w_sys_gate）。界面只是提前告诉用户。
   bool get lowBattery => ac == 'no' && battery != null && battery! < 15;
+}
+
+/// 用户输入的 BitLocker 恢复密钥：去掉空格与连字符后是 48 位数字就按 6 位一组、连字符分隔返回，否则 null。
+/// 每组的校验与比对由 gk3w 做（installer/backend/src/blkey.c），这里只决定"校验"按钮能不能按
+String? normalizeRecoveryKey(String input) {
+  final d = input.replaceAll(RegExp(r'[\s-]'), '');
+  if (!RegExp(r'^[0-9]{48}$').hasMatch(d)) return null;
+  return [for (var i = 0; i < 48; i += 6) d.substring(i, i + 6)].join('-');
 }
 
 /// gk3w probe 的 DISK 记录
