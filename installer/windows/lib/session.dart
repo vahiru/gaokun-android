@@ -69,6 +69,7 @@ class Session extends ChangeNotifier {
     } catch (e) {
       checkErr = _failed('check');
       log.add('!! $e');
+      logNote?.call('!! $e');
     } finally {
       checking = false;
       notifyListeners();
@@ -177,6 +178,7 @@ class Session extends ChangeNotifier {
       _liveCd[src] = lc == null ? null : LiveCd(lc);
     } catch (e) {
       // 后端的流出错也不能让页面一直转圈
+      logNote?.call('!! releases: $e');
       _variants[src] = const [];
       _variantsErr[src] = const Gk3Record('ERR', {'code': 'manifest-unavailable'});
     } finally {
@@ -274,8 +276,11 @@ class Session extends ChangeNotifier {
   Completer<bool>? _quitPrompt;
   Completer<void>? _quitAfterDownload;
 
-  /// 确认框正在显示：不再弹第二个；这时下载结束了也先不写盘，等答案（[_downloadThen]）
-  bool get quitPromptOpen => _quitPrompt != null;
+  /// 选了退出、正在停止下载并删除文件（之后关窗口）
+  bool _exiting = false;
+
+  /// 确认框正在显示，或已经选了退出、还在收尾：不再弹第二个；确认框开着时下载结束了也先不写盘，等答案（[_downloadThen]）
+  bool get quitPromptOpen => _quitPrompt != null || _exiting;
   void openQuitPrompt() {
     _quitPrompt = Completer<bool>();
     notifyListeners();
@@ -289,10 +294,16 @@ class Session extends ChangeNotifier {
     c?.complete(quit);
     notifyListeners();
     if (!quit) return;
-    if (downloading) {
-      await cancelDownload();
-    } else {
-      await _quitAfterDownload?.future;
+    // 停止下载可能要等一会儿（重试前的等待、正在算 sha256）：这期间再按关闭不再弹框
+    _exiting = true;
+    try {
+      if (downloading) {
+        await cancelDownload();
+      } else {
+        await _quitAfterDownload?.future;
+      }
+    } finally {
+      _exiting = false;
     }
   }
 

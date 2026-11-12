@@ -20,6 +20,19 @@ void main() {
   final backend = real ?? FixtureBackend(kScenarios.contains(scenario) ? scenario! : kScenarios.first);
   final session = Session(backend, language: requestedLanguage(), testDisk: real == null ? null : requestedTestDisk());
   attachWindow(session);
+  // 界面里没有接住的异常也记进日志文件（日志区之外，用户发来的日志里看得到）
+  final note = session.logNote;
+  if (note != null) {
+    final present = FlutterError.onError;
+    FlutterError.onError = (d) {
+      note('!! ${d.exceptionAsString()}');
+      present?.call(d);
+    };
+    WidgetsBinding.instance.platformDispatcher.onError = (e, _) {
+      note('!! $e');
+      return false;
+    };
+  }
   runApp(WinInstallerApp(session: session));
   session.check();
 }

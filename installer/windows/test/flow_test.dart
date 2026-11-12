@@ -465,6 +465,43 @@ void main() {
     expect(window.where((c) => c.method == 'forceClose' || c.method == 'close'), isEmpty);
   });
 
+  testWidgets('选了退出、还在停止下载时再按关闭：不再弹框，收尾完关窗口一次', (t) async {
+    final window = <MethodCall>[];
+    t.binding.defaultBinaryMessenger.setMockMethodCallHandler(const MethodChannel('gk3/window'), (c) async {
+      window.add(c);
+      return null;
+    });
+    addTearDown(() => t.binding.defaultBinaryMessenger.setMockMethodCallHandler(const MethodChannel('gk3/window'), null));
+    final (rec, s) = await pumpApp(t, 'free');
+    final deleted = <String>[];
+    s.deleteFiles = deleted.add;
+    final gate = Completer<void>();
+    rec.replace['download'] = (_) {
+      final c = StreamController<Gk3Event>();
+      // 停止要过一会儿（例如正在算 sha256）
+      c.onCancel = () => gate.future;
+      return c.stream;
+    };
+    for (var i = 0; i < 4; i++) {
+      await tap(t, find.text(l.btnNext));
+    }
+    await hold(t, l.holdToInstall);
+    await waitFor(t, find.byType(RunPage));
+    await settle(t);
+    await tap(t, find.bySemanticsLabel(l.winClose));
+    await tap(t, find.text(l.quitDownloadExit));
+    expect(s.downloading, isTrue);
+    await tap(t, find.bySemanticsLabel(l.winClose));
+    unawaited(handleCloseRequest(kNavigatorKey.currentContext!, s));
+    await settle(t);
+    expect(find.text(l.quitDownloadTitle), findsNothing);
+    expect(window.where((c) => c.method == 'forceClose'), isEmpty);
+    gate.complete();
+    await settle(t);
+    expect(deleted, hasLength(1));
+    expect(window.where((c) => c.method == 'forceClose'), hasLength(1));
+  });
+
   testWidgets('确认框只弹一个：按了关闭键之后又按 Alt+F4（原生转来 closeRequested）', (t) async {
     final (_, s, window, _) = await startPendingDownload(t);
     await tap(t, find.bySemanticsLabel(l.winClose));
@@ -539,6 +576,18 @@ void main() {
     expect(t.getTopRight(find.byType(WindowButtons)).dx, closeTo(1280, 0.5));
     expect(t.getTopLeft(find.byType(DragStrip)).dx, closeTo(0, 0.5));
     expect(t.getBottomLeft(find.byType(CheckPage)).dy, closeTo(752, 0.5));
+    expect(t.takeException(), isNull);
+    // 100 % 缩放的 1920×1080 显示器上最大化：工作区比画布大，放大到铺满（与原生 InCaption 的算法相同：
+    // s = min(1920/1280, 1032/800)，标题栏是顶上 32·s 高的一行，按钮在最右边 138·s 宽）
+    t.view.physicalSize = const Size(1920, 1032);
+    t.view.devicePixelRatio = 1;
+    await settle(t);
+    const s = 1032 / 800;
+    expect(t.getTopRight(find.byType(WindowButtons)).dx, closeTo(1920, 0.5));
+    expect(t.getTopLeft(find.byType(WindowButtons)).dx, closeTo(1920 - WindowButtons.width * s, 0.5));
+    expect(t.getTopLeft(find.byType(DragStrip)).dy, closeTo(0, 0.5));
+    expect(t.getBottomLeft(find.byType(DragStrip)).dy, closeTo(DragStrip.height * s, 0.5));
+    expect(t.getBottomLeft(find.byType(CheckPage)).dy, closeTo(1032, 0.5));
     expect(t.takeException(), isNull);
   });
 

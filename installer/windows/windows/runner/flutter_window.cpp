@@ -264,6 +264,8 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               LPARAM const lparam) noexcept {
   // 安装或卸载期间不关闭窗口（WM_CLOSE 来自 Alt+F4、任务栏、PostMessage）
   if (message == WM_CLOSE && busy_) {
+    // forceClose 发出的 WM_CLOSE 赶上了写盘开始：这次不关，也不能留着 force_close_（之后的关闭会跳过界面的确认）
+    force_close_ = false;
     MessageBeep(MB_ICONWARNING);
     return 0;
   }

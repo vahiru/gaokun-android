@@ -20,16 +20,14 @@ class LogicalCanvas extends StatelessWidget {
     return LayoutBuilder(builder: (context, c) {
       final s = c.maxWidth / kCanvas.width < c.maxHeight / kCanvas.height ? c.maxWidth / kCanvas.width : c.maxHeight / kCanvas.height;
       if (!s.isFinite || s <= 0) return _scaled(context, kCanvas);
-      return _scaled(context, Size(c.maxWidth / s, c.maxHeight / s));
+      return _scaled(context, Size(c.maxWidth / s, c.maxHeight / s), fill: true);
     });
   }
 
-  Widget _scaled(BuildContext context, Size size) {
+  /// [fill]：画布与可用空间同比例，放大缩小都铺满（Center 给的是宽松约束，FittedBox 只会缩小、不会放大）
+  Widget _scaled(BuildContext context, Size size, {bool fill = false}) {
     final mq = MediaQuery.of(context);
-    return ColoredBox(
-      color: Theme.of(context).colorScheme.surface,
-      child: Center(
-        child: FittedBox(
+    final fitted = FittedBox(
           child: SizedBox.fromSize(
             size: size,
             child: MediaQuery(
@@ -40,8 +38,10 @@ class LogicalCanvas extends StatelessWidget {
               ),
             ),
           ),
-        ),
-      ),
+        );
+    return ColoredBox(
+      color: Theme.of(context).colorScheme.surface,
+      child: fill ? SizedBox.expand(child: fitted) : Center(child: fitted),
     );
   }
 }
