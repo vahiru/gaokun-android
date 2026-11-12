@@ -41,6 +41,45 @@ String? normalizeRecoveryKey(String input) {
   return [for (var i = 0; i < 48; i += 6) d.substring(i, i + 6)].join('-');
 }
 
+/// gk3w shrink-info 的 SHRINK 记录：C 盘最多还能压缩出多少、压缩停在哪个文件（installer/backend/src/win/shrink.c）
+class ShrinkInfo {
+  ShrinkInfo(this.r);
+  final Gk3Record r;
+
+  String get drive => r['drive'];
+  int get maxShrinkMib => r.intOf('max_shrink_mib');
+
+  /// 最后一个不可移动的文件（卷内路径，去掉了 ::$DATA 之类的流名）；没找到为 null
+  String? get file {
+    final f = r['file'];
+    if (f.isEmpty) return null;
+    final colon = f.indexOf(':');
+    return colon < 0 ? f : f.substring(0, colon);
+  }
+
+  ShrinkBlocker? get blocker => file == null ? null : classifyShrinkBlocker(file!);
+}
+
+/// 挡住压缩的常见文件，各有各的处理方法（界面按它给出步骤）
+enum ShrinkBlocker { pagefile, hiberfil, restorePoint, bitlocker, usnJournal, ntfsMeta, memoryDump, other }
+
+/// 按卷内路径（不分大小写）归类
+ShrinkBlocker classifyShrinkBlocker(String path) {
+  final p = path.toLowerCase();
+  if (p == r'\pagefile.sys' || p == r'\swapfile.sys') return ShrinkBlocker.pagefile;
+  if (p == r'\hiberfil.sys') return ShrinkBlocker.hiberfil;
+  const svi = r'\system volume information\';
+  if (p.startsWith('${svi}fve2.')) return ShrinkBlocker.bitlocker;
+  // 卷影副本（还原点）的差异文件：{GUID}{3808876b-c176-4e48-b7ae-04046e6cc752}
+  if (p.startsWith(svi) && p.contains('{3808876b-c176-4e48-b7ae-04046e6cc752}')) return ShrinkBlocker.restorePoint;
+  if (p.startsWith(r'\$extend\$usnjrnl')) return ShrinkBlocker.usnJournal;
+  if (p.startsWith(r'\$')) return ShrinkBlocker.ntfsMeta;
+  if (p == r'\memory.dmp' || p.startsWith(r'\windows\minidump\') || p.startsWith(r'\windows\livekernelreports\')) {
+    return ShrinkBlocker.memoryDump;
+  }
+  return ShrinkBlocker.other;
+}
+
 /// gk3w probe 的 DISK 记录
 class WinDisk {
   WinDisk(this.r);

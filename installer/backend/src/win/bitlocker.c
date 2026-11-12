@@ -12,10 +12,7 @@
  * 别的设备的都过不去。
  *
  * 密钥只从标准输入读（参数会原样记进安装日志），用完即清除，不写日志、不输出。 */
-#define COBJMACROS
-#include <windows.h>
-#include <oleauto.h>
-#include <wbemidl.h>
+#include "wmi.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -29,144 +26,42 @@
 
 /* 一个卷在 WMI 里的实例 */
 typedef struct {
-    HRESULT init;
-    IWbemLocator *loc;
-    IWbemServices *svc;
-    IWbemClassObject *cls;      /* Win32_EncryptableVolume 类：方法的入参定义从这里取 */
-    BSTR path;                  /* 这个卷的实例路径（__PATH） */
+    gk3w_wmi w;
+    IWbemClassObject *vol;      /* Win32_EncryptableVolume 的实例 */
     int protection;             /* ProtectionStatus：0 关、1 开、2 未知；读不到 -1 */
 } blw;
 
-static void blw_close(blw *w)
+static void blw_close(blw *b)
 {
-    if (w->cls)
-        IWbemClassObject_Release(w->cls);
-    if (w->svc)
-        IWbemServices_Release(w->svc);
-    if (w->loc)
-        IWbemLocator_Release(w->loc);
-    SysFreeString(w->path);
-    if (SUCCEEDED(w->init))
-        CoUninitialize();
-    memset(w, 0, sizeof *w);
-    w->init = E_FAIL;
+    if (b->vol)
+        IWbemClassObject_Release(b->vol);
+    b->vol = NULL;
+    gk3w_wmi_close(&b->w);
 }
 
 /* 连上 BitLocker 的 WMI 命名空间、找到盘符为 drive 的卷。失败返回 -1（之后仍要 blw_close） */
-static int blw_open(blw *w, wchar_t drive)
+static int blw_open(blw *b, wchar_t drive)
 {
-    IEnumWbemClassObject *en = NULL;
-    IWbemClassObject *obj = NULL;
-    BSTR ns = NULL, lang = NULL, query = NULL, cls = NULL;
     wchar_t q[128];
-    ULONG n = 0;
-    VARIANT v;
-    int rc = -1;
+    uint64_t ps;
 
-    memset(w, 0, sizeof *w);
-    w->protection = -1;
-    w->init = CoInitializeEx(NULL, COINIT_MULTITHREADED);
-    /* 进程里已经设过安全参数时这里会失败，不影响后面（代理上另设 CoSetProxyBlanket） */
-    CoInitializeSecurity(NULL, -1, NULL, NULL, RPC_C_AUTHN_LEVEL_PKT_PRIVACY, RPC_C_IMP_LEVEL_IMPERSONATE, NULL, EOAC_NONE,
-                         NULL);
-    if (FAILED(CoCreateInstance(&CLSID_WbemLocator, NULL, CLSCTX_INPROC_SERVER, &IID_IWbemLocator, (void **)&w->loc)))
-        goto out;
-    ns = SysAllocString(L"ROOT\\CIMV2\\Security\\MicrosoftVolumeEncryption");
-    /* WBEM_FLAG_CONNECT_USE_MAX_WAIT：WMI 服务卡住时连接最多等 2 分钟（Windows 的上限），不无限等 */
-    if (FAILED(IWbemLocator_ConnectServer(w->loc, ns, NULL, NULL, NULL, WBEM_FLAG_CONNECT_USE_MAX_WAIT, NULL, NULL, &w->svc)))
-        goto out;
-    /* 包级加密：取回的恢复密钥要经过 RPC，这个命名空间也要求加密 */
-    CoSetProxyBlanket((IUnknown *)w->svc, RPC_C_AUTHN_WINNT, RPC_C_AUTHZ_NONE, NULL, RPC_C_AUTHN_LEVEL_PKT_PRIVACY,
-                      RPC_C_IMP_LEVEL_IMPERSONATE, NULL, EOAC_NONE);
+    b->vol = NULL;
+    b->protection = -1;
+    if (gk3w_wmi_open(&b->w, L"ROOT\\CIMV2\\Security\\MicrosoftVolumeEncryption"))
+        return -1;
     _snwprintf(q, 128, L"SELECT * FROM Win32_EncryptableVolume WHERE DriveLetter='%lc:'", drive);
-    lang = SysAllocString(L"WQL");
-    query = SysAllocString(q);
-    if (FAILED(IWbemServices_ExecQuery(w->svc, lang, query, WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY, NULL, &en)))
-        goto out;
-    /* 查询结果最多等 30 秒：WMI 服务卡住时不能让检查一直不返回（超时 = WBEM_S_TIMEDOUT） */
-    if (IEnumWbemClassObject_Next(en, 30000, 1, &obj, &n) != WBEM_S_NO_ERROR || n != 1)
-        goto out;
-    VariantInit(&v);
-    if (SUCCEEDED(IWbemClassObject_Get(obj, L"ProtectionStatus", 0, &v, NULL, NULL)) && (v.vt == VT_I4 || v.vt == VT_UI4))
-        w->protection = (int)v.lVal;
-    VariantClear(&v);
-    if (FAILED(IWbemClassObject_Get(obj, L"__PATH", 0, &v, NULL, NULL)) || v.vt != VT_BSTR || !v.bstrVal) {
-        VariantClear(&v);
-        goto out;
-    }
-    w->path = v.bstrVal;   /* 接管，不 VariantClear */
-    cls = SysAllocString(L"Win32_EncryptableVolume");
-    {
-        /* 半同步取类定义，最多等 30 秒（同上：WMI 服务卡住时检查不能一直不返回） */
-        IWbemCallResult *cr = NULL;
-        HRESULT hr = IWbemServices_GetObject(w->svc, cls, WBEM_FLAG_RETURN_IMMEDIATELY, NULL, NULL, &cr);
-        if (SUCCEEDED(hr))
-            hr = IWbemCallResult_GetResultObject(cr, 30000, &w->cls);
-        if (cr)
-            IWbemCallResult_Release(cr);
-        if (hr != WBEM_S_NO_ERROR || !w->cls)
-            goto out;
-    }
-    rc = 0;
-out:
-    if (obj)
-        IWbemClassObject_Release(obj);
-    if (en)
-        IEnumWbemClassObject_Release(en);
-    SysFreeString(ns);
-    SysFreeString(lang);
-    SysFreeString(query);
-    SysFreeString(cls);
-    return rc;
+    /* 查询结果最多等 30 秒：WMI 服务卡住时不能让检查一直不返回 */
+    if (gk3w_wmi_find(&b->w, q, 30000, NULL, NULL, &b->vol))
+        return -1;
+    if (!gk3w_wmi_u64(b->vol, L"ProtectionStatus", &ps) && ps <= 2)
+        b->protection = (int)ps;
+    return 0;
 }
 
-/* 调这个卷的一个方法，入参至多一个（pname 为 NULL 时不带）。方法的 ReturnValue 不是 0 就算失败（返回它，
- * 不是负数时换成 E_FAIL）；调用本身失败或 60 秒没有结果时返回调用的 HRESULT。成功时 *out 由调用方释放 */
-static HRESULT blw_call(blw *w, const wchar_t *method, const wchar_t *pname, VARIANT *pval, IWbemClassObject **out)
+/* 调这个卷的一个方法（见 gk3w_wmi_call），最多等 60 秒 */
+static HRESULT blw_call(blw *b, const wchar_t *method, const wchar_t *pname, VARIANT *pval, IWbemClassObject **out)
 {
-    IWbemClassObject *def = NULL, *in = NULL;
-    BSTR m = SysAllocString(method);
-    VARIANT rv;
-    HRESULT hr = S_OK;
-
-    *out = NULL;
-    if (pname) {
-        hr = IWbemClassObject_GetMethod(w->cls, method, 0, &def, NULL);
-        if (SUCCEEDED(hr))
-            hr = IWbemClassObject_SpawnInstance(def, 0, &in);
-        if (SUCCEEDED(hr))
-            hr = IWbemClassObject_Put(in, pname, 0, pval, 0);
-    }
-    if (SUCCEEDED(hr)) {
-        /* 半同步调用，最多等 60 秒：提供程序卡住时不能让检查或安装一直不返回 */
-        IWbemCallResult *cr = NULL;
-        hr = IWbemServices_ExecMethod(w->svc, w->path, m, WBEM_FLAG_RETURN_IMMEDIATELY, NULL, in, NULL, &cr);
-        if (SUCCEEDED(hr)) {
-            hr = IWbemCallResult_GetResultObject(cr, 60000, out);
-            if (hr == WBEM_S_TIMEDOUT)
-                hr = WBEM_E_TIMED_OUT;
-        }
-        if (cr)
-            IWbemCallResult_Release(cr);
-    }
-    if (SUCCEEDED(hr)) {
-        VariantInit(&rv);
-        if (*out && SUCCEEDED(IWbemClassObject_Get(*out, L"ReturnValue", 0, &rv, NULL, NULL)) && (rv.vt == VT_I4 || rv.vt == VT_UI4))
-            hr = rv.lVal == 0 ? S_OK : FAILED((HRESULT)rv.lVal) ? (HRESULT)rv.lVal : E_FAIL;
-        else
-            hr = E_UNEXPECTED;
-        VariantClear(&rv);
-    }
-    if (FAILED(hr) && *out) {
-        IWbemClassObject_Release(*out);
-        *out = NULL;
-    }
-    if (in)
-        IWbemClassObject_Release(in);
-    if (def)
-        IWbemClassObject_Release(def);
-    SysFreeString(m);
-    return hr;
+    return gk3w_wmi_call(&b->w, b->vol, method, pname, pval, 60000, out);
 }
 
 /* 卷上数字密码保护器（恢复密钥）的 ID。返回个数（*ids 由调用方 SafeArrayDestroy；0 个时为 NULL），失败返回 -1 */

@@ -1,0 +1,6 @@
+D 120
+E PROGRESS 0 shrink-analyze
+D 3000
+E shrink: analysis of C: took 43.0 s
+O SHRINK drive=C: size_mib=976233 min_mib=973705 max_shrink_mib=2528 file=\pagefile.sys::$DATA flags=P---D
+X 0

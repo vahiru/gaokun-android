@@ -5,6 +5,7 @@
  *   gk3w uninstall ...  卸载 apply 装上去的那一套，留下空闲空间（见 uninstall.c）
  *   gk3w preflight      安装前检查要看的系统状态（只读，见 sys.c）
  *   gk3w bitlocker-key  校验标准输入上的 BitLocker 恢复密钥，可选暂停保护（见 bitlocker.c）
+ *   gk3w shrink-info    系统卷最多还能压缩出多少、被哪个文件挡住（只读，见 shrink.c）
  *   gk3w dump|esp-tree|readpart  把装好的盘摘要成文本或导出小分区，与 LiveCD 的结果对拍（只读，见 dump.c）
  *   gk3w mkpart|rmpart|write|esp-ls|esp-put   阶段 1 的写盘验证命令，只对 VHD 动手（见 write.c）
  *   gk3w --version
@@ -52,7 +53,7 @@ int wmain(int argc, wchar_t **argv)
     SetConsoleOutputCP(CP_UTF8);
 
     if (argc < 2) {
-        fprintf(stderr, "!! usage: gk3w probe|preflight|bitlocker-key|plan|hash|space|apply|uninstall|dump|esp-tree|readpart|mkpart|rmpart|write|esp-ls|esp-put|--version\n");
+        fprintf(stderr, "!! usage: gk3w probe|preflight|bitlocker-key|shrink-info|plan|hash|space|apply|uninstall|dump|esp-tree|readpart|mkpart|rmpart|write|esp-ls|esp-put|--version\n");
         return 2;
     }
     if (!wcscmp(argv[1], L"--version")) {
@@ -68,7 +69,7 @@ int wmain(int argc, wchar_t **argv)
             {L"write", gk3w_cmd_write},   {L"esp-ls", gk3w_cmd_esp_ls}, {L"esp-put", gk3w_cmd_esp_put},
             {L"apply", gk3w_cmd_apply},   {L"dump", gk3w_cmd_dump},     {L"esp-tree", gk3w_cmd_esp_tree},
             {L"readpart", gk3w_cmd_readpart}, {L"uninstall", gk3w_cmd_uninstall}, {L"preflight", gk3w_cmd_preflight}, {L"plan", gk3w_cmd_plan},
-            {L"hash", gk3w_cmd_hash}, {L"space", gk3w_cmd_space}, {L"bitlocker-key", gk3w_cmd_bitlocker_key},
+            {L"hash", gk3w_cmd_hash}, {L"space", gk3w_cmd_space}, {L"bitlocker-key", gk3w_cmd_bitlocker_key}, {L"shrink-info", gk3w_cmd_shrink_info},
         };
         for (size_t i = 0; i < sizeof cmds / sizeof cmds[0]; i++)
             if (!wcscmp(argv[1], cmds[i].name))

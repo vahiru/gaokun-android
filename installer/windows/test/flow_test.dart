@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gk3_common/backend/protocol.dart';
 import 'package:gk3_windows/app.dart';
+import 'package:gk3_windows/model.dart';
 import 'package:gk3_windows/session.dart';
 import 'package:gk3_windows/ui/check_page.dart';
 import 'package:gk3_windows/ui/media_pages.dart';
@@ -123,6 +124,38 @@ void main() {
     await waitFor(t, find.byType(DonePage), tries: 400);
     expect(find.text(l.doneUninstallSub('40 GiB')), findsOneWidget);
     expect(rec.calls.singleWhere((c) => c.first == 'uninstall'), containsAllInOrder(['--disk', '0', '--real-disk']));
+  });
+
+  testWidgets('空间不够：分析 C 盘的可压缩空间，指出挡住压缩的文件与处理方法；重新检查后清掉', (t) async {
+    final (rec, s) = await pumpApp(t, 'nospace');
+    await see(t, find.text(l.shrinkAnalyze));
+    await tap(t, find.text(l.shrinkAnalyze));
+    await waitFor(t, find.text(l.sbPagefile), tries: 400);
+    expect(find.text(l.shrinkNotEnough('2.5 GiB', fmtMib(s.minNeedMib))), findsOneWidget);
+    expect(find.text(r'C:\pagefile.sys'), findsOneWidget);
+    expect(find.text(l.sbPagefileHow), findsOneWidget);
+    expect(find.text(l.shrinkReanalyze), findsOneWidget);
+    expect(rec.calls.where((c) => c.first == 'shrink-info'), hasLength(1));
+    await tap(t, find.text(l.btnRecheck));
+    expect(find.text(l.sbPagefile), findsNothing);
+    expect(find.text(l.shrinkAnalyze), findsOneWidget);
+  });
+
+  testWidgets('空间不够、但 C 盘压缩得出来：请用户去压缩；分析失败、找不到文件也说清楚', (t) async {
+    Stream<Gk3Event> shrink(Map<String, String> f) =>
+        Stream.fromIterable([Gk3Record('SHRINK', {'drive': 'C:', 'size_mib': '170000', ...f}), const Gk3Exit(0)]);
+    var reply = shrink({'max_shrink_mib': '90000', 'file': r'\pagefile.sys::$DATA'});
+    final (_, s) = await pumpApp(t, 'nospace', respond: {'shrink-info': (args, input) => reply});
+    final need = fmtMib(s.minNeedMib);
+    await tap(t, find.text(l.shrinkAnalyze));
+    await see(t, find.text(l.shrinkEnough('87.9 GiB', need)));
+    expect(find.text(l.sbPagefile), findsNothing);
+    reply = shrink({'max_shrink_mib': '1024'});
+    await tap(t, find.text(l.shrinkReanalyze));
+    await see(t, find.text(l.shrinkNoFile('1 GiB', need)));
+    reply = Stream.fromIterable([const Gk3Record('ERR', {'code': 'shrink-query'}), const Gk3Exit(1)]);
+    await tap(t, find.text(l.shrinkReanalyze));
+    await see(t, find.text('${l.shrinkFailed}${l.errShrinkQuery}'));
   });
 
   testWidgets('系统盘没有空闲区：说明要压缩出多少，不能往下走', (t) async {

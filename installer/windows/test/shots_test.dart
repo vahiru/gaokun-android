@@ -212,4 +212,13 @@ void main() {
     await tapShown(t, find.text(en.blVerify));
     await shot(t, '37-bitlocker-confirm-ok-en');
   }, skip: !haveFont);
+
+  testWidgets('空间不够：分析可压缩空间', (t) async {
+    await pumpApp(t, 'nospace');
+    await tap(t, find.text(l.shrinkAnalyze));
+    await waitFor(t, find.text(l.sbPagefile), tries: 400);
+    await shot(t, '38-shrink-pagefile');
+    await t.drag(find.byType(ListView).first, const Offset(0, -400));
+    await shot(t, '39-shrink-pagefile-scrolled');
+  }, skip: !haveFont);
 }

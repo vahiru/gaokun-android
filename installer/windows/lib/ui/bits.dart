@@ -6,10 +6,13 @@ enum CheckState { ok, warn, fail, info }
 
 /// 检查页的一行：左边状态图标，右边标题与说明（说明里写清楚怎么处理）
 class CheckRow extends StatelessWidget {
-  const CheckRow({super.key, required this.state, required this.title, this.detail});
+  const CheckRow({super.key, required this.state, required this.title, this.detail, this.trailing});
   final CheckState state;
   final String title;
   final String? detail;
+
+  /// 右侧的操作（例如"分析可压缩空间"）
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -34,6 +37,7 @@ class CheckRow extends StatelessWidget {
             ],
           ]),
         ),
+        if (trailing != null) ...[const SizedBox(width: 16), trailing!],
       ]),
     );
   }

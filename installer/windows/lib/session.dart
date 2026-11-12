@@ -69,6 +69,9 @@ class Session extends ChangeNotifier {
           (pfRec == null ? _failed('preflight') : (pr.ok ? null : _failed('probe')));
       plans.clear();
       region = null;
+      // 压缩分析的结果对应的是上一次检查时的 C 盘
+      shrinkInfo = null;
+      shrinkErr = null;
       mediaTarget = null;
       mediaRegion = _defaultMediaRegion();
       if (disk != null && !installed) await _loadPlans();
@@ -114,6 +117,36 @@ class Session extends ChangeNotifier {
   }
 
   bool get hasRoom => plans.values.any((p) => p.ok);
+
+  // ── 压缩分析（空闲空间不够时） ──
+  /// 正在分析 C 盘最多还能压缩出多少（gk3w shrink-info，大盘要几分钟）
+  bool shrinkChecking = false;
+  ShrinkInfo? shrinkInfo;
+  Gk3Record? shrinkErr;
+
+  Future<void> analyzeShrink() async {
+    if (shrinkChecking) return;
+    shrinkChecking = true;
+    shrinkInfo = null;
+    shrinkErr = null;
+    notifyListeners();
+    try {
+      final r = await backend.run('shrink-info');
+      // 分析期间重新检查过也照样填上：分析读的是 C 盘当时的状态，不依赖检查的结果
+      final rec = r.ok ? r.first('SHRINK') : null;
+      if (rec != null) {
+        shrinkInfo = ShrinkInfo(rec);
+      } else {
+        shrinkErr = r.err ?? _failed('shrink-info');
+      }
+    } catch (e) {
+      logNote?.call('!! shrink-info: $e');
+      shrinkErr = _failed('shrink-info');
+    } finally {
+      shrinkChecking = false;
+      notifyListeners();
+    }
+  }
 
   /// 写入本机时放 GK3LIVE 的那块未分配空间；没有放得下的 = null。
   /// GK3LIVE 建在它的【末尾】：之后在 LiveCD 里保留现有系统安装 Android 时，Android 装在它前面、userdata 排在最后，

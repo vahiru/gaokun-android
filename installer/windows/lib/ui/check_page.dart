@@ -10,6 +10,7 @@ import 'bits.dart';
 import 'install_pages.dart';
 import 'manage_pages.dart';
 import 'messages.dart';
+import 'shrink_guide.dart';
 
 /// 第一页：这台电脑能不能装。每一项都写清楚怎么处理；有一项不过就不让往下走（gk3w 写盘前还会再查一遍）
 class CheckPage extends StatelessWidget {
@@ -36,6 +37,8 @@ class CheckPage extends StatelessWidget {
           state: CheckState.fail,
           title: l.chkNoRoom(fmtMib(s.minNeedMib)),
           detail: '${biggest == 0 ? l.chkNoRoomNone : l.chkNoRoomBiggest(fmtMib(biggest))}\n${l.chkNoRoomHow(fmtMib(s.minNeedMib))}',
+          // C 盘压缩不出足够的空间时，查是哪个文件挡住了、怎么处理（结果在这一行下面：ShrinkGuide）
+          trailing: const ShrinkAnalyzeButton(),
         ));
         blocked = true;
       } else {
@@ -63,6 +66,7 @@ class CheckPage extends StatelessWidget {
             )
           : ListView(children: [
               ...rows,
+              if (!s.checking && d != null && !s.installed && !s.hasRoom) const ShrinkGuide(),
               if (suspendFirst) ...[
                 const SizedBox(height: 12),
                 BitlockerKeyBox(text: l.chkBitlockerSuspendBox, suspendReboots: 2),

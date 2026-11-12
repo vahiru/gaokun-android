@@ -29,7 +29,7 @@ WARN      := -Wall -Wextra -Wshadow -Wstrict-prototypes -Wno-unused-parameter
 SAN       := -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
 WINFLAGS  := -std=gnu11 -O2 $(WARN) -Werror -municode -DUNICODE -D_UNICODE -I$(CORE)/include $(ZSTD_INC)
 ZSTDFLAGS := -O2 -w
-WINLIBS   := -static -lrpcrt4 -lbcrypt -lole32 -loleaut32 -lwbemuuid
+WINLIBS   := -static -lrpcrt4 -lbcrypt -lole32 -loleaut32 -lwbemuuid -lwevtapi
 
 .PHONY: all test win-x64 win-arm64 host-tools mke2fs mke2fs-align sdboot clean
 all: test win-x64 win-arm64 host-tools

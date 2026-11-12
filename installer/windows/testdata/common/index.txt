@@ -6,6 +6,7 @@
 # download：LiveCD 的录制（installer/live/testdata/common），Windows 版按同一个行协议输出；去掉了 LiveCD 自己的中文日志行，RELEASE 的目录换成 Windows 路径
 # plan：真跑的 gk3w plan（40 GiB 的区间 / 12508 MiB 的区间 / 空区间：界面用它问"至少要多大"，录的是 --disk 2）
 # bitlocker-key：PC 上对一个开启了 BitLocker 的测试卷（数据卷 Q:）真跑的输出，盘符换成 C:，时间是估的；带 --suspend 2 的那份按同样的格式补了暂停保护的一行（数据卷不能按重启次数暂停，录不到）
+# shrink-info：这台 PC（1 TB 的 C:）以管理员真跑的输出，分析的 43 s 缩短成 3 s
 # apply、uninstall：PC 上的 VHDX 真跑（磁盘号 2），带真实的时间；uninstall 的 FREE 记录按之后修正的格式（disk=disk2，与 probe 相同）替换过
 preflight                 preflight-ok.txt
 releases --source github  releases-github.txt
@@ -16,5 +17,6 @@ plan --sector 512 --region-start 0 --region-end 0 --disk 2 plan-need.txt
 plan *                    plan-ok.txt
 bitlocker-key --suspend 2 bitlocker-key-suspend.txt
 bitlocker-key *           bitlocker-key.txt
+shrink-info *             shrink-info.txt
 apply *                   apply.txt
 uninstall *               uninstall.txt

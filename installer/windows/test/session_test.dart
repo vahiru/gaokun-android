@@ -148,6 +148,25 @@ void main() {
     expect(s.checking, isFalse);
   });
 
+  test('压缩停在哪类文件：按卷内路径归类，去掉流名', () {
+    ShrinkBlocker k(String f) => ShrinkInfo(Gk3Record('SHRINK', {'drive': 'C:', 'max_shrink_mib': '1', 'file': f})).blocker!;
+    expect(k(r'\pagefile.sys::$DATA'), ShrinkBlocker.pagefile);
+    expect(k(r'\SwapFile.sys::$DATA'), ShrinkBlocker.pagefile);
+    expect(k(r'\hiberfil.sys::$DATA'), ShrinkBlocker.hiberfil);
+    expect(k(r'\System Volume Information\FVE2.{e40ad34d-dae9-4bc7-95bd-b16218c10f72}.3::$DATA'), ShrinkBlocker.bitlocker);
+    expect(k(r'\System Volume Information\{a7ae2a31-1b2e-11f0-9c5b-806e6f6e6963}{3808876b-c176-4e48-b7ae-04046e6cc752}::$DATA'),
+        ShrinkBlocker.restorePoint);
+    expect(k(r'\$Extend\$UsnJrnl:$J:$DATA'), ShrinkBlocker.usnJournal);
+    expect(k(r'\$Mft::$DATA'), ShrinkBlocker.ntfsMeta);
+    expect(k(r'\$LogFile::$DATA'), ShrinkBlocker.ntfsMeta);
+    expect(k(r'\MEMORY.DMP::$DATA'), ShrinkBlocker.memoryDump);
+    expect(k(r'\Windows\Minidump\111225-1.dmp::$DATA'), ShrinkBlocker.memoryDump);
+    expect(k(r'\Users\a\big.vhdx::$DATA'), ShrinkBlocker.other);
+    final i = ShrinkInfo(const Gk3Record('SHRINK', {'drive': 'C:', 'max_shrink_mib': '2528', 'file': r'\pagefile.sys::$DATA'}));
+    expect(i.file, r'\pagefile.sys');
+    expect(ShrinkInfo(const Gk3Record('SHRINK', {'drive': 'C:', 'max_shrink_mib': '2528'})).blocker, isNull);
+  });
+
   group('恢复密钥输入框的格式', () {
     final f = RecoveryKeyFormatter();
     TextEditingValue v(String t, [int? c]) => TextEditingValue(text: t, selection: TextSelection.collapsed(offset: c ?? t.length));

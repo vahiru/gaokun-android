@@ -129,6 +129,60 @@
     }
   },
   "chkNoRoomHow": "请在Windows“磁盘管理”中右键点击C盘，选择“压缩卷”压缩出至少{need}的未分配空间，随后返回此处重新检查。",
+  "shrinkAnalyze": "分析可压缩空间",
+  "shrinkReanalyze": "重新分析",
+  "shrinkAnalyzing": "正在分析C盘可压缩的空间，可能需要几分钟…",
+  "shrinkFailed": "无法分析C盘的可压缩空间。",
+  "shrinkEnough": "C盘当前最多可压缩出{max}，足以安装Android（至少需要{need}）。请在“磁盘管理”中压缩C盘，然后重新检查。",
+  "@shrinkEnough": {
+    "placeholders": {
+      "max": {
+        "type": "String"
+      },
+      "need": {
+        "type": "String"
+      }
+    }
+  },
+  "shrinkNotEnough": "C盘当前最多只能压缩出{max}，安装Android至少需要{need}。压缩无法越过以下文件：",
+  "@shrinkNotEnough": {
+    "placeholders": {
+      "max": {
+        "type": "String"
+      },
+      "need": {
+        "type": "String"
+      }
+    }
+  },
+  "shrinkNoFile": "C盘当前最多只能压缩出{max}，安装Android至少需要{need}。未能确定限制压缩的文件，请重启电脑后再次分析。",
+  "@shrinkNoFile": {
+    "placeholders": {
+      "max": {
+        "type": "String"
+      },
+      "need": {
+        "type": "String"
+      }
+    }
+  },
+  "shrinkNext": "处理完成后请重新分析：压缩可能会停在下一个无法移动的文件。",
+  "sbPagefile": "虚拟内存的分页文件",
+  "sbPagefileHow": "1. 按Win+R，输入“SystemPropertiesPerformance”并确定，在“高级”选项卡的“虚拟内存”中单击“更改”。\n2. 取消勾选“自动管理所有驱动器的分页文件大小”，选中C盘，选择“无分页文件”，单击“设置”，然后单击“确定”。\n3. 重启电脑，在“磁盘管理”中压缩C盘。\n4. 压缩完成后，重新勾选“自动管理所有驱动器的分页文件大小”并重启。",
+  "sbHiberfil": "休眠文件",
+  "sbHiberfilHow": "1. 以管理员身份打开“终端”，运行“powercfg /h off”关闭休眠，休眠文件将随之删除。\n2. 在“磁盘管理”中压缩C盘。\n3. 如需继续使用休眠，压缩完成后运行“powercfg /h on”重新开启；快速启动需保持关闭。",
+  "sbRestore": "系统还原点（卷影副本）",
+  "sbRestoreHow": "1. 按Win+R，输入“SystemPropertiesProtection”并确定，打开“系统保护”。\n2. 选中C盘，单击“配置”，再单击“删除”，删除该驱动器的所有还原点。\n3. 在“磁盘管理”中压缩C盘。删除后将无法还原到这些还原点。",
+  "sbBitlocker": "BitLocker元数据",
+  "sbBitlockerHow": "BitLocker在系统盘上保存的元数据在加密状态下无法移动。如需压缩出更多空间，请在Windows中关闭BitLocker（设备加密），等待解密完成后压缩C盘，再重新开启。重新开启后会生成新的恢复密钥，请妥善保存。",
+  "sbUsn": "NTFS更改日志（USN日志）",
+  "sbUsnHow": "1. 以管理员身份打开“终端”，运行“fsutil usn deletejournal /d C:”删除更改日志。\n2. 在“磁盘管理”中压缩C盘。Windows会在需要时自动重新创建更改日志。",
+  "sbNtfs": "NTFS元数据",
+  "sbNtfsHow": "这是NTFS自身的元数据，Windows在运行时无法移动它，C盘只能压缩到当前的上限。",
+  "sbDump": "内存转储文件",
+  "sbDumpHow": "1. 打开“磁盘清理”，选择C盘，单击“清理系统文件”。\n2. 勾选“系统错误内存转储文件”与“系统错误小型转储文件”后删除。\n3. 在“磁盘管理”中压缩C盘。",
+  "sbOther": "其他文件",
+  "sbOtherHow": "该文件正在使用或被系统锁定。请重启电脑后再次分析；如果仍停在同一文件，请根据路径确认它所属的程序，暂时关闭或卸载该程序后再试。",
   "@chkNoRoomHow": {
     "placeholders": {
       "need": {
@@ -317,6 +371,7 @@
   "errBitlockerUnverifiable": "无法读取系统盘的BitLocker恢复密钥信息，因此无法进行校验。请重新检查；如果问题仍然存在，请在Windows中关闭BitLocker（设备加密）后再继续。",
   "errBitlockerSuspend": "无法暂停BitLocker保护。请重新检查后再试。",
   "errBitlockerConverting": "BitLocker正在加密或解密系统盘，请等待操作完成后重新检查。",
+  "errShrinkQuery": "Windows未能完成C盘的压缩分析，请稍后重试。",
   "errLowBattery": "设备电量过低且未连接电源适配器。",
   "errEspFull": "EFI系统分区剩余空间不足。",
   "errPartsUnclear": "磁盘中存在与Android分区同名但内容无法识别的分区；为避免误删数据，操作已中止。",
