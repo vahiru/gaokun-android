@@ -221,4 +221,16 @@ void main() {
     await t.drag(find.byType(ListView).first, const Offset(0, -400));
     await shot(t, '39-shrink-pagefile-scrolled');
   }, skip: !haveFont);
+
+  testWidgets('空间不够：压缩停在 MFT 上', (t) async {
+    final (_, s) = await pumpApp(t, 'nospace-mft');
+    await tap(t, find.text(l.shrinkAnalyze));
+    await waitFor(t, find.text(l.mftMoveBtn), tries: 400);
+    await t.drag(find.byType(ListView).first, const Offset(0, -400));
+    await shot(t, '40-shrink-mft');
+    await t.runAsync(s.moveMft);
+    await waitFor(t, find.text(l.mftStuck), tries: 400);
+    await t.drag(find.byType(ListView).first, const Offset(0, -400));
+    await shot(t, '41-shrink-mft-moved');
+  }, skip: !haveFont);
 }

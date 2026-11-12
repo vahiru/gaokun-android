@@ -7,6 +7,7 @@
 # plan：真跑的 gk3w plan（40 GiB 的区间 / 12508 MiB 的区间 / 空区间：界面用它问"至少要多大"，录的是 --disk 2）
 # bitlocker-key：PC 上对一个开启了 BitLocker 的测试卷（数据卷 Q:）真跑的输出，盘符换成 C:，时间是估的；带 --suspend 2 的那份按同样的格式补了暂停保护的一行（数据卷不能按重启次数暂停，录不到）
 # shrink-info：这台 PC（1 TB 的 C:）以管理员真跑的输出，分析的 38.8 s 缩短成 3 s
+# mft-move：PC 上 2 GB 测试卷（T:）真跑 --execute 的输出，盘符换成 C:，时间是估的
 # apply、uninstall：PC 上的 VHDX 真跑（磁盘号 2），带真实的时间；uninstall 的 FREE 记录按之后修正的格式（disk=disk2，与 probe 相同）替换过
 preflight                 preflight-ok.txt
 releases --source github  releases-github.txt
@@ -18,5 +19,6 @@ plan *                    plan-ok.txt
 bitlocker-key --suspend 2 bitlocker-key-suspend.txt
 bitlocker-key *           bitlocker-key.txt
 shrink-info *             shrink-info.txt
+mft-move *                mft-move.txt
 apply *                   apply.txt
 uninstall *               uninstall.txt

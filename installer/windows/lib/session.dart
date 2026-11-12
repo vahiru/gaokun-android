@@ -58,6 +58,8 @@ class Session extends ChangeNotifier {
     // 压缩分析的结果对应的是检查之前的 C 盘（在这之后才结束的分析照样填进来）
     shrinkInfo = null;
     shrinkErr = null;
+    mftResult = null;
+    mftErr = null;
     notifyListeners();
     try {
       final pf = await backend.run('preflight');
@@ -124,8 +126,43 @@ class Session extends ChangeNotifier {
   ShrinkInfo? shrinkInfo;
   Gk3Record? shrinkErr;
 
+  // ── 移动 MFT（压缩停在 $Mft 上时） ──
+  /// 正在把 MFT 挪到 C 盘前部（gk3w mft-move --execute）：写 C 盘，这期间不许关闭窗口、阻止关机
+  bool mftMoving = false;
+
+  /// 最近一次移动的结果（MFTMOVE 记录）或失败原因；重新检查时清掉
+  Gk3Record? mftResult;
+  Gk3Record? mftErr;
+
+  /// 移动 MFT，成功后重新分析可压缩空间
+  Future<void> moveMft() async {
+    if (mftMoving || shrinkChecking) return;
+    mftMoving = true;
+    mftResult = null;
+    mftErr = null;
+    notifyListeners();
+    try {
+      // 原生窗口确认已经挡住关闭与关机，才启动 gk3w（同写盘）
+      await beforeDiskWrite?.call();
+      final r = await backend.run('mft-move', ['--execute']);
+      final rec = r.ok ? r.first('MFTMOVE') : null;
+      if (rec != null) {
+        mftResult = rec;
+      } else {
+        mftErr = r.err ?? _failed('mft-move');
+      }
+    } catch (e) {
+      logNote?.call('!! mft-move: $e');
+      mftErr = _failed('mft-move');
+    } finally {
+      mftMoving = false;
+      notifyListeners();
+    }
+    if (mftResult != null) await analyzeShrink();
+  }
+
   Future<void> analyzeShrink() async {
-    if (shrinkChecking) return;
+    if (shrinkChecking || mftMoving) return;
     shrinkChecking = true;
     shrinkInfo = null;
     shrinkErr = null;

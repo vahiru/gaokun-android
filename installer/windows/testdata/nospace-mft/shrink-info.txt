@@ -1,0 +1,6 @@
+D 120
+E PROGRESS 0 shrink-analyze
+D 1500
+E shrink: analysis of C: took 0.5 s
+O SHRINK drive=C: size_mib=2031 min_mib=806 max_shrink_mib=1226 adjacent_mib=0 free_mib=1921 file=\$Mft::$DATA flags=-S--D limit=file
+X 0

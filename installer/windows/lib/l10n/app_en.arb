@@ -135,6 +135,39 @@
   "sbBitlockerHow": "The metadata BitLocker keeps on the system drive cannot be moved while the drive is encrypted. To free more space, turn off BitLocker (device encryption) in Windows, wait for decryption to finish, shrink drive C:, and then turn it on again. Turning it on again creates a new recovery key; store it safely.",
   "sbUsn": "NTFS change journal (USN journal)",
   "sbUsnHow": "1. Open Terminal as an administrator and run “fsutil usn deletejournal /d C:” to delete the change journal.\n2. Shrink drive C: in Disk Management. Windows creates the change journal again when needed.",
+  "sbMft": "NTFS Master File Table (MFT)",
+  "sbMftHow": "Some fragments of the MFT are located near the end of drive C:. The installer can move them to free space near the start of the drive using the Windows defragmentation interface, then analyze again.",
+  "mftMoveBtn": "Move MFT",
+  "mftConfirmTitle": "Move MFT",
+  "mftConfirmBody": "The installer will move the fragments of the MFT located near the end of drive C: to free space near the start. Each step is carried out by NTFS itself, so stopping midway does not damage any files. The installer cannot be closed while moving; do not shut down the computer. Depending on the size of the MFT, this may take a few minutes.",
+  "mftConfirmOk": "Move",
+  "mftConfirmCancel": "Cancel",
+  "mftMoving": "Moving the MFT. This may take a few minutes…",
+  "mftMoved": "Moved {moved}; the end of the MFT moved from {before} to {after}.",
+  "@mftMoved": {
+    "placeholders": {
+      "moved": {
+        "type": "String"
+      },
+      "before": {
+        "type": "String"
+      },
+      "after": {
+        "type": "String"
+      }
+    }
+  },
+  "mftStuck": "The system records at the start of the MFT must stay in place, so drive C: can only be shrunk up to the current limit.",
+  "mftUnplaced": "Another {size} could not be moved lower because there is not enough free space near the start of drive C:. Free up space on drive C:, then analyze and move again.",
+  "@mftUnplaced": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "mftFailed": "An error occurred while moving the MFT. The parts already moved are not affected; you can try again. ",
+  "shutdownReasonMft": "Moving the MFT of drive C:",
   "sbNtfs": "NTFS metadata",
   "sbNtfsHow": "This is NTFS metadata that Windows cannot move while it is running, so drive C: can only be shrunk up to the current limit.",
   "sbDump": "Memory dump file",

@@ -71,7 +71,7 @@ class ShrinkInfo {
 }
 
 /// 挡住压缩的常见文件，各有各的处理方法（界面按它给出步骤）
-enum ShrinkBlocker { pagefile, hiberfil, restorePoint, bitlocker, usnJournal, ntfsMeta, memoryDump, other }
+enum ShrinkBlocker { pagefile, hiberfil, restorePoint, bitlocker, usnJournal, mft, ntfsMeta, memoryDump, other }
 
 /// 按卷内路径（不分大小写）归类
 ShrinkBlocker classifyShrinkBlocker(String path) {
@@ -83,6 +83,8 @@ ShrinkBlocker classifyShrinkBlocker(String path) {
   // 卷影副本（还原点）的差异文件：{GUID}{3808876b-c176-4e48-b7ae-04046e6cc752}
   if (p.startsWith(svi) && p.contains('{3808876b-c176-4e48-b7ae-04046e6cc752}')) return ShrinkBlocker.restorePoint;
   if (p.startsWith(r'\$extend\$usnjrnl')) return ShrinkBlocker.usnJournal;
+  // 主文件表（$Mft 的 $DATA 或 $BITMAP，流名已去掉）：除了开头的系统记录，都能挪到前部（gk3w mft-move）
+  if (p == r'\$mft') return ShrinkBlocker.mft;
   // NTFS 的元数据：根目录下以 $ 开头的单个文件（$Mft、$LogFile、$Bitmap …）或 $Extend 里的；
   // \$Recycle.Bin\…、\$WINDOWS.~BT\… 这类以 $ 开头的普通目录不算
   if (RegExp(r'^\\\$[^\\]+$').hasMatch(p) || p.startsWith(r'\$extend\')) return ShrinkBlocker.ntfsMeta;

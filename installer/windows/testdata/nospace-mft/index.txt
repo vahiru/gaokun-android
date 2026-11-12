@@ -1,0 +1,6 @@
+# 场景：压缩停在 $Mft 上 —— 可以把 MFT 挪到前部（移动成功之后换到 nospace-mft-after）
+# shrink-info：PC 上 2 GB 测试卷（8 万个小文件把 MFT 推到卷的中部）真跑的输出，盘符换成 C:，时间缩短
+# probe：同 nospace；preflight 用 common 里平板的
+@next mft-move nospace-mft-after
+probe                     probe.txt
+shrink-info *             shrink-info.txt

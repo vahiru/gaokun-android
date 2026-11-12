@@ -21,7 +21,8 @@ const kBackendFiles = ['gk3w.exe', 'mke2fs.exe', 'mke2fs.conf', 'systemd-bootaa6
 /// ★ 测试模式（[testDisk]，环境变量 GK3_TEST_DISK）：在 PC 上对着一块 VHD 走完整个流程。
 ///   probe 的结果里把那块 VHD 标成系统盘（别的盘标成不是），apply / uninstall 去掉 --real-disk 与
 ///   --bitlocker-key —— gk3w 不带 --real-disk 时本来就只肯写 VHD（disk.c 的 VHD 检查），真盘碰不到；
-///   bitlocker-key 去掉 --suspend（不动这台 PC 自己的 BitLocker）；"立即重启"什么都不做。界面在角上标出测试模式。
+///   bitlocker-key 去掉 --suspend（不动这台 PC 自己的 BitLocker），mft-move 去掉 --execute；"立即重启"什么都不做。
+///   界面在角上标出测试模式。
 class WinBackend extends Gk3Backend {
   WinBackend({required this.gk3w, this.sdboot, this.backupDir, this.mke2fs, this.testDisk, Net? net, this.log, this.logPath})
       : _net = net ?? Net();
@@ -47,7 +48,7 @@ class WinBackend extends Gk3Backend {
   ///   而每次调用结束时都要 flush
   final RandomAccessFile? log;
 
-  static const _gk3wCommands = {'preflight', 'probe', 'plan', 'apply', 'uninstall', 'hash', 'space', 'bitlocker-key', 'shrink-info'};
+  static const _gk3wCommands = {'preflight', 'probe', 'plan', 'apply', 'uninstall', 'hash', 'space', 'bitlocker-key', 'shrink-info', 'mft-move'};
 
   /// 写盘的调用：测试模式下去掉 --real-disk / --bitlocker-key
   static const _writes = {'apply', 'uninstall'};
@@ -210,6 +211,8 @@ class WinBackend extends Gk3Backend {
       final i = a.indexOf('--suspend');
       if (i >= 0) a = [...a.take(i), ...a.skip(i + 2)];
     }
+    // 测试模式不改动这台电脑的 C 盘：只出计划
+    if (testDisk != null && fn == 'mft-move') a = [for (final x in a) if (x != '--execute') x];
     return a;
   }
 

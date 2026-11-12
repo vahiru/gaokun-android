@@ -52,7 +52,8 @@ class CheckPage extends StatelessWidget {
       title: l.checkTitle,
       subtitle: l.checkSub,
       // 校验恢复密钥（并暂停保护）期间不能重新检查：它做完会自己重新检查
-      bottomLeft: Btn(l.btnRecheck, onPressed: s.checking || s.bitlockerChecking ? null : s.check, kind: BtnKind.secondary, icon: Icons.refresh),
+      bottomLeft: Btn(l.btnRecheck,
+          onPressed: s.checking || s.bitlockerChecking || s.mftMoving ? null : s.check, kind: BtnKind.secondary, icon: Icons.refresh),
       nextLabel: s.installed ? l.btnManage : l.btnNext,
       onNext: s.checking || blocked || (s.probe == null)
           ? null

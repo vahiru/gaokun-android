@@ -157,7 +157,9 @@ void main() {
     expect(k(r'\System Volume Information\{a7ae2a31-1b2e-11f0-9c5b-806e6f6e6963}{3808876b-c176-4e48-b7ae-04046e6cc752}::$DATA'),
         ShrinkBlocker.restorePoint);
     expect(k(r'\$Extend\$UsnJrnl:$J:$DATA'), ShrinkBlocker.usnJournal);
-    expect(k(r'\$Mft::$DATA'), ShrinkBlocker.ntfsMeta);
+    expect(k(r'\$Mft::$DATA'), ShrinkBlocker.mft);
+    expect(k(r'\$Mft::$BITMAP'), ShrinkBlocker.mft);
+    expect(k(r'\$MftMirr::$DATA'), ShrinkBlocker.ntfsMeta);
     expect(k(r'\$LogFile::$DATA'), ShrinkBlocker.ntfsMeta);
     expect(k(r'\MEMORY.DMP::$DATA'), ShrinkBlocker.memoryDump);
     expect(k(r'\Windows\MEMORY.DMP::$DATA'), ShrinkBlocker.memoryDump);

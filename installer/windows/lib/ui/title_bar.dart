@@ -170,16 +170,20 @@ class WindowButtons extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = context.session, l = context.l;
+    // 移动 MFT 也在写 C 盘：与写盘一样不许关闭、阻止关机
+    final mft = s.mftMoving;
     WindowControl.setBusy(
-      s.diskBusy,
-      awake: s.writing,
+      s.diskBusy || mft,
+      awake: s.writing || mft,
       confirmClose: s.downloading || s.exitCleanupPending || s.quitPromptOpen,
-      power: runTitle(l, s.task),
-      shutdown: switch (s.task) {
-        WriteTask.install => l.shutdownReasonInstall,
-        WriteTask.uninstall => l.shutdownReasonUninstall,
-        WriteTask.media => l.shutdownReasonMedia,
-      },
+      power: mft ? l.mftMoving : runTitle(l, s.task),
+      shutdown: mft
+          ? l.shutdownReasonMft
+          : switch (s.task) {
+              WriteTask.install => l.shutdownReasonInstall,
+              WriteTask.uninstall => l.shutdownReasonUninstall,
+              WriteTask.media => l.shutdownReasonMedia,
+            },
     );
     return Row(mainAxisSize: MainAxisSize.min, children: [
       _CaptionButton(icon: Icons.remove, label: context.l.winMinimize, onPressed: WindowControl.minimize),
@@ -196,7 +200,7 @@ class WindowButtons extends StatelessWidget {
         icon: Icons.close,
         label: context.l.winClose,
         danger: true,
-        onPressed: s.diskBusy ? null : () => handleCloseRequest(context, s),
+        onPressed: s.diskBusy || s.mftMoving ? null : () => handleCloseRequest(context, s),
       ),
     ]);
   }

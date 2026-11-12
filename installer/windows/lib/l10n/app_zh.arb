@@ -198,6 +198,39 @@
   "sbBitlockerHow": "BitLocker在系统盘上保存的元数据在加密状态下无法移动。如需压缩出更多空间，请在Windows中关闭BitLocker（设备加密），等待解密完成后压缩C盘，再重新开启。重新开启后会生成新的恢复密钥，请妥善保存。",
   "sbUsn": "NTFS更改日志（USN日志）",
   "sbUsnHow": "1. 以管理员身份打开“终端”，运行“fsutil usn deletejournal /d C:”删除更改日志。\n2. 在“磁盘管理”中压缩C盘。Windows会在需要时自动重新创建更改日志。",
+  "sbMft": "NTFS主文件表（MFT）",
+  "sbMftHow": "MFT的部分片段位于C盘靠后的位置。安装器可以使用Windows的碎片整理接口，将这些片段移到C盘前部的空闲位置，然后重新分析。",
+  "mftMoveBtn": "移动MFT",
+  "mftConfirmTitle": "移动MFT",
+  "mftConfirmBody": "安装器将把MFT位于C盘后部的片段移到前部的空闲位置。每一步都由NTFS自身完成，中途停止不会损坏文件；移动期间无法关闭安装器，请勿关闭电脑。根据MFT的大小，可能需要几分钟。",
+  "mftConfirmOk": "移动",
+  "mftConfirmCancel": "取消",
+  "mftMoving": "正在移动MFT，可能需要几分钟……",
+  "mftMoved": "已移动{moved}，MFT的末尾从{before}处移到{after}处。",
+  "@mftMoved": {
+    "placeholders": {
+      "moved": {
+        "type": "String"
+      },
+      "before": {
+        "type": "String"
+      },
+      "after": {
+        "type": "String"
+      }
+    }
+  },
+  "mftStuck": "MFT开头的系统记录必须留在原处，C盘只能压缩到当前的上限。",
+  "mftUnplaced": "另有{size}无法移到更低的位置：C盘前部没有足够大的空闲空间。可先清理C盘上的文件，再重新分析并移动。",
+  "@mftUnplaced": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "mftFailed": "移动MFT时出错，已移动的部分不受影响，可以重新尝试。",
+  "shutdownReasonMft": "正在移动C盘的MFT",
   "sbNtfs": "NTFS元数据",
   "sbNtfsHow": "这是NTFS自身的元数据，Windows在运行时无法移动它，C盘只能压缩到当前的上限。",
   "sbDump": "内存转储文件",

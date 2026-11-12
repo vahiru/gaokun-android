@@ -45,3 +45,5 @@ flutter:
     - testdata/bitlocker/
     - testdata/bitlocker-suspended/
     - testdata/bitlocker-on/
+    - testdata/nospace-mft/
+    - testdata/nospace-mft-after/

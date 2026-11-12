@@ -78,6 +78,9 @@ esac
     // 不动这台 PC 自己的 BitLocker：校验照常，暂停去掉
     await Gk3Backend.collect(b.callWithInput('bitlocker-key', ['--suspend', '2'], 'x\n'));
     expect(argsLog.readAsLinesSync().last, 'bitlocker-key');
+    // 也不移动这台 PC 的 MFT：只出计划
+    await b.run('mft-move', ['--execute']);
+    expect(argsLog.readAsLinesSync().last, 'mft-move');
   });
 
   test('恢复密钥经标准输入交给 gk3w，日志里只记"有标准输入"', () async {

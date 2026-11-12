@@ -167,6 +167,47 @@ void main() {
     await see(t, find.text('${l.shrinkFailed}${l.errShrinkQuery}'));
   });
 
+  testWidgets('压缩停在 MFT 上：确认后移动 MFT（写盘期间挡住关闭），再自动重新分析', (t) async {
+    final window = <MethodCall>[];
+    t.binding.defaultBinaryMessenger.setMockMethodCallHandler(const MethodChannel('gk3/window'), (c) async {
+      window.add(c);
+      return null;
+    });
+    addTearDown(() => t.binding.defaultBinaryMessenger.setMockMethodCallHandler(const MethodChannel('gk3/window'), null));
+    final (rec, s) = await pumpApp(t, 'nospace-mft');
+    // 同 main.dart：启动 gk3w 之前等原生窗口挡住关闭（一帧）
+    s.beforeDiskWrite = WindowControl.settleBusy;
+    await tap(t, find.text(l.shrinkAnalyze));
+    await waitFor(t, find.text(l.mftMoveBtn), tries: 400);
+    expect(find.text(l.sbMft), findsOneWidget);
+    expect(find.text(r'C:\$Mft'), findsOneWidget);
+    // 取消：不动盘
+    await tapShown(t, find.text(l.mftMoveBtn));
+    await tap(t, find.text(l.mftConfirmCancel));
+    expect(rec.calls.where((c) => c.first == 'mft-move'), isEmpty);
+    await tapShown(t, find.text(l.mftMoveBtn));
+    await tap(t, find.text(l.mftConfirmOk));
+    await waitFor(t, find.text(l.mftStuck), tries: 400);
+    expect(rec.calls.singleWhere((c) => c.first == 'mft-move'), ['mft-move', '--execute']);
+    expect(rec.calls.where((c) => c.first == 'shrink-info'), hasLength(2));
+    expect(find.text(l.mftMoved('78 MiB', '755 MiB', '677 MiB')), findsOneWidget);
+    expect(find.text(l.mftMoveBtn), findsNothing);
+    final busy = [for (final c in window) if (c.method == 'setBusy') c.arguments as Map];
+    expect(busy.where((a) => a['busy'] == true && a['power'] == l.mftMoving), isNotEmpty);
+    expect(busy.last['busy'], isFalse);
+    expect(s.mftMoving, isFalse);
+  });
+
+  testWidgets('移动 MFT 失败：说明已移动的部分不受影响', (t) async {
+    final (_, s) = await pumpApp(t, 'nospace-mft', respond: {
+      'mft-move': (args, input) => Stream.fromIterable([const Gk3Record('ERR', {'code': 'mft-move-failed'}), const Gk3Exit(1)]),
+    });
+    await t.runAsync(s.analyzeShrink);
+    await t.runAsync(s.moveMft);
+    await settle(t);
+    expect(find.textContaining(l.mftFailed), findsOneWidget);
+  });
+
   testWidgets('测试模式不分析这台电脑的 C 盘', (t) async {
     await pumpApp(t, 'nospace', testDisk: 2);
     await see(t, find.text(l.chkNoRoom('20.2 GiB')));

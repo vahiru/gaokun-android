@@ -1,0 +1,21 @@
+D 60
+E volume C: 2031 MiB, 1925 MiB free, 4096-byte clusters; MFT starts at 677 MiB
+E $MFT::$DATA: 1 fragment(s), 78 MiB, ends at 755 MiB
+E $MFT::$BITMAP: 4 fragment(s), 0 MiB, ends at 677 MiB
+E moving
+D 400
+E moved $MFT::$DATA VCN 16388 (3644 clusters): 741 MiB -> 5 MiB
+D 400
+E moved $MFT::$DATA VCN 12292 (4096 clusters): 725 MiB -> 19 MiB
+D 400
+E moved $MFT::$DATA VCN 8196 (4096 clusters): 709 MiB -> 35 MiB
+D 400
+E moved $MFT::$DATA VCN 4100 (4096 clusters): 693 MiB -> 51 MiB
+D 400
+E moved $MFT::$DATA VCN 4 (4096 clusters): 677 MiB -> 67 MiB
+E moved $MFT::$BITMAP VCN 0 (1 clusters): 677 MiB -> 83 MiB
+E moved $MFT::$BITMAP VCN 3 (1 clusters): 580 MiB -> 83 MiB
+E moved $MFT::$BITMAP VCN 2 (1 clusters): 573 MiB -> 83 MiB
+E moved 78 MiB in 8 step(s), 0 MiB could not be placed lower; the MFT now ends at 677 MiB (was 755 MiB)
+O MFTMOVE drive=C: execute=yes end_before_mib=755 end_after_mib=677 moved_mib=78 steps=8 unplaced_mib=0
+X 0
