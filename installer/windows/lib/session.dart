@@ -145,12 +145,9 @@ class Session extends ChangeNotifier {
       // 原生窗口确认已经挡住关闭与关机，才启动 gk3w（同写盘）
       await beforeDiskWrite?.call();
       final r = await backend.run('mft-move', ['--execute']);
-      final rec = r.ok ? r.first('MFTMOVE') : null;
-      if (rec != null) {
-        mftResult = rec;
-      } else {
-        mftErr = r.err ?? _failed('mft-move');
-      }
+      // 中途失败时 gk3w 照样报已挪的部分（MFTMOVE），再报 ERR：两样都留着
+      mftResult = r.first('MFTMOVE');
+      if (!r.ok) mftErr = r.err ?? _failed('mft-move');
     } catch (e) {
       logNote?.call('!! mft-move: $e');
       mftErr = _failed('mft-move');
@@ -158,11 +155,14 @@ class Session extends ChangeNotifier {
       mftMoving = false;
       notifyListeners();
     }
-    if (mftResult != null) await analyzeShrink();
+    // 挪动过（哪怕中途失败）：C 盘已经变了，重新分析
+    if (mftResult != null) await analyzeShrink(manual: false);
   }
 
-  Future<void> analyzeShrink() async {
+  /// [manual]：用户按的"分析"（清掉上一次移动的失败提示，让分析结果显示出来）；移动之后自动的那次不清
+  Future<void> analyzeShrink({bool manual = true}) async {
     if (shrinkChecking || mftMoving) return;
+    if (manual) mftErr = null;
     shrinkChecking = true;
     shrinkInfo = null;
     shrinkErr = null;

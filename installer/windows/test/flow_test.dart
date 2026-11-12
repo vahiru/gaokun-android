@@ -198,14 +198,34 @@ void main() {
     expect(s.mftMoving, isFalse);
   });
 
-  testWidgets('移动 MFT 失败：说明已移动的部分不受影响', (t) async {
-    final (_, s) = await pumpApp(t, 'nospace-mft', respond: {
-      'mft-move': (args, input) => Stream.fromIterable([const Gk3Record('ERR', {'code': 'mft-move-failed'}), const Gk3Exit(1)]),
-    });
+  testWidgets('移动 MFT 失败：说明原因、可以再试；中途失败时照样重新分析并显示已移动的部分', (t) async {
+    var reply = Stream<Gk3Event>.fromIterable([const Gk3Record('ERR', {'code': 'mft-open'}), const Gk3Exit(1)]);
+    final (rec, s) = await pumpApp(t, 'nospace-mft', respond: {'mft-move': (args, input) => reply});
     await t.runAsync(s.analyzeShrink);
     await t.runAsync(s.moveMft);
     await settle(t);
-    expect(find.textContaining(l.mftFailed), findsOneWidget);
+    // 一步都没挪：不重新分析，失败原因与"移动MFT"按钮都在
+    expect(find.text('${l.mftFailed}${l.errMftRead}'), findsOneWidget);
+    expect(find.text(l.mftMoveBtn), findsOneWidget);
+    expect(rec.calls.where((c) => c.first == 'shrink-info'), hasLength(1));
+    // 手动重新分析：失败提示清掉
+    await t.runAsync(s.analyzeShrink);
+    await settle(t);
+    expect(find.textContaining(l.mftFailed), findsNothing);
+    // 挪了一部分后连续失败：报已挪的部分、失败原因，重新分析，还能再挪
+    reply = Stream<Gk3Event>.fromIterable([
+      const Gk3Record('MFTMOVE', {'drive': 'C:', 'execute': 'yes', 'end_before_mib': '755', 'end_after_mib': '720', 'moved_mib': '35',
+          'steps': '3', 'unplaced_mib': '43', 'fixed_end_mib': '678'}),
+      const Gk3Record('ERR', {'code': 'mft-move-failed'}),
+      const Gk3Exit(1),
+    ]);
+    await t.runAsync(s.moveMft);
+    await settle(t);
+    expect(rec.calls.where((c) => c.first == 'shrink-info'), hasLength(3));
+    expect(find.text(l.mftMoved('35 MiB', '755 MiB', '720 MiB')), findsOneWidget);
+    expect(find.text('${l.mftFailed}${l.errMftFailed}'), findsOneWidget);
+    expect(find.text(l.mftUnplaced('43 MiB')), findsOneWidget);
+    expect(find.text(l.mftMoveBtn), findsOneWidget);
   });
 
   testWidgets('空间够用时也能分析：说还能再压缩出多少，挡住的文件照样给出处理方法', (t) async {

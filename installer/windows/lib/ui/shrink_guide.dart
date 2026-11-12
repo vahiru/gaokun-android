@@ -37,8 +37,6 @@ class ShrinkGuide extends StatelessWidget {
         const SizedBox(width: 12),
         Expanded(child: Text(l.mftMoving, style: context.tt.bodyLarge)),
       ]);
-    } else if (s.mftErr != null) {
-      body = NoteBox(warn: true, text: '${l.mftFailed}${errText(l, s.mftErr!)}');
     } else if (s.shrinkChecking) {
       body = Row(children: [
         const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
@@ -99,24 +97,31 @@ class ShrinkGuide extends StatelessWidget {
     ]);
   }
 
-  /// 压缩停在 MFT 上：没挪过就说明并提供"移动 MFT"；挪过了还停在它上面，说明为什么不能再多
+  /// 压缩停在 MFT 上：没挪过就说明并提供"移动 MFT"；挪过了，说挪了多少，再按情况说明：
+  /// MFT 已经只剩开头必须留在原处的部分（不能再多），还有放不下的部分（腾出前部的空间后可以再挪），
+  /// 或者别的原因仍停在它上面（例如挪动期间 MFT 又变大了：可以再挪一次）
   List<Widget> _mftBody(BuildContext context, Color fg) {
     final s = context.session, l = context.l;
     final style = context.tt.bodyLarge!.copyWith(color: fg);
     final done = s.mftResult;
-    if (done != null) {
-      final unplaced = done.intOf('unplaced_mib');
-      return [
-        Text(l.mftMoved(fmtMib(done.intOf('moved_mib')), fmtMib(done.intOf('end_before_mib')), fmtMib(done.intOf('end_after_mib'))),
-            style: style),
-        const SizedBox(height: 4),
-        Text(unplaced > 0 ? l.mftUnplaced(fmtMib(unplaced)) : l.mftStuck, style: style),
-      ];
+    final again = Btn(l.mftMoveBtn, kind: BtnKind.secondary, icon: Icons.low_priority, onPressed: () => confirmMoveMft(context));
+    // 移动失败的提示写在这一块里（分析结果仍然有效，照样显示）
+    final failed = s.mftErr == null ? null : Text('${l.mftFailed}${errText(l, s.mftErr!)}', style: style);
+    if (done == null) {
+      return [if (failed != null) ...[failed, const SizedBox(height: 4)], Text(l.sbMftHow, style: style), const SizedBox(height: 12), again];
     }
+    final moved = done.intOf('moved_mib'), unplaced = done.intOf('unplaced_mib');
+    final stuck = unplaced == 0 && done.intOf('end_after_mib') <= done.intOf('fixed_end_mib');
     return [
-      Text(l.sbMftHow, style: style),
-      const SizedBox(height: 12),
-      Btn(l.mftMoveBtn, kind: BtnKind.secondary, icon: Icons.low_priority, onPressed: () => confirmMoveMft(context)),
+      Text(
+          moved > 0
+              ? l.mftMoved(fmtMib(moved), fmtMib(done.intOf('end_before_mib')), fmtMib(done.intOf('end_after_mib')))
+              : l.mftNothing,
+          style: style),
+      if (failed != null) ...[const SizedBox(height: 4), failed],
+      const SizedBox(height: 4),
+      Text(stuck ? l.mftStuck : unplaced > 0 ? l.mftUnplaced(fmtMib(unplaced)) : l.mftAgain, style: style),
+      if (!stuck) ...[const SizedBox(height: 12), again],
     ];
   }
 }

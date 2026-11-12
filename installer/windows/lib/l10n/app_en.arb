@@ -164,14 +164,14 @@
   "sbUsn": "NTFS change journal (USN journal)",
   "sbUsnHow": "1. Open Terminal as an administrator and run “fsutil usn deletejournal /d C:” to delete the change journal.\n2. Shrink drive C: in Disk Management. Windows creates the change journal again when needed.",
   "sbMft": "NTFS Master File Table (MFT)",
-  "sbMftHow": "Some fragments of the MFT are located near the end of drive C:. The installer can move them to free space near the start of the drive using the Windows defragmentation interface, then analyze again.",
+  "sbMftHow": "Some fragments of the MFT are located near the end of drive C:. The installer can move them to available space near the start of the drive using the Windows defragmentation interface, then analyze again.",
   "mftMoveBtn": "Move MFT",
   "mftConfirmTitle": "Move MFT",
-  "mftConfirmBody": "The installer will move the fragments of the MFT located near the end of drive C: to free space near the start. Each step is carried out by NTFS itself, so stopping midway does not damage any files. The installer cannot be closed while moving; do not shut down the computer. Depending on the size of the MFT, this may take a few minutes.",
+  "mftConfirmBody": "The installer will use the Windows defragmentation interface to move the fragments of the MFT located near the end of drive C: to available space near the start. The installer cannot be closed while moving; do not shut down the computer or disconnect power. Depending on the size of the MFT, this may take a few minutes.",
   "mftConfirmOk": "Move",
   "mftConfirmCancel": "Cancel",
   "mftMoving": "Moving the MFT. This may take a few minutes…",
-  "mftMoved": "Moved {moved}; the end of the MFT moved from {before} to {after}.",
+  "mftMoved": "Moved {moved}. The end of the MFT is now {after} from the start of drive C: (previously {before}).",
   "@mftMoved": {
     "placeholders": {
       "moved": {
@@ -186,7 +186,9 @@
     }
   },
   "mftStuck": "The system records at the start of the MFT must stay in place, so drive C: can only be shrunk up to the current limit.",
-  "mftUnplaced": "Another {size} could not be moved lower because there is not enough free space near the start of drive C:. Free up space on drive C:, then analyze and move again.",
+  "mftUnplaced": "Another {size} could not be moved lower because there is not enough contiguous available space near the start of drive C:. Delete files you no longer need from drive C:, move again, then analyze again.",
+  "mftNothing": "No fragments of the MFT can be moved lower.",
+  "mftAgain": "Some fragments of the MFT are still located near the end of drive C: (for example, because the MFT grew while it was being moved). You can move it again.",
   "@mftUnplaced": {
     "placeholders": {
       "size": {
@@ -194,7 +196,7 @@
       }
     }
   },
-  "mftFailed": "An error occurred while moving the MFT. The parts already moved are not affected; you can try again. ",
+  "mftFailed": "An error occurred while moving the MFT. The parts already moved remain valid; you can try again. ",
   "shutdownReasonMft": "Moving the MFT of drive C:",
   "sbNtfs": "NTFS metadata",
   "sbNtfsHow": "This is NTFS metadata that Windows cannot move while it is running, so drive C: can only be shrunk up to the current limit.",
@@ -292,6 +294,9 @@
   "errBitlockerSuspend": "Unable to suspend BitLocker protection. Check again and retry.",
   "errBitlockerConverting": "BitLocker is encrypting or decrypting the system drive. Wait for it to finish, then check again.",
   "errShrinkQuery": "Try analyzing again later. If it still fails, right-click drive C: in Disk Management and choose Shrink Volume to see how much space can be freed.",
+  "errMftFailed": "Moving failed several times in a row and was stopped.",
+  "errMftRead": "Unable to read the MFT layout or the available space of drive C:.",
+  "errVolumeOpen": "Unable to open drive C:.",
   "errLowBattery": "Battery level is too low and the power adapter is not connected.",
   "errEspFull": "Insufficient free space on the EFI system partition.",
   "errPartsUnclear": "Partitions with Android partition names were found on the disk, but their contents could not be recognized. Operation aborted to prevent data loss.",

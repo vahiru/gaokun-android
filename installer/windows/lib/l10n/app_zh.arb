@@ -227,14 +227,14 @@
   "sbUsn": "NTFS更改日志（USN日志）",
   "sbUsnHow": "1. 以管理员身份打开“终端”，运行“fsutil usn deletejournal /d C:”删除更改日志。\n2. 在“磁盘管理”中压缩C盘。Windows会在需要时自动重新创建更改日志。",
   "sbMft": "NTFS主文件表（MFT）",
-  "sbMftHow": "MFT的部分片段位于C盘靠后的位置。安装器可以使用Windows的碎片整理接口，将这些片段移到C盘前部的空闲位置，然后重新分析。",
+  "sbMftHow": "MFT的部分片段位于C盘靠后的位置。安装器可以使用Windows的碎片整理接口，将这些片段移至C盘前部的可用空间，然后重新分析。",
   "mftMoveBtn": "移动MFT",
   "mftConfirmTitle": "移动MFT",
-  "mftConfirmBody": "安装器将把MFT位于C盘后部的片段移到前部的空闲位置。每一步都由NTFS自身完成，中途停止不会损坏文件；移动期间无法关闭安装器，请勿关闭电脑。根据MFT的大小，可能需要几分钟。",
+  "mftConfirmBody": "安装器将使用Windows的碎片整理接口，把MFT位于C盘靠后位置的片段移至前部的可用空间。移动期间无法关闭安装器，请勿关闭电脑或断开电源。根据MFT的大小，可能需要几分钟。",
   "mftConfirmOk": "移动",
   "mftConfirmCancel": "取消",
   "mftMoving": "正在移动MFT，可能需要几分钟……",
-  "mftMoved": "已移动{moved}，MFT的末尾从{before}处移到{after}处。",
+  "mftMoved": "已移动{moved}。MFT末尾距C盘开头的位置由{before}变为{after}。",
   "@mftMoved": {
     "placeholders": {
       "moved": {
@@ -249,7 +249,9 @@
     }
   },
   "mftStuck": "MFT开头的系统记录必须留在原处，C盘只能压缩到当前的上限。",
-  "mftUnplaced": "另有{size}无法移到更低的位置：C盘前部没有足够大的空闲空间。可先清理C盘上的文件，再重新分析并移动。",
+  "mftUnplaced": "另有{size}未能移至更低的位置：C盘前部没有足够大的连续可用空间。可先删除C盘上不需要的文件，再次移动后重新分析。",
+  "mftNothing": "MFT中没有可以移至更低位置的片段。",
+  "mftAgain": "MFT仍有片段位于C盘靠后的位置（例如移动期间MFT有所增长），可以再次移动。",
   "@mftUnplaced": {
     "placeholders": {
       "size": {
@@ -257,7 +259,7 @@
       }
     }
   },
-  "mftFailed": "移动MFT时出错，已移动的部分不受影响，可以重新尝试。",
+  "mftFailed": "移动MFT时出错，已移动的部分仍然有效，可以再次尝试。",
   "shutdownReasonMft": "正在移动C盘的MFT",
   "sbNtfs": "NTFS元数据",
   "sbNtfsHow": "这是NTFS自身的元数据，Windows在运行时无法移动它，C盘只能压缩到当前的上限。",
@@ -447,6 +449,9 @@
   "errBitlockerSuspend": "无法暂停BitLocker保护。请重新检查后再试。",
   "errBitlockerConverting": "BitLocker正在加密或解密系统盘，请等待操作完成后重新检查。",
   "errShrinkQuery": "请稍后重新分析；如果仍然失败，可在“磁盘管理”中右键点击C盘，选择“压缩卷”查看可压缩的空间。",
+  "errMftFailed": "连续多次移动失败，已停止。",
+  "errMftRead": "无法读取C盘的MFT布局或可用空间信息。",
+  "errVolumeOpen": "无法打开C盘。",
   "errLowBattery": "设备电量过低且未连接电源适配器。",
   "errEspFull": "EFI系统分区剩余空间不足。",
   "errPartsUnclear": "磁盘中存在与Android分区同名但内容无法识别的分区；为避免误删数据，操作已中止。",
