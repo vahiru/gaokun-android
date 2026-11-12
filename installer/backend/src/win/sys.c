@@ -90,22 +90,12 @@ void gk3w_sys_read(gk3w_sys *s)
             FindClose(fh);
     }
     {
-        int conv;
-        s->bitlocker = gk3w_bitlocker_status(s->system_drive, s->bitlocker_key_ids, sizeof s->bitlocker_key_ids, &s->bitlocker_ids_known, &conv);
-        if (s->bitlocker < 0) {
-            /* WMI 读不到：按盘上签名判断（有签名当作保护开着）；签名也读不到就保持 -1，由 gk3w_sys_gate 当作开着处理 */
-            int f = fve_signature(s->system_drive);
-            if (f >= 0)
-                s->bitlocker = f ? GK3W_BL_STATE_ON : GK3W_BL_STATE_OFF;
-        } else if (conv >= 2 && conv <= 5) {
-            /* 正在加密或解密：保护状态这时是 0，但 TPM 保护器可能在用（例如登录 Microsoft 账户之后的设备加密），
-             * 改了启动链 Windows 就会要求输入恢复密钥，而这时可能还没有可以校验的恢复密钥 —— 等转换完成 */
-            s->bitlocker = GK3W_BL_STATE_CONVERTING;
-        } else if (s->bitlocker == 0 && (conv == 1 || (conv < 0 && fve_signature(s->system_drive) == 1))) {
-            /* 保护关着而卷已完全加密：暂停了保护（Suspend-BitLocker / 安装器暂停的），或设备加密尚未激活。
-             * 转换状态查不到而卷上有 BitLocker 签名：不能排除正在加密，当作状态不明（要恢复密钥） */
-            s->bitlocker = conv == 1 ? GK3W_BL_STATE_SUSPENDED : GK3W_BL_STATE_UNKNOWN;
-        }
+        int conv, fve = -1;
+        int prot = gk3w_bitlocker_status(s->system_drive, s->bitlocker_key_ids, sizeof s->bitlocker_key_ids, &s->bitlocker_ids_known, &conv);
+        /* 盘上签名只在需要时读（见 gk3w_bl_state） */
+        if (prot < 0 || (prot == 0 && conv < 0))
+            fve = fve_signature(s->system_drive);
+        s->bitlocker = gk3w_bl_state(prot, conv, fve);
     }
     s->ac = -1;
     s->battery = -1;
@@ -180,6 +170,7 @@ int gk3w_cmd_preflight(int argc, wchar_t **argv)
     (void)argv;
     gk3w_sys_read(&s);
     gk3w_line_begin(&l, "PREFLIGHT");
+    gk3w_line_kv(&l, "gk3w", gk3w_version);
     gk3w_line_kv(&l, "manufacturer", s.manufacturer);
     gk3w_line_kv(&l, "model", s.model);
     gk3w_line_kv(&l, "model_ok", gk3w_model_ok(&s) ? "yes" : "no");

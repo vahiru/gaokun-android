@@ -78,7 +78,8 @@ class _BitlockerKeyBoxState extends State<BitlockerKeyBox> {
   Widget build(BuildContext context) {
     final s = context.session, l = context.l, cs = context.cs, gk = context.gk;
     final ids = s.preflight?.bitlockerKeyIds;
-    final canVerify = !s.bitlockerChecking && normalizeRecoveryKey(_key.text) != null;
+    // 移动 MFT 期间不校验：校验并暂停保护之后要重新检查，而那时检查会被拒绝
+    final canVerify = !s.bitlockerChecking && !s.mftMoving && normalizeRecoveryKey(_key.text) != null;
     Future<void> submit() async {
       if (!canVerify) return;
       await s.verifyBitlockerKey(_key.text, suspendReboots: widget.suspendReboots);

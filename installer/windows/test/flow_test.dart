@@ -224,7 +224,8 @@ void main() {
     expect(rec.calls.where((c) => c.first == 'shrink-info'), hasLength(3));
     expect(find.text(l.mftMoved('35 MiB', '755 MiB', '720 MiB')), findsOneWidget);
     expect(find.text('${l.mftFailed}${l.errMftFailed}'), findsOneWidget);
-    expect(find.text(l.mftUnplaced('43 MiB')), findsOneWidget);
+    // 失败时不去猜别的原因（不说前部空间不足）
+    expect(find.text(l.mftUnplaced('43 MiB')), findsNothing);
     expect(find.text(l.mftMoveBtn), findsOneWidget);
   });
 
@@ -251,6 +252,35 @@ void main() {
     await tap(t, find.text(l.shrinkReanalyze));
     await see(t, find.text('${l.shrinkMore('1 GiB')}\n${l.shrinkMoreFull('2 GiB')}'));
     expect(s.hasRoom, isTrue);
+  });
+
+  testWidgets('移动 MFT 期间不能往下走、不能重新检查，也不能校验恢复密钥', (t) async {
+    final gate = StreamController<Gk3Event>();
+    final (_, s) = await pumpApp(t, 'free', respond: {
+      'shrink-info': (args, input) => Stream.fromIterable([
+            const Gk3Record('SHRINK', {'drive': 'C:', 'max_shrink_mib': '100', 'file': r'\$Mft::$DATA', 'limit': 'file'}),
+            const Gk3Exit(0),
+          ]),
+      'mft-move': (args, input) => gate.stream,
+    });
+    expect(enabled(t, l.btnNext), isTrue);
+    await tap(t, find.text(l.shrinkAnalyze));
+    await tapShown(t, find.text(l.mftMoveBtn));
+    await tap(t, find.text(l.mftConfirmOk));
+    expect(s.mftMoving, isTrue);
+    expect(enabled(t, l.btnNext), isFalse);
+    expect(enabled(t, l.btnRecheck), isFalse);
+    expect(await s.verifyBitlockerKey(kGoodKey), isFalse);
+    expect(await s.install(releaseDir: r'C:\x'), isFalse);
+    expect(s.result!.err!['code'], 'internal');
+    gate
+      ..add(const Gk3Record('MFTMOVE', {'drive': 'C:', 'execute': 'yes', 'end_before_mib': '900', 'end_after_mib': '100', 'moved_mib': '800',
+          'steps': '50', 'unplaced_mib': '0', 'fixed_end_mib': '3'}))
+      ..add(const Gk3Exit(0));
+    await gate.close();
+    await settle(t, 40);
+    expect(s.mftMoving, isFalse);
+    expect(enabled(t, l.btnNext), isTrue);
   });
 
   testWidgets('测试模式不分析这台电脑的 C 盘', (t) async {

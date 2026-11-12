@@ -104,21 +104,23 @@ class ShrinkGuide extends StatelessWidget {
     final s = context.session, l = context.l;
     final style = context.tt.bodyLarge!.copyWith(color: fg);
     final done = s.mftResult;
-    final again = Btn(l.mftMoveBtn, kind: BtnKind.secondary, icon: Icons.low_priority, onPressed: () => confirmMoveMft(context));
+    // 校验恢复密钥（并暂停保护）期间不移动：它做完会重新检查
+    final again = Btn(l.mftMoveBtn,
+        kind: BtnKind.secondary, icon: Icons.low_priority, onPressed: s.bitlockerChecking ? null : () => confirmMoveMft(context));
     // 移动失败的提示写在这一块里（分析结果仍然有效，照样显示）
     final failed = s.mftErr == null ? null : Text('${l.mftFailed}${errText(l, s.mftErr!)}', style: style);
     if (done == null) {
       return [if (failed != null) ...[failed, const SizedBox(height: 4)], Text(l.sbMftHow, style: style), const SizedBox(height: 12), again];
     }
     final moved = done.intOf('moved_mib'), unplaced = done.intOf('unplaced_mib');
+    final movedText = Text(l.mftMoved(fmtMib(moved), fmtMib(done.intOf('end_before_mib')), fmtMib(done.intOf('end_after_mib'))), style: style);
+    // 中途失败：只说挪了多少与失败原因，不去猜别的原因；可以再试
+    if (failed != null) {
+      return [if (moved > 0) ...[movedText, const SizedBox(height: 4)], failed, const SizedBox(height: 12), again];
+    }
     final stuck = unplaced == 0 && done.intOf('end_after_mib') <= done.intOf('fixed_end_mib');
     return [
-      Text(
-          moved > 0
-              ? l.mftMoved(fmtMib(moved), fmtMib(done.intOf('end_before_mib')), fmtMib(done.intOf('end_after_mib')))
-              : l.mftNothing,
-          style: style),
-      if (failed != null) ...[const SizedBox(height: 4), failed],
+      moved > 0 ? movedText : Text(l.mftNothing, style: style),
       const SizedBox(height: 4),
       Text(stuck ? l.mftStuck : unplaced > 0 ? l.mftUnplaced(fmtMib(unplaced)) : l.mftAgain, style: style),
       if (!stuck) ...[const SizedBox(height: 12), again],

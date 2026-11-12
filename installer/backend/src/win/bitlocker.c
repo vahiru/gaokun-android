@@ -316,7 +316,7 @@ int gk3w_cmd_bitlocker_key(int argc, wchar_t **argv)
 {
     const wchar_t *vol = gk3w_arg(argc, argv, L"--volume");
     uint64_t reboots = 0;
-    wchar_t drive, win[MAX_PATH];
+    wchar_t drive, sysdrive, win[MAX_PATH];
     char key[128], dl[3];
     int group = 0;
     gk3w_bl_result r;
@@ -325,9 +325,10 @@ int gk3w_cmd_bitlocker_key(int argc, wchar_t **argv)
     if ((gk3w_arg(argc, argv, L"--suspend") && (gk3w_arg_u64(argc, argv, L"--suspend", &reboots) || reboots < 1 || reboots > 15)) ||
         (vol && (!iswalpha(vol[0]) || vol[1] != L':' || vol[2])))
         return gk3w_err(GK3W_TOUCHED_NA, "usage", "usage: bitlocker-key [--suspend 1-15] [--volume X:]  (the recovery key is read from standard input)", 0);
-    drive = vol ? towupper(vol[0]) : (GetSystemWindowsDirectoryW(win, MAX_PATH) && win[1] == L':' ? towupper(win[0]) : L'C');
-    /* 暂停系统卷的保护只为在这台平板上安装：别的电脑上不动它（--volume 是对着测试卷用的） */
-    if (reboots && !vol && !gk3w_model_ok_now())
+    sysdrive = GetSystemWindowsDirectoryW(win, MAX_PATH) && win[1] == L':' ? towupper(win[0]) : L'C';
+    drive = vol ? towupper(vol[0]) : sysdrive;
+    /* 暂停系统卷的保护只为在这台平板上安装：别的电脑上不动它（--volume 指别的卷用于测试） */
+    if (reboots && drive == sysdrive && !gk3w_model_ok_now())
         return gk3w_err(GK3W_TOUCHED_NA, "wrong-model", "this computer is not a Huawei MateBook E Go (gaokun3); not suspending its BitLocker protection", 0);
     if (gk3w_read_key_stdin(key, sizeof key)) {
         gk3w_wipe(key, sizeof key);

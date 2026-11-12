@@ -19,7 +19,7 @@ B          := build
 
 CORE      := ../../tools/gk3boot/core
 CORE_SRC  := $(wildcard $(CORE)/src/*.c)
-PORTABLE  := src/proto.c src/layout.c src/sparse.c src/plan.c src/esp.c src/blkey.c
+PORTABLE  := src/proto.c src/layout.c src/sparse.c src/plan.c src/esp.c src/blkey.c src/mftplan.c
 WIN_SRC   := $(wildcard src/win/*.c)
 HEADERS   := $(wildcard src/*.h src/win/*.h) $(CORE)/include/gk3core.h
 ZSTD      := third_party/zstd/zstd_dec.c
@@ -27,7 +27,9 @@ ZSTD_INC  := -Ithird_party/zstd/lib
 
 WARN      := -Wall -Wextra -Wshadow -Wstrict-prototypes -Wno-unused-parameter
 SAN       := -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
-WINFLAGS  := -std=gnu11 -O2 $(WARN) -Werror -municode -DUNICODE -D_UNICODE -I$(CORE)/include $(ZSTD_INC)
+# gk3w 的版本号（gk3w --version、PREFLIGHT 的 gk3w=）：CI 从 windows-installer-vX.Y.Z 标签传入
+GK3W_VERSION ?= dev
+WINFLAGS  := -std=gnu11 -O2 $(WARN) -Werror -municode -DUNICODE -D_UNICODE -I$(CORE)/include $(ZSTD_INC) -DGK3W_VERSION=\"$(GK3W_VERSION)\"
 ZSTDFLAGS := -O2 -w
 WINLIBS   := -static -lrpcrt4 -lbcrypt -lole32 -loleaut32 -lwbemuuid -lwevtapi
 

@@ -59,7 +59,7 @@
 各工具、脚本与HAL子目录自带的`README.md`说明该模块的使用与测试方式：
 
 - 启动入口与Fastboot：[`tools/gk3boot/README.md`](../tools/gk3boot/README.md)、[`device/huawei/gaokun3/prebuilt-gk3boot/README.md`](../device/huawei/gaokun3/prebuilt-gk3boot/README.md)
-- LiveCD与图形安装器：[`scripts/live/README.md`](../scripts/live/README.md)、[`installer/live/README.md`](../installer/live/README.md)、[`installer/common/README.md`](../installer/common/README.md)、[`installer/windows/README.md`](../installer/windows/README.md)（原型）、[`scripts/windows/README.md`](../scripts/windows/README.md)
+- LiveCD、图形安装器与Windows安装器：[`scripts/live/README.md`](../scripts/live/README.md)、[`installer/live/README.md`](../installer/live/README.md)、[`installer/common/README.md`](../installer/common/README.md)、[`installer/windows/README.md`](../installer/windows/README.md)（Windows安装器）、[`scripts/windows/README.md`](../scripts/windows/README.md)
 - 设备树HAL与音频后处理：[`camera/README.md`](../device/huawei/gaokun3/camera/README.md)、[`sensors-hal/README.md`](../device/huawei/gaokun3/sensors-hal/README.md)、[`ssc/README.md`](../device/huawei/gaokun3/ssc/README.md)、[`micarray/README.md`](../device/huawei/gaokun3/micarray/README.md)、[`denoise/README.md`](../device/huawei/gaokun3/denoise/README.md)、[`speakerfx/README.md`](../device/huawei/gaokun3/speakerfx/README.md)、[`effects/README.md`](../device/huawei/gaokun3/effects/README.md)
 - 构建输入准备：[`firmware/README.md`](../device/huawei/gaokun3/firmware/README.md)、[`hexagonrpcd-root/README.md`](../device/huawei/gaokun3/hexagonrpcd-root/README.md)、[`prebuilt-boot/README.md`](../device/huawei/gaokun3/prebuilt-boot/README.md)
 - 调试与性能脚本：[`scripts/touch/README.md`](../scripts/touch/README.md)、[`scripts/perf/README.md`](../scripts/perf/README.md)、[`scripts/selinux/README.md`](../scripts/selinux/README.md)

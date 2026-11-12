@@ -61,7 +61,8 @@ class CheckPage extends StatelessWidget {
       bottomLeft: Btn(l.btnRecheck,
           onPressed: s.checking || s.bitlockerChecking || s.mftMoving ? null : s.check, kind: BtnKind.secondary, icon: Icons.refresh),
       nextLabel: s.installed ? l.btnManage : l.btnNext,
-      onNext: s.checking || blocked || (s.probe == null)
+      // 移动 MFT 期间不能往下走：之后的安装会与它同时写 C 盘
+      onNext: s.checking || s.mftMoving || blocked || (s.probe == null)
           ? null
           : () => go(context, s.installed ? const ManagePage() : const RegionPage()),
       child: s.checking

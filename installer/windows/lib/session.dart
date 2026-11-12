@@ -49,6 +49,8 @@ class Session extends ChangeNotifier {
   int _checkGen = 0;
 
   Future<void> check() async {
+    // 移动 MFT 期间 C 盘还在变：不检查（界面上的入口那时都不可用）
+    if (mftMoving) return;
     final gen = ++_checkGen;
     checking = true;
     checkErr = null;
@@ -91,6 +93,13 @@ class Session extends ChangeNotifier {
   }
 
   static Gk3Record _failed(String fn) => Gk3Record('ERR', {'code': 'backend-failed', 'fn': fn});
+
+  /// 正在移动 MFT 时被要求写盘（界面上那时走不到这里）：留下失败原因，失败页不显示上一次的结果
+  bool _busy() {
+    result = const CallResult([Gk3Record('ERR', {'code': 'internal'})], [Gk3Log('!! the MFT is being moved; not writing the disk')], 1);
+    notifyListeners();
+    return false;
+  }
 
   WinDisk? get disk => probe?.systemDisk;
   bool get installed => disk != null && probe!.androidOn(disk!).isNotEmpty;
@@ -136,7 +145,7 @@ class Session extends ChangeNotifier {
 
   /// 移动 MFT，成功后重新分析可压缩空间
   Future<void> moveMft() async {
-    if (mftMoving || shrinkChecking) return;
+    if (mftMoving || shrinkChecking || bitlockerChecking) return;
     mftMoving = true;
     mftResult = null;
     mftErr = null;
@@ -337,6 +346,8 @@ class Session extends ChangeNotifier {
   /// 校验用户输入的恢复密钥（gk3w bitlocker-key，密钥经标准输入）。[suspendReboots] 大于 0：通过之后由 gk3w
   /// 暂停 BitLocker 保护，Windows 重启这么多次后自动恢复（关闭 Secure Boot 之前用），然后重新检查
   Future<bool> verifyBitlockerKey(String input, {int suspendReboots = 0}) async {
+    // 移动 MFT 期间不校验（之后的重新检查会被拒绝）；界面上那时按钮不可用
+    if (mftMoving) return false;
     final key = normalizeRecoveryKey(input);
     _bitlockerKey = null;
     if (key == null) {
@@ -617,6 +628,8 @@ class Session extends ChangeNotifier {
 
   /// [command]：下载完之后的写盘调用（函数、参数、标准输入）
   Future<bool> _downloadThen(WriteTask t, String releaseDir, (String, List<String>, String?) Function(String dir) command) async {
+    // 移动 MFT 期间不写盘（检查页那时不让往下走，这里再挡一次）
+    if (mftMoving) return _busy();
     _begin(t);
     final local = source == ReleaseSource.local;
     try {
@@ -673,6 +686,7 @@ class Session extends ChangeNotifier {
 
   /// 卸载：gk3w uninstall 不报百分比，界面显示一条不定长的进度
   Future<bool> uninstall() async {
+    if (mftMoving) return _busy();
     _begin(WriteTask.uninstall);
     try {
       await _startDiskWrite();

@@ -389,7 +389,7 @@
     }
   },
   "doneUninstallExtend": "可在Windows“磁盘管理”中右键点击C盘并选择“扩展卷”，将该未分配空间合并回C盘。",
-  "doneUninstallBoot": "设备开机时将直接启动Windows。",
+  "doneUninstallBoot": "Android的启动项已移除，设备开机时将按EFI分区中的默认引导文件启动（通常为Windows）。",
   "failInstallTitle": "安装未完成",
   "failUninstallTitle": "卸载未完成",
   "failUntouched": "磁盘未被修改，现有Windows系统不受影响。请排除问题后重试。",
@@ -422,7 +422,7 @@
       }
     }
   },
-  "uninstallBoot": "移除启动菜单（systemd-boot），将EFI默认引导文件恢复为Windows启动管理器",
+  "uninstallBoot": "移除Android的启动项，将EFI默认引导文件恢复为安装前的状态（通常为Windows启动管理器；EFI分区中其他系统的引导设置予以保留）",
   "uninstallFree": "释放的空间将保留为未分配状态，后续可在“磁盘管理”中合并回C盘",
   "errRelease": "安装镜像文件不完整或校验失败，请重新下载。",
   "errInstalled": "当前设备已安装Android。如需重新安装，请先执行卸载。",
@@ -449,7 +449,7 @@
   "errBitlockerSuspend": "无法暂停BitLocker保护，请重新检查后再试。",
   "errBitlockerConverting": "BitLocker正在加密或解密系统盘，请等待转换完成后重新检查。",
   "errShrinkQuery": "请稍后重试；若仍然失败，可在“磁盘管理”中右键点击C盘并选择“压缩卷”查看可压缩空间。",
-  "errMftFailed": "连续多次移动失败，操作已中止，可稍后重试。",
+  "errMftFailed": "累计多次移动失败，操作已中止，可稍后重试。",
   "errMftRead": "无法读取C盘的MFT布局或可用空间位图。",
   "errVolumeOpen": "无法打开C盘。",
   "errLowBattery": "设备电量过低且未连接电源适配器。",

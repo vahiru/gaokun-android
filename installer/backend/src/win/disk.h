@@ -8,6 +8,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "../blkey.h"
 #include "../proto.h"
 
 /* ── 参数 ── */
@@ -81,13 +82,6 @@ int gk3w_mkdirs(const wchar_t *path, size_t root_len);
 int gk3w_exists(const wchar_t *path);
 
 /* ── 系统状态（sys.c） ── */
-/* gk3w_sys.bitlocker：系统卷的 BitLocker */
-#define GK3W_BL_STATE_OFF 0         /* 没有加密 */
-#define GK3W_BL_STATE_ON 1          /* 保护已开启（或 WMI 读不到、而卷上有 BitLocker 签名） */
-#define GK3W_BL_STATE_UNKNOWN 2     /* ProtectionStatus 2 */
-#define GK3W_BL_STATE_SUSPENDED 3   /* 已完全加密，保护已暂停或尚未激活：Windows 下次启动不会要求输入恢复密钥 */
-#define GK3W_BL_STATE_CONVERTING 4  /* 正在加密或解密（含已暂停）：此时保护状态为 0，但 TPM 保护器可能在用，不改动启动链 */
-#define GK3W_BL_STATE_UNREADABLE (-1)
 typedef struct {
     char manufacturer[64], model[64];
     int secure_boot;            /* 1 开、0 关、-1 读不到 */

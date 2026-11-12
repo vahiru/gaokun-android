@@ -53,7 +53,8 @@ Future<T?> go<T>(BuildContext context, Widget page, {bool replace = false}) {
 /// 回到第一页并重新检查（失败页、完成页的"重新开始"）
 void restart(BuildContext context) {
   Navigator.of(context).popUntil((r) => r.isFirst);
-  context.session.check();
+  // 正在移动 MFT 时不重新检查（Session.check 也会拒绝）：它做完会自己重新分析
+  if (!context.session.mftMoving) context.session.check();
 }
 
 class WinInstallerApp extends StatelessWidget {

@@ -5,6 +5,7 @@
 
 #include "../src/blkey.h"
 #include "../src/esp.h"
+#include "../src/mftplan.h"
 #include "../src/layout.h"
 #include "../src/proto.h"
 
@@ -336,8 +337,166 @@ static void test_blkey(void)
     CHECK(!gk3w_blkey_equal("x", "x"));
 }
 
+static void test_bl_state(void)
+{
+    CHECK(gk3w_bl_state(-1, -1, -1) == GK3W_BL_STATE_UNREADABLE);
+    CHECK(gk3w_bl_state(-1, -1, 1) == GK3W_BL_STATE_ON);
+    CHECK(gk3w_bl_state(-1, -1, 0) == GK3W_BL_STATE_OFF);
+    CHECK(gk3w_bl_state(0, 0, -1) == GK3W_BL_STATE_OFF);
+    CHECK(gk3w_bl_state(0, 1, -1) == GK3W_BL_STATE_SUSPENDED);
+    for (int c = 2; c <= 5; c++) {
+        CHECK(gk3w_bl_state(0, c, -1) == GK3W_BL_STATE_CONVERTING);
+        CHECK(gk3w_bl_state(1, c, -1) == GK3W_BL_STATE_CONVERTING);
+    }
+    /* 保护关着、转换状态读不到：有签名就不能排除正在加密 */
+    CHECK(gk3w_bl_state(0, -1, 1) == GK3W_BL_STATE_UNKNOWN);
+    CHECK(gk3w_bl_state(0, -1, 0) == GK3W_BL_STATE_OFF);
+    CHECK(gk3w_bl_state(1, 1, -1) == GK3W_BL_STATE_ON);
+    CHECK(gk3w_bl_state(1, -1, -1) == GK3W_BL_STATE_ON);
+    CHECK(gk3w_bl_state(2, 1, -1) == GK3W_BL_STATE_UNKNOWN);
+}
+
+static void test_mft_free_runs(void)
+{
+    uint8_t bm[8];
+    gk3w_mft_run *r = NULL;
+    size_t n = 0;
+    /* 簇 0–3 占用、4–19 空（16）、20 占用、21–24 空（4）、25–63 占用 */
+    memset(bm, 0xff, sizeof bm);
+    for (int i = 4; i < 20; i++)
+        bm[i >> 3] &= (uint8_t)~(1u << (i & 7));
+    for (int i = 21; i < 25; i++)
+        bm[i >> 3] &= (uint8_t)~(1u << (i & 7));
+    CHECK(!gk3w_mft_free_runs(bm, 1000, 64, 1064, 8, &r, &n));
+    CHECK(n == 1 && r[0].start == 1004 && r[0].len == 16);
+    free(r);
+    CHECK(!gk3w_mft_free_runs(bm, 1000, 64, 1064, 4, &r, &n));
+    CHECK(n == 2 && r[1].start == 1021 && r[1].len == 4);
+    free(r);
+    /* limit 截断：只看 limit 以下 */
+    CHECK(!gk3w_mft_free_runs(bm, 1000, 64, 1010, 4, &r, &n));
+    CHECK(n == 1 && r[0].start == 1004 && r[0].len == 6);
+    free(r);
+}
+
+static void test_mft_split(void)
+{
+    gk3w_mft_ext ext[] = {{0, 0, 1000, 10}, {0, 10, 2000, 300}, {1, 0, 3000, 5}};
+    gk3w_mft_seg *s = NULL;
+    size_t n = 0, cap = 0;
+    int64_t fixed = 0;
+    CHECK(!gk3w_mft_split(ext, 3, 16, 100, &s, &n, &cap, &fixed));
+    /* $DATA 的 VCN 0–15 留在原处（跨两个片段）；$BITMAP 不受影响 */
+    CHECK(fixed == 2006);
+    CHECK(n == 4);
+    CHECK(s[0].stream == 0 && s[0].vcn == 16 && s[0].lcn == 2006 && s[0].count == 100);
+    CHECK(s[2].vcn == 216 && s[2].count == 94);
+    CHECK(s[3].stream == 1 && s[3].vcn == 0 && s[3].lcn == 3000 && s[3].count == 5);
+    free(s);
+}
+
+/* 规划结果的通用性质：放在分到的空隙里、在源的下方、距离对齐；同一空隙里没有重叠 */
+static int plan_ok(const gk3w_mft_seg *s, size_t n, const gk3w_mft_run *r, int64_t align)
+{
+    for (size_t i = 0; i < n; i++) {
+        if (s[i].gap < 0)
+            continue;
+        if (s[i].target < r[s[i].gap].start || s[i].target + s[i].count > r[s[i].gap].start + r[s[i].gap].len)
+            return 0;
+        if (s[i].target + s[i].count > s[i].lcn || (s[i].lcn - s[i].target) % align)
+            return 0;
+        for (size_t j = 0; j < n; j++)
+            if (j != i && s[j].gap >= 0 && s[i].target < s[j].target + s[j].count && s[j].target < s[i].target + s[i].count)
+                return 0;
+    }
+    return 1;
+}
+
+static void test_mft_plan(void)
+{
+    gk3w_mft_ext one = {0, 0, 5000, 404};
+    gk3w_mft_run big[] = {{100, 1000}};
+    gk3w_mft_seg *s = NULL;
+    size_t n = 0, cap = 0;
+    int64_t fixed = 0, total = 0;
+    gk3w_mft_result res;
+
+    /* 一个片段、一大块空隙：开头 4 个簇留下，其余从空隙底部按 VCN 首尾相接（挪完仍是连续的一段） */
+    CHECK(!gk3w_mft_split(&one, 1, 4, 100, &s, &n, &cap, &fixed));
+    CHECK(!gk3w_mft_plan(&s, &n, &cap, big, 1, 8, 4));
+    CHECK(plan_ok(s, n, big, 4));
+    for (size_t i = 0; i < n; i++) {
+        CHECK(s[i].gap == 0);
+        for (size_t j = 0; j < n; j++)
+            if (s[j].vcn == s[i].vcn + s[i].count)
+                CHECK(s[j].target == s[i].target + s[i].count);
+    }
+    gk3w_mft_summary(s, n, 0, fixed, &res);
+    CHECK(res.moved == 400 && res.steps == 4 && res.unplaced == 0);
+    CHECK(res.end == 5004);   /* 留在原处的开头 */
+    free(s);
+
+    /* 两块小空隙：放不下整段时拆开；总量不变 */
+    {
+        gk3w_mft_ext e = {1, 0, 5000, 300};
+        gk3w_mft_run small[] = {{100, 150}, {400, 300}};
+        s = NULL;
+        n = cap = 0;
+        fixed = 0;
+        CHECK(!gk3w_mft_split(&e, 1, 4, 100, &s, &n, &cap, &fixed));
+        CHECK(fixed == 0);
+        CHECK(!gk3w_mft_plan(&s, &n, &cap, small, 2, 8, 4));
+        CHECK(plan_ok(s, n, small, 4));
+        for (size_t i = 0; i < n; i++) {
+            CHECK(s[i].gap >= 0);
+            total += s[i].count;
+        }
+        CHECK(total == 300);
+        gk3w_mft_summary(s, n, 0, fixed, &res);
+        CHECK(res.moved == 300 && res.unplaced == 0 && res.end <= 700);
+        free(s);
+    }
+
+    /* 没有空隙：什么都不挪，也不算放不下（只有一段时它就是末尾） */
+    {
+        gk3w_mft_ext e = {1, 0, 50, 20};
+        s = NULL;
+        n = cap = 0;
+        fixed = 0;
+        CHECK(!gk3w_mft_split(&e, 1, 4, 100, &s, &n, &cap, &fixed));
+        CHECK(!gk3w_mft_plan(&s, &n, &cap, NULL, 0, 8, 4));
+        gk3w_mft_summary(s, n, 0, fixed, &res);
+        CHECK(res.moved == 0 && res.steps == 0 && res.end == 70);
+        free(s);
+    }
+}
+
+static void test_mft_summary(void)
+{
+    gk3w_mft_seg s[] = {
+        {0, 10, 900, 50, 0, 100, GK3W_SEG_TODO},     /* 计划挪到 100–150 */
+        {0, 60, 120, 10, -1, 0, GK3W_SEG_TODO},      /* 本来就在前部、下面没有空隙：不算放不下 */
+        {1, 0, 1000, 20, -1, 0, GK3W_SEG_TODO},      /* 在挪好的部分上方、放不下 */
+        {0, 70, 2000, 5, 1, 300, GK3W_SEG_TODO},     /* 执行时分到了空隙却没挪成 */
+    };
+    gk3w_mft_result r;
+    gk3w_mft_summary(s, 4, 0, 0, &r);
+    CHECK(r.moved == 55 && r.steps == 2);
+    CHECK(r.unplaced == 20 && r.end == 1020);
+    /* 执行时：DONE 才算挪了；没挪成的不算放不下，但末尾照它算 */
+    s[0].state = GK3W_SEG_DONE;
+    gk3w_mft_summary(s, 4, 1, 0, &r);
+    CHECK(r.moved == 50 && r.steps == 1);
+    CHECK(r.unplaced == 20 && r.end == 2005);
+}
+
 int main(void)
 {
+    test_bl_state();
+    test_mft_free_runs();
+    test_mft_split();
+    test_mft_plan();
+    test_mft_summary();
     test_blkey();
     test_entry_names();
     test_content_kind();

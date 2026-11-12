@@ -15,6 +15,9 @@ void gk3w_guid_upper(const GUID *g, char *out);
 extern const GUID GK3W_LINUX_DATA;   /* 0FC63DAF-8483-4772-8E79-3D69D8477DE4（sgdisk 8300，Android 的分区都用它） */
 extern const GUID GK3W_ESP_TYPE;     /* C12A7328-F81F-11D2-BA4B-00A0C93EC93B */
 
+/* 版本号（main.c，GK3W_VERSION） */
+extern const char gk3w_version[];
+
 int gk3w_cmd_probe(int argc, wchar_t **argv);
 int gk3w_cmd_apply(int argc, wchar_t **argv);
 int gk3w_cmd_dump(int argc, wchar_t **argv);

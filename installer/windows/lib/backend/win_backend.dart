@@ -7,6 +7,9 @@ import 'package:gk3_common/backend/protocol.dart';
 
 import 'net.dart';
 
+/// 界面的版本号（同 app.dart 的 kAppVersion，CI 从标签传入），记进日志文件的第一行；gk3w 的版本在 PREFLIGHT 记录里
+const _appVersion = String.fromEnvironment('GK3_VERSION', defaultValue: 'dev');
+
 /// 随程序分发、缺一不可的后端文件（CMake 打包进程序目录的 backend\）
 const kBackendFiles = ['gk3w.exe', 'mke2fs.exe', 'mke2fs.conf', 'systemd-bootaa64.efi'];
 
@@ -92,7 +95,7 @@ class WinBackend extends Gk3Backend {
     } on FileSystemException {
       log = null;
     }
-    log?.writeStringSync('gaokun3 Windows installer: backend=$dir test_disk=${testDisk ?? '(none)'}\n');
+    log?.writeStringSync('gaokun3 Windows installer $_appVersion: backend=$dir test_disk=${testDisk ?? '(none)'}\n');
     return WinBackend(
       gk3w: gk3w,
       sdboot: '$dir\\systemd-bootaa64.efi',

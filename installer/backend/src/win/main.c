@@ -1,7 +1,7 @@
-/* gk3w：gaokun3 安装器的 Windows 后端（原型）。
+/* gk3w：gaokun3 安装器的 Windows 后端。
  *
  *   gk3w probe        列出磁盘、分区、空闲区（只读，要管理员权限）
- *   gk3w apply ...    装到一段空闲空间（双系统），对应 gk3_apply --mode alongside（见 apply.c；原型只对 VHD 动手）
+ *   gk3w apply ...    装到一段空闲空间（双系统），对应 gk3_apply --mode alongside（见 apply.c；--real-disk 才写真实磁盘）
  *   gk3w uninstall ...  卸载 apply 装上去的那一套，留下空闲空间（见 uninstall.c）
  *   gk3w preflight      安装前检查要看的系统状态（只读，见 sys.c）
  *   gk3w bitlocker-key  校验标准输入上的 BitLocker 恢复密钥，可选暂停保护（见 bitlocker.c）
@@ -22,9 +22,12 @@
 #include "../proto.h"
 #include "win.h"
 
+/* 版本号：Makefile 传入（CI 取自 windows-installer-vX.Y.Z 标签，本地构建是 dev） */
 #ifndef GK3W_VERSION
-#define GK3W_VERSION "0.0.0-proto"
+#define GK3W_VERSION "dev"
 #endif
+
+const char gk3w_version[] = GK3W_VERSION;
 
 void gk3w_w2u(const wchar_t *w, char *out, size_t cap)
 {
