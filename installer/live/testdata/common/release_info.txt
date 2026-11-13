@@ -1,2 +1,2 @@
-O RELEASE dir=/media/gk3/gaokun3/payload boot=yes super=zst sha256=yes rescue=yes version=crDroidAndroid-16.0-20260916-gaokun3-v12.11 super_mib=64
+O RELEASE dir=/media/gk3/gaokun3/payload boot=yes super=zst sha256=yes version=crDroidAndroid-16.0-20260916-gaokun3-v12.11 super_mib=64
 X 0

@@ -1,16 +1,7 @@
-# gk3_probe：一块 MBR 盘 + 一块读不出分区表的盘（见 docs/dev/installer-rust-design.md）。
-# 来源：2026-10-06 test-env 容器里 shell 版与 Rust 版对拍时实录的两块盘（逐字节相同），拼进 blank 场景的 U 盘那两行：
-#   MBR 盘 = sfdisk 'label: dos' + ',300M,ef' + ',4G,7'（0xEF 分区经 sgdisk 换算显示成 EFI System / os=esp）；
-#   读不出 = 假 sgdisk 照 dm-error 上实录的输出回答（退出码 0 + 空表 + stderr 的 "Read error 5"）。
-# 替换：loop0 → /dev/nvme0n1（MBR 盘），loop1 → /dev/sdb（读不出），tran= 按真机填。其余原样。
-D 171
-O DISK path=/dev/sda size_mib=7680 model=? removable=1 tran=usb medium=yes table=gpt
-O PART path=/dev/sda1 num=1 start=2048 end=15728606 size_mib=7678 size_kib=7863279 type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B name=esp fs=vfat fslabel=GK3LIVE os=esp medium=yes
-O DISK path=/dev/nvme0n1 size_mib=30720 model=? removable=0 tran=nvme medium=no table=mbr
-O PART path=/dev/nvme0n1p1 num=1 start=2048 end=616447 size_mib=300 size_kib=307200 type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B name=EFI%20system%20partition fs=vfat fslabel= os=esp medium=no
-O PART path=/dev/nvme0n1p2 num=2 start=616448 end=9005055 size_mib=4096 size_kib=4194304 type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7 name=Microsoft%20basic%20data fs= fslabel= os= medium=no
-O FREE disk=/dev/nvme0n1 start=9005056 end=62914526 size_mib=26322
-O DISK path=/dev/sdb size_mib=20480 model=? removable=0 tran=usb medium=no table=unreadable
-E ERR code=disk-unreadable disk=/dev/sdb touched=no
-E !! 读不出 /dev/sdb 的分区表（读盘出错：Warning! Read error 5; strange behavior now likely!）—— 不列它的分区与空闲区
+O DISK path=/dev/sda size_mib=7680 sector=512 physsector=512 model=? bus=usb removable=1 medium=yes table=gpt kernel=ok
+O PART path=/dev/sda1 disk=/dev/sda num=1 idx=1 start=2048 end=15728606 size_mib=7678 size_kib=7863279 type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B uuid=9EE39B9F-58BD-42F0-AB92-9FF600174210 attrs=0x0000000000000000 name=esp fs=vfat fslabel=GK3LIVE os=esp medium=yes
+O DISK path=/dev/nvme0n1 size_mib=30720 sector=512 physsector=512 model=? bus=nvme removable=0 medium=no table=mbr
+O DISK path=/dev/sdb size_mib=20480 sector=512 physsector=512 model=? bus=usb removable=0 medium=no table=unreadable
+E ERR code=disk-unreadable disk=/dev/sdb
+E !! cannot read the partition table (I/O error); its partitions and free space are not listed
 X 1

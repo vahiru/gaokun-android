@@ -4,10 +4,10 @@
 
 ## 一、前后端职责边界
 
-图形界面不包含任何分区规划或磁盘写入计算，所有磁盘探针、容量校验、NTFS压缩与镜像写入均调用[`scripts/live/installer-lib.sh`](../../scripts/live/installer-lib.sh)（或兼容行协议的Rust后端[`tools/gk3-installer/`](../../docs/dev/installer-rust-design.md)）：
+图形界面不包含任何分区规划或磁盘写入计算，所有磁盘探测、容量校验与镜像写入均调用安装器后端[`gk3l`](../backend/)（`installer/backend/src/linux/`，与Windows安装器的`gk3w`共用分区方案、行协议与镜像写入代码；各命令的输出格式见对应源文件的文件头）：
 
 ```
-lib/backend/      shell_backend.dart（真实后端调用）· platform*.dart（按平台选后端与语言来源）
+lib/backend/      live_backend.dart（真实后端调用）· platform*.dart（按平台选后端与语言来源）
 lib/model/        将后端输出的键值对记录解析为强类型数据结构
 lib/session.dart  单次安装会话状态机
 lib/ui/           Material Design 3界面：各页面、步骤骨架（widgets.dart的StepPage）、文案映射（messages.dart）
@@ -16,7 +16,7 @@ testdata/         由真实后端在容器内录制的各场景输出fixture
 
 行协议与百分号解码（`protocol.dart`）、后端接口（`backend.dart`）、fixture回放（`fixture_backend.dart`）、MD3主题、固定1280×800逻辑画布（`LogicalCanvas`）、通用控件与打包字体在共用包[`installer/common/`](../common/README.md)（`gk3_common`）里，以`package:gk3_common/...`引用。`installer/`是pub工作区，锁文件在`installer/pubspec.lock`。
 
-调用后端命令时，`shell_backend.dart`固定通过`bash -c '. "$0" && "$@"' <lib> <函数> <参数…>`传递位置参数，严禁将用户输入拼接进shell字符串。
+调用后端命令时，`live_backend.dart`以参数列表直接启动`gk3l <命令> <参数…>`（不经过shell），严禁将用户输入拼接进命令字符串。写入磁盘的命令（`apply`、`delete`）经`gk3l job run`放进独立的systemd临时单元运行，界面退出后写入照常完成。
 
 ## 二、本地开发与测试
 
@@ -45,7 +45,7 @@ bash scripts/live/test-in-container.sh scripts/live/gen-fixtures.sh
 - **Material Design 3主题**：基于`ColorScheme.fromSeed`动态派生配色，内嵌可变字重Roboto与Noto Sans SC字体（在`gk3_common`的`buildTheme()`中显式绑定`FontVariation('wght', ...)`）。
 - **强制风险确认页**（`lib/ui/screens_risk.dart`）：任何修改磁盘的操作（整盘清空、双系统、覆盖重装、删除分区）执行前均需经过风险确认页（滚动到底部、倒计时阅读并勾选确认；整盘清空或在含Windows的磁盘上删除分区还需输入`ERASE`），最后一步按钮需长按2秒触发（支持触控长按或键盘按住回车/空格）。
 - **不可用选项显式说明原因**：无法选择的磁盘或安装模式（如当前正在运行的Live USB介质、加密卷等）保持展示并注明不可用原因，而非直接隐藏。
-- **多语言与文案校验**：后端只输出结构化进度码（`PROGRESS <代码>`）与错误码（`ERR code=<代码>`），由前端`lib/ui/messages.dart`映射为中英文文案。修改`lib/l10n/*.arb`后需运行`flutter gen-l10n`，`test/messages_test.dart`会自动校验`installer-lib.sh`中的所有状态码均具备中英文翻译。
+- **多语言与文案校验**：后端只输出结构化进度码（`PROGRESS <代码>`）与错误码（`ERR code=<代码>`），由前端`lib/ui/messages.dart`映射为中英文文案。修改`lib/l10n/*.arb`后需运行`flutter gen-l10n`，`test/messages_test.dart`会自动校验gk3l源码中的所有状态码均具备中英文翻译。
 
 ## 四、Linux arm64构建与无头渲染验证
 

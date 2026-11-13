@@ -1,9 +1,0 @@
-O PLAN op=useesp path=/dev/nvme0n1p1 need_mib=150
-O PLAN op=mkpart disk=/dev/nvme0n1 num=0 name=misc start=789448704 end=789456895 size_mib=4 type=8300
-O PLAN op=mkpart disk=/dev/nvme0n1 num=0 name=metadata start=789456896 end=789522431 size_mib=32 type=8300
-O PLAN op=mkpart disk=/dev/nvme0n1 num=0 name=boot_a start=789522432 end=789653503 size_mib=64 type=8300
-O PLAN op=mkpart disk=/dev/nvme0n1 num=0 name=boot_b start=789653504 end=789784575 size_mib=64 type=8300
-O PLAN op=mkpart disk=/dev/nvme0n1 num=0 name=super start=789784576 end=814950399 size_mib=12288 type=8300
-O PLAN op=mkpart disk=/dev/nvme0n1 num=0 name=userdata start=814950400 end=957220863 size_mib=69468 type=8300
-O PLANSUM mode=alongside rescue=no avail_mib=81920 fixed_mib=12452 userdata_mib=69468
-X 0

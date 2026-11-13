@@ -74,7 +74,7 @@ class _OptsPageState extends State<OptsPage> {
   }
 }
 
-/// PLANERR → 人话。msg 的取值在 installer-lib.sh 的 gk3_plan 里。
+/// PLANERR → 人话。msg 的取值见 installer/backend/src/plan.c 的 gk3w_plan_strerror。
 String planErrorText(BuildContext context, Plan p) {
   final l = context.l;
   final e = p.error;
@@ -83,9 +83,7 @@ String planErrorText(BuildContext context, Plan p) {
     'not-enough-space' => l.errNoSpace(fmtMib(e.intOf('avail_mib')), fmtMib(e.intOf('need_mib'))),
     'userdata-too-small' => l.errUserdataSmall(fmtMib(e.intOf('min_mib'))),
     'userdata-too-big' => l.errUserdataBig(fmtMib(e.intOf('max_mib'))),
-    'mbr-disk' => l.errMbr,
-    'partlabel-conflict' => l.modeWhyInstalled(e['names'].replaceAll(',', ', ')),
-    'alongside-needs-existing-esp' || 'reinstall-needs-esp' => l.modeWhyNoEsp,
+    'bad-region' => l.errBadRegion,
     'reinstall-missing' => l.errReinstallMissing(e['names'].replaceAll(',', ', ')),
     'reinstall-duplicate' => l.errReinstallDup(e['names'].replaceAll(',', ', ')),
     // 按 KiB 报（本机的 misc 只有 1007 KiB，按 MiB 取整是 0）
@@ -117,7 +115,7 @@ class _AdvPageState extends State<AdvPage> {
     final s = context.session, l = context.l, tt = Theme.of(context).textTheme;
     final p = s.plan;
     final max = s.maxUserdataMib ?? p?.userdataMib ?? 0;
-    const min = 8192; // 滑块下限的显示值；真正的下限由 gk3_plan 判（PLANERR userdata-too-small）
+    const min = 8192; // 滑块下限的显示值；真正的下限由 gk3l plan 判（PLANERR userdata-too-small）
     final cur = _v ?? (p?.userdataMib ?? max).toDouble();
     return StepPage(
       step: Gk3Step.opts,
@@ -349,7 +347,7 @@ class DualOptions extends StatelessWidget {
 class RunPage extends StatefulWidget {
   const RunPage({super.key, this.resume});
 
-  /// 不是新开一次安装，而是接着跟一个还在跑的写盘任务（gk3_job_status 的 JOB 记录，GUI-11）
+  /// 不是新开一次安装，而是接着跟一个还在跑的写盘任务（gk3l job status 的 JOB 记录，GUI-11）
   final Gk3Record? resume;
   @override
   State<RunPage> createState() => _RunPageState();
@@ -360,7 +358,7 @@ class _RunPageState extends State<RunPage> {
   final _scroll = ScrollController();
   int _pct = 0;
   Gk3Progress? _last;
-  Gk3Record? _err, _planErr;
+  Gk3Record? _err, _planErr, _backup;
   bool _showLog = false;
   StreamSubscription<Gk3Event>? _sub;
 
@@ -385,6 +383,7 @@ class _RunPageState extends State<RunPage> {
           case Gk3Record():
             if (e.type == 'ERR') _err = e;
             if (e.type == 'PLANERR') _planErr = e;
+            if (e.type == 'BACKUP') _backup = e;
             _log.add('${e.type} ${e.fields}');
           case Gk3Exit():
             _finish(e.code);
@@ -402,10 +401,10 @@ class _RunPageState extends State<RunPage> {
     final job = widget.resume;
     if (code == 0) {
       // 接着跟的是删除分区：做完了就从头走一遍（盘变了，前面的判断都要重来）
-      go(context, job == null || job['fn'] == 'gk3_apply' ? const DonePage() : const WelcomePage(), replace: true);
+      go(context, job == null || job['cmd'].startsWith('apply') ? const DonePage() : const WelcomePage(), replace: true);
       return;
     }
-    // 盘没动过的失败（gk3_apply 在第一次写盘之前的检查里停下 —— ERR touched=no）：
+    // 盘没动过的失败（gk3l apply 在第一次写盘之前的检查里停下 —— ERR touched=no）：
     // 可以返回、可以重试。写盘阶段的失败才是"盘可能写了一半"（v1.0 计划 GUI-3）
     final untouched = job == null && _err?['touched'] == 'no';
     go(
@@ -415,6 +414,7 @@ class _RunPageState extends State<RunPage> {
         code: code,
         err: _err,
         planErr: _planErr,
+        backup: _backup,
         untouched: untouched,
       ),
       replace: true,
@@ -495,9 +495,10 @@ class DonePage extends StatelessWidget {
 }
 
 /// 失败页分两种（v1.0 计划 GUI-3）：
-///   - 盘没动过（[untouched]：gk3_apply 在第一次写盘之前的检查里停下、ERR touched=no）：
+///   - 盘没动过（[untouched]：gk3l apply 在第一次写盘之前的检查里停下、ERR touched=no）：
 ///     给"重试"和"返回修改"（换选项）。
-///   - 写盘阶段失败：盘可能停在中间状态 —— 不许返回、不给重试，让用户先看日志（分区表备份的还原命令在里面）。
+///   - 写盘阶段失败：盘可能停在中间状态 —— 不许返回、不给重试，让用户先看日志；动盘之前做过分区表备份的（BACKUP 记录），
+///     写明备份在哪、怎么写回去。
 /// 两种都能从侧栏重启 / 关机。
 /// ★ 标题下面那句错误说明按 ERR 的代码查 l10n（ui/messages.dart）；后端的中文原话只在日志里（INST-10）。
 ///   日志是后端原样的输出、部分是中文 —— 英文界面里默认收起，点了才看（bug 报告要它，所以不能不给）。
@@ -508,11 +509,15 @@ class FailPage extends StatefulWidget {
     required this.code,
     this.err,
     this.planErr,
+    this.backup,
     this.untouched = false,
   });
   final List<String> log;
   final int code;
   final Gk3Record? err, planErr;
+
+  /// gk3l 动盘之前的分区表备份（stdout 的 BACKUP 记录）
+  final Gk3Record? backup;
   final bool untouched;
 
   @override
@@ -527,7 +532,8 @@ class _FailPageState extends State<FailPage> {
     final l = context.l, tt = Theme.of(context).textTheme;
     final w = widget;
     final String msg;
-    if (w.err != null) {
+    // 方案不成立时 gk3l 先打一行 PLANERR、再报 ERR code=plan：PLANERR 说得更具体（差多少）
+    if (w.err != null && !(w.err!['code'] == 'plan' && w.planErr != null)) {
       msg = errText(l, w.err!);
     } else if (w.planErr != null) {
       msg = planErrorText(context, Plan(CallResult([w.planErr!], const [], w.code)));
@@ -535,7 +541,7 @@ class _FailPageState extends State<FailPage> {
       final raw = w.log.lastWhere((x) => x.startsWith('!! '), orElse: () => '');
       msg = raw.isNotEmpty && l.localeName.startsWith('zh') ? raw.substring(3) : l.errNoCode('${w.code}');
     }
-    final backedUp = !w.untouched && w.log.any((x) => x.contains('sgdisk --load-backup='));
+    final backup = w.untouched ? null : w.backup;
     final title = w.untouched ? l.failUntouchedTitle : l.failTitle;
     final sub = w.untouched ? l.failUntouchedSub : l.failSub;
     final showLog = _showLog ?? l.localeName.startsWith('zh');
@@ -568,7 +574,7 @@ class _FailPageState extends State<FailPage> {
               ]),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Text(msg, style: tt.titleMedium!.copyWith(color: context.cs.error)),
-          if (backedUp) ...[const SizedBox(height: 8), Text(l.failBackup, style: tt.bodyMedium)],
+          if (backup != null) ...[const SizedBox(height: 8), Text(l.failBackup(backup['path']), style: tt.bodyMedium)],
           const SizedBox(height: 14),
           if (showLog) ...[
             Text(l.failLogTitle, style: tt.labelLarge),

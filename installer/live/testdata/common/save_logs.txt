@@ -1,3 +1,2 @@
-D 161
-O LOGSAVED dir=gaokun3-logs-20261005-145133 part=/dev/sda1 files=9 esp=yes
+O LOGSAVED dir=gaokun3-logs-20261113-114559 part=/dev/sda1 files=5 esp=yes
 X 0

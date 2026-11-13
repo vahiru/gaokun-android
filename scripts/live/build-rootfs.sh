@@ -190,6 +190,15 @@ strip "$WORK/gk3-misc"
 install -Dm755 "$WORK/gk3-misc" "$ROOTFS/usr/share/gaokun3/gk3-misc"
 sha256sum "$WORK/gk3-misc" | cut -d' ' -f1 > "$OUT/gk3-misc.sha256"
 ok "安装器后端 + 命令行安装器 + gk3-misc（静态，sha256 $(cut -c1-16 "$OUT/gk3-misc.sha256")…）（/usr/share/gaokun3/）"
+# gk3l：图形安装器的后端（installer/backend，与 Windows 安装器的 gk3w 同源）。编法只在 installer/backend/linux/build.sh 一处
+# （静态链接）；构建容器里没有 make，直接调它。版本号取图形安装器的版本
+[ -f "$REPO/installer/backend/linux/build.sh" ] || die "没有 $REPO/installer/backend/linux/build.sh（build-live.sh 要把 installer/backend 一起拷进容器）"
+GK3W_VERSION=${GK3_VERSION:-dev} sh "$REPO/installer/backend/linux/build.sh" "$WORK/gk3l" gcc || die "gk3l 编不过"
+strip "$WORK/gk3l"
+install -Dm755 "$WORK/gk3l" "$ROOTFS/usr/lib/gaokun3/gk3l"
+ln -sf ../lib/gaokun3/gk3l "$ROOTFS/usr/bin/gk3l"
+sha256sum "$WORK/gk3l" | cut -d' ' -f1 > "$OUT/gk3l.sha256"
+ok "gk3l（静态，sha256 $(cut -c1-16 "$OUT/gk3l.sha256")…）→ /usr/lib/gaokun3/gk3l"
 
 if [ "$PROFILE" = live ]; then
     mkdir -p "$ROOTFS/usr/lib/gaokun3/installer"
@@ -218,6 +227,11 @@ for c in sshd sgdisk parted partprobe resize2fs e2fsck mkfs.ext4 mkfs.vfat mkfs.
 need_path /usr/lib/systemd/boot/efi/systemd-bootaa64.efi   # gk3_apply 往目标机 ESP 上装的就是它
 need_path /usr/bin/busybox                                 # initramfs 用的静态 busybox
 for f in installer-lib.sh gk3-unsparse.py gk3-bootimg.py install-gaokun3.sh gk3-misc; do need_path "/usr/share/gaokun3/$f"; done
+need_path /usr/lib/gaokun3/gk3l
+# gk3l 在【目标】上真的能跑：版本号与一次纯计算的分区方案（静态链接，不看镜像的 libc）
+if in_ch '/usr/bin/gk3l --version | grep -q "^gk3l " && /usr/bin/gk3l plan --sector 512 --region-start 2048 --region-end 100000000 | grep -q "^PLANSUM mode=alongside "'; then
+    ok "gk3l 在镜像里能跑（--version、plan）"
+else echo "   ✗ gk3l 在镜像里跑不起来"; BAD=1; fi
 # gk3-misc 在【目标】上真的能跑：在 chroot 里对一个 64 KiB 的空文件 init 一次、dump 读回来（静态链接，不看镜像的 libc）
 if in_ch 'f=$(mktemp) && head -c 65536 /dev/zero > $f && /usr/share/gaokun3/gk3-misc init $f --slot a | grep -q "^MISCINIT slot=a default=none " && /usr/share/gaokun3/gk3-misc dump $f | grep -q "_a priority=15 tries=6 successful=0"; r=$?; rm -f $f; exit $r'; then
     ok "gk3-misc init 在镜像里能跑（64 KiB 空文件 → _a 15/6，读回一致）"

@@ -3,7 +3,7 @@
 // ★ 只做删除。缩小分区要回 Windows 用"压缩卷"，新建、格式化分区不是安装 Android 需要的操作。
 // ★ 每次删除单独确认（按住 2 秒）、立即执行，与 Windows 安装程序的分区页一样 —— 攒到最后一起做，
 //   中途失败时留下的中间状态讲不清楚。
-// ★ 界面只负责"让人选、让人确认"。能不能删由后端判（installer-lib.sh 的 gk3_part_delete）：
+// ★ 界面只负责"让人选、让人确认"。能不能删由后端判（gk3l delete，installer/backend/src/linux/edit.c）：
 //   ESP 不动、挂着的不动，后端会自己再验一遍；界面上不给按钮只是先把原因说出来。
 import 'package:flutter/material.dart';
 import 'package:gk3_common/backend/protocol.dart';

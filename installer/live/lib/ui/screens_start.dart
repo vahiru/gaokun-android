@@ -223,6 +223,7 @@ class _ModePageState extends State<ModePage> {
           ? l.modeWhyNoFree(needMib == null ? '?' : fmtMib(needMib))
           : l.modeWhyNoRoom(needMib == null ? '?' : fmtMib(needMib), fmtMib(haveMib)),
       AlongMbr() => l.errMbr,
+      AlongBadTable() => l.errNoGpt,
       AlongError(:final msg) => l.errPlan(msg),
     };
   }
@@ -319,8 +320,8 @@ class _ModePageState extends State<ModePage> {
           icon: Icons.delete_outline,
           title: l.editEntryTitle,
           body: l.editEntryBody,
-          // MBR 盘上删除分区要写 GPT 分区表，后端拒绝（ERR mbr-disk）—— 这里先说
-          reason: s.disk!.mbr ? l.errMbr : null,
+          // MBR 盘、主 GPT 坏了的盘上删除分区要写 GPT 分区表，后端拒绝（ERR mbr-disk / disk-not-gpt）—— 这里先说
+          reason: s.disk!.mbr ? l.errMbr : (s.disk!.damaged ? l.errNoGpt : null),
           selected: _pick == _Pick.edit,
           onTap: () => setState(() => _pick = _Pick.edit),
         ),

@@ -3,9 +3,9 @@ import 'dart:io';
 import 'package:gk3_common/backend/backend.dart';
 
 import '../session.dart';
-import 'shell_backend.dart';
+import 'live_backend.dart';
 
-Gk3Backend? locateShellBackend() => ShellBackend.locate();
+Gk3Backend? locateLiveBackend() => LiveBackend.locate();
 
 /// GK3_FIXTURE=factory 之类：在 Linux 开发机上也用演示数据
 String? requestedScenario() => Platform.environment['GK3_FIXTURE'];

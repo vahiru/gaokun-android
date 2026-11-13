@@ -1,13 +1,11 @@
-D 973
-O DISK path=/dev/sda size_mib=7680 model=? removable=1 tran=usb medium=yes
-O PART path=/dev/sda1 num=1 start=2048 end=15728606 size_mib=7678 size_kib=7863279 type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B name=esp fs=vfat fslabel=GK3LIVE os=esp medium=yes
-O DISK path=/dev/nvme0n1 size_mib=488386 model=? removable=0 tran=nvme medium=no
-O PART path=/dev/nvme0n1p1 num=1 start=2048 end=616447 size_mib=300 size_kib=307200 type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B name=esp fs=vfat fslabel=ESP os=esp medium=no
-O PART path=/dev/nvme0n1p2 num=2 start=616448 end=624639 size_mib=4 size_kib=4096 type=0FC63DAF-8483-4772-8E79-3D69D8477DE4 name=misc fs= fslabel= os=android medium=no
-O PART path=/dev/nvme0n1p3 num=3 start=624640 end=690175 size_mib=32 size_kib=32768 type=0FC63DAF-8483-4772-8E79-3D69D8477DE4 name=metadata fs=ext4 fslabel=metadata os=android medium=no
-O PART path=/dev/nvme0n1p4 num=4 start=690176 end=821247 size_mib=64 size_kib=65536 type=0FC63DAF-8483-4772-8E79-3D69D8477DE4 name=boot_a fs= fslabel= os=android medium=no
-O PART path=/dev/nvme0n1p5 num=5 start=821248 end=952319 size_mib=64 size_kib=65536 type=0FC63DAF-8483-4772-8E79-3D69D8477DE4 name=boot_b fs= fslabel= os=android medium=no
-O PART path=/dev/nvme0n1p6 num=6 start=952320 end=26118143 size_mib=12288 size_kib=12582912 type=0FC63DAF-8483-4772-8E79-3D69D8477DE4 name=super fs= fslabel= os=android medium=no
-O PART path=/dev/nvme0n1p7 num=7 start=26118144 end=28215295 size_mib=1024 size_kib=1048576 type=0FC63DAF-8483-4772-8E79-3D69D8477DE4 name=gk3rescue fs=ext4 fslabel=gk3rescue os=linux medium=no
-O PART path=/dev/nvme0n1p8 num=8 start=28215296 end=1000212479 size_mib=474608 size_kib=485998592 type=0FC63DAF-8483-4772-8E79-3D69D8477DE4 name=userdata fs=ext4 fslabel=userdata os=android medium=no
+O DISK path=/dev/sda size_mib=7680 sector=512 physsector=512 model=? bus=usb removable=1 medium=yes table=gpt kernel=ok
+O PART path=/dev/sda1 disk=/dev/sda num=1 idx=1 start=2048 end=15728606 size_mib=7678 size_kib=7863279 type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B uuid=9EE39B9F-58BD-42F0-AB92-9FF600174210 attrs=0x0000000000000000 name=esp fs=vfat fslabel=GK3LIVE os=esp medium=yes
+O DISK path=/dev/nvme0n1 size_mib=488386 sector=512 physsector=512 model=? bus=nvme removable=0 medium=no table=gpt kernel=ok
+O PART path=/dev/nvme0n1p1 disk=/dev/nvme0n1 num=1 idx=1 start=2048 end=616447 size_mib=300 size_kib=307200 type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B uuid=9E1B7D28-0463-4BA9-8891-0A65FCEAB7CE attrs=0x0000000000000000 name=esp fs=vfat fslabel=ESP os=esp medium=no
+O PART path=/dev/nvme0n1p2 disk=/dev/nvme0n1 num=2 idx=2 start=616448 end=624639 size_mib=4 size_kib=4096 type=0FC63DAF-8483-4772-8E79-3D69D8477DE4 uuid=AED7D017-7FBD-43A5-B9BB-400A6B63957A attrs=0x0000000000000000 name=misc fs= fslabel= os=android medium=no
+O PART path=/dev/nvme0n1p3 disk=/dev/nvme0n1 num=3 idx=3 start=624640 end=690175 size_mib=32 size_kib=32768 type=0FC63DAF-8483-4772-8E79-3D69D8477DE4 uuid=3B96D7C0-6316-4E86-849C-6DC8C80DD75A attrs=0x0000000000000000 name=metadata fs=ext4 fslabel=metadata os=android medium=no
+O PART path=/dev/nvme0n1p4 disk=/dev/nvme0n1 num=4 idx=4 start=690176 end=821247 size_mib=64 size_kib=65536 type=0FC63DAF-8483-4772-8E79-3D69D8477DE4 uuid=9FDDA7A8-8293-42B2-95BB-9CFBC17968F5 attrs=0x0000000000000000 name=boot_a fs= fslabel= os=android medium=no
+O PART path=/dev/nvme0n1p5 disk=/dev/nvme0n1 num=5 idx=5 start=821248 end=952319 size_mib=64 size_kib=65536 type=0FC63DAF-8483-4772-8E79-3D69D8477DE4 uuid=3BDEA6C7-C4DE-4104-9BDF-EEBB4A00ED1D attrs=0x0000000000000000 name=boot_b fs= fslabel= os=android medium=no
+O PART path=/dev/nvme0n1p6 disk=/dev/nvme0n1 num=6 idx=6 start=952320 end=26118143 size_mib=12288 size_kib=12582912 type=0FC63DAF-8483-4772-8E79-3D69D8477DE4 uuid=5D9A6AEC-8513-43C9-AE43-2A877D3FA36D attrs=0x0000000000000000 name=super fs= fslabel= os=android medium=no
+O PART path=/dev/nvme0n1p7 disk=/dev/nvme0n1 num=7 idx=7 start=26118144 end=1000212479 size_mib=475632 size_kib=487047168 type=0FC63DAF-8483-4772-8E79-3D69D8477DE4 uuid=52B3B066-758A-4349-9E9B-C5A38C35034E attrs=0x0000000000000000 name=userdata fs=ext4 fslabel=userdata os=android medium=no
 X 0

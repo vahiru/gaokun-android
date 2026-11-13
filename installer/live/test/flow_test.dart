@@ -37,15 +37,13 @@ void main() {
     await see(t, find.text(l.confirmWindowsKept));
     // 值落在对的位置（占位符顺序那个 bug：曾渲染成"创建 /dev/nvme0n1p1 的分区…EFI 分区 80 GiB"）
     await see(t, find.textContaining(tail(l.confirmAlongBody(hole, '/dev/nvme0n1p1'))));
-    // 要安装的版本：安装介质上的系统文件（gk3_release_info 的 version）
+    // 要安装的版本：安装介质上的系统文件（gk3l release-info 的 version）
     await see(t, find.text(l.confirmVersion('crDroidAndroid-16.0-20260916-gaokun3-v12.11')));
     await hold(t, l.confirmHoldIdle);
     await see(t, find.text(l.doneTitle));
-    final a = rec.last('gk3_apply')!.join(' ');
+    final a = rec.last('apply')!.join(' ');
     expect(a, contains('--mode alongside'));
-    expect(a, contains('--rescue no'));
     expect(a, contains('--region-start 790497280 --region-end 958269439'));
-    expect(a, contains('--esp /dev/nvme0n1p1'));
     expect(a, contains('--release /media/gk3/gaokun3/payload'));
   });
 
@@ -75,7 +73,7 @@ void main() {
     await see(t, find.text(l.confirmAlongHead));
     await hold(t, l.confirmHoldIdle);
     await see(t, find.text(l.doneTitle));
-    final a = rec.last('gk3_apply')!.join(' ');
+    final a = rec.last('apply')!.join(' ');
     expect(a, contains('--mode alongside'));
     expect(a, contains('--region-start 789448704 --region-end 957220863')); // Data 缩出来的那段，紧挨在 GK3LIVE 前面
   });
@@ -103,10 +101,9 @@ void main() {
     await see(t, find.text(l.confirmWindowsKept));
     await hold(t, l.confirmHoldIdle);
     await see(t, find.text(l.doneTitle));
-    final a = rec.last('gk3_apply')!.join(' ');
+    final a = rec.last('apply')!.join(' ');
     expect(a, contains('--mode alongside'));
     expect(a, contains('--region-start 798885888 --region-end 958269439'));   // GK3LIVE 之后那段空闲
-    expect(a, contains('--esp /dev/nvme0n1p1'));
   });
 
   testWidgets('退出到终端切不过去：SnackBar 说出原因与替代办法（M0 实测：镜像里没有 chvt，按钮点了没反应）', (t) async {
@@ -141,11 +138,11 @@ void main() {
     await see(t, find.text(l.confirmNoParts));
     await hold(t, l.confirmHoldIdle);
     await see(t, find.text(l.doneTitle));
-    expect(rec.last('gk3_apply')!.join(' '), contains('--mode wipe'));
+    expect(rec.last('apply')!.join(' '), contains('--mode wipe'));
   });
 
   testWidgets('MBR 盘与读不出分区表的盘（S1 / S2）：读不出的盘禁用并写明原因；MBR 盘只给整盘清空，整盘清空照常装完', (t) async {
-    final rec = await pumpApp(t, 'blank', overrides: {'gk3_probe': 'probe-mbr-unreadable.txt'});
+    final rec = await pumpApp(t, 'blank', overrides: {'probe': 'probe-mbr-unreadable.txt'});
     await tap(t, find.text(l.btnStart));
     // 读不出的盘：列出来（让人知道它在），但禁用、写明原因，不说"没有分区"（S1 原来把它报成一整块空闲）
     await see(t, find.text(l.diskUnreadable));
@@ -158,7 +155,7 @@ void main() {
     await tap(t, find.textContaining('/dev/nvme0n1'));
     await next(t);
     await see(t, find.text(l.errMbr), findsNWidgets(2));
-    expect(rec.calls.where((c) => c.first == 'gk3_esp_info' || (c.first == 'gk3_plan' && c.contains('alongside'))), isEmpty);
+    expect(rec.calls.where((c) => c.first == 'esp-info' || (c.first == 'plan' && c.contains('--sector'))), isEmpty);
     for (final title in [l.modeAlongTitle, l.editEntryTitle]) {
       final card = find.ancestor(of: find.text(title), matching: find.byType(ChoiceCard));
       expect(t.widget<ChoiceCard>(card).reason, l.errMbr, reason: title);
@@ -169,7 +166,7 @@ void main() {
     await passRisk(t);
     await hold(t, l.confirmHoldIdle);
     await see(t, find.text(l.doneTitle));
-    expect(rec.last('gk3_apply')!.join(' '), contains('--disk /dev/nvme0n1 --mode wipe'));
+    expect(rec.last('apply')!.join(' '), contains('--disk /dev/nvme0n1 --mode wipe'));
   });
 
   testWidgets('写盘入口拒绝 MBR 盘 / 读不出的盘（ERR mbr-disk / disk-unreadable）：失败的话按代码说', (t) async {
@@ -207,10 +204,9 @@ void main() {
     await see(t, find.text(l.actWrite), findsNWidgets(4));    // misc、boot_a、boot_b、super（不再重写 gk3rescue）
     await hold(t, l.confirmHoldIdle);
     await see(t, find.text(l.doneTitle));
-    final a = rec.last('gk3_apply')!.join(' ');
+    final a = rec.last('apply')!.join(' ');
     expect(a, contains('--mode reinstall'));
     expect(a, contains('--keep-data no'));
-    expect(a, contains('--esp /dev/nvme0n1p1'));
     expect(a, isNot(contains('--region-start')));
   });
 
@@ -228,7 +224,7 @@ void main() {
     await see(t, find.text(l.actKeep), findsNWidgets(2));
     await hold(t, l.confirmHoldIdle);
     await see(t, find.text(l.doneTitle));
-    expect(rec.last('gk3_apply')!.join(' '), contains('--keep-data yes'));
+    expect(rec.last('apply')!.join(' '), contains('--keep-data yes'));
   });
 
   Future<Rec> openEdit(WidgetTester t, String scenario, {Map<String, String> overrides = const {}}) async {
@@ -251,13 +247,13 @@ void main() {
     await see(t, find.text(l.editDeleteOnekey));
     expect(find.text(l.editDeleteWinre), findsNothing);
     await hold(t, '${l.editDelete} · ${l.holdIdle}');
-    expect(rec.last('gk3_part_delete'), ['gk3_part_delete', '/dev/nvme0n1p6']);
+    expect(rec.last('delete'), ['delete', '--part', '/dev/nvme0n1p6']);
     await see(t, find.text(l.editOk('Onekey')));
-    final probes = rec.calls.where((c) => c.first == 'gk3_probe').length;
+    final probes = rec.calls.where((c) => c.first == 'probe').length;
     await tap(t, find.text(l.editDone)); // 右下角"完成" → 回到方式页
     await see(t, find.text(l.modeTitle));
-    expect(rec.calls.where((c) => c.first == 'gk3_plan').isNotEmpty, isTrue);
-    expect(rec.calls.where((c) => c.first == 'gk3_probe').length, greaterThanOrEqualTo(probes));
+    expect(rec.calls.where((c) => c.first == 'plan').isNotEmpty, isTrue);
+    expect(rec.calls.where((c) => c.first == 'probe').length, greaterThanOrEqualTo(probes));
   });
 
   testWidgets('删除分区：Windows 恢复分区写明删除后恢复环境无法使用', (t) async {
@@ -279,7 +275,7 @@ void main() {
   });
 
   testWidgets('删除分区：后端拒绝时把原因显示出来', (t) async {
-    await openEdit(t, 'factory', overrides: {'gk3_part_delete': 'part_delete-esp.txt'});
+    await openEdit(t, 'factory', overrides: {'delete': 'part_delete-esp.txt'});
     await tap(t, find.textContaining('Onekey'));
     await tap(t, find.text(l.editDelete));
     await hold(t, '${l.editDelete} · ${l.holdIdle}');
@@ -287,7 +283,7 @@ void main() {
   });
 
   testWidgets('预检：型号不对 → 拦住，写明当前型号', (t) async {
-    await pumpApp(t, 'blank', overrides: {'gk3_preflight': 'preflight-model.txt'});
+    await pumpApp(t, 'blank', overrides: {'preflight': 'preflight-model.txt'});
     await see(t, find.text(l.checkBlocked));
     await see(t, find.text(l.checkModelBadTitle));
     await see(t, find.text(l.checkModelBad('GK-W57')));
@@ -296,7 +292,7 @@ void main() {
   });
 
   testWidgets('安装介质里没有系统文件：三种安装方式都不可选并写明原因，删除分区照常可选', (t) async {
-    await pumpApp(t, 'android', overrides: {'gk3_release_info': 'release_info-none.txt'});
+    await pumpApp(t, 'android', overrides: {'release-info': 'release_info-none.txt'});
     await tap(t, find.text(l.btnStart));
     await tap(t, find.textContaining('/dev/nvme0n1'));
     await next(t);
@@ -333,8 +329,8 @@ void main() {
     await passRisk(t);
     await hold(t, l.confirmHoldIdle);
     await see(t, find.text(l.failTitle));
-    await see(t, find.textContaining('分区 super 没解析出来'), findsWidgets);
-    await see(t, find.text(l.failBackup));
+    await see(t, find.text(l.errDiskWrite));
+    await see(t, find.text(l.failBackup('/media/gk3/gaokun3/gpt-before-wipe-nvme0n1-20261113-120000-head2048-tail2048.bin')));
     expect(find.text(l.btnBack), findsNothing);
     // 写盘阶段失败：不给重试、不说"盘没动"（v1.0 计划 GUI-3）
     expect(find.text(l.btnRetry), findsNothing);
@@ -441,10 +437,10 @@ void main() {
     await see(t, find.text(l.failUntouchedTitle));
     await see(t, find.text(l.errReleaseNoSuper));
     expect(find.text(l.failTitle), findsNothing);
-    expect(find.text(l.failBackup), findsNothing);
+    expect(find.textContaining('restore-table'), findsNothing);
     await tap(t, find.text(l.failBackEdit));
     await see(t, find.text(l.optsTitle));
-    expect(rec.calls.where((c) => c.first == 'gk3_apply').length, 1);
+    expect(rec.calls.where((c) => c.first == 'apply').length, 1);
   });
 
   testWidgets('写盘阶段失败：标题下面是按 ERR 代码查的话（不是后端的中文原句）', (t) async {
@@ -458,12 +454,12 @@ void main() {
     await passRisk(t, loc: en);
     await hold(t, en.confirmHoldIdle);
     await see(t, find.text(en.failTitle));
-    await see(t, find.text(en.errPartMissing('super')));
+    await see(t, find.text(en.errDiskWrite));
     expect(cjkOnScreen(t), isEmpty);
   });
 
   testWidgets('预检：电量低且没接电源 → 拦住，写明原因（GUI-8）', (t) async {
-    await pumpApp(t, 'blank', overrides: {'gk3_preflight': 'preflight-lowbatt.txt'});
+    await pumpApp(t, 'blank', overrides: {'preflight': 'preflight-lowbatt.txt'});
     await see(t, find.text(l.checkBlocked));
     await see(t, find.text(l.checkPowerLow));
     await see(t, find.text(l.checkPowerBad('15')));
@@ -491,7 +487,7 @@ void main() {
     await see(t, find.text(l.doneTitle));
     await see(t, find.text(l.doneBodyInternal));
     expect(find.text(l.doneBody), findsNothing);
-    expect(rec.last('gk3_apply')!.join(' '), contains('--rescue no'));
+    expect(rec.last('apply')!.join(' '), contains('--mode alongside'));
   });
 
   testWidgets('从 U 盘装：完成页照旧提示移除介质；不装救援系统', (t) async {
@@ -505,7 +501,7 @@ void main() {
     await passRisk(t);
     await hold(t, l.confirmHoldIdle);
     await see(t, find.text(l.doneBody));
-    expect(rec.last('gk3_apply')!.join(' '), contains('--rescue no'));
+    expect(rec.last('apply')!.join(' '), contains('--mode wipe'));
   });
 
   testWidgets('整盘清空出厂盘：确认页标明 Onekey 是华为一键恢复分区、删掉的后果（GUI-18）', (t) async {
@@ -541,16 +537,16 @@ void main() {
 
   // ── 后端留给前端的三个接口 ──────────────
 
-  testWidgets('界面重新起来时写盘任务还在跑：欢迎页直接接上去跟（gk3_job_follow <id>），侧栏禁用，跟完到完成页（GUI-11）', (t) async {
-    final rec = await pumpApp(t, 'blank', overrides: {'gk3_job_status': 'job_status-running.txt', 'gk3_job_follow': 'job_follow-apply.txt'});
+  testWidgets('界面重新起来时写盘任务还在跑：欢迎页直接接上去跟（gk3l job follow <id>），侧栏禁用，跟完到完成页（GUI-11）', (t) async {
+    final rec = await pumpApp(t, 'blank', overrides: {'job status': 'job_status-running.txt', 'job follow 20261113-101500-4242-7a3f': 'job_follow-apply.txt'});
     await see(t, find.text(l.doneTitle));
-    expect(rec.last('gk3_job_follow'), ['gk3_job_follow', '20261005-101500-4242-31337']);
-    expect(rec.last('gk3_apply'), isNull, reason: '不该再起一次安装');
+    expect(rec.last('job follow'), ['job', 'follow', '20261113-101500-4242-7a3f']);
+    expect(rec.last('apply'), isNull, reason: '不该再起一次安装');
   });
 
   testWidgets('接着跟的过程中：标题说"接着刚才的写盘"，侧栏的重启 / 关机禁用', (t) async {
     final gate = Completer<void>();
-    await pumpApp(t, 'blank', overrides: {'gk3_job_status': 'job_status-running.txt', 'gk3_job_follow': 'job_follow-apply.txt'}, holdFollow: gate);
+    await pumpApp(t, 'blank', overrides: {'job status': 'job_status-running.txt', 'job follow 20261113-101500-4242-7a3f': 'job_follow-apply.txt'}, holdFollow: gate);
     await see(t, find.text(l.runResumeTitle));
     await see(t, find.text(l.railBusy));
     gate.complete();
@@ -560,8 +556,8 @@ void main() {
   testWidgets('没有在跑的写盘任务：照常停在欢迎页', (t) async {
     final rec = await pumpApp(t, 'blank');
     await see(t, find.text(l.welcomeTitle));
-    expect(rec.last('gk3_job_status'), isNotNull);
-    expect(rec.last('gk3_job_follow'), isNull);
+    expect(rec.last('job status'), isNotNull);
+    expect(rec.last('job follow'), isNull);
   });
 
   Future<void> failWipe(WidgetTester t) async {
@@ -582,25 +578,25 @@ void main() {
     await tap(t, find.text(l.logsSave));
     await see(t, find.text(l.logsTitle));
     await see(t, find.text(l.logsEspNote));
-    await see(t, find.textContaining('KINGSTON'));   // 另插的 U 盘排在前面（gk3_log_targets 的顺序）
+    await see(t, find.textContaining('KINGSTON'));   // 另插的 U 盘排在前面（gk3l log-targets 的顺序）
     await tap(t, find.textContaining('GK3LIVE'));
     await see(t, find.textContaining(l.logsSavedEsp));
-    expect(rec.last('gk3_save_logs'), ['gk3_save_logs', '/dev/sda1']);
+    expect(rec.last('save-logs'), ['save-logs', '--to', '/dev/sda1']);
   });
 
   testWidgets('保存日志：没有能存的地方 → 叫人插 U 盘、能重新查找', (t) async {
-    final rec = await pumpApp(t, 'blank', failApply: true, overrides: {'gk3_log_targets': 'job_status-none.txt'});
+    final rec = await pumpApp(t, 'blank', failApply: true, overrides: {'log-targets': 'job_status-none.txt'});
     await failWipe(t);
     await tap(t, find.text(l.logsSave));
     await see(t, find.text(l.logsNoTarget));
-    final n = rec.calls.where((c) => c.first == 'gk3_log_targets').length;
+    final n = rec.calls.where((c) => c.first == 'log-targets').length;
     await tap(t, find.text(l.logsRescan));
-    expect(rec.calls.where((c) => c.first == 'gk3_log_targets').length, n + 1);
-    expect(rec.last('gk3_save_logs'), isNull);
+    expect(rec.calls.where((c) => c.first == 'log-targets').length, n + 1);
+    expect(rec.last('save-logs'), isNull);
   });
 
   // ── 双系统专项（见 tools/gk3boot/README.md）──────────────────────────────────────────────
-  /// U 盘双系统一路走到确认页（windows-free，或 overrides 换掉 gk3_esp_info）
+  /// U 盘双系统一路走到确认页（windows-free，或 overrides 换掉 esp-info）
   Future<Rec> toConfirm(WidgetTester t, {String scenario = 'windows-free', Map<String, String> overrides = const {}}) async {
     final rec = await pumpApp(t, scenario, overrides: overrides);
     await tap(t, find.text(l.btnStart));
@@ -624,11 +620,11 @@ void main() {
     await hold(t, l.confirmHoldIdle);
     await see(t, find.text(l.doneTitle));
     await see(t, find.text(l.doneDualAndroid));
-    final a = rec.last('gk3_apply')!.join(' ');
+    final a = rec.last('apply')!.join(' ');
     expect(a, contains('--default-os android'));
-    expect(a, isNot(contains('--bitlocker-key')));
-    // gk3_plan 不认识这两个参数：只发给 gk3_apply
-    expect(rec.calls.where((c) => c.first == 'gk3_plan').any((c) => c.contains('--default-os')), isFalse);
+    expect(a, isNot(contains('--bitlocker-confirmed')));
+    // 这两个参数只发给 apply，不发给 plan
+    expect(rec.calls.where((c) => c.first == 'plan').any((c) => c.contains('--default-os')), isFalse);
   });
 
   testWidgets('双系统选 Windows 为默认：说清"前两次开机进 Android"，apply 带 --default-os windows，完成页照着说（U12）', (t) async {
@@ -638,17 +634,17 @@ void main() {
     await hold(t, l.confirmHoldIdle);
     await see(t, find.text(l.doneTitle));
     await see(t, find.text(l.doneDualWindows));
-    expect(rec.last('gk3_apply')!.join(' '), contains('--default-os windows'));
+    expect(rec.last('apply')!.join(' '), contains('--default-os windows'));
   });
 
-  testWidgets('BitLocker + 要换 BOOTAA64（从 U 盘来）：不勾"已拿到恢复密钥"按住也开始不了；勾了才装、带 --bitlocker-key yes（U16）', (t) async {
-    final rec = await toConfirm(t, overrides: {'gk3_esp_info': 'esp_info-bitlocker.txt'});
+  testWidgets('BitLocker + 要换 BOOTAA64（从 U 盘来）：不勾"已拿到恢复密钥"按住也开始不了；勾了才装、带 --bitlocker-confirmed（U16）', (t) async {
+    final rec = await toConfirm(t, overrides: {'esp-info': 'esp_info-bitlocker.txt'});
     await see(t, find.text(l.confirmBitlockerHead));
     await see(t, find.text(l.confirmBitlockerUsb));
     expect(find.text(l.confirmBitlockerScript), findsNothing);
     await hold(t, l.confirmHoldIdle);
     expect(find.text(l.doneTitle), findsNothing);
-    expect(rec.last('gk3_apply'), isNull);
+    expect(rec.last('apply'), isNull);
     // 勾选框在列表下方：先滚到它、等布局完再点（tap() 里的 ensureVisible 之后不等一帧，会点空）
     await t.ensureVisible(find.byType(Checkbox));
     await settle(t);
@@ -657,17 +653,17 @@ void main() {
     expect(t.widget<CheckboxListTile>(find.byType(CheckboxListTile)).value, isTrue);
     await hold(t, l.confirmHoldIdle);
     await see(t, find.text(l.doneTitle));
-    expect(rec.last('gk3_apply')!.join(' '), contains('--bitlocker-key yes'));
+    expect(rec.last('apply')!.join(' '), contains('--bitlocker-confirmed'));
   });
 
   testWidgets('BitLocker、走的是 Windows 工具那条路（安装器在内置盘上）：文案换成"工具已暂停 BitLocker"（§4.9.7 规则 6）', (t) async {
-    await toConfirm(t, scenario: 'windows-live', overrides: {'gk3_esp_info': 'esp_info-bitlocker.txt'});
+    await toConfirm(t, scenario: 'windows-live', overrides: {'esp-info': 'esp_info-bitlocker.txt'});
     await see(t, find.text(l.confirmBitlockerScript));
     expect(find.text(l.confirmBitlockerUsb), findsNothing);
   });
 
   testWidgets('Windows 在休眠：双系统禁用并写明"回 Windows 关快速启动、用关机退出"（U18）', (t) async {
-    await pumpApp(t, 'windows-free', overrides: {'gk3_esp_info': 'esp_info-hibernated.txt'});
+    await pumpApp(t, 'windows-free', overrides: {'esp-info': 'esp_info-hibernated.txt'});
     await tap(t, find.text(l.btnStart));
     await tap(t, find.textContaining('/dev/nvme0n1'));
     await next(t);
@@ -678,7 +674,7 @@ void main() {
   });
 
   testWidgets('100 MiB 的 EFI 分区：双系统明确禁用，说"这个版本不支持"而不是"请清理"（U17）', (t) async {
-    await pumpApp(t, 'windows-free', overrides: {'gk3_esp_info': 'esp_info-small.txt'});
+    await pumpApp(t, 'windows-free', overrides: {'esp-info': 'esp_info-small.txt'});
     await tap(t, find.text(l.btnStart));
     await tap(t, find.textContaining('/dev/nvme0n1'));
     await next(t);
@@ -687,7 +683,7 @@ void main() {
   });
 
   testWidgets('后端说 EFI 变量删不掉（NOTE loadervar-stuck）：完成页用红字说怎么在开机菜单里清除', (t) async {
-    await toConfirm(t, overrides: {'gk3_apply': 'apply-note.txt'});
+    await toConfirm(t, overrides: {'apply': 'apply-note.txt'});
     await hold(t, l.confirmHoldIdle);
     await see(t, find.text(l.doneTitle));
     await see(t, find.text(l.doneNoteLoaderVar('auto-windows')));
@@ -707,7 +703,7 @@ void main() {
   });
 
   testWidgets('英文界面的双系统确认页（BitLocker）没有 CJK', (t) async {
-    await pumpApp(t, 'windows-free', language: 'en', overrides: {'gk3_esp_info': 'esp_info-bitlocker.txt'});
+    await pumpApp(t, 'windows-free', language: 'en', overrides: {'esp-info': 'esp_info-bitlocker.txt'});
     await tap(t, find.text(en.btnStart));
     await tap(t, find.textContaining('/dev/nvme0n1'));
     await next(t, en);
@@ -767,7 +763,7 @@ void main() {
       await settle(t);
       expect(find.text(l.riskTitle), findsOneWidget);
       expect(find.text(nextTitle), findsNothing);
-      for (final fn in ['gk3_apply', 'gk3_part_delete']) {
+      for (final fn in ['apply', 'delete']) {
         expect(rec.last(fn), isNull, reason: fn);
       }
     }
@@ -874,7 +870,7 @@ void main() {
     });
 
     testWidgets('双系统 + BitLocker：风险页提一句"确认页会要你确认恢复密钥"，勾选框仍只在确认页（不重复确认）', (t) async {
-      await toRisk(t, 'windows-free', (x) => x.modeAlongTitle, overrides: {'gk3_esp_info': 'esp_info-bitlocker.txt'});
+      await toRisk(t, 'windows-free', (x) => x.modeAlongTitle, overrides: {'esp-info': 'esp_info-bitlocker.txt'});
       await see(t, find.textContaining(l.riskWinBitlocker));
       expect(find.text(l.confirmBitlockerCheck), findsNothing);
       expect(find.byType(CheckboxListTile), findsOneWidget); // 只有"我已备份…"那一个
@@ -951,7 +947,7 @@ void main() {
       expect((ev.last as Gk3Exit).code, isNot(0));
       final ed = await s.deletePartition('/dev/nvme0n1p6', (_) {});
       expect(ed.err?['code'], kRiskUnackedCode);
-      for (final fn in ['gk3_apply', 'gk3_net_release', 'gk3_part_delete']) {
+      for (final fn in ['apply', 'delete']) {
         expect(rec.last(fn), isNull, reason: fn);
       }
       // 认过的那一条才放行；换了方式（或换了盘、改了保不保留数据）就又不算了
@@ -959,12 +955,12 @@ void main() {
       expect(s.riskAcked(RiskKind.install), isTrue);
       expect(s.riskAcked(RiskKind.edit), isFalse);
       await s.install().toList();
-      expect(rec.last('gk3_apply'), isNotNull);
+      expect(rec.last('apply'), isNotNull);
       s.setMode(Mode.alongside);
       expect(s.riskAcked(RiskKind.install), isFalse);
       s.ackRisk(RiskKind.edit);
       await s.deletePartition('/dev/nvme0n1p6', (_) {});
-      expect(rec.last('gk3_part_delete'), isNotNull);
+      expect(rec.last('delete'), isNotNull);
     });
 
     test('界面认识守卫的错误代码（两种语言）', () {

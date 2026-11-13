@@ -1,3 +1,3 @@
-E ERR code=edit-esp
-E !! /dev/nvme0n1p1 是 EFI 系统分区：动它，盘上所有系统都起不来（要重建 ESP，用整盘清空）
+E ERR code=edit-esp touched=no
+E !! this is the EFI system partition: without it no system on this disk can start (to rebuild it, wipe the whole disk) (disk not touched)
 X 1

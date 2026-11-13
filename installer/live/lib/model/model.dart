@@ -1,12 +1,15 @@
 // 把后端的行记录解读成界面用的类型。
 //
 // ⚠️ 这里只做【解读】，不做任何分区计算：空间够不够、/data 能给多大、放不放得下，
-//    一律问 gk3_plan（backend.dart 顶上那条规矩）。
+//    一律问 gk3l plan（backend.dart 顶上那条规矩）。记录的格式见 installer/backend/src/linux/ 各命令的文件头。
 
 import 'package:gk3_common/backend/backend.dart';
 import 'package:gk3_common/backend/protocol.dart';
 
 const espTypeGuid = 'C12A7328-F81F-11D2-BA4B-00A0C93EC93B';
+
+/// 安装器会建的分区名（与 gk3l 的 OUR_NAMES 相同）：盘上已有同名的，双系统就不能再建一套
+const kAndroidNames = {'misc', 'metadata', 'boot_a', 'boot_b', 'super', 'userdata', 'gk3rescue'};
 
 class Part {
   Part(Gk3Record r)
@@ -25,7 +28,7 @@ class Part {
   final String path, type, name, fs, fslabel, os;
   final int num, start, end, sizeMib, sizeKib;
 
-  /// 安装器就是从这个分区跑起来的（gk3_probe 的 PART medium=yes）—— 删除分区页不让删它
+  /// 安装器就是从这个分区跑起来的（gk3l probe 的 PART medium=yes）—— 删除分区页不让删它
   final bool medium;
 
   bool get isEsp => type == espTypeGuid || name == 'esp';
@@ -50,26 +53,35 @@ class Disk {
         sizeMib = r.intOf('size_mib'),
         model = r['model'] == '?' ? '' : r['model'],
         removable = r['removable'] == '1',
-        tran = r['tran'],
+        bus = r['bus'],
+        sector = r.intOf('sector', 512),
         medium = r.yes('medium'),
         table = r['table'];
-  final String path, model, tran;
+  final String path, model, bus;
   final int sizeMib;
+
+  /// 逻辑扇区的字节数（512 或 4096）：start / end 的单位，gk3l plan 要它
+  final int sector;
   final bool removable, medium;
 
-  /// gk3_probe 的 table=：gpt | mbr | unreadable | unknown（旧后端 / 旧 fixture 没有这个字段 → 空串，按 gpt 待）。
-  /// 设计稿见 docs/dev/installer-rust-design.md
+  /// gk3l probe 的 table=：gpt | damaged | mbr | raw | unreadable（含义见 installer/backend/src/linux/probe.c 文件头）
   final String table;
   final parts = <Part>[];
   final free = <FreeRegion>[];
 
-  bool get external => removable || tran == 'usb';
+  bool get external => removable || bus == 'usb';
 
   /// 分区表读不出来：后端不列它的分区与空闲区，界面不给选
   bool get unreadable => table == 'unreadable';
 
   /// MBR 盘：后端只写 GPT，非整盘的写盘入口一律 ERR mbr-disk —— 只能整盘清空
   bool get mbr => table == 'mbr';
+
+  /// 有 GPT 的痕迹，主表却不能用：同样只能整盘清空
+  bool get damaged => table == 'damaged';
+
+  /// 没有分区表（全新的盘、整盘格式化的 U 盘）
+  bool get raw => table == 'raw';
   Part? get esp {
     for (final p in parts) {
       if (p.isEsp) return p;
@@ -85,7 +97,7 @@ class Disk {
     return best;
   }
 
-  /// gk3_probe 的输出：DISK 行后面跟着它的 PART / FREE 行（FREE 带 disk= 可以直接认）
+  /// gk3l probe 的输出：DISK 行后面跟着它的 PART / FREE 行（FREE 带 disk= 可以直接认）
   static List<Disk> fromProbe(CallResult r) {
     final disks = <Disk>[];
     for (final rec in r.records) {
@@ -109,20 +121,35 @@ class Disk {
 
 enum CheckState { ok, fail, unknown }
 
-/// gk3_preflight 的一项（CHECK id=model / id=power）
+/// 欢迎页的一项检查：gk3l preflight 的 PREFLIGHT 记录拆成两项（机型、电源）
 class Check {
-  Check(Gk3Record r)
-      : id = r['id'],
-        state = switch (r['ok']) { 'yes' => CheckState.ok, 'no' => CheckState.fail, _ => CheckState.unknown },
-        value = r['value'],
-        min = r['min'],
-        ac = r.yes('ac');
+  const Check(this.id, this.state, this.value, {this.min = '', this.ac = false});
   final String id, value;
 
-  /// CHECK id=power 的门槛（百分比）与"接着电源"
+  /// 电源那一项的门槛（百分比）与"接着电源"
   final String min;
   final bool ac;
   final CheckState state;
+
+  /// PREFLIGHT model= model_ok=yes|no|unknown ac=yes|no [battery=] battery_min=。
+  /// 电量低的判据与 gk3l 写盘之前的把关相同（installer/backend/src/policy.c）：没接电源、读得到电量、低于门槛
+  static List<Check> fromPreflight(Gk3Record r) {
+    final model = Check(
+      'model',
+      switch (r['model_ok']) { 'yes' => CheckState.ok, 'no' => CheckState.fail, _ => CheckState.unknown },
+      r['model'],
+    );
+    final ac = r.yes('ac'), has = r.fields.containsKey('battery'), min = r['battery_min'];
+    final low = !ac && has && r.intOf('battery') < r.intOf('battery_min', 15);
+    final power = Check(
+      'power',
+      low ? CheckState.fail : (has ? CheckState.ok : CheckState.unknown),
+      has ? r['battery'] : '',
+      min: min,
+      ac: ac,
+    );
+    return [model, power];
+  }
 }
 
 class EspInfo {
@@ -174,7 +201,7 @@ class PlanPart {
   final int start, end, sizeMib;
 }
 
-/// 重新安装时复用的一个现有分区（gk3_plan --mode reinstall 的 PLAN op=reuse）
+/// 重新安装时复用的一个现有分区（gk3l plan --mode reinstall 的 PLAN op=reuse）
 class PlanReuse {
   PlanReuse(Gk3Record r)
       : name = r['name'],
@@ -189,7 +216,7 @@ class PlanReuse {
   final String action;
 }
 
-/// gk3_plan 的结果：要么 parts + summary，要么 error
+/// gk3l plan 的结果：要么 parts + summary，要么 error
 class Plan {
   Plan(CallResult r)
       : parts = [for (final p in r.ofType('PLAN').where((p) => p['op'] == 'mkpart')) PlanPart(p)],
@@ -222,7 +249,7 @@ String fmtMib(int mib) {
   return '${s.endsWith('.0') ? s.substring(0, s.length - 2) : s} GiB';
 }
 
-/// gk3_release_info 的 RELEASE 记录（安装介质上 gaokun3/payload/ 里的系统文件）
+/// gk3l release-info 的 RELEASE 记录（安装介质上 gaokun3/payload/ 里的系统文件）
 class Release {
   Release(Gk3Record r)
       : dir = r['dir'],

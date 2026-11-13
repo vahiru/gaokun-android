@@ -1,3 +1,2 @@
-O CHECK id=model ok=no value=GK-W57
-O CHECK id=power ok=yes value=40 ac=yes min=15
+O PREFLIGHT gk3l=dev manufacturer=HUAWEI model=GK-W57 model_ok=no ac=yes battery=40 battery_min=15
 X 0

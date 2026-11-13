@@ -1,10 +1,8 @@
-D 122
-O PLAN op=useesp path=/dev/nvme0n1p1 need_mib=16
 O PLAN op=reuse name=misc path=/dev/nvme0n1p2 num=2 start=616448 end=624639 size_mib=4 size_kib=4096 action=write
-O PLAN op=reuse name=metadata path=/dev/nvme0n1p3 num=3 start=624640 end=690175 size_mib=32 size_kib=32768 action=keep
+O PLAN op=reuse name=metadata path=/dev/nvme0n1p3 num=3 start=624640 end=690175 size_mib=32 size_kib=32768 action=format
 O PLAN op=reuse name=boot_a path=/dev/nvme0n1p4 num=4 start=690176 end=821247 size_mib=64 size_kib=65536 action=write
 O PLAN op=reuse name=boot_b path=/dev/nvme0n1p5 num=5 start=821248 end=952319 size_mib=64 size_kib=65536 action=write
 O PLAN op=reuse name=super path=/dev/nvme0n1p6 num=6 start=952320 end=26118143 size_mib=12288 size_kib=12582912 action=write
-O PLAN op=reuse name=userdata path=/dev/nvme0n1p8 num=8 start=28215296 end=1000212479 size_mib=474608 size_kib=485998592 action=keep
-O PLANSUM mode=reinstall rescue=no keep_data=yes avail_mib=487060 fixed_mib=12452 userdata_mib=474608
+O PLAN op=reuse name=userdata path=/dev/nvme0n1p7 num=7 start=26118144 end=1000212479 size_mib=475632 size_kib=487047168 action=format
+O PLANSUM mode=reinstall keep_data=no avail_mib=488084 fixed_mib=12452 userdata_mib=475632
 X 0

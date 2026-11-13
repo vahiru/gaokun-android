@@ -67,7 +67,7 @@ void main() {
   }, skip: !haveFont);
 
   testWidgets('02 欢迎 / 预检拦住（型号不对）', (t) async {
-    await pumpApp(t, 'blank', overrides: {'gk3_preflight': 'preflight-model.txt'});
+    await pumpApp(t, 'blank', overrides: {'preflight': 'preflight-model.txt'});
     await waitFor(t, find.text(l.checkBlocked));
     await shot(t, '02-welcome-blocked');
   }, skip: !haveFont);
@@ -140,7 +140,7 @@ void main() {
   }, skip: !haveFont);
 
   testWidgets('13d 风险确认：双系统（Windows 与 BitLocker）', (t) async {
-    await pumpApp(t, 'windows-free', overrides: {'gk3_esp_info': 'esp_info-bitlocker.txt'});
+    await pumpApp(t, 'windows-free', overrides: {'esp-info': 'esp_info-bitlocker.txt'});
     await toMode(t);
     await tap(t, find.text(l.modeAlongTitle));
     await next(t);

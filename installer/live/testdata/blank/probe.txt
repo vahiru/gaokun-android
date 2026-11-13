@@ -1,6 +1,5 @@
-D 171
-O DISK path=/dev/sda size_mib=7680 model=? removable=1 tran=usb medium=yes
-O PART path=/dev/sda1 num=1 start=2048 end=15728606 size_mib=7678 size_kib=7863279 type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B name=esp fs=vfat fslabel=GK3LIVE os=esp medium=yes
-O DISK path=/dev/nvme0n1 size_mib=488386 model=? removable=0 tran=nvme medium=no
+O DISK path=/dev/sda size_mib=7680 sector=512 physsector=512 model=? bus=usb removable=1 medium=yes table=gpt kernel=ok
+O PART path=/dev/sda1 disk=/dev/sda num=1 idx=1 start=2048 end=15728606 size_mib=7678 size_kib=7863279 type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B uuid=9EE39B9F-58BD-42F0-AB92-9FF600174210 attrs=0x0000000000000000 name=esp fs=vfat fslabel=GK3LIVE os=esp medium=yes
+O DISK path=/dev/nvme0n1 size_mib=488386 sector=512 physsector=512 model=? bus=nvme removable=0 medium=no table=gpt kernel=ok
 O FREE disk=/dev/nvme0n1 start=34 end=1000214494 size_mib=488385
 X 0

@@ -20,13 +20,13 @@ class Rec extends Gk3Backend {
   final FixtureBackend inner;
   final bool failApply;
 
-  /// gk3_apply 在第一次写盘之前的检查里失败（ERR touched=no）
+  /// gk3l apply 在第一次写盘之前的检查里失败（ERR touched=no）
   final bool failApplyUntouched;
 
-  /// 给了就让 gk3_apply 停在半路、等它完成（看"写盘期间"界面的样子）
+  /// 给了就让 gk3l apply 停在半路、等它完成（看"写盘期间"界面的样子）
   final Completer<void>? holdApply;
 
-  /// 给了就让 gk3_job_follow 停在半路（接着跟一个写盘任务时的界面）
+  /// 给了就让 gk3l job follow 停在半路（接着跟一个写盘任务时的界面）
   final Completer<void>? holdFollow;
 
   /// 侧栏 / 完成页发出的重启与关机
@@ -42,35 +42,38 @@ class Rec extends Gk3Backend {
   @override
   Stream<Gk3Event> call(String fn, [List<String> args = const []]) async* {
     calls.add([fn, ...args]);
-    if (fn == 'gk3_job_follow' && holdFollow != null) {
+    if (fn == 'job' && args.firstOrNull == 'follow' && holdFollow != null) {
       yield parseStderrLine('PROGRESS 30 write-super');
       await holdFollow!.future;
     }
-    if (fn == 'gk3_apply' && holdApply != null) {
+    if (fn == 'apply' && holdApply != null) {
       yield parseStderrLine('PROGRESS 30 write-super');
       await holdApply!.future;
     }
-    if (fn == 'gk3_apply' && failApplyUntouched) {
+    if (fn == 'apply' && failApplyUntouched) {
       yield parseStderrLine('PROGRESS 1 check');
       yield parseStderrLine('ERR code=release-no-super touched=no');
-      yield const Gk3Log('!! 发布目录里既没有 super.img.zst 也没有 super.img');
+      yield const Gk3Log('!! the release directory has neither super.img.zst nor super.img');
       yield const Gk3Exit(1);
       return;
     }
-    if (fn == 'gk3_apply' && failApply) {
+    if (fn == 'apply' && failApply) {
       yield parseStderrLine('PROGRESS 5 write-gpt');
-      yield const Gk3Log('分区表已备份到 /media/gk3/gaokun3/gpt-backup-nvme0n1-1.bin（还原：sgdisk --load-backup=/media/gk3/gaokun3/gpt-backup-nvme0n1-1.bin /dev/nvme0n1）');
-      yield parseStderrLine('ERR code=part-missing name=super disk=/dev/nvme0n1 touched=yes');
-      yield const Gk3Log('!! 分区 super 没解析出来（/dev/nvme0n1 上找不到这个 PARTLABEL）');
+      yield parseStdoutLine('BACKUP path=/media/gk3/gaokun3/gpt-before-wipe-nvme0n1-20261113-120000-head2048-tail2048.bin disk=/dev/nvme0n1 sector=512 head=2048 tail=2048 ram=no');
+      yield parseStderrLine('ERR code=disk-write part=gpt errno=5 touched=yes');
+      yield const Gk3Log('!! writing the partition table failed (the backup is listed above)');
       yield const Gk3Exit(1);
       return;
     }
     yield* inner.call(fn, args);
   }
 
-  List<String>? last(String fn) => calls.lastWhere((c) => c.first == fn, orElse: () => const []).isEmpty
-      ? null
-      : calls.lastWhere((c) => c.first == fn);
+  /// 最后一次这个命令的调用；key 可以带子命令（'job follow'）
+  List<String>? last(String key) {
+    final k = key.split(' ');
+    bool hit(List<String> c) => c.length >= k.length && [for (var i = 0; i < k.length; i++) c[i] == k[i]].every((x) => x);
+    return calls.where(hit).lastOrNull;
+  }
 
   @override
   Future<void> reboot() async => power.add('reboot');

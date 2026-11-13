@@ -1,2 +1,2 @@
-O RELEASE dir=/media/gk3/gaokun3/payload boot=no super=no sha256=no rescue=yes version=? super_mib=0
+O RELEASE dir=/media/gk3/gaokun3/payload boot=no super=no sha256=no version=? super_mib=0
 X 0

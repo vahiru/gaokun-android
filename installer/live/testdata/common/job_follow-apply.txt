@@ -1,153 +1,58 @@
 E PROGRESS 1 check
 E PROGRESS 1 verify-sha
-E boot.img：sha256 与发版清单一致
-D 63
-E super.img.zst：sha256 与发版清单一致
-E   Image            300002 字节
-E   ramdisk.img      123457 字节
-E   gaokun3.dtb       20005 字节
-E   cmdline.txt         183 字节
+E boot.img: sha256 matches the release manifest
+E super.img.zst: sha256 matches the release manifest
+E   Image           300002 bytes
+E   ramdisk.img     123457 bytes
+E   gaokun3.dtb      20005 bytes
+E PROGRESS 1 test-zst
+D 53
+E super.img.zst: full test decode passed
 E PROGRESS 2 plan
-E 分区表备份：/media/gk3/gaokun3/gpt-before-apply-nvme0n1-20261005-142715.bin（还原：sgdisk --load-backup=/media/gk3/gaokun3/gpt-before-apply-nvme0n1-20261005-142715.bin /dev/nvme0n1）
+O PLAN op=wipe disk=/dev/nvme0n1
+O PLAN op=mkpart disk=/dev/nvme0n1 name=esp start=2048 end=616447 size_mib=300 type=ef00
+O PLAN op=mkpart disk=/dev/nvme0n1 name=misc start=616448 end=624639 size_mib=4 type=8300
+O PLAN op=mkpart disk=/dev/nvme0n1 name=metadata start=624640 end=690175 size_mib=32 type=8300
+O PLAN op=mkpart disk=/dev/nvme0n1 name=boot_a start=690176 end=821247 size_mib=64 type=8300
+O PLAN op=mkpart disk=/dev/nvme0n1 name=boot_b start=821248 end=952319 size_mib=64 type=8300
+O PLAN op=mkpart disk=/dev/nvme0n1 name=super start=952320 end=26118143 size_mib=12288 type=8300
+O PLAN op=mkpart disk=/dev/nvme0n1 name=userdata start=26118144 end=1000212479 size_mib=475632 type=8300
+O PLANSUM mode=wipe avail_mib=488384 fixed_mib=12752 userdata_mib=475632
+E partition table backup: /media/gk3/gaokun3/gpt-before-wipe-nvme0n1-20261113-114533-head2048-tail2048.bin (restore: dd the first 2048 sectors to the start of /dev/nvme0n1 and the last 2048 to its end, bs=512)
+O BACKUP path=/media/gk3/gaokun3/gpt-before-wipe-nvme0n1-20261113-114533-head2048-tail2048.bin disk=/dev/nvme0n1 sector=512 head=2048 tail=2048 ram=no
 E PROGRESS 5 write-gpt
-E + sgdisk --zap-all /dev/nvme0n1
-D 1008
-E GPT data structures destroyed! You may now partition the disk using fdisk or
-E other utilities.
-E + sgdisk -n 0:2048:616447 -t 0:ef00 -c 0:esp /dev/nvme0n1
-D 1009
-E Creating new GPT entries in memory.
-E The operation has completed successfully.
-E + sgdisk -n 0:616448:624639 -t 0:8300 -c 0:misc /dev/nvme0n1
-D 1020
-E The operation has completed successfully.
-E + sgdisk -n 0:624640:690175 -t 0:8300 -c 0:metadata /dev/nvme0n1
-D 1012
-E The operation has completed successfully.
-E + sgdisk -n 0:690176:821247 -t 0:8300 -c 0:boot_a /dev/nvme0n1
-D 1019
-E The operation has completed successfully.
-E + sgdisk -n 0:821248:952319 -t 0:8300 -c 0:boot_b /dev/nvme0n1
-D 1027
-E The operation has completed successfully.
-E + sgdisk -n 0:952320:26118143 -t 0:8300 -c 0:super /dev/nvme0n1
-D 1028
-E The operation has completed successfully.
-E + sgdisk -n 0:26118144:28215295 -t 0:8300 -c 0:gk3rescue /dev/nvme0n1
-D 1027
-E The operation has completed successfully.
-E + sgdisk -n 0:28215296:1000212479 -t 0:8300 -c 0:userdata /dev/nvme0n1
-D 1023
-E The operation has completed successfully.
-E + partprobe /dev/nvme0n1
-D 1500
+E partition table written (primary and backup), the kernel knows the 7 new partitions
 E PROGRESS 15 format
-D 168
-E + mkfs.vfat -F 32 -n ESP /dev/nvme0n1p1
+E misc: MISCINIT slot=a default=none bcab=5f61000042434142010200006f0000000000000000000000000000000ad6c368
 E mkfs.fat 4.2 (2021-01-31)
-E + mkfs.ext4 -q -F -L metadata /dev/nvme0n1p3
-E + mkfs.ext4 -q -F -m 0 -L userdata /dev/nvme0n1p8
-D 57
-E + dd if=/dev/zero of=/dev/nvme0n1p2 bs=1024 count=4096 conv=fsync,nocreat status=none
-E misc：MISCINIT slot=a default=none bcab=5f61000042434142010200006f0000000000000000000000000000000ad6c368 rec_crc=836b9d53 rest=zero direct=yes
-E + mkfs.ext4 -q -F -L gk3rescue /dev/nvme0n1p7
+D 121
+E metadata, userdata: ext4 created (superblock magic and label read back from the disk)
 E PROGRESS 30 write-super
-E PROGRESS 30 write-super done_mib=0 total_mib=12288
-D 102
-E PROGRESS 31 write-super done_mib=337 total_mib=12288
-D 82
-E PROGRESS 32 write-super done_mib=657 total_mib=12288
-D 887
-E PROGRESS 33 write-super done_mib=980 total_mib=12288
+E PROGRESS 32 write-super done_mib=4 total_mib=12288
+E PROGRESS 34 write-super done_mib=8 total_mib=12288
+E PROGRESS 37 write-super done_mib=12 total_mib=12288
+E PROGRESS 39 write-super done_mib=16 total_mib=12288
+D 831
+E PROGRESS 42 write-super done_mib=903 total_mib=12288
+E PROGRESS 44 write-super done_mib=907 total_mib=12288
+E PROGRESS 47 write-super done_mib=911 total_mib=12288
+E PROGRESS 49 write-super done_mib=915 total_mib=12288
 D 1500
-E PROGRESS 34 write-super done_mib=1236 total_mib=12288
-D 195
-E PROGRESS 35 write-super done_mib=1556 total_mib=12288
-D 162
-E PROGRESS 36 write-super done_mib=1876 total_mib=12288
+E PROGRESS 52 write-super done_mib=4003 total_mib=12288
+E PROGRESS 54 write-super done_mib=4007 total_mib=12288
+E PROGRESS 57 write-super done_mib=4011 total_mib=12288
+E PROGRESS 59 write-super done_mib=4015 total_mib=12288
 D 1500
-E PROGRESS 37 write-super done_mib=2196 total_mib=12288
-D 236
-E PROGRESS 38 write-super done_mib=2516 total_mib=12288
-D 123
-E PROGRESS 39 write-super done_mib=2772 total_mib=12288
+E PROGRESS 62 write-super done_mib=9003 total_mib=12288
+E PROGRESS 64 write-super done_mib=9007 total_mib=12288
+E PROGRESS 67 write-super done_mib=9011 total_mib=12288
+E PROGRESS 69 write-super done_mib=9015 total_mib=12288
 D 1500
-E PROGRESS 40 write-super done_mib=3092 total_mib=12288
-D 922
-E PROGRESS 41 write-super done_mib=3412 total_mib=12288
-D 267
-E PROGRESS 42 write-super done_mib=3732 total_mib=12288
-D 155
-E PROGRESS 43 write-super done_mib=4000 total_mib=12288
-D 1500
-E PROGRESS 44 write-super done_mib=4336 total_mib=12288
-D 1500
-E PROGRESS 45 write-super done_mib=4656 total_mib=12288
-D 59
-E PROGRESS 46 write-super done_mib=4976 total_mib=12288
-E PROGRESS 47 write-super done_mib=5232 total_mib=12288
-D 1500
-E PROGRESS 48 write-super done_mib=5552 total_mib=12288
-D 69
-E PROGRESS 49 write-super done_mib=5872 total_mib=12288
-D 126
-E PROGRESS 50 write-super done_mib=6192 total_mib=12288
-D 913
-E PROGRESS 51 write-super done_mib=6512 total_mib=12288
-D 1500
-E PROGRESS 52 write-super done_mib=6768 total_mib=12288
-D 141
-E PROGRESS 53 write-super done_mib=7088 total_mib=12288
-D 119
-E PROGRESS 54 write-super done_mib=7408 total_mib=12288
-D 1071
-E PROGRESS 55 write-super done_mib=7728 total_mib=12288
-D 1500
-E PROGRESS 56 write-super done_mib=8048 total_mib=12288
-D 114
-E PROGRESS 57 write-super done_mib=8304 total_mib=12288
-D 116
-E PROGRESS 58 write-super done_mib=8624 total_mib=12288
-D 1115
-E PROGRESS 59 write-super done_mib=8944 total_mib=12288
-D 1500
-E PROGRESS 60 write-super done_mib=9272 total_mib=12288
-D 88
-E PROGRESS 61 write-super done_mib=9528 total_mib=12288
-D 108
-E PROGRESS 62 write-super done_mib=9848 total_mib=12288
-D 1053
-E PROGRESS 63 write-super done_mib=10168 total_mib=12288
-D 1500
-E PROGRESS 64 write-super done_mib=10488 total_mib=12288
-D 141
-E PROGRESS 65 write-super done_mib=10808 total_mib=12288
-D 110
-E PROGRESS 66 write-super done_mib=11064 total_mib=12288
-D 1500
-E PROGRESS 67 write-super done_mib=11384 total_mib=12288
-D 160
-E PROGRESS 68 write-super done_mib=11704 total_mib=12288
-D 113
-E PROGRESS 69 write-super done_mib=12024 total_mib=12288
-D 609
 E PROGRESS 70 write-super done_mib=12288 total_mib=12288
-D 1283
-E gk3-unsparse: 3145728 块 × 4096 字节 = 12288 MiB，200 个块段
-E super：LP geometry 魔数正确
+E super: LP geometry magic correct
 E PROGRESS 70 write-boot
-E + dd if=/media/gk3/gaokun3/payload/boot.img of=/dev/nvme0n1p4 bs=4M conv=fsync,nocreat status=none
-E + dd if=/media/gk3/gaokun3/payload/boot.img of=/dev/nvme0n1p5 bs=4M conv=fsync,nocreat status=none
 E PROGRESS 80 bootloader
-E + mount -t vfat /dev/nvme0n1p1 /tmp/tmp.FsMXWrX550
-D 55
-E + umount /tmp/tmp.FsMXWrX550
-E /dev/nvme0n1p1：9 个文件从介质读回核对一致
-E PROGRESS 92 write-rescue
-E + mount /dev/nvme0n1p7 /tmp/tmp.2GsxOyMxTu
-E 警告：没有 WiFi 配置可带给救援系统 —— 它开机后连不上网，只能在机器旁操作
-E 警告：没有 ssh 公钥可带给救援系统 —— 只能在机器旁登录（放一份到 U 盘的 gaokun3/authorized_keys）
-E + umount /tmp/tmp.2GsxOyMxTu
-E /dev/nvme0n1p7：1 个文件从介质读回核对一致
+E ESP: systemd-boot, kernel / dtb / ramdisk for both slots, both entries and loader.conf written; 11 files read back from the disk and verified
+E cannot read EFI variables (efivarfs unavailable); LoaderEntryDefault not checked
 E PROGRESS 100 done
 X 0

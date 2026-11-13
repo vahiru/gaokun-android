@@ -1,168 +1,59 @@
 E PROGRESS 1 check
 E PROGRESS 1 verify-sha
-E boot.img：sha256 与发版清单一致
-E super.img.zst：sha256 与发版清单一致
-E   Image            300002 字节
-E   ramdisk.img      123457 字节
-E   gaokun3.dtb       20005 字节
-E   cmdline.txt         183 字节
-E ESP 上用目录 0123456789abcdef0123456789abcdef；要写 2 MiB（已扣掉会被覆盖的同名文件），空闲 198 MiB；Windows 的启动管理器：yes；BOOTAA64 要变：yes
-E Windows 卷：bitlocker=no hibernated=no hib_part=
-E U17：装完、扣掉一次 OTA 的暂时空间后还剩 190 MiB 给 Windows 与固件（要 ≥ 32）
-E 现有 ESP /dev/nvme0n1p1 空闲 199 MiB（需要 150）
+E boot.img: sha256 matches the release manifest
+E super.img.zst: sha256 matches the release manifest
+E   Image           300002 bytes
+E   ramdisk.img     123457 bytes
+E   gaokun3.dtb      20005 bytes
+E PROGRESS 1 test-zst
+D 56
+E super.img.zst: full test decode passed
+E ESP: using directory 0123456789abcdef0123456789abcdef; 4 MiB to write (net of files overwritten), 198 MiB free; Windows boot manager present: yes
+D 82
+E Windows volumes: bitlocker=no hibernated=no
 E PROGRESS 2 plan
-E 分区表备份：/media/gk3/gaokun3/gpt-before-apply-nvme0n1-20261005-142403.bin（还原：sgdisk --load-backup=/media/gk3/gaokun3/gpt-before-apply-nvme0n1-20261005-142403.bin /dev/nvme0n1）
+O PLAN op=mkpart disk=/dev/nvme0n1 name=misc start=789448704 end=789456895 size_mib=4 type=8300
+O PLAN op=mkpart disk=/dev/nvme0n1 name=metadata start=789456896 end=789522431 size_mib=32 type=8300
+O PLAN op=mkpart disk=/dev/nvme0n1 name=boot_a start=789522432 end=789653503 size_mib=64 type=8300
+O PLAN op=mkpart disk=/dev/nvme0n1 name=boot_b start=789653504 end=789784575 size_mib=64 type=8300
+O PLAN op=mkpart disk=/dev/nvme0n1 name=super start=789784576 end=814950399 size_mib=12288 type=8300
+O PLAN op=mkpart disk=/dev/nvme0n1 name=userdata start=814950400 end=957220863 size_mib=69468 type=8300
+O PLANSUM mode=alongside avail_mib=81920 fixed_mib=12452 userdata_mib=69468
+E partition table backup: /media/gk3/gaokun3/gpt-before-apply-nvme0n1-20261113-114517-head34-tail33.bin (restore: dd the first 34 sectors to the start of /dev/nvme0n1 and the last 33 to its end, bs=512)
+O BACKUP path=/media/gk3/gaokun3/gpt-before-apply-nvme0n1-20261113-114517-head34-tail33.bin disk=/dev/nvme0n1 sector=512 head=34 tail=33 ram=no
 E PROGRESS 5 write-gpt
-E + sgdisk -n 0:789448704:789456895 -t 0:8300 -c 0:misc /dev/nvme0n1
-D 1009
-E Warning: The kernel is still using the old partition table.
-E The new table will be used at the next reboot or after you
-E run partprobe(8) or kpartx(8)
-E The operation has completed successfully.
-E + sgdisk -n 0:789456896:789522431 -t 0:8300 -c 0:metadata /dev/nvme0n1
-D 1008
-E Warning: The kernel is still using the old partition table.
-E The new table will be used at the next reboot or after you
-E run partprobe(8) or kpartx(8)
-E The operation has completed successfully.
-E + sgdisk -n 0:789522432:789653503 -t 0:8300 -c 0:boot_a /dev/nvme0n1
-D 1012
-E Warning: The kernel is still using the old partition table.
-E The new table will be used at the next reboot or after you
-E run partprobe(8) or kpartx(8)
-E The operation has completed successfully.
-E + sgdisk -n 0:789653504:789784575 -t 0:8300 -c 0:boot_b /dev/nvme0n1
-D 1008
-E Warning: The kernel is still using the old partition table.
-E The new table will be used at the next reboot or after you
-E run partprobe(8) or kpartx(8)
-E The operation has completed successfully.
-E + sgdisk -n 0:789784576:814950399 -t 0:8300 -c 0:super /dev/nvme0n1
-D 1014
-E Warning: The kernel is still using the old partition table.
-E The new table will be used at the next reboot or after you
-E run partprobe(8) or kpartx(8)
-E The operation has completed successfully.
-E + sgdisk -n 0:814950400:817047551 -t 0:8300 -c 0:gk3rescue /dev/nvme0n1
-D 1006
-E Warning: The kernel is still using the old partition table.
-E The new table will be used at the next reboot or after you
-E run partprobe(8) or kpartx(8)
-E The operation has completed successfully.
-E + sgdisk -n 0:817047552:957220863 -t 0:8300 -c 0:userdata /dev/nvme0n1
-D 1011
-E Warning: The kernel is still using the old partition table.
-E The new table will be used at the next reboot or after you
-E run partprobe(8) or kpartx(8)
-E The operation has completed successfully.
-E + partprobe /dev/nvme0n1
-D 1500
+E partition table written (primary and backup), the kernel knows the 6 new partitions
 E PROGRESS 15 format
-D 170
-E 复用现有 ESP：/dev/nvme0n1p1（不格式化；空间与类型在动盘之前已验过）
-E + mkfs.ext4 -q -F -L metadata /dev/nvme0n1p10
-E + mkfs.ext4 -q -F -m 0 -L userdata /dev/nvme0n1p15
-E + dd if=/dev/zero of=/dev/nvme0n1p9 bs=1024 count=4096 conv=fsync,nocreat status=none
-E misc：MISCINIT slot=a default=android bcab=5f61000042434142010200006f0000000000000000000000000000000ad6c368 rec_crc=2280d0d2 rest=zero direct=yes
-E + mkfs.ext4 -q -F -L gk3rescue /dev/nvme0n1p14
+E misc: MISCINIT slot=a default=android bcab=5f61000042434142010200006f0000000000000000000000000000000ad6c368
+D 52
+E metadata, userdata: ext4 created (superblock magic and label read back from the disk)
 E PROGRESS 30 write-super
-E PROGRESS 30 write-super done_mib=0 total_mib=12288
-D 73
-E PROGRESS 31 write-super done_mib=337 total_mib=12288
-D 70
-E PROGRESS 32 write-super done_mib=657 total_mib=12288
-D 142
-E PROGRESS 33 write-super done_mib=980 total_mib=12288
-D 381
-E PROGRESS 34 write-super done_mib=1236 total_mib=12288
+E PROGRESS 32 write-super done_mib=4 total_mib=12288
+E PROGRESS 34 write-super done_mib=8 total_mib=12288
+E PROGRESS 37 write-super done_mib=12 total_mib=12288
+E PROGRESS 39 write-super done_mib=16 total_mib=12288
+D 910
+E PROGRESS 42 write-super done_mib=903 total_mib=12288
+E PROGRESS 44 write-super done_mib=907 total_mib=12288
+E PROGRESS 47 write-super done_mib=911 total_mib=12288
+E PROGRESS 49 write-super done_mib=915 total_mib=12288
 D 1500
-E PROGRESS 35 write-super done_mib=1556 total_mib=12288
-D 482
-E PROGRESS 36 write-super done_mib=1876 total_mib=12288
+E PROGRESS 52 write-super done_mib=4003 total_mib=12288
+E PROGRESS 54 write-super done_mib=4007 total_mib=12288
+E PROGRESS 57 write-super done_mib=4011 total_mib=12288
+E PROGRESS 59 write-super done_mib=4015 total_mib=12288
 D 1500
-E PROGRESS 37 write-super done_mib=2196 total_mib=12288
-D 740
-E PROGRESS 38 write-super done_mib=2516 total_mib=12288
-D 131
-E PROGRESS 39 write-super done_mib=2772 total_mib=12288
-D 1098
-E PROGRESS 40 write-super done_mib=3092 total_mib=12288
+E PROGRESS 62 write-super done_mib=9003 total_mib=12288
+E PROGRESS 64 write-super done_mib=9007 total_mib=12288
+E PROGRESS 67 write-super done_mib=9011 total_mib=12288
+E PROGRESS 69 write-super done_mib=9015 total_mib=12288
 D 1500
-E PROGRESS 41 write-super done_mib=3412 total_mib=12288
-D 596
-E PROGRESS 42 write-super done_mib=3732 total_mib=12288
-D 282
-E PROGRESS 43 write-super done_mib=4000 total_mib=12288
-D 1114
-E PROGRESS 44 write-super done_mib=4336 total_mib=12288
-D 1500
-E PROGRESS 45 write-super done_mib=4656 total_mib=12288
-D 177
-E PROGRESS 46 write-super done_mib=4976 total_mib=12288
-D 142
-E PROGRESS 47 write-super done_mib=5232 total_mib=12288
-D 913
-E PROGRESS 48 write-super done_mib=5552 total_mib=12288
-D 1500
-E PROGRESS 49 write-super done_mib=5872 total_mib=12288
-D 103
-E PROGRESS 50 write-super done_mib=6192 total_mib=12288
-D 104
-E PROGRESS 51 write-super done_mib=6512 total_mib=12288
-D 1054
-E PROGRESS 52 write-super done_mib=6768 total_mib=12288
-D 1500
-E PROGRESS 53 write-super done_mib=7088 total_mib=12288
-D 183
-E PROGRESS 54 write-super done_mib=7408 total_mib=12288
-D 85
-E PROGRESS 55 write-super done_mib=7728 total_mib=12288
-D 1500
-E PROGRESS 56 write-super done_mib=8048 total_mib=12288
-D 60
-E PROGRESS 57 write-super done_mib=8304 total_mib=12288
-D 87
-E PROGRESS 58 write-super done_mib=8624 total_mib=12288
-D 635
-E PROGRESS 59 write-super done_mib=8944 total_mib=12288
-D 1500
-E PROGRESS 60 write-super done_mib=9272 total_mib=12288
-D 81
-E PROGRESS 61 write-super done_mib=9528 total_mib=12288
-D 93
-E PROGRESS 62 write-super done_mib=9848 total_mib=12288
-D 724
-E PROGRESS 63 write-super done_mib=10168 total_mib=12288
-D 1500
-E PROGRESS 64 write-super done_mib=10488 total_mib=12288
-D 131
-E PROGRESS 65 write-super done_mib=10808 total_mib=12288
-D 85
-E PROGRESS 66 write-super done_mib=11064 total_mib=12288
-D 992
-E PROGRESS 67 write-super done_mib=11384 total_mib=12288
-D 1500
-E PROGRESS 68 write-super done_mib=11704 total_mib=12288
-D 111
-E PROGRESS 69 write-super done_mib=12024 total_mib=12288
-D 55
 E PROGRESS 70 write-super done_mib=12288 total_mib=12288
-D 836
-E gk3-unsparse: 3145728 块 × 4096 字节 = 12288 MiB，200 个块段
-E super：LP geometry 魔数正确
+E super: LP geometry magic correct
 E PROGRESS 70 write-boot
-E + dd if=/media/gk3/gaokun3/payload/boot.img of=/dev/nvme0n1p11 bs=4M conv=fsync,nocreat status=none
-E + dd if=/media/gk3/gaokun3/payload/boot.img of=/dev/nvme0n1p12 bs=4M conv=fsync,nocreat status=none
 E PROGRESS 80 bootloader
-E + mount -t vfat /dev/nvme0n1p1 /tmp/tmp.PJfxDvTdAN
-E 原有的 EFI/BOOT/BOOTAA64.EFI 已备份为 EFI/BOOT/BOOTAA64.EFI.before-gaokun3
-E + umount /tmp/tmp.PJfxDvTdAN
-E /dev/nvme0n1p1：9 个文件从介质读回核对一致
-E PROGRESS 92 write-rescue
-E + mount /dev/nvme0n1p14 /tmp/tmp.PZt6UktvA7
-E 警告：没有 WiFi 配置可带给救援系统 —— 它开机后连不上网，只能在机器旁操作
-E 警告：没有 ssh 公钥可带给救援系统 —— 只能在机器旁登录（放一份到 U 盘的 gaokun3/authorized_keys）
-E + umount /tmp/tmp.PZt6UktvA7
-E /dev/nvme0n1p14：1 个文件从介质读回核对一致
+E backed up the original EFI/BOOT/BOOTAA64.EFI as EFI/BOOT/BOOTAA64.EFI.before-gaokun3
+E ESP: systemd-boot, kernel / dtb / ramdisk for both slots, both entries and loader.conf written; 12 files read back from the disk and verified
+E cannot read EFI variables (efivarfs unavailable); LoaderEntryDefault not checked
 E PROGRESS 100 done
 X 0

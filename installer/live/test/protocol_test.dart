@@ -83,7 +83,7 @@ void main() {
         FixtureBackend(sc, bundle: rootBundle, speed: 0, overrides: o);
 
     test('factory：7 个分区、没有空闲区、安装 U 盘被认出来', () async {
-      final disks = Disk.fromProbe(await b('factory').run('gk3_probe'));
+      final disks = Disk.fromProbe(await b('factory').run('probe'));
       final nvme = disks.firstWhere((d) => d.path == '/dev/nvme0n1');
       final usb = disks.firstWhere((d) => d.path == '/dev/sda');
       expect(nvme.parts, hasLength(7));
@@ -95,65 +95,60 @@ void main() {
     });
     test('windows-free：80 GiB 空闲区；ESP 够用、有 Windows', () async {
       final bk = b('windows-free');
-      final d = Disk.fromProbe(await bk.run('gk3_probe')).firstWhere((d) => d.path == '/dev/nvme0n1');
+      final d = Disk.fromProbe(await bk.run('probe')).firstWhere((d) => d.path == '/dev/nvme0n1');
       expect(d.largestFree?.sizeMib, 81920);
-      final esp = EspInfo((await bk.run('gk3_esp_info', ['/dev/nvme0n1p1'])).first('ESP')!);
+      final esp = EspInfo((await bk.run('esp-info', ['--disk', '/dev/nvme0n1'])).first('ESP')!);
       expect(esp.roomy, isTrue);
       expect(esp.windows, isTrue);
     });
-    test('android：双系统被 partlabel-conflict 拒绝', () async {
-      final r = await b('android').run('gk3_plan', [
-        '--disk', '/dev/nvme0n1', '--mode', 'alongside', '--rescue', 'no',
-        '--region-start', '0', '--region-end', '0', '--esp', '/dev/nvme0n1p1'
-      ]);
-      final plan = Plan(r);
-      expect(plan.ok, isFalse);
-      expect(plan.error?['msg'], 'partlabel-conflict');
-      expect(plan.error?['names'], contains('super'));
+    test('android：盘上已有 Android 的分区（双系统会重名，界面据此拦住）；重新安装的方案成立', () async {
+      final bk = b('android');
+      final d = Disk.fromProbe(await bk.run('probe')).firstWhere((d) => d.path == '/dev/nvme0n1');
+      expect(d.parts.map((p) => p.name).where(kAndroidNames.contains), containsAll(['super', 'userdata', 'misc']));
+      final re = Plan(await bk.run('plan', ['--mode', 'reinstall', '--disk', '/dev/nvme0n1', '--keep-data', 'no']));
+      expect(re.ok, isTrue);
+      expect(re.reuse.map((r) => r.name), containsAll(['super', 'userdata', 'misc', 'metadata', 'boot_a', 'boot_b']));
     });
     test('apply 的进度单调、走到 100、stdout 里没有记录', () async {
       final events = <Gk3Event>[];
-      final r = await b('blank').run('gk3_apply', ['--anything'], events.add);
+      final r = await b('blank').run('apply', ['--anything'], events.add);
       expect(r.ok, isTrue);
       final pcts = events.whereType<Gk3Progress>().map((p) => p.percent).toList();
       expect(pcts.last, 100);
       for (var i = 1; i < pcts.length; i++) {
         expect(pcts[i], greaterThanOrEqualTo(pcts[i - 1]));
       }
-      expect(r.records, isEmpty);
+      // stdout 上只有方案与分区表备份的记录
+      expect(r.records.map((x) => x.type).toSet(), {'PLAN', 'PLANSUM', 'BACKUP'});
     });
     test('windows-live：介质在内置盘上 —— 盘与介质分区都标 medium', () async {
-      final disks = Disk.fromProbe(await b('windows-live').run('gk3_probe'));
+      final disks = Disk.fromProbe(await b('windows-live').run('probe'));
       expect(disks.single.medium, isTrue);
       expect(disks.single.external, isFalse);
       expect(disks.single.parts.where((p) => p.medium).map((p) => p.path), ['/dev/nvme0n1p8']);
     });
     test('overrides：换一份预检（型号不对拦住，电源照常）', () async {
-      final checks = (await b('blank', {'gk3_preflight': 'preflight-model.txt'}).run('gk3_preflight'))
-          .ofType('CHECK').map(Check.new).toList();
+      final checks = Check.fromPreflight((await b('blank', {'preflight': 'preflight-model.txt'}).run('preflight')).first('PREFLIGHT')!);
       expect(checks.map((c) => c.id), ['model', 'power']);
       expect(checks.firstWhere((c) => c.id == 'model').state, CheckState.fail);
       expect(checks.firstWhere((c) => c.id == 'model').value, 'GK-W57');
       expect(checks.firstWhere((c) => c.id == 'power').state, CheckState.ok);
     });
     test('双系统至少要多少：后端自己报（C 版写死了 20.2 GiB）', () async {
-      final p = Plan(await b('factory').run('gk3_plan', [
-        '--disk', '/dev/nvme0n1', '--mode', 'alongside', '--rescue', 'yes',
-        '--region-start', '0', '--region-end', '0', '--esp', '/dev/nvme0n1p1'
-      ]));
+      final p = Plan(await b('factory').run('plan', ['--sector', '512', '--region-start', '0', '--region-end', '0', '--disk', '/dev/nvme0n1']));
       expect(p.error?['msg'], 'not-enough-space');
       expect(p.error?.intOf('need_mib'), greaterThan(20000));
     });
     test('fixture 里没有的调用：失败（127），而不是编一个结果', () async {
-      final r = await b('blank').run('gk3_no_such_function');
+      final r = await b('blank').run('no-such-command');
       expect(r.exitCode, 127);
       expect(r.error, contains('no recorded output'));
     });
     test('发布目录（安装介质上的系统文件）', () async {
-      final rel = Release((await b('blank').run('gk3_release_info')).first('RELEASE')!);
+      final rel = Release((await b('blank').run('release-info')).first('RELEASE')!);
       expect(rel.installable, isTrue);
       expect(rel.version, startsWith('crDroidAndroid-16.0'));
-      final none = Release((await b('blank', {'gk3_release_info': 'release_info-none.txt'}).run('gk3_release_info')).first('RELEASE')!);
+      final none = Release((await b('blank', {'release-info': 'release_info-none.txt'}).run('release-info')).first('RELEASE')!);
       expect(none.installable, isFalse);
     });
   });

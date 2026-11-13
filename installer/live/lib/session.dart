@@ -1,9 +1,8 @@
 // 一次安装的全部状态：用户的选择 + 从后端问来的事实。
 //
-// ★ 每一个"能不能 / 够不够 / 多大"都来自后端的一次调用，这里只是记下来、组合起来。
-//   例如"双系统要多少空间"：C 版写死了"不足 20.2 GiB"（strings.zh.txt 的 MODE.WHY.NOROOM），
-//   这里用一个空区间去问 gk3_plan，让它在 PLANERR need_mib= 里自己报出来 ——
-//   installer-lib.sh 里的常量一改，界面上的数字跟着变。
+// ★ 每一个"能不能 / 够不够 / 多大"都来自后端（gk3l）的一次调用，这里只是记下来、组合起来。
+//   例如"双系统要多少空间"：用一个空区间去问 gk3l plan，让它在 PLANERR need_mib= 里自己报出来 ——
+//   installer/backend/src/plan.h 里的常量一改，界面上的数字跟着变。
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -50,7 +49,7 @@ class AlongHibernated extends Along {
 class AlongInstalled extends Along {
   const AlongInstalled(this.names);
 
-  /// 冲突的分区名（gk3_plan 的 PLANERR partlabel-conflict names=）；
+  /// 冲突的分区名（盘上已有的、与 Android 的分区同名的）；
   /// 空串 = 分区名不冲突、但这个 ESP 上已经有 gaokun3 的启动项
   final String names;
 }
@@ -68,6 +67,11 @@ class AlongMbr extends Along {
   const AlongMbr();
 }
 
+/// 有 GPT 的痕迹、主表却不能用（gk3l probe 的 table=damaged）：只能整盘清空
+class AlongBadTable extends Along {
+  const AlongBadTable();
+}
+
 class AlongError extends Along {
   const AlongError(this.msg);
   final String msg;
@@ -79,10 +83,10 @@ const kCancelledExit = 130;
 /// 两条写盘的路，写盘之前都要阅读风险提示。每一条在 UI 上都先过 RiskPage（ui/screens_risk.dart）；
 /// Session 再守一道：没确认过的那条路，install / deletePartition 一个字节都不写（[Session.riskAcked]）
 enum RiskKind {
-  /// 整盘清空 / 双系统 / 重新安装：gk3_apply
+  /// 整盘清空 / 双系统 / 重新安装：gk3l apply
   install,
 
-  /// 删除分区：gk3_part_delete
+  /// 删除分区：gk3l delete
   edit,
 }
 
@@ -179,16 +183,17 @@ class Session extends ChangeNotifier {
   bool get blocked => checks?.any((c) => c.state == CheckState.fail) ?? false;
 
   /// 安装器（重新）起来时还在跑的写盘任务（GUI-11）：界面崩过、被 systemd 拉起来了，写盘进程在独立单元里没死。
-  /// 欢迎页看到它就直接进运行页、gk3_job_follow 接着跟，而不是让人对着一块正在被写的盘从头再装一遍
+  /// 欢迎页看到它就直接进运行页、gk3l job follow 接着跟，而不是让人对着一块正在被写的盘从头再装一遍
   Gk3Record? runningJob;
 
   Future<void> start() async {
     // 最近的一个 state=running（id 以时间开头，按 id 排序就是按时间）
-    final jobs = (await backend.run('gk3_job_status')).ofType('JOB').where((j) => j['state'] == 'running').toList()
+    final jobs = (await backend.run('job', ['status'])).ofType('JOB').where((j) => j['state'] == 'running').toList()
       ..sort((a, b) => a['id'].compareTo(b['id']));
     runningJob = jobs.lastOrNull;
-    checks = (await backend.run('gk3_preflight')).ofType('CHECK').map(Check.new).toList();
-    final r = (await backend.run('gk3_release_info')).first('RELEASE');
+    final pf = (await backend.run('preflight')).first('PREFLIGHT');
+    checks = pf == null ? const [] : Check.fromPreflight(pf);
+    final r = (await backend.run('release-info')).first('RELEASE');
     usbRelease = r == null ? null : Release(r);
     _changed();
   }
@@ -201,7 +206,7 @@ class Session extends ChangeNotifier {
     disks = null;
     probeError = null;
     _changed();
-    final r = await backend.run('gk3_probe');
+    final r = await backend.run('probe');
     disks = Disk.fromProbe(r);
     if (!r.ok) probeError = r.error ?? 'exit ${r.exitCode}';
     _changed();
@@ -211,7 +216,7 @@ class Session extends ChangeNotifier {
   Along? along;
 
   /// 重新安装的可行性：盘上有我们的分区时才问（null = 这块盘上没有我们的 Android，不出这一项）。
-  /// 用 gk3_plan --mode reinstall 问，不在界面里自己判 —— 缺哪个分区、哪个太小都是它报的
+  /// 用 gk3l plan --mode reinstall 问，不在界面里自己判 —— 缺哪个分区、哪个太小都是它报的
   Plan? reinstall;
   EspInfo? espInfo;
   bool assessing = false;
@@ -231,50 +236,57 @@ class Session extends ChangeNotifier {
     _changed();
     along = await _assessAlong(d);
     if (d.parts.any((p) => const {'super', 'userdata', 'boot_a', 'boot_b'}.contains(p.name))) {
-      reinstall = Plan(await backend.run('gk3_plan', _reinstallArgs(d, keep: false)));
+      reinstall = Plan(await backend.run('plan', _reinstallArgs(d, keep: false)));
     }
     assessing = false;
     _changed();
   }
 
   Future<Along> _assessAlong(Disk d) async {
-    // MBR 盘先说：它上面的 0xEF 分区经 sgdisk 换算也会显示成 ESP，不先拦就会走到"ESP 类型不对"之类别的原因上（S2）
+    // 分区表本身不能用的先说：MBR、主 GPT 坏了（gk3l 都只列整盘清空一条路）
     if (d.mbr) return const AlongMbr();
+    if (d.damaged) return const AlongBadTable();
     final esp = d.esp;
     if (esp == null) return const AlongNoEsp();
-    final er = (await backend.run('gk3_esp_info', [esp.path])).first('ESP');
+    final esr = await backend.run('esp-info', ['--disk', d.path]);
+    final er = esr.first('ESP');
     if (er != null) espInfo = EspInfo(er);
+    if (er == null && esr.err != null) return AlongError(esr.err!['code']);
     final info = espInfo;
     // 顺序：分区本身太小（清理也没用）> 在休眠（回 Windows 关机就好）> 空闲不够（清理）
     if (info != null && info.small && !info.ours) return AlongEspTooSmall(info.sizeMib);
     if (info != null && info.winHibernated) return const AlongHibernated();
     if (info != null && !info.roomy && !info.ours) return AlongEspSmall(info.freeMib, info.needMib);
+    // 盘上已有与 Android 同名的分区：再建一套就重名（Android 按名字挂分区，重名时挂哪个说不准）。
+    // 这里只是把 probe 报的名字列出来；apply 动盘之前会按同一条规则再拒绝一次（ERR partlabel-conflict）
+    final dup = [for (final p in d.parts) if (kAndroidNames.contains(p.name)) p.name];
+    if (dup.isNotEmpty) return AlongInstalled(dup.join(','));
+    // ESP 上已经有我们的启动项（Android 装在另一块盘上、共用这个 ESP）：再装一份会覆盖那边的启动项 —— 同样拦住
+    if (info != null && info.ours) return const AlongInstalled('');
     final f = d.largestFree;
-    // 没有空闲区也问一次（空区间）：让 gk3_plan 自己报"至少要多少"
-    final p = Plan(await backend.run('gk3_plan', [
-      '--disk', d.path, '--mode', 'alongside', '--rescue', 'no',
-      '--region-start', '${f?.start ?? 0}', '--region-end', '${f?.end ?? 0}', '--esp', esp.path,
-    ]));
+    // 没有空闲区也问一次（空区间）：让 gk3l plan 自己报"至少要多少"
+    final p = Plan(await backend.run('plan', _alongArgs(d, f?.start ?? 0, f?.end ?? 0)));
     if (p.ok && f != null) return AlongOk(f, esp, info?.windows ?? false);
     final e = p.error;
-    // ESP 上已经有我们的启动项、而分区名又不冲突（Android 装在另一块盘上、共用这个 ESP）：
-    // 再装一份会覆盖那边的启动项 —— 同样拦住
-    if (e?['msg'] != 'partlabel-conflict' && info != null && info.ours) return const AlongInstalled('');
     return switch (e?['msg']) {
-      'partlabel-conflict' => AlongInstalled(e!['names']),
-      'mbr-disk' => const AlongMbr(),
       'not-enough-space' => AlongNoRoom(e!.intOf('avail_mib'), e.intOf('need_mib'), e.fields.containsKey('fixed_mib') ? e.intOf('fixed_mib') : null),
       _ when f == null => AlongNoRoom(0, null),
       _ => AlongError(e?['msg'] ?? 'unknown'),
     };
   }
 
+  /// gk3l plan 的双系统方案：纯计算，要扇区大小与区间（盘号只是写进 PLAN 行）
+  List<String> _alongArgs(Disk d, int start, int end) => [
+        '--sector', '${d.sector}', '--region-start', '$start', '--region-end', '$end', '--disk', d.path,
+        if (userdataMib != null) ...['--userdata-mib', '$userdataMib'],
+      ];
+
   // ── 删除分区 ────────────────────────────────────────────────────────────
-  /// 删除一个分区（gk3_part_delete）。成功与否都重新探测这块盘 ——
+  /// 删除一个分区（gk3l delete）。成功与否都重新探测这块盘 ——
   /// 分区号、空闲区都可能变了，界面上显示的必须是盘上【现在】的样子
   Future<CallResult> deletePartition(String part, void Function(Gk3Event) onEvent) async {
     if (!riskAcked(RiskKind.edit)) return _riskRefused;
-    final r = await _whileWriting(() => backend.run('gk3_part_delete', [part], onEvent));
+    final r = await _whileWriting(() => backend.run('delete', ['--part', part], onEvent));
     await probe();
     final again = disks?.where((x) => x.path == disk?.path).firstOrNull;
     if (again != null) disk = again;
@@ -291,12 +303,7 @@ class Session extends ChangeNotifier {
   /// 重新安装时 /data 留不留。默认清除（用户 2026-09-25 定的）：换到更旧的版本时，留下的数据可能起不来
   bool keepData = false;
 
-  List<String> _reinstallArgs(Disk d, {required bool keep}) => [
-        '--disk', d.path, '--mode', 'reinstall',
-        // 不再装救援系统（恢复手段是 gk3boot 的 fastboot 与菜单）；以前装过的，gk3_apply 会清掉它的启动项
-        '--rescue', 'no',
-        '--esp', d.esp?.path ?? '', '--keep-data', keep ? 'yes' : 'no',
-      ];
+  List<String> _reinstallArgs(Disk d, {required bool keep}) => ['--mode', 'reinstall', '--disk', d.path, '--keep-data', keep ? 'yes' : 'no'];
 
   Future<void> setKeepData(bool v) async {
     keepData = v;
@@ -310,22 +317,31 @@ class Session extends ChangeNotifier {
   }
 
   List<String> _planArgs() {
-    final d = disk!;
-    if (mode == Mode.reinstall) return _reinstallArgs(d, keep: keepData);
-    final a = ['--disk', d.path, '--mode', mode == Mode.wipe ? 'wipe' : 'alongside', '--rescue', 'no'];
-    final al = along;
-    if (mode == Mode.alongside && al is AlongOk) {
-      a.addAll(['--region-start', '${al.region.start}', '--region-end', '${al.region.end}', '--esp', al.esp.path]);
-    }
-    if (userdataMib != null) a.addAll(['--userdata-mib', '$userdataMib']);
-    return a;
+    final d = disk!, al = along;
+    return switch (mode) {
+      Mode.reinstall => _reinstallArgs(d, keep: keepData),
+      Mode.wipe => ['--mode', 'wipe', '--disk', d.path, if (userdataMib != null) ...['--userdata-mib', '$userdataMib']],
+      _ => al is AlongOk ? _alongArgs(d, al.region.start, al.region.end) : _alongArgs(d, 0, 0),
+    };
+  }
+
+  /// gk3l apply 的参数：方式、盘、区间（双系统）、/data 大小、保不保留数据（重新安装）
+  List<String> _applyArgs() {
+    final d = disk!, al = along;
+    return [
+      '--disk', d.path,
+      '--mode', switch (mode) { Mode.wipe => 'wipe', Mode.reinstall => 'reinstall', _ => 'alongside' },
+      if (mode == Mode.alongside && al is AlongOk) ...['--region-start', '${al.region.start}', '--region-end', '${al.region.end}'],
+      if (mode == Mode.reinstall) ...['--keep-data', keepData ? 'yes' : 'no'],
+      if (mode != Mode.reinstall && userdataMib != null) ...['--userdata-mib', '$userdataMib'],
+    ];
   }
 
   Future<void> computePlan() async {
     if (disk == null || mode == null) return;
     planning = true;
     _changed();
-    plan = Plan(await backend.run('gk3_plan', _planArgs()));
+    plan = Plan(await backend.run('plan', _planArgs()));
     planning = false;
     _changed();
   }
@@ -384,7 +400,7 @@ class Session extends ChangeNotifier {
     _writing++;
     _changed();
     try {
-      yield* backend.call('gk3_job_follow', [id]);
+      yield* backend.call('job', ['follow', id]);
     } finally {
       _writing--;
       runningJob = null;
@@ -392,7 +408,7 @@ class Session extends ChangeNotifier {
     }
   }
 
-  /// 用安装介质自带的系统文件（gaokun3/payload/）安装：gk3_apply
+  /// 用安装介质自带的系统文件（gaokun3/payload/）安装：gk3l apply
   Stream<Gk3Event> install() async* {
     // 风险确认页没过（界面的缺陷才会走到这里）：一个字节都不写
     if (!riskAcked(RiskKind.install)) {
@@ -406,13 +422,12 @@ class Session extends ChangeNotifier {
     _changed();
     try {
       final args = [
-        '--release', rel, ..._planArgs(),
-        // 只给 gk3_apply、不给 gk3_plan（它不认识这两个参数）
+        '--release', rel, ..._applyArgs(),
         if (dual) ...['--default-os', defaultOs],
-        if (needBitlockerKey && bitlockerKeyOk) ...['--bitlocker-key', 'yes'],
+        if (needBitlockerKey && bitlockerKeyOk) '--bitlocker-confirmed',
       ];
       notes.clear();
-      await for (final e in backend.call('gk3_apply', args)) {
+      await for (final e in backend.call('apply', args)) {
         if (e is Gk3Record && e.type == 'NOTE') notes.add(e);
         yield e;
       }

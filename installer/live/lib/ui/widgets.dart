@@ -150,7 +150,7 @@ class _PowerButtons extends StatelessWidget {
 }
 
 /// /data 低于这个值时提醒（v1.0 计划 GUI-20：一个大型手游就要 20–40 GiB，而项目的目标就是跑手游）。
-/// 只是提醒、不拦：真正的下限仍由 gk3_plan 判（GK3_USERDATA_MIN_MIB）
+/// 只是提醒、不拦：真正的下限仍由 gk3l plan 判（GK3W_USERDATA_MIN_MIB）
 const kDataWarnMib = 32 * 1024;
 
 /// 黄色（warning 角色）的一行提醒；/data 够大时什么都不画

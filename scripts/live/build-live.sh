@@ -108,6 +108,8 @@ docker run --rm --privileged "${MOUNTS[@]}" \
     cp -a /repo/scripts /build/scripts
     # gk3-misc 的源码（build-rootfs.sh 静态编进镜像，S10）；Mac 上编出来的 build/ 不要
     mkdir -p /build/tools && cp -a /repo/tools/gk3boot /build/tools/gk3boot && rm -rf /build/tools/gk3boot/build
+    # 安装器后端 gk3l（build-rootfs.sh 用 installer/backend/linux/build.sh 现编）
+    mkdir -p /build/installer/backend && cp -a /repo/installer/backend/src /repo/installer/backend/linux /repo/installer/backend/third_party /build/installer/backend/
     mkdir -p /build/out-installer && [ "$PROFILE" = rescue ] || cp -a /repo/out/installer-flutter-linux-arm64/. /build/out-installer/
     bash /build/scripts/live/build-rootfs.sh --profile "$PROFILE" --out $O --installer /build/out-installer \
         ${HAVE_KEY:+--ssh-key /in/ssh.pub} ${HAVE_WIFI:+--wifi-conf /in/wpa.conf} ${HAVE_FW:+--firmware /in/firmware}

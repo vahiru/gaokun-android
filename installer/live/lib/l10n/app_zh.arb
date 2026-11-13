@@ -87,7 +87,7 @@
   },
   "modeWhyNoEsp": "此磁盘上未找到EFI系统分区，不存在可保留的UEFI操作系统。",
   "modeWhyMedium": "安装器正在从此磁盘运行，无法清除整个磁盘。请选择“保留现有系统”。",
-  "modeWhyNoRelease": "安装介质中未找到系统安装文件（gaokun3/payload目录中的boot.img与super.img.zst），无法安装Android。",
+  "modeWhyNoRelease": "未在安装介质的gaokun3/payload目录中找到完整的系统安装文件（boot.img、super.img.zst），无法安装Android。",
   "editEntryTitle": "删除分区",
   "editEntryBody": "删除不再需要的分区以腾出空间，例如Windows恢复分区或华为一键恢复分区。操作完成后返回此页选择安装方式。",
   "editTitle": "删除分区",
@@ -204,7 +204,7 @@
     }
   },
   "optsTitle": "安装选项",
-  "optsSub": "默认已启用推荐配置，通常可直接点击“下一步”继续。",
+  "optsSub": "请确认数据分区配置；如无特殊需求，可直接点击“下一步”继续。",
   "optsData": "剩余空间将全部分配给/data分区：约{size}",
   "@optsData": {
     "placeholders": {
@@ -290,7 +290,14 @@
   "doneBody": "请拔出安装介质，重启设备后即可进入Android系统。",
   "failTitle": "安装未完成",
   "failSub": "磁盘写入中途出错，磁盘分区可能处于不完整状态。请勿立即重启进入原系统，建议先将下方运行日志保存至U盘或拍照留存。",
-  "failBackup": "修改磁盘前已备份原分区表，可在终端中按日志提示执行“sgdisk --load-backup=…”命令恢复安装前的分区表。",
+  "failBackup": "修改磁盘前已备份原分区表（{path}）。如需恢复安装前的分区表，可在终端中执行“gk3l restore-table --file {path}”，然后重启设备。",
+  "@failBackup": {
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
+  },
   "errNoSpace": "未分配空间不足：当前可用{avail}，至少需要{need}。",
   "@errNoSpace": {
     "placeholders": {
@@ -355,7 +362,7 @@
   },
   "stepPrep": "正在准备……",
   "modeWhyEspOurs": "此EFI系统分区中已包含Gaokun Android引导项（可能由其他磁盘上的系统使用），继续安装将覆盖现有引导配置。",
-  "modeWhyNoFree": "此磁盘上没有未分配空间，至少需要{need}。请在Windows“磁盘管理”中使用“压缩卷”腾出空间，或删除不再需要的分区。",
+  "modeWhyNoFree": "此磁盘当前无未分配空间，至少需要{need}。请在Windows“磁盘管理”中使用“压缩卷”腾出空间，或删除不再需要的分区。",
   "@modeWhyNoFree": {
     "placeholders": {
       "need": {
@@ -466,14 +473,6 @@
     }
   },
   "errUsage": "安装器内部错误：后端调用参数无效。",
-  "errCmdFailed": "执行命令{cmd}失败。",
-  "@errCmdFailed": {
-    "placeholders": {
-      "cmd": {
-        "type": "String"
-      }
-    }
-  },
   "errReleaseNoBoot": "安装文件中缺少boot.img。",
   "errReleaseNoSuper": "安装文件中未找到super.img.zst或super.img。",
   "errSdbootMissing": "未找到启动管理器文件（systemd-bootaa64.efi）。",
@@ -485,7 +484,7 @@
       }
     }
   },
-  "errSha256Mismatch": "{file}的SHA-256校验值与发布清单不符，文件可能下载不完整或已损坏。",
+  "errSha256Mismatch": "{file}的SHA-256校验值与校验清单不符，安装文件不完整或已损坏。",
   "@errSha256Mismatch": {
     "placeholders": {
       "file": {
@@ -493,16 +492,8 @@
       }
     }
   },
-  "errZstCorrupt": "super.img.zst解压校验失败，文件不完整或已损坏，请重新获取安装文件。",
+  "errZstCorrupt": "super.img.zst解压校验失败，安装文件不完整或已损坏，请重新准备安装介质。",
   "errBootimgUnpack": "无法解包boot.img，镜像格式无效或文件已损坏。",
-  "errEspMissing": "未找到目标EFI系统分区（{esp}）。",
-  "@errEspMissing": {
-    "placeholders": {
-      "esp": {
-        "type": "String"
-      }
-    }
-  },
   "errEspNotFat": "{esp}的文件系统为{fs}，并非有效的FAT格式EFI系统分区。",
   "@errEspNotFat": {
     "placeholders": {
@@ -510,14 +501,6 @@
         "type": "String"
       },
       "fs": {
-        "type": "String"
-      }
-    }
-  },
-  "errEspNotEspType": "{esp}的GPT分区类型不是EFI系统分区。",
-  "@errEspNotEspType": {
-    "placeholders": {
-      "esp": {
         "type": "String"
       }
     }
@@ -566,14 +549,6 @@
       }
     }
   },
-  "errNodeVanished": "写入磁盘期间设备节点{dev}意外消失，数据未能完整写入。",
-  "@errNodeVanished": {
-    "placeholders": {
-      "dev": {
-        "type": "String"
-      }
-    }
-  },
   "errEspWrite": "无法写入EFI系统分区（{esp}），可能是分区空间不足或存储介质异常。",
   "@errEspWrite": {
     "placeholders": {
@@ -592,22 +567,6 @@
   },
   "errSuperWrite": "写入super分区失败，请检查安装文件及目标磁盘状态。",
   "errSuperBadLp": "写入super分区的镜像缺少有效的逻辑分区（LP）元数据，无法用于启动系统。",
-  "errPartMissing": "未找到分区{name}。",
-  "@errPartMissing": {
-    "placeholders": {
-      "name": {
-        "type": "String"
-      }
-    }
-  },
-  "errPartNodeTimeout": "等待分区设备节点{dev}超时（10秒）：分区表已写入，但内核尚未识别新分区。",
-  "@errPartNodeTimeout": {
-    "placeholders": {
-      "dev": {
-        "type": "String"
-      }
-    }
-  },
   "errPartUnknown": "无法确定分区{part}所属的磁盘设备。",
   "@errPartUnknown": {
     "placeholders": {
@@ -624,7 +583,6 @@
       }
     }
   },
-  "errGptRewrite": "写入GPT分区表失败。修改前已自动备份原分区表，可参照运行日志中的命令恢复。",
   "errNotBlock": "{dev}不是有效的块设备。",
   "@errNotBlock": {
     "placeholders": {
@@ -652,14 +610,6 @@
   },
   "errVerifyRemount": "写入完成后无法重新挂载{dev}，无法校验已写入的文件。",
   "@errVerifyRemount": {
-    "placeholders": {
-      "dev": {
-        "type": "String"
-      }
-    }
-  },
-  "errVerifyMismatch": "从{dev}读回的文件内容与源文件不一致，写入过程可能发生存储错误。",
-  "@errVerifyMismatch": {
     "placeholders": {
       "dev": {
         "type": "String"
@@ -812,14 +762,14 @@
   "riskPowerHead": "全程保持连接电源",
   "riskPowerBody": "请在开始操作前连接电源适配器，并在完成前切勿断开。写入磁盘期间若意外断电或电量耗尽，将导致磁盘分区处于不完整状态，使系统无法启动或数据损坏。操作进行期间请勿长按电源键或强制重启设备。",
   "riskNoCancelHead": "开始写入磁盘后无法中止",
-  "riskNoCancelInstall": "下一页为最终确认页：按住按钮开始写入磁盘后，操作无法取消或回退（若选择从网络安装，下载阶段尚未修改磁盘，仍可随时取消）。",
+  "riskNoCancelInstall": "下一页为最终确认页：按住按钮开始写入磁盘后，操作无法取消或回退。",
   "riskNoCancelStep": "下一页中的每项删除操作在按住确认后将立即执行，中途无法中止，执行后也无法直接撤销。",
   "riskEnd": "—— 阅读完毕 ——",
   "riskScrollHint": "请向下滚动阅读全文",
   "riskCheck": "我已备份重要数据，并了解上述操作可能造成不可逆的数据丢失",
   "riskWord": "ERASE",
   "@riskWord": {
-    "description": "确认词。⚠️ 必须是 ASCII：live 里没有输入法，软键盘与实体键盘都只出 ASCII（screens_source.dart 的 HiddenNetPage 注释）"
+    "description": "确认词。必须为纯ASCII字符：LiveCD环境未内置中文输入法，屏幕键盘与实体键盘均仅支持输入ASCII字符。"
   },
   "riskWordPrompt": "此操作将清除磁盘上的现有系统或用户数据。请在下方输入“{word}”（不区分大小写）以确认：",
   "@riskWordPrompt": {
@@ -866,5 +816,73 @@
       }
     }
   },
-  "errRiskUnacked": "尚未完成写入磁盘前的风险确认，操作已中止，磁盘未被修改。请保存运行日志并反馈此问题。"
+  "errRiskUnacked": "尚未完成写入磁盘前的风险确认，操作已中止，磁盘未被修改。请保存运行日志并反馈此问题。",
+  "errWrongModel": "当前设备并非华为MateBook E Go（GK-W7X）。",
+  "errLowBattery": "设备电量过低且未连接电源适配器，请连接电源后重试。",
+  "errNotRoot": "安装器后端未以root权限运行，无法访问磁盘。",
+  "errDiskOpen": "无法打开磁盘{disk}。",
+  "@errDiskOpen": {
+    "placeholders": {
+      "disk": {
+        "type": "String"
+      }
+    }
+  },
+  "errDiskSector": "此磁盘的扇区大小不受支持（仅支持512字节与4096字节）。",
+  "errDiskBusy": "目标磁盘正被系统或其他进程占用，请稍后重试。",
+  "errNoGpt": "未在此磁盘上检测到有效的GPT分区表，无法保留现有分区或单独删除分区。如需在此磁盘上安装Android，请选择“清除整个磁盘”以重新初始化为GPT分区表。",
+  "errPartTable": "无法读取目标磁盘的GPT分区表，或分区表中存在越界、重叠的分区项。",
+  "errLayoutChanged": "准备安装期间磁盘分区布局发生了变化，请返回重新选择磁盘。",
+  "errBadRegion": "目标未分配空间状态已发生变化，请返回重新选择磁盘。",
+  "errGptBackup": "无法备份磁盘分区表。",
+  "errGptFull": "分区表中已无空余的分区项，无法新建Android分区。",
+  "errGptLayout": "目标磁盘的GPT分区表结构异常，无法修改分区表。",
+  "errKernelAdd": "分区表已写入，但系统内核未能识别新分区。请重启设备后再试。",
+  "errNodeMissing": "分区表已写入，但未找到新分区{name}的设备节点。",
+  "@errNodeMissing": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "errLayoutVerify": "修改分区表后，无法确认磁盘分区布局已按预期更新。",
+  "errDiskWrite": "写入磁盘时发生错误，详细信息请查看运行日志。",
+  "errDiskVerify": "写入磁盘的数据读回后与原数据不一致，存储介质可能存在异常。",
+  "errFormat": "格式化分区时发生错误。",
+  "errEspAmbiguous": "此磁盘上存在多个EFI系统分区，无法确定目标引导分区。",
+  "errEspBusy": "EFI系统分区当前处于挂载状态（{mnt}），请先卸载后再试。",
+  "@errEspBusy": {
+    "placeholders": {
+      "mnt": {
+        "type": "String"
+      }
+    }
+  },
+  "errEspUnreadable": "无法读取EFI系统分区中的{file}，请检查该分区文件系统是否损坏。",
+  "@errEspUnreadable": {
+    "placeholders": {
+      "file": {
+        "type": "String"
+      }
+    }
+  },
+  "errFallbackConflict": "EFI系统分区中的默认引导文件（BOOTAA64.EFI）属于其他操作系统，继续安装将覆盖该引导程序。请先处理现有引导配置后再试。",
+  "errEspVerify": "EFI系统分区中的{file}读回后与写入的内容不一致，存储介质可能存在异常。",
+  "@errEspVerify": {
+    "placeholders": {
+      "file": {
+        "type": "String"
+      }
+    }
+  },
+  "errRestore": "无法读取分区表备份文件，或该备份与目标磁盘不匹配。",
+  "errInternal": "安装器发生内部错误（{code}），详细信息请查看运行日志。",
+  "@errInternal": {
+    "placeholders": {
+      "code": {
+        "type": "String"
+      }
+    }
+  }
 }

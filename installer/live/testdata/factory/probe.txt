@@ -1,12 +1,11 @@
-D 161
-O DISK path=/dev/sda size_mib=7680 model=? removable=1 tran=usb medium=yes
-O PART path=/dev/sda1 num=1 start=2048 end=15728606 size_mib=7678 size_kib=7863279 type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B name=esp fs=vfat fslabel=GK3LIVE os=esp medium=yes
-O DISK path=/dev/nvme0n1 size_mib=488386 model=? removable=0 tran=nvme medium=no
-O PART path=/dev/nvme0n1p1 num=1 start=2048 end=616447 size_mib=300 size_kib=307200 type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B name=EFI%20system%20partition fs=vfat fslabel=SYSTEM os=esp medium=no
-O PART path=/dev/nvme0n1p2 num=2 start=616448 end=649215 size_mib=16 size_kib=16384 type=E3C9E316-0B5C-4DB8-817D-F92DF00215AE name=Microsoft%20reserved%20partition fs= fslabel= os=msr medium=no
-O PART path=/dev/nvme0n1p3 num=3 start=649216 end=252307455 size_mib=122880 size_kib=125829120 type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7 name=Basic%20data%20partition fs=ntfs fslabel=Windows os=windows medium=no
-O PART path=/dev/nvme0n1p4 num=4 start=252307456 end=958269439 size_mib=344708 size_kib=352980992 type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7 name=Basic%20data%20partition fs=ntfs fslabel=Data os=windows medium=no
-O PART path=/dev/nvme0n1p5 num=5 start=958269440 end=960366591 size_mib=1024 size_kib=1048576 type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7 name=Basic%20data%20partition fs=vfat fslabel=WINPE os=fat medium=no
-O PART path=/dev/nvme0n1p6 num=6 start=960366592 end=998115327 size_mib=18432 size_kib=18874368 type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7 name=Basic%20data%20partition fs=ntfs fslabel=Onekey os=windows medium=no
-O PART path=/dev/nvme0n1p7 num=7 start=998115328 end=1000214494 size_mib=1024 size_kib=1049583 type=DE94BBA4-06D1-4D40-A16A-BFD50179D6AC name=Basic%20data%20partition fs=ntfs fslabel=WinRE os=winre medium=no
+O DISK path=/dev/sda size_mib=7680 sector=512 physsector=512 model=? bus=usb removable=1 medium=yes table=gpt kernel=ok
+O PART path=/dev/sda1 disk=/dev/sda num=1 idx=1 start=2048 end=15728606 size_mib=7678 size_kib=7863279 type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B uuid=9EE39B9F-58BD-42F0-AB92-9FF600174210 attrs=0x0000000000000000 name=esp fs=vfat fslabel=GK3LIVE os=esp medium=yes
+O DISK path=/dev/nvme0n1 size_mib=488386 sector=512 physsector=512 model=? bus=nvme removable=0 medium=no table=gpt kernel=ok
+O PART path=/dev/nvme0n1p1 disk=/dev/nvme0n1 num=1 idx=1 start=2048 end=616447 size_mib=300 size_kib=307200 type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B uuid=EA042984-6E3B-417C-8BEE-11DC7FFE50F8 attrs=0x0000000000000000 name=EFI%20system%20partition fs=vfat fslabel=SYSTEM os=esp medium=no
+O PART path=/dev/nvme0n1p2 disk=/dev/nvme0n1 num=2 idx=2 start=616448 end=649215 size_mib=16 size_kib=16384 type=E3C9E316-0B5C-4DB8-817D-F92DF00215AE uuid=C3BF8841-8713-4256-BBEA-C91A3BAD7423 attrs=0x0000000000000000 name=Microsoft%20reserved%20partition fs= fslabel= os=msr medium=no
+O PART path=/dev/nvme0n1p3 disk=/dev/nvme0n1 num=3 idx=3 start=649216 end=252307455 size_mib=122880 size_kib=125829120 type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7 uuid=B50C5FC0-C4AB-4D81-9597-7EE5F90CF657 attrs=0x0000000000000000 name=Basic%20data%20partition fs=ntfs fslabel=Windows os=windows medium=no
+O PART path=/dev/nvme0n1p4 disk=/dev/nvme0n1 num=4 idx=4 start=252307456 end=958269439 size_mib=344708 size_kib=352980992 type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7 uuid=C7FCC36F-7498-4881-AB03-C506908175FA attrs=0x0000000000000000 name=Basic%20data%20partition fs=ntfs fslabel=Data os=windows medium=no
+O PART path=/dev/nvme0n1p5 disk=/dev/nvme0n1 num=5 idx=5 start=958269440 end=960366591 size_mib=1024 size_kib=1048576 type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7 uuid=7F5CD7D6-4B3F-4F34-8E8B-6492625E4740 attrs=0x0000000000000000 name=Basic%20data%20partition fs=vfat fslabel=WINPE os=fat medium=no
+O PART path=/dev/nvme0n1p6 disk=/dev/nvme0n1 num=6 idx=6 start=960366592 end=998115327 size_mib=18432 size_kib=18874368 type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7 uuid=650574BE-A303-4941-8A56-CAC81248EDC0 attrs=0x0000000000000000 name=Basic%20data%20partition fs=ntfs fslabel=Onekey os=windows medium=no
+O PART path=/dev/nvme0n1p7 disk=/dev/nvme0n1 num=7 idx=7 start=998115328 end=1000214494 size_mib=1024 size_kib=1049583 type=DE94BBA4-06D1-4D40-A16A-BFD50179D6AC uuid=BF2841DE-73D4-49B7-97EC-A0EEC3ECA56C attrs=0x0000000000000000 name=Basic%20data%20partition fs=ntfs fslabel=WinRE os=winre medium=no
 X 0

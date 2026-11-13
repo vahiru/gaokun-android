@@ -1,19 +1,19 @@
 # 与盘无关的调用。所有场景找不到时都回落到这里。
-# 标了「手写」的几条是容器里做不到的：不是这台机器（没有 DMI）。
-# 它们照着真实输出的格式写：预检的值取自实测 dmesg（见 docs/dev/hardware.md）。
-gk3_preflight                                                                  preflight-ok.txt   # 手写（容器不是 gaokun3）
+# 标了「手写」的几条是容器里做不到的：不是这台机器（没有 DMI）、起不了 systemd 单元。
+# 它们照着 gk3l 真实输出的格式写：预检的值取自实测（见 docs/dev/hardware.md）。
+preflight                                                                      preflight-ok.txt   # 手写（容器不是 gaokun3）
 #  preflight-lowbatt.txt：电量 9%、没接电源；preflight-model.txt：型号不是 GK-W7X（测试用 overrides 选它们）
 #  esp_info-bitlocker.txt：Windows 卷是 BitLocker、BOOTAA64 还是 Windows 的（确认页要勾恢复密钥）
 #  esp_info-hibernated.txt：Windows 在休眠（双系统 / 重新安装禁用）
 #  esp_info-small.txt：100 MiB 的 ESP（双系统明确不装）
 #  apply-note.txt：windows-free 录的那次 apply + 一条 NOTE code=loadervar-stuck（EFI 变量删不掉，完成页要说）
-#  ↑ 这四份是从录到的输出改字段得来的（半手写，gen-fixtures.sh 里写着怎么改），后端判据见 test-apply.sh 的 K 组
-gk3_job_status                                                                 job_status-none.txt   # 手写（没有在跑的写盘任务）
+#  ↑ 这四份是从录到的输出改字段得来的（半手写，gen-fixtures.sh 里写着怎么改）
+job status                                                                     job_status-none.txt   # 手写（没有在跑的写盘任务）
 #  job_status-running.txt / job_follow-apply.txt：界面重新起来时 apply 还在跑（测试用 overrides 选它们）
-gk3_log_targets                                                                log_targets.txt   # 录（假 U 盘挂在 /media/gk3）
-gk3_save_logs *                                                                save_logs.txt   # 录（存到假 U 盘上）
-gk3_release_info                                                               release_info.txt   # 录
-#  release_info-none.txt：U 盘里没有镜像（界面测试用 overrides 选它）
-#  probe-mbr-unreadable.txt：一块 MBR 盘 + 一块读不出分区表的盘（S1 / S2；对拍时实录的两块盘拼的，文件头写着怎么拼；测试用 overrides 选它）
-gk3_part_delete *                                                              part_delete.txt   # 录（出厂布局的另一块盘上真做）
-gk3_part_delete-esp                                                            part_delete-esp.txt   # 录（出厂布局的另一块盘上真做）
+log-targets                                                                    log_targets.txt   # 录（假 U 盘挂在 /media/gk3）
+save-logs *                                                                    save_logs.txt   # 录（存到假 U 盘上）
+release-info                                                                   release_info.txt   # 录
+#  release_info-none.txt：介质里没有系统文件（界面测试用 overrides 选它）
+delete *                                                                       part_delete.txt   # 录（出厂布局的另一块盘上真做）
+delete-esp                                                                     part_delete-esp.txt   # 录（出厂布局的另一块盘上真做）
+#  probe-mbr-unreadable.txt：一块 MBR 盘（nvme0n1）+ 一块读不出分区表的盘（sdb，dm-error）（界面测试用 overrides 选它）

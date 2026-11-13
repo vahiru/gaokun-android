@@ -1,8 +1,8 @@
 // "保存日志"（v1.0 计划 GUI-12 的前端）：失败页上的一个按钮。
 //
 // 安装 U 盘只有一个 EFI 类型的分区，Windows / macOS 默认不挂它 —— 装失败的人把 U 盘插回电脑看不到日志。
-// 后端 gk3_log_targets 列出能写的 FAT / exFAT（另插的 U 盘在前、启动介质最后并标 esp=yes），
-// gk3_save_logs <分区> 写一个 gaokun3-logs-<时间>/（不含 WiFi 配置）。这里只是让人挑一个、告诉人存到哪了。
+// 后端 gk3l log-targets 列出能写的 FAT / exFAT（另插的 U 盘在前、启动介质最后并标 esp=yes），
+// gk3l save-logs --to <分区> 写一个 gaokun3-logs-<时间>/。这里只是让人挑一个、告诉人存到哪了。
 import 'package:flutter/material.dart';
 import 'package:gk3_common/backend/backend.dart';
 import 'package:gk3_common/backend/protocol.dart';
@@ -44,13 +44,13 @@ class _SaveLogsDialogState extends State<SaveLogsDialog> {
       _error = null;
       _result = null;
     });
-    final r = await context.session.backend.run('gk3_log_targets');
+    final r = await context.session.backend.run('log-targets');
     if (mounted) setState(() => _targets = r.ofType('LOGTARGET').toList());
   }
 
   Future<void> _save(Gk3Record t) async {
     setState(() => _busy = true);
-    final CallResult r = await context.session.backend.run('gk3_save_logs', [t['part']]);
+    final CallResult r = await context.session.backend.run('save-logs', ['--to', t['part']]);
     if (!mounted) return;
     final l = context.l;
     setState(() {
