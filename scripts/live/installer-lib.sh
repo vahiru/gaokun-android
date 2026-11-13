@@ -694,8 +694,8 @@ gk3__misc_tool() {
 
 # 同一块盘上的 Windows 卷是什么状态（双系统写 ESP 之前看，见 tools/gk3boot/README.md）。
 #   $1=ESP 分区节点 → 一行 `bitlocker=yes|no hibernated=yes|no|unknown hib_part=<分区>`
-# hibernated：任一 NTFS 卷的 hiberfil.sys 以 hibr/HIBR 开头（gk3__ntfs_hibernated，ntfscat 只读）⇒ yes；
-#   没有 ntfscat、或者盘上有 BitLocker 卷（里面的 NTFS 这边读不到）而别的 NTFS 都没在休眠 ⇒ unknown；否则 no。
+# hibernated：任一 NTFS 卷的 hiberfil.sys 以 hibr/HIBR 开头（gk3__ntfs_hibernated，ntfs3 只读挂载）⇒ yes；
+#   有 NTFS 卷挂不上、或者盘上有 BitLocker 卷（里面的 NTFS 这边读不到）而别的 NTFS 都没在休眠 ⇒ unknown；否则 no。
 # ⚠️ 只看 ESP 所在的那块盘：Windows 的 C: 在别的盘上时这里看不到（本机只有一块 NVMe）
 gk3__win_state() {
     local disk p fs bl=no hib=no hp="" unk=no
@@ -706,8 +706,10 @@ gk3__win_state() {
         case "$fs" in
             BitLocker) bl=yes ;;
             ntfs)
-                if ! command -v ntfscat >/dev/null 2>&1; then unk=yes
-                elif [ "$hib" = no ] && gk3__ntfs_hibernated "$p"; then hib=yes; hp=$p; fi ;;
+                if [ "$hib" = no ]; then
+                    gk3__ntfs_hibernated "$p"
+                    case $? in 0) hib=yes; hp=$p ;; 2) unk=yes ;; esac
+                fi ;;
         esac
     done
     [ "$hib" = no ] && { [ "$bl" = yes ] || [ "$unk" = yes ]; } && hib=unknown
@@ -935,7 +937,7 @@ gk3_apply() {
                         gk3_fail esp-windows-hibernated "part=$(gk3__f "$ws" hib_part)" -- "Windows 处于休眠或“快速启动”状态（$(gk3__f "$ws" hib_part)）—— 这时往共用的 EFI 分区里写东西，Windows 醒来时可能把它写坏。回 Windows 关掉快速启动、用“关机”退出，再试（盘还没动过）"
                         return 1
                     fi
-                    [ "$(gk3__f "$ws" hibernated)" = unknown ] && echo "⚠️ 看不出 Windows 是否在休眠（BitLocker 卷读不到里面，或缺 ntfscat）—— 请确认是在 Windows 里用“关机”（不是休眠）退出的、快速启动已关" >&2
+                    [ "$(gk3__f "$ws" hibernated)" = unknown ] && echo "⚠️ 看不出 Windows 是否在休眠（BitLocker 卷读不到里面，或有 NTFS 卷挂不上）—— 请确认是在 Windows 里用“关机”（不是休眠）退出的、快速启动已关" >&2
                     # ★ U16 规则 3：BitLocker 的卷 + 这次要换掉 BOOTAA64（固件每次开机进的就是它，PCR4 会变）⇒ 下一次进 Windows
                     #   多半要恢复密钥。Linux 这边暂停不了 BitLocker，只能要用户确认手里有密钥（界面上那个勾选框）
                     if [ "$(gk3__f "$ws" bitlocker)" = yes ] && [ "$aa_change" = yes ] && [ "$blkey" != yes ]; then
@@ -1546,13 +1548,25 @@ gk3__bylabel() {
 }
 
 # ── NTFS：Windows 休眠 / 快速启动 / 没关干净 ─────────────────────────────────
-# hiberfil.sys 开头是 hibr / HIBR ⇒ Windows 处于休眠（快速启动的"关机"也是休眠）。ntfscat 只读打开卷，不写任何东西；
-# 判据与 ntfs-3g 自己的休眠检查相同
+# hiberfil.sys 开头是 hibr / HIBR ⇒ Windows 处于休眠（快速启动的"关机"也是休眠）。判据与 ntfs-3g 自己的休眠检查相同。
+# 用内核的 ntfs3 只读挂载去读：只读时 ntfs3 不重放、不清空 $LogFile（fs/ntfs3/fsntfs.c 的 ntfs_loadlog_and_replay），
+# 不往卷上写任何东西；它也不因为卷在休眠而拒绝只读挂载。
+#   返回 0 = 在休眠；1 = 没在休眠；2 = 挂不上（内核没有 ntfs3、卷损坏……），判断不了
+# GK3_NTFS_MOUNT：测试用，换掉挂载命令（测试容器的内核没有 ntfs3，换成 ntfs-3g -o ro）
 gk3__ntfs_hibernated() {
-    case "$(ntfscat "$1" /hiberfil.sys 2>/dev/null | head -c 4 | od -An -tx1 | tr -d ' \n')" in
-        68696272|48494252) return 0 ;;    # "hibr" / "HIBR"
-    esac
-    return 1
+    local m hdr rc=2
+    m=$(mktemp -d) || return 2
+    # shellcheck disable=SC2086
+    if ${GK3_NTFS_MOUNT:-mount -t ntfs3 -o ro} "$1" "$m" 2>/dev/null; then
+        hdr=$(head -c 4 "$m/hiberfil.sys" 2>/dev/null | od -An -tx1 | tr -d ' \n')
+        umount "$m" 2>/dev/null
+        case "$hdr" in
+            68696272|48494252) rc=0 ;;    # "hibr" / "HIBR"
+            *) rc=1 ;;
+        esac
+    fi
+    rmdir "$m" 2>/dev/null
+    return $rc
 }
 
 # 看一个发布目录里有什么（默认：安装 U 盘上 build-usb.sh 放 payload 的位置）。

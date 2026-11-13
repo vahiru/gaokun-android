@@ -47,8 +47,6 @@ util-linux
 e2fsprogs
 dosfstools
 f2fs-tools
-# ntfsresize：双系统缩 Windows 分区
-ntfs-3g
 nvme-cli
 # simg2img：后端已改用 gk3-unsparse.py（simg2img 喂管道会失败），留着给手工排障
 android-sdk-libsparse-utils

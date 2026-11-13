@@ -26,6 +26,8 @@ cd "$(dirname "$0")/../.."
 [ "$(id -u)" = 0 ] || { echo "要 root（用 scripts/live/test-in-container.sh 跑）"; exit 2; }
 . scripts/live/installer-lib.sh
 export GK3_ALLOW_LOOP=1 GK3_MACHINE_ID=0123456789abcdef0123456789abcdef
+# 测试容器的内核没有 ntfs3：休眠检查改用 ntfs-3g 只读挂载（gk3__ntfs_hibernated 的 GK3_NTFS_MOUNT）
+grep -qw ntfs3 /proc/filesystems || export GK3_NTFS_MOUNT="ntfs-3g -o ro"
 OUT=installer/live/testdata
 W=$(mktemp -d /tmp/gk3-fix.XXXX)
 LOOPS=()

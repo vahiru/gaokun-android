@@ -4,7 +4,7 @@
   tmpfs overlay, and changes are lost on reboot. The boot medium is mounted
   at /media/gk3.
 
-  Partition and file system tools: sgdisk parted resize2fs ntfsresize mkfs.* simg2img
+  Partition and file system tools: sgdisk parted resize2fs mkfs.* simg2img
   Install Android:      bash -c '. /usr/share/gaokun3/installer-lib.sh && gk3_preflight'
   Boot an Android slot next time: gk3-boot-android a|b [--reboot]  (--list shows the entries)
   Boot evidence:        /media/gk3/gaokun3/diag/  (written by gk3-diag 45 s after boot)

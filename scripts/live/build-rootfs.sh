@@ -213,8 +213,8 @@ need_enabled() { if in_ch "systemctl is-enabled $1 | grep -qx enabled"; then ok 
 need_masked()  { if in_ch "systemctl is-enabled $1 | grep -qx masked"; then ok "masked $1"; else echo "   ✗ 没 mask：$1"; BAD=1; fi; }
 
 if in_ch 'readlink -f /sbin/init | grep -q systemd'; then ok "/sbin/init → systemd"; else echo "   ✗ /sbin/init 不是 systemd"; BAD=1; fi
-for c in sshd sgdisk parted partprobe resize2fs e2fsck mkfs.ext4 mkfs.vfat mkfs.f2fs ntfsresize blkid lsblk findmnt \
-         udevadm wpa_supplicant wpa_cli dhcpcd iw python3 zstd curl cmp sha256sum mkntfs; do need_cmd "$c"; done
+for c in sshd sgdisk parted partprobe resize2fs e2fsck mkfs.ext4 mkfs.vfat mkfs.f2fs blkid lsblk findmnt \
+         udevadm wpa_supplicant wpa_cli dhcpcd iw python3 zstd curl cmp sha256sum; do need_cmd "$c"; done
 need_path /usr/lib/systemd/boot/efi/systemd-bootaa64.efi   # gk3_apply 往目标机 ESP 上装的就是它
 need_path /usr/bin/busybox                                 # initramfs 用的静态 busybox
 for f in installer-lib.sh gk3-unsparse.py gk3-bootimg.py install-gaokun3.sh gk3-misc; do need_path "/usr/share/gaokun3/$f"; done

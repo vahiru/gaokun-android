@@ -19,7 +19,7 @@ bash scripts/live/build-live.sh --profile rescue --boot-img <boot.img> --ssh-key
 ```
 
 `build-live.sh`在容器内依次执行：
-1. `build-rootfs.sh`（使用`mmdebstrap`构建Debian rootfs，锁文件保存在`packages-<profile>.lock`，并在打包`mksquashfs`前校验`sgdisk`、`resize2fs`、`ntfsresize`、`simg2img`、`wpa_supplicant`与`ath11k`固件均已就位）。
+1. `build-rootfs.sh`（使用`mmdebstrap`构建Debian rootfs，锁文件保存在`packages-<profile>.lock`，并在打包`mksquashfs`前校验`sgdisk`、`resize2fs`、`simg2img`、`wpa_supplicant`与`ath11k`固件均已就位）。
 2. `build-initramfs.sh`（生成查找并挂载`squashfs`的`initramfs.img`）。
 3. 从传入的Android `boot.img`提取共用内核`vmlinuz.efi`与`gaokun3.dtb`。
 4. `build-usb.sh`（组装可启动GPT镜像）。
@@ -35,7 +35,7 @@ bash scripts/live/release-installer.sh --boot-img <boot.img> --rom <ROM版本> -
 1. **与Android共用同一内核镜像**：
    救援系统与Android使用完全相同的`vmlinuz.efi`与`gaokun3.dtb`，仅通过不同的`initramfs.img`和内核命令行区分。为此在[`scripts/kernel-config-android.sh`](../kernel-config-android.sh)中内建了三项配置：
    - `CONFIG_SQUASHFS=y`（挂载只读根文件系统）。
-   - `CONFIG_NTFS3_FS=y`（双系统安装时压缩Windows分区，同时显式禁用旧版`CONFIG_NTFS_FS`）。
+   - `CONFIG_NTFS3_FS=y`（双系统安装前只读挂载Windows分区，检查Windows是否处于休眠，同时显式禁用旧版`CONFIG_NTFS_FS`）。
    - `CONFIG_NLS_UTF8=y`（支持FAT32上的非ASCII文件名）。
 2. **`initramfs`动态扫描介质**：
    `initramfs-init`不依赖固定的分区标签或UUID，而是先扫描可移动介质、再扫描内置NVMe分区，寻找包含`/gaokun3/rescue.squashfs`（或`live.squashfs`）的分区挂载启动。

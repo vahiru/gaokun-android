@@ -32,6 +32,8 @@ REPO=$(pwd)
 [ "$(id -u)" = 0 ] || { echo "要 root（用 scripts/live/test-in-container.sh 跑）"; exit 2; }
 . scripts/live/installer-lib.sh
 export GK3_ALLOW_LOOP=1
+# 测试容器的内核没有 ntfs3：休眠检查改用 ntfs-3g 只读挂载（gk3__ntfs_hibernated 的 GK3_NTFS_MOUNT）
+grep -qw ntfs3 /proc/filesystems || export GK3_NTFS_MOUNT="ntfs-3g -o ro"
 . scripts/live/duel-lib.sh
 
 PASS=0; FAIL=0
@@ -598,6 +600,8 @@ PY
 # Windows 在休眠（快速启动的"关机"）：C: 根上的 hiberfil.sys 以 hibr 开头
 mk=$W/mnt-k; mkdir -p "$mk"
 ntfs-3g "${DK}p3" "$mk" && { printf 'hibr'; head -c 8192 /dev/urandom; } > "$mk/hiberfil.sys" && umount "$mk"
+gk3__ntfs_hibernated "${DK}p3"; [ $? = 0 ] && ok "gk3__ntfs_hibernated：hiberfil.sys 以 hibr 开头 ⇒ 0（在休眠）" || bad "休眠没认出来"
+GK3_NTFS_MOUNT=false gk3__ntfs_hibernated "${DK}p3"; [ $? = 2 ] && ok "gk3__ntfs_hibernated：挂不上 ⇒ 2（判断不了）" || bad "挂不上时返回值不对"
 # 假 efivarfs：一个指着 live 的 LoaderEntryDefault（§4.9.3 的"不合法值"）与一个 OneShot
 EFV=$W/efivars; mkdir -p "$EFV"
 efw "$EFV" LoaderEntryDefault gaokun3-live.conf; efw "$EFV" LoaderEntryOneShot "*-android-a.conf"
@@ -613,7 +617,9 @@ BEFORE_K=$(fp "$DK")
 OUT=$(GK3_EFIVARS=$EFV kapply --bitlocker-key yes 2>&1); rc=$?
 [ "$rc" != 0 ] && printf '%s' "$OUT" | grep -q "^ERR code=esp-windows-hibernated part=${DK}p3 touched=no" && [ "$(fp "$DK")" = "$BEFORE_K" ] \
     && ok "U18：Windows 在休眠 ⇒ 拒绝写 ESP（esp-windows-hibernated），盘没动" || { bad "休眠没拦住（rc=${rc}）"; printf '%s\n' "$OUT" | tail -3 | sed 's/^/      /'; }
-ntfs-3g "${DK}p3" "$mk" && rm -f "$mk/hiberfil.sys" && umount "$mk"
+# 卷在休眠时 ntfs-3g 的读写挂载会退回只读（rm 失败）；remove_hiberfile 才会删掉 hiberfil.sys 并读写挂上
+ntfs-3g -o remove_hiberfile "${DK}p3" "$mk" && umount "$mk"
+gk3__ntfs_hibernated "${DK}p3"; [ $? = 1 ] && ok "gk3__ntfs_hibernated：没有 hiberfil.sys ⇒ 1（没在休眠）" || bad "没休眠却没报 1"
 EI=$(gk3_esp_info "${DK}p1")
 printf '%s' "$EI" | grep -q ' bitlocker=yes hibernated=unknown ' \
     && ok "关了休眠、但有 BitLocker 卷（里面读不到）：hibernated=unknown（只警告，不拦）" || bad "hibernated 不对：$EI"

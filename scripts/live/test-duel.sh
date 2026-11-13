@@ -19,6 +19,8 @@ cd "$(dirname "$0")/../.."
 [ "$(id -u)" = 0 ] || { echo "要 root（用 scripts/live/test-in-container.sh 跑）"; exit 2; }
 [ -n "${GK3_TEST_DUEL:-}" ] || GK3_TEST_DUEL=$PWD/tools/gk3-installer/target/aarch64-unknown-linux-musl/release/gk3-installer
 export GK3_TEST_DUEL GK3_ALLOW_LOOP=1
+# 测试容器的内核没有 ntfs3：休眠检查改用 ntfs-3g 只读挂载（gk3__ntfs_hibernated 的 GK3_NTFS_MOUNT）
+grep -qw ntfs3 /proc/filesystems || export GK3_NTFS_MOUNT="ntfs-3g -o ro"
 . scripts/live/duel-lib.sh
 
 W=$(mktemp -d /tmp/gk3-duel-disks.XXXX)
