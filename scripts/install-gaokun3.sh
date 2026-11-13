@@ -84,7 +84,6 @@ done
 # ── preflight ──────────────────────────────────────────────────────────────
 say "Preflight"
 blocked=0
-pkgs=
 # GK3_SKIP_PREFLIGHT=1 exists only for scripts/live/test-apply.sh, which runs
 # this script inside a container against a loop device — there is no UEFI there.
 if [ "${GK3_SKIP_PREFLIGHT:-0}" = 1 ]; then
@@ -92,10 +91,6 @@ if [ "${GK3_SKIP_PREFLIGHT:-0}" = 1 ]; then
 else
 while read -r _ id ok rest; do
     id=${id#id=}; ok=${ok#ok=}
-    # INST-16: the backend names the Debian/Ubuntu packages of the missing tools
-    if [ "$id" = tools ]; then
-        for kv in $rest; do case "$kv" in pkgs=*) pkgs=$(printf '%s' "${kv#pkgs=}" | tr ',' ' ') ;; esac; done
-    fi
     case "$ok" in
         yes)     printf '  ✓ %-11s %s\n' "$id" "$rest" ;;
         unknown) printf '  ? %-11s %s  (could not tell — continuing)\n' "$id" "$rest" ;;
@@ -106,13 +101,8 @@ if [ "$blocked" = 1 ]; then
     cat >&2 <<EOF
 
 Refusing to continue. What the failures mean:
-  root        run with sudo
-  uefi        boot the live USB in UEFI mode
   model       this installer is for the MateBook E Go 2022 (GK-W7X) only
               (override: GK3_SKIP_MODEL_CHECK=1)
-  secureboot  the kernel is unsigned — disable Secure Boot in firmware setup
-  tools       Debian/Ubuntu: apt install ${pkgs:-gdisk parted util-linux dosfstools e2fsprogs coreutils zstd python3}
-              (installing also needs systemd-boot-efi, for systemd-bootaa64.efi)
   power       battery below 15% and no charger: plug in the charger
               (override the threshold: GK3_POWER_MIN_PCT=<percent>)
 EOF

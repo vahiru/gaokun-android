@@ -239,19 +239,12 @@ verify_install() {
     fi
 }
 
-# ── P. 预检：缺工具时报出包名（v1.0 计划 INST-16）───────────────────────────
-echo "═══ P. 预检：缺的工具对应哪个包 ═══"
-PB=$W/pathbin; mkdir -p "$PB"
-# 预检本身要用的命令照常给；故意不给 sgdisk、partprobe、blkid、lsblk（后两个同属 util-linux：包名只出一次）
-for t in id cat od sed tr grep dmesg findmnt mkfs.vfat mkfs.ext4 dd zstd python3; do
-    command -v "$t" >/dev/null && ln -sf "$(command -v "$t")" "$PB/$t"
-done
-TL=$(PATH=$PB gk3_preflight 2>/dev/null | grep '^CHECK id=tools ')
-[ "$TL" = "CHECK id=tools ok=no missing=sgdisk,partprobe,blkid,lsblk pkgs=gdisk,parted,util-linux" ] \
-    && ok "缺 sgdisk / partprobe / blkid / lsblk：$TL" || bad "预检的包名不对：$TL"
-TL=$(gk3_preflight 2>/dev/null | grep '^CHECK id=tools ')
-[ "$TL" = "CHECK id=tools ok=yes" ] && ok "工具齐全：${TL}（没有 pkgs= 字段）" || bad "工具齐全时预检不对：$TL"
-duel_call P gk3_preflight; duel_call "P 缺工具" "PATH=$PB" gk3_preflight; duel_pure
+# ── P. 预检：只报设备型号与电量 ──────────────────────────────────────────────
+echo "═══ P. 预检：只有 model 与 power 两项 ═══"
+PF=$(gk3_preflight 2>/dev/null | grep '^CHECK ' | awk '{print $2}' | tr '\n' ' ')
+[ "$PF" = "id=model id=power " ] && ok "预检只出 model、power 两项" || bad "预检的项不对：$PF"
+[ "$(GK3_SKIP_MODEL_CHECK=1 gk3_preflight 2>/dev/null | grep '^CHECK id=model ' | grep -c 'ok=unknown.*skipped=yes')" = 1 ] \
+    && ok "GK3_SKIP_MODEL_CHECK=1：型号报 unknown、skipped=yes" || bad "跳过型号检查不对"
 
 # ── A. 命令行版，整盘 ───────────────────────────────────────────────────────
 echo "═══ A. install-gaokun3.sh 整盘安装 ═══"
@@ -1070,14 +1063,12 @@ mkps() {   # mkps <名字> <type> [capacity] [online] [status]
 pc() { GK3_POWER_SUPPLY_DIR=$PS gk3__power_check; }
 rm -rf "$PS"; mkps gaokun-ec-battery Battery 12 "" Discharging; mkps gaokun-ec-adapter USB "" 0
 [ "$(pc)" = "CHECK id=power ok=no value=12 ac=no min=15" ] && ok "12%、没接电源：ok=no" || bad "低电量没拦：$(pc)"
-duel_call "H 低电量" "GK3_POWER_SUPPLY_DIR=$PS" gk3_preflight
 echo 1 > "$PS/gaokun-ec-adapter/online"
 [ "$(pc)" = "CHECK id=power ok=yes value=12 ac=yes min=15" ] && ok "12%、接着电源：放行" || bad "接着电源还拦：$(pc)"
 echo 0 > "$PS/gaokun-ec-adapter/online"; echo 15 > "$PS/gaokun-ec-battery/capacity"
 [ "$(pc)" = "CHECK id=power ok=yes value=15 ac=no min=15" ] && ok "正好 15%：放行" || bad "15% 被拦：$(pc)"
 rm -rf "$PS"; mkps BAT0 Battery 5 "" Charging
 [ "$(pc)" = "CHECK id=power ok=yes value=5 ac=yes min=15" ] && ok "认不出名字时按 type 找电池；status=Charging 算接着电源" || bad "按 type 找不对：$(pc)"
-duel_call "H 按 type 找电池" "GK3_POWER_SUPPLY_DIR=$PS" gk3_preflight
 rm -rf "$PS"; mkdir -p "$PS"
 [ "$(pc)" = "CHECK id=power ok=unknown value= ac=no min=15" ] && ok "没有电池：ok=unknown（不拦）" || bad "没电池时：$(pc)"
 gk3_preflight 2>/dev/null | grep -q '^CHECK id=power ' && ok "gk3_preflight 带上了 CHECK id=power" || bad "gk3_preflight 里没有 power"

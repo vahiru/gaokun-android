@@ -32,6 +32,7 @@ flutter:
   # fixture：真后端在容器里录的输出（scripts/live/gen-fixtures.sh）。
   # Mac 上开发（-d chrome）与 golden 出图时回放；设备上不用，但体积可以忽略（<100 KB）。
   assets:
+    - assets/logo.png        # 侧栏的标志（与 Windows 安装器同一份，由 installer/windows/tool/icon/make-icon.sh 生成）
     - testdata/common/
     - testdata/factory/
     - testdata/windows-free/

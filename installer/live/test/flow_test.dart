@@ -292,11 +292,11 @@ void main() {
     await see(t, find.text(l.editFailed(l.editWhyEsp)));
   });
 
-  testWidgets('预检：BIOS 2.17 不再拦（2026-09-25）；安全启动开着 → 拦住', (t) async {
-    await pumpApp(t, 'blank', overrides: {'gk3_preflight': 'preflight-secureboot.txt'});
+  testWidgets('预检：型号不对 → 拦住，写明当前型号', (t) async {
+    await pumpApp(t, 'blank', overrides: {'gk3_preflight': 'preflight-model.txt'});
     await see(t, find.text(l.checkBlocked));
-    await see(t, find.text('2.17'));   // 版本号照样显示（bug 报告要它），但不是失败项
-    await see(t, find.text(l.checkSecurebootBad));
+    await see(t, find.text(l.checkModelBadTitle));
+    await see(t, find.text(l.checkModelBad('GK-W57')));
     final btn = t.widget<ButtonStyleButton>(find.ancestor(of: find.text(l.btnStart), matching: find.byWidgetPredicate((w) => w is ButtonStyleButton)).first);
     expect(btn.onPressed, isNull);
   });
@@ -699,8 +699,7 @@ void main() {
   testWidgets('预检：电量低且没接电源 → 拦住，写明原因（GUI-8）', (t) async {
     await pumpApp(t, 'blank', overrides: {'gk3_preflight': 'preflight-lowbatt.txt'});
     await see(t, find.text(l.checkBlocked));
-    await see(t, find.text(l.checkPower));
-    await see(t, find.text(l.checkPowerShown('9')));
+    await see(t, find.text(l.checkPowerLow));
     await see(t, find.text(l.checkPowerBad('15')));
     final btn = t.widget<ButtonStyleButton>(find.ancestor(of: find.text(l.btnStart), matching: find.byWidgetPredicate((w) => w is ButtonStyleButton)).first);
     expect(btn.onPressed, isNull);
@@ -888,12 +887,6 @@ void main() {
     await netInstall(t, failNetOnce: true);
     await see(t, find.text(l.failDlTitle));
     await see(t, find.text(l.logsSave));
-  });
-
-  testWidgets('预检缺工具：写出要装的 Debian 包（CHECK id=tools 的 pkgs=，INST-16）', (t) async {
-    await pumpApp(t, 'blank', overrides: {'gk3_preflight': 'preflight-tools.txt'});
-    await see(t, find.text(l.checkToolsBadPkgs('sgdisk, partprobe', 'gdisk parted')));
-    await see(t, find.text(l.checkBlocked));
   });
 
   // ── 双系统专项（见 tools/gk3boot/README.md）──────────────────────────────────────────────

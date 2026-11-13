@@ -32,30 +32,22 @@ class _WelcomePageState extends State<WelcomePage> {
     });
   }
 
-  String _checkName(String id) {
-    final l = context.l;
-    return switch (id) {
-      'model' => l.checkModel,
-      'bios' => l.checkBios,
-      'secureboot' => l.checkSecureboot,
-      'uefi' => l.checkUefi,
-      'root' => l.checkRoot,
-      'tools' => l.checkTools,
-      'power' => l.checkPower,
-      _ => id,
-    };
-  }
-
-  String? _failText(Check c) {
+  /// 一项检查 → 一行：通过时标题说明是什么、下面是取值；没通过时标题说问题、下面说怎么处理
+  _CheckRow _row(Check c) {
     final l = context.l;
     return switch (c.id) {
-      'model' => l.checkModelBad(c.value),
-      'secureboot' => l.checkSecurebootBad,
-      'uefi' => l.checkUefiBad,
-      'root' => l.checkRootBad,
-      'tools' => c.pkgs.isEmpty ? l.checkToolsBad(c.missing.replaceAll(',', ', ')) : l.checkToolsBadPkgs(c.missing.replaceAll(',', ', '), c.pkgs.replaceAll(',', ' ')),
-      'power' => l.checkPowerBad(c.min),
-      _ => null,
+      'model' => switch (c.state) {
+          CheckState.ok => _CheckRow(state: c.state, title: l.checkModelOk, detail: c.value),
+          CheckState.fail => _CheckRow(state: c.state, title: l.checkModelBadTitle, detail: l.checkModelBad(c.value)),
+          CheckState.unknown => _CheckRow(state: c.state, title: l.checkModel, detail: l.checkUnknown),
+        },
+      'power' => switch (c.state) {
+          CheckState.ok => _CheckRow(state: c.state, title: l.checkPower, detail: c.ac ? l.checkPowerShownAc(c.value) : l.checkPowerShown(c.value)),
+          CheckState.fail => _CheckRow(state: c.state, title: l.checkPowerLow, detail: l.checkPowerBad(c.min)),
+          CheckState.unknown => _CheckRow(state: c.state, title: l.checkPower, detail: l.checkUnknown),
+        },
+      // 后端多报了一项（新后端）：照样列出来，不当成失败以外的东西
+      _ => _CheckRow(state: c.state, title: c.id, detail: c.value.isEmpty ? null : c.value),
     };
   }
 
@@ -74,81 +66,57 @@ class _WelcomePageState extends State<WelcomePage> {
         const Spacer(),
         Btn(l.btnStart, autofocus: true, onPressed: checks == null || s.blocked ? null : () => go(context, const DiskPage())),
       ]),
-      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Expanded(
-          flex: 5,
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(l.welcomeBody, style: tt.bodyLarge),
-            const SizedBox(height: 24),
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(color: context.cs.surfaceContainerLow, borderRadius: BorderRadius.circular(16)),
-              child: Text(l.welcomeNote, style: tt.bodyMedium),
-            ),
-          ]),
-        ),
-        const SizedBox(width: 40),
-        Expanded(
-          flex: 4,
-          child: Container(
-            padding: const EdgeInsets.all(22),
-            decoration: BoxDecoration(color: context.cs.surfaceContainerLow, borderRadius: BorderRadius.circular(20), border: Border.all(color: s.blocked ? context.cs.error : context.cs.outlineVariant)),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(l.checkTitle, style: tt.titleMedium),
-              const SizedBox(height: 14),
-              if (checks == null)
-                Row(children: [const SizedBox.square(dimension: 22, child: CircularProgressIndicator(strokeWidth: 3)), const SizedBox(width: 12), Text(l.checkRunning, style: tt.bodyMedium)])
-              else ...[
-                for (final c in checks)
-                  _CheckRow(
-                    name: _checkName(c.id),
-                    check: c,
-                    // 后端的取值是给机器看的（disabled/enabled），界面上说人话
-                    shown: switch (c.id) {
-                      'secureboot' => switch (c.value) { 'disabled' => l.checkSecurebootOff, 'enabled' => l.checkSecurebootOn, _ => c.value },
-                      'power' => c.value.isEmpty ? '' : (c.ac ? l.checkPowerShownAc(c.value) : l.checkPowerShown(c.value)),
-                      _ => c.value,
-                    },
-                    failText: _failText(c),
-                    unknownText: l.checkUnknown,
-                  ),
-                if (s.blocked) ...[const SizedBox(height: 10), Text(l.checkBlocked, style: tt.bodyLarge!.copyWith(color: context.cs.error))],
-              ],
+      // 与 Windows 安装器的检查页同一种排法：说明在上，检查结果逐行列在下面
+      child: ListView(children: [
+        Text(l.welcomeBody, style: tt.bodyLarge),
+        const SizedBox(height: 24),
+        Text(l.checkTitle, style: tt.titleMedium),
+        const SizedBox(height: 8),
+        if (checks == null)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Row(children: [
+              const SizedBox.square(dimension: 28, child: CircularProgressIndicator(strokeWidth: 3)),
+              const SizedBox(width: 16),
+              Text(l.checkRunning, style: tt.bodyLarge),
             ]),
-          ),
-        ),
+          )
+        else ...[
+          for (final c in checks) _row(c),
+          if (s.blocked) ...[const SizedBox(height: 8), Text(l.checkBlocked, style: tt.bodyLarge!.copyWith(color: context.cs.error))],
+        ],
       ]),
     );
   }
 }
 
+/// 检查结果的一行：左边状态图标，右边标题与说明（样式同 Windows 安装器的 CheckRow）
 class _CheckRow extends StatelessWidget {
-  const _CheckRow({required this.name, required this.check, required this.shown, this.failText, required this.unknownText});
-  final String name, unknownText, shown;
-  final Check check;
-  final String? failText;
+  const _CheckRow({required this.state, required this.title, this.detail});
+  final CheckState state;
+  final String title;
+  final String? detail;
 
   @override
   Widget build(BuildContext context) {
-    final tt = Theme.of(context).textTheme;
-    final (icon, color) = switch (check.state) {
+    final cs = context.cs, tt = context.tt;
+    final (icon, color) = switch (state) {
       CheckState.ok => (Icons.check_circle, context.gk.success),
-      CheckState.fail => (Icons.cancel, context.cs.error),
-      CheckState.unknown => (Icons.help, context.gk.warning),
+      CheckState.fail => (Icons.cancel, cs.error),
+      CheckState.unknown => (Icons.warning_amber_rounded, context.gk.warning),
     };
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 5),
+      padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Icon(icon, color: color, size: 22),
-        const SizedBox(width: 10),
+        Icon(icon, color: color, size: 28),
+        const SizedBox(width: 16),
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [
-              Flexible(child: Text(name, style: tt.bodyLarge, overflow: TextOverflow.ellipsis)),
-              if (shown.isNotEmpty) ...[const SizedBox(width: 10), Flexible(child: Text(shown, style: tt.bodyMedium, overflow: TextOverflow.ellipsis))],
-            ]),
-            if (check.state == CheckState.fail && failText != null) Text(failText!, style: tt.bodyMedium!.copyWith(color: context.cs.error)),
-            if (check.state == CheckState.unknown) Text(unknownText, style: tt.bodySmall),
+            Text(title, style: tt.titleMedium),
+            if (detail != null) ...[
+              const SizedBox(height: 2),
+              Text(detail!, style: tt.bodyMedium!.copyWith(color: cs.onSurfaceVariant)),
+            ],
           ]),
         ),
       ]),

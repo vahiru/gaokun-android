@@ -2,6 +2,7 @@
 # 标了「手写」的几条是容器里做不到的：不是这台机器（没有 DMI）、没有 wlan0、下载清单还不存在。
 # 它们照着真实输出的格式写：预检的值取自实测 dmesg（见 docs/dev/hardware.md）。
 gk3_preflight                                                                  preflight-ok.txt   # 手写（容器不是 gaokun3）
+#  preflight-lowbatt.txt：电量 9%、没接电源；preflight-model.txt：型号不是 GK-W7X（测试用 overrides 选它们）
 gk3_wifi_scan                                                                  wifi_scan.txt   # 录（真 gk3-wpa-scan.py，合成的 scan_results）
 gk3_wifi_connect *                                                             wifi_connect-ok.txt   # 手写（容器里没有 wlan0）
 gk3_net_status                                                                 net_status-off.txt   # 手写

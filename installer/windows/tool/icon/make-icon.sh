@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 由 crdroid-eye.svg 生成安装器的图标（要 ImageMagick 7 的 magick）：
 #   windows/runner/resources/app_icon.ico   Windows 的任务栏、Alt+Tab、exe 文件的图标（16–256 多尺寸）
-#   assets/logo.png                         侧栏标题左边的标志
+#   assets/logo.png                         侧栏标题左边的标志（LiveCD 安装器用同一份：installer/live/assets/logo.png）
 #   web/favicon.png、web/icons/*.png         浏览器预览
 set -euo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -19,6 +19,7 @@ rm -f "$APP/windows/runner/resources/icon-256.png"
 mkdir -p "$APP/assets"
 magick -density 1536 -background none "$SVG" -trim +repage -gravity center -extent '%[fx:max(w,h)]x%[fx:max(w,h)]' \
     -resize 112x112 -define png:exclude-chunks=date,time "$APP/assets/logo.png"
+mkdir -p "$APP/../live/assets" && cp "$APP/assets/logo.png" "$APP/../live/assets/logo.png"
 render 32 "$APP/web/favicon.png"
 render 192 "$APP/web/icons/Icon-192.png"
 render 512 "$APP/web/icons/Icon-512.png"

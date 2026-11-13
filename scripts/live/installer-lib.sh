@@ -328,41 +328,19 @@ gk3_partpath() {
 
 # ── 预检 ────────────────────────────────────────────────────────────────────
 # 这台机器能不能装。一项一行：
-#   CHECK id=root       ok=yes|no
-#   CHECK id=uefi       ok=yes|no
-#   CHECK id=model      ok=yes|no|unknown value=GK-W7X
-#   CHECK id=bios       ok=yes value=2.16          （只报版本，不拦 —— 见下）
-#   CHECK id=secureboot ok=yes|no|unknown value=disabled|enabled
-#   CHECK id=tools      ok=yes|no         missing=a,b pkgs=p,q
-#     pkgs：缺的工具在 Debian / Ubuntu 上属于哪些包（去重、按 missing 的顺序；gk3__tool_pkg），
-#     前端照着提示 `apt install <pkgs>`（v1.0 计划 INST-16：原先的提示是手抄的一行包名，漏了 partprobe 所在的 parted）
+#   CHECK id=model ok=yes|no|unknown value=GK-W7X
+#   CHECK id=power ok=yes|no|unknown value=<电量%> ac=yes|no min=<门槛>    （见下面 gk3__power_check）
 # ok=no 的项前端必须拦住；unknown 只警告 —— 读不到 ≠ 不合格（例如内核没开 DMIID）。
+# root 权限、UEFI 引导、Secure Boot、工具齐全不再检查：能启动到 LiveCD 并运行安装器，这几项就必然满足；
+# 缺工具时各写盘入口自己会报 tool-missing。
 #
-# 型号 / BIOS 的读取点：/sys/class/dmi/id/{product_name,bios_version}
-#   （drivers/firmware/dmi-id.c:42-47，要 CONFIG_DMIID，Kconfig 默认 y），
+# 型号的读取点：/sys/class/dmi/id/product_name（drivers/firmware/dmi-id.c:42-47，要 CONFIG_DMIID，Kconfig 默认 y），
 #   读不到时退回内核启动日志里那行 "Hardware name: HUAWEI GK-W7X/GK-W7X-PCB, BIOS 2.16 …"
-#   （本机实测原文见 docs/dev/hardware.md）。
-# BIOS【不限制】（已有人验证过，不依赖 BIOS 版本）。原先只认 2.16、拒绝 2.17，
-#   理由几经改写（最早的"两版触摸 SPI 总线与 GPIO 编号不同"比错了表，#120 §4）。现在只报版本号，
-#   永远 ok=yes —— 出问题时 bug 报告里要有它，但它不再是装不装的条件。
-#   型号仍然拦：GK3_SKIP_MODEL_CHECK=1 放行（gaokun2 是另一台机器、另一套 EC 协议，别装）。
-# ★ Secure Boot：EFI 全局变量 SecureBoot，GUID 是 EFI_GLOBAL_VARIABLE_GUID
-#   8be4df61-93ca-11d2-aa0d-00e098032b8c（include/linux/efi.h 里的定义，
-#   Debian 6.12 头文件 :368）。efivarfs 的文件 = 4 字节属性 + 1 字节值。
-#   ⚠️ 从【我们的】live U 盘启动时这项必然是 disabled（内核没签名，开着就起不来），
-#      它真正拦的是"从通用的 Ubuntu/Debian live U 盘跑命令行版"那条路。
+#   （本机实测原文见 docs/dev/hardware.md）。GK3_SKIP_MODEL_CHECK=1 放行（gaokun2 是另一台机器、另一套 EC 协议，别装）。
 gk3_preflight() {
-    local v f dmesg_hw=""
-    gk3__hwline() {
-        [ -n "$dmesg_hw" ] || dmesg_hw=$(dmesg 2>/dev/null | grep -m1 'Hardware name:' || true)
-        printf '%s' "$dmesg_hw"
-    }
-
-    [ "$(id -u)" = 0 ] && echo "CHECK id=root ok=yes" || echo "CHECK id=root ok=no"
-    [ -d /sys/firmware/efi ] && echo "CHECK id=uefi ok=yes" || echo "CHECK id=uefi ok=no"
-
+    local v
     v=$(cat /sys/class/dmi/id/product_name 2>/dev/null)
-    [ -n "$v" ] || v=$(gk3__hwline | sed -n 's/.*Hardware name: [^ ]* \([^/,]*\).*/\1/p')
+    [ -n "$v" ] || v=$(dmesg 2>/dev/null | grep -m1 'Hardware name:' | sed -n 's/.*Hardware name: [^ ]* \([^/,]*\).*/\1/p')
     if [ "${GK3_SKIP_MODEL_CHECK:-0}" = 1 ]; then
         echo "CHECK id=model ok=unknown value=$(gk3__enc "${v:-?}") skipped=yes"
     else case "$v" in
@@ -370,48 +348,8 @@ gk3_preflight() {
         "")     echo "CHECK id=model ok=unknown value=" ;;
         *)      echo "CHECK id=model ok=no value=$(gk3__enc "$v")" ;;
     esac; fi
-
-    v=$(cat /sys/class/dmi/id/bios_version 2>/dev/null)
-    [ -n "$v" ] || v=$(gk3__hwline | sed -n 's/.*, BIOS \([^ ]*\).*/\1/p')
-    echo "CHECK id=bios ok=yes value=$(gk3__enc "${v:-?}")"
-
-    f=/sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c
-    v=$(od -An -tu1 -j4 -N1 "$f" 2>/dev/null | tr -d ' ')
-    case "$v" in
-        0) echo "CHECK id=secureboot ok=yes value=disabled" ;;
-        1) echo "CHECK id=secureboot ok=no value=enabled" ;;
-        *) echo "CHECK id=secureboot ok=unknown value=" ;;
-    esac
-
-    local t p missing="" pkgs=""
-    for t in sgdisk partprobe blkid lsblk findmnt mkfs.vfat mkfs.ext4 dd od zstd python3; do
-        command -v "$t" >/dev/null 2>&1 && continue
-        missing="$missing,$t"; p=$(gk3__tool_pkg "$t")
-        case ",$pkgs," in *",$p,"*) ;; *) pkgs="$pkgs,$p" ;; esac
-    done
-    missing=${missing#,}; pkgs=${pkgs#,}
-    [ -z "$missing" ] && echo "CHECK id=tools ok=yes" || echo "CHECK id=tools ok=no missing=$missing pkgs=$pkgs"
     gk3__power_check
     return 0
-}
-
-# 工具 → Debian / Ubuntu 的包名（INST-16）。对照的是 live 镜像里 dpkg -S 的结果（Debian 13，2026-10-05 在
-# gk3-bootsmoke 容器里查的：partprobe 在 parted、blkid / lsblk / findmnt 在 util-linux、python3 由 python3-minimal
-# 提供但装 python3 即可）。Ubuntu 的包名同名（未逐个核实）。不认识的工具原样回它自己的名字。
-gk3__tool_pkg() {
-    case "$1" in
-        sgdisk) echo gdisk ;;
-        partprobe) echo parted ;;
-        blkid|lsblk|findmnt) echo util-linux ;;
-        mkfs.vfat) echo dosfstools ;;
-        mkfs.ext4|resize2fs|e2fsck|chattr) echo e2fsprogs ;;
-        ntfsresize|ntfscat|ntfs-3g|mkntfs) echo ntfs-3g ;;
-        dd|od|sha256sum) echo coreutils ;;
-        zstd) echo zstd ;;
-        python3) echo python3 ;;
-        systemd-run|systemd-inhibit) echo systemd ;;
-        *) echo "$1" ;;
-    esac
 }
 
 # ★ 电量（v1.0 计划 GUI-8）：缩 NTFS、写 12 GiB 的 super 要几分钟到十几分钟，半路没电就是一块半装的盘。

@@ -63,12 +63,12 @@ void main() {
 
   testWidgets('01 欢迎 / 预检通过', (t) async {
     await pumpApp(t, 'windows-free');
-    await waitFor(t, find.text('2.16'));
+    await waitFor(t, find.text(l.checkModelOk));
     await shot(t, '01-welcome');
   }, skip: !haveFont);
 
-  testWidgets('02 欢迎 / 预检拦住（安全启动；BIOS 2.17 放行）', (t) async {
-    await pumpApp(t, 'blank', overrides: {'gk3_preflight': 'preflight-secureboot.txt'});
+  testWidgets('02 欢迎 / 预检拦住（型号不对）', (t) async {
+    await pumpApp(t, 'blank', overrides: {'gk3_preflight': 'preflight-model.txt'});
     await waitFor(t, find.text(l.checkBlocked));
     await shot(t, '02-welcome-blocked');
   }, skip: !haveFont);
@@ -302,7 +302,7 @@ void main() {
 
   testWidgets('19–20 英文：欢迎 与 整盘确认（查长文案的排版）', (t) async {
     await pumpApp(t, 'factory', language: 'en');
-    await waitFor(t, find.text('2.16'));
+    await waitFor(t, find.text(l.checkModelOk));
     await shot(t, '19-welcome-en');
   }, skip: !haveFont);
 }

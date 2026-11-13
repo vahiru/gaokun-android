@@ -1,7 +1,8 @@
 {
   "@@locale": "zh",
   "appTitle": "Gaokun Android Installer",
-  "railSub": "Android安装器",
+  "railTitle": "Gaokun Android",
+  "railSub": "LiveCD Installer",
   "railWelcome": "欢迎",
   "railDisk": "磁盘",
   "railMode": "安装方式",
@@ -12,7 +13,6 @@
   "welcomeTitle": "安装Android",
   "welcomeSub": "HUAWEI MateBook E Go · Snapdragon 8cx Gen 3 (SC8280XP)",
   "welcomeBody": "本向导用于在本机磁盘上安装Android系统。\n后续步骤中可选择清除整个磁盘，或保留现有系统并在未分配空间中安装。",
-  "welcomeNote": "本设备采用UEFI引导而非传统Android设备的fastboot引导，安装完成后将通过启动管理器（systemd-boot）启动系统。",
   "btnStart": "开始",
   "btnQuit": "切换至终端",
   "shellFailed": "无法切换至终端（{err}），请尝试按Ctrl+Alt+F2手动切换。",
@@ -31,26 +31,12 @@
   "checkTitle": "安装环境检查",
   "checkRunning": "正在检查……",
   "checkModel": "设备型号",
-  "checkBios": "BIOS版本",
-  "checkSecureboot": "Secure Boot",
-  "checkUefi": "UEFI引导",
-  "checkRoot": "root权限",
-  "checkTools": "依赖工具",
+  "checkModelOk": "华为MateBook E Go",
+  "checkModelBadTitle": "非目标机型",
   "checkModelBad": "本安装器仅适用于2022/2023版华为MateBook E Go（GK-W7X），当前设备型号为{value}。",
   "@checkModelBad": {
     "placeholders": {
       "value": {
-        "type": "String"
-      }
-    }
-  },
-  "checkSecurebootBad": "Secure Boot未关闭。由于内核未签名，开启状态下系统将无法启动，请先在UEFI固件设置中关闭Secure Boot。",
-  "checkUefiBad": "当前环境未以UEFI模式引导。",
-  "checkRootBad": "安装器未以root权限运行。",
-  "checkToolsBad": "缺少所需工具：{missing}",
-  "@checkToolsBad": {
-    "placeholders": {
-      "missing": {
         "type": "String"
       }
     }
@@ -442,8 +428,6 @@
   },
   "stepPrep": "正在准备……",
   "modeWhyEspOurs": "此EFI系统分区中已包含Gaokun Android引导项（可能由其他磁盘上的系统使用），继续安装将覆盖现有引导配置。",
-  "checkSecurebootOff": "已关闭",
-  "checkSecurebootOn": "已开启",
   "modeWhyNoFree": "此磁盘上没有未分配空间，至少需要{need}。请在Windows“磁盘管理”中使用“压缩卷”腾出空间，或删除不再需要的分区。",
   "@modeWhyNoFree": {
     "placeholders": {
@@ -477,8 +461,9 @@
       }
     }
   },
-  "checkPower": "电池电量",
-  "checkPowerShown": "{pct}%",
+  "checkPower": "电源",
+  "checkPowerLow": "电量过低",
+  "checkPowerShown": "使用电池供电，电量{pct}%",
   "@checkPowerShown": {
     "placeholders": {
       "pct": {
@@ -486,7 +471,7 @@
       }
     }
   },
-  "checkPowerShownAc": "{pct}%（已连接电源）",
+  "checkPowerShownAc": "已连接电源，电量{pct}%",
   "@checkPowerShownAc": {
     "placeholders": {
       "pct": {
@@ -916,17 +901,6 @@
   "logsEspNote": "安装介质自身（EFI系统分区，常规系统下默认隐藏）",
   "runResumeTitle": "正在继续写入磁盘",
   "runResumeSub": "安装器界面重新启动后已重新连接至后台安装进程。完成前请勿关机或断开电源。",
-  "checkToolsBadPkgs": "缺少所需工具：{missing}（Debian / Ubuntu可执行：apt install {pkgs}）",
-  "@checkToolsBadPkgs": {
-    "placeholders": {
-      "missing": {
-        "type": "String"
-      },
-      "pkgs": {
-        "type": "String"
-      }
-    }
-  },
   "errJobStart": "无法启动后台安装进程（systemd-run / setsid调用失败）。",
   "errJobMissing": "未找到指定的后台安装任务（{id}）。",
   "@errJobMissing": {

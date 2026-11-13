@@ -71,6 +71,9 @@ class StepPage extends StatelessWidget {
     return StepScaffold(
       steps: [for (final s in Gk3Step.values) RailStep(s.label(l), s.icons.$1, s.icons.$2)],
       current: step.index,
+      railTitle: l.railTitle,
+      railIcon: null,
+      railLogo: Image.asset('assets/logo.png', width: 24, height: 24, filterQuality: FilterQuality.medium),
       railSubtitle: l.railSub,
       railFooter: [
         const _PowerButtons(),

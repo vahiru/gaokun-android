@@ -141,11 +141,13 @@ void main() {
       expect(vs.single.base, 'https://ota.072172.xyz/install/crDroidAndroid-16.0-20260916-gaokun3-v12.11/');
       expect(vs.single.sizeMib, 1247);
     });
-    test('overrides：换一份预检（BIOS 2.17 放行，安全启动拦住）', () async {
-      final checks = (await b('blank', {'gk3_preflight': 'preflight-secureboot.txt'}).run('gk3_preflight'))
+    test('overrides：换一份预检（型号不对拦住，电源照常）', () async {
+      final checks = (await b('blank', {'gk3_preflight': 'preflight-model.txt'}).run('gk3_preflight'))
           .ofType('CHECK').map(Check.new).toList();
-      expect(checks.firstWhere((c) => c.id == 'bios').state, CheckState.ok);
-      expect(checks.firstWhere((c) => c.id == 'secureboot').state, CheckState.fail);
+      expect(checks.map((c) => c.id), ['model', 'power']);
+      expect(checks.firstWhere((c) => c.id == 'model').state, CheckState.fail);
+      expect(checks.firstWhere((c) => c.id == 'model').value, 'GK-W57');
+      expect(checks.firstWhere((c) => c.id == 'power').state, CheckState.ok);
     });
     test('双系统至少要多少：后端自己报（C 版写死了 20.2 GiB）', () async {
       final p = Plan(await b('factory').run('gk3_plan', [

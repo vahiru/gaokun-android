@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# shell 版与 Rust 版（tools/gk3-installer）的对拍 —— 只读入口（gk3_probe / gk3_preflight / gk3_plan）。
+# shell 版与 Rust 版（tools/gk3-installer）的对拍 —— 只读入口（gk3_probe / gk3_plan）。
 # 设计：docs/dev/installer-rust-design.md。
 #
 #   bash tools/gk3-installer/build.sh musl
@@ -134,25 +134,6 @@ mkdir -p /media/gk3 && mount "${D4}p3" /media/gk3
 duel_scene "介质在怪名字盘上" "$D4"
 umount /media/gk3
 
-echo "═══ 7. 预检：缺工具、跳过型号检查、假的电源目录 ═══"
-duel_call 预检 gk3_preflight
-PB=$W/pathbin; mkdir -p "$PB"
-for t in id cat od sed tr grep dmesg findmnt mkfs.vfat mkfs.ext4 dd zstd python3; do
-    command -v "$t" >/dev/null && ln -sf "$(command -v "$t")" "$PB/$t"
-done
-duel_call 预检 "PATH=$PB" gk3_preflight
-duel_call 预检 GK3_SKIP_MODEL_CHECK=1 gk3_preflight
-PS=$W/ps
-mkps() { mkdir -p "$PS/$1"; echo "$2" > "$PS/$1/type"; [ -z "${3:-}" ] || echo "$3" > "$PS/$1/capacity"
-         [ -z "${4:-}" ] || echo "$4" > "$PS/$1/online"; [ -z "${5:-}" ] || echo "$5" > "$PS/$1/status"; }
-mkps gaokun-ec-battery Battery 12 "" Discharging; mkps gaokun-ec-adapter USB "" 0
-duel_call 电量 "GK3_POWER_SUPPLY_DIR=$PS" gk3_preflight
-echo 1 > "$PS/gaokun-ec-adapter/online"; duel_call 电量 "GK3_POWER_SUPPLY_DIR=$PS" gk3_preflight
-duel_call 电量 "GK3_POWER_SUPPLY_DIR=$PS" GK3_POWER_MIN_PCT=abc gk3_preflight
-rm -rf "$PS"; mkps BAT0 Battery 5 "" Charging; duel_call 电量 "GK3_POWER_SUPPLY_DIR=$PS" gk3_preflight
-echo "85 " > "$PS/BAT0/capacity"; duel_call 电量 "GK3_POWER_SUPPLY_DIR=$PS" gk3_preflight
-rm -rf "$PS"; mkdir -p "$PS"; duel_call 电量 "GK3_POWER_SUPPLY_DIR=$PS" gk3_preflight
-duel_call 电量 GK3_POWER_SUPPLY_DIR=/nonexistent gk3_preflight
-
+# 预检不再对拍：shell 版只剩设备型号与电量两项，Rust 版（tools/gk3-installer）没有跟着改
 echo
 duel_summary
