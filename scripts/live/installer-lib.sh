@@ -1192,6 +1192,16 @@ EOF
             mv "$e" "$e.disabled" || { esp_fail "停用 ${e##*/}"; return 1; }
             echo "停用了另一个目录的启动项 ${e##*/} → ${e##*/}.disabled（默认项的通配会同时匹配它）" >&2
         done
+        # 不装救援系统时，这个目录下旧的救援启动项与 rescue/ 一并删掉（以前装过救援系统的机器重新安装）：留着的话，
+        # 菜单里那两项会用新内核配旧的 initramfs 启动。gk3rescue 分区本身不动
+        if [ "$rescue" != yes ]; then
+            for e in "$mnt/loader/entries/$mid-rescue.conf" "$mnt/loader/entries/$mid-rescue-b.conf"; do
+                [ -f "$e" ] || continue
+                rm -f "$e" || { esp_fail "删救援启动项 ${e##*/}"; return 1; }
+                echo "删掉了旧的救援启动项 ${e##*/}" >&2
+            done
+            if [ -d "$mnt/$mid/rescue" ]; then rm -rf "$mnt/$mid/rescue" || { esp_fail "删 $mid/rescue"; return 1; }; fi
+        fi
         # ★ S10：统一启动入口的条目（gk3boot-android-<槽>[+N[-M]].conf、.staged、gk3prev-android-<槽>.conf、gk3boot-tools.conf）
         #   与没人再引用的 EFI/gk3boot/<版本>/ 一并删掉（log/ 留着）—— 装完的机器回到"还没有入口"，第一次开机走直连条目，
         #   开机完成时由【装上的这个系统】的 HAL 部署它自己那一版（理由见上面 misc 那段）。留着的话：

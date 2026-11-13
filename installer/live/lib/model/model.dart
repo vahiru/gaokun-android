@@ -229,11 +229,10 @@ class Release {
         hasBoot = r.yes('boot'),
         superKind = r['super'],
         hasSha = r.yes('sha256'),
-        rescue = r.yes('rescue'),
         version = r['version'] == '?' ? '' : r['version'],
         superMib = r.intOf('super_mib');
   final String dir, superKind, version;
-  final bool hasBoot, hasSha, rescue;
+  final bool hasBoot, hasSha;
   final int superMib;
 
   /// 能不能拿它装：boot.img 与 super 都在

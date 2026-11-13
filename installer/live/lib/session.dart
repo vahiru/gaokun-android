@@ -218,9 +218,6 @@ class Session extends ChangeNotifier {
 
   /// 选定一块盘：把两种方式能不能走都问清楚
   Future<void> assess(Disk d) async {
-    // 安装器就在这块盘上（免 U 盘安装）：它自己就留在开机菜单里，默认不再另建 gk3rescue（v1.0 计划 GUI-17）。
-    // 用户在选项页仍可打开
-    if (!identical(disk, d)) rescue = !d.medium;
     disk = d;
     mode = null;
     plan = null;
@@ -255,7 +252,7 @@ class Session extends ChangeNotifier {
     final f = d.largestFree;
     // 没有空闲区也问一次（空区间）：让 gk3_plan 自己报"至少要多少"
     final p = Plan(await backend.run('gk3_plan', [
-      '--disk', d.path, '--mode', 'alongside', '--rescue', rescue ? 'yes' : 'no',
+      '--disk', d.path, '--mode', 'alongside', '--rescue', 'no',
       '--region-start', '${f?.start ?? 0}', '--region-end', '${f?.end ?? 0}', '--esp', esp.path,
     ]));
     if (p.ok && f != null) return AlongOk(f, esp, info?.windows ?? false);
@@ -287,23 +284,17 @@ class Session extends ChangeNotifier {
 
   // ── 方式与选项 ──────────────────────────────────────────────────────────
   Mode? mode;
-  bool rescue = true;
   int? userdataMib; // null = 剩下的全给 /data
   Plan? plan;
   bool planning = false;
 
-  bool get rescueAvailable => usbRelease?.rescue ?? false;
-
   /// 重新安装时 /data 留不留。默认清除（用户 2026-09-25 定的）：换到更旧的版本时，留下的数据可能起不来
   bool keepData = false;
 
-  /// 重新安装只重写【已有的】救援分区；没有这个分区就不装（不改分区表）
-  bool get _diskHasRescue => disk?.parts.any((p) => p.name == 'gk3rescue') ?? false;
-  bool get rescueUsable => rescueAvailable && (mode != Mode.reinstall || _diskHasRescue);
-
   List<String> _reinstallArgs(Disk d, {required bool keep}) => [
         '--disk', d.path, '--mode', 'reinstall',
-        '--rescue', rescue && rescueAvailable && d.parts.any((p) => p.name == 'gk3rescue') ? 'yes' : 'no',
+        // 不再装救援系统（恢复手段是 gk3boot 的 fastboot 与菜单）；以前装过的，gk3_apply 会清掉它的启动项
+        '--rescue', 'no',
         '--esp', d.esp?.path ?? '', '--keep-data', keep ? 'yes' : 'no',
       ];
 
@@ -321,7 +312,7 @@ class Session extends ChangeNotifier {
   List<String> _planArgs() {
     final d = disk!;
     if (mode == Mode.reinstall) return _reinstallArgs(d, keep: keepData);
-    final a = ['--disk', d.path, '--mode', mode == Mode.wipe ? 'wipe' : 'alongside', '--rescue', rescue && rescueAvailable ? 'yes' : 'no'];
+    final a = ['--disk', d.path, '--mode', mode == Mode.wipe ? 'wipe' : 'alongside', '--rescue', 'no'];
     final al = along;
     if (mode == Mode.alongside && al is AlongOk) {
       a.addAll(['--region-start', '${al.region.start}', '--region-end', '${al.region.end}', '--esp', al.esp.path]);
@@ -342,8 +333,8 @@ class Session extends ChangeNotifier {
   /// 专业分区页：/data 的最大值 = 默认方案里给它的全部
   int? maxUserdataMib;
 
-  Future<void> setRescue(bool v) async {
-    rescue = v;
+  /// 进入选项页：按默认（/data 占满剩余空间）算一次方案，记下 /data 的最大值
+  Future<void> startOpts() async {
     userdataMib = null;
     await computePlan();
     maxUserdataMib = plan?.ok == true ? plan!.userdataMib : null;

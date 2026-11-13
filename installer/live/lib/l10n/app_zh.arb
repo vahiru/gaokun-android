@@ -168,7 +168,6 @@
       }
     }
   },
-  "optsRescueNoPart": "此磁盘上没有救援分区。重新安装不会修改分区表，因此本次无法安装救援系统。",
   "confirmReinstallHead": "将重写以下分区：",
   "confirmReinstallRight": "保持现有分区表",
   "actWrite": "写入镜像",
@@ -206,9 +205,6 @@
   },
   "optsTitle": "安装选项",
   "optsSub": "默认已启用推荐配置，通常可直接点击“下一步”继续。",
-  "optsRescueTitle": "安装救援系统",
-  "optsRescueBody": "占用1 GiB空间，内置SSH与磁盘分区工具。当Android无法正常启动时，可通过启动菜单进入救援系统以远程连接并修复设备，强烈建议保留。",
-  "optsRescueMissing": "当前安装介质未包含救援系统镜像，无法启用此项。",
   "optsData": "剩余空间将全部分配给/data分区：约{size}",
   "@optsData": {
     "placeholders": {
@@ -267,7 +263,6 @@
     }
   },
   "confirmWindowsKept": "现有Windows系统不受影响，开机时可通过启动菜单进入。",
-  "confirmRescue": "救援系统：{yesno}",
   "confirmVersion": "系统版本：{version}",
   "@confirmVersion": {
     "placeholders": {
@@ -276,16 +271,7 @@
       }
     }
   },
-  "@confirmRescue": {
-    "placeholders": {
-      "yesno": {
-        "type": "String"
-      }
-    }
-  },
   "confirmNewLayout": "新建分区布局：",
-  "wordInstall": "安装",
-  "wordNoInstall": "不安装",
   "confirmHoldIdle": "按住2秒开始安装",
   "holdIdle": "按住2秒",
   "confirmHoldBusy": "请继续按住……{pct}%",
@@ -302,7 +288,6 @@
   "runHideLog": "隐藏详细信息",
   "doneTitle": "Android安装完成",
   "doneBody": "请拔出安装介质，重启设备后即可进入Android系统。",
-  "doneRescue": "救援系统已一并安装：当Android无法正常启动时，可在启动菜单中选择救援系统以远程连接并修复设备。",
   "failTitle": "安装未完成",
   "failSub": "磁盘写入中途出错，磁盘分区可能处于不完整状态。请勿立即重启进入原系统，建议先将下方运行日志保存至U盘或拍照留存。",
   "failBackup": "修改磁盘前已备份原分区表，可在终端中按日志提示执行“sgdisk --load-backup=…”命令恢复安装前的分区表。",
@@ -471,7 +456,6 @@
   "failLogTitle": "运行日志",
   "failLogShow": "显示运行日志",
   "doneBodyInternal": "重启设备后即可进入Android系统。安装器所在分区仍保留在本机磁盘上，后续可通过启动菜单再次进入安装环境。",
-  "optsRescueSameDisk": "当前安装器分区位于本磁盘并保留在启动菜单中，本身即可用于重装系统或使用终端工具，因此默认不重复安装救援系统；如有需要仍可手动开启。",
   "confirmOnekey": "华为一键恢复分区",
   "confirmOnekeyWarn": "即将删除的分区中包含华为一键恢复分区（{label}）：删除后，将无法通过华为一键恢复将设备还原为出厂Windows系统。",
   "@confirmOnekeyWarn": {

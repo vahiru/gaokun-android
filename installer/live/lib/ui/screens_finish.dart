@@ -27,9 +27,7 @@ class _OptsPageState extends State<OptsPage> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final s = context.session;
-      if (!s.rescueUsable) s.rescue = false;
-      s.setRescue(s.rescue);
+      context.session.startOpts();
     });
   }
 
@@ -67,17 +65,7 @@ class _OptsPageState extends State<OptsPage> {
           ),
           const SizedBox(height: 14),
         ],
-        ChoiceCard(
-          icon: Icons.health_and_safety,
-          title: l.optsRescueTitle,
-          body: l.optsRescueBody,
-          // 安装器就在目标盘上（免 U 盘安装）：默认关，写明为什么（GUI-17）
-          note: s.disk?.medium == true && s.rescueUsable ? l.optsRescueSameDisk : null,
-          reason: !s.rescueAvailable ? l.optsRescueMissing : (s.rescueUsable ? null : l.optsRescueNoPart),
-          trailing: Switch(value: s.rescue && s.rescueUsable, onChanged: s.rescueUsable ? s.setRescue : null),
-          onTap: s.rescueUsable ? () => s.setRescue(!s.rescue) : null,
-        ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 6),
         Text(dataLine, style: tt.titleMedium!.copyWith(color: dataBad ? context.cs.error : context.cs.onSurface)),
         // 新建分区时提醒 /data 太小（重新安装不改分区大小，提醒了也没法改）
         if (p != null && p.ok && !s.planning && !re) DataSizeWarning(p.userdataMib),
@@ -292,7 +280,6 @@ class ConfirmPage extends StatelessWidget {
                   child: Row(children: [Expanded(child: Text(part.name, style: tt.bodyLarge)), Text(fmtMib(part.sizeMib), style: tt.bodyMedium)]),
                 ),
               const Divider(height: 24),
-              Text(l.confirmRescue(s.rescue && s.rescueUsable ? l.wordInstall : l.wordNoInstall), style: tt.bodyLarge),
               if (s.usbRelease case final rel? when rel.version.isNotEmpty) Text(l.confirmVersion(rel.version), style: tt.bodyLarge),
             ]),
           ),
@@ -501,7 +488,6 @@ class DonePage extends StatelessWidget {
             const SizedBox(height: 16),
             Text(l.doneNoteLoaderVar(n['value']), style: tt.bodyLarge!.copyWith(color: context.cs.error)),
           ],
-          if (s.rescue && s.rescueUsable) ...[const SizedBox(height: 16), Text(l.doneRescue, style: tt.bodyLarge)],
         ]),
       ),
     );

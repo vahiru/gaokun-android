@@ -152,7 +152,6 @@ void main() {
     test('发布目录（安装介质上的系统文件）', () async {
       final rel = Release((await b('blank').run('gk3_release_info')).first('RELEASE')!);
       expect(rel.installable, isTrue);
-      expect(rel.rescue, isTrue);
       expect(rel.version, startsWith('crDroidAndroid-16.0'));
       final none = Release((await b('blank', {'gk3_release_info': 'release_info-none.txt'}).run('gk3_release_info')).first('RELEASE')!);
       expect(none.installable, isFalse);

@@ -537,6 +537,16 @@ OUT=$(GK3_MACHINE_ID=$OTHER gk3_apply --disk "$DA" --mode reinstall --rescue yes
     && ok "ESP 放得下但装完只剩约 27 MiB：OTA 的门槛过不了，同样动盘之前拒绝" \
     || { bad "OTA 余量没拦住（rc=${rc}）"; printf '%s\n' "$OUT" | tail -3 | sed 's/^/      /'; }
 mount "$ESPA" "$mk" && rm -f "$mk/filler.bin" && umount "$mk"
+# 以前装过救援系统的机器重新安装、这次不装救援：旧的救援启动项与 rescue/ 要删掉（留着的话菜单里那两项会用新内核配旧 initramfs）；
+# gk3rescue 分区本身不动
+gk3_apply --disk "$DA" --mode reinstall --rescue yes --release "$REL" --esp "$ESPA" >"$W/f5.log" 2>&1
+mount -o ro "$ESPA" "$mk"; HAD=no; [ -e "$mk/loader/entries/$MID-rescue.conf" ] && [ -d "$mk/$MID/rescue" ] && HAD=yes; umount "$mk"
+gk3_apply --disk "$DA" --mode reinstall --rescue no --release "$REL" --esp "$ESPA" >"$W/f6.log" 2>&1; rc=$?
+mount -o ro "$ESPA" "$mk"
+[ "$rc" = 0 ] && [ "$HAD" = yes ] && [ ! -e "$mk/loader/entries/$MID-rescue.conf" ] && [ ! -e "$mk/loader/entries/$MID-rescue-b.conf" ] \
+    && [ ! -e "$mk/$MID/rescue" ] && [ -e "$mk/loader/entries/$MID-android-a.conf" ] && [ -n "$(gk3__bylabel "$DA" gk3rescue 2>/dev/null)" ] \
+    && ok "重新安装不装救援：旧的救援启动项与 rescue/ 删掉了，gk3rescue 分区还在" || { bad "旧的救援启动项没清掉（rc=${rc} had=${HAD}）"; tail -3 "$W/f6.log"; }
+umount "$mk"
 # ★ 真机的布局（2026-09-25 从设备的 sysfs 读的，按比例缩小）：misc 只有 1007 KiB、从第 34 扇区起
 #   （GPT 表之后那段空隙）；没有 gk3rescue；安装器从 p3（ubunturescue）上跑。第一版的方案按 MiB 比，
 #   把 misc 判成 0 MiB"太小"，重新安装在真机上整个走不通 —— 离线的测试盘都是我们自己的 4 MiB 布局，没抓到。

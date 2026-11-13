@@ -43,7 +43,7 @@ void main() {
     await see(t, find.text(l.doneTitle));
     final a = rec.last('gk3_apply')!.join(' ');
     expect(a, contains('--mode alongside'));
-    expect(a, contains('--rescue yes'));
+    expect(a, contains('--rescue no'));
     expect(a, contains('--region-start 790497280 --region-end 958269439'));
     expect(a, contains('--esp /dev/nvme0n1p1'));
     expect(a, contains('--release /media/gk3/gaokun3/payload'));
@@ -121,8 +121,8 @@ void main() {
     await tap(t, find.text(l.btnStart));
     await tap(t, find.textContaining('/dev/nvme0n1'));
     await next(t);
-    // 21668 MiB = 21.2 GiB —— 来自 gk3_plan 的 PLANERR need_mib，不是界面写死的
-    await see(t, find.text(l.modeWhyNoFree(fmtMib(21668))));
+    // 来自 gk3_plan 的 PLANERR need_mib（不装救援系统），不是界面写死的
+    await see(t, find.text(l.modeWhyNoFree(fmtMib(20644))));
     expect(find.text(l.modeAlongOk), findsNothing);
   });
 
@@ -204,7 +204,7 @@ void main() {
     await passRisk(t);
     await see(t, find.text(l.confirmReinstallHead));
     await see(t, find.text(l.actFormat), findsNWidgets(2));   // userdata、metadata
-    await see(t, find.text(l.actWrite), findsNWidgets(5));    // misc、boot_a、boot_b、super、gk3rescue
+    await see(t, find.text(l.actWrite), findsNWidgets(4));    // misc、boot_a、boot_b、super（不再重写 gk3rescue）
     await hold(t, l.confirmHoldIdle);
     await see(t, find.text(l.doneTitle));
     final a = rec.last('gk3_apply')!.join(' ');
@@ -477,7 +477,7 @@ void main() {
     expect(find.text(l.checkBlocked), findsNothing);
   });
 
-  testWidgets('免 U 盘（安装器在内置盘上）：默认不另装救援、写明为什么；完成页不叫人"移除安装介质"（GUI-17）', (t) async {
+  testWidgets('免 U 盘（安装器在内置盘上）：完成页不叫人"移除安装介质"（GUI-17）', (t) async {
     final rec = await pumpApp(t, 'windows-live');
     await tap(t, find.text(l.btnStart));
     await tap(t, find.textContaining('/dev/nvme0n1'));
@@ -485,10 +485,8 @@ void main() {
     await tap(t, find.text(l.modeAlongTitle));
     await next(t);
     await see(t, find.text(l.optsTitle));
-    await see(t, find.text(l.optsRescueSameDisk));
     await next(t);
     await passRisk(t);
-    await see(t, find.text(l.confirmRescue(l.wordNoInstall)));
     await hold(t, l.confirmHoldIdle);
     await see(t, find.text(l.doneTitle));
     await see(t, find.text(l.doneBodyInternal));
@@ -496,19 +494,18 @@ void main() {
     expect(rec.last('gk3_apply')!.join(' '), contains('--rescue no'));
   });
 
-  testWidgets('从 U 盘装：完成页照旧提示移除介质、救援默认装', (t) async {
+  testWidgets('从 U 盘装：完成页照旧提示移除介质；不装救援系统', (t) async {
     final rec = await pumpApp(t, 'blank');
     await tap(t, find.text(l.btnStart));
     await tap(t, find.textContaining('/dev/nvme0n1'));
     await next(t);
     await tap(t, find.text(l.modeWipeTitle));
     await next(t);
-    expect(find.text(l.optsRescueSameDisk), findsNothing);
     await next(t);
     await passRisk(t);
     await hold(t, l.confirmHoldIdle);
     await see(t, find.text(l.doneBody));
-    expect(rec.last('gk3_apply')!.join(' '), contains('--rescue yes'));
+    expect(rec.last('gk3_apply')!.join(' '), contains('--rescue no'));
   });
 
   testWidgets('整盘清空出厂盘：确认页标明 Onekey 是华为一键恢复分区、删掉的后果（GUI-18）', (t) async {
