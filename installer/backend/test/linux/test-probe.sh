@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# gk3l 的只读命令（probe / plan / preflight）在 loop 盘上的测试：与 shell 版 gk3_probe / gk3_plan 逐项比对，
-# 再单独检查 shell 版没有的部分（table= 的细分、4Kn 盘、内核分区视图过期、读盘出错、介质、预检）。
+# gk3l 的只读命令（probe / plan / preflight）在 loop 盘上的测试：probe 的每个字段由 check_probe.py 对照 sgdisk、
+# blkid 与 sysfs 检查，方案按 plan.h 的规矩检查；另测 table= 的细分、4Kn 盘、内核分区视图过期、读盘出错、介质、预检。
 #
 #   bash scripts/live/test-in-container.sh installer/backend/test/linux/test-probe.sh
 #
@@ -10,8 +10,7 @@ set -u
 cd "$(dirname "$0")/../../../.."
 [ "$(id -u)" = 0 ] || { echo "要 root（用 scripts/live/test-in-container.sh 跑）"; exit 2; }
 export GK3_ALLOW_LOOP=1
-LIB=scripts/live/installer-lib.sh
-CMP="python3 -I installer/backend/test/linux/cmp_probe.py"
+CHK="python3 -I installer/backend/test/linux/check_probe.py"
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS+1)); echo "  ✓ $*"; }
 bad() { FAIL=$((FAIL+1)); echo "  ✗ $*"; }
@@ -41,34 +40,33 @@ ok "ASan 版与静态版都编出来了"
 new_disk() { truncate -s "$2" "$W/$1.img"; losetup -fP --show ${3:+--sector-size "$3"} "$W/$1.img"; }
 settle() { partprobe "$1" 2>/dev/null; udevadm settle 2>/dev/null; sleep 1; }
 
-# 两边各探测一次，比较指定的盘。参数：标签 盘=期望的table…
-DISKS=()
-compare() {
+# 探测一次，检查指定的盘。参数：标签 盘=期望的table…
+check() {
     local label=$1; shift
     "$G" probe >"$W/lx.out" 2>"$W/lx.err"; echo $? >"$W/lx.rc"
-    /bin/bash -c '. "$0" && gk3_probe' "$LIB" >"$W/sh.out" 2>"$W/sh.err"
     if grep -q 'ERROR: \(Address\|Undefined\)Sanitizer\|runtime error' "$W/lx.err"; then
         bad "$label：sanitizer 报错"; sed -n 1,20p "$W/lx.err"; return
     fi
-    if $CMP probe "$W/lx.out" "$W/sh.out" "$@" >"$W/cmp.txt"; then ok "$label"
-    else bad "$label"; cat "$W/cmp.txt"; fi
+    if $CHK probe "$W/lx.out" "$@" >"$W/chk.txt"; then ok "$label"
+    else bad "$label"; cat "$W/chk.txt"; fi
 }
 
-# 每段空闲区：gk3l plan 与 gk3_plan --mode alongside 比（带 / 不带 /data 大小）
-compare_plans() {
+# 每段空闲区，外加一段太小的：gk3l plan 按方案的规矩检查（不给 /data 大小、刚好下限、低于下限、超过能给的）
+check_plans() {
     local label=$1 disk=$2 sector=$3 line rs re n=0 ud
     while read -r line; do
         rs=$(printf '%s\n' "$line" | tr ' ' '\n' | sed -n 's/^start=//p')
         re=$(printf '%s\n' "$line" | tr ' ' '\n' | sed -n 's/^end=//p')
-        for ud in "" 8192 8191 99999999; do
-            "$G" plan --sector "$sector" --region-start "$rs" --region-end "$re" --disk "$disk" ${ud:+--userdata-mib $ud} >"$W/pl.out" 2>/dev/null
-            /bin/bash -c '. "$0" && gk3_plan "$@"' "$LIB" --disk "$disk" --mode alongside --rescue no \
-                --region-start "$rs" --region-end "$re" --esp x ${ud:+--userdata-mib $ud} >"$W/ps.out" 2>/dev/null
-            if $CMP plan "$W/pl.out" "$W/ps.out" >"$W/cmp.txt"; then n=$((n+1))
-            else bad "$label：方案 $rs-$re ud=${ud:-全部}"; cat "$W/cmp.txt"; fi
+        for r in "$rs $re" "$rs $((rs + 20000 * 2048))"; do
+            set -- $r
+            for ud in "" 8192 8191 99999999; do
+                "$G" plan --sector "$sector" --region-start "$1" --region-end "$2" --disk "$disk" ${ud:+--userdata-mib $ud} >"$W/pl.out" 2>/dev/null
+                if $CHK plan "$W/pl.out" "$1" "$2" "$sector" "$ud" >"$W/chk.txt"; then n=$((n+1))
+                else bad "$label：方案 $1-$2 ud=${ud:-全部}"; cat "$W/chk.txt"; fi
+            done
         done
     done < <(grep "^FREE disk=$disk " "$W/lx.out")
-    ok "$label：$n 个方案与 shell 版一致"
+    [ "$n" -gt 0 ] && ok "$label：$n 个方案都合乎规矩" || bad "$label：没有可查的空闲区"
 }
 
 field() { printf '%s\n' "$1" | tr ' ' '\n' | sed -n "s/^$2=//p" | head -1; }
@@ -92,7 +90,7 @@ dd if=/dev/zero of="$D3P" bs=512 seek=$(( 3 * 1024 * 2048 - 33 )) count=33 conv=
 # 整盘格式化的 U 盘（没有分区表，LBA 0 就是 FAT 的引导扇区）
 D3F=$(new_disk superfloppy 2G); mkfs.vfat -F 32 -I "$D3F" >/dev/null 2>&1
 settle "$D1"
-compare "各种分区表" "$D1=raw" "$D2=damaged" "$D2C=damaged" "$D3=mbr" "$D3Z=mbr" "$D3H=gpt" "$D3P=damaged" "$D3F=raw"
+check "各种分区表" "$D1=raw" "$D2=damaged" "$D2C=damaged" "$D3=mbr" "$D3Z=mbr" "$D3H=gpt" "$D3P=damaged" "$D3F=raw"
 [ "$(field "$(disk_line "$D2")" why)" = magic ] && [ "$(field "$(disk_line "$D2C")" why)" = crc ] \
     && [ "$(field "$(disk_line "$D3P")" why)" = magic ] && ok "坏的 GPT：why=magic / crc" \
     || bad "坏的 GPT 的 why：$(disk_line "$D2") / $(disk_line "$D2C") / $(disk_line "$D3P")"
@@ -113,9 +111,7 @@ sgdisk -n 8:$S:+12G -t 8:8300 -c 8:"super x" "$D4" >/dev/null 2>&1
 settle "$D4"
 mkfs.vfat -F 32 "${D4}p3" >/dev/null 2>&1; mkfs.ext4 -q -F -L "lab el%" "${D4}p1"
 mkfs.ext4 -q -F -L "$(printf '\xcf\xb5\xcd\xb3 \xc5\xcc')" "${D4}p5"
-compare "怪名字" "$D4=gpt"
-# 方案不在这块盘上比：shell 版的 gk3_plan 按空格切分区名查重名（"super x" 算撞了 super），gk3l plan 不读盘，
-# 重名由写盘入口按完整的名字查
+check "怪名字" "$D4=gpt"
 
 echo "═══ 3. 一套装好的 Android（真机那种 34 扇区起的 misc）、带 Windows 的盘 ═══"
 D5=$(new_disk android 30G)
@@ -128,8 +124,8 @@ sgdisk -o -n 1:2048:+300M -t 1:ef00 -c 1:"EFI system partition" -n 2:0:+16M -t 2
        -n 3:0:+30G -t 3:0700 -c 3:"Basic data partition" -n 4:0:+1G -t 4:2700 -c 4:"Basic data partition" "$D6" >/dev/null 2>&1
 settle "$D6"; mkfs.vfat -F 32 -n SYSTEM "${D6}p1" >/dev/null; mkntfs -Q -F -L Windows "${D6}p3" >/dev/null 2>&1
 mkntfs -Q -F -L "Windows RE tools" "${D6}p4" >/dev/null 2>&1
-compare "Android 与 Windows" "$D5=gpt" "$D6=gpt"
-compare_plans "Windows 盘" "$D6" 512
+check "Android 与 Windows" "$D5=gpt" "$D6=gpt"
+check_plans "Windows 盘" "$D6" 512
 L=$(disk_line "$D6")
 [ "$(field "$L" kernel)" = ok ] && [ "$(field "$L" bus)" = loop ] && [ "$(field "$L" sector)" = 512 ] \
     && ok "DISK kernel=ok bus=loop sector=512" || bad "DISK 字段：$L"
@@ -142,7 +138,7 @@ echo "═══ 4. 4Kn 盘 ═══"
 D7=$(new_disk k4 64G 4096)
 sgdisk -o -n 1:256:+300M -t 1:ef00 -c 1:esp -n 2:0:+16G -t 2:0700 -c 2:win "$D7" >/dev/null 2>&1; settle "$D7"
 mkfs.vfat -F 32 -S 4096 "${D7}p1" >/dev/null 2>&1
-compare "4Kn 盘（不比 size）" "$D7=gpt"
+check "4Kn 盘" "$D7=gpt"
 L=$(disk_line "$D7"); P=$(grep "^PART path=${D7}p2 " "$W/lx.out"); F=$(grep "^FREE disk=$D7 " "$W/lx.out")
 LAST=$(sgdisk -p "$D7" | sed -n 's/.*last usable sector is \([0-9]*\).*/\1/p')
 P2END=$(sgdisk -i 2 "$D7" | awk '/^Last sector:/{print $3}')
@@ -167,7 +163,7 @@ blockdev --rereadpt "$D6"; settle "$D6"
 
 echo "═══ 6. 安装介质在这块盘上（/media/gk3 挂着它的一个分区）═══"
 mkdir -p /media/gk3 && mount "${D4}p3" /media/gk3
-compare "介质在怪名字盘上" "$D4=gpt" "$D6=gpt"
+check "介质在怪名字盘上" "$D4=gpt" "$D6=gpt"
 [ "$(field "$(disk_line "$D4")" medium)" = yes ] && [ "$(field "$(grep "^PART path=${D4}p3 " "$W/lx.out")" medium)" = yes ] \
     && [ "$(field "$(disk_line "$D6")" medium)" = no ] && ok "介质盘与介质分区标出来了" || bad "介质：$(disk_line "$D4")"
 umount /media/gk3
@@ -185,7 +181,8 @@ if command -v dmsetup >/dev/null; then
         && ! grep -q "disk=$EL " <(grep -E '^(PART|FREE) ' "$W/lx.out") \
         && [ "$(field "$(disk_line "$D6")" table)" = gpt ] \
         && ok "读不出：table=unreadable + ERR disk-unreadable、不列分区，别的盘照常，退出码 1" || { bad "读不出：rc=$rc $L"; cat "$W/lx.err"; }
-    losetup -d "$EL"; dmsetup remove --noudevsync gk3l-eio
+    losetup -d "$EL"; EL=""
+    for i in 1 2 3 4 5 6 7 8 9 10; do dmsetup remove --noudevsync gk3l-eio 2>/dev/null && break; sleep 0.5; done
 else
     bad "容器里没有 dmsetup（test-env.Dockerfile）"
 fi
