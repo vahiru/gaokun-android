@@ -7,8 +7,8 @@ cross the full tap radius while lift-off centroid drift stays locked:
 - Unlock immediately once a single-frame step exceeds track_tap_speed (default
   15 units, ~1.5 mm) after the contact has settled.
 - When contact signal drops below track_tap_fall% (default 50%) of the track's
-  peak signal during lift-off, require exceeding track_tap_hard (default 30
-  units, ~3 mm) before unlocking.
+  peak signal during lift-off, require exceeding track_tap_hard (default 22
+  units, ~2.3 mm) before unlocking.
 - Snap the One Euro filter state to the current contact position and velocity
   on tap-lock release (track_tap_snap, default 1) and raise default
   track_filter_beta from 15 to 30.
@@ -43,7 +43,7 @@ index 17f8ad0..9d9e118 100644
  	&dev_attr_track_filter_beta.attr,
  	&dev_attr_track_filter_dcutoff.attr,
 diff --git a/drivers/input/touchscreen/hx-algo.c b/drivers/input/touchscreen/hx-algo.c
-index 17fe45d..f752112 100644
+index 17fe45d..0bd19a6 100644
 --- a/drivers/input/touchscreen/hx-algo.c
 +++ b/drivers/input/touchscreen/hx-algo.c
 @@ -93,8 +93,12 @@ void hx_algo_init_defaults(struct hx_algo *algo)
@@ -51,7 +51,7 @@ index 17fe45d..f752112 100644
  	algo->track_jump_dist2     = 0;  /* disabled by default */
  	algo->track_tap_radius     = 20;   /* ~2 mm */
 +	algo->track_tap_speed      = 15;   /* ~1.5 mm in one frame */
-+	algo->track_tap_hard       = 30;
++	algo->track_tap_hard       = 22;   /* ~2.3 mm */
 +	algo->track_tap_fall       = 50;
 +	algo->track_tap_snap       = true;
  	algo->track_filter_mincutoff = 1000;  /* 1 Hz at rest */
