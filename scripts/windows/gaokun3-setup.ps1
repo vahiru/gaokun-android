@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   gaokun3（华为 MateBook E Go）免 U 盘安装：在 Windows 里把 Android 安装器放上内置盘，下次开机进安装器。
   gaokun3 USB-free install: put the Android installer on the internal disk from Windows; the next boot starts it.
