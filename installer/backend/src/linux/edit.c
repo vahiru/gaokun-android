@@ -104,7 +104,13 @@ int gk3l_cmd_delete(int argc, char **argv)
     gk3w_progress(10, "gpt-backup");
     if (gk3l_gpt_backup(&d, gk3l_arg(argc, argv, "--backup-dir"), "delete", d.g.first_usable, d.blocks - (d.g.last_usable + 1)))
         goto out;
-    gk3w_progress(50, "part-delete");
+    {
+        /* 界面按 part= 说"正在删除 …" */
+        char enc[400];
+        gk3w_enc(part, enc, sizeof enc);
+        fprintf(stderr, "PROGRESS 50 part-delete part=%s\n", enc);
+        fflush(stderr);
+    }
     if (gk3w_gpt_remove(d.hdr, d.bs, d.ent, (size_t)d.g.num_entries * d.g.entry_size, (uint32_t)idx) != GK3W_GPTW_OK) {
         gk3l_err(T, "gpt-layout", "internal error: cannot remove the entry from the partition table (disk not touched)", 0);
         goto out;

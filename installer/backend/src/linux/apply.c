@@ -209,6 +209,7 @@ static int check_ext4(const gk3l_disk *d, uint64_t off, const char *label, uint8
 
 typedef struct {
     char dir[256];              /* 挂载点 */
+    char dev[96];               /* 分区节点（ERR 的 esp=） */
     char mid[33];
     int windows;                /* EFI/Microsoft/Boot/bootmgfw.efi 在 */
 } esp_ctx;
@@ -288,11 +289,11 @@ static int esp_put(esp_log *lg, const char *rel, const uint8_t *data, size_t len
     if (slash) {
         *slash = 0;
         if ((err = gk3l_mkdirs(dir)))
-            return gk3l_err_kv(GK3W_TOUCHED_YES, "esp-write", "file", rel, "cannot create a directory on the EFI system partition", err);
+            return gk3l_err_kv2(GK3W_TOUCHED_YES, "esp-write", "esp", lg->e->dev, "file", rel, "cannot create a directory on the EFI system partition", err);
     }
     err = renamed ? gk3l_replace_file(p, data, len) : gk3l_write_file(p, data, len);
     if (err)
-        return gk3l_err_kv(GK3W_TOUCHED_YES, "esp-write", "file", rel, "writing the EFI system partition failed: out of space, or a media error", err);
+        return gk3l_err_kv2(GK3W_TOUCHED_YES, "esp-write", "esp", lg->e->dev, "file", rel, "writing the EFI system partition failed: out of space, or a media error", err);
     if (lg->n < MAX_WRITTEN) {
         snprintf(lg->w[lg->n].rel, sizeof lg->w[lg->n].rel, "%s", rel);
         lg->w[lg->n].data = data;
@@ -355,7 +356,7 @@ static int esp_cleanup(const esp_ctx *e)
                 if (rename(p, q)) {
                     err = errno;
                     closedir(d);
-                    return gk3l_err_kv(GK3W_TOUCHED_YES, "esp-write", "file", n, "cannot disable a boot entry of another directory", err);
+                    return gk3l_err_kv2(GK3W_TOUCHED_YES, "esp-write", "esp", e->dev, "file", n, "cannot disable a boot entry of another directory", err);
                 }
                 gk3l_log("disabled the boot entry of another directory %s -> %s.disabled (the default wildcard would match it too)", n, n);
             } else if ((!strncmp(n, "gk3boot-android-", 16) || !strncmp(n, "gk3prev-android-", 16) || !strcmp(n, "gk3boot-tools.conf")) &&
@@ -363,14 +364,14 @@ static int esp_cleanup(const esp_ctx *e)
                 if (unlink(p)) {
                     err = errno;
                     closedir(d);
-                    return gk3l_err_kv(GK3W_TOUCHED_YES, "esp-write", "file", n, "cannot delete an old boot entry", err);
+                    return gk3l_err_kv2(GK3W_TOUCHED_YES, "esp-write", "esp", e->dev, "file", n, "cannot delete an old boot entry", err);
                 }
                 gn++;
             } else if (!strncmp(n, e->mid, 32) && (!strcmp(n + 32, "-rescue.conf") || !strcmp(n + 32, "-rescue-b.conf"))) {
                 if (unlink(p)) {
                     err = errno;
                     closedir(d);
-                    return gk3l_err_kv(GK3W_TOUCHED_YES, "esp-write", "file", n, "cannot delete an old rescue boot entry", err);
+                    return gk3l_err_kv2(GK3W_TOUCHED_YES, "esp-write", "esp", e->dev, "file", n, "cannot delete an old rescue boot entry", err);
                 }
                 gk3l_log("deleted the old rescue boot entry %s", n);
             }
@@ -379,7 +380,7 @@ static int esp_cleanup(const esp_ctx *e)
     }
     snprintf(p, sizeof p, "%s/%s/rescue", e->dir, e->mid);
     if (gk3l_is_dir(p) && (err = gk3l_rm_rf(p)))
-        return gk3l_err_kv(GK3W_TOUCHED_YES, "esp-write", "file", "rescue", "cannot delete the old rescue directory", err);
+        return gk3l_err_kv2(GK3W_TOUCHED_YES, "esp-write", "esp", e->dev, "file", "rescue", "cannot delete the old rescue directory", err);
     esp_path(e, "EFI/gk3boot", p, sizeof p);
     d = opendir(p);
     if (d) {
@@ -416,7 +417,7 @@ static int esp_cleanup(const esp_ctx *e)
                 continue;
             if ((err = gk3l_rm_rf(vd))) {
                 closedir(d);
-                return gk3l_err_kv(GK3W_TOUCHED_YES, "esp-write", "file", de->d_name, "cannot delete an old boot manager directory", err);
+                return gk3l_err_kv2(GK3W_TOUCHED_YES, "esp-write", "esp", e->dev, "file", de->d_name, "cannot delete an old boot manager directory", err);
             }
             gn++;
         }
@@ -594,15 +595,16 @@ static int esp_check(apply_ctx *c)
         const gk3l_kpart *k = gk3l_kernel_find(d->kp, d->nk, esp_idx);
         char where[4096];
         snprintf(c->esp_dev, sizeof c->esp_dev, "/dev/%s", k ? k->name : "");
+        snprintf(c->esp.dev, sizeof c->esp.dev, "%s", c->esp_dev);
         /* 别处挂着的 ESP：只读挂不上（同一个超级块不能一处读写一处只读），别人还可能正在往里写 —— 先卸下再装 */
         if (k && !gk3l_mount_of(k->devno, where, sizeof where))
             return gk3l_err_kv(c->T, "esp-busy", "mnt", where, "the EFI system partition is mounted; unmount it first (disk not touched)", 0), -1;
     }
     gk3l_blkid(c->esp_dev, fs, sizeof fs, label, sizeof label);
     if (strcmp(fs, "vfat"))
-        return gk3l_err_kv(c->T, "esp-not-fat", "fs", fs, "the EFI system partition is not FAT (disk not touched)", 0), -1;
+        return gk3l_err_kv2(c->T, "esp-not-fat", "esp", c->esp_dev, "fs", fs, "the EFI system partition is not FAT (disk not touched)", 0), -1;
     if ((err = gk3l_mount_tmp(c->esp_dev, "vfat", 1, c->esp.dir, sizeof c->esp.dir)))
-        return gk3l_err(c->T, "esp-mount", "cannot mount the EFI system partition; refusing to install a boot chain on an unreadable ESP (disk not touched)", err), -1;
+        return gk3l_err_kv(c->T, "esp-mount", "esp", c->esp_dev, "cannot mount the EFI system partition; refusing to install a boot chain on an unreadable ESP (disk not touched)", err), -1;
     c->esp_mounted = 1;
     {
         char pb[4096];
@@ -624,7 +626,7 @@ static int esp_check(apply_ctx *c)
             esp_path(&c->esp, rels[j], pth, sizeof pth);
             if (gk3l_exists(pth) && (err = gk3l_read_file(pth, &b[j], &bl[j], 64u << 20))) {
                 free(b[0]), free(b[1]), free(b[2]);
-                return gk3l_err_kv(c->T, "esp-unreadable", "file", rels[j], "cannot read a file on the EFI system partition that must be checked or backed up first (disk not touched)", err), -1;
+                return gk3l_err_kv2(c->T, "esp-unreadable", "esp", c->esp_dev, "file", rels[j], "cannot read a file on the EFI system partition that must be checked or backed up first (disk not touched)", err), -1;
             }
         }
         c->aa_change = !(b[0] && bl[0] == c->sdboot_len && !memcmp(b[0], c->sdboot, c->sdboot_len));
@@ -645,7 +647,7 @@ static int esp_check(apply_ctx *c)
         esp_path(&c->esp, "loader/loader.conf", pth, sizeof pth);
         if (esp_size_of(&c->esp, "loader/loader.conf.before-gaokun3") < 0 && gk3l_exists(pth)) {
             if ((err = gk3l_read_file(pth, &c->orig[1], &c->orig_len[1], 64u << 20)))
-                return gk3l_err_kv(c->T, "esp-unreadable", "file", "loader/loader.conf", "cannot read a file on the EFI system partition that must be backed up first (disk not touched)", err), -1;
+                return gk3l_err_kv2(c->T, "esp-unreadable", "esp", c->esp_dev, "file", "loader/loader.conf", "cannot read a file on the EFI system partition that must be backed up first (disk not touched)", err), -1;
             if (c->orig_len[1] == c->sdboot_len && !memcmp(c->orig[1], c->sdboot, c->sdboot_len)) {
                 free(c->orig[1]);
                 c->orig[1] = NULL;
@@ -673,7 +675,7 @@ static int esp_check(apply_ctx *c)
         if (aa >= 0 && c->aa_change)
             need += aa / 1024 + 4;
         if (statvfs(c->esp.dir, &sv))
-            return gk3l_err(c->T, "esp-mount", "cannot read the free space of the EFI system partition (disk not touched)", errno), -1;
+            return gk3l_err_kv(c->T, "esp-mount", "esp", c->esp_dev, "cannot read the free space of the EFI system partition (disk not touched)", errno), -1;
         sp.esp_size_mib = c->esp_bytes >> 20;
         sp.free_kib = (int64_t)((uint64_t)sv.f_bavail * sv.f_frsize / 1024);
         sp.need_kib = need;
@@ -720,7 +722,7 @@ static int esp_check(apply_ctx *c)
     }
     /* 卸不下来的话，后面写 ESP 时就挂不上可写的（那时盘已经写过了）：在这里就停 */
     if ((err = gk3l_umount_tmp(c->esp.dir)))
-        return gk3l_err(c->T, "esp-umount", "cannot unmount the EFI system partition after checking it (disk not touched)", err), -1;
+        return gk3l_err_kv(c->T, "esp-umount", "esp", c->esp_dev, "cannot unmount the EFI system partition after checking it (disk not touched)", err), -1;
     c->esp_mounted = 0;
     if (c->esp.windows) {
         gk3l_win w;
@@ -1053,13 +1055,13 @@ static int write_parts(apply_ctx *c)
         gk3_setdef def = c->esp.windows ? (c->defos_windows ? GK3_SETDEF_WINDOWS : GK3_SETDEF_ANDROID) : GK3_SETDEF_NONE;
         char hex[GK3_MISC_BCAB_SIZE * 2 + 1];
         if (gk3_misc_build_install(head, recb, 0, def))
-            return gk3l_err(c->T, "misc-init", "internal error: the misc initial state failed its self-check", 0), -1;
+            return gk3l_err_kv(c->T, "misc-init", "dev", c->t[T_MISC].node, "internal error: the misc initial state failed its self-check", 0), -1;
         /* 64 KiB：BCB + BCAB 在 0，GK3 记录在 8 KiB，其余是零 */
         memcpy(c->zero, head, sizeof head);
         memcpy(c->zero + GK3_MISC_GK3_OFF, recb, sizeof recb);
         w = gk3l_write_verify(d, c->zero, GK3_MISC_READ_SIZE, c->t[T_MISC].off, c->chk);
         if (w)
-            return gk3l_err(c->T, "misc-init", "writing the misc initial state failed", errno), -1;
+            return gk3l_err_kv(c->T, "misc-init", "dev", c->t[T_MISC].node, "writing the misc initial state failed", errno), -1;
         for (unsigned k = 0; k < GK3_MISC_BCAB_SIZE; k++)
             snprintf(hex + 2 * k, 3, "%02x", head[GK3_MISC_BCAB_OFF + k]);
         gk3l_log("misc: MISCINIT slot=a default=%s bcab=%s", def == GK3_SETDEF_WINDOWS ? "windows" : def == GK3_SETDEF_ANDROID ? "android" : "none", hex);
@@ -1142,10 +1144,11 @@ static int write_esp(apply_ctx *c)
     elog.e = &c->esp;
     if (c->mode == M_WIPE) {
         snprintf(c->esp_dev, sizeof c->esp_dev, "%s", c->t[T_ESP].node);
+        snprintf(c->esp.dev, sizeof c->esp.dev, "%s", c->esp_dev);
         memcpy(c->esp.mid, c->mid_fb, 33);   /* 新格式化的 ESP：没有现成目录 */
     }
     if ((err = gk3l_mount_tmp(c->esp_dev, "vfat", 0, c->esp.dir, sizeof c->esp.dir)))
-        return gk3l_err(c->T, "esp-mount", "cannot mount the EFI system partition for writing", err), -1;
+        return gk3l_err_kv(c->T, "esp-mount", "esp", c->esp_dev, "cannot mount the EFI system partition for writing", err), -1;
     c->esp_mounted = 1;
     if (esp_cleanup(&c->esp))
         return -1;
@@ -1176,7 +1179,7 @@ static int write_esp(apply_ctx *c)
         snprintf(relp, sizeof relp, "loader/entries/%s-android-%c.conf", c->esp.mid, sl);
         n = gk3w_esp_android_entry(entry[sl - 'a'], sizeof entry[0], c->esp.mid, sl, c->bi.cmdline);
         if (n < 0)
-            return gk3l_err(c->T, "esp-write", "internal error: cannot generate the boot entry", 0), -1;
+            return gk3l_err_kv(c->T, "esp-write", "esp", c->esp_dev, "internal error: cannot generate the boot entry", 0), -1;
         if (esp_put(&elog, relp, (const uint8_t *)entry[sl - 'a'], (size_t)n, 0))
             return -1;
     }
@@ -1184,16 +1187,16 @@ static int write_esp(apply_ctx *c)
         return -1;
     sync();
     if ((err = gk3l_umount_tmp(c->esp.dir)))
-        return gk3l_err(c->T, "esp-umount", "cannot unmount the EFI system partition; what was written may not be on the disk", err), -1;
+        return gk3l_err_kv(c->T, "esp-umount", "esp", c->esp_dev, "cannot unmount the EFI system partition; what was written may not be on the disk", err), -1;
     c->esp_mounted = 0;
     /* 从介质读回核对：丢掉这块设备的缓存，只读挂回去逐个比 */
     gk3l_flush_node(c->esp_dev);
     if ((err = gk3l_mount_tmp(c->esp_dev, "vfat", 1, c->esp.dir, sizeof c->esp.dir)))
-        return gk3l_err(c->T, "verify-remount", "cannot mount the EFI system partition again to verify it", err), -1;
+        return gk3l_err_kv(c->T, "verify-remount", "dev", c->esp_dev, "cannot mount the EFI system partition again to verify it", err), -1;
     c->esp_mounted = 1;
     for (size_t i = 0; i < elog.n; i++)
         if (!esp_same(&c->esp, elog.w[i].rel, elog.w[i].data, elog.w[i].len))
-            return gk3l_err_kv(c->T, "esp-verify", "file", elog.w[i].rel, "a file on the EFI system partition did not read back identically", 0), -1;
+            return gk3l_err_kv2(c->T, "esp-verify", "esp", c->esp_dev, "file", elog.w[i].rel, "a file on the EFI system partition did not read back identically", 0), -1;
     gk3l_umount_tmp(c->esp.dir);
     c->esp_mounted = 0;
     gk3l_log("ESP: systemd-boot, kernel / dtb / ramdisk for both slots, both entries and loader.conf written; %zu files read back from the disk and verified", elog.n);

@@ -56,6 +56,22 @@ int gk3l_err_kv(gk3w_touched t, const char *code, const char *k, const char *v, 
     return 1;
 }
 
+int gk3l_err_kv2(gk3w_touched t, const char *code, const char *k1, const char *v1, const char *k2, const char *v2, const char *human,
+                 int err)
+{
+    gk3w_line l = {0};
+    gk3w_line_begin(&l, "ERR");
+    gk3w_line_kv(&l, "code", code);
+    gk3w_line_kv(&l, k1, v1);
+    if (k2)
+        gk3w_line_kv(&l, k2, v2);
+    if (err > 0)
+        gk3w_line_u64(&l, "errno", (uint64_t)err);
+    gk3w_fail(&l, t, human);
+    gk3w_line_free(&l);
+    return 1;
+}
+
 int gk3l_err(gk3w_touched t, const char *code, const char *human, int err)
 {
     return gk3l_err_kv(t, code, NULL, NULL, human, err);

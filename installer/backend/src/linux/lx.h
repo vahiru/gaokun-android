@@ -20,6 +20,9 @@ int gk3l_arg_u64(int argc, char **argv, const char *key, uint64_t *out);
  * err 是 errno 的值，0 表示不带。 ── */
 int gk3l_err(gk3w_touched t, const char *code, const char *human, int err);
 int gk3l_err_kv(gk3w_touched t, const char *code, const char *k, const char *v, const char *human, int err);
+/* 带两个字段（k2 可为 NULL） */
+int gk3l_err_kv2(gk3w_touched t, const char *code, const char *k1, const char *v1, const char *k2, const char *v2, const char *human,
+                 int err);
 /* stderr 上给人看的日志行 */
 void gk3l_log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 

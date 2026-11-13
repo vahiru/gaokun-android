@@ -48,14 +48,16 @@ static void jobdir(char *out, size_t cap)
 static int put(const char *dir, const char *name, const char *text)
 {
     char p[4200];
-    snprintf(p, sizeof p, "%s/%s", dir, name);
+    if ((size_t)snprintf(p, sizeof p, "%s/%s", dir, name) >= sizeof p)
+        return ENAMETOOLONG;
     return gk3l_write_file(p, (const uint8_t *)text, strlen(text));
 }
 
 static int get(const char *dir, const char *name, char *out, size_t cap)
 {
     char p[4200];
-    snprintf(p, sizeof p, "%s/%s", dir, name);
+    if ((size_t)snprintf(p, sizeof p, "%s/%s", dir, name) >= sizeof p)
+        return -1;
     return gk3l_read_line(p, out, cap);
 }
 
@@ -70,11 +72,10 @@ static int which(const char *t, char *out, size_t cap)
     }
     snprintf(buf, sizeof buf, "%s", path && *path ? path : "/usr/sbin:/usr/bin:/sbin:/bin");
     for (char *d = strtok_r(buf, ":", &save); d; d = strtok_r(NULL, ":", &save)) {
-        snprintf(p, sizeof p, "%s/%s", d, t);
-        if (!access(p, X_OK)) {
-            snprintf(out, cap, "%s", p);
-            return 0;
-        }
+        if ((size_t)snprintf(p, sizeof p, "%s/%s", d, t) >= sizeof p)
+            continue;
+        if (!access(p, X_OK))
+            return (size_t)snprintf(out, cap, "%s", p) >= cap ? -1 : 0;
     }
     return -1;
 }
