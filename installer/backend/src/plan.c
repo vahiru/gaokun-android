@@ -31,7 +31,7 @@ static void add(gk3w_plan *p, const char *name, uint64_t mib, uint64_t *cur, uin
     *cur = e->last + 1;
 }
 
-gk3w_plan_err gk3w_plan_alongside(const gk3w_plan_req *r, gk3w_plan *out)
+static gk3w_plan_err plan_one(const gk3w_plan_req *r, gk3w_plan *out)
 {
     uint64_t per_mib, cur, avail, fixed, need, ud;
 
@@ -83,6 +83,55 @@ gk3w_plan_err gk3w_plan_alongside(const gk3w_plan_req *r, gk3w_plan *out)
     return GK3W_PLAN_OK;
 }
 
+gk3w_plan_err gk3w_plan_alongside(const gk3w_plan_req *r, gk3w_plan *out)
+{
+    gk3w_plan_req q;
+    gk3w_plan b;
+    gk3w_plan_err ea = GK3W_PLAN_EINVAL, eb = GK3W_PLAN_EINVAL;
+    if (!r->whole || !r->keep.last)
+        return plan_one(r, out);
+    memset(out, 0, sizeof *out);
+    /* 保留的分区必须整个落在区间里 */
+    if (r->keep.first > r->keep.last || r->keep.first < r->region.first || r->keep.last > r->region.last)
+        return GK3W_PLAN_EINVAL;
+    q = *r;
+    q.keep = (gk3w_span){0, 0};
+    memset(&b, 0, sizeof b);
+    if (r->keep.first > r->region.first) {
+        q.region = (gk3w_span){r->region.first, r->keep.first - 1};
+        if ((ea = plan_one(&q, out)) == GK3W_PLAN_OK)
+            return ea;
+    }
+    if (r->keep.last < r->region.last) {
+        q.region = (gk3w_span){r->keep.last + 1, r->region.last};
+        if ((eb = plan_one(&q, &b)) == GK3W_PLAN_OK) {
+            *out = b;
+            return eb;
+        }
+    }
+    /* 两段都放不下：报大的那一段（界面据此说"还差多少"） */
+    if (eb != GK3W_PLAN_EINVAL && (ea == GK3W_PLAN_EINVAL || b.avail_mib > out->avail_mib)) {
+        *out = b;
+        return eb;
+    }
+    return ea;
+}
+
+static void print_keep(const gk3w_plan_req *r, const char *disk, FILE *fp)
+{
+    gk3w_line l = {0};
+    uint64_t per_mib = (1u << 20) / r->sector;
+    gk3w_line_begin(&l, "PLAN");
+    gk3w_line_kv(&l, "op", "keep");
+    gk3w_line_kv(&l, "disk", disk);
+    gk3w_line_kv(&l, "name", r->keep_name ? r->keep_name : "");
+    gk3w_line_u64(&l, "start", r->keep.first);
+    gk3w_line_u64(&l, "end", r->keep.last);
+    gk3w_line_u64(&l, "size_mib", (r->keep.last - r->keep.first + 1) / per_mib);
+    (void)gk3w_line_emit(&l, fp);
+    gk3w_line_free(&l);
+}
+
 gk3w_plan_err gk3w_plan_print(const gk3w_plan_req *r, const char *disk, gk3w_plan *out, FILE *fp)
 {
     gk3w_plan_err pe = gk3w_plan_alongside(r, out);
@@ -109,6 +158,9 @@ gk3w_plan_err gk3w_plan_print(const gk3w_plan_req *r, const char *disk, gk3w_pla
         (void)gk3w_line_emit(&l, fp);
         gk3w_line_free(&l);
     }
+    /* 保留的分区按盘上的先后排进新分区的列表里 */
+    if (r->whole && r->keep.last && r->keep.last < out->parts[0].first)
+        print_keep(r, disk, fp);
     for (size_t i = 0; i < out->n; i++) {
         gk3w_line_begin(&l, "PLAN");
         gk3w_line_kv(&l, "op", "mkpart");
@@ -121,6 +173,8 @@ gk3w_plan_err gk3w_plan_print(const gk3w_plan_req *r, const char *disk, gk3w_pla
         (void)gk3w_line_emit(&l, fp);
         gk3w_line_free(&l);
     }
+    if (r->whole && r->keep.last && r->keep.first > out->parts[out->n - 1].last)
+        print_keep(r, disk, fp);
     gk3w_line_begin(&l, "PLANSUM");
     gk3w_line_kv(&l, "mode", r->whole ? "wipe" : "alongside");
     gk3w_line_u64(&l, "avail_mib", out->avail_mib);

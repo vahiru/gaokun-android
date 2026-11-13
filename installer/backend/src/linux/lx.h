@@ -41,11 +41,36 @@ int gk3l_run(char *const argv[], char *out, size_t cap);
 int gk3l_run_quiet(char *const argv[]);
 
 /* ── 盘 ── */
-/* 安装介质所在的分区（"主设备号:次设备号"，例如 "259:3"）；不是从安装介质启动的返回 -1。
- * 介质挂在 /media/gk3（initramfs-init），测试可用 GK3_MEDIUM_DIR 换挂载点。 */
-int gk3l_medium_devno(char *out, size_t cap);
 /* 设备（"主设备号:次设备号"）挂在哪里；没挂返回 -1 */
 int gk3l_mount_of(const char *devno, char *mnt, size_t cap);
+/* 反过来：dir 上挂的是哪个设备（同一处挂了几层时取最上层）；dir 不是挂载点返回 -1 */
+int gk3l_devno_at(const char *dir, char *out, size_t cap);
+
+/* ── 安装介质（medium.c）──
+ * initramfs-init 把介质记在 /run/gaokun3/medium（测试用 GK3_MEDIUM_FILE 换），每行一个 键=值：
+ *   part=nvme0n1p8 disk=nvme0n1 start=… size=…（sysfs 的 512 字节单位） ram=yes|no
+ * ram=yes：从内置盘启动，gaokun3/ 已读进内存，/media/gk3 是 tmpfs 上的副本，介质分区本身没有挂载（安装器分区，
+ * 可以整盘清空时保留、装完删掉）。没有记录（U 盘启动的旧 initramfs、测试）时按 /media/gk3 上挂的设备认，
+ * 测试可用 GK3_MEDIUM_DIR 换挂载点。 */
+/* 介质分区现在的 "主设备号:次设备号"（例如 "259:3"）；不是从安装介质启动的、或者介质分区已经删掉了，返回 -1 */
+int gk3l_medium_devno(char *out, size_t cap);
+/* 介质读进了内存 */
+int gk3l_medium_ram(void);
+/* 持久保存诊断文件（分区表备份、任务日志）的 gaokun3 目录：介质挂着时把 /media/gk3 改成可写；读进内存时临时挂上
+ * 介质分区；删掉安装器分区之后是 gk3l_persist_to_esp 给的 ESP。返回 0 并填 dir；没有这样的地方返回 -1。
+ * 成功后必须 gk3l_persist_close（同一时间只开一个） */
+int gk3l_persist_open(char *dir, size_t cap);
+void gk3l_persist_close(void);
+/* 介质读进了内存时，把内存副本里会变的文件（diag/、installer-lang、分区表备份）抄到持久的地方（diag/ 与 installer-lang
+ * 覆盖，分区表备份只补没有的）。返回 0；没有持久的地方或有文件没抄成返回 -1（介质不在内存里时什么都不做，返回 0） */
+int gk3l_persist_sync(void);
+/* 上面要抄的文件一共多大（字节） */
+uint64_t gk3l_persist_bytes(void);
+/* 删掉安装器分区之后，本进程的持久保存改去这个 ESP（分区节点）；NULL 改回介质 */
+void gk3l_persist_to_esp(const char *node);
+/* 删掉安装器分区之后，把那个 ESP（sysfs 的起点、大小）追加进介质记录（esp_start= esp_size=）：之后的进程（任务结束、
+ * 开机诊断）同样写到它上面 */
+void gk3l_medium_note_esp(uint64_t start512, uint64_t size512);
 
 /* ── 写盘之前的把关（sys.c）：机型（GK3_SKIP_MODEL_CHECK=1 放行，读不到只提醒）与电量。拒绝时已报 ERR（touched=no），返回 -1 ── */
 int gk3l_sys_gate(void);
@@ -57,6 +82,8 @@ int gk3l_cmd_restore_table(int argc, char **argv);
 int gk3l_cmd_esp_info(int argc, char **argv);
 int gk3l_cmd_release_info(int argc, char **argv);
 int gk3l_cmd_job(int argc, char **argv);
+int gk3l_cmd_remove_installer(int argc, char **argv);
+int gk3l_cmd_persist_sync(int argc, char **argv);
 int gk3l_cmd_log_targets(int argc, char **argv);
 int gk3l_cmd_save_logs(int argc, char **argv);
 /* 按 argv[0] 的命令名分派（main 与 job body 共用）；返回命令的退出码 */

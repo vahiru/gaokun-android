@@ -1,7 +1,9 @@
 /* 分区方案。算术与 scripts/live/installer-lib.sh 的 gk3_plan 相同：
  *   双系统：在用户选的一段空闲区里，起点向上对齐到 1 MiB，各分区按固定大小依次排，userdata 吃掉剩下的、排在最后
  *           （以后扩容不用挪任何东西）。
- *   整盘清空：区间是新分区表的整个 usable 区，最前面另放 300 MiB 的 ESP，其余同上。
+ *   整盘清空：区间是新分区表的整个 usable 区，最前面另放 300 MiB 的 ESP，其余同上。要原样保留一个分区（读进内存的
+ *           安装器分区 GK3LIVE）时，它把区间切成前后两段：先试前面那段（userdata 紧挨在它前面，以后删掉它就能并进
+ *           userdata），放不下再试后面那段。
  *   重新安装：不改分区表，按名字认出盘上现有的那一套，逐个决定写新系统、格式化还是保留。
  * 比 shell 版多做的：扇区大小显式给出（4Kn 盘不再按 512 算），算术全部防溢出，区间本身也要校验。 */
 #ifndef GK3W_PLAN_H
@@ -31,6 +33,8 @@ typedef struct {
     uint64_t userdata_mib;      /* 0 = 吃掉剩下的全部 */
     int rescue;                 /* 1 = 带救援分区 gk3rescue（Windows 原型不用） */
     int whole;                  /* 1 = 整盘清空：最前面另放 ESP（名字 esp，类型 EFI System） */
+    gk3w_span keep;             /* 整盘清空时原样保留的分区（含两端）；keep.last == 0 表示没有 */
+    const char *keep_name;      /* 它在 PLAN op=keep 行里的名字 */
 } gk3w_plan_req;
 
 typedef struct {
@@ -60,7 +64,8 @@ typedef enum {
 gk3w_plan_err gk3w_plan_alongside(const gk3w_plan_req *r, gk3w_plan *out);
 
 /* 算方案并按行协议打印到 fp：成功时每个分区一行 PLAN（op=mkpart disk name start end size_mib type=8300），
- * 再一行 PLANSUM（avail_mib fixed_mib userdata_mib）；失败时一行 PLANERR（msg avail_mib need_mib fixed_mib）。
+ * 保留的分区一行 PLAN op=keep（disk name start end size_mib，按盘上的先后排），再一行 PLANSUM（avail_mib fixed_mib
+ * userdata_mib）；失败时一行 PLANERR（msg avail_mib need_mib fixed_mib）。
  * apply 与 plan 命令共用这一份输出，界面只认这些行，自己不算分区。 */
 /* disk 是 PLAN 行里 disk= 的值：Windows 是磁盘号，Linux 是 /dev 下的路径。 */
 gk3w_plan_err gk3w_plan_print(const gk3w_plan_req *r, const char *disk, gk3w_plan *out, FILE *fp);

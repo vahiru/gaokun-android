@@ -53,6 +53,13 @@ gk3w_gptw_err gk3w_gpt_add(uint8_t *hdr, uint32_t bs, uint8_t *entries, size_t e
 /* 从主表删掉 idx 号（1 起）分区：表项清零，重算表项 CRC 与表头 CRC。没有这一项返回 GK3W_GPTW_RANGE，出错时什么都不改 */
 gk3w_gptw_err gk3w_gpt_remove(uint8_t *hdr, uint32_t bs, uint8_t *entries, size_t entries_len, uint32_t idx);
 
+/* 把一个现成的表项（盘上格式的 GK3W_GPT_ENTRY_SIZE 字节，例如从旧表抄来的）原样放进序号最小的空表项，*idx 返回序号；
+ * 类型不能为空，范围与重叠的检查同 gk3w_gpt_add。出错时什么都不改 */
+gk3w_gptw_err gk3w_gpt_put_raw(uint8_t *hdr, uint32_t bs, uint8_t *entries, size_t entries_len, const uint8_t *raw, uint32_t *idx);
+
+/* 改 idx 号分区的末尾：新末尾不小于起点、在 usable 区内、不与别的分区重叠。出错时什么都不改 */
+gk3w_gptw_err gk3w_gpt_set_last(uint8_t *hdr, uint32_t bs, uint8_t *entries, size_t entries_len, uint32_t idx, uint64_t last);
+
 /* 由主表头生成备份表头（一整块 bak_hdr，写到主表头的 alt_lba），*entries_lba 是备份表项的位置
  * （紧贴在备份表头之前，必须在 usable 区间之后）。备份表项与主表项逐字节相同。 */
 gk3w_gptw_err gk3w_gpt_make_backup(const uint8_t *hdr, uint32_t bs, uint8_t *bak_hdr, uint64_t *entries_lba);

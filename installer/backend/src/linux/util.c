@@ -238,16 +238,13 @@ int gk3l_mount_of(const char *devno, char *mnt_out, size_t cap)
     return found;
 }
 
-int gk3l_medium_devno(char *out, size_t cap)
+int gk3l_devno_at(const char *dir, char *out, size_t cap)
 {
-    const char *dir = getenv("GK3_MEDIUM_DIR");
     FILE *f;
     char *line = NULL;
     size_t lcap = 0;
     int found = -1;
 
-    if (!dir || !*dir)
-        dir = "/media/gk3";
     f = fopen("/proc/self/mountinfo", "re");
     if (!f)
         return -1;

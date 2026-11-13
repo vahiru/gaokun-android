@@ -103,21 +103,20 @@ static const char *job_state(const char *d)
     return gk3l_exists(p) ? "done" : "lost";   /* 进程刚好在这两步之间写完 */
 }
 
-/* 安装介质只读挂着就临时改成读写，写完改回去 */
+/* 任务的输出存一份到安装介质的 gaokun3/diag/。介质读进了内存时先写进内存副本，再连同其中别的日志一起写回介质分区
+ * （安装器分区删掉之后写到 ESP，见 lx.h 的 gk3l_persist_open）：以后删安装器分区时，内存副本里的才会一起存到 ESP */
 static void keep_on_medium(const char *d, const char *id)
 {
-    struct statvfs sv;
-    char p[4200], cmd[256] = "?", rc[16] = "?", mode[32] = "?";
-    int was_ro;
+    char pd[4096], p[4400], cmd[256] = "?", rc[16] = "?", mode[32] = "?";
+    int ram = gk3l_medium_ram() && gk3l_is_dir("/media/gk3/gaokun3");
     FILE *f;
-    if (!gk3l_is_dir("/media/gk3/gaokun3") || statvfs("/media/gk3", &sv))
+    if (ram)
+        snprintf(pd, sizeof pd, "/media/gk3/gaokun3");
+    else if (gk3l_persist_open(pd, sizeof pd))
         return;
-    was_ro = (sv.f_flag & ST_RDONLY) != 0;
-    if (was_ro && mount(NULL, "/media/gk3", NULL, MS_REMOUNT | (sv.f_flag & ST_NOSUID ? MS_NOSUID : 0) | (sv.f_flag & ST_NODEV ? MS_NODEV : 0) |
-                                                     (sv.f_flag & ST_NOEXEC ? MS_NOEXEC : 0), NULL))
-        return;
-    if (!gk3l_mkdirs("/media/gk3/gaokun3/diag")) {
-        snprintf(p, sizeof p, "/media/gk3/gaokun3/diag/job-%s.log", id);
+    snprintf(p, sizeof p, "%s/diag", pd);
+    if (!gk3l_mkdirs(p)) {
+        snprintf(p, sizeof p, "%s/diag/job-%s.log", pd, id);
         f = fopen(p, "we");
         if (f) {
             get(d, "cmd", cmd, sizeof cmd);
@@ -140,10 +139,10 @@ static void keep_on_medium(const char *d, const char *id)
             fclose(f);
         }
     }
-    sync();
-    if (was_ro)
-        (void)mount(NULL, "/media/gk3", NULL, MS_REMOUNT | MS_RDONLY | (sv.f_flag & ST_NOSUID ? MS_NOSUID : 0) |
-                                                (sv.f_flag & ST_NODEV ? MS_NODEV : 0) | (sv.f_flag & ST_NOEXEC ? MS_NOEXEC : 0), NULL);
+    if (ram)
+        (void)gk3l_persist_sync();
+    else
+        gk3l_persist_close();
 }
 
 /* 单元里跑的那段：stdout / stderr 换成文件，pid 记下来，跑命令，写退出码，存一份到介质 */

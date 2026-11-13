@@ -600,6 +600,41 @@ static void test_gptw(void)
         CHECK(!memcmp(save_hdr, h2, BS));
     }
 
+    /* 原样抄一个表项（整盘清空保留安装器分区）：名字、GUID、属性都照旧，放进最小的空号 */
+    {
+        uint8_t h2[BS], e2[sizeof ent], raw[GK3W_GPT_ENTRY_SIZE];
+        memcpy(h2, hdr, BS);
+        memcpy(e2, ent, sizeof ent);
+        memcpy(raw, ent + GK3W_GPT_ENTRY_SIZE, GK3W_GPT_ENTRY_SIZE);   /* 2 号 super */
+        CHECK(gk3w_gpt_remove(h2, BS, e2, sizeof e2, 2) == GK3W_GPTW_OK);
+        CHECK(gk3w_gpt_put_raw(h2, BS, e2, sizeof e2, raw, idx) == GK3W_GPTW_OK && idx[0] == 2);
+        CHECK(!memcmp(h2, hdr, BS) && !memcmp(e2, ent, sizeof ent));
+        /* 与现有分区重叠、越界、类型为空：不改 */
+        CHECK(gk3w_gpt_put_raw(h2, BS, e2, sizeof e2, raw, idx) == GK3W_GPTW_OVERLAP);
+        gk3_put_le64(raw + 40, total - 33);
+        gk3_put_le64(raw + 32, total - 100);
+        CHECK(gk3w_gpt_put_raw(h2, BS, e2, sizeof e2, raw, idx) == GK3W_GPTW_RANGE);
+        memset(raw, 0, 16);
+        CHECK(gk3w_gpt_put_raw(h2, BS, e2, sizeof e2, raw, idx) == GK3W_GPTW_EINVAL);
+        CHECK(!memcmp(h2, hdr, BS) && !memcmp(e2, ent, sizeof ent));
+
+        /* 改末尾（删掉安装器分区后扩 userdata）：只动末尾，不许重叠、越界、小于起点 */
+        CHECK(gk3w_gpt_remove(h2, BS, e2, sizeof e2, 2) == GK3W_GPTW_OK);
+        CHECK(gk3w_gpt_set_last(h2, BS, e2, sizeof e2, 1, 50000) == GK3W_GPTW_OK);
+        CHECK(gk3_gpt_parse_mem(h2, BS, e2, sizeof e2, &g) == GK3_OK && gk3_gpt_find(&g, "userdata", &p) == GK3_OK);
+        CHECK(p.first_lba == 30000 && p.last_lba == 50000 && p.part_guid[0] == np[2].uuid[0]);
+        memcpy(save_hdr, h2, BS);
+        CHECK(gk3w_gpt_set_last(h2, BS, e2, sizeof e2, 1, total - 33) == GK3W_GPTW_RANGE);
+        CHECK(gk3w_gpt_set_last(h2, BS, e2, sizeof e2, 1, 29999) == GK3W_GPTW_RANGE);
+        CHECK(gk3w_gpt_set_last(h2, BS, e2, sizeof e2, 2, 60000) == GK3W_GPTW_RANGE);
+        np[0].first = 60000, np[0].last = 61000;
+        CHECK(gk3w_gpt_add(h2, BS, e2, sizeof e2, np, 1, idx) == GK3W_GPTW_OK);
+        memcpy(save_hdr, h2, BS);
+        CHECK(gk3w_gpt_set_last(h2, BS, e2, sizeof e2, 1, 60000) == GK3W_GPTW_OVERLAP);
+        CHECK(!memcmp(save_hdr, h2, BS));
+        np[0].first = 2048, np[0].last = 10239;
+    }
+
     /* 主表坏了不写 */
     hdr[20] ^= 1;   /* 表头的保留字段：CRC 对不上了 */
     CHECK(gk3w_gpt_add(hdr, BS, ent, sizeof ent, &np[2], 1, idx) == GK3W_GPTW_EINVAL);

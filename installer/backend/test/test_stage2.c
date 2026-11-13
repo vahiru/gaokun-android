@@ -260,7 +260,7 @@ static void test_plan_fixture(void)
         {"boot_a", 789522432, 789653503, 64},       {"boot_b", 789653504, 789784575, 64},
         {"super", 789784576, 814950399, 12288},     {"userdata", 814950400, 957220863, 69468},
     };
-    gk3w_plan_req r = {512, {789448704, 957220863}, 0, 0, 0};
+    gk3w_plan_req r = {512, {789448704, 957220863}, 0, 0, 0, {0, 0}, NULL};
     gk3w_plan p;
     CHECK(gk3w_plan_alongside(&r, &p) == GK3W_PLAN_OK);
     CHECK(p.n == 6);
@@ -281,7 +281,7 @@ static void test_plan_fixture(void)
 static void test_plan_edges(void)
 {
     gk3w_plan p;
-    gk3w_plan_req r = {512, {1000, 1000 + (20644ull << 11)}, 0, 0, 0};
+    gk3w_plan_req r = {512, {1000, 1000 + (20644ull << 11)}, 0, 0, 0, {0, 0}, NULL};
     /* 起点 1000 向上对齐到 2048，丢掉的不到 1 MiB 让可用只剩 20643 MiB，差 1 MiB */
     CHECK(gk3w_plan_alongside(&r, &p) == GK3W_PLAN_ENOSPACE && p.avail_mib == 20643);
     r.region.last += 2048;
@@ -305,7 +305,7 @@ static void test_plan_edges(void)
     r.userdata_mib = 0;
     /* 4Kn：1 MiB = 256 扇区 */
     {
-        gk3w_plan_req q = {4096, {6, 6 + (20645ull << 8)}, 0, 0, 0};
+        gk3w_plan_req q = {4096, {6, 6 + (20645ull << 8)}, 0, 0, 0, {0, 0}, NULL};
         CHECK(gk3w_plan_alongside(&q, &p) == GK3W_PLAN_OK);
         CHECK(p.parts[0].first == 256 && p.parts[0].last == 256 + 4 * 256 - 1);
         CHECK(p.parts[4].mib == 12288 && p.parts[4].last - p.parts[4].first + 1 == 12288ull * 256);
@@ -369,7 +369,7 @@ static void test_plan_whole_reinstall(void)
 {
     /* 整盘清空：64 GiB 的 512 盘，新表的 usable 区 [34, total-34]，ESP 从 2048 起 300 MiB，userdata 吃掉剩下的 */
     uint64_t total = 64ull << 21;
-    gk3w_plan_req r = {512, {34, total - 34}, 0, 0, 1};
+    gk3w_plan_req r = {512, {34, total - 34}, 0, 0, 1, {0, 0}, NULL};
     gk3w_plan p;
     gk3w_reinstall ri;
     gk3w_part_ref parts[8];
@@ -380,6 +380,31 @@ static void test_plan_whole_reinstall(void)
     /* 与 installer-lib.sh 相同：盘按整 MiB 算，首尾各让出 1 MiB */
     CHECK(p.avail_mib == (64u << 10) - 2 && p.fixed_mib == 300 + 4 + 32 + 128 + 12288);
     CHECK(p.userdata_mib == p.avail_mib - p.fixed_mib);
+
+    /* 整盘清空、保留安装器分区：Android 排在它前面那段，userdata 紧挨着它；前面放不下才排到后面 */
+    {
+        gk3w_plan_req k = r;
+        uint64_t lf = total - 34 - (4ull << 21) + 1;   /* 末尾 4 GiB */
+        k.keep = (gk3w_span){lf, total - 34};
+        k.keep_name = "GK3LIVE";
+        CHECK(gk3w_plan_alongside(&k, &p) == GK3W_PLAN_OK);
+        CHECK(p.parts[0].first == 2048 && p.parts[6].last < lf && lf - p.parts[6].last <= 2048);
+        CHECK(p.avail_mib == (64u << 10) - 4096 - 2);
+        /* 放在开头：只能排在后面那段，ESP 也跟着过去 */
+        k.keep = (gk3w_span){2048, (4ull << 21) + 2047};
+        CHECK(gk3w_plan_alongside(&k, &p) == GK3W_PLAN_OK);
+        CHECK(!strcmp(p.parts[0].name, "esp") && p.parts[0].first == (4ull << 21) + 2048 && p.parts[6].last <= total - 34);
+        /* 两段都放不下：报大的那一段 */
+        k.keep = (gk3w_span){(20ull << 21), (44ull << 21)};
+        CHECK(gk3w_plan_alongside(&k, &p) == GK3W_PLAN_ENOSPACE && p.avail_mib == (20u << 10) - 1);
+        /* 保留的分区越出区间：不算 */
+        k.keep = (gk3w_span){10, 100};
+        CHECK(gk3w_plan_alongside(&k, &p) == GK3W_PLAN_EINVAL);
+        /* 双系统（whole = 0）不看 keep */
+        k.whole = 0;
+        k.keep = (gk3w_span){lf, total - 34};
+        CHECK(gk3w_plan_alongside(&k, &p) == GK3W_PLAN_OK && p.parts[p.n - 1].last <= total - 34 && p.parts[p.n - 1].last >= lf);
+    }
 
     /* 重新安装：按名字认出一套，misc 只有 1007 KiB 也行 */
     memset(parts, 0, sizeof parts);

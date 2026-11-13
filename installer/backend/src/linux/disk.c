@@ -393,6 +393,21 @@ int gk3l_kernel_add(const gk3l_disk *d, uint32_t idx, uint64_t first, uint64_t l
     return ioctl(d->fd, BLKPG, &a) ? errno : 0;
 }
 
+int gk3l_kernel_resize(const gk3l_disk *d, uint32_t idx, uint64_t first, uint64_t last)
+{
+    struct blkpg_partition p;
+    struct blkpg_ioctl_arg a;
+    memset(&p, 0, sizeof p);
+    p.start = (long long)(first * d->bs);
+    p.length = (long long)((last - first + 1) * d->bs);
+    p.pno = (int)idx;
+    memset(&a, 0, sizeof a);
+    a.op = BLKPG_RESIZE_PARTITION;
+    a.datalen = sizeof p;
+    a.data = &p;
+    return ioctl(d->fd, BLKPG, &a) ? errno : 0;
+}
+
 /* 等内核建好 idx 号分区的节点：sysfs 里有它、/dev 下同名节点是块设备且设备号一致。最多等 10 秒 */
 int gk3l_wait_node(const gk3l_disk *d, uint32_t idx, char *out, size_t cap)
 {
@@ -470,18 +485,19 @@ int gk3l_gpt_backup(const gk3l_disk *d, const char *dir_arg, const char *tag, ui
         /* 调用方指定的地方写不进去就不装 */
         err = backup_to(dir_arg, name, gb, len, path, sizeof path);
     } else {
+        char pd[4096];
         err = ENOENT;
-        if (gk3l_is_dir("/media/gk3/gaokun3")) {
-            /* 安装介质平时只读挂着，备份要留在拔得走的地方：重新挂成可写，挂载选项（nosuid、noexec …）照旧 */
-            struct statvfs sv;
-            unsigned long fl = MS_REMOUNT;
-            if (!statvfs("/media/gk3", &sv)) {
-                fl |= (sv.f_flag & ST_NOSUID ? MS_NOSUID : 0) | (sv.f_flag & ST_NODEV ? MS_NODEV : 0) |
-                      (sv.f_flag & ST_NOEXEC ? MS_NOEXEC : 0) | (sv.f_flag & ST_NOATIME ? MS_NOATIME : 0) |
-                      (sv.f_flag & ST_RELATIME ? MS_RELATIME : 0);
-                (void)mount(NULL, "/media/gk3", NULL, fl, NULL);
+        /* 写到安装介质的 gaokun3/（U 盘：/media/gk3 改成可写；读进了内存：临时挂上介质分区本身） */
+        if (!gk3l_persist_open(pd, sizeof pd)) {
+            err = backup_to(pd, name, gb, len, path, sizeof path);
+            gk3l_persist_close();
+            /* 持久的那份在临时挂上的分区里：内存副本里也放一份 —— 界面、restore-table、另存日志都按 /media/gk3 的路径找，
+             * 重启后 initramfs 读进内存的也正是这个路径 */
+            if (!err && strcmp(pd, "/media/gk3/gaokun3") && gk3l_is_dir("/media/gk3/gaokun3")) {
+                char p2[4400];
+                if (!backup_to("/media/gk3/gaokun3", name, gb, len, p2, sizeof p2))
+                    snprintf(path, sizeof path, "%s", p2);
             }
-            err = backup_to("/media/gk3/gaokun3", name, gb, len, path, sizeof path);
         }
         /* 介质写不进去（写保护、只读介质）就留在内存里，照旧装 —— 与 installer-lib.sh 相同 */
         if (err) {

@@ -2,7 +2,8 @@
  *
  * 记录与 Windows 版（win/probe.c）同为 DISK / PART / FREE，字段同名；不同之处：
  *   - path= 是 /dev 节点（/dev/nvme0n1、/dev/nvme0n1p5），PART 的 num= 与 idx= 都是 GPT 表项序号（Linux 的 pN）。
- *   - DISK 没有 num= / system=；多报 medium=（安装器就是从这块盘、这个分区启动的）。
+ *   - DISK 没有 num= / system=；多报 medium=（安装器就是从这块盘、这个分区启动的）。介质分区的 PART 在介质读进了
+ *     内存、而且像安装器分区（gk3l_live_like）时多一个 ram=yes（没有挂载，整盘清空时保留，装完可以删掉，见 live.h）。
  *   - DISK 的 kernel=：内核眼里的分区（sysfs）与盘上主 GPT 逐项核对的结果（ok / differs），对应 Windows 的 rawgpt=。
  *     differs 说明内核还没重读分区表，写盘入口要拒绝。
  * 分区表以盘上的主 GPT 为准（libgk3core 直接读，只信主表）。table= 的取值：
@@ -24,6 +25,7 @@
 #include "../proto.h"
 #include "disk.h"
 #include "gk3core.h"
+#include "live.h"
 #include "lx.h"
 
 #define FREE_MIN_BYTES (16ull << 20)    /* 小于 16 MiB 的缝隙不报（GPT 对齐留下的） */
@@ -221,6 +223,8 @@ static int probe_disk(const char *name, const char *medium, gk3w_line *l)
             gk3w_line_kv(l, "fslabel", label);
             gk3w_line_kv(l, "os", gk3w_guess_os(pname, type, fs));
             gk3w_line_kv(l, "medium", pm ? "yes" : "no");
+            if (pm && gk3l_medium_ram() && gk3l_live_like(type, fs, label, pname))
+                gk3w_line_kv(l, "ram", "yes");
             if (gk3w_line_emit(l, stdout))
                 rc = -1;
         }

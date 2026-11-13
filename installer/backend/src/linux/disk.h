@@ -68,6 +68,8 @@ int gk3l_disk_lock(gk3l_disk *d);
 /* BLKPG：告诉内核加一个 / 去掉一个分区（不重读整张表，别的分区挂着也不受影响）。返回 0 或 errno */
 int gk3l_kernel_add(const gk3l_disk *d, uint32_t idx, uint64_t first, uint64_t last);
 int gk3l_kernel_del(const gk3l_disk *d, uint64_t pno);
+/* 改内核里 idx 号分区的大小（起点不变；BLKPG_RESIZE_PARTITION） */
+int gk3l_kernel_resize(const gk3l_disk *d, uint32_t idx, uint64_t first, uint64_t last);
 /* 等内核建好 idx 号分区的节点（sysfs 里有它、/dev 下同名节点是块设备且设备号一致），最多 10 秒；out 是节点路径 */
 int gk3l_wait_node(const gk3l_disk *d, uint32_t idx, char *out, size_t cap);
 /* 丢掉分区设备的页缓存（BLKFLSBUF） */

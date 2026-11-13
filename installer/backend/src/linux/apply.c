@@ -4,7 +4,7 @@
  *   gk3l apply --disk /dev/X --release DIR --mode wipe                                             整盘清空
  *   gk3l apply --disk /dev/X --release DIR --mode reinstall [--keep-data yes|no]                   重新安装
  *   共同的可选参数：[--sdboot FILE] [--backup-dir DIR] [--machine-id HEX32] [--default-os android|windows]
- *                   [--userdata-mib N] [--bitlocker-confirmed]
+ *                   [--userdata-mib N] [--bitlocker-confirmed] [--remove-installer]
  *
  * 步骤与进度代码同 Windows 版 gk3w apply：1 check / verify-sha / test-zst → 2 plan → 5 write-gpt → 15 format →
  * 30 write-super → 70 write-boot → 80 bootloader → 100 done（重新安装没有 write-gpt）。★ 所有输入在第一次写盘之前验完
@@ -20,6 +20,9 @@
  *   - 整盘清空：换一张新的 GPT（最前面 300 MiB 的 ESP，格式化为 FAT32），安装介质在这块盘上、或者盘上有分区在用
  *     （挂着、交换分区、上面叠着别的设备）时拒绝。内核里的旧分区先逐个去掉（去不掉就加回来、不动盘）。
  *     EFI 变量 LoaderEntryOneShot 也一并删掉。
+ *     安装器分区（读进了内存的介质分区，见 live.h）例外：它的表项原样抄进新表、位置不变，Android 排在它前面那段
+ *     （放不下再排在后面那段）；新 ESP 格式化后先写 systemd-boot 与 loader.conf，再写各个分区 —— 中途失败时开机仍能从
+ *     systemd-boot 进安装器分区（XBOOTLDR）里的 LiveCD。
  *   - 重新安装：分区表不动，按名字认出现有的那一套（每个名字恰好一个、大小够这一版），super / boot / misc 重写，
  *     metadata / userdata 格式化（--keep-data yes 时保留）；要写的分区在用时拒绝。
  *
@@ -35,7 +38,10 @@
  *     EFI/BOOT/BOOTAA64.EFI 时，要 --bitlocker-confirmed（用户在界面上确认拿到了恢复密钥），Linux 这边暂停不了 BitLocker。
  *   - ESP 上已有的启动项按 installer-lib.sh 的规则清理（别的目录的直连条目改名停用、旧的救援启动项与统一启动入口的
  *     条目删掉），不像 Windows 版那样拒绝：LiveCD 没有卸载功能，删过 Android 分区的盘上留着这些条目是常见情形。
- *   - 写完删 EFI 变量 LoaderEntryDefault（删不掉报 NOTE loadervar-stuck）。 */
+ *   - 写完删 EFI 变量 LoaderEntryDefault（删不掉报 NOTE loadervar-stuck）。
+ *   - --remove-installer：装完之后删掉这块盘上的安装器分区、并进 userdata（live.c；进度 92 remove-installer）。
+ *     安装器分区不在这块盘上时动盘之前就拒绝（ERR live-missing）；装完之后那一步在动盘之前失败只提醒
+ *     （NOTE code=installer-kept），安装照样算成功。 */
 #define _GNU_SOURCE
 #include <dirent.h>
 #include <errno.h>
@@ -65,6 +71,7 @@
 #include "disk.h"
 #include "files.h"
 #include "gk3core.h"
+#include "live.h"
 #include "lx.h"
 #include "sysstate.h"
 
@@ -438,7 +445,7 @@ enum { T_MISC, T_META, T_BOOTA, T_BOOTB, T_SUPER, T_DATA, T_ESP, T_N };
 static const char *const T_NAMES[T_N] = {"misc", "metadata", "boot_a", "boot_b", "super", "userdata", "esp"};
 
 typedef struct {
-    int mode, keep, defos_windows, blconfirmed;
+    int mode, keep, defos_windows, blconfirmed, rmlive;
     const char *rel, *backup_dir;
     uint64_t rstart, rend, ud_mib;
     char mid_fb[33];
@@ -464,6 +471,8 @@ typedef struct {
     gk3w_plan plan;
     gk3w_reinstall ri;
     uint8_t *nhdr, *nent, *npmbr;   /* 整盘清空：新表（动盘之前在内存里建好） */
+    gk3l_live live;                 /* 整盘清空时保留的安装器分区（have_live） */
+    int have_live, esp_ready;       /* esp_ready：整盘清空时 ESP 已提前格式化、写好 systemd-boot */
     struct {
         char node[96];
         uint64_t off, bytes;
@@ -794,8 +803,10 @@ static int plan_wipe(apply_ctx *c)
     gk3w_plan_req req;
     gk3w_plan_err pe;
     char medium[32] = "", what[400] = "";
-    /* 安装介质就在这块盘上：整盘清空等于锯掉自己脚下的地板（而且跑到一半才死） */
-    if (!gk3l_medium_devno(medium, sizeof medium)) {
+    /* 安装器分区（读进了内存的介质分区）在这块盘上：保留它。别的情况下介质在这块盘上，整盘清空等于锯掉自己脚下的
+     * 地板（而且跑到一半才死） */
+    c->have_live = gk3l_live_find(d, &c->live);
+    if (!c->have_live && !gk3l_medium_devno(medium, sizeof medium)) {
         int on = !strcmp(medium, d->devno);
         for (size_t i = 0; i < d->nk; i++)
             on |= !strcmp(d->kp[i].devno, medium);
@@ -831,6 +842,11 @@ static int plan_wipe(apply_ctx *c)
     req.region = (gk3w_span){g.first_usable, g.last_usable};
     req.userdata_mib = c->ud_mib;
     req.whole = 1;
+    if (c->have_live) {
+        req.keep = (gk3w_span){c->live.first, c->live.last};
+        req.keep_name = c->live.name;
+        gk3l_log("whole-disk wipe: the installer partition /dev/%s (%s) is kept in place", c->live.k.name, c->live.name);
+    }
     pe = gk3w_plan_print(&req, d->path, &c->plan, stdout);
     if (pe != GK3W_PLAN_OK)
         return gk3l_err_kv(c->T, "plan", "why", gk3w_plan_strerror(pe), "the disk is too small for Android (disk not touched)", 0), -1;
@@ -918,6 +934,7 @@ static int write_table(apply_ctx *c)
     uint8_t *hdr = c->mode == M_WIPE ? c->nhdr : d->hdr, *ent = c->mode == M_WIPE ? c->nent : d->ent;
     uint8_t bak[4096];
     uint64_t bel = 0;
+    uint32_t live_idx = 0;
     size_t elen;
     gk3w_gptw_err ge;
     gk3_gpt g;
@@ -939,6 +956,9 @@ static int write_table(apply_ctx *c)
         np[i].last = c->plan.parts[i].last;
     }
     ge = gk3w_gpt_add(hdr, d->bs, ent, elen, np, c->plan.n, idx);
+    /* 整盘清空保留安装器分区：原表项（类型、GUID、名字、属性）原样抄进新表 */
+    if (ge == GK3W_GPTW_OK && c->mode == M_WIPE && c->have_live)
+        ge = gk3w_gpt_put_raw(hdr, d->bs, ent, elen, c->live.raw, &live_idx);
     /* 备份表放得下（gk3l_gpt_write 里还会再生成一次） */
     if (ge == GK3W_GPTW_OK && d->bs <= sizeof bak)
         ge = gk3w_gpt_make_backup(hdr, d->bs, bak, &bel);
@@ -954,7 +974,9 @@ static int write_table(apply_ctx *c)
     /* 整盘清空先写保护性 MBR，并清掉表项之后到第一个分区之前的旧数据（旧的引导扇区、文件系统签名） */
     w = 0;
     if (c->mode == M_WIPE) {
-        uint64_t gap = c->plan.parts[0].first - g.first_usable;
+        /* 保留的安装器分区在第一个新分区前面时，只清到它之前 */
+        uint64_t stop = c->have_live && c->live.first < c->plan.parts[0].first ? c->live.first : c->plan.parts[0].first;
+        uint64_t gap = stop - g.first_usable;
         memset(c->zero, 0, IO_CHUNK);
         memcpy(c->zero, c->npmbr, d->bs);
         w = gk3l_write_verify(d, c->zero, d->bs, 0, c->chk);
@@ -984,6 +1006,14 @@ static int write_table(apply_ctx *c)
             c->t[t].off = q.first_lba * d->bs;
             c->t[t].bytes = (q.last_lba - q.first_lba + 1) * d->bs;
         }
+    }
+    if (live_idx) {
+        gk3_gpt_part q;
+        if (gk3_gpt_get(&d->g, live_idx - 1, &q) != GK3_OK || q.first_lba != c->live.first || q.last_lba != c->live.last)
+            return gk3l_err_kv(c->T, "verify-layout", "name", c->live.name, "after writing the partition table, the kept installer partition is not where it was", 0), -1;
+        if ((err = gk3l_kernel_add(d, live_idx, q.first_lba, q.last_lba)))
+            return gk3l_err_kv(c->T, "kernel-add", "name", c->live.name, "the kernel refused the kept installer partition (BLKPG)", err), -1;
+        gk3l_log("the installer partition stays at the same place as partition %u", live_idx);
     }
     for (int t = 0; t < T_N; t++)
         if (c->t[t].idx && gk3l_wait_node(d, c->t[t].idx, c->t[t].node, sizeof c->t[t].node))
@@ -1067,7 +1097,7 @@ static int write_parts(apply_ctx *c)
         gk3l_log("misc: MISCINIT slot=a default=%s bcab=%s", def == GK3_SETDEF_WINDOWS ? "windows" : def == GK3_SETDEF_ANDROID ? "android" : "none", hex);
         memset(c->zero, 0, IO_CHUNK);
     }
-    if (c->mode == M_WIPE) {
+    if (c->mode == M_WIPE && !c->esp_ready) {
         char *av[] = {"mkfs.vfat", "-F", "32", "-n", "ESP", c->t[T_ESP].node, NULL};
         if (gk3l_run(av, NULL, 0))
             return gk3l_err_kv(c->T, "mkfs", "part", "esp", "mkfs.vfat failed", 0), -1;
@@ -1128,6 +1158,51 @@ static int write_parts(apply_ctx *c)
     return 0;
 }
 
+/* 卸下 ESP、丢掉缓存、只读挂回去，逐个比对写过的文件 */
+static int esp_verify(apply_ctx *c, const esp_log *elog)
+{
+    int err;
+    sync();
+    if ((err = gk3l_umount_tmp(c->esp.dir)))
+        return gk3l_err_kv(c->T, "esp-umount", "esp", c->esp_dev, "cannot unmount the EFI system partition; what was written may not be on the disk", err), -1;
+    c->esp_mounted = 0;
+    gk3l_flush_node(c->esp_dev);
+    if ((err = gk3l_mount_tmp(c->esp_dev, "vfat", 1, c->esp.dir, sizeof c->esp.dir)))
+        return gk3l_err_kv(c->T, "verify-remount", "dev", c->esp_dev, "cannot mount the EFI system partition again to verify it", err), -1;
+    c->esp_mounted = 1;
+    for (size_t i = 0; i < elog->n; i++)
+        if (!esp_same(&c->esp, elog->w[i].rel, elog->w[i].data, elog->w[i].len))
+            return gk3l_err_kv2(c->T, "esp-verify", "esp", c->esp_dev, "file", elog->w[i].rel, "a file on the EFI system partition did not read back identically", 0), -1;
+    gk3l_umount_tmp(c->esp.dir);
+    c->esp_mounted = 0;
+    return 0;
+}
+
+/* 整盘清空且保留安装器分区：新 ESP 先格式化，写好 systemd-boot 与 loader.conf。之后哪一步失败，开机都还能经
+ * systemd-boot 进安装器分区里的 LiveCD（XBOOTLDR 上的启动项）再装一次；write_esp 见到相同的文件不再重写 */
+static int esp_boot_first(apply_ctx *c)
+{
+    static esp_log elog;
+    char *av[] = {"mkfs.vfat", "-F", "32", "-n", "ESP", c->t[T_ESP].node, NULL};
+    int err;
+    if (gk3l_run(av, NULL, 0))
+        return gk3l_err_kv(c->T, "mkfs", "part", "esp", "mkfs.vfat failed", 0), -1;
+    c->esp_ready = 1;
+    snprintf(c->esp_dev, sizeof c->esp_dev, "%s", c->t[T_ESP].node);
+    snprintf(c->esp.dev, sizeof c->esp.dev, "%s", c->esp_dev);
+    memset(&elog, 0, sizeof elog);
+    elog.e = &c->esp;
+    if ((err = gk3l_mount_tmp(c->esp_dev, "vfat", 0, c->esp.dir, sizeof c->esp.dir)))
+        return gk3l_err_kv(c->T, "esp-mount", "esp", c->esp_dev, "cannot mount the EFI system partition for writing", err), -1;
+    c->esp_mounted = 1;
+    if (esp_put(&elog, "EFI/BOOT/BOOTAA64.EFI", c->sdboot, c->sdboot_len, 1) ||
+        esp_put(&elog, "EFI/systemd/systemd-bootaa64.efi", c->sdboot, c->sdboot_len, 0) ||
+        esp_put(&elog, "loader/loader.conf", (const uint8_t *)gk3w_loader_conf, strlen(gk3w_loader_conf), 0) || esp_verify(c, &elog))
+        return -1;
+    gk3l_log("ESP: formatted, systemd-boot written first (read back and verified): the installer partition stays bootable until the install completes");
+    return 0;
+}
+
 /* ── 80 bootloader：ESP ── */
 static int write_esp(apply_ctx *c)
 {
@@ -1183,22 +1258,9 @@ static int write_esp(apply_ctx *c)
         if (esp_put(&elog, relp, (const uint8_t *)entry[sl - 'a'], (size_t)n, 0))
             return -1;
     }
-    if (esp_put(&elog, "loader/loader.conf", (const uint8_t *)gk3w_loader_conf, strlen(gk3w_loader_conf), 0))
-        return -1;
-    sync();
-    if ((err = gk3l_umount_tmp(c->esp.dir)))
-        return gk3l_err_kv(c->T, "esp-umount", "esp", c->esp_dev, "cannot unmount the EFI system partition; what was written may not be on the disk", err), -1;
-    c->esp_mounted = 0;
     /* 从介质读回核对：丢掉这块设备的缓存，只读挂回去逐个比 */
-    gk3l_flush_node(c->esp_dev);
-    if ((err = gk3l_mount_tmp(c->esp_dev, "vfat", 1, c->esp.dir, sizeof c->esp.dir)))
-        return gk3l_err_kv(c->T, "verify-remount", "dev", c->esp_dev, "cannot mount the EFI system partition again to verify it", err), -1;
-    c->esp_mounted = 1;
-    for (size_t i = 0; i < elog.n; i++)
-        if (!esp_same(&c->esp, elog.w[i].rel, elog.w[i].data, elog.w[i].len))
-            return gk3l_err_kv2(c->T, "esp-verify", "esp", c->esp_dev, "file", elog.w[i].rel, "a file on the EFI system partition did not read back identically", 0), -1;
-    gk3l_umount_tmp(c->esp.dir);
-    c->esp_mounted = 0;
+    if (esp_put(&elog, "loader/loader.conf", (const uint8_t *)gk3w_loader_conf, strlen(gk3w_loader_conf), 0) || esp_verify(c, &elog))
+        return -1;
     gk3l_log("ESP: systemd-boot, kernel / dtb / ramdisk for both slots, both entries and loader.conf written; %zu files read back from the disk and verified", elog.n);
     return 0;
 }
@@ -1246,6 +1308,7 @@ int gk3l_cmd_apply(int argc, char **argv)
     c.rel = gk3l_arg(argc, argv, "--release");
     c.backup_dir = gk3l_arg(argc, argv, "--backup-dir");
     c.blconfirmed = gk3l_flag(argc, argv, "--bitlocker-confirmed");
+    c.rmlive = gk3l_flag(argc, argv, "--remove-installer");
     c.mode = !mode || !strcmp(mode, "alongside") ? M_ALONGSIDE : !strcmp(mode, "wipe") ? M_WIPE : !strcmp(mode, "reinstall") ? M_REINSTALL : -1;
     if (c.mode < 0 || !disk_arg || !c.rel || (gk3l_arg(argc, argv, "--userdata-mib") && gk3l_arg_u64(argc, argv, "--userdata-mib", &c.ud_mib)) ||
         (keep && strcmp(keep, "yes") && strcmp(keep, "no")))
@@ -1256,7 +1319,7 @@ int gk3l_cmd_apply(int argc, char **argv)
         return gk3l_err(c.T, "usage",
                         "usage: apply --disk /dev/X --release DIR [--mode alongside|wipe|reinstall] [--region-start LBA --region-end LBA] "
                         "[--keep-data yes|no] [--sdboot FILE] [--backup-dir DIR] [--machine-id HEX32] [--default-os android|windows] "
-                        "[--userdata-mib N] [--bitlocker-confirmed]",
+                        "[--userdata-mib N] [--bitlocker-confirmed] [--remove-installer]",
                         0);
     c.keep = keep && !strcmp(keep, "yes");
     if (defos_arg && strcmp(defos_arg, "android") && strcmp(defos_arg, "windows"))
@@ -1289,6 +1352,13 @@ int gk3l_cmd_apply(int argc, char **argv)
     memset(c.zero, 0, IO_CHUNK);
     if (check_inputs(&c, gk3l_arg(argc, argv, "--sdboot")) || open_disk(&c, disk_arg))
         goto out;
+    if (c.rmlive) {
+        gk3l_live lv;
+        if (!gk3l_live_find(&c.d, &lv)) {
+            gk3l_err_kv(c.T, "live-missing", "disk", c.d.path, "--remove-installer: the installer partition is not on this disk, or the installer was not loaded into memory from it (disk not touched)", 0);
+            goto out;
+        }
+    }
     if (c.mode != M_WIPE && esp_check(&c))
         goto out;
     gk3w_progress(2, "plan");
@@ -1302,6 +1372,8 @@ int gk3l_cmd_apply(int argc, char **argv)
         gk3l_err(c.T, "layout-changed", "the partition table changed while preparing the install; run the installer again (disk not touched)", 0);
         goto out;
     }
+    /* 介质读进了内存：动盘之前把内存里的界面日志写回介质分区（写到一半断电时，这次的日志不至于全没） */
+    (void)gk3l_persist_sync();
     if (c.mode == M_REINSTALL) {
         /* 分区表不动：不备份；目标就是现有分区 */
         gk3l_log("reinstall: the partition table is not changed; reusing the existing %d partitions", GK3W_REUSE_N);
@@ -1314,9 +1386,13 @@ int gk3l_cmd_apply(int argc, char **argv)
         if (write_table(&c))
             goto out;
     }
+    if (c.mode == M_WIPE && c.have_live && esp_boot_first(&c))
+        goto out;
     if (write_parts(&c) || write_esp(&c))
         goto out;
     clear_loader_vars(&c);
+    if (c.rmlive && gk3l_live_remove(&c.d, 1) < 0)
+        goto out;
     gk3w_progress(100, "done");
     rc = 0;
 out:

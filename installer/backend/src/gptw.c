@@ -176,6 +176,65 @@ gk3w_gptw_err gk3w_gpt_remove(uint8_t *hdr, uint32_t bs, uint8_t *entries, size_
     return GK3W_GPTW_OK;
 }
 
+/* [first, last] 与表里 skip 之外（序号 1 起，0 = 不跳过）的分区有没有重叠 */
+static int overlaps(const gk3_gpt *g, uint64_t first, uint64_t last, uint32_t skip)
+{
+    for (uint32_t k = 0; k < g->num_entries; k++) {
+        gk3_gpt_part p;
+        if (k + 1 == skip || gk3_gpt_get(g, k, &p) != GK3_OK)
+            continue;
+        if (first <= p.last_lba && p.first_lba <= last)
+            return 1;
+    }
+    return 0;
+}
+
+gk3w_gptw_err gk3w_gpt_put_raw(uint8_t *hdr, uint32_t bs, uint8_t *entries, size_t entries_len, const uint8_t *raw, uint32_t *idx)
+{
+    gk3_gpt g;
+    uint64_t first = gk3_le64(raw + 32), last = gk3_le64(raw + 40);
+    if (gk3_gpt_parse_mem(hdr, bs, entries, entries_len, &g) != GK3_OK || g.entry_size < GK3W_GPT_ENTRY_SIZE || is_empty(raw))
+        return GK3W_GPTW_EINVAL;
+    if (first > last || first < g.first_usable || last > g.last_usable)
+        return GK3W_GPTW_RANGE;
+    if (overlaps(&g, first, last, 0))
+        return GK3W_GPTW_OVERLAP;
+    for (uint32_t k = 0; k < g.num_entries; k++) {
+        uint8_t *e = entries + (size_t)k * g.entry_size;
+        if (!is_empty(e))
+            continue;
+        memset(e, 0, g.entry_size);
+        memcpy(e, raw, GK3W_GPT_ENTRY_SIZE);
+        gk3_put_le32(hdr + 88, gk3_crc32(0, entries, (size_t)g.num_entries * g.entry_size));
+        seal_header(hdr);
+        if (idx)
+            *idx = k + 1;
+        return GK3W_GPTW_OK;
+    }
+    return GK3W_GPTW_FULL;
+}
+
+gk3w_gptw_err gk3w_gpt_set_last(uint8_t *hdr, uint32_t bs, uint8_t *entries, size_t entries_len, uint32_t idx, uint64_t last)
+{
+    gk3_gpt g;
+    uint8_t *e;
+    uint64_t first;
+    if (gk3_gpt_parse_mem(hdr, bs, entries, entries_len, &g) != GK3_OK)
+        return GK3W_GPTW_EINVAL;
+    if (!idx || idx > g.num_entries || is_empty(entries + (size_t)(idx - 1) * g.entry_size))
+        return GK3W_GPTW_RANGE;
+    e = entries + (size_t)(idx - 1) * g.entry_size;
+    first = gk3_le64(e + 32);
+    if (last < first || last > g.last_usable)
+        return GK3W_GPTW_RANGE;
+    if (overlaps(&g, first, last, idx))
+        return GK3W_GPTW_OVERLAP;
+    gk3_put_le64(e + 40, last);
+    gk3_put_le32(hdr + 88, gk3_crc32(0, entries, (size_t)g.num_entries * g.entry_size));
+    seal_header(hdr);
+    return GK3W_GPTW_OK;
+}
+
 gk3w_gptw_err gk3w_gpt_make_backup(const uint8_t *hdr, uint32_t bs, uint8_t *bak_hdr, uint64_t *entries_lba)
 {
     gk3_gpt g;
