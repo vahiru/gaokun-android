@@ -1,5 +1,0 @@
-E PROGRESS 20 part-format part=/dev/nvme0n1p6 fs=vfat
-D 1500
-E PROGRESS 100 done
-O RESULT op=format part=/dev/nvme0n1p6 fs=vfat
-X 0

@@ -62,8 +62,7 @@ class AlongNoRoom extends Along {
   final int haveMib;
   final int? needMib;
 
-  /// 除 /data 之外要的固定开销（PLANERR fixed_mib；旧后端没有这个字段 → null）。
-  /// 缩分区页拿它把默认值算成"/data 约 64 GiB"（v1.0 计划 GUI-20）
+  /// 除 /data 之外要的固定开销（PLANERR fixed_mib；旧后端没有这个字段 → null）
   final int? fixedMib;
 }
 
@@ -79,16 +78,13 @@ class AlongError extends Along {
 /// 下载被取消时 install() 最后报的退出码（130 = 被信号打断的惯例）
 const kCancelledExit = 130;
 
-/// 三条写盘的路（用户 2026-10-06：分区之前强制阅读风险提示）。每一条在 UI 上都先过 RiskPage（ui/screens_risk.dart）；
-/// Session 再守一道：没确认过的那条路，install / shrink / editDisk 一个字节都不写（[Session.riskAcked]）
+/// 两条写盘的路，写盘之前都要阅读风险提示。每一条在 UI 上都先过 RiskPage（ui/screens_risk.dart）；
+/// Session 再守一道：没确认过的那条路，install / deletePartition 一个字节都不写（[Session.riskAcked]）
 enum RiskKind {
   /// 整盘清空 / 双系统 / 重新安装：gk3_apply
   install,
 
-  /// 缩分区腾空间：gk3_shrink
-  shrink,
-
-  /// 手动调整磁盘：gk3_part_*
+  /// 删除分区：gk3_part_delete
   edit,
 }
 
@@ -147,7 +143,7 @@ class Session extends ChangeNotifier {
   void _changed() => notifyListeners();
 
   // ── 正在写盘 ────────────────────────────────────────────────────────────
-  /// 安装、缩分区、手动调整磁盘在跑的时候为 true：侧栏的重启 / 关机据此禁用（v1.0 计划 GUI-3）
+  /// 安装、删除分区在跑的时候为 true：侧栏的重启 / 关机据此禁用（v1.0 计划 GUI-3）
   bool get writing => _writing > 0;
   int _writing = 0;
 
@@ -227,7 +223,6 @@ class Session extends ChangeNotifier {
   /// 用 gk3_plan --mode reinstall 问，不在界面里自己判 —— 缺哪个分区、哪个太小都是它报的
   Plan? reinstall;
   EspInfo? espInfo;
-  List<Shrinkable>? shrinkables;
   bool assessing = false;
 
   /// 选定一块盘：把两种方式能不能走都问清楚
@@ -242,7 +237,6 @@ class Session extends ChangeNotifier {
     along = null;
     reinstall = null;
     espInfo = null;
-    shrinkables = null;
     defaultOs = 'android';
     bitlockerKeyOk = false;
     assessing = true;
@@ -250,10 +244,6 @@ class Session extends ChangeNotifier {
     along = await _assessAlong(d);
     if (d.parts.any((p) => const {'super', 'userdata', 'boot_a', 'boot_b'}.contains(p.name))) {
       reinstall = Plan(await backend.run('gk3_plan', _reinstallArgs(d, keep: false)));
-    }
-    // 双系统因为空间不够走不通时，才需要知道能不能缩
-    if (along is AlongNoRoom) {
-      shrinkables = (await backend.run('gk3_shrink_scan', [d.path])).ofType('SHRINK').map(Shrinkable.new).toList();
     }
     assessing = false;
     _changed();
@@ -291,38 +281,16 @@ class Session extends ChangeNotifier {
     };
   }
 
-  bool get canShrink => shrinkables?.any((s) => s.can) ?? false;
-
-  // ── 手动调整磁盘 ────────────────────────────────────────────────────────
-  /// 调整大小要知道每个分区最小能缩到多少：问 gk3_shrink_scan（文件系统自己报，不猜）
-  Future<void> scanShrink() async {
-    final d = disk;
-    if (d == null) return;
-    shrinkables = (await backend.run('gk3_shrink_scan', [d.path])).ofType('SHRINK').map(Shrinkable.new).toList();
-    _changed();
-  }
-
-  /// 执行一个调整操作（gk3_part_delete / format / create / resize）。成功与否都重新探测这块盘 ——
+  // ── 删除分区 ────────────────────────────────────────────────────────────
+  /// 删除一个分区（gk3_part_delete）。成功与否都重新探测这块盘 ——
   /// 分区号、空闲区都可能变了，界面上显示的必须是盘上【现在】的样子
-  Future<CallResult> editDisk(String fn, List<String> args, void Function(Gk3Event) onEvent) async {
+  Future<CallResult> deletePartition(String part, void Function(Gk3Event) onEvent) async {
     if (!riskAcked(RiskKind.edit)) return _riskRefused;
-    final r = await _whileWriting(() => backend.run(fn, args, onEvent));
+    final r = await _whileWriting(() => backend.run('gk3_part_delete', [part], onEvent));
     await probe();
     final again = disks?.where((x) => x.path == disk?.path).firstOrNull;
     if (again != null) disk = again;
-    await scanShrink();
-    return r;
-  }
-
-  // ── 缩分区 ──────────────────────────────────────────────────────────────
-  Future<CallResult> shrink(Shrinkable s, int targetMib, void Function(Gk3Event) onEvent) async {
-    if (!riskAcked(RiskKind.shrink)) return _riskRefused;
-    final r = await _whileWriting(() => backend.run('gk3_shrink', [s.part, '$targetMib'], onEvent));
-    if (r.ok) {
-      await probe();
-      final again = disks?.where((d) => d.path == disk?.path).firstOrNull;
-      if (again != null) await assess(again);
-    }
+    _changed();
     return r;
   }
 

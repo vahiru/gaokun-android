@@ -15,7 +15,7 @@ import 'package:gk3_common/backend/protocol.dart';
 ///   装成了，但事后在介质上找不到 gk3_apply 的任何一行输出（只在屏幕上的日志区里出现过）——
 ///   装坏的那一次要是也这样，就只剩"屏幕上好像报了个错"。
 ///
-/// ★ 写盘的调用（[writesDisk]）套一层 `systemd-inhibit`（v1.0 计划 B5 / GUI-2）：缩 NTFS、写 super 的
+/// ★ 写盘的调用（[writesDisk]）套一层 `systemd-inhibit`（v1.0 计划 B5 / GUI-2）：写分区表、写 super 的
 ///   那几分钟里，电源键、合盖、睡眠都不许把机器关掉或挂起。这是第三层 —— 前两层在镜像里
 ///   （overlay-common 的 logind.conf.d 关了按键与合盖、build-rootfs.sh mask 了几个睡眠 target）。
 ///   拿不到 inhibitor（logind 没在跑）时照样执行、只在日志里记一笔：前两层不靠 logind 活着。
@@ -33,8 +33,8 @@ class ShellBackend extends Gk3Backend {
   /// 取消时连 curl 一起杀掉 —— 只杀 bash 的话 curl 成了孤儿，照样往 /run 里那个文件写，下一次重试就是两个 curl 写同一个文件
   static final String? _setsid = ['/usr/bin/setsid', '/bin/setsid'].where((f) => File(f).existsSync()).firstOrNull;
 
-  /// 会动盘的函数：安装、缩分区、手动调整磁盘
-  static bool writesDisk(String fn) => fn == 'gk3_apply' || fn == 'gk3_shrink' || fn.startsWith('gk3_part_');
+  /// 会动盘的函数：安装、删除分区
+  static bool writesDisk(String fn) => fn == 'gk3_apply' || fn.startsWith('gk3_part_');
 
   /// 挡住的东西：关机 / 重启、睡眠，以及 logind 对电源键、睡眠键、休眠键、合盖的处理（systemd-inhibit(1) 的 --what）
   static const inhibitWhat = 'shutdown:sleep:handle-power-key:handle-suspend-key:handle-hibernate-key:handle-lid-switch';

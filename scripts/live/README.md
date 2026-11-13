@@ -66,5 +66,4 @@ bash scripts/live/test-boot-android.sh  # 救援系统一键重启回Android的U
 
 # 容器内端到端磁盘安装测试（使用loop与dm-error设备）：
 bash scripts/live/test-in-container.sh scripts/live/test-apply.sh
-bash scripts/live/test-in-container.sh scripts/live/test-shrink.sh
 ```

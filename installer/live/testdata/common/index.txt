@@ -19,9 +19,5 @@ gk3_release_info                                                               r
 #  probe-mbr-unreadable.txt：一块 MBR 盘 + 一块读不出分区表的盘（S1 / S2；对拍时实录的两块盘拼的，文件头写着怎么拼；测试用 overrides 选它）
 gk3_net_release *                                                              net_release.txt   # 录（本地服务器，内容是上面那份发布目录）
 gk3_net_manifest                                                               net_manifest.txt   # 手写（清单 URL 还不存在）
-# shrink_scan-bitlocker.txt   gk3_shrink_scan：出厂盘、C: 与 D: 是 BitLocker 卷头（录；只给测试按文件名用）
 gk3_part_delete *                                                              part_delete.txt   # 录（出厂布局的另一块盘上真做）
-gk3_part_resize *                                                              part_resize.txt   # 录（出厂布局的另一块盘上真做）
-gk3_part_create *                                                              part_create.txt   # 录（出厂布局的另一块盘上真做）
-gk3_part_format *                                                              part_format.txt   # 录（出厂布局的另一块盘上真做）
 gk3_part_delete-esp                                                            part_delete-esp.txt   # 录（出厂布局的另一块盘上真做）

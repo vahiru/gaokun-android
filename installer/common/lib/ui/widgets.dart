@@ -69,7 +69,7 @@ class ChoiceCard extends StatelessWidget {
   final String title;
   final String? body, warn, good;
 
-  /// 紧凑的一行（调整磁盘页的分区列表：一块盘的分区要一屏看完 —— 出厂布局 7 个分区加空闲区）
+  /// 紧凑的一行（删除分区页的分区列表：一块盘的分区要一屏看完 —— 出厂布局 7 个分区加空闲区）
   final bool dense;
 
   /// 不为空 ⇒ 禁用，并把原因写在卡片上

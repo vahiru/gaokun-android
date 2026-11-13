@@ -18,7 +18,7 @@
 #   K. 双系统专项（见 tools/gk3boot/README.md）：Windows 休眠拒绝写 ESP、BitLocker + 换 BOOTAA64
 #      要确认恢复密钥、默认系统写进 GK3 的 set_default、timeout 5、32 MiB 余量、
 #      重新安装删掉统一启动入口的条目、BOOTAA64 字节相同就不重写、LoaderEntryDefault 被删掉
-#   M. MBR 盘与读不出分区表的盘（见 docs/dev/installer-rust-design.md）：MBR 盘上方案报 mbr-disk、apply / 缩分区 / 手动调整在动盘前
+#   M. MBR 盘与读不出分区表的盘（见 docs/dev/installer-rust-design.md）：MBR 盘上方案报 mbr-disk、apply / 删除分区在动盘前
 #      ERR mbr-disk touched=no、整盘清空照常；读不出的盘（dm-error 真设备 + 照它实录输出回答的假 sgdisk）探测不报空闲、
 #      写盘入口 ERR disk-unreadable
 #   每一次装完都核对 misc 的前 64 KiB 与 Python 独立算的初始状态逐字节相同（gk3-misc init）
@@ -440,11 +440,10 @@ duel_scene "D 介质与目标同盘" "$DD"
 printf '%s\n' "$PROBE" | grep -q "^DISK path=$DD .*medium=yes" && printf '%s\n' "$PROBE" | grep -q "^PART path=${DD}p4 .*medium=yes" \
     && ! printf '%s\n' "$PROBE" | grep -q "^PART path=${DD}p3 .*medium=yes" \
     && ok "gk3_probe：整块盘 medium=yes，且只有 p4（安装器所在）标 medium=yes" || bad "medium 标得不对"
-SI=$(gk3_shrink_info "${DD}p4" 2>&1)
-printf '%s' "$SI" | grep -q 'can=no why=mounted' && ok "介质分区不可缩：$SI" || bad "介质分区居然可缩：$SI"
 BEFORE_D=$(fp "$DD")
-OUT=$(gk3_shrink "${DD}p4" 600 2>&1); rc=$?
-[ "$rc" != 0 ] && [ "$(fp "$DD")" = "$BEFORE_D" ] && ok "gk3_shrink 自己也拒绝缩介质分区，盘没动" || bad "gk3_shrink 缩了介质分区（rc=${rc}）"
+OUT=$(gk3_part_delete "${DD}p4" 2>&1); rc=$?
+[ "$rc" != 0 ] && printf '%s' "$OUT" | grep -q "^ERR code=edit-mounted" && [ "$(fp "$DD")" = "$BEFORE_D" ] \
+    && ok "删除介质分区（安装器正从它运行）：拒绝，盘没动" || bad "介质分区被删了，或报错不对（rc=${rc}）"
 OUT=$(gk3_apply --disk "$DD" --mode wipe --rescue no --release "$REL" 2>&1); rc=$?
 [ "$rc" != 0 ] && printf '%s' "$OUT" | grep -q '锯掉' && [ "$(fp "$DD")" = "$BEFORE_D" ] \
     && printf '%s' "$OUT" | grep -q "^ERR code=wipe-medium disk=$DD touched=no" \
@@ -670,17 +669,16 @@ grep -q '^NOTE code=loadervar-stuck name=LoaderEntryDefault value=auto-windows$'
 duel_scene "K 双系统重新安装完" "$DK"
 umount "$EFV2"
 
-# ── G. 手动调整磁盘 ────────────────────────────────────────────────────────
+# ── G. 删除分区 ────────────────────────────────────────────────────────────
 # 用户 2026-09-25："能给的都给" —— 删除 / 新建 / 格式化 / 缩小 / 扩大。每个操作都要守住：
 # ESP 不动、挂着的不动、越界的不做；删除不抹数据（分区表备份还原回去就在）；扩大保住 PARTUUID 与数据。
-echo "═══ G. 手动调整磁盘 ═══"
+echo "═══ G. 删除分区 ═══"
 DG=$(new_disk g 16G)
 sgdisk -o -n 1:2048:+300M -t 1:ef00 -c 1:"EFI system partition" -n 2:0:+3G -t 2:0700 -c 2:"Basic data partition" \
        -n 3:0:+2G -t 3:8300 -c 3:linux "$DG" >/dev/null 2>&1
 partprobe "$DG" 2>/dev/null; udevadm settle 2>/dev/null; sleep 1
-mkfs.vfat -F 32 "${DG}p1" >/dev/null; mkntfs -Q -F -L Data "${DG}p2" >/dev/null 2>&1; mkfs.ext4 -q -F "${DG}p3"
+mkfs.vfat -F 32 "${DG}p1" >/dev/null; mkfs.ext4 -q -F "${DG}p3"
 mg=$W/mnt-g; mkdir -p "$mg"
-ntfs-3g "${DG}p2" "$mg" && head -c 20971520 /dev/urandom > "$mg/win.bin" && NT_SHA=$(sha "$mg/win.bin") && umount "$mg"
 PU2=$(sgdisk -i 2 "$DG" | awk '/unique GUID/{print $4}')
 gfail() {   # $1=说明 $2=期望的报错片段 $3…=命令：必须失败、报对原因、分区表一个字节不变
     local what=$1 want=$2; shift 2
@@ -690,39 +688,11 @@ gfail() {   # $1=说明 $2=期望的报错片段 $3…=命令：必须失败、�
         ok "${what}：拒绝且分区表没动"; else bad "${what}：rc=${rc}，或报错不对，或分区表变了"; printf '%s\n' "$out" | tail -2 | sed 's/^/      /'; fi
 }
 gfail "删 ESP" "EFI 系统分区" gk3_part_delete "${DG}p1"
-gfail "格式化 ESP" "EFI 系统分区" gk3_part_format "${DG}p1" ext4
 mount "${DG}p3" "$mg"; gfail "删挂着的分区" "正挂着" gk3_part_delete "${DG}p3"; umount "$mg"
 gk3_part_delete "${DG}p3" >"$W/g1.log" 2>&1 && ! [ -b "${DG}p3" ] && [ "$(sgdisk -i 2 "$DG" | awk '/unique GUID/{print $4}')" = "$PU2" ] \
     && grep -q '^RESULT op=delete' "$W/g1.log" && ok "删 p3：分区没了，别的分区 PARTUUID 没变" || { bad "删 p3 不对"; tail -3 "$W/g1.log"; }
 ls /tmp/gpt-before-delete-"$(basename "$DG")"-*.bin >/dev/null 2>&1 && ok "删之前备份了分区表" || bad "删之前没备份分区表"
-FREEG=$(gk3__probe_parts "$DG" "$(blockdev --getsz "$DG")" | grep '^FREE ' | head -1); FS=$(gk3__f "$FREEG" start)
-gfail "新建时压到别的分区" "不在任何一段空闲区里" gk3_part_create --disk "$DG" --start 616448 --size-mib 1024 --fs ext4
-OUT=$(gk3_part_create --disk "$DG" --start "$FS" --size-mib 1024 --fs ext4 2>/dev/null); NP=$(printf '%s' "$OUT" | sed -n 's/^RESULT op=create part=\([^ ]*\).*/\1/p')
-[ -b "$NP" ] && [ "$(blkid -o value -s TYPE "$NP")" = ext4 ] && [ "$(( $(blockdev --getsize64 "$NP") >> 20 ))" = 1024 ] \
-    && [ $(( $(sgdisk -i "$(cat /sys/class/block/$(basename "$NP")/partition)" "$DG" | awk '/^First sector:/{print $3}') % 2048 )) = 0 ] \
-    && ok "在空闲区新建 1 GiB ext4：${NP}（对齐 1 MiB）" || bad "新建分区不对：$OUT"
-duel_scene "G 手动新建分区之后" "$DG"
-gk3_part_format "$NP" vfat >/dev/null 2>&1 && [ "$(blkid -o value -s TYPE "$NP")" = vfat ] \
-    && sgdisk -i "$(cat /sys/class/block/$(basename "$NP")/partition)" "$DG" | grep -q 'EBD0A0A2' \
-    && ok "格式化成 FAT32：类型也跟着改成 Basic data" || bad "格式化不对"
-gk3_part_format "$NP" ext4 >/dev/null 2>&1; mount "$NP" "$mg" && head -c 10485760 /dev/urandom > "$mg/f.bin" && X_SHA=$(sha "$mg/f.bin") && umount "$mg"
-PUN=$(sgdisk -i "$(cat /sys/class/block/$(basename "$NP")/partition)" "$DG" | awk '/unique GUID/{print $4}')
-gk3_part_resize "$NP" 2048 >"$W/g2.log" 2>&1; rc=$?
-mount -o ro "$NP" "$mg"; SZ=$(df -m "$mg" | awk 'NR==2{print $2}'); GOT=$(sha "$mg/f.bin"); umount "$mg"
-[ "$rc" = 0 ] && [ "$(( $(blockdev --getsize64 "$NP") >> 20 ))" = 2048 ] && [ "$SZ" -gt 1900 ] && [ "$GOT" = "$X_SHA" ] \
-    && [ "$(sgdisk -i "$(cat /sys/class/block/$(basename "$NP")/partition)" "$DG" | awk '/unique GUID/{print $4}')" = "$PUN" ] \
-    && ok "扩大 ext4 1 → 2 GiB：分区与文件系统都变大（df ${SZ} MiB），文件没变，PARTUUID 没变" || { bad "扩大 ext4 不对（rc=$rc df=${SZ}）"; tail -3 "$W/g2.log"; }
-gk3_part_resize "$NP" 1024 >"$W/g3.log" 2>&1 && [ "$(( $(blockdev --getsize64 "$NP") >> 20 ))" = 1024 ] \
-    && mount -o ro "$NP" "$mg" && [ "$(sha "$mg/f.bin")" = "$X_SHA" ] && umount "$mg" \
-    && ok "缩小 ext4 2 → 1 GiB（走 gk3_shrink）：文件没变" || { bad "缩小不对"; tail -3 "$W/g3.log"; umount "$mg" 2>/dev/null; }
-# NTFS 扩大：它后面紧挨着的是新建的那个分区 —— 先删掉，腾出紧挨的空闲
-gk3_part_delete "$NP" >/dev/null 2>&1
-gk3_part_resize "${DG}p2" 4096 >"$W/g4.log" 2>&1; rc=$?
-ntfs-3g -o ro "${DG}p2" "$mg" && GOT=$(sha "$mg/win.bin") && NSZ=$(df -m "$mg" | awk 'NR==2{print $2}') && umount "$mg"
-[ "$rc" = 0 ] && [ "$(( $(blockdev --getsize64 "${DG}p2") >> 20 ))" = 4096 ] && [ "$GOT" = "$NT_SHA" ] && [ "$NSZ" -gt 3900 ] \
-    && [ "$(sgdisk -i 2 "$DG" | awk '/unique GUID/{print $4}')" = "$PU2" ] \
-    && ok "扩大 NTFS 3 → 4 GiB：文件没变，PARTUUID 没变（Windows 的 BCD 靠它）" || { bad "扩大 NTFS 不对（rc=$rc df=${NSZ}）"; tail -3 "$W/g4.log"; }
-gfail "扩到比后面的空闲还大" "紧挨着的空闲不够" gk3_part_resize "${DG}p2" 30000
+duel_scene "G 删除分区之后" "$DG"
 
 # ★ 2026-09-27 审查：partprobe 没生效（分区被占着）时内核还拿着旧分区表，同号节点指着旧起点 —— -b 看不出来
 DS=$(new_disk s 2G); sgdisk -o -n 1:2048:+100M "$DS" >/dev/null 2>&1; partprobe "$DS"; sleep 1
@@ -735,7 +705,7 @@ gk3__node_matches "$DS" "${DS}p1" 2>/dev/null && ok "卸下、partprobe 生效�
 
 # ── M. MBR 盘与读不出分区表的盘（见 docs/dev/installer-rust-design.md）──────
 # 原来的 MBR 检查找 "MBR only"，gdisk 1.0.10 从不这么说 ⇒ MBR 盘上照算双系统方案，挡住写盘的是 ESP 类型检查的
-# 副作用（esp-not-esp-type）。现在：方案报 mbr-disk；apply / 缩分区 / 手动调整在动盘前报 ERR mbr-disk touched=no；
+# 副作用（esp-not-esp-type）。现在：方案报 mbr-disk；apply / 删除分区在动盘前报 ERR mbr-disk touched=no；
 # 整盘清空照常（本来就要抹掉分区表）。这块盘上故意放一个 0xEF 分区：证明拦住它的是 MBR 检查，不是 ESP 检查。
 # sgdisk -p 读不出时原来把整块盘报成一段空闲。现在 DISK 标 table=unreadable、不列 PART / FREE、ERR disk-unreadable。
 echo "═══ M. MBR 盘与读不出分区表的盘：动盘之前明确拒绝 ═══"
@@ -774,12 +744,7 @@ MERR="ERR code=mbr-disk disk=$DM touched=no"
 mrefuse "apply 双系统（ESP 类型检查之前就拦）" "$MERR" gk3_apply --disk "$DM" --mode alongside --rescue no --release "$REL" \
     --region-start "$(gk3__f "$FM" start)" --region-end "$(gk3__f "$FM" end)" --esp "${DM}p1"
 mrefuse "apply 重新安装" "$MERR" gk3_apply --disk "$DM" --mode reinstall --rescue no --release "$REL" --esp "${DM}p1"
-mrefuse "缩 NTFS（gk3_shrink）" "$MERR" gk3_shrink "${DM}p2" 2048
 mrefuse "删分区" "$MERR" gk3_part_delete "${DM}p3"
-mrefuse "格式化分区（原来先 mkfs、之后的 sgdisk -t 才失败）" "$MERR" gk3_part_format "${DM}p3" vfat
-mrefuse "新建分区" "$MERR" gk3_part_create --disk "$DM" --start "$(gk3__f "$FM" start)" --size-mib 1024 --fs ext4
-mrefuse "扩大分区" "$MERR" gk3_part_resize "${DM}p3" 3072
-mrefuse "缩小分区" "$MERR" gk3_part_resize "${DM}p3" 1024
 # 整盘清空：照常装完，盘变成 GPT
 gk3_apply --disk "$DM" --mode wipe --rescue no --release "$REL" >"$W/m-wipe.log" 2>&1; rc=$?
 [ "$rc" = 0 ] && [ "$(blkid -p -o value -s PTTYPE "$DM")" = gpt ] && [ "$(gk3__bylabel "$DM" super 2>/dev/null)" != "" ] \
@@ -798,9 +763,6 @@ if dmsetup create "$EIO" --table "0 6291456 error" 2>/dev/null; then
     OUT=$(gk3_apply --disk "$DX" --mode wipe --rescue no --release "$REL" 2>&1); rc=$?
     [ "$rc" != 0 ] && printf '%s\n' "$OUT" | grep -q "^ERR code=disk-unreadable disk=$DX touched=no$" \
         && ok "apply 整盘清空一块读不出的盘：ERR disk-unreadable touched=no" || { bad "读不出的盘 apply 没拦（rc=${rc}）"; printf '%s\n' "$OUT" | grep -e '^ERR' -e '^!!' | tail -2; }
-    OUT=$(gk3_part_create --disk "$DX" --start 2048 --size-mib 100 --fs ext4 2>&1); rc=$?
-    [ "$rc" != 0 ] && printf '%s\n' "$OUT" | grep -q "^ERR code=disk-unreadable disk=$DX touched=no$" \
-        && ok "在读不出的盘上新建分区：ERR disk-unreadable" || bad "读不出的盘上新建分区没拦（rc=${rc}）"
     rm -f "$DX"; dmsetup remove "$EIO" 2>/dev/null
 else bad "建不出 dm-error 设备（容器里没有 dmsetup / device-mapper？）"; fi
 

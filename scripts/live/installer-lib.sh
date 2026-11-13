@@ -99,8 +99,8 @@ gk3_prog() {
 
 # 失败：gk3_fail <代码> [k=v …] -- <给人看的说明…>
 #   stderr 上先出 `ERR code=<代码> k=v…`（给界面），再出 `!! <说明>`（给日志与命令行版）。返回 1。
-# ★ 在 gk3_apply / gk3_shrink 里面（看调用栈，不看变量 —— 同一个 shell 里先后调过它们，变量会留着）
-#   自动带上 touched=yes|no：目标盘动过没有（GK3__TOUCHED，由它们俩维护）。
+# ★ 在 gk3_apply 里面（看调用栈，不看变量 —— 同一个 shell 里先后调过它，变量会留着）
+#   自动带上 touched=yes|no：目标盘动过没有（GK3__TOUCHED，由 gk3_apply 维护）。
 #   界面据此决定失败页说"盘没动过，可以返回 / 重试"还是"盘可能写了一半"；命令行版在失败时照着说一句。
 #   调用方自己给了 touched=（例如 gk3__table_guard 在任何入口里都是"没动过"）就不再追加。
 gk3_fail() {
@@ -112,7 +112,7 @@ gk3_fail() {
     [ "${1:-}" = -- ] && shift
     case "$out " in
         *" touched="*) ;;
-        *) case " ${FUNCNAME[*]} " in *" gk3_apply "*|*" gk3_shrink "*) out="$out touched=${GK3__TOUCHED:-no}" ;; esac ;;
+        *) case " ${FUNCNAME[*]} " in *" gk3_apply "*) out="$out touched=${GK3__TOUCHED:-no}" ;; esac ;;
     esac
     echo "$out" >&2
     gk3_die "$@"
@@ -147,7 +147,7 @@ gk3_probe() {
         local name; name=$(basename "$d")
         # ⚠️ 正常情况下跳过 loop —— 没人往 loop 设备装系统。但测试需要它，
         #    所以给一个显式开关：GK3_ALLOW_LOOP=1。
-        #    （否则 test-shrink.sh 没法用 gk3_probe 验"空间释放出来了没有"，
+        #    （否则测试没法用 gk3_probe 验"空间释放出来了没有"，
         #     只能另写一套算法，而那就等于测了两份不同的逻辑。）
         case "$name" in
             loop*)  [ "${GK3_ALLOW_LOOP:-0}" = 1 ] || continue ;;
@@ -221,7 +221,7 @@ gk3__read_table() {
 #   ★ MBR 盘上为什么必须在【入口】拦（2026-10-06 容器实录，gdisk 1.0.10）：sgdisk 读 MBR 盘时在内存里转成 GPT，
 #     写的时候不带 -g 就拒绝保存 —— `sgdisk -d / -n / -t / -c` 一律 rc=3 "Non-GPT disk; not saving changes. Use -g to override."，
 #     盘上的 MBR 不变（带 -g 才真的转成 GPT）。所以不拦的话不是"静默转表"，而是写表那一步【必然失败】，而失败之前的步骤已经做了：
-#     格式化先跑了 mkfs、缩分区先缩了文件系统、apply 已经标了 touched=yes —— 报出来的是 part-type / gpt-rewrite / cmd-failed
+#     apply 已经标了 touched=yes —— 报出来的是 gpt-rewrite / cmd-failed
 #     （"盘可能写了一半"），不是"这是 MBR 盘"。整盘清空的 `sgdisk --zap-all` 在 MBR 盘上照常成功（rc 0，之后 PTTYPE 为空）。
 #   没有 sgdisk（unknown）不在这里拦：各入口自己的工具检查会报 tool-missing。
 gk3__table_guard() {
@@ -556,7 +556,7 @@ gk3_plan() {
 
     local need=$(( fixed + GK3_USERDATA_MIN_MIB ))
     if [ "$avail_mib" -lt "$need" ]; then
-        # fixed_mib：界面拿它推"腾出多少 /data 才有多大"（缩分区页的默认值，v1.0 计划 GUI-20），不在 Dart 里再算一遍固定开销
+        # fixed_mib：除 /data 之外的固定开销，界面需要时直接用，不在 Dart 里再算一遍
         echo "PLANERR msg=not-enough-space avail_mib=$avail_mib need_mib=$need fixed_mib=$fixed"
         return 1
     fi
@@ -988,7 +988,7 @@ gk3_apply() {
                 echo "ESP 上用目录 ${esp_mid}；要写 $(( need_kib / 1024 )) MiB（已扣掉会被覆盖的同名文件），空闲 $(( free_kib / 1024 )) MiB；Windows 的启动管理器：${esp_win}；BOOTAA64 要变：${aa_change}" >&2
                 if [ "$esp_win" = yes ]; then
                     # ★ U18：Windows 休眠（快速启动的"关机"也是休眠，默认开着）时它缓存着 ESP 的 FAT —— 这边写了，Windows 醒来
-                    #   再写就可能把 FAT 写坏（设计稿 §4.9.10，D4 定级）。复用缩分区那条路上的判据（gk3__ntfs_hibernated，只读）
+                    #   再写就可能把 FAT 写坏（设计稿 §4.9.10，D4 定级）。判据见 gk3__ntfs_hibernated（只读）
                     local ws; ws=$(gk3__win_state "$esp")
                     echo "Windows 卷：$ws" >&2
                     if [ "$(gk3__f "$ws" hibernated)" = yes ]; then
@@ -1596,241 +1596,14 @@ gk3__bylabel() {
     echo ""
 }
 
-# ── 缩分区 ──────────────────────────────────────────────────────────────────
-#
-# ★ 这是安装器里【唯一会去动用户现有数据】的操作，纪律高于别处：
-#
-#   1. 最小能缩到多少【问文件系统】，不自己猜（ntfsresize --info / resize2fs -P）
-#   2. NTFS 必须是干净卸载的。ntfsresize 自己会拒绝带 dirty 位的卷 ——
-#      **不要绕过它**。脏 NTFS 缩 = 数据损坏，而用户往往是因为 Windows
-#      快速启动/休眠才脏的，他自己都不知道盘是脏的。
-#   3. 先演练通过，再真做
-#   4. **先缩文件系统，再缩分区**。反了就是把文件系统截断 —— 直接丢数据
-#   5. 重建分区时保住 PARTUUID：Windows 的 BCD 按 PARTUUID 找系统盘，
-#      换了它 Windows 就起不来（分区还在、数据还在，但引导指向不存在的 UUID）
-
 # ── NTFS：Windows 休眠 / 快速启动 / 没关干净 ─────────────────────────────────
-# ⚠️★ 2026-09-27 审查查出、按 ntfs-3g 2022.10.3（packages-live.lock 里那一版）的源码核实：
-#   * ntfsresize【看不出】Windows 在休眠（快速启动的"关机"也是休眠，而它默认开着）：它按 NTFS_MNT_FORENSIC
-#     打开卷（ntfsprogs/ntfsresize.c:2888），这个标志正好跳过休眠与 $LogFile 两项检查（libntfs-3g/volume.c:1286）
-#   * 原先还给 --info / --no-action 加了 --force —— 而脏卷那一道一个 --force 就放行（ntfsresize.c:2946-2948）；
-#     真做时的 --force --force 再喂一个 y，连"确认"（ntfsresize.c:4656）一起替用户答了
-#   这样的卷缩了，Windows 醒来时它缓存里的元数据与盘上对不上 = 损坏。上面"不要绕过它"那条纪律，代码自己没守住。
-#   现在：只读的探测看 hiberfil.sys（与 ntfs-3g 自己的判据相同，volume.c:832-833）+ 不带 --force 的 --info；
-#   真动手之前再让 ntfs-3g 读写挂一次（它做全套检查，挂成只读 = 不安全）；ntfsresize 只给一个 --force，stdin 接 /dev/null。
-
-# hiberfil.sys 开头是 hibr / HIBR ⇒ Windows 休眠着。ntfscat 只读打开卷，不写任何东西
+# hiberfil.sys 开头是 hibr / HIBR ⇒ Windows 处于休眠（快速启动的"关机"也是休眠）。ntfscat 只读打开卷，不写任何东西；
+# 判据与 ntfs-3g 自己的休眠检查相同
 gk3__ntfs_hibernated() {
     case "$(ntfscat "$1" /hiberfil.sys 2>/dev/null | head -c 4 | od -An -tx1 | tr -d ' \n')" in
         68696272|48494252) return 0 ;;    # "hibr" / "HIBR"
     esac
     return 1
-}
-
-# 动手之前的终审：让 ntfs-3g 按读写挂一次再卸下 —— 休眠与 $LogFile 没关干净这两项它都查，判据就是库里那一套。
-# ⚠️ 判据是"挂成了只读"，不是退出码：读写挂载默认带 NTFS_MNT_MAY_RDONLY（src/ntfs-3g.c:4031-4033），
-#    卷不安全时它【退回只读、照样返回 0】（libntfs-3g/volume.c:1286-1315 的 need_fallback_ro）。
-# ⚠️ norecover：不加的话，$LogFile 没关干净时它会"修好"—— 清空日志（volume.c:1296-1302）。这正是要避免的写入。
-# no_detach：让它在前台跑，卸下之后 wait 它 —— 它把卷真正关好之前，不能让 ntfsresize 去开同一个设备
-gk3__ntfs_trial_mount() {
-    local part=$1 m pid rc i opts=""
-    m=$(mktemp -d)
-    ntfs-3g -o no_detach,norecover "$part" "$m" 2>/dev/null &
-    pid=$!
-    for i in $(seq 1 100); do
-        findmnt -rn "$m" >/dev/null 2>&1 && break
-        kill -0 "$pid" 2>/dev/null || break
-        sleep 0.1
-    done
-    if findmnt -rn "$m" >/dev/null 2>&1; then
-        opts=$(findmnt -rn -o OPTIONS "$m")
-        umount "$m" 2>/dev/null || fusermount3 -u "$m" 2>/dev/null || fusermount -u "$m" 2>/dev/null
-    fi
-    wait "$pid"; rc=$?
-    rmdir "$m" 2>/dev/null
-    if [ "$rc" = 0 ] && [ -n "$opts" ]; then
-        case ",$opts," in
-            *,rw,*) return 0 ;;
-        esac
-        # 退回了只读 = 不安全。是哪一种：自己再看一眼 hiberfil.sys（只读）
-        if gk3__ntfs_hibernated "$part"; then rc=14; else rc=15; fi
-    fi
-    case "$rc" in
-        14) gk3_fail ntfs-hibernated "part=$part" -- "Windows 处于休眠或“快速启动”状态（${part}）—— 这时改它的大小会损坏 Windows 的数据。回 Windows 关掉快速启动、用“关机”退出，再试（盘没动过）" ;;
-        15) gk3_fail ntfs-dirty "part=$part" -- "这个 NTFS 分区上次没有正常关机（${part}，日志里有没做完的操作）—— 回 Windows 正常开关机一次，再试（盘没动过）" ;;
-        *)  gk3_fail ntfs-mount "part=$part" "rc=$rc" -- "ntfs-3g 挂不上 ${part}（退出码 ${rc}）—— 不敢改它的大小（盘没动过）" ;;
-    esac
-    return 1
-}
-
-# 问文件系统"最小能缩到多少 MiB"。问不出来就报 can=no —— 不猜。
-gk3_shrink_info() {
-    local part=$1 fs cur_mib min_mib can why out b bs blocks
-    if [ ! -b "$part" ]; then
-        echo "SHRINK part=$part can=no why=not-a-block-device"; return 1
-    fi
-    fs=$(blkid -o value -s TYPE "$part" 2>/dev/null)
-    cur_mib=$(( $(blockdev --getsize64 "$part" 2>/dev/null || echo 0) / 1048576 ))
-    can=no; why=""; min_mib=""
-    # ⚠️ 挂着的分区一律不缩 —— 首先是安装器自己所在的那个（live 从内置盘跑时，它就在目标盘上：
-    #    免 U 盘装双系统正是这种情况）。ntfsresize 本来也拒绝挂着的卷，resize2fs 对挂着的 ext4
-    #    缩小会失败，但【先问、先说清楚】比让工具半路报错好。
-    if findmnt -rn -S "$part" >/dev/null 2>&1; then
-        echo "SHRINK part=$part fs=${fs:-none} cur_mib=$cur_mib min_mib=0 can=no why=mounted"; return 1
-    fi
-    case "$fs" in
-        ntfs)
-            if ! command -v ntfsresize >/dev/null; then
-                why=no-ntfsresize
-            elif gk3__ntfs_hibernated "$part"; then
-                why=ntfs-hibernated
-            else
-                # ⚠️ 不加 --force：它就是脏卷检查的开关（见上面"NTFS：Windows 休眠"那一段）
-                out=$(ntfsresize --info "$part" 2>&1)
-                if [ $? -ne 0 ]; then
-                    # ⚠️ 最常见的原因是卷脏（Windows 快速启动/休眠）。
-                    #    这不是该绕过的错误，是该转达给用户的错误。
-                    # 脏卷时 ntfsresize 的原话是 "Volume is scheduled for check"（ntfsresize.c:2948）
-                    case "$out" in
-                        *"scheduled for check"*|*dirty*|*Dirty*|*unclean*)  why=ntfs-dirty ;;
-                        *"resize support"*)         why=ntfs-unsupported ;;
-                        *)                          why=ntfsresize-failed ;;
-                    esac
-                else
-                    b=$(printf '%s' "$out" | grep -o 'You might resize at [0-9]* bytes' | grep -o '[0-9]*')
-                    if [ -n "$b" ]; then
-                        min_mib=$(( b / 1048576 + 1 )); can=yes
-                    else
-                        why=cannot-parse-min
-                    fi
-                fi
-            fi ;;
-        ext2|ext3|ext4)
-            if ! command -v resize2fs >/dev/null; then
-                why=no-resize2fs
-            else
-                bs=$(dumpe2fs -h "$part" 2>/dev/null | awk -F: '/Block size/{gsub(/ /,"",$2); print $2}')
-                blocks=$(resize2fs -P "$part" 2>/dev/null | grep -o '[0-9]*$')
-                if [ -n "$bs" ] && [ -n "$blocks" ]; then
-                    min_mib=$(( blocks * bs / 1048576 + 1 )); can=yes
-                else
-                    why=cannot-parse-min
-                fi
-            fi ;;
-        "") why=no-filesystem ;;
-        # 加密的卷（BitLocker / Windows 11 的"设备加密"，blkid 报 TYPE=BitLocker）：这边读不了里面的 NTFS，
-        # 只有 Windows 能缩它 —— 单列一个原因，界面上说清楚回 Windows 怎么做（原先报 fs-not-shrinkable，
-        # 界面说"这种文件系统不支持无损缩小"，是误导）
-        BitLocker) why=bitlocker ;;
-        *)  why=fs-not-shrinkable ;;
-    esac
-    echo "SHRINK part=$part fs=${fs:-none} cur_mib=$cur_mib min_mib=${min_mib:-0} can=$can why=$why"
-    [ "$can" = yes ]
-}
-
-# 真的缩。$2 是目标大小（MiB）。
-# ⚠️ 这个函数会改用户的数据，所以它自己把所有前提再验一遍，不依赖调用方。
-gk3_shrink() {
-    local part=$1 target_mib=$2
-    GK3__TOUCHED=no    # 见 gk3_apply
-    local info fs cur min floor disk num pu pl pt start end bk newpu newmib rc
-    info=$(gk3_shrink_info "$part") || { echo "$info"; return 1; }
-    fs=$(gk3__f "$info" fs); cur=$(gk3__f "$info" cur_mib); min=$(gk3__f "$info" min_mib)
-
-    # 余量：至少给文件系统留 512 MiB。缩到贴着最小值，用户开机就没地方
-    # 写页面文件了 —— 那是"能装上但不能用"。
-    floor=$(( min + 512 ))
-    if [ "$target_mib" -lt "$floor" ]; then
-        gk3_fail shrink-too-small "target_mib=$target_mib" "floor_mib=$floor" -- "目标 ${target_mib} MiB 太小：最小 ${min} + 512 余量 = ${floor} MiB"; return 1
-    fi
-    if [ "$target_mib" -ge "$cur" ]; then
-        gk3_fail shrink-not-smaller "target_mib=$target_mib" "cur_mib=$cur" -- "目标 ${target_mib} MiB 不小于当前 ${cur} MiB，没必要缩"; return 1
-    fi
-
-    disk=/dev/$(lsblk -no PKNAME "$part" 2>/dev/null | head -1)
-    num=$(cat "/sys/class/block/$(basename "$part")/partition" 2>/dev/null)
-    if [ ! -b "$disk" ] || [ -z "$num" ]; then
-        gk3_fail part-unknown "part=$part" -- "认不出 $part 属于哪块盘的第几个分区"; return 1
-    fi
-    # MBR 盘：下面的 sgdisk -d / -n 一定失败（不带 -g 不写 MBR 盘）—— 而那时文件系统已经缩了；读不出的盘不动（设计稿 S1 / S2）。
-    # 所以在缩文件系统之前拦
-    gk3__table_guard "$disk" || return 1
-
-    # ★ 保住身份：PARTUUID（Windows BCD 靠它）、PARTLABEL、类型 GUID
-    pu=$(sgdisk -i "$num" "$disk" 2>/dev/null | grep '^Partition unique GUID:' | awk '{print $4}')
-    pl=$(sgdisk -i "$num" "$disk" 2>/dev/null | grep '^Partition name:' | cut -d"'" -f2)
-    pt=$(sgdisk -i "$num" "$disk" 2>/dev/null | grep '^Partition GUID code:' | awk '{print $4}')
-    if [ -z "$pu" ] || [ -z "$pt" ]; then
-        gk3_fail gpt-read "part=$part" -- "读不到分区 $num 的 GUID —— 不敢重建它"; return 1
-    fi
-    local pattr; pattr=$(gk3__part_attr "$disk" "$num")
-    echo "分区 $num 身份：PARTUUID=$pu 类型=$pt 名字=${pl:-(无)} 属性=${pattr:-?}" >&2
-
-    gk3_prog 5 gpt-backup
-    gk3__gpt_backup "$disk" shrink; bk=${GK3_GPT_BK:-（没有备份）}
-
-    # ── 第 1 步：缩文件系统（演练 → 真做）───────────────────────────────
-    gk3_prog 15 shrink-trial
-    case "$fs" in
-        ntfs)
-            gk3__ntfs_trial_mount "$part" || return 1
-            if ! ntfsresize --no-action --size "${target_mib}M" "$part" >/dev/null 2>&1 </dev/null; then
-                gk3_fail ntfs-dryrun -- "ntfsresize 演练没通过 —— 不往下做"; return 1
-            fi
-            gk3_prog 30 shrink-ntfs
-            GK3__TOUCHED=yes
-            # 一个 --force = 替用户答"确认"那一问（ntfsresize.c:4656）。脏卷的话它先被脏卷检查吃掉，
-            # 确认那一问就会去读 stdin —— 接的是 /dev/null，于是停下。别再喂 y
-            if ! ntfsresize --force --size "${target_mib}M" "$part" >/dev/null 2>&1 </dev/null; then
-                gk3_fail ntfs-shrink -- "缩小 NTFS 失败 —— 分区表还没动过，数据应当完好"; return 1
-            fi ;;
-        ext2|ext3|ext4)
-            gk3_prog 20 fsck
-            GK3__TOUCHED=yes    # e2fsck -p 会修（写）文件系统
-            e2fsck -fp "$part" >/dev/null 2>&1; rc=$?
-            # e2fsck 返回 1/2 表示"修好了"；>=4 才是真出事
-            if [ "$rc" -ge 4 ]; then
-                gk3_fail fsck "rc=$rc" -- "e2fsck 报错（${rc}），不敢缩"; return 1
-            fi
-            gk3_prog 30 shrink-ext
-            if ! resize2fs "$part" "${target_mib}M" >/dev/null 2>&1; then
-                gk3_fail resize2fs -- "resize2fs 失败 —— 分区表还没动过"; return 1
-            fi ;;
-        *) gk3_fail fs-unsupported "fs=$fs" -- "不支持缩 $fs"; return 1 ;;
-    esac
-
-    # ── 第 2 步：缩分区（文件系统已经小了，这一步才安全）────────────────
-    gk3_prog 70 gpt-edit
-    start=$(sgdisk -i "$num" "$disk" 2>/dev/null | grep '^First sector:' | awk '{print $3}')
-    if [ -z "$start" ]; then
-        gk3_fail gpt-read "part=$part" -- "读不到分区 $num 的起始扇区"; return 1
-    fi
-    end=$(( start + target_mib * 2048 - 1 ))
-    if ! sgdisk -d "$num" "$disk" >/dev/null 2>&1; then
-        gk3_fail gpt-rewrite -- "删旧分区项失败"; return 1
-    fi
-    if ! sgdisk -n "${num}:${start}:${end}" -t "${num}:${pt}" -u "${num}:${pu}" "$disk" >/dev/null 2>&1; then
-        gk3_fail gpt-rewrite -- "重建分区项失败 —— 分区表备份在 $bk"; return 1
-    fi
-    # 分区名丢了的话 by-name 找不到它（userdata / metadata 丢了名字，以后重新安装就找不到）
-    if [ -n "$pl" ] && ! sgdisk -c "${num}:${pl}" "$disk" >/dev/null 2>&1; then
-        gk3_fail gpt-rewrite -- "分区名 $pl 没写回去 —— 分区表备份在 $bk"; return 1
-    fi
-    gk3__part_attr_restore "$disk" "$num" "$pattr" || return 1
-    gk3__settle "$disk"
-
-    # ── 第 3 步：验 ─────────────────────────────────────────────────────
-    gk3_prog 90 verify
-    newpu=$(sgdisk -i "$num" "$disk" 2>/dev/null | grep '^Partition unique GUID:' | awk '{print $4}')
-    if [ "$newpu" != "$pu" ]; then
-        gk3_fail partuuid-changed -- "PARTUUID 变了（$pu -> ${newpu}）—— Windows 会起不来"; return 1
-    fi
-    newmib=$(( $(blockdev --getsize64 "$part" 2>/dev/null || echo 0) / 1048576 ))
-    [ "$newmib" = "$target_mib" ] \
-        || { gk3_fail shrink-size-mismatch "have_mib=$newmib" "want_mib=$target_mib" -- "分区 $num 现在是 ${newmib} MiB，不是要的 ${target_mib} MiB（内核没看到新分区表？）—— 文件系统已缩到 ${target_mib} MiB，数据完好；重启后看一眼"; return 1; }
-    echo "分区 ${num}：${cur} MiB -> ${newmib} MiB（PARTUUID 未变）" >&2
-    gk3_prog 100 done
-    return 0
 }
 
 # ── 网络 ────────────────────────────────────────────────────────────────────
@@ -2300,32 +2073,14 @@ gk3_esp_info() {
          "entry=$(gk3__enc "${ver:-none}") entry_mode=$emode entry_state=${est:-none} staged=$staged prev=$prev loader_default=$ld boot_entries=$be"
 }
 
-# 一次问完整块盘上所有分区能不能缩。
-# ⚠️ 界面那边原来是逐个分区调 gk3_shrink_info，每次都要 fork 一个 shell 并
-#    source 整个库 —— 8 个分区就是 8 次。合成一个调用。
-gk3_shrink_scan() {
-    local disk=$1 n part
-    [ -b "$disk" ] || { gk3_fail not-block "dev=$disk" -- "不是块设备：$disk"; return 1; }
-    for n in $(sgdisk -p "$disk" 2>/dev/null | awk '/^ *[0-9]+ /{print $1}'); do
-        part=$(gk3_partpath "$disk" "$n")
-        [ -b "$part" ] || continue
-        gk3_shrink_info "$part" || true
-    done
-}
-
-# ── 手动调整磁盘（用户 2026-09-25："能给的都给"）─────────────────────────────
-# 参考别的安装器：Windows 安装程序在选盘页直接给 删除 / 格式化 / 新建 / 扩展，每一步立即生效；
-# Ubuntu（新的桌面安装器也是 Flutter 写的）在"安装类型"最后一项进手动分区。这里入口学 Ubuntu
-# （安装方式页最后一项"手动调整磁盘"），执行学 Windows：每个操作单独确认、立即执行 —— 攒到最后一起做，
-# 中途失败时留下的中间状态讲不清楚。
+# ── 删除分区 ────────────────────────────────────────────────────────────────
+# 安装方式页最后一项"删除分区"：腾出空间（例如删掉 Windows 恢复分区、华为一键恢复分区，"磁盘管理"删不了它们）。
+# 每次删除单独确认、立即执行。缩小分区与新建、格式化不在这里做：空间在 Windows 里用"压缩卷"腾出。
 #
 #   gk3_part_delete <分区>
-#   gk3_part_format <分区> ext4|vfat|ntfs
-#   gk3_part_create --disk D --start <扇区> --size-mib N --fs ext4|vfat|ntfs|none
-#   gk3_part_resize <分区> <目标 MiB>      变小走 gk3_shrink；变大 = 并进紧挨在后面的空闲
-# 成功时 stdout 一行 RESULT op=… part=…；失败走 gk3_die（盘没动过时会说）。
+# 成功时 stdout 一行 RESULT op=delete part=…；失败走 gk3_die（盘没动过时会说）。
 #
-# ★ 共同的闸（gk3__edit_guard）：块设备；不是 ESP（删或格式化它，盘上所有系统都起不来 —— 要重建 ESP
+# ★ 闸（gk3__edit_guard）：块设备；不是 ESP（删了它，盘上所有系统都无法启动 —— 要重建 ESP
 #   就用整盘清空）；没挂着（首先是安装器所在的那个分区）；动手之前把分区表备份到介质。
 # ★ 删除【不】抹文件系统签名：分区表备份还原回去，数据就还在（Windows 的删除也是这样）。
 GK3_ESP_GUID=C12A7328-F81F-11D2-BA4B-00A0C93EC93B
@@ -2342,21 +2097,12 @@ gk3__edit_guard() {    # $1=分区 → 设 GK3_E_DISK / GK3_E_NUM
     GK3_E_DISK=/dev/$(lsblk -no PKNAME "$part" 2>/dev/null | head -1)
     GK3_E_NUM=$(cat "/sys/class/block/$(basename "$part")/partition" 2>/dev/null)
     [ -b "$GK3_E_DISK" ] && [ -n "$GK3_E_NUM" ] || { gk3_fail part-unknown "part=$part" -- "认不出 $part 属于哪块盘的第几个分区"; return 1; }
-    # MBR 盘：删 / 改类型码 / 重建分区项都是 sgdisk 写表，一定失败（格式化是先 mkfs 再改类型码 —— 数据已经没了才报错）；
+    # MBR 盘：删除分区项是 sgdisk 写 GPT，一定失败；
     # 读不出的盘不动（设计稿 S1 / S2）
     gk3__table_guard "$GK3_E_DISK"
 }
 
-# 分区的 GPT 属性位（16 位十六进制）。重建分区项时要原样带过去 —— Windows 恢复分区靠它们
-# （"平台必需" / "不分配盘符"；2026-09-27 审查）
-gk3__part_attr() { sgdisk -i "$2" "$1" 2>/dev/null | awk '/^Attribute flags:/{print $3}'; }
-gk3__part_attr_restore() {    # $1=盘 $2=号 $3=原来的属性位
-    [ -z "$3" ] || [ "$3" = 0000000000000000 ] && return 0
-    sgdisk -A "$2:=:$3" "$1" >/dev/null 2>&1 && [ "$(gk3__part_attr "$1" "$2")" = "$3" ] \
-        || { gk3_fail part-attr -- "分区 $2 的属性位 $3 没带回去"; return 1; }
-}
-
-# 动盘之前备份分区表到介质（出事一条命令还原）。gk3_apply / gk3_shrink / 调整磁盘共用这一份；路径留在 GK3_GPT_BK。
+# 动盘之前备份分区表到介质（出事一条命令还原）。gk3_apply 与删除分区共用这一份；路径留在 GK3_GPT_BK。
 # ⚠️ "还原：sgdisk --load-backup=" 这几个字界面在认（screens_finish.dart 的失败页），别改
 gk3__gpt_backup() {    # $1=盘 $2=标签
     local disk=$1 dir=/media/gk3/gaokun3
@@ -2404,18 +2150,6 @@ gk3__node_matches() {
     fi
 }
 
-gk3__mkfs() {          # $1=分区 $2=ext4|vfat|ntfs
-    case "$2" in
-        ext4) mkfs.ext4 -q -F "$1" ;;
-        vfat) mkfs.vfat -F 32 "$1" >/dev/null ;;
-        ntfs) mkntfs -Q -F "$1" >/dev/null 2>&1 ;;   # -Q 快速（不清零整个分区）
-        *) return 2 ;;
-    esac
-}
-
-# 分区类型跟着文件系统走：Windows 只认 Basic data，Linux 的认 Linux filesystem
-gk3__type_for_fs() { case "$1" in vfat|ntfs) echo 0700 ;; *) echo 8300 ;; esac; }
-
 gk3_part_delete() {
     local part=$1
     gk3__edit_guard "$part" || return 1
@@ -2426,136 +2160,6 @@ gk3_part_delete() {
     gk3__settle "$GK3_E_DISK"
     gk3_prog 100 done
     echo "RESULT op=delete part=$part"
-}
-
-gk3_part_format() {
-    local part=$1 fs=$2 tool
-    case "$fs" in ext4) tool=mkfs.ext4 ;; vfat) tool=mkfs.vfat ;; ntfs) tool=mkntfs ;; *) gk3_fail fs-unsupported "fs=$fs" -- "不支持的文件系统：$fs"; return 1 ;; esac
-    command -v "$tool" >/dev/null || { gk3_fail tool-missing "tool=$tool" -- "缺工具：$tool"; return 1; }
-    gk3__edit_guard "$part" || return 1
-    gk3_prog 20 part-format "part=$part" "fs=$fs"
-    gk3__mkfs "$part" "$fs" || { gk3_fail mkfs "part=$part" -- "格式化 $part 失败"; return 1; }
-    # 类型码没改过去的话，格式化成 NTFS 的分区 Windows 不认（审查 #8）—— 文件系统已经建好，说清楚
-    sgdisk -t "$GK3_E_NUM:$(gk3__type_for_fs "$fs")" "$GK3_E_DISK" >/dev/null 2>&1 \
-        || { gk3_fail part-type -- "已格式化成 ${fs}，但分区类型码没改过去（sgdisk -t 失败）—— 别的系统可能不认它"; return 1; }
-    gk3__settle "$GK3_E_DISK"
-    gk3_prog 100 done
-    echo "RESULT op=format part=$part fs=$fs"
-}
-
-gk3_part_create() {
-    local disk="" start="" mib="" fs=ext4 name
-    while [ $# -gt 0 ]; do
-        case "$1" in
-            --disk) disk=$2; shift 2 ;; --start) start=$2; shift 2 ;;
-            --size-mib) mib=$2; shift 2 ;; --fs) fs=$2; shift 2 ;;
-            *) gk3_fail usage -- "create: 不认识的参数 $1"; return 1 ;;
-        esac
-    done
-    [ -b "$disk" ] && [ -n "$start" ] && [ -n "$mib" ] || { gk3_fail usage -- "create 要 --disk --start --size-mib"; return 1; }
-    case "$fs" in ext4|vfat|ntfs|none) ;; *) gk3_fail fs-unsupported "fs=$fs" -- "不支持的文件系统：$fs"; return 1 ;; esac
-    gk3__table_guard "$disk" || return 1      # 同 gk3__edit_guard
-    # 起点对齐到 1 MiB；整段必须落在【某一段】空闲区里 —— 空闲区用 gk3_probe 同一套算法算，不另写一份
-    local st=$(( (start + 2047) / 2048 * 2048 )) en ok="" line a b
-    en=$(( st + mib * 2048 - 1 ))
-    while read -r line; do
-        [ -n "$line" ] || continue
-        a=$(gk3__f "$line" start); b=$(gk3__f "$line" end)
-        [ "$st" -ge "$a" ] && [ "$en" -le "$b" ] && ok=1
-    done <<EOF
-$(gk3__probe_parts "$disk" "$(cat "/sys/block/$(basename "$disk")/size" 2>/dev/null || echo 0)" | grep '^FREE ')
-EOF
-    [ -n "$ok" ] || { gk3_fail create-overlap -- "扇区 [$st, $en] 不在任何一段空闲区里 —— 会压到别的分区（盘没动过）"; return 1; }
-    case "$fs" in vfat|ntfs) name="Basic data partition" ;; *) name=linux ;; esac
-    gk3_prog 10 gpt-backup
-    gk3__gpt_backup "$disk" create
-    gk3_prog 30 part-create "mib=$mib"
-    sgdisk -n "0:$st:$en" -t "0:$(gk3__type_for_fs "$fs")" -c "0:$name" "$disk" >/dev/null 2>&1 || { gk3_fail create-failed -- "sgdisk 建分区失败"; return 1; }
-    gk3__settle "$disk"
-    # sgdisk -n 0 自己挑编号：按起始扇区找回来
-    local num part
-    num=$(sgdisk -p "$disk" 2>/dev/null | awk -v s="$st" '/^ *[0-9]+ /{ if ($2 == s) print $1 }')
-    part=$(gk3_partpath "$disk" "$num")
-    [ -n "$num" ] && gk3__wait_node "$part" || { gk3_fail create-node -- "新分区的节点没出现（${part}）"; return 1; }
-    if [ "$fs" != none ]; then
-        gk3_prog 60 part-format "fs=$fs"
-        gk3__mkfs "$part" "$fs" || { gk3_fail mkfs "part=$part" -- "格式化新分区 $part 失败（分区已建好）"; return 1; }
-    fi
-    gk3_prog 100 done
-    echo "RESULT op=create part=$part fs=$fs size_mib=$mib"
-}
-
-gk3_part_resize() {
-    local part=$1 target=$2 cur
-    [ -b "$part" ] || { gk3_fail not-block "dev=$part" -- "不是块设备：$part"; return 1; }
-    cur=$(( $(blockdev --getsize64 "$part" 2>/dev/null || echo 0) / 1048576 ))
-    if [ "$target" -lt "$cur" ]; then
-        gk3__edit_guard "$part" || return 1
-        gk3_shrink "$part" "$target" || return 1
-        echo "RESULT op=shrink part=$part size_mib=$target"; return 0
-    fi
-    [ "$target" -gt "$cur" ] || { gk3_fail grow-same -- "目标大小与现在一样（${cur} MiB）"; return 1; }
-    gk3__grow "$part" "$target"
-}
-
-# 扩大：先扩分区项（同一个起点、同一个 PARTUUID / 名字 / 类型 —— 与 gk3_shrink 同一种重建），再扩文件系统。
-# 只能并进【紧挨在后面】的空闲：要把前面的空间也并进来就得挪数据，那是另一个量级的风险，不做。
-gk3__grow() {
-    local part=$1 target=$2 fs disk num st en pu pl pt next last lim newend rc
-    gk3__edit_guard "$part" || return 1
-    disk=$GK3_E_DISK; num=$GK3_E_NUM
-    fs=$(blkid -o value -s TYPE "$part" 2>/dev/null)
-    case "$fs" in
-        ext2|ext3|ext4) command -v resize2fs >/dev/null || { gk3_fail tool-missing tool=resize2fs -- "缺工具：resize2fs"; return 1; } ;;
-        ntfs) command -v ntfsresize >/dev/null || { gk3_fail tool-missing tool=ntfsresize -- "缺工具：ntfsresize"; return 1; } ;;
-        *) gk3_fail fs-unsupported "fs=${fs:-none}" -- "不支持扩大 ${fs:-没有文件系统的分区}（只支持 ext 与 NTFS）"; return 1 ;;
-    esac
-    st=$(sgdisk -i "$num" "$disk" 2>/dev/null | awk '/^First sector:/{print $3}')
-    en=$(sgdisk -i "$num" "$disk" 2>/dev/null | awk '/^Last sector:/{print $3}')
-    pu=$(sgdisk -i "$num" "$disk" 2>/dev/null | grep '^Partition unique GUID:' | awk '{print $4}')
-    pl=$(sgdisk -i "$num" "$disk" 2>/dev/null | grep '^Partition name:' | cut -d"'" -f2)
-    pt=$(sgdisk -i "$num" "$disk" 2>/dev/null | grep '^Partition GUID code:' | awk '{print $4}')
-    local pattr; pattr=$(gk3__part_attr "$disk" "$num")
-    [ -n "$st" ] && [ -n "$pu" ] && [ -n "$pt" ] || { gk3_fail gpt-read "part=$part" -- "读不到分区 $num 的起点 / GUID —— 不敢重建它"; return 1; }
-    next=$(sgdisk -p "$disk" 2>/dev/null | awk -v e="$en" '/^ *[0-9]+ /{ if ($2 > e && (n == "" || $2 < n)) n = $2 } END { print n }')
-    last=$(sgdisk -p "$disk" 2>/dev/null | sed -n 's/.*last usable sector is \([0-9]*\).*/\1/p')
-    lim=$(( ${next:-$(( last + 1 ))} - 1 ))
-    newend=$(( st + target * 2048 - 1 ))
-    if [ "$newend" -gt "$lim" ]; then
-        gk3_fail grow-no-room "max_mib=$(( (lim - st + 1) / 2048 ))" -- "后面紧挨着的空闲不够：最多能扩到 $(( (lim - st + 1) / 2048 )) MiB（盘没动过）"; return 1
-    fi
-    if [ "$fs" = ntfs ]; then
-        # 与缩小同一条纪律：脏卷（Windows 快速启动 / 休眠）不碰 —— ntfsresize --info 先问一遍
-        gk3__ntfs_trial_mount "$part" || return 1
-        ntfsresize --info "$part" >/dev/null 2>&1 </dev/null || { gk3_fail ntfs-check -- "ntfsresize 检查没通过（卷脏？回 Windows 关掉快速启动、正常关机）—— 盘没动过"; return 1; }
-    fi
-    gk3_prog 10 gpt-backup
-    gk3__gpt_backup "$disk" grow
-    gk3_prog 30 grow-entry
-    sgdisk -d "$num" "$disk" >/dev/null 2>&1 || { gk3_fail gpt-rewrite -- "删旧分区项失败"; return 1; }
-    sgdisk -n "$num:$st:$newend" -t "$num:$pt" -u "$num:$pu" "$disk" >/dev/null 2>&1 \
-        || { gk3_fail gpt-rewrite -- "重建分区项失败 —— 用上面的分区表备份还原"; return 1; }
-    if [ -n "$pl" ]; then
-        sgdisk -c "$num:$pl" "$disk" >/dev/null 2>&1 || { gk3_fail gpt-rewrite -- "分区名 $pl 没写回去 —— 用上面的分区表备份还原"; return 1; }
-    fi
-    gk3__part_attr_restore "$disk" "$num" "$pattr" || return 1
-    gk3__settle "$disk"
-    gk3__wait_node "$part" || { gk3_fail part-node-timeout "dev=$part" -- "分区节点没回来（${part}）"; return 1; }
-    # 内核看到的必须已经是新大小 —— 否则 resize2fs / ntfsresize 会说"不用改"然后退出 0，报一个假的"扩大完成"
-    [ "$(blockdev --getsize64 "$part" 2>/dev/null)" = "$(( target * 1048576 ))" ] \
-        || { gk3_fail grow-kernel-stale -- "内核还没看到新的分区大小（${part}）—— 分区项已扩大，文件系统没动；重启后再扩一次"; return 1; }
-    gk3_prog 60 grow-fs
-    case "$fs" in
-        ntfs) ntfsresize --force "$part" >/dev/null 2>&1 </dev/null || { gk3_fail grow-ntfs -- "扩大 NTFS 失败（分区项已扩大，文件系统还是原来的大小，数据完好）"; return 1; } ;;
-        *)
-            e2fsck -fp "$part" >/dev/null 2>&1; rc=$?
-            [ "$rc" -lt 4 ] || { gk3_fail fsck "rc=$rc" -- "e2fsck 报错（${rc}），不敢扩"; return 1; }
-            resize2fs "$part" >/dev/null 2>&1 || { gk3_fail grow-resize2fs -- "resize2fs 失败（分区项已扩大，文件系统还是原来的大小，数据完好）"; return 1; } ;;
-    esac
-    [ "$(sgdisk -i "$num" "$disk" 2>/dev/null | grep '^Partition unique GUID:' | awk '{print $4}')" = "$pu" ] \
-        || { gk3_fail partuuid-changed -- "PARTUUID 变了 —— Windows 会起不来"; return 1; }
-    gk3_prog 100 done
-    echo "RESULT op=grow part=$part size_mib=$target"
 }
 
 # ── 写盘进程脱离界面（v1.0 计划 GUI-11）──────────────────────────────────────

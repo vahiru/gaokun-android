@@ -38,7 +38,7 @@ void main() {
     await see(t, find.text(l.confirmAlongHead));
     await see(t, find.text(l.confirmWindowsKept));
     // 值落在对的位置（占位符顺序那个 bug：曾渲染成"创建 /dev/nvme0n1p1 的分区…EFI 分区 80 GiB"）
-    await see(t, find.textContaining('EFI 分区 /dev/nvme0n1p1'));
+    await see(t, find.textContaining(tail(l.confirmAlongBody(hole, '/dev/nvme0n1p1'))));
     await hold(t, l.confirmHoldIdle);
     await see(t, find.text(l.doneTitle));
     final a = rec.last('gk3_apply')!.join(' ');
@@ -49,26 +49,24 @@ void main() {
     expect(a, contains('--release /media/gk3/gaokun3/payload'));
   });
 
-  testWidgets('windows-setup（2026-09-27 起 Windows 脚本的默认：只划了 GK3LIVE、没有空闲）→ 在安装器里缩 Data → 双系统装进 Data 与 GK3LIVE 之间', (t) async {
-    final rec = await pumpApp(t, 'windows-setup');
+  testWidgets('windows-setup（Windows 脚本只划了 GK3LIVE、没有空闲）：双系统禁用并报"至少要多少"，安装器里不缩分区', (t) async {
+    await pumpApp(t, 'windows-setup');
     await tap(t, find.text(l.btnStart));
     await tap(t, find.textContaining('/dev/nvme0n1'));
     await next(t);
     await see(t, find.text(l.modeTitle));
-    // 没有空闲：双系统报"至少要多少"（后端的数），缩分区可选
     // 安装器就在这块盘上（GK3LIVE）⇒ 默认不另装救援（GUI-17），所以是不带救援的那个数（20644 MiB = 20.2 GiB）
-    await see(t, find.textContaining('至少需要 ${fmtMib(20644)}'));
+    await see(t, find.text(l.modeWhyNoFree(fmtMib(20644))));
     expect(find.text(l.modeAlongOk), findsNothing);
-    await tap(t, find.text(l.modeShrinkTitle));
+    // 腾空间要回 Windows 压缩卷；这里只剩删除分区
+    expect(find.text(l.editEntryTitle), findsOneWidget);
+  });
+
+  testWidgets('windows-setup-shrunk（在 Windows 里压缩出空间之后）→ 双系统装进 Data 与 GK3LIVE 之间', (t) async {
+    final rec = await pumpApp(t, 'windows-setup-shrunk');
+    await tap(t, find.text(l.btnStart));
+    await tap(t, find.textContaining('/dev/nvme0n1'));
     await next(t);
-    await passRisk(t);
-    await see(t, find.text(l.shrinkTitle));
-    await tap(t, find.textContaining('Data'));
-    await hold(t, l.shrinkGo);
-    expect(rec.last('gk3_shrink')!.first, 'gk3_shrink');
-    expect(rec.last('gk3_shrink')![1], '/dev/nvme0n1p4');
-    // 缩完回到方式页（场景换成 windows-setup-shrunk）：双系统可行
-    await see(t, find.text(l.modeTitle));
     await see(t, find.text(l.modeAlongOk));
     await tap(t, find.text(l.modeAlongTitle));
     await next(t);
@@ -120,36 +118,14 @@ void main() {
     await see(t, find.textContaining('busybox: No such file or directory'));
   });
 
-  testWidgets('factory：没有空闲区 → 双系统禁用并报"至少要多少"（后端报的数）→ 缩分区 → 双系统可选', (t) async {
+  testWidgets('factory：没有空闲区 → 双系统禁用并报"至少要多少"（后端报的数）', (t) async {
     await pumpApp(t, 'factory');
     await tap(t, find.text(l.btnStart));
     await tap(t, find.textContaining('/dev/nvme0n1'));
     await next(t);
     // 21668 MiB = 21.2 GiB —— 来自 gk3_plan 的 PLANERR need_mib，不是界面写死的
-    await see(t, find.textContaining('至少需要 ${fmtMib(21668)}'));
+    await see(t, find.text(l.modeWhyNoFree(fmtMib(21668))));
     expect(find.text(l.modeAlongOk), findsNothing);
-    await tap(t, find.text(l.modeShrinkTitle));
-    await next(t);
-    await passRisk(t);
-    await see(t, find.text(l.shrinkTitle));
-    await tap(t, find.textContaining('Data'));
-    await hold(t, l.shrinkGo);
-    // 缩完回到方式页：场景已经换成 windows-free，双系统可行、并且替用户选上了
-    await see(t, find.text(l.modeTitle));
-    await see(t, find.text(l.modeAlongOk));
-  });
-
-  testWidgets('factory、C: 与 D: 都加了密（BitLocker / 设备加密）：缩分区页写明"只有 Windows 能缩"，不说"文件系统不支持"', (t) async {
-    await pumpApp(t, 'factory', overrides: {'gk3_shrink_scan': 'shrink_scan-bitlocker.txt'});
-    await tap(t, find.text(l.btnStart));
-    await tap(t, find.textContaining('/dev/nvme0n1'));
-    await next(t);
-    await tap(t, find.text(l.modeShrinkTitle));
-    await next(t);
-    await passRisk(t);
-    await see(t, find.text(l.shrinkTitle));
-    await see(t, find.text(l.shrinkWhyBitlocker), findsWidgets); // 两个加密卷各一条
-    expect(find.text(l.shrinkWhyFs), findsNothing);
   });
 
   testWidgets('blank：整盘安装；确认页如实说"没有任何分区"', (t) async {
@@ -228,7 +204,7 @@ void main() {
     await next(t); // → 选项
     await see(t, find.text(l.optsKeepTitle));
     expect(find.text(l.optsAdvanced), findsNothing);   // 不改分区表：没有分区大小可调
-    await see(t, find.textContaining('/data 将被清空'));
+    await see(t, find.textContaining(lead(l.optsDataWiped(hole))));
     await next(t);
     await passRisk(t);
     await see(t, find.text(l.confirmReinstallHead));
@@ -252,7 +228,7 @@ void main() {
     await next(t);
     await next(t);
     await tap(t, find.text(l.optsKeepTitle));
-    await see(t, find.textContaining('/data 保留'));
+    await see(t, find.textContaining(lead(l.optsDataKept(hole))));
     await next(t);
     await passRisk(t);
     await see(t, find.text(l.actKeep), findsNWidgets(2));
@@ -273,14 +249,16 @@ void main() {
     return rec;
   }
 
-  testWidgets('调整磁盘：删除一个分区 —— 按住确认，调用对，完成后回到安装方式页重新评估', (t) async {
+  testWidgets('删除分区：删除华为一键恢复分区 —— 说明后果、按住确认，调用对，完成后回到安装方式页重新评估', (t) async {
     final rec = await openEdit(t, 'factory');
     await tap(t, find.textContaining('Onekey'));
     await tap(t, find.text(l.editDelete));
     await see(t, find.text(l.editDeleteWarn));
+    await see(t, find.text(l.editDeleteOnekey));
+    expect(find.text(l.editDeleteWinre), findsNothing);
     await hold(t, '${l.editDelete} · ${l.holdIdle}');
     expect(rec.last('gk3_part_delete'), ['gk3_part_delete', '/dev/nvme0n1p6']);
-    await see(t, find.textContaining('已完成'));
+    await see(t, find.text(l.editOk('Onekey')));
     final probes = rec.calls.where((c) => c.first == 'gk3_probe').length;
     await tap(t, find.text(l.editDone)); // 右下角"完成" → 回到方式页
     await see(t, find.text(l.modeTitle));
@@ -288,43 +266,30 @@ void main() {
     expect(rec.calls.where((c) => c.first == 'gk3_probe').length, greaterThanOrEqualTo(probes));
   });
 
-  testWidgets('调整磁盘：ESP 只说原因、不给操作', (t) async {
+  testWidgets('删除分区：Windows 恢复分区写明删除后恢复环境无法使用', (t) async {
     await openEdit(t, 'factory');
+    await tap(t, find.textContaining('WinRE'));
+    await tap(t, find.text(l.editDelete));
+    await see(t, find.text(l.editDeleteWinre));
+    expect(find.text(l.editDeleteOnekey), findsNothing);
+  });
+
+  testWidgets('删除分区：ESP 只说原因、不给按钮；未分配空间不能选', (t) async {
+    await openEdit(t, 'windows-free');
     await tap(t, find.textContaining('SYSTEM'));
     await see(t, find.text(l.editWhyEsp));
     expect(find.text(l.editDelete), findsNothing);
-    expect(find.text(l.editFormat), findsNothing);
-  });
-
-  testWidgets('调整磁盘：在空闲空间新建 —— 默认占满整段、ext4', (t) async {
-    final rec = await openEdit(t, 'windows-free');
+    // 未分配空间点了不改变选择
     await tap(t, find.text(l.editFree));
-    await tap(t, find.text(l.editCreate));
-    await hold(t, '${l.editCreate} · ${l.holdIdle}');
-    final a = rec.last('gk3_part_create')!;
-    expect(a.join(' '), contains('--disk /dev/nvme0n1 --start 790497280'));
-    expect(a.join(' '), contains('--size-mib 81920'));   // 空闲区 [790497280, 958269439] 起点本来就对齐 1 MiB：整段正好 81920 MiB
-    expect(a.join(' '), contains('--fs ext4'));
+    await see(t, find.text(l.editWhyEsp));
   });
 
-  testWidgets('调整磁盘：拖滑块缩小 Data，发出去的目标比现在小', (t) async {
-    final rec = await openEdit(t, 'factory');
-    await tap(t, find.textContaining('Data'));
-    await tap(t, find.text(l.editResize));
-    await t.drag(find.byType(Slider), const Offset(-120, 0));
-    await settle(t);
-    await hold(t, '${l.editResize} · ${l.holdIdle}');
-    final a = rec.last('gk3_part_resize')!;
-    expect(a[1], '/dev/nvme0n1p4');
-    expect(int.parse(a[2]), lessThan(262788 + 1));   // Data 在 factory 里是 262788 MiB
-  });
-
-  testWidgets('调整磁盘：后端拒绝时把原因显示出来', (t) async {
+  testWidgets('删除分区：后端拒绝时把原因显示出来', (t) async {
     await openEdit(t, 'factory', overrides: {'gk3_part_delete': 'part_delete-esp.txt'});
     await tap(t, find.textContaining('Onekey'));
     await tap(t, find.text(l.editDelete));
     await hold(t, '${l.editDelete} · ${l.holdIdle}');
-    await see(t, find.textContaining('EFI 系统分区'));
+    await see(t, find.text(l.editFailed(l.editWhyEsp)));
   });
 
   testWidgets('预检：BIOS 2.17 不再拦（2026-09-25）；安全启动开着 → 拦住', (t) async {
@@ -336,7 +301,7 @@ void main() {
     expect(btn.onPressed, isNull);
   });
 
-  testWidgets('返回走的是真正来的那一页（C 版 screen-- 会掉进没走过的缩分区页）', (t) async {
+  testWidgets('返回走的是真正来的那一页（C 版 screen-- 会掉进没走过的页）', (t) async {
     await pumpApp(t, 'windows-free');
     await tap(t, find.text(l.btnStart));
     await tap(t, find.textContaining('/dev/nvme0n1'));
@@ -346,7 +311,6 @@ void main() {
     await see(t, find.text(l.sourceTitle));
     await tap(t, find.text(l.btnBack));
     await see(t, find.text(l.modeTitle));
-    expect(find.text(l.shrinkTitle), findsNothing);
   });
 
   testWidgets('WiFi 两步式：软键盘输密码，短于 8 位不许连；连上后选版本；网络安装先下载再 apply', (t) async {
@@ -374,7 +338,7 @@ void main() {
     expect(find.text(l.netPasswordLength), findsNothing);
     await tap(t, find.text(l.netConnect));
     expect(rec.last('gk3_wifi_connect'), ['gk3_wifi_connect', 'hex:e5aebfe8888de7bd912d3547', 'abcdefgh']);
-    await see(t, find.textContaining('已连接到 宿舍网-5G（192.168.10.239）'));
+    await see(t, find.textContaining(l.netConnected('宿舍网-5G', '192.168.10.239')));
     await next(t);
     await see(t, find.text(l.variantTitle));
     await tap(t, find.text('标准版'));
@@ -435,7 +399,7 @@ void main() {
     await tap(t, find.text(l.netConnect));
     expect(rec.last('gk3_wifi_connect'), ['gk3_wifi_connect', 'hex:6c6162', 'abcdefgh', 'hidden']);
     await see(t, find.text(l.netTitle)); // 连上后回到列表
-    await see(t, find.textContaining('已连接到'));
+    await see(t, find.textContaining(lead(l.netConnected(hole, ''))));
   });
 
   testWidgets('安装失败：失败页给出错误、说明分区表有备份、不许返回', (t) async {
@@ -529,10 +493,10 @@ void main() {
     await tap(t, find.text('取消'));
     expect(rec.power, isEmpty);
     await tap(t, find.text(l.railPoweroff));
-    await tap(t, find.text('现在关机'));
+    await tap(t, find.text(l.powerPoweroffTitle.replaceAll(RegExp(r'[？?]$'), '')));
     expect(rec.power, ['poweroff']);
     await tap(t, find.text(l.railReboot));
-    await tap(t, find.text('现在重新启动'));
+    await tap(t, find.text(l.powerRebootTitle.replaceAll(RegExp(r'[？?]$'), '')));
     expect(rec.power, ['poweroff', 'reboot']);
   });
 
@@ -575,7 +539,7 @@ void main() {
       await tap(t, find.text(k));
     }
     await tap(t, find.text(l.netConnect));
-    await see(t, find.textContaining('已连接到'));
+    await see(t, find.textContaining(lead(l.netConnected(hole, ''))));
     await next(t);
     await tap(t, find.text('标准版'));
     await next(t);
@@ -594,29 +558,6 @@ void main() {
     await see(t, find.text(l.doneTitle));
   });
 
-  testWidgets('缩分区的默认值：/data 约 64 GiB（不是原先的约 16 GiB）；拖到只腾一点时黄色提醒（v1.0 计划 GUI-20）', (t) async {
-    final rec = await pumpApp(t, 'factory');
-    await tap(t, find.text(l.btnStart));
-    await tap(t, find.textContaining('/dev/nvme0n1'));
-    await next(t);
-    await tap(t, find.text(l.modeShrinkTitle));
-    await next(t);
-    await passRisk(t);
-    await tap(t, find.textContaining('Data'));
-    // 固定开销 13476 MiB 来自 PLANERR fixed_mib（双系统 + 救援）；Data 现在 344708 MiB
-    await see(t, find.text(l.shrinkData(fmtMib(65536))));
-    expect(find.textContaining('建议至少留 32 GiB'), findsNothing);
-    // 往右拖到头 = 几乎不缩：/data 不够 → 提醒（只提醒，不拦）
-    await t.drag(find.byType(Slider), const Offset(600, 0));
-    await settle(t);
-    await see(t, find.textContaining('建议至少留 32 GiB'));
-    await t.drag(find.byType(Slider), const Offset(-2000, 0)); // 拖回最左再选一次 = 回到默认
-    await settle(t);
-    await tap(t, find.textContaining('Data'));
-    await hold(t, l.shrinkGo);
-    expect(rec.last('gk3_shrink'), ['gk3_shrink', '/dev/nvme0n1p4', '${344708 - 13476 - 65536}']);
-  });
-
   testWidgets('分区大小页：/data 拖到 32 GiB 以下时黄色提醒（v1.0 计划 GUI-20）', (t) async {
     await pumpApp(t, 'windows-free');
     await tap(t, find.text(l.btnStart));
@@ -626,13 +567,13 @@ void main() {
     await next(t);
     await next(t); // 来源
     await see(t, find.text(l.optsTitle));
-    expect(find.textContaining('建议至少留 32 GiB'), findsNothing); // 默认 66.8 GiB
+    expect(find.textContaining(tail(l.dataSmallWarn(hole))), findsNothing); // 默认 66.8 GiB
     await tap(t, find.text(l.optsAdvanced));
     await see(t, find.text(l.advTitle));
-    expect(find.textContaining('建议至少留 32 GiB'), findsNothing);
+    expect(find.textContaining(tail(l.dataSmallWarn(hole))), findsNothing);
     await t.drag(find.byType(Slider), const Offset(-2000, 0));
     await settle(t);
-    await see(t, find.textContaining('建议至少留 32 GiB'));
+    await see(t, find.textContaining(tail(l.dataSmallWarn(hole))));
   });
 
   // ── v1.0 批 3：安装器前端与协议（INST-10 / GUI-4/5/8/9/14/17/18/19）──────────────────────────────
@@ -1074,7 +1015,9 @@ void main() {
     await next(t, en);
     await next(t, en);
     await passRisk(t, loc: en);
-    await see(t, find.text(en.confirmBitlockerHead));
+    await see(t, find.text(en.confirmTitle));
+    // 英文比中文长，BitLocker 这一段落在列表下方：懒加载的列表要滚到才会建出来
+    await t.scrollUntilVisible(find.text(en.confirmBitlockerHead), 200, scrollable: find.byType(Scrollable).last);
     expect(cjkOnScreen(t), isEmpty);
   });
 
@@ -1127,7 +1070,7 @@ void main() {
       await settle(t);
       expect(find.text(l.riskTitle), findsOneWidget);
       expect(find.text(nextTitle), findsNothing);
-      for (final fn in ['gk3_apply', 'gk3_shrink', 'gk3_part_delete', 'gk3_part_create', 'gk3_part_format', 'gk3_part_resize']) {
+      for (final fn in ['gk3_apply', 'gk3_part_delete']) {
         expect(rec.last(fn), isNull, reason: fn);
       }
     }
@@ -1250,19 +1193,7 @@ void main() {
       await tapDoesNothing(t, rec, l.confirmTitle);
     });
 
-    testWidgets('缩分区：方式页 → 风险页 → 缩分区页；不要确认词；没过风险页就没有缩分区页', (t) async {
-      final rec = await toRisk(t, 'factory', (x) => x.modeShrinkTitle, install: false);
-      await see(t, find.text(l.riskShrinkHead));
-      await see(t, find.text(l.riskNoCancelStep));
-      expect(find.byKey(kRiskWordKey), findsNothing);
-      await tapDoesNothing(t, rec, l.shrinkTitle);
-      // 返回：回到方式页，什么都没做
-      await tap(t, find.text(l.btnBack));
-      await see(t, find.text(l.modeTitle));
-      expect(rec.last('gk3_shrink'), isNull);
-    });
-
-    testWidgets('手动调整磁盘（盘上有 Windows）：经过风险页、要确认词；从调整页"完成"直接回到方式页（不停在风险页）', (t) async {
+    testWidgets('删除分区（盘上有 Windows）：经过风险页、要确认词；从删除分区页"完成"直接回到方式页（不停在风险页）', (t) async {
       final rec = await toRisk(t, 'factory', (x) => x.editEntryTitle, install: false);
       await see(t, find.text(l.riskEditHead));
       expect(find.byKey(kRiskWordKey), findsOneWidget);
@@ -1274,7 +1205,7 @@ void main() {
       expect(find.text(l.riskTitle), findsNothing);
     });
 
-    testWidgets('手动调整磁盘（盘上没有 Windows）：经过风险页，不要确认词', (t) async {
+    testWidgets('删除分区（盘上没有 Windows）：经过风险页，不要确认词', (t) async {
       await toRisk(t, 'android', (x) => x.editEntryTitle, install: false);
       await see(t, find.text(l.riskEditHead));
       expect(find.byKey(kRiskWordKey), findsNothing);
@@ -1291,7 +1222,7 @@ void main() {
       await see(t, find.text(l.optsTitle));
     });
 
-    testWidgets('英文界面：整盘清空与手动调整的风险页没有 CJK，确认词是 ERASE', (t) async {
+    testWidgets('英文界面：整盘清空的风险页没有 CJK，确认词是 ERASE', (t) async {
       await toRisk(t, 'factory', (x) => x.modeWipeTitle, loc: en);
       expect(cjkOnScreen(t), isEmpty);
       await see(t, find.text(en.riskWordPrompt('ERASE')));
@@ -1304,12 +1235,12 @@ void main() {
       expect(riskContinueEnabled(t, en), isTrue);
     });
 
-    testWidgets('英文界面：缩分区的风险页没有 CJK', (t) async {
-      await toRisk(t, 'factory', (x) => x.modeShrinkTitle, loc: en, install: false);
+    testWidgets('英文界面：删除分区的风险页没有 CJK', (t) async {
+      await toRisk(t, 'factory', (x) => x.editEntryTitle, loc: en, install: false);
       expect(cjkOnScreen(t), isEmpty);
     });
 
-    test('Session 守卫：没确认过风险的路，install / shrink / editDisk 一个字节都不写；换了方式要重新确认', () async {
+    test('Session 守卫：没确认过风险的路，install / deletePartition 一个字节都不写；换了方式要重新确认', () async {
       final rec = Rec(FixtureBackend('factory', bundle: DiskBundle(), speed: 0));
       final s = Session(rec);
       await s.start();
@@ -1321,11 +1252,9 @@ void main() {
       expect(ev.whereType<Gk3Record>().where((r) => r.type == 'ERR').single['code'], kRiskUnackedCode);
       expect(ev.whereType<Gk3Record>().single['touched'], 'no');
       expect((ev.last as Gk3Exit).code, isNot(0));
-      final sh = await s.shrink(Shrinkable(const Gk3Record('SHRINK', {'part': '/dev/nvme0n1p4', 'fs': 'ntfs', 'cur_mib': '300000', 'min_mib': '100000', 'can': 'yes'})), 200000, (_) {});
-      expect(sh.err?['code'], kRiskUnackedCode);
-      final ed = await s.editDisk('gk3_part_delete', ['/dev/nvme0n1p6'], (_) {});
+      final ed = await s.deletePartition('/dev/nvme0n1p6', (_) {});
       expect(ed.err?['code'], kRiskUnackedCode);
-      for (final fn in ['gk3_apply', 'gk3_net_release', 'gk3_shrink', 'gk3_part_delete']) {
+      for (final fn in ['gk3_apply', 'gk3_net_release', 'gk3_part_delete']) {
         expect(rec.last(fn), isNull, reason: fn);
       }
       // 认过的那一条才放行；换了方式（或换了盘、改了保不保留数据）就又不算了
@@ -1337,7 +1266,7 @@ void main() {
       s.setMode(Mode.alongside);
       expect(s.riskAcked(RiskKind.install), isFalse);
       s.ackRisk(RiskKind.edit);
-      await s.editDisk('gk3_part_delete', ['/dev/nvme0n1p6'], (_) {});
+      await s.deletePartition('/dev/nvme0n1p6', (_) {});
       expect(rec.last('gk3_part_delete'), isNotNull);
     });
 

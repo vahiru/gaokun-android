@@ -128,14 +128,11 @@ void main() {
       expect(aps.any((a) => a.ssid == '隔壁 的 网'), isTrue);
       expect(aps.firstWhere((a) => a.ssid == 'eduroam').supported, isFalse);
     });
-    test('windows-live：介质在内置盘上 —— 盘与分区都标 medium，介质分区不可缩（why=mounted）', () async {
+    test('windows-live：介质在内置盘上 —— 盘与介质分区都标 medium', () async {
       final disks = Disk.fromProbe(await b('windows-live').run('gk3_probe'));
       expect(disks.single.medium, isTrue);
       expect(disks.single.external, isFalse);
-      final sh = (await b('windows-live').run('gk3_shrink_scan', ['/dev/nvme0n1'])).ofType('SHRINK').map(Shrinkable.new).toList();
-      final live = sh.firstWhere((x) => x.part == '/dev/nvme0n1p8');
-      expect(live.can, isFalse);
-      expect(live.why, 'mounted');
+      expect(disks.single.parts.where((p) => p.medium).map((p) => p.path), ['/dev/nvme0n1p8']);
     });
     test('版本列表：变体清单 404 时退回 OTA 清单的"最新发布"（真实输出）', () async {
       final vs = (await b('blank', {'gk3_net_manifest': 'net_manifest-latest.txt'}).run('gk3_net_manifest')).ofType('VARIANT').map(Variant.new).toList();
@@ -149,13 +146,6 @@ void main() {
           .ofType('CHECK').map(Check.new).toList();
       expect(checks.firstWhere((c) => c.id == 'bios').state, CheckState.ok);
       expect(checks.firstWhere((c) => c.id == 'secureboot').state, CheckState.fail);
-    });
-    test('@next：factory 上缩完分区，接着按 windows-free 回放（有 80 GiB 空闲了）', () async {
-      final bk = b('factory');
-      expect(Disk.fromProbe(await bk.run('gk3_probe')).firstWhere((d) => d.path == '/dev/nvme0n1').free, isEmpty);
-      expect((await bk.run('gk3_shrink', ['/dev/nvme0n1p4', '262788'])).ok, isTrue);
-      expect(bk.scenario, 'windows-free');
-      expect(Disk.fromProbe(await bk.run('gk3_probe')).firstWhere((d) => d.path == '/dev/nvme0n1').largestFree?.sizeMib, 81920);
     });
     test('双系统至少要多少：后端自己报（C 版写死了 20.2 GiB）', () async {
       final p = Plan(await b('factory').run('gk3_plan', [

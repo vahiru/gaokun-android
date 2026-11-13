@@ -94,21 +94,10 @@ void main() {
     await shot(t, '04b-mode-internal-medium');
   }, skip: !haveFont);
 
-  testWidgets('04 方式：出厂布局，没有空闲区 → 可以缩分区', (t) async {
+  testWidgets('04 方式：出厂布局，没有空闲区 → 双系统禁用', (t) async {
     await pumpApp(t, 'factory');
     await toMode(t);
-    await tap(t, find.text(l.modeShrinkTitle));
     await shot(t, '04-mode-factory');
-  }, skip: !haveFont);
-
-  testWidgets('05 缩分区', (t) async {
-    await pumpApp(t, 'factory');
-    await toMode(t);
-    await tap(t, find.text(l.modeShrinkTitle));
-    await next(t);
-    await passRisk(t);
-    await tap(t, find.textContaining('Data'));
-    await shot(t, '05-shrink');
   }, skip: !haveFont);
 
   testWidgets('06 方式：双系统可行', (t) async {
@@ -251,16 +240,16 @@ void main() {
     await shot(t, '15b-confirm-reinstall');
   }, skip: !haveFont);
 
-  testWidgets('04c 调整磁盘（选中 Data、调整大小）', (t) async {
+  testWidgets('04c 删除分区（选中 WinRE、点删除）', (t) async {
     await pumpApp(t, 'factory');
     await toMode(t);
     await tap(t, find.text(l.editEntryTitle));
     await next(t);
     await passRisk(t);
     await waitFor(t, find.text(l.editTitle));
-    await tap(t, find.textContaining('Data'));
-    await tap(t, find.text(l.editResize));
-    await shot(t, '04c-edit-resize');
+    await tap(t, find.textContaining('WinRE'));
+    await tap(t, find.text(l.editDelete));
+    await shot(t, '04c-edit-delete');
   }, skip: !haveFont);
 
   testWidgets('15 确认：双系统', (t) async {
@@ -290,7 +279,7 @@ void main() {
       await t.pump(const Duration(milliseconds: 100));
     }
     await g.up();
-    await waitFor(t, find.textContaining('写入 super（'));
+    await waitFor(t, find.textContaining(lead(l.progWriteSuperMib(hole, ''))));
     await tap(t, find.text(l.runShowLog));
     await shot(t, '16-run');
     // 按录制节奏回放，整个 apply 有 20 秒上下的停顿（fixture 的 D 行）—— 大步推进假时间

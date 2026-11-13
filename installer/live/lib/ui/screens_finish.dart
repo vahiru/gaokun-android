@@ -415,7 +415,7 @@ class _RunPageState extends State<RunPage> {
     final s = context.session;
     final job = widget.resume;
     if (code == 0) {
-      // 接着跟的是缩分区 / 调整磁盘：做完了就从头走一遍（盘变了，前面的判断都要重来）
+      // 接着跟的是删除分区：做完了就从头走一遍（盘变了，前面的判断都要重来）
       go(context, job == null || job['fn'] == 'gk3_apply' ? const DonePage() : const WelcomePage(), replace: true);
       return;
     }

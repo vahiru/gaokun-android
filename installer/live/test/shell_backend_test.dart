@@ -70,8 +70,8 @@ gk3_part_delete() { echo "PARTOP op=delete part=$1"; }
     }
     expect(lines.last, contains('--mode=block'));
     expect(lines.last, contains('gk3_part_delete /dev/nvme0n1p6'));
-    expect(ShellBackend.writesDisk('gk3_apply') && ShellBackend.writesDisk('gk3_shrink') && ShellBackend.writesDisk('gk3_part_resize'), isTrue);
-    expect(ShellBackend.writesDisk('gk3_shrink_scan') || ShellBackend.writesDisk('gk3_net_release'), isFalse);
+    expect(ShellBackend.writesDisk('gk3_apply') && ShellBackend.writesDisk('gk3_part_delete'), isTrue);
+    expect(ShellBackend.writesDisk('gk3_probe') || ShellBackend.writesDisk('gk3_net_release'), isFalse);
   });
 
   // GUI-5：下载可以取消 —— 取消订阅 = 杀掉后端进程（有 setsid 时整个进程组，连 curl 一起；macOS 上没有 setsid，只杀 bash）

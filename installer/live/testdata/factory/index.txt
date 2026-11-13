@@ -5,11 +5,7 @@
 # 格式：<界面发出的调用>  <文件>。找不到精确匹配时用 '<函数> *' 那一行。
 gk3_probe                                                                      probe.txt
 gk3_esp_info /dev/nvme0n1p1                                                    esp_info.txt
-gk3_shrink_scan /dev/nvme0n1                                                   shrink_scan.txt
 gk3_plan --disk /dev/nvme0n1 --mode wipe --rescue yes                          plan-wipe-rescue.txt
 gk3_plan --disk /dev/nvme0n1 --mode wipe --rescue no                           plan-wipe-norescue.txt
 gk3_plan --disk /dev/nvme0n1 --mode alongside --rescue yes --region-start 0 --region-end 0 --esp /dev/nvme0n1p1 plan-along-empty-yes.txt
 gk3_plan --disk /dev/nvme0n1 --mode alongside --rescue no --region-start 0 --region-end 0 --esp /dev/nvme0n1p1 plan-along-empty-no.txt
-gk3_shrink /dev/nvme0n1p4 262788                                               shrink.txt
-gk3_shrink *                                                                   shrink.txt
-@next gk3_shrink windows-free

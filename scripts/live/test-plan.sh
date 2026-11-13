@@ -68,7 +68,7 @@ OUT=$(gk3_plan --disk /dev/nvme0n1 --mode alongside --rescue no \
 if printf '%s' "$OUT" | grep -q '^PLANERR msg=not-enough-space'; then
     ok "10 GiB 空闲区被拒：$(printf '%s' "$OUT" | grep '^PLANERR')"
 else bad "10 GiB 居然通过了"; fi
-# fixed_mib：界面拿它算缩分区页的默认值（/data 约 64 GiB，v1.0 计划 GUI-20）—— 必须 = need_mib − /data 下限
+# fixed_mib：除 /data 之外的固定开销 —— 必须 = need_mib − /data 下限
 PE=$(printf '%s' "$OUT" | grep '^PLANERR')
 [ -n "$(gk3__f "$PE" fixed_mib)" ] && [ "$(( $(gk3__f "$PE" fixed_mib) + GK3_USERDATA_MIN_MIB ))" = "$(gk3__f "$PE" need_mib)" ] \
     && ok "PLANERR 带 fixed_mib=$(gk3__f "$PE" fixed_mib)（+ /data 下限 = need_mib）" || bad "PLANERR 的 fixed_mib 不对：$PE"

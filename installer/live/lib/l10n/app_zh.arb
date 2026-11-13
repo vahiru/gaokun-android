@@ -1,7 +1,7 @@
 {
   "@@locale": "zh",
-  "appTitle": "gaokun3 安装器",
-  "railSub": "Android 安装器",
+  "appTitle": "Gaokun Android Installer",
+  "railSub": "Android安装器",
   "railWelcome": "欢迎",
   "railDisk": "磁盘",
   "railMode": "安装方式",
@@ -9,13 +9,13 @@
   "railOpts": "选项",
   "railConfirm": "确认",
   "railInstall": "安装",
-  "welcomeTitle": "让我们在这台电脑上安装 Android",
-  "welcomeSub": "HUAWEI MateBook E Go · Snapdragon 8cx Gen 3 (sc8280xp)",
-  "welcomeBody": "我们将把 Android 安装到你的内置固态硬盘上。\n在接下来的步骤中，你可以选择清除整个磁盘，或者保留现有系统，仅使用可用空间。",
-  "welcomeNote": "你的设备使用 UEFI 引导，而不是 fastboot。安装完成后，systemd-boot 将为你启动系统，内核和 ramdisk 会以普通文件的形式放置在 EFI 分区上。",
-  "btnStart": "开始使用",
-  "btnQuit": "退出到终端",
-  "shellFailed": "切不到终端（{err}）。可以直接按 Ctrl+Alt+F2 试试。",
+  "welcomeTitle": "安装Android",
+  "welcomeSub": "HUAWEI MateBook E Go · Snapdragon 8cx Gen 3 (SC8280XP)",
+  "welcomeBody": "本向导用于在本机磁盘上安装Android系统。\n后续步骤中可选择清除整个磁盘，或保留现有系统并在未分配空间中安装。",
+  "welcomeNote": "本设备采用UEFI引导而非传统Android设备的fastboot引导，安装完成后将通过启动管理器（systemd-boot）启动系统。",
+  "btnStart": "开始",
+  "btnQuit": "切换至终端",
+  "shellFailed": "无法切换至终端（{err}），请尝试按Ctrl+Alt+F2手动切换。",
   "@shellFailed": {
     "placeholders": {
       "err": {
@@ -25,18 +25,18 @@
   },
   "btnBack": "返回",
   "btnNext": "下一步",
-  "btnReboot": "立即重新启动",
+  "btnReboot": "立即重启",
   "btnRetry": "重试",
   "btnLanguage": "English",
-  "checkTitle": "先确认这台电脑能装",
+  "checkTitle": "安装环境检查",
   "checkRunning": "正在检查……",
-  "checkModel": "机型",
-  "checkBios": "BIOS 版本",
-  "checkSecureboot": "安全启动",
-  "checkUefi": "UEFI 引导",
-  "checkRoot": "管理员权限",
-  "checkTools": "所需工具",
-  "checkModelBad": "这个安装器只适用于 MateBook E Go 2022（GK-W7X），这台报告的是 {value}。",
+  "checkModel": "设备型号",
+  "checkBios": "BIOS版本",
+  "checkSecureboot": "Secure Boot",
+  "checkUefi": "UEFI引导",
+  "checkRoot": "root权限",
+  "checkTools": "依赖工具",
+  "checkModelBad": "本安装器仅适用于2022/2023版华为MateBook E Go（GK-W7X），当前设备型号为{value}。",
   "@checkModelBad": {
     "placeholders": {
       "value": {
@@ -44,10 +44,10 @@
       }
     }
   },
-  "checkSecurebootBad": "安全启动已开启。我们的内核没有签名，开着它装好也起不来 —— 请先在固件设置里关闭。",
-  "checkUefiBad": "这个系统不是以 UEFI 方式启动的。",
-  "checkRootBad": "安装器没有以 root 身份运行。",
-  "checkToolsBad": "缺少工具：{missing}",
+  "checkSecurebootBad": "Secure Boot未关闭。由于内核未签名，开启状态下系统将无法启动，请先在UEFI固件设置中关闭Secure Boot。",
+  "checkUefiBad": "当前环境未以UEFI模式引导。",
+  "checkRootBad": "安装器未以root权限运行。",
+  "checkToolsBad": "缺少所需工具：{missing}",
   "@checkToolsBad": {
     "placeholders": {
       "missing": {
@@ -55,16 +55,16 @@
       }
     }
   },
-  "checkUnknown": "无法确认 —— 将继续",
-  "checkBlocked": "上面有检查没有通过，现在不能安装。",
-  "diskTitle": "你想将 Android 安装在哪里？",
-  "diskSub": "选择一个磁盘以继续。",
-  "diskNone": "我们找不到可以安装的磁盘。请检查你的内置硬盘是否已被识别（可以在终端中运行 lsblk）。",
+  "checkUnknown": "无法确认状态，将继续执行",
+  "checkBlocked": "请先解决上述未通过的检查项，再继续安装。",
+  "diskTitle": "选择目标磁盘",
+  "diskSub": "请选择要安装Android的磁盘。",
+  "diskNone": "未检测到可用磁盘。请确认内置硬盘已被系统识别（可在终端中运行lsblk查看）。",
   "diskInternal": "内置固态硬盘",
   "diskExternal": "外接磁盘",
-  "diskMedium": "这是你正在使用的安装 U 盘，不能安装到它上面。",
-  "diskMediumInternal": "安装器正从这块盘上运行。可以装在空闲空间里、与现有系统共存，但不能清除整个磁盘。",
-  "diskParts": "{count} 个分区",
+  "diskMedium": "当前安装器正在从此U盘运行，无法安装至该介质。",
+  "diskMediumInternal": "当前安装器正在从此磁盘运行：可在未分配空间中与现有系统共存安装，但无法清除整个磁盘。",
+  "diskParts": "{count}个分区",
   "@diskParts": {
     "placeholders": {
       "count": {
@@ -72,9 +72,9 @@
       }
     }
   },
-  "diskNoParts": "没有分区",
-  "diskUnreadable": "读不出这块盘的分区表（坏盘，或者连接不稳？），不能安装到它上面。详情见日志。",
-  "diskFree": "可用 {size}",
+  "diskNoParts": "无分区",
+  "diskUnreadable": "无法读取此磁盘的分区表，无法安装至该磁盘。详细信息请查看运行日志。",
+  "diskFree": "未分配空间{size}",
   "@diskFree": {
     "placeholders": {
       "size": {
@@ -82,14 +82,14 @@
       }
     }
   },
-  "modeTitle": "你希望如何安装？",
-  "modeSub": "此选择将决定磁盘上现有内容的去留。请在继续之前仔细确认。",
+  "modeTitle": "选择安装方式",
+  "modeSub": "请选择磁盘分区处理方式，继续前请仔细确认。",
   "modeWipeTitle": "清除整个磁盘",
-  "modeWipeWarn": "此磁盘上的所有内容都将被删除，包括其他操作系统。",
-  "modeWipeBody": "这将为你提供最干净的分区布局，Android 将获得全部空间。如果这台电脑只用来运行 Android，我们建议选择此项。",
+  "modeWipeWarn": "此磁盘上的所有分区与数据（包括现有操作系统）都将被永久删除。",
+  "modeWipeBody": "清空磁盘并创建标准Android分区布局，将全部可用容量分配给Android。若此设备仅用于运行Android，建议选择此项。",
   "modeAlongTitle": "保留现有系统",
-  "modeAlongOk": "只在空闲空间里建分区，不改你现有的分区；会在 EFI 分区里放入启动器（原来的文件先备份），以后开机会出现选择菜单。",
-  "modeAlongInfo": "可用空间：{free}\n我们将重用你现有的 EFI 分区：{esp}",
+  "modeAlongOk": "仅在未分配空间中创建Android分区，不修改现有分区；同时在EFI系统分区中安装启动管理器（systemd-boot）并备份原有引导文件，开机时显示启动菜单。",
+  "modeAlongInfo": "可用未分配空间：{free}\n共用EFI系统分区：{esp}",
   "@modeAlongInfo": {
     "placeholders": {
       "free": {
@@ -100,29 +100,21 @@
       }
     }
   },
-  "modeWhyNoEsp": "此磁盘上没有 EFI 系统分区 —— 这意味着它上面没有可以保留的 UEFI 系统。",
-  "modeWhyMedium": "安装器正从这块盘上运行 —— 清除整个磁盘会把安装器自己也删掉。请选“保留现有系统”。",
-  "editEntryTitle": "手动调整磁盘",
-  "editEntryBody": "删除、新建、格式化、缩小或扩大分区。改完回到这一页，再选安装方式。",
-  "editTitle": "调整磁盘",
-  "editSub": "每一步都会立即执行；执行之前会把分区表备份到安装介质。",
-  "editFree": "空闲空间",
-  "editPick": "在左边选一个分区或一段空闲空间。",
-  "editResize": "调整大小",
-  "editFormat": "格式化",
+  "modeWhyNoEsp": "此磁盘上未找到EFI系统分区，不存在可保留的UEFI操作系统。",
+  "modeWhyMedium": "安装器正在从此磁盘运行，无法清除整个磁盘。请选择“保留现有系统”。",
+  "editEntryTitle": "删除分区",
+  "editEntryBody": "删除不再需要的分区以腾出空间，例如Windows恢复分区或华为一键恢复分区。操作完成后返回此页选择安装方式。",
+  "editTitle": "删除分区",
+  "editSub": "每次删除立即生效；删除前会将分区表备份至安装介质。如需压缩现有分区，请在Windows“磁盘管理”中使用“压缩卷”。",
+  "editFree": "未分配空间",
+  "editPick": "请在左侧选择要删除的分区。",
   "editDelete": "删除",
-  "editCreate": "新建分区",
-  "editWhyEsp": "EFI 系统分区不能在这里修改：删除或格式化它，盘上的所有系统都将无法启动。",
-  "editWhyMedium": "安装器正从这个分区运行，不能修改。",
-  "editWhyNoResizeFs": "这种文件系统不支持调整大小（只支持 NTFS 与 ext4）。",
-  "editOnlyShrink": "后面没有紧挨着的空闲空间，所以只能缩小。",
-  "editNewSize": "新的大小",
-  "editFsLabel": "文件系统",
-  "editFsNone": "不格式化",
-  "editDeleteWarn": "分区里的所有文件都将无法访问。",
-  "editFormatWarn": "分区里的所有文件都会被清除。",
-  "editResizeWarn": "调整之前会先检查文件系统；文件不会丢失，但请先备份重要数据。",
-  "editOk": "已完成：{what}",
+  "editWhyEsp": "无法删除EFI系统分区：删除后，磁盘上的所有系统都将无法启动。",
+  "editWhyMedium": "安装器正在从此分区运行，无法删除。",
+  "editDeleteWarn": "此分区中的所有数据都将无法访问。",
+  "editDeleteWinre": "这是Windows恢复分区。删除后，Windows恢复环境（WinRE）将无法使用，“重置此电脑”和启动修复等依赖它的功能也将无法使用。",
+  "editDeleteOnekey": "这是华为一键恢复分区。删除后，将无法通过华为一键恢复将设备还原为出厂时的Windows。",
+  "editOk": "已删除：{what}",
   "@editOk": {
     "placeholders": {
       "what": {
@@ -130,7 +122,7 @@
       }
     }
   },
-  "editFailed": "没有完成：{err}",
+  "editFailed": "操作未完成：{err}",
   "@editFailed": {
     "placeholders": {
       "err": {
@@ -139,10 +131,10 @@
     }
   },
   "editDone": "完成",
-  "modeReinstallTitle": "重新安装 Android",
-  "modeReinstallWarn": "默认会清除 /data 上的所有数据（下一步可以选择保留）。",
-  "modeReinstallBody": "保留现有的分区布局，重新写入系统（super、boot）。适合修复系统或更换版本。",
-  "errReinstallMissing": "这块盘上的 Android 分区不完整（缺少：{names}），无法重新安装。",
+  "modeReinstallTitle": "重新安装Android",
+  "modeReinstallWarn": "默认清空/data分区中的所有用户数据（可在“选项”步骤中选择保留）。",
+  "modeReinstallBody": "保留现有分区布局，重新写入系统镜像（super与boot分区），适用于修复系统或更换版本。",
+  "errReinstallMissing": "此磁盘上的Android分区不完整（缺少：{names}），无法执行重新安装。",
   "@errReinstallMissing": {
     "placeholders": {
       "names": {
@@ -150,7 +142,7 @@
       }
     }
   },
-  "errReinstallDup": "有重名的分区（{names}），无法确定该写哪一个。",
+  "errReinstallDup": "磁盘上存在同名的重复分区（{names}），无法确定目标分区。",
   "@errReinstallDup": {
     "placeholders": {
       "names": {
@@ -158,7 +150,7 @@
       }
     }
   },
-  "errReinstallSmall": "分区 {name} 太小（{have}，至少要 {need}）。",
+  "errReinstallSmall": "分区{name}容量不足（当前为{have}，至少需要{need}）。",
   "@errReinstallSmall": {
     "placeholders": {
       "name": {
@@ -173,8 +165,8 @@
     }
   },
   "optsKeepTitle": "保留用户数据",
-  "optsKeepBody": "不格式化 /data 与 metadata。换到更旧的版本时，保留的数据可能导致无法开机。",
-  "optsDataWiped": "/data 将被清空（{size}）",
+  "optsKeepBody": "保留/data与metadata分区而不重新格式化。若降级至较旧版本，保留旧数据可能导致系统无法正常启动。",
+  "optsDataWiped": "/data将被清空（{size}）",
   "@optsDataWiped": {
     "placeholders": {
       "size": {
@@ -182,7 +174,7 @@
       }
     }
   },
-  "optsDataKept": "/data 保留（{size}）",
+  "optsDataKept": "保留/data现有数据（{size}）",
   "@optsDataKept": {
     "placeholders": {
       "size": {
@@ -190,13 +182,13 @@
       }
     }
   },
-  "optsRescueNoPart": "这块盘上没有救援分区。重新安装不改分区表，所以这次装不了救援系统。",
-  "confirmReinstallHead": "以下分区将被重写：",
-  "confirmReinstallRight": "分区表不变",
-  "actWrite": "写入新系统",
+  "optsRescueNoPart": "此磁盘上没有救援分区。重新安装不会修改分区表，因此本次无法安装救援系统。",
+  "confirmReinstallHead": "将重写以下分区：",
+  "confirmReinstallRight": "保持现有分区表",
+  "actWrite": "写入镜像",
   "actFormat": "格式化",
   "actKeep": "保留",
-  "modeWhyNoRoom": "可用空间不足 {need}（现有最大的一块是 {have}）。可以缩小一个现有分区来腾出空间。",
+  "modeWhyNoRoom": "可用的未分配空间不足{need}（当前最大连续未分配空间为{have}）。请在Windows“磁盘管理”中使用“压缩卷”腾出空间，或删除不再需要的分区。",
   "@modeWhyNoRoom": {
     "placeholders": {
       "need": {
@@ -207,7 +199,7 @@
       }
     }
   },
-  "modeWhyEspSmall": "你现有的 EFI 分区只剩 {free} MiB，而我们需要 {need} MiB。Windows 默认建的 EFI 分区只有 100 MiB，通常放不下。",
+  "modeWhyEspSmall": "现有EFI系统分区剩余空间不足（当前剩余{free} MiB，至少需要{need} MiB）。Windows默认创建的100 MiB EFI分区通常空间不足。",
   "@modeWhyEspSmall": {
     "placeholders": {
       "free": {
@@ -218,7 +210,7 @@
       }
     }
   },
-  "modeWhyInstalled": "这块盘上已经装过 Android（已有同名分区：{names}）。要重新安装，请选上面的“重新安装 Android”。",
+  "modeWhyInstalled": "此磁盘上已存在Android分区（{names}）。如需覆盖安装，请选择上方的“重新安装Android”。",
   "@modeWhyInstalled": {
     "placeholders": {
       "names": {
@@ -226,57 +218,21 @@
       }
     }
   },
-  "modeShrinkTitle": "缩小现有分区腾出空间",
-  "modeShrinkBody": "我们可以帮你缩小一个现有分区，把腾出来的空间给 Android。你的文件不会被删除。",
-  "shrinkTitle": "要缩小哪个分区？",
-  "shrinkSub": "我们只会调整分区的大小，不会删除里面的任何文件。开始之前，我们会先备份分区表。",
-  "shrinkNone": "这块磁盘上没有可以缩小的分区。只有 NTFS 和 ext 文件系统支持在不丢数据的前提下缩小。",
-  "shrinkRow": "{fs} · 当前 {cur} · 最小可缩到 {min}",
-  "@shrinkRow": {
-    "placeholders": {
-      "fs": {
-        "type": "String"
-      },
-      "cur": {
-        "type": "String"
-      },
-      "min": {
-        "type": "String"
-      }
-    }
-  },
-  "shrinkWhyDirty": "这个 NTFS 分区没有被干净地卸载。请回到 Windows，关闭“快速启动”并正常关机，然后再试一次。",
-  "shrinkWhyHibernated": "Windows 处于休眠或“快速启动”状态，这时缩小它会损坏 Windows 的数据。请回到 Windows，关闭“快速启动”，用“关机”（不是休眠）退出，然后再试一次。",
-  "shrinkWhyBitlocker": "这个分区用 BitLocker（或 Windows 的“设备加密”）加密了，安装器没法缩小它，只有 Windows 能。回到 Windows，重新运行 gaokun3-setup，它会问你要不要现在就给 Android 缩出空间（也可以在“磁盘管理”里压缩这个卷），然后重启回来。",
-  "shrinkWhyFs": "这种文件系统不支持在不丢数据的前提下缩小。",
-  "shrinkWhyMounted": "这个分区正在使用中（安装器就是从它上面运行的），不能缩小。",
-  "shrinkSizeHint": "缩小后的大小",
-  "shrinkFreed": "这会腾出大约 {size} 给 Android",
-  "@shrinkFreed": {
-    "placeholders": {
-      "size": {
-        "type": "String"
-      }
-    }
-  },
-  "shrinkGo": "开始缩小",
-  "shrinkWarn": "这是整个安装过程中唯一会改动你现有数据的一步。请确认重要文件已经备份。",
-  "shrinkRunning": "正在缩小分区……",
-  "sourceTitle": "从哪里获取 Android？",
-  "sourceSub": "你可以使用安装 U 盘里自带的镜像，也可以从网络下载最新版本。",
-  "sourceUsbTitle": "使用 U 盘里的镜像",
-  "sourceUsbBody": "速度最快，不需要联网。这是我们推荐的方式。",
-  "sourceUsbMissing": "这个 U 盘里没有安装镜像。",
+  "sourceTitle": "选择安装来源",
+  "sourceSub": "可使用安装介质内置的系统镜像，或连接Wi-Fi在线下载。",
+  "sourceUsbTitle": "使用安装介质内置镜像",
+  "sourceUsbBody": "无需联网，安装速度最快（推荐）。",
+  "sourceUsbMissing": "当前安装介质中未包含系统安装镜像。",
   "sourceNetTitle": "从网络下载",
-  "sourceNetBody": "可以拿到最新版本，也可以选择不同的构建。这台设备的无线速度大约每秒 1–2 MB，1 GB 左右的镜像需要十几分钟。",
-  "netTitle": "连接到 Wi-Fi",
-  "netSub": "这台设备只有无线网卡。选择一个网络。",
-  "netScanning": "正在搜索附近的网络……",
-  "netNone": "没有搜索到任何网络。请确认无线开关已打开，然后重试。",
+  "sourceNetBody": "在线获取最新发布版本或选择其他构建版本。受限于LiveCD环境下的无线网卡速率（约1–2 MB/s），下载约1 GB镜像通常需要十余分钟。",
+  "netTitle": "连接Wi-Fi",
+  "netSub": "请选择要连接的无线网络。",
+  "netScanning": "正在搜索无线网络……",
+  "netNone": "未搜索到无线网络，请确认路由器已开启后重试。",
   "netPassword": "网络密码",
   "netConnect": "连接",
   "netRescan": "重新搜索",
-  "netConnected": "已连接到 {ssid}（{ip}）",
+  "netConnected": "已连接至{ssid}（{ip}）",
   "@netConnected": {
     "placeholders": {
       "ssid": {
@@ -287,7 +243,7 @@
       }
     }
   },
-  "netConnecting": "正在连接 {ssid}……",
+  "netConnecting": "正在连接{ssid}……",
   "@netConnecting": {
     "placeholders": {
       "ssid": {
@@ -295,10 +251,10 @@
       }
     }
   },
-  "netFailed": "连接失败。请检查密码是否正确，或者信号是否太弱。",
-  "netEnterprise": "企业网络（802.1X）暂不支持",
+  "netFailed": "无法连接网络，请检查密码是否正确或信号是否稳定。",
+  "netEnterprise": "暂不支持企业级网络（802.1X）",
   "netOpen": "开放网络",
-  "netPasswordLength": "WPA 密码要 8–63 个字符",
+  "netPasswordLength": "WPA密码长度须为8–63个字符",
   "netPasswordFor": "输入“{ssid}”的密码",
   "@netPasswordFor": {
     "placeholders": {
@@ -309,18 +265,18 @@
   },
   "netShowPassword": "显示密码",
   "netHidden": "其他网络",
-  "netHiddenBody": "名称不公开的网络，手动输入",
-  "netHiddenTitle": "连接到隐藏的网络",
-  "netHiddenSub": "隐藏的网络不会出现在列表里。输入它的名称；开放网络的密码留空。",
-  "netSsid": "网络名称",
-  "netSsidTooLong": "网络名称最长 32 字节",
-  "netPasswordOptional": "网络密码（开放网络留空）",
-  "netHiddenFailed": "连接失败。请检查网络名称（区分大小写）和密码，或者走近一点再试。",
-  "variantTitle": "选择一个版本",
-  "variantSub": "这些版本的区别在构建时就已经决定，安装之后无法互相切换。",
-  "variantFailed": "我们无法获取版本列表。",
-  "variantLatest": "最新发布版本（和设备“系统更新”里看到的是同一版）。",
-  "variantSize": "下载大小约 {size}",
+  "netHiddenBody": "手动输入隐藏网络的SSID",
+  "netHiddenTitle": "连接隐藏网络",
+  "netHiddenSub": "请输入无线网络名称（SSID）；若为开放网络，密码留空即可。",
+  "netSsid": "网络名称（SSID）",
+  "netSsidTooLong": "网络名称最长为32字节",
+  "netPasswordOptional": "网络密码（开放网络请留空）",
+  "netHiddenFailed": "无法连接网络，请检查网络名称（区分大小写）、密码及信号强度。",
+  "variantTitle": "选择系统版本",
+  "variantSub": "不同构建版本在编译时即已确定，安装后无法直接切换。",
+  "variantFailed": "无法获取系统版本列表。",
+  "variantLatest": "最新发布版本（与系统内置更新推送的版本一致）。",
+  "variantSize": "下载大小约{size}",
   "@variantSize": {
     "placeholders": {
       "size": {
@@ -328,12 +284,12 @@
       }
     }
   },
-  "optsTitle": "快速设置",
-  "optsSub": "我们已经为你选择了推荐的设置。如果不确定，直接点击“下一步”即可。",
-  "optsRescueTitle": "同时安装救援系统",
-  "optsRescueBody": "占用 1 GiB：一套小型 Linux（带 ssh 和分区工具）。它的系统镜像（squashfs）从这个分区只读挂载，运行中的改动只在内存里、重启就没。当 Android 无法启动时，它是远程访问这台设备的唯一方式。我们强烈建议保留此项。",
-  "optsRescueMissing": "这个安装介质里没有救援系统镜像，这次不能装。",
-  "optsData": "/data 将获得所有剩余空间：大约 {size}",
+  "optsTitle": "安装选项",
+  "optsSub": "默认已启用推荐配置，通常可直接点击“下一步”继续。",
+  "optsRescueTitle": "安装救援系统",
+  "optsRescueBody": "占用1 GiB空间，内置SSH与磁盘分区工具。当Android无法正常启动时，可通过启动菜单进入救援系统以远程连接并修复设备，强烈建议保留。",
+  "optsRescueMissing": "当前安装介质未包含救援系统镜像，无法启用此项。",
+  "optsData": "剩余空间将全部分配给/data分区：约{size}",
   "@optsData": {
     "placeholders": {
       "size": {
@@ -341,7 +297,7 @@
       }
     }
   },
-  "optsDataFixed": "/data：{size}",
+  "optsDataFixed": "/data分区容量：{size}",
   "@optsDataFixed": {
     "placeholders": {
       "size": {
@@ -349,11 +305,11 @@
       }
     }
   },
-  "optsAdvanced": "自定义分区大小",
-  "advTitle": "分区大小",
-  "advSub": "这些是我们将要创建的分区。除非你清楚自己在做什么，否则建议保持默认值。",
+  "optsAdvanced": "自定义分区容量",
+  "advTitle": "自定义分区容量",
+  "advSub": "以下为即将创建的Android分区；除/data外其余分区为固定容量。无特殊需求建议保持默认值。",
   "advReset": "恢复默认",
-  "advTotal": "已分配 {used}，共 {total}",
+  "advTotal": "已分配{used} / 共{total}",
   "@advTotal": {
     "placeholders": {
       "used": {
@@ -365,12 +321,12 @@
     }
   },
   "advUserdata": "/data（userdata）",
-  "advFixed": "固定大小（由系统决定）",
-  "confirmTitle": "在开始之前，请确认一下",
-  "confirmSub": "这是最后一步。在此之后，我们将开始对磁盘进行更改。",
-  "confirmWipeHead": "以下分区将全部被删除：",
-  "confirmNoParts": "（此磁盘上目前没有任何分区）",
-  "confirmMore": "…以及其余 {count} 个分区",
+  "advFixed": "系统固定容量",
+  "confirmTitle": "确认安装信息",
+  "confirmSub": "确认后将开始修改目标磁盘，请仔细检查以下配置。",
+  "confirmWipeHead": "以下现有分区将被全部删除：",
+  "confirmNoParts": "（此磁盘当前无任何分区）",
+  "confirmMore": "……以及其余{count}个分区",
   "@confirmMore": {
     "placeholders": {
       "count": {
@@ -378,8 +334,8 @@
       }
     }
   },
-  "confirmAlongHead": "你现有的分区不会被改动：我们只在空闲空间里建分区，并在 EFI 分区里放入启动器（原文件已备份）。",
-  "confirmAlongBody": "我们将创建 {size} 的 Android 分区，并在你的 EFI 分区 {esp} 中添加启动项。",
+  "confirmAlongHead": "现有分区将保持不变：仅在未分配空间中新建分区，并在EFI系统分区中安装启动管理器（systemd-boot，原有引导文件自动备份）。",
+  "confirmAlongBody": "将在未分配空间中创建共{size}的Android分区，并在EFI系统分区（{esp}）中配置启动项。",
   "@confirmAlongBody": {
     "placeholders": {
       "size": {
@@ -390,7 +346,7 @@
       }
     }
   },
-  "confirmWindowsKept": "Windows 仍然可以从开机菜单进入。",
+  "confirmWindowsKept": "现有Windows系统不受影响，开机时可通过启动菜单进入。",
   "confirmRescue": "救援系统：{yesno}",
   "@confirmRescue": {
     "placeholders": {
@@ -399,12 +355,12 @@
       }
     }
   },
-  "confirmNewLayout": "将要创建：",
+  "confirmNewLayout": "新建分区布局：",
   "wordInstall": "安装",
   "wordNoInstall": "不安装",
-  "confirmHoldIdle": "按住 2 秒以开始安装",
-  "holdIdle": "按住 2 秒",
-  "confirmHoldBusy": "请继续按住…… {pct}%",
+  "confirmHoldIdle": "按住2秒开始安装",
+  "holdIdle": "按住2秒",
+  "confirmHoldBusy": "请继续按住……{pct}%",
   "@confirmHoldBusy": {
     "placeholders": {
       "pct": {
@@ -412,17 +368,17 @@
       }
     }
   },
-  "runTitle": "我们正在为你安装 Android",
-  "runSub": "这可能需要几分钟时间。请不要关闭电源。",
+  "runTitle": "正在安装Android",
+  "runSub": "此过程可能需要数分钟，请勿关机或断开电源。",
   "runShowLog": "显示详细信息",
   "runHideLog": "隐藏详细信息",
-  "doneTitle": "一切就绪！",
-  "doneBody": "请移除安装介质。重新启动后，你将进入 Android。",
-  "doneRescue": "我们还为你安装了救援系统：你可以在开机菜单中选择它。当 Android 无法启动时，它是远程访问这台设备的唯一方式。",
-  "failTitle": "哎呀，出错了",
-  "failSub": "你的磁盘可能处于未完成的中间状态。请不要立即重启回原系统 —— 我们建议先保存或拍下下方的日志。",
-  "failBackup": "改动之前，分区表已经备份。日志里有一行“还原：sgdisk --load-backup=…”，照着执行就能回到安装前的分区表。",
-  "errNoSpace": "空间不足：当前可用 {avail}，但我们至少需要 {need}",
+  "doneTitle": "Android安装完成",
+  "doneBody": "请拔出安装介质，重启设备后即可进入Android系统。",
+  "doneRescue": "救援系统已一并安装：当Android无法正常启动时，可在启动菜单中选择救援系统以远程连接并修复设备。",
+  "failTitle": "安装未完成",
+  "failSub": "磁盘写入中途出错，磁盘分区可能处于不完整状态。请勿立即重启进入原系统，建议先将下方运行日志保存至U盘或拍照留存。",
+  "failBackup": "修改磁盘前已备份原分区表，可在终端中按日志提示执行“sgdisk --load-backup=…”命令恢复安装前的分区表。",
+  "errNoSpace": "未分配空间不足：当前可用{avail}，至少需要{need}。",
   "@errNoSpace": {
     "placeholders": {
       "avail": {
@@ -433,7 +389,7 @@
       }
     }
   },
-  "errPlan": "我们无法计算分区方案：{msg}",
+  "errPlan": "无法生成分区方案：{msg}",
   "@errPlan": {
     "placeholders": {
       "msg": {
@@ -441,8 +397,8 @@
       }
     }
   },
-  "errMbr": "这块盘是 MBR 分区表。我们不会把它转换成 GPT —— 那会丢掉现有布局。要用这块盘，只能整盘清空。",
-  "errUserdataSmall": "/data 至少要 {min}",
+  "errMbr": "此磁盘使用MBR分区表，不支持保留现有分区或单独删除分区。如需在此磁盘上安装Android，只能选择“清除整个磁盘”以重新初始化为GPT分区表。",
+  "errUserdataSmall": "/data分区容量至少需要{min}。",
   "@errUserdataSmall": {
     "placeholders": {
       "min": {
@@ -450,7 +406,7 @@
       }
     }
   },
-  "errUserdataBig": "/data 最多只能给 {max}",
+  "errUserdataBig": "/data分区容量最多可设为{max}。",
   "@errUserdataBig": {
     "placeholders": {
       "max": {
@@ -458,7 +414,7 @@
       }
     }
   },
-  "errBackend": "我们无法启动安装后端：{detail}",
+  "errBackend": "无法启动安装器后端进程：{detail}",
   "@errBackend": {
     "placeholders": {
       "detail": {
@@ -466,7 +422,7 @@
       }
     }
   },
-  "errExit": "未能完成（退出码 {code}）",
+  "errExit": "操作未完成（退出码：{code}）",
   "@errExit": {
     "placeholders": {
       "code": {
@@ -475,7 +431,7 @@
     }
   },
   "shellOpen": "打开终端",
-  "shellHint": "第二个虚拟终端上有一个 shell。按 Ctrl+Alt+F2 切换过去，按 Ctrl+Alt+F1 回到这里。里面有 sgdisk、parted、resize2fs 等工具。",
+  "shellHint": "第2个虚拟终端（tty2）提供root shell及sgdisk、parted、resize2fs等磁盘工具：按Ctrl+Alt+F2切换至终端，按Ctrl+Alt+F1返回图形界面。",
   "fixtureBadge": "演示数据：{scenario}",
   "@fixtureBadge": {
     "placeholders": {
@@ -484,11 +440,11 @@
       }
     }
   },
-  "stepPrep": "正在准备一些事情……",
-  "modeWhyEspOurs": "这个 EFI 分区上已经有 gaokun3 的启动项（另一处安装在用它）。再装一份会覆盖那边的启动项。",
+  "stepPrep": "正在准备……",
+  "modeWhyEspOurs": "此EFI系统分区中已包含Gaokun Android引导项（可能由其他磁盘上的系统使用），继续安装将覆盖现有引导配置。",
   "checkSecurebootOff": "已关闭",
   "checkSecurebootOn": "已开启",
-  "modeWhyNoFree": "这块盘上没有空闲空间，而我们至少需要 {need}。可以缩小一个现有分区来腾出空间。",
+  "modeWhyNoFree": "此磁盘上没有未分配空间，至少需要{need}。请在Windows“磁盘管理”中使用“压缩卷”腾出空间，或删除不再需要的分区。",
   "@modeWhyNoFree": {
     "placeholders": {
       "need": {
@@ -498,14 +454,14 @@
   },
   "railReboot": "重新启动",
   "railPoweroff": "关机",
-  "railBusy": "正在写盘：完成之前不能重启或关机",
-  "powerRebootTitle": "现在重新启动？",
-  "powerPoweroffTitle": "现在关机？",
-  "powerBody": "安装器会退出。已经做完的缩小分区、磁盘调整会保留；还没开始的安装不会进行。",
-  "failDlTitle": "下载没有完成",
-  "failDlSub": "磁盘没有被改动。已经下好的部分还留着，重试会接着下载；也可以返回，换一个网络或版本。",
+  "railBusy": "正在写入磁盘，完成前无法重启或关机",
+  "powerRebootTitle": "立即重启？",
+  "powerPoweroffTitle": "立即关机？",
+  "powerBody": "安装器将退出。已执行的分区删除操作仍会保留；尚未开始的系统安装不会执行。",
+  "failDlTitle": "下载未完成",
+  "failDlSub": "磁盘未被修改。已下载的部分已保留，点击“重试”可断点续传，也可返回上一步更换无线网络或系统版本。",
   "failBackEdit": "返回修改",
-  "dataSmallWarn": "/data 只有 {size}：一个大型手游通常就要 20–40 GiB，建议至少留 32 GiB。",
+  "dataSmallWarn": "当前/data分区容量仅为{size}。单个大型游戏通常占用20–40 GiB空间，建议至少预留32 GiB。",
   "@dataSmallWarn": {
     "placeholders": {
       "size": {
@@ -513,15 +469,7 @@
       }
     }
   },
-  "shrinkData": "装好后 /data 约 {size}",
-  "@shrinkData": {
-    "placeholders": {
-      "size": {
-        "type": "String"
-      }
-    }
-  },
-  "railFooter": "HUAWEI MateBook E Go\n安装器 {version}",
+  "railFooter": "HUAWEI MateBook E Go\n安装器{version}",
   "@railFooter": {
     "placeholders": {
       "version": {
@@ -529,7 +477,7 @@
       }
     }
   },
-  "checkPower": "电量",
+  "checkPower": "电池电量",
   "checkPowerShown": "{pct}%",
   "@checkPowerShown": {
     "placeholders": {
@@ -538,7 +486,7 @@
       }
     }
   },
-  "checkPowerShownAc": "{pct}%（接着电源）",
+  "checkPowerShownAc": "{pct}%（已连接电源）",
   "@checkPowerShownAc": {
     "placeholders": {
       "pct": {
@@ -546,7 +494,7 @@
       }
     }
   },
-  "checkPowerBad": "电量低于 {min}% 且没接电源。安装要写好几分钟的盘，半路没电会留下一块装了一半的盘 —— 请先插上充电器。",
+  "checkPowerBad": "当前电量低于{min}%且未连接电源。安装过程中断电可能导致磁盘分区处于不完整状态，请先连接电源适配器。",
   "@checkPowerBad": {
     "placeholders": {
       "min": {
@@ -554,14 +502,14 @@
       }
     }
   },
-  "progCheck": "检查安装文件",
-  "progVerifySha": "核对 sha256",
-  "progTestZst": "试解 super.img.zst",
-  "progPlan": "计算分区方案",
-  "progWriteGpt": "写分区表",
-  "progFormat": "格式化",
-  "progWriteSuper": "写入 super",
-  "progWriteSuperMib": "写入 super（{done} / {total}）",
+  "progCheck": "正在检查安装文件",
+  "progVerifySha": "正在校验SHA-256",
+  "progTestZst": "正在校验super.img.zst压缩包",
+  "progPlan": "正在规划分区布局",
+  "progWriteGpt": "正在写入分区表",
+  "progFormat": "正在格式化分区",
+  "progWriteSuper": "正在写入super分区",
+  "progWriteSuperMib": "正在写入super分区（{done} / {total}）",
   "@progWriteSuperMib": {
     "placeholders": {
       "done": {
@@ -572,18 +520,12 @@
       }
     }
   },
-  "progWriteBoot": "写入 boot_a / boot_b",
-  "progBootloader": "安装引导链",
-  "progWriteRescue": "写入救援系统",
-  "progDone": "完成",
-  "progGptBackup": "备份分区表",
-  "progShrinkTrial": "演练缩小文件系统",
-  "progShrinkNtfs": "缩小 NTFS",
-  "progFsck": "检查文件系统",
-  "progShrinkExt": "缩小 ext 文件系统",
-  "progGptEdit": "改分区表",
-  "progVerify": "复核",
-  "progWifiAssoc": "正在连接 {ssid}",
+  "progWriteBoot": "正在写入boot_a / boot_b分区",
+  "progBootloader": "正在配置启动管理器",
+  "progWriteRescue": "正在写入救援系统",
+  "progDone": "已完成",
+  "progGptBackup": "正在备份分区表",
+  "progWifiAssoc": "正在关联{ssid}",
   "@progWifiAssoc": {
     "placeholders": {
       "ssid": {
@@ -591,11 +533,11 @@
       }
     }
   },
-  "progWifiAssocAny": "正在连接",
-  "progWifiDhcp": "取 IP 地址",
+  "progWifiAssocAny": "正在关联无线网络",
+  "progWifiDhcp": "正在获取IP地址",
   "progWifiOk": "已连接",
-  "progDlSums": "取校验清单",
-  "progDlStart": "开始下载 {name}",
+  "progDlSums": "正在获取校验文件",
+  "progDlStart": "准备下载{name}",
   "@progDlStart": {
     "placeholders": {
       "name": {
@@ -603,7 +545,7 @@
       }
     }
   },
-  "progDl": "下载 {name}（{pct}%）",
+  "progDl": "正在下载{name}（{pct}%）",
   "@progDl": {
     "placeholders": {
       "name": {
@@ -614,7 +556,7 @@
       }
     }
   },
-  "progDlVerify": "校验 {name}",
+  "progDlVerify": "正在校验{name}",
   "@progDlVerify": {
     "placeholders": {
       "name": {
@@ -622,7 +564,7 @@
       }
     }
   },
-  "progDlDone": "{name} 下载完成",
+  "progDlDone": "{name}下载完成",
   "@progDlDone": {
     "placeholders": {
       "name": {
@@ -631,7 +573,7 @@
     }
   },
   "progDlReady": "安装文件已就绪",
-  "progPartDelete": "删除分区 {part}",
+  "progPartDelete": "正在删除分区{part}",
   "@progPartDelete": {
     "placeholders": {
       "part": {
@@ -639,36 +581,7 @@
       }
     }
   },
-  "progPartFormat": "格式化 {part} 为 {fs}",
-  "@progPartFormat": {
-    "placeholders": {
-      "part": {
-        "type": "String"
-      },
-      "fs": {
-        "type": "String"
-      }
-    }
-  },
-  "progFormatAs": "格式化为 {fs}",
-  "@progFormatAs": {
-    "placeholders": {
-      "fs": {
-        "type": "String"
-      }
-    }
-  },
-  "progPartCreate": "新建分区（{size}）",
-  "@progPartCreate": {
-    "placeholders": {
-      "size": {
-        "type": "String"
-      }
-    }
-  },
-  "progGrowEntry": "扩大分区项",
-  "progGrowFs": "扩大文件系统",
-  "progOther": "正在进行：{code}",
+  "progOther": "正在执行：{code}",
   "@progOther": {
     "placeholders": {
       "code": {
@@ -684,7 +597,7 @@
       }
     }
   },
-  "runSpeedLeft": "{speed}/s · 还要{left}",
+  "runSpeedLeft": "{speed}/s · 剩余{left}",
   "@runSpeedLeft": {
     "placeholders": {
       "speed": {
@@ -695,8 +608,8 @@
       }
     }
   },
-  "etaUnderMinute": "不到 1 分钟",
-  "etaMinutes": "约 {n} 分钟",
+  "etaUnderMinute": "不到1分钟",
+  "etaMinutes": "约{n}分钟",
   "@etaMinutes": {
     "placeholders": {
       "n": {
@@ -704,7 +617,7 @@
       }
     }
   },
-  "etaHours": "约 {h} 小时 {m} 分钟",
+  "etaHours": "约{h}小时{m}分钟",
   "@etaHours": {
     "placeholders": {
       "h": {
@@ -717,17 +630,17 @@
   },
   "runCancel": "取消下载",
   "runCancelTitle": "取消下载？",
-  "runCancelBody": "盘还一个字节都没动。已经下好的部分留着，之后重试会接着下。",
+  "runCancelBody": "当前尚未修改磁盘。已下载的部分将保留，后续重试时自动断点续传。",
   "runCancelKeep": "继续下载",
   "failCancelTitle": "下载已取消",
-  "failUntouchedTitle": "安装没有开始",
-  "failUntouchedSub": "在第一次写盘之前的检查里停下了：你的盘一个字节都没动过，原来的系统完好。可以返回修改，或者解决下面的问题后重试。",
-  "failLogTitle": "技术日志（后端原样输出，部分是中文）",
-  "failLogShow": "显示技术日志",
-  "doneBodyInternal": "重新启动后，你将进入 Android。安装器所在的分区还留在这块盘上，开机菜单里可以再进安装器。",
-  "optsRescueSameDisk": "安装器就放在这块盘上，开机菜单里随时能进它（能重新安装、能开终端），所以默认不另装一份救援系统。需要的话可以打开。",
+  "failUntouchedTitle": "安装尚未开始",
+  "failUntouchedSub": "写入磁盘前的预检未通过，磁盘未被修改，现有系统不受影响。可返回调整安装选项，或排除下方问题后重试。",
+  "failLogTitle": "运行日志",
+  "failLogShow": "显示运行日志",
+  "doneBodyInternal": "重启设备后即可进入Android系统。安装器所在分区仍保留在本机磁盘上，后续可通过启动菜单再次进入安装环境。",
+  "optsRescueSameDisk": "当前安装器分区位于本磁盘并保留在启动菜单中，本身即可用于重装系统或使用终端工具，因此默认不重复安装救援系统；如有需要仍可手动开启。",
   "confirmOnekey": "华为一键恢复分区",
-  "confirmOnekeyWarn": "其中包括华为一键恢复分区（{label}）：删掉之后，就不能再用华为自带的一键恢复把这台电脑恢复成出厂的 Windows 了。",
+  "confirmOnekeyWarn": "即将删除的分区中包含华为一键恢复分区（{label}）：删除后，将无法通过华为一键恢复将设备还原为出厂Windows系统。",
   "@confirmOnekeyWarn": {
     "placeholders": {
       "label": {
@@ -735,13 +648,13 @@
       }
     }
   },
-  "netWep": "WEP 太旧，不支持（请改用 WPA2 / WPA3）",
-  "netOwe": "增强型开放（OWE）网络暂不支持",
+  "netWep": "不支持WEP加密网络，请使用WPA2或WPA3",
+  "netOwe": "暂不支持增强型开放网络（OWE）",
   "netWpa3": "WPA3",
-  "netNoIp": "连上了，但没拿到 IP 地址（路由器的 DHCP 没响应？）",
-  "netNoAdapter": "找不到无线网卡（Wi-Fi 驱动没起来）。打开终端看看 dmesg | grep ath11k。",
-  "errUsage": "安装器内部错误（调用后端的参数不对）",
-  "errCmdFailed": "命令 {cmd} 失败",
+  "netNoIp": "已关联无线网络，但未能通过DHCP获取IP地址。",
+  "netNoAdapter": "未检测到无线网卡（Wi-Fi驱动未正常加载），可在终端中运行dmesg | grep ath11k排查。",
+  "errUsage": "安装器内部错误：后端调用参数无效。",
+  "errCmdFailed": "执行命令{cmd}失败。",
   "@errCmdFailed": {
     "placeholders": {
       "cmd": {
@@ -749,10 +662,10 @@
       }
     }
   },
-  "errReleaseNoBoot": "安装文件里没有 boot.img",
-  "errReleaseNoSuper": "安装文件里既没有 super.img.zst 也没有 super.img",
-  "errSdbootMissing": "找不到 systemd-boot（systemd-bootaa64.efi）",
-  "errToolMissing": "缺少工具：{tool}",
+  "errReleaseNoBoot": "安装文件中缺少boot.img。",
+  "errReleaseNoSuper": "安装文件中未找到super.img.zst或super.img。",
+  "errSdbootMissing": "未找到启动管理器文件（systemd-bootaa64.efi）。",
+  "errToolMissing": "缺少所需工具：{tool}",
   "@errToolMissing": {
     "placeholders": {
       "tool": {
@@ -760,7 +673,7 @@
       }
     }
   },
-  "errSha256Mismatch": "{file} 的 sha256 与发版清单不符：下载不完整或被改过",
+  "errSha256Mismatch": "{file}的SHA-256校验值与发布清单不符，文件可能下载不完整或已损坏。",
   "@errSha256Mismatch": {
     "placeholders": {
       "file": {
@@ -768,9 +681,9 @@
       }
     }
   },
-  "errZstCorrupt": "super.img.zst 不完整（解压测试没通过），请重新下载",
-  "errBootimgUnpack": "boot.img 拆不开",
-  "errEspMissing": "找不到要用的 EFI 分区（{esp}）",
+  "errZstCorrupt": "super.img.zst解压校验失败，文件不完整或已损坏，请重新获取安装文件。",
+  "errBootimgUnpack": "无法解包boot.img，镜像格式无效或文件已损坏。",
+  "errEspMissing": "未找到目标EFI系统分区（{esp}）。",
   "@errEspMissing": {
     "placeholders": {
       "esp": {
@@ -778,7 +691,7 @@
       }
     }
   },
-  "errEspNotFat": "{esp} 不是 FAT 文件系统（是 {fs}），不像一个 EFI 分区",
+  "errEspNotFat": "{esp}的文件系统为{fs}，并非有效的FAT格式EFI系统分区。",
   "@errEspNotFat": {
     "placeholders": {
       "esp": {
@@ -789,7 +702,7 @@
       }
     }
   },
-  "errEspNotEspType": "{esp} 的分区类型不是 EFI 系统分区",
+  "errEspNotEspType": "{esp}的GPT分区类型不是EFI系统分区。",
   "@errEspNotEspType": {
     "placeholders": {
       "esp": {
@@ -797,7 +710,7 @@
       }
     }
   },
-  "errEspFull": "EFI 分区空间不够：要写 {need}，只有 {free}。请先在原系统里清理 EFI 分区",
+  "errEspFull": "EFI系统分区剩余空间不足（需写入{need}，当前仅剩{free}），请先在原系统中清理EFI系统分区。",
   "@errEspFull": {
     "placeholders": {
       "need": {
@@ -808,7 +721,7 @@
       }
     }
   },
-  "errEspOtaRoom": "EFI 分区装得下，但装完只剩 {left}：以后的系统更新会因为空间不够失败。请先清理 EFI 分区",
+  "errEspOtaRoom": "写入引导文件后EFI系统分区仅剩{left}，不足以支持后续Android系统更新。请先清理EFI系统分区后再试。",
   "@errEspOtaRoom": {
     "placeholders": {
       "left": {
@@ -816,7 +729,7 @@
       }
     }
   },
-  "errEspMount": "挂不上现有的 EFI 分区 {esp}，不敢往一个读不了的分区上装引导",
+  "errEspMount": "无法挂载现有的EFI系统分区（{esp}），操作已中止。",
   "@errEspMount": {
     "placeholders": {
       "esp": {
@@ -824,8 +737,8 @@
       }
     }
   },
-  "errWipeMedium": "安装器就在这块盘上，不能清除整个磁盘",
-  "errWipeMounted": "这块盘上还有挂载着的分区（{mounts}）",
+  "errWipeMedium": "安装器正在从此磁盘运行，无法清除整个磁盘。",
+  "errWipeMounted": "目标磁盘上仍有处于挂载状态的分区（{mounts}），无法清除磁盘。",
   "@errWipeMounted": {
     "placeholders": {
       "mounts": {
@@ -833,7 +746,7 @@
       }
     }
   },
-  "errReinstallBusy": "要重写的分区还挂着（{parts}）：安装器是不是就从它上面运行？",
+  "errReinstallBusy": "待重写的目标分区当前处于挂载状态（{parts}），请确认安装器未从该分区运行。",
   "@errReinstallBusy": {
     "placeholders": {
       "parts": {
@@ -841,7 +754,7 @@
       }
     }
   },
-  "errNodeVanished": "{dev} 在写盘途中不见了：写进去的内容不在盘上",
+  "errNodeVanished": "写入磁盘期间设备节点{dev}意外消失，数据未能完整写入。",
   "@errNodeVanished": {
     "placeholders": {
       "dev": {
@@ -849,7 +762,7 @@
       }
     }
   },
-  "errEspWrite": "写 EFI 分区失败（{esp}）：空间不够，或者介质出了错",
+  "errEspWrite": "无法写入EFI系统分区（{esp}），可能是分区空间不足或存储介质异常。",
   "@errEspWrite": {
     "placeholders": {
       "esp": {
@@ -857,7 +770,7 @@
       }
     }
   },
-  "errEspUmount": "EFI 分区卸不下来（{esp}）：写进去的内容可能没落盘",
+  "errEspUmount": "无法卸载EFI系统分区（{esp}），写入的数据可能未完整保存。",
   "@errEspUmount": {
     "placeholders": {
       "esp": {
@@ -865,9 +778,9 @@
       }
     }
   },
-  "errSuperWrite": "写入 super 失败：安装文件完整吗？",
-  "errSuperBadLp": "写进去的 super 不是一份能用的系统镜像（没有 LP 元数据）",
-  "errPartMissing": "找不到分区 {name}",
+  "errSuperWrite": "写入super分区失败，请检查安装文件及目标磁盘状态。",
+  "errSuperBadLp": "写入super分区的镜像缺少有效的逻辑分区（LP）元数据，无法用于启动系统。",
+  "errPartMissing": "未找到分区{name}。",
   "@errPartMissing": {
     "placeholders": {
       "name": {
@@ -875,7 +788,7 @@
       }
     }
   },
-  "errPartNodeTimeout": "{dev} 等了 10 秒还没出现：分区表写下去了，但内核没认",
+  "errPartNodeTimeout": "等待分区设备节点{dev}超时（10秒）：分区表已写入，但内核尚未识别新分区。",
   "@errPartNodeTimeout": {
     "placeholders": {
       "dev": {
@@ -883,27 +796,7 @@
       }
     }
   },
-  "errNtfsMount": "{part} 挂不上，不敢改它的大小",
-  "@errNtfsMount": {
-    "placeholders": {
-      "part": {
-        "type": "String"
-      }
-    }
-  },
-  "errShrinkTooSmall": "目标 {target} 太小，至少要 {floor}",
-  "@errShrinkTooSmall": {
-    "placeholders": {
-      "target": {
-        "type": "String"
-      },
-      "floor": {
-        "type": "String"
-      }
-    }
-  },
-  "errShrinkNotSmaller": "目标大小不比现在小，不用缩",
-  "errPartUnknown": "认不出 {part} 在哪块盘上",
+  "errPartUnknown": "无法确定分区{part}所属的磁盘设备。",
   "@errPartUnknown": {
     "placeholders": {
       "part": {
@@ -911,15 +804,7 @@
       }
     }
   },
-  "errGptRead": "读不到 {part} 在分区表里的信息，不敢改它",
-  "@errGptRead": {
-    "placeholders": {
-      "part": {
-        "type": "String"
-      }
-    }
-  },
-  "errDiskUnreadable": "读不出 {disk} 的分区表，没有动它",
+  "errDiskUnreadable": "无法读取磁盘{disk}的分区表，磁盘未被修改。",
   "@errDiskUnreadable": {
     "placeholders": {
       "disk": {
@@ -927,42 +812,11 @@
       }
     }
   },
-  "errNtfsDryrun": "NTFS 缩小的演练没通过，没有往下做",
-  "errNtfsShrink": "缩小 NTFS 失败：分区表还没动，数据应当完好",
-  "errFsck": "文件系统检查报错（{rc}），不敢动它",
-  "@errFsck": {
-    "placeholders": {
-      "rc": {
-        "type": "String"
-      }
-    }
-  },
-  "errResize2fs": "缩小 ext 文件系统失败：分区表还没动",
-  "errFsUnsupported": "不支持这种文件系统：{fs}",
-  "@errFsUnsupported": {
-    "placeholders": {
-      "fs": {
-        "type": "String"
-      }
-    }
-  },
-  "errGptRewrite": "改分区表失败。动手之前备份过分区表，日志里有还原用的命令",
-  "errPartuuidChanged": "分区的 PARTUUID 变了：Windows 可能起不来",
-  "errShrinkSizeMismatch": "分区现在是 {have}，不是要的 {want}（内核没看到新分区表？）。文件系统已缩好、数据完好，重启后再看一眼",
-  "@errShrinkSizeMismatch": {
-    "placeholders": {
-      "have": {
-        "type": "String"
-      },
-      "want": {
-        "type": "String"
-      }
-    }
-  },
-  "errWpaStart": "Wi-Fi 服务（wpa_supplicant）起不来",
-  "errWpaReject": "Wi-Fi 服务不接受这个网络的设置",
-  "errManifestUnavailable": "取不到版本列表（两份清单都下载不了）",
-  "errDlIncomplete": "{name} 没下载完。已下好的 {kept} 留着，重试会接着下",
+  "errGptRewrite": "写入GPT分区表失败。修改前已自动备份原分区表，可参照运行日志中的命令恢复。",
+  "errWpaStart": "无法启动Wi-Fi服务（wpa_supplicant）。",
+  "errWpaReject": "Wi-Fi服务拒绝了该无线网络的配置参数。",
+  "errManifestUnavailable": "无法获取版本列表（主备镜像清单均下载失败）。",
+  "errDlIncomplete": "{name}下载未完成。已下载的{kept}数据已保留，重试时将自动断点续传。",
   "@errDlIncomplete": {
     "placeholders": {
       "name": {
@@ -973,7 +827,7 @@
       }
     }
   },
-  "errDlFailed": "下载 {name} 失败（curl 退出码 {rc}）",
+  "errDlFailed": "下载{name}失败（curl退出码：{rc}）。",
   "@errDlFailed": {
     "placeholders": {
       "name": {
@@ -984,7 +838,7 @@
       }
     }
   },
-  "errDlSha256": "{name} 下载下来与校验清单不符（下载不完整或被篡改），已删掉，重试会从头下载",
+  "errDlSha256": "{name}的SHA-256校验失败（文件不完整或已损坏），已自动删除该文件，重试时将重新下载。",
   "@errDlSha256": {
     "placeholders": {
       "name": {
@@ -992,8 +846,8 @@
       }
     }
   },
-  "errDlSums": "取不到校验清单",
-  "errDlSumsMissing": "校验清单里没有 {name}",
+  "errDlSums": "无法下载校验文件。",
+  "errDlSumsMissing": "校验文件中未包含{name}的记录。",
   "@errDlSumsMissing": {
     "placeholders": {
       "name": {
@@ -1001,7 +855,7 @@
       }
     }
   },
-  "errNotBlock": "{dev} 不是一个块设备",
+  "errNotBlock": "{dev}不是有效的块设备。",
   "@errNotBlock": {
     "placeholders": {
       "dev": {
@@ -1009,34 +863,8 @@
       }
     }
   },
-  "errPartAttr": "分区的属性位没写回去",
-  "errKernelStale": "内核看到的分区与盘上的分区表对不上：新分区表没生效（有分区被占着？）。重启后再来",
-  "errMkfs": "格式化 {part} 失败",
-  "@errMkfs": {
-    "placeholders": {
-      "part": {
-        "type": "String"
-      }
-    }
-  },
-  "errPartType": "已经格式化了，但分区类型码没改过去：别的系统可能不认它",
-  "errCreateOverlap": "这一段不在空闲空间里，会压到别的分区（盘没动过）",
-  "errCreateFailed": "建分区失败",
-  "errCreateNode": "新分区的设备节点没出现",
-  "errGrowSame": "目标大小与现在一样",
-  "errGrowNoRoom": "后面紧挨着的空闲不够：最多能扩到 {max}",
-  "@errGrowNoRoom": {
-    "placeholders": {
-      "max": {
-        "type": "String"
-      }
-    }
-  },
-  "errNtfsCheck": "NTFS 检查没通过（卷没正常关闭？回 Windows 关掉快速启动、正常关机）—— 盘没动过",
-  "errGrowKernelStale": "内核还没看到新的分区大小：分区项已扩大、文件系统没动，重启后再扩一次",
-  "errGrowNtfs": "扩大 NTFS 失败（分区项已扩大，文件系统还是原来的大小，数据完好）",
-  "errGrowResize2fs": "扩大 ext 文件系统失败（分区项已扩大，文件系统还是原来的大小，数据完好）",
-  "errOther": "出错了（代码 {code}），详情见日志",
+  "errKernelStale": "内核识别的分区状态与磁盘实际分区表不一致（可能有分区仍被占用），请重启设备后再试。",
+  "errOther": "安装器返回错误（代码：{code}），详细信息请查看运行日志。",
   "@errOther": {
     "placeholders": {
       "code": {
@@ -1044,7 +872,7 @@
       }
     }
   },
-  "errNoCode": "没有完成（退出码 {code}），详情见日志",
+  "errNoCode": "操作未完成（退出码：{code}），详细信息请查看运行日志。",
   "@errNoCode": {
     "placeholders": {
       "code": {
@@ -1052,7 +880,7 @@
       }
     }
   },
-  "errVerifyRemount": "写完之后 {dev} 挂不回来，没法核对写进去的内容",
+  "errVerifyRemount": "写入完成后无法重新挂载{dev}，无法校验已写入的文件。",
   "@errVerifyRemount": {
     "placeholders": {
       "dev": {
@@ -1060,7 +888,7 @@
       }
     }
   },
-  "errVerifyMismatch": "{dev} 上读回来的文件与源文件不一致（写盘出错？）",
+  "errVerifyMismatch": "从{dev}读回的文件内容与源文件不一致，写入过程可能发生存储错误。",
   "@errVerifyMismatch": {
     "placeholders": {
       "dev": {
@@ -1069,11 +897,11 @@
     }
   },
   "logsSave": "保存日志",
-  "logsTitle": "把日志存到 U 盘",
-  "logsPick": "存到哪里？另插一个 U 盘（FAT / exFAT）最方便：拿到电脑上就能打开。",
-  "logsNoTarget": "没找到能存日志的地方。插一个 FAT / exFAT 格式的 U 盘，再点\"重新查找\"。",
-  "logsRescan": "重新查找",
-  "logsSaved": "已存到 {target} 上的 {dir}。报告问题时请附上整个文件夹。",
+  "logsTitle": "保存日志至U盘",
+  "logsPick": "请选择保存位置（建议使用独立的FAT / exFAT格式U盘，便于在其他电脑上读取）：",
+  "logsNoTarget": "未检测到可写入的FAT / exFAT分区。请插入FAT或exFAT格式的U盘，然后点击“重新检测”。",
+  "logsRescan": "重新检测",
+  "logsSaved": "日志已保存至{target}的{dir}目录，反馈问题时请附上该完整目录。",
   "@logsSaved": {
     "placeholders": {
       "target": {
@@ -1084,11 +912,11 @@
       }
     }
   },
-  "logsSavedEsp": "这是安装介质的 EFI 分区：Windows 和 macOS 默认看不到它。最好再另插一个 U 盘存一份。",
-  "logsEspNote": "安装介质本身（EFI 分区，电脑上默认看不到）",
-  "runResumeTitle": "正在接着刚才的写盘",
-  "runResumeSub": "安装器刚才重新启动过；写盘的进程一直在后台运行，这里接着显示它的进度。不要关机。",
-  "checkToolsBadPkgs": "缺少工具：{missing}（Debian / Ubuntu：apt install {pkgs}）",
+  "logsSavedEsp": "该分区为安装介质的EFI系统分区，Windows与macOS默认不显示其盘符，建议另插U盘再保存一份。",
+  "logsEspNote": "安装介质自身（EFI系统分区，常规系统下默认隐藏）",
+  "runResumeTitle": "正在继续写入磁盘",
+  "runResumeSub": "安装器界面重新启动后已重新连接至后台安装进程。完成前请勿关机或断开电源。",
+  "checkToolsBadPkgs": "缺少所需工具：{missing}（Debian / Ubuntu可执行：apt install {pkgs}）",
   "@checkToolsBadPkgs": {
     "placeholders": {
       "missing": {
@@ -1099,8 +927,8 @@
       }
     }
   },
-  "errJobStart": "写盘进程起不来（systemd-run / setsid 失败）",
-  "errJobMissing": "找不到这个写盘任务（{id}）",
+  "errJobStart": "无法启动后台安装进程（systemd-run / setsid调用失败）。",
+  "errJobMissing": "未找到指定的后台安装任务（{id}）。",
   "@errJobMissing": {
     "placeholders": {
       "id": {
@@ -1108,8 +936,8 @@
       }
     }
   },
-  "errJobLost": "写盘进程没写完成状态就没了（被杀，或者机器出错）：盘可能只写了一半",
-  "errLogsNotFat": "{part} 不是 FAT / exFAT，不往别的文件系统写日志",
+  "errJobLost": "后台安装进程异常终止且未返回完成状态，磁盘分区可能处于不完整状态。",
+  "errLogsNotFat": "{part}不是FAT或exFAT格式分区，仅支持将日志写入FAT / exFAT文件系统。",
   "@errLogsNotFat": {
     "placeholders": {
       "part": {
@@ -1117,7 +945,7 @@
       }
     }
   },
-  "errLogsReadonly": "{part} 改不成可写（写保护？）",
+  "errLogsReadonly": "无法以读写模式挂载{part}，请检查存储介质是否处于写保护状态。",
   "@errLogsReadonly": {
     "placeholders": {
       "part": {
@@ -1125,7 +953,7 @@
       }
     }
   },
-  "errLogsMount": "挂不上 {part}",
+  "errLogsMount": "无法挂载分区{part}。",
   "@errLogsMount": {
     "placeholders": {
       "part": {
@@ -1133,8 +961,8 @@
       }
     }
   },
-  "errLogsMkdir": "在那里建不了目录（满了？）",
-  "modeWhyEspTooSmall": "你现有的 EFI 分区只有 {size} MiB（重装 Windows 时建的那种）。它放不下 Android 的启动文件，也没法再给 Windows 更新留余量 —— 这个版本不支持这种布局，以后的版本会改用单独的分区。",
+  "errLogsMkdir": "无法在目标分区创建日志目录，请检查剩余空间是否充足。",
+  "modeWhyEspTooSmall": "现有EFI系统分区总容量仅为{size} MiB，不足以在容纳Android引导文件的同时为Windows更新保留足够空间，当前不支持该分区布局。",
   "@modeWhyEspTooSmall": {
     "placeholders": {
       "size": {
@@ -1142,22 +970,22 @@
       }
     }
   },
-  "modeWhyHibernated": "Windows 处于休眠或“快速启动”状态。这时往两个系统共用的 EFI 分区里写东西，Windows 醒来时可能把它写坏。请回到 Windows，关掉快速启动，用“关机”退出后再来。",
-  "confirmDefaultTitle": "开机默认进入哪个系统",
-  "confirmDefaultLead": "关机后再按电源键开机，进这里选的系统；在 Android 里重启，总是回到 Android。平时主要用 Windows 就选 Windows。以后可以在 Android 的「设置 → 系统 → 启动选项」里改。",
+  "modeWhyHibernated": "检测到Windows处于休眠或“快速启动”状态。此时修改共用的EFI系统分区，可能导致Windows恢复运行时损坏分区数据。请先启动进入Windows，关闭“快速启动”并执行完整关机后再试。",
+  "confirmDefaultTitle": "选择默认启动系统",
+  "confirmDefaultLead": "设备冷启动（关机后按电源键开机）时默认进入所选系统；在Android中选择“重启”将始终回到Android。安装完成后，也可随时在Android的“设置 → 系统 → 启动选项”中更改。",
   "confirmDefaultAndroid": "Android",
-  "confirmDefaultAndroidBody": "开机直接进 Android；要进 Windows 就在开机菜单里选。",
+  "confirmDefaultAndroidBody": "开机默认启动Android，需要时可在启动菜单中选择Windows。",
   "confirmDefaultWindows": "Windows",
-  "confirmDefaultWindowsBody": "开机进 Windows；要进 Android 就在开机菜单里选，或者在 Windows 里重启到 Android。",
-  "confirmDefaultWindowsWhen": "装好之后前两次开机都会进 Android（第一次用来完成设置）；从那以后，关机再开机就默认进 Windows。",
-  "confirmMenu5": "有两个系统时，每次开机会显示 5 秒钟的选择菜单。",
-  "confirmBitlockerHead": "Windows 的磁盘用 BitLocker 加密了",
-  "confirmBitlockerScript": "安装会换掉开机时最先运行的启动器。Windows 工具已经先暂停了 BitLocker，接下来 2 次重启不会要恢复密钥；万一要了，到 aka.ms/myrecoverykey 按屏幕上显示的密钥 ID 找。",
-  "confirmBitlockerUsb": "安装会换掉开机时最先运行的启动器。下一次进 Windows 很可能要输入 48 位的恢复密钥：屏幕上会显示密钥 ID，到 aka.ms/myrecoverykey 按 ID 找。没有密钥就进不了 Windows —— 先确认拿得到再继续。",
-  "confirmBitlockerCheck": "我已经拿到了 BitLocker 恢复密钥",
-  "doneDualAndroid": "开机默认进 Android，开机菜单里可以选 Windows。要改成默认进 Windows：Android 的「设置 → 系统 → 启动选项」。",
-  "doneDualWindows": "接下来两次开机会先进 Android（第一次完成设置）；之后关机再开机就默认进 Windows。在 Android 的「设置 → 系统 → 启动选项」里可以改回来。",
-  "doneNoteLoaderVar": "注意：固件里的默认启动项（{value}）没能清除，开机可能仍先进它。请在开机菜单里高亮当前默认的那一项，按一次 d 键清除。",
+  "confirmDefaultWindowsBody": "开机默认启动Windows，需要时可在启动菜单中选择Android，或从Windows重启进入Android。",
+  "confirmDefaultWindowsWhen": "安装完成后的前两次启动将自动进入Android（用于完成首次开机初始化），此后冷启动将默认进入Windows。",
+  "confirmMenu5": "双系统模式下，每次开机将显示5秒启动菜单。",
+  "confirmBitlockerHead": "检测到Windows分区已开启BitLocker加密",
+  "confirmBitlockerScript": "安装过程将替换EFI默认引导文件（BOOTAA64.EFI）。Windows端工具已预先暂停BitLocker保护，接下来2次重启通常不会要求输入恢复密钥；若Windows仍提示输入恢复密钥，请访问https://aka.ms/myrecoverykey并按屏幕显示的恢复密钥ID查询。",
+  "confirmBitlockerUsb": "安装过程将替换EFI默认引导文件（BOOTAA64.EFI），下次启动Windows时很可能需要输入48位BitLocker恢复密钥。请提前访问https://aka.ms/myrecoverykey，确认可根据恢复密钥ID获取对应的密钥；若无恢复密钥，届时将无法解锁进入Windows。",
+  "confirmBitlockerCheck": "我已备妥BitLocker恢复密钥",
+  "doneDualAndroid": "当前开机默认启动Android，也可在启动菜单中选择Windows。如需修改默认启动系统，可在Android中前往“设置 → 系统 → 启动选项”。",
+  "doneDualWindows": "接下来两次启动将自动进入Android（用于完成首次开机初始化），此后冷启动将默认进入Windows。如需修改默认启动系统，可在Android中前往“设置 → 系统 → 启动选项”。",
+  "doneNoteLoaderVar": "注意：未能清除UEFI固件中保存的默认启动项变量（{value}），开机时可能仍优先启动该项。请在启动菜单中选中当前标为默认的条目，按一次d键将其清除。",
   "@doneNoteLoaderVar": {
     "placeholders": {
       "value": {
@@ -1165,8 +993,8 @@
       }
     }
   },
-  "errDefaultOsNoWindows": "这块盘上没有 Windows 的启动管理器，不能把 Windows 设成默认系统",
-  "errEspWindowsHibernated": "Windows 处于休眠或“快速启动”状态（{part}）：这时写共用的 EFI 分区可能把它写坏。回 Windows 关掉快速启动、用“关机”退出，再试",
+  "errDefaultOsNoWindows": "此磁盘上未找到Windows启动管理器，无法将Windows设为默认启动系统。",
+  "errEspWindowsHibernated": "检测到Windows处于休眠或“快速启动”状态（{part}），此时写入共用的EFI系统分区可能损坏分区数据。请先进入Windows关闭“快速启动”并执行完整关机后再试。",
   "@errEspWindowsHibernated": {
     "placeholders": {
       "part": {
@@ -1174,8 +1002,8 @@
       }
     }
   },
-  "errBitlockerKeyUnconfirmed": "Windows 的磁盘是 BitLocker 加密的，安装要换掉开机启动器，下次进 Windows 可能要恢复密钥。请在确认页勾选“已经拿到恢复密钥”",
-  "errEspTooSmall": "EFI 分区只有 {size} MiB，这个版本装不下（以后的版本会改用单独的分区）",
+  "errBitlockerKeyUnconfirmed": "检测到Windows分区已开启BitLocker加密，修改引导文件后下次启动Windows可能要求输入恢复密钥。请先在确认页勾选“我已备妥BitLocker恢复密钥”。",
+  "errEspTooSmall": "EFI系统分区容量仅为{size} MiB，空间不足，无法安装。",
   "@errEspTooSmall": {
     "placeholders": {
       "size": {
@@ -1183,7 +1011,7 @@
       }
     }
   },
-  "errEspWinReserve": "装完、再留出以后系统更新要的空间，EFI 分区只剩 {left}，不够给 Windows 更新和固件留的 {need}。请先在 Windows 里清理 EFI 分区（不要删 Persisted_Capsules.bin、EFI\\Microsoft、EFI\\UpdateCapsule）",
+  "errEspWinReserve": "写入Android引导文件并预留后续更新空间后，EFI系统分区仅剩{left}，不足以为Windows更新与固件更新保留所需的{need}。请先在Windows中清理EFI系统分区（切勿删除Persisted_Capsules.bin、EFI\\Microsoft及EFI\\UpdateCapsule）。",
   "@errEspWinReserve": {
     "placeholders": {
       "left": {
@@ -1194,7 +1022,7 @@
       }
     }
   },
-  "errMiscInit": "初始化 misc 分区（{dev}）失败",
+  "errMiscInit": "无法初始化misc分区（{dev}）。",
   "@errMiscInit": {
     "placeholders": {
       "dev": {
@@ -1202,41 +1030,39 @@
       }
     }
   },
-  "riskTitle": "请先读完：接下来的操作可能让你丢失数据",
-  "riskSub": "接下来要改动这块硬盘。请从头读到尾 —— 读完、等够时间、勾选之后，继续按钮才会亮起。",
-  "riskExpHead": "这是实验性的社区移植",
-  "riskExpBody": "这个 Android 是爱好者做的移植，不是华为、高通或 Google 的产品。没有任何厂商支持，也没有人对你的数据负责。安装器在真机上测过的情形很有限（安装说明里的“在真机上测过什么”一节）。",
-  "riskDiskHead": "对硬盘的改动可能无法挽回",
-  "riskDiskBody": "接下来要修改这块硬盘的分区表和分区里的内容。程序缺陷、硬盘故障或意外断电，都可能让数据损坏，甚至全部丢失。这些改动不可逆：安装器不能撤销，也不能保证事后把数据找回来。",
-  "riskWipeHead": "清除整个磁盘：盘上的一切都会被删除",
-  "riskWipeBody": "这块盘上的所有分区都会被删除 —— Windows、你的文件、其他系统和恢复分区，一个不留。之后想再用 Windows，只能用 Windows 安装 U 盘从头装。",
-  "riskAlongHead": "保留现有系统：仍然会改动硬盘",
-  "riskAlongBody": "Android 只装进空闲空间，现有分区不缩、不删；但分区表会被改写，两个系统共用的 EFI 分区里也要放入启动器。哪一步出错，现有的系统同样可能起不来。",
-  "riskReinstallHead": "重新安装 Android",
-  "riskReinstallWipe": "Android 的系统分区会被重写，/data 会被清空：装过的应用、照片、聊天记录等存在 Android 里的东西都会丢失。",
-  "riskReinstallKeep": "Android 的系统分区会被重写，你选了保留 /data。但换到更旧的版本、或者安装中途出错时，保留下来的数据也可能读不出来 —— 一样要先备份。",
-  "riskWinHead": "Windows 与 BitLocker 恢复密钥",
-  "riskWinBody": "安装要往两个系统共用的 EFI 分区里放启动器，并替换开机时最先运行的启动文件（原文件先备份）。Windows 用了 BitLocker 或“设备加密”时，下次进 Windows 可能要输入恢复密钥 —— 没有密钥，就再也进不了 Windows，里面的数据也读不出来。继续之前，先到 aka.ms/myrecoverykey 确认拿得到密钥。",
-  "riskWinBitlocker": "这块盘上确实有 BitLocker 加密的卷：最后的确认页会要你确认已经拿到恢复密钥。",
-  "riskShrinkHead": "缩小现有分区",
-  "riskShrinkBody": "缩小分区要搬动文件系统里的数据。如果 Windows 没有完全关机（休眠、快速启动），或者分区本身有错误，缩小可能把它弄坏、让 Windows 起不来。用了 BitLocker 的 Windows，下次启动还可能要恢复密钥（aka.ms/myrecoverykey）。",
-  "riskEditHead": "手动调整磁盘",
-  "riskEditBody": "删除和格式化会立刻抹掉分区里的数据；缩小、扩大要搬动文件系统里的数据。只在你清楚每一个分区是什么的时候使用 —— 删错一个，就可能让 Windows 或 Android 再也起不来。",
-  "riskBackupHead": "现在就备份",
-  "riskBackupBody": "把重要的文件（照片、文档、Windows 里的资料、Android 里的应用数据）复制到另一台设备、移动硬盘或网盘上。备份在这块硬盘的另一个分区里不算 —— 它同样在风险之内。还没备份的话，现在点“返回”，关机去备份，备份好了再回来。",
-  "riskPowerHead": "全程接上电源",
-  "riskPowerBody": "开始之前插上电源适配器，直到完成都不要拔。写到一半断电或电池耗尽，硬盘会停在写了一半的状态：系统起不来，数据可能损坏。进行中不要长按电源键，也不要强行重启。",
-  "riskNoCancelHead": "开始写盘之后不能取消",
-  "riskNoCancelInstall": "下一页是最后确认。在那里按住开始之后就会写盘，写盘阶段不能取消、不能返回（从网络安装时，下载阶段还能取消 —— 那时盘还没动）。",
-  "riskNoCancelStep": "下一页上的每一个操作，在按住确认之后立即执行：执行中途不能停下，执行完也没有“撤销”。",
-  "riskEnd": "—— 以上就是全部 ——",
-  "riskScrollHint": "向下滚动，读完全文",
-  "riskCheck": "我已备份重要数据，并理解此操作可能造成不可逆的数据丢失",
+  "riskTitle": "重要提示：后续操作存在数据丢失风险",
+  "riskSub": "即将修改目标磁盘的分区或引导配置。请完整阅读以下说明，倒计时结束并勾选确认后方可继续。",
+  "riskExpHead": "实验性社区移植版本",
+  "riskExpBody": "本系统为社区维护的实验性移植版本，并非华为、高通或Google官方产品，不提供任何厂商技术支持或数据安全担保。安装器经实测覆盖的软硬件环境有限，请自行评估风险。",
+  "riskDiskHead": "磁盘修改不可逆",
+  "riskDiskBody": "后续操作将修改目标磁盘的分区表或分区数据。程序异常、存储介质故障或意外断电均可能导致数据损坏乃至全部丢失；相关更改一旦执行即无法撤销，安装器也无法恢复受损数据。",
+  "riskWipeHead": "清除整个磁盘：所有现有数据将被删除",
+  "riskWipeBody": "目标磁盘上的全部现有分区（包括Windows系统、个人文件、其他操作系统及出厂恢复分区）都将被永久删除。此后如需重新使用Windows，只能通过Windows安装介质重新安装。",
+  "riskAlongHead": "保留现有系统：仍将修改分区表与EFI引导文件",
+  "riskAlongBody": "Android将安装至未分配空间，不会压缩或删除现有分区；但安装过程仍需写入GPT分区表，并在共用的EFI系统分区中安装启动管理器（systemd-boot）。若中途发生异常，现有操作系统同样可能无法正常启动。",
+  "riskReinstallHead": "重新安装Android",
+  "riskReinstallWipe": "Android系统分区将被重写，且/data分区将被格式化：已安装的应用、照片、聊天记录及所有Android用户数据都将被永久清除。",
+  "riskReinstallKeep": "Android系统分区将被重写，同时保留/data分区中的现有数据。但若降级至较旧版本或安装中途出错，原有数据仍可能无法正常读取，建议提前备份。",
+  "riskWinHead": "Windows与BitLocker恢复密钥",
+  "riskWinBody": "安装过程将在共用的EFI系统分区中安装启动管理器（systemd-boot），并替换默认引导文件（BOOTAA64.EFI，原文件将自动备份）。若Windows开启了BitLocker或“设备加密”，下次启动Windows时可能要求输入48位恢复密钥；若无恢复密钥，将无法进入Windows或读取其中的数据。继续前请访问https://aka.ms/myrecoverykey确认可获取对应的恢复密钥。",
+  "riskWinBitlocker": "检测到此磁盘上存在BitLocker加密分区，稍后在最终确认页需勾选确认已备妥恢复密钥。",
+  "riskEditHead": "删除分区：其中的数据将立即无法访问",
+  "riskEditBody": "请在确认每个分区的用途后再操作：误删Windows所在分区将导致Windows无法启动。每次删除前都会将分区表备份至安装介质。",
+  "riskBackupHead": "请提前将重要数据备份至其他设备",
+  "riskBackupBody": "请将照片、文档、Windows个人文件及Android应用数据等重要资料备份至其他电脑、移动存储设备或云盘。保存在同一块磁盘其他分区中的数据同样面临风险，不能替代外部备份。如尚未备份，请点击“返回”并关机，完成备份后再继续。",
+  "riskPowerHead": "全程保持连接电源",
+  "riskPowerBody": "请在开始操作前连接电源适配器，并在完成前切勿断开。写入磁盘期间若意外断电或电量耗尽，将导致磁盘分区处于不完整状态，使系统无法启动或数据损坏。操作进行期间请勿长按电源键或强制重启设备。",
+  "riskNoCancelHead": "开始写入磁盘后无法中止",
+  "riskNoCancelInstall": "下一页为最终确认页：按住按钮开始写入磁盘后，操作无法取消或回退（若选择从网络安装，下载阶段尚未修改磁盘，仍可随时取消）。",
+  "riskNoCancelStep": "下一页中的每项删除操作在按住确认后将立即执行，中途无法中止，执行后也无法直接撤销。",
+  "riskEnd": "—— 阅读完毕 ——",
+  "riskScrollHint": "请向下滚动阅读全文",
+  "riskCheck": "我已备份重要数据，并了解上述操作可能造成不可逆的数据丢失",
   "riskWord": "ERASE",
   "@riskWord": {
     "description": "确认词。⚠️ 必须是 ASCII：live 里没有输入法，软键盘与实体键盘都只出 ASCII（screens_source.dart 的 HiddenNetPage 注释）"
   },
-  "riskWordPrompt": "这一步会删掉盘上现有的系统或数据。请在下面输入 {word}（大小写均可）以确认：",
+  "riskWordPrompt": "此操作将清除磁盘上的现有系统或用户数据。请在下方输入“{word}”（不区分大小写）以确认：",
   "@riskWordPrompt": {
     "placeholders": {
       "word": {
@@ -1245,7 +1071,7 @@
     }
   },
   "riskWordLabel": "确认词",
-  "riskWordWrong": "与 {word} 不一致",
+  "riskWordWrong": "输入内容与{word}不符",
   "@riskWordWrong": {
     "placeholders": {
       "word": {
@@ -1254,7 +1080,7 @@
     }
   },
   "riskContinue": "我已了解风险，继续",
-  "riskMissing": "还差：{items}",
+  "riskMissing": "尚需完成：{items}",
   "@riskMissing": {
     "placeholders": {
       "items": {
@@ -1263,8 +1089,8 @@
     }
   },
   "riskSep": "、",
-  "riskNeedScroll": "读到最后",
-  "riskNeedWait": "再等 {sec} 秒",
+  "riskNeedScroll": "阅读至底部",
+  "riskNeedWait": "等待{sec}秒",
   "@riskNeedWait": {
     "placeholders": {
       "sec": {
@@ -1272,8 +1098,8 @@
       }
     }
   },
-  "riskNeedCheck": "勾选确认",
-  "riskNeedWord": "输入 {word}",
+  "riskNeedCheck": "勾选确认项",
+  "riskNeedWord": "输入{word}",
   "@riskNeedWord": {
     "placeholders": {
       "word": {
@@ -1281,5 +1107,5 @@
       }
     }
   },
-  "errRiskUnacked": "没有经过写盘前的风险确认，安装器拒绝写盘，盘没有动过。这是安装器的缺陷，请保存日志并报告。"
+  "errRiskUnacked": "尚未完成写入磁盘前的风险确认，操作已中止，磁盘未被修改。请保存运行日志并反馈此问题。"
 }

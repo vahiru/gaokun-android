@@ -101,6 +101,12 @@ class Rec extends Gk3Backend {
 }
 
 final l = lookupL10n(const Locale('zh'));
+
+/// 文案模板里占位符前后的固定部分：测试按它找含有运行时数值的文字，改文案不用跟着改测试。
+/// 用法：把占位符填成 [hole]，再取 [lead]（占位符之前）或 [tail]（占位符之后）
+const hole = '\u0000';
+String lead(String filled) => filled.split(hole).first;
+String tail(String filled) => filled.split(hole).last;
 final en = lookupL10n(const Locale('en'));
 
 /// 直接同步读磁盘的资源包。

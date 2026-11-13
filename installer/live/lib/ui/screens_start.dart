@@ -1,8 +1,5 @@
-// 欢迎 / 预检 → 选盘 → 方式 → （缩分区）
-import 'dart:math' as math;
-
+// 欢迎 / 预检 → 选盘 → 方式 → （删除分区）
 import 'package:flutter/material.dart';
-import 'package:gk3_common/backend/protocol.dart';
 import 'package:gk3_common/ui/theme.dart';
 import 'package:gk3_common/ui/widgets.dart';
 
@@ -12,7 +9,6 @@ import '../session.dart';
 import 'screens_edit.dart';
 import 'screens_finish.dart';
 import 'screens_risk.dart';
-import 'messages.dart';
 import 'screens_source.dart';
 import 'widgets.dart';
 
@@ -242,7 +238,7 @@ class ModePage extends StatefulWidget {
   State<ModePage> createState() => _ModePageState();
 }
 
-enum _Pick { wipe, along, shrink, reinstall, edit }
+enum _Pick { wipe, along, reinstall, edit }
 
 class _ModePageState extends State<ModePage> {
   _Pick? _pick;
@@ -276,18 +272,14 @@ class _ModePageState extends State<ModePage> {
       case _Pick.reinstall:
         s.setMode(Mode.reinstall);
         go(context, const SourcePage());
-      // 缩分区与手动调整同样先过风险确认页（RiskPage 等那一页 pop 了才跟着 pop，所以这里 await 的仍是"做完了没有"）
+      // 删除分区同样先过风险确认页（RiskPage 等那一页 pop 了才跟着 pop，所以这里 await 的仍是"做完了没有"）
       case _Pick.edit:
         await RiskPage.open(context, RiskKind.edit, const DiskEditPage());
-        // 改过的盘要重新评估：几种方式能不能走，都可能变了
+        // 删过分区的盘要重新评估：几种方式能不能走，都可能变了
         if (mounted && s.disk != null) {
           setState(() => _pick = null);
           await s.assess(s.disk!);
         }
-      case _Pick.shrink:
-        await RiskPage.open(context, RiskKind.shrink, const ShrinkPage());
-        // 缩完回来：assess 已经重跑过，双系统多半可行了 —— 替用户选上
-        if (mounted && context.session.along is AlongOk) setState(() => _pick = _Pick.along);
     }
   }
 
@@ -345,191 +337,19 @@ class _ModePageState extends State<ModePage> {
           onTap: () => setState(() => _pick = _Pick.along),
           extra: a is AlongOk ? diskBar(s.disk!, highlightFree: a.region) : null,
         ),
-        if (a is AlongNoRoom && s.canShrink) ...[
-          const SizedBox(height: 14),
-          ChoiceCard(
-            icon: Icons.compress,
-            title: l.modeShrinkTitle,
-            body: l.modeShrinkBody,
-            selected: _pick == _Pick.shrink,
-            onTap: () => setState(() => _pick = _Pick.shrink),
-          ),
-        ],
-        // ★ 最后一项：手动调整（Ubuntu 的"安装类型"也是把手动分区放在最后）。总是可选 ——
-        //   上面几项都走不通的时候，这是用户自己能做点什么的地方
+        // ★ 最后一项：删除分区（例如 Windows 恢复分区，"磁盘管理"删不了它们）。总是可选 ——
+        //   上面几项都走不通的时候，这是用户在安装器里能做的；缩小分区要回 Windows 压缩卷
         const SizedBox(height: 14),
         ChoiceCard(
-          icon: Icons.construction,
+          icon: Icons.delete_outline,
           title: l.editEntryTitle,
           body: l.editEntryBody,
-          // MBR 盘上删 / 建 / 改大小都要写 GPT 分区表，后端一律拒绝（ERR mbr-disk）—— 这里先说
+          // MBR 盘上删除分区要写 GPT 分区表，后端拒绝（ERR mbr-disk）—— 这里先说
           reason: s.disk!.mbr ? l.errMbr : null,
           selected: _pick == _Pick.edit,
           onTap: () => setState(() => _pick = _Pick.edit),
         ),
       ]),
-    );
-  }
-}
-
-// ── 缩分区 ───────────────────────────────────────────────────────────────────
-
-class ShrinkPage extends StatefulWidget {
-  const ShrinkPage({super.key});
-  @override
-  State<ShrinkPage> createState() => _ShrinkPageState();
-}
-
-class _ShrinkPageState extends State<ShrinkPage> {
-  Shrinkable? _pick;
-  double _target = 0;
-  bool _running = false;
-  final _log = <String>[];
-  int _pct = 0;
-  String? _error;
-
-  /// 默认让 /data 有多大（v1.0 计划 GUI-20）。与 Windows 脚本 D: 加密时的默认（"回车 = 64"）同一个口径
-  static const _dataDefaultMib = 64 * 1024;
-
-  /// 双系统除 /data 之外的固定开销（gk3_plan 在 PLANERR fixed_mib= 里报的；旧后端没有就退回 need_mib，只会多腾）。
-  /// 兜底的 20 GiB 只决定滑块的【初始位置】与 /data 的估计，不参与任何判定 —— 判定在 gk3_shrink 与 gk3_plan 里。
-  int get _fixedMib {
-    final a = context.session.along;
-    return a is AlongNoRoom ? (a.fixedMib ?? a.needMib ?? 20 * 1024) : 20 * 1024;
-  }
-
-  void _select(Shrinkable s) {
-    // 默认：腾出"固定开销 + 64 GiB 的 /data"，但不低于 gk3_shrink 自己的下限。
-    // ⚠️ 原先是"至少要的（固定开销 + 8 GiB 下限）再多 8 GiB" —— 按默认操作的双系统用户 /data 只有约 16 GiB，
-    //    一个大型手游都装不下（v1.0 计划 GUI-20）
-    final want = s.curMib - _fixedMib - _dataDefaultMib;
-    setState(() {
-      _pick = s;
-      _target = want.clamp(s.floorMib, s.curMib - 1024).toDouble();
-    });
-  }
-
-  Future<void> _go() async {
-    final s = context.session;
-    setState(() {
-      _running = true;
-      _error = null;
-      _log.clear();
-    });
-    final r = await s.shrink(_pick!, _target.round(), (e) {
-      if (!mounted) return;
-      setState(() {
-        if (e is Gk3Progress) {
-          _pct = e.percent;
-          _log.add('[${e.percent}%] ${progressText(context.l, e)}');
-        } else if (e is Gk3Log) {
-          _log.add(e.line);
-        }
-      });
-    });
-    if (!mounted) return;
-    if (r.ok) {
-      Navigator.pop(context);
-    } else {
-      setState(() {
-        _running = false;
-        _error = callErrorText(context.l, r);
-      });
-    }
-  }
-
-  String? _why(Shrinkable s) {
-    final l = context.l;
-    if (s.can) return null;
-    return switch (s.why) {
-      'ntfs-dirty' => l.shrinkWhyDirty,
-      'ntfs-hibernated' => l.shrinkWhyHibernated,
-      'bitlocker' => l.shrinkWhyBitlocker,
-      'mounted' => l.shrinkWhyMounted,
-      _ => l.shrinkWhyFs,
-    };
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final s = context.session, l = context.l, tt = Theme.of(context).textTheme;
-    final list = (s.shrinkables ?? []).where((x) => x.fs == 'ntfs' || x.fs.startsWith('ext') || x.why == 'ntfs-dirty' || x.why == 'ntfs-hibernated' || x.why == 'bitlocker').toList()
-      ..sort((a, b) => b.curMib.compareTo(a.curMib));
-    final labels = {for (final p in s.disk?.parts ?? <Part>[]) p.path: p.label};
-    if (_running) {
-      return StepPage(
-      step: Gk3Step.mode,
-        title: l.shrinkRunning,
-        subtitle: l.shrinkWarn,
-        bottom: const SizedBox(height: kTouch),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          LinearProgressIndicator(value: _pct / 100, minHeight: 8),
-          const SizedBox(height: 16),
-          Expanded(child: LogView(_log)),
-        ]),
-      );
-    }
-    final p = _pick;
-    return StepPage(
-      step: Gk3Step.mode,
-      title: l.shrinkTitle,
-      subtitle: l.shrinkSub,
-      onBack: () => Navigator.pop(context),
-      bottom: p == null
-          ? null
-          : Row(children: [
-              Btn(l.btnBack, kind: BtnKind.text, icon: Icons.arrow_back, onPressed: () => Navigator.pop(context)),
-              const SizedBox(width: 24),
-              Expanded(
-                // 不用 confirmHoldIdle（"按住 2 秒以开始安装"）：这一步是缩分区，不是开始安装
-                child: HoldToConfirm(idle: '${l.shrinkGo} · ${l.holdIdle}', busy: (x) => l.confirmHoldBusy('$x'), onConfirmed: _go),
-              ),
-            ]),
-      child: list.isEmpty
-          ? Text(l.shrinkNone, style: tt.bodyLarge)
-          : Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Expanded(
-                child: ListView.separated(
-                  itemCount: list.length,
-                  separatorBuilder: (_, _) => const SizedBox(height: 12),
-                  itemBuilder: (_, i) {
-                    final x = list[i];
-                    return ChoiceCard(
-                      title: '${labels[x.part] ?? x.part}  ·  ${x.part.split('/').last}',
-                      body: l.shrinkRow(x.fs.toUpperCase(), fmtMib(x.curMib), fmtMib(x.minMib)),
-                      reason: _why(x),
-                      selected: identical(p, x),
-                      onTap: () => _select(x),
-                    );
-                  },
-                ),
-              ),
-              if (p != null) ...[
-                const SizedBox(width: 28),
-                SizedBox(
-                  width: 440,
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(l.shrinkSizeHint, style: tt.titleMedium),
-                    const SizedBox(height: 8),
-                    Text(fmtMib(_target.round()), style: tt.headlineMedium),
-                    Slider(
-                      value: _target,
-                      min: p.floorMib.toDouble(),
-                      max: (p.curMib - 1024).toDouble(),
-                      // 取整到 GiB 之后再夹回范围：两端不一定是整 GiB，取整会越界（Slider 断言 value <= max）
-                      onChanged: (v) => setState(() => _target = ((v / 1024).round() * 1024.0).clamp(p.floorMib.toDouble(), (p.curMib - 1024).toDouble())),
-                    ),
-                    Text(l.shrinkFreed(fmtMib(p.curMib - _target.round())), style: tt.bodyLarge!.copyWith(color: context.gk.success)),
-                    // /data 的估计：腾出来的减去固定开销（腾出来的那段要是紧挨着已有的空闲，实际会更大一点）
-                    Text(l.shrinkData(fmtMib(math.max(0, p.curMib - _target.round() - _fixedMib))), style: tt.bodyLarge),
-                    DataSizeWarning(p.curMib - _target.round() - _fixedMib),
-                    const SizedBox(height: 18),
-                    Text(l.shrinkWarn, style: tt.bodyMedium!.copyWith(color: context.gk.warning)),
-                    if (_error != null) ...[const SizedBox(height: 12), Text(_error!, style: tt.bodyMedium!.copyWith(color: context.cs.error))],
-                  ]),
-                ),
-              ],
-            ]),
     );
   }
 }

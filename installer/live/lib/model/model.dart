@@ -26,7 +26,7 @@ class Part {
   final String path, type, name, fs, fslabel, os;
   final int num, start, end, sizeMib, sizeKib;
 
-  /// 安装器就是从这个分区跑起来的（gk3_probe 的 PART medium=yes）—— 调整磁盘页不让动它
+  /// 安装器就是从这个分区跑起来的（gk3_probe 的 PART medium=yes）—— 删除分区页不让删它
   final bool medium;
 
   bool get isEsp => type == espTypeGuid || name == 'esp';
@@ -168,23 +168,6 @@ class EspInfo {
 
   /// 安装会换掉 BOOTAA64、而 Windows 卷是 BitLocker：要用户确认拿到了恢复密钥（U16）
   bool get needsBitlockerKey => windows && bitlocker && bootaa64 != 'sdboot';
-}
-
-class Shrinkable {
-  Shrinkable(Gk3Record r)
-      : part = r['part'],
-        fs = r['fs'],
-        curMib = r.intOf('cur_mib'),
-        minMib = r.intOf('min_mib'),
-        can = r.yes('can'),
-        why = r['why'];
-  final String part, fs, why;
-  final int curMib, minMib;
-  final bool can;
-
-  /// gk3_shrink 自己再加的余量（installer-lib.sh：floor = min + 512）。
-  /// ⚠️ 这是界面上滑块的下限，【不是】判据 —— 判据在 gk3_shrink 里，它会自己再验一遍。
-  int get floorMib => minMib + 512;
 }
 
 class PlanPart {

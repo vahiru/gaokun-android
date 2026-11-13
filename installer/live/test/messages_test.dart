@@ -24,7 +24,7 @@ void main() {
   final errCodes = grab(lib, RegExp(r'gk3_fail ([a-z][a-z0-9-]*)'));
 
   test('抓到的代码数量像样（正则没写坏）', () {
-    expect(progCodes.length, greaterThan(25));
+    expect(progCodes.length, greaterThan(15));
     expect(errCodes.length, greaterThan(50));
     expect(progCodes, containsAll(['dl', 'write-super', 'wifi-assoc', 'done']));
   });

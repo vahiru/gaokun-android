@@ -1,8 +1,0 @@
-O SHRINK part=/dev/nvme0n1p1 fs=vfat cur_mib=300 min_mib=0 can=no why=fs-not-shrinkable
-O SHRINK part=/dev/nvme0n1p2 fs=none cur_mib=16 min_mib=0 can=no why=no-filesystem
-O SHRINK part=/dev/nvme0n1p3 fs=ntfs cur_mib=122880 min_mib=1093 can=yes why=
-O SHRINK part=/dev/nvme0n1p4 fs=ntfs cur_mib=262788 min_mib=0 can=no why=ntfs-dirty
-O SHRINK part=/dev/nvme0n1p5 fs=vfat cur_mib=1024 min_mib=0 can=no why=fs-not-shrinkable
-O SHRINK part=/dev/nvme0n1p6 fs=ntfs cur_mib=18432 min_mib=66 can=yes why=
-O SHRINK part=/dev/nvme0n1p7 fs=ntfs cur_mib=1024 min_mib=6 can=yes why=
-X 0

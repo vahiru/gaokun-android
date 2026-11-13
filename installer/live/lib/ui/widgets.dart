@@ -96,7 +96,7 @@ class StepPage extends StatelessWidget {
   }
 }
 
-/// 侧栏底部常驻的"重新启动 / 关机"（v1.0 计划 GUI-3）：失败页、缩分区页让用户"回 Windows 关掉快速启动"，
+/// 侧栏底部常驻的"重新启动 / 关机"（v1.0 计划 GUI-3）：失败页让用户"回 Windows 关掉快速启动"，
 /// 以前整个安装器只有完成页能重启 —— 别的时候只能长按电源键。
 /// 正在写盘（Session.writing）时禁用并写明原因；点了先弹确认，不是一碰就关。
 class _PowerButtons extends StatelessWidget {
