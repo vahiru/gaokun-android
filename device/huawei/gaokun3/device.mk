@@ -1311,5 +1311,5 @@ PRODUCT_PACKAGES += \
     Fcitx5Android
 endif
 endif
-# Class 1 fingerprint candidate; see fingerprint/README.md.
+# 指纹HAL、TA与Goodix配置模板，见fingerprint/README.md。
 include $(LOCAL_PATH)/fingerprint/fingerprint.mk

@@ -394,6 +394,12 @@ PY
 )
     [ "$NF" = 1 ] || die "boot.img 的 dtb 段里有 $NF 个 FDT —— prebuilt-boot/dtb/ 多半留了陈旧文件"
     ok "boot.img 的 dtb 段只含 1 个 FDT"
+
+    # 设备树总是装上指纹HAL（fingerprint/fingerprint.mk）；内核缺驱动时设置里能录入，录入时却报硬件不可用。
+    KCFG=$(python3 "$REPO/scripts/extract-kconfig.py" "$OUT/boot.img") || die "无法从 boot.img 读取内核配置（CONFIG_IKCONFIG 是否已开启？）"
+    grep -qx 'CONFIG_GAOKUN3_FPCMD=y' <<<"$KCFG" \
+        || die "boot.img 的内核没有开 CONFIG_GAOKUN3_FPCMD（指纹驱动）—— 用 scripts/kernel-config-android.sh 重新配置并编译内核"
+    ok "boot.img 的内核带指纹驱动（CONFIG_GAOKUN3_FPCMD=y）"
 fi
 
 # ★ 统一启动入口（2026-10-05，S9）：vendor 里那份 gk3boot.efi / version 必须就是设备树 prebuilt-gk3boot/ 里那份

@@ -494,6 +494,13 @@ OUT="${1:?用法: $0 <kernel-out-dir>}"
 #   UsbDeviceManager。主线没有这个类，patches/kernel/ec-usb/0011 补上它（连接状态由 USB 端口 HAL 写）。
 ./scripts/config --file "$OUT/.config" --enable USB_ANDROID_USB_STATE
 
+# ★ 指纹：/dev/gaokun3_fpcmd（patches/kernel/fingerprint/0001–0003）。符号默认 n，Kconfig 要求
+#   QCOM_QSEECOM 与 QCOM_SCM=y。驱动初始化时只注册设备节点，TA 调用都由指纹HAL的 ioctl 发起。
+#   HAL 经 gpio cdev 读一次 GPIO61/62 板级 strap 判断传感器型号，所以 GPIO_CDEV 也要 =y。
+#   sync-device-tree.sh 第 3a 步和 release.sh 从内核镜像里嵌的配置确认指纹驱动在，要 IKCONFIG。
+./scripts/config --file "$OUT/.config" --enable QCOM_QSEECOM --enable GAOKUN3_FPCMD --enable GPIO_CDEV \
+    --enable IKCONFIG
+
 # ─── olddefconfig + 断言（止损"=m 坑"）───
 # 这个坑已经踩了 13 次：`scripts/config --enable X` 写进去了，olddefconfig
 # 却可能因为依赖把它降回 =m（或压根没有该符号），而 Android **不加载任何模块**
@@ -571,6 +578,7 @@ DETECT_HUNG_TASK SOFTLOCKUP_DETECTOR ANON_VMA_NAME THERMAL_STATISTICS
 DEBUG_INFO_BTF USERFAULTFD
 ARMV8_DEPRECATED SWP_EMULATION CP15_BARRIER_EMULATION SETEND_EMULATION
 TOUCHSCREEN_HIMAX_HX83121A_PEN TYPEC_MUX_GPIO_SBU USB_ANDROID_USB_STATE
+QCOM_QSEECOM GAOKUN3_FPCMD GPIO_CDEV IKCONFIG
 "
 # 接了 ReSukiSU 才断言 KSU —— 没接的树上断言它只会误报。
 if [ "$RESUKISU" = 1 ]; then

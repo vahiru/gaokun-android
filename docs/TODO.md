@@ -41,7 +41,7 @@
 
 ## 四、功能开发
 
-- **指纹**：驱动和HAL在[PR #92](https://github.com/vahiru/gaokun-android/pull/92)（草稿），支持FocalTech和Goodix两种传感器，匹配效果还需要改进。
+- **指纹**：驱动和HAL已由[PR #92](https://github.com/vahiru/gaokun-android/pull/92)合入并随镜像构建，支持FocalTech和Goodix两种传感器；FocalTech的`matchScale`尚未用真实手指测量，匹配效果还需要改进。
 - **蓝牙通话**（[issue #107](https://github.com/vahiru/gaokun-android/issues/107)）：音频策略里没有蓝牙SCO通路，蓝牙耳机的麦克风在通话中无法使用。
 - **相机**（[issue #108](https://github.com/vahiru/gaokun-android/issues/108)）：变焦和曝光补偿；软件ISP降噪；闪光灯照片负向曝光补偿；手电筒亮度档位；libcamera补丁和传感器参数提交到上游。
 - **按网络随机的Wi-Fi MAC地址**：需要同时做一次性迁移，避免老网络的设置突然生效。

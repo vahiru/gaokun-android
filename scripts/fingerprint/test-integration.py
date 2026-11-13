@@ -45,24 +45,29 @@ with tempfile.TemporaryDirectory(prefix='gk3-fp-integration-') as tmp:
 
     archive = ROOT / 'gaokun3-fingerprint-driver-handoff-20261101.zip'
     gfspi = ROOT / 'gfspi.dll'
-    if archive.exists() and gfspi.exists():
-        tree = tmp / 'device'
-        script = ROOT / 'scripts/fingerprint/prepare-crdroid.py'
-        subprocess.run(['python3', str(script), '--device-tree', str(tree)], check=True)
-        ta = tree / 'firmware/fingerpr.mbn'
+    # A checkout that builds the ROM already has both inputs staged here (TA from the public
+    # driver package, QcTreeExtOem8280.cab); the private handoff ZIP is optional.
+    repo_fw = ROOT / 'device/huawei/gaokun3/firmware'
+    script = ROOT / 'scripts/fingerprint/prepare-crdroid.py'
+    tree = tmp / 'device'
+    ta = tree / 'firmware/fingerpr.mbn'
+    cfg = tree / 'firmware/gaokun3-goodix-cfg.bin'
+    if gfspi.exists() and (archive.exists() or (repo_fw / 'fingerpr.mbn').exists()):
+        ta_args = [] if archive.exists() else ['--ta', str(repo_fw / 'fingerpr.mbn')]
+        subprocess.run(['python3', str(script), '--device-tree', str(tree), *ta_args], check=True)
         expected = hashlib.sha256(ta.read_bytes()).hexdigest()
-        bad = tmp / 'bad.zip'
-        with zipfile.ZipFile(archive) as src, zipfile.ZipFile(bad, 'w') as out:
-            for member in src.namelist():
-                data = src.read(member)
-                if member == 'firmware/fingerpr.mbn':
-                    data = bytes([data[0] ^ 1]) + data[1:]
-                out.writestr(member, data)
-        result = subprocess.run(['python3', str(script), '--device-tree', str(tree),
-                                 '--handoff', str(bad)], capture_output=True)
-        assert result.returncode != 0
-        assert hashlib.sha256(ta.read_bytes()).hexdigest() == expected
-        cfg = tree / 'firmware/gaokun3-goodix-cfg.bin'
+        if archive.exists():
+            bad = tmp / 'bad.zip'
+            with zipfile.ZipFile(archive) as src, zipfile.ZipFile(bad, 'w') as out:
+                for member in src.namelist():
+                    data = src.read(member)
+                    if member == 'firmware/fingerpr.mbn':
+                        data = bytes([data[0] ^ 1]) + data[1:]
+                    out.writestr(member, data)
+            result = subprocess.run(['python3', str(script), '--device-tree', str(tree),
+                                     '--handoff', str(bad)], capture_output=True)
+            assert result.returncode != 0
+            assert hashlib.sha256(ta.read_bytes()).hexdigest() == expected
         staged = cfg.read_bytes()
         dll = gfspi.read_bytes()
         # The template bytes occur more than once in gfspi.dll: damage them all.
@@ -72,59 +77,59 @@ with tempfile.TemporaryDirectory(prefix='gk3-fp-integration-') as tmp:
             assert data != dll
             wrong.write_bytes(data)
             result = subprocess.run(['python3', str(script), '--device-tree', str(tree),
-                                     '--gfspi', str(wrong)], capture_output=True)
+                                     '--gfspi', str(wrong), *ta_args], capture_output=True)
             assert result.returncode != 0 and cfg.read_bytes() == staged
-        print('PASS: handoff/template staging and corrupt input rejection leave existing input intact')
+        # --ta takes the TA straight from the driver package; the handoff ZIP is then not read.
+        ta_file = tmp / 'fingerpr.mbn'
+        ta_bytes = ta.read_bytes()
+        ta_file.write_bytes(ta_bytes)
+        tree_ta = tmp / 'device-ta'
+        command = ['python3', str(script), '--device-tree', str(tree_ta), '--ta', str(ta_file),
+                   '--handoff', str(tmp / 'absent.zip')]
+        subprocess.run(command, check=True)
+        assert (tree_ta / 'firmware/fingerpr.mbn').read_bytes() == ta_bytes
+        ta_file.write_bytes(bytes([ta_bytes[0] ^ 1]) + ta_bytes[1:])
+        assert subprocess.run(command, capture_output=True).returncode != 0
+        assert (tree_ta / 'firmware/fingerpr.mbn').read_bytes() == ta_bytes
+        print('PASS: handoff/--ta/template staging and corrupt input rejection leave existing input intact')
+    elif (repo_fw / 'fingerpr.mbn').exists() and (repo_fw / 'gaokun3-goodix-cfg.bin').exists():
+        cfg.parent.mkdir(parents=True)
+        shutil.copyfile(repo_fw / 'fingerpr.mbn', ta)
+        shutil.copyfile(repo_fw / 'gaokun3-goodix-cfg.bin', cfg)
+        print('SKIP: gfspi.dll unavailable; staging tests skipped, using the staged firmware/ inputs')
+
+    if ta.exists() and cfg.exists():
         makefile = tmp / 'gate.mk'
         makefile.write_text('LOCAL_PATH := ' + str(tree) + '\n'
                             'TARGET_COPY_OUT_VENDOR := vendor\n'
                             'include ' + str(FP / 'fingerprint.mk') + '\n'
-                            '.PHONY: check\ncheck:\n\t@test "$(PRODUCT_PACKAGES)" = "$(EXPECTED)"\n')
-        def make(*args):
-            return subprocess.run(['make', '-f', str(makefile), 'check', *args], capture_output=True)
+                            '.PHONY: check copies\ncheck:\n\t@test "$(PRODUCT_PACKAGES)" = "$(EXPECTED)"\n'
+                            'copies:\n\t@echo $(PRODUCT_COPY_FILES)\n')
+        def make():
+            # With the expected package list, only fingerprint.mk's $(error) can fail the run.
+            return subprocess.run(['make', '-f', str(makefile), 'check',
+                                   'EXPECTED=android.hardware.biometrics.fingerprint-service.gaokun3 '
+                                   'Gaokun3SystemUIFingerprintOverlay'], capture_output=True)
         assert make().returncode == 0
-        assert make('GAOKUN3_FINGERPRINT=true').returncode != 0
-        boot = tree / 'prebuilt-boot'
-        boot.mkdir()
-        image = boot / 'vmlinuz.efi'
-        image.write_bytes(b'synthetic kernel fixture, not bootable')
-        proof = boot / 'fingerprint-kernel.sha256'
-        proof.write_text(hashlib.sha256(image.read_bytes()).hexdigest() + '  vmlinuz.efi\n')
-        assert make('GAOKUN3_FINGERPRINT=true',
-                    'EXPECTED=android.hardware.biometrics.fingerprint-service.gaokun3 '
-                    'Gaokun3SystemUIFingerprintOverlay').returncode == 0
-        cfg_bytes = cfg.read_bytes()
-        cfg.unlink()
-        assert make('GAOKUN3_FINGERPRINT=true').returncode != 0
-        cfg.write_bytes(cfg_bytes[:-1] + bytes([cfg_bytes[-1] ^ 1]))
-        assert make('GAOKUN3_FINGERPRINT=true').returncode != 0
-        cfg.write_bytes(cfg_bytes)
-        image.write_bytes(b'stale kernel fixture')
-        assert make('GAOKUN3_FINGERPRINT=true').returncode != 0
-        print('PASS: product disabled by default, missing/stale kernel and Goodix template rejected, pinned inputs accepted')
-        # Synthetic extractor/image fixtures exercise staging rollback logic only.
-        # They do not establish that any real EFI image has the required config.
-        extractor = tmp / 'fake-kernel/scripts/extract-ikconfig'
-        extractor.parent.mkdir(parents=True)
-        extractor.write_text("#!/bin/sh\nprintf '%s\\n' CONFIG_QCOM_SCM=y "
-                             "CONFIG_QCOM_QSEECOM=y CONFIG_GAOKUN3_FPCMD=y CONFIG_GPIO_CDEV=y\n")
-        candidate = tmp / 'synthetic.efi'
-        candidate.write_bytes(b'new synthetic EFI fixture')
-        command = ['python3', str(script), '--device-tree', str(tree),
-                   '--kernel-tree', str(extractor.parents[1]), '--kernel-image', str(candidate)]
-        old = image.read_bytes()
-        result = subprocess.run(command, capture_output=True)
-        assert result.returncode == 0, result.stderr.decode()
-        backup = boot / 'vmlinuz.efi.before-fingerprint'
-        assert backup.read_bytes() == old
-        assert image.read_bytes() == candidate.read_bytes()
-        candidate.write_bytes(b'another synthetic EFI fixture')
-        assert subprocess.run(command, capture_output=True).returncode != 0
-        assert backup.read_bytes() == old
-        assert image.read_bytes() == b'new synthetic EFI fixture'
-        print('PASS: staging preserves rollback kernel and refuses to overwrite an existing backup')
-
-
+        copies = subprocess.run(['make', '-f', str(makefile), 'copies'], capture_output=True,
+                                check=True).stdout.decode().split()
+        assert sorted(copies) == sorted([
+            f'{ta}:vendor/firmware/fingerpr.mbn',
+            f'{cfg}:vendor/firmware/gaokun3-goodix-cfg.bin',
+            'frameworks/native/data/etc/android.hardware.fingerprint.xml:'
+            'vendor/etc/permissions/android.hardware.fingerprint.xml']), copies
+        for pinned in (ta, cfg):
+            data = pinned.read_bytes()
+            pinned.unlink()
+            result = make()
+            assert result.returncode != 0 and b'missing' in result.stderr, result.stderr
+            pinned.write_bytes(data[:-1] + bytes([data[-1] ^ 1]))
+            result = make()
+            assert result.returncode != 0 and b'SHA256 mismatch' in result.stderr, result.stderr
+            pinned.write_bytes(data)
+        assert make().returncode == 0
+        print('PASS: product always installs the HAL, TA, template and feature XML; missing or altered TA/Goodix template rejected')
     else:
-        print('SKIP: private handoff archive or gfspi.dll unavailable; staging tests require local input')
+        print('SKIP: no fingerprint TA/Goodix template available (firmware/ or handoff + gfspi.dll); '
+              'fingerprint.mk checks require local input')
 print('PASS: offline integration checks (no Android compile or device validation)')
