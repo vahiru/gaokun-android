@@ -23,6 +23,10 @@ HAL 持久化失败计数：每 5 次失败锁定 30 秒，20 次永久锁定，
 认证标准。`CONVENIENCE` 是开发阶段的保守能力报告，不是安全认证结论。
 
 HAL随镜像构建。不得仅改成WEAK/STRONG来绕过框架限制；提高安全等级仍需可信录入授权以及安全等级评估。
+SystemUI对Class 1/2指纹只在人脸也锁定时才禁止指纹解锁，没有人脸识别时，指纹自己临时锁定期间仍会不断请求认证。
+[`patches/android/frameworks-base/0001`](../../../../patches/android/frameworks-base/0001-systemui-respect-fingerprint-lockout.patch)
+（由`scripts/crdroid-tree-fixes.py`打入）让它在锁定期间改为只检测接触，与Class 3指纹锁定时相同；锁定期满时HAL发出
+`onLockoutCleared`，SystemUI随之恢复认证。
 
 ## 传感器型号
 

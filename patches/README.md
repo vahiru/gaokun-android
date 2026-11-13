@@ -22,7 +22,7 @@
 | [`android/drm-hwcomposer/`](android/drm-hwcomposer/) | AOSP `external/drm_hwcomposer` | [`scripts/crdroid-tree-fixes.py`](../scripts/crdroid-tree-fixes.py) | 10-bit客户端目标帧缓冲、内置屏sRGB/Display P3切换、压暗图层走GPU、内置屏HDR10/HLG声明 |
 | [`android/v4l2-codec2/`](android/v4l2-codec2/) | AOSP `external/v4l2_codec2` | [`scripts/crdroid-tree-fixes.py`](../scripts/crdroid-tree-fixes.py) | HEVC CSD合并入首帧、字节缓冲模式使用dmabuf ID、HDR静态元数据传递、编码器输入块CPU读用途、HEVC编码组件、单平面编码输入的缓冲长度 |
 | [`android/tinyalsa/`](android/tinyalsa/) | AOSP `external/tinyalsa_new` | [`scripts/crdroid-tree-fixes.py`](../scripts/crdroid-tree-fixes.py) | `sw_params`从refined `hw_params`推导 |
-| [`android/frameworks-base/`](android/frameworks-base/) | AOSP `frameworks/base` | 候选/按需应用 | SystemUI指纹锁定状态处理 |
+| [`android/frameworks-base/`](android/frameworks-base/) | AOSP `frameworks/base` | [`scripts/crdroid-tree-fixes.py`](../scripts/crdroid-tree-fixes.py) | SystemUI在指纹临时锁定期间不再请求指纹认证 |
 | [`mesa/`](mesa/) | AOSP `external/mesa3d`（Turnip Vulkan驱动） | [`scripts/mesa-a17/regen.sh`](../scripts/mesa-a17/regen.sh) | Android Native Buffer空内存重绑定容错、`VK_FORMAT_G10X6_B10X6R10X6_2PLANE_420_UNORM_3PACK16`（P010）支持、Mesa 26.1上游构建与依赖回移（`0003..0011`）、A6xx抢占（`0012`上游VSC修正，`0013`） |
 | [`libcamera/`](libcamera/) | 上游`libcamera`（替换`external/libcamera`） | [`scripts/camera/setup-libcamera-tree.sh`](../scripts/camera/setup-libcamera-tree.sh) | 详见[`libcamera/README.md`](libcamera/README.md) |
 | [`e2fsprogs/`](e2fsprogs/) | Debian `e2fsprogs` 1.47.2-3（Windows安装器自带的`mke2fs.exe`） | [`installer/backend/mke2fs/build.sh`](../installer/backend/mke2fs/build.sh) | `-E android_sparse`下跨块的按字节读写（1 KiB块时`zap_sector()`越界） |
