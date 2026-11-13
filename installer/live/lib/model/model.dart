@@ -2,7 +2,6 @@
 //
 // ⚠️ 这里只做【解读】，不做任何分区计算：空间够不够、/data 能给多大、放不放得下，
 //    一律问 gk3_plan（backend.dart 顶上那条规矩）。
-import 'dart:convert';
 
 import 'package:gk3_common/backend/backend.dart';
 import 'package:gk3_common/backend/protocol.dart';
@@ -211,57 +210,6 @@ class Plan {
   bool get keepData => summary?.yes('keep_data') ?? false;
 }
 
-class Ap {
-  Ap(Gk3Record r)
-      : signal = r.intOf('signal', -100),
-        secure = r.yes('secure'),
-        auth = r['auth'],
-        ssidHex = r['ssid_hex'],
-        ssid = r['ssid'],
-        hidden = false;
-
-  /// 手输的隐藏网络（不广播名字，扫描列表里没有它）。名字按 UTF-8 转成 ssid_hex ——
-  /// 与扫描来的网络走同一条 hex: 路径，引号、空格都不会坏；后端再加 scan_ssid=1
-  Ap.hidden(this.ssid, {required this.secure})
-      : signal = -100,
-        auth = secure ? 'psk' : 'open',
-        ssidHex = utf8.encode(ssid).map((b) => b.toRadixString(16).padLeft(2, '0')).join(),
-        hidden = true;
-
-  final int signal;
-  final bool secure, hidden;
-  final String auth, ssidHex, ssid;
-
-  /// 安装器连得上的：开放、WPA/WPA2（psk）、纯 WPA3（sae）。企业网络（eap）、WEP、OWE 连不了 —— 列表里标灰
-  /// 并写明原因，不再让人输了密码再报"密码错"（v1.0 计划 GUI-9）
-  bool get supported => const {'open', 'psk', 'sae'}.contains(auth);
-
-  /// 信号格数 0–4（dBm 数字对用户没有意义 —— roadmap 欠账第 1 条）
-  int get bars => signal >= -55 ? 4 : signal >= -65 ? 3 : signal >= -75 ? 2 : signal >= -85 ? 1 : 0;
-}
-
-/// 变体清单的一行。base= 指向 R2 上的一个发布目录（installer-lib.sh 的 gk3_net_manifest）
-class Variant {
-  Variant(Gk3Record r)
-      : id = r['id'],
-        name = r['name'],
-        desc = r['desc'],
-        base = r['base'],
-        sizeMib = r.intOf('size_mib'),
-        latest = r.yes('latest'),
-        _rec = r;
-  final String id, name, desc, base;
-  final Gk3Record _rec;
-
-  /// 按界面语言取 name_<语言> / desc_<语言>，清单里没有就用 name / desc（installer-lib.sh 的 gk3_net_manifest）
-  String nameFor(String lang) => _rec.fields['name_$lang'] ?? name;
-  String descFor(String lang) => _rec.fields['desc_$lang'] ?? desc;
-  final int sizeMib;
-
-  /// 从 OTA 清单推出来的"最新发布"（变体清单还没发布时，gk3__ota_variant）
-  final bool latest;
-}
-
 /// MiB → 给人看的大小：100 GiB 以下保留一位小数（"21.2 GiB"），整数不显示 ".0"
 /// 不到 1 MiB 的按 KiB 报（本机的 misc 是 1007 KiB —— 报成"0 MiB"看着像个空分区）
 String fmtKib(int kib) => kib < 1024 ? '$kib KiB' : fmtMib(kib ~/ 1024);
@@ -274,7 +222,7 @@ String fmtMib(int mib) {
   return '${s.endsWith('.0') ? s.substring(0, s.length - 2) : s} GiB';
 }
 
-/// gk3_release_info / gk3_net_release 的 RELEASE 记录
+/// gk3_release_info 的 RELEASE 记录（安装介质上 gaokun3/payload/ 里的系统文件）
 class Release {
   Release(Gk3Record r)
       : dir = r['dir'],

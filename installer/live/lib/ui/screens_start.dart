@@ -9,7 +9,6 @@ import '../session.dart';
 import 'screens_edit.dart';
 import 'screens_finish.dart';
 import 'screens_risk.dart';
-import 'screens_source.dart';
 import 'widgets.dart';
 
 class WelcomePage extends StatefulWidget {
@@ -233,13 +232,13 @@ class _ModePageState extends State<ModePage> {
     switch (_pick!) {
       case _Pick.wipe:
         s.setMode(Mode.wipe);
-        go(context, const SourcePage());
+        go(context, const OptsPage());
       case _Pick.along:
         s.setMode(Mode.alongside);
-        go(context, const SourcePage());
+        go(context, const OptsPage());
       case _Pick.reinstall:
         s.setMode(Mode.reinstall);
-        go(context, const SourcePage());
+        go(context, const OptsPage());
       // 删除分区同样先过风险确认页（RiskPage 等那一页 pop 了才跟着 pop，所以这里 await 的仍是"做完了没有"）
       case _Pick.edit:
         await RiskPage.open(context, RiskKind.edit, const DiskEditPage());
@@ -255,7 +254,9 @@ class _ModePageState extends State<ModePage> {
   Widget build(BuildContext context) {
     final s = context.session, l = context.l;
     final a = s.along;
-    final reason = _alongReason(a);
+    // 安装介质上没有系统文件（gaokun3/payload/）：三种安装方式都不能选，只剩删除分区
+    final noRel = !(s.usbRelease?.installable ?? false);
+    final reason = noRel ? l.modeWhyNoRelease : _alongReason(a);
     if (s.assessing || s.disk == null) {
       return StepPage(
       step: Gk3Step.mode,title: l.modeTitle, subtitle: l.modeSub, child: const Center(child: CircularProgressIndicator()));
@@ -278,7 +279,13 @@ class _ModePageState extends State<ModePage> {
             warn: l.modeReinstallWarn,
             body: l.modeReinstallBody,
             // U18：Windows 在休眠时重新安装同样要写共用的 EFI 分区 —— 一样拦住
-            reason: !r.ok ? planErrorText(context, r) : (s.espInfo?.winHibernated ?? false) ? l.modeWhyHibernated : null,
+            reason: noRel
+                ? l.modeWhyNoRelease
+                : !r.ok
+                    ? planErrorText(context, r)
+                    : (s.espInfo?.winHibernated ?? false)
+                        ? l.modeWhyHibernated
+                        : null,
             selected: _pick == _Pick.reinstall,
             onTap: () => setState(() => _pick = _Pick.reinstall),
           ),
@@ -290,7 +297,7 @@ class _ModePageState extends State<ModePage> {
           title: l.modeWipeTitle,
           warn: l.modeWipeWarn,
           body: l.modeWipeBody,
-          reason: s.disk!.medium ? l.modeWhyMedium : null,
+          reason: noRel ? l.modeWhyNoRelease : (s.disk!.medium ? l.modeWhyMedium : null),
           selected: _pick == _Pick.wipe,
           onTap: () => setState(() => _pick = _Pick.wipe),
         ),

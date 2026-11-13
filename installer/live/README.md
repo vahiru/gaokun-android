@@ -16,7 +16,7 @@ testdata/         由真实后端在容器内录制的各场景输出fixture
 
 行协议与百分号解码（`protocol.dart`）、后端接口（`backend.dart`）、fixture回放（`fixture_backend.dart`）、MD3主题、固定1280×800逻辑画布（`LogicalCanvas`）、通用控件与打包字体在共用包[`installer/common/`](../common/README.md)（`gk3_common`）里，以`package:gk3_common/...`引用。`installer/`是pub工作区，锁文件在`installer/pubspec.lock`。
 
-调用后端命令时，`shell_backend.dart`固定通过`bash -c '. "$0" && "$@"' <lib> <函数> <参数…>`传递位置参数，严禁将用户输入（如Wi-Fi密码）拼接进shell字符串。
+调用后端命令时，`shell_backend.dart`固定通过`bash -c '. "$0" && "$@"' <lib> <函数> <参数…>`传递位置参数，严禁将用户输入拼接进shell字符串。
 
 ## 二、本地开发与测试
 

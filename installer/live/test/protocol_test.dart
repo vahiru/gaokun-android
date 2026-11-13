@@ -122,24 +122,11 @@ void main() {
       }
       expect(r.records, isEmpty);
     });
-    test('WiFi：中文 SSID 与原始字节', () async {
-      final aps = (await b('blank').run('gk3_wifi_scan')).ofType('WIFI').map(Ap.new).toList();
-      expect(aps.first.ssid, '宿舍网-5G');
-      expect(aps.any((a) => a.ssid == '隔壁 的 网'), isTrue);
-      expect(aps.firstWhere((a) => a.ssid == 'eduroam').supported, isFalse);
-    });
     test('windows-live：介质在内置盘上 —— 盘与介质分区都标 medium', () async {
       final disks = Disk.fromProbe(await b('windows-live').run('gk3_probe'));
       expect(disks.single.medium, isTrue);
       expect(disks.single.external, isFalse);
       expect(disks.single.parts.where((p) => p.medium).map((p) => p.path), ['/dev/nvme0n1p8']);
-    });
-    test('版本列表：变体清单 404 时退回 OTA 清单的"最新发布"（真实输出）', () async {
-      final vs = (await b('blank', {'gk3_net_manifest': 'net_manifest-latest.txt'}).run('gk3_net_manifest')).ofType('VARIANT').map(Variant.new).toList();
-      expect(vs.single.latest, isTrue);
-      expect(vs.single.name, 'crDroid 12.11');
-      expect(vs.single.base, 'https://ota.072172.xyz/install/crDroidAndroid-16.0-20260916-gaokun3-v12.11/');
-      expect(vs.single.sizeMib, 1247);
     });
     test('overrides：换一份预检（型号不对拦住，电源照常）', () async {
       final checks = (await b('blank', {'gk3_preflight': 'preflight-model.txt'}).run('gk3_preflight'))
@@ -162,7 +149,7 @@ void main() {
       expect(r.exitCode, 127);
       expect(r.error, contains('no recorded output'));
     });
-    test('发布目录与网络下载', () async {
+    test('发布目录（安装介质上的系统文件）', () async {
       final rel = Release((await b('blank').run('gk3_release_info')).first('RELEASE')!);
       expect(rel.installable, isTrue);
       expect(rel.rescue, isTrue);

@@ -15,8 +15,6 @@ import 'model/model.dart';
 /// reinstall：盘上已经有我们的 Android 时，复用现有分区重新安装（用户 2026-09-25）
 enum Mode { wipe, alongside, reinstall }
 
-enum Source { usb, net }
-
 /// 双系统可不可行、不可行的原因（方式页据此"禁用 + 写明原因"，而不是藏起来）
 sealed class Along {
   const Along();
@@ -90,13 +88,6 @@ enum RiskKind {
 
 /// 没经过风险确认页就要写盘时报的 ERR 代码（界面自己的，不是后端的；touched=no ⇒ "盘没动过"那种失败页）
 const kRiskUnackedCode = 'risk-not-acknowledged';
-
-/// /run 是 tmpfs：1.2 GiB 的 super.img.zst 放得下，展开是流式写盘的（gk3_net_release 的注释）
-const netPayloadDir = '/run/gaokun3/payload';
-
-/// 安装走到哪一段了。失败页据此分两种（v1.0 计划 GUI-3）：下载阶段失败时盘一个字节都没动，
-/// 可以重试（/run 里下好的部分留着、接着续传）或返回；写盘阶段失败才是"盘可能写了一半"
-enum InstallStage { download, write }
 
 /// 语言从哪来、选了存到哪（v1.0 计划 GUI-19）。真机上是 backend/platform_io.dart 的实现
 /// （内核参数 gk3.lang= 与介质上的一个小文件）；测试与 Web 预览用 [LangPrefs.none]
@@ -396,84 +387,9 @@ class Session extends ChangeNotifier {
   /// 安装期间后端给的提醒（stdout 上的 NOTE 记录，例如 EFI 变量删不掉）—— 完成页逐条说
   final notes = <Gk3Record>[];
 
-  // ── 来源 ────────────────────────────────────────────────────────────────
-  Source source = Source.usb;
-  void setSource(Source s) {
-    source = s;
-    _changed();
-  }
-
-  Gk3Record? net;
-  List<Ap>? aps;
-  bool scanning = false;
-
-  Future<void> scanWifi() async {
-    scanning = true;
-    _changed();
-    final st = await backend.run('gk3_net_status');
-    net = st.first('NET');
-    aps = (await backend.run('gk3_wifi_scan')).ofType('WIFI').map(Ap.new).toList();
-    scanning = false;
-    _changed();
-  }
-
-  bool get online => net?.yes('online') ?? false;
-
-  Future<CallResult> connect(Ap ap, String password, void Function(Gk3Event) onEvent) async {
-    // 纯 WPA3 要 key_mgmt SAE + ieee80211w 2（后端按 sae 设；v1.0 计划 GUI-9）
-    final r = await backend.run('gk3_wifi_connect', ['hex:${ap.ssidHex}', password, if (ap.hidden) 'hidden', if (ap.auth == 'sae') 'sae'], onEvent);
-    if (r.ok) net = r.first('NET');
-    _changed();
-    return r;
-  }
-
-  List<Variant>? variants;
-  /// 取版本列表失败的那次调用（界面按它的 ERR 说原因）
-  CallResult? variantsFail;
-  Variant? variant;
-
-  Future<void> fetchVariants() async {
-    variants = null;
-    variantsFail = null;
-    _changed();
-    final r = await backend.run('gk3_net_manifest');
-    if (r.ok) {
-      variants = r.ofType('VARIANT').map(Variant.new).toList();
-    } else {
-      variantsFail = r;
-    }
-    _changed();
-  }
-
-  void setVariant(Variant v) {
-    variant = v;
-    _changed();
-  }
-
   // ── 安装 ────────────────────────────────────────────────────────────────
-  /// 现在（或失败时）在哪一段
-  InstallStage? stage;
-
-  /// 下载被用户取消了（失败页据此说"已取消"）
-  bool cancelled = false;
-  StreamSubscription<Gk3Event>? _dl;
-  StreamController<Gk3Event>? _dlOut;
-
-  /// 下载阶段可以取消（GUI-5）：盘还没动。进了写盘就不行了 —— 那时返回 false，什么都不做
-  bool cancelDownload() {
-    if (stage != InstallStage.download || _dl == null) return false;
-    cancelled = true;
-    // 不 await：取消要等后端那边的流收尾，而 ShellBackend 收尾 = 杀进程组、等它退出
-    unawaited(_dl!.cancel());
-    _dl = null;
-    _dlOut?.close();
-    return true;
-  }
-
   /// 接着跟一个还在跑的写盘任务（[runningJob]）。算写盘阶段：侧栏的重启 / 关机照样禁用
   Stream<Gk3Event> follow(String id) async* {
-    stage = InstallStage.write;
-    cancelled = false;
     _writing++;
     _changed();
     try {
@@ -485,51 +401,16 @@ class Session extends ChangeNotifier {
     }
   }
 
-  /// 网络安装先下载（占总进度 0–40%），再走和 U 盘安装完全相同的 gk3_apply
+  /// 用安装介质自带的系统文件（gaokun3/payload/）安装：gk3_apply
   Stream<Gk3Event> install() async* {
-    // 风险确认页没过（界面的缺陷才会走到这里）：连下载都不开始
+    // 风险确认页没过（界面的缺陷才会走到这里）：一个字节都不写
     if (!riskAcked(RiskKind.install)) {
-      stage = InstallStage.write;
-      cancelled = false;
       yield _riskLog;
       yield _riskErr;
       yield const Gk3Exit(1);
       return;
     }
-    var rel = usbRelease?.dir ?? '';
-    final net = source == Source.net;
-    if (net) {
-      // 下载阶段不算"写盘"：盘没动，侧栏的重启 / 关机照常可用 —— 下载卡住时它们就是取消（GUI 审查 2026-10-05）
-      stage = InstallStage.download;
-      cancelled = false;
-      var ok = false;
-      // 中间隔一个 controller：取消时（cancelDownload）直接关掉它，这边的循环立刻结束，
-      // 不必等后端的流先吐完最后一个事件
-      final out = _dlOut = StreamController<Gk3Event>();
-      _dl = backend.call('gk3_net_release', [variant!.base, netPayloadDir]).listen(out.add, onDone: out.close);
-      await for (final e in out.stream) {
-        if (e is Gk3Progress) {
-          yield e.at(e.percent * 40 ~/ 100);
-        } else if (e is Gk3Exit) {
-          ok = e.code == 0;
-          if (!ok) {
-            yield e;
-            return;
-          }
-        } else {
-          yield e;
-        }
-      }
-      _dl = null;
-      _dlOut = null;
-      if (cancelled) {
-        yield const Gk3Exit(kCancelledExit);
-        return;
-      }
-      if (!ok) return;
-      rel = netPayloadDir;
-    }
-    stage = InstallStage.write;
+    final rel = usbRelease?.dir ?? '';
     _writing++;
     _changed();
     try {
@@ -542,7 +423,7 @@ class Session extends ChangeNotifier {
       notes.clear();
       await for (final e in backend.call('gk3_apply', args)) {
         if (e is Gk3Record && e.type == 'NOTE') notes.add(e);
-        yield (net && e is Gk3Progress) ? e.at(40 + e.percent * 60 ~/ 100) : e;
+        yield e;
       }
     } finally {
       _writing--;

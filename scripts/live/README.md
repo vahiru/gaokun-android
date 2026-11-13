@@ -46,13 +46,12 @@ bash scripts/live/release-installer.sh --boot-img <boot.img> --rom <ROM版本> -
 
 ## 三、安装器后端（`installer-lib.sh`）与测试套件
 
-命令行安装器（[`scripts/install-gaokun3.sh`](../install-gaokun3.sh)）与Flutter图形安装器共用同一份后端库`scripts/live/installer-lib.sh`（并行推进的Rust重写版见[`docs/dev/installer-rust-design.md`](../../docs/dev/installer-rust-design.md)）。后端配套四个辅助工具（安装于Live镜像的`/usr/share/gaokun3/`）：
+命令行安装器（[`scripts/install-gaokun3.sh`](../install-gaokun3.sh)）与Flutter图形安装器共用同一份后端库`scripts/live/installer-lib.sh`（并行推进的Rust重写版见[`docs/dev/installer-rust-design.md`](../../docs/dev/installer-rust-design.md)）。后端配套三个辅助工具（安装于Live镜像的`/usr/share/gaokun3/`）：
 
 | 工具 | 作用 |
 |---|---|
 | `gk3-unsparse.py` | 从标准输入流式展开Android sparse镜像并直接写入目标分区（无需像`simg2img`那样要求输入文件支持`lseek`而额外生成12 GiB临时文件） |
 | `gk3-bootimg.py` | 解析`boot.img`（v2）并拆出`Image`、`gaokun3.dtb`、`ramdisk.img`与`cmdline.txt` |
-| `gk3-wpa-scan.py` | 解析`wpa_cli scan_results`中的`\xNN`转义序列与制表符分隔字段，正确还原中文及特殊字符SSID |
 | `gk3-misc` | 初始化`misc`分区的A/B槽位状态与`GK3R`记录（源码位于[`tools/gk3boot/misc/gk3-misc.c`](../../tools/gk3boot/misc/gk3-misc.c)） |
 
 运行后端自动化测试：
@@ -60,8 +59,6 @@ bash scripts/live/release-installer.sh --boot-img <boot.img> --rom <ROM版本> -
 ```sh
 bash scripts/live/test-plan.sh          # 分区规划计算校验（不重叠、不越界）
 bash scripts/live/test-unsparse.sh      # sparse流式展开与截断拒绝测试
-bash scripts/live/test-wpa-scan.sh      # UTF-8 / GBK / 特殊字符SSID解析测试
-bash scripts/live/test-wifi-connect.sh  # wpa_cli连接指令生成测试
 bash scripts/live/test-boot-android.sh  # 救援系统一键重启回Android的UEFI变量写入测试
 
 # 容器内端到端磁盘安装测试（使用loop与dm-error设备）：

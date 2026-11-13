@@ -11,7 +11,6 @@
 import 'dart:io';
 
 import 'package:flutter/services.dart';
-import 'package:flutter/widgets.dart' show Scrollable;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gk3_common/ui/theme.dart';
 import 'package:gk3_installer/app.dart';
@@ -113,60 +112,10 @@ void main() {
     await shot(t, '07-mode-installed');
   }, skip: !haveFont);
 
-  testWidgets('08 来源 / U 盘里没有镜像', (t) async {
-    await pumpApp(t, 'windows-free', overrides: {'gk3_release_info': 'release_info-none.txt'});
-    await toMode(t);
-    await tap(t, find.text(l.modeAlongTitle));
-    await next(t);
-    await shot(t, '08-source-nousb');
-  }, skip: !haveFont);
-
-  testWidgets('09–11 WiFi 两步式 与 选版本', (t) async {
-    await pumpApp(t, 'windows-free', overrides: {'gk3_release_info': 'release_info-none.txt'});
-    await toMode(t);
-    await tap(t, find.text(l.modeAlongTitle));
-    await next(t);
-    await next(t);
-    await waitFor(t, find.text('宿舍网-5G'));
-    await shot(t, '09-wifi');
-    await tap(t, find.text('宿舍网-5G'));
-    for (final k in 'hunter'.split('')) {
-      await tap(t, find.text(k));
-    }
-    await shot(t, '10-wifi-password');
-    await tap(t, find.text(l.btnBack));
-    await t.scrollUntilVisible(find.text(l.netHidden), 200, scrollable: find.byType(Scrollable).last);
-    await tap(t, find.text(l.netHidden));
-    for (final k in 'lab-guest'.split('')) {
-      await tap(t, find.text(k == '-' ? '123' : k));
-      if (k == '-') {
-        await tap(t, find.text('-'));
-        await tap(t, find.text('abc'));
-      }
-    }
-    await shot(t, '10b-wifi-hidden');
-    await tap(t, find.text(l.btnBack));
-    await t.scrollUntilVisible(find.text('宿舍网-5G'), -200, scrollable: find.byType(Scrollable).last);
-    await tap(t, find.text('宿舍网-5G'));
-    for (final k in 'hunter'.split('')) {
-      await tap(t, find.text(k));
-    }
-    for (final k in '42'.split('')) {
-      await tap(t, find.text('123'));
-      await tap(t, find.text(k));
-      await tap(t, find.text('abc'));
-    }
-    await tap(t, find.text(l.netConnect));
-    await next(t);
-    await tap(t, find.text('标准版'));
-    await shot(t, '11-variant');
-  }, skip: !haveFont);
-
   testWidgets('12–13 选项 与 分区大小', (t) async {
     await pumpApp(t, 'windows-free');
     await toMode(t);
     await tap(t, find.text(l.modeAlongTitle));
-    await next(t);
     await next(t);
     await waitFor(t, find.textContaining('/data'));
     await shot(t, '12-opts');
@@ -179,7 +128,6 @@ void main() {
     await pumpApp(t, 'factory');
     await toMode(t);
     await tap(t, find.text(l.modeWipeTitle));
-    await next(t);
     await next(t);
     await next(t);
     await waitFor(t, find.text(l.riskTitle));
@@ -197,7 +145,6 @@ void main() {
     await tap(t, find.text(l.modeAlongTitle));
     await next(t);
     await next(t);
-    await next(t);
     await waitFor(t, find.text(l.riskTitle));
     await scrollRiskToEnd(t);
     await shot(t, '13d-risk-alongside');
@@ -211,7 +158,6 @@ void main() {
     await tap(t, find.text(en.modeWipeTitle));
     await next(t, en);
     await next(t, en);
-    await next(t, en);
     await waitFor(t, find.text(en.riskTitle));
     await shot(t, '13e-risk-wipe-en');
   }, skip: !haveFont);
@@ -220,7 +166,6 @@ void main() {
     await pumpApp(t, 'factory');
     await toMode(t);
     await tap(t, find.text(l.modeWipeTitle));
-    await next(t);
     await next(t);
     await next(t);
     await passRisk(t);
@@ -232,7 +177,6 @@ void main() {
     await pumpApp(t, 'android');
     await toMode(t);
     await tap(t, find.text(l.modeReinstallTitle));
-    await next(t);
     await next(t);
     await next(t);
     await passRisk(t);
@@ -258,7 +202,6 @@ void main() {
     await tap(t, find.text(l.modeAlongTitle));
     await next(t);
     await next(t);
-    await next(t);
     await passRisk(t);
     await waitFor(t, find.text(l.confirmAlongHead));
     await shot(t, '15-confirm-alongside');
@@ -269,7 +212,6 @@ void main() {
     await pumpApp(t, 'windows-free', speed: 1);
     await toMode(t);
     await tap(t, find.text(l.modeAlongTitle));
-    await next(t);
     await next(t);
     await next(t);
     await passRisk(t);
@@ -291,7 +233,6 @@ void main() {
     await pumpApp(t, 'blank', failApply: true);
     await toMode(t);
     await tap(t, find.text(l.modeWipeTitle));
-    await next(t);
     await next(t);
     await next(t);
     await passRisk(t);

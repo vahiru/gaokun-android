@@ -26,13 +26,6 @@ class ShellBackend extends Gk3Backend {
   /// 拿 inhibitor 的命令（测试换成一个记录参数的假脚本）
   final List<String> inhibitor;
 
-  /// 可以中途取消的函数（取消 = 取消对 call() 返回的流的订阅）：只有下载 —— 写盘的那些半路停下就是半个盘
-  static bool cancellable(String fn) => fn == 'gk3_net_release';
-
-  /// setsid(1)（util-linux，live 镜像里有；macOS 没有）。有它就让可取消的调用自成一个进程组，
-  /// 取消时连 curl 一起杀掉 —— 只杀 bash 的话 curl 成了孤儿，照样往 /run 里那个文件写，下一次重试就是两个 curl 写同一个文件
-  static final String? _setsid = ['/usr/bin/setsid', '/bin/setsid'].where((f) => File(f).existsSync()).firstOrNull;
-
   /// 会动盘的函数：安装、删除分区
   static bool writesDisk(String fn) => fn == 'gk3_apply' || fn.startsWith('gk3_part_');
 
@@ -52,11 +45,6 @@ class ShellBackend extends Gk3Backend {
     }
     return _inhibitOk;
   }
-
-  /// 写进日志时要遮住的参数：WiFi 密码（gk3_wifi_connect 的第二个）
-  static List<String> redact(String fn, List<String> args) => [
-        for (var i = 0; i < args.length; i++) fn == 'gk3_wifi_connect' && i == 1 && args[i].isNotEmpty ? '<密码 ${args[i].length} 个字符>' : args[i],
-      ];
 
   /// 找库：GK3_LIB 环境变量 → live 镜像里的位置 → 仓库里（在 Linux 开发机上直接跑）
   static ShellBackend? locate() {
@@ -84,23 +72,10 @@ class ShellBackend extends Gk3Backend {
 
   @override
   Stream<Gk3Event> call(String fn, [List<String> args = const []]) {
-    Process? proc;
-    var group = false, cancelled = false;
-    final ctl = StreamController<Gk3Event>(onCancel: () {
-      if (!cancellable(fn) || cancelled) return;
-      cancelled = true;
-      final p = proc;
-      if (p == null) return;
-      _log.writeln('[${DateTime.now().toIso8601String().substring(11, 19)}] 取消 $fn（${group ? '进程组' : '进程'} ${p.pid}）');
-      if (group) {
-        Process.run('kill', ['-TERM', '--', '-${p.pid}']).catchError((Object _) => ProcessResult(0, 1, '', ''));
-      } else {
-        p.kill();
-      }
-    });
+    final ctl = StreamController<Gk3Event>();
     final t0 = DateTime.now();
     String ts() => DateTime.now().toIso8601String().substring(11, 19);
-    _log.writeln('[${ts()}] >> $fn ${redact(fn, args).join(' ')}'.trimRight());
+    _log.writeln('[${ts()}] >> $fn ${args.join(' ')}'.trimRight());
     () async {
       final Process p;
       // ★ 写盘的调用放进独立的 systemd 临时单元（GUI-11，installer-lib.sh 的 gk3_job_run）：界面崩了、cage 退出、
@@ -117,14 +92,8 @@ class ShellBackend extends Gk3Backend {
           _log.writeln('   ⚠️ 拿不到 systemd-inhibit（logind 没在跑？）—— 照样执行；电源键与合盖仍由 logind.conf.d 屏蔽、睡眠 target 已 mask');
         }
       }
-      if (cancellable(fn) && _setsid != null) {
-        // setsid 不是进程组长时不 fork，直接 exec：pid 不变、自己就是新进程组的组长（kill -- -pid 杀整组）
-        argv = [_setsid!, ...argv];
-        group = true;
-      }
       try {
         p = await Process.start(argv.first, argv.sublist(1));
-        proc = p;
       } on ProcessException catch (e) {
         _log.writeln('[${ts()}] << $fn 起不来 ${argv.first}：${e.message}');
         ctl.add(Gk3Log('!! 起不来 ${argv.first}：${e.message}'));

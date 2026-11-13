@@ -16,21 +16,15 @@ import 'package:gk3_installer/ui/screens_risk.dart';
 
 /// 包一层 FixtureBackend：记下每一次调用；可以让某个函数失败
 class Rec extends Gk3Backend {
-  Rec(this.inner, {this.failApply = false, this.failApplyUntouched = false, this.shellError, this.failNetOnce = false, this.holdApply, this.holdNet, this.holdFollow});
+  Rec(this.inner, {this.failApply = false, this.failApplyUntouched = false, this.shellError, this.holdApply, this.holdFollow});
   final FixtureBackend inner;
   final bool failApply;
 
   /// gk3_apply 在第一次写盘之前的检查里失败（ERR touched=no）
   final bool failApplyUntouched;
 
-  /// 第一次 gk3_net_release 失败（下载中断，盘没动），之后照常
-  bool failNetOnce;
-
   /// 给了就让 gk3_apply 停在半路、等它完成（看"写盘期间"界面的样子）
   final Completer<void>? holdApply;
-
-  /// 给了就让 gk3_net_release 停在半路（看"下载期间"界面的样子）
-  final Completer<void>? holdNet;
 
   /// 给了就让 gk3_job_follow 停在半路（接着跟一个写盘任务时的界面）
   final Completer<void>? holdFollow;
@@ -48,20 +42,6 @@ class Rec extends Gk3Backend {
   @override
   Stream<Gk3Event> call(String fn, [List<String> args = const []]) async* {
     calls.add([fn, ...args]);
-    if (fn == 'gk3_net_release' && failNetOnce) {
-      failNetOnce = false;
-      // 照新后端的样子（installer-lib.sh 的 gk3_net_fetch / gk3_fail）：进度与 ERR 都只有代码，中文只在 !! 与日志里
-      yield parseStderrLine('PROGRESS 30 dl name=super.img.zst pct=31 speed=1843k left=0:07:12');
-      yield const Gk3Log('下载 super.img.zst 中断（curl 退出码 28），3 秒后接着下（第 5/5 次）');
-      yield parseStderrLine('ERR code=dl-incomplete name=super.img.zst rc=28 http=200 tries=5 kept_mib=377');
-      yield const Gk3Log('!! 下载 super.img.zst 没完成（curl 退出码 28，试了 5 次）；已下的 377 MiB 留着，重试会接着下');
-      yield const Gk3Exit(1);
-      return;
-    }
-    if (fn == 'gk3_net_release' && holdNet != null) {
-      yield parseStderrLine('PROGRESS 30 dl name=super.img.zst pct=31 speed=1843k left=0:07:12');
-      await holdNet!.future;
-    }
     if (fn == 'gk3_job_follow' && holdFollow != null) {
       yield parseStderrLine('PROGRESS 30 write-super');
       await holdFollow!.future;
@@ -130,15 +110,13 @@ Future<Rec> pumpApp(WidgetTester t, String scenario,
     String language = 'zh',
     LangPrefs? prefs,
     String? shellError,
-    bool failNetOnce = false,
     Completer<void>? holdApply,
-    Completer<void>? holdNet,
     Completer<void>? holdFollow}) async {
   t.view.physicalSize = const Size(1280, 800);
   t.view.devicePixelRatio = 1;
   addTearDown(t.view.reset);
   final rec = Rec(FixtureBackend(scenario, bundle: DiskBundle(), speed: speed, overrides: overrides),
-      failApply: failApply, failApplyUntouched: failApplyUntouched, shellError: shellError, failNetOnce: failNetOnce, holdApply: holdApply, holdNet: holdNet, holdFollow: holdFollow);
+      failApply: failApply, failApplyUntouched: failApplyUntouched, shellError: shellError, holdApply: holdApply, holdFollow: holdFollow);
   final session = Session(rec, prefs: prefs ?? LangPrefs.none);
   if (prefs == null) session.language = language;
   await t.pumpWidget(InstallerApp(session: session));

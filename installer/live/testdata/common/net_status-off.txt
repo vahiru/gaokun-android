@@ -1,2 +1,0 @@
-O NET if=wlan0 ip=none ssid=none online=no
-X 0

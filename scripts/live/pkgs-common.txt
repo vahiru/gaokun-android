@@ -52,7 +52,7 @@ ntfs-3g
 nvme-cli
 # simg2img：后端已改用 gk3-unsparse.py（simg2img 喂管道会失败），留着给手工排障
 android-sdk-libsparse-utils
-# ★ python3：gk3-unsparse / gk3-bootimg / gk3-wpa-scan 三个辅助脚本
+# ★ python3：gk3-unsparse / gk3-bootimg 两个辅助脚本
 python3
 zstd
 xz-utils

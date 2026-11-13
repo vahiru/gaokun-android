@@ -43,7 +43,7 @@ docker run --rm -v "$(dirname "$BASE"):/base:ro" -v "$APP:/app:ro" -v "$REPO/out
     cp -a /app/. $R/usr/lib/gaokun3/installer/ && chown -R 0:0 $R/usr/lib/gaokun3/installer
     # 后端：与 build-rootfs.sh 同样的装法（权限一样）
     install -Dm644 /live/installer-lib.sh $R/usr/share/gaokun3/installer-lib.sh
-    for f in gk3-unsparse.py gk3-bootimg.py gk3-wpa-scan.py; do install -Dm755 /live/$f $R/usr/share/gaokun3/$f; done
+    for f in gk3-unsparse.py gk3-bootimg.py; do install -Dm755 /live/$f $R/usr/share/gaokun3/$f; done
     install -Dm755 /cli.sh $R/usr/share/gaokun3/install-gaokun3.sh
     # gk3-misc（S10）：编法同 build-rootfs.sh（静态；构建环境 live-build.Dockerfile 带 gcc）
     gcc -std=c11 -O2 -Wall -Wextra -Werror -Wno-unused-parameter -I/gk3boot/core/include -static -o /w/gk3-misc \

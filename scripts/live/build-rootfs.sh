@@ -177,7 +177,7 @@ fi
 
 # 安装器后端（两个前端共用；图形前端默认从这里加载，见 shell_backend.dart 的 locate()）
 install -Dm644 "$LIVE/installer-lib.sh" "$ROOTFS/usr/share/gaokun3/installer-lib.sh"
-for f in gk3-unsparse.py gk3-bootimg.py gk3-wpa-scan.py; do install -Dm755 "$LIVE/$f" "$ROOTFS/usr/share/gaokun3/$f"; done
+for f in gk3-unsparse.py gk3-bootimg.py; do install -Dm755 "$LIVE/$f" "$ROOTFS/usr/share/gaokun3/$f"; done
 install -Dm755 "$REPO/scripts/install-gaokun3.sh" "$ROOTFS/usr/share/gaokun3/install-gaokun3.sh"
 # gk3-misc（S10）：gk3_apply 清零 misc 之后用它的 init 写初始的 A/B 状态与 GK3 记录（installer-lib.sh 的 gk3__misc_tool 先找这里）。
 # 在构建容器里静态编（live-build.Dockerfile 装了 gcc / libc6-dev）：编法照 tools/gk3boot/Makefile 的 $(B)/gk3-misc.static ——
@@ -217,13 +217,15 @@ for c in sshd sgdisk parted partprobe resize2fs e2fsck mkfs.ext4 mkfs.vfat mkfs.
          udevadm wpa_supplicant wpa_cli dhcpcd iw python3 zstd curl cmp sha256sum mkntfs; do need_cmd "$c"; done
 need_path /usr/lib/systemd/boot/efi/systemd-bootaa64.efi   # gk3_apply 往目标机 ESP 上装的就是它
 need_path /usr/bin/busybox                                 # initramfs 用的静态 busybox
-for f in installer-lib.sh gk3-unsparse.py gk3-bootimg.py gk3-wpa-scan.py install-gaokun3.sh gk3-misc; do need_path "/usr/share/gaokun3/$f"; done
+for f in installer-lib.sh gk3-unsparse.py gk3-bootimg.py install-gaokun3.sh gk3-misc; do need_path "/usr/share/gaokun3/$f"; done
 # gk3-misc 在【目标】上真的能跑：在 chroot 里对一个 64 KiB 的空文件 init 一次、dump 读回来（静态链接，不看镜像的 libc）
 if in_ch 'f=$(mktemp) && head -c 65536 /dev/zero > $f && /usr/share/gaokun3/gk3-misc init $f --slot a | grep -q "^MISCINIT slot=a default=none " && /usr/share/gaokun3/gk3-misc dump $f | grep -q "_a priority=15 tries=6 successful=0"; r=$?; rm -f $f; exit $r'; then
     ok "gk3-misc init 在镜像里能跑（64 KiB 空文件 → _a 15/6，读回一致）"
 else echo "   ✗ gk3-misc 在镜像里跑不起来 / init 结果不对"; BAD=1; fi
 # 辅助脚本在【目标】的 python 上真的能跑（不是只看文件在不在）
-if in_ch 'python3 /usr/share/gaokun3/gk3-wpa-scan.py < /dev/null'; then ok "gk3-wpa-scan.py 在镜像的 python3 上能跑"; else echo "   ✗ 辅助脚本在镜像的 python3 上跑不起来"; BAD=1; fi
+if in_ch 'python3 -c "import ast, sys; [ast.parse(open(f).read()) for f in sys.argv[1:]]" /usr/share/gaokun3/gk3-unsparse.py /usr/share/gaokun3/gk3-bootimg.py'; then
+    ok "gk3-unsparse.py / gk3-bootimg.py 能被镜像的 python3 解析"
+else echo "   ✗ 辅助脚本在镜像的 python3 上解析不了"; BAD=1; fi
 for u in gk3-wifi.service ssh.service gk3-diag.timer avahi-daemon.service; do need_enabled "$u"; done
 # ⚠️ 判据锚定行首的实际指令（Alpine 版第一次 grep 到了自己注释里的"不能用 need"，当场自我误报）
 if in_ch 'grep -qE "^(Requires|BindsTo|Requisite)=" /etc/systemd/system/gk3-wifi.service'; then

@@ -8,16 +8,15 @@ import '../l10n/app_localizations.dart';
 import '../model/model.dart';
 import '../version.dart';
 
-/// 安装流程的七步。左侧导航按它标出"到哪了"（只是指示，不可点：导航只走 返回 / 下一步，
+/// 安装流程的六步。左侧导航按它标出"到哪了"（只是指示，不可点：导航只走 返回 / 下一步，
 /// 那是 Navigator 的栈 —— C 版 screen++/screen-- 掉进没走过的页的教训，见 app.dart 的 go）。
-enum Gk3Step { welcome, disk, mode, source, opts, confirm, install }
+enum Gk3Step { welcome, disk, mode, opts, confirm, install }
 
 extension on Gk3Step {
   (IconData, IconData) get icons => switch (this) {
     Gk3Step.welcome => (Icons.waving_hand_outlined, Icons.waving_hand),
     Gk3Step.disk => (Icons.storage_outlined, Icons.storage),
     Gk3Step.mode => (Icons.call_split_outlined, Icons.call_split),
-    Gk3Step.source => (Icons.download_outlined, Icons.download),
     Gk3Step.opts => (Icons.tune_outlined, Icons.tune),
     Gk3Step.confirm => (Icons.fact_check_outlined, Icons.fact_check),
     Gk3Step.install => (Icons.install_desktop_outlined, Icons.install_desktop),
@@ -26,7 +25,6 @@ extension on Gk3Step {
     Gk3Step.welcome => l.railWelcome,
     Gk3Step.disk => l.railDisk,
     Gk3Step.mode => l.railMode,
-    Gk3Step.source => l.railSource,
     Gk3Step.opts => l.railOpts,
     Gk3Step.confirm => l.railConfirm,
     Gk3Step.install => l.railInstall,

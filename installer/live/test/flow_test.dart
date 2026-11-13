@@ -28,8 +28,6 @@ void main() {
     await see(t, find.text(l.modeAlongOk));
     await tap(t, find.text(l.modeAlongTitle));
     await next(t);
-    await see(t, find.text(l.sourceTitle));
-    await next(t);
     await see(t, find.text(l.optsTitle));
     await see(t, find.textContaining('/data'), findsWidgets);
     await next(t);
@@ -39,6 +37,8 @@ void main() {
     await see(t, find.text(l.confirmWindowsKept));
     // 值落在对的位置（占位符顺序那个 bug：曾渲染成"创建 /dev/nvme0n1p1 的分区…EFI 分区 80 GiB"）
     await see(t, find.textContaining(tail(l.confirmAlongBody(hole, '/dev/nvme0n1p1'))));
+    // 要安装的版本：安装介质上的系统文件（gk3_release_info 的 version）
+    await see(t, find.text(l.confirmVersion('crDroidAndroid-16.0-20260916-gaokun3-v12.11')));
     await hold(t, l.confirmHoldIdle);
     await see(t, find.text(l.doneTitle));
     final a = rec.last('gk3_apply')!.join(' ');
@@ -70,7 +70,6 @@ void main() {
     await see(t, find.text(l.modeAlongOk));
     await tap(t, find.text(l.modeAlongTitle));
     await next(t);
-    await next(t); // 来源
     await next(t); // 选项
     await passRisk(t);
     await see(t, find.text(l.confirmAlongHead));
@@ -98,7 +97,6 @@ void main() {
     await see(t, find.text(l.modeAlongOk));
     await tap(t, find.text(l.modeAlongTitle));
     await next(t);
-    await next(t); // 来源
     await next(t); // 选项
     await passRisk(t);
     await see(t, find.text(l.confirmAlongHead));
@@ -137,7 +135,6 @@ void main() {
     await see(t, find.text(l.modeWhyNoEsp));
     await tap(t, find.text(l.modeWipeTitle));
     await next(t);
-    await next(t); // 来源：U 盘
     await next(t); // 选项
     await passRisk(t);
     await see(t, find.text(l.confirmWipeHead));
@@ -168,7 +165,6 @@ void main() {
     }
     await tap(t, find.text(l.modeWipeTitle));
     await next(t);
-    await next(t); // 来源：U 盘
     await next(t); // 选项
     await passRisk(t);
     await hold(t, l.confirmHoldIdle);
@@ -200,8 +196,7 @@ void main() {
     await next(t);
     await see(t, find.text(l.modeReinstallTitle));
     await tap(t, find.text(l.modeReinstallTitle));
-    await next(t); // 来源
-    await next(t); // → 选项
+    await next(t); // 选项
     await see(t, find.text(l.optsKeepTitle));
     expect(find.text(l.optsAdvanced), findsNothing);   // 不改分区表：没有分区大小可调
     await see(t, find.textContaining(lead(l.optsDataWiped(hole))));
@@ -225,7 +220,6 @@ void main() {
     await tap(t, find.textContaining('/dev/nvme0n1'));
     await next(t);
     await tap(t, find.text(l.modeReinstallTitle));
-    await next(t);
     await next(t);
     await tap(t, find.text(l.optsKeepTitle));
     await see(t, find.textContaining(lead(l.optsDataKept(hole))));
@@ -301,6 +295,21 @@ void main() {
     expect(btn.onPressed, isNull);
   });
 
+  testWidgets('安装介质里没有系统文件：三种安装方式都不可选并写明原因，删除分区照常可选', (t) async {
+    await pumpApp(t, 'android', overrides: {'gk3_release_info': 'release_info-none.txt'});
+    await tap(t, find.text(l.btnStart));
+    await tap(t, find.textContaining('/dev/nvme0n1'));
+    await next(t);
+    await see(t, find.text(l.modeTitle));
+    // 重新安装、清除整个磁盘、保留现有系统各写一次原因
+    await see(t, find.text(l.modeWhyNoRelease), findsNWidgets(3));
+    Finder nextOn() => find.ancestor(of: find.text(l.btnNext), matching: find.byWidgetPredicate((w) => w is ButtonStyleButton && w.onPressed != null));
+    await tap(t, find.text(l.modeAlongTitle));
+    expect(nextOn(), findsNothing);
+    await tap(t, find.text(l.editEntryTitle));
+    expect(nextOn(), findsOneWidget);
+  });
+
   testWidgets('返回走的是真正来的那一页（C 版 screen-- 会掉进没走过的页）', (t) async {
     await pumpApp(t, 'windows-free');
     await tap(t, find.text(l.btnStart));
@@ -308,98 +317,9 @@ void main() {
     await next(t);
     await tap(t, find.text(l.modeAlongTitle));
     await next(t);
-    await see(t, find.text(l.sourceTitle));
+    await see(t, find.text(l.optsTitle));
     await tap(t, find.text(l.btnBack));
     await see(t, find.text(l.modeTitle));
-  });
-
-  testWidgets('WiFi 两步式：软键盘输密码，短于 8 位不许连；连上后选版本；网络安装先下载再 apply', (t) async {
-    final rec = await pumpApp(t, 'windows-free', overrides: {'gk3_release_info': 'release_info-none.txt'});
-    await tap(t, find.text(l.btnStart));
-    await tap(t, find.textContaining('/dev/nvme0n1'));
-    await next(t);
-    await tap(t, find.text(l.modeAlongTitle));
-    await next(t);
-    // U 盘里没有镜像：U 盘那张禁用并写明原因，自动选到网络
-    await see(t, find.text(l.sourceUsbMissing));
-    await next(t);
-    await see(t, find.text(l.netTitle));
-    await see(t, find.text('宿舍网-5G'));
-    await see(t, find.text(l.netEnterprise)); // eduroam
-    await tap(t, find.text('宿舍网-5G'));
-    await see(t, find.text(l.netPasswordFor('宿舍网-5G')));
-    for (final k in 'abc'.split('')) {
-      await tap(t, find.text(k));
-    }
-    await see(t, find.text(l.netPasswordLength));
-    for (final k in 'defgh'.split('')) {
-      await tap(t, find.text(k));
-    }
-    expect(find.text(l.netPasswordLength), findsNothing);
-    await tap(t, find.text(l.netConnect));
-    expect(rec.last('gk3_wifi_connect'), ['gk3_wifi_connect', 'hex:e5aebfe8888de7bd912d3547', 'abcdefgh']);
-    await see(t, find.textContaining(l.netConnected('宿舍网-5G', '192.168.10.239')));
-    await next(t);
-    await see(t, find.text(l.variantTitle));
-    await tap(t, find.text('标准版'));
-    await next(t);
-    await next(t); // 选项
-    await passRisk(t);
-    await hold(t, l.confirmHoldIdle);
-    await see(t, find.text(l.doneTitle));
-    final dl = rec.last('gk3_net_release')!;
-    expect(dl[1], startsWith('https://ota.072172.xyz/install/'));
-    expect(dl[2], netPayloadDir);
-    expect(rec.last('gk3_apply')!.join(' '), contains('--release $netPayloadDir'));
-    // 下载在 apply 之前
-    expect(rec.calls.indexWhere((c) => c.first == 'gk3_net_release'), lessThan(rec.calls.indexWhere((c) => c.first == 'gk3_apply')));
-  });
-
-  testWidgets('WiFi 隐藏网络：手输名字（软键盘跟着焦点走）、密码可空、按字节限 32、后端收到 hidden', (t) async {
-    final rec = await pumpApp(t, 'windows-free', overrides: {'gk3_release_info': 'release_info-none.txt'});
-    await tap(t, find.text(l.btnStart));
-    await tap(t, find.textContaining('/dev/nvme0n1'));
-    await next(t);
-    await tap(t, find.text(l.modeAlongTitle));
-    await next(t);
-    await see(t, find.text(l.sourceUsbMissing));
-    await next(t);
-    // "其他网络"排在列表最后：网络一多就在屏幕外（GridView 是懒建的），先滚过去
-    await t.scrollUntilVisible(find.text(l.netHidden), 200, scrollable: find.byType(Scrollable).last);
-    await tap(t, find.text(l.netHidden));
-    await see(t, find.text(l.netHiddenTitle));
-    bool canConnect() => t
-        .widget<ButtonStyleButton>(find.ancestor(of: find.text(l.netConnect), matching: find.byWidgetPredicate((w) => w is ButtonStyleButton)).first)
-        .onPressed != null;
-    expect(canConnect(), isFalse); // 名字是空的
-    // 实体键盘：11 个汉字 = 33 字节 → 报错、不许连
-    await t.enterText(find.widgetWithText(TextField, l.netSsid), '一二三四五六七八九十一');
-    await settle(t);
-    await see(t, find.text(l.netSsidTooLong));
-    expect(canConnect(), isFalse);
-    // 名字框一开始就有焦点：软键盘打进名字框
-    await t.enterText(find.widgetWithText(TextField, l.netSsid), '');
-    await settle(t);
-    for (final k in 'lab'.split('')) {
-      await tap(t, find.text(k));
-    }
-    expect(find.text('lab'), findsOneWidget);
-    expect(canConnect(), isTrue); // 密码空 = 开放网络
-    // 点密码框之后软键盘改打进密码框（点软键盘本身会让输入框失焦 —— 打字的目标不能跟着丢）
-    await tap(t, find.widgetWithText(TextField, l.netPasswordOptional));
-    for (final k in 'abc'.split('')) {
-      await tap(t, find.text(k));
-    }
-    await see(t, find.text(l.netPasswordLength));
-    expect(canConnect(), isFalse);
-    for (final k in 'defgh'.split('')) {
-      await tap(t, find.text(k));
-    }
-    expect(find.text('lab'), findsOneWidget); // 名字没被打乱
-    await tap(t, find.text(l.netConnect));
-    expect(rec.last('gk3_wifi_connect'), ['gk3_wifi_connect', 'hex:6c6162', 'abcdefgh', 'hidden']);
-    await see(t, find.text(l.netTitle)); // 连上后回到列表
-    await see(t, find.textContaining(lead(l.netConnected(hole, ''))));
   });
 
   testWidgets('安装失败：失败页给出错误、说明分区表有备份、不许返回', (t) async {
@@ -410,75 +330,14 @@ void main() {
     await tap(t, find.text(l.modeWipeTitle));
     await next(t);
     await next(t);
-    await next(t);
     await passRisk(t);
     await hold(t, l.confirmHoldIdle);
     await see(t, find.text(l.failTitle));
     await see(t, find.textContaining('分区 super 没解析出来'), findsWidgets);
     await see(t, find.text(l.failBackup));
     expect(find.text(l.btnBack), findsNothing);
-    // 写盘阶段失败：不给重试、不说"盘没动"（v1.0 计划 GUI-3 只给下载失败开这扇门）
+    // 写盘阶段失败：不给重试、不说"盘没动"（v1.0 计划 GUI-3）
     expect(find.text(l.btnRetry), findsNothing);
-    expect(find.text(l.failDlTitle), findsNothing);
-  });
-
-  /// windows-free 上走网络安装一直到确认页按住开始（WiFi 那条测试的同一条路，只是不再细查键盘）。
-  /// [loc] = 界面语言（英文界面无 CJK 那条用）；[noCjk] 给了就在每一页（WiFi 列表页除外：SSID 是用户的数据）查一遍
-  Future<Rec> netInstall(WidgetTester t, {bool failNetOnce = false, L10n? loc, Completer<void>? holdNet, void Function(String page)? noCjk}) async {
-    final x = loc ?? l;
-    final rec = await pumpApp(t, 'windows-free', overrides: {'gk3_release_info': 'release_info-none.txt'}, failNetOnce: failNetOnce,
-        language: x.localeName, holdNet: holdNet);
-    noCjk?.call('welcome');
-    await tap(t, find.text(x.btnStart));
-    await tap(t, find.textContaining('/dev/nvme0n1'));
-    noCjk?.call('disk');
-    await next(t, x);
-    await tap(t, find.text(x.modeAlongTitle));
-    noCjk?.call('mode');
-    await next(t, x);
-    await see(t, find.text(x.sourceUsbMissing));
-    noCjk?.call('source');
-    await next(t, x);
-    await tap(t, find.text('宿舍网-5G'));
-    for (final k in 'abcdefgh'.split('')) {
-      await tap(t, find.text(k));
-    }
-    await tap(t, find.text(x.netConnect));
-    await see(t, find.textContaining('192.168.10.239'));
-    await next(t, x);
-    await see(t, find.text(x.variantTitle));
-    noCjk?.call('variant');
-    await tap(t, find.text(x.localeName == 'en' ? 'Standard' : '标准版'));
-    await next(t, x);
-    noCjk?.call('opts');
-    await next(t, x); // 选项
-    await passRisk(t, loc: x, check: () => noCjk?.call('risk'));
-    noCjk?.call('confirm');
-    await hold(t, x.confirmHoldIdle);
-    return rec;
-  }
-
-  testWidgets('下载失败（盘没动）：失败页如实说、给重试与返回；重试 → 接着下 → 装完（v1.0 计划 GUI-3）', (t) async {
-    final rec = await netInstall(t, failNetOnce: true);
-    await see(t, find.text(l.failDlTitle));
-    await see(t, find.text(l.failDlSub));
-    await see(t, find.textContaining('已下的 377 MiB 留着'), findsWidgets);
-    expect(find.text(l.failTitle), findsNothing);
-    expect(find.text(l.failBackup), findsNothing);
-    expect(rec.last('gk3_apply'), isNull); // 一个字节都没写
-    await tap(t, find.text(l.btnRetry));
-    await see(t, find.text(l.doneTitle));
-    expect(rec.calls.where((c) => c.first == 'gk3_net_release').length, 2);
-    expect(rec.calls.where((c) => c.first == 'gk3_net_release').map((c) => c.join(' ')).toSet().length, 1, reason: '重试用的是同一个 base 与目录（续传）');
-    expect(rec.last('gk3_apply')!.join(' '), contains('--release $netPayloadDir'));
-  });
-
-  testWidgets('下载失败 → 返回修改：回到选项页，什么都没写', (t) async {
-    final rec = await netInstall(t, failNetOnce: true);
-    await see(t, find.text(l.failDlTitle));
-    await tap(t, find.text(l.failBackEdit));
-    await see(t, find.text(l.optsTitle));
-    expect(rec.last('gk3_apply'), isNull);
   });
 
   ButtonStyleButton railBtn(WidgetTester t, String label) =>
@@ -510,7 +369,6 @@ void main() {
     await tap(t, find.text(l.modeWipeTitle));
     await next(t);
     await next(t);
-    await next(t);
     await passRisk(t);
     await hold(t, l.confirmHoldIdle);
     await see(t, find.text(l.runTitle));
@@ -524,40 +382,6 @@ void main() {
     expect(rec.power, isEmpty);
   });
 
-  testWidgets('下载期间盘没动：侧栏的重启 / 关机可用（下载卡住时它们就是取消）；进了写盘才禁用', (t) async {
-    final net = Completer<void>(), apply = Completer<void>();
-    final rec = await pumpApp(t, 'windows-free', overrides: {'gk3_release_info': 'release_info-none.txt'}, holdNet: net, holdApply: apply);
-    await tap(t, find.text(l.btnStart));
-    await tap(t, find.textContaining('/dev/nvme0n1'));
-    await next(t);
-    await tap(t, find.text(l.modeAlongTitle));
-    await next(t);
-    await see(t, find.text(l.sourceUsbMissing));
-    await next(t);
-    await tap(t, find.text('宿舍网-5G'));
-    for (final k in 'abcdefgh'.split('')) {
-      await tap(t, find.text(k));
-    }
-    await tap(t, find.text(l.netConnect));
-    await see(t, find.textContaining(lead(l.netConnected(hole, ''))));
-    await next(t);
-    await tap(t, find.text('标准版'));
-    await next(t);
-    await next(t); // 选项
-    await passRisk(t);
-    await hold(t, l.confirmHoldIdle);
-    await see(t, find.text(l.runTitle));
-    expect(rec.last('gk3_net_release'), isNotNull);
-    expect(rec.last('gk3_apply'), isNull);
-    expect(find.text(l.railBusy), findsNothing);
-    expect(railBtn(t, l.railPoweroff).onPressed, isNotNull);
-    net.complete();
-    await see(t, find.text(l.railBusy));
-    expect(railBtn(t, l.railPoweroff).onPressed, isNull);
-    apply.complete();
-    await see(t, find.text(l.doneTitle));
-  });
-
   testWidgets('分区大小页：/data 拖到 32 GiB 以下时黄色提醒（v1.0 计划 GUI-20）', (t) async {
     await pumpApp(t, 'windows-free');
     await tap(t, find.text(l.btnStart));
@@ -565,7 +389,6 @@ void main() {
     await next(t);
     await tap(t, find.text(l.modeAlongTitle));
     await next(t);
-    await next(t); // 来源
     await see(t, find.text(l.optsTitle));
     expect(find.textContaining(tail(l.dataSmallWarn(hole))), findsNothing); // 默认 66.8 GiB
     await tap(t, find.text(l.optsAdvanced));
@@ -592,8 +415,6 @@ void main() {
     check('mode');
     await tap(t, find.text(en.modeAlongTitle));
     await next(t, en);
-    check('source');
-    await next(t, en);
     await see(t, find.text(en.optsTitle));
     check('opts');
     await next(t, en);
@@ -607,66 +428,12 @@ void main() {
     expect(find.textContaining('Installer 0.'), findsOneWidget);
   });
 
-  testWidgets('英文界面、下载失败：失败页的说明是英文的（后端只给 ERR 代码），日志默认收起；运行页的进度也是英文（INST-10 / GUI-14）', (t) async {
-    await netInstall(t, failNetOnce: true, loc: en, noCjk: (page) => expect(cjkOnScreen(t), isEmpty, reason: '「$page」页'));
-    await see(t, find.text(en.failDlTitle));
-    await see(t, find.text(en.errDlIncomplete('super.img.zst', fmtMib(377))));
-    expect(find.byType(LogView), findsNothing);
-    expect(cjkOnScreen(t), isEmpty);
-    // 日志点了才看（它是后端原样的输出，部分是中文 —— bug 报告要它）
-    await tap(t, find.text(en.failLogShow));
-    await see(t, find.byType(LogView));
-    await see(t, find.textContaining('已下的 377 MiB 留着'), findsWidgets);
-  });
-
-  testWidgets('下载阶段：显示速度与剩余时间；取消 → 先问一句 → "下载已取消"（盘没动）→ 重试接着装完（GUI-5）', (t) async {
-    final gate = Completer<void>();
-    final rec = await netInstall(t, holdNet: gate);
-    await see(t, find.text(l.runTitle));
-    await see(t, find.text(l.progDl('super.img.zst', '31')));
-    await see(t, find.text(l.runSpeedLeft('1.8 MB', l.etaMinutes('8'))));   // 1843k/s、0:07:12 → 约 8 分钟
-    await tap(t, find.text(l.runCancel));
-    await see(t, find.text(l.runCancelTitle));
-    await tap(t, find.text(l.runCancelKeep));   // 先按"继续下载"：什么都不发生
-    expect(find.text(l.runTitle), findsOneWidget);
-    await tap(t, find.text(l.runCancel));
-    await tap(t, find.widgetWithText(FilledButton, l.runCancel));
-    await see(t, find.text(l.failCancelTitle));
-    expect(rec.last('gk3_apply'), isNull);
-    expect(find.text(l.failBackup), findsNothing);
-    gate.complete();   // 被取消的那次调用在后台收尾，不该再推进到写盘
-    await settle(t);
-    expect(rec.last('gk3_apply'), isNull);
-    await tap(t, find.text(l.btnRetry));
-    await see(t, find.text(l.doneTitle));
-    expect(rec.calls.where((c) => c.first == 'gk3_net_release').length, 2);
-  });
-
-  testWidgets('写盘阶段没有取消按钮（停下就是半个盘）', (t) async {
-    final gate = Completer<void>();
-    await pumpApp(t, 'blank', holdApply: gate);
-    await tap(t, find.text(l.btnStart));
-    await tap(t, find.textContaining('/dev/nvme0n1'));
-    await next(t);
-    await tap(t, find.text(l.modeWipeTitle));
-    await next(t);
-    await next(t);
-    await next(t);
-    await passRisk(t);
-    await hold(t, l.confirmHoldIdle);
-    await see(t, find.text(l.progWriteSuper));
-    expect(find.text(l.runCancel), findsNothing);
-    gate.complete();
-    await see(t, find.text(l.doneTitle));
-  });
-
   testWidgets('apply 在第一次写盘之前失败（ERR touched=no）：失败页说"盘没动过"、给返回与重试，不说"写了一半"', (t) async {
     final rec = await pumpApp(t, 'blank', failApplyUntouched: true);
     await tap(t, find.text(l.btnStart));
     await tap(t, find.textContaining('/dev/nvme0n1'));
     await next(t);
     await tap(t, find.text(l.modeWipeTitle));
-    await next(t);
     await next(t);
     await next(t);
     await passRisk(t);
@@ -686,7 +453,6 @@ void main() {
     await tap(t, find.textContaining('/dev/nvme0n1'));
     await next(t, en);
     await tap(t, find.text(en.modeWipeTitle));
-    await next(t, en);
     await next(t, en);
     await next(t, en);
     await passRisk(t, loc: en);
@@ -711,48 +477,6 @@ void main() {
     expect(find.text(l.checkBlocked), findsNothing);
   });
 
-  testWidgets('WiFi：WEP / OWE 标灰写明原因、点了不进输密码页；纯 WPA3 能连、后端收到 sae（GUI-9）', (t) async {
-    final rec = await pumpApp(t, 'windows-free', overrides: {'gk3_release_info': 'release_info-none.txt'});
-    await tap(t, find.text(l.btnStart));
-    await tap(t, find.textContaining('/dev/nvme0n1'));
-    await next(t);
-    await tap(t, find.text(l.modeAlongTitle));
-    await next(t);
-    await next(t);
-    await see(t, find.text(l.netTitle));
-    await see(t, find.text(l.netWep));
-    await see(t, find.text(l.netOwe));
-    // 标灰 = 卡片不可点（InkWell 没有 onTap）
-    for (final n in ['OldRouter-WEP', 'Cafe-OWE', 'eduroam']) {
-      expect(t.widget<InkWell>(find.ancestor(of: find.text(n), matching: find.byType(InkWell)).first).onTap, isNull, reason: n);
-    }
-    expect(t.widget<InkWell>(find.ancestor(of: find.text('WPA3-Home'), matching: find.byType(InkWell)).first).onTap, isNotNull);
-    await see(t, find.text(l.netWpa3));
-    await tap(t, find.text('WPA3-Home'));
-    await see(t, find.text(l.netPasswordFor('WPA3-Home')));
-    for (final k in 'abcdefgh'.split('')) {
-      await tap(t, find.text(k));
-    }
-    await tap(t, find.text(l.netConnect));
-    expect(rec.last('gk3_wifi_connect'), ['gk3_wifi_connect', 'hex:${'WPA3-Home'.codeUnits.map((c) => c.toRadixString(16).padLeft(2, '0')).join()}', 'abcdefgh', 'sae']);
-  });
-
-  testWidgets('WiFi 连不上：按 ERR 说原因（关联失败 → 密码 / 信号那句）', (t) async {
-    await pumpApp(t, 'windows-free', overrides: {'gk3_release_info': 'release_info-none.txt', 'gk3_wifi_connect': 'wifi_connect-fail.txt'});
-    await tap(t, find.text(l.btnStart));
-    await tap(t, find.textContaining('/dev/nvme0n1'));
-    await next(t);
-    await tap(t, find.text(l.modeAlongTitle));
-    await next(t);
-    await next(t);
-    await tap(t, find.text('宿舍网-5G'));
-    for (final k in 'abcdefgh'.split('')) {
-      await tap(t, find.text(k));
-    }
-    await tap(t, find.text(l.netConnect));
-    await see(t, find.text(l.netFailed));
-  });
-
   testWidgets('免 U 盘（安装器在内置盘上）：默认不另装救援、写明为什么；完成页不叫人"移除安装介质"（GUI-17）', (t) async {
     final rec = await pumpApp(t, 'windows-live');
     await tap(t, find.text(l.btnStart));
@@ -760,7 +484,6 @@ void main() {
     await next(t);
     await tap(t, find.text(l.modeAlongTitle));
     await next(t);
-    await next(t); // 来源
     await see(t, find.text(l.optsTitle));
     await see(t, find.text(l.optsRescueSameDisk));
     await next(t);
@@ -780,7 +503,6 @@ void main() {
     await next(t);
     await tap(t, find.text(l.modeWipeTitle));
     await next(t);
-    await next(t);
     expect(find.text(l.optsRescueSameDisk), findsNothing);
     await next(t);
     await passRisk(t);
@@ -795,7 +517,6 @@ void main() {
     await tap(t, find.textContaining('/dev/nvme0n1'));
     await next(t);
     await tap(t, find.text(l.modeWipeTitle));
-    await next(t);
     await next(t);
     await next(t);
     await passRisk(t);
@@ -835,7 +556,6 @@ void main() {
     await pumpApp(t, 'blank', overrides: {'gk3_job_status': 'job_status-running.txt', 'gk3_job_follow': 'job_follow-apply.txt'}, holdFollow: gate);
     await see(t, find.text(l.runResumeTitle));
     await see(t, find.text(l.railBusy));
-    expect(find.text(l.runCancel), findsNothing);
     gate.complete();
     await see(t, find.text(l.doneTitle));
   });
@@ -852,7 +572,6 @@ void main() {
     await tap(t, find.textContaining('/dev/nvme0n1'));
     await next(t);
     await tap(t, find.text(l.modeWipeTitle));
-    await next(t);
     await next(t);
     await next(t);
     await passRisk(t);
@@ -883,12 +602,6 @@ void main() {
     expect(rec.last('gk3_save_logs'), isNull);
   });
 
-  testWidgets('下载失败页也有"保存日志"', (t) async {
-    await netInstall(t, failNetOnce: true);
-    await see(t, find.text(l.failDlTitle));
-    await see(t, find.text(l.logsSave));
-  });
-
   // ── 双系统专项（见 tools/gk3boot/README.md）──────────────────────────────────────────────
   /// U 盘双系统一路走到确认页（windows-free，或 overrides 换掉 gk3_esp_info）
   Future<Rec> toConfirm(WidgetTester t, {String scenario = 'windows-free', Map<String, String> overrides = const {}}) async {
@@ -898,7 +611,6 @@ void main() {
     await next(t);
     await tap(t, find.text(l.modeAlongTitle));
     await next(t);
-    await next(t); // 来源
     await next(t); // 选项
     await passRisk(t);
     await see(t, find.text(l.confirmTitle));
@@ -992,7 +704,6 @@ void main() {
     await tap(t, find.text(l.modeWipeTitle));
     await next(t);
     await next(t);
-    await next(t);
     await passRisk(t);
     await see(t, find.text(l.confirmTitle));
     expect(find.text(l.confirmDefaultTitle), findsNothing);
@@ -1006,7 +717,6 @@ void main() {
     await tap(t, find.text(en.modeAlongTitle));
     await next(t, en);
     await next(t, en);
-    await next(t, en);
     await passRisk(t, loc: en);
     await see(t, find.text(en.confirmTitle));
     // 英文比中文长，BitLocker 这一段落在列表下方：懒加载的列表要滚到才会建出来
@@ -1016,7 +726,7 @@ void main() {
 
   // ── 写盘前的风险确认（用户 2026-10-06：分区之前强制阅读风险提示）────────────────────────────────────
   group('风险确认页', () {
-    /// 走到风险确认页。[install]：安装的三种方式（还要过来源、选项两页）；否则是缩分区 / 手动调整（方式页的下一页就是它）
+    /// 走到风险确认页。[install]：安装的三种方式（还要过选项一页）；否则是删除分区（方式页的下一页就是它）
     Future<Rec> toRisk(WidgetTester t, String scenario, String Function(L10n) pick, {L10n? loc, bool install = true, Map<String, String> overrides = const {}}) async {
       final x = loc ?? l;
       final rec = await pumpApp(t, scenario, language: x.localeName, overrides: overrides);
@@ -1025,10 +735,7 @@ void main() {
       await next(t, x);
       await tap(t, find.text(pick(x)));
       await next(t, x);
-      if (install) {
-        await next(t, x); // 来源
-        await next(t, x); // 选项
-      }
+      if (install) await next(t, x); // 选项
       await see(t, find.text(x.riskTitle));
       return rec;
     }

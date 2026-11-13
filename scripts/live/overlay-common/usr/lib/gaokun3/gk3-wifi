@@ -9,10 +9,8 @@
 # ★ 优先用介质上那份，是为了让【镜像本身不含任何凭据】：公开发布的 LiveCD 不能带
 #   别人家的 WiFi 密码，而救援镜像也不该把密码焊死在只读的 squashfs 里。
 #
-# ★ 控制接口统一放在 /run/wpa_supplicant：安装器的 WiFi 页（installer-lib.sh 的
-#   gk3_wifi_up）就连这里。用户放在介质上的配置未必写了 ctrl_interface —— 那样的话
-#   安装器以为没有 wpa_supplicant 在跑，会再起一个去抢同一块网卡。所以这里先合成
-#   一份：统一的控制接口 + 用户配置里除 ctrl_interface 以外的全部内容。
+# ★ 控制接口统一放在 /run/wpa_supplicant（wpa_cli 默认就找这里）。用户放在介质上的配置未必写了
+#   ctrl_interface，所以这里先合成一份：统一的控制接口 + 用户配置里除 ctrl_interface 以外的全部内容。
 # 无线网卡的名字：本应是 wlan0 —— overlay 屏蔽了 systemd 的可预测命名（/etc/systemd/network/99-default.link
 # → /dev/null）。⚠️ 但不写死：M0 第一轮（2026-09-25）没屏蔽时 systemd-udevd 把它改名成了 wlP6p1s0，
 # 这里只认 wlan0，于是以为 ath11k 没起来、跑去重绑。兜底认第一块有 wireless/ 的网卡。

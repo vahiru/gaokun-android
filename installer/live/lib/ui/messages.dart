@@ -30,56 +30,9 @@ String progressText(L10n l, Gk3Progress p) {
     'write-rescue' => l.progWriteRescue,
     'done' => l.progDone,
     'gpt-backup' => l.progGptBackup,
-    'wifi-assoc' => p['ssid'].isEmpty ? l.progWifiAssocAny : l.progWifiAssoc(p['ssid']),
-    'wifi-dhcp' => l.progWifiDhcp,
-    'wifi-ok' => l.progWifiOk,
-    'dl-sums' => l.progDlSums,
-    'dl-start' => l.progDlStart(p['name']),
-    'dl' => l.progDl(p['name'], p['pct']),
-    'dl-verify' => l.progDlVerify(p['name']),
-    'dl-done' => l.progDlDone(p['name']),
-    'dl-ready' => l.progDlReady,
     'part-delete' => l.progPartDelete(p['part']),
     _ => l.progOther(c),
   };
-}
-
-/// curl 的速度列（"2048k"、"1.5M"，1024 进制，curl 的单位）→ 字节/秒；认不出 → null
-double? parseCurlSpeed(String s) {
-  final m = RegExp(r'^([0-9.]+)([kMGTP]?)$').firstMatch(s);
-  if (m == null) return null;
-  final v = double.tryParse(m.group(1)!);
-  if (v == null) return null;
-  const mul = {'': 1.0, 'k': 1024.0, 'M': 1048576.0, 'G': 1073741824.0, 'T': 1099511627776.0, 'P': 1125899906842624.0};
-  return v * mul[m.group(2)]!;
-}
-
-/// curl 的剩余时间列（"0:06:59"）→ Duration；认不出 → null
-Duration? parseCurlLeft(String s) {
-  final m = RegExp(r'^(\d+):(\d\d):(\d\d)$').firstMatch(s);
-  if (m == null) return null;
-  return Duration(hours: int.parse(m.group(1)!), minutes: int.parse(m.group(2)!), seconds: int.parse(m.group(3)!));
-}
-
-String fmtSpeed(double bps) {
-  if (bps < 1024 * 1024) return '${(bps / 1024).toStringAsFixed(0)} KB';
-  return '${(bps / 1048576).toStringAsFixed(1)} MB';
-}
-
-String fmtEta(L10n l, Duration d) {
-  if (d.inSeconds < 60) return l.etaUnderMinute;
-  final mins = (d.inSeconds / 60).ceil();
-  if (mins < 60) return l.etaMinutes('$mins');
-  return l.etaHours('${mins ~/ 60}', '${mins % 60}');
-}
-
-/// 下载进度的速度 / 剩余时间一行（GUI-5）；这条进度不是下载、或者 curl 没给速度 → null
-String? downloadRate(L10n l, Gk3Progress p) {
-  if (p.code != 'dl') return null;
-  final sp = parseCurlSpeed(p['speed']);
-  if (sp == null) return null;
-  final left = parseCurlLeft(p['left']);
-  return left == null ? l.runSpeed(fmtSpeed(sp)) : l.runSpeedLeft(fmtSpeed(sp), fmtEta(l, left));
 }
 
 /// 一条 ERR 说给人听
@@ -135,19 +88,6 @@ String errText(L10n l, Gk3Record e) {
     'disk-unreadable' => l.errDiskUnreadable(f('disk')),
     'mbr-disk' => l.errMbr,
     'gpt-rewrite' => l.errGptRewrite,
-    'wifi-no-if' => l.netNoAdapter,
-    'wpa-start' => l.errWpaStart,
-    'ssid-too-long' => l.netSsidTooLong,
-    'psk-length' => l.netPasswordLength,
-    'wpa-reject' => l.errWpaReject,
-    'wifi-assoc' => l.netFailed,
-    'wifi-dhcp' => l.netNoIp,
-    'manifest-unavailable' => l.errManifestUnavailable,
-    'dl-incomplete' => l.errDlIncomplete(f('name'), _mib(f('kept_mib'))),
-    'dl-failed' => l.errDlFailed(f('name'), f('rc')),
-    'dl-sha256' => l.errDlSha256(f('name')),
-    'dl-sums' => l.errDlSums,
-    'dl-sums-missing' => l.errDlSumsMissing(f('name')),
     'not-block' => l.errNotBlock(f('dev')),
     'edit-esp' => l.editWhyEsp,
     'edit-mounted' => l.editWhyMedium,

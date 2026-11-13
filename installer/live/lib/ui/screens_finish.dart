@@ -293,7 +293,7 @@ class ConfirmPage extends StatelessWidget {
                 ),
               const Divider(height: 24),
               Text(l.confirmRescue(s.rescue && s.rescueUsable ? l.wordInstall : l.wordNoInstall), style: tt.bodyLarge),
-              if (s.source == Source.net && s.variant != null) Text(s.variant!.nameFor(s.language), style: tt.bodyLarge),
+              if (s.usbRelease case final rel? when rel.version.isNotEmpty) Text(l.confirmVersion(rel.version), style: tt.bodyLarge),
             ]),
           ),
         ),
@@ -412,16 +412,15 @@ class _RunPageState extends State<RunPage> {
   }
 
   void _finish(int code) {
-    final s = context.session;
     final job = widget.resume;
     if (code == 0) {
       // 接着跟的是删除分区：做完了就从头走一遍（盘变了，前面的判断都要重来）
       go(context, job == null || job['fn'] == 'gk3_apply' ? const DonePage() : const WelcomePage(), replace: true);
       return;
     }
-    // 盘没动过的失败（下载阶段、取消、或者 gk3_apply 在第一次写盘之前的检查里停下 —— ERR touched=no）：
+    // 盘没动过的失败（gk3_apply 在第一次写盘之前的检查里停下 —— ERR touched=no）：
     // 可以返回、可以重试。写盘阶段的失败才是"盘可能写了一半"（v1.0 计划 GUI-3）
-    final untouched = job == null && (s.stage == InstallStage.download || _err?['touched'] == 'no');
+    final untouched = job == null && _err?['touched'] == 'no';
     go(
       context,
       FailPage(
@@ -430,28 +429,9 @@ class _RunPageState extends State<RunPage> {
         err: _err,
         planErr: _planErr,
         untouched: untouched,
-        download: s.stage == InstallStage.download,
-        cancelled: s.cancelled,
       ),
       replace: true,
     );
-  }
-
-  /// 取消下载（GUI-5）：先问一句；问的这会儿要是已经下完、进了写盘，就什么都不做
-  Future<void> _cancel() async {
-    final l = context.l;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: Text(l.runCancelTitle),
-        content: SizedBox(width: 520, child: Text(l.runCancelBody)),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(c, false), child: Text(l.runCancelKeep)),
-          FilledButton(onPressed: () => Navigator.pop(c, true), child: Text(l.runCancel)),
-        ],
-      ),
-    );
-    if (ok == true && mounted) context.session.cancelDownload();
   }
 
   @override
@@ -463,11 +443,9 @@ class _RunPageState extends State<RunPage> {
 
   @override
   Widget build(BuildContext context) {
-    final s = context.session, l = context.l, tt = Theme.of(context).textTheme;
+    final l = context.l, tt = Theme.of(context).textTheme;
     final last = _last;
     final step = last == null ? l.stepPrep : progressText(l, last);
-    final rate = last == null ? null : downloadRate(l, last);
-    final downloading = s.stage == InstallStage.download;
     return PopScope(
       canPop: false, // 装到一半不许返回
       child: StepPage(
@@ -477,8 +455,6 @@ class _RunPageState extends State<RunPage> {
         bottom: Row(children: [
           Btn(_showLog ? l.runHideLog : l.runShowLog, kind: BtnKind.secondary, icon: Icons.subject, onPressed: () => setState(() => _showLog = !_showLog)),
           const Spacer(),
-          // 只在下载阶段有：盘还没动，停下来没有代价（写盘阶段停下就是半个盘 —— 不给这个按钮）
-          if (downloading) Btn(l.runCancel, kind: BtnKind.text, icon: Icons.close, onPressed: _cancel),
         ]),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           const SizedBox(height: 20),
@@ -488,10 +464,6 @@ class _RunPageState extends State<RunPage> {
           ]),
           const SizedBox(height: 16),
           LinearProgressIndicator(value: _pct / 100, minHeight: 8),
-          if (rate != null) ...[
-            const SizedBox(height: 10),
-            Text(rate, style: tt.bodyLarge!.copyWith(color: context.cs.onSurfaceVariant)),
-          ],
           const SizedBox(height: 24),
           if (_showLog) Expanded(child: LogView(_log, controller: _scroll)),
         ]),
@@ -537,8 +509,8 @@ class DonePage extends StatelessWidget {
 }
 
 /// 失败页分两种（v1.0 计划 GUI-3）：
-///   - 盘没动过（[untouched]：下载阶段失败 / 取消，或者 gk3_apply 在第一次写盘之前的检查里停下、ERR touched=no）：
-///     给"重试"（/run 里下好的部分留着，gk3_net_fetch 接着续传）和"返回修改"（换网络 / 换版本 / 换选项）。
+///   - 盘没动过（[untouched]：gk3_apply 在第一次写盘之前的检查里停下、ERR touched=no）：
+///     给"重试"和"返回修改"（换选项）。
 ///   - 写盘阶段失败：盘可能停在中间状态 —— 不许返回、不给重试，让用户先看日志（分区表备份的还原命令在里面）。
 /// 两种都能从侧栏重启 / 关机。
 /// ★ 标题下面那句错误说明按 ERR 的代码查 l10n（ui/messages.dart）；后端的中文原话只在日志里（INST-10）。
@@ -551,13 +523,11 @@ class FailPage extends StatefulWidget {
     this.err,
     this.planErr,
     this.untouched = false,
-    this.download = false,
-    this.cancelled = false,
   });
   final List<String> log;
   final int code;
   final Gk3Record? err, planErr;
-  final bool untouched, download, cancelled;
+  final bool untouched;
 
   @override
   State<FailPage> createState() => _FailPageState();
@@ -571,9 +541,7 @@ class _FailPageState extends State<FailPage> {
     final l = context.l, tt = Theme.of(context).textTheme;
     final w = widget;
     final String msg;
-    if (w.cancelled) {
-      msg = l.runCancelBody;
-    } else if (w.err != null) {
+    if (w.err != null) {
       msg = errText(l, w.err!);
     } else if (w.planErr != null) {
       msg = planErrorText(context, Plan(CallResult([w.planErr!], const [], w.code)));
@@ -582,8 +550,8 @@ class _FailPageState extends State<FailPage> {
       msg = raw.isNotEmpty && l.localeName.startsWith('zh') ? raw.substring(3) : l.errNoCode('${w.code}');
     }
     final backedUp = !w.untouched && w.log.any((x) => x.contains('sgdisk --load-backup='));
-    final title = w.cancelled ? l.failCancelTitle : (w.download ? l.failDlTitle : (w.untouched ? l.failUntouchedTitle : l.failTitle));
-    final sub = w.download || w.cancelled ? l.failDlSub : (w.untouched ? l.failUntouchedSub : l.failSub);
+    final title = w.untouched ? l.failUntouchedTitle : l.failTitle;
+    final sub = w.untouched ? l.failUntouchedSub : l.failSub;
     final showLog = _showLog ?? l.localeName.startsWith('zh');
     return PopScope(
       canPop: w.untouched,
@@ -613,7 +581,7 @@ class _FailPageState extends State<FailPage> {
                 Expanded(child: Text(l.shellHint, style: tt.bodySmall)),
               ]),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Text(msg, style: tt.titleMedium!.copyWith(color: w.cancelled ? context.cs.onSurface : context.cs.error)),
+          Text(msg, style: tt.titleMedium!.copyWith(color: context.cs.error)),
           if (backedUp) ...[const SizedBox(height: 8), Text(l.failBackup, style: tt.bodyMedium)],
           const SizedBox(height: 14),
           if (showLog) ...[
