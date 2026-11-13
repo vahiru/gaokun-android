@@ -52,7 +52,8 @@ gk3w_plan_err gk3w_plan_alongside(const gk3w_plan_req *r, gk3w_plan *out);
 /* 算方案并按行协议打印到 fp：成功时每个分区一行 PLAN（op=mkpart disk name start end size_mib type=8300），
  * 再一行 PLANSUM（avail_mib fixed_mib userdata_mib）；失败时一行 PLANERR（msg avail_mib need_mib fixed_mib）。
  * apply 与 plan 命令共用这一份输出，界面只认这些行，自己不算分区。 */
-gk3w_plan_err gk3w_plan_print(const gk3w_plan_req *r, uint64_t disk, gk3w_plan *out, FILE *fp);
+/* disk 是 PLAN 行里 disk= 的值：Windows 是磁盘号，Linux 是 /dev 下的路径。 */
+gk3w_plan_err gk3w_plan_print(const gk3w_plan_req *r, const char *disk, gk3w_plan *out, FILE *fp);
 const char *gk3w_plan_strerror(gk3w_plan_err e);
 
 #endif

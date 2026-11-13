@@ -13,10 +13,11 @@ FROM debian@sha256:9cc080028c43b27d2074d63a5f9caf7166d731494965616c1a6d2827a0045
 #   android-sdk-libsparse-utils         —— 真 simg2img/img2simg，拿来交叉比对
 #   zstd python3 mtools udev(udevadm)   —— 发版格式 / 解包器 / FAT / 等分区节点
 #   curl                                —— 网络安装（gk3_net_fetch / gk3_net_release）
+#   dmsetup                             —— 造读盘出错的盘（dm-error，installer/backend/test/linux/test-probe.sh）
 #   gcc libc6-dev                       —— 现编 gk3-misc（installer-lib.sh 的 gk3__misc_tool：仓库 checkout 里没有现成的就用 cc 编；
 #                                          live 镜像里是 build-rootfs.sh 静态编好放进 /usr/share/gaokun3/ 的）
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       gdisk fdisk parted e2fsprogs dosfstools ntfs-3g \
-      android-sdk-libsparse-utils zstd python3 mtools udev util-linux curl ca-certificates gcc libc6-dev \
+      android-sdk-libsparse-utils zstd python3 mtools udev util-linux curl ca-certificates gcc libc6-dev dmsetup \
  && rm -rf /var/lib/apt/lists/*

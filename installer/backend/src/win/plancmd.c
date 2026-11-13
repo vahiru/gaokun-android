@@ -6,6 +6,8 @@
  * 重新核对，这里不读盘。 */
 #include <windows.h>
 
+#include <stdio.h>
+
 #include "../plan.h"
 #include "../proto.h"
 #include "disk.h"
@@ -17,6 +19,7 @@ int gk3w_cmd_plan(int argc, wchar_t **argv)
     gk3w_plan_req req;
     gk3w_plan plan;
     gk3w_plan_err pe;
+    char dn[24];
     if (gk3w_arg_u64(argc, argv, L"--sector", &sector) || (sector != 512 && sector != 4096) ||
         gk3w_arg_u64(argc, argv, L"--region-start", &rstart) || gk3w_arg_u64(argc, argv, L"--region-end", &rend) ||
         (gk3w_arg(argc, argv, L"--userdata-mib") && gk3w_arg_u64(argc, argv, L"--userdata-mib", &ud)) ||
@@ -26,7 +29,8 @@ int gk3w_cmd_plan(int argc, wchar_t **argv)
     req.region = (gk3w_span){rstart, rend};
     req.userdata_mib = ud;
     req.rescue = 0;
-    pe = gk3w_plan_print(&req, disk, &plan, stdout);
+    snprintf(dn, sizeof dn, "%llu", (unsigned long long)disk);
+    pe = gk3w_plan_print(&req, dn, &plan, stdout);
     if (pe != GK3W_PLAN_OK)
         return gk3w_err_kv(GK3W_TOUCHED_NA, "plan", "why", gk3w_plan_strerror(pe), "the selected free space is too small for Android", 0);
     return fflush(stdout) == 0 ? 0 : 1;

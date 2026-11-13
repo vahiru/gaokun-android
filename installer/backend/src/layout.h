@@ -1,4 +1,4 @@
-/* 与平台无关的分区布局计算：空闲区。以后 plan 也放在这一层，Linux 与 Windows 共用。 */
+/* 与平台无关的分区布局计算：空闲区、分区内容的识别。Linux 与 Windows 共用。 */
 #ifndef GK3W_LAYOUT_H
 #define GK3W_LAYOUT_H
 
@@ -44,5 +44,10 @@ typedef enum {
 } gk3w_content_kind;
 gk3w_content_kind gk3w_content_kind_of(const uint8_t *head, size_t len);
 const char *gk3w_content_kind_name(gk3w_content_kind k);
+
+/* 分区上大概是什么系统，只给界面提示用，不参与任何判断。name 是 GPT 分区名，type 是大写的类型 GUID 文本，
+ * fs 是文件系统名：Windows 的写法（NTFS、FAT32）与 blkid 的写法（ntfs、vfat）都认，不区分大小写。
+ * 返回 esp / android / winre / msr / windows / fat / linux / luks，认不出为空串。 */
+const char *gk3w_guess_os(const char *name, const char *type, const char *fs);
 
 #endif

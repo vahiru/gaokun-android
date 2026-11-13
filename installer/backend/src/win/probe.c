@@ -115,28 +115,6 @@ static const char *bus_name(STORAGE_BUS_TYPE t)
     }
 }
 
-static const char *guess_os(const char *name, const char *type, const char *fs)
-{
-    /* 与 uninstall.c 的 OUR_NAMES 相同：安装器会建、卸载会删的分区 */
-    static const char *const android[] = {"super", "userdata", "metadata", "misc", "boot_a", "boot_b", "gk3rescue"};
-    if (!strcmp(name, "esp"))
-        return "esp";
-    for (size_t i = 0; i < sizeof android / sizeof android[0]; i++)
-        if (!strcmp(name, android[i]))
-            return "android";
-    if (!strcmp(type, "C12A7328-F81F-11D2-BA4B-00A0C93EC93B"))
-        return "esp";
-    if (!strcmp(type, "DE94BBA4-06D1-4D40-A16A-BFD50179D6AC"))
-        return "winre";
-    if (!strcmp(type, "E3C9E316-0B5C-4DB8-817D-F92DF00215AE"))
-        return "msr";
-    if (!_stricmp(fs, "NTFS"))
-        return "windows";
-    if (!_stricmp(fs, "FAT32") || !_stricmp(fs, "FAT"))
-        return "fat";
-    return "";
-}
-
 /* libgk3core 的块设备回调：按逻辑扇区读 \\.\PhysicalDrive<N> */
 typedef struct {
     HANDLE h;
@@ -394,7 +372,7 @@ static int probe_disk(DWORD n, int system_disk, gk3w_line *l)
             gk3w_line_kv(l, "vol", v ? v->vol : "");
             if (v && v->fs_err)
                 gk3w_line_u64(l, "fserr", v->fs_err);
-            gk3w_line_kv(l, "os", guess_os(name, type, fs));
+            gk3w_line_kv(l, "os", gk3w_guess_os(name, type, fs));
             if (gk3w_line_emit(l, stdout))
                 rc = -1;
         }

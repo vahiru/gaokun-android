@@ -746,7 +746,11 @@ int gk3w_cmd_apply(int argc, wchar_t **argv)
         req.region = (gk3w_span){rstart, rend};
         req.userdata_mib = ud_mib;
         req.rescue = 0;
-        pe = gk3w_plan_print(&req, d.num, &plan, stdout);
+        {
+            char dn[24];
+            snprintf(dn, sizeof dn, "%lu", (unsigned long)d.num);
+            pe = gk3w_plan_print(&req, dn, &plan, stdout);
+        }
         if (pe != GK3W_PLAN_OK) {
             gk3w_err_kv(T, "plan", "why", gk3w_plan_strerror(pe), "the selected free space is too small (disk not touched)", 0);
             goto out;

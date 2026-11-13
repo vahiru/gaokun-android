@@ -77,7 +77,7 @@ gk3w_plan_err gk3w_plan_alongside(const gk3w_plan_req *r, gk3w_plan *out)
     return GK3W_PLAN_OK;
 }
 
-gk3w_plan_err gk3w_plan_print(const gk3w_plan_req *r, uint64_t disk, gk3w_plan *out, FILE *fp)
+gk3w_plan_err gk3w_plan_print(const gk3w_plan_req *r, const char *disk, gk3w_plan *out, FILE *fp)
 {
     gk3w_plan_err pe = gk3w_plan_alongside(r, out);
     gk3w_line l = {0};
@@ -94,7 +94,7 @@ gk3w_plan_err gk3w_plan_print(const gk3w_plan_req *r, uint64_t disk, gk3w_plan *
     for (size_t i = 0; i < out->n; i++) {
         gk3w_line_begin(&l, "PLAN");
         gk3w_line_kv(&l, "op", "mkpart");
-        gk3w_line_u64(&l, "disk", disk);
+        gk3w_line_kv(&l, "disk", disk);
         gk3w_line_kv(&l, "name", out->parts[i].name);
         gk3w_line_u64(&l, "start", out->parts[i].first);
         gk3w_line_u64(&l, "end", out->parts[i].last);
