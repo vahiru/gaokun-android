@@ -1,4 +1,4 @@
-# crDroid 指纹候选（FTE7001、GDIX5125）
+# crDroid指纹HAL（FTE7001、GDIX5125）
 
 面向本仓crDroid 17.0（Android 17）的AIDL fingerprint V4服务：录入（每指16次）、认证、
 接触检测、枚举、删除、取消和用户切换，最多5根手指。取图经内核的fpcmd驱动和厂商TA，
@@ -22,8 +22,11 @@ HAL 持久化失败计数：每 5 次失败锁定 30 秒，20 次永久锁定，
 没有 FAR/FRR、防伪、TEE 模板保护或防回滚证明，不声明已达到 CDD Class 1/2/3
 认证标准。`CONVENIENCE` 是开发阶段的保守能力报告，不是安全认证结论。
 
-默认不装入发布镜像。`GAOKUN3_FINGERPRINT=true` 显式启用实验候选；
-不得仅改成 WEAK/STRONG 来绕过框架限制。正式接入仍需可信录入授权以及安全等级评估。
+HAL随镜像构建。不得仅改成WEAK/STRONG来绕过框架限制；提高安全等级仍需可信录入授权以及安全等级评估。
+SystemUI对Class 1/2指纹只在人脸也锁定时才禁止指纹解锁，没有人脸识别时，指纹自己临时锁定期间仍会不断请求认证。
+[`patches/android/frameworks-base/0001`](../../../../patches/android/frameworks-base/0001-systemui-respect-fingerprint-lockout.patch)
+（由`scripts/crdroid-tree-fixes.py`打入）让它在锁定期间改为只检测接触，与Class 3指纹锁定时相同；锁定期满时HAL发出
+`onLockoutCleared`，SystemUI随之恢复认证。
 
 ## 传感器型号
 
@@ -67,18 +70,7 @@ OTP修补DAC等寄存器。模板和TA来自同一个Windows驱动包（uup-driv
 ## 内核
 
 沿用 Android 自己的内核基线、配置、DTB 和补丁链，不使用 NixOS/HyperOS 内核替代。
-[`patches/kernel/fingerprint/`](../../../../patches/kernel/fingerprint/) 下的 3 个补丁（`0001` QSEECOM、`0002` 常驻驱动、`0003` Goodix 分支）随 `kernel-apply-patches.sh` 一并打入，`CONFIG_GAOKUN3_FPCMD` 默认不开启，由 `configure-kernel.sh` 打开：
-
-```sh
-bash /path/to/gaokun-android/scripts/kernel-apply-patches.sh /path/to/kernel
-# 在内核源码目录，先跑现有 Android 配置流程，然后：
-bash /path/to/gaokun-android/scripts/fingerprint/configure-kernel.sh /path/to/kernel-output
-make O=/path/to/kernel-output ARCH=arm64 -j8 vmlinuz.efi
-```
-
-继续使用已有 ARM64 编译器/CROSS_COMPILE 设置。配置脚本只运行 olddefconfig，
-不编译、不插入模块。内核缺 `0003` 时，Goodix 机器上的 HAL 会在日志里报 `Fingerprint kernel driver has no Goodix support`。
-大构建开始前必须核对实际输出文件系统空间，预留镜像、验证副本及至少 2 GiB。
+[`patches/kernel/fingerprint/`](../../../../patches/kernel/fingerprint/)下的3个补丁（`0001` QSEECOM、`0002`常驻驱动、`0003` Goodix分支）随`kernel-apply-patches.sh`一并打入。`CONFIG_GAOKUN3_FPCMD`在Kconfig中默认关闭，由[`kernel-config-android.sh`](../../../../scripts/kernel-config-android.sh)连同`QCOM_QSEECOM`和`GPIO_CDEV`一起打开，并断言为`=y`；按[`prebuilt-boot/README.md`](../prebuilt-boot/README.md)的常规流程编译即可，不需要单独的指纹内核。内核缺`0003`时，Goodix机器上的HAL会在日志里报`Fingerprint kernel driver has no Goodix support`。
 
 `0002` 与原交付版本的差异：TA 默认路径 `/vendor/firmware/fingerpr.mbn`；
 驱动编为 built-in；同一时刻只允许一个 open；HAL 崩溃后 release 请求 shutdown；
@@ -88,41 +80,36 @@ shutdown 一旦失败，保留 DMA 缓冲且拒绝重试和重新 open，重启�
 
 ## 本地输入和 Android 构建
 
-下面的准备脚本只离线写本地目录，不连接构建机或真机。
-它先核验整份交接包及固定 TA 哈希，再从候选 EFI 的嵌入 IKCONFIG 验证驱动配置。
-首次替换现有预置内核时保留 `vmlinuz.efi.before-fingerprint`；已存在回退副本时
-拒绝覆盖。可先用 `--device-tree /tmp/fingerprint-candidate` 输出到独立目录检查。
-使用已有设备树时要同时保留与该 Android 内核配套的 DTB。
+TA和Goodix模板是专有二进制，不入库，放在设备树的`firmware/`（git忽略）中，来源见
+[`firmware/README.md`](../firmware/README.md)第三、四节。下面的准备脚本只离线写本地目录，不连接构建机或真机：
+它核对TA哈希（`--ta`给出驱动包里的`fingerpr.mbn`；不给时从私有交接包读取并核验整份交接包），
+再从`gfspi.dll`导出Goodix模板。可先用`--device-tree /tmp/fingerprint-candidate`输出到独立目录检查。
 
 ```sh
-python3 scripts/fingerprint/prepare-crdroid.py \
-  --gfspi /path/to/gfspi.dll \
-  --kernel-tree /path/to/kernel \
-  --kernel-image /path/to/kernel-output/arch/arm64/boot/vmlinuz.efi
+python3 scripts/fingerprint/prepare-crdroid.py --ta /path/to/fingerpr.mbn --gfspi /path/to/gfspi.dll
 ```
 
-不传内核参数时仅准备TA和Goodix模板（模板SHA256：
-`273537378e759cc19b829c6c5a3b5226da603b55f96be6bcdf9a2e66c6c26725`）。
-固件在既有 firmware 忽略目录中，专有二进制和
-含有它的原交接 ZIP 都不入库。TA SHA256：
-`b081543c7b6ae4360969007836747601e8c48ec48a8335a5479e45ec0e34355a`。
+TA SHA256：`b081543c7b6ae4360969007836747601e8c48ec48a8335a5479e45ec0e34355a`；
+模板SHA256：`273537378e759cc19b829c6c5a3b5226da603b55f96be6bcdf9a2e66c6c26725`。
+含有TA的原交接ZIP同样不入库。
 
-在已经具备完整 crDroid 编译环境的构建机上：
+`scripts/sync-device-tree.sh`在第2a步把本机的这两份带到构建机（本机没有时保留构建机上的那份），
+第3a步按sha256断言构建机上的两份，并从构建机上`prebuilt-boot/vmlinuz.efi`嵌入的配置确认
+`CONFIG_GAOKUN3_FPCMD=y`。在已经具备完整crDroid编译环境的构建机上：
 
 ```sh
-# 从本仓同步（现有脚本只连接指定构建机，不访问平板）：
-GAOKUN3_FINGERPRINT=true bash scripts/sync-device-tree.sh BUILD_HOST
+# 从本仓同步（脚本只连接指定构建机，不访问平板）：
+bash scripts/sync-device-tree.sh BUILD_HOST
 # 进入构建机的 crDroid 源码目录：
 source build/envsetup.sh
-export GAOKUN3_FINGERPRINT=true
 lunch lineage_gaokun3-cp2a-userdebug
 m android.hardware.biometrics.fingerprint-service.gaokun3 selinux_policy
 # 单编与策略通过后，再按现有流程构建镜像。
 ```
 
-fingerprint.mk 将拒绝缺失/错误的 TA或Goodix模板，或缺少 fingerprint-kernel.sha256、
-与该摘要不匹配的预置 EFI。直接同步设备树时也要带上这两个不入库的输入。
-关闭构建变量后 HAL、VINTF fragment、固件和 feature XML 都不会安装。
+TA或Goodix模板缺失、哈希不符时，fingerprint.mk直接报错。内核不带驱动时Android构建本身不会失败，
+由上面的同步检查和`scripts/release.sh`对`boot.img`的检查拦下。
+不经`sync-device-tree.sh`直接同步设备树时，也要带上这两个不入库的文件。
 新增节点标签和 ueventd 权限为 system:system 0600；SELinux 仅给指纹 HAL 访问。
 GPIO chip 固定核对 `f100000.pinctrl` / 230 lines，使用 line 185，输出加上拉，
 读回确认高 10ms→低后等待 400ms，并在 TA 使用期间持有 GPIO。成功 shutdown 后
@@ -207,7 +194,7 @@ AddressSanitizer + UBSan下运行：
 检查真实Transport实现的GPIO持有和恢复、读回失败和INIT失败的清理、shutdown失败后的保留，
 设备调用全部用模拟实现替换。会话回归模块`gaokun3-fingerprint-session-test`在设备上运行，
 不采集图像也不访问模板，覆盖旧会话替换、HW_UNAVAILABLE回调内重试和close回调重入。
-`test-integration.py`检查补丁能否打上、UAPI是否一致、V4接口覆盖、构建开关和输入准备。
+`test-integration.py`检查补丁能否打上、UAPI是否一致、V4接口覆盖、镜像总是装入HAL与固件、缺失或改动的输入被拒绝，以及输入准备。
 
 现在的代码在Goodix机器上以框架的虚拟指纹实例实测过录入、解锁和拒绝其他手指。装进ROM的
 正式服务、与之配套的SELinux策略，以及FTE7001机器上的匹配，都尚未验证。

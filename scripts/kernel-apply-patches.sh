@@ -288,7 +288,7 @@ KPATCHES=(
     kernel/dts/0023-arm64-dts-qcom-sc8280xp-huawei-gaokun3-Power-the-CSIPHYs-from-their-own-supplies.patch
     kernel/dts/0024-arm64-dts-qcom-sc8280xp-Give-the-camera-clock-controller-its-MX-domain.patch
 
-    # ─── 11. kernel/fingerprint：QSEECOM 与指纹传输驱动（/dev/gaokun3_fpcmd，CONFIG_GAOKUN3_FPCMD 默认 n）───
+    # ─── 11. kernel/fingerprint：QSEECOM 与指纹传输驱动（/dev/gaokun3_fpcmd，CONFIG_GAOKUN3_FPCMD 由 kernel-config-android.sh 打开）───
     kernel/fingerprint/0001-firmware-qcom-scm-qseecom-app-load-shutdown-listener.patch
     kernel/fingerprint/0002-firmware-qcom-gaokun3-fingerprint-ioctl.patch
     kernel/fingerprint/0003-firmware-qcom-gaokun3-fpcmd-add-the-Goodix-GDIX5125-sensor.patch
