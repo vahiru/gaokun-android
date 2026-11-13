@@ -322,6 +322,29 @@ void main() {
     expect(s.touched, Touched.no);
   });
 
+  testWidgets('写入中途被安全软件拒绝访问：失败页提示允许 gk3w.exe，并先卸载未完成的安装', (t) async {
+    final (_, s) = await pumpApp(t, 'free', respond: {
+      'apply': (args, input) => Stream.fromIterable([
+            const Gk3Record('ERR', {'code': 'disk-write', 'part': 'boot_a', 'winerr': '5', 'touched': 'yes'}),
+            const Gk3Exit(1),
+          ]),
+    });
+    await tap(t, find.text(l.btnNext));
+    await tap(t, find.text(l.btnNext));
+    await see(t, find.textContaining('v1.0.0-rc.3'));
+    await tap(t, find.text(l.btnNext));
+    await tap(t, find.text(l.btnNext));
+    await hold(t, l.holdToInstall);
+    await waitFor(t, find.byType(FailPage), tries: 400);
+    expect(find.text(l.errWriteDenied), findsOneWidget);
+    expect(find.text(l.failTouchedInstall), findsOneWidget);
+    expect(s.touched, Touched.yes);
+    // 别的 Windows 错误照常按写入失败说；不是写入类的错误码不提安全软件
+    expect(errText(l, const Gk3Record('ERR', {'code': 'disk-write', 'winerr': '1117'})), l.errDiskWrite);
+    expect(errText(l, const Gk3Record('ERR', {'code': 'esp-verify', 'winerr': '5'})), l.errDiskVerify);
+    expect(errText(l, const Gk3Record('ERR', {'code': 'esp-write', 'winerr': '5'})), l.errWriteDenied);
+  });
+
   testWidgets('安装介质写入U盘：侧栏入口 → 说明 → 目标 → 版本 → 确认；gk3w 还没有 media 命令，写入这一步按失败处理', (t) async {
     final window = <MethodCall>[];
     t.binding.defaultBinaryMessenger.setMockMethodCallHandler(const MethodChannel('gk3/window'), (c) async {

@@ -3,18 +3,34 @@ import 'package:gk3_common/backend/protocol.dart';
 import '../l10n/app_localizations.dart';
 import '../model.dart';
 
+/// 写入类的错误码。走到这些步骤时已经以管理员身份打开了磁盘，此时再报 Windows 错误 5（拒绝访问），
+/// 多半是安全软件拦下了这一次写入
+const _writeCodes = {'disk-write', 'set-layout', 'super-write', 'mkfs', 'misc-init', 'esp-write', 'gpt-backup'};
+
 /// gk3w 的 ERR code=… → 给用户看的一句话（代码定义在 installer/backend/src/win/*.c）。
 /// 没收录的代码照原样报出，用户截图时也能对上日志。
 String errText(L10n l, Gk3Record err) {
   final code = err['code'];
   return switch (code) {
+    _ when _writeCodes.contains(code) && err['winerr'] == '5' => l.errWriteDenied,
+    'disk-write' || 'set-layout' || 'super-write' || 'misc-init' => l.errDiskWrite,
+    'disk-verify' || 'esp-verify' || 'super-bad-lp' => l.errDiskVerify,
+    'mkfs' => l.errFormat,
+    'esp-write' => l.errEspWrite,
+    'esp-mount' || 'esp-unreadable' => l.errEspRead,
+    'esp-not-fat' => l.errEspNotFat,
+    'disk-layout' || 'disk-not-gpt' => l.errPartTable,
+    'verify-layout' || 'update-properties' => l.errLayoutVerify,
+    'disk-sector' || 'disk-size' => l.errDiskInfo,
+    'gpt-backup' => l.errGptBackup,
+    'gpt-full' => l.errGptFull,
     'zst-corrupt' || 'sha-mismatch' || 'bootimg-unpack' => l.errRelease,
     'release-no-boot' || 'release-no-super' => l.errReleaseMissing,
     'esp-has-android' => l.errInstalled,
     'plan' || 'bad-region' => l.errPlan,
     'layout-changed' => l.errLayoutChanged,
     'fallback-conflict' => l.errFallbackConflict,
-    'no-windows-bootmgr' || 'no-windows-boot' => l.errNoBootmgr,
+    'no-windows-bootmgr' || 'no-windows-boot' || 'default-os-no-windows' => l.errNoBootmgr,
     'wrong-model' => l.errWrongModel,
     'secure-boot-on' => l.errSecureBoot,
     'fast-startup-on' => l.errFastStartup,
@@ -32,14 +48,15 @@ String errText(L10n l, Gk3Record err) {
     'volume-open' => l.errVolumeOpen,
     'low-battery' => l.errLowBattery,
     'esp-full' || 'esp-full-min' || 'esp-ota-room' || 'esp-win-reserve' || 'esp-too-small' => l.errEspFull,
-    'partlabel-conflict' || 'android-unconfirmed' || 'foreign-content' || 'bad-part-type' => l.errPartsUnclear,
+    'partlabel-conflict' || 'android-unconfirmed' || 'foreign-content' || 'bad-part-type' || 'misc-too-big' || 'disk-read' =>
+      l.errPartsUnclear,
     'not-system-disk' || 'not-vhd' || 'disk-open' => l.errDisk,
     'manifest-unavailable' => l.releaseNone,
     'dl-sums' || 'dl-sums-missing' || 'dl-failed' || 'dl-http' => l.errDownload,
     'dl-write' => l.errDownloadWrite,
     'dl-space' => l.errDownloadSpace(fmtMib(err.intOf('need_mib'))),
     'backend-failed' => l.errBackendFailed,
-    'internal' => l.errUnknown,
+    'internal' || 'uuid' || 'random' || 'nomem' => l.errUnknown,
     'backend-missing' || 'tool-missing' => l.errBackendMissing,
     'hash-failed' => l.errRelease,
     'not-admin' => l.errNotAdmin,

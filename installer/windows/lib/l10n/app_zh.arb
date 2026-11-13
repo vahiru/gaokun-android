@@ -456,6 +456,18 @@
   "errEspFull": "EFI系统分区剩余空间不足。",
   "errPartsUnclear": "磁盘中存在与Android分区同名但内容无法识别的分区；为避免误删数据，操作已中止。",
   "errDisk": "无法打开Windows所在的系统磁盘。",
+  "errWriteDenied": "写入时被拒绝访问，通常是安全软件拦截了安装器后端程序（gk3w.exe）。请在安全软件中允许该程序运行后重试。",
+  "errDiskWrite": "写入磁盘时发生错误，详细信息请查看下方日志。",
+  "errDiskVerify": "写入磁盘的数据读回后与原数据不一致。",
+  "errFormat": "格式化Android分区时发生错误。",
+  "errEspWrite": "无法写入EFI系统分区。",
+  "errEspRead": "无法读取EFI系统分区。",
+  "errEspNotFat": "EFI系统分区不是FAT32格式。",
+  "errPartTable": "无法读取系统磁盘的GPT分区表，或分区表中存在越界、重叠的分区项。",
+  "errLayoutVerify": "修改分区表后，无法确认磁盘分区布局已按预期更新。",
+  "errDiskInfo": "无法获取系统磁盘的容量，或磁盘扇区大小不受支持。",
+  "errGptBackup": "无法备份磁盘分区表。",
+  "errGptFull": "分区表中已无空余的分区项，无法新建Android分区。",
   "errOther": "安装器返回错误：{code}",
   "@errOther": {
     "placeholders": {
