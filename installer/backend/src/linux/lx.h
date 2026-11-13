@@ -39,8 +39,14 @@ int gk3l_run(char *const argv[], char *out, size_t cap);
 /* 安装介质所在的分区（"主设备号:次设备号"，例如 "259:3"）；不是从安装介质启动的返回 -1。
  * 介质挂在 /media/gk3（initramfs-init），测试可用 GK3_MEDIUM_DIR 换挂载点。 */
 int gk3l_medium_devno(char *out, size_t cap);
+/* 设备（"主设备号:次设备号"）挂在哪里；没挂返回 -1 */
+int gk3l_mount_of(const char *devno, char *mnt, size_t cap);
+
+/* ── 写盘之前的把关（sys.c）：机型（GK3_SKIP_MODEL_CHECK=1 放行，读不到只提醒）与电量。拒绝时已报 ERR（touched=no），返回 -1 ── */
+int gk3l_sys_gate(void);
 
 /* ── 命令 ── */
+int gk3l_cmd_apply(int argc, char **argv);
 int gk3l_cmd_probe(int argc, char **argv);
 int gk3l_cmd_preflight(int argc, char **argv);
 int gk3l_cmd_plan(int argc, char **argv);

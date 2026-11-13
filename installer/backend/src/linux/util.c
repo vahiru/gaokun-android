@@ -183,6 +183,30 @@ static void unescape_octal(char *s)
     *w = 0;
 }
 
+int gk3l_mount_of(const char *devno, char *mnt_out, size_t cap)
+{
+    FILE *f = fopen("/proc/self/mountinfo", "re");
+    char *line = NULL;
+    size_t lcap = 0;
+    int found = -1;
+    if (!f)
+        return -1;
+    while (getline(&line, &lcap, f) > 0) {
+        char dn[32], mnt[4096];
+        if (sscanf(line, "%*s %*s %31s %*s %4095s", dn, mnt) != 2 || strcmp(dn, devno))
+            continue;
+        unescape_octal(mnt);
+        if (strlen(mnt) < cap) {
+            strcpy(mnt_out, mnt);
+            found = 0;
+            break;
+        }
+    }
+    free(line);
+    fclose(f);
+    return found;
+}
+
 int gk3l_medium_devno(char *out, size_t cap)
 {
     const char *dir = getenv("GK3_MEDIUM_DIR");

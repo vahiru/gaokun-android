@@ -3,6 +3,7 @@
  *   gk3l probe        列出磁盘、分区、空闲区（只读，要 root）
  *   gk3l preflight    安装前检查：机型与电源（只读）
  *   gk3l plan ...     算分区方案（纯计算，不读盘）
+ *   gk3l apply ...    装到一段空闲空间（双系统），见 apply.c
  *   gk3l --version
  *
  * 输出走行协议（../proto.h）：记录在 stdout，进度与错误在 stderr，都是 UTF-8。 */
@@ -29,6 +30,7 @@ int main(int argc, char **argv)
         {"probe", gk3l_cmd_probe},
         {"preflight", gk3l_cmd_preflight},
         {"plan", gk3l_cmd_plan},
+        {"apply", gk3l_cmd_apply},
     };
 
     /* 记录行逐行 fflush（gk3w_line_emit）；前端关掉管道时按写失败处理，而不是被 SIGPIPE 直接结束 */
@@ -36,7 +38,7 @@ int main(int argc, char **argv)
     signal(SIGPIPE, SIG_IGN);
 
     if (argc < 2) {
-        fprintf(stderr, "!! usage: gk3l probe|preflight|plan|--version\n");
+        fprintf(stderr, "!! usage: gk3l probe|preflight|plan|apply|--version\n");
         return 2;
     }
     if (!strcmp(argv[1], "--version")) {

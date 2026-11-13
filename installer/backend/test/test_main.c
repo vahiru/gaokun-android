@@ -1,10 +1,13 @@
-/* 主机单测：协议编码、空闲区计算、启动项名字与分区内容的识别（与平台无关的部分）。make test 用 ASan/UBSan 跑。 */
+/* 主机单测：协议编码、空闲区计算、启动项名字与分区内容的识别、GPT 的写（与平台无关的部分）。make test 用 ASan/UBSan 跑。 */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "gk3core.h"
+
 #include "../src/blkey.h"
 #include "../src/esp.h"
+#include "../src/gptw.h"
 #include "../src/mftplan.h"
 #include "../src/layout.h"
 #include "../src/proto.h"
@@ -490,8 +493,131 @@ static void test_mft_summary(void)
     CHECK(r.unplaced == 20 && r.end == 2005);
 }
 
+/* 盘上的一块：读备份表头时自己核 CRC（libgk3core 只认 my_lba == 1 的主表头） */
+static int hdr_crc_ok(const uint8_t *h)
+{
+    uint8_t t[92];
+    memcpy(t, h, 92);
+    memset(t + 16, 0, 4);
+    return gk3_crc32(0, t, 92) == gk3_le32(h + 16);
+}
+
+static void test_gptw(void)
+{
+    enum { BS = 512 };
+    static uint8_t pmbr[BS], hdr[BS], ent[GK3W_GPT_ENTRIES * GK3W_GPT_ENTRY_SIZE], bak[BS], save_hdr[BS], save_ent[sizeof ent];
+    uint8_t dg[16] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}, t[16];
+    uint64_t total = (64ull << 30) / BS, bel = 0;
+    uint32_t idx[3] = {0};
+    gk3_gpt g;
+    gk3_gpt_part p;
+    gk3w_gpt_new np[3];
+
+    CHECK(gk3w_guid_parse("0FC63DAF-8483-4772-8E79-3D69D8477DE4", t) == 0);
+    CHECK(t[0] == 0xAF && t[3] == 0x0F && t[4] == 0x83 && t[6] == 0x72 && t[8] == 0x8E && t[15] == 0xE4);
+    CHECK(gk3w_guid_parse("0fc63daf-8483-4772-8e79-3d69d8477de4", t) == 0 && t[0] == 0xAF);
+    CHECK(gk3w_guid_parse("0FC63DAF-8483-4772-8E79-3D69D8477DE", t) == -1);
+    CHECK(gk3w_guid_parse("0FC63DAF+8483-4772-8E79-3D69D8477DE4", t) == -1);
+    memset(t, 0xFF, 16);
+    gk3w_guid_v4(t);
+    CHECK(t[7] == 0x4F && t[8] == 0xBF);
+
+    /* 新建：sgdisk -o 的同一种布局 */
+    CHECK(gk3w_gpt_init(BS, total, dg, pmbr, hdr, ent) == GK3W_GPTW_OK);
+    CHECK(pmbr[510] == 0x55 && pmbr[511] == 0xAA && pmbr[446 + 4] == 0xEE && gk3_le32(pmbr + 446 + 8) == 1);
+    CHECK(gk3_le32(pmbr + 446 + 12) == (uint32_t)(total - 1));
+    CHECK(gk3_gpt_parse_mem(hdr, BS, ent, sizeof ent, &g) == GK3_OK);
+    CHECK(g.first_usable == 34 && g.last_usable == total - 34 && g.alt_lba == total - 1 && g.entries_lba == 2);
+    CHECK(gk3_gpt_count(&g) == 0 && !memcmp(g.disk_guid, dg, 16));
+
+    /* 加分区：序号依次 1、2，名字、类型、起止照填，CRC 重算后 libgk3core 认 */
+    np[0] = (gk3w_gpt_new){"misc", {0}, {0}, 2048, 10239, 0};
+    np[1] = (gk3w_gpt_new){"super", {0}, {0}, 10240, 20479, 0};
+    gk3w_guid_parse("0FC63DAF-8483-4772-8E79-3D69D8477DE4", np[0].type);
+    memcpy(np[1].type, np[0].type, 16);
+    memset(np[0].uuid, 0xA1, 16);
+    memset(np[1].uuid, 0xA2, 16);
+    CHECK(gk3w_gpt_add(hdr, BS, ent, sizeof ent, np, 2, idx) == GK3W_GPTW_OK);
+    CHECK(idx[0] == 1 && idx[1] == 2);
+    CHECK(gk3_gpt_parse_mem(hdr, BS, ent, sizeof ent, &g) == GK3_OK && gk3_gpt_count(&g) == 2);
+    CHECK(gk3_gpt_find(&g, "super", &p) == GK3_OK && p.index == 2 && p.first_lba == 10240 && p.last_lba == 20479);
+    CHECK(p.part_guid[0] == 0xA2 && p.type_guid[0] == 0xAF && p.attrs == 0);
+
+    /* 出错时什么都不改：重叠、越界、名字非 ASCII / 太长、类型为零 */
+    memcpy(save_hdr, hdr, BS);
+    memcpy(save_ent, ent, sizeof ent);
+    np[2] = (gk3w_gpt_new){"x", {0}, {0}, 20000, 30000, 0};
+    memcpy(np[2].type, np[0].type, 16);
+    CHECK(gk3w_gpt_add(hdr, BS, ent, sizeof ent, &np[2], 1, idx) == GK3W_GPTW_OVERLAP);
+    np[2].first = 30000, np[2].last = total - 33;
+    CHECK(gk3w_gpt_add(hdr, BS, ent, sizeof ent, &np[2], 1, idx) == GK3W_GPTW_RANGE);
+    np[2].first = 33, np[2].last = 100;
+    CHECK(gk3w_gpt_add(hdr, BS, ent, sizeof ent, &np[2], 1, idx) == GK3W_GPTW_RANGE);
+    np[2].first = 30000, np[2].last = 29999;
+    CHECK(gk3w_gpt_add(hdr, BS, ent, sizeof ent, &np[2], 1, idx) == GK3W_GPTW_RANGE);
+    np[2].first = 30000, np[2].last = 40000;
+    np[2].name = "1234567890123456789012345678901234567";
+    CHECK(gk3w_gpt_add(hdr, BS, ent, sizeof ent, &np[2], 1, idx) == GK3W_GPTW_EINVAL);
+    np[2].name = "数据";
+    CHECK(gk3w_gpt_add(hdr, BS, ent, sizeof ent, &np[2], 1, idx) == GK3W_GPTW_EINVAL);
+    {
+        gk3w_gpt_new two[2] = {np[2], np[2]};
+        two[0].name = two[1].name = "a";
+        two[1].first = 40000, two[1].last = 50000;
+        CHECK(gk3w_gpt_add(hdr, BS, ent, sizeof ent, two, 2, idx) == GK3W_GPTW_OVERLAP);
+    }
+    CHECK(!memcmp(save_hdr, hdr, BS) && !memcmp(save_ent, ent, sizeof ent));
+
+    /* 中间有空表项（删过分区）：新分区填最小的空号 */
+    memset(ent, 0, GK3W_GPT_ENTRY_SIZE);   /* 删掉 1 号 */
+    gk3_put_le32(hdr + 88, gk3_crc32(0, ent, sizeof ent));
+    {
+        uint8_t tmp[92];
+        memcpy(tmp, hdr, 92);
+        memset(tmp + 16, 0, 4);
+        gk3_put_le32(hdr + 16, gk3_crc32(0, tmp, 92));
+    }
+    np[2].name = "userdata";
+    np[2].first = 30000, np[2].last = 40000;
+    CHECK(gk3w_gpt_add(hdr, BS, ent, sizeof ent, &np[2], 1, idx) == GK3W_GPTW_OK && idx[0] == 1);
+
+    /* 主表坏了不写 */
+    hdr[20] ^= 1;   /* 表头的保留字段：CRC 对不上了 */
+    CHECK(gk3w_gpt_add(hdr, BS, ent, sizeof ent, &np[2], 1, idx) == GK3W_GPTW_EINVAL);
+    hdr[20] ^= 1;
+
+    /* 备份表头：my / alt 对调，表项紧贴在它之前，CRC 对，其余与主表头相同 */
+    CHECK(gk3w_gpt_make_backup(hdr, BS, bak, &bel) == GK3W_GPTW_OK);
+    CHECK(bel == total - 33 && gk3_le64(bak + 72) == total - 33);
+    CHECK(gk3_le64(bak + 24) == total - 1 && gk3_le64(bak + 32) == 1 && hdr_crc_ok(bak));
+    CHECK(!memcmp(bak + 40, hdr + 40, 32) && !memcmp(bak + 80, hdr + 80, 12));
+
+    /* 表满了 */
+    CHECK(gk3w_gpt_init(BS, total, dg, pmbr, hdr, ent) == GK3W_GPTW_OK);
+    for (uint32_t i = 0; i < GK3W_GPT_ENTRIES; i++) {
+        np[2].name = "p";
+        np[2].first = 2048 + (uint64_t)i * 2048, np[2].last = np[2].first + 2047;
+        if (gk3w_gpt_add(hdr, BS, ent, sizeof ent, &np[2], 1, idx) != GK3W_GPTW_OK || idx[0] != i + 1)
+            break;
+    }
+    np[2].first = 2048 + 200 * 2048, np[2].last = np[2].first + 2047;
+    CHECK(gk3w_gpt_add(hdr, BS, ent, sizeof ent, &np[2], 1, idx) == GK3W_GPTW_FULL);
+
+    /* 4Kn：表项 4 块，usable 从 6 起 */
+    {
+        static uint8_t p4[4096], h4[4096], b4[4096], e4[GK3W_GPT_ENTRIES * GK3W_GPT_ENTRY_SIZE];
+        uint64_t t4 = (64ull << 30) / 4096;
+        CHECK(gk3w_gpt_init(4096, t4, dg, p4, h4, e4) == GK3W_GPTW_OK);
+        CHECK(gk3_gpt_parse_mem(h4, 4096, e4, sizeof e4, &g) == GK3_OK && g.first_usable == 6 && g.last_usable == t4 - 6);
+        CHECK(gk3w_gpt_make_backup(h4, 4096, b4, &bel) == GK3W_GPTW_OK && bel == t4 - 5);
+    }
+    CHECK(gk3w_gpt_init(1024, total, dg, pmbr, hdr, ent) == GK3W_GPTW_EINVAL);
+    CHECK(gk3w_gpt_init(BS, 60, dg, pmbr, hdr, ent) == GK3W_GPTW_EINVAL);
+}
+
 int main(void)
 {
+    test_gptw();
     test_bl_state();
     test_mft_free_runs();
     test_mft_split();

@@ -102,6 +102,30 @@ static void read_power(int *ac, int *battery)
         *battery = (int)cap;
 }
 
+static void read_model(char *model, size_t cap)
+{
+    if (gk3l_read_line("/sys/class/dmi/id/product_name", model, cap) || !model[0])
+        model_from_klog(model, cap);
+}
+
+int gk3l_sys_gate(void)
+{
+    char model[128] = "";
+    const char *skip = getenv("GK3_SKIP_MODEL_CHECK");
+    int ac, battery;
+    read_model(model, sizeof model);
+    if (!(skip && !strcmp(skip, "1"))) {
+        if (!model[0])
+            gk3l_log("note: cannot read the model (no DMI and no 'Hardware name' line in the kernel log); not checked");
+        else if (!gk3w_model_supported(model))
+            return gk3l_err_kv(GK3W_TOUCHED_NO, "wrong-model", "model", model, "this computer is not a Huawei MateBook E Go (gaokun3); refusing to write the disk (disk not touched)", 0), -1;
+    }
+    read_power(&ac, &battery);
+    if (gk3w_battery_low(ac, battery))
+        return gk3l_err(GK3W_TOUCHED_NO, "low-battery", "battery below 15% and not on AC power: losing power midway would leave the disk partitions in an incomplete state. Plug in the charger first (disk not touched)", 0), -1;
+    return 0;
+}
+
 int gk3l_cmd_preflight(int argc, char **argv)
 {
     gk3w_line l = {0};
@@ -112,8 +136,7 @@ int gk3l_cmd_preflight(int argc, char **argv)
     (void)argv;
 
     gk3l_read_line("/sys/class/dmi/id/sys_vendor", vendor, sizeof vendor);
-    if (gk3l_read_line("/sys/class/dmi/id/product_name", model, sizeof model) || !model[0])
-        model_from_klog(model, sizeof model);
+    read_model(model, sizeof model);
     read_power(&ac, &battery);
 
     gk3w_line_begin(&l, "PREFLIGHT");

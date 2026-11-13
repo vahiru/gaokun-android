@@ -42,13 +42,14 @@ test: $(B)/test_host $(B)/test_stage2
 	$(B)/test_host
 	$(B)/test_stage2
 
-$(B)/test_host: test/test_main.c $(PORTABLE) $(HEADERS)
+# 平台无关层引用了 libgk3core（boot.img、GPT）与 zstd：单测一并编进来
+$(B)/test_host: test/test_main.c $(PORTABLE) $(HEADERS) $(B)/host/zstd.o
 	@mkdir -p $(@D)
-	$(HOSTCC) -std=c11 -O1 -g $(WARN) -Wmissing-prototypes -Werror $(SAN) -o $@ test/test_main.c $(PORTABLE)
+	$(HOSTCC) -std=c11 -O1 -g $(WARN) -Wmissing-prototypes -Werror $(SAN) -I$(CORE)/include $(ZSTD_INC) -o $@ test/test_main.c $(PORTABLE) $(CORE_SRC) $(B)/host/zstd.o
 
-$(B)/test_stage2: test/test_stage2.c $(PORTABLE) $(HEADERS)
+$(B)/test_stage2: test/test_stage2.c $(PORTABLE) $(HEADERS) $(B)/host/zstd.o
 	@mkdir -p $(@D)
-	$(HOSTCC) -std=c11 -O1 -g $(WARN) -Wmissing-prototypes -Werror $(SAN) -o $@ test/test_stage2.c $(PORTABLE)
+	$(HOSTCC) -std=c11 -O1 -g $(WARN) -Wmissing-prototypes -Werror $(SAN) -I$(CORE)/include $(ZSTD_INC) -o $@ test/test_stage2.c $(PORTABLE) $(CORE_SRC) $(B)/host/zstd.o
 
 host-tools: $(B)/host/unsparse
 

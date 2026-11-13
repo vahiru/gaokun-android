@@ -43,22 +43,18 @@
 #include "../layout.h"
 #include "../plan.h"
 #include "../proto.h"
+#include "../release.h"
 #include "../sparse.h"
 #include "disk.h"
 #include "gk3core.h"
 #include "win.h"
 #include "zstd.h"
 
-#define IO_CHUNK (4u << 20)
-#define BOOT_MAX (64u << 20)
+#define IO_CHUNK GK3W_IO_CHUNK
+#define BOOT_MAX GK3W_BOOT_MAX
 #define ZERO_HEAD (16u << 20)
 
-typedef struct {
-    uint8_t *img;               /* 整个 boot.img */
-    size_t len;
-    gk3_bootimg b;
-    char cmdline[GK3_BOOT_ARGS_SIZE + GK3_BOOT_EXTRA_ARGS_SIZE + 1];
-} bootimg;
+typedef gk3w_boot bootimg;
 
 static const char *const OUR_NAMES[] = {"misc", "metadata", "boot_a", "boot_b", "super", "userdata", "gk3rescue"};
 
@@ -66,47 +62,17 @@ static const char *const OUR_NAMES[] = {"misc", "metadata", "boot_a", "boot_b", 
 
 static int load_boot(const wchar_t *path, bootimg *bi)
 {
-    long n;
+    gk3w_boot_err e;
     memset(bi, 0, sizeof *bi);
     if (gk3w_read_file(path, &bi->img, &bi->len, BOOT_MAX))
         return gk3w_err(GK3W_TOUCHED_NA, "release-no-boot", "the release directory has no readable boot.img (or it is larger than 64 MiB)", GetLastError());
-    if (gk3_bootimg_parse(bi->img, bi->len, BOOT_MAX, &bi->b) || bi->b.total_size > bi->len)
-        return gk3w_err(GK3W_TOUCHED_NA, "bootimg-unpack", "boot.img cannot be unpacked (disk not touched)", 0);
-    /* 与 gk3-bootimg.py 相同的体检：只认 v2，三段都不空，内核是 PE，dtb 是 FDT */
-    if (bi->b.version != 2 || !bi->b.kernel_size || !bi->b.ramdisk_size || !bi->b.dtb_size ||
-        memcmp(bi->img + bi->b.kernel_off, "MZ", 2) || memcmp(bi->img + bi->b.dtb_off, "\xd0\x0d\xfe\xed", 4))
-        return gk3w_err(GK3W_TOUCHED_NA, "bootimg-unpack", "boot.img is not a v2 image with a dtb, or its kernel / dtb is malformed (disk not touched)", 0);
-    n = gk3_bootimg_cmdline(&bi->b, bi->cmdline, sizeof bi->cmdline);
-    if (n <= 0)
-        return gk3w_err(GK3W_TOUCHED_NA, "bootimg-unpack", "boot.img has no kernel command line (disk not touched)", 0);
-    for (long i = 0; i < n; i++)
-        if ((unsigned char)bi->cmdline[i] < 0x20 || (unsigned char)bi->cmdline[i] > 0x7e)
-            return gk3w_err(GK3W_TOUCHED_NA, "bootimg-unpack", "the boot.img command line has non-ASCII or control characters (disk not touched)", 0);
+    e = gk3w_boot_check(bi);
+    if (e != GK3W_BOOT_OK)
+        return gk3w_err(GK3W_TOUCHED_NA, "bootimg-unpack", gk3w_boot_strerror(e), 0);
     gk3w_log("  Image       %10u bytes", bi->b.kernel_size);
     gk3w_log("  ramdisk.img %10u bytes", bi->b.ramdisk_size);
     gk3w_log("  gaokun3.dtb %10u bytes", bi->b.dtb_size);
     return 0;
-}
-
-/* install-artifacts.sha256 里 name 那一行的 sha256（小写 hex）；没有返回 -1 */
-static int manifest_hash(const uint8_t *m, size_t len, const char *name, char out[65])
-{
-    size_t i = 0, nl = strlen(name);
-    while (i < len) {
-        size_t e = i;
-        while (e < len && m[e] != '\n')
-            e++;
-        /* "<64 hex>  <name>" */
-        if (e - i >= 66 + nl && m[i + 64] == ' ' && m[i + 65] == ' ' && !memcmp(m + i + 66, name, nl) &&
-            (e - i == 66 + nl || (e - i == 67 + nl && m[e - 1] == '\r'))) {
-            for (int k = 0; k < 64; k++)
-                out[k] = (char)(m[i + k] >= 'A' && m[i + k] <= 'F' ? m[i + k] + 32 : m[i + k]);
-            out[64] = 0;
-            return 0;
-        }
-        i = e + 1;
-    }
-    return -1;
 }
 
 /* ── super：zstd → sparse → 盘 ─────────────────────────────────────── */
@@ -143,97 +109,34 @@ static int ss_fill(void *ctx, uint64_t off, uint64_t len, uint32_t pattern)
     return 0;
 }
 
-/* 把 sparse 镜像（zst = 1 时先 zstd 解码）展开写出去。sink 为 NULL 时只校验（动盘之前的完整试解）。
- * prog：0 = 不报进度；否则按读入的压缩字节报 30→70。返回 0 成功，失败时 *why 是原因。 */
+static long file_read(void *ctx, uint8_t *buf, size_t cap)
+{
+    DWORD got = 0;
+    if (!ReadFile((HANDLE)ctx, buf, (DWORD)(cap > 0x7fffffffu ? 0x7fffffffu : cap), &got, NULL))
+        return -1;
+    return (long)got;
+}
+
+/* 把 sparse 镜像（zst = 1 时先 zstd 解码）展开写出去（../release.c 的 gk3w_image_run）。sink 为 NULL 时只校验。 */
 static int run_image(const wchar_t *path, int zst, uint64_t limit, const gk3w_sparse_sink *sink, int prog, const char **why,
                      uint32_t *blk_sz)
 {
     HANDLE f = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
     LARGE_INTEGER fsz;
-    ZSTD_DCtx *dc = NULL;
-    uint8_t *in = NULL, *out = NULL, *sbuf = NULL;
-    gk3w_sparse s;
-    uint64_t read_total = 0;
-    size_t r = 1;
-    unsigned last_pct = 0;
-    int rc = -1;
-    DWORD got;
-
+    gk3w_reader rd;
+    int rc;
     *why = "open";
-    if (f == INVALID_HANDLE_VALUE || !GetFileSizeEx(f, &fsz) || !fsz.QuadPart)
-        goto out;
-    *why = "nomem";
-    in = malloc(IO_CHUNK);
-    out = malloc(IO_CHUNK);
-    sbuf = _aligned_malloc(IO_CHUNK, 4096);
-    dc = zst ? ZSTD_createDCtx() : NULL;
-    if (!in || !out || !sbuf || (zst && !dc))
-        goto out;
-    /* release.sh 用 -19 --long 压：解码时放宽窗口上限（同 installer-lib.sh 的 zstd -dc --long=31） */
-    if (dc)
-        ZSTD_DCtx_setParameter(dc, ZSTD_d_windowLogMax, 31);
-    if (gk3w_sparse_init(&s, limit, sbuf, IO_CHUNK))
-        goto out;
-    if (!zst)
-        r = 0;
-    while (ReadFile(f, in, IO_CHUNK, &got, NULL) && got) {
-        ZSTD_inBuffer ib = {in, got, 0};
-        read_total += got;
-        if (!zst && gk3w_sparse_feed(&s, in, got, sink)) {
-            *why = s.err;
-            goto out;
-        }
-        while (zst && ib.pos < ib.size) {
-            ZSTD_outBuffer ob = {out, IO_CHUNK, 0};
-            r = ZSTD_decompressStream(dc, &ob, &ib);
-            if (ZSTD_isError(r)) {
-                *why = "zstd-corrupt";
-                goto out;
-            }
-            if (gk3w_sparse_feed(&s, out, ob.pos, sink)) {
-                *why = s.err;
-                goto out;
-            }
-        }
-        if (prog) {
-            unsigned pct = 30 + (unsigned)(read_total * 40 / (uint64_t)fsz.QuadPart);
-            if (pct != last_pct) {
-                fprintf(stderr, "PROGRESS %u write-super done_mib=%llu total_mib=%llu\n", pct,
-                        (unsigned long long)(s.out_off >> 20), (unsigned long long)(gk3w_sparse_total(&s) >> 20));
-                fflush(stderr);
-                last_pct = pct;
-            }
-        }
-    }
-    /* 读到文件尾时帧必须正好结束（r == 0）；否则把解码器里剩下的吐完，还不结束就是下载不完整 */
-    while (r) {
-        ZSTD_inBuffer ib = {in, 0, 0};
-        ZSTD_outBuffer ob = {out, IO_CHUNK, 0};
-        r = ZSTD_decompressStream(dc, &ob, &ib);
-        if (ZSTD_isError(r) || !ob.pos) {
-            *why = "zst-truncated";
-            goto out;
-        }
-        if (gk3w_sparse_feed(&s, out, ob.pos, sink)) {
-            *why = s.err;
-            goto out;
-        }
-    }
-    if (gk3w_sparse_finish(&s, sink)) {
-        *why = s.err;
-        goto out;
-    }
-    if (blk_sz)
-        *blk_sz = s.blk_sz;
-    rc = 0;
-out:
-    if (dc)
-        ZSTD_freeDCtx(dc);
-    free(in);
-    free(out);
-    _aligned_free(sbuf);
-    if (f != INVALID_HANDLE_VALUE)
+    if (f == INVALID_HANDLE_VALUE)
+        return -1;
+    if (!GetFileSizeEx(f, &fsz) || !fsz.QuadPart) {
         CloseHandle(f);
+        return -1;
+    }
+    rd.ctx = f;
+    rd.read = file_read;
+    rd.size = (uint64_t)fsz.QuadPart;
+    rc = gk3w_image_run(&rd, zst, limit, sink, prog, why, blk_sz);
+    CloseHandle(f);
     return rc;
 }
 
@@ -509,7 +412,7 @@ int gk3w_cmd_apply(int argc, wchar_t **argv)
         gk3w_progress(1, "verify-sha");
         for (int i = 0; i < 2; i++) {
             char want[65], got[65];
-            if (manifest_hash(man, man_len, names[i], want))
+            if (gk3w_manifest_hash(man, man_len, names[i], want))
                 continue;
             if (gk3w_file_sha256(paths[i], got, NULL) || strcmp(want, got)) {
                 gk3w_err_kv(T, "sha-mismatch", "file", names[i], "a downloaded file does not match the sha256 in the release manifest; download it again (disk not touched)", 0);
