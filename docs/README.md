@@ -49,7 +49,6 @@
 | [dev/sensors-ssc-protocol.md](dev/sensors-ssc-protocol.md) | SLPI传感器中枢（SSC）QMI over QRTR与Protobuf协议规格、`hexagonrpcd`文件服务及`ambient_light`流类型约束 |
 | [dev/fingerprint-driver-design.md](dev/fingerprint-driver-design.md) | 侧边指纹（FocalTech `FTE7001`、Goodix `GDIX5125`）：TrustZone QSEECOM TA加载、固定ioctl驱动与用户态HAL的分工 |
 | [dev/fingerprint-machine-check-2026-10-30.md](dev/fingerprint-machine-check-2026-10-30.md)、[dev/crdroid-fingerprint-machine-check-2026-11-01.md](dev/crdroid-fingerprint-machine-check-2026-11-01.md) | 指纹实机记录：TA命令收发与首帧取图；crDroid候选的构建、部署与录入解锁 |
-| [dev/installer-rust-design.md](dev/installer-rust-design.md) | 安装器Rust后端（`tools/gk3-installer/`）设计：零静默失败执行模型、分区表安全判据与Shell对拍框架 |
 | [dev/release-checklist.md](dev/release-checklist.md) | 候选版与正式版发布回归测试清单（A档自动化 / B档交互 / C档长稳 / D档产物核对） |
 | [dev/hw/README.md](dev/hw/README.md) | 硬件原始转储：后摄模组EEPROM镜像与[BIOS 2.16解包工具及清单](dev/hw/bios-2.16/README.md) |
 | [dev/fingerprint/README.md](dev/fingerprint/README.md) | 指纹Windows侧专有二进制本地逆向报告目录说明 |

@@ -1,6 +1,0 @@
-# 测试里允许 unwrap / expect / panic / 下标 / print（断言失败本来就该 panic）。非测试代码的规则见 Cargo.toml 的 [lints]
-allow-unwrap-in-tests = true
-allow-expect-in-tests = true
-allow-panic-in-tests = true
-allow-indexing-slicing-in-tests = true
-allow-print-in-tests = true

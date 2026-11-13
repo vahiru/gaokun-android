@@ -1,3 +1,0 @@
-# 与仓库里别的代码一样偏宽（中文注释多，80 列会把一行判据拆成好几行）
-max_width = 140
-use_small_heuristics = "Max"
