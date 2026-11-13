@@ -121,11 +121,26 @@ void main() {
       // stdout 上只有方案与分区表备份的记录
       expect(r.records.map((x) => x.type).toSet(), {'PLAN', 'PLANSUM', 'BACKUP'});
     });
-    test('windows-live：介质在内置盘上 —— 盘与介质分区都标 medium', () async {
+    test('windows-live：介质在内置盘上、读进了内存 —— 盘与介质分区都标 medium，介质分区是安装器分区（ram）', () async {
       final disks = Disk.fromProbe(await b('windows-live').run('probe'));
       expect(disks.single.medium, isTrue);
       expect(disks.single.external, isFalse);
       expect(disks.single.parts.where((p) => p.medium).map((p) => p.path), ['/dev/nvme0n1p8']);
+      expect(disks.single.parts.where((p) => p.ram).map((p) => p.path), ['/dev/nvme0n1p8']);
+    });
+    test('windows-setup：介质挂着（没读进内存）—— medium 但不是安装器分区', () async {
+      final d = Disk.fromProbe(await b('windows-setup').run('probe')).firstWhere((d) => d.path == '/dev/nvme0n1');
+      expect(d.parts.where((p) => p.medium).length, 1);
+      expect(d.parts.where((p) => p.ram), isEmpty);
+    });
+    test('方案预览：整盘清空保留安装器分区（op=keep）、删掉它之后 /data 多大（op=rmlive）', () async {
+      final p = Plan(await b('windows-live').run('plan', ['--mode', 'wipe', '--disk', '/dev/nvme0n1', '--remove-installer']));
+      expect(p.ok, isTrue);
+      expect(p.keep.single.name, 'GK3LIVE');
+      expect(p.parts.map((x) => x.name), isNot(contains('GK3LIVE')));
+      expect(p.rmlive!.merge, isTrue);
+      expect(p.rmlive!.userdataMib, greaterThan(p.userdataMib));
+      expect(p.rmlive!.part, '/dev/nvme0n1p8');
     });
     test('overrides：换一份预检（型号不对拦住，电源照常）', () async {
       final checks = Check.fromPreflight((await b('blank', {'preflight': 'preflight-model.txt'}).run('preflight')).first('PREFLIGHT')!);

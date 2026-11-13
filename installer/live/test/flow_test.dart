@@ -14,6 +14,10 @@ import 'package:gk3_installer/ui/screens_risk.dart';
 
 import 'helpers.dart';
 
+/// windows-live 场景里 Data 与 GK3LIVE 之间那段空闲（scripts/live/gen-fixtures.sh 的 mk_winlive）
+const kLiveFreeStart = 790497280;
+const kLiveFreeEnd = 949880831;
+
 void main() {
   testWidgets('windows-free：双系统一路装到完成，apply 的参数对', (t) async {
     final rec = await pumpApp(t, 'windows-free');
@@ -78,32 +82,38 @@ void main() {
     expect(a, contains('--region-start 789448704 --region-end 957220863')); // Data 缩出来的那段，紧挨在 GK3LIVE 前面
   });
 
-  testWidgets('windows-live（免 U 盘装双系统）：安装器跑在内置盘上 → 盘可选、整盘清空禁用、双系统一路装完', (t) async {
+  testWidgets('windows-live（免 U 盘装双系统）：安装器分区读进了内存 → 盘可选、整盘清空可选（保留它）、双系统装完删掉它并进 /data', (t) async {
     final rec = await pumpApp(t, 'windows-live');
     await tap(t, find.text(l.btnStart));
     await see(t, find.text(l.diskTitle));
-    // 没有 U 盘；内置盘就是介质 —— 不禁用，只提示"只能装在空闲空间里"
+    // 没有 U 盘；内置盘上的安装器分区就是介质 —— 不禁用，说明整盘清空时保留它
     expect(find.text(l.diskMedium), findsNothing);
-    await see(t, find.text(l.diskMediumInternal));
+    await see(t, find.text(l.diskInstallerPart));
     await tap(t, find.textContaining('/dev/nvme0n1'));
     await next(t);
     await see(t, find.text(l.modeTitle));
-    await see(t, find.text(l.modeWhyMedium));
-    // 点"清除整个磁盘"没反应：下一步仍是灰的
-    await tap(t, find.text(l.modeWipeTitle));
-    expect(find.ancestor(of: find.text(l.btnNext), matching: find.byWidgetPredicate((w) => w is ButtonStyleButton && w.onPressed != null)), findsNothing);
+    expect(find.text(l.modeWhyMedium), findsNothing);
+    await see(t, find.text(l.confirmWipeKeepsLive('GK3LIVE')));
     await see(t, find.text(l.modeAlongOk));
     await tap(t, find.text(l.modeAlongTitle));
     await next(t);
-    await next(t); // 选项
-    await passRisk(t);
+    // 选项页："保留安装器分区"默认关，写明删掉之后 /data 多大（后端 plan --remove-installer 的预览）
+    await see(t, find.text(l.optsKeepLiveTitle));
+    expect(t.widget<Switch>(find.byType(Switch)).value, isFalse);
+    await see(t, find.text(l.optsDataRmLive('67.8 GiB')));
+    expect(rec.last('plan')!.join(' '), endsWith('--remove-installer'));
+    await next(t);
+    await passRisk(t, check: () => expect(find.text(l.riskRmLiveHead), findsOneWidget));
     await see(t, find.text(l.confirmAlongHead));
     await see(t, find.text(l.confirmWindowsKept));
+    await see(t, find.text(l.confirmRmLiveMerge('GK3LIVE', '4 GiB')));
     await hold(t, l.confirmHoldIdle);
     await see(t, find.text(l.doneTitle));
+    await see(t, find.text(l.doneBodyRmLiveMerge));
     final a = rec.last('apply')!.join(' ');
     expect(a, contains('--mode alongside'));
-    expect(a, contains('--region-start 798885888 --region-end 958269439'));   // GK3LIVE 之后那段空闲
+    expect(a, contains('--region-start $kLiveFreeStart --region-end $kLiveFreeEnd'));   // Data 与 GK3LIVE 之间那段空闲
+    expect(a, contains('--remove-installer'));
   });
 
   testWidgets('退出到终端切不过去：SnackBar 说出原因与替代办法（M0 实测：镜像里没有 chvt，按钮点了没反应）', (t) async {
@@ -473,21 +483,27 @@ void main() {
     expect(find.text(l.checkBlocked), findsNothing);
   });
 
-  testWidgets('免 U 盘（安装器在内置盘上）：完成页不叫人"移除安装介质"（GUI-17）', (t) async {
-    final rec = await pumpApp(t, 'windows-live');
+  testWidgets('免 U 盘、保留安装器分区：apply 不带 --remove-installer；完成页不叫人"移除安装介质"（GUI-17）', (t) async {
+    final rec = await pumpApp(t, 'windows-live', overrides: {'apply': 'apply-live-keep.txt'});
     await tap(t, find.text(l.btnStart));
     await tap(t, find.textContaining('/dev/nvme0n1'));
     await next(t);
     await tap(t, find.text(l.modeAlongTitle));
     await next(t);
     await see(t, find.text(l.optsTitle));
+    await tap(t, find.text(l.optsKeepLiveTitle));
+    expect(t.widget<Switch>(find.byType(Switch)).value, isTrue);
+    expect(find.text(l.optsDataRmLive('67.8 GiB')), findsNothing);
     await next(t);
-    await passRisk(t);
+    await passRisk(t, check: () => expect(find.text(l.riskRmLiveHead), findsNothing));
+    expect(find.text(l.confirmRmLiveMerge('GK3LIVE', '4 GiB')), findsNothing);
     await hold(t, l.confirmHoldIdle);
     await see(t, find.text(l.doneTitle));
     await see(t, find.text(l.doneBodyInternal));
     expect(find.text(l.doneBody), findsNothing);
-    expect(rec.last('apply')!.join(' '), contains('--mode alongside'));
+    final a = rec.last('apply')!.join(' ');
+    expect(a, contains('--mode alongside'));
+    expect(a, isNot(contains('--remove-installer')));
   });
 
   testWidgets('从 U 盘装：完成页照旧提示移除介质；不装救援系统', (t) async {
@@ -967,6 +983,117 @@ void main() {
       final e = const Gk3Record('ERR', {'code': kRiskUnackedCode});
       expect(errText(l, e), l.errRiskUnacked);
       expect(errText(en, e), en.errRiskUnacked);
+    });
+  });
+
+  // ── 安装器分区（读进了内存的内置 GK3LIVE，见 installer/backend/src/linux/live.h）──────────────
+  group('安装器分区', () {
+    testWidgets('windows-live 整盘清空：安装器分区不在删除清单里、原样保留，新布局里标"保留"，装完删掉', (t) async {
+      final rec = await pumpApp(t, 'windows-live');
+      await tap(t, find.text(l.btnStart));
+      await tap(t, find.textContaining('/dev/nvme0n1'));
+      await next(t);
+      await tap(t, find.text(l.modeWipeTitle));
+      await next(t);
+      await see(t, find.text(l.optsKeepLiveTitle));
+      expect(rec.last('plan')!.join(' '), 'plan --mode wipe --disk /dev/nvme0n1 --remove-installer');
+      await next(t);
+      await passRisk(t, check: () {
+        expect(find.textContaining(l.confirmWipeKeepsLive('GK3LIVE')), findsOneWidget);
+        expect(find.text(l.riskRmLiveHead), findsOneWidget);
+      });
+      await see(t, find.text(l.confirmWipeHead));
+      await see(t, find.text(l.confirmWipeKeepsLive('GK3LIVE')));
+      await see(t, find.text('GK3LIVE（${l.confirmKept}）'));
+      // 删除清单里没有它（清单里每一行是"分区号 + 卷标"，GK3LIVE 只出现在保留的那两处）
+      expect(find.textContaining('nvme0n1p8'), findsNothing);
+      // 在左栏列表的下方：先滚过去（ListView 只建看得见的那一段）
+      await t.scrollUntilVisible(find.text(l.confirmRmLiveMerge('GK3LIVE', '4 GiB')), 200,
+          scrollable: find.ancestor(of: find.text(l.confirmWipeHead), matching: find.byType(Scrollable)).first);
+      await hold(t, l.confirmHoldIdle);
+      await see(t, find.text(l.doneTitle));
+      final a = rec.last('apply')!.join(' ');
+      expect(a, contains('--mode wipe'));
+      expect(a, endsWith('--remove-installer'));
+    });
+
+    testWidgets('android-live：方式页单独删除安装器分区 → 风险页（不要确认词）→ 按住删除 → /data 扩大；完成回到方式页', (t) async {
+      final rec = await pumpApp(t, 'android-live');
+      await tap(t, find.text(l.btnStart));
+      await tap(t, find.textContaining('/dev/nvme0n1'));
+      await next(t);
+      await see(t, find.text(l.modeReinstallTitle));
+      await see(t, find.text(l.modeRmLiveTitle));
+      await see(t, find.textContaining(l.rmLiveMerge('GK3LIVE', '4 GiB')));
+      expect(rec.calls.map((c) => c.join(' ')), contains('plan --mode reinstall --disk /dev/nvme0n1 --keep-data no --remove-installer'));
+      await tap(t, find.text(l.modeRmLiveTitle));
+      await next(t);
+      await see(t, find.text(l.riskTitle));
+      expect(find.text(l.riskRmLiveHead), findsOneWidget);
+      expect(find.byKey(kRiskWordKey), findsNothing);
+      await passRisk(t);
+      await see(t, find.text(l.rmLiveSub));
+      await see(t, find.text(l.rmLiveLogs));
+      expect(rec.last('remove-installer'), isNull);
+      await hold(t, '${l.modeRmLiveTitle} · ${l.holdIdle}');
+      expect(rec.last('remove-installer'), ['remove-installer', '--disk', '/dev/nvme0n1']);
+      await see(t, find.text(l.rmLiveOkMerge('67.8 GiB')));
+      await tap(t, find.text(l.editDone));
+      await see(t, find.text(l.modeTitle));
+    });
+
+    testWidgets('删除分区页：安装器分区不给删除按钮，说明装好 Android 之后再删', (t) async {
+      await pumpApp(t, 'windows-live');
+      await tap(t, find.text(l.btnStart));
+      await tap(t, find.textContaining('/dev/nvme0n1'));
+      await next(t);
+      await tap(t, find.text(l.editEntryTitle));
+      await next(t);
+      await passRisk(t);
+      await tap(t, find.textContaining('GK3LIVE  ·  nvme0n1p8'));
+      await see(t, find.text(l.editWhyInstallerPart));
+      expect(find.text(l.editDelete), findsNothing);
+    });
+
+    testWidgets('装完删安装器分区那一步没做成（NOTE installer-kept）：安装照样算成功，完成页用红字说原因', (t) async {
+      await pumpApp(t, 'windows-live', overrides: {'apply': 'apply-note-live.txt'});
+      await tap(t, find.text(l.btnStart));
+      await tap(t, find.textContaining('/dev/nvme0n1'));
+      await next(t);
+      await tap(t, find.text(l.modeAlongTitle));
+      await next(t);
+      await next(t);
+      await passRisk(t);
+      await hold(t, l.confirmHoldIdle);
+      await see(t, find.text(l.doneTitle));
+      await see(t, find.text(l.doneBodyInternal));
+      await see(t, find.text(l.doneNoteLiveKept(l.errEspFull('5 MiB', '1 MiB'))));
+    });
+
+    testWidgets('英文界面：删除安装器分区的风险页没有 CJK', (t) async {
+      await pumpApp(t, 'android-live', language: 'en');
+      await tap(t, find.text(en.btnStart));
+      await tap(t, find.textContaining('/dev/nvme0n1'));
+      await next(t, en);
+      await tap(t, find.text(en.modeRmLiveTitle));
+      await next(t, en);
+      await see(t, find.text(en.riskTitle));
+      expect(cjkOnScreen(t), isEmpty);
+    });
+
+    test('Session 守卫：没确认过风险，removeInstallerNow 一个字节都不写', () async {
+      final rec = Rec(FixtureBackend('android-live', bundle: DiskBundle(), speed: 0));
+      final s = Session(rec);
+      await s.start();
+      await s.probe();
+      await s.assess(s.disks!.firstWhere((d) => d.path == '/dev/nvme0n1'));
+      expect(s.installerPart?.path, '/dev/nvme0n1p8');
+      final r = await s.removeInstallerNow((_) {});
+      expect(r.err?['code'], kRiskUnackedCode);
+      expect(rec.last('remove-installer'), isNull);
+      s.ackRisk(RiskKind.removeInstaller);
+      expect((await s.removeInstallerNow((_) {})).ok, isTrue);
+      expect(rec.last('remove-installer'), ['remove-installer', '--disk', '/dev/nvme0n1']);
     });
   });
 }

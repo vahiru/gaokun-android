@@ -1,11 +1,12 @@
-# 场景：windows-live —— 免 U 盘装双系统：Windows 缩出 80 GiB 空闲 + 4 GiB 的 GK3LIVE（FAT32）放 live，安装器就从这块盘上跑
+# 场景：windows-live —— 免 U 盘装双系统：Windows 缩出 80 GiB 空闲，末尾 4 GiB 是安装器分区 GK3LIVE（XBOOTLDR），安装器从它读进内存运行
 # 录制：scripts/live/gen-fixtures.sh，2026-11-13，Debian 13.7 容器，loop 设备
 # 替换：loop 设备 → /dev/nvme0n1（内置盘）与 /dev/sda（安装 U 盘，挂在 /media/gk3）；
 #       DISK 行的 bus= 按真机填（loop 报不出来）；U 盘的 removable 填 1。其余一律原样。
 # 格式：<界面发出的调用（gk3l 的命令与参数）>  <文件>。找不到精确匹配时用 '<命令> *' 那一行。
 probe                                                                          probe.txt
 esp-info --disk /dev/nvme0n1                                                   esp_info.txt
-plan --sector 512 --region-start 798885888 --region-end 958269439 --disk /dev/nvme0n1 plan-along.txt
-plan --mode wipe --disk /dev/nvme0n1                                           plan-wipe.txt
-apply --release /media/gk3/gaokun3/payload --disk /dev/nvme0n1 --mode alongside --region-start 798885888 --region-end 958269439 apply-along.txt
+plan --sector 512 --region-start 790497280 --region-end 949880831 --disk /dev/nvme0n1 plan-along.txt
+plan --sector 512 --region-start 790497280 --region-end 949880831 --disk /dev/nvme0n1 --remove-installer plan-along-rm.txt
+plan --mode wipe --disk /dev/nvme0n1 --remove-installer                        plan-wipe.txt
+apply --release /media/gk3/gaokun3/payload --disk /dev/nvme0n1 --mode alongside --region-start 790497280 --region-end 949880831 --remove-installer apply-along.txt
 apply *                                                                        apply-along.txt

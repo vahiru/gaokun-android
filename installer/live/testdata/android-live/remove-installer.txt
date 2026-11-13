@@ -1,0 +1,18 @@
+E PROGRESS 10 remove-installer
+E logs and partition table backups copied to gaokun3/ on the EFI system partition /dev/nvme0n1p1
+E partition table backup: /media/gk3/gaokun3/gpt-before-rmlive-nvme0n1-20261113-133523-head34-tail33.bin (restore: dd the first 34 sectors to the start of /dev/nvme0n1 and the last 33 to its end, bs=512)
+O BACKUP path=/media/gk3/gaokun3/gpt-before-rmlive-nvme0n1-20261113-133523-head34-tail33.bin disk=/dev/nvme0n1 sector=512 head=34 tail=33 ram=no
+E PROGRESS 50 remove-installer
+E installer partition /dev/nvme0n1p8 (GK3LIVE) removed from the partition table and the kernel
+E PROGRESS 80 remove-installer
+E userdata: partition enlarged from 65372 MiB to 69468 MiB
+E userdata: 12/4186112 files (0.0% non-contiguous), 342137/16735232 blocks
+E resize2fs 1.47.2 (1-Jan-2025)
+D 59
+E Resizing the filesystem on /dev/nvme0n1p14 to 17783808 (4k) blocks.
+E The filesystem on /dev/nvme0n1p14 is now 17783808 (4k) blocks long.
+E 
+E userdata: file system enlarged to fill the partition (e2fsck -f -p, resize2fs)
+O REMOVED part=/dev/nvme0n1p8 name=GK3LIVE size_mib=4096 grow=yes userdata_mib=69468 esp=/dev/nvme0n1p1
+E PROGRESS 100 done
+X 0

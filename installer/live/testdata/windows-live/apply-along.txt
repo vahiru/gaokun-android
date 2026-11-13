@@ -6,20 +6,20 @@ E   Image           300002 bytes
 E   ramdisk.img     123457 bytes
 E   gaokun3.dtb      20005 bytes
 E PROGRESS 1 test-zst
-D 68
+D 53
 E super.img.zst: full test decode passed
 E ESP: using directory 0123456789abcdef0123456789abcdef; 4 MiB to write (net of files overwritten), 198 MiB free; Windows boot manager present: yes
 E Windows volumes: bitlocker=no hibernated=no
 E PROGRESS 2 plan
-O PLAN op=mkpart disk=/dev/nvme0n1 name=misc start=798885888 end=798894079 size_mib=4 type=8300
-O PLAN op=mkpart disk=/dev/nvme0n1 name=metadata start=798894080 end=798959615 size_mib=32 type=8300
-O PLAN op=mkpart disk=/dev/nvme0n1 name=boot_a start=798959616 end=799090687 size_mib=64 type=8300
-O PLAN op=mkpart disk=/dev/nvme0n1 name=boot_b start=799090688 end=799221759 size_mib=64 type=8300
-O PLAN op=mkpart disk=/dev/nvme0n1 name=super start=799221760 end=824387583 size_mib=12288 type=8300
-O PLAN op=mkpart disk=/dev/nvme0n1 name=userdata start=824387584 end=958269439 size_mib=65372 type=8300
+O PLAN op=mkpart disk=/dev/nvme0n1 name=misc start=790497280 end=790505471 size_mib=4 type=8300
+O PLAN op=mkpart disk=/dev/nvme0n1 name=metadata start=790505472 end=790571007 size_mib=32 type=8300
+O PLAN op=mkpart disk=/dev/nvme0n1 name=boot_a start=790571008 end=790702079 size_mib=64 type=8300
+O PLAN op=mkpart disk=/dev/nvme0n1 name=boot_b start=790702080 end=790833151 size_mib=64 type=8300
+O PLAN op=mkpart disk=/dev/nvme0n1 name=super start=790833152 end=815998975 size_mib=12288 type=8300
+O PLAN op=mkpart disk=/dev/nvme0n1 name=userdata start=815998976 end=949880831 size_mib=65372 type=8300
 O PLANSUM mode=alongside avail_mib=77824 fixed_mib=12452 userdata_mib=65372
-E partition table backup: /media/gk3/gaokun3/gpt-before-apply-nvme0n1-20261113-114420-head34-tail33.bin (restore: dd the first 34 sectors to the start of /dev/nvme0n1 and the last 33 to its end, bs=512)
-O BACKUP path=/media/gk3/gaokun3/gpt-before-apply-nvme0n1-20261113-114420-head34-tail33.bin disk=/dev/nvme0n1 sector=512 head=34 tail=33 ram=no
+E partition table backup: /media/gk3/gaokun3/gpt-before-apply-nvme0n1-20261113-133413-head34-tail33.bin (restore: dd the first 34 sectors to the start of /dev/nvme0n1 and the last 33 to its end, bs=512)
+O BACKUP path=/media/gk3/gaokun3/gpt-before-apply-nvme0n1-20261113-133413-head34-tail33.bin disk=/dev/nvme0n1 sector=512 head=34 tail=33 ram=no
 E PROGRESS 5 write-gpt
 E partition table written (primary and backup), the kernel knows the 6 new partitions
 E PROGRESS 15 format
@@ -31,7 +31,7 @@ E PROGRESS 32 write-super done_mib=4 total_mib=12288
 E PROGRESS 34 write-super done_mib=8 total_mib=12288
 E PROGRESS 37 write-super done_mib=12 total_mib=12288
 E PROGRESS 39 write-super done_mib=16 total_mib=12288
-D 1076
+D 969
 E PROGRESS 42 write-super done_mib=903 total_mib=12288
 E PROGRESS 44 write-super done_mib=907 total_mib=12288
 E PROGRESS 47 write-super done_mib=911 total_mib=12288
@@ -54,5 +54,19 @@ E PROGRESS 80 bootloader
 E backed up the original EFI/BOOT/BOOTAA64.EFI as EFI/BOOT/BOOTAA64.EFI.before-gaokun3
 E ESP: systemd-boot, kernel / dtb / ramdisk for both slots, both entries and loader.conf written; 12 files read back from the disk and verified
 E cannot read EFI variables (efivarfs unavailable); LoaderEntryDefault not checked
+E PROGRESS 92 remove-installer
+E logs and partition table backups copied to gaokun3/ on the EFI system partition /dev/nvme0n1p1
+E partition table backup: /media/gk3/gaokun3/gpt-before-rmlive-nvme0n1-20261113-133427-head34-tail33.bin (restore: dd the first 34 sectors to the start of /dev/nvme0n1 and the last 33 to its end, bs=512)
+O BACKUP path=/media/gk3/gaokun3/gpt-before-rmlive-nvme0n1-20261113-133427-head34-tail33.bin disk=/dev/nvme0n1 sector=512 head=34 tail=33 ram=no
+E installer partition /dev/nvme0n1p8 (GK3LIVE) removed from the partition table and the kernel
+E userdata: partition enlarged from 65372 MiB to 69468 MiB
+E userdata: 12/4186112 files (0.0% non-contiguous), 342137/16735232 blocks
+E resize2fs 1.47.2 (1-Jan-2025)
+D 52
+E Resizing the filesystem on /dev/nvme0n1p14 to 17783808 (4k) blocks.
+E The filesystem on /dev/nvme0n1p14 is now 17783808 (4k) blocks long.
+E 
+E userdata: file system enlarged to fill the partition (e2fsck -f -p, resize2fs)
+O REMOVED part=/dev/nvme0n1p8 name=GK3LIVE size_mib=4096 grow=yes userdata_mib=69468 esp=/dev/nvme0n1p1
 E PROGRESS 100 done
 X 0

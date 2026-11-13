@@ -24,12 +24,17 @@ class Part {
         fs = r['fs'],
         fslabel = r['fslabel'],
         os = r['os'],
-        medium = r.yes('medium');
+        medium = r.yes('medium'),
+        ram = r.yes('medium') && r.yes('ram');
   final String path, type, name, fs, fslabel, os;
   final int num, start, end, sizeMib, sizeKib;
 
   /// 安装器就是从这个分区跑起来的（gk3l probe 的 PART medium=yes）—— 删除分区页不让删它
   final bool medium;
+
+  /// 安装器分区：介质分区的内容已读进内存、分区本身没有挂载（PART ram=yes，见 installer/backend/src/linux/live.h）。
+  /// 整盘清空时保留它，装完可以删掉它（选项页"保留安装器分区"），Android 装好后可在方式页单独删除
+  final bool ram;
 
   bool get isEsp => type == espTypeGuid || name == 'esp';
 
@@ -216,15 +221,39 @@ class PlanReuse {
   final String action;
 }
 
+/// gk3l plan --remove-installer 的 PLAN op=rmlive：装完删掉安装器分区时 userdata 会怎样
+class PlanRmLive {
+  PlanRmLive(Gk3Record r)
+      : part = r['part'],
+        name = r['name'],
+        sizeMib = r.intOf('size_mib'),
+        merge = r.yes('merge'),
+        userdataMib = r.intOf('userdata_mib');
+  final String part, name;
+  final int sizeMib;
+
+  /// userdata 紧挨在安装器分区前面：删掉之后空间并进 userdata（否则成为未分配空间）
+  final bool merge;
+
+  /// 删掉之后 userdata 的大小（merge = false 时是原大小）
+  final int userdataMib;
+}
+
 /// gk3l plan 的结果：要么 parts + summary，要么 error
 class Plan {
   Plan(CallResult r)
       : parts = [for (final p in r.ofType('PLAN').where((p) => p['op'] == 'mkpart')) PlanPart(p)],
+        keep = [for (final p in r.ofType('PLAN').where((p) => p['op'] == 'keep')) PlanPart(p)],
+        rmlive = r.ofType('PLAN').where((p) => p['op'] == 'rmlive').map(PlanRmLive.new).firstOrNull,
         reuse = [for (final p in r.ofType('PLAN').where((p) => p['op'] == 'reuse')) PlanReuse(p)],
         wipe = r.ofType('PLAN').any((p) => p['op'] == 'wipe'),
         summary = r.first('PLANSUM'),
         error = r.first('PLANERR') ?? (r.ok ? null : Gk3Record('PLANERR', {'msg': r.error ?? 'exit-${r.exitCode}'}));
   final List<PlanPart> parts;
+
+  /// 整盘清空时原样保留的分区（安装器分区，PLAN op=keep）
+  final List<PlanPart> keep;
+  final PlanRmLive? rmlive;
   final List<PlanReuse> reuse;
   final bool wipe;
   final Gk3Record? summary, error;

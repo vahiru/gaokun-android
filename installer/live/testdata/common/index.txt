@@ -7,7 +7,9 @@ preflight                                                                      p
 #  esp_info-hibernated.txt：Windows 在休眠（双系统 / 重新安装禁用）
 #  esp_info-small.txt：100 MiB 的 ESP（双系统明确不装）
 #  apply-note.txt：windows-free 录的那次 apply + 一条 NOTE code=loadervar-stuck（EFI 变量删不掉，完成页要说）
-#  ↑ 这四份是从录到的输出改字段得来的（半手写，gen-fixtures.sh 里写着怎么改）
+#  apply-live-keep.txt：windows-live 录的那次 apply 去掉删除安装器分区那一段（选项页开了"保留安装器分区"）
+#  apply-note-live.txt：同上，删除那一段换成 NOTE code=installer-kept（ESP 放不下日志、没删；完成页要说）
+#  ↑ 这六份是从录到的输出改字段得来的（半手写，gen-fixtures.sh 里写着怎么改）
 job status                                                                     job_status-none.txt   # 手写（没有在跑的写盘任务）
 #  job_status-running.txt / job_follow-apply.txt：界面重新起来时 apply 还在跑（测试用 overrides 选它们）
 log-targets                                                                    log_targets.txt   # 录（假 U 盘挂在 /media/gk3）

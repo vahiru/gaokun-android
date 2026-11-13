@@ -31,6 +31,7 @@ String progressText(L10n l, Gk3Progress p) {
     'done' => l.progDone,
     'gpt-backup' => l.progGptBackup,
     'part-delete' => l.progPartDelete(p['part']),
+    'remove-installer' => l.progRemoveInstaller,
     _ => l.progOther(c),
   };
 }
@@ -107,6 +108,10 @@ String errText(L10n l, Gk3Record e) {
     'bitlocker-key-unconfirmed' => l.errBitlockerKeyUnconfirmed,
     // 整盘清空、重新安装、删除分区
     'wipe-medium' => l.errWipeMedium,
+    // 安装器分区（installer/backend/src/linux/live.c）
+    'live-missing' => l.errLiveMissing,
+    'live-busy' => l.errLiveBusy,
+    'logs-not-kept' => l.errLogsNotKept,
     'wipe-mounted' => l.errWipeMounted(f('mounts').trim()),
     'reinstall-busy' => l.errReinstallBusy(f('parts')),
     'part-unknown' => l.errPartUnknown(f('part')),

@@ -17,8 +17,10 @@
 #   windows-free  factory 上把 Data 缩掉 80 GiB 之后（代替 Windows 的"压缩卷"，见 win_shrink）→ 走双系统
 #   blank         一块空盘 → 走整盘
 #   android       blank 上真装一遍之后（"已经装过"：双系统应被拒绝（分区重名）；重新安装可行）
-#   windows-live  免 U 盘装双系统：出厂盘缩出空闲区 + 一个放 live 的 FAT32 分区，
-#                 安装器就从这块盘上跑（介质与目标同盘）—— 整盘清空要被拦、双系统要放行、介质分区不可删
+#   windows-live  免 U 盘装双系统：出厂盘缩出空闲区，空闲区末尾是安装器分区 GK3LIVE（XBOOTLDR，FAT32），
+#                 安装器从它启动、gaokun3/ 已读进内存（介质与目标同盘）—— 整盘清空保留它、双系统放行、
+#                 装完删掉它并进 /data（选项页"保留安装器分区"默认关）
+#   android-live  windows-live 上装了双系统、保留了安装器分区之后 —— 方式页多一项"删除安装器分区"
 #   windows-setup Windows 脚本的默认：只缩出 512 MiB 放 GK3LIVE、没有空闲 → 要先回 Windows 压缩卷
 #   windows-setup-shrunk  上面那块盘在 Windows 里再缩出 80 GiB 之后 → 走双系统
 set -u
@@ -204,20 +206,69 @@ header windows-free "factory 上把 Data 缩掉 80 GiB 之后（代替 Windows �
 along_set windows-free "$DF"
 drop_disk "$DF"
 
+# 免 U 盘装双系统（Windows 安装器的"制作安装介质"）：Windows 里先"压缩卷"缩出空闲区，空闲区末尾建安装器分区 GK3LIVE
+# （XBOOTLDR，FAT32，4 GiB），下次开机从它启动。压缩卷用 win_shrink 代替，其余照实造。
+# 开机时 initramfs 把 gaokun3/ 读进内存、卸下 GK3LIVE，并把介质记进 /run/gaokun3/medium（scripts/live/initramfs-init）：
+# 这里用 tmpfs 当 /media/gk3 的内存副本，记录写进 GK3_MEDIUM_FILE
+mk_winlive() {   # $1=盘
+    local d=$1 lf ls
+    make_factory "$d"
+    DATA_MIB=$(( $(blockdev --getsize64 "${d}p4") / 1048576 ))
+    win_shrink "$d" 4 $(( DATA_MIB - 81920 )) || return 1
+    lf=$(bash -c "$(probe_of "$d" nostick)" | grep '^FREE ' | sort -t= -k5 -n | tail -1)
+    ls=$(( ($(field "$lf" end) + 1 - 4 * 2097152) / 2048 * 2048 ))
+    sgdisk -n 8:$ls:+4G -t 8:EA00 -c 8:GK3LIVE "$d" >/dev/null 2>&1 || return 1
+    settle "$d"
+    mkfs.vfat -F 32 -n GK3LIVE "${d}p8" >/dev/null || return 1
+    mmd -i "${d}p8" ::/gaokun3 ::/gaokun3/diag ::/loader ::/loader/entries
+    head -c 65536 /dev/urandom > "$W/live.squashfs"; mcopy -i "${d}p8" "$W/live.squashfs" ::/gaokun3/live.squashfs
+    printf 'title LiveCD\n' > "$W/live.conf"; mcopy -i "${d}p8" "$W/live.conf" ::/loader/entries/gaokun3-live.conf
+}
+toram_of() {   # $1=盘：p8 读进内存
+    local n; n=$(basename "${1}p8")
+    umount /media/gk3 && mount -t tmpfs -o size=64m tmpfs /media/gk3 && mkdir -p /media/gk3/gaokun3
+    mcopy -s -i "${1}p8" ::/gaokun3/* /media/gk3/gaokun3/
+    printf 'part=%s\ndisk=%s\nstart=%s\nsize=%s\nram=yes\n' "$n" "$(basename "$1")" \
+        "$(cat /sys/class/block/$n/start)" "$(cat /sys/class/block/$n/size)" > "$W/medium"
+    export GK3_MEDIUM_FILE=$W/medium
+}
+unram() { unset GK3_MEDIUM_FILE; umount /media/gk3 && mount "${STICK}p1" /media/gk3; }
+
 echo "═══ windows-live ═══"
-# 免 U 盘装双系统：Windows 里先"压缩卷"缩出空闲区、再在空闲区开头建一个 FAT32 小分区放 live，下次开机从它起安装器。
-# 压缩卷用 win_shrink 代替，其余照实造。分区的大小与卷标：4 GiB、GK3LIVE
-DL=$(new_disk winlive 488386M); make_factory "$DL"
-DATA_MIB=$(( $(blockdev --getsize64 "${DL}p4") / 1048576 ))
-win_shrink "$DL" 4 $(( DATA_MIB - 81920 )) || { echo "windows-live：缩 Data 失败"; exit 1; }
-LF=$(bash -c "$(probe_of "$DL" nostick)" | grep '^FREE ' | sort -t= -k5 -n | tail -1)
-sgdisk -n 8:"$(field "$LF" start)":+4G -t 8:0700 -c 8:"Basic data partition" "$DL" >/dev/null 2>&1; settle "$DL"
-mkfs.vfat -F 32 -n GK3LIVE "${DL}p8" >/dev/null
-umount /media/gk3 && mount "${DL}p8" /media/gk3 && mkdir -p /media/gk3/gaokun3
-head -c 65536 /dev/urandom > /media/gk3/gaokun3/live.squashfs
-header windows-live "免 U 盘装双系统：Windows 缩出 80 GiB 空闲 + 4 GiB 的 GK3LIVE（FAT32）放 live，安装器就从这块盘上跑"
-along_set windows-live "$DL" nostick
-umount /media/gk3 && mount "${STICK}p1" /media/gk3
+DL=$(new_disk winlive 488386M); mk_winlive "$DL" || { echo "windows-live：造盘失败"; exit 1; }
+toram_of "$DL"
+header windows-live "免 U 盘装双系统：Windows 缩出 80 GiB 空闲，末尾 4 GiB 是安装器分区 GK3LIVE（XBOOTLDR），安装器从它读进内存运行"
+rec windows-live "$DL" probe.txt    "probe" "$(probe_of "$DL" nostick)"
+rec windows-live "$DL" esp_info.txt "esp-info --disk /dev/nvme0n1"
+fr=$(bash -c "$(probe_of "$DL" nostick)" | grep '^FREE ' | sort -t= -k5 -n | tail -1)
+rs=$(field "$fr" start); re=$(field "$fr" end)
+# 方式页评估时不带 --remove-installer，选项页的方案带（session.dart 的 _planArgs）
+rec windows-live "$DL" plan-along.txt    "plan --sector 512 --region-start $rs --region-end $re --disk /dev/nvme0n1"
+rec windows-live "$DL" plan-along-rm.txt "plan --sector 512 --region-start $rs --region-end $re --disk /dev/nvme0n1 --remove-installer"
+rec windows-live "$DL" plan-wipe.txt     "plan --mode wipe --disk /dev/nvme0n1 --remove-installer"
+rec windows-live "$DL" apply-along.txt \
+    "apply --release /media/gk3/gaokun3/payload --disk /dev/nvme0n1 --mode alongside --region-start $rs --region-end $re --remove-installer" \
+    "$G apply --release $REL --disk $DL --mode alongside --region-start $rs --region-end $re --remove-installer"
+printf '%-78s %s\n' "apply *" apply-along.txt >> "$OUT/windows-live/index.txt"
+unram
+drop_disk "$DL"
+
+echo "═══ android-live ═══"
+# 同样的盘装双系统时选了"保留安装器分区"：Android 与 GK3LIVE 都在，安装器又从 GK3LIVE 启动
+DL=$(new_disk winlive2 488386M); mk_winlive "$DL" || { echo "android-live：造盘失败"; exit 1; }
+toram_of "$DL"
+fr=$(bash -c "$(probe_of "$DL" nostick)" | grep '^FREE ' | sort -t= -k5 -n | tail -1)
+"$G" apply --release "$REL" --disk "$DL" --mode alongside --region-start "$(field "$fr" start)" --region-end "$(field "$fr" end)" >/dev/null 2>&1 \
+    || { echo "android-live：安装失败"; exit 1; }
+header android-live "windows-live 上装了双系统、保留了安装器分区之后 —— 重新安装可行，也可以单独删除安装器分区"
+rec android-live "$DL" probe.txt    "probe" "$(probe_of "$DL" nostick)"
+rec android-live "$DL" esp_info.txt "esp-info --disk /dev/nvme0n1"
+for k in no yes; do
+  rec android-live "$DL" "plan-reinstall-keep-$k.txt" "plan --mode reinstall --disk /dev/nvme0n1 --keep-data $k --remove-installer"
+done
+rec android-live "$DL" plan-wipe.txt "plan --mode wipe --disk /dev/nvme0n1 --remove-installer"
+rec android-live "$DL" remove-installer.txt "remove-installer --disk /dev/nvme0n1"
+unram
 drop_disk "$DL"
 
 echo "═══ windows-setup ═══"
@@ -297,11 +348,19 @@ esp_var -e 's/ bootaa64=[a-z]*/ bootaa64=other/' -e 's/ bitlocker=no/ bitlocker=
 esp_var -e 's/ hibernated=[a-z]*/ hibernated=yes/' > "$C/esp_info-hibernated.txt"
 esp_var -e 's/ size_mib=[0-9]*/ size_mib=100/' -e 's/ free_mib=[0-9]*/ free_mib=70/' -e 's/ small=no/ small=yes/' > "$C/esp_info-small.txt"
 { grep -v '^X ' "$OUT/windows-free/apply-along.txt"; echo 'O NOTE code=loadervar-stuck name=LoaderEntryDefault value=auto-windows'; echo 'X 0'; } > "$C/apply-note.txt"
+# windows-live 录的那次 apply（装完删掉安装器分区）去掉删除那一段：选项页开了"保留安装器分区"时的样子；
+# 再换成一条 NOTE installer-kept（ESP 放不下日志、没删）：完成页要说
+sed '/^E PROGRESS 92 remove-installer$/,/^O REMOVED /d' "$OUT/windows-live/apply-along.txt" > "$C/apply-live-keep.txt"
+sed -e '/^E PROGRESS 92 remove-installer$/,/^O REMOVED /{/^E PROGRESS 92 remove-installer$/!d}' \
+    -e '/^E PROGRESS 92 remove-installer$/a O NOTE code=installer-kept why=esp-full need_mib=5 free_mib=1' \
+    "$OUT/windows-live/apply-along.txt" > "$C/apply-note-live.txt"
 { echo "#  esp_info-bitlocker.txt：Windows 卷是 BitLocker、BOOTAA64 还是 Windows 的（确认页要勾恢复密钥）"
   echo "#  esp_info-hibernated.txt：Windows 在休眠（双系统 / 重新安装禁用）"
   echo "#  esp_info-small.txt：100 MiB 的 ESP（双系统明确不装）"
   echo "#  apply-note.txt：windows-free 录的那次 apply + 一条 NOTE code=loadervar-stuck（EFI 变量删不掉，完成页要说）"
-  echo "#  ↑ 这四份是从录到的输出改字段得来的（半手写，gen-fixtures.sh 里写着怎么改）"; } >> "$C/index.txt"
+  echo "#  apply-live-keep.txt：windows-live 录的那次 apply 去掉删除安装器分区那一段（选项页开了"保留安装器分区"）"
+  echo "#  apply-note-live.txt：同上，删除那一段换成 NOTE code=installer-kept（ESP 放不下日志、没删；完成页要说）"
+  echo "#  ↑ 这六份是从录到的输出改字段得来的（半手写，gen-fixtures.sh 里写着怎么改）"; } >> "$C/index.txt"
 # 写盘任务。没有在跑的（默认）；"界面崩过又起来、apply 还在跑"那种给测试按文件名用。
 # 手写：容器里起不了 systemd 单元；格式照 gk3l job status 的输出写。跟读的内容就是 blank 场景录的那次 apply
 printf 'X 0\n' > "$C/job_status-none.txt"

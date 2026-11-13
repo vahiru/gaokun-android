@@ -45,6 +45,7 @@ class _OptsPageState extends State<OptsPage> {
                 : (s.userdataMib == null ? l.optsData(fmtMib(p.userdataMib)) : l.optsDataFixed(fmtMib(p.userdataMib)));
     // 重新安装且清数据：这一行是"要丢东西"的提醒，用 error 色
     final dataBad = p != null && (!p.ok || (re && !p.keepData));
+    final lv = s.installerPart, rm = p?.rmlive;
     return StepPage(
       step: Gk3Step.opts,
       title: l.optsTitle,
@@ -65,8 +66,24 @@ class _OptsPageState extends State<OptsPage> {
           ),
           const SizedBox(height: 14),
         ],
+        // 从本机磁盘上的安装器分区运行：装完删不删它（默认删，用户 2026-11-13）
+        if (lv != null) ...[
+          ChoiceCard(
+            icon: Icons.save_outlined,
+            title: l.optsKeepLiveTitle,
+            body: l.optsKeepLiveBody,
+            trailing: Switch(value: s.keepInstaller, onChanged: s.setKeepInstaller),
+            onTap: () => s.setKeepInstaller(!s.keepInstaller),
+          ),
+          const SizedBox(height: 14),
+        ],
         const SizedBox(height: 6),
         Text(dataLine, style: tt.titleMedium!.copyWith(color: dataBad ? context.cs.error : context.cs.onSurface)),
+        // 删掉安装器分区之后 /data 会怎样（后端 plan --remove-installer 的预览）
+        if (s.removeInstaller && rm != null && p!.ok && !s.planning) ...[
+          const SizedBox(height: 6),
+          Text(rm.merge ? l.optsDataRmLive(fmtMib(rm.userdataMib)) : l.optsDataRmLiveFree, style: tt.bodyLarge),
+        ],
         // 新建分区时提醒 /data 太小（重新安装不改分区大小，提醒了也没法改）
         if (p != null && p.ok && !s.planning && !re) DataSizeWarning(p.userdataMib),
       ]),
@@ -184,6 +201,9 @@ class ConfirmPage extends StatelessWidget {
     final wipe = s.mode == Mode.wipe;
     final re = s.mode == Mode.reinstall;
     final a = s.along;
+    final lv = s.installerPart, rm = p.rmlive;
+    // 整盘清空时要删的分区：安装器分区保留（gk3l 把它原样抄进新表），不在这里列
+    final gone = [for (final x in d.parts) if (!x.ram) x];
     // 将被删除的东西要全列出来；9 行以内不折叠（第一版折叠到 6 行，藏掉的正好是 WinRE）
     const show = 9;
     return StepPage(
@@ -213,9 +233,9 @@ class ConfirmPage extends StatelessWidget {
             if (wipe) ...[
               Text(l.confirmWipeHead, style: tt.titleMedium!.copyWith(color: context.cs.error)),
               const SizedBox(height: 8),
-              if (d.parts.isEmpty) Text(l.confirmNoParts, style: tt.bodyMedium),
+              if (gone.isEmpty) Text(l.confirmNoParts, style: tt.bodyMedium),
               // ★ 必须把将被销毁的东西逐条列出来（stage7-live-installer.md §3 的界面流程）
-              for (final part in d.parts.take(show))
+              for (final part in gone.take(show))
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 3),
                   child: Row(children: [
@@ -231,7 +251,8 @@ class ConfirmPage extends StatelessWidget {
                     Text(fmtMib(part.sizeMib), style: tt.bodyMedium),
                   ]),
                 ),
-              if (d.parts.length > show) Text(l.confirmMore('${d.parts.length - show}'), style: tt.bodyMedium),
+              if (gone.length > show) Text(l.confirmMore('${gone.length - show}'), style: tt.bodyMedium),
+              if (lv != null) ...[const SizedBox(height: 10), Text(l.confirmWipeKeepsLive(lv.label), style: tt.bodyLarge)],
               // v1.0 计划 GUI-18：整盘清空连华为的一键恢复分区一起删 —— 写明后果
               if (d.parts.where(isOnekey).firstOrNull case final ok?) ...[
                 const SizedBox(height: 10),
@@ -260,6 +281,11 @@ class ConfirmPage extends StatelessWidget {
               Text(l.confirmAlongBody(fmtMib(p.totalNewMib), a is AlongOk ? a.esp.path : '?'), style: tt.bodyLarge),
               if (a is AlongOk && a.windows) ...[const SizedBox(height: 6), Text(l.confirmWindowsKept, style: tt.bodyLarge)],
             ],
+            // 装完删掉安装器分区（选项页没开"保留安装器分区"）
+            if (s.removeInstaller && lv != null) ...[
+              const SizedBox(height: 10),
+              Text(rm?.merge ?? false ? l.confirmRmLiveMerge(lv.label, fmtMib(lv.sizeMib)) : l.confirmRmLiveFree(lv.label, fmtMib(lv.sizeMib)), style: tt.bodyLarge),
+            ],
             if (s.dual) ...[const SizedBox(height: 22), const DualOptions()],
           ]),
         ),
@@ -276,6 +302,15 @@ class ConfirmPage extends StatelessWidget {
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 2),
                   child: Row(children: [Expanded(child: Text(part.name, style: tt.bodyLarge)), Text(fmtMib(part.sizeMib), style: tt.bodyMedium)]),
+                ),
+              // 整盘清空时原样保留的安装器分区（PLAN op=keep）
+              for (final k in p.keep)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Row(children: [
+                    Expanded(child: Text('${k.name}（${l.confirmKept}）', style: tt.bodyLarge!.copyWith(color: context.cs.onSurfaceVariant))),
+                    Text(fmtMib(k.sizeMib), style: tt.bodyMedium),
+                  ]),
                 ),
               const Divider(height: 24),
               if (s.usbRelease case final rel? when rel.version.isNotEmpty) Text(l.confirmVersion(rel.version), style: tt.bodyLarge),
@@ -466,6 +501,8 @@ class DonePage extends StatelessWidget {
     final s = context.session, l = context.l, tt = Theme.of(context).textTheme;
     // 免 U 盘安装（安装器跑在内置盘上）：没有要拔的介质（v1.0 计划 GUI-17）
     final internalMedium = s.disks?.any((d) => d.medium && !d.external) ?? false;
+    // 装完删掉了安装器分区（apply 的 REMOVED）：空间并进了 /data，或者成了未分配空间
+    final rmv = s.removed;
     return PopScope(
       canPop: false,
       child: StepPage(
@@ -480,13 +517,25 @@ class DonePage extends StatelessWidget {
             child: Icon(Icons.check, size: 56, color: context.gk.onSuccessContainer),
           ),
           const SizedBox(height: 24),
-          Text(internalMedium ? l.doneBodyInternal : l.doneBody, style: tt.bodyLarge),
+          Text(
+            rmv != null ? (rmv.yes('grow') ? l.doneBodyRmLiveMerge : l.doneBodyRmLiveFree) : (internalMedium ? l.doneBodyInternal : l.doneBody),
+            style: tt.bodyLarge,
+          ),
           // 双系统：开机默认进哪个、什么时候生效、在哪里改（设计稿 §4.7"完成页按所选的默认系统说明"）
           if (s.dual) ...[const SizedBox(height: 16), Text(s.defaultOs == 'windows' ? l.doneDualWindows : l.doneDualAndroid, style: tt.bodyLarge)],
           // 后端的提醒：EFI 变量 LoaderEntryDefault 删不掉 —— 开机仍会先进它指的那一项
           for (final n in s.notes.where((n) => n['code'] == 'loadervar-stuck')) ...[
             const SizedBox(height: 16),
             Text(l.doneNoteLoaderVar(n['value']), style: tt.bodyLarge!.copyWith(color: context.cs.error)),
+          ],
+          // 装完之后删安装器分区那一步：动盘之前停下了（安装照样成功）；或者 /data 的文件系统没扩成
+          for (final n in s.notes.where((n) => n['code'] == 'installer-kept')) ...[
+            const SizedBox(height: 16),
+            Text(l.doneNoteLiveKept(errText(l, Gk3Record('ERR', {...n.fields, 'code': n['why']}))), style: tt.bodyLarge!.copyWith(color: context.cs.error)),
+          ],
+          if (s.notes.any((n) => n['code'] == 'userdata-fs-not-grown')) ...[
+            const SizedBox(height: 16),
+            Text(l.doneNoteFsNotGrown, style: tt.bodyLarge!.copyWith(color: context.cs.error)),
           ],
         ]),
       ),

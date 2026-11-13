@@ -6,7 +6,7 @@ import 'package:gk3_common/backend/backend.dart';
 import 'package:gk3_common/backend/protocol.dart';
 
 /// 真后端：gk3l（installer/backend 的 Linux 版，与 Windows 安装器的 gk3w 同源）。调用名就是 gk3l 的命令：
-/// probe、preflight、release-info、esp-info、plan、apply、delete、job、log-targets、save-logs。
+/// probe、preflight、release-info、esp-info、plan、apply、delete、remove-installer、job、log-targets、save-logs。
 ///
 /// ★ 参数按 argv 传（Process.start 不经过 shell），不拼命令行。
 ///
@@ -25,8 +25,8 @@ class LiveBackend extends Gk3Backend {
   /// gk3l 的路径
   final String gk3l;
 
-  /// 会动盘的命令：安装、删除分区
-  static bool writesDisk(String fn) => fn == 'apply' || fn == 'delete';
+  /// 会动盘的命令：安装、删除分区、删除安装器分区
+  static bool writesDisk(String fn) => fn == 'apply' || fn == 'delete' || fn == 'remove-installer';
 
   /// 找 gk3l：GK3L 环境变量 → live 镜像里的位置 → 仓库里编出来的（在 Linux 开发机上直接跑）
   static LiveBackend? locate() {

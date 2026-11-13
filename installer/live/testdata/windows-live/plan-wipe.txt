@@ -5,6 +5,8 @@ O PLAN op=mkpart disk=/dev/nvme0n1 name=metadata start=624640 end=690175 size_mi
 O PLAN op=mkpart disk=/dev/nvme0n1 name=boot_a start=690176 end=821247 size_mib=64 type=8300
 O PLAN op=mkpart disk=/dev/nvme0n1 name=boot_b start=821248 end=952319 size_mib=64 type=8300
 O PLAN op=mkpart disk=/dev/nvme0n1 name=super start=952320 end=26118143 size_mib=12288 type=8300
-O PLAN op=mkpart disk=/dev/nvme0n1 name=userdata start=26118144 end=1000212479 size_mib=475632 type=8300
-O PLANSUM mode=wipe avail_mib=488384 fixed_mib=12752 userdata_mib=475632
+O PLAN op=mkpart disk=/dev/nvme0n1 name=userdata start=26118144 end=949880831 size_mib=451056 type=8300
+O PLAN op=keep disk=/dev/nvme0n1 name=GK3LIVE start=949880832 end=958269439 size_mib=4096
+O PLANSUM mode=wipe avail_mib=463808 fixed_mib=12752 userdata_mib=451056
+O PLAN op=rmlive part=/dev/nvme0n1p8 name=GK3LIVE start=949880832 end=958269439 size_mib=4096 merge=yes userdata_mib=475632
 X 0

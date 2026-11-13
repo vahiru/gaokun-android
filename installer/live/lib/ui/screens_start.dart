@@ -178,7 +178,7 @@ class _DiskPageState extends State<DiskPage> {
               if (free != null) l.diskFree(fmtMib(free.sizeMib)),
             ].join('   ·   '),
             reason: d.unreadable ? l.diskUnreadable : (blocked(d) ? l.diskMedium : null),
-            note: d.medium && !d.external ? l.diskMediumInternal : null,
+            note: d.medium && !d.external ? (d.parts.any((p) => p.ram) ? l.diskInstallerPart : l.diskMediumInternal) : null,
             selected: identical(_picked, d),
             onTap: () => setState(() => _picked = d),
             extra: diskBar(d),
@@ -205,7 +205,7 @@ class ModePage extends StatefulWidget {
   State<ModePage> createState() => _ModePageState();
 }
 
-enum _Pick { wipe, along, reinstall, edit }
+enum _Pick { wipe, along, reinstall, rmlive, edit }
 
 class _ModePageState extends State<ModePage> {
   _Pick? _pick;
@@ -240,9 +240,10 @@ class _ModePageState extends State<ModePage> {
       case _Pick.reinstall:
         s.setMode(Mode.reinstall);
         go(context, const OptsPage());
-      // 删除分区同样先过风险确认页（RiskPage 等那一页 pop 了才跟着 pop，所以这里 await 的仍是"做完了没有"）
-      case _Pick.edit:
-        await RiskPage.open(context, RiskKind.edit, const DiskEditPage());
+      // 删除分区、删除安装器分区同样先过风险确认页（RiskPage 等那一页 pop 了才跟着 pop，所以这里 await 的仍是"做完了没有"）
+      case _Pick.edit || _Pick.rmlive:
+        await RiskPage.open(context, _pick == _Pick.edit ? RiskKind.edit : RiskKind.removeInstaller,
+            _pick == _Pick.edit ? const DiskEditPage() : const RemoveInstallerPage());
         // 删过分区的盘要重新评估：几种方式能不能走，都可能变了
         if (mounted && s.disk != null) {
           setState(() => _pick = null);
@@ -291,6 +292,20 @@ class _ModePageState extends State<ModePage> {
             onTap: () => setState(() => _pick = _Pick.reinstall),
           ),
           const SizedBox(height: 14),
+          // Android 已装好、安装器从这块盘上的安装器分区运行：可以单独删掉它（装的时候选了保留，或者删除没成功）
+          if (s.installerPart case final lv?) ...[
+            ChoiceCard(
+              icon: Icons.delete_sweep_outlined,
+              title: l.modeRmLiveTitle,
+              body: [
+                l.modeRmLiveBody,
+                if (r.rmlive case final rm?) rm.merge ? l.rmLiveMerge(lv.label, fmtMib(lv.sizeMib)) : l.rmLiveFree(lv.label, fmtMib(lv.sizeMib)),
+              ].join('\n'),
+              selected: _pick == _Pick.rmlive,
+              onTap: () => setState(() => _pick = _Pick.rmlive),
+            ),
+            const SizedBox(height: 14),
+          ],
         ],
         ChoiceCard(
           icon: Icons.delete_forever,
@@ -298,7 +313,9 @@ class _ModePageState extends State<ModePage> {
           title: l.modeWipeTitle,
           warn: l.modeWipeWarn,
           body: l.modeWipeBody,
-          reason: noRel ? l.modeWhyNoRelease : (s.disk!.medium ? l.modeWhyMedium : null),
+          // 安装器从这块盘上运行：读进了内存（安装器分区）就照常清除、保留那个分区；否则清除不了
+          reason: noRel ? l.modeWhyNoRelease : (s.disk!.medium && s.installerPart == null ? l.modeWhyMedium : null),
+          note: s.installerPart == null ? null : l.confirmWipeKeepsLive(s.installerPart!.label),
           selected: _pick == _Pick.wipe,
           onTap: () => setState(() => _pick = _Pick.wipe),
         ),

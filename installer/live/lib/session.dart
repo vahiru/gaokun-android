@@ -88,6 +88,9 @@ enum RiskKind {
 
   /// 删除分区：gk3l delete
   edit,
+
+  /// 删除安装器分区（Android 已装好时在方式页单独做）：gk3l remove-installer
+  removeInstaller,
 }
 
 /// 没经过风险确认页就要写盘时报的 ERR 代码（界面自己的，不是后端的；touched=no ⇒ "盘没动过"那种失败页）
@@ -157,7 +160,7 @@ class Session extends ChangeNotifier {
   /// 确认过的是"哪条路、哪块盘、哪种方式"：换了盘、换了方式、改了保不保留数据，都要重新确认
   final _riskAcked = <String>{};
   String _riskKey(RiskKind k) => switch (k) {
-        RiskKind.install => 'install ${disk?.path} ${mode?.name} keep=$keepData',
+        RiskKind.install => 'install ${disk?.path} ${mode?.name} keep=$keepData rmlive=$removeInstaller',
         _ => '${k.name} ${disk?.path}',
       };
 
@@ -232,11 +235,13 @@ class Session extends ChangeNotifier {
     espInfo = null;
     defaultOs = 'android';
     bitlockerKeyOk = false;
+    keepInstaller = false;
     assessing = true;
     _changed();
     along = await _assessAlong(d);
     if (d.parts.any((p) => const {'super', 'userdata', 'boot_a', 'boot_b'}.contains(p.name))) {
-      reinstall = Plan(await backend.run('plan', _reinstallArgs(d, keep: false)));
+      // 盘上有安装器分区时一并问删掉它之后 /data 会怎样（方式页"删除安装器分区"那一项要说）
+      reinstall = Plan(await backend.run('plan', [..._reinstallArgs(d, keep: false), if (d.parts.any((p) => p.ram)) '--remove-installer']));
     }
     assessing = false;
     _changed();
@@ -294,6 +299,35 @@ class Session extends ChangeNotifier {
     return r;
   }
 
+  // ── 安装器分区（见 installer/backend/src/linux/live.h）────────────────────
+  /// 所选的盘上的安装器分区：从这块盘上的 GK3LIVE 启动、内容已读进内存（PART ram=yes）。
+  /// 有它时：整盘清空会保留它；选项页给"保留安装器分区"（默认不保留 ⇒ 装完删掉、空间并进 /data）；
+  /// Android 已装好时方式页可以单独删除它
+  Part? get installerPart => disk?.parts.where((p) => p.ram).firstOrNull;
+
+  /// 装完之后保留安装器分区。默认不保留（用户 2026-11-13）
+  bool keepInstaller = false;
+
+  /// 这次装完要删掉安装器分区
+  bool get removeInstaller => installerPart != null && !keepInstaller;
+
+  void setKeepInstaller(bool v) {
+    keepInstaller = v;
+    _changed();
+  }
+
+  /// 单独删除安装器分区（gk3l remove-installer）。成功与否都重新探测这块盘
+  Future<CallResult> removeInstallerNow(void Function(Gk3Event) onEvent) async {
+    if (!riskAcked(RiskKind.removeInstaller)) return _riskRefused;
+    final d = disk!;
+    final r = await _whileWriting(() => backend.run('remove-installer', ['--disk', d.path], onEvent));
+    await probe();
+    final again = disks?.where((x) => x.path == d.path).firstOrNull;
+    if (again != null) disk = again;
+    _changed();
+    return r;
+  }
+
   // ── 方式与选项 ──────────────────────────────────────────────────────────
   Mode? mode;
   int? userdataMib; // null = 剩下的全给 /data
@@ -316,13 +350,17 @@ class Session extends ChangeNotifier {
     _changed();
   }
 
+  /// 方案总带上 --remove-installer（盘上有安装器分区时）：选项页据此说明删掉它之后 /data 会怎样，不管开关在哪一边
   List<String> _planArgs() {
     final d = disk!, al = along;
-    return switch (mode) {
-      Mode.reinstall => _reinstallArgs(d, keep: keepData),
-      Mode.wipe => ['--mode', 'wipe', '--disk', d.path, if (userdataMib != null) ...['--userdata-mib', '$userdataMib']],
-      _ => al is AlongOk ? _alongArgs(d, al.region.start, al.region.end) : _alongArgs(d, 0, 0),
-    };
+    return [
+      ...switch (mode) {
+        Mode.reinstall => _reinstallArgs(d, keep: keepData),
+        Mode.wipe => ['--mode', 'wipe', '--disk', d.path, if (userdataMib != null) ...['--userdata-mib', '$userdataMib']],
+        _ => al is AlongOk ? _alongArgs(d, al.region.start, al.region.end) : _alongArgs(d, 0, 0),
+      },
+      if (installerPart != null) '--remove-installer',
+    ];
   }
 
   /// gk3l apply 的参数：方式、盘、区间（双系统）、/data 大小、保不保留数据（重新安装）
@@ -334,6 +372,7 @@ class Session extends ChangeNotifier {
       if (mode == Mode.alongside && al is AlongOk) ...['--region-start', '${al.region.start}', '--region-end', '${al.region.end}'],
       if (mode == Mode.reinstall) ...['--keep-data', keepData ? 'yes' : 'no'],
       if (mode != Mode.reinstall && userdataMib != null) ...['--userdata-mib', '$userdataMib'],
+      if (removeInstaller) '--remove-installer',
     ];
   }
 
@@ -394,6 +433,9 @@ class Session extends ChangeNotifier {
   /// 安装期间后端给的提醒（stdout 上的 NOTE 记录，例如 EFI 变量删不掉）—— 完成页逐条说
   final notes = <Gk3Record>[];
 
+  /// 装完之后删掉了安装器分区（apply 的 REMOVED 记录）；没删 / 没要求删时为 null
+  Gk3Record? removed;
+
   // ── 安装 ────────────────────────────────────────────────────────────────
   /// 接着跟一个还在跑的写盘任务（[runningJob]）。算写盘阶段：侧栏的重启 / 关机照样禁用
   Stream<Gk3Event> follow(String id) async* {
@@ -427,8 +469,10 @@ class Session extends ChangeNotifier {
         if (needBitlockerKey && bitlockerKeyOk) '--bitlocker-confirmed',
       ];
       notes.clear();
+      removed = null;
       await for (final e in backend.call('apply', args)) {
         if (e is Gk3Record && e.type == 'NOTE') notes.add(e);
+        if (e is Gk3Record && e.type == 'REMOVED') removed = e;
         yield e;
       }
     } finally {

@@ -5,6 +5,7 @@
 // ★ 两条写盘的路都先过这一页（RiskKind）：
 //     安装（整盘清空 / 双系统 / 重新安装，gk3l apply）  选项 → 本页 → 确认页（按住 2 秒）→ 开始
 //     删除分区（gk3l delete）                           方式 → 本页 → 删除分区页（每次删除按住 2 秒）
+//     删除安装器分区（gk3l remove-installer）            方式 → 本页 → 删除安装器分区页（按住 2 秒）
 //   接着跟一个还在跑的写盘任务（GUI-11 的 gk3l job follow）不过这一页：盘已经在写了，拦它没有意义。
 //   Session 再守一道（Session.riskAcked）：没在这一页确认过的路，install / deletePartition 一个字节都不写。
 // ★ 门槛（全部满足，"继续"才可点；没满足时按钮旁边写明还差什么）：
@@ -54,6 +55,7 @@ class RiskPage extends StatefulWidget {
   static bool needsWord(Session s, RiskKind kind) => switch (kind) {
         RiskKind.install => s.mode == Mode.wipe,
         RiskKind.edit => s.disk?.parts.any((p) => p.os == 'windows' || p.os == 'winre' || isOnekey(p)) ?? false,
+        RiskKind.removeInstaller => false,
       };
 
   @override
@@ -125,20 +127,29 @@ class _RiskPageState extends State<RiskPage> {
     final s = context.session, l = context.l;
     final onekey = s.disk?.parts.where(isOnekey).firstOrNull;
     final win = (Icons.key_outlined, l.riskWinHead, [l.riskWinBody, if (s.needBitlockerKey) l.riskWinBitlocker].join('\n\n'), true);
+    final rmlive = (Icons.delete_sweep_outlined, l.riskRmLiveHead, l.riskRmLiveBody, true);
     return [
       (Icons.science_outlined, l.riskExpHead, l.riskExpBody, false),
       (Icons.report_outlined, l.riskDiskHead, l.riskDiskBody, true),
       ...switch (widget.kind) {
-        RiskKind.install => switch (s.mode) {
-            Mode.wipe => [
-                // 华为一键恢复分区：和确认页同一句话（GUI-18）
-                (Icons.delete_forever, l.riskWipeHead, [l.riskWipeBody, if (onekey != null) l.confirmOnekeyWarn(onekey.label)].join('\n\n'), true),
-              ],
-            Mode.alongside => [(Icons.call_split, l.riskAlongHead, l.riskAlongBody, true), if (s.dual) win],
-            Mode.reinstall => [(Icons.system_update_alt, l.riskReinstallHead, s.keepData ? l.riskReinstallKeep : l.riskReinstallWipe, true), if (s.dual) win],
-            null => const <(IconData, String, String, bool)>[],
-          },
+        RiskKind.install => [
+            ...switch (s.mode) {
+              Mode.wipe => [
+                  // 华为一键恢复分区：和确认页同一句话（GUI-18）；安装器分区保留到装完
+                  (Icons.delete_forever, l.riskWipeHead, [
+                    l.riskWipeBody,
+                    if (onekey != null) l.confirmOnekeyWarn(onekey.label),
+                    if (s.installerPart case final lv?) l.confirmWipeKeepsLive(lv.label),
+                  ].join('\n\n'), true),
+                ],
+              Mode.alongside => [(Icons.call_split, l.riskAlongHead, l.riskAlongBody, true), if (s.dual) win],
+              Mode.reinstall => [(Icons.system_update_alt, l.riskReinstallHead, s.keepData ? l.riskReinstallKeep : l.riskReinstallWipe, true), if (s.dual) win],
+              null => const <(IconData, String, String, bool)>[],
+            },
+            if (s.removeInstaller) rmlive,
+          ],
         RiskKind.edit => [(Icons.delete_outline, l.riskEditHead, l.riskEditBody, true)],
+        RiskKind.removeInstaller => [rmlive],
       },
       (Icons.backup_outlined, l.riskBackupHead, l.riskBackupBody, true),
       (Icons.power, l.riskPowerHead, l.riskPowerBody, false),

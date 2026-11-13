@@ -5,6 +5,7 @@
 //   中途失败时留下的中间状态讲不清楚。
 // ★ 界面只负责"让人选、让人确认"。能不能删由后端判（gk3l delete，installer/backend/src/linux/edit.c）：
 //   ESP 不动、挂着的不动，后端会自己再验一遍；界面上不给按钮只是先把原因说出来。
+// 同一文件里还有删除安装器分区页（RemoveInstallerPage，gk3l remove-installer）：Android 已装好时从方式页进来。
 import 'package:flutter/material.dart';
 import 'package:gk3_common/backend/protocol.dart';
 import 'package:gk3_common/ui/theme.dart';
@@ -147,6 +148,8 @@ class _DiskEditPageState extends State<DiskEditPage> {
     ];
     // 这两种不给按钮：直接说为什么（后端也会拒绝，这里只是先说出来）
     if (p.isEsp) return [...head, _why(l.editWhyEsp)];
+    // 安装器分区（读进了内存）：删它要先存日志、再并进 /data —— 走方式页的"删除安装器分区"，Android 装好之后才有
+    if (p.ram) return [...head, _why(l.editWhyInstallerPart)];
     if (p.medium) return [...head, _why(l.editWhyMedium)];
     // 删掉之后少了什么：Windows 恢复环境、华为一键恢复
     final consequence = [
@@ -175,5 +178,84 @@ class _DiskEditPageState extends State<DiskEditPage> {
         ),
       ],
     ];
+  }
+}
+
+/// 删除安装器分区（gk3l remove-installer，installer/backend/src/linux/live.c）：方式页 → 风险确认页 → 本页。
+/// 说清楚删掉之后空间去哪（并进 /data，或者成为未分配空间 —— 后端 plan --remove-installer 的预览）、日志存到哪，
+/// 按住 2 秒执行。成功之后安装器仍在内存里运行，"完成"回到方式页（方式页重新评估这块盘）
+class RemoveInstallerPage extends StatefulWidget {
+  const RemoveInstallerPage({super.key});
+  @override
+  State<RemoveInstallerPage> createState() => _RemoveInstallerPageState();
+}
+
+class _RemoveInstallerPageState extends State<RemoveInstallerPage> {
+  bool _busy = false, _done = false;
+  int _pct = 0;
+  String? _msg, _err;
+
+  Future<void> _remove() async {
+    final s = context.session;
+    setState(() {
+      _busy = true;
+      _pct = 0;
+      _err = null;
+    });
+    Gk3Record? rmv;
+    final r = await s.removeInstallerNow((e) {
+      if (e is Gk3Progress && mounted) setState(() => _pct = e.percent);
+    });
+    rmv = r.first('REMOVED');
+    if (!mounted) return;
+    final l = context.l;
+    setState(() {
+      _busy = false;
+      if (r.ok) {
+        _done = true;
+        _msg = rmv != null && rmv.yes('grow') ? l.rmLiveOkMerge(fmtMib(rmv.intOf('userdata_mib'))) : l.rmLiveOk;
+        if (r.ofType('NOTE').any((n) => n['code'] == 'userdata-fs-not-grown')) _msg = '$_msg\n${l.doneNoteFsNotGrown}';
+      } else {
+        _err = l.editFailed(callErrorText(l, r));
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = context.session, l = context.l, cs = context.cs, tt = context.tt;
+    final lv = s.installerPart;
+    final rm = s.reinstall?.rmlive;
+    return StepPage(
+      step: Gk3Step.mode,
+      title: l.modeRmLiveTitle,
+      subtitle: l.rmLiveSub,
+      onBack: _busy || _done ? null : () => Navigator.pop(context),
+      nextLabel: l.editDone,
+      onNext: _busy ? null : () => Navigator.pop(context),
+      child: ListView(children: [
+        if (lv != null && !_done) ...[
+          Text('${lv.label}  ·  ${lv.path}  ·  ${fmtMib(lv.sizeMib)}', style: tt.titleMedium),
+          const SizedBox(height: 16),
+          Text(rm?.merge ?? false ? l.rmLiveMerge(lv.label, fmtMib(lv.sizeMib)) : l.rmLiveFree(lv.label, fmtMib(lv.sizeMib)), style: tt.bodyLarge),
+          if (rm != null && rm.merge) ...[const SizedBox(height: 6), Text(l.optsDataRmLive(fmtMib(rm.userdataMib)), style: tt.bodyLarge)],
+          const SizedBox(height: 6),
+          Text(l.rmLiveLogs, style: tt.bodyLarge),
+          const SizedBox(height: 24),
+          SizedBox(
+            width: 420,
+            child: HoldToConfirm(
+              idle: '${l.modeRmLiveTitle} · ${l.holdIdle}',
+              busy: (x) => l.confirmHoldBusy('$x'),
+              enabled: !_busy,
+              onConfirmed: _remove,
+            ),
+          ),
+        ],
+        if (_busy) ...[const SizedBox(height: 16), LinearProgressIndicator(value: _pct / 100, minHeight: 8)],
+        if (_msg != null) ...[const SizedBox(height: 16), Text(_msg!, style: tt.bodyLarge!.copyWith(color: context.gk.success))],
+        if (_err != null) ...[const SizedBox(height: 16), Text(_err!, style: tt.bodyMedium!.copyWith(color: cs.error))],
+      ]),
+    );
   }
 }

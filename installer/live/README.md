@@ -16,7 +16,9 @@ testdata/         由真实后端在容器内录制的各场景输出fixture
 
 行协议与百分号解码（`protocol.dart`）、后端接口（`backend.dart`）、fixture回放（`fixture_backend.dart`）、MD3主题、固定1280×800逻辑画布（`LogicalCanvas`）、通用控件与打包字体在共用包[`installer/common/`](../common/README.md)（`gk3_common`）里，以`package:gk3_common/...`引用。`installer/`是pub工作区，锁文件在`installer/pubspec.lock`。
 
-调用后端命令时，`live_backend.dart`以参数列表直接启动`gk3l <命令> <参数…>`（不经过shell），严禁将用户输入拼接进命令字符串。写入磁盘的命令（`apply`、`delete`）经`gk3l job run`放进独立的systemd临时单元运行，界面退出后写入照常完成。
+调用后端命令时，`live_backend.dart`以参数列表直接启动`gk3l <命令> <参数…>`（不经过shell），严禁将用户输入拼接进命令字符串。写入磁盘的命令（`apply`、`delete`、`remove-installer`）经`gk3l job run`放进独立的systemd临时单元运行，界面退出后写入照常完成。
+
+安装器从内置盘上的安装器分区运行（`gk3l probe`的介质分区带`ram=yes`，即initramfs已把它读进内存）时：清除整个磁盘保留该分区；选项页提供"保留安装器分区"，默认关闭，此时`apply`带`--remove-installer`，安装完成后删除该分区，与`/data`相邻时并入`/data`；Android已安装时，方式页另有"删除安装器分区"（`gk3l remove-installer`）。删除前日志与分区表备份保存至该盘ESP的`gaokun3/`。后端说明见[`installer/backend/src/linux/live.h`](../backend/src/linux/live.h)与`live.c`文件头。
 
 ## 二、本地开发与测试
 
