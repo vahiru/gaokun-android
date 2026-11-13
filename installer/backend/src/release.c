@@ -66,8 +66,8 @@ int gk3w_manifest_hash(const uint8_t *m, size_t len, const char *name, char out[
         size_t e = i;
         while (e < len && m[e] != '\n')
             e++;
-        /* "<64 hex>  <name>" */
-        if (e - i >= 66 + nl && m[i + 64] == ' ' && m[i + 65] == ' ' && !memcmp(m + i + 66, name, nl) &&
+        /* "<64 hex>  <name>"，或 sha256sum 二进制模式的 "<64 hex> *<name>" */
+        if (e - i >= 66 + nl && m[i + 64] == ' ' && (m[i + 65] == ' ' || m[i + 65] == '*') && !memcmp(m + i + 66, name, nl) &&
             (e - i == 66 + nl || (e - i == 67 + nl && m[e - 1] == '\r'))) {
             for (int k = 0; k < 64; k++)
                 out[k] = (char)(m[i + k] >= 'A' && m[i + k] <= 'F' ? m[i + k] + 32 : m[i + k]);

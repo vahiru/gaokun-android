@@ -178,11 +178,12 @@ L=$(grep "^DISK path=$B " "$W/probe1.out"); PU=$(grep "^PART path=${B}p$NU " "$W
 [ "$(field "$L" kernel)" = ok ] && [ "$(field "$PU" fs)" = ext4 ] && [ "$(field "$PU" fslabel)" = userdata ] \
     && ok "装完 gk3l probe：kernel=ok，userdata 认得出 ext4 / 卷标" || bad "装完的探测：$L / $PU"
 grep -q "^PLAN op=mkpart disk=$B name=super " "$W/b.out" && ok "stdout 有方案（PLAN / PLANSUM）" || bad "stdout 没有方案：$(head -3 "$W/b.out")"
+grep -q "^BACKUP path=$W/run/gpt-before-apply-.* disk=$B sector=512 head=34 tail=33 ram=yes$" "$W/b.out" \
+    && ok "stdout 有 BACKUP 记录（没有安装介质 ⇒ ram=yes）" || bad "BACKUP 记录不对：$(grep ^BACKUP "$W/b.out")"
 ls "$W/run"/gpt-before-apply-* >/dev/null 2>&1 && ok "分区表备份：$(basename "$(ls "$W/run"/gpt-before-apply-* | head -1)")" || bad "没有分区表备份"
 H=$(ls "$W/run"/gpt-before-apply-* | head -1)
 [ "$(head -c $((34 * 512)) "$H" | sha256sum)" = "$(head -c $((34 * 512)) "$W/base.img" | sha256sum)" ] \
     && ok "备份的主表区与装之前的盘逐字节相同" || bad "备份的主表区不对"
-losetup -d "$A"
 
 echo "═══ 2. 拒绝：盘一个字节不变、ERR 带 touched=no ═══"
 # refuse <说明> <期望的 ERR 代码> <盘> -- <gk3l apply 的其余参数…>
@@ -266,7 +267,12 @@ H3=$(sha "${C}p3"); H4=$(sha "${C}p4")
 mkdir -p "$W/elsewhere"; mount -t vfat "${C}p1" "$W/elsewhere"
 refuse "ESP 另有一处挂着" esp-busy "$C" -- --region-start "$RS" --region-end "$RE" --release "$REL" --bitlocker-confirmed
 umount "$W/elsewhere"
+# 安装介质写保护（只读的 loop）：分区表备份退回内存，照样装
+truncate -s 64M "$W/medium.img"; mkfs.vfat "$W/medium.img" >/dev/null; mmd -i "$W/medium.img" ::/gaokun3
+MD=$(losetup -fr --show "$W/medium.img"); mkdir -p /media/gk3; mount -o ro -t vfat "$MD" /media/gk3
 "$G" apply --disk "$C" --region-start "$RS" --region-end "$RE" --release "$REL" --bitlocker-confirmed --default-os windows >"$W/c.out" 2>"$W/c.err"; rc=$?
+umount /media/gk3; losetup -d "$MD"
+grep -q '^BACKUP .* ram=yes$' "$W/c.out" && grep -q 'only in RAM' "$W/c.err" && ok "介质写保护：分区表备份留在内存里，照样装" || bad "写保护的介质：$(grep ^BACKUP "$W/c.out")"
 [ "$rc" = 0 ] && ok "装完" || { bad "装失败 rc=$rc"; tail -8 "$W/c.err"; }
 NM=$(dump_disk "$C" | awk '/name=misc/{print $2}' | cut -d= -f2)
 misc_want() {
@@ -325,7 +331,137 @@ SL=$(printf '%s\n' "$DK" | grep 'name=super'); SZ=$(( ($(field "$SL" end) - $(fi
 NU=$(printf '%s\n' "$DK" | awk '/name=userdata/{print $2}' | cut -d= -f2)
 dumpe2fs -h "${K}p$NU" 2>/dev/null | grep -q '^Block size: *4096' && ok "4Kn：userdata 是 4 KiB 块的 ext4" || bad "4Kn：userdata 的 ext4 不对"
 losetup -d "$K"
-losetup -d "$B"
+
+echo "═══ 6. 重新安装对拍：在第 1 组装好的两块盘上，shell 版与 gk3l 各重新安装一遍 ═══"
+# reinst <keep yes|no> <说明>：userdata 里先放一个文件，装完看它在不在
+reinst() {
+    local keep=$1 what=$2 x m=$W/ud
+    mkdir -p "$m"
+    for x in "$A" "$B"; do mount "${x}p$NU" "$m" && echo marker > "$m/marker" && umount "$m"; done
+    bash -c '. "$0" && gk3_apply "$@"' "$LIB" --disk "$A" --mode reinstall --rescue no --release "$REL" --esp "${A}p1" --keep-data "$keep" >"$W/ra.out" 2>"$W/ra.err"; RA=$?
+    "$G" apply --disk "$B" --mode reinstall --keep-data "$keep" --release "$REL" >"$W/rb.out" 2>"$W/rb.err"; RB=$?
+    if grep -q 'ERROR: \(Address\|Undefined\)Sanitizer\|runtime error' "$W/rb.err"; then bad "sanitizer 报错"; sed -n 1,30p "$W/rb.err"; fi
+    [ "$RA" = 0 ] && [ "$RB" = 0 ] && ok "$what：两边都装完" || { bad "$what：shell rc=$RA gk3l rc=$RB"; tail -4 "$W/ra.err"; tail -10 "$W/rb.err"; return; }
+    [ "$(prog_codes "$W/rb.err")" = "check verify-sha test-zst plan format write-super write-boot bootloader done " ] \
+        || bad "$what：进度代码 $(prog_codes "$W/rb.err")"
+    dump_disk "$A" | sed "s#$A#DISK#g" >"$W/a.dump"; dump_disk "$B" | sed "s#$B#DISK#g" >"$W/b.dump"
+    cmp -s "$W/a.dump" "$W/b.dump" && ok "$what：分区表与 misc / boot / super 的内容相同" || { bad "$what：分区不同"; diff "$W/a.dump" "$W/b.dump" | head; }
+    dump_esp "${A}p1" >"$W/a.esp"; dump_esp "${B}p1" >"$W/b.esp"
+    cmp -s "$W/a.esp" "$W/b.esp" && ok "$what：ESP 相同（$(grep -c . "$W/b.esp") 个文件）" || { bad "$what：ESP 不同"; diff "$W/a.esp" "$W/b.esp" | head; }
+    [ "$(ext4_sum "${A}p$NU")" = "$(ext4_sum "${B}p$NU")" ] && ok "$what：userdata 的 ext4 参数相同" || bad "$what：userdata 的 ext4 参数不同"
+    for x in "$A" "$B"; do
+        mount -o ro "${x}p$NU" "$m"
+        if [ "$keep" = yes ]; then [ -f "$m/marker" ] || bad "$what：$x 的用户数据没留下"
+        else [ ! -e "$m/marker" ] || bad "$what：$x 的 userdata 没格式化"; fi
+        umount "$m"
+    done
+    ok "$what：用户数据$([ "$keep" = yes ] && echo 留下了 || echo 格式化了)（两边一样）"
+    grep -q "^PLAN op=reuse name=super path=${B}p" "$W/rb.out" && grep -q "^PLANSUM mode=reinstall keep_data=$keep " "$W/rb.out" \
+        && ok "$what：stdout 有方案（PLAN op=reuse / PLANSUM）" || bad "$what：方案不对：$(head -2 "$W/rb.out")"
+}
+reinst no "重新安装（格式化数据）"
+reinst yes "重新安装（保留数据）"
+mount "${B}p$NU" "$W/ud"
+refuse "要重写的 userdata 正挂着" reinstall-busy "$B" -- --mode reinstall --release "$REL"
+umount "$W/ud"
+
+echo "═══ 7. 方案与查询：gk3l plan / esp-info / release-info 与 shell 版比 ═══"
+norm_mk() { grep '^PLAN op=mkpart' "$1" | tr ' ' '\n' | grep -E '^(name|start|end|size_mib)=' | paste -sd' ' | sed 's/ name=/\nname=/g'; grep -o 'userdata_mib=[0-9]*' "$1" | head -1; }
+bash -c '. "$0" && gk3_plan "$@"' "$LIB" --disk "$B" --mode wipe --rescue no >"$W/pa.out" 2>/dev/null
+"$G" plan --mode wipe --disk "$B" >"$W/pb.out" 2>/dev/null
+[ "$(norm_mk "$W/pa.out")" = "$(norm_mk "$W/pb.out")" ] && grep -q '^PLAN op=wipe ' "$W/pb.out" && grep -q 'name=esp .*type=ef00' "$W/pb.out" \
+    && ok "整盘清空的方案与 shell 版相同（ESP 在前、ef00）" || { bad "整盘清空的方案不同"; diff <(norm_mk "$W/pa.out") <(norm_mk "$W/pb.out"); }
+norm_ru() { grep '^PLAN op=reuse' "$1" | tr ' ' '\n' | grep -E '^(name|path|num|start|end|size_kib|action)=' | paste -sd' '; grep -o 'userdata_mib=[0-9]*' "$1" | head -1; }
+for kd in no yes; do
+    bash -c '. "$0" && gk3_plan "$@"' "$LIB" --disk "$A" --mode reinstall --rescue no --esp "${A}p1" --keep-data "$kd" 2>/dev/null | sed "s#$A#DISK#g" >"$W/pa.out"
+    "$G" plan --mode reinstall --disk "$B" --keep-data "$kd" 2>/dev/null | sed "s#$B#DISK#g" >"$W/pb.out"
+    [ "$(norm_ru "$W/pa.out")" = "$(norm_ru "$W/pb.out")" ] && ok "重新安装的方案（keep=$kd）与 shell 版相同" || { bad "重新安装的方案（keep=$kd）不同"; diff <(norm_ru "$W/pa.out") <(norm_ru "$W/pb.out"); }
+done
+"$G" plan --mode reinstall --disk "${B}p1" >/dev/null 2>&1; [ $? != 0 ] && ok "plan --mode reinstall 给的是分区 ⇒ 失败" || bad "plan 没拒绝分区"
+# free_mib 只差取整：shell 版用 df -m（向上取整），gk3l 向下取整
+espf() { tr ' ' '\n' <<<"$1" | grep -E '^(size_mib|windows|gaokun3|mountable|small|bootaa64|bitlocker|hibernated|loader_default)=' | paste -sd' '; }
+mkdir -p "$W/ef1"; efw "$W/ef1" LoaderEntryDefault auto-windows
+EA=$(GK3_EFIVARS=$W/ef1 bash -c '. "$0" && gk3_esp_info "$1"' "$LIB" "${A}p1" 2>/dev/null)
+EB=$(GK3_EFIVARS=$W/ef1 "$G" esp-info --disk "$B" 2>/dev/null)
+FA=$(field "$EA" free_mib); FB=$(field "$EB" free_mib)
+[ -n "$EB" ] && [ "$(espf "$EA")" = "$(espf "$EB")" ] && [ "$(field "$EB" part)" = "${B}p1" ] && [ $((FA - FB)) -ge 0 ] && [ $((FA - FB)) -le 1 ] \
+    && ok "esp-info 与 gk3_esp_info 相同：$(espf "$EB")" || { bad "esp-info 不同"; echo "      shell: $(espf "$EA")"; echo "      gk3l:  $(espf "$EB")"; }
+RLA=$(bash -c '. "$0" && gk3_release_info "$1"' "$LIB" "$REL" 2>/dev/null); RLB=$("$G" release-info --dir "$REL" 2>/dev/null)
+relf() { tr ' ' '\n' <<<"$1" | grep -E '^(boot|super|sha256|version|super_mib)=' | paste -sd' '; }
+[ "$(relf "$RLA")" = "$(relf "$RLB")" ] && ok "release-info 与 gk3_release_info 相同：$(relf "$RLB")" || { bad "release-info 不同"; echo "      $RLA"; echo "      $RLB"; }
+printf '%s  %s\n' "$(printf 'a%.0s' $(seq 64))" "crDroid-12.6-20261101-gaokun3.zip" >> "$REL/install-artifacts.sha256"
+RLB=$("$G" release-info --dir "$REL" 2>/dev/null)
+[ "$(field "$RLB" version)" = crDroid-12.6-20261101-gaokun3 ] && ok "版本取自校验清单里的 .zip" || bad "版本：$RLB"
+sed -i '$d' "$REL/install-artifacts.sha256"
+losetup -d "$A"; losetup -d "$B"
+
+echo "═══ 8. 整盘清空对拍：同一张 Windows 盘的两份拷贝 ═══"
+cp --sparse=always "$W/base.img" "$W/a.img"; cp --sparse=always "$W/base.img" "$W/b.img"
+A=$(attach "$W/a.img"); B=$(attach "$W/b.img")
+mkdir -p "$W/efa" "$W/efb"; for x in efa efb; do efw "$W/$x" LoaderEntryDefault auto-windows; efw "$W/$x" LoaderEntryOneShot auto-windows; done
+GK3_EFIVARS=$W/efa bash -c '. "$0" && gk3_apply "$@"' "$LIB" --disk "$A" --mode wipe --rescue no --release "$REL" >"$W/a.out" 2>"$W/a.err"; RA=$?
+GK3_EFIVARS=$W/efb "$G" apply --disk "$B" --mode wipe --release "$REL" >"$W/b.out" 2>"$W/b.err"; RB=$?
+if grep -q 'ERROR: \(Address\|Undefined\)Sanitizer\|runtime error' "$W/b.err"; then bad "sanitizer 报错"; sed -n 1,30p "$W/b.err"; fi
+[ "$RA" = 0 ] && [ "$RB" = 0 ] && ok "两边都装完" || { bad "整盘清空：shell rc=$RA gk3l rc=$RB"; tail -4 "$W/a.err"; tail -10 "$W/b.err"; }
+partprobe "$A" 2>/dev/null; udevadm settle 2>/dev/null; sleep 1
+dump_disk "$A" | sed "s#$A#DISK#g" >"$W/a.dump"; dump_disk "$B" | sed "s#$B#DISK#g" >"$W/b.dump"
+cmp -s "$W/a.dump" "$W/b.dump" && ok "分区表（$(grep -c . "$W/b.dump") 个分区，ESP 在前）与 misc / boot / super 的内容相同" || { bad "分区不同"; diff "$W/a.dump" "$W/b.dump" | head; }
+dump_esp "${A}p1" >"$W/a.esp"; dump_esp "${B}p1" >"$W/b.esp"
+cmp -s "$W/a.esp" "$W/b.esp" && ok "ESP 相同（$(grep -c . "$W/b.esp") 个文件，Windows 的都不在了）" || { bad "ESP 不同"; diff "$W/a.esp" "$W/b.esp" | head; }
+[ "$(blkid -p -o value -s LABEL "${A}p1")" = "$(blkid -p -o value -s LABEL "${B}p1")" ] && [ "$(blkid -p -o value -s TYPE "${B}p1")" = vfat ] \
+    && ok "ESP：FAT32，卷标 $(blkid -p -o value -s LABEL "${B}p1")" || bad "ESP 的文件系统不同"
+NU=$(dump_disk "$B" | awk '/name=userdata/{print $2}' | cut -d= -f2)
+[ "$(ext4_sum "${A}p$NU")" = "$(ext4_sum "${B}p$NU")" ] && ok "userdata 的 ext4 参数相同" || bad "userdata 的 ext4 参数不同"
+[ ! -e "$W/efb/LoaderEntryDefault-$LOADER_GUID" ] && [ ! -e "$W/efb/LoaderEntryOneShot-$LOADER_GUID" ] && ok "LoaderEntryDefault 与 LoaderEntryOneShot 都删了" || bad "EFI 变量没删干净"
+V=$(sgdisk -v "$B" 2>&1); printf '%s\n' "$V" | grep -q 'No problems found' && ok "sgdisk -v 没问题" || { bad "sgdisk -v"; printf '%s\n' "$V" | head -5; }
+"$G" probe >"$W/probe8.out" 2>/dev/null
+[ "$(field "$(grep "^DISK path=$B " "$W/probe8.out")" kernel)" = ok ] && ! grep -q "^PART path=${B}p[0-9]* .*name=Basic" "$W/probe8.out" \
+    && ok "内核只剩新分区（kernel=ok，旧的 Windows 分区不见了）" || bad "内核的分区视图不对：$(grep "^DISK path=$B " "$W/probe8.out")"
+[ "$(head -c 512 "$B" | tail -c 66 | head -c 5 | od -An -tx1 | tr -d ' \n')" = 00000200ee ] && ok "保护性 MBR" || bad "LBA 0 不是保护性 MBR"
+ls "$W/run"/gpt-before-wipe-* >/dev/null 2>&1 && ok "整盘清空之前备份了盘头盘尾" || bad "整盘清空没有备份"
+losetup -d "$A"
+# 拒绝：安装介质在这块盘上；有分区挂着
+cp --sparse=always "$W/base.img" "$W/r.img"; R=$(attach "$W/r.img")
+mkdir -p /media/gk3; mount -o ro -t vfat "${R}p1" /media/gk3
+refuse "安装介质就在这块盘上" wipe-medium "$R" -- --mode wipe --release "$REL"
+umount /media/gk3
+mount -t vfat "${R}p1" "$W/seed"
+refuse "有分区挂着" wipe-mounted "$R" -- --mode wipe --release "$REL"
+umount "$W/seed"
+refuse "整盘清空却要 Windows 为默认" default-os-no-windows "$R" -- --mode wipe --release "$REL" --default-os windows
+losetup -d "$R"
+# MBR 盘也能整盘清空
+D=$(truncate -s 32G "$W/mbr2.img" && losetup -fP --show "$W/mbr2.img"); printf 'label: dos\n,1G,7\n,1G,83\n' | sfdisk -q "$D"; partprobe "$D"; sleep 1
+"$G" apply --disk "$D" --mode wipe --release "$REL" >/dev/null 2>"$W/m.err"; rc=$?
+[ "$rc" = 0 ] && [ "$(blkid -p -o value -s PTTYPE "$D")" = gpt ] && sgdisk -v "$D" 2>&1 | grep -q 'No problems found' \
+    && ok "MBR 盘整盘清空成 GPT" || { bad "MBR 盘整盘清空失败 rc=$rc"; tail -5 "$W/m.err"; }
+losetup -d "$D"
+
+echo "═══ 9. 删除分区：与 shell 版的 gk3_part_delete 比 ═══"
+cp --sparse=always "$W/base.img" "$W/a.img"; cp --sparse=always "$W/base.img" "$W/b.img"
+A=$(attach "$W/a.img"); B=$(attach "$W/b.img")
+bash -c '. "$0" && gk3_part_delete "$1"' "$LIB" "${A}p4" >"$W/a.out" 2>"$W/a.err"; RA=$?
+"$G" delete --part "${B}p4" >"$W/b.out" 2>"$W/b.err"; RB=$?
+[ "$RA" = 0 ] && [ "$RB" = 0 ] && grep -q "^RESULT op=delete part=${B}p4$" "$W/b.out" && ok "两边都删了 p4（RESULT op=delete）" || { bad "删除：shell rc=$RA gk3l rc=$RB"; tail -5 "$W/b.err"; }
+partprobe "$A" 2>/dev/null; sleep 1
+[ "$(sgdisk -p "$A" | sed -n '/^Number/,$p')" = "$(sgdisk -p "$B" | sed -n '/^Number/,$p')" ] && ok "分区表相同（$(sgdisk -p "$B" | awk '/^ *[0-9]+ /' | wc -l) 个分区）" || { bad "删除后的分区表不同"; diff <(sgdisk -p "$A") <(sgdisk -p "$B"); }
+sgdisk -v "$B" 2>&1 | grep -q 'No problems found' && [ ! -e "${B}p4" ] && ok "sgdisk -v 没问题，内核里 p4 也没了" || bad "删除之后：$(sgdisk -v "$B" 2>&1 | head -2)，p4 节点 $([ -e "${B}p4" ] && echo 还在)"
+[ "$(prog_codes "$W/b.err")" = "gpt-backup part-delete done " ] && ok "进度代码：$(prog_codes "$W/b.err")" || bad "进度代码：$(prog_codes "$W/b.err")"
+# refusedel <说明> <ERR 代码> <分区>
+refusedel() {
+    local before out rc
+    before=$(fp "$B"); out=$("$G" delete --part "$3" 2>&1 >/dev/null); rc=$?
+    [ "$rc" != 0 ] && printf '%s\n' "$out" | grep -q "^ERR code=$2 " && [ "$(fp "$B")" = "$before" ] && ok "$1 ⇒ $2" || { bad "$1：rc=$rc"; printf '%s\n' "$out" | head -3; }
+}
+refusedel "删 ESP" edit-esp "${B}p1"
+# 挂着的分区（内核文件系统挂载，设备号才对得上；容器里 NTFS 只能用 FUSE，所以把 C 盘换成 FAT 来挂）
+mkfs.vfat "${B}p3" >/dev/null 2>&1; mount -t vfat "${B}p3" "$W/seed"
+refusedel "删挂着的分区" edit-mounted "${B}p3"
+umount "$W/seed"
+refusedel "给的是整块盘" part-unknown "$B"
+refusedel "不是块设备" not-block "$W/b.img"
+losetup -d "$A"; losetup -d "$B"
+
 
 echo
 echo "合计：通过 $PASS，失败 $FAIL"

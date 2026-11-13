@@ -50,6 +50,9 @@ gk3w_gptw_err gk3w_gpt_init(uint32_t bs, uint64_t total_blocks, const uint8_t di
 gk3w_gptw_err gk3w_gpt_add(uint8_t *hdr, uint32_t bs, uint8_t *entries, size_t entries_len, const gk3w_gpt_new *np, size_t n,
                            uint32_t *idx);
 
+/* 从主表删掉 idx 号（1 起）分区：表项清零，重算表项 CRC 与表头 CRC。没有这一项返回 GK3W_GPTW_RANGE，出错时什么都不改 */
+gk3w_gptw_err gk3w_gpt_remove(uint8_t *hdr, uint32_t bs, uint8_t *entries, size_t entries_len, uint32_t idx);
+
 /* 由主表头生成备份表头（一整块 bak_hdr，写到主表头的 alt_lba），*entries_lba 是备份表项的位置
  * （紧贴在备份表头之前，必须在 usable 区间之后）。备份表项与主表项逐字节相同。 */
 gk3w_gptw_err gk3w_gpt_make_backup(const uint8_t *hdr, uint32_t bs, uint8_t *bak_hdr, uint64_t *entries_lba);

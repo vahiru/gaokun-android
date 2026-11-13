@@ -260,7 +260,7 @@ static void test_plan_fixture(void)
         {"boot_a", 789522432, 789653503, 64},       {"boot_b", 789653504, 789784575, 64},
         {"super", 789784576, 814950399, 12288},     {"userdata", 814950400, 957220863, 69468},
     };
-    gk3w_plan_req r = {512, {789448704, 957220863}, 0, 0};
+    gk3w_plan_req r = {512, {789448704, 957220863}, 0, 0, 0};
     gk3w_plan p;
     CHECK(gk3w_plan_alongside(&r, &p) == GK3W_PLAN_OK);
     CHECK(p.n == 6);
@@ -281,7 +281,7 @@ static void test_plan_fixture(void)
 static void test_plan_edges(void)
 {
     gk3w_plan p;
-    gk3w_plan_req r = {512, {1000, 1000 + (20644ull << 11)}, 0, 0};
+    gk3w_plan_req r = {512, {1000, 1000 + (20644ull << 11)}, 0, 0, 0};
     /* 起点 1000 向上对齐到 2048，丢掉的不到 1 MiB 让可用只剩 20643 MiB，差 1 MiB */
     CHECK(gk3w_plan_alongside(&r, &p) == GK3W_PLAN_ENOSPACE && p.avail_mib == 20643);
     r.region.last += 2048;
@@ -305,7 +305,7 @@ static void test_plan_edges(void)
     r.userdata_mib = 0;
     /* 4Kn：1 MiB = 256 扇区 */
     {
-        gk3w_plan_req q = {4096, {6, 6 + (20645ull << 8)}, 0, 0};
+        gk3w_plan_req q = {4096, {6, 6 + (20645ull << 8)}, 0, 0, 0};
         CHECK(gk3w_plan_alongside(&q, &p) == GK3W_PLAN_OK);
         CHECK(p.parts[0].first == 256 && p.parts[0].last == 256 + 4 * 256 - 1);
         CHECK(p.parts[4].mib == 12288 && p.parts[4].last - p.parts[4].first + 1 == 12288ull * 256);
@@ -345,7 +345,7 @@ static void test_esp(void)
     CHECK(!strcmp(gk3w_loader_conf, "timeout 5\nconsole-mode keep\neditor no\ndefault *-android-a.conf\n"));
 
     /* 空间检查：出厂 300 MiB 的 ESP，Windows 占了约 100 MiB */
-    gk3w_esp_space sp = {300, 199 * 1024, 2 * 1024, 46 * 1024, 1};
+    gk3w_esp_space sp = {300, 199 * 1024, 2 * 1024, 46 * 1024, 1, 0};
     CHECK(gk3w_esp_space_check(&sp) == GK3W_ESP_OK);
     sp.esp_size_mib = 100;
     CHECK(gk3w_esp_space_check(&sp) == GK3W_ESP_TOO_SMALL);
@@ -353,20 +353,79 @@ static void test_esp(void)
     sp.need_kib = 200 * 1024;
     CHECK(gk3w_esp_space_check(&sp) == GK3W_ESP_FULL);
     /* 装完剩下的 + 一个槽 ≤ 56 MiB：OTA 放不下 */
-    sp = (gk3w_esp_space){300, 100 * 1024, 90 * 1024, 46 * 1024, 0};
+    sp = (gk3w_esp_space){300, 100 * 1024, 90 * 1024, 46 * 1024, 0, 0};
     CHECK(gk3w_esp_space_check(&sp) == GK3W_ESP_OTA_ROOM);
     /* 有 Windows：扣掉一个槽和一版入口后不到 32 MiB */
-    sp = (gk3w_esp_space){300, 160 * 1024, 80 * 1024, 46 * 1024, 1};
+    sp = (gk3w_esp_space){300, 160 * 1024, 80 * 1024, 46 * 1024, 1, 0};
     CHECK(gk3w_esp_space_check(&sp) == GK3W_ESP_WIN_RESERVE);
     sp.windows = 0;
     CHECK(gk3w_esp_space_check(&sp) == GK3W_ESP_OK);
     /* 空闲不到 150 MiB */
-    sp = (gk3w_esp_space){300, 149 * 1024, 1024, 10 * 1024, 0};
+    sp = (gk3w_esp_space){300, 149 * 1024, 1024, 10 * 1024, 0, 0};
     CHECK(gk3w_esp_space_check(&sp) == GK3W_ESP_FULL_MIN && !strcmp(gk3w_esp_check_code(GK3W_ESP_FULL_MIN), "esp-full"));
+}
+
+static void test_plan_whole_reinstall(void)
+{
+    /* 整盘清空：64 GiB 的 512 盘，新表的 usable 区 [34, total-34]，ESP 从 2048 起 300 MiB，userdata 吃掉剩下的 */
+    uint64_t total = 64ull << 21;
+    gk3w_plan_req r = {512, {34, total - 34}, 0, 0, 1};
+    gk3w_plan p;
+    gk3w_reinstall ri;
+    gk3w_part_ref parts[8];
+    CHECK(gk3w_plan_alongside(&r, &p) == GK3W_PLAN_OK);
+    CHECK(p.n == 7 && !strcmp(p.parts[0].name, "esp") && p.parts[0].first == 2048 && p.parts[0].mib == 300);
+    CHECK(!strcmp(p.parts[1].name, "misc") && p.parts[1].first == 2048 + 300 * 2048);
+    CHECK(!strcmp(p.parts[6].name, "userdata") && p.parts[6].last <= total - 34);
+    /* 与 installer-lib.sh 相同：盘按整 MiB 算，首尾各让出 1 MiB */
+    CHECK(p.avail_mib == (64u << 10) - 2 && p.fixed_mib == 300 + 4 + 32 + 128 + 12288);
+    CHECK(p.userdata_mib == p.avail_mib - p.fixed_mib);
+
+    /* 重新安装：按名字认出一套，misc 只有 1007 KiB 也行 */
+    memset(parts, 0, sizeof parts);
+    {
+        static const char *const nm[] = {"esp", "misc", "boot_a", "boot_b", "metadata", "super", "userdata", "x"};
+        static const uint64_t sz[] = {300 * 2048, 2014, 64 * 2048, 64 * 2048, 32 * 2048, 12288 * 2048, 9000 * 2048, 2048};
+        uint64_t cur = 34;
+        for (int i = 0; i < 8; i++) {
+            snprintf(parts[i].name, sizeof parts[i].name, "%s", nm[i]);
+            parts[i].idx = (uint32_t)i + 1;
+            parts[i].first = cur;
+            parts[i].last = cur + sz[i] - 1;
+            cur += sz[i];
+        }
+    }
+    CHECK(gk3w_plan_reinstall(512, parts, 8, 0, &ri) == GK3W_PLAN_OK);
+    CHECK(ri.p[0].idx == 2 && ri.kib[0] == 1007 && ri.act[0] == GK3W_REUSE_WRITE);
+    CHECK(ri.act[1] == GK3W_REUSE_FORMAT && ri.act[5] == GK3W_REUSE_FORMAT && ri.userdata_mib == 9000);
+    CHECK(ri.fixed_mib == 0 + 32 + 64 + 64 + 12288);
+    CHECK(gk3w_plan_reinstall(512, parts, 8, 1, &ri) == GK3W_PLAN_OK && ri.act[1] == GK3W_REUSE_KEEP && ri.act[5] == GK3W_REUSE_KEEP);
+    /* 太小、缺、重名 */
+    parts[5].last = parts[5].first + 12287 * 2048 - 1;
+    CHECK(gk3w_plan_reinstall(512, parts, 8, 0, &ri) == GK3W_PLAN_SMALL && !strcmp(ri.bad, "super") && ri.need_kib == 12288 * 1024);
+    parts[5].last = parts[5].first + 12288 * 2048 - 1;
+    snprintf(parts[7].name, sizeof parts[7].name, "boot_a");
+    CHECK(gk3w_plan_reinstall(512, parts, 8, 0, &ri) == GK3W_PLAN_DUP && !strcmp(ri.bad, "boot_a"));
+    snprintf(parts[7].name, sizeof parts[7].name, "x");
+    snprintf(parts[4].name, sizeof parts[4].name, "meta");
+    snprintf(parts[6].name, sizeof parts[6].name, "data");
+    CHECK(gk3w_plan_reinstall(512, parts, 8, 0, &ri) == GK3W_PLAN_MISSING && !strcmp(ri.bad, "metadata,userdata"));
+
+    /* 重新安装的 ESP：100 MiB 的也不拦，空闲下限 16 MiB */
+    {
+        gk3w_esp_space sp = {100, 17 * 1024, 1024, 60 * 1024, 0, 1};
+        CHECK(gk3w_esp_space_check(&sp) == GK3W_ESP_OK);
+        sp.free_kib = 15 * 1024;
+        CHECK(gk3w_esp_space_check(&sp) == GK3W_ESP_FULL_MIN);
+        sp.reinstall = 0;
+        sp.free_kib = 149 * 1024;
+        CHECK(gk3w_esp_space_check(&sp) == GK3W_ESP_TOO_SMALL);
+    }
 }
 
 int main(void)
 {
+    test_plan_whole_reinstall();
     test_sparse_ok();
     test_sparse_bad();
     test_plan_fixture();

@@ -62,6 +62,27 @@ void gk3l_guid_upper(const uint8_t g[16], char out[37]);
 void gk3l_gpt_name_utf8(const gk3_gpt *g, uint32_t idx0, char *out, size_t cap);
 const char *gk3l_gpt_why(gk3_err e);
 
+/* ── 写盘的命令共用 ── */
+/* 对整块盘持 BSD 排他锁（udev 见到它就不去探测，见 systemd 的块设备锁约定），最多等 5 秒；拿不到返回 -1 */
+int gk3l_disk_lock(gk3l_disk *d);
+/* BLKPG：告诉内核加一个 / 去掉一个分区（不重读整张表，别的分区挂着也不受影响）。返回 0 或 errno */
+int gk3l_kernel_add(const gk3l_disk *d, uint32_t idx, uint64_t first, uint64_t last);
+int gk3l_kernel_del(const gk3l_disk *d, uint64_t pno);
+/* 等内核建好 idx 号分区的节点（sysfs 里有它、/dev 下同名节点是块设备且设备号一致），最多 10 秒；out 是节点路径 */
+int gk3l_wait_node(const gk3l_disk *d, uint32_t idx, char *out, size_t cap);
+/* 丢掉分区设备的页缓存（BLKFLSBUF） */
+void gk3l_flush_node(const char *dev);
+/* 盘头 head、盘尾 tail 个扇区原样备份到 <dir>/gpt-before-<tag>-…bin，并在 stdout 报一行
+ * BACKUP path= disk= sector= head= tail= ram=yes|no。dir_arg 为空时写到安装介质的 gaokun3/，写不进去就留在 GK3_RUNDIR
+ * （内存里，ram=yes）；dir_arg 给了而写不进去算失败。失败已报 ERR（touched=no），返回 -1 */
+int gk3l_gpt_backup(const gk3l_disk *d, const char *dir_arg, const char *tag, uint64_t head, uint64_t tail);
+/* 把主表（hdr = LBA 1 的整块，ent = 整个表项区）写到盘上，并按它生成、写入备份表；每一段写后读回比对。
+ * chk ≥ 表项区大小（按 4096 对齐）。0 成功；-1 写失败（errno）；-2 读回不一致 */
+int gk3l_gpt_write(const gk3l_disk *d, const uint8_t *hdr, const uint8_t *ent, void *chk);
+/* 这个分区（或整块盘：k->name 与 disk 相同）在不在用：挂着、当交换分区、或者上面叠着别的设备（dm / md）。
+ * 是的话 what 写明 "/dev/<名字>@<挂载点|swap|上层设备>" */
+int gk3l_part_in_use(const char *disk, const gk3l_kpart *k, char *what, size_t cap);
+
 /* blkid -p：文件系统类型与卷标（不走 blkid 的缓存）。认不出时两个都是空串 */
 void gk3l_blkid(const char *dev, char *fs, size_t fscap, char *label, size_t lcap);
 

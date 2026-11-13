@@ -11,6 +11,7 @@
 #include "../src/mftplan.h"
 #include "../src/layout.h"
 #include "../src/proto.h"
+#include "../src/release.h"
 
 static int g_fail, g_run;
 
@@ -279,6 +280,9 @@ static void test_fallback_decide(void)
         static uint8_t G2[32];
         memset(G2, 6, sizeof G2);
         CHECK(BK(G2, W, G) == GK3W_BK_CONFLICT);    /* 两份不同的别的引导程序 */
+        /* 回落路径上已经是要装的这一份、只是没有 systemd-boot 的标记：重新安装不能拿它换掉原件的备份 */
+        CHECK(gk3w_install_backup_decide(G2, sizeof G2, W, sizeof W, W, sizeof W, G2, sizeof G2) == GK3W_BK_NONE);
+        CHECK(gk3w_install_backup_decide(G2, sizeof G2, W, sizeof W, G, sizeof G, G2, sizeof G2) == GK3W_BK_NONE);
     }
 #undef BK
 }
@@ -581,6 +585,21 @@ static void test_gptw(void)
     np[2].first = 30000, np[2].last = 40000;
     CHECK(gk3w_gpt_add(hdr, BS, ent, sizeof ent, &np[2], 1, idx) == GK3W_GPTW_OK && idx[0] == 1);
 
+    /* 删分区：表项清零、CRC 重算；没有这一项 / 序号越界不改 */
+    {
+        uint8_t h2[BS], e2[sizeof ent];
+        memcpy(h2, hdr, BS);
+        memcpy(e2, ent, sizeof ent);
+        CHECK(gk3w_gpt_remove(h2, BS, e2, sizeof e2, 2) == GK3W_GPTW_OK);
+        CHECK(gk3_gpt_parse_mem(h2, BS, e2, sizeof e2, &g) == GK3_OK && gk3_gpt_count(&g) == 1);
+        CHECK(gk3_gpt_find(&g, "super", &p) == GK3_ENOENT && gk3_gpt_find(&g, "userdata", &p) == GK3_OK);
+        memcpy(save_hdr, h2, BS);
+        CHECK(gk3w_gpt_remove(h2, BS, e2, sizeof e2, 2) == GK3W_GPTW_RANGE);
+        CHECK(gk3w_gpt_remove(h2, BS, e2, sizeof e2, 0) == GK3W_GPTW_RANGE);
+        CHECK(gk3w_gpt_remove(h2, BS, e2, sizeof e2, 129) == GK3W_GPTW_RANGE);
+        CHECK(!memcmp(save_hdr, h2, BS));
+    }
+
     /* 主表坏了不写 */
     hdr[20] ^= 1;   /* 表头的保留字段：CRC 对不上了 */
     CHECK(gk3w_gpt_add(hdr, BS, ent, sizeof ent, &np[2], 1, idx) == GK3W_GPTW_EINVAL);
@@ -615,8 +634,23 @@ static void test_gptw(void)
     CHECK(gk3w_gpt_init(BS, 60, dg, pmbr, hdr, ent) == GK3W_GPTW_EINVAL);
 }
 
+static void test_manifest(void)
+{
+    static const char m[] =
+        "1111111111111111111111111111111111111111111111111111111111111111  crDroid-12.6-gaokun3.zip\n"
+        "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  boot.img\r\n"
+        "2222222222222222222222222222222222222222222222222222222222222222 *super.img.zst\n"
+        "3333333333333333333333333333333333333333333333333333333333333333  super.img.zst.part\n";
+    char out[65];
+    CHECK(gk3w_manifest_hash((const uint8_t *)m, sizeof m - 1, "boot.img", out) == 0 && out[0] == 'a' && out[63] == 'a');
+    CHECK(gk3w_manifest_hash((const uint8_t *)m, sizeof m - 1, "super.img.zst", out) == 0 && out[0] == '2');
+    CHECK(gk3w_manifest_hash((const uint8_t *)m, sizeof m - 1, "super.img", out) == -1);
+    CHECK(gk3w_manifest_hash((const uint8_t *)m, sizeof m - 1, "recovery.img", out) == -1);
+}
+
 int main(void)
 {
+    test_manifest();
     test_gptw();
     test_bl_state();
     test_mft_free_runs();

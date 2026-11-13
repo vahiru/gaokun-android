@@ -5,17 +5,24 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <linux/blkpg.h>
 #include <linux/fs.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/file.h>
 #include <sys/ioctl.h>
+#include <sys/mount.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <sys/sysmacros.h>
+#include <time.h>
 #include <unistd.h>
 
+#include "../gptw.h"
 #include "../layout.h"
 #include "../release.h"
+#include "files.h"
 #include "lx.h"
 
 /* ── 读写 ── */
@@ -356,4 +363,237 @@ void gk3l_blkid(const char *dev, char *fs, size_t fscap, char *label, size_t lca
             unescape_hex(label);
         }
     }
+}
+
+/* ── 内核的分区、锁、备份（写盘的命令共用） ── */
+
+int gk3l_disk_lock(gk3l_disk *d)
+{
+    /* 排他锁：udev 见到它就不去探测这块盘（systemd 的块设备锁约定）；另一个安装器进程也拿不到。等最多 5 秒 */
+    for (int i = 0; i < 50; i++) {
+        if (!flock(d->fd, LOCK_EX | LOCK_NB))
+            return 0;
+        usleep(100000);
+    }
+    return -1;
+}
+
+int gk3l_kernel_add(const gk3l_disk *d, uint32_t idx, uint64_t first, uint64_t last)
+{
+    struct blkpg_partition p;
+    struct blkpg_ioctl_arg a;
+    memset(&p, 0, sizeof p);
+    p.start = (long long)(first * d->bs);
+    p.length = (long long)((last - first + 1) * d->bs);
+    p.pno = (int)idx;
+    memset(&a, 0, sizeof a);
+    a.op = BLKPG_ADD_PARTITION;
+    a.datalen = sizeof p;
+    a.data = &p;
+    return ioctl(d->fd, BLKPG, &a) ? errno : 0;
+}
+
+/* 等内核建好 idx 号分区的节点：sysfs 里有它、/dev 下同名节点是块设备且设备号一致。最多等 10 秒 */
+int gk3l_wait_node(const gk3l_disk *d, uint32_t idx, char *out, size_t cap)
+{
+    for (int i = 0; i < 100; i++) {
+        gk3l_kpart kp[256];
+        size_t nk = gk3l_kernel_parts(d->name, kp, 256);
+        const gk3l_kpart *k = gk3l_kernel_find(kp, nk, idx);
+        struct stat st;
+        if (k) {
+            unsigned ma, mi;
+            snprintf(out, cap, "/dev/%s", k->name);
+            if (sscanf(k->devno, "%u:%u", &ma, &mi) == 2 && !stat(out, &st) && S_ISBLK(st.st_mode) &&
+                major(st.st_rdev) == ma && minor(st.st_rdev) == mi)
+                return 0;
+        }
+        usleep(100000);
+    }
+    return -1;
+}
+
+/* 丢掉分区设备的页缓存：新分区是经整块盘写的，谁之前经分区节点读过，缓存里就是旧内容 */
+void gk3l_flush_node(const char *dev)
+{
+    int fd = open(dev, O_RDONLY | O_CLOEXEC);
+    if (fd >= 0) {
+        (void)ioctl(fd, BLKFLSBUF, 0);
+        close(fd);
+    }
+}
+
+/* ── 分区表备份 ── */
+
+/* 盘头 head 个扇区与盘尾 tail 个扇区原样存进 <dir>/gpt-before-<tag>-<盘>-<时间>-head<N>-tail<M>.bin（与 Windows 版同一格式）。
+ * GPT 盘上 head / tail 就是主表区（LBA 0 到 usable 起点）与备份表区（usable 终点之后到盘尾）。还原：两段各自 dd 回原位 */
+/* 写一份备份文件并读回核对；返回 0 或 errno */
+static int backup_to(const char *dir, const char *name, const uint8_t *data, size_t len, char *path, size_t cap)
+{
+    int err = gk3l_mkdirs(dir);
+    snprintf(path, cap, "%s/%s", dir, name);
+    if (!err)
+        err = gk3l_write_file(path, data, len);
+    if (!err && !gk3l_file_same(path, data, len))
+        err = EIO;
+    return err;
+}
+
+int gk3l_gpt_backup(const gk3l_disk *d, const char *dir_arg, const char *tag, uint64_t head, uint64_t tail)
+{
+    const char *run = getenv("GK3_RUNDIR");
+    char name[256], path[4400], ts[32];
+    uint8_t *gb;
+    size_t len = (size_t)((head + tail) * d->bs);
+    time_t now = time(NULL);
+    struct tm tmv;
+    int err, in_ram = 0;
+    if ((head + tail) * d->bs > (4u << 20))
+        return gk3l_err(GK3W_TOUCHED_NO, "gpt-backup", "the partition table area is unusually large; refusing to continue (disk not touched)", 0), -1;
+    gb = gk3w_aligned_alloc(len);
+    if (!gb)
+        return gk3l_err(GK3W_TOUCHED_NO, "nomem", "out of memory", ENOMEM), -1;
+    if (gk3l_pread(d, gb, (size_t)(head * d->bs), 0) ||
+        gk3l_pread(d, gb + head * d->bs, (size_t)(tail * d->bs), (d->blocks - tail) * d->bs)) {
+        err = errno;
+        gk3w_aligned_free(gb);
+        return gk3l_err(GK3W_TOUCHED_NO, "gpt-backup", "reading the partition table area failed (disk not touched)", err), -1;
+    }
+    localtime_r(&now, &tmv);
+    strftime(ts, sizeof ts, "%Y%m%d-%H%M%S", &tmv);
+    snprintf(name, sizeof name, "gpt-before-%s-%s-%s-head%llu-tail%llu.bin", tag, d->name, ts, (unsigned long long)head,
+             (unsigned long long)tail);
+    if (dir_arg && *dir_arg) {
+        /* 调用方指定的地方写不进去就不装 */
+        err = backup_to(dir_arg, name, gb, len, path, sizeof path);
+    } else {
+        err = ENOENT;
+        if (gk3l_is_dir("/media/gk3/gaokun3")) {
+            /* 安装介质平时只读挂着，备份要留在拔得走的地方：重新挂成可写，挂载选项（nosuid、noexec …）照旧 */
+            struct statvfs sv;
+            unsigned long fl = MS_REMOUNT;
+            if (!statvfs("/media/gk3", &sv)) {
+                fl |= (sv.f_flag & ST_NOSUID ? MS_NOSUID : 0) | (sv.f_flag & ST_NODEV ? MS_NODEV : 0) |
+                      (sv.f_flag & ST_NOEXEC ? MS_NOEXEC : 0) | (sv.f_flag & ST_NOATIME ? MS_NOATIME : 0) |
+                      (sv.f_flag & ST_RELATIME ? MS_RELATIME : 0);
+                (void)mount(NULL, "/media/gk3", NULL, fl, NULL);
+            }
+            err = backup_to("/media/gk3/gaokun3", name, gb, len, path, sizeof path);
+        }
+        /* 介质写不进去（写保护、只读介质）就留在内存里，照旧装 —— 与 installer-lib.sh 相同 */
+        if (err) {
+            in_ram = 1;
+            err = backup_to(run && *run ? run : "/run/gaokun3", name, gb, len, path, sizeof path);
+        }
+    }
+    gk3w_aligned_free(gb);
+    if (err)
+        return gk3l_err(GK3W_TOUCHED_NO, "gpt-backup", "writing the partition table backup failed (disk not touched)", err), -1;
+    gk3l_log("partition table backup: %s (restore: dd the first %llu sectors to the start of %s and the last %llu to its end, bs=%u)",
+             path, (unsigned long long)head, d->path, (unsigned long long)tail, d->bs);
+    if (in_ram)
+        gk3l_log("warning: the installation medium is not writable, so the backup is only in RAM (%s) and is lost on reboot", path);
+    {
+        /* 界面的失败页据此告诉用户有备份、在哪里（不去日志里找字样） */
+        gk3w_line l = {0};
+        gk3w_line_begin(&l, "BACKUP");
+        gk3w_line_kv(&l, "path", path);
+        gk3w_line_kv(&l, "disk", d->path);
+        gk3w_line_u64(&l, "sector", d->bs);
+        gk3w_line_u64(&l, "head", head);
+        gk3w_line_u64(&l, "tail", tail);
+        gk3w_line_kv(&l, "ram", in_ram ? "yes" : "no");
+        (void)gk3w_line_emit(&l, stdout);
+        gk3w_line_free(&l);
+    }
+    return 0;
+}
+
+/* 这个分区（"主:次"）在不在用：挂着、当交换分区、或者上面叠着别的设备（dm / md）。是的话 what 写明是哪种 */
+int gk3l_part_in_use(const char *disk, const gk3l_kpart *k, char *what, size_t cap)
+{
+    char p[512], where[4096];
+    DIR *h;
+    struct dirent *e;
+    if (!gk3l_mount_of(k->devno, where, sizeof where)) {
+        snprintf(what, cap, "/dev/%.63s@%.200s", k->name, where);
+        return 1;
+    }
+    {
+        FILE *f = fopen("/proc/swaps", "re");
+        char line[512], dev[300];
+        if (f) {
+            while (fgets(line, sizeof line, f))
+                if (sscanf(line, "%299s", dev) == 1 && !strncmp(dev, "/dev/", 5) && !strcmp(dev + 5, k->name)) {
+                    fclose(f);
+                    snprintf(what, cap, "/dev/%.63s@swap", k->name);
+                    return 1;
+                }
+            fclose(f);
+        }
+    }
+    if (!strcmp(disk, k->name))
+        snprintf(p, sizeof p, "/sys/block/%s/holders", disk);
+    else
+        snprintf(p, sizeof p, "/sys/block/%s/%s/holders", disk, k->name);
+    h = opendir(p);
+    if (h) {
+        while ((e = readdir(h)))
+            if (e->d_name[0] != '.') {
+                closedir(h);
+                snprintf(what, cap, "/dev/%.63s@%.63s", k->name, e->d_name);
+                return 1;
+            }
+        closedir(h);
+    }
+    return 0;
+}
+
+int gk3l_kernel_del(const gk3l_disk *d, uint64_t pno)
+{
+    struct blkpg_partition p;
+    struct blkpg_ioctl_arg a;
+    memset(&p, 0, sizeof p);
+    p.pno = (int)pno;
+    memset(&a, 0, sizeof a);
+    a.op = BLKPG_DEL_PARTITION;
+    a.datalen = sizeof p;
+    a.data = &p;
+    return ioctl(d->fd, BLKPG, &a) ? errno : 0;
+}
+
+
+int gk3l_gpt_write(const gk3l_disk *d, const uint8_t *hdr, const uint8_t *ent, void *chk)
+{
+    gk3_gpt g;
+    uint8_t *bak;
+    uint64_t bel = 0, tb;
+    size_t elen;
+    int w;
+    if (gk3_gpt_parse_header(hdr, d->bs, &g) != GK3_OK)
+        return errno = EINVAL, -1;
+    tb = ((uint64_t)g.num_entries * g.entry_size + d->bs - 1) / d->bs;
+    elen = (size_t)(tb * d->bs);
+    bak = gk3w_aligned_alloc(d->bs < 4096 ? 4096 : d->bs);
+    if (!bak)
+        return errno = ENOMEM, -1;
+    if (gk3w_gpt_make_backup(hdr, d->bs, bak, &bel) != GK3W_GPTW_OK) {
+        gk3w_aligned_free(bak);
+        return errno = EINVAL, -1;
+    }
+    /* 主表项 → 主表头 → 备份表项 → 备份表头：每一份表头只在它的表项写完之后才写，任何时刻断电，
+     * 两份表要么是旧的、要么是新的、要么表头与表项的 CRC 对不上（固件与内核会改用另一份） */
+    w = gk3l_write_verify(d, ent, elen, g.entries_lba * d->bs, chk);
+    if (!w)
+        w = gk3l_write_verify(d, hdr, d->bs, 1 * (uint64_t)d->bs, chk);
+    if (!w)
+        w = gk3l_write_verify(d, ent, elen, bel * d->bs, chk);
+    if (!w)
+        w = gk3l_write_verify(d, bak, d->bs, g.alt_lba * d->bs, chk);
+    {
+        int e = errno;
+        gk3w_aligned_free(bak);
+        errno = e;
+    }
+    return w;
 }

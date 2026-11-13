@@ -163,6 +163,19 @@ gk3w_gptw_err gk3w_gpt_add(uint8_t *hdr, uint32_t bs, uint8_t *entries, size_t e
     return GK3W_GPTW_OK;
 }
 
+gk3w_gptw_err gk3w_gpt_remove(uint8_t *hdr, uint32_t bs, uint8_t *entries, size_t entries_len, uint32_t idx)
+{
+    gk3_gpt g;
+    if (gk3_gpt_parse_mem(hdr, bs, entries, entries_len, &g) != GK3_OK)
+        return GK3W_GPTW_EINVAL;
+    if (!idx || idx > g.num_entries || is_empty(entries + (size_t)(idx - 1) * g.entry_size))
+        return GK3W_GPTW_RANGE;
+    memset(entries + (size_t)(idx - 1) * g.entry_size, 0, g.entry_size);
+    gk3_put_le32(hdr + 88, gk3_crc32(0, entries, (size_t)g.num_entries * g.entry_size));
+    seal_header(hdr);
+    return GK3W_GPTW_OK;
+}
+
 gk3w_gptw_err gk3w_gpt_make_backup(const uint8_t *hdr, uint32_t bs, uint8_t *bak_hdr, uint64_t *entries_lba)
 {
     gk3_gpt g;

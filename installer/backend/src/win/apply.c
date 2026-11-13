@@ -591,6 +591,7 @@ int gk3w_cmd_apply(int argc, wchar_t **argv)
         sp.need_kib = need;
         sp.slot_kib = (int64_t)((sizes[0] + sizes[1] + sizes[2]) / 1024);
         sp.windows = esp.windows;
+        sp.reinstall = 0;
         gk3w_log("ESP: using directory %s; %lld MiB to write (net of files overwritten), %lld MiB free; Windows boot manager present: %s",
                  esp.mid, (long long)(need / 1024), (long long)(sp.free_kib / 1024), esp.windows ? "yes" : "no");
         ck = gk3w_esp_space_check(&sp);
@@ -649,6 +650,7 @@ int gk3w_cmd_apply(int argc, wchar_t **argv)
         req.region = (gk3w_span){rstart, rend};
         req.userdata_mib = ud_mib;
         req.rescue = 0;
+        req.whole = 0;
         {
             char dn[24];
             snprintf(dn, sizeof dn, "%lu", (unsigned long)d.num);

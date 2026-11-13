@@ -203,7 +203,8 @@ gk3w_backup_action gk3w_install_backup_decide(const uint8_t *cur, size_t cur_len
         return GK3W_BK_NONE;
     if (!bak)
         return same_bytes(cur, cur_len, sd, sd_len) ? GK3W_BK_NONE : GK3W_BK_SAVE;
-    if (gk3w_is_systemd_boot(cur, cur_len) || same_bytes(cur, cur_len, bak, bak_len) ||
+    /* 现在的就是要装的这一份（认不出标记的 systemd-boot 也算）：覆盖不丢 */
+    if (gk3w_is_systemd_boot(cur, cur_len) || same_bytes(cur, cur_len, sd, sd_len) || same_bytes(cur, cur_len, bak, bak_len) ||
         gk3w_is_windows_boot_manager(cur, cur_len) || same_bytes(cur, cur_len, w, w_len))
         return GK3W_BK_NONE;
     return gk3w_fallback_bak_disposable(bak, bak_len, w, w_len) ? GK3W_BK_REPLACE : GK3W_BK_CONFLICT;
@@ -241,7 +242,7 @@ int gk3w_esp_android_entry(char *out, size_t cap, const char *mid, char slot, co
 gk3w_esp_check gk3w_esp_space_check(const gk3w_esp_space *in)
 {
     /* 顺序与 installer-lib.sh gk3_apply 双系统那段相同 */
-    if (in->esp_size_mib > 0 && in->esp_size_mib < GK3W_ESP_MIN_SIZE_MIB)
+    if (!in->reinstall && in->esp_size_mib > 0 && in->esp_size_mib < GK3W_ESP_MIN_SIZE_MIB)
         return GK3W_ESP_TOO_SMALL;
     if (in->free_kib < in->need_kib)
         return GK3W_ESP_FULL;
@@ -250,7 +251,7 @@ gk3w_esp_check gk3w_esp_space_check(const gk3w_esp_space *in)
     if (in->windows &&
         in->free_kib - in->need_kib - in->slot_kib - (int64_t)GK3W_ESP_GK3BOOT_KIB < (int64_t)GK3W_ESP_WIN_RESERVE_KIB)
         return GK3W_ESP_WIN_RESERVE;
-    if (in->free_kib / 1024 < (int64_t)GK3W_ESP_NEED_MIB)
+    if (in->free_kib / 1024 < (int64_t)(in->reinstall ? GK3W_ESP_REINSTALL_NEED_MIB : GK3W_ESP_NEED_MIB))
         return GK3W_ESP_FULL_MIN;
     return GK3W_ESP_OK;
 }

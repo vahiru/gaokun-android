@@ -7,6 +7,7 @@
 #include <stdint.h>
 
 #define GK3W_ESP_NEED_MIB 150u
+#define GK3W_ESP_REINSTALL_NEED_MIB 16u
 #define GK3W_ESP_MIN_SIZE_MIB 200u
 #define GK3W_ESP_OTA_NEED_KIB 57344u
 #define GK3W_ESP_WIN_RESERVE_KIB 32768u
@@ -75,6 +76,8 @@ typedef struct {
     int64_t need_kib;           /* 这次要多占的（已扣掉会被覆盖的同名文件，含 256 KiB 的启动项余量） */
     int64_t slot_kib;           /* 一个槽的 Image + dtb + ramdisk */
     int windows;                /* ESP 上有 Windows 的启动管理器 */
+    int reinstall;              /* 重新安装：我们已经在这个 ESP 上，不查分区大小，空闲下限 16 MiB 而不是 150 MiB
+                                 * （覆盖的是自己的文件，不是新增） */
 } gk3w_esp_space;
 
 typedef enum {

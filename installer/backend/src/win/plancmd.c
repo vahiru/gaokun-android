@@ -29,6 +29,7 @@ int gk3w_cmd_plan(int argc, wchar_t **argv)
     req.region = (gk3w_span){rstart, rend};
     req.userdata_mib = ud;
     req.rescue = 0;
+    req.whole = 0;
     snprintf(dn, sizeof dn, "%llu", (unsigned long long)disk);
     pe = gk3w_plan_print(&req, dn, &plan, stdout);
     if (pe != GK3W_PLAN_OK)

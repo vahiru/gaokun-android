@@ -47,6 +47,9 @@ int gk3l_sys_gate(void);
 
 /* ── 命令 ── */
 int gk3l_cmd_apply(int argc, char **argv);
+int gk3l_cmd_delete(int argc, char **argv);
+int gk3l_cmd_esp_info(int argc, char **argv);
+int gk3l_cmd_release_info(int argc, char **argv);
 int gk3l_cmd_probe(int argc, char **argv);
 int gk3l_cmd_preflight(int argc, char **argv);
 int gk3l_cmd_plan(int argc, char **argv);
