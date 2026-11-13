@@ -4,7 +4,7 @@
 #   bash installer/backend/mke2fs/build.sh x64|arm64|native
 #     → installer/backend/build/mke2fs-<目标>/{mke2fs(.exe), mke2fs.conf}
 #
-# 源码：Debian 的 e2fsprogs 1.47.2-3（与 LiveCD 的 Debian 13 同一版本：scripts/live/packages-live.lock），
+# 源码：Debian 的 e2fsprogs 1.47.2-3（与 LiveCD 的 Debian 13 同一版本：installer/tools/build/packages-live.lock），
 #   上游 1.47.2 原始源码 + Debian 的补丁 + 本仓 patches/e2fsprogs/。下载的两个包按 sha256 钉死。
 # mke2fs.conf 取自源码的 misc/mke2fs.conf.in：与 Debian 13 的 /etc/mke2fs.conf 一字不差，
 #   所以格式化出来的特性、块大小、inode 大小与 LiveCD 的 mkfs.ext4 相同。

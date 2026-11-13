@@ -8,7 +8,7 @@ import 'session.dart';
 import 'ui/soak.dart';
 import 'version.dart';
 
-/// 演示场景：testdata/<场景>/（scripts/live/gen-fixtures.sh 用真后端录的，pubspec 的 assets 里逐个列出）。
+/// 演示场景：testdata/<场景>/（installer/tools/test/gen-fixtures.sh 用真后端录的，pubspec 的 assets 里逐个列出）。
 /// gk3_common 的 FixtureBackend 不认识场景名，有哪些、默认用哪个由应用自己定
 const kScenarios = ['factory', 'windows-free', 'windows-live', 'windows-setup', 'windows-setup-shrunk', 'blank', 'android'];
 

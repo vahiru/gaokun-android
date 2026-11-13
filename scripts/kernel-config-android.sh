@@ -37,7 +37,7 @@ OUT="${1:?用法: $0 <kernel-out-dir>}"
     --enable USB_CONFIGFS_F_MIDI \
     --enable OVERLAY_FS
 
-# ---- 让【同一个内核】也能当救援/LiveCD 系统用（见 scripts/live/README.md）----
+# ---- 让【同一个内核】也能当救援/LiveCD 系统用（见 installer/tools/README.md）----
 # 今天 ESP 上有两个内核：Android 一个、救援 Ubuntu 一个，白占 14 MiB，
 # 而且两份要各自维护。统一成一个之后，救援系统只是"同一个内核 + 另一个 initramfs"。
 # 这三项对 Android 是惰性的（不挂就没有代价），但缺了救援就起不来：

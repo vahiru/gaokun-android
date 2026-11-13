@@ -6,7 +6,7 @@
 
 - [../../docs/dev/android-bringup.md](../../docs/dev/android-bringup.md)（A/B分区、OTA与SELinux整体架构）
 - [../../device/huawei/gaokun3/prebuilt-gk3boot/README.md](../../device/huawei/gaokun3/prebuilt-gk3boot/README.md)（ROM侧预编译产物放入方式）
-- [../../scripts/live/README.md](../../scripts/live/README.md)（Live安装器初始化`misc`与ESP布局）
+- [../../installer/backend/src/linux/apply.c](../../installer/backend/src/linux/apply.c)（安装器初始化`misc`与ESP布局）
 
 ## 1. 架构与目录结构
 

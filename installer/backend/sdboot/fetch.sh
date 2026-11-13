@@ -3,7 +3,7 @@
 #
 #   bash installer/backend/sdboot/fetch.sh   → installer/backend/build/sdboot/systemd-bootaa64.efi
 #
-# 来源：Debian 的 systemd-boot-efi，与 LiveCD 同一版本（scripts/live/packages-live.lock），所以 Windows 端装出来的
+# 来源：Debian 的 systemd-boot-efi，与 LiveCD 同一版本（installer/tools/build/packages-live.lock），所以 Windows 端装出来的
 # ESP 与 LiveCD 装的相同（notes：VHDX 上逐文件对拍过）。包与包里的 efi 都按 sha256 钉死。
 # 先从 deb.debian.org 的 pool 取；那边换成新的修订版后旧包会下架，再按包的 sha1 从 snapshot.debian.org 取。
 # 只用 curl、ar（binutils）、tar、xz、sha256sum。

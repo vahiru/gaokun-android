@@ -34,7 +34,7 @@ dosfstools
 systemd-boot-efi
 
 # —— 图形安装器（Flutter 的 GTK embedder）+ cage。决定见 installer/live/README.md ——
-#   scripts/live/render-test.Dockerfile 是这一段的预演：那边能跑，这边就该能跑
+#   installer/tools/test/render-test.Dockerfile 是这一段的预演：那边能跑，这边就该能跑
 cage
 # ★ 旋转与缩放：cage 0.2.0 没有旋转参数，起来之后用 wlr-randr 设（gk3-installer-session）
 wlr-randr

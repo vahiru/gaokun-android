@@ -2,13 +2,13 @@
 # gk3l 的只读命令（probe / plan / preflight）在 loop 盘上的测试：probe 的每个字段由 check_probe.py 对照 sgdisk、
 # blkid 与 sysfs 检查，方案按 plan.h 的规矩检查；另测 table= 的细分、4Kn 盘、内核分区视图过期、读盘出错、介质、预检。
 #
-#   bash scripts/live/test-in-container.sh installer/backend/test/linux/test-probe.sh
+#   bash installer/tools/test/test-in-container.sh installer/backend/test/linux/test-probe.sh
 #
 # gk3l 在容器里现编（ASan + UBSan）；另编一份静态的发布形态，跑一遍 probe 确认静态链接没问题。
 # ⚠️ 只动容器所在虚拟机里的 loop 设备（背后是 /tmp 下的稀疏文件）。
 set -u
 cd "$(dirname "$0")/../../../.."
-[ "$(id -u)" = 0 ] || { echo "要 root（用 scripts/live/test-in-container.sh 跑）"; exit 2; }
+[ "$(id -u)" = 0 ] || { echo "要 root（用 installer/tools/test/test-in-container.sh 跑）"; exit 2; }
 export GK3_ALLOW_LOOP=1
 CHK="python3 -I installer/backend/test/linux/check_probe.py"
 PASS=0; FAIL=0

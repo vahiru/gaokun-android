@@ -6,12 +6,12 @@
 #   - 不相邻（GK3LIVE 在空闲区开头）：删掉但不扩；
 #   - 拒绝：没有读进内存、挂着、apply --remove-installer 而盘上没有它 —— 盘一个字节不变。
 #
-#   bash scripts/live/test-in-container.sh installer/backend/test/linux/test-live.sh
+#   bash installer/tools/test/test-in-container.sh installer/backend/test/linux/test-live.sh
 #
 # ⚠️ 只动容器所在虚拟机里的 loop 设备（背后是 /tmp 下的稀疏文件）；/media/gk3 在容器里挂一个 tmpfs 当内存副本。
 set -u
 cd "$(dirname "$0")/../../../.."
-[ "$(id -u)" = 0 ] || { echo "要 root（用 scripts/live/test-in-container.sh 跑）"; exit 2; }
+[ "$(id -u)" = 0 ] || { echo "要 root（用 installer/tools/test/test-in-container.sh 跑）"; exit 2; }
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS+1)); echo "  ✓ $*"; }
 bad() { FAIL=$((FAIL+1)); echo "  ✗ $*"; }

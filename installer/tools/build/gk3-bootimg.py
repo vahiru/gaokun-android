@@ -64,7 +64,7 @@ def main(img, out):
             data = f.read(size)
             if len(data) != size:
                 die("%s 读不全：%d / %d 字节（镜像被截断？）" % (name, len(data), size))
-            # 体检：和 scripts/live/build-usb.sh 对输入做的检查同一套
+            # 体检：和 installer/tools/build/build-usb.sh 对输入做的检查同一套
             if name == "Image" and data[:2] != b"MZ":
                 die("内核不是 PE/EFI 格式（开头不是 MZ）")
             if name == "gaokun3.dtb" and data[:4] != b"\xd0\x0d\xfe\xed":

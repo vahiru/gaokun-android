@@ -1,5 +1,5 @@
 #!/bin/sh
-# gk3l（LiveCD 的安装器后端）的唯一编法：Makefile 的 linux 目标、scripts/live/build-rootfs.sh（构建容器里没有 make）
+# gk3l（LiveCD 的安装器后端）的唯一编法：Makefile 的 linux 目标、installer/tools/build/build-rootfs.sh（构建容器里没有 make）
 # 与 test/linux/ 的容器测试都调这里。静态链接：不依赖镜像里装的是哪一版 libc。
 #
 #   sh installer/backend/linux/build.sh <输出文件> [编译器，默认 cc]

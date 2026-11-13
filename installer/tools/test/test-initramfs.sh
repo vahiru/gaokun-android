@@ -8,10 +8,10 @@
 # 不能真的切根或重启），sleep 去掉。在新的挂载命名空间里跑（unshare -m），它挂的东西随它一起消失。
 # "squashfs"用 ext2 镜像代替（测试镜像里没有 mksquashfs；init 只用 mount -o loop，认得出就行）。
 #
-#   bash scripts/live/test-in-container.sh scripts/live/test-initramfs.sh
+#   bash installer/tools/test/test-in-container.sh installer/tools/test/test-initramfs.sh
 set -u
-cd "$(dirname "$0")/../.."
-[ "$(id -u)" = 0 ] || { echo "要 root（用 scripts/live/test-in-container.sh 跑）"; exit 2; }
+cd "$(dirname "$0")/../../.."
+[ "$(id -u)" = 0 ] || { echo "要 root（用 installer/tools/test/test-in-container.sh 跑）"; exit 2; }
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS+1)); echo "  ✓ $*"; }
 bad() { FAIL=$((FAIL+1)); echo "  ✗ $*"; }
@@ -63,7 +63,7 @@ sed -e '/^export PATH$/r '"$W/report.sh" \
     -e 's|/proc/meminfo|${GK3_TEST_MEMINFO:-/proc/meminfo}|' \
     -e 's|^exec switch_root /newroot /sbin/init$|report; exit 0|' \
     -e 's|reboot -f|exit 99|' -e 's|sleep 60|:|g' \
-    scripts/live/initramfs-init > "$W/init"
+    installer/tools/build/initramfs-init > "$W/init"
 grep -q 'report; exit 0' "$W/init" && grep -q 'GK3_TEST_CMDLINE' "$W/init" || { echo "改副本失败（initramfs-init 的写法变了？）"; exit 1; }
 
 run_init() {   # run_init <额外 cmdline> [meminfo 文件]

@@ -1,5 +1,5 @@
 # 在 Mac（Apple Silicon）上构建 gaokun3 图形安装器的 Linux arm64 版本。
-# 由 scripts/live/build-flutter.sh 构建和调用。
+# 由 installer/tools/build/build-flutter.sh 构建和调用。
 #
 # 为什么在这里而不是构建机：构建机是 x86_64，Flutter 的 Linux 桌面构建不做交叉编译；
 #   Mac 是 arm64，arm64 容器里就是原生构建，不需要 qemu（见 installer/live/README.md）。

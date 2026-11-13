@@ -4,11 +4,11 @@
 
 | 归档脚本 | 原用途 | 退役原因与现行替代工具 |
 |---|---|---|
-| `deploy-android.sh` | 从早期U盘Linux将`super`与`ramdisk`部署至内置盘 | 已被LiveCD图形安装器（[`../live/README.md`](../live/README.md)）及[`../install-ota-local.sh`](../install-ota-local.sh)取代 |
+| `deploy-android.sh` | 从早期U盘Linux将`super`与`ramdisk`部署至内置盘 | 已被LiveCD图形安装器（[`../../installer/tools/README.md`](../../installer/tools/README.md)）及[`../install-ota-local.sh`](../install-ota-local.sh)取代 |
 | `deploy-from-ubuntu.sh` | 在救援Ubuntu下从构建机拉取产物并刷写分区 | 硬编码了早期分区号（如`nvme0n1p8`），与现行安装器分区布局不兼容；现使用[`../install-ota-local.sh`](../install-ota-local.sh)或Live安装器 |
 | `partition-android.sh` | 早期手动划分Android分区 | 现由安装器（[`../../installer/backend/`](../../installer/backend/)）统一完成分区创建 |
 | `esp-migrate-to-internal.sh` | 将引导链从外置U盘ESP迁移至内置ESP | 早期一次性迁移脚本 |
-| `flash-usb.ps1` | 在Windows下将Ubuntu镜像写入U盘 | 已被[`../live/build-usb.sh`](../live/build-usb.sh)与Windows安装器（[`../../installer/windows/`](../../installer/windows/README.md)）取代 |
+| `flash-usb.ps1` | 在Windows下将Ubuntu镜像写入U盘 | 已被[`../../installer/tools/build/build-usb.sh`](../../installer/tools/build/build-usb.sh)与Windows安装器（[`../../installer/windows/`](../../installer/windows/README.md)）取代 |
 | `restore-boot-entries.ps1` | 在Windows下恢复U盘ESP启动项 | 已被[`../boot-oneshot.sh`](../boot-oneshot.sh)与Windows安装器（[`../../installer/windows/`](../../installer/windows/README.md)）取代 |
 | `windows-preflight.ps1` | 在Windows下读取机型、BIOS与Secure Boot状态 | 硬件信息已收录于[`../../docs/dev/hardware.md`](../../docs/dev/hardware.md)；现行Windows侧预检集成在Windows安装器（[`../../installer/windows/`](../../installer/windows/README.md)）中 |
 | `probe-windows-sensors.sh` | 挂载Windows分区识别传感器型号 | 传感器型号与配置已合入[`../../device/huawei/gaokun3/hexagonrpcd-root/`](../../device/huawei/gaokun3/hexagonrpcd-root/)（详见[`../../docs/dev/sensors-ssc-protocol.md`](../../docs/dev/sensors-ssc-protocol.md)） |

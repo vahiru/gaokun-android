@@ -4,7 +4,7 @@
 #   make upstream        与真正的 libboot_control.cpp 逐字节对拍（要 refs/，先跑 scripts/clone-refs.sh）
 #   make freestanding    按 UEFI 的条件编 aarch64 目标文件，并断言没有任何外部符号依赖（T9）
 #   make gk3-misc        主机版 CLI（dump misc / gpt / boot.img；init = 安装器初始化 misc，S10）
-#   make gk3-misc-static Linux 上静态链接的 gk3-misc（live 镜像里安装器调的就是它；scripts/live/build-rootfs.sh 照这条编）
+#   make gk3-misc-static Linux 上静态链接的 gk3-misc（手工检查、初始化 misc 用）
 #   make misc-test       gk3-misc init 的字节测试（期望值由 Python 独立算，test/misc/run.sh）
 #   make hal-test        boot_control HAL 开机完成线程（device/…/boot_control/Gk3Boot.cpp）的主机场景测试（test/hal/run.sh）
 #   make postinstall-test OTA postinstall 的选直连条目 + 入口部署一节，mksh/dash/ksh 各跑一遍（test/postinstall/run.sh；先 hal-test 才有交叉核对）

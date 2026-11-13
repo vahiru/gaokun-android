@@ -9,7 +9,7 @@ This repository contains the Android device tree, custom HALs and system service
 - [`device/huawei/gaokun3/`](device/huawei/gaokun3/): Android device configuration, custom AIDL HALs (camera, sensors, light, USB, boot control, audio hooks/mic array/NPU denoise/speaker effects), stylus daemon, Parts settings app, and SELinux policies.
 - [`patches/`](patches/README.md): Patch queues organized by target tree and subsystem (`kernel/`, `android/`, `mesa/`, `libcamera/`, `resukisu/`), applied by [`scripts/kernel-apply-patches.sh`](scripts/kernel-apply-patches.sh), [`scripts/crdroid-tree-fixes.py`](scripts/crdroid-tree-fixes.py), [`scripts/mesa-a17/regen.sh`](scripts/mesa-a17/regen.sh), [`scripts/camera/setup-libcamera-tree.sh`](scripts/camera/setup-libcamera-tree.sh), and [`scripts/kernel-setup-resukisu.sh`](scripts/kernel-setup-resukisu.sh).
 - [`scripts/crdroid-tree-fixes.py`](scripts/crdroid-tree-fixes.py): Modifications applied to other AOSP/crDroid repositories. Register any AOSP change outside `device/huawei/gaokun3/` here.
-- [`tools/`](tools/) and [`installer/`](installer/): Self-contained subprojects — [`tools/gk3boot/`](tools/gk3boot/README.md) (UEFI boot manager `gk3boot.efi` and `fastboot` executor), [`installer/backend/`](installer/backend/) (C installer backend: `gk3l` for the LiveCD, `gk3w` for Windows), [`installer/live/`](installer/live/README.md) (Flutter LiveCD installer, image built via [`scripts/live/`](scripts/live/README.md)), and [`installer/windows/`](installer/windows/README.md) (Flutter Windows installer).
+- [`tools/`](tools/) and [`installer/`](installer/): Self-contained subprojects — [`tools/gk3boot/`](tools/gk3boot/README.md) (UEFI boot manager `gk3boot.efi` and `fastboot` executor), [`installer/backend/`](installer/backend/) (C installer backend: `gk3l` for the LiveCD, `gk3w` for Windows), [`installer/live/`](installer/live/README.md) (Flutter LiveCD installer, image built via [`installer/tools/`](installer/tools/README.md)), and [`installer/windows/`](installer/windows/README.md) (Flutter Windows installer).
 - `refs/` (git-ignored, fetched via `bash scripts/clone-refs.sh`): Read-only reference trees (`linux-gaokun`, `gaokun-buildbot`, `aospm-*`, `lineage-sepolicy`).
 
 ## 2. Patch Queue Workflow & Format (`patches/`)
@@ -52,7 +52,7 @@ Modifications to upstream source trees (Linux kernel, AOSP/crDroid repositories,
 - **Hardware safety**: Writing `boot` partitions, altering ESP boot entries, writing EC charging thresholds, or issuing untested TrustZone SMCs requires explicit user confirmation beforehand.
 - **Local verification commands**:
   - Boot manager & fastboot: `make -C tools/gk3boot/core test`; container tests: `bash scripts/gk3boot/test-{boot,probe,fastbootd,executor}.sh`
-  - Installer backend: `make -C installer/backend test`; container tests: `bash scripts/live/test-in-container.sh installer/backend/test/linux/test-{probe,apply,jobs,live}.sh`
+  - Installer backend: `make -C installer/backend test`; container tests: `bash installer/tools/test/test-in-container.sh installer/backend/test/linux/test-{probe,apply,jobs,live}.sh`
   - Installer frontend: `flutter test` inside `installer/live/`
   - Kernel patches & config: `bash scripts/kernel-apply-patches.sh <kernel-tree> --check`, `bash scripts/kernel-config-android.sh <kout>`
   - Documentation links: `python3 -I scripts/check-doc-links.py`

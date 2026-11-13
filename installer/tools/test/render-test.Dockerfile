@@ -1,4 +1,4 @@
-# 图形安装器的运行时：cage + mesa + GTK3 + 中文字体。给 scripts/live/test-render.sh 用。
+# 图形安装器的运行时：cage + mesa + GTK3 + 中文字体。给 installer/tools/test/test-render.sh 用。
 # ★ 它同时是 Debian live 镜像图形部分的预演：这里缺什么，镜像里就会缺什么。
 FROM debian@sha256:9cc080028c43b27d2074d63a5f9caf7166d731494965616c1a6d2827a004585c
 RUN apt-get update \

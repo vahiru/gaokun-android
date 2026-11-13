@@ -1,5 +1,5 @@
 # 场景：windows-free —— factory 上把 Data 缩掉 80 GiB 之后（代替 Windows 的压缩卷）—— 走双系统
-# 录制：scripts/live/gen-fixtures.sh，2026-11-13，Debian 13.7 容器，loop 设备
+# 录制：installer/tools/test/gen-fixtures.sh，2026-11-13，Debian 13.7 容器，loop 设备
 # 替换：loop 设备 → /dev/nvme0n1（内置盘）与 /dev/sda（安装 U 盘，挂在 /media/gk3）；
 #       DISK 行的 bus= 按真机填（loop 报不出来）；U 盘的 removable 填 1。其余一律原样。
 # 格式：<界面发出的调用（gk3l 的命令与参数）>  <文件>。找不到精确匹配时用 '<命令> *' 那一行。

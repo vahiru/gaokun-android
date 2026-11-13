@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # 在容器里用 headless 的 cage 真跑 Linux arm64 版的图形安装器：截图 + 记 RSS。
 #
-#   bash scripts/live/build-flutter.sh      # 先构建
-#   bash scripts/live/test-render.sh [秒数]  → out/render-test/{*.png, rss.txt, app.log, log.txt}
-#   SOAK=1 RENDERER=skia bash scripts/live/test-render.sh 60
+#   bash installer/tools/build/build-flutter.sh      # 先构建
+#   bash installer/tools/test/test-render.sh [秒数]  → out/render-test/{*.png, rss.txt, app.log, log.txt}
+#   SOAK=1 RENDERER=skia bash installer/tools/test/test-render.sh 60
 #     SOAK=1          进浸泡页（持续出帧；app.log 里每 5 秒一行 SOAK fps= raster_p95_ms=）
 #     RENDERER=skia   关 Impeller（3.47.2 在 Linux 上默认是 Impeller）。走 runner 认的 GK3_RENDERER
 #                     （linux/runner/my_application.cc）—— release 版不读 FLUTTER_ENGINE_SWITCHES
@@ -15,15 +15,15 @@
 #   GPU 路径不同 —— flutter/flutter#192603 那个逐帧泄漏说的恰恰是 ARM GLES 驱动。
 #   这里的 RSS 曲线只是一条【软件渲染下的基线】，真机 M0 要另量。
 set -euo pipefail
-REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 APP=$REPO/out/installer-flutter-linux-arm64
 OUT=$REPO/out/render-test${RENDERER:+-$RENDERER}${SOAK:+-soak}
 SECS=${1:-60}
 die() { echo "✗ $*" >&2; exit 1; }
-[ -x "$APP/gk3_installer" ] || die "先跑 scripts/live/build-flutter.sh"
-H=$(shasum -a 256 "$REPO/scripts/live/render-test.Dockerfile" 2>/dev/null || sha256sum "$REPO/scripts/live/render-test.Dockerfile")
+[ -x "$APP/gk3_installer" ] || die "先跑 installer/tools/build/build-flutter.sh"
+H=$(shasum -a 256 "$REPO/installer/tools/test/render-test.Dockerfile" 2>/dev/null || sha256sum "$REPO/installer/tools/test/render-test.Dockerfile")
 TAG="gk3-render-test:${H:0:12}"
-docker image inspect "$TAG" >/dev/null 2>&1 || docker build -q -t "$TAG" -f "$REPO/scripts/live/render-test.Dockerfile" "$REPO/scripts/live" >/dev/null
+docker image inspect "$TAG" >/dev/null 2>&1 || docker build -q -t "$TAG" -f "$REPO/installer/tools/test/render-test.Dockerfile" "$REPO/installer/tools/test" >/dev/null
 rm -rf "$OUT"; mkdir -p "$OUT"
 docker run --rm -e SECS="$SECS" -e SOAK="${SOAK:-}" -e RENDERER="${RENDERER:-}" -v "$APP:/app:ro" -v "$OUT:/out" "$TAG" bash -c '
     export XDG_RUNTIME_DIR=/tmp/xdg; mkdir -p -m 700 $XDG_RUNTIME_DIR

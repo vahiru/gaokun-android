@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 构建图形安装器的 Linux arm64 版本（在 Mac 上的 arm64 Debian 容器里，原生构建）。
 #
-#   bash scripts/live/build-flutter.sh            → out/installer-flutter-linux-arm64/
+#   bash installer/tools/build/build-flutter.sh            → out/installer-flutter-linux-arm64/
 #
 # ⚠️ 工程是【拷进】容器再编的，不在挂载目录里编：容器里跑一次 pub get 会把
 #    .dart_tool/package_config.json 里的路径改成 Linux 的，回到 Mac 上又改回来，
@@ -9,7 +9,7 @@
 # ★ installer/ 是 pub 工作区（installer/pubspec.yaml）：应用依赖同一工作区里的 gk3_common，
 #   锁文件在 installer/pubspec.lock。所以拷的是整个 installer/（C 后端 installer/backend 除外），在 live/ 里编。
 set -euo pipefail
-REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 OUT=$REPO/out/installer-flutter-linux-arm64
 die() { echo "✗ $*" >&2; exit 1; }
 say() { echo; echo "══ $*"; }
@@ -17,13 +17,13 @@ say() { echo; echo "══ $*"; }
 command -v docker >/dev/null && docker info >/dev/null 2>&1 || die "docker 没在跑（macOS 上：colima start）"
 [ "$(docker info --format '{{.Architecture}}')" = aarch64 ] || die "docker 不是 arm64 —— 这个脚本就是为了原生构建才存在的"
 
-H=$(shasum -a 256 "$REPO/scripts/live/flutter-build.Dockerfile" 2>/dev/null || sha256sum "$REPO/scripts/live/flutter-build.Dockerfile")
+H=$(shasum -a 256 "$REPO/installer/tools/build/flutter-build.Dockerfile" 2>/dev/null || sha256sum "$REPO/installer/tools/build/flutter-build.Dockerfile")
 BASE="gk3-flutter-base:${H:0:12}"
 TAG="gk3-flutter-build:${H:0:12}"
 if ! docker image inspect "$TAG" >/dev/null 2>&1; then
     say "构建 Flutter 构建环境 ${TAG}（第一次要下 Flutter SDK 与引擎，约 1–2 GB）"
     docker image inspect "$BASE" >/dev/null 2>&1 \
-        || docker build -t "$BASE" -f "$REPO/scripts/live/flutter-build.Dockerfile" "$REPO/scripts/live"
+        || docker build -t "$BASE" -f "$REPO/installer/tools/build/flutter-build.Dockerfile" "$REPO/installer/tools/build"
     # 预取在 docker run 里做（理由见 Dockerfile 末尾），做完 commit 成构建镜像
     docker rm -f gk3-flutter-prep >/dev/null 2>&1 || true
     docker run --name gk3-flutter-prep "$BASE" bash -euo pipefail -c '

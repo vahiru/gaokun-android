@@ -32,7 +32,7 @@ flutter run -d chrome --web-browser-flag=--window-size=1280,800   # 浏览器交
 重新录制容器内的后端测试fixture：
 
 ```sh
-bash scripts/live/test-in-container.sh scripts/live/gen-fixtures.sh
+bash installer/tools/test/test-in-container.sh installer/tools/test/gen-fixtures.sh
 ```
 
 | Fixture场景 | 模拟的磁盘状态 |
@@ -52,9 +52,9 @@ bash scripts/live/test-in-container.sh scripts/live/gen-fixtures.sh
 ## 四、Linux arm64构建与无头渲染验证
 
 ```sh
-bash scripts/live/build-flutter.sh                 # 在arm64容器内构建 → out/installer-flutter-linux-arm64/
-bash scripts/live/test-render.sh 60                # 在无头cage中实际运行并抓取截图与RSS → out/render-test/
-SOAK=1 RENDERER=skia bash scripts/live/test-render.sh 600   # 持续渲染浸泡测试
+bash installer/tools/build/build-flutter.sh                 # 在arm64容器内构建 → out/installer-flutter-linux-arm64/
+bash installer/tools/test/test-render.sh 60                # 在无头cage中实际运行并抓取截图与RSS → out/render-test/
+SOAK=1 RENDERER=skia bash installer/tools/test/test-render.sh 600   # 持续渲染浸泡测试
 ```
 
 常用运行期环境变量：

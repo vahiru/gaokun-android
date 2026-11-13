@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # gk3l job（写盘进程脱离界面）与 log-targets / save-logs 的容器测试。
 #
-#   bash scripts/live/test-in-container.sh installer/backend/test/linux/test-jobs.sh
+#   bash installer/tools/test/test-in-container.sh installer/backend/test/linux/test-jobs.sh
 #
 # 容器里没有 systemd：直接跑是 setsid 方式；systemd-run 方式用一个假的 systemd-run（GK3_SYSTEMD_RUN）。
 set -u
 cd "$(dirname "$0")/../../../.."
-[ "$(id -u)" = 0 ] || { echo "要 root（用 scripts/live/test-in-container.sh 跑）"; exit 2; }
+[ "$(id -u)" = 0 ] || { echo "要 root（用 installer/tools/test/test-in-container.sh 跑）"; exit 2; }
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS+1)); echo "  ✓ $*"; }
 bad() { FAIL=$((FAIL+1)); echo "  ✗ $*"; }

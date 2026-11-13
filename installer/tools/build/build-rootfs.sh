@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 造 LiveCD 的根文件系统（Debian 13 trixie arm64）：图形安装器（Flutter + cage）与它的后端 gk3l → squashfs。
 #
-#   bash scripts/live/build-live.sh                       # 在 arm64 容器里跑本脚本（推荐）
+#   bash installer/tools/build/build-live.sh                       # 在 arm64 容器里跑本脚本（推荐）
 #   bash build-rootfs.sh --out /build/out --installer <Flutter bundle 目录> --firmware <GPU 固件目录>
 #
 # ⚠️ 必须 root（mmdebstrap 的 root 模式、chroot）、必须在 arm64 上跑（arm64 的主机或容器里是原生的，不需要 qemu）。
@@ -10,7 +10,7 @@
 #
 # 2026-09-25 从 Alpine 换成 Debian（Flutter 引擎只有 glibc 版）。Alpine 版的每一条断言
 # 都有一次上机事故在后面，这里全部保留、换成 Debian 的查法 —— 见"体检"一节。
-# 设计取舍见 scripts/live/README.md 与 installer/live/README.md。
+# 设计取舍见 installer/tools/README.md 与 installer/live/README.md。
 set -euo pipefail
 
 # ---- 钉死的上游 ----------------------------------------------------------
@@ -21,8 +21,8 @@ SUITE=trixie
 if [ -n "${GK3_SNAPSHOT:-}" ]; then MIRROR=http://snapshot.debian.org/archive/debian/$GK3_SNAPSHOT
 else MIRROR=${GK3_DEBIAN_MIRROR:-http://deb.debian.org/debian}; fi
 
-REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-LIVE=$REPO/scripts/live
+REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
+LIVE=$REPO/installer/tools/build
 
 OUT= ; INSTALLER= ; KEEP= ; FIRMWARE=
 # GPU（Adreno 690）要的三个固件。zap shader 的名字取自 dtb（gpu@3d00000/zap-shader/firmware-name）。
@@ -54,7 +54,7 @@ for t in mmdebstrap mksquashfs chroot; do
     command -v "$t" >/dev/null || die "缺工具：${t}（apt install mmdebstrap squashfs-tools）"
 done
 INSTALLER=${INSTALLER:-$REPO/out/installer-flutter-linux-arm64}
-[ -x "$INSTALLER/gk3_installer" ] || die "要图形安装器：$INSTALLER/gk3_installer 不在（先跑 scripts/live/build-flutter.sh）"
+[ -x "$INSTALLER/gk3_installer" ] || die "要图形安装器：$INSTALLER/gk3_installer 不在（先跑 installer/tools/build/build-flutter.sh）"
 # 先查、后花二十分钟构建：没有 GPU 固件的镜像开机就是黑屏
 for f in $GPU_FW; do [ -f "$FIRMWARE/$f" ] || die "要 GPU 固件：--firmware <目录> 里缺 ${f}（从设备取：adb pull /vendor/firmware <目录>）"; done
 
@@ -94,8 +94,7 @@ ch() { chroot "$ROOTFS" "$@"; }
 
 # ---- 2. 配置 ---------------------------------------------------------------
 say "2. 配置"
-cp -a "$LIVE/overlay-common"/. "$ROOTFS"/; ok "铺了 overlay-common"
-cp -a "$LIVE/overlay-live"/. "$ROOTFS"/; ok "铺了 overlay-live"
+cp -a "$LIVE/overlay"/. "$ROOTFS"/; ok "铺了 overlay"
 for f in $GPU_FW; do install -Dm644 "$FIRMWARE/$f" "$ROOTFS/usr/lib/firmware/$f"; done
 ok "GPU 固件（来自 ${FIRMWARE}）"
 # 版本（build-live.sh 从 pubspec 读、从宿主取 git 提交后传进来）：gk3-installer-session 把它打进会话日志的开头
@@ -114,12 +113,12 @@ UNITS="gk3-diag.timer gk3-installer.service seatd.service getty@tty2.service"
 ch systemctl enable $UNITS >/dev/null 2>&1 || true
 # 在一个全内存、每次开机都是新的系统上，apt 的定时任务只会白白吃 CPU。
 # nvme-cli 带的 NVMe over Fabrics 自动连接：我们用不到，开机冒烟测试里它每次都失败，
-# 污染"失败的单元"与 gk3-diag 的报告（scripts/live/test-boot-container.sh）
+# 污染"失败的单元"与 gk3-diag 的报告（installer/tools/test/test-boot-container.sh）
 ch systemctl mask apt-daily.timer apt-daily-upgrade.timer e2scrub_all.timer \
     nvmf-autoconnect.service nvmefc-boot-connections.service >/dev/null 2>&1 || true
 # 不许睡：live 里 a600000.usb 停在 role=device、没有 usbrole 守卫，挂起会整板复位
 #   （见 docs/dev/deep-sleep.md）—— 赶上写 super 就是一块坏盘。logind 的按键与合盖已经在
-#   overlay-common 的 logind.conf.d 里关了；这里把"睡"这条路本身堵上，谁来要都不行。体检逐个核对
+#   overlay 的 logind.conf.d 里关了；这里把"睡"这条路本身堵上，谁来要都不行。体检逐个核对
 SLEEP_TARGETS="sleep.target suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target"
 # shellcheck disable=SC2086
 ch systemctl mask $SLEEP_TARGETS >/dev/null 2>&1 || true
@@ -229,4 +228,4 @@ mksquashfs "$ROOTFS" "$SQUASH" -comp zstd -Xcompression-level 19 -noappend -no-p
 ok "$SQUASH  $(du -h "$SQUASH" | cut -f1)（根文件系统展开 $(du -sh "$ROOTFS" | cut -f1)）"
 [ -n "$KEEP" ] || rm -rf "$WORK"
 echo
-echo "下一步：bash scripts/live/build-initramfs.sh --busybox $OUT/busybox.static --out $OUT"
+echo "下一步：bash installer/tools/build/build-initramfs.sh --busybox $OUT/busybox.static --out $OUT"

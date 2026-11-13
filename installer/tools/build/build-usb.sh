@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 把 LiveCD 组装成一个可启动的 U 盘镜像（GPT + 单个 ESP，卷标 GK3LIVE）。
 #
-#   bash scripts/live/build-usb.sh \
+#   bash installer/tools/build/build-usb.sh \
 #        --squashfs  <gaokun3-live.squashfs> --initramfs <initramfs.img> \
 #        --kernel    <Image（EFI stub）>      --dtb       <gaokun3.dtb> \
 #        --sdboot    <systemd-bootaa64.efi>  --cmdline   <boot.img 的 cmdline.txt> \

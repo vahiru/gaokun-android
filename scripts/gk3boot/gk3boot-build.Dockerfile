@@ -1,7 +1,7 @@
 # gk3boot 的 UEFI 构建与 QEMU 夹具环境（见 tools/gk3boot/README.md）。
 # 由 scripts/gk3boot/test-probe.sh 调用。
-# ★ 与 scripts/live/live-build.Dockerfile 同一个 Debian 13 基础镜像（arm64，Mac 上原生，不用 qemu-user）。
-# ★ 版本钉死：systemd-boot-efi 必须与设备同版本（257.13，scripts/live/packages-live.lock:333）；
+# ★ 与 installer/tools/build/live-build.Dockerfile 同一个 Debian 13 基础镜像（arm64，Mac 上原生，不用 qemu-user）。
+# ★ 版本钉死：systemd-boot-efi 必须与设备同版本（257.13，installer/tools/build/packages-live.lock:333）；
 #   gnu-efi / QEMU / AAVMF 钉住是为了"昨天绿今天红"时能把变量压到只剩代码。
 # ★ fastboot（主机端，android-platform-tools）：S7c 的执行端端到端场景用它对 QEMU 里的 gk3-fastbootd 发命令
 #   （与 fastbootd-test.Dockerfile 同样不钉版本）。

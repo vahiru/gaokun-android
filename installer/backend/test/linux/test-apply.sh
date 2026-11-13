@@ -3,12 +3,12 @@
 # check_install.py 对照测试的输入与独立的工具（sgdisk、dumpe2fs）逐项检查（分区、misc / boot / super 的内容、ext4、
 # ESP 上的每个文件）；再测拒绝路径（盘一个字节不变、ERR 带 touched=no）、写到一半出错（touched=yes）、4Kn 盘。
 #
-#   bash scripts/live/test-in-container.sh installer/backend/test/linux/test-apply.sh
+#   bash installer/tools/test/test-in-container.sh installer/backend/test/linux/test-apply.sh
 #
 # ⚠️ 只动容器所在虚拟机里的 loop 设备（背后是 /tmp 下的稀疏文件）。
 set -u
 cd "$(dirname "$0")/../../../.."
-[ "$(id -u)" = 0 ] || { echo "要 root（用 scripts/live/test-in-container.sh 跑）"; exit 2; }
+[ "$(id -u)" = 0 ] || { echo "要 root（用 installer/tools/test/test-in-container.sh 跑）"; exit 2; }
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS+1)); echo "  ✓ $*"; }
 bad() { FAIL=$((FAIL+1)); echo "  ✗ $*"; }

@@ -1,5 +1,5 @@
 # 安装器后端等的测试环境：Debian trixie + 分区 / 文件系统 / libsparse 工具。
-# 由 scripts/live/test-in-container.sh 构建和调用，不单独用。
+# 由 installer/tools/test/test-in-container.sh 构建和调用，不单独用。
 #
 # ★ 钉死到摘要，不写 debian:trixie —— tag 会动，测试环境一动，
 #   "昨天绿今天红"就分不清是代码变了还是环境变了。

@@ -1,29 +1,29 @@
-# `scripts/live/`：LiveCD构建
+# `installer/tools/`：LiveCD的构建与测试
 
-本目录构建`gaokun3`的LiveCD：基于**Debian 13（trixie）arm64**的只读`squashfs` + `tmpfs` overlay内存根文件系统，开机后在`cage`中运行图形安装器（[`installer/live/`](../../installer/live/README.md)），后端是`gk3l`（[`installer/backend/`](../../installer/backend/)）。同一份镜像既可写入USB启动盘，也可放入内置盘上的安装器分区`GK3LIVE`。LiveCD中没有网络与`sshd`，安装所用的系统文件只从安装介质的`gaokun3/payload/`读取。
+本目录构建`gaokun3`的LiveCD：基于**Debian 13（trixie）arm64**的只读`squashfs` + `tmpfs` overlay内存根文件系统，开机后在`cage`中运行图形安装器（[`installer/live/`](../live/README.md)），后端是`gk3l`（[`installer/backend/`](../backend/)）。同一份镜像既可写入USB启动盘，也可放入内置盘上的安装器分区`GK3LIVE`。LiveCD中没有网络与`sshd`，安装所用的系统文件只从安装介质的`gaokun3/payload/`读取。
 
 ## 一、构建
 
 所有步骤都在arm64容器内原生执行（Apple Silicon的Mac或arm64的Linux主机）：
 
 ```sh
-bash scripts/live/build-flutter.sh                                         # 编译图形安装器 → out/installer-flutter-linux-arm64/
-bash scripts/live/build-live.sh --boot-img <boot.img> --firmware <目录>     # 构建LiveCD → out/live/gaokun3-live.img
-bash scripts/live/build-live.sh --release <发布目录> --firmware <目录> --payload   # 同时放入系统文件
+bash installer/tools/build/build-flutter.sh                                         # 编译图形安装器 → out/installer-flutter-linux-arm64/
+bash installer/tools/build/build-live.sh --boot-img <boot.img> --firmware <目录>     # 构建LiveCD → out/live/gaokun3-live.img
+bash installer/tools/build/build-live.sh --release <发布目录> --firmware <目录> --payload   # 同时放入系统文件
 ```
 
 `--firmware`指向形如`/vendor/firmware`的目录（GPU的zap shader为华为专有固件，Debian中没有）。正式构建由GitHub Actions完成（[`.github/workflows/installer-livecd.yml`](../../.github/workflows/installer-livecd.yml)，推送`livecd-v*`标签触发），输入均按sha256固定。
 
 `build-live.sh`在容器内依次执行：
-1. `build-rootfs.sh`：用`mmdebstrap`按[`pkgs.txt`](pkgs.txt)构建根文件系统，叠加`overlay-common/`与`overlay-live/`，静态编译`gk3l`，放入图形安装器与GPU固件；打包`squashfs`前逐项检查（命令、单元是否启用、动态库能否解析、字体、freedreno）。所装软件包的版本记入[`packages-live.lock`](packages-live.lock)。
-2. `build-initramfs.sh`：静态`busybox`加[`initramfs-init`](initramfs-init)，生成`initramfs.img`。
-3. `gk3-bootimg.py`：从Android的`boot.img`拆出共用的内核`Image`、`gaokun3.dtb`与内核参数。
-4. `build-usb.sh`：组装可启动的GPT镜像（单个ESP，卷标`GK3LIVE`）。
+1. `build/build-rootfs.sh`：用`mmdebstrap`按[`pkgs.txt`](build/pkgs.txt)构建根文件系统，叠加`build/overlay/`，静态编译`gk3l`，放入图形安装器与GPU固件；打包`squashfs`前逐项检查（命令、单元是否启用、动态库能否解析、字体、freedreno）。所装软件包的版本记入[`packages-live.lock`](build/packages-live.lock)。
+2. `build/build-initramfs.sh`：静态`busybox`加[`initramfs-init`](build/initramfs-init)，生成`initramfs.img`。
+3. `build/gk3-bootimg.py`：从Android的`boot.img`拆出共用的内核`Image`、`gaokun3.dtb`与内核参数。
+4. `build/build-usb.sh`：组装可启动的GPT镜像（单个ESP，卷标`GK3LIVE`）。
 
 ## 二、关键设计
 
 1. **与Android共用同一内核**：
-   LiveCD与Android使用完全相同的内核与`gaokun3.dtb`，只以`initramfs.img`和内核参数区分。为此[`scripts/kernel-config-android.sh`](../kernel-config-android.sh)内建了：
+   LiveCD与Android使用完全相同的内核与`gaokun3.dtb`，只以`initramfs.img`和内核参数区分。为此[`scripts/kernel-config-android.sh`](../../scripts/kernel-config-android.sh)内建了：
    - `CONFIG_SQUASHFS=y`（挂载只读根文件系统）。
    - `CONFIG_NTFS3_FS=y`（双系统安装前只读挂载Windows分区，检查Windows是否处于休眠，同时显式禁用旧版`CONFIG_NTFS_FS`）。
    - `CONFIG_NLS_UTF8=y`（支持FAT32上的非ASCII文件名）。
@@ -41,10 +41,10 @@ bash scripts/live/build-live.sh --release <发布目录> --firmware <目录> --p
 
 ```sh
 # 需要root、loop设备与分区工具的测试，在容器里运行（环境见test-env.Dockerfile）：
-bash scripts/live/test-in-container.sh installer/backend/test/linux/test-apply.sh   # gk3l的其余容器测试同在该目录
-bash scripts/live/test-in-container.sh scripts/live/test-initramfs.sh            # initramfs读进内存与介质记录
-bash scripts/live/test-in-container.sh scripts/live/gen-fixtures.sh              # 用真实的gk3l录制图形安装器的测试数据
+bash installer/tools/test/test-in-container.sh installer/backend/test/linux/test-apply.sh   # gk3l的其余容器测试同在该目录
+bash installer/tools/test/test-in-container.sh installer/tools/test/test-initramfs.sh            # initramfs读进内存与介质记录
+bash installer/tools/test/test-in-container.sh installer/tools/test/gen-fixtures.sh              # 用真实的gk3l录制图形安装器的测试数据
 
-bash scripts/live/test-boot-container.sh   # 以systemd为PID 1启动构建好的squashfs，检查各单元
-bash scripts/live/test-render.sh           # 在无头cage中运行图形安装器：截图与内存占用
+bash installer/tools/test/test-boot-container.sh   # 以systemd为PID 1启动构建好的squashfs，检查各单元
+bash installer/tools/test/test-render.sh           # 在无头cage中运行图形安装器：截图与内存占用
 ```

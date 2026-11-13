@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # 开机冒烟：把 LiveCD 的 squashfs 解开当容器根，以 systemd 为 PID 1 启动，看各单元起不起得来。
 #
-#   bash scripts/live/test-boot-container.sh [squashfs] [秒数]     # 默认 out/live/gaokun3-live.squashfs、70 秒
-#   GK3_TEST_OVERLAY=1 bash scripts/live/test-boot-container.sh    # 先把【工作区】的 overlay 叠上去再开机
+#   bash installer/tools/test/test-boot-container.sh [squashfs] [秒数]     # 默认 out/live/gaokun3-live.squashfs、70 秒
+#   GK3_TEST_OVERLAY=1 bash installer/tools/test/test-boot-container.sh    # 先把【工作区】的 overlay 叠上去再开机
 #     —— 只改了 overlay、又没法重建时用（2026-09-25：换了网络，deb.debian.org 不通）。
 #     ⚠️ 这样验的是"已构建的根 + 工作区的 overlay"，【不是】产物本身；上机前仍要重建。
 #
@@ -14,12 +14,12 @@
 #      seatd           可能拿不到 VT
 #      getty@tty2      容器里没有 /dev/tty2（ConditionPathExists 跳过）
 set -euo pipefail
-REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 SQ=${1:-$REPO/out/live/gaokun3-live.squashfs}
 SECS=${2:-70}
 die() { echo "✗ $*" >&2; exit 1; }
-[ -f "$SQ" ] || die "没有 ${SQ}（先跑 scripts/live/build-live.sh）"
-H=$(shasum -a 256 "$REPO/scripts/live/live-build.Dockerfile" 2>/dev/null || sha256sum "$REPO/scripts/live/live-build.Dockerfile")
+[ -f "$SQ" ] || die "没有 ${SQ}（先跑 installer/tools/build/build-live.sh）"
+H=$(shasum -a 256 "$REPO/installer/tools/build/live-build.Dockerfile" 2>/dev/null || sha256sum "$REPO/installer/tools/build/live-build.Dockerfile")
 BUILD="gk3-live-build:${H:0:12}"
 docker image inspect "$BUILD" >/dev/null 2>&1 || die "没有构建环境 ${BUILD}（先跑一次 build-live.sh）"
 NAME=gk3-bootsmoke
@@ -30,8 +30,7 @@ docker run --rm -v "$(cd "$(dirname "$SQ")" && pwd):/in:ro" "$BUILD" \
 if [ -n "${GK3_TEST_OVERLAY:-}" ]; then
     echo "══ ⚠️ 叠上工作区的 overlay（验的不是产物本身）"
     c=$(docker create "$NAME:latest" /bin/true)
-    ods=("$REPO/scripts/live/overlay-common")
-    case "$(basename "$SQ")" in *live*) ods+=("$REPO/scripts/live/overlay-live") ;; esac
+    ods=("$REPO/installer/tools/build/overlay")
     for od in "${ods[@]}"; do docker cp "$od/." "$c:/"; done
     docker commit "$c" "$NAME:latest" >/dev/null; docker rm "$c" >/dev/null
     # docker cp 带进来的是 Mac 上的属主（uid 501）；产物里是 root —— 改回来，别让测试与产物在这一点上不同

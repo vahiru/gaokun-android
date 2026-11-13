@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # 造 gaokun3 LiveCD 的 initramfs。
 #
-#   bash scripts/live/build-initramfs.sh --busybox <busybox.static> --out <目录>
+#   bash installer/tools/build/build-initramfs.sh --busybox <busybox.static> --out <目录>
 #
 # 里面只有：静态 busybox + 我们的 /init。没有模块 —— 本机内核该有的都是 =y
 # （NVMe / USB_STORAGE / SQUASHFS / OVERLAY_FS / loop / vfat / ext4）。
 # 不需要 root。
 set -euo pipefail
 
-REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-LIVE=$REPO/scripts/live
+REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
+LIVE=$REPO/installer/tools/build
 BB=; OUT=
 
 die() { echo "!! $*" >&2; exit 1; }

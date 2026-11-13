@@ -3,7 +3,7 @@
 # 由 gk3-installer.service 拉起：cage -s -- /usr/bin/gk3-installer-session
 #
 # ★ 旋转与缩放只能在这里做：cage 0.2.0 没有旋转参数，但支持输出管理协议，
-#   wlr-randr 实测能设模式与缩放（scripts/live/test-render.sh）。
+#   wlr-randr 实测能设模式与缩放（installer/tools/test/test-render.sh）。
 #
 # 可以在启动项的 cmdline 上改：
 #   gk3.rotate=270    输出变换。默认 270 当初是推理出来的（C 版把内容相对面板顺时针转 90°，

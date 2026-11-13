@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 用【真后端】（gk3l，installer/backend/src/linux/）录图形安装器的 fixture（界面开发、出图时回放它们）。
 #
-#   bash scripts/live/test-in-container.sh scripts/live/gen-fixtures.sh
+#   bash installer/tools/test/test-in-container.sh installer/tools/test/gen-fixtures.sh
 #   GK3_TEST_BOOTIMG=/repo/out/…/boot.img …   （用真发版 boot.img，进度里的大小更像真的）
 #
 # 产物：installer/live/testdata/<场景>/{index.txt, *.txt}，格式见 record-fixture.py。
@@ -24,8 +24,8 @@
 #   windows-setup Windows 脚本的默认：只缩出 512 MiB 放 GK3LIVE、没有空闲 → 要先回 Windows 压缩卷
 #   windows-setup-shrunk  上面那块盘在 Windows 里再缩出 80 GiB 之后 → 走双系统
 set -u
-cd "$(dirname "$0")/../.."
-[ "$(id -u)" = 0 ] || { echo "要 root（用 scripts/live/test-in-container.sh 跑）"; exit 2; }
+cd "$(dirname "$0")/../../.."
+[ "$(id -u)" = 0 ] || { echo "要 root（用 installer/tools/test/test-in-container.sh 跑）"; exit 2; }
 export GK3_ALLOW_LOOP=1 GK3_MACHINE_ID=0123456789abcdef0123456789abcdef GK3_SKIP_MODEL_CHECK=1
 # 测试容器的内核没有 ntfs3：休眠检查改用 ntfs-3g 只读挂载（gk3l 的 GK3_NTFS_MOUNT）
 grep -qw ntfs3 /proc/filesystems || export GK3_NTFS_MOUNT="ntfs-3g -o ro"
@@ -117,7 +117,7 @@ rec() {
     local sc=$1 d=$2 name=$3 call=$4 real=${5:-}
     local dir=$OUT/$sc; mkdir -p "$dir"
     [ -n "$real" ] || real="$G $(printf '%s' "$call" | sed "s#/dev/nvme0n1#$d#g")"
-    python3 scripts/live/record-fixture.py "$dir/$name" \
+    python3 installer/tools/test/record-fixture.py "$dir/$name" \
         --sub "${STICK}p=/dev/sda" --sub "$STICK=/dev/sda" --sub "$d=/dev/nvme0n1" \
         --sub "-$(basename "$d")-=-nvme0n1-" \
         --sub "$REL=/media/gk3/gaokun3/payload" --sub "$W=/tmp" \
@@ -138,7 +138,7 @@ probe_of() {   # $2=nostick：这个场景里没有 U 盘（免 U 盘安装）
 header() {   # $1=场景 $2=说明
     mkdir -p "$OUT/$1"; rm -f "$OUT/$1"/*.txt
     { echo "# 场景：$1 —— $2"
-      echo "# 录制：scripts/live/gen-fixtures.sh，$(date +%F)，Debian $(cat /etc/debian_version) 容器，loop 设备"
+      echo "# 录制：installer/tools/test/gen-fixtures.sh，$(date +%F)，Debian $(cat /etc/debian_version) 容器，loop 设备"
       echo "# 替换：loop 设备 → /dev/nvme0n1（内置盘）与 /dev/sda（安装 U 盘，挂在 /media/gk3）；"
       echo "#       DISK 行的 bus= 按真机填（loop 报不出来）；U 盘的 removable 填 1。其余一律原样。"
       echo "# 格式：<界面发出的调用（gk3l 的命令与参数）>  <文件>。找不到精确匹配时用 '<命令> *' 那一行。"; } > "$OUT/$1/index.txt"
@@ -208,7 +208,7 @@ drop_disk "$DF"
 
 # 免 U 盘装双系统（Windows 安装器的"制作安装介质"）：Windows 里先"压缩卷"缩出空闲区，空闲区末尾建安装器分区 GK3LIVE
 # （XBOOTLDR，FAT32，4 GiB），下次开机从它启动。压缩卷用 win_shrink 代替，其余照实造。
-# 开机时 initramfs 把 gaokun3/ 读进内存、卸下 GK3LIVE，并把介质记进 /run/gaokun3/medium（scripts/live/initramfs-init）：
+# 开机时 initramfs 把 gaokun3/ 读进内存、卸下 GK3LIVE，并把介质记进 /run/gaokun3/medium（installer/tools/build/initramfs-init）：
 # 这里用 tmpfs 当 /media/gk3 的内存副本，记录写进 GK3_MEDIUM_FILE
 mk_winlive() {   # $1=盘
     local d=$1 lf ls
@@ -375,24 +375,24 @@ echo "#  job_status-running.txt / job_follow-apply.txt：界面重新起来时 a
 # 只留这两块的行：容器里别的场景留下的 loop 盘（GK3_ALLOW_LOOP=1 下也算"可移动"）不是真机上会有的东西
 U2=$(new_disk usb2 1G); sgdisk -o -n 1:2048:0 -t 1:0700 -c 1:"Basic data partition" "$U2" >/dev/null 2>&1; settle "$U2"
 mkfs.vfat -F 32 -n KINGSTON "${U2}p1" >/dev/null
-python3 scripts/live/record-fixture.py "$C/log_targets.txt" --sub "${STICK}p=/dev/sda" --sub "${U2}p=/dev/sdb" \
+python3 installer/tools/test/record-fixture.py "$C/log_targets.txt" --sub "${STICK}p=/dev/sda" --sub "${U2}p=/dev/sdb" \
     -- bash -c "$G log-targets | grep -e 'part=${STICK}p' -e 'part=${U2}p'"
 drop_disk "$U2"
 printf '%-78s %s\n' "log-targets" "log_targets.txt   # 录（假 U 盘挂在 /media/gk3）" >> "$C/index.txt"
-python3 scripts/live/record-fixture.py "$C/save_logs.txt" --sub "${STICK}p=/dev/sda" \
+python3 installer/tools/test/record-fixture.py "$C/save_logs.txt" --sub "${STICK}p=/dev/sda" \
     -- bash -c "$G save-logs --to ${STICK}p1"
 printf '%-78s %s\n' "save-logs *" "save_logs.txt   # 录（存到假 U 盘上）" >> "$C/index.txt"
 # 录：安装介质里带了什么
-python3 scripts/live/record-fixture.py "$C/release_info.txt" --sub "$REL=/media/gk3/gaokun3/payload" \
+python3 installer/tools/test/record-fixture.py "$C/release_info.txt" --sub "$REL=/media/gk3/gaokun3/payload" \
     -- bash -c "$G release-info --dir $REL"
 printf '%-78s %s\n' "release-info" "release_info.txt   # 录" >> "$C/index.txt"
-python3 scripts/live/record-fixture.py "$C/release_info-none.txt" -- bash -c "$G release-info"
+python3 installer/tools/test/record-fixture.py "$C/release_info-none.txt" -- bash -c "$G release-info"
 echo "#  release_info-none.txt：介质里没有系统文件（界面测试用 overrides 选它）" >> "$C/index.txt"
 # 录：删除分区 —— 在另一块出厂布局的盘上真做一遍。放 common/（任何场景都能用），界面按 '<命令> *' 取；
 # 做完之后界面会重新探测，拿到的仍是各场景自己那份 probe（测试只核对发出去的调用）
 DE=$(new_disk edit 488386M); make_factory "$DE"
 recc() {   # 和 rec 一样，但录进 common/；$1=文件名 $2=界面发出的调用（nvme0n1）$3=实际执行的命令
-    python3 scripts/live/record-fixture.py "$C/$1" --sub "${DE}p=/dev/nvme0n1p" --sub "$DE=/dev/nvme0n1" --sub "-$(basename "$DE")-=-nvme0n1-" --sub "$W=/tmp" \
+    python3 installer/tools/test/record-fixture.py "$C/$1" --sub "${DE}p=/dev/nvme0n1p" --sub "$DE=/dev/nvme0n1" --sub "-$(basename "$DE")-=-nvme0n1-" --sub "$W=/tmp" \
         --sub "${STICK}p=/dev/sda" -- bash -c "$3"
     printf '%-78s %s\n' "$2" "$1   # 录（出厂布局的另一块盘上真做）" >> "$C/index.txt"
 }
@@ -408,7 +408,7 @@ DEB=$(new_disk eiobase 20480M); sgdisk -o "$DEB" >/dev/null 2>&1
 NS=$(( 20480 * 2048 ))
 printf '0 1 linear %s 0\n1 33 error\n34 %s linear %s 34\n' "$DEB" $((NS - 34)) "$DEB" | dmsetup create --noudevsync gk3-fix-eio
 EIO=$(losetup -f --show "/dev/$(dmsetup info -c --noheadings -o blkdevname gk3-fix-eio | tr -d ' ')")
-python3 scripts/live/record-fixture.py "$W/probe-raw.txt" --sub "${STICK}p=/dev/sda" --sub "$STICK=/dev/sda" \
+python3 installer/tools/test/record-fixture.py "$W/probe-raw.txt" --sub "${STICK}p=/dev/sda" --sub "$STICK=/dev/sda" \
     --sub "${DM}p=/dev/nvme0n1p" --sub "$DM=/dev/nvme0n1" --sub "$EIO=/dev/sdb" -- "$G" probe
 python3 - "$W/probe-raw.txt" "$C/probe-mbr-unreadable.txt" <<'PY'
 import re, sys

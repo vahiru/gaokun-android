@@ -1,5 +1,5 @@
 # LiveCD（installer/live 的图形安装器 + Debian live 系统）：在 GitHub 的 arm64 运行器上原生构建，与本地构建
-# 同一套脚本（scripts/live/build-flutter.sh → build-live.sh）。产物是 U 盘镜像 gaokun3-live.img，不带 Android 的
+# 同一套脚本（installer/tools/build/build-flutter.sh → build-live.sh）。产物是 U 盘镜像 gaokun3-live.img，不带 Android 的
 # 系统文件（gaokun3/payload/ 由用户另行放入，或由 Windows 安装器制作安装介质时写入）。
 #
 # 什么时候跑（不随每次推送跑）：
@@ -12,7 +12,7 @@
 #     按同一发布里的 install-artifacts.sha256 核对；手动运行时可以另指一个标签
 #   - GPU 固件（cage 要 GPU；zap shader 是华为专有的，Debian 的固件包里没有，见 build-rootfs.sh 的 GPU_FW）：
 #     KawaiiHachimi/linux-gaokun-buildbot 的固定提交，三个文件与 ROM 的 /vendor/firmware 里的逐字节相同
-#   - Flutter、Debian 基础镜像由 scripts/live/ 的 Dockerfile 钉死；字体由 installer/common/tool/fetch-fonts.py 按 sha256 下载
+#   - Flutter、Debian 基础镜像由 installer/tools/build/ 的 Dockerfile 钉死；字体由 installer/common/tool/fetch-fonts.py 按 sha256 下载
 name: LiveCD
 
 on:
@@ -97,9 +97,9 @@ jobs:
           command -v clang >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq clang; }
           make -C installer/backend test
       - name: graphical installer (Flutter, linux-arm64)
-        run: bash scripts/live/build-flutter.sh
+        run: bash installer/tools/build/build-flutter.sh
       - name: live image
-        run: bash scripts/live/build-live.sh --boot-img out/rom/boot.img --firmware out/vendor-firmware
+        run: bash installer/tools/build/build-live.sh --boot-img out/rom/boot.img --firmware out/vendor-firmware
       - name: collect
         run: |
           mkdir -p dist

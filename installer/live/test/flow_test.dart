@@ -14,7 +14,7 @@ import 'package:gk3_installer/ui/screens_risk.dart';
 
 import 'helpers.dart';
 
-/// windows-live 场景里 Data 与 GK3LIVE 之间那段空闲（scripts/live/gen-fixtures.sh 的 mk_winlive）
+/// windows-live 场景里 Data 与 GK3LIVE 之间那段空闲（installer/tools/test/gen-fixtures.sh 的 mk_winlive）
 const kLiveFreeStart = 790497280;
 const kLiveFreeEnd = 949880831;
 
