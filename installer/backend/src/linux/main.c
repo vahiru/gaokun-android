@@ -4,7 +4,7 @@
  *   gk3l preflight    安装前检查：机型与电源（只读）
  *   gk3l plan ...     算分区方案（纯计算，不读盘）
  *   gk3l apply ...    安装：双系统 / 整盘清空 / 重新安装（见 apply.c）
- *   gk3l delete ...   删除一个分区（见 edit.c）
+ *   gk3l delete ...   删除一个分区；gk3l restore-table --file …  把动盘之前的分区表备份写回去（见 edit.c）
  *   gk3l esp-info ... 这块盘上 ESP 的状况；gk3l release-info [--dir DIR] 安装介质上的系统文件（只读，见 info.c）
  *   gk3l job ...      写盘进程脱离界面运行（见 job.c）
  *   gk3l log-targets / save-logs   把日志另存到用户拿得到的地方（见 logs.c）
@@ -34,6 +34,7 @@ static const struct {
     {"plan", gk3l_cmd_plan},
     {"apply", gk3l_cmd_apply},
     {"delete", gk3l_cmd_delete},
+    {"restore-table", gk3l_cmd_restore_table},
     {"esp-info", gk3l_cmd_esp_info},
     {"release-info", gk3l_cmd_release_info},
     {"job", gk3l_cmd_job},
@@ -66,7 +67,7 @@ int main(int argc, char **argv)
     signal(SIGPIPE, SIG_IGN);
 
     if (argc < 2) {
-        fprintf(stderr, "!! usage: gk3l probe|preflight|plan|apply|delete|esp-info|release-info|job|log-targets|save-logs|--version\n");
+        fprintf(stderr, "!! usage: gk3l probe|preflight|plan|apply|delete|restore-table|esp-info|release-info|job|log-targets|save-logs|--version\n");
         return 2;
     }
     if (!strcmp(argv[1], "--version")) {

@@ -12,6 +12,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <linux/fs.h>
+#include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
 #include <unistd.h>
@@ -20,6 +22,7 @@
 #include "../proto.h"
 #include "../release.h"
 #include "disk.h"
+#include "files.h"
 #include "lx.h"
 
 #define ESP_TYPE "C12A7328-F81F-11D2-BA4B-00A0C93EC93B"
@@ -135,6 +138,97 @@ int gk3l_cmd_delete(int argc, char **argv)
         gk3w_line_free(&l);
     }
 out:
+    gk3w_aligned_free(chk);
+    gk3l_disk_close(&d);
+    return rc;
+}
+
+/* gk3l restore-table --file <备份> [--disk /dev/X]
+ *
+ * 把 gk3l 动盘之前存的分区表备份（gpt-before-<tag>-<盘>-<时间>-head<N>-tail<M>.bin：盘头 N 个扇区 + 盘尾 M 个扇区，原样）
+ * 写回原位，逐段读回核对，再让内核重读分区表；有分区在用、重读不了时提示重启。盘名取自文件名，--disk 可以另指。
+ * 文件大小、盘的扇区大小与盘尾位置对不上就拒绝：备份不是这块盘的。成功时 stdout 一行 RESULT op=restore-table disk=… reread=yes|no */
+int gk3l_cmd_restore_table(int argc, char **argv)
+{
+    const char *file = gk3l_arg(argc, argv, "--file"), *disk = gk3l_arg(argc, argv, "--disk"), *base, *h;
+    static gk3l_disk d;
+    unsigned long long head = 0, tail = 0;
+    char name[64] = "";
+    uint8_t *data = NULL, *buf = NULL, *chk = NULL;
+    size_t len = 0;
+    gk3w_touched T = GK3W_TOUCHED_NO;
+    int rc = 1, err, w = 0, reread;
+
+    if (!file)
+        return gk3l_err(T, "usage", "usage: restore-table --file gpt-before-...-headN-tailM.bin [--disk /dev/X]", 0);
+    base = strrchr(file, '/') ? strrchr(file, '/') + 1 : file;
+    h = strstr(base, "-head");
+    if (strncmp(base, "gpt-before-", 11) || !h || sscanf(h, "-head%llu-tail%llu.bin", &head, &tail) != 2 || !head || !tail)
+        return gk3l_err_kv(T, "usage", "file", file, "not a partition table backup made by this installer (gpt-before-...-headN-tailM.bin)", 0);
+    if (disk) {
+        if (gk3l_whole_disk_name(disk, name, sizeof name))
+            return gk3l_err_kv(T, "disk-open", "disk", disk, "--disk is not a whole disk", 0);
+    } else {
+        /* gpt-before-<tag>-<盘>-<年月日>-<时分秒>-head…：盘名是 tag 之后、日期之前的那一段 */
+        const char *a = strchr(base + 11, '-'), *b;
+        b = a ? strchr(a + 1, '-') : NULL;
+        if (!a || !b || (size_t)(b - a - 1) >= sizeof name || b == a + 1)
+            return gk3l_err_kv(T, "usage", "file", file, "cannot tell the disk from the file name; pass --disk", 0);
+        memcpy(name, a + 1, (size_t)(b - a - 1));
+        name[b - a - 1] = 0;
+    }
+    if ((err = gk3l_read_file(file, &data, &len, 8u << 20)))
+        return gk3l_err_kv(T, "restore-read", "file", file, "cannot read the backup file", err);
+    err = gk3l_disk_open(&d, name, 1);
+    if (err) {
+        free(data);
+        return gk3l_err_kv(T, err == EACCES || err == EPERM ? "not-root" : "disk-open", "disk", name, "cannot open the disk for writing", err);
+    }
+    /* 备份必须是这块盘的：长度 = (head + tail) × 扇区大小；GPT 的备份表头（在盘尾那段的最后一个扇区）指着这块盘的最后一个扇区 */
+    if ((uint64_t)len != (head + tail) * d.bs || head + tail > d.blocks) {
+        gk3l_err_kv(T, "restore-mismatch", "disk", d.path, "the backup does not match this disk (sector size or length differ) (disk not touched)", 0);
+        goto out;
+    }
+    if (!memcmp(data + len - d.bs, "EFI PART", 8) && gk3_le64(data + len - d.bs + 24) != d.blocks - 1) {
+        gk3l_err_kv(T, "restore-mismatch", "disk", d.path, "the backup was made on a disk of a different size (disk not touched)", 0);
+        goto out;
+    }
+    if (gk3l_disk_lock(&d)) {
+        gk3l_err(T, "disk-busy", "another program holds the disk; try again (disk not touched)", errno);
+        goto out;
+    }
+    buf = gk3w_aligned_alloc(len);
+    chk = gk3w_aligned_alloc(len);
+    if (!buf || !chk) {
+        gk3l_err(T, "nomem", "out of memory", ENOMEM);
+        goto out;
+    }
+    memcpy(buf, data, len);
+    T = GK3W_TOUCHED_YES;
+    /* 先写盘尾（备份表）再写盘头（主表）：中途断电时主表还是现在的，固件与内核照它走 */
+    w = gk3l_write_verify(&d, buf + head * d.bs, (size_t)(tail * d.bs), (d.blocks - tail) * d.bs, chk);
+    if (!w)
+        w = gk3l_write_verify(&d, buf, (size_t)(head * d.bs), 0, chk);
+    if (w) {
+        gk3l_err_kv(T, w == -1 ? "disk-write" : "disk-verify", "part", "gpt", w == -1 ? "writing the partition table back failed" : "the restored partition table did not read back identically", errno);
+        goto out;
+    }
+    /* 让内核重读整张表；有分区在用（挂着）时内核拒绝，要重启 */
+    reread = ioctl(d.fd, BLKRRPART) == 0;
+    if (!reread)
+        gk3l_log("the partition table is restored on the disk, but the kernel cannot re-read it while a partition is in use; reboot");
+    {
+        gk3w_line l = {0};
+        gk3w_line_begin(&l, "RESULT");
+        gk3w_line_kv(&l, "op", "restore-table");
+        gk3w_line_kv(&l, "disk", d.path);
+        gk3w_line_kv(&l, "reread", reread ? "yes" : "no");
+        rc = gk3w_line_emit(&l, stdout) ? 1 : 0;
+        gk3w_line_free(&l);
+    }
+out:
+    free(data);
+    gk3w_aligned_free(buf);
     gk3w_aligned_free(chk);
     gk3l_disk_close(&d);
     return rc;

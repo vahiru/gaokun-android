@@ -332,6 +332,21 @@ NU=$(printf '%s\n' "$DK" | awk '/name=userdata/{print $2}' | cut -d= -f2)
 dumpe2fs -h "${K}p$NU" 2>/dev/null | grep -q '^Block size: *4096' && ok "4Kn：userdata 是 4 KiB 块的 ext4" || bad "4Kn：userdata 的 ext4 不对"
 losetup -d "$K"
 
+echo "═══ 5b. restore-table：用双系统安装前的备份把分区表写回去 ═══"
+cp --sparse=always "$W/base.img" "$W/rt.img"; RT=$(attach "$W/rt.img")
+"$G" apply --disk "$RT" --region-start "$RS" --region-end "$RE" --release "$REL" --backup-dir "$W/rtbk" >"$W/rt.out" 2>/dev/null
+BK=$(field "$(grep '^BACKUP ' "$W/rt.out")" path)
+O=$("$G" restore-table --file "$BK" --disk "$RT" 2>"$W/rt.err"); rc=$?
+N=$(( 64 * 1024 * 2048 ))
+[ "$rc" = 0 ] && [ "$(field "$O" op)" = restore-table ] && cmp -s <(head -c $((34 * 512)) "$RT") <(head -c $((34 * 512)) "$W/base.img") \
+    && cmp -s <(tail -c $((33 * 512)) "$W/rt.img") <(tail -c $((33 * 512)) "$W/base.img") && [ "$(field "$O" reread)" = yes ] \
+    && [ "$(sgdisk -p "$RT" | awk '/^ *[0-9]+ /' | wc -l)" = 4 ] && [ ! -e "${RT}p5" ] \
+    && ok "备份写回：盘头盘尾与装之前逐字节相同，内核重读后只剩 4 个分区" || { bad "restore-table：rc=$rc $O"; cat "$W/rt.err" | tail -3; }
+truncate -s 1M "$W/gpt-before-apply-loop0-20260101-000000-head34-tail33.bin"
+O=$("$G" restore-table --file "$W/gpt-before-apply-loop0-20260101-000000-head34-tail33.bin" --disk "$RT" 2>&1); rc=$?
+[ "$rc" != 0 ] && printf '%s' "$O" | grep -q '^ERR code=restore-mismatch' && ok "长度不对的备份 ⇒ restore-mismatch" || bad "长度不对：$O"
+losetup -d "$RT"
+
 echo "═══ 6. 重新安装对拍：在第 1 组装好的两块盘上，shell 版与 gk3l 各重新安装一遍 ═══"
 # reinst <keep yes|no> <说明>：userdata 里先放一个文件，装完看它在不在
 reinst() {

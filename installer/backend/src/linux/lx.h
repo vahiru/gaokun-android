@@ -50,6 +50,7 @@ int gk3l_sys_gate(void);
 /* ── 命令 ── */
 int gk3l_cmd_apply(int argc, char **argv);
 int gk3l_cmd_delete(int argc, char **argv);
+int gk3l_cmd_restore_table(int argc, char **argv);
 int gk3l_cmd_esp_info(int argc, char **argv);
 int gk3l_cmd_release_info(int argc, char **argv);
 int gk3l_cmd_job(int argc, char **argv);

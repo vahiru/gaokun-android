@@ -93,6 +93,11 @@ gk3w_plan_err gk3w_plan_print(const gk3w_plan_req *r, const char *disk, gk3w_pla
         gk3w_line_u64(&l, "avail_mib", out->avail_mib);
         gk3w_line_u64(&l, "need_mib", out->need_mib);
         gk3w_line_u64(&l, "fixed_mib", out->fixed_mib);
+        /* /data 指定得不对时：允许的范围（界面据此写明能设多大） */
+        if (pe == GK3W_PLAN_EUD_SMALL)
+            gk3w_line_u64(&l, "min_mib", GK3W_USERDATA_MIN_MIB);
+        if (pe == GK3W_PLAN_EUD_BIG)
+            gk3w_line_u64(&l, "max_mib", out->avail_mib - out->fixed_mib);
         (void)gk3w_line_emit(&l, fp);
         gk3w_line_free(&l);
         return pe;
