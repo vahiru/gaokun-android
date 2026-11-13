@@ -1,4 +1,4 @@
-/* ESP 上要写的东西：启动项与 loader.conf 的文本、空间检查。与 scripts/live/installer-lib.sh 的 gk3_apply
+/* ESP 上要写的东西：启动项与 loader.conf 的文本、空间检查。LiveCD（gk3l）与 Windows 安装器（gk3w）共用
  * 写出的内容逐字节相同（对拍时比对文件），检查的算式与顺序也相同。 */
 #ifndef GK3W_ESP_H
 #define GK3W_ESP_H
@@ -20,7 +20,7 @@ extern const char gk3w_loader_conf[];
 /* mid 是不是 32 位小写十六进制（ESP 根目录下 <machine-id>/ 的名字） */
 int gk3w_is_machine_id(const char *s);
 
-/* loader/entries 里的这个文件名是不是我们写的，与 scripts/windows/gaokun3-setup.ps1 的 Test-OurEntryName 相同：
+/* loader/entries 里的这个文件名是不是我们写的：
  * gaokun3-live[-N]、gk3*（统一启动入口与双系统的 gk3-windows.conf）、<mid>-android|rescue|recovery[-a|-b]；
  * 可带启动计数后缀 +N[-M]、可带 .disabled；ASCII 不分大小写。 */
 int gk3w_our_entry_name(const char *name);

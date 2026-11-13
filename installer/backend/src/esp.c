@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 
-/* installer-lib.sh：纯 Android 与双系统统一 5 秒、不写 menu-hidden */
+/* 纯 Android 与双系统统一 5 秒、不写 menu-hidden */
 const char gk3w_loader_conf[] = "timeout 5\n"
                                 "console-mode keep\n"
                                 "editor no\n"
@@ -221,7 +221,7 @@ int gk3w_is_machine_id(const char *s)
 
 /* 文件名与各行都是承重的：boot_control HAL 按 *-android-a.conf / *-android-b.conf 改写 loader.conf 的 default
  * （EspSlot.cpp:41-43）；OTA postinstall 只改 options 那一行、只往 slot_<后缀>/ 写这三个文件名。
- * ⚠️ 标题里的 "crDroid 16.0" 照抄 installer-lib.sh（那边已经过时，要改两边一起改）。 */
+ * ⚠️ 标题里的 "crDroid 16.0" 是写死的，换大版本时要改。 */
 int gk3w_esp_android_entry(char *out, size_t cap, const char *mid, char slot, const char *cmdline)
 {
     int n;
@@ -241,7 +241,7 @@ int gk3w_esp_android_entry(char *out, size_t cap, const char *mid, char slot, co
 
 gk3w_esp_check gk3w_esp_space_check(const gk3w_esp_space *in)
 {
-    /* 顺序与 installer-lib.sh gk3_apply 双系统那段相同 */
+    /* 先回落路径，再 Windows 的引导管理器 */
     if (!in->reinstall && in->esp_size_mib > 0 && in->esp_size_mib < GK3W_ESP_MIN_SIZE_MIB)
         return GK3W_ESP_TOO_SMALL;
     if (in->free_kib < in->need_kib)

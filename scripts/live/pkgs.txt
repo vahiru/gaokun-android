@@ -1,0 +1,55 @@
+# LiveCD 的包（Debian 13 trixie 包名）。由 build-rootfs.sh 以 --no-install-recommends 装：推荐包不跟进来，要的就写在这里。
+# ★ 每一个都要说得出"没有它会怎样"。镜像里多一个包就多一个会坏的东西。
+
+# —— init 与基础 ——
+# ★ systemd-sysv 提供 /sbin/init；initramfs-init 最后 switch_root 到它
+systemd-sysv
+# ★ udev：libinput 靠 udev 的 input_id 规则打的属性（ID_INPUT_TOUCHSCREEN）才知道一个设备是触摸屏，
+#   没有它界面画得出来但一个触摸事件都没有
+udev
+dbus
+kmod
+procps
+# 终端里排障用（"退出到终端"之后，tty2）
+less
+file
+strace
+pciutils
+usbutils
+gdisk
+fdisk
+nvme-cli
+# ★ initramfs 用的静态 busybox 从这里取（build-initramfs.sh 要求静态 aarch64）；镜像里的 chvt 也链到它
+busybox-static
+
+# —— 安装器后端 gk3l 调用的工具（installer/backend/src/linux/）——
+# blkid、lsblk、findmnt、dmesg
+util-linux
+# mkfs.ext4（metadata / userdata）、e2fsck 与 resize2fs（删掉安装器分区后扩大 userdata）
+e2fsprogs
+# mkfs.vfat：整盘清空时格式化新的 ESP
+dosfstools
+# ★ systemd-bootaa64.efi：gk3l 往目标机 ESP 上装的就是镜像里这一份（/usr/lib/systemd/boot/efi）；
+#   U 盘的回落路径用的也是它
+systemd-boot-efi
+
+# —— 图形安装器（Flutter 的 GTK embedder）+ cage。决定见 installer/live/README.md ——
+#   scripts/live/render-test.Dockerfile 是这一段的预演：那边能跑，这边就该能跑
+cage
+# ★ 旋转与缩放：cage 0.2.0 没有旋转参数，起来之后用 wlr-randr 设（gk3-installer-session）
+wlr-randr
+# cage（wlroots）要 libseat 拿 DRM / 输入设备；seatd 最直接，不必走 logind 会话
+seatd
+libgtk-3-0t64
+# ★ GLES：freedreno 在 libgl1-mesa-dri 里
+libgl1-mesa-dri
+libegl1
+libegl-mesa0
+libgles2
+libepoxy0
+# ★ 中文字体。⚠️ Flutter 在 Linux 上不按字符回退系统字体，主题里是按名字
+#   "WenQuanYi Micro Hei" 回退的（installer/common/lib/ui/theme.dart）—— 换字体包就要一起改，build-rootfs.sh 断言它在
+fonts-wqy-microhei
+fontconfig
+# 截屏：gk3-diag 在装机失败时把屏幕存到介质上
+grim

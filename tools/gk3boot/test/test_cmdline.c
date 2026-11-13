@@ -107,7 +107,7 @@ void test_cmdline(void)
         CHECK_EQ(gk3_cmdline_android(base, &a, out, sizeof(out)), GK3_EINVAL);
     }
 
-    /* 执行端（§4.4.1）：规则同 installer-lib.sh gk3__rescue_cmdline，再去 deferred_probe_timeout */
+    /* 执行端（§4.4.1）：规则同 LiveCD 启动项的过滤，再去 deferred_probe_timeout */
     {
         gk3_fastboot_args f = {"bootloader", 0, "1.0.0", "53912ab2-33ac-49d2-a099-94fed8664a26", NULL, false, false};
         CHECK_EQ(gk3_cmdline_fastboot(base, &f, out, sizeof(out)), GK3_OK);

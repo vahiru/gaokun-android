@@ -8,7 +8,7 @@
 #   make mke2fs-align 本仓编的 mke2fs 与 Debian mkfs.ext4 对拍（要 docker）
 #   make sdboot      Windows 安装器随程序分发的 systemd-bootaa64.efi（sdboot/fetch.sh：Debian 的包，按 sha256 钉死）
 #   make host-tools  主机上的辅助工具（build/host/unsparse：用同一份 zstd + sparse 代码把 super.img.zst 展开成文件，
-#                    与 gk3-unsparse.py 的结果对拍）
+#                    与 simg2img 的结果对拍）
 #
 # Windows 版用 llvm-mingw 在 Linux 上交叉编译（github.com/mstorsjo/llvm-mingw），LLVM_MINGW 指向解包目录。
 # libgk3core（tools/gk3boot/core）按源码编进来：GPT、CRC32、boot.img、misc 的盘上格式只在那里有一份。

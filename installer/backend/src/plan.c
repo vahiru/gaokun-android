@@ -63,7 +63,7 @@ static gk3w_plan_err plan_one(const gk3w_plan_req *r, gk3w_plan *out)
     }
     out->userdata_mib = ud;
 
-    /* ⚠️ 顺序即磁盘顺序，userdata 必须最后（installer-lib.sh gk3_plan 的同一条规矩） */
+    /* ⚠️ 顺序即磁盘顺序，userdata 必须最后（以后扩大 userdata 不用挪任何东西） */
     if (r->whole)
         add(out, "esp", GK3W_ESP_MIB, &cur, per_mib);
     add(out, "misc", GK3W_MISC_MIB, &cur, per_mib);

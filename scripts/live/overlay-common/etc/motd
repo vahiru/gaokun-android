@@ -1,10 +1,11 @@
-  gaokun3 rescue system  (Debian 13, changes are kept in RAM only)
+
+  gaokun3 LiveCD  (Debian 13, changes are kept in RAM only)
 
   This is not an installed system: the root is a read-only squashfs with a
   tmpfs overlay, and changes are lost on reboot. The boot medium is mounted
-  at /media/gk3.
+  at /media/gk3 (an in-memory copy when started from the internal disk).
 
-  Partition and file system tools: sgdisk parted resize2fs mkfs.* simg2img
-  Install Android:      bash -c '. /usr/share/gaokun3/installer-lib.sh && gk3_preflight'
-  Boot an Android slot next time: gk3-boot-android a|b [--reboot]  (--list shows the entries)
+  The graphical installer runs on tty1 (Ctrl+Alt+F1); its backend is gk3l.
+  Partition and file system tools: sgdisk fdisk blkid mkfs.ext4 e2fsck resize2fs
   Boot evidence:        /media/gk3/gaokun3/diag/  (written by gk3-diag 45 s after boot)
+

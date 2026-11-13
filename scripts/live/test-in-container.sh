@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
-# 在 Linux 容器里跑安装器后端的测试（开发机是 macOS，没有 sgdisk / loop 设备）。
+# 在 Linux 容器里跑要 root、loop 设备与分区工具的测试（安装器后端、initramfs、界面的 fixture 录制）。
 #
-#   bash scripts/live/test-in-container.sh scripts/live/test-unsparse.sh
-#   bash scripts/live/test-in-container.sh scripts/live/test-apply.sh
+#   bash scripts/live/test-in-container.sh installer/backend/test/linux/test-apply.sh
+#   bash scripts/live/test-in-container.sh scripts/live/test-initramfs.sh
 #
-# ⚠️ 用 --privileged 并把宿主（colima 虚拟机）的 /dev 挂进来：loop 设备的
-#    分区节点（loop0p1…）是【之后】才由内核建出来的，不挂 /dev 的话容器里
-#    永远看不见它们 —— 那样 gk3__need_part 会等满 10 秒然后判死，
+# ⚠️ 用 --privileged 并把宿主（docker 所在的虚拟机或机器）的 /dev 挂进来：loop 设备的
+#    分区节点（loop0p1…）是【之后】才由内核建出来的，不挂 /dev 的话容器里永远看不见它们，
 #    测出来的是容器的问题而不是代码的问题。
-# ⚠️ 这只动 colima 虚拟机里的 loop 设备，碰不到 Mac 的盘，更碰不到平板。
+# ⚠️ 测试只动 loop 设备（背后是容器里的稀疏文件），不碰宿主的盘。
 set -euo pipefail
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 IMG=gk3-test-env

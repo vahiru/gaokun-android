@@ -14,7 +14,7 @@ enum WriteTask { install, uninstall, media }
 enum Touched { no, yes, unknown }
 
 /// 安装介质（LiveCD + 所选版本的安装文件）要占多大：U 盘至少这么大，写到本机时在未分配空间里划出这么大的 GK3LIVE。
-/// 暂定值：按 scripts/windows/gaokun3-setup.ps1 的算法（内容 ×1.25 + 128 MiB，按 256 MiB 向上取整）
+/// 暂定值：内容 ×1.25 + 128 MiB，按 256 MiB 向上取整
 /// 估 rc.3（LiveCD 约 210 MiB + boot.img 27 MiB + super.img.zst 1290 MiB）。gk3w 还没有写入安装介质的命令，
 /// 做好之后改为问 gk3w（与 plan 一样），按所选版本的实际大小算。
 const kMediaNeedMib = 2048;

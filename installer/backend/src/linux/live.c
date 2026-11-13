@@ -10,7 +10,7 @@
  *   3. 内核放掉安装器分区（在用时拒绝）→ 主表去掉它、userdata 的表项改大 → 写主表与备份表并读回核对。
  *   4. 内核里的 userdata 改大（BLKPG_RESIZE_PARTITION，不行就去掉再加）→ e2fsck -f -p → resize2fs。
  *      文件系统没扩成只提醒（NOTE code=userdata-fs-not-grown）：分区比文件系统大不影响使用。
- *   5. ESP 上只为启动安装器分区而写的东西删掉：旧的 Windows 脚本（scripts/windows/gaokun3-setup.ps1）把 LiveCD 的内核放在
+ *   5. ESP 上只为启动安装器分区而写的东西删掉：旧版的 Windows 脚本把 LiveCD 的内核放在
  *      EFI/gaokun3/、启动项是 loader/entries/gaokun3-live*.conf。安装器分区没了，它们只会启动失败（XBOOTLDR 的
  *      GK3LIVE 自带启动项，ESP 上没有这些）。
  * stdout：BACKUP；REMOVED part= name= size_mib= grow=yes|no userdata_mib= esp=。

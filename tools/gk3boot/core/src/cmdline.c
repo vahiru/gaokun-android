@@ -162,7 +162,7 @@ gk3_err gk3_cmdline_fastboot(const char *base, const gk3_fastboot_args *a, char 
         (a->esp && !value_ok(a->esp)))
         return GK3_EINVAL;
     while ((n = next_token(&p, &t)) != 0) {
-        /* 同 installer-lib.sh gk3__rescue_cmdline：去掉只给 Android 的；再去掉
+        /* 同 LiveCD 启动项的过滤（scripts/live/build-usb.sh 的 live_cmdline）：去掉只给 Android 的；再去掉
          * deferred_probe_timeout（BoardConfig.mk:130，执行端不需要等 10 秒）与我们自己要加的键 */
         if (has_prefix(t, n, "androidboot.") || key_is(t, n, "init") ||
             key_is(t, n, "firmware_class.path") || key_is(t, n, "deferred_probe_timeout") ||

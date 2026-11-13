@@ -30,7 +30,7 @@ gk3boot（S5）的 QEMU 测试另用这几样（qemu/run-boot-tests.sh）：
 盘的样子照实机抄（tools/gk3boot/test/vectors/gpt-primary-20261005.bin）：分区号、名字、类型 GUID、
 PARTUUID、磁盘 GUID、boot_a 的属性位 bit 54 都与实机一致；misc 也照实机坐在 LBA 34–2047，
 内容是实机只读读出的 64 KiB（misc-20261005-1791053208.bin）。其余分区按比例缩小。
-ESP 的目录结构照安装器（scripts/live/installer-lib.sh:868-960）：systemd-boot 257.13 + loader.conf +
+ESP 的目录结构照安装器（installer/backend/src/linux/apply.c 的 write_esp）：systemd-boot 257.13 + loader.conf +
 <mid>-android-{a,b}.conf 直连条目 + <mid>/android/slot_{a,b}/；"Image" 换成 gk3-fake-android.efi。
 """
 import argparse
@@ -193,7 +193,7 @@ def esp_tree(stage, variant, gk3boot_options=None, gk3boot_entry=GK3BOOT_ENTRY, 
     sd = open(SDBOOT, "rb").read()
     put("EFI/BOOT/BOOTAA64.EFI", sd)
     put("EFI/systemd/systemd-bootaa64.efi", sd)
-    # 实机是 timeout 15（installer-lib.sh:955-960）；夹具缩到 2 秒，别的照抄
+    # 夹具把菜单等待缩到 2 秒，别的照抄
     put("loader/loader.conf", ("timeout 2\nconsole-mode keep\neditor no\ndefault %s\n" % loader_default).encode())
     cmd = open(CMDLINE_VEC).read().split()
     base = " ".join(t for t in cmd if not t.startswith("initrd=") and not t.startswith("androidboot.slot_suffix="))
@@ -212,7 +212,7 @@ def esp_tree(stage, variant, gk3boot_options=None, gk3boot_entry=GK3BOOT_ENTRY, 
         put("%s/android/slot_%s/Image" % (MID, slot), fake)
         put("%s/android/slot_%s/gaokun3.dtb" % (MID, slot), minimal_fdt())
         put("%s/android/slot_%s/ramdisk.img" % (MID, slot), b"\x1f\x8b" + b"\0" * 4094)
-        # 与 installer-lib.sh:921-929 同一格式（title 里的 "—" 也照抄）
+        # 与 installer/backend/src/esp.c 的 gk3w_esp_android_entry 同一格式（title 里的 "—" 也照抄）
         put("loader/entries/%s-android-%s.conf" % (MID, slot), (
             "title      crDroid 16.0 (gaokun3) — slot _%s\n"
             "version    gaokun3-slot-%s\n"

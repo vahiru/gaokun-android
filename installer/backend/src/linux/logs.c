@@ -1,4 +1,4 @@
-/* Linux：把日志另存到用户拿得到的地方（installer-lib.sh 的 gk3_log_targets / gk3_save_logs 移过来的）。
+/* Linux：把日志另存到用户拿得到的地方。
  *
  * 问题：安装 U 盘只有一个分区，类型是 EFI System，日志写在它的 gaokun3/diag/ 下；Windows 与 macOS 默认都不给 ESP
  *   分配盘符，装失败的人把 U 盘插回电脑看不到日志。免 U 盘安装时介质是内置盘上的 GK3LIVE（有盘符），回 Windows 就能看到。

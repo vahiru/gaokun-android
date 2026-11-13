@@ -119,7 +119,7 @@ echo $?        # 0 = 无FAIL；1 = 有FAIL；2 = adb不通或中途掉线（不�
 | 文档与注释同步检查 | 检查`README*.md`、`docs/INSTALL*.md`、`docs/known-limitations*.md`、`docs/TODO.md`及`device/huawei/gaokun3/`中的配置注释 | 状态描述与本版实测结果一致 |
 | 构建时间戳一致性 | 运行`release.sh --no-build`核对`system`、`system_ext`、`product`、`vendor`、`odm`各分区`build.prop`的`date.utc` | 各分区时间戳与验收时的时间戳完全一致 |
 | 发布产物与校验和核对 | 核对GitHub Release与R2上所有附件的服务端字节数及`install-artifacts.sha256`、`kernel-source.txt`、`kernel-config.txt`、`kernel-base-patches.tar.gz` | 服务端文件字节数与本地完全一致 |
-| 安装器与ROM镜像匹配 | 运行`release-installer.sh --artifacts <install-artifacts.sha256>` | `--boot-img`的sha256与清单中`boot.img`及安装器内置内核完全一致 |
+| 安装器与ROM镜像匹配 | 核对LiveCD构建（`.github/workflows/installer-livecd.yml`）所用的`ROM_TAG`与本次发布一致，`gaokun3/release.txt`中的`GK3_BOOTIMG_SHA256`与清单中`boot.img`的sha256相同 | LiveCD内置内核与ROM的`boot.img`完全一致 |
 | 发版说明与合规披露 | 检查发版说明中的已知限制、Root说明、签名说明、专有组件说明及GPL源码对应清单 | 披露完整且与当前版本行为一致 |
 | 验收报告归档 | 归档`out/accept/`下的`report.txt`与交互验证、长稳测量数据 | 无人值守检查FAIL为0 |
 | SELinux Enforcing核验 | 确认`getenforce`为`Enforcing`，运行`avc-summary.py --enforcing` | 无未解释的SELinux拒绝 |

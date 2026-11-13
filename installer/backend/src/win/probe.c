@@ -1,6 +1,6 @@
 /* Windows：列出磁盘、分区、空闲区（只读）。
  *
- * 输出与 installer-lib.sh 的 gk3_probe 同样是 DISK / PART / FREE 三种记录，字段尽量同名；不同之处：
+ * 输出与 LiveCD 的 gk3l probe 同样是 DISK / PART / FREE 三种记录，字段尽量同名；不同之处：
  *   - path= 不是 /dev 节点：磁盘是 disk<N>（\\.\PhysicalDrive<N>），分区是 disk<N>p<M>（M 是 Windows 的分区号，
  *     不一定等于 GPT 表项序号；表项序号另报 idx=，即 Linux 上的 pN）。
  *   - start= / end= 是逻辑扇区号，sector= 给出扇区字节数（4Kn 盘上不是 512）。

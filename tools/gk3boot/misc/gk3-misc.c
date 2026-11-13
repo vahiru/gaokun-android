@@ -7,14 +7,14 @@
  *
  * S10（安装器）：
  *   gk3-misc init <misc 分区或镜像> [--slot a|b] [--default windows|android|none]
- *     安装器清零 misc 之后调它（scripts/live/installer-lib.sh 的 gk3_apply；设计稿 §4.7 "misc"）。只写三处、其余字节不碰：
+ *     安装器清零 misc 之后写的就是这个状态（安装器用 libgk3core 的 gk3_misc_build_install；设计稿 §4.7 "misc"）。只写三处、其余字节不碰：
  *       0      BCB 2048 字节清零（迁移标记的前提：标记的意思是"这之前的 BCB 都已清掉"）
  *       2048   bootloader_control = gk3_bcab_init_install：目标槽 priority 15 / tries 6 / 未成功，另一槽 0 / 0
  *              （新装机器的另一槽没有 system，LP 里那一槽是陈旧元数据 —— C′ §2.6）
  *       8192   GK3 记录 v1：gk3_rec_init + gk3_rec_migrate(全零 BCB, GK3_DISPATCH_VER)（= 入口首跑迁移在空 BCB 上做的那一步，
  *              事件环里一条 migrated）；--default windows|android 时再放一个 set_default 请求（设计稿 §4.9.3、U12：
  *              安装器不直接写 LoaderEntryDefault，由入口第一次在动作模式下运行时按 core/src/dual.c 的同一套规则写，理由见
- *              installer-lib.sh 的"默认启动哪个系统"一节）。
+ *              安装器的"默认启动哪个系统"选项）。
  *     写完 fsync，再【绕过页缓存】读回 64 KiB 逐字节比对（块设备上 O_DIRECT；不支持时退回普通读并说一声），
  *     并用 gk3_bcab_validate / gk3_rec_validate 复核。stdout 一行
  *       MISCINIT slot=a default=none bcab=<32 字节 hex> rec_crc=<8 hex> rest=zero|nonzero direct=yes|no
@@ -337,7 +337,7 @@ static int init_misc(int argc, char **argv)
     }
     close(fd);
 
-    /* 读回：绕过页缓存读的才是盘上的字节（同 HAL 的 gk3_blk_write_bytes_verify、安装器的 gk3__verify_on） */
+    /* 读回：绕过页缓存读的才是盘上的字节（同 HAL 的 gk3_blk_write_bytes_verify、安装器的 gk3l_write_verify） */
     unsigned char *m = NULL;
     int direct = 0;
     if (posix_memalign((void **)&m, 4096, GK3_MISC_READ_SIZE))

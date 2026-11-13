@@ -582,8 +582,8 @@ typedef struct {
     bool fbtcp;                 /* gk3.fbtcp=1：执行端打开 TCP 5554（只来自条目 options，开发用；不认证） */
 } gk3_fastboot_args;
 
-/* 执行端用（§4.4.1）：去掉 androidboot.*、init=、firmware_class.path=（同 installer-lib.sh
- * gk3__rescue_cmdline）、deferred_probe_timeout=、panic=、gk3.*，再追加
+/* 执行端用（§4.4.1）：去掉 androidboot.*、init=、firmware_class.path=（同 LiveCD 启动项
+ * 的过滤，scripts/live/build-usb.sh 的 live_cmdline）、deferred_probe_timeout=、panic=、gk3.*，再追加
  * panic=10 gk3.mode=fastboot gk3.why= gk3.slot= gk3.bootver= gk3.disk= [gk3.esp=] [gk3.dispatch=1] [gk3.fbtcp=1]。 */
 gk3_err gk3_cmdline_fastboot(const char *base, const gk3_fastboot_args *a, char *out, size_t out_len);
 

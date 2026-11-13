@@ -1,4 +1,4 @@
-/* Windows：从一块盘上卸载 Android，回到只有 Windows。顺序与规则同 scripts/windows/gaokun3-setup.ps1 的
+/* Windows：从一块盘上卸载 Android，回到只有 Windows。顺序与规则沿用旧版 Windows 脚本的
  * -RemoveAndroid（Invoke-RemoveAndroid）：
  *
  *   gk3w uninstall --disk N --backup-dir DIR [--real-disk [--bitlocker-key -]]

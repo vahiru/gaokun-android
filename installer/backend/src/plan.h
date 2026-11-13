@@ -1,4 +1,4 @@
-/* 分区方案。算术与 scripts/live/installer-lib.sh 的 gk3_plan 相同：
+/* 分区方案（LiveCD 的 gk3l 与 Windows 安装器的 gk3w 共用这一份算术）：
  *   双系统：在用户选的一段空闲区里，起点向上对齐到 1 MiB，各分区按固定大小依次排，userdata 吃掉剩下的、排在最后
  *           （以后扩容不用挪任何东西）。
  *   整盘清空：区间是新分区表的整个 usable 区，最前面另放 300 MiB 的 ESP，其余同上。要原样保留一个分区（读进内存的

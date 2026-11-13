@@ -1,15 +1,14 @@
 #!/bin/sh
 # 把启动诊断写回启动介质（由 gk3-diag.timer 在开机 45 秒后触发，也可以手动 systemctl start gk3-diag）。
 #
-# 为什么需要它：这台机器没有串口。救援系统一旦"起来了但网络没起来"，就【一点信息都拿不到】
-#   —— 2026-08-23 上机时正是如此，只能靠人到跟前看屏幕。所以系统必须自己把证据留在介质上，
-#   下次进 Android（或把 U 盘插到别的机器上）挂上就能读（见 scripts/live/README.md）。
+# 为什么需要它：这台机器没有串口，LiveCD 里也没有网络。图形界面起不来时一点信息都拿不到，
+#   所以系统必须自己把证据留在介质上，下次进 Windows / Android（或把 U 盘插到别的机器上）就能读。
 MEDIA=/media/gk3
 OUT=$MEDIA/gaokun3/diag
 # 介质是只读挂的（initramfs 那边就是 -o ro）。临时改成读写，写完改回去 ——
 # ⚠️ 但只在【本来是只读】时改回去：安装器会话（gk3-installer-session）也把它改成读写、并一直开着
 #    installer.log 与浸泡日志。在它之后改回只读，最好的情况是 EBUSY 失败（有文件开着写），
-#    差一点就是浸泡日志从第 45 秒起全部 EROFS —— M0 要的恰恰是那条 10 分钟曲线。
+#    差一点就是那些日志从第 45 秒起全部 EROFS。
 WAS=$(awk -v m="$MEDIA" '$2 == m { split($4, o, ","); r = o[1] } END { print r }' /proc/mounts)
 mount -o remount,rw "$MEDIA" 2>/dev/null || { echo "Cannot remount the boot medium read-write (write-protected USB drive?); skipping"; exit 0; }
 mkdir -p "$OUT" 2>/dev/null
@@ -18,15 +17,9 @@ F=$OUT/boot-$(date +%Y%m%d-%H%M%S).log
     echo "=== Time / kernel ==="; date; uname -a; cat /proc/cmdline
     echo; echo "=== Failed units ==="; systemctl --failed --no-pager 2>&1
     echo; echo "=== gaokun3 services ==="
-    systemctl status --no-pager -l gk3-wifi ssh gk3-installer seatd avahi-daemon 2>&1 | head -80
+    systemctl status --no-pager -l gk3-installer seatd 2>&1 | head -60
     echo; echo "=== Mounts ==="; findmnt -o TARGET,SOURCE,FSTYPE,OPTIONS 2>&1 | head -40
-    echo; echo "=== Network interfaces ==="; ip -br addr 2>&1; ip route 2>&1
-    echo; echo "=== Wireless ==="; iw dev 2>&1 | head -20
-        for n in /sys/class/net/*; do [ -d "$n/wireless" ] && { echo "--- ${n##*/}"; iw dev "${n##*/}" link 2>&1; }; done
-    echo; echo "=== wpa_supplicant configuration sources ==="
-    for f in /media/gk3/gaokun3/wpa_supplicant.conf /etc/wpa_supplicant/wpa_supplicant.conf; do
-        [ -f "$f" ] && echo "  present: $f" || echo "  absent:  $f"
-    done
+    echo; echo "=== Boot medium ==="; cat /run/gaokun3/medium 2>&1
     echo; echo "=== Display outputs (DRM) ==="
     for c in /sys/class/drm/card*-*; do
         [ -e "$c/status" ] || continue
@@ -38,11 +31,7 @@ F=$OUT/boot-$(date +%Y%m%d-%H%M%S).log
     echo; echo "=== Input devices (touch / keyboard) ==="; grep -E "^N:|^H:" /proc/bus/input/devices 2>/dev/null | head -20
     echo; echo "=== Installer log ==="; tail -60 "$OUT/installer.log" 2>/dev/null
     echo; echo "=== Processes ==="; ps -eo pid,rss,args 2>&1 | head -50
-    echo; echo "=== Effective sshd configuration ==="
-    /usr/sbin/sshd -T 2>&1 | grep -iE "^(port|permitrootlogin|pubkeyauth|passwordauth|authorizedkeysfile|usepam|strictmodes)"
-    echo; echo "=== root account ==="; getent passwd root; grep '^root:' /etc/shadow | cut -c1-12
-    echo; echo "=== authorized_keys ==="; ls -la /root/.ssh/ 2>&1; wc -c /root/.ssh/authorized_keys 2>&1
-    echo; echo "=== ath11k / firmware ==="; dmesg 2>/dev/null | grep -iE "ath11k|firmware" | tail -20
+    echo; echo "=== Firmware loading ==="; dmesg 2>/dev/null | grep -iE "firmware" | tail -20
     echo; echo "=== dmesg tail ==="; dmesg 2>/dev/null | tail -60
     echo; echo "=== journal (this boot, warning and above) ==="; journalctl -b -p warning --no-pager 2>&1 | tail -120
 } > "$F" 2>&1

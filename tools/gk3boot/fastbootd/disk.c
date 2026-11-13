@@ -4,7 +4,7 @@
  *   1. 目标盘：cmdline 有 gk3.disk=<misc 的 PARTUUID>（gk3boot 传）就只认 misc 是这个 PARTUUID 的那块盘；
  *      没有就扫全部盘，要求恰好一块满足第 2 条。0 块或多块（含两块盘 misc PARTUUID 相同的克隆盘）⇒ 拒绝一切写入。
  *   2. 这块盘的主 GPT 里 misc / boot_a / boot_b / super / userdata / metadata 各恰好出现一次
- *      （PARTLABEL 精确匹配、大小写敏感；与 installer-lib.sh 的 gk3__need_part / gk3__bylabel 同一套规则，
+ *      （PARTLABEL 精确匹配、大小写敏感；与安装器认分区的规则相同，
  *       libgk3core 的 gk3_gpt_require_unique 实现）。
  *   3. 对外只暴露前 5 个名字；misc 只能按偏移写 BCB / BCAB / VAB 三段；esp、Windows 分区、救援分区、整盘
  *      在协议里根本不存在 —— 所有写都经 fb_part_write / fb_misc_write，它们只接受表里的下标并查越界。

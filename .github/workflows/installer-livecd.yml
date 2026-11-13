@@ -1,6 +1,6 @@
-# LiveCD（installer/live 的图形安装器 + Debian live 系统）：在 GitHub 的 arm64 运行器上原生构建，与 Mac 上的
-# scripts/live/build-flutter.sh → build-live.sh 同一套脚本。产物是 U 盘镜像 gaokun3-live.img 与免 U 盘安装包
-# gaokun3-windows.zip，不带 Android 的系统文件（安装介质里的 gaokun3/payload/ 由用户另行放入）。
+# LiveCD（installer/live 的图形安装器 + Debian live 系统）：在 GitHub 的 arm64 运行器上原生构建，与本地构建
+# 同一套脚本（scripts/live/build-flutter.sh → build-live.sh）。产物是 U 盘镜像 gaokun3-live.img，不带 Android 的
+# 系统文件（gaokun3/payload/ 由用户另行放入，或由 Windows 安装器制作安装介质时写入）。
 #
 # 什么时候跑（不随每次推送跑）：
 #   - 推送 livecd-vX.Y.Z[-pre] 标签：发布构建，打包后建一个【草稿】Release，维护者改好说明再发布（不设为最新版本）
@@ -103,8 +103,8 @@ jobs:
       - name: collect
         run: |
           mkdir -p dist
-          cp out/live/gaokun3-live.img out/live/gaokun3-windows.zip out/live/release.txt out/live/packages-live.lock dist/
-          ( cd dist && sha256sum gaokun3-live.img gaokun3-windows.zip > SHA256SUMS )
+          cp out/live/gaokun3-live.img out/live/release.txt out/live/packages-live.lock dist/
+          ( cd dist && sha256sum gaokun3-live.img > SHA256SUMS )
           cat dist/release.txt dist/SHA256SUMS
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -133,4 +133,4 @@ jobs:
           pre=(); [ '${{ needs.build.outputs.prerelease }}' = yes ] && pre=(--prerelease)
           gh release create "livecd-v$V" -R "$GITHUB_REPOSITORY" --draft --latest=false "${pre[@]}" \
             --title "LiveCD installer v$V" --notes "Draft: write the release notes before publishing." \
-            dist/gaokun3-live.img dist/gaokun3-windows.zip dist/SHA256SUMS dist/release.txt
+            dist/gaokun3-live.img dist/SHA256SUMS dist/release.txt

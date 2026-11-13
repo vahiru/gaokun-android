@@ -1,5 +1,5 @@
 #!/bin/sh
-# gaokun3 live/rescue initramfs.
+# gaokun3 LiveCD initramfs.
 #
 # 一份 init 同时服务两种介质：
 #   * U 盘（LiveCD）：squashfs 就在那个 FAT 分区上
@@ -8,7 +8,7 @@
 # 配置越少，越不会因为"换了台机器"而失效。
 #
 # cmdline 参数：
-#   gk3.squash=<路径>   squashfs 在介质上的路径（默认 /gaokun3/rescue.squashfs）
+#   gk3.squash=<路径>   squashfs 在介质上的路径（默认 /gaokun3/live.squashfs）
 #   gk3.dev=<设备>      跳过搜索，直接用这个块设备
 #   gk3.toram=0|1       介质读不读进内存（默认：内置盘读，U 盘不读）
 #   gk3.debug           出错时给一个 shell，而不是重启
@@ -27,7 +27,7 @@
 PATH=/bin:/sbin:/usr/bin:/usr/sbin
 export PATH
 
-SQUASH=/gaokun3/rescue.squashfs
+SQUASH=/gaokun3/live.squashfs
 FORCE_DEV=
 DEBUG=
 TORAM=auto
@@ -35,7 +35,7 @@ TORAM=auto
 say()  { echo "[gk3] $*"; }
 fail() {
     echo
-    echo "============= gaokun3 rescue: boot failed ============="
+    echo "============= gaokun3 LiveCD: boot failed ============="
     echo "Reason: $*"
     echo
     echo "Known block devices:"
@@ -87,7 +87,7 @@ try_dev() {
     return 1
 }
 
-# ★ "还没出现"和"不存在"是两回事（installer-lib.sh 的 gk3__need_part 吃过同一个亏）：
+# ★ "还没出现"和"不存在"是两回事：
 #   NVMe 的命名空间是异步 probe 出来的，/init 开始跑的时候块设备未必到齐。
 #   原先两条路都只看一眼就下结论 —— Alpine 版 M0 靠扫描找到了 p3，可能只是时序碰巧。
 if [ -n "$FORCE_DEV" ]; then

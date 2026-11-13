@@ -13,11 +13,6 @@
 #    两边必须产出【逐字节相同】的四个文件 —— 包括 cmdline.txt 的结尾换行
 #    （bootimg_extract.cpp:176 是 fprintf("%s\n")）。改一边就要改另一边。
 #
-# ★ 历史：这段代码原先内嵌在 scripts/install-gaokun3.sh 里，而 installer-lib.sh
-#   不拆 boot.img、要求发布目录里带散装的 Image/dtb/ramdisk —— 发版并不带
-#   （docs/relnotes/v0.6.2-alpha.md 的 Files 表），于是图形安装器那条路根本装不了
-#   正式发版。抽成一个文件，两个前端共用。
-#
 # ★ cmdline 从镜像头里取（BOARD_KERNEL_CMDLINE），不在安装器里另抄一份：
 #   手抄的那份 2026-09-23 之前已经漂了（缺 himax disable_pressure=0，TODO B15）。
 import os

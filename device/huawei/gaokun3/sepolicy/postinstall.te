@@ -85,7 +85,7 @@ allow postinstall boot_block_device:blk_file r_file_perms;
 #     neverallow { domain -kernel -init -recovery } block_device:blk_file { open read write };
 # 是加 allow 也绕不过去的（写了 sepolicy_neverallows 直接构建失败）。
 #
-# 后果要说清楚：转 enforcing 之后，**只有按 scripts/install-gaokun3.sh 的
+# 后果要说清楚：转 enforcing 之后，**只有按安装器（installer/backend）的
 # 布局装的机器（p1=ESP）能走完 OTA 最后一步**；手工分区的机器会在
 # postinstall 失败，整次 OTA 回滚。这不是"少一条规则"，是布局假设变成了硬约束。
 # ★ 正解仍是 [TODO B3]：自研 EFI 加载器直接读 misc 选槽，postinstall 整个消失。

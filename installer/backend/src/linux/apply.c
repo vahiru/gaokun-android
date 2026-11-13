@@ -15,7 +15,7 @@
  * systemd-boot：--sdboot，否则 GK3_SDBOOT，否则依次找 /usr/share/gaokun3/、发布目录、/usr/lib/systemd/boot/efi/ 下的
  * systemd-bootaa64.efi。
  *
- * 三种方式的差别（规则同 installer-lib.sh 的 gk3_apply）：
+ * 三种方式的差别：
  *   - 双系统：只往用户选的空闲区里加分区，用盘上现有的 ESP；分区名不能与盘上已有的重。
  *   - 整盘清空：换一张新的 GPT（最前面 300 MiB 的 ESP，格式化为 FAT32），安装介质在这块盘上、或者盘上有分区在用
  *     （挂着、交换分区、上面叠着别的设备）时拒绝。内核里的旧分区先逐个去掉（去不掉就加回来、不动盘）。
@@ -31,12 +31,12 @@
  *     也不受影响。双系统要求动手之前内核的分区视图与盘上的 GPT 一致（gk3l probe 的 kernel=ok）。
  *   - 写盘期间对整块盘持 BSD 排他锁：systemd-udevd 见到锁就不去探测这块盘（systemd 的块设备锁约定），
  *     新分区在写完之前不会被 udev 读进缓存。
- *   - metadata / userdata 用 Debian 的 mkfs.ext4 直接格式化（参数同 installer-lib.sh），写完核对超级块的魔数与卷标。
+ *   - metadata / userdata 用 Debian 的 mkfs.ext4 直接格式化（-L 卷标，userdata 加 -m 0），写完核对超级块的魔数与卷标。
  *   - ESP 挂载后写文件，写完卸下、丢掉这块设备的缓存再只读挂回去逐个比对：读回的是介质上的内容，不是页缓存。
  *     ESP 在别处挂着时拒绝（esp-busy）。
  *   - Windows 卷在休眠时不写共用的 ESP（ERR esp-windows-hibernated）；Windows 卷是 BitLocker、而这次要换掉
  *     EFI/BOOT/BOOTAA64.EFI 时，要 --bitlocker-confirmed（用户在界面上确认拿到了恢复密钥），Linux 这边暂停不了 BitLocker。
- *   - ESP 上已有的启动项按 installer-lib.sh 的规则清理（别的目录的直连条目改名停用、旧的救援启动项与统一启动入口的
+ *   - ESP 上已有的启动项先清理（别的目录的直连条目改名停用、旧的救援启动项与统一启动入口的
  *     条目删掉），不像 Windows 版那样拒绝：LiveCD 没有卸载功能，删过 Android 分区的盘上留着这些条目是常见情形。
  *   - 写完删 EFI 变量 LoaderEntryDefault（删不掉报 NOTE loadervar-stuck）。
  *   - --remove-installer：装完之后删掉这块盘上的安装器分区、并进 userdata（live.c；进度 92 remove-installer）。
@@ -233,7 +233,7 @@ static int64_t esp_size_of(const esp_ctx *e, const char *rel)
     return gk3l_file_size(p);
 }
 
-/* 往 ESP 上写这一组文件要多占多少 KiB（同名旧文件只算变大的部分，按 4 KiB 簇向上取整）—— gk3__esp_delta_kib */
+/* 往 ESP 上写这一组文件要多占多少 KiB（同名旧文件只算变大的部分，按 4 KiB 簇向上取整） */
 static int64_t esp_delta(const esp_ctx *e, const char *rel, uint64_t newsz)
 {
     int64_t old = esp_size_of(e, rel);
@@ -249,7 +249,7 @@ static int esp_same(const esp_ctx *e, const char *rel, const uint8_t *data, size
     return gk3l_file_same(p, data, len);
 }
 
-/* ESP 根目录下第一个（按字节序）32 位十六进制的目录名 —— gk3__esp_pick_mid */
+/* ESP 根目录下第一个（按字节序）32 位十六进制的目录名 */
 static int esp_pick_mid(const esp_ctx *e, char out[33])
 {
     DIR *d = opendir(e->dir);
@@ -313,7 +313,7 @@ static int esp_put(esp_log *lg, const char *rel, const uint8_t *data, size_t len
 /* 别的 <machine-id> 目录下我们的直连条目：default 的通配 *-android-<槽>.conf 会同时匹配它们，改名停用（不删）。
  * 统一启动入口的条目（gk3boot-* / gk3prev-* / gk3boot-tools.conf）与没人引用的 EFI/gk3boot/<版本>/ 删掉（log/ 留着）：
  * 装完的机器回到"还没有入口"，第一次开机完成时由装上的系统部署它自己那一版。旧的救援启动项与 <mid>/rescue/ 删掉
- * （不再装救援系统）。规则与 installer-lib.sh 的 gk3_apply 相同。 */
+ * （不再装救援系统）。 */
 static int is_direct_entry(const char *n)
 {
     size_t l = strlen(n);
@@ -695,7 +695,7 @@ static int esp_check(apply_ctx *c)
                  c->esp.mid, (long long)(need / 1024), (long long)(sp.free_kib / 1024), c->esp.windows ? "yes" : "no");
         ck = gk3w_esp_space_check(&sp);
         if (ck != GK3W_ESP_OK) {
-            /* 字段与 installer-lib.sh 相同：界面按它们写出差多少 */
+            /* 界面按这些字段写出差多少 */
             gk3w_line l = {0};
             gk3w_line_begin(&l, "ERR");
             gk3w_line_kv(&l, "code", gk3w_esp_check_code(ck));
@@ -1105,7 +1105,7 @@ static int write_parts(apply_ctx *c)
     if (c->mode == M_REINSTALL && c->keep) {
         gk3l_log("keeping user data: userdata and metadata are not formatted");
     } else {
-        /* 参数同 installer-lib.sh：userdata 加 -m 0（Android 的应用都不是 uid 0，5% 的保留块谁也用不上；
+        /* userdata 加 -m 0（Android 的应用都不是 uid 0，5% 的保留块谁也用不上；
          * 系统的保留空间由 fstab 的 reservedsize= 交给 fs_mgr 管） */
         if (mkfs_ext4(c, T_META, "metadata", 0) || mkfs_ext4(c, T_DATA, "userdata", 1))
             return -1;
@@ -1123,7 +1123,7 @@ static int write_parts(apply_ctx *c)
             return gk3l_err_kv(c->T, "super-write", "why", why, ss.failed == -2 ? "super did not read back identically" : "writing super failed", errno), -1;
         }
         gk3w_aligned_free(ss.pat);
-        /* 偏移 4096 处必须是 LP geometry 魔数（installer-lib.sh gk3__write_super 的同一道检查） */
+        /* 偏移 4096 处必须是 LP geometry 魔数 */
         if (gk3l_pread(d, c->zero, 4096, c->t[T_SUPER].off + 4096) || memcmp(c->zero, "gDla", 4))
             return gk3l_err(c->T, "super-bad-lp", "no LP geometry magic at offset 4096 of super: what was written is not a usable super", 0), -1;
         gk3l_log("super: LP geometry magic correct");

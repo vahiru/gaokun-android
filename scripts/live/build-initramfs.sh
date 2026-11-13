@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 造 gaokun3 救援/LiveCD 的 initramfs。
+# 造 gaokun3 LiveCD 的 initramfs。
 #
 #   bash scripts/live/build-initramfs.sh --busybox <busybox.static> --out <目录>
 #
@@ -10,7 +10,7 @@ set -euo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 LIVE=$REPO/scripts/live
-BB=; OUT=; FW=
+BB=; OUT=
 
 die() { echo "!! $*" >&2; exit 1; }
 ok()  { echo "   ✓ $*"; }
@@ -18,7 +18,6 @@ ok()  { echo "   ✓ $*"; }
 while [ $# -gt 0 ]; do
     case "$1" in
         --busybox)  BB=$2; shift 2 ;;
-        --firmware) FW=$2; shift 2 ;;
         --out)     OUT=$2; shift 2 ;;
         *) die "不认识的参数：$1" ;;
     esac
@@ -63,20 +62,6 @@ for a in sh ash mount umount mkdir rmdir ls cat echo sleep basename dirname \
 done
 ln -sf ../bin/busybox "$D/sbin/switch_root"
 
-# ★ WiFi 固件必须进 initramfs —— 理由见 build-rootfs.sh 里那段注释
-#   （内建 ath11k 在 initramfs 阶段就要固件，squashfs 那时还没挂）。
-if [ -n "$FW" ]; then
-    [ -d "$FW/lib/firmware" ] || die "--firmware 目录里没有 lib/firmware：$FW"
-    mkdir -p "$D/lib"
-    cp -a "$FW/lib/firmware" "$D/lib/"
-    n=$(find "$D/lib/firmware" -type f | wc -l)
-    [ "$n" -gt 0 ] || die "固件目录是空的"
-    ok "带上 $n 个固件文件（$(du -sh "$D/lib/firmware" | cut -f1)）"
-else
-    echo "   ⚠️ 没给 --firmware —— 内建 ath11k 会在 initramfs 阶段拿不到固件，"
-    echo "      救援系统会【起来但没网】。除非你知道自己在干什么，否则别这样。"
-fi
-
 install -m755 "$LIVE/initramfs-init" "$D/init"
 ok "init + $(ls "$D/bin" | wc -l) 个 applet"
 
@@ -89,9 +74,5 @@ T=$(mktemp -d)
 ( cd "$T" && gzip -dc "$IMG" | cpio -idm --quiet )
 [ -x "$T/init" ] || die "打出来的 initramfs 里 /init 不可执行"
 [ -x "$T/bin/busybox" ] || die "打出来的 initramfs 里没有 busybox"
-if [ -n "$FW" ]; then
-    ls "$T"/lib/firmware/ath11k/WCN6855/*/amss.bin* >/dev/null 2>&1         || die "打出来的 initramfs 里没有 ath11k 固件 —— 会造出没网的救援系统"
-    ok "initramfs 里有 ath11k 固件"
-fi
 rm -rf "$T"
 ok "回解体检通过"

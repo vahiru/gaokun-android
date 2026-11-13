@@ -377,7 +377,7 @@ static void test_plan_whole_reinstall(void)
     CHECK(p.n == 7 && !strcmp(p.parts[0].name, "esp") && p.parts[0].first == 2048 && p.parts[0].mib == 300);
     CHECK(!strcmp(p.parts[1].name, "misc") && p.parts[1].first == 2048 + 300 * 2048);
     CHECK(!strcmp(p.parts[6].name, "userdata") && p.parts[6].last <= total - 34);
-    /* 与 installer-lib.sh 相同：盘按整 MiB 算，首尾各让出 1 MiB */
+    /* 盘按整 MiB 算，首尾各让出 1 MiB */
     CHECK(p.avail_mib == (64u << 10) - 2 && p.fixed_mib == 300 + 4 + 32 + 128 + 12288);
     CHECK(p.userdata_mib == p.avail_mib - p.fixed_mib);
 

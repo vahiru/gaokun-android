@@ -1,4 +1,4 @@
-/* Windows：装 Android 到一段空闲空间（双系统），对应 installer-lib.sh 的 gk3_apply --mode alongside。
+/* Windows：装 Android 到一段空闲空间（双系统），对应 LiveCD 的 gk3l apply --mode alongside。
  *
  *   gk3w apply --disk N --region-start LBA --region-end LBA --release DIR --sdboot FILE --backup-dir DIR
  *              [--mke2fs PATH] [--machine-id HEX32] [--default-os android|windows] [--userdata-mib N]
@@ -11,7 +11,7 @@
  *
  * metadata / userdata 的格式化：给了 --mke2fs（本仓 mke2fs/build.sh 编的 mke2fs.exe，同目录要有 mke2fs.conf）时，
  * 照 fastboot -w 的做法：动盘之前用 mke2fs -E android_sparse 按分区大小各生成一个 sparse 镜像并完整试解，格式化那一步
- * 用与 super 同一套 sparse 写入写进去，写完核对 ext4 魔数与卷标。参数同 LiveCD（installer-lib.sh：-L 卷标、userdata
+ * 用与 super 同一套 sparse 写入写进去，写完核对 ext4 魔数与卷标。参数同 LiveCD（gk3l：-L 卷标、userdata
  * 加 -m 0），配置是 Debian 13 的同一份 mke2fs.conf，所以特性、块大小（metadata 1 KiB）与 LiveCD 相同
  * （mke2fs/test-align.sh 对拍）。4Kn 盘上加 -b 4096（LiveCD 的 mkfs.ext4 在 4Kn 块设备上也会把块大小提到扇区大小），
  * 否则 metadata 的 1 KiB 块写不了无缓冲 I/O。lazy_itable_init=1 与 LiveCD 相同：sparse 输出里 mke2fs 的“清零”
@@ -240,7 +240,7 @@ static int64_t esp_size_of(const esp_ctx *e, const char *rel)
     return (int64_t)(((uint64_t)a.nFileSizeHigh << 32) | a.nFileSizeLow);
 }
 
-/* 往 ESP 上写这一组文件要多占多少 KiB（同名旧文件只算变大的部分，按 4 KiB 簇向上取整）—— gk3__esp_delta_kib */
+/* 往 ESP 上写这一组文件要多占多少 KiB（同名旧文件只算变大的部分，按 4 KiB 簇向上取整） */
 static int64_t esp_delta(const esp_ctx *e, const char *rel, uint64_t newsz)
 {
     int64_t old = esp_size_of(e, rel);
@@ -262,7 +262,7 @@ static int esp_has_android_entries(const esp_ctx *e)
     return 1;
 }
 
-/* ESP 根目录下第一个（按字节序）32 位十六进制的目录名 —— gk3__esp_pick_mid */
+/* ESP 根目录下第一个（按字节序）32 位十六进制的目录名 */
 static int esp_pick_mid(const esp_ctx *e, char out[33])
 {
     wchar_t pat[MAX_PATH * 2];
@@ -460,7 +460,7 @@ int gk3w_cmd_apply(int argc, wchar_t **argv)
         }
     }
     {
-        /* Android 侧的 sepolicy 只给名叫 esp 或 "EFI system partition" 的分区打 ESP 的标签（同 installer-lib.sh 的提醒） */
+        /* Android 侧的 sepolicy 只给名叫 esp 或 "EFI system partition" 的分区打 ESP 的标签 */
         wchar_t wn[GK3_GPT_NAME_CHARS + 1];
         char en[GK3_GPT_NAME_CHARS * 3 + 1];
         memcpy(wn, esp_part->Gpt.Name, sizeof esp_part->Gpt.Name);
@@ -869,7 +869,7 @@ int gk3w_cmd_apply(int argc, wchar_t **argv)
                 goto out;
             }
             _aligned_free(ss.pat);
-            /* 偏移 4096 处必须是 LP geometry 魔数（installer-lib.sh gk3__write_super 的同一道检查） */
+            /* 偏移 4096 处必须是 LP geometry 魔数 */
             if (gk3w_pread(d.h, lp, 4096, poff[i_super] + 4096) || memcmp(lp, "gDla", 4)) {
                 gk3w_err(T, "super-bad-lp", "no LP geometry magic at offset 4096 of super: what was written is not a usable super", 0);
                 goto out;

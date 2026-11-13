@@ -10,7 +10,7 @@ release.sh 在发版末尾自动跑它（正式发版：全部三类；--stage-o
 保留规则（用户 2026-10-11 定）：
   official   一个"版本"= builds/<名>.zip（连同 .zip.sha256sum）+ install/<名>/。
              ★ OTA 清单 ota/gaokun3.json 指向的那一版（= Updater 与图形安装器联网安装取的那一版，
-               installer-lib.sh:2035/2071）永远保留，另留按日期排在它前面的 --keep-official 版（默认 2）。
+               Windows 安装器的 installer/windows/lib/backend/net.dart）永远保留，另留按日期排在它前面的 --keep-official 版（默认 2）。
              比当前版还新的（清单还没指过去的）一律不动。
   staging    staging/<名>/ 一组算一份，按组里最新的 LastModified 排序，留最新 --keep-staging 组（默认 2）。
   installer  installer/<版本>/ 同 staging，留最新 --keep-installer 个（默认 2）。installer/ 根下的文件

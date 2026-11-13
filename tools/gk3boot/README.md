@@ -228,8 +228,8 @@ HAL在正常开机时先以**只读**方式挂载ESP比对文件状态；若条�
    - 每次进入Android时，`gk3boot.efi`在交接内核前预先将`LoaderEntryOneShot`写为`*-android-<当前槽>.conf`。因此，在Android运行期间发起普通重启（`adb reboot`、系统更新重启、内核panic重启）都会消费该OneShot回到`gk3boot.efi`并继续进入Android，不会在更新或重启中途误进Windows。
    - 当用户在Android中执行**正常关机**时，`init`在`on shutdown`阶段调用`/vendor/bin/hw/android.hardware.boot-service.gaokun3 --gk3-mark-poweroff`，在GK3记录中置位`clean_poweroff`。下次按电源键冷开机时，`gk3boot.efi`经预置的OneShot被拉起，检测到`clean_poweroff`且默认系统为Windows、同时无Android待办事项（无BCB分派、非正在扣减`tries_remaining`的新槽、上次已正常开机完成），则清除`clean_poweroff`、写入`LoaderEntryOneShot=<Windows条目>`并冷复位进入Windows；再下一次冷开机则直接由`LoaderEntryDefault`进入Windows。
 3. **从Android一键重启到Windows**：在「设置 → 系统 → 启动选项」中点击「重启到Windows」，HAL将GK3记录的`next_kind`设为`GK3_NEXT_WINDOWS (3)`并触发重启；`gk3boot.efi`检查无Android待办事项后清零`next_kind`，写`LoaderEntryOneShot=<Windows条目>`并冷复位进入Windows（若正处于OTA新槽验证或有待执行BCB，则自动作废该一次性意图并记`intent_dropped`，优先完成Android启动）。
-4. **从Windows重启到Android / 切换默认系统**：使用[../../scripts/windows/gaokun3-setup.ps1](../../scripts/windows/gaokun3-setup.ps1)（`-RebootToAndroid` / `-SetDefault`）修改固件NVRAM中的`LoaderEntryOneShot`或`LoaderEntryDefault`（详见[../../scripts/windows/README.md](../../scripts/windows/README.md)）。
-5. **安装器初始化（`gk3-misc init`）**：Live安装器在写入分区后调用`gk3-misc init <misc> --slot a --default <windows|android|none>`，一步初始化空BCB、槽`_a`（`15/6/未成功`）及带`migrated`标记与`set_default`请求的GK3记录。
+4. **从Windows重启到Android / 切换默认系统**：由Windows侧的工具修改固件NVRAM中的`LoaderEntryOneShot`或`LoaderEntryDefault`。原先的Windows脚本已删除，这项功能由Windows安装器（[`installer/windows/`](../../installer/windows/README.md)）的管理页接替，尚未实现。
+5. **安装器初始化**：安装器（LiveCD的`gk3l`、Windows的`gk3w`）在写入分区后用libgk3core的`gk3_misc_build_install`（与`gk3-misc init <misc> --slot a --default <windows|android|none>`相同）一步初始化空BCB、槽`_a`（`15/6/未成功`）及带`migrated`标记与`set_default`请求的GK3记录。
 
 ## 7. 构建与测试
 

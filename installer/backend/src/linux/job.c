@@ -1,4 +1,4 @@
-/* Linux：写盘进程脱离界面运行（installer-lib.sh 的 gk3_job_* 移过来的）。
+/* Linux：写盘进程脱离界面运行。
  *
  * 问题：图形安装器起的子进程全在 gk3-installer.service 的 cgroup 里。界面一崩，服务停下，systemd 按默认的
  *   KillMode=control-group 把整个 cgroup 杀掉 —— 正在写 super 的那个进程一起死，留下写了一半的盘。

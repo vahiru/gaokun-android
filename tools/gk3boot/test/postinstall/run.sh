@@ -162,9 +162,9 @@ sc f9 off "$V1" "$FBBIG"; FREE_KB=43000 go f9
 chk "off ⇒ 不算入口、照常通过" '[ "$RC" = 0 ]'
 
 # ── R：救援条目（v1.0 计划 OTA-10 / GUI-10 / INST-17）──────────────────────────────────
-# 期望值不在这里手抄：拿安装器的 gk3__rescue_cmdline（bash）对同一份 cmdline 算一遍 —— 两边的规则必须逐字相同
+# 期望值按旧版安装器写救援条目的规则对同一份 cmdline 算一遍（postinstall 必须与它逐字相同）
 RCL="androidboot.hardware=gaokun3 init=/init firmware_class.path=/vendor/firmware/ console=tty0 clk_ignore_unused gk3.x=1"
-RWANT=$(bash -c '. "$1" >/dev/null 2>&1; gk3__rescue_cmdline "$2"' _ "$G/../../scripts/live/installer-lib.sh" "$RCL")
+RWANT="$(printf '%s\n' "$RCL" | tr ' ' '\n' | grep -v -e '^androidboot\.' -e '^init=' -e '^firmware_class\.path=' -e '^$' | tr '\n' ' ')loglevel=3 panic=10 gk3.squash=/gaokun3/rescue.squashfs"
 resc() {   # resc <场景> <文件名> <槽> <title> <options>：放一条安装器样式的救援条目
     printf 'title      %s\nversion    gaokun3-rescue\nsort-key   linux1\nlinux      /%s/android/slot_%s/Image\ndevicetree /%s/android/slot_%s/gaokun3.dtb\ninitrd     /%s/rescue/initramfs.img\noptions    %s\n' \
         "$4" "$MID" "$3" "$MID" "$3" "$MID" "$5" > "$P/sc-$1/esp/loader/entries/$2"

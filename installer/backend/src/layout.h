@@ -28,7 +28,7 @@ gk3w_layout_err gk3w_free_spans(uint64_t usable_first, uint64_t usable_last, con
 /* 区间的字节数；溢出时饱和到 UINT64_MAX */
 uint64_t gk3w_span_bytes(gk3w_span s, uint32_t sector_bytes);
 
-/* 分区开头若干字节认内容，与 scripts/windows/gaokun3-setup.ps1 的 Get-ContentKind 相同（卸载前核对要删的分区）。
+/* 分区开头若干字节认内容（卸载前核对要删的分区）。
  * 签名：NTFS / BitLocker / exFAT 在偏移 3，boot.img 的 "ANDROID!" 在 0，FAT32 在 82、FAT12/16 在 54，
  * ext4 的 s_magic 在 1080，LP 元数据几何区的魔数在 4096；都不是：全零为 EMPTY，否则 UNKNOWN。 */
 typedef enum {

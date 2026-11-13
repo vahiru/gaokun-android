@@ -146,7 +146,7 @@ static void pre_start(void)
     gk3_log_close(&g_log);
 }
 
-/* 直连条目：\loader\entries\<32 位十六进制>-android-<x>.conf（安装器的写法，scripts/live/installer-lib.sh:921）。
+/* 直连条目：\loader\entries\<32 位十六进制>-android-<x>.conf（安装器的写法，installer/backend/src/esp.c 的 gk3w_esp_android_entry）。
  * gk3boot 自己的条目 gk3boot-android-<x>[+N].conf 前缀不是 machine-id，不会被当成直连条目。
  * 有多个（多份安装共用 ESP）时取 id 最大的那个 —— 两份直连条目 sort-key / version 相同时，systemd-boot 的
  * default 通配命中的也是它（boot.c:1707-1745 按 -strverscmp(id) 排，:1771-1782 取第一个匹配）。 */

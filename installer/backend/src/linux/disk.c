@@ -499,7 +499,7 @@ int gk3l_gpt_backup(const gk3l_disk *d, const char *dir_arg, const char *tag, ui
                     snprintf(path, sizeof path, "%s", p2);
             }
         }
-        /* 介质写不进去（写保护、只读介质）就留在内存里，照旧装 —— 与 installer-lib.sh 相同 */
+        /* 介质写不进去（写保护、只读介质）就留在内存里，照旧装 */
         if (err) {
             in_ram = 1;
             err = backup_to(run && *run ? run : "/run/gaokun3", name, gb, len, path, sizeof path);

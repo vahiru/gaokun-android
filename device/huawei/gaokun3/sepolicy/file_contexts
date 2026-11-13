@@ -171,7 +171,7 @@
 # ⚠️★★ 此前这里是 /dev/block/nvme0n1p1…p10 写死分区号，对的只是【开发机】的老布局
 #    （p1=esp p2=userdata p4=misc p5/p6=boot p8=super p10=metadata）。v0.7.0 起的图形安装器
 #    按 esp, misc, metadata, boot_a, boot_b, super, [gk3rescue], userdata 的顺序 `sgdisk -n 0:`
-#    （取下一个空号，scripts/live/installer-lib.sh:388-400、:788）⇒ 新装机 p2=misc、p4=boot_a、
+#    （取下一个空号）⇒ 新装机 p2=misc、p4=boot_a、
 #    p6=super……标签全错：enforcing 下 bootctl 读不了 misc、postinstall 读不了 boot_x、
 #    snapuserd 碰不了 super、fsck 碰不了 userdata。开发机布局恰好对得上，普查与试跑都看不见。
 #    设备上 policy-query：hal_bootctl_default userdata_block_device open DENY 等（第七轮审计）。

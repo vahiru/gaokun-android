@@ -1,4 +1,4 @@
-# 开机 45 秒后写一次：那时 WiFi/DHCP、sshd、安装器都该起来了（起不来的那一个正是要记下的）。
+# 开机 45 秒后写一次：那时图形安装器该起来了（起不来正是要记下的）。
 [Unit]
 Description=Write gaokun3 boot diagnostics 45 s after boot
 

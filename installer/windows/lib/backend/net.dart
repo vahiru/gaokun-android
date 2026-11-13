@@ -1,5 +1,5 @@
 // 版本列表与下载。gk3w 不碰网络：JSON 与 HTTP 在 Dart 里写省事得多，也能在 Linux 上对着本地 HTTP 服务测
-// （test/net_test.dart）。输出的事件与 LiveCD 的 gk3_net_manifest / gk3_net_release 相同（scripts/live/installer-lib.sh），
+// （test/net_test.dart）。
 // 界面用同一套代码处理，回放数据（testdata/common/releases-*.txt、download.txt）也是这个格式。
 //
 // 下载的规矩照搬 LiveCD 的 gk3_net_fetch（那边的注释记着每一条是怎么来的）：

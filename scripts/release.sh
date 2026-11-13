@@ -123,7 +123,7 @@ fi
 #   kernel-base-patches.tar.gz  构建树上 $LINUX_BASE_TAG..HEAD 的提交（git format-patch），即 buildbot 那一层。
 #                               直接带补丁本身，就不依赖"当时用的是 buildbot 哪个提交"这个从没记过的信息
 #   crdroid-manifest.xml        repo manifest -r（ROM 侧各仓库的确切提交）；拿不到就在清单里写命令
-# ⚠️ 不写进 install-artifacts.sha256：那份文件安装器在读（scripts/live/m0-internal.sh:221-225），
+# ⚠️ 不写进 install-artifacts.sha256：那份文件安装器在读（gk3l / gk3w 的 release-info 与安装前的校验），
 #    只认三个载荷；这几份的 sha256 记在 kernel-source.txt 里。
 # 缺了任何一样就是这一版给不出对应源码 ⇒ 发版（含 --dry-run）拦，--stage-only 只警告。
 # ★ SEC-9（2026-10-05）：基线从 v7.2-rc2 追到 v7.2.9 stable。v7.2-rc2 时代的值（tag 对象 4c45e14df2f4…、

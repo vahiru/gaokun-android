@@ -33,7 +33,7 @@ static gk3_err parse(const unsigned char *disk, unsigned bs, gk3_gpt *g)
                              (size_t)g->num_entries * g->entry_size, g);
 }
 
-/* 按安装器的命名（installer-lib.sh 写的 PARTLABEL；hw-inventory §8quinquies）生成一张盘头 */
+/* 按安装器的命名（安装器写的 PARTLABEL；hw-inventory §8quinquies）生成一张盘头 */
 static unsigned char *build(unsigned bs, uint64_t nblocks, size_t *len)
 {
     static const struct { const char *name; uint64_t first_mib, size_mib; } parts[] = {
@@ -92,7 +92,7 @@ static void real_disk(void)
     CHECK_STR(guid, "e6c13d1a-e678-468a-b6b6-b79f19efb0e5");
     CHECK_EQ(gk3_gpt_require_unique(&g, six, 6, &bad), GK3_OK);
 
-    /* 实机：misc 就坐在 GPT 表后面的 LBA 34–2047（1007 KiB），installer-lib.sh:841 的注释说的就是它 */
+    /* 实机：misc 就坐在 GPT 表后面的 LBA 34–2047（1007 KiB） */
     CHECK_EQ(gk3_gpt_find(&g, "misc", &p), GK3_OK);
     CHECK_EQ(p.index, 4);
     CHECK_EQ(p.first_lba, 34);
