@@ -436,6 +436,9 @@ static int backup_to(const char *dir, const char *name, const uint8_t *data, siz
         err = gk3l_write_file(path, data, len);
     if (!err && !gk3l_file_same(path, data, len))
         err = EIO;
+    /* 写了一半的备份不能留下：以后会被当成一份完整的 */
+    if (err)
+        unlink(path);
     return err;
 }
 
@@ -545,6 +548,26 @@ int gk3l_part_in_use(const char *disk, const gk3l_kpart *k, char *what, size_t c
                 return 1;
             }
         closedir(h);
+    }
+    /* 内核自己的判据：独占打开（O_EXCL）。挂载（FUSE、btrfs 在 mountinfo 里是匿名设备号，上面认不出）、交换分区、
+     * dm / md 都独占着它；整块盘上任何一个分区被独占，整块盘的独占打开也会失败 */
+    {
+        unsigned ma, mi;
+        char node[96];
+        int fd;
+        snprintf(node, sizeof node, "/dev/%.63s", k->name);
+        if (sscanf(k->devno, "%u:%u", &ma, &mi) == 2) {
+            struct stat st;
+            if (!stat(node, &st) && S_ISBLK(st.st_mode) && major(st.st_rdev) == ma && minor(st.st_rdev) == mi) {
+                fd = open(node, O_RDONLY | O_EXCL | O_CLOEXEC);
+                if (fd < 0 && errno == EBUSY) {
+                    snprintf(what, cap, "/dev/%.63s@claimed", k->name);
+                    return 1;
+                }
+                if (fd >= 0)
+                    close(fd);
+            }
+        }
     }
     return 0;
 }

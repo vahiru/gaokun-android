@@ -858,6 +858,15 @@ static int plan_reinstall(apply_ctx *c)
         paths[n] = pathbuf[n];
         n++;
     }
+    /* 分区表本身要合乎常理：名字对得上、却与别的分区重叠的表（坏的、手改的）不往上写 */
+    {
+        gk3w_span sp[GK3W_MAX_PARTS], fr[GK3W_MAX_PARTS + 1];
+        size_t nf = 0;
+        for (size_t i = 0; i < n; i++)
+            sp[i] = (gk3w_span){parts[i].first, parts[i].last};
+        if (gk3w_free_spans(d->g.first_usable, d->g.last_usable, sp, n, d->bs, 0, fr, GK3W_MAX_PARTS + 1, &nf) != GK3W_LAYOUT_OK)
+            return gk3l_err(c->T, "disk-layout", "the existing partition table has out-of-range or overlapping entries (disk not touched)", 0), -1;
+    }
     pe = gk3w_reinstall_print(d->bs, parts, paths, n, c->keep, &c->ri, stdout);
     if (pe != GK3W_PLAN_OK)
         return gk3l_err_kv(c->T, "plan", "why", gk3w_plan_strerror(pe), "the Android partitions on this disk do not form one complete installation of this version (disk not touched)", 0), -1;
@@ -889,7 +898,9 @@ static int wipe_kernel_parts(apply_ctx *c)
         if (err) {
             for (size_t j = 0; j < i; j++) {
                 uint64_t f = d->bs / 512;
-                (void)gk3l_kernel_add(d, (uint32_t)d->kp[j].num, d->kp[j].start512 / f, (d->kp[j].start512 + d->kp[j].size512) / f - 1);
+                if (d->kp[j].size512 < f ||
+                    gk3l_kernel_add(d, (uint32_t)d->kp[j].num, d->kp[j].start512 / f, (d->kp[j].start512 + d->kp[j].size512) / f - 1))
+                    gk3l_log("warning: could not give partition %s back to the kernel; reboot before using this disk", d->kp[j].name);
             }
             return gk3l_err_kv(GK3W_TOUCHED_NO, "wipe-mounted", "mounts", d->kp[i].name, "the kernel would not release a partition of this disk (disk not touched)", err), -1;
         }
@@ -1281,19 +1292,19 @@ int gk3l_cmd_apply(int argc, char **argv)
     if (c.mode == M_ALONGSIDE ? plan_alongside(&c) : c.mode == M_WIPE ? plan_wipe(&c) : plan_reinstall(&c))
         goto out;
 
+    /* 最后一次核对：准备期间分区表被别的工具改过就不写 */
+    if (c.mode != M_WIPE &&
+        (gk3l_disk_read_table(&c.d) || strcmp(c.d.table, "gpt") || memcmp(c.snap, c.d.hdr, c.d.bs) ||
+         memcmp(c.snap + c.d.bs, c.d.ent, c.snap_len) || !gk3l_disk_kernel_ok(&c.d))) {
+        gk3l_err(c.T, "layout-changed", "the partition table changed while preparing the install; run the installer again (disk not touched)", 0);
+        goto out;
+    }
     if (c.mode == M_REINSTALL) {
         /* 分区表不动：不备份；目标就是现有分区 */
         gk3l_log("reinstall: the partition table is not changed; reusing the existing %d partitions", GK3W_REUSE_N);
         if (reuse_targets(&c))
             goto out;
     } else {
-        /* 最后一次核对、分区表备份 */
-        if (c.mode == M_ALONGSIDE &&
-            (gk3l_disk_read_table(&c.d) || strcmp(c.d.table, "gpt") || memcmp(c.snap, c.d.hdr, c.d.bs) ||
-             memcmp(c.snap + c.d.bs, c.d.ent, c.snap_len) || !gk3l_disk_kernel_ok(&c.d))) {
-            gk3l_err(c.T, "layout-changed", "the partition table changed while preparing the install; run the installer again (disk not touched)", 0);
-            goto out;
-        }
         if (c.mode == M_ALONGSIDE ? gk3l_gpt_backup(&c.d, c.backup_dir, "apply", c.d.g.first_usable, c.d.blocks - (c.d.g.last_usable + 1))
                                   : gk3l_gpt_backup(&c.d, c.backup_dir, "wipe", (1u << 20) / c.d.bs, (1u << 20) / c.d.bs))
             goto out;

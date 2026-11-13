@@ -428,6 +428,7 @@ umount /media/gk3
 mount -t vfat "${R}p1" "$W/seed"
 refuse "有分区挂着" wipe-mounted "$R" -- --mode wipe --release "$REL"
 umount "$W/seed"
+ntfs-3g "${R}p3" "$W/ntfs" && { refuse "有分区经 FUSE 挂着" wipe-mounted "$R" -- --mode wipe --release "$REL"; umount "$W/ntfs"; }
 refuse "整盘清空却要 Windows 为默认" default-os-no-windows "$R" -- --mode wipe --release "$REL" --default-os windows
 losetup -d "$R"
 # MBR 盘也能整盘清空
@@ -454,7 +455,9 @@ refusedel() {
     [ "$rc" != 0 ] && printf '%s\n' "$out" | grep -q "^ERR code=$2 " && [ "$(fp "$B")" = "$before" ] && ok "$1 ⇒ $2" || { bad "$1：rc=$rc"; printf '%s\n' "$out" | head -3; }
 }
 refusedel "删 ESP" edit-esp "${B}p1"
-# 挂着的分区（内核文件系统挂载，设备号才对得上；容器里 NTFS 只能用 FUSE，所以把 C 盘换成 FAT 来挂）
+# FUSE 挂着的 NTFS：mountinfo 里是匿名设备号，靠独占打开与内核的 BLKPG 认出来
+ntfs-3g "${B}p3" "$W/ntfs" && { refusedel "删 FUSE 挂着的 NTFS 分区" edit-mounted "${B}p3"; umount "$W/ntfs"; }
+# 内核文件系统挂着的
 mkfs.vfat "${B}p3" >/dev/null 2>&1; mount -t vfat "${B}p3" "$W/seed"
 refusedel "删挂着的分区" edit-mounted "${B}p3"
 umount "$W/seed"

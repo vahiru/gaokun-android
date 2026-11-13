@@ -106,14 +106,19 @@ int gk3l_cmd_delete(int argc, char **argv)
         gk3l_err(T, "gpt-layout", "internal error: cannot remove the entry from the partition table (disk not touched)", 0);
         goto out;
     }
+    /* 先让内核放掉这个分区：它在用（挂着、交换分区、被独占）时内核拒绝（EBUSY），这是最终的判据。
+     * 放掉了再改分区表；改不成就把它加回去 */
+    if ((err = gk3l_kernel_del(&d, idx))) {
+        gk3l_err_kv(T, "edit-mounted", "part", part, "the kernel would not release the partition: it is in use (disk not touched)", err);
+        goto out;
+    }
     T = GK3W_TOUCHED_YES;
     w = gk3l_gpt_write(&d, d.hdr, d.ent, chk);
     if (w) {
-        gk3l_err_kv(T, w == -1 ? "disk-write" : "disk-verify", "part", "gpt", w == -1 ? "writing the partition table failed (the backup is listed above)" : "the partition table did not read back identically (the backup is listed above)", errno);
-        goto out;
-    }
-    if ((err = gk3l_kernel_del(&d, idx))) {
-        gk3l_err_kv(T, "kernel-del", "part", part, "the partition is gone from the partition table, but the kernel would not drop it; reboot", err);
+        int e = errno;
+        if (gk3l_kernel_add(&d, (uint32_t)idx, q.first_lba, q.last_lba))
+            gk3l_log("warning: could not give the partition back to the kernel; reboot before using this disk");
+        gk3l_err_kv(T, w == -1 ? "disk-write" : "disk-verify", "part", "gpt", w == -1 ? "writing the partition table failed (the backup is listed above)" : "the partition table did not read back identically (the backup is listed above)", e);
         goto out;
     }
     if (gk3l_disk_read_table(&d) || strcmp(d.table, "gpt") || gk3_gpt_get(&d.g, (uint32_t)idx - 1, &q) != GK3_ENOENT || !gk3l_disk_kernel_ok(&d)) {
