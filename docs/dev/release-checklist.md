@@ -12,8 +12,8 @@
 | **发版核对** | `release.sh --no-build`前后 | 宿主机侧核对 | 下表命令 |
 
 ```bash
-# 候选版装入备用槽位启动、开机满10分钟后：
-SER=gaokun3 bash scripts/accept.sh --stamp <候选版的ro.build.date.utc> --soak 600 --video <测试视频.mp4>
+# 候选版装入备用槽位启动、开机满10分钟后（只连一台设备时可省略SER；#99起adb序列号为整机SMBIOS序列号）：
+SER=<设备序列号> bash scripts/accept.sh --stamp <候选版的ro.build.date.utc> --soak 600 --video <测试视频.mp4>
 echo $?        # 0 = 无FAIL；1 = 有FAIL；2 = adb不通或中途掉线（不要接管道后再取$?）
 ```
 
@@ -71,6 +71,11 @@ echo $?        # 0 = 无FAIL；1 = 有FAIL；2 = adb不通或中途掉线（不�
 | `power_profile`配置 | `dumpsys batterystats`中的power profile信息 | 包含2个CPU簇（`policy0` / `policy4`）、21与18个频点、电池容量4483 mAh |
 | `cpuset`分组 | `cat /dev/cpuset/{background,system-background,foreground,top-app}/cpus` | `background`与`system-background`为`0-3`，`foreground`与`top-app`为`0-7` |
 | 待机开关属性镜像 | `getprop persist.sys.gaokun3.allow_suspend`、`getprop persist.vendor.gaokun3.allow_suspend` | 设置过前者时两者保持一致 |
+| 面板自动识别 | `su -c "dmesg \| grep 'panel ID pins'"` | BOE屏输出`0 1`，CSOT屏输出`0 0`，显示正常 |
+| Wi-Fi推送唤醒服务 | `ps -AZ \| grep gaokun3-wifi-wake`；`logcat -d -s gaokun3-wifiwake`；`su -c "iw phy phy0 wowlan show"` | 进程位于`gaokun3_wifiwake`域且持续运行；日志输出唤醒规则数；`wowlan`包含`patterns` |
+| 麦克风降噪与手写笔服务 | `getprop init.svc.vendor.gk3denoise`、`getprop init.svc.vendor.gk3pend`；`ps -AZ` | 均为`running`，分别位于`gk3denoise`与`gk3pend`域 |
+| 指纹服务与内核配置 | `getprop init.svc.vendor.fingerprint-gaokun3`；`zcat /proc/config.gz \| grep CONFIG_GAOKUN3_FPCMD` | 服务`running`（`hal_fingerprint_default`域）；`CONFIG_GAOKUN3_FPCMD=y` |
+| 显示模糊、色彩与HDR声明 | `dumpsys window \| grep mBlurEnabled`；`dumpsys display \| grep useSurfaceControl`；`dumpsys SurfaceFlinger \| grep hdr10`；`dumpsys media.player` | `mBlurEnabled=true`、`useSurfaceControl=true`、`hdr10=true`；HEVC解码器列出`Main10HDR10` |
 
 ## 3. 人在场交互检查
 
@@ -99,13 +104,17 @@ echo $?        # 0 = 无FAIL；1 = 有FAIL；2 = adb不通或中途掉线（不�
 | 恢复出厂设置（RC跑一次） | 备份`/data/misc/adb/adb_keys`后在“设置 → 系统 → 重置选项”执行“清除所有数据” | `gk3boot`识别`why=wipe`并转交执行端格式化`userdata`与`metadata`，重启后进入开机向导且BCB清零 |
 | USB文件传输/PTP/RNDIS/MIDI | 连接电脑依次切换文件传输（拷贝>1 GB文件并校验哈希）、PTP、USB网络共享、MIDI，并测试`scripts/game-mode.sh` | 四种USB功能在电脑端均正常识别工作，大文件传输哈希一致；游戏模式开启与恢复后adb正常重连 |
 | 手写笔设置 | 在“设置 → 已连接的设备 → 手写笔设置”中调节笔迹平滑档位与双击笔身功能，重启后复查 | 每次调节后`dmesg`输出对应`beta`值（300/200/125），双击功能与电量显示正常，重启后设置保留 |
+| 侧边指纹录入与解锁 | 在设置中录入指纹并锁屏解锁，测试未录入的手指与连续5次失败后的锁定 | 录入与解锁正常、其他手指被拒绝；连续5次失败后锁定30秒且期间不再高频轮询认证，期满自动恢复 |
+| 显示颜色模式与HDR播放 | 在“设置 → 显示 → 颜色”切换“鲜艳”与“标准”，播放10-bit HDR视频 | 两种颜色模式切换生效；HDR视频高光提亮正常 |
+| 麦克风阵列、回声消除与降噪 | 外放状态下进行语音通话，切换“设置 → 提示音和振动 → 麦克风降噪”各开关测试录音与录像 | 通话对方听不到外放回声；各场景降噪开关按设置生效 |
+| 内核版本伪装设置 | 查看设置中的内核版本与`adb shell uname -r`，在“设置 → 系统 → 内核版本伪装”中切换开关或修改版本号并重启 | 系统与`uname -r`始终显示真实版本，普通应用读到设定版本；关闭后普通应用读到真实版本 |
 
 ## 4. 长稳与性能/功耗测量
 
 | 检查项 | 操作命令 | 判据与记录要求 |
 | --- | --- | --- |
-| 游戏性能基线 | 固定场景下运行`SER=gaokun3 bash scripts/perf/game-perf.sh`：三角洲行动20分钟（`-p com.tencent.tmgp.dfm -t 1200`）、卡拉彼丘10分钟（`-p com.idreamsky.klbqm -t 600`）、明日方舟30分钟（`-p com.hypergryph.arknights -t 1800`），随后跑`accept.sh --readonly` | 记录平均帧率、1% low、最高温度、温控降频时长与GPU频率分布；GMU错误与SMMU fault为0。与上一版相比，平均帧率下降不得超过10%、最高温升不得超过5 °C |
-| 拔线待机8小时 | `SER=gaokun3 bash scripts/perf/standby.sh start` → 设`allow_suspend=1` → 拔除USB息屏静置8小时 → 插回执行`pull`与`stop` | 记录每小时掉电百分比、mAh消耗、挂起次数及`cxsd` / `aosd` / `ddr`睡眠统计增量 |
+| 游戏性能基线 | 固定场景下运行`SER=<设备序列号> bash scripts/perf/game-perf.sh`：三角洲行动20分钟（`-p com.tencent.tmgp.dfm -t 1200`）、卡拉彼丘10分钟（`-p com.idreamsky.klbqm -t 600`）、明日方舟30分钟（`-p com.hypergryph.arknights -t 1800`），随后跑`accept.sh --readonly` | 记录平均帧率、1% low、最高温度、温控降频时长与GPU频率分布；GMU错误与SMMU fault为0。与上一版相比，平均帧率下降不得超过10%、最高温升不得超过5 °C |
+| 拔线待机8小时 | `SER=<设备序列号> bash scripts/perf/standby.sh start` → 设`allow_suspend=1` → 拔除USB息屏静置8小时 → 插回执行`pull`与`stop` | 记录每小时掉电百分比、mAh消耗、挂起次数及`cxsd` / `aosd` / `ddr`睡眠统计增量 |
 | 亮屏硬解1小时 | 固定亮度下启动`HB=300 … standby.sh start`，拔线连续硬件解码播放视频1小时后`pull` | 记录1小时耗电百分比与温升 |
 | 72小时日常综合测试 | 设`allow_suspend=1`并开启`standby.sh start`，拔线日常使用72小时后`pull`并跑`accept.sh` | 累计挂起≥30次；`system_server_crash`与系统tombstone为0；关键守护进程PID不变、无内存或fd泄漏；每次唤醒后Wi-Fi自动恢复 |
 | 挂起/恢复压力循环 | 内核休眠路径有改动时运行[`scripts/s2idle/android-ath11k-s2loop.sh`](../../scripts/s2idle/android-ath11k-s2loop.sh) | 全部循环正常唤醒、Wi-Fi每次恢复、恢复期间无`GFP_DMA`高阶内存分配失败 |

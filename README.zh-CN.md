@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://t.me/gaokunAndroid"><img alt="Telegram频道：gaokunAndroid" src="https://img.shields.io/badge/Telegram-gaokunAndroid-26A5E4?logo=telegram&logoColor=white"></a>
   <a href="https://qm.qq.com/q/3VIV2KY6o0"><img alt="QQ群：920133252" src="https://img.shields.io/badge/QQ%E7%BE%A4-920133252-12B7F5?logo=qq&logoColor=white"></a>
-  <a href="https://github.com/vahiru/gaokun-android/releases/tag/v1.0.0-rc.3"><img alt="最新版本：1.0.0-rc.3" src="https://img.shields.io/badge/Latest-1.0.0--rc.3-yellow"></a>
+  <a href="https://github.com/vahiru/gaokun-android/releases/tag/v1.0.0-rc.4"><img alt="最新版本：1.0.0-rc.4" src="https://img.shields.io/badge/Latest-1.0.0--rc.4-yellow"></a>
 </p>
 
 ## 现状
@@ -46,9 +46,9 @@
 | 游戏 | ⚠️ | 原神最高画质运行流畅，明日方舟、三角洲行动等均可运行；英雄联盟手游可以启动，**游玩使用ACE等反作弊框架的游戏可能导致封号** |
 | 视频播放 | ✅ | 支持硬件解码，包括10-bit和HDR视频 |
 | 视频编码 | ⚠️ | 支持H.264和HEVC硬件编码，录像使用硬件编码，系统录屏仍为软件编码；同一时刻只有一路使用硬件，屏幕关闭后继续处理的视频可能不完整 |
-| 摄像头 | ⚠️ | 使用软件ISP。前后摄可以拍照和录像，后摄支持自动对焦；曝光补偿暂不支持，暗处噪点较多，录制720p@30fps以上规格的视频可能导致相机App崩溃 |
+| 摄像头 | ✅ | 使用硬件ISP，前后摄支持拍照与1080p录像，后摄支持自动对焦、数码变焦与曝光补偿 |
 | USB-C | ⚠️ | 支持与电脑传输文件、共享网络，可以连接U盘和外接显示器；偶尔开机后USB-C口无法正常工作，重启后恢复，原因尚在排查 |
-| 指纹 | ❌ | 驱动和系统服务尚在开发，暂时不可用 |
+| 指纹 | ⚠️ | 支持录入与锁屏解锁（兼容Goodix与FocalTech传感器）；安全等级为便利级，无法用于指纹支付，FocalTech传感器的识别效果未经实测 |
 | 定位 | ❌ | 无GPS硬件，卫星定位无法使用 |
 | TPM | ❌ | 不支持 |
 | 视频版权保护（DRM） | ❌ | 系统未集成Widevine，Netflix等付费流媒体的内容无法播放 |
@@ -94,7 +94,7 @@
 
 **救援系统：**本机没有可用的Android recovery，救援系统是出问题时的修复手段。它是一个精简的Linux系统，与图形安装器是同一套程序，可以重新安装Android，存放在单独的1 GiB分区中。图形安装器可以一并安装它（安装时勾选"同时安装救援系统"选项）；命令行安装器只在提供了救援系统镜像时才会安装。
 
-每次开机时会显示15秒的启动菜单，可以从中进入救援系统；Android卡死时，系统不会自动进入救援系统。需要时请长按电源键强制关机，再次开机后在菜单中选择救援系统；选择菜单项需要连接键盘盖。如需通过网络（SSH）登录救援系统，请在安装前把自己的SSH公钥放到安装器U盘上，具体做法见[安装说明](docs/INSTALL.zh-CN.md#救援系统)。
+每次开机时会显示5秒的启动菜单，可以从中进入救援系统；Android卡死时，系统不会自动进入救援系统。需要时请长按电源键强制关机，再次开机后在菜单中用音量键和电源键（或键盘盖的方向键和回车）选择救援系统。如需通过网络（SSH）登录救援系统，请在安装前把自己的SSH公钥放到安装器U盘上，具体做法见[安装说明](docs/INSTALL.zh-CN.md#救援系统)。
 
 **中国境内下载：**GitHub的下载服务器慢或者连不上时，系统镜像（`boot.img`、`super.img.zst`）可从镜像站：`https://ota.072172.xyz/install/<build>/<文件名>`下载，`<build>`即该版OTA包去掉`.zip`的文件名，详见[`docs/INSTALL.zh-CN.md`](docs/INSTALL.zh-CN.md#下载)。
 
@@ -114,7 +114,7 @@
 | 版本回退 | 新版本首次成功启动后，上一版即被合并覆盖，无法回退；大版本更新还会升级用户数据 | 更新前备份重要数据 |
 | Google认证 | 本机未通过Play保护机制认证，需手动登记后Play商店才能正常使用；Play Integrity无法通过，依赖它的应用（如Google钱包、部分银行应用）无法使用 | 按[安装说明](docs/INSTALL.zh-CN.md#此设备未经play保护机制认证)登记一次 |
 | 国内使用 | 系统只附带Google应用，未预装国内应用商店；无法访问Google时，Play商店、Google服务和网络定位均无法使用 | 从应用官网或应用商店网页版下载安装包 |
-| 内核版本号 | 为通过部分应用的环境检测，应用读取到的内核版本号是伪装的 | 从下一个版本起，可在"设置 → 系统 → 内核版本伪装"中关闭或修改 |
+| 内核版本号 | 为通过部分应用的环境检测，应用读取到的内核版本号是伪装的 | 可在"设置 → 系统 → 内核版本伪装"中关闭或修改 |
 | 音频与蓝牙 | 有用户报告长时间运行后声音和蓝牙同时失效，原因尚在排查 | 重启即可恢复；反馈时请附上`/data/vendor/gaokun3/hangdump-*`（需要root权限读取） |
 | 连接电脑 | 连接部分电脑时，平板可能反过来为电脑供电，双方都无法识别对方 | 重新插拔一次，或换用电脑上的另一个接口 |
 | USB-C接口 | 插拔设备后（多见于待机之后），USB-C口可能无法正常工作，直到重启 | 重启；在此之前通过Wi-Fi使用adb和传输文件 |
@@ -149,7 +149,7 @@
 * **Mesa**的`freedreno`和`turnip`驱动。
 * **@mashen11**：麦克风、扬声器增强和相机自动对焦。
 * **@Rivarise**：CSOT屏手写笔的调校与测试。
-* **@dezige131**：图形安装器的修复。
+* **@dezige131**：相机硬件ISP像素通路的最初实现，以及图形安装器的修复。
 * 帮忙测试的各位用户。
 
 ## 许可

@@ -54,9 +54,9 @@ Each entry follows the same format: **Symptom** (what you will run into), **Caus
 * **What to do**: there is no way around it; it is the precondition for running Android on this machine.
 
 ### Apps are told a kernel version that is not the real one
-* **Symptom**: apps read the kernel version `6.6.30-android15-8-g0a4d3c12b3`, which matches no real Android kernel; the kernel actually running is mainline Linux 7.2.9 with this project's patches. On 1.0.0-rc.2 and rc.3 the whole system reports this version; from the next release, only apps see it, while `uname -r` in `adb shell` and the kernel version shown in Settings are the real one.
+* **Symptom**: apps read the kernel version `6.6.30-android15-8-g0a4d3c12b3`, which matches no real Android kernel; the kernel actually running is mainline Linux 7.2.9 with this project's patches. On 1.0.0-rc.2 and rc.3 the whole system reports this version; since 1.0.0-rc.4, only apps see it, while `uname -r` in `adb shell` and the kernel version shown in Settings are the real one.
 * **Cause**: some apps' environment checks only accept the version numbers of Android's common kernels. Only the number apps read is changed; the kernel itself, its build-time version and module checks are untouched. This is a deliberate disguise, which is why it is listed here.
-* **What to do**: from the next release, you can turn it off or change it in Settings → System → Kernel version spoofing; it takes effect after a restart. 1.0.0-rc.2 and rc.3 do not have this setting; to see the real version, run `dmesg | head -1` as root. Please do not use "Install" or LKM patching in the KernelSU manager: KernelSU is already built into this kernel.
+* **What to do**: since 1.0.0-rc.4, you can turn it off or change it in Settings → System → Kernel version spoofing; it takes effect after a restart. 1.0.0-rc.2 and rc.3 do not have this setting; to see the real version, run `dmesg | head -1` as root. Please do not use "Install" or LKM patching in the KernelSU manager: KernelSU is already built into this kernel.
 
 ## 2. Unsupported or incomplete features
 
@@ -70,10 +70,10 @@ Each entry follows the same format: **Symptom** (what you will run into), **Caus
 * **Cause**: the keyboard cover's connector appears to the system as a permanently attached USB keyboard, and Android hides the USB connection notification when it sees such a device. The USB-C port next to the power button only runs at USB 2.0 speed when connected to a computer.
 * **What to do**: choose "File transfer" in Settings as above. The tablet does not enter standby while connected to a computer, so transfers continue with the screen off; please unplug the cable when you are done.
 
-### Fingerprint is not available yet
-* **Symptom**: Settings has no fingerprint option, and the sensor in the power button cannot be used.
-* **Cause**: the fingerprint driver and system service are still in development.
-* **What to do**: unlock with a PIN or password. Even once fingerprints are supported, fingerprint payment in payment apps will most likely not work.
+### Fingerprint is for screen unlock only, not for payments
+* **Symptom**: 1.0.0-rc.3 and earlier do not support the fingerprint sensor. Since 1.0.0-rc.4, you can enrol fingerprints in Settings and unlock the screen (both Goodix and FocalTech sensors are supported), but fingerprint payment in banking and payment apps and fingerprint sign-in that relies on Android Keystore do not work; matching on machines with a FocalTech sensor has not been tested with real fingers yet.
+* **Cause**: image decoding, matching and template storage run in a normal system service without hardware-backed token signing or anti-spoofing certification, so the service reports the lowest security tier (Class 1 / convenience), which high-security apps do not accept. The pixel-pitch scale for FocalTech sensors has not been measured on real captures yet.
+* **What to do**: keep using your password or PIN in payment and banking apps. If recognition is poor on a FocalTech machine, unlock with a PIN or password for now and let us know in an issue.
 
 ### The stylus does not support the first-generation M-Pencil
 * **Symptom**: on 1.0.0-rc.1 and earlier, the stylus does nothing at all. Since rc.2, the second- and third-generation M-Pencil support pressure, hover, tilt and double-tap on the side; everyday use of the third-generation pen has not been tested yet. The first-generation M-Pencil does not work.
@@ -99,7 +99,7 @@ Each entry follows the same format: **Symptom** (what you will run into), **Caus
 * **What to do**: use the tablet's own microphone and speakers for calls. Listening to music over a Bluetooth headset uses a different path and is not affected.
 
 ### Messages from some apps are delayed in standby
-* **Symptom**: once the screen is off and the machine is in standby, new messages from apps that do not use Google's push service (FCM), such as WeChat and QQ, only arrive at the system's next scheduled wake-up or when you turn the screen on, usually one or two minutes late, occasionally around three. Apps that use FCM are delayed the same way on 1.0.0-rc.3 and earlier; from the next release they can wake the system and arrive on time. Wi-Fi stays connected during standby, so there is no need to reconnect after waking.
+* **Symptom**: once the screen is off and the machine is in standby, new messages from apps that do not use Google's push service (FCM), such as WeChat and QQ, only arrive at the system's next scheduled wake-up or when you turn the screen on, usually one or two minutes late, occasionally around three. Apps that use FCM are delayed the same way on 1.0.0-rc.3 and earlier; since 1.0.0-rc.4 they can wake the system and arrive on time. Wi-Fi stays connected during standby, so there is no need to reconnect after waking.
 * **Cause**: Chinese apps have no vendor push channel on this system, so they can only fetch messages from their servers when the system is awake.
 * **What to do**: when you need messages on time, keep the screen on, or receive them on a phone.
 

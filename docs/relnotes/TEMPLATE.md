@@ -61,10 +61,10 @@ The full list, with workarounds, is in
 
 * **Security**: signed with Android's public test keys; `/data` is **not encrypted**; root (KernelSU / ReSukiSU) is
   built in; the boot chain is unlocked.
-* **Proprietary components** ship in the images: Huawei firmware and sensor configuration, the Huawei Histen audio
-  engine, and Google apps (MindTheGapps).
+* **Proprietary components** ship in the images: Huawei firmware and device calibration data, the Huawei Histen audio
+  engine, Qualcomm's QNN runtime (for microphone noise suppression), and Google apps (MindTheGapps).
 * **Not supported or incomplete**: *Erase all data* in Settings (untested; use the graphical installer's *Reinstall Android*);
-  fingerprint (in progress); first-generation M-Pencil; GPS / location; DRM video (no Widevine); Bluetooth headset
+  fingerprint payment (screen unlock only); first-generation M-Pencil; GPS / location; DRM video (no Widevine); Bluetooth headset
   microphone in calls; push notifications from apps that do not use FCM while in standby; Google certification
   (register once; Play Integrity never passes).
 

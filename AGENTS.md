@@ -56,7 +56,7 @@ Modifications to upstream source trees (Linux kernel, AOSP/crDroid repositories,
   - Installer frontend: `flutter test` inside `installer/live/`
   - Kernel patches & config: `bash scripts/kernel-apply-patches.sh <kernel-tree> --check`, `bash scripts/kernel-config-android.sh <kout>`
   - Documentation links: `python3 -I scripts/check-doc-links.py`
-  - On-device release acceptance: `SER=gaokun3 bash scripts/accept.sh` (see [`docs/dev/release-checklist.md`](docs/dev/release-checklist.md))
+  - On-device release acceptance: `bash scripts/accept.sh` (pass `SER=<serial>` if multiple devices are attached; see [`docs/dev/release-checklist.md`](docs/dev/release-checklist.md))
 
 ## 4. Language & Documentation Conventions
 
