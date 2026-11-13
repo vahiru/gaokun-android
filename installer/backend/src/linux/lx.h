@@ -34,6 +34,8 @@ int gk3l_read_u64(const char *path, uint64_t *out);
  * out 为 NULL 时子进程的 stdout 并进我们的 stderr（进安装日志，不混进协议记录）。子进程的 stderr 照原样进我们的 stderr。
  * 返回退出码；没能运行（找不到、fork 失败）返回 -1，被信号结束返回 128+信号。 */
 int gk3l_run(char *const argv[], char *out, size_t cap);
+/* 同上，但子进程的 stdout 与 stderr 都丢掉（只要退出码的试探） */
+int gk3l_run_quiet(char *const argv[]);
 
 /* ── 盘 ── */
 /* 安装介质所在的分区（"主设备号:次设备号"，例如 "259:3"）；不是从安装介质启动的返回 -1。
@@ -50,6 +52,11 @@ int gk3l_cmd_apply(int argc, char **argv);
 int gk3l_cmd_delete(int argc, char **argv);
 int gk3l_cmd_esp_info(int argc, char **argv);
 int gk3l_cmd_release_info(int argc, char **argv);
+int gk3l_cmd_job(int argc, char **argv);
+int gk3l_cmd_log_targets(int argc, char **argv);
+int gk3l_cmd_save_logs(int argc, char **argv);
+/* 按 argv[0] 的命令名分派（main 与 job body 共用）；返回命令的退出码 */
+int gk3l_dispatch(int argc, char **argv);
 int gk3l_cmd_probe(int argc, char **argv);
 int gk3l_cmd_preflight(int argc, char **argv);
 int gk3l_cmd_plan(int argc, char **argv);

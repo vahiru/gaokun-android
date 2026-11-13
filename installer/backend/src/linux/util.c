@@ -166,6 +166,21 @@ int gk3l_run(char *const argv[], char *out, size_t cap)
     return -1;
 }
 
+int gk3l_run_quiet(char *const argv[])
+{
+    int nul = open("/dev/null", O_WRONLY | O_CLOEXEC), saved, r;
+    if (nul < 0)
+        return gk3l_run(argv, NULL, 0);
+    fflush(stderr);
+    saved = dup(2);
+    dup2(nul, 2);
+    close(nul);
+    r = gk3l_run(argv, NULL, 0);
+    dup2(saved, 2);
+    close(saved);
+    return r;
+}
+
 /* ── 安装介质 ── */
 
 /* mountinfo 里的路径把空格、制表符、换行、反斜杠写成 \ooo（八进制） */
