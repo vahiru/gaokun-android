@@ -3,14 +3,22 @@
 #
 # 一份 init 同时服务两种介质：
 #   * U 盘（LiveCD）：squashfs 就在那个 FAT 分区上
-#   * 内置盘（救援系统）：squashfs 在自己的小分区上
+#   * 内置盘（免 U 盘的安装器分区 GK3LIVE）：squashfs 同样在 gaokun3/ 下，读进内存后卸下分区（见下面 gk3.toram）
 # 所以【不靠分区标签、不靠 UUID】—— 挨个挂上去找那个文件。
 # 配置越少，越不会因为"换了台机器"而失效。
 #
 # cmdline 参数：
 #   gk3.squash=<路径>   squashfs 在介质上的路径（默认 /gaokun3/rescue.squashfs）
 #   gk3.dev=<设备>      跳过搜索，直接用这个块设备
+#   gk3.toram=0|1       介质读不读进内存（默认：内置盘读，U 盘不读）
 #   gk3.debug           出错时给一个 shell，而不是重启
+#
+# 读进内存（介质在内置盘上：免 U 盘的安装器分区 GK3LIVE）：gaokun3/ 整个复制进 tmpfs、卸下介质分区，
+#   tmpfs 挂到 /media/gk3（路径与 U 盘时相同）。安装器因此可以在清除整个磁盘时保留这个分区、装完把它删掉并入 /data
+#   （installer/backend/src/linux/live.h）。内存不够（gaokun3/ 的大小加 2 GiB）或复制失败时照旧直接挂着用。
+#   U 盘不读：拔掉 U 盘就是退出，而且读进内存要多花时间。
+# 介质记在 /run/gaokun3/medium（gk3l 据此认介质，见 installer/backend/src/linux/lx.h）：
+#   part=<分区名> disk=<盘名> start= size=（sysfs 的 512 字节单位） ram=yes|no
 #
 # ⚠️ 失败时【默认重启】而不是停在 shell：这台机器没有串口，停住就等于要人到
 #    机器旁按电源键。重启会回到 systemd-boot 菜单 → 15 秒 → default(Android)，
@@ -22,6 +30,7 @@ export PATH
 SQUASH=/gaokun3/rescue.squashfs
 FORCE_DEV=
 DEBUG=
+TORAM=auto
 
 say()  { echo "[gk3] $*"; }
 fail() {
@@ -45,7 +54,7 @@ fail() {
     while : ; do sleep 60; done
 }
 
-mkdir -p /proc /sys /dev /mnt /lower /upper /newroot
+mkdir -p /proc /sys /dev /mnt /lower /upper /newroot /ram /run
 mount -t proc     proc     /proc  || fail "mounting /proc failed"
 mount -t sysfs    sysfs    /sys   || fail "mounting /sys failed"
 mount -t devtmpfs devtmpfs /dev 2>/dev/null || mount -t tmpfs tmpfs /dev
@@ -54,6 +63,7 @@ for arg in $(cat /proc/cmdline); do
     case "$arg" in
         gk3.squash=*) SQUASH="${arg#gk3.squash=}" ;;
         gk3.dev=*)    FORCE_DEV="${arg#gk3.dev=}" ;;
+        gk3.toram=*)  TORAM="${arg#gk3.toram=}" ;;
         gk3.debug)    DEBUG=1 ;;
     esac
 done
@@ -116,7 +126,44 @@ fi
 
 [ -n "$MEDIA" ] || fail "$SQUASH not found on any partition"
 
-mount -o ro,loop "/mnt$SQUASH" /lower || fail "mounting the squashfs failed (kernel without CONFIG_SQUASHFS?)"
+# 介质所在的整块盘；内置盘 = 既不可移动、也不在 USB 上（有的 USB 固态硬盘报 removable=0）
+MNAME=${MEDIA#/dev/}
+MSYS=$(readlink -f "/sys/class/block/$MNAME")
+MDISK=$(basename "$(dirname "$MSYS")")
+INTERNAL=1
+[ "$(cat "/sys/block/$MDISK/removable" 2>/dev/null || echo 0)" = 1 ] && INTERNAL=0
+case "$MSYS" in */usb*) INTERNAL=0 ;; esac
+case "$TORAM" in
+    1|yes) WANT_RAM=1 ;;
+    0|no)  WANT_RAM=0 ;;
+    *)     WANT_RAM=$INTERNAL ;;
+esac
+# 只复制 gaokun3/：squashfs 不在里面就没法读进内存
+case "$SQUASH" in /gaokun3/*) ;; *) WANT_RAM=0 ;; esac
+
+RAM=
+if [ "$WANT_RAM" = 1 ]; then
+    NEED=$(du -sk /mnt/gaokun3 2>/dev/null | cut -f1)
+    AVAIL=$(sed -n 's/^MemAvailable: *\([0-9]*\) kB$/\1/p' /proc/meminfo)
+    if [ -n "$NEED" ] && [ -n "$AVAIL" ] && [ $((NEED + 2097152)) -le "$AVAIL" ]; then
+        say "copying gaokun3/ ($((NEED / 1024)) MiB) into memory"
+        # 多留 256 MiB 给之后写进去的日志与分区表备份
+        if mount -t tmpfs -o "size=$((NEED + 262144))k,mode=0755" tmpfs /ram && cp -a /mnt/gaokun3 /ram/; then
+            RAM=1
+        else
+            say "warning: copying into memory failed; running from the partition"
+            umount /ram 2>/dev/null
+        fi
+    else
+        say "not enough memory to copy gaokun3/ (need $((NEED / 1024)) MiB + 2 GiB, available $((AVAIL / 1024)) MiB); running from the partition"
+    fi
+fi
+if [ -n "$RAM" ]; then
+    umount /mnt || fail "unmounting the boot medium after copying it into memory failed"
+    mount -o ro,loop "/ram$SQUASH" /lower || fail "mounting the squashfs failed (kernel without CONFIG_SQUASHFS?)"
+else
+    mount -o ro,loop "/mnt$SQUASH" /lower || fail "mounting the squashfs failed (kernel without CONFIG_SQUASHFS?)"
+fi
 
 # 整个系统跑在内存里：改动落在 tmpfs，介质保持只读。
 # ⚠️ 这台机器 15.7 GiB 内存，50% 上限足够，而且留了一半给安装过程用。
@@ -126,9 +173,28 @@ mount -t overlay overlay \
       -o lowerdir=/lower,upperdir=/upper/rw,workdir=/upper/work /newroot \
       || fail "mounting the overlayfs failed (kernel without CONFIG_OVERLAY_FS?)"
 
-# 把介质本身也带进去：安装器要从 U 盘上读 super.img / boot.img
+# 把介质本身也带进去：安装器要从 U 盘上读 super.img / boot.img（读进了内存的就是内存里那份）
 mkdir -p /newroot/media/gk3
-mount --move /mnt /newroot/media/gk3 2>/dev/null || say "warning: could not move the boot medium into the new root"
+if [ -n "$RAM" ]; then
+    mount --move /ram /newroot/media/gk3 2>/dev/null || say "warning: could not move the in-memory copy of the boot medium into the new root"
+else
+    mount --move /mnt /newroot/media/gk3 2>/dev/null || say "warning: could not move the boot medium into the new root"
+fi
+
+# 介质的记录放在 /run：先在这里挂好 tmpfs、写进去，再整个移进新根（systemd 见到 /run 已经挂着就沿用）
+if mount -t tmpfs -o nosuid,nodev,mode=0755,size=10% tmpfs /run && mkdir -p /run/gaokun3; then
+    {
+        echo "part=$MNAME"
+        echo "disk=$MDISK"
+        echo "start=$(cat "/sys/class/block/$MNAME/start" 2>/dev/null)"
+        echo "size=$(cat "/sys/class/block/$MNAME/size" 2>/dev/null)"
+        if [ -n "$RAM" ]; then echo "ram=yes"; else echo "ram=no"; fi
+    } > /run/gaokun3/medium
+    mkdir -p /newroot/run
+    mount --move /run /newroot/run || say "warning: could not move /run into the new root; the installer will not recognise the boot medium"
+else
+    say "warning: could not mount /run; the installer will not recognise the boot medium"
+fi
 
 mkdir -p /newroot/proc /newroot/sys /newroot/dev
 mount --move /proc /newroot/proc

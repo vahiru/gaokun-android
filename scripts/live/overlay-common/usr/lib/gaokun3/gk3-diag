@@ -52,4 +52,8 @@ if command -v grim >/dev/null && [ -S /run/gk3-installer/wayland-0 ]; then
 fi
 sync
 [ "$WAS" = ro ] && mount -o remount,ro "$MEDIA" 2>/dev/null
+# 介质读进了内存（内置盘上的安装器分区）：上面写的是内存里那份，再写回分区本身（initramfs-init 的 gk3.toram）
+if [ -x /usr/lib/gaokun3/gk3l ] && grep -qx 'ram=yes' /run/gaokun3/medium 2>/dev/null; then
+    /usr/lib/gaokun3/gk3l persist-sync >/dev/null 2>&1 || echo "Could not copy the report back to the installer partition"
+fi
 echo "Diagnostics written to $F"

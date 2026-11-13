@@ -39,6 +39,7 @@ bash scripts/live/release-installer.sh --boot-img <boot.img> --rom <ROM版本> -
    - `CONFIG_NLS_UTF8=y`（支持FAT32上的非ASCII文件名）。
 2. **`initramfs`动态扫描介质**：
    `initramfs-init`不依赖固定的分区标签或UUID，而是先扫描可移动介质、再扫描内置NVMe分区，寻找包含`/gaokun3/rescue.squashfs`（或`live.squashfs`）的分区挂载启动。
+   介质位于内置盘（免U盘安装的安装器分区`GK3LIVE`）时，先把`gaokun3/`整个复制进内存（tmpfs）再卸下该分区，内存副本同样挂在`/media/gk3`；安装器因此可以在清除整个磁盘时保留该分区、安装完成后将其删除并入`/data`（见[`installer/backend/src/linux/live.h`](../../installer/backend/src/linux/live.h)）。内存不足（`gaokun3/`的大小加2 GiB）或复制失败时照旧直接挂载；内核参数`gk3.toram=0|1`可强制关闭或开启。介质信息记入`/run/gaokun3/medium`（`/run`在initramfs中挂好后整体移入新根），`gk3l`据此识别介质。容器测试：`bash scripts/live/test-in-container.sh scripts/live/test-initramfs.sh`。
 3. **启动失败自动重启回退**：
    由于设备无外露串口，若`initramfs`找不到根文件系统且未传入`gk3.debug`参数，会在打印诊断信息60秒后自动执行`reboot -f`，由启动加载器超时回退至默认系统（Android或Windows），避免停在无人值守的错误shell中。
 4. **无线凭据与公钥外部化**：

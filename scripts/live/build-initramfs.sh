@@ -58,7 +58,7 @@ install -m755 "$BB" "$D/bin/busybox"
 # /init 需要的 applet。busybox 靠 argv[0] 分派，所以要有对应的符号链接。
 for a in sh ash mount umount mkdir rmdir ls cat echo sleep basename dirname \
          readlink switch_root reboot mdev losetup tr cut grep sed find \
-         mknod chmod ln rm dmesg; do
+         mknod chmod ln rm dmesg cp du; do
     ln -sf busybox "$D/bin/$a"
 done
 ln -sf ../bin/busybox "$D/sbin/switch_root"
