@@ -1,0 +1,173 @@
+From 5b3a9204ced94527eff5d7e56e197b7d907b5e51 Mon Sep 17 00:00:00 2001
+From: Akisaira <akisaira@outlook.com>
+Date: Sat, 14 Nov 2026 23:23:35 +1100
+Subject: [PATCH] ipa: libipa: agc: Limit how far an upper constraint darkens the frame
+
+An upper constraint keeps the brightest part of the histogram below its
+target by lowering the exposure of the whole frame. A light source or a
+window in the scene then darkens everything else: a lamp in the
+background of a video call, many times brighter than the face, pulls
+the exposure down until the lamp itself no longer saturates.
+
+Add an optional minRestRatio to the constraints in the tuning data: an
+upper bound lowers the gain no further than to keep the mean of the
+histogram below its qLo at this fraction of the mean luminance target.
+Beyond that the highlights clip and the rest of the frame keeps a usable
+brightness. For highlights smaller than 1 - qLo of the histogram those
+pixels lie below the highlights, so their mean scales with the gain and
+the limit comes from the histogram of the frame alone, with no
+prediction of how the clipped pixels would change; larger highlights
+fall partly among them and weaken the limit. The default, zero, keeps
+the current behaviour; a lower bound ignores the value.
+
+Signed-off-by: Akisaira <akisaira@outlook.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+Origin: local
+Upstream-Status: Pending
+---
+ src/ipa/libipa/agc_mean_luminance.cpp | 60 ++++++++++++++++++++++++---
+ src/ipa/libipa/agc_mean_luminance.h   |  4 +-
+ 2 files changed, 58 insertions(+), 6 deletions(-)
+
+diff --git a/src/ipa/libipa/agc_mean_luminance.cpp b/src/ipa/libipa/agc_mean_luminance.cpp
+index 11195e0a..80e7317b 100644
+--- a/src/ipa/libipa/agc_mean_luminance.cpp
++++ b/src/ipa/libipa/agc_mean_luminance.cpp
+@@ -106,6 +106,21 @@ static constexpr unsigned int kDefaultLuxLevel = 500;
+  * \brief The luminance target for the constraint
+  */
+ 
++/**
++ * \var AgcMeanLuminance::AgcConstraint::minRestRatio
++ * \brief For an upper bound, the lowest mean luminance of the pixels below
++ * its quantiles, as a fraction of the mean luminance target
++ *
++ * An upper bound on the brightest part of the histogram brings a light source
++ * or a window out of saturation by darkening the whole frame. A non-zero ratio
++ * limits how far it goes: the bound lowers the gain no further than to keep
++ * the mean of the histogram below qLo at this fraction of the mean luminance
++ * target, so that the rest of the frame keeps a usable brightness and the
++ * highlights clip instead. This holds for highlights smaller than 1 - qLo of
++ * the histogram; larger ones fall partly below qLo and weaken the limit.
++ * Zero, the default, sets no limit. A lower bound ignores it.
++ */
++
+ /**
+  * \class AgcMeanLuminance::Traits
+  * \brief A collection of callbacks
+@@ -225,7 +240,22 @@ int AgcMeanLuminance::parseConstraint(const ValueNode &modeDict, int32_t id)
+ 			return -EINVAL;
+ 		}
+ 
+-		AgcConstraint constraint = { bound, qLo, qHi, std::move(*yTarget) };
++		double minRestRatio = 0.0;
++		if (content.contains("minRestRatio")) {
++			auto ratio = content["minRestRatio"].get<double>();
++			if (!ratio || !(*ratio >= 0.0 && *ratio <= 1.0)) {
++				LOG(AgcMeanLuminance, Error)
++					<< "minRestRatio must be a number from 0 to 1";
++				return -EINVAL;
++			}
++			minRestRatio = *ratio;
++		}
++		if (minRestRatio > 0.0 && bound == AgcConstraint::Bound::Lower)
++			LOG(AgcMeanLuminance, Warning)
++				<< "Ignoring minRestRatio of a lower bound";
++
++		AgcConstraint constraint = { bound, qLo, qHi, std::move(*yTarget),
++					     minRestRatio };
+ 		auto &constraints = constraintModes_[id];
+ 
+ 		if (idx)
+@@ -370,8 +400,10 @@ void AgcMeanLuminance::configure(utils::Duration lineDuration,
+  * a dictionary called AeConstraintMode containing per-mode setting dictionaries
+  * with the key being a value from \ref controls::AeConstraintModeNameValueMap.
+  * The yTarget can either be provided as single value or as array in which case
+- * it is interpreted as a PWL mapping lux levels to yTarget values. Each mode
+- * dict may contain either a "lower" or "upper" key or both, for example:
++ * it is interpreted as a PWL mapping lux levels to yTarget values. An upper
++ * bound may also take a minRestRatio (see
++ * AgcMeanLuminance::AgcConstraint::minRestRatio). Each mode dict may
++ * contain either a "lower" or "upper" key or both, for example:
+  *
+  * \code{.unparsed}
+  * algorithms:
+@@ -391,6 +423,7 @@ void AgcMeanLuminance::configure(utils::Duration lineDuration,
+  *             qLo: 0.98
+  *             qHi: 1.0
+  *             yTarget: [ 100, 0.8, 20000, 0.5 ]
++ *             minRestRatio: 0.5
+  *
+  * \endcode
+  *
+@@ -497,10 +530,12 @@ double AgcMeanLuminance::estimateInitialGain(const Traits &traits, double yTarge
+  * \brief Clamp gain within the bounds of a defined constraint
+  * \param[in] params The set of parameters for the calculation
+  * \param[in] gain The gain to clamp
++ * \param[in] yTarget The mean luminance target
+  *
+  * \return The gain clamped within the constraint bounds
+  */
+-double AgcMeanLuminance::constraintClampGain(const Params &params, double gain) const
++double AgcMeanLuminance::constraintClampGain(const Params &params, double gain,
++					     double yTarget) const
+ {
+ 	auto applyConstraint = [&](const AgcConstraint &constraint) {
+ 		double lux = params.lux;
+@@ -521,6 +556,21 @@ double AgcMeanLuminance::constraintClampGain(const Params &params, double gain)
+ 			gain = newGain;
+ 		}
+ 
++		/*
++		 * The pixels below the bound's quantiles keep their share of
++		 * the target. With highlights smaller than 1 - qLo of the
++		 * histogram they are below the highlights, so their mean scales
++		 * with the gain; larger highlights fall partly among them and
++		 * make the limit weaker.
++		 */
++		if (constraint.bound == AgcConstraint::Bound::Upper &&
++		    constraint.minRestRatio > 0.0 && constraint.qLo > 0.0) {
++			double rest = params.yHist.interQuantileMean(0.0, constraint.qLo);
++			if (rest > 0.0)
++				newGain = std::max(newGain, constraint.minRestRatio * yTarget *
++							    params.yHist.bins() / rest);
++		}
++
+ 		if (constraint.bound == AgcConstraint::Bound::Upper &&
+ 		    newGain < gain) {
+ 			LOG(AgcMeanLuminance, Debug)
+@@ -701,7 +751,7 @@ AgcMeanLuminance::calculateNewEv(const Params &params)
+ 	}
+ 
+ 	double gain = estimateInitialGain(params.traits, yTarget);
+-	gain = constraintClampGain(params, gain);
++	gain = constraintClampGain(params, gain, yTarget);
+ 
+ 	/*
+ 	 * We don't check whether we're already close to the target, because
+diff --git a/src/ipa/libipa/agc_mean_luminance.h b/src/ipa/libipa/agc_mean_luminance.h
+index 8545b4f6..3ffb2e1b 100644
+--- a/src/ipa/libipa/agc_mean_luminance.h
++++ b/src/ipa/libipa/agc_mean_luminance.h
+@@ -38,6 +38,7 @@ public:
+ 		double qLo;
+ 		double qHi;
+ 		Pwl yTarget;
++		double minRestRatio = 0.0;
+ 	};
+ 
+ 	struct Traits {
+@@ -87,7 +88,8 @@ private:
+ 	int parseConstraintModes(const ValueNode &tuningData);
+ 	int parseExposureModes(const ValueNode &tuningData);
+ 	double estimateInitialGain(const Traits &traits, double yTarget) const;
+-	double constraintClampGain(const Params &params, double gain) const;
++	double constraintClampGain(const Params &params, double gain,
++				   double yTarget) const;
+ 	utils::Duration filterExposure(utils::Duration exposureValue, unsigned int frames);
+ 
+ 	utils::Duration filteredExposure_;
+-- 
+2.53.0
+
