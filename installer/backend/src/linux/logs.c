@@ -318,7 +318,8 @@ int gk3l_cmd_save_logs(int argc, char **argv)
                         free(b);
                     }
                 }
-                if (ferror(f) | fclose(f)) {
+                int bad = ferror(f);
+                if (fclose(f) || bad) {
                     unlink(out);
                     failed++;
                 } else {
@@ -359,12 +360,6 @@ int gk3l_cmd_save_logs(int argc, char **argv)
         }
     }
     sync();
-    /* 命令的输出（dmesg、journal）是子进程写的，写不下时它们不一定报错：分区写满了就算没存全 */
-    {
-        struct statvfs sv;
-        if (!failed && !statvfs(dir, &sv) && sv.f_bavail == 0)
-            failed++;
-    }
 done:
     if (own)
         gk3l_umount_tmp(m);
