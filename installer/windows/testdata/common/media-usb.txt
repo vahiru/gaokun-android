@@ -1,0 +1,185 @@
+D 25
+E PROGRESS 1 check
+D 20
+E PROGRESS 1 verify-sha
+D 200
+E boot.img: sha256 matches the release manifest
+D 5500
+E super.img.zst: sha256 matches the release manifest
+D 30
+E USB drive: disk 3, 59232 MiB, 512-byte sectors; FAT32 from 1 MiB, 12 files, at least 1490 MiB needed
+D 300
+E PROGRESS 10 lock
+D 360
+E PROGRESS 15 write-media
+D 360
+E PROGRESS 15 write-media
+D 360
+E PROGRESS 16 write-media
+D 360
+E PROGRESS 17 write-media
+D 360
+E PROGRESS 18 write-media
+D 360
+E PROGRESS 19 write-media
+D 360
+E PROGRESS 20 write-media
+D 360
+E PROGRESS 21 write-media
+D 360
+E PROGRESS 22 write-media
+D 360
+E PROGRESS 23 write-media
+D 360
+E PROGRESS 24 write-media
+D 360
+E PROGRESS 25 write-media
+D 360
+E PROGRESS 26 write-media
+D 360
+E PROGRESS 27 write-media
+D 360
+E PROGRESS 28 write-media
+D 360
+E PROGRESS 29 write-media
+D 360
+E PROGRESS 30 write-media
+D 360
+E PROGRESS 31 write-media
+D 360
+E PROGRESS 32 write-media
+D 360
+E PROGRESS 33 write-media
+D 360
+E PROGRESS 34 write-media
+D 360
+E PROGRESS 35 write-media
+D 360
+E PROGRESS 36 write-media
+D 360
+E PROGRESS 37 write-media
+D 360
+E PROGRESS 38 write-media
+D 360
+E PROGRESS 39 write-media
+D 360
+E PROGRESS 40 write-media
+D 360
+E PROGRESS 41 write-media
+D 360
+E PROGRESS 42 write-media
+D 360
+E PROGRESS 43 write-media
+D 360
+E PROGRESS 44 write-media
+D 360
+E PROGRESS 45 write-media
+D 360
+E PROGRESS 46 write-media
+D 360
+E PROGRESS 47 write-media
+D 360
+E PROGRESS 48 write-media
+D 360
+E PROGRESS 49 write-media
+D 360
+E PROGRESS 50 write-media
+D 360
+E PROGRESS 51 write-media
+D 360
+E PROGRESS 52 write-media
+D 360
+E PROGRESS 53 write-media
+D 360
+E PROGRESS 54 write-media
+D 360
+E PROGRESS 55 write-media
+D 360
+E PROGRESS 56 write-media
+D 360
+E PROGRESS 57 write-media
+D 360
+E PROGRESS 58 write-media
+D 360
+E PROGRESS 59 write-media
+D 360
+E PROGRESS 60 write-media
+D 360
+E PROGRESS 61 write-media
+D 360
+E PROGRESS 62 write-media
+D 360
+E PROGRESS 63 write-media
+D 360
+E PROGRESS 64 write-media
+D 360
+E PROGRESS 65 write-media
+D 360
+E PROGRESS 66 write-media
+D 360
+E PROGRESS 67 write-media
+D 360
+E PROGRESS 68 write-media
+D 360
+E PROGRESS 69 write-media
+D 360
+E PROGRESS 70 write-media
+D 360
+E PROGRESS 71 write-media
+D 360
+E PROGRESS 72 write-media
+D 360
+E PROGRESS 73 write-media
+D 360
+E PROGRESS 74 write-media
+D 360
+E PROGRESS 75 write-media
+D 360
+E PROGRESS 76 write-media
+D 360
+E PROGRESS 77 write-media
+D 360
+E PROGRESS 78 write-media
+D 360
+E PROGRESS 79 write-media
+D 360
+E PROGRESS 80 write-media
+D 360
+E PROGRESS 81 write-media
+D 360
+E PROGRESS 82 write-media
+D 360
+E PROGRESS 83 write-media
+D 360
+E PROGRESS 84 write-media
+D 360
+E PROGRESS 85 write-media
+D 360
+E PROGRESS 86 write-media
+D 360
+E PROGRESS 87 write-media
+D 360
+E PROGRESS 88 write-media
+D 360
+E PROGRESS 89 write-media
+D 360
+E PROGRESS 90 write-media
+D 360
+E PROGRESS 91 write-media
+D 360
+E PROGRESS 92 write-media
+D 360
+E PROGRESS 93 write-media
+D 360
+E PROGRESS 94 write-media
+D 360
+E PROGRESS 95 write-media
+D 200
+E PROGRESS 97 partition
+D 30
+E USB drive written and verified: MBR + FAT32 "GK3LIVE", 12 files
+D 100
+E PROGRESS 100 done
+D 20
+O MEDIA target=usb disk=3 size_mib=59231 files=12
+X 0

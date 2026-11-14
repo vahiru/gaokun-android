@@ -9,4 +9,5 @@ E PROGRESS 95 dl-verify name=super.img.zst
 E PROGRESS 100 dl-done name=super.img.zst
 E PROGRESS 100 dl-ready
 O RELEASE dir=C:%5CProgramData%5Cgaokun3%5Crelease source=net
+O LIVEISO path=C:%5CProgramData%5Cgaokun3%5Crelease%5Cgaokun3-live-0.2.0.iso
 X 0

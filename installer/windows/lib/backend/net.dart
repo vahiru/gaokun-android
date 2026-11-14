@@ -217,24 +217,39 @@ class Net {
 
   // ── 下载 ──
 
-  /// `download <base-url> <目录>`：校验清单、boot.img、super.img.zst，核对后报 RELEASE dir=… source=net。
+  /// `download <base-url> <目录> [<LiveCD ISO 的地址> <它的 SHA256SUMS 的地址>]`：校验清单、boot.img、super.img.zst，
+  /// 核对后报 RELEASE dir=… source=net；给了 LiveCD 时先把 ISO 下到同一个目录、按 SHA256SUMS 核对，另报 LIVEISO path=…。
   /// [hash] 算一个文件的 sha256（小写 hex；Windows 上是 gk3w hash），算不了就抛异常。
   /// [space] 目录所在卷的可用字节（Windows 上是 gk3w space；null = 不查）：每个文件开始下载前确认放得下，
   /// 不把盘写满了才失败
   Stream<Gk3Event> download(List<String> args, Future<String> Function(String path) hash, {Future<int?> Function(String dir)? space}) =>
       _guard(() async* {
-        if (args.length != 2) throw NetError('usage', 'usage: download <base-url> <dir>');
+        if (args.length != 2 && args.length != 4) throw NetError('usage', 'usage: download <base-url> <dir> [<livecd-iso-url> <livecd-sums-url>]');
         _aborted = false;
         final base = args[0].endsWith('/') ? args[0] : '${args[0]}/';
         final dir = args[1];
+        final live = args.length == 4;
         await Directory(dir).create(recursive: true);
+        // LiveCD 先下（不到 200 MiB）：占 0–10 %
+        String? iso;
+        if (live) {
+          final name = Uri.parse(args[2]).pathSegments.last;
+          yield _prog(0, 'dl-sums');
+          final want = sumOf(await _fetchSums(args[3]), name);
+          if (want == null) throw NetError('dl-sums-missing', 'SHA256SUMS has no line for $name', {'name': name});
+          await for (final e in _fetch(args[2], dir, name, want, 0, 10, hash, space)) {
+            yield e;
+          }
+          iso = '$dir${Platform.pathSeparator}$name';
+        }
         final sumsFile = File('$dir${Platform.pathSeparator}install-artifacts.sha256');
         final old = await sumsFile.exists() ? await sumsFile.readAsString() : null;
-        yield _prog(0, 'dl-sums');
+        yield _prog(live ? 10 : 0, 'dl-sums');
         final sums = await _fetchSums('${base}install-artifacts.sha256');
         await sumsFile.writeAsString(sums, flush: true);
         // 先小后大：boot.img 失败的话，不必先等 1.2 GiB 下完才知道。进度：boot.img 占 0–5 %，super 占 5–100 %
-        for (final (name, lo, span) in const [('boot.img', 0, 5), ('super.img.zst', 5, 95)]) {
+        // （先下了 LiveCD 时整体后移：boot.img 10–15 %，super 15–100 %）
+        for (final (name, lo, span) in live ? const [('boot.img', 10, 5), ('super.img.zst', 15, 85)] : const [('boot.img', 0, 5), ('super.img.zst', 5, 95)]) {
           if (_aborted) throw NetError('cancelled', 'download cancelled', {'name': name});
           final want = sumOf(sums, name);
           if (want == null) throw NetError('dl-sums-missing', 'install-artifacts.sha256 has no line for $name', {'name': name});
@@ -252,6 +267,7 @@ class Net {
         }
         yield _prog(100, 'dl-ready');
         yield Gk3Record('RELEASE', {'dir': dir, 'source': 'net'});
+        if (iso != null) yield Gk3Record('LIVEISO', {'path': iso});
       }, failCode: 'dl-failed');
 
   Future<String> _fetchSums(String url) async {
@@ -288,7 +304,7 @@ class Net {
         yield _prog(lo + span, 'dl-done', {'name': name});
         return;
       }
-      yield Gk3Log('$name: the existing file does not match install-artifacts.sha256, downloading it again');
+      yield Gk3Log('$name: the existing file does not match the checksum list, downloading it again');
       await dst.delete();
     }
     for (var t = 1;; t++) {
@@ -312,7 +328,7 @@ class Net {
     final got = await hash(part.path);
     if (got != want) {
       await part.delete();
-      throw NetError('sha-mismatch', '$name does not match install-artifacts.sha256 (got $got), deleted', {'name': name});
+      throw NetError('sha-mismatch', '$name does not match its sha256 in the checksum list (got $got), deleted', {'name': name});
     }
     await part.rename(dst.path);
     yield _prog(lo + span, 'dl-done', {'name': name});
@@ -447,8 +463,9 @@ String? sumOf(String sums, String name) {
 }
 
 /// GitHub API 的 releases 列表 → VARIANT（只列挂着整套安装文件的版本，最新的在前、第一个 latest=yes）
-/// + 最新安装器的 LIVECD（挂着 gaokun3-installer-<版本>-windows.zip 的最新一个 release）。
-/// 与回放数据生成器（experiments/…/gen-testdata.py 的 releases_github）同一套规则
+/// + 最新 LiveCD 的 LIVECD：最新一个 `livecd-v<版本>` release 里不带系统文件的 `gaokun3-live-<版本>.iso`
+/// （带系统文件的叫 `gaokun3-live-<版本>-android-<ROM 标签>.iso`，不取）与核对它的 SHA256SUMS。
+/// LiveCD 的 release 没有 boot.img 等安装文件，不会被当成一个系统版本
 List<Gk3Record> githubVariants(List<Map<String, dynamic>> releases) {
   final out = <Gk3Record>[];
   var first = true;
@@ -457,20 +474,19 @@ List<Gk3Record> githubVariants(List<Map<String, dynamic>> releases) {
     if (r['draft'] == true) continue;
     final assets = {for (final a in (r['assets'] as List).cast<Map<String, dynamic>>()) a['name'] as String: a};
     final tag = r['tag_name'] as String;
-    if (live == null) {
-      for (final a in assets.values) {
-        final m = RegExp(r'^gaokun3-installer-(.+)-windows\.zip$').firstMatch(a['name'] as String);
-        if (m != null) {
-          live = Gk3Record('LIVECD', {
-            'id': m.group(1)!,
-            'rom': tag,
-            'date': '${a['updated_at'] ?? ''}'.split('T').first,
-            'url': a['browser_download_url'] as String,
-            'size_mib': '${(a['size'] as num).toInt() >> 20}',
-            'source': 'github',
-          });
-          break;
-        }
+    if (live == null && tag.startsWith('livecd-v') && assets.containsKey('SHA256SUMS')) {
+      final ver = tag.substring('livecd-v'.length);
+      final iso = assets['gaokun3-live-$ver.iso'];
+      if (iso != null) {
+        live = Gk3Record('LIVECD', {
+          'id': ver,
+          'date': '${r['published_at'] ?? ''}'.split('T').first,
+          'url': iso['browser_download_url'] as String,
+          'sums': assets['SHA256SUMS']!['browser_download_url'] as String,
+          'size_mib': '${(iso['size'] as num).toInt() >> 20}',
+          'pre': r['prerelease'] == true ? 'yes' : 'no',
+          'source': 'github',
+        });
       }
     }
     if (!const ['boot.img', 'super.img.zst', 'install-artifacts.sha256'].every(assets.containsKey)) continue;

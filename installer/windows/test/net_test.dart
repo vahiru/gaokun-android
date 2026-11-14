@@ -155,6 +155,42 @@ void main() {
     expect(pcts.last, 100);
   });
 
+  test('制作安装介质：先下 LiveCD 镜像并按 SHA256SUMS 核对，再下安装文件，另报 LIVEISO', () async {
+    final iso = blob(700 * 1024, 3);
+    srv.files['livecd/gaokun3-live-0.2.0.iso'] = iso;
+    srv.files['livecd/SHA256SUMS'] = utf8.encode('${await sumOfBytes(iso)}  gaokun3-live-0.2.0.iso\n${'0' * 64}  gaokun3-live-0.2.0-android-v1.iso\n');
+    final all = <Gk3Event>[];
+    final r = await collect(
+        Net(cfg: fast).download([srv.base, dir.path, '${srv.base}livecd/gaokun3-live-0.2.0.iso', '${srv.base}livecd/SHA256SUMS'], sha256sum), all);
+    expect(r.ok, isTrue, reason: '${r.log.map((l) => l.line)}');
+    final path = '${dir.path}${Platform.pathSeparator}gaokun3-live-0.2.0.iso';
+    expect(File(path).readAsBytesSync(), iso);
+    expect(r.first('LIVEISO')!.fields, {'path': path});
+    expect(r.first('RELEASE')!.fields, {'dir': dir.path, 'source': 'net'});
+    expect(srv.requests.first, 'GET livecd/SHA256SUMS');
+    final pcts = [for (final e in all) if (e is Gk3Progress) e.percent];
+    expect(pcts, orderedEquals([...pcts]..sort()));
+    expect(pcts.last, 100);
+  });
+
+  test('制作安装介质：LiveCD 镜像与 SHA256SUMS 不符时报 sha-mismatch，不下安装文件', () async {
+    srv.files['livecd/gaokun3-live-0.2.0.iso'] = blob(700 * 1024, 3);
+    srv.files['livecd/SHA256SUMS'] = utf8.encode('${'1' * 64}  gaokun3-live-0.2.0.iso\n');
+    final r = await collect(
+        Net(cfg: fast).download([srv.base, dir.path, '${srv.base}livecd/gaokun3-live-0.2.0.iso', '${srv.base}livecd/SHA256SUMS'], sha256sum));
+    expect(r.ok, isFalse);
+    expect(r.err!['code'], 'sha-mismatch');
+    expect(srv.requests.where((q) => q.contains('super.img.zst')), isEmpty);
+  });
+
+  test('制作安装介质：SHA256SUMS 里没有这个镜像：dl-sums-missing', () async {
+    srv.files['livecd/gaokun3-live-0.2.0.iso'] = blob(1024, 3);
+    srv.files['livecd/SHA256SUMS'] = utf8.encode('${'1' * 64}  something-else.iso\n');
+    final r = await collect(
+        Net(cfg: fast).download([srv.base, dir.path, '${srv.base}livecd/gaokun3-live-0.2.0.iso', '${srv.base}livecd/SHA256SUMS'], sha256sum));
+    expect(r.err!['code'], 'dl-sums-missing');
+  });
+
   test('已经下完、核对过的文件不再下载', () async {
     expect((await collect(dl())).ok, isTrue);
     srv.requests.clear();

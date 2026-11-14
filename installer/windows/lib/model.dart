@@ -206,12 +206,13 @@ class Variant {
   static final _alpha = RegExp(r'^v?\d+(\.\d+)*-alpha\b', caseSensitive: false);
 }
 
-/// 最新的安装器（LiveCD）：gk3w releases 的 LIVECD 记录，只含 LiveCD、不带系统（gaokun3-installer-<版本>-windows.zip）
+/// 最新的 LiveCD：gk3w releases 的 LIVECD 记录，不带系统文件的 gaokun3-live-<版本>.iso 与核对它的 SHA256SUMS
 class LiveCd {
   LiveCd(this.r);
   final Gk3Record r;
   String get id => r['id'];
   String get url => r['url'];
+  String get sums => r['sums'];
   int get sizeMib => r.intOf('size_mib');
 }
 

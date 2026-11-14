@@ -51,7 +51,7 @@ class WinBackend extends Gk3Backend {
   ///   而每次调用结束时都要 flush
   final RandomAccessFile? log;
 
-  static const _gk3wCommands = {'preflight', 'probe', 'plan', 'apply', 'uninstall', 'hash', 'space', 'bitlocker-key', 'shrink-info', 'mft-move'};
+  static const _gk3wCommands = {'preflight', 'probe', 'plan', 'apply', 'media', 'uninstall', 'hash', 'space', 'bitlocker-key', 'shrink-info', 'mft-move'};
 
   /// 写盘的调用：测试模式下去掉 --real-disk / --bitlocker-key
   static const _writes = {'apply', 'uninstall'};

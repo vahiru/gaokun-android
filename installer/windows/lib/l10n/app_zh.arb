@@ -630,7 +630,7 @@
     }
   },
   "releaseNoLiveCd": "当前下载源未提供LiveCD镜像，请切换至其他来源。",
-  "localLiveCd": "gaokun3-installer-<版本>-windows.zip（含LiveCD镜像）",
+  "localLiveCd": "gaokun3-live-<版本>.iso（LiveCD镜像）",
   "mediaConfirmTitle": "确认写入安装介质",
   "mediaConfirmSubUsb": "U盘（{model}，{size}）中的所有数据将被永久清除且无法恢复。",
   "@mediaConfirmSubUsb": {
@@ -713,6 +713,34 @@
     }
   },
   "errReleaseMissing": "所选目录中未找到系统镜像文件（boot.img、super.img.zst）。",
+  "errMediaNotUsb": "所选磁盘不是U盘，未写入任何数据。",
+  "errMediaTooSmall": "U盘容量不足：写入LiveCD及系统安装文件至少需要{need}。U盘未被修改。",
+  "@errMediaTooSmall": {
+    "placeholders": {
+      "need": {
+        "type": "String"
+      }
+    }
+  },
+  "errLiveCd": "LiveCD镜像无法读取或不完整，请重新下载或改用其他镜像文件。磁盘未被修改。",
+  "errMediaInUse": "U盘中的文件正被其他程序使用，请关闭相关程序（如打开该U盘的资源管理器窗口）后重试。U盘未被修改。",
+  "errMediaRead": "写入U盘时无法读取LiveCD镜像或系统安装文件，U盘中的内容不完整，请重新制作。",
+  "errMediaOpen": "无法打开所选U盘，或无法读取其容量。请重新插入U盘后重试。",
+  "errMediaChanged": "所选U盘的容量与确认时不一致，可能已更换为其他磁盘。为避免误写，未写入任何数据，请重新选择写入位置。",
+  "errMediaReadOnly": "所选U盘处于写保护状态，未写入任何数据。",
+  "errMediaIsSource": "LiveCD镜像、系统安装文件或安装器本身位于所选U盘上，无法写入该U盘。请将这些文件移至其他位置后重试。U盘未被修改。",
+  "localLiveCdUsed": "将使用LiveCD镜像：{file}",
+  "@localLiveCdUsed": {
+    "placeholders": {
+      "file": {
+        "type": "String"
+      }
+    }
+  },
+  "prMediaLock": "正在锁定U盘",
+  "prMediaWrite": "正在写入安装介质",
+  "prMediaVerify": "正在校验写入的内容",
+  "prMediaPartition": "正在写入分区表",
   "errDownloadSpace": "C盘剩余空间不足，本次下载还需至少{need}。请清理空间后重试，已下载的部分将保留。",
   "@errDownloadSpace": {
     "placeholders": {

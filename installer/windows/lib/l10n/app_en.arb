@@ -417,7 +417,7 @@
     }
   },
   "releaseNoLiveCd": "No LiveCD image is available from the selected source. Please switch to another source.",
-  "localLiveCd": "gaokun3-installer-<version>-windows.zip (contains LiveCD image)",
+  "localLiveCd": "gaokun3-live-<version>.iso (LiveCD image)",
   "mediaConfirmTitle": "Confirm writing installation media",
   "mediaConfirmSubUsb": "All data on the USB drive ({model}, {size}) will be permanently erased and cannot be recovered.",
   "@mediaConfirmSubUsb": {
@@ -500,6 +500,20 @@
     }
   },
   "errReleaseMissing": "System image files (boot.img, super.img.zst) were not found in the selected directory.",
+  "errMediaNotUsb": "The selected disk is not a USB drive. Nothing was written.",
+  "errMediaTooSmall": "The USB drive is too small: the LiveCD and the system installation files need at least {need}. The USB drive was not modified.",
+  "errLiveCd": "The LiveCD image cannot be read or is incomplete. Download it again or use another image file. The disk was not modified.",
+  "errMediaInUse": "Files on the USB drive are in use by another program. Close those programs (such as File Explorer windows showing the drive) and try again. The USB drive was not modified.",
+  "errMediaRead": "The LiveCD image or the system installation files could not be read while writing the USB drive. The contents of the USB drive are incomplete; please create it again.",
+  "errMediaOpen": "Unable to open the selected USB drive or read its capacity. Reinsert the USB drive and try again.",
+  "errMediaChanged": "The capacity of the selected USB drive differs from the one you confirmed; it may have been replaced by another disk. Nothing was written. Select the target again.",
+  "errMediaReadOnly": "The selected USB drive is write-protected. Nothing was written.",
+  "errMediaIsSource": "The LiveCD image, the system installation files or the installer itself are stored on the selected USB drive, so it cannot be written. Move these files elsewhere and try again. The USB drive was not modified.",
+  "localLiveCdUsed": "LiveCD image to be used: {file}",
+  "prMediaLock": "Locking the USB drive",
+  "prMediaWrite": "Writing the installation media",
+  "prMediaVerify": "Verifying the written data",
+  "prMediaPartition": "Writing the partition table",
   "errDownloadSpace": "Insufficient free space on the C: volume; at least {need} more is required for this download. Free up space and retry — already downloaded data will be kept.",
   "@errDownloadSpace": {
     "placeholders": {

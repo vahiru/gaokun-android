@@ -411,7 +411,8 @@ class Session extends ChangeNotifier {
 
   /// 删掉一个下载目录里的安装文件。回放演示数据时什么都不删（录制里的目录是开发机上真实的下载目录）；
   /// 测试里换成记录调用的
-  late void Function(String dir) deleteFiles = backend.demoLabel == null ? deleteDownloadedRelease : (_) {};
+  late void Function(String dir) deleteFiles =
+      backend.demoLabel == null ? (d) => deleteDownloadedRelease(d, also: [if (liveCd case final lc?) Uri.parse(lc.url).pathSegments.last]) : (_) {};
 
   /// 这次安装下载的文件所在的目录（装好之后由用户决定退出时删不删：[deleteOnExit]）
   String? downloadedDir;
@@ -596,7 +597,7 @@ class Session extends ChangeNotifier {
   }
 
   /// 下载（0–40 %）再安装（40–100 %）；用本地文件时直接安装（0–100 %）
-  Future<bool> install({required String releaseDir}) => _downloadThen(WriteTask.install, releaseDir, (dir) {
+  Future<bool> install({required String releaseDir}) => _downloadThen(WriteTask.install, releaseDir, (dir, _) {
         final d = disk!, r = region!;
         return ('apply', [
           '--disk', '${d.num}', '--region-start', '${r.start}', '--region-end', '${r.end}',
@@ -604,16 +605,18 @@ class Session extends ChangeNotifier {
         ], _bitlockerInput);
       });
 
-  /// 制作安装介质：下载所选版本，再由 gk3w 写入 LiveCD 与安装文件 —— U 盘整个清除后写入；本机则在所选未分配空间的
-  /// 末尾建 GK3LIVE（见 [mediaRegion]）、在 ESP 里放 LiveCD 的启动文件与启动项。--livecd 是 LiveCD 的下载地址，本地文件时是那个目录。
-  /// gk3w 的 media 命令尚未实现（参数是计划中的样子），演示数据里也就没有它的录制，回放时这一步按失败处理。
+  /// 制作安装介质：下载 LiveCD 镜像与所选版本，再由 gk3w 写入 —— U 盘整个清除后写入；本机则在所选未分配空间的
+  /// 末尾建 GK3LIVE（见 [mediaRegion]）、在 ESP 里放 LiveCD 的启动文件与启动项。--livecd 是下载好、核对过的 ISO，
+  /// 本地文件时是目录里的那个（[localLiveIso]）。gk3w 目前只实现了写入 U 盘。
   Future<bool> writeMedia({required String releaseDir}) {
     mediaWritten = mediaTarget;
-    return _downloadThen(WriteTask.media, releaseDir, (dir) {
+    final lc = liveCd;
+    return _downloadThen(WriteTask.media, releaseDir, extra: source == ReleaseSource.local || lc == null ? const [] : [lc.url, lc.sums], (dir, iso) {
       final t = mediaWritten!;
-      final live = source == ReleaseSource.local ? dir : liveCd!.url;
+      final live = (source == ReleaseSource.local ? localLiveIso(dir) : iso) ?? '';
       if (t.usb) {
-        return ('media', ['--target', 'usb', '--disk', '${t.disk!.num}', '--release', dir, '--livecd', live], null);
+        // --expect-mib：确认时看到的容量，换插了别的盘就不写（见 gk3w 的 media.c）
+        return ('media', ['--target', 'usb', '--disk', '${t.disk!.num}', '--expect-mib', '${t.disk!.sizeMib}', '--release', dir, '--livecd', live], null);
       }
       final d = disk!, r = mediaRegion!;
       return ('media', [
@@ -627,19 +630,22 @@ class Session extends ChangeNotifier {
   MediaTarget? mediaWritten;
 
   /// [command]：下载完之后的写盘调用（函数、参数、标准输入）
-  Future<bool> _downloadThen(WriteTask t, String releaseDir, (String, List<String>, String?) Function(String dir) command) async {
+  /// [extra]：再交给 download 的参数（LiveCD 镜像与它的 SHA256SUMS 的地址）；下载结果里的 LIVEISO 交给 [command]
+  Future<bool> _downloadThen(WriteTask t, String releaseDir, (String, List<String>, String?) Function(String dir, String? iso) command,
+      {List<String> extra = const []}) async {
     // 移动 MFT 期间不写盘（检查页那时不让往下走，这里再挡一次）
     if (mftMoving) return _busy();
     _begin(t);
     final local = source == ReleaseSource.local;
     try {
       var dir = localDir;
+      String? iso;
       if (!local) {
         downloading = true;
         notifyListeners();
         final CallResult dl;
         try {
-          dl = await _download([variant!.base, await _releaseDir(releaseDir)]);
+          dl = await _download([variant!.base, await _releaseDir(releaseDir), ...extra]);
         } finally {
           downloading = false;
           _dlSub = null;
@@ -649,6 +655,7 @@ class Session extends ChangeNotifier {
           return false;
         }
         dir = dl.first('RELEASE')?['dir'] ?? releaseDir;
+        iso = dl.first('LIVEISO')?['path'];
         // 退出确认框还开着时下载结束了：先等答案再写盘。选了退出就当作撤回（删掉刚下完的文件），不写盘；
         // 不然用户点的"退出"没有任何作用，安装照样开始写盘
         final prompt = _quitPrompt;
@@ -667,7 +674,7 @@ class Session extends ChangeNotifier {
           }
         }
       }
-      final (fn, args, input) = command(dir);
+      final (fn, args, input) = command(dir, iso);
       await _startDiskWrite();
       result = await Gk3Backend.collect(input == null ? backend.call(fn, args) : backend.callWithInput(fn, args, input),
           (e) => _onEvent(e, base: local ? 0 : 40, span: local ? 100 : 60));

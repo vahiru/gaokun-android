@@ -29,16 +29,37 @@ String? requestedLanguage() {
 
 /// 本地发布目录里缺了哪些必需的文件（boot.img、super.img.zst；install-artifacts.sha256 是可选的，有就校验）。
 /// 只在 Windows 上查：Linux 上跑测试时目录是假的
+/// 本地目录里的 LiveCD 镜像 gaokun3-live-<版本>.iso；没有返回 null。有几个时取不带系统文件的（-android- 的那个也能用，
+/// gk3w media 不用它自带的系统文件），再取修改时间最新的
+String? localLiveIso(String dir) {
+  if (dir.isEmpty) return null;
+  // 不是 Windows（测试、开发机）：与 missingReleaseFiles 一样当作文件都在
+  if (!Platform.isWindows) return '$dir\\gaokun3-live.iso';
+  try {
+    final isos = [
+      for (final e in Directory(dir).listSync())
+        if (e is File && RegExp(r'^gaokun3-live-.+\.iso$', caseSensitive: false).hasMatch(e.uri.pathSegments.last)) e
+    ];
+    int rank(File f) => f.uri.pathSegments.last.toLowerCase().contains('-android-') ? 1 : 0;
+    isos.sort((a, b) => rank(a) != rank(b) ? rank(a) - rank(b) : b.lastModifiedSync().compareTo(a.lastModifiedSync()));
+    return isos.firstOrNull?.path;
+  } on FileSystemException {
+    return null;
+  }
+}
+
+/// 本地目录里缺了哪些安装文件（不是 Windows 时当作都在）
 List<String> missingReleaseFiles(String dir) {
   if (!Platform.isWindows || dir.isEmpty) return const [];
   return [for (final f in const ['boot.img', 'super.img.zst']) if (!File('$dir\\$f').existsSync()) f];
 }
 
-/// 删掉一个下载目录里的安装文件（只删我们下载的那几个；删不掉就算了）。目录空了就连目录一起删，
-/// 它的上一级（"下载"里的 Gaokun Android）空了也删 —— 用户自己放进去的东西不动
-void deleteDownloadedRelease(String dir) {
+/// 删掉一个下载目录里的安装文件（只删我们下载的那几个，[also] 是这次一起下载的 LiveCD 镜像；删不掉就算了）。
+/// 目录空了就连目录一起删，它的上一级（"下载"里的 Gaokun Android）空了也删 —— 用户自己放进去的东西不动
+void deleteDownloadedRelease(String dir, {Iterable<String> also = const []}) {
   if (!Platform.isWindows || dir.isEmpty) return;
-  for (final f in const ['boot.img', 'super.img.zst', 'install-artifacts.sha256', 'boot.img.part', 'super.img.zst.part']) {
+  final names = <String>['boot.img', 'super.img.zst', 'install-artifacts.sha256', 'boot.img.part', 'super.img.zst.part', for (final a in also) ...[a, '$a.part']];
+  for (final f in names) {
     try {
       final x = File('$dir\\$f');
       if (x.existsSync()) x.deleteSync();

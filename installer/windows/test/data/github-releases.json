@@ -1,5 +1,38 @@
 [
  {
+  "tag_name": "livecd-v0.2.0",
+  "name": "LiveCD installer v0.2.0",
+  "published_at": "2026-11-20T08:00:00Z",
+  "prerelease": false,
+  "draft": false,
+  "assets": [
+   {
+    "name": "gaokun3-live-0.2.0.iso",
+    "size": 190054400,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/livecd-v0.2.0/gaokun3-live-0.2.0.iso",
+    "updated_at": "2026-11-20T07:50:00Z"
+   },
+   {
+    "name": "gaokun3-live-0.2.0-android-v1.0.0-rc.3.iso",
+    "size": 1574830080,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/livecd-v0.2.0/gaokun3-live-0.2.0-android-v1.0.0-rc.3.iso",
+    "updated_at": "2026-11-20T07:55:00Z"
+   },
+   {
+    "name": "SHA256SUMS",
+    "size": 190,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/livecd-v0.2.0/SHA256SUMS",
+    "updated_at": "2026-11-20T07:55:00Z"
+   },
+   {
+    "name": "release.txt",
+    "size": 250,
+    "browser_download_url": "https://github.com/vahiru/gaokun-android/releases/download/livecd-v0.2.0/release.txt",
+    "updated_at": "2026-11-20T07:55:00Z"
+   }
+  ]
+ },
+ {
   "tag_name": "v1.0.0-rc.3",
   "name": "v1.0.0-rc.3 — EFI pstore fix · Android 17",
   "published_at": "2026-10-30T02:40:31Z",

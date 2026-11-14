@@ -367,22 +367,26 @@ void main() {
     expect(s.mediaTarget!.usb, isTrue);
     await tap(t, find.text(l.btnNext));
     await see(t, find.text(l.releaseSubMedia));
-    await see(t, find.text(l.releaseLiveCd('0.2.0-rc.2', '225 MiB')));
+    await see(t, find.text(l.releaseLiveCd('0.2.0', '181 MiB')));
     await tap(t, find.text(l.btnNext));
     await see(t, find.text(l.mediaConfirmSubUsb('Generic Flash Disk', '29.4 GiB')));
     expect(find.text(l.mediaConfirmUsb), findsOneWidget);
-    expect(find.text(l.mediaConfirmLiveDl('0.2.0-rc.2', '225 MiB')), findsOneWidget);
+    expect(find.text(l.mediaConfirmLiveDl('0.2.0', '181 MiB')), findsOneWidget);
     expect(find.text(l.confirmBoot), findsNothing);
 
     await hold(t, l.holdToWrite);
-    await waitFor(t, find.byType(FailPage), tries: 400);
-    expect(find.text(l.failMediaTitle), findsOneWidget);
-    // 回放数据里没有 gk3w media：退出码 127、没有 ERR —— 与 gk3w 被结束时一样，按"不知道动没动过盘"说
-    expect(find.text(l.failUnknownTouched), findsOneWidget);
-    expect(rec.calls.where((c) => c.first == 'download').length, 1);
+    await waitFor(t, find.byType(DonePage), tries: 400);
+    expect(find.text(l.doneMediaTitle), findsOneWidget);
+    expect(find.text(l.doneMediaSubUsb), findsOneWidget);
+    // 下载时一并下载 LiveCD 镜像（与核对它的 SHA256SUMS），gk3w media 拿到的是下载好的 ISO
+    final dl = rec.calls.singleWhere((c) => c.first == 'download');
+    expect(dl.sublist(dl.length - 2), [
+      'https://github.com/vahiru/gaokun-android/releases/download/livecd-v0.2.0/gaokun3-live-0.2.0.iso',
+      'https://github.com/vahiru/gaokun-android/releases/download/livecd-v0.2.0/SHA256SUMS',
+    ]);
     final media = rec.calls.singleWhere((c) => c.first == 'media');
-    expect(media, containsAllInOrder(['--target', 'usb', '--disk', '3', '--release', r'C:\ProgramData\gaokun3\release']));
-    expect(media, containsAllInOrder(['--livecd', 'https://github.com/vahiru/gaokun-android/releases/download/v1.0.0-rc.2/gaokun3-installer-0.2.0-rc.2-windows.zip']));
+    expect(media, containsAllInOrder(['--target', 'usb', '--disk', '3', '--expect-mib', '30108', '--release', r'C:\ProgramData\gaokun3\release']));
+    expect(media, containsAllInOrder(['--livecd', r'C:\ProgramData\gaokun3\release\gaokun3-live-0.2.0.iso']));
     expect(media, isNot(contains('--real-disk')));
     final busy = [for (final c in window) if (c.method == 'setBusy') c.arguments as Map];
     expect(busy.where((a) => a['busy'] == true).single,
@@ -453,7 +457,7 @@ void main() {
     expect(enabled(t, l.btnNext), isFalse);
   });
 
-  testWidgets('安装介质：R2 也有 LiveCD；本地文件时目录里还要有 LiveCD', (t) async {
+  testWidgets('安装介质：R2 上还没有 LiveCD（不能往下走）；本地文件时目录里还要有 LiveCD 镜像', (t) async {
     final (_, s) = await pumpApp(t, 'usb');
     await tap(t, find.text(l.railMedia));
     await tap(t, find.text(l.btnNext));
@@ -461,7 +465,9 @@ void main() {
     await tap(t, find.text(l.btnNext));
     await tap(t, find.text(l.srcR2));
     await see(t, find.text('crDroid 13.0'));
-    expect(s.liveCd!.url, startsWith('https://ota.072172.xyz/installer/0.2.0-rc.2/'));
+    expect(s.liveCd, isNull);
+    await see(t, find.text(l.releaseNoLiveCd));
+    expect(enabled(t, l.btnNext), isFalse);
     await tap(t, find.text(l.srcLocal));
     await see(t, find.text(l.localLiveCd));
   });

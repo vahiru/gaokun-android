@@ -17,5 +17,8 @@ int? requestedTestDisk() => null;
 /// Web 上不查本地文件
 List<String> missingReleaseFiles(String dir) => const [];
 
+/// 同上：当作目录里有 LiveCD 镜像
+String? localLiveIso(String dir) => dir.isEmpty ? null : '$dir\\gaokun3-live.iso';
+
 /// Web 上没有下载的文件
-void deleteDownloadedRelease(String dir) {}
+void deleteDownloadedRelease(String dir, {Iterable<String> also = const []}) {}

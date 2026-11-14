@@ -3,6 +3,7 @@ import 'package:gk3_common/ui/theme.dart';
 import 'package:gk3_common/ui/widgets.dart';
 
 import '../app.dart';
+import '../backend/platform.dart';
 import '../model.dart';
 import '../session.dart';
 import 'bitlocker_box.dart';
@@ -128,8 +129,8 @@ class _ReleasePageState extends State<ReleasePage> {
   @override
   Widget build(BuildContext context) {
     final s = context.session, l = context.l, media = widget.media;
-    // 制作安装介质还要这个来源上有 LiveCD（本地文件时 LiveCD 也在那个目录里）
-    final ready = s.releaseReady && (!media || s.source == ReleaseSource.local || s.liveCd != null);
+    // 制作安装介质还要这个来源上有 LiveCD（本地文件时 LiveCD 镜像也在那个目录里）
+    final ready = s.releaseReady && (!media || (s.source == ReleaseSource.local ? localLiveIso(s.localDir) != null : s.liveCd != null));
     return WinStepPage(
       step: media ? MediaStep.release : WinStep.release,
       title: l.releaseTitle,
@@ -223,10 +224,15 @@ class _ReleasePageState extends State<ReleasePage> {
           s.setLocalDir(d);
         }),
       ]),
-      if (s.localDir.isNotEmpty && s.localMissing.isNotEmpty) ...[
+      if (s.localDir.isNotEmpty && (s.localMissing.isNotEmpty || (widget.media && localLiveIso(s.localDir) == null))) ...[
         const SizedBox(height: 12),
-        NoteBox(warn: true, text: l.localMissing(s.localMissing.join(s.language == 'zh' ? '、' : ', '))),
+        NoteBox(warn: true, text: l.localMissing([...s.localMissing, if (widget.media && localLiveIso(s.localDir) == null) 'gaokun3-live-*.iso'].join(s.language == 'zh' ? '、' : ', '))),
       ],
+      if (widget.media)
+        if (localLiveIso(s.localDir) case final iso?) ...[
+          const SizedBox(height: 12),
+          NoteBox(text: l.localLiveCdUsed(iso.split(RegExp(r'[\\/]')).last)),
+        ],
       const SizedBox(height: 20),
       Text(l.localNeed, style: context.tt.titleMedium),
       const SizedBox(height: 4),

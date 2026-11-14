@@ -8,11 +8,13 @@ import '../model.dart';
 const _writeCodes = {'disk-write', 'set-layout', 'super-write', 'mkfs', 'misc-init', 'esp-write', 'gpt-backup'};
 
 /// gk3w 的 ERR code=… → 给用户看的一句话（代码定义在 installer/backend/src/win/*.c）。
-/// 没收录的代码照原样报出，用户截图时也能对上日志。
-String errText(L10n l, Gk3Record err) {
+/// 没收录的代码照原样报出，用户截图时也能对上日志。[media]：写的是 U 盘（gk3w media），打开磁盘、读磁盘信息失败时说的是 U 盘
+String errText(L10n l, Gk3Record err, {bool media = false}) {
   final code = err['code'];
   return switch (code) {
     _ when _writeCodes.contains(code) && err['winerr'] == '5' => l.errWriteDenied,
+    'disk-open' when media => l.errMediaOpen,
+    'disk-sector' || 'disk-size' when media => l.errMediaOpen,
     'disk-write' || 'set-layout' || 'super-write' || 'misc-init' => l.errDiskWrite,
     'disk-verify' || 'esp-verify' || 'super-bad-lp' => l.errDiskVerify,
     'mkfs' => l.errFormat,
@@ -25,7 +27,15 @@ String errText(L10n l, Gk3Record err) {
     'gpt-backup' => l.errGptBackup,
     'gpt-full' => l.errGptFull,
     'zst-corrupt' || 'sha-mismatch' || 'bootimg-unpack' => l.errRelease,
-    'release-no-boot' || 'release-no-super' => l.errReleaseMissing,
+    'release-no-boot' || 'release-no-super' || 'release-open' => l.errReleaseMissing,
+    'not-removable' => l.errMediaNotUsb,
+    'media-too-small' => l.errMediaTooSmall(fmtMib(int.tryParse(err['need_mib']) ?? 0)),
+    'livecd-open' || 'livecd-iso' || 'livecd-incomplete' || 'livecd-names' => l.errLiveCd,
+    'media-in-use' => l.errMediaInUse,
+    'media-read' => l.errMediaRead,
+    'media-changed' => l.errMediaChanged,
+    'media-readonly' => l.errMediaReadOnly,
+    'media-is-source' => l.errMediaIsSource,
     'esp-has-android' => l.errInstalled,
     'plan' || 'bad-region' => l.errPlan,
     'layout-changed' => l.errLayoutChanged,
@@ -74,6 +84,10 @@ String progressText(L10n l, Gk3Progress p) => switch (p.code) {
       'write-super' => l.prSuper,
       'write-boot' => l.prBoot,
       'bootloader' => l.prBootloader,
+      'lock' => l.prMediaLock,
+      'write-media' => l.prMediaWrite,
+      'verify-media' => l.prMediaVerify,
+      'partition' => l.prMediaPartition,
       'done' => l.prDone,
       'dl-sums' => l.prDlSums,
       'dl-start' || 'dl' when p['pct'].isNotEmpty => l.prDlPct(p['name'], p['pct']),

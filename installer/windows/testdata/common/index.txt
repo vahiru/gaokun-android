@@ -2,12 +2,13 @@
 # preflight-ok：平板（GK-W7X）真跑的结果，平板测试包抓的原样输出，没有时间信息
 # preflight-blocked：这台 PC（联想 21TK）以管理员真跑的结果：机型不对、Secure Boot、BitLocker、快速启动都开着
 # releases：由 GitHub API（vahiru/gaokun-android 的 releases）与 R2 上 OTA 清单的真实返回整理成 VARIANT 记录（2026-11-11 取的；只列挂着 boot.img、super.img.zst、install-artifacts.sha256 的版本）；真后端按同样的格式输出
-# releases 的 LIVECD：最新的安装器（LiveCD，不带系统的 windows.zip）。GitHub 取自同一份 API 返回；R2 是 2026-11-12 对 installer/0.2.0-rc.2/ 的真实 HEAD（R2 没有安装器的列表，版本号照 GitHub 的；真后端怎样在 R2 上找最新的尚未确定）
-# download：LiveCD 的录制（installer/live/testdata/common），Windows 版按同一个行协议输出；去掉了 LiveCD 自己的中文日志行，RELEASE 的目录换成 Windows 路径
+# releases 的 LIVECD：最新 livecd-v* release 里不带系统文件的 gaokun3-live-<版本>.iso 与 SHA256SUMS。还没有发布过 LiveCD 的 release，test/data/github-releases.json 最前面的 livecd-v0.2.0 是按 CI 的产物名构造的；R2 上放 LiveCD 的位置还没定，真后端不报 LIVECD
+# download：LiveCD 的录制（installer/live/testdata/common），Windows 版按同一个行协议输出；去掉了 LiveCD 自己的中文日志行，RELEASE 的目录换成 Windows 路径；末尾的 LIVEISO（制作安装介质时一起下载的 LiveCD 镜像）是照 net.dart 的格式补的
 # plan：真跑的 gk3w plan（40 GiB 的区间 / 12508 MiB 的区间 / 空区间：界面用它问"至少要多大"，录的是 --disk 2）
 # bitlocker-key：PC 上对一个开启了 BitLocker 的测试卷（数据卷 Q:）真跑的输出，盘符换成 C:，时间是估的；带 --suspend 2 的那份按同样的格式补了暂停保护的一行（数据卷不能按重启次数暂停，录不到）
 # shrink-info：这台 PC（1 TB 的 C:）以管理员真跑的输出，分析的 38.8 s 缩短成 3 s
 # mft-move：PC 上 2 GB 测试卷（T:）真跑 --execute 的输出，盘符换成 C:，时间是估的
+# media-usb：gk3w media 写一个 62 GB 的真 U 盘（SanDisk Ultra USB 3.0）的真实输出，磁盘号 2 换成 3（usb 场景里 U 盘的号），时间是估的（真跑约 39 秒）
 # apply、uninstall：PC 上的 VHDX 真跑（磁盘号 2），带真实的时间；uninstall 的 FREE 记录按之后修正的格式（disk=disk2，与 probe 相同）替换过
 preflight                 preflight-ok.txt
 releases --source github  releases-github.txt
@@ -21,4 +22,5 @@ bitlocker-key *           bitlocker-key.txt
 shrink-info *             shrink-info.txt
 mft-move *                mft-move.txt
 apply *                   apply.txt
+media *                   media-usb.txt
 uninstall *               uninstall.txt
