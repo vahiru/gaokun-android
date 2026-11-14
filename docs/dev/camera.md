@@ -4,7 +4,7 @@
 
 ## 一、端到端流水线概览
 
-主线内核`qcom-camss`在Titan 17x上只驱动RDI（Raw Dump Interface），把CSI-2原始拜耳帧原样写入内存，不做任何图像处理。本项目在内核中补上IFE（VFE的像素通路）硬件ISP（`patches/kernel/camera/0009`–`0036`），由`libcamera`的`qcom-ife`流水线与IPA（`patches/libcamera/0014`–`0018`）按帧下发ISP参数、读取统计并运行3A，再由自研AIDL Camera HAL向Android框架提供相机服务：
+主线内核`qcom-camss`在Titan 17x上只驱动RDI（Raw Dump Interface），把CSI-2原始拜耳帧原样写入内存，不做任何图像处理。本项目在内核中补上IFE（VFE的像素通路）硬件ISP（`patches/kernel/camera/0009`–`0036`），由`libcamera`的`qcom-ife`流水线与IPA（`patches/libcamera/0014`–`0020`）按帧下发ISP参数、读取统计并运行3A，再由自研AIDL Camera HAL向Android框架提供相机服务：
 
 ```
 前摄 Hi-846 (2-0020) ──► CSIPHY3 ──┐
@@ -131,12 +131,12 @@ Android NDK的`libc++`使用内联命名空间`std::__ndk1`，而AOSP平台源�
 ### 4. IPA与调校文件
 
 - **算法**（每帧基于统计运行）：
-  - AGC：以`AfWindows`为测光窗口在AWB网格上计亮度均值，亮度约束基于同一窗口的拜耳直方图。`AeFlickerMode`设为手动时曝光按闪烁周期取整（周期默认10 ms，对应50 Hz市电；默认关闭，`patches/libcamera/0016`）。传感器拿到的是由最新统计算出的曝光，与在途请求数无关。
+  - AGC：以`AfWindows`为测光窗口在AWB网格上计亮度均值，亮度约束基于同一窗口的拜耳直方图。下限约束要求最亮的2%不低于0.5；上限约束只看第90–95百分位（不超过0.8），最亮的5%允许过曝，背景里的灯不会把整幅画面压暗；上限约束压暗画面时，第90百分位以下像素的平均亮度不低于平均亮度目标的一半，再亮的高光直接过曝（`minRestRatio`，`patches/libcamera/0019`、`0020`）。`AeFlickerMode`设为手动时曝光按闪烁周期取整（周期默认10 ms，对应50 Hz市电；默认关闭，`patches/libcamera/0016`）。传感器拿到的是由最新统计算出的曝光，与在途请求数无关。
   - AWB：`libipa`的灰度世界或贝叶斯算法（由调校文件选择），CCM按色温插值。
   - 黑电平、伽马、镜头阴影、坏点与PD像素修正、ABF降噪表（按增益）。
   - 对焦：在`AfWindows`区域内由对焦统计算出`FocusFoM`，对焦算法在HAL中。
   - 帧长由`FrameDurationLimits`设定。
-- **调校文件**：`device/huawei/gaokun3/camera/ipa-data/qcom-ife/{hi846,ov13b10,uncalibrated}.yaml`，安装到`/vendor/etc/libcamera/ipa/qcom-ife/`，与`0018`中`src/ipa/qcom-ife/data/`的同名文件一致。数据来自华为Windows相机驱动的模组调校与实机标定；`Awb`与`Ccm`两段由`scripts/camera/gen-*-ccm.py`生成（见[`scripts/camera/README.md`](../../scripts/camera/README.md)）。缺少调校文件时IPA初始化失败，该摄像头不会注册。
+- **调校文件**：`device/huawei/gaokun3/camera/ipa-data/qcom-ife/{hi846,ov13b10,uncalibrated}.yaml`，安装到`/vendor/etc/libcamera/ipa/qcom-ife/`，与打完全部补丁后`src/ipa/qcom-ife/data/`的同名文件一致（`0018`加入，`0020`修改）。数据来自华为Windows相机驱动的模组调校与实机标定；`Awb`与`Ccm`两段由`scripts/camera/gen-*-ccm.py`生成（见[`scripts/camera/README.md`](../../scripts/camera/README.md)）。缺少调校文件时IPA初始化失败，该摄像头不会注册。
 
 ### 5. 已知限制（内核与`libcamera`）
 
