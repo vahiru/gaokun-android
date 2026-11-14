@@ -4,18 +4,18 @@
 #
 #   bash installer/tools/build/build-flutter.sh                 # 先有图形安装器
 #   bash installer/tools/build/build-live.sh --boot-img <boot.img> --firmware <GPU 固件目录>
-#   bash installer/tools/build/build-live.sh --release <发布目录> --firmware <目录> --payload    # 带上系统文件，装机不用另放
+#   bash installer/tools/build/build-live.sh --release <发布目录> --firmware <目录> --payload    # 另出一个带系统文件的 ISO
 #
 #   --boot-img  内核 / dtb / 内核参数的来源：LiveCD 与 Android 共用同一个内核（见 installer/tools/README.md）。
 #               给 --release 时默认用里面的 boot.img
 #   --firmware  GPU 固件的来源，形如 /vendor/firmware 的目录（adb pull /vendor/firmware out/vendor-firmware）。
 #               cage 要 GPU；zap shader 是华为专有的，Debian 的固件包里没有（见 build-rootfs.sh 的 GPU_FW）
-#   --payload   把 --release 目录整个放进 ISO（gaokun3/payload/），安装器直接从它装
+#   --payload   另出一个 ISO，把 --release 目录整个放进它的 gaokun3/payload/：安装器直接从它装，dd 写入后也能安装
 #   --allow-no-iso9660  boot.img 的内核没有开启 CONFIG_ISO9660_FS 时照样构建（测试用；dd 写入的 ISO 找不到 squashfs，
 #               只有拖放方式可用，见 build-iso.sh）
 #   换源：GK3_DEBIAN_MIRROR=http://mirrors.ustc.edu.cn/debian；可复现：GK3_SNAPSHOT=20260925T000000Z（透传给 build-rootfs.sh）
 #
-# 产物 → out/live/：gaokun3-live.squashfs · initramfs.img · gaokun3-live.iso · packages-live.lock · release.txt
+# 产物 → out/live/：gaokun3-live.squashfs · initramfs.img · gaokun3-live.iso · [gaokun3-live-payload.iso] · packages-live.lock · release.txt
 # packages-live.lock 另拷一份到 installer/tools/build/ —— 入库，两次构建之间 diff 它就知道变了什么。
 #
 # ⚠️ --privileged：mmdebstrap 的 root 模式要在 chroot 里挂 proc/sys/dev。只动容器自己的文件系统。
@@ -85,11 +85,15 @@ docker run --rm --privileged "${MOUNTS[@]}" -e PAYLOAD="$PAYLOAD" -e ALLOW_NO_IS
         || { [ -n "$ALLOW_NO_ISO" ] && : > /build/boot/kernel-config.txt; }
     printf "GK3_INSTALLER_VERSION=%s\nGK3_GIT=%s\nGK3_BUILT=%s\nGK3_BOOTIMG_SHA256=%s\nGK3_GK3L_SHA256=%s\n" \
         "$GK3_VERSION" "$GK3_GIT" "$GK3_BUILT" "$GK3_BOOTSHA" "$(cat $O/gk3l.sha256)" > $O/release.txt
-    bash /build/installer/tools/build/build-iso.sh --squashfs $O/gaokun3-live.squashfs --initramfs $O/initramfs.img \
-        --kernel /build/boot/Image --dtb /build/boot/gaokun3.dtb --sdboot $O/systemd-bootaa64.efi \
-        --cmdline /build/boot/cmdline.txt --kconfig /build/boot/kernel-config.txt ${ALLOW_NO_ISO:+--allow-no-iso9660} \
-        ${PAYLOAD:+--payload /in/payload} --release-info $O/release.txt --out $O/gaokun3-live.iso
+    ISO=(bash /build/installer/tools/build/build-iso.sh --squashfs $O/gaokun3-live.squashfs --initramfs $O/initramfs.img
+        --kernel /build/boot/Image --dtb /build/boot/gaokun3.dtb --sdboot $O/systemd-bootaa64.efi
+        --cmdline /build/boot/cmdline.txt --kconfig /build/boot/kernel-config.txt ${ALLOW_NO_ISO:+--allow-no-iso9660}
+        --release-info $O/release.txt)
+    "${ISO[@]}" --out $O/gaokun3-live.iso
     cp $O/gaokun3-live.squashfs $O/initramfs.img $O/gaokun3-live.iso $O/packages-live.lock $O/release.txt /outlive/
+    # 带系统文件的那个直接写到输出目录：1.5 GB 左右，不在容器里多存一份
+    rm -f /outlive/gaokun3-live-payload.iso
+    if [ -n "$PAYLOAD" ]; then "${ISO[@]}" --payload /in/payload --out /outlive/gaokun3-live-payload.iso; fi
 '
 cp "$REPO/out/live/packages-live.lock" "$REPO/installer/tools/build/packages-live.lock"
 say "产物（out/live/）"

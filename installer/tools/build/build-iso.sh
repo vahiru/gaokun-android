@@ -17,7 +17,8 @@
 #              squashfs，内核没有开启CONFIG_ISO9660_FS时这条路走不通，默认拒绝构建；--allow-no-iso9660只供测试构建使用
 #              （拖放方式不受影响）。
 #   --payload  把发布目录（boot.img、super.img.zst、校验清单）放进gaokun3/payload/：安装器从这里安装，不联网。
-#              CI构建的ISO不带，由用户放入，或由Windows安装器制作安装介质时写入。
+#              不带系统文件的ISO由用户把它们放进拖放做成的U盘，或由Windows安装器制作安装介质时写入；
+#              发布构建另出一个带系统文件的ISO（build-live.sh --payload），dd写入后也能安装。
 #
 # ISO的布局：
 #   ISO9660文件树（Rock Ridge给Linux长文件名，Joliet给Windows长文件名）是U盘的完整内容：
@@ -125,14 +126,15 @@ mmd -i "$EFI" ::/EFI ::/EFI/BOOT ::/loader ::/loader/entries ::/gaokun3
 for f in $BOOT_FILES; do mcopy -i "$EFI" "$T/$f" "::/$f"; done
 ok "EFI 系统分区 $(( EFI_KIB / 1024 )) MiB"
 
+# 安装载荷（系统文件，一个 super.img.zst 就有 1 GiB 以上）不复制：xorriso 直接把发布目录挂到 /gaokun3/payload
+GRAFT=("/=$T")
+PAYLOAD_FILES=
 if [ -n "$PAYLOAD" ]; then
-    mkdir -p "$T/gaokun3/payload"
-    n=0
-    for f in "$PAYLOAD"/*; do
-        [ -f "$f" ] || continue
-        cp "$f" "$T/gaokun3/payload/"; n=$(( n + 1 ))
-    done
-    ok "带上了安装载荷（$n 个文件）"
+    PAYLOAD_FILES=$(cd "$PAYLOAD" && find . -maxdepth 1 -type f | sed 's#^\./##' | LC_ALL=C sort)
+    [ -n "$PAYLOAD_FILES" ] || die "--payload $PAYLOAD 里没有文件"
+    find "$PAYLOAD" -mindepth 1 ! -type f | grep -q . && die "--payload 只能放文件：$PAYLOAD 里有目录或别的东西"
+    GRAFT+=("/gaokun3/payload=$PAYLOAD")
+    ok "带上安装载荷（$(printf '%s\n' "$PAYLOAD_FILES" | wc -l) 个文件，$(du -sh "$PAYLOAD" | cut -f1)）"
 fi
 
 # —— 混合 ISO ——
@@ -143,7 +145,7 @@ if ! xorriso -as mkisofs -o "$OUT" -V GK3LIVE -R -J -joliet-long \
         -iso_mbr_part_type EBD0A0A2-B9E5-4433-87C0-68B6B72699C7 \
         -c boot.catalog --boot-catalog-hide \
         -e --interval:appended_partition_2::: -no-emul-boot \
-        "$T" > "$W/xorriso.log" 2>&1; then
+        -graft-points "${GRAFT[@]}" > "$W/xorriso.log" 2>&1; then
     cat "$W/xorriso.log" >&2
     die "xorriso 失败"
 fi
@@ -165,6 +167,9 @@ for rf in any norock; do
         printf '%s\n' "$L" | grep -qx "'$want'" || die "ISO（-read_fs $rf）里没有 $want"
     done
     if printf '%s\n' "$L" | grep -q boot.catalog; then die "ISO（-read_fs $rf）里看得到 boot.catalog"; fi
+    for f in $PAYLOAD_FILES; do
+        printf '%s\n' "$L" | grep -qx "'/gaokun3/payload/$f'" || die "ISO（-read_fs $rf）里没有安装载荷 $f"
+    done
     ok "目录树（-read_fs $rf）文件齐全，boot.catalog 已隐藏"
 done
 EL=$(mdir -i "$EFI" -b -/ :: 2>/dev/null)

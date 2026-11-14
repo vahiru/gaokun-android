@@ -1,7 +1,9 @@
 # LiveCD（installer/live 的图形安装器 + Debian live 系统）：在 GitHub 的 arm64 运行器上原生构建，与本地构建
-# 同一套脚本（installer/tools/build/build-flutter.sh → build-live.sh）。产物是混合 ISO gaokun3-live.iso（可在 Windows 中打开后
-# 把文件拖进 FAT32 U 盘，也可整个写入 U 盘），不带 Android 的系统文件（gaokun3/payload/ 由用户另行放入，或由 Windows 安装器
-# 制作安装介质时写入）。
+# 同一套脚本（installer/tools/build/build-flutter.sh → build-live.sh）。产物是混合 ISO（可在 Windows 中打开后把文件拖进
+# FAT32 U 盘，也可整个写入 U 盘）：
+#   - gaokun3-live-<版本>.iso：不带 Android 的系统文件（gaokun3/payload/ 由用户另行放入，或由 Windows 安装器制作安装介质时写入）
+#   - gaokun3-live-<版本>-android-<ROM 标签>.iso：带上下面那个 ROM 发布的系统文件（约 1.5 GB），整个写入 U 盘后也能直接安装。
+#     发布构建都出；测试构建只在标签以 -payload 结尾（livecd-test-<任意>-payload）或手动运行勾选 payload 时出
 #
 # 什么时候跑（不随每次推送跑）：
 #   - 推送 livecd-vX.Y.Z[-pre] 标签：发布构建，打包后建一个【草稿】Release，维护者改好说明再发布（不设为最新版本）
@@ -10,7 +12,8 @@
 #
 # 输入（都从公开来源取，按 sha256 钉死）：
 #   - 内核、dtb、内核参数：ROM 发布里的 boot.img（live 与 Android 共用同一个内核），默认取下面 ROM_TAG 那一版，
-#     按同一发布里的 install-artifacts.sha256 核对；手动运行时可以另指一个标签。发布构建要求这个内核开启了
+#     按同一发布里的 install-artifacts.sha256 核对；手动运行时可以另指一个标签。带系统文件的 ISO 另取同一发布的
+#     super.img.zst，同样核对。发布构建要求这个内核开启了
 #     CONFIG_ISO9660_FS（整个写入 U 盘时从 ISO9660 分区读取 squashfs，见 build-iso.sh）；测试构建不要求
 #   - GPU 固件（cage 要 GPU；zap shader 是华为专有的，Debian 的固件包里没有，见 build-rootfs.sh 的 GPU_FW）：
 #     KawaiiHachimi/linux-gaokun-buildbot 的固定提交，三个文件与 ROM 的 /vendor/firmware 里的逐字节相同
@@ -28,6 +31,11 @@ on:
         description: 'ROM release in vahiru/gaokun-android whose boot.img provides the kernel'
         required: false
         default: ''
+      payload:
+        description: 'Also build the ISO that carries the ROM release (about 1.5 GB)'
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -45,10 +53,20 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       prerelease: ${{ steps.version.outputs.prerelease }}
+      rom: ${{ steps.version.outputs.rom }}
     steps:
       - name: version
         id: version
+        env:
+          ROM_INPUT: ${{ inputs.rom_tag }}
+          PAYLOAD_INPUT: ${{ inputs.payload }}
         run: |
+          echo "rom=${ROM_INPUT:-$ROM_TAG}" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF" == refs/tags/livecd-v* || "$GITHUB_REF" == refs/tags/livecd-test-*-payload || "$PAYLOAD_INPUT" == true ]]; then
+            echo "payload=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "payload=no" >> "$GITHUB_OUTPUT"
+          fi
           if [[ "$GITHUB_REF" == refs/tags/livecd-v* ]]; then
             v=${GITHUB_REF#refs/tags/livecd-v}
             [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] \
@@ -69,14 +87,20 @@ jobs:
             || { echo "::error::tag livecd-v${{ steps.version.outputs.version }} but installer/live/pubspec.yaml says $p"; exit 1; }
       - name: fonts
         run: python3 installer/common/tool/fetch-fonts.py
-      - name: boot.img
+      - name: ROM release files
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.rom_tag || env.ROM_TAG }}
+          TAG: ${{ steps.version.outputs.rom }}
+          PAYLOAD: ${{ steps.version.outputs.payload }}
         run: |
+          # out/rom 只放这几个文件：带系统文件的 ISO 把整个目录放进 gaokun3/payload/
           mkdir -p out/rom
-          gh release download "$TAG" -R "$ROM_REPO" -D out/rom -p boot.img -p install-artifacts.sha256
-          ( cd out/rom && grep -E '  \*?boot\.img$' install-artifacts.sha256 | sha256sum -c )
+          files=(boot.img); [ "$PAYLOAD" = yes ] && files+=(super.img.zst)
+          pats=(-p install-artifacts.sha256); for f in "${files[@]}"; do pats+=(-p "$f"); done
+          gh release download "$TAG" -R "$ROM_REPO" -D out/rom "${pats[@]}"
+          for f in "${files[@]}"; do
+            ( cd out/rom && grep -E "^[0-9a-fA-F]{64} [ *]${f//./\\.}\$" install-artifacts.sha256 | sha256sum -c )
+          done
           echo "kernel from $ROM_REPO $TAG"
           # 发布构建：内核要开启 CONFIG_ISO9660_FS（build-iso.sh 也会拒绝，这里在耗时的步骤之前就停下）
           if [[ "$GITHUB_REF" == refs/tags/livecd-v* ]]; then
@@ -106,14 +130,24 @@ jobs:
       - name: graphical installer (Flutter, linux-arm64)
         run: bash installer/tools/build/build-flutter.sh
       - name: live image
+        env:
+          PAYLOAD: ${{ steps.version.outputs.payload }}
         run: |
           allow=(); [[ "$GITHUB_REF" == refs/tags/livecd-v* ]] || allow=(--allow-no-iso9660)
-          bash installer/tools/build/build-live.sh --boot-img out/rom/boot.img --firmware out/vendor-firmware "${allow[@]}"
+          src=(--boot-img out/rom/boot.img); [ "$PAYLOAD" = yes ] && src=(--release out/rom --payload)
+          bash installer/tools/build/build-live.sh "${src[@]}" --firmware out/vendor-firmware "${allow[@]}"
       - name: collect
+        env:
+          V: ${{ steps.version.outputs.version }}
+          ROM: ${{ steps.version.outputs.rom }}
+          PAYLOAD: ${{ steps.version.outputs.payload }}
         run: |
+          # 带系统文件的那个用 mv：1.5 GB 左右，不再多存一份
           mkdir -p dist
-          cp out/live/gaokun3-live.iso out/live/release.txt out/live/packages-live.lock dist/
-          ( cd dist && sha256sum gaokun3-live.iso > SHA256SUMS )
+          cp out/live/release.txt out/live/packages-live.lock dist/
+          cp out/live/gaokun3-live.iso "dist/gaokun3-live-$V.iso"
+          [ "$PAYLOAD" = yes ] && mv out/live/gaokun3-live-payload.iso "dist/gaokun3-live-$V-android-$ROM.iso"
+          ( cd dist && sha256sum ./*.iso | sed 's#  \./#  #' > SHA256SUMS )
           cat dist/release.txt dist/SHA256SUMS
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -142,4 +176,4 @@ jobs:
           pre=(); [ '${{ needs.build.outputs.prerelease }}' = yes ] && pre=(--prerelease)
           gh release create "livecd-v$V" -R "$GITHUB_REPOSITORY" --draft --latest=false "${pre[@]}" \
             --title "LiveCD installer v$V" --notes "Draft: write the release notes before publishing." \
-            dist/gaokun3-live.iso dist/SHA256SUMS dist/release.txt
+            dist/*.iso dist/SHA256SUMS dist/release.txt

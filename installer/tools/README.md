@@ -9,10 +9,10 @@
 ```sh
 bash installer/tools/build/build-flutter.sh                                         # 编译图形安装器 → out/installer-flutter-linux-arm64/
 bash installer/tools/build/build-live.sh --boot-img <boot.img> --firmware <目录>     # 构建LiveCD → out/live/gaokun3-live.iso
-bash installer/tools/build/build-live.sh --release <发布目录> --firmware <目录> --payload   # 同时放入系统文件
+bash installer/tools/build/build-live.sh --release <发布目录> --firmware <目录> --payload   # 另出一个带系统文件的ISO
 ```
 
-`--firmware`指向形如`/vendor/firmware`的目录（GPU的zap shader为华为专有固件，Debian中没有）。正式构建由GitHub Actions完成（[`.github/workflows/installer-livecd.yml`](../../.github/workflows/installer-livecd.yml)，推送`livecd-v*`标签触发），输入均按sha256固定。
+`--firmware`指向形如`/vendor/firmware`的目录（GPU的zap shader为华为专有固件，Debian中没有）。正式构建由GitHub Actions完成（[`.github/workflows/installer-livecd.yml`](../../.github/workflows/installer-livecd.yml)，推送`livecd-v*`标签触发），输入均按sha256固定。每次发布产出两个ISO：不带系统文件的`gaokun3-live-<版本>.iso`（用户自行放入系统文件，或由Windows安装器制作安装介质），以及带上所用ROM版本系统文件的`gaokun3-live-<版本>-android-<ROM标签>.iso`（整个写入U盘后也能直接安装）。
 
 `build-live.sh`在容器内依次执行：
 1. `build/build-rootfs.sh`：用`mmdebstrap`按[`pkgs.txt`](build/pkgs.txt)构建根文件系统，叠加`build/overlay/`，静态编译`gk3l`，放入图形安装器与GPU固件；打包`squashfs`前逐项检查（命令、单元是否启用、动态库能否解析、字体、freedreno）。所装软件包的版本记入[`packages-live.lock`](build/packages-live.lock)。
