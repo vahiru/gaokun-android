@@ -181,6 +181,11 @@ if in_ch 'grep -q "^root::" /etc/shadow'; then ok "root 不设密码（tty2 能�
 # "退出到终端"要 chvt（它在 kbd 包里、没装 —— 按钮点了什么都不发生）。overlay 里链到 busybox
 need_cmd chvt
 if in_ch '[ -x /usr/lib/gaokun3/gk3-diag ]'; then ok "/usr/lib/gaokun3/gk3-diag 可执行"; else echo "   ✗ /usr/lib/gaokun3/gk3-diag 不可执行"; BAD=1; fi
+# 触摸跟随画面旋转（cage不会替我们转，见gk3-touch-matrix）：规则能解析，程序在默认旋转270下给出矩阵
+if in_ch 'udevadm verify /etc/udev/rules.d/70-gk3-touchscreen.rules'; then ok "udev规则70-gk3-touchscreen.rules"
+else echo "   ✗ 缺少udev规则70-gk3-touchscreen.rules或无法解析，触摸会与画面错开90°"; BAD=1; fi
+if in_ch '/usr/lib/gaokun3/gk3-touch-matrix /dev/null | grep -qx "LIBINPUT_CALIBRATION_MATRIX=0 1 0 -1 0 1"'; then ok "gk3-touch-matrix（默认旋转270）"
+else echo "   ✗ gk3-touch-matrix不可执行，或没有给出旋转270的矩阵，触摸会与画面错开90°"; BAD=1; fi
 need_path /usr/bin/gk3-installer
 need_path /usr/bin/gk3-installer-session
 for f in $GPU_FW; do need_path "/usr/lib/firmware/$f"; done
