@@ -160,6 +160,21 @@ check "按这个大小写成功、fsck.fat 干净、内容与期望相同" sh -c
 check "  …fsck.fat 干净" fsck_clean "$W/sized.img"
 check "  …内核挂上的树与期望相同" mount_same "$W/sized.img"
 
+echo "═══ 7. 短名不遮住别的文件的长名字 ═══"
+mkdir -p "$W/sh"; echo long > "$W/sh/long"; echo short > "$W/sh/short"
+"$M" fat-mk "$W/shadow.img" $((64 << 20)) 512 SH abcdefghi.txt="$W/sh/long" 'ABCDEF~1.TXT'="$W/sh/short" >/dev/null; rc=$?
+shadow_ok() {
+    local l r
+    mkdir -p "$W/mnt"
+    l=$(losetup -f --show -r "$W/shadow.img") || return 1
+    mount -o ro,utf8 -t vfat "$l" "$W/mnt" || { losetup -d "$l"; return 1; }
+    [ "$(cat "$W/mnt/ABCDEF~1.TXT")" = short ] && [ "$(cat "$W/mnt/abcdefghi.txt")" = long ]; r=$?
+    umount "$W/mnt"; losetup -d "$l"; return $r
+}
+check "abcdefghi.txt 与 ABCDEF~1.TXT 并存：按各自的名字都打得开" sh -c 'test "$1" = 0' _ $rc
+check "  …内核挂上读到的内容各是各的" shadow_ok
+check "  …fsck.fat 干净" fsck_clean "$W/shadow.img"
+
 echo
 echo "合计：通过 $PASS，失败 $FAIL"
 [ "$FAIL" = 0 ]

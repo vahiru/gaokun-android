@@ -189,11 +189,24 @@ static void basis(const char *name, char base[9], char ext[4], int *lossy)
     ext[e] = 0;
 }
 
-static int sname_taken(const node *nd, int nn, int parent, const uint8_t s[11])
+/* 同一目录里别的条目已经用了这个短名，或者别的条目的长文件名按 8.3 读正好是它：vfat 查找时短名也算数，
+ * 这样的短名会让那个文件按自己的名字打不开 */
+static int sname_taken(const node *nd, int nn, int self, int parent, const uint8_t s[11])
 {
-    for (int i = 1; i < nn; i++)
-        if (nd[i].parent == parent && nd[i].nlfn >= 0 && !memcmp(nd[i].sname, s, 11))
+    for (int i = 1; i < nn; i++) {
+        char up[256];
+        uint8_t o[11];
+        size_t k;
+        if (i == self || nd[i].parent != parent)
+            continue;
+        if (nd[i].nlfn >= 0 && !memcmp(nd[i].sname, s, 11))
             return 1;
+        for (k = 0; nd[i].name[k] && k + 1 < sizeof up; k++)
+            up[k] = (char)(nd[i].name[k] >= 'a' && nd[i].name[k] <= 'z' ? nd[i].name[k] - 32 : nd[i].name[k]);
+        up[k] = 0;
+        if (plain_83(up, o) && !memcmp(o, s, 11))
+            return 1;
+    }
     return 0;
 }
 
@@ -205,7 +218,7 @@ static int name_node(node *nd, int nn, int k)
     int lossy;
     uint8_t s[11];
     x->nlfn = -1;   /* 还没定：sname_taken 跳过它 */
-    if (plain_83(x->name, s) && !sname_taken(nd, nn, x->parent, s)) {
+    if (plain_83(x->name, s) && !sname_taken(nd, nn, k, x->parent, s)) {
         memcpy(x->sname, s, 11);
         x->nlfn = 0;
         return 0;
@@ -215,7 +228,7 @@ static int name_node(node *nd, int nn, int k)
         memset(s, ' ', 11);
         memcpy(s, base, strlen(base));
         memcpy(s + 8, ext, strlen(ext));
-        if (!sname_taken(nd, nn, x->parent, s))
+        if (!sname_taken(nd, nn, k, x->parent, s))
             goto done;
     }
     for (unsigned long t = 1; t < 1000000; t++) {
@@ -228,7 +241,7 @@ static int name_node(node *nd, int nn, int k)
         memcpy(s, base, keep);
         memcpy(s + keep, tail, (size_t)tl);
         memcpy(s + 8, ext, strlen(ext));
-        if (!sname_taken(nd, nn, x->parent, s))
+        if (!sname_taken(nd, nn, k, x->parent, s))
             goto done;
     }
     return -1;

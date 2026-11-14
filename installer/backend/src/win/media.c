@@ -1,6 +1,6 @@
 /* Windows：制作独立安装介质（界面上的"制作独立安装介质"）。
  *
- *   gk3w media --target usb --disk N --livecd <ISO> --release <目录>
+ *   gk3w media --target usb --disk N --expect-mib M --livecd <ISO> --release <目录>
  *
  * 把 LiveCD 混合 ISO（installer/tools/build/build-iso.sh）里的文件，连同发布目录里的 boot.img、super.img.zst、
  * install-artifacts.sha256（放进 gaokun3/payload/），写进一个 FAT32 卷，卷标 GK3LIVE。
@@ -8,12 +8,17 @@
  * U 盘：整个清空，建 MBR 与一个 FAT32（LBA，0x0C）分区，起点 1 MiB、占满整个 U 盘。这是 Windows 格式化 U 盘时的样子，
  *   把 ISO 里的文件拖进这样的 U 盘已上机验证能启动。只认 U 盘（总线 USB 或可移动介质），而且不是 Windows 所在的盘；
  *   VHD 也认（测试用）。
+ *   --expect-mib 是界面确认时看到的容量（gk3w probe 的 size_mib）：从确认到写入之间隔着整个下载，这期间换插的另一块盘
+ *   可能拿到同一个磁盘号，容量对不上就不写。写保护的、或者 LiveCD 与发布目录（以及 gk3w 自己）就在这块 U 盘上的，也不写。
  *   写法：U 盘上原有的卷全部锁定并卸下（句柄留到写完），先清掉盘头与盘尾各 1 MiB（旧的 GPT 主表与备份表、ISO 的卷描述符），
- *   再裸写整个 FAT32（src/fatw.c，每一块写完立即读回比对），最后写 MBR、让 Windows 重读分区表：Windows 重新识别这块盘时，
- *   卷已经格式化好了，不会提示"需要格式化"。
+ *   再裸写整个 FAT32（src/fatw.c），最后写 MBR、让 Windows 重读分区表：Windows 重新识别这块盘时，卷已经格式化好了，
+ *   不会提示"需要格式化"。每一块写完立即读回比对（写不进去、丢弃写入的假容量 U 盘在这里发现）；全部写完后再按记下的
+ *   哈希整个读回一遍（地址回绕的假容量 U 盘把后写的数据写到了前面，只有这一遍才发现）。
+ *   FAT32 分区最大 2 TiB（MBR 的 32 位扇区数），更大的 U 盘只用前 2 TiB。
  *
  * 所有输入在第一次写盘之前验完（发布目录的 sha256、boot.img 拆得开、ISO 里有启动所需的文件、放得下），之后 ERR 一律带
- * touched=yes。进度：1 check / verify-sha → 10 lock → 15 write-media（到 95）→ 97 partition → 100 done。
+ * touched=yes。进度：1 check / verify-sha → 10 lock → 15 write-media（到 85）→ 85 verify-media（到 97）→ 97 partition
+ * → 100 done。
  * stdout：MEDIA target=usb disk=N size_mib= files=N。 */
 #include <windows.h>
 #include <winioctl.h>
@@ -36,8 +41,8 @@
 
 /* 启动 LiveCD 必须有的文件：缺一个都不是我们的 LiveCD ISO */
 static const char *const LIVE_NEED[] = {
-    "EFI/BOOT/BOOTAA64.EFI", "loader/loader.conf", "gaokun3/Image", "gaokun3/gaokun3.dtb", "gaokun3/initramfs.img",
-    "gaokun3/live.squashfs",
+    "EFI/BOOT/BOOTAA64.EFI", "loader/loader.conf", "loader/entries/gaokun3-live.conf", "gaokun3/Image", "gaokun3/gaokun3.dtb",
+    "gaokun3/initramfs.img", "gaokun3/live.squashfs",
 };
 /* 放进 gaokun3/payload/ 的发布文件（install-artifacts.sha256 可以没有） */
 static const char *const PAYLOAD[] = {"boot.img", "super.img.zst", "install-artifacts.sha256"};
@@ -47,9 +52,18 @@ typedef struct {
     uint64_t base;              /* ISO 里的文件：内容在 ISO 里的起点 */
 } source;
 
+/* 写过的每一块：位置、长度与哈希（写完之后整个读回再比一遍） */
+typedef struct {
+    uint64_t off;
+    uint32_t len;
+    uint8_t sha[32];
+} written;
+
 typedef struct {
     gk3w_disk *d;
     uint8_t *chk;               /* 读回比对用（与写缓冲同样大小、同样对齐） */
+    written *w;
+    size_t nw, capw;
 } target;
 
 static int file_pread(HANDLE h, void *buf, size_t len, uint64_t off)
@@ -84,14 +98,49 @@ static int src_read(void *ctx, const gk3w_fat_file *f, uint64_t off, void *buf, 
 static int disk_write(void *ctx, uint64_t off, const void *buf, size_t len)
 {
     target *t = ctx;
-    /* 4 MiB 一块（fatw.c 的 CHUNK）：写完立即读回比对，U 盘的假容量、坏块在这里就能发现 */
-    return gk3w_write_verify(t->d->h, buf, (DWORD)len, PART_START + off, t->chk) ? -1 : 0;
+    /* 最多 4 MiB 一块（fatw.c 的 CHUNK）：写完立即读回比对，并记下哈希 */
+    if (gk3w_write_verify(t->d->h, buf, (DWORD)len, PART_START + off, t->chk))
+        return -1;
+    if (t->nw == t->capw) {
+        size_t cap = t->capw ? t->capw * 2 : 1024;
+        written *w = realloc(t->w, cap * sizeof *w);
+        if (!w)
+            return -1;
+        t->w = w;
+        t->capw = cap;
+    }
+    t->w[t->nw].off = PART_START + off;
+    t->w[t->nw].len = (uint32_t)len;
+    if (gk3w_sha256(buf, len, t->w[t->nw].sha))
+        return -1;
+    t->nw++;
+    return 0;
+}
+
+/* 全部写完后按记下的哈希整个读回：同一位置后来又被写过的（目录、FAT 在文件之后写），以最后一次为准 */
+static int verify_all(target *t)
+{
+    for (size_t i = 0; i < t->nw; i++) {
+        uint8_t sha[32];
+        int later = 0;
+        for (size_t k = i + 1; k < t->nw && !later; k++)
+            if (t->w[k].off < t->w[i].off + t->w[i].len && t->w[i].off < t->w[k].off + t->w[k].len)
+                later = 1;
+        if (later)
+            continue;
+        if (gk3w_pread(t->d->h, t->chk, t->w[i].len, t->w[i].off) || gk3w_sha256(t->chk, t->w[i].len, sha) ||
+            memcmp(sha, t->w[i].sha, 32))
+            return -1;
+        if (i % 16 == 0)
+            gk3w_progress(85 + (unsigned)(i * 12 / t->nw), "verify-media");
+    }
+    return 0;
 }
 
 static void on_progress(void *ctx, uint64_t done, uint64_t total)
 {
     static unsigned last;
-    unsigned pct = total ? 15 + (unsigned)(done * 80 / total) : 95;
+    unsigned pct = total ? 15 + (unsigned)(done * 70 / total) : 85;
     (void)ctx;
     if (pct != last) {
         gk3w_progress(pct, "write-media");
@@ -156,6 +205,34 @@ static int lock_volumes(DWORD disk, HANDLE *out, int cap, int *n)
     } while (FindNextVolumeW(f, name, MAX_PATH));
     FindVolumeClose(f);
     return rc;
+}
+
+/* path 所在的卷是否落在 disk 这块盘上（拿不准算不在：只用来给出更准确的报错，锁卷那一步照样会拦住） */
+static int on_disk(const wchar_t *path, DWORD disk)
+{
+    wchar_t mp[MAX_PATH], vol[MAX_PATH];
+    HANDLE h;
+    union {
+        VOLUME_DISK_EXTENTS e;
+        BYTE raw[sizeof(VOLUME_DISK_EXTENTS) + 16 * sizeof(DISK_EXTENT)];
+    } ext;
+    DWORD got = 0;
+    size_t n;
+    int hit = 0;
+    if (!GetVolumePathNameW(path, mp, MAX_PATH) || !GetVolumeNameForVolumeMountPointW(mp, vol, MAX_PATH))
+        return 0;
+    n = wcslen(vol);
+    if (n && vol[n - 1] == L'\\')
+        vol[n - 1] = 0;
+    h = CreateFileW(vol, 0, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+    if (h == INVALID_HANDLE_VALUE)
+        return 0;
+    if (DeviceIoControl(h, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS, NULL, 0, &ext, sizeof ext, &got, NULL))
+        for (DWORD i = 0; i < ext.e.NumberOfDiskExtents; i++)
+            if (ext.e.Extents[i].DiskNumber == disk)
+                hit = 1;
+    CloseHandle(h);
+    return hit;
 }
 
 /* 一个扇区的 MBR：磁盘签名随机，第一个分区项是从 start 起 count 个扇区的 FAT32（LBA） */
@@ -225,7 +302,7 @@ int gk3w_cmd_media(int argc, wchar_t **argv)
     const wchar_t *tgt = gk3w_arg(argc, argv, L"--target"), *iso_path = gk3w_arg(argc, argv, L"--livecd"),
                   *rel = gk3w_arg(argc, argv, L"--release");
     gk3w_touched T = GK3W_TOUCHED_NO;
-    uint64_t num, iso_size, part_bytes, need;
+    uint64_t num, iso_size, part_bytes, need, expect_mib;
     static gk3w_iso_entry ents[MAX_ENTRIES];
     static gk3w_fat_file files[MAX_ENTRIES + 3];
     static source srcs[MAX_ENTRIES + 3];
@@ -242,13 +319,13 @@ int gk3w_cmd_media(int argc, wchar_t **argv)
     gk3w_fat_params fp;
     gk3w_fat_io io;
     gk3w_fat_err fe;
-    target tg;
+    target tg = {0};
     SYSTEMTIME st;
     DWORD got = 0;
     d.h = INVALID_HANDLE_VALUE;
 
-    if (!tgt || !iso_path || !rel || gk3w_arg_u64(argc, argv, L"--disk", &num))
-        return gk3w_err(GK3W_TOUCHED_NA, "usage", "usage: gk3w media --target usb --disk N --livecd ISO --release DIR", 0);
+    if (!tgt || !iso_path || !rel || gk3w_arg_u64(argc, argv, L"--disk", &num) || gk3w_arg_u64(argc, argv, L"--expect-mib", &expect_mib))
+        return gk3w_err(GK3W_TOUCHED_NA, "usage", "usage: gk3w media --target usb --disk N --expect-mib M --livecd ISO --release DIR", 0);
     if (wcscmp(tgt, L"usb"))
         return gk3w_err(GK3W_TOUCHED_NA, "usage", "--target internal is not implemented yet; only --target usb", 0);
 
@@ -310,9 +387,37 @@ int gk3w_cmd_media(int argc, wchar_t **argv)
 
     if (gk3w_disk_open_removable((DWORD)num, &d, T))
         goto out;
+    if ((d.size >> 20) != expect_mib) {
+        char cur[32];
+        snprintf(cur, sizeof cur, "%llu", (unsigned long long)(d.size >> 20));
+        gk3w_err_kv(T, "media-changed", "size_mib", cur, "disk number now refers to a disk of a different size than the one confirmed; was the USB drive replaced? (disk not touched)", 0);
+        goto out;
+    }
+    if (!DeviceIoControl(d.h, IOCTL_DISK_IS_WRITABLE, NULL, 0, NULL, 0, &got, NULL)) {
+        gk3w_err(T, "media-readonly", "the USB drive is write-protected (disk not touched)", GetLastError());
+        goto out;
+    }
+    {
+        wchar_t self[MAX_PATH];
+        const wchar_t *mine[3] = {iso_path, rel, GetModuleFileNameW(NULL, self, MAX_PATH) ? self : NULL};
+        for (int i = 0; i < 3; i++)
+            if (mine[i] && on_disk(mine[i], d.num)) {
+                gk3w_err(T, "media-is-source", "the LiveCD, the system files or the installer itself are on this USB drive; it cannot overwrite itself (disk not touched)", 0);
+                goto out;
+            }
+    }
     need = gk3w_fat_size_for(files, nf, d.bs);
+    if (!need) {
+        gk3w_err(T, "livecd-names", "a file in the LiveCD or the release directory cannot be stored on FAT32 (name or size) (disk not touched)", 0);
+        goto out;
+    }
+    /* FAT32 最大 2 TiB，MBR 的扇区数也是 32 位：更大的 U 盘只用前面一段 */
     part_bytes = d.size > 2ull * PART_START ? (d.size - PART_START) / d.bs * d.bs : 0;
-    if (!need || part_bytes < need || part_bytes / d.bs > 0xFFFFFFFFull) {
+    if (part_bytes > (2ull << 40))
+        part_bytes = 2ull << 40;
+    if (part_bytes / d.bs > 0xFFFFFFFFull - PART_START / d.bs)
+        part_bytes = (0xFFFFFFFFull - PART_START / d.bs) * d.bs;
+    if (part_bytes < need) {
         char nb[32];
         snprintf(nb, sizeof nb, "%llu", (unsigned long long)((need + (1u << 20) - 1) >> 20));
         gk3w_err_kv(T, "media-too-small", "need_mib", nb, "the USB drive is too small for the LiveCD and the system files (disk not touched)", 0);
@@ -365,6 +470,11 @@ int gk3w_cmd_media(int argc, wchar_t **argv)
                     GetLastError());
         goto out;
     }
+    gk3w_progress(85, "verify-media");
+    if (verify_all(&tg)) {
+        gk3w_err(T, "disk-verify", "the USB drive did not read back what was written: it is faulty or smaller than it reports", GetLastError());
+        goto out;
+    }
     gk3w_progress(97, "partition");
     make_mbr(buf, d.bs, PART_START / d.bs, (uint32_t)(part_bytes / d.bs));
     if (gk3w_write_verify(d.h, buf, d.bs, 0, chk)) {
@@ -395,6 +505,7 @@ out:
         CloseHandle(locked[i]);
     gk3w_aligned_free(buf);
     gk3w_aligned_free(chk);
+    free(tg.w);
     gk3w_disk_close(&d);
     if (iso != INVALID_HANDLE_VALUE)
         CloseHandle(iso);
