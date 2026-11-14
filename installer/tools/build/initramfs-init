@@ -2,7 +2,7 @@
 # gaokun3 LiveCD initramfs.
 #
 # 一份 init 同时服务两种介质：
-#   * U 盘（LiveCD）：squashfs 就在那个 FAT 分区上
+#   * U 盘（LiveCD）：squashfs 在混合ISO的ISO9660分区上（ISO整个写入U盘），或在用户拖入文件的FAT分区上
 #   * 内置盘（免 U 盘的安装器分区 GK3LIVE）：squashfs 同样在 gaokun3/ 下，读进内存后卸下分区（见下面 gk3.toram）
 # 所以【不靠分区标签、不靠 UUID】—— 挨个挂上去找那个文件。
 # 配置越少，越不会因为"换了台机器"而失效。

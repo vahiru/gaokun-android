@@ -8,7 +8,7 @@
 
 ```sh
 bash installer/tools/build/build-flutter.sh                                         # 编译图形安装器 → out/installer-flutter-linux-arm64/
-bash installer/tools/build/build-live.sh --boot-img <boot.img> --firmware <目录>     # 构建LiveCD → out/live/gaokun3-live.img
+bash installer/tools/build/build-live.sh --boot-img <boot.img> --firmware <目录>     # 构建LiveCD → out/live/gaokun3-live.iso
 bash installer/tools/build/build-live.sh --release <发布目录> --firmware <目录> --payload   # 同时放入系统文件
 ```
 
@@ -18,7 +18,7 @@ bash installer/tools/build/build-live.sh --release <发布目录> --firmware <�
 1. `build/build-rootfs.sh`：用`mmdebstrap`按[`pkgs.txt`](build/pkgs.txt)构建根文件系统，叠加`build/overlay/`，静态编译`gk3l`，放入图形安装器与GPU固件；打包`squashfs`前逐项检查（命令、单元是否启用、动态库能否解析、字体、freedreno）。所装软件包的版本记入[`packages-live.lock`](build/packages-live.lock)。
 2. `build/build-initramfs.sh`：静态`busybox`加[`initramfs-init`](build/initramfs-init)，生成`initramfs.img`。
 3. `build/gk3-bootimg.py`：从Android的`boot.img`拆出共用的内核`Image`、`gaokun3.dtb`与内核参数。
-4. `build/build-usb.sh`：组装可启动的GPT镜像（单个ESP，卷标`GK3LIVE`）。
+4. `build/build-iso.sh`：组装混合ISO。ISO9660文件树（Rock Ridge加Joliet）是U盘的完整内容，可以在Windows中打开ISO，把`EFI`、`loader`、`gaokun3`三个目录拖进格式化为FAT32的U盘；附加的EFI系统分区装着除`live.squashfs`以外的启动文件，ISO整个写入U盘后固件从它启动，initramfs再从ISO9660分区读取`live.squashfs`。后一种用法要求内核开启`CONFIG_ISO9660_FS`，构建时从`boot.img`中提取内核配置检查，未开启时拒绝构建（测试构建可加`--allow-no-iso9660`）。
 
 ## 二、关键设计
 
@@ -27,6 +27,7 @@ bash installer/tools/build/build-live.sh --release <发布目录> --firmware <�
    - `CONFIG_SQUASHFS=y`（挂载只读根文件系统）。
    - `CONFIG_NTFS3_FS=y`（双系统安装前只读挂载Windows分区，检查Windows是否处于休眠，同时显式禁用旧版`CONFIG_NTFS_FS`）。
    - `CONFIG_NLS_UTF8=y`（支持FAT32上的非ASCII文件名）。
+   - `CONFIG_ISO9660_FS=y`（ISO整个写入U盘后，从ISO9660分区读取`live.squashfs`）。rc.3及之前的内核尚未开启，带上它的ROM发布之前，正式构建会被拒绝。
 2. **`initramfs`动态查找介质**：
    `initramfs-init`不依赖固定的分区标签或UUID，而是先扫描可移动介质、再扫描内置盘，寻找包含`/gaokun3/live.squashfs`的分区。
    介质位于内置盘（免U盘安装的安装器分区`GK3LIVE`）时，先把`gaokun3/`整个复制进内存（tmpfs）再卸下该分区，内存副本同样挂在`/media/gk3`；安装器因此可以在清除整个磁盘时保留该分区、安装完成后将其删除并入`/data`（见[`installer/backend/src/linux/live.h`](../../installer/backend/src/linux/live.h)）。内存不足（`gaokun3/`的大小加2 GiB）或复制失败时照旧直接挂载；内核参数`gk3.toram=0|1`可强制关闭或开启。介质信息记入`/run/gaokun3/medium`（`/run`在initramfs中挂好后整体移入新根），`gk3l`据此识别介质。

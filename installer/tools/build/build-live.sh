@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 造 LiveCD 的 U 盘镜像：在 arm64 容器里依次跑 build-rootfs.sh → build-initramfs.sh → 拆 boot.img → build-usb.sh。
+# 造 LiveCD 的混合 ISO：在 arm64 容器里依次跑 build-rootfs.sh → build-initramfs.sh → 拆 boot.img → build-iso.sh。
 # 要在 arm64 的主机上跑（Apple Silicon 的 Mac、GitHub 的 ubuntu-24.04-arm 运行器），容器里是原生的，不需要 qemu。
 #
 #   bash installer/tools/build/build-flutter.sh                 # 先有图形安装器
@@ -10,10 +10,12 @@
 #               给 --release 时默认用里面的 boot.img
 #   --firmware  GPU 固件的来源，形如 /vendor/firmware 的目录（adb pull /vendor/firmware out/vendor-firmware）。
 #               cage 要 GPU；zap shader 是华为专有的，Debian 的固件包里没有（见 build-rootfs.sh 的 GPU_FW）
-#   --payload   把 --release 目录整个放进 U 盘（gaokun3/payload/），安装器直接从它装
+#   --payload   把 --release 目录整个放进 ISO（gaokun3/payload/），安装器直接从它装
+#   --allow-no-iso9660  boot.img 的内核没有开启 CONFIG_ISO9660_FS 时照样构建（测试用；dd 写入的 ISO 找不到 squashfs，
+#               只有拖放方式可用，见 build-iso.sh）
 #   换源：GK3_DEBIAN_MIRROR=http://mirrors.ustc.edu.cn/debian；可复现：GK3_SNAPSHOT=20260925T000000Z（透传给 build-rootfs.sh）
 #
-# 产物 → out/live/：gaokun3-live.squashfs · initramfs.img · gaokun3-live.img · packages-live.lock · release.txt
+# 产物 → out/live/：gaokun3-live.squashfs · initramfs.img · gaokun3-live.iso · packages-live.lock · release.txt
 # packages-live.lock 另拷一份到 installer/tools/build/ —— 入库，两次构建之间 diff 它就知道变了什么。
 #
 # ⚠️ --privileged：mmdebstrap 的 root 模式要在 chroot 里挂 proc/sys/dev。只动容器自己的文件系统。
@@ -22,13 +24,14 @@ REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 die() { echo "✗ $*" >&2; exit 1; }
 say() { echo; echo "══ $*"; }
 
-REL=; BOOTIMG=; PAYLOAD=; FW=
+REL=; BOOTIMG=; PAYLOAD=; FW=; ALLOW_NO_ISO=
 while [ $# -gt 0 ]; do
     case "$1" in
         --release)   REL=$2; shift 2 ;;
         --boot-img)  BOOTIMG=$2; shift 2 ;;
         --payload)   PAYLOAD=1; shift ;;
         --firmware)  FW=$2; shift 2 ;;
+        --allow-no-iso9660) ALLOW_NO_ISO=1; shift ;;
         *) die "不认识的参数：$1" ;;
     esac
 done
@@ -62,7 +65,7 @@ GK3_BUILT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 echo "   安装器 $GK3_VERSION · git $GK3_GIT · 内核来自 boot.img ${GK3_BOOTSHA:0:16}…"
 
 say "在容器里构建"
-docker run --rm --privileged "${MOUNTS[@]}" -e PAYLOAD="$PAYLOAD" \
+docker run --rm --privileged "${MOUNTS[@]}" -e PAYLOAD="$PAYLOAD" -e ALLOW_NO_ISO="$ALLOW_NO_ISO" \
     -e GK3_VERSION="$GK3_VERSION" -e GK3_GIT="$GK3_GIT" -e GK3_BOOTSHA="$GK3_BOOTSHA" -e GK3_BUILT="$GK3_BUILT" \
     ${GK3_DEBIAN_MIRROR:+-e GK3_DEBIAN_MIRROR="$GK3_DEBIAN_MIRROR"} ${GK3_SNAPSHOT:+-e GK3_SNAPSHOT="$GK3_SNAPSHOT"} \
     "$TAG" bash -euo pipefail -c '
@@ -77,16 +80,21 @@ docker run --rm --privileged "${MOUNTS[@]}" -e PAYLOAD="$PAYLOAD" \
     bash /build/installer/tools/build/build-rootfs.sh --out $O --installer /build/out-installer --firmware /in/firmware
     bash /build/installer/tools/build/build-initramfs.sh --busybox $O/busybox.static --out $O
     python3 /build/installer/tools/build/gk3-bootimg.py /in/boot.img /build/boot
+    # 测试构建（ALLOW_NO_ISO）不要求能提取内核配置：提取不了就当作没有开启 ISO9660，交给 build-iso.sh 提醒
+    python3 /repo/scripts/extract-kconfig.py /in/boot.img > /build/boot/kernel-config.txt \
+        || { [ -n "$ALLOW_NO_ISO" ] && : > /build/boot/kernel-config.txt; }
     printf "GK3_INSTALLER_VERSION=%s\nGK3_GIT=%s\nGK3_BUILT=%s\nGK3_BOOTIMG_SHA256=%s\nGK3_GK3L_SHA256=%s\n" \
         "$GK3_VERSION" "$GK3_GIT" "$GK3_BUILT" "$GK3_BOOTSHA" "$(cat $O/gk3l.sha256)" > $O/release.txt
-    bash /build/installer/tools/build/build-usb.sh --squashfs $O/gaokun3-live.squashfs --initramfs $O/initramfs.img \
+    bash /build/installer/tools/build/build-iso.sh --squashfs $O/gaokun3-live.squashfs --initramfs $O/initramfs.img \
         --kernel /build/boot/Image --dtb /build/boot/gaokun3.dtb --sdboot $O/systemd-bootaa64.efi \
-        --cmdline /build/boot/cmdline.txt ${PAYLOAD:+--payload /in/payload} --release-info $O/release.txt --out $O/gaokun3-live.img
-    cp $O/gaokun3-live.squashfs $O/initramfs.img $O/gaokun3-live.img $O/packages-live.lock $O/release.txt /outlive/
+        --cmdline /build/boot/cmdline.txt --kconfig /build/boot/kernel-config.txt ${ALLOW_NO_ISO:+--allow-no-iso9660} \
+        ${PAYLOAD:+--payload /in/payload} --release-info $O/release.txt --out $O/gaokun3-live.iso
+    cp $O/gaokun3-live.squashfs $O/initramfs.img $O/gaokun3-live.iso $O/packages-live.lock $O/release.txt /outlive/
 '
 cp "$REPO/out/live/packages-live.lock" "$REPO/installer/tools/build/packages-live.lock"
 say "产物（out/live/）"
 ls -lh "$REPO/out/live/"
 echo
 echo "写 U 盘（⚠️ 先确认 /dev/sdX 是 U 盘）："
-echo "  sudo dd if=out/live/gaokun3-live.img of=/dev/sdX bs=4M conv=fsync status=progress"
+echo "  sudo dd if=out/live/gaokun3-live.iso of=/dev/sdX bs=4M conv=fsync status=progress"
+echo "或者在 Windows 中打开 ISO，把 EFI、loader、gaokun3 三个目录拖进格式化为 FAT32 的 U 盘"
