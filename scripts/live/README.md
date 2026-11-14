@@ -33,10 +33,11 @@ bash scripts/live/release-installer.sh --boot-img <boot.img> --rom <ROM版本> -
 ## 二、关键架构设计
 
 1. **与Android共用同一内核镜像**：
-   救援系统与Android使用完全相同的`vmlinuz.efi`与`gaokun3.dtb`，仅通过不同的`initramfs.img`和内核命令行区分。为此在[`scripts/kernel-config-android.sh`](../kernel-config-android.sh)中内建了三项配置：
+   救援系统与Android使用完全相同的`vmlinuz.efi`与`gaokun3.dtb`，仅通过不同的`initramfs.img`和内核命令行区分。为此在[`scripts/kernel-config-android.sh`](../kernel-config-android.sh)中内建了以下配置：
    - `CONFIG_SQUASHFS=y`（挂载只读根文件系统）。
    - `CONFIG_NTFS3_FS=y`（双系统安装时压缩Windows分区，同时显式禁用旧版`CONFIG_NTFS_FS`）。
    - `CONFIG_NLS_UTF8=y`（支持FAT32上的非ASCII文件名）。
+   - `CONFIG_ISO9660_FS=y`（LiveCD以混合ISO发布，dd写入U盘后从ISO9660分区读取squashfs）。
 2. **`initramfs`动态扫描介质**：
    `initramfs-init`不依赖固定的分区标签或UUID，而是先扫描可移动介质、再扫描内置NVMe分区，寻找包含`/gaokun3/rescue.squashfs`（或`live.squashfs`）的分区挂载启动。
 3. **启动失败自动重启回退**：

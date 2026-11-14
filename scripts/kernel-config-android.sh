@@ -40,17 +40,19 @@ OUT="${1:?用法: $0 <kernel-out-dir>}"
 # ---- 让【同一个内核】也能当救援/LiveCD 系统用（见 scripts/live/README.md）----
 # 今天 ESP 上有两个内核：Android 一个、救援 Ubuntu 一个，白占 14 MiB，
 # 而且两份要各自维护。统一成一个之后，救援系统只是"同一个内核 + 另一个 initramfs"。
-# 这三项对 Android 是惰性的（不挂就没有代价），但缺了救援就起不来：
+# 这几项对 Android 是惰性的（不挂就没有代价），但缺了救援就起不来：
 #   SQUASHFS  —— 救援 rootfs 是 squashfs；★ 它默认是 =m，而【救援 initramfs 里
 #                没有模块】，和本仓踩过 13 次的「=m 坑」完全同类
 #   NTFS3_FS  —— 双系统安装要缩 Windows 分区，得先能读它
 #   NLS_UTF8  —— FAT 上的非 ASCII 文件名
+#   ISO9660_FS —— LiveCD以混合ISO发布：dd写入U盘启动时，squashfs在ISO9660文件系统里，
+#                initramfs要能挂载它（长文件名靠Rock Ridge，内核始终支持，不需要另开选项）
 # ⚠️★ NTFS3_FS 的 Kconfig 是 `depends on !NTFS_FS || m` —— 只要那个旧的
 #    NTFS_FS 兼容壳还开着（主线删掉 fs/ntfs 之后留下的别名），ntfs3 就被
 #    【钉死在 =m】，`--enable` 写进去也会被 olddefconfig 改回 m。
 #    症状是断言报 "CONFIG_NTFS3_FS=m"，而看 --enable 那行完全看不出原因。
 ./scripts/config --file "$OUT/.config" --disable NTFS_FS
-./scripts/config --file "$OUT/.config"     --enable SQUASHFS --enable SQUASHFS_ZSTD --enable SQUASHFS_XZ     --enable NTFS3_FS --enable NLS_UTF8
+./scripts/config --file "$OUT/.config"     --enable SQUASHFS --enable SQUASHFS_ZSTD --enable SQUASHFS_XZ     --enable NTFS3_FS --enable NLS_UTF8 --enable ISO9660_FS
 
 # ★ Android 的挂起框架依赖 /sys/power/wake_lock（CONFIG_PM_WAKELOCKS）。
 #   缺了它 SystemSuspend 退化到 wakeup_count 模式，而本机 s2idle 恢复是坏的
@@ -557,7 +559,7 @@ PM_DEVFREQ PM_OPP PM_GENERIC_DOMAINS_OF QCOM_UBWC_CONFIG QCOM_MDT_LOADER QCOM_SC
 VIDEO_QCOM_CAMSS VIDEO_HI846 VIDEO_OV13B10 VIDEO_DW9714 I2C_QCOM_CCI SC_CAMCC_8280XP LEDS_GPIO LEDS_CLASS_FLASH LEDS_QCOM_FLASH
 VIDEOBUF2_DMA_SG MEDIA_CAMERA_SUPPORT V4L_PLATFORM_DRIVERS VIDEO_CAMERA_SENSOR
 EXPERT PM_DEBUG PM_SLEEP_DEBUG PM_ADVANCED_DEBUG DPM_WATCHDOG
-SQUASHFS NTFS3_FS NLS_UTF8
+SQUASHFS NTFS3_FS NLS_UTF8 ISO9660_FS
 USB_NET_DRIVERS USB_USBNET MII USB_RTL8152 USB_NET_AX8817X USB_NET_AX88179_178A
 ARM64_USER_MMAP_WINDOW_39
 USB_NET_CDCETHER USB_NET_CDC_EEM USB_NET_CDC_NCM USB_NET_HUAWEI_CDC_NCM USB_NET_RNDIS_HOST
