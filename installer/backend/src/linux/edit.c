@@ -5,7 +5,7 @@
  *
  * 成功时 stdout 一行 RESULT op=delete part=…。进度：10 gpt-backup → 50 part-delete → 100 done。
  * 不删：ESP（删了它，盘上所有系统都无法启动；要重建 ESP 用整盘清空）、在用的分区（挂着、交换分区、上面叠着别的设备，
- * 首先是安装器所在的那个）。动手之前把分区表备份到安装介质。
+ * 首先是安装器所在的那个）。动手之前备份分区表（放在内存里，见 disk.h 的 gk3l_gpt_backup）。
  * 只清掉分区表里的那一项，不抹分区里的数据：分区表备份还原回去，数据就还在（Windows 的删除也是这样）。 */
 #define _GNU_SOURCE
 #include <errno.h>

@@ -1,7 +1,7 @@
 // "保存日志"（v1.0 计划 GUI-12 的前端）：失败页上的一个按钮。
 //
-// 安装 U 盘只有一个 EFI 类型的分区，Windows / macOS 默认不挂它 —— 装失败的人把 U 盘插回电脑看不到日志。
-// 后端 gk3l log-targets 列出能写的 FAT / exFAT（另插的 U 盘在前、启动介质最后并标 esp=yes），
+// LiveCD 不自动保存日志（只在内存里，见 installer/backend/src/linux/lx.h），装失败时要由用户存到电脑上读得到的地方。
+// 后端 gk3l log-targets 列出能写的 FAT / exFAT（另插的 U 盘在前、启动介质本身在后，EFI 分区标 esp=yes），
 // gk3l save-logs --to <分区> 写一个 gaokun3-logs-<时间>/。这里只是让人挑一个、告诉人存到哪了。
 import 'package:flutter/material.dart';
 import 'package:gk3_common/backend/backend.dart';

@@ -59,7 +59,7 @@ class Rec extends Gk3Backend {
     }
     if (fn == 'apply' && failApply) {
       yield parseStderrLine('PROGRESS 5 write-gpt');
-      yield parseStdoutLine('BACKUP path=/media/gk3/gaokun3/gpt-before-wipe-nvme0n1-20261113-120000-head2048-tail2048.bin disk=/dev/nvme0n1 sector=512 head=2048 tail=2048 ram=no');
+      yield parseStdoutLine('BACKUP path=/run/gaokun3/gpt-before-wipe-nvme0n1-20261113-120000-head2048-tail2048.bin disk=/dev/nvme0n1 sector=512 head=2048 tail=2048 ram=yes');
       yield parseStderrLine('ERR code=disk-write part=gpt errno=5 touched=yes');
       yield const Gk3Log('!! writing the partition table failed (the backup is listed above)');
       yield const Gk3Exit(1);

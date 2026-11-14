@@ -1372,8 +1372,6 @@ int gk3l_cmd_apply(int argc, char **argv)
         gk3l_err(c.T, "layout-changed", "the partition table changed while preparing the install; run the installer again (disk not touched)", 0);
         goto out;
     }
-    /* 介质读进了内存：动盘之前把内存里的界面日志写回介质分区（写到一半断电时，这次的日志不至于全没） */
-    (void)gk3l_persist_sync();
     if (c.mode == M_REINSTALL) {
         /* 分区表不动：不备份；目标就是现有分区 */
         gk3l_log("reinstall: the partition table is not changed; reusing the existing %d partitions", GK3W_REUSE_N);

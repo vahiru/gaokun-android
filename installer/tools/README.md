@@ -30,13 +30,13 @@ bash installer/tools/build/build-live.sh --release <发布目录> --firmware <�
    - `CONFIG_ISO9660_FS=y`（ISO整个写入U盘后，从ISO9660分区读取`live.squashfs`）。rc.3及之前的内核尚未开启，带上它的ROM发布之前，正式构建会被拒绝。
 2. **`initramfs`动态查找介质**：
    `initramfs-init`不依赖固定的分区标签或UUID，而是先扫描可移动介质、再扫描内置盘，寻找包含`/gaokun3/live.squashfs`的分区。
-   介质位于内置盘（免U盘安装的安装器分区`GK3LIVE`）时，先把`gaokun3/`整个复制进内存（tmpfs）再卸下该分区，内存副本同样挂在`/media/gk3`；安装器因此可以在清除整个磁盘时保留该分区、安装完成后将其删除并入`/data`（见[`installer/backend/src/linux/live.h`](../../installer/backend/src/linux/live.h)）。内存不足（`gaokun3/`的大小加2 GiB）或复制失败时照旧直接挂载；内核参数`gk3.toram=0|1`可强制关闭或开启。介质信息记入`/run/gaokun3/medium`（`/run`在initramfs中挂好后整体移入新根），`gk3l`据此识别介质。
+   介质位于内置盘（免U盘安装的安装器分区`GK3LIVE`）时，先把`gaokun3/`整个复制进内存（tmpfs，复制完改为只读）再卸下该分区，内存副本同样挂在`/media/gk3`；安装器因此可以在清除整个磁盘时保留该分区、安装完成后将其删除并入`/data`（见[`installer/backend/src/linux/live.h`](../../installer/backend/src/linux/live.h)）。内存不足（`gaokun3/`的大小加2 GiB）或复制失败时照旧直接挂载；内核参数`gk3.toram=0|1`可强制关闭或开启。介质信息记入`/run/gaokun3/medium`（`/run`在initramfs中挂好后整体移入新根），`gk3l`据此识别介质。
 3. **启动失败自动重启**：
    设备没有外露串口。若`initramfs`找不到根文件系统且未传入`gk3.debug`，会在打印诊断信息60秒后执行`reboot -f`，由启动管理器超时回到默认系统，避免停在无人值守的错误shell中。
 4. **写入磁盘期间不睡眠、不关机**：
    睡眠相关的systemd target全部屏蔽，logind忽略电源键与合盖，写入磁盘的任务另由`systemd-inhibit`保护。
-5. **开机诊断写回介质**：
-   `gk3-diag`在开机45秒后把服务状态、挂载、显示输出、输入设备、日志等写入介质的`gaokun3/diag/`；介质已读进内存时，再由`gk3l persist-sync`写回分区本身。
+5. **不写入安装介质**：
+   介质可能是只读的ISO9660，LiveCD不往介质写任何东西。界面日志（`/run/gk3-installer/installer.log`）、写入磁盘任务的输出与分区表备份都只在内存里，关机即丢失；安装失败时由用户在界面上另存到U盘（`gk3l save-logs`，同时带上dmesg与本次启动的journal）。
 
 ## 三、测试
 

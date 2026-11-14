@@ -192,7 +192,7 @@ L=$(grep "^DISK path=$B " "$W/probe1.out"); PU=$(grep "^PART path=${B}p$NU " "$W
     && ok "装完 gk3l probe：kernel=ok，userdata 认得出 ext4 / 卷标" || bad "装完的探测：$L / $PU"
 grep -q "^PLAN op=mkpart disk=$B name=super " "$W/b.out" && ok "stdout 有方案（PLAN / PLANSUM）" || bad "stdout 没有方案：$(head -3 "$W/b.out")"
 grep -q "^BACKUP path=$W/run/gpt-before-apply-.* disk=$B sector=512 head=34 tail=33 ram=yes$" "$W/b.out" \
-    && ok "stdout 有 BACKUP 记录（没有安装介质 ⇒ ram=yes）" || bad "BACKUP 记录不对：$(grep ^BACKUP "$W/b.out")"
+    && ok "stdout 有 BACKUP 记录（备份在内存里 ⇒ ram=yes）" || bad "BACKUP 记录不对：$(grep ^BACKUP "$W/b.out")"
 ls "$W/run"/gpt-before-apply-* >/dev/null 2>&1 && ok "分区表备份：$(basename "$(ls "$W/run"/gpt-before-apply-* | head -1)")" || bad "没有分区表备份"
 H=$(ls "$W/run"/gpt-before-apply-* | head -1)
 [ "$(head -c $((34 * 512)) "$H" | sha256sum)" = "$(head -c $((34 * 512)) "$W/base.img" | sha256sum)" ] \
@@ -280,12 +280,13 @@ H3=$(sha "${C}p3"); H4=$(sha "${C}p4")
 mkdir -p "$W/elsewhere"; mount -t vfat "${C}p1" "$W/elsewhere"
 refuse "ESP 另有一处挂着" esp-busy "$C" -- --region-start "$RS" --region-end "$RE" --release "$REL" --bitlocker-confirmed
 umount "$W/elsewhere"
-# 安装介质写保护（只读的 loop）：分区表备份退回内存，照样装
+# 安装介质挂着、可写：分区表备份也只放在内存里，介质一个字节都不写
 truncate -s 64M "$W/medium.img"; mkfs.vfat "$W/medium.img" >/dev/null; mmd -i "$W/medium.img" ::/gaokun3
-MD=$(losetup -fr --show "$W/medium.img"); mkdir -p /media/gk3; mount -o ro -t vfat "$MD" /media/gk3
+MD=$(losetup -f --show "$W/medium.img"); mkdir -p /media/gk3; mount -t vfat "$MD" /media/gk3
 "$G" apply --disk "$C" --region-start "$RS" --region-end "$RE" --release "$REL" --bitlocker-confirmed --default-os windows >"$W/c.out" 2>"$W/c.err"; rc=$?
-umount /media/gk3; losetup -d "$MD"
-grep -q '^BACKUP .* ram=yes$' "$W/c.out" && grep -q 'only in RAM' "$W/c.err" && ok "介质写保护：分区表备份留在内存里，照样装" || bad "写保护的介质：$(grep ^BACKUP "$W/c.out")"
+mlist=$(ls -A /media/gk3/gaokun3); umount /media/gk3; losetup -d "$MD"
+grep -q "^BACKUP path=$W/run/.* ram=yes$" "$W/c.out" && grep -q 'only in RAM' "$W/c.err" && [ -z "$mlist" ] \
+    && ok "介质可写也不写：分区表备份在内存里，照样装" || bad "介质：BACKUP $(grep ^BACKUP "$W/c.out") / 介质上 $mlist"
 [ "$rc" = 0 ] && ok "装完" || { bad "装失败 rc=$rc"; tail -8 "$W/c.err"; }
 check "分区、内容、ESP 都对，misc 带“默认 Windows”的请求" "$C" "$W/c.out" --mode alongside --default windows
 [ "$(sha "${C}p3")" = "$H3" ] && [ "$(sha "${C}p4")" = "$H4" ] && ok "Windows 卷（NTFS、BitLocker）逐字节没动" || bad "Windows 卷被动了"

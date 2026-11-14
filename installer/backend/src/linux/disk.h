@@ -75,8 +75,8 @@ int gk3l_wait_node(const gk3l_disk *d, uint32_t idx, char *out, size_t cap);
 /* 丢掉分区设备的页缓存（BLKFLSBUF） */
 void gk3l_flush_node(const char *dev);
 /* 盘头 head、盘尾 tail 个扇区原样备份到 <dir>/gpt-before-<tag>-…bin，并在 stdout 报一行
- * BACKUP path= disk= sector= head= tail= ram=yes|no。dir_arg 为空时写到安装介质的 gaokun3/，写不进去就留在 GK3_RUNDIR
- * （内存里，ram=yes）；dir_arg 给了而写不进去算失败。失败已报 ERR（touched=no），返回 -1 */
+ * BACKUP path= disk= sector= head= tail= ram=yes|no。dir_arg 为空时放在 GK3_RUNDIR（内存里，ram=yes；LiveCD 不往介质写）；
+ * dir_arg 给了而写不进去算失败。失败已报 ERR（touched=no），返回 -1 */
 int gk3l_gpt_backup(const gk3l_disk *d, const char *dir_arg, const char *tag, uint64_t head, uint64_t tail);
 /* 把主表（hdr = LBA 1 的整块，ent = 整个表项区）写到盘上，并按它生成、写入备份表；每一段写后读回比对。
  * chk ≥ 表项区大小（按 4096 对齐）。0 成功；-1 写失败（errno）；-2 读回不一致 */

@@ -76,13 +76,13 @@ L=$W/run/jobs/lost-1; mkdir -p "$L"; echo apply > "$L/cmd"; echo 1 > "$L/started
 [ "$JR" != 0 ] && grep -q '^ERR code=job-missing' "$W/j.err" && ok "没有这个 job ⇒ job-missing" || bad "missing：rc=$JR"
 "$G" job follow ../jobs >/dev/null 2>"$W/j.err"; [ $? != 0 ] && grep -q '^ERR code=job-missing' "$W/j.err" && ok "id 带斜杠 ⇒ job-missing" || bad "id 带斜杠没拦住"
 
-echo "═══ 4. job 结束时把输出存一份到安装介质（介质只读挂着：临时改成读写、写完改回去） ═══"
+echo "═══ 4. job 的输出只在内存里：安装介质挂着、可写也不写 ═══"
 truncate -s 64M "$W/medium.img"; mkfs.vfat "$W/medium.img" >/dev/null; mmd -i "$W/medium.img" ::/gaokun3
-MD=$(losetup -f --show "$W/medium.img"); mkdir -p /media/gk3; mount -o ro -t vfat "$MD" /media/gk3
+MD=$(losetup -f --show "$W/medium.img"); mkdir -p /media/gk3; mount -t vfat "$MD" /media/gk3
 "$G" job run "${P[@]}" >/dev/null 2>"$W/j.err"
 ID=$(field "$(grep '^JOB ' "$W/j.err")" id)
-[ -f "/media/gk3/gaokun3/diag/job-$ID.log" ] && grep -q '^PLAN op=mkpart' "/media/gk3/gaokun3/diag/job-$ID.log" \
-    && findmnt -rno OPTIONS /media/gk3 | grep -q '^ro' && ok "diag/job-<id>.log 写进介质，介质改回只读" || bad "介质上没有 job 日志或没改回只读：$(findmnt -rno OPTIONS /media/gk3)"
+grep -q '^PLAN op=mkpart' "$W/run/jobs/$ID/out" && [ -z "$(ls -A /media/gk3/gaokun3)" ] \
+    && ok "输出在 \$GK3_RUNDIR/jobs/<id>/，介质的 gaokun3/ 仍是空的" || bad "job 输出不在内存里或写了介质：$(ls -A /media/gk3/gaokun3)"
 
 echo "═══ 5. log-targets / save-logs ═══"
 export GK3_ALLOW_LOOP=1

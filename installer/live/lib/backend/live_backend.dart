@@ -11,7 +11,8 @@ import 'package:gk3_common/backend/protocol.dart';
 /// ★ 参数按 argv 传（Process.start 不经过 shell），不拼命令行。
 ///
 /// ★ 每次调用的参数、stderr、stdout 记录与退出码都照抄一份到 [log]（默认是本进程的 stderr ——
-///   gk3-installer-session 把它接到介质上的 diag/installer.log）：装坏的那一次要能在介质上找到后端的每一行输出。
+///   gk3-installer-session 把它接到内存里的 /run/gk3-installer/installer.log，另存日志时一并带走）：
+///   装坏的那一次要能看到后端的每一行输出。
 ///
 /// ★ 写盘的命令（[writesDisk]）经 `gk3l job run` 放进独立的 systemd 临时单元：界面崩了、cage 退出、
 ///   gk3-installer.service 的 cgroup 被整个杀掉时，写 super 的那个进程不跟着死。stdout / stderr / 退出码与直接调用

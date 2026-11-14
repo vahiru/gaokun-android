@@ -16,7 +16,7 @@
  * job 目录 $GK3_RUNDIR/jobs/<id>/：cmd、started、mode、unit、pid、out、err、rc（写完才有）、start-error。
  * 单元里套一层 systemd-inhibit：写盘期间不许关机、睡眠、按电源键与合盖关机；锁跟着写盘进程活，不跟着界面活。
  * 不是 systemd 当 PID 1 的环境（容器）退回 setsid：只脱离进程组与终端。判据同 sd_booted(3)：/run/systemd/system/ 在不在。
- * job 结束时把输出另存一份到安装介质的 gaokun3/diag/job-<id>.log：/run 在内存里，重启就没了。
+ * job 的输出只在内存里（LiveCD 不往介质写，见 lx.h），需要时由另存日志（logs.c）带走。
  * 测试用：GK3_SYSTEMD_RUN=<假的 systemd-run>（同时当作"systemd 在跑"），GK3_JOB_POLL=<秒>。 */
 #define _GNU_SOURCE
 #include <dirent.h>
@@ -103,58 +103,14 @@ static const char *job_state(const char *d)
     return gk3l_exists(p) ? "done" : "lost";   /* 进程刚好在这两步之间写完 */
 }
 
-/* 任务的输出存一份到安装介质的 gaokun3/diag/。介质读进了内存时先写进内存副本，再连同其中别的日志一起写回介质分区
- * （安装器分区删掉之后写到 ESP，见 lx.h 的 gk3l_persist_open）：以后删安装器分区时，内存副本里的才会一起存到 ESP */
-static void keep_on_medium(const char *d, const char *id)
-{
-    char pd[4096], p[4400], cmd[256] = "?", rc[16] = "?", mode[32] = "?";
-    int ram = gk3l_medium_ram() && gk3l_is_dir("/media/gk3/gaokun3");
-    FILE *f;
-    if (ram)
-        snprintf(pd, sizeof pd, "/media/gk3/gaokun3");
-    else if (gk3l_persist_open(pd, sizeof pd))
-        return;
-    snprintf(p, sizeof p, "%s/diag", pd);
-    if (!gk3l_mkdirs(p)) {
-        snprintf(p, sizeof p, "%s/diag/job-%s.log", pd, id);
-        f = fopen(p, "we");
-        if (f) {
-            get(d, "cmd", cmd, sizeof cmd);
-            get(d, "rc", rc, sizeof rc);
-            get(d, "mode", mode, sizeof mode);
-            fprintf(f, "=== job %s: %s, exit %s, %s\n", id, cmd, rc, mode);
-            for (int k = 0; k < 2; k++) {
-                uint8_t *b;
-                size_t n;
-                char src[4200];
-                snprintf(src, sizeof src, "%s/%s", d, k ? "err" : "out");
-                fprintf(f, "--- %s\n", k ? "stderr" : "stdout");
-                if (!gk3l_read_file(src, &b, &n, 64u << 20)) {
-                    fwrite(b, 1, n, f);
-                    free(b);
-                }
-            }
-            fflush(f);
-            fsync(fileno(f));
-            fclose(f);
-        }
-    }
-    if (ram)
-        (void)gk3l_persist_sync();
-    else
-        gk3l_persist_close();
-}
-
-/* 单元里跑的那段：stdout / stderr 换成文件，pid 记下来，跑命令，写退出码，存一份到介质 */
+/* 单元里跑的那段：stdout / stderr 换成文件，pid 记下来，跑命令，写退出码 */
 static int job_body(int argc, char **argv)
 {
     const char *d = argc >= 2 ? argv[0] : NULL;
     char p[4200], pid[32], rc[16];
     int fo, fe, r;
-    const char *id;
     if (!d)
         return 2;
-    id = strrchr(d, '/') ? strrchr(d, '/') + 1 : d;
     snprintf(p, sizeof p, "%s/out", d);
     fo = open(p, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0600);
     snprintf(p, sizeof p, "%s/err", d);
@@ -180,7 +136,6 @@ static int job_body(int argc, char **argv)
         snprintf(q, sizeof q, "%s/rc", d);
         rename(p, q);
     }
-    keep_on_medium(d, id);
     return r;
 }
 

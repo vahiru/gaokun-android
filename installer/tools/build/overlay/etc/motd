@@ -7,5 +7,6 @@
 
   The graphical installer runs on tty1 (Ctrl+Alt+F1); its backend is gk3l.
   Partition and file system tools: sgdisk fdisk blkid mkfs.ext4 e2fsck resize2fs
-  Boot evidence:        /media/gk3/gaokun3/diag/  (written by gk3-diag 45 s after boot)
+  Logs (in RAM only):   /run/gk3-installer/installer.log, journalctl -b, dmesg
+  Save them to a USB drive: gk3l save-logs
 

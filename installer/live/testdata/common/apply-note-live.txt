@@ -6,7 +6,6 @@ E   Image           300002 bytes
 E   ramdisk.img     123457 bytes
 E   gaokun3.dtb      20005 bytes
 E PROGRESS 1 test-zst
-D 53
 E super.img.zst: full test decode passed
 E ESP: using directory 0123456789abcdef0123456789abcdef; 4 MiB to write (net of files overwritten), 198 MiB free; Windows boot manager present: yes
 E Windows volumes: bitlocker=no hibernated=no
@@ -18,20 +17,20 @@ O PLAN op=mkpart disk=/dev/nvme0n1 name=boot_b start=790702080 end=790833151 siz
 O PLAN op=mkpart disk=/dev/nvme0n1 name=super start=790833152 end=815998975 size_mib=12288 type=8300
 O PLAN op=mkpart disk=/dev/nvme0n1 name=userdata start=815998976 end=949880831 size_mib=65372 type=8300
 O PLANSUM mode=alongside avail_mib=77824 fixed_mib=12452 userdata_mib=65372
-E partition table backup: /media/gk3/gaokun3/gpt-before-apply-nvme0n1-20261113-133413-head34-tail33.bin (restore: dd the first 34 sectors to the start of /dev/nvme0n1 and the last 33 to its end, bs=512)
-O BACKUP path=/media/gk3/gaokun3/gpt-before-apply-nvme0n1-20261113-133413-head34-tail33.bin disk=/dev/nvme0n1 sector=512 head=34 tail=33 ram=no
+E partition table backup: /run/gaokun3/gpt-before-apply-nvme0n1-20261114-081630-head34-tail33.bin (restore: dd the first 34 sectors to the start of /dev/nvme0n1 and the last 33 to its end, bs=512)
+E note: the backup is only in RAM (/run/gaokun3/gpt-before-apply-nvme0n1-20261114-081630-head34-tail33.bin) and is lost on reboot; saving the logs copies it as well
+O BACKUP path=/run/gaokun3/gpt-before-apply-nvme0n1-20261114-081630-head34-tail33.bin disk=/dev/nvme0n1 sector=512 head=34 tail=33 ram=yes
 E PROGRESS 5 write-gpt
 E partition table written (primary and backup), the kernel knows the 6 new partitions
 E PROGRESS 15 format
 E misc: MISCINIT slot=a default=android bcab=5f61000042434142010200006f0000000000000000000000000000000ad6c368
-D 53
 E metadata, userdata: ext4 created (superblock magic and label read back from the disk)
 E PROGRESS 30 write-super
 E PROGRESS 32 write-super done_mib=4 total_mib=12288
 E PROGRESS 34 write-super done_mib=8 total_mib=12288
 E PROGRESS 37 write-super done_mib=12 total_mib=12288
 E PROGRESS 39 write-super done_mib=16 total_mib=12288
-D 969
+D 1043
 E PROGRESS 42 write-super done_mib=903 total_mib=12288
 E PROGRESS 44 write-super done_mib=907 total_mib=12288
 E PROGRESS 47 write-super done_mib=911 total_mib=12288
@@ -55,6 +54,6 @@ E backed up the original EFI/BOOT/BOOTAA64.EFI as EFI/BOOT/BOOTAA64.EFI.before-g
 E ESP: systemd-boot, kernel / dtb / ramdisk for both slots, both entries and loader.conf written; 12 files read back from the disk and verified
 E cannot read EFI variables (efivarfs unavailable); LoaderEntryDefault not checked
 E PROGRESS 92 remove-installer
-O NOTE code=installer-kept why=esp-full need_mib=5 free_mib=1
+O NOTE code=installer-kept why=live-busy part=/dev/nvme0n1p8
 E PROGRESS 100 done
 X 0

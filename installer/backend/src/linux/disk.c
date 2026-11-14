@@ -485,25 +485,9 @@ int gk3l_gpt_backup(const gk3l_disk *d, const char *dir_arg, const char *tag, ui
         /* 调用方指定的地方写不进去就不装 */
         err = backup_to(dir_arg, name, gb, len, path, sizeof path);
     } else {
-        char pd[4096];
-        err = ENOENT;
-        /* 写到安装介质的 gaokun3/（U 盘：/media/gk3 改成可写；读进了内存：临时挂上介质分区本身） */
-        if (!gk3l_persist_open(pd, sizeof pd)) {
-            err = backup_to(pd, name, gb, len, path, sizeof path);
-            gk3l_persist_close();
-            /* 持久的那份在临时挂上的分区里：内存副本里也放一份 —— 界面、restore-table、另存日志都按 /media/gk3 的路径找，
-             * 重启后 initramfs 读进内存的也正是这个路径 */
-            if (!err && strcmp(pd, "/media/gk3/gaokun3") && gk3l_is_dir("/media/gk3/gaokun3")) {
-                char p2[4400];
-                if (!backup_to("/media/gk3/gaokun3", name, gb, len, p2, sizeof p2))
-                    snprintf(path, sizeof path, "%s", p2);
-            }
-        }
-        /* 介质写不进去（写保护、只读介质）就留在内存里，照旧装 */
-        if (err) {
-            in_ram = 1;
-            err = backup_to(run && *run ? run : "/run/gaokun3", name, gb, len, path, sizeof path);
-        }
+        /* 默认放在内存里（LiveCD 不往介质写，见 lx.h）：重启即丢失；失败页给出路径，另存日志时一并带走 */
+        in_ram = 1;
+        err = backup_to(run && *run ? run : "/run/gaokun3", name, gb, len, path, sizeof path);
     }
     gk3w_aligned_free(gb);
     if (err)
@@ -511,7 +495,7 @@ int gk3l_gpt_backup(const gk3l_disk *d, const char *dir_arg, const char *tag, ui
     gk3l_log("partition table backup: %s (restore: dd the first %llu sectors to the start of %s and the last %llu to its end, bs=%u)",
              path, (unsigned long long)head, d->path, (unsigned long long)tail, d->bs);
     if (in_ram)
-        gk3l_log("warning: the installation medium is not writable, so the backup is only in RAM (%s) and is lost on reboot", path);
+        gk3l_log("note: the backup is only in RAM (%s) and is lost on reboot; saving the logs copies it as well", path);
     {
         /* 界面的失败页据此告诉用户有备份、在哪里（不去日志里找字样） */
         gk3w_line l = {0};

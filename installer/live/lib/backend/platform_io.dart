@@ -17,16 +17,13 @@ LangPrefs platformLangPrefs() => const FileLangPrefs();
 
 /// 语言的来源与记忆（v1.0 计划 GUI-19）：
 ///   * 启动项：内核参数 gk3.lang=en|zh（gk3-installer-session 也会转成 GK3_LANG 环境变量；这里两样都认）
-///   * 记住：写进一个小文件。live 里能写、又能跨重启留下来的只有启动介质 ——
-///     gk3-installer-session 把 /media/gk3 重新挂成可写、日志写在 /media/gk3/gaokun3/diag/（同一个道理），
-///     所以放 /media/gk3/gaokun3/installer-lang；介质只读时退到 /run/gk3-installer/lang（tmpfs：
-///     安装器被 systemd 重新拉起时还在，重启就没了）。GK3_LANG_FILE 可以指定别的位置。
+///   * 记住：写进 /run/gk3-installer/lang（tmpfs：安装器被 systemd 重新拉起时还在，重启就没了；LiveCD 不往介质写）。
+///     GK3_LANG_FILE 可以指定别的位置。
 class FileLangPrefs extends LangPrefs {
   const FileLangPrefs();
 
   static List<String> get _files => [
         if (Platform.environment['GK3_LANG_FILE'] case final f? when f.isNotEmpty) f,
-        '/media/gk3/gaokun3/installer-lang',
         '/run/gk3-installer/lang',
       ];
 
@@ -63,7 +60,7 @@ class FileLangPrefs extends LangPrefs {
       try {
         final d = File(f).parent;
         if (!d.existsSync()) {
-          // 只在 /run 下替自己建目录；介质上的 gaokun3/ 不在，说明不是从我们的介质启动的，别乱建
+          // 只在 /run 下替自己建目录
           if (!f.startsWith('/run/')) continue;
           d.createSync(recursive: true);
         }

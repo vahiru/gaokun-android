@@ -1,7 +1,7 @@
 /* Linux：把日志另存到用户拿得到的地方。
  *
- * 问题：安装 U 盘只有一个分区，类型是 EFI System，日志写在它的 gaokun3/diag/ 下；Windows 与 macOS 默认都不给 ESP
- *   分配盘符，装失败的人把 U 盘插回电脑看不到日志。免 U 盘安装时介质是内置盘上的 GK3LIVE（有盘符），回 Windows 就能看到。
+ * LiveCD 不自动往介质写任何东西（见 lx.h），日志、任务输出与分区表备份都只在内存里，关机即丢失。装失败时由用户在界面上
+ *   另存一份，带到电脑上附在问题报告里。
  *
  *   gk3l log-targets              能存日志的地方，一行一个（第一个是默认）：
  *     LOGTARGET part=/dev/sda1 fs=vfat size_mib=… label=… removable=yes|no medium=yes|no esp=yes|no
@@ -9,7 +9,7 @@
  *     启动介质。顺序：另插的 U 盘 → 启动介质本身（esp=yes 的话电脑上不好读）。
  *   gk3l save-logs [--to 分区|目录]  不给就用 log-targets 的第一个；给目录就直接写进去（测试用）。
  *     写一个 gaokun3-logs-<时间>/：界面日志、各 job 的输出、分区表备份、dmesg、本次启动的 journal、gk3l probe、
- *     /etc/gaokun3-release、最近的开机诊断报告。stdout：LOGSAVED dir=… part=…|- files=N esp=yes|no
+ *     /etc/gaokun3-release。stdout：LOGSAVED dir=… part=…|- files=N esp=yes|no
  * 测试用：GK3_ALLOW_LOOP=1 时 loop 设备算可移动盘。 */
 #define _GNU_SOURCE
 #include <dirent.h>
@@ -226,9 +226,8 @@ int gk3l_cmd_save_logs(int argc, char **argv)
         goto done;
     }
     {
-        /* 界面日志（介质上的与内存里的）、发行信息 */
+        /* 界面日志、发行信息 */
         static const char *const src[][2] = {
-            {"/media/gk3/gaokun3/diag/installer.log", "diag-installer.log"},
             {"/run/gk3-installer/installer.log", "gk3-installer-installer.log"},
             {"/etc/gaokun3-release", "etc-gaokun3-release"},
             {"/media/gk3/gaokun3/release.txt", "gaokun3-release.txt"},
@@ -240,39 +239,15 @@ int gk3l_cmd_save_logs(int argc, char **argv)
         }
     }
     {
-        /* 最近的开机诊断报告、分区表备份（介质上的与内存里的）、各 job 的输出 */
-        const char *bdirs[] = {"/media/gk3/gaokun3", run};
-        char newest[512] = "";
-        time_t nt = 0;
-        DIR *dd = opendir("/media/gk3/gaokun3/diag");
+        /* 分区表备份、各 job 的输出 */
+        DIR *dd;
         struct dirent *e;
+        dd = opendir(run);
         if (dd) {
-            while ((e = readdir(dd))) {
-                struct stat s2;
-                if (strncmp(e->d_name, "boot-", 5) || !strstr(e->d_name, ".log"))
-                    continue;
-                snprintf(p, sizeof p, "/media/gk3/gaokun3/diag/%s", e->d_name);
-                if (!stat(p, &s2) && s2.st_mtime >= nt) {
-                    nt = s2.st_mtime;
-                    snprintf(newest, sizeof newest, "%s", e->d_name);
-                }
-            }
-            closedir(dd);
-        }
-        if (newest[0]) {
-            snprintf(p, sizeof p, "/media/gk3/gaokun3/diag/%s", newest);
-            snprintf(q, sizeof q, "%.4000s/%.400s", dir, newest);
-            if (!copy_file(p, q))
-                files++;
-        }
-        for (int k = 0; k < 2; k++) {
-            dd = opendir(bdirs[k]);
-            if (!dd)
-                continue;
             while ((e = readdir(dd))) {
                 if (strncmp(e->d_name, "gpt-before-", 11))
                     continue;
-                snprintf(p, sizeof p, "%s/%s", bdirs[k], e->d_name);
+                snprintf(p, sizeof p, "%s/%s", run, e->d_name);
                 snprintf(q, sizeof q, "%s/%s", dir, e->d_name);
                 if (!copy_file(p, q))
                     files++;

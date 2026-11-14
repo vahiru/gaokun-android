@@ -239,8 +239,6 @@ class _RemoveInstallerPageState extends State<RemoveInstallerPage> {
           const SizedBox(height: 16),
           Text(rm?.merge ?? false ? l.rmLiveMerge(lv.label, fmtMib(lv.sizeMib)) : l.rmLiveFree(lv.label, fmtMib(lv.sizeMib)), style: tt.bodyLarge),
           if (rm != null && rm.merge) ...[const SizedBox(height: 6), Text(l.optsDataRmLive(fmtMib(rm.userdataMib)), style: tt.bodyLarge)],
-          const SizedBox(height: 6),
-          Text(l.rmLiveLogs, style: tt.bodyLarge),
           const SizedBox(height: 24),
           SizedBox(
             width: 420,

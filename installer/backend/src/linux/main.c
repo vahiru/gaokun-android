@@ -7,7 +7,6 @@
  *   gk3l delete ...   删除一个分区；gk3l restore-table --file …  把动盘之前的分区表备份写回去（见 edit.c）
  *   gk3l esp-info ... 这块盘上 ESP 的状况；gk3l release-info [--dir DIR] 安装介质上的系统文件（只读，见 info.c）
  *   gk3l remove-installer --disk …   删掉读进了内存的安装器分区、并进 userdata（见 live.c）
- *   gk3l persist-sync 介质读进了内存时，把内存里的日志写回介质分区（开机诊断写完调；见 medium.c）
  *   gk3l job ...      写盘进程脱离界面运行（见 job.c）
  *   gk3l log-targets / save-logs   把日志另存到用户拿得到的地方（见 logs.c）
  *   gk3l --version
@@ -40,7 +39,6 @@ static const struct {
     {"esp-info", gk3l_cmd_esp_info},
     {"release-info", gk3l_cmd_release_info},
     {"remove-installer", gk3l_cmd_remove_installer},
-    {"persist-sync", gk3l_cmd_persist_sync},
     {"job", gk3l_cmd_job},
     {"log-targets", gk3l_cmd_log_targets},
     {"save-logs", gk3l_cmd_save_logs},
@@ -71,7 +69,7 @@ int main(int argc, char **argv)
     signal(SIGPIPE, SIG_IGN);
 
     if (argc < 2) {
-        fprintf(stderr, "!! usage: gk3l probe|preflight|plan|apply|delete|restore-table|esp-info|release-info|remove-installer|persist-sync|job|log-targets|save-logs|--version\n");
+        fprintf(stderr, "!! usage: gk3l probe|preflight|plan|apply|delete|restore-table|esp-info|release-info|remove-installer|job|log-targets|save-logs|--version\n");
         return 2;
     }
     if (!strcmp(argv[1], "--version")) {

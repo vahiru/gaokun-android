@@ -158,8 +158,9 @@ if [ "$WANT_RAM" = 1 ]; then
     AVAIL=$(sed -n 's/^MemAvailable: *\([0-9]*\) kB$/\1/p' /proc/meminfo)
     if [ -n "$NEED" ] && [ -n "$AVAIL" ] && [ $((NEED + 2097152)) -le "$AVAIL" ]; then
         say "copying gaokun3/ ($((NEED / 1024)) MiB) into memory"
-        # 多留 256 MiB 给之后写进去的日志与分区表备份
-        if mount -t tmpfs -o "size=$((NEED + 262144))k,mode=0755" tmpfs /ram && cp -a /mnt/gaokun3 /ram/; then
+        # 多留16 MiB给tmpfs自身的开销；复制完改成只读：与U盘一样，LiveCD不往介质写
+        if mount -t tmpfs -o "size=$((NEED + 16384))k,mode=0755" tmpfs /ram && cp -a /mnt/gaokun3 /ram/ \
+           && mount -o remount,ro /ram; then
             RAM=1
         else
             say "warning: copying into memory failed; running from the partition"

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # initramfs-init 的容器测试：只测找到介质之后的那一段（读进内存、介质记录、挂进新根）。
 #   - 介质在不可移动的盘上（loop 盘的 removable 是 0，算内置盘）→ gaokun3/ 读进内存、介质分区卸下，
-#     新根里 /media/gk3 是 tmpfs、内容与介质相同，/run 已挂好，/run/gaokun3/medium 记 ram=yes
+#     新根里 /media/gk3 是只读的 tmpfs、内容与介质相同，/run 已挂好，/run/gaokun3/medium 记 ram=yes
 #   - gk3.toram=0 → 照旧直接挂着，ram=no
 #   - 内存不够（MemAvailable 换成很小的数）→ 不读，ram=no
 # 跑的是改过的一份副本：cmdline 与 meminfo 从环境变量来；switch_root 换成打印状态后退出、reboot 换成退出（容器里
@@ -51,6 +51,7 @@ report() {
     mount -t proc proc /proc
     echo "MEDIA_FS=$(findmnt -no FSTYPE /newroot/media/gk3)"
     echo "MEDIA_SRC=$(findmnt -no SOURCE /newroot/media/gk3)"
+    echo "MEDIA_RW=$(findmnt -no OPTIONS /newroot/media/gk3 | cut -d, -f1)"
     echo "RUN_FS=$(findmnt -no FSTYPE /newroot/run)"
     echo "MNT=$(findmnt -no SOURCE /mnt)"
     echo "ROOT_FS=$(findmnt -no FSTYPE /newroot)"
@@ -74,7 +75,7 @@ run_init() {   # run_init <额外 cmdline> [meminfo 文件]
 echo "═══ 1. 内置盘：读进内存 ═══"
 out=$(run_init "")
 printf '%s\n' "$out" | grep -E '^\[gk3\]' | sed 's/^/    /'
-check "介质是 tmpfs（内存里那份）" test "$(val "$out" MEDIA_FS)" = tmpfs
+check "介质是 tmpfs（内存里那份）、只读" test "$(val "$out" MEDIA_FS)/$(val "$out" MEDIA_RW)" = tmpfs/ro
 check "新根是 overlay、/run 是 tmpfs" test "$(val "$out" ROOT_FS)/$(val "$out" RUN_FS)" = overlay/tmpfs
 check "介质分区卸下了" test -z "$(val "$out" MNT)"
 check "内容与介质上的 gaokun3/ 逐字节相同" test "$(cat "$W/files")" = "$want"

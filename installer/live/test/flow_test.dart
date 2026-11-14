@@ -340,7 +340,7 @@ void main() {
     await hold(t, l.confirmHoldIdle);
     await see(t, find.text(l.failTitle));
     await see(t, find.text(l.errDiskWrite));
-    await see(t, find.text(l.failBackup('/media/gk3/gaokun3/gpt-before-wipe-nvme0n1-20261113-120000-head2048-tail2048.bin')));
+    await see(t, find.text(l.failBackup('/run/gaokun3/gpt-before-wipe-nvme0n1-20261113-120000-head2048-tail2048.bin')));
     expect(find.text(l.btnBack), findsNothing);
     // 写盘阶段失败：不给重试、不说"盘没动"（v1.0 计划 GUI-3）
     expect(find.text(l.btnRetry), findsNothing);
@@ -1033,7 +1033,6 @@ void main() {
       expect(find.byKey(kRiskWordKey), findsNothing);
       await passRisk(t);
       await see(t, find.text(l.rmLiveSub));
-      await see(t, find.text(l.rmLiveLogs));
       expect(rec.last('remove-installer'), isNull);
       await hold(t, '${l.modeRmLiveTitle} · ${l.holdIdle}');
       expect(rec.last('remove-installer'), ['remove-installer', '--disk', '/dev/nvme0n1']);
@@ -1067,7 +1066,7 @@ void main() {
       await hold(t, l.confirmHoldIdle);
       await see(t, find.text(l.doneTitle));
       await see(t, find.text(l.doneBodyInternal));
-      await see(t, find.text(l.doneNoteLiveKept(l.errEspFull('5 MiB', '1 MiB'))));
+      await see(t, find.text(l.doneNoteLiveKept(l.errLiveBusy)));
     });
 
     testWidgets('英文界面：删除安装器分区的风险页没有 CJK', (t) async {

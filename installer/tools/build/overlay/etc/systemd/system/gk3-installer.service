@@ -18,6 +18,8 @@ Environment=XDG_RUNTIME_DIR=/run/gk3-installer
 Environment=LIBSEAT_BACKEND=seatd
 RuntimeDirectory=gk3-installer
 RuntimeDirectoryMode=0700
+# 自动重启时保留这个目录：界面日志（installer.log）与语言设置只放在这里，删了就丢掉崩溃之前的日志
+RuntimeDirectoryPreserve=restart
 ExecStart=/usr/bin/cage -s -- /usr/bin/gk3-installer-session
 TTYPath=/dev/tty1
 TTYReset=yes

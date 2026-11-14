@@ -11,16 +11,13 @@
 #                     （/usr/lib/gaokun3/gk3-touch-matrix），两处的默认值必须一致。
 #   gk3.scale=2       面板 2560×1600 → 1280×800 逻辑像素（安装器的逻辑画布就是 1280×800）
 #   gk3.renderer=skia 关 Impeller（Flutter 3.47.2 在 Linux 默认是 Impeller）
-#   gk3.soak=1        进浸泡页，并每 5 秒把 RSS 记到介质上（M0 的"帧率 + RSS 曲线"）
-#   gk3.lang=en       界面语言的默认（zh / en，v1.0 计划 GUI-19）。用户在安装器里切过语言就以那次为准：
-#                     记在介质上的 gaokun3/installer-lang（只读时在 /run/gk3-installer/lang），见 lib/backend/platform_io.dart
+#   gk3.soak=1        进浸泡页，并每5秒把RSS记到/run/gk3-installer/（量帧率与内存曲线用）
+#   gk3.lang=en       界面语言的默认（zh / en）。用户在安装器里切过语言就以那次为准，记在/run/gk3-installer/lang
+#                     （重启后失效），见installer/live/lib/backend/platform_io.dart
 arg() { tr ' ' '\n' < /proc/cmdline | sed -n "s/^$1=//p" | tail -1; }
 
-# 日志优先写回启动介质 —— 这台机器可能既没网也没串口，介质上那份是唯一能事后读到的东西
+# 日志只放在内存里（LiveCD不往介质写，介质可能是只读的ISO9660）；装失败时由用户在界面上另存（gk3l save-logs）
 LOG=/run/gk3-installer/installer.log
-if mount -o remount,rw /media/gk3 2>/dev/null; then
-    mkdir -p /media/gk3/gaokun3/diag 2>/dev/null && LOG=/media/gk3/gaokun3/diag/installer.log
-fi
 echo "=== $(date) session start | $(tr '\n' ' ' < /etc/gaokun3-release 2>/dev/null)| $(cat /proc/cmdline)" >> "$LOG"
 
 OUTNAME=$(wlr-randr 2>>"$LOG" | awk 'NR==1{print $1}')

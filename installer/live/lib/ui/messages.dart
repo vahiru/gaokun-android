@@ -111,7 +111,6 @@ String errText(L10n l, Gk3Record e) {
     // 安装器分区（installer/backend/src/linux/live.c）
     'live-missing' => l.errLiveMissing,
     'live-busy' => l.errLiveBusy,
-    'logs-not-kept' => l.errLogsNotKept,
     'wipe-mounted' => l.errWipeMounted(f('mounts').trim()),
     'reinstall-busy' => l.errReinstallBusy(f('parts')),
     'part-unknown' => l.errPartUnknown(f('part')),

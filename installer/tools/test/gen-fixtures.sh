@@ -120,7 +120,7 @@ rec() {
     python3 installer/tools/test/record-fixture.py "$dir/$name" \
         --sub "${STICK}p=/dev/sda" --sub "$STICK=/dev/sda" --sub "$d=/dev/nvme0n1" \
         --sub "-$(basename "$d")-=-nvme0n1-" \
-        --sub "$REL=/media/gk3/gaokun3/payload" --sub "$W=/tmp" \
+        --sub "$REL=/media/gk3/gaokun3/payload" --sub "$W/run=/run/gaokun3" --sub "$W=/tmp" \
         -- bash -c "$real"
     printf '%-78s %s\n' "$call" "$name" >> "$dir/index.txt"
 }
@@ -349,17 +349,17 @@ esp_var -e 's/ hibernated=[a-z]*/ hibernated=yes/' > "$C/esp_info-hibernated.txt
 esp_var -e 's/ size_mib=[0-9]*/ size_mib=100/' -e 's/ free_mib=[0-9]*/ free_mib=70/' -e 's/ small=no/ small=yes/' > "$C/esp_info-small.txt"
 { grep -v '^X ' "$OUT/windows-free/apply-along.txt"; echo 'O NOTE code=loadervar-stuck name=LoaderEntryDefault value=auto-windows'; echo 'X 0'; } > "$C/apply-note.txt"
 # windows-live 录的那次 apply（装完删掉安装器分区）去掉删除那一段：选项页开了"保留安装器分区"时的样子；
-# 再换成一条 NOTE installer-kept（ESP 放不下日志、没删）：完成页要说
+# 再换成一条 NOTE installer-kept（安装器分区在用、没删）：完成页要说
 sed '/^E PROGRESS 92 remove-installer$/,/^O REMOVED /d' "$OUT/windows-live/apply-along.txt" > "$C/apply-live-keep.txt"
 sed -e '/^E PROGRESS 92 remove-installer$/,/^O REMOVED /{/^E PROGRESS 92 remove-installer$/!d}' \
-    -e '/^E PROGRESS 92 remove-installer$/a O NOTE code=installer-kept why=esp-full need_mib=5 free_mib=1' \
+    -e '/^E PROGRESS 92 remove-installer$/a O NOTE code=installer-kept why=live-busy part=/dev/nvme0n1p8' \
     "$OUT/windows-live/apply-along.txt" > "$C/apply-note-live.txt"
 { echo "#  esp_info-bitlocker.txt：Windows 卷是 BitLocker、BOOTAA64 还是 Windows 的（确认页要勾恢复密钥）"
   echo "#  esp_info-hibernated.txt：Windows 在休眠（双系统 / 重新安装禁用）"
   echo "#  esp_info-small.txt：100 MiB 的 ESP（双系统明确不装）"
   echo "#  apply-note.txt：windows-free 录的那次 apply + 一条 NOTE code=loadervar-stuck（EFI 变量删不掉，完成页要说）"
   echo "#  apply-live-keep.txt：windows-live 录的那次 apply 去掉删除安装器分区那一段（选项页开了"保留安装器分区"）"
-  echo "#  apply-note-live.txt：同上，删除那一段换成 NOTE code=installer-kept（ESP 放不下日志、没删；完成页要说）"
+  echo "#  apply-note-live.txt：同上，删除那一段换成 NOTE code=installer-kept（安装器分区在用、没删；完成页要说）"
   echo "#  ↑ 这六份是从录到的输出改字段得来的（半手写，gen-fixtures.sh 里写着怎么改）"; } >> "$C/index.txt"
 # 写盘任务。没有在跑的（默认）；"界面崩过又起来、apply 还在跑"那种给测试按文件名用。
 # 手写：容器里起不了 systemd 单元；格式照 gk3l job status 的输出写。跟读的内容就是 blank 场景录的那次 apply
@@ -392,7 +392,7 @@ echo "#  release_info-none.txt：介质里没有系统文件（界面测试用 o
 # 做完之后界面会重新探测，拿到的仍是各场景自己那份 probe（测试只核对发出去的调用）
 DE=$(new_disk edit 488386M); make_factory "$DE"
 recc() {   # 和 rec 一样，但录进 common/；$1=文件名 $2=界面发出的调用（nvme0n1）$3=实际执行的命令
-    python3 installer/tools/test/record-fixture.py "$C/$1" --sub "${DE}p=/dev/nvme0n1p" --sub "$DE=/dev/nvme0n1" --sub "-$(basename "$DE")-=-nvme0n1-" --sub "$W=/tmp" \
+    python3 installer/tools/test/record-fixture.py "$C/$1" --sub "${DE}p=/dev/nvme0n1p" --sub "$DE=/dev/nvme0n1" --sub "-$(basename "$DE")-=-nvme0n1-" --sub "$W/run=/run/gaokun3" --sub "$W=/tmp" \
         --sub "${STICK}p=/dev/sda" -- bash -c "$3"
     printf '%-78s %s\n' "$2" "$1   # 录（出厂布局的另一块盘上真做）" >> "$C/index.txt"
 }

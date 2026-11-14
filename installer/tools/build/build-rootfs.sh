@@ -108,12 +108,12 @@ ok "hostname ${HOST}"
 
 # ★ 开机自启：显式 enable 我们要的，并且【不假设】包的 postinst 替我们 enable 了什么。
 #   这里 enable 完，体检那一节再用 is-enabled 逐个核一遍。
-UNITS="gk3-diag.timer gk3-installer.service seatd.service getty@tty2.service"
+UNITS="gk3-installer.service seatd.service getty@tty2.service"
 # shellcheck disable=SC2086
 ch systemctl enable $UNITS >/dev/null 2>&1 || true
 # 在一个全内存、每次开机都是新的系统上，apt 的定时任务只会白白吃 CPU。
 # nvme-cli 带的 NVMe over Fabrics 自动连接：我们用不到，开机冒烟测试里它每次都失败，
-# 污染"失败的单元"与 gk3-diag 的报告（installer/tools/test/test-boot-container.sh）
+# 污染"失败的单元"（installer/tools/test/test-boot-container.sh）
 ch systemctl mask apt-daily.timer apt-daily-upgrade.timer e2scrub_all.timer \
     nvmf-autoconnect.service nvmefc-boot-connections.service >/dev/null 2>&1 || true
 # 不许睡：live里没有Android那套usbrole守卫，挂起尚未经实测；initramfs把port0切到host失败时，a600000.usb停在role=device，
@@ -168,7 +168,6 @@ need_path /usr/lib/gaokun3/gk3l
 if in_ch '/usr/bin/gk3l --version | grep -q "^gk3l " && /usr/bin/gk3l plan --sector 512 --region-start 2048 --region-end 100000000 | grep -q "^PLANSUM mode=alongside "'; then
     ok "gk3l 在镜像里能跑（--version、plan）"
 else echo "   ✗ gk3l 在镜像里跑不起来"; BAD=1; fi
-need_enabled gk3-diag.timer
 # ★ 写盘期间不许关机 / 挂起：几个睡眠 target 都 mask 了、logind 不管电源键与合盖、
 #   安装器要套的 systemd-inhibit 在。判据锚定行首的实际指令（别 grep 到注释）
 for u in $SLEEP_TARGETS; do need_masked "$u"; done
@@ -180,7 +179,6 @@ need_cmd systemd-inhibit
 if in_ch 'grep -q "^root::" /etc/shadow'; then ok "root 不设密码（tty2 能直接登录）"; else echo "   ✗ root 有密码或被锁定 —— 退出到终端之后登录不了"; BAD=1; fi
 # "退出到终端"要 chvt（它在 kbd 包里、没装 —— 按钮点了什么都不发生）。overlay 里链到 busybox
 need_cmd chvt
-if in_ch '[ -x /usr/lib/gaokun3/gk3-diag ]'; then ok "/usr/lib/gaokun3/gk3-diag 可执行"; else echo "   ✗ /usr/lib/gaokun3/gk3-diag 不可执行"; BAD=1; fi
 # 触摸跟随画面旋转（cage不会替我们转，见gk3-touch-matrix）：规则能解析，程序在默认旋转270下给出矩阵
 if in_ch 'udevadm verify /etc/udev/rules.d/70-gk3-touchscreen.rules'; then ok "udev规则70-gk3-touchscreen.rules"
 else echo "   ✗ 缺少udev规则70-gk3-touchscreen.rules或无法解析，触摸会与画面错开90°"; BAD=1; fi
@@ -189,7 +187,7 @@ else echo "   ✗ gk3-touch-matrix不可执行，或没有给出旋转270的矩�
 need_path /usr/bin/gk3-installer
 need_path /usr/bin/gk3-installer-session
 for f in $GPU_FW; do need_path "/usr/lib/firmware/$f"; done
-need_cmd cage; need_cmd wlr-randr; need_cmd seatd; need_cmd grim
+need_cmd cage; need_cmd wlr-randr; need_cmd seatd
 # ★ 那根线：二进制在镜像里不等于它会跑（Alpine 版第一次停在 login 提示符）
 for u in gk3-installer.service seatd.service getty@tty2.service; do need_enabled "$u"; done
 # ★ 安装器的每一个动态库都要能解析 —— 缺一个就是开机一块黑屏

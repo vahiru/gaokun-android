@@ -5,8 +5,7 @@
  *
  * 删掉 X 上的安装器分区；userdata 紧挨在它前面时把空出来的空间并进 userdata（GPT 表项、内核的分区、ext4 一起扩）。
  *   1. 核对：分区表是 gpt 且与内核一致；安装器分区在这块盘上、读进了内存、没在用；这块盘有且只有一个 ESP、没有挂着。
- *   2. 诊断文件先存好：内存副本里的 diag/、installer-lang、分区表备份抄到 ESP 的 gaokun3/ 下（ESP 放不下就不删），
- *      这一步的分区表备份也写在那里。之后本进程的任务日志也写到 ESP（gk3l_persist_to_esp）。
+ *   2. 备份分区表（与安装时的一样只放在内存里，见 lx.h）。
  *   3. 内核放掉安装器分区（在用时拒绝）→ 主表去掉它、userdata 的表项改大 → 写主表与备份表并读回核对。
  *   4. 内核里的 userdata 改大（BLKPG_RESIZE_PARTITION，不行就去掉再加）→ e2fsck -f -p → resize2fs。
  *      文件系统没扩成只提醒（NOTE code=userdata-fs-not-grown）：分区比文件系统大不影响使用。
@@ -24,7 +23,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
-#include <sys/statvfs.h>
 #include <unistd.h>
 
 #include "../proto.h"
@@ -257,7 +255,6 @@ int gk3l_live_remove(gk3l_disk *d, int as_note)
     gk3l_live lv;
     gk3_gpt_part q, ud = {0};
     uint32_t esp_idx = 0;
-    uint64_t esp_start = 0, esp_size = 0;
     size_t n = 0, elen;
     int n_esp = 0, n_ud = 0, err, w, grow = 0;
     uint64_t new_last = 0, per_mib = (1u << 20) / d->bs;
@@ -301,15 +298,13 @@ int gk3l_live_remove(gk3l_disk *d, int as_note)
     }
     if (n_esp != 1)
         return refuse(as_note, n_esp ? "esp-ambiguous" : "esp-missing", NULL, NULL,
-                      n_esp ? "this disk has more than one EFI system partition (disk not touched)" : "this disk has no EFI system partition to keep the logs on (disk not touched)", 0);
+                      n_esp ? "this disk has more than one EFI system partition (disk not touched)" : "this disk has no EFI system partition (disk not touched)", 0);
     {
         const gk3l_kpart *k = gk3l_kernel_find(d->kp, d->nk, esp_idx);
         char where[4096];
         if (!k)
             return refuse(as_note, "kernel-stale", NULL, NULL, "the kernel does not know the EFI system partition (disk not touched)", 0);
         snprintf(esp_node, sizeof esp_node, "/dev/%s", k->name);
-        esp_start = k->start512;
-        esp_size = k->size512;
         if (!gk3l_mount_of(k->devno, where, sizeof where))
             return refuse(as_note, "esp-busy", "mnt", where, "the EFI system partition is mounted; unmount it first (disk not touched)", 0);
     }
@@ -325,40 +320,11 @@ int gk3l_live_remove(gk3l_disk *d, int as_note)
     if (!grow)
         gk3l_log("userdata does not directly precede the installer partition (or is in use): the space becomes unallocated");
 
-    /* 诊断文件先存到 ESP：ESP 放不下就不删 */
-    gk3l_persist_to_esp(esp_node);
-    {
-        char pd[4096];
-        struct statvfs sv;
-        uint64_t need = gk3l_persist_bytes() + (4u << 20), have;
-        if (gk3l_persist_open(pd, sizeof pd)) {
-            gk3l_persist_to_esp(NULL);
-            return refuse(as_note, "esp-mount", "esp", esp_node, "cannot mount the EFI system partition to keep the logs there (disk not touched)", 0);
-        }
-        have = statvfs(pd, &sv) ? 0 : (uint64_t)sv.f_bavail * sv.f_frsize;
-        gk3l_persist_close();
-        if (have < need) {
-            char nb[32], fb[32];
-            gk3l_persist_to_esp(NULL);
-            snprintf(nb, sizeof nb, "%llu", (unsigned long long)((need + (1u << 20) - 1) >> 20));
-            snprintf(fb, sizeof fb, "%llu", (unsigned long long)(have >> 20));
-            return refuse2(as_note, "esp-full", "need_mib", nb, "free_mib", fb, "the EFI system partition has no room for the logs (disk not touched)", 0);
-        }
-    }
-    if (gk3l_persist_sync()) {
-        gk3l_persist_to_esp(NULL);
-        return refuse(as_note, "logs-not-kept", "esp", esp_node, "copying the logs to the EFI system partition failed (disk not touched)", 0);
-    }
-    gk3l_log("logs and partition table backups copied to gaokun3/ on the EFI system partition %s", esp_node);
-    if (d->g.alt_lba >= d->blocks) {
-        gk3l_persist_to_esp(NULL);
+    if (d->g.alt_lba >= d->blocks)
         return refuse(as_note, "gpt-layout", NULL, NULL, "the backup partition table header lies beyond the end of the disk (disk not touched)", 0);
-    }
     /* 备份写不成时 gk3l_gpt_backup 已报 ERR gpt-backup；装完之后那一步里另报 NOTE，安装照样算成功 */
-    if (gk3l_gpt_backup(d, NULL, "rmlive", d->g.first_usable, d->blocks - (d->g.last_usable + 1))) {
-        gk3l_persist_to_esp(NULL);
+    if (gk3l_gpt_backup(d, NULL, "rmlive", d->g.first_usable, d->blocks - (d->g.last_usable + 1)))
         return as_note ? refuse(as_note, "gpt-backup", NULL, NULL, "writing the partition table backup failed (disk not touched)", 0) : -1;
-    }
 
     /* 新表在副本上改好再动盘 */
     elen = (size_t)d->g.num_entries * d->g.entry_size;
@@ -366,7 +332,6 @@ int gk3l_live_remove(gk3l_disk *d, int as_note)
     ent = gk3w_aligned_alloc((elen + 4095) / 4096 * 4096);
     chk = gk3w_aligned_alloc(GK3L_ENTRIES_MAX);
     if (!hdr || !ent || !chk) {
-        gk3l_persist_to_esp(NULL);
         rc = refuse(as_note, "nomem", NULL, NULL, "out of memory (disk not touched)", ENOMEM);
         goto out;
     }
@@ -374,7 +339,6 @@ int gk3l_live_remove(gk3l_disk *d, int as_note)
     memcpy(ent, d->ent, elen);
     if (gk3w_gpt_remove(hdr, d->bs, ent, elen, lv.idx) != GK3W_GPTW_OK ||
         (grow && gk3w_gpt_set_last(hdr, d->bs, ent, elen, ud.index, new_last) != GK3W_GPTW_OK)) {
-        gk3l_persist_to_esp(NULL);
         rc = refuse(as_note, "gpt-layout", NULL, NULL, "internal error: cannot change the partition table (disk not touched)", 0);
         goto out;
     }
@@ -382,7 +346,6 @@ int gk3l_live_remove(gk3l_disk *d, int as_note)
         gk3w_progress(50, "remove-installer");
     /* 内核先放掉安装器分区（在用时拒绝，这是最终的判据）；放掉了再改分区表，改不成就加回去 */
     if ((err = gk3l_kernel_del(d, lv.idx))) {
-        gk3l_persist_to_esp(NULL);
         rc = refuse(as_note, "live-busy", "part", live_node, "the kernel would not release the installer partition: it is in use (disk not touched)", err);
         goto out;
     }
@@ -403,7 +366,6 @@ int gk3l_live_remove(gk3l_disk *d, int as_note)
         goto out;
     }
     gk3l_log("installer partition %s (%s) removed from the partition table and the kernel", live_node, lv.name);
-    gk3l_medium_note_esp(esp_start, esp_size);
     esp_drop_live_entries(esp_node);
     if (grow) {
         if (!as_note)

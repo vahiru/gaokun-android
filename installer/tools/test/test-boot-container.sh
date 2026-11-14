@@ -39,28 +39,28 @@ if [ -n "${GK3_TEST_OVERLAY:-}" ]; then
     docker commit "$NAME-own" "$NAME:latest" >/dev/null; docker rm "$NAME-own" >/dev/null
 fi
 docker rm -f "$NAME" >/dev/null 2>&1 || true
-# 假的启动介质，挂到 /media/gk3（gk3-diag 往它的 gaokun3/diag/ 写开机报告）
+# 假的启动介质，只读挂到 /media/gk3（与 ISO9660 介质一样；LiveCD 不往介质写）
 VOL=gk3-bootsmoke-media
 docker volume rm -f "$VOL" >/dev/null 2>&1 || true
 docker volume create "$VOL" >/dev/null
 docker run --rm -v "$VOL:/m" "$NAME:latest" sh -c 'mkdir -p /m/gaokun3'
 echo "══ 以 systemd 为 PID 1 启动，等 ${SECS} 秒"
 docker run -d --name "$NAME" --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
-    -v "$VOL:/media/gk3" \
+    -v "$VOL:/media/gk3:ro" \
     --tmpfs /run --tmpfs /run/lock --tmpfs /tmp -e container=docker "$NAME:latest" /sbin/init >/dev/null
 sleep "$SECS"
 X() { docker exec "$NAME" "$@" 2>&1; }
 echo "── 系统状态：$(X systemctl is-system-running)"
 echo "── 失败的单元"; X systemctl --failed --no-legend --plain | sed 's/^/   /'
 echo "── 我们的单元"
-for u in gk3-diag.timer gk3-diag.service seatd.service gk3-installer.service getty@tty2.service; do
+for u in seatd.service gk3-installer.service getty@tty2.service; do
     printf '   %-22s %-10s %s\n' "$u" "$(X systemctl is-enabled "$u")" "$(X systemctl show -p ActiveState,SubState,Result --value "$u" | tr '\n' ' ')"
 done
 echo "── 单元文件的告警（键写错、值不合法、依赖打环）"
 X journalctl -b --no-pager | grep -iE "unknown (key|section)|invalid|ordering cycle|failed to parse|bad unit|not executable|No such file" | sed 's/^/   /' | head -30 || true
 echo "── 没有任何网络服务在听"
 X sh -c 'ss -ltnu 2>/dev/null | tail -n +2 | grep -v "127.0.0" || echo "   （没有）"' | sed 's/^/   /'
-echo "── gk3-diag 的输出"; X journalctl -b -u gk3-diag --no-pager -o cat | tail -5 | sed 's/^/   /'
+echo "── 界面日志（只在内存里）"; X tail -5 /run/gk3-installer/installer.log | sed 's/^/   /'
 echo "── gk3-installer 最近几次尝试"; X journalctl -b -u gk3-installer --no-pager -o cat | tail -6 | sed 's/^/   /'
 docker rm -f "$NAME" >/dev/null
 docker volume rm -f "$VOL" >/dev/null

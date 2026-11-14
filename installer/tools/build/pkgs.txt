@@ -51,5 +51,3 @@ libepoxy0
 #   "WenQuanYi Micro Hei" 回退的（installer/common/lib/ui/theme.dart）—— 换字体包就要一起改，build-rootfs.sh 断言它在
 fonts-wqy-microhei
 fontconfig
-# 截屏：gk3-diag 在装机失败时把屏幕存到介质上
-grim

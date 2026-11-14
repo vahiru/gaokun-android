@@ -92,7 +92,7 @@
   "editEntryTitle": "删除分区",
   "editEntryBody": "删除不再需要的分区以腾出空间，例如Windows恢复分区或华为一键恢复分区。操作完成后返回此页选择安装方式。",
   "editTitle": "删除分区",
-  "editSub": "每次删除立即生效；删除前会将分区表备份至安装介质。如需压缩现有分区，请在Windows“磁盘管理”中使用“压缩卷”。",
+  "editSub": "每次删除立即生效；删除前会自动备份分区表。如需压缩现有分区，请在Windows“磁盘管理”中使用“压缩卷”。",
   "editFree": "未分配空间",
   "editPick": "请在左侧选择要删除的分区。",
   "editDelete": "删除",
@@ -146,7 +146,6 @@
       }
     }
   },
-  "rmLiveLogs": "删除前，日志与分区表备份将保存至EFI系统分区的gaokun3文件夹。",
   "rmLiveSub": "删除本机磁盘上的安装器分区。",
   "rmLiveOk": "安装器分区已删除。",
   "rmLiveOkMerge": "安装器分区已删除，/data分区已扩大至{size}。",
@@ -369,7 +368,7 @@
   "doneBody": "请拔出安装介质，重启设备后即可进入Android系统。",
   "failTitle": "安装未完成",
   "failSub": "磁盘写入中途出错，磁盘分区可能处于不完整状态。请勿立即重启进入原系统，建议先将下方运行日志保存至U盘或拍照留存。",
-  "failBackup": "修改磁盘前已备份原分区表（{path}）。如需恢复安装前的分区表，可在终端中执行“gk3l restore-table --file {path}”，然后重启设备。",
+  "failBackup": "修改磁盘前已备份原分区表（{path}）。备份仅保存在内存中，保存运行日志时会一并保存。如需恢复安装前的分区表，请在重启前于终端中执行“gk3l restore-table --file {path}”，然后重启设备。",
   "@failBackup": {
     "placeholders": {
       "path": {
@@ -617,7 +616,6 @@
   "errWipeMedium": "安装器正在从此磁盘运行，无法清除整个磁盘。",
   "errLiveMissing": "此磁盘上未找到已载入内存的安装器分区。",
   "errLiveBusy": "安装器分区正在使用中，无法删除。",
-  "errLogsNotKept": "无法将日志保存至EFI系统分区，安装器分区未删除。",
   "errWipeMounted": "目标磁盘上仍有处于挂载状态的分区（{mounts}），无法清除磁盘。",
   "@errWipeMounted": {
     "placeholders": {
@@ -850,9 +848,9 @@
   "riskWinBody": "安装过程将在共用的EFI系统分区中安装启动管理器（systemd-boot），并替换默认引导文件（BOOTAA64.EFI，原文件将自动备份）。若Windows开启了BitLocker或“设备加密”，下次启动Windows时可能要求输入48位恢复密钥；若无恢复密钥，将无法进入Windows或读取其中的数据。继续前请访问https://aka.ms/myrecoverykey确认可获取对应的恢复密钥。",
   "riskWinBitlocker": "检测到此磁盘上存在BitLocker加密分区，稍后在最终确认页需勾选确认已备妥恢复密钥。",
   "riskEditHead": "删除分区：其中的数据将立即无法访问",
-  "riskEditBody": "请在确认每个分区的用途后再操作：误删Windows所在分区将导致Windows无法启动。每次删除前都会将分区表备份至安装介质。",
+  "riskEditBody": "请在确认每个分区的用途后再操作：误删Windows所在分区将导致Windows无法启动。每次删除前都会自动备份分区表。",
   "riskRmLiveHead": "删除安装器分区：此后无法再从本机磁盘启动安装器",
-  "riskRmLiveBody": "安装器分区及其中的安装文件将被删除。删除后，如需再次运行安装器，请使用U盘或Windows安装器。删除前，日志与分区表备份将保存至EFI系统分区的gaokun3文件夹。",
+  "riskRmLiveBody": "安装器分区及其中的安装文件将被删除。删除后，如需再次运行安装器，请使用U盘或Windows安装器。",
   "riskBackupHead": "请提前将重要数据备份至其他设备",
   "riskBackupBody": "请将照片、文档、Windows个人文件及Android应用数据等重要资料备份至其他电脑、移动存储设备或云盘。保存在同一块磁盘其他分区中的数据同样面临风险，不能替代外部备份。如尚未备份，请点击“返回”并关机，完成备份后再继续。",
   "riskPowerHead": "全程保持连接电源",

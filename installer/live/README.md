@@ -18,7 +18,7 @@ testdata/         由真实后端在容器内录制的各场景输出fixture
 
 调用后端命令时，`live_backend.dart`以参数列表直接启动`gk3l <命令> <参数…>`（不经过shell），严禁将用户输入拼接进命令字符串。写入磁盘的命令（`apply`、`delete`、`remove-installer`）经`gk3l job run`放进独立的systemd临时单元运行，界面退出后写入照常完成。
 
-安装器从内置盘上的安装器分区运行（`gk3l probe`的介质分区带`ram=yes`，即initramfs已把它读进内存）时：清除整个磁盘保留该分区；选项页提供"保留安装器分区"，默认关闭，此时`apply`带`--remove-installer`，安装完成后删除该分区，与`/data`相邻时并入`/data`；Android已安装时，方式页另有"删除安装器分区"（`gk3l remove-installer`）。删除前日志与分区表备份保存至该盘ESP的`gaokun3/`。后端说明见[`installer/backend/src/linux/live.h`](../backend/src/linux/live.h)与`live.c`文件头。
+安装器从内置盘上的安装器分区运行（`gk3l probe`的介质分区带`ram=yes`，即initramfs已把它读进内存）时：清除整个磁盘保留该分区；选项页提供"保留安装器分区"，默认关闭，此时`apply`带`--remove-installer`，安装完成后删除该分区，与`/data`相邻时并入`/data`；Android已安装时，方式页另有"删除安装器分区"（`gk3l remove-installer`）。LiveCD不往介质和ESP写日志，日志与分区表备份只在内存里，安装失败时由用户另存。后端说明见[`installer/backend/src/linux/live.h`](../backend/src/linux/live.h)与`live.c`文件头。
 
 ## 二、本地开发与测试
 
@@ -61,4 +61,4 @@ SOAK=1 RENDERER=skia bash installer/tools/test/test-render.sh 600   # 持续渲�
 - `GK3_FIXTURE=<场景>`：使用内置fixture演示数据运行
 - `GK3_RENDERER=skia`：切换为Skia渲染后端（默认启用Impeller）
 - `GK3_WINDOWED=1`：窗口模式（默认在`cage -s`下无边框全屏运行）
-- `GK3_LANG=en|zh`：指定初始界面语言（真机默认从内核命令行`gk3.lang=`或介质上的`gaokun3/installer-lang`读取）
+- `GK3_LANG=en|zh`：指定初始界面语言（真机默认从内核命令行`gk3.lang=`读取；在安装器里切换过语言时，以记在`/run/gk3-installer/lang`中的为准）

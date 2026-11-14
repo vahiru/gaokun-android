@@ -1,7 +1,0 @@
-# 把启动诊断写回启动介质（没有串口、也没有网络的机器上，系统必须自己留证据）。逻辑与理由见脚本。
-[Unit]
-Description=gaokun3 boot diagnostics to the boot medium
-
-[Service]
-Type=oneshot
-ExecStart=/usr/lib/gaokun3/gk3-diag
