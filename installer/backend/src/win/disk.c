@@ -162,7 +162,7 @@ long gk3w_system_disk_number(void)
     return e.NumberOfDiskExtents == 1 ? (long)e.Extents[0].DiskNumber : -1;
 }
 
-static int disk_open_any(DWORD num, gk3w_disk *d, gk3w_touched t);
+static int disk_open_any(DWORD num, gk3w_disk *d, gk3w_touched t, int need_gpt);
 
 int gk3w_disk_open_vhd(DWORD num, gk3w_disk *d, gk3w_touched t)
 {
@@ -172,7 +172,7 @@ int gk3w_disk_open_vhd(DWORD num, gk3w_disk *d, gk3w_touched t)
     /* 先查类型、再以读写方式打开：真实磁盘连写句柄都不拿 */
     if (!gk3w_disk_is_vhd(num))
         return gk3w_err(t, "not-vhd", "this disk is not a VHD; writing a real disk requires --real-disk", 0), -1;
-    return disk_open_any(num, d, t);
+    return disk_open_any(num, d, t, 1);
 }
 
 int gk3w_disk_open(DWORD num, int real, gk3w_disk *d, gk3w_touched t)
@@ -186,10 +186,45 @@ int gk3w_disk_open(DWORD num, int real, gk3w_disk *d, gk3w_touched t)
     sys = gk3w_system_disk_number();
     if (sys < 0 || (DWORD)sys != num || gk3w_disk_is_vhd(num))
         return gk3w_err(t, "not-system-disk", "--real-disk only accepts the disk that holds Windows; this is not it", 0), -1;
-    return disk_open_any(num, d, t);
+    return disk_open_any(num, d, t, 1);
 }
 
-static int disk_open_any(DWORD num, gk3w_disk *d, gk3w_touched t)
+int gk3w_disk_is_usb(DWORD num)
+{
+    wchar_t path[40];
+    STORAGE_PROPERTY_QUERY q;
+    BYTE descbuf[512];
+    STORAGE_DEVICE_DESCRIPTOR *desc = (STORAGE_DEVICE_DESCRIPTOR *)descbuf;
+    DWORD got = 0;
+    HANDLE h;
+    int usb;
+    _snwprintf(path, 40, L"\\\\.\\PhysicalDrive%lu", (unsigned long)num);
+    h = CreateFileW(path, 0, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+    if (h == INVALID_HANDLE_VALUE)
+        return 0;
+    memset(&q, 0, sizeof q);
+    q.PropertyId = StorageDeviceProperty;
+    q.QueryType = PropertyStandardQuery;
+    memset(descbuf, 0, sizeof descbuf);
+    usb = DeviceIoControl(h, IOCTL_STORAGE_QUERY_PROPERTY, &q, sizeof q, descbuf, sizeof descbuf, &got, NULL) &&
+          (desc->BusType == BusTypeUsb || desc->RemovableMedia);
+    CloseHandle(h);
+    return usb;
+}
+
+int gk3w_disk_open_removable(DWORD num, gk3w_disk *d, gk3w_touched t)
+{
+    long sys = gk3w_system_disk_number();
+    memset(d, 0, sizeof *d);
+    d->num = num;
+    d->h = INVALID_HANDLE_VALUE;
+    /* 先查类型、再以读写方式打开：别的盘连写句柄都不拿 */
+    if ((sys >= 0 && (DWORD)sys == num) || !(gk3w_disk_is_usb(num) || gk3w_disk_is_vhd(num)))
+        return gk3w_err(t, "not-removable", "this disk is not a USB drive (and not a VHD); only those can be made into installation media", 0), -1;
+    return disk_open_any(num, d, t, 0);
+}
+
+static int disk_open_any(DWORD num, gk3w_disk *d, gk3w_touched t, int need_gpt)
 {
     wchar_t path[40];
     STORAGE_PROPERTY_QUERY q;
@@ -225,6 +260,8 @@ static int disk_open_any(DWORD num, gk3w_disk *d, gk3w_touched t)
         return gk3w_err(t, "disk-size", "cannot read the disk size", e), -1;
     }
     d->size = (uint64_t)li.Length.QuadPart;
+    if (!need_gpt)
+        return 0;
     if (gk3w_disk_read_layout(d) || d->lay->PartitionStyle != PARTITION_STYLE_GPT) {
         DWORD e = GetLastError();
         gk3w_disk_close(d);

@@ -24,6 +24,7 @@ int gk3w_cmd_dump(int argc, wchar_t **argv);
 int gk3w_cmd_esp_tree(int argc, wchar_t **argv);
 int gk3w_cmd_readpart(int argc, wchar_t **argv);
 int gk3w_cmd_uninstall(int argc, wchar_t **argv);
+int gk3w_cmd_media(int argc, wchar_t **argv);
 int gk3w_cmd_preflight(int argc, wchar_t **argv);
 int gk3w_cmd_plan(int argc, wchar_t **argv);
 int gk3w_cmd_hash(int argc, wchar_t **argv);
