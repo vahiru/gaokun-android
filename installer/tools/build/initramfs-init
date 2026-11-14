@@ -71,6 +71,17 @@ done
 # devtmpfs 已经把节点建好了；没有的话用 mdev 兜底
 [ -e /dev/null ] || /bin/busybox mdev -s
 
+# ★ port0（a600000.usb）在设备树里是dr_mode="otg"加usb-role-switch，本机的UCSI又不提供角色来源：无人切换时它一直
+#   处于device角色，xHCI不出现，Linux看不到插在这个口上的U盘（固件能从它启动，用的是UEFI自己的驱动）。
+#   Android里由USB端口HAL按对端切换；LiveCD里没有它，这里切到host（LiveCD只作主机使用，睡眠也已屏蔽）。
+#   角色开关随dwc3驱动注册，最多等待5秒。角色切换是异步的，U盘还要几秒才能枚举出来：没有别的介质时，后面的扫描
+#   会重扫到它出现；内置盘上另有一份squashfs（安装器分区GK3LIVE）时，第一遍扫描就会选中内置盘上那份
+ROLE=/sys/class/usb_role/a600000.usb-role-switch/role
+i=0; while [ ! -e "$ROLE" ] && [ $i -lt 10 ]; do sleep 0.5; i=$((i + 1)); done
+if [ -w "$ROLE" ]; then
+    if echo host > "$ROLE" 2>/dev/null; then say "USB port0 switched to host"; else say "warning: could not switch USB port0 to host"; fi
+fi
+
 say "looking for $SQUASH"
 
 MEDIA=
@@ -98,9 +109,9 @@ else
     # ★ 先试可移动介质（U 盘），再试内置盘。
     #   理由：插着 LiveCD 启动时，用户想要的是【U 盘上那一份】，
     #   而不是内置盘上可能很旧的那一份。
-    # 扫一遍没找到就等 2 秒再扫，最多 5 遍（理由见上面强制设备那一支）
+    # 扫一遍没找到就等2秒再扫，最多10遍（理由见上面强制设备那一支；port0刚切到host时，U盘要几秒才能枚举出来）
     tries=0
-    while [ -z "$MEDIA" ] && [ $tries -lt 5 ]; do
+    while [ -z "$MEDIA" ] && [ $tries -lt 10 ]; do
         [ $tries -gt 0 ] && { say "not found yet, scanning again in 2 seconds (pass $((tries + 1)))"; sleep 2; }
         for pass in removable fixed; do
             [ -n "$MEDIA" ] && break

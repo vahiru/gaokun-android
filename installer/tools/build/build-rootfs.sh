@@ -116,9 +116,9 @@ ch systemctl enable $UNITS >/dev/null 2>&1 || true
 # 污染"失败的单元"与 gk3-diag 的报告（installer/tools/test/test-boot-container.sh）
 ch systemctl mask apt-daily.timer apt-daily-upgrade.timer e2scrub_all.timer \
     nvmf-autoconnect.service nvmefc-boot-connections.service >/dev/null 2>&1 || true
-# 不许睡：live 里 a600000.usb 停在 role=device、没有 usbrole 守卫，挂起会整板复位
-#   （见 docs/dev/deep-sleep.md）—— 赶上写 super 就是一块坏盘。logind 的按键与合盖已经在
-#   overlay 的 logind.conf.d 里关了；这里把"睡"这条路本身堵上，谁来要都不行。体检逐个核对
+# 不许睡：live里没有Android那套usbrole守卫，挂起尚未经实测；initramfs把port0切到host失败时，a600000.usb停在role=device，
+#   这种状态下挂起会整板复位（见docs/dev/deep-sleep.md），赶上写super就是一块写了一半的盘。logind的按键与合盖已经在
+#   overlay的logind.conf.d里关了；这里把"睡"这条路本身堵上，谁来要都不行。体检逐个核对
 SLEEP_TARGETS="sleep.target suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target"
 # shellcheck disable=SC2086
 ch systemctl mask $SLEEP_TARGETS >/dev/null 2>&1 || true
