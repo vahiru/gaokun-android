@@ -4,12 +4,15 @@
  *   另存一份，带到电脑上附在问题报告里。
  *
  *   gk3l log-targets              能存日志的地方，一行一个（第一个是默认）：
- *     LOGTARGET part=/dev/sda1 fs=vfat size_mib=… label=… removable=yes|no medium=yes|no esp=yes|no
- *     只列 FAT / exFAT：不往 NTFS 写（Windows 休眠或快速启动时写它会损坏数据）。内置盘上的分区不列，除非它就是
- *     启动介质。顺序：另插的 U 盘 → 启动介质本身（esp=yes 的话电脑上不好读）。
+ *     LOGTARGET part=/dev/sda1 fs=vfat size_mib=… label=… removable=yes|no medium=yes|no esp=no
+ *     只列可移动盘上、Windows 会分配盘符的 FAT / exFAT 分区（GPT 的 Microsoft 基本数据分区，或 MBR 上不是 0xEF 的分区）：
+ *     日志要能在电脑上直接打开。不列 NTFS（Windows 休眠或快速启动时写它会损坏数据），不列 EFI 系统分区（dd 写入的
+ *     混合 ISO 上那一块：没有盘符，空间也只够放启动文件）与内置盘上的分区（GK3LIVE 是 XBOOTLDR 类型，同样没有盘符）。
+ *     顺序：另插的 U 盘 → 启动介质本身（文件拖进 FAT32 U 盘做成的介质）。
  *   gk3l save-logs [--to 分区|目录]  不给就用 log-targets 的第一个；给目录就直接写进去（测试用）。
  *     写一个 gaokun3-logs-<时间>/：界面日志、各 job 的输出、分区表备份、dmesg、本次启动的 journal、gk3l probe、
- *     /etc/gaokun3-release。stdout：LOGSAVED dir=… part=…|- files=N esp=yes|no
+ *     /etc/gaokun3-release。stdout：LOGSAVED dir=… part=…|- files=N esp=yes|no；有文件没写成（多半是空间不够）时
+ *     报 ERR code=logs-incomplete dir= failed=N，退出码 1。
  * 测试用：GK3_ALLOW_LOOP=1 时 loop 设备算可移动盘。 */
 #define _GNU_SOURCE
 #include <dirent.h>
@@ -31,13 +34,16 @@
 #include "lx.h"
 
 #define ESP_TYPE "c12a7328-f81f-11d2-ba4b-00a0c93ec93b"
+#define BASIC_DATA_TYPE "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7"
 
-/* blkid -p 的 PART_ENTRY_TYPE（小写） */
-static void part_type(const char *dev, char *out, size_t cap)
+/* blkid -p 的 PART_ENTRY_TYPE（小写；GPT 是 GUID，MBR 是 0x0c 这样的类型号）；scheme 可为 NULL */
+static void part_type2(const char *dev, char *out, size_t cap, char *scheme, size_t scap)
 {
     char buf[2048], *save = NULL;
     char *av[] = {"blkid", "-p", "-o", "udev", (char *)dev, NULL};
     out[0] = 0;
+    if (scheme)
+        scheme[0] = 0;
     if (gk3l_run(av, buf, sizeof buf) != 0)
         return;
     for (char *l = strtok_r(buf, "\n", &save); l; l = strtok_r(NULL, "\n", &save))
@@ -46,7 +52,24 @@ static void part_type(const char *dev, char *out, size_t cap)
             for (char *c = out; *c; c++)
                 if (*c >= 'A' && *c <= 'Z')
                     *c = (char)(*c + 32);
+        } else if (scheme && !strncmp(l, "ID_PART_ENTRY_SCHEME=", 21)) {
+            snprintf(scheme, scap, "%s", l + 21);
         }
+}
+
+static void part_type(const char *dev, char *out, size_t cap)
+{
+    part_type2(dev, out, cap, NULL, 0);
+}
+
+/* Windows 会给它分配盘符：GPT 上只有 Microsoft 基本数据分区，MBR 上除了 EFI 系统分区（0xEF）都会 */
+static int gets_drive_letter(const char *scheme, const char *type)
+{
+    if (!strcmp(scheme, "gpt"))
+        return !strcmp(type, BASIC_DATA_TYPE);
+    if (!strcmp(scheme, "dos"))
+        return strcmp(type, "0xef") != 0;
+    return 0;
 }
 
 static int removable(const char *disk)
@@ -84,21 +107,22 @@ static size_t list_targets(target *t, size_t cap)
         if (e->d_name[0] == '.' || !strncmp(e->d_name, "ram", 3) || !strncmp(e->d_name, "zram", 4) || !strncmp(e->d_name, "dm-", 3))
             continue;
         rem = removable(e->d_name);
+        /* 内置盘上的分区不当存日志的地方（见文件头） */
+        if (!rem)
+            continue;
         nk = gk3l_kernel_parts(e->d_name, kp, 64);
         for (size_t i = 0; i < nk && n < cap; i++) {
             target *x = &t[n];
             int med = medium[0] && !strcmp(kp[i].devno, medium);
-            char type[64];
-            /* 内置盘上的分区（ESP、Windows 的分区）不当存日志的地方 —— 除非它就是启动介质（免 U 盘时的 GK3LIVE） */
-            if (!rem && !med)
-                continue;
+            char type[64], scheme[16];
             memset(x, 0, sizeof *x);
             snprintf(x->part, sizeof x->part, "/dev/%.63s", kp[i].name);
             gk3l_blkid(x->part, x->fs, sizeof x->fs, x->label, sizeof x->label);
             if (strcmp(x->fs, "vfat") && strcmp(x->fs, "exfat"))
                 continue;
-            part_type(x->part, type, sizeof type);
-            x->esp = !strcmp(type, ESP_TYPE);
+            part_type2(x->part, type, sizeof type, scheme, sizeof scheme);
+            if (!gets_drive_letter(scheme, type))
+                continue;
             x->size_mib = kp[i].size512 / 2048;
             x->removable = rem;
             x->medium = med;
@@ -139,22 +163,35 @@ int gk3l_cmd_log_targets(int argc, char **argv)
     return 0;
 }
 
+/* 0：抄好了；1：源文件读不到（没有就跳过）；-1：写不进去（多半是空间不够，写了一半的删掉） */
 static int copy_file(const char *src, const char *dst)
 {
     uint8_t *b;
     size_t n;
-    int err = gk3l_read_file(src, &b, &n, 256u << 20);
-    if (err)
-        return err;
+    int err;
+    if (gk3l_read_file(src, &b, &n, 256u << 20))
+        return 1;
     err = gk3l_write_file(dst, b, n);
     free(b);
-    return err;
+    if (err) {
+        unlink(dst);
+        return -1;
+    }
+    return 0;
 }
 
-/* 跑一条命令，stdout 与 stderr 都进 dst */
+static void tally(int r, int *files, int *failed)
+{
+    if (!r)
+        (*files)++;
+    else if (r < 0)
+        (*failed)++;
+}
+
+/* 跑一条命令，stdout 与 stderr 都进 dst。0：写好了；1：命令起不来；-1：文件写不进去 */
 static int run_to(char *const av[], const char *dst)
 {
-    int fd = open(dst, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644), saved, r;
+    int fd = open(dst, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644), saved, r, synced;
     if (fd < 0)
         return -1;
     fflush(stdout);
@@ -165,8 +202,11 @@ static int run_to(char *const av[], const char *dst)
     fflush(stderr);
     dup2(saved, 2);
     close(saved);
+    synced = fsync(fd);
     close(fd);
-    return r < 0 ? -1 : 0;
+    if (synced)
+        return -1;
+    return r < 0 ? 1 : 0;
 }
 
 int gk3l_cmd_save_logs(int argc, char **argv)
@@ -174,7 +214,7 @@ int gk3l_cmd_save_logs(int argc, char **argv)
     const char *to = gk3l_arg(argc, argv, "--to"), *run = getenv("GK3_RUNDIR");
     static target t[64];
     char part[96] = "-", m[256] = "", dir[4096], p[4400], q[4500], ts[32], self[4096];
-    int own = 0, remount_ro = 0, esp = 0, files = 0, err;
+    int own = 0, remount_ro = 0, esp = 0, files = 0, failed = 0, err;
     time_t now = time(NULL);
     struct tm tmv;
     struct stat st;
@@ -234,8 +274,7 @@ int gk3l_cmd_save_logs(int argc, char **argv)
         };
         for (size_t i = 0; i < sizeof src / sizeof src[0]; i++) {
             snprintf(p, sizeof p, "%s/%s", dir, src[i][1]);
-            if (!copy_file(src[i][0], p))
-                files++;
+            tally(copy_file(src[i][0], p), &files, &failed);
         }
     }
     {
@@ -249,8 +288,7 @@ int gk3l_cmd_save_logs(int argc, char **argv)
                     continue;
                 snprintf(p, sizeof p, "%s/%s", run, e->d_name);
                 snprintf(q, sizeof q, "%s/%s", dir, e->d_name);
-                if (!copy_file(p, q))
-                    files++;
+                tally(copy_file(p, q), &files, &failed);
             }
             closedir(dd);
         }
@@ -265,8 +303,10 @@ int gk3l_cmd_save_logs(int argc, char **argv)
                 snprintf(jd, sizeof jd, "%s/jobs/%s", run, e->d_name);
                 snprintf(out, sizeof out, "%s/jobs/%s.log", dir, e->d_name);
                 f = fopen(out, "we");
-                if (!f)
+                if (!f) {
+                    failed++;
                     continue;
+                }
                 for (int s = 0; s < 4; s++) {
                     static const char *const nm[] = {"cmd", "rc", "out", "err"};
                     uint8_t *b;
@@ -278,8 +318,12 @@ int gk3l_cmd_save_logs(int argc, char **argv)
                         free(b);
                     }
                 }
-                fclose(f);
-                files++;
+                if (ferror(f) | fclose(f)) {
+                    unlink(out);
+                    failed++;
+                } else {
+                    files++;
+                }
             }
             closedir(dd);
         }
@@ -289,11 +333,9 @@ int gk3l_cmd_save_logs(int argc, char **argv)
         char *jr[] = {"journalctl", "-b", "--no-pager", "-n", "5000", NULL};
         ssize_t sn = readlink("/proc/self/exe", self, sizeof self - 1);
         snprintf(p, sizeof p, "%s/dmesg.txt", dir);
-        if (!run_to(dm, p))
-            files++;
+        tally(run_to(dm, p), &files, &failed);
         snprintf(p, sizeof p, "%s/journal.txt", dir);
-        if (!run_to(jr, p))
-            files++;
+        tally(run_to(jr, p), &files, &failed);
         if (sn > 0) {
             char *pr[] = {self, "probe", NULL};
             self[sn] = 0;
@@ -304,14 +346,25 @@ int gk3l_cmd_save_logs(int argc, char **argv)
                 if (fd >= 0) {
                     char buf[1 << 16];
                     int r = gk3l_run(pr, buf, sizeof buf);
-                    if (write(fd, buf, strlen(buf)) >= 0 && r >= 0)
+                    size_t len = strlen(buf);
+                    if (write(fd, buf, len) != (ssize_t)len || fsync(fd))
+                        failed++;
+                    else if (r >= 0)
                         files++;
                     close(fd);
+                } else {
+                    failed++;
                 }
             }
         }
     }
     sync();
+    /* 命令的输出（dmesg、journal）是子进程写的，写不下时它们不一定报错：分区写满了就算没存全 */
+    {
+        struct statvfs sv;
+        if (!failed && !statvfs(dir, &sv) && sv.f_bavail == 0)
+            failed++;
+    }
 done:
     if (own)
         gk3l_umount_tmp(m);
@@ -319,6 +372,12 @@ done:
         (void)mount(NULL, m, NULL, MS_REMOUNT | MS_RDONLY, NULL);
     if (files < 0)
         return gk3l_err_kv(GK3W_TOUCHED_NA, "logs-mkdir", "to", to, "cannot create a directory there (full?)", 0);
+    if (failed) {
+        char nf[16];
+        snprintf(nf, sizeof nf, "%d", failed);
+        return gk3l_err_kv2(GK3W_TOUCHED_NA, "logs-incomplete", "dir", dir + strlen(m) + 1, "failed", nf,
+                            "some files could not be written (out of space?); the logs are incomplete", 0);
+    }
     gk3w_line_begin(&l, "LOGSAVED");
     gk3w_line_kv(&l, "dir", dir + strlen(m) + 1);
     gk3w_line_kv(&l, "part", part);

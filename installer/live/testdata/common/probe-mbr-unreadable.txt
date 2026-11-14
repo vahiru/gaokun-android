@@ -1,5 +1,5 @@
 O DISK path=/dev/sda size_mib=7680 sector=512 physsector=512 model=? bus=usb removable=1 medium=yes table=gpt kernel=ok
-O PART path=/dev/sda1 disk=/dev/sda num=1 idx=1 start=2048 end=15728606 size_mib=7678 size_kib=7863279 type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B uuid=F56F994D-3CE5-4A3B-9F1A-2EB86597F16C attrs=0x0000000000000000 name=esp fs=vfat fslabel=GK3LIVE os=esp medium=yes
+O PART path=/dev/sda1 disk=/dev/sda num=1 idx=1 start=2048 end=15728606 size_mib=7678 size_kib=7863279 type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7 uuid=9FDB39F4-4198-4EC7-AF50-07F70EF54207 attrs=0x0000000000000000 name=Basic%20data%20partition fs=vfat fslabel=GK3LIVE os=fat medium=yes
 O DISK path=/dev/nvme0n1 size_mib=30720 sector=512 physsector=512 model=? bus=nvme removable=0 medium=no table=mbr
 O DISK path=/dev/sdb size_mib=20480 sector=512 physsector=512 model=? bus=usb removable=0 medium=no table=unreadable
 E ERR code=disk-unreadable disk=/dev/sdb

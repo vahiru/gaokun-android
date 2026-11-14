@@ -715,8 +715,6 @@
       }
     }
   },
-  "logsSavedEsp": "该分区为安装介质的EFI系统分区，Windows与macOS默认不显示其盘符，建议另插U盘再保存一份。",
-  "logsEspNote": "安装介质自身（EFI系统分区，常规系统下默认隐藏）",
   "runResumeTitle": "正在继续写入磁盘",
   "runResumeSub": "安装器界面重新启动后已重新连接至后台安装进程。完成前请勿关机或断开电源。",
   "errJobStart": "无法启动后台安装进程（systemd-run / setsid调用失败）。",
@@ -754,6 +752,14 @@
     }
   },
   "errLogsMkdir": "无法在目标分区创建日志目录，请检查剩余空间是否充足。",
+  "errLogsIncomplete": "日志未能完整保存：{count}个文件写入失败。请检查目标分区的剩余空间是否充足，或改用其他U盘。",
+  "@errLogsIncomplete": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
   "modeWhyEspTooSmall": "现有EFI系统分区总容量仅为{size} MiB，不足以在容纳Android引导文件的同时为Windows更新保留足够空间，当前不支持该分区布局。",
   "@modeWhyEspTooSmall": {
     "placeholders": {

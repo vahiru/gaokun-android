@@ -51,6 +51,7 @@ String errText(L10n l, Gk3Record e) {
     'logs-readonly' => l.errLogsReadonly(f('part')),
     'logs-mount' => l.errLogsMount(f('part')),
     'logs-mkdir' => l.errLogsMkdir,
+    'logs-incomplete' => l.errLogsIncomplete(f('failed')),
     // 安装前的把关与输入
     'wrong-model' => l.errWrongModel,
     'low-battery' => l.errLowBattery,

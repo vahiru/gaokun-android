@@ -87,17 +87,21 @@ grep -q '^PLAN op=mkpart' "$W/run/jobs/$ID/out" && [ -z "$(ls -A /media/gk3/gaok
 echo "═══ 5. log-targets / save-logs ═══"
 export GK3_ALLOW_LOOP=1
 umount /media/gk3; losetup -d "$MD"
+# 另插的 U 盘：FAT（Basic data）、NTFS、EFI 系统分区（FAT）、只有 2 MiB 的 FAT
 truncate -s 2G "$W/usb.img"; U=$(losetup -fP --show "$W/usb.img")
-sgdisk -o -n 1:2048:+500M -t 1:0700 -n 2:0:+500M -t 2:0700 "$U" >/dev/null; partprobe "$U"; sleep 1
+sgdisk -o -n 1:2048:+500M -t 1:0700 -n 2:0:+500M -t 2:0700 -n 3:0:+64M -t 3:ef00 -n 4:0:+2M -t 4:0700 "$U" >/dev/null
+partprobe "$U"; sleep 1
 mkfs.vfat -n USBLOGS "${U}p1" >/dev/null; mkntfs -Q -F "${U}p2" >/dev/null 2>&1
-# 启动介质：另一块盘上的 ESP 分区，挂在 /media/gk3
+mkfs.vfat -n EFIPART "${U}p3" >/dev/null; mkfs.vfat -n TINY "${U}p4" >/dev/null
+# 启动介质：拖放方式做的 FAT32 U 盘（Basic data），挂在 /media/gk3；另一块 dd 写入式的只读介质见 build-iso.sh
 truncate -s 2G "$W/boot.img"; BT=$(losetup -fP --show "$W/boot.img")
-sgdisk -o -n 1:2048:+500M -t 1:ef00 "$BT" >/dev/null; partprobe "$BT"; sleep 1; mkfs.vfat -n GK3LIVE "${BT}p1" >/dev/null
+sgdisk -o -n 1:2048:+500M -t 1:0700 "$BT" >/dev/null; partprobe "$BT"; sleep 1; mkfs.vfat -n GK3LIVE "${BT}p1" >/dev/null
 mount -o ro -t vfat "${BT}p1" /media/gk3
 T=$("$G" log-targets)
 printf '%s\n' "$T" | head -1 | grep -q "^LOGTARGET part=${U}p1 fs=vfat .*label=USBLOGS removable=yes medium=no esp=no" \
-    && ! printf '%s\n' "$T" | grep -q "part=${U}p2 " && printf '%s\n' "$T" | tail -1 | grep -q "part=${BT}p1 .*medium=yes esp=yes" \
-    && ok "U 盘的 FAT 分区排第一，NTFS 不列，启动介质排最后" || { bad "log-targets："; printf '%s\n' "$T"; }
+    && printf '%s\n' "$T" | grep -q "part=${U}p4 .*label=TINY" \
+    && ! printf '%s\n' "$T" | grep -q -e "part=${U}p2 " -e "part=${U}p3 " && printf '%s\n' "$T" | tail -1 | grep -q "part=${BT}p1 .*medium=yes esp=no" \
+    && ok "U 盘的 FAT 分区排第一，NTFS 与 EFI 系统分区不列，启动介质排最后" || { bad "log-targets："; printf '%s\n' "$T"; }
 S=$("$G" save-logs --to "${U}p1"); rc=$?
 mkdir -p "$W/chk"; mount -o ro "${U}p1" "$W/chk"
 D=$(field "$S" dir)
@@ -109,6 +113,12 @@ findmnt -rn -S "${U}p1" >/dev/null && bad "save-logs 自己挂的分区没卸下
 S=$("$G" save-logs --to "${U}p2" 2>"$W/s.err"); [ $? != 0 ] && grep -q '^ERR code=logs-not-fat' "$W/s.err" && ok "NTFS ⇒ logs-not-fat" || bad "NTFS：$S"
 mkdir -p "$W/dir"; S=$("$G" save-logs --to "$W/dir"); [ $? = 0 ] && [ -d "$W/dir/$(field "$S" dir)" ] && [ "$(field "$S" part)" = - ] && ok "存到目录：$S" || bad "存到目录：$S"
 S=$("$G" save-logs); [ $? = 0 ] && [ "$(field "$S" part)" = "${U}p1" ] && ok "不给 --to：用第一个（U 盘）" || bad "默认目标：$S"
+# 写不下：内存里放一份 4 MiB 的假分区表备份，存到只有 2 MiB 的分区
+head -c 4194304 /dev/urandom > "$W/run/gpt-before-fill.bin"
+S=$("$G" save-logs --to "${U}p4" 2>"$W/s.err"); rc=$?
+rm -f "$W/run/gpt-before-fill.bin"
+[ "$rc" = 1 ] && [ -z "$S" ] && grep -q '^ERR code=logs-incomplete .*failed=[1-9]' "$W/s.err" \
+    && ok "空间不够：ERR logs-incomplete（$(grep -o 'failed=[0-9]*' "$W/s.err")），不报 LOGSAVED" || { bad "空间不够：rc=$rc $S"; cat "$W/s.err"; }
 umount /media/gk3; losetup -d "$BT"; losetup -d "$U"
 
 echo

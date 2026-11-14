@@ -1,8 +1,8 @@
 E PROGRESS 10 gpt-backup
-E partition table backup: /run/gaokun3/gpt-before-delete-nvme0n1-20261114-081932-head34-tail33.bin (restore: dd the first 34 sectors to the start of /dev/nvme0n1 and the last 33 to its end, bs=512)
-E note: the backup is only in RAM (/run/gaokun3/gpt-before-delete-nvme0n1-20261114-081932-head34-tail33.bin) and is lost on reboot; saving the logs copies it as well
+E partition table backup: /run/gaokun3/gpt-before-delete-nvme0n1-20261114-120457-head34-tail33.bin (restore: dd the first 34 sectors to the start of /dev/nvme0n1 and the last 33 to its end, bs=512)
+E note: the backup is only in RAM (/run/gaokun3/gpt-before-delete-nvme0n1-20261114-120457-head34-tail33.bin) and is lost on reboot; saving the logs copies it as well
 E PROGRESS 50 part-delete part=/dev/nvme0n1p6
-O BACKUP path=/run/gaokun3/gpt-before-delete-nvme0n1-20261114-081932-head34-tail33.bin disk=/dev/nvme0n1 sector=512 head=34 tail=33 ram=yes
+O BACKUP path=/run/gaokun3/gpt-before-delete-nvme0n1-20261114-120457-head34-tail33.bin disk=/dev/nvme0n1 sector=512 head=34 tail=33 ram=yes
 E PROGRESS 100 done
 O RESULT op=delete part=/dev/nvme0n1p6
 X 0

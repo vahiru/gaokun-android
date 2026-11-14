@@ -1,2 +1,3 @@
+D 55
 O ESP part=/dev/nvme0n1p1 size_mib=300 free_mib=198 need_mib=150 windows=yes gaokun3=no mountable=yes small=no bootaa64=other bitlocker=no hibernated=no loader_default=unknown
 X 0

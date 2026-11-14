@@ -14,6 +14,7 @@ job status                                                                     j
 #  job_status-running.txt / job_follow-apply.txt：界面重新起来时 apply 还在跑（测试用 overrides 选它们）
 log-targets                                                                    log_targets.txt   # 录（假 U 盘挂在 /media/gk3）
 save-logs *                                                                    save_logs.txt   # 录（存到假 U 盘上）
+#  save_logs-incomplete.txt：存到只有 2 MiB 的 U 盘，日志存不全（界面测试用 overrides 选它）
 release-info                                                                   release_info.txt   # 录
 #  release_info-none.txt：介质里没有系统文件（界面测试用 overrides 选它）
 delete *                                                                       part_delete.txt   # 录（出厂布局的另一块盘上真做）

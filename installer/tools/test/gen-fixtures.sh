@@ -80,8 +80,9 @@ drop_disk() {
 }
 
 # ── 安装介质：一个假 U 盘挂在 /media/gk3，好让 gk3l probe 真的报出 medium=yes ────
+# 按拖放方式做的介质造：一个 Basic data 类型的 FAT32 分区（Windows 格式化 U 盘得到的就是普通数据分区）
 STICK=$(new_disk stick 7680M)
-sgdisk -o -n 1:2048:0 -t 1:ef00 -c 1:esp "$STICK" >/dev/null 2>&1; settle "$STICK"
+sgdisk -o -n 1:2048:0 -t 1:0700 -c 1:"Basic data partition" "$STICK" >/dev/null 2>&1; settle "$STICK"
 mkfs.vfat -F 32 -n GK3LIVE "${STICK}p1" >/dev/null
 mkdir -p /media/gk3 && mount "${STICK}p1" /media/gk3 && mkdir -p /media/gk3/gaokun3
 
@@ -371,7 +372,7 @@ X 0
 EOF
 cp "$OUT/blank/apply-wipe.txt" "$C/job_follow-apply.txt"
 echo "#  job_status-running.txt / job_follow-apply.txt：界面重新起来时 apply 还在跑（测试用 overrides 选它们）" >> "$C/index.txt"
-# 录：日志另存 —— 另插一个 FAT 的 U 盘（Basic data 类型，像普通 U 盘那样）+ 安装介质本身（ESP 类型，esp=yes）。
+# 录：日志另存 —— 另插一个 FAT 的 U 盘（Basic data 类型，像普通 U 盘那样）+ 安装介质本身（拖放方式做的 FAT32 U 盘）。
 # 只留这两块的行：容器里别的场景留下的 loop 盘（GK3_ALLOW_LOOP=1 下也算"可移动"）不是真机上会有的东西
 U2=$(new_disk usb2 1G); sgdisk -o -n 1:2048:0 -t 1:0700 -c 1:"Basic data partition" "$U2" >/dev/null 2>&1; settle "$U2"
 mkfs.vfat -F 32 -n KINGSTON "${U2}p1" >/dev/null
@@ -382,6 +383,15 @@ printf '%-78s %s\n' "log-targets" "log_targets.txt   # 录（假 U 盘挂在 /me
 python3 installer/tools/test/record-fixture.py "$C/save_logs.txt" --sub "${STICK}p=/dev/sda" \
     -- bash -c "$G save-logs --to ${STICK}p1"
 printf '%-78s %s\n' "save-logs *" "save_logs.txt   # 录（存到假 U 盘上）" >> "$C/index.txt"
+# 录：日志存不全 —— 另一块只有 2 MiB 的 FAT U 盘，内存里放一份 4 MiB 的假分区表备份把它写满
+U3=$(new_disk usb3 64M); sgdisk -o -n 1:2048:+2M -t 1:0700 -c 1:"Basic data partition" "$U3" >/dev/null 2>&1; settle "$U3"
+mkfs.vfat -n TINY "${U3}p1" >/dev/null
+mkdir -p "$GK3_RUNDIR"; head -c 4194304 /dev/urandom > "$GK3_RUNDIR/gpt-before-fill.bin"
+python3 installer/tools/test/record-fixture.py "$C/save_logs-incomplete.txt" --sub "${U3}p=/dev/sdc" \
+    --sub "$W/run=/run/gaokun3" --sub "$W=/tmp" -- bash -c "$G save-logs --to ${U3}p1"
+rm -f "$GK3_RUNDIR/gpt-before-fill.bin"
+drop_disk "$U3"
+echo "#  save_logs-incomplete.txt：存到只有 2 MiB 的 U 盘，日志存不全（界面测试用 overrides 选它）" >> "$C/index.txt"
 # 录：安装介质里带了什么
 python3 installer/tools/test/record-fixture.py "$C/release_info.txt" --sub "$REL=/media/gk3/gaokun3/payload" \
     -- bash -c "$G release-info --dir $REL"

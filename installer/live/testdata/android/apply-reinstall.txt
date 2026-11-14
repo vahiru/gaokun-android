@@ -6,6 +6,7 @@ E   Image           300002 bytes
 E   ramdisk.img     123457 bytes
 E   gaokun3.dtb      20005 bytes
 E PROGRESS 1 test-zst
+D 74
 E super.img.zst: full test decode passed
 E ESP: using directory 0123456789abcdef0123456789abcdef; 0 MiB to write (net of files overwritten), 298 MiB free; Windows boot manager present: no
 E PROGRESS 2 plan
@@ -19,14 +20,14 @@ O PLANSUM mode=reinstall keep_data=no avail_mib=488084 fixed_mib=12452 userdata_
 E reinstall: the partition table is not changed; reusing the existing 6 partitions
 E PROGRESS 15 format
 E misc: MISCINIT slot=a default=none bcab=5f61000042434142010200006f0000000000000000000000000000000ad6c368
-D 138
+D 269
 E metadata, userdata: ext4 created (superblock magic and label read back from the disk)
 E PROGRESS 30 write-super
 E PROGRESS 32 write-super done_mib=4 total_mib=12288
 E PROGRESS 34 write-super done_mib=8 total_mib=12288
 E PROGRESS 37 write-super done_mib=12 total_mib=12288
 E PROGRESS 39 write-super done_mib=16 total_mib=12288
-D 826
+D 848
 E PROGRESS 42 write-super done_mib=903 total_mib=12288
 E PROGRESS 44 write-super done_mib=907 total_mib=12288
 E PROGRESS 47 write-super done_mib=911 total_mib=12288

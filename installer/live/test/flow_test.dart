@@ -588,16 +588,24 @@ void main() {
     await see(t, find.text(l.failTitle));
   }
 
-  testWidgets('失败页"保存日志"：列出能存的地方（启动介质标出"电脑上看不到"），存完说存到哪（GUI-12）', (t) async {
+  testWidgets('失败页"保存日志"：列出能存的地方（另插的 U 盘在前、启动介质在后），存完说存到哪（GUI-12）', (t) async {
     final rec = await pumpApp(t, 'blank', failApply: true);
     await failWipe(t);
     await tap(t, find.text(l.logsSave));
     await see(t, find.text(l.logsTitle));
-    await see(t, find.text(l.logsEspNote));
     await see(t, find.textContaining('KINGSTON'));   // 另插的 U 盘排在前面（gk3l log-targets 的顺序）
     await tap(t, find.textContaining('GK3LIVE'));
-    await see(t, find.textContaining(l.logsSavedEsp));
+    await see(t, find.textContaining('gaokun3-logs-'));
     expect(rec.last('save-logs'), ['save-logs', '--to', '/dev/sda1']);
+  });
+
+  testWidgets('保存日志：空间不够、没存全 → 如实说，不说"已保存"', (t) async {
+    await pumpApp(t, 'blank', failApply: true, overrides: {'save-logs': 'save_logs-incomplete.txt'});
+    await failWipe(t);
+    await tap(t, find.text(l.logsSave));
+    await tap(t, find.textContaining('KINGSTON'));
+    await see(t, find.textContaining(l.errLogsIncomplete('#').split('#').first));
+    expect(find.textContaining('gaokun3-logs-'), findsNothing);
   });
 
   testWidgets('保存日志：没有能存的地方 → 叫人插 U 盘、能重新查找', (t) async {

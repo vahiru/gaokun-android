@@ -1,7 +1,7 @@
 // "保存日志"（v1.0 计划 GUI-12 的前端）：失败页上的一个按钮。
 //
 // LiveCD 不自动保存日志（只在内存里，见 installer/backend/src/linux/lx.h），装失败时要由用户存到电脑上读得到的地方。
-// 后端 gk3l log-targets 列出能写的 FAT / exFAT（另插的 U 盘在前、启动介质本身在后，EFI 分区标 esp=yes），
+// 后端 gk3l log-targets 列出可移动盘上 Windows 会分配盘符的 FAT / exFAT 分区（另插的 U 盘在前、启动介质本身在后），
 // gk3l save-logs --to <分区> 写一个 gaokun3-logs-<时间>/。这里只是让人挑一个、告诉人存到哪了。
 import 'package:flutter/material.dart';
 import 'package:gk3_common/backend/backend.dart';
@@ -57,7 +57,7 @@ class _SaveLogsDialogState extends State<SaveLogsDialog> {
       _busy = false;
       final saved = r.first('LOGSAVED');
       if (r.ok && saved != null) {
-        _result = [l.logsSaved(_name(t), saved['dir']), if (saved.yes('esp')) l.logsSavedEsp].join('\n');
+        _result = l.logsSaved(_name(t), saved['dir']);
       } else {
         _error = callErrorText(l, r);
       }
@@ -86,7 +86,6 @@ class _SaveLogsDialogState extends State<SaveLogsDialog> {
             icon: t.yes('removable') && !t.yes('medium') ? Icons.usb : Icons.sd_storage,
             title: _name(t),
             body: t['part'],
-            note: t.yes('esp') ? l.logsEspNote : null,
             dense: true,
             onTap: () => _save(t),
           ),
