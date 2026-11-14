@@ -44,6 +44,7 @@ bash installer/tools/build/build-live.sh --release <发布目录> --firmware <�
 # 需要root、loop设备与分区工具的测试，在容器里运行（环境见test-env.Dockerfile）：
 bash installer/tools/test/test-in-container.sh installer/backend/test/linux/test-apply.sh   # gk3l的其余容器测试同在该目录
 bash installer/tools/test/test-in-container.sh installer/tools/test/test-initramfs.sh            # initramfs读进内存与介质记录
+bash installer/tools/test/test-in-container.sh installer/backend/test/test-media.sh             # 制作安装介质用的ISO读取与FAT32写入
 bash installer/tools/test/test-in-container.sh installer/tools/test/gen-fixtures.sh              # 用真实的gk3l录制图形安装器的测试数据
 
 bash installer/tools/test/test-boot-container.sh   # 以systemd为PID 1启动构建好的squashfs，检查各单元

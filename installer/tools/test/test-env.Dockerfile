@@ -14,8 +14,9 @@ FROM debian@sha256:9cc080028c43b27d2074d63a5f9caf7166d731494965616c1a6d2827a0045
 #   python3 mtools udev(udevadm)        —— 测试里的检查脚本 / FAT / 等分区节点
 #   dmsetup                             —— 造读盘出错的盘（dm-error，installer/backend/test/linux/test-probe.sh）
 #   gcc libc6-dev                       —— 测试里现编 gk3l（installer/backend/linux/build.sh）
+#   xorriso                             —— 造 ISO、对照 ISO 读取（installer/backend/test/test-media.sh）
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       gdisk fdisk parted e2fsprogs dosfstools ntfs-3g \
-      android-sdk-libsparse-utils zstd python3 mtools udev util-linux gcc libc6-dev dmsetup \
+      android-sdk-libsparse-utils zstd python3 mtools udev util-linux gcc libc6-dev dmsetup xorriso \
  && rm -rf /var/lib/apt/lists/*
