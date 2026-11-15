@@ -15,10 +15,14 @@ set -euo pipefail
 
 # ---- 钉死的上游 ----------------------------------------------------------
 SUITE=trixie
-# ★ 可复现：GK3_SNAPSHOT=20260925T000000Z 用 snapshot.debian.org 上那一刻的归档
-#   （慢，但"昨天好的今天坏了"时能把变量压到只剩代码）。默认走 deb.debian.org，
-#   每次构建都把装了哪些包的哪个版本写进 packages-live.lock —— 两次构建之间 diff 它。
-if [ -n "${GK3_SNAPSHOT:-}" ]; then MIRROR=http://snapshot.debian.org/archive/debian/$GK3_SNAPSHOT
+# ★ 包的版本钉死：从 snapshot.debian.org 上 SNAPSHOT 那一刻的归档装，每次构建装的都是同一套包
+#   （装了哪些包的哪个版本写进 packages-live.lock）。其中 systemd-boot-efi 与 e2fsprogs 必须与 Windows 安装器
+#   带的相同（installer/backend/sdboot/fetch.sh、installer/backend/mke2fs/build.sh）：两个安装器往 ESP 上装同一个
+#   systemd-boot，格式化出同样的 ext4。换时间点要三处一起改，体检会核对。
+#   GK3_SNAPSHOT=<时间点> 换一个时间点；GK3_SNAPSHOT= （空）改从 deb.debian.org（或 GK3_DEBIAN_MIRROR）取当前版本，
+#   这两个包的版本一变，体检就不通过。
+SNAPSHOT=${GK3_SNAPSHOT-20261115T120000Z}
+if [ -n "$SNAPSHOT" ]; then MIRROR=http://snapshot.debian.org/archive/debian/$SNAPSHOT
 else MIRROR=${GK3_DEBIAN_MIRROR:-http://deb.debian.org/debian}; fi
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
@@ -162,6 +166,15 @@ if in_ch 'readlink -f /sbin/init | grep -q systemd'; then ok "/sbin/init → sys
 # gk3l 调用的外部工具（installer/backend/src/linux/）与终端排障用的
 for c in blkid lsblk findmnt dmesg journalctl systemd-run mkfs.ext4 e2fsck resize2fs mkfs.vfat udevadm sgdisk; do need_cmd "$c"; done
 need_path /usr/lib/systemd/boot/efi/systemd-bootaa64.efi   # gk3l 往目标机 ESP 上装的就是它
+# 与 Windows 安装器相同的 systemd-boot（逐字节）与 e2fsprogs（同一份源码），见开头 SNAPSHOT 的说明
+SD_WANT=$(sed -n 's/^EFI_SHA256=//p' "$REPO/installer/backend/sdboot/fetch.sh")
+SD_HAVE=$(sha256sum "$ROOTFS/usr/lib/systemd/boot/efi/systemd-bootaa64.efi" 2>/dev/null | cut -d' ' -f1 || true)
+if [ -n "$SD_WANT" ] && [ "$SD_HAVE" = "$SD_WANT" ]; then ok "systemd-bootaa64.efi 与 Windows 安装器的相同"
+else echo "   ✗ systemd-bootaa64.efi（${SD_HAVE:-无}）与 installer/backend/sdboot/fetch.sh 的 EFI_SHA256（${SD_WANT:-无}）不同"; BAD=1; fi
+E2_WANT="$(sed -n 's/^VER=//p' "$REPO/installer/backend/mke2fs/build.sh")-$(sed -n 's/^DEBREV=//p' "$REPO/installer/backend/mke2fs/build.sh")"
+E2_HAVE=$(chroot "$ROOTFS" dpkg-query -W -f='${source:Version}' e2fsprogs 2>/dev/null || true)
+if [ "$E2_HAVE" = "$E2_WANT" ]; then ok "e2fsprogs $E2_HAVE 与 Windows 安装器的 mke2fs 同一份源码"
+else echo "   ✗ e2fsprogs 的源码版本（${E2_HAVE:-无}）与 installer/backend/mke2fs/build.sh 的（$E2_WANT）不同"; BAD=1; fi
 need_path /usr/bin/busybox                                 # initramfs 用的静态 busybox
 need_path /usr/lib/gaokun3/gk3l
 # gk3l 在【目标】上真的能跑：版本号与一次纯计算的分区方案（静态链接，不看镜像的 libc）

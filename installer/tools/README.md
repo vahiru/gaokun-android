@@ -15,7 +15,7 @@ bash installer/tools/build/build-live.sh --release <发布目录> --firmware <�
 `--firmware`指向形如`/vendor/firmware`的目录（GPU的zap shader为华为专有固件，Debian中没有）。正式构建由GitHub Actions完成（[`.github/workflows/installer-livecd.yml`](../../.github/workflows/installer-livecd.yml)，推送`livecd-v*`标签触发），输入均按sha256固定。每次发布产出两个ISO：不带系统文件的`gaokun3-live-<版本>.iso`（用户自行放入系统文件，或由Windows安装器制作安装介质），以及带上所用ROM版本系统文件的`gaokun3-live-<版本>-android-<ROM标签>.iso`（整个写入U盘后也能直接安装）。
 
 `build-live.sh`在容器内依次执行：
-1. `build/build-rootfs.sh`：用`mmdebstrap`按[`pkgs.txt`](build/pkgs.txt)构建根文件系统，叠加`build/overlay/`，静态编译`gk3l`，放入图形安装器与GPU固件；打包`squashfs`前逐项检查（命令、单元是否启用、动态库能否解析、字体、freedreno）。所装软件包的版本记入[`packages-live.lock`](build/packages-live.lock)。
+1. `build/build-rootfs.sh`：用`mmdebstrap`按[`pkgs.txt`](build/pkgs.txt)从snapshot.debian.org的固定时间点构建根文件系统（其中systemd-boot与e2fsprogs与Windows安装器带的版本相同），叠加`build/overlay/`，静态编译`gk3l`，放入图形安装器与GPU固件；打包`squashfs`前逐项检查（命令、单元是否启用、动态库能否解析、字体、freedreno，以及systemd-boot与e2fsprogs是否与Windows安装器的一致）。所装软件包的版本记入[`packages-live.lock`](build/packages-live.lock)。
 2. `build/build-initramfs.sh`：静态`busybox`加[`initramfs-init`](build/initramfs-init)，生成`initramfs.img`。
 3. `build/gk3-bootimg.py`：从Android的`boot.img`拆出共用的内核`Image`、`gaokun3.dtb`与内核参数。
 4. `build/build-iso.sh`：组装混合ISO。ISO9660文件树（Rock Ridge加Joliet）是U盘的完整内容，可以在Windows中打开ISO，把`EFI`、`loader`、`gaokun3`三个目录拖进格式化为FAT32的U盘；附加的EFI系统分区装着除`live.squashfs`以外的启动文件，ISO整个写入U盘后固件从它启动，initramfs再从ISO9660分区读取`live.squashfs`。后一种用法要求内核开启`CONFIG_ISO9660_FS`，构建时从`boot.img`中提取内核配置检查，未开启时拒绝构建（测试构建可加`--allow-no-iso9660`）。

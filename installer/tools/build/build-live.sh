@@ -13,7 +13,8 @@
 #   --payload   另出一个 ISO，把 --release 目录整个放进它的 gaokun3/payload/：安装器直接从它装，dd 写入后也能安装
 #   --allow-no-iso9660  boot.img 的内核没有开启 CONFIG_ISO9660_FS 时照样构建（测试用；dd 写入的 ISO 找不到 squashfs，
 #               只有拖放方式可用，见 build-iso.sh）
-#   换源：GK3_DEBIAN_MIRROR=http://mirrors.ustc.edu.cn/debian；可复现：GK3_SNAPSHOT=20260925T000000Z（透传给 build-rootfs.sh）
+#   Debian 的包默认钉在 build-rootfs.sh 的 SNAPSHOT 时间点；GK3_SNAPSHOT=<时间点> 换一个，GK3_SNAPSHOT= （空）改取当前版本，
+#   此时可用 GK3_DEBIAN_MIRROR=http://mirrors.ustc.edu.cn/debian 换源（都透传给 build-rootfs.sh）
 #
 # 产物 → out/live/：gaokun3-live.squashfs · initramfs.img · gaokun3-live.iso · [gaokun3-live-payload.iso] · packages-live.lock · release.txt
 # packages-live.lock 另拷一份到 installer/tools/build/ —— 入库，两次构建之间 diff 它就知道变了什么。
@@ -67,7 +68,7 @@ echo "   安装器 $GK3_VERSION · git $GK3_GIT · 内核来自 boot.img ${GK3_B
 say "在容器里构建"
 docker run --rm --privileged "${MOUNTS[@]}" -e PAYLOAD="$PAYLOAD" -e ALLOW_NO_ISO="$ALLOW_NO_ISO" \
     -e GK3_VERSION="$GK3_VERSION" -e GK3_GIT="$GK3_GIT" -e GK3_BOOTSHA="$GK3_BOOTSHA" -e GK3_BUILT="$GK3_BUILT" \
-    ${GK3_DEBIAN_MIRROR:+-e GK3_DEBIAN_MIRROR="$GK3_DEBIAN_MIRROR"} ${GK3_SNAPSHOT:+-e GK3_SNAPSHOT="$GK3_SNAPSHOT"} \
+    ${GK3_DEBIAN_MIRROR:+-e GK3_DEBIAN_MIRROR="$GK3_DEBIAN_MIRROR"} ${GK3_SNAPSHOT+-e GK3_SNAPSHOT="$GK3_SNAPSHOT"} \
     "$TAG" bash -euo pipefail -c '
     O=/build/out; mkdir -p $O /build/boot
     # 仓库只读挂进来；构建脚本按自己所在目录找 overlay 与清单，所以拷一份可写的

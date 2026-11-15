@@ -18,6 +18,8 @@
 #   - GPU 固件（cage 要 GPU；zap shader 是华为专有的，Debian 的固件包里没有，见 build-rootfs.sh 的 GPU_FW）：
 #     KawaiiHachimi/linux-gaokun-buildbot 的固定提交，三个文件与 ROM 的 /vendor/firmware 里的逐字节相同
 #   - Flutter、Debian 基础镜像由 installer/tools/build/ 的 Dockerfile 钉死；字体由 installer/common/tool/fetch-fonts.py 按 sha256 下载
+#   - live 系统里的 Debian 包：build-rootfs.sh 从 snapshot.debian.org 的固定时间点安装（其中 systemd-boot 与 e2fsprogs
+#     与 Windows 安装器带的相同，体检核对）
 name: LiveCD
 
 on:
