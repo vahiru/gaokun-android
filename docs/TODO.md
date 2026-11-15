@@ -20,6 +20,7 @@
 下面这些代码已经合入，但效果尚未经完整实测。如果你有这台机器，欢迎挑一项测试，并在issue里报告结果，无论成功与否。
 
 - **BOE和CSOT屏幕自动识别**（#58）：在CSOT屏的机器上确认开机日志里是`panel ID pins: 0 0`，画面正常。
+- **2022款机器上的前后摄方向**（#83）：确认2022款机器上前后摄取景与成片方向正确。
 - **带麦克风的有线耳机录音**：确认插入3.5 mm四段式耳机后，`Wired Headset Mic`正常录音。
 - **传感器DSP崩溃后的自动恢复**：触发一次SLPI恢复，确认`gaokun3_sscrecover`在约60秒内恢复加速度计与自动旋转。
 - **fastboot执行端**：用电源键确认的操作和刷写功能。
@@ -41,9 +42,8 @@
 
 ## 四、功能开发
 
-- **指纹**：驱动和HAL已由[PR #92](https://github.com/vahiru/gaokun-android/pull/92)合入并随镜像构建，支持FocalTech和Goodix两种传感器；FocalTech的`matchScale`尚未用真实手指测量，匹配效果还需要改进。
 - **蓝牙通话**（[issue #107](https://github.com/vahiru/gaokun-android/issues/107)）：音频策略里没有蓝牙SCO通路，蓝牙耳机的麦克风在通话中无法使用。
-- **相机**（[issue #108](https://github.com/vahiru/gaokun-android/issues/108)）：变焦和曝光补偿；软件ISP降噪；闪光灯照片负向曝光补偿；手电筒亮度档位；libcamera补丁和传感器参数提交到上游。
+- **相机**（[issue #108](https://github.com/vahiru/gaokun-android/issues/108)）：闪光灯照片负向曝光补偿；手电筒亮度档位；libcamera补丁和传感器参数提交到上游。
 - **按网络随机的Wi-Fi MAC地址**：需要同时做一次性迁移，避免老网络的设置突然生效。
 - **GPU最高优先级的权限检查**：目前内核和Turnip都不检查调用者权限。ROM里的ANGLE看到Turnip声明了REALTIME，就会让每个进程都用它，所以用OpenGL ES的游戏和SurfaceFlinger同在ring 0，享受不到抢占。可以参照panthor的`group_priority_permit()`：内核只允许带`CAP_SYS_NICE`的进程或DRM master使用最高一档ring；Turnip在初始化时试建一个最高优先级的队列，建不成就不声明REALTIME。不能让队列创建直接失败，因为ROM的ANGLE遇到`VK_ERROR_NOT_PERMITTED`不会降级重试，GLES应用会无法启动。动手之前先确认两点：SurfaceFlinger在本ROM上带有`CAP_SYS_NICE`；常玩的GLES游戏在现有内核上确实有合成掉帧。代价是SystemUI等界面也会落到ring 2，游戏在前台时下拉通知栏，动画可能变卡。背景见[`dev/gpu-turnip.md`](dev/gpu-turnip.md)的“GPU抢占”一节。
 - **120 Hz无缝降频**
@@ -51,7 +51,6 @@
 - **在设置里显示Android ID**，方便用户自己登记Google认证
 - **收紧SELinux策略**：rproc-kick、hexagonrpcd、bootctl的规则收窄；做一个vendor版的tinymix，让audioroute不再需要`vendor_executes_system_violators`。
 - **统一启动入口的后续**：不再依赖ESP上的派生文件；AVB校验。
-- **开启Secure Boot安装**：借用发行版带微软签名的arm64 shim，由用户在首次开机时登记本项目的密钥（MOK），再用这把密钥给systemd-boot、gk3boot和内核签名，这样安装时就不必关闭Secure Boot，双系统时BitLocker也不会要求输入恢复密钥。第一步是读取固件的`db`变量，确认其中是否有微软第三方UEFI CA（2011或2023版），以及BIOS中是否有相关开关。其他需要确认的问题：Secure Boot开启时systemd-boot能否加载单独的设备树，或者是否需要改用统一内核镜像（UKI）；Windows更新推送的SBAT吊销规则会使旧shim失效，附带的shim需要持续更新。这项改动不能让Play Integrity通过；要真正提高安全性，还需要dm-verity、救援系统的登录限制等配合。
 - **otapreopt**
 
 ## 五、维护者事项

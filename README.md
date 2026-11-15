@@ -7,7 +7,7 @@ Unofficial port of crDroid 13 for Huawei MateBook E Go (gaokun3).
 <p align="center">
   <a href="https://t.me/gaokunAndroid"><img alt="Telegram channel: gaokunAndroid" src="https://img.shields.io/badge/Telegram-gaokunAndroid-26A5E4?logo=telegram&logoColor=white"></a>
   <a href="https://qm.qq.com/q/3VIV2KY6o0"><img alt="QQ group: 920133252" src="https://img.shields.io/badge/QQ%20Group-920133252-12B7F5?logo=qq&logoColor=white"></a>
-  <a href="https://github.com/vahiru/gaokun-android/releases/tag/v1.0.0-rc.3"><img alt="Latest release: 1.0.0-rc.3" src="https://img.shields.io/badge/Latest-1.0.0--rc.3-yellow"></a>
+  <a href="https://github.com/vahiru/gaokun-android/releases/tag/v1.0.0-rc.4"><img alt="Latest release: 1.0.0-rc.4" src="https://img.shields.io/badge/Latest-1.0.0--rc.4-yellow"></a>
 </p>
 
 ## Status
@@ -46,13 +46,13 @@ The table below shows how the main features work in the current version. See the
 | Games | ⚠️ | Genshin Impact runs smoothly at the highest settings, Arknights, Delta Force and others run; League of Legends: Wild Rift starts. **Playing games that come with ACE framework or other anti-cheat mechanisms on this system may get your account banned** |
 | Video playback | ✅ | Hardware decoding, including 10-bit and HDR video |
 | Video encoding | ⚠️ | H.264 and HEVC hardware encoding, used for camera recording; the built-in screen recorder still uses software encoding; only one stream at a time uses the hardware, and video processed after the screen turns off may come out incomplete |
-| Camera | ⚠️ | Uses a software ISP. Both cameras take photos and record video, the rear camera has autofocus; exposure compensation is not supported yet, dim scenes are noisy, and recording above 720p@30fps may crash the camera app |
+| Camera | ✅ | Hardware ISP; both cameras take photos, record up to 1080p video and support digital zoom and exposure compensation, and the rear camera supports autofocus |
 | USB-C | ⚠️ | File transfer and network sharing with a computer, USB flash drives and external displays work; occasionally the USB-C port does not work after a boot until a restart, the cause is still under investigation |
-| Fingerprint | ❌ | Not available yet; the driver and system service are under development |
+| Fingerprint | ⚠️ | Enrolment and screen unlock work (Goodix and FocalTech sensors); rated convenience class, fingerprint payment in apps is not available |
 | Location | ❌ | No GPS hardware, satellite positioning is not available |
 | TPM | ❌ | Not supported |
 | Video copy protection (DRM) | ❌ | Widevine is not included, paid streaming content such as Netflix does not play |
-| Root | ⚠️ | KernelSU is built in; some apps that detect root may refuse to run |
+| Root | ⚠️ | ReSukiSU is built into the kernel; apps that detect root may refuse to run |
 | Chinese input method | ✅ | fcitx5 is preinstalled |
 
 ## Hardware
@@ -68,7 +68,7 @@ The table below shows how the main features work in the current version. See the
 
 ## Installing
 
-Get the latest version from [**Releases**](https://github.com/vahiru/gaokun-android/releases); the full installation steps are in [`docs/INSTALL.md`](docs/INSTALL.md) (Chinese: [`docs/INSTALL.zh-CN.md`](docs/INSTALL.zh-CN.md)). **Secure Boot must be turned off** before installing.
+Get the latest version from [**Releases**](https://github.com/vahiru/gaokun-android/releases); the full installation steps are in [`docs/INSTALL.md`](docs/INSTALL.md) (Chinese: [`docs/INSTALL.zh-CN.md`](docs/INSTALL.zh-CN.md)). **Secure Boot must be disabled** before installing.
 
 There are two installers to choose from:
 
@@ -94,7 +94,7 @@ Default partition layout when the whole disk is erased:
 
 **Rescue system:** this machine has no working Android recovery, so the rescue system is the way to repair it when something goes wrong. It is a small Linux system, the same program as the graphical installer, so it can also reinstall Android, and it lives in its own 1 GiB partition. The graphical installer can install it as well (tick *Also install the rescue system*); the command-line installer installs it only when given the rescue system image.
 
-Every boot shows a 15-second boot menu, from which the rescue system can be started; the system does not switch to it on its own when Android hangs. When you need it, hold the power button to force a shutdown, then choose the rescue system in the menu on the next boot; choosing a menu entry needs the keyboard cover attached. To log in to the rescue system over the network (SSH), put your own SSH public key on the installer USB stick before installing; see the [installation guide](docs/INSTALL.md#rescue-system) for how.
+Every boot shows a 5-second boot menu, from which the rescue system can be started; the system does not switch to it on its own when Android hangs. When you need it, hold the power button to force a shutdown, then choose the rescue system in the menu on the next boot with the volume and power buttons (or the arrow keys and Enter on the keyboard cover). To log in to the rescue system over the network (SSH), put your own SSH public key on the installer USB stick before installing; see the [installation guide](docs/INSTALL.md#rescue-system) for how.
 
 **Downloads from mainland China:** when GitHub's download servers are slow or unreachable, the system images (`boot.img`, `super.img.zst`) can be downloaded from a mirror: `https://ota.072172.xyz/install/<build>/<file name>`, where `<build>` is the release's OTA package file name without `.zip`; see [`docs/INSTALL.md`](docs/INSTALL.md#downloads).
 
@@ -107,14 +107,14 @@ The table below lists the limitations to keep in mind in daily use. The full exp
 | Topic | What it means | What to do |
 |---|---|---|
 | Data encryption | The user data partition is not encrypted: anyone who has the machine can read all data on it, and the lock screen cannot stop that | Don't keep sensitive data on it; before selling or sending it in for repair, reinstall and wipe it with the graphical installer |
-| Root | KernelSU is built into the kernel and cannot be turned off; it stays dormant until the manager app is installed. Some apps that detect root may refuse to run; once adb root is enabled in the manager, any computer authorized for USB debugging gets root through adb | Don't enable adb root unless you need it; only authorize computers you trust, and turn USB debugging and wireless debugging off when not in use |
+| Root | ReSukiSU is built into the kernel and cannot be disabled; it stays dormant until the manager app is installed. Apps that detect root may refuse to run; once adb root is enabled in the manager, any computer authorized for USB debugging gets root through adb | Don't enable adb root unless you need it; only authorize computers you trust, and disable USB debugging and wireless debugging when not in use |
 | System signing | The system and its updates are signed with Android's public test keys, so anyone can build an update package or a system app this device will accept | Update only through System update in Settings or this project's release page, and don't install "system components" of unknown origin |
-| Boot security | Secure Boot must be off, the boot chain is unlocked, and system partitions are not integrity-checked | This is what running Android on this machine requires; there is no way around it |
+| Boot security | Secure Boot must be disabled, the boot chain is unlocked, and system partitions are not integrity-checked | This is what running Android on this machine requires; there is no way around it |
 | Factory reset | *Erase all data* in Settings has not been tested; don't rely on it | Wipe the device with the graphical installer's *Reinstall Android* |
 | Rolling back | Once a new version has booted successfully, the previous version is merged away and cannot be restored; major version updates also upgrade user data | Back up important data before updating |
 | Google certification | The device is not Play Protect certified, so the Play Store works properly only after you register it by hand; Play Integrity cannot pass, so apps that depend on it (Google Wallet, some banking apps) do not work | Register it once, following the [installation guide](docs/INSTALL.md#this-device-isnt-play-protect-certified) |
 | Use in mainland China | The system ships only Google apps and no Chinese app store; without access to Google, the Play Store, Google services and network location do not work | Download app packages from the apps' official sites or the web versions of app stores |
-| Kernel version | To pass some apps' environment checks, apps are told a disguised kernel version | From the next release, turn it off or change it in Settings → System → Kernel version spoofing |
+| Kernel version | To pass some apps' environment checks, apps are told a disguised kernel version | Turn it off or change it in Settings → System → Kernel version spoofing |
 | Audio and Bluetooth | Users have reported sound and Bluetooth both stopping after a long uptime; the cause is still under investigation | Restart to recover; when reporting it, attach `/data/vendor/gaokun3/hangdump-*` (reading it needs root) |
 | Connecting to a computer | With some computers, the tablet may end up powering the computer, and neither side sees the other | Unplug and plug in again, or use another port on the computer |
 | USB-C port | After plugging and unplugging devices (mostly after standby), the USB-C port may stop working until a restart | Restart; until then, use adb and file transfer over Wi-Fi |
@@ -149,7 +149,7 @@ This project is built on the work of many people. Our thanks go to:
 * **Mesa**, for the `freedreno` and `turnip` drivers.
 * **@mashen11**, for the microphones, the speaker enhancement and camera autofocus.
 * **@Rivarise**, for tuning and testing the stylus on CSOT panels.
-* **@dezige131**, for fixes to the graphical installer.
+* **@dezige131**, for the initial camera hardware ISP pixel-path implementation and fixes to the graphical installer.
 * Everyone who helped with testing.
 
 ## License
