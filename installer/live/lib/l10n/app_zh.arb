@@ -848,7 +848,7 @@
   "riskCheck": "我已备份重要数据，并了解上述操作可能造成不可逆的数据丢失",
   "riskWord": "ERASE",
   "@riskWord": {
-    "description": "确认词。必须为纯ASCII字符：LiveCD环境未内置中文输入法，屏幕键盘与实体键盘均仅支持输入ASCII字符。"
+    "description": "确认词。必须为纯ASCII字符：Live安装器未内置中文输入法，屏幕键盘与实体键盘均仅支持输入ASCII字符。"
   },
   "riskWordPrompt": "此操作将清除磁盘上的现有系统或用户数据。请在下方输入“{word}”（不区分大小写）以确认：",
   "@riskWordPrompt": {

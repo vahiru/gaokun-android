@@ -16,8 +16,8 @@ body:
     attributes:
       label: How you installed or updated / 安装或更新方式
       options:
-        - LiveCD from a USB drive / LiveCD，从U盘启动
-        - LiveCD from the installer partition on the system disk / LiveCD，从系统磁盘上的安装器分区启动
+        - Live installer from a USB drive / Live安装器，从U盘启动
+        - Live installer from the installer partition on the system disk / Live安装器，从系统磁盘上的安装器分区启动
         - Windows installer / Windows安装器
         - System update in Settings / 设置中的系统更新
         - Other / 其他
@@ -61,7 +61,7 @@ body:
       options:
         - Android, with adb / Android，可以使用adb
         - Windows / Windows
-        - Only the LiveCD / 只有LiveCD
+        - Only the Live installer / 只有Live安装器
         - Nothing / 都进不去
     validations:
       required: true
@@ -95,8 +95,8 @@ body:
     attributes:
       label: Diagnostic files / 诊断文件
       description: |
-        LiveCD: select "Save logs" in the installer to save them to a USB drive, in a folder named `gaokun3-logs-<time>`. Windows installer: the logs are in `%ProgramData%\gaokun3\logs`. Please check the files for personal information before attaching them. The [FAQ](https://github.com/vahiru/gaokun-android/blob/main/docs/FAQ.md) describes how to collect more information.
-        LiveCD：在安装器中选择“保存日志”，日志将保存到U盘上名为`gaokun3-logs-<时间>`的文件夹中。Windows安装器：日志位于`%ProgramData%\gaokun3\logs`。上传附件前，请检查其中是否包含个人信息。更多收集方法见[常见问题](https://github.com/vahiru/gaokun-android/blob/main/docs/FAQ.zh-CN.md)。
+        Live installer: select "Save logs" in the installer to save them to a USB drive, in a folder named `gaokun3-logs-<time>`. Windows installer: the logs are in `%ProgramData%\gaokun3\logs`. Please check the files for personal information before attaching them. The [FAQ](https://github.com/vahiru/gaokun-android/blob/main/docs/FAQ.md) describes how to collect more information.
+        Live安装器：在安装器中选择“保存日志”，日志将保存到U盘上名为`gaokun3-logs-<时间>`的文件夹中。Windows安装器：日志位于`%ProgramData%\gaokun3\logs`。上传附件前，请检查其中是否包含个人信息。更多收集方法见[常见问题](https://github.com/vahiru/gaokun-android/blob/main/docs/FAQ.zh-CN.md)。
 
   - type: textarea
     id: extra

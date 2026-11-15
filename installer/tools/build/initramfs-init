@@ -35,7 +35,7 @@ TORAM=1
 say()  { echo "[gk3] $*"; }
 fail() {
     echo
-    echo "============= gaokun3 LiveCD: boot failed ============="
+    echo "========= gaokun3 live installer: boot failed ========="
     echo "Reason: $*"
     echo
     echo "Known block devices:"

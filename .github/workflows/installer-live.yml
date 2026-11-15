@@ -3,12 +3,12 @@
 # FAT32 U 盘，也可整个写入 U 盘）：
 #   - gaokun3-live-<版本>.iso：不带 Android 的系统文件（gaokun3/payload/ 由用户另行放入，或由 Windows 安装器制作安装介质时写入）
 #   - gaokun3-live-<版本>-android-<ROM 标签>.iso：带上下面那个 ROM 发布的系统文件（约 1.5 GB），整个写入 U 盘后也能直接安装。
-#     发布构建都出；测试构建只在标签以 -payload 结尾（livecd-test-<任意>-payload）或手动运行勾选 payload 时出
+#     发布构建都出；测试构建只在标签以 -payload 结尾（live-installer-test-<任意>-payload）或手动运行勾选 payload 时出
 #
 # 什么时候跑（不随每次推送跑）：
-#   - 推送 livecd-vX.Y.Z[-pre] 标签：发布构建，打包后建一个【草稿】Release，维护者改好说明再发布（不设为最新版本）
+#   - 推送 live-installer-vX.Y.Z[-pre] 标签：发布构建，打包后建一个【草稿】Release，维护者改好说明再发布（不设为最新版本）
 #   - 手动（Actions 页面的 Run workflow，可选分支）：测试构建，产物是 Actions 的工件。GitHub 只列出默认分支上的
-#     工作流，这个文件还不在默认分支上时，改推一个 livecd-test-<任意> 标签：同样是测试构建，不建 Release
+#     工作流，这个文件还不在默认分支上时，改推一个 live-installer-test-<任意> 标签：同样是测试构建，不建 Release
 #
 # 输入（都从公开来源取，按 sha256 钉死）：
 #   - 内核、dtb、内核参数：ROM 发布里的 boot.img（live 与 Android 共用同一个内核），默认取下面 ROM_TAG 那一版，
@@ -20,13 +20,13 @@
 #   - Flutter、Debian 基础镜像由 installer/tools/build/ 的 Dockerfile 钉死；字体由 installer/common/tool/fetch-fonts.py 按 sha256 下载
 #   - live 系统里的 Debian 包：build-rootfs.sh 从 snapshot.debian.org 的固定时间点安装（其中 systemd-boot 与 e2fsprogs
 #     与 Windows 安装器带的相同，体检核对）
-name: LiveCD
+name: Live installer
 
 on:
   push:
     tags:
-      - 'livecd-v*'
-      - 'livecd-test-*'
+      - 'live-installer-v*'
+      - 'live-installer-test-*'
   workflow_dispatch:
     inputs:
       rom_tag:
@@ -50,7 +50,7 @@ env:
 
 jobs:
   build:
-    name: LiveCD image
+    name: Live installer image
     runs-on: ubuntu-24.04-arm
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -64,15 +64,15 @@ jobs:
           PAYLOAD_INPUT: ${{ inputs.payload }}
         run: |
           echo "rom=${ROM_INPUT:-$ROM_TAG}" >> "$GITHUB_OUTPUT"
-          if [[ "$GITHUB_REF" == refs/tags/livecd-v* || "$GITHUB_REF" == refs/tags/livecd-test-*-payload || "$PAYLOAD_INPUT" == true ]]; then
+          if [[ "$GITHUB_REF" == refs/tags/live-installer-v* || "$GITHUB_REF" == refs/tags/live-installer-test-*-payload || "$PAYLOAD_INPUT" == true ]]; then
             echo "payload=yes" >> "$GITHUB_OUTPUT"
           else
             echo "payload=no" >> "$GITHUB_OUTPUT"
           fi
-          if [[ "$GITHUB_REF" == refs/tags/livecd-v* ]]; then
-            v=${GITHUB_REF#refs/tags/livecd-v}
+          if [[ "$GITHUB_REF" == refs/tags/live-installer-v* ]]; then
+            v=${GITHUB_REF#refs/tags/live-installer-v}
             [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] \
-              || { echo "::error::the tag must look like livecd-v1.2.3 or livecd-v1.2.3-rc.1"; exit 1; }
+              || { echo "::error::the tag must look like live-installer-v1.2.3 or live-installer-v1.2.3-rc.1"; exit 1; }
             echo "version=$v" >> "$GITHUB_OUTPUT"
             [[ "$v" == *-* ]] && echo "prerelease=yes" >> "$GITHUB_OUTPUT" || echo "prerelease=no" >> "$GITHUB_OUTPUT"
           else
@@ -81,12 +81,12 @@ jobs:
           fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: tag matches the installer version
-        if: startsWith(github.ref, 'refs/tags/livecd-v')
+        if: startsWith(github.ref, 'refs/tags/live-installer-v')
         run: |
           # 镜像里的版本号只从 installer/live/pubspec.yaml 读（build-live.sh），标签要与它一致
           p=$(sed -n 's/^version:[[:space:]]*\([^+[:space:]]*\).*/\1/p' installer/live/pubspec.yaml)
           [ "$p" = '${{ steps.version.outputs.version }}' ] \
-            || { echo "::error::tag livecd-v${{ steps.version.outputs.version }} but installer/live/pubspec.yaml says $p"; exit 1; }
+            || { echo "::error::tag live-installer-v${{ steps.version.outputs.version }} but installer/live/pubspec.yaml says $p"; exit 1; }
       - name: fonts
         run: python3 installer/common/tool/fetch-fonts.py
       - name: ROM release files
@@ -105,7 +105,7 @@ jobs:
           done
           echo "kernel from $ROM_REPO $TAG"
           # 发布构建：内核要开启 CONFIG_ISO9660_FS（build-iso.sh 也会拒绝，这里在耗时的步骤之前就停下）
-          if [[ "$GITHUB_REF" == refs/tags/livecd-v* ]]; then
+          if [[ "$GITHUB_REF" == refs/tags/live-installer-v* ]]; then
             python3 scripts/extract-kconfig.py out/rom/boot.img | grep -qx 'CONFIG_ISO9660_FS=y' \
               || { echo "::error::the kernel in $TAG's boot.img lacks CONFIG_ISO9660_FS: a dd-written ISO could not find its squashfs"; exit 1; }
           fi
@@ -135,7 +135,7 @@ jobs:
         env:
           PAYLOAD: ${{ steps.version.outputs.payload }}
         run: |
-          allow=(); [[ "$GITHUB_REF" == refs/tags/livecd-v* ]] || allow=(--allow-no-iso9660)
+          allow=(); [[ "$GITHUB_REF" == refs/tags/live-installer-v* ]] || allow=(--allow-no-iso9660)
           src=(--boot-img out/rom/boot.img); [ "$PAYLOAD" = yes ] && src=(--release out/rom --payload)
           bash installer/tools/build/build-live.sh "${src[@]}" --firmware out/vendor-firmware "${allow[@]}"
       - name: collect
@@ -153,7 +153,7 @@ jobs:
           cat dist/release.txt dist/SHA256SUMS
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: livecd-${{ steps.version.outputs.version }}
+          name: live-installer-${{ steps.version.outputs.version }}
           if-no-files-found: error
           retention-days: 14
           path: dist/
@@ -161,14 +161,14 @@ jobs:
   release:
     name: draft release
     needs: build
-    if: startsWith(github.ref, 'refs/tags/livecd-v')
+    if: startsWith(github.ref, 'refs/tags/live-installer-v')
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: livecd-${{ needs.build.outputs.version }}
+          name: live-installer-${{ needs.build.outputs.version }}
           path: dist
       - name: draft release
         env:
@@ -176,6 +176,6 @@ jobs:
           V: ${{ needs.build.outputs.version }}
         run: |
           pre=(); [ '${{ needs.build.outputs.prerelease }}' = yes ] && pre=(--prerelease)
-          gh release create "livecd-v$V" -R "$GITHUB_REPOSITORY" --draft --latest=false "${pre[@]}" \
+          gh release create "live-installer-v$V" -R "$GITHUB_REPOSITORY" --draft --latest=false "${pre[@]}" \
             --title "LiveCD installer v$V" --notes "Draft: write the release notes before publishing." \
             dist/*.iso dist/SHA256SUMS dist/release.txt

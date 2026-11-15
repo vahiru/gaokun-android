@@ -463,7 +463,7 @@ String? sumOf(String sums, String name) {
 }
 
 /// GitHub API 的 releases 列表 → VARIANT（只列挂着整套安装文件的版本，最新的在前、第一个 latest=yes）
-/// + 最新 LiveCD 的 LIVECD：最新一个 `livecd-v<版本>` release 里不带系统文件的 `gaokun3-live-<版本>.iso`
+/// + 最新 Live 安装器的 LIVECD：最新一个 `live-installer-v<版本>` release 里不带系统文件的 `gaokun3-live-<版本>.iso`
 /// （带系统文件的叫 `gaokun3-live-<版本>-android-<ROM 标签>.iso`，不取）与核对它的 SHA256SUMS。
 /// LiveCD 的 release 没有 boot.img 等安装文件，不会被当成一个系统版本
 List<Gk3Record> githubVariants(List<Map<String, dynamic>> releases) {
@@ -474,8 +474,8 @@ List<Gk3Record> githubVariants(List<Map<String, dynamic>> releases) {
     if (r['draft'] == true) continue;
     final assets = {for (final a in (r['assets'] as List).cast<Map<String, dynamic>>()) a['name'] as String: a};
     final tag = r['tag_name'] as String;
-    if (live == null && tag.startsWith('livecd-v') && assets.containsKey('SHA256SUMS')) {
-      final ver = tag.substring('livecd-v'.length);
+    if (live == null && tag.startsWith('live-installer-v') && assets.containsKey('SHA256SUMS')) {
+      final ver = tag.substring('live-installer-v'.length);
       final iso = assets['gaokun3-live-$ver.iso'];
       if (iso != null) {
         live = Gk3Record('LIVECD', {

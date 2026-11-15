@@ -1,6 +1,6 @@
-# `installer/tools/`：LiveCD的构建与测试
+# `installer/tools/`：Live安装器的构建与测试
 
-本目录构建`gaokun3`的LiveCD：基于**Debian 13（trixie）arm64**的只读`squashfs` + `tmpfs` overlay内存根文件系统，开机后在`cage`中运行图形安装器（[`installer/live/`](../live/README.md)），后端是`gk3l`（[`installer/backend/`](../backend/)）。同一份镜像既可写入USB启动盘，也可放入内置盘上的安装器分区`GK3LIVE`。LiveCD中没有网络与`sshd`，安装所用的系统文件只从安装介质的`gaokun3/payload/`读取。
+本目录构建`gaokun3`的Live安装器：基于**Debian 13（trixie）arm64**的只读`squashfs` + `tmpfs` overlay内存根文件系统，开机后在`cage`中运行图形安装器（[`installer/live/`](../live/README.md)），后端是`gk3l`（[`installer/backend/`](../backend/)）。同一份镜像既可写入USB启动盘，也可放入内置盘上的安装器分区`GK3LIVE`。Live安装器中没有网络与`sshd`，安装所用的系统文件只从安装介质的`gaokun3/payload/`读取。
 
 ## 一、构建
 
@@ -8,11 +8,11 @@
 
 ```sh
 bash installer/tools/build/build-flutter.sh                                         # 编译图形安装器 → out/installer-flutter-linux-arm64/
-bash installer/tools/build/build-live.sh --boot-img <boot.img> --firmware <目录>     # 构建LiveCD → out/live/gaokun3-live.iso
+bash installer/tools/build/build-live.sh --boot-img <boot.img> --firmware <目录>     # 构建Live安装器 → out/live/gaokun3-live.iso
 bash installer/tools/build/build-live.sh --release <发布目录> --firmware <目录> --payload   # 另出一个带系统文件的ISO
 ```
 
-`--firmware`指向形如`/vendor/firmware`的目录（GPU的zap shader为华为专有固件，Debian中没有）。正式构建由GitHub Actions完成（[`.github/workflows/installer-livecd.yml`](../../.github/workflows/installer-livecd.yml)，推送`livecd-v*`标签触发），输入均按sha256固定。每次发布产出两个ISO：不带系统文件的`gaokun3-live-<版本>.iso`（用户自行放入系统文件，或由Windows安装器制作安装介质），以及带上所用ROM版本系统文件的`gaokun3-live-<版本>-android-<ROM标签>.iso`（整个写入U盘后也能直接安装）。
+`--firmware`指向形如`/vendor/firmware`的目录（GPU的zap shader为华为专有固件，Debian中没有）。正式构建由GitHub Actions完成（[`.github/workflows/installer-live.yml`](../../.github/workflows/installer-live.yml)，推送`livecd-v*`标签触发），输入均按sha256固定。每次发布产出两个ISO：不带系统文件的`gaokun3-live-<版本>.iso`（用户自行放入系统文件，或由Windows安装器制作安装介质），以及带上所用ROM版本系统文件的`gaokun3-live-<版本>-android-<ROM标签>.iso`（整个写入U盘后也能直接安装）。
 
 `build-live.sh`在容器内依次执行：
 1. `build/build-rootfs.sh`：用`mmdebstrap`按[`pkgs.txt`](build/pkgs.txt)从snapshot.debian.org的固定时间点构建根文件系统（其中systemd-boot与e2fsprogs与Windows安装器带的版本相同），叠加`build/overlay/`，静态编译`gk3l`，放入图形安装器与GPU固件；打包`squashfs`前逐项检查（命令、单元是否启用、动态库能否解析、字体、freedreno，以及systemd-boot与e2fsprogs是否与Windows安装器的一致）。所装软件包的版本记入[`packages-live.lock`](build/packages-live.lock)。
@@ -23,7 +23,7 @@ bash installer/tools/build/build-live.sh --release <发布目录> --firmware <�
 ## 二、关键设计
 
 1. **与Android共用同一内核**：
-   LiveCD与Android使用完全相同的内核与`gaokun3.dtb`，只以`initramfs.img`和内核参数区分。为此[`scripts/kernel-config-android.sh`](../../scripts/kernel-config-android.sh)内建了：
+   Live安装器与Android使用完全相同的内核与`gaokun3.dtb`，只以`initramfs.img`和内核参数区分。为此[`scripts/kernel-config-android.sh`](../../scripts/kernel-config-android.sh)内建了：
    - `CONFIG_SQUASHFS=y`（挂载只读根文件系统）。
    - `CONFIG_NTFS3_FS=y`（双系统安装前只读挂载Windows分区，检查Windows是否处于休眠，同时显式禁用旧版`CONFIG_NTFS_FS`）。
    - `CONFIG_NLS_UTF8=y`（支持FAT32上的非ASCII文件名）。
@@ -36,7 +36,7 @@ bash installer/tools/build/build-live.sh --release <发布目录> --firmware <�
 4. **写入磁盘期间不睡眠、不关机**：
    睡眠相关的systemd target全部屏蔽，logind忽略电源键与合盖，写入磁盘的任务另由`systemd-inhibit`保护。
 5. **不写入安装介质**：
-   介质可能是只读的ISO9660，LiveCD不往介质写任何东西。界面日志（`/run/gk3-installer/installer.log`）、写入磁盘任务的输出与分区表备份都只在内存里，关机即丢失；安装失败时由用户在界面上另存到U盘（`gk3l save-logs`，同时带上dmesg与本次启动的journal）。
+   介质可能是只读的ISO9660，Live安装器不往介质写任何东西。界面日志（`/run/gk3-installer/installer.log`）、写入磁盘任务的输出与分区表备份都只在内存里，关机即丢失；安装失败时由用户在界面上另存到U盘（`gk3l save-logs`，同时带上dmesg与本次启动的journal）。
 
 ## 三、测试
 

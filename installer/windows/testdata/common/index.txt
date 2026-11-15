@@ -2,7 +2,7 @@
 # preflight-ok：平板（GK-W7X）真跑的结果，平板测试包抓的原样输出，没有时间信息
 # preflight-blocked：这台 PC（联想 21TK）以管理员真跑的结果：机型不对、Secure Boot、BitLocker、快速启动都开着
 # releases：由 GitHub API（vahiru/gaokun-android 的 releases）与 R2 上 OTA 清单的真实返回整理成 VARIANT 记录（2026-11-11 取的；只列挂着 boot.img、super.img.zst、install-artifacts.sha256 的版本）；真后端按同样的格式输出
-# releases 的 LIVECD：最新 livecd-v* release 里不带系统文件的 gaokun3-live-<版本>.iso 与 SHA256SUMS。还没有发布过 LiveCD 的 release，test/data/github-releases.json 最前面的 livecd-v0.2.0 是按 CI 的产物名构造的；R2 上放 LiveCD 的位置还没定，真后端不报 LIVECD
+# releases 的 LIVECD：最新 live-installer-v* release 里不带系统文件的 gaokun3-live-<版本>.iso 与 SHA256SUMS。还没有发布过 Live 安装器的 release，test/data/github-releases.json 最前面的 live-installer-v0.2.0 是按 CI 的产物名构造的；R2 上放 LiveCD 的位置还没定，真后端不报 LIVECD
 # download：LiveCD 的录制（installer/live/testdata/common），Windows 版按同一个行协议输出；去掉了 LiveCD 自己的中文日志行，RELEASE 的目录换成 Windows 路径；末尾的 LIVEISO（制作安装介质时一起下载的 LiveCD 镜像）是照 net.dart 的格式补的
 # plan：真跑的 gk3w plan（40 GiB 的区间 / 12508 MiB 的区间 / 空区间：界面用它问"至少要多大"，录的是 --disk 2）
 # bitlocker-key：PC 上对一个开启了 BitLocker 的测试卷（数据卷 Q:）真跑的输出，盘符换成 C:，时间是估的；带 --suspend 2 的那份按同样的格式补了暂停保护的一行（数据卷不能按重启次数暂停，录不到）

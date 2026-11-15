@@ -401,8 +401,8 @@ void main() {
     // 下载时一并下载 LiveCD 镜像（与核对它的 SHA256SUMS），gk3w media 拿到的是下载好的 ISO
     final dl = rec.calls.singleWhere((c) => c.first == 'download');
     expect(dl.sublist(dl.length - 2), [
-      'https://github.com/vahiru/gaokun-android/releases/download/livecd-v0.2.0/gaokun3-live-0.2.0.iso',
-      'https://github.com/vahiru/gaokun-android/releases/download/livecd-v0.2.0/SHA256SUMS',
+      'https://github.com/vahiru/gaokun-android/releases/download/live-installer-v0.2.0/gaokun3-live-0.2.0.iso',
+      'https://github.com/vahiru/gaokun-android/releases/download/live-installer-v0.2.0/SHA256SUMS',
     ]);
     final media = rec.calls.singleWhere((c) => c.first == 'media');
     expect(media, containsAllInOrder(['--target', 'usb', '--disk', '3', '--expect-mib', '30108', '--release', r'C:\ProgramData\gaokun3\release']));

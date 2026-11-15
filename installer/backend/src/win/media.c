@@ -368,7 +368,7 @@ static int inputs_open(const wchar_t *iso_path, const wchar_t *rel, inputs *in, 
         return -1;
     in->iso = CreateFileW(iso_path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
     if (in->iso == INVALID_HANDLE_VALUE || !GetFileSizeEx(in->iso, &sz))
-        return gk3w_err(T, "livecd-open", "cannot open the LiveCD ISO", GetLastError()), -1;
+        return gk3w_err(T, "livecd-open", "cannot open the live installer ISO", GetLastError()), -1;
     iso_size = (uint64_t)sz.QuadPart;
     isrc.ctx = &in->iso;
     isrc.read = iso_read;
@@ -381,7 +381,7 @@ static int inputs_open(const wchar_t *iso_path, const wchar_t *rel, inputs *in, 
             if (!ents[k].is_dir && !strcmp(ents[k].path, LIVE_NEED[i]))
                 found = 1;
         if (!found)
-            return gk3w_err_kv(T, "livecd-incomplete", "file", LIVE_NEED[i], "the ISO is not a gaokun3 LiveCD: a file needed to boot it is missing", 0), -1;
+            return gk3w_err_kv(T, "livecd-incomplete", "file", LIVE_NEED[i], "the ISO is not a gaokun3 live installer image: a file needed to boot it is missing", 0), -1;
     }
     /* ISO 里的文件：El Torito 目录（老的 ISO 没有隐藏它）与 ISO 自带的安装载荷（带系统文件的 ISO）不要，载荷用所选的版本 */
     for (size_t k = 0; k < nent; k++) {
@@ -441,7 +441,7 @@ static int write_fat(gk3w_disk *d, uint64_t base, uint64_t part_bytes, uint32_t 
     gk3w_progress(15, "write-media");
     fe = gk3w_fat_build(&fp, in->files, in->nf, &io);
     if (fe) {
-        snprintf(msg, sizeof msg, fe == GK3W_FAT_READ ? "reading the LiveCD or the system files failed while writing the %s"
+        snprintf(msg, sizeof msg, fe == GK3W_FAT_READ ? "reading the live installer or the system files failed while writing the %s"
                                                       : "writing the %s failed: a media error, or the disk is smaller than it reports", what);
         return gk3w_err_kv(GK3W_TOUCHED_YES, fe == GK3W_FAT_READ ? "media-read" : "disk-write", "why", gk3w_fat_strerror(fe), msg, GetLastError()), -1;
     }
@@ -490,13 +490,13 @@ static int media_usb(int argc, wchar_t **argv)
         const wchar_t *mine[3] = {iso_path, rel, GetModuleFileNameW(NULL, self, MAX_PATH) ? self : NULL};
         for (int i = 0; i < 3; i++)
             if (mine[i] && on_disk(mine[i], d.num)) {
-                gk3w_err(T, "media-is-source", "the LiveCD, the system files or the installer itself are on this USB drive; it cannot overwrite itself (disk not touched)", 0);
+                gk3w_err(T, "media-is-source", "the live installer, the system files or the Windows installer itself are on this USB drive; it cannot overwrite itself (disk not touched)", 0);
                 goto out;
             }
     }
     need = gk3w_fat_size_for(in.files, in.nf, d.bs);
     if (!need) {
-        gk3w_err(T, "livecd-names", "a file in the LiveCD or the release directory cannot be stored on FAT32 (name or size) (disk not touched)", 0);
+        gk3w_err(T, "livecd-names", "a file in the live installer or the release directory cannot be stored on FAT32 (name or size) (disk not touched)", 0);
         goto out;
     }
     /* FAT32 最大 2 TiB，MBR 的扇区数也是 32 位：更大的 U 盘只用前面一段 */
@@ -508,7 +508,7 @@ static int media_usb(int argc, wchar_t **argv)
     if (part_bytes < need) {
         char nb[32];
         snprintf(nb, sizeof nb, "%llu", (unsigned long long)((need + (1u << 20) - 1) >> 20));
-        gk3w_err_kv(T, "media-too-small", "need_mib", nb, "the USB drive is too small for the LiveCD and the system files (disk not touched)", 0);
+        gk3w_err_kv(T, "media-too-small", "need_mib", nb, "the USB drive is too small for the live installer and the system files (disk not touched)", 0);
         goto out;
     }
     gk3w_log("USB drive: disk %lu, %llu MiB, %u-byte sectors; FAT32 from 1 MiB, %zu files, at least %llu MiB needed",
@@ -665,7 +665,7 @@ static int media_internal(int argc, wchar_t **argv)
     memcpy(snap, d.lay, d.laysz);
     need = gk3w_fat_size_for(in.files, in.nf, d.bs);
     if (!need) {
-        gk3w_err(T, "livecd-names", "a file in the LiveCD or the release directory cannot be stored on FAT32 (name or size) (disk not touched)", 0);
+        gk3w_err(T, "livecd-names", "a file in the live installer or the release directory cannot be stored on FAT32 (name or size) (disk not touched)", 0);
         goto out;
     }
     /* 至少 LIVE_MIB；内容更大时按 256 MiB 向上取整（界面按 LIVE_MIB 选空闲区，放不下时下面报 media-too-small） */
@@ -751,7 +751,7 @@ static int media_internal(int argc, wchar_t **argv)
             gk3w_log("ESP: Android is installed and the fallback path holds systemd-boot; the ESP is left as it is");
         } else {
             gk3w_log("ESP: Android is installed and the fallback path holds another system's boot loader; the ESP is left as it is "
-                     "(the LiveCD appears in the systemd-boot menu only when that loader chains to systemd-boot)");
+                     "(the live installer appears in the systemd-boot menu only when that loader chains to systemd-boot)");
         }
         free(cur);
     }

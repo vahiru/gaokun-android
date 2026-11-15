@@ -229,7 +229,7 @@ static void esp_drop_live_entries(const char *esp_node)
     struct dirent *e;
     int n = 0;
     if (gk3l_mount_tmp(esp_node, "vfat", 0, mnt, sizeof mnt)) {
-        gk3l_log("warning: cannot mount the EFI system partition to remove the old LiveCD boot entries");
+        gk3l_log("warning: cannot mount the EFI system partition to remove the old live installer boot entries");
         return;
     }
     snprintf(p, sizeof p, "%s/loader/entries", mnt);
@@ -239,7 +239,7 @@ static void esp_drop_live_entries(const char *esp_node)
                 continue;
             snprintf(p, sizeof p, "%s/loader/entries/%s", mnt, e->d_name);
             if (unlink(p))
-                gk3l_log("warning: cannot delete the old LiveCD boot entry %s", e->d_name);
+                gk3l_log("warning: cannot delete the old live installer boot entry %s", e->d_name);
             else
                 n++;
         }
@@ -248,7 +248,7 @@ static void esp_drop_live_entries(const char *esp_node)
     snprintf(p, sizeof p, "%s/EFI/gaokun3", mnt);
     if (gk3l_is_dir(p)) {
         if (gk3l_rm_rf(p))
-            gk3l_log("warning: cannot delete EFI/gaokun3 (the old LiveCD kernel)");
+            gk3l_log("warning: cannot delete EFI/gaokun3 (the old live installer kernel)");
         else
             n++;
     }
@@ -256,7 +256,7 @@ static void esp_drop_live_entries(const char *esp_node)
     if (gk3l_umount_tmp(mnt))
         gk3l_log("warning: cannot unmount the EFI system partition");
     if (n)
-        gk3l_log("ESP: removed the old LiveCD boot entry and kernel (they only started the installer partition)");
+        gk3l_log("ESP: removed the old live installer boot entry and kernel (they only started the installer partition)");
 }
 
 static int ends_with_ci(const char *n, const char *suf)
