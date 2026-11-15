@@ -16,7 +16,7 @@
 | 相机子系统 | Qualcomm CAMSS（Titan 170）：后摄OmniVision OV13B10（`@0x36` + DW9714 VCM `@0x0c`），前摄Hynix Hi-846（`@0x20`） |
 | 传感器中枢 | SLPI DSP（`qcslpi8280.mbn`）+ QMI SSC：ICM42607（IMU）、AK09918（磁力计）、TCS3408（颜色/光感）、SAR、霍尔传感器 |
 | 电源与EC | Huawei Matebook E Go EC（I2C `@0x76`，电源适配器`gaokun-psy-ec`、电池`gaokun-battery`、Type-C连接器状态） |
-| 指纹传感器 | FocalTech `FTE7001`（侧边电源键集成，SPI接口由TrustZone安全世界独占，通过QSEECOM `fingerprint` TA访问） |
+| 指纹传感器 | FocalTech `FTE7001` / Goodix `GDIX5125`（侧边电源键集成，SPI接口由TrustZone安全世界独占，通过QSEECOM `fingerprint` TA访问） |
 
 ## 二、BIOS版本警告：2.16与8cx Gen 2固件不可混用
 
@@ -88,6 +88,7 @@ SC8280XP在`gaokun3`上启用了3个DWC3控制器，各自的角色能力不同�
 | `qcom/sc8280xp/SC8280XP-HUAWEI-GAOKUN3-tplg.bin` | 音频拓扑 | Audioreach（`q6apm`）声卡拓扑文件 |
 | `ath11k/WCN6855/hw2.1/{amss.bin,m3.bin,board-2.bin,regdb.bin}` | Wi-Fi | WCN6855 PCIe无线网卡固件与板级校准数据 |
 | `qca/wcnhpbtfw21.tlv`、`qca/wcnhpnv21g.bin` | 蓝牙 | WCN6855蓝牙控制器补丁与NVM配置 |
+| `fingerpr.mbn`、`gaokun3-goodix-cfg.bin` | 指纹 | QSEECOM指纹可信应用（TA名`fingerprint`）与Goodix `GDIX5125`传感器配置模板（仅位于`/vendor/firmware/`） |
 
 ## 六、崩溃日志持久化（`efi_pstore` vs `ramoops`）
 

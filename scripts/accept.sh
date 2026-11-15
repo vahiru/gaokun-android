@@ -2,7 +2,7 @@
 # 发版装机验收的 A 档（无人值守）一键跑。逐条对应 docs/dev/release-checklist.md 的 A1–A20。
 # 在【宿主机】跑，走 adb；以只读检查为主，B / C 档（要人在场、长稳与测量）不在这里。
 #
-#   SER=gaokun3 bash scripts/accept.sh [选项]
+#   [SER=<设备序列号>] bash scripts/accept.sh [选项]
 #     --readonly          只做只读检查：跳过相机（A12）、麦克风（A13）与真解、真编视频（A11的第5、5b步）
 #     --stamp <戳>        期望的 ro.build.date.utc（候选版的构建戳）；不给就只记录、不判
 #     --profile release   默认。A3（G1 安全默认值）不过判 FAIL

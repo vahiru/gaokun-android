@@ -196,5 +196,4 @@ AddressSanitizer + UBSan下运行：
 不采集图像也不访问模板，覆盖旧会话替换、HW_UNAVAILABLE回调内重试和close回调重入。
 `test-integration.py`检查补丁能否打上、UAPI是否一致、V4接口覆盖、镜像总是装入HAL与固件、缺失或改动的输入被拒绝，以及输入准备。
 
-现在的代码在Goodix机器上以框架的虚拟指纹实例实测过录入、解锁和拒绝其他手指。装进ROM的
-正式服务、与之配套的SELinux策略，以及FTE7001机器上的匹配，都尚未验证。
+现在的代码已随ROM构建，在Goodix机器上实测过正式服务与SELinux策略下的录入、解锁和拒绝其他手指；FTE7001机器上的匹配尚未实测。
