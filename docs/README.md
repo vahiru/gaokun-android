@@ -15,7 +15,7 @@
 
 | 文档 | 内容说明 |
 |---|---|
-| [INSTALL.md](INSTALL.md) / [INSTALL.zh-CN.md](INSTALL.zh-CN.md) | 图形安装器、命令行安装、免U盘双系统安装、OTA更新、ADB调试、救援系统与fastboot使用指南 |
+| [INSTALL.md](INSTALL.md) / [INSTALL.zh-CN.md](INSTALL.zh-CN.md) | Windows安装器与Live安装器的使用、系统更新、开机菜单、fastboot与清除数据 |
 | [FAQ.md](FAQ.md) / [FAQ.zh-CN.md](FAQ.zh-CN.md) | 常见问题与故障排查：启动菜单、版本回退、抓取日志、恢复出厂设置与卸载 |
 | [known-limitations.md](known-limitations.md) / [known-limitations.zh-CN.md](known-limitations.zh-CN.md) | 当前版本的已知限制、硬件不支持项、安全模型与专有固件说明 |
 | [BUILDING.zh-CN.md](BUILDING.zh-CN.md) | 从源码编译ROM与主线Linux内核：拉取crDroid树、准备专有固件、发布构建与开发构建的区别 |

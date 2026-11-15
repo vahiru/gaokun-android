@@ -33,7 +33,7 @@ adb shell 'cat /sys/class/dmi/id/product_name /sys/class/dmi/id/product_sku /sys
 
 * `ro.build.date.utc`（10位数字）是**构建戳**，最能说明装的是哪一版；每份发版说明里都写着它。
 * 在部分版本上，应用读到的`uname`可能是伪装的`6.6.30-android15-…`版本号（见known-limitations第一节），崩溃记录里也会显示伪装版本。真实内核版本一律以`adb shell su -c 'dmesg | head -1'`为准；报告里两样都贴上。
-* 问用户：这个版本是怎么装上去的（图形安装器的哪种模式 / 系统更新 / 别的），从哪个版本升上来的。
+* 问用户：这个版本是怎么装上去的（Windows安装器 / Live安装器的哪种安装方式 / 系统更新 / 别的），从哪个版本升上来的。
 
 ## 第3步：问清现象
 
@@ -61,7 +61,7 @@ adb shell su -c dmesg > dmesg.txt          # 内核日志，要root
 | USB-C（插电脑不识别、接口无法工作、充电方向反了） | 在仓库里跑`bash scripts/usb/ucsi-snapshot.sh <adb序列号> "<插的是什么>"`，每换一种插法跑一次 |
 | 游戏 / App画面、性能 | `adb shell getprop ro.hardware.vulkan`（如果是`pastel`，说明用的是软件渲染，性能数据没有参考价值）；游戏内画质设置 |
 | 触摸 / 手写笔 | `adb shell getevent -pl > getevent.txt` |
-| Android起不来 | 按[FAQ「Collecting logs when the machine won't boot Android」](docs/FAQ.md#collecting-logs-when-android-does-not-start)：开机菜单选`gaokun3 rescue`，诊断信息在`/media/gk3/gaokun3/diag/`；**重启前**把`/sys/fs/pstore/`与`/var/lib/systemd/pstore/`拷到那个目录 |
+| Android起不来 | 按[FAQ「The machine keeps restarting or hangs」](docs/FAQ.md#the-machine-keeps-restarting-or-hangs-what-can-i-do)：先等系统自动退回上一版本，退回后按上面几行收集；仍然起不来时，问清是更新后还是刚安装后出现的，以及开机停在哪一步 |
 | 安装失败 | 用*Install / boot failure*表单；写清安装方式、模式、系统镜像从哪来、安装器版本，以及屏幕上的报错原文 |
 
 `adb bugreport`能一次全收，但里面个人信息很多。优先用上面这些针对性的命令；用户坚持要附bugreport时，先做第5步。
