@@ -91,6 +91,7 @@
   "rmLiveFree": "The installer partition {name} ({size}) will be deleted, and its space will become unallocated.",
   "rmLiveSub": "Delete the installer partition from the internal disk.",
   "rmLiveOk": "The installer partition has been deleted.",
+  "rmLiveEspKept": "The EFI system partition was not restored; the boot menu still appears at startup.",
   "rmLiveOkMerge": "The installer partition has been deleted, and the /data partition has been enlarged to {size}.",
   "errReinstallMissing": "Android partitions on this disk are incomplete (missing: {names}); cannot reinstall.",
   "@errReinstallMissing": {
@@ -330,6 +331,7 @@
   "riskEditBody": "Be cautious before deleting any partition, please confirm that you have already backed up your data.",
   "riskRmLiveHead": "Deleting the installer partition: the installer can no longer be started from the internal disk",
   "riskRmLiveBody": "The installer partition and the installation files on it will be deleted. To run the installer again afterwards, use a USB drive or the Windows installer.",
+  "riskRmLiveEsp": "After deletion, the changes made to the EFI system partition when the installer partition was written are undone. If BitLocker or Device Encryption is enabled in Windows, Windows may ask for the 48-digit recovery key on its next boot.",
   "riskBackupHead": "Back up important data to another device",
   "riskBackupBody": "Copy important files — such as photos, documents, Windows files, and Android app data — to another device, external storage, or cloud storage. Keeping copies on another partition of the same disk does not protect against disk-wide failure. If you have not backed up yet, click “Back”, shut down, and back up your data first.",
   "riskPowerHead": "Keep AC power connected throughout",

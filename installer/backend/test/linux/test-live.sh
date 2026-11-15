@@ -4,6 +4,8 @@
 #   - 双系统 + --remove-installer：装完删掉它，userdata 紧挨着它时并进去（GPT、内核、ext4 一起扩）；
 #   - 整盘清空：它的表项原样留在新表里、内容不动，新 ESP 上先有 systemd-boot；之后 remove-installer 扩到盘尾；
 #   - 不相邻（GK3LIVE 在空闲区开头）：删掉但不扩；
+#   - 还没装 Android（只写入过本机磁盘的安装介质）：删掉它，ESP 还原（回落路径换回 Windows 启动管理器，loader/ 等删掉）；
+#     有 Android、或 ESP 上有别的系统时 ESP 不动；
 #   - 拒绝：没有读进内存、挂着、apply --remove-installer 而盘上没有它 —— 盘一个字节不变。
 #
 #   bash installer/tools/test/test-in-container.sh installer/backend/test/linux/test-live.sh
@@ -185,7 +187,29 @@ bk=$(printf '%s\n' "$out" | grep '^BACKUP')
 check "这一步的备份在内存里（ram=yes）" test "$(dirname "$(field "$bk" path)")/$(field "$bk" ram)" = "$GK3_RUNDIR/yes"
 check "ESP 上没有日志与备份（gaokun3/ 不存在）" on_part "$ESP" test ! -e gaokun3
 check "ESP：旧脚本的 LiveCD 启动项与内核删掉了，别的启动项还在" on_part "$ESP" sh -c 'test ! -e loader/entries/gaokun3-live.conf && test ! -e EFI/gaokun3 && test -s loader/entries/other.conf'
+check "ESP 上本来就没有我们的 systemd-boot：不报 esp-kept" sh -c "! printf '%s\n' \"\$1\" | grep -q 'code=esp-kept'" _ "$out"
 check "probe：介质分区没有了 → 盘不再标 medium" test "$(field "$("$G" probe 2>/dev/null | grep "^DISK path=$L ")" medium)" = no
+
+echo "═══ 2b. 还没装 Android（Windows 安装器只写入过本机磁盘的安装介质）：删掉安装器分区，ESP 还原 ═══"
+# 写入本机磁盘之后的 ESP：回落路径是 systemd-boot（带版本标记）、原件留成 .before-gaokun3、默认进 Windows 的 loader.conf、
+# EFI/systemd 里一份 systemd-boot；没有别的系统的启动项
+L2=$(mkdisk "$W/b2.img" end) || { bad "造盘"; exit 1; }
+{ cat "$GK3_SDBOOT"; printf '#### LoaderInfo: systemd-boot 257.13 ####'; } > "$W/sd-tagged.efi"
+m=$W/seed; mount -t vfat "${L2}p1" "$m"
+rm -rf "$m/loader" "$m/EFI/gaokun3"; mkdir -p "$m/loader" "$m/EFI/systemd"
+cp "$W/win-bootmgr.efi" "$m/EFI/BOOT/BOOTAA64.EFI.before-gaokun3"
+cp "$W/sd-tagged.efi" "$m/EFI/BOOT/BOOTAA64.EFI"; cp "$W/sd-tagged.efi" "$m/EFI/systemd/systemd-bootaa64.efi"
+printf 'timeout 5\nconsole-mode keep\neditor no\ndefault auto-windows\n' > "$m/loader/loader.conf"
+umount "$m"
+toram "$L2"
+out=$("$G" remove-installer --disk "$L2" 2>"$W/err2b"); rc=$?
+check "删掉了：REMOVED grow=no" test "$rc/$(field "$(printf '%s\n' "$out" | grep '^REMOVED')" grow)" = 0/no
+check "ESP：回落路径换回 Windows 启动管理器" on_part "${L2}p1" cmp -s EFI/BOOT/BOOTAA64.EFI "$W/win-bootmgr.efi"
+check "ESP：loader/、EFI/systemd、.before-gaokun3 都删了" on_part "${L2}p1" sh -c 'test ! -e loader && test ! -e EFI/systemd && test ! -e EFI/BOOT/BOOTAA64.EFI.before-gaokun3'
+check "ESP：Windows 启动管理器本身没动" on_part "${L2}p1" cmp -s EFI/Microsoft/Boot/bootmgfw.efi "$W/win-bootmgr.efi"
+check "日志写明 ESP 还原了" grep -q 'ESP: restored' "$W/err2b"
+check "还原成功：没有 NOTE esp-kept" sh -c "! printf '%s\n' \"\$1\" | grep -q 'code=esp-kept'" _ "$out"
+losetup -d "$L2"; rm -f "$W/b2.img"
 
 echo "═══ 3. 双系统 + --remove-installer：相邻 → 并进 userdata ═══"
 losetup -d "$L"
@@ -240,6 +264,7 @@ check "remove-installer：grow=yes" test "$rc/$(field "$rmv" grow)" = 0/yes
 lu=$(sgdisk -p "$L" | awk '/last usable sector is/{print $NF}')
 check "userdata 扩到盘尾（原 WinRE 的空间也并进来）" test $(( lu - $(last_of "$L" "$UD") )) -lt 2048
 check "ext4 扩满了分区" test "$(ext4_bytes "${L}p$UD")" = "$(part_bytes "${L}p$UD")"
+check "ESP 上有 Android：回落路径仍是 systemd-boot、loader.conf 还在" on_part "${L}p1" sh -c "cmp -s EFI/BOOT/BOOTAA64.EFI '$GK3_SDBOOT' && test -s loader/loader.conf"
 
 echo "═══ 5. apply --remove-installer 而盘上没有它：动盘之前拒绝 ═══"
 G1=$(gpt_sum "$L")

@@ -30,7 +30,7 @@ void main() {
     // live.c 的 refuse()：单独的命令里是 ERR，apply 的最后一步里是 NOTE installer-kept 的 why=（完成页同样按 ERR 说）
     for (final m in RegExp(r'refuse\(\s*[^,]+,\s*([^,]+),').allMatches(src)) ...quoted(m.group(1)!),
     'esp-too-small', 'esp-full', 'esp-ota-room', 'esp-win-reserve',
-  }..removeAll(['loadervar-stuck', 'installer-kept', 'userdata-fs-not-grown']); // 这几个是 NOTE 的代码，完成页另说
+  }..removeAll(['loadervar-stuck', 'installer-kept', 'userdata-fs-not-grown', 'esp-kept']); // 这几个是 NOTE 的代码，完成页与删除安装器分区页另说
 
   test('抓到的代码数量像样（正则没写坏）', () {
     expect(progCodes.length, greaterThan(10));

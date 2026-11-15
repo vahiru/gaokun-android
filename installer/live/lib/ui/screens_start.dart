@@ -271,20 +271,6 @@ class _ModePageState extends State<ModePage> {
                 onTap: () => setState(() => _pick = _Pick.reinstall),
               ),
               const SizedBox(height: 14),
-              // Android 已装好、安装器从这块盘上的安装器分区运行：可以单独删掉它（装的时候选了保留，或者删除没成功）
-              if (s.installerPart case final lv?) ...[
-                ChoiceCard(
-                  icon: Icons.delete_sweep_outlined,
-                  title: l.modeRmLiveTitle,
-                  body: [
-                    l.modeRmLiveBody,
-                    if (r.rmlive case final rm?) rm.merge ? l.rmLiveMerge(lv.label, fmtMib(lv.sizeMib)) : l.rmLiveFree(lv.label, fmtMib(lv.sizeMib)),
-                  ].join('\n'),
-                  selected: _pick == _Pick.rmlive,
-                  onTap: () => setState(() => _pick = _Pick.rmlive),
-                ),
-                const SizedBox(height: 14),
-              ],
             ],
             ChoiceCard(
               icon: Icons.delete_forever,
@@ -311,6 +297,27 @@ class _ModePageState extends State<ModePage> {
             // ★ 最后一项：删除分区（例如 Windows 恢复分区，"磁盘管理"删不了它们）。总是可选 ——
             //   上面几项都走不通的时候，这是用户在安装器里能做的；缩小分区要回 Windows 压缩卷
             const SizedBox(height: 14),
+            // 安装器从这块盘上的安装器分区运行时总能单独删掉它（不论是否已装 Android：没装时这就是撤销写入本机磁盘的
+            // 安装介质）。删除分区页不给它删除按钮（它是正在运行的介质），由这一项走 gk3l remove-installer
+            if (s.installerPart case final lv?) ...[
+              ChoiceCard(
+                icon: Icons.delete_sweep_outlined,
+                title: l.modeRmLiveTitle,
+                // 空出来的空间去哪：没装 Android 时一定是未分配空间；装了时按 plan 的预览（拿不到就不说）
+                body: [
+                  l.modeRmLiveBody,
+                  if (s.reinstall == null)
+                    l.rmLiveFree(lv.label, fmtMib(lv.sizeMib))
+                  else if (s.reinstall!.rmlive case final rm?)
+                    rm.merge ? l.rmLiveMerge(lv.label, fmtMib(lv.sizeMib)) : l.rmLiveFree(lv.label, fmtMib(lv.sizeMib)),
+                ].join('\n'),
+                // 还没装 Android 时删除会顺带还原 ESP：Windows 在休眠时不能改（同"保留现有系统"与"重新安装"）
+                reason: (s.espInfo?.winHibernated ?? false) ? l.modeWhyHibernated : null,
+                selected: _pick == _Pick.rmlive,
+                onTap: () => setState(() => _pick = _Pick.rmlive),
+              ),
+              const SizedBox(height: 14),
+            ],
             ChoiceCard(
               icon: Icons.delete_outline,
               title: l.editEntryTitle,

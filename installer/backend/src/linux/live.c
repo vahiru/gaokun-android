@@ -12,6 +12,14 @@
  *   5. ESP 上只为启动安装器分区而写的东西删掉：旧版的 Windows 脚本把 LiveCD 的内核放在
  *      EFI/gaokun3/、启动项是 loader/entries/gaokun3-live*.conf。安装器分区没了，它们只会启动失败（XBOOTLDR 的
  *      GK3LIVE 自带启动项，ESP 上没有这些）。
+ *   6. ESP 上没有 Android 的启动项时（只写入过本机磁盘的安装介质、还没装 Android），把 Windows 安装器为它对 ESP 做的
+ *      改动撤回，规则同卸载（src/win/uninstall.c 开头的 1–2）：ESP 上有别的系统（loader/entries 里有不是我们写的启动项，
+ *      或 EFI/Linux 下有 UKI）时只把 loader.conf 的 .before-gaokun3 换回来；否则回落路径按 gk3w_fallback_decide 换回
+ *      （写 .tmp 再改名、读回核对），删掉 loader/ 与 EFI/systemd/，最后删 .before-gaokun3。有 Android 时不动（那是
+ *      Android 的启动链）。Windows 在休眠时不改（同 apply 的 esp-windows-hibernated）。LiveCD 暂停不了 BitLocker：
+ *      回落路径换回之后 Windows 可能要恢复密钥（风险确认页写明）。
+ *      第 5、6 步失败都只提醒：安装器分区已经删了，留下的至多是一个只有 Windows 的开机菜单。第 6 步没有做成时另报
+ *      NOTE code=esp-kept why=hibernated|foreign|unreadable|no-windows|write-failed（界面据此如实说明）。
  * stdout：BACKUP；REMOVED part= name= size_mib= grow=yes|no userdata_mib= esp=。
  * 进度代码：PROGRESS 92 remove-installer（apply 里）/ 10、50、80、100（命令）。 */
 #define _GNU_SOURCE
@@ -25,10 +33,12 @@
 #include <strings.h>
 #include <unistd.h>
 
+#include "../esp.h"
 #include "../proto.h"
 #include "../release.h"
 #include "files.h"
 #include "lx.h"
+#include "sysstate.h"
 
 #define ESP_TYPE "C12A7328-F81F-11D2-BA4B-00A0C93EC93B"
 
@@ -249,6 +259,173 @@ static void esp_drop_live_entries(const char *esp_node)
         gk3l_log("ESP: removed the old LiveCD boot entry and kernel (they only started the installer partition)");
 }
 
+static int ends_with_ci(const char *n, const char *suf)
+{
+    size_t a = strlen(n), b = strlen(suf);
+    return a >= b && !strcasecmp(n + a - b, suf);
+}
+
+/* ESP 上还有我们为启动安装器分区留下的东西：回落路径是 systemd-boot，或 loader.conf 是我们写的 */
+static int esp_has_ours(const char *mnt)
+{
+    char p[4400];
+    uint8_t *b = NULL;
+    size_t n = 0;
+    int ours = 0;
+    snprintf(p, sizeof p, "%s/EFI/BOOT/BOOTAA64.EFI", mnt);
+    if (!gk3l_read_file(p, &b, &n, 64u << 20))
+        ours = gk3w_is_systemd_boot(b, n);
+    free(b);
+    b = NULL;
+    snprintf(p, sizeof p, "%s/loader/loader.conf", mnt);
+    if (!ours && !gk3l_read_file(p, &b, &n, 1u << 20))
+        ours = gk3w_is_our_loader_conf(b, n);
+    free(b);
+    return ours;
+}
+
+/* 第 6 步没有做成：ESP 上还留着我们的东西时报给界面（没有就不用说：本来就是原样） */
+static void note_esp_kept(const char *mnt, const char *why)
+{
+    gk3w_line l = {0};
+    if (!esp_has_ours(mnt))
+        return;
+    gk3w_line_begin(&l, "NOTE");
+    gk3w_line_kv(&l, "code", "esp-kept");
+    gk3w_line_kv(&l, "why", why);
+    (void)gk3w_line_emit(&l, stdout);
+    gk3w_line_free(&l);
+}
+
+/* 第 6 步（说明见文件头）。读不到的文件按"不存在"处理之前先确认确实不存在：读错误时整步放弃 */
+static void esp_restore_no_android(const char *esp_node, const char *disk)
+{
+    char mnt[4096], p[4400], q[4500];   /* q 有时是 p 加后缀 */
+    DIR *dd;
+    struct dirent *e;
+    int android = 0, foreign = 0, keep_bak = 0, err = 0;
+    uint8_t *cur = NULL, *w = NULL, *bak = NULL;
+    const uint8_t *target = NULL;
+    size_t cur_len = 0, w_len = 0, bak_len = 0, target_len = 0;
+    static const char *const rels[3] = {"EFI/BOOT/BOOTAA64.EFI", "EFI/Microsoft/Boot/bootmgfw.efi", "EFI/BOOT/BOOTAA64.EFI.before-gaokun3"};
+    uint8_t **bufs[3] = {&cur, &w, &bak};
+    size_t *lens[3] = {&cur_len, &w_len, &bak_len};
+    if (gk3l_mount_tmp(esp_node, "vfat", 0, mnt, sizeof mnt)) {
+        gk3l_log("warning: cannot mount the EFI system partition to restore it");
+        return;
+    }
+    snprintf(p, sizeof p, "%s/loader/entries", mnt);
+    if ((dd = opendir(p))) {
+        while ((e = readdir(dd))) {
+            if (e->d_name[0] == '.' || !ends_with_ci(e->d_name, ".conf"))
+                continue;
+            if (strcasestr(e->d_name, "-android-"))
+                android = 1;
+            else if (!gk3w_our_entry_name(e->d_name))
+                foreign++;
+        }
+        closedir(dd);
+    }
+    snprintf(p, sizeof p, "%s/EFI/Linux", mnt);
+    if ((dd = opendir(p))) {
+        while ((e = readdir(dd)))
+            if (e->d_name[0] != '.' && ends_with_ci(e->d_name, ".efi"))
+                foreign++;
+        closedir(dd);
+    }
+    if (android)
+        goto done;   /* 那是 Android 的启动链 */
+    {
+        gk3l_win ws;
+        gk3l_win_state(disk, &ws);
+        if (ws.hibernated == 1) {
+            gk3l_log("warning: Windows is hibernated or in Fast Startup (%s): the EFI system partition is left as it is", ws.hib_part);
+            note_esp_kept(mnt, "hibernated");
+            goto done;
+        }
+        if (ws.hibernated < 0)
+            gk3l_log("warning: cannot tell whether Windows is hibernated; make sure Windows was shut down with Fast Startup off");
+    }
+    if (foreign) {
+        snprintf(p, sizeof p, "%s/loader/loader.conf", mnt);
+        snprintf(q, sizeof q, "%s.before-gaokun3", p);
+        if (gk3l_exists(q)) {
+            if (rename(q, p))
+                gk3l_log("warning: cannot put loader/loader.conf.before-gaokun3 back (%s)", strerror(errno));
+            else
+                gk3l_log("ESP: loader/loader.conf restored from its .before-gaokun3 copy");
+        }
+        gk3l_log("ESP is shared with another system: the fallback EFI/BOOT/BOOTAA64.EFI, loader/ and EFI/systemd stay as they are");
+        note_esp_kept(mnt, "foreign");
+        goto done;
+    }
+    for (int k = 0; k < 3; k++) {
+        snprintf(p, sizeof p, "%s/%s", mnt, rels[k]);
+        err = gk3l_read_file(p, bufs[k], lens[k], 64u << 20);
+        if (err == ENOENT)
+            err = 0;
+        if (err) {
+            gk3l_log("warning: cannot read %s on the EFI system partition (%s); the ESP is left as it is", rels[k], strerror(err));
+            note_esp_kept(mnt, "unreadable");
+            goto done;
+        }
+    }
+    switch (gk3w_fallback_decide(cur, cur_len, w, w_len, bak, bak_len)) {
+    case GK3W_FB_LEAVE_OTHER:
+        keep_bak = !gk3w_fallback_bak_disposable(bak, bak_len, w, w_len);
+        gk3l_log("EFI/BOOT/BOOTAA64.EFI holds another system's boot loader: left as it is");
+        break;
+    case GK3W_FB_RESTORE_ORIGINAL:
+    case GK3W_FB_USE_BAK:
+        target = bak, target_len = bak_len;
+        break;
+    case GK3W_FB_USE_W:
+        target = w, target_len = w_len;
+        break;
+    case GK3W_FB_NO_WINDOWS:
+        gk3l_log("warning: EFI/BOOT/BOOTAA64.EFI is systemd-boot and there is neither the Windows Boot Manager nor a usable backup to put back; the ESP is left as it is");
+        note_esp_kept(mnt, "no-windows");
+        goto done;
+    case GK3W_FB_UNTOUCHED:
+        break;
+    }
+    snprintf(p, sizeof p, "%s/EFI/BOOT/BOOTAA64.EFI", mnt);
+    if (target && !(cur && cur_len == target_len && !memcmp(cur, target, target_len))) {
+        snprintf(q, sizeof q, "%s/EFI/BOOT", mnt);
+        if ((err = gk3l_mkdirs(q)) || (err = gk3l_replace_file(p, target, target_len)) || !gk3l_file_same(p, target, target_len)) {
+            gk3l_log("warning: restoring EFI/BOOT/BOOTAA64.EFI failed (%s); the rest of the ESP is left as it is", err ? strerror(err) : "read-back mismatch");
+            note_esp_kept(mnt, "write-failed");
+            goto done;
+        }
+        gk3l_log("ESP: EFI/BOOT/BOOTAA64.EFI restored (%s)", target == w ? "the Windows Boot Manager" : "the file it held before");
+    }
+    /* systemd-boot 的配置与副本、中断留下的临时文件；最后才删备份（前面失败时它还在，重跑仍有还原的来源） */
+    snprintf(q, sizeof q, "%s/loader", mnt);
+    if (gk3l_is_dir(q) && gk3l_rm_rf(q))
+        err = 1;
+    snprintf(q, sizeof q, "%s/EFI/systemd", mnt);
+    if (gk3l_is_dir(q) && gk3l_rm_rf(q))
+        err = 1;
+    snprintf(q, sizeof q, "%s.tmp", p);
+    unlink(q);
+    snprintf(q, sizeof q, "%s.before-gaokun3.tmp", p);
+    unlink(q);
+    snprintf(q, sizeof q, "%s.before-gaokun3", p);
+    if (!err && !keep_bak && gk3l_exists(q) && unlink(q))
+        err = 1;
+    if (err)
+        gk3l_log("warning: some of loader/, EFI/systemd or EFI/BOOT/BOOTAA64.EFI.before-gaokun3 could not be removed from the ESP");
+    else
+        gk3l_log("ESP: restored to how it was before the installer was written to this disk (no Android on it)");
+done:
+    free(cur);
+    free(w);
+    free(bak);
+    sync();
+    if (gk3l_umount_tmp(mnt))
+        gk3l_log("warning: cannot unmount the EFI system partition");
+}
+
 int gk3l_live_remove(gk3l_disk *d, int as_note)
 {
     static gk3w_span parts[1024];
@@ -367,6 +544,7 @@ int gk3l_live_remove(gk3l_disk *d, int as_note)
     }
     gk3l_log("installer partition %s (%s) removed from the partition table and the kernel", live_node, lv.name);
     esp_drop_live_entries(esp_node);
+    esp_restore_no_android(esp_node, d->name);
     if (grow) {
         if (!as_note)
             gk3w_progress(80, "remove-installer");

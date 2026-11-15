@@ -149,7 +149,11 @@ class _RiskPageState extends State<RiskPage> {
             if (s.removeInstaller) rmlive,
           ],
         RiskKind.edit => [(Icons.delete_outline, l.riskEditHead, l.riskEditBody, true)],
-        RiskKind.removeInstaller => [rmlive],
+        // ESP 上没有 Android 的启动项（esp-info gaokun3=no，与 gk3l remove-installer 第 6 步同一条规则）：删除时 ESP
+        // 一并还原，回落路径换回去之后 Windows 可能要 BitLocker 恢复密钥。读不到 ESP 时也说（宁可多说）
+        RiskKind.removeInstaller => [
+            !(s.espInfo?.ours ?? false) ? (rmlive.$1, rmlive.$2, '${rmlive.$3}\n\n${l.riskRmLiveEsp}', rmlive.$4) : rmlive,
+          ],
       },
       (Icons.backup_outlined, l.riskBackupHead, l.riskBackupBody, true),
       (Icons.power, l.riskPowerHead, l.riskPowerBody, false),

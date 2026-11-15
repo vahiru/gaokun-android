@@ -5,7 +5,7 @@
 //   中途失败时留下的中间状态讲不清楚。
 // ★ 界面只负责"让人选、让人确认"。能不能删由后端判（gk3l delete，installer/backend/src/linux/edit.c）：
 //   ESP 不动、挂着的不动，后端会自己再验一遍；界面上不给按钮只是先把原因说出来。
-// 同一文件里还有删除安装器分区页（RemoveInstallerPage，gk3l remove-installer）：Android 已装好时从方式页进来。
+// 同一文件里还有删除安装器分区页（RemoveInstallerPage，gk3l remove-installer）：安装器从本机磁盘上的安装器分区运行时从方式页进来。
 import 'package:flutter/material.dart';
 import 'package:gk3_common/backend/protocol.dart';
 import 'package:gk3_common/ui/theme.dart';
@@ -215,6 +215,8 @@ class _RemoveInstallerPageState extends State<RemoveInstallerPage> {
         _done = true;
         _msg = rmv != null && rmv.yes('grow') ? l.rmLiveOkMerge(fmtMib(rmv.intOf('userdata_mib'))) : l.rmLiveOk;
         if (r.ofType('NOTE').any((n) => n['code'] == 'userdata-fs-not-grown')) _msg = '$_msg\n${l.doneNoteFsNotGrown}';
+        // 还没装 Android 而 ESP 没能还原（Windows 在休眠、有别的系统、读写失败……）：开机菜单还在
+        if (r.ofType('NOTE').any((n) => n['code'] == 'esp-kept')) _msg = '$_msg\n${l.rmLiveEspKept}';
       } else {
         _err = l.editFailed(callErrorText(l, r));
       }
@@ -237,7 +239,9 @@ class _RemoveInstallerPageState extends State<RemoveInstallerPage> {
         if (lv != null && !_done) ...[
           Text('${lv.label}  ·  ${lv.path}  ·  ${fmtMib(lv.sizeMib)}', style: tt.titleMedium),
           const SizedBox(height: 16),
-          Text(rm?.merge ?? false ? l.rmLiveMerge(lv.label, fmtMib(lv.sizeMib)) : l.rmLiveFree(lv.label, fmtMib(lv.sizeMib)), style: tt.bodyLarge),
+          // 没装 Android 时一定是未分配空间；装了时按 plan 的预览（拿不到就不说，同方式页）
+          if (s.reinstall == null || rm != null)
+            Text(rm?.merge ?? false ? l.rmLiveMerge(lv.label, fmtMib(lv.sizeMib)) : l.rmLiveFree(lv.label, fmtMib(lv.sizeMib)), style: tt.bodyLarge),
           if (rm != null && rm.merge) ...[const SizedBox(height: 6), Text(l.optsDataRmLive(fmtMib(rm.userdataMib)), style: tt.bodyLarge)],
           const SizedBox(height: 24),
           SizedBox(

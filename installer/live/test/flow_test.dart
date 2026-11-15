@@ -53,6 +53,35 @@ void main() {
     expect(a, contains('--release /media/gk3/gaokun3/payload'));
   });
 
+  testWidgets('windows-live（还没装 Android）：方式页同样可以单独删除安装器分区，空间成为未分配空间', (t) async {
+    await pumpApp(t, 'windows-live');
+    await tap(t, find.text(l.btnStart));
+    await see(t, find.text(l.modeRmLiveTitle));
+    await see(t, find.textContaining(l.rmLiveFree('GK3LIVE', '4 GiB')));
+    // 风险页：没装 Android 时删除会顺带还原 ESP（回落路径换回 Windows 启动管理器），写明 BitLocker 的后果
+    await tap(t, find.text(l.modeRmLiveTitle));
+    await next(t);
+    await see(t, find.text(l.riskRmLiveHead));
+    await see(t, find.textContaining(l.riskRmLiveEsp));
+  });
+
+  testWidgets('android-live：删除安装器分区的风险页不说还原 ESP（ESP 上是 Android 的启动链，不动）', (t) async {
+    await pumpApp(t, 'android-live');
+    await tap(t, find.text(l.btnStart));
+    await tap(t, find.text(l.modeRmLiveTitle));
+    await next(t);
+    await see(t, find.text(l.riskRmLiveHead));
+    expect(find.textContaining(l.riskRmLiveEsp), findsNothing);
+  });
+
+  testWidgets('windows-live、Windows 在休眠：删除安装器分区不能选（会改 ESP），写明原因', (t) async {
+    await pumpApp(t, 'windows-live', overrides: {'esp-info': 'esp_info-hibernated.txt'});
+    await tap(t, find.text(l.btnStart));
+    await see(t, find.text(l.modeRmLiveTitle));
+    final card = find.ancestor(of: find.text(l.modeRmLiveTitle), matching: find.byType(ChoiceCard));
+    expect(t.widget<ChoiceCard>(card).reason, l.modeWhyHibernated);
+  });
+
   testWidgets('windows-setup（Windows 脚本只划了 GK3LIVE、没有空闲）：双系统禁用并报"至少要多少"，安装器里不缩分区', (t) async {
     await pumpApp(t, 'windows-setup');
     await tap(t, find.text(l.btnStart));

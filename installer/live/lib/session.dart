@@ -89,7 +89,7 @@ enum RiskKind {
   /// 删除分区：gk3l delete
   edit,
 
-  /// 删除安装器分区（Android 已装好时在方式页单独做）：gk3l remove-installer
+  /// 删除安装器分区（安装器从它运行时在方式页单独做，不论是否已装 Android）：gk3l remove-installer
   removeInstaller,
 }
 
@@ -313,7 +313,7 @@ class Session extends ChangeNotifier {
   // ── 安装器分区（见 installer/backend/src/linux/live.h）────────────────────
   /// 所选的盘上的安装器分区：从这块盘上的 GK3LIVE 启动、内容已读进内存（PART ram=yes）。
   /// 有它时：整盘清空会保留它；选项页给"保留安装器分区"（默认不保留 ⇒ 装完删掉、空间并进 /data）；
-  /// Android 已装好时方式页可以单独删除它
+  /// 方式页总能单独删除它（还没装 Android 时 ESP 一并还原，见 gk3l remove-installer）
   Part? get installerPart => disk?.parts.where((p) => p.ram).firstOrNull;
 
   /// 装完之后保留安装器分区。默认不保留（用户 2026-11-13）
