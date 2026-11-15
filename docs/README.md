@@ -7,7 +7,7 @@
 | Install / update / remove | [INSTALL.md](INSTALL.md) | [INSTALL.zh-CN.md](INSTALL.zh-CN.md) |
 | Questions & troubleshooting | [FAQ.md](FAQ.md) | [FAQ.zh-CN.md](FAQ.zh-CN.md) |
 | Known limitations, unsupported features | [known-limitations.md](known-limitations.md) | [known-limitations.zh-CN.md](known-limitations.zh-CN.md) |
-| Release notes | [relnotes/](relnotes/) (latest released: [v1.0.0-rc.3](relnotes/v1.0.0-rc.3.md)) | 同左（已发布的各版为英文；1.0.0正式版起另附`.zh-CN.md`） |
+| Release notes | [relnotes/](relnotes/) (latest: [v1.0.0-rc.4](relnotes/v1.0.0-rc.4.md)) | [relnotes/](relnotes/)（最新：[v1.0.0-rc.4](relnotes/v1.0.0-rc.4.zh-CN.md)；v1.0.0-rc.1起提供中文版） |
 
 项目总览与硬件支持状态表位于仓库根目录的[README.md](../README.md)与[README.zh-CN.md](../README.zh-CN.md)。
 
@@ -35,7 +35,7 @@
 | [dev/gpu-turnip.md](dev/gpu-turnip.md) | Adreno 690 GPU加速架构：Turnip + ANGLE + DPU图形栈、`VkNativeBufferANDROID`延迟绑定修复、GPU SMMU失速死锁处理与P010零拷贝合成 |
 | [dev/mesa-a17.md](dev/mesa-a17.md) | Android 17上的Mesa 26.1 Turnip构建管线（`meson2hermetic`与`scripts/mesa-a17/`） |
 | [dev/audio-video.md](dev/audio-video.md) | 音频与硬件视频编解码：Audioreach/SoundWire拓扑、扬声器增益与防爆音、有线耳机插拔检测、内置麦克风录音、低延迟音频播放及`qcom-iris`视频硬件编解码 |
-| [dev/camera.md](dev/camera.md) | 相机子系统：前后摄（Hi-846 / OV13B10）与闪光灯供电拓扑、`titan_top_gdsc`电源域死锁修复、`libcamera`软件ISP标定及自研AIDL Camera HAL |
+| [dev/camera.md](dev/camera.md) | 相机子系统：前后摄（Hi-846 / OV13B10）与闪光灯供电拓扑、`titan_top_gdsc`电源域死锁修复、`libcamera` `qcom-ife`硬件ISP管线及自研AIDL Camera HAL |
 
 ### 2. 专题设计与协议参考
 
