@@ -177,5 +177,5 @@ jobs:
         run: |
           pre=(); [ '${{ needs.build.outputs.prerelease }}' = yes ] && pre=(--prerelease)
           gh release create "live-installer-v$V" -R "$GITHUB_REPOSITORY" --draft --latest=false "${pre[@]}" \
-            --title "LiveCD installer v$V" --notes "Draft: write the release notes before publishing." \
+            --title "Live installer v$V" --notes "Draft: write the release notes before publishing." \
             dist/*.iso dist/SHA256SUMS dist/release.txt
