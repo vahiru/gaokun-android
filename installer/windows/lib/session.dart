@@ -710,6 +710,8 @@ class Session extends ChangeNotifier {
   Future<bool> uninstall({bool installerOnly = false}) async {
     if (mftMoving) return _busy();
     _begin(installerOnly ? WriteTask.removeLive : WriteTask.uninstall);
+    rmLiveMib = livePart?.sizeMib ?? 0;
+    rmLiveBesideAndroid = installed;
     try {
       await _startDiskWrite();
       final args = ['--disk', '${disk!.num}', if (installerOnly) '--installer-only', '--real-disk', ..._bitlockerArgs], input = _bitlockerInput;
@@ -722,6 +724,11 @@ class Session extends ChangeNotifier {
     }
     return result!.ok;
   }
+
+  /// 删除安装器分区（[WriteTask.removeLive]）时它的大小，与当时是否装着 Android（装着时空出的空间在 /data 后面，
+  /// 不能合并回 C 盘）：完成页照它说，不看 FREE —— 没装 Android 时它会与前面的未分配空间连成一块
+  int rmLiveMib = 0;
+  bool rmLiveBesideAndroid = false;
 
   /// 卸载之后空出来的空间（gk3w uninstall 的 FREE 记录里最大的一段）
   int get freedMib {

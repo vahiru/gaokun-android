@@ -568,5 +568,6 @@
   "errLiveMissing": "No installer partition was found on the system disk.",
   "runRmLiveTitle": "Deleting the installer partition",
   "failRmLiveTitle": "Installer partition not deleted",
-  "failTouchedRmLive": "The deletion only completed partially, though your Windows installation is unaffected. Return to the start and run the deletion again."
+  "failTouchedRmLive": "The deletion only completed partially, though your Windows installation is unaffected. Return to the start and run the deletion again.",
+  "errLiveUnrecognized": "The installer partition on the system disk has unrecognized contents; the operation was stopped to avoid deleting data."
 }

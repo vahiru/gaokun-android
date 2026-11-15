@@ -72,6 +72,9 @@ class AlongBadTable extends Along {
   const AlongBadTable();
 }
 
+/// 界面自己造的错误码：后端没报 ERR 就退出了（崩溃、被结束），exit= 是退出码
+const kBackendExitCode = 'backend-exit';
+
 class AlongError extends Along {
   const AlongError(this.msg, [this.err]);
   final String msg;
@@ -203,7 +206,7 @@ class Session extends ChangeNotifier {
 
   // ── 盘 ──────────────────────────────────────────────────────────────────
   List<Disk>? disks;
-  /// probe 失败时的 ERR 记录（后端没给 ERR 就按退出码造一条）：方式页照它说明原因，而不是"未检测到内置硬盘"
+  /// probe 失败时的 ERR 记录（后端没给 ERR 就造一条 [kBackendExitCode]，带退出码）：方式页照它说明原因，而不是"未检测到内置硬盘"
   Gk3Record? probeErr;
 
   Future<void> probe() async {
@@ -212,7 +215,7 @@ class Session extends ChangeNotifier {
     _changed();
     final r = await backend.run('probe');
     disks = Disk.fromProbe(r);
-    if (!r.ok) probeErr = r.err ?? Gk3Record('ERR', {'code': r.error ?? 'exit ${r.exitCode}'});
+    if (!r.ok) probeErr = r.err ?? Gk3Record('ERR', {'code': kBackendExitCode, 'exit': '${r.exitCode}'});
     _changed();
   }
 

@@ -25,6 +25,7 @@ String errText(L10n l, Gk3Record err, {bool media = false, bool internal = false
     'esp-missing' => l.errEspMissing,
     'esp-ambiguous' => l.errEspAmbiguous,
     'live-missing' => l.errLiveMissing,
+    'live-unrecognized' => l.errLiveUnrecognized,
     'disk-layout' || 'disk-not-gpt' => l.errPartTable,
     'verify-layout' || 'update-properties' => l.errLayoutVerify,
     'disk-sector' || 'disk-size' => l.errDiskInfo,

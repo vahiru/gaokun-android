@@ -823,5 +823,6 @@
   "errLiveMissing": "系统磁盘上未找到安装器分区。",
   "runRmLiveTitle": "正在删除安装器分区",
   "failRmLiveTitle": "安装器分区未删除",
-  "failTouchedRmLive": "删除流程仅完成一部分，Windows系统不受影响。请返回首页并重新执行删除。"
+  "failTouchedRmLive": "删除流程仅完成一部分，Windows系统不受影响。请返回首页并重新执行删除。",
+  "errLiveUnrecognized": "系统磁盘上的安装器分区内容无法识别；为避免误删数据，操作已中止。"
 }

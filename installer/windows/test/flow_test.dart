@@ -514,12 +514,15 @@ void main() {
     await hold(t, l.holdToRmLive);
     await waitFor(t, find.byType(DonePage), tries: 400);
     expect(find.text(l.doneRmLiveTitle), findsOneWidget);
+    // 释放的是安装器分区本身的 2 GiB（FREE 记录是与前面的未分配空间连成的 40 GiB），可以合并回 C 盘
+    expect(find.text(l.doneUninstallSub('2 GiB')), findsOneWidget);
+    expect(find.text(l.doneUninstallExtend), findsOneWidget);
     // 不必重启：只有"返回首页"
     expect(find.text(l.btnRebootNow), findsNothing);
     expect(rec.calls.singleWhere((c) => c.first == 'uninstall'), containsAllInOrder(['--disk', '2', '--installer-only', '--real-disk']));
   });
 
-  testWidgets('删除安装器分区：已装 Android 时不动 EFI 分区，确认页不说还原引导', (t) async {
+  testWidgets('删除安装器分区：已装 Android 时不动 EFI 分区，确认页不说还原引导，完成页不建议合并回 C 盘', (t) async {
     Gk3Event xbootldr(Gk3Event e) => e is Gk3Record && e.type == 'PART' && e['path'] == 'disk0p4'
         ? Gk3Record('PART', {...e.fields, 'type': kXbootldrType, 'name': 'GK3LIVE', 'fslabel': ''})
         : e;
@@ -529,6 +532,11 @@ void main() {
     await tap(t, find.text(l.mediaRmLiveTitle));
     await see(t, find.text(l.rmLivePart('2.3 GiB')));
     expect(find.text(l.rmLiveBoot), findsNothing);
+    await hold(t, l.holdToRmLive);
+    await waitFor(t, find.byType(DonePage), tries: 400);
+    expect(find.text(l.doneUninstallSub('2.3 GiB')), findsOneWidget);
+    // 空出的空间在 /data 后面：合并不回 C 盘
+    expect(find.text(l.doneUninstallExtend), findsNothing);
   });
 
   testWidgets('旧版脚本建的 GK3LIVE（Basic data 类型）：不提供删除', (t) async {

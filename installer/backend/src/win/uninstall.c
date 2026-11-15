@@ -3,10 +3,12 @@
  *
  *   gk3w uninstall --disk N --backup-dir DIR [--installer-only] [--real-disk [--bitlocker-key -]]
  *
- * 安装器分区 GK3LIVE（media --target internal 写的：XBOOTLDR 类型、GPT 名 GK3LIVE）一并删除：卸载会删掉 ESP 上的
- * systemd-boot，之后它启动不了，也挡着再写一份。旧版脚本建的 Basic data 类型的 GK3LIVE 不认、不动。
- * --installer-only：只删安装器分区。盘上有 Android 分区时 Android 与 ESP 都不动（GK3LIVE 的启动项在它自己里面，
- * 随分区一起没了）；没有时与完整卸载相同（ESP 还原到写入安装器分区之前）。盘上没有安装器分区时拒绝（live-missing）。
+ * 安装器分区 GK3LIVE（media --target internal 写的：XBOOTLDR 类型、GPT 名 GK3LIVE，内容是卷标 GK3LIVE 的 FAT32）一并
+ * 删除：卸载会删掉 ESP 上的 systemd-boot，之后它启动不了，也挡着再写一份。旧版脚本建的 Basic data 类型的 GK3LIVE 不认、
+ * 不动；类型与名字对、内容不像的也留着。
+ * --installer-only：只删安装器分区。盘上有 Android 的分区（按名字认）时 Android 与 ESP 都不动（GK3LIVE 的启动项在它
+ * 自己里面，随分区一起没了）；没有时与完整卸载相同（ESP 还原到写入安装器分区之前）。盘上没有安装器分区时拒绝
+ * （live-missing），内容不像时拒绝（live-unrecognized）。
  *
  * 0 预检（只读；不过就什么都不改）：
  *   - 分区：misc、metadata、boot_a、boot_b、super、gk3rescue、userdata 中盘上有的。每个名字至多一个、必须是 Linux 数据
@@ -386,7 +388,8 @@ int gk3w_cmd_uninstall(int argc, wchar_t **argv)
     gk3w_touched T = GK3W_TOUCHED_NO;
     gk3w_disk d;
     GUID ids[N_OURS + MAX_LIVE];
-    size_t n_ids = 0, n_android, n_live = 0;
+    size_t n_ids = 0, n_android = 0, n_live = 0;
+    int android_present = 0;
     const PARTITION_INFORMATION_EX *esp_part = NULL;
     DRIVE_LAYOUT_INFORMATION_EX *snap = NULL;
     uint8_t *head = NULL, *winboot = NULL;
@@ -425,7 +428,22 @@ int gk3w_cmd_uninstall(int argc, wchar_t **argv)
     }
     memcpy(snap, d.lay, d.laysz);
 
-    /* ── 0 预检：分区 ── */
+    /* ── 0 预检：分区 ──
+     * --installer-only 不删 Android 的分区，只看在不在（在就不动 ESP）：下面逐个把关的检查只为删它们，不能因此挡住删安装器分区 */
+    if (only_live) {
+        for (DWORD i = 0; i < d.lay->PartitionCount; i++) {
+            const PARTITION_INFORMATION_EX *p = &d.lay->PartitionEntry[i];
+            wchar_t wn[GK3_GPT_NAME_CHARS + 1];
+            if (p->PartitionStyle != PARTITION_STYLE_GPT || !p->PartitionLength.QuadPart)
+                continue;
+            memcpy(wn, p->Gpt.Name, sizeof p->Gpt.Name);
+            wn[GK3_GPT_NAME_CHARS] = 0;
+            for (size_t k = 0; k < N_OURS; k++)
+                if (!wcscmp(wn, OUR_NAMES[k]))
+                    android_present = 1;
+        }
+        goto scan_live;
+    }
     for (size_t k = 0; k < N_OURS; k++) {
         int hits = 0;
         char nm[32];
@@ -478,8 +496,12 @@ int gk3w_cmd_uninstall(int argc, wchar_t **argv)
         gk3w_log("no Android content found yet, but the partitions are laid out exactly as the installer creates them (an interrupted install): removing them");
     }
     n_android = n_ids;
+    android_present = n_android > 0;
 
-    /* ── 0 预检：安装器分区 ── */
+scan_live:
+    /* ── 0 预检：安装器分区 ──
+     * 只认我们写的：XBOOTLDR 类型、GPT 名 GK3LIVE，内容是 FAT32、引导扇区里的卷标是 GK3LIVE（media.c 先写好 FAT32 再建分区）。
+     * 不像的（例如别的系统把自己的内核放进了这个 XBOOTLDR 分区）：完整卸载时留着它，--installer-only 时拒绝 */
     for (DWORD i = 0; i < d.lay->PartitionCount; i++) {
         const PARTITION_INFORMATION_EX *p = &d.lay->PartitionEntry[i];
         wchar_t wn[GK3_GPT_NAME_CHARS + 1];
@@ -491,18 +513,13 @@ int gk3w_cmd_uninstall(int argc, wchar_t **argv)
         wn[GK3_GPT_NAME_CHARS] = 0;
         if (_wcsicmp(wn, L"GK3LIVE"))
             continue;
-        if (n_live == MAX_LIVE) {
-            gk3w_err_kv(T, "partlabel-conflict", "names", "GK3LIVE", "too many installer partitions on this disk (disk not touched)", 0);
-            goto out;
-        }
-        if (read_kind(&d, p, head, &kind)) {
-            gk3w_err_kv(T, "disk-read", "name", "GK3LIVE", "cannot read the start of the partition (disk not touched)", GetLastError());
-            goto out;
-        }
-        /* 我们写的是 FAT32：装着 NTFS / BitLocker / exFAT 的不是我们的安装器分区 */
-        if (kind == GK3W_KIND_NTFS || kind == GK3W_KIND_BITLOCKER || kind == GK3W_KIND_EXFAT) {
-            gk3w_err_kv(T, "foreign-content", "name", "GK3LIVE", "this partition holds a Windows file system, so it is not the installer partition (disk not touched)", 0);
-            goto out;
+        if (n_live == MAX_LIVE || read_kind(&d, p, head, &kind) || kind != GK3W_KIND_FAT || memcmp(head + 71, "GK3LIVE    ", 11)) {
+            if (only_live) {
+                gk3w_err(T, "live-unrecognized", "a partition named GK3LIVE does not hold the FAT32 file system this installer writes; leaving it (disk not touched)", 0);
+                goto out;
+            }
+            gk3w_log("a partition named GK3LIVE (XBOOTLDR type) does not hold the FAT32 file system this installer writes: left as it is");
+            continue;
         }
         gk3w_log("installer partition GK3LIVE: %llu MiB, content %s", (unsigned long long)(p->PartitionLength.QuadPart >> 20), gk3w_content_kind_name(kind));
         ids[n_android + n_live++] = p->Gpt.PartitionId;
@@ -513,9 +530,7 @@ int gk3w_cmd_uninstall(int argc, wchar_t **argv)
             goto out;
         }
         /* Android 还在：只删安装器分区，Android 的分区与 ESP 都不动 */
-        if (n_android) {
-            memmove(ids, ids + n_android, n_live * sizeof ids[0]);
-            n_android = 0;
+        if (android_present) {
             touch_esp = 0;
             gk3w_log("Android is installed: only the installer partition is removed; the Android partitions and the EFI system partition stay as they are");
         }
@@ -645,10 +660,10 @@ esp_checked:
         goto out;
     }
 
-    /* ══ 从这里起开始动盘 ══ */
-    T = GK3W_TOUCHED_YES;
+    /* ══ 从这里起开始动盘（不动 ESP 时第一次写是下面的删分区） ══ */
     if (!touch_esp)
         goto esp_done;
+    T = GK3W_TOUCHED_YES;
 
     /* ── 1 还原引导 ── */
     if (!s.foreign) {
@@ -706,13 +721,15 @@ esp_done:
         DWORD count = 0;
         DRIVE_LAYOUT_INFORMATION_EX *lay;
         if (gk3w_disk_read_layout(&d)) {
-            gk3w_err(T, "verify-layout", "re-reading the partition table before removing partitions failed (EFI system partition already cleaned, partitions not removed)", GetLastError());
+            gk3w_err(T, "verify-layout", touch_esp ? "re-reading the partition table before removing partitions failed (EFI system partition already cleaned, partitions not removed)"
+                                                    : "re-reading the partition table before removing partitions failed (disk not touched)", GetLastError());
             goto out;
         }
         if (d.lay->PartitionCount != snap->PartitionCount ||
             memcmp(&d.lay->Gpt, &snap->Gpt, sizeof snap->Gpt) ||
             memcmp(d.lay->PartitionEntry, snap->PartitionEntry, snap->PartitionCount * sizeof(PARTITION_INFORMATION_EX))) {
-            gk3w_err(T, "layout-changed", "the partition table changed during the uninstall; run uninstall again (EFI system partition already cleaned, partitions not removed)", 0);
+            gk3w_err(T, "layout-changed", touch_esp ? "the partition table changed during the uninstall; run uninstall again (EFI system partition already cleaned, partitions not removed)"
+                                                     : "the partition table changed during the uninstall; run uninstall again (disk not touched)", 0);
             goto out;
         }
         lay = calloc(1, d.laysz);
@@ -733,6 +750,7 @@ esp_done:
             if (!ours)
                 lay->PartitionEntry[count++] = *p;
         }
+        T = GK3W_TOUCHED_YES;
         if (gk3w_disk_set_layout(&d, lay, count, T)) {
             free(lay);
             goto out;

@@ -111,7 +111,7 @@ class DonePage extends StatelessWidget {
         WriteTask.install => l.doneInstallSub,
         WriteTask.uninstall => l.doneUninstallSub(fmtMib(s.freedMib)),
         WriteTask.media => usb ? l.doneMediaSubUsb : l.doneMediaSubInternal,
-        WriteTask.removeLive => l.doneUninstallSub(fmtMib(s.freedMib)),
+        WriteTask.removeLive => l.doneUninstallSub(fmtMib(s.rmLiveMib)),
       },
       bottom: Row(children: [
         if (!noReboot) Btn(l.btnLater, onPressed: () => restart(context), kind: BtnKind.text),
@@ -155,7 +155,7 @@ class DonePage extends StatelessWidget {
             else Bullet(l.doneMediaStays, icon: Icons.menu_open),
           ],
         WriteTask.removeLive => [
-            Bullet(l.doneUninstallExtend, icon: Icons.open_in_full),
+            if (!s.rmLiveBesideAndroid) Bullet(l.doneUninstallExtend, icon: Icons.open_in_full),
             Bullet(l.doneRmLiveBoot, icon: Icons.menu_open),
           ],
       }),
