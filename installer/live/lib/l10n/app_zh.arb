@@ -409,7 +409,7 @@
     }
   },
   "shellOpen": "打开终端",
-  "shellHint": "第2个虚拟终端（tty2）提供root shell及sgdisk、parted、resize2fs等磁盘工具：按Ctrl+Alt+F2切换至终端，按Ctrl+Alt+F1返回图形界面。",
+  "shellHint": "第2个虚拟终端（tty2）提供root shell及sgdisk、resize2fs等磁盘工具：按Ctrl+Alt+F2切换至终端，按Ctrl+Alt+F1返回图形界面。",
   "fixtureBadge": "演示数据：{scenario}",
   "@fixtureBadge": {
     "placeholders": {
