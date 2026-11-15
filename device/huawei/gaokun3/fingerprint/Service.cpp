@@ -343,11 +343,14 @@ class Session final : public BnSession {
         bool attempted = false;
         unsigned usableProbes = 0;
         unsigned statusErrors = 0;
-        // Android keyguard authentication stays armed until canceled. The
-        // desktop driver's 30-second verify timeout does not apply here.
-        auto deadline = kind == 1 ? Clock::now() + 90s : Clock::time_point::max();
+        // Every operation stays armed until canceled. Settings cancels
+        // enrollment when the user leaves the screen; a HAL deadline only
+        // discarded slow but progressing enrollments (frames lost to status
+        // retries and quality rejects), and keyguard authentication must not
+        // time out. The desktop driver's 30-second verify timeout does not
+        // apply here either.
         auto pressStart = Clock::time_point{};
-        while (!cancel && !closed_ && Clock::now() < deadline) {
+        while (!cancel && !closed_) {
             // Detection may stay active while authentication is locked out.
             maybeClearTimedLockout();
             // SRAM consumption clears frame-ready even while the finger stays
@@ -463,7 +466,7 @@ class Session final : public BnSession {
             }
             std::this_thread::sleep_for(300ms);
         }
-        error((cancel || closed_) ? Error::CANCELED : Error::TIMEOUT);
+        error(Error::CANCELED);
     }
     void loop() {
         for (;;) {
