@@ -1,0 +1,4 @@
+O DISK path=/dev/nvme0n1 size_mib=20480 sector=512 physsector=512 model=? bus=nvme removable=0 medium=no table=unreadable
+E ERR code=disk-unreadable disk=/dev/nvme0n1
+E !! cannot read the partition table (I/O error); its partitions and free space are not listed
+X 1

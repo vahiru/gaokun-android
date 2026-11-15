@@ -125,23 +125,20 @@ rec() {
         -- bash -c "$real"
     printf '%-78s %s\n' "$call" "$name" >> "$dir/index.txt"
 }
-# 探测只留这块盘和 U 盘（容器里还看得见宿主自己的盘与别的 loop），
-# 并把 loop 报不出来的字段按真机填上：内置盘 bus=nvme，U 盘 bus=usb removable=1
-probe_of() {   # $2=nostick：这个场景里没有 U 盘（免 U 盘安装）
-    local u=$STICK; [ "${2:-}" = nostick ] && u=/nonexistent
-    printf '%s' "$G probe | awk -v d='$1' -v u='$u' '
+# 探测只留这块盘的行：gk3l probe 在真机上只列内置的NVMe（容器里别的 loop 盘、U 盘都不是它会列出的），
+# 并把 loop 报不出来的字段按真机填上：bus=nvme
+probe_of() {
+    printf '%s' "$G probe | awk -v d='$1' '
       (\$1==\"DISK\" && \$2==\"path=\"d) { sub(/bus=[^ ]*/, \"bus=nvme\"); print; next }
-      (\$1==\"DISK\" && \$2==\"path=\"u) { sub(/bus=[^ ]*/, \"bus=usb\"); sub(/removable=0/, \"removable=1\"); print; next }
       (\$1==\"PART\" && \$3==\"disk=\"d) { print; next }
-      (\$1==\"PART\" && \$3==\"disk=\"u) { print; next }
-      (\$1==\"FREE\" && (\$2==\"disk=\"d || \$2==\"disk=\"u)) { print }'"
+      (\$1==\"FREE\" && \$2==\"disk=\"d) { print }'"
 }
 header() {   # $1=场景 $2=说明
     mkdir -p "$OUT/$1"; rm -f "$OUT/$1"/*.txt
     { echo "# 场景：$1 —— $2"
       echo "# 录制：installer/tools/test/gen-fixtures.sh，$(date +%F)，Debian $(cat /etc/debian_version) 容器，loop 设备"
-      echo "# 替换：loop 设备 → /dev/nvme0n1（内置盘）与 /dev/sda（安装 U 盘，挂在 /media/gk3）；"
-      echo "#       DISK 行的 bus= 按真机填（loop 报不出来）；U 盘的 removable 填 1。其余一律原样。"
+      echo "# 替换：loop 设备 → /dev/nvme0n1（内置盘）与 /dev/sda（安装 U 盘，挂在 /media/gk3；gk3l probe 不列它）；"
+      echo "#       DISK 行的 bus= 按真机填（loop 报不出来）。其余一律原样。"
       echo "# 格式：<界面发出的调用（gk3l 的命令与参数）>  <文件>。找不到精确匹配时用 '<命令> *' 那一行。"; } > "$OUT/$1/index.txt"
 }
 
@@ -187,12 +184,12 @@ rec factory "$DF" plan-along-empty.txt "plan --sector 512 --region-start 0 --reg
 DATA_MIB=$(( $(blockdev --getsize64 "${DF}p4") / 1048576 ))
 win_shrink "$DF" 4 $(( DATA_MIB - 81920 )) || { echo "windows-free：缩 Data 失败"; exit 1; }
 
-# 双系统的一组：探测、ESP、方案（选中的空闲区）、整盘方案、真装一遍。$1=场景 $2=盘 $3=nostick（没有 U 盘）
+# 双系统的一组：探测、ESP、方案（选中的空闲区）、整盘方案、真装一遍。$1=场景 $2=盘
 along_set() {
     local sc=$1 d=$2 fr rs re
-    rec "$sc" "$d" probe.txt    "probe" "$(probe_of "$d" "${3:-}")"
+    rec "$sc" "$d" probe.txt    "probe" "$(probe_of "$d")"
     rec "$sc" "$d" esp_info.txt "esp-info --disk /dev/nvme0n1"
-    fr=$(bash -c "$(probe_of "$d" "${3:-}")" | grep '^FREE ' | sort -t= -k5 -n | tail -1)
+    fr=$(bash -c "$(probe_of "$d")" | grep '^FREE ' | sort -t= -k5 -n | tail -1)
     rs=$(field "$fr" start); re=$(field "$fr" end)
     rec "$sc" "$d" plan-along.txt "plan --sector 512 --region-start $rs --region-end $re --disk /dev/nvme0n1"
     rec "$sc" "$d" plan-wipe.txt  "plan --mode wipe --disk /dev/nvme0n1"
@@ -216,7 +213,7 @@ mk_winlive() {   # $1=盘
     make_factory "$d"
     DATA_MIB=$(( $(blockdev --getsize64 "${d}p4") / 1048576 ))
     win_shrink "$d" 4 $(( DATA_MIB - 81920 )) || return 1
-    lf=$(bash -c "$(probe_of "$d" nostick)" | grep '^FREE ' | sort -t= -k5 -n | tail -1)
+    lf=$(bash -c "$(probe_of "$d")" | grep '^FREE ' | sort -t= -k5 -n | tail -1)
     ls=$(( ($(field "$lf" end) + 1 - 4 * 2097152) / 2048 * 2048 ))
     sgdisk -n 8:$ls:+4G -t 8:EA00 -c 8:GK3LIVE "$d" >/dev/null 2>&1 || return 1
     settle "$d"
@@ -239,9 +236,9 @@ echo "═══ windows-live ═══"
 DL=$(new_disk winlive 488386M); mk_winlive "$DL" || { echo "windows-live：造盘失败"; exit 1; }
 toram_of "$DL"
 header windows-live "免 U 盘装双系统：Windows 缩出 80 GiB 空闲，末尾 4 GiB 是安装器分区 GK3LIVE（XBOOTLDR），安装器从它读进内存运行"
-rec windows-live "$DL" probe.txt    "probe" "$(probe_of "$DL" nostick)"
+rec windows-live "$DL" probe.txt    "probe" "$(probe_of "$DL")"
 rec windows-live "$DL" esp_info.txt "esp-info --disk /dev/nvme0n1"
-fr=$(bash -c "$(probe_of "$DL" nostick)" | grep '^FREE ' | sort -t= -k5 -n | tail -1)
+fr=$(bash -c "$(probe_of "$DL")" | grep '^FREE ' | sort -t= -k5 -n | tail -1)
 rs=$(field "$fr" start); re=$(field "$fr" end)
 # 方式页评估时不带 --remove-installer，选项页的方案带（session.dart 的 _planArgs）
 rec windows-live "$DL" plan-along.txt    "plan --sector 512 --region-start $rs --region-end $re --disk /dev/nvme0n1"
@@ -258,11 +255,11 @@ echo "═══ android-live ═══"
 # 同样的盘装双系统时选了"保留安装器分区"：Android 与 GK3LIVE 都在，安装器又从 GK3LIVE 启动
 DL=$(new_disk winlive2 488386M); mk_winlive "$DL" || { echo "android-live：造盘失败"; exit 1; }
 toram_of "$DL"
-fr=$(bash -c "$(probe_of "$DL" nostick)" | grep '^FREE ' | sort -t= -k5 -n | tail -1)
+fr=$(bash -c "$(probe_of "$DL")" | grep '^FREE ' | sort -t= -k5 -n | tail -1)
 "$G" apply --release "$REL" --disk "$DL" --mode alongside --region-start "$(field "$fr" start)" --region-end "$(field "$fr" end)" >/dev/null 2>&1 \
     || { echo "android-live：安装失败"; exit 1; }
 header android-live "windows-live 上装了双系统、保留了安装器分区之后 —— 重新安装可行，也可以单独删除安装器分区"
-rec android-live "$DL" probe.txt    "probe" "$(probe_of "$DL" nostick)"
+rec android-live "$DL" probe.txt    "probe" "$(probe_of "$DL")"
 rec android-live "$DL" esp_info.txt "esp-info --disk /dev/nvme0n1"
 for k in no yes; do
   rec android-live "$DL" "plan-reinstall-keep-$k.txt" "plan --mode reinstall --disk /dev/nvme0n1 --keep-data $k --remove-installer"
@@ -278,13 +275,13 @@ echo "═══ windows-setup ═══"
 DS=$(new_disk winsetup 488386M); make_factory "$DS"
 DATA_MIB=$(( $(blockdev --getsize64 "${DS}p4") / 1048576 ))
 win_shrink "$DS" 4 $(( DATA_MIB - 512 )) || { echo "windows-setup：缩 Data 失败"; exit 1; }
-LF=$(bash -c "$(probe_of "$DS" nostick)" | grep '^FREE ' | sort -t= -k5 -n | tail -1)
+LF=$(bash -c "$(probe_of "$DS")" | grep '^FREE ' | sort -t= -k5 -n | tail -1)
 sgdisk -n 8:"$(field "$LF" start)":"$(field "$LF" end)" -t 8:0700 -c 8:"Basic data partition" "$DS" >/dev/null 2>&1; settle "$DS"
 mkfs.vfat -F 32 -n GK3LIVE "${DS}p8" >/dev/null
 umount /media/gk3 && mount "${DS}p8" /media/gk3 && mkdir -p /media/gk3/gaokun3
 head -c 65536 /dev/urandom > /media/gk3/gaokun3/live.squashfs
 header windows-setup "只缩出 512 MiB 放 GK3LIVE（紧挨在 Data 后面），没有空闲 —— 要先回 Windows 压缩卷"
-rec windows-setup "$DS" probe.txt     "probe" "$(probe_of "$DS" nostick)"
+rec windows-setup "$DS" probe.txt     "probe" "$(probe_of "$DS")"
 rec windows-setup "$DS" esp_info.txt  "esp-info --disk /dev/nvme0n1"
 rec windows-setup "$DS" plan-along-empty.txt "plan --sector 512 --region-start 0 --region-end 0 --disk /dev/nvme0n1"
 rec windows-setup "$DS" plan-wipe.txt "plan --mode wipe --disk /dev/nvme0n1"
@@ -293,7 +290,7 @@ win_shrink "$DS" 4 $(( DATA_MIB - 81920 )) || { echo "windows-setup-shrunk：缩
 
 echo "═══ windows-setup-shrunk ═══"
 header windows-setup-shrunk "windows-setup 上在 Windows 里再缩出 80 GiB 之后：空闲在 Data 与 GK3LIVE 之间 —— 走双系统"
-along_set windows-setup-shrunk "$DS" nostick
+along_set windows-setup-shrunk "$DS"
 umount /media/gk3 && mount "${STICK}p1" /media/gk3
 drop_disk "$DS"
 
@@ -410,51 +407,40 @@ recc part_delete.txt   "delete *"  "$G delete --part ${DE}p6"
 # 反例：删 ESP（界面不给按钮，但后端要拒绝 —— 测试用 overrides 换进来）
 recc part_delete-esp.txt "delete-esp" "$G delete --part ${DE}p1"
 
-# 录：一块 MBR 盘 + 一块读不出分区表的盘（loop 叠在 dm-error 上，GPT 那几个扇区读不出），与 U 盘一起探测。
-# 替换：MBR 盘 → /dev/nvme0n1，读不出的盘 → /dev/sdb；bus= 按真机填；只留这三块盘的行
+# 录：一块 MBR 盘、一块读不出分区表的盘（loop 叠在 dm-error 上，GPT 那几个扇区读不出）。真机上 gk3l probe 只列内置的NVMe，
+# 所以各派生一份只有它的探测结果（改名为 /dev/nvme0n1、bus=nvme，X 按有没有 ERR 重算），再加一份什么盘都没有的
 DM=$(new_disk mbr 30720M); printf 'label: dos\n,300M,ef\n,4G,7\n' | sfdisk -q "$DM"; settle "$DM"
 mkfs.vfat -F 32 "${DM}p1" >/dev/null
 DEB=$(new_disk eiobase 20480M); sgdisk -o "$DEB" >/dev/null 2>&1
 NS=$(( 20480 * 2048 ))
 printf '0 1 linear %s 0\n1 33 error\n34 %s linear %s 34\n' "$DEB" $((NS - 34)) "$DEB" | dmsetup create --noudevsync gk3-fix-eio
 EIO=$(losetup -f --show "/dev/$(dmsetup info -c --noheadings -o blkdevname gk3-fix-eio | tr -d ' ')")
-python3 installer/tools/test/record-fixture.py "$W/probe-raw.txt" --sub "${STICK}p=/dev/sda" --sub "$STICK=/dev/sda" \
-    --sub "${DM}p=/dev/nvme0n1p" --sub "$DM=/dev/nvme0n1" --sub "$EIO=/dev/sdb" -- "$G" probe
-python3 - "$W/probe-raw.txt" "$C/probe-mbr-unreadable.txt" <<'PY'
-import re, sys
-keep = {"/dev/sda": "usb", "/dev/nvme0n1": "nvme", "/dev/sdb": "usb"}
-rows, skip_bang = [], True
-for l in open(sys.argv[1]).read().splitlines():
-    if l.startswith("D "):
-        continue
-    if l.startswith("X "):
-        rows.append(l)
-        continue
-    m = re.search(r" (?:path|disk)=(/dev/[a-z0-9]+)", l)
-    if l.startswith("O DISK "):
-        d = m.group(1) if m else ""
-        if d in keep:
-            l = re.sub(r" bus=\S+", " bus=" + keep[d], l)
-            if d == "/dev/sda":
-                l = l.replace(" removable=0", " removable=1")
-            rows.append(l)
-        continue
-    if l.startswith("O PART ") or l.startswith("O FREE "):
-        d = re.search(r" disk=(\S+)", l)
-        if d and d.group(1) in keep:
-            rows.append(l)
-        continue
-    if l.startswith("E ERR "):
-        skip_bang = not (m and m.group(1) in keep)
-        if not skip_bang:
-            rows.append(l)
-        continue
-    if l.startswith("E !! ") and not skip_bang:
-        rows.append(l)
-        skip_bang = True
-open(sys.argv[2], "w").write("\n".join(rows) + "\n")
+python3 installer/tools/test/record-fixture.py "$W/probe-raw.txt" \
+    --sub "${DM}p=/dev/nvme0n1p" --sub "$DM=/dev/nvme0n1" --sub "$EIO=/dev/eio" -- "$G" probe
+python3 - "$W/probe-raw.txt" "$C" /dev/nvme0n1 /dev/eio <<'PY'
+import os, re, sys
+src, out, mbr, eio = open(sys.argv[1]).read().splitlines(), sys.argv[2], sys.argv[3], sys.argv[4]
+def disk_of(l):   # 这一行属于哪块盘：DISK 看 path=，PART / FREE / ERR 看 disk=
+    m = re.search(r" path=(/dev/[a-z0-9]+)" if l.startswith("O DISK ") else r" disk=(/dev/[a-z0-9]+)", l)
+    return m.group(1) if m else None
+def only(disk):   # 只留这块盘的行（E !! 跟着它前面那条 ERR），改名为 /dev/nvme0n1
+    rows, cur = [], None
+    for l in src:
+        if l.startswith("E !! "):
+            if cur == disk:
+                rows.append(l)
+            continue
+        if not (l.startswith("O ") or l.startswith("E ERR ")):
+            continue
+        cur = disk_of(l)
+        if cur == disk:
+            l = l.replace(disk, "/dev/nvme0n1")
+            rows.append(re.sub(r" bus=\S+", " bus=nvme", l) if l.startswith("O DISK ") else l)
+    return rows + ["X 1" if any(l.startswith("E ERR ") for l in rows) else "X 0"]
+for name, rows in (("probe-mbr.txt", only(mbr)), ("probe-internal-unreadable.txt", only(eio)), ("probe-no-internal.txt", ["X 0"])):
+    open(os.path.join(out, name), "w").write("\n".join(rows) + "\n")
 PY
-echo "#  probe-mbr-unreadable.txt：一块 MBR 盘（nvme0n1）+ 一块读不出分区表的盘（sdb，dm-error）（界面测试用 overrides 选它）" >> "$C/index.txt"
+echo "#  probe-mbr.txt：内置硬盘是 MBR 盘；probe-internal-unreadable.txt：内置硬盘读不出分区表（dm-error）；probe-no-internal.txt：没有内置硬盘（界面测试用 overrides 选它们）" >> "$C/index.txt"
 losetup -d "$EIO"; for i in 1 2 3 4 5 6 7 8 9 10; do dmsetup remove --noudevsync gk3-fix-eio 2>/dev/null && break; sleep 0.5; done
 drop_disk "$DM"; drop_disk "$DEB"
 

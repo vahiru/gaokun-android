@@ -4,7 +4,6 @@
   "railTitle": "Gaokun Android",
   "railSub": "LiveCD Installer",
   "railWelcome": "欢迎",
-  "railDisk": "磁盘",
   "railMode": "安装方式",
   "railOpts": "选项",
   "railConfirm": "确认",
@@ -42,32 +41,13 @@
   },
   "checkUnknown": "无法确认状态，将继续执行",
   "checkBlocked": "请先解决上述未通过的检查项，再继续安装。",
-  "diskTitle": "选择目标磁盘",
-  "diskSub": "请选择要安装Android的磁盘。",
-  "diskNone": "未检测到可用磁盘。请确认内置硬盘已被系统识别（可在终端中运行lsblk查看）。",
+  "diskNone": "未检测到内置硬盘。",
   "diskInternal": "内置固态硬盘",
   "diskExternal": "外接磁盘",
-  "diskMedium": "当前安装器正在从此U盘运行，无法安装至该介质。",
-  "diskMediumInternal": "当前安装器正在从此磁盘运行：可在未分配空间中与现有系统共存安装，但无法清除整个磁盘。",
-  "diskInstallerPart": "安装器分区位于此磁盘，安装器已载入内存运行：清除整个磁盘时将保留该分区，安装完成后可将其删除。",
-  "diskParts": "{count}个分区",
-  "@diskParts": {
-    "placeholders": {
-      "count": {
-        "type": "String"
-      }
-    }
-  },
-  "diskNoParts": "无分区",
-  "diskUnreadable": "无法读取此磁盘的分区表，无法安装至该磁盘。详细信息请查看运行日志。",
-  "diskFree": "未分配空间{size}",
-  "@diskFree": {
-    "placeholders": {
-      "size": {
-        "type": "String"
-      }
-    }
-  },
+  "diskUnreadable": "无法读取内置硬盘的分区表。",
+  "legendExisting": "现有分区",
+  "legendFree": "未分配空间",
+  "legendTarget": "目标安装位置",
   "modeTitle": "选择安装方式",
   "modeSub": "请选择磁盘分区处理方式，继续前请仔细确认。",
   "modeWipeTitle": "清除整个磁盘",

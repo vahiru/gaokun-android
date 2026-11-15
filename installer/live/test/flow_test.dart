@@ -23,14 +23,15 @@ void main() {
     final rec = await pumpApp(t, 'windows-free');
     await see(t, find.text(l.welcomeTitle));
     await tap(t, find.text(l.btnStart));
-    await see(t, find.text(l.diskTitle));
-    // 安装 U 盘列出来了、但禁用并写明原因（C 版是直接藏起来）
-    await see(t, find.text(l.diskMedium));
-    await tap(t, find.textContaining('/dev/nvme0n1'));
-    await next(t);
+    // 不再选盘：直接是内置硬盘的方式页，顶部是它的分区布局
     await see(t, find.text(l.modeTitle));
+    await see(t, find.text('/dev/nvme0n1'));
+    await see(t, find.text(l.legendExisting));
+    expect(find.text(l.legendTarget), findsNothing);
     await see(t, find.text(l.modeAlongOk));
     await tap(t, find.text(l.modeAlongTitle));
+    // 选中双系统：布局条上突出 Android 将要使用的那块未分配空间
+    await see(t, find.text(l.legendTarget));
     await next(t);
     await see(t, find.text(l.optsTitle));
     await see(t, find.textContaining('/data'), findsWidgets);
@@ -54,12 +55,12 @@ void main() {
   testWidgets('windows-setup（Windows 脚本只划了 GK3LIVE、没有空闲）：双系统禁用并报"至少要多少"，安装器里不缩分区', (t) async {
     await pumpApp(t, 'windows-setup');
     await tap(t, find.text(l.btnStart));
-    await tap(t, find.textContaining('/dev/nvme0n1'));
-    await next(t);
     await see(t, find.text(l.modeTitle));
     // 安装器就在这块盘上（GK3LIVE）⇒ 默认不另装救援（GUI-17），所以是不带救援的那个数（20644 MiB = 20.2 GiB）
     await see(t, find.text(l.modeWhyNoFree(fmtMib(20644))));
     expect(find.text(l.modeAlongOk), findsNothing);
+    // GK3LIVE 是直接挂载的介质（没有读进内存）：不能清除整个磁盘，写明原因
+    await see(t, find.text(l.modeWhyMedium));
     // 腾空间要回 Windows 压缩卷；这里只剩删除分区
     expect(find.text(l.editEntryTitle), findsOneWidget);
   });
@@ -67,8 +68,6 @@ void main() {
   testWidgets('windows-setup-shrunk（在 Windows 里压缩出空间之后）→ 双系统装进 Data 与 GK3LIVE 之间', (t) async {
     final rec = await pumpApp(t, 'windows-setup-shrunk');
     await tap(t, find.text(l.btnStart));
-    await tap(t, find.textContaining('/dev/nvme0n1'));
-    await next(t);
     await see(t, find.text(l.modeAlongOk));
     await tap(t, find.text(l.modeAlongTitle));
     await next(t);
@@ -82,16 +81,11 @@ void main() {
     expect(a, contains('--region-start 789448704 --region-end 957220863')); // Data 缩出来的那段，紧挨在 GK3LIVE 前面
   });
 
-  testWidgets('windows-live（免 U 盘装双系统）：安装器分区读进了内存 → 盘可选、整盘清空可选（保留它）、双系统装完删掉它并进 /data', (t) async {
+  testWidgets('windows-live（免 U 盘装双系统）：安装器分区读进了内存 → 整盘清空可选（保留它）、双系统装完删掉它并进 /data', (t) async {
     final rec = await pumpApp(t, 'windows-live');
     await tap(t, find.text(l.btnStart));
-    await see(t, find.text(l.diskTitle));
-    // 没有 U 盘；内置盘上的安装器分区就是介质 —— 不禁用，说明整盘清空时保留它
-    expect(find.text(l.diskMedium), findsNothing);
-    await see(t, find.text(l.diskInstallerPart));
-    await tap(t, find.textContaining('/dev/nvme0n1'));
-    await next(t);
     await see(t, find.text(l.modeTitle));
+    // 内置盘上的安装器分区就是介质：整盘清空可选，卡片上说明保留它
     expect(find.text(l.modeWhyMedium), findsNothing);
     await see(t, find.text(l.confirmWipeKeepsLive('GK3LIVE')));
     await see(t, find.text(l.modeAlongOk));
@@ -126,8 +120,6 @@ void main() {
   testWidgets('factory：没有空闲区 → 双系统禁用并报"至少要多少"（后端报的数）', (t) async {
     await pumpApp(t, 'factory');
     await tap(t, find.text(l.btnStart));
-    await tap(t, find.textContaining('/dev/nvme0n1'));
-    await next(t);
     // 来自 gk3_plan 的 PLANERR need_mib（不装救援系统），不是界面写死的
     await see(t, find.text(l.modeWhyNoFree(fmtMib(20644))));
     expect(find.text(l.modeAlongOk), findsNothing);
@@ -136,10 +128,11 @@ void main() {
   testWidgets('blank：整盘安装；确认页如实说"没有任何分区"', (t) async {
     final rec = await pumpApp(t, 'blank');
     await tap(t, find.text(l.btnStart));
-    await tap(t, find.textContaining('/dev/nvme0n1'));
-    await next(t);
     // 空盘没有 ESP：双系统禁用并写明原因
     await see(t, find.text(l.modeWhyNoEsp));
+    // 图例只列条上有的：整块未分配空间，没有现有分区
+    await see(t, find.text(l.legendFree));
+    expect(find.text(l.legendExisting), findsNothing);
     await tap(t, find.text(l.modeWipeTitle));
     await next(t);
     await next(t); // 选项
@@ -151,20 +144,14 @@ void main() {
     expect(rec.last('apply')!.join(' '), contains('--mode wipe'));
   });
 
-  testWidgets('MBR 盘与读不出分区表的盘（S1 / S2）：读不出的盘禁用并写明原因；MBR 盘只给整盘清空，整盘清空照常装完', (t) async {
-    final rec = await pumpApp(t, 'blank', overrides: {'probe': 'probe-mbr-unreadable.txt'});
+  testWidgets('内置硬盘是 MBR 盘（S2）：只给整盘清空，整盘清空照常装完', (t) async {
+    final rec = await pumpApp(t, 'blank', overrides: {'probe': 'probe-mbr.txt'});
     await tap(t, find.text(l.btnStart));
-    // 读不出的盘：列出来（让人知道它在），但禁用、写明原因，不说"没有分区"（S1 原来把它报成一整块空闲）
-    await see(t, find.text(l.diskUnreadable));
-    final unreadable = find.ancestor(of: find.textContaining('/dev/sdb'), matching: find.byType(ChoiceCard));
-    expect(t.widget<ChoiceCard>(unreadable).reason, l.diskUnreadable);
-    expect(find.descendant(of: unreadable, matching: find.textContaining(l.diskNoParts)), findsNothing);
-    await tap(t, find.textContaining('/dev/sdb'));
-    expect(t.widget<ChoiceCard>(unreadable).selected, isFalse);
     // MBR 盘：双系统与手动调整都写明"MBR、只能整盘清空"，不去问 ESP、不去算双系统方案
-    await tap(t, find.textContaining('/dev/nvme0n1'));
-    await next(t);
     await see(t, find.text(l.errMbr), findsNWidgets(2));
+    // MBR 盘不列分区：不画布局条（画出来是一整条灰色，看着像全是现有分区）
+    expect(find.text(l.legendExisting), findsNothing);
+    expect(find.text(l.diskUnreadable), findsNothing);
     expect(rec.calls.where((c) => c.first == 'esp-info' || (c.first == 'plan' && c.contains('--sector'))), isEmpty);
     for (final title in [l.modeAlongTitle, l.editEntryTitle]) {
       final card = find.ancestor(of: find.text(title), matching: find.byType(ChoiceCard));
@@ -179,6 +166,23 @@ void main() {
     expect(rec.last('apply')!.join(' '), contains('--disk /dev/nvme0n1 --mode wipe'));
   });
 
+  testWidgets('内置硬盘读不出分区表（S1）：方式页写明原因，没有可选的方式，也不评估它', (t) async {
+    final rec = await pumpApp(t, 'blank', overrides: {'probe': 'probe-internal-unreadable.txt'});
+    await tap(t, find.text(l.btnStart));
+    await see(t, find.text(l.diskUnreadable));
+    await see(t, find.text('/dev/nvme0n1'));
+    expect(find.byType(ChoiceCard), findsNothing);
+    expect(find.text(l.legendExisting), findsNothing);
+    expect(rec.calls.where((c) => c.first == 'esp-info' || c.first == 'plan'), isEmpty);
+  });
+
+  testWidgets('没有内置硬盘（gk3l probe 一块盘也没列）：方式页说明未检测到内置硬盘', (t) async {
+    await pumpApp(t, 'blank', overrides: {'probe': 'probe-no-internal.txt'});
+    await tap(t, find.text(l.btnStart));
+    await see(t, find.text(l.diskNone));
+    expect(find.byType(ChoiceCard), findsNothing);
+  });
+
   testWidgets('写盘入口拒绝 MBR 盘 / 读不出的盘（ERR mbr-disk / disk-unreadable）：失败的话按代码说', (t) async {
     final mbr = Gk3Record('ERR', {'code': 'mbr-disk', 'disk': '/dev/nvme0n1', 'touched': 'no'});
     final bad = Gk3Record('ERR', {'code': 'disk-unreadable', 'disk': '/dev/sdb', 'touched': 'no'});
@@ -190,8 +194,6 @@ void main() {
   testWidgets('android（已经装过）：双系统禁用，原因里列出冲突的分区名', (t) async {
     await pumpApp(t, 'android');
     await tap(t, find.text(l.btnStart));
-    await tap(t, find.textContaining('/dev/nvme0n1'));
-    await next(t);
     await see(t, find.textContaining('super'), findsWidgets);
     expect(find.text(l.modeAlongOk), findsNothing);
   });
@@ -199,8 +201,6 @@ void main() {
   testWidgets('android（已经装过）→ 重新安装：默认清除数据，确认页逐个列出，apply 走 reinstall', (t) async {
     final rec = await pumpApp(t, 'android');
     await tap(t, find.text(l.btnStart));
-    await tap(t, find.textContaining('/dev/nvme0n1'));
-    await next(t);
     await see(t, find.text(l.modeReinstallTitle));
     await tap(t, find.text(l.modeReinstallTitle));
     await next(t); // 选项
@@ -223,8 +223,6 @@ void main() {
   testWidgets('重新安装 + 保留数据：确认页写"保留"，apply 带 --keep-data yes', (t) async {
     final rec = await pumpApp(t, 'android');
     await tap(t, find.text(l.btnStart));
-    await tap(t, find.textContaining('/dev/nvme0n1'));
-    await next(t);
     await tap(t, find.text(l.modeReinstallTitle));
     await next(t);
     await tap(t, find.text(l.optsKeepTitle));
@@ -240,8 +238,6 @@ void main() {
   Future<Rec> openEdit(WidgetTester t, String scenario, {Map<String, String> overrides = const {}}) async {
     final rec = await pumpApp(t, scenario, overrides: overrides);
     await tap(t, find.text(l.btnStart));
-    await tap(t, find.textContaining('/dev/nvme0n1'));
-    await next(t);
     await tap(t, find.text(l.editEntryTitle));
     await next(t);
     await passRisk(t);
@@ -304,8 +300,6 @@ void main() {
   testWidgets('安装介质里没有系统文件：三种安装方式都不可选并写明原因，删除分区照常可选', (t) async {
     await pumpApp(t, 'android', overrides: {'release-info': 'release_info-none.txt'});
     await tap(t, find.text(l.btnStart));
-    await tap(t, find.textContaining('/dev/nvme0n1'));
-    await next(t);
     await see(t, find.text(l.modeTitle));
     // 重新安装、清除整个磁盘、保留现有系统各写一次原因
     await see(t, find.text(l.modeWhyNoRelease), findsNWidgets(3));
@@ -319,8 +313,6 @@ void main() {
   testWidgets('返回走的是真正来的那一页（C 版 screen-- 会掉进没走过的页）', (t) async {
     await pumpApp(t, 'windows-free');
     await tap(t, find.text(l.btnStart));
-    await tap(t, find.textContaining('/dev/nvme0n1'));
-    await next(t);
     await tap(t, find.text(l.modeAlongTitle));
     await next(t);
     await see(t, find.text(l.optsTitle));
@@ -331,8 +323,6 @@ void main() {
   testWidgets('安装失败：失败页给出错误、说明分区表有备份、不许返回', (t) async {
     await pumpApp(t, 'blank', failApply: true);
     await tap(t, find.text(l.btnStart));
-    await tap(t, find.textContaining('/dev/nvme0n1'));
-    await next(t);
     await tap(t, find.text(l.modeWipeTitle));
     await next(t);
     await next(t);
@@ -370,8 +360,6 @@ void main() {
     final rec = await pumpApp(t, 'blank', holdApply: gate);
     expect(railBtn(t, l.railReboot).onPressed, isNotNull);
     await tap(t, find.text(l.btnStart));
-    await tap(t, find.textContaining('/dev/nvme0n1'));
-    await next(t);
     await tap(t, find.text(l.modeWipeTitle));
     await next(t);
     await next(t);
@@ -391,8 +379,6 @@ void main() {
   testWidgets('分区大小页：/data 拖到 32 GiB 以下时黄色提醒（v1.0 计划 GUI-20）', (t) async {
     await pumpApp(t, 'windows-free');
     await tap(t, find.text(l.btnStart));
-    await tap(t, find.textContaining('/dev/nvme0n1'));
-    await next(t);
     await tap(t, find.text(l.modeAlongTitle));
     await next(t);
     await see(t, find.text(l.optsTitle));
@@ -413,13 +399,11 @@ void main() {
     await see(t, find.text(en.welcomeTitle));
     check('welcome');
     await tap(t, find.text(en.btnStart));
-    await see(t, find.text(en.diskTitle));
-    await tap(t, find.textContaining('/dev/nvme0n1'));
-    check('disk');
-    await next(t, en);
     await see(t, find.text(en.modeAlongOk));
     check('mode');
     await tap(t, find.text(en.modeAlongTitle));
+    await see(t, find.text(en.legendTarget));
+    check('mode (alongside selected)');
     await next(t, en);
     await see(t, find.text(en.optsTitle));
     check('opts');
@@ -437,8 +421,6 @@ void main() {
   testWidgets('apply 在第一次写盘之前失败（ERR touched=no）：失败页说"盘没动过"、给返回与重试，不说"写了一半"', (t) async {
     final rec = await pumpApp(t, 'blank', failApplyUntouched: true);
     await tap(t, find.text(l.btnStart));
-    await tap(t, find.textContaining('/dev/nvme0n1'));
-    await next(t);
     await tap(t, find.text(l.modeWipeTitle));
     await next(t);
     await next(t);
@@ -456,8 +438,6 @@ void main() {
   testWidgets('写盘阶段失败：标题下面是按 ERR 代码查的话（不是后端的中文原句）', (t) async {
     await pumpApp(t, 'blank', failApply: true, language: 'en');
     await tap(t, find.text(en.btnStart));
-    await tap(t, find.textContaining('/dev/nvme0n1'));
-    await next(t, en);
     await tap(t, find.text(en.modeWipeTitle));
     await next(t, en);
     await next(t, en);
@@ -486,8 +466,6 @@ void main() {
   testWidgets('免 U 盘、保留安装器分区：apply 不带 --remove-installer；完成页不叫人"移除安装介质"（GUI-17）', (t) async {
     final rec = await pumpApp(t, 'windows-live', overrides: {'apply': 'apply-live-keep.txt'});
     await tap(t, find.text(l.btnStart));
-    await tap(t, find.textContaining('/dev/nvme0n1'));
-    await next(t);
     await tap(t, find.text(l.modeAlongTitle));
     await next(t);
     await see(t, find.text(l.optsTitle));
@@ -509,8 +487,6 @@ void main() {
   testWidgets('从 U 盘装：完成页照旧提示移除介质；不装救援系统', (t) async {
     final rec = await pumpApp(t, 'blank');
     await tap(t, find.text(l.btnStart));
-    await tap(t, find.textContaining('/dev/nvme0n1'));
-    await next(t);
     await tap(t, find.text(l.modeWipeTitle));
     await next(t);
     await next(t);
@@ -523,8 +499,6 @@ void main() {
   testWidgets('整盘清空出厂盘：确认页标明 Onekey 是华为一键恢复分区、删掉的后果（GUI-18）', (t) async {
     await pumpApp(t, 'factory');
     await tap(t, find.text(l.btnStart));
-    await tap(t, find.textContaining('/dev/nvme0n1'));
-    await next(t);
     await tap(t, find.text(l.modeWipeTitle));
     await next(t);
     await next(t);
@@ -578,8 +552,6 @@ void main() {
 
   Future<void> failWipe(WidgetTester t) async {
     await tap(t, find.text(l.btnStart));
-    await tap(t, find.textContaining('/dev/nvme0n1'));
-    await next(t);
     await tap(t, find.text(l.modeWipeTitle));
     await next(t);
     await next(t);
@@ -624,8 +596,6 @@ void main() {
   Future<Rec> toConfirm(WidgetTester t, {String scenario = 'windows-free', Map<String, String> overrides = const {}}) async {
     final rec = await pumpApp(t, scenario, overrides: overrides);
     await tap(t, find.text(l.btnStart));
-    await tap(t, find.textContaining('/dev/nvme0n1'));
-    await next(t);
     await tap(t, find.text(l.modeAlongTitle));
     await next(t);
     await next(t); // 选项
@@ -689,8 +659,6 @@ void main() {
   testWidgets('Windows 在休眠：双系统禁用并写明"回 Windows 关快速启动、用关机退出"（U18）', (t) async {
     await pumpApp(t, 'windows-free', overrides: {'esp-info': 'esp_info-hibernated.txt'});
     await tap(t, find.text(l.btnStart));
-    await tap(t, find.textContaining('/dev/nvme0n1'));
-    await next(t);
     await see(t, find.text(l.modeWhyHibernated));
     expect(find.text(l.modeAlongOk), findsNothing);
     await tap(t, find.text(l.modeAlongTitle));
@@ -700,8 +668,6 @@ void main() {
   testWidgets('100 MiB 的 EFI 分区：双系统明确禁用，说"这个版本不支持"而不是"请清理"（U17）', (t) async {
     await pumpApp(t, 'windows-free', overrides: {'esp-info': 'esp_info-small.txt'});
     await tap(t, find.text(l.btnStart));
-    await tap(t, find.textContaining('/dev/nvme0n1'));
-    await next(t);
     await see(t, find.text(l.modeWhyEspTooSmall('100')));
     expect(find.text(l.modeWhyEspSmall('70', '150')), findsNothing);
   });
@@ -716,8 +682,6 @@ void main() {
   testWidgets('纯 Android（整盘）：确认页与完成页都没有默认系统那一节', (t) async {
     await pumpApp(t, 'blank');
     await tap(t, find.text(l.btnStart));
-    await tap(t, find.textContaining('/dev/nvme0n1'));
-    await next(t);
     await tap(t, find.text(l.modeWipeTitle));
     await next(t);
     await next(t);
@@ -729,8 +693,6 @@ void main() {
   testWidgets('英文界面的双系统确认页（BitLocker）没有 CJK', (t) async {
     await pumpApp(t, 'windows-free', language: 'en', overrides: {'esp-info': 'esp_info-bitlocker.txt'});
     await tap(t, find.text(en.btnStart));
-    await tap(t, find.textContaining('/dev/nvme0n1'));
-    await next(t, en);
     await tap(t, find.text(en.modeAlongTitle));
     await next(t, en);
     await next(t, en);
@@ -748,8 +710,6 @@ void main() {
       final x = loc ?? l;
       final rec = await pumpApp(t, scenario, language: x.localeName, overrides: overrides);
       await tap(t, find.text(x.btnStart));
-      await tap(t, find.textContaining('/dev/nvme0n1'));
-      await next(t, x);
       await tap(t, find.text(pick(x)));
       await next(t, x);
       if (install) await next(t, x); // 选项
@@ -999,8 +959,6 @@ void main() {
     testWidgets('windows-live 整盘清空：安装器分区不在删除清单里、原样保留，新布局里标"保留"，装完删掉', (t) async {
       final rec = await pumpApp(t, 'windows-live');
       await tap(t, find.text(l.btnStart));
-      await tap(t, find.textContaining('/dev/nvme0n1'));
-      await next(t);
       await tap(t, find.text(l.modeWipeTitle));
       await next(t);
       await see(t, find.text(l.optsKeepLiveTitle));
@@ -1028,8 +986,6 @@ void main() {
     testWidgets('android-live：方式页单独删除安装器分区 → 风险页（不要确认词）→ 按住删除 → /data 扩大；完成回到方式页', (t) async {
       final rec = await pumpApp(t, 'android-live');
       await tap(t, find.text(l.btnStart));
-      await tap(t, find.textContaining('/dev/nvme0n1'));
-      await next(t);
       await see(t, find.text(l.modeReinstallTitle));
       await see(t, find.text(l.modeRmLiveTitle));
       await see(t, find.textContaining(l.rmLiveMerge('GK3LIVE', '4 GiB')));
@@ -1052,8 +1008,6 @@ void main() {
     testWidgets('删除分区页：安装器分区不给删除按钮，说明装好 Android 之后再删', (t) async {
       await pumpApp(t, 'windows-live');
       await tap(t, find.text(l.btnStart));
-      await tap(t, find.textContaining('/dev/nvme0n1'));
-      await next(t);
       await tap(t, find.text(l.editEntryTitle));
       await next(t);
       await passRisk(t);
@@ -1065,8 +1019,6 @@ void main() {
     testWidgets('装完删安装器分区那一步没做成（NOTE installer-kept）：安装照样算成功，完成页用红字说原因', (t) async {
       await pumpApp(t, 'windows-live', overrides: {'apply': 'apply-note-live.txt'});
       await tap(t, find.text(l.btnStart));
-      await tap(t, find.textContaining('/dev/nvme0n1'));
-      await next(t);
       await tap(t, find.text(l.modeAlongTitle));
       await next(t);
       await next(t);
@@ -1080,8 +1032,6 @@ void main() {
     testWidgets('英文界面：删除安装器分区的风险页没有 CJK', (t) async {
       await pumpApp(t, 'android-live', language: 'en');
       await tap(t, find.text(en.btnStart));
-      await tap(t, find.textContaining('/dev/nvme0n1'));
-      await next(t, en);
       await tap(t, find.text(en.modeRmLiveTitle));
       await next(t, en);
       await see(t, find.text(en.riskTitle));

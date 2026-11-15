@@ -82,16 +82,15 @@ void main() {
     FixtureBackend b(String sc, [Map<String, String> o = const {}]) =>
         FixtureBackend(sc, bundle: rootBundle, speed: 0, overrides: o);
 
-    test('factory：7 个分区、没有空闲区、安装 U 盘被认出来', () async {
+    test('factory：只列内置硬盘（gk3l probe 不读 U 盘）、7 个分区、没有空闲区', () async {
       final disks = Disk.fromProbe(await b('factory').run('probe'));
-      final nvme = disks.firstWhere((d) => d.path == '/dev/nvme0n1');
-      final usb = disks.firstWhere((d) => d.path == '/dev/sda');
+      expect(disks.map((d) => d.path), ['/dev/nvme0n1']);
+      final nvme = disks.single;
       expect(nvme.parts, hasLength(7));
       expect(nvme.free, isEmpty);
       expect(nvme.esp?.path, '/dev/nvme0n1p1');
       expect(nvme.parts[3].label, 'Data');
-      expect(usb.medium, isTrue);
-      expect(usb.external, isTrue);
+      expect(nvme.external, isFalse);
     });
     test('windows-free：80 GiB 空闲区；ESP 够用、有 Windows', () async {
       final bk = b('windows-free');

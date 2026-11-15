@@ -4,7 +4,7 @@
  *   - path= 是 /dev 节点（/dev/nvme0n1、/dev/nvme0n1p5），PART 的 num= 与 idx= 都是 GPT 表项序号（Linux 的 pN）。
  *   - DISK 没有 num= / system=；多报 medium=（安装器就是从这块盘、这个分区启动的）。介质分区的 PART 在介质读进了
  *     内存、在内置盘上（gk3l_disk_internal）而且像安装器分区（gk3l_live_like）时多一个 ram=yes（没有挂载，整盘清空时
- *     保留，装完可以删掉，见 live.h）。U盘启动时介质同样读进内存，但U盘上的分区不报ram=yes。
+ *     保留，装完可以删掉，见 live.h）。
  *   - DISK 的 kernel=：内核眼里的分区（sysfs）与盘上主 GPT 逐项核对的结果（ok / differs），对应 Windows 的 rawgpt=。
  *     differs 说明内核还没重读分区表，写盘入口要拒绝。
  * 分区表以盘上的主 GPT 为准（libgk3core 直接读，只信主表）。table= 的取值：
@@ -14,7 +14,7 @@
  *   mbr        没有 GPT，LBA 0 是 MBR 分区表（含空的 MBR 表）：只能整盘清空
  *   raw        既没有 GPT 也没有 MBR（全新的盘、整盘格式化的 U 盘）：只能整盘清空
  *   unreadable 读盘出错：后面不跟 PART / FREE，另报 ERR disk-unreadable，这块盘不给选
- * 小于 1 GiB 的盘不列；loop 设备只在 GK3_ALLOW_LOOP=1 时列（测试用）。 */
+ * 只列内置的NVMe整盘（want_disk）；小于 1 GiB 的盘不列；loop 设备只在 GK3_ALLOW_LOOP=1 时列（测试用）。 */
 #define _GNU_SOURCE
 #include <dirent.h>
 #include <errno.h>
@@ -251,17 +251,26 @@ out:
     return rc;
 }
 
-static int skip_disk(const char *name)
+static const char *skip_digits(const char *p)
 {
-    static const char *const never[] = {"ram", "zram", "dm-", "sr", "md", "nbd", "mtdblock", "fd"};
-    const char *loop = getenv("GK3_ALLOW_LOOP");
-    for (size_t i = 0; i < sizeof never / sizeof never[0]; i++)
-        if (!strncmp(name, never[i], strlen(never[i])))
-            return 1;
-    /* 没人往 loop 设备上装系统；测试用 GK3_ALLOW_LOOP=1 放开 */
+    if (*p < '0' || *p > '9')
+        return NULL;
+    while (*p >= '0' && *p <= '9')
+        p++;
+    return p;
+}
+
+/* 安装目标只有内置的NVMe：只认 nvme<控制器>n<命名空间> 这样的整盘。U盘与USB硬盘盒里的NVMe都是 sd*，不去读它们
+ * （故障的U盘会让读分区表卡住很久）；多路径时的 nvme0c0n1 这类隐藏路径也不认。雷电 / USB4 硬盘盒里的NVMe同样叫 nvme*，
+ * 本机内核未开启 USB4，不会出现。没人往 loop 设备上装系统；测试用 GK3_ALLOW_LOOP=1 放开 */
+static int want_disk(const char *name)
+{
+    const char *p, *loop = getenv("GK3_ALLOW_LOOP");
     if (!strncmp(name, "loop", 4))
-        return !(loop && !strcmp(loop, "1"));
-    return 0;
+        return loop && !strcmp(loop, "1");
+    if (strncmp(name, "nvme", 4) || !(p = skip_digits(name + 4)) || *p != 'n' || !(p = skip_digits(p + 1)))
+        return 0;
+    return *p == 0;
 }
 
 static int cmp_name(const void *a, const void *b)
@@ -286,7 +295,7 @@ int gk3l_cmd_probe(int argc, char **argv)
     if (!dir)
         return gk3l_err(GK3W_TOUCHED_NA, "sysfs", "cannot list /sys/block", errno);
     while ((e = readdir(dir)) && n < MAX_DISKS) {
-        if (e->d_name[0] == '.' || skip_disk(e->d_name) || strlen(e->d_name) >= 64)
+        if (e->d_name[0] == '.' || !want_disk(e->d_name) || strlen(e->d_name) >= 64)
             continue;
         names[n] = strdup(e->d_name);
         if (names[n])

@@ -8,14 +8,13 @@ import '../l10n/app_localizations.dart';
 import '../model/model.dart';
 import '../version.dart';
 
-/// 安装流程的六步。左侧导航按它标出"到哪了"（只是指示，不可点：导航只走 返回 / 下一步，
+/// 安装流程的五步。左侧导航按它标出"到哪了"（只是指示，不可点：导航只走 返回 / 下一步，
 /// 那是 Navigator 的栈 —— C 版 screen++/screen-- 掉进没走过的页的教训，见 app.dart 的 go）。
-enum Gk3Step { welcome, disk, mode, opts, confirm, install }
+enum Gk3Step { welcome, mode, opts, confirm, install }
 
 extension on Gk3Step {
   (IconData, IconData) get icons => switch (this) {
     Gk3Step.welcome => (Icons.waving_hand_outlined, Icons.waving_hand),
-    Gk3Step.disk => (Icons.storage_outlined, Icons.storage),
     Gk3Step.mode => (Icons.call_split_outlined, Icons.call_split),
     Gk3Step.opts => (Icons.tune_outlined, Icons.tune),
     Gk3Step.confirm => (Icons.fact_check_outlined, Icons.fact_check),
@@ -23,7 +22,6 @@ extension on Gk3Step {
   };
   String label(L10n l) => switch (this) {
     Gk3Step.welcome => l.railWelcome,
-    Gk3Step.disk => l.railDisk,
     Gk3Step.mode => l.railMode,
     Gk3Step.opts => l.railOpts,
     Gk3Step.confirm => l.railConfirm,
@@ -31,7 +29,7 @@ extension on Gk3Step {
   };
 }
 
-/// 每一步的骨架：gk3_common 的 StepScaffold，填上 LiveCD 的七步、侧栏底部的重启 / 关机与版本号
+/// 每一步的骨架：gk3_common 的 StepScaffold，填上 LiveCD 的五步、侧栏底部的重启 / 关机与版本号
 class StepPage extends StatelessWidget {
   const StepPage({
     super.key,
@@ -169,12 +167,40 @@ class DataSizeWarning extends StatelessWidget {
 }
 
 /// 一块盘的布局条（gk3_common 的 DiskBar）：把 [Disk] 的分区与空闲区交给它。
-/// [highlightFree] 按对象认（与 disk.free 里的同一个 FreeRegion），不按起点比
-DiskBar diskBar(Disk disk, {FreeRegion? highlightFree}) => DiskBar(
+/// [highlightFree] 按对象认（与 disk.free 里的同一个 FreeRegion），不按起点比。
+/// [muted]：已有分区一律暗灰，只突出空闲区与 Android（方式页，与 Windows 安装器的选位置页相同）
+DiskBar diskBar(Disk disk, {FreeRegion? highlightFree, bool muted = false, double height = 20}) => DiskBar(
       parts: [for (final p in disk.parts) (start: p.start, sizeMib: p.sizeMib, os: p.os)],
       free: [for (final f in disk.free) (start: f.start, sizeMib: f.sizeMib)],
       highlightFree: highlightFree == null ? null : disk.free.indexWhere((f) => identical(f, highlightFree)),
+      muted: muted,
+      height: height,
     );
+
+/// [diskBar] 为 muted 时的图例（配色与 gk3_common 的 DiskBar 对应）：只列条上实际出现的几种
+class DiskLegend extends StatelessWidget {
+  const DiskLegend({super.key, this.existing = false, this.free = false, this.target = false, this.android = false});
+  final bool existing, free, target, android;
+
+  @override
+  Widget build(BuildContext context) {
+    final l = L10n.of(context), cs = context.cs, gk = context.gk;
+    Widget item(Color c, String label) => Padding(
+          padding: const EdgeInsets.only(right: 20),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Container(width: 12, height: 12, decoration: BoxDecoration(color: c, borderRadius: BorderRadius.circular(3))),
+            const SizedBox(width: 6),
+            Text(label, style: context.tt.bodySmall),
+          ]),
+        );
+    return Wrap(children: [
+      if (existing) item(cs.surfaceContainerHighest, l.legendExisting),
+      if (free) item(gk.success.withValues(alpha: 0.35), l.legendFree),
+      if (target) item(gk.success, l.legendTarget),
+      if (android) item(gk.success, 'Android'),
+    ]);
+  }
+}
 
 /// 信号格数（dBm 数字对用户没有意义，roadmap 欠账第 1 条）—— 用 MD3 自带的 WiFi 图标
 class SignalBars extends StatelessWidget {

@@ -13,7 +13,7 @@
 #   （stdout 上的记录）之间的先后，正是界面要处理的东西。分开录就丢了。
 # ★ --sub 把 loop 设备名换成真机上会出现的名字（/dev/loop3 → /dev/nvme0n1），
 #   让界面看到的路径和真机一样。替换规则由调用方写进 index.txt 的注释里 ——
-#   fixture 必须说清楚自己哪里不是原样。
+#   fixture 必须说清楚自己哪里不是原样。长的先换：/dev/loop1 不会误换掉 /dev/loop12 的前半截。
 import os, selectors, subprocess, sys, time
 
 args = sys.argv[1:]
@@ -23,6 +23,8 @@ while args and args[0] == "--sub":
     a, b = args[1].split("=", 1); subs.append((a, b)); args = args[2:]
 assert args and args[0] == "--", "用法：record-fixture.py <输出> [--sub 旧=新 …] -- <命令…>"
 cmd = args[1:]
+
+subs.sort(key=lambda s: -len(s[0]))   # sort 是稳定的：同样长的照给出的顺序
 
 def fix(line):
     for a, b in subs:

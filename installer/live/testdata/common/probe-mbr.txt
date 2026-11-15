@@ -1,0 +1,2 @@
+O DISK path=/dev/nvme0n1 size_mib=30720 sector=512 physsector=512 model=? bus=nvme removable=0 medium=no table=mbr
+X 0

@@ -48,15 +48,8 @@ void main() {
     }
   });
 
-  Future<void> toDisk(WidgetTester t) async {
-    await tap(t, find.text(l.btnStart));
-    await waitFor(t, find.textContaining('/dev/nvme0n1'));
-  }
-
   Future<void> toMode(WidgetTester t) async {
-    await toDisk(t);
-    await tap(t, find.textContaining('/dev/nvme0n1'));
-    await next(t);
+    await tap(t, find.text(l.btnStart));
     await waitFor(t, find.text(l.modeWipeTitle));
   }
 
@@ -72,21 +65,7 @@ void main() {
     await shot(t, '02-welcome-blocked');
   }, skip: !haveFont);
 
-  testWidgets('03 选盘（安装 U 盘列出但禁用）', (t) async {
-    await pumpApp(t, 'factory');
-    await toDisk(t);
-    await tap(t, find.textContaining('/dev/nvme0n1'));
-    await shot(t, '03-disk');
-  }, skip: !haveFont);
-
-  testWidgets('03b 选盘（免 U 盘：安装器跑在内置盘上，可选、带提示）', (t) async {
-    await pumpApp(t, 'windows-live');
-    await toDisk(t);
-    await tap(t, find.textContaining('/dev/nvme0n1'));
-    await shot(t, '03b-disk-internal-medium');
-  }, skip: !haveFont);
-
-  testWidgets('04b 方式（免 U 盘：整盘清空禁用，双系统可行）', (t) async {
+  testWidgets('04b 方式（免 U 盘：整盘清空保留安装器分区，双系统可行）', (t) async {
     await pumpApp(t, 'windows-live');
     await toMode(t);
     await tap(t, find.text(l.modeAlongTitle));
@@ -153,8 +132,6 @@ void main() {
   testWidgets('13e 风险确认：英文、整盘清除', (t) async {
     await pumpApp(t, 'factory', language: 'en');
     await tap(t, find.text(en.btnStart));
-    await tap(t, find.textContaining('/dev/nvme0n1'));
-    await next(t, en);
     await tap(t, find.text(en.modeWipeTitle));
     await next(t, en);
     await next(t, en);

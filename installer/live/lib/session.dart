@@ -215,6 +215,17 @@ class Session extends ChangeNotifier {
     _changed();
   }
 
+  /// 只安装到内置硬盘：gk3l probe 只列内置的NVMe（installer/backend/src/linux/probe.c 的 want_disk），取第一块
+  Disk? get internalDisk => disks?.firstOrNull;
+
+  /// 进入方式页时：重新探测、选定内置硬盘并评估。读不出分区表的盘不评估，方式页直接说明原因
+  Future<void> probeInternal() async {
+    disk = null;
+    await probe();
+    final d = internalDisk;
+    if (d != null && !d.unreadable) await assess(d);
+  }
+
   Disk? disk;
   Along? along;
 

@@ -187,6 +187,11 @@ else
     bad "容器里没有 dmsetup（test-env.Dockerfile）"
 fi
 
+echo "═══ 7b. 只列内置的NVMe：不设 GK3_ALLOW_LOOP 时 loop 盘一块都不列，宿主的 sd* 也不列（probe.c 的 want_disk）═══"
+env -u GK3_ALLOW_LOOP "$G" probe >"$W/lx.out" 2>"$W/lx.err"; rc=$?
+[ "$rc" = 0 ] && ! grep -qE '^DISK path=/dev/(loop|sd)' "$W/lx.out" \
+    && ok "没有 loop 与 sd* 盘，退出码 0" || { bad "rc=$rc"; grep '^DISK' "$W/lx.out"; }
+
 echo "═══ 8. 预检 ═══"
 PS=$W/ps; mkdir -p "$PS/gaokun-ec-battery" "$PS/gaokun-ec-adapter"
 echo Battery > "$PS/gaokun-ec-battery/type"; echo 9 > "$PS/gaokun-ec-battery/capacity"; echo Discharging > "$PS/gaokun-ec-battery/status"

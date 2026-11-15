@@ -19,4 +19,4 @@ release-info                                                                   r
 #  release_info-none.txt：介质里没有系统文件（界面测试用 overrides 选它）
 delete *                                                                       part_delete.txt   # 录（出厂布局的另一块盘上真做）
 delete-esp                                                                     part_delete-esp.txt   # 录（出厂布局的另一块盘上真做）
-#  probe-mbr-unreadable.txt：一块 MBR 盘（nvme0n1）+ 一块读不出分区表的盘（sdb，dm-error）（界面测试用 overrides 选它）
+#  probe-mbr.txt：内置硬盘是 MBR 盘；probe-internal-unreadable.txt：内置硬盘读不出分区表（dm-error）；probe-no-internal.txt：没有内置硬盘（界面测试用 overrides 选它们）
