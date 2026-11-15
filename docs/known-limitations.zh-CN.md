@@ -45,7 +45,7 @@
 * **现象**：大多数机器上看不出来。但如果硬盘是你自己手动分区的，并且EFI分区的GPT分区名既不是`esp`，也不是`EFI system partition`，系统更新和切换槽位都会失败。
 * **原因**：从1.0.0-rc.1起，SELinux从permissive（只记录、不拦截）改为enforcing（实际拦截）。SELinux是Android应用沙箱的第二层防护，即使某个应用找到了漏洞，能做的事也少得多。安全规则只允许系统更新和启动控制组件按这两个名称打开EFI分区：`esp`是安装器"清除整个磁盘"时建立的名称，`EFI system partition`是Windows建立的名称，双系统使用的就是它。早期版本在找不到时会扫描所有存储设备，enforcing模式下不允许这样做。
 * **建议**：
-  * 如果你的EFI分区使用了其他名称，请在任意Linux中（例如Live安装器的终端：按Ctrl+Alt+F2切换）改一次名：`sgdisk -c <N>:esp /dev/nvme0n1`，其中N是EFI分区的分区号。UEFI只看分区类型，改名不会有副作用。安装器检测到这种名称时也会提醒。
+  * 如果你的EFI分区使用了其他名称，请在任意Linux中（例如Live安装器的终端：按Ctrl+Alt+F2切换，以root登录，无需密码）改一次名：`sgdisk -c <N>:esp /dev/nvme0n1`，其中N是EFI分区的分区号。UEFI只看分区类型，改名不会有副作用。
   * 如果某项功能在v0.7.1上正常、现在无法使用，请报告问题，并附上`adb shell dmesg | grep avc`的输出。
 
 ### 启动链未锁定，系统分区不做完整性校验

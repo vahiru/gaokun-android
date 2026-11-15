@@ -74,7 +74,7 @@
 
 | | Windows安装器 | Live安装器 |
 |---|---|---|
-| 支持的操作 | 安装到系统磁盘的未分配空间（与Windows双系统）；卸载Android；制作Live安装器的安装介质 | 保留现有系统（双系统）；清除整个磁盘；重新安装Android（默认清除数据，可选保留）；删除分区 |
+| 支持的操作 | 安装到系统磁盘的未分配空间（与Windows双系统）；卸载Android；制作Live安装器的安装介质 | 保留现有系统（双系统）；清除整个磁盘；重新安装Android（默认清除数据，可选保留）；删除分区；删除安装器分区 |
 | 运行方式 | 在机器上的Windows中运行 | 从U盘或本机磁盘上的安装器分区启动 |
 | 系统安装文件 | 联网下载，或使用已下载的本地文件 | 随安装介质附带，安装时不联网 |
 | 获取方式 | [Releases](https://github.com/vahiru/gaokun-android/releases)页面中的`Windows installer`发布 | [Releases](https://github.com/vahiru/gaokun-android/releases)页面中的`Live installer`发布 |
@@ -86,8 +86,8 @@
 | `esp` | 300 MiB | 开机菜单和各槽位的内核 |
 | `misc` | 4 MiB | 记录A/B槽位的状态 |
 | `metadata` | 32 MiB | Android的元数据 |
-| `super` | 12 GiB | 系统分区，A/B两份 |
 | `boot_a`、`boot_b` | 各64 MiB | 内核和启动镜像，A/B两份 |
+| `super` | 12 GiB | 系统分区，A/B两份 |
 | `userdata` | 剩余全部空间 | 用户数据 |
 
 **修复：**本机没有可用的Android recovery。Android无法启动时，请用Live安装器重新安装Android，可以选择保留用户数据。

@@ -74,7 +74,7 @@ There are two installers to choose from:
 
 | | Windows installer | Live installer |
 |---|---|---|
-| What it does | Installs into unallocated space on the system disk (dual boot with Windows); uninstalls Android; creates installation media for the Live installer | Keep existing system (dual boot); erase entire disk; reinstall Android (user data is erased by default and can be kept); delete partitions |
+| What it does | Installs into unallocated space on the system disk (dual boot with Windows); uninstalls Android; creates installation media for the Live installer | Keep existing system (dual boot); erase entire disk; reinstall Android (user data is erased by default and can be kept); delete partitions; delete installer partition |
 | How it runs | Inside the Windows installed on the machine | Started from a USB drive or from the installer partition on the internal disk |
 | System installation files | Downloaded, or taken from files you have already downloaded | Carried on the installation media; no network is used during installation |
 | Where to get it | The `Windows installer` releases on the [Releases](https://github.com/vahiru/gaokun-android/releases) page | The `Live installer` releases on the [Releases](https://github.com/vahiru/gaokun-android/releases) page |
@@ -86,8 +86,8 @@ Default partition layout after erasing the entire disk:
 | `esp` | 300 MiB | Boot menu and the kernel of each slot |
 | `misc` | 4 MiB | A/B slot state |
 | `metadata` | 32 MiB | Android metadata |
-| `super` | 12 GiB | System partitions, A and B copies |
 | `boot_a`, `boot_b` | 64 MiB each | Kernel and boot image, A and B copies |
+| `super` | 12 GiB | System partitions, A and B copies |
 | `userdata` | All remaining space | User data |
 
 **Repair:** this machine has no working Android recovery. If Android does not start, reinstall Android with the Live installer; you can keep your user data.

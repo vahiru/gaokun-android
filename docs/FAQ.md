@@ -82,7 +82,7 @@ Yes. Without the keyboard cover, use the volume up/down buttons to move the curs
 There are two possible causes:
 
 - **Secure Boot has been turned on again**, for example after a firmware update or after restoring the default settings. Turn Secure Boot off again in the firmware settings; see the [install guide](INSTALL.md#if-you-want-to-keep-windows).
-- **A Windows update has replaced the default boot file on the EFI partition.** Start the Live installer, choose "Reinstall Android" and select "Keep user data"; this writes the boot menu again.
+- **A Windows update has replaced the default boot file on the EFI partition.** The boot menu no longer appears, so `gaokun3 installer` on the internal disk cannot be reached either. In Windows, use the Windows installer to create a USB drive with the latest version (see the [install guide](INSTALL.md#creating-installation-media)), start the Live installer from it, choose "Reinstall Android" and select "Keep user data"; this writes the boot menu again. The version you install must not be older than the one on the tablet, or it may not start; the system to start by default has to be chosen again on the confirmation page. This has not been tested yet.
 
 ## Updates and going back
 
@@ -103,7 +103,7 @@ You can install any version with "Reinstall Android" in the Live installer. But 
 
 1. If it started after an update, wait for a few restarts first: when a new version repeatedly fails to start, the machine goes back to the previous version by itself, and you get a notification once Android is up. If it is stuck on one screen, hold the power button to turn it off, then start it again.
 2. After going back to the previous version, collect logs as described in [When Android starts](#when-android-starts) and attach them to your report.
-3. If it still does not start, start the Live installer and choose "Reinstall Android". Selecting "Keep user data" keeps your data; reinstalling the same version this way has been verified on a real machine.
+3. If it still does not start, start the Live installer and choose "Reinstall Android". Selecting "Keep user data" keeps your data; reinstalling the same version this way has been verified on a real machine. Do not install a version older than the one on the tablet.
 
 ## Collecting logs
 
