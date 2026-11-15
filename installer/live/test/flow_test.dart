@@ -11,6 +11,7 @@ import 'package:gk3_installer/model/model.dart';
 import 'package:gk3_installer/session.dart';
 import 'package:gk3_installer/ui/messages.dart';
 import 'package:gk3_installer/ui/screens_risk.dart';
+import 'package:gk3_installer/version.dart';
 
 import 'helpers.dart';
 
@@ -414,8 +415,8 @@ void main() {
     await hold(t, en.confirmHoldIdle);
     await see(t, find.text(en.doneTitle));
     check('done');
-    // 侧栏原先写死"安装器"（GUI-4）
-    expect(find.textContaining('Installer 0.'), findsOneWidget);
+    // 侧栏底部的版本号走 ARB（原先写死"安装器"，GUI-4）
+    expect(find.text(en.railFooter(kInstallerVersion)), findsOneWidget);
   });
 
   testWidgets('apply 在第一次写盘之前失败（ERR touched=no）：失败页说"盘没动过"、给返回与重试，不说"写了一半"', (t) async {

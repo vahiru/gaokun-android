@@ -2,7 +2,7 @@
   "@@locale": "zh",
   "appTitle": "Gaokun Android Installer",
   "railTitle": "Gaokun Android",
-  "railSub": "LiveCD Installer",
+  "railSub": "Live Installer",
   "railWelcome": "欢迎",
   "railMode": "安装方式",
   "railOpts": "选项",
@@ -79,7 +79,7 @@
   "editWhyEsp": "无法删除EFI系统分区：删除后，磁盘上的所有系统都将无法启动。",
   "editWhyMedium": "安装器正在从此分区运行，无法删除。",
   "editWhyInstallerPart": "此分区为安装器分区，可在Android安装完成后删除。",
-  "editDeleteWarn": "此分区中的所有数据都将无法访问。",
+  "editDeleteWarn": "此分区中的所有数据都将丢失。",
   "editDeleteWinre": "这是Windows恢复分区。删除后，Windows恢复环境（WinRE）将无法使用，“重置此电脑”和启动修复等依赖它的功能也将无法使用。",
   "editDeleteOnekey": "这是华为一键恢复分区。删除后，将无法通过华为一键恢复将设备还原为出厂时的Windows。",
   "editOk": "已删除：{what}",
@@ -443,7 +443,7 @@
       }
     }
   },
-  "railFooter": "HUAWEI MateBook E Go\n安装器{version}",
+  "railFooter": "v{version}",
   "@railFooter": {
     "placeholders": {
       "version": {
@@ -833,8 +833,8 @@
   "riskWinHead": "Windows与BitLocker恢复密钥",
   "riskWinBody": "安装过程将在共用的EFI系统分区中安装启动管理器（systemd-boot），并替换默认引导文件（BOOTAA64.EFI，原文件将自动备份）。若Windows开启了BitLocker或“设备加密”，下次启动Windows时可能要求输入48位恢复密钥；若无恢复密钥，将无法进入Windows或读取其中的数据。继续前请访问https://aka.ms/myrecoverykey确认可获取对应的恢复密钥。",
   "riskWinBitlocker": "检测到此磁盘上存在BitLocker加密分区，稍后在最终确认页需勾选确认已备妥恢复密钥。",
-  "riskEditHead": "删除分区：其中的数据将立即无法访问",
-  "riskEditBody": "请在确认每个分区的用途后再操作：误删Windows所在分区将导致Windows无法启动。每次删除前都会自动备份分区表。",
+  "riskEditHead": "被删除分区中的数据将会丢失",
+  "riskEditBody": "数据无价，请谨慎操作。",
   "riskRmLiveHead": "删除安装器分区：此后无法再从本机磁盘启动安装器",
   "riskRmLiveBody": "安装器分区及其中的安装文件将被删除。删除后，如需再次运行安装器，请使用U盘或Windows安装器。",
   "riskBackupHead": "请提前将重要数据备份至其他设备",
