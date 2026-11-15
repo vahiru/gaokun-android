@@ -73,12 +73,12 @@ class AlongBadTable extends Along {
 }
 
 class AlongError extends Along {
-  const AlongError(this.msg);
+  const AlongError(this.msg, [this.err]);
   final String msg;
-}
 
-/// 下载被取消时 install() 最后报的退出码（130 = 被信号打断的惯例）
-const kCancelledExit = 130;
+  /// 后端的 ERR 记录（有就按错误码给文案）
+  final Gk3Record? err;
+}
 
 /// 两条写盘的路，写盘之前都要阅读风险提示。每一条在 UI 上都先过 RiskPage（ui/screens_risk.dart）；
 /// Session 再守一道：没确认过的那条路，install / deletePartition 一个字节都不写（[Session.riskAcked]）
@@ -97,7 +97,7 @@ enum RiskKind {
 const kRiskUnackedCode = 'risk-not-acknowledged';
 
 /// 语言从哪来、选了存到哪（v1.0 计划 GUI-19）。真机上是 backend/platform_io.dart 的实现
-/// （内核参数 gk3.lang= 与介质上的一个小文件）；测试与 Web 预览用 [LangPrefs.none]
+/// （内核参数 gk3.lang= 与 /run 下的一个小文件）；测试与 Web 预览用 [LangPrefs.none]
 abstract class LangPrefs {
   const LangPrefs();
 
@@ -131,7 +131,7 @@ String? normalizeLang(String? v) {
 
 class Session extends ChangeNotifier {
   /// 语言：记住的 > 启动项的 gk3.lang= > 中文。记住的排在前面：用户在这台机器上明确选过一次，
-  /// 安装器重启（cage 拉起来）、回 Windows 关快速启动再回来，都该沿用；gk3.lang= 是第一次进来时的默认
+  /// 安装器重启（cage 拉起来）后该沿用（只记在内存里，重新开机不保留）；gk3.lang= 是第一次进来时的默认
   Session(this.backend, {LangPrefs prefs = LangPrefs.none})
       : _prefs = prefs,
         language = normalizeLang(prefs.saved()) ?? normalizeLang(prefs.fromBoot()) ?? 'zh';
@@ -203,15 +203,16 @@ class Session extends ChangeNotifier {
 
   // ── 盘 ──────────────────────────────────────────────────────────────────
   List<Disk>? disks;
-  String? probeError;
+  /// probe 失败时的 ERR 记录（后端没给 ERR 就按退出码造一条）：方式页照它说明原因，而不是"未检测到内置硬盘"
+  Gk3Record? probeErr;
 
   Future<void> probe() async {
     disks = null;
-    probeError = null;
+    probeErr = null;
     _changed();
     final r = await backend.run('probe');
     disks = Disk.fromProbe(r);
-    if (!r.ok) probeError = r.error ?? 'exit ${r.exitCode}';
+    if (!r.ok) probeErr = r.err ?? Gk3Record('ERR', {'code': r.error ?? 'exit ${r.exitCode}'});
     _changed();
   }
 
@@ -267,7 +268,7 @@ class Session extends ChangeNotifier {
     final esr = await backend.run('esp-info', ['--disk', d.path]);
     final er = esr.first('ESP');
     if (er != null) espInfo = EspInfo(er);
-    if (er == null && esr.err != null) return AlongError(esr.err!['code']);
+    if (er == null && esr.err != null) return AlongError(esr.err!['code'], esr.err);
     final info = espInfo;
     // 顺序：分区本身太小（清理也没用）> 在休眠（回 Windows 关机就好）> 空闲不够（清理）
     if (info != null && info.small && !info.ours) return AlongEspTooSmall(info.sizeMib);
@@ -438,9 +439,6 @@ class Session extends ChangeNotifier {
     _changed();
   }
 
-  /// 走的是 Windows 脚本那条路（安装器从内置盘上的 GK3LIVE 跑）：脚本已经先暂停过 BitLocker（§4.9.7 规则 6 的两种文案）
-  bool get viaWindowsScript => disks?.any((d) => d.medium && !d.external) ?? false;
-
   /// 安装期间后端给的提醒（stdout 上的 NOTE 记录，例如 EFI 变量删不掉）—— 完成页逐条说
   final notes = <Gk3Record>[];
 
@@ -452,8 +450,15 @@ class Session extends ChangeNotifier {
   Stream<Gk3Event> follow(String id) async* {
     _writing++;
     _changed();
+    // job follow 从头重放任务的全部输出：NOTE / REMOVED 照样收起来，完成页才说得全
+    notes.clear();
+    removed = null;
     try {
-      yield* backend.call('job', ['follow', id]);
+      await for (final e in backend.call('job', ['follow', id])) {
+        if (e is Gk3Record && e.type == 'NOTE') notes.add(e);
+        if (e is Gk3Record && e.type == 'REMOVED') removed = e;
+        yield e;
+      }
     } finally {
       _writing--;
       runningJob = null;

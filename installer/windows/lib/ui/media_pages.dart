@@ -106,13 +106,15 @@ class MediaTargetPage extends StatelessWidget {
   List<String> _internalBlockers(BuildContext context) {
     final s = context.session, l = context.l, pf = s.preflight;
     if (s.checkErr != null || pf == null || s.probe == null) return [l.chkFailed];
+    // 测试模式（对着一块 VHD）：本机的检查项不挡住，同首页检查
+    final host = !s.testMode;
     return [
-      if (!pf.modelOk) l.chkModelBad,
-      if (pf.secureBoot == 'on') l.chkSecureBootOn,
-      if (pf.fastStartup == 'on') l.chkFastStartupOn,
-      if (s.bitlockerNoKey) l.chkBitlockerNoKey,
-      if (s.bitlockerConverting) l.chkBitlockerConverting,
-      if (pf.lowBattery) l.chkBatteryLow,
+      if (host && !pf.modelOk) l.chkModelBad,
+      if (host && pf.secureBoot == 'on') l.chkSecureBootOn,
+      if (host && pf.fastStartup == 'on') l.chkFastStartupOn,
+      if (host && s.bitlockerNoKey) l.chkBitlockerNoKey,
+      if (host && s.bitlockerConverting) l.chkBitlockerConverting,
+      if (host && pf.lowBattery) l.chkBatteryLow,
       if (s.disk == null) l.chkNoSystemDisk else if (s.liveExists) l.chkLiveExists else if (s.mediaRegion == null) l.chkNoRoom(fmtMib(kMediaNeedMib)),
     ];
   }

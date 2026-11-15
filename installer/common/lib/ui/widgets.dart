@@ -185,7 +185,7 @@ class ChoiceCard extends StatelessWidget {
   }
 }
 
-/// 布局条上的一个分区：起点、大小（MiB）与系统（gk3_probe 的 PART os=，决定颜色，见 [DiskBar.colorOf]）
+/// 布局条上的一个分区：起点、大小（MiB）与系统（gk3l / gk3w probe 的 PART os=，决定颜色，见 [DiskBar.colorOf]）
 typedef DiskBarPart = ({int start, int sizeMib, String os});
 
 /// 布局条上的一块空闲区：起点与大小（MiB）

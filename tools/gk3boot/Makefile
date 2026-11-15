@@ -87,8 +87,7 @@ $(B)/gk3-misc: misc/gk3-misc.c $(CORE_SRC) core/include/gk3core.h | $(B)
 
 gk3-misc: $(B)/gk3-misc
 
-# 发布形态（live 镜像，/usr/share/gaokun3/gk3-misc）：静态、去符号，只在 Linux 上编得出来。
-# ⚠️ build-rootfs.sh 不经 make（构建容器里没装 make），照抄了这一行 —— 改一边要改另一边
+# 静态链接版：拷到别的 Linux 机器上直接能跑，只在 Linux 上编得出来。
 $(B)/gk3-misc.static: misc/gk3-misc.c $(CORE_SRC) core/include/gk3core.h | $(B)
 	$(CC) -std=c11 -O2 $(WARN) -Werror -Wno-missing-prototypes -Icore/include -static -o $@ misc/gk3-misc.c $(CORE_SRC)
 	strip $@

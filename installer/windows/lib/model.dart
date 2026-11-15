@@ -185,7 +185,7 @@ class Plan {
   int get needMib => _err?.intOf('need_mib') ?? 0;
 }
 
-/// 可以下载安装的一个版本（VARIANT 记录：LiveCD 的 gk3_net_manifest 的格式，另加 date / pre / source）
+/// 可以下载安装的一个版本（VARIANT 记录，由 backend/net.dart 从发布清单整理出来，带 date / pre / source）
 class Variant {
   Variant(this.r);
   final Gk3Record r;

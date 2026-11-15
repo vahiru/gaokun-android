@@ -27,7 +27,6 @@ String progressText(L10n l, Gk3Progress p) {
     'write-super' => p.fields.containsKey('total_mib') ? l.progWriteSuperMib(_mib(p['done_mib']), _mib(p['total_mib'])) : l.progWriteSuper,
     'write-boot' => l.progWriteBoot,
     'bootloader' => l.progBootloader,
-    'write-rescue' => l.progWriteRescue,
     'done' => l.progDone,
     'gpt-backup' => l.progGptBackup,
     'part-delete' => l.progPartDelete(p['part']),

@@ -206,7 +206,7 @@ gk3w_fallback_action gk3w_fallback_decide(const uint8_t *cur, size_t cur_len, co
     if (bak_ok || cur_sd)
         return w ? GK3W_FB_USE_W : bak_ok ? GK3W_FB_USE_BAK : GK3W_FB_NO_WINDOWS;
     if (!cur && w)
-        return GK3W_FB_USE_W;   /* 回落路径不见了（例如改名替换时掉电）：放回 Windows 启动管理器，同 PS1 */
+        return GK3W_FB_USE_W;   /* 回落路径不见了（例如改名替换时掉电）：放回 Windows 启动管理器 */
     return GK3W_FB_UNTOUCHED;
 }
 

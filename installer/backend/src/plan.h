@@ -20,6 +20,7 @@
 #define GK3W_METADATA_MIB 32u
 #define GK3W_BOOT_MIB 64u
 #define GK3W_SUPER_MIB 12288u
+/* 旧版安装器在 super 与 userdata 之间建的救援分区 gk3rescue：现在不再建，卸载时仍要认出这样的旧安装（uninstall.c） */
 #define GK3W_RESCUE_MIB 1024u
 #define GK3W_USERDATA_MIN_MIB 8192u
 
@@ -31,7 +32,6 @@ typedef struct {
     uint32_t sector;            /* 512 或 4096 */
     gk3w_span region;           /* 用户选的空闲区（含两端，逻辑扇区），调用方已核对它确实是空闲的 */
     uint64_t userdata_mib;      /* 0 = 吃掉剩下的全部 */
-    int rescue;                 /* 1 = 带救援分区 gk3rescue（Windows 原型不用） */
     int whole;                  /* 1 = 整盘清空：最前面另放 ESP（名字 esp，类型 EFI System） */
     gk3w_span keep;             /* 整盘清空时原样保留的分区（含两端）；keep.last == 0 表示没有 */
     const char *keep_name;      /* 它在 PLAN op=keep 行里的名字 */

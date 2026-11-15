@@ -251,7 +251,7 @@ static void test_sparse_bad(void)
 
 static void test_plan_fixture(void)
 {
-    /* installer/live/testdata/windows-setup-shrunk：probe 的 FREE 与 plan-along-rescue-no.txt（shell 版 gk3_plan 录的） */
+    /* installer/live/testdata/windows-setup-shrunk：probe 的 FREE 与 plan-along.txt */
     static const struct {
         const char *name;
         uint64_t first, last, mib;
@@ -260,7 +260,7 @@ static void test_plan_fixture(void)
         {"boot_a", 789522432, 789653503, 64},       {"boot_b", 789653504, 789784575, 64},
         {"super", 789784576, 814950399, 12288},     {"userdata", 814950400, 957220863, 69468},
     };
-    gk3w_plan_req r = {512, {789448704, 957220863}, 0, 0, 0, {0, 0}, NULL};
+    gk3w_plan_req r = {512, {789448704, 957220863}, 0, 0, {0, 0}, NULL};
     gk3w_plan p;
     CHECK(gk3w_plan_alongside(&r, &p) == GK3W_PLAN_OK);
     CHECK(p.n == 6);
@@ -269,19 +269,12 @@ static void test_plan_fixture(void)
         CHECK(p.parts[i].first == want[i].first && p.parts[i].last == want[i].last && p.parts[i].mib == want[i].mib);
     }
     CHECK(p.avail_mib == 81920 && p.fixed_mib == 12452 && p.userdata_mib == 69468);
-
-    /* 带救援分区（plan-along-rescue-yes.txt：gk3rescue 排在 super 之后、userdata 之前） */
-    r.rescue = 1;
-    CHECK(gk3w_plan_alongside(&r, &p) == GK3W_PLAN_OK);
-    CHECK(p.n == 7 && !strcmp(p.parts[5].name, "gk3rescue") && p.parts[5].first == 814950400 &&
-          p.parts[5].last == 817047551);
-    CHECK(p.parts[6].first == 817047552 && p.parts[6].last == 957220863 && p.userdata_mib == 68444);
 }
 
 static void test_plan_edges(void)
 {
     gk3w_plan p;
-    gk3w_plan_req r = {512, {1000, 1000 + (20644ull << 11)}, 0, 0, 0, {0, 0}, NULL};
+    gk3w_plan_req r = {512, {1000, 1000 + (20644ull << 11)}, 0, 0, {0, 0}, NULL};
     /* 起点 1000 向上对齐到 2048，丢掉的不到 1 MiB 让可用只剩 20643 MiB，差 1 MiB */
     CHECK(gk3w_plan_alongside(&r, &p) == GK3W_PLAN_ENOSPACE && p.avail_mib == 20643);
     r.region.last += 2048;
@@ -305,7 +298,7 @@ static void test_plan_edges(void)
     r.userdata_mib = 0;
     /* 4Kn：1 MiB = 256 扇区 */
     {
-        gk3w_plan_req q = {4096, {6, 6 + (20645ull << 8)}, 0, 0, 0, {0, 0}, NULL};
+        gk3w_plan_req q = {4096, {6, 6 + (20645ull << 8)}, 0, 0, {0, 0}, NULL};
         CHECK(gk3w_plan_alongside(&q, &p) == GK3W_PLAN_OK);
         CHECK(p.parts[0].first == 256 && p.parts[0].last == 256 + 4 * 256 - 1);
         CHECK(p.parts[4].mib == 12288 && p.parts[4].last - p.parts[4].first + 1 == 12288ull * 256);
@@ -369,7 +362,7 @@ static void test_plan_whole_reinstall(void)
 {
     /* 整盘清空：64 GiB 的 512 盘，新表的 usable 区 [34, total-34]，ESP 从 2048 起 300 MiB，userdata 吃掉剩下的 */
     uint64_t total = 64ull << 21;
-    gk3w_plan_req r = {512, {34, total - 34}, 0, 0, 1, {0, 0}, NULL};
+    gk3w_plan_req r = {512, {34, total - 34}, 0, 1, {0, 0}, NULL};
     gk3w_plan p;
     gk3w_reinstall ri;
     gk3w_part_ref parts[8];

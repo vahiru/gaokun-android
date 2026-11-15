@@ -6,6 +6,7 @@ import 'package:gk3_common/ui/widgets.dart';
 import '../app.dart';
 import '../model/model.dart';
 import '../session.dart';
+import 'messages.dart';
 import 'screens_edit.dart';
 import 'screens_finish.dart';
 import 'screens_risk.dart';
@@ -162,7 +163,7 @@ class _ModePageState extends State<ModePage> {
           : l.modeWhyNoRoom(needMib == null ? '?' : fmtMib(needMib), fmtMib(haveMib)),
       AlongMbr() => l.errMbr,
       AlongBadTable() => l.errNoGpt,
-      AlongError(:final msg) => l.errPlan(msg),
+      AlongError(:final msg, :final err) => err != null ? errText(l, err) : l.errPlan(msg),
     };
   }
 
@@ -241,7 +242,10 @@ class _ModePageState extends State<ModePage> {
     if (_loading || s.assessing) return page(const Center(child: CircularProgressIndicator()));
     final d = s.internalDisk;
     // 只安装到内置硬盘：没有它，或读不出它的分区表时，没有可选的方式
-    if (d == null) return page(Text(l.diskNone, style: context.tt.bodyLarge));
+    if (d == null) {
+      final e = s.probeErr;
+      return page(Text(e == null ? l.diskNone : errText(l, e), style: e == null ? context.tt.bodyLarge : context.tt.bodyLarge!.copyWith(color: context.cs.error)));
+    }
     if (d.unreadable || s.disk == null) {
       return page(ListView(children: [_diskHead(d), Text(l.diskUnreadable, style: context.tt.bodyLarge!.copyWith(color: context.cs.error))]));
     }
@@ -311,7 +315,7 @@ class _ModePageState extends State<ModePage> {
                   else if (s.reinstall!.rmlive case final rm?)
                     rm.merge ? l.rmLiveMerge(lv.label, fmtMib(lv.sizeMib)) : l.rmLiveFree(lv.label, fmtMib(lv.sizeMib)),
                 ].join('\n'),
-                // 还没装 Android 时删除会顺带还原 ESP：Windows 在休眠时不能改（同"保留现有系统"与"重新安装"）
+                // 删除时要写 ESP（删去旧的 LiveCD 启动项；还没装 Android 时还原 ESP）：Windows 在休眠时不能改（同"保留现有系统"与"重新安装"）
                 reason: (s.espInfo?.winHibernated ?? false) ? l.modeWhyHibernated : null,
                 selected: _pick == _Pick.rmlive,
                 onTap: () => setState(() => _pick = _Pick.rmlive),

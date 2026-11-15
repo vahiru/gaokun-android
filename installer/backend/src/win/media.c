@@ -188,7 +188,7 @@ static int lock_volumes(DWORD disk, HANDLE *out, int cap, int *n)
     do {
         size_t len = wcslen(name);
         wchar_t dev[MAX_PATH];
-        HANDLE h;
+        HANDLE h, q;
         union {
             VOLUME_DISK_EXTENTS e;
             BYTE raw[sizeof(VOLUME_DISK_EXTENTS) + 16 * sizeof(DISK_EXTENT)];
@@ -199,19 +199,25 @@ static int lock_volumes(DWORD disk, HANDLE *out, int cap, int *n)
             continue;
         wcscpy(dev, name);
         dev[len - 1] = 0;   /* 去掉末尾的反斜杠：打开的是卷本身 */
-        h = CreateFileW(dev, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
-        if (h == INVALID_HANDLE_VALUE)
+        /* 先用不带读写权限的句柄查卷在哪块盘上：卷被别的程序以不共享写入的方式打开时，读写打开会失败，
+         * 不能因此把它当成不在这块盘上 */
+        q = CreateFileW(dev, 0, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+        if (q == INVALID_HANDLE_VALUE)
             continue;
-        if (DeviceIoControl(h, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS, NULL, 0, &ext, sizeof ext, &got, NULL))
+        if (DeviceIoControl(q, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS, NULL, 0, &ext, sizeof ext, &got, NULL))
             for (i = 0; i < ext.e.NumberOfDiskExtents; i++)
                 if (ext.e.Extents[i].DiskNumber == disk)
                     on = 1;
-        if (!on) {
-            CloseHandle(h);
+        CloseHandle(q);
+        if (!on)
             continue;
-        }
         if (*n >= cap) {
-            CloseHandle(h);
+            rc = -1;
+            break;
+        }
+        h = CreateFileW(dev, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+        if (h == INVALID_HANDLE_VALUE) {
+            gk3w_log("a volume on disk %lu could not be opened for locking (error %lu)", (unsigned long)disk, (unsigned long)GetLastError());
             rc = -1;
             break;
         }
@@ -641,8 +647,6 @@ static int media_internal(int argc, wchar_t **argv)
         }
     }
     gk3w_wipe(key, sizeof key);
-    /* 写入期间阻止系统因空闲进入睡眠状态；进程退出时自动撤销 */
-    SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED);
 
     /* ── 输入：全部在动盘之前验完 ── */
     if (inputs_open(iso_path, rel, &in, 1, T))
@@ -900,6 +904,8 @@ out:
 int gk3w_cmd_media(int argc, wchar_t **argv)
 {
     const wchar_t *tgt = gk3w_arg(argc, argv, L"--target");
+    /* 写入期间阻止系统因空闲进入睡眠状态（图形界面另有电源请求与阻止关机）；进程退出时自动撤销 */
+    SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED);
     if (tgt && !wcscmp(tgt, L"usb"))
         return media_usb(argc, argv);
     if (tgt && !wcscmp(tgt, L"internal"))

@@ -5,7 +5,7 @@
  *              [--real-disk [--bitlocker-key -]]
  *
  * 发布目录：boot.img、super.img.zst，可选 install-artifacts.sha256（有就逐个核对）。
- * 步骤与进度代码同 gk3_apply：1 check / verify-sha / test-zst → 2 plan → 5 write-gpt → 15 format → 30 write-super
+ * 步骤与进度代码同 gk3l apply：1 check / verify-sha / test-zst → 2 plan → 5 write-gpt → 15 format → 30 write-super
  * → 70 write-boot → 80 bootloader → 100 done。★ 所有输入在第一次写盘之前验完（boot.img 拆得开、super 完整试解一遍、
  * ESP 空间够、区间确实空闲、分区名不重），之后 ERR 一律带 touched=yes。
  *
@@ -22,7 +22,7 @@
  * ESP：原件的 .before-gaokun3 备份先写到 .tmp、读回核对后再改名 —— 中途失败不会留下一份残缺的“备份”。
  *
  * 默认只对 VHD 虚拟盘动手。--real-disk 才写真实磁盘，而且只认 Windows 所在的那块系统盘、机型必须是 MateBook E Go，
- * 先过安装前检查（gk3w_sys_gate：Secure Boot、快速启动、BitLocker、电量），写完 ESP 后删 LoaderEntryDefault（同 gk3_apply）。
+ * 先过安装前检查（gk3w_sys_gate：Secure Boot、快速启动、BitLocker、电量），写完 ESP 后删 LoaderEntryDefault（同 gk3l apply）。
  * 系统卷的 BitLocker 保护开着时，--bitlocker-key - 从标准输入读恢复密钥，与系统卷的恢复密钥比对；一致才继续，
  * 并在第一次写盘之前暂停保护到下次重启（Windows 下次启动时按新的启动链重新绑定 TPM，不再要求输入恢复密钥）。
  *
@@ -430,7 +430,6 @@ int gk3w_cmd_apply(int argc, wchar_t **argv)
         req.sector = d.bs;
         req.region = (gk3w_span){rstart, rend};
         req.userdata_mib = ud_mib;
-        req.rescue = 0;
         req.whole = 0;
         {
             char dn[24];
@@ -715,7 +714,7 @@ int gk3w_cmd_apply(int argc, wchar_t **argv)
             goto out;
         gk3w_log("ESP: systemd-boot, kernel / dtb / ramdisk for both slots, both entries and loader.conf written and verified");
     }
-    /* LoaderEntryDefault 优先于 loader.conf 的 default：装完还在的话，第一次重启进的就不是新装的 Android（同 gk3_apply）。
+    /* LoaderEntryDefault 优先于 loader.conf 的 default：装完还在的话，第一次重启进的就不是新装的 Android（同 gk3l apply）。
      * 删不掉只提醒：盘上的东西都已写好。VHD 测试时这是 PC 自己的固件变量，不碰。 */
     if (real) {
         gk3w_loader_var_delete(L"LoaderEntryDefault", NULL);

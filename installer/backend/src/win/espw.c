@@ -171,7 +171,7 @@ int gk3w_esp_open(gk3w_disk *d, gk3w_esp *e, const PARTITION_INFORMATION_EX **pa
 
 int gk3w_esp_plan_backups(const gk3w_esp *e, const uint8_t *sd, size_t sd_len, uint8_t *orig[2], size_t orig_len[2], gk3w_touched T)
 {
-    /* 原件留一份（gk3_apply 同一条规矩）：只在第一次装时留，且与这份 systemd-boot 不同时才留。
+    /* 原件留一份（与 gk3l apply 同一条规矩）：只在第一次装时留，且与这份 systemd-boot 不同时才留。
      * 文件在而读不了（共享冲突、读错误）就在这里拒绝 —— 不能跳过备份再去覆盖它。
      * 回落路径另有一条（gk3w_install_backup_decide）：已有备份、而现在回落路径上是别的系统的引导程序（上次卸载
      * 之后别的系统放的）时，备份删了不丢就用现在的换掉它，两份都是别人的原件就拒绝 —— 不能覆盖任何一份 */

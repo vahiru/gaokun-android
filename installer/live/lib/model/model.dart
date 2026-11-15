@@ -33,7 +33,7 @@ class Part {
   final bool medium;
 
   /// 安装器分区：介质分区的内容已读进内存、分区本身没有挂载（PART ram=yes，见 installer/backend/src/linux/live.h）。
-  /// 整盘清空时保留它，装完可以删掉它（选项页"保留安装器分区"），Android 装好后可在方式页单独删除
+  /// 整盘清空时保留它，装完可以删掉它（选项页"保留安装器分区"），也可在方式页单独删除
   final bool ram;
 
   bool get isEsp => type == espTypeGuid || name == 'esp';
@@ -74,7 +74,6 @@ class Disk {
   final parts = <Part>[];
   final free = <FreeRegion>[];
 
-  bool get external => removable || bus == 'usb';
 
   /// 分区表读不出来：后端不列它的分区与空闲区，界面不给选
   bool get unreadable => table == 'unreadable';

@@ -3,7 +3,7 @@ import 'protocol.dart';
 /// 安装器后端。真实现由各应用自己提供（LiveCD：live 的 LiveBackend，调 gk3l；Windows：调 gk3w）；
 /// FixtureBackend（fixture_backend.dart）回放录好的输出，给开发和出图用。
 ///
-/// ★ 界面里【不许】有任何分区逻辑 —— 连"userdata 能给多大"都问 gk3_plan。
+/// ★ 界面里【不许】有任何分区逻辑 —— 连"userdata 能给多大"都问后端的 plan。
 ///   一旦在 Dart 里再算一遍，就是本仓反复吃过的"两份拷贝各自漂移"。
 abstract class Gk3Backend {
   /// 调后端的一个命令（gk3l / gk3w 的子命令）。事件按到达顺序，最后一个一定是 [Gk3Exit]。

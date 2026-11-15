@@ -228,8 +228,8 @@ ch dpkg-query -W -f='${Installed-Size}\t${Package}\n' | sort -rn | head -15 | se
 say "5. 打包"
 cleanup; trap - EXIT
 rm -rf "$ROOTFS"/var/lib/apt/lists/* "$ROOTFS"/var/cache/apt/* "$ROOTFS"/var/log/* "$ROOTFS"/tmp/*
-# ★ machine-id 留空：systemd 每次开机现生成。镜像里带一个固定的，所有装机就共用一个
-#   （gk3_apply 用它给 ESP 上的目录命名）
+# ★ machine-id 留空：systemd 每次开机现生成。镜像里不带固定的 machine-id
+#   （ESP 上的目录名由 gk3l apply 自己随机生成，不用它）
 : > "$ROOTFS/etc/machine-id"; rm -f "$ROOTFS/var/lib/dbus/machine-id"
 : > "$ROOTFS/etc/resolv.conf"
 

@@ -45,7 +45,7 @@ static gk3w_plan_err plan_one(const gk3w_plan_req *r, gk3w_plan *out)
     cur = (r->region.first + per_mib - 1) / per_mib * per_mib;
     avail = cur > r->region.last ? 0 : (r->region.last - cur + 1) / per_mib;
 
-    fixed = GK3W_MISC_MIB + GK3W_METADATA_MIB + 2 * GK3W_BOOT_MIB + GK3W_SUPER_MIB + (r->rescue ? GK3W_RESCUE_MIB : 0) +
+    fixed = GK3W_MISC_MIB + GK3W_METADATA_MIB + 2 * GK3W_BOOT_MIB + GK3W_SUPER_MIB +
             (r->whole ? GK3W_ESP_MIB : 0);
     need = fixed + GK3W_USERDATA_MIN_MIB;
     out->avail_mib = avail;
@@ -71,8 +71,6 @@ static gk3w_plan_err plan_one(const gk3w_plan_req *r, gk3w_plan *out)
     add(out, "boot_a", GK3W_BOOT_MIB, &cur, per_mib);
     add(out, "boot_b", GK3W_BOOT_MIB, &cur, per_mib);
     add(out, "super", GK3W_SUPER_MIB, &cur, per_mib);
-    if (r->rescue)
-        add(out, "gk3rescue", GK3W_RESCUE_MIB, &cur, per_mib);
     add(out, "userdata", ud, &cur, per_mib);
 
     /* 再独立验一次：最后一个分区不能越过区间末尾（算错的代价是写到别人的分区上） */

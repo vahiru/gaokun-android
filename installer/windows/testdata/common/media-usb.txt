@@ -154,27 +154,31 @@ D 360
 E PROGRESS 84 write-media
 D 360
 E PROGRESS 85 write-media
-D 360
-E PROGRESS 86 write-media
-D 360
-E PROGRESS 87 write-media
-D 360
-E PROGRESS 88 write-media
-D 360
-E PROGRESS 89 write-media
-D 360
-E PROGRESS 90 write-media
-D 360
-E PROGRESS 91 write-media
-D 360
-E PROGRESS 92 write-media
-D 360
-E PROGRESS 93 write-media
-D 360
-E PROGRESS 94 write-media
-D 360
-E PROGRESS 95 write-media
 D 200
+D 360
+E PROGRESS 85 verify-media
+D 360
+E PROGRESS 86 verify-media
+D 360
+E PROGRESS 87 verify-media
+D 360
+E PROGRESS 88 verify-media
+D 360
+E PROGRESS 89 verify-media
+D 360
+E PROGRESS 90 verify-media
+D 360
+E PROGRESS 91 verify-media
+D 360
+E PROGRESS 92 verify-media
+D 360
+E PROGRESS 93 verify-media
+D 360
+E PROGRESS 94 verify-media
+D 360
+E PROGRESS 95 verify-media
+D 360
+E PROGRESS 96 verify-media
 E PROGRESS 97 partition
 D 30
 E USB drive written and verified: MBR + FAT32 "GK3LIVE", 12 files

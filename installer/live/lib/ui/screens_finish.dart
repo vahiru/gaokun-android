@@ -226,7 +226,7 @@ class ConfirmPage extends StatelessWidget {
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Expanded(
           child: ListView(children: [
-            Text('${d.model.isNotEmpty ? d.model : (d.external ? l.diskExternal : l.diskInternal)} · ${d.path} · ${fmtMib(d.sizeMib)}', style: tt.titleMedium),
+            Text('${d.model.isNotEmpty ? d.model : l.diskInternal} · ${d.path} · ${fmtMib(d.sizeMib)}', style: tt.titleMedium),
             const SizedBox(height: 10),
             diskBar(d, highlightFree: a is AlongOk && !wipe ? a.region : null),
             const SizedBox(height: 18),
@@ -364,7 +364,7 @@ class DualOptions extends StatelessWidget {
         const SizedBox(height: 18),
         Text(l.confirmBitlockerHead, style: tt.titleMedium!.copyWith(color: context.cs.error)),
         const SizedBox(height: 6),
-        Text(s.viaWindowsScript ? l.confirmBitlockerScript : l.confirmBitlockerUsb, style: tt.bodyLarge),
+        Text(l.confirmBitlockerUsb, style: tt.bodyLarge),
         CheckboxListTile(
           contentPadding: EdgeInsets.zero,
           controlAffinity: ListTileControlAffinity.leading,
@@ -500,7 +500,7 @@ class DonePage extends StatelessWidget {
   Widget build(BuildContext context) {
     final s = context.session, l = context.l, tt = Theme.of(context).textTheme;
     // 免 U 盘安装（安装器跑在内置盘上）：没有要拔的介质（v1.0 计划 GUI-17）
-    final internalMedium = s.disks?.any((d) => d.medium && !d.external) ?? false;
+    final internalMedium = s.disks?.any((d) => d.medium) ?? false;
     // 装完删掉了安装器分区（apply 的 REMOVED）：空间并进了 /data，或者成了未分配空间
     final rmv = s.removed;
     return PopScope(

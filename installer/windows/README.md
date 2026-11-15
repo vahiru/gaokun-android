@@ -6,7 +6,7 @@ ARM64版（平板）由GitHub Actions构建（`.github/workflows/installer-windo
 
 ## 后端
 
-`lib/backend/win_backend.dart`：检查、分区方案、安装与卸载调用程序目录`backend\`里的`gk3w.exe`，参数按argv传递；`--sdboot`、`--mke2fs`、`--backup-dir`由它补上，界面不需要知道这些文件在哪里。版本列表与下载在Dart中实现（`lib/backend/net.dart`），输出与LiveCD的`gk3_net_manifest`、`gk3_net_release`相同；下载的规则沿用LiveCD的`gk3_net_fetch`（断点续传、停滞判定、只重试暂时性错误、换版本时丢弃旧文件），完成后用`gk3w hash`校验sha256。每次调用的参数与输出写入`%ProgramData%\gaokun3\logs\`。
+`lib/backend/win_backend.dart`：检查、分区方案、安装与卸载调用程序目录`backend\`里的`gk3w.exe`，参数按argv传递；`--sdboot`、`--mke2fs`、`--backup-dir`由它补上，界面不需要知道这些文件在哪里。版本列表与下载在Dart中实现（`lib/backend/net.dart`）：断点续传、停滞判定、只重试暂时性错误、换版本时丢弃旧文件，完成后用`gk3w hash`校验sha256。每次调用的参数与输出写入`%ProgramData%\gaokun3\logs\`。
 
 程序清单要求以管理员身份运行（`windows/runner/runner.exe.manifest`），启动时出现一次UAC提示。
 

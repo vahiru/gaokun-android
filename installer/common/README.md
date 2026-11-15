@@ -16,7 +16,7 @@ lib/ui/widgets.dart              Btn/BtnKind、ChoiceCard、DiskBar、HoldToConf
 assets/fonts/                    Roboto与Noto Sans SC（不入库，python3 tool/fetch-fonts.py取，见assets/fonts/README.md）
 ```
 
-留在应用里的：真后端（LiveCD的`ShellBackend`）、会话状态机、磁盘模型、各个页面、文案（l10n）与录像（`testdata/`）。
+留在应用里的：真后端（LiveCD的`LiveBackend`、Windows的`WinBackend`）、会话状态机、磁盘模型、各个页面、文案（l10n）与录像（`testdata/`）。
 
 ## 二、应用怎样接入
 

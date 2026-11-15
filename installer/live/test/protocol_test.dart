@@ -90,7 +90,6 @@ void main() {
       expect(nvme.free, isEmpty);
       expect(nvme.esp?.path, '/dev/nvme0n1p1');
       expect(nvme.parts[3].label, 'Data');
-      expect(nvme.external, isFalse);
     });
     test('windows-free：80 GiB 空闲区；ESP 够用、有 Windows', () async {
       final bk = b('windows-free');
@@ -123,7 +122,6 @@ void main() {
     test('windows-live：介质在内置盘上、读进了内存 —— 盘与介质分区都标 medium，介质分区是安装器分区（ram）', () async {
       final disks = Disk.fromProbe(await b('windows-live').run('probe'));
       expect(disks.single.medium, isTrue);
-      expect(disks.single.external, isFalse);
       expect(disks.single.parts.where((p) => p.medium).map((p) => p.path), ['/dev/nvme0n1p8']);
       expect(disks.single.parts.where((p) => p.ram).map((p) => p.path), ['/dev/nvme0n1p8']);
     });

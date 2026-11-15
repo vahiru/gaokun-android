@@ -82,11 +82,11 @@ void main() {
     expect(t.widget<ChoiceCard>(card).reason, l.modeWhyHibernated);
   });
 
-  testWidgets('windows-setup（Windows 脚本只划了 GK3LIVE、没有空闲）：双系统禁用并报"至少要多少"，安装器里不缩分区', (t) async {
+  testWidgets('windows-setup（盘上只划了 GK3LIVE、没有空闲）：双系统禁用并报"至少要多少"', (t) async {
     await pumpApp(t, 'windows-setup');
     await tap(t, find.text(l.btnStart));
     await see(t, find.text(l.modeTitle));
-    // 安装器就在这块盘上（GK3LIVE）⇒ 默认不另装救援（GUI-17），所以是不带救援的那个数（20644 MiB = 20.2 GiB）
+    // gk3l plan 的 PLANERR need_mib（20644 MiB = 20.2 GiB）
     await see(t, find.text(l.modeWhyNoFree(fmtMib(20644))));
     expect(find.text(l.modeAlongOk), findsNothing);
     // GK3LIVE 是直接挂载的介质（没有读进内存）：不能清除整个磁盘，写明原因
@@ -150,7 +150,7 @@ void main() {
   testWidgets('factory：没有空闲区 → 双系统禁用并报"至少要多少"（后端报的数）', (t) async {
     await pumpApp(t, 'factory');
     await tap(t, find.text(l.btnStart));
-    // 来自 gk3_plan 的 PLANERR need_mib（不装救援系统），不是界面写死的
+    // 来自 gk3l plan 的 PLANERR need_mib，不是界面写死的
     await see(t, find.text(l.modeWhyNoFree(fmtMib(20644))));
     expect(find.text(l.modeAlongOk), findsNothing);
   });
@@ -514,7 +514,7 @@ void main() {
     expect(a, isNot(contains('--remove-installer')));
   });
 
-  testWidgets('从 U 盘装：完成页照旧提示移除介质；不装救援系统', (t) async {
+  testWidgets('从 U 盘装：完成页照旧提示移除介质', (t) async {
     final rec = await pumpApp(t, 'blank');
     await tap(t, find.text(l.btnStart));
     await tap(t, find.text(l.modeWipeTitle));
@@ -665,7 +665,6 @@ void main() {
     final rec = await toConfirm(t, overrides: {'esp-info': 'esp_info-bitlocker.txt'});
     await see(t, find.text(l.confirmBitlockerHead));
     await see(t, find.text(l.confirmBitlockerUsb));
-    expect(find.text(l.confirmBitlockerScript), findsNothing);
     await hold(t, l.confirmHoldIdle);
     expect(find.text(l.doneTitle), findsNothing);
     expect(rec.last('apply'), isNull);
@@ -680,10 +679,9 @@ void main() {
     expect(rec.last('apply')!.join(' '), contains('--bitlocker-confirmed'));
   });
 
-  testWidgets('BitLocker、走的是 Windows 工具那条路（安装器在内置盘上）：文案换成"工具已暂停 BitLocker"（§4.9.7 规则 6）', (t) async {
+  testWidgets('BitLocker、安装器在内置盘上：同样提醒确认恢复密钥', (t) async {
     await toConfirm(t, scenario: 'windows-live', overrides: {'esp-info': 'esp_info-bitlocker.txt'});
-    await see(t, find.text(l.confirmBitlockerScript));
-    expect(find.text(l.confirmBitlockerUsb), findsNothing);
+    await see(t, find.text(l.confirmBitlockerUsb));
   });
 
   testWidgets('Windows 在休眠：双系统禁用并写明"回 Windows 关快速启动、用关机退出"（U18）', (t) async {

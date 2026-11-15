@@ -18,7 +18,7 @@ import 'package:gk3_common/backend/protocol.dart';
 ///   gk3-installer.service 的 cgroup 被整个杀掉时，写 super 的那个进程不跟着死。stdout / stderr / 退出码与直接调用
 ///   逐行相同，只多一条 stderr 上的 JOB 记录（id 记进日志，界面重新起来时按它接着跟）。
 ///   单元里还套着 systemd-inhibit：写盘的那几分钟里电源键、合盖、睡眠都不许把机器关掉或挂起
-///   （另外两层在镜像里：overlay-common 的 logind.conf.d 关了按键与合盖、build-rootfs.sh mask 了几个睡眠 target）。
+///   （另外两层在镜像里：installer/tools/build/overlay 的 logind.conf.d 关了按键与合盖、build-rootfs.sh mask 了几个睡眠 target）。
 class LiveBackend extends Gk3Backend {
   LiveBackend(this.gk3l, {IOSink? log}) : _log = log ?? stderr;
   final IOSink _log;
@@ -92,7 +92,7 @@ class LiveBackend extends Gk3Backend {
     await Process.run(cmd, const []);
   }
 
-  /// 命令行逃生口：切到 tty2（那里有 getty）。镜像里 chvt 链到 busybox（overlay-common），这里再退一步直接调 busybox；
+  /// 命令行逃生口：切到 tty2（那里有 getty）。镜像里 chvt 链到 busybox（installer/tools/build/overlay），这里再退一步直接调 busybox；
   /// 都不行就把原因交给界面说出来（不能点了没反应）
   @override
   Future<String?> openShell() async {

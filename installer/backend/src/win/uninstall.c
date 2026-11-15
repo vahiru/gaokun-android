@@ -22,8 +22,8 @@
  *      不能把它唯一的一份删掉。
  *   c. 有 B，或 cur 是 systemd-boot：换成【当前的】W（Windows 之后更新过的启动管理器只在 EFI/Microsoft/Boot 里，
  *      B 是装机那天的拷贝）；没有 W 才用 B；两样都没有就拒绝（删完没有东西能启动）。
- *   d. cur 不存在而有 W（例如改名替换时掉电）：放回 W，同 PS1。其余（没有可用的 B，cur 已经是 Windows 启动管理器
- *      或别的引导程序）：这一套安装没动过回落路径（例如 apply 在写 ESP 之前就中断了），原样留着；PS1 则一律换成 W。
+ *   d. cur 不存在而有 W（例如改名替换时掉电）：放回 W。其余（没有可用的 B，cur 已经是 Windows 启动管理器
+ *      或别的引导程序）：这一套安装没动过回落路径（例如 apply 在写 ESP 之前就中断了），原样留着。
  *   回落路径上已经是要换的那个文件时不写；要写时先查 ESP 空闲够不够，写成 .tmp 再改名。
  *   必须在删分区之前：反过来的话 systemd-boot 仍默认进一个已经不存在的 Android。
  * 2 删 ESP 上我们的东西：我们的启动项；含 android/ 或 rescue/ 的 <mid>/ 里的这两个目录（<mid>/ 空了才删）；
@@ -38,7 +38,7 @@
  * 不动回落路径时也要求）；要换回落路径时，第一次写盘之前暂停保护到下次重启。
  *
  * 与 -RemoveAndroid 的差别（原型阶段）：GK3LIVE 不删、C: 不扩；免 U 盘安装旧版留下的 BCD 启动项不删（EFI/gaokun3 照样删）；
- * 盘上没有 Android 分区时也清 ESP（PS1 拒绝）；<mid>/ 不整个删（它也可能是别的系统的 BLS 目录）；EFI/Linux 下的
+ * 盘上没有 Android 分区时也清 ESP；<mid>/ 不整个删（它也可能是别的系统的 BLS 目录）；EFI/Linux 下的
  * UKI 也算 foreign；装机时的分区组也认（见上）；回落路径原来不是 Windows 时换回原件（见上）。 */
 #include <windows.h>
 #include <winioctl.h>
@@ -165,7 +165,7 @@ static void rm_dir(esp_ctx *e, const wchar_t *rel)
         note("esp-dir", rel);
 }
 
-/* 32 位十六进制（不分大小写，同 PS1 的 '^[0-9a-fA-F]{32}$'） */
+/* 32 位十六进制（不分大小写） */
 static int is_hex32(const wchar_t *s)
 {
     size_t n = 0;
@@ -212,7 +212,7 @@ static void scan_esp(const esp_ctx *e, esp_scan *s)
             n = strlen(u);
             if (gk3w_our_entry_name(u))
                 s->our_entries++;
-            else if (n >= 5 && !_stricmp(u + n - 5, ".conf")) {   /* 同 PS1：只有 .conf 算别人的启动项 */
+            else if (n >= 5 && !_stricmp(u + n - 5, ".conf")) {   /* 只有 .conf 算别人的启动项 */
                 s->foreign++;
                 gk3w_log("boot entry of another system: loader/entries/%s", u);
             }

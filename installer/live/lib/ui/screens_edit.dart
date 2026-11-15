@@ -148,7 +148,7 @@ class _DiskEditPageState extends State<DiskEditPage> {
     ];
     // 这两种不给按钮：直接说为什么（后端也会拒绝，这里只是先说出来）
     if (p.isEsp) return [...head, _why(l.editWhyEsp)];
-    // 安装器分区（读进了内存）：删它要先存日志、再并进 /data —— 走方式页的"删除安装器分区"，Android 装好之后才有
+    // 安装器分区（读进了内存）：走方式页的"删除安装器分区"（与 /data 相邻时并进 /data）
     if (p.ram) return [...head, _why(l.editWhyInstallerPart)];
     if (p.medium) return [...head, _why(l.editWhyMedium)];
     // 删掉之后少了什么：Windows 恢复环境、华为一键恢复

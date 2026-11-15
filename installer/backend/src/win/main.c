@@ -1,9 +1,9 @@
 /* gk3w：gaokun3 安装器的 Windows 后端。
  *
  *   gk3w probe        列出磁盘、分区、空闲区（只读，要管理员权限）
- *   gk3w apply ...    装到一段空闲空间（双系统），对应 gk3_apply --mode alongside（见 apply.c；--real-disk 才写真实磁盘）
+ *   gk3w apply ...    装到一段空闲空间（双系统），与 gk3l apply --mode alongside 装出的相同（见 apply.c；--real-disk 才写真实磁盘）
  *   gk3w uninstall ...  卸载 apply 装上去的那一套，留下空闲空间（见 uninstall.c）
- *   gk3w media ...      制作独立安装介质：把 LiveCD 与所选版本写进 U 盘（见 media.c）
+ *   gk3w media ...      制作独立安装介质：把 LiveCD 与所选版本写进 U 盘或本机磁盘上的安装器分区（见 media.c）
  *   gk3w preflight      安装前检查要看的系统状态（只读，见 sys.c）
  *   gk3w bitlocker-key  校验标准输入上的 BitLocker 恢复密钥，可选暂停保护（见 bitlocker.c）
  *   gk3w shrink-info    系统卷最多还能压缩出多少、被哪个文件挡住（只读，见 shrink.c）

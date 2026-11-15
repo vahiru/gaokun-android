@@ -29,8 +29,8 @@ int gk3w_is_machine_id(const char *s);
  * 可带启动计数后缀 +N[-M]、可带 .disabled；ASCII 不分大小写。 */
 int gk3w_our_entry_name(const char *name);
 
-/* 共用 ESP 上卸载时，这个 Loader 变量值算不算我们写的（Test-OurVarValue）：auto-windows、gk3-windows.conf
- * （同 gk3_defvar_classify），指向某个槽的 *-android-<a|b>.conf，或 gk3w_our_entry_name 认得的条目名 */
+/* 共用 ESP 上卸载时，这个 Loader 变量值算不算我们写的：auto-windows、gk3-windows.conf，
+ * 指向某个槽的 *-android-<a|b>.conf，或 gk3w_our_entry_name 认得的条目名 */
 int gk3w_our_var_value(const char *v);
 
 /* 这个 EFI 程序是不是 Windows 启动管理器：PE 版本资源里 CompanyName 为 "Microsoft Corporation"、FileDescription 为

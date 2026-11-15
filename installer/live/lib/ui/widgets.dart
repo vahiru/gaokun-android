@@ -201,28 +201,3 @@ class DiskLegend extends StatelessWidget {
     ]);
   }
 }
-
-/// 信号格数（dBm 数字对用户没有意义，roadmap 欠账第 1 条）—— 用 MD3 自带的 WiFi 图标
-class SignalBars extends StatelessWidget {
-  const SignalBars(this.bars, {super.key, this.secure = false});
-  final int bars;
-  final bool secure;
-  @override
-  Widget build(BuildContext context) {
-    final icon = switch (bars.clamp(0, 4)) {
-      0 => Icons.signal_wifi_0_bar,
-      1 => Icons.network_wifi_1_bar,
-      2 => Icons.network_wifi_2_bar,
-      3 => Icons.network_wifi_3_bar,
-      _ => Icons.signal_wifi_4_bar,
-    };
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (secure) Icon(Icons.lock_outline, size: 18, color: context.cs.onSurfaceVariant),
-        const SizedBox(width: 4),
-        Icon(icon, color: context.cs.onSurfaceVariant),
-      ],
-    );
-  }
-}

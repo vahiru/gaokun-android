@@ -189,7 +189,7 @@ Future<void> scrollRiskToEnd(WidgetTester t) async {
 bool riskContinueEnabled(WidgetTester t, [L10n? loc]) =>
     t.widget<ButtonStyleButton>(find.ancestor(of: find.text((loc ?? l).riskContinue), matching: find.byWidgetPredicate((w) => w is ButtonStyleButton)).first).onPressed != null;
 
-/// 按住 2 秒（确认页 / 缩分区）
+/// 按住 2 秒（确认页）
 Future<void> hold(WidgetTester t, String idleText) async {
   final g = await t.startGesture(t.getCenter(find.textContaining(idleText).first));
   for (var i = 0; i < 25; i++) {
