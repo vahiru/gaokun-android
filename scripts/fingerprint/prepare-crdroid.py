@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Verify the handoff and stage ignored firmware / an explicitly supplied kernel.
+"""Verify and stage the ignored fingerprint firmware.
 
-Offline only. Does not build, sync, flash, or contact a device. A candidate
-kernel must carry its own IKCONFIG proving that the restricted driver is built in.
-The Goodix configuration template comes from gfspi.dll of the same Windows
-driver release as the TA (uup-drivers-sc8280xp 200.0.10.0, gfspi.cab).
+Offline only. Does not build, sync, flash, or contact a device.
+The TA comes either from QcTreeExtOem8280.cab of the Windows driver release
+(--ta) or from the private handoff ZIP (--handoff, used when --ta is absent).
+The Goodix configuration template comes from gfspi.dll of the same release
+(uup-drivers-sc8280xp 200.0.10.0, gfspi.cab).
 """
 import argparse
 import hashlib
@@ -12,7 +13,6 @@ import os
 from pathlib import Path
 import shutil
 import struct
-import subprocess
 import tempfile
 import zipfile
 
@@ -66,43 +66,32 @@ def goodix_template(dll):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--ta", type=Path,
+                        help="fingerpr.mbn from the Windows driver release (QcTreeExtOem8280.cab)")
     parser.add_argument("--handoff", type=Path,
-                        default=ROOT / "gaokun3-fingerprint-driver-handoff-20261101.zip")
+                        default=ROOT / "gaokun3-fingerprint-driver-handoff-20261101.zip",
+                        help="private handoff ZIP; read only when --ta is not given")
     parser.add_argument("--gfspi", type=Path, default=ROOT / "gfspi.dll",
                         help="gfspi.dll from the Windows driver release (gfspi.cab)")
     parser.add_argument("--device-tree", type=Path, default=ROOT / "device/huawei/gaokun3")
-    parser.add_argument("--kernel-image", type=Path)
-    parser.add_argument("--kernel-tree", type=Path,
-                        help="source tree containing scripts/extract-ikconfig")
     args = parser.parse_args()
-    if bool(args.kernel_image) != bool(args.kernel_tree):
-        parser.error("--kernel-image and --kernel-tree must be supplied together")
-    with zipfile.ZipFile(args.handoff) as z:
-        # Read known members only; never extract archive-controlled paths.
-        for line in z.read("SHA256SUMS").decode().splitlines():
-            digest, name = line.split(None, 1)
-            data = z.read(name.lstrip("*"))
-            if hashlib.sha256(data).hexdigest() != digest:
-                raise ValueError("handoff checksum mismatch: " + name)
-        ta = z.read("firmware/fingerpr.mbn")
+    if args.ta:
+        ta = args.ta.read_bytes()
+    else:
+        with zipfile.ZipFile(args.handoff) as z:
+            # Read known members only; never extract archive-controlled paths.
+            for line in z.read("SHA256SUMS").decode().splitlines():
+                digest, name = line.split(None, 1)
+                data = z.read(name.lstrip("*"))
+                if hashlib.sha256(data).hexdigest() != digest:
+                    raise ValueError("handoff checksum mismatch: " + name)
+            ta = z.read("firmware/fingerpr.mbn")
     if hashlib.sha256(ta).hexdigest() != TA_HASH:
         raise ValueError("unexpected TA revision")
     goodix_cfg = goodix_template(args.gfspi.read_bytes())
-    kernel = None
-    if args.kernel_image:
-        config = subprocess.check_output(
-            ["sh", str(args.kernel_tree / "scripts/extract-ikconfig"),
-             str(args.kernel_image.resolve())], text=True)
-        for option in ("QCOM_SCM", "QCOM_QSEECOM", "GAOKUN3_FPCMD", "GPIO_CDEV"):
-            if f"CONFIG_{option}=y" not in config.splitlines():
-                raise ValueError(f"candidate image does not contain CONFIG_{option}=y")
-        kernel = args.kernel_image.read_bytes()
     # Budget for a staged copy AND atomic-write temporary files, leaving 2 GiB.
     args.device_tree.mkdir(parents=True, exist_ok=True)
-    old_image = args.device_tree / "prebuilt-boot/vmlinuz.efi"
-    rollback_bytes = old_image.stat().st_size if kernel and old_image.exists() else 0
-    need = 2 * (len(ta) + len(goodix_cfg) + (len(kernel) if kernel else 0) +
-                rollback_bytes) + 2 * 1024**3
+    need = 2 * (len(ta) + len(goodix_cfg)) + 2 * 1024**3
     if shutil.disk_usage(args.device_tree).free < need:
         raise OSError("insufficient free space for staging plus 2 GiB reserve")
     dest = args.device_tree / "firmware/fingerpr.mbn"
@@ -111,19 +100,6 @@ def main():
     dest = args.device_tree / "firmware/gaokun3-goodix-cfg.bin"
     atomic_copy(goodix_cfg, dest)
     print("Verified/staged ignored Goodix template:", dest)
-    if kernel:
-        dest = args.device_tree / "prebuilt-boot/vmlinuz.efi"
-        if dest.exists() and dest.read_bytes() != kernel:
-            backup = dest.with_name("vmlinuz.efi.before-fingerprint")
-            if backup.exists():
-                raise FileExistsError("preserve existing rollback kernel: " + str(backup))
-            atomic_copy(dest.read_bytes(), backup)
-            print("Preserved previous kernel:", backup)
-        atomic_copy(kernel, dest)
-        digest = hashlib.sha256(kernel).hexdigest()
-        atomic_copy((digest + "  vmlinuz.efi\n").encode(),
-                    dest.with_name("fingerprint-kernel.sha256"))
-        print("Verified/staged candidate kernel:", digest)
     print("Free space after staging:", shutil.disk_usage(args.device_tree).free, "bytes")
 
 

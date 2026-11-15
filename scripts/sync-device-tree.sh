@@ -100,23 +100,22 @@ else
     echo "· 本机没有 prebuilt-boot/vmlinuz.efi，保留构建机上的那份"
 fi
 
-# Fingerprint candidates require three ignored inputs: the TA, the Goodix
-# configuration template and the fingerprint kernel. This branch is only
-# reached when explicitly enabled; no device connection is made by this script.
-if [ "${GAOKUN3_FINGERPRINT:-false}" = true ]; then
-    FP_TA="$SRC/firmware/fingerpr.mbn"
-    FP_CFG="$SRC/firmware/gaokun3-goodix-cfg.bin"
-    [ -f "$FP_TA" ] || die "指纹 TA 缺失：先运行 scripts/fingerprint/prepare-crdroid.py"
-    [ "$(shasum -a 256 "$FP_TA" | cut -d' ' -f1)" = b081543c7b6ae4360969007836747601e8c48ec48a8335a5479e45ec0e34355a ] || die "指纹 TA 哈希错误"
-    [ -f "$FP_CFG" ] || die "Goodix 配置模板缺失：先运行 scripts/fingerprint/prepare-crdroid.py --gfspi"
-    [ "$(shasum -a 256 "$FP_CFG" | cut -d' ' -f1)" = 273537378e759cc19b829c6c5a3b5226da603b55f96be6bcdf9a2e66c6c26725 ] || die "Goodix 配置模板哈希错误"
-    (cd "$SRC/prebuilt-boot" && shasum -a 256 -c fingerprint-kernel.sha256) || die "指纹候选内核缺失或已变化"
-    rsync -a -e "$SSH" "$FP_TA" "$FP_CFG" "$DST/firmware/"
-    $SSH "vahiru@$HOST" 'cd ~/crdroid/device/huawei/gaokun3 &&
-      test "$(sha256sum firmware/fingerpr.mbn | cut -d" " -f1)" = b081543c7b6ae4360969007836747601e8c48ec48a8335a5479e45ec0e34355a &&
-      test "$(sha256sum firmware/gaokun3-goodix-cfg.bin | cut -d" " -f1)" = 273537378e759cc19b829c6c5a3b5226da603b55f96be6bcdf9a2e66c6c26725 &&
-      cd prebuilt-boot && sha256sum -c fingerprint-kernel.sha256' || die "构建机指纹输入校验失败"
-fi
+echo "═══ 2a. 指纹TA与Goodix配置模板（firmware/ 里两个不入库的文件）单独同步 ═══"
+# fingerprint.mk 缺了它们构建就失败，没有跳过的开关。与 prebuilt-boot 同一个规矩：本机有就核对后带过去，
+#   没有就保留构建机上的那份；第 3a 步按 sha256 断言构建机上的两份。来源见 firmware/README.md 第四节。
+#   --checksum：构建机上那份坏了而大小、时间没变时也要换掉。
+FP_TA_SHA=b081543c7b6ae4360969007836747601e8c48ec48a8335a5479e45ec0e34355a
+FP_CFG_SHA=273537378e759cc19b829c6c5a3b5226da603b55f96be6bcdf9a2e66c6c26725
+for fp in "fingerpr.mbn:$FP_TA_SHA" "gaokun3-goodix-cfg.bin:$FP_CFG_SHA"; do
+    f=${fp%%:*}; want=${fp#*:}
+    if [ -f "$SRC/firmware/$f" ]; then
+        [ "$(shasum -a 256 "$SRC/firmware/$f" | cut -d' ' -f1)" = "$want" ] || die "本机的 firmware/$f sha256 不符 —— 见 firmware/README.md 第四节"
+        rsync -a --checksum -e "$SSH" "$SRC/firmware/$f" "$DST/firmware/"
+        ok "firmware/$f 已同步（${want:0:16}）"
+    else
+        echo "· 本机没有 firmware/$f，保留构建机上的那份（若有）"
+    fi
+done
 
 echo "═══ 2b. effects/prebuilt（Histen 引擎）单独同步，【不带 --delete】═══"
 # README.md 也在这个目录里、且受版本控制 —— 第 1 步把整个目录排除了，所以它也靠这一步过去。
@@ -179,6 +178,20 @@ $SSH "vahiru@$HOST" "AK_MIN=$AK_MIN; "'cd ~/crdroid/device/huawei/gaokun3
   [ "$fw" -eq 18 ] && [ "$hx" -eq 34 ] && [ "$ak" -gt "$AK_MIN" ] && [ "$dtb" -eq 1 ] && [ -f prebuilt-boot/vmlinuz.efi ]' \
   | tee /dev/stderr | tail -1 >/dev/null || die "构建机上缺构建必需的输入 —— 见上一行；恢复方法在 firmware/README.md 与 hexagonrpcd-root/README.md"
 ok "18 个固件 · 34 个 hexagonrpcd 文件 · 1 个 dtb · vmlinuz.efi 都在 · $AK_WHAT"
+
+echo "═══ 3a. 断言：指纹TA与Goodix配置模板在、构建机上的内核带指纹驱动 ═══"
+# 设备树总是装上指纹HAL（fingerprint/fingerprint.mk）。内核没开 CONFIG_GAOKUN3_FPCMD 时构建照样通过，
+#   设置里能录入指纹，录入时却报硬件不可用（/dev/gaokun3_fpcmd 不存在）。配置从 vmlinuz.efi 里嵌的
+#   IKCONFIG 读，读法见 scripts/extract-kconfig.py（脚本经 stdin 送到构建机执行）。
+$SSH "vahiru@$HOST" "cd ~/crdroid/device/huawei/gaokun3/firmware &&
+  test \"\$(sha256sum fingerpr.mbn 2>/dev/null | cut -d' ' -f1)\" = $FP_TA_SHA &&
+  test \"\$(sha256sum gaokun3-goodix-cfg.bin 2>/dev/null | cut -d' ' -f1)\" = $FP_CFG_SHA" ||
+    die "构建机上的指纹TA或Goodix配置模板缺失或 sha256 不符 —— 见 firmware/README.md 第四节"
+KCFG=$($SSH "vahiru@$HOST" 'python3 -I - ~/crdroid/device/huawei/gaokun3/prebuilt-boot/vmlinuz.efi' \
+    < "$REPO/scripts/extract-kconfig.py") || die "无法读取构建机上 prebuilt-boot/vmlinuz.efi 的内核配置（见上）"
+grep -qx 'CONFIG_GAOKUN3_FPCMD=y' <<<"$KCFG" ||
+    die "构建机的 prebuilt-boot/vmlinuz.efi 没有开 CONFIG_GAOKUN3_FPCMD —— 用 scripts/kernel-config-android.sh 重新配置并编译内核（prebuilt-boot/README.md）"
+ok "指纹TA与Goodix配置模板都在，内核带指纹驱动（CONFIG_GAOKUN3_FPCMD=y）"
 
 echo "═══ 3b. 断言：Histen 引擎在、且是核对过的那一份 ═══"
 # 期望值与来源见 effects/prebuilt/README.md。

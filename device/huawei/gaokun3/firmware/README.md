@@ -32,7 +32,7 @@ cp -r /tmp/fw/firmware/* device/huawei/gaokun3/firmware/
 
 ```bash
 curl -LO https://github.com/matebook-e-go/uup-drivers-sc8280xp/releases/download/200.0.10.0/200.0.10.0.zip
-unzip -o 200.0.10.0.zip 'qc*.cab' 'Qc*.cab'
+unzip -o 200.0.10.0.zip 'qc*.cab' 'Qc*.cab' 'gfspi.cab'
 # 使用cabextract（Linux）或expand.exe（Windows）解包对应.cab文件
 ```
 
@@ -43,12 +43,13 @@ unzip -o 200.0.10.0.zip 'qc*.cab' 'Qc*.cab'
 | `qccdsp8280.mbn`、`RCDS.bin` | `qcsubsys_ext_cdsp8280.cab` |
 | 传感器配置JSON、`sns_reg_config`、`socinfo` | `qcSensorsConfigQrd8280.cab` |
 | 指纹可信应用`fingerpr.mbn`（详见[`docs/dev/fingerprint-driver-design.md`](../../../../docs/dev/fingerprint-driver-design.md)） | `QcTreeExtOem8280.cab` |
+| `gfspi.dll`（用于导出Goodix配置模板，见第四节） | `gfspi.cab` |
 
 ## 四、指纹TA与Goodix配置模板
 
-只在`GAOKUN3_FINGERPRINT=true`时打包，两者都是专有二进制，不入库：
+两者都是专有二进制，不入库，但构建必需：缺失或哈希不符时[`fingerprint.mk`](../fingerprint/fingerprint.mk)直接报错。
 
-- `fingerpr.mbn`：指纹可信应用（TA名`fingerprint`，单一secelf，3669575字节，sha256前缀`b081543c7b6ae4`），与上表`QcTreeExtOem8280.cab`中的相同。fpcmd驱动（补丁0212）通过`kernel_read_file_from_path(..., READING_FIRMWARE)`读取`/vendor/firmware/fingerpr.mbn`。
-- `gaokun3-goodix-cfg.bin`：装Goodix GDIX5125的机器初始化时下发的传感器配置（类型14，224字节，sha256前缀`273537378e759cc1`），取自同一发布包`gfspi.cab`中的`gfspi.dll`。驱动（补丁0213）从`/vendor/firmware/gaokun3-goodix-cfg.bin`读取，只接受这一份，再按每台机器的OTP修补。
+- `fingerpr.mbn`：指纹可信应用（TA名`fingerprint`，单一secelf，3669575字节，sha256前缀`b081543c7b6ae4`），与上表`QcTreeExtOem8280.cab`中的相同。fpcmd驱动（`patches/kernel/fingerprint/0002`）通过`kernel_read_file_from_path(..., READING_FIRMWARE)`读取`/vendor/firmware/fingerpr.mbn`。
+- `gaokun3-goodix-cfg.bin`：装Goodix GDIX5125的机器初始化时下发的传感器配置（类型14，224字节，sha256前缀`273537378e759cc1`），取自同一发布包`gfspi.cab`中的`gfspi.dll`。驱动（`patches/kernel/fingerprint/0003`）从`/vendor/firmware/gaokun3-goodix-cfg.bin`读取，只接受这一份，再按每台机器的OTP修补。
 
-`python3 scripts/fingerprint/prepare-crdroid.py`核对交接包和哈希后把TA放到这里，加上`--gfspi <gfspi.dll>`时同时导出Goodix模板；完整步骤见[指纹HAL说明](../fingerprint/README.md)。
+用第三节解出的`fingerpr.mbn`和`gfspi.dll`运行`python3 scripts/fingerprint/prepare-crdroid.py --ta <fingerpr.mbn> --gfspi <gfspi.dll>`，脚本核对TA哈希、从`gfspi.dll`导出模板，再把两者放到这里。不传`--ta`时TA改从私有交接包读取，不传`--gfspi`时读取仓库根目录的`gfspi.dll`。完整步骤见[指纹HAL说明](../fingerprint/README.md)。

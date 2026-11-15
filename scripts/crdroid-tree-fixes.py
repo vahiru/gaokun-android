@@ -1446,6 +1446,12 @@ def main():
     step(" [43] v4l2_codec2编码器单平面输入按驱动要求的长度送缓冲（640x480等尺寸）: ", apply_patch_file(
         tree, "external/v4l2_codec2",
         "android/v4l2-codec2/0006-v4l2-codec2-give-single-planar-encoder-input-the-device-buffer-length.patch"))
+    # 指纹HAL（device/huawei/gaokun3/fingerprint）报告CONVENIENCE。SystemUI对Class 1/2指纹只在人脸也锁定时
+    # 才禁止指纹解锁，没有人脸识别时，指纹自己临时锁定期间仍会不断请求认证，框架逐次拒绝。补丁让它在
+    # 锁定期间改为只检测接触（与Class 3相同）；锁定期满时HAL发出onLockoutCleared，SystemUI随之恢复认证。
+    step(" [44] SystemUI在指纹临时锁定期间不再请求指纹认证: ", apply_patch_file(
+        tree, "frameworks/base",
+        "android/frameworks-base/0001-systemui-respect-fingerprint-lockout.patch"))
     # 游戏环境如实修正：fingerprint 尾部 userdebug→user，与 ro.build.type=user 对齐
     # （Duck Detector system_properties 3 条 danger 的根；运行时改不掉 Build.FINGERPRINT 常量）
     step(" [23] BUILD_FINGERPRINT/THUMBPRINT/SYSTEM_FINGERPRINT 变体段改写成 user（与 ro.build.type 对齐）: ",

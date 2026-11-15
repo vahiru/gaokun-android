@@ -1,0 +1,35 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: i2c: hi846: Allow every analogue gain step
+
+The analogue gain control took steps of 8 codes, and the control core
+rounds a value to the nearest step: with gain = 1 + code / 16 only every
+0.5x reached the sensor. An AGC that models the gain in steps of 1/16, as
+the register allows, then saw the gains it asked for between 1.5x and 2x
+land on two values 33% apart, and hunted between them: the whole frame
+pumped about once a second.
+
+The register takes the codes between: measured on the Huawei MateBook E
+Go with the front camera under a white paper and a fixed exposure, each
+of the codes 8 to 16, written directly over I2C, gives 1 + code / 16
+within 0.3%. Let the control take a step of 1.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/media/i2c/hi846.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/media/i2c/hi846.c b/drivers/media/i2c/hi846.c
+index 704892eaa..5117be0bb 100644
+--- a/drivers/media/i2c/hi846.c
++++ b/drivers/media/i2c/hi846.c
+@@ -67,7 +67,7 @@
+ #define HI846_REG_ANALOG_GAIN		0x0077
+ #define HI846_ANAL_GAIN_MIN		0
+ #define HI846_ANAL_GAIN_MAX		240
+-#define HI846_ANAL_GAIN_STEP		8
++#define HI846_ANAL_GAIN_STEP		1
+ 
+ /* Digital gain controls from sensor */
+ #define HI846_REG_MWB_GR_GAIN_H		0x0078

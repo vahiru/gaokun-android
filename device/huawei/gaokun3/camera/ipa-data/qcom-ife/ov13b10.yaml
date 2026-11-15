@@ -11,13 +11,18 @@
 # BlackLevel: the camera sensor helper gives the level.
 #
 # Agc: the libipa mean luminance target, the libipa lower constraint (the
-# brightest 2% of the pixels at least 0.5) and an upper one (at most 0.8), which
-# keeps highlights such as white text on a screen out of saturation. Both are
-# metered on the focus window (by default the centre 70% of the frame, the
-# meteringWindow key); the regions outside it weigh 0.25 in the mean
-# (outsideWeight) and take no part in the constraints. The IPA
-# sets the frame length from FrameDurationLimits, and the exposure time may
-# stretch the frame up to the longest one allowed.
+# brightest 2% of the pixels at least 0.5) and an upper one, which keeps large
+# highlights such as a screen out of saturation: the 90th to 95th percentiles at
+# most 0.8. The brightest 5% may clip, so that a lamp in the background does
+# not darken the frame. The upper constraint lowers the exposure no further than
+# to keep the pixels below the 90th percentile at half the mean target
+# (minRestRatio): beyond that the highlights, such as a window in daylight,
+# clip and the rest of the frame keeps its brightness. Both are metered on the
+# focus window (by default the centre 70% of the frame, the meteringWindow key);
+# the regions outside it weigh 0.25 in the mean (outsideWeight) and take no part
+# in the constraints.
+# The IPA sets the frame length from FrameDurationLimits, and the exposure time
+# may stretch the frame up to the longest one allowed.
 #
 # Pdpc: the thresholds of the ov13b10 tuning of the Windows camera driver
 # (mod_pdpc11_aec_data: fmax 80, fmin 32, offsets 128). The phase detection
@@ -39,9 +44,10 @@ algorithms:
             qHi: 1.0
             yTarget: 0.5
           upper:
-            qLo: 0.98
-            qHi: 1.0
+            qLo: 0.90
+            qHi: 0.95
             yTarget: 0.8
+            minRestRatio: 0.5
   - Awb:
       algorithm: bayes
       colourGains:

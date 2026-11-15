@@ -31,7 +31,7 @@ index 9d9e118..975c00a 100644
  	&dev_attr_ghost_row_filter.attr,
  	&dev_attr_debounce_strong.attr,
 diff --git a/drivers/input/touchscreen/hx-algo.c b/drivers/input/touchscreen/hx-algo.c
-index f752112..c09cf5b 100644
+index 0bd19a6..9e58aef 100644
 --- a/drivers/input/touchscreen/hx-algo.c
 +++ b/drivers/input/touchscreen/hx-algo.c
 @@ -84,6 +84,7 @@ void hx_algo_init_defaults(struct hx_algo *algo)

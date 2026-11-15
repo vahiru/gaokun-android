@@ -215,6 +215,7 @@ KPATCHES=(
     kernel/camera/0034-media-qcom-camss-vfe-17x-Stamp-buffers-with-the-frame-start.patch
     kernel/camera/0035-media-qcom-camss-vfe-17x-Add-the-Bayer-histogram-statistics.patch
     kernel/camera/0036-media-qcom-camss-Quiet-the-stop-flag-the-timestamps.patch
+    kernel/camera/0037-media-i2c-hi846-Allow-every-analogue-gain-step.patch
 
     # ─── 8. kernel/audio：ASoC sc8280xp、LPASS 编解码宏、WSA883x 功放、SoundWire 与 Q6APM ───
     # 0007–0008 与 kernel/dts/0016 及 device/huawei/gaokun3/bin/audio-route.sh 配套；
@@ -288,7 +289,7 @@ KPATCHES=(
     kernel/dts/0023-arm64-dts-qcom-sc8280xp-huawei-gaokun3-Power-the-CSIPHYs-from-their-own-supplies.patch
     kernel/dts/0024-arm64-dts-qcom-sc8280xp-Give-the-camera-clock-controller-its-MX-domain.patch
 
-    # ─── 11. kernel/fingerprint：QSEECOM 与指纹传输驱动（/dev/gaokun3_fpcmd，CONFIG_GAOKUN3_FPCMD 默认 n）───
+    # ─── 11. kernel/fingerprint：QSEECOM 与指纹传输驱动（/dev/gaokun3_fpcmd，CONFIG_GAOKUN3_FPCMD 由 kernel-config-android.sh 打开）───
     kernel/fingerprint/0001-firmware-qcom-scm-qseecom-app-load-shutdown-listener.patch
     kernel/fingerprint/0002-firmware-qcom-gaokun3-fingerprint-ioctl.patch
     kernel/fingerprint/0003-firmware-qcom-gaokun3-fpcmd-add-the-Goodix-GDIX5125-sensor.patch

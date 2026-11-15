@@ -24,5 +24,7 @@ ${CXX:-clang++} -std=c++17 -Wall -Wextra -Werror -g -fsanitize=address,undefined
     "$fp_src/test_matcher.cpp" "$fp_tmp/matcher.o" -o "$fp_tmp/matcher-test"
 "$fp_tmp/matcher-test"
 python3 "$fp_repo/scripts/fingerprint/test-integration.py"
-bash -n "$fp_repo/scripts/fingerprint/configure-kernel.sh" \
-    "$fp_repo/scripts/kernel-apply-patches.sh" "$fp_repo/scripts/sync-device-tree.sh"
+# bash -n 只检查第一个文件（其余是位置参数），所以逐个检查。
+for fp_script in kernel-config-android.sh kernel-apply-patches.sh sync-device-tree.sh; do
+    bash -n "$fp_repo/scripts/$fp_script"
+done

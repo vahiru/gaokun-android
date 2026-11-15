@@ -27,6 +27,8 @@
 | `0016-ipa-libipa-agc-avoid-light-flicker.patch` | 通用AGC支持`AeFlickerMode`/`AeFlickerPeriod`（关闭、手动），曝光取整到闪烁周期的整数倍（默认10 ms，对应50 Hz市电） |
 | `0017-include-linux-add-the-qualcomm-ife-17x-isp-header.patch` | IFE参数与统计缓冲区的UAPI头`ife17x-config.h`（须与内核`patches/kernel/camera`中的同名头一致）及两个meta格式 |
 | `0018-libcamera-add-the-qcom-ife-pipeline-handler-and-ipa.patch` | `qcom-ife`管线与IPA：IFE硬件ISP出NV12、双IFE、显示输出与`ScalerCrop`、RDI原始流（相位对焦）、出错重启；IPA做AGC（拜耳直方图约束、防闪烁）、AWB、CCM、黑电平、伽马、镜头阴影、坏点与PD像素修正、ABF降噪表、对焦统计；含前后摄调校文件 |
+| `0019-ipa-libipa-agc-limit-how-far-an-upper-constraint-darkens-the-frame.patch` | AGC约束新增可选参数`minRestRatio`：上限约束压暗画面时，其分位段以下像素的平均亮度不低于平均亮度目标的这一比例，再亮的高光直接过曝；默认0，不改变其他IPA |
+| `0020-ipa-qcom-ife-let-small-highlights-clip.patch` | 前后摄AGC的上限约束改看第90–95百分位，最亮的5%允许过曝；配合`0019`，第90百分位以下像素的平均亮度不低于平均目标的一半 |
 | `libcamera-Android.bp` | AOSP Soong构建定义（复制到`external/libcamera/Android.bp`） |
 | `config.h` | 替代meson生成的`config.h`，将IPA与配置文件路径指向`/vendor/`对应目录 |
 
@@ -34,4 +36,4 @@
 
 1. **必须在AOSP树内由Soong编译**：Android NDK的`libc++`使用`std::__ndk1`内联命名空间，而AOSP平台使用`std::__1`。跨工具链预编译会导致所有含标准库类型参数的C++符号无法链接。
 2. **生成源码准备**：Soong构建消费的5个生成源文件（`control_ids.cpp`、`property_ids.cpp`、`version.cpp`、`ipa_pub_key.cpp`、`qcom-ife_ipa_proxy.cpp`）与`generated/include/libcamera/**`由[`scripts/camera/gen-libcamera-sources.sh`](../../scripts/camera/gen-libcamera-sources.sh)运行meson生成后放入`external/libcamera/generated/`。[`scripts/camera/setup-libcamera-tree.sh`](../../scripts/camera/setup-libcamera-tree.sh)一次完成铺上游源码、打补丁、放置`Android.bp`、生成与`config.h`。
-3. **只编`qcom-ife`**：`libcamera-Android.bp`编出`libcamera_base_gk3`、`libcamera_gk3`（管线只有`qcom-ife`）与`libcamera_ipa_qcom_ife_gk3`，调校文件由`device.mk`从`device/huawei/gaokun3/camera/ipa-data/qcom-ife/`安装到`/vendor/etc/libcamera/ipa/qcom-ife/`，须与`0018`中`src/ipa/qcom-ife/data/`的同名文件一致。软件ISP（`simple`管线与`softisp` IPA）不再编译；`0006`、`0007`、`0009`–`0011`只改软件ISP，保留在补丁集中以便后续`0014`起的补丁按原顺序打上。
+3. **只编`qcom-ife`**：`libcamera-Android.bp`编出`libcamera_base_gk3`、`libcamera_gk3`（管线只有`qcom-ife`）与`libcamera_ipa_qcom_ife_gk3`，调校文件由`device.mk`从`device/huawei/gaokun3/camera/ipa-data/qcom-ife/`安装到`/vendor/etc/libcamera/ipa/qcom-ife/`，须与打完全部补丁后`src/ipa/qcom-ife/data/`的同名文件一致（`0018`加入，`0020`修改）。软件ISP（`simple`管线与`softisp` IPA）不再编译；`0006`、`0007`、`0009`–`0011`只改软件ISP，保留在补丁集中以便后续`0014`起的补丁按原顺序打上。
