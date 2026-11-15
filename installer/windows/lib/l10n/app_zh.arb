@@ -786,5 +786,42 @@
         "type": "String"
       }
     }
-  }
+  },
+  "mediaRmLiveTitle": "删除系统磁盘上的安装器分区",
+  "mediaRmLiveBody": "删除GK3LIVE分区（{size}），其空间将成为未分配空间",
+  "@mediaRmLiveBody": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "rmLiveTitle": "确认删除安装器分区",
+  "rmLiveSub": "删除后，如需再次运行安装器，请重新制作安装介质。",
+  "rmLivePart": "删除安装器分区GK3LIVE（{size}），其空间将成为未分配空间",
+  "@rmLivePart": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "rmLiveBoot": "将EFI默认引导文件恢复为写入安装器分区之前的状态（通常为Windows启动管理器）",
+  "holdToRmLive": "按住2秒开始删除",
+  "shutdownReasonRmLive": "正在删除安装器分区。中断删除可能导致磁盘分区处于不完整状态。",
+  "runSleepHintRmLive": "删除期间请勿合上键盘盖或按电源键，否则设备进入睡眠后删除将暂停。",
+  "doneRmLiveTitle": "安装器分区已删除",
+  "doneRmLiveBoot": "LiveCD的启动项已移除。",
+  "uninstallLive": "删除安装器分区GK3LIVE（{size}）",
+  "@uninstallLive": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "errLiveMissing": "系统磁盘上未找到安装器分区。",
+  "runRmLiveTitle": "正在删除安装器分区",
+  "failRmLiveTitle": "安装器分区未删除",
+  "failTouchedRmLive": "删除流程仅完成一部分，Windows系统不受影响。请返回首页并重新执行删除。"
 }

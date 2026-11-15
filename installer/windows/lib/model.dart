@@ -126,6 +126,7 @@ class WinPart {
   int get end => r.intOf('end');
   int get sizeMib => r.intOf('size_mib');
   String get name => r['name'];
+  String get type => r['type'];
   String get fs => r['fs'];
   String get fslabel => r['fslabel'];
   String get letter => r['letter'];
@@ -144,6 +145,9 @@ class FreeSpan {
 
 /// 安装器会建、卸载会删的分区名（与 gk3w uninstall 的 OUR_NAMES 相同）
 const kAndroidNames = {'misc', 'metadata', 'boot_a', 'boot_b', 'super', 'gk3rescue', 'userdata'};
+
+/// XBOOTLDR 分区类型（gk3w probe 的 PART type=）：本机磁盘上的安装器分区 GK3LIVE 用它（installer/backend/src/win/win.h）
+const kXbootldrType = 'BC13C2FF-59E6-4262-A352-B275FD6F7172';
 
 class Probe {
   Probe(CallResult res)

@@ -9,8 +9,8 @@ import '../session.dart';
 import 'bits.dart';
 import 'messages.dart';
 
-/// 侧栏标在哪一步：双系统安装与卸载在"安装"，制作安装介质在"写入"
-Enum _railStep(WriteTask t) => t == WriteTask.media ? MediaStep.write : WinStep.install;
+/// 侧栏标在哪一步：双系统安装与卸载在"安装"，制作安装介质与删除安装器分区在"写入"
+Enum _railStep(WriteTask t) => t == WriteTask.media || t == WriteTask.removeLive ? MediaStep.write : WinStep.install;
 
 /// 正在写盘：进度条、当前在做什么、日志。跑完换成完成页或失败页（不能"返回"到确认页）
 class RunPage extends StatefulWidget {
@@ -33,6 +33,7 @@ class _RunPageState extends State<RunPage> {
         WriteTask.install => await s.install(releaseDir: widget.releaseDir),
         WriteTask.uninstall => await s.uninstall(),
         WriteTask.media => await s.writeMedia(releaseDir: widget.releaseDir),
+        WriteTask.removeLive => await s.uninstall(installerOnly: true),
       };
       if (!mounted) return;
       go(context, ok ? DonePage(task: widget.task) : FailPage(task: widget.task), replace: true);
@@ -48,8 +49,8 @@ class _RunPageState extends State<RunPage> {
   @override
   Widget build(BuildContext context) {
     final s = context.session, l = context.l, task = widget.task;
-    // 卸载不报百分比（gk3w uninstall），进度条不定长
-    final pct = task != WriteTask.uninstall;
+    // 卸载与删除安装器分区不报百分比（gk3w uninstall），进度条不定长
+    final pct = task != WriteTask.uninstall && task != WriteTask.removeLive;
     final p = s.lastProgress;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scroll.hasClients) _scroll.jumpTo(_scroll.position.maxScrollExtent);
@@ -77,6 +78,7 @@ class _RunPageState extends State<RunPage> {
             WriteTask.install => l.runSleepHintInstall,
             WriteTask.uninstall => l.runSleepHintUninstall,
             WriteTask.media => (s.mediaWritten?.usb ?? false) ? '${l.runSleepHintMedia}${l.runMediaUsbHint}' : l.runSleepHintMedia,
+            WriteTask.removeLive => l.runSleepHintRmLive,
           }),
           const SizedBox(height: 16),
           Expanded(child: LogView(s.log, controller: _scroll)),
@@ -94,24 +96,27 @@ class DonePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = context.session, l = context.l;
-    // U 盘做好了不必重启：只有"返回首页"
+    // U 盘做好了、删掉了安装器分区：不必重启，只有"返回首页"
     final usb = task == WriteTask.media && (s.mediaWritten?.usb ?? false);
+    final noReboot = usb || task == WriteTask.removeLive;
     return WinStepPage(
       step: _railStep(task),
       title: switch (task) {
         WriteTask.install => l.doneInstallTitle,
         WriteTask.uninstall => l.doneUninstallTitle,
         WriteTask.media => l.doneMediaTitle,
+        WriteTask.removeLive => l.doneRmLiveTitle,
       },
       subtitle: switch (task) {
         WriteTask.install => l.doneInstallSub,
         WriteTask.uninstall => l.doneUninstallSub(fmtMib(s.freedMib)),
         WriteTask.media => usb ? l.doneMediaSubUsb : l.doneMediaSubInternal,
+        WriteTask.removeLive => l.doneUninstallSub(fmtMib(s.freedMib)),
       },
       bottom: Row(children: [
-        if (!usb) Btn(l.btnLater, onPressed: () => restart(context), kind: BtnKind.text),
+        if (!noReboot) Btn(l.btnLater, onPressed: () => restart(context), kind: BtnKind.text),
         const Spacer(),
-        usb
+        noReboot
             ? Btn(l.btnStartOver, icon: Icons.home_outlined, onPressed: () => restart(context))
             : Btn(l.btnRebootNow, icon: Icons.restart_alt, onPressed: () {
                 // 立即重启也是退出：勾了"删除下载的安装文件"就先删
@@ -149,6 +154,10 @@ class DonePage extends StatelessWidget {
             if (usb) Bullet(l.doneMediaSecureBoot, icon: Icons.security)
             else Bullet(l.doneMediaStays, icon: Icons.menu_open),
           ],
+        WriteTask.removeLive => [
+            Bullet(l.doneUninstallExtend, icon: Icons.open_in_full),
+            Bullet(l.doneRmLiveBoot, icon: Icons.menu_open),
+          ],
       }),
     );
   }
@@ -173,6 +182,7 @@ class FailPage extends StatelessWidget {
         WriteTask.install => l.failInstallTitle,
         WriteTask.uninstall => l.failUninstallTitle,
         WriteTask.media => l.failMediaTitle,
+        WriteTask.removeLive => l.failRmLiveTitle,
       },
       subtitle: why,
       bottom: Row(children: [
@@ -190,6 +200,7 @@ class FailPage extends StatelessWidget {
                 WriteTask.install => l.failTouchedInstall,
                 WriteTask.uninstall => l.failTouchedUninstall,
                 WriteTask.media => (s.mediaWritten?.usb ?? false) ? l.failTouchedMediaUsb : l.failTouchedMediaInternal,
+                WriteTask.removeLive => l.failTouchedRmLive,
               },
           },
         ),
@@ -205,4 +216,5 @@ String runTitle(L10n l, WriteTask t) => switch (t) {
       WriteTask.install => l.runInstallTitle,
       WriteTask.uninstall => l.runUninstallTitle,
       WriteTask.media => l.runMediaTitle,
+      WriteTask.removeLive => l.runRmLiveTitle,
     };

@@ -552,5 +552,21 @@
         "type": "String"
       }
     }
-  }
+  },
+  "mediaRmLiveTitle": "Delete the installer partition on the system disk",
+  "mediaRmLiveBody": "Deletes the GK3LIVE partition ({size}); its space becomes unallocated",
+  "rmLiveTitle": "Confirm deleting the installer partition",
+  "rmLiveSub": "To run the installer again afterwards, create the installation media again.",
+  "rmLivePart": "Delete the installer partition GK3LIVE ({size}); its space becomes unallocated",
+  "rmLiveBoot": "Restore the default EFI boot file to its state before the installer partition was written (usually the Windows Boot Manager)",
+  "holdToRmLive": "Hold for 2 seconds to delete",
+  "shutdownReasonRmLive": "Deleting the installer partition. Interrupting the deletion may leave disk partitions in an incomplete state.",
+  "runSleepHintRmLive": "Do not close the keyboard cover or press the power button during the deletion, or the device will enter sleep and pause the deletion.",
+  "doneRmLiveTitle": "Installer partition deleted",
+  "doneRmLiveBoot": "The LiveCD boot entry has been removed.",
+  "uninstallLive": "Delete the installer partition GK3LIVE ({size})",
+  "errLiveMissing": "No installer partition was found on the system disk.",
+  "runRmLiveTitle": "Deleting the installer partition",
+  "failRmLiveTitle": "Installer partition not deleted",
+  "failTouchedRmLive": "The deletion only completed partially, though your Windows installation is unaffected. Return to the start and run the deletion again."
 }

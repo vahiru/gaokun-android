@@ -1,0 +1,4 @@
+# 场景：系统盘上已有 gk3w media 写入的安装器分区（XBOOTLDR 类型的 GK3LIVE），还没装 Android → 可以单独删除它
+# probe：PC 上仿出厂布局的 VHDX 真跑 media --target internal 之后的 probe（2026-11-15），与 free 场景同样只留这块盘、
+# 标成系统盘，型号 / 总线换成平板的（321JN0256GB / nvme）；其余行原样
+probe                     probe.txt

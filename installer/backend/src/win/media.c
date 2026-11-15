@@ -69,8 +69,6 @@ static const char *const LIVE_NEED[] = {
     "EFI/BOOT/BOOTAA64.EFI", "loader/loader.conf", "loader/entries/gaokun3-live.conf", "gaokun3/Image", "gaokun3/gaokun3.dtb",
     "gaokun3/initramfs.img", "gaokun3/live.squashfs",
 };
-/* XBOOTLDR：BC13C2FF-59E6-4262-A352-B275FD6F7172（与 LiveCD 认安装器分区用的同一个，见 src/linux/live.c） */
-static const GUID XBOOTLDR_TYPE = {0xBC13C2FF, 0x59E6, 0x4262, {0xA3, 0x52, 0xB2, 0x75, 0xFD, 0x6F, 0x71, 0x72}};
 /* 放进 gaokun3/payload/ 的发布文件（install-artifacts.sha256 可以没有） */
 static const char *const PAYLOAD[] = {"boot.img", "super.img.zst", "install-artifacts.sha256"};
 
@@ -586,7 +584,7 @@ static int has_live_part(const gk3w_disk *d)
             continue;
         memcpy(wn, p->Gpt.Name, sizeof p->Gpt.Name);
         wn[GK3_GPT_NAME_CHARS] = 0;
-        if (!memcmp(&p->Gpt.PartitionType, &XBOOTLDR_TYPE, sizeof(GUID)) || !_wcsicmp(wn, L"GK3LIVE"))
+        if (!memcmp(&p->Gpt.PartitionType, &GK3W_XBOOTLDR_TYPE, sizeof(GUID)) || !_wcsicmp(wn, L"GK3LIVE"))
             return 1;
         if (!gk3w_find_volume(d->num, (uint64_t)p->StartingOffset.QuadPart, vol, MAX_PATH) &&
             GetVolumeInformationW(vol, label, MAX_PATH + 1, NULL, NULL, NULL, NULL, 0) && !_wcsicmp(label, L"GK3LIVE"))
@@ -850,7 +848,7 @@ static int media_internal(int argc, wchar_t **argv)
         e->PartitionStyle = PARTITION_STYLE_GPT;
         e->StartingOffset.QuadPart = (LONGLONG)(first * d.bs);
         e->PartitionLength.QuadPart = (LONGLONG)part_bytes;
-        e->Gpt.PartitionType = XBOOTLDR_TYPE;
+        e->Gpt.PartitionType = GK3W_XBOOTLDR_TYPE;
         if (UuidCreate(&e->Gpt.PartitionId) != RPC_S_OK) {
             free(lay);
             gk3w_err(T, "uuid", "cannot generate a partition GUID", 0);

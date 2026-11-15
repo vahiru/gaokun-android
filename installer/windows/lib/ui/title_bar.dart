@@ -183,6 +183,7 @@ class WindowButtons extends StatelessWidget {
               WriteTask.install => l.shutdownReasonInstall,
               WriteTask.uninstall => l.shutdownReasonUninstall,
               WriteTask.media => l.shutdownReasonMedia,
+              WriteTask.removeLive => l.shutdownReasonRmLive,
             },
     );
     return Row(mainAxisSize: MainAxisSize.min, children: [

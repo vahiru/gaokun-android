@@ -124,6 +124,28 @@ void main() {
     expect(rec.calls.singleWhere((c) => c.first == 'uninstall'), containsAllInOrder(['--disk', '0', '--real-disk']));
   });
 
+  testWidgets('已经装了、系统盘上还有 gk3w 写的安装器分区：卸载时一并删除，确认页写明', (t) async {
+    // installed 的 GK3LIVE（disk0p4）是旧版脚本建的 Basic data 类型：改成 gk3w media 建的 XBOOTLDR 类型
+    Gk3Event xbootldr(Gk3Event e) => e is Gk3Record && e.type == 'PART' && e['path'] == 'disk0p4'
+        ? Gk3Record('PART', {...e.fields, 'type': kXbootldrType, 'name': 'GK3LIVE', 'fslabel': ''})
+        : e;
+    final (rec, s) = await pumpApp(t, 'installed', map: {'probe': xbootldr});
+    await tap(t, find.text(l.btnManage));
+    await tap(t, find.text(l.manageUninstall));
+    await see(t, find.text(l.uninstallLive('2.3 GiB')));
+    await hold(t, l.holdToUninstall);
+    await waitFor(t, find.byType(DonePage), tries: 400);
+    expect(rec.calls.singleWhere((c) => c.first == 'uninstall'), isNot(contains('--installer-only')));
+  });
+
+  testWidgets('旧版脚本建的 GK3LIVE（Basic data 类型）：卸载确认页不说要删它', (t) async {
+    await pumpApp(t, 'installed');
+    await tap(t, find.text(l.btnManage));
+    await tap(t, find.text(l.manageUninstall));
+    await see(t, find.text(l.uninstallParts(7, '64.1 GiB')));
+    expect(find.text(l.uninstallLive('2.3 GiB')), findsNothing);
+  });
+
   testWidgets('空间不够：分析 C 盘的可压缩空间，指出挡住压缩的文件与处理方法；重新检查后清掉', (t) async {
     final (rec, s) = await pumpApp(t, 'nospace');
     await see(t, find.text(l.shrinkAnalyze));
@@ -477,6 +499,44 @@ void main() {
     await see(t, find.textContaining(l.chkLiveExists));
     await tap(t, find.text(l.mediaInternalTitle));
     expect(s.mediaTarget, isNull);
+  });
+
+  testWidgets('删除本机磁盘上的安装器分区：没装 Android 时 ESP 一并还原，按住后只删它（--installer-only）', (t) async {
+    final (rec, s) = await pumpApp(t, 'live');
+    await tap(t, find.text(l.railMedia));
+    await tap(t, find.text(l.btnNext));
+    await see(t, find.textContaining(l.chkLiveExists));
+    await see(t, find.text(l.mediaRmLiveBody('2 GiB')));
+    await tap(t, find.text(l.mediaRmLiveTitle));
+    await see(t, find.text(l.rmLiveTitle));
+    expect(find.text(l.rmLivePart('2 GiB')), findsOneWidget);
+    expect(find.text(l.rmLiveBoot), findsOneWidget);
+    await hold(t, l.holdToRmLive);
+    await waitFor(t, find.byType(DonePage), tries: 400);
+    expect(find.text(l.doneRmLiveTitle), findsOneWidget);
+    // 不必重启：只有"返回首页"
+    expect(find.text(l.btnRebootNow), findsNothing);
+    expect(rec.calls.singleWhere((c) => c.first == 'uninstall'), containsAllInOrder(['--disk', '2', '--installer-only', '--real-disk']));
+  });
+
+  testWidgets('删除安装器分区：已装 Android 时不动 EFI 分区，确认页不说还原引导', (t) async {
+    Gk3Event xbootldr(Gk3Event e) => e is Gk3Record && e.type == 'PART' && e['path'] == 'disk0p4'
+        ? Gk3Record('PART', {...e.fields, 'type': kXbootldrType, 'name': 'GK3LIVE', 'fslabel': ''})
+        : e;
+    await pumpApp(t, 'installed', map: {'probe': xbootldr});
+    await tap(t, find.text(l.railMedia));
+    await tap(t, find.text(l.btnNext));
+    await tap(t, find.text(l.mediaRmLiveTitle));
+    await see(t, find.text(l.rmLivePart('2.3 GiB')));
+    expect(find.text(l.rmLiveBoot), findsNothing);
+  });
+
+  testWidgets('旧版脚本建的 GK3LIVE（Basic data 类型）：不提供删除', (t) async {
+    await pumpApp(t, 'installed');
+    await tap(t, find.text(l.railMedia));
+    await tap(t, find.text(l.btnNext));
+    await see(t, find.textContaining(l.chkLiveExists));
+    expect(find.text(l.mediaRmLiveTitle), findsNothing);
   });
 
   testWidgets('安装介质：R2 上还没有 LiveCD（不能往下走）；本地文件时目录里还要有 LiveCD 镜像', (t) async {

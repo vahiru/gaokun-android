@@ -7,7 +7,7 @@ import 'package:gk3_common/backend/protocol.dart';
 import 'backend/platform.dart';
 import 'model.dart';
 
-enum WriteTask { install, uninstall, media }
+enum WriteTask { install, uninstall, media, removeLive }
 
 /// 任务失败时盘有没有被动过。unknown：写盘的 gk3w 非零退出却没报 ERR（被安全软件或任务管理器结束、崩溃），
 /// 不能说"磁盘未被修改"。下载失败一定有 ERR（net.dart 的 _guard）
@@ -218,6 +218,14 @@ class Session extends ChangeNotifier {
     final d = disk, p = probe;
     if (d == null || p == null) return false;
     return p.partsOf(d).any((x) => x.name.toUpperCase() == 'GK3LIVE' || x.fslabel.toUpperCase() == 'GK3LIVE');
+  }
+
+  /// gk3w media 写入本机磁盘的安装器分区（XBOOTLDR 类型、GPT 名 GK3LIVE）：gk3w uninstall 认的就是这一种，
+  /// 可以删；旧版脚本建的 Basic data 类型的 GK3LIVE 不算（[liveExists] 照样挡住再写一份）
+  WinPart? get livePart {
+    final d = disk, p = probe;
+    if (d == null || p == null) return null;
+    return p.partsOf(d).where((x) => x.type.toUpperCase() == kXbootldrType && x.name.toUpperCase() == 'GK3LIVE').firstOrNull;
   }
 
   /// 安装介质写到哪（目标页选的）；重新检查后清空
@@ -697,13 +705,14 @@ class Session extends ChangeNotifier {
     return result!.ok;
   }
 
-  /// 卸载：gk3w uninstall 不报百分比，界面显示一条不定长的进度
-  Future<bool> uninstall() async {
+  /// 卸载：gk3w uninstall 不报百分比，界面显示一条不定长的进度。[installerOnly]：只删安装器分区
+  /// （--installer-only：装着 Android 时 Android 与 ESP 都不动，没装时 ESP 还原到写入安装器分区之前）
+  Future<bool> uninstall({bool installerOnly = false}) async {
     if (mftMoving) return _busy();
-    _begin(WriteTask.uninstall);
+    _begin(installerOnly ? WriteTask.removeLive : WriteTask.uninstall);
     try {
       await _startDiskWrite();
-      final args = ['--disk', '${disk!.num}', '--real-disk', ..._bitlockerArgs], input = _bitlockerInput;
+      final args = ['--disk', '${disk!.num}', if (installerOnly) '--installer-only', '--real-disk', ..._bitlockerArgs], input = _bitlockerInput;
       result = await Gk3Backend.collect(
           input == null ? backend.call('uninstall', args) : backend.callWithInput('uninstall', args, input), _onEvent);
     } catch (e) {
