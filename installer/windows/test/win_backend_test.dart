@@ -33,7 +33,7 @@ esac
   });
   tearDown(() => d.deleteSync(recursive: true));
 
-  test('apply 补上 --sdboot、--mke2fs、--backup-dir，uninstall 补上 --backup-dir，其余参数原样', () async {
+  test('apply 补上 --sdboot、--mke2fs、--backup-dir，uninstall 补上 --backup-dir，写入本机磁盘的 media 补上 --sdboot、--backup-dir，其余参数原样', () async {
     final b = WinBackend(gk3w: fake, sdboot: r'C:\gk3\backend\systemd-bootaa64.efi', mke2fs: r'C:\gk3\backend\mke2fs.exe', backupDir: r'C:\ProgramData\gaokun3\backup');
     final r = await b.run('apply', ['--disk', '1', '--real-disk', '--bitlocker-key', '-']);
     expect(r.ok, isFalse);
@@ -41,10 +41,14 @@ esac
     expect(r.error, 'too small');
     await b.run('uninstall', ['--disk', '1', '--real-disk']);
     await b.run('plan', ['--sector', '512']);
+    await b.run('media', ['--target', 'internal', '--disk', '1', '--real-disk']);
+    await b.run('media', ['--target', 'usb', '--disk', '3']);
     expect(argsLog.readAsLinesSync(), [
       r'apply --disk 1 --real-disk --bitlocker-key - --sdboot C:\gk3\backend\systemd-bootaa64.efi --mke2fs C:\gk3\backend\mke2fs.exe --backup-dir C:\ProgramData\gaokun3\backup',
       r'uninstall --disk 1 --real-disk --backup-dir C:\ProgramData\gaokun3\backup',
       'plan --sector 512',
+      r'media --target internal --disk 1 --real-disk --sdboot C:\gk3\backend\systemd-bootaa64.efi --backup-dir C:\ProgramData\gaokun3\backup',
+      'media --target usb --disk 3',
     ]);
   });
 
@@ -75,6 +79,9 @@ esac
     expect(p.ofType('DISK').last['model'], 'Msft Virtual Disk');
     await b.run('uninstall', ['--disk', '2', '--real-disk', '--bitlocker-key', '-']);
     expect(argsLog.readAsLinesSync().last, 'uninstall --disk 2');
+    // 写入本机磁盘的安装介质同样只写那块 VHD
+    await b.run('media', ['--target', 'internal', '--disk', '2', '--real-disk', '--bitlocker-key', '-']);
+    expect(argsLog.readAsLinesSync().last, 'media --target internal --disk 2');
     // 不动这台 PC 自己的 BitLocker：校验照常，暂停去掉
     await Gk3Backend.collect(b.callWithInput('bitlocker-key', ['--suspend', '2'], 'x\n'));
     expect(argsLog.readAsLinesSync().last, 'bitlocker-key');

@@ -12,7 +12,6 @@ import 'run_pages.dart';
 
 // 制作独立安装介质（侧栏底部的入口）：把最新的 LiveCD 与所选版本的安装文件写入 U 盘或本机磁盘。
 // 安装方式（清除整个磁盘 / 保留 Windows / 重新安装）在 LiveCD 里选，这边不向 LiveCD 传任何状态。
-// 写到本机磁盘时，LiveCD 要先载入内存才能清除它所在的磁盘（LiveCD 端尚未实现）。
 // 设计与待定事项：experiments/wininstall-proto-20261111/notes.md（工作区，不在仓库里）。
 
 /// 第一步：安装介质能做什么、可以写到哪里
@@ -114,7 +113,7 @@ class MediaTargetPage extends StatelessWidget {
       if (s.bitlockerNoKey) l.chkBitlockerNoKey,
       if (s.bitlockerConverting) l.chkBitlockerConverting,
       if (pf.lowBattery) l.chkBatteryLow,
-      if (s.disk == null) l.chkNoSystemDisk else if (s.mediaRegion == null) l.chkNoRoom(fmtMib(kMediaNeedMib)),
+      if (s.disk == null) l.chkNoSystemDisk else if (s.liveExists) l.chkLiveExists else if (s.mediaRegion == null) l.chkNoRoom(fmtMib(kMediaNeedMib)),
     ];
   }
 }
@@ -218,7 +217,8 @@ class MediaConfirmPage extends StatelessWidget {
           Bullet(l.mediaConfirmUsb)
         else ...[
           Bullet(l.mediaConfirmPart(fmtMib(s.mediaRegion!.sizeMib), fmtMib(kMediaNeedMib))),
-          Bullet(l.confirmBoot),
+          // 已装 Android 时启动管理器本来就在，gk3w 不动 EFI 分区
+          if (s.probe!.androidOn(s.disk!).isEmpty) Bullet(l.confirmBoot),
           Bullet(l.mediaConfirmEntry),
           const SizedBox(height: 12),
           Bullet(l.confirmWindowsSafe, icon: Icons.shield_outlined, color: context.gk.success),

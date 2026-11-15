@@ -10,6 +10,27 @@ const char gk3w_loader_conf[] = "timeout 5\n"
                                 "editor no\n"
                                 "default *-android-a.conf\n";
 
+/* 写入本机磁盘的 LiveCD（gk3w media --target internal）而还没有 Android 时：默认仍进 Windows（systemd-boot 自动生成的
+ * auto-windows），LiveCD 在菜单里选。不用 LoaderEntryDefault：LiveCD 的内核带 efi=noruntime，装 Android 时删不掉它 */
+const char gk3w_loader_conf_windows[] = "timeout 5\n"
+                                        "console-mode keep\n"
+                                        "editor no\n"
+                                        "default auto-windows\n";
+
+int gk3w_is_our_loader_conf(const uint8_t *b, size_t n)
+{
+    /* boot_control HAL 切槽时只把 default 改成 *-android-b.conf（device/huawei/gaokun3 的 EspSlot.cpp），那份也是我们的 */
+    static const char conf_b[] = "timeout 5\n"
+                                 "console-mode keep\n"
+                                 "editor no\n"
+                                 "default *-android-b.conf\n";
+    const char *ours[3] = {gk3w_loader_conf, conf_b, gk3w_loader_conf_windows};
+    for (int i = 0; i < 3; i++)
+        if (n == strlen(ours[i]) && !memcmp(b, ours[i], n))
+            return 1;
+    return 0;
+}
+
 static char lower_ascii(char c)
 {
     return (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;

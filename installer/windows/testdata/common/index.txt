@@ -9,6 +9,7 @@
 # shrink-info：这台 PC（1 TB 的 C:）以管理员真跑的输出，分析的 38.8 s 缩短成 3 s
 # mft-move：PC 上 2 GB 测试卷（T:）真跑 --execute 的输出，盘符换成 C:，时间是估的
 # media-usb：gk3w media 写一个 62 GB 的真 U 盘（SanDisk Ultra USB 3.0）的真实输出，磁盘号 2 换成 3（usb 场景里 U 盘的号），时间是估的（真跑约 39 秒）
+# media-internal.txt：gk3w media --target internal 在 PC 上 VHDX（仿出厂布局，磁盘号 2）真跑的输出，分区表备份的目录换成 C:\ProgramData\gaokun3\backup，时间是估的（测试用 overrides 选它）
 # apply、uninstall：PC 上的 VHDX 真跑（磁盘号 2），带真实的时间；uninstall 的 FREE 记录按之后修正的格式（disk=disk2，与 probe 相同）替换过
 preflight                 preflight-ok.txt
 releases --source github  releases-github.txt

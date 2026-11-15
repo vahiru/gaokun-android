@@ -17,10 +17,6 @@ const kAppVersion = String.fromEnvironment('GK3_VERSION', defaultValue: 'dev');
 /// MaterialApp 的导航器：原生转来的关闭请求（下载中途按 Alt+F4）要在这里弹确认框
 final kNavigatorKey = GlobalKey<NavigatorState>();
 
-/// 侧栏底部"制作独立安装介质"的入口。0.1.0 只发布在 Windows 上安装 / 卸载 Android，入口先不注册；
-/// 页面与测试保留（测试里打开它），等 LiveCD 能写入安装介质时打开
-bool mediaEntryEnabled = false;
-
 /// 给子树提供 Session，并在它变化时重建依赖它的部分
 class SessionScope extends InheritedNotifier<Session> {
   const SessionScope({super.key, required Session session, required super.child}) : super(notifier: session);
@@ -174,13 +170,12 @@ class WinStepPage extends StatelessWidget {
       railSubtitle: l.railSub,
       railFooter: [
         // 制作独立安装介质的入口：写盘期间、已在这个流程里时不可用
-        if (mediaEntryEnabled)
-          TextButton.icon(
-            style: footerButton,
-            onPressed: s.writing || media ? null : () => go(context, const MediaAboutPage()),
-            icon: const Icon(Icons.album_outlined),
-            label: Text(l.railMedia),
-          ),
+        TextButton.icon(
+          style: footerButton,
+          onPressed: s.writing || media ? null : () => go(context, const MediaAboutPage()),
+          icon: const Icon(Icons.album_outlined),
+          label: Text(l.railMedia),
+        ),
         TextButton.icon(
           style: footerButton,
           onPressed: s.writing ? null : () => s.setLanguage(s.language == 'zh' ? 'en' : 'zh'),

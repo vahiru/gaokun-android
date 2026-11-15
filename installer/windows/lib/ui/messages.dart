@@ -8,8 +8,9 @@ import '../model.dart';
 const _writeCodes = {'disk-write', 'set-layout', 'super-write', 'mkfs', 'misc-init', 'esp-write', 'gpt-backup'};
 
 /// gk3w 的 ERR code=… → 给用户看的一句话（代码定义在 installer/backend/src/win/*.c）。
-/// 没收录的代码照原样报出，用户截图时也能对上日志。[media]：写的是 U 盘（gk3w media），打开磁盘、读磁盘信息失败时说的是 U 盘
-String errText(L10n l, Gk3Record err, {bool media = false}) {
+/// 没收录的代码照原样报出，用户截图时也能对上日志。[media]：写的是 U 盘（gk3w media），打开磁盘、读磁盘信息失败时说的是 U 盘；
+/// [internal]：写入本机磁盘的安装介质（GK3LIVE 放不下时说的是所选的未分配空间）
+String errText(L10n l, Gk3Record err, {bool media = false, bool internal = false}) {
   final code = err['code'];
   return switch (code) {
     _ when _writeCodes.contains(code) && err['winerr'] == '5' => l.errWriteDenied,
@@ -25,11 +26,16 @@ String errText(L10n l, Gk3Record err, {bool media = false}) {
     'verify-layout' || 'update-properties' => l.errLayoutVerify,
     'disk-sector' || 'disk-size' => l.errDiskInfo,
     'gpt-backup' => l.errGptBackup,
+    'gpt-full' when internal => l.errGptFullLive,
     'gpt-full' => l.errGptFull,
     'zst-corrupt' || 'sha-mismatch' || 'bootimg-unpack' => l.errRelease,
     'release-no-boot' || 'release-no-super' || 'release-open' => l.errReleaseMissing,
     'not-removable' => l.errMediaNotUsb,
+    'media-too-small' when internal => l.errLiveTooSmall(fmtMib(int.tryParse(err['need_mib']) ?? 0)),
+    'media-read' when internal => l.errLiveRead,
+    'bad-region' when internal => l.errLayoutChanged,
     'media-too-small' => l.errMediaTooSmall(fmtMib(int.tryParse(err['need_mib']) ?? 0)),
+    'live-exists' => l.errLiveExists,
     'livecd-open' || 'livecd-iso' || 'livecd-incomplete' || 'livecd-names' => l.errLiveCd,
     'media-in-use' => l.errMediaInUse,
     'media-read' => l.errMediaRead,

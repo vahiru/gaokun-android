@@ -163,7 +163,10 @@ class FailPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final s = context.session, l = context.l;
     final err = s.result?.err;
-    final why = err == null ? (s.result?.error ?? l.errUnknown) : errText(l, err, media: task == WriteTask.media && (s.mediaWritten?.usb ?? false));
+    final media = task == WriteTask.media;
+    final why = err == null
+        ? (s.result?.error ?? l.errUnknown)
+        : errText(l, err, media: media && (s.mediaWritten?.usb ?? false), internal: media && !(s.mediaWritten?.usb ?? true));
     return WinStepPage(
       step: _railStep(task),
       title: switch (task) {

@@ -16,6 +16,10 @@
 
 /* loader/loader.conf 的全文 */
 extern const char gk3w_loader_conf[];
+/* 同上，默认进 Windows：写入本机磁盘的 LiveCD 而还没有 Android 时用（gk3w media --target internal） */
+extern const char gk3w_loader_conf_windows[];
+/* 这份 loader.conf 是我们写的（上面两份之一）：安装时不当成原件留备份 */
+int gk3w_is_our_loader_conf(const uint8_t *b, size_t n);
 
 /* mid 是不是 32 位小写十六进制（ESP 根目录下 <machine-id>/ 的名字） */
 int gk3w_is_machine_id(const char *s);

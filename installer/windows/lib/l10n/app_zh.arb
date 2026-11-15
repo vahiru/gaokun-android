@@ -112,6 +112,7 @@
   "chkInstalled": "当前设备已安装Android",
   "chkInstalledHow": "点击“管理”可查看分区详情或卸载系统。如需重新安装，请先卸载现有Android系统。",
   "chkNoRoom": "未分配空间不足（至少需要{need}）",
+  "chkLiveExists": "系统磁盘上已有GK3LIVE分区",
   "@chkNoRoom": {
     "placeholders": {
       "need": {
@@ -722,6 +723,17 @@
       }
     }
   },
+  "errLiveTooSmall": "所选未分配空间容量不足：写入LiveCD及系统安装文件至少需要{need}。磁盘未被修改。",
+  "@errLiveTooSmall": {
+    "placeholders": {
+      "need": {
+        "type": "String"
+      }
+    }
+  },
+  "errLiveExists": "系统磁盘上已有GK3LIVE分区。磁盘未被修改。",
+  "errLiveRead": "写入时无法读取LiveCD镜像或系统安装文件，请重新下载后重试。",
+  "errGptFullLive": "分区表中已无空余的分区项，无法新建GK3LIVE分区。磁盘未被修改。",
   "errLiveCd": "LiveCD镜像无法读取或不完整，请重新下载或改用其他镜像文件。磁盘未被修改。",
   "errMediaInUse": "U盘中的文件正被其他程序使用，请关闭相关程序（如打开该U盘的资源管理器窗口）后重试。U盘未被修改。",
   "errMediaRead": "写入U盘时无法读取LiveCD镜像或系统安装文件，U盘中的内容不完整，请重新制作。",

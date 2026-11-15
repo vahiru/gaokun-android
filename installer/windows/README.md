@@ -45,7 +45,7 @@ BitLocker（`lib/ui/bitlocker_box.dart`，后端`gk3w bitlocker-key`）：系统
 
 压缩指引（`lib/ui/shrink_guide.dart`，后端`gk3w shrink-info`与`gk3w mft-move`）：检查页“可用未分配空间”一行的“分析可压缩空间”做一次与“磁盘管理”的“压缩卷”相同的分析，给出C盘最多还能压缩出多少，以及压缩停在哪个文件上（应用程序日志的259号事件），按文件类别给出处理步骤。停在`$MFT`上时可以“移动MFT”：用碎片整理接口把MFT位于后部的片段移到前部，执行期间不能关闭窗口、不能往下走，完成后自动重新分析。
 
-左侧菜单底部的“制作独立安装介质”（0.1.0不注册这个入口：`app.dart`的`mediaEntryEnabled`；页面与测试都在）把最新的LiveCD与所选版本的安装文件写入U盘或本机磁盘：说明 → 目标（写到本机时另有位置页）→ 选版本 → 确认 → 写入。U盘整个清除后写入；写到本机时需满足首页的检查项，另有一页选择未分配空间并在分区条上标出GK3LIVE的位置：GK3LIVE建在所选未分配空间的末尾（默认选最大的一块，与LiveCD保留现有系统时选的相同），之后在LiveCD中安装的Android的userdata紧挨着它，删除GK3LIVE后可并入userdata；EFI分区中另添加LiveCD的启动项。安装方式（清除整个磁盘、保留现有系统、重新安装）在LiveCD中选择，本程序不向LiveCD传递状态。写入这一步对应的`gk3w media`命令尚未实现，演示数据中没有它的录制，回放时这一步按失败处理；介质大小暂定为2 GiB。`releases`另输出最新安装器的`LIVECD`记录。
+左侧菜单底部的“制作独立安装介质”把最新的LiveCD与所选版本的安装文件写入U盘或本机磁盘：说明 → 目标（写到本机时另有位置页）→ 选版本 → 确认 → 写入。U盘整个清除后写入；写到本机时需满足首页的检查项，另有一页选择未分配空间并在分区条上标出GK3LIVE的位置：GK3LIVE建在所选未分配空间的末尾（默认选最大的一块，与LiveCD保留现有系统时选的相同），之后在LiveCD中安装的Android的userdata紧挨着它，删除GK3LIVE后可并入userdata。GK3LIVE是XBOOTLDR类型的分区，LiveCD的启动项与内核都在其中；EFI分区中还没有Android时，默认引导文件换成systemd-boot（原文件留作备份），默认仍启动Windows，开机时在启动菜单中选择LiveCD（不再需要时，在LiveCD中删除安装器分区即可撤销，EFI分区一并还原）；已安装Android时不改动EFI分区，只有默认引导文件不存在或已被换回Windows启动管理器时才恢复为systemd-boot。安装方式（清除整个磁盘、保留现有系统、重新安装）在LiveCD中选择，本程序不向LiveCD传递状态。写入由`gk3w media`完成（说明见[`installer/backend/src/win/media.c`](../backend/src/win/media.c)的文件头），演示数据中写入U盘与写入本机磁盘各有一份真实输出的录制。GK3LIVE至少2 GiB，内容更大时按256 MiB向上取整。`releases`另输出最新安装器的`LIVECD`记录。
 
 分区够不够、数据分区多大都问`gk3w plan`，界面里不做分区计算。
 

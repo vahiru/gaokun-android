@@ -657,7 +657,8 @@ static int esp_check(apply_ctx *c)
         if (esp_size_of(&c->esp, "loader/loader.conf.before-gaokun3") < 0 && gk3l_exists(pth)) {
             if ((err = gk3l_read_file(pth, &c->orig[1], &c->orig_len[1], 64u << 20)))
                 return gk3l_err_kv2(c->T, "esp-unreadable", "esp", c->esp_dev, "file", "loader/loader.conf", "cannot read a file on the EFI system partition that must be backed up first (disk not touched)", err), -1;
-            if (c->orig_len[1] == c->sdboot_len && !memcmp(c->orig[1], c->sdboot, c->sdboot_len)) {
+            /* 我们自己写的 loader.conf（例如 Windows 安装器写入本机磁盘的 LiveCD 留下的）不是原件 */
+            if (gk3w_is_our_loader_conf(c->orig[1], c->orig_len[1])) {
                 free(c->orig[1]);
                 c->orig[1] = NULL;
             }

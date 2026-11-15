@@ -17,8 +17,6 @@ import 'package:gk3_windows/ui/title_bar.dart';
 import 'helpers.dart';
 
 void main() {
-  // 安装介质的入口在 0.1.0 里不注册（app.dart 的 mediaEntryEnabled）；页面照样测
-  setUpAll(() => mediaEntryEnabled = true);
   testWidgets('有空闲区：检查 → 位置 → 版本 → 选项 → 确认 → 安装完成', (t) async {
     // 原生窗口的通道：记下安装期间的 setBusy（阻止关机与睡眠）
     final window = <MethodCall>[];
@@ -345,7 +343,7 @@ void main() {
     expect(errText(l, const Gk3Record('ERR', {'code': 'esp-write', 'winerr': '5'})), l.errWriteDenied);
   });
 
-  testWidgets('安装介质写入U盘：侧栏入口 → 说明 → 目标 → 版本 → 确认；gk3w 还没有 media 命令，写入这一步按失败处理', (t) async {
+  testWidgets('安装介质写入U盘：侧栏入口 → 说明 → 目标 → 版本 → 确认 → 写入完成', (t) async {
     final window = <MethodCall>[];
     t.binding.defaultBinaryMessenger.setMockMethodCallHandler(const MethodChannel('gk3/window'), (c) async {
       window.add(c);
@@ -399,8 +397,8 @@ void main() {
     expect(s.mediaTarget, isNull);
   });
 
-  testWidgets('安装介质写入本机磁盘：没有U盘时提示，写到未分配空间', (t) async {
-    final (rec, s) = await pumpApp(t, 'free');
+  testWidgets('安装介质写入本机磁盘：没有U盘时提示，写到未分配空间，完成页说明从启动菜单进入 LiveCD', (t) async {
+    final (rec, s) = await pumpApp(t, 'free', overrides: const {'media': 'media-internal.txt'});
     await tap(t, find.text(l.railMedia));
     await tap(t, find.text(l.btnNext));
     await see(t, find.text(l.mediaUsbNone));
@@ -418,14 +416,17 @@ void main() {
     expect(find.text(l.confirmBoot), findsOneWidget);
     expect(find.text(l.mediaConfirmEntry), findsOneWidget);
     await hold(t, l.holdToWrite);
-    await waitFor(t, find.byType(FailPage), tries: 400);
+    // 回放的是 PC 上 VHDX 真跑 gk3w media --target internal 的输出（testdata/common/media-internal.txt）
+    await waitFor(t, find.byType(DonePage), tries: 400);
+    expect(find.text(l.doneMediaTitle), findsOneWidget);
+    expect(find.text(l.doneMediaSubInternal), findsOneWidget);
     final media = rec.calls.singleWhere((c) => c.first == 'media');
     expect(media, containsAllInOrder(['--target', 'internal', '--disk', '2', '--region-start', '874383360', '--region-end', '958269439']));
     expect(media, contains('--real-disk'));
   });
 
   testWidgets('安装介质写入本机磁盘：几块未分配空间时默认选最大的一块（LiveCD 保留现有系统时也装进最大的），可以换', (t) async {
-    final (rec, s) = await pumpApp(t, 'multi');
+    final (rec, s) = await pumpApp(t, 'multi', overrides: const {'media': 'media-internal.txt'});
     await tap(t, find.text(l.railMedia));
     await tap(t, find.text(l.btnNext));
     await tap(t, find.text(l.mediaInternalTitle));
@@ -440,7 +441,7 @@ void main() {
     await tap(t, find.text(l.btnNext));
     await see(t, find.text(l.mediaConfirmPart('15 GiB', '2 GiB')));
     await hold(t, l.holdToWrite);
-    await waitFor(t, find.byType(FailPage), tries: 400);
+    await waitFor(t, find.byType(DonePage), tries: 400);
     final media = rec.calls.singleWhere((c) => c.first == 'media');
     expect(media, containsAllInOrder(['--region-start', '${s.mediaRegion!.start}', '--region-end', '${s.mediaRegion!.end}']));
   });
@@ -455,6 +456,27 @@ void main() {
     await tap(t, find.text(l.mediaInternalTitle));
     expect(s.mediaTarget, isNull);
     expect(enabled(t, l.btnNext), isFalse);
+  });
+
+  testWidgets('安装介质：系统盘上已有 GK3LIVE 时本机磁盘不能选，写明原因', (t) async {
+    final (_, s) = await pumpApp(t, 'installed');
+    await tap(t, find.text(l.railMedia));
+    await tap(t, find.text(l.btnNext));
+    await see(t, find.textContaining(l.chkLiveExists));
+    await tap(t, find.text(l.mediaInternalTitle));
+    expect(s.mediaTarget, isNull);
+  });
+
+  testWidgets('安装介质：gk3w 建的 GK3LIVE（GPT 名为 GK3LIVE、没有卷标）同样拦住', (t) async {
+    Gk3Event live(Gk3Event e) => e is Gk3Record && e.type == 'PART' && e['path'] == 'disk2p5'
+        ? Gk3Record('PART', {...e.fields, 'name': 'GK3LIVE', 'fslabel': ''})
+        : e;
+    final (_, s) = await pumpApp(t, 'free', map: {'probe': live});
+    await tap(t, find.text(l.railMedia));
+    await tap(t, find.text(l.btnNext));
+    await see(t, find.textContaining(l.chkLiveExists));
+    await tap(t, find.text(l.mediaInternalTitle));
+    expect(s.mediaTarget, isNull);
   });
 
   testWidgets('安装介质：R2 上还没有 LiveCD（不能往下走）；本地文件时目录里还要有 LiveCD 镜像', (t) async {
