@@ -24,7 +24,8 @@ typedef struct {
  * 那样的分区不能当安装器分区去删。type 是大写的类型 GUID，name 是 GPT 名字（UTF-8） */
 int gk3l_live_like(const char *type, const char *fs, const char *label, const char *name);
 
-/* d 上有没有安装器分区：有返回 1 并填 *lv，没有返回 0。d 的分区表要已读（gk3l_disk_read_table）且是 gpt */
+/* d 上有没有安装器分区：有返回 1 并填 *lv，没有返回 0。d 的分区表要已读（gk3l_disk_read_table）且是 gpt，
+ * d 要是内置盘（gk3l_disk_internal）：U盘启动时介质同样读进了内存，但U盘上的分区不是安装器分区 */
 int gk3l_live_find(const gk3l_disk *d, gk3l_live *lv);
 
 /* 删掉安装器分区之后 userdata（ud）能扩到哪：ud 在 lv 前面、两者之间没有别的分区时，扩到 lv 后面下一个分区之前

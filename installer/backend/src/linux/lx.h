@@ -49,9 +49,9 @@ int gk3l_devno_at(const char *dir, char *out, size_t cap);
 /* ── 安装介质（medium.c）──
  * initramfs-init 把介质记在 /run/gaokun3/medium（测试用 GK3_MEDIUM_FILE 换），每行一个 键=值：
  *   part=nvme0n1p8 disk=nvme0n1 start=… size=…（sysfs 的 512 字节单位） ram=yes|no
- * ram=yes：从内置盘启动，gaokun3/ 已读进内存，/media/gk3 是 tmpfs 上的副本，介质分区本身没有挂载（安装器分区，
- * 可以整盘清空时保留、装完删掉）。没有记录（U 盘启动的旧 initramfs、测试）时按 /media/gk3 上挂的设备认，
- * 测试可用 GK3_MEDIUM_DIR 换挂载点。
+ * ram=yes：gaokun3/已读进内存（initramfs默认如此，U盘与内置盘相同），/media/gk3是tmpfs上的副本，介质分区本身
+ * 没有挂载；内置盘上的安装器分区（gk3l_live_find）因此可以整盘清空时保留、装完删掉。ram=no（gk3.toram=0、内存不够、
+ * 复制失败）与没有记录（测试）时按/media/gk3上挂的设备认，测试可用GK3_MEDIUM_DIR换挂载点。
  * LiveCD 不自动往介质写任何东西（介质可能是只读的 ISO9660）：分区表备份与任务日志只放在内存（/run）里，
  * 需要时由用户另存（save-logs，logs.c；用户选了介质本身时才写它）。 */
 /* 介质分区现在的 "主设备号:次设备号"（例如 "259:3"）；不是从安装介质启动的、或者介质分区已经删掉了，返回 -1 */

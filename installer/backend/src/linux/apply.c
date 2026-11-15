@@ -1355,7 +1355,7 @@ int gk3l_cmd_apply(int argc, char **argv)
     if (c.rmlive) {
         gk3l_live lv;
         if (!gk3l_live_find(&c.d, &lv)) {
-            gk3l_err_kv(c.T, "live-missing", "disk", c.d.path, "--remove-installer: the installer partition is not on this disk, or the installer was not loaded into memory from it (disk not touched)", 0);
+            gk3l_err_kv(c.T, "live-missing", "disk", c.d.path, "--remove-installer: the installer partition is not on this disk, this is not an internal disk, or the installer was not loaded into memory from it (disk not touched)", 0);
             goto out;
         }
     }

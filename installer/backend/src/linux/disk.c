@@ -139,6 +139,16 @@ int gk3l_whole_disk_name(const char *path, char *out, size_t cap)
 
 /* ── sysfs ── */
 
+int gk3l_disk_internal(const char *disk)
+{
+    char p[256], rem[8] = "", real[4096];
+    snprintf(p, sizeof p, "/sys/block/%s/removable", disk);
+    if (!gk3l_read_line(p, rem, sizeof rem) && rem[0] == '1')
+        return 0;
+    snprintf(p, sizeof p, "/sys/block/%s", disk);
+    return realpath(p, real) && !strstr(real, "/usb");
+}
+
 size_t gk3l_kernel_parts(const char *disk, gk3l_kpart *out, size_t cap)
 {
     char p[512];

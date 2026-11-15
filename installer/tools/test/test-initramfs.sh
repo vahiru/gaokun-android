@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # initramfs-init 的容器测试：只测找到介质之后的那一段（读进内存、介质记录、挂进新根）。
-#   - 介质在不可移动的盘上（loop 盘的 removable 是 0，算内置盘）→ gaokun3/ 读进内存、介质分区卸下，
-#     新根里 /media/gk3 是只读的 tmpfs、内容与介质相同，/run 已挂好，/run/gaokun3/medium 记 ram=yes
-#   - gk3.toram=0 → 照旧直接挂着，ram=no
+#   - 默认 → gaokun3/ 读进内存、介质分区卸下，新根里 /media/gk3 是只读的 tmpfs、内容与介质相同，
+#     squashfs 从内存里那份挂载（loop 的后端在 tmpfs 上），/run 已挂好，/run/gaokun3/medium 记 ram=yes
+#   - gk3.toram=0 → 照旧直接挂着（squashfs 的后端在介质上），ram=no
 #   - 内存不够（MemAvailable 换成很小的数）→ 不读，ram=no
 # 跑的是改过的一份副本：cmdline 与 meminfo 从环境变量来；switch_root 换成打印状态后退出、reboot 换成退出（容器里
 # 不能真的切根或重启），sleep 去掉。在新的挂载命名空间里跑（unshare -m），它挂的东西随它一起消失。
+# initramfs-init 不区分U盘与内置盘（没有这样的分支），loop 盘在这里代表两者。
 # "squashfs"用 ext2 镜像代替（测试镜像里没有 mksquashfs；init 只用 mount -o loop，认得出就行）。
 #
 #   bash installer/tools/test/test-in-container.sh installer/tools/test/test-initramfs.sh
@@ -55,6 +56,7 @@ report() {
     echo "RUN_FS=$(findmnt -no FSTYPE /newroot/run)"
     echo "MNT=$(findmnt -no SOURCE /mnt)"
     echo "ROOT_FS=$(findmnt -no FSTYPE /newroot)"
+    echo "LOWER_ON=$(stat -f -c %T "$(losetup -nO BACK-FILE "$(findmnt -no SOURCE /lower)")")"
     sed 's/^/REC_/' /newroot/run/gaokun3/medium
     ( cd /newroot/media/gk3/gaokun3 && find . -type f | LC_ALL=C sort | xargs sha256sum ) > "$GK3_TEST_FILES"
 }
@@ -72,12 +74,13 @@ run_init() {   # run_init <额外 cmdline> [meminfo 文件]
         unshare -m sh -c "mount --make-rprivate / && sh $W/init" 2>&1
 }
 
-echo "═══ 1. 内置盘：读进内存 ═══"
+echo "═══ 1. 默认：读进内存 ═══"
 out=$(run_init "")
 printf '%s\n' "$out" | grep -E '^\[gk3\]' | sed 's/^/    /'
 check "介质是 tmpfs（内存里那份）、只读" test "$(val "$out" MEDIA_FS)/$(val "$out" MEDIA_RW)" = tmpfs/ro
 check "新根是 overlay、/run 是 tmpfs" test "$(val "$out" ROOT_FS)/$(val "$out" RUN_FS)" = overlay/tmpfs
 check "介质分区卸下了" test -z "$(val "$out" MNT)"
+check "squashfs 的后端在内存里" test "$(val "$out" LOWER_ON)" = tmpfs
 check "内容与介质上的 gaokun3/ 逐字节相同" test "$(cat "$W/files")" = "$want"
 n=$(basename "${L}p1")
 check "记录：part / disk / start / size 对、ram=yes" \
@@ -87,6 +90,7 @@ check "记录：part / disk / start / size 对、ram=yes" \
 echo "═══ 2. gk3.toram=0：直接挂着 ═══"
 out=$(run_init "gk3.toram=0")
 check "介质是 vfat、来源是介质分区" test "$(val "$out" MEDIA_FS)/$(val "$out" MEDIA_SRC)" = "vfat/${L}p1"
+check "squashfs 的后端在介质上" test "$(val "$out" LOWER_ON)" = msdos
 check "记录 ram=no" test "$(val "$out" REC_ram)" = no
 check "内容照样看得到" test "$(cat "$W/files")" = "$want"
 

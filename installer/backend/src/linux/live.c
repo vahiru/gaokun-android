@@ -48,7 +48,7 @@ int gk3l_live_find(const gk3l_disk *d, gk3l_live *lv)
     gk3_gpt_part q;
     uint64_t f = d->bs / 512;
     memset(lv, 0, sizeof *lv);
-    if (strcmp(d->table, "gpt") || !gk3l_medium_ram() || gk3l_medium_devno(devno, sizeof devno))
+    if (strcmp(d->table, "gpt") || !gk3l_disk_internal(d->name) || !gk3l_medium_ram() || gk3l_medium_devno(devno, sizeof devno))
         return 0;
     for (size_t i = 0; i < d->nk; i++)
         if (!strcmp(d->kp[i].devno, devno))
@@ -273,7 +273,7 @@ int gk3l_live_remove(gk3l_disk *d, int as_note)
     if (!gk3l_disk_kernel_ok(d))
         return refuse(as_note, "kernel-stale", NULL, NULL, "the kernel's view of the partitions differs from the partition table on disk (disk not touched)", 0);
     if (!gk3l_live_find(d, &lv))
-        return refuse(as_note, "live-missing", "disk", d->path, "the installer partition is not on this disk, or the installer was not loaded into memory from it (disk not touched)", 0);
+        return refuse(as_note, "live-missing", "disk", d->path, "the installer partition is not on this disk, this is not an internal disk, or the installer was not loaded into memory from it (disk not touched)", 0);
     snprintf(live_node, sizeof live_node, "/dev/%s", lv.k.name);
     if (gk3l_part_in_use(d->name, &lv.k, what, sizeof what))
         return refuse(as_note, "live-busy", "mounts", what, "the installer partition is in use (disk not touched)", 0);

@@ -3,20 +3,20 @@
 #
 # 一份 init 同时服务两种介质：
 #   * U 盘（LiveCD）：squashfs 在混合ISO的ISO9660分区上（ISO整个写入U盘），或在用户拖入文件的FAT分区上
-#   * 内置盘（免 U 盘的安装器分区 GK3LIVE）：squashfs 同样在 gaokun3/ 下，读进内存后卸下分区（见下面 gk3.toram）
+#   * 内置盘（免 U 盘的安装器分区 GK3LIVE）：squashfs 同样在 gaokun3/ 下
 # 所以【不靠分区标签、不靠 UUID】—— 挨个挂上去找那个文件。
 # 配置越少，越不会因为"换了台机器"而失效。
 #
 # cmdline 参数：
 #   gk3.squash=<路径>   squashfs 在介质上的路径（默认 /gaokun3/live.squashfs）
 #   gk3.dev=<设备>      跳过搜索，直接用这个块设备
-#   gk3.toram=0|1       介质读不读进内存（默认：内置盘读，U 盘不读）
+#   gk3.toram=0         不把介质读进内存，直接挂着用（默认读进内存；no、off、false同0）
 #   gk3.debug           出错时给一个 shell，而不是重启
 #
-# 读进内存（介质在内置盘上：免 U 盘的安装器分区 GK3LIVE）：gaokun3/ 整个复制进 tmpfs、卸下介质分区，
-#   tmpfs 挂到 /media/gk3（路径与 U 盘时相同）。安装器因此可以在清除整个磁盘时保留这个分区、装完把它删掉并入 /data
-#   （installer/backend/src/linux/live.h）。内存不够（gaokun3/ 的大小加 2 GiB）或复制失败时照旧直接挂着用。
-#   U 盘不读：拔掉 U 盘就是退出，而且读进内存要多花时间。
+# 读进内存（两种介质相同）：gaokun3/（squashfs与安装载荷payload/）整个复制进tmpfs、卸下介质分区，tmpfs挂到/media/gk3
+#   （路径与直接挂着时相同）。启动完成后系统与安装都不再依赖介质：U盘可以拔掉；内置盘上的安装器分区可以在清除整个
+#   磁盘时保留、装完删掉并入/data（installer/backend/src/linux/live.h）。内存不够（gaokun3/的大小加2 GiB）或复制
+#   失败时照旧直接挂着用，这时U盘要一直插着（记录里ram=no）。
 # 介质记在 /run/gaokun3/medium（gk3l 据此认介质，见 installer/backend/src/linux/lx.h）：
 #   part=<分区名> disk=<盘名> start= size=（sysfs 的 512 字节单位） ram=yes|no
 #
@@ -30,7 +30,7 @@ export PATH
 SQUASH=/gaokun3/live.squashfs
 FORCE_DEV=
 DEBUG=
-TORAM=auto
+TORAM=1
 
 say()  { echo "[gk3] $*"; }
 fail() {
@@ -137,17 +137,12 @@ fi
 
 [ -n "$MEDIA" ] || fail "$SQUASH not found on any partition"
 
-# 介质所在的整块盘；内置盘 = 既不可移动、也不在 USB 上（有的 USB 固态硬盘报 removable=0）
+# 介质所在的整块盘（记进/run/gaokun3/medium）
 MNAME=${MEDIA#/dev/}
-MSYS=$(readlink -f "/sys/class/block/$MNAME")
-MDISK=$(basename "$(dirname "$MSYS")")
-INTERNAL=1
-[ "$(cat "/sys/block/$MDISK/removable" 2>/dev/null || echo 0)" = 1 ] && INTERNAL=0
-case "$MSYS" in */usb*) INTERNAL=0 ;; esac
+MDISK=$(basename "$(dirname "$(readlink -f "/sys/class/block/$MNAME")")")
 case "$TORAM" in
-    1|yes) WANT_RAM=1 ;;
-    0|no)  WANT_RAM=0 ;;
-    *)     WANT_RAM=$INTERNAL ;;
+    0|no|off|false) WANT_RAM=0 ;;
+    *)              WANT_RAM=1 ;;
 esac
 # 只复制 gaokun3/：squashfs 不在里面就没法读进内存
 case "$SQUASH" in /gaokun3/*) ;; *) WANT_RAM=0 ;; esac
@@ -157,8 +152,8 @@ if [ "$WANT_RAM" = 1 ]; then
     NEED=$(du -sk /mnt/gaokun3 2>/dev/null | cut -f1)
     AVAIL=$(sed -n 's/^MemAvailable: *\([0-9]*\) kB$/\1/p' /proc/meminfo)
     if [ -n "$NEED" ] && [ -n "$AVAIL" ] && [ $((NEED + 2097152)) -le "$AVAIL" ]; then
-        say "copying gaokun3/ ($((NEED / 1024)) MiB) into memory"
-        # 多留16 MiB给tmpfs自身的开销；复制完改成只读：与U盘一样，LiveCD不往介质写
+        say "copying gaokun3/ ($((NEED / 1024)) MiB) into memory, this can take a minute on a slow USB drive"
+        # 多留16 MiB给tmpfs自身的开销；复制完改成只读：LiveCD不往介质写
         if mount -t tmpfs -o "size=$((NEED + 16384))k,mode=0755" tmpfs /ram && cp -a /mnt/gaokun3 /ram/ \
            && mount -o remount,ro /ram; then
             RAM=1
@@ -185,7 +180,7 @@ mount -t overlay overlay \
       -o lowerdir=/lower,upperdir=/upper/rw,workdir=/upper/work /newroot \
       || fail "mounting the overlayfs failed (kernel without CONFIG_OVERLAY_FS?)"
 
-# 把介质本身也带进去：安装器要从 U 盘上读 super.img / boot.img（读进了内存的就是内存里那份）
+# 把介质本身也带进去：安装器要从介质读super.img / boot.img（读进了内存时是内存里那份）
 mkdir -p /newroot/media/gk3
 if [ -n "$RAM" ]; then
     mount --move /ram /newroot/media/gk3 2>/dev/null || say "warning: could not move the in-memory copy of the boot medium into the new root"

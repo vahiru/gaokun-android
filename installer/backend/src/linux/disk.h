@@ -54,6 +54,8 @@ int gk3l_write_verify(const gk3l_disk *d, const void *buf, size_t len, uint64_t 
 /* sysfs：这块盘的分区；按号找 */
 size_t gk3l_kernel_parts(const char *disk, gk3l_kpart *out, size_t cap);
 const gk3l_kpart *gk3l_kernel_find(const gk3l_kpart *k, size_t n, uint64_t num);
+/* 内置盘：既不可移动、也不在USB上（有的USB固态硬盘报removable=0，所以还要看sysfs里设备的真实路径） */
+int gk3l_disk_internal(const char *disk);
 /* 内核给分区起的名字（盘名以数字结尾加 p：nvme0n1 + 5 → nvme0n1p5，sda + 5 → sda5） */
 void gk3l_part_devname(const char *disk, uint32_t idx, char *out, size_t cap);
 
