@@ -77,6 +77,10 @@ docker run --rm --privileged "${MOUNTS[@]}" -e PAYLOAD="$PAYLOAD" -e ALLOW_NO_IS
     mkdir -p /build/installer/backend /build/tools/gk3boot
     cp -a /repo/installer/backend/src /repo/installer/backend/linux /repo/installer/backend/third_party /build/installer/backend/
     cp -a /repo/tools/gk3boot/core /build/tools/gk3boot/
+    # 体检核对 systemd-boot 与 e2fsprogs 用的版本：与 Windows 安装器带的相同（build-rootfs.sh 开头 SNAPSHOT 的说明）
+    mkdir -p /build/installer/backend/sdboot /build/installer/backend/mke2fs
+    cp /repo/installer/backend/sdboot/fetch.sh /build/installer/backend/sdboot/
+    cp /repo/installer/backend/mke2fs/build.sh /build/installer/backend/mke2fs/
     mkdir -p /build/out-installer && cp -a /repo/out/installer-flutter-linux-arm64/. /build/out-installer/
     bash /build/installer/tools/build/build-rootfs.sh --out $O --installer /build/out-installer --firmware /in/firmware
     bash /build/installer/tools/build/build-initramfs.sh --busybox $O/busybox.static --out $O

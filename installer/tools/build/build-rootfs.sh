@@ -167,6 +167,9 @@ if in_ch 'readlink -f /sbin/init | grep -q systemd'; then ok "/sbin/init → sys
 for c in blkid lsblk findmnt dmesg journalctl systemd-run mkfs.ext4 e2fsck resize2fs mkfs.vfat udevadm sgdisk; do need_cmd "$c"; done
 need_path /usr/lib/systemd/boot/efi/systemd-bootaa64.efi   # gk3l 往目标机 ESP 上装的就是它
 # 与 Windows 安装器相同的 systemd-boot（逐字节）与 e2fsprogs（同一份源码），见开头 SNAPSHOT 的说明
+for f in sdboot/fetch.sh mke2fs/build.sh; do
+    [ -f "$REPO/installer/backend/$f" ] || die "缺 installer/backend/$f（体检要从它读 Windows 安装器带的版本）"
+done
 SD_WANT=$(sed -n 's/^EFI_SHA256=//p' "$REPO/installer/backend/sdboot/fetch.sh")
 SD_HAVE=$(sha256sum "$ROOTFS/usr/lib/systemd/boot/efi/systemd-bootaa64.efi" 2>/dev/null | cut -d' ' -f1 || true)
 if [ -n "$SD_WANT" ] && [ "$SD_HAVE" = "$SD_WANT" ]; then ok "systemd-bootaa64.efi 与 Windows 安装器的相同"
