@@ -1,5 +1,5 @@
 // 后端的代码 ↔ 界面的话（v1.0 计划 INST-10）。
-// ★ 契约测试：installer-lib.sh / gk3-unsparse.py 里出现的每一个进度代码与 ERR 代码，界面都得认识 ——
+// ★ 契约测试：gk3l（installer/backend/src/linux/ 与平台无关的 src/）里出现的每一个进度代码与 ERR 代码，界面都得认识 ——
 //   后端新加了一个、这边没加，这里就红（否则用户看到的是"正在进行：xxx""出错了（代码 xxx）"）。
 import 'dart:io';
 
@@ -11,22 +11,32 @@ import 'package:gk3_installer/ui/messages.dart';
 
 void main() {
   final zh = lookupL10n(const Locale('zh')), en = lookupL10n(const Locale('en'));
-  final lib = File('../../scripts/live/installer-lib.sh').readAsStringSync();
-  final unsparse = File('../../scripts/live/gk3-unsparse.py').readAsStringSync();
+  final src = [
+    for (final d in ['../backend/src/linux', '../backend/src'])
+      for (final f in Directory(d).listSync().whereType<File>().where((f) => f.path.endsWith('.c'))) f.readAsStringSync(),
+  ].join('\n');
 
-  Set<String> grab(String src, RegExp re) => re.allMatches(src).map((m) => m.group(1)!).toSet();
-  // gk3_prog <百分比表达式> <代码> —— 百分比可能是 "$lo" 或 $(( … ))，代码是它后面第一个 [a-z-] 单词
+  Set<String> grab(String s, RegExp re) => re.allMatches(s).map((m) => m.group(1)!).toSet();
+  Set<String> quoted(String s) => grab(s, RegExp(r'"([a-z][a-z0-9-]*)"'));
   final progCodes = {
-    ...grab(lib, RegExp(r'gk3_prog (?:\d+|"\$lo"|\$\(\([^)]*\)\)) ([a-z][a-z0-9-]*)')),
-    ...grab(lib, RegExp(r'PROGRESS \$\(\([^)]*\)\) ([a-z][a-z0-9-]*) ')),
-    ...grab(unsparse, RegExp(r'PROGRESS %d ([a-z][a-z0-9-]*)')),
+    ...grab(src, RegExp(r'gk3w_progress\(\d+, "([a-z][a-z0-9-]*)"\)')),
+    // 手拼的进度行：printf 的 "PROGRESS %u write-super …"、"PROGRESS 50 part-delete …"（proto.c 的 "%u %s" 是通用的那一处，不算）
+    ...grab(src, RegExp(r'PROGRESS (?:%u|\d+) ([a-z][a-z0-9-]*)[ \\]')),
   };
-  final errCodes = grab(lib, RegExp(r'gk3_fail ([a-z][a-z0-9-]*)'));
+  // gk3l_err / _kv / _kv2 的代码参数（可能是三元表达式），以及手拼的 ERR 行；ESP 空间不足的代码来自 gk3w_esp_check_code
+  final errCodes = {
+    for (final m in RegExp(r'gk3l_err(?:_kv2?)?\(\s*[^,]+,\s*([^,]+),').allMatches(src)) ...quoted(m.group(1)!),
+    for (final m in RegExp(r'gk3w_line_kv\(&?l, "code", ([^;]+)\);').allMatches(src)) ...quoted(m.group(1)!),
+    // live.c 的 refuse()：单独的命令里是 ERR，apply 的最后一步里是 NOTE installer-kept 的 why=（完成页同样按 ERR 说）
+    for (final m in RegExp(r'refuse\(\s*[^,]+,\s*([^,]+),').allMatches(src)) ...quoted(m.group(1)!),
+    'esp-too-small', 'esp-full', 'esp-ota-room', 'esp-win-reserve',
+  }..removeAll(['loadervar-stuck', 'installer-kept', 'userdata-fs-not-grown', 'esp-kept']); // 这几个是 NOTE 的代码，完成页与删除安装器分区页另说
 
   test('抓到的代码数量像样（正则没写坏）', () {
-    expect(progCodes.length, greaterThan(25));
+    expect(progCodes.length, greaterThan(10));
     expect(errCodes.length, greaterThan(50));
-    expect(progCodes, containsAll(['dl', 'write-super', 'wifi-assoc', 'done']));
+    expect(progCodes, containsAll(['write-super', 'part-delete', 'done']));
+    expect(errCodes, containsAll(['disk-write', 'esp-busy', 'not-root', 'job-lost', 'logs-no-target']));
   });
 
   test('每一个进度代码都有中英文的话', () {
@@ -45,22 +55,6 @@ void main() {
         expect(errText(l, e), isNot(l.errOther(c)), reason: 'ERR 代码 $c 没有 l10n（${l.localeName}）');
       }
     }
-  });
-
-  test('curl 的速度 / 剩余时间 → "1.8 MB/s · 约 8 分钟"（GUI-5）', () {
-    expect(parseCurlSpeed('1843k'), 1843 * 1024);
-    expect(parseCurlSpeed('2.5M'), 2.5 * 1048576);
-    expect(parseCurlSpeed('0'), 0);
-    expect(parseCurlSpeed('--'), isNull);
-    expect(parseCurlLeft('0:07:12'), const Duration(minutes: 7, seconds: 12));
-    expect(parseCurlLeft('--:--:--'), isNull);
-    expect(fmtEta(zh, const Duration(seconds: 40)), zh.etaUnderMinute);
-    expect(fmtEta(en, const Duration(hours: 1, minutes: 5)), en.etaHours('1', '5'));
-    final p = parseStderrLine('PROGRESS 23 dl name=super.img.zst pct=31 speed=1843k left=0:07:12') as Gk3Progress;
-    expect(downloadRate(zh, p), zh.runSpeedLeft('1.8 MB', zh.etaMinutes('8')));
-    final noLeft = parseStderrLine('PROGRESS 90 dl name=super.img.zst pct=100 speed=9000k') as Gk3Progress;
-    expect(downloadRate(en, noLeft), en.runSpeed('8.8 MB'));
-    expect(downloadRate(en, parseStderrLine('PROGRESS 30 write-super') as Gk3Progress), isNull);
   });
 
   test('英文的进度与报错里没有 CJK（占位符给的是 ASCII 时）', () {

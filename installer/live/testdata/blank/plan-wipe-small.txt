@@ -1,3 +1,4 @@
-O PLAN op=wipe disk=/dev/nvme0n1
-O PLANERR msg=userdata-too-small min_mib=8192
+O PLANERR msg=userdata-too-small avail_mib=488384 need_mib=20944 fixed_mib=12752 min_mib=8192
+E ERR code=plan why=userdata-too-small
+E !! the disk is too small for Android
 X 1

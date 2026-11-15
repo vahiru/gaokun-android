@@ -10,12 +10,10 @@
 #include <string.h>
 #include <wchar.h>
 
+#include "../policy.h"
 #include "../proto.h"
 #include "disk.h"
 #include "win.h"
-
-/* 允许写真实磁盘的机型（SMBIOS 的 SystemProductName）：华为 MateBook E Go（gaokun3） */
-static const char *const MODELS[] = {"GK-W7X"};
 
 /* systemd-boot 的厂商 GUID（LoaderEntryDefault 等变量所在的命名空间） */
 #define LOADER_GUID L"{4a67b082-0a4c-41cf-b6c7-440b29bb8c4f}"
@@ -115,10 +113,7 @@ int gk3w_model_ok_now(void)
 
 int gk3w_model_ok(const gk3w_sys *s)
 {
-    for (size_t i = 0; i < sizeof MODELS / sizeof MODELS[0]; i++)
-        if (!strcmp(s->model, MODELS[i]))
-            return 1;
-    return 0;
+    return gk3w_model_supported(s->model);
 }
 
 int gk3w_sys_bitlocker_on(const gk3w_sys *s)
@@ -155,7 +150,7 @@ int gk3w_sys_gate(const gk3w_sys *s, const char *bitlocker_key, gk3w_gate_mode m
             return gk3w_bitlocker_err(r, group, GK3W_TOUCHED_NO), -1;
         gk3w_log("BitLocker: the recovery key matches the system volume");
     }
-    if (s->ac == 0 && s->battery >= 0 && s->battery < 15)
+    if (gk3w_battery_low(s->ac, s->battery))
         return gk3w_err(GK3W_TOUCHED_NO, "low-battery", "battery below 15% and not on AC power: losing power midway leaves a half-installed disk. Plug in the charger first (disk not touched)", 0), -1;
     if (mode == GK3W_GATE_APPLY && s->hiberfil)
         gk3w_log("note: a hibernation file exists (Fast Startup is off). Do not start Android while Windows is hibernated");

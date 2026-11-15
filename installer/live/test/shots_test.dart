@@ -11,7 +11,6 @@
 import 'dart:io';
 
 import 'package:flutter/services.dart';
-import 'package:flutter/widgets.dart' show Scrollable;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gk3_common/ui/theme.dart';
 import 'package:gk3_installer/app.dart';
@@ -49,66 +48,34 @@ void main() {
     }
   });
 
-  Future<void> toDisk(WidgetTester t) async {
-    await tap(t, find.text(l.btnStart));
-    await waitFor(t, find.textContaining('/dev/nvme0n1'));
-  }
-
   Future<void> toMode(WidgetTester t) async {
-    await toDisk(t);
-    await tap(t, find.textContaining('/dev/nvme0n1'));
-    await next(t);
+    await tap(t, find.text(l.btnStart));
     await waitFor(t, find.text(l.modeWipeTitle));
   }
 
   testWidgets('01 欢迎 / 预检通过', (t) async {
     await pumpApp(t, 'windows-free');
-    await waitFor(t, find.text('2.16'));
+    await waitFor(t, find.text(l.checkModelOk));
     await shot(t, '01-welcome');
   }, skip: !haveFont);
 
-  testWidgets('02 欢迎 / 预检拦住（安全启动；BIOS 2.17 放行）', (t) async {
-    await pumpApp(t, 'blank', overrides: {'gk3_preflight': 'preflight-secureboot.txt'});
+  testWidgets('02 欢迎 / 预检拦住（型号不对）', (t) async {
+    await pumpApp(t, 'blank', overrides: {'preflight': 'preflight-model.txt'});
     await waitFor(t, find.text(l.checkBlocked));
     await shot(t, '02-welcome-blocked');
   }, skip: !haveFont);
 
-  testWidgets('03 选盘（安装 U 盘列出但禁用）', (t) async {
-    await pumpApp(t, 'factory');
-    await toDisk(t);
-    await tap(t, find.textContaining('/dev/nvme0n1'));
-    await shot(t, '03-disk');
-  }, skip: !haveFont);
-
-  testWidgets('03b 选盘（免 U 盘：安装器跑在内置盘上，可选、带提示）', (t) async {
-    await pumpApp(t, 'windows-live');
-    await toDisk(t);
-    await tap(t, find.textContaining('/dev/nvme0n1'));
-    await shot(t, '03b-disk-internal-medium');
-  }, skip: !haveFont);
-
-  testWidgets('04b 方式（免 U 盘：整盘清空禁用，双系统可行）', (t) async {
+  testWidgets('04b 方式（免 U 盘：整盘清空保留安装器分区，双系统可行）', (t) async {
     await pumpApp(t, 'windows-live');
     await toMode(t);
     await tap(t, find.text(l.modeAlongTitle));
     await shot(t, '04b-mode-internal-medium');
   }, skip: !haveFont);
 
-  testWidgets('04 方式：出厂布局，没有空闲区 → 可以缩分区', (t) async {
+  testWidgets('04 方式：出厂布局，没有空闲区 → 双系统禁用', (t) async {
     await pumpApp(t, 'factory');
     await toMode(t);
-    await tap(t, find.text(l.modeShrinkTitle));
     await shot(t, '04-mode-factory');
-  }, skip: !haveFont);
-
-  testWidgets('05 缩分区', (t) async {
-    await pumpApp(t, 'factory');
-    await toMode(t);
-    await tap(t, find.text(l.modeShrinkTitle));
-    await next(t);
-    await passRisk(t);
-    await tap(t, find.textContaining('Data'));
-    await shot(t, '05-shrink');
   }, skip: !haveFont);
 
   testWidgets('06 方式：双系统可行', (t) async {
@@ -124,60 +91,10 @@ void main() {
     await shot(t, '07-mode-installed');
   }, skip: !haveFont);
 
-  testWidgets('08 来源 / U 盘里没有镜像', (t) async {
-    await pumpApp(t, 'windows-free', overrides: {'gk3_release_info': 'release_info-none.txt'});
-    await toMode(t);
-    await tap(t, find.text(l.modeAlongTitle));
-    await next(t);
-    await shot(t, '08-source-nousb');
-  }, skip: !haveFont);
-
-  testWidgets('09–11 WiFi 两步式 与 选版本', (t) async {
-    await pumpApp(t, 'windows-free', overrides: {'gk3_release_info': 'release_info-none.txt'});
-    await toMode(t);
-    await tap(t, find.text(l.modeAlongTitle));
-    await next(t);
-    await next(t);
-    await waitFor(t, find.text('宿舍网-5G'));
-    await shot(t, '09-wifi');
-    await tap(t, find.text('宿舍网-5G'));
-    for (final k in 'hunter'.split('')) {
-      await tap(t, find.text(k));
-    }
-    await shot(t, '10-wifi-password');
-    await tap(t, find.text(l.btnBack));
-    await t.scrollUntilVisible(find.text(l.netHidden), 200, scrollable: find.byType(Scrollable).last);
-    await tap(t, find.text(l.netHidden));
-    for (final k in 'lab-guest'.split('')) {
-      await tap(t, find.text(k == '-' ? '123' : k));
-      if (k == '-') {
-        await tap(t, find.text('-'));
-        await tap(t, find.text('abc'));
-      }
-    }
-    await shot(t, '10b-wifi-hidden');
-    await tap(t, find.text(l.btnBack));
-    await t.scrollUntilVisible(find.text('宿舍网-5G'), -200, scrollable: find.byType(Scrollable).last);
-    await tap(t, find.text('宿舍网-5G'));
-    for (final k in 'hunter'.split('')) {
-      await tap(t, find.text(k));
-    }
-    for (final k in '42'.split('')) {
-      await tap(t, find.text('123'));
-      await tap(t, find.text(k));
-      await tap(t, find.text('abc'));
-    }
-    await tap(t, find.text(l.netConnect));
-    await next(t);
-    await tap(t, find.text('标准版'));
-    await shot(t, '11-variant');
-  }, skip: !haveFont);
-
   testWidgets('12–13 选项 与 分区大小', (t) async {
     await pumpApp(t, 'windows-free');
     await toMode(t);
     await tap(t, find.text(l.modeAlongTitle));
-    await next(t);
     await next(t);
     await waitFor(t, find.textContaining('/data'));
     await shot(t, '12-opts');
@@ -192,7 +109,6 @@ void main() {
     await tap(t, find.text(l.modeWipeTitle));
     await next(t);
     await next(t);
-    await next(t);
     await waitFor(t, find.text(l.riskTitle));
     await shot(t, '13b-risk-wipe');
     await scrollRiskToEnd(t);
@@ -203,10 +119,9 @@ void main() {
   }, skip: !haveFont);
 
   testWidgets('13d 风险确认：双系统（Windows 与 BitLocker）', (t) async {
-    await pumpApp(t, 'windows-free', overrides: {'gk3_esp_info': 'esp_info-bitlocker.txt'});
+    await pumpApp(t, 'windows-free', overrides: {'esp-info': 'esp_info-bitlocker.txt'});
     await toMode(t);
     await tap(t, find.text(l.modeAlongTitle));
-    await next(t);
     await next(t);
     await next(t);
     await waitFor(t, find.text(l.riskTitle));
@@ -217,10 +132,7 @@ void main() {
   testWidgets('13e 风险确认：英文、整盘清除', (t) async {
     await pumpApp(t, 'factory', language: 'en');
     await tap(t, find.text(en.btnStart));
-    await tap(t, find.textContaining('/dev/nvme0n1'));
-    await next(t, en);
     await tap(t, find.text(en.modeWipeTitle));
-    await next(t, en);
     await next(t, en);
     await next(t, en);
     await waitFor(t, find.text(en.riskTitle));
@@ -231,7 +143,6 @@ void main() {
     await pumpApp(t, 'factory');
     await toMode(t);
     await tap(t, find.text(l.modeWipeTitle));
-    await next(t);
     await next(t);
     await next(t);
     await passRisk(t);
@@ -245,29 +156,27 @@ void main() {
     await tap(t, find.text(l.modeReinstallTitle));
     await next(t);
     await next(t);
-    await next(t);
     await passRisk(t);
     await waitFor(t, find.text(l.confirmReinstallHead));
     await shot(t, '15b-confirm-reinstall');
   }, skip: !haveFont);
 
-  testWidgets('04c 调整磁盘（选中 Data、调整大小）', (t) async {
+  testWidgets('04c 删除分区（选中 WinRE、点删除）', (t) async {
     await pumpApp(t, 'factory');
     await toMode(t);
     await tap(t, find.text(l.editEntryTitle));
     await next(t);
     await passRisk(t);
     await waitFor(t, find.text(l.editTitle));
-    await tap(t, find.textContaining('Data'));
-    await tap(t, find.text(l.editResize));
-    await shot(t, '04c-edit-resize');
+    await tap(t, find.textContaining('WinRE'));
+    await tap(t, find.text(l.editDelete));
+    await shot(t, '04c-edit-delete');
   }, skip: !haveFont);
 
   testWidgets('15 确认：双系统', (t) async {
     await pumpApp(t, 'windows-free');
     await toMode(t);
     await tap(t, find.text(l.modeAlongTitle));
-    await next(t);
     await next(t);
     await next(t);
     await passRisk(t);
@@ -282,7 +191,6 @@ void main() {
     await tap(t, find.text(l.modeAlongTitle));
     await next(t);
     await next(t);
-    await next(t);
     await passRisk(t);
     await waitFor(t, find.text(l.confirmHoldIdle));
     final g = await t.startGesture(t.getCenter(find.text(l.confirmHoldIdle)));
@@ -290,7 +198,7 @@ void main() {
       await t.pump(const Duration(milliseconds: 100));
     }
     await g.up();
-    await waitFor(t, find.textContaining('写入 super（'));
+    await waitFor(t, find.textContaining(lead(l.progWriteSuperMib(hole, ''))));
     await tap(t, find.text(l.runShowLog));
     await shot(t, '16-run');
     // 按录制节奏回放，整个 apply 有 20 秒上下的停顿（fixture 的 D 行）—— 大步推进假时间
@@ -304,7 +212,6 @@ void main() {
     await tap(t, find.text(l.modeWipeTitle));
     await next(t);
     await next(t);
-    await next(t);
     await passRisk(t);
     await hold(t, l.confirmHoldIdle);
     await waitFor(t, find.text(l.failTitle));
@@ -313,7 +220,7 @@ void main() {
 
   testWidgets('19–20 英文：欢迎 与 整盘确认（查长文案的排版）', (t) async {
     await pumpApp(t, 'factory', language: 'en');
-    await waitFor(t, find.text('2.16'));
+    await waitFor(t, find.text(l.checkModelOk));
     await shot(t, '19-welcome-en');
   }, skip: !haveFont);
 }

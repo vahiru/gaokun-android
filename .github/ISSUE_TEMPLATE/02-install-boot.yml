@@ -8,18 +8,17 @@ body:
         Sorry you ran into this. Please first check the "If it does not boot" section of the [install guide](https://github.com/vahiru/gaokun-android/blob/main/docs/INSTALL.md); many common cases are covered there.
         遇到这种情况很抱歉。请先看一下[安装说明](https://github.com/vahiru/gaokun-android/blob/main/docs/INSTALL.zh-CN.md)里"无法开机时"一节，常见的情况那里都有说明。
 
-        This machine has no serial console, so most clues come from the installer's diagnostic files and from the rescue system in the boot menu. If either of them still works, the machine can usually be recovered.
-        这台机器没有串口，线索主要来自安装器保存的诊断文件和开机菜单里的救援系统。只要其中一个还能用，机器一般都能救回来。
+        This machine has no serial console, so most clues come from the installer's logs.
+        这台机器没有串口，线索主要来自安装器的日志。
 
   - type: dropdown
     id: method
     attributes:
       label: How you installed or updated / 安装或更新方式
       options:
-        - Graphical installer from a USB stick / 图形安装器，从U盘启动
-        - Graphical installer started from Windows (gaokun3-setup.cmd) / 图形安装器，从Windows启动（gaokun3-setup.cmd）
-        - Graphical installer from the boot menu / 图形安装器，从开机菜单进入
-        - Command-line installer (scripts/install-gaokun3.sh) / 命令行安装器（scripts/install-gaokun3.sh）
+        - Live installer from a USB drive / Live安装器，从U盘启动
+        - Live installer from the installer partition on the system disk / Live安装器，从系统磁盘上的安装器分区启动
+        - Windows installer / Windows安装器
         - System update in Settings / 设置中的系统更新
         - Other / 其他
     validations:
@@ -30,11 +29,14 @@ body:
     attributes:
       label: Install mode / 安装模式
       options:
-        - Erase the whole disk / 清空整块硬盘
-        - Dual boot with Windows / 与Windows双系统
+        - Erase entire disk / 清除整个磁盘
+        - Keep existing system (dual boot with Windows) / 保留现有系统（与Windows双系统）
         - Reinstall Android, keep data / 重新安装Android，保留数据
         - Reinstall Android, wipe data / 重新安装Android，清除数据
-        - Adjust partitions manually / 手动调整分区
+        - Delete partitions / 删除分区
+        - Delete installer partition / 删除安装器分区
+        - Uninstall Android (Windows installer) / 卸载Android（Windows安装器）
+        - Create installation media (Windows installer) / 制作安装介质（Windows安装器）
         - Not applicable / 不适用
 
   - type: dropdown
@@ -58,8 +60,8 @@ body:
       label: What still works / 现在还能进入什么
       options:
         - Android, with adb / Android，可以使用adb
-        - The rescue system / 救援系统
-        - Only the installer USB stick / 只有安装器U盘
+        - Windows / Windows
+        - Only the Live installer / 只有Live安装器
         - Nothing / 都进不去
     validations:
       required: true
@@ -93,8 +95,8 @@ body:
     attributes:
       label: Diagnostic files / 诊断文件
       description: |
-        The installer and the rescue system save their logs in the `gaokun3/diag/` folder. On the installer USB stick this is on the partition labelled `GK3LIVE`, which any computer can open; in the rescue system it is `/media/gk3/gaokun3/diag/`. Please attach the files, after removing Wi-Fi names and MAC addresses. The [FAQ](https://github.com/vahiru/gaokun-android/blob/main/docs/FAQ.md) describes how to collect more information.
-        安装器和救援系统会把日志保存在`gaokun3/diag/`文件夹里：在安装器U盘上，它位于卷标为`GK3LIVE`的分区，任何电脑都能打开；在救援系统里，它位于`/media/gk3/gaokun3/diag/`。请删除其中的Wi-Fi名称和MAC地址后作为附件上传。更多收集方法见[常见问题](https://github.com/vahiru/gaokun-android/blob/main/docs/FAQ.zh-CN.md)。
+        Live installer: select "Save logs" in the installer to save them to a USB drive, in a folder named `gaokun3-logs-<time>`. Windows installer: the logs are in `%ProgramData%\gaokun3\logs`. Please check the files for personal information before attaching them. The [FAQ](https://github.com/vahiru/gaokun-android/blob/main/docs/FAQ.md) describes how to collect more information.
+        Live安装器：在安装器中选择“保存日志”，日志将保存到U盘上名为`gaokun3-logs-<时间>`的文件夹中。Windows安装器：日志位于`%ProgramData%\gaokun3\logs`。上传附件前，请检查其中是否包含个人信息。更多收集方法见[常见问题](https://github.com/vahiru/gaokun-android/blob/main/docs/FAQ.zh-CN.md)。
 
   - type: textarea
     id: extra

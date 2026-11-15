@@ -35,7 +35,7 @@ done
 mkdir -p "$OUT"
 OUT=$(cd "$OUT" && pwd)
 
-# 断言"静态 aarch64"：判失败条件（动态 / 带解释器），不枚举成功条件 —— 理由见 scripts/live/build-initramfs.sh
+# 断言"静态 aarch64"：判失败条件（动态 / 带解释器），不枚举成功条件 —— 理由见 installer/tools/build/build-initramfs.sh
 assert_static() {
     local f=$1 info
     info=$(file -b "$f")

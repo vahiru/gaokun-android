@@ -1,5 +1,5 @@
 #!/bin/bash
-# mkesp.sh <目录>：造一份"安装器装出来的" ESP（与 scripts/live/installer-lib.sh:919-926 同形）
+# mkesp.sh <目录>：造一份"安装器装出来的" ESP（与 installer/backend/src/esp.c 的 gk3w_esp_android_entry 同形）
 set -eu
 E=$1/esp; MID=8a29534fa802480d9fbb71aa18c01d7b
 mkdir -p "$E/loader/entries" "$E/EFI/BOOT" "$E/$MID/android/slot_a" "$E/$MID/android/slot_b"

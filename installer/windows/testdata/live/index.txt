@@ -1,0 +1,6 @@
+# 场景：系统盘上已有 gk3w media 写入的安装器分区（XBOOTLDR 类型的 GK3LIVE），还没装 Android → 可以单独删除它
+# probe：PC 上仿出厂布局的 VHDX 真跑 media --target internal 之后的 probe（2026-11-15），与 free 场景同样只留这块盘、
+# 标成系统盘，型号 / 总线换成平板的（321JN0256GB / nvme）；其余行原样
+# uninstall：同一块 VHDX 上真跑 gk3w uninstall --installer-only 的输出（2026-11-16），分区表备份的目录换成 C:\ProgramData\gaokun3\backup，时间是估的
+probe                     probe.txt
+uninstall *               uninstall.txt

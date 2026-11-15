@@ -14,6 +14,8 @@ void gk3w_guid_upper(const GUID *g, char *out);
 /* GPT 分区类型 */
 extern const GUID GK3W_LINUX_DATA;   /* 0FC63DAF-8483-4772-8E79-3D69D8477DE4（sgdisk 8300，Android 的分区都用它） */
 extern const GUID GK3W_ESP_TYPE;     /* C12A7328-F81F-11D2-BA4B-00A0C93EC93B */
+/* BC13C2FF-59E6-4262-A352-B275FD6F7172：本机磁盘上的安装器分区 GK3LIVE（media.c 建、uninstall.c 删；LiveCD 认它用的也是这个，见 src/linux/live.c） */
+extern const GUID GK3W_XBOOTLDR_TYPE;
 
 /* 版本号（main.c，GK3W_VERSION） */
 extern const char gk3w_version[];
@@ -24,6 +26,7 @@ int gk3w_cmd_dump(int argc, wchar_t **argv);
 int gk3w_cmd_esp_tree(int argc, wchar_t **argv);
 int gk3w_cmd_readpart(int argc, wchar_t **argv);
 int gk3w_cmd_uninstall(int argc, wchar_t **argv);
+int gk3w_cmd_media(int argc, wchar_t **argv);
 int gk3w_cmd_preflight(int argc, wchar_t **argv);
 int gk3w_cmd_plan(int argc, wchar_t **argv);
 int gk3w_cmd_hash(int argc, wchar_t **argv);

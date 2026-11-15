@@ -1,0 +1,10 @@
+
+  Gaokun Android Installer
+
+  The boot medium is mounted at /media/gk3.
+
+  The graphical installer runs on tty1, press Ctrl+Alt+F1 to switch to it.
+
+  Logs: /run/gk3-installer/installer.log, journalctl -b, dmesg
+  Save them to a USB drive: gk3l save-logs
+

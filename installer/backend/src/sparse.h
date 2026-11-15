@@ -1,5 +1,5 @@
 /* Android sparse 镜像（libsparse 格式）的流式展开：输入按任意大小的片段喂进来（zstd 解码器的输出），
- * 展开后的数据经回调写到目标。语义与 scripts/live/gk3-unsparse.py 相同（那边又与 simg2img 相同）：
+ * 展开后的数据经回调写到目标。语义与 simg2img 相同：
  *   - RAW 原样写；FILL 按 4 字节图案填；DONT_CARE 跳过、【不写零】；CRC32 块只消费、不校验。
  *   - 输入提前结束、块数或 chunk 数对不上、chunk 长度与类型不符、展开后超过目标大小、最后一个 chunk 之后还有字节，
  *     一律失败。

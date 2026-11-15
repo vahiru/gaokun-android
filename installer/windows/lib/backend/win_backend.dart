@@ -51,10 +51,13 @@ class WinBackend extends Gk3Backend {
   ///   而每次调用结束时都要 flush
   final RandomAccessFile? log;
 
-  static const _gk3wCommands = {'preflight', 'probe', 'plan', 'apply', 'uninstall', 'hash', 'space', 'bitlocker-key', 'shrink-info', 'mft-move'};
+  static const _gk3wCommands = {'preflight', 'probe', 'plan', 'apply', 'media', 'uninstall', 'hash', 'space', 'bitlocker-key', 'shrink-info', 'mft-move'};
 
   /// 写盘的调用：测试模式下去掉 --real-disk / --bitlocker-key
   static const _writes = {'apply', 'uninstall'};
+
+  /// 写系统盘的调用（[_writes]，以及写入本机磁盘的安装介质：同样改分区表与 ESP）
+  static bool _writesSystemDisk(String fn, List<String> args) => _writes.contains(fn) || (fn == 'media' && args.contains('internal'));
 
   String _ts() => DateTime.now().toIso8601String().substring(11, 19);
   void _w(String line) {
@@ -119,7 +122,7 @@ class WinBackend extends Gk3Backend {
     // 记的是真正交给 gk3w 的参数（补上的文件路径、测试模式去掉的 --real-disk 都看得见），不是界面传进来的
     final argv = _gk3wCommands.contains(fn) ? _argsFor(fn, args) : args;
     // 测试模式下写盘的调用去掉了 --bitlocker-key，gk3w 不读输入，也就不给
-    if (testDisk != null && _writes.contains(fn)) input = null;
+    if (testDisk != null && _writesSystemDisk(fn, args)) input = null;
     // 标准输入的内容（恢复密钥）不记
     _w('[${_ts()}] >> ${[fn, ...argv].join(' ')}${input == null ? '' : ' (+ stdin, not logged)'}');
     final Stream<Gk3Event> src;
@@ -193,12 +196,12 @@ class WinBackend extends Gk3Backend {
   /// 界面只传它关心的参数；随程序分发的文件与目录在这里补上（界面不必知道它们在哪）
   List<String> _argsFor(String fn, List<String> args) {
     var a = [...args];
-    if (fn == 'apply') {
-      if (sdboot != null && !a.contains('--sdboot')) a = [...a, '--sdboot', sdboot!];
-      if (mke2fs != null && !a.contains('--mke2fs')) a = [...a, '--mke2fs', mke2fs!];
-    }
-    if (_writes.contains(fn) && backupDir != null && !a.contains('--backup-dir')) a = [...a, '--backup-dir', backupDir!];
-    if (testDisk != null && _writes.contains(fn)) {
+    final sys = _writesSystemDisk(fn, args);
+    // systemd-boot：双系统安装与写入本机磁盘的安装介质都可能要把它放进 ESP
+    if ((fn == 'apply' || (fn == 'media' && sys)) && sdboot != null && !a.contains('--sdboot')) a = [...a, '--sdboot', sdboot!];
+    if (fn == 'apply' && mke2fs != null && !a.contains('--mke2fs')) a = [...a, '--mke2fs', mke2fs!];
+    if (sys && backupDir != null && !a.contains('--backup-dir')) a = [...a, '--backup-dir', backupDir!];
+    if (testDisk != null && sys) {
       final out = <String>[];
       for (var i = 0; i < a.length; i++) {
         if (a[i] == '--real-disk') continue;

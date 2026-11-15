@@ -12,7 +12,6 @@ import 'run_pages.dart';
 
 // 制作独立安装介质（侧栏底部的入口）：把最新的 LiveCD 与所选版本的安装文件写入 U 盘或本机磁盘。
 // 安装方式（清除整个磁盘 / 保留 Windows / 重新安装）在 LiveCD 里选，这边不向 LiveCD 传任何状态。
-// 写到本机磁盘时，LiveCD 要先载入内存才能清除它所在的磁盘（LiveCD 端尚未实现）。
 // 设计与待定事项：experiments/wininstall-proto-20261111/notes.md（工作区，不在仓库里）。
 
 /// 第一步：安装介质能做什么、可以写到哪里
@@ -55,7 +54,7 @@ class MediaTargetPage extends StatelessWidget {
     final s = context.session, l = context.l;
     final need = fmtMib(kMediaNeedMib);
     final t = s.mediaTarget;
-    final blockers = _internalBlockers(context);
+    final blockers = _internalBlockers(context), rmBlockers = _removeBlockers(context);
     return WinStepPage(
       step: MediaStep.target,
       title: l.mediaTargetTitle,
@@ -99,6 +98,19 @@ class MediaTargetPage extends StatelessWidget {
                 selected: t != null && t.same(const MediaTarget.internal()),
                 onTap: blockers.isEmpty ? () => s.selectMediaTarget(const MediaTarget.internal()) : null,
               ),
+              // 已经写过本机磁盘的安装介质：可以单独删掉它（gk3w uninstall --installer-only）
+              if (s.livePart case final lp?) ...[
+                const SizedBox(height: 12),
+                ChoiceCard(
+                  icon: Icons.delete_outline,
+                  danger: true,
+                  title: l.mediaRmLiveTitle,
+                  body: rmBlockers.isEmpty ? l.mediaRmLiveBody(fmtMib(lp.sizeMib)) : null,
+                  reason: rmBlockers.isEmpty ? null : '${l.mediaInternalBlocked}\n${rmBlockers.join('\n')}',
+                  trailing: rmBlockers.isEmpty ? const Icon(Icons.chevron_right) : null,
+                  onTap: rmBlockers.isEmpty ? () => go(context, const RemoveLiveConfirmPage()) : null,
+                ),
+              ],
             ]),
     );
   }
@@ -107,15 +119,69 @@ class MediaTargetPage extends StatelessWidget {
   List<String> _internalBlockers(BuildContext context) {
     final s = context.session, l = context.l, pf = s.preflight;
     if (s.checkErr != null || pf == null || s.probe == null) return [l.chkFailed];
+    // 测试模式（对着一块 VHD）：本机的检查项不挡住，同首页检查
+    final host = !s.testMode;
     return [
-      if (!pf.modelOk) l.chkModelBad,
-      if (pf.secureBoot == 'on') l.chkSecureBootOn,
-      if (pf.fastStartup == 'on') l.chkFastStartupOn,
-      if (s.bitlockerNoKey) l.chkBitlockerNoKey,
-      if (s.bitlockerConverting) l.chkBitlockerConverting,
-      if (pf.lowBattery) l.chkBatteryLow,
-      if (s.disk == null) l.chkNoSystemDisk else if (s.mediaRegion == null) l.chkNoRoom(fmtMib(kMediaNeedMib)),
+      if (host && !pf.modelOk) l.chkModelBad,
+      if (host && pf.secureBoot == 'on') l.chkSecureBootOn,
+      if (host && pf.fastStartup == 'on') l.chkFastStartupOn,
+      if (host && s.bitlockerNoKey) l.chkBitlockerNoKey,
+      if (host && s.bitlockerConverting) l.chkBitlockerConverting,
+      if (host && pf.lowBattery) l.chkBatteryLow,
+      if (s.disk == null) l.chkNoSystemDisk else if (s.liveExists) l.chkLiveExists else if (s.mediaRegion == null) l.chkNoRoom(fmtMib(kMediaNeedMib)),
     ];
+  }
+}
+
+/// 删除安装器分区之前不满足的条件：与卸载相同（gk3w 的 GK3W_GATE_UNINSTALL 不查 Secure Boot 与快速启动）
+List<String> _removeBlockers(BuildContext context) {
+  final s = context.session, l = context.l, pf = s.preflight;
+  if (s.checkErr != null || pf == null || s.probe == null) return [l.chkFailed];
+  if (s.testMode) return const [];
+  return [
+    if (!pf.modelOk) l.chkModelBad,
+    if (s.bitlockerNoKey) l.chkBitlockerNoKey,
+    if (s.bitlockerConverting) l.chkBitlockerConverting,
+    if (pf.lowBattery) l.chkBatteryLow,
+  ];
+}
+
+/// 删除本机磁盘上的安装器分区之前：删什么、引导怎么还原；按住 2 秒才开始
+class RemoveLiveConfirmPage extends StatelessWidget {
+  const RemoveLiveConfirmPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final s = context.session, l = context.l, lp = s.livePart!;
+    return WinStepPage(
+      step: MediaStep.confirm,
+      danger: true,
+      title: l.rmLiveTitle,
+      subtitle: l.rmLiveSub,
+      bottom: Row(children: [
+        Btn(l.btnBack, onPressed: () => Navigator.pop(context), kind: BtnKind.text, icon: Icons.arrow_back),
+        const SizedBox(width: 24),
+        Expanded(
+          child: HoldToConfirm(
+            idle: l.holdToRmLive,
+            busy: (_) => l.holdKeep,
+            enabled: s.bitlockerReady,
+            onConfirmed: () => go(context, const RunPage(task: WriteTask.removeLive), replace: true),
+          ),
+        ),
+      ]),
+      child: ListView(children: [
+        Text(l.confirmWill, style: context.tt.titleMedium),
+        const SizedBox(height: 4),
+        Bullet(l.rmLivePart(fmtMib(lp.sizeMib))),
+        // 已装 Android 时 gk3w 不动 EFI 分区
+        if (!s.installed) Bullet(l.rmLiveBoot),
+        const SizedBox(height: 12),
+        Bullet(l.confirmWindowsSafe, icon: Icons.shield_outlined, color: context.gk.success),
+        Bullet(l.confirmAntivirus, icon: Icons.gpp_maybe_outlined, color: context.gk.warning),
+        if (s.needBitlockerKey) ...[const SizedBox(height: 16), BitlockerKeyBox(text: l.confirmBitlocker)],
+      ]),
+    );
   }
 }
 
@@ -218,7 +284,8 @@ class MediaConfirmPage extends StatelessWidget {
           Bullet(l.mediaConfirmUsb)
         else ...[
           Bullet(l.mediaConfirmPart(fmtMib(s.mediaRegion!.sizeMib), fmtMib(kMediaNeedMib))),
-          Bullet(l.confirmBoot),
+          // 已装 Android 时启动管理器本来就在，gk3w 不动 EFI 分区
+          if (s.probe!.androidOn(s.disk!).isEmpty) Bullet(l.confirmBoot),
           Bullet(l.mediaConfirmEntry),
           const SizedBox(height: 12),
           Bullet(l.confirmWindowsSafe, icon: Icons.shield_outlined, color: context.gk.success),

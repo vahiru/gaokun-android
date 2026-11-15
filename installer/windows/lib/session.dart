@@ -7,16 +7,15 @@ import 'package:gk3_common/backend/protocol.dart';
 import 'backend/platform.dart';
 import 'model.dart';
 
-enum WriteTask { install, uninstall, media }
+enum WriteTask { install, uninstall, media, removeLive }
 
 /// 任务失败时盘有没有被动过。unknown：写盘的 gk3w 非零退出却没报 ERR（被安全软件或任务管理器结束、崩溃），
 /// 不能说"磁盘未被修改"。下载失败一定有 ERR（net.dart 的 _guard）
 enum Touched { no, yes, unknown }
 
-/// 安装介质（LiveCD + 所选版本的安装文件）要占多大：U 盘至少这么大，写到本机时在未分配空间里划出这么大的 GK3LIVE。
-/// 暂定值：按 scripts/windows/gaokun3-setup.ps1 的算法（内容 ×1.25 + 128 MiB，按 256 MiB 向上取整）
-/// 估 rc.3（LiveCD 约 210 MiB + boot.img 27 MiB + super.img.zst 1290 MiB）。gk3w 还没有写入安装介质的命令，
-/// 做好之后改为问 gk3w（与 plan 一样），按所选版本的实际大小算。
+/// 安装介质（LiveCD + 所选版本的安装文件）要占多大：U 盘至少这么大，写到本机时在未分配空间里划出这么大的 GK3LIVE
+/// （与 gk3w 的 LIVE_MIB 相同，见 installer/backend/src/win/media.c）。rc.3 的内容约 1.5 GiB（LiveCD 约 210 MiB、
+/// boot.img 27 MiB、super.img.zst 1290 MiB）；放不下时 gk3w 在动盘之前报 media-too-small。
 const kMediaNeedMib = 2048;
 
 /// 一次安装器会话：检查结果、用户的选择、正在跑的任务。界面只读它、调它的方法。
@@ -213,6 +212,21 @@ class Session extends ChangeNotifier {
 
   /// 插着的 U 盘（probe 的 DISK 记录里 USB 总线或可移动、且不是系统盘的）
   List<WinDisk> get usbDisks => [for (final d in probe?.disks ?? const <WinDisk>[]) if (d.usbStick) d];
+
+  /// 系统盘上已经有 GK3LIVE（GPT 名或卷标；gk3w 写之前另按 XBOOTLDR 类型再查一次）：不再写入本机磁盘
+  bool get liveExists {
+    final d = disk, p = probe;
+    if (d == null || p == null) return false;
+    return p.partsOf(d).any((x) => x.name.toUpperCase() == 'GK3LIVE' || x.fslabel.toUpperCase() == 'GK3LIVE');
+  }
+
+  /// gk3w media 写入本机磁盘的安装器分区（XBOOTLDR 类型、GPT 名 GK3LIVE）：gk3w uninstall 认的就是这一种，
+  /// 可以删；旧版脚本建的 Basic data 类型的 GK3LIVE 不算（[liveExists] 照样挡住再写一份）
+  WinPart? get livePart {
+    final d = disk, p = probe;
+    if (d == null || p == null) return null;
+    return p.partsOf(d).where((x) => x.type.toUpperCase() == kXbootldrType && x.name.toUpperCase() == 'GK3LIVE').firstOrNull;
+  }
 
   /// 安装介质写到哪（目标页选的）；重新检查后清空
   MediaTarget? mediaTarget;
@@ -411,7 +425,8 @@ class Session extends ChangeNotifier {
 
   /// 删掉一个下载目录里的安装文件。回放演示数据时什么都不删（录制里的目录是开发机上真实的下载目录）；
   /// 测试里换成记录调用的
-  late void Function(String dir) deleteFiles = backend.demoLabel == null ? deleteDownloadedRelease : (_) {};
+  late void Function(String dir) deleteFiles =
+      backend.demoLabel == null ? (d) => deleteDownloadedRelease(d, also: [if (liveCd case final lc?) Uri.parse(lc.url).pathSegments.last]) : (_) {};
 
   /// 这次安装下载的文件所在的目录（装好之后由用户决定退出时删不删：[deleteOnExit]）
   String? downloadedDir;
@@ -596,7 +611,7 @@ class Session extends ChangeNotifier {
   }
 
   /// 下载（0–40 %）再安装（40–100 %）；用本地文件时直接安装（0–100 %）
-  Future<bool> install({required String releaseDir}) => _downloadThen(WriteTask.install, releaseDir, (dir) {
+  Future<bool> install({required String releaseDir}) => _downloadThen(WriteTask.install, releaseDir, (dir, _) {
         final d = disk!, r = region!;
         return ('apply', [
           '--disk', '${d.num}', '--region-start', '${r.start}', '--region-end', '${r.end}',
@@ -604,16 +619,18 @@ class Session extends ChangeNotifier {
         ], _bitlockerInput);
       });
 
-  /// 制作安装介质：下载所选版本，再由 gk3w 写入 LiveCD 与安装文件 —— U 盘整个清除后写入；本机则在所选未分配空间的
-  /// 末尾建 GK3LIVE（见 [mediaRegion]）、在 ESP 里放 LiveCD 的启动文件与启动项。--livecd 是 LiveCD 的下载地址，本地文件时是那个目录。
-  /// gk3w 的 media 命令尚未实现（参数是计划中的样子），演示数据里也就没有它的录制，回放时这一步按失败处理。
+  /// 制作安装介质：下载 LiveCD 镜像与所选版本，再由 gk3w 写入 —— U 盘整个清除后写入；本机则在所选未分配空间的
+  /// 末尾建 GK3LIVE（XBOOTLDR 分区，见 [mediaRegion]），还没有 Android 时把 ESP 的回落路径换成 systemd-boot、默认仍进
+  /// Windows。--livecd 是下载好、核对过的 ISO，本地文件时是目录里的那个（[localLiveIso]）。
   Future<bool> writeMedia({required String releaseDir}) {
     mediaWritten = mediaTarget;
-    return _downloadThen(WriteTask.media, releaseDir, (dir) {
+    final lc = liveCd;
+    return _downloadThen(WriteTask.media, releaseDir, extra: source == ReleaseSource.local || lc == null ? const [] : [lc.url, lc.sums], (dir, iso) {
       final t = mediaWritten!;
-      final live = source == ReleaseSource.local ? dir : liveCd!.url;
+      final live = (source == ReleaseSource.local ? localLiveIso(dir) : iso) ?? '';
       if (t.usb) {
-        return ('media', ['--target', 'usb', '--disk', '${t.disk!.num}', '--release', dir, '--livecd', live], null);
+        // --expect-mib：确认时看到的容量，换插了别的盘就不写（见 gk3w 的 media.c）
+        return ('media', ['--target', 'usb', '--disk', '${t.disk!.num}', '--expect-mib', '${t.disk!.sizeMib}', '--release', dir, '--livecd', live], null);
       }
       final d = disk!, r = mediaRegion!;
       return ('media', [
@@ -627,19 +644,22 @@ class Session extends ChangeNotifier {
   MediaTarget? mediaWritten;
 
   /// [command]：下载完之后的写盘调用（函数、参数、标准输入）
-  Future<bool> _downloadThen(WriteTask t, String releaseDir, (String, List<String>, String?) Function(String dir) command) async {
+  /// [extra]：再交给 download 的参数（LiveCD 镜像与它的 SHA256SUMS 的地址）；下载结果里的 LIVEISO 交给 [command]
+  Future<bool> _downloadThen(WriteTask t, String releaseDir, (String, List<String>, String?) Function(String dir, String? iso) command,
+      {List<String> extra = const []}) async {
     // 移动 MFT 期间不写盘（检查页那时不让往下走，这里再挡一次）
     if (mftMoving) return _busy();
     _begin(t);
     final local = source == ReleaseSource.local;
     try {
       var dir = localDir;
+      String? iso;
       if (!local) {
         downloading = true;
         notifyListeners();
         final CallResult dl;
         try {
-          dl = await _download([variant!.base, await _releaseDir(releaseDir)]);
+          dl = await _download([variant!.base, await _releaseDir(releaseDir), ...extra]);
         } finally {
           downloading = false;
           _dlSub = null;
@@ -649,6 +669,7 @@ class Session extends ChangeNotifier {
           return false;
         }
         dir = dl.first('RELEASE')?['dir'] ?? releaseDir;
+        iso = dl.first('LIVEISO')?['path'];
         // 退出确认框还开着时下载结束了：先等答案再写盘。选了退出就当作撤回（删掉刚下完的文件），不写盘；
         // 不然用户点的"退出"没有任何作用，安装照样开始写盘
         final prompt = _quitPrompt;
@@ -667,7 +688,7 @@ class Session extends ChangeNotifier {
           }
         }
       }
-      final (fn, args, input) = command(dir);
+      final (fn, args, input) = command(dir, iso);
       await _startDiskWrite();
       result = await Gk3Backend.collect(input == null ? backend.call(fn, args) : backend.callWithInput(fn, args, input),
           (e) => _onEvent(e, base: local ? 0 : 40, span: local ? 100 : 60));
@@ -684,13 +705,16 @@ class Session extends ChangeNotifier {
     return result!.ok;
   }
 
-  /// 卸载：gk3w uninstall 不报百分比，界面显示一条不定长的进度
-  Future<bool> uninstall() async {
+  /// 卸载：gk3w uninstall 不报百分比，界面显示一条不定长的进度。[installerOnly]：只删安装器分区
+  /// （--installer-only：装着 Android 时 Android 与 ESP 都不动，没装时 ESP 还原到写入安装器分区之前）
+  Future<bool> uninstall({bool installerOnly = false}) async {
     if (mftMoving) return _busy();
-    _begin(WriteTask.uninstall);
+    _begin(installerOnly ? WriteTask.removeLive : WriteTask.uninstall);
+    rmLiveMib = livePart?.sizeMib ?? 0;
+    rmLiveBesideAndroid = installed;
     try {
       await _startDiskWrite();
-      final args = ['--disk', '${disk!.num}', '--real-disk', ..._bitlockerArgs], input = _bitlockerInput;
+      final args = ['--disk', '${disk!.num}', if (installerOnly) '--installer-only', '--real-disk', ..._bitlockerArgs], input = _bitlockerInput;
       result = await Gk3Backend.collect(
           input == null ? backend.call('uninstall', args) : backend.callWithInput('uninstall', args, input), _onEvent);
     } catch (e) {
@@ -700,6 +724,11 @@ class Session extends ChangeNotifier {
     }
     return result!.ok;
   }
+
+  /// 删除安装器分区（[WriteTask.removeLive]）时它的大小，与当时是否装着 Android（装着时空出的空间在 /data 后面，
+  /// 不能合并回 C 盘）：完成页照它说，不看 FREE —— 没装 Android 时它会与前面的未分配空间连成一块
+  int rmLiveMib = 0;
+  bool rmLiveBesideAndroid = false;
 
   /// 卸载之后空出来的空间（gk3w uninstall 的 FREE 记录里最大的一段）
   int get freedMib {

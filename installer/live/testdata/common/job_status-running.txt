@@ -1,2 +1,2 @@
-O JOB id=20261005-101500-4242-31337 fn=gk3_apply state=running rc=- mode=systemd-run unit=gk3-job-20261005-101500-4242-31337
+O JOB id=20261113-101500-4242-7a3f cmd=apply%20--release%20/media/gk3/gaokun3/payload%20--disk%20/dev/nvme0n1%20--mode%20wipe state=running rc=- mode=systemd-run unit=gk3-job-20261113-101500-4242-7a3f
 X 0

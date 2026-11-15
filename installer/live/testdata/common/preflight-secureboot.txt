@@ -1,8 +1,0 @@
-O CHECK id=root ok=yes
-O CHECK id=uefi ok=yes
-O CHECK id=model ok=yes value=GK-W7X
-O CHECK id=bios ok=yes value=2.17
-O CHECK id=secureboot ok=no value=enabled
-O CHECK id=tools ok=yes
-O CHECK id=power ok=yes value=40 ac=yes min=15
-X 0

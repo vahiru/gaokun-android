@@ -69,7 +69,7 @@ class ChoiceCard extends StatelessWidget {
   final String title;
   final String? body, warn, good;
 
-  /// 紧凑的一行（调整磁盘页的分区列表：一块盘的分区要一屏看完 —— 出厂布局 7 个分区加空闲区）
+  /// 紧凑的一行（删除分区页的分区列表：一块盘的分区要一屏看完 —— 出厂布局 7 个分区加空闲区）
   final bool dense;
 
   /// 不为空 ⇒ 禁用，并把原因写在卡片上
@@ -185,7 +185,7 @@ class ChoiceCard extends StatelessWidget {
   }
 }
 
-/// 布局条上的一个分区：起点、大小（MiB）与系统（gk3_probe 的 PART os=，决定颜色，见 [DiskBar.colorOf]）
+/// 布局条上的一个分区：起点、大小（MiB）与系统（gk3l / gk3w probe 的 PART os=，决定颜色，见 [DiskBar.colorOf]）
 typedef DiskBarPart = ({int start, int sizeMib, String os});
 
 /// 布局条上的一块空闲区：起点与大小（MiB）

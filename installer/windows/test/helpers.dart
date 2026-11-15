@@ -79,13 +79,13 @@ class DiskBundle extends AssetBundle {
 
 /// [home]：从某一页开始（出图时看那些回放数据走不到的页）
 Future<(Rec, Session)> pumpApp(WidgetTester t, String scenario,
-    {String language = 'zh', Widget? home, int? testDisk, Map<String, Gk3Event Function(Gk3Event)> map = const {},
+    {String language = 'zh', Widget? home, int? testDisk, Map<String, String> overrides = const {}, Map<String, Gk3Event Function(Gk3Event)> map = const {},
     Map<String, Stream<Gk3Event> Function(List<String>)> replaceFirst = const {},
     Map<String, Stream<Gk3Event> Function(List<String>, String?)> respond = const {}}) async {
   t.view.physicalSize = const Size(1280, 800);
   t.view.devicePixelRatio = 1;
   addTearDown(t.view.reset);
-  final rec = Rec(FixtureBackend(scenario, bundle: DiskBundle(), speed: 0))
+  final rec = Rec(FixtureBackend(scenario, bundle: DiskBundle(), speed: 0, overrides: overrides))
     ..map.addAll(map)
     ..replaceFirst.addAll(replaceFirst)
     ..respond.addAll(respond);

@@ -11,7 +11,7 @@ contact_links:
     about: Limitations that are already known, with workarounds. / 已知的限制及应对办法。
   - name: FAQ / 常见问题
     url: https://github.com/vahiru/gaokun-android/blob/main/docs/FAQ.md
-    about: Boot menu, updates and rollback, collecting logs, the rescue system, uninstalling. / 启动菜单、更新与回退、抓取日志、救援系统、卸载。
+    about: Boot menu, updates and rollback, collecting logs, uninstalling. / 启动菜单、更新与回退、抓取日志、卸载。
   - name: Install guide / 安装说明
     url: https://github.com/vahiru/gaokun-android/blob/main/docs/INSTALL.md
     about: Please read this before reporting an installation problem. / 报告安装问题前请先阅读。

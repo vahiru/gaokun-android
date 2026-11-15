@@ -1,4 +1,4 @@
-<#
+﻿<#
     Stage 0 -- Windows preflight (run on the Ego, not on the build machine)
 
     Purpose, now that the plan is USB-boot rather than an internal install:

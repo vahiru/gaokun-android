@@ -37,13 +37,12 @@ OUT="${1:?用法: $0 <kernel-out-dir>}"
     --enable USB_CONFIGFS_F_MIDI \
     --enable OVERLAY_FS
 
-# ---- 让【同一个内核】也能当救援/LiveCD 系统用（见 scripts/live/README.md）----
-# 今天 ESP 上有两个内核：Android 一个、救援 Ubuntu 一个，白占 14 MiB，
-# 而且两份要各自维护。统一成一个之后，救援系统只是"同一个内核 + 另一个 initramfs"。
-# 这几项对 Android 是惰性的（不挂就没有代价），但缺了救援就起不来：
-#   SQUASHFS  —— 救援 rootfs 是 squashfs；★ 它默认是 =m，而【救援 initramfs 里
+# ---- 让【同一个内核】也能当 LiveCD 安装器的内核用（见 installer/tools/README.md）----
+# LiveCD 与 Android 共用这一个内核，只换 initramfs 与命令行，不必另外维护一份。
+# 这几项对 Android 是惰性的（不挂就没有代价），但缺了 LiveCD 就起不来或装不了：
+#   SQUASHFS  —— LiveCD 的 rootfs 是 squashfs；★ 它默认是 =m，而【LiveCD 的 initramfs 里
 #                没有模块】，和本仓踩过 13 次的「=m 坑」完全同类
-#   NTFS3_FS  —— 双系统安装要缩 Windows 分区，得先能读它
+#   NTFS3_FS  —— 安装前只读挂载 Windows 分区，检查 Windows 是否处于休眠
 #   NLS_UTF8  —— FAT 上的非 ASCII 文件名
 #   ISO9660_FS —— LiveCD以混合ISO发布：dd写入U盘启动时，squashfs在ISO9660文件系统里，
 #                initramfs要能挂载它（长文件名靠Rock Ridge，内核始终支持，不需要另开选项）

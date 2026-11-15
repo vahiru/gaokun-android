@@ -126,6 +126,7 @@ class WinPart {
   int get end => r.intOf('end');
   int get sizeMib => r.intOf('size_mib');
   String get name => r['name'];
+  String get type => r['type'];
   String get fs => r['fs'];
   String get fslabel => r['fslabel'];
   String get letter => r['letter'];
@@ -144,6 +145,9 @@ class FreeSpan {
 
 /// 安装器会建、卸载会删的分区名（与 gk3w uninstall 的 OUR_NAMES 相同）
 const kAndroidNames = {'misc', 'metadata', 'boot_a', 'boot_b', 'super', 'gk3rescue', 'userdata'};
+
+/// XBOOTLDR 分区类型（gk3w probe 的 PART type=）：本机磁盘上的安装器分区 GK3LIVE 用它（installer/backend/src/win/win.h）
+const kXbootldrType = 'BC13C2FF-59E6-4262-A352-B275FD6F7172';
 
 class Probe {
   Probe(CallResult res)
@@ -185,7 +189,7 @@ class Plan {
   int get needMib => _err?.intOf('need_mib') ?? 0;
 }
 
-/// 可以下载安装的一个版本（VARIANT 记录：LiveCD 的 gk3_net_manifest 的格式，另加 date / pre / source）
+/// 可以下载安装的一个版本（VARIANT 记录，由 backend/net.dart 从发布清单整理出来，带 date / pre / source）
 class Variant {
   Variant(this.r);
   final Gk3Record r;
@@ -206,12 +210,13 @@ class Variant {
   static final _alpha = RegExp(r'^v?\d+(\.\d+)*-alpha\b', caseSensitive: false);
 }
 
-/// 最新的安装器（LiveCD）：gk3w releases 的 LIVECD 记录，只含 LiveCD、不带系统（gaokun3-installer-<版本>-windows.zip）
+/// 最新的 LiveCD：gk3w releases 的 LIVECD 记录，不带系统文件的 gaokun3-live-<版本>.iso 与核对它的 SHA256SUMS
 class LiveCd {
   LiveCd(this.r);
   final Gk3Record r;
   String get id => r['id'];
   String get url => r['url'];
+  String get sums => r['sums'];
   int get sizeMib => r.intOf('size_mib');
 }
 

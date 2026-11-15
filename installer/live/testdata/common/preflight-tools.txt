@@ -1,8 +1,0 @@
-O CHECK id=root ok=yes
-O CHECK id=uefi ok=yes
-O CHECK id=model ok=yes value=GK-W7X
-O CHECK id=bios ok=yes value=2.16
-O CHECK id=secureboot ok=yes value=disabled
-O CHECK id=tools ok=no missing=sgdisk,partprobe pkgs=gdisk,parted
-O CHECK id=power ok=yes value=76 ac=no min=15
-X 0

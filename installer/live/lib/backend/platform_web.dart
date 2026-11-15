@@ -2,7 +2,7 @@ import 'package:gk3_common/backend/backend.dart';
 
 import '../session.dart';
 
-Gk3Backend? locateShellBackend() => null;
+Gk3Backend? locateLiveBackend() => null;
 
 /// http://localhost:xxxx/?scenario=factory
 String? requestedScenario() => Uri.base.queryParameters['scenario'];

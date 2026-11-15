@@ -1,0 +1,35 @@
+# LiveCD 的 tty1：cage（单应用 kiosk 合成器）里跑图形安装器。
+#
+# ★ 这个服务就是"那根线"：Alpine 版第一次把安装器编进了镜像却【没有任何东西去拉起它】，
+#   实机启动后停在 login 提示符。build-rootfs.sh 断言它是 enabled 的。
+# cage -s：允许切换 VT。cage 0.2.0【默认禁止】—— 不加它，命令行逃生口（tty2 上的 getty、
+#   安装器里的"退出到终端"）必然失效（见 installer/live/README.md）。
+# 拿 DRM 与输入设备走 libseat → seatd（Wants/After seatd）。
+# 安装器崩了或被退出，cage 跟着退出，这里 2 秒后拉起来；tty2 始终有 getty 备用。
+[Unit]
+Description=gaokun3 graphical installer (cage)
+After=systemd-user-sessions.service seatd.service systemd-udev-settle.service
+Wants=seatd.service
+Conflicts=getty@tty1.service
+
+[Service]
+Type=simple
+Environment=XDG_RUNTIME_DIR=/run/gk3-installer
+Environment=LIBSEAT_BACKEND=seatd
+RuntimeDirectory=gk3-installer
+RuntimeDirectoryMode=0700
+# 自动重启时保留这个目录：界面日志（installer.log）与语言设置只放在这里，删了就丢掉崩溃之前的日志
+RuntimeDirectoryPreserve=restart
+ExecStart=/usr/bin/cage -s -- /usr/bin/gk3-installer-session
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+StandardInput=tty-fail
+StandardOutput=journal
+StandardError=journal
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

@@ -112,6 +112,7 @@
   "chkInstalled": "当前设备已安装Android",
   "chkInstalledHow": "点击“管理”可查看分区详情或卸载系统。如需重新安装，请先卸载现有Android系统。",
   "chkNoRoom": "未分配空间不足（至少需要{need}）",
+  "chkLiveExists": "系统磁盘上已有GK3LIVE分区",
   "@chkNoRoom": {
     "placeholders": {
       "need": {
@@ -456,6 +457,20 @@
   "errEspFull": "EFI系统分区剩余空间不足。",
   "errPartsUnclear": "磁盘中存在与Android分区同名但内容无法识别的分区；为避免误删数据，操作已中止。",
   "errDisk": "无法打开Windows所在的系统磁盘。",
+  "errWriteDenied": "写入时被拒绝访问，通常是安全软件拦截了安装器后端程序（gk3w.exe）。请在安全软件中允许该程序运行后重试。",
+  "errDiskWrite": "写入磁盘时发生错误，详细信息请查看下方日志。",
+  "errDiskVerify": "写入磁盘的数据读回后与原数据不一致。",
+  "errFormat": "格式化Android分区时发生错误。",
+  "errEspWrite": "无法写入EFI系统分区。",
+  "errEspMissing": "此磁盘上未找到EFI系统分区。",
+  "errEspAmbiguous": "此磁盘上存在多个EFI系统分区，无法确定目标引导分区。",
+  "errEspRead": "无法读取EFI系统分区。",
+  "errEspNotFat": "EFI系统分区不是FAT32格式。",
+  "errPartTable": "无法读取系统磁盘的GPT分区表，或分区表中存在越界、重叠的分区项。",
+  "errLayoutVerify": "修改分区表后，无法确认磁盘分区布局已按预期更新。",
+  "errDiskInfo": "无法获取系统磁盘的容量，或磁盘扇区大小不受支持。",
+  "errGptBackup": "无法备份磁盘分区表。",
+  "errGptFull": "分区表中已无空余的分区项，无法新建Android分区。",
   "errOther": "安装器返回错误：{code}",
   "@errOther": {
     "placeholders": {
@@ -560,17 +575,17 @@
   "railTarget": "目标",
   "railWrite": "写入",
   "mediaAboutTitle": "制作独立安装介质",
-  "mediaAboutSub": "将独立安装环境（LiveCD）写入U盘或本机磁盘。从安装介质启动后即可脱离Windows运行完整的图形安装器。",
+  "mediaAboutSub": "将Live安装器写入U盘或本机磁盘。从安装介质启动后即可脱离Windows运行完整的图形安装器。",
   "mediaAboutUses": "通过独立安装介质可以：",
   "mediaUseWipe": "清除整个磁盘并安装Android（Windows将被删除）",
   "mediaUseAlong": "保留现有系统，在未分配空间中安装Android",
   "mediaUseReinstall": "重新安装Android，用于修复系统或更换版本",
   "mediaAboutTargets": "可写入以下位置：",
   "mediaAboutUsb": "U盘：将清空该U盘中的所有数据；制作完成后可用于任意MateBook E Go设备。",
-  "mediaAboutInternal": "本机磁盘：在系统磁盘的未分配空间中创建GK3LIVE分区，并将LiveCD添加至启动菜单。",
-  "mediaAboutNote": "具体安装方式将在进入LiveCD后选择。从安装介质启动前，请先在目标设备的UEFI固件设置中关闭Secure Boot。",
+  "mediaAboutInternal": "本机磁盘：在系统磁盘的未分配空间中创建GK3LIVE分区，并将Live安装器添加至启动菜单。",
+  "mediaAboutNote": "具体安装方式将在进入Live安装器后选择。从安装介质启动前，请先在目标设备的UEFI固件设置中关闭Secure Boot。",
   "mediaTargetTitle": "选择写入位置",
-  "mediaTargetSub": "LiveCD及所选版本的系统安装文件共需约{need}空间。",
+  "mediaTargetSub": "Live安装器及所选版本的系统安装文件共需约{need}空间。",
   "@mediaTargetSub": {
     "placeholders": {
       "need": {
@@ -603,10 +618,10 @@
   },
   "mediaInternalHeader": "本机磁盘",
   "mediaInternalTitle": "系统磁盘的未分配空间",
-  "mediaInternalBody": "创建GK3LIVE分区并将LiveCD添加至启动菜单，现有分区及其中的数据不受影响",
+  "mediaInternalBody": "创建GK3LIVE分区并将Live安装器添加至启动菜单，现有分区及其中的数据不受影响",
   "mediaInternalBlocked": "以下条件尚未满足（详情请返回首页查看安装环境检查）：",
-  "releaseSubMedia": "所选版本的系统安装文件将与LiveCD一并写入安装介质，进入LiveCD安装时无需联网。",
-  "releaseLiveCd": "LiveCD将使用最新版安装器{version}（下载大小{size}）。",
+  "releaseSubMedia": "所选版本的系统安装文件将与Live安装器一并写入安装介质，进入Live安装器安装时无需联网。",
+  "releaseLiveCd": "将使用最新版Live安装器{version}（下载大小{size}）。",
   "@releaseLiveCd": {
     "placeholders": {
       "version": {
@@ -617,8 +632,8 @@
       }
     }
   },
-  "releaseNoLiveCd": "当前下载源未提供LiveCD镜像，请切换至其他来源。",
-  "localLiveCd": "gaokun3-installer-<版本>-windows.zip（含LiveCD镜像）",
+  "releaseNoLiveCd": "当前下载源未提供Live安装器镜像，请切换至其他来源。",
+  "localLiveCd": "gaokun3-live-<版本>.iso（Live安装器镜像）",
   "mediaConfirmTitle": "确认写入安装介质",
   "mediaConfirmSubUsb": "U盘（{model}，{size}）中的所有数据将被永久清除且无法恢复。",
   "@mediaConfirmSubUsb": {
@@ -632,7 +647,7 @@
     }
   },
   "mediaConfirmSubInternal": "即将修改磁盘分区表与EFI引导文件，请提前备份重要数据。",
-  "mediaConfirmLiveDl": "下载LiveCD（安装器{version}，{size}）并校验文件完整性",
+  "mediaConfirmLiveDl": "下载Live安装器{version}（{size}）并校验文件完整性",
   "@mediaConfirmLiveDl": {
     "placeholders": {
       "version": {
@@ -643,8 +658,8 @@
       }
     }
   },
-  "mediaConfirmUsb": "清空U盘中的所有分区，创建GK3LIVE分区并写入LiveCD及系统安装文件",
-  "mediaConfirmPart": "在{region}未分配空间的末尾创建GK3LIVE分区（{size}），并写入LiveCD及系统安装文件",
+  "mediaConfirmUsb": "清空U盘中的所有分区，创建GK3LIVE分区并写入Live安装器及系统安装文件",
+  "mediaConfirmPart": "在{region}未分配空间的末尾创建GK3LIVE分区（{size}），并写入Live安装器及系统安装文件",
   "@mediaConfirmPart": {
     "placeholders": {
       "region": {
@@ -655,18 +670,18 @@
       }
     }
   },
-  "mediaConfirmEntry": "将LiveCD添加至启动菜单",
+  "mediaConfirmEntry": "将Live安装器添加至启动菜单",
   "holdToWrite": "按住2秒开始写入",
   "runMediaTitle": "正在写入安装介质",
   "runSleepHintMedia": "写入期间请勿合上键盘盖或按电源键，否则设备进入睡眠后写入将暂停。",
   "runMediaUsbHint": "写入完成前请勿拔出U盘。",
   "shutdownReasonMedia": "正在写入安装介质。中断写入可能导致磁盘分区处于不完整状态。",
   "doneMediaTitle": "安装介质制作完成",
-  "doneMediaSubUsb": "现在可使用该U盘引导MateBook E Go进入LiveCD安装环境。",
-  "doneMediaSubInternal": "重启设备并在启动菜单中选择LiveCD即可进入安装环境。",
-  "doneMediaInstall": "具体安装方式将在进入LiveCD后选择。",
+  "doneMediaSubUsb": "现在可使用该U盘引导MateBook E Go进入Live安装器。",
+  "doneMediaSubInternal": "重启设备并在启动菜单中选择“gaokun3 installer”即可进入Live安装器。",
+  "doneMediaInstall": "具体安装方式将在进入Live安装器后选择。",
   "doneMediaSecureBoot": "从U盘启动前，请先在目标设备的UEFI固件设置中关闭Secure Boot。",
-  "doneMediaStays": "除非执行“清除整个磁盘”或移除启动菜单，否则LiveCD入口将一直保留在启动菜单中。",
+  "doneMediaStays": "安装Android后，安装器分区及其启动项默认将被删除；如需保留，请在Live安装器的“安装选项”中开启“保留安装器分区”。",
   "failMediaTitle": "写入未完成",
   "failTouchedMediaUsb": "U盘已发生部分更改，其中的原有数据可能已被清除。请返回首页后重试。",
   "failTouchedMediaInternal": "磁盘已发生部分更改，但Windows系统不受影响。请返回首页重新检查后重试。",
@@ -701,6 +716,45 @@
     }
   },
   "errReleaseMissing": "所选目录中未找到系统镜像文件（boot.img、super.img.zst）。",
+  "errMediaNotUsb": "所选磁盘不是U盘，未写入任何数据。",
+  "errMediaTooSmall": "U盘容量不足：写入Live安装器及系统安装文件至少需要{need}。U盘未被修改。",
+  "@errMediaTooSmall": {
+    "placeholders": {
+      "need": {
+        "type": "String"
+      }
+    }
+  },
+  "errLiveTooSmall": "所选未分配空间容量不足：写入Live安装器及系统安装文件至少需要{need}。磁盘未被修改。",
+  "@errLiveTooSmall": {
+    "placeholders": {
+      "need": {
+        "type": "String"
+      }
+    }
+  },
+  "errLiveExists": "系统磁盘上已有GK3LIVE分区。磁盘未被修改。",
+  "errLiveRead": "写入时无法读取Live安装器镜像或系统安装文件，请重新下载后重试。",
+  "errGptFullLive": "分区表中已无空余的分区项，无法新建GK3LIVE分区。磁盘未被修改。",
+  "errLiveCd": "Live安装器镜像无法读取或不完整，请重新下载或改用其他镜像文件。磁盘未被修改。",
+  "errMediaInUse": "U盘中的文件正被其他程序使用，请关闭相关程序（如打开该U盘的资源管理器窗口）后重试。U盘未被修改。",
+  "errMediaRead": "写入U盘时无法读取Live安装器镜像或系统安装文件，U盘中的内容不完整，请重新制作。",
+  "errMediaOpen": "无法打开所选U盘，或无法读取其容量。请重新插入U盘后重试。",
+  "errMediaChanged": "所选U盘的容量与确认时不一致，可能已更换为其他磁盘。为避免误写，未写入任何数据，请重新选择写入位置。",
+  "errMediaReadOnly": "所选U盘处于写保护状态，未写入任何数据。",
+  "errMediaIsSource": "Live安装器镜像、系统安装文件或Windows安装器本身位于所选U盘上，无法写入该U盘。请将这些文件移至其他位置后重试。U盘未被修改。",
+  "localLiveCdUsed": "将使用Live安装器镜像：{file}",
+  "@localLiveCdUsed": {
+    "placeholders": {
+      "file": {
+        "type": "String"
+      }
+    }
+  },
+  "prMediaLock": "正在锁定U盘",
+  "prMediaWrite": "正在写入安装介质",
+  "prMediaVerify": "正在校验写入的内容",
+  "prMediaPartition": "正在写入分区表",
   "errDownloadSpace": "C盘剩余空间不足，本次下载还需至少{need}。请清理空间后重试，已下载的部分将保留。",
   "@errDownloadSpace": {
     "placeholders": {
@@ -732,5 +786,43 @@
         "type": "String"
       }
     }
-  }
+  },
+  "mediaRmLiveTitle": "删除系统磁盘上的安装器分区",
+  "mediaRmLiveBody": "删除GK3LIVE分区（{size}），其空间将成为未分配空间",
+  "@mediaRmLiveBody": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "rmLiveTitle": "确认删除安装器分区",
+  "rmLiveSub": "删除后，如需再次运行安装器，请重新制作安装介质。",
+  "rmLivePart": "删除安装器分区GK3LIVE（{size}），其空间将成为未分配空间",
+  "@rmLivePart": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "rmLiveBoot": "将EFI默认引导文件恢复为写入安装器分区之前的状态（通常为Windows启动管理器）",
+  "holdToRmLive": "按住2秒开始删除",
+  "shutdownReasonRmLive": "正在删除安装器分区。中断删除可能导致磁盘分区处于不完整状态。",
+  "runSleepHintRmLive": "删除期间请勿合上键盘盖或按电源键，否则设备进入睡眠后删除将暂停。",
+  "doneRmLiveTitle": "安装器分区已删除",
+  "doneRmLiveBoot": "Live安装器的启动项已移除。",
+  "uninstallLive": "删除安装器分区GK3LIVE（{size}）",
+  "@uninstallLive": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "errLiveMissing": "系统磁盘上未找到安装器分区。",
+  "runRmLiveTitle": "正在删除安装器分区",
+  "failRmLiveTitle": "安装器分区未删除",
+  "failTouchedRmLive": "删除流程仅完成一部分，Windows系统不受影响。请返回首页并重新执行删除。",
+  "errLiveUnrecognized": "系统磁盘上的安装器分区内容无法识别；为避免误删数据，操作已中止。"
 }

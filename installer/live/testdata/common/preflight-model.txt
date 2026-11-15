@@ -1,0 +1,2 @@
+O PREFLIGHT gk3l=dev manufacturer=HUAWEI model=GK-W57 model_ok=no ac=yes battery=40 battery_min=15
+X 0

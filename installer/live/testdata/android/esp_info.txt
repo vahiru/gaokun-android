@@ -1,3 +1,2 @@
-D 239
-O ESP part=/dev/nvme0n1p1 size_mib=300 free_mib=299 need_mib=150 windows=no gaokun3=yes mountable=yes small=no bootaa64=sdboot bitlocker=no hibernated=no entry=none entry_mode=none entry_state=none staged=no prev=no loader_default=none boot_entries=unknown
+O ESP part=/dev/nvme0n1p1 size_mib=300 free_mib=298 need_mib=150 windows=no gaokun3=yes mountable=yes small=no bootaa64=sdboot bitlocker=no hibernated=no loader_default=unknown
 X 0

@@ -47,3 +47,4 @@ flutter:
     - testdata/bitlocker-on/
     - testdata/nospace-mft/
     - testdata/nospace-mft-after/
+    - testdata/live/

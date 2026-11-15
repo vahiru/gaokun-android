@@ -1,9 +1,0 @@
-D 67
-E PROGRESS 10 gpt-backup
-E 分区表备份：/media/gk3/gaokun3/gpt-before-create-nvme0n1-20261005-145331.bin（还原：sgdisk --load-backup=/media/gk3/gaokun3/gpt-before-create-nvme0n1-20261005-145331.bin /dev/nvme0n1）
-E PROGRESS 30 part-create mib=4096
-D 1500
-E PROGRESS 60 part-format fs=ext4
-E PROGRESS 100 done
-O RESULT op=create part=/dev/nvme0n1p6 fs=ext4 size_mib=4096
-X 0

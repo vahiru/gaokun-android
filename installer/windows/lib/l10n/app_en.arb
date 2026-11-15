@@ -70,6 +70,7 @@
   "chkInstalled": "Android is already installed on this device",
   "chkInstalledHow": "Click “Manage” to view partition details or uninstall the system. To reinstall, please uninstall the existing Android installation first.",
   "chkNoRoom": "Insufficient unallocated space (at least {need} required)",
+  "chkLiveExists": "The system disk already has a GK3LIVE partition",
   "chkNoRoomNone": "There is no unallocated space on the system disk.",
   "chkNoRoomBiggest": "The largest contiguous unallocated space on the system disk is {size}.",
   "chkNoRoomHow": "In Windows Disk Management, right-click the C: volume and select “Shrink Volume” to free up at least {need} of unallocated space, then return here and check again.",
@@ -301,6 +302,20 @@
   "errEspFull": "Insufficient free space on the EFI system partition.",
   "errPartsUnclear": "Partitions with Android partition names were found on the disk, but their contents could not be recognized. Operation aborted to prevent data loss.",
   "errDisk": "Unable to open the Windows system disk.",
+  "errWriteDenied": "Access was denied while writing, usually because security software blocked the installer backend (gk3w.exe). Allow the program in your security software and try again.",
+  "errDiskWrite": "An error occurred while writing to the disk. See the log below for details.",
+  "errDiskVerify": "Data written to the disk did not match when read back.",
+  "errFormat": "An error occurred while formatting the Android partitions.",
+  "errEspWrite": "Unable to write to the EFI system partition.",
+  "errEspMissing": "No EFI system partition was found on this disk.",
+  "errEspAmbiguous": "Multiple EFI system partitions were found on this disk; unable to determine which one to use.",
+  "errEspRead": "Unable to read the EFI system partition.",
+  "errEspNotFat": "The EFI system partition is not formatted as FAT32.",
+  "errPartTable": "Unable to read the GPT partition table of the system disk, or the table contains out-of-range or overlapping entries.",
+  "errLayoutVerify": "After the partition table was modified, the updated disk layout could not be confirmed.",
+  "errDiskInfo": "Unable to determine the capacity of the system disk, or its sector size is not supported.",
+  "errGptBackup": "Unable to back up the disk partition table.",
+  "errGptFull": "The partition table has no free entries, so the Android partitions cannot be created.",
   "errOther": "The installer reported an error: {code}",
   "prVerify": "Verifying installation files",
   "prPlan": "Planning partition layout",
@@ -347,17 +362,17 @@
   "railTarget": "Target",
   "railWrite": "Write",
   "mediaAboutTitle": "Create standalone installation media",
-  "mediaAboutSub": "Write the standalone installer environment (LiveCD) to a USB drive or to this device's disk, allowing you to boot into the full graphical installer independently of Windows.",
+  "mediaAboutSub": "Write the Live installer to a USB drive or to this device's disk, allowing you to boot into the full graphical installer independently of Windows.",
   "mediaAboutUses": "With standalone installation media, you can:",
   "mediaUseWipe": "Erase the entire disk and install Android (Windows will be removed)",
   "mediaUseAlong": "Keep the existing system and install Android into unallocated space",
   "mediaUseReinstall": "Reinstall Android to repair the system or switch to another release",
   "mediaAboutTargets": "Available target locations:",
   "mediaAboutUsb": "USB drive: erases all existing data on the USB drive; can be used on any MateBook E Go.",
-  "mediaAboutInternal": "Internal disk: creates a GK3LIVE partition in unallocated space on the system disk and adds the LiveCD to the boot menu.",
-  "mediaAboutNote": "You will select the installation mode inside the LiveCD. Before booting from the installation media, ensure Secure Boot is disabled in the target device's UEFI firmware settings.",
+  "mediaAboutInternal": "Internal disk: creates a GK3LIVE partition in unallocated space on the system disk and adds the Live installer to the boot menu.",
+  "mediaAboutNote": "You will select the installation mode inside the Live installer. Before booting from the installation media, ensure Secure Boot is disabled in the target device's UEFI firmware settings.",
   "mediaTargetTitle": "Select target location",
-  "mediaTargetSub": "The LiveCD and installation files for the selected release require approximately {need}.",
+  "mediaTargetSub": "The Live installer and installation files for the selected release require approximately {need}.",
   "@mediaTargetSub": {
     "placeholders": {
       "need": {
@@ -390,10 +405,10 @@
   },
   "mediaInternalHeader": "Internal disk",
   "mediaInternalTitle": "Unallocated space on the system disk",
-  "mediaInternalBody": "Creates a GK3LIVE partition and adds the LiveCD to the boot menu; existing partitions and their data are unaffected",
+  "mediaInternalBody": "Creates a GK3LIVE partition and adds the Live installer to the boot menu; existing partitions and their data are unaffected",
   "mediaInternalBlocked": "The following requirements are not met (return to the start page for details):",
-  "releaseSubMedia": "The installation files for the selected release will be written alongside the LiveCD so installation can proceed offline.",
-  "releaseLiveCd": "The LiveCD will use the latest installer ({version}, download size: {size}).",
+  "releaseSubMedia": "The installation files for the selected release will be written alongside the Live installer so installation can proceed offline.",
+  "releaseLiveCd": "The latest Live installer will be used ({version}, download size: {size}).",
   "@releaseLiveCd": {
     "placeholders": {
       "version": {
@@ -404,8 +419,8 @@
       }
     }
   },
-  "releaseNoLiveCd": "No LiveCD image is available from the selected source. Please switch to another source.",
-  "localLiveCd": "gaokun3-installer-<version>-windows.zip (contains LiveCD image)",
+  "releaseNoLiveCd": "No Live installer image is available from the selected source. Please switch to another source.",
+  "localLiveCd": "gaokun3-live-<version>.iso (Live installer image)",
   "mediaConfirmTitle": "Confirm writing installation media",
   "mediaConfirmSubUsb": "All data on the USB drive ({model}, {size}) will be permanently erased and cannot be recovered.",
   "@mediaConfirmSubUsb": {
@@ -419,7 +434,7 @@
     }
   },
   "mediaConfirmSubInternal": "The disk partition table and EFI boot files are about to be modified. Please back up important data before proceeding.",
-  "mediaConfirmLiveDl": "Download the LiveCD (installer {version}, {size}) and verify file integrity",
+  "mediaConfirmLiveDl": "Download the Live installer {version} ({size}) and verify file integrity",
   "@mediaConfirmLiveDl": {
     "placeholders": {
       "version": {
@@ -430,8 +445,8 @@
       }
     }
   },
-  "mediaConfirmUsb": "Erase all partitions on the USB drive, create a GK3LIVE partition, and write the LiveCD and system installation files",
-  "mediaConfirmPart": "Create a GK3LIVE partition ({size}) at the end of the {region} unallocated space and write the LiveCD and system installation files",
+  "mediaConfirmUsb": "Erase all partitions on the USB drive, create a GK3LIVE partition, and write the Live installer and system installation files",
+  "mediaConfirmPart": "Create a GK3LIVE partition ({size}) at the end of the {region} unallocated space and write the Live installer and system installation files",
   "@mediaConfirmPart": {
     "placeholders": {
       "region": {
@@ -442,18 +457,18 @@
       }
     }
   },
-  "mediaConfirmEntry": "Add the LiveCD to the boot menu",
+  "mediaConfirmEntry": "Add the Live installer to the boot menu",
   "holdToWrite": "Hold for 2 seconds to start writing",
   "runMediaTitle": "Writing installation media",
   "runSleepHintMedia": "Do not close the keyboard cover or press the power button while writing, or the device will enter sleep and pause the operation.",
   "runMediaUsbHint": " Do not unplug the USB drive until writing is complete.",
   "shutdownReasonMedia": "Writing installation media. Interrupting the operation may leave disk partitions in an incomplete state.",
   "doneMediaTitle": "Installation media created",
-  "doneMediaSubUsb": "You can now boot a MateBook E Go from this USB drive into the LiveCD environment.",
-  "doneMediaSubInternal": "Restart the device and select the LiveCD in the boot menu to enter the installer environment.",
-  "doneMediaInstall": "You will select the installation mode inside the LiveCD.",
+  "doneMediaSubUsb": "You can now boot a MateBook E Go from this USB drive into the Live installer.",
+  "doneMediaSubInternal": "Restart the device and select \"gaokun3 installer\" in the boot menu to start the Live installer.",
+  "doneMediaInstall": "You will select the installation mode inside the Live installer.",
   "doneMediaSecureBoot": "Before booting from the USB drive, ensure Secure Boot is disabled in the target device's UEFI firmware settings.",
-  "doneMediaStays": "The LiveCD entry will remain in the boot menu unless the entire disk is erased or the boot menu is removed.",
+  "doneMediaStays": "After Android is installed, the installer partition and its boot menu entry are deleted by default. To keep them, turn on \"Keep installer partition\" in the Live installer's \"Installation options\".",
   "failMediaTitle": "Writing incomplete",
   "failTouchedMediaUsb": "The USB drive was partially modified and its existing data may have been erased. Return to the start and try again.",
   "failTouchedMediaInternal": "The disk was partially modified, though your Windows installation is unaffected. Return to the start, check again, and retry.",
@@ -488,6 +503,24 @@
     }
   },
   "errReleaseMissing": "System image files (boot.img, super.img.zst) were not found in the selected directory.",
+  "errMediaNotUsb": "The selected disk is not a USB drive. Nothing was written.",
+  "errMediaTooSmall": "The USB drive is too small: the Live installer and the system installation files need at least {need}. The USB drive was not modified.",
+  "errLiveTooSmall": "The selected unallocated space is too small: the Live installer and the system installation files need at least {need}. The disk was not modified.",
+  "errLiveExists": "The system disk already has a GK3LIVE partition. The disk was not modified.",
+  "errLiveRead": "The Live installer image or the system installation files could not be read while writing. Download them again and retry.",
+  "errGptFullLive": "The partition table has no free entries, so the GK3LIVE partition cannot be created. The disk was not modified.",
+  "errLiveCd": "The Live installer image cannot be read or is incomplete. Download it again or use another image file. The disk was not modified.",
+  "errMediaInUse": "Files on the USB drive are in use by another program. Close those programs (such as File Explorer windows showing the drive) and try again. The USB drive was not modified.",
+  "errMediaRead": "The Live installer image or the system installation files could not be read while writing the USB drive. The contents of the USB drive are incomplete; please create it again.",
+  "errMediaOpen": "Unable to open the selected USB drive or read its capacity. Reinsert the USB drive and try again.",
+  "errMediaChanged": "The capacity of the selected USB drive differs from the one you confirmed; it may have been replaced by another disk. Nothing was written. Select the target again.",
+  "errMediaReadOnly": "The selected USB drive is write-protected. Nothing was written.",
+  "errMediaIsSource": "The Live installer image, the system installation files or the Windows installer itself are stored on the selected USB drive, so it cannot be written. Move these files elsewhere and try again. The USB drive was not modified.",
+  "localLiveCdUsed": "Live installer image to be used: {file}",
+  "prMediaLock": "Locking the USB drive",
+  "prMediaWrite": "Writing the installation media",
+  "prMediaVerify": "Verifying the written data",
+  "prMediaPartition": "Writing the partition table",
   "errDownloadSpace": "Insufficient free space on the C: volume; at least {need} more is required for this download. Free up space and retry — already downloaded data will be kept.",
   "@errDownloadSpace": {
     "placeholders": {
@@ -519,5 +552,22 @@
         "type": "String"
       }
     }
-  }
+  },
+  "mediaRmLiveTitle": "Delete the installer partition on the system disk",
+  "mediaRmLiveBody": "Deletes the GK3LIVE partition ({size}); its space becomes unallocated",
+  "rmLiveTitle": "Confirm deleting the installer partition",
+  "rmLiveSub": "To run the installer again afterwards, create the installation media again.",
+  "rmLivePart": "Delete the installer partition GK3LIVE ({size}); its space becomes unallocated",
+  "rmLiveBoot": "Restore the default EFI boot file to its state before the installer partition was written (usually the Windows Boot Manager)",
+  "holdToRmLive": "Hold for 2 seconds to delete",
+  "shutdownReasonRmLive": "Deleting the installer partition. Interrupting the deletion may leave disk partitions in an incomplete state.",
+  "runSleepHintRmLive": "Do not close the keyboard cover or press the power button during the deletion, or the device will enter sleep and pause the deletion.",
+  "doneRmLiveTitle": "Installer partition deleted",
+  "doneRmLiveBoot": "The Live installer boot entry has been removed.",
+  "uninstallLive": "Delete the installer partition GK3LIVE ({size})",
+  "errLiveMissing": "No installer partition was found on the system disk.",
+  "runRmLiveTitle": "Deleting the installer partition",
+  "failRmLiveTitle": "Installer partition not deleted",
+  "failTouchedRmLive": "The deletion only completed partially, though your Windows installation is unaffected. Return to the start and run the deletion again.",
+  "errLiveUnrecognized": "The installer partition on the system disk has unrecognized contents; the operation was stopped to avoid deleting data."
 }

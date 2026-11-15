@@ -60,7 +60,7 @@ log() {
 # 只给测试看的跟踪行（GK3_TRACE=1）：只打控制台，不进日志文件 —— 否则"看日志"那一页会因为自己的跟踪行不停重画
 trace() { [ "$GK3_TRACE" = 1 ] && echo "[gk3-fbi] $*" > /dev/console 2>/dev/null; return 0; }
 
-# 最早期的失败（连 /proc 都挂不上）：照 scripts/live/initramfs-init 的做法，打印原因、60 秒后重启。
+# 最早期的失败（连 /proc 都挂不上）：照 installer/tools/build/initramfs-init 的做法，打印原因、60 秒后重启。
 # 重启 = 回到 gk3boot：BCB 驱动的进入会再来一次，wipe 有 3 次上限，bootloader/fastboot 的 BCB
 # 入口进来之前已经清了，不会无限循环。
 early_fail() {

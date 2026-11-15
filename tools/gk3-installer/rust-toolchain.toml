@@ -1,7 +1,0 @@
-# 钉住工具链：与 test-env.Dockerfile 钉摘要同一个理由 —— "昨天绿今天红"要分得清是代码变了还是环境变了。
-# build.sh 会核对实际用的 rustc 是不是这一版（不经 rustup 代理调用时这个文件不生效，所以要另外核）。
-[toolchain]
-channel = "1.99.0"
-targets = ["aarch64-unknown-linux-musl"]
-components = ["clippy", "rustfmt"]
-profile = "minimal"

@@ -103,3 +103,43 @@ const char *gk3w_content_kind_name(gk3w_content_kind k)
     static const char *const names[] = {"empty", "unknown", "ntfs", "bitlocker", "exfat", "fat", "android-boot", "ext4", "lp"};
     return (unsigned)k < sizeof names / sizeof names[0] ? names[k] : "unknown";
 }
+
+/* 只比 ASCII 字母的大小写（文件系统名都是 ASCII） */
+static int ascii_ieq(const char *a, const char *b)
+{
+    for (; *a && *b; a++, b++) {
+        char x = *a >= 'A' && *a <= 'Z' ? (char)(*a + 32) : *a;
+        char y = *b >= 'A' && *b <= 'Z' ? (char)(*b + 32) : *b;
+        if (x != y)
+            return 0;
+    }
+    return *a == *b;
+}
+
+const char *gk3w_guess_os(const char *name, const char *type, const char *fs)
+{
+    /* 安装器会建、卸载会删的分区（与 win/uninstall.c 的 OUR_NAMES 相同） */
+    static const char *const android[] = {"super", "userdata", "metadata", "misc", "boot_a", "boot_b", "gk3rescue"};
+    static const struct {
+        const char *fs, *os;
+    } by_fs[] = {
+        {"ntfs", "windows"}, {"fat32", "fat"}, {"fat", "fat"},     {"vfat", "fat"},     {"ext2", "linux"},
+        {"ext3", "linux"},   {"ext4", "linux"}, {"btrfs", "linux"}, {"xfs", "linux"},    {"f2fs", "android"},
+        {"crypto_LUKS", "luks"},
+    };
+    if (!strcmp(name, "esp"))
+        return "esp";
+    for (size_t i = 0; i < sizeof android / sizeof android[0]; i++)
+        if (!strcmp(name, android[i]))
+            return "android";
+    if (!strcmp(type, "C12A7328-F81F-11D2-BA4B-00A0C93EC93B"))
+        return "esp";
+    if (!strcmp(type, "DE94BBA4-06D1-4D40-A16A-BFD50179D6AC"))
+        return "winre";
+    if (!strcmp(type, "E3C9E316-0B5C-4DB8-817D-F92DF00215AE"))
+        return "msr";
+    for (size_t i = 0; i < sizeof by_fs / sizeof by_fs[0]; i++)
+        if (ascii_ieq(fs, by_fs[i].fs))
+            return by_fs[i].os;
+    return "";
+}

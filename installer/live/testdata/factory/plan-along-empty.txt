@@ -1,0 +1,4 @@
+O PLANERR msg=not-enough-space avail_mib=0 need_mib=20644 fixed_mib=12452
+E ERR code=plan why=not-enough-space
+E !! the selected free space is too small for Android
+X 1

@@ -1,7 +1,0 @@
-E PROGRESS 20 wifi-assoc
-D 1200
-E PROGRESS 60 wifi-dhcp
-D 900
-E PROGRESS 100 wifi-ok
-O NET if=wlan0 ip=192.168.10.239 ssid=宿舍网-5G online=yes
-X 0

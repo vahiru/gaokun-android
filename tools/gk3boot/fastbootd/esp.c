@@ -8,7 +8,7 @@
  *   · 挂载点私有（rundir/esp），不叫 /mnt/esp。
  *   · 选目录：loader/entries 里【直连条目】<32 位小写十六进制>-android-<x>.conf 必须恰好一个，它的 linux 行必须是
  *     /<mid>/android/slot_<x>/Image，内核就写进 /<mid>/android/slot_<x>/ —— 与 gaokun3-ota-postinstall.sh 的
- *     is_direct_entry / KPATH 两段、installer-lib.sh 的 gk3__esp_pick_mid、gk3boot.c 的 direct_cb 同一规则。
+ *     is_direct_entry / KPATH 两段、安装器选 machine-id 目录的规则（installer/backend/src/linux/apply.c 的 esp_pick_mid）、gk3boot.c 的 direct_cb 同一规则。
  *   · 写文件：.<名字>.new → fsync → 丢缓存读回逐字节比对 → rename → fsync 目录；写前按"新文件合计 − 将被覆盖的旧文件"
  *     核对空闲空间。
  *   · 条目 options = boot.img 的 cmdline（头 cmdline + extra 直接相接）+ " androidboot.slot_suffix=_<x>"（已带则不加），

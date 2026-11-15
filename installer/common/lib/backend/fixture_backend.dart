@@ -4,7 +4,7 @@ import 'backend.dart';
 import 'protocol.dart';
 
 /// 回放 [root]/<场景>/ 里录好的后端输出。录像是应用自己的资源：放在应用的目录里、写进应用 pubspec 的
-/// assets（LiveCD：live/testdata/，scripts/live/gen-fixtures.sh 用真后端录的）。本类不认识任何场景名，
+/// assets（LiveCD：live/testdata/，installer/tools/test/gen-fixtures.sh 用真后端录的）。本类不认识任何场景名，
 /// 有哪些场景、默认用哪个，由应用自己定。
 ///
 /// 目录约定：每个场景一个目录，里面的 index.txt 是"调用串 → 文件名"的索引；[root]/common/ 放各场景共用的录像。

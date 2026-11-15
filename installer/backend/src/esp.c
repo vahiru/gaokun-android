@@ -4,11 +4,32 @@
 #include <stdio.h>
 #include <string.h>
 
-/* installer-lib.sh：纯 Android 与双系统统一 5 秒、不写 menu-hidden */
+/* 纯 Android 与双系统统一 5 秒、不写 menu-hidden */
 const char gk3w_loader_conf[] = "timeout 5\n"
                                 "console-mode keep\n"
                                 "editor no\n"
                                 "default *-android-a.conf\n";
+
+/* 写入本机磁盘的 LiveCD（gk3w media --target internal）而还没有 Android 时：默认仍进 Windows（systemd-boot 自动生成的
+ * auto-windows），LiveCD 在菜单里选。不用 LoaderEntryDefault：LiveCD 的内核带 efi=noruntime，装 Android 时删不掉它 */
+const char gk3w_loader_conf_windows[] = "timeout 5\n"
+                                        "console-mode keep\n"
+                                        "editor no\n"
+                                        "default auto-windows\n";
+
+int gk3w_is_our_loader_conf(const uint8_t *b, size_t n)
+{
+    /* boot_control HAL 切槽时只把 default 改成 *-android-b.conf（device/huawei/gaokun3 的 EspSlot.cpp），那份也是我们的 */
+    static const char conf_b[] = "timeout 5\n"
+                                 "console-mode keep\n"
+                                 "editor no\n"
+                                 "default *-android-b.conf\n";
+    const char *ours[3] = {gk3w_loader_conf, conf_b, gk3w_loader_conf_windows};
+    for (int i = 0; i < 3; i++)
+        if (n == strlen(ours[i]) && !memcmp(b, ours[i], n))
+            return 1;
+    return 0;
+}
 
 static char lower_ascii(char c)
 {
@@ -185,7 +206,7 @@ gk3w_fallback_action gk3w_fallback_decide(const uint8_t *cur, size_t cur_len, co
     if (bak_ok || cur_sd)
         return w ? GK3W_FB_USE_W : bak_ok ? GK3W_FB_USE_BAK : GK3W_FB_NO_WINDOWS;
     if (!cur && w)
-        return GK3W_FB_USE_W;   /* 回落路径不见了（例如改名替换时掉电）：放回 Windows 启动管理器，同 PS1 */
+        return GK3W_FB_USE_W;   /* 回落路径不见了（例如改名替换时掉电）：放回 Windows 启动管理器 */
     return GK3W_FB_UNTOUCHED;
 }
 
@@ -203,7 +224,8 @@ gk3w_backup_action gk3w_install_backup_decide(const uint8_t *cur, size_t cur_len
         return GK3W_BK_NONE;
     if (!bak)
         return same_bytes(cur, cur_len, sd, sd_len) ? GK3W_BK_NONE : GK3W_BK_SAVE;
-    if (gk3w_is_systemd_boot(cur, cur_len) || same_bytes(cur, cur_len, bak, bak_len) ||
+    /* 现在的就是要装的这一份（认不出标记的 systemd-boot 也算）：覆盖不丢 */
+    if (gk3w_is_systemd_boot(cur, cur_len) || same_bytes(cur, cur_len, sd, sd_len) || same_bytes(cur, cur_len, bak, bak_len) ||
         gk3w_is_windows_boot_manager(cur, cur_len) || same_bytes(cur, cur_len, w, w_len))
         return GK3W_BK_NONE;
     return gk3w_fallback_bak_disposable(bak, bak_len, w, w_len) ? GK3W_BK_REPLACE : GK3W_BK_CONFLICT;
@@ -220,7 +242,7 @@ int gk3w_is_machine_id(const char *s)
 
 /* 文件名与各行都是承重的：boot_control HAL 按 *-android-a.conf / *-android-b.conf 改写 loader.conf 的 default
  * （EspSlot.cpp:41-43）；OTA postinstall 只改 options 那一行、只往 slot_<后缀>/ 写这三个文件名。
- * ⚠️ 标题里的 "crDroid 16.0" 照抄 installer-lib.sh（那边已经过时，要改两边一起改）。 */
+ * ⚠️ 标题里的 "crDroid 16.0" 是写死的，换大版本时要改。 */
 int gk3w_esp_android_entry(char *out, size_t cap, const char *mid, char slot, const char *cmdline)
 {
     int n;
@@ -240,8 +262,8 @@ int gk3w_esp_android_entry(char *out, size_t cap, const char *mid, char slot, co
 
 gk3w_esp_check gk3w_esp_space_check(const gk3w_esp_space *in)
 {
-    /* 顺序与 installer-lib.sh gk3_apply 双系统那段相同 */
-    if (in->esp_size_mib > 0 && in->esp_size_mib < GK3W_ESP_MIN_SIZE_MIB)
+    /* 先回落路径，再 Windows 的引导管理器 */
+    if (!in->reinstall && in->esp_size_mib > 0 && in->esp_size_mib < GK3W_ESP_MIN_SIZE_MIB)
         return GK3W_ESP_TOO_SMALL;
     if (in->free_kib < in->need_kib)
         return GK3W_ESP_FULL;
@@ -250,7 +272,7 @@ gk3w_esp_check gk3w_esp_space_check(const gk3w_esp_space *in)
     if (in->windows &&
         in->free_kib - in->need_kib - in->slot_kib - (int64_t)GK3W_ESP_GK3BOOT_KIB < (int64_t)GK3W_ESP_WIN_RESERVE_KIB)
         return GK3W_ESP_WIN_RESERVE;
-    if (in->free_kib / 1024 < (int64_t)GK3W_ESP_NEED_MIB)
+    if (in->free_kib / 1024 < (int64_t)(in->reinstall ? GK3W_ESP_REINSTALL_NEED_MIB : GK3W_ESP_NEED_MIB))
         return GK3W_ESP_FULL_MIN;
     return GK3W_ESP_OK;
 }

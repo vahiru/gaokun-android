@@ -2,19 +2,19 @@
 //   "分区之前，你用最醒目的方式告诉用户，这玩意儿可能会损坏数据。然后强迫用户阅读这一段话。
 //    告诉他们备份。告诉他们在此处操作硬盘可能会带来不可逆的风险。"
 //
-// ★ 三条写盘的路都先过这一页（RiskKind）：
-//     安装（整盘清空 / 双系统 / 重新安装，gk3_apply）  选项 → 本页 → 确认页（按住 2 秒）→ 开始
-//     缩分区（gk3_shrink）                              方式 → 本页 → 缩分区页（按住 2 秒）
-//     手动调整磁盘（gk3_part_*）                        方式 → 本页 → 调整磁盘页（每一步按住 2 秒）
-//   接着跟一个还在跑的写盘任务（GUI-11 的 gk3_job_follow）不过这一页：盘已经在写了，拦它没有意义。
-//   Session 再守一道（Session.riskAcked）：没在这一页确认过的路，install / shrink / editDisk 一个字节都不写。
+// ★ 两条写盘的路都先过这一页（RiskKind）：
+//     安装（整盘清空 / 双系统 / 重新安装，gk3l apply）  选项 → 本页 → 确认页（按住 2 秒）→ 开始
+//     删除分区（gk3l delete）                           方式 → 本页 → 删除分区页（每次删除按住 2 秒）
+//     删除安装器分区（gk3l remove-installer）            方式 → 本页 → 删除安装器分区页（按住 2 秒）
+//   接着跟一个还在跑的写盘任务（GUI-11 的 gk3l job follow）不过这一页：盘已经在写了，拦它没有意义。
+//   Session 再守一道（Session.riskAcked）：没在这一页确认过的路，install / deletePartition 一个字节都不写。
 // ★ 门槛（全部满足，"继续"才可点；没满足时按钮旁边写明还差什么）：
 //     1. 正文滚到底（正文短到不用滚时自动算读完）
 //     2. 页面打开满 [RiskPage.readSeconds] 秒 —— 与 1 同时要求，不是二选一：滚得再快也要停够时间
 //     3. 勾选"我已备份重要数据，并理解此操作可能造成不可逆的数据丢失"
-//     4. 整盘清空、或者在有 Windows 的盘上手动调整（那里能删掉它）：输入确认词 ERASE（大小写均可）
+//     4. 整盘清空、或者在有 Windows 的盘上删除分区（那里能删掉它）：输入确认词 ERASE（大小写均可）
 // ⚠️ 确认词中英文界面都是 ASCII 的 ERASE：live 里没有输入法，软键盘与实体键盘都只出 ASCII
-//    （screens_source.dart 的 HiddenNetPage 注释）—— 中文界面要人输"清除"，就是一个永远过不去的门。
+//    —— 中文界面要人输"清除"，就是一个永远过不去的门。
 // ★ 不和确认页重复：这一页确认的是"知道风险、备份过了"；BitLocker 恢复密钥、开机默认系统这些
 //   与具体方案绑定的选择仍在确认页（这一页只提一句"确认页会要你确认恢复密钥"）。
 import 'dart:async';
@@ -42,8 +42,8 @@ class RiskPage extends StatefulWidget {
   final RiskKind kind;
 
   /// 确认之后进的页。安装：确认页（本页留在栈里 —— 从确认页返回，回到这里，已经满足的条件不用再来一遍）。
-  /// 缩分区 / 调整磁盘：那一页 pop 时本页跟着 pop、把结果交给方式页（方式页 await 的是"做完了没有"）——
-  /// ⚠️ 所以这两种的 [next] 只许 pop 自己、不许 pushReplacement
+  /// 删除分区：那一页 pop 时本页跟着 pop、把结果交给方式页（方式页 await 的是"做完了没有"）——
+  /// ⚠️ 所以它的 [next] 只许 pop 自己、不许 pushReplacement
   final Widget next;
 
   /// 至少停留多久（秒）
@@ -51,11 +51,11 @@ class RiskPage extends StatefulWidget {
 
   static Future<T?> open<T>(BuildContext context, RiskKind kind, Widget next) => go<T>(context, RiskPage(kind: kind, next: next), name: kRiskRoute);
 
-  /// 要不要再输入确认词：整盘清空（盘上的一切都没了）；手动调整而盘上有 Windows（那一页能删掉它）
+  /// 要不要再输入确认词：整盘清空（盘上的一切都没了）；删除分区而盘上有 Windows（那一页能删掉它）
   static bool needsWord(Session s, RiskKind kind) => switch (kind) {
         RiskKind.install => s.mode == Mode.wipe,
         RiskKind.edit => s.disk?.parts.any((p) => p.os == 'windows' || p.os == 'winre' || isOnekey(p)) ?? false,
-        RiskKind.shrink => false,
+        RiskKind.removeInstaller => false,
       };
 
   @override
@@ -127,21 +127,33 @@ class _RiskPageState extends State<RiskPage> {
     final s = context.session, l = context.l;
     final onekey = s.disk?.parts.where(isOnekey).firstOrNull;
     final win = (Icons.key_outlined, l.riskWinHead, [l.riskWinBody, if (s.needBitlockerKey) l.riskWinBitlocker].join('\n\n'), true);
+    final rmlive = (Icons.delete_sweep_outlined, l.riskRmLiveHead, l.riskRmLiveBody, true);
     return [
       (Icons.science_outlined, l.riskExpHead, l.riskExpBody, false),
       (Icons.report_outlined, l.riskDiskHead, l.riskDiskBody, true),
       ...switch (widget.kind) {
-        RiskKind.install => switch (s.mode) {
-            Mode.wipe => [
-                // 华为一键恢复分区：和确认页同一句话（GUI-18）
-                (Icons.delete_forever, l.riskWipeHead, [l.riskWipeBody, if (onekey != null) l.confirmOnekeyWarn(onekey.label)].join('\n\n'), true),
-              ],
-            Mode.alongside => [(Icons.call_split, l.riskAlongHead, l.riskAlongBody, true), if (s.dual) win],
-            Mode.reinstall => [(Icons.system_update_alt, l.riskReinstallHead, s.keepData ? l.riskReinstallKeep : l.riskReinstallWipe, true), if (s.dual) win],
-            null => const <(IconData, String, String, bool)>[],
-          },
-        RiskKind.shrink => [(Icons.compress, l.riskShrinkHead, l.riskShrinkBody, true)],
-        RiskKind.edit => [(Icons.construction, l.riskEditHead, l.riskEditBody, true)],
+        RiskKind.install => [
+            ...switch (s.mode) {
+              Mode.wipe => [
+                  // 华为一键恢复分区：和确认页同一句话（GUI-18）；安装器分区保留到装完
+                  (Icons.delete_forever, l.riskWipeHead, [
+                    l.riskWipeBody,
+                    if (onekey != null) l.confirmOnekeyWarn(onekey.label),
+                    if (s.installerPart case final lv?) l.confirmWipeKeepsLive(lv.label),
+                  ].join('\n\n'), true),
+                ],
+              Mode.alongside => [(Icons.call_split, l.riskAlongHead, l.riskAlongBody, true), if (s.dual) win],
+              Mode.reinstall => [(Icons.system_update_alt, l.riskReinstallHead, s.keepData ? l.riskReinstallKeep : l.riskReinstallWipe, true), if (s.dual) win],
+              null => const <(IconData, String, String, bool)>[],
+            },
+            if (s.removeInstaller) rmlive,
+          ],
+        RiskKind.edit => [(Icons.delete_outline, l.riskEditHead, l.riskEditBody, true)],
+        // ESP 上没有 Android 的启动项（esp-info gaokun3=no，与 gk3l remove-installer 第 6 步同一条规则）：删除时 ESP
+        // 一并还原，回落路径换回去之后 Windows 可能要 BitLocker 恢复密钥。读不到 ESP 时也说（宁可多说）
+        RiskKind.removeInstaller => [
+            !(s.espInfo?.ours ?? false) ? (rmlive.$1, rmlive.$2, '${rmlive.$3}\n\n${l.riskRmLiveEsp}', rmlive.$4) : rmlive,
+          ],
       },
       (Icons.backup_outlined, l.riskBackupHead, l.riskBackupBody, true),
       (Icons.power, l.riskPowerHead, l.riskPowerBody, false),
@@ -239,7 +251,8 @@ class _RiskPageState extends State<RiskPage> {
                           child: Row(mainAxisSize: MainAxisSize.min, children: [
                             Icon(Icons.arrow_downward, size: 20, color: cs.onError),
                             const SizedBox(width: 8),
-                            Text(l.riskScrollHint, style: tt.labelLarge!.copyWith(color: cs.onError)),
+                            // 译文较长时换行，不撑破胶囊
+                            Flexible(child: Text(l.riskScrollHint, textAlign: TextAlign.center, style: tt.labelLarge!.copyWith(color: cs.onError))),
                           ]),
                         ),
                       ),

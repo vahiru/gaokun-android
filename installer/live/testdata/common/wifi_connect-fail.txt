@@ -1,5 +1,0 @@
-E PROGRESS 20 wifi-assoc
-D 1500
-E ERR code=wifi-assoc
-E !! 连不上 所选网络（密码错？信号弱？）
-X 1

@@ -1,17 +1,17 @@
-/* Windows：装 Android 到一段空闲空间（双系统），对应 installer-lib.sh 的 gk3_apply --mode alongside。
+/* Windows：装 Android 到一段空闲空间（双系统），对应 LiveCD 的 gk3l apply --mode alongside。
  *
  *   gk3w apply --disk N --region-start LBA --region-end LBA --release DIR --sdboot FILE --backup-dir DIR
  *              [--mke2fs PATH] [--machine-id HEX32] [--default-os android|windows] [--userdata-mib N]
  *              [--real-disk [--bitlocker-key -]]
  *
  * 发布目录：boot.img、super.img.zst，可选 install-artifacts.sha256（有就逐个核对）。
- * 步骤与进度代码同 gk3_apply：1 check / verify-sha / test-zst → 2 plan → 5 write-gpt → 15 format → 30 write-super
+ * 步骤与进度代码同 gk3l apply：1 check / verify-sha / test-zst → 2 plan → 5 write-gpt → 15 format → 30 write-super
  * → 70 write-boot → 80 bootloader → 100 done。★ 所有输入在第一次写盘之前验完（boot.img 拆得开、super 完整试解一遍、
  * ESP 空间够、区间确实空闲、分区名不重），之后 ERR 一律带 touched=yes。
  *
  * metadata / userdata 的格式化：给了 --mke2fs（本仓 mke2fs/build.sh 编的 mke2fs.exe，同目录要有 mke2fs.conf）时，
  * 照 fastboot -w 的做法：动盘之前用 mke2fs -E android_sparse 按分区大小各生成一个 sparse 镜像并完整试解，格式化那一步
- * 用与 super 同一套 sparse 写入写进去，写完核对 ext4 魔数与卷标。参数同 LiveCD（installer-lib.sh：-L 卷标、userdata
+ * 用与 super 同一套 sparse 写入写进去，写完核对 ext4 魔数与卷标。参数同 LiveCD（gk3l：-L 卷标、userdata
  * 加 -m 0），配置是 Debian 13 的同一份 mke2fs.conf，所以特性、块大小（metadata 1 KiB）与 LiveCD 相同
  * （mke2fs/test-align.sh 对拍）。4Kn 盘上加 -b 4096（LiveCD 的 mkfs.ext4 在 4Kn 块设备上也会把块大小提到扇区大小），
  * 否则 metadata 的 1 KiB 块写不了无缓冲 I/O。lazy_itable_init=1 与 LiveCD 相同：sparse 输出里 mke2fs 的“清零”
@@ -22,7 +22,7 @@
  * ESP：原件的 .before-gaokun3 备份先写到 .tmp、读回核对后再改名 —— 中途失败不会留下一份残缺的“备份”。
  *
  * 默认只对 VHD 虚拟盘动手。--real-disk 才写真实磁盘，而且只认 Windows 所在的那块系统盘、机型必须是 MateBook E Go，
- * 先过安装前检查（gk3w_sys_gate：Secure Boot、快速启动、BitLocker、电量），写完 ESP 后删 LoaderEntryDefault（同 gk3_apply）。
+ * 先过安装前检查（gk3w_sys_gate：Secure Boot、快速启动、BitLocker、电量），写完 ESP 后删 LoaderEntryDefault（同 gk3l apply）。
  * 系统卷的 BitLocker 保护开着时，--bitlocker-key - 从标准输入读恢复密钥，与系统卷的恢复密钥比对；一致才继续，
  * 并在第一次写盘之前暂停保护到下次重启（Windows 下次启动时按新的启动链重新绑定 TPM，不再要求输入恢复密钥）。
  *
@@ -43,22 +43,19 @@
 #include "../layout.h"
 #include "../plan.h"
 #include "../proto.h"
+#include "../release.h"
 #include "../sparse.h"
 #include "disk.h"
+#include "espw.h"
 #include "gk3core.h"
 #include "win.h"
 #include "zstd.h"
 
-#define IO_CHUNK (4u << 20)
-#define BOOT_MAX (64u << 20)
+#define IO_CHUNK GK3W_IO_CHUNK
+#define BOOT_MAX GK3W_BOOT_MAX
 #define ZERO_HEAD (16u << 20)
 
-typedef struct {
-    uint8_t *img;               /* 整个 boot.img */
-    size_t len;
-    gk3_bootimg b;
-    char cmdline[GK3_BOOT_ARGS_SIZE + GK3_BOOT_EXTRA_ARGS_SIZE + 1];
-} bootimg;
+typedef gk3w_boot bootimg;
 
 static const char *const OUR_NAMES[] = {"misc", "metadata", "boot_a", "boot_b", "super", "userdata", "gk3rescue"};
 
@@ -66,47 +63,17 @@ static const char *const OUR_NAMES[] = {"misc", "metadata", "boot_a", "boot_b", 
 
 static int load_boot(const wchar_t *path, bootimg *bi)
 {
-    long n;
+    gk3w_boot_err e;
     memset(bi, 0, sizeof *bi);
     if (gk3w_read_file(path, &bi->img, &bi->len, BOOT_MAX))
         return gk3w_err(GK3W_TOUCHED_NA, "release-no-boot", "the release directory has no readable boot.img (or it is larger than 64 MiB)", GetLastError());
-    if (gk3_bootimg_parse(bi->img, bi->len, BOOT_MAX, &bi->b) || bi->b.total_size > bi->len)
-        return gk3w_err(GK3W_TOUCHED_NA, "bootimg-unpack", "boot.img cannot be unpacked (disk not touched)", 0);
-    /* 与 gk3-bootimg.py 相同的体检：只认 v2，三段都不空，内核是 PE，dtb 是 FDT */
-    if (bi->b.version != 2 || !bi->b.kernel_size || !bi->b.ramdisk_size || !bi->b.dtb_size ||
-        memcmp(bi->img + bi->b.kernel_off, "MZ", 2) || memcmp(bi->img + bi->b.dtb_off, "\xd0\x0d\xfe\xed", 4))
-        return gk3w_err(GK3W_TOUCHED_NA, "bootimg-unpack", "boot.img is not a v2 image with a dtb, or its kernel / dtb is malformed (disk not touched)", 0);
-    n = gk3_bootimg_cmdline(&bi->b, bi->cmdline, sizeof bi->cmdline);
-    if (n <= 0)
-        return gk3w_err(GK3W_TOUCHED_NA, "bootimg-unpack", "boot.img has no kernel command line (disk not touched)", 0);
-    for (long i = 0; i < n; i++)
-        if ((unsigned char)bi->cmdline[i] < 0x20 || (unsigned char)bi->cmdline[i] > 0x7e)
-            return gk3w_err(GK3W_TOUCHED_NA, "bootimg-unpack", "the boot.img command line has non-ASCII or control characters (disk not touched)", 0);
+    e = gk3w_boot_check(bi);
+    if (e != GK3W_BOOT_OK)
+        return gk3w_err(GK3W_TOUCHED_NA, "bootimg-unpack", gk3w_boot_strerror(e), 0);
     gk3w_log("  Image       %10u bytes", bi->b.kernel_size);
     gk3w_log("  ramdisk.img %10u bytes", bi->b.ramdisk_size);
     gk3w_log("  gaokun3.dtb %10u bytes", bi->b.dtb_size);
     return 0;
-}
-
-/* install-artifacts.sha256 里 name 那一行的 sha256（小写 hex）；没有返回 -1 */
-static int manifest_hash(const uint8_t *m, size_t len, const char *name, char out[65])
-{
-    size_t i = 0, nl = strlen(name);
-    while (i < len) {
-        size_t e = i;
-        while (e < len && m[e] != '\n')
-            e++;
-        /* "<64 hex>  <name>" */
-        if (e - i >= 66 + nl && m[i + 64] == ' ' && m[i + 65] == ' ' && !memcmp(m + i + 66, name, nl) &&
-            (e - i == 66 + nl || (e - i == 67 + nl && m[e - 1] == '\r'))) {
-            for (int k = 0; k < 64; k++)
-                out[k] = (char)(m[i + k] >= 'A' && m[i + k] <= 'F' ? m[i + k] + 32 : m[i + k]);
-            out[64] = 0;
-            return 0;
-        }
-        i = e + 1;
-    }
-    return -1;
 }
 
 /* ── super：zstd → sparse → 盘 ─────────────────────────────────────── */
@@ -143,97 +110,34 @@ static int ss_fill(void *ctx, uint64_t off, uint64_t len, uint32_t pattern)
     return 0;
 }
 
-/* 把 sparse 镜像（zst = 1 时先 zstd 解码）展开写出去。sink 为 NULL 时只校验（动盘之前的完整试解）。
- * prog：0 = 不报进度；否则按读入的压缩字节报 30→70。返回 0 成功，失败时 *why 是原因。 */
+static long file_read(void *ctx, uint8_t *buf, size_t cap)
+{
+    DWORD got = 0;
+    if (!ReadFile((HANDLE)ctx, buf, (DWORD)(cap > 0x7fffffffu ? 0x7fffffffu : cap), &got, NULL))
+        return -1;
+    return (long)got;
+}
+
+/* 把 sparse 镜像（zst = 1 时先 zstd 解码）展开写出去（../release.c 的 gk3w_image_run）。sink 为 NULL 时只校验。 */
 static int run_image(const wchar_t *path, int zst, uint64_t limit, const gk3w_sparse_sink *sink, int prog, const char **why,
                      uint32_t *blk_sz)
 {
     HANDLE f = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
     LARGE_INTEGER fsz;
-    ZSTD_DCtx *dc = NULL;
-    uint8_t *in = NULL, *out = NULL, *sbuf = NULL;
-    gk3w_sparse s;
-    uint64_t read_total = 0;
-    size_t r = 1;
-    unsigned last_pct = 0;
-    int rc = -1;
-    DWORD got;
-
+    gk3w_reader rd;
+    int rc;
     *why = "open";
-    if (f == INVALID_HANDLE_VALUE || !GetFileSizeEx(f, &fsz) || !fsz.QuadPart)
-        goto out;
-    *why = "nomem";
-    in = malloc(IO_CHUNK);
-    out = malloc(IO_CHUNK);
-    sbuf = _aligned_malloc(IO_CHUNK, 4096);
-    dc = zst ? ZSTD_createDCtx() : NULL;
-    if (!in || !out || !sbuf || (zst && !dc))
-        goto out;
-    /* release.sh 用 -19 --long 压：解码时放宽窗口上限（同 installer-lib.sh 的 zstd -dc --long=31） */
-    if (dc)
-        ZSTD_DCtx_setParameter(dc, ZSTD_d_windowLogMax, 31);
-    if (gk3w_sparse_init(&s, limit, sbuf, IO_CHUNK))
-        goto out;
-    if (!zst)
-        r = 0;
-    while (ReadFile(f, in, IO_CHUNK, &got, NULL) && got) {
-        ZSTD_inBuffer ib = {in, got, 0};
-        read_total += got;
-        if (!zst && gk3w_sparse_feed(&s, in, got, sink)) {
-            *why = s.err;
-            goto out;
-        }
-        while (zst && ib.pos < ib.size) {
-            ZSTD_outBuffer ob = {out, IO_CHUNK, 0};
-            r = ZSTD_decompressStream(dc, &ob, &ib);
-            if (ZSTD_isError(r)) {
-                *why = "zstd-corrupt";
-                goto out;
-            }
-            if (gk3w_sparse_feed(&s, out, ob.pos, sink)) {
-                *why = s.err;
-                goto out;
-            }
-        }
-        if (prog) {
-            unsigned pct = 30 + (unsigned)(read_total * 40 / (uint64_t)fsz.QuadPart);
-            if (pct != last_pct) {
-                fprintf(stderr, "PROGRESS %u write-super done_mib=%llu total_mib=%llu\n", pct,
-                        (unsigned long long)(s.out_off >> 20), (unsigned long long)(gk3w_sparse_total(&s) >> 20));
-                fflush(stderr);
-                last_pct = pct;
-            }
-        }
-    }
-    /* 读到文件尾时帧必须正好结束（r == 0）；否则把解码器里剩下的吐完，还不结束就是下载不完整 */
-    while (r) {
-        ZSTD_inBuffer ib = {in, 0, 0};
-        ZSTD_outBuffer ob = {out, IO_CHUNK, 0};
-        r = ZSTD_decompressStream(dc, &ob, &ib);
-        if (ZSTD_isError(r) || !ob.pos) {
-            *why = "zst-truncated";
-            goto out;
-        }
-        if (gk3w_sparse_feed(&s, out, ob.pos, sink)) {
-            *why = s.err;
-            goto out;
-        }
-    }
-    if (gk3w_sparse_finish(&s, sink)) {
-        *why = s.err;
-        goto out;
-    }
-    if (blk_sz)
-        *blk_sz = s.blk_sz;
-    rc = 0;
-out:
-    if (dc)
-        ZSTD_freeDCtx(dc);
-    free(in);
-    free(out);
-    _aligned_free(sbuf);
-    if (f != INVALID_HANDLE_VALUE)
+    if (f == INVALID_HANDLE_VALUE)
+        return -1;
+    if (!GetFileSizeEx(f, &fsz) || !fsz.QuadPart) {
         CloseHandle(f);
+        return -1;
+    }
+    rd.ctx = f;
+    rd.read = file_read;
+    rd.size = (uint64_t)fsz.QuadPart;
+    rc = gk3w_image_run(&rd, zst, limit, sink, prog, why, blk_sz);
+    CloseHandle(f);
     return rc;
 }
 
@@ -295,130 +199,6 @@ static int check_ext4(HANDLE h, uint64_t off, const char *label, uint8_t *buf4k)
 
 /* ── ESP ──────────────────────────────────────────────────────────── */
 
-typedef struct {
-    wchar_t root[MAX_PATH];     /* \\?\Volume{…}\ */
-    size_t root_len;
-    char mid[33];
-    int windows;                /* EFI\Microsoft\Boot\bootmgfw.efi 在 */
-} esp_ctx;
-
-static void esp_path(const esp_ctx *e, const char *rel, wchar_t *out, size_t cap)
-{
-    wchar_t w[MAX_PATH];
-    gk3w_u2w(rel, w, MAX_PATH);
-    for (wchar_t *p = w; *p; p++)
-        if (*p == L'/')
-            *p = L'\\';
-    _snwprintf(out, cap, L"%ls%ls", e->root, w);
-}
-
-/* ESP 上 rel 这个文件与 data 是否逐字节相同；不存在算不同 */
-static int esp_same(const esp_ctx *e, const char *rel, const uint8_t *data, size_t len)
-{
-    wchar_t p[MAX_PATH * 2];
-    uint8_t *old;
-    size_t olen;
-    int same;
-    esp_path(e, rel, p, MAX_PATH * 2);
-    if (gk3w_read_file(p, &old, &olen, 256u << 20))
-        return 0;
-    same = olen == len && !memcmp(old, data, len);
-    free(old);
-    return same;
-}
-
-static int64_t esp_size_of(const esp_ctx *e, const char *rel)
-{
-    wchar_t p[MAX_PATH * 2];
-    WIN32_FILE_ATTRIBUTE_DATA a;
-    esp_path(e, rel, p, MAX_PATH * 2);
-    if (!GetFileAttributesExW(p, GetFileExInfoStandard, &a))
-        return -1;
-    return (int64_t)(((uint64_t)a.nFileSizeHigh << 32) | a.nFileSizeLow);
-}
-
-/* 往 ESP 上写这一组文件要多占多少 KiB（同名旧文件只算变大的部分，按 4 KiB 簇向上取整）—— gk3__esp_delta_kib */
-static int64_t esp_delta(const esp_ctx *e, const char *rel, uint64_t newsz)
-{
-    int64_t old = esp_size_of(e, rel);
-    if (old < 0)
-        old = 0;
-    return (int64_t)newsz > old ? ((int64_t)newsz - old + 4095) / 4096 * 4 : 0;
-}
-
-static int esp_has_android_entries(const esp_ctx *e)
-{
-    wchar_t pat[MAX_PATH * 2];
-    WIN32_FIND_DATAW fd;
-    HANDLE h;
-    _snwprintf(pat, MAX_PATH * 2, L"%lsloader\\entries\\*-android-*.conf", e->root);
-    h = FindFirstFileW(pat, &fd);
-    if (h == INVALID_HANDLE_VALUE)
-        return 0;
-    FindClose(h);
-    return 1;
-}
-
-/* ESP 根目录下第一个（按字节序）32 位十六进制的目录名 —— gk3__esp_pick_mid */
-static int esp_pick_mid(const esp_ctx *e, char out[33])
-{
-    wchar_t pat[MAX_PATH * 2];
-    WIN32_FIND_DATAW fd;
-    HANDLE h;
-    int found = 0;
-    _snwprintf(pat, MAX_PATH * 2, L"%ls*", e->root);
-    h = FindFirstFileW(pat, &fd);
-    if (h == INVALID_HANDLE_VALUE)
-        return 0;
-    do {
-        char n[MAX_PATH * 3];
-        gk3w_w2u(fd.cFileName, n, sizeof n);
-        if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && gk3w_is_machine_id(n) && (!found || strcmp(n, out) < 0)) {
-            memcpy(out, n, 33);
-            found = 1;
-        }
-    } while (FindNextFileW(h, &fd));
-    FindClose(h);
-    return found;
-}
-
-static int esp_write(const esp_ctx *e, const char *rel, const uint8_t *data, size_t len)
-{
-    wchar_t p[MAX_PATH * 2], dir[MAX_PATH * 2], *slash;
-    int w;
-    esp_path(e, rel, p, MAX_PATH * 2);
-    wcscpy(dir, p);
-    slash = wcsrchr(dir, L'\\');
-    if (slash && (size_t)(slash - dir) > e->root_len) {
-        *slash = 0;
-        if (gk3w_mkdirs(dir, e->root_len))
-            return gk3w_err_kv(GK3W_TOUCHED_YES, "esp-write", "file", rel, "cannot create a directory on the EFI system partition", GetLastError());
-    }
-    w = gk3w_write_file_verify(p, data, len);
-    if (w)
-        return gk3w_err_kv(GK3W_TOUCHED_YES, w == -1 ? "esp-write" : "esp-verify", "file", rel,
-                           w == -1 ? "writing the EFI system partition failed: out of space, or a media error" : "a file on the EFI system partition did not read back identically", GetLastError());
-    return 0;
-}
-
-/* 写成 <rel>.tmp、读回核对，再改名覆盖 <rel>（gk3w_replace_file_verify，保留 <rel> 原来的属性）：中途失败或掉电时
- * <rel> 要么是原来的、要么是完整的新文件。 */
-static int esp_write_renamed(const esp_ctx *e, const char *rel, const uint8_t *data, size_t len)
-{
-    wchar_t pf[MAX_PATH * 2], dir[MAX_PATH * 2], *slash;
-    esp_path(e, rel, pf, MAX_PATH * 2);
-    wcscpy(dir, pf);
-    slash = wcsrchr(dir, L'\\');
-    if (slash && (size_t)(slash - dir) > e->root_len) {
-        *slash = 0;
-        if (gk3w_mkdirs(dir, e->root_len))
-            return gk3w_err_kv(GK3W_TOUCHED_YES, "esp-write", "file", rel, "cannot create a directory on the EFI system partition", GetLastError());
-    }
-    if (gk3w_replace_file_verify(pf, data, len))
-        return gk3w_err_kv(GK3W_TOUCHED_YES, "esp-write", "file", rel, "writing the EFI system partition failed: out of space, a media error, or the file did not read back identically", GetLastError());
-    return 0;
-}
-
 /* ── apply ────────────────────────────────────────────────────────── */
 
 int gk3w_cmd_apply(int argc, wchar_t **argv)
@@ -438,7 +218,7 @@ int gk3w_cmd_apply(int argc, wchar_t **argv)
     DWORD snap_sz = 0;
     size_t sdboot_len = 0, man_len = 0;
     gk3w_disk d;
-    esp_ctx esp;
+    gk3w_esp esp;
     gk3w_plan plan;
     GUID ids[GK3W_PLAN_MAX];
     uint64_t poff[GK3W_PLAN_MAX];
@@ -509,7 +289,7 @@ int gk3w_cmd_apply(int argc, wchar_t **argv)
         gk3w_progress(1, "verify-sha");
         for (int i = 0; i < 2; i++) {
             char want[65], got[65];
-            if (manifest_hash(man, man_len, names[i], want))
+            if (gk3w_manifest_hash(man, man_len, names[i], want))
                 continue;
             if (gk3w_file_sha256(paths[i], got, NULL) || strcmp(want, got)) {
                 gk3w_err_kv(T, "sha-mismatch", "file", names[i], "a downloaded file does not match the sha256 in the release manifest; download it again (disk not touched)", 0);
@@ -541,46 +321,8 @@ int gk3w_cmd_apply(int argc, wchar_t **argv)
         goto out;
     }
     memcpy(snap, d.lay, snap_sz);
-    {
-        int n_esp = 0;
-        for (DWORD i = 0; i < d.lay->PartitionCount; i++) {
-            const PARTITION_INFORMATION_EX *p = &d.lay->PartitionEntry[i];
-            if (p->PartitionStyle == PARTITION_STYLE_GPT && p->PartitionLength.QuadPart &&
-                !memcmp(&p->Gpt.PartitionType, &GK3W_ESP_TYPE, sizeof(GUID))) {
-                esp_part = p;
-                n_esp++;
-            }
-        }
-        if (n_esp != 1) {
-            gk3w_err(T, n_esp ? "esp-ambiguous" : "esp-missing", n_esp ? "this disk has more than one EFI system partition" : "this disk has no EFI system partition", 0);
-            goto out;
-        }
-    }
-    {
-        /* Android 侧的 sepolicy 只给名叫 esp 或 "EFI system partition" 的分区打 ESP 的标签（同 installer-lib.sh 的提醒） */
-        wchar_t wn[GK3_GPT_NAME_CHARS + 1];
-        char en[GK3_GPT_NAME_CHARS * 3 + 1];
-        memcpy(wn, esp_part->Gpt.Name, sizeof esp_part->Gpt.Name);
-        wn[GK3_GPT_NAME_CHARS] = 0;
-        gk3w_w2u(wn, en, sizeof en);
-        if (strcmp(en, "esp") && strcmp(en, "EFI system partition"))
-            gk3w_log("warning: the EFI system partition is named '%s', not 'esp' or 'EFI system partition'; slot switching and "
-                     "OTA will fail on future enforcing builds. Renaming the partition is harmless (UEFI only looks at the type GUID).", en);
-    }
-    if (gk3w_find_volume(d.num, (uint64_t)esp_part->StartingOffset.QuadPart, esp.root, MAX_PATH)) {
-        gk3w_err(T, "esp-mount", "cannot find the volume of the EFI system partition; refusing to install a boot chain on an unreadable ESP (disk not touched)", 0);
+    if (gk3w_esp_open(&d, &esp, &esp_part, T))
         goto out;
-    }
-    esp.root_len = wcslen(esp.root);
-    {
-        wchar_t fs[32] = L"", p[MAX_PATH * 2];
-        if (!GetVolumeInformationW(esp.root, NULL, 0, NULL, NULL, NULL, fs, 32) || _wcsicmp(fs, L"FAT32")) {
-            gk3w_err(T, "esp-not-fat", "the EFI system partition is not FAT32 (disk not touched)", GetLastError());
-            goto out;
-        }
-        _snwprintf(p, MAX_PATH * 2, L"%lsEFI\\Microsoft\\Boot\\bootmgfw.efi", esp.root);
-        esp.windows = gk3w_exists(p);
-    }
     if (defos_windows && !esp.windows) {
         gk3w_err(T, "default-os-no-windows", "there is no Windows boot manager on the EFI system partition, so Windows cannot be the default (disk not touched)", 0);
         goto out;
@@ -591,72 +333,14 @@ int gk3w_cmd_apply(int argc, wchar_t **argv)
         gk3w_err(T, "no-windows-bootmgr", "EFI/Microsoft/Boot/bootmgfw.efi is missing from the EFI system partition: the Windows boot files of this disk are incomplete; repair them first (disk not touched)", 0);
         goto out;
     }
-    if (esp_has_android_entries(&esp)) {
+    if (gk3w_esp_has_android_entries(&esp)) {
         gk3w_err(T, "esp-has-android", "the EFI system partition already has Android boot entries; run uninstall first (disk not touched)", 0);
         goto out;
     }
-    if (!esp_pick_mid(&esp, esp.mid))
+    if (!gk3w_esp_pick_mid(&esp, esp.mid))
         memcpy(esp.mid, mid_fb, 33);
-    {
-        /* 原件留一份（gk3_apply 同一条规矩）：只在第一次装时留，且与这份 systemd-boot 不同时才留。
-         * 文件在而读不了（共享冲突、读错误）就在这里拒绝 —— 不能跳过备份再去覆盖它。
-         * 回落路径另有一条（gk3w_install_backup_decide）：已有备份、而现在回落路径上是别的系统的引导程序（上次卸载
-         * 之后别的系统放的）时，备份删了不丢就用现在的换掉它，两份都是别人的原件就拒绝 —— 不能覆盖任何一份 */
-        static const char *const names[2] = {"EFI/BOOT/BOOTAA64.EFI", "loader/loader.conf"};
-        for (int k = 0; k < 2; k++) {
-            char relb[96];
-            wchar_t pth[MAX_PATH * 2];
-            snprintf(relb, sizeof relb, "%s.before-gaokun3", names[k]);
-            esp_path(&esp, names[k], pth, MAX_PATH * 2);
-            if (k == 0) {
-                static const char *const rels[2] = {"EFI/Microsoft/Boot/bootmgfw.efi", "EFI/BOOT/BOOTAA64.EFI.before-gaokun3"};
-                uint8_t *cur = NULL, *wb[2] = {NULL, NULL};
-                size_t cur_len = 0, wb_len[2] = {0, 0};
-                const char *bad = NULL;
-                DWORD bad_err = 0;
-                if (gk3w_exists(pth) && gk3w_read_file(pth, &cur, &cur_len, 64u << 20))
-                    bad = names[k], bad_err = GetLastError();
-                for (int j = 0; j < 2 && !bad; j++) {
-                    wchar_t pj[MAX_PATH * 2];
-                    esp_path(&esp, rels[j], pj, MAX_PATH * 2);
-                    if (gk3w_exists(pj) && gk3w_read_file(pj, &wb[j], &wb_len[j], 64u << 20))
-                        bad = rels[j], bad_err = GetLastError();
-                }
-                if (bad) {
-                    free(cur), free(wb[0]), free(wb[1]);
-                    gk3w_err_kv(T, "esp-unreadable", "file", bad, "cannot read a file on the EFI system partition that must be checked or backed up first (disk not touched)", bad_err);
-                    goto out;
-                }
-                switch (gk3w_install_backup_decide(cur, cur_len, wb[0], wb_len[0], wb[1], wb_len[1], sdboot, sdboot_len)) {
-                case GK3W_BK_SAVE:
-                    orig[0] = cur, orig_len[0] = cur_len, cur = NULL;
-                    break;
-                case GK3W_BK_REPLACE:
-                    gk3w_log("EFI/BOOT/BOOTAA64.EFI now holds another system's boot loader, and its .before-gaokun3 can go without loss: keeping the current file as .before-gaokun3 instead");
-                    orig[0] = cur, orig_len[0] = cur_len, cur = NULL;
-                    break;
-                case GK3W_BK_CONFLICT:
-                    free(cur), free(wb[0]), free(wb[1]);
-                    gk3w_err(T, "fallback-conflict", "EFI/BOOT/BOOTAA64.EFI holds another system's boot loader, and EFI/BOOT/BOOTAA64.EFI.before-gaokun3 holds a different one that is not Windows: installing would lose one of them (disk not touched)", 0);
-                    goto out;
-                case GK3W_BK_NONE:
-                    break;
-                }
-                free(cur), free(wb[0]), free(wb[1]);
-                continue;
-            }
-            if (esp_size_of(&esp, relb) >= 0 || !gk3w_exists(pth))
-                continue;
-            if (gk3w_read_file(pth, &orig[k], &orig_len[k], 64u << 20)) {
-                gk3w_err_kv(T, "esp-unreadable", "file", names[k], "cannot read a file on the EFI system partition that must be backed up first (disk not touched)", GetLastError());
-                goto out;
-            }
-            if (orig_len[k] == sdboot_len && !memcmp(orig[k], sdboot, sdboot_len)) {
-                free(orig[k]);
-                orig[k] = NULL;
-            }
-        }
-    }
+    if (gk3w_esp_plan_backups(&esp, sdboot, sdboot_len, orig, orig_len, T))
+        goto out;
     {
         ULARGE_INTEGER avail;
         gk3w_esp_space sp;
@@ -665,19 +349,19 @@ int gk3w_cmd_apply(int argc, wchar_t **argv)
         char rel_path[96];
         uint64_t sizes[3] = {bi.b.kernel_size, bi.b.dtb_size, bi.b.ramdisk_size};
         static const char *const fn[3] = {"Image", "gaokun3.dtb", "ramdisk.img"};
-        int64_t aa = esp_size_of(&esp, "EFI/BOOT/BOOTAA64.EFI");
-        need += esp_delta(&esp, "EFI/BOOT/BOOTAA64.EFI", sdboot_len);
-        need += esp_delta(&esp, "EFI/systemd/systemd-bootaa64.efi", sdboot_len);
+        int64_t aa = gk3w_esp_size_of(&esp, "EFI/BOOT/BOOTAA64.EFI");
+        need += gk3w_esp_delta(&esp, "EFI/BOOT/BOOTAA64.EFI", sdboot_len);
+        need += gk3w_esp_delta(&esp, "EFI/systemd/systemd-bootaa64.efi", sdboot_len);
         for (char sl = 'a'; sl <= 'b'; sl++)
             for (int k = 0; k < 3; k++) {
                 snprintf(rel_path, sizeof rel_path, "%s/android/slot_%c/%s", esp.mid, sl, fn[k]);
-                need += esp_delta(&esp, rel_path, sizes[k]);
+                need += gk3w_esp_delta(&esp, rel_path, sizes[k]);
             }
         /* 要新写的备份（第一次留，或换掉可丢的旧备份：写成 .tmp 时旧备份还在）；回落路径也写成 .tmp 再改名，
          * 改名之前旧文件还占着空间。比 LiveCD 的算法多算后两项（几百 KiB 到几 MiB） */
         if (orig[0])
             need += (int64_t)orig_len[0] / 1024 + 4;
-        if (aa >= 0 && !esp_same(&esp, "EFI/BOOT/BOOTAA64.EFI", sdboot, sdboot_len))
+        if (aa >= 0 && !gk3w_esp_same(&esp, "EFI/BOOT/BOOTAA64.EFI", sdboot, sdboot_len))
             need += aa / 1024 + 4;
         if (!GetDiskFreeSpaceExW(esp.root, &avail, NULL, NULL)) {
             gk3w_err(T, "esp-mount", "cannot read the free space of the EFI system partition (disk not touched)", GetLastError());
@@ -688,6 +372,7 @@ int gk3w_cmd_apply(int argc, wchar_t **argv)
         sp.need_kib = need;
         sp.slot_kib = (int64_t)((sizes[0] + sizes[1] + sizes[2]) / 1024);
         sp.windows = esp.windows;
+        sp.reinstall = 0;
         gk3w_log("ESP: using directory %s; %lld MiB to write (net of files overwritten), %lld MiB free; Windows boot manager present: %s",
                  esp.mid, (long long)(need / 1024), (long long)(sp.free_kib / 1024), esp.windows ? "yes" : "no");
         ck = gk3w_esp_space_check(&sp);
@@ -745,8 +430,12 @@ int gk3w_cmd_apply(int argc, wchar_t **argv)
         req.sector = d.bs;
         req.region = (gk3w_span){rstart, rend};
         req.userdata_mib = ud_mib;
-        req.rescue = 0;
-        pe = gk3w_plan_print(&req, d.num, &plan, stdout);
+        req.whole = 0;
+        {
+            char dn[24];
+            snprintf(dn, sizeof dn, "%lu", (unsigned long)d.num);
+            pe = gk3w_plan_print(&req, dn, &plan, stdout);
+        }
         if (pe != GK3W_PLAN_OK) {
             gk3w_err_kv(T, "plan", "why", gk3w_plan_strerror(pe), "the selected free space is too small (disk not touched)", 0);
             goto out;
@@ -960,7 +649,7 @@ int gk3w_cmd_apply(int argc, wchar_t **argv)
                 goto out;
             }
             _aligned_free(ss.pat);
-            /* 偏移 4096 处必须是 LP geometry 魔数（installer-lib.sh gk3__write_super 的同一道检查） */
+            /* 偏移 4096 处必须是 LP geometry 魔数 */
             if (gk3w_pread(d.h, lp, 4096, poff[i_super] + 4096) || memcmp(lp, "gDla", 4)) {
                 gk3w_err(T, "super-bad-lp", "no LP geometry magic at offset 4096 of super: what was written is not a usable super", 0);
                 goto out;
@@ -1002,30 +691,14 @@ int gk3w_cmd_apply(int argc, wchar_t **argv)
         static const char *const fn[3] = {"Image", "gaokun3.dtb", "ramdisk.img"};
         const uint8_t *src[3] = {bi.img + bi.b.kernel_off, bi.img + bi.b.dtb_off, bi.img + bi.b.ramdisk_off};
         size_t sz[3] = {bi.b.kernel_size, bi.b.dtb_size, bi.b.ramdisk_size};
-        static const char *const backups[2] = {"EFI/BOOT/BOOTAA64.EFI", "loader/loader.conf"};
         char relp[160], entry[GK3_BOOT_ARGS_SIZE + GK3_BOOT_EXTRA_ARGS_SIZE + 512];
-        for (int k = 0; k < 2; k++) {
-            if (!orig[k])
-                continue;
-            snprintf(relp, sizeof relp, "%s.before-gaokun3", backups[k]);
-            if (esp_write_renamed(&esp, relp, orig[k], orig_len[k]))
-                goto out;
-            gk3w_log("backed up the original %s as %s", backups[k], relp);
-        }
-        /* 只在字节不同时写（BitLocker 量的是固件每次加载的这个文件）。回落路径写成 .tmp 再改名：中途断电或写错时
-         * 它要么还是原来的文件、要么是完整的 systemd-boot，不会是半个文件（卸载会把半个文件当成别的系统的引导程序） */
-        for (int k = 0; k < 2; k++) {
-            const char *t = k ? "EFI/systemd/systemd-bootaa64.efi" : "EFI/BOOT/BOOTAA64.EFI";
-            if (esp_same(&esp, t, sdboot, sdboot_len))
-                gk3w_log("%s is already this systemd-boot, not rewritten", t);
-            else if (k ? esp_write(&esp, t, sdboot, sdboot_len) : esp_write_renamed(&esp, t, sdboot, sdboot_len))
-                goto out;
-        }
+        if (gk3w_esp_write_sdboot(&esp, sdboot, sdboot_len, orig, orig_len, NULL))
+            goto out;
         for (char sl = 'a'; sl <= 'b'; sl++) {
             int n;
             for (int k = 0; k < 3; k++) {
                 snprintf(relp, sizeof relp, "%s/android/slot_%c/%s", esp.mid, sl, fn[k]);
-                if (esp_write(&esp, relp, src[k], sz[k]))
+                if (gk3w_esp_write(&esp, relp, src[k], sz[k]))
                     goto out;
             }
             snprintf(relp, sizeof relp, "loader/entries/%s-android-%c.conf", esp.mid, sl);
@@ -1034,14 +707,14 @@ int gk3w_cmd_apply(int argc, wchar_t **argv)
                 gk3w_err(T, "esp-write", "internal error: cannot generate the boot entry", 0);
                 goto out;
             }
-            if (esp_write(&esp, relp, (const uint8_t *)entry, (size_t)n))
+            if (gk3w_esp_write(&esp, relp, (const uint8_t *)entry, (size_t)n))
                 goto out;
         }
-        if (esp_write(&esp, "loader/loader.conf", (const uint8_t *)gk3w_loader_conf, strlen(gk3w_loader_conf)))
+        if (gk3w_esp_write(&esp, "loader/loader.conf", (const uint8_t *)gk3w_loader_conf, strlen(gk3w_loader_conf)))
             goto out;
         gk3w_log("ESP: systemd-boot, kernel / dtb / ramdisk for both slots, both entries and loader.conf written and verified");
     }
-    /* LoaderEntryDefault 优先于 loader.conf 的 default：装完还在的话，第一次重启进的就不是新装的 Android（同 gk3_apply）。
+    /* LoaderEntryDefault 优先于 loader.conf 的 default：装完还在的话，第一次重启进的就不是新装的 Android（同 gk3l apply）。
      * 删不掉只提醒：盘上的东西都已写好。VHD 测试时这是 PC 自己的固件变量，不碰。 */
     if (real) {
         gk3w_loader_var_delete(L"LoaderEntryDefault", NULL);

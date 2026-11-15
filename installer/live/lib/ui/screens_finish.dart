@@ -27,9 +27,7 @@ class _OptsPageState extends State<OptsPage> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final s = context.session;
-      if (!s.rescueUsable) s.rescue = false;
-      s.setRescue(s.rescue);
+      context.session.startOpts();
     });
   }
 
@@ -47,6 +45,7 @@ class _OptsPageState extends State<OptsPage> {
                 : (s.userdataMib == null ? l.optsData(fmtMib(p.userdataMib)) : l.optsDataFixed(fmtMib(p.userdataMib)));
     // 重新安装且清数据：这一行是"要丢东西"的提醒，用 error 色
     final dataBad = p != null && (!p.ok || (re && !p.keepData));
+    final lv = s.installerPart, rm = p?.rmlive;
     return StepPage(
       step: Gk3Step.opts,
       title: l.optsTitle,
@@ -67,18 +66,24 @@ class _OptsPageState extends State<OptsPage> {
           ),
           const SizedBox(height: 14),
         ],
-        ChoiceCard(
-          icon: Icons.health_and_safety,
-          title: l.optsRescueTitle,
-          body: l.optsRescueBody,
-          // 安装器就在目标盘上（免 U 盘安装）：默认关，写明为什么（GUI-17）
-          note: s.disk?.medium == true && s.rescueUsable ? l.optsRescueSameDisk : null,
-          reason: !s.rescueAvailable ? l.optsRescueMissing : (s.rescueUsable ? null : l.optsRescueNoPart),
-          trailing: Switch(value: s.rescue && s.rescueUsable, onChanged: s.rescueUsable ? s.setRescue : null),
-          onTap: s.rescueUsable ? () => s.setRescue(!s.rescue) : null,
-        ),
-        const SizedBox(height: 20),
+        // 从本机磁盘上的安装器分区运行：装完删不删它（默认删，用户 2026-11-13）
+        if (lv != null) ...[
+          ChoiceCard(
+            icon: Icons.save_outlined,
+            title: l.optsKeepLiveTitle,
+            body: l.optsKeepLiveBody,
+            trailing: Switch(value: s.keepInstaller, onChanged: s.setKeepInstaller),
+            onTap: () => s.setKeepInstaller(!s.keepInstaller),
+          ),
+          const SizedBox(height: 14),
+        ],
+        const SizedBox(height: 6),
         Text(dataLine, style: tt.titleMedium!.copyWith(color: dataBad ? context.cs.error : context.cs.onSurface)),
+        // 删掉安装器分区之后 /data 会怎样（后端 plan --remove-installer 的预览）
+        if (s.removeInstaller && rm != null && p!.ok && !s.planning) ...[
+          const SizedBox(height: 6),
+          Text(rm.merge ? l.optsDataRmLive(fmtMib(rm.userdataMib)) : l.optsDataRmLiveFree, style: tt.bodyLarge),
+        ],
         // 新建分区时提醒 /data 太小（重新安装不改分区大小，提醒了也没法改）
         if (p != null && p.ok && !s.planning && !re) DataSizeWarning(p.userdataMib),
       ]),
@@ -86,7 +91,7 @@ class _OptsPageState extends State<OptsPage> {
   }
 }
 
-/// PLANERR → 人话。msg 的取值在 installer-lib.sh 的 gk3_plan 里。
+/// PLANERR → 人话。msg 的取值见 installer/backend/src/plan.c 的 gk3w_plan_strerror。
 String planErrorText(BuildContext context, Plan p) {
   final l = context.l;
   final e = p.error;
@@ -95,9 +100,7 @@ String planErrorText(BuildContext context, Plan p) {
     'not-enough-space' => l.errNoSpace(fmtMib(e.intOf('avail_mib')), fmtMib(e.intOf('need_mib'))),
     'userdata-too-small' => l.errUserdataSmall(fmtMib(e.intOf('min_mib'))),
     'userdata-too-big' => l.errUserdataBig(fmtMib(e.intOf('max_mib'))),
-    'mbr-disk' => l.errMbr,
-    'partlabel-conflict' => l.modeWhyInstalled(e['names'].replaceAll(',', ', ')),
-    'alongside-needs-existing-esp' || 'reinstall-needs-esp' => l.modeWhyNoEsp,
+    'bad-region' => l.errBadRegion,
     'reinstall-missing' => l.errReinstallMissing(e['names'].replaceAll(',', ', ')),
     'reinstall-duplicate' => l.errReinstallDup(e['names'].replaceAll(',', ', ')),
     // 按 KiB 报（本机的 misc 只有 1007 KiB，按 MiB 取整是 0）
@@ -129,7 +132,7 @@ class _AdvPageState extends State<AdvPage> {
     final s = context.session, l = context.l, tt = Theme.of(context).textTheme;
     final p = s.plan;
     final max = s.maxUserdataMib ?? p?.userdataMib ?? 0;
-    const min = 8192; // 滑块下限的显示值；真正的下限由 gk3_plan 判（PLANERR userdata-too-small）
+    const min = 8192; // 滑块下限的显示值；真正的下限由 gk3l plan 判（PLANERR userdata-too-small）
     final cur = _v ?? (p?.userdataMib ?? max).toDouble();
     return StepPage(
       step: Gk3Step.opts,
@@ -198,6 +201,9 @@ class ConfirmPage extends StatelessWidget {
     final wipe = s.mode == Mode.wipe;
     final re = s.mode == Mode.reinstall;
     final a = s.along;
+    final lv = s.installerPart, rm = p.rmlive;
+    // 整盘清空时要删的分区：安装器分区保留（gk3l 把它原样抄进新表），不在这里列
+    final gone = [for (final x in d.parts) if (!x.ram) x];
     // 将被删除的东西要全列出来；9 行以内不折叠（第一版折叠到 6 行，藏掉的正好是 WinRE）
     const show = 9;
     return StepPage(
@@ -220,16 +226,16 @@ class ConfirmPage extends StatelessWidget {
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Expanded(
           child: ListView(children: [
-            Text('${d.model.isNotEmpty ? d.model : (d.external ? l.diskExternal : l.diskInternal)} · ${d.path} · ${fmtMib(d.sizeMib)}', style: tt.titleMedium),
+            Text('${d.model.isNotEmpty ? d.model : l.diskInternal} · ${d.path} · ${fmtMib(d.sizeMib)}', style: tt.titleMedium),
             const SizedBox(height: 10),
             diskBar(d, highlightFree: a is AlongOk && !wipe ? a.region : null),
             const SizedBox(height: 18),
             if (wipe) ...[
               Text(l.confirmWipeHead, style: tt.titleMedium!.copyWith(color: context.cs.error)),
               const SizedBox(height: 8),
-              if (d.parts.isEmpty) Text(l.confirmNoParts, style: tt.bodyMedium),
+              if (gone.isEmpty) Text(l.confirmNoParts, style: tt.bodyMedium),
               // ★ 必须把将被销毁的东西逐条列出来（stage7-live-installer.md §3 的界面流程）
-              for (final part in d.parts.take(show))
+              for (final part in gone.take(show))
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 3),
                   child: Row(children: [
@@ -245,7 +251,8 @@ class ConfirmPage extends StatelessWidget {
                     Text(fmtMib(part.sizeMib), style: tt.bodyMedium),
                   ]),
                 ),
-              if (d.parts.length > show) Text(l.confirmMore('${d.parts.length - show}'), style: tt.bodyMedium),
+              if (gone.length > show) Text(l.confirmMore('${gone.length - show}'), style: tt.bodyMedium),
+              if (lv != null) ...[const SizedBox(height: 10), Text(l.confirmWipeKeepsLive(lv.label), style: tt.bodyLarge)],
               // v1.0 计划 GUI-18：整盘清空连华为的一键恢复分区一起删 —— 写明后果
               if (d.parts.where(isOnekey).firstOrNull case final ok?) ...[
                 const SizedBox(height: 10),
@@ -274,6 +281,11 @@ class ConfirmPage extends StatelessWidget {
               Text(l.confirmAlongBody(fmtMib(p.totalNewMib), a is AlongOk ? a.esp.path : '?'), style: tt.bodyLarge),
               if (a is AlongOk && a.windows) ...[const SizedBox(height: 6), Text(l.confirmWindowsKept, style: tt.bodyLarge)],
             ],
+            // 装完删掉安装器分区（选项页没开"保留安装器分区"）
+            if (s.removeInstaller && lv != null) ...[
+              const SizedBox(height: 10),
+              Text(rm?.merge ?? false ? l.confirmRmLiveMerge(lv.label, fmtMib(lv.sizeMib)) : l.confirmRmLiveFree(lv.label, fmtMib(lv.sizeMib)), style: tt.bodyLarge),
+            ],
             if (s.dual) ...[const SizedBox(height: 22), const DualOptions()],
           ]),
         ),
@@ -291,9 +303,17 @@ class ConfirmPage extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(vertical: 2),
                   child: Row(children: [Expanded(child: Text(part.name, style: tt.bodyLarge)), Text(fmtMib(part.sizeMib), style: tt.bodyMedium)]),
                 ),
+              // 整盘清空时原样保留的安装器分区（PLAN op=keep）
+              for (final k in p.keep)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Row(children: [
+                    Expanded(child: Text('${k.name}（${l.confirmKept}）', style: tt.bodyLarge!.copyWith(color: context.cs.onSurfaceVariant))),
+                    Text(fmtMib(k.sizeMib), style: tt.bodyMedium),
+                  ]),
+                ),
               const Divider(height: 24),
-              Text(l.confirmRescue(s.rescue && s.rescueUsable ? l.wordInstall : l.wordNoInstall), style: tt.bodyLarge),
-              if (s.source == Source.net && s.variant != null) Text(s.variant!.nameFor(s.language), style: tt.bodyLarge),
+              if (s.usbRelease case final rel? when rel.version.isNotEmpty) Text(l.confirmVersion(rel.version), style: tt.bodyLarge),
             ]),
           ),
         ),
@@ -344,7 +364,7 @@ class DualOptions extends StatelessWidget {
         const SizedBox(height: 18),
         Text(l.confirmBitlockerHead, style: tt.titleMedium!.copyWith(color: context.cs.error)),
         const SizedBox(height: 6),
-        Text(s.viaWindowsScript ? l.confirmBitlockerScript : l.confirmBitlockerUsb, style: tt.bodyLarge),
+        Text(l.confirmBitlockerUsb, style: tt.bodyLarge),
         CheckboxListTile(
           contentPadding: EdgeInsets.zero,
           controlAffinity: ListTileControlAffinity.leading,
@@ -362,7 +382,7 @@ class DualOptions extends StatelessWidget {
 class RunPage extends StatefulWidget {
   const RunPage({super.key, this.resume});
 
-  /// 不是新开一次安装，而是接着跟一个还在跑的写盘任务（gk3_job_status 的 JOB 记录，GUI-11）
+  /// 不是新开一次安装，而是接着跟一个还在跑的写盘任务（gk3l job status 的 JOB 记录，GUI-11）
   final Gk3Record? resume;
   @override
   State<RunPage> createState() => _RunPageState();
@@ -373,7 +393,7 @@ class _RunPageState extends State<RunPage> {
   final _scroll = ScrollController();
   int _pct = 0;
   Gk3Progress? _last;
-  Gk3Record? _err, _planErr;
+  Gk3Record? _err, _planErr, _backup;
   bool _showLog = false;
   StreamSubscription<Gk3Event>? _sub;
 
@@ -398,6 +418,7 @@ class _RunPageState extends State<RunPage> {
           case Gk3Record():
             if (e.type == 'ERR') _err = e;
             if (e.type == 'PLANERR') _planErr = e;
+            if (e.type == 'BACKUP') _backup = e;
             _log.add('${e.type} ${e.fields}');
           case Gk3Exit():
             _finish(e.code);
@@ -412,16 +433,15 @@ class _RunPageState extends State<RunPage> {
   }
 
   void _finish(int code) {
-    final s = context.session;
     final job = widget.resume;
     if (code == 0) {
-      // 接着跟的是缩分区 / 调整磁盘：做完了就从头走一遍（盘变了，前面的判断都要重来）
-      go(context, job == null || job['fn'] == 'gk3_apply' ? const DonePage() : const WelcomePage(), replace: true);
+      // 接着跟的是删除分区：做完了就从头走一遍（盘变了，前面的判断都要重来）
+      go(context, job == null || job['cmd'].startsWith('apply') ? const DonePage() : const WelcomePage(), replace: true);
       return;
     }
-    // 盘没动过的失败（下载阶段、取消、或者 gk3_apply 在第一次写盘之前的检查里停下 —— ERR touched=no）：
+    // 盘没动过的失败（gk3l apply 在第一次写盘之前的检查里停下 —— ERR touched=no）：
     // 可以返回、可以重试。写盘阶段的失败才是"盘可能写了一半"（v1.0 计划 GUI-3）
-    final untouched = job == null && (s.stage == InstallStage.download || _err?['touched'] == 'no');
+    final untouched = job == null && _err?['touched'] == 'no';
     go(
       context,
       FailPage(
@@ -429,29 +449,11 @@ class _RunPageState extends State<RunPage> {
         code: code,
         err: _err,
         planErr: _planErr,
+        backup: _backup,
         untouched: untouched,
-        download: s.stage == InstallStage.download,
-        cancelled: s.cancelled,
       ),
       replace: true,
     );
-  }
-
-  /// 取消下载（GUI-5）：先问一句；问的这会儿要是已经下完、进了写盘，就什么都不做
-  Future<void> _cancel() async {
-    final l = context.l;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: Text(l.runCancelTitle),
-        content: SizedBox(width: 520, child: Text(l.runCancelBody)),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(c, false), child: Text(l.runCancelKeep)),
-          FilledButton(onPressed: () => Navigator.pop(c, true), child: Text(l.runCancel)),
-        ],
-      ),
-    );
-    if (ok == true && mounted) context.session.cancelDownload();
   }
 
   @override
@@ -463,11 +465,9 @@ class _RunPageState extends State<RunPage> {
 
   @override
   Widget build(BuildContext context) {
-    final s = context.session, l = context.l, tt = Theme.of(context).textTheme;
+    final l = context.l, tt = Theme.of(context).textTheme;
     final last = _last;
     final step = last == null ? l.stepPrep : progressText(l, last);
-    final rate = last == null ? null : downloadRate(l, last);
-    final downloading = s.stage == InstallStage.download;
     return PopScope(
       canPop: false, // 装到一半不许返回
       child: StepPage(
@@ -477,8 +477,6 @@ class _RunPageState extends State<RunPage> {
         bottom: Row(children: [
           Btn(_showLog ? l.runHideLog : l.runShowLog, kind: BtnKind.secondary, icon: Icons.subject, onPressed: () => setState(() => _showLog = !_showLog)),
           const Spacer(),
-          // 只在下载阶段有：盘还没动，停下来没有代价（写盘阶段停下就是半个盘 —— 不给这个按钮）
-          if (downloading) Btn(l.runCancel, kind: BtnKind.text, icon: Icons.close, onPressed: _cancel),
         ]),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           const SizedBox(height: 20),
@@ -488,10 +486,6 @@ class _RunPageState extends State<RunPage> {
           ]),
           const SizedBox(height: 16),
           LinearProgressIndicator(value: _pct / 100, minHeight: 8),
-          if (rate != null) ...[
-            const SizedBox(height: 10),
-            Text(rate, style: tt.bodyLarge!.copyWith(color: context.cs.onSurfaceVariant)),
-          ],
           const SizedBox(height: 24),
           if (_showLog) Expanded(child: LogView(_log, controller: _scroll)),
         ]),
@@ -506,7 +500,9 @@ class DonePage extends StatelessWidget {
   Widget build(BuildContext context) {
     final s = context.session, l = context.l, tt = Theme.of(context).textTheme;
     // 免 U 盘安装（安装器跑在内置盘上）：没有要拔的介质（v1.0 计划 GUI-17）
-    final internalMedium = s.disks?.any((d) => d.medium && !d.external) ?? false;
+    final internalMedium = s.disks?.any((d) => d.medium) ?? false;
+    // 装完删掉了安装器分区（apply 的 REMOVED）：空间并进了 /data，或者成了未分配空间
+    final rmv = s.removed;
     return PopScope(
       canPop: false,
       child: StepPage(
@@ -521,7 +517,10 @@ class DonePage extends StatelessWidget {
             child: Icon(Icons.check, size: 56, color: context.gk.onSuccessContainer),
           ),
           const SizedBox(height: 24),
-          Text(internalMedium ? l.doneBodyInternal : l.doneBody, style: tt.bodyLarge),
+          Text(
+            rmv != null ? (rmv.yes('grow') ? l.doneBodyRmLiveMerge : l.doneBodyRmLiveFree) : (internalMedium ? l.doneBodyInternal : l.doneBody),
+            style: tt.bodyLarge,
+          ),
           // 双系统：开机默认进哪个、什么时候生效、在哪里改（设计稿 §4.7"完成页按所选的默认系统说明"）
           if (s.dual) ...[const SizedBox(height: 16), Text(s.defaultOs == 'windows' ? l.doneDualWindows : l.doneDualAndroid, style: tt.bodyLarge)],
           // 后端的提醒：EFI 变量 LoaderEntryDefault 删不掉 —— 开机仍会先进它指的那一项
@@ -529,7 +528,15 @@ class DonePage extends StatelessWidget {
             const SizedBox(height: 16),
             Text(l.doneNoteLoaderVar(n['value']), style: tt.bodyLarge!.copyWith(color: context.cs.error)),
           ],
-          if (s.rescue && s.rescueUsable) ...[const SizedBox(height: 16), Text(l.doneRescue, style: tt.bodyLarge)],
+          // 装完之后删安装器分区那一步：动盘之前停下了（安装照样成功）；或者 /data 的文件系统没扩成
+          for (final n in s.notes.where((n) => n['code'] == 'installer-kept')) ...[
+            const SizedBox(height: 16),
+            Text(l.doneNoteLiveKept(errText(l, Gk3Record('ERR', {...n.fields, 'code': n['why']}))), style: tt.bodyLarge!.copyWith(color: context.cs.error)),
+          ],
+          if (s.notes.any((n) => n['code'] == 'userdata-fs-not-grown')) ...[
+            const SizedBox(height: 16),
+            Text(l.doneNoteFsNotGrown, style: tt.bodyLarge!.copyWith(color: context.cs.error)),
+          ],
         ]),
       ),
     );
@@ -537,9 +544,10 @@ class DonePage extends StatelessWidget {
 }
 
 /// 失败页分两种（v1.0 计划 GUI-3）：
-///   - 盘没动过（[untouched]：下载阶段失败 / 取消，或者 gk3_apply 在第一次写盘之前的检查里停下、ERR touched=no）：
-///     给"重试"（/run 里下好的部分留着，gk3_net_fetch 接着续传）和"返回修改"（换网络 / 换版本 / 换选项）。
-///   - 写盘阶段失败：盘可能停在中间状态 —— 不许返回、不给重试，让用户先看日志（分区表备份的还原命令在里面）。
+///   - 盘没动过（[untouched]：gk3l apply 在第一次写盘之前的检查里停下、ERR touched=no）：
+///     给"重试"和"返回修改"（换选项）。
+///   - 写盘阶段失败：盘可能停在中间状态 —— 不许返回、不给重试，让用户先看日志；动盘之前做过分区表备份的（BACKUP 记录），
+///     写明备份在哪、怎么写回去。
 /// 两种都能从侧栏重启 / 关机。
 /// ★ 标题下面那句错误说明按 ERR 的代码查 l10n（ui/messages.dart）；后端的中文原话只在日志里（INST-10）。
 ///   日志是后端原样的输出、部分是中文 —— 英文界面里默认收起，点了才看（bug 报告要它，所以不能不给）。
@@ -550,14 +558,16 @@ class FailPage extends StatefulWidget {
     required this.code,
     this.err,
     this.planErr,
+    this.backup,
     this.untouched = false,
-    this.download = false,
-    this.cancelled = false,
   });
   final List<String> log;
   final int code;
   final Gk3Record? err, planErr;
-  final bool untouched, download, cancelled;
+
+  /// gk3l 动盘之前的分区表备份（stdout 的 BACKUP 记录）
+  final Gk3Record? backup;
+  final bool untouched;
 
   @override
   State<FailPage> createState() => _FailPageState();
@@ -571,9 +581,8 @@ class _FailPageState extends State<FailPage> {
     final l = context.l, tt = Theme.of(context).textTheme;
     final w = widget;
     final String msg;
-    if (w.cancelled) {
-      msg = l.runCancelBody;
-    } else if (w.err != null) {
+    // 方案不成立时 gk3l 先打一行 PLANERR、再报 ERR code=plan：PLANERR 说得更具体（差多少）
+    if (w.err != null && !(w.err!['code'] == 'plan' && w.planErr != null)) {
       msg = errText(l, w.err!);
     } else if (w.planErr != null) {
       msg = planErrorText(context, Plan(CallResult([w.planErr!], const [], w.code)));
@@ -581,9 +590,9 @@ class _FailPageState extends State<FailPage> {
       final raw = w.log.lastWhere((x) => x.startsWith('!! '), orElse: () => '');
       msg = raw.isNotEmpty && l.localeName.startsWith('zh') ? raw.substring(3) : l.errNoCode('${w.code}');
     }
-    final backedUp = !w.untouched && w.log.any((x) => x.contains('sgdisk --load-backup='));
-    final title = w.cancelled ? l.failCancelTitle : (w.download ? l.failDlTitle : (w.untouched ? l.failUntouchedTitle : l.failTitle));
-    final sub = w.download || w.cancelled ? l.failDlSub : (w.untouched ? l.failUntouchedSub : l.failSub);
+    final backup = w.untouched ? null : w.backup;
+    final title = w.untouched ? l.failUntouchedTitle : l.failTitle;
+    final sub = w.untouched ? l.failUntouchedSub : l.failSub;
     final showLog = _showLog ?? l.localeName.startsWith('zh');
     return PopScope(
       canPop: w.untouched,
@@ -613,8 +622,8 @@ class _FailPageState extends State<FailPage> {
                 Expanded(child: Text(l.shellHint, style: tt.bodySmall)),
               ]),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Text(msg, style: tt.titleMedium!.copyWith(color: w.cancelled ? context.cs.onSurface : context.cs.error)),
-          if (backedUp) ...[const SizedBox(height: 8), Text(l.failBackup, style: tt.bodyMedium)],
+          Text(msg, style: tt.titleMedium!.copyWith(color: context.cs.error)),
+          if (backup != null) ...[const SizedBox(height: 8), Text(l.failBackup(backup['path']), style: tt.bodyMedium)],
           const SizedBox(height: 14),
           if (showLog) ...[
             Text(l.failLogTitle, style: tt.labelLarge),

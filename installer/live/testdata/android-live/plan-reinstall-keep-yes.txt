@@ -1,0 +1,9 @@
+O PLAN op=reuse name=misc path=/dev/nvme0n1p9 num=9 start=790497280 end=790505471 size_mib=4 size_kib=4096 action=write
+O PLAN op=reuse name=metadata path=/dev/nvme0n1p10 num=10 start=790505472 end=790571007 size_mib=32 size_kib=32768 action=keep
+O PLAN op=reuse name=boot_a path=/dev/nvme0n1p11 num=11 start=790571008 end=790702079 size_mib=64 size_kib=65536 action=write
+O PLAN op=reuse name=boot_b path=/dev/nvme0n1p12 num=12 start=790702080 end=790833151 size_mib=64 size_kib=65536 action=write
+O PLAN op=reuse name=super path=/dev/nvme0n1p13 num=13 start=790833152 end=815998975 size_mib=12288 size_kib=12582912 action=write
+O PLAN op=reuse name=userdata path=/dev/nvme0n1p14 num=14 start=815998976 end=949880831 size_mib=65372 size_kib=66940928 action=keep
+O PLANSUM mode=reinstall keep_data=yes avail_mib=77824 fixed_mib=12452 userdata_mib=65372
+O PLAN op=rmlive part=/dev/nvme0n1p8 name=GK3LIVE start=949880832 end=958269439 size_mib=4096 merge=yes userdata_mib=69468
+X 0

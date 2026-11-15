@@ -8,32 +8,28 @@ import '../l10n/app_localizations.dart';
 import '../model/model.dart';
 import '../version.dart';
 
-/// 安装流程的七步。左侧导航按它标出"到哪了"（只是指示，不可点：导航只走 返回 / 下一步，
+/// 安装流程的五步。左侧导航按它标出"到哪了"（只是指示，不可点：导航只走 返回 / 下一步，
 /// 那是 Navigator 的栈 —— C 版 screen++/screen-- 掉进没走过的页的教训，见 app.dart 的 go）。
-enum Gk3Step { welcome, disk, mode, source, opts, confirm, install }
+enum Gk3Step { welcome, mode, opts, confirm, install }
 
 extension on Gk3Step {
   (IconData, IconData) get icons => switch (this) {
     Gk3Step.welcome => (Icons.waving_hand_outlined, Icons.waving_hand),
-    Gk3Step.disk => (Icons.storage_outlined, Icons.storage),
     Gk3Step.mode => (Icons.call_split_outlined, Icons.call_split),
-    Gk3Step.source => (Icons.download_outlined, Icons.download),
     Gk3Step.opts => (Icons.tune_outlined, Icons.tune),
     Gk3Step.confirm => (Icons.fact_check_outlined, Icons.fact_check),
     Gk3Step.install => (Icons.install_desktop_outlined, Icons.install_desktop),
   };
   String label(L10n l) => switch (this) {
     Gk3Step.welcome => l.railWelcome,
-    Gk3Step.disk => l.railDisk,
     Gk3Step.mode => l.railMode,
-    Gk3Step.source => l.railSource,
     Gk3Step.opts => l.railOpts,
     Gk3Step.confirm => l.railConfirm,
     Gk3Step.install => l.railInstall,
   };
 }
 
-/// 每一步的骨架：gk3_common 的 StepScaffold，填上 LiveCD 的七步、侧栏底部的重启 / 关机与版本号
+/// 每一步的骨架：gk3_common 的 StepScaffold，填上 LiveCD 的五步、侧栏底部的重启 / 关机与版本号
 class StepPage extends StatelessWidget {
   const StepPage({
     super.key,
@@ -71,6 +67,9 @@ class StepPage extends StatelessWidget {
     return StepScaffold(
       steps: [for (final s in Gk3Step.values) RailStep(s.label(l), s.icons.$1, s.icons.$2)],
       current: step.index,
+      railTitle: l.railTitle,
+      railIcon: null,
+      railLogo: Image.asset('assets/logo.png', width: 24, height: 24, filterQuality: FilterQuality.medium),
       railSubtitle: l.railSub,
       railFooter: [
         const _PowerButtons(),
@@ -96,7 +95,7 @@ class StepPage extends StatelessWidget {
   }
 }
 
-/// 侧栏底部常驻的"重新启动 / 关机"（v1.0 计划 GUI-3）：失败页、缩分区页让用户"回 Windows 关掉快速启动"，
+/// 侧栏底部常驻的"重新启动 / 关机"（v1.0 计划 GUI-3）：失败页让用户"回 Windows 关掉快速启动"，
 /// 以前整个安装器只有完成页能重启 —— 别的时候只能长按电源键。
 /// 正在写盘（Session.writing）时禁用并写明原因；点了先弹确认，不是一碰就关。
 class _PowerButtons extends StatelessWidget {
@@ -149,7 +148,7 @@ class _PowerButtons extends StatelessWidget {
 }
 
 /// /data 低于这个值时提醒（v1.0 计划 GUI-20：一个大型手游就要 20–40 GiB，而项目的目标就是跑手游）。
-/// 只是提醒、不拦：真正的下限仍由 gk3_plan 判（GK3_USERDATA_MIN_MIB）
+/// 只是提醒、不拦：真正的下限仍由 gk3l plan 判（GK3W_USERDATA_MIN_MIB）
 const kDataWarnMib = 32 * 1024;
 
 /// 黄色（warning 角色）的一行提醒；/data 够大时什么都不画
@@ -168,34 +167,37 @@ class DataSizeWarning extends StatelessWidget {
 }
 
 /// 一块盘的布局条（gk3_common 的 DiskBar）：把 [Disk] 的分区与空闲区交给它。
-/// [highlightFree] 按对象认（与 disk.free 里的同一个 FreeRegion），不按起点比
-DiskBar diskBar(Disk disk, {FreeRegion? highlightFree}) => DiskBar(
+/// [highlightFree] 按对象认（与 disk.free 里的同一个 FreeRegion），不按起点比。
+/// [muted]：已有分区一律暗灰，只突出空闲区与 Android（方式页，与 Windows 安装器的选位置页相同）
+DiskBar diskBar(Disk disk, {FreeRegion? highlightFree, bool muted = false, double height = 20}) => DiskBar(
       parts: [for (final p in disk.parts) (start: p.start, sizeMib: p.sizeMib, os: p.os)],
       free: [for (final f in disk.free) (start: f.start, sizeMib: f.sizeMib)],
       highlightFree: highlightFree == null ? null : disk.free.indexWhere((f) => identical(f, highlightFree)),
+      muted: muted,
+      height: height,
     );
 
-/// 信号格数（dBm 数字对用户没有意义，roadmap 欠账第 1 条）—— 用 MD3 自带的 WiFi 图标
-class SignalBars extends StatelessWidget {
-  const SignalBars(this.bars, {super.key, this.secure = false});
-  final int bars;
-  final bool secure;
+/// [diskBar] 为 muted 时的图例（配色与 gk3_common 的 DiskBar 对应）：只列条上实际出现的几种
+class DiskLegend extends StatelessWidget {
+  const DiskLegend({super.key, this.existing = false, this.free = false, this.target = false, this.android = false});
+  final bool existing, free, target, android;
+
   @override
   Widget build(BuildContext context) {
-    final icon = switch (bars.clamp(0, 4)) {
-      0 => Icons.signal_wifi_0_bar,
-      1 => Icons.network_wifi_1_bar,
-      2 => Icons.network_wifi_2_bar,
-      3 => Icons.network_wifi_3_bar,
-      _ => Icons.signal_wifi_4_bar,
-    };
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (secure) Icon(Icons.lock_outline, size: 18, color: context.cs.onSurfaceVariant),
-        const SizedBox(width: 4),
-        Icon(icon, color: context.cs.onSurfaceVariant),
-      ],
-    );
+    final l = L10n.of(context), cs = context.cs, gk = context.gk;
+    Widget item(Color c, String label) => Padding(
+          padding: const EdgeInsets.only(right: 20),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Container(width: 12, height: 12, decoration: BoxDecoration(color: c, borderRadius: BorderRadius.circular(3))),
+            const SizedBox(width: 6),
+            Text(label, style: context.tt.bodySmall),
+          ]),
+        );
+    return Wrap(children: [
+      if (existing) item(cs.surfaceContainerHighest, l.legendExisting),
+      if (free) item(gk.success.withValues(alpha: 0.35), l.legendFree),
+      if (target) item(gk.success, l.legendTarget),
+      if (android) item(gk.success, 'Android'),
+    ]);
   }
 }

@@ -48,6 +48,11 @@ int gk3w_disk_open_vhd(DWORD num, gk3w_disk *d, gk3w_touched t);
 /* real = 0：同 gk3w_disk_open_vhd。real = 1（--real-disk）：只认 Windows 所在的那块系统盘（VHD 也不认）；
  * 机型与安装前检查由调用方先用 gk3w_sys_gate 把关。 */
 int gk3w_disk_open(DWORD num, int real, gk3w_disk *d, gk3w_touched t);
+/* 是 U 盘（总线 USB，或可移动介质）（只查不报） */
+int gk3w_disk_is_usb(DWORD num);
+/* 制作安装介质用：只认 U 盘或 VHD（测试用），而且不是 Windows 所在的盘；不读分区表（U 盘上可能是任何格式）。
+ * 失败已报 ERR，返回 -1。 */
+int gk3w_disk_open_removable(DWORD num, gk3w_disk *d, gk3w_touched t);
 void gk3w_disk_close(gk3w_disk *d);
 int gk3w_disk_read_layout(gk3w_disk *d);
 /* 以 lay 的前 count 个表项设置分区表，并让分区管理器重读。失败已报 ERR，返回 -1。 */

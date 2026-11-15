@@ -1,4 +1,4 @@
-// installer-lib.sh 的行协议。规则写在 scripts/live/installer-lib.sh 的文件头：
+// 安装器后端（gk3l / gk3w）的行协议。输出端在 installer/backend/src/proto.h：
 //
 //   stdout：`TYPE k=v k=v …`，值经百分号编码（所以值里没有空格）
 //   stderr：给人看的日志；`PROGRESS <百分比> <代码> [k=v…]` 是进度；`ERR code=<代码> [k=v…]` 是失败原因；
@@ -98,7 +98,7 @@ Gk3Event parseStderrLine(String line) {
     final c = _coded(text);
     return Gk3Progress(int.parse(m.group(1)!), text, code: c?.$1, fields: c?.$2 ?? const {});
   }
-  // ERR 走 stderr（理由在 installer-lib.sh 的文件头），解析成与 stdout 记录一样的 Gk3Record；
+  // ERR 走 stderr（stdout 只放记录，失败时前面已经输出的记录照样完整），解析成与 stdout 记录一样的 Gk3Record；
   // gk3_job_run 的 JOB 记录同样打在 stderr 上（不混进被调函数自己的 stdout 记录流）
   if (line.startsWith('ERR ') || line.startsWith('JOB ')) {
     final r = parseStdoutLine(line);

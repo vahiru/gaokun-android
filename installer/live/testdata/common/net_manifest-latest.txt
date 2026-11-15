@@ -1,3 +1,0 @@
-E 变体清单取不到（https://ota.072172.xyz/installer/variants.txt）—— 退回 OTA 清单 https://ota.072172.xyz/ota/gaokun3.json
-O VARIANT id=latest name=crDroid%2012.11 desc= base=https://ota.072172.xyz/install/crDroidAndroid-16.0-20260916-gaokun3-v12.11/ size_mib=1247 latest=yes
-X 0

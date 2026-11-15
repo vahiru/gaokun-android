@@ -1,0 +1,17 @@
+D 200
+E installer partition GK3LIVE: 2048 MiB, content fat
+D 300
+E 1 partitions to remove; 0 of our boot entries, 0 install directories on the ESP
+D 300
+E partition table backup: C:\ProgramData\gaokun3\backup\gpt-before-uninstall-disk2-20261116-045354-head34-tail33.bin
+D 300
+E EFI/BOOT/BOOTAA64.EFI = Windows Boot Manager (from EFI/Microsoft/Boot/bootmgfw.efi)
+D 300
+E removed 1 partitions
+D 300
+O UNINSTALL esp-restored=EFI\BOOT\BOOTAA64.EFI
+O UNINSTALL esp-dir=loader
+O UNINSTALL esp-dir=EFI\systemd
+O UNINSTALL esp-file=EFI\BOOT\BOOTAA64.EFI.before-gaokun3
+O FREE disk=disk2 start=874383360 end=958269439 size_mib=40960
+X 0

@@ -17,8 +17,6 @@ import 'package:gk3_windows/ui/title_bar.dart';
 import 'helpers.dart';
 
 void main() {
-  // 安装介质的入口在 0.1.0 里不注册（app.dart 的 mediaEntryEnabled）；页面照样测
-  setUpAll(() => mediaEntryEnabled = true);
   testWidgets('有空闲区：检查 → 位置 → 版本 → 选项 → 确认 → 安装完成', (t) async {
     // 原生窗口的通道：记下安装期间的 setBusy（阻止关机与睡眠）
     final window = <MethodCall>[];
@@ -124,6 +122,28 @@ void main() {
     await waitFor(t, find.byType(DonePage), tries: 400);
     expect(find.text(l.doneUninstallSub('40 GiB')), findsOneWidget);
     expect(rec.calls.singleWhere((c) => c.first == 'uninstall'), containsAllInOrder(['--disk', '0', '--real-disk']));
+  });
+
+  testWidgets('已经装了、系统盘上还有 gk3w 写的安装器分区：卸载时一并删除，确认页写明', (t) async {
+    // installed 的 GK3LIVE（disk0p4）是旧版脚本建的 Basic data 类型：改成 gk3w media 建的 XBOOTLDR 类型
+    Gk3Event xbootldr(Gk3Event e) => e is Gk3Record && e.type == 'PART' && e['path'] == 'disk0p4'
+        ? Gk3Record('PART', {...e.fields, 'type': kXbootldrType, 'name': 'GK3LIVE', 'fslabel': ''})
+        : e;
+    final (rec, s) = await pumpApp(t, 'installed', map: {'probe': xbootldr});
+    await tap(t, find.text(l.btnManage));
+    await tap(t, find.text(l.manageUninstall));
+    await see(t, find.text(l.uninstallLive('2.3 GiB')));
+    await hold(t, l.holdToUninstall);
+    await waitFor(t, find.byType(DonePage), tries: 400);
+    expect(rec.calls.singleWhere((c) => c.first == 'uninstall'), isNot(contains('--installer-only')));
+  });
+
+  testWidgets('旧版脚本建的 GK3LIVE（Basic data 类型）：卸载确认页不说要删它', (t) async {
+    await pumpApp(t, 'installed');
+    await tap(t, find.text(l.btnManage));
+    await tap(t, find.text(l.manageUninstall));
+    await see(t, find.text(l.uninstallParts(7, '64.1 GiB')));
+    expect(find.text(l.uninstallLive('2.3 GiB')), findsNothing);
   });
 
   testWidgets('空间不够：分析 C 盘的可压缩空间，指出挡住压缩的文件与处理方法；重新检查后清掉', (t) async {
@@ -322,7 +342,30 @@ void main() {
     expect(s.touched, Touched.no);
   });
 
-  testWidgets('安装介质写入U盘：侧栏入口 → 说明 → 目标 → 版本 → 确认；gk3w 还没有 media 命令，写入这一步按失败处理', (t) async {
+  testWidgets('写入中途被安全软件拒绝访问：失败页提示允许 gk3w.exe，并先卸载未完成的安装', (t) async {
+    final (_, s) = await pumpApp(t, 'free', respond: {
+      'apply': (args, input) => Stream.fromIterable([
+            const Gk3Record('ERR', {'code': 'disk-write', 'part': 'boot_a', 'winerr': '5', 'touched': 'yes'}),
+            const Gk3Exit(1),
+          ]),
+    });
+    await tap(t, find.text(l.btnNext));
+    await tap(t, find.text(l.btnNext));
+    await see(t, find.textContaining('v1.0.0-rc.3'));
+    await tap(t, find.text(l.btnNext));
+    await tap(t, find.text(l.btnNext));
+    await hold(t, l.holdToInstall);
+    await waitFor(t, find.byType(FailPage), tries: 400);
+    expect(find.text(l.errWriteDenied), findsOneWidget);
+    expect(find.text(l.failTouchedInstall), findsOneWidget);
+    expect(s.touched, Touched.yes);
+    // 别的 Windows 错误照常按写入失败说；不是写入类的错误码不提安全软件
+    expect(errText(l, const Gk3Record('ERR', {'code': 'disk-write', 'winerr': '1117'})), l.errDiskWrite);
+    expect(errText(l, const Gk3Record('ERR', {'code': 'esp-verify', 'winerr': '5'})), l.errDiskVerify);
+    expect(errText(l, const Gk3Record('ERR', {'code': 'esp-write', 'winerr': '5'})), l.errWriteDenied);
+  });
+
+  testWidgets('安装介质写入U盘：侧栏入口 → 说明 → 目标 → 版本 → 确认 → 写入完成', (t) async {
     final window = <MethodCall>[];
     t.binding.defaultBinaryMessenger.setMockMethodCallHandler(const MethodChannel('gk3/window'), (c) async {
       window.add(c);
@@ -344,22 +387,26 @@ void main() {
     expect(s.mediaTarget!.usb, isTrue);
     await tap(t, find.text(l.btnNext));
     await see(t, find.text(l.releaseSubMedia));
-    await see(t, find.text(l.releaseLiveCd('0.2.0-rc.2', '225 MiB')));
+    await see(t, find.text(l.releaseLiveCd('0.2.0', '181 MiB')));
     await tap(t, find.text(l.btnNext));
     await see(t, find.text(l.mediaConfirmSubUsb('Generic Flash Disk', '29.4 GiB')));
     expect(find.text(l.mediaConfirmUsb), findsOneWidget);
-    expect(find.text(l.mediaConfirmLiveDl('0.2.0-rc.2', '225 MiB')), findsOneWidget);
+    expect(find.text(l.mediaConfirmLiveDl('0.2.0', '181 MiB')), findsOneWidget);
     expect(find.text(l.confirmBoot), findsNothing);
 
     await hold(t, l.holdToWrite);
-    await waitFor(t, find.byType(FailPage), tries: 400);
-    expect(find.text(l.failMediaTitle), findsOneWidget);
-    // 回放数据里没有 gk3w media：退出码 127、没有 ERR —— 与 gk3w 被结束时一样，按"不知道动没动过盘"说
-    expect(find.text(l.failUnknownTouched), findsOneWidget);
-    expect(rec.calls.where((c) => c.first == 'download').length, 1);
+    await waitFor(t, find.byType(DonePage), tries: 400);
+    expect(find.text(l.doneMediaTitle), findsOneWidget);
+    expect(find.text(l.doneMediaSubUsb), findsOneWidget);
+    // 下载时一并下载 LiveCD 镜像（与核对它的 SHA256SUMS），gk3w media 拿到的是下载好的 ISO
+    final dl = rec.calls.singleWhere((c) => c.first == 'download');
+    expect(dl.sublist(dl.length - 2), [
+      'https://github.com/vahiru/gaokun-android/releases/download/live-installer-v0.2.0/gaokun3-live-0.2.0.iso',
+      'https://github.com/vahiru/gaokun-android/releases/download/live-installer-v0.2.0/SHA256SUMS',
+    ]);
     final media = rec.calls.singleWhere((c) => c.first == 'media');
-    expect(media, containsAllInOrder(['--target', 'usb', '--disk', '3', '--release', r'C:\ProgramData\gaokun3\release']));
-    expect(media, containsAllInOrder(['--livecd', 'https://github.com/vahiru/gaokun-android/releases/download/v1.0.0-rc.2/gaokun3-installer-0.2.0-rc.2-windows.zip']));
+    expect(media, containsAllInOrder(['--target', 'usb', '--disk', '3', '--expect-mib', '30108', '--release', r'C:\ProgramData\gaokun3\release']));
+    expect(media, containsAllInOrder(['--livecd', r'C:\ProgramData\gaokun3\release\gaokun3-live-0.2.0.iso']));
     expect(media, isNot(contains('--real-disk')));
     final busy = [for (final c in window) if (c.method == 'setBusy') c.arguments as Map];
     expect(busy.where((a) => a['busy'] == true).single,
@@ -372,8 +419,8 @@ void main() {
     expect(s.mediaTarget, isNull);
   });
 
-  testWidgets('安装介质写入本机磁盘：没有U盘时提示，写到未分配空间', (t) async {
-    final (rec, s) = await pumpApp(t, 'free');
+  testWidgets('安装介质写入本机磁盘：没有U盘时提示，写到未分配空间，完成页说明从启动菜单进入 LiveCD', (t) async {
+    final (rec, s) = await pumpApp(t, 'free', overrides: const {'media': 'media-internal.txt'});
     await tap(t, find.text(l.railMedia));
     await tap(t, find.text(l.btnNext));
     await see(t, find.text(l.mediaUsbNone));
@@ -391,14 +438,17 @@ void main() {
     expect(find.text(l.confirmBoot), findsOneWidget);
     expect(find.text(l.mediaConfirmEntry), findsOneWidget);
     await hold(t, l.holdToWrite);
-    await waitFor(t, find.byType(FailPage), tries: 400);
+    // 回放的是 PC 上 VHDX 真跑 gk3w media --target internal 的输出（testdata/common/media-internal.txt）
+    await waitFor(t, find.byType(DonePage), tries: 400);
+    expect(find.text(l.doneMediaTitle), findsOneWidget);
+    expect(find.text(l.doneMediaSubInternal), findsOneWidget);
     final media = rec.calls.singleWhere((c) => c.first == 'media');
     expect(media, containsAllInOrder(['--target', 'internal', '--disk', '2', '--region-start', '874383360', '--region-end', '958269439']));
     expect(media, contains('--real-disk'));
   });
 
   testWidgets('安装介质写入本机磁盘：几块未分配空间时默认选最大的一块（LiveCD 保留现有系统时也装进最大的），可以换', (t) async {
-    final (rec, s) = await pumpApp(t, 'multi');
+    final (rec, s) = await pumpApp(t, 'multi', overrides: const {'media': 'media-internal.txt'});
     await tap(t, find.text(l.railMedia));
     await tap(t, find.text(l.btnNext));
     await tap(t, find.text(l.mediaInternalTitle));
@@ -413,7 +463,7 @@ void main() {
     await tap(t, find.text(l.btnNext));
     await see(t, find.text(l.mediaConfirmPart('15 GiB', '2 GiB')));
     await hold(t, l.holdToWrite);
-    await waitFor(t, find.byType(FailPage), tries: 400);
+    await waitFor(t, find.byType(DonePage), tries: 400);
     final media = rec.calls.singleWhere((c) => c.first == 'media');
     expect(media, containsAllInOrder(['--region-start', '${s.mediaRegion!.start}', '--region-end', '${s.mediaRegion!.end}']));
   });
@@ -430,7 +480,74 @@ void main() {
     expect(enabled(t, l.btnNext), isFalse);
   });
 
-  testWidgets('安装介质：R2 也有 LiveCD；本地文件时目录里还要有 LiveCD', (t) async {
+  testWidgets('安装介质：系统盘上已有 GK3LIVE 时本机磁盘不能选，写明原因', (t) async {
+    final (_, s) = await pumpApp(t, 'installed');
+    await tap(t, find.text(l.railMedia));
+    await tap(t, find.text(l.btnNext));
+    await see(t, find.textContaining(l.chkLiveExists));
+    await tap(t, find.text(l.mediaInternalTitle));
+    expect(s.mediaTarget, isNull);
+  });
+
+  testWidgets('安装介质：gk3w 建的 GK3LIVE（GPT 名为 GK3LIVE、没有卷标）同样拦住', (t) async {
+    Gk3Event live(Gk3Event e) => e is Gk3Record && e.type == 'PART' && e['path'] == 'disk2p5'
+        ? Gk3Record('PART', {...e.fields, 'name': 'GK3LIVE', 'fslabel': ''})
+        : e;
+    final (_, s) = await pumpApp(t, 'free', map: {'probe': live});
+    await tap(t, find.text(l.railMedia));
+    await tap(t, find.text(l.btnNext));
+    await see(t, find.textContaining(l.chkLiveExists));
+    await tap(t, find.text(l.mediaInternalTitle));
+    expect(s.mediaTarget, isNull);
+  });
+
+  testWidgets('删除本机磁盘上的安装器分区：没装 Android 时 ESP 一并还原，按住后只删它（--installer-only）', (t) async {
+    final (rec, s) = await pumpApp(t, 'live');
+    await tap(t, find.text(l.railMedia));
+    await tap(t, find.text(l.btnNext));
+    await see(t, find.textContaining(l.chkLiveExists));
+    await see(t, find.text(l.mediaRmLiveBody('2 GiB')));
+    await tap(t, find.text(l.mediaRmLiveTitle));
+    await see(t, find.text(l.rmLiveTitle));
+    expect(find.text(l.rmLivePart('2 GiB')), findsOneWidget);
+    expect(find.text(l.rmLiveBoot), findsOneWidget);
+    await hold(t, l.holdToRmLive);
+    await waitFor(t, find.byType(DonePage), tries: 400);
+    expect(find.text(l.doneRmLiveTitle), findsOneWidget);
+    // 释放的是安装器分区本身的 2 GiB（FREE 记录是与前面的未分配空间连成的 40 GiB），可以合并回 C 盘
+    expect(find.text(l.doneUninstallSub('2 GiB')), findsOneWidget);
+    expect(find.text(l.doneUninstallExtend), findsOneWidget);
+    // 不必重启：只有"返回首页"
+    expect(find.text(l.btnRebootNow), findsNothing);
+    expect(rec.calls.singleWhere((c) => c.first == 'uninstall'), containsAllInOrder(['--disk', '2', '--installer-only', '--real-disk']));
+  });
+
+  testWidgets('删除安装器分区：已装 Android 时不动 EFI 分区，确认页不说还原引导，完成页不建议合并回 C 盘', (t) async {
+    Gk3Event xbootldr(Gk3Event e) => e is Gk3Record && e.type == 'PART' && e['path'] == 'disk0p4'
+        ? Gk3Record('PART', {...e.fields, 'type': kXbootldrType, 'name': 'GK3LIVE', 'fslabel': ''})
+        : e;
+    await pumpApp(t, 'installed', map: {'probe': xbootldr});
+    await tap(t, find.text(l.railMedia));
+    await tap(t, find.text(l.btnNext));
+    await tap(t, find.text(l.mediaRmLiveTitle));
+    await see(t, find.text(l.rmLivePart('2.3 GiB')));
+    expect(find.text(l.rmLiveBoot), findsNothing);
+    await hold(t, l.holdToRmLive);
+    await waitFor(t, find.byType(DonePage), tries: 400);
+    expect(find.text(l.doneUninstallSub('2.3 GiB')), findsOneWidget);
+    // 空出的空间在 /data 后面：合并不回 C 盘
+    expect(find.text(l.doneUninstallExtend), findsNothing);
+  });
+
+  testWidgets('旧版脚本建的 GK3LIVE（Basic data 类型）：不提供删除', (t) async {
+    await pumpApp(t, 'installed');
+    await tap(t, find.text(l.railMedia));
+    await tap(t, find.text(l.btnNext));
+    await see(t, find.textContaining(l.chkLiveExists));
+    expect(find.text(l.mediaRmLiveTitle), findsNothing);
+  });
+
+  testWidgets('安装介质：R2 上还没有 LiveCD（不能往下走）；本地文件时目录里还要有 LiveCD 镜像', (t) async {
     final (_, s) = await pumpApp(t, 'usb');
     await tap(t, find.text(l.railMedia));
     await tap(t, find.text(l.btnNext));
@@ -438,7 +555,9 @@ void main() {
     await tap(t, find.text(l.btnNext));
     await tap(t, find.text(l.srcR2));
     await see(t, find.text('crDroid 13.0'));
-    expect(s.liveCd!.url, startsWith('https://ota.072172.xyz/installer/0.2.0-rc.2/'));
+    expect(s.liveCd, isNull);
+    await see(t, find.text(l.releaseNoLiveCd));
+    expect(enabled(t, l.btnNext), isFalse);
     await tap(t, find.text(l.srcLocal));
     await see(t, find.text(l.localLiveCd));
   });

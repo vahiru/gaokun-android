@@ -81,6 +81,7 @@ class UninstallConfirmPage extends StatelessWidget {
         Text(l.confirmWill, style: context.tt.titleMedium),
         const SizedBox(height: 4),
         Bullet(l.uninstallParts(parts.length, fmtMib(total))),
+        if (s.livePart case final lp?) Bullet(l.uninstallLive(fmtMib(lp.sizeMib))),
         Bullet(l.uninstallBoot),
         Bullet(l.uninstallFree),
         const SizedBox(height: 12),

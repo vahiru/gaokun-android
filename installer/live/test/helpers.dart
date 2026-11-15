@@ -16,23 +16,17 @@ import 'package:gk3_installer/ui/screens_risk.dart';
 
 /// 包一层 FixtureBackend：记下每一次调用；可以让某个函数失败
 class Rec extends Gk3Backend {
-  Rec(this.inner, {this.failApply = false, this.failApplyUntouched = false, this.shellError, this.failNetOnce = false, this.holdApply, this.holdNet, this.holdFollow});
+  Rec(this.inner, {this.failApply = false, this.failApplyUntouched = false, this.shellError, this.holdApply, this.holdFollow});
   final FixtureBackend inner;
   final bool failApply;
 
-  /// gk3_apply 在第一次写盘之前的检查里失败（ERR touched=no）
+  /// gk3l apply 在第一次写盘之前的检查里失败（ERR touched=no）
   final bool failApplyUntouched;
 
-  /// 第一次 gk3_net_release 失败（下载中断，盘没动），之后照常
-  bool failNetOnce;
-
-  /// 给了就让 gk3_apply 停在半路、等它完成（看"写盘期间"界面的样子）
+  /// 给了就让 gk3l apply 停在半路、等它完成（看"写盘期间"界面的样子）
   final Completer<void>? holdApply;
 
-  /// 给了就让 gk3_net_release 停在半路（看"下载期间"界面的样子）
-  final Completer<void>? holdNet;
-
-  /// 给了就让 gk3_job_follow 停在半路（接着跟一个写盘任务时的界面）
+  /// 给了就让 gk3l job follow 停在半路（接着跟一个写盘任务时的界面）
   final Completer<void>? holdFollow;
 
   /// 侧栏 / 完成页发出的重启与关机
@@ -48,49 +42,38 @@ class Rec extends Gk3Backend {
   @override
   Stream<Gk3Event> call(String fn, [List<String> args = const []]) async* {
     calls.add([fn, ...args]);
-    if (fn == 'gk3_net_release' && failNetOnce) {
-      failNetOnce = false;
-      // 照新后端的样子（installer-lib.sh 的 gk3_net_fetch / gk3_fail）：进度与 ERR 都只有代码，中文只在 !! 与日志里
-      yield parseStderrLine('PROGRESS 30 dl name=super.img.zst pct=31 speed=1843k left=0:07:12');
-      yield const Gk3Log('下载 super.img.zst 中断（curl 退出码 28），3 秒后接着下（第 5/5 次）');
-      yield parseStderrLine('ERR code=dl-incomplete name=super.img.zst rc=28 http=200 tries=5 kept_mib=377');
-      yield const Gk3Log('!! 下载 super.img.zst 没完成（curl 退出码 28，试了 5 次）；已下的 377 MiB 留着，重试会接着下');
-      yield const Gk3Exit(1);
-      return;
-    }
-    if (fn == 'gk3_net_release' && holdNet != null) {
-      yield parseStderrLine('PROGRESS 30 dl name=super.img.zst pct=31 speed=1843k left=0:07:12');
-      await holdNet!.future;
-    }
-    if (fn == 'gk3_job_follow' && holdFollow != null) {
+    if (fn == 'job' && args.firstOrNull == 'follow' && holdFollow != null) {
       yield parseStderrLine('PROGRESS 30 write-super');
       await holdFollow!.future;
     }
-    if (fn == 'gk3_apply' && holdApply != null) {
+    if (fn == 'apply' && holdApply != null) {
       yield parseStderrLine('PROGRESS 30 write-super');
       await holdApply!.future;
     }
-    if (fn == 'gk3_apply' && failApplyUntouched) {
+    if (fn == 'apply' && failApplyUntouched) {
       yield parseStderrLine('PROGRESS 1 check');
       yield parseStderrLine('ERR code=release-no-super touched=no');
-      yield const Gk3Log('!! 发布目录里既没有 super.img.zst 也没有 super.img');
+      yield const Gk3Log('!! the release directory has neither super.img.zst nor super.img');
       yield const Gk3Exit(1);
       return;
     }
-    if (fn == 'gk3_apply' && failApply) {
+    if (fn == 'apply' && failApply) {
       yield parseStderrLine('PROGRESS 5 write-gpt');
-      yield const Gk3Log('分区表已备份到 /media/gk3/gaokun3/gpt-backup-nvme0n1-1.bin（还原：sgdisk --load-backup=/media/gk3/gaokun3/gpt-backup-nvme0n1-1.bin /dev/nvme0n1）');
-      yield parseStderrLine('ERR code=part-missing name=super disk=/dev/nvme0n1 touched=yes');
-      yield const Gk3Log('!! 分区 super 没解析出来（/dev/nvme0n1 上找不到这个 PARTLABEL）');
+      yield parseStdoutLine('BACKUP path=/run/gaokun3/gpt-before-wipe-nvme0n1-20261113-120000-head2048-tail2048.bin disk=/dev/nvme0n1 sector=512 head=2048 tail=2048 ram=yes');
+      yield parseStderrLine('ERR code=disk-write part=gpt errno=5 touched=yes');
+      yield const Gk3Log('!! writing the partition table failed (the backup is listed above)');
       yield const Gk3Exit(1);
       return;
     }
     yield* inner.call(fn, args);
   }
 
-  List<String>? last(String fn) => calls.lastWhere((c) => c.first == fn, orElse: () => const []).isEmpty
-      ? null
-      : calls.lastWhere((c) => c.first == fn);
+  /// 最后一次这个命令的调用；key 可以带子命令（'job follow'）
+  List<String>? last(String key) {
+    final k = key.split(' ');
+    bool hit(List<String> c) => c.length >= k.length && [for (var i = 0; i < k.length; i++) c[i] == k[i]].every((x) => x);
+    return calls.where(hit).lastOrNull;
+  }
 
   @override
   Future<void> reboot() async => power.add('reboot');
@@ -101,6 +84,12 @@ class Rec extends Gk3Backend {
 }
 
 final l = lookupL10n(const Locale('zh'));
+
+/// 文案模板里占位符前后的固定部分：测试按它找含有运行时数值的文字，改文案不用跟着改测试。
+/// 用法：把占位符填成 [hole]，再取 [lead]（占位符之前）或 [tail]（占位符之后）
+const hole = '\u0000';
+String lead(String filled) => filled.split(hole).first;
+String tail(String filled) => filled.split(hole).last;
 final en = lookupL10n(const Locale('en'));
 
 /// 直接同步读磁盘的资源包。
@@ -124,15 +113,13 @@ Future<Rec> pumpApp(WidgetTester t, String scenario,
     String language = 'zh',
     LangPrefs? prefs,
     String? shellError,
-    bool failNetOnce = false,
     Completer<void>? holdApply,
-    Completer<void>? holdNet,
     Completer<void>? holdFollow}) async {
   t.view.physicalSize = const Size(1280, 800);
   t.view.devicePixelRatio = 1;
   addTearDown(t.view.reset);
   final rec = Rec(FixtureBackend(scenario, bundle: DiskBundle(), speed: speed, overrides: overrides),
-      failApply: failApply, failApplyUntouched: failApplyUntouched, shellError: shellError, failNetOnce: failNetOnce, holdApply: holdApply, holdNet: holdNet, holdFollow: holdFollow);
+      failApply: failApply, failApplyUntouched: failApplyUntouched, shellError: shellError, holdApply: holdApply, holdFollow: holdFollow);
   final session = Session(rec, prefs: prefs ?? LangPrefs.none);
   if (prefs == null) session.language = language;
   await t.pumpWidget(InstallerApp(session: session));
@@ -202,7 +189,7 @@ Future<void> scrollRiskToEnd(WidgetTester t) async {
 bool riskContinueEnabled(WidgetTester t, [L10n? loc]) =>
     t.widget<ButtonStyleButton>(find.ancestor(of: find.text((loc ?? l).riskContinue), matching: find.byWidgetPredicate((w) => w is ButtonStyleButton)).first).onPressed != null;
 
-/// 按住 2 秒（确认页 / 缩分区）
+/// 按住 2 秒（确认页）
 Future<void> hold(WidgetTester t, String idleText) async {
   final g = await t.startGesture(t.getCenter(find.textContaining(idleText).first));
   for (var i = 0; i < 25; i++) {

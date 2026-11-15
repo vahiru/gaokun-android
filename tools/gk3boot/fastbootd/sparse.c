@@ -1,7 +1,7 @@
 /* gk3-fastbootd：Android sparse 镜像（libsparse 格式）。
  *
  * 格式与语义对齐 libsparse（system/core/libsparse/sparse_format.h、sparse_read.cpp）和本仓的
- * scripts/live/gk3-unsparse.py：
+ * simg2img：
  *   文件头 28 字节：magic u32 / major u16(=1) / minor u16 / file_hdr_sz u16 / chunk_hdr_sz u16 /
  *                   blk_sz u32 / total_blks u32 / total_chunks u32 / image_checksum u32
  *   chunk 头 12 字节：chunk_type u16 / reserved u16 / chunk_sz u32（块数）/ total_sz u32（含头的字节数）

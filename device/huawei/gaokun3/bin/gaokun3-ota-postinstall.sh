@@ -107,7 +107,7 @@ MOUNTED=1
 #   它的 linux 行必须是 /<目录>/android/slot_<槽>/Image —— 内核写进那个目录、改的也是那个条目。
 #   找不到 / 多于一个 / linux 行对不上 ⇒ 让 OTA 失败：没有启动项的槽本来就起不来（boot_control 切 default 时
 #   按同一个通配找条目），失败了用户留在当前能用的槽上，比"报成功、重启进一个起不来的槽"好。
-#   安装器写的条目正是这个形状（scripts/live/installer-lib.sh:919-926：$mid-android-$slot.conf，
+#   安装器写的条目正是这个形状（installer/backend/src/esp.c 的 gk3w_esp_android_entry：$mid-android-$slot.conf，
 #   linux /$mid/android/slot_$slot/Image），所以装好的机器两边选出的是同一个目录。
 #   ★ 统一启动入口（2026-10-05，S9）：只认【直连条目】<32 位小写十六进制 machine-id>-android-<槽>.conf。
 #     gk3boot 的条目被祝福（去掉计数）之后叫 gk3boot-android-<槽>.conf、上一版入口叫 gk3prev-android-<槽>.conf，
@@ -116,7 +116,7 @@ MOUNTED=1
 #     0gk3 排在直连条目 zandroid<槽> 前面，照样先命中，设计稿 §4.2。）
 #     非默认条目 gk3boot-tools.conf 名字里没有 -android-，这里的 glob、default 通配、find_esp 的认盘通配都匹配不到它。
 # $1 = 条目文件名（不带目录），$2 = 槽字母；是直连条目时返回 0。规则与 gk3boot.efi 找 fail-open 目标
-#   （tools/gk3boot/efi/boot/gk3boot.c 的 direct_cb）、安装器的 gk3__esp_pick_mid 一致。
+#   （tools/gk3boot/efi/boot/gk3boot.c 的 direct_cb）、安装器选 machine-id 目录的规则（installer/backend/src/linux/apply.c 的 esp_pick_mid）一致。
 is_direct_entry() {
     _id=${1%-android-"$2".conf}
     [ "$_id" != "$1" ] && [ "${#_id}" -eq 32 ] || return 1
@@ -232,10 +232,10 @@ else
 fi
 
 # ── 救援条目：借这个槽内核的那条，options 也跟着 boot.img 走（v1.0 计划 OTA-10 / GUI-10 / INST-17）────────
-# 安装器装了救援系统时写两条（scripts/live/installer-lib.sh 的 gk3_apply）：<MID>-rescue.conf 借 slot_a 的内核与 dtb、
+# 旧版安装器装了救援系统时写两条（现在的安装器不再装救援系统）：<MID>-rescue.conf 借 slot_a 的内核与 dtb、
 #   <MID>-rescue-b.conf 借 slot_b 的，initramfs 共用 <MID>/rescue/initramfs.img。上面刚把这个槽的内核换了 ——
 #   借它的那条救援条目的 options 原先是装机当天写死的，与新内核的 cmdline 会漂（与直连条目 #116 §17 是同一种漂移）。
-# 规则与安装器的 gk3__rescue_cmdline【逐字相同】（改一边就要改另一边；tools/gk3boot/test/postinstall/run.sh 的 R 组交叉核对）：
+# 规则与旧版安装器写救援条目时相同（tools/gk3boot/test/postinstall/run.sh 的 R 组按这条规则核对）：
 #   去掉 androidboot.* / init= / firmware_class.path=，末尾加 loglevel=3 panic=10 gk3.squash=/gaokun3/rescue.squashfs。
 # 只动安装器写的那种：文件名 <MID>-rescue*.conf、linux 行正好是 /<MID>/android/slot_<槽>/Image、options 里有
 #   gk3.squash=/gaokun3/rescue.squashfs。别的（手写的、指向别处的）一概不碰。
@@ -438,7 +438,7 @@ gk3_deploy
 
 # ── loader.conf 的菜单等待（tools/gk3boot/README.md）──────────
 # 开机菜单（音量上/下与电源键即可无键盘操作）统一显示 5 秒。新装时安装器直接写 5
-# （scripts/live/installer-lib.sh 的 GK3_LOADER_TIMEOUT）；之前装的机器上是旧安装器写的 15 —— 只改【正好是 timeout 15】
+# （installer/backend/src/esp.c 的 gk3w_loader_conf）；之前装的机器上是旧安装器写的 15 —— 只改【正好是 timeout 15】
 # 那一行，用户改过的（别的数、menu-hidden、多了空格）不动。
 # 改 loader.conf 只进 PCR5，不会让 BitLocker 要密钥。写法同条目：.new → 核对 → 改名；失败只记日志、不让 OTA 失败。
 # 权限：只用到 vfat:file create/write/rename（sepolicy/postinstall.te 已有），不新增规则。

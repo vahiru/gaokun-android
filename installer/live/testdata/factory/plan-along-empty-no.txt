@@ -1,3 +1,0 @@
-O PLAN op=useesp path=/dev/nvme0n1p1 need_mib=150
-O PLANERR msg=not-enough-space avail_mib=0 need_mib=20644 fixed_mib=12452
-X 1

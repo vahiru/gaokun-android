@@ -1,0 +1,24 @@
+#!/bin/sh
+# 给内置触摸屏输出libinput的校准矩阵，让触摸跟随画面旋转（由udev规则70-gk3-touchscreen.rules用IMPORT{program}调用）。
+#
+# 为什么需要：画面由gk3-installer-session用wlr-randr在cage里旋转（gk3.rotate，默认270），触摸却不会跟着转。
+#   wlroots只对映射到某个输出的触摸设备套用该输出的旋转（types/wlr_cursor.c的apply_output_transform），
+#   而cage 0.2.0只在设备接入那一刻按udev的WL_OUTPUT属性做映射，那时还没有输出（wlroots先启动libinput、后启动DRM）。
+#   内核报的是面板原生的竖屏坐标（与Android相同），不校准就按竖屏铺到横屏画布上，触点与手指错开90°。
+# 矩阵与apply_output_transform逐项相同：x' = a·x + b·y + c，y' = d·x + e·y + f（坐标归一化到0–1）。
+# 默认值必须与gk3-installer-session里gk3.rotate的默认值一致。
+# 参数：读取哪份内核命令行（默认/proc/cmdline，测试时可传入其他文件）。
+CMDLINE=${1:-/proc/cmdline}
+ROT=$(tr ' ' '\n' < "$CMDLINE" | sed -n 's/^gk3\.rotate=//p' | tail -1)
+case "${ROT:-270}" in
+    normal)      M="1 0 0 0 1 0" ;;
+    90)          M="0 -1 1 1 0 0" ;;
+    180)         M="-1 0 1 0 -1 1" ;;
+    270)         M="0 1 0 -1 0 1" ;;
+    flipped)     M="-1 0 1 0 1 0" ;;
+    flipped-90)  M="0 1 0 1 0 0" ;;
+    flipped-180) M="1 0 0 0 -1 1" ;;
+    flipped-270) M="0 -1 1 -1 0 1" ;;
+    *) exit 0 ;;
+esac
+echo "LIBINPUT_CALIBRATION_MATRIX=$M"
