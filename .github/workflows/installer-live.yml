@@ -44,7 +44,7 @@ permissions:
 
 env:
   ROM_REPO: vahiru/gaokun-android
-  ROM_TAG: v1.0.0-rc.3
+  ROM_TAG: v1.0.0-rc.4
   FW_REPO: KawaiiHachimi/linux-gaokun-buildbot
   FW_COMMIT: 315528c028843794ccd0f3d9dab373b03033150f
 
