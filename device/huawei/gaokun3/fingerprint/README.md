@@ -22,6 +22,9 @@ HAL 持久化失败计数：每 5 次失败锁定 30 秒，20 次永久锁定，
 没有 FAR/FRR、防伪、TEE 模板保护或防回滚证明，不声明已达到 CDD Class 1/2/3
 认证标准。`CONVENIENCE` 是开发阶段的保守能力报告，不是安全认证结论。
 
+challenge按用户保存在服务里，不随会话销毁：每个用户最多16个，生成后10分钟内有效。传感器出错时HAL报
+`HW_UNAVAILABLE`并退役当前会话，框架新建会话后，设置用原来的授权令牌重试录入，新会话因此要能识别这个challenge。
+
 HAL随镜像构建。不得仅改成WEAK/STRONG来绕过框架限制；提高安全等级仍需可信录入授权以及安全等级评估。
 SystemUI对Class 1/2指纹只在人脸也锁定时才禁止指纹解锁，没有人脸识别时，指纹自己临时锁定期间仍会不断请求认证。
 [`patches/android/frameworks-base/0001`](../../../../patches/android/frameworks-base/0001-systemui-respect-fingerprint-lockout.patch)
@@ -40,6 +43,9 @@ SystemUI对Class 1/2指纹只在人脸也锁定时才禁止指纹解锁，没有
 
 - FocalTech：40×196，TA返回AES加密的LE16样本，HAL解密后按百分位归一化，与原来相同。
   内核默认就是FocalTech，HAL不调用`SET_SENSOR`，旧内核也能用。
+  GET_FINGER_STATUS在FocalTech上表示传感器里有一帧待读，读出之前始终为1，手指抬起也不会复位。
+  认证读到1就取图；录入和检测要等手指抬起，这期间读到1时HAL读出并丢弃这一帧，否则状态位
+  不会变回0，此后的按压均无响应。
 - Goodix：36×160，内核返回已解包的12位样本。HAL在INIT前调用`GAOKUN3_FPCMD_IOC_SET_SENSOR`。
   Goodix原图有很强的固定图样（逐像素的偏移，幅度和脊线相当），所以HAL在手指状态为0时
   采一帧底图；有手指的帧先减底图，再减7×7局部均值去掉按压造成的大面积明暗变化。
@@ -193,7 +199,8 @@ AddressSanitizer + UBSan下运行：
 合成纹理只是回归测试，推不出真实手指的识别率或误识率。`test-transport.sh`在Linux主机上
 检查真实Transport实现的GPIO持有和恢复、读回失败和INIT失败的清理、shutdown失败后的保留，
 设备调用全部用模拟实现替换。会话回归模块`gaokun3-fingerprint-session-test`在设备上运行，
-不采集图像也不访问模板，覆盖旧会话替换、HW_UNAVAILABLE回调内重试和close回调重入。
+不采集图像也不访问模板，覆盖旧会话替换、HW_UNAVAILABLE回调内重试、close回调重入、
+退役会话的challenge在新会话中仍然有效，以及FocalTech等待抬起期间读出并丢弃待读的帧。
 `test-integration.py`检查补丁能否打上、UAPI是否一致、V4接口覆盖、镜像总是装入HAL与固件、缺失或改动的输入被拒绝，以及输入准备。
 
 现在的代码已随ROM构建，在Goodix机器上实测过正式服务与SELinux策略下的录入、解锁和拒绝其他手指；FTE7001机器上的匹配尚未实测。
