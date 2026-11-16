@@ -16,6 +16,9 @@ class Transport {
     // profile.captureBytes of raw fpcmd CAPTURE data.
     bool captureRaw(uint8_t* data, size_t bytes);
     bool capture(Gaokun3Frame* frame, bool* usable);
+    // 等待手指抬起期间状态位为1时调用。FocalTech的状态位表示有一帧待读，读出之前
+    // 始终为1，这里读出并丢弃；Goodix的状态位表示手指在位，不执行任何操作。
+    bool discardPending();
   private:
     const SensorProfile* profile_;
     int fd_ = -1;

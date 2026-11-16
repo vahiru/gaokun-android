@@ -340,6 +340,7 @@ class Session final : public BnSession {
         bool attempted = false;
         unsigned usableProbes = 0;
         unsigned statusErrors = 0;
+        unsigned discardErrors = 0;
         // Every operation stays armed until canceled. Settings cancels
         // enrollment when the user leaves the screen; a HAL deadline only
         // discarded slow but progressing enrollments (frames lost to status
@@ -381,8 +382,18 @@ class Session final : public BnSession {
             statusErrors = 0;
             if (!down) {
                 latched = false;
+                discardErrors = 0;
             }
-            else if (!latched) {
+            else if (latched) {
+                // 录入和检测正在等待手指抬起。FocalTech有帧待读时状态位不会自行复位，
+                // 不读出这一帧，状态位将始终为1，此后的按压均无响应。这一帧本就丢弃，
+                // 读取时遇到坏帧不必中止操作，下次轮询时重试。
+                if (transport_.discardPending()) discardErrors = 0;
+                else if ((errno == EPROTO || errno == EBADMSG) && ++discardErrors <= 5)
+                    LOG(WARNING) << "Fingerprint pending frame rejected; retry " << discardErrors;
+                else { error(Error::HW_UNAVAILABLE); return; }
+            }
+            else {
                 if (kind == 3) { cb_->onInteractionDetected(); return; }
                 Gaokun3Frame frame{}; bool usable = false;
                 if (!transport_.capture(&frame,&usable)) { error(Error::HW_UNAVAILABLE); return; }

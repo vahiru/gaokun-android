@@ -10,7 +10,7 @@
 namespace aidl::android::hardware::biometrics::fingerprint {
 class Callback final : public BnSessionCallback {
  public:
-    std::atomic_int challenges{0}, errors{0}, closes{0}, interactions{0}, lastError{0}, successes{0}, rejections{0}, timedLockouts{0};
+    std::atomic_int challenges{0}, errors{0}, closes{0}, interactions{0}, lastError{0}, successes{0}, rejections{0}, timedLockouts{0}, acquired{0};
     std::atomic<int64_t> lastChallenge{0};
     std::function<void()> errorHook, closeHook, rejectionHook;
     ScopedAStatus onChallengeGenerated(int64_t c) override {
@@ -27,7 +27,7 @@ class Callback final : public BnSessionCallback {
     }
 #define NOOP(name, args) ScopedAStatus name args override { return ScopedAStatus::ok(); }
     NOOP(onChallengeRevoked, (int64_t))
-    NOOP(onAcquired, (AcquiredInfo, int32_t))
+    ScopedAStatus onAcquired(AcquiredInfo, int32_t) override { ++acquired; return ScopedAStatus::ok(); }
     NOOP(onEnrollmentProgress, (int32_t, int32_t))
     ScopedAStatus onAuthenticationSucceeded(int32_t, const Hat&) override { ++successes; return ScopedAStatus::ok(); }
     ScopedAStatus onAuthenticationFailed() override {
@@ -357,5 +357,89 @@ TEST(Authentication, RejectedWindowDoesNotRequireReadyFlagToClear) {
     EXPECT_EQ(cb->timedLockouts.load(),0);
     gaokun3::Store restored(dir.data()+"/gaokun3-templates.db",gaokun3::kFocalTech);
     ASSERT_TRUE(restored.load());EXPECT_EQ(restored.failures,0u);
+}
+}
+
+namespace aidl::android::hardware::biometrics::fingerprint {
+// FocalTech的状态位表示有一帧待读，读出后才复位。录入和检测在等待手指抬起时若状态位
+// 仍为1，HAL须读出并丢弃这一帧，不能一直等待它变为0，否则此后的按压均无响应。
+static bool waitAtLeast(const std::atomic_int& value, int count, int ticks=500) {
+    for (int i=0; i<ticks && value.load()<count; ++i) std::this_thread::sleep_for(10ms);
+    return value.load()>=count;
+}
+static Hat enrollmentHat(int64_t challenge) {
+    Hat hat{};hat.challenge=challenge;hat.userId=1;
+    hat.authenticatorType=keymaster::HardwareAuthenticatorType::PASSWORD;hat.mac.assign(32,0);
+    return hat;
+}
+TEST(ReadyFlag, FramePendingAtEnrollmentStartIsDiscarded) {
+    // 录入开始时手指已按在键上：第1次读状态时已有帧待读。这一帧读出后丢弃、不上报，
+    // 第5次读状态时的新按压照常取图并上报。
+    resetMockTransport();mockReadyModel=true;mockReadyAt={1,5};
+    TemporaryStore dir;encryptedSyntheticFrame(1);
+    auto hal=ndk::SharedRefBase::make<Fingerprint>(&gaokun3::kFocalTech);auto cb=ndk::SharedRefBase::make<Callback>();
+    std::shared_ptr<ISession> session;ASSERT_TRUE(hal->createSession(0,0,cb,&session).isOk());
+    std::static_pointer_cast<Session>(session)->setStoreDirectoryForTest(dir.data());
+    ASSERT_TRUE(session->generateChallenge().isOk());ASSERT_TRUE(waitFor(cb->challenges));
+    Signal signal;ASSERT_TRUE(session->enroll(enrollmentHat(cb->lastChallenge),&signal).isOk());
+    EXPECT_TRUE(waitFor(cb->acquired));
+    signal->cancel();session->close();EXPECT_TRUE(waitFor(cb->closes));
+    EXPECT_EQ(mockCaptures.load(),2);EXPECT_EQ(cb->acquired.load(),1);
+    EXPECT_EQ(cb->lastError.load(),static_cast<int>(Error::CANCELED));
+}
+TEST(ReadyFlag, FrameReadyAgainBeforeLiftIsDiscarded) {
+    // 第2次读状态时按下并取图；手指尚未抬起，传感器在下一次读状态前又备好一帧，
+    // 状态位始终不为0。这一帧读出后丢弃，第6次读状态时的下一次按压照常取图并上报。
+    resetMockTransport();mockReadyModel=true;mockReadyAt={2,3,6};
+    TemporaryStore dir;encryptedSyntheticFrame(1);
+    auto hal=ndk::SharedRefBase::make<Fingerprint>(&gaokun3::kFocalTech);auto cb=ndk::SharedRefBase::make<Callback>();
+    std::shared_ptr<ISession> session;ASSERT_TRUE(hal->createSession(0,0,cb,&session).isOk());
+    std::static_pointer_cast<Session>(session)->setStoreDirectoryForTest(dir.data());
+    ASSERT_TRUE(session->generateChallenge().isOk());ASSERT_TRUE(waitFor(cb->challenges));
+    Signal signal;ASSERT_TRUE(session->enroll(enrollmentHat(cb->lastChallenge),&signal).isOk());
+    EXPECT_TRUE(waitAtLeast(cb->acquired,2));
+    signal->cancel();session->close();EXPECT_TRUE(waitFor(cb->closes));
+    EXPECT_EQ(mockCaptures.load(),3);EXPECT_EQ(cb->acquired.load(),2);
+    EXPECT_EQ(cb->lastError.load(),static_cast<int>(Error::CANCELED));
+}
+TEST(ReadyFlag, FramePendingAtDetectionStartIsDiscarded) {
+    // 检测同样从等待手指抬起开始：开始时待读的帧读出后丢弃，第4次读状态时的按压才算交互。
+    resetMockTransport();mockReadyModel=true;mockReadyAt={1,4};
+    TemporaryStore dir;
+    auto hal=ndk::SharedRefBase::make<Fingerprint>(&gaokun3::kFocalTech);auto cb=ndk::SharedRefBase::make<Callback>();
+    std::shared_ptr<ISession> session;ASSERT_TRUE(hal->createSession(0,0,cb,&session).isOk());
+    std::static_pointer_cast<Session>(session)->setStoreDirectoryForTest(dir.data());
+    Signal signal;ASSERT_TRUE(session->detectInteraction(&signal).isOk());
+    EXPECT_TRUE(waitFor(cb->interactions));
+    session->close();EXPECT_TRUE(waitFor(cb->closes));
+    EXPECT_EQ(mockCaptures.load(),1);EXPECT_EQ(mockStatusReads.load(),4);
+}
+TEST(ReadyFlag, BadFrameWhileDiscardingIsRetried) {
+    // 读出待读帧时遇到坏帧：这一帧本就丢弃，不中止录入，下次轮询时重试。
+    resetMockTransport();mockReadyModel=true;mockReadyAt={1,5};mockCaptureErrors={EPROTO};
+    TemporaryStore dir;encryptedSyntheticFrame(1);
+    auto hal=ndk::SharedRefBase::make<Fingerprint>(&gaokun3::kFocalTech);auto cb=ndk::SharedRefBase::make<Callback>();
+    std::shared_ptr<ISession> session;ASSERT_TRUE(hal->createSession(0,0,cb,&session).isOk());
+    std::static_pointer_cast<Session>(session)->setStoreDirectoryForTest(dir.data());
+    ASSERT_TRUE(session->generateChallenge().isOk());ASSERT_TRUE(waitFor(cb->challenges));
+    Signal signal;ASSERT_TRUE(session->enroll(enrollmentHat(cb->lastChallenge),&signal).isOk());
+    EXPECT_TRUE(waitFor(cb->acquired));
+    signal->cancel();session->close();EXPECT_TRUE(waitFor(cb->closes));
+    EXPECT_EQ(mockCaptures.load(),3);EXPECT_EQ(cb->acquired.load(),1);
+    EXPECT_EQ(cb->lastError.load(),static_cast<int>(Error::CANCELED));
+}
+TEST(ReadyFlag, GoodixFingerHeldIsNotCaptured) {
+    // Goodix的状态位就是手指在位：录入开始时手指按着，抬起前不取图。
+    resetMockTransport();mockStatusSamples={1,1,1,1};
+    TemporaryStore dir;
+    auto hal=ndk::SharedRefBase::make<Fingerprint>(&gaokun3::kGoodix);auto cb=ndk::SharedRefBase::make<Callback>();
+    std::shared_ptr<ISession> session;ASSERT_TRUE(hal->createSession(0,0,cb,&session).isOk());
+    std::static_pointer_cast<Session>(session)->setStoreDirectoryForTest(dir.data());
+    ASSERT_TRUE(session->generateChallenge().isOk());ASSERT_TRUE(waitFor(cb->challenges));
+    Signal signal;ASSERT_TRUE(session->enroll(enrollmentHat(cb->lastChallenge),&signal).isOk());
+    // 第5、6次读到0时距最后一次按下不到2秒，也不会取无指底图。
+    EXPECT_TRUE(waitAtLeast(mockStatusReads,6));
+    signal->cancel();session->close();EXPECT_TRUE(waitFor(cb->closes));
+    EXPECT_EQ(mockCaptures.load(),0);EXPECT_EQ(cb->acquired.load(),0);
 }
 }
