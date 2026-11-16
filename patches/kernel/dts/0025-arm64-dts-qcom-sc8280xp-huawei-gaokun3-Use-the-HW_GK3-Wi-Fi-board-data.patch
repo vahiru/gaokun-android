@@ -1,0 +1,49 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] arm64: dts: qcom: sc8280xp-huawei-gaokun3: Use the HW_GK3 Wi-Fi board data
+
+The NTM_TW220 board data selected by the calibration variant pins the
+WCN6855 firmware to the US regulatory domain. The firmware never takes
+a country from 802.11d with it, and for every country set from user
+space (US, AU, CN, DE and JP were tried) it allows the 2.4 GHz band
+only up to channel 11, with the rule ending at 2472 MHz. Channels 12
+and 13 stay disabled and networks on them cannot be found, although
+this tablet is sold in China, where both channels are in common use.
+
+linux-firmware has the NTM_TW220 data also for the Lenovo X13s under
+qmi-chip-id=18; HW_GK3 shares the data of the X13s qmi-chip-id=2
+entry. With it the firmware takes the country of nearby access points
+and allows channels 12 and 13 for passive scanning. Against NTM_TW220,
+5 GHz gave the same signal and iperf3 throughput over three interleaved
+rounds, and 2.4 GHz showed no difference; 6 GHz was not compared.
+Dropping the variant is not an option: the generic qmi-chip-id=18 data
+it falls back to is about 22 dB weaker.
+
+linux-firmware lists HW_GK3 only under qmi-chip-id=2, while this chip
+reports chip_id 0x12, so board-2.bin needs a qmi-chip-id=18 name for
+the same data. The device firmware step adds it.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Inappropriate [needs a board-2.bin name that linux-firmware lacks]
+---
+ arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
+index 18934eb7a..8f29b189b 100644
+--- a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
++++ b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
+@@ -1015,8 +1015,11 @@ wifi@0 {
+ 		vddrfa1p2-supply = <&vreg_pmu_rfa_1p2>;
+ 		vddrfa1p8-supply = <&vreg_pmu_rfa_1p7>;
+ 
+-		/* HACK: qmi-chip-id=18 */
+-		qcom,calibration-variant = "NTM_TW220";
++		/*
++		 * linux-firmware lists HW_GK3 only under qmi-chip-id=2; this chip
++		 * reports 18, so board-2.bin carries an extra qmi-chip-id=18 name.
++		 */
++		qcom,calibration-variant = "HW_GK3";
+ 	};
+ };
+ 

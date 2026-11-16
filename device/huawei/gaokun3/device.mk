@@ -621,7 +621,14 @@ PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/wifi/wpa_supplicant.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/wpa_supplicant.rc \
     frameworks/native/data/etc/android.hardware.wifi.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.hardware.wifi.xml
 
-# WCN6855 固件（board-2.bin 已验含 NTM_TW220，DTS qcom,calibration-variant 所需）
+# WCN6855 固件，来自linux-firmware。设备树的qcom,calibration-variant是HW_GK3（patches/kernel/dts/0025），
+# 本机芯片上报qmi-chip-id=18，而linux-firmware只在qmi-chip-id=2下登记了HW_GK3，所以board-2.bin要先用
+# scripts/wifi/ath11k-board-alias.py补上qmi-chip-id=18的名称。缺少这个名称时驱动会改用通用板级数据，
+# 信号弱约22 dB，因此构建直接失败。
+GAOKUN3_WLAN_BOARD := $(LOCAL_PATH)/firmware/ath11k/WCN6855/hw2.0/board-2.bin
+ifneq ($(shell grep -qaF 'subsystem-device=0108,qmi-chip-id=18,qmi-board-id=255,variant=HW_GK3' $(GAOKUN3_WLAN_BOARD) 2>/dev/null && echo yes),yes)
+$(error WCN6855 board-2.bin lacks the qmi-chip-id=18 HW_GK3 board name: see device/huawei/gaokun3/firmware/README.md)
+endif
 PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/firmware/ath11k/WCN6855/hw2.0/amss.bin:$(TARGET_COPY_OUT_VENDOR)/firmware/ath11k/WCN6855/hw2.0/amss.bin \
     $(LOCAL_PATH)/firmware/ath11k/WCN6855/hw2.0/board-2.bin:$(TARGET_COPY_OUT_VENDOR)/firmware/ath11k/WCN6855/hw2.0/board-2.bin \
