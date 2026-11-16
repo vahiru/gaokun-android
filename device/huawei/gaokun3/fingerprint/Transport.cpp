@@ -193,6 +193,12 @@ bool Transport::captureRaw(uint8_t* data, size_t bytes) {
     }
     return true;
 }
+bool Transport::discardPending() {
+    if (profile_->sensor == Sensor::kGoodix) return true;
+    LOG(INFO) << "Fingerprint frame pending while waiting for lift-off; discarding it";
+    std::vector<uint8_t> raw(profile_->captureBytes);
+    return captureRaw(raw.data(),raw.size());
+}
 bool Transport::capture(Gaokun3Frame* frame, bool* usable) {
     std::vector<uint8_t> raw(profile_->captureBytes);
     if (!captureRaw(raw.data(),raw.size())) return false;

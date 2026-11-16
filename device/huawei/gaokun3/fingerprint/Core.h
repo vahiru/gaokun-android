@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 #include <array>
+#include <map>
 #include <cstdint>
 #include <cstddef>
 #include <memory>
@@ -140,6 +141,23 @@ void learn(Enrollment& e, const Gaokun3Frame& probe);
 constexpr float kEnrollCoverage = 0.6f;
 enum class EnrollFrame { kTake, kPartial, kRepeat };
 EnrollFrame checkEnrollFrame(const Gaokun3Frame& frame, const Frames& taken);
+
+// 录入用的challenge按用户保存在服务里，不随会话销毁：传感器出错时HAL会退役当前会话，
+// 框架新建会话后，设置用原来的授权令牌重试录入，新会话须能识别这个challenge。
+// 每个用户最多kMax个，生成后kLifetimeMs内有效；时间由调用方给出（单调时钟毫秒）。
+class Challenges {
+  public:
+    static constexpr size_t kMax = 16;
+    static constexpr int64_t kLifetimeMs = 10 * 60 * 1000;
+    // 返回0表示无法生成：随机数失败，或该用户未过期的challenge已满。
+    int64_t generate(int32_t user, int64_t nowMs);
+    void revoke(int32_t user, int64_t challenge);
+    bool valid(int32_t user, int64_t challenge, int64_t nowMs);
+  private:
+    std::mutex mutex_;
+    // 用户 -> (challenge -> 生成时间)
+    std::map<int32_t, std::map<int64_t, int64_t>> issued_;
+};
 
 // Failure count is persisted in Store. Runtime deadlines use a monotonic clock.
 // Restarting the HAL at a timed boundary imposes another 30 seconds, never less.

@@ -2,6 +2,7 @@
 // Linker wrappers for the session tests' fixed transport devices only.
 #pragma once
 #include "gaokun3_fpcmd.h"
+#include <algorithm>
 #include <cassert>
 #include <cstdarg>
 #include <fcntl.h>
@@ -15,6 +16,13 @@ static size_t mockCipherCursor=0;
 static std::vector<int> mockStatusSamples;
 static size_t mockStatusCursor=0;
 static std::atomic_int mockStatusReads{0};
+// FocalTech的状态位表示有一帧待读：第n次读状态（从1开始计数）在mockReadyAt中时置位，
+// 之后始终为1，直到一次成功的CAPTURE将其读出。开启mockReadyModel后取代mockStatusSamples。
+static bool mockReadyModel=false, mockReady=false;
+static std::vector<int> mockReadyAt;
+// 前几次CAPTURE依次以这些errno失败，帧仍保持待读。
+static std::vector<int> mockCaptureErrors;
+static size_t mockCaptureErrorCursor=0;
 static bool mockOwned=false, mockLoaded=false, mockHigh=false;
 extern "C" int __real_open(const char*, int, ...);
 extern "C" int __real_close(int);
@@ -43,15 +51,31 @@ extern "C" int __wrap_ioctl(int fd, unsigned long command, ...) {
     if (fd==100000) {
         if (command==GAOKUN3_FPCMD_IOC_LOAD) { assert(!mockLoaded); mockLoaded=true; ++mockLoads; return 0; }
         if (command==GAOKUN3_FPCMD_IOC_UNLOAD) { assert(mockLoaded); mockLoaded=false; ++mockUnloads; return 0; }
+        if (command==GAOKUN3_FPCMD_IOC_SET_SENSOR) {
+            assert(mockOwned && *static_cast<uint32_t*>(arg)==GAOKUN3_FPCMD_SENSOR_GOODIX); return 0;
+        }
         if (command==GAOKUN3_FPCMD_IOC_CAPTURE) {
             auto* request=static_cast<gaokun3_fpcmd_capture*>(arg);
-            assert(request->image_bytes==mockCipher.size() && request->reserved==0);
+            assert(request->reserved==0);
+            if (mockCaptureErrorCursor<mockCaptureErrors.size()) {
+                ++mockCaptures; errno=mockCaptureErrors[mockCaptureErrorCursor++]; return -1;
+            }
+            mockReady=false;
+            if (request->image_bytes==gaokun3::kGoodix.captureBytes) {
+                memset(reinterpret_cast<void*>(request->user_ptr),0,request->image_bytes);
+                ++mockCaptures; return 0;
+            }
+            assert(request->image_bytes==mockCipher.size());
             const auto& cipher=mockCipherCursor<mockCipherQueue.size() ? mockCipherQueue[mockCipherCursor++] : mockCipher;
             memcpy(reinterpret_cast<void*>(request->user_ptr),cipher.data(),cipher.size());
             ++mockCaptures; return 0;
         }
         if (command==GAOKUN3_FPCMD_IOC_GET_FINGER_STATUS) {
-            ++mockStatusReads;
+            const int read=++mockStatusReads;
+            if (mockReadyModel) {
+                if (std::find(mockReadyAt.begin(),mockReadyAt.end(),read)!=mockReadyAt.end()) mockReady=true;
+                *static_cast<uint8_t*>(arg)=mockReady; return 0;
+            }
             int sample=mockStatusCursor<mockStatusSamples.size() ? mockStatusSamples[mockStatusCursor++] : 0;
             if (sample<0) { errno=-sample; return -1; }
             *static_cast<uint8_t*>(arg)=sample; return 0;
@@ -82,4 +106,6 @@ static void resetMockTransport() {
     assert(!mockOwned && !mockLoaded); mockLoads=mockUnloads=0;
     mockCipher.fill(0); mockCaptures=0; mockCipherQueue.clear(); mockCipherCursor=0;
     mockStatusSamples.clear(); mockStatusCursor=0; mockStatusReads=0;
+    mockReadyModel=mockReady=false; mockReadyAt.clear();
+    mockCaptureErrors.clear(); mockCaptureErrorCursor=0;
 }

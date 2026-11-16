@@ -27,6 +27,28 @@ int64_t Lockout::remaining(uint32_t failures, int64_t nowMs) {
     }
     return std::max(int64_t(0), untilMs_ - nowMs);
 }
+int64_t Challenges::generate(int32_t user, int64_t nowMs) {
+    std::lock_guard lock(mutex_);
+    auto& issued = issued_[user];
+    for (auto i = issued.begin(); i != issued.end();)
+        i = nowMs - i->second > kLifetimeMs ? issued.erase(i) : std::next(i);
+    const int64_t c = randomId();
+    if (!c || issued.size() >= kMax || issued.count(c)) return 0;
+    issued[c] = nowMs;
+    return c;
+}
+void Challenges::revoke(int32_t user, int64_t challenge) {
+    std::lock_guard lock(mutex_);
+    const auto it = issued_.find(user);
+    if (it != issued_.end()) it->second.erase(challenge);
+}
+bool Challenges::valid(int32_t user, int64_t challenge, int64_t nowMs) {
+    std::lock_guard lock(mutex_);
+    const auto it = issued_.find(user);
+    if (it == issued_.end()) return false;
+    const auto c = it->second.find(challenge);
+    return c != it->second.end() && nowMs - c->second <= kLifetimeMs;
+}
 void Lockout::reset() {
     std::lock_guard lock(mutex_);
     timedCount_ = 0; untilMs_ = 0;
