@@ -286,7 +286,7 @@ TEST(Authentication, FrameGapDoesNotCountAnAttemptOrLockout) {
     session->close();EXPECT_TRUE(waitFor(cb->closes));
     EXPECT_EQ(mockCaptures.load(),2);EXPECT_EQ(cb->successes.load(),1);
     EXPECT_EQ(cb->rejections.load(),0);EXPECT_EQ(cb->timedLockouts.load(),0);
-    gaokun3::Store restored(dir.data()+"/gaokun3-templates.db");
+    gaokun3::Store restored(dir.data()+"/gaokun3-templates.db",gaokun3::kFocalTech);
     ASSERT_TRUE(restored.load());EXPECT_EQ(restored.failures,0u);
 }
 TEST(Authentication, RejectedWindowDoesNotRequireReadyFlagToClear) {
@@ -306,7 +306,7 @@ TEST(Authentication, RejectedWindowDoesNotRequireReadyFlagToClear) {
     signal->cancel();session->close();EXPECT_TRUE(waitFor(cb->closes));
     EXPECT_EQ(cb->successes.load(),1);EXPECT_EQ(cb->rejections.load(),1);
     EXPECT_EQ(cb->timedLockouts.load(),0);
-    gaokun3::Store restored(dir.data()+"/gaokun3-templates.db");
+    gaokun3::Store restored(dir.data()+"/gaokun3-templates.db",gaokun3::kFocalTech);
     ASSERT_TRUE(restored.load());EXPECT_EQ(restored.failures,0u);
 }
 }
