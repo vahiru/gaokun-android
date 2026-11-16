@@ -44,7 +44,7 @@ permissions:
 
 env:
   ROM_REPO: vahiru/gaokun-android
-  ROM_TAG: v1.0.0-rc.3
+  ROM_TAG: v1.0.0-rc.4
   FW_REPO: KawaiiHachimi/linux-gaokun-buildbot
   FW_COMMIT: 315528c028843794ccd0f3d9dab373b03033150f
 
@@ -177,5 +177,5 @@ jobs:
         run: |
           pre=(); [ '${{ needs.build.outputs.prerelease }}' = yes ] && pre=(--prerelease)
           gh release create "live-installer-v$V" -R "$GITHUB_REPOSITORY" --draft --latest=false "${pre[@]}" \
-            --title "LiveCD installer v$V" --notes "Draft: write the release notes before publishing." \
+            --title "Live installer v$V" --notes "Draft: write the release notes before publishing." \
             dist/*.iso dist/SHA256SUMS dist/release.txt

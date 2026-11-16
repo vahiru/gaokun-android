@@ -1,7 +1,7 @@
 name: gk3_installer
 description: "gaokun3 (MateBook E Go) Android installer"
 publish_to: 'none'
-version: 0.2.0-rc.2+3
+version: 0.2.0+4
 resolution: workspace
 
 # ⚠️ 依赖刻意只有 Flutter SDK 自带的两个（本地化）与工作区里的 gk3_common。本仓其余代码都不拉网络依赖

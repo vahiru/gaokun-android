@@ -197,7 +197,7 @@
   "errBackend": "Unable to start the installer backend: {detail}",
   "errExit": "Operation did not complete (exit code {code})",
   "shellOpen": "Open terminal",
-  "shellHint": "A root shell with disk utilities (sgdisk, parted, resize2fs) is available on the second virtual terminal: press Ctrl+Alt+F2 to switch to it, and Ctrl+Alt+F1 to return here.",
+  "shellHint": "A root shell with disk utilities (such as sgdisk and resize2fs) is available on the second virtual terminal: press Ctrl+Alt+F2 to switch to it, and Ctrl+Alt+F1 to return here.",
   "fixtureBadge": "Demo data: {scenario}",
   "stepPrep": "Preparing…",
   "modeWhyEspOurs": "This EFI system partition already contains Gaokun Android boot entries (used by another installation); installing again would overwrite them.",
