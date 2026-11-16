@@ -59,22 +59,9 @@
 
 相关讨论见[issue #56](https://github.com/vahiru/gaokun-android/issues/56)。
 
-### 开机菜单里的各项是什么？
+### 开机菜单怎么操作、各项是什么？
 
-开机菜单默认停留5秒，不做选择则启动默认项。
-
-| 菜单项 | 说明 |
-|---|---|
-| `Android` | 默认启动的Android。它会自动选择槽位，更新后的系统反复无法启动时自动退回上一版本 |
-| `Android (previous loader)` | 上一版的启动程序，供`Android`一项出现问题时使用 |
-| `Android fastboot / boot menu` | fastboot模式，见[安装说明](INSTALL.zh-CN.md#fastboot) |
-| `crDroid … (gaokun3) — slot _a`<br>`crDroid … (gaokun3) — slot _b` | 直接启动某一个槽位的Android，用于排查问题。更新后，旧槽位的条目将无法启动，见[下文](#更新后出了问题能退回上一版本吗) |
-| `gaokun3 installer` | 本机磁盘上有安装器分区时出现，启动Live安装器 |
-| `Windows Boot Manager` | 双系统时出现，进入Windows |
-
-### 不连接键盘盖能操作开机菜单吗？
-
-可以。不连接键盘盖时，按机身音量上/下键移动光标、按电源键确认；连接键盘盖时，也可以用方向键选择、回车确认。
+开机菜单默认停留5秒，不连接键盘盖时可用机身音量上/下键移动光标、按电源键确认（连接键盘盖时也可用方向键和回车）。常用菜单项见[安装说明](INSTALL.zh-CN.md#开机菜单)；菜单中另列出的`Android (previous loader)`与按槽位区分的`crDroid … — slot _a / _b`条目仅供排查问题使用（更新后旧槽位条目将无法启动，见[下文](#更新后出了问题能退回上一版本吗)）。
 
 ### 开机直接进入了Windows，没有出现开机菜单
 

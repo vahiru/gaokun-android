@@ -71,7 +71,7 @@ body:
     attributes:
       label: Release and installer version / 系统与安装器版本
       description: The installer version is shown at the bottom of its side bar. / 安装器版本显示在它的侧边栏底部。
-      placeholder: "v1.0.0-rc.3, installer 0.2.0-rc.2"
+      placeholder: "v1.0.0-rc.4, Windows installer 0.1.0"
     validations:
       required: true
 

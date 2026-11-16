@@ -74,7 +74,7 @@
 
 | | Windows安装器 | Live安装器 |
 |---|---|---|
-| 支持的操作 | 安装到系统磁盘的未分配空间（与Windows双系统）；卸载Android；制作Live安装器的安装介质 | 保留现有系统（双系统）；清除整个磁盘；重新安装Android（默认清除数据，可选保留）；删除分区；删除安装器分区 |
+| 支持的操作 | 安装到系统磁盘的未分配空间（与Windows双系统）；卸载Android；制作独立安装介质（Live安装器） | 保留现有系统（双系统）；清除整个磁盘；重新安装Android（默认清除数据，可选保留）；删除分区；删除安装器分区 |
 | 运行方式 | 在机器上的Windows中运行 | 从U盘或本机磁盘上的安装器分区启动 |
 | 系统安装文件 | 联网下载，或使用已下载的本地文件 | 随安装介质附带，安装时不联网 |
 | 获取方式 | [Releases](https://github.com/vahiru/gaokun-android/releases)页面中的`Windows installer`发布 | [Releases](https://github.com/vahiru/gaokun-android/releases)页面中的`Live installer`发布 |

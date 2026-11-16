@@ -22,7 +22,7 @@
 
 If Windows is still on the machine, you can open the firmware settings from Windows; see the [install guide](INSTALL.md#if-you-want-to-keep-windows). The keys for entering the firmware settings and the boot menu at power-on, and how to do it without the keyboard cover, have not been documented yet. If you know them, please tell us in the community groups or in an issue.
 
-To boot from a USB drive, turn off Secure Boot, plug in the Live installer's USB drive and choose it in the firmware's boot menu.
+To boot from a USB drive, disable Secure Boot, plug in the Live installer's USB drive and choose it in the firmware's boot menu.
 
 ### USB sticks do not appear in the firmware's boot menu, and Huawei's official recovery does not start
 
@@ -60,28 +60,15 @@ Every version before 1.0.0-rc.3 writes the log into the mainboard firmware's var
 
 See [issue #56](https://github.com/vahiru/gaokun-android/issues/56) for the discussion.
 
-### What are the entries in the boot menu?
+### How do I use the boot menu, and what are its entries?
 
-The boot menu stays for 5 seconds by default. If you do not choose, the default entry starts.
-
-| Entry | Purpose |
-|---|---|
-| `Android` | Android, started by default. It picks the slot by itself, and goes back to the previous version if an updated system repeatedly fails to start |
-| `Android (previous loader)` | The previous version of the boot program, for when the `Android` entry has a problem |
-| `Android fastboot / boot menu` | Fastboot mode; see the [install guide](INSTALL.md#fastboot) |
-| `crDroid … (gaokun3) — slot _a`<br>`crDroid … (gaokun3) — slot _b` | Start Android from one particular slot, for troubleshooting. After an update, the old slot's entry no longer starts; see [below](#something-broke-after-an-update-can-i-go-back-to-the-previous-version) |
-| `gaokun3 installer` | Shown when the internal disk has an installer partition; starts the Live installer |
-| `Windows Boot Manager` | Windows, with dual boot |
-
-### Can I use the boot menu without the keyboard cover?
-
-Yes. Without the keyboard cover, use the volume up/down buttons to move the cursor and the power button to confirm; with the keyboard cover attached, you can also use the arrow keys and Enter.
+The boot menu stays for 5 seconds by default; without the keyboard cover, use the volume up/down buttons to move the cursor and the power button to confirm (with the keyboard cover attached, you can also use the arrow keys and Enter). The main entries are listed in the [install guide](INSTALL.md#the-boot-menu); the extra `Android (previous loader)` and per-slot `crDroid … — slot _a / _b` entries are for troubleshooting only (after an update, the old slot's entry no longer starts; see [below](#something-broke-after-an-update-can-i-go-back-to-the-previous-version)).
 
 ### The machine starts Windows directly, without the boot menu
 
 There are two possible causes:
 
-- **Secure Boot has been turned on again**, for example after a firmware update or after restoring the default settings. Turn Secure Boot off again in the firmware settings; see the [install guide](INSTALL.md#if-you-want-to-keep-windows).
+- **Secure Boot has been enabled again**, for example after a firmware update or after restoring the default settings. Disable Secure Boot again in the firmware settings; see the [install guide](INSTALL.md#if-you-want-to-keep-windows).
 - **A Windows update has replaced the default boot file on the EFI partition.** The boot menu no longer appears, so `gaokun3 installer` on the internal disk cannot be reached either. In Windows, use the Windows installer to create a USB drive with the latest version (see the [install guide](INSTALL.md#creating-installation-media)), start the Live installer from it, choose "Reinstall Android" and select "Keep user data"; this writes the boot menu again. The version you install must not be older than the one on the tablet, or it may not start; the system to start by default has to be chosen again on the confirmation page. This has not been tested yet.
 
 ## Updates and going back
@@ -112,7 +99,7 @@ When reporting a problem, please describe what you did and what happened, and in
 ### Setting up adb
 
 1. Install Google's SDK Platform Tools on your computer; they include `adb`.
-2. Turn on Developer options and USB debugging on the tablet; see [below](#turning-on-developer-options).
+2. Enable Developer options and USB debugging on the tablet; see [below](#enabling-developer-options).
 3. Connect the tablet to the computer with a USB cable and run `adb devices` on the computer. Use the USB-C port **next to the power button**; the other port cannot be used for USB debugging.
 4. If the computer does not see the device, unplug the cable and plug it in again. With some computers the two sides occasionally negotiate the wrong way round, so that the tablet powers the computer and neither sees the other; see [known limitations](known-limitations.md#plugged-into-a-computer-the-tablet-may-charge-the-computer-instead).
 5. If a cable is inconvenient, use [wireless debugging](#wireless-debugging).
@@ -162,7 +149,7 @@ Whether "Bug report" in Developer options works on this machine has not been tes
 Erase your data as follows:
 
 1. Start the Live installer: choose `gaokun3 installer` in the boot menu if it is there, otherwise boot from the Live installer's USB drive.
-2. Choose "Reinstall Android" and do not select "Keep user data" (it is off by default).
+2. Choose "Reinstall Android" and do not select "Keep user data" (disabled by default).
 
 The user data partition on this machine is not encrypted (see [known limitations](known-limitations.md)), so please make sure to erase it before selling the machine or sending it for repair.
 
@@ -182,26 +169,26 @@ In this case Windows has already been deleted, and the only way back is to reins
 
 ## Developer options and adb
 
-### Turning on Developer options
+### Enabling Developer options
 
 1. In Settings → About tablet, tap "Build number" seven times and enter your screen lock when asked.
 2. From then on you can find it under Settings → System → Developer options.
 
 ### USB debugging
 
-Turn on "USB debugging" in Developer options and connect the computer with a cable. The tablet asks "Allow USB debugging?"; check the computer's fingerprint, tick "Always allow from this computer" and tap Allow. Computers that have not been authorized cannot connect.
+Enable "USB debugging" in Developer options and connect the computer with a cable. The tablet asks "Allow USB debugging?"; check the computer's fingerprint, tick "Always allow from this computer" and tap Allow. Computers that have not been authorized cannot connect.
 
 ### Wireless debugging
 
 1. Connect the tablet and the computer to the same Wi-Fi network.
-2. In Developer options, turn on "Wireless debugging", tap "Pair device with pairing code", and note the IP address, port and pairing code.
+2. In Developer options, enable "Wireless debugging", tap "Pair device with pairing code", and note the IP address, port and pairing code.
 3. On the computer, run `adb pair <IP>:<pairing port>` and enter the pairing code. Each computer only needs to pair once.
 4. Then run `adb connect <IP>:<port>`. This port is the one shown on the "Wireless debugging" page, not the pairing port.
 
-Please turn wireless debugging off when you are not using it.
+Please disable wireless debugging when not in use.
 
 ### Why doesn't `adb root` work?
 
 Release builds do not support `adb root`. When you need a root shell, first grant root to Shell in the ReSukiSU manager, then use `adb shell su`.
 
-> v0.7.1 and earlier opened network adb on port 5555 without authorization by default, so anyone on the same network could connect and get root. This has been turned off since 1.0.0-rc.1. If you are still on an older version, please update soon, and until then do not join Wi-Fi networks you do not trust.
+> v0.7.1 and earlier opened network adb on port 5555 without authorization by default, so anyone on the same network could connect and get root. This has been disabled since 1.0.0-rc.1. If you are still on an older version, please update soon, and until then do not join Wi-Fi networks you do not trust.
