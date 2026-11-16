@@ -26,14 +26,14 @@
 | 项目 | 状态 | 说明 |
 |---|:--:|---|
 | 启动与系统更新 | ✅ | 支持A/B无缝系统更新 |
-| 恢复出厂设置 | ⚠️ | 还未上机验证，如要清空数据请用图形安装器重装 |
+| 恢复出厂设置 | ⚠️ | 还未上机验证，如要清空数据请用Live安装器重装 |
 | 屏幕 | ✅ | 120 Hz，使用出厂校准的色彩，支持广色域和HDR |
 | GPU | ✅ | 支持硬件加速与Vulkan |
 | 触摸屏 | ✅ | 可在设置里切换日常与游戏模式，日常模式下能消除书写等场景下的手掌误触 |
-| 手写笔（M-Pencil） | ⚠️ | 支持二代和三代M-Pencil，实现了压感、悬停、倾斜和侧边双击功能，笔迹平滑强度可调节，三代M-Pencil尚未实测日常使用效果 |
+| 手写笔（M-Pencil） | ✅ | 兼容二代和三代M-Pencil，支持压感、悬停、倾斜和侧边双击功能，笔迹平滑强度可调节，支持4096级压感 |
 | 磁吸键盘和触控板 | ✅ | |
 | Wi-Fi | ✅ | |
-| Wi-Fi热点 | ⚠️ | 可以开启；还未实际测试使用其他设备经热点上网 |
+| Wi-Fi热点 | ✅ | |
 | 蓝牙 | ⚠️ | 通话时无法使用蓝牙耳机的麦克风 |
 | 扬声器 | ✅ | 可在设置里开启低音增强或华为Histen音效 |
 | 麦克风 | ✅ | 支持波束成形，有可按场景开关的回声消除和降噪 |
@@ -68,35 +68,32 @@
 
 ## 安装
 
-从[**Releases**](https://github.com/vahiru/gaokun-android/releases)取最新版，详细安装操作请见[`docs/INSTALL.zh-CN.md`](docs/INSTALL.zh-CN.md)（英文版[`docs/INSTALL.md`](docs/INSTALL.md)）。安装前**必须关闭Secure Boot**。
+从[**Releases**](https://github.com/vahiru/gaokun-android/releases)页面下载最新版，详细安装操作请见[`docs/INSTALL.zh-CN.md`](docs/INSTALL.zh-CN.md)（英文版[`docs/INSTALL.md`](docs/INSTALL.md)）。安装前**必须关闭Secure Boot**。
 
 目前有两种安装器可供选择：
 
-| | 图形安装器（预览版） | 命令行安装器 |
+| | Windows安装器 | Live安装器 |
 |---|---|---|
-| 支持的安装方式 | 与Windows共存（双系统）；清空整块硬盘后安装；保留分区重新安装Android（默认清除数据，可选保留）；手动调整分区 | 清空整块硬盘后安装 |
-| 运行环境 | 自带的Linux系统，可从U盘启动，也可在Windows中运行`gaokun3-setup.cmd`启动，无需U盘 | arm64 Linux Live U盘，另需下载本仓库的代码；通用的Ubuntu/Debian镜像能否在本机启动，未经验证 |
-| 系统镜像来源 | 随安装介质附带，或联网下载 | 从发布页手动下载`super.img.zst`、`boot.img`和`install-artifacts.sha256` |
-| 获取方式 | 在[v1.0.0-rc.2发布页](https://github.com/vahiru/gaokun-android/releases/tag/v1.0.0-rc.2)下载`gaokun3-installer-0.2.0-rc.2-*`文件（v1.0.0-rc.3未重新制作安装器，U盘镜像内置的是rc.2系统，安装完成后请在设置中更新到rc.3） | 本仓库中的`scripts/install-gaokun3.sh` |
-| 实机测试情况 | "清空整块硬盘后安装"尚未经过实机测试；安装成功后仍然可能发生报错 | 与图形安装器共用同一套安装流程；下文的分区布局目前仅在测试盘上创建过 |
+| 支持的操作 | 安装到系统磁盘的未分配空间（与Windows双系统）；卸载Android；制作独立安装介质（Live安装器） | 保留现有系统（双系统）；清除整个磁盘；重新安装Android（默认清除数据，可选保留）；删除分区；删除安装器分区 |
+| 运行方式 | 在机器上的Windows中运行 | 从U盘或本机磁盘上的安装器分区启动 |
+| 系统安装文件 | 联网下载，或使用已下载的本地文件 | 随安装介质附带，安装时不联网 |
+| 获取方式 | [Releases](https://github.com/vahiru/gaokun-android/releases)页面中的`Windows installer`发布 | [Releases](https://github.com/vahiru/gaokun-android/releases)页面中的`Live installer`发布 |
+| 最新版本 | [Windows安装器0.2.0](https://github.com/vahiru/gaokun-android/releases/tag/windows-installer-v0.2.0) | [Live安装器0.2.0](https://github.com/vahiru/gaokun-android/releases/tag/live-installer-v0.2.0) |
 
-清空全盘安装的默认分区布局：
+清除整个磁盘安装的默认分区布局：
 
 | 分区 | 大小 | 用途 |
 |---|---|---|
 | `esp` | 300 MiB | 开机菜单和各槽位的内核 |
 | `misc` | 4 MiB | 记录A/B槽位的状态 |
 | `metadata` | 32 MiB | Android的元数据 |
-| `super` | 12 GiB | 系统分区，A/B两份 |
 | `boot_a`、`boot_b` | 各64 MiB | 内核和启动镜像，A/B两份 |
-| `gk3rescue` | 1 GiB | 救援系统（可选） |
+| `super` | 12 GiB | 系统分区，A/B两份 |
 | `userdata` | 剩余全部空间 | 用户数据 |
 
-**救援系统：**本机没有可用的Android recovery，救援系统是出问题时的修复手段。它是一个精简的Linux系统，与图形安装器是同一套程序，可以重新安装Android，存放在单独的1 GiB分区中。图形安装器可以一并安装它（安装时勾选"同时安装救援系统"选项）；命令行安装器只在提供了救援系统镜像时才会安装。
+**修复：**本机没有可用的Android recovery。Android无法启动时，请用Live安装器重新安装Android，可以选择保留用户数据。
 
-每次开机时会显示5秒的启动菜单，可以从中进入救援系统；Android卡死时，系统不会自动进入救援系统。需要时请长按电源键强制关机，再次开机后在菜单中用音量键和电源键（或键盘盖的方向键和回车）选择救援系统。如需通过网络（SSH）登录救援系统，请在安装前把自己的SSH公钥放到安装器U盘上，具体做法见[安装说明](docs/INSTALL.zh-CN.md#救援系统)。
-
-**中国境内下载：**GitHub的下载服务器慢或者连不上时，系统镜像（`boot.img`、`super.img.zst`）可从镜像站：`https://ota.072172.xyz/install/<build>/<文件名>`下载，`<build>`即该版OTA包去掉`.zip`的文件名，详见[`docs/INSTALL.zh-CN.md`](docs/INSTALL.zh-CN.md#下载)。
+**中国境内下载：**GitHub的下载服务器慢或者连不上时，系统镜像（`boot.img`、`super.img.zst`）可从镜像站：`https://ota.072172.xyz/install/<build>/<文件名>`下载，`<build>`即该版OTA包去掉`.zip`的文件名，详见[`docs/INSTALL.zh-CN.md`](docs/INSTALL.zh-CN.md#下载)。Windows安装器选择版本时，可以直接把下载源切换为"R2镜像源"。
 
 **更新：**在"设置 → 系统 → 系统更新"界面进行OTA更新，OTA更新包会从上述镜像站下载。网络不畅时也可通过其他途径下载OTA包，在此界面使用"安装本地更新"功能安装放置在平板内部存储空间中的OTA包。
 
@@ -106,11 +103,11 @@
 
 | 项目 | 说明 | 建议 |
 |---|---|---|
-| 数据加密 | 用户数据分区未加密，他人拿到机器即可读取全部数据，锁屏密码无法阻止 | 不要存放敏感资料；出售、送修前用图形安装器重装并清除数据 |
+| 数据加密 | 用户数据分区未加密，他人拿到机器即可读取全部数据，锁屏密码无法阻止 | 不要存放敏感资料；出售、送修前用Live安装器重装并清除数据 |
 | Root | 内核内置ReSukiSU，无法关闭；未安装管理器时处于休眠状态。检测root的应用可能拒绝运行；在管理器中开启adb root后，已授权USB调试的电脑通过adb即可获得root权限 | 不需要时不要开启adb root；只授权信任的电脑，不使用时关闭USB调试和无线调试 |
 | 系统签名 | 系统和更新包使用Android公开的测试密钥签名，任何人都能制作本机会接受的更新包和系统应用 | 只通过设置中的系统更新或本项目的发布页更新，不要安装来源不明的"系统组件" |
 | 启动安全 | 必须关闭Secure Boot，启动链未上锁，系统分区不做完整性校验 | 这是在本机运行Android的前提，无法规避 |
-| 恢复出厂设置 | 设置中的"清除所有数据"未经实测，请勿依赖 | 用图形安装器的"重新安装Android"清除数据 |
+| 恢复出厂设置 | 设置中的"清除所有数据"未经实测，请勿依赖 | 用Live安装器的"重新安装Android"清除数据 |
 | 版本回退 | 新版本首次成功启动后，上一版即被合并覆盖，无法回退；大版本更新还会升级用户数据 | 更新前备份重要数据 |
 | Google认证 | 本机未通过Play保护机制认证，需手动登记后Play商店才能正常使用；Play Integrity无法通过，依赖它的应用（如Google钱包、部分银行应用）无法使用 | 按[安装说明](docs/INSTALL.zh-CN.md#此设备未经play保护机制认证)登记一次 |
 | 国内使用 | 系统只附带Google应用，未预装国内应用商店；无法访问Google时，Play商店、Google服务和网络定位均无法使用 | 从应用官网或应用商店网页版下载安装包 |

@@ -26,10 +26,10 @@ Each entry follows the same format: **Symptom** (what you will run into), **Caus
 
 ### User data is not encrypted
 * **Symptom**: the screen lock only stops others from using the machine directly; it does not stop them from reading its data.
-* **Cause**: the user data partition is an unencrypted ext4 file system. Secure Boot must be disabled, the boot menu offers the installer and the rescue system, and logging in as root in front of the machine needs no password; plugging in a Linux USB stick reads the disk just as well. Whoever has the machine can read photos, chat histories, browser logins, Wi-Fi passwords and everything else.
+* **Cause**: the user data partition is an unencrypted ext4 file system. Secure Boot must be disabled, so plugging in any Linux USB drive (the Live installer included) reads the disk. Whoever has the machine can read photos, chat histories, browser logins, Wi-Fi passwords and everything else.
 * **What to do**:
   * Treat this machine as one whose data anyone holding it can read, and do not keep sensitive material on it.
-  * Before selling it, sending it for repair or lending it out, erase your data with "Reinstall Android" in the graphical installer; see the [FAQ](FAQ.md#erasing-your-data).
+  * Before selling it, sending it for repair or lending it out, erase your data with "Reinstall Android" in the Live installer; see the [FAQ](FAQ.md#erasing-your-data).
   * If file-based encryption is added later, getting it will require wiping data and reinstalling; it cannot arrive through a system update.
 
 ### Root is built into the kernel (KernelSU / ReSukiSU)
@@ -45,7 +45,7 @@ Each entry follows the same format: **Symptom** (what you will run into), **Caus
 * **Symptom**: nothing visible on most machines. But if you partitioned the disk yourself and the EFI partition's GPT partition name is neither `esp` nor `EFI system partition`, system updates and slot switching fail.
 * **Cause**: since 1.0.0-rc.1, SELinux has changed from permissive (log only) to enforcing (actually block). SELinux is the second layer of Android's app sandbox: even an app that finds a vulnerability can do far less. The policy only lets the update and boot control components open the EFI partition by these two names: `esp` is the name the installer gives it when erasing the whole disk, and `EFI system partition` is the name Windows gives it, which is what dual boot uses. Earlier versions scanned every storage device when the partition was not found; enforcing mode does not allow that.
 * **What to do**:
-  * If your EFI partition has a different name, rename it once from any Linux (the installer's terminal or the rescue system will do): `sgdisk -c <N>:esp /dev/nvme0n1`, where N is the EFI partition's number. UEFI only looks at the partition type, so renaming has no side effects. The installer also warns you when it sees such a name.
+  * If your EFI partition has a different name, rename it once from any Linux (for example the Live installer's terminal: press Ctrl+Alt+F2 and log in as root, no password needed): `sgdisk -c <N>:esp /dev/nvme0n1`, where N is the EFI partition's number. UEFI only looks at the partition type, so renaming has no side effects.
   * If something worked on v0.7.1 and no longer does, please report it and attach the output of `adb shell dmesg | grep avc`.
 
 ### The boot chain is unlocked, and system partitions are not verified
@@ -63,7 +63,7 @@ Each entry follows the same format: **Symptom** (what you will run into), **Caus
 ### "Erase all data" in Settings has not been tested
 * **Symptom**: "Erase all data (factory reset)" in Settings is carried out by fastboot mode after a restart, but this has not been tested on a real machine, so there is no guarantee that your data is fully erased.
 * **Cause**: this feature normally relies on Android recovery, which cannot start on this machine, so fastboot mode in the boot menu carries it out instead.
-* **What to do**: erase your data with "Reinstall Android" in the graphical installer, which wipes user data by default; see the [FAQ](FAQ.md#erasing-your-data).
+* **What to do**: erase your data with "Reinstall Android" in the Live installer, which wipes user data by default; see the [FAQ](FAQ.md#erasing-your-data).
 
 ### File transfer over USB: no prompt, and USB 2.0 speed only
 * **Symptom**: when connected to a computer, the tablet does not show the "USB usage" notification. To transfer files, choose "File transfer" or "PTP" in Settings → Connected devices → USB; a portable device called "MateBook E Go" then appears on the computer. The same page offers "USB tethering" and "MIDI". Transfers only reach USB 2.0 speed, about 30 MB/s.
