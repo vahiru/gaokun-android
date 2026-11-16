@@ -11,8 +11,11 @@ namespace aidl::android::hardware::biometrics::fingerprint {
 class Callback final : public BnSessionCallback {
  public:
     std::atomic_int challenges{0}, errors{0}, closes{0}, interactions{0}, lastError{0}, successes{0}, rejections{0}, timedLockouts{0};
+    std::atomic<int64_t> lastChallenge{0};
     std::function<void()> errorHook, closeHook, rejectionHook;
-    ScopedAStatus onChallengeGenerated(int64_t) override { ++challenges; return ScopedAStatus::ok(); }
+    ScopedAStatus onChallengeGenerated(int64_t c) override {
+        lastChallenge=c; ++challenges; return ScopedAStatus::ok();
+    }
     ScopedAStatus onError(Error e, int32_t) override {
         lastError=static_cast<int>(e);
         if (errorHook) errorHook();
@@ -215,6 +218,52 @@ TEST(StatusPolling, TransportIoFailureIsNotRetried) {
     EXPECT_EQ(mockStatusReads.load(),1);
     EXPECT_EQ(cb->lastError.load(),static_cast<int>(Error::HW_UNAVAILABLE));
     EXPECT_EQ(cb->interactions.load(),0);
+}
+TEST(SessionLifecycle, ReplacementAcceptsChallengeOfRetiredSession) {
+    // 传感器出错时HAL报HW_UNAVAILABLE并退役会话；框架新建会话后，设置拿原来的令牌重试录入。
+    resetMockTransport();
+    mockStatusSamples={-EIO,-EIO};
+    TemporaryStore dir;
+    auto hal=ndk::SharedRefBase::make<Fingerprint>(&gaokun3::kFocalTech);
+    auto oldCb=ndk::SharedRefBase::make<Callback>();
+    std::shared_ptr<ISession> old;
+    ASSERT_TRUE(hal->createSession(0,0,oldCb,&old).isOk());
+    std::static_pointer_cast<Session>(old)->setStoreDirectoryForTest(dir.data());
+    ASSERT_TRUE(old->generateChallenge().isOk());
+    ASSERT_TRUE(waitFor(oldCb->challenges));
+    Hat hat{};
+    hat.challenge=oldCb->lastChallenge;
+    hat.userId=1;
+    hat.authenticatorType=keymaster::HardwareAuthenticatorType::PASSWORD;
+    hat.mac.assign(32,0);
+    Signal signal;
+    ASSERT_TRUE(old->enroll(hat,&signal).isOk());
+    ASSERT_TRUE(waitFor(oldCb->errors));
+    std::static_pointer_cast<Session>(old)->waitDrained();
+    EXPECT_EQ(oldCb->lastError.load(),static_cast<int>(Error::HW_UNAVAILABLE));
+    // 新会话能识别旧会话生成的challenge，于是初始化传感器并读到同样的错误，
+    // 而不是在开始时就以UNABLE_TO_PROCESS结束。
+    auto newCb=ndk::SharedRefBase::make<Callback>();
+    std::shared_ptr<ISession> current;
+    ASSERT_TRUE(hal->createSession(0,0,newCb,&current).isOk());
+    std::static_pointer_cast<Session>(current)->setStoreDirectoryForTest(dir.data());
+    ASSERT_TRUE(current->enroll(hat,&signal).isOk());
+    ASSERT_TRUE(waitFor(newCb->errors));
+    // 以UNABLE_TO_PROCESS结束的会话不会退役，先查错误码再等它关闭。
+    ASSERT_EQ(newCb->lastError.load(),static_cast<int>(Error::HW_UNAVAILABLE));
+    std::static_pointer_cast<Session>(current)->waitDrained();
+    EXPECT_EQ(mockStatusReads.load(),2);
+    // 另一个用户的会话不接受这个challenge，也不去碰传感器。
+    auto otherCb=ndk::SharedRefBase::make<Callback>();
+    std::shared_ptr<ISession> other;
+    ASSERT_TRUE(hal->createSession(0,10,otherCb,&other).isOk());
+    std::static_pointer_cast<Session>(other)->setStoreDirectoryForTest(dir.data());
+    ASSERT_TRUE(other->enroll(hat,&signal).isOk());
+    ASSERT_TRUE(waitFor(otherCb->errors));
+    EXPECT_EQ(otherCb->lastError.load(),static_cast<int>(Error::UNABLE_TO_PROCESS));
+    EXPECT_EQ(mockLoads.load(),2);
+    other->close();
+    EXPECT_TRUE(waitFor(otherCb->closes));
 }
 }
 

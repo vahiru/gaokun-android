@@ -159,6 +159,23 @@ int main() {
     encrypt(); assert(decode(cipher.data(),&flat));
     assert(score(flat,e.frames) >= kMatchThreshold); // AES, LE16 layout and inverted scaling agree.
     plain.fill(255); encrypt(); assert(!decode(cipher.data(),&flat));
+    // challenge按用户保存：有效期、撤销、用户隔离、每个用户的上限。
+    {
+        Challenges c;
+        const int64_t a = c.generate(0,1000);
+        assert(a && c.valid(0,a,1000) && c.valid(0,a,1000+Challenges::kLifetimeMs));
+        assert(!c.valid(0,a,1001+Challenges::kLifetimeMs));
+        const int64_t other = c.generate(10,1000);   // 另一个用户也持有challenge
+        assert(other && other != a && !c.valid(10,a,1000) && !c.valid(0,other,1000));
+        const int64_t b = c.generate(0,2000);
+        assert(b && b != a);
+        c.revoke(0,b); assert(!c.valid(0,b,2000) && c.valid(0,a,2000));
+        c.revoke(10,a); assert(c.valid(0,a,2000) && c.valid(10,other,2000));
+        Challenges full;
+        for (size_t i = 0; i < Challenges::kMax; ++i) assert(full.generate(0,5000));
+        assert(!full.generate(0,5000) && full.generate(1,5000));
+        assert(full.generate(0,5001+Challenges::kLifetimeMs));   // expired ones free their slots
+    }
     Lockout tracker;
     assert(tracker.remaining(5,1000) == 30000);
     assert(tracker.remaining(5,2000) == 29000);

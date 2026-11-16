@@ -47,12 +47,13 @@ class Session final : public BnSession {
     Session(const gaokun3::SensorProfile& profile, int32_t user,
             std::shared_ptr<ISessionCallback> cb,
             std::shared_ptr<gaokun3::Lockout> lockout,
+            std::shared_ptr<gaokun3::Challenges> challenges,
             std::shared_ptr<std::mutex> hardwareMutex,
             std::shared_ptr<Session> predecessor = nullptr)
         : cb_(std::move(cb)),
           dir_("/data/vendor_de/"+std::to_string(user)+"/fpdata"),
           store_(dir_+"/gaokun3-templates.db",profile), transport_(profile),
-          lockout_(std::move(lockout)),
+          lockout_(std::move(lockout)), user_(user), challenges_(std::move(challenges)),
           hardwareMutex_(std::move(hardwareMutex)), predecessor_(std::move(predecessor)),
           worker_([this] { loop(); }) {}
     ~Session() override {
@@ -87,18 +88,14 @@ class Session final : public BnSession {
 #endif
     ScopedAStatus generateChallenge() override {
         return command([this] {
-            for (auto i = challenges_.begin(); i != challenges_.end();) {
-                if (Clock::now()-i->second > 10min) i = challenges_.erase(i); else ++i;
-            }
-            int64_t c = gaokun3::randomId();
-            if (!c || challenges_.size() >= 16) { error(Error::UNABLE_TO_PROCESS); return; }
-            challenges_[c] = Clock::now();
+            const int64_t c = challenges_->generate(user_,monotonicMs());
+            if (!c) { error(Error::UNABLE_TO_PROCESS); return; }
             cb_->onChallengeGenerated(c);
         });
     }
     ScopedAStatus revokeChallenge(int64_t c) override {
         return command([this,c] {
-            challenges_.erase(c); cb_->onChallengeRevoked(c);
+            challenges_->revoke(user_,c); cb_->onChallengeRevoked(c);
         });
     }
     ScopedAStatus enroll(const Hat& hat, Signal* out) override {
@@ -318,10 +315,10 @@ class Session final : public BnSession {
 #endif
         if (!load()) return;
         if (kind == 1) {
-            auto c = challenges_.find(hat.challenge);
-            if (c == challenges_.end() || !hat.userId || hat.mac.size() != 32 ||
-                !(static_cast<int32_t>(hat.authenticatorType) & 1) ||
-                Clock::now()-c->second > 10min) { error(Error::UNABLE_TO_PROCESS); return; }
+            if (!challenges_->valid(user_,hat.challenge,monotonicMs()) || !hat.userId ||
+                hat.mac.size() != 32 || !(static_cast<int32_t>(hat.authenticatorType) & 1)) {
+                error(Error::UNABLE_TO_PROCESS); return;
+            }
             // Only structural enrollment authorization is possible at Class 1.
             if (store_.enrollments.size() >= gaokun3::kMaxFingers) { error(Error::NO_SPACE); return; }
         }
@@ -496,6 +493,8 @@ class Session final : public BnSession {
     gaokun3::Store store_;
     gaokun3::Transport transport_;
     std::shared_ptr<gaokun3::Lockout> lockout_;
+    const int32_t user_;
+    std::shared_ptr<gaokun3::Challenges> challenges_;
     std::shared_ptr<std::mutex> hardwareMutex_;
     std::shared_ptr<Session> predecessor_;
     Clock::time_point lockoutDeadline_ = Clock::time_point::max();
@@ -511,7 +510,6 @@ class Session final : public BnSession {
     std::deque<std::function<void()>> queue_;
     std::shared_ptr<std::atomic_bool> cancel_;
     bool quit_ = false;
-    std::map<int64_t,Clock::time_point> challenges_;
     std::thread worker_;
 };
 
@@ -572,7 +570,7 @@ class Fingerprint final : public BnFingerprint {
         // exclusive kernel FD release shuts down the TA before another open.
         auto& lockout = lockouts_[user];
         if (!lockout) lockout = std::make_shared<gaokun3::Lockout>();
-        session_ = ndk::SharedRefBase::make<Session>(*profile_,user,cb,lockout,hardwareMutex_,
+        session_ = ndk::SharedRefBase::make<Session>(*profile_,user,cb,lockout,challenges_,hardwareMutex_,
                                                      std::move(predecessor));
         if (!session_->linkToDeath()) { session_->close(); return unavailable(); }
         *out = session_; return ScopedAStatus::ok();
@@ -583,6 +581,7 @@ class Fingerprint final : public BnFingerprint {
     std::shared_ptr<Session> session_;
     std::vector<std::shared_ptr<Session>> retired_;
     std::map<int32_t,std::shared_ptr<gaokun3::Lockout>> lockouts_;
+    std::shared_ptr<gaokun3::Challenges> challenges_ = std::make_shared<gaokun3::Challenges>();
     std::shared_ptr<std::mutex> hardwareMutex_ = std::make_shared<std::mutex>();
 };
 }
