@@ -165,6 +165,14 @@ else
     echo "· 本机没有 prebuilt-gk3boot/gk3boot.efi，保留构建机上的那份（若有）"
 fi
 
+echo "═══ 2e. Wi-Fi板级数据：给构建机上的board-2.bin补充qmi-chip-id=18的HW_GK3名称 ═══"
+# firmware/不同步，board-2.bin只在构建机上。设备树按HW_GK3选择板级数据（patches/kernel/dts/0025），缺少这个
+#   名称时驱动改用通用数据，信号弱约22 dB，device.mk也会因此使构建失败。脚本经stdin送到构建机执行：
+#   已包含该名称时不改动文件，数据的SHA-256不符时报错。见firmware/README.md第二节。
+$SSH "vahiru@$HOST" 'python3 -I - ~/crdroid/device/huawei/gaokun3/firmware/ath11k/WCN6855/hw2.0/board-2.bin' \
+    < "$REPO/scripts/wifi/ath11k-board-alias.py" || die "无法为构建机上的board-2.bin补充HW_GK3名称（见上）—— 见firmware/README.md第二节"
+ok "board-2.bin包含qmi-chip-id=18的HW_GK3名称"
+
 echo "═══ 3. 断言：构建机上不入库的构建输入都在 ═══"
 # adb_keys 的下限：开发构建要 >500 字节（一把 RSA 公钥约 720），发布构建不要求（0）。
 if [ "${GAOKUN3_DEV_BUILD:-}" = 1 ]; then AK_MIN=500; AK_WHAT="adb_keys（开发构建）"

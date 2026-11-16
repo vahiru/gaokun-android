@@ -55,7 +55,13 @@ UEFI 2.16 (关闭Secure Boot)
 
 ### 1. Wi-Fi（WCN6855 / `ath11k_pci`）
 
-- **固件与初始化**：PCIe设备`0002:01:00.0`加载`/vendor/firmware/ath11k/WCN6855/hw2.1/`下的`amss.bin`、`m3.bin`、`board-2.bin`与`regdb.bin`（`board-id`未收录时自动回退至通用`bus=pci,qmi-chip-id=2,qmi-board-id=255`条目）。
+- **固件与初始化**：PCIe设备`0006:01:00.0`（WCN6855 hw2.1，上报chip_id 0x12）加载`/vendor/firmware/ath11k/WCN6855/hw2.1/`下的`amss.bin`、`m3.bin`、`board-2.bin`与`regdb.bin`。
+- **板级数据（射频校准）**：`ath11k`以PCI ID、`qmi-chip-id=18`、`qmi-board-id=255`和设备树的`qcom,calibration-variant`组成名称，在`board-2.bin`中查找板级数据，找不到时去掉变体名再查一次。设备树使用`HW_GK3`（`patches/kernel/dts/0025`），这份数据在`linux-firmware`中也用于联想X13s的`qmi-chip-id=2`条目（X13s的`qmi-chip-id=18`条目与`NTM_TW220`共用另一份数据）。`linux-firmware`只在`qmi-chip-id=2`下登记了它，构建前需运行`scripts/wifi/ath11k-board-alias.py`补充`qmi-chip-id=18`的名称（见[`firmware/README.md`](../../device/huawei/gaokun3/firmware/README.md)）。三份候选数据的实测对比如下：
+  - **`HW_GK3`**：固件按周围AP确定国家，2.4 GHz第12、13信道可被动扫描；5 GHz信号与吞吐量和`NTM_TW220`相同。
+  - **`NTM_TW220`（此前使用）**：国家固定为US，无论设置哪个国家，2.4 GHz都只开放到第11信道（规则上限为2472 MHz），第12、13信道上的网络扫描不到。
+  - **不指定变体（通用数据）**：信号减弱约22 dB，吞吐量只有前两者的几分之一。
+
+  `HW_GK3`原本登记在`qmi-chip-id=2`的芯片上，用于本机时只对比过2.4 GHz和5 GHz，6 GHz尚未经实测。
 - **持久化MAC地址生成**：因主线`ath11k`未从UEFI/NV读取出厂Wi-Fi MAC，`init.gaokun3.rc`在开机时运行`wpa_supplicant_mac_gen`脚本，在`/data/vendor/wifi/wlan_mac.bin`生成并持久化一个本地管理MAC地址，避免每次重启MAC变化导致路由器DHCP租约重置。
 - **WPA3（SAE-H2E）与多频段**：支持2.4 GHz / 5 GHz / 6 GHz（802.11ax 160 MHz）及WPA2-PSK与WPA3-SAE（`sae_pwe=1` H2E）。
 - **CMA内存预留与休眠恢复（`patches/kernel/dts/0011`）**：`ath11k`在每次挂起/恢复（或模块重初始化）时向DMA子系统申请高阶连续物理内存（order-9，2 MiB×32段）。设备树在`0xec000000`处配置512 MiB `shared-dma-pool`（`reusable`），确保系统长时间运行内存碎片化后`ath11k`仍能从CMA池稳定分配DMA缓冲。

@@ -264,6 +264,8 @@ KPATCHES=(
     # ─── 10. kernel/dts：SC8280XP 与 gaokun3 设备树 ───
     # 0004→0005→0006→0008→0012 依次叠在 sc8280xp-huawei-gaokun3-camera.dtsi 上（0006 需 CONFIG_LEDS_CLASS_FLASH=y、
     # CONFIG_LEDS_QCOM_FLASH=y）；0009→0010 启用 iris 视频解码节点；0011 调整默认 CMA 范围（影响 prebuilt-boot dtb）。
+    # 0025把Wi-Fi校准变体改为HW_GK3，要求vendor的board-2.bin带qmi-chip-id=18的HW_GK3名称
+    # （scripts/wifi/ath11k-board-alias.py添加，device.mk构建时检查），否则会改用信号弱约22 dB的通用数据。
     kernel/dts/0001-arm64-dts-gaokun3-drive-ts-mode-gpio174-low.patch
     kernel/dts/0002-arm64-dts-sc8280xp-add-cpu-cooling-maps.patch
     kernel/dts/0003-arm64-dts-gaokun3-usb0-otg-for-usb-adb.patch
@@ -288,6 +290,7 @@ KPATCHES=(
     kernel/dts/0022-arm64-dts-qcom-sc8280xp-mark-the-CDSP-FastRPC-context-banks-dma-coherent.patch
     kernel/dts/0023-arm64-dts-qcom-sc8280xp-huawei-gaokun3-Power-the-CSIPHYs-from-their-own-supplies.patch
     kernel/dts/0024-arm64-dts-qcom-sc8280xp-Give-the-camera-clock-controller-its-MX-domain.patch
+    kernel/dts/0025-arm64-dts-qcom-sc8280xp-huawei-gaokun3-Use-the-HW_GK3-Wi-Fi-board-data.patch
 
     # ─── 11. kernel/fingerprint：QSEECOM 与指纹传输驱动（/dev/gaokun3_fpcmd，CONFIG_GAOKUN3_FPCMD 由 kernel-config-android.sh 打开）───
     kernel/fingerprint/0001-firmware-qcom-scm-qseecom-app-load-shutdown-listener.patch

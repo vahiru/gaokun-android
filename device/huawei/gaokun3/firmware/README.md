@@ -20,11 +20,19 @@ cp -r /tmp/fw/firmware/* device/huawei/gaokun3/firmware/
 | `qcom/a660_sqe.fw`<br>`qcom/a660_gmu.bin` | Adreno 690 GPU微码 | `linux-firmware` ≥ 20241210 |
 | `qcom/sc8280xp/HUAWEI/gaokun3/qcdxkmsuc8280.mbn` | GPU受保护上下文切换（Zap Shader） | 华为Windows驱动包 |
 | `qca/wcnhpbtfw21.tlv`<br>`qca/wcnhpnv21g.bin` | WCN6855蓝牙固件 | `linux-firmware` ≥ 20241210 |
-| `ath11k/WCN6855/hw2.0/{amss,board-2,m3,regdb}.bin` | WCN6855 Wi-Fi固件 | `linux-firmware` ≥ 20241210 |
+| `ath11k/WCN6855/hw2.0/{amss,board-2,m3,regdb}.bin` | WCN6855 Wi-Fi固件（`board-2.bin`需补充板级数据名称，见下文） | `linux-firmware` ≥ 20241210 |
 | `qcom/sc8280xp/HUAWEI/gaokun3/qcadsp8280.mbn`<br>`qccdsp8280.mbn`<br>`qcslpi8280.mbn` | ADSP / CDSP / SLPI远端处理器固件 | 华为Windows驱动包 |
 | `qcom/sc8280xp/HUAWEI/gaokun3/audioreach-tplg.bin` | Audioreach声卡拓扑（构建前需运行`micarray/tplg-four-channel-capture.py`开启四声道采集上限，详见[`../micarray/README.md`](../micarray/README.md)） | `audioreach-topology` / 驱动包 |
 | `qcom/sc8280xp/HUAWEI/gaokun3/qcvss8280.mbn` | Iris / Venus硬件视频解码固件 | 华为Windows驱动包 |
 | `qcom/sc8280xp/HUAWEI/gaokun3/{adspr,adspua,battmgr,cdspr}.jsn` | `pd-mapper`服务映射表 | 华为Windows驱动包 |
+
+**Wi-Fi板级数据名称**：放入`board-2.bin`后，还需在仓库根目录运行：
+
+```bash
+python3 -I scripts/wifi/ath11k-board-alias.py device/huawei/gaokun3/firmware/ath11k/WCN6855/hw2.0/board-2.bin
+```
+
+设备树按`HW_GK3`选择Wi-Fi射频校准数据（`patches/kernel/dts/0025`），而`linux-firmware`只在`qmi-chip-id=2`下登记了这份数据，本机芯片上报的是18。脚本为`qmi-chip-id=18`补充一个指向同一份数据的名称，写入前校验数据的SHA-256，已包含该名称时不改动文件。缺少该名称时驱动会改用通用数据，信号减弱约22 dB，因此`device.mk`会使构建失败。从早于此改动的系统中拉取的`board-2.bin`同样需要运行此脚本。
 
 ## 三、从公开Windows驱动归档提取（无需保留Windows分区）
 
