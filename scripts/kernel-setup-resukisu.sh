@@ -23,9 +23,9 @@
 #   （sys_enter tracepoint 由它提供），已加进 kernel-config-android.sh。
 set -uo pipefail
 
-# 钉死的上游 commit（main @ 2026-08-22）。要升级就改这一行，别改成分支名 ——
+# 钉死的上游 commit（v4.2.0-rc3 标签，2026-09-23；内核 UAPI 4，与同名管理器一致 —— 管理器的 UAPI 比内核高就只提示"需要更新内核"、不能授权）。要升级就改这一行，别改成分支名 ——
 # 分支名会让"同一份脚本"在不同时间产出不同内核。
-RESUKISU_PIN=b2ac2fc8703ce9f5226e2a38a59f8b72f8a3005c
+RESUKISU_PIN=239e1e8871b8fcd51a6e5b3002e0ba522fdd99fb
 RESUKISU_URL=https://github.com/ReSukiSU/ReSukiSU
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)

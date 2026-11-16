@@ -10,13 +10,13 @@ Origin: local
 Upstream-Status: Pending
 ---
 diff --git a/kernel/compat/kernel_compat.h b/kernel/compat/kernel_compat.h
-index 50141dc..f230701 100644
+index cd62584..505fb82 100644
 --- a/kernel/compat/kernel_compat.h
 +++ b/kernel/compat/kernel_compat.h
-@@ -6,6 +6,39 @@
+@@ -9,6 +9,39 @@
  #include <linux/fdtable.h>
  #include "ss/policydb.h"
- #include "linux/key.h"
+ #include <linux/key.h>
 +#include <linux/string.h>
 +#include <linux/types.h>
 +
@@ -50,18 +50,18 @@ index 50141dc..f230701 100644
 +#define strncpy ksu_compat_strncpy
 +#endif
 +
- 
- /*
-  * Leagcy Huawei Hisi Devices info Start
+ #include <linux/ptrace.h>
+ #include <linux/syscalls.h>
+ #include "arch.h"
 diff --git a/kernel/tools/kernel_compat.mk b/kernel/tools/kernel_compat.mk
-index 4ad0da5..5ed6923 100644
+index 57504d0..28abcfc 100644
 --- a/kernel/tools/kernel_compat.mk
 +++ b/kernel/tools/kernel_compat.mk
-@@ -301,4 +301,19 @@ $(info -- $(REPO_NAME)/compat: module.h found)
- ccflags-y += -DKSU_COMPAT_HAS_UAPI_MODULE_H
+@@ -319,3 +319,20 @@ ifeq ($(shell grep -q "struct file .dentry_open.const struct path .path, int fla
+ $(info -- $(REPO_NAME)/compat: modern dentry_open found)
+ ccflags-y += -DKSU_COMPAT_HAS_MODERN_DENTRY_OPEN
  endif
- 
--
++
 +# mainline deleted strncpy() outright (Kees Cook's deprecation campaign): on
 +# such kernels include/linux/string.h mentions it only in prose, so a call
 +# still compiles (gcc has a builtin prototype) and then fails at link time.
