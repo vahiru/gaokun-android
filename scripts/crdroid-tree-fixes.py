@@ -1452,6 +1452,12 @@ def main():
     step(" [44] SystemUI在指纹临时锁定期间不再请求指纹认证: ", apply_patch_file(
         tree, "frameworks/base",
         "android/frameworks-base/0001-systemui-respect-fingerprint-lockout.patch"))
+    # crDroid的锁屏充电信息（core: Lockscreen Charging）固定从/sys/class/power_supply/battery读取电流和电压，
+    # 没有这个节点时改读充电器节点。本机电池节点名为gaokun-ec-battery，EC适配器节点没有电流和电压，UCSI节点在
+    # PD模式下两者均为0，锁屏因此只显示默认的5V。补丁在没有battery节点时改用BatteryMonitor已识别的电池节点。
+    step(" [45] healthd锁屏充电信息改用已识别的电池节点: ", apply_patch_file(
+        tree, "system/core",
+        "android/system-core/0001-healthd-use-the-discovered-battery-for-lockscreen-charging-info.patch"))
     # 游戏环境如实修正：fingerprint 尾部 userdebug→user，与 ro.build.type=user 对齐
     # （Duck Detector system_properties 3 条 danger 的根；运行时改不掉 Build.FINGERPRINT 常量）
     step(" [23] BUILD_FINGERPRINT/THUMBPRINT/SYSTEM_FINGERPRINT 变体段改写成 user（与 ro.build.type 对齐）: ",

@@ -1,0 +1,86 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] healthd: use the discovered battery for lockscreen charging
+ info
+
+"core: Lockscreen Charging (2/3)" computes maxChargingCurrent and
+maxChargingVoltage from /sys/class/power_supply/battery/current_now and
+voltage_now, and falls back to the charger's own current_now and
+voltage_now when that power supply is missing. Batteries are not always
+named "battery": on the Huawei MateBook E Go it is gaokun-ec-battery. The
+chargers there are an adapter supply without current_now/voltage_now and a
+UCSI supply that reports 0 for both under a USB PD contract. With a PD
+charger both values are therefore 0, and SystemUI shows a default of 5 V
+without current or wattage on the lockscreen.
+
+When there is no "battery" power supply, read the current and voltage of
+the battery device BatteryMonitor has already discovered, the one the rest
+of HealthInfo comes from, and fall back to the charger only when that
+device does not provide them. This follows the existing preference for
+battery values: on devices without a "battery" supply whose chargers do
+report current_now and voltage_now, the lockscreen now shows the
+battery's values instead of the charger's. Devices with a power supply
+named "battery" behave as before.
+
+Origin: local
+Upstream-Status: Pending
+---
+ healthd/BatteryMonitor.cpp    | 9 ++++++++-
+ healthd/BatteryMonitor_v1.cpp | 7 ++++++-
+ 2 files changed, 14 insertions(+), 2 deletions(-)
+
+diff --git a/healthd/BatteryMonitor.cpp b/healthd/BatteryMonitor.cpp
+index 0daf4b5..074a61d 100644
+--- a/healthd/BatteryMonitor.cpp
++++ b/healthd/BatteryMonitor.cpp
+@@ -608,9 +608,13 @@ void BatteryMonitor::updateValues(void) {
+             int ChargingCurrent = 0;
+             int ChargingVoltage = 0;
+ 
+-            // Prefer battery current_now / voltage_now
++            // Prefer battery current_now / voltage_now. Without a power supply
++            // named "battery", use the battery device found by the scan above.
+             if (access(SYSFS_BATTERY_CURRENT, R_OK) == 0) {
+                 ChargingCurrent = abs(tryGetIntField(String8(SYSFS_BATTERY_CURRENT)).value_or(0));
++            } else if (!mHealthdConfig->batteryCurrentNowPath.empty()) {
++                ChargingCurrent =
++                        abs(tryGetIntField(mHealthdConfig->batteryCurrentNowPath).value_or(0));
+             } else {
+                 path.clear();
+                 path.appendFormat("%s/%s/current_now", POWER_SUPPLY_SYSFS_PATH,
+@@ -622,6 +626,9 @@ void BatteryMonitor::updateValues(void) {
+ 
+             if (access(SYSFS_BATTERY_VOLTAGE, R_OK) == 0) {
+                 ChargingVoltage = abs(tryGetIntField(String8(SYSFS_BATTERY_VOLTAGE)).value_or(0));
++            } else if (!mHealthdConfig->batteryVoltagePath.empty()) {
++                ChargingVoltage =
++                        abs(tryGetIntField(mHealthdConfig->batteryVoltagePath).value_or(0));
+             } else {
+                 path.clear();
+                 path.appendFormat("%s/%s/voltage_now", POWER_SUPPLY_SYSFS_PATH,
+diff --git a/healthd/BatteryMonitor_v1.cpp b/healthd/BatteryMonitor_v1.cpp
+index 39d0441..1deb531 100644
+--- a/healthd/BatteryMonitor_v1.cpp
++++ b/healthd/BatteryMonitor_v1.cpp
+@@ -374,9 +374,12 @@ void BatteryMonitor::updateValues(void) {
+             int ChargingCurrent = 0;
+             int ChargingVoltage = 0;
+ 
+-            // Prefer battery current_now / voltage_now
++            // Prefer battery current_now / voltage_now. Without a power supply
++            // named "battery", use the battery device found by init().
+             if (access(SYSFS_BATTERY_CURRENT, R_OK) == 0) {
+                 ChargingCurrent = abs(getIntField(String8(SYSFS_BATTERY_CURRENT)));
++            } else if (!mHealthdConfig->batteryCurrentNowPath.empty()) {
++                ChargingCurrent = abs(getIntField(mHealthdConfig->batteryCurrentNowPath));
+             } else {
+                 path.clear();
+                 path.appendFormat("%s/%s/current_now", POWER_SUPPLY_SYSFS_PATH,
+@@ -388,6 +391,8 @@ void BatteryMonitor::updateValues(void) {
+ 
+             if (access(SYSFS_BATTERY_VOLTAGE, R_OK) == 0) {
+                 ChargingVoltage = getIntField(String8(SYSFS_BATTERY_VOLTAGE));
++            } else if (!mHealthdConfig->batteryVoltagePath.empty()) {
++                ChargingVoltage = getIntField(mHealthdConfig->batteryVoltagePath);
+             } else {
+                 path.clear();
+                 path.appendFormat("%s/%s/voltage_now", POWER_SUPPLY_SYSFS_PATH,
