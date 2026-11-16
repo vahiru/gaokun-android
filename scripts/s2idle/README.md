@@ -1,38 +1,30 @@
-# `s2idle`挂起诊断工具集（SC8280XP / 主线Linux 7.2）
+# `s2idle`挂起/恢复压力测试
 
-本目录包含在Linux环境下排查`s2idle`（Suspend-to-Idle）设备挂起复位与唤醒问题的自动化循环测试脚本。`s2idle`与AOSS深睡（CX collapse）的完整架构与修复详见[`../../docs/dev/deep-sleep.md`](../../docs/dev/deep-sleep.md)。
+本目录的`android-ath11k-s2loop.sh`在Android中循环执行挂起与恢复，检查ath11k固件每次都能重新加载、Wi-Fi每次都能恢复连接。`s2idle`与AOSS深睡（CX collapse）的架构与修复详见[`../../docs/dev/deep-sleep.md`](../../docs/dev/deep-sleep.md)，执行时机与通过判据见[`../../docs/dev/release-checklist.md`](../../docs/dev/release-checklist.md)。
 
-## 一、测试方法与判据
+## 一、用法
 
-1. **多轮循环验证**：单次挂起测试受竞态影响可能偶发通过，本目录脚本（`s2loop.sh` / `s2fp.sh`）以连续通过10轮作为稳定判据。
-2. **`pm_test=devices`窗口定位**：
-   - `echo devices > /sys/power/pm_test`覆盖`dpm_suspend_start()`与`dpm_suspend_noirq()`阶段，并在5秒后自动恢复，无需外部唤醒源，适合无人值守二分定位挂起阶段崩溃。
-3. **识别`-EBUSY`假阳性**：
-   - `pm_test`周期刚结束时可能残留pending唤醒事件，立即再次执行`echo mem > /sys/power/state`会在0–1秒内返回`-EBUSY`。
-   - 真实`pm_test=devices`周期耗时5–8秒；脚本仅在`rc=0`时计入成功次数，非零返回时等待10秒后重试。
-4. **真实`s2idle`时间判据**：在真实`s2idle`挂起（带RTC唤醒闹钟）中，除检查返回码外，还需核对墙钟时间（由RTC补偿）显著大于内核`printk`单调时钟增量，以确认本地时钟确实进入停机状态。
-
-## 二、目录文件说明
-
-| 文件 | 用途 |
-|---|---|
-| `s2fp.sh` | 完整开机指纹采集与`pm_test=devices`自动串链测试脚本（采集绑定驱动、wakeup源、中断、`runtime_status`、PCI链路、genpd与dmesg） |
-| `s2cmp.sh` | 对比正常通过10/10与挂起失败开机的系统状态快照差异 |
-| `s2loop.sh` | 轻量级`pm_test=devices`循环测试脚本 |
-| `sx.sh` | 单次挂起辅助脚本（强制检查`rtc0`与`wakealarm`是否就绪，防止无唤醒源死睡） |
-| `s2real.sh` | 结合`role=host`与RTC闹钟的真实`s2idle`挂起测试脚本 |
-| `s2verify.sh` | 验收脚本：检查udev规则是否已生效并执行真实挂起测试 |
-| `99-gaokun3-usb-role.rules`、`gaokun3-usb-role*` | Linux环境规则与systemd挂起钩子：将未绑定gadget的`a600000.usb`角色设为`host`，避免半初始化`device`角色在挂起时触发整板复位 |
-
-## 三、在救援Linux环境中部署挂起钩子
-
-在救援Ubuntu/Debian环境中（未使用USB gadget），可通过`system-sleep`钩子在每次挂起前确保`a600000.usb`处于`host`角色（仅靠开机设置一次会被迟到的Type-C/UCSI初始化改回`device`）：
+脚本需以root身份在设备上运行：
 
 ```sh
-sudo install -m755 gaokun3-usb-role-host.sh   /usr/local/bin/
-sudo install -m644 gaokun3-usb-role.service   /etc/systemd/system/
-sudo install -m755 gaokun3-usb-role-sleephook /usr/lib/systemd/system-sleep/gaokun3-usb-role
-sudo systemctl enable gaokun3-usb-role.service
+setsid nohup sh /data/local/tmp/android-ath11k-s2loop.sh <pm_test次数> <真实s2idle次数> <同网段可ping通的主机> &
 ```
 
-验证时请使用`systemctl suspend`（直接写`/sys/power/state`不会触发`system-sleep`钩子）。Android环境下的动态USB角色切换逻辑见[`../../device/huawei/gaokun3/bin/gaokun3-usbrole.sh`](../../device/huawei/gaokun3/bin/gaokun3-usbrole.sh)。
+- 前两个参数默认为10和3：先执行`pm_test=platform`循环，再执行带RTC唤醒闹钟（20秒）的真实`s2idle`。
+- 第三个参数必须给出，请填写确认能ping通的同网段主机，不要按主路由表推测网关地址：Android的默认路由位于策略路由表中。
+- 测试期间脚本会停止USB端口HAL（`vendor.usb-gaokun3`）并将`a600000.usb`固定为`host`角色，结束后恢复为`device`并重新启动该服务，因此USB adb在测试期间会断开，需通过`setsid nohup`启动。
+- 结果写入`/data/local/tmp/mhi-test/log`，每轮的`dmesg`与`logcat`保存在同一目录。
+
+环境变量：
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `WOW` | `0` | `0`测试断电挂起（每轮应重新加载固件并重新关联）；`1`用于WoWLAN已开启时的测试（脚本不会自行开启WoWLAN；挂起时芯片不断电、连接不应断开），固件拒绝进入WoW的次数单独记为`declined`，不计为失败 |
+| `PACE` | `75` | 每轮的最短间隔（秒）。Android Wi-Fi框架会限制自动重连频率，间隔过短时后续轮次会因不再重连而误判失败；只检查内核侧时可设为`0` |
+
+## 二、判据与注意事项
+
+1. **每轮通过条件**：挂起返回0；60秒内能ping通对端；本轮标记之后的内核日志中没有页分配失败、MHI上电失败、DPM超时、WoW或HIF挂起/恢复失败、固件崩溃等错误。`WOW=0`时还要求本轮重新关联并至少重新加载一次固件；`WOW=1`时连接断开（`deauthenticating`）也计为错误。
+2. **必须使用`pm_test=platform`**：`devices`档不执行`suspend_late`/`resume_early`，ath11k既不断电也不重新加载固件，Wi-Fi必然无法恢复，测不到需要验证的路径。
+3. **`-EBUSY`重试**：上一轮结束后可能残留待处理的唤醒事件，此时再次写入`/sys/power/state`会立即返回`-EBUSY`。脚本只在返回0时计入成功，非零时等待5秒后重试，每轮最多尝试6次。
+4. **USB角色**：USB端口HAL按对端决定port0的数据角色，连接电脑或充电器时，`host`角色下约6秒内没有下游设备就会切回`device`，因此脚本在测试期间停止该服务。每轮挂起前脚本还会核对角色，不是`host`时中止测试。

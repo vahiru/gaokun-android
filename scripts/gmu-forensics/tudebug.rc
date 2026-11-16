@@ -1,9 +1,0 @@
-# turnip 调试旗标注入（属性名修正版）。
-# mesa src/util/os_misc.c os_get_android_option()：TU_DEBUG 不以 MESA_ 开头
-# → 加 "mesa." 前缀 → 下划线转点、转小写 → "mesa.tu.debug"
-# → 依次试前缀 "debug." / "vendor." / ""。
-# 所以正确属性名是 debug.mesa.tu.debug —— 旧档案里的 debug.tu.debug 无效，
-# 导致此前所有 tu_debug 实验的旗标从未真正生效。
-on post-fs-data
-    setprop debug.mesa.tu.debug ${ro.boot.tu_debug}
-    setprop vendor.mesa.tu.debug ${ro.boot.tu_debug}
