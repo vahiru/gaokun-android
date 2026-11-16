@@ -20,9 +20,9 @@
 
 ### How do I get into the firmware settings, or boot from a USB stick?
 
-If Windows is still on the machine, you can open the firmware settings from Windows; see the [install guide](INSTALL.md#if-you-want-to-keep-windows). The keys for entering the firmware settings and the boot menu at power-on, and how to do it without the keyboard cover, have not been documented yet. If you know them, please tell us in the community groups or in an issue.
+With the keyboard cover (or a USB keyboard) attached, press `Esc` at power-on to enter the firmware settings, or press `F12` to open the firmware boot menu; how to do this without a keyboard has not been documented yet. If Windows is still on the machine, you can also restart into the firmware settings from Windows; see the [install guide](INSTALL.md#if-you-want-to-keep-windows).
 
-To boot from a USB drive, disable Secure Boot, plug in the Live installer's USB drive and choose it in the firmware's boot menu.
+To boot from a USB drive, disable Secure Boot, plug in the Live installer's USB drive, press `F12` at power-on, and choose it in the firmware boot menu.
 
 ### USB sticks do not appear in the firmware's boot menu, and Huawei's official recovery does not start
 

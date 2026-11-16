@@ -100,7 +100,7 @@ When Android is installed, select "Manage" on the environment check page, then "
 - **A USB drive**: the whole drive is erased first. The finished drive can be used on any MateBook E Go.
 - **The internal disk**: an installer partition of about 2 GiB (GK3LIVE) is created at the end of an unallocated area on the system disk, and `gaokun3 installer` is added to the boot menu. If Android is not installed yet, the boot manager (systemd-boot) is installed to the EFI system partition and the original default boot file (BOOTAA64.EFI) is backed up, with Windows remaining the default. Whenever BitLocker is enabled on the system disk (whether or not Android is already installed), verifying the recovery key is required before writing or deleting the installer partition. Other partitions and their data are not affected.
 
-The Live installer can only be downloaded from GitHub or taken from local files (including `gaokun3-live-<version>.iso`); with "R2 mirror" selected, installation media cannot be created.
+The Live installer can only be downloaded from GitHub or taken from local system installation files placed in the same directory as `gaokun3-live-<version>.iso`; with "R2 mirror" selected, installation media cannot be created.
 
 If the internal disk already has an installer partition, it can be deleted in the "Select target location" step (if Android is not installed yet, deleting it also restores the default EFI boot file; deleting the installer partition separately has not been verified on real hardware yet). When you install Android, the Live installer also deletes the installer partition by default.
 
@@ -117,11 +117,11 @@ Use any one of the following:
   sudo dd if=gaokun3-live-<version>-android-<system version>.iso of=/dev/sdX bs=4M conv=fsync status=progress
   ```
 
-- **Copy the files to a USB drive**: format the USB drive as FAT32, open the ISO in Windows by double-clicking it, and copy all of its files to the drive. With the ISO that has no system installation files, also copy `boot.img`, `super.img.zst` and `install-artifacts.sha256` into the `gaokun3\payload` folder on the drive.
+- **Copy the files to a USB drive**: format the USB drive as FAT32 (Windows built-in formatting supports drives up to 32 GB; use one of the two methods above for larger drives), open either ISO in Windows by double-clicking it, and copy all of its files to the drive. With the ISO that has no system installation files, also copy `boot.img`, `super.img.zst` and `install-artifacts.sha256` into the `gaokun3\payload` folder on the drive.
 
 ### Starting the Live installer
 
-- **From a USB drive**: plug it in and select it in the firmware's boot menu when the machine starts; see the [FAQ](FAQ.md#how-do-i-get-into-the-firmware-settings-or-boot-from-a-usb-stick).
+- **From a USB drive**: plug it in, press `F12` at power-on to open the firmware boot menu, and select it (see the [FAQ](FAQ.md#how-do-i-get-into-the-firmware-settings-or-boot-from-a-usb-stick)).
 - **From the internal disk**: select `gaokun3 installer` in the boot menu.
 
 The Live installer normally reads all of its files into memory when it starts, so the USB drive can be removed afterwards.
