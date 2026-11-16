@@ -30,10 +30,10 @@ The table below shows how the main features work in the current version. See the
 | Display | ✅ | 120 Hz, factory-calibrated colour, wide colour gamut and HDR |
 | GPU | ✅ | Hardware acceleration and Vulkan |
 | Touchscreen | ✅ | Everyday and game modes can be switched in Settings; everyday mode suppresses accidental palm touches while writing and the like |
-| Stylus (M-Pencil) | ⚠️ | Second- and third-generation M-Pencils are supported, with pressure, hover, tilt and the side double-tap; stroke smoothing is adjustable in Settings. Everyday use of the third-generation M-Pencil has not been tested yet |
+| Stylus (M-Pencil) | ✅ | Compatible with second- and third-generation M-Pencils; supports pressure, hover, tilt and the side double-tap, with adjustable stroke smoothing and 4096 pressure levels |
 | Detachable keyboard and touchpad | ✅ | |
 | Wi-Fi | ✅ | |
-| Wi-Fi hotspot | ⚠️ | Can be turned on; other devices going online through the hotspot has not been tested yet |
+| Wi-Fi hotspot | ✅ | |
 | Bluetooth | ⚠️ | The microphone of a Bluetooth headset cannot be used in calls |
 | Speakers | ✅ | Bass enhancement or Huawei Histen can be turned on in Settings |
 | Microphones | ✅ | Beamforming, with echo cancellation and noise suppression that can be switched per scenario |
@@ -68,7 +68,7 @@ The table below shows how the main features work in the current version. See the
 
 ## Installing
 
-Get the latest version from [**Releases**](https://github.com/vahiru/gaokun-android/releases); the full installation steps are in [`docs/INSTALL.md`](docs/INSTALL.md) (Chinese: [`docs/INSTALL.zh-CN.md`](docs/INSTALL.zh-CN.md)). **Secure Boot must be disabled** before installing.
+Download the latest version from the [**Releases**](https://github.com/vahiru/gaokun-android/releases) page; the full installation steps are in [`docs/INSTALL.md`](docs/INSTALL.md) (Chinese: [`docs/INSTALL.zh-CN.md`](docs/INSTALL.zh-CN.md)). **Secure Boot must be disabled** before installing.
 
 There are two installers to choose from:
 
@@ -78,6 +78,7 @@ There are two installers to choose from:
 | How it runs | Inside the Windows installed on the machine | Started from a USB drive or from the installer partition on the internal disk |
 | System installation files | Downloaded, or taken from files you have already downloaded | Carried on the installation media; no network is used during installation |
 | Where to get it | The `Windows installer` releases on the [Releases](https://github.com/vahiru/gaokun-android/releases) page | The `Live installer` releases on the [Releases](https://github.com/vahiru/gaokun-android/releases) page |
+| Latest version | [Windows installer 0.2.0](https://github.com/vahiru/gaokun-android/releases/tag/windows-installer-v0.2.0) | [Live installer 0.2.0](https://github.com/vahiru/gaokun-android/releases/tag/live-installer-v0.2.0) |
 
 Default partition layout after erasing the entire disk:
 

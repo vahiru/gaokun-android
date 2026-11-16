@@ -30,10 +30,10 @@
 | 屏幕 | ✅ | 120 Hz，使用出厂校准的色彩，支持广色域和HDR |
 | GPU | ✅ | 支持硬件加速与Vulkan |
 | 触摸屏 | ✅ | 可在设置里切换日常与游戏模式，日常模式下能消除书写等场景下的手掌误触 |
-| 手写笔（M-Pencil） | ⚠️ | 支持二代和三代M-Pencil，实现了压感、悬停、倾斜和侧边双击功能，笔迹平滑强度可调节，三代M-Pencil尚未实测日常使用效果 |
+| 手写笔（M-Pencil） | ✅ | 兼容二代和三代M-Pencil，支持压感、悬停、倾斜和侧边双击功能，笔迹平滑强度可调节，支持4096级压感 |
 | 磁吸键盘和触控板 | ✅ | |
 | Wi-Fi | ✅ | |
-| Wi-Fi热点 | ⚠️ | 可以开启；还未实际测试使用其他设备经热点上网 |
+| Wi-Fi热点 | ✅ | |
 | 蓝牙 | ⚠️ | 通话时无法使用蓝牙耳机的麦克风 |
 | 扬声器 | ✅ | 可在设置里开启低音增强或华为Histen音效 |
 | 麦克风 | ✅ | 支持波束成形，有可按场景开关的回声消除和降噪 |
@@ -68,7 +68,7 @@
 
 ## 安装
 
-从[**Releases**](https://github.com/vahiru/gaokun-android/releases)取最新版，详细安装操作请见[`docs/INSTALL.zh-CN.md`](docs/INSTALL.zh-CN.md)（英文版[`docs/INSTALL.md`](docs/INSTALL.md)）。安装前**必须关闭Secure Boot**。
+从[**Releases**](https://github.com/vahiru/gaokun-android/releases)页面下载最新版，详细安装操作请见[`docs/INSTALL.zh-CN.md`](docs/INSTALL.zh-CN.md)（英文版[`docs/INSTALL.md`](docs/INSTALL.md)）。安装前**必须关闭Secure Boot**。
 
 目前有两种安装器可供选择：
 
@@ -78,6 +78,7 @@
 | 运行方式 | 在机器上的Windows中运行 | 从U盘或本机磁盘上的安装器分区启动 |
 | 系统安装文件 | 联网下载，或使用已下载的本地文件 | 随安装介质附带，安装时不联网 |
 | 获取方式 | [Releases](https://github.com/vahiru/gaokun-android/releases)页面中的`Windows installer`发布 | [Releases](https://github.com/vahiru/gaokun-android/releases)页面中的`Live installer`发布 |
+| 最新版本 | [Windows安装器0.2.0](https://github.com/vahiru/gaokun-android/releases/tag/windows-installer-v0.2.0) | [Live安装器0.2.0](https://github.com/vahiru/gaokun-android/releases/tag/live-installer-v0.2.0) |
 
 清除整个磁盘安装的默认分区布局：
 
