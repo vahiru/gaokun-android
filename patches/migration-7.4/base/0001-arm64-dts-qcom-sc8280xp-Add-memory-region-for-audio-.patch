@@ -46,3 +46,4 @@ index d17475c3e6..42a26c1e91 100644
 +						      QCOM_SCM_VMID_ADSP_HEAP>;
  					#address-cells = <1>;
  					#size-cells = <0>;
+ 

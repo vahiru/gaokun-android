@@ -44,3 +44,4 @@ index 2ac517db50..7a8d1136f6 100644
 -		timing->dce_bytes_per_line = msm_dsc_get_bytes_per_line(dsc);
  	}
  }
+ 

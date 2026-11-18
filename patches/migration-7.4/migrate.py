@@ -350,24 +350,31 @@ def summarize(st):
 
 # ---------- record ----------
 
-def changed_lines_hash(text):
-    """只看增删行（忽略上下文、行号与空白），用来判断补丁内容是否真的变了。"""
-    out, f = [], None
-    for line in text.splitlines():
-        if line == "-- ":  # 邮件签名分隔线，其后是git版本号
-            break
-        if line.startswith("+++ "):
-            f = line[4:].split("/", 1)[-1]
-            continue
-        if line.startswith(("--- ", "diff --git", "index ")):
-            continue
-        if f and line[:1] in ("+", "-") and not line.startswith(("+++", "---")):
-            out.append(f + ":" + line[0] + re.sub(r"\s+", "", line[1:]))
-    return hashlib.sha1("\n".join(sorted(out)).encode()).hexdigest()
+def same_result(tree, sha, patch):
+    """把来源补丁打到提交的父提交上（临时索引，不碰工作树），结果是否与该提交完全相同。
+    同一组改动，git可能生成增删行排列不同的diff，只比增删行会误判。"""
+    idx = Path(tree.git("rev-parse", "--git-path", "migration-7.4.index"))
+    if not idx.is_absolute():
+        idx = tree.path / idx
+    env = dict(tree.env, GIT_INDEX_FILE=str(idx))
+    try:
+        def g(*a):
+            return subprocess.run(["git", *a], cwd=tree.path, capture_output=True, text=True, env=env)
+        if g("read-tree", f"{sha}^").returncode:
+            return False
+        if g("apply", "--cached", "--3way", str(patch)).returncode:
+            return False
+        t = g("write-tree")
+        return t.returncode == 0 and t.stdout.strip() == tree.git("rev-parse", f"{sha}^{{tree}}")
+    finally:
+        idx.unlink(missing_ok=True)
 
 
 def export_commit(tree, sha):
-    text = tree.git("format-patch", "-1", "--stdout", "-N", "--no-signature", "--zero-commit", sha)
+    r = tree.run("format-patch", "-1", "--stdout", "-N", "--no-signature", "--zero-commit", sha)
+    if r.returncode:
+        die(f"git format-patch {sha}失败：{r.stderr.strip()}")
+    text = r.stdout  # 不能strip：补丁末尾可能是只有一个空格的上下文行
     lines, out, header = text.splitlines(), [], True
     for i, line in enumerate(lines):
         if i == 0 and re.match(r"^From 0{40} ", line):
@@ -398,18 +405,15 @@ def cmd_record(args):
             unknown.append((sha, subj))
             continue
         text = export_commit(tree, sha)
-        src = Path(it["path"]).read_text(encoding="utf-8", errors="replace")
         key = it["key"]
-        # 手动解决过的补丁一律写回：来源在新基线上打不上，哪怕增删行相同、只是上下文变了。
-        # 其余的只在内容确实改过（如并入了fixup）时写回。
-        resolved = st["results"].get(key, {}).get("status") == "resolved"
-        if not resolved and changed_lines_hash(text) == changed_lines_hash(src):
+        # 来源补丁打到父提交上能得到同一棵树，就不需要写回；打不上（冲突后手动解决的）
+        # 或结果不同（并入了fixup）才写回。只比增删行会把"只是上下文变了"的补丁漏掉。
+        if same_result(tree, sha, it["path"]):
             continue
         if it["source"] in ("dev", "override"):
             sub, slug = key.split("/", 1)
             dp = dev_path[key]
-            if not resolved and changed_lines_hash(text) == changed_lines_hash(
-                    dp.read_text(encoding="utf-8", errors="replace")):
+            if it["source"] == "override" and same_result(tree, sha, dp):
                 same_as_dev.append(key)
                 continue
             op = HERE / "override" / sub / f"{slug}.patch"

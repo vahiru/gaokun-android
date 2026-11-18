@@ -43,6 +43,16 @@ python3 -I $M/migrate.py check                      # 合并upstream/dev之后�
 ## 当前状态
 
 - 新基线：v7.4-rc3。
-- 补丁链198个（buildbot层19个，dev 179个），丢弃23个（见`drop.tsv`）。
-- 在v7.4-rc3上：163个可直接打上，35个冲突待解决。其中20个属于相机HW ISP补丁栈，冲突主要集中在`camss-vfe-17x.c`。
+- 补丁链197个（buildbot层19个，dev 162个，override 16个），丢弃24个（见`drop.tsv`）。
+- 在v7.4-rc3上从头重建：196个可直接打上，与手动解决时的结果逐字节一致；尚未编译。
+- 待处理：`core/misc-fastrpc-fix-context-leak-and-hang-on-signal-interrupted-invoke`。改用上游v4系列（2026-11-17，3个补丁），并重新加入dev版本中仍然适用的修改（如回调在硬中断上下文中取`fl->lock`的问题，v4仍未处理）。
 - ReSukiSU：BakaSU主线尚未合入tiann/KernelSU `9ae6e65a`（7.3起arm64首个系统调用参数的寄存器修正），需在`add/resukisu/`中回移。
+
+## 与7.2.9相比的行为变化（待上机核对）
+
+- Wi-Fi WAKE#：v7.4把PERST、WAKE移到了PCIe端口节点。`wake-gpios`仍只放在`wifi@0`，从`pcie4_port0`删除，保持唤醒中断归Wi-Fi设备所有，与7.2.9一致。
+- NVMe：v7.4的`pcie2a_port0`带有`wake-gpios`，根端口会注册WAKE#唤醒中断，7.2.9中该属性不生效。
+- 相机：RDI线路改用上游的线路与写主控一一对应（fc02156a3e），像素通路固定使用写主控3、4；VFE复位改由上游在最后一条线路停止时执行（e5d4b0e69a）；传感器超时回退同时支持独立PHY节点的布局。
+- remoteproc：handover中断首次触发后即关闭（上游改动），原限流补丁已丢弃。
+- 温控：CPU冷却映射挂在`cpuN-0-thermal`（tsens0，与7.2.9的`cpuN-thermal`为同一传感器）；v7.4新增的`cpuN-1-thermal`（tsens1）只有临界温度。
+- DSC宽度：保留按`dce_bytes_per_line`计算的算法，未采用上游的向上取整。
