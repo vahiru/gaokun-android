@@ -1,0 +1,25 @@
+# 键	原因
+# 键为<子系统>/<slug>（dev补丁）或base/<slug>（buildbot层），slug即文件名去掉编号与.patch。
+pcie-pm/PCI-Allow-D3-for-native-hotplug-capable-Root-Ports-on-non-x86-platforms	v7.4-rc3上为空操作（上游d4c79b63d82d）
+pcie-pm/PCI-Add-support-for-PCIe-WAKE-interrupt	v7.4-rc3上为空操作（上游071e245ab749）
+wifi/wifi-mac80211-shut-down-RX-BA-session-timer-on-teardown	v7.4-rc3上为空操作（上游e588e83e5c7a，7.2.y稳定版亦已包含）
+wifi/wifi-ath11k-fix-locking-problem-in-ath11k_dp_rx_tid_del_func	v7.4-rc3上为空操作（上游c7555d47b1d0）
+wifi/wifi-ath11k-avoid-IDR-mutation-during-pending-mgmt-TX-cleanup	v7.4-rc3上为空操作（上游3e7f5d362b2b）
+wifi/wifi-ath11k-avoid-IDR-mutation-during-vif-mgmt-TX-cleanup	v7.4-rc3上为空操作（上游dc29226dada3）
+drm/drm-msm-rework-queuelock	v7.4-rc3上为空操作（v7.3-rc1 ea69d489d3a6）
+drm/drm-msm-synchronize-vm-creation-on-ctxlock	v7.4-rc3上为空操作（v7.3-rc1 2c26f9e46d39）
+drm/drm-msm-allow-lazy-vm-creation-to-fail	v7.4-rc3上为空操作（v7.3-rc1 00dfa76bdfc2）
+iris/media-iris-take-core-lock-when-scanning-the-instance-list	v7.4-rc3上为空操作（上游e2e2bc058a5e）
+audio/ASoC-codecs-lpass-va-macro-Switch-to-PM-clock-framework-for-runtime-PM	v7.4-rc3上为空操作（lpass PM clock系列已合入）
+audio/ASoC-codecs-lpass-wsa-macro-Use-devm_clk_hw_register-for-MCLK-output	v7.4-rc3上为空操作（lpass PM clock系列已合入）
+pcie-pm/serial-qcom-geni-add-force-suspend-resume-to-system-sleep-callbacks	上游d0cd9c8d0fd5已合入，新增代码在v7.4-rc3中全部存在
+drm/drm-crtc-drop-racy-BUG_ON-in-fence_to_crtc	v7.4-rc3重写了fence_to_crtc()，已无该BUG_ON
+drm/drm-msm-fix-barriers-accessing-ctx-vm	v7.3-rc1 ae88499d71ce
+drm/drm-msm-gem-validate-lazy-vm-in-gem_new	v7.3-rc1 a6d87a272b2c
+iris/media-iris-fail-firmware-boot-on-invalid-uc_region	上游cff20ea46d5d，v7.4-rc3已包含
+iris/media-iris-add-request-key-frame-support-for-encoder	v7.3-rc1 6f62dcefd249
+audio/ASoC-codecs-lpass-wsa-macro-Switch-to-PM-clock-framework-for-runtime-PM	lpass PM clock系列已合入（合入版删去了几条出错路径的警告日志）
+audio/ASoC-codecs-lpass-tx-macro-switch-to-PM-clock-framework-for-runtime-PM	lpass PM clock系列已合入（合入版删去了几条出错路径的警告日志）
+audio/ASoC-codecs-lpass-rx-macro-switch-to-PM-clock-framework-for-runtime-PM	lpass PM clock系列已合入（合入版删去了几条出错路径的警告日志）
+dts/arm64-dts-qcom-sc8280xp-add-iris-and-videocc	v7.4-rc3的sc8280xp.dtsi已有相同的iris与videocc节点及pil_video_mem
+dts/arm64-dts-qcom-sc8280xp-mark-the-CDSP-FastRPC-context-banks-dma-coherent	上游3ca6796122将ADSP、CDSP、SLPI的上下文全部标为dma-coherent
