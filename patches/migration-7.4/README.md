@@ -44,7 +44,7 @@ python3 -I $M/migrate.py check                      # 合并upstream/dev之后�
 
 - 新基线：v7.4-rc3。
 - 补丁链197个（buildbot层19个，dev 162个，override 16个），丢弃24个（见`drop.tsv`）。
-- 在v7.4-rc3上从头重建：196个可直接打上，与手动解决时的结果逐字节一致；尚未编译。
+- 在v7.4-rc3上从头重建：196个可直接打上；以rc.4发布配置加`kernel-config-android.sh`编译通过（尚未接入ReSukiSU、未含fastrpc）。
 - 待处理：`core/misc-fastrpc-fix-context-leak-and-hang-on-signal-interrupted-invoke`。改用上游v4系列（2026-11-17，3个补丁），并重新加入dev版本中仍然适用的修改（如回调在硬中断上下文中取`fl->lock`的问题，v4仍未处理）。
 - ReSukiSU：BakaSU主线尚未合入tiann/KernelSU `9ae6e65a`（7.3起arm64首个系统调用参数的寄存器修正），需在`add/resukisu/`中回移。
 

@@ -73,7 +73,7 @@ index 27898b3cc7..f2f68be44d 100644
  		camss-vfe-680.o \
 diff --git a/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.c b/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.c
 new file mode 100644
-index 0000000000..278a5c3823
+index 0000000000..78e3a39d16
 --- /dev/null
 +++ b/drivers/media/platform/qcom/camss/camss-vfe-17x-meta.c
 @@ -0,0 +1,902 @@
@@ -175,7 +175,7 @@ index 0000000000..278a5c3823
 +#define		PACKER_FMT_PLAIN_64	0xa
 +#define		WM_CFG_FRAME_BASED	0x3
 +
-+#define IFE_PARAMS_SIZE		v4l2_isp_params_buffer_size(IFE17X_PARAMS_MAX_SIZE)
++#define IFE_PARAMS_SIZE		v4l2_isp_buffer_size(IFE17X_PARAMS_MAX_SIZE)
 +#define IFE_STATS_SIZE		sizeof(struct ife17x_stats_buffer)
 +
 +struct ife_params_buf {

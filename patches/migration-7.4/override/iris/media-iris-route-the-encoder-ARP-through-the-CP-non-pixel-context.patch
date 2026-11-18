@@ -47,7 +47,7 @@ index 0996213e71..c16494a44a 100644
  	select V4L2_MEM2MEM_DEV
  	select QCOM_MDT_LOADER
 diff --git a/drivers/media/platform/qcom/iris/iris_buffer.c b/drivers/media/platform/qcom/iris/iris_buffer.c
-index eb8de60c11..1c488c5c7e 100644
+index eb8de60c11..b3574762d9 100644
 --- a/drivers/media/platform/qcom/iris/iris_buffer.c
 +++ b/drivers/media/platform/qcom/iris/iris_buffer.c
 @@ -3,6 +3,10 @@
@@ -197,10 +197,10 @@ index eb8de60c11..1c488c5c7e 100644
 +		/*
 +		 * The ARP pages are stuck owned by VMID 0xb; leak them (and only
 +		 * free the bookkeeping struct) rather than hand firmware-owned
-+		 * memory back to the allocator. Return 0 so teardown continues.
++		 * memory back to the allocator. Teardown carries on.
 +		 */
 +		kfree(buffer);
-+		return 0;
++		return;
 +	}
  	dma_free_attrs(core->dev, buffer->buffer_size, buffer->kvaddr,
  		       buffer->device_addr, buffer->dma_attrs);

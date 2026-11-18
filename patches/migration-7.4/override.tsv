@@ -5,7 +5,9 @@ camera/clk-qcom-camcc-sc8280xp-Vote-MX-for-the-PLLs	b37fd2df9c3f7212ead06227b2e9
 camera/media-camss-continue-without-never-bound-sensors	0958a54694b317f2cbbf8b30dcdc3f6fb75341e0228e31e10e6fb52cc7122dbe	
 camera/media-i2c-ov13b10-of-match-and-gaokun3-power-sequence	17d9398ad05212e0ed0ca6df63a325958ac433a99191a0155d93c52ef5ca251e	
 camera/media-qcom-camss-Share-the-upstream-subdevs-between-video-nodes	37f534e9ec5494f6527f99cb2a386782c27fd67eab4f8a9467a46c28e643a66f	
+camera/media-qcom-camss-csid-gen2-Crop-the-IPP-output	9971b47c71793433f0af8abaf7b9af879be855c13a5108bdc8d8b802fe8395c5	
 camera/media-qcom-camss-vfe-17x-Add-parameters-and-statistics-nodes-to-the-pixel-path	ac8489d331cfb12ddd5995750137d3b0bf39b950ac9fbf02963ced9415246449	
+camera/media-qcom-camss-vfe-17x-Add-the-display-output-of-the-pixel-path	90c3e2137e018d2e8c15c9f1b0f0174034af6ad692e33665636b48b9f83fb07e	
 camera/media-qcom-camss-vfe-17x-Add-the-focus-statistics	823301bbdb132fbacf4740edb20df949b4bbffbba81e254306b464d10d8f1e1f	
 camera/media-qcom-camss-vfe-17x-Add-the-pixel-pipeline-Bayer-to-NV12-NV21	e66abb92a476947178905504a3d3e160cd8350332cef6e0fb093cda9112d497e	
 drm/drm-msm-a6xx-enable-preemption-on-a690	045cf083b6c0c15ceb131ca11781a6127d42649f21804985440ce8df09964b39	

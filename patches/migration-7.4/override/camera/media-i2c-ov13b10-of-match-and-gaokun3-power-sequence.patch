@@ -13,11 +13,11 @@ camss fallback when the rear sensor is absent.
 Origin: local
 Upstream-Status: Pending
 ---
- drivers/media/i2c/ov13b10.c | 85 +++++++++++++++++++++++++++++++++++--
- 1 file changed, 82 insertions(+), 3 deletions(-)
+ drivers/media/i2c/ov13b10.c | 86 +++++++++++++++++++++++++++++++++++--
+ 1 file changed, 83 insertions(+), 3 deletions(-)
 
 diff --git a/drivers/media/i2c/ov13b10.c b/drivers/media/i2c/ov13b10.c
-index f639a70f60..1e60a2bcd6 100644
+index f639a70f60..a7b21192f5 100644
 --- a/drivers/media/i2c/ov13b10.c
 +++ b/drivers/media/i2c/ov13b10.c
 @@ -6,6 +6,7 @@
@@ -107,7 +107,7 @@ index f639a70f60..1e60a2bcd6 100644
  	/* 5ms to wait ready after XSHUTDN assert */
  	usleep_range(5000, 5500);
  
-@@ -1339,8 +1374,41 @@ static const struct v4l2_subdev_video_ops ov13b10_video_ops = {
+@@ -1339,8 +1374,42 @@ static const struct v4l2_subdev_video_ops ov13b10_video_ops = {
  	.s_stream = ov13b10_set_stream,
  };
  
@@ -117,6 +117,7 @@ index f639a70f60..1e60a2bcd6 100644
 + * within the full array for V4L2_SEL_TGT_CROP.
 + */
 +static int ov13b10_get_selection(struct v4l2_subdev *sd,
++				 const struct v4l2_subdev_client_info *ci,
 +				 struct v4l2_subdev_state *sd_state,
 +				 struct v4l2_subdev_selection *sel)
 +{
@@ -149,7 +150,7 @@ index f639a70f60..1e60a2bcd6 100644
  	.get_fmt = ov13b10_get_pad_format,
  	.set_fmt = ov13b10_set_pad_format,
  	.enum_frame_size = ov13b10_enum_frame_size,
-@@ -1592,6 +1660,10 @@ static int ov13b10_probe(struct i2c_client *client)
+@@ -1592,6 +1661,10 @@ static int ov13b10_probe(struct i2c_client *client)
  	bool full_power;
  	int ret;
  
@@ -160,7 +161,7 @@ index f639a70f60..1e60a2bcd6 100644
  	ov13b = devm_kzalloc_obj(&client->dev, *ov13b);
  	if (!ov13b)
  		return -ENOMEM;
-@@ -1706,11 +1778,18 @@ static const struct acpi_device_id ov13b10_acpi_ids[] = {
+@@ -1706,11 +1779,18 @@ static const struct acpi_device_id ov13b10_acpi_ids[] = {
  MODULE_DEVICE_TABLE(acpi, ov13b10_acpi_ids);
  #endif
  
