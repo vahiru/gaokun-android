@@ -13,6 +13,7 @@
 | [`drop.tsv`](drop.tsv) | 新基线上丢弃的补丁及原因（上游对应提交或等效实现） |
 | [`override.tsv`](override.tsv)、`override/<子系统>/<slug>.patch` | 在新基线上需要改写的补丁；`override.tsv`记录所基于的dev补丁的sha256 |
 | [`add.tsv`](add.tsv)、`add/<子系统>/NNNN-<slug>.patch` | 只有新基线才需要的新补丁，以及插入位置 |
+| [`resukisu/`](resukisu/) | 新基线需要的ReSukiSU补丁，在`kernel-setup-resukisu.sh`应用`patches/resukisu/`之后再打 |
 | [`migrate.py`](migrate.py) | 生成补丁链、重建内核树、写回改动、检查与`dev`的差异 |
 
 补丁以“键”标识：dev补丁为`<子系统>/<slug>`，buildbot层为`base/<slug>`，新增补丁为`add/<子系统>/<slug>`。slug即文件名去掉`NNNN-`前缀与`.patch`后缀，因此`dev`重新编号不影响本目录的任何记录。
@@ -44,9 +45,9 @@ python3 -I $M/migrate.py check                      # 合并upstream/dev之后�
 
 - 新基线：v7.4-rc3。
 - 补丁链197个（buildbot层19个，dev 162个，override 16个），丢弃24个（见`drop.tsv`）。
-- 在v7.4-rc3上从头重建：196个可直接打上；以rc.4发布配置加`kernel-config-android.sh`编译通过（尚未接入ReSukiSU、未含fastrpc）。
+- 在v7.4-rc3上从头重建：196个可直接打上；以rc.4发布配置加`kernel-config-android.sh`编译通过（未含fastrpc）。
 - 待处理：`core/misc-fastrpc-fix-context-leak-and-hang-on-signal-interrupted-invoke`。改用上游v4系列（2026-11-17，3个补丁），并重新加入dev版本中仍然适用的修改（如回调在硬中断上下文中取`fl->lock`的问题，v4仍未处理）。
-- ReSukiSU：BakaSU主线尚未合入tiann/KernelSU `9ae6e65a`（7.3起arm64首个系统调用参数的寄存器修正），需在`add/resukisu/`中回移。
+- ReSukiSU：保持钉住的`239e1e88`（UAPI与现有管理器一致）。7.3起arm64原生系统调用从`orig_x0`取第一个参数，钉住的版本仍改写`regs[0]`，sucompat与`__ksyscall()`因此失效；`resukisu/0001`改为在系统调用的寄存器上读写`orig_x0`，对应tiann/KernelSU `9ae6e65a`。
 
 ## 与7.2.9相比的行为变化（待上机核对）
 
