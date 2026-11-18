@@ -131,6 +131,7 @@ TX_DEC0 Volume = 102, TX_DEC1 Volume = 102
 | `patches/kernel/iris/0001` | `drivers/media/platform/qcom/iris/` | 引入`core->hw_powered`标志，防止解码器下电后残余中断触发未供电寄存器读取导致内核崩溃 |
 | `patches/kernel/iris/0003` | `drivers/media/platform/qcom/iris/` | 允许`v4l2_codec2`在首个`V4L2_EVENT_SOURCE_CHANGE`事件到达前调用`VIDIOC_G_FMT(CAPTURE)`，兼容Android Codec2初始化顺序 |
 | `patches/kernel/iris/0005` | `drivers/media/platform/qcom/iris/` | 在非动态分辨率切换（非DRC）的`CAPTURE streamoff`路径发送`HFI_FLUSH_ALL`而非`HFI_FLUSH_OUTPUT`，修复视频拖动进度条（seek）或关闭播放器时固件等待`HFI_FLUSH_OUTPUT`响应超时导致的卡死 |
+| `patches/kernel/dts/0026` | `arch/arm64/boot/dts/qcom/sc8280xp.dtsi` | iris加载固件时把`0x0..0x25800000`作为视频内容保护范围交给TZ，只有安全会话可以使用。`iris`主域（SID `0x2a00`）的IOVA从高往低分配，每路1080p解码约占260–310 MiB，1440p约占735 MiB，同时打开的会话较多时，普通会话的缓冲区会被映射进这个范围，解码器一访问，整板即复位，内核不留任何记录。补丁增加一个只带`iommu-addresses`的reserved-memory节点，并在`iris`的`memory-region`中引用（固件区域须排在第一个），使该范围在主域中预留。地址空间不足时，映射失败，对应会话的`VIDIOC_QBUF`或`VIDIOC_STREAMON`返回错误，该路解码失败，不再复位。CB15（编码器ARP，见下文）有独立的页表，不受影响 |
 
 ### 3. 硬件视频编码
 
