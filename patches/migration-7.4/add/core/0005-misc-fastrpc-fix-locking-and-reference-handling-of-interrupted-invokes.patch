@@ -1,4 +1,4 @@
-From 655e38b31f40ffb3059a276a39b96ce4babefa11 Mon Sep 17 00:00:00 2001
+From 5f23864f2ff50c1de8995d41d96a4d6f103ccc68 Mon Sep 17 00:00:00 2001
 From: Akisaira <akisaira@outlook.com>
 Date: Thu, 19 Nov 2026 01:07:27 +1100
 Subject: [PATCH] misc: fastrpc: fix locking and reference handling of
@@ -43,14 +43,16 @@ only meant to be applied together with this patch.
 
 - At close, the worker reference of a parked context is dropped only if
   the call went to the dynamic process created on this fd and the DSP
-  released that process; ctx->dynamic_pd records the target when the
-  context is allocated. A static or attached PD outlives its client and
-  may still be running the call, so its buffers must stay valid until the
-  DSP answers or the channel goes away.
+  released that process. ctx->dynamic_pd records, when the context is
+  allocated, whether the fd has a dynamic process and targets USER_PD;
+  that doesn't tell a static process apart if one fd initializes both.
+  A static or attached PD outlives its client and may still be running
+  the call, so its buffers must stay valid until the DSP answers or the
+  channel goes away.
 
-- invoke_interrupted_mmaps stays, and close moves fl->mmaps to it while a
-  parked context keeps its worker reference: such a call may still use
-  fl->mmaps, and its late reply frees fl. That is what 76e8e4ace1ed guards
+- invoke_interrupted_mmaps stays, and close moves fl->mmaps to it when it
+  leaves the worker reference of a parked context in place: such a call
+  may still use fl->mmaps, and its late reply frees fl. That is what 76e8e4ace1ed guards
   against. fastrpc_rpmsg_remove() walks the list under cctx->lock, as close
   now adds to it and misc_deregister() doesn't wait for open fds.
 
