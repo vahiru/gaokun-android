@@ -13,8 +13,7 @@
 | [`drop.tsv`](drop.tsv) | 新基线上丢弃的补丁及原因（上游对应提交或等效实现） |
 | [`override.tsv`](override.tsv)、`override/<子系统>/<slug>.patch` | 在新基线上需要改写的补丁；`override.tsv`记录所基于的dev补丁的sha256 |
 | [`add.tsv`](add.tsv)、`add/<子系统>/NNNN-<slug>.patch` | 只有新基线才需要的新补丁，以及插入位置 |
-| [`resukisu/`](resukisu/) | 新基线需要的ReSukiSU补丁，在`kernel-setup-resukisu.sh`应用`patches/resukisu/`之后再打 |
-| [`bakasu/`](bakasu/) | 改用BakaSU主线`7b65bde0`时需要的补丁，已包含`patches/resukisu/`的strncpy兼容层；与`resukisu/`二选一，取决于切换时钉住的版本 |
+| [`bakasu/`](bakasu/) | KernelSU改为钉住BakaSU主线`7b65bde0`后需要的补丁，已包含`patches/resukisu/`中的strncpy兼容层，迁移时取代`patches/resukisu/` |
 | [`kernel-config-7.4.sh`](kernel-config-7.4.sh) | 新基线需要的配置改动，在`kernel-config-android.sh`之后运行；合并时并入该脚本 |
 | [`migrate.py`](migrate.py) | 生成补丁链、重建内核树、写回改动、检查与`dev`的差异 |
 
@@ -41,7 +40,7 @@ python3 -I $M/migrate.py check                      # 合并upstream/dev之后�
 
 ## 合并前的整理（尚未实现）
 
-决定迁移时，由工具读取当时的`dev`与本目录，生成新的补丁队列：按`drop.tsv`删除，用`override/`替换，插入`add/`；把`base/`的补丁分配到各子系统目录；每个目录从`0001`起重新连续编号；重新生成`KPATCHES`；同时修改`kernel-apply-patches.sh`、`kernel-config-android.sh`、`kernel-setup-resukisu.sh`与`release.sh`中的基线信息。产出为一个基于`upstream/dev`的新分支，并附新旧编号对照表。
+决定迁移时，由工具读取当时的`dev`与本目录，生成新的补丁队列：按`drop.tsv`删除，用`override/`替换，插入`add/`；把`base/`的补丁分配到各子系统目录；每个目录从`0001`起重新连续编号；重新生成`KPATCHES`；同时修改`kernel-apply-patches.sh`、`kernel-config-android.sh`、`kernel-setup-resukisu.sh`与`release.sh`中的基线信息，并把KernelSU钉住的版本改为BakaSU。产出为一个基于`upstream/dev`的新分支，并附新旧编号对照表。
 
 ## 当前状态
 
@@ -50,7 +49,7 @@ python3 -I $M/migrate.py check                      # 合并upstream/dev之后�
 - 在v7.4-rc3上从头重建：202个全部可以打上；以rc.4发布配置加`kernel-config-android.sh`、`kernel-config-7.4.sh`编译通过。
 - 上机：Android可以完整启动，不含KSU与含BakaSU两种构建都已验证；显示、触控、音频正常。
 - fastrpc：改用上游v4系列，1/3、2/3为`add/core/0003`、`0004`，3/3为`core/misc-fastrpc-fix-context-leak-and-hang-on-signal-interrupted-invoke`的override，内容与上游一致（3/3只适配了一处上下文）。本地修正单独放在`add/core/0005`，各项改动及原因见其补丁说明；v4的补丁单独应用并不安全，须与它一起应用。尚未上机验证。
-- ReSukiSU：保持钉住的`239e1e88`（UAPI与现有管理器一致）。7.3起arm64原生系统调用从`orig_x0`取第一个参数，钉住的版本仍改写`regs[0]`，sucompat与`__ksyscall()`因此失效；`resukisu/0001`改为在系统调用的寄存器上读写`orig_x0`，对应tiann/KernelSU `9ae6e65a`。
+- KernelSU：改为钉住BakaSU主线`7b65bde0`。它的UAPI为6，与目前发布的管理器（ReSukiSU v4.2.0-rc3，UAPI 4）不兼容，切换时用户需要同时更换管理器；可用的管理器目前只有BakaSU在GitHub Actions上用官方证书签名的构建。
 
 ## 7.4启动所需的改动
 
@@ -60,7 +59,7 @@ python3 -I $M/migrate.py check                      # 合并upstream/dev之后�
 - `add/core/0002`：v7.4（d99c4a302c）不允许mmap回调在由内存管理核心管理的映射上清除`VM_MAYWRITE`。ashmem据此实现只读保护，只读映射因此失败，system_server无法建立字体表，启动循环。补丁改为在`do_mmap()`调用驱动之前去掉该标志，与memfd的写封印相同。
 - binder：v7.4删除了C版binder（fd2bc059ed），只保留`ANDROID_BINDER_IPC_RUST`，构建因此需要Rust工具链（rustc ≥ 1.85、bindgen ≥ 0.71.1、rust-src组件、libclang）。`kernel-config-7.4.sh`会断言`CONFIG_RUST`未被olddefconfig关闭。
 - `SCHEDSTATS`：关闭时`task_struct`中的`struct sched_statistics stats`是带64字节对齐的空结构体，bindgen生成的Rust类型丢失这一对齐，`stats`之后的字段在Rust中整体错位，Rust binder因此读错`mm`等字段。内核以`--no-layout-tests`调用bindgen，编译期不会报错。开启`SCHEDSTATS`后结构体非空，布局一致。
-- KernelSU：v7.3起arm64原生系统调用从`orig_x0`取第一个参数，见`resukisu/0001`与`bakasu/0002`；v7.4已删除`strncpy()`，见`bakasu/0001`。
+- KernelSU：v7.3起arm64原生系统调用从`orig_x0`取第一个参数，见`bakasu/0002`；v7.4已删除`strncpy()`，见`bakasu/0001`。
 
 ## 与7.2.9相比的行为变化（待上机核对）
 
