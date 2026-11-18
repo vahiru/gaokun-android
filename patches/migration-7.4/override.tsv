@@ -18,4 +18,4 @@ ec-usb/usb-typec-ucsi-huawei_gaokun-set-the-number-of-ports-at-probe	277cd46beef
 iris/media-iris-gen1-decoder-seek-mode-switch	b99b3eb3640f1be086c3853b4c823d1a862144cbd03a747e9e3d45540f2e6aa0	
 iris/media-iris-route-the-encoder-ARP-through-the-CP-non-pixel-context	13b6619b6fb4659295d1598af7c50897538114f18e18678c5ab4baa9332cdeed	
 pcie-pm/PCI-dwc-abort-suspend-when-a-device-has-signalled-PME	843b31aecd251306d89a421c2345a5b534d91e22908839c34ff600b081c3aa08	
-core/misc-fastrpc-fix-context-leak-and-hang-on-signal-interrupted-invoke	c9a40789a560c76f488dc94835f5d1ca3fc8a06c3a95a53ba7834a8df74e0d02	改用上游v4系列（2/3与3/3合并），并加入仍然适用的本地修改
+core/misc-fastrpc-fix-context-leak-and-hang-on-signal-interrupted-invoke	c9a40789a560c76f488dc94835f5d1ca3fc8a06c3a95a53ba7834a8df74e0d02	改用上游v4系列3/3，本地修正见add/core/0005

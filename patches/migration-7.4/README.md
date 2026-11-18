@@ -46,10 +46,10 @@ python3 -I $M/migrate.py check                      # 合并upstream/dev之后�
 ## 当前状态
 
 - 新基线：v7.4-rc3。
-- 补丁链200个（buildbot层19个，dev 159个，override 19个，新增3个），丢弃24个（见`drop.tsv`）。
-- 在v7.4-rc3上从头重建：200个全部可以打上；以rc.4发布配置加`kernel-config-android.sh`、`kernel-config-7.4.sh`编译通过。
+- 补丁链202个（buildbot层19个，dev 159个，override 19个，新增5个），丢弃24个（见`drop.tsv`）。
+- 在v7.4-rc3上从头重建：202个全部可以打上；以rc.4发布配置加`kernel-config-android.sh`、`kernel-config-7.4.sh`编译通过。
 - 上机：Android可以完整启动，不含KSU与含BakaSU两种构建都已验证；显示、触控、音频正常。
-- fastrpc：改用上游v4系列。1/3为`add/core/0003`；2/3单独应用并不安全，与3/3合并为`core/misc-fastrpc-fix-context-leak-and-hang-on-signal-interrupted-invoke`的override，并加入仍然适用的本地修改，各项改动及原因见补丁说明。尚未上机验证。
+- fastrpc：改用上游v4系列，1/3、2/3为`add/core/0003`、`0004`，3/3为`core/misc-fastrpc-fix-context-leak-and-hang-on-signal-interrupted-invoke`的override，内容与上游一致（3/3只适配了一处上下文）。本地修正单独放在`add/core/0005`，各项改动及原因见其补丁说明；v4的补丁单独应用并不安全，须与它一起应用。尚未上机验证。
 - ReSukiSU：保持钉住的`239e1e88`（UAPI与现有管理器一致）。7.3起arm64原生系统调用从`orig_x0`取第一个参数，钉住的版本仍改写`regs[0]`，sucompat与`__ksyscall()`因此失效；`resukisu/0001`改为在系统调用的寄存器上读写`orig_x0`，对应tiann/KernelSU `9ae6e65a`。
 
 ## 7.4启动所需的改动

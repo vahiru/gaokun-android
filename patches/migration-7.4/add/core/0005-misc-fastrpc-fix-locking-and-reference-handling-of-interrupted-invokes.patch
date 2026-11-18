@@ -1,0 +1,346 @@
+From c9dc2c745a099951709254f144940ff05b13f798 Mon Sep 17 00:00:00 2001
+From: Akisaira <akisaira@outlook.com>
+Date: Thu, 19 Nov 2026 01:07:27 +1100
+Subject: [PATCH] misc: fastrpc: fix locking and reference handling of
+ interrupted invokes
+
+Fixes on top of the interrupted-invoke series (v4) for glink over SMEM and
+subsystem restart. The three patches of the series are carried unchanged
+before this one; on their own, 2/3 can put a context twice and 3/3 can
+deadlock on channel removal, so they are only meant to be applied together
+with this patch.
+
+- fastrpc_context_schedule_put_work() uses xchg() instead of fl->lock.
+  fastrpc_rpmsg_callback() runs in hard interrupt context with glink over
+  SMEM, where the non-IRQ-safe fl->lock can deadlock on one CPU, and
+  fastrpc_notify_users() calls it with fl->lock already held, which
+  deadlocks on channel removal whenever a context is pending or parked.
+
+- put_work_scheduled marks the time in which nobody may drop the worker
+  reference: it is set when the context is allocated, cleared right after
+  fastrpc_invoke_send() takes the reference, and a failed send claims it
+  before dropping the reference. Otherwise fastrpc_notify_users() puts
+  contexts that hold no worker reference: on subsystem restart glink wakes
+  a sender blocked on the crashed DSP before it removes the channel, so
+  the failed send and notify_users() both drop the same reference, and a
+  context that is still being set up loses its invoker reference.
+
+- A context is parked only when the wait itself was interrupted. Checking
+  err at the bail: label also caught a DSP retval of -ERESTARTSYS and
+  parked a call that had already completed. Setup and send failures go to
+  bail: again. DSP error codes in the kernel's restart range are returned
+  as -EIO, so that they cannot restart the syscall either.
+
+- A retry resumes a parked context only with the same args, as ctx->args
+  isn't repointed on resume. A different retry is a new call.
+
+- At close, the worker reference of a parked context is dropped only if
+  this fd created a dynamic process and the DSP released it. A static or
+  attached PD outlives its client and may still be running the call, so
+  its buffers must stay valid until the DSP answers or the channel goes
+  away.
+
+- invoke_interrupted_mmaps stays, now filled at close if a context is
+  still parked: a static PD may still use fl->mmaps, and dropping the
+  parked context at close, or its late reply, frees fl. That is what
+  76e8e4ace1ed guards against. fastrpc_rpmsg_remove() walks the list under
+  cctx->lock, as close now adds to it and misc_deregister() doesn't wait
+  for open fds.
+
+Two statements in the commit messages of the series don't hold here. The
+kref_get_unless_zero() race described in 3/3 cannot happen while the fd
+is open, as only close drops the invoker reference of a parked context.
+rpmsg keeps .callback and .remove apart on subsystem restart only because
+glink_smem disables its interrupt first, not on unbind or a remote close;
+put_work_scheduled keeps the put single in those cases.
+
+Signed-off-by: Akisaira <akisaira@outlook.com>
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/misc/fastrpc.c | 144 +++++++++++++++++++++++++++--------------
+ 1 file changed, 96 insertions(+), 48 deletions(-)
+
+diff --git a/drivers/misc/fastrpc.c b/drivers/misc/fastrpc.c
+index 98396a9fe4..f7343f8c12 100644
+--- a/drivers/misc/fastrpc.c
++++ b/drivers/misc/fastrpc.c
+@@ -272,7 +272,11 @@ struct fastrpc_invoke_ctx {
+ 	bool is_work_done;
+ 	/* process updates poll memory instead of glink response */
+ 	bool is_polled;
+-	/* set once put_work has been scheduled for this ctx, guarded by fl->lock */
++	/*
++	 * Set while nobody may drop the worker reference: before
++	 * fastrpc_invoke_send() takes it, and once a reply, notify_users() or a
++	 * failed send has claimed it.
++	 */
+ 	bool put_work_scheduled;
+ 	struct kref refcount;
+ 	struct list_head node; /* list of ctxs */
+@@ -323,6 +327,7 @@ struct fastrpc_channel_ctx {
+ 	u32 dsp_attributes[FASTRPC_MAX_DSP_ATTRIBUTES];
+ 	struct fastrpc_device *secure_fdevice;
+ 	struct fastrpc_device *fdevice;
++	struct list_head invoke_interrupted_mmaps;
+ 	bool secure;
+ 	bool unsigned_support;
+ 	bool poll_mode_supported;
+@@ -652,17 +657,15 @@ static void fastrpc_context_put_wq(struct work_struct *work)
+ 	fastrpc_context_put(ctx);
+ }
+ 
+-/* Schedules put_work at most once per ctx; racing callers may both try. */
++/*
++ * Schedules put_work at most once per ctx; racing callers may both try.
++ * No fl->lock here: fastrpc_rpmsg_callback() runs in hard interrupt context
++ * with glink over smem, where the non-IRQ-safe fl->lock can deadlock, and
++ * fastrpc_notify_users() calls this with fl->lock already held.
++ */
+ static void fastrpc_context_schedule_put_work(struct fastrpc_invoke_ctx *ctx)
+ {
+-	bool do_schedule;
+-
+-	spin_lock(&ctx->fl->lock);
+-	do_schedule = !ctx->put_work_scheduled;
+-	ctx->put_work_scheduled = true;
+-	spin_unlock(&ctx->fl->lock);
+-
+-	if (do_schedule)
++	if (!xchg(&ctx->put_work_scheduled, true))
+ 		schedule_work(&ctx->put_work);
+ }
+ 
+@@ -674,16 +677,23 @@ static void fastrpc_context_save_interrupted(struct fastrpc_invoke_ctx *ctx)
+ 	spin_unlock(&ctx->fl->lock);
+ }
+ 
+-/* Matches on handle+sc, not sc alone, to avoid resuming an unrelated call. */
+-static struct fastrpc_invoke_ctx *fastrpc_context_restore_interrupted(struct fastrpc_user *fl,
+-								      u32 handle, u32 sc)
++/*
++ * Matches on handle, sc and args: the restarted syscall passes all of them
++ * unchanged. Anything else is a different call, whose buffers the DSP's output
++ * wouldn't reach, as ctx->args still holds the interrupted call's.
++ */
++static struct fastrpc_invoke_ctx *
++fastrpc_context_restore_interrupted(struct fastrpc_user *fl, u32 handle,
++				    u32 sc, struct fastrpc_invoke_args *args)
+ {
+ 	struct fastrpc_invoke_ctx *ctx = NULL, *ictx;
+ 
+ 	spin_lock(&fl->lock);
+ 	list_for_each_entry(ictx, &fl->interrupted, node) {
+ 		if (ictx->pid == current->pid && ictx->handle == handle &&
+-		    ictx->sc == sc) {
++		    ictx->sc == sc &&
++		    (!ictx->nscalars ||
++		     !memcmp(ictx->args, args, ictx->nscalars * sizeof(*args)))) {
+ 			/* May already be mid-teardown; don't resurrect it. */
+ 			if (kref_get_unless_zero(&ictx->refcount)) {
+ 				ctx = ictx;
+@@ -805,6 +815,8 @@ static struct fastrpc_invoke_ctx *fastrpc_context_alloc(
+ 	ctx->cctx = cctx;
+ 	init_completion(&ctx->work);
+ 	INIT_WORK(&ctx->put_work, fastrpc_context_put_wq);
++	/* No worker reference yet: notify_users() must not drop one. */
++	ctx->put_work_scheduled = true;
+ 
+ 	spin_lock(&user->lock);
+ 	list_add_tail(&ctx->node, &user->pending);
+@@ -1344,10 +1356,16 @@ static int fastrpc_invoke_send(struct fastrpc_session_ctx *sctx,
+ 	msg->addr = ctx->buf ? ctx->buf->dma_addr : 0;
+ 	msg->size = roundup(ctx->msg_sz, PAGE_SIZE);
+ 	fastrpc_context_get(ctx);
++	/* Ordered after the get, so whoever claims the reference sees it. */
++	smp_store_release(&ctx->put_work_scheduled, false);
+ 
+ 	ret = rpmsg_send(cctx->rpdev->ept, (void *)msg, sizeof(*msg));
+ 
+-	if (ret)
++	/*
++	 * Nothing was sent, so no reply will drop the worker reference. Drop it
++	 * here unless fastrpc_notify_users() has already claimed it.
++	 */
++	if (ret && !xchg(&ctx->put_work_scheduled, true))
+ 		fastrpc_context_put(ctx);
+ 
+ 	return ret;
+@@ -1439,7 +1457,7 @@ static int fastrpc_internal_invoke(struct fastrpc_user *fl,  u32 kernel,
+ 
+ 	/* Resume an interrupted invoke instead of resending to the DSP. */
+ 	if (!kernel)
+-		ctx = fastrpc_context_restore_interrupted(fl, handle, sc);
++		ctx = fastrpc_context_restore_interrupted(fl, handle, sc, args);
+ 	if (ctx)
+ 		goto wait;
+ 
+@@ -1455,15 +1473,8 @@ static int fastrpc_internal_invoke(struct fastrpc_user *fl,  u32 kernel,
+ 	dma_wmb();
+ 	/* Send invoke buffer to remote dsp */
+ 	err = fastrpc_invoke_send(fl->sctx, ctx, kernel, handle);
+-	if (err) {
+-		/* Never sent, so not safe to park and resume like bail: does. */
+-		spin_lock(&fl->lock);
+-		list_del_init(&ctx->node);
+-		spin_unlock(&fl->lock);
+-		fastrpc_context_put(ctx);
+-		dev_dbg(fl->sctx->dev, "Error: Invoke Failed %d\n", err);
+-		return err;
+-	}
++	if (err)
++		goto bail;
+ 
+ 	/*
+ 	 * Set message context as polled if the call is for a user PD
+@@ -1474,14 +1485,22 @@ static int fastrpc_internal_invoke(struct fastrpc_user *fl,  u32 kernel,
+ 
+ wait:
+ 	err = fastrpc_wait_for_completion(ctx, kernel);
+-	if (err == -ETIMEDOUT)
+-		dev_warn(fl->sctx->dev,
+-			 "fastrpc_invoke: TIMEOUT ctxid=0x%llx handle=0x%x nscalars=%d\n",
+-			 ctx->ctxid, handle, ctx->nscalars);
+-	else if (err == -ERESTARTSYS)
++	if (err == -ERESTARTSYS) {
+ 		dev_dbg(fl->sctx->dev,
+ 			"fastrpc_invoke: INTERRUPTED ctxid=0x%llx handle=0x%x nscalars=%d\n",
+ 			ctx->ctxid, handle, ctx->nscalars);
++		/* Still with the DSP: park it so that a retry resumes the wait. */
++		fastrpc_context_save_interrupted(ctx);
++		return err;
++	}
++	if (err == -ETIMEDOUT) {
++		dev_warn(fl->sctx->dev,
++			 "fastrpc_invoke: TIMEOUT ctxid=0x%llx handle=0x%x nscalars=%d\n",
++			 ctx->ctxid, handle, ctx->nscalars);
++		/* Leave linked: a late DSP answer or notify_users() still needs to reach it. */
++		fastrpc_context_put(ctx);
++		return err;
++	}
+ 	if (err)
+ 		goto bail;
+ 
+@@ -1494,21 +1513,21 @@ static int fastrpc_internal_invoke(struct fastrpc_user *fl,  u32 kernel,
+ 
+ 	/* Check the response from remote dsp */
+ 	err = ctx->retval;
++	/* A DSP error code must not reach the syscall exit as a restart code. */
++	if (err <= -ERESTARTSYS && err >= -ERESTART_RESTARTBLOCK)
++		err = -EIO;
+ 	if (err)
+ 		goto bail;
+ 
+ bail:
+-	if (err == -ERESTARTSYS) {
+-		fastrpc_context_save_interrupted(ctx);
+-	} else if (err == -ETIMEDOUT) {
+-		/* Leave linked: a late DSP answer or notify_users() still needs to reach it. */
+-		fastrpc_context_put(ctx);
+-	} else {
+-		spin_lock(&fl->lock);
+-		list_del_init(&ctx->node);
+-		spin_unlock(&fl->lock);
+-		fastrpc_context_put(ctx);
+-	}
++	/*
++	 * The call is over: it completed, failed before sending or while
++	 * copying the results back, or the DSP returned an error.
++	 */
++	spin_lock(&fl->lock);
++	list_del_init(&ctx->node);
++	spin_unlock(&fl->lock);
++	fastrpc_context_put(ctx);
+ 
+ 	if (err)
+ 		dev_dbg(fl->sctx->dev, "Error: Invoke Failed %d\n", err);
+@@ -1810,22 +1829,43 @@ static int fastrpc_device_release(struct inode *inode, struct file *file)
+ 	struct fastrpc_user *fl = (struct fastrpc_user *)file->private_data;
+ 	struct fastrpc_channel_ctx *cctx = fl->cctx;
+ 	struct fastrpc_invoke_ctx *ctx, *n;
++	unsigned long flags;
+ 	int release_err;
++	LIST_HEAD(mmaps);
+ 
+ 	release_err = fastrpc_release_current_dsp_process(fl);
+ 
+ 	/*
+-	 * Drop the invoker ref unconditionally: no retry can arrive once the
+-	 * fd is closed. Drop the worker ref only if the DSP confirmed it is
+-	 * done with the process; otherwise leave ctx linked so a real answer
+-	 * or a later SSR can still release it.
++	 * A call still parked means the client died mid-invoke, and a static PD
++	 * outlives it and may still use fl->mmaps. Dropping the parked call
++	 * below, or its late reply, can free fl, so keep them with the channel.
++	 * cctx->lock isn't taken under fl->lock, as fastrpc_notify_users()
++	 * nests them the other way.
++	 */
++	spin_lock(&fl->lock);
++	if (!list_empty(&fl->interrupted))
++		list_splice_init(&fl->mmaps, &mmaps);
++	spin_unlock(&fl->lock);
++
++	spin_lock_irqsave(&cctx->lock, flags);
++	list_splice_tail(&mmaps, &cctx->invoke_interrupted_mmaps);
++	spin_unlock_irqrestore(&cctx->lock, flags);
++
++	/*
++	 * Drop the invoker ref: no retry can arrive once the fd is closed. Drop
++	 * the worker ref too only if this fd created a dynamic process
++	 * (fl->init_mem) and the DSP has released it, so that nothing on the
++	 * DSP can still use the call's buffers. A static or attached PD outlives
++	 * its client and may still be running the call: there, and when the
++	 * release failed, ctx stays linked with its worker ref until the DSP
++	 * answers or the channel goes away.
+ 	 */
+ 	spin_lock(&fl->lock);
+ 	list_for_each_entry_safe(ctx, n, &fl->interrupted, node) {
+ 		ctx->retval = -EPIPE;
+ 		complete(&ctx->work);
+ 		spin_unlock(&fl->lock);
+-		if (!release_err)
++		if (!release_err && fl->init_mem)
+ 			fastrpc_context_schedule_put_work(ctx);
+ 		fastrpc_context_put(ctx);
+ 		spin_lock(&fl->lock);
+@@ -2732,6 +2772,7 @@ static int fastrpc_rpmsg_probe(struct rpmsg_device *rpdev)
+ 	rdev->dma_mask = &data->dma_mask;
+ 	dma_set_mask_and_coherent(rdev, DMA_BIT_MASK(32));
+ 	INIT_LIST_HEAD(&data->users);
++	INIT_LIST_HEAD(&data->invoke_interrupted_mmaps);
+ 	spin_lock_init(&data->lock);
+ 	idr_init(&data->ctx_idr);
+ 	data->domain_id = domain_id;
+@@ -2766,8 +2807,8 @@ static void fastrpc_notify_users(struct fastrpc_user *user)
+ 		fastrpc_context_schedule_put_work(ctx);
+ 	}
+ 	/*
+-	 * Invoker ref for a parked context is released by fastrpc_user_free()
+-	 * or fastrpc_device_release(); this only drops the worker ref.
++	 * Drops only the worker ref. The invoker ref of a parked context goes
++	 * when the call resumes or in fastrpc_device_release().
+ 	 */
+ 	list_for_each_entry(ctx, &user->interrupted, node) {
+ 		ctx->retval = -EPIPE;
+@@ -2780,6 +2821,7 @@ static void fastrpc_notify_users(struct fastrpc_user *user)
+ static void fastrpc_rpmsg_remove(struct rpmsg_device *rpdev)
+ {
+ 	struct fastrpc_channel_ctx *cctx = dev_get_drvdata(&rpdev->dev);
++	struct fastrpc_buf *buf, *b;
+ 	struct fastrpc_user *user;
+ 	unsigned long flags;
+ 
+@@ -2796,6 +2838,12 @@ static void fastrpc_rpmsg_remove(struct rpmsg_device *rpdev)
+ 	if (cctx->secure_fdevice)
+ 		misc_deregister(&cctx->secure_fdevice->miscdev);
+ 
++	/* misc_deregister() doesn't wait for open fds, and a close adds to this list. */
++	spin_lock_irqsave(&cctx->lock, flags);
++	list_for_each_entry_safe(buf, b, &cctx->invoke_interrupted_mmaps, node)
++		list_del(&buf->node);
++	spin_unlock_irqrestore(&cctx->lock, flags);
++
+ 	if (cctx->remote_heap_size && cctx->vmcount) {
+ 		u64 src_perms = 0;
+ 		int err, i;
