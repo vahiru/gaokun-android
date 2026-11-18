@@ -1,0 +1,153 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: iris: let the decoder client size its input buffers
+
+The decoder sizes every OUTPUT (bitstream) buffer for the worst case of
+a 4096x2304 frame, whatever the coded resolution: 6.75 MiB for H.264
+and HEVC and 13.5 MiB for VP9. S_FMT also overwrites the sizeimage the
+client passes. A client that knows its stream is small cannot ask for
+less, so the Codec2 V4L2 HAL allocates 16 MiB input buffers (64 MiB
+above 1080p) to cover VP9, up to 16 per session. A web page with a few
+looping videos then maps gigabytes through the decoder.
+
+Keep the sizeimage the client sets on the OUTPUT queue, within the size
+the coded resolution set on that queue needs (half a 4:2:0 frame, a
+whole one for VP9, never below 720p) and the existing worst case. A
+sizeimage of 0 still gets the worst case, so clients that leave the
+size to the driver see no change. The venus driver similarly sizes
+compressed buffers from the resolution (half a frame for every codec,
+eight times that below 720p) and keeps a larger client value up to
+8 MiB. TRY_FMT still returns the client's sizeimage unchanged, as
+before.
+
+buf_prepare checked decoder input buffers against the worst case
+recomputed from the current resolution, which would reject every
+buffer sized by the client. Check them against the size set by S_FMT
+instead; this also keeps input buffers sized for the starting
+resolution usable after a resolution change in the stream. Encoder
+buffers are checked as before.
+
+Checked on SC8280XP (Huawei MateBook E Go): S_FMT keeps 1 MiB for H.264
+and HEVC at 0x0, raises 100 KiB to the 720p minimum and 1 MiB at 1080p
+to the 1080p minimum, and still gives the old 6.75/13.5 MiB for 0 and
+for larger requests. Through the Codec2 V4L2 HAL, which asks for 16 MiB,
+H.264 (480p, 1080p, 4K), HEVC 1080p and VP9 1080p decode with output
+identical to the software decoders, as do two H.264 streams that change
+resolution midway, the same as without this patch.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ .../media/platform/qcom/iris/iris_buffer.c    | 20 +++++++++++++++++++
+ .../media/platform/qcom/iris/iris_buffer.h    |  1 +
+ drivers/media/platform/qcom/iris/iris_vb2.c   | 18 ++++++++++++++---
+ drivers/media/platform/qcom/iris/iris_vdec.c  | 17 +++++++++++++++-
+ 4 files changed, 52 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/media/platform/qcom/iris/iris_buffer.c b/drivers/media/platform/qcom/iris/iris_buffer.c
+index 563b37be6..2b23d4bb5 100644
+--- a/drivers/media/platform/qcom/iris/iris_buffer.c
++++ b/drivers/media/platform/qcom/iris/iris_buffer.c
+@@ -493,6 +493,26 @@ static u32 iris_dec_bitstream_buffer_size(struct iris_inst *inst)
+ 	return ALIGN(frame_size, PIXELS_4K);
+ }
+ 
++/*
++ * Smallest decoder input buffer for the coded resolution set on the OUTPUT
++ * queue: half a 4:2:0 frame (a whole one for VP9) at that resolution, with
++ * 720p as the floor, and never more than the worst case above.
++ */
++u32 iris_dec_bitstream_min_size(struct iris_inst *inst)
++{
++	u32 max_size = iris_dec_bitstream_buffer_size(inst);
++	u32 num_mbs = max_t(u32, iris_get_mbpf(inst), NUM_MBS_720P);
++	u32 div_factor = inst->codec == V4L2_PIX_FMT_VP9 ? 1 : 2;
++	u32 frame_size;
++
++	if (num_mbs > NUM_MBS_4K)
++		return max_size;
++
++	frame_size = num_mbs * (16 * 16) * 3 / 2 / div_factor;
++
++	return min_t(u32, ALIGN(frame_size, PIXELS_4K), max_size);
++}
++
+ static u32 iris_enc_bitstream_buffer_size(struct iris_inst *inst)
+ {
+ 	u32 aligned_width, aligned_height, bitstream_size, yuv_size;
+diff --git a/drivers/media/platform/qcom/iris/iris_buffer.h b/drivers/media/platform/qcom/iris/iris_buffer.h
+index cbc7678ae..e97faa28a 100644
+--- a/drivers/media/platform/qcom/iris/iris_buffer.h
++++ b/drivers/media/platform/qcom/iris/iris_buffer.h
+@@ -113,6 +113,7 @@ struct iris_buffers {
+ };
+ 
+ int iris_get_buffer_size(struct iris_inst *inst, enum iris_buffer_type buffer_type);
++u32 iris_dec_bitstream_min_size(struct iris_inst *inst);
+ void iris_get_internal_buffers(struct iris_inst *inst, u32 plane);
+ int iris_create_internal_buffers(struct iris_inst *inst, u32 plane);
+ int iris_queue_internal_buffers(struct iris_inst *inst, u32 plane);
+diff --git a/drivers/media/platform/qcom/iris/iris_vb2.c b/drivers/media/platform/qcom/iris/iris_vb2.c
+index 8faf709c2..936d00cc2 100644
+--- a/drivers/media/platform/qcom/iris/iris_vb2.c
++++ b/drivers/media/platform/qcom/iris/iris_vb2.c
+@@ -272,9 +272,21 @@ int iris_vb2_buf_prepare(struct vb2_buffer *vb)
+ 		if (vb->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE &&
+ 		    vb2_plane_size(vb, 0) < iris_get_buffer_size(inst, BUF_OUTPUT))
+ 			return -EINVAL;
+-		if (vb->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE &&
+-		    vb2_plane_size(vb, 0) < iris_get_buffer_size(inst, BUF_INPUT))
+-			return -EINVAL;
++		if (vb->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) {
++			u32 input_size;
++
++			/*
++			 * Decoder input buffers keep the size set by S_FMT:
++			 * a resolution change in the stream does not resize
++			 * them.
++			 */
++			if (inst->domain == DECODER)
++				input_size = inst->buffers[BUF_INPUT].size;
++			else
++				input_size = iris_get_buffer_size(inst, BUF_INPUT);
++			if (vb2_plane_size(vb, 0) < input_size)
++				return -EINVAL;
++		}
+ 	}
+ 	return 0;
+ }
+diff --git a/drivers/media/platform/qcom/iris/iris_vdec.c b/drivers/media/platform/qcom/iris/iris_vdec.c
+index 5874dc6cb..a5537b315 100644
+--- a/drivers/media/platform/qcom/iris/iris_vdec.c
++++ b/drivers/media/platform/qcom/iris/iris_vdec.c
+@@ -205,6 +205,20 @@ int iris_vdec_try_fmt(struct iris_inst *inst, struct v4l2_format *f)
+ 	return 0;
+ }
+ 
++/*
++ * Keep the input buffer size the client asks for, between what the coded
++ * resolution needs and the worst case for the codec. 0 keeps the worst case.
++ */
++static u32 iris_vdec_input_sizeimage(struct iris_inst *inst, u32 requested)
++{
++	u32 max_size = iris_get_buffer_size(inst, BUF_INPUT);
++
++	if (!requested)
++		return max_size;
++
++	return clamp(requested, iris_dec_bitstream_min_size(inst), max_size);
++}
++
+ int iris_vdec_s_fmt(struct iris_inst *inst, struct v4l2_format *f)
+ {
+ 	struct v4l2_format *fmt, *output_fmt;
+@@ -241,7 +255,8 @@ int iris_vdec_s_fmt(struct iris_inst *inst, struct v4l2_format *f)
+ 		fmt->fmt.pix_mp.height = ALIGN(f->fmt.pix_mp.height, codec_align);
+ 		fmt->fmt.pix_mp.num_planes = 1;
+ 		fmt->fmt.pix_mp.plane_fmt[0].bytesperline = 0;
+-		fmt->fmt.pix_mp.plane_fmt[0].sizeimage = iris_get_buffer_size(inst, BUF_INPUT);
++		fmt->fmt.pix_mp.plane_fmt[0].sizeimage =
++			iris_vdec_input_sizeimage(inst, f->fmt.pix_mp.plane_fmt[0].sizeimage);
+ 		inst->buffers[BUF_INPUT].min_count = iris_vpu_buf_count(inst, BUF_INPUT);
+ 		inst->buffers[BUF_INPUT].size = fmt->fmt.pix_mp.plane_fmt[0].sizeimage;
+ 

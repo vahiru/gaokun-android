@@ -172,6 +172,10 @@ KPATCHES=(
     kernel/iris/0016-media-iris-add-request-key-frame-support-for-encoder.patch
     kernel/iris/0017-media-iris-send-the-raw-and-visible-frame-sizes-to-the-gen1-encoder.patch
     kernel/iris/0018-media-iris-zero-the-gen1-empty-buffer-packets.patch
+    # 0019让解码器采用客户端在S_FMT中设置的输入缓冲区大小，限定在分辨率所需的下限（不低于720p）与原来的最坏值之间；
+    # 客户端填0时仍为最坏值。crdroid-tree-fixes.py [46]（android/v4l2-codec2/0007）依赖0019：缺少0019时，
+    # 1080p及以下的硬件解码与1080p以上的VP9硬件解码会在启动时报错。
+    kernel/iris/0019-media-iris-let-the-decoder-client-size-its-input-buffers.patch
 
     # ─── 7. kernel/camera：camcc 时钟/GDSC、camss 与前后摄传感器驱动（ov13b10 / hi846）───
     # 0003 与 kernel/dts/0005 配套，需 CONFIG_VIDEO_OV13B10=y 与 CONFIG_VIDEO_DW9714=y；

@@ -132,6 +132,7 @@ TX_DEC0 Volume = 102, TX_DEC1 Volume = 102
 | `patches/kernel/iris/0003` | `drivers/media/platform/qcom/iris/` | 允许`v4l2_codec2`在首个`V4L2_EVENT_SOURCE_CHANGE`事件到达前调用`VIDIOC_G_FMT(CAPTURE)`，兼容Android Codec2初始化顺序 |
 | `patches/kernel/iris/0005` | `drivers/media/platform/qcom/iris/` | 在非动态分辨率切换（非DRC）的`CAPTURE streamoff`路径发送`HFI_FLUSH_ALL`而非`HFI_FLUSH_OUTPUT`，修复视频拖动进度条（seek）或关闭播放器时固件等待`HFI_FLUSH_OUTPUT`响应超时导致的卡死 |
 | `patches/kernel/dts/0026` | `arch/arm64/boot/dts/qcom/sc8280xp.dtsi` | iris加载固件时把`0x0..0x25800000`作为视频内容保护范围交给TZ，只有安全会话可以使用。`iris`主域（SID `0x2a00`）的IOVA从高往低分配，每路1080p解码约占260–310 MiB，1440p约占735 MiB，同时打开的会话较多时，普通会话的缓冲区会被映射进这个范围，解码器一访问，整板即复位，内核不留任何记录。补丁增加一个只带`iommu-addresses`的reserved-memory节点，并在`iris`的`memory-region`中引用（固件区域须排在第一个），使该范围在主域中预留。地址空间不足时，映射失败，对应会话的`VIDIOC_QBUF`或`VIDIOC_STREAMON`返回错误，该路解码失败，不再复位。CB15（编码器ARP，见下文）有独立的页表，不受影响 |
+| `patches/kernel/iris/0019` | `drivers/media/platform/qcom/iris/` | 解码器原来不论分辨率，都按4096x2304的最坏情况确定输入（码流）缓冲区大小（H.264/HEVC约6.75 MiB，VP9约13.5 MiB），并忽略客户端在`S_FMT`中设置的值，因此`v4l2_codec2`只能为每路会话分配16个16 MiB的输入缓冲区。补丁改为采用客户端设置的值，下限为分辨率所需的大小（4:2:0半帧，VP9为整帧，不低于720p），上限为原来的最坏值；客户端填0时仍为最坏值。`buf_prepare`改为按`S_FMT`确定的大小检查输入缓冲区，码流中途提高分辨率后，原有的输入缓冲区仍可使用 |
 
 ### 3. 硬件视频编码
 
