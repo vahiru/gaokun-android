@@ -61,7 +61,7 @@
 - Live安装器与Windows安装器：[`installer/tools/README.md`](../installer/tools/README.md)、[`installer/live/README.md`](../installer/live/README.md)、[`installer/common/README.md`](../installer/common/README.md)、[`installer/windows/README.md`](../installer/windows/README.md)（Windows安装器）
 - 设备树HAL与音频后处理：[`camera/README.md`](../device/huawei/gaokun3/camera/README.md)、[`sensors-hal/README.md`](../device/huawei/gaokun3/sensors-hal/README.md)、[`ssc/README.md`](../device/huawei/gaokun3/ssc/README.md)、[`micarray/README.md`](../device/huawei/gaokun3/micarray/README.md)、[`denoise/README.md`](../device/huawei/gaokun3/denoise/README.md)、[`speakerfx/README.md`](../device/huawei/gaokun3/speakerfx/README.md)、[`effects/README.md`](../device/huawei/gaokun3/effects/README.md)
 - 构建输入准备：[`firmware/README.md`](../device/huawei/gaokun3/firmware/README.md)、[`hexagonrpcd-root/README.md`](../device/huawei/gaokun3/hexagonrpcd-root/README.md)、[`prebuilt-boot/README.md`](../device/huawei/gaokun3/prebuilt-boot/README.md)
-- 调试与性能脚本：[`scripts/touch/README.md`](../scripts/touch/README.md)、[`scripts/perf/README.md`](../scripts/perf/README.md)、[`scripts/selinux/README.md`](../scripts/selinux/README.md)
+- 调试与性能脚本：[`scripts/touch/README.md`](../scripts/touch/README.md)、[`scripts/perf/README.md`](../scripts/perf/README.md)、[`scripts/selinux/README.md`](../scripts/selinux/README.md)、[`scripts/s2idle/README.md`](../scripts/s2idle/README.md)、[`scripts/gmu-forensics/README.md`](../scripts/gmu-forensics/README.md)、[`scripts/camera/README.md`](../scripts/camera/README.md)、[`scripts/ssc/README.md`](../scripts/ssc/README.md)
 
 检查仓库内所有Markdown相对链接与锚点：
 

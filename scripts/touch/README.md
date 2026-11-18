@@ -6,14 +6,18 @@
 |---|---|
 | `dump-state.sh` | **一键取证**：一次抓取逐级计数器、触点出生记录、两张原始网格、54个算法参数、输入轴信息与IRQ计数 |
 | `grid.py` | 将40×60电容网格渲染为可视化字符图；传入两个文件时并排对比 |
-| `capture-ab.sh` | 在设备上运行：录制`/dev/input/event7`原始事件流，收满指定数据量后自动切换A/B预设 |
+| `capture-ab.sh` | 在设备上运行：按设备名查找触摸屏节点并录制原始事件流，收满指定数据量后自动切换A/B预设 |
+| `capture-presets.sh` | 在设备上运行：`capture-ab.sh`的通用版，可依次切换任意多组算法参数，每组收满指定字节数后切到下一组，结束或被终止时恢复原参数 |
 | `evdev-strokes.py` | 在宿主机运行：将原始事件解码为轨迹，统计轨迹数、每条帧数、速度分布与**相邻轨迹间隔** |
+| `merge-check.py` | 在宿主机运行：在原始事件流中查找“冻结后瞬移”的轨迹，即后一次点按被跟踪器接到上一条尚未释放的轨迹上、没有产生新的按下 |
 | `tracker-sim.c` | 在宿主机运行：`hx_track_contacts()`的逐行复刻，无需硬件即可验证跟踪器改动 |
 | `gk3trec.c` | 在设备上运行：将驱动处理后的网格（加`-r`时含原始网格）以及触摸屏、手写笔evdev事件录制进同一文件，统一使用`CLOCK_MONOTONIC`时间戳 |
 | `hxsim/` | 在宿主机运行：直接编译内核树中的`hx-algo.c`生成离线回放器，逐帧输出连通域、峰值、触点与跟踪结果 |
 | `trec.py` | 读取录制文件；`summary`子命令列出标记与每段活动的起止时间 |
 | `simcmp.py` | 核对离线回放结果与设备录制时的实际上报是否一致 |
 | `outcomes.py` | 按时间段统计到达应用的触摸与被撤回的触摸，用于对比算法改动前后的效果 |
+| `frame-rate-sampler.sh` | 在设备上运行：每0.1秒记录一次驱动的帧计数（处理与上报）、触点计数、新建轨迹计数与触摸中断计数，同时录制原始事件流，用于判断丢帧发生在落指、按住还是空闲阶段 |
+| `irq-trace.sh` | 在设备上运行：用独立的ftrace instance记录触摸硬中断及其中断线程的调度事件，用于区分扫描空档来自触控IC未出帧、线程调度延迟还是帧处理本身 |
 
 ## 驱动侧可观测接口（`patches/kernel/input/0007`、`patches/kernel/input/0013`）
 
@@ -80,7 +84,7 @@ adb pull /data/local/tmp/ts_A.bin . && adb pull /data/local/tmp/ts_B.bin .
 python3 scripts/touch/evdev-strokes.py ts_A.bin ts_B.bin
 ```
 
-运行前请先通过`grep -A9 -i himax /proc/bus/input/devices`核对触摸屏对应的`eventX`编号。
+脚本按设备名查找触摸屏节点，不依赖`eventX`编号。需要对比两组以上参数时改用`capture-presets.sh`，参数格式与产物见文件开头；两种录制结果都可以再用`merge-check.py`检查是否有点按被并入旧轨迹。
 
 ## 断触判据与阈值调优原则
 

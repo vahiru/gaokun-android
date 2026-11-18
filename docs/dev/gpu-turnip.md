@@ -128,4 +128,4 @@ SC8280XP的GPU SMMU（`3da0000.iommu`，`qcom,sc8280xp-smmu-500`）在`msm_iommu
 
 - `dmesg`里不应出现`preemption timed out`、`preemption faulted`或`CP | HW fault`。
 - tracefs的`drm_msm_gpu/msm_gpu_preemption_trigger`和`msm_gpu_preemption_irq`记录每次切换，两者应一一对应；`msm_gpu_submit`的`ring=`字段显示每次提交进了哪个ring。
-- GPU挂死时用Mesa的`crashdec -f`解码devcoredump（`/sys/class/devcoredump/devcd*/data`，5分钟后自动删除）；A690要先把dump里的`revision: 0 (06090000)`改成`revision: 690 (6.9.0.0)`。
+- GPU挂死时用Mesa的`crashdec -f`解码devcoredump（`/sys/class/devcoredump/devcd*/data`，5分钟后自动删除）；A690要先把dump里的`revision: 0 (06090000)`改成`revision: 690 (6.9.0.0)`。只需查看GMU HFI消息、GMU固件trace或`ring0`当前位置附近的PM4包时，可以用[`scripts/gmu-forensics/`](../../scripts/gmu-forensics/README.md)中的解析脚本。
