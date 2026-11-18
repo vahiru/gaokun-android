@@ -1,4 +1,4 @@
-From f8391295f1dec453d721f2f791a607cf6db9d166 Mon Sep 17 00:00:00 2001
+From e59394b0430eefa2d8676cd79228187e19c55d88 Mon Sep 17 00:00:00 2001
 From: Akisaira <akisaira@outlook.com>
 Date: Wed, 18 Nov 2026 23:13:26 +1100
 Subject: [PATCH] kernel: fix SELinux generation tracking for policy updates

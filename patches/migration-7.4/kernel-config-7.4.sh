@@ -10,8 +10,8 @@ OUT="${1:?用法: $0 <kernel-out-dir>}"
 # 原配置中的ANDROID_BINDER_IPC与ANDROID_BINDERFS会被olddefconfig丢弃，
 # binderfs已包含在ANDROID_BINDER_IPC_RUST中。缺少binder时，servicemanager与vold
 # 启动即中止，init以vold-failed为由重启。
-# CONFIG_RUST依赖RUST_IS_AVAILABLE：PATH中缺少rustc、bindgen或rust-src组件时，
-# olddefconfig会静默关闭它，因此下面加以断言；原因可用`make rustavailable`查看。
+# PATH中缺少rustc、bindgen或rust-src组件，或CONFIG_RUST的其他配置条件不满足时，
+# olddefconfig会静默关闭它，因此下面加以断言，并给出可能的原因。
 ./scripts/config --file "$OUT/.config" --enable RUST --enable ANDROID_BINDER_IPC_RUST \
     --set-str ANDROID_BINDER_DEVICES "binder,hwbinder,vndbinder"
 
@@ -33,8 +33,20 @@ for s in RUST ANDROID_BINDER_IPC_RUST SCHEDSTATS; do
 done
 grep -qx 'CONFIG_ANDROID_BINDER_DEVICES="binder,hwbinder,vndbinder"' "$OUT/.config" ||
     { echo "  ✗ CONFIG_ANDROID_BINDER_DEVICES 与预期不符" >&2; bad=1; }
+if ! grep -qx 'CONFIG_RUST=y' "$OUT/.config"; then
+    # CONFIG_RUST除了要求工具链可用（RUST_IS_AVAILABLE），还有若干配置条件，
+    # 见init/Kconfig中config RUST的depends on；make rustavailable只检查前者。
+    if ! grep -qx 'CONFIG_RUST_IS_AVAILABLE=y' "$OUT/.config"; then
+        echo "  CONFIG_RUST被关闭：Rust工具链不可用，请运行 make rustavailable 查看原因。" >&2
+    elif grep -qx 'CONFIG_DEBUG_INFO_BTF=y' "$OUT/.config" &&
+         ! grep -qx 'CONFIG_PAHOLE_HAS_LANG_EXCLUDE=y' "$OUT/.config"; then
+        echo "  CONFIG_RUST被关闭：已开启DEBUG_INFO_BTF，需要pahole ≥ 1.24。" >&2
+    else
+        echo "  CONFIG_RUST被关闭：工具链可用，请核对init/Kconfig中config RUST的其余依赖。" >&2
+    fi
+fi
 if [ $bad -ne 0 ]; then
-    echo "断言失败：Rust工具链不可用时，请先运行 make rustavailable 查看原因。" >&2
+    echo "断言失败：上面的符号未达到预期。" >&2
     exit 1
 fi
 echo "== 7.4配置断言通过：RUST、ANDROID_BINDER_IPC_RUST、SCHEDSTATS =y =="

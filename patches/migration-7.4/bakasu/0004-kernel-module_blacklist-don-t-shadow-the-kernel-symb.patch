@@ -1,4 +1,4 @@
-From 99161460e5d2cb0be98a6bf414bfc4b21e737abe Mon Sep 17 00:00:00 2001
+From f62960facc34a1f0c53c1b28cf6b8f2b8b287701 Mon Sep 17 00:00:00 2001
 From: Akisaira <akisaira@outlook.com>
 Date: Wed, 18 Nov 2026 23:23:50 +1100
 Subject: [PATCH] kernel: module_blacklist: don't shadow the kernel symbol we

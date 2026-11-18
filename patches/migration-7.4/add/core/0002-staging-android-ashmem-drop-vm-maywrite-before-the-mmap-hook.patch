@@ -1,4 +1,4 @@
-From 758eb14c26b31f2e4dcae8c3d4526aea346aa5cc Mon Sep 17 00:00:00 2001
+From aeb98b6492becdc3d4610ffd1d9946ed2bc5bfab Mon Sep 17 00:00:00 2001
 From: Akisaira <akisaira@outlook.com>
 Date: Wed, 18 Nov 2026 22:52:31 +1100
 Subject: [PATCH] staging: android: ashmem: drop VM_MAYWRITE before the mmap
@@ -20,6 +20,11 @@ memfd_check_seals_mmap(). A writable mapping of such a region is
 refused there with -EPERM, as before. ashmem_mmap() no longer clears
 VM_MAYWRITE; if it is still set while the mask lacks PROT_WRITE, the
 mask was lowered concurrently and the mmap fails with -EPERM.
+
+As a side effect, a writable mapping of such a region is now refused
+before mmap_region(): -EPERM takes precedence over the -EINVAL for a
+region without a size or a too large length, and a MAP_FIXED request
+fails before the old mapping is unmapped.
 
 Origin: local
 Upstream-Status: Inappropriate [ashmem is not upstream]
