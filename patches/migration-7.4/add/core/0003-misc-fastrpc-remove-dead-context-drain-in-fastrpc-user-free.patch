@@ -1,0 +1,56 @@
+From 48a6bc530dc50660def49dae46e1910215aa9b19 Mon Sep 17 00:00:00 2001
+From: Anandu Krishnan E <anandu.e@oss.qualcomm.com>
+Date: Tue, 17 Nov 2026 15:09:45 +0530
+Subject: [PATCH] misc: fastrpc: remove dead context drain in
+ fastrpc_user_free()
+
+fastrpc_context_alloc() takes a reference on fl via fastrpc_user_get()
+for the lifetime of every context, and fastrpc_context_free() always
+unlinks the context from fl->pending before releasing that reference
+with fastrpc_user_put(). This means fl->refcount cannot reach zero -
+and fastrpc_user_free() cannot run - while any context is still linked
+on fl->pending: whichever context's release happens to be the one that
+drops the last reference has, by construction, already removed itself
+from the list a few lines earlier in the very same call.
+
+The list_for_each_entry_safe() loop over fl->pending in
+fastrpc_user_free() can therefore never find anything to iterate. It
+has been unreachable since fl's own lifetime was switched from
+file-close-synchronous teardown to kref-counted teardown; it was never
+updated to reflect that the list it walks is now guaranteed empty by
+the time this callback can run. Remove it.
+
+Fixes: e85eb5feca8e2 ("misc: fastrpc: fix use-after-free of fastrpc_user in workqueue context")
+Signed-off-by: Anandu Krishnan E <anandu.e@oss.qualcomm.com>
+[Akisaira: in this tree fastrpc_context_free() does not unlink the context;
+ the invoker does, with list_del() before its last put. The conclusion
+ holds all the same: no context is freed while it is still on fl->pending.]
+Signed-off-by: Akisaira <akisaira@outlook.com>
+Origin: backport, https://patch.msgid.link/20261117-interrupted-invoke-v4-v4-1-2320a8a7eda2@oss.qualcomm.com
+Upstream-Status: Backport [https://patch.msgid.link/20261117-interrupted-invoke-v4-v4-1-2320a8a7eda2@oss.qualcomm.com]
+---
+ drivers/misc/fastrpc.c | 6 ------
+ 1 file changed, 6 deletions(-)
+
+diff --git a/drivers/misc/fastrpc.c b/drivers/misc/fastrpc.c
+index cdc2627bda..7e84230d2e 100644
+--- a/drivers/misc/fastrpc.c
++++ b/drivers/misc/fastrpc.c
+@@ -559,17 +559,11 @@ static void fastrpc_context_put(struct fastrpc_invoke_ctx *ctx);
+ static void fastrpc_user_free(struct kref *ref)
+ {
+ 	struct fastrpc_user *fl = container_of(ref, struct fastrpc_user, refcount);
+-	struct fastrpc_invoke_ctx *ctx, *n;
+ 	struct fastrpc_map *map, *m;
+ 	struct fastrpc_buf *buf, *b;
+ 
+ 	fastrpc_buf_free(fl->init_mem);
+ 
+-	list_for_each_entry_safe(ctx, n, &fl->pending, node) {
+-		list_del(&ctx->node);
+-		fastrpc_context_put(ctx);
+-	}
+-
+ 	list_for_each_entry_safe(map, m, &fl->maps, node)
+ 		fastrpc_map_put(map);
+ 

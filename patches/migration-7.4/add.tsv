@@ -1,4 +1,5 @@
 # 插在哪个键之后	文件（相对本目录）	备注
 # 键为^表示紧接base层之后。文件放在add/<子系统>/NNNN-<slug>.patch，只有新基线才需要的补丁。
 core/kernel-report-a-set-release-to-android-apps	add/core/0001-fs-keep-the-fs-struct-pid-1-left-while-its-threads-share-it.patch	v7.3起PID 1离开fs_struct时内核会重置其根目录，Android init的属性服务线程因此失去真实根目录
+core/kernel-report-a-set-release-to-android-apps	add/core/0003-misc-fastrpc-remove-dead-context-drain-in-fastrpc-user-free.patch	上游v4系列1/3，排在core/0009之前
 core/staging-android-port-ashmem-from-ack	add/core/0002-staging-android-ashmem-drop-vm-maywrite-before-the-mmap-hook.patch	v7.4禁止驱动在mmap回调中清除VM_MAYWRITE，ashmem的只读映射因此失败
