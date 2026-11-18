@@ -1,0 +1,73 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] arm64: dts: qcom: sc8280xp: keep iris IOVAs out of the
+ content-protection range
+
+When it loads the firmware, the iris driver passes [0, 0x25800000) to TZ
+as the video content-protection range (tz_cp_config_vpu2: pixel from 0,
+non-pixel from 0x01000000). Only secure sessions may use those
+addresses. The driver limits its DMA mask to 0xe0000000 but nothing
+keeps the IOVA allocator out of the low range, and the allocator hands
+out addresses from the top down. Once enough buffers are mapped, a
+non-secure session gets IOVAs below 0x25800000, and the first VPU access
+to such a buffer resets the SoC without any kernel message.
+
+A browser page with several videos is enough to get there. In the DMA
+trace, each 1080p H.264 session from the Codec2 V4L2 HAL had 260-310 MiB
+mapped (8 to 11 of its 16 input buffers of 16 MiB, 20 capture buffers
+of 3 MiB and about 71 MiB of internal buffers), and a 1440p session
+about 735 MiB. With six 1080p sessions and one 1440p session, the lowest
+iris IOVA reached 0x18000000 within one second, and the tablet reset
+right after.
+
+Reserve the range in the iris IOVA space with a reserved-memory node
+that only has iommu-addresses. The downstream driver does the same
+with a virtual-addr-pool of 0x25800000-0xe0000000. When the space runs
+out, the DMA mapping fails instead: VIDIOC_QBUF or VIDIOC_STREAMON
+returns an error and that decode session fails, and the SoC does not
+reset. With this change the same page no longer resets the tablet, and
+the lowest iris IOVA stays at 0x25800000.
+
+The venus and iris bindings allow one memory-region item, so
+dtbs_check will flag the second one until the binding takes it.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ arch/arm64/boot/dts/qcom/sc8280xp.dtsi | 16 +++++++++++++++-
+ 1 file changed, 15 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm64/boot/dts/qcom/sc8280xp.dtsi b/arch/arm64/boot/dts/qcom/sc8280xp.dtsi
+index c9ebcd061..7805bdf03 100644
+--- a/arch/arm64/boot/dts/qcom/sc8280xp.dtsi
++++ b/arch/arm64/boot/dts/qcom/sc8280xp.dtsi
+@@ -735,6 +735,18 @@ reserved-region@aeb00000 {
+ 			reg = <0 0xaeb00000 0 0x16600000>;
+ 			no-map;
+ 		};
++
++		/*
++		 * When it loads the firmware, the iris driver hands
++		 * [0, 0x25800000) to TZ as the video content-protection range
++		 * (pixel and non-pixel). A buffer of a non-secure session mapped
++		 * there resets the SoC as soon as the VPU touches it, so keep
++		 * the IOVA allocator above it, like the downstream
++		 * virtual-addr-pool.
++		 */
++		iris_cp_iova: reservation-iris-cp {
++			iommu-addresses = <&iris 0x0 0x0 0x0 0x25800000>;
++		};
+ 	};
+ 
+ 	smp2p-adsp {
+@@ -4259,7 +4271,9 @@ &config_noc SLAVE_VENUS_CFG QCOM_ICC_TAG_ACTIVE_ONLY>,
+ 
+ 			operating-points-v2 = <&iris_opp_table>;
+ 			iommus = <&apps_smmu 0x2a00 0x400>;
+-			memory-region = <&pil_video_mem>;
++			/* The firmware region must stay first: the driver loads it by index 0. */
++			memory-region = <&pil_video_mem>,
++					<&iris_cp_iova>;
+ 
+ 			status = "disabled";
+ 

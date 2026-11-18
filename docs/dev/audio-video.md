@@ -127,10 +127,13 @@ TX_DEC0 Volume = 102, TX_DEC1 Volume = 102
 | 补丁 | 位置 | 解决的问题 |
 |---|---|---|
 | `crdroid-tree-fixes.py` | `external/v4l2_codec2` | `V4L2Device::getDeviceInfos()`原本写死只扫描`/dev/video0..9`；启用相机`camss`后VFE占用了`video0..31`，解码器被推到`video32`，导致硬解静默消失。将扫描上界扩大至64 |
-| `patches/android/v4l2-codec2/0001` | `external/v4l2_codec2` | HEVC码流的首个配置缓冲（VPS/SPS/PPS）合并进第一帧DMA-BUF（≥8 MiB），避免固件因缺少`CODECCONFIG`标志在`SOURCE_CHANGE`前等待输出缓冲而死锁 |
+| `patches/android/v4l2-codec2/0001` | `external/v4l2_codec2` | HEVC码流的首个配置缓冲（VPS/SPS/PPS）合并进第一帧DMA-BUF（不小于输入缓冲区），避免固件因缺少`CODECCONFIG`标志在`SOURCE_CHANGE`前等待输出缓冲而死锁 |
 | `patches/kernel/iris/0001` | `drivers/media/platform/qcom/iris/` | 引入`core->hw_powered`标志，防止解码器下电后残余中断触发未供电寄存器读取导致内核崩溃 |
 | `patches/kernel/iris/0003` | `drivers/media/platform/qcom/iris/` | 允许`v4l2_codec2`在首个`V4L2_EVENT_SOURCE_CHANGE`事件到达前调用`VIDIOC_G_FMT(CAPTURE)`，兼容Android Codec2初始化顺序 |
 | `patches/kernel/iris/0005` | `drivers/media/platform/qcom/iris/` | 在非动态分辨率切换（非DRC）的`CAPTURE streamoff`路径发送`HFI_FLUSH_ALL`而非`HFI_FLUSH_OUTPUT`，修复视频拖动进度条（seek）或关闭播放器时固件等待`HFI_FLUSH_OUTPUT`响应超时导致的卡死 |
+| `patches/kernel/dts/0026` | `arch/arm64/boot/dts/qcom/sc8280xp.dtsi` | iris加载固件时把`0x0..0x25800000`作为视频内容保护范围交给TZ，只有安全会话可以使用。`iris`主域（SID `0x2a00`）的IOVA从高往低分配，在`v4l2-codec2/0007`之前，每路1080p解码约占260–310 MiB，1440p约占735 MiB（之后分别约为150 MiB和290 MiB），同时打开的会话较多时，普通会话的缓冲区会被映射进这个范围，解码器一访问，整板即复位，内核不留任何记录。补丁增加一个只带`iommu-addresses`的reserved-memory节点，并在`iris`的`memory-region`中引用（固件区域须排在第一个），使该范围在主域中预留。地址空间不足时，映射失败，对应会话的`VIDIOC_QBUF`或`VIDIOC_STREAMON`返回错误，该路解码失败，不再复位。CB15（编码器ARP，见下文）有独立的页表，不受影响 |
+| `patches/kernel/iris/0019` | `drivers/media/platform/qcom/iris/` | 解码器原来不论分辨率，都按4096x2304的最坏情况确定输入（码流）缓冲区大小（H.264/HEVC约6.75 MiB，VP9约13.5 MiB），并忽略客户端在`S_FMT`中设置的值，因此`v4l2_codec2`只能为每路会话分配16个16 MiB的输入缓冲区。补丁改为采用客户端设置的值，下限为分辨率所需的大小（4:2:0半帧，VP9为整帧，不低于720p），上限为原来的最坏值；客户端填0时仍为最坏值。`buf_prepare`改为按`S_FMT`确定的大小检查输入缓冲区，码流中途提高分辨率后，原有的输入缓冲区仍可使用 |
+| `patches/android/v4l2-codec2/0007` | `external/v4l2_codec2` | 解码器的输入缓冲区改回1080p及以下2 MiB、以上8 MiB（LineageOS为满足旧版iris的最坏值改成了16 MiB和64 MiB），每路1080p会话的输入缓冲区从256 MiB降到32 MiB。应用设置了更大的`max-input-size`时仍采用应用的值。大小在配置解码器时确定：按1080p及以下配置的会话，单帧码流不能超过2 MiB，码流中途提高分辨率后也是如此；1080p以上的VP9不能超过8 MiB（原为13.5 MiB）。Chromium在关键帧放不下时会用更大的缓冲区重建解码器，Media3按自适应码流中最大的格式分配。必须与`patches/kernel/iris/0019`一起使用：在不含0019的内核上，1080p及以下的解码与1080p以上的VP9解码会在启动时报错退出 |
 
 ### 3. 硬件视频编码
 
