@@ -23,3 +23,4 @@ audio/ASoC-codecs-lpass-tx-macro-switch-to-PM-clock-framework-for-runtime-PM	lpa
 audio/ASoC-codecs-lpass-rx-macro-switch-to-PM-clock-framework-for-runtime-PM	lpass PM clock系列已合入（合入版删去了几条出错路径的警告日志）
 dts/arm64-dts-qcom-sc8280xp-add-iris-and-videocc	v7.4-rc3的sc8280xp.dtsi已有相同的iris与videocc节点及pil_video_mem
 dts/arm64-dts-qcom-sc8280xp-mark-the-CDSP-FastRPC-context-banks-dma-coherent	上游3ca6796122将ADSP、CDSP、SLPI的上下文全部标为dma-coherent
+core/remoteproc-qcom-ratelimit-repeat-handover-error	v7.4-rc3的q6v5_handover_interrupt()在首次触发后即关闭handover中断，不再打印该消息

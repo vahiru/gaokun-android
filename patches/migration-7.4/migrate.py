@@ -354,12 +354,14 @@ def changed_lines_hash(text):
     """只看增删行（忽略上下文、行号与空白），用来判断补丁内容是否真的变了。"""
     out, f = [], None
     for line in text.splitlines():
+        if line == "-- ":  # 邮件签名分隔线，其后是git版本号
+            break
         if line.startswith("+++ "):
             f = line[4:].split("/", 1)[-1]
             continue
         if line.startswith(("--- ", "diff --git", "index ")):
             continue
-        if f and line[:1] in "+-" and not line.startswith(("+++", "---")):
+        if f and line[:1] in ("+", "-") and not line.startswith(("+++", "---")):
             out.append(f + ":" + line[0] + re.sub(r"\s+", "", line[1:]))
     return hashlib.sha1("\n".join(sorted(out)).encode()).hexdigest()
 
@@ -397,13 +399,17 @@ def cmd_record(args):
             continue
         text = export_commit(tree, sha)
         src = Path(it["path"]).read_text(encoding="utf-8", errors="replace")
-        if changed_lines_hash(text) == changed_lines_hash(src):
-            continue
         key = it["key"]
+        # 手动解决过的补丁一律写回：来源在新基线上打不上，哪怕增删行相同、只是上下文变了。
+        # 其余的只在内容确实改过（如并入了fixup）时写回。
+        resolved = st["results"].get(key, {}).get("status") == "resolved"
+        if not resolved and changed_lines_hash(text) == changed_lines_hash(src):
+            continue
         if it["source"] in ("dev", "override"):
             sub, slug = key.split("/", 1)
             dp = dev_path[key]
-            if changed_lines_hash(text) == changed_lines_hash(dp.read_text(encoding="utf-8", errors="replace")):
+            if not resolved and changed_lines_hash(text) == changed_lines_hash(
+                    dp.read_text(encoding="utf-8", errors="replace")):
                 same_as_dev.append(key)
                 continue
             op = HERE / "override" / sub / f"{slug}.patch"

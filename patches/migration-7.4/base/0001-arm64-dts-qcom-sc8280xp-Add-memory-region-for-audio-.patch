@@ -12,18 +12,18 @@ Link: https://lore.kernel.org/linux-arm-msm/20260418-talosaudio-v1-1-585ab22faaf
  1 file changed, 10 insertions(+), 1 deletion(-)
 
 diff --git a/arch/arm64/boot/dts/qcom/sc8280xp.dtsi b/arch/arm64/boot/dts/qcom/sc8280xp.dtsi
-index d7d127900..4f3781cae 100644
+index d17475c3e6..42a26c1e91 100644
 --- a/arch/arm64/boot/dts/qcom/sc8280xp.dtsi
 +++ b/arch/arm64/boot/dts/qcom/sc8280xp.dtsi
-@@ -12,6 +12,7 @@
- #include <dt-bindings/clock/qcom,sc8280xp-camcc.h>
+@@ -13,6 +13,7 @@
  #include <dt-bindings/clock/qcom,sc8280xp-lpasscc.h>
+ #include <dt-bindings/clock/qcom,sm8350-videocc.h>
  #include <dt-bindings/dma/qcom-gpi.h>
 +#include <dt-bindings/firmware/qcom,scm.h>
+ #include <dt-bindings/interconnect/qcom,icc.h>
  #include <dt-bindings/interconnect/qcom,osm-l3.h>
  #include <dt-bindings/interconnect/qcom,sc8280xp.h>
- #include <dt-bindings/interrupt-controller/arm-gic.h>
-@@ -683,7 +684,12 @@ reserved-region@80b00000 {
+@@ -626,7 +627,12 @@ reserved-region@80b00000 {
  		};
  
  		reserved-region@83b00000 {
@@ -46,4 +46,3 @@ index d7d127900..4f3781cae 100644
 +						      QCOM_SCM_VMID_ADSP_HEAP>;
  					#address-cells = <1>;
  					#size-cells = <0>;
- 
