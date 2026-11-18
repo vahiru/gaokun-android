@@ -1,0 +1,87 @@
+From 99161460e5d2cb0be98a6bf414bfc4b21e737abe Mon Sep 17 00:00:00 2001
+From: Akisaira <akisaira@outlook.com>
+Date: Wed, 18 Nov 2026 23:23:50 +1100
+Subject: [PATCH] kernel: module_blacklist: don't shadow the kernel symbol we
+ look up
+
+ksu_module_blacklist_init() finds the kernel's static module_blacklist
+with find_kernel_symbol_exact("module_blacklist") and stores the address
+in a static variable of the same name. With KernelSU built in and
+CONFIG_KALLSYMS_ALL=y both statics are in kallsyms, and the lookup keeps
+the last match, which is KernelSU's own variable. The variable then
+points at itself, the "blocked modules" log prints the bytes of that
+pointer, and the kernel's blacklist is never extended.
+
+Rename KernelSU's variable so the name only matches the kernel's.
+
+Origin: local
+Upstream-Status: Pending
+---
+ kernel/feature/module_blacklist.c | 16 ++++++++--------
+ 1 file changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/kernel/feature/module_blacklist.c b/kernel/feature/module_blacklist.c
+index 18df7a00..33f6a083 100644
+--- a/kernel/feature/module_blacklist.c
++++ b/kernel/feature/module_blacklist.c
+@@ -12,7 +12,7 @@
+ #if defined(KSU_COMPAT_HAS_INSMOD_HOOK) || defined(CONFIG_KSU_TRACEPOINT_HOOK)
+ static char *blacklist = NULL;
+ static char *orig_blacklist = NULL;
+-static char **module_blacklist = NULL;
++static char **kernel_module_blacklist = NULL;
+ 
+ // workaround https://cs.android.com/android/platform/superproject/+/android-latest-release:system/core/libmodprobe/utils.cpp;l=73
+ // userspace will throw error when ret != 0
+@@ -71,13 +71,13 @@ void __init ksu_module_blacklist_init(const char *modules)
+     if (!modules[0] && !extra[0])
+         return;
+ 
+-    module_blacklist = (char **)find_kernel_symbol_exact("module_blacklist");
+-    if (!module_blacklist) {
++    kernel_module_blacklist = (char **)find_kernel_symbol_exact("module_blacklist");
++    if (!kernel_module_blacklist) {
+         pr_warn("module_blacklist: kernel symbol not found, skipping blocked modules\n");
+         return;
+     }
+ 
+-    existing = *module_blacklist;
++    existing = *kernel_module_blacklist;
+     existing_len = existing ? strlen(existing) : 0;
+     blacklist =
+         kasprintf(GFP_KERNEL, "%s%s%s%s", existing_len ? existing : "", existing_len ? "," : "", modules, extra);
+@@ -86,7 +86,7 @@ void __init ksu_module_blacklist_init(const char *modules)
+         return;
+     }
+ 
+-    *module_blacklist = blacklist;
++    *kernel_module_blacklist = blacklist;
+     orig_blacklist = (char *)existing;
+     pr_info("module_blacklist: blocked modules: %s\n", blacklist);
+ 
+@@ -101,7 +101,7 @@ void __exit ksu_module_blacklist_exit()
+ {
+     const char *existing;
+ 
+-    if (module_blacklist == NULL) {
++    if (kernel_module_blacklist == NULL) {
+         // that's mean no modules got block
+         return;
+     }
+@@ -118,14 +118,14 @@ void __exit ksu_module_blacklist_exit()
+         return;
+     }
+ 
+-    existing = *module_blacklist;
++    existing = *kernel_module_blacklist;
+ 
+     if (existing != blacklist) {
+         pr_warn("module_blacklist: looks module_blacklist changed by other, skip kfree and revert changes!\n");
+         return;
+     }
+ 
+-    *module_blacklist = orig_blacklist;
++    *kernel_module_blacklist = orig_blacklist;
+     kfree(blacklist); // kasprintf alloc
+ 
+     pr_info("module_blacklist: blacklist reverted and memory freed!\n");

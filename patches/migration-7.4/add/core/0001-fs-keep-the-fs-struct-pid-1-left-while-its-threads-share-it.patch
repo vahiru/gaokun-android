@@ -1,0 +1,69 @@
+From 323b2a99c6ca9f6fb3404d718ece9cdfa775a52f Mon Sep 17 00:00:00 2001
+From: Akisaira <akisaira@outlook.com>
+Date: Wed, 18 Nov 2026 22:07:26 +1100
+Subject: [PATCH] fs: don't rewrite the fs_struct PID 1 left while its threads
+ share it
+
+Since commit 14adbd5341aa ("fs: stop sharing fs_struct between init_task
+and pid 1"), PID 1 owns a private fs_struct that doubles as
+userspace_init_fs. When PID 1 switches to another fs_struct,
+validate_fs_switch() resets the root and pwd of the old one to nullfs.
+
+The old fs_struct is not necessarily dead at that point. Android init
+starts its property service threads with CLONE_FS and only then calls
+unshare(CLONE_NEWNS) from the main thread in SetupMountNamespaces().
+The reset moves those threads out of the real root; libselinux can no
+longer open /sys/fs/selinux/access from them, every property_service
+check fails, and boot stalls with "SELinux permission check failed" for
+every property set.
+
+Only reset the fs_struct when the global reference is the last one.
+While other threads of PID 1 still use it, keep it as is, matching the
+behaviour before the nullfs conversion, and say so in the warning.
+
+Origin: local
+Upstream-Status: Pending
+---
+ fs/fs_struct.c | 22 ++++++++++++++++++++++
+ 1 file changed, 22 insertions(+)
+
+diff --git a/fs/fs_struct.c b/fs/fs_struct.c
+index 34699f3b6f..0a1993a1d7 100644
+--- a/fs/fs_struct.c
++++ b/fs/fs_struct.c
+@@ -185,6 +185,8 @@ EXPORT_SYMBOL_GPL(unshare_fs_struct);
+  */
+ static inline void validate_fs_switch(struct fs_struct *old_fs)
+ {
++	int users;
++
+ 	might_sleep();
+ 
+ 	if (likely(current->pid != 1))
+@@ -192,6 +194,26 @@ static inline void validate_fs_switch(struct fs_struct *old_fs)
+ 	/* @old_fs may be dangling but for comparison it's fine */
+ 	if (old_fs != userspace_init_fs)
+ 		return;
++
++	/*
++	 * userspace_init_fs holds a reference of its own, so @old_fs is
++	 * still valid here. Any count beyond that reference belongs to
++	 * other threads of PID 1 that share it through CLONE_FS: it is
++	 * still live userspace state and must not be rewritten under
++	 * them. Android init does exactly this: it starts its property
++	 * service threads and then unshares CLONE_NEWNS in the main
++	 * thread. Leave the fs_struct alone in that case, which is what
++	 * kernels before the nullfs conversion did.
++	 */
++	read_seqlock_excl(&old_fs->seq);
++	users = old_fs->users;
++	read_sequnlock_excl(&old_fs->seq);
++	if (users > 1) {
++		pr_warn("VFS: Pid 1 stopped sharing filesystem state, still used by %d other task(s)\n",
++			users - 1);
++		return;
++	}
++
+ 	pr_warn("VFS: Pid 1 stopped sharing filesystem state\n");
+ 	set_fs_root(userspace_init_fs, &init_fs.root);
+ 	set_fs_pwd(userspace_init_fs, &init_fs.root);

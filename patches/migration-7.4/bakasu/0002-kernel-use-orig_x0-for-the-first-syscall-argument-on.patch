@@ -1,0 +1,48 @@
+From d5e40ac08cbc7c2ba070d0f9dc4b70bae0d7714b Mon Sep 17 00:00:00 2001
+From: Akisaira <akisaira@outlook.com>
+Date: Wed, 18 Nov 2026 23:12:52 +1100
+Subject: [PATCH] kernel: use orig_x0 for the first syscall argument on arm64
+ 7.3+
+
+Since Linux 7.3 the native arm64 syscall wrappers take the first argument
+from regs->orig_x0 instead of regs->regs[0] (SC_ARM64_REGS_TO_ARGS).
+
+Define __PT_SYSCALL_PARM1_REG as orig_x0 there, as tiann/KernelSU did in
+9ae6e65aa88a, so that the hooks reading or rewriting the first argument
+reach the syscall. __ksyscall() builds pt_regs for a direct call of a
+syscall wrapper and set only regs[0]; set the syscall register as well,
+or the called syscall sees zero as its first argument on 7.3+.
+
+Origin: other, https://github.com/tiann/KernelSU/commit/9ae6e65aa88a13a47f8e895550dd5b369c6d8820
+Upstream-Status: Pending
+---
+ kernel/compat/kernel_compat.h | 1 +
+ kernel/include/arch.h         | 3 +++
+ 2 files changed, 4 insertions(+)
+
+diff --git a/kernel/compat/kernel_compat.h b/kernel/compat/kernel_compat.h
+index 460fdc45..d3b952b7 100644
+--- a/kernel/compat/kernel_compat.h
++++ b/kernel/compat/kernel_compat.h
+@@ -74,6 +74,7 @@ static_assert(1 == 0, "Unsupported architecture!");
+         extern long KSU_SYS_PREFIX(name)(const struct pt_regs *);                                                      \
+         struct pt_regs __ksu_regs = { 0 };                                                                             \
+         PT_REGS_NATIVE_PARM1(&__ksu_regs) = (unsigned long)(a);                                                        \
++        PT_REGS_NATIVE_SYSCALL_PARM1(&__ksu_regs) = (unsigned long)(a);                                                \
+         PT_REGS_NATIVE_PARM2(&__ksu_regs) = (unsigned long)(b);                                                        \
+         PT_REGS_NATIVE_PARM3(&__ksu_regs) = (unsigned long)(c);                                                        \
+         PT_REGS_NATIVE_SYSCALL_PARM4(&__ksu_regs) = (unsigned long)(d);                                                \
+diff --git a/kernel/include/arch.h b/kernel/include/arch.h
+index b5a361a9..a36389b5 100644
+--- a/kernel/include/arch.h
++++ b/kernel/include/arch.h
+@@ -7,6 +7,9 @@
+ #if defined(__aarch64__)
+ 
+ #define __PT_PARM1_REG regs[0]
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 3, 0)
++#define __PT_SYSCALL_PARM1_REG orig_x0
++#endif
+ #define __PT_PARM2_REG regs[1]
+ #define __PT_PARM3_REG regs[2]
+ #define __PT_SYSCALL_PARM4_REG regs[3]

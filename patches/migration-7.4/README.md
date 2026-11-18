@@ -14,6 +14,8 @@
 | [`override.tsv`](override.tsv)、`override/<子系统>/<slug>.patch` | 在新基线上需要改写的补丁；`override.tsv`记录所基于的dev补丁的sha256 |
 | [`add.tsv`](add.tsv)、`add/<子系统>/NNNN-<slug>.patch` | 只有新基线才需要的新补丁，以及插入位置 |
 | [`resukisu/`](resukisu/) | 新基线需要的ReSukiSU补丁，在`kernel-setup-resukisu.sh`应用`patches/resukisu/`之后再打 |
+| [`bakasu/`](bakasu/) | 改用BakaSU主线`7b65bde0`时需要的补丁，已包含`patches/resukisu/`的strncpy兼容层；与`resukisu/`二选一，取决于切换时钉住的版本 |
+| [`kernel-config-7.4.sh`](kernel-config-7.4.sh) | 新基线需要的配置改动，在`kernel-config-android.sh`之后运行；合并时并入该脚本 |
 | [`migrate.py`](migrate.py) | 生成补丁链、重建内核树、写回改动、检查与`dev`的差异 |
 
 补丁以“键”标识：dev补丁为`<子系统>/<slug>`，buildbot层为`base/<slug>`，新增补丁为`add/<子系统>/<slug>`。slug即文件名去掉`NNNN-`前缀与`.patch`后缀，因此`dev`重新编号不影响本目录的任何记录。
@@ -44,10 +46,21 @@ python3 -I $M/migrate.py check                      # 合并upstream/dev之后�
 ## 当前状态
 
 - 新基线：v7.4-rc3。
-- 补丁链197个（buildbot层19个，dev 162个，override 16个），丢弃24个（见`drop.tsv`）。
-- 在v7.4-rc3上从头重建：196个可直接打上；以rc.4发布配置加`kernel-config-android.sh`编译通过（未含fastrpc）。
+- 补丁链199个（buildbot层19个，dev 162个，override 16个，新增2个），丢弃24个（见`drop.tsv`）。
+- 在v7.4-rc3上从头重建：198个可直接打上；以rc.4发布配置加`kernel-config-android.sh`、`kernel-config-7.4.sh`编译通过（未含fastrpc）。
+- 上机：Android可以完整启动，不含KSU与含BakaSU两种构建都已验证；显示、触控、音频正常。
 - 待处理：`core/misc-fastrpc-fix-context-leak-and-hang-on-signal-interrupted-invoke`。改用上游v4系列（2026-11-17，3个补丁），并重新加入dev版本中仍然适用的修改（如回调在硬中断上下文中取`fl->lock`的问题，v4仍未处理）。
 - ReSukiSU：保持钉住的`239e1e88`（UAPI与现有管理器一致）。7.3起arm64原生系统调用从`orig_x0`取第一个参数，钉住的版本仍改写`regs[0]`，sucompat与`__ksyscall()`因此失效；`resukisu/0001`改为在系统调用的寄存器上读写`orig_x0`，对应tiann/KernelSU `9ae6e65a`。
+
+## 7.4启动所需的改动
+
+以下问题都会使Android无法完成启动，在纯主线上同样存在：
+
+- `add/core/0001`：自v7.3起（14adbd5341），PID 1拥有独立的fs_struct；PID 1切换到新的fs_struct时，`validate_fs_switch()`会把旧的fs_struct的根目录重置到nullfs。Android init先以`CLONE_FS`启动属性服务线程，再在主线程中`unshare(CLONE_NEWNS)`，这些线程因此离开真实根目录，libselinux无法打开`/sys/fs/selinux/access`，所有属性设置都被判定为拒绝。补丁只在全局引用为最后一个使用者时才重置。
+- `add/core/0002`：v7.4（d99c4a302c）不允许mmap回调在由内存管理核心管理的映射上清除`VM_MAYWRITE`。ashmem据此实现只读保护，只读映射因此失败，system_server无法建立字体表，启动循环。补丁改为在`do_mmap()`调用驱动之前去掉该标志，与memfd的写封印相同。
+- binder：v7.4删除了C版binder（fd2bc059ed），只保留`ANDROID_BINDER_IPC_RUST`，构建因此需要Rust工具链（rustc ≥ 1.85、bindgen ≥ 0.71.1、rust-src组件、libclang）。`kernel-config-7.4.sh`会断言`CONFIG_RUST`未被olddefconfig关闭。
+- `SCHEDSTATS`：关闭时`task_struct`中的`struct sched_statistics stats`是带64字节对齐的空结构体，bindgen生成的Rust类型丢失这一对齐，`stats`之后的字段在Rust中整体错位，Rust binder因此读错`mm`等字段。内核以`--no-layout-tests`调用bindgen，编译期不会报错。开启`SCHEDSTATS`后结构体非空，布局一致。
+- KernelSU：v7.3起arm64原生系统调用从`orig_x0`取第一个参数，见`resukisu/0001`与`bakasu/0002`；v7.4已删除`strncpy()`，见`bakasu/0001`。
 
 ## 与7.2.9相比的行为变化（待上机核对）
 
@@ -57,3 +70,6 @@ python3 -I $M/migrate.py check                      # 合并upstream/dev之后�
 - remoteproc：handover中断首次触发后即关闭（上游改动），原限流补丁已丢弃。
 - 温控：CPU冷却映射挂在`cpuN-0-thermal`（tsens0，与7.2.9的`cpuN-thermal`为同一传感器）；v7.4新增的`cpuN-1-thermal`（tsens1）只有临界温度。
 - DSC宽度：保留按`dce_bytes_per_line`计算的算法，未采用上游的向上取整。
+- selinuxfs：v7.4中`/sys/fs/selinux/policy`的权限不可更改，init.rc中的`chmod 0400`会失败。
+- binder：Rust版binder下，`AidlLazyServiceRegistrar`注销apexservice时报告“仍有已知客户端”，C版下未出现。
+- Wi-Fi板级数据：dev中设备树的校准变体为`HW_GK3`（#135），需要搭配含该变体的ROM；在此之前的ROM上会退回通用数据，信号明显变差。
