@@ -117,7 +117,7 @@ echo $?        # 0 = 无FAIL；1 = 有FAIL；2 = adb不通或中途掉线（不�
 | 拔线待机8小时 | `SER=<设备序列号> bash scripts/perf/standby.sh start` → 设`allow_suspend=1` → 拔除USB息屏静置8小时 → 插回执行`pull`与`stop` | 记录每小时掉电百分比、mAh消耗、挂起次数及`cxsd` / `aosd` / `ddr`睡眠统计增量 |
 | 亮屏硬解1小时 | 固定亮度下启动`HB=300 … standby.sh start`，拔线连续硬件解码播放视频1小时后`pull` | 记录1小时耗电百分比与温升 |
 | 72小时日常综合测试 | 设`allow_suspend=1`并开启`standby.sh start`，拔线日常使用72小时后`pull`并跑`accept.sh` | 累计挂起≥30次；`system_server_crash`与系统tombstone为0；关键守护进程PID不变、无内存或fd泄漏；每次唤醒后Wi-Fi自动恢复 |
-| 挂起/恢复压力循环 | 内核休眠路径有改动时运行[`scripts/s2idle/android-ath11k-s2loop.sh`](../../scripts/s2idle/android-ath11k-s2loop.sh) | 全部循环正常唤醒、Wi-Fi每次恢复、恢复期间无`GFP_DMA`高阶内存分配失败 |
+| 挂起/恢复压力循环 | 内核休眠路径有改动时运行[`scripts/s2idle/android-ath11k-s2loop.sh`](../../scripts/s2idle/android-ath11k-s2loop.sh)（用法见[README](../../scripts/s2idle/README.md)） | 全部循环正常唤醒、Wi-Fi每次恢复、恢复期间无`GFP_DMA`高阶内存分配失败 |
 | 60 / 120 Hz功耗对比 | 同一静止与滑动场景下分别采样60 Hz与120 Hz的`current_now` | 存档作为刷新率功耗基线 |
 
 ## 5. 发版核对（宿主机侧）

@@ -14,7 +14,7 @@
   turnip-shared.bp.in）同样写的是 compile_multilib: "64"，这里保持一致。
   （32 位 turnip 要另加 android_arm 平台，见 docs/dev/mesa-a17.md「待定」。）
 
-A16 那 9 类合并后处理（scripts/mesa-bp-merge.py）在 A17 上都不需要了：
+A16 合并生成结果时所需的 9 类后处理在 A17 上都不需要了：
 生成器直接写多文件 Android.bp、不重名、tools / libs / export_generated_headers
 都自己处理。新出现的问题先查生成器能不能改，再考虑往这里加。
 """

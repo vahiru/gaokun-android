@@ -93,9 +93,7 @@ SC8280XP的GPU SMMU（`3da0000.iommu`，`qcom,sc8280xp-smmu-500`）在`msm_iommu
 - **P010零拷贝显示合成**（`patches/mesa/0002`）：
   - Iris硬件解码器在解码10-bit HEVC/VP9视频时输出`HAL_PIXEL_FORMAT_YCbCr_P010`。
   - `minigbm_msm`为`DRM_FORMAT_P010`开放`BO_USE_SCANOUT`用法，DPU驱动在`msm_dpu`层直接接收P010平面，避免SurfaceFlinger回退到GPU Shader做每帧格式转换，显著降低4K 10-bit视频播放时的GPU负载与功耗。
-- **Mesa构建工具链**：
-  - Android 16使用Mesa树内`meson_to_hermetic`生成`Android.bp`，由`scripts/mesa-tool-fixes.py`与`scripts/mesa-bp-merge.py`修补并合入；同时为`external/deqp-deps/glslang`补充Turnip编译器所需的宿主机`glslangValidator`目标。
-  - Android 17切换至重写后的`meson2hermetic`（`build_android_bp.py`），具体适配步骤见[mesa-a17.md](mesa-a17.md)。
+- **Mesa构建工具链**：Android 17使用上游生成器`meson2hermetic`（`meson convert`）生成`Android.bp`，具体适配步骤见[mesa-a17.md](mesa-a17.md)。
 
 
 ## 五、GPU抢占（`kernel/drm/0016`、`mesa/0012`、`mesa/0013`）
@@ -130,4 +128,4 @@ SC8280XP的GPU SMMU（`3da0000.iommu`，`qcom,sc8280xp-smmu-500`）在`msm_iommu
 
 - `dmesg`里不应出现`preemption timed out`、`preemption faulted`或`CP | HW fault`。
 - tracefs的`drm_msm_gpu/msm_gpu_preemption_trigger`和`msm_gpu_preemption_irq`记录每次切换，两者应一一对应；`msm_gpu_submit`的`ring=`字段显示每次提交进了哪个ring。
-- GPU挂死时用Mesa的`crashdec -f`解码devcoredump（`/sys/class/devcoredump/devcd*/data`，5分钟后自动删除）；A690要先把dump里的`revision: 0 (06090000)`改成`revision: 690 (6.9.0.0)`。
+- GPU挂死时用Mesa的`crashdec -f`解码devcoredump（`/sys/class/devcoredump/devcd*/data`，5分钟后自动删除）；A690要先把dump里的`revision: 0 (06090000)`改成`revision: 690 (6.9.0.0)`。只需查看GMU HFI消息、GMU固件trace或`ring0`当前位置附近的PM4包时，可以用[`scripts/gmu-forensics/`](../../scripts/gmu-forensics/README.md)中的解析脚本。

@@ -790,16 +790,14 @@ PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/firmware/qca/wcnhpnv21g.bin:ramdisk/lib/firmware/qca/wcnhpnv21g.bin
 
 # ─── Stage 5 Phase B: 硬件 Vulkan（turnip / freedreno on 主线 msm DRM）───
-# 构建流程历史见 docs/dev/gpu-turnip.md（A16）：
-#   1. scripts/mesa-tool-fixes.py     补 meson_to_hermetic 与 mesa 25.3 的 API 落差
-#   2. 生成器 + scripts/mesa-bp-merge.py 产出 external/mesa3d/Android.bp
-#   3. mesa/turnip-shared.bp.in       把静态库包成 Android Vulkan HAL 共享库
+# A16 的构建流程（git 历史中可查）：用 meson_to_hermetic 生成 external/mesa3d/Android.bp，
+#   再由 mesa/turnip-shared.bp.in 把静态库包成 Android Vulkan HAL 共享库。
 # GLES 仍由 ANGLE 提供，但它的 Vulkan 后端从此跑在 Adreno 690 上而不是 SwiftShader。
 # ⚠️ GPU 需要 zap shader 固件 qcdxkmsuc8280.mbn（见上面的固件双路安装），
 #    缺了它 GPU 停在安全模式，adreno probe 会失败。
 # Stage 6 M3（2026-08-19）：管线已在 crDroid 树上跑通并打开。
 # （A16 时 crDroid 的 external/mesa3d 与 Stage 5 打补丁那棵是同一个 commit d4b6f1eba289… @ android-16.0.0_r4。）
-# ★ A17（docs/dev/mesa-a17.md）：上面 1–3 步只适用于 A16，全部作废。
+# ★ A17（docs/dev/mesa-a17.md）：上面的 A16 流程全部作废。
 #   external/mesa3d 是 26.1.0-devel，上游的 meson_to_hermetic 换成了 meson2hermetic；现在用
 #   scripts/mesa-a17/regen.sh 在 26.1 上整树重新生成（配置 mesa/hermetic/，步骤见 docs/dev/mesa-a17.md），
 #   生成结果直接出 cc_library_shared "vulkan.freedreno"，所以这里的包名不变。
@@ -980,7 +978,7 @@ PRODUCT_PACKAGES += \
 # 再由 QRTR 上的 QMI 服务 400 把读数送回来。
 #
 # 已在救援 Linux 上实测通过：静止时加速度计 Z≈9.87 m/s²，15 秒 131 行读数。
-# 详见 docs/dev/sensors-ssc-protocol.md，Linux 侧一键复现 scripts/slpi-sensors-setup.sh。
+# 详见 docs/dev/sensors-ssc-protocol.md。
 #
 # ★ hexagonrpcd 上游自带 Android.bp 与 hexagonrpcd-sdsp.rc（cc_binary + vendor:true，
 #   service 跑在 system:system，-R /vendor/etc/hexagonrpcd-root）——所以这里
