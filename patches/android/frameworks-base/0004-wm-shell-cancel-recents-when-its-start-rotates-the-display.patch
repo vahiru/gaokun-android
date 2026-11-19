@@ -1,0 +1,79 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] WM Shell: cancel recents when its starting transition rotates
+ the display
+
+On a display that ignores orientation requests (large screens by default),
+an activity that requests "nosensor" or "locked", or one exempted with
+OVERRIDE_RESPECT_REQUESTED_ORIENTATION, still sets the display rotation.
+When Overview is opened from such an activity while the sensor reports a
+different rotation, the orientation request of the recents activity is
+ignored, so WindowManager gives its launch no fixed-rotation transform and
+puts the display rotation into the transition that starts recents.
+
+RecentsController.start() does not handle a display change. It starts the
+recents animation with the display rotation still in the transition, the
+launcher never shows Overview, and the transition does not finish until
+Home is pressed; until then only the wallpaper is visible. merge() already
+refuses a display change that arrives while recents is running and cancels,
+so that the default handler can play the rotation.
+
+Do the same in start(): when a display rotates in the starting transition,
+cancel the recents animation and return false, so that the next handler
+animates the transition together with the rotation, as start() already
+does when it cannot take a transition (no listener, or neither a recents
+task nor a pausing task). Nothing waits on the canceled animation; whether
+the launcher then shows Overview or stays on Home depends on how far it
+got before the cancel arrived.
+
+Seen on a tablet whose panel is naturally portrait, with Aperture
+(screenOrientation="nosensor") exempted from the large-screen orientation
+policy: held in landscape, opening Overview from Aperture left only the
+wallpaper on screen until Home was pressed, in 3 of 3 attempts.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ .../recents/RecentsTransitionHandler.java     | 22 +++++++++++++++++++
+ 1 file changed, 22 insertions(+)
+
+diff --git a/libs/WindowManager/Shell/src/com/android/wm/shell/recents/RecentsTransitionHandler.java b/libs/WindowManager/Shell/src/com/android/wm/shell/recents/RecentsTransitionHandler.java
+index 7702979..0d8e8f7 100644
+--- a/libs/WindowManager/Shell/src/com/android/wm/shell/recents/RecentsTransitionHandler.java
++++ b/libs/WindowManager/Shell/src/com/android/wm/shell/recents/RecentsTransitionHandler.java
+@@ -799,6 +799,16 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
+                         + ") or no transition (" + (mTransition == null) + ")");
+                 return false;
+             }
++            // The display rotates in the transition that starts recents when an activity held
++            // the display in an orientation the sensor no longer reports and the display
++            // ignores the orientation request of the recents activity: WindowManager then gives
++            // the launch no fixed-rotation transform and rotates the display right away. Recents
++            // cannot animate a rotation, so leave the whole transition to the next handler, as
++            // merge() does for a display change that arrives later.
++            if (hasDisplayRotation(info)) {
++                cancel("display rotation in the starting transition");
++                return false;
++            }
+             // First see if this is a valid recents transition.
+             boolean hasPausingTasks = false;
+             for (int i = 0; i < info.getChanges().size(); ++i) {
+@@ -2110,6 +2120,18 @@ public class RecentsTransitionHandler implements Transitions.TransitionHandler,
+         }
+     };
+ 
++    /** Returns whether a display rotates in {@code info}. */
++    private static boolean hasDisplayRotation(TransitionInfo info) {
++        for (int i = info.getChanges().size() - 1; i >= 0; --i) {
++            final TransitionInfo.Change change = info.getChanges().get(i);
++            if (change.hasFlags(TransitionInfo.FLAG_IS_DISPLAY)
++                    && change.getStartRotation() != change.getEndRotation()) {
++                return true;
++            }
++        }
++        return false;
++    }
++
+     /** Utility class to track the state of a task as-seen by recents. */
+     private static class TaskState {
+         WindowContainerToken mToken;
