@@ -278,4 +278,21 @@
         <item>0</item>
     </integer-array>
 
+    <!--
+      按应用设置宽高比（设置 → 应用 → 宽高比），包括"全屏"选项，让锁定竖屏的手机应用可以铺满横屏。
+
+      内屏的ignoreOrientationRequest采用平台的大屏默认值：最小宽度不小于600dp时为true
+      （DisplayContent.getIgnoreOrientationRequest()）。屏幕方向跟随加速度计或用户锁定的方向，请求横屏或竖屏的
+      应用改为在当前方向中居中显示；nosensor、locked、sensor、fullSensor以及按应用豁免的请求仍会改变屏幕方向
+      （DisplayArea.shouldIgnoreOrientationRequest()）。宽高比选项，以及"全屏"对应用方向的覆盖，只在
+      ignoreOrientationRequest为true时生效（AppCompatAspectRatioOverrides.shouldEnableUserAspectRatioSettings()、
+      AppCompatOrientationPolicy.overrideOrientationIfNeeded()）。
+
+      不要在vendor/etc/display_settings.xml中为内屏写ignoreOrientationRequest，写true也不行：
+      DisplayContent.setIgnoreOrientationRequest()会把与初始值false不同的值存入/data/system/display_settings.xml，
+      之后的版本再修改这一项不会生效。
+    -->
+    <bool name="config_appCompatUserAppAspectRatioSettingsIsEnabled">true</bool>
+    <bool name="config_appCompatUserAppAspectRatioFullscreenIsEnabled">true</bool>
+
 </resources>

@@ -942,10 +942,11 @@ PRODUCT_COPY_FILES += \
 PRODUCT_VENDOR_PROPERTIES += \
     persist.vendor.gaokun3.allow_suspend=1
 
-# ★ WindowManager 每显示器设置：关掉大屏默认的 ignoreOrientationRequest。
-# 不装它 → 应用请求横屏时系统不转屏而是把应用信箱化（原神被压成 1600x1000）。
-# 完整机制、实测症状与格式依据见 etc/display_settings.xml 的注释。
-PRODUCT_COPY_FILES += $(LOCAL_PATH)/etc/display_settings.xml:$(TARGET_COPY_OUT_VENDOR)/etc/display_settings.xml
+# Aperture的按应用兼容覆盖（etc/compat_framework_overrides.xml，内含各项说明）：让它在大屏方向策略下
+# 把屏幕转为竖屏使用，其他应用不受影响。CompatConfig在开机时读取/product/etc/appcompat下的这个文件
+# （services/core/java/com/android/server/compat/CompatConfig.java，STATIC_OVERRIDES_PRODUCT_DIR）。
+PRODUCT_COPY_FILES += \
+    $(LOCAL_PATH)/etc/compat_framework_overrides.xml:$(TARGET_COPY_OUT_PRODUCT)/etc/appcompat/compat_framework_overrides.xml
 
 # 触摸屏和手写笔上报面板（竖屏）坐标，而屏幕的自然方向是横屏（见上方关于自然方向的说明）。
 # InputReader先按厂商和产品号、再按设备名查找配置文件（frameworks/native libs/input/InputDevice.cpp，
