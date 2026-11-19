@@ -171,7 +171,8 @@ bool Device::init()
 	 *   ★ 还要扣掉 libcamera 已经转掉的部分：会话不设 CameraConfiguration::orientation，
 	 *     默认要 Rotate0，管线用 CameraSensor::computeTransform() 去凑。180 能靠
 	 *     水平 + 垂直翻转消掉，后摄 ov13b10 支持翻转，就是被翻转读出的（日志里
-	 *     transform hvflip）；90 / 270 要转置，消不掉。前摄 hi846 没有翻转控件。
+	 *     transform hvflip）；90 / 270 要转置，消不掉。前摄 hi846 没有翻转控件；s5k4h7 有，
+	 *     但前摄设备树写的是 0°，不需要翻转。
 	 *
 	 *   ⇒ 本机：后摄 180 - 180 + 270 = 270 → SENSOR_ORIENTATION 90；
 	 *           前摄 0 + 90 = 90 → SENSOR_ORIENTATION 270。
@@ -238,7 +239,7 @@ bool Device::init()
 	 * 这里【只找节点】、不开设备：打开 /dev/v4l-subdevN 本身就会给马达上电
 	 * （dw9714_open → pm_runtime，见 Lens.h），相机还没开的时候不该占着它。真正的 open 在
 	 * Session::init()（有会话才有必要）。
-	 * 前摄 hi846 无马达 ⇒ hasAf 保持 false，元数据如实按定焦声明。
+	 * 前摄（hi846 或 s5k4h7 模组）无马达 ⇒ hasAf 保持 false，元数据如实按定焦声明。
 	 */
 	if (!facts_.frontFacing && !Lens::findNode().empty()) {
 		facts_.hasAf = true;

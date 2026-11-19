@@ -1,0 +1,279 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: qcom: camss: Drop unfitted alternative sensors without
+ waiting
+
+A board that may be fitted with one of several sensors on the same
+connector lists each of them as an endpoint of the same CSIPHY port, and
+only the fitted one ever binds. The sensor fallback then waited
+sensor_wait_ms (20 s) on every boot before the cameras appeared.
+
+A port carries one sensor (the driver keeps a single CSI-2 configuration
+per CSIPHY and does not use combo mode). When a sensor binds and every
+endpoint still waiting is on a port that already has a bound sensor, run
+the fallback at once. This does not depend on sensor_wait_ms: with such
+endpoints the notifier would otherwise never complete.
+
+The bound callback queues the fallback only once camss_probe() has
+registered the notifier and while camss_remove() has not started; during
+the registration it only records the condition, and probe queues the
+work after a successful registration. A failed registration therefore
+never leaves a work behind that registers the notifier of a freed camss.
+
+The fallback no longer walks the notifier's waiting list, which a sensor
+binding at the same time modifies under v4l2-async's private lock; the
+endpoints dropped are logged while the bound ones are parsed again. The
+fwnode references of the bound sensors are dropped after the notifier is
+unregistered, and on the probe error path too.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/media/platform/qcom/camss/camss.c | 121 ++++++++++++++++++----
+ drivers/media/platform/qcom/camss/camss.h |   5 +
+ 2 files changed, 108 insertions(+), 18 deletions(-)
+
+diff --git a/drivers/media/platform/qcom/camss/camss.c b/drivers/media/platform/qcom/camss/camss.c
+index 2f98035f3f..b179010af3 100644
+--- a/drivers/media/platform/qcom/camss/camss.c
++++ b/drivers/media/platform/qcom/camss/camss.c
+@@ -35,14 +35,15 @@
+ 
+ /*
+  * v4l2-async only completes the notifier after all graph endpoints bind.
+- * On boards shipped with alternate rear camera modules, an absent sensor in DT
+- * never binds and would otherwise block the working front camera as well.
+- * Wait sensor_wait_ms after probe, then re-register the notifier with only the
+- * bound endpoints (0 disables the fallback).
++ * On boards shipped with alternative camera modules, a sensor in DT that is
++ * not fitted never binds and would otherwise block the other cameras as well.
++ * Once every port has a bound sensor, the endpoints still waiting are dropped
++ * at once. Otherwise wait sensor_wait_ms after probe, then re-register the
++ * notifier with only the bound endpoints (0 disables this timed fallback).
+  */
+ static unsigned int sensor_wait_ms = 20000;
+ module_param(sensor_wait_ms, uint, 0644);
+-MODULE_PARM_DESC(sensor_wait_ms, "ms to wait for all sensors before continuing with the bound ones (0=off)");
++MODULE_PARM_DESC(sensor_wait_ms, "ms to wait for all sensors before continuing with the bound ones (0=off; unfitted alternatives are dropped regardless)");
+ 
+ #define CAMSS_CLOCK_MARGIN_NUMERATOR 105
+ #define CAMSS_CLOCK_MARGIN_DENOMINATOR 100
+@@ -4961,7 +4962,8 @@ static bool camss_sensor_is_bound(struct camss *camss, struct fwnode_handle *ep)
+ 	return found;
+ }
+ 
+-static int camss_parse_ports_filtered(struct camss *camss, bool bound_only)
++static int camss_parse_ports_filtered(struct camss *camss, bool bound_only,
++				      bool alternatives)
+ {
+ 	struct device *dev = camss->dev;
+ 	struct fwnode_handle *fwnode = dev_fwnode(dev), *ep;
+@@ -4971,7 +4973,12 @@ static int camss_parse_ports_filtered(struct camss *camss, bool bound_only)
+ 		struct camss_async_subdev *csd;
+ 
+ 		if (bound_only && !camss_sensor_is_bound(camss, ep)) {
+-			dev_warn(dev, "skipping endpoint %pfw: its sensor never bound\n", ep);
++			if (alternatives)
++				dev_info(dev, "skipping endpoint %pfw: an alternative sensor is fitted\n",
++					 ep);
++			else
++				dev_warn(dev, "skipping endpoint %pfw: its sensor never bound\n",
++					 ep);
+ 			continue;
+ 		}
+ 
+@@ -4997,7 +5004,7 @@ static int camss_parse_ports_filtered(struct camss *camss, bool bound_only)
+ 
+ static int camss_parse_ports(struct camss *camss)
+ {
+-	return camss_parse_ports_filtered(camss, false);
++	return camss_parse_ports_filtered(camss, false, false);
+ }
+ 
+ /*
+@@ -5369,6 +5376,41 @@ static void camss_unregister_entities(struct camss *camss)
+ 		msm_vfe_unregister_entities(&camss->vfe[i]);
+ }
+ 
++/*
++ * A CSIPHY port carries one sensor. A board that may be fitted with one of
++ * several sensors on the same connector lists each of them as an endpoint of
++ * that port, and only the fitted one ever binds. Called from the bound
++ * callback, while @bound is still on the waiting list: return true when some
++ * endpoints are still waiting and each of them is on a port that already has
++ * a bound sensor.
++ */
++static bool camss_only_alternatives_wait(struct camss *camss,
++					 struct v4l2_async_connection *bound)
++{
++	struct v4l2_async_connection *asc;
++	unsigned long bound_ports;
++	bool waiting = false;
++
++	bound_ports = BIT(container_of(bound, struct camss_async_subdev,
++				       asd)->interface.csiphy_id);
++	list_for_each_entry(asc, &camss->notifier.done_list, asc_entry)
++		bound_ports |= BIT(container_of(asc, struct camss_async_subdev,
++						asd)->interface.csiphy_id);
++
++	list_for_each_entry(asc, &camss->notifier.waiting_list, asc_entry) {
++		struct camss_async_subdev *csd =
++			container_of(asc, struct camss_async_subdev, asd);
++
++		if (asc == bound)
++			continue;
++		if (!(bound_ports & BIT(csd->interface.csiphy_id)))
++			return false;
++		waiting = true;
++	}
++
++	return waiting;
++}
++
+ static int camss_subdev_notifier_bound(struct v4l2_async_notifier *async,
+ 				       struct v4l2_subdev *subdev,
+ 				       struct v4l2_async_connection *asd)
+@@ -5395,6 +5437,23 @@ static int camss_subdev_notifier_bound(struct v4l2_async_notifier *async,
+ 				fwnode_handle_get(asd->match.fwnode);
+ 	}
+ 
++	/*
++	 * Once every port has a bound sensor, the endpoints still waiting can
++	 * only be alternatives that are not fitted: drop them now instead of
++	 * after sensor_wait_ms (also when that fallback is turned off, as the
++	 * notifier would never complete). While camss_probe() is still
++	 * registering the notifier, leave the queueing to it: if the
++	 * registration fails, the work must not run.
++	 */
++	if (camss_only_alternatives_wait(camss, asd)) {
++		spin_lock(&camss->fallback_lock);
++		camss->dropping_alternatives = true;
++		if (camss->notifier_registered && !camss->removing)
++			mod_delayed_work(system_percpu_wq,
++					 &camss->sensor_fallback_work, 0);
++		spin_unlock(&camss->fallback_lock);
++	}
++
+ 	return 0;
+ }
+ 
+@@ -5449,16 +5508,28 @@ static void camss_sensor_fallback_work(struct work_struct *work)
+ {
+ 	struct camss *camss = container_of(to_delayed_work(work), struct camss,
+ 					   sensor_fallback_work);
+-	struct v4l2_async_connection *asd;
++	bool alternatives, removing;
+ 	int ret;
+ 
+-	if (camss->notifier_complete)
++	spin_lock(&camss->fallback_lock);
++	alternatives = camss->dropping_alternatives;
++	removing = camss->removing;
++	spin_unlock(&camss->fallback_lock);
++
++	if (camss->notifier_complete || removing)
+ 		return;
+ 
+-	dev_warn(camss->dev, "not all sensors bound after %u ms; continuing with %u bound sensor(s)\n",
+-		 sensor_wait_ms, camss->num_bound_sensors);
+-	list_for_each_entry(asd, &camss->notifier.waiting_list, asc_entry)
+-		dev_warn(camss->dev, "  never bound: %pfw\n", asd->match.fwnode);
++	/*
++	 * The endpoints dropped are logged while parsing below. The waiting
++	 * list is not walked here: a sensor binding concurrently moves its
++	 * connection off it under v4l2-async's private lock.
++	 */
++	if (alternatives)
++		dev_info(camss->dev, "every port has a sensor; continuing with %u bound sensor(s)\n",
++			 camss->num_bound_sensors);
++	else
++		dev_warn(camss->dev, "not all sensors bound after %u ms; continuing with %u bound sensor(s)\n",
++			 sensor_wait_ms, camss->num_bound_sensors);
+ 
+ 	if (!camss->num_bound_sensors)
+ 		return;
+@@ -5468,7 +5539,7 @@ static void camss_sensor_fallback_work(struct work_struct *work)
+ 	v4l2_async_nf_init(&camss->notifier, &camss->v4l2_dev);
+ 	camss->notifier.ops = &camss_subdev_notifier_ops;
+ 
+-	ret = camss_parse_ports_filtered(camss, true);
++	ret = camss_parse_ports_filtered(camss, true, alternatives);
+ 	if (ret < 0) {
+ 		dev_err(camss->dev, "fallback: parsing bound endpoints failed: %d\n", ret);
+ 		return;
+@@ -5609,6 +5680,7 @@ static int camss_probe(struct platform_device *pdev)
+ {
+ 	struct device *dev = &pdev->dev;
+ 	struct camss *camss;
++	unsigned int i;
+ 	int ret;
+ 
+ 	camss = devm_kzalloc(dev, sizeof(*camss), GFP_KERNEL);
+@@ -5686,6 +5758,7 @@ static int camss_probe(struct platform_device *pdev)
+ 
+ 	v4l2_async_nf_init(&camss->notifier, &camss->v4l2_dev);
+ 	INIT_DELAYED_WORK(&camss->sensor_fallback_work, camss_sensor_fallback_work);
++	spin_lock_init(&camss->fallback_lock);
+ 
+ 	pm_runtime_enable(dev);
+ 
+@@ -5715,9 +5788,14 @@ static int camss_probe(struct platform_device *pdev)
+ 		goto err_media_device_unregister;
+ 	}
+ 
+-	if (sensor_wait_ms && !camss->notifier_complete)
++	spin_lock(&camss->fallback_lock);
++	camss->notifier_registered = true;
++	if (camss->dropping_alternatives)
++		mod_delayed_work(system_percpu_wq, &camss->sensor_fallback_work, 0);
++	else if (sensor_wait_ms && !camss->notifier_complete)
+ 		schedule_delayed_work(&camss->sensor_fallback_work,
+ 				      msecs_to_jiffies(sensor_wait_ms));
++	spin_unlock(&camss->fallback_lock);
+ 
+ 	return 0;
+ 
+@@ -5728,6 +5806,8 @@ static int camss_probe(struct platform_device *pdev)
+ err_v4l2_device_unregister:
+ 	v4l2_device_unregister(&camss->v4l2_dev);
+ 	v4l2_async_nf_cleanup(&camss->notifier);
++	for (i = 0; i < camss->num_bound_sensors; i++)
++		fwnode_handle_put(camss->bound_sensors[i]);
+ 	pm_runtime_disable(dev);
+ err_media_device_cleanup:
+ 	media_device_cleanup(&camss->media_dev);
+@@ -5757,11 +5837,16 @@ static void camss_remove(struct platform_device *pdev)
+ 	struct camss *camss = platform_get_drvdata(pdev);
+ 	unsigned int i;
+ 
++	/* No sensor binding from here on may queue the fallback again */
++	spin_lock(&camss->fallback_lock);
++	camss->removing = true;
++	spin_unlock(&camss->fallback_lock);
+ 	cancel_delayed_work_sync(&camss->sensor_fallback_work);
+-	for (i = 0; i < camss->num_bound_sensors; i++)
+-		fwnode_handle_put(camss->bound_sensors[i]);
+ 	v4l2_async_nf_unregister(&camss->notifier);
+ 	v4l2_async_nf_cleanup(&camss->notifier);
++	/* After the unregistration: no bound callback can record one now */
++	for (i = 0; i < camss->num_bound_sensors; i++)
++		fwnode_handle_put(camss->bound_sensors[i]);
+ 	camss_unregister_entities(camss);
+ 
+ 	if (atomic_read(&camss->ref_count) == 0)
+diff --git a/drivers/media/platform/qcom/camss/camss.h b/drivers/media/platform/qcom/camss/camss.h
+index 3596419cf9..fb23324814 100644
+--- a/drivers/media/platform/qcom/camss/camss.h
++++ b/drivers/media/platform/qcom/camss/camss.h
+@@ -143,6 +143,11 @@ struct camss {
+ 	/* Fallback state for completing the notifier without unbound sensors */
+ 	struct delayed_work sensor_fallback_work;
+ 	bool notifier_complete;
++	/* fallback_lock protects the three flags below */
++	spinlock_t fallback_lock;
++	bool notifier_registered;
++	bool removing;
++	bool dropping_alternatives;
+ 	struct fwnode_handle *bound_sensors[8];
+ 	unsigned int num_bound_sensors;
+ 	struct media_device media_dev;

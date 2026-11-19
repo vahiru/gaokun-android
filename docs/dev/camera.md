@@ -45,10 +45,10 @@
 
 | 部件 | 前置相机（`CAMF`） | 后置相机（`CAMS`） |
 |---|---|---|
-| 传感器型号 | Hynix Hi-846（8 MP，3264×2448） | OmniVision OV13B10（13 MP，4208×3120） |
-| CCI总线与I2C地址 | `cci1` bus 1，`0x20`（`2-0020`） | `cci0` bus 0，`0x36`（`1-0036`） |
+| 传感器型号 | Hynix Hi-846或Samsung S5K4H7（均为8 MP，3264×2448，见下文第4节） | OmniVision OV13B10（13 MP，4208×3120） |
+| CCI总线与I2C地址 | `cci1` bus 1，Hi-846为`0x20`（`2-0020`），S5K4H7为`0x2d`（`2-002d`） | `cci0` bus 0，`0x36`（`1-0036`） |
 | MIPI CSI-2通路 | `CSIPHY3`，4-lane | `CSIPHY0`，4-lane（560 MHz link freq） |
-| 拜耳排列格式 | `SGBRG10_CSI2P` | `SGRBG10_CSI2P` |
+| 拜耳排列格式 | Hi-846为`SGBRG10_CSI2P`，S5K4H7为`SGRBG10_CSI2P` | `SGRBG10_CSI2P` |
 | MCLK时钟 | `camcc_mclk3_clk`（24 MHz） | `camcc_mclk4_clk`（19.2 MHz，匹配上游寄存器表） |
 | 复位与供电使能GPIO | Reset `GPIO 15`；DVDD 1.2V使能`GPIO 44`（`vreg_camf`） | Reset `GPIO 7`；DVDD使能`GPIO 92`（`vreg_camr`） |
 | PMIC供电轨 | `vdda` = `LDO11_C`（2.8V），`vddio` = `LDO2_C`（1.8V） | `avdd` = `LDO2_B`（2.8V），`dovdd` = `LDO2_C`（1.8V） |
@@ -65,6 +65,16 @@
 ### 3. 后摄模组EEPROM（`1-0050`）
 
 后摄模组搭载16 KiB EEPROM（挂载在CCI0总线`0x50`，与面板共用1.8V轨，亮屏即应答）。因高通CCI适配器不支持`I2C_RDWR`复合消息，读取时需使用两步SMBus操作（`i2cset`写16位大端地址指针，再连续调用`i2cget`逐字节读取）。原始转储位于[ov13b10-module-eeprom-0x50.bin](hw/ov13b10-module-eeprom-0x50.bin)。
+
+### 4. 前摄的两种模组（`patches/kernel/camera/0038`、`0039`，`patches/kernel/dts/0029`）
+
+部分机器的前摄是Xinli的S5K4H7模组，而不是Hi-846。两者装在同一个位置，使用相同的供电、复位GPIO与MCLK，只是I2C地址不同。华为Windows驱动先探测Hi-846，失败后再探测S5K4H7（`com.qti.sensormodule.xinli_s5k4h7.bin`）。
+
+- **设备树**：`cci1` bus 1下同时描述`camera@20`（Hi-846）与`camera@2d`（S5K4H7），分别连接`camss`的`port@3`下`endpoint@0`与`endpoint@1`。未装配的那个传感器的驱动无法读取芯片ID，探测失败并释放供电与复位GPIO，另一个随即正常探测，与两者的探测先后无关。S5K4H7驱动此时仅输出一行info级别的日志并返回`-ENODEV`；Hi-846驱动返回`-EIO`，内核日志中有`hi846 2-0020: i2c read error: -6`等两行错误，不影响功能。
+- **共享复位GPIO**：两个节点引用同一根`GPIO 15`，gpiolib会把它视为共享GPIO，只能通过`gpio-shared-proxy`取得。因此`CONFIG_GPIO_SHARED_PROXY`必须为`=y`（`scripts/kernel-config-android.sh`），为`=m`时两个前摄都会一直等待代理而无法探测。
+- **引脚**：MCLK3（`GPIO 17`）与复位脚的引脚状态改由`tlmm`自身持有（`pinctrl-0`），不再写在传感器节点上：TLMM是严格模式的引脚控制器，同一引脚只能属于一个设备。
+- **`camss`**（`0039`）：一个CSIPHY只接一个传感器。某个传感器绑定时，若仍在等待的endpoint都位于已有传感器绑定的端口上，即视为未装配的备选模组，`camss`立即按`0004`的方式只保留已绑定的endpoint继续注册，不再等待20秒。
+- **S5K4H7驱动**（`0038`）：MIPI CCS寄存器布局，24 MHz MCLK，4-lane、每lane 700 Mbps（链路频率350 MHz），RAW10，像素时钟280 MHz。上电时序、初始化与三个模式（3264×2448、3264×1836、1632×1224合并，均为30 fps）的寄存器设置取自上述Windows模组配置。拜耳排列、模拟增益范围与曝光限制在探测时从传感器的CCS寄存器读取。定焦，镜头参数与Hi-846模组的配置相同。
 
 ## 三、CAMSS电源域（`titan_top_gdsc`）死锁修复
 
@@ -109,14 +119,15 @@ Android NDK的`libc++`使用内联命名空间`std::__ndk1`，而AOSP平台源�
 - **免签名进程内IPA加载（`patches/libcamera/0003`）**：编译宏`LIBCAMERA_IPA_TRUST_UNSIGNED`使`IPAManager`在没有`.sign`签名的情况下将IPA直接加载到HAL进程内线程运行。
 - **生成文件**：`scripts/camera/setup-libcamera-tree.sh`铺上游源码、打补丁、放置`Android.bp`，并调用`scripts/camera/gen-libcamera-sources.sh`由meson产出`control_ids.cpp`、`qcom-ife_ipa_proxy.cpp`等生成文件，详见[`patches/libcamera/README.md`](../../patches/libcamera/README.md)。
 
-### 2. 传感器增益与黑电平标定（`patches/libcamera/0002`、`0004`）
+### 2. 传感器增益与黑电平标定（`patches/libcamera/0002`、`0004`、`0021`）
 
-内核传感器驱动（`hi846.c`、`ov13b10.c`）仅将`V4L2_CID_ANALOGUE_GAIN`原样写入传感器寄存器，不包含物理增益换算公式；若`libcamera`的`CameraSensorHelper`未收录该传感器，AGC会将`analogue-gain`锁死在`0`，导致画面接近全黑。曝光、模拟增益与`VBLANK`的生效延迟（前后摄均为2帧，`patches/libcamera/0014`）经IFE统计逐帧实测。
+内核传感器驱动（`hi846.c`、`ov13b10.c`、`s5k4h7.c`）仅将`V4L2_CID_ANALOGUE_GAIN`原样写入传感器寄存器，不包含物理增益换算公式；若`libcamera`的`CameraSensorHelper`未收录该传感器，AGC会将`analogue-gain`锁死在`0`，导致画面接近全黑。曝光、模拟增益与`VBLANK`的生效延迟（前后摄均为2帧，`patches/libcamera/0014`）经IFE统计逐帧实测；S5K4H7的生效延迟尚未测量，暂按2帧处理。
 
 | 传感器 | 黑电平（16位归一化） | 模拟增益模型 | 说明 |
 |---|---|---|---|
 | `hi846` | `blackLevel_ = 4096`（10位下为64，位于模拟增益之后的数字偏置） | `AnalogueGainLinear{1, 16, 0, 16}`，即$\text{gain} = 1 + \frac{\text{code}}{16}$ | 经固定曝光留出法实测标定（`code=0..240`对应`1.0×..16.0×`，留出验证误差<2.3%）；内核增益控件的步长为1（`patches/kernel/camera/0037`），AGC可按1/16一档调节；`code=8..16`逐档实测与公式相差0.3%以内 |
 | `ov13b10` | `blackLevel_ = 4096`（10位下为64） | $\text{gain} = \frac{\text{code}}{128}$，按传感器实际保留的档位取整：1×–2×步长1/16，2×–4×为1/8，4×–8×为1/4，8×–15.5×为1/2（`patches/libcamera/0005`） | 档位经实机增益扫描测得，避免AGC在相邻档位间来回跳变 |
+| `s5k4h7` | `blackLevel_ = 4096`（10位下为64） | `AnalogueGainLinear{1, 0, 0, 32}`，即$\text{gain} = \frac{\text{code}}{32}$（`code=32..512`对应`1.0×..16.0×`） | 黑电平、增益模型与曝光余量（4行）均为传感器CCS寄存器报告的值（`patches/libcamera/0021`），未经实测标定 |
 
 ### 3. `qcom-ife`流水线（`patches/libcamera/0018`）
 
@@ -136,7 +147,7 @@ Android NDK的`libc++`使用内联命名空间`std::__ndk1`，而AOSP平台源�
   - 黑电平、伽马、镜头阴影、坏点与PD像素修正、ABF降噪表（按增益）。
   - 对焦：在`AfWindows`区域内由对焦统计算出`FocusFoM`，对焦算法在HAL中。
   - 帧长由`FrameDurationLimits`设定。
-- **调校文件**：`device/huawei/gaokun3/camera/ipa-data/qcom-ife/{hi846,ov13b10,uncalibrated}.yaml`，安装到`/vendor/etc/libcamera/ipa/qcom-ife/`，与打完全部补丁后`src/ipa/qcom-ife/data/`的同名文件一致（`0018`加入，`0020`修改）。数据来自华为Windows相机驱动的模组调校与实机标定；`Awb`与`Ccm`两段由`scripts/camera/gen-*-ccm.py`生成（见[`scripts/camera/README.md`](../../scripts/camera/README.md)）。缺少调校文件时IPA初始化失败，该摄像头不会注册。
+- **调校文件**：`device/huawei/gaokun3/camera/ipa-data/qcom-ife/{hi846,ov13b10,s5k4h7,uncalibrated}.yaml`，安装到`/vendor/etc/libcamera/ipa/qcom-ife/`，与打完全部补丁后`src/ipa/qcom-ife/data/`的同名文件一致（`0018`加入，`0020`修改，`0021`加入`s5k4h7.yaml`）。数据来自华为Windows相机驱动的模组调校与实机标定；`Awb`与`Ccm`两段由`scripts/camera/gen-*-ccm.py`生成（见[`scripts/camera/README.md`](../../scripts/camera/README.md)）。缺少调校文件时IPA初始化失败，该摄像头不会注册。
 
 ### 5. 已知限制（内核与`libcamera`）
 
