@@ -51,7 +51,7 @@ struct LensParams {
 	float fNumber;
 };
 constexpr LensParams kLensBack = { 4.0f, 1.8f };     /* ov13b10 */
-constexpr LensParams kLensFront = { 3.0f, 2.0f };    /* hi846 */
+constexpr LensParams kLensFront = { 3.0f, 2.0f };    /* hi846 与 s5k4h7 模组的镜头参数相同 */
 constexpr const LensParams &lensParams(bool frontFacing)
 {
 	return frontFacing ? kLensFront : kLensBack;

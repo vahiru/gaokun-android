@@ -691,13 +691,14 @@ PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/camera/gaokun3-camera-features.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/gaokun3-camera-features.xml \
     $(LOCAL_PATH)/camera/ipa-data/qcom-ife/hi846.yaml:$(TARGET_COPY_OUT_VENDOR)/etc/libcamera/ipa/qcom-ife/hi846.yaml \
     $(LOCAL_PATH)/camera/ipa-data/qcom-ife/ov13b10.yaml:$(TARGET_COPY_OUT_VENDOR)/etc/libcamera/ipa/qcom-ife/ov13b10.yaml \
+    $(LOCAL_PATH)/camera/ipa-data/qcom-ife/s5k4h7.yaml:$(TARGET_COPY_OUT_VENDOR)/etc/libcamera/ipa/qcom-ife/s5k4h7.yaml \
     $(LOCAL_PATH)/camera/ipa-data/qcom-ife/uncalibrated.yaml:$(TARGET_COPY_OUT_VENDOR)/etc/libcamera/ipa/qcom-ife/uncalibrated.yaml
 
 # ⚠️★ qcom-ife 的 IPA【必须】能读到调优文件（<传感器型号>.yaml，没有则用
 #   uncalibrated.yaml），否则 IPA 初始化失败，这颗摄像头不会注册。
 #   路径布局是 <IPA_CONFIG_DIR>/<ipa名>/<文件名>（libcamera ipa_proxy.cpp:57），
 #   而 IPA_CONFIG_DIR 由我们自己的 config.h 定成 /vendor/etc/libcamera/ipa。
-#   这三份文件须与 patches/libcamera 里 src/ipa/qcom-ife/data/ 的同名文件一致。
+#   这些文件须与 patches/libcamera 里 src/ipa/qcom-ife/data/ 的同名文件一致。
 
 # ─── Stage 4: 蓝牙（WCN6855 / hci_qca，AOSP 原装 HAL 直接可用）───
 # ⚠️ 2026-08-19 发现：#34 记了"把这个 HAL 推进 vendor 即可"，但那句话
