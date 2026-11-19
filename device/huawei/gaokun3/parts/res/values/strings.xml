@@ -69,6 +69,13 @@
     <string name="app_kernel_restart_now">Restart</string>
     <string name="app_kernel_restart_later">Later</string>
 
+    <!-- GPU driver compatibility (GlDriverVersionSettingsActivity) -->
+    <string name="gl_driver_version_title">GPU driver compatibility</string>
+    <string name="gl_driver_version_summary">Report a Qualcomm driver version to selected apps</string>
+    <string name="gl_driver_version_intro">Some games, such as those built with Unreal Engine, use Vulkan only when they detect a Qualcomm GPU driver. When this is enabled for a game, the game detects a Qualcomm driver version. Do not enable it for browsers, or some WebGL pages will not display correctly. Changes apply the next time the app starts.</string>
+    <string name="gl_driver_version_apps_title">Apps</string>
+    <string name="gl_driver_version_no_apps">No installed apps found</string>
+
     <!-- Stylus settings, injected into Settings → Connected devices -->
     <string name="stylus_title">Stylus settings</string>
     <string name="stylus_summary">Ink smoothing and double-tap on the pen</string>

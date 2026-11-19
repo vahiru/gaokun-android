@@ -1465,6 +1465,13 @@ def main():
     step(" [47] 开机20分钟后不再压缩全部系统进程: ", apply_patch_file(
         tree, "frameworks/base",
         "android/frameworks-base/0002-activitymanager-dont-compact-system-processes-after-boot.patch"))
+    # 虚幻引擎只在GL_VERSION里读到不低于下限的高通驱动版本（"V@<版本>"）时才给Adreno 6xx选开启Vulkan的设备档案，
+    # ANGLE的GL_VERSION不含驱动版本。补丁让Parts的GPU驱动兼容设置中选定的应用在启动时设置ANGLE_GL_VERSION，
+    # 读到带驱动版本的GL_VERSION；名单经CoreSettingsObserver传给应用，默认为空。未采用全局的debug.angle.gl_version：
+    # Chromium浏览器自带的ANGLE也会读到它，Edge上的WebGL 1随之无法使用。
+    step(" [48] 选定的应用在GL_VERSION中读到高通驱动版本: ", apply_patch_file(
+        tree, "frameworks/base",
+        "android/frameworks-base/0003-graphicsenv-per-app-gl-driver-version.patch"))
     # crDroid的锁屏充电信息（core: Lockscreen Charging）固定从/sys/class/power_supply/battery读取电流和电压，
     # 没有这个节点时改读充电器节点。本机电池节点名为gaokun-ec-battery，EC适配器节点没有电流和电压，UCSI节点在
     # PD模式下两者均为0，锁屏因此只显示默认的5V。补丁在没有battery节点时改用BatteryMonitor已识别的电池节点。

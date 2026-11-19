@@ -35,7 +35,7 @@
 - **音频与蓝牙在长时间运行后一起卡死**（[issue #104](https://github.com/vahiru/gaokun-android/issues/104)）：有用户报告，从未复现。看门狗会把现场记录到`/data/vendor/gaokun3/hangdump-*`，请遇到的人提供。
 - **休眠期间大流量下载可能断网**（[issue #105](https://github.com/vahiru/gaokun-android/issues/105)）：息屏休眠期间若后台有持续大带宽下载，有较大概率被路由器踢下线，点亮屏幕后自动重连恢复。
 - **GPU的SMMU轮询脚本待移除**（[issue #101](https://github.com/vahiru/gaokun-android/issues/101)）：设备树的上下文中断列表已由`kernel/dts/0027`改正（上游回移），context fault能够到达CPU。`smmu-nostall.sh`的定时轮询仍保留，待内核在失速模式下的故障处理在A690上验证之后移除，见[`dev/gpu-turnip.md`](dev/gpu-turnip.md)。
-- **无限暖暖启动即崩溃**（[issue #33](https://github.com/vahiru/gaokun-android/issues/33)）：虚幻引擎按ANGLE报告的渲染器名称匹配机型时选了GLES，而游戏只带了Vulkan着色器。报告者覆盖渲染器名称后，游戏改用Vulkan，可以进入登录界面，但约280秒后退出，并且有与网络连接有关的闪退。下一步：分析报告者在issue中提供的诊断材料。
+- **无限暖暖的联网闪退与约280秒后的退出**（[issue #33](https://github.com/vahiru/gaokun-android/issues/33)）：启动即退出的原因是虚幻引擎无法从GL_VERSION读取高通驱动版本、改用了GLES，现由"GPU驱动兼容"设置处理（见[`dev/gaming.md`](dev/gaming.md)），该设置尚未经实测。报告者使用修改过的安装包时，登录前有与网络连接有关的闪退，登录后约280秒退出；原版安装包停留在登录界面时没有出现前者，后者尚未经实测。
 - **部分网站里后摄红蓝颠倒或无法打开**：需要网站名称和复现时的日志。
 - **部分机器的前置摄像头模组不受支持**（[issue #139](https://github.com/vahiru/gaokun-android/issues/139)）：华为配备了两种前置模组，本项目只支持HI846；另一种（推测为`0x2d`上的S5K4H7）没有驱动，这类机器的内核日志中有`hi846 2-0020: i2c read error: -6`，camss等待20秒后只注册后摄。支持它需要传感器驱动、能兼容两种模组的设备树、libcamera参数与调校，以及一台可以反复测试的机器。后摄的S5K3L6模组同样不受支持，尚未收到报告。
 - **硬件解码的遗留问题**：拖动到更低分辨率后裁剪不更新；字节缓冲模式下分辨率变大时重新分配失败；`SYS_ERROR`之后出现`invalid uc_region`；HAL里POLLPRI空转；`venus_compat_gfmt=N`需要复测。
