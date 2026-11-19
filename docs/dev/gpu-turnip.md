@@ -142,3 +142,20 @@ GPU的每档OPP在`opp-peak-kBps`中声明对DDR（`ebi`）的峰值带宽投票
 修正之前，GPU即使在最高频率，投票（2.7 GB/s）也低于NVMe控制器（`1c20000.pcie`）常驻的3.94 GB/s，DDR档位实际由NVMe的投票决定，GPU可用的带宽与自身频率无关。修正之后，GPU在410 MHz及以上会提高DDR档位；270 MHz的投票（1.8 GB/s）仍低于NVMe的投票，界面合成等轻载下DDR档位不变。
 
 排查：`/sys/kernel/debug/interconnect/interconnect_summary`中，`ebi@interconnect-mc-virt`下`3d00000.gpu`一行是GPU当前的峰值投票，节点首行是汇总后的结果。
+
+## 七、微信对acquire信号量的重复等待（`mesa/0014`）
+
+微信的Flutter引擎（自行维护的Impeller分支，Vulkan后端）每次调用`vkAcquireNextImageKHR`后，会在两次提交里等待同一个acquire信号量：一次在acquire之后紧接着的提交里，一次在present之前的提交里。第一次等待已经消耗了acquire时导入的临时载荷，第二次等待的是从未被signal的永久载荷，违反`VUID-vkQueueSubmit-pWaitSemaphores-03238`。高通驱动不检查这一点。Turnip在msm上按需启用线程化提交（`VK_QUEUE_SUBMIT_MODE_THREADED_ON_DEMAND`），遇到这次等待会在`vkQueueSubmit`的`vk_queue_submit_move_binary_waits_to_temps()`中无限期阻塞：Flutter的光栅线程卡住，平台线程在下一次Surface变化时等待光栅线程，整个微信无响应。用LiteApp绘制的页面（公众号、服务号、游戏中心等）一直不出内容，离开页面时微信被判定为ANR。改为立即提交也不可行：内核会拒绝没有fence的syncobj，结果是设备丢失。
+
+处理方式：
+
+- Vulkan运行时为每个二值信号量统计已提交、但还没被等待或SYNC_FD导出消耗的signal（`vk_semaphore::binary_signals_pending`）。用计数而不用标志，是因为跨队列等待时间线时，同一个二值信号量可以先后有两次signal都已提交。永久载荷被导入，或导出为可共享的句柄之后，其他信号量或进程也能signal它，此后不再统计（`binary_untracked`）。
+- driconf选项`vk_drop_unsignaled_binary_waits`打开时，等待一个没有临时载荷、仍在统计、且计数为0的二值信号量，这次等待会被丢弃；每个进程第一次丢弃时在logcat中输出一条警告（`Dropping waits on binary semaphores without a submitted signal operation`）。第一次等待已经让前一个提交等待acquire栅栏，msm上同一队列的作业按提交顺序执行，所以丢弃第二次等待不改变GPU的执行顺序。
+- present路径（`vkQueueSignalReleaseImageANDROID`）在msm上原本由CPU直接复制信号量载荷来生成释放栅栏。其中有等待会被丢弃时改为向队列提交一次空提交，释放栅栏因此仍排在之前的GPU工作之后，SurfaceFlinger不会合成尚未画完的帧。
+- 提交失败时计数不回滚，与临时载荷在失败时已被消耗的现有行为一致。
+- `00-mesa-defaults.conf`只对进程名匹配`^com[.]tencent[.]mm(:.*)?$`的进程打开这个选项。ROM的Mesa使用编译进库的静态driconf表，其他应用的行为不变。
+
+排查：
+
+- 微信进程的logcat中出现上面的警告，说明选项已生效，并且发生了丢弃。
+- 其他应用出现同样的卡死时，ANR记录中光栅线程停在`vk_queue_submit_move_binary_waits_to_temps()` → `drmSyncobjTimelineWait`。确认是同类问题后，可以在`00-mesa-defaults.conf`中为它添加同样的条目。
