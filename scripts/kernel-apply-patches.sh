@@ -297,6 +297,8 @@ KPATCHES=(
     kernel/dts/0024-arm64-dts-qcom-sc8280xp-Give-the-camera-clock-controller-its-MX-domain.patch
     kernel/dts/0025-arm64-dts-qcom-sc8280xp-huawei-gaokun3-Use-the-HW_GK3-Wi-Fi-board-data.patch
     kernel/dts/0026-arm64-dts-qcom-sc8280xp-keep-iris-IOVAs-out-of-the-content-protection-range.patch
+    kernel/dts/0027-arm64-dts-qcom-sc8280xp-Fix-GPU-SMMU-context-fault-interrupts.patch
+    kernel/dts/0028-arm64-dts-qcom-sc8280xp-fix-GPU-peak-bandwidth-votes.patch
 
     # ─── 11. kernel/fingerprint：QSEECOM 与指纹传输驱动（/dev/gaokun3_fpcmd，CONFIG_GAOKUN3_FPCMD 由 kernel-config-android.sh 打开）───
     kernel/fingerprint/0001-firmware-qcom-scm-qseecom-app-load-shutdown-listener.patch

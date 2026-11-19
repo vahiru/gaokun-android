@@ -43,7 +43,7 @@ echo $?        # 0 = 无FAIL；1 = 有FAIL；2 = adb不通或中途掉线（不�
 | 相机冒烟 | `/data/local/tmp/gaokun3-ncam-smoke`与`… front` | 前后摄末行均为`RESULT: PASS` |
 | 麦克风冒烟 | `/data/local/tmp/micverify/gaokun3-mic-smoke -r 48000 -c 2 -t 5 -T` | 末行以`RESULT: PASS`开头；`logcat`有`first capture block ready`且无`incomplete data received` |
 | 扬声器音效库加载 | effect HAL进程的`/proc/<pid>/maps`；`logcat` | `maps`含`libgaokunhisteneffect.so`；无音效相关的链接命名空间报错 |
-| GPU浸泡 | `scripts/verify-turnip.sh 600`（`--soak 600`） | GLES渲染器为turnip、GMU错误与`a6xx_recover`为0、`smmustall`心跳`fault=0`、帧读回非空；浸泡前后错误计数不增、桌面进程PID不变 |
+| GPU浸泡 | `scripts/verify-turnip.sh 600`（`--soak 600`） | GLES渲染器为turnip、GMU错误与`a6xx_recover`为0、`smmustall`心跳`fault=0`、`gpu_smmu`上下文故障中断为0、帧读回非空；浸泡前后错误计数不增、桌面进程PID不变 |
 | 系统崩溃记录 | `/data/system/dropbox`本次开机以来的条目 | `system_server_crash`为0；系统进程`SYSTEM_TOMBSTONE`为0（测试工具与第三方应用崩溃记WARN）；`system_server_anr`为0 |
 | SELinux拒绝 | `logcat -b all` + `dmesg`中的`avc`，经`scripts/selinux/avc-summary.py`去重统计 | 0为PASS；非0为WARN并核查是否有新增拒绝；`audit_lost`为0 |
 | 待机计数与性能快照 | `suspend_stats`、`qcom_stats`、两簇`time_in_state`、GPU `trans_stat`、`thermal`、`cooling_device`（GPU浸泡前后各采一份） | 空闲时`cooling_device`全为0；保存GPU浸泡期间的平均频率增量供跨版本比对 |

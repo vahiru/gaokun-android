@@ -12,6 +12,10 @@
 #                           三者任一非 0 = D3 那条死亡链又起来了
 #   smmustall 服务       —— 常驻解锁器；它不跑 = 第一次页错误就永久挂死
 #   抓 fault=N           —— 解锁器抓到的真实 GPU 页错误（0004 v3 之后应为 0）
+#   上下文故障中断       —— gpu_smmu的arm-smmu-context-fault计数（应为0）。kernel/dts/0027
+#                           之后内核处理完故障立即清除FSR，100 ms轮询的解锁器基本抓不到，
+#                           真实页错误要看这个计数，地址在dmesg的"*** gpu fault"行（GPU，CB0）
+#                           或"Unhandled context fault"行（GMU，CB1）
 #   screencap            —— 帧读回；Stage 5 时它会永久卡死，是最灵敏的探针
 #
 # ⚠️ 2026-10-04 改（PERF-12）：开机几小时后跑，旧版三处判据会【假阴性】——
@@ -50,6 +54,14 @@ recover_count() {
     A 'a=$(dmesg 2>/dev/null | grep -c a6xx_recover); b=$(logcat -b kernel -d 2>/dev/null | grep -c a6xx_recover);
        [ "${a:-0}" -gt "${b:-0}" ] && echo ${a:-0} || echo ${b:-0}'
 }
+# gpu_smmu上下文故障中断的累计次数（各CPU列相加）。按GIC hwirq认行：驱动只取前7个
+# （= NUMCB），kernel/dts/0027之前是710–716（SPI 678–684），之后是712–718（SPI 680–686）；
+# apps_smmu的上下文中断从721（SPI 689）起，不在这个范围内。中断计数不会像日志那样滚掉。
+# 一行都没认出来（adb断开或格式变了）时输出空串，由调用处判失败。
+kfault_count() {
+    A 'cat /proc/interrupts' | awk '/GICv3 +71[0-8] +Level +arm-smmu-context-fault/ { n++
+        for (i = 2; i <= NF; i++) { if ($i ~ /^[0-9]+$/) s += $i; else break } } END { if (n) print s + 0 }'
+}
 # 最近一次 smmustall 心跳里的累计 fault 数；没有心跳输出空串
 fault_count() {
     A 'logcat -d -s smmustall 2>/dev/null | grep "心跳" | tail -1' | sed -n 's/.*抓 fault=\([0-9][0-9]*\).*/\1/p'
@@ -87,6 +99,10 @@ if [ -z "$F0" ]; then
     bad "logcat 里找不到 smmustall 心跳（服务在跑的话约每 60 秒一行；没有 = 脚本卡住或日志没进 logd）"
 elif [ "$F0" = 0 ]; then ok "心跳：抓 fault=0"
 else bad "心跳：抓 fault=${F0}（真实 GPU 页错误，FAULT# 行里有地址）"; fi
+K0=$(kfault_count)
+if [ -z "$K0" ]; then bad "/proc/interrupts里找不到gpu_smmu的上下文故障中断行"
+elif [ "$K0" = 0 ]; then ok "gpu_smmu上下文故障中断为0"
+else bad "gpu_smmu上下文故障中断${K0}次（真实GPU页错误，地址见dmesg的\"*** gpu fault\"或\"Unhandled context fault\"行）"; fi
 
 echo; echo "═══ 5. 桌面进程 ═══"
 # ⚠️ 不用 pgrep -f：它的模式串就在 adb 拉起的那个 sh 的命令行里，会把自己也数进去（每次 PID 都不同，浸泡对比必假阳性）
@@ -105,7 +121,7 @@ A 'logcat -d -b crash 2>/dev/null | grep -E ">>> " | tail -3' | sed 's/^/  /'
 if [ "$SECS" -gt 0 ]; then
   echo; echo "═══ 浸泡 ${SECS}s 后复查 ═══"
   sleep "$SECS"
-  G2=$(gmu_count); R2=$(recover_count); F2=$(fault_count)
+  G2=$(gmu_count); R2=$(recover_count); F2=$(fault_count); K2=$(kfault_count)
   # 用 -gt 判新增：浸泡期间旧行可能从 dmesg / logd 缓冲里滚掉，计数变小不是"新增"
   # （局限：滚掉 n 行的同时又新增 n 行会看不出来 —— 只在原本就 > 0 时才可能，那时本来就已经 FAIL 了）
   if [ "${G2:-0}" -gt "${G:-0}" ]; then bad "浸泡期间新增 GMU 错误：${G:-0} → $G2"
@@ -115,6 +131,9 @@ if [ "$SECS" -gt 0 ]; then
   if [ -z "$F2" ]; then bad "浸泡后找不到 smmustall 心跳"
   elif [ "$F2" = "${F0:-0}" ]; then ok "SMMU fault ${F0:-?} → $F2"
   else bad "浸泡期间新增 SMMU fault：${F0:-?} → $F2"; fi
+  if [ -z "$K2" ]; then bad "浸泡后/proc/interrupts里找不到gpu_smmu的上下文故障中断行"
+  elif [ "$K2" -gt "${K0:-0}" ]; then bad "浸泡期间新增gpu_smmu上下文故障中断：${K0:-0} → $K2"
+  else ok "gpu_smmu上下文故障中断${K0:-0} → ${K2:-0}"; fi
   [ "$(A getprop sys.boot_completed)" = 1 ] && ok "boot_completed 仍为 1" || bad "boot_completed 不是 1（重启过？）"
   P2=$(A "pidof $DESK")
   [ "$P2" = "$P0" ] && ok "桌面四进程 PID 不变（${P2}）" || bad "桌面进程 PID 变了：[$P0] → [$P2]（有进程崩溃重启）"

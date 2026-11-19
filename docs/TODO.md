@@ -33,7 +33,7 @@
 - **插电脑时平板反过来供电**（[issue #103](https://github.com/vahiru/gaokun-android/issues/103)）：对方不支持USB PD时偶尔发生，目前只会弹通知提示重插。自动重新协商尚未实现。
 - **音频与蓝牙在长时间运行后一起卡死**（[issue #104](https://github.com/vahiru/gaokun-android/issues/104)）：有用户报告，从未复现。看门狗会把现场记录到`/data/vendor/gaokun3/hangdump-*`，请遇到的人提供。
 - **休眠期间大流量下载可能断网**（[issue #105](https://github.com/vahiru/gaokun-android/issues/105)）：息屏休眠期间若后台有持续大带宽下载，有较大概率被路由器踢下线，点亮屏幕后自动重连恢复。
-- **GPU的SMMU中断号不对**（[issue #101](https://github.com/vahiru/gaokun-android/issues/101)）：硬件触发的是SPI 675/680，设备树声明的是678/679，所以context fault到不了CPU，目前用`smmu-nostall.sh`定时轮询作为替代。改错了不会有任何征兆，需要先确认正确的映射，见[`dev/gpu-turnip.md`](dev/gpu-turnip.md)。
+- **GPU的SMMU轮询脚本待移除**（[issue #101](https://github.com/vahiru/gaokun-android/issues/101)）：设备树的上下文中断列表已由`kernel/dts/0027`改正（上游回移），context fault能够到达CPU。`smmu-nostall.sh`的定时轮询仍保留，待内核在失速模式下的故障处理在A690上验证之后移除，见[`dev/gpu-turnip.md`](dev/gpu-turnip.md)。
 - **无限暖暖启动即崩溃**（[issue #33](https://github.com/vahiru/gaokun-android/issues/33)）：推测虚幻引擎按ANGLE报告的渲染器名称匹配机型时选了GLES，而游戏只带了Vulkan着色器。下一步：请报告者用`debug.angle.gl_renderer`和`debug.angle.gl_vendor`覆盖渲染器名称后对比。
 - **部分网站里后摄红蓝颠倒或无法打开**：需要网站名称和复现时的日志。
 - **部分机器的前置摄像头模组不受支持**（[issue #139](https://github.com/vahiru/gaokun-android/issues/139)）：华为配备了两种前置模组，本项目只支持HI846；另一种（推测为`0x2d`上的S5K4H7）没有驱动，这类机器的内核日志中有`hi846 2-0020: i2c read error: -6`，camss等待20秒后只注册后摄。支持它需要传感器驱动、能兼容两种模组的设备树、libcamera参数与调校，以及一台可以反复测试的机器。后摄的S5K3L6模组同样不受支持，尚未收到报告。
