@@ -1,20 +1,20 @@
 # GPU SMMU stall-on-fault 解锁器（Stage 5 D5/D6 的常驻 workaround）。
 #
-# 为什么必须常驻：本平台 gpu_smmu 的 context-fault 中断打不到 CPU
-# （DT 声明 SPI 678/679，硬件实际拉 SPI 675/680 —— 见 docs/dev/gpu-turnip.md），
-# 而 SCTLR.CFCFG=1 是 stall-on-fault。于是【任何一次】GPU 页错误都会让
-# SMMU 永久 stall → AHB 总线 stall → CP 断粮 → GMU 看门狗 → cx gdsc 塌不下去
-# → 全系统 VK_ERROR_DEVICE_LOST 崩溃循环，且无法自愈。
-# patches/mesa/0001 v3 之后实测 fault 数 66 → 0，但这条链是"错一次就死"，
-# 所以解锁器留着当安全网，代价是一个 100ms 轮询的 shell 循环。
+# 为什么要常驻：主线DT给gpu_smmu声明的上下文中断错位（前两项SPI 678/679是PMU中断，
+# CB0故障拉的是SPI 680），context-fault中断无法到达CPU，而SCTLR.CFCFG=1是stall-on-fault。
+# 于是【任何一次】GPU页错误都会让SMMU永久stall → AHB总线stall → CP取不到指令 → GMU看门狗
+# → cx gdsc塌不下去 → 全系统VK_ERROR_DEVICE_LOST崩溃循环，且无法自愈。
+# patches/kernel/dts/0027改正了中断列表，内核已能收到故障中断并处理；但失速模式下的
+# 内核故障处理在A690上尚未经实测，解锁器暂时保留当安全网，代价是一个100ms轮询的shell循环。
+# 详见docs/dev/gpu-turnip.md第三节。
 #
 # ⚠️ 时序：必须早于 SurfaceFlinger 第一次用 GPU（约开机 7s）。
 #    post-fs-data 触发点在 `on boot`（class_start core/main）之前，正合适。
 #    再早不行 —— 脚本在 /vendor/bin，要等 mount_all 挂上 vendor。
 #
-# ⚠️ 脚本里的 NCB=2 绝对不能调大：扫到未实现的 context bank 会打出
-#    external abort，把内核静默带走（无 tombstone / 无 pstore / adb 不上线）。
-#    实现了几个看 /proc/interrupts 的 arm-smmu-context-fault 条数。
+# ⚠️ 脚本里的NCB=2只覆盖GPU与GMU使用的CB0和CB1。不要扫CB7及以上：超出驱动报告的
+#    7个context bank（IDR1.NUMCB），访问会打出external abort，把内核静默带走
+#    （无tombstone / 无pstore / adb不上线）。
 service smmustall /vendor/bin/smmu-nostall.sh
     class core
     user root

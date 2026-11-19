@@ -70,23 +70,25 @@ Android App / SystemUI / SurfaceFlinger (renderengine = skiagl / skiavkthreaded)
 2. 将查询到的modifier（如`DRM_FORMAT_MOD_QCOM_COMPRESSED`或`DRM_FORMAT_MOD_LINEAR`）写入`image->vk.drm_format_mod`，调用`tu_image_update_layout()`重新计算Turnip内部布局（避免`tu_CreateImage`阶段假定的线性布局与Gralloc实际分配的UBWC布局不一致导致渲染错位或越界写）。
 3. 调用`vk_android_import_anb()`将DMA-BUF fd导入为`VkDeviceMemory`，再通过`image->ops->bind_memory()`绑定`image->bo`并映射正确的GPU IOVA。
 
-## 三、GPU SMMU上下文故障失速（Stall-on-Fault）死锁
+## 三、GPU SMMU上下文故障中断（`kernel/dts/0027`）与失速（Stall-on-Fault）
 
-### 1. 硬件中断号失配与死锁链
+### 1. 中断号错位与死锁链
 
-SC8280XP的GPU SMMU（`3da0000.iommu`，`qcom,sc8280xp-smmu-500`）在`msm_iommu.c`初始化时默认开启上下文故障失速模式（`SCTLR.CFCFG = 1`）：当任一GPU事务发生地址翻译错误时，SMMU冻结该笔总线事务并拉高上下文中断线，等待内核的`adreno_smmu_fault_handler`执行`RESUME`（终止事务）并清中断。
+SC8280XP的GPU SMMU（`3da0000.iommu`，`qcom,sc8280xp-smmu-500`）在`msm_iommu.c`初始化时开启上下文故障失速模式（`SCTLR.CFCFG = 1`）：当任一GPU事务发生地址翻译错误时，SMMU冻结该笔总线事务并拉高该Context Bank（CB）的中断线，等待内核的`adreno_fault_handler`处理后写`RESUME`终止该笔事务。
 
-然而在SC8280XP上，设备树为`gpu_smmu`声明的上下文中断号（GIC SPI 678/679）与硬件在故障时实际拉高的中断线（SPI 675/680，对应GIC INTID 707/712）不一致。因此一旦发生任何一次GPU页错误：
+主线设备树为`gpu_smmu`声明的上下文中断列表有错位：前两项SPI 678/679其实是PMU中断，CB0发生故障时拉高的是SPI 680（GIC INTID 712）。驱动按CB序号取中断，故障处理函数因此挂在了错误的中断线上，内核收不到任何上下文故障中断。此时一旦发生GPU页错误：
 
-1. SMMU置起`FSR.SS = 1`（Stalled）并挂起GPU的AXI/AHB读事务，但CPU侧收不到中断，`adreno_smmu_fault_handler`永不执行。
+1. SMMU置起`FSR.SS = 1`（Stalled）并挂起GPU的AXI/AHB读事务，但CPU侧收不到中断，`adreno_fault_handler`永不执行。
 2. 挂起的事务阻塞GPU的CX主总线（`CP_AHB_BUSY_CX_MASTER`）。
 3. 随后GPU进入空闲休眠时，GMU固件尝试抽空总线但永远等不到空闲，报`HFI_H2F_MSG_GX_BW_PERF_VOTE`超时（`-110`），`cx gdsc`无法塌缩。
 4. 内核尝试调用`a6xx_recover`复位GPU，但复位路径写寄存器同样走已冻结的AHB路径，最终导致GPU恢复工作队列永久卡死。
 
+`kernel/dts/0027`是上游的修正（qcom树`arm64-for-7.5`分支，`89083b1e9e31`），按CB顺序改为SPI 680–688与703。应用之后，GPU页错误会进入`adreno_fault_handler`：`dmesg`打印`*** gpu fault: ttbr0=... iova=... dir=... type=...`，`/proc/interrupts`中`arm-smmu-context-fault`（GIC INTID 712起）的计数随之增加。
+
 ### 2. 处置与注意事项
 
-- **关闭`SCTLR.CFCFG`**：清除已分配上下文银行（Context Bank）`SCTLR`寄存器的bit 7（`CFCFG`）并置位bit 8（`HUPCF`，Hit Under Previous Context Fault）。这样当发生非法地址访问时，SMMU直接向GPU返回总线错误（Bus Error）而非挂起流水线，GPU可正常完成硬件复位。
-- **严禁遍历未实现的Context Bank**：`gpu_smmu`的`IDR1.NUMCB`（架构上限）虽为8或16，但硬件仅实现了2个上下文银行（`NCB = 2`，CB0与CB1）。访问CB2及以上的寄存器空间会立即触发同步外部中止（Synchronous External Abort），导致内核无日志死机。
+- **常驻解锁器`smmustall`**（`device/huawei/gaokun3/bin/smmu-nostall.sh`、`etc/smmustall.rc`）：持续清除已用CB的`SCTLR`中的bit 7（`CFCFG`），使非法地址访问直接终止，而不是挂起流水线（bit 8 `HUPCF`由驱动置位，后续事务照常处理）。它是在中断无法到达时加入的；`kernel/dts/0027`之后中断能够到达，两者并存时故障直接终止，中断照常上报。解锁器暂时保留：内核失速模式下的故障处理（暂停失速500 ms、写`RESUME`终止被冻结的事务、生成devcoredump）在A690上尚未经实测，确认之后再考虑移除。
+- **严禁访问CB7及以上**：驱动按`IDR1.NUMCB`报告7个CB（CB0–CB6，`dmesg`中的`7 context banks`），GPU与GMU只用CB0和CB1。CB7及以上超出`NUMCB`，访问其寄存器空间会立即触发同步外部中止（Synchronous External Abort），导致内核无日志死机；`smmu-nostall.sh`因此只扫描CB0和CB1。
 
 ## 四、10位视频（P010）零拷贝合成与构建脚本
 
@@ -129,3 +131,11 @@ SC8280XP的GPU SMMU（`3da0000.iommu`，`qcom,sc8280xp-smmu-500`）在`msm_iommu
 - `dmesg`里不应出现`preemption timed out`、`preemption faulted`或`CP | HW fault`。
 - tracefs的`drm_msm_gpu/msm_gpu_preemption_trigger`和`msm_gpu_preemption_irq`记录每次切换，两者应一一对应；`msm_gpu_submit`的`ring=`字段显示每次提交进了哪个ring。
 - GPU挂死时用Mesa的`crashdec -f`解码devcoredump（`/sys/class/devcoredump/devcd*/data`，5分钟后自动删除）；A690要先把dump里的`revision: 0 (06090000)`改成`revision: 690 (6.9.0.0)`。只需查看GMU HFI消息、GMU固件trace或`ring0`当前位置附近的PM4包时，可以用[`scripts/gmu-forensics/`](../../scripts/gmu-forensics/README.md)中的解析脚本。
+
+## 六、GPU的DDR带宽投票（`kernel/dts/0028`）
+
+GPU的每档OPP在`opp-peak-kBps`中声明对DDR（`ebi`）的峰值带宽投票，devfreq切换频率时由OPP框架经interconnect提交给RPMh。主线的取值漏乘了DDR接口宽度（4字节），实际填的是DDR频率（kHz），投票只有应有值的四分之一。`kernel/dts/0028`是已提交上游、尚待评审的修正，改为1804000、6220000、10944000 kB/s（对应DDR 451、1555、2736 MHz）。
+
+修正之前，GPU即使在最高频率，投票（2.7 GB/s）也低于NVMe控制器（`1c20000.pcie`）常驻的3.94 GB/s，DDR档位实际由NVMe的投票决定，GPU可用的带宽与自身频率无关。修正之后，GPU在410 MHz及以上会提高DDR档位；270 MHz的投票（1.8 GB/s）仍低于NVMe的投票，界面合成等轻载下DDR档位不变。
+
+排查：`/sys/kernel/debug/interconnect/interconnect_summary`中，`ebi@interconnect-mc-virt`下`3d00000.gpu`一行是GPU当前的峰值投票，节点首行是汇总后的结果。

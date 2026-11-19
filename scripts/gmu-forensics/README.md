@@ -16,7 +16,7 @@
 
 ## 二、调试注意事项
 
-1. **GPU SMMU寄存器访问前提**：GPU SMMU的Context Bank（CB）寄存器仅在GPU处于上电状态时可读；另外，本机仅实现2个Context Bank（`/proc/interrupts`中2条`arm-smmu-context-fault`，对应CB0 GPU与CB1 GMU）。**严禁扫描未实现的CB寄存器**，否则会触发同步外部中止（external abort）导致整机死锁。
+1. **GPU SMMU寄存器访问前提**：GPU SMMU的Context Bank（CB）寄存器仅在GPU处于上电状态时可读；另外，驱动按`IDR1.NUMCB`报告7个Context Bank，GPU与GMU只用CB0和CB1。**严禁扫描CB7及以上的寄存器**：它们超出`NUMCB`，访问会触发同步外部中止（external abort）导致整机死锁。
 2. **`toybox devmem`输出格式**：Android内置`toybox devmem`默认以十进制输出结果（例如`00000487`代表`0x1E7`），读取时需注意进制转换。
 3. **`crashdec`版本号识别**：使用Mesa `crashdec`解析主线内核产生的devcoredump时，若遇到`revision: 0 (06090000)`，可替换为`revision: 690 (6.9.0.0)`以便解析器识别Adreno 690寄存器定义。
 4. **Mesa Android属性命名规则**：环境变量`TU_DEBUG`在Android属性系统中对应`debug.mesa.tu.debug`（`mesa.`前缀并将下划线转为点号）。
