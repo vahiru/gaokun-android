@@ -14,6 +14,7 @@
 | 触摸响应 | **`game`触摸预设** | 关闭坐标平滑（减少约25 ms稳态滞后）、debounce设为1帧、关闭手掌位置图（避免贴屏幕边缘平放的拇指被当成手掌撤回）。可在"设置 → 显示 → 触摸模式"切换 | `bin/gaokun3-touch-mode.sh`，详见[`palm-rejection.md`](palm-rejection.md) |
 | 内存 | **zram交换空间**（`mmd.zram.enabled=true`） | 没有交换空间时，内存压缩只能回收文件页，进程正在执行的代码页也会被逐出；压缩全部系统进程时会反复逐出SurfaceFlinger、audioserver、音频HAL的代码页，造成约1秒的画面剧烈掉帧和扬声器爆音。现由mmd在开机完成时配置zram（lz4，大小为内存的一半） | `device.mk` |
 | 调度 | **后台cpuset限在`0-3`** | 将`background`和`system-background`限制在4个能效核，避免后台任务与前台游戏争抢大核 | `device/huawei/gaokun3/` |
+| 内存 | **开机后不自动压缩全部系统进程**（`patches/android/frameworks-base/0002`） | crDroid（取自CAF）原本在开机20分钟后把全部系统进程的内存回收一遍，SurfaceFlinger、音频服务正在使用的页面被逐出，正在玩游戏时会出现约1秒的剧烈掉帧和爆音。AOSP和LineageOS的正式版本不会自动压缩系统进程，补丁与之一致 | `crdroid-tree-fixes.py` |
 
 ## 2. 按应用UID伪装内核版本（`patches/kernel/core/0008`）
 

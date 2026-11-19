@@ -1,0 +1,47 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] ActivityManagerService: don't compact system processes 20 minutes after boot
+
+A CAF change carried by crDroid since 14.0 (30306f98c8e7 there,
+"CachedAppOptimizer: Set thread group to background") added
+CachedAppOptimizer.compactAllSystem() to the task that runs
+FULL_PSS_MIN_INTERVAL (20 minutes) after the user's boot completes.
+AOSP does not compact system processes there or anywhere else on its
+own: a93181541fda ("ActivityManagerService: don't compact system at
+BOOT_COMPLETED") took it out of the boot path, and the remaining call in
+performIdleMaintenance() is behind disable_system_compaction, which is
+enabled in release builds. The CAF call bypasses that flag, so it is the
+only automatic system compaction left on crDroid.
+
+With useMemcgForCompaction, compactAllSystem() writes the whole
+memory.current of the system cgroup to its memory.reclaim, so every
+system daemon is reclaimed at once, whatever the device is doing at that
+moment. SurfaceFlinger, the composer HAL, audioserver and the audio HAL
+then fault their working set back in while the reclaim is still running.
+On the Huawei MateBook E Go during a rhythm game this shows as about one
+second of heavy frame drops and, without swap, speaker crackle; with zram
+the audio stays clean, but composition still misses frames for about
+half a second.
+
+Drop the call and keep the deferred PSS collection, as in AOSP and
+LineageOS. System processes are then compacted only on request
+(am compact system); cached app compaction is unchanged.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ .../core/java/com/android/server/am/ActivityManagerService.java  | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/services/core/java/com/android/server/am/ActivityManagerService.java b/services/core/java/com/android/server/am/ActivityManagerService.java
+index e40aea8..0e2ef33 100644
+--- a/services/core/java/com/android/server/am/ActivityManagerService.java
++++ b/services/core/java/com/android/server/am/ActivityManagerService.java
+@@ -6011,7 +6011,6 @@ public class ActivityManagerService extends IActivityManager.Stub
+                             // Defer the full Pss collection as the system is really busy now.
+                             mHandler.postDelayed(() -> {
+                                 synchronized (mProcLock) {
+-                                    mCachedAppOptimizer.compactAllSystem();
+                                     mAppProfiler.requestPssAllProcsLPr(
+                                             SystemClock.uptimeMillis(), true, false);
+                                 }
