@@ -827,15 +827,6 @@ PRODUCT_PACKAGES += \
 PRODUCT_VENDOR_PROPERTIES += \
     ro.hardware.vulkan=freedreno
 
-# GPU SMMU stall 解锁器（常驻安全网）。装它的理由、时序约束与
-# NCB=2 的血泪教训见 etc/smmustall.rc 与 bin/smmu-nostall.sh 的注释。
-# ⚠️ 这两个文件在 Stage 5 只通过 adb push 进过设备，从没写进构建配置 ——
-#    与 audio-route.sh / tplg.bin 是完全同一类漏网。照原样构建会得到
-#    「跑着 turnip 但没有安全网」，第一次 GPU 页错误就永久挂死且无法自愈。
-PRODUCT_COPY_FILES += \
-    $(LOCAL_PATH)/bin/smmu-nostall.sh:$(TARGET_COPY_OUT_VENDOR)/bin/smmu-nostall.sh \
-    $(LOCAL_PATH)/etc/smmustall.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/smmustall.rc
-
 # ★ 资源 overlay —— 把 crDroid 的系统内 Updater 指向本项目（M6）。
 #
 # 为什么必须是【构建期】overlay 而不是运行时 RRO：

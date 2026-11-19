@@ -37,7 +37,7 @@
 # 退出时归零即可完全恢复。
 # 实测可控：cd0 cur_state 0->1 使 policy0 scaling_max_freq 2438400 -> 2342400。
 #
-# ⚠️ PATH 必须钉 /system/bin —— 与 smmu-nostall.sh / audio-route.sh 同一个坑：
+# ⚠️ PATH 必须钉 /system/bin —— 与 audio-route.sh 同一个坑：
 #    本脚本以 `#!/vendor/bin/sh` 起，PATH 默认优先 /vendor/bin，于是 log/sleep
 #    每次都去 exec /vendor/bin/toybox_vendor，而服务跑在 u:r:shell:s0 域下对
 #    vendor_toolbox_exec 无权限 → permissive 下功能正常但疯狂刷 avc denied。

@@ -19,16 +19,6 @@ type gaokun3_audioroute, domain;
 type gaokun3_audioroute_exec, exec_type, vendor_file_type, file_type;
 init_daemon_domain(gaokun3_audioroute)
 
-# ── smmu-nostall.sh：GPU SMMU stall 解锁器，常驻轮询 ─────────────────────
-# （TODO B6 根治之后这个域就可以删掉）
-type gaokun3_smmustall, domain;
-type gaokun3_smmustall_exec, exec_type, vendor_file_type, file_type;
-init_daemon_domain(gaokun3_smmustall)
-# v1.0 LIVE-4（2026-10-05）：每轮先读 GPU 的 runtime_status，suspended 时退避到 1 秒一轮。
-#   /sys/devices/platform/soc@0/3d00000.gpu/power/runtime_status 实机标签 u:object_r:sysfs:s0（ls -Z 核过）。
-#   读不到时脚本退回原来的 10 Hz（不会更差），所以 enforcing 下漏了这条只是没省电、不坏功能。⬜ 未编译、未上机。
-r_dir_file(gaokun3_smmustall, sysfs)
-
 # ── gaokun3-hangdump.sh：死锁取证看门狗 ─────────────────────────────────
 type gaokun3_hangdump, domain;
 type gaokun3_hangdump_exec, exec_type, vendor_file_type, file_type;
@@ -73,11 +63,9 @@ init_daemon_domain(gaokun3_rprockick)
 #   /(vendor|system/vendor)/bin/sh            u:object_r:vendor_shell_exec:s0
 #   /(vendor|system/vendor)/bin/toybox_vendor u:object_r:vendor_toolbox_exec:s0
 # 显式写全，不用 m4 宏 —— 十行重复远比"一个只在本文件里定义的宏"好读，
-# 也不会因为策略文件的拼接顺序出意外。（2026-09-18 起是六个：加了 touch-mode。）
+# 也不会因为策略文件的拼接顺序出意外。
 allow gaokun3_audioroute vendor_shell_exec:file rx_file_perms;
 allow gaokun3_audioroute vendor_toolbox_exec:file rx_file_perms;
-allow gaokun3_smmustall  vendor_shell_exec:file rx_file_perms;
-allow gaokun3_smmustall  vendor_toolbox_exec:file rx_file_perms;
 allow gaokun3_hangdump   vendor_shell_exec:file rx_file_perms;
 allow gaokun3_hangdump   vendor_toolbox_exec:file rx_file_perms;
 allow gaokun3_keyboard   vendor_shell_exec:file rx_file_perms;
@@ -208,32 +196,9 @@ allow gaokun3_audioroute sysfs:file getattr;
 #   （同 gaokun3_usbrole）。⬜ 未编译、未上机。
 set_prop(gaokun3_audioroute, vendor_gaokun3_prop)
 
-# ── ⚠️ 故意【不写】的两个域（2026-09-18）—— ★ 2026-09-27 起两个都写了，见本文件末尾（#126）──
+# ── ⚠️ 故意【不写】的域（2026-09-18）—— ★ 2026-09-27 起写了，见下文（#126）──
 #
-# gaokun3_smmustall：实测要 `self:capability sys_rawio` +
-#   `gaokun3_devmem_device:chr_file {map open read write}`。
-#   那条 sys_rawio 的 neverallow 带 userdebug_or_eng 豁免
-#   （lineage-23.0 的 domain.te:2012-2024；⚠️ 行号每次同步都会漂，
-#    判据是那条 neverallow 的正文里有没有 `userdebug_or_eng(\`-domain')`）。
-#   ⚠️★★ 2026-09-18 我在这里写过一条"更正"，说本仓发的是 user 变体所以豁免不生效
-#   —— **那条更正本身是错的，当晚就被实机推翻了**。
-#   `ro.build.type=user` / `ro.debuggable=0` 是 build.prop 被硬写成那样的
-#   （`build/soong/scripts/gen_build_prop.py:28` 的 get_build_variant() 没有
-#    userdebug 这一档，非 eng 一律按 user 写），**与真实构建变体无关**。
-#   本仓一直编的是 userdebug（A16 时 `lineage_gaokun3-bp4a-userdebug`；A17 起
-#   `lineage_gaokun3-cp2a-userdebug`，`AndroidProducts.mk:8`），
-#   所以 userdebug 豁免【是生效的】（A17 的 private/domain.te:2120-2133 仍带 `userdebug_or_eng(\`-domain')`）—— 原话"写得进去，但那意味着 enforcing 与否
-#   取决于构建变体"仍然成立。
-#   ★ 正解是把 [TODO B6] 做掉（DT 中断映射修对），这个轮询脚本整个消失。
-#   在那之前，宁可让它在 enforcing 下明确失效，也不要写一条只在
-#   userdebug 上成立的规则。
-#   ⚠️★ 2026-09-27 改了主意（#126），规则写在本文件末尾：
-#   "明确失效"在这里的意思是【第一次 GPU 页错误就永久卡死、无法自愈】（device.mk 装它那一节），
-#   而那条顾虑"只在 userdebug 上成立"在实际中不存在 —— user 变体本来就起不来（#117 §15），
-#   本仓只编 userdebug。不写规则 = enforcing 下拆掉 GPU 的安全网；写了 = 与今天 permissive 下
-#   的行为一模一样。B6 仍是根治，做掉之后这几行连同脚本一起删。
-#
-# gaokun3_hangdump：⚠️ 下面这段是 2026-09-18 的判断，2026-09-27 改了主意（见本文件末尾）：
+# gaokun3_hangdump：⚠️ 下面这段是 2026-09-18 的判断，2026-09-27 改了主意（见下文）：
 #   实测要读别的域的 /proc（观测到 init 与 kernel，
 #   而它的职责是扫【所有】线程找 D 状态，所以实际需要 domain:file r_file_perms）。
 #   ⚠️ 再加上 debugfs 那条【没有 userdebug 豁免】的 neverallow
@@ -300,21 +265,9 @@ allow gaokun3_hangdump proc_uptime:file r_file_perms;
 r_dir_file(gaokun3_hangdump, sysfs)
 allow gaokun3_hangdump proc_interrupts:file r_file_perms;
 
-# ── gaokun3-smmu-nostall.sh：只在 userdebug / eng 上放行（2026-09-27，#126）──────────
-# 证据：`gaokun3_smmustall gaokun3_devmem_device:chr_file { read open map write }` 与
-#   `self:capability sys_rawio`（enforcing 试跑里 3 分钟被拒 481 次 —— 它每 0.1 秒轮询一次）。
-# sys_rawio 的 neverallow 带 userdebug_or_eng(`-domain') 豁免，所以必须包在 userdebug_or_eng 里，
-# 否则 user 变体的 sepolicy_neverallows 会失败。/dev/mem 的类型是我们自己的（device.te），没有核心禁令。
-# ⚠️ 这是在 enforcing 下保住现状，不是认可这种做法：用户态经 /dev/mem 改 SMMU 寄存器
-#    本身就是 B6 没做完的症状。理由见本文件"故意不写的两个域"一节的 2026-09-27 补注。
-userdebug_or_eng(`
-  allow gaokun3_smmustall self:global_capability_class_set sys_rawio;
-  allow gaokun3_smmustall gaokun3_devmem_device:chr_file { open read write map };
-')
-
 # ── gaokun3-wlan-ap.sh：开机给热点预建 wlan1（v1.0 NET-2，2026-10-05）────────────
 # ⚠️ 先写后验：按源码推出来的，还没上过机、没经过 enforcing 普查。
-#   * shebang /vendor/bin/sh + toybox（等待循环里的 sleep / cat）—— 同上面七个脚本域。
+#   * shebang /vendor/bin/sh + toybox（等待循环里的 sleep / cat）—— 同上面六个脚本域。
 #   * 执行 /vendor/bin/iw（iw_vendor）：核心策略没给它标签（只标了 /system/bin/iw，
 #     private/file_contexts:291）⇒ 是 vendor_file，在本域里直接执行（不转域）。
 #   * iw 走 nl80211（generic netlink）发 NEW_INTERFACE，内核要 CAP_NET_ADMIN（rc 里 capabilities NET_ADMIN）。
