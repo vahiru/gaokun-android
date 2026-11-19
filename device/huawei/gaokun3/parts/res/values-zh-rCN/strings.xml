@@ -61,6 +61,13 @@
     <string name="app_kernel_restart_now">重启</string>
     <string name="app_kernel_restart_later">稍后</string>
 
+    <!-- GPU驱动兼容（GlDriverVersionSettingsActivity） -->
+    <string name="gl_driver_version_title">GPU驱动兼容</string>
+    <string name="gl_driver_version_summary">向所选应用报告高通驱动版本</string>
+    <string name="gl_driver_version_intro">部分游戏（如虚幻引擎游戏）只在识别到高通GPU驱动时才使用Vulkan。为这类游戏开启后，游戏将识别到高通驱动版本。请勿为浏览器开启，否则部分WebGL网页将无法正常显示。更改在应用下次启动时生效。</string>
+    <string name="gl_driver_version_apps_title">应用</string>
+    <string name="gl_driver_version_no_apps">未找到已安装的应用</string>
+
     <!-- 手写笔设置，注入到「设置 → 已连接的设备」 -->
     <string name="stylus_title">手写笔设置</string>
     <string name="stylus_summary">笔迹平滑和双击笔身</string>

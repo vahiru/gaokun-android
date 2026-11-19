@@ -156,6 +156,11 @@ The following are bugs, not trade-offs; they will be removed from this list once
 * **Cause**: the game engine assumes that a 64-bit process's memory addresses stay below 2^39, while this kernel gave processes a 2^48 address space by default. The kernel now hands out addresses below 2^39 by default.
 * **What to do**: if the game still quits or gets stuck elsewhere on rc.2 or later, collect the crash log right after it quits (see the [FAQ](FAQ.md#when-android-starts)) and attach it to [#15](https://github.com/vahiru/gaokun-android/issues/15).
 
+### Some Unreal Engine games only use OpenGL ES, or exit at startup
+* **Symptom**: some games built with Unreal Engine only use OpenGL ES; games that ship only Vulkan shaders, such as *Infinity Nikki*, exit at startup with "Game files required to initialize the global shader and cooked content are most likely missing".
+* **Cause**: these games use Vulkan only when they detect a Qualcomm GPU driver. OpenGL ES on this device is provided by ANGLE, whose version information contains no Qualcomm driver version.
+* **What to do**: turn on the switch for the game in Settings → System → GPU driver compatibility, then restart the game. Do not turn it on for browsers, or some WebGL pages will not display correctly. 1.0.0-rc.4 and earlier do not have this setting; it has not been tested yet.
+
 ### The Chinese input method has to be turned on once
 * **Symptom**: the default keyboard does not support Chinese.
 * **Cause**: since 1.0.0-rc.1 the Chinese input method fcitx5 (with Pinyin, Shuangpin and Wubi) is preinstalled, but it is not set as the default.
