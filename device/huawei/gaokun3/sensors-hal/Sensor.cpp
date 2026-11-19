@@ -261,10 +261,14 @@ void AccelSensor::readEventPayload(EventPayload& payload) {
     // 真数据来自 SLPI 上的 sh3001，经 SscHub 缓存（见 SscHub.h 的线程模型）。
     // 数据还没到时报 UNRELIABLE 而不是编一个 9.8 出来 —— 那会让上层以为
     // 机器平放着。
+    //
+    // 坐标轴：SSC上报芯片自身的坐标轴（安装矩阵全为0，见README.md），即面板竖屏的坐标轴。
+    // Android要求按屏幕自然方向的坐标轴上报，而自然方向是横屏，即面板旋转90°（设备树中面板的
+    // rotation，见device.mk）。接键盘横放时芯片的+x朝上、+y朝左，所以x = -y、y = x。
     const gaokun3::Sample s = gaokun3::SscHub::Get().Accel();
     EventPayload::Vec3 vec3 = {
-            .x = s.v[0],
-            .y = s.v[1],
+            .x = -s.v[1],
+            .y = s.v[0],
             .z = s.v[2],
             .status = s.valid ? SscAccuracyToStatus(s.accuracy)
                               : SensorStatus::UNRELIABLE,
@@ -400,10 +404,11 @@ GyroSensor::GyroSensor(int32_t sensorHandle, ISensorsEventCallback* callback) : 
 
 void GyroSensor::readEventPayload(EventPayload& payload) {
     // 与加速度计同一颗 sh3001（6 轴），单位 rad/s。
+    // 同一颗芯片，坐标轴的换算与AccelSensor::readEventPayload()相同。
     const gaokun3::Sample s = gaokun3::SscHub::Get().Gyro();
     EventPayload::Vec3 vec3 = {
-            .x = s.v[0],
-            .y = s.v[1],
+            .x = -s.v[1],
+            .y = s.v[0],
             .z = s.v[2],
             .status = s.valid ? SscAccuracyToStatus(s.accuracy)
                               : SensorStatus::UNRELIABLE,

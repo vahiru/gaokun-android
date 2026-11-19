@@ -14,6 +14,7 @@
 * [Collecting logs](#collecting-logs)
 * [Erasing your data](#erasing-your-data)
 * [Removing Android, getting Windows back](#removing-android-getting-windows-back)
+* [App display](#app-display)
 * [Developer options and adb](#developer-options-and-adb)
 
 ## Starting up and the boot menu
@@ -166,6 +167,19 @@ Run the Windows installer in Windows, select "Manage" on the environment check p
 ### Installed with "Erase entire disk" and want Windows back
 
 In this case Windows has already been deleted, and the only way back is to reinstall it from Huawei's recovery media or a Windows installation USB stick. This has not been tested on this machine yet. If you want to keep Windows, choose "Keep existing system" (dual boot) when installing.
+
+## App display
+
+### Some apps only use the middle of the screen in landscape
+
+Apps that only support portrait, such as many phone apps, are shown in the middle of the screen in landscape, with black bars on both sides; the screen does not rotate for them. To make an app fill the screen:
+
+1. Open Settings → Apps → Aspect ratio.
+2. Select the app, then select "Full screen".
+
+In full screen the app lays itself out for the landscape screen, and some screens may be cut off or stretched. If that happens, change it back to "App default".
+
+Likewise, when "Auto-rotate screen" is disabled and the screen stays in portrait, apps that only support landscape, such as some games, are shown in the middle of the screen. Enable "Auto-rotate screen" and hold the tablet in landscape.
 
 ## Developer options and adb
 

@@ -439,22 +439,19 @@ PRODUCT_VENDOR_PROPERTIES += \
 PRODUCT_SYSTEM_EXT_PROPERTIES += \
     persist.sys.sf.native_mode=1
 
-# Landscape as the default orientation of the built-in display. bootanimation ignores
-# WindowManager and draws in the panel's natural portrait unless
-# ro.bootanim.set_orientation_<physical display id>, or as a fallback
-# ro.bootanim.set_orientation_logical_0, asks for a rotation (frameworks/base
-# cmds/bootanimation/BootAnimation.cpp, parseOrientationProperty()). WindowManager reads the
-# same properties as the default display's initial rotation (wm/DisplayRotation.java,
-# readDefaultDisplayRotation()), so the UI also starts in landscape until the sensor reports
-# an orientation. logical_0 keeps it independent of the physical display id. ORIENTATION_90
-# is the landscape WindowManager calls ROTATION_90.
-# Limit: the multi-display boot animation (enabled in cp2a) applies this rotation to every
-# display, so an external monitor already detected when it starts shows it sideways.
-# system_ext: the property has no property_contexts entry, so it is default_prop, which only
-# init may set. init checks /vendor/build.prop as vendor_init and would drop the line under
-# enforcing.
-PRODUCT_SYSTEM_EXT_PROPERTIES += \
-    ro.bootanim.set_orientation_logical_0=ORIENTATION_90
+# 内屏的自然方向为横屏：面板按竖屏扫描（1600x2560），接键盘横放时面板右侧朝上。设备树在面板节点上声明
+# rotation = <90>（patches/kernel/dts/0030），面板驱动把它作为连接器的panel orientation属性上报
+# （patches/kernel/drm/0020），drm_hwcomposer再把它作为屏幕的物理方向交给SurfaceFlinger
+# （hwc3/ComposerClient.cpp，getDisplayPhysicalOrientation()）。SurfaceFlinger据此按2560x1600上报模式，
+# 开机动画、WindowManager和应用都按横屏工作：ROTATION_0是接键盘横放，面板自身的竖屏是ROTATION_270。
+# 随之调整的部分：
+#   · 触摸屏和手写笔上报面板坐标：下方的usr/idc；
+#   · 加速度计和陀螺仪：sensors-hal/Sensor.cpp；
+#   · 相机的SENSOR_ORIENTATION：camera/Device.cpp；
+#   · 指纹传感器（电源键）的位置：fingerprint/Service.cpp、rro/Gaokun3SystemUIFingerprintOverlay；
+#   · 已保存的旋转锁定（Settings.System.USER_ROTATION）：parts/RotationLockMigration.java。
+# 不再需要ro.bootanim.set_orientation_*：开机动画按上报的模式确定画面尺寸（cmds/bootanimation/BootAnimation.cpp，
+# readyToRun()），WindowManager的初始旋转随之为0，外接显示器上的开机动画也不再横躺。
 
 # ⚠️ 软渲染（SwiftShader）导入不了 UBWC 压缩 buffer —— SF 崩于
 # "Failed to create a valid texture"（GaneshBackendTexture 导入
@@ -945,10 +942,18 @@ PRODUCT_COPY_FILES += \
 PRODUCT_VENDOR_PROPERTIES += \
     persist.vendor.gaokun3.allow_suspend=1
 
-# ★ WindowManager 每显示器设置：关掉大屏默认的 ignoreOrientationRequest。
-# 不装它 → 应用请求横屏时系统不转屏而是把应用信箱化（原神被压成 1600x1000）。
-# 完整机制、实测症状与格式依据见 etc/display_settings.xml 的注释。
-PRODUCT_COPY_FILES += $(LOCAL_PATH)/etc/display_settings.xml:$(TARGET_COPY_OUT_VENDOR)/etc/display_settings.xml
+# Aperture的按应用兼容覆盖（etc/compat_framework_overrides.xml，内含各项说明）：让它在大屏方向策略下
+# 把屏幕转为竖屏使用，其他应用不受影响。CompatConfig在开机时读取/product/etc/appcompat下的这个文件
+# （services/core/java/com/android/server/compat/CompatConfig.java，STATIC_OVERRIDES_PRODUCT_DIR）。
+PRODUCT_COPY_FILES += \
+    $(LOCAL_PATH)/etc/compat_framework_overrides.xml:$(TARGET_COPY_OUT_PRODUCT)/etc/appcompat/compat_framework_overrides.xml
+
+# 触摸屏和手写笔上报面板（竖屏）坐标，而屏幕的自然方向是横屏（见上方关于自然方向的说明）。
+# InputReader先按厂商和产品号、再按设备名查找配置文件（frameworks/native libs/input/InputDevice.cpp，
+# getInputDeviceConfigurationFilePathByDeviceIdentifier()），详见各文件中的注释。
+PRODUCT_COPY_FILES += \
+    $(LOCAL_PATH)/idc/Himax_Capacitive_TouchScreen.idc:$(TARGET_COPY_OUT_VENDOR)/usr/idc/Himax_Capacitive_TouchScreen.idc \
+    $(LOCAL_PATH)/idc/Vendor_12d1_Product_cd54.idc:$(TARGET_COPY_OUT_VENDOR)/usr/idc/Vendor_12d1_Product_cd54.idc
 
 # ★ tinyalsa 工具集 —— 又一个同类漏网（2026-08-19 M3 上机才发现）。
 # audio-route.sh 第一件事就是找 tinymix，找不到就 `log 找不到 tinymix，放弃; exit 1`。

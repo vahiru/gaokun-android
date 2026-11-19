@@ -150,6 +150,8 @@ KPATCHES=(
     kernel/drm/0017-drm-msm-reset-the-gpu-when-a-preemption-times-out-on-an-idle-ring.patch
     kernel/drm/0018-drm-msm-dpu-add-the-DSPP-3D-LUT-of-sc8280xp.patch
     kernel/drm/0019-drm-msm-dpu-load-the-gaokun3-factory-calibration-into-the-3D-LUT.patch
+    kernel/drm/0020-drm-panel-himax-hx83121a-report-the-panel-orientation.patch
+    kernel/drm/0021-drm-panel-himax-hx83121a-swap-the-panel-s-width-and-height-in-mm.patch
 
     # ─── 6. kernel/iris：qcom-iris视频编解码驱动 ───
     # 配套 DT 见 kernel/dts/0009–0010、0026；需 CONFIG_VIDEO_QCOM_IRIS=y、CONFIG_VIDEO_QCOM_VENUS 不设。
@@ -309,6 +311,7 @@ KPATCHES=(
     kernel/dts/0027-arm64-dts-qcom-sc8280xp-Fix-GPU-SMMU-context-fault-interrupts.patch
     kernel/dts/0028-arm64-dts-qcom-sc8280xp-fix-GPU-peak-bandwidth-votes.patch
     kernel/dts/0029-arm64-dts-qcom-sc8280xp-huawei-gaokun3-Describe-the-S5K4H7-front-camera.patch
+    kernel/dts/0030-arm64-dts-qcom-sc8280xp-huawei-gaokun3-set-the-panel-rotation.patch
 
     # ─── 11. kernel/fingerprint：QSEECOM 与指纹传输驱动（/dev/gaokun3_fpcmd，CONFIG_GAOKUN3_FPCMD 由 kernel-config-android.sh 打开）───
     kernel/fingerprint/0001-firmware-qcom-scm-qseecom-app-load-shutdown-listener.patch

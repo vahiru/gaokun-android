@@ -161,12 +161,10 @@ bool Device::init()
 	 *        rotation property in anticlockwise direction."
 	 *     但 x 不能直接用设备树的值，还要先做下面两步。
 	 *
-	 *   ★ 两边的参照系差 90°（issue #23、#42）：
-	 *     设备树按【横屏使用】的方向写（与下游 Linux 内核一致；绑定文档说"上"由使用环境决定，
-	 *     笔记本摄像头的例子写 0）：后摄 180、前摄 0。Android 的自然方向却是面板原生的
-	 *     【竖屏】，接键盘横放（前摄在上边框）时显示旋转是 ROTATION_90。SENSOR_ORIENTATION
-	 *     要相对竖屏算：从横屏换到竖屏，前摄的安装角加 90°；后摄从机背那一面看，方向相反，
-	 *     加 270°。
+	 *   ★ 参照系（issue #23、#42）：设备树按【横屏使用】的方向写（与下游Linux内核一致；
+	 *     绑定文档说"上"由使用环境决定，笔记本摄像头的例子写0）：后摄180、前摄0。
+	 *     设备树为面板声明了横屏的安装方向，Android的自然方向也是横屏
+	 *     （接键盘横放时ROTATION_0），两边参照系一致，不需要换算。
 	 *
 	 *   ★ 还要扣掉 libcamera 已经转掉的部分：会话不设 CameraConfiguration::orientation，
 	 *     默认要 Rotate0，管线用 CameraSensor::computeTransform() 去凑。180 能靠
@@ -174,11 +172,9 @@ bool Device::init()
 	 *     transform hvflip）；90 / 270 要转置，消不掉。前摄 hi846 没有翻转控件；s5k4h7 有，
 	 *     但前摄设备树写的是 0°，不需要翻转。
 	 *
-	 *   ⇒ 本机：后摄 180 - 180 + 270 = 270 → SENSOR_ORIENTATION 90；
-	 *           前摄 0 + 90 = 90 → SENSOR_ORIENTATION 270。
-	 *     核对：接键盘横放（ROTATION_90，右边朝上，OrientationEventListener 报 270）时，
-	 *     应用按 Android 文档的 getJpegOrientation 算出的 JPEG 角是后摄 (90 + 270) % 360 = 0、
-	 *     前摄 (270 - 270) = 0，即交付的画面横放时本来就是正的，和设备树按横屏写的意思一致。
+	 *   ⇒ 本机：后摄180 - 180 = 0、前摄0，SENSOR_ORIENTATION都是0。
+	 *     核对：接键盘横放（ROTATION_0，OrientationEventListener报0）时，应用按Android文档的
+	 *     getJpegOrientation算出的JPEG角是0，即交付的画面横放时本来就是正的。
 	 */
 	auto rot = props.get(libcamera::properties::Rotation);
 	const int32_t rawRotation = rot ? *rot : 0;
@@ -215,12 +211,13 @@ bool Device::init()
 	 * 照 #42 设过的旧值（后 270、前 90）在这里会把方向带歪。要试别的角度就改设备树
 	 * （rotation 控件是只读的，运行时改不了）。
 	 *
-	 * 先换到竖屏自然方向下的逆时针角，再按 (360 - 逆时针) 换成顺时针。
+	 * 自然方向是横屏（设备树中面板的rotation，见device.mk），与摄像头安装角的参照系相同，
+	 * 不再加竖屏换算的90°/270°；按(360 - 逆时针)换成顺时针。
 	 */
-	const int32_t natural = (ccw - undone + (facts_.frontFacing ? 90 : 270) + 360) % 360;
+	const int32_t natural = (ccw - undone + 360) % 360;
 	facts_.orientation = (360 - natural) % 360;
-	ALOGI("%s 朝向：安装角 %d°（横屏参照系，逆时针），libcamera 翻转消掉 %d°，"
-	      "竖屏自然方向下 %d° ⇒ SENSOR_ORIENTATION %d",
+	ALOGI("%s orientation: mounted %d deg CCW (landscape frame), %d deg undone by libcamera "
+	      "flips, %d deg in the natural orientation => SENSOR_ORIENTATION %d",
 	      name_.c_str(), ccw, undone, natural, facts_.orientation);
 
 	/*

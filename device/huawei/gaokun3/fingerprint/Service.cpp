@@ -536,21 +536,18 @@ class Fingerprint final : public BnFingerprint {
         p.commonProps.maxEnrollmentsPerUser = gaokun3::kMaxFingers;
         p.sensorType = FingerprintSensorType::POWER_BUTTON;
         p.supportsDetectInteraction = true;
-        // Where the power key sits, so the framework can point at it (side
-        // fingerprint indicator, enrollment animation). Pixels of the built-in
-        // display in its natural portrait orientation (1600 x 2560, 244.8 ppi,
-        // 0.1038 mm per pixel), origin top-left. Held in landscape (ROTATION_90)
-        // the key is on the left edge, its centre about 27 mm below the top of
-        // the 184 mm chassis, i.e. 18 mm below the top of the active area past
-        // the 9 mm bezel; the left edge is the natural top edge and the top
-        // edge the natural right one. The key is about 16 mm long. Both sensor
-        // variants sit in the same key. From Huawei's outline drawing, +/- 2 mm.
-        // SystemUI's side-fps math takes y == 0 as "on the natural top edge",
-        // x as the key's start along that edge and the radius as half its
-        // length: the key spans [x, x + 2r], so x = centre (1428) - r.
+        // 电源键的位置，供框架指向它（侧边指纹提示、录入动画）。坐标是内屏在自然方向下的
+        // 像素：自然方向为横屏（设备树中面板的rotation，见device.mk），2560x1600，244.8 ppi，
+        // 每像素0.1038 mm，原点在左上角。接键盘横放时电源键在左边缘，中心距机身顶部约27 mm
+        // （机身高184 mm），即距显示区域顶部约18 mm（边框9 mm），约172像素；按键长约16 mm。
+        // 两种传感器都装在同一个按键里。数据来自华为的外形图，误差约2 mm。
+        // SystemUI把y != 0的传感器当作竖直放置：y是按键沿边缘的起点，半径是长度的一半，按键占
+        // [y, y + 2r]，所以y = 中心172 - r；x不使用，填0。位于左边缘由SystemUI的
+        // config_sideFpsSensorOnLeftEdge声明（patches/android/frameworks-base/0005，
+        // rro/Gaokun3SystemUIFingerprintOverlay），否则SystemUI按右边缘放置。
         SensorLocation location{};
-        location.sensorLocationX = 1600 - 172 - 78;
-        location.sensorLocationY = 0;
+        location.sensorLocationX = 0;
+        location.sensorLocationY = 172 - 78;
         location.sensorRadius = 78;
         // The framework and Settings take "" as the default display, but
         // SystemUI's side fingerprint indicator looks the location up by the

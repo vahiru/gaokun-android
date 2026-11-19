@@ -1,0 +1,209 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] SystemUI: support a side fingerprint sensor on the left edge
+
+SideFpsSensorInteractor places the side fingerprint indicator from the
+sensor location that the fingerprint HAL reports in the display's default
+orientation. It knows two placements: a horizontal sensor on the top edge
+(sensorLocationY == 0, sensorLocationX is where it starts) and a vertical
+sensor on the right edge (sensorLocationY is where it starts,
+sensorLocationX is not used). A power key on the left edge in the default
+orientation cannot be described, and the indicator ends up on the right
+edge. This is the case on a tablet whose display reports landscape as its
+natural orientation while the power key is on the left side.
+
+Add config_sideFpsSensorOnLeftEdge, false by default. When a device sets
+it, a vertical sensor is on the left edge. Such a sensor sits where a
+right-edge sensor at the mirrored position (displayHeight -
+sensorLocationY - length) sits with the display turned a further 180
+degrees, so the interactor and the indicator's view rotation reuse the
+right-edge placement with the rotation turned by 180 degrees. The
+indicator asset is the same for opposite rotations and needs no change.
+Devices that do not set the option behave as before.
+
+SideFpsProgressBarViewModel, used only with config_restToUnlockSupported,
+still assumes the right edge. The side fingerprint artwork in
+BiometricPrompt and in Settings' enrollment screen is chosen from the
+rotation alone and keeps showing the key on the right.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ packages/SystemUI/res/values/config.xml       |  5 +++
+ .../interactor/SideFpsSensorInteractor.kt     | 37 ++++++++++++++++---
+ .../domain/model/SideFpsSensorLocation.kt     | 26 ++++++++++++-
+ .../ui/viewmodel/SideFpsOverlayViewModel.kt   |  3 +-
+ 4 files changed, 63 insertions(+), 8 deletions(-)
+
+diff --git a/packages/SystemUI/res/values/config.xml b/packages/SystemUI/res/values/config.xml
+index e25cf31..c2eeeb8 100644
+--- a/packages/SystemUI/res/values/config.xml
++++ b/packages/SystemUI/res/values/config.xml
+@@ -1036,6 +1036,11 @@
+     <!-- Device specific config that controls whether rest to unlock feature is supported.  -->
+     <bool name="config_restToUnlockSupported">false</bool>
+ 
++    <!-- Device specific config: whether a vertical side fingerprint sensor (the HAL reports a
++         nonzero sensorLocationY) is on the left edge of the display in its default orientation
++         instead of the right edge. sensorLocationX is not used for a vertical sensor. -->
++    <bool name="config_sideFpsSensorOnLeftEdge">false</bool>
++
+     <!--
+     Time in milliseconds the user has to touch the side FPS sensor to successfully authenticate when
+     the screen is turned off with AOD not enabled.
+diff --git a/packages/SystemUI/src/com/android/systemui/biometrics/domain/interactor/SideFpsSensorInteractor.kt b/packages/SystemUI/src/com/android/systemui/biometrics/domain/interactor/SideFpsSensorInteractor.kt
+index d2e97b8..0ebae0c 100644
+--- a/packages/SystemUI/src/com/android/systemui/biometrics/domain/interactor/SideFpsSensorInteractor.kt
++++ b/packages/SystemUI/src/com/android/systemui/biometrics/domain/interactor/SideFpsSensorInteractor.kt
+@@ -21,6 +21,7 @@ import android.hardware.biometrics.SensorLocationInternal
+ import android.view.WindowManager
+ import com.android.systemui.biometrics.FingerprintInteractiveToAuthProvider
+ import com.android.systemui.biometrics.domain.model.SideFpsSensorLocation
++import com.android.systemui.biometrics.domain.model.turnedHalfway
+ import com.android.systemui.dagger.SysUISingleton
+ import com.android.systemui.dagger.qualifiers.Main
+ import com.android.systemui.display.domain.interactor.DisplayStateInteractor
+@@ -59,6 +60,9 @@ constructor(
+     private val isProlongedTouchEnabledForDevice =
+         context.resources.getBoolean(R.bool.config_restToUnlockSupported)
+ 
++    private val isSensorOnLeftEdgeForDevice =
++        context.resources.getBoolean(R.bool.config_sideFpsSensorOnLeftEdge)
++
+     private val sensorLocationForCurrentDisplay =
+         combine(
+                 displayStateInteractor.displayChanges,
+@@ -119,28 +123,46 @@ constructor(
+                 val displayWidth = if (isDefaultOrientation) size.width() else size.height()
+                 val displayHeight = if (isDefaultOrientation) size.height() else size.width()
+                 val sensorLengthInPx = sensorLocation.sensorRadius * 2
++                // A vertical sensor is on the right edge in the default orientation unless the
++                // device says otherwise (config_sideFpsSensorOnLeftEdge). A sensor on the left edge
++                // is placed like a right-edge sensor at the mirrored position (counted from the
++                // bottom), with the display turned a further 180 degrees.
++                val isSensorOnLeftEdgeInDefaultOrientation =
++                    isSensorVerticalInDefaultOrientation && isSensorOnLeftEdgeForDevice
++                val sensorY =
++                    if (isSensorOnLeftEdgeInDefaultOrientation) {
++                        displayHeight - sensorLocation.sensorLocationY - sensorLengthInPx
++                    } else {
++                        sensorLocation.sensorLocationY
++                    }
++                val verticalPlacementRotation =
++                    if (isSensorOnLeftEdgeInDefaultOrientation) {
++                        rotation.turnedHalfway()
++                    } else {
++                        rotation
++                    }
+ 
+                 val (sensorLeft, sensorTop) =
+                     if (isSensorVerticalInDefaultOrientation) {
+-                        when (rotation) {
++                        when (verticalPlacementRotation) {
+                             DisplayRotation.ROTATION_0 -> {
+-                                Pair(displayWidth, sensorLocation.sensorLocationY)
++                                Pair(displayWidth, sensorY)
+                             }
+                             DisplayRotation.ROTATION_90 -> {
+-                                Pair(sensorLocation.sensorLocationY, 0)
++                                Pair(sensorY, 0)
+                             }
+                             DisplayRotation.ROTATION_180 -> {
+                                 Pair(
+                                     0,
+                                     displayHeight -
+-                                        sensorLocation.sensorLocationY -
++                                        sensorY -
+                                         sensorLengthInPx,
+                                 )
+                             }
+                             DisplayRotation.ROTATION_270 -> {
+                                 Pair(
+                                     displayHeight -
+-                                        sensorLocation.sensorLocationY -
++                                        sensorY -
+                                         sensorLengthInPx,
+                                     displayWidth,
+                                 )
+@@ -175,6 +197,7 @@ constructor(
+                     top = sensorTop,
+                     length = sensorLengthInPx,
+                     isSensorVerticalInDefaultOrientation = isSensorVerticalInDefaultOrientation,
++                    isSensorOnLeftEdgeInDefaultOrientation = isSensorOnLeftEdgeInDefaultOrientation,
+                 )
+             }
+             .distinctUntilChanged(
+@@ -183,7 +206,9 @@ constructor(
+                         old.top == new.top &&
+                         old.length == new.length &&
+                         old.isSensorVerticalInDefaultOrientation ==
+-                            new.isSensorVerticalInDefaultOrientation
++                            new.isSensorVerticalInDefaultOrientation &&
++                        old.isSensorOnLeftEdgeInDefaultOrientation ==
++                            new.isSensorOnLeftEdgeInDefaultOrientation
+                 }
+             )
+             .onEach {
+diff --git a/packages/SystemUI/src/com/android/systemui/biometrics/domain/model/SideFpsSensorLocation.kt b/packages/SystemUI/src/com/android/systemui/biometrics/domain/model/SideFpsSensorLocation.kt
+index 12f374f..e89dc9a 100644
+--- a/packages/SystemUI/src/com/android/systemui/biometrics/domain/model/SideFpsSensorLocation.kt
++++ b/packages/SystemUI/src/com/android/systemui/biometrics/domain/model/SideFpsSensorLocation.kt
+@@ -16,6 +16,8 @@
+ 
+ package com.android.systemui.biometrics.domain.model
+ 
++import com.android.systemui.display.shared.model.DisplayRotation
++
+ data class SideFpsSensorLocation(
+     /** Pixel offset from the left of the screen */
+     val left: Int,
+@@ -27,5 +29,27 @@ data class SideFpsSensorLocation(
+      * Whether the sensor is vertical when the device is in its default orientation (Rotation_0 or
+      * Rotation_180)
+      */
+-    val isSensorVerticalInDefaultOrientation: Boolean
++    val isSensorVerticalInDefaultOrientation: Boolean,
++    /**
++     * Whether a vertical sensor is on the left edge of the display in its default orientation
++     * rather than on the right edge
++     */
++    val isSensorOnLeftEdgeInDefaultOrientation: Boolean = false,
+ )
++
++/**
++ * The rotation in which a sensor on the right (or top) edge sits where this sensor sits in
++ * [rotation]. A sensor on the left edge in the default orientation sits where a right-edge sensor
++ * does with the display turned a further 180 degrees.
++ */
++fun SideFpsSensorLocation.placementRotation(rotation: DisplayRotation): DisplayRotation =
++    if (isSensorOnLeftEdgeInDefaultOrientation) rotation.turnedHalfway() else rotation
++
++/** This rotation turned a further 180 degrees. */
++fun DisplayRotation.turnedHalfway(): DisplayRotation =
++    when (this) {
++        DisplayRotation.ROTATION_0 -> DisplayRotation.ROTATION_180
++        DisplayRotation.ROTATION_90 -> DisplayRotation.ROTATION_270
++        DisplayRotation.ROTATION_180 -> DisplayRotation.ROTATION_0
++        DisplayRotation.ROTATION_270 -> DisplayRotation.ROTATION_90
++    }
+diff --git a/packages/SystemUI/src/com/android/systemui/biometrics/ui/viewmodel/SideFpsOverlayViewModel.kt b/packages/SystemUI/src/com/android/systemui/biometrics/ui/viewmodel/SideFpsOverlayViewModel.kt
+index 07e8a03..9c0b171 100644
+--- a/packages/SystemUI/src/com/android/systemui/biometrics/ui/viewmodel/SideFpsOverlayViewModel.kt
++++ b/packages/SystemUI/src/com/android/systemui/biometrics/ui/viewmodel/SideFpsOverlayViewModel.kt
+@@ -31,6 +31,7 @@ import com.airbnb.lottie.model.KeyPath
+ import com.android.systemui.biometrics.Utils
+ import com.android.systemui.biometrics.domain.interactor.SideFpsSensorInteractor
+ import com.android.systemui.biometrics.domain.model.SideFpsSensorLocation
++import com.android.systemui.biometrics.domain.model.placementRotation
+ import com.android.systemui.biometrics.shared.model.LottieCallback
+ import com.android.systemui.dagger.qualifiers.Application
+ import com.android.systemui.display.domain.interactor.DisplayStateInteractor
+@@ -120,7 +121,7 @@ constructor(
+     private val overlayViewRotation: Flow<Float> =
+         combine(displayRotation, sensorLocation) { rotation: DisplayRotation, sensorLocation ->
+                 val yAligned = sensorLocation.isSensorVerticalInDefaultOrientation
+-                when (rotation) {
++                when (sensorLocation.placementRotation(rotation)) {
+                     DisplayRotation.ROTATION_90 -> if (yAligned) 0f else 180f
+                     DisplayRotation.ROTATION_180 -> 180f
+                     DisplayRotation.ROTATION_270 -> if (yAligned) 180f else 0f
