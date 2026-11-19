@@ -30,7 +30,7 @@
 
 ## 三、已知问题
 
-- **USB-C偶尔开机后无法工作**（[issue #102](https://github.com/vahiru/gaokun-android/issues/102)）：开机时UCSI初始化失败（`PPM init failed`，`/sys/class/typec`为空），重启后恢复；另有偶发的开机后电脑无法识别平板的情况。原因尚在排查。
+- **USB-C偶尔开机后无法工作**（[issue #102](https://github.com/vahiru/gaokun-android/issues/102)）：开机时UCSI初始化失败（`PPM init failed`，`/sys/class/typec`为空），重启后恢复；另有偶发的开机后电脑无法识别平板的情况。原因尚在排查。失败时若EC一直重复USB事件，系统无法持续休眠，`kernel/ec-usb/0017`在初始化失败后确认这些事件（效果尚未经实测），见[`dev/deep-sleep.md`](dev/deep-sleep.md#ec唤醒)。
 - **插电脑时平板反过来供电**（[issue #103](https://github.com/vahiru/gaokun-android/issues/103)）：对方不支持USB PD时偶尔发生，目前只会弹通知提示重插。自动重新协商尚未实现。
 - **音频与蓝牙在长时间运行后一起卡死**（[issue #104](https://github.com/vahiru/gaokun-android/issues/104)）：有用户报告，从未复现。看门狗会把现场记录到`/data/vendor/gaokun3/hangdump-*`，请遇到的人提供。
 - **休眠期间大流量下载可能断网**（[issue #105](https://github.com/vahiru/gaokun-android/issues/105)）：息屏休眠期间若后台有持续大带宽下载，有较大概率被路由器踢下线，点亮屏幕后自动重连恢复。
