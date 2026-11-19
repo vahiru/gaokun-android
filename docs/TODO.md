@@ -30,7 +30,7 @@
 
 ## 三、已知问题
 
-- **USB-C偶尔开机后无法工作**（[issue #102](https://github.com/vahiru/gaokun-android/issues/102)）：开机时UCSI初始化失败（`PPM init failed`，`/sys/class/typec`为空），重启后恢复；另有偶发的开机后电脑无法识别平板的情况。原因尚在排查。失败时若EC一直重复USB事件，系统无法持续休眠，`kernel/ec-usb/0017`在初始化失败后确认这些事件（效果尚未经实测），见[`dev/deep-sleep.md`](dev/deep-sleep.md#ec唤醒)。
+- **USB-C偶尔开机后无法工作**（[issue #102](https://github.com/vahiru/gaokun-android/issues/102)）：开机时UCSI初始化失败（`PPM init failed`，`/sys/class/typec`为空），重启后恢复。原因是EC偶尔在完成一条命令时没有清除CCI里的BUSY位，并且一直保持这个状态；UCSI核心忽略带BUSY的CCI，命令等满10秒超时，初始化随之放弃。卡住的命令与电池驱动在0xB1事件后连续读取EC寄存器的时机重合；0xB1周期事件只在电池初始化后约3分钟内出现，此后是否还会卡住尚未经实测。`kernel/ec-usb/0018`、`0019`在初始化超时后重新初始化，最多5次，这样的开机里端口预计比平常晚约15秒可用；真实失败后的重试尚未经实测。同样的超时落在后台任务上时不会导致初始化失败，但会让所有UCSI命令等待10秒；若落在`ucsi_register_partner_pdos()`上，核心对它的重试会因为`partner_pd`已经注册而直接返回，对端的PD能力（PDO）不再补读（只影响sysfs中的信息）。另有偶发的开机后电脑无法识别平板的情况，原因尚在排查。失败时若EC一直重复USB事件，系统无法持续休眠，`kernel/ec-usb/0017`在初始化失败后确认这些事件（效果尚未经实测），见[`dev/deep-sleep.md`](dev/deep-sleep.md#ec唤醒)。
 - **插电脑时平板反过来供电**（[issue #103](https://github.com/vahiru/gaokun-android/issues/103)）：对方不支持USB PD时偶尔发生，目前只会弹通知提示重插。自动重新协商尚未实现。
 - **音频与蓝牙在长时间运行后一起卡死**（[issue #104](https://github.com/vahiru/gaokun-android/issues/104)）：有用户报告，从未复现。看门狗会把现场记录到`/data/vendor/gaokun3/hangdump-*`，请遇到的人提供。
 - **休眠期间大流量下载可能断网**（[issue #105](https://github.com/vahiru/gaokun-android/issues/105)）：息屏休眠期间若后台有持续大带宽下载，有较大概率被路由器踢下线，点亮屏幕后自动重连恢复。
