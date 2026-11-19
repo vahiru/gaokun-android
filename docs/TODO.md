@@ -35,7 +35,7 @@
 - **音频与蓝牙在长时间运行后一起卡死**（[issue #104](https://github.com/vahiru/gaokun-android/issues/104)）：有用户报告，从未复现。看门狗会把现场记录到`/data/vendor/gaokun3/hangdump-*`，请遇到的人提供。
 - **休眠期间大流量下载可能断网**（[issue #105](https://github.com/vahiru/gaokun-android/issues/105)）：息屏休眠期间若后台有持续大带宽下载，有较大概率被路由器踢下线，点亮屏幕后自动重连恢复。
 - **GPU的SMMU轮询脚本待移除**（[issue #101](https://github.com/vahiru/gaokun-android/issues/101)）：设备树的上下文中断列表已由`kernel/dts/0027`改正（上游回移），context fault能够到达CPU。`smmu-nostall.sh`的定时轮询仍保留，待内核在失速模式下的故障处理在A690上验证之后移除，见[`dev/gpu-turnip.md`](dev/gpu-turnip.md)。
-- **无限暖暖启动即崩溃**（[issue #33](https://github.com/vahiru/gaokun-android/issues/33)）：推测虚幻引擎按ANGLE报告的渲染器名称匹配机型时选了GLES，而游戏只带了Vulkan着色器。下一步：请报告者用`debug.angle.gl_renderer`和`debug.angle.gl_vendor`覆盖渲染器名称后对比。
+- **无限暖暖启动即崩溃**（[issue #33](https://github.com/vahiru/gaokun-android/issues/33)）：虚幻引擎按ANGLE报告的渲染器名称匹配机型时选了GLES，而游戏只带了Vulkan着色器。报告者覆盖渲染器名称后，游戏改用Vulkan，可以进入登录界面，但约280秒后退出，并且有与网络连接有关的闪退。下一步：分析报告者在issue中提供的诊断材料。
 - **部分网站里后摄红蓝颠倒或无法打开**：需要网站名称和复现时的日志。
 - **部分机器的前置摄像头模组不受支持**（[issue #139](https://github.com/vahiru/gaokun-android/issues/139)）：华为配备了两种前置模组，本项目只支持HI846；另一种（推测为`0x2d`上的S5K4H7）没有驱动，这类机器的内核日志中有`hi846 2-0020: i2c read error: -6`，camss等待20秒后只注册后摄。支持它需要传感器驱动、能兼容两种模组的设备树、libcamera参数与调校，以及一台可以反复测试的机器。后摄的S5K3L6模组同样不受支持，尚未收到报告。
 - **硬件解码的遗留问题**：拖动到更低分辨率后裁剪不更新；字节缓冲模式下分辨率变大时重新分配失败；`SYS_ERROR`之后出现`invalid uc_region`；HAL里POLLPRI空转；`venus_compat_gfmt=N`需要复测。
@@ -45,7 +45,7 @@
 ## 四、功能开发
 
 - **蓝牙通话**（[issue #107](https://github.com/vahiru/gaokun-android/issues/107)）：音频策略里没有蓝牙SCO通路，蓝牙耳机的麦克风在通话中无法使用。
-- **相机**（[issue #108](https://github.com/vahiru/gaokun-android/issues/108)）：闪光灯照片负向曝光补偿；手电筒亮度档位；libcamera补丁和传感器参数提交到上游。
+- **相机**（[issue #108](https://github.com/vahiru/gaokun-android/issues/108)）：闪光灯拍照的负向曝光补偿；手电筒亮度档位。
 - **按网络随机的Wi-Fi MAC地址**：需要同时做一次性迁移，避免老网络的设置突然生效。
 - **GPU最高优先级的权限检查**：目前内核和Turnip都不检查调用者权限。ROM里的ANGLE看到Turnip声明了REALTIME，就会让每个进程都用它，所以用OpenGL ES的游戏和SurfaceFlinger同在ring 0，享受不到抢占。可以参照panthor的`group_priority_permit()`：内核只允许带`CAP_SYS_NICE`的进程或DRM master使用最高一档ring；Turnip在初始化时试建一个最高优先级的队列，建不成就不声明REALTIME。不能让队列创建直接失败，因为ROM的ANGLE遇到`VK_ERROR_NOT_PERMITTED`不会降级重试，GLES应用会无法启动。动手之前先确认两点：SurfaceFlinger在本ROM上带有`CAP_SYS_NICE`；常玩的GLES游戏在现有内核上确实有合成掉帧。代价是SystemUI等界面也会落到ring 2，游戏在前台时下拉通知栏，动画可能变卡。背景见[`dev/gpu-turnip.md`](dev/gpu-turnip.md)的“GPU抢占”一节。
 - **120 Hz无缝降频**
@@ -63,7 +63,6 @@
 - 补传v0.7.1的内核源码附件；在v0.2到v0.5的发布页说明旧下载链接已失效
 - 核对issue表单的显示效果
 - 构建机上的设备树改为本仓库的checkout
-- 提交到上游：`drm_crtc`的`BUG_ON`问题（`patches/kernel/drm/0001`）、[`patches/kernel/camera/0001..0004`](../patches/kernel/camera/)里的相机与`camcc`补丁、libcamera补丁
 
 ## 六、搁置
 
