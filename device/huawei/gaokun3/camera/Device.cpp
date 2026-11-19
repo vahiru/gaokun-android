@@ -44,6 +44,8 @@ ndk::ScopedAStatus err(Status s)
 
 /* 后摄闪光灯在内核里的名字（patches/kernel/dts/0006：PM8350C 闪光模块 1+4 路 → 一个 LED）。 */
 constexpr char kRearFlashLed[] = "/sys/class/leds/white:flash";
+/* 驱动把brightness换算成电流时除以的满量程（include/linux/leds.h的LED_FULL）。 */
+constexpr int32_t kLedFull = 255;
 
 bool writeSysfs(const std::string &path, const std::string &value)
 {
@@ -61,21 +63,6 @@ bool writeSysfs(const std::string &path, const std::string &value)
 	return true;
 }
 
-std::string readSysfs(const std::string &path)
-{
-	char buf[64] = {};
-	int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC);
-	if (fd < 0)
-		return {};
-	ssize_t n = read(fd, buf, sizeof(buf) - 1);
-	close(fd);
-	if (n <= 0)
-		return {};
-	std::string s(buf, static_cast<size_t>(n));
-	while (!s.empty() && (s.back() == '\n' || s.back() == ' '))
-		s.pop_back();
-	return s;
-}
 } /* namespace */
 
 Device::Device(std::shared_ptr<libcamera::Camera> cam, std::string name, Provider *provider)
@@ -530,7 +517,7 @@ ndk::ScopedAStatus Device::open(const std::shared_ptr<ICameraDeviceCallback> &cb
 	/* 相机被占用期间手电筒不可用（框架的约定）；灯由会话按请求控制。 */
 	inUse_ = true;
 	if (!facts_.flashLed.empty()) {
-		setLed(false);
+		resetTorchLocked();
 		provider_->notifyTorch(name_, TorchModeStatus::NOT_AVAILABLE);
 	}
 	session->setOnClosed([this] { onSessionClosed(); });
@@ -544,19 +531,30 @@ void Device::onSessionClosed()
 	std::lock_guard<std::mutex> lk(mutex_);
 	inUse_ = false;
 	if (!facts_.flashLed.empty()) {
-		setLed(false);
+		resetTorchLocked();
 		provider_->notifyTorch(name_, TorchModeStatus::AVAILABLE_OFF);
 	}
 }
 
-bool Device::setLed(bool on)
+void Device::resetTorchLocked()
+{
+	setLedLevel(0);
+	torchOn_ = false;
+	torchLevel_ = kTorchDefaultLevel;
+}
+
+bool Device::setLedLevel(int32_t level)
 {
 	if (facts_.flashLed.empty())
 		return false;
-	std::string max = readSysfs(facts_.flashLed + "/max_brightness");
-	if (max.empty())
-		max = "255";
-	return writeSysfs(facts_.flashLed + "/brightness", on ? max : "0");
+	/*
+	 * 第level档取不小于level/kTorchMaxLevel × 255的最小brightness：驱动按
+	 * brightness × 最大电流 / LED_FULL(255)向下取整，取整后正好是该档的电流（Metadata.h）。
+	 * 驱动除以的是常量LED_FULL而不是max_brightness；设备树没有max-brightness属性，
+	 * 所以max_brightness也是255，写入值不会被LED core截断。
+	 */
+	const int32_t brightness = (level * kLedFull + kTorchMaxLevel - 1) / kTorchMaxLevel;
+	return writeSysfs(facts_.flashLed + "/brightness", std::to_string(brightness));
 }
 
 ndk::ScopedAStatus Device::openInjectionSession(
@@ -579,22 +577,51 @@ ndk::ScopedAStatus Device::setTorchMode(bool on)
 		return err(Status::OPERATION_NOT_SUPPORTED);
 	if (inUse_)
 		return err(Status::CAMERA_IN_USE);
-	if (!setLed(on))
+	/* 开灯用当前档位：亮着时就是turnOnTorchWithStrengthLevel设的档，灭着时是默认档。 */
+	if (!setLedLevel(on ? torchLevel_ : 0))
 		return err(Status::INTERNAL_ERROR);
+	torchOn_ = on;
+	if (!on)
+		torchLevel_ = kTorchDefaultLevel;
 	provider_->notifyTorch(name_, on ? TorchModeStatus::AVAILABLE_ON
 					 : TorchModeStatus::AVAILABLE_OFF);
-	ALOGI("%s 手电筒 %s", name_.c_str(), on ? "开" : "关");
+	ALOGI("%s torch %s, level %d/%d", name_.c_str(), on ? "on" : "off", torchLevel_,
+	      kTorchMaxLevel);
 	return ndk::ScopedAStatus::ok();
 }
 
-ndk::ScopedAStatus Device::turnOnTorchWithStrengthLevel(int32_t)
+ndk::ScopedAStatus Device::turnOnTorchWithStrengthLevel(int32_t level)
 {
-	return err(Status::OPERATION_NOT_SUPPORTED);
+	/*
+	 * 设定档位，灯灭着就同时开灯（ICameraDevice.aidl）。档位范围由HAL检查：cameraserver
+	 * 原样转发，越界要返回ILLEGAL_ARGUMENT。只有灭→亮才报状态；亮着时改档位，
+	 * cameraserver自己广播onTorchStrengthLevelChanged。
+	 */
+	std::lock_guard<std::mutex> lk(mutex_);
+	if (facts_.flashLed.empty())
+		return err(Status::OPERATION_NOT_SUPPORTED);
+	if (level < 1 || level > kTorchMaxLevel)
+		return err(Status::ILLEGAL_ARGUMENT);
+	if (inUse_)
+		return err(Status::CAMERA_IN_USE);
+	if (!setLedLevel(level))
+		return err(Status::INTERNAL_ERROR);
+	torchLevel_ = level;
+	if (!torchOn_) {
+		torchOn_ = true;
+		provider_->notifyTorch(name_, TorchModeStatus::AVAILABLE_ON);
+	}
+	ALOGI("%s torch level %d/%d", name_.c_str(), level, kTorchMaxLevel);
+	return ndk::ScopedAStatus::ok();
 }
 
-ndk::ScopedAStatus Device::getTorchStrengthLevel(int32_t *)
+ndk::ScopedAStatus Device::getTorchStrengthLevel(int32_t *out)
 {
-	return err(Status::OPERATION_NOT_SUPPORTED);
+	std::lock_guard<std::mutex> lk(mutex_);
+	if (facts_.flashLed.empty())
+		return err(Status::OPERATION_NOT_SUPPORTED);
+	*out = torchLevel_;
+	return ndk::ScopedAStatus::ok();
 }
 
 ndk::ScopedAStatus Device::constructDefaultRequestSettings(RequestTemplate type,
