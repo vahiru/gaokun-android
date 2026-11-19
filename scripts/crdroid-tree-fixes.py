@@ -568,7 +568,7 @@ def apply_patch_file(tree: pathlib.Path, project: str, patch_name: str,
     """把 <repo>/patches/<patch_name> 用 git apply 打进 AOSP 树的 <project>（幂等）。
 
     ★ 为什么要有这个助手：本仓 `patches/android/` 里的 **AOSP 侧**补丁（
-    hardware-interfaces/0001–0011 audio HAL、v4l2-codec2/0001–0006、tinyalsa/0001、drm-hwcomposer/0001–0004）
+    hardware-interfaces/0001–0011 audio HAL、v4l2-codec2/0001–0007、tinyalsa/0001、drm-hwcomposer/0001–0004）
     原先**没有任何消费者** —— 全靠人手动
     `git apply`。而本仓已经为"没有消费者的配置一定会漂"付过三次账
     （M13 的 BOARD_KERNEL_CMDLINE、M17 的上游 Venus 补丁集、以及 2026-09-12
@@ -1446,6 +1446,12 @@ def main():
     step(" [43] v4l2_codec2编码器单平面输入按驱动要求的长度送缓冲（640x480等尺寸）: ", apply_patch_file(
         tree, "external/v4l2_codec2",
         "android/v4l2-codec2/0006-v4l2-codec2-give-single-planar-encoder-input-the-device-buffer-length.patch"))
+    # 解码器输入缓冲区改回1080p及以下2 MiB、以上8 MiB（原为16 MiB和64 MiB，每路会话最多16个）。要和patches/kernel/iris/0019
+    # 一起生效：旧内核仍要求6.75 MiB（VP9为13.5 MiB）的输入缓冲区，1080p及以下的解码与1080p以上的VP9解码会在启动时报错退出。
+    # 在[43]打完的树上生成，排在它之后。
+    step(" [46] v4l2_codec2解码器输入缓冲区按码流大小分配（需kernel/iris/0019）: ", apply_patch_file(
+        tree, "external/v4l2_codec2",
+        "android/v4l2-codec2/0007-v4l2-codec2-size-decoder-input-buffers-for-the-stream-again.patch"))
     # 指纹HAL（device/huawei/gaokun3/fingerprint）报告CONVENIENCE。SystemUI对Class 1/2指纹只在人脸也锁定时
     # 才禁止指纹解锁，没有人脸识别时，指纹自己临时锁定期间仍会不断请求认证，框架逐次拒绝。补丁让它在
     # 锁定期间改为只检测接触（与Class 3相同）；锁定期满时HAL发出onLockoutCleared，SystemUI随之恢复认证。

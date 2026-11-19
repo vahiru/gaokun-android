@@ -80,6 +80,11 @@ Each entry follows the same format: **Symptom** (what you will run into), **Caus
 * **Cause**: the stylus signal comes from the touchscreen's second controller chip, whose driver was reverse-engineered by a community contributor; the first-generation pen uses a different protocol that the driver does not support.
 * **What to do**: if a second- or third-generation pen does not work properly on rc.2 or later, please open an issue and attach the output of `adb shell getevent -pl`.
 
+### The front camera does not work on some machines
+* **Symptom**: the camera app has no button to switch between the front and rear cameras, and apps that need the front camera (for example, for face recognition) cannot open it. The rear camera is not affected.
+* **Cause**: this machine comes with one of two front camera modules, and only the Hynix HI846 is supported; the other (probably a Samsung S5K4H7) has no driver yet. The rear camera also comes in two modules: on machines with the Samsung S5K3L6, the rear camera does not work. No such machine has been reported yet.
+* **What to do**: there is no solution at the moment. If your machine is affected, please leave a comment in [issue #139](https://github.com/vahiru/gaokun-android/issues/139) and attach the logs (see the [FAQ](FAQ.md#when-android-starts) for how to collect them).
+
 ### Location mostly does not work
 * **Symptom**: maps, weather, delivery and ride-hailing apps cannot get a location, or stay on "locating".
 * **Cause**: this machine has no GPS. Network location is provided by Google Play services and is unavailable in mainland China, where Google cannot be reached.

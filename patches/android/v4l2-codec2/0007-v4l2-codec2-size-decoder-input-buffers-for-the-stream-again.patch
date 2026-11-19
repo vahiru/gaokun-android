@@ -1,0 +1,90 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] v4l2_codec2: size decoder input buffers for the stream again
+
+LineageOS raised the input buffer size for streams up to 1080p from
+2 MiB to 16 MiB (e5ee3bf, "Raise the input buffer size for 1080p to
+16MB") because the Qualcomm iris driver sized every input buffer for a
+4096x2304 frame (6.75 MiB, 13.5 MiB for VP9) and rejected anything
+smaller. Above 1080p the size is four times that. A session keeps up to
+16 of these buffers and maps them through the decoder as they are
+queued, so a 1080p session used about 275 MiB of decoder address space
+and a 1440p one about 735 MiB. A web page with a few looping videos
+then needs gigabytes.
+
+The iris driver on this device now keeps the size the client sets on
+the OUTPUT queue, down to half a 4:2:0 frame at 720p (a whole one for
+VP9), see patches/kernel/iris/0019. Go back to 2 MiB up to 1080p and
+8 MiB above, as the comment above the constant still describes. Coded
+frames are far smaller: the largest one in a 7 Mbps 1080p H.264 stream
+is 673 KB, in a 28 Mbps 4K HEVC stream 204 KB. A larger max-input-size
+set by the client is kept by MaxInputBufferSizeCalculator, as before.
+The driver's lower bound does not get in the way for any codec:
+setupInputFormat() passes the device's minimum resolution to S_FMT in
+this tree, so the bound stays at its 720p floor (about 1.35 MiB for VP9,
+whose bound is a whole frame rather than half of one).
+
+The size is chosen when the component is configured. A session set up
+at up to 1080p now takes coded frames of at most 2 MiB, also after the
+stream switches to a higher resolution, as before e5ee3bf; VP9 above
+1080p takes at most 8 MiB instead of 13.5 MiB. Clients size their input
+buffers from the codec's max-input-size: Chromium re-creates the codec
+with larger buffers when a key frame does not fit, and Media3 sizes them
+for the largest format of an adaptive stream.
+
+Also check the sizeimage the driver returns. A driver that needs more
+than the allocated size rejects the input buffers at VIDIOC_QBUF, so
+setupInputFormat() now fails at once and logs both sizes.
+
+Checked on the Huawei MateBook E Go with patches/kernel/iris/0019: input
+buffers are mapped at 2 MiB, 8 MiB for 4K clips. H.264 (480p, 1080p,
+4K), HEVC 1080p and VP9 (1080p, 4K) decode through the byte-buffer and
+Surface paths with output identical to the software decoders, as do two
+H.264 streams that change resolution midway. On minimax.cn, where Edge
+opened 316 decoder sessions during 12 scroll cycles (78 of them 1440p),
+a 1080p session used about 150 MiB and a 1440p one about 290 MiB, and
+the decoder's mappings peaked at about 1.5 GiB instead of about
+2.4 GiB, with no failed buffer. On a kernel without iris/0019, 1080p
+H.264 and VP9 fail at start with "Driver needs 7077888-byte input
+buffers, larger than the 2097152 bytes allocated."
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Inappropriate [needs the iris input size change in patches/kernel/iris/0019]
+---
+ components/DecodeInterface.cpp | 2 +-
+ v4l2/V4L2Decoder.cpp           | 9 +++++++++
+ 2 files changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/components/DecodeInterface.cpp b/components/DecodeInterface.cpp
+index 3d751d3..0397deb 100644
+--- a/components/DecodeInterface.cpp
++++ b/components/DecodeInterface.cpp
+@@ -28,7 +28,7 @@ constexpr size_t k4KArea = 3840 * 2160;
+ // when using higher bitrates, like 1Mb/s on slower devices. Also, this brings up compability
+ // with the Chrome browser as it is using 2MB buffer size for a 1080p stream, ref:
+ // https://source.chromium.org/chromium/chromium/src/+/main:media/gpu/gpu_video_encode_accelerator_helpers.cc;l=25
+-constexpr size_t kInputBufferSizeFor1080p = 16 * 1024 * 1024;  // 16MB
++constexpr size_t kInputBufferSizeFor1080p = 2 * 1024 * 1024;  // 2MB
+ // Input bitstream buffer size for up to 4k streams.
+ constexpr size_t kInputBufferSizeFor4K = 4 * kInputBufferSizeFor1080p;
+ 
+diff --git a/v4l2/V4L2Decoder.cpp b/v4l2/V4L2Decoder.cpp
+index 1d595b9..24e98e5 100644
+--- a/v4l2/V4L2Decoder.cpp
++++ b/v4l2/V4L2Decoder.cpp
+@@ -220,6 +220,15 @@ bool V4L2Decoder::setupInputFormat(const uint32_t inputPixelFormat, const size_t
+     }
+     ALOG_ASSERT(format->fmt.pix_mp.pixelformat == inputPixelFormat);
+ 
++    // Input blocks are inputBufferSize bytes long unless the client allocates
++    // its own. A driver that needs larger buffers would reject them at
++    // VIDIOC_QBUF, so fail here instead of in the middle of decoding.
++    if (format->fmt.pix_mp.plane_fmt[0].sizeimage > inputBufferSize) {
++        ALOGE("Driver needs %u-byte input buffers, larger than the %zu bytes allocated.",
++              format->fmt.pix_mp.plane_fmt[0].sizeimage, inputBufferSize);
++        return false;
++    }
++
+     if (mInputQueue->allocateBuffers(kNumInputBuffers, V4L2_MEMORY_DMABUF) == 0) {
+         ALOGE("Failed to allocate input buffer.");
+         return false;

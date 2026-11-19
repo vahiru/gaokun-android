@@ -8,6 +8,7 @@ out/
 *.img
 *.dtb
 *.dtbo
+__pycache__/
 
 # 固件 blob 不进版本库：
 #   qca/ + a660_* + ath11k/ 来自 linux-firmware >= 20241210
