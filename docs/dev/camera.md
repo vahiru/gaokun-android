@@ -171,6 +171,7 @@ HAL实现`android.hardware.camera.provider-V3`，组件说明详见[`device/huaw
 9. **FMQ请求设置读取**：`AidlCamera3Device`优先通过Fast Message Queue（`requestQueue_`）传递每帧capture settings（此时`r.settings.metadata`为空，`fmqSettingsSize > 0`），HAL同时支持从FMQ与内联metadata读取请求参数。
 10. **手电筒与预闪拍照状态机**：
     - `ICameraDevice::setTorchMode`直接控制`/sys/class/leds/white:flash/brightness`，并在相机打开会话期间自动互斥并回调`TorchModeStatus::NOT_AVAILABLE`。
+    - 手电筒支持20档亮度（`turnOnTorchWithStrengthLevel`，每档10 mA，10–200 mA），SystemUI手电筒磁贴据此提供亮度滑块；档位与`brightness`的换算见`device/huawei/gaokun3/camera/README.md`第四节。
     - 因PMIC LED无硬件帧同步信号，拍照闪光采用预闪常亮策略：收到`AE_PRECAPTURE_TRIGGER_START`时点亮LED并上报`AE_STATE_PRECAPTURE`让AGC收敛，通过`firedPending_`计数在途拍照请求，直至静态JPEG帧曝光完成才熄灭LED。
 11. **传感器朝向（`Device.cpp`）**：
     - 设备树按横屏使用的方向写安装角：后摄180、前摄0。Android把`1600×2560`的面板视为天生竖屏，接键盘横放时显示旋转为`ROTATION_90`。

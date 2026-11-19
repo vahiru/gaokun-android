@@ -361,6 +361,14 @@ std::vector<uint8_t> buildCharacteristics(const SensorFacts &f)
 	const uint8_t flashAvailable = hasFlash ? ANDROID_FLASH_INFO_AVAILABLE_TRUE
 					       : ANDROID_FLASH_INFO_AVAILABLE_FALSE;
 	add_camera_metadata_entry(m, ANDROID_FLASH_INFO_AVAILABLE, &flashAvailable, 1);
+	/* 手电筒档位（Metadata.h）。最大档大于1时，SystemUI的手电筒磁贴才提供亮度滑块。 */
+	if (hasFlash) {
+		const int32_t torchMax = kTorchMaxLevel;
+		const int32_t torchDefault = kTorchDefaultLevel;
+		add_camera_metadata_entry(m, ANDROID_FLASH_INFO_STRENGTH_MAXIMUM_LEVEL, &torchMax, 1);
+		add_camera_metadata_entry(m, ANDROID_FLASH_INFO_STRENGTH_DEFAULT_LEVEL,
+					  &torchDefault, 1);
+	}
 	/* Camera1 rebuilds the view angles from it and SENSOR_INFO_PHYSICAL_SIZE. */
 	const LensParams &lens = lensParams(f.frontFacing);
 	const float focalLengths[] = { lens.focalLengthMm };

@@ -25,7 +25,9 @@
 ## 四、闪光灯与手电筒
 
 - **硬件节点**：机背LED连接在PM8350C闪光模块的1+4通道，由内核`patches/kernel/dts/0006`暴露为`/sys/class/leds/white:flash`（`ueventd.gaokun3.rc`设置权限为`0664 root camera`，SELinux标为`sysfs_leds`）。
-- **手电筒模式**：`Device::setTorchMode`直接写入`brightness = max_brightness`；当相机存在活跃拍摄会话时返回`CAMERA_IN_USE`，并在`open()`与会话关闭时通过provider回调更新`TorchModeStatus`。
+- **手电筒模式**：当相机存在活跃拍摄会话时返回`CAMERA_IN_USE`，并在`open()`与会话关闭时通过provider回调更新`TorchModeStatus`。
+- **手电筒亮度档位**：后摄声明`FLASH_INFO_STRENGTH_MAXIMUM_LEVEL = 20`、`FLASH_INFO_STRENGTH_DEFAULT_LEVEL = 20`，实现`turnOnTorchWithStrengthLevel`与`getTorchStrengthLevel`；最大档大于1时，SystemUI手电筒磁贴提供亮度滑块。内核将`brightness`按比例换算为总电流（上限为设备树的`led-max-microamp`，200 mA），平分到两路后每路按5 mA取整，因此硬件共有20档，每档10 mA；HAL为每档写入换算后恰好对应该档电流的最小`brightness`，档位与电流成正比。灯熄灭（`setTorchMode(false)`、相机被打开或会话关闭）后档位恢复为默认档；默认档为最亮，与支持档位前的手电筒亮度相同。修改设备树中的电流上限或通道数时，须同步修改`Metadata.h`中的`kTorchMaxLevel`。
+- **拍照时的手电筒**：会话内的`FLASH_MODE_TORCH`与预闪仍使用`max_brightness`，不受手电筒档位影响。
 - **预闪常亮拍照**：因PMIC LED无硬件帧曝光同步信号，收到`AE_PRECAPTURE_TRIGGER_START`时点亮LED并上报`AE_STATE_PRECAPTURE`供AGC收敛，通过`firedPending_`统计在途拍照请求，直至静态JPEG帧完成采集后再熄灭LED。`ON_AUTO_FLASH`模式基于交付帧采样平均亮度（`kDarkLuma`）与模拟增益启发式判断是否需要开灯。
 
 ## 五、关键实现约定
