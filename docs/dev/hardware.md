@@ -101,3 +101,10 @@ SC8280XP在`gaokun3`上启用了3个DWC3控制器，各自的角色能力不同�
    - 本机内核命令行默认带有`efi=noruntime`，但Qualcomm平台通过`qcom_scm` + `qsee_uefisecapp`（`drivers/firmware/qcom/qcom_qseecom_uefisecapp.c`）将自定义`efivar_ops`直接注册到安全世界，**不依赖标准EFI Runtime Services**。
    - **初始化时序修复（`patches/kernel/core/0001`）**：内置`efi_pstore`在`~0.28s`初始化时检查`efivar_supports_writes()`，而`qsee_uefisecapp`直到`~0.76s`才完成探测并调用`efivars_register()`。`patches/kernel/core/0001`在`drivers/firmware/efi/vars.c`中引入`efivar_ops_nh`通知链与工作队列，当`efivars_register()`稍后上线时自动触发`efi_pstore`补注册，从而使内核panic日志稳定写入`/sys/fs/pstore/dmesg-efi_pstore-*`。
 
+## 七、PCIe DMA与缓存一致性（`patches/kernel/pcie-pm/0013`）
+
+设备树把PCIe控制器（`pcie2a`接NVMe，`pcie4`接Wi-Fi）标为`dma-coherent`，内核在DMA前后不做缓存维护，要求端点的读写都经过缓存一致性处理（snoop）。PCIe事务可以带No Snoop属性，端点在Device Control中开启Enable No Snoop后就可以这样发送；已检查的Phison NVMe和WCN6855 Wi-Fi都已开启。控制器若按原样转发这类事务，端点写入内存后，CPU可能仍读到缓存中的旧数据；反过来，端点读内存时可能读到CPU缓存中尚未写回的旧内容，例如NVMe把旧数据写入磁盘。
+
+`patches/kernel/pcie-pm/0013`（Xilin Wu，取自瑞莎的内核树）在`cfg_sc8280xp`中打开`override_no_snoop`：`qcom_pcie_post_init_2_7_0()`在每次初始化控制器时向PARF的`PARF_NO_SNOOP_OVERRIDE`（偏移`0x3d4`）写入`0xa`，读写事务一律按需要snoop处理。待机恢复时链路掉电重新训练，`qcom_pcie_host_init()`再次执行，该寄存器随之重新写入。
+
+排查：控制器链路在线时，可用`devmem 0x1c203d4 4`（NVMe）和`devmem 0x1c003d4 4`（Wi-Fi）读取该寄存器，应为`0x0000000a`；链路不在线时控制器的时钟可能已关闭，不要读取。端点的Enable No Snoop位在PCIe能力结构中Device Control的bit 11。

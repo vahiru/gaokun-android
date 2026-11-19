@@ -57,6 +57,7 @@ KPATCHES=(
     # ─── 2. kernel/pcie-pm：PCIe、NVMe、cpuidle、系统休眠与唤醒基础设施 ───
     # 深度待机与 PCIe / NVMe 恢复处理详见 docs/dev/deep-sleep.md。
     # 0003 依赖 0001（L2 下保留 PCIe-MEM active-only 投票）；0011–0012 与 kernel/dts/0021、kernel/wifi/0027 配套。
+    # 0013让SC8280XP的PCIe控制器把所有事务都当作需要snoop，见docs/dev/hardware.md。
     kernel/pcie-pm/0001-PCI-qcom-keep-an-active-only-PCIe-MEM-vote-in-L2-on-SC8280XP.patch
     kernel/pcie-pm/0002-serial-qcom-geni-add-force-suspend-resume-to-system-sleep-callbacks.patch
     kernel/pcie-pm/0003-PCI-Allow-D3-for-native-hotplug-capable-Root-Ports-on-non-x86-platforms.patch
@@ -69,6 +70,7 @@ KPATCHES=(
     kernel/pcie-pm/0010-cpuidle-psci-wait-after-a-denied-cluster-request-in-s2idle.patch
     kernel/pcie-pm/0011-PCI-Add-support-for-PCIe-WAKE-interrupt.patch
     kernel/pcie-pm/0012-PM-sleep-disarm-wake-IRQs-before-resuming-device-IRQs.patch
+    kernel/pcie-pm/0013-PCI-qcom-Override-NO_SNOOP-attribute-for-SC8280XP-platforms.patch
 
     # ─── 3. kernel/wifi：ath11k、mac80211 与 MHI ───
     # 0012–0026 叠在 0002–0011 之上（0017、0023 修改 0011 引入的辅助函数；0025 覆盖 0023–0024 之后的失败路径）。

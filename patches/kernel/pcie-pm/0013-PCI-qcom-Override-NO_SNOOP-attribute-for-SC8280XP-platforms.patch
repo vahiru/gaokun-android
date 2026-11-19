@@ -1,0 +1,36 @@
+From: Xilin Wu <sophon@radxa.com>
+Subject: [PATCH] PCI: qcom: Override NO_SNOOP attribute for SC8280XP platforms
+
+The SC8280XP PCIe controller can pass transactions with the NO_SNOOP
+attribute set even though system memory is cache coherent.  This can make
+DMA to cacheable memory fail coherency, leaving the CPU observing stale
+cache lines after the endpoint has completed the DMA.
+
+This is reproducible with a discrete NVIDIA GPU behind the SC8280XP root
+complex: the GPU copy engine writes system memory and signals completion,
+but the CPU readback still sees the old value, causing the driver copy
+engine self-test to fail during device initialisation.
+
+Use the existing NO_SNOOP override support for the SC8280XP configuration
+so both read and write transactions are forced to snoop.
+
+Fixes: 70574511f3fc ("PCI: qcom: Add support for SC8280XP")
+Signed-off-by: Xilin Wu <sophon@radxa.com>
+Origin: other, https://github.com/strongtz/linux-radxa-qcom/commit/ecd4703c5c2154513cadd72575ed95cfdc077530
+Upstream-Status: Pending
+---
+ drivers/pci/controller/dwc/pcie-qcom.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/drivers/pci/controller/dwc/pcie-qcom.c b/drivers/pci/controller/dwc/pcie-qcom.c
+index d7f8b9abd1..b044630c4d 100644
+--- a/drivers/pci/controller/dwc/pcie-qcom.c
++++ b/drivers/pci/controller/dwc/pcie-qcom.c
+@@ -1615,6 +1615,7 @@ static const struct qcom_pcie_cfg cfg_sc8280xp = {
+ 	.no_l0s = true,
+ 	.l2_mem_vote = true,
+ 	.async_pm = true,
++	.override_no_snoop = true,
+ };
+ 
+ static const struct qcom_pcie_cfg cfg_x1e80100 = {
