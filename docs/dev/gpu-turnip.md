@@ -85,10 +85,13 @@ SC8280XP的GPU SMMU（`3da0000.iommu`，`qcom,sc8280xp-smmu-500`）在`msm_iommu
 
 `kernel/dts/0027`是上游的修正（qcom树`arm64-for-7.5`分支，`89083b1e9e31`），按CB顺序改为SPI 680–688与703。应用之后，GPU页错误会进入`adreno_fault_handler`：`dmesg`打印`*** gpu fault: ttbr0=... iova=... dir=... type=...`，`/proc/interrupts`中`arm-smmu-context-fault`（GIC INTID 712起）的计数随之增加。
 
-### 2. 处置与注意事项
+### 2. 内核的故障处理
 
-- **常驻解锁器`smmustall`**（`device/huawei/gaokun3/bin/smmu-nostall.sh`、`etc/smmustall.rc`）：持续清除已用CB的`SCTLR`中的bit 7（`CFCFG`），使非法地址访问直接终止，而不是挂起流水线（bit 8 `HUPCF`由驱动置位，后续事务照常处理）。它是在中断无法到达时加入的；`kernel/dts/0027`之后中断能够到达，两者并存时故障直接终止，中断照常上报。解锁器暂时保留：内核失速模式下的故障处理（暂停失速500 ms、写`RESUME`终止被冻结的事务、生成devcoredump）在A690上尚未经实测，确认之后再考虑移除。
-- **严禁访问CB7及以上**：驱动按`IDR1.NUMCB`报告7个CB（CB0–CB6，`dmesg`中的`7 context banks`），GPU与GMU只用CB0和CB1。CB7及以上超出`NUMCB`，访问其寄存器空间会立即触发同步外部中止（Synchronous External Abort），导致内核无日志死机；`smmu-nostall.sh`因此只扫描CB0和CB1。
+`kernel/dts/0027`之后故障完全由内核处理。在A690上用Vulkan计算着色器经buffer device address向未映射地址写入，实测如下：
+
+- **少量故障**：一次提交向512页以内的未映射地址写入时，第一次故障冻结该笔事务并进入`adreno_fault_handler`。内核打印`*** gpu fault`，关闭失速，生成devcoredump（`/sys/class/devcoredump/devcd*`），再写`RESUME`终止该笔事务。作业正常结束，写入被丢弃，应用不受影响。失速至少关闭500 ms，并且要等devcoredump被读取或删除（5分钟后自动删除）、下一次提交时才重新开启，在此之前的故障直接终止，不再生成devcoredump。含`fault-info`一节的devcoredump说明事务确实被冻结过（`FSR.SS`）；GPU挂起复位时也会生成devcoredump，但没有这一节。
+- **大量故障**：一次提交向768页及以上写入，或经错误指针连续写入256 KB（65535次写入）时，内核只报告前两次故障，约150 ms后硬件挂起检测触发`hangcheck recover`复位GPU。出错的进程收到`VK_ERROR_DEVICE_LOST`，其他进程不受影响。若一直清除`CFCFG`、只用终止模式，同样的负载不会使GPU挂起；但大量故障说明应用本身已经出错，出错的应用收到设备丢失错误是预期行为，本项目沿用上游内核的默认处理。
+- **严禁访问CB7及以上**：驱动按`IDR1.NUMCB`报告7个CB（CB0–CB6，`dmesg`中的`7 context banks`），GPU与GMU只用CB0和CB1。CB7及以上超出`NUMCB`，访问其寄存器空间会立即触发同步外部中止（Synchronous External Abort），导致内核无日志死机。用`devmem`排查时只能访问CB0和CB1。
 
 ## 四、10位视频（P010）零拷贝合成与构建脚本
 

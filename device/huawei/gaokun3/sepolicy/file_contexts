@@ -119,7 +119,6 @@
 /vendor/bin/gaokun3-hangdump\.sh     u:object_r:gaokun3_hangdump_exec:s0
 /vendor/bin/gaokun3-qrtr-lookup    u:object_r:gaokun3_qrtr_lookup_exec:s0
 /vendor/bin/gaokun3-keyboard\.sh     u:object_r:gaokun3_keyboard_exec:s0
-/vendor/bin/smmu-nostall\.sh         u:object_r:gaokun3_smmustall_exec:s0
 /vendor/bin/gaokun3-usbrole\.sh      u:object_r:gaokun3_usbrole_exec:s0
 /vendor/bin/gaokun3-rproc-kick\.sh   u:object_r:gaokun3_rprockick_exec:s0
 /vendor/bin/gaokun3-ssc-recover\.sh  u:object_r:gaokun3_sscrecover_exec:s0
@@ -253,9 +252,7 @@
 
 # ── /dev/mem：整棵 AOSP 策略里【没有任何条目】（memory_device 类型也不存在）──
 # ⚠️ 打上专用类型不是为了给谁开权限，恰恰相反：是为了让"谁在碰它"变得显式。
-#    唯一被允许的是 gaokun3_smmustall，而且只在 userdebug（gaokun3_scripts.te 末尾，
-#    2026-09-27 #126 改的；sys_rawio 那条 neverallow 只在 userdebug 上豁免）。
-#    正解是把 TODO B6 做掉，让这个脚本和这条放行一起消失。见 #75。
+#    现在没有任何域被允许访问它。见 #75。
 /dev/mem                 u:object_r:gaokun3_devmem_device:s0
 
 # ── /vendor/firmware：只给内核读（类型定义与理由见 device.te，规则见 kernel.te）──

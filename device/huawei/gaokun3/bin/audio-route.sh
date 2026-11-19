@@ -18,7 +18,7 @@
 #    Alert = 从设备拉了中断没被清，而 WSA883x 的中断源就是保护事件。两件事
 #    可能同源，未证实。⚠️ 抬 PA 增益之前值得先把这个查清楚（docs #78 第 5 节）。
 
-# ⚠️ 必须把 PATH 钉在 /system/bin —— 与 smmu-nostall.sh 同一个坑。
+# ⚠️ 必须把 PATH 钉在 /system/bin。
 # 本脚本以 `#!/vendor/bin/sh` 起，PATH 默认优先 /vendor/bin，于是 log/sleep 每次都去
 # exec /vendor/bin/toybox_vendor；而服务跑在 u:r:shell:s0 域，对 vendor_toolbox_exec
 # 没有权限 —— permissive 下功能照常，但每次调用都吐 4 行 avc denied。
