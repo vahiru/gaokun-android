@@ -108,6 +108,20 @@ PRODUCT_COPY_FILES += \
 PRODUCT_PACKAGES += \
     android.hardware.usb-service.gaokun3
 
+# ------------------------------------------------------------- 内存：zram交换空间
+# 开机完成时由系统自带的mmd（system/memory/mmd）把zram0配置成交换空间，大小取它的默认值，
+# 即内存的一半（这是压缩前可存放的上限，压缩后的数据按需占用内存）。内核的ZRAM和LZ4后端在
+# scripts/kernel-config-android.sh里打开；这两个属性的SELinux类型允许vendor设置，
+# mmd_setup所需的规则由system/sepolicy提供。
+# 没有交换空间时，ActivityManager的内存压缩（CachedAppOptimizer）只能回收文件页，进程正在执行的
+# 代码页也会被逐出，随后又要从存储读回。压缩全部系统进程时（am compact system）影响最大：
+# SurfaceFlinger、audioserver、音频HAL的代码页被逐出后马上又要读回，读回后又被逐出，约1秒里这些
+# 进程不断等待读回代码页，表现为画面剧烈掉帧、扬声器爆音。有了zram，匿名页也能回收，回收不再
+# 反复逐出刚读回的代码页。
+PRODUCT_VENDOR_PROPERTIES += \
+    mmd.zram.enabled=true \
+    mmd.zram.comp_algorithm=lz4
+
 # ------------------------------------------------- 安全 HAL（软件实现）
 # keystore2 是 critical 服务且被 init.rc 的
 #   exec 4 (/system/bin/vdc keymaster earlyBootEnded)

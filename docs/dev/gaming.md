@@ -12,6 +12,7 @@
 | 音频延迟 | **5 ms FastMixer低延迟通路**（`patches/android/hardware-interfaces/0008` + `patches/kernel/audio/0013` + `crdroid-tree-fixes.py`） | 原来85 ms一块时没有FastMixer，游戏的低延迟请求批不下来，应用输出延迟约317 ms。播放块现为5 ms（`ro.vendor.audio.primary.out_latency_ms=5`，`mixPeriod=5.00 ms`），按块数申请缓冲的游戏（如PJSK申请两个块），轨道缓冲也随之缩小；内核`q6apm-dai`的播放period步长同时改为240帧，否则ALSA缓冲不会跟着缩短 | `device.mk`、`kernel-apply-patches.sh`、`crdroid-tree-fixes.py` |
 | 音频延迟 | **播放缓冲3个period**（`patches/android/hardware-interfaces/0011`） | ALSA播放缓冲切成3个period（3 × 240帧 = 15 ms）；录音方向仍为4个，不影响采集钩子与降噪（`ro.vendor.audio.primary.out_period_count=3`）。与上一行合计：按PJSK的申请方式，应用按时间戳算出的输出延迟中位约21.5 ms（10 ms块、3 × 480帧时为43.7 ms），扬声器和有线耳机相同 | `device.mk`、`crdroid-tree-fixes.py` |
 | 触摸响应 | **`game`触摸预设** | 关闭坐标平滑（减少约25 ms稳态滞后）、debounce设为1帧、关闭手掌位置图（避免贴屏幕边缘平放的拇指被当成手掌撤回）。可在"设置 → 显示 → 触摸模式"切换 | `bin/gaokun3-touch-mode.sh`，详见[`palm-rejection.md`](palm-rejection.md) |
+| 内存 | **zram交换空间**（`mmd.zram.enabled=true`） | 没有交换空间时，内存压缩只能回收文件页，进程正在执行的代码页也会被逐出；压缩全部系统进程时会反复逐出SurfaceFlinger、audioserver、音频HAL的代码页，造成约1秒的画面剧烈掉帧和扬声器爆音。现由mmd在开机完成时配置zram（lz4，大小为内存的一半） | `device.mk` |
 | 调度 | **后台cpuset限在`0-3`** | 将`background`和`system-background`限制在4个能效核，避免后台任务与前台游戏争抢大核 | `device/huawei/gaokun3/` |
 
 ## 2. 按应用UID伪装内核版本（`patches/kernel/core/0008`）
