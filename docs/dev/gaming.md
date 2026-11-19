@@ -13,6 +13,7 @@
 | 音频延迟 | **播放缓冲3个period**（`patches/android/hardware-interfaces/0011`） | ALSA播放缓冲切成3个period（3 × 240帧 = 15 ms）；录音方向仍为4个，不影响采集钩子与降噪（`ro.vendor.audio.primary.out_period_count=3`）。与上一行合计：按PJSK的申请方式，应用按时间戳算出的输出延迟中位约21.5 ms（10 ms块、3 × 480帧时为43.7 ms），扬声器和有线耳机相同 | `device.mk`、`crdroid-tree-fixes.py` |
 | 触摸响应 | **`game`触摸预设** | 关闭坐标平滑（减少约25 ms稳态滞后）、debounce设为1帧、关闭手掌位置图（避免贴屏幕边缘平放的拇指被当成手掌撤回）。可在"设置 → 显示 → 触摸模式"切换 | `bin/gaokun3-touch-mode.sh`，详见[`palm-rejection.md`](palm-rejection.md) |
 | 调度 | **后台cpuset限在`0-3`** | 将`background`和`system-background`限制在4个能效核，避免后台任务与前台游戏争抢大核 | `device/huawei/gaokun3/` |
+| 内存 | **开机后不自动压缩全部系统进程**（`patches/android/frameworks-base/0002`） | crDroid（取自CAF）原本在开机20分钟后把全部系统进程的内存回收一遍，SurfaceFlinger、音频服务正在使用的页面被逐出，正在玩游戏时会出现约1秒的剧烈掉帧和爆音。AOSP和LineageOS的正式版本不会自动压缩系统进程，补丁与之一致 | `crdroid-tree-fixes.py` |
 
 ## 2. 按应用UID伪装内核版本（`patches/kernel/core/0008`）
 

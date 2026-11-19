@@ -1458,6 +1458,13 @@ def main():
     step(" [44] SystemUI在指纹临时锁定期间不再请求指纹认证: ", apply_patch_file(
         tree, "frameworks/base",
         "android/frameworks-base/0001-systemui-respect-fingerprint-lockout.patch"))
+    # crDroid（取自CAF）在开机完成20分钟后的任务里调用compactAllSystem()，把system内存cgroup整体回收一遍，
+    # SurfaceFlinger、音频服务等正在使用的页面随之被逐出，游戏中表现为约1秒的掉帧（没有交换空间时还会爆音）。
+    # AOSP和LineageOS在这个任务里只收集内存统计；AOSP正式版本还用disable_system_compaction关闭了空闲维护里的
+    # 系统压缩，这处调用绕过了它。补丁去掉这次调用，之后系统进程只在执行am compact system时压缩，后台应用的压缩不变。
+    step(" [47] 开机20分钟后不再压缩全部系统进程: ", apply_patch_file(
+        tree, "frameworks/base",
+        "android/frameworks-base/0002-activitymanager-dont-compact-system-processes-after-boot.patch"))
     # crDroid的锁屏充电信息（core: Lockscreen Charging）固定从/sys/class/power_supply/battery读取电流和电压，
     # 没有这个节点时改读充电器节点。本机电池节点名为gaokun-ec-battery，EC适配器节点没有电流和电压，UCSI节点在
     # PD模式下两者均为0，锁屏因此只显示默认的5V。补丁在没有battery节点时改用BatteryMonitor已识别的电池节点。
