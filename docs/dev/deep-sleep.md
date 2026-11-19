@@ -34,6 +34,8 @@ NVMe每次待机都做一次shutdown，醒来重新建队列。两条链路在no
 
 插充电器、合盖这类事件由EC报给主机，中断走PDC（`pdc 215`，GPIO 103）。SoC进了AOSD之后，电平触发的中断常常接不住插充电器：PDC一直把SoC叫醒，CPU每次去看时线又是高的，GIC上没有挂着的中断，系统要等下一个闹钟或电源键。看起来EC这时只发很短的低电平脉冲。所以EC驱动在`suspend_noirq`里把中断改成下降沿，PDC把它当作边沿交给GIC；恢复时改回DT里的电平，再读一遍EC排着的事件（`patches/kernel/ec-usb/0015`）。醒着时一直是电平触发：打开中断时线如果已经是低的，边沿触发就收不到这个事件。睡眠中插线不亮屏、而`qcom_stats/aosd`的Count在一次睡眠里涨了几千，就是这个问题。
 
+UCSI初始化偶尔失败（`PPM init failed`，`/sys/class/typec`为空，见[TODO](../TODO.md)）。部分开机过程中，EC从驱动注册通知起就约每200毫秒重复一个USB事件（0x22），等待驱动确认；初始化成功时，驱动处理并确认这个事件之后，重复随之停止。初始化失败后没有连接器，事件不会被处理，重复会持续到重启，每次都把系统从休眠中叫醒，系统无法持续休眠。`ucsi_huawei_gaokun`在判定初始化已经结束且失败之后（已注册，`ucsi->work`既不排队也不运行，连接器仍为空，连续两个事件都如此），只确认、不处理这些事件（`patches/kernel/ec-usb/0017`）。初始化仍可能成功时仍不确认，之后的重复事件会被完整处理（设置端口的模式、方向和DP HPD）。单独确认能否让真实失败开机里的重复停止，尚未经实测。排查：UCSI初始化失败之后，日志里仍反复出现`ucsi connector is not initialized yet`，就是这种情况。带此补丁时，确认生效会输出一条`acknowledging USB events without handling them`，之后这条日志不再出现，EC是否停止重复要看`/proc/interrupts`里EC中断（`15-0038`）是否还在增长。
+
 ## Wi-Fi
 
 开着WoW时，固件在`PERST#`拉低后继续运行，关联不断。碰上唤醒条件时，固件拉低`WAKE#`（TLMM 139，经PDC，AOSD里也能叫醒）。PCI核心把它登记成Wi-Fi的专用唤醒中断，低电平触发（`patches/kernel/pcie-pm/0011`）；它只在设备自己的DT节点上找`wake-gpios`，所以这根线写在`wifi@0`上，不在`pcie4`上（`patches/kernel/dts/0021`）。从固件字符串和测试推断，固件要在链路走L2、`PERST#`拉低之后才拉这根线，所以`WAKE#`离不开上面断链待机的那几个补丁。Wi-Fi关着时固件不运行，`pcie4`挂起时会打一条`Timeout waiting for L2 entry`，这是预期的。
