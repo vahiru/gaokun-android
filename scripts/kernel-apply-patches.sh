@@ -122,6 +122,8 @@ KPATCHES=(
     kernel/ec-usb/0015-platform-arm64-huawei-gaokun-ec-use-an-edge-triggered-IRQ-while-suspended.patch
     kernel/ec-usb/0016-power-supply-huawei-gaokun-battery-report-temperature.patch
     kernel/ec-usb/0017-usb-typec-ucsi-huawei_gaokun-acknowledge-USB-events-after-a-failed-init.patch
+    kernel/ec-usb/0018-usb-typec-ucsi-add-a-quirk-to-retry-the-initialization-after-a-timeout.patch
+    kernel/ec-usb/0019-usb-typec-ucsi-huawei_gaokun-retry-the-initialization-after-a-timeout.patch
 
     # ─── 5. kernel/drm：DRM 核心、MSM DPU 色彩与平面、DSI PHY、Himax 面板、MSM GPU ───
     # 显示色彩详见 docs/dev/display-color.md。0003 与 kernel/dts/0017 配套；
