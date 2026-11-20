@@ -1498,6 +1498,11 @@ def main():
     step(" [53] 窗口管理扩展库按应用自带的规则分栏显示: ", apply_patch_file(
         tree, "frameworks/base",
         "android/frameworks-base/0007-wm-jetpack-parallel-view-from-easygo-rules.patch"))
+    # 拖动可拖动的分隔条时，AOSP用纯色遮罩盖住两侧，颜色取页面的窗口背景；许多应用的窗口背景与页面颜色不同
+    # （例如深色主题下窗口背景为纯黑），两侧因此变成全黑。0008在开始拖动时截取两侧页面，拖动期间显示截图。
+    step(" [54] 拖动分隔条时显示两侧页面的截图: ", apply_patch_file(
+        tree, "frameworks/base",
+        "android/frameworks-base/0008-wm-jetpack-show-snapshots-while-dragging-the-divider.patch"))
     # crDroid的锁屏充电信息（core: Lockscreen Charging）固定从/sys/class/power_supply/battery读取电流和电压，
     # 没有这个节点时改读充电器节点。本机电池节点名为gaokun-ec-battery，EC适配器节点没有电流和电压，UCSI节点在
     # PD模式下两者均为0，锁屏因此只显示默认的5V。补丁在没有battery节点时改用BatteryMonitor已识别的电池节点。

@@ -11,6 +11,7 @@
 | 兼容变更 | `patches/android/frameworks-base/0006`（`ActivityInfo`、`ActivityThread`、`WindowExtensionsHelper`） | 新增`OVERRIDE_ENABLE_PARALLEL_VIEW`（3374131364，可覆盖，默认关闭）。开启的应用在`handleBindApplication`末尾初始化窗口管理扩展库，不依赖虚拟手柄的aconfig标志`virtual_gamepad_override` |
 | 规则转换 | `patches/android/frameworks-base/0007`（`libs/WindowManager/Jetpack`的`ParallelViewRules`） | 读取`easygo.json`并生成嵌入规则；处理两类妨碍扩展库识别页面的应用行为 |
 | 设置页面 | `device/huawei/gaokun3/parts`的`ParallelViewSettingsActivity` | 列出带规则的应用，按应用设置兼容覆盖 |
+| 分隔条拖动画面 | `patches/android/frameworks-base/0008`（`DividerPresenter`） | 拖动分隔条时显示两侧页面的截图，对所有使用可拖动分隔条的应用生效 |
 
 ### 扩展库的加载
 
@@ -59,6 +60,14 @@ AOSP只为虚拟手柄提供了"系统替应用载入嵌入规则"的路径：PM
 - 布局监听按页面实例登记，页面销毁时移除，因为页面重建时可能沿用原来的窗口。`SplitController`构造时把自己交给`ParallelViewRules`。
 
 不处理的情况：左侧页面请求横屏（AOSP展开左侧时会结束右侧页面）；不切换为横屏的全屏（只隐藏系统栏，或竖屏视频）；按窗口大小而不是`isInMultiWindowMode()`判断分屏的应用。应用仍会收到`onMultiWindowModeChanged()`回调。
+
+### 拖动分隔条
+
+AOSP拖动分隔条时不实时调整两侧大小（否则应用每一帧都要重新排版），而是用纯色遮罩盖住两侧，松手后再按新比例排版。遮罩颜色取页面的窗口背景，而许多应用的窗口背景与页面颜色不同：例如知乎深色主题下窗口背景为`#000000`，页面为`#191B1F`，拖动时两侧都变成全黑。
+
+0008在开始拖动时用`ScreenCaptureInternal.captureLayers`截取两侧页面的窗口（含视频等子图层），显示在遮罩上原来的位置，由遮罩按新边界裁切，看起来是分隔条从页面上划过。某一侧变宽时，截图未覆盖的部分用该侧窗口靠分隔条一边4 px宽的条带中最常见的不透明颜色填充（应用自己设置了遮罩颜色时用该颜色）。没有`READ_FRAME_BUFFER`权限时，SurfaceFlinger只允许应用截取自己uid的图层，正好满足这里的需要。以下情况退回原来的纯色遮罩：容器中有其他进程的页面（无法在本进程截取，且可能盖在上面）、窗口与容器不重合（留边或按尺寸兼容缩放）、窗口含安全内容（截出来是黑色）、截取失败。截取（每侧一次窗口、一次条带）在开始拖动时同步进行。
+
+拖到边缘时，AOSP的处理分两种：右侧（次容器）铺满时两侧都保留，可以再拖回来；左侧（主容器）铺满时，右侧的页面随即结束（`TaskContainer.updateTopSplitContainerForDivider`）。
 
 ### 设置页面
 
