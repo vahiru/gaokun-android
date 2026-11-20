@@ -1,0 +1,161 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] core: per-app compat change for parallel view
+
+Parallel view shows the activities of an app side by side in large
+landscape windows, following the Huawei EasyGo rules the app ships in
+assets/easygo.json; the window manager extensions turn those rules into
+activity embedding rules. The only path that loads embedding rules into
+an app that does not use activity embedding itself is the virtual
+gamepad: OVERRIDE_ENABLE_VIRTUAL_GAMEPAD, gated on the
+virtual_gamepad_override flag, makes the package manager add the
+extensions library to the app when it is scanned, and makes
+ActivityThread initialize embedding when the app is bound. The gamepad
+change also forces the app to be resizable and its flag can be turned
+off at run time, so parallel view gets its own change instead.
+
+Add OVERRIDE_ENABLE_PARALLEL_VIEW (overridable, disabled by default; the
+device settings app enables it per package together with
+FORCE_RESIZE_APP, because WindowOrganizerController refuses to create a
+TaskFragment for a non-resizable owner activity otherwise). When it is
+enabled, ActivityThread initializes embedding regardless of the flag.
+
+The package manager still adds the extensions library only for the
+gamepad, so a change made in the settings app applies when the app next
+starts instead of after a reboot. For apps without the library,
+WindowExtensionsHelper falls back to the class loader zygote preloaded
+for it; apps that use the library are given the same class loader, so
+there is one instance of the extensions per process either way. The
+fallback passes null for the parent, class loader name and shared
+libraries, as the cache only matches top-level libraries loaded that
+way.
+
+initEmbedding() logged a wtf and then dereferenced null when the device
+has no extensions; it now returns false there.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Inappropriate [device-specific feature]
+---
+ core/java/android/app/ActivityThread.java     |  7 +++++
+ .../java/android/content/pm/ActivityInfo.java | 16 ++++++++++
+ .../window/WindowExtensionsHelper.java        | 30 +++++++++++++++++--
+ 3 files changed, 50 insertions(+), 3 deletions(-)
+
+diff --git a/core/java/android/app/ActivityThread.java b/core/java/android/app/ActivityThread.java
+index 93a7411..035d27b 100644
+--- a/core/java/android/app/ActivityThread.java
++++ b/core/java/android/app/ActivityThread.java
+@@ -31,6 +31,7 @@ import static android.app.servertransaction.ActivityLifecycleItem.ON_START;
+ import static android.app.servertransaction.ActivityLifecycleItem.ON_STOP;
+ import static android.app.servertransaction.ActivityLifecycleItem.PRE_ON_CREATE;
+ import static android.content.pm.ActivityInfo.CONFIG_RESOURCES_UNUSED;
++import static android.content.pm.ActivityInfo.OVERRIDE_ENABLE_PARALLEL_VIEW;
+ import static android.content.pm.ActivityInfo.OVERRIDE_ENABLE_VIRTUAL_GAMEPAD;
+ import static android.content.res.Configuration.UI_MODE_TYPE_DESK;
+ import static android.content.res.Configuration.UI_MODE_TYPE_MASK;
+@@ -8498,6 +8499,12 @@ public final class ActivityThread extends ClientTransactionHandler
+                 && isVirtualGamepadOverrideAllowed(app)
+                 && !Process.isIsolated()) {
+             WindowExtensionsHelper.initEmbedding(app);
++        } else if (CompatChanges.isChangeEnabled(OVERRIDE_ENABLE_PARALLEL_VIEW)
++                && !Process.isIsolated()) {
++            // Parallel view: the extensions load the app's own split rules. It does not depend on
++            // the virtual gamepad flag, nor on the package manager adding the extensions library
++            // to the app (WindowExtensionsHelper falls back to the copy zygote preloaded).
++            WindowExtensionsHelper.initEmbedding(app);
+         }
+     }
+ 
+diff --git a/core/java/android/content/pm/ActivityInfo.java b/core/java/android/content/pm/ActivityInfo.java
+index 88eb290..e3d85bb 100644
+--- a/core/java/android/content/pm/ActivityInfo.java
++++ b/core/java/android/content/pm/ActivityInfo.java
+@@ -1772,6 +1772,22 @@ public class ActivityInfo extends ComponentInfo implements Parcelable {
+     @TestApi
+     public static final long OVERRIDE_ENABLE_VIRTUAL_GAMEPAD = 447093535L;
+ 
++    /**
++     * This change id enables parallel view for the app: in large landscape windows, the window
++     * manager extensions show its activities side by side, following the Huawei EasyGo rules the
++     * app ships in {@code assets/easygo.json}.
++     *
++     * <p>This is disabled by default, and is enabled per application through per-app overrides
++     * set by the device settings app. A split can only be started from a resizable activity, so
++     * the settings app enables {@link #FORCE_RESIZE_APP} for the app as well.
++     *
++     * @hide
++     */
++    @ChangeId
++    @Overridable
++    @Disabled
++    public static final long OVERRIDE_ENABLE_PARALLEL_VIEW = 3374131364L;
++
+     /**
+      * This change id skips the activity recreation by default on config change of
+      * {@link #CONFIG_KEYBOARD}, {@link #CONFIG_KEYBOARD_HIDDEN}, {@link #CONFIG_NAVIGATION},
+diff --git a/core/java/android/window/WindowExtensionsHelper.java b/core/java/android/window/WindowExtensionsHelper.java
+index 3f58dae..76637d6 100644
+--- a/core/java/android/window/WindowExtensionsHelper.java
++++ b/core/java/android/window/WindowExtensionsHelper.java
+@@ -18,10 +18,13 @@ package android.window;
+ 
+ import android.annotation.NonNull;
+ import android.annotation.Nullable;
++import android.app.ApplicationLoaders;
+ import android.content.Context;
++import android.os.Environment;
+ import android.util.Log;
+ import android.view.WindowManager;
+ 
++import java.io.File;
+ import java.lang.reflect.InvocationTargetException;
+ import java.lang.reflect.Method;
+ 
+@@ -32,6 +35,8 @@ import java.lang.reflect.Method;
+  */
+ public class WindowExtensionsHelper {
+     private static final String TAG = "WindowExtensionsHelper";
++    private static final String PROVIDER_CLASS =
++            "androidx.window.extensions.WindowExtensionsProvider";
+ 
+     /**
+      * Initializes Activity Embedding components for embedding rule overrides. This method should
+@@ -45,6 +50,7 @@ public class WindowExtensionsHelper {
+             if (extensions == null) {
+                 Log.wtf(TAG,
+                         "Embedding should never be initialized on devices without extensions!");
++                return false;
+             }
+ 
+             final Method aeInitMethod = extensions.getClass()
+@@ -65,9 +71,27 @@ public class WindowExtensionsHelper {
+         if (!WindowManager.hasWindowExtensionsEnabled()) {
+             return null;
+         }
+-        final Class<?> windowExtensionsProviderClass = Class.forName(
+-                "androidx.window.extensions.WindowExtensionsProvider",
+-                true /* initialize */, context.getClassLoader());
++        Class<?> windowExtensionsProviderClass;
++        try {
++            windowExtensionsProviderClass = Class.forName(PROVIDER_CLASS,
++                    true /* initialize */, context.getClassLoader());
++        } catch (ClassNotFoundException e) {
++            // The package manager adds the extensions library only to apps that use it or have
++            // the virtual gamepad enabled. For other apps, take the class loader zygote preloaded
++            // for the library (ZygoteInit#cacheNonBootClasspathClassLoaders); apps that use the
++            // library get the same one.
++            final ClassLoader preloaded = ApplicationLoaders.getDefault()
++                    .getCachedNonBootclasspathSystemLib(
++                            new File(Environment.getSystemExtDirectory(), "framework").getPath()
++                                    + "/androidx.window.extensions.jar",
++                            null /* parent */, null /* classLoaderName */,
++                            null /* sharedLibraries */);
++            if (preloaded == null) {
++                throw e;
++            }
++            windowExtensionsProviderClass = Class.forName(PROVIDER_CLASS,
++                    true /* initialize */, preloaded);
++        }
+         final Method getWindowExtensionsMethod = windowExtensionsProviderClass
+                 .getDeclaredMethod("getWindowExtensions");
+         return getWindowExtensionsMethod.invoke(null);

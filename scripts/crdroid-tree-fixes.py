@@ -1488,6 +1488,16 @@ def main():
     step(" [51] SystemUI侧边指纹提示支持左边缘的传感器: ", apply_patch_file(
         tree, "frameworks/base",
         "android/frameworks-base/0005-systemui-side-fingerprint-sensor-on-the-left-edge.patch"))
+    # 平行视界：许多国内应用在assets/easygo.json中自带华为平板的分栏规则。0006新增按应用开启的兼容变更
+    # OVERRIDE_ENABLE_PARALLEL_VIEW（Parts的“设置 → 应用 → 平行视界”设置），开启的应用启动时初始化窗口管理
+    # 扩展库，不依赖虚拟手柄的标志，也不需要重启系统。0007让扩展库把这些规则转换为Activity嵌入规则，横屏时
+    # 左右分栏显示。
+    step(" [52] 按应用开启平行视界的兼容变更: ", apply_patch_file(
+        tree, "frameworks/base",
+        "android/frameworks-base/0006-core-parallel-view-compat-change.patch"))
+    step(" [53] 窗口管理扩展库按应用自带的规则分栏显示: ", apply_patch_file(
+        tree, "frameworks/base",
+        "android/frameworks-base/0007-wm-jetpack-parallel-view-from-easygo-rules.patch"))
     # crDroid的锁屏充电信息（core: Lockscreen Charging）固定从/sys/class/power_supply/battery读取电流和电压，
     # 没有这个节点时改读充电器节点。本机电池节点名为gaokun-ec-battery，EC适配器节点没有电流和电压，UCSI节点在
     # PD模式下两者均为0，锁屏因此只显示默认的5V。补丁在没有battery节点时改用BatteryMonitor已识别的电池节点。

@@ -97,4 +97,11 @@
     <string name="denoise_camcorder_title">录像</string>
     <string name="denoise_camcorder_summary">相机录像的声音</string>
     <string name="denoise_note">只处理从内置麦克风输入的声音。降噪会保留人声、压低其他声音，包括音乐和环境声。改动从下一次通话或录音开始生效。</string>
+
+    <!-- 平行视界（ParallelViewSettingsActivity） -->
+    <string name="parallel_view_title">平行视界（实验性）</string>
+    <string name="parallel_view_summary">横屏时将应用页面左右分栏显示</string>
+    <string name="parallel_view_intro">为支持分栏的应用开启后，横屏时应用页面将左右分栏显示。更改此设置将关闭该应用，并在应用下次打开时生效。</string>
+    <string name="parallel_view_apps_title">应用</string>
+    <string name="parallel_view_no_apps">未找到支持分栏的应用</string>
 </resources>

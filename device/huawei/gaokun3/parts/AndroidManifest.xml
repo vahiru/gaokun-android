@@ -31,6 +31,11 @@
     <uses-permission android:name="android.permission.REBOOT" />
     <!-- LidBehaviorDefault writes Settings.Global.LID_BEHAVIOR. -->
     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
+    <!-- 平行视界：读取并设置兼容框架的按应用覆盖，切换后结束该应用的进程。 -->
+    <uses-permission android:name="android.permission.READ_COMPAT_CHANGE_CONFIG" />
+    <uses-permission android:name="android.permission.LOG_COMPAT_CHANGE" />
+    <uses-permission android:name="android.permission.OVERRIDE_COMPAT_CHANGE_CONFIG_ON_RELEASE_BUILD" />
+    <uses-permission android:name="android.permission.KILL_UID" />
 
     <application
         android:label="@string/app_name"
@@ -218,6 +223,29 @@
             <meta-data
                 android:name="com.android.settings.icon"
                 android:resource="@drawable/ic_gl_driver_version" />
+        </activity>
+
+        <!-- 平行视界：按应用开启frameworks-base/0006–0007的分栏显示。入口在“设置 → 应用”。 -->
+        <activity
+            android:name="com.huawei.gaokun3.parts.ParallelViewSettingsActivity"
+            android:exported="true"
+            android:label="@string/parallel_view_title">
+            <intent-filter>
+                <action android:name="com.android.settings.action.IA_SETTINGS" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <meta-data
+                android:name="com.android.settings.category"
+                android:value="com.android.settings.category.ia.apps" />
+            <meta-data
+                android:name="com.android.settings.title"
+                android:resource="@string/parallel_view_title" />
+            <meta-data
+                android:name="com.android.settings.summary"
+                android:resource="@string/parallel_view_summary" />
+            <meta-data
+                android:name="com.android.settings.icon"
+                android:resource="@drawable/ic_parallel_view" />
         </activity>
 
         <!-- 控制中心（快捷设置）里的开关。

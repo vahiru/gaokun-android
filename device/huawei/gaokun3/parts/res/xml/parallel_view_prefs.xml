@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 应用列表由ParallelViewSettingsActivity在后台读取后填入parallel_view_apps。 -->
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android">
+    <Preference
+        android:key="parallel_view_intro"
+        android:summary="@string/parallel_view_intro"
+        android:selectable="false" />
+    <PreferenceCategory
+        android:key="parallel_view_apps"
+        android:title="@string/parallel_view_apps_title" />
+</PreferenceScreen>

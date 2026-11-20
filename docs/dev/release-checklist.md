@@ -109,6 +109,7 @@ echo $?        # 0 = 无FAIL；1 = 有FAIL；2 = adb不通或中途掉线（不�
 | 麦克风阵列、回声消除与降噪 | 外放状态下进行语音通话，切换“设置 → 提示音和振动 → 麦克风降噪”各开关测试录音与录像 | 通话对方听不到外放回声；各场景降噪开关按设置生效 |
 | 内核版本伪装设置 | 查看设置中的内核版本与`adb shell uname -r`，在“设置 → 系统 → 内核版本伪装”中切换开关或修改版本号并重启 | 系统与`uname -r`始终显示真实版本，普通应用读到设定版本；关闭后普通应用读到真实版本 |
 | GPU驱动兼容设置 | 安装只带Vulkan着色器的虚幻引擎游戏（如《无限暖暖》），先直接启动一次；再在“设置 → 系统 → GPU驱动兼容”中为它开启，结束游戏后重新启动；随后用浏览器打开WebGL 1页面 | 开启前启动时报global shader缺失并退出，开启后进入登录界面；`adb shell settings get global gaokun3_angle_gl_version_pkgs`含该包名，logcat中有`GraphicsEnvironment: ANGLE_GL_VERSION set for <包名>`；未开启的浏览器中WebGL 1正常 |
+| 平行视界设置 | 安装知乎与淘宝，在“设置 → 应用 → 平行视界（实验性）”中查看列表并为两者开启；横屏打开知乎首页的一条回答、淘宝首页的一件商品；再关闭知乎的开关并重新打开知乎 | 列表只含带分栏规则的应用，不含酷安；开启后无需重启系统，知乎回答在右侧打开，淘宝在右侧显示默认页面、商品在右侧打开；`adb shell dumpsys platform_compat`中`OVERRIDE_ENABLE_PARALLEL_VIEW`与`FORCE_RESIZE_APP`含该包名；logcat中有`ParallelView: <包名>: mode …`；关闭后知乎恢复居中显示 |
 
 ## 4. 长稳与性能/功耗测量
 
