@@ -181,6 +181,15 @@ In full screen the app lays itself out for the landscape screen, and some screen
 
 Likewise, when "Auto-rotate screen" is disabled and the screen stays in portrait, apps that only support landscape, such as some games, are shown in the middle of the screen. Enable "Auto-rotate screen" and hold the tablet in landscape.
 
+### Showing app pages side by side
+
+Some apps, such as Zhihu, Taobao and WeChat, include split layouts for tablets. To show their pages side by side in landscape:
+
+1. Open Settings → Apps → Force activity embedding (experimental).
+2. Turn on the switch for the app.
+
+The app is closed when the switch is changed; the change applies the next time the app opens. Only apps that include split layouts are listed. Known issues are listed in [Known limitations](known-limitations.md#showing-app-pages-side-by-side-is-experimental).
+
 ## Developer options and adb
 
 ### Enabling Developer options

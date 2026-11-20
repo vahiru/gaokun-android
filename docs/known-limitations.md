@@ -118,6 +118,15 @@ Each entry follows the same format: **Symptom** (what you will run into), **Caus
 * **Cause**: this project only releases builds with Google apps.
 * **What to do**: download APKs with a browser from the apps' official websites or the web versions of Chinese app stores.
 
+### Showing app pages side by side is experimental
+* **Symptom**: with Settings → Apps → Force activity embedding (experimental) enabled for an app:
+  * WeChat opens chats from its Chats list on the left, inside its main screen; pages opened from elsewhere, such as Contacts, open on the right.
+  * A video played full screen from the left-hand page, or in a full-screen mode that does not switch to landscape, stays within its side of the screen.
+  * When an app requests a permission, the permission dialog may be partly covered by the right-hand page.
+  * 1.0.0-rc.4 and earlier do not have this setting.
+* **Cause**: the split layouts come with the apps, and WeChat opens chats on the right only on devices it recognizes. A side is expanded to the full screen only when the right-hand page switches to landscape.
+* **What to do**: in apps whose divider can be dragged to the edge of the screen, drag it there to show one page in full screen. Otherwise turn off the switch for the app.
+
 ### Hardware this machine does not have
 * **Mobile network and SIM card**: this machine has no modem.
 * **Compass**: there is no magnetometer. Auto-rotation uses the accelerometer and gyroscope and is not affected.

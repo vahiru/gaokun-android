@@ -45,6 +45,7 @@
 | [dev/stylus.md](dev/stylus.md) | 手写笔（M-Pencil）：Himax SPI与蓝牙双通路、压感/倾斜上报、双击与侧键守护进程 |
 | [dev/palm-rejection.md](dev/palm-rejection.md) | 触摸屏防误触：驱动层手掌位置图算法、`MT_TOOL_PALM`撤回机制与调参接口 |
 | [dev/deep-sleep.md](dev/deep-sleep.md) | 深度待机（S3 / s2idle）：`qcom_stats`睡眠计数、阻断`cx`/`ddr`下电的投票排查、PCIe电源与Wi-Fi唤醒恢复 |
+| [dev/parallel-view.md](dev/parallel-view.md) | 平行视界：读取应用自带的`easygo.json`分栏规则，转换为Activity嵌入规则；按应用的兼容变更、扩展库加载与应用行为的兼容处理 |
 | [dev/gaming.md](dev/gaming.md) | 游戏兼容性与性能调优：39位虚拟地址空间窗口、着色器缓存、触控采样预设与游戏模式脚本 |
 | [dev/sensors-ssc-protocol.md](dev/sensors-ssc-protocol.md) | SLPI传感器中枢（SSC）QMI over QRTR与Protobuf协议规格、`hexagonrpcd`文件服务及`ambient_light`流类型约束 |
 | [dev/fingerprint-driver-design.md](dev/fingerprint-driver-design.md) | 侧边指纹（FocalTech `FTE7001`、Goodix `GDIX5125`）：TrustZone QSEECOM TA加载、固定ioctl驱动与用户态HAL的分工 |

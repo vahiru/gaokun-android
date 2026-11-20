@@ -1,0 +1,439 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] WM Jetpack: show snapshots of the containers while dragging
+ the divider
+
+While the divider is being dragged, DividerPresenter covers both
+containers with solid veils and resizes the containers only when the
+drag ends, so that the apps do not lay out again on every move. The
+veil color is the window background of the top activity if it is a
+color, or black and gray. Many apps paint their own background over a
+window background of another color; in the dark theme of one such app
+the window background is #000000 under a page drawn in #191B1F, and
+both sides of the split turned black while dragging.
+
+When dragging starts, capture the window of the top activity of each
+container, with its child surfaces such as video, and show the capture
+on the veil where it was taken. The veil crops it to the container's
+new bounds, so the divider slides over the content instead of hiding
+it. The part of a growing container that the capture does not cover is
+filled with the most common opaque color of a 4px strip of the window
+next to the divider, unless the app configured a veil color. Without
+READ_FRAME_BUFFER, SurfaceFlinger lets an app capture only the layers
+of its own uid, which these windows are. The veil shows a solid color
+as before when the container has activities of another process (which
+cannot be captured here, and one may be on top), when the window does
+not cover exactly the current bounds of the container (letterboxed or
+scaled for size compatibility), when it has secure content (captured
+black), or when a capture fails. The snapshots are removed together with the veils when
+the drag ends; their buffers are closed once the transaction holds
+them.
+
+The captures (a window and a strip on each side) run synchronously
+when dragging starts; with two 1280x1600 windows they took about 20 ms
+in total on this device. Reading the strip back from the hardware
+bitmap is exempted from StrictMode's slow-call check.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ .../embedding/DividerPresenter.java           | 288 +++++++++++++++++-
+ 1 file changed, 274 insertions(+), 14 deletions(-)
+
+diff --git a/libs/WindowManager/Jetpack/src/androidx/window/extensions/embedding/DividerPresenter.java b/libs/WindowManager/Jetpack/src/androidx/window/extensions/embedding/DividerPresenter.java
+index af682c8..bc25ef8 100644
+--- a/libs/WindowManager/Jetpack/src/androidx/window/extensions/embedding/DividerPresenter.java
++++ b/libs/WindowManager/Jetpack/src/androidx/window/extensions/embedding/DividerPresenter.java
+@@ -45,14 +45,19 @@ import android.app.Activity;
+ import android.app.ActivityThread;
+ import android.content.Context;
+ import android.content.res.Configuration;
++import android.graphics.Bitmap;
+ import android.graphics.Color;
+ import android.graphics.PixelFormat;
+ import android.graphics.Rect;
+ import android.graphics.drawable.ColorDrawable;
+ import android.graphics.drawable.Drawable;
+ import android.graphics.drawable.RotateDrawable;
++import android.hardware.HardwareBuffer;
+ import android.hardware.display.DisplayManager;
+ import android.os.IBinder;
++import android.os.Process;
++import android.os.StrictMode;
++import android.util.Log;
+ import android.util.TypedValue;
+ import android.view.Gravity;
+ import android.view.MotionEvent;
+@@ -60,12 +65,16 @@ import android.view.SurfaceControl;
+ import android.view.SurfaceControlViewHost;
+ import android.view.VelocityTracker;
+ import android.view.View;
++import android.view.ViewRootImpl;
+ import android.view.WindowManager;
+ import android.view.WindowlessWindowManager;
+ import android.view.animation.PathInterpolator;
+ import android.widget.FrameLayout;
+ import android.widget.ImageButton;
+ import android.window.InputTransferToken;
++import android.window.ScreenCaptureInternal;
++import android.window.ScreenCaptureInternal.ScreenshotHardwareBuffer;
++import android.window.TaskFragmentInfo;
+ import android.window.TaskFragmentOperation;
+ import android.window.TaskFragmentParentInfo;
+ import android.window.WindowContainerTransaction;
+@@ -81,6 +90,7 @@ import com.android.internal.R;
+ import com.android.internal.annotations.VisibleForTesting;
+ import com.android.window.flags.Flags;
+ 
++import java.util.Arrays;
+ import java.util.Objects;
+ import java.util.concurrent.Executor;
+ 
+@@ -90,6 +100,7 @@ import java.util.concurrent.Executor;
+ class DividerPresenter implements View.OnTouchListener {
+     static final float RATIO_EXPANDED_PRIMARY = 1.0f;
+     static final float RATIO_EXPANDED_SECONDARY = 0.0f;
++    private static final String TAG = "DividerPresenter";
+     private static final String WINDOW_NAME = "AE Divider";
+     private static final int VEIL_LAYER = 0;
+     private static final int DIVIDER_LAYER = 1;
+@@ -97,6 +108,11 @@ class DividerPresenter implements View.OnTouchListener {
+     // TODO(b/327067596) Update based on UX guidance.
+     private static final Color DEFAULT_PRIMARY_VEIL_COLOR = Color.valueOf(Color.BLACK);
+     private static final Color DEFAULT_SECONDARY_VEIL_COLOR = Color.valueOf(Color.GRAY);
++    /**
++     * Width of the strip of a snapshot next to the divider whose most common color fills the
++     * part of a container that the snapshot does not cover while dragging.
++     */
++    private static final int SNAPSHOT_EDGE_SAMPLE_PX = 4;
+     @VisibleForTesting
+     static final float DEFAULT_MIN_RATIO = 0.35f;
+     @VisibleForTesting
+@@ -1118,6 +1134,18 @@ class DividerPresenter implements View.OnTouchListener {
+         private SurfaceControl mPrimaryVeil;
+         @Nullable
+         private SurfaceControl mSecondaryVeil;
++        /**
++         * Snapshots of the windows of the containers, shown on the veils while dragging so that
++         * the containers keep showing their content instead of a solid color. Null when no
++         * snapshot could be taken.
++         */
++        @Nullable
++        private SurfaceControl mPrimarySnapshot;
++        @Nullable
++        private SurfaceControl mSecondarySnapshot;
++        /** Where the snapshots were taken, relative to the task. */
++        private final Rect mPrimarySnapshotBounds = new Rect();
++        private final Rect mSecondarySnapshotBounds = new Rect();
+         private boolean mIsDragging;
+         private int mDividerPosition;
+         private int mDividerSurfaceWidthPx;
+@@ -1386,6 +1414,7 @@ class DividerPresenter implements View.OnTouchListener {
+         }
+ 
+         private void removeVeils(@NonNull SurfaceControl.Transaction t) {
++            removeSnapshots(t);
+             if (mPrimaryVeil != null) {
+                 t.remove(mPrimaryVeil);
+             }
+@@ -1397,14 +1426,25 @@ class DividerPresenter implements View.OnTouchListener {
+         }
+ 
+         private void showVeils(@NonNull SurfaceControl.Transaction t) {
++            final Snapshot primarySnapshot =
++                    takeSnapshot(mProperties.mPrimaryContainer, true /* isPrimary */);
++            final Snapshot secondarySnapshot =
++                    takeSnapshot(mProperties.mSecondaryContainer, false /* isPrimary */);
+             final Color primaryVeilColor = getVeilColor(
+                     mProperties.mDividerAttributes.getPrimaryVeilColor(),
++                    primarySnapshot != null ? primarySnapshot.mEdgeColor : null,
+                     mProperties.mPrimaryContainer,
+                     DEFAULT_PRIMARY_VEIL_COLOR);
+             final Color secondaryVeilColor = getVeilColor(
+                     mProperties.mDividerAttributes.getSecondaryVeilColor(),
++                    secondarySnapshot != null ? secondarySnapshot.mEdgeColor : null,
+                     mProperties.mSecondaryContainer,
+                     DEFAULT_SECONDARY_VEIL_COLOR);
++            removeSnapshots(t);
++            mPrimarySnapshot = showSnapshot(t, mPrimaryVeil, primarySnapshot,
++                    "DividerPrimarySnapshot", mPrimarySnapshotBounds);
++            mSecondarySnapshot = showSnapshot(t, mSecondaryVeil, secondarySnapshot,
++                    "DividerSecondarySnapshot", mSecondarySnapshotBounds);
+             t.setColor(mPrimaryVeil, colorToFloatArray(primaryVeilColor))
+                     .setColor(mSecondaryVeil, colorToFloatArray(secondaryVeilColor))
+                     .setLayer(mDividerSurface, DIVIDER_LAYER)
+@@ -1417,9 +1457,233 @@ class DividerPresenter implements View.OnTouchListener {
+ 
+         private void hideVeils(@NonNull SurfaceControl.Transaction t) {
+             t.setVisibility(mPrimaryVeil, false).setVisibility(mSecondaryVeil, false);
++            removeSnapshots(t);
++        }
++
++        /** A snapshot of the window of a container, and the color next to the divider. */
++        private static final class Snapshot {
++            @NonNull
++            final ScreenshotHardwareBuffer mBuffer;
++            /** Relative to the task. */
++            @NonNull
++            final Rect mBounds;
++            @Nullable
++            final Color mEdgeColor;
++
++            Snapshot(@NonNull ScreenshotHardwareBuffer buffer, @NonNull Rect bounds,
++                    @Nullable Color edgeColor) {
++                mBuffer = buffer;
++                mBounds = bounds;
++                mEdgeColor = edgeColor;
++            }
++        }
++
++        /**
++         * Takes a snapshot of the window of the top activity in {@code container}. Returns null if
++         * the container has activities of another process (they cannot be captured here, and one
++         * may be on top), if the window does not exactly fill the container (letterboxed or scaled
++         * for size compatibility), if it has secure content, or if it cannot be captured; the veil
++         * then shows a solid color.
++         */
++        @Nullable
++        private Snapshot takeSnapshot(@NonNull TaskFragmentContainer container,
++                boolean isPrimary) {
++            final TaskFragmentInfo info = container.getInfo();
++            if (info == null || container.hasCrossProcessActivities()) {
++                return null;
++            }
++            final Activity activity = container.getTopNonFinishingActivity();
++            final View decor = activity != null ? activity.getWindow().peekDecorView() : null;
++            final ViewRootImpl viewRoot = decor != null ? decor.getViewRootImpl() : null;
++            final SurfaceControl window = viewRoot != null ? viewRoot.getSurfaceControl() : null;
++            if (window == null || !window.isValid()) {
++                return null;
++            }
++            final Rect taskBounds = mProperties.mConfiguration.windowConfiguration.getBounds();
++            final int[] location = new int[2];
++            decor.getLocationOnScreen(location);
++            final Rect bounds = new Rect(0, 0, decor.getWidth(), decor.getHeight());
++            bounds.offset(location[0] - taskBounds.left, location[1] - taskBounds.top);
++            // The current bounds of the container; the veils already follow the touch.
++            final Rect containerBounds =
++                    new Rect(info.getConfiguration().windowConfiguration.getBounds());
++            containerBounds.offset(-taskBounds.left, -taskBounds.top);
++            if (containerBounds.isEmpty() || !bounds.equals(containerBounds)) {
++                return null;
++            }
++            // The content starts at the surface insets of the window surface.
++            final Rect insets = viewRoot.mWindowAttributes.surfaceInsets;
++            final Rect crop = new Rect(0, 0, bounds.width(), bounds.height());
++            crop.offset(insets.left, insets.top);
++            ScreenshotHardwareBuffer buffer = null;
++            try {
++                buffer = capture(window, crop);
++                if (buffer == null || buffer.containsSecureLayers()) {
++                    // Secure content comes out black.
++                    return null;
++                }
++                // The strip on the side of the divider.
++                final Rect edge = new Rect(crop);
++                final boolean atStart = isPrimary != mProperties.mIsReversedLayout;
++                if (mProperties.mIsVerticalSplit) {
++                    if (atStart) {
++                        edge.left = Math.max(edge.left, edge.right - SNAPSHOT_EDGE_SAMPLE_PX);
++                    } else {
++                        edge.right = Math.min(edge.right, edge.left + SNAPSHOT_EDGE_SAMPLE_PX);
++                    }
++                } else {
++                    if (atStart) {
++                        edge.top = Math.max(edge.top, edge.bottom - SNAPSHOT_EDGE_SAMPLE_PX);
++                    } else {
++                        edge.bottom = Math.min(edge.bottom, edge.top + SNAPSHOT_EDGE_SAMPLE_PX);
++                    }
++                }
++                final Snapshot snapshot =
++                        new Snapshot(buffer, bounds, mostCommonColor(capture(window, edge)));
++                buffer = null;
++                return snapshot;
++            } catch (RuntimeException e) {
++                Log.w(TAG, "Could not take a snapshot of " + activity.getComponentName(), e);
++                return null;
++            } finally {
++                if (buffer != null) {
++                    buffer.getHardwareBuffer().close();
++                }
++            }
++        }
++
++        /** Captures {@code crop} of {@code window} and its child surfaces. */
++        @Nullable
++        private static ScreenshotHardwareBuffer capture(@NonNull SurfaceControl window,
++                @NonNull Rect crop) {
++            return ScreenCaptureInternal.captureLayers(
++                    new ScreenCaptureInternal.LayerCaptureArgs.Builder(window)
++                            .setSourceCrop(crop)
++                            .setChildrenOnly(false)
++                            // Without READ_FRAME_BUFFER, SurfaceFlinger lets an app capture only
++                            // the layers of its own uid.
++                            .setUid(Process.myUid())
++                            .build());
++        }
++
++        /** The most common opaque color in {@code buffer}, which is closed. */
++        @Nullable
++        private static Color mostCommonColor(@Nullable ScreenshotHardwareBuffer buffer) {
++            if (buffer == null) {
++                return null;
++            }
++            final Bitmap bitmap;
++            // Copying a hardware bitmap counts as a slow call for StrictMode; the strip is small.
++            final StrictMode.ThreadPolicy policy = StrictMode.allowThreadViolations();
++            try {
++                final Bitmap hardware = buffer.asBitmap();
++                bitmap = hardware != null
++                        ? hardware.copy(Bitmap.Config.ARGB_8888, false /* isMutable */) : null;
++                if (hardware != null) {
++                    hardware.recycle();
++                }
++            } finally {
++                StrictMode.setThreadPolicy(policy);
++                buffer.getHardwareBuffer().close();
++            }
++            if (bitmap == null) {
++                return null;
++            }
++            final int[] pixels = new int[bitmap.getWidth() * bitmap.getHeight()];
++            bitmap.getPixels(pixels, 0, bitmap.getWidth(), 0, 0, bitmap.getWidth(),
++                    bitmap.getHeight());
++            bitmap.recycle();
++            // Translucent or undrawn pixels say nothing about the color of the page.
++            Arrays.sort(pixels);
++            int best = 0;
++            int bestCount = 0;
++            for (int i = 0; i < pixels.length; ) {
++                int j = i + 1;
++                while (j < pixels.length && pixels[j] == pixels[i]) {
++                    j++;
++                }
++                if (Color.alpha(pixels[i]) == 0xFF && j - i > bestCount) {
++                    best = pixels[i];
++                    bestCount = j - i;
++                }
++                i = j;
++            }
++            return bestCount > 0 ? Color.valueOf(best) : null;
++        }
++
++        /**
++         * Shows {@code snapshot} on {@code veil} and closes its buffer. Returns the snapshot
++         * surface, or null if there is no snapshot.
++         */
++        @Nullable
++        private static SurfaceControl showSnapshot(@NonNull SurfaceControl.Transaction t,
++                @Nullable SurfaceControl veil, @Nullable Snapshot snapshot, @NonNull String name,
++                @NonNull Rect outBounds) {
++            if (snapshot == null) {
++                return null;
++            }
++            final HardwareBuffer buffer = snapshot.mBuffer.getHardwareBuffer();
++            try {
++                if (veil == null) {
++                    return null;
++                }
++                final SurfaceControl surface = new SurfaceControl.Builder()
++                        .setParent(veil)
++                        .setName(name)
++                        .setCallsite("DividerManager.showSnapshot")
++                        .setBLASTLayer()
++                        .build();
++                t.setBuffer(surface, buffer)
++                        .setDataSpace(surface, snapshot.mBuffer.getColorSpace().getDataSpace())
++                        .setVisibility(surface, true);
++                outBounds.set(snapshot.mBounds);
++                return surface;
++            } finally {
++                // The transaction keeps its own reference to the buffer.
++                buffer.close();
++            }
++        }
++
++        private void removeSnapshots(@NonNull SurfaceControl.Transaction t) {
++            if (mPrimarySnapshot != null) {
++                t.remove(mPrimarySnapshot);
++                mPrimarySnapshot = null;
++            }
++            if (mSecondarySnapshot != null) {
++                t.remove(mSecondarySnapshot);
++                mSecondarySnapshot = null;
++            }
+         }
+ 
+         private void updateVeils(@NonNull SurfaceControl.Transaction t) {
++            final Rect[] bounds = getVeilBounds();
++            final Rect primaryBounds = bounds[0];
++            final Rect secondaryBounds = bounds[1];
++            if (mPrimaryVeil != null) {
++                t.setWindowCrop(mPrimaryVeil, primaryBounds.width(), primaryBounds.height());
++                t.setPosition(mPrimaryVeil, primaryBounds.left, primaryBounds.top);
++                t.setVisibility(mPrimaryVeil, !primaryBounds.isEmpty());
++            }
++            if (mSecondaryVeil != null) {
++                t.setWindowCrop(mSecondaryVeil, secondaryBounds.width(), secondaryBounds.height());
++                t.setPosition(mSecondaryVeil, secondaryBounds.left, secondaryBounds.top);
++                t.setVisibility(mSecondaryVeil, !secondaryBounds.isEmpty());
++            }
++            // The snapshots stay where they were taken; the veils crop them to the containers.
++            if (mPrimarySnapshot != null) {
++                t.setPosition(mPrimarySnapshot, mPrimarySnapshotBounds.left - primaryBounds.left,
++                        mPrimarySnapshotBounds.top - primaryBounds.top);
++            }
++            if (mSecondarySnapshot != null) {
++                t.setPosition(mSecondarySnapshot,
++                        mSecondarySnapshotBounds.left - secondaryBounds.left,
++                        mSecondarySnapshotBounds.top - secondaryBounds.top);
++            }
++        }
++
++        /** Bounds of the primary and secondary veils relative to the task. */
++        @NonNull
++        private Rect[] getVeilBounds() {
+             final Rect taskBounds = mProperties.mConfiguration.windowConfiguration.getBounds();
+ 
+             // Relative bounds of the primary and secondary containers in the Task.
+@@ -1439,30 +1703,26 @@ class DividerPresenter implements View.OnTouchListener {
+                 primaryBounds = mProperties.mIsReversedLayout ? boundsBottom : boundsTop;
+                 secondaryBounds = mProperties.mIsReversedLayout ? boundsTop : boundsBottom;
+             }
+-            if (mPrimaryVeil != null) {
+-                t.setWindowCrop(mPrimaryVeil, primaryBounds.width(), primaryBounds.height());
+-                t.setPosition(mPrimaryVeil, primaryBounds.left, primaryBounds.top);
+-                t.setVisibility(mPrimaryVeil, !primaryBounds.isEmpty());
+-            }
+-            if (mSecondaryVeil != null) {
+-                t.setWindowCrop(mSecondaryVeil, secondaryBounds.width(), secondaryBounds.height());
+-                t.setPosition(mSecondaryVeil, secondaryBounds.left, secondaryBounds.top);
+-                t.setVisibility(mSecondaryVeil, !secondaryBounds.isEmpty());
+-            }
++            return new Rect[] {primaryBounds, secondaryBounds};
+         }
+ 
+         /**
+          * Returns the veil color.
+          *
+          * If the configured color is not transparent, we use the configured color, otherwise we use
+-         * the window background color of the top activity. If the background color of the top
++         * the color next to the divider in the snapshot of the container if there is one, or the
++         * window background color of the top activity. If the background color of the top
+          * activity is unavailable, the default color is used.
+          */
+         @NonNull
+         private static Color getVeilColor(@ColorInt int configuredColor,
+-                @NonNull TaskFragmentContainer container, @NonNull Color defaultColor) {
+-            return configuredColor != Color.TRANSPARENT
+-                    ? Color.valueOf(configuredColor)
++                @Nullable Color snapshotEdgeColor, @NonNull TaskFragmentContainer container,
++                @NonNull Color defaultColor) {
++            if (configuredColor != Color.TRANSPARENT) {
++                return Color.valueOf(configuredColor);
++            }
++            return snapshotEdgeColor != null
++                    ? snapshotEdgeColor
+                     : getContainerBackgroundColor(container, defaultColor);
+         }
+ 
