@@ -95,7 +95,7 @@ on boot
     #   放在 on boot（晚于 init.rc 的 on init copy）：已经在这两个 cpuset 里的进程随 cpus 一起迁走，不怕时序。
     #   SELinux：/dev/cpuset 是 cgroup 类型（refs/lineage-sepolicy/private/genfs_contexts:121），
     #   vendor_init 有 cgroup:file w_file_perms（private/vendor_init.te:46）⇒ 不用加规则。
-    #   Power HAL 仍是 AOSP 示例桩（device.mk 的 android.hardware.power-service.example），这里不碰它。
+    #   Power HAL（lineage-libperfmgr）只按提示改频率上下限和top-app的uclamp，不改cpuset。
     #   ⬜ 未上机。判据：`cat /dev/cpuset/background/cpus /dev/cpuset/system-background/cpus` = 0-3、0-3，
     #   top-app / foreground 仍 0-7；`grep Cpus_allowed_list /proc/$(pidof -s com.android.providers.media.module)/status`
     #   之类后台进程 = 0-3；游戏帧率不低于改前（PERF-2 的 game-perf.sh 对照一次）。
@@ -178,6 +178,10 @@ service gaokun3_rprockick /vendor/bin/gaokun3-rproc-kick.sh
 on property:sys.boot_completed=1
     start gaokun3_rprockick
     start gaokun3_wifiwake
+    # Power HAL在此之前已注册服务，收到的提示先排队；开机完成后才启动节点写入线程和温控监听，
+    # 按powerhint.json的ResetOnInit写入各节点的默认值，排队中未到期的提示随后生效。
+    # ADPF会话不受这个属性影响。做法同Pixel的init.gs101.rc。
+    setprop vendor.powerhal.init 1
 
 # turnip 调试旗标（见 docs/dev/gpu-turnip.md）：
 # 内核 cmdline 加 androidboot.tu_debug=<flags> → ro.boot.tu_debug → 下面的属性。
