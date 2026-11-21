@@ -137,7 +137,7 @@ PRODUCT_PACKAGES += \
 # 软件 HAL 全家桶（hardware/interfaces 各 default 实现，模块名逐一核实）。
 # system_server 的 HAL 阶梯（每级都是实测 FATAL 后确认的）：
 #   BatteryService     ← IHealth（"instance default isn't available"）
-#   HintManagerService ← IPower（SupportInfo.headroom NPE）
+#   HintManagerService ← IPower（SupportInfo.headroom NPE）—— IPower现由下面的lineage-libperfmgr提供。
 # thermal/memtrack/lights 为预防性（cuttlefish 同款 example）。
 # ★ v1.0 HW-6（2026-10-05）：vibrator example 删掉了 —— 本机没有马达（键盘 / 触摸都没有 EV_FF），
 #   假 HAL 只会让框架以为有振动器（设置里出现"振动和触感"、App 调振动"成功"却没反应）。没有它不会 NPE（构建机核过）：
@@ -151,9 +151,28 @@ PRODUCT_PACKAGES += \
 #     没声明就退回 Legacy / nullptr，不会 waitForService 卡住。
 PRODUCT_PACKAGES += \
     android.hardware.health-service.example \
-    android.hardware.power-service.example \
     android.hardware.memtrack-service.example \
     android.hardware.lights-service.example
+
+# ------------------------------------------------------------- Power HAL
+# Lineage的lineage-libperfmgr（hardware/lineage/interfaces/power-libperfmgr，与Pixel共用libperfmgr），
+# 按power/powerhint.json处理触摸、启动应用、省电模式等提示，并为ADPF会话的线程设置uclamp。
+# 三个目录各是一个Soong namespace，HAL依赖另外两个。配置的取值依据见power/README.md。
+PRODUCT_SOONG_NAMESPACES += \
+    hardware/google/interfaces \
+    hardware/google/pixel/power-libperfmgr \
+    hardware/lineage/interfaces/power-libperfmgr
+PRODUCT_PACKAGES += \
+    android.hardware.power-service.lineage-libperfmgr
+PRODUCT_COPY_FILES += \
+    $(LOCAL_PATH)/power/powerhint.json:$(TARGET_COPY_OUT_VENDOR)/etc/powerhint.json
+# HWUI默认不为应用的UI线程和RenderThread创建ADPF会话（frameworks/base libs/hwui/Properties.cpp，
+# debug.hwui.use_hint_manager缺省为false）；没有会话，Power HAL无从按帧耗时调整这些线程的uclamp。
+PRODUCT_VENDOR_PROPERTIES += \
+    debug.hwui.use_hint_manager=true
+# 本机没有显示空闲节点（idle_state），触摸提示按固定时长生效（1.4–5.65秒）；明确声明，HAL启动时不再报错。
+PRODUCT_VENDOR_PROPERTIES += \
+    vendor.powerhal.disp.idle_support=false
 
 # 音频 HAL（AIDL 示例实现，null 音频）—— audioserver 没有 HAL 会 NPE
 # 崩溃循环，而 system_server 主线程在 AudioService 构造时【同步阻塞】

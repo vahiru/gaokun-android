@@ -292,6 +292,9 @@ AB_OTA_POSTINSTALL_CONFIG +=     RUN_POSTINSTALL_vendor=true     POSTINSTALL_PAT
 # --------------------------------------------------------------- sepolicy
 # permissive 起步（cmdline 里也带了），但 policy 仍要能编过
 BOARD_VENDOR_SEPOLICY_DIRS += device/huawei/gaokun3/sepolicy
+# lineage-libperfmgr的通用规则（CPU调频节点、cgroup、vendor.powerhal.*属性、温控HAL客户端）；
+# 本机另需的规则在sepolicy/hal_power_default.te。
+include device/lineage/sepolicy/libperfmgr/sepolicy.mk
 # minigbm 的 sepolicy 复用 dragonboard 的（同一套 HAL）
 # ⚠️ A17：这份的 file_contexts:8 把 /(system|vendor)/lib(64)?/libdrm.so 标成 same_process_hal_file，
 #   撞 A17 默认强制的 SELinux Treble 标签检查（vendor 策略不许标 /system 下的文件）——

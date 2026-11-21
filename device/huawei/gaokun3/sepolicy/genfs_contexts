@@ -130,3 +130,6 @@ genfscon sysfs /devices/virtual/power_supply/m-pencil u:object_r:sysfs_gaokun3_p
 
 # Kernel release reported to apps (patches/kernel/core/0008).
 genfscon proc /sys/kernel/app_osrelease u:object_r:gaokun3_proc_app_osrelease:s0
+
+# GPU最低频率（Power HAL写入，见file.te）。/sys/class/devfreq/3d00000.gpu是指向这里的符号链接。
+genfscon sysfs /devices/platform/soc@0/3d00000.gpu/devfreq/3d00000.gpu/min_freq u:object_r:sysfs_gaokun3_gpu_min_freq:s0

@@ -48,6 +48,7 @@ UEFI 2.16 (关闭Secure Boot)
 
 ### 2. 电源、电池与导航栏
 
+- **Power HAL**：使用Lineage的`android.hardware.power-service.lineage-libperfmgr`，配置为`device/huawei/gaokun3/power/powerhint.json`：触摸、启动应用时提高top-app的uclamp下限，省电模式限制CPU频率上限，并为HWUI等的ADPF会话调整线程的uclamp；RT任务的uclamp默认值由HAL改为0。取值依据见[power/README.md](../../device/huawei/gaokun3/power/README.md)。
 - **电池与充电器状态**：由内核`ec_huawei_gaokun`驱动暴露`/sys/class/power_supply/gaokun-battery`与`gaokun-psy-ec`，对接`android.hardware.health-service.example`。
 - **导航栏与侧滑返回手势**：平板设备必须在framework overlay（`overlay/frameworks/base/core/res/res/values/config.xml`）中声明`config_showNavigationBar = true`。在Android中，全屏边缘侧滑返回（Edge Back Gesture）的输入监听器由`NavigationBar` / `Taskbar`组件负责创建；若未启用该项，系统既无底部任务栏也无法响应侧滑返回手势。
 - **游戏模式与高刷调度**：CPU/GPU调频、SurfaceFlinger合成锁与触控采样率优化详见[gaming.md](gaming.md)，深度休眠（S3 mem sleep）详见[deep-sleep.md](deep-sleep.md)。
