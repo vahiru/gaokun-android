@@ -1503,6 +1503,16 @@ def main():
     step(" [54] 拖动分隔条时显示两侧页面的截图: ", apply_patch_file(
         tree, "frameworks/base",
         "android/frameworks-base/0008-wm-jetpack-show-snapshots-while-dragging-the-divider.patch"))
+    # 大屏默认忽略应用的方向请求（ignoreOrientationRequest），只支持横屏的应用（多数游戏）在屏幕处于竖屏时启动，
+    # 会以横条显示在屏幕顶部。0009让自然方向为横屏的屏幕仍响应横屏请求，其他请求照旧忽略（按应用豁免的除外）。
+    # 计算旋转时landscape与reverseLandscape按userLandscape处理，由传感器或旋转锁定在两个横屏方向中选择；请求被
+    # 忽略的半透明页面（如竖屏的登录对话框）让下层页面决定方向。平行视界等分栏只在横屏并排显示，屏幕已是横屏时，
+    # 并排的容器按堆叠时的覆盖关系从上往下判断，先遇到横屏请求则报告userLandscape，屏幕保持横屏，不会转回竖屏后
+    # 又转为横屏；主页面请求横屏时0007不打开占位页，已显示的占位页会被关闭。从这样的应用进入最近任务时的屏幕旋转
+    # 需要0004。
+    step(" [55] 自然方向为横屏的屏幕仍响应横屏请求: ", apply_patch_file(
+        tree, "frameworks/base",
+        "android/frameworks-base/0009-wm-respect-landscape-requests-on-a-naturally-landscape-display.patch"))
     # crDroid的锁屏充电信息（core: Lockscreen Charging）固定从/sys/class/power_supply/battery读取电流和电压，
     # 没有这个节点时改读充电器节点。本机电池节点名为gaokun-ec-battery，EC适配器节点没有电流和电压，UCSI节点在
     # PD模式下两者均为0，锁屏因此只显示默认的5V。补丁在没有battery节点时改用BatteryMonitor已识别的电池节点。

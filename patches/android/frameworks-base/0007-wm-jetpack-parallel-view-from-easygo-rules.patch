@@ -74,13 +74,16 @@ video. The previous split attributes are restored when the side no
 longer requests landscape. The pages of the side container are judged as
 window management judges the display orientation: from the top, the
 first page with an explicit orientation decides, a page that requests
-"behind", or a translucent or floating page without one, defers to the
-page below, and an opaque page without one ends the search. So a page opened above a player does not restore the
-split while the player shows through, and a player with a translucent
-theme still counts. A split whose side page is a placeholder that is not
-sticky is not expanded, since that dismisses the placeholder with the
-pages above it. A page's requested orientation is the one it last passed
-to setRequestedOrientation()
+"behind", or a translucent or floating page without one or with one the
+display ignores (any but landscape, "locked", "nosensor", "sensor" and
+"fullSensor", see "WM: respect landscape requests on a naturally
+landscape display"), defers to the page below, and an opaque page
+without one ends the search. So a page opened above a player does not
+restore the split while the player shows through, and a player with a
+translucent theme still counts. A split whose side page is a placeholder
+that is not sticky is not expanded, since that dismisses the placeholder
+with the pages above it. A page's requested orientation is the one it
+last passed to setRequestedOrientation()
 (Activity#mLastRequestedOrientation), else what the system holds for the
 activity, queried once (declared in the manifest, or requested by an
 earlier instance of a relaunched activity). The layout listener belongs
@@ -88,14 +91,34 @@ to the activity instance, since a relaunch can keep the window. The
 SplitController passes itself to ParallelViewRules for this, and only
 apps that got parallel-view rules are affected.
 
+No placeholder is launched beside a main page whose container requests
+landscape, judged as for the side container, and a placeholder already
+shown is dismissed at the next layout of a page of its main container
+once they request landscape; the main page then fills the task. The
+placeholder is dismissed as
+SplitController#dismissPlaceholderIfNecessary does, without finishing
+its dependents, since the placeholder rules finish the primary with the
+placeholder (FINISH_ALWAYS); the pages opened above the placeholder in
+its container close with it, as when Jetpack dismisses a placeholder in
+portrait. Splits are shown side by side only in landscape, a placeholder
+that is not sticky is finished in portrait, and window management keeps
+the display in landscape for a split only while its containers, walked
+from the top as the task walks them stacked, first meet a landscape
+request (an opaque placeholder on top ends the walk), so with the tablet
+held in portrait a placeholder beside a landscape main page would rotate
+the display back and forth; a sticky one would cover the main page in
+portrait. When the main page no longer requests landscape, the
+placeholder comes back with the next update of its container, e.g. when
+the page resumes or the display rotates.
+
 Assisted-by: Claude:claude-opus-5-5
 Origin: local
 Upstream-Status: Inappropriate [device-specific feature]
 ---
- .../AppCompatEmbeddingRuleController.java     |   6 +
- .../embedding/ParallelViewRules.java          | 992 ++++++++++++++++++
- .../extensions/embedding/SplitController.java |  10 +-
- 3 files changed, 1006 insertions(+), 2 deletions(-)
+ .../AppCompatEmbeddingRuleController.java     |    6 +
+ .../embedding/ParallelViewRules.java          | 1061 +++++++++++++++++
+ .../extensions/embedding/SplitController.java |   35 +-
+ 3 files changed, 1100 insertions(+), 2 deletions(-)
  create mode 100644 libs/WindowManager/Jetpack/src/androidx/window/extensions/embedding/ParallelViewRules.java
 
 diff --git a/libs/WindowManager/Jetpack/src/androidx/window/extensions/embedding/AppCompatEmbeddingRuleController.java b/libs/WindowManager/Jetpack/src/androidx/window/extensions/embedding/AppCompatEmbeddingRuleController.java
@@ -124,10 +147,10 @@ index 918505b..4ec7391 100644
  
 diff --git a/libs/WindowManager/Jetpack/src/androidx/window/extensions/embedding/ParallelViewRules.java b/libs/WindowManager/Jetpack/src/androidx/window/extensions/embedding/ParallelViewRules.java
 new file mode 100644
-index 0000000..401e68b
+index 0000000..631be0d
 --- /dev/null
 +++ b/libs/WindowManager/Jetpack/src/androidx/window/extensions/embedding/ParallelViewRules.java
-@@ -0,0 +1,992 @@
+@@ -0,0 +1,1061 @@
 +/*
 + * Copyright (C) 2026 The gaokun-android contributors
 + *
@@ -190,6 +213,7 @@ index 0000000..401e68b
 +import java.lang.reflect.Modifier;
 +import java.nio.charset.StandardCharsets;
 +import java.util.ArrayList;
++import java.util.Collections;
 +import java.util.HashSet;
 +import java.util.List;
 +import java.util.Set;
@@ -280,6 +304,39 @@ index 0000000..401e68b
 +                onLayout(activity);
 +            }
 +        });
++    }
++
++    /**
++     * Whether no placeholder is launched beside {@code primary}, because the pages of its
++     * container request landscape, judged as in {@link #onLayout} (see {@link #sideOrientation}).
++     *
++     * <p>Splits are shown side by side only in landscape, and a placeholder that is not sticky is
++     * finished when the display turns to portrait. If the main page requested landscape with a
++     * placeholder beside it, the display would rotate to landscape for it, show the placeholder,
++     * follow the sensor back to portrait (the placeholder on top does not request landscape),
++     * finish the placeholder, and rotate to landscape again. Without a placeholder, the main page
++     * fills the task in landscape. A sticky placeholder would cover the main page in portrait.
++     * Window management keeps a split side by side in landscape only while its top container
++     * requests landscape (frameworks-base/0009, TaskFragment#getOrientation).
++     */
++    static boolean isPlaceholderSuppressed(@NonNull Activity primary) {
++        final SplitController controller = sController;
++        if (controller == null) {
++            return false;
++        }
++        try {
++            final List<Activity> pages;
++            synchronized (controller.mLock) {
++                final TaskFragmentContainer container =
++                        controller.getContainerWithActivity(primary);
++                pages = container != null ? container.collectNonFinishingActivities()
++                        : Collections.singletonList(primary);
++            }
++            return isLandscape(sideOrientation(pages));
++        } catch (ReflectiveOperationException | RuntimeException e) {
++            Log.w(TAG, "Could not read the orientation of " + primary.getComponentName(), e);
++            return false;
++        }
 +    }
 +
 +    /** Whether parallel view is enabled for the app of this process. */
@@ -506,6 +563,10 @@ index 0000000..401e68b
 +     * expanded so that they fill the task, with the main page kept underneath and without a
 +     * divider, and the split is restored when they no longer request landscape. The pages are
 +     * judged as window management judges the display orientation (see {@link #sideOrientation}).
++     *
++     * <p>When the pages of the main container of a placeholder split request landscape, the
++     * placeholder is finished, and no new one is launched while they do (see
++     * {@link #isPlaceholderSuppressed}).
 +     */
 +    private static void onLayout(@NonNull Activity activity) {
 +        final SplitController controller = sController;
@@ -516,6 +577,7 @@ index 0000000..401e68b
 +        final SplitContainer split;
 +        final List<Activity> sidePages;
 +        final boolean isNonStickyPlaceholder;
++        final List<Activity> mainPages;
 +        synchronized (controller.mLock) {
 +            final TaskFragmentContainer container = controller.getContainerWithActivity(activity);
 +            final TaskContainer task = container != null ? container.getTaskContainer() : null;
@@ -525,6 +587,9 @@ index 0000000..401e68b
 +                    ? container.collectNonFinishingActivities() : null;
 +            isNonStickyPlaceholder = split != null && split.isPlaceholderContainer()
 +                    && !SplitContainer.isStickyPlaceholderRule(split.getSplitRule());
++            mainPages = split != null && split.isPlaceholderContainer()
++                    && split.getPrimaryContainer() == container
++                    ? container.collectNonFinishingActivities() : null;
 +        }
 +        try {
 +            final boolean inMultiWindowMode = !inSplitOfFullTask
@@ -534,6 +599,15 @@ index 0000000..401e68b
 +                final Field field = Activity.class.getDeclaredField("mIsInMultiWindowMode");
 +                field.setAccessible(true);
 +                field.setBoolean(activity, inMultiWindowMode);
++            }
++            if (mainPages != null && isLandscape(sideOrientation(mainPages))) {
++                // Not Activity#finish(): the placeholder rules finish the primary with the
++                // placeholder (FINISH_ALWAYS).
++                if (controller.dismissPlaceholder(split)) {
++                    Log.i(TAG, activity.getComponentName().getClassName()
++                            + " requests landscape; dismissing the placeholder beside it");
++                }
++                return;
 +            }
 +            if (sidePages == null) {
 +                return;
@@ -579,9 +653,9 @@ index 0000000..401e68b
 +     * The orientation that the pages of a container ({@code pages}, bottom to top) request
 +     * together, as window management determines the display orientation: from the top, the
 +     * first page that requests an explicit orientation decides; a page that requests "behind",
-+     * or a translucent or floating page that requests none, defers to the page below, and an
-+     * opaque page that requests none ends the search unspecified. Pages of other processes are
-+     * not known here. So
++     * or a translucent or floating page that requests none or one the display ignores (see
++     * {@link #isIgnoredByDisplay}), defers to the page below, and an opaque page that requests
++     * none ends the search unspecified. Pages of other processes are not known here. So
 +     * a page opened above a player does not restore the split while the player is visible under
 +     * it, and a player with a translucent theme still decides.
 +     */
@@ -593,11 +667,14 @@ index 0000000..401e68b
 +            if (orientation == ActivityInfo.SCREEN_ORIENTATION_BEHIND) {
 +                continue;
 +            }
++            final boolean translucent =
++                    ActivityInfo.isTranslucentOrFloating(page.getWindow().getWindowStyle());
 +            if (orientation != ActivityInfo.SCREEN_ORIENTATION_UNSET
-+                    && orientation != ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED) {
++                    && orientation != ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
++                    && !(translucent && isIgnoredByDisplay(orientation))) {
 +                return orientation;
 +            }
-+            if (!ActivityInfo.isTranslucentOrFloating(page.getWindow().getWindowStyle())) {
++            if (!translucent) {
 +                break;
 +            }
 +        }
@@ -628,6 +705,21 @@ index 0000000..401e68b
 +            sServerOrientations.put(activity, fromServer);
 +        }
 +        return fromServer;
++    }
++
++    /**
++     * Whether the display ignores {@code orientation}: large screens ignore orientation requests,
++     * except "locked", "nosensor", "sensor" and "fullSensor", and here landscape ones
++     * (frameworks-base/0009, DisplayArea#shouldIgnoreOrientationRequest). A translucent page with
++     * such a request defers to the pages behind it there too
++     * (ActivityRecord#defersIgnoredOrientationRequest).
++     */
++    private static boolean isIgnoredByDisplay(int orientation) {
++        return !isLandscape(orientation)
++                && orientation != ActivityInfo.SCREEN_ORIENTATION_LOCKED
++                && orientation != ActivityInfo.SCREEN_ORIENTATION_NOSENSOR
++                && orientation != ActivityInfo.SCREEN_ORIENTATION_SENSOR
++                && orientation != ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR;
 +    }
 +
 +    private static boolean isLandscape(int orientation) {
@@ -1121,7 +1213,7 @@ index 0000000..401e68b
 +    }
 +}
 diff --git a/libs/WindowManager/Jetpack/src/androidx/window/extensions/embedding/SplitController.java b/libs/WindowManager/Jetpack/src/androidx/window/extensions/embedding/SplitController.java
-index 83d4bab..c803832 100644
+index 83d4bab..5e569a2 100644
 --- a/libs/WindowManager/Jetpack/src/androidx/window/extensions/embedding/SplitController.java
 +++ b/libs/WindowManager/Jetpack/src/androidx/window/extensions/embedding/SplitController.java
 @@ -234,19 +234,24 @@ public class SplitController implements JetpackTaskFragmentOrganizer.TaskFragmen
@@ -1159,3 +1251,42 @@ index 83d4bab..c803832 100644
  
          // The divider need to be updated even if shouldUpdateContainer is false, because the decor
          // surface may change in TaskFragmentParentInfo, which requires divider update but not
+@@ -2241,6 +2247,10 @@ public class SplitController implements JetpackTaskFragmentOrganizer.TaskFragmen
+             return false;
+         }
+ 
++        if (ParallelViewRules.isPlaceholderSuppressed(activity)) {
++            return false;
++        }
++
+         if (container != null && container.getTaskContainer().isPlaceholderRuleSuppressed()) {
+             return false;
+         }
+@@ -2357,6 +2367,27 @@ public class SplitController implements JetpackTaskFragmentOrganizer.TaskFragmen
+         return true;
+     }
+ 
++    /**
++     * Dismisses the placeholder of {@code splitContainer}, with the pages above it in its
++     * container, without finishing its primary, as {@link #dismissPlaceholderIfNecessary} does;
++     * for parallel view (ParallelViewRules), when the primary requests landscape. Returns whether
++     * it started to.
++     */
++    boolean dismissPlaceholder(@NonNull SplitContainer splitContainer) {
++        synchronized (mLock) {
++            final TaskFragmentContainer placeholder = splitContainer.getSecondaryContainer();
++            if (!splitContainer.isPlaceholderContainer() || placeholder.isFinished()) {
++                return false;
++            }
++            final TransactionRecord transactionRecord = mTransactionManager.startNewTransaction();
++            transactionRecord.setOriginType(TASK_FRAGMENT_TRANSIT_CLOSE);
++            mPresenter.cleanupContainer(transactionRecord.getTransaction(), placeholder,
++                    false /* shouldFinishDependent */);
++            transactionRecord.apply(false /* shouldApplyIndependently */);
++            return true;
++        }
++    }
++
+     /**
+      * Returns the rule to launch a placeholder for the activity with the provided component name
+      * if it is configured in the split config.

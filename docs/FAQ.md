@@ -179,7 +179,7 @@ Apps that only support portrait, such as many phone apps, are shown in the middl
 
 In full screen the app lays itself out for the landscape screen, and some screens may be cut off or stretched. If that happens, change it back to "App default".
 
-Likewise, when "Auto-rotate screen" is disabled and the screen stays in portrait, apps that only support landscape, such as some games, are shown in the middle of the screen. Enable "Auto-rotate screen" and hold the tablet in landscape.
+Apps that only support landscape, such as most games, are not affected: the screen rotates to landscape when they open, unless the app is set to "Full screen" under Aspect ratio.
 
 ### Showing app pages side by side
 
