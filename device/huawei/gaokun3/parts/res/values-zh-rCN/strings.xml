@@ -104,4 +104,9 @@
     <string name="parallel_view_intro">为支持分栏的应用开启后，横屏时应用页面将左右分栏显示。更改此设置将关闭该应用，并在应用下次打开时生效。</string>
     <string name="parallel_view_apps_title">应用</string>
     <string name="parallel_view_no_apps">未找到支持分栏的应用</string>
+
+    <!-- 性能模式（设置 → 电池） -->
+    <string name="perf_mode_title">性能模式</string>
+    <string name="perf_mode_summary">开启性能模式可提高处理器和GPU在高负载下的温度上限，适合游戏等长时间高负载的场景。</string>
+    <string name="perf_mode_error">无法更改性能模式</string>
 </resources>

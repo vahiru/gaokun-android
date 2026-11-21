@@ -154,6 +154,19 @@
                 android:resource="@drawable/ic_touch_game" />
         </activity>
 
+        <!-- 性能模式：电池页里的一个开关条目，没有单独的页面（PerformanceModeProvider.java）。
+             设置按IA_SETTINGS查询provider，再从它读取标题、分类（ia.battery）和开关状态。
+             受WRITE_SECURE_SETTINGS保护：只有设置等系统组件能读写这个开关。 -->
+        <provider
+            android:name="com.huawei.gaokun3.parts.PerformanceModeProvider"
+            android:authorities="com.huawei.gaokun3.parts.performancemode"
+            android:exported="true"
+            android:permission="android.permission.WRITE_SECURE_SETTINGS">
+            <intent-filter>
+                <action android:name="com.android.settings.action.IA_SETTINGS" />
+            </intent-filter>
+        </provider>
+
         <!-- M-Pencil settings: ink smoothing and the side double-tap (stylus/gk3pend.rc). Injected into
              Settings → Connected devices: category ia.connect = CategoryKey.CATEGORY_CONNECT, which
              ConnectedDeviceDashboardFragment takes its injected entries from. -->

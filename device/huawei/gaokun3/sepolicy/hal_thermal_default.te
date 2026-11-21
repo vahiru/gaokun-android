@@ -1,4 +1,4 @@
-# 自研温控 HAL（thermal/Thermal.cpp，读 /sys/class/thermal；[TODO B2]，v0.6.0 起进镜像）。
+# 自研温控HAL（thermal/Thermal.cpp）：读取/sys/class/thermal，并按性能模式改写板载热敏电阻温区的降频点。
 #
 # 证据：2026-09-18 实机 dmesg，35 条
 #   scontext=u:r:hal_thermal_default:s0 tcontext=u:object_r:sysfs:s0 tclass=file
@@ -18,3 +18,12 @@
 # ⚠️ HAL 是 opendir("/sys/class/thermal") 再逐个 zone 读 temp/type，所以 dir 与
 #    file 都要 —— r_dir_file 一次给全。
 r_dir_file(hal_thermal_default, sysfs_thermal)
+
+# 性能模式：改写板载热敏电阻温区的降频点（trip_point_*_temp，同为sysfs_thermal；DAC由
+# ueventd.gaokun3.rc交给system组，只放开了trip 0/1，cooling device等其余节点仍是0644 root），
+# 读电源适配器是否接入（gaokun-ec-adapter的online，sysfs_batteryinfo，见genfs_contexts里
+# EC power_supply那条），读init从persist.sys.gaokun3.perf_mode转写的vendor.gaokun3.perf_mode。
+# 在强制模式下，这是唯一能写sysfs_thermal的非root进程。
+allow hal_thermal_default sysfs_thermal:file w_file_perms;
+r_dir_file(hal_thermal_default, sysfs_batteryinfo)
+get_prop(hal_thermal_default, vendor_gaokun3_prop)

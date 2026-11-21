@@ -117,4 +117,9 @@
     <string name="parallel_view_intro">When this is enabled for an app that provides split layouts, its pages are shown side by side in landscape. Changing this setting closes the app; the change applies the next time the app opens.</string>
     <string name="parallel_view_apps_title">Apps</string>
     <string name="parallel_view_no_apps">No apps with split layouts found</string>
+
+    <!-- Performance mode (Settings → Battery) -->
+    <string name="perf_mode_title">Performance mode</string>
+    <string name="perf_mode_summary">Turn on to raise the temperature limits of the processor and GPU under heavy load, for long periods of heavy use such as games.</string>
+    <string name="perf_mode_error">Couldn\'t change performance mode</string>
 </resources>

@@ -38,6 +38,9 @@ android_app {
         "SettingsLibCollapsingToolbarBaseActivity",
         "SettingsLibFooterPreference",
         "SettingsLibSettingsTheme",
+        // 「设置 → 电池」里的性能模式开关条目（PerformanceModeProvider：EntriesProvider/ProviderSwitch）。
+        // 模块在frameworks/base/packages/SettingsLib/Tile/，crDroid 17.0的frameworks_base里同名。
+        "SettingsLibTile",
         // 手写笔设置的四档平滑滑块（Material 离散滑块，带刻度和两端文字）：frameworks/base/packages/SettingsLib/
         // SliderPreference/，crDroid 17.0 与 LineageOS 24.0 是同一版。这一版默认不画刻度，StylusSettingsActivity 里打开。
         "SettingsLibSliderPreference",
