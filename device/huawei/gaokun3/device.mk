@@ -108,6 +108,20 @@ PRODUCT_COPY_FILES += \
 PRODUCT_PACKAGES += \
     android.hardware.usb-service.gaokun3
 
+# ------------------------------------------------------------- 内存：zram交换空间
+# 开机完成时由系统自带的mmd（system/memory/mmd）把zram0配置成交换空间，大小取它的默认值，
+# 即内存的一半（这是压缩前可存放的上限，压缩后的数据按需占用内存）。内核的ZRAM和LZ4后端在
+# scripts/kernel-config-android.sh里打开；这两个属性的SELinux类型允许vendor设置，
+# mmd_setup所需的规则由system/sepolicy提供。
+# 没有交换空间时，ActivityManager的内存压缩（CachedAppOptimizer）只能回收文件页，进程正在执行的
+# 代码页也会被逐出，随后又要从存储读回。压缩全部系统进程时（am compact system）影响最大：
+# SurfaceFlinger、audioserver、音频HAL的代码页被逐出后马上又要读回，读回后又被逐出，约1秒里这些
+# 进程不断等待读回代码页，表现为画面剧烈掉帧、扬声器爆音。有了zram，匿名页也能回收，回收不再
+# 反复逐出刚读回的代码页。
+PRODUCT_VENDOR_PROPERTIES += \
+    mmd.zram.enabled=true \
+    mmd.zram.comp_algorithm=lz4
+
 # ------------------------------------------------- 安全 HAL（软件实现）
 # keystore2 是 critical 服务且被 init.rc 的
 #   exec 4 (/system/bin/vdc keymaster earlyBootEnded)
@@ -425,22 +439,19 @@ PRODUCT_VENDOR_PROPERTIES += \
 PRODUCT_SYSTEM_EXT_PROPERTIES += \
     persist.sys.sf.native_mode=1
 
-# Landscape as the default orientation of the built-in display. bootanimation ignores
-# WindowManager and draws in the panel's natural portrait unless
-# ro.bootanim.set_orientation_<physical display id>, or as a fallback
-# ro.bootanim.set_orientation_logical_0, asks for a rotation (frameworks/base
-# cmds/bootanimation/BootAnimation.cpp, parseOrientationProperty()). WindowManager reads the
-# same properties as the default display's initial rotation (wm/DisplayRotation.java,
-# readDefaultDisplayRotation()), so the UI also starts in landscape until the sensor reports
-# an orientation. logical_0 keeps it independent of the physical display id. ORIENTATION_90
-# is the landscape WindowManager calls ROTATION_90.
-# Limit: the multi-display boot animation (enabled in cp2a) applies this rotation to every
-# display, so an external monitor already detected when it starts shows it sideways.
-# system_ext: the property has no property_contexts entry, so it is default_prop, which only
-# init may set. init checks /vendor/build.prop as vendor_init and would drop the line under
-# enforcing.
-PRODUCT_SYSTEM_EXT_PROPERTIES += \
-    ro.bootanim.set_orientation_logical_0=ORIENTATION_90
+# 内屏的自然方向为横屏：面板按竖屏扫描（1600x2560），接键盘横放时面板右侧朝上。设备树在面板节点上声明
+# rotation = <90>（patches/kernel/dts/0030），面板驱动把它作为连接器的panel orientation属性上报
+# （patches/kernel/drm/0020），drm_hwcomposer再把它作为屏幕的物理方向交给SurfaceFlinger
+# （hwc3/ComposerClient.cpp，getDisplayPhysicalOrientation()）。SurfaceFlinger据此按2560x1600上报模式，
+# 开机动画、WindowManager和应用都按横屏工作：ROTATION_0是接键盘横放，面板自身的竖屏是ROTATION_270。
+# 随之调整的部分：
+#   · 触摸屏和手写笔上报面板坐标：下方的usr/idc；
+#   · 加速度计和陀螺仪：sensors-hal/Sensor.cpp；
+#   · 相机的SENSOR_ORIENTATION：camera/Device.cpp；
+#   · 指纹传感器（电源键）的位置：fingerprint/Service.cpp、rro/Gaokun3SystemUIFingerprintOverlay；
+#   · 已保存的旋转锁定（Settings.System.USER_ROTATION）：parts/RotationLockMigration.java。
+# 不再需要ro.bootanim.set_orientation_*：开机动画按上报的模式确定画面尺寸（cmds/bootanimation/BootAnimation.cpp，
+# readyToRun()），WindowManager的初始旋转随之为0，外接显示器上的开机动画也不再横躺。
 
 # ⚠️ 软渲染（SwiftShader）导入不了 UBWC 压缩 buffer —— SF 崩于
 # "Failed to create a valid texture"（GaneshBackendTexture 导入
@@ -677,13 +688,14 @@ PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/camera/gaokun3-camera-features.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/gaokun3-camera-features.xml \
     $(LOCAL_PATH)/camera/ipa-data/qcom-ife/hi846.yaml:$(TARGET_COPY_OUT_VENDOR)/etc/libcamera/ipa/qcom-ife/hi846.yaml \
     $(LOCAL_PATH)/camera/ipa-data/qcom-ife/ov13b10.yaml:$(TARGET_COPY_OUT_VENDOR)/etc/libcamera/ipa/qcom-ife/ov13b10.yaml \
+    $(LOCAL_PATH)/camera/ipa-data/qcom-ife/s5k4h7.yaml:$(TARGET_COPY_OUT_VENDOR)/etc/libcamera/ipa/qcom-ife/s5k4h7.yaml \
     $(LOCAL_PATH)/camera/ipa-data/qcom-ife/uncalibrated.yaml:$(TARGET_COPY_OUT_VENDOR)/etc/libcamera/ipa/qcom-ife/uncalibrated.yaml
 
 # ⚠️★ qcom-ife 的 IPA【必须】能读到调优文件（<传感器型号>.yaml，没有则用
 #   uncalibrated.yaml），否则 IPA 初始化失败，这颗摄像头不会注册。
 #   路径布局是 <IPA_CONFIG_DIR>/<ipa名>/<文件名>（libcamera ipa_proxy.cpp:57），
 #   而 IPA_CONFIG_DIR 由我们自己的 config.h 定成 /vendor/etc/libcamera/ipa。
-#   这三份文件须与 patches/libcamera 里 src/ipa/qcom-ife/data/ 的同名文件一致。
+#   这些文件须与 patches/libcamera 里 src/ipa/qcom-ife/data/ 的同名文件一致。
 
 # ─── Stage 4: 蓝牙（WCN6855 / hci_qca，AOSP 原装 HAL 直接可用）───
 # ⚠️ 2026-08-19 发现：#34 记了"把这个 HAL 推进 vendor 即可"，但那句话
@@ -813,15 +825,6 @@ PRODUCT_PACKAGES += \
 PRODUCT_VENDOR_PROPERTIES += \
     ro.hardware.vulkan=freedreno
 
-# GPU SMMU stall 解锁器（常驻安全网）。装它的理由、时序约束与
-# NCB=2 的血泪教训见 etc/smmustall.rc 与 bin/smmu-nostall.sh 的注释。
-# ⚠️ 这两个文件在 Stage 5 只通过 adb push 进过设备，从没写进构建配置 ——
-#    与 audio-route.sh / tplg.bin 是完全同一类漏网。照原样构建会得到
-#    「跑着 turnip 但没有安全网」，第一次 GPU 页错误就永久挂死且无法自愈。
-PRODUCT_COPY_FILES += \
-    $(LOCAL_PATH)/bin/smmu-nostall.sh:$(TARGET_COPY_OUT_VENDOR)/bin/smmu-nostall.sh \
-    $(LOCAL_PATH)/etc/smmustall.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/smmustall.rc
-
 # ★ 资源 overlay —— 把 crDroid 的系统内 Updater 指向本项目（M6）。
 #
 # 为什么必须是【构建期】overlay 而不是运行时 RRO：
@@ -939,10 +942,18 @@ PRODUCT_COPY_FILES += \
 PRODUCT_VENDOR_PROPERTIES += \
     persist.vendor.gaokun3.allow_suspend=1
 
-# ★ WindowManager 每显示器设置：关掉大屏默认的 ignoreOrientationRequest。
-# 不装它 → 应用请求横屏时系统不转屏而是把应用信箱化（原神被压成 1600x1000）。
-# 完整机制、实测症状与格式依据见 etc/display_settings.xml 的注释。
-PRODUCT_COPY_FILES += $(LOCAL_PATH)/etc/display_settings.xml:$(TARGET_COPY_OUT_VENDOR)/etc/display_settings.xml
+# Aperture的按应用兼容覆盖（etc/compat_framework_overrides.xml，内含各项说明）：让它在大屏方向策略下
+# 把屏幕转为竖屏使用，其他应用不受影响。CompatConfig在开机时读取/product/etc/appcompat下的这个文件
+# （services/core/java/com/android/server/compat/CompatConfig.java，STATIC_OVERRIDES_PRODUCT_DIR）。
+PRODUCT_COPY_FILES += \
+    $(LOCAL_PATH)/etc/compat_framework_overrides.xml:$(TARGET_COPY_OUT_PRODUCT)/etc/appcompat/compat_framework_overrides.xml
+
+# 触摸屏和手写笔上报面板（竖屏）坐标，而屏幕的自然方向是横屏（见上方关于自然方向的说明）。
+# InputReader先按厂商和产品号、再按设备名查找配置文件（frameworks/native libs/input/InputDevice.cpp，
+# getInputDeviceConfigurationFilePathByDeviceIdentifier()），详见各文件中的注释。
+PRODUCT_COPY_FILES += \
+    $(LOCAL_PATH)/idc/Himax_Capacitive_TouchScreen.idc:$(TARGET_COPY_OUT_VENDOR)/usr/idc/Himax_Capacitive_TouchScreen.idc \
+    $(LOCAL_PATH)/idc/Vendor_12d1_Product_cd54.idc:$(TARGET_COPY_OUT_VENDOR)/usr/idc/Vendor_12d1_Product_cd54.idc
 
 # ★ tinyalsa 工具集 —— 又一个同类漏网（2026-08-19 M3 上机才发现）。
 # audio-route.sh 第一件事就是找 tinymix，找不到就 `log 找不到 tinymix，放弃; exit 1`。

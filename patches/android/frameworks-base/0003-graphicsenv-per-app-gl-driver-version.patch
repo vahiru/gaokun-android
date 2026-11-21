@@ -1,0 +1,118 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] GraphicsEnvironment: per-app Qualcomm driver version in
+ GL_VERSION
+
+On this device GLES is provided by ANGLE on top of the turnip Vulkan
+driver, and ANGLE's GL_VERSION is "OpenGL ES 3.2 (ANGLE 2.1 git hash:
+...)". Unreal Engine enables Vulkan on Adreno 6xx only through its
+Android_Adreno6xx_Vulkan device profile, which requires a minimum
+Qualcomm driver version; of the values the profile selector reads, only
+GL_VERSION can carry one ("V@0525.0"). Without it UE games select
+Android_Adreno6xx, which disables Vulkan, and games that ship only Vulkan
+shaders fail at startup with "Failed to initialize ShaderCodeLibrary ...
+part of the Global shader library is missing".
+
+ANGLE uses the ANGLE_GL_VERSION environment variable verbatim as
+GL_VERSION when it is set and not empty. For the packages listed in the
+global setting gaokun3_angle_gl_version_pkgs, set it to "OpenGL ES 3.2
+V@0762.10 (ANGLE 2.1)" while the app's graphics environment is set up,
+before any context becomes current. CoreSettingsObserver passes the
+setting in coreSettings, as it does for the ANGLE per-app driver
+selection, so apps do not read a hidden global setting themselves. The
+device's settings app writes it; the list is empty by default.
+
+It is per package because the value fixes the ES version at 3.2. That
+matches the contexts ANGLE hands to apps through libEGL, but a Chromium
+browser runs its own ANGLE on top of the system one and creates an ES 2.0
+context for WebGL 1; with the same string set for every process
+(debug.angle.gl_version) WebGL 1 fails to initialise in Edge ("maximum
+transform feedback separate attribs is too small").
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Inappropriate [device-specific]
+---
+ core/java/android/os/GraphicsEnvironment.java | 41 +++++++++++++++++++
+ .../server/am/CoreSettingsObserver.java       |  3 ++
+ 2 files changed, 44 insertions(+)
+
+diff --git a/core/java/android/os/GraphicsEnvironment.java b/core/java/android/os/GraphicsEnvironment.java
+index 92f42b1..4e93e06 100644
+--- a/core/java/android/os/GraphicsEnvironment.java
++++ b/core/java/android/os/GraphicsEnvironment.java
+@@ -75,6 +75,12 @@ public class GraphicsEnvironment {
+     private static final String ANGLE_DRIVER_VERSION_NAME = "";
+     private static final long ANGLE_DRIVER_VERSION_CODE = 0;
+ 
++    // Settings.Global key listing, comma separated, the packages that are told a Qualcomm-style
++    // driver version in GL_VERSION (setupAngleGlVersion()). CoreSettingsObserver passes it in
++    // coreSettings.
++    private static final String ANGLE_GL_VERSION_PKGS = "gaokun3_angle_gl_version_pkgs";
++    private static final String ANGLE_GL_VERSION = "OpenGL ES 3.2 V@0762.10 (ANGLE 2.1)";
++
+     // System properties related to updatable graphics drivers.
+     private static final String PROPERTY_GFX_DRIVER_PRODUCTION = "ro.gfx.driver.0";
+     private static final String PROPERTY_GFX_DRIVER_PRERELEASE = "ro.gfx.driver.1";
+@@ -156,6 +162,8 @@ public class GraphicsEnvironment {
+         }
+         Trace.traceEnd(Trace.TRACE_TAG_GRAPHICS);
+ 
++        setupAngleGlVersion(coreSettings, packageName);
++
+         Trace.traceBegin(Trace.TRACE_TAG_GRAPHICS, "chooseDriver");
+         if (!chooseDriver(context, coreSettings, pm, packageName, appInfoWithMetaData)) {
+             if (!mShouldUseAngle) {
+@@ -379,6 +387,39 @@ public class GraphicsEnvironment {
+         return -1;
+     }
+ 
++    /**
++     * Report a Qualcomm-style driver version in ANGLE's GL_VERSION to the packages listed in
++     * ANGLE_GL_VERSION_PKGS.
++     *
++     * Unreal Engine enables Vulkan on Adreno only through device profiles that require a
++     * minimum Qualcomm driver version; of the values its profile selector reads, only
++     * GL_VERSION can carry one ("OpenGL ES 3.2 V@0525.0 ..."). ANGLE's own GL_VERSION carries
++     * none, so such games use GLES, and games that ship only Vulkan shaders fail at startup.
++     *
++     * ANGLE takes GL_VERSION verbatim from the ANGLE_GL_VERSION environment variable when it is
++     * not empty, read when a context first becomes current, which happens after this.
++     * GL_RENDERER and GL_VENDOR are unchanged. The value pins the ES version to 3.2, which is
++     * what ANGLE gives apps going through libEGL, but not what a Chromium browser's own ANGLE
++     * creates for WebGL 1: setting it for every process (debug.angle.gl_version) left WebGL 1
++     * unavailable in Edge. Hence a per-package opt-in, empty by default.
++     */
++    private static void setupAngleGlVersion(Bundle coreSettings, String packageName) {
++        if (coreSettings == null) {
++            return;
++        }
++        final List<String> packages =
++                getGlobalSettingsString(null, coreSettings, ANGLE_GL_VERSION_PKGS);
++        if (getPackageIndex(packageName, packages) < 0) {
++            return;
++        }
++        try {
++            android.system.Os.setenv("ANGLE_GL_VERSION", ANGLE_GL_VERSION, true);
++            Log.i(TAG, "ANGLE_GL_VERSION set for " + packageName);
++        } catch (android.system.ErrnoException e) {
++            Log.w(TAG, "Could not set ANGLE_GL_VERSION", e);
++        }
++    }
++
+     private static ApplicationInfo getAppInfoWithMetadata(Context context,
+                                                           PackageManager pm, String packageName) {
+         ApplicationInfo ai;
+diff --git a/services/core/java/com/android/server/am/CoreSettingsObserver.java b/services/core/java/com/android/server/am/CoreSettingsObserver.java
+index 99bd60f..d2403b0 100644
+--- a/services/core/java/com/android/server/am/CoreSettingsObserver.java
++++ b/services/core/java/com/android/server/am/CoreSettingsObserver.java
+@@ -126,6 +126,9 @@ class CoreSettingsObserver extends ContentObserver {
+                 Settings.Global.ANGLE_GL_DRIVER_SELECTION_VALUES, String.class);
+         sGlobalSettingToTypeMap.put(
+                 Settings.Global.ANGLE_EGL_FEATURES, String.class);
++        // Packages told a Qualcomm-style driver version in ANGLE's GL_VERSION, see
++        // GraphicsEnvironment.setupAngleGlVersion().
++        sGlobalSettingToTypeMap.put("gaokun3_angle_gl_version_pkgs", String.class);
+         sGlobalSettingToTypeMap.put(
+                 Settings.Global.SHOW_ANGLE_IN_USE_DIALOG_BOX, String.class);
+         sGlobalSettingToTypeMap.put(Settings.Global.ENABLE_GPU_DEBUG_LAYERS, int.class);

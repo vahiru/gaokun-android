@@ -1,4 +1,5 @@
-// SystemUI overlay that starts the fingerprint unlock ripple at the power key.
+// SystemUI overlay that starts the fingerprint unlock ripple at the power key and
+// places the side fingerprint indicator on the left edge (config.xml).
 // Installed only with the fingerprint HAL (fingerprint.mk).
 //
 // For a fingerprint sensor that is not under the display, SystemUI's
@@ -12,7 +13,7 @@
 // Not built or tested on a device yet. Check: `cmd overlay list com.android.systemui`
 // shows this package as [x], `dumpsys activity service
 // com.android.systemui/.SystemUIService` shows
-// fingerprintSensorLocationInNaturalOrientation=Point(1428, 0), and the unlock
+// fingerprintSensorLocationInNaturalOrientation=Point(0, 172), and the unlock
 // ripple starts near the power key.
 runtime_resource_overlay {
     name: "Gaokun3SystemUIFingerprintOverlay",

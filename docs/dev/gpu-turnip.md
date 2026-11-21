@@ -85,10 +85,13 @@ SC8280XP的GPU SMMU（`3da0000.iommu`，`qcom,sc8280xp-smmu-500`）在`msm_iommu
 
 `kernel/dts/0027`是上游的修正（qcom树`arm64-for-7.5`分支，`89083b1e9e31`），按CB顺序改为SPI 680–688与703。应用之后，GPU页错误会进入`adreno_fault_handler`：`dmesg`打印`*** gpu fault: ttbr0=... iova=... dir=... type=...`，`/proc/interrupts`中`arm-smmu-context-fault`（GIC INTID 712起）的计数随之增加。
 
-### 2. 处置与注意事项
+### 2. 内核的故障处理
 
-- **常驻解锁器`smmustall`**（`device/huawei/gaokun3/bin/smmu-nostall.sh`、`etc/smmustall.rc`）：持续清除已用CB的`SCTLR`中的bit 7（`CFCFG`），使非法地址访问直接终止，而不是挂起流水线（bit 8 `HUPCF`由驱动置位，后续事务照常处理）。它是在中断无法到达时加入的；`kernel/dts/0027`之后中断能够到达，两者并存时故障直接终止，中断照常上报。解锁器暂时保留：内核失速模式下的故障处理（暂停失速500 ms、写`RESUME`终止被冻结的事务、生成devcoredump）在A690上尚未经实测，确认之后再考虑移除。
-- **严禁访问CB7及以上**：驱动按`IDR1.NUMCB`报告7个CB（CB0–CB6，`dmesg`中的`7 context banks`），GPU与GMU只用CB0和CB1。CB7及以上超出`NUMCB`，访问其寄存器空间会立即触发同步外部中止（Synchronous External Abort），导致内核无日志死机；`smmu-nostall.sh`因此只扫描CB0和CB1。
+`kernel/dts/0027`之后故障完全由内核处理。在A690上用Vulkan计算着色器经buffer device address向未映射地址写入，实测如下：
+
+- **少量故障**：一次提交向512页以内的未映射地址写入时，第一次故障冻结该笔事务并进入`adreno_fault_handler`。内核打印`*** gpu fault`，关闭失速，生成devcoredump（`/sys/class/devcoredump/devcd*`），再写`RESUME`终止该笔事务。作业正常结束，写入被丢弃，应用不受影响。失速至少关闭500 ms，并且要等devcoredump被读取或删除（5分钟后自动删除）、下一次提交时才重新开启，在此之前的故障直接终止，不再生成devcoredump。含`fault-info`一节的devcoredump说明事务确实被冻结过（`FSR.SS`）；GPU挂起复位时也会生成devcoredump，但没有这一节。
+- **大量故障**：一次提交向768页及以上写入，或经错误指针连续写入256 KB（65535次写入）时，内核只报告前两次故障，约150 ms后硬件挂起检测触发`hangcheck recover`复位GPU。出错的进程收到`VK_ERROR_DEVICE_LOST`，其他进程不受影响。若一直清除`CFCFG`、只用终止模式，同样的负载不会使GPU挂起；但大量故障说明应用本身已经出错，出错的应用收到设备丢失错误是预期行为，本项目沿用上游内核的默认处理。
+- **严禁访问CB7及以上**：驱动按`IDR1.NUMCB`报告7个CB（CB0–CB6，`dmesg`中的`7 context banks`），GPU与GMU只用CB0和CB1。CB7及以上超出`NUMCB`，访问其寄存器空间会立即触发同步外部中止（Synchronous External Abort），导致内核无日志死机。用`devmem`排查时只能访问CB0和CB1。
 
 ## 四、10位视频（P010）零拷贝合成与构建脚本
 
@@ -139,3 +142,20 @@ GPU的每档OPP在`opp-peak-kBps`中声明对DDR（`ebi`）的峰值带宽投票
 修正之前，GPU即使在最高频率，投票（2.7 GB/s）也低于NVMe控制器（`1c20000.pcie`）常驻的3.94 GB/s，DDR档位实际由NVMe的投票决定，GPU可用的带宽与自身频率无关。修正之后，GPU在410 MHz及以上会提高DDR档位；270 MHz的投票（1.8 GB/s）仍低于NVMe的投票，界面合成等轻载下DDR档位不变。
 
 排查：`/sys/kernel/debug/interconnect/interconnect_summary`中，`ebi@interconnect-mc-virt`下`3d00000.gpu`一行是GPU当前的峰值投票，节点首行是汇总后的结果。
+
+## 七、微信对acquire信号量的重复等待（`mesa/0014`）
+
+微信的Flutter引擎（自行维护的Impeller分支，Vulkan后端）每次调用`vkAcquireNextImageKHR`后，会在两次提交里等待同一个acquire信号量：一次在acquire之后紧接着的提交里，一次在present之前的提交里。第一次等待已经消耗了acquire时导入的临时载荷，第二次等待的是从未被signal的永久载荷，违反`VUID-vkQueueSubmit-pWaitSemaphores-03238`。高通驱动不检查这一点。Turnip在msm上按需启用线程化提交（`VK_QUEUE_SUBMIT_MODE_THREADED_ON_DEMAND`），遇到这次等待会在`vkQueueSubmit`的`vk_queue_submit_move_binary_waits_to_temps()`中无限期阻塞：Flutter的光栅线程卡住，平台线程在下一次Surface变化时等待光栅线程，整个微信无响应。用LiteApp绘制的页面（公众号、服务号、游戏中心等）一直不出内容，离开页面时微信被判定为ANR。改为立即提交也不可行：内核会拒绝没有fence的syncobj，结果是设备丢失。
+
+处理方式：
+
+- Vulkan运行时为每个二值信号量统计已提交、但还没被等待或SYNC_FD导出消耗的signal（`vk_semaphore::binary_signals_pending`）。用计数而不用标志，是因为跨队列等待时间线时，同一个二值信号量可以先后有两次signal都已提交。永久载荷被导入，或导出为可共享的句柄之后，其他信号量或进程也能signal它，此后不再统计（`binary_untracked`）。
+- driconf选项`vk_drop_unsignaled_binary_waits`打开时，等待一个没有临时载荷、仍在统计、且计数为0的二值信号量，这次等待会被丢弃；每个进程第一次丢弃时在logcat中输出一条警告（`Dropping waits on binary semaphores without a submitted signal operation`）。第一次等待已经让前一个提交等待acquire栅栏，msm上同一队列的作业按提交顺序执行，所以丢弃第二次等待不改变GPU的执行顺序。
+- present路径（`vkQueueSignalReleaseImageANDROID`）在msm上原本由CPU直接复制信号量载荷来生成释放栅栏。其中有等待会被丢弃时改为向队列提交一次空提交，释放栅栏因此仍排在之前的GPU工作之后，SurfaceFlinger不会合成尚未画完的帧。
+- 提交失败时计数不回滚，与临时载荷在失败时已被消耗的现有行为一致。
+- `00-mesa-defaults.conf`只对进程名匹配`^com[.]tencent[.]mm(:.*)?$`的进程打开这个选项。ROM的Mesa使用编译进库的静态driconf表，其他应用的行为不变。
+
+排查：
+
+- 微信进程的logcat中出现上面的警告，说明选项已生效，并且发生了丢弃。
+- 其他应用出现同样的卡死时，ANR记录中光栅线程停在`vk_queue_submit_move_binary_waits_to_temps()` → `drmSyncobjTimelineWait`。确认是同类问题后，可以在`00-mesa-defaults.conf`中为它添加同样的条目。

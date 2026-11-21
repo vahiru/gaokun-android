@@ -1,0 +1,47 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] drm/panel: himax-hx83121a: swap the panel's width and height
+ in mm
+
+Both panel descriptions give width_mm = 266 and height_mm = 166, but
+their modes are 1600x2560: the 266 mm side is the one with 2560 pixels.
+DSI panels have no EDID, so userspace takes the size from the connector.
+drm_hwcomposer computes the DPI from the width alone, as hdisplay * 25.4 /
+width_mm, and reported about 153 dpi for a panel of about 245 dpi
+(0.1038 mm per pixel).
+
+Swap the two values for both panels.
+
+Fixes: a7c61963b727 ("drm/panel: Add Himax HX83121A panel driver")
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/gpu/drm/panel/panel-himax-hx83121a.c | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/gpu/drm/panel/panel-himax-hx83121a.c b/drivers/gpu/drm/panel/panel-himax-hx83121a.c
+index 440099533d..9fc4f82a83 100644
+--- a/drivers/gpu/drm/panel/panel-himax-hx83121a.c
++++ b/drivers/gpu/drm/panel/panel-himax-hx83121a.c
+@@ -777,8 +777,8 @@ static void himax_remove(struct mipi_dsi_device *dsi)
+ 
+ /* Model name: BOE PPC357DB1-4 */
+ static const struct panel_desc boe_ppc357db1_4_desc = {
+-	.width_mm = 266,
+-	.height_mm = 166,
++	.width_mm = 166,
++	.height_mm = 266,
+ 	.lanes = 4,
+ 	.bpc = 8,
+ 	.format = MIPI_DSI_FMT_RGB888,
+@@ -797,8 +797,8 @@ static const struct panel_desc boe_ppc357db1_4_desc = {
+ 
+ /* Model name: CSOT PPC357DB1-4 */
+ static const struct panel_desc csot_ppc357db1_4_desc = {
+-	.width_mm = 266,
+-	.height_mm = 166,
++	.width_mm = 166,
++	.height_mm = 266,
+ 	.lanes = 4,
+ 	.bpc = 8,
+ 	.format = MIPI_DSI_FMT_RGB888,

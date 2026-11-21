@@ -1,0 +1,422 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] vulkan,tu: Drop waits on binary semaphores nothing will
+ signal
+
+WeChat's Flutter engine (a fork of Impeller) waits twice on the
+semaphore it passed to vkAcquireNextImageKHR: once in a submit right
+after the acquire and again in the submit before vkQueuePresentKHR.
+The first wait consumes the payload that AcquireImageANDROID imported
+temporarily, so the second one waits on the permanent payload, which
+nothing ever signals. That breaks
+VUID-vkQueueSubmit-pWaitSemaphores-03238; Qualcomm's driver lets it
+pass.
+
+On msm the device runs in VK_QUEUE_SUBMIT_MODE_THREADED_ON_DEMAND. The
+second wait is not pending, so vk_queue_submit() starts the submit
+thread and vk_queue_submit_move_binary_waits_to_temps() blocks in
+vk_sync_wait(VK_SYNC_WAIT_PENDING, UINT64_MAX) forever. The raster
+thread never returns, Flutter's platform thread waits for it on the
+next surface change and the whole app stops responding. Without the
+submit thread the kernel would reject the syncobj, which has no fence,
+and the device would be lost instead.
+
+For each binary semaphore whose permanent payload never left the
+VkSemaphore, count the submitted signals that no wait or SYNC_FD
+export has consumed yet. With the new vk_drop_unsignaled_binary_waits
+driconf option, a queue wait on such a semaphore with a count of zero
+is dropped, with one warning per process. The first wait still makes
+the first submit wait for the acquire fence, and on msm the jobs of one
+queue run in submission order, so the work of the second submit still
+runs after it. If vkQueueSignalReleaseImageANDROID would drop a wait,
+it submits to the queue instead of copying the payloads on the CPU, so
+the release fence still follows the work queued before it. Like the
+temporary payloads, which a failed submit already consumes, the counts
+are not rolled back when a submit fails.
+
+Enable the option for WeChat's processes only.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Inappropriate [application-specific workaround]
+---
+ src/freedreno/vulkan/tu_device.cc |  5 +++
+ src/freedreno/vulkan/tu_device.h  |  3 ++
+ src/util/00-mesa-defaults.conf    |  7 ++++
+ src/util/driconf.h                |  4 ++
+ src/vulkan/runtime/vk_android.c   | 13 ++++++-
+ src/vulkan/runtime/vk_device.c    | 13 +++++++
+ src/vulkan/runtime/vk_device.h    | 17 +++++++++
+ src/vulkan/runtime/vk_queue.c     |  5 +++
+ src/vulkan/runtime/vk_semaphore.c | 40 ++++++++++++++++++++
+ src/vulkan/runtime/vk_semaphore.h | 61 +++++++++++++++++++++++++++++++
+ 10 files changed, 167 insertions(+), 1 deletion(-)
+
+diff --git a/src/freedreno/vulkan/tu_device.cc b/src/freedreno/vulkan/tu_device.cc
+index 0f84e70..2bec528 100644
+--- a/src/freedreno/vulkan/tu_device.cc
++++ b/src/freedreno/vulkan/tu_device.cc
+@@ -1820,6 +1820,7 @@ static const driOptionDescription tu_dri_options[] = {
+       DRI_CONF_VK_WSI_FORCE_SWAPCHAIN_TO_CURRENT_EXTENT(false)
+       DRI_CONF_VK_X11_IGNORE_SUBOPTIMAL(false)
+       DRI_CONF_VK_DONT_CARE_AS_LOAD(false)
++      DRI_CONF_VK_DROP_UNSIGNALED_BINARY_WAITS(false)
+    DRI_CONF_SECTION_END
+ 
+    DRI_CONF_SECTION_MISCELLANEOUS
+@@ -1846,6 +1847,8 @@ tu_init_dri_options(struct tu_instance *instance)
+          driQueryOptioni(&instance->dri_options, "force_vk_vendor");
+    instance->dont_care_as_load =
+          driQueryOptionb(&instance->dri_options, "vk_dont_care_as_load");
++   instance->drop_unsignaled_binary_waits =
++         driQueryOptionb(&instance->dri_options, "vk_drop_unsignaled_binary_waits");
+    instance->conservative_lrz =
+          !driQueryOptionb(&instance->dri_options, "disable_conservative_lrz");
+    instance->reserve_descriptor_set =
+@@ -2793,6 +2796,8 @@ tu_CreateDevice(VkPhysicalDevice physicalDevice,
+    device->instance = physical_device->instance;
+    device->physical_device = physical_device;
+    device->device_idx = device->physical_device->device_count++;
++   device->vk.drop_unsignaled_binary_waits =
++      device->instance->drop_unsignaled_binary_waits;
+ 
+    result = tu_drm_device_init(device);
+    if (result != VK_SUCCESS) {
+diff --git a/src/freedreno/vulkan/tu_device.h b/src/freedreno/vulkan/tu_device.h
+index 592519e..0a43570 100644
+--- a/src/freedreno/vulkan/tu_device.h
++++ b/src/freedreno/vulkan/tu_device.h
+@@ -188,6 +188,9 @@ struct tu_instance
+    uint32_t force_vk_vendor;
+    bool dont_care_as_load;
+ 
++   /* Copied to vk_device::drop_unsignaled_binary_waits. */
++   bool drop_unsignaled_binary_waits;
++
+    /* Conservative LRZ (default true) invalidates LRZ on draws with
+     * blend and depth-write enabled, because this can lead to incorrect
+     * rendering.  Driconf can be used to disable conservative LRZ for
+diff --git a/src/util/00-mesa-defaults.conf b/src/util/00-mesa-defaults.conf
+index 809f8ac..5a0a584 100644
+--- a/src/util/00-mesa-defaults.conf
++++ b/src/util/00-mesa-defaults.conf
+@@ -1401,6 +1401,13 @@ TODO: document the other workarounds.
+         <application name="Creed: Rise to Glory" executable="Creed-Win64-Shipping.exe">
+             <option name="tu_ignore_frag_depth_direction" value="true" />
+         </application>
++        <!--
++            WeChat's Flutter engine (Impeller) waits twice on the semaphore of
++            one swapchain acquire and then hangs in vkQueueSubmit.
++        -->
++        <application name="WeChat" executable_regexp="^com[.]tencent[.]mm(:.*)?$">
++            <option name="vk_drop_unsignaled_binary_waits" value="true" />
++        </application>
+     </device>
+ 
+     <device driver="asahi">
+diff --git a/src/util/driconf.h b/src/util/driconf.h
+index be7b53e..874ac0e 100644
+--- a/src/util/driconf.h
++++ b/src/util/driconf.h
+@@ -331,6 +331,10 @@
+    DRI_CONF_OPT_B(vk_dont_care_as_load, def, \
+                   "Treat VK_ATTACHMENT_LOAD_OP_DONT_CARE as LOAD_OP_LOAD, workaround on tiler GPUs for games that confuse these two load ops")
+ 
++#define DRI_CONF_VK_DROP_UNSIGNALED_BINARY_WAITS(def) \
++   DRI_CONF_OPT_B(vk_drop_unsignaled_binary_waits, def, \
++                  "Drop queue waits on binary semaphores that have no signal operation submitted, workaround for applications that wait on one swapchain acquire semaphore twice")
++
+ #define DRI_CONF_VK_LOWER_TERMINATE_TO_DISCARD(def) \
+    DRI_CONF_OPT_B(vk_lower_terminate_to_discard, def, \
+                   "Lower terminate to discard (which is implicitly demote)")
+diff --git a/src/vulkan/runtime/vk_android.c b/src/vulkan/runtime/vk_android.c
+index 505ada0..a0b9485 100644
+--- a/src/vulkan/runtime/vk_android.c
++++ b/src/vulkan/runtime/vk_android.c
+@@ -32,6 +32,7 @@
+ #include "vk_log.h"
+ #include "vk_physical_device.h"
+ #include "vk_queue.h"
++#include "vk_semaphore.h"
+ #include "vk_util.h"
+ 
+ #include "c11/threads.h"
+@@ -429,7 +430,17 @@ vk_common_QueueSignalReleaseImageANDROID(VkQueue _queue,
+       /* see wsi_common_queue_present for the rationale */
+       .stageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+    };
+-   if (device->copy_sync_payloads != NULL) {
++   /* A wait that drop_unsignaled_binary_waits drops must not let the CPU-side
++    * payload copy signal the release fence right away: submit to the queue
++    * instead, so the fence still comes after the work queued before it.
++    */
++   bool drops_wait = false;
++   for (uint32_t i = 0; i < waitSemaphoreCount; i++) {
++      VK_FROM_HANDLE(vk_semaphore, semaphore, pWaitSemaphores[i]);
++      drops_wait |= vk_semaphore_wait_is_unsignaled(device, semaphore);
++   }
++
++   if (device->copy_sync_payloads != NULL && !drops_wait) {
+       result = vk_device_copy_semaphore_payloads(
+          device, waitSemaphoreCount, wait_infos, 1, &signal_info, 0, NULL);
+    } else {
+diff --git a/src/vulkan/runtime/vk_device.c b/src/vulkan/runtime/vk_device.c
+index a2ffe73..d5253de 100644
+--- a/src/vulkan/runtime/vk_device.c
++++ b/src/vulkan/runtime/vk_device.c
+@@ -766,6 +766,19 @@ vk_device_copy_semaphore_payloads(struct vk_device *device,
+          goto fail;
+    }
+ 
++   /* Count the waits on and signals of permanent payloads, see
++    * vk_device::drop_unsignaled_binary_waits.  Before the temporary payloads
++    * are reset, so that a wait on a temporary one is not counted.
++    */
++   for (uint32_t i = 0; i < wait_semaphore_count; i++) {
++      VK_FROM_HANDLE(vk_semaphore, semaphore, wait_semaphores[i].semaphore);
++      vk_semaphore_note_wait(semaphore);
++   }
++   for (uint32_t i = 0; i < signal_semaphore_count; i++) {
++      VK_FROM_HANDLE(vk_semaphore, semaphore, signal_semaphores[i].semaphore);
++      vk_semaphore_note_signal(semaphore);
++   }
++
+    /* Reset any temporary semaphores we waited on */
+    for (uint32_t i = 0; i < wait_semaphore_count; i++) {
+       VK_FROM_HANDLE(vk_semaphore, semaphore, wait_semaphores[i].semaphore);
+diff --git a/src/vulkan/runtime/vk_device.h b/src/vulkan/runtime/vk_device.h
+index cebff12..9ba758b 100644
+--- a/src/vulkan/runtime/vk_device.h
++++ b/src/vulkan/runtime/vk_device.h
+@@ -316,6 +316,23 @@ struct vk_device {
+    /* Link-time optimization disable */
+    bool disable_lto;
+ 
++   /** Drop queue waits on binary semaphores nothing will ever signal
++    *
++    * Waiting on a binary semaphore requires a signal operation on it to have
++    * been submitted already (VUID-vkQueueSubmit-pWaitSemaphores-03238).  Some
++    * applications wait twice on the semaphore they passed to one
++    * vkAcquireNextImageKHR.  The first wait consumes the acquire payload and
++    * the second one waits on the unsignaled permanent payload, which blocks
++    * forever with threaded submit and is rejected by the kernel otherwise.
++    * When this is set, a queue wait on a binary semaphore whose permanent
++    * payload has no submitted signal left that an earlier wait has not
++    * consumed is dropped instead.  Only semaphores whose payload never left
++    * the VkSemaphore are tracked, see vk_semaphore::binary_signals_pending.
++    * Like the temporary payloads, which a failed submit already consumes,
++    * the counts are not rolled back when a submit fails.
++    */
++   bool drop_unsignaled_binary_waits;
++
+    struct vk_device_memory_report *memory_reports;
+    uint32_t memory_report_count;
+ };
+diff --git a/src/vulkan/runtime/vk_queue.c b/src/vulkan/runtime/vk_queue.c
+index eee0816..3f73a01 100644
+--- a/src/vulkan/runtime/vk_queue.c
++++ b/src/vulkan/runtime/vk_queue.c
+@@ -245,6 +245,9 @@ vk_queue_submit_add_semaphore_wait(struct vk_queue *queue,
+ {
+    VK_FROM_HANDLE(vk_semaphore, semaphore, wait_info->semaphore);
+ 
++   if (vk_semaphore_drop_unsignaled_wait(queue->base.device, semaphore))
++      return;
++
+    /* From the Vulkan 1.2.194 spec:
+     *
+     *    "Applications can import a semaphore payload into an existing
+@@ -275,6 +278,7 @@ vk_queue_submit_add_semaphore_wait(struct vk_queue *queue,
+          submit->_has_binary_permanent_semaphore_wait = true;
+       }
+ 
++      vk_semaphore_note_wait(semaphore);
+       sync = &semaphore->permanent;
+    }
+ 
+@@ -299,6 +303,7 @@ vk_queue_submit_add_semaphore_signal(struct vk_queue *queue,
+ 
+    struct vk_sync *sync = vk_semaphore_get_active_sync(semaphore);
+    uint64_t signal_value = signal_info->value;
++   vk_semaphore_note_signal(semaphore);
+    if (semaphore->type == VK_SEMAPHORE_TYPE_TIMELINE) {
+       if (signal_value == 0) {
+          return vk_queue_set_lost(queue,
+diff --git a/src/vulkan/runtime/vk_semaphore.c b/src/vulkan/runtime/vk_semaphore.c
+index 534eaa7..341991d 100644
+--- a/src/vulkan/runtime/vk_semaphore.c
++++ b/src/vulkan/runtime/vk_semaphore.c
+@@ -38,6 +38,9 @@
+ #include "vk_physical_device.h"
+ #include "vk_util.h"
+ 
++#include "util/log.h"
++#include "util/u_atomic.h"
++
+ static VkExternalSemaphoreHandleTypeFlags
+ vk_sync_semaphore_import_types(const struct vk_sync_type *type,
+                                VkSemaphoreType semaphore_type)
+@@ -229,6 +232,34 @@ vk_semaphore_reset_temporary(struct vk_device *device,
+    semaphore->temporary = NULL;
+ }
+ 
++bool
++vk_semaphore_wait_is_unsignaled(const struct vk_device *device,
++                                const struct vk_semaphore *semaphore)
++{
++   return device->drop_unsignaled_binary_waits &&
++          semaphore->type == VK_SEMAPHORE_TYPE_BINARY &&
++          semaphore->temporary == NULL &&
++          !semaphore->binary_untracked &&
++          p_atomic_read(&semaphore->binary_signals_pending) == 0;
++}
++
++bool
++vk_semaphore_drop_unsignaled_wait(struct vk_device *device,
++                                  struct vk_semaphore *semaphore)
++{
++   if (!vk_semaphore_wait_is_unsignaled(device, semaphore))
++      return false;
++
++   static bool warned;
++   if (!p_atomic_xchg(&warned, true)) {
++      mesa_logw("Dropping waits on binary semaphores without a submitted "
++                "signal operation (VUID-vkQueueSubmit-pWaitSemaphores-03238), "
++                "first one: %p", (void *)semaphore);
++   }
++
++   return true;
++}
++
+ VKAPI_ATTR void VKAPI_CALL
+ vk_common_DestroySemaphore(VkDevice _device,
+                            VkSemaphore _semaphore,
+@@ -490,6 +521,8 @@ vk_common_ImportSemaphoreWin32HandleKHR(VkDevice _device,
+    if (temporary) {
+       vk_semaphore_reset_temporary(device, semaphore);
+       semaphore->temporary = temporary;
++   } else {
++      semaphore->binary_untracked = true;
+    }
+ 
+    return VK_SUCCESS;
+@@ -514,6 +547,8 @@ vk_common_GetSemaphoreWin32HandleKHR(VkDevice _device,
+       result = vk_sync_export_win32_handle(device, sync, pHandle);
+       if (result != VK_SUCCESS)
+          return result;
++      if (sync == &semaphore->permanent)
++         semaphore->binary_untracked = true;
+       break;
+ 
+    default:
+@@ -620,6 +655,8 @@ vk_common_ImportSemaphoreFdKHR(VkDevice _device,
+    if (temporary) {
+       vk_semaphore_reset_temporary(device, semaphore);
+       semaphore->temporary = temporary;
++   } else {
++      semaphore->binary_untracked = true;
+    }
+ 
+    return VK_SUCCESS;
+@@ -643,6 +680,8 @@ vk_common_GetSemaphoreFdKHR(VkDevice _device,
+       result = vk_sync_export_opaque_fd(device, sync, pFd);
+       if (result != VK_SUCCESS)
+          return result;
++      if (sync == &semaphore->permanent)
++         semaphore->binary_untracked = true;
+       break;
+ 
+    case VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT:
+@@ -701,6 +740,7 @@ vk_common_GetSemaphoreFdKHR(VkDevice _device,
+          result = vk_sync_reset(device, sync);
+          if (unlikely(result != VK_SUCCESS))
+             return result;
++         vk_semaphore_note_wait(semaphore);
+       }
+       break;
+ 
+diff --git a/src/vulkan/runtime/vk_semaphore.h b/src/vulkan/runtime/vk_semaphore.h
+index 141f39a..6ce12b1 100644
+--- a/src/vulkan/runtime/vk_semaphore.h
++++ b/src/vulkan/runtime/vk_semaphore.h
+@@ -26,6 +26,8 @@
+ #include "vk_object.h"
+ #include "vk_sync.h"
+ 
++#include "util/u_atomic.h"
++
+ #ifdef __cplusplus
+ extern "C" {
+ #endif
+@@ -49,6 +51,22 @@ struct vk_semaphore {
+     */
+    struct vk_sync *temporary;
+ 
++   /** Binary semaphores only: number of signal operations on the permanent
++    * payload that have been submitted and not yet consumed by a wait or a
++    * SYNC_FD export.  More than one can be outstanding when a later signal
++    * waits on a timeline that the consuming wait's batch signals.  Updated
++    * atomically: such a signal and wait can come from different threads
++    * without any host ordering between them.  Only meaningful while
++    * binary_untracked is false.  See vk_device::drop_unsignaled_binary_waits.
++    */
++   uint32_t binary_signals_pending;
++
++   /** Binary semaphores only: the permanent payload has been imported or
++    * exported as a shareable handle, so other semaphores or processes can
++    * signal it and binary_signals_pending says nothing.
++    */
++   bool binary_untracked;
++
+    /** Permanent semaphore state.
+     *
+     * Every semaphore has some form of permanent state.
+@@ -70,6 +88,49 @@ vk_semaphore_get_active_sync(struct vk_semaphore *semaphore)
+    return semaphore->temporary ? semaphore->temporary : &semaphore->permanent;
+ }
+ 
++/* Whether a wait on this semaphore has no signal operation to pair with and
++ * vk_device::drop_unsignaled_binary_waits asks for it to be dropped.  Call it
++ * before the wait consumes the temporary payload.
++ */
++bool vk_semaphore_wait_is_unsignaled(const struct vk_device *device,
++                                     const struct vk_semaphore *semaphore);
++
++/* vk_semaphore_wait_is_unsignaled(), and warn once per process when it is
++ * true.  A queue wait for which this returns true is dropped.
++ */
++bool vk_semaphore_drop_unsignaled_wait(struct vk_device *device,
++                                       struct vk_semaphore *semaphore);
++
++/* Record a queue wait on, or a signal of, the active payload of a binary
++ * semaphore.  Only waits on and signals of the permanent payload are
++ * counted.
++ */
++static inline void
++vk_semaphore_note_wait(struct vk_semaphore *semaphore)
++{
++   if (semaphore->type != VK_SEMAPHORE_TYPE_BINARY ||
++       semaphore->temporary != NULL)
++      return;
++
++   /* Saturating decrement */
++   uint32_t n = p_atomic_read(&semaphore->binary_signals_pending);
++   while (n > 0) {
++      uint32_t prev = p_atomic_cmpxchg(&semaphore->binary_signals_pending,
++                                       n, n - 1);
++      if (prev == n)
++         break;
++      n = prev;
++   }
++}
++
++static inline void
++vk_semaphore_note_signal(struct vk_semaphore *semaphore)
++{
++   if (semaphore->type == VK_SEMAPHORE_TYPE_BINARY &&
++       semaphore->temporary == NULL)
++      p_atomic_inc(&semaphore->binary_signals_pending);
++}
++
+ #ifdef __cplusplus
+ }
+ #endif

@@ -26,17 +26,17 @@
 - **fastboot执行端**：用电源键确认的操作和刷写功能。
 - **银行、支付类应用与游戏**：常用银行和支付应用兼容性汇总；《英雄联盟手游》进入对局。
 - **开关UBWC压缩的游戏帧率对比**：对比去掉`vendor.minigbm.debug=nocompression`前后的游戏帧率与稳定性。
+- **USB-C外接显示器的四通道DP**：用不带USB hub的USB-C转DisplayPort线连接显示器，确认能输出仅靠两条通道带宽不足的显示模式（例如DP 1.2显示器上的4K 60 Hz），并在反复插拔、正反面插入和两个USB-C口上都保持正常。带USB hub的扩展坞和USB-C显示器通常只使用两条通道，不适用于这项测试。
 
 ## 三、已知问题
 
-- **USB-C偶尔开机后无法工作**（[issue #102](https://github.com/vahiru/gaokun-android/issues/102)）：开机时UCSI初始化失败（`PPM init failed`，`/sys/class/typec`为空），重启后恢复；另有偶发的开机后电脑无法识别平板的情况。原因尚在排查。
+- **USB-C偶尔开机后无法工作**（[issue #102](https://github.com/vahiru/gaokun-android/issues/102)）：开机时UCSI初始化失败（`PPM init failed`，`/sys/class/typec`为空），重启后恢复。原因是EC偶尔在完成一条命令时没有清除CCI里的BUSY位，并且一直保持这个状态；UCSI核心忽略带BUSY的CCI，命令等满10秒超时，初始化随之放弃。卡住的命令与电池驱动在0xB1事件后连续读取EC寄存器的时机重合；0xB1周期事件只在电池初始化后约3分钟内出现，此后是否还会卡住尚未经实测。`kernel/ec-usb/0018`、`0019`在初始化超时后重新初始化，最多5次，这样的开机里端口比平常晚约15秒可用。重试已在真实的命令超时上验证可以恢复（第一次重试即成功）；BUSY一直不清这种超时之后的重试尚未经实测。同样的超时落在后台任务上时不会导致初始化失败，但会让所有UCSI命令等待10秒；若落在`ucsi_register_partner_pdos()`上，核心对它的重试会因为`partner_pd`已经注册而直接返回，对端的PD能力（PDO）不再补读（只影响sysfs中的信息）。另有偶发的开机后电脑无法识别平板的情况，原因尚在排查。失败时若EC一直重复USB事件，系统无法持续休眠，`kernel/ec-usb/0017`在初始化失败后确认这些事件（效果尚未经实测），见[`dev/deep-sleep.md`](dev/deep-sleep.md#ec唤醒)。
 - **插电脑时平板反过来供电**（[issue #103](https://github.com/vahiru/gaokun-android/issues/103)）：对方不支持USB PD时偶尔发生，目前只会弹通知提示重插。自动重新协商尚未实现。
 - **音频与蓝牙在长时间运行后一起卡死**（[issue #104](https://github.com/vahiru/gaokun-android/issues/104)）：有用户报告，从未复现。看门狗会把现场记录到`/data/vendor/gaokun3/hangdump-*`，请遇到的人提供。
 - **休眠期间大流量下载可能断网**（[issue #105](https://github.com/vahiru/gaokun-android/issues/105)）：息屏休眠期间若后台有持续大带宽下载，有较大概率被路由器踢下线，点亮屏幕后自动重连恢复。
-- **GPU的SMMU轮询脚本待移除**（[issue #101](https://github.com/vahiru/gaokun-android/issues/101)）：设备树的上下文中断列表已由`kernel/dts/0027`改正（上游回移），context fault能够到达CPU。`smmu-nostall.sh`的定时轮询仍保留，待内核在失速模式下的故障处理在A690上验证之后移除，见[`dev/gpu-turnip.md`](dev/gpu-turnip.md)。
-- **无限暖暖启动即崩溃**（[issue #33](https://github.com/vahiru/gaokun-android/issues/33)）：推测虚幻引擎按ANGLE报告的渲染器名称匹配机型时选了GLES，而游戏只带了Vulkan着色器。下一步：请报告者用`debug.angle.gl_renderer`和`debug.angle.gl_vendor`覆盖渲染器名称后对比。
+- **无限暖暖的联网闪退与约280秒后的退出**（[issue #33](https://github.com/vahiru/gaokun-android/issues/33)）：启动即退出的原因是虚幻引擎无法从GL_VERSION读取高通驱动版本、改用了GLES，现由"GPU驱动兼容"设置处理（见[`dev/gaming.md`](dev/gaming.md)），该设置尚未经实测。报告者使用修改过的安装包时，登录前有与网络连接有关的闪退，登录后约280秒退出；原版安装包停留在登录界面时没有出现前者，后者尚未经实测。
 - **部分网站里后摄红蓝颠倒或无法打开**：需要网站名称和复现时的日志。
-- **部分机器的前置摄像头模组不受支持**（[issue #139](https://github.com/vahiru/gaokun-android/issues/139)）：华为配备了两种前置模组，本项目只支持HI846；另一种（推测为`0x2d`上的S5K4H7）没有驱动，这类机器的内核日志中有`hi846 2-0020: i2c read error: -6`，camss等待20秒后只注册后摄。支持它需要传感器驱动、能兼容两种模组的设备树、libcamera参数与调校，以及一台可以反复测试的机器。后摄的S5K3L6模组同样不受支持，尚未收到报告。
+- **部分机器的后摄模组不受支持**：后摄有OV13B10与S5K3L6两种模组，本项目只支持OV13B10；S5K3L6尚无可用的驱动，尚未收到报告。前摄的两种模组（HI846、S5K4H7）都已支持，做法见[`dev/camera.md`](dev/camera.md)中“前摄的两种模组”一节，S5K3L6可以照此处理。
 - **硬件解码的遗留问题**：拖动到更低分辨率后裁剪不更新；字节缓冲模式下分辨率变大时重新分配失败；`SYS_ERROR`之后出现`invalid uc_region`；HAL里POLLPRI空转；`venus_compat_gfmt=N`需要复测。
 - **硬件编码的遗留问题**：熄屏而系统没有休眠时视频硬件会挂起，之后编码可能一直失败到重启；一次只能有一个编码会话（需要在CP非像素窗口上做IOVA分配）；`v4l2_codec2`把`MB_RC_ENABLE`和`GOP_SIZE`放在同一次调用里，gen1不认前者，于是IDR之间还有每30帧一个的I帧；休眠唤醒后偶发一次编码无输出，没有任何报错，原因不明。见[`dev/audio-video.md`](dev/audio-video.md)的“硬件视频编码”一节。
 - **Wi-Fi芯片启动失败时泄漏内存**：`ath11k_mhi_start`失败后没有释放，每次泄漏约4 MB DMA内存（`mhi.c:446-450`）。
@@ -44,10 +44,10 @@
 ## 四、功能开发
 
 - **蓝牙通话**（[issue #107](https://github.com/vahiru/gaokun-android/issues/107)）：音频策略里没有蓝牙SCO通路，蓝牙耳机的麦克风在通话中无法使用。
-- **相机**（[issue #108](https://github.com/vahiru/gaokun-android/issues/108)）：闪光灯照片负向曝光补偿；手电筒亮度档位；libcamera补丁和传感器参数提交到上游。
 - **按网络随机的Wi-Fi MAC地址**：需要同时做一次性迁移，避免老网络的设置突然生效。
 - **GPU最高优先级的权限检查**：目前内核和Turnip都不检查调用者权限。ROM里的ANGLE看到Turnip声明了REALTIME，就会让每个进程都用它，所以用OpenGL ES的游戏和SurfaceFlinger同在ring 0，享受不到抢占。可以参照panthor的`group_priority_permit()`：内核只允许带`CAP_SYS_NICE`的进程或DRM master使用最高一档ring；Turnip在初始化时试建一个最高优先级的队列，建不成就不声明REALTIME。不能让队列创建直接失败，因为ROM的ANGLE遇到`VK_ERROR_NOT_PERMITTED`不会降级重试，GLES应用会无法启动。动手之前先确认两点：SurfaceFlinger在本ROM上带有`CAP_SYS_NICE`；常玩的GLES游戏在现有内核上确实有合成掉帧。代价是SystemUI等界面也会落到ring 2，游戏在前台时下拉通知栏，动画可能变卡。背景见[`dev/gpu-turnip.md`](dev/gpu-turnip.md)的“GPU抢占”一节。
 - **120 Hz无缝降频**
+- **平行视界的全屏播放（其余情况）**：右侧页面请求横屏时已能展开为整屏；左侧页面请求横屏、不切换为横屏的全屏，以及按窗口大小判断分屏的应用仍不能全屏显示（见[`dev/parallel-view.md`](dev/parallel-view.md)）。
 - **Wi-Fi Direct**；海外地区的Wi-Fi频段设置（regdomain）
 - **在设置里显示Android ID**，方便用户自己登记Google认证
 - **收紧SELinux策略**：rproc-kick、hexagonrpcd、bootctl的规则收窄；做一个vendor版的tinymix，让audioroute不再需要`vendor_executes_system_violators`。
@@ -62,7 +62,6 @@
 - 补传v0.7.1的内核源码附件；在v0.2到v0.5的发布页说明旧下载链接已失效
 - 核对issue表单的显示效果
 - 构建机上的设备树改为本仓库的checkout
-- 提交到上游：`drm_crtc`的`BUG_ON`问题（`patches/kernel/drm/0001`）、[`patches/kernel/camera/0001..0004`](../patches/kernel/camera/)里的相机与`camcc`补丁、libcamera补丁
 
 ## 六、搁置
 

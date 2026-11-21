@@ -1,0 +1,68 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] drm_hwcomposer: report extra cursor planes once per pipeline
+
+GetUsablePlanes() runs several times for every frame. When the DRM
+device lists more than one cursor plane for a CRTC, it logs
+"Encountered multiple cursor planes" on every call. The SC8280XP DPU
+registers both of its cursor-capable pipes as cursor planes usable on
+every CRTC, so the internal display logs about 200 of these lines per
+second while the screen updates. The message itself is harmless, but
+it crowds everything else out of the log buffer and keeps being
+mistaken for the cause of unrelated hangs.
+
+Log it once per pipeline, and say that later cursor planes are skipped
+too. The choice of cursor plane is unchanged.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drm/DrmDisplayPipeline.cpp | 11 +++++++----
+ drm/DrmDisplayPipeline.h   |  5 +++++
+ 2 files changed, 12 insertions(+), 4 deletions(-)
+
+diff --git a/drm/DrmDisplayPipeline.cpp b/drm/DrmDisplayPipeline.cpp
+index 1c5b7e1..b91e564 100644
+--- a/drm/DrmDisplayPipeline.cpp
++++ b/drm/DrmDisplayPipeline.cpp
+@@ -155,10 +155,13 @@ auto DrmDisplayPipeline::GetUsablePlanes() const -> UsablePlanes {
+         }
+       } else if (plane->GetType() == DRM_PLANE_TYPE_CURSOR) {
+         if (cursor) {
+-          ALOGW(
+-              "Encountered multiple cursor planes for CRTC %d. Ignoring "
+-              "plane %d",
+-              crtc->Get()->GetId(), plane->GetId());
++          if (!extra_cursor_plane_reported.exchange(true)) {
++            ALOGW(
++                "Encountered multiple cursor planes for CRTC %d. Ignoring "
++                "plane %d and any further cursor planes (logged once per "
++                "pipeline)",
++                crtc->Get()->GetId(), plane->GetId());
++          }
+         } else {
+           cursor = plane->BindPipeline(this, true);
+         }
+diff --git a/drm/DrmDisplayPipeline.h b/drm/DrmDisplayPipeline.h
+index 00da5d6..cf2b893 100644
+--- a/drm/DrmDisplayPipeline.h
++++ b/drm/DrmDisplayPipeline.h
+@@ -16,6 +16,7 @@
+ 
+ #pragma once
+ 
++#include <atomic>
+ #include <memory>
+ #include <vector>
+ 
+@@ -109,6 +110,10 @@ struct DrmDisplayPipeline {
+ 
+   std::unique_ptr<DrmAtomicCommitSink> atomic_commit_sink;
+   std::unique_ptr<CompositionPlanner> planner;
++
++  /* GetUsablePlanes() runs for every frame, so report extra cursor planes
++   * only once per pipeline. */
++  mutable std::atomic_bool extra_cursor_plane_reported{false};
+ };
+ 
+ }  // namespace android::drm_hwcomposer

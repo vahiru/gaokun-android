@@ -44,6 +44,8 @@ ndk::ScopedAStatus err(Status s)
 
 /* 后摄闪光灯在内核里的名字（patches/kernel/dts/0006：PM8350C 闪光模块 1+4 路 → 一个 LED）。 */
 constexpr char kRearFlashLed[] = "/sys/class/leds/white:flash";
+/* 驱动把brightness换算成电流时除以的满量程（include/linux/leds.h的LED_FULL）。 */
+constexpr int32_t kLedFull = 255;
 
 bool writeSysfs(const std::string &path, const std::string &value)
 {
@@ -61,21 +63,6 @@ bool writeSysfs(const std::string &path, const std::string &value)
 	return true;
 }
 
-std::string readSysfs(const std::string &path)
-{
-	char buf[64] = {};
-	int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC);
-	if (fd < 0)
-		return {};
-	ssize_t n = read(fd, buf, sizeof(buf) - 1);
-	close(fd);
-	if (n <= 0)
-		return {};
-	std::string s(buf, static_cast<size_t>(n));
-	while (!s.empty() && (s.back() == '\n' || s.back() == ' '))
-		s.pop_back();
-	return s;
-}
 } /* namespace */
 
 Device::Device(std::shared_ptr<libcamera::Camera> cam, std::string name, Provider *provider)
@@ -174,23 +161,20 @@ bool Device::init()
 	 *        rotation property in anticlockwise direction."
 	 *     但 x 不能直接用设备树的值，还要先做下面两步。
 	 *
-	 *   ★ 两边的参照系差 90°（issue #23、#42）：
-	 *     设备树按【横屏使用】的方向写（与下游 Linux 内核一致；绑定文档说"上"由使用环境决定，
-	 *     笔记本摄像头的例子写 0）：后摄 180、前摄 0。Android 的自然方向却是面板原生的
-	 *     【竖屏】，接键盘横放（前摄在上边框）时显示旋转是 ROTATION_90。SENSOR_ORIENTATION
-	 *     要相对竖屏算：从横屏换到竖屏，前摄的安装角加 90°；后摄从机背那一面看，方向相反，
-	 *     加 270°。
+	 *   ★ 参照系（issue #23、#42）：设备树按【横屏使用】的方向写（与下游Linux内核一致；
+	 *     绑定文档说"上"由使用环境决定，笔记本摄像头的例子写0）：后摄180、前摄0。
+	 *     设备树为面板声明了横屏的安装方向，Android的自然方向也是横屏
+	 *     （接键盘横放时ROTATION_0），两边参照系一致，不需要换算。
 	 *
 	 *   ★ 还要扣掉 libcamera 已经转掉的部分：会话不设 CameraConfiguration::orientation，
 	 *     默认要 Rotate0，管线用 CameraSensor::computeTransform() 去凑。180 能靠
 	 *     水平 + 垂直翻转消掉，后摄 ov13b10 支持翻转，就是被翻转读出的（日志里
-	 *     transform hvflip）；90 / 270 要转置，消不掉。前摄 hi846 没有翻转控件。
+	 *     transform hvflip）；90 / 270 要转置，消不掉。前摄 hi846 没有翻转控件；s5k4h7 有，
+	 *     但前摄设备树写的是 0°，不需要翻转。
 	 *
-	 *   ⇒ 本机：后摄 180 - 180 + 270 = 270 → SENSOR_ORIENTATION 90；
-	 *           前摄 0 + 90 = 90 → SENSOR_ORIENTATION 270。
-	 *     核对：接键盘横放（ROTATION_90，右边朝上，OrientationEventListener 报 270）时，
-	 *     应用按 Android 文档的 getJpegOrientation 算出的 JPEG 角是后摄 (90 + 270) % 360 = 0、
-	 *     前摄 (270 - 270) = 0，即交付的画面横放时本来就是正的，和设备树按横屏写的意思一致。
+	 *   ⇒ 本机：后摄180 - 180 = 0、前摄0，SENSOR_ORIENTATION都是0。
+	 *     核对：接键盘横放（ROTATION_0，OrientationEventListener报0）时，应用按Android文档的
+	 *     getJpegOrientation算出的JPEG角是0，即交付的画面横放时本来就是正的。
 	 */
 	auto rot = props.get(libcamera::properties::Rotation);
 	const int32_t rawRotation = rot ? *rot : 0;
@@ -227,12 +211,13 @@ bool Device::init()
 	 * 照 #42 设过的旧值（后 270、前 90）在这里会把方向带歪。要试别的角度就改设备树
 	 * （rotation 控件是只读的，运行时改不了）。
 	 *
-	 * 先换到竖屏自然方向下的逆时针角，再按 (360 - 逆时针) 换成顺时针。
+	 * 自然方向是横屏（设备树中面板的rotation，见device.mk），与摄像头安装角的参照系相同，
+	 * 不再加竖屏换算的90°/270°；按(360 - 逆时针)换成顺时针。
 	 */
-	const int32_t natural = (ccw - undone + (facts_.frontFacing ? 90 : 270) + 360) % 360;
+	const int32_t natural = (ccw - undone + 360) % 360;
 	facts_.orientation = (360 - natural) % 360;
-	ALOGI("%s 朝向：安装角 %d°（横屏参照系，逆时针），libcamera 翻转消掉 %d°，"
-	      "竖屏自然方向下 %d° ⇒ SENSOR_ORIENTATION %d",
+	ALOGI("%s orientation: mounted %d deg CCW (landscape frame), %d deg undone by libcamera "
+	      "flips, %d deg in the natural orientation => SENSOR_ORIENTATION %d",
 	      name_.c_str(), ccw, undone, natural, facts_.orientation);
 
 	/*
@@ -251,7 +236,7 @@ bool Device::init()
 	 * 这里【只找节点】、不开设备：打开 /dev/v4l-subdevN 本身就会给马达上电
 	 * （dw9714_open → pm_runtime，见 Lens.h），相机还没开的时候不该占着它。真正的 open 在
 	 * Session::init()（有会话才有必要）。
-	 * 前摄 hi846 无马达 ⇒ hasAf 保持 false，元数据如实按定焦声明。
+	 * 前摄（hi846 或 s5k4h7 模组）无马达 ⇒ hasAf 保持 false，元数据如实按定焦声明。
 	 */
 	if (!facts_.frontFacing && !Lens::findNode().empty()) {
 		facts_.hasAf = true;
@@ -530,7 +515,7 @@ ndk::ScopedAStatus Device::open(const std::shared_ptr<ICameraDeviceCallback> &cb
 	/* 相机被占用期间手电筒不可用（框架的约定）；灯由会话按请求控制。 */
 	inUse_ = true;
 	if (!facts_.flashLed.empty()) {
-		setLed(false);
+		resetTorchLocked();
 		provider_->notifyTorch(name_, TorchModeStatus::NOT_AVAILABLE);
 	}
 	session->setOnClosed([this] { onSessionClosed(); });
@@ -544,19 +529,30 @@ void Device::onSessionClosed()
 	std::lock_guard<std::mutex> lk(mutex_);
 	inUse_ = false;
 	if (!facts_.flashLed.empty()) {
-		setLed(false);
+		resetTorchLocked();
 		provider_->notifyTorch(name_, TorchModeStatus::AVAILABLE_OFF);
 	}
 }
 
-bool Device::setLed(bool on)
+void Device::resetTorchLocked()
+{
+	setLedLevel(0);
+	torchOn_ = false;
+	torchLevel_ = kTorchDefaultLevel;
+}
+
+bool Device::setLedLevel(int32_t level)
 {
 	if (facts_.flashLed.empty())
 		return false;
-	std::string max = readSysfs(facts_.flashLed + "/max_brightness");
-	if (max.empty())
-		max = "255";
-	return writeSysfs(facts_.flashLed + "/brightness", on ? max : "0");
+	/*
+	 * 第level档取不小于level/kTorchMaxLevel × 255的最小brightness：驱动按
+	 * brightness × 最大电流 / LED_FULL(255)向下取整，取整后正好是该档的电流（Metadata.h）。
+	 * 驱动除以的是常量LED_FULL而不是max_brightness；设备树没有max-brightness属性，
+	 * 所以max_brightness也是255，写入值不会被LED core截断。
+	 */
+	const int32_t brightness = (level * kLedFull + kTorchMaxLevel - 1) / kTorchMaxLevel;
+	return writeSysfs(facts_.flashLed + "/brightness", std::to_string(brightness));
 }
 
 ndk::ScopedAStatus Device::openInjectionSession(
@@ -579,22 +575,51 @@ ndk::ScopedAStatus Device::setTorchMode(bool on)
 		return err(Status::OPERATION_NOT_SUPPORTED);
 	if (inUse_)
 		return err(Status::CAMERA_IN_USE);
-	if (!setLed(on))
+	/* 开灯用当前档位：亮着时就是turnOnTorchWithStrengthLevel设的档，灭着时是默认档。 */
+	if (!setLedLevel(on ? torchLevel_ : 0))
 		return err(Status::INTERNAL_ERROR);
+	torchOn_ = on;
+	if (!on)
+		torchLevel_ = kTorchDefaultLevel;
 	provider_->notifyTorch(name_, on ? TorchModeStatus::AVAILABLE_ON
 					 : TorchModeStatus::AVAILABLE_OFF);
-	ALOGI("%s 手电筒 %s", name_.c_str(), on ? "开" : "关");
+	ALOGI("%s torch %s, level %d/%d", name_.c_str(), on ? "on" : "off", torchLevel_,
+	      kTorchMaxLevel);
 	return ndk::ScopedAStatus::ok();
 }
 
-ndk::ScopedAStatus Device::turnOnTorchWithStrengthLevel(int32_t)
+ndk::ScopedAStatus Device::turnOnTorchWithStrengthLevel(int32_t level)
 {
-	return err(Status::OPERATION_NOT_SUPPORTED);
+	/*
+	 * 设定档位，灯灭着就同时开灯（ICameraDevice.aidl）。档位范围由HAL检查：cameraserver
+	 * 原样转发，越界要返回ILLEGAL_ARGUMENT。只有灭→亮才报状态；亮着时改档位，
+	 * cameraserver自己广播onTorchStrengthLevelChanged。
+	 */
+	std::lock_guard<std::mutex> lk(mutex_);
+	if (facts_.flashLed.empty())
+		return err(Status::OPERATION_NOT_SUPPORTED);
+	if (level < 1 || level > kTorchMaxLevel)
+		return err(Status::ILLEGAL_ARGUMENT);
+	if (inUse_)
+		return err(Status::CAMERA_IN_USE);
+	if (!setLedLevel(level))
+		return err(Status::INTERNAL_ERROR);
+	torchLevel_ = level;
+	if (!torchOn_) {
+		torchOn_ = true;
+		provider_->notifyTorch(name_, TorchModeStatus::AVAILABLE_ON);
+	}
+	ALOGI("%s torch level %d/%d", name_.c_str(), level, kTorchMaxLevel);
+	return ndk::ScopedAStatus::ok();
 }
 
-ndk::ScopedAStatus Device::getTorchStrengthLevel(int32_t *)
+ndk::ScopedAStatus Device::getTorchStrengthLevel(int32_t *out)
 {
-	return err(Status::OPERATION_NOT_SUPPORTED);
+	std::lock_guard<std::mutex> lk(mutex_);
+	if (facts_.flashLed.empty())
+		return err(Status::OPERATION_NOT_SUPPORTED);
+	*out = torchLevel_;
+	return ndk::ScopedAStatus::ok();
 }
 
 ndk::ScopedAStatus Device::constructDefaultRequestSettings(RequestTemplate type,

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  按应用的兼容覆盖，安装到/product/etc/appcompat/。CompatConfig开机时先读本文件，再读/data/misc/appcompat/
+  下的同名文件；本文件存在时，它会把合并后的结果写回/data。因此这里的覆盖一经开机就会留在/data中：以后的版本
+  删除或修改某一项都不会生效，需要另外执行am compat reset <变更ID> <包名>。
+  只用validated：开机时直接生效，不检查应用版本（CompatChange.loadOverrides()）。
+
+  Aperture（org.lineageos.aperture）声明screenOrientation="nosensor"，界面按竖屏设计。自然方向为横屏时，
+  nosensor会让它横向显示；以下三项让它像在竖屏自然方向的设备上一样，把屏幕转为竖屏使用：
+    OVERRIDE_UNDEFINED_ORIENTATION_TO_PORTRAIT（265452344）与OVERRIDE_ANY_ORIENTATION（265464455）：
+      把它请求的方向改为portrait（AppCompatOrientationPolicy.overrideOrientationIfNeeded()）。后者让nosensor
+      这种固定方向也被替换；targetSdk 36及以上时大屏策略已先把固定方向换成未指定，单靠前者也够，两项一起
+      不依赖targetSdk。
+    OVERRIDE_RESPECT_REQUESTED_ORIENTATION（236283604）：屏幕忽略方向请求时，仍响应它的方向请求，转为竖屏，
+      而不是在横屏中居中显示（DisplayArea.shouldIgnoreOrientationRequest()）。
+  覆盖按应用生效：Aperture中没有声明方向的设置页和锁屏相机（SettingsActivity、SecureCameraActivity）同样
+  转为竖屏。从Aperture进入最近任务时屏幕要转回横屏，这需要patches/android/frameworks-base/0004。
+-->
+<overrides>
+    <change-overrides changeId="265452344">
+        <validated>
+            <override-value packageName="org.lineageos.aperture" enabled="true" />
+        </validated>
+    </change-overrides>
+    <change-overrides changeId="265464455">
+        <validated>
+            <override-value packageName="org.lineageos.aperture" enabled="true" />
+        </validated>
+    </change-overrides>
+    <change-overrides changeId="236283604">
+        <validated>
+            <override-value packageName="org.lineageos.aperture" enabled="true" />
+        </validated>
+    </change-overrides>
+</overrides>

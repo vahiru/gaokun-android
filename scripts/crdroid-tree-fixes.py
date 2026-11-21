@@ -568,7 +568,7 @@ def apply_patch_file(tree: pathlib.Path, project: str, patch_name: str,
     """把 <repo>/patches/<patch_name> 用 git apply 打进 AOSP 树的 <project>（幂等）。
 
     ★ 为什么要有这个助手：本仓 `patches/android/` 里的 **AOSP 侧**补丁（
-    hardware-interfaces/0001–0011 audio HAL、v4l2-codec2/0001–0007、tinyalsa/0001、drm-hwcomposer/0001–0004）
+    hardware-interfaces/0001–0011 audio HAL、v4l2-codec2/0001–0007、tinyalsa/0001、drm-hwcomposer/0001–0005）
     原先**没有任何消费者** —— 全靠人手动
     `git apply`。而本仓已经为"没有消费者的配置一定会漂"付过三次账
     （M13 的 BOARD_KERNEL_CMDLINE、M17 的上游 Venus 补丁集、以及 2026-09-12
@@ -1433,6 +1433,9 @@ def main():
     step(" [35] drm_hwcomposer 内置屏声明 HDR10 和 HLG: ", apply_patch_file(
         tree, "external/drm_hwcomposer",
         "android/drm-hwcomposer/0004-drm-hwcomposer-declare-hdr-on-internal-panels.patch"))
+    step(" [49] drm_hwcomposer多余光标平面的警告每条管线只打印一次: ", apply_patch_file(
+        tree, "external/drm_hwcomposer",
+        "android/drm-hwcomposer/0005-drm-hwcomposer-report-extra-cursor-planes-once-per-pipeline.patch"))
     # 硬件视频编码：[41][42]要和patches/kernel/iommu/0001、kernel/iris/0013–0018以及device.mk的编码器属性一起生效。
     # 两条都是在[3][5][7][8][28][30][34]打完的树上生成的，所以排在它们之后；0004与0005改的是EncodeInterface.cpp的不同位置。
     step(" [41] v4l2_codec2编码器输入块带CPU读用途（相机录像、录屏）: ", apply_patch_file(
@@ -1458,6 +1461,58 @@ def main():
     step(" [44] SystemUI在指纹临时锁定期间不再请求指纹认证: ", apply_patch_file(
         tree, "frameworks/base",
         "android/frameworks-base/0001-systemui-respect-fingerprint-lockout.patch"))
+    # crDroid（取自CAF）在开机完成20分钟后的任务里调用compactAllSystem()，把system内存cgroup整体回收一遍，
+    # SurfaceFlinger、音频服务等正在使用的页面随之被逐出，游戏中表现为约1秒的掉帧（没有交换空间时还会爆音）。
+    # AOSP和LineageOS在这个任务里只收集内存统计；AOSP正式版本还用disable_system_compaction关闭了空闲维护里的
+    # 系统压缩，这处调用绕过了它。补丁去掉这次调用，之后系统进程只在执行am compact system时压缩，后台应用的压缩不变。
+    step(" [47] 开机20分钟后不再压缩全部系统进程: ", apply_patch_file(
+        tree, "frameworks/base",
+        "android/frameworks-base/0002-activitymanager-dont-compact-system-processes-after-boot.patch"))
+    # 虚幻引擎只在GL_VERSION里读到不低于下限的高通驱动版本（"V@<版本>"）时才给Adreno 6xx选开启Vulkan的设备档案，
+    # ANGLE的GL_VERSION不含驱动版本。补丁让Parts的GPU驱动兼容设置中选定的应用在启动时设置ANGLE_GL_VERSION，
+    # 读到带驱动版本的GL_VERSION；名单经CoreSettingsObserver传给应用，默认为空。未采用全局的debug.angle.gl_version：
+    # Chromium浏览器自带的ANGLE也会读到它，Edge上的WebGL 1随之无法使用。
+    step(" [48] 选定的应用在GL_VERSION中读到高通驱动版本: ", apply_patch_file(
+        tree, "frameworks/base",
+        "android/frameworks-base/0003-graphicsenv-per-app-gl-driver-version.patch"))
+    # 屏幕忽略方向请求时（大屏默认如此），声明nosensor或locked的应用仍会改变屏幕方向。从这样的应用进入最近任务、
+    # 而加速度计报告另一个方向时，WindowManager把屏幕旋转放进启动最近任务的过渡，WMShell的RecentsController.start()
+    # 不处理旋转，屏幕上只剩壁纸，直到按下主屏幕键。补丁让start()与merge()一样：过渡中有屏幕旋转时取消最近任务，
+    # 交给下一个处理器连同旋转一起播放。
+    step(" [50] 启动最近任务的过渡带屏幕旋转时交给默认动画: ", apply_patch_file(
+        tree, "frameworks/base",
+        "android/frameworks-base/0004-wm-shell-cancel-recents-when-its-start-rotates-the-display.patch"))
+    # 自然方向为横屏后，电源键（侧边指纹）位于自然方向的左边缘，SystemUI只支持上边缘和右边缘。补丁新增配置项
+    # config_sideFpsSensorOnLeftEdge（默认false），开启后把竖直传感器视为位于左边缘，按镜像位置和多转180°复用右边缘的
+    # 摆放；本机由rro/Gaokun3SystemUIFingerprintOverlay开启，指纹HAL按此上报位置（见fingerprint/Service.cpp）。
+    step(" [51] SystemUI侧边指纹提示支持左边缘的传感器: ", apply_patch_file(
+        tree, "frameworks/base",
+        "android/frameworks-base/0005-systemui-side-fingerprint-sensor-on-the-left-edge.patch"))
+    # 平行视界：许多国内应用在assets/easygo.json中自带华为平板的分栏规则。0006新增按应用开启的兼容变更
+    # OVERRIDE_ENABLE_PARALLEL_VIEW（Parts的“设置 → 应用 → 平行视界”设置），开启的应用启动时初始化窗口管理
+    # 扩展库，不依赖虚拟手柄的标志，也不需要重启系统。0007让扩展库把这些规则转换为Activity嵌入规则，横屏时
+    # 左右分栏显示。
+    step(" [52] 按应用开启平行视界的兼容变更: ", apply_patch_file(
+        tree, "frameworks/base",
+        "android/frameworks-base/0006-core-parallel-view-compat-change.patch"))
+    step(" [53] 窗口管理扩展库按应用自带的规则分栏显示: ", apply_patch_file(
+        tree, "frameworks/base",
+        "android/frameworks-base/0007-wm-jetpack-parallel-view-from-easygo-rules.patch"))
+    # 拖动可拖动的分隔条时，AOSP用纯色遮罩盖住两侧，颜色取页面的窗口背景；许多应用的窗口背景与页面颜色不同
+    # （例如深色主题下窗口背景为纯黑），两侧因此变成全黑。0008在开始拖动时截取两侧页面，拖动期间显示截图。
+    step(" [54] 拖动分隔条时显示两侧页面的截图: ", apply_patch_file(
+        tree, "frameworks/base",
+        "android/frameworks-base/0008-wm-jetpack-show-snapshots-while-dragging-the-divider.patch"))
+    # 大屏默认忽略应用的方向请求（ignoreOrientationRequest），只支持横屏的应用（多数游戏）在屏幕处于竖屏时启动，
+    # 会以横条显示在屏幕顶部。0009让自然方向为横屏的屏幕仍响应横屏请求，其他请求照旧忽略（按应用豁免的除外）。
+    # 计算旋转时landscape与reverseLandscape按userLandscape处理，由传感器或旋转锁定在两个横屏方向中选择；请求被
+    # 忽略的半透明页面（如竖屏的登录对话框）让下层页面决定方向。平行视界等分栏只在横屏并排显示，屏幕已是横屏时，
+    # 并排的容器按堆叠时的覆盖关系从上往下判断，先遇到横屏请求则报告userLandscape，屏幕保持横屏，不会转回竖屏后
+    # 又转为横屏；主页面请求横屏时0007不打开占位页，已显示的占位页会被关闭。从这样的应用进入最近任务时的屏幕旋转
+    # 需要0004。
+    step(" [55] 自然方向为横屏的屏幕仍响应横屏请求: ", apply_patch_file(
+        tree, "frameworks/base",
+        "android/frameworks-base/0009-wm-respect-landscape-requests-on-a-naturally-landscape-display.patch"))
     # crDroid的锁屏充电信息（core: Lockscreen Charging）固定从/sys/class/power_supply/battery读取电流和电压，
     # 没有这个节点时改读充电器节点。本机电池节点名为gaokun-ec-battery，EC适配器节点没有电流和电压，UCSI节点在
     # PD模式下两者均为0，锁屏因此只显示默认的5V。补丁在没有battery节点时改用BatteryMonitor已识别的电池节点。

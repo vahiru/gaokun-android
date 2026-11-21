@@ -69,3 +69,10 @@
 # FTE7001: no TA operation occurs until the fingerprint HAL opens the device.
 /dev/gaokun3_fpcmd 0600 system system
 /dev/gpiochip4 0600 system system
+
+# 温控HAL（user system，thermal/）按性能模式与电源状态改写板载热敏电阻温区sys-therm1–4的被动降频点，
+# 这些文件内核默认0644 root。温区编号随探测顺序变化，只能按通配符给，所以所有温区的trip 0/1都对system组
+# 可写，其中包括CPU、GPU、PMIC等温区的紧急关机点。实际能写的进程由SELinux限定：只有hal_thermal_default
+# 有sysfs_thermal的写权限（sepolicy/hal_thermal_default.te），HAL也只写sys-therm1–4中类型为passive的降频点。
+/sys/class/thermal/thermal_zone*   trip_point_0_temp   0664   root   system
+/sys/class/thermal/thermal_zone*   trip_point_1_temp   0664   root   system

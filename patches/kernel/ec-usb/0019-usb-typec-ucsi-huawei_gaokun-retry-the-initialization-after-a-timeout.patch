@@ -1,0 +1,66 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] usb: typec: ucsi: huawei_gaokun: Retry the initialization after a timeout
+
+On some boots ucsi_init() fails with -ETIMEDOUT ("PPM init failed"),
+usually after "failed to register alt modes": the EC answers
+GET_ALTERNATE_MODES with BUSY, then with COMMAND_COMPLETE but BUSY still
+set, and leaves BUSY set. The core ignores a CCI with BUSY set, so the
+command times out after 10 s and UCSI stays down until the next boot. In
+the failures logged with the EC traffic, the commands sent after it
+completed normally.
+
+Set UCSI_RETRY_INIT_ON_TIMEOUT. When a retry succeeds, the ports of such
+a boot should come up about 15 s later than on a normal boot, depending
+on which command timed out, instead of staying down.
+
+The check for a failed initialization, which acknowledges USB events
+once nothing else will, keeps working: a queued retry counts as busy, so
+it holds only after the last retry has failed. Update its comment.
+
+Tested with timeouts simulated by a test-only change: two failures of
+GET_ALTERNATE_MODES, after which the third run registered the ports and
+the USB HAL reported port0; one failure that first waited 10 s, so that
+the ports came up after boot had completed, and the USB HAL reported
+port0 again; and six failures of GET_CAPABILITY, after which the driver
+stopped trying. None of 20 boots without simulation failed, so a retry
+after a real failure has not been observed yet.
+
+Fixes: 00327d7f2c8c ("usb: typec: ucsi: add Huawei Matebook E Go ucsi driver")
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c | 13 ++++++++++---
+ 1 file changed, 10 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c b/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c
+index b9c4c77803..70c7b61191 100644
+--- a/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c
++++ b/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c
+@@ -441,9 +441,10 @@ static void gaokun_ucsi_handle_usb_mode(struct gaokun_ucsi_port *port)
+ /*
+  * Whether UCSI has given up initializing. ucsi_register() only queues
+  * ucsi->work; ucsi_init() runs from it and sets ucsi->connector on success.
+- * On failure it leaves ucsi->connector NULL and does not try again, except
+- * for -EPROBE_DEFER, which queues the work once more. work_busy() is only a
+- * snapshot, so the caller acts on this only when it holds for two USB
++ * On failure it leaves ucsi->connector NULL. The work is queued again only
++ * after -EPROBE_DEFER or, with UCSI_RETRY_INIT_ON_TIMEOUT, -ETIMEDOUT, a
++ * limited number of times; a queued retry counts as busy. work_busy() is
++ * only a snapshot, so the caller acts on this only when it holds for two USB
+  * events in a row.
+  */
+ static bool gaokun_ucsi_init_failed(struct gaokun_ucsi *uec)
+@@ -693,6 +694,12 @@ static int gaokun_ucsi_probe(struct auxiliary_device *adev,
+ 	if (IS_ERR(uec->ucsi))
+ 		return PTR_ERR(uec->ucsi);
+ 
++	/*
++	 * The EC sometimes completes a command but leaves BUSY set in the CCI,
++	 * so the command times out. It takes the next command normally.
++	 */
++	uec->ucsi->quirks |= UCSI_RETRY_INIT_ON_TIMEOUT;
++
+ 	ucsi_set_drvdata(uec->ucsi, uec);
+ 	auxiliary_set_drvdata(adev, uec);
+ 

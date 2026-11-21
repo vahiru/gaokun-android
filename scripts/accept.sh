@@ -113,12 +113,12 @@ info "设备当前 persist.vendor.gaokun3.allow_suspend = [$(R 'getprop persist.
 
 # ── A5 自研服务与 SELinux 域 ──
 sect "A5 自研服务与域"
-for s in smmustall hangdump vendor.usb-gaokun3 vendor.boot-gaokun3 vendor.camera-provider-gaokun3 \
+for s in hangdump vendor.usb-gaokun3 vendor.boot-gaokun3 vendor.camera-provider-gaokun3 \
          vendor.sensors-gaokun3 vendor.light-gaokun3 vendor.thermal-gaokun3; do
     chk A5 "$(R "getprop init.svc.$s")" running "init.svc.$s"
 done
 PSZ=$(R 'ps -AZ -o LABEL,PID,ARGS 2>/dev/null')
-for e in "gaokun3_smmustall:smmu-nostall.sh" "hal_usb_default:android.hardware.usb-service.gaokun3"; do
+for e in "hal_usb_default:android.hardware.usb-service.gaokun3"; do
     d=${e%%:*}; c=${e#*:}
     if echo "$PSZ" | grep -F "$c" | grep -q "u:r:$d:s0"; then pass A5 "$c 跑在 u:r:$d:s0"
     else fail A5 "$c 不在 u:r:$d:s0（实际：$(echo "$PSZ" | grep -F "$c" | awk '{print $1}' | head -1)）"; fi

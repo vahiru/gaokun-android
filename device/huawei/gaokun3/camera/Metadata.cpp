@@ -341,7 +341,7 @@ std::vector<uint8_t> buildCharacteristics(const SensorFacts &f)
 	/*
 	 * HAL 把请求的帧率范围作为 FrameDurationLimits 交给 libcamera（见
 	 * processCaptureRequest），由它据此设置传感器的帧长。HAL 要的模式最高
-	 * 60 fps（ov13b10 合并模式）或 30 fps（全尺寸、hi846 合并模式），所以
+	 * 60 fps（ov13b10 合并模式）或 30 fps（全尺寸、前摄的合并模式），所以
 	 * 30 fps 总能达到。只有某个尺寸能到 60 fps 时才声明 60 fps 的范围
 	 * （Device::init()），具体哪些尺寸由最短帧长告诉应用。
 	 */
@@ -361,6 +361,14 @@ std::vector<uint8_t> buildCharacteristics(const SensorFacts &f)
 	const uint8_t flashAvailable = hasFlash ? ANDROID_FLASH_INFO_AVAILABLE_TRUE
 					       : ANDROID_FLASH_INFO_AVAILABLE_FALSE;
 	add_camera_metadata_entry(m, ANDROID_FLASH_INFO_AVAILABLE, &flashAvailable, 1);
+	/* 手电筒档位（Metadata.h）。最大档大于1时，SystemUI的手电筒磁贴才提供亮度滑块。 */
+	if (hasFlash) {
+		const int32_t torchMax = kTorchMaxLevel;
+		const int32_t torchDefault = kTorchDefaultLevel;
+		add_camera_metadata_entry(m, ANDROID_FLASH_INFO_STRENGTH_MAXIMUM_LEVEL, &torchMax, 1);
+		add_camera_metadata_entry(m, ANDROID_FLASH_INFO_STRENGTH_DEFAULT_LEVEL,
+					  &torchDefault, 1);
+	}
 	/* Camera1 rebuilds the view angles from it and SENSOR_INFO_PHYSICAL_SIZE. */
 	const LensParams &lens = lensParams(f.frontFacing);
 	const float focalLengths[] = { lens.focalLengthMm };

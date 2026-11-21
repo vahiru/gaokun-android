@@ -121,6 +121,9 @@ KPATCHES=(
     kernel/ec-usb/0014-usb-xhci-don-t-fail-system-suspend-on-a-dead-host.patch
     kernel/ec-usb/0015-platform-arm64-huawei-gaokun-ec-use-an-edge-triggered-IRQ-while-suspended.patch
     kernel/ec-usb/0016-power-supply-huawei-gaokun-battery-report-temperature.patch
+    kernel/ec-usb/0017-usb-typec-ucsi-huawei_gaokun-acknowledge-USB-events-after-a-failed-init.patch
+    kernel/ec-usb/0018-usb-typec-ucsi-add-a-quirk-to-retry-the-initialization-after-a-timeout.patch
+    kernel/ec-usb/0019-usb-typec-ucsi-huawei_gaokun-retry-the-initialization-after-a-timeout.patch
 
     # ─── 5. kernel/drm：DRM 核心、MSM DPU 色彩与平面、DSI PHY、Himax 面板、MSM GPU ───
     # 显示色彩详见 docs/dev/display-color.md。0003 与 kernel/dts/0017 配套；
@@ -147,6 +150,8 @@ KPATCHES=(
     kernel/drm/0017-drm-msm-reset-the-gpu-when-a-preemption-times-out-on-an-idle-ring.patch
     kernel/drm/0018-drm-msm-dpu-add-the-DSPP-3D-LUT-of-sc8280xp.patch
     kernel/drm/0019-drm-msm-dpu-load-the-gaokun3-factory-calibration-into-the-3D-LUT.patch
+    kernel/drm/0020-drm-panel-himax-hx83121a-report-the-panel-orientation.patch
+    kernel/drm/0021-drm-panel-himax-hx83121a-swap-the-panel-s-width-and-height-in-mm.patch
 
     # ─── 6. kernel/iris：qcom-iris视频编解码驱动 ───
     # 配套 DT 见 kernel/dts/0009–0010、0026；需 CONFIG_VIDEO_QCOM_IRIS=y、CONFIG_VIDEO_QCOM_VENUS 不设。
@@ -179,9 +184,10 @@ KPATCHES=(
     # 1080p及以下的硬件解码与1080p以上的VP9硬件解码会在启动时报错。
     kernel/iris/0019-media-iris-let-the-decoder-client-size-its-input-buffers.patch
 
-    # ─── 7. kernel/camera：camcc 时钟/GDSC、camss 与前后摄传感器驱动（ov13b10 / hi846）───
+    # ─── 7. kernel/camera：camcc 时钟/GDSC、camss 与前后摄传感器驱动（ov13b10 / hi846 / s5k4h7）───
     # 0003 与 kernel/dts/0005 配套，需 CONFIG_VIDEO_OV13B10=y 与 CONFIG_VIDEO_DW9714=y；
     # 0007 叠在 0003 之上，0008 叠在 0005–0006 之上。
+    # 0038（S5K4H7驱动，需CONFIG_VIDEO_S5K4H7=y）与kernel/dts/0029配套；0039叠在0004之上。
     kernel/camera/0001-clk-qcom-camcc-sc8280xp-gdsc-wait-vals.patch
     kernel/camera/0002-clk-qcom-camcc-sc8280xp-mark-camnoc-ahb-rcgs-shared.patch
     kernel/camera/0003-media-i2c-ov13b10-of-match-and-gaokun3-power-sequence.patch
@@ -222,6 +228,8 @@ KPATCHES=(
     kernel/camera/0035-media-qcom-camss-vfe-17x-Add-the-Bayer-histogram-statistics.patch
     kernel/camera/0036-media-qcom-camss-Quiet-the-stop-flag-the-timestamps.patch
     kernel/camera/0037-media-i2c-hi846-Allow-every-analogue-gain-step.patch
+    kernel/camera/0038-media-i2c-Add-a-driver-for-the-Samsung-S5K4H7-sensor.patch
+    kernel/camera/0039-media-qcom-camss-Drop-unfitted-alternative-sensors-without-waiting.patch
 
     # ─── 8. kernel/audio：ASoC sc8280xp、LPASS 编解码宏、WSA883x 功放、SoundWire 与 Q6APM ───
     # 0007–0008 与 kernel/dts/0016 及 device/huawei/gaokun3/bin/audio-route.sh 配套；
@@ -273,6 +281,7 @@ KPATCHES=(
     # 0025把Wi-Fi校准变体改为HW_GK3，要求vendor的board-2.bin带qmi-chip-id=18的HW_GK3名称
     # （scripts/wifi/ath11k-board-alias.py添加，device.mk构建时检查），否则会改用信号弱约22 dB的通用数据。
     # 0026在iris主域预留0x0..0x25800000，范围须与iris_platform_vpu2.c的tz_cp_config_vpu2一致。
+    # 0029在摄像头dtsi的前摄位置同时描述HI846与S5K4H7两个节点，二者共用复位GPIO，需CONFIG_GPIO_SHARED_PROXY=y。
     kernel/dts/0001-arm64-dts-gaokun3-drive-ts-mode-gpio174-low.patch
     kernel/dts/0002-arm64-dts-sc8280xp-add-cpu-cooling-maps.patch
     kernel/dts/0003-arm64-dts-gaokun3-usb0-otg-for-usb-adb.patch
@@ -301,6 +310,9 @@ KPATCHES=(
     kernel/dts/0026-arm64-dts-qcom-sc8280xp-keep-iris-IOVAs-out-of-the-content-protection-range.patch
     kernel/dts/0027-arm64-dts-qcom-sc8280xp-Fix-GPU-SMMU-context-fault-interrupts.patch
     kernel/dts/0028-arm64-dts-qcom-sc8280xp-fix-GPU-peak-bandwidth-votes.patch
+    kernel/dts/0029-arm64-dts-qcom-sc8280xp-huawei-gaokun3-Describe-the-S5K4H7-front-camera.patch
+    kernel/dts/0030-arm64-dts-qcom-sc8280xp-huawei-gaokun3-set-the-panel-rotation.patch
+    kernel/dts/0031-arm64-dts-qcom-sc8280xp-huawei-gaokun3-throttle-on-the-board-thermistors.patch
 
     # ─── 11. kernel/fingerprint：QSEECOM 与指纹传输驱动（/dev/gaokun3_fpcmd，CONFIG_GAOKUN3_FPCMD 由 kernel-config-android.sh 打开）───
     kernel/fingerprint/0001-firmware-qcom-scm-qseecom-app-load-shutdown-listener.patch

@@ -30,6 +30,18 @@ constexpr int32_t kMaxDigitalZoom = 4;
 
 /* 曝光补偿每档的步数（ANDROID_CONTROL_AE_COMPENSATION_STEP） */
 constexpr int32_t kEvStepsPerStop = 3;
+
+/*
+ * 手电筒亮度档位（FLASH_INFO_STRENGTH_*，ICameraDevice::turnOnTorchWithStrengthLevel）。
+ * 内核leds-qcom-flash把brightness按brightness/255（LED_FULL）的比例换算成总电流，上限是设备树的
+ * led-max-microamp（200 mA，patches/kernel/dts/0006），再平分到1、4两路，每路按5 mA取整。
+ * 因此硬件只有20个电流档：每档10 mA，从10 mA到200 mA。档位与电流成正比，满足
+ * ICameraDevice.aidl要求的线性关系（第10档的亮度是第5档的两倍）。
+ * 修改设备树的led-max-microamp或通道数时，档位数要随之修改。
+ */
+constexpr int32_t kTorchMaxLevel = 20;
+/* 默认最亮，与支持档位之前的手电筒一致；关灯后档位回到这里（接口契约）。 */
+constexpr int32_t kTorchDefaultLevel = kTorchMaxLevel;
 /*
  * 镜头参数，取自华为 Windows 相机拍的照片的 EXIF。特性、每帧结果和 JPEG 的 EXIF 用同一份，
  * 应用和 CTS 会核对它们是否一致。
@@ -39,7 +51,7 @@ struct LensParams {
 	float fNumber;
 };
 constexpr LensParams kLensBack = { 4.0f, 1.8f };     /* ov13b10 */
-constexpr LensParams kLensFront = { 3.0f, 2.0f };    /* hi846 */
+constexpr LensParams kLensFront = { 3.0f, 2.0f };    /* hi846 与 s5k4h7 模组的镜头参数相同 */
 constexpr const LensParams &lensParams(bool frontFacing)
 {
 	return frontFacing ? kLensFront : kLensBack;

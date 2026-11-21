@@ -1,0 +1,1292 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] WM Jetpack: parallel view from the app's EasyGo rules
+
+Many apps from China ship the split rules they use on Huawei tablets in
+assets/easygo.json ("magicwindow" entity): which page opens on the side
+of which (activityPairs, "*" for any page), a page shown on the side of
+the main page by default (defaultDualActivities), pages that never take
+part in a split (transActivities) or always fill the task (Activities
+with defaultFullScreen), the split ratio (UX.windowsRatio) and whether
+the divider can be dragged (UX.isDraggable). For apps with
+OVERRIDE_ENABLE_PARALLEL_VIEW enabled, turn those rules into embedding
+rules when the extensions load the app compat rules:
+
+- custom mode (1): a SplitPairRule per pair, clearing the side when a
+  new page opens from the main side and finishing the side page with
+  its primary;
+- shopping mode (0), where the pairs do not apply: one wildcard rule
+  that sends every page to the side and pushes the side page to the main
+  side. Launcher activities stay out of it; they are usually splash
+  screens that start the main page and finish, and would otherwise
+  leave the main page on the side;
+- defaultDualActivities: a SplitPlaceholderRule, transActivities and
+  full-screen pages: never split, the latter as always-expand rules;
+- splits only in landscape parents at least 600dp wide, measured with
+  the density of the window metrics rather than that of the app's
+  resources, which some apps change; the divider is draggable (25% to
+  75%, and to full screen when UX.supportDraggingToFullScreen names PAD
+  or is "true") only when the rules say so;
+- wildcard rules leave out pages with a floating theme, and implicit
+  intents are resolved to find the page they start.
+
+The rules apply even when the app sets
+PROPERTY_ACTIVITY_EMBEDDING_ALLOW_SYSTEM_OVERRIDE to false, since they
+are the app's own. Apps that use activity embedding themselves
+(PROPERTY_ACTIVITY_EMBEDDING_SPLITS_ENABLED) are left alone, as for the
+virtual gamepad. The SplitController constructor loads the compat rules
+for these apps also when the virtual_gamepad_override flag is off.
+
+Two app behaviours keep the controller from seeing activities, and are
+worked around for apps with parallel view enabled only:
+
+- some Application classes override registerActivityLifecycleCallbacks()
+  and wrap each callback in a class that forwards only the original
+  seven methods, so onActivityPreCreated() never arrives. If the
+  Application overrides the method, the controller's callbacks are added
+  to Application's own list, as the platform implementation does;
+- some apps replace the Instrumentation, so activity starts go through
+  an instance whose own monitor list lacks the controller's start
+  monitor, or are passed on to the replaced instance. The monitor is
+  put into the own list of the current Instrumentation, and of every
+  Instrumentation it keeps in a field, when the controller starts and
+  again before each activity is created if the Instrumentation changed.
+
+Both use reflection on Application and Instrumentation fields; the
+extensions library is part of the platform, so these are not restricted.
+
+Full-screen playback: a page shown beside another one is in multi-window
+mode, in which some apps refuse full-screen playback (Bilibili checks
+Activity#isInMultiWindowMode() and only shows a toast). For apps with
+parallel-view rules loaded, a page in a split of a task that is not in
+multi-window mode itself is reported as not in multi-window mode, and
+any other page as it really is (split screen, freeform,
+picture-in-picture). ActivityThread sets this state only when the
+activity is created and when it enters or leaves multi-window mode, so
+it is checked after every layout of the page and again when the task
+changes. The windowing mode itself stays multi-window, which window
+management relies on for the bounds and visibility of the containers.
+
+When the side container then requests a landscape orientation, as
+video players do for full screen, the split is changed to
+ExpandContainersSplitType without a divider: the side fills the task
+with the main page kept underneath, and there is no handle over the
+video. The previous split attributes are restored when the side no
+longer requests landscape. The pages of the side container are judged as
+window management judges the display orientation: from the top, the
+first page with an explicit orientation decides, a page that requests
+"behind", or a translucent or floating page without one or with one the
+display ignores (any but landscape, "locked", "nosensor", "sensor" and
+"fullSensor", see "WM: respect landscape requests on a naturally
+landscape display"), defers to the page below, and an opaque page
+without one ends the search. So a page opened above a player does not
+restore the split while the player shows through, and a player with a
+translucent theme still counts. A split whose side page is a placeholder
+that is not sticky is not expanded, since that dismisses the placeholder
+with the pages above it. A page's requested orientation is the one it
+last passed to setRequestedOrientation()
+(Activity#mLastRequestedOrientation), else what the system holds for the
+activity, queried once (declared in the manifest, or requested by an
+earlier instance of a relaunched activity). The layout listener belongs
+to the activity instance, since a relaunch can keep the window. The
+SplitController passes itself to ParallelViewRules for this, and only
+apps that got parallel-view rules are affected.
+
+No placeholder is launched beside a main page whose container requests
+landscape, judged as for the side container, and a placeholder already
+shown is dismissed at the next layout of a page of its main container
+once they request landscape; the main page then fills the task. The
+placeholder is dismissed as
+SplitController#dismissPlaceholderIfNecessary does, without finishing
+its dependents, since the placeholder rules finish the primary with the
+placeholder (FINISH_ALWAYS); the pages opened above the placeholder in
+its container close with it, as when Jetpack dismisses a placeholder in
+portrait. Splits are shown side by side only in landscape, a placeholder
+that is not sticky is finished in portrait, and window management keeps
+the display in landscape for a split only while its containers, walked
+from the top as the task walks them stacked, first meet a landscape
+request (an opaque placeholder on top ends the walk), so with the tablet
+held in portrait a placeholder beside a landscape main page would rotate
+the display back and forth; a sticky one would cover the main page in
+portrait. When the main page no longer requests landscape, the
+placeholder comes back with the next update of its container, e.g. when
+the page resumes or the display rotates.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Inappropriate [device-specific feature]
+---
+ .../AppCompatEmbeddingRuleController.java     |    6 +
+ .../embedding/ParallelViewRules.java          | 1061 +++++++++++++++++
+ .../extensions/embedding/SplitController.java |   35 +-
+ 3 files changed, 1100 insertions(+), 2 deletions(-)
+ create mode 100644 libs/WindowManager/Jetpack/src/androidx/window/extensions/embedding/ParallelViewRules.java
+
+diff --git a/libs/WindowManager/Jetpack/src/androidx/window/extensions/embedding/AppCompatEmbeddingRuleController.java b/libs/WindowManager/Jetpack/src/androidx/window/extensions/embedding/AppCompatEmbeddingRuleController.java
+index 918505b..4ec7391 100644
+--- a/libs/WindowManager/Jetpack/src/androidx/window/extensions/embedding/AppCompatEmbeddingRuleController.java
++++ b/libs/WindowManager/Jetpack/src/androidx/window/extensions/embedding/AppCompatEmbeddingRuleController.java
+@@ -80,6 +80,8 @@ public class AppCompatEmbeddingRuleController {
+             return rules;
+         }
+ 
++        ParallelViewRules.addRules(context, rules);
++
+         if (sIsVirtualGamepadRuleEnabled) {
+             final EmbeddingRule rule = createVirtualGamepadOverrideRule(
+                     context.getResources().getString(R.string.config_virtual_gamepad_package_name),
+@@ -90,6 +92,10 @@ public class AppCompatEmbeddingRuleController {
+                     context.getApplicationInfo().uid);
+             if (rule != null) {
+                 rules.add(rule);
++            } else {
++                // No gamepad on this device: do not pin other placeholders, such as the
++                // parallel-view ones, as if they were the gamepad.
++                sIsVirtualGamepadRuleEnabled = false;
+             }
+         }
+ 
+diff --git a/libs/WindowManager/Jetpack/src/androidx/window/extensions/embedding/ParallelViewRules.java b/libs/WindowManager/Jetpack/src/androidx/window/extensions/embedding/ParallelViewRules.java
+new file mode 100644
+index 0000000..631be0d
+--- /dev/null
++++ b/libs/WindowManager/Jetpack/src/androidx/window/extensions/embedding/ParallelViewRules.java
+@@ -0,0 +1,1061 @@
++/*
++ * Copyright (C) 2026 The gaokun-android contributors
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package androidx.window.extensions.embedding;
++
++import static android.content.pm.ActivityInfo.OVERRIDE_ENABLE_PARALLEL_VIEW;
++import static android.view.WindowManager.PROPERTY_ACTIVITY_EMBEDDING_ALLOW_SYSTEM_OVERRIDE;
++
++import android.app.Activity;
++import android.app.ActivityThread;
++import android.app.Application;
++import android.app.Instrumentation;
++import android.app.WindowConfiguration;
++import android.app.compat.CompatChanges;
++import android.content.ComponentName;
++import android.content.Context;
++import android.content.Intent;
++import android.content.pm.ActivityInfo;
++import android.content.pm.PackageManager;
++import android.content.pm.ResolveInfo;
++import android.content.res.Resources;
++import android.content.res.TypedArray;
++import android.graphics.Rect;
++import android.os.Bundle;
++import android.os.Handler;
++import android.os.Looper;
++import android.util.Log;
++import android.util.Pair;
++import android.view.View;
++import android.view.ViewTreeObserver;
++import android.view.WindowMetrics;
++
++import androidx.annotation.NonNull;
++import androidx.annotation.Nullable;
++import androidx.window.extensions.core.util.function.Predicate;
++
++import org.json.JSONArray;
++import org.json.JSONException;
++import org.json.JSONObject;
++
++import java.io.ByteArrayOutputStream;
++import java.io.IOException;
++import java.io.InputStream;
++import java.lang.ref.WeakReference;
++import java.lang.reflect.Field;
++import java.lang.reflect.Method;
++import java.lang.reflect.Modifier;
++import java.nio.charset.StandardCharsets;
++import java.util.ArrayList;
++import java.util.Collections;
++import java.util.HashSet;
++import java.util.List;
++import java.util.Set;
++import java.util.WeakHashMap;
++import java.util.concurrent.ConcurrentHashMap;
++
++/**
++ * Parallel view: shows the activities of an app side by side in large landscape windows,
++ * following the Huawei EasyGo rules the app ships in {@code assets/easygo.json} (the
++ * "magicwindow" entity). Applies to apps with
++ * {@link android.content.pm.ActivityInfo#OVERRIDE_ENABLE_PARALLEL_VIEW} enabled, which the
++ * device settings app sets per package.
++ *
++ * <p>{@link SplitController} calls {@link #registerLifecycleCallbacks} and
++ * {@link #addStartMonitor} in place of the plain registrations, and
++ * {@link AppCompatEmbeddingRuleController#loadAppCompatRules} calls {@link #addRules} after it has
++ * checked that the app does not use activity embedding itself.
++ */
++public final class ParallelViewRules {
++    private static final String TAG = "ParallelView";
++    /** Splits need a parent window at least this wide, and wider than tall. */
++    private static final int MIN_WIDTH_DP = 600;
++    /** Range of the primary (left) share when the app's rules allow dragging the divider. */
++    private static final float DIVIDER_MIN_RATIO = 0.25f;
++    private static final float DIVIDER_MAX_RATIO = 0.75f;
++
++    /**
++     * Activities treated as transitional in addition to an app's own transActivities: pages that
++     * its rules would send to the side although they are no pages of their own. Package name,
++     * then class names.
++     */
++    private static final String[][] EXTRA_TRANSITIONAL = {
++        // A translucent full-window banner; sent to the side, it leaves the side black under it.
++        {"tv.danmaku.bili", "kntr.common.compose.launcher.TranslucentVertexActivity"},
++    };
++
++    /** Set by {@link #addRules}: the app's package, package manager and resources. */
++    private static volatile String sPackage;
++    private static volatile PackageManager sPackageManager;
++    private static volatile Resources sResources;
++    /** Activity class name -> whether its theme is floating. */
++    private static final ConcurrentHashMap<String, Boolean> sFloating = new ConcurrentHashMap<>();
++
++    /** SplitController's activity start monitor, and the Instrumentation it was last added to. */
++    @Nullable
++    private static Instrumentation.ActivityMonitor sMonitor;
++    @Nullable
++    private static Instrumentation sMonitoredInstrumentation;
++
++    /** Whether {@link #addRules} added rules for the app of this process. */
++    private static volatile boolean sRulesAdded;
++    /** The controller of this process; set only when parallel-view rules were added. */
++    @Nullable
++    private static volatile SplitController sController;
++    /** Activities with a layout listener for {@link #onLayout}, and that listener. */
++    private static final WeakHashMap<Activity, ViewTreeObserver.OnGlobalLayoutListener>
++            sWatched = new WeakHashMap<>();
++    /** Requested orientation of activities that have not called setRequestedOrientation(). */
++    private static final WeakHashMap<Activity, Integer> sServerOrientations = new WeakHashMap<>();
++    /** Splits expanded for full-screen playback, and their attributes before that. */
++    private static final WeakHashMap<SplitContainer, SplitAttributes> sExpandedSplits =
++            new WeakHashMap<>();
++
++    private ParallelViewRules() {}
++
++    /** Called at the end of the SplitController constructor, after the rules are loaded. */
++    public static void setSplitController(@NonNull SplitController controller) {
++        // Apps that use activity embedding themselves get no rules here and are left alone.
++        if (isEnabled() && sRulesAdded) {
++            sController = controller;
++        }
++    }
++
++    /**
++     * Called when the task of a split changes, for example when it enters or leaves split
++     * screen; checks the pages again after the current transaction.
++     */
++    static void onTaskChanged() {
++        if (sController == null) {
++            return;
++        }
++        new Handler(Looper.getMainLooper()).post(() -> {
++            final List<Activity> activities;
++            synchronized (sWatched) {
++                activities = new ArrayList<>(sWatched.keySet());
++            }
++            for (Activity activity : activities) {
++                onLayout(activity);
++            }
++        });
++    }
++
++    /**
++     * Whether no placeholder is launched beside {@code primary}, because the pages of its
++     * container request landscape, judged as in {@link #onLayout} (see {@link #sideOrientation}).
++     *
++     * <p>Splits are shown side by side only in landscape, and a placeholder that is not sticky is
++     * finished when the display turns to portrait. If the main page requested landscape with a
++     * placeholder beside it, the display would rotate to landscape for it, show the placeholder,
++     * follow the sensor back to portrait (the placeholder on top does not request landscape),
++     * finish the placeholder, and rotate to landscape again. Without a placeholder, the main page
++     * fills the task in landscape. A sticky placeholder would cover the main page in portrait.
++     * Window management keeps a split side by side in landscape only while its top container
++     * requests landscape (frameworks-base/0009, TaskFragment#getOrientation).
++     */
++    static boolean isPlaceholderSuppressed(@NonNull Activity primary) {
++        final SplitController controller = sController;
++        if (controller == null) {
++            return false;
++        }
++        try {
++            final List<Activity> pages;
++            synchronized (controller.mLock) {
++                final TaskFragmentContainer container =
++                        controller.getContainerWithActivity(primary);
++                pages = container != null ? container.collectNonFinishingActivities()
++                        : Collections.singletonList(primary);
++            }
++            return isLandscape(sideOrientation(pages));
++        } catch (ReflectiveOperationException | RuntimeException e) {
++            Log.w(TAG, "Could not read the orientation of " + primary.getComponentName(), e);
++            return false;
++        }
++    }
++
++    /** Whether parallel view is enabled for the app of this process. */
++    public static boolean isEnabled() {
++        return CompatChanges.isChangeEnabled(OVERRIDE_ENABLE_PARALLEL_VIEW);
++    }
++
++    /**
++     * Registers SplitController's activity lifecycle callbacks, in place of
++     * {@code app.registerActivityLifecycleCallbacks(callbacks)}.
++     *
++     * <p>Some apps override that method and wrap every callback in a class that forwards only
++     * the seven original methods, so onActivityPreCreated and onActivityPostCreated never arrive
++     * and no rule is ever resolved. For apps with parallel view enabled whose Application
++     * overrides the method, the callbacks go straight into Application's own list, as the
++     * platform implementation of the method does. Apps with parallel view enabled also get a
++     * {@link MonitorKeeper}, registered the same way ahead of SplitController's callbacks.
++     */
++    public static void registerLifecycleCallbacks(@NonNull Application app,
++            @NonNull Application.ActivityLifecycleCallbacks callbacks) {
++        if (isEnabled()) {
++            try {
++                final Method register = app.getClass().getMethod(
++                        "registerActivityLifecycleCallbacks",
++                        Application.ActivityLifecycleCallbacks.class);
++                if (register.getDeclaringClass() != Application.class) {
++                    final Field field =
++                            Application.class.getDeclaredField("mActivityLifecycleCallbacks");
++                    field.setAccessible(true);
++                    @SuppressWarnings("unchecked")
++                    final ArrayList<Application.ActivityLifecycleCallbacks> list =
++                            (ArrayList<Application.ActivityLifecycleCallbacks>) field.get(app);
++                    synchronized (list) {
++                        list.add(new MonitorKeeper());
++                        list.add(callbacks);
++                    }
++                    Log.i(TAG, app.getClass().getName()
++                            + " overrides registerActivityLifecycleCallbacks; added directly");
++                    return;
++                }
++            } catch (ReflectiveOperationException | RuntimeException e) {
++                Log.w(TAG, "Could not add the lifecycle callbacks directly", e);
++            }
++            app.registerActivityLifecycleCallbacks(new MonitorKeeper());
++        }
++        app.registerActivityLifecycleCallbacks(callbacks);
++    }
++
++    /**
++     * Adds SplitController's activity start monitor, in place of
++     * {@code instrumentation.addMonitor(monitor)}.
++     *
++     * <p>Some apps replace the Instrumentation after they start. Starts then go through the
++     * replacement's execStartActivity(), which checks only the replacement's own monitors (or
++     * passes the start on to the instance it replaced), so the monitor would never see a start
++     * and new activities would never be routed to the side. For apps with parallel view enabled,
++     * the monitor therefore goes into the own list of the current Instrumentation now (the app
++     * may have replaced it already), and {@link MonitorKeeper} does the same before each activity
++     * is created.
++     */
++    public static void addStartMonitor(@NonNull Instrumentation instrumentation,
++            @NonNull Instrumentation.ActivityMonitor monitor) {
++        instrumentation.addMonitor(monitor);
++        if (!isEnabled()) {
++            return;
++        }
++        synchronized (ParallelViewRules.class) {
++            sMonitor = monitor;
++            sMonitoredInstrumentation = null;
++        }
++        ensureStartMonitor();
++    }
++
++    /**
++     * Makes sure that the current Instrumentation holds SplitController's start monitor in its
++     * own list, and so does every Instrumentation it keeps in a field: a replacement that
++     * overrides execStartActivity() usually passes starts on to the instance it replaced, and
++     * only that instance's monitors are checked then.
++     */
++    static void ensureStartMonitor() {
++        final Instrumentation current = ActivityThread.currentActivityThread().getInstrumentation();
++        final Instrumentation.ActivityMonitor monitor;
++        synchronized (ParallelViewRules.class) {
++            if (sMonitor == null || current == null || current == sMonitoredInstrumentation) {
++                return;
++            }
++            monitor = sMonitor;
++            sMonitoredInstrumentation = current;
++        }
++        try {
++            final StringBuilder note = new StringBuilder(current.getClass().getName());
++            addToOwnList(current, monitor);
++            for (Class<?> c = current.getClass(); c != null && c != Instrumentation.class;
++                    c = c.getSuperclass()) {
++                for (Field f : c.getDeclaredFields()) {
++                    if (Modifier.isStatic(f.getModifiers())
++                            || !Instrumentation.class.isAssignableFrom(f.getType())) {
++                        continue;
++                    }
++                    f.setAccessible(true);
++                    final Object inner = f.get(current);
++                    if (inner instanceof Instrumentation && inner != current) {
++                        addToOwnList((Instrumentation) inner, monitor);
++                        note.append(", wraps ").append(inner.getClass().getName());
++                    }
++                }
++            }
++            Log.i(TAG, "Start monitor in the own list of " + note);
++        } catch (ReflectiveOperationException | RuntimeException e) {
++            Log.w(TAG, "Could not add the start monitor to the current Instrumentation", e);
++        }
++    }
++
++    /** Adds {@code monitor} to the own list of {@code instrumentation}, as addMonitor() does. */
++    private static void addToOwnList(@NonNull Instrumentation instrumentation,
++            @NonNull Instrumentation.ActivityMonitor monitor)
++            throws ReflectiveOperationException {
++        final Field syncField = Instrumentation.class.getDeclaredField("mSync");
++        final Field monitorsField = Instrumentation.class.getDeclaredField("mActivityMonitors");
++        syncField.setAccessible(true);
++        monitorsField.setAccessible(true);
++        synchronized (syncField.get(instrumentation)) {
++            @SuppressWarnings("unchecked")
++            List<Instrumentation.ActivityMonitor> monitors =
++                    (List<Instrumentation.ActivityMonitor>) monitorsField.get(instrumentation);
++            if (monitors == null) {
++                monitors = new ArrayList<>();
++                monitorsField.set(instrumentation, monitors);
++            }
++            if (!monitors.contains(monitor)) {
++                monitors.add(monitor);
++            }
++        }
++    }
++
++    /** Before each activity is created, checks whether the app replaced its Instrumentation. */
++    private static final class MonitorKeeper implements Application.ActivityLifecycleCallbacks {
++        @Override
++        public void onActivityPreCreated(@NonNull Activity activity,
++                @Nullable Bundle savedInstanceState) {
++            ensureStartMonitor();
++        }
++
++        @Override
++        public void onActivityCreated(@NonNull Activity activity,
++                @Nullable Bundle savedInstanceState) {}
++
++        @Override
++        public void onActivityPostCreated(@NonNull Activity activity,
++                @Nullable Bundle savedInstanceState) {
++            watchLayout(activity);
++        }
++
++        @Override
++        public void onActivityStarted(@NonNull Activity activity) {}
++
++        @Override
++        public void onActivityResumed(@NonNull Activity activity) {
++            watchLayout(activity);
++        }
++
++        @Override
++        public void onActivityPaused(@NonNull Activity activity) {}
++
++        @Override
++        public void onActivityStopped(@NonNull Activity activity) {}
++
++        @Override
++        public void onActivitySaveInstanceState(@NonNull Activity activity,
++                @NonNull Bundle outState) {}
++
++        @Override
++        public void onActivityDestroyed(@NonNull Activity activity) {
++            unwatchLayout(activity);
++        }
++    }
++
++    /** Calls {@link #onLayout} after every layout of the window of {@code activity}. */
++    private static void watchLayout(@NonNull Activity activity) {
++        final View decor = activity.getWindow().peekDecorView();
++        if (sController == null || decor == null) {
++            return;
++        }
++        final WeakReference<Activity> ref = new WeakReference<>(activity);
++        final ViewTreeObserver.OnGlobalLayoutListener listener = () -> {
++            final Activity a = ref.get();
++            if (a != null) {
++                onLayout(a);
++            }
++        };
++        synchronized (sWatched) {
++            if (sWatched.containsKey(activity)) {
++                return;
++            }
++            sWatched.put(activity, listener);
++        }
++        // A relaunched activity may keep the window of the instance it replaces, so the
++        // listener belongs to the instance and is removed when it is destroyed.
++        decor.getViewTreeObserver().addOnGlobalLayoutListener(listener);
++        onLayout(activity);
++    }
++
++    private static void unwatchLayout(@NonNull Activity activity) {
++        final ViewTreeObserver.OnGlobalLayoutListener listener;
++        synchronized (sWatched) {
++            listener = sWatched.remove(activity);
++        }
++        final View decor = activity.getWindow().peekDecorView();
++        if (listener != null && decor != null) {
++            decor.getViewTreeObserver().removeOnGlobalLayoutListener(listener);
++        }
++    }
++
++    /**
++     * Keeps full-screen playback working for a page shown beside another one.
++     *
++     * <p>Such a page is in multi-window mode, in which some apps refuse full-screen playback;
++     * it is reported as not in multi-window mode while it is in a split of a task that is not in
++     * multi-window mode itself, and as it really is otherwise (split screen, freeform,
++     * picture-in-picture). ActivityThread sets the state only when the activity is created and
++     * when it enters or leaves multi-window mode, so it is checked after every layout.
++     *
++     * <p>When the pages of the side container request a landscape orientation, the split is
++     * expanded so that they fill the task, with the main page kept underneath and without a
++     * divider, and the split is restored when they no longer request landscape. The pages are
++     * judged as window management judges the display orientation (see {@link #sideOrientation}).
++     *
++     * <p>When the pages of the main container of a placeholder split request landscape, the
++     * placeholder is finished, and no new one is launched while they do (see
++     * {@link #isPlaceholderSuppressed}).
++     */
++    private static void onLayout(@NonNull Activity activity) {
++        final SplitController controller = sController;
++        if (controller == null || activity.isFinishing() || activity.isDestroyed()) {
++            return;
++        }
++        final boolean inSplitOfFullTask;
++        final SplitContainer split;
++        final List<Activity> sidePages;
++        final boolean isNonStickyPlaceholder;
++        final List<Activity> mainPages;
++        synchronized (controller.mLock) {
++            final TaskFragmentContainer container = controller.getContainerWithActivity(activity);
++            final TaskContainer task = container != null ? container.getTaskContainer() : null;
++            inSplitOfFullTask = task != null && !task.isInMultiWindow();
++            split = inSplitOfFullTask ? task.getActiveSplitForContainer(container) : null;
++            sidePages = split != null && split.getSecondaryContainer() == container
++                    ? container.collectNonFinishingActivities() : null;
++            isNonStickyPlaceholder = split != null && split.isPlaceholderContainer()
++                    && !SplitContainer.isStickyPlaceholderRule(split.getSplitRule());
++            mainPages = split != null && split.isPlaceholderContainer()
++                    && split.getPrimaryContainer() == container
++                    ? container.collectNonFinishingActivities() : null;
++        }
++        try {
++            final boolean inMultiWindowMode = !inSplitOfFullTask
++                    && WindowConfiguration.inMultiWindowMode(activity.getResources()
++                            .getConfiguration().windowConfiguration.getWindowingMode());
++            if (activity.isInMultiWindowMode() != inMultiWindowMode) {
++                final Field field = Activity.class.getDeclaredField("mIsInMultiWindowMode");
++                field.setAccessible(true);
++                field.setBoolean(activity, inMultiWindowMode);
++            }
++            if (mainPages != null && isLandscape(sideOrientation(mainPages))) {
++                // Not Activity#finish(): the placeholder rules finish the primary with the
++                // placeholder (FINISH_ALWAYS).
++                if (controller.dismissPlaceholder(split)) {
++                    Log.i(TAG, activity.getComponentName().getClassName()
++                            + " requests landscape; dismissing the placeholder beside it");
++                }
++                return;
++            }
++            if (sidePages == null) {
++                return;
++            }
++            final boolean landscape = isLandscape(sideOrientation(sidePages));
++            final SplitAttributes restore;
++            synchronized (sExpandedSplits) {
++                if (landscape && !sExpandedSplits.containsKey(split)) {
++                    // Expanding dismisses a placeholder that is not sticky, together with the
++                    // pages above it.
++                    if (isNonStickyPlaceholder) {
++                        return;
++                    }
++                    sExpandedSplits.put(split, split.getDefaultSplitAttributes());
++                    restore = null;
++                } else if (!landscape && sExpandedSplits.containsKey(split)) {
++                    restore = sExpandedSplits.remove(split);
++                } else {
++                    return;
++                }
++            }
++            if (restore == null) {
++                Log.i(TAG, activity.getComponentName().getClassName()
++                        + " requests landscape; expanding its split");
++                // Without a divider: no handle over the video, and no drag to undo.
++                controller.updateSplitAttributes(split.getToken(),
++                        new SplitAttributes.Builder(split.getDefaultSplitAttributes())
++                                .setSplitType(
++                                        new SplitAttributes.SplitType.ExpandContainersSplitType())
++                                .setDividerAttributes(null)
++                                .build());
++            } else {
++                Log.i(TAG, activity.getComponentName().getClassName()
++                        + " no longer requests landscape; restoring its split");
++                controller.updateSplitAttributes(split.getToken(), restore);
++            }
++        } catch (ReflectiveOperationException | RuntimeException e) {
++            Log.w(TAG, "Could not update the split of " + activity.getComponentName(), e);
++        }
++    }
++
++    /**
++     * The orientation that the pages of a container ({@code pages}, bottom to top) request
++     * together, as window management determines the display orientation: from the top, the
++     * first page that requests an explicit orientation decides; a page that requests "behind",
++     * or a translucent or floating page that requests none or one the display ignores (see
++     * {@link #isIgnoredByDisplay}), defers to the page below, and an opaque page that requests
++     * none ends the search unspecified. Pages of other processes are not known here. So
++     * a page opened above a player does not restore the split while the player is visible under
++     * it, and a player with a translucent theme still decides.
++     */
++    private static int sideOrientation(@NonNull List<Activity> pages)
++            throws ReflectiveOperationException {
++        for (int i = pages.size() - 1; i >= 0; i--) {
++            final Activity page = pages.get(i);
++            final int orientation = requestedOrientation(page);
++            if (orientation == ActivityInfo.SCREEN_ORIENTATION_BEHIND) {
++                continue;
++            }
++            final boolean translucent =
++                    ActivityInfo.isTranslucentOrFloating(page.getWindow().getWindowStyle());
++            if (orientation != ActivityInfo.SCREEN_ORIENTATION_UNSET
++                    && orientation != ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
++                    && !(translucent && isIgnoredByDisplay(orientation))) {
++                return orientation;
++            }
++            if (!translucent) {
++                break;
++            }
++        }
++        return ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED;
++    }
++
++    /**
++     * The orientation that {@code activity} requests: what it last passed to
++     * setRequestedOrientation(), else what the system holds for it (declared in the manifest,
++     * or requested by an earlier instance of a relaunched activity), queried once.
++     */
++    private static int requestedOrientation(@NonNull Activity activity)
++            throws ReflectiveOperationException {
++        final Field field = Activity.class.getDeclaredField("mLastRequestedOrientation");
++        field.setAccessible(true);
++        final int requested = field.getInt(activity);
++        if (requested != ActivityInfo.SCREEN_ORIENTATION_UNSET) {
++            return requested;
++        }
++        synchronized (sServerOrientations) {
++            final Integer known = sServerOrientations.get(activity);
++            if (known != null) {
++                return known;
++            }
++        }
++        final int fromServer = activity.getRequestedOrientation();
++        synchronized (sServerOrientations) {
++            sServerOrientations.put(activity, fromServer);
++        }
++        return fromServer;
++    }
++
++    /**
++     * Whether the display ignores {@code orientation}: large screens ignore orientation requests,
++     * except "locked", "nosensor", "sensor" and "fullSensor", and here landscape ones
++     * (frameworks-base/0009, DisplayArea#shouldIgnoreOrientationRequest). A translucent page with
++     * such a request defers to the pages behind it there too
++     * (ActivityRecord#defersIgnoredOrientationRequest).
++     */
++    private static boolean isIgnoredByDisplay(int orientation) {
++        return !isLandscape(orientation)
++                && orientation != ActivityInfo.SCREEN_ORIENTATION_LOCKED
++                && orientation != ActivityInfo.SCREEN_ORIENTATION_NOSENSOR
++                && orientation != ActivityInfo.SCREEN_ORIENTATION_SENSOR
++                && orientation != ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR;
++    }
++
++    private static boolean isLandscape(int orientation) {
++        return orientation == ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
++                || orientation == ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
++                || orientation == ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
++                || orientation == ActivityInfo.SCREEN_ORIENTATION_USER_LANDSCAPE;
++    }
++
++    /** Adds the parallel-view rules of the app in {@code context} to {@code rules}. */
++    public static void addRules(@NonNull Context context, @NonNull Set<EmbeddingRule> rules) {
++        if (!isEnabled()) {
++            return;
++        }
++        final String pkg = context.getPackageName();
++        try {
++            sPackage = pkg;
++            sPackageManager = context.getPackageManager();
++            sResources = context.getResources();
++            if (!isSystemOverrideAllowed(context, pkg)) {
++                // The property refuses rules that the system makes up for the app. These rules
++                // are the app's own, so they apply all the same.
++                Log.i(TAG, pkg + ": system override not allowed; applying the app's own rules");
++            }
++            final String json = readAsset(context, "easygo.json");
++            if (json == null) {
++                Log.i(TAG, pkg + ": no assets/easygo.json");
++                return;
++            }
++            final EasyGo cfg = EasyGo.parse(json);
++            if (cfg == null) {
++                Log.i(TAG, pkg + ": no magicwindow entity in easygo.json");
++                return;
++            }
++            if (cfg.excludesPad) {
++                Log.i(TAG, pkg + ": easygo.json excludes tablets");
++                return;
++            }
++            for (String[] extra : EXTRA_TRANSITIONAL) {
++                if (extra[0].equals(pkg)) {
++                    for (int i = 1; i < extra.length; i++) {
++                        cfg.transitional.add(extra[i]);
++                    }
++                }
++            }
++            final int added = addRules(context, pkg, cfg, rules);
++            sRulesAdded = added > 0;
++            Log.i(TAG, pkg + ": mode " + cfg.mode + ", ratio " + cfg.ratio + ", divider "
++                    + (cfg.draggable ? (cfg.dragToFullScreen ? "draggable to full screen"
++                            : "draggable") : "fixed")
++                    + ", " + cfg.pairs.size() + " pairs, " + cfg.dual.size() + " default dual, "
++                    + cfg.fullScreen.size() + " full-screen, " + cfg.transitional.size()
++                    + " transitional, kept out of push: " + cfg.pushExcluded + "; "
++                    + added + " rules");
++        } catch (JSONException | RuntimeException e) {
++            Log.w(TAG, pkg + ": could not load the parallel-view rules", e);
++        }
++    }
++
++    private static int addRules(@NonNull Context context, @NonNull String pkg,
++            @NonNull EasyGo cfg, @NonNull Set<EmbeddingRule> rules) {
++        final MinWidthLandscape parent = new MinWidthLandscape();
++        final SplitAttributes.Builder attrsBuilder = new SplitAttributes.Builder()
++                .setSplitType(cfg.ratio > 0
++                        ? new SplitAttributes.SplitType.RatioSplitType(cfg.ratio)
++                        : SplitAttributes.SplitType.RatioSplitType.splitEqually())
++                .setLayoutDirection(SplitAttributes.LayoutDirection.LEFT_TO_RIGHT);
++        if (cfg.draggable) {
++            // Dragging the divider to an edge expands one side to the whole task, where the app
++            // is no longer in multi-window mode.
++            attrsBuilder.setDividerAttributes(new DividerAttributes.Builder(
++                            DividerAttributes.DIVIDER_TYPE_DRAGGABLE)
++                    .setDraggingToFullscreenAllowed(cfg.dragToFullScreen)
++                    .setPrimaryMinRatio(DIVIDER_MIN_RATIO)
++                    .setPrimaryMaxRatio(DIVIDER_MAX_RATIO)
++                    .build());
++        }
++        final SplitAttributes attrs = attrsBuilder.build();
++        int added = 0;
++        if (cfg.mode == EasyGo.MODE_SHOPPING) {
++            // Every page the app opens goes to the side and pushes the page there to the main
++            // side; activityPairs do not apply in this mode. Launcher activities are usually
++            // splash screens that start the main page and finish, so they stay out of the push
++            // rule unless one is a main page with a default side page.
++            cfg.pushExcluded.addAll(launcherActivities(context, pkg));
++            for (String[] d : cfg.dual) {
++                cfg.pushExcluded.remove(d[0]);
++            }
++            rules.add(pairRule(pkg, cfg, null, null, parent, attrs, false /* clearTop */,
++                    SplitRule.FINISH_NEVER, "pv-push"));
++            added++;
++        } else {
++            for (String[] p : cfg.pairs) {
++                final String from = "*".equals(p[0]) ? null : p[0];
++                final String to = "*".equals(p[1]) ? null : p[1];
++                rules.add(pairRule(pkg, cfg, from, to, parent, attrs, true /* clearTop */,
++                        SplitRule.FINISH_ALWAYS, "pv-" + p[0] + "->" + p[1]));
++                added++;
++            }
++        }
++        for (String[] d : cfg.dual) {
++            // The page the app shows on the side of its main page by default.
++            final Intent placeholder = new Intent().setClassName(pkg, d[1]);
++            rules.add(new SplitPlaceholderRule.Builder(placeholder, new ActivityIs(pkg, d[0]),
++                    new IntentIs(pkg, d[0]), parent)
++                    .setDefaultSplitAttributes(attrs)
++                    .setFinishPrimaryWithPlaceholder(SplitRule.FINISH_ALWAYS)
++                    .setSticky(false)
++                    .setTag("pv-dual-" + d[0])
++                    .build());
++            added++;
++        }
++        for (String name : cfg.fullScreen) {
++            rules.add(new ActivityRule.Builder(new ActivityIs(pkg, name), new IntentIs(pkg, name))
++                    .setShouldAlwaysExpand(true)
++                    .setTag("pv-full-" + name)
++                    .build());
++            added++;
++        }
++        return added;
++    }
++
++    @NonNull
++    private static SplitPairRule pairRule(@NonNull String pkg, @NonNull EasyGo cfg,
++            @Nullable String from, @Nullable String to, @NonNull MinWidthLandscape parent,
++            @NonNull SplitAttributes attrs, boolean clearTop, int finishSecondaryWithPrimary,
++            @NonNull String tag) {
++        return new SplitPairRule.Builder(new PairMatches(pkg, cfg, from, to),
++                new IntentPairMatches(pkg, cfg, from, to), parent)
++                .setDefaultSplitAttributes(attrs)
++                .setFinishPrimaryWithSecondary(SplitRule.FINISH_NEVER)
++                .setFinishSecondaryWithPrimary(finishSecondaryWithPrimary)
++                .setShouldClearTop(clearTop)
++                .setTag(tag)
++                .build();
++    }
++
++    private static boolean isSystemOverrideAllowed(@NonNull Context context,
++            @NonNull String pkg) {
++        try {
++            return context.getPackageManager()
++                    .getProperty(PROPERTY_ACTIVITY_EMBEDDING_ALLOW_SYSTEM_OVERRIDE, pkg)
++                    .getBoolean();
++        } catch (PackageManager.NameNotFoundException e) {
++            return true;
++        }
++    }
++
++    /** The app's launcher activities, with aliases resolved to their target activities. */
++    @NonNull
++    private static Set<String> launcherActivities(@NonNull Context context, @NonNull String pkg) {
++        final Set<String> out = new HashSet<>();
++        final Intent launcher = new Intent(Intent.ACTION_MAIN)
++                .addCategory(Intent.CATEGORY_LAUNCHER).setPackage(pkg);
++        for (ResolveInfo ri : context.getPackageManager().queryIntentActivities(launcher, 0)) {
++            if (ri.activityInfo != null) {
++                out.add(ri.activityInfo.name);
++                if (ri.activityInfo.targetActivity != null) {
++                    out.add(ri.activityInfo.targetActivity);
++                }
++            }
++        }
++        return out;
++    }
++
++    @Nullable
++    private static String readAsset(@NonNull Context context, @NonNull String name) {
++        try (InputStream in = context.getAssets().open(name)) {
++            final ByteArrayOutputStream out = new ByteArrayOutputStream();
++            final byte[] buf = new byte[8192];
++            int n;
++            while ((n = in.read(buf)) > 0) {
++                out.write(buf, 0, n);
++            }
++            // JSONObject skips a leading byte order mark.
++            return new String(out.toByteArray(), StandardCharsets.UTF_8);
++        } catch (IOException e) {
++            return null;
++        }
++    }
++
++    /** Whether the theme of the activity class {@code cls} is floating (dialog-like). */
++    private static boolean isFloating(@NonNull String cls, @Nullable Activity activity) {
++        final Boolean known = sFloating.get(cls);
++        if (known != null) {
++            return known;
++        }
++        boolean floating = false;
++        try {
++            Resources.Theme theme = null;
++            if (activity != null) {
++                theme = activity.getTheme();
++            } else if (sPackage != null && sPackageManager != null && sResources != null) {
++                final ActivityInfo info =
++                        sPackageManager.getActivityInfo(new ComponentName(sPackage, cls), 0);
++                theme = sResources.newTheme();
++                theme.applyStyle(info.getThemeResource(), true /* force */);
++            }
++            if (theme != null) {
++                final TypedArray a = theme.obtainStyledAttributes(
++                        new int[] {android.R.attr.windowIsFloating});
++                floating = a.getBoolean(0, false);
++                a.recycle();
++            }
++        } catch (PackageManager.NameNotFoundException | RuntimeException e) {
++            Log.w(TAG, "Could not read the theme of " + cls, e);
++        }
++        if (floating) {
++            Log.i(TAG, cls + " has a floating theme; wildcard rules leave it alone");
++        }
++        sFloating.put(cls, floating);
++        return floating;
++    }
++
++    /** The parts of an EasyGo "magicwindow" entity that parallel view uses. */
++    static final class EasyGo {
++        /** Shopping mode: pages push each other from the side to the main side. */
++        static final int MODE_SHOPPING = 0;
++        /** Custom mode: activityPairs say which page opens on the side of which. */
++        static final int MODE_CUSTOM = 1;
++
++        int mode = MODE_CUSTOM;
++        /** Share of the width for the main (left) side from UX.windowsRatio for PAD, or 0. */
++        float ratio;
++        /** excludeDevice names PAD. */
++        boolean excludesPad;
++        /** UX.isDraggable (tablets only; false when absent). */
++        boolean draggable;
++        /** UX.supportDraggingToFullScreen names PAD or is "true". */
++        boolean dragToFullScreen;
++        /** {from, to} class names; "*" matches any activity of the app. */
++        final List<String[]> pairs = new ArrayList<>();
++        /** {main page, page shown on its side by default}. */
++        final List<String[]> dual = new ArrayList<>();
++        /** Pages that never take part in a split. */
++        final Set<String> transitional = new HashSet<>();
++        /** Pages that always fill the task. */
++        final Set<String> fullScreen = new HashSet<>();
++        /** Activities that the shopping-mode push rule leaves alone. */
++        final Set<String> pushExcluded = new HashSet<>();
++
++        /** Parses the first magicwindow entity, or returns null if there is none. */
++        @Nullable
++        static EasyGo parse(@NonNull String json) throws JSONException {
++            final JSONArray entities = new JSONObject(json).optJSONArray("logicEntities");
++            for (int e = 0; entities != null && e < entities.length(); e++) {
++                final JSONObject entity = entities.optJSONObject(e);
++                final JSONObject head = entity != null ? entity.optJSONObject("head") : null;
++                final JSONObject body = entity != null ? entity.optJSONObject("body") : null;
++                if (head == null || body == null
++                        || !"magicwindow".equals(head.optString("function"))) {
++                    continue;
++                }
++                final EasyGo cfg = new EasyGo();
++                cfg.mode = "0".equals(body.optString("mode", "1")) ? MODE_SHOPPING : MODE_CUSTOM;
++                cfg.excludesPad = namesPad(body.optString("excludeDevice"));
++                final JSONObject ux = body.optJSONObject("UX");
++                if (ux != null) {
++                    cfg.draggable = "true".equalsIgnoreCase(ux.optString("isDraggable").trim());
++                    final String full = ux.optString("supportDraggingToFullScreen").trim();
++                    cfg.dragToFullScreen = "true".equalsIgnoreCase(full) || namesPad(full);
++                    cfg.ratio = padRatio(ux.optJSONArray("windowsRatio"));
++                }
++                final JSONArray pairs = body.optJSONArray("activityPairs");
++                for (int i = 0; pairs != null && i < pairs.length(); i++) {
++                    final JSONObject p = pairs.optJSONObject(i);
++                    if (p == null) {
++                        continue;
++                    }
++                    final String from = p.optString("from").trim();
++                    final String to = p.optString("to").trim();
++                    if (!from.isEmpty() && !to.isEmpty()) {
++                        cfg.pairs.add(new String[] {from, to});
++                    } else {
++                        cfg.addDual(p);
++                    }
++                }
++                final JSONObject dual = body.optJSONObject("defaultDualActivities");
++                if (dual != null) {
++                    cfg.addDual(dual);
++                }
++                final JSONArray transitional = body.optJSONArray("transActivities");
++                for (int i = 0; transitional != null && i < transitional.length(); i++) {
++                    final String t = transitional.optString(i).trim();
++                    if (!t.isEmpty()) {
++                        cfg.transitional.add(t);
++                    }
++                }
++                final JSONArray activities = body.optJSONArray("Activities");
++                for (int i = 0; activities != null && i < activities.length(); i++) {
++                    final JSONObject a = activities.optJSONObject(i);
++                    final String name = a != null ? a.optString("name").trim() : "";
++                    if (!name.isEmpty() && "true".equals(a.optString("defaultFullScreen"))) {
++                        cfg.fullScreen.add(name);
++                    }
++                }
++                return cfg;
++            }
++            return null;
++        }
++
++        /** Whether a "|"-separated device list names PAD. */
++        private static boolean namesPad(@NonNull String devices) {
++            for (String d : devices.split("\\|")) {
++                if ("PAD".equalsIgnoreCase(d.trim())) {
++                    return true;
++                }
++            }
++            return false;
++        }
++
++        /**
++         * The main side's share of the width from the PAD entry of UX.windowsRatio, whose ratio
++         * is "left|right" in pixels of the device the app was tuned on; 0 for an even split.
++         */
++        private static float padRatio(@Nullable JSONArray ratios) {
++            for (int i = 0; ratios != null && i < ratios.length(); i++) {
++                final JSONObject r = ratios.optJSONObject(i);
++                if (r == null || !"PAD".equalsIgnoreCase(r.optString("device").trim())) {
++                    continue;
++                }
++                final String[] lr = r.optString("ratio").split("\\|");
++                try {
++                    final float left = Float.parseFloat(lr[0].trim());
++                    final float right = Float.parseFloat(lr[1].trim());
++                    final float share = left / (left + right);
++                    if (share >= 0.2f && share <= 0.8f) {
++                        return share;
++                    }
++                } catch (NumberFormatException | ArrayIndexOutOfBoundsException e) {
++                    // Not two numbers: keep the even split.
++                }
++            }
++            return 0;
++        }
++
++        /** Adds {mainPage or each of mainPages (comma-separated), relatedPage}, once each. */
++        void addDual(@NonNull JSONObject o) {
++            final String related = o.optString("relatedPage").trim();
++            if (related.isEmpty()) {
++                return;
++            }
++            final String mains = o.has("mainPage")
++                    ? o.optString("mainPage") : o.optString("mainPages");
++            for (String m : mains.split(",")) {
++                final String main = m.trim();
++                if (main.isEmpty()) {
++                    continue;
++                }
++                boolean seen = false;
++                for (String[] d : dual) {
++                    seen |= d[0].equals(main) && d[1].equals(related);
++                }
++                if (!seen) {
++                    dual.add(new String[] {main, related});
++                }
++            }
++        }
++
++        /** Whether {@code cls} may take part in a split at all. */
++        boolean isSplittable(@NonNull String cls) {
++            return !transitional.contains(cls) && !fullScreen.contains(cls);
++        }
++    }
++
++    private static boolean matches(@Nullable String pattern, @NonNull String cls) {
++        return pattern == null || pattern.equals(cls);
++    }
++
++    @Nullable
++    private static String classOf(@NonNull String pkg, @Nullable ComponentName c) {
++        return c != null && pkg.equals(c.getPackageName()) ? c.getClassName() : null;
++    }
++
++    /** The activity class of {@code pkg} that an intent starts, also for implicit intents. */
++    @Nullable
++    private static String classOf(@NonNull String pkg, @NonNull Intent intent) {
++        if (intent.getComponent() != null) {
++            return classOf(pkg, intent.getComponent());
++        }
++        final PackageManager pm = sPackageManager;
++        if (pm == null || (intent.getPackage() != null && !pkg.equals(intent.getPackage()))) {
++            return null;
++        }
++        final ResolveInfo ri = pm.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY);
++        return ri != null && ri.activityInfo != null && pkg.equals(ri.activityInfo.packageName)
++                ? ri.activityInfo.name : null;
++    }
++
++    /**
++     * Whether a pair of classes matches a pair rule from {@code from} to {@code to} (null for
++     * "*"). Wildcard rules leave out floating pages and, for the push rule, the pages the push
++     * rule excludes.
++     */
++    private static boolean pairMatches(@NonNull EasyGo cfg, @Nullable String from,
++            @Nullable String to, @Nullable String primary, @Nullable String secondary) {
++        return primary != null && secondary != null
++                && cfg.isSplittable(primary) && cfg.isSplittable(secondary)
++                && matches(from, primary) && matches(to, secondary)
++                && (from != null || to != null || (!cfg.pushExcluded.contains(primary)
++                        && !cfg.pushExcluded.contains(secondary)));
++    }
++
++    /** Primary and secondary activity of a split that already exists or is being formed. */
++    private static final class PairMatches implements Predicate<Pair<Activity, Activity>> {
++        private final String mPackage;
++        private final EasyGo mCfg;
++        private final String mFrom;
++        private final String mTo;
++
++        PairMatches(String pkg, EasyGo cfg, String from, String to) {
++            mPackage = pkg;
++            mCfg = cfg;
++            mFrom = from;
++            mTo = to;
++        }
++
++        @Override
++        public boolean test(Pair<Activity, Activity> p) {
++            final String secondary = classOf(mPackage, p.second.getComponentName());
++            return pairMatches(mCfg, mFrom, mTo,
++                    classOf(mPackage, p.first.getComponentName()), secondary)
++                    && (mTo != null || !isFloating(secondary, p.second));
++        }
++    }
++
++    /** Primary activity and the intent it is about to start. */
++    private static final class IntentPairMatches implements Predicate<Pair<Activity, Intent>> {
++        private final String mPackage;
++        private final EasyGo mCfg;
++        private final String mFrom;
++        private final String mTo;
++
++        IntentPairMatches(String pkg, EasyGo cfg, String from, String to) {
++            mPackage = pkg;
++            mCfg = cfg;
++            mFrom = from;
++            mTo = to;
++        }
++
++        @Override
++        public boolean test(Pair<Activity, Intent> p) {
++            final String secondary = classOf(mPackage, p.second);
++            return pairMatches(mCfg, mFrom, mTo,
++                    classOf(mPackage, p.first.getComponentName()), secondary)
++                    && (mTo != null || !isFloating(secondary, null /* activity */));
++        }
++    }
++
++    private static final class ActivityIs implements Predicate<Activity> {
++        private final String mPackage;
++        private final String mClass;
++
++        ActivityIs(String pkg, String cls) {
++            mPackage = pkg;
++            mClass = cls;
++        }
++
++        @Override
++        public boolean test(Activity activity) {
++            return mClass.equals(classOf(mPackage, activity.getComponentName()));
++        }
++    }
++
++    private static final class IntentIs implements Predicate<Intent> {
++        private final String mPackage;
++        private final String mClass;
++
++        IntentIs(String pkg, String cls) {
++            mPackage = pkg;
++            mClass = cls;
++        }
++
++        @Override
++        public boolean test(Intent intent) {
++            return mClass.equals(classOf(mPackage, intent));
++        }
++    }
++
++    /**
++     * Splits only in landscape parents at least {@link #MIN_WIDTH_DP} wide. The density comes from
++     * the window metrics, as apps may change the density in their own resources.
++     */
++    private static final class MinWidthLandscape implements Predicate<WindowMetrics> {
++        @Override
++        public boolean test(WindowMetrics metrics) {
++            final Rect bounds = metrics.getBounds();
++            return bounds.width() >= MIN_WIDTH_DP * metrics.getDensity()
++                    && bounds.width() > bounds.height();
++        }
++    }
++}
+diff --git a/libs/WindowManager/Jetpack/src/androidx/window/extensions/embedding/SplitController.java b/libs/WindowManager/Jetpack/src/androidx/window/extensions/embedding/SplitController.java
+index 83d4bab..5e569a2 100644
+--- a/libs/WindowManager/Jetpack/src/androidx/window/extensions/embedding/SplitController.java
++++ b/libs/WindowManager/Jetpack/src/androidx/window/extensions/embedding/SplitController.java
+@@ -234,19 +234,24 @@ public class SplitController implements JetpackTaskFragmentOrganizer.TaskFragmen
+         final ActivityThread activityThread = ActivityThread.currentActivityThread();
+         final Application application = activityThread.getApplication();
+         // Register a callback to be notified about activities being created.
+-        application.registerActivityLifecycleCallbacks(new LifecycleCallbacks());
++        ParallelViewRules.registerLifecycleCallbacks(application, new LifecycleCallbacks());
+         // Intercept activity starts to route activities to new containers if necessary.
+         Instrumentation instrumentation = activityThread.getInstrumentation();
+ 
+         mActivityStartMonitor = new ActivityStartMonitor();
+-        instrumentation.addMonitor(mActivityStartMonitor);
++        ParallelViewRules.addStartMonitor(instrumentation, mActivityStartMonitor);
+         foldingFeatureProducer.addDataChangedCallback(new FoldingFeatureListener());
+ 
+         // Load override rules if applicable.
+         if (com.android.window.flags.Flags.virtualGamepadOverride()) {
+             AppCompatEmbeddingRuleController.init(application);
+             setEmbeddingRules(AppCompatEmbeddingRuleController.loadAppCompatRules(application));
++        } else if (ParallelViewRules.isEnabled()) {
++            // Without the flag the virtual gamepad stays disabled, and only the parallel-view
++            // rules are loaded.
++            setEmbeddingRules(AppCompatEmbeddingRuleController.loadAppCompatRules(application));
+         }
++        ParallelViewRules.setSplitController(this);
+ 
+         synchronized (mLock) {
+             // Abort the restoration if any and the application already has running activities.
+@@ -907,6 +912,7 @@ public class SplitController implements JetpackTaskFragmentOrganizer.TaskFragmen
+         // Checks if container should be updated before apply new parentInfo.
+         final boolean shouldUpdateContainer = taskContainer.shouldUpdateContainer(parentInfo);
+         taskContainer.updateTaskFragmentParentInfo(parentInfo);
++        ParallelViewRules.onTaskChanged();
+ 
+         // The divider need to be updated even if shouldUpdateContainer is false, because the decor
+         // surface may change in TaskFragmentParentInfo, which requires divider update but not
+@@ -2241,6 +2247,10 @@ public class SplitController implements JetpackTaskFragmentOrganizer.TaskFragmen
+             return false;
+         }
+ 
++        if (ParallelViewRules.isPlaceholderSuppressed(activity)) {
++            return false;
++        }
++
+         if (container != null && container.getTaskContainer().isPlaceholderRuleSuppressed()) {
+             return false;
+         }
+@@ -2357,6 +2367,27 @@ public class SplitController implements JetpackTaskFragmentOrganizer.TaskFragmen
+         return true;
+     }
+ 
++    /**
++     * Dismisses the placeholder of {@code splitContainer}, with the pages above it in its
++     * container, without finishing its primary, as {@link #dismissPlaceholderIfNecessary} does;
++     * for parallel view (ParallelViewRules), when the primary requests landscape. Returns whether
++     * it started to.
++     */
++    boolean dismissPlaceholder(@NonNull SplitContainer splitContainer) {
++        synchronized (mLock) {
++            final TaskFragmentContainer placeholder = splitContainer.getSecondaryContainer();
++            if (!splitContainer.isPlaceholderContainer() || placeholder.isFinished()) {
++                return false;
++            }
++            final TransactionRecord transactionRecord = mTransactionManager.startNewTransaction();
++            transactionRecord.setOriginType(TASK_FRAGMENT_TRANSIT_CLOSE);
++            mPresenter.cleanupContainer(transactionRecord.getTransaction(), placeholder,
++                    false /* shouldFinishDependent */);
++            transactionRecord.apply(false /* shouldApplyIndependently */);
++            return true;
++        }
++    }
++
+     /**
+      * Returns the rule to launch a placeholder for the activity with the provided component name
+      * if it is configured in the split config.

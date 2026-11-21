@@ -80,10 +80,10 @@ Each entry follows the same format: **Symptom** (what you will run into), **Caus
 * **Cause**: the stylus signal comes from the touchscreen's second controller chip, whose driver was reverse-engineered by a community contributor; the first-generation pen uses a different protocol that the driver does not support.
 * **What to do**: if a second- or third-generation pen does not work properly on rc.2 or later, please open an issue and attach the output of `adb shell getevent -pl`.
 
-### The front camera does not work on some machines
-* **Symptom**: the camera app has no button to switch between the front and rear cameras, and apps that need the front camera (for example, for face recognition) cannot open it. The rear camera is not affected.
-* **Cause**: this machine comes with one of two front camera modules, and only the Hynix HI846 is supported; the other (probably a Samsung S5K4H7) has no driver yet. The rear camera also comes in two modules: on machines with the Samsung S5K3L6, the rear camera does not work. No such machine has been reported yet.
-* **What to do**: there is no solution at the moment. If your machine is affected, please leave a comment in [issue #139](https://github.com/vahiru/gaokun-android/issues/139) and attach the logs (see the [FAQ](FAQ.md#when-android-starts) for how to collect them).
+### The front or rear camera does not work on some machines
+* **Symptom**: the camera app shows only one camera and no button to switch between the front and rear cameras; apps that need the other camera (for example, face recognition with the front camera) cannot open it.
+* **Cause**: this machine comes with one of two front camera modules and one of two rear camera modules. The Samsung S5K4H7 front module is not supported on 1.0.0-rc.4 and earlier, which support only the Hynix HI846; later versions support it. The Samsung S5K3L6 rear module is still not supported (only the OmniVision OV13B10 is); no machine with it has been reported yet.
+* **What to do**: if the front camera does not work, update to a version later than 1.0.0-rc.4. If it still does not work after the update, or the rear camera does not work, please open an issue and attach the logs (see the [FAQ](FAQ.md#when-android-starts) for how to collect them).
 
 ### Location mostly does not work
 * **Symptom**: maps, weather, delivery and ride-hailing apps cannot get a location, or stay on "locating".
@@ -117,6 +117,15 @@ Each entry follows the same format: **Symptom** (what you will run into), **Caus
 * **Symptom**: where Google cannot be reached, the Play Store and Google services do not work, and Google services keep trying to connect in the background; the power cost of this has not been measured. The system has no Chinese app store.
 * **Cause**: this project only releases builds with Google apps.
 * **What to do**: download APKs with a browser from the apps' official websites or the web versions of Chinese app stores.
+
+### Showing app pages side by side is experimental
+* **Symptom**: with Settings → Apps → Force activity embedding (experimental) enabled for an app:
+  * WeChat opens chats from its Chats list on the left, inside its main screen; pages opened from elsewhere, such as Contacts, open on the right.
+  * A video played full screen from the left-hand page, or in a full-screen mode that does not switch to landscape, stays within its side of the screen.
+  * When an app requests a permission, the permission dialog may be partly covered by the right-hand page.
+  * 1.0.0-rc.4 and earlier do not have this setting.
+* **Cause**: the split layouts come with the apps, and WeChat opens chats on the right only on devices it recognizes. A side is expanded to the full screen only when the right-hand page switches to landscape.
+* **What to do**: in apps whose divider can be dragged to the edge of the screen, drag it there to show one page in full screen. Otherwise turn off the switch for the app.
 
 ### Hardware this machine does not have
 * **Mobile network and SIM card**: this machine has no modem.
@@ -155,6 +164,11 @@ The following are bugs, not trade-offs; they will be removed from this list once
 * **Symptom**: on 1.0.0-rc.1 and earlier, the game quits as soon as it opens. Since rc.2 it starts and reaches the user agreement screen; whether you can get into a match has not been tested yet.
 * **Cause**: the game engine assumes that a 64-bit process's memory addresses stay below 2^39, while this kernel gave processes a 2^48 address space by default. The kernel now hands out addresses below 2^39 by default.
 * **What to do**: if the game still quits or gets stuck elsewhere on rc.2 or later, collect the crash log right after it quits (see the [FAQ](FAQ.md#when-android-starts)) and attach it to [#15](https://github.com/vahiru/gaokun-android/issues/15).
+
+### Some Unreal Engine games only use OpenGL ES, or exit at startup
+* **Symptom**: some games built with Unreal Engine only use OpenGL ES; games that ship only Vulkan shaders, such as *Infinity Nikki*, exit at startup with "Game files required to initialize the global shader and cooked content are most likely missing".
+* **Cause**: these games use Vulkan only when they detect a Qualcomm GPU driver. OpenGL ES on this device is provided by ANGLE, whose version information contains no Qualcomm driver version.
+* **What to do**: turn on the switch for the game in Settings → System → GPU driver compatibility, then restart the game. Do not turn it on for browsers, or some WebGL pages will not display correctly. 1.0.0-rc.4 and earlier do not have this setting; it has not been tested yet.
 
 ### The Chinese input method has to be turned on once
 * **Symptom**: the default keyboard does not support Chinese.

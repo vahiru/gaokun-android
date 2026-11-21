@@ -1,0 +1,131 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] arm64: dts: qcom: sc8280xp-huawei-gaokun3: Describe the
+ S5K4H7 front camera
+
+Units carry either an HI846 or an S5K4H7 front camera module on the same
+connector; the Windows driver probes the HI846 and falls back to the
+S5K4H7 at 0x2d. Describe both, with the same supplies, reset GPIO and
+MCLK3, as two endpoints of CSIPHY3. The driver of the missing sensor
+finds nothing at its address and releases its resources.
+
+The reset GPIO is now referenced by two nodes, which gpiolib treats as a
+shared GPIO: it needs CONFIG_GPIO_SHARED_PROXY built in, or both sensors
+wait for the proxy forever. The pins move from the sensor nodes to the
+pin controller's own default state, since this pin controller lets only
+one device own a pin.
+
+The camss binding allows a single endpoint per port, so endpoint@1 does
+not pass dtbs_check as the binding stands.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ .../qcom/sc8280xp-huawei-gaokun3-camera.dtsi  | 63 +++++++++++++++++--
+ 1 file changed, 59 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3-camera.dtsi b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3-camera.dtsi
+index 8e13e07f74..7de5ce49b7 100644
+--- a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3-camera.dtsi
++++ b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3-camera.dtsi
+@@ -168,6 +168,12 @@ csiphy0_ep: endpoint@0 {
+ 			};
+ 		};
+ 
++		/*
++		 * port@3: csiphy3 -> front camera. Units carry either an HI846
++		 * or an S5K4H7 module on the same connector (the Windows driver
++		 * probes the HI846 first, then the S5K4H7); only one of the two
++		 * endpoints ever binds.
++		 */
+ 		port@3 {
+ 			csiphy3_ep: endpoint@0 {
+ 				reg = <0>;
+@@ -176,6 +182,14 @@ csiphy3_ep: endpoint@0 {
+ 				data-lanes = <0 1 2 3>;
+ 				remote-endpoint = <&hi846_ep>;
+ 			};
++
++			csiphy3_s5k4h7_ep: endpoint@1 {
++				reg = <1>;
++
++				clock-lanes = <7>;
++				data-lanes = <0 1 2 3>;
++				remote-endpoint = <&s5k4h7_ep>;
++			};
+ 		};
+ 	};
+ };
+@@ -262,15 +276,11 @@ &cci2 {
+ 
+ &cci2_i2c1 {
+ 	// ??? @10 appears when CAMCC_MCLK3_CLK@19.2MHz
+-	// On 2023 model, S5K4H7@2d, image quality is better than hi846
+ 
+ 	camera_front: camera@20 {
+ 		compatible = "hynix,hi846";
+ 		reg = <0x20>;
+ 
+-		pinctrl-0 = <&camf_rgb_default>;
+-		pinctrl-names = "default";
+-
+ 		clocks = <&camcc CAMCC_MCLK3_CLK>;
+ 
+ 		assigned-clocks = <&camcc CAMCC_MCLK3_CLK>;
+@@ -296,11 +306,56 @@ hi846_ep: endpoint {
+ 		};
+ 	};
+ 
++	/*
++	 * The other front camera module (Xinli S5K4H7, fixed focus), with the
++	 * same supplies, reset GPIO and MCLK3 as the HI846. Only one of the two
++	 * is fitted: the driver of the missing one finds no sensor at its
++	 * address and releases the supplies and the reset GPIO (a shared GPIO,
++	 * through the gpio-shared proxy) for the other. The pins are held by
++	 * the pin controller, see &tlmm.
++	 */
++	camera_front_s5k4h7: camera@2d {
++		compatible = "samsung,s5k4h7";
++		reg = <0x2d>;
++
++		clocks = <&camcc CAMCC_MCLK3_CLK>;
++
++		assigned-clocks = <&camcc CAMCC_MCLK3_CLK>;
++		assigned-clock-rates = <24000000>;
++
++		reset-gpios = <&tlmm 15 GPIO_ACTIVE_LOW>;
++		vddio-supply = <&vreg_l2c>;
++		vdda-supply = <&vreg_l11c>;
++		vddd-supply = <&vreg_camf_1p2>;
++
++		leds = <&privacy_led>;
++		led-names = "privacy";
++
++		orientation = <0>;	/* Front facing */
++		rotation = <0>;
++
++		port {
++			s5k4h7_ep: endpoint {
++				data-lanes = <1 2 3 4>;
++				link-frequencies = /bits/ 64 <350000000>;
++				remote-endpoint = <&csiphy3_s5k4h7_ep>;
++			};
++		};
++	};
++
+ 	// eeprom@50
+ 	// actuator???@58, 2023 only
+ };
+ 
+ &tlmm {
++	/*
++	 * The front camera's MCLK and reset pins are configured here rather
++	 * than by a sensor node: both front sensor nodes use them, and this
++	 * pin controller lets only one device own a pin.
++	 */
++	pinctrl-0 = <&camf_rgb_default>;
++	pinctrl-names = "default";
++
+ 	cam_indicator_en: cam-indicator-en-state {
+ 		pins = "gpio34";
+ 		function = "gpio";

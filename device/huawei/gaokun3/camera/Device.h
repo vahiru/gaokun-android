@@ -77,14 +77,19 @@ private:
 	void accumulateLimits(ManualLimits &l);
 	/* 会话关闭时由 Session 回调：相机不再占用，手电筒重新可用。 */
 	void onSessionClosed();
-	/* 写 LED 的 brightness（torch 档 = max_brightness）。没有闪光灯时返回 false。 */
-	bool setLed(bool on);
+	/* 按手电筒档位（1..kTorchMaxLevel，0 = 灭）写LED的brightness。没有闪光灯时返回false。 */
+	bool setLedLevel(int32_t level);
+	/* 灭灯并把档位复位为默认（相机被打开、会话关闭时）。 */
+	void resetTorchLocked();
 
 	std::mutex mutex_;
 	std::shared_ptr<libcamera::Camera> cam_;
 	std::string name_;
 	Provider *provider_ = nullptr;
 	bool inUse_ = false;
+	/* 手电筒是否亮着、当前档位；灯灭时档位为kTorchDefaultLevel（ICameraDevice.aidl的约定）。 */
+	bool torchOn_ = false;
+	int32_t torchLevel_ = kTorchDefaultLevel;
 	SensorFacts facts_;
 	std::vector<uint8_t> characteristics_;
 };

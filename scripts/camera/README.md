@@ -8,6 +8,7 @@
 | `camtest` | 建立media link、沿管道配置格式并采集RAW帧（依次测试默认曝光、满增益、传感器测试彩条与分辨率图案） |
 | `gen-ov13b10-ccm.py` | 从Windows驱动调校文件`com.qti.tuned.ofilm_ov13b10.bin`生成后摄调校的AWB与CCM数据 |
 | `gen-hi846-ccm.py` | 结合Windows驱动调校文件`com.qti.tuned.hlt_hi846.bin`与实测白点生成前摄调校的AWB与CCM数据 |
+| `gen-s5k4h7-ccm.py` | 从Windows驱动调校文件`com.qti.tuned.xinli_s5k4h7.bin`生成S5K4H7前摄调校的AWB与CCM数据 |
 
 编译C诊断工具：`bash scripts/camera/build.sh <内核源码树路径>`（生成静态链接二进制，`adb push`至`/data/local/tmp/`以root运行）。
 
@@ -32,7 +33,7 @@ msm_vfe0_rdi0:1 -> msm_vfe0_video0   [固定连接] => /dev/videoN
 
 ## 三、AWB与CCM数据生成
 
-两个脚本输出的是软件ISP格式的完整调校文件（最早给软件ISP用）。硬件ISP（qcom-ife）的调校文件[`../../device/huawei/gaokun3/camera/ipa-data/qcom-ife/`](../../device/huawei/gaokun3/camera/ipa-data/qcom-ife/)原样采用其中的`Awb`与`Ccm`两段；该目录须与`patches/libcamera`里`src/ipa/qcom-ife/data/`的同名文件一致。
+`gen-ov13b10-ccm.py`与`gen-hi846-ccm.py`输出的是软件ISP格式的完整调校文件（最早给软件ISP用）。硬件ISP（qcom-ife）的调校文件[`../../device/huawei/gaokun3/camera/ipa-data/qcom-ife/`](../../device/huawei/gaokun3/camera/ipa-data/qcom-ife/)原样采用其中的`Awb`与`Ccm`两段；该目录须与`patches/libcamera`里`src/ipa/qcom-ife/data/`的同名文件一致。
 
 ### 后摄（`ov13b10`）：`gen-ov13b10-ccm.py`
 
@@ -53,4 +54,12 @@ python3 scripts/camera/gen-ov13b10-ccm.py com.qti.tuned.ofilm_ov13b10.bin \
 ```bash
 python3 scripts/camera/gen-hi846-ccm.py com.qti.tuned.hlt_hi846.bin \
     > /tmp/hi846-softisp.yaml     # 取其中的Awb与Ccm段
+```
+
+### 前摄（`s5k4h7`）：`gen-s5k4h7-ccm.py`
+
+部分机器的前摄是S5K4H7模组。`qccamfrontsensor_extension8280.cab`内的`com.qti.tuned.xinli_s5k4h7.bin`是这个模组自己的调校（Hi-846用的是高通的默认调校），因此按`gen-ov13b10-ccm.py`的方法直接取其中的CCM与标准光源白点。各数据表按记录名查找。脚本只输出`qcom-ife`调校文件中的`Awb`与`Ccm`两段：
+
+```bash
+python3 scripts/camera/gen-s5k4h7-ccm.py com.qti.tuned.xinli_s5k4h7.bin
 ```

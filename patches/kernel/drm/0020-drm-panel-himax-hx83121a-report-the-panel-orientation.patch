@@ -1,0 +1,79 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] drm/panel: himax-hx83121a: report the panel orientation
+
+Read the panel orientation from the device tree ("rotation", defined in
+panel-common.yaml) and report it through the get_orientation callback.
+drm_bridge_connector, which the msm DSI driver uses, then attaches the
+"panel orientation" property to the connector. The binding sets
+additionalProperties: false, so list "rotation" there, as
+himax,hx83102.yaml does.
+
+The Huawei MateBook E Go's panel scans out in portrait (1600x2560), but
+the tablet is used in landscape with its keyboard cover, the panel's
+right side up. With the property, userspace can treat landscape as the
+natural orientation of the display: drm_hwcomposer reports it to
+SurfaceFlinger as the display's physical orientation, and fbcon rotates
+the console by itself.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ .../bindings/display/panel/himax,hx83121a.yaml      |  1 +
+ drivers/gpu/drm/panel/panel-himax-hx83121a.c        | 13 +++++++++++++
+ 2 files changed, 14 insertions(+)
+
+diff --git a/Documentation/devicetree/bindings/display/panel/himax,hx83121a.yaml b/Documentation/devicetree/bindings/display/panel/himax,hx83121a.yaml
+index 836031d494..a254c072b3 100644
+--- a/Documentation/devicetree/bindings/display/panel/himax,hx83121a.yaml
++++ b/Documentation/devicetree/bindings/display/panel/himax,hx83121a.yaml
+@@ -51,6 +51,7 @@ properties:
+ 
+   backlight: true
+   ports: true
++  rotation: true
+ 
+ required:
+   - compatible
+diff --git a/drivers/gpu/drm/panel/panel-himax-hx83121a.c b/drivers/gpu/drm/panel/panel-himax-hx83121a.c
+index f25a37881b..440099533d 100644
+--- a/drivers/gpu/drm/panel/panel-himax-hx83121a.c
++++ b/drivers/gpu/drm/panel/panel-himax-hx83121a.c
+@@ -36,6 +36,7 @@ struct himax {
+ 	struct gpio_desc *reset_gpio;
+ 	struct regulator_bulk_data *supplies;
+ 	struct backlight_device *backlight;
++	enum drm_panel_orientation orientation;
+ };
+ 
+ struct panel_desc {
+@@ -187,10 +188,18 @@ static int himax_get_modes(struct drm_panel *panel,
+ 	return num_modes;
+ }
+ 
++static enum drm_panel_orientation himax_get_orientation(struct drm_panel *panel)
++{
++	struct himax *ctx = to_himax(panel);
++
++	return ctx->orientation;
++}
++
+ static const struct drm_panel_funcs himax_panel_funcs = {
+ 	.prepare = himax_prepare,
+ 	.unprepare = himax_unprepare,
+ 	.get_modes = himax_get_modes,
++	.get_orientation = himax_get_orientation,
+ };
+ 
+ static int himax_bl_update_status(struct backlight_device *bl)
+@@ -724,6 +733,10 @@ static int himax_probe(struct mipi_dsi_device *dsi)
+ 	ctx->dsi[0] = dsi;
+ 	mipi_dsi_set_drvdata(dsi, ctx);
+ 
++	ret = of_drm_get_panel_orientation(dev->of_node, &ctx->orientation);
++	if (ret < 0)
++		return dev_err_probe(dev, ret, "Failed to get orientation\n");
++
+ 	ctx->panel.prepare_prev_first = true;
+ 
+ 	if (desc->has_dcs_backlight) {
