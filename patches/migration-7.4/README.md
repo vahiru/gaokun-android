@@ -45,8 +45,8 @@ python3 -I $M/migrate.py check                      # 合并upstream/dev之后�
 ## 当前状态
 
 - 新基线：v7.4-rc3。
-- 补丁链208个（buildbot层19个，dev 164个，override 19个，新增6个），丢弃24个（见`drop.tsv`）。
-- 在v7.4-rc3上从头重建：208个全部可以打上。以rc.4发布配置加`kernel-config-android.sh`、`kernel-config-7.4.sh`编译并上机验证过的是合并#140至#144之前的补丁链；之后从dev带入的5个补丁（iris的IOVA保留与解码输入缓冲区、GPU带宽与SMMU中断、PCIe NO_SNOOP）尚未在7.4上编译。
+- 补丁链218个（buildbot层19个，dev 170个，override 23个，新增6个），丢弃24个（见`drop.tsv`）。
+- 在v7.4-rc3上从头重建：218个全部可以打上，以rc.4发布配置加`kernel-config-android.sh`、`kernel-config-7.4.sh`编译通过。上机验证过的是合并#140之前的补丁链（另加`add/core/0001`、`0006`）；之后从dev带入的补丁（iris的IOVA保留与解码输入缓冲区、GPU带宽与SMMU中断、PCIe NO_SNOOP、UCSI初始化重试、S5K4H7前摄、面板方向、板载热敏电阻温区）尚未在7.4上运行。
 - 上机：Android可以完整启动，不含KSU与含BakaSU两种构建都已验证；显示、触控、音频正常。
 - fastrpc：改用上游v4系列，1/3、2/3为`add/core/0003`、`0004`，3/3为`core/misc-fastrpc-fix-context-leak-and-hang-on-signal-interrupted-invoke`的override，内容与上游一致（3/3只适配了一处上下文）。本地修正单独放在`add/core/0005`，各项改动及原因见其补丁说明；v4的补丁单独应用并不安全，须与它一起应用。尚未上机验证。
 - KernelSU：改为钉住BakaSU主线`7b65bde0`。它的UAPI为6，与目前发布的管理器（ReSukiSU v4.2.0-rc3，UAPI 4）不兼容，切换时用户需要同时更换管理器；可用的管理器目前只有BakaSU在GitHub Actions上用官方证书签名的构建。
