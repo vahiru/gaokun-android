@@ -160,6 +160,9 @@ OUT="${1:?用法: $0 <kernel-out-dir>}"
 #     但 RFCOMM/HIDP/UHID 是 =m → 蓝牙键鼠/串口 profile 全废。
 #   温控/带宽：QCOM_SPMI_ADC5 等是 =m → PMIC 温度传感器缺席；
 #     ICC_BWMON 关系到内存带宽随负载升频（打游戏要）。
+#   QCOM_SPMI_ADC_TM5：PMIC热敏电阻的阈值监控，设备树里sys_therm1–4、7的温区
+#     （kernel/dts/0031）靠它注册温度传感器。本机内核不加载任何模块，=m时这些温区不存在，
+#     软件降频只剩芯片温度85 °C一道。
 ./scripts/config --file "$OUT/.config" \
     `# ★声卡链` \
     --enable PINCTRL_LPASS_LPI --enable PINCTRL_SC8280XP_LPASS_LPI \
@@ -170,7 +173,7 @@ OUT="${1:?用法: $0 <kernel-out-dir>}"
     --enable HID_MULTITOUCH \
     `# 温度传感器 + 内存带宽调频 + 电源统计` \
     --enable IIO --enable QCOM_SPMI_ADC5 --enable QCOM_VADC_COMMON \
-    --enable QCOM_SPMI_TEMP_ALARM --enable QCOM_ICC_BWMON \
+    --enable QCOM_SPMI_TEMP_ALARM --enable QCOM_SPMI_ADC_TM5 --enable QCOM_ICC_BWMON \
     --enable QCOM_LMH --enable QCOM_SPM --enable QCOM_STATS --enable QCOM_SOCINFO \
     `# Android 基础设施：FUSE（外部存储）、熵源、AF_ALG` \
     --enable FUSE_FS --enable HW_RANDOM --enable HW_RANDOM_ARM_SMCCC_TRNG \
@@ -557,7 +560,7 @@ PINCTRL_LPASS_LPI PINCTRL_SC8280XP_LPASS_LPI SC_LPASSCC_8280XP
 SND_SOC_SC8280XP SND_SOC_WSA883X SND_SOC_WCD938X SOUNDWIRE_QCOM
 SND_SOC_LPASS_RX_MACRO SND_SOC_LPASS_TX_MACRO SND_SOC_LPASS_VA_MACRO
 SND_SOC_LPASS_WSA_MACRO SND_SOC_QDSP6 QCOM_PD_MAPPER SND_USB SND_USB_AUDIO
-FUSE_FS IIO QCOM_SPMI_ADC5 QCOM_FASTRPC
+FUSE_FS IIO QCOM_SPMI_ADC5 QCOM_SPMI_ADC_TM5 QCOM_FASTRPC
 CPUSETS_V1 MEMCG_V1 UCLAMP_TASK UCLAMP_TASK_GROUP EFI_ZBOOT EFI_STUB EFI_GENERIC_STUB EFI_VARS_PSTORE_DEFAULT_DISABLE
 SWAP ZRAM ZRAM_BACKEND_LZ4
 MEDIA_SUPPORT MEDIA_PLATFORM_SUPPORT VIDEO_DEV V4L_MEM2MEM_DRIVERS

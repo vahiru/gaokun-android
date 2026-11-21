@@ -312,6 +312,7 @@ KPATCHES=(
     kernel/dts/0028-arm64-dts-qcom-sc8280xp-fix-GPU-peak-bandwidth-votes.patch
     kernel/dts/0029-arm64-dts-qcom-sc8280xp-huawei-gaokun3-Describe-the-S5K4H7-front-camera.patch
     kernel/dts/0030-arm64-dts-qcom-sc8280xp-huawei-gaokun3-set-the-panel-rotation.patch
+    kernel/dts/0031-arm64-dts-qcom-sc8280xp-huawei-gaokun3-throttle-on-the-board-thermistors.patch
 
     # ─── 11. kernel/fingerprint：QSEECOM 与指纹传输驱动（/dev/gaokun3_fpcmd，CONFIG_GAOKUN3_FPCMD 由 kernel-config-android.sh 打开）───
     kernel/fingerprint/0001-firmware-qcom-scm-qseecom-app-load-shutdown-listener.patch
