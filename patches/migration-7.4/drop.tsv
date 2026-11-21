@@ -24,3 +24,4 @@ audio/ASoC-codecs-lpass-rx-macro-switch-to-PM-clock-framework-for-runtime-PM	lpa
 dts/arm64-dts-qcom-sc8280xp-add-iris-and-videocc	v7.4-rc3的sc8280xp.dtsi已有相同的iris与videocc节点及pil_video_mem
 dts/arm64-dts-qcom-sc8280xp-mark-the-CDSP-FastRPC-context-banks-dma-coherent	上游3ca6796122将ADSP、CDSP、SLPI的上下文全部标为dma-coherent
 core/remoteproc-qcom-ratelimit-repeat-handover-error	v7.4-rc3的q6v5_handover_interrupt()在首次触发后即关闭handover中断，不再打印该消息
+dts/arm64-dts-qcom-sc8280xp-keep-iris-IOVAs-out-of-the-content-protection-range	上游200473c198（v7.4-rc1）由iris驱动在探测时用dma_iova_try_alloc()保留同一段IOVA（0至0x25800000）；设备树再用iommu-addresses保留时，驱动的保留失败，探测返回-ENOMEM
