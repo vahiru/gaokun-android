@@ -456,7 +456,7 @@ OUT="${1:?用法: $0 <kernel-out-dir>}"
     --enable SOFTLOCKUP_DETECTOR --set-val BOOTPARAM_SOFTLOCKUP_PANIC 0
 
 # ★ LIVE-12：ANON_VMA_NAME（mm/Kconfig:1365）—— scudo / ART 靠它给匿名映射起名，
-#   没有它 dumpsys meminfo 的 Java / Native 堆全是 0、全算进 Unknown。LRU_GEN 改回收行为，不在这里顺手开。
+#   没有它dumpsys meminfo的Java/Native堆全是0、全算进Unknown。
 # ★ LIVE-13：LOG_BUF_SHIFT（init/Kconfig:804，范围 12–25；7.2.9 树 ~/gk3-kernel-72y 里是 :807）17 → 19，内核环形缓冲 128 KiB → 512 KiB。
 # ★ PERF-11 / PWR-13：THERMAL_STATISTICS（drivers/thermal/Kconfig:29，7.2.9 同）—— cooling_device*/stats，
 #   降频历史可查。（以上与下面 APP-17 的四个符号 2026-10-05 在 7.2.9 树上重 grep 过；该树的 .config 四项 + 这两项都已是期望值。）
@@ -470,6 +470,20 @@ OUT="${1:?用法: $0 <kernel-out-dir>}"
     --enable THERMAL_STATISTICS \
     --enable ARMV8_DEPRECATED --enable SWP_EMULATION \
     --enable CP15_BARRIER_EMULATION --enable SETEND_EMULATION
+
+# ★ 透明大页、页面回收与写回节流采用GKI（android17-6.18的gki_defconfig）的设置：
+#   · 透明大页（THP）为madvise：匿名内存只有以madvise(MADV_HUGEPAGE)标记的区域才使用2 MiB大页。为always时，
+#     对齐的匿名映射在缺页时就分配大页，khugepaged还在后台把4 KiB页（包括文件映射）合并成大页，必要时规整内存，
+#     匿名内存占用随之增加。运行时改回：向/sys/kernel/mm/transparent_hugepage/enabled写always。
+#   · MGLRU（LRU_GEN、LRU_GEN_ENABLED）：按访问的新旧把页面分代回收，取代active/inactive两个链表。
+#     运行时关闭：向/sys/kernel/mm/lru_gen/enabled写n。Android 17的init.rc不再按DeviceConfig属性改写这个节点。
+#   · 写回节流（BLK_WBT）只编入，默认不启用（BLK_WBT_MQ=n，其Kconfig默认为y，须显式关闭）。启用后，
+#     读延迟超过目标值（非旋转盘为2 ms）时降低后台写回的队列深度；运行时启用：
+#     向/sys/block/<盘>/queue/wbt_lat_usec写-1（写0关闭）。
+./scripts/config --file "$OUT/.config" \
+    --disable TRANSPARENT_HUGEPAGE_ALWAYS --enable TRANSPARENT_HUGEPAGE_MADVISE \
+    --enable LRU_GEN --enable LRU_GEN_ENABLED \
+    --enable BLK_WBT --disable BLK_WBT_MQ
 
 # ★ LIVE-5：BTF 与 userfaultfd。
 #   · DEBUG_INFO_BTF（lib/Kconfig.debug:398）：buildbot defconfig 未选 DWARF 选项，olddefconfig 默认选
@@ -563,6 +577,7 @@ SND_SOC_LPASS_WSA_MACRO SND_SOC_QDSP6 QCOM_PD_MAPPER SND_USB SND_USB_AUDIO
 FUSE_FS IIO QCOM_SPMI_ADC5 QCOM_SPMI_ADC_TM5 QCOM_FASTRPC
 CPUSETS_V1 MEMCG_V1 UCLAMP_TASK UCLAMP_TASK_GROUP EFI_ZBOOT EFI_STUB EFI_GENERIC_STUB EFI_VARS_PSTORE_DEFAULT_DISABLE
 SWAP ZRAM ZRAM_BACKEND_LZ4
+TRANSPARENT_HUGEPAGE_MADVISE LRU_GEN LRU_GEN_ENABLED BLK_WBT
 MEDIA_SUPPORT MEDIA_PLATFORM_SUPPORT VIDEO_DEV V4L_MEM2MEM_DRIVERS
 VIDEOBUF2_DMA_CONTIG V4L2_MEM2MEM_DEV SM_VIDEOCC_8350 VIDEO_QCOM_IRIS
 PM_DEVFREQ PM_OPP PM_GENERIC_DOMAINS_OF QCOM_UBWC_CONFIG QCOM_MDT_LOADER QCOM_SCM INTERCONNECT_QCOM_SC8280XP QCOM_RPMHPD
