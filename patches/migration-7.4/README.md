@@ -45,8 +45,8 @@ python3 -I $M/migrate.py check                      # 合并upstream/dev之后�
 ## 当前状态
 
 - 新基线：v7.4-rc3。
-- 补丁链202个（buildbot层19个，dev 159个，override 19个，新增5个），丢弃24个（见`drop.tsv`）。
-- 在v7.4-rc3上从头重建：202个全部可以打上；以rc.4发布配置加`kernel-config-android.sh`、`kernel-config-7.4.sh`编译通过。
+- 补丁链208个（buildbot层19个，dev 164个，override 19个，新增6个），丢弃24个（见`drop.tsv`）。
+- 在v7.4-rc3上从头重建：208个全部可以打上。以rc.4发布配置加`kernel-config-android.sh`、`kernel-config-7.4.sh`编译并上机验证过的是合并#140至#144之前的补丁链；之后从dev带入的5个补丁（iris的IOVA保留与解码输入缓冲区、GPU带宽与SMMU中断、PCIe NO_SNOOP）尚未在7.4上编译。
 - 上机：Android可以完整启动，不含KSU与含BakaSU两种构建都已验证；显示、触控、音频正常。
 - fastrpc：改用上游v4系列，1/3、2/3为`add/core/0003`、`0004`，3/3为`core/misc-fastrpc-fix-context-leak-and-hang-on-signal-interrupted-invoke`的override，内容与上游一致（3/3只适配了一处上下文）。本地修正单独放在`add/core/0005`，各项改动及原因见其补丁说明；v4的补丁单独应用并不安全，须与它一起应用。尚未上机验证。
 - KernelSU：改为钉住BakaSU主线`7b65bde0`。它的UAPI为6，与目前发布的管理器（ReSukiSU v4.2.0-rc3，UAPI 4）不兼容，切换时用户需要同时更换管理器；可用的管理器目前只有BakaSU在GitHub Actions上用官方证书签名的构建。
@@ -55,7 +55,7 @@ python3 -I $M/migrate.py check                      # 合并upstream/dev之后�
 
 以下问题都会使Android无法完成启动，在纯主线上同样存在：
 
-- `add/core/0001`：自v7.3起（14adbd5341），PID 1拥有独立的fs_struct；PID 1切换到新的fs_struct时，`validate_fs_switch()`会把旧的fs_struct的根目录重置到nullfs。Android init先以`CLONE_FS`启动属性服务线程，再在主线程中`unshare(CLONE_NEWNS)`，这些线程因此离开真实根目录，libselinux无法打开`/sys/fs/selinux/access`，所有属性设置都被判定为拒绝。补丁只在全局引用为最后一个使用者时才重置。
+- `add/core/0001`、`0006`：自v7.3起（14adbd5341），PID 1拥有独立的fs_struct；PID 1切换到新的fs_struct时，`validate_fs_switch()`会把旧的fs_struct的根目录重置到nullfs。Android init先以`CLONE_FS`启动属性服务线程，再在主线程中`unshare(CLONE_NEWNS)`，这些线程因此离开真实根目录，libselinux无法打开`/sys/fs/selinux/access`，所有属性设置都被判定为拒绝。两个补丁是vfs维护者针对这一问题发出的上游修复（v1，尚未合入，标有`Cc: stable # v7.3+`）：0006不再重置，内核线程和usermodehelper继续使用PID 1留下的根目录，与v7.3之前相同；0001让`pivot_root()`同时更新这个fs_struct，是0006的前提。进入主线后改为对应提交的backport；若7.4.y已包含，则移入`drop.tsv`。
 - `add/core/0002`：v7.4（d99c4a302c）不允许mmap回调在由内存管理核心管理的映射上清除`VM_MAYWRITE`。ashmem据此实现只读保护，只读映射因此失败，system_server无法建立字体表，启动循环。补丁改为在`do_mmap()`调用驱动之前去掉该标志，与memfd的写封印相同。
 - binder：v7.4删除了C版binder（fd2bc059ed），只保留`ANDROID_BINDER_IPC_RUST`，构建因此需要Rust工具链（rustc ≥ 1.85、bindgen ≥ 0.71.1、rust-src组件、libclang）。`kernel-config-7.4.sh`会断言`CONFIG_RUST`未被olddefconfig关闭。
 - `SCHEDSTATS`：关闭时`task_struct`中的`struct sched_statistics stats`是带64字节对齐的空结构体，bindgen生成的Rust类型丢失这一对齐，`stats`之后的字段在Rust中整体错位，Rust binder因此读错`mm`等字段。内核以`--no-layout-tests`调用bindgen，编译期不会报错。开启`SCHEDSTATS`后结构体非空，布局一致。

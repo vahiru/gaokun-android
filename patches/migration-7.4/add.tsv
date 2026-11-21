@@ -1,6 +1,7 @@
 # 插在哪个键之后	文件（相对本目录）	备注
 # 键为^表示紧接base层之后。文件放在add/<子系统>/NNNN-<slug>.patch，只有新基线才需要的补丁。
-core/kernel-report-a-set-release-to-android-apps	add/core/0001-fs-keep-the-fs-struct-pid-1-left-while-its-threads-share-it.patch	v7.3起PID 1离开fs_struct时内核会重置其根目录，Android init的属性服务线程因此失去真实根目录
+core/kernel-report-a-set-release-to-android-apps	add/core/0001-fs-let-pivot-root-move-userspace-init-fs-when-nobody-shares-it.patch	上游修复v1系列1/2，2/2的前提
+core/kernel-report-a-set-release-to-android-apps	add/core/0006-fs-don-t-reset-userspace-init-fs-when-pid-1-stops-sharing-it.patch	上游修复v1系列2/2：v7.3起PID 1离开fs_struct时内核会重置其根目录，Android init的属性服务线程因此失去真实根目录
 core/kernel-report-a-set-release-to-android-apps	add/core/0003-misc-fastrpc-remove-dead-context-drain-in-fastrpc-user-free.patch	上游v4系列1/3
 core/kernel-report-a-set-release-to-android-apps	add/core/0004-misc-fastrpc-drop-the-dsp-response-reference-on-channel-removal.patch	上游v4系列2/3；3/3为core/0009的override
 core/misc-fastrpc-fix-context-leak-and-hang-on-signal-interrupted-invoke	add/core/0005-misc-fastrpc-fix-locking-and-reference-handling-of-interrupted-invokes.patch	v4系列之上的本地修正，须与v4的三个补丁一起应用
