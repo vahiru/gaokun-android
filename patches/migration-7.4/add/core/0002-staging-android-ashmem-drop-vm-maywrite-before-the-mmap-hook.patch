@@ -1,0 +1,166 @@
+From aeb98b6492becdc3d4610ffd1d9946ed2bc5bfab Mon Sep 17 00:00:00 2001
+From: Akisaira <akisaira@outlook.com>
+Date: Wed, 18 Nov 2026 22:52:31 +1100
+Subject: [PATCH] staging: android: ashmem: drop VM_MAYWRITE before the mmap
+ hook
+
+Since commit d99c4a302c ("mm/vma: only allow mmap to clear
+VMA_MAYWRITE_BIT if not mm-managed"), mmap_validate() warns and fails
+the mmap with -EINVAL when an mmap hook clears VM_MAYWRITE on an
+mm-managed mapping. ashmem_mmap() does exactly that for a region whose
+protection mask lacks PROT_WRITE, and every ashmem mapping is
+mm-managed (shmem or anonymous memory). So a read-only mapping of a
+region after ASHMEM_SET_PROT_MASK(PROT_READ) fails. Android's
+SharedMemory does this for the system font map, so system_server
+crashes with "The Typeface is not fully initialized" and boot loops.
+
+Drop VM_MAYWRITE in do_mmap() before the mapping is set up, the way
+memfd write seals do, through a new ashmem_check_mmap() called next to
+memfd_check_seals_mmap(). A writable mapping of such a region is
+refused there with -EPERM, as before. ashmem_mmap() no longer clears
+VM_MAYWRITE; if it is still set while the mask lacks PROT_WRITE, the
+mask was lowered concurrently and the mmap fails with -EPERM.
+
+As a side effect, a writable mapping of such a region is now refused
+before mmap_region(): -EPERM takes precedence over the -EINVAL for a
+region without a size or a too large length, and a MAP_FIXED request
+fails before the old mapping is unmapped.
+
+Origin: local
+Upstream-Status: Inappropriate [ashmem is not upstream]
+---
+ drivers/staging/android/ashmem.c | 49 ++++++++++++++++++++++++++++++--
+ include/linux/ashmem.h           | 18 ++++++++++++
+ mm/mmap.c                        |  6 ++++
+ 3 files changed, 71 insertions(+), 2 deletions(-)
+ create mode 100644 include/linux/ashmem.h
+
+diff --git a/drivers/staging/android/ashmem.c b/drivers/staging/android/ashmem.c
+index 7e939504e7..912398994a 100644
+--- a/drivers/staging/android/ashmem.c
++++ b/drivers/staging/android/ashmem.c
+@@ -24,6 +24,7 @@
+ #include <linux/bitops.h>
+ #include <linux/mutex.h>
+ #include <linux/shmem_fs.h>
++#include <linux/ashmem.h>
+ #include "ashmem.h"
+ 
+ #define ASHMEM_NAME_PREFIX "dev/ashmem/"
+@@ -401,7 +402,16 @@ static int ashmem_mmap(struct file *file, struct vm_area_struct *vma)
+ 		ret = -EPERM;
+ 		goto out;
+ 	}
+-	vm_flags_clear(vma, calc_vm_may_flags(~asma->prot_mask));
++	/*
++	 * VM_MAYWRITE was already dropped by ashmem_check_mmap(): the core
++	 * rejects an mmap hook that clears it on an mm-managed mapping. If
++	 * it is still set, PROT_WRITE was removed from the mask in between.
++	 */
++	if ((vma->vm_flags & VM_MAYWRITE) && !(asma->prot_mask & PROT_WRITE)) {
++		ret = -EPERM;
++		goto out;
++	}
++	vm_flags_clear(vma, calc_vm_may_flags(~asma->prot_mask) & ~VM_MAYWRITE);
+ 
+ 	if (!asma->file) {
+ 		char *name = ASHMEM_NAME_DEF;
+@@ -564,7 +574,8 @@ static int set_prot_mask(struct ashmem_area *asma, unsigned long prot)
+ 	if ((prot & PROT_READ) && (current->personality & READ_IMPLIES_EXEC))
+ 		prot |= PROT_EXEC;
+ 
+-	asma->prot_mask = prot;
++	/* Read without the lock by ashmem_check_mmap(). */
++	WRITE_ONCE(asma->prot_mask, prot);
+ 
+ out:
+ 	mutex_unlock(&ashmem_mutex);
+@@ -932,6 +943,40 @@ static void ashmem_show_fdinfo(struct seq_file *m, struct file *file)
+ 	mutex_unlock(&ashmem_mutex);
+ }
+ #endif
++static const struct file_operations ashmem_fops;
++
++/**
++ * ashmem_check_mmap() - apply an ashmem region's protection mask to a new
++ * mapping before the mapping is set up
++ * @file: the file being mapped
++ * @vma_flags: the VMA flags of the new mapping, updated in place
++ *
++ * Called from do_mmap() next to memfd_check_seals_mmap(). Every ashmem
++ * mapping is mm-managed (shmem or anonymous memory), and the core rejects
++ * an mmap hook that clears VMA_MAYWRITE_BIT on such a mapping. So, like
++ * memfd write seals, drop VMA_MAYWRITE_BIT here when the region does not
++ * allow PROT_WRITE, so that mprotect() cannot make the mapping writable
++ * later. This applies to private mappings too, as ashmem_mmap() always did.
++ *
++ * Return: -EPERM if a writable mapping of a read-only region is requested,
++ * 0 otherwise.
++ */
++int ashmem_check_mmap(struct file *file, vma_flags_t *vma_flags)
++{
++	struct ashmem_area *asma;
++
++	if (file->f_op != &ashmem_fops)
++		return 0;
++
++	asma = file->private_data;
++	if (READ_ONCE(asma->prot_mask) & PROT_WRITE)
++		return 0;
++	if (vma_flags_test(vma_flags, VMA_WRITE_BIT))
++		return -EPERM;
++	vma_flags_clear(vma_flags, VMA_MAYWRITE_BIT);
++	return 0;
++}
++
+ static const struct file_operations ashmem_fops = {
+ 	.owner = THIS_MODULE,
+ 	.open = ashmem_open,
+diff --git a/include/linux/ashmem.h b/include/linux/ashmem.h
+new file mode 100644
+index 0000000000..697afc22fa
+--- /dev/null
++++ b/include/linux/ashmem.h
+@@ -0,0 +1,18 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++#ifndef _LINUX_ASHMEM_MMAP_H
++#define _LINUX_ASHMEM_MMAP_H
++
++#include <linux/mm_types.h>
++
++struct file;
++
++#ifdef CONFIG_ASHMEM
++int ashmem_check_mmap(struct file *file, vma_flags_t *vma_flags);
++#else
++static inline int ashmem_check_mmap(struct file *file, vma_flags_t *vma_flags)
++{
++	return 0;
++}
++#endif
++
++#endif /* _LINUX_ASHMEM_MMAP_H */
+diff --git a/mm/mmap.c b/mm/mmap.c
+index 7618e72766..573fe94a40 100644
+--- a/mm/mmap.c
++++ b/mm/mmap.c
+@@ -48,6 +48,7 @@
+ #include <linux/sched/mm.h>
+ #include <linux/ksm.h>
+ #include <linux/memfd.h>
++#include <linux/ashmem.h>
+ 
+ #include <linux/uaccess.h>
+ #include <asm/cacheflush.h>
+@@ -499,6 +500,11 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
+ 		err = memfd_check_seals_mmap(file, &vma_flags);
+ 		if (err)
+ 			return (unsigned long)err;
++
++		/* The same for an ashmem region without PROT_WRITE. */
++		err = ashmem_check_mmap(file, &vma_flags);
++		if (err)
++			return (unsigned long)err;
+ 	} else {
+ 		switch (flags & MAP_TYPE) {
+ 		case MAP_SHARED:

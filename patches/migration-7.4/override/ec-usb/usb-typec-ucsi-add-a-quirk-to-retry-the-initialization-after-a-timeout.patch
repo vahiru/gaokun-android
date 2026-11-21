@@ -1,0 +1,85 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] usb: typec: ucsi: Add a quirk to retry the initialization
+ after a timeout
+
+ucsi_init() gives up for good when a command times out: the connectors
+are unregistered, ucsi->connector stays NULL and the ports are unusable
+until the next boot. On some PPMs such a timeout is not a lasting fault.
+The PPM of the Huawei Matebook E Go sometimes completes a command but
+leaves BUSY set in the CCI, which ucsi_notify_common() ignores, so the
+command times out. The commands sent after it still complete, and so
+does the PPM_RESET on the error path.
+
+Add UCSI_RETRY_INIT_ON_TIMEOUT. With it, ucsi_init_work() queues the
+work again after -ETIMEDOUT, one second later and at most five times, as
+long as ucsi_init() failed before publishing the connectors: it has then
+unregistered them, and the next run starts with a PPM reset. ucsi_init()
+can also fail after publishing them, when reading the CCI at the end
+fails; the ports are in use then and are left alone, as before.
+
+Windows does not accept a CCI with BUSY set either. When a command times
+out, UcmUcsiCx asks the framework to restart the device
+(WdfDeviceSetFailed() with WdfDeviceFailedAttemptRestart).
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/usb/typec/ucsi/ucsi.c | 19 +++++++++++++++++++
+ drivers/usb/typec/ucsi/ucsi.h |  6 ++++++
+ 2 files changed, 25 insertions(+)
+
+diff --git a/drivers/usb/typec/ucsi/ucsi.c b/drivers/usb/typec/ucsi/ucsi.c
+index 8ebcc1162f..f7e6a121cb 100644
+--- a/drivers/usb/typec/ucsi/ucsi.c
++++ b/drivers/usb/typec/ucsi/ucsi.c
+@@ -2266,6 +2266,25 @@ static void ucsi_init_work(struct work_struct *work)
+ 	}
+ 
+ 	dev_err_probe(ucsi->dev, ret, "PPM init failed\n");
++
++	/*
++	 * Unless it got as far as publishing the connectors, a failed
++	 * ucsi_init() has unregistered them, and the next run starts with a
++	 * PPM reset, so it can simply run again.
++	 */
++	if (ret == -ETIMEDOUT && !ucsi->connector &&
++	    ucsi->quirks & UCSI_RETRY_INIT_ON_TIMEOUT) {
++		if (ucsi->init_retries++ >= UCSI_INIT_RETRIES) {
++			dev_err(ucsi->dev, "PPM init failed %d times, stop trying\n",
++				UCSI_INIT_RETRIES + 1);
++			return;
++		}
++
++		dev_warn(ucsi->dev, "retrying PPM init (%d/%d)\n",
++			 ucsi->init_retries, UCSI_INIT_RETRIES);
++		queue_delayed_work(system_dfl_long_wq, &ucsi->work,
++				   UCSI_INIT_RETRY_DELAY);
++	}
+ }
+ 
+ /**
+diff --git a/drivers/usb/typec/ucsi/ucsi.h b/drivers/usb/typec/ucsi/ucsi.h
+index 1996f04ed5..80862b3cd9 100644
+--- a/drivers/usb/typec/ucsi/ucsi.h
++++ b/drivers/usb/typec/ucsi/ucsi.h
+@@ -491,6 +491,9 @@ struct ucsi {
+ #define UCSI_ROLE_SWITCH_RETRY_PER_HZ	10
+ #define UCSI_ROLE_SWITCH_INTERVAL	(HZ / UCSI_ROLE_SWITCH_RETRY_PER_HZ)
+ #define UCSI_ROLE_SWITCH_WAIT_COUNT	(10 * UCSI_ROLE_SWITCH_RETRY_PER_HZ)
++	int init_retries;
++#define UCSI_INIT_RETRIES		5
++#define UCSI_INIT_RETRY_DELAY		HZ
+ 
+ 	/* PPM Communication lock */
+ 	struct mutex ppm_lock;
+@@ -511,6 +514,9 @@ struct ucsi {
+ 
+ /* USB4 connection can imply that USB communcation is supported */
+ #define UCSI_USB4_IMPLIES_USB	BIT(2)
++
++/* The PPM may leave a command uncompleted: retry ucsi_init() after a timeout */
++#define UCSI_RETRY_INIT_ON_TIMEOUT	BIT(3)
+ };
+ 
+ #define UCSI_MAX_DATA_LENGTH(u) (((u)->version < UCSI_VERSION_2_0) ? 0x10 : 0xff)

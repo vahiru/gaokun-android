@@ -1,0 +1,25 @@
+# 键	所基于的dev补丁sha256	备注
+# 文件放在override/<子系统>/<slug>.patch，内容为该补丁在新基线上的版本。
+audio/ASoC-qcom-q6apm-dai-keep-the-source-s-channel-order-on-capture	708377f8d7679d19edd8e53df3855d238cb8536ac106bd8e3d82db4573163e66	
+camera/clk-qcom-camcc-sc8280xp-Vote-MX-for-the-PLLs	b37fd2df9c3f7212ead06227b2e90f08c0e4c8c20e666a1f77793ec00c440fd9	
+camera/media-camss-continue-without-never-bound-sensors	0958a54694b317f2cbbf8b30dcdc3f6fb75341e0228e31e10e6fb52cc7122dbe	
+camera/media-i2c-Add-a-driver-for-the-Samsung-S5K4H7-sensor	711cc5186e2ea4bc544724f29a67682058ff3d301d87c92cfdf2864139f6d132	
+camera/media-i2c-ov13b10-of-match-and-gaokun3-power-sequence	17d9398ad05212e0ed0ca6df63a325958ac433a99191a0155d93c52ef5ca251e	
+camera/media-qcom-camss-Drop-unfitted-alternative-sensors-without-waiting	8413a5221e906f3fcf148f1cbafb8b042d60286a3622cb7d839522c24a2c53f0	
+camera/media-qcom-camss-Share-the-upstream-subdevs-between-video-nodes	37f534e9ec5494f6527f99cb2a386782c27fd67eab4f8a9467a46c28e643a66f	
+camera/media-qcom-camss-csid-gen2-Crop-the-IPP-output	9971b47c71793433f0af8abaf7b9af879be855c13a5108bdc8d8b802fe8395c5	
+camera/media-qcom-camss-vfe-17x-Add-parameters-and-statistics-nodes-to-the-pixel-path	ac8489d331cfb12ddd5995750137d3b0bf39b950ac9fbf02963ced9415246449	
+camera/media-qcom-camss-vfe-17x-Add-the-display-output-of-the-pixel-path	90c3e2137e018d2e8c15c9f1b0f0174034af6ad692e33665636b48b9f83fb07e	
+camera/media-qcom-camss-vfe-17x-Add-the-focus-statistics	823301bbdb132fbacf4740edb20df949b4bbffbba81e254306b464d10d8f1e1f	
+camera/media-qcom-camss-vfe-17x-Add-the-pixel-pipeline-Bayer-to-NV12-NV21	e66abb92a476947178905504a3d3e160cd8350332cef6e0fb093cda9112d497e	
+core/misc-fastrpc-fix-context-leak-and-hang-on-signal-interrupted-invoke	c9a40789a560c76f488dc94835f5d1ca3fc8a06c3a95a53ba7834a8df74e0d02	改用上游v4系列3/3，本地修正见add/core/0005
+drm/drm-msm-a6xx-enable-preemption-on-a690	045cf083b6c0c15ceb131ca11781a6127d42649f21804985440ce8df09964b39	
+drm/drm-panel-himax-hx83121a-report-the-panel-orientation	45d6b238b47ddb6f90b1dd6058912f8d47cc09289c955114972750f947bb911a	
+dts/arm64-dts-qcom-sc8280xp-huawei-gaokun3-move-wake-gpios-to-the-Wi-Fi-node	bc938784186fc4489995a91b0a82bb783ae8dfd9c796ad87f23c882531dfafe8	
+dts/arm64-dts-sc8280xp-add-cpu-cooling-maps	3094dec2ee292c5297ccc4187a1d03f0b2043c886f610e2eca28b0e8a4c8e026	
+ec-usb/platform-arm64-huawei-gaokun-ec-use-an-edge-triggered-IRQ-while-suspended	45eae5c8969ce381d54e3230028cc194e90740cc56bbefdae77b19cfec9c1b29	
+ec-usb/usb-typec-ucsi-add-a-quirk-to-retry-the-initialization-after-a-timeout	2ef6e3293476f30c9064cba8646f094e433dc2cd588c79cf774ebd2ad0c86bd5	
+ec-usb/usb-typec-ucsi-huawei_gaokun-set-the-number-of-ports-at-probe	277cd46beef89416e1418878f59c6d61f223aac817614881655b330347e3156c	
+iris/media-iris-gen1-decoder-seek-mode-switch	b99b3eb3640f1be086c3853b4c823d1a862144cbd03a747e9e3d45540f2e6aa0	
+iris/media-iris-route-the-encoder-ARP-through-the-CP-non-pixel-context	13b6619b6fb4659295d1598af7c50897538114f18e18678c5ab4baa9332cdeed	
+pcie-pm/PCI-dwc-abort-suspend-when-a-device-has-signalled-PME	843b31aecd251306d89a421c2345a5b534d91e22908839c34ff600b081c3aa08	

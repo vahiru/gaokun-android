@@ -1,0 +1,106 @@
+From c1e4d881950295d0469419bb5105fef16f93ed12 Mon Sep 17 00:00:00 2001
+From: Akisaira <akisaira@outlook.com>
+Date: Wed, 18 Nov 2026 23:12:52 +1100
+Subject: [PATCH] kernel: use orig_x0 for the first syscall argument on arm64
+ 7.3+
+
+Since Linux 7.3 the native arm64 syscall wrappers take the first argument
+from regs->orig_x0 instead of regs->regs[0] (SC_ARM64_REGS_TO_ARGS). The
+compat wrappers still read regs->regs[0].
+
+Define __PT_SYSCALL_PARM1_REG as orig_x0 there, as tiann/KernelSU did in
+9ae6e65aa88a, so that the hooks reading the first argument of a native
+syscall see the value the syscall uses. Reads for compat tasks keep going
+through regs[0].
+
+Writes need both registers: sucompat rewrites the first argument and then
+calls either the native or the compat execveat wrapper. Add
+PT_REGS_SET_SYSCALL_PARM1(), which on arm64 7.3+ sets regs[0] and orig_x0
+as syscall_set_arguments() does, and use it for the rewrite and the
+restore. Otherwise an allowed 32-bit process running su gets root
+credentials but its exec fails, because the compat wrapper still sees the
+original filename pointer as the fd.
+
+__ksyscall() builds pt_regs for a direct call of a native syscall wrapper
+and set only regs[0]; set the syscall register as well, or the called
+syscall sees zero as its first argument on 7.3+.
+
+Origin: other, https://github.com/tiann/KernelSU/commit/9ae6e65aa88a13a47f8e895550dd5b369c6d8820
+Upstream-Status: Pending
+---
+ kernel/compat/kernel_compat.h |  1 +
+ kernel/feature/sucompat.c     |  4 ++--
+ kernel/include/arch.h         | 19 +++++++++++++++++++
+ 3 files changed, 22 insertions(+), 2 deletions(-)
+
+diff --git a/kernel/compat/kernel_compat.h b/kernel/compat/kernel_compat.h
+index 460fdc45..d3b952b7 100644
+--- a/kernel/compat/kernel_compat.h
++++ b/kernel/compat/kernel_compat.h
+@@ -74,6 +74,7 @@ static_assert(1 == 0, "Unsupported architecture!");
+         extern long KSU_SYS_PREFIX(name)(const struct pt_regs *);                                                      \
+         struct pt_regs __ksu_regs = { 0 };                                                                             \
+         PT_REGS_NATIVE_PARM1(&__ksu_regs) = (unsigned long)(a);                                                        \
++        PT_REGS_NATIVE_SYSCALL_PARM1(&__ksu_regs) = (unsigned long)(a);                                                \
+         PT_REGS_NATIVE_PARM2(&__ksu_regs) = (unsigned long)(b);                                                        \
+         PT_REGS_NATIVE_PARM3(&__ksu_regs) = (unsigned long)(c);                                                        \
+         PT_REGS_NATIVE_SYSCALL_PARM4(&__ksu_regs) = (unsigned long)(d);                                                \
+diff --git a/kernel/feature/sucompat.c b/kernel/feature/sucompat.c
+index dc8cab81..9869407c 100644
+--- a/kernel/feature/sucompat.c
++++ b/kernel/feature/sucompat.c
+@@ -269,7 +269,7 @@ static long ksu_handle_execve_sucompat_common_internal(const char __user **filen
+     PT_REGS_NATIVE_SYSCALL_PARM4(regs) = envp;
+     PT_REGS_NATIVE_PARM3(regs) = (unsigned long)argv_user;
+     PT_REGS_NATIVE_PARM2(regs) = (unsigned long)empty_user_path();
+-    PT_REGS_NATIVE_SYSCALL_PARM1(regs) = tmp_fd;
++    PT_REGS_SET_SYSCALL_PARM1(regs, tmp_fd);
+ 
+     ret = escape_with_root_profile();
+     if (ret) {
+@@ -285,7 +285,7 @@ static long ksu_handle_execve_sucompat_common_internal(const char __user **filen
+         ret = ksu_call_syscall(__NR_execveat, regs);
+     if (ret < 0) {
+         ksu_close_fd(tmp_fd);
+-        PT_REGS_NATIVE_SYSCALL_PARM1(regs) = orig_regs[0];
++        PT_REGS_SET_SYSCALL_PARM1(regs, orig_regs[0]);
+         PT_REGS_NATIVE_PARM2(regs) = orig_regs[1];
+         PT_REGS_NATIVE_PARM3(regs) = orig_regs[2];
+         PT_REGS_NATIVE_SYSCALL_PARM4(regs) = orig_regs[3];
+diff --git a/kernel/include/arch.h b/kernel/include/arch.h
+index b5a361a9..ef880855 100644
+--- a/kernel/include/arch.h
++++ b/kernel/include/arch.h
+@@ -7,6 +7,9 @@
+ #if defined(__aarch64__)
+ 
+ #define __PT_PARM1_REG regs[0]
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 3, 0)
++#define __PT_SYSCALL_PARM1_REG orig_x0
++#endif
+ #define __PT_PARM2_REG regs[1]
+ #define __PT_PARM3_REG regs[2]
+ #define __PT_SYSCALL_PARM4_REG regs[3]
+@@ -115,6 +118,22 @@
+ #define PT_REGS_NATIVE_PARM5(x) (__PT_REGS_CAST(x)->__PT_PARM5_REG)
+ #define PT_REGS_NATIVE_PARM6(x) (__PT_REGS_CAST(x)->__PT_PARM6_REG)
+ 
++/*
++ * Rewrite the first argument of the current syscall. On arm64 7.3+ native
++ * syscall wrappers read it from orig_x0 while compat wrappers still read
++ * regs[0], so write both, as syscall_set_arguments() does. regs[0] is the
++ * return slot and gets overwritten on return anyway.
++ */
++#if defined(__aarch64__) && LINUX_VERSION_CODE >= KERNEL_VERSION(7, 3, 0)
++#define PT_REGS_SET_SYSCALL_PARM1(x, v)                                                                                \
++    do {                                                                                                               \
++        __PT_REGS_CAST(x)->regs[0] = (v);                                                                              \
++        __PT_REGS_CAST(x)->orig_x0 = (v);                                                                              \
++    } while (0)
++#else
++#define PT_REGS_SET_SYSCALL_PARM1(x, v) (PT_REGS_NATIVE_SYSCALL_PARM1(x) = (v))
++#endif
++
+ #if defined(__aarch64__) && defined(CONFIG_COMPAT)
+ #include <linux/compat.h>
+ 
