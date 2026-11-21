@@ -1,0 +1,273 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] arm64: dts: qcom: sc8280xp-huawei-gaokun3: throttle on the
+ board thermistors
+
+Several of the PMIC thermistors on this board sit close to the SoC, and
+the Windows firmware throttles on four of them. Huawei's PEP driver
+configuration maps SYS_THERM1-4 to the ACPI thermal zones QCOM065D,
+QCOM065E, QCOM065F and QCOM0660. The DSDT shipped with the machine
+enables five passive zones on them. Linux throttles only at the 85 degC
+die trips. After 100 s of full GPU load, sys_therm1 reads 61 degC (the
+first Windows zone trips at 54 degC) and sys_therm7 reads 80 degC, while
+no cooling device has engaged.
+
+Describe the Windows zones with the DSDT's initial values:
+
+  sensor      passive  throttles     minimum performance (_MTL)
+  sys_therm1  54 degC  CPUs and GPU  60 %
+  sys_therm2  58 degC  CPUs and GPU  56 %
+  sys_therm3  58 degC  GPU           60 %
+  sys_therm3  65 degC  CPUs and GPU  none
+  sys_therm4  64 degC  CPUs and GPU  40 %
+
+Windows also dims the backlight in the last four zones. That is not
+mirrored here. Huawei's SSDT rewrites these trip temperatures at runtime,
+from an EC event and from its performance-mode WMI method; in
+performance mode, for example, sys_therm1-3 trip at 60/64/68 degC. The
+kernel keeps the boot defaults, and userspace can change the trip
+temperatures through sysfs.
+
+Each zone gets the 100 degC critical trip Windows uses (_CRT 99.85 degC).
+Windows never throttles below the _MTL share of full performance. Map
+that to the deepest cooling state whose frequency is still at or above
+that share of the maximum. On the 2.69 GHz part this gives:
+
+  - little cluster: 1555.2, 1440.0 or 1017.6 MHz
+  - big cluster: 1632.0, 1516.8 or 1171.2 MHz
+  - GPU: 500 or 410 MHz
+
+The big-cluster OPP table in sc8280xp.dtsi goes up to 2995.2 MHz. If a
+3.0 GHz part exposes those three extra states, the same caps give 66, 62
+and 51 % instead of 60, 56 and 40 %.
+
+The ACPI zones sample every 5 s, and every 20 s for the GPU-only zone.
+Poll every second instead while passive cooling is active. Under full
+GPU load, sys_therm1 still rises by about 0.2 degC/s when it crosses
+54 degC. The ADC-TM threshold interrupt reports the first crossing.
+
+No Windows zone on this machine uses sys_therm7. It rises with GPU load
+and drops by 20 degC within seconds of the load stopping, so it probably
+sits next to a power component. Add a backstop at 95 degC. The value is
+the passive trip of the reference design's zone on that thermistor; on
+this machine that zone is disabled.
+
+Drop skin-temp-thermal. It reads sys_therm6, which no Windows zone here
+uses, and its trips are the ThinkPad X13s values: 55/58 degC passive on
+the big cores and a 73 degC critical trip. It has never been registered
+because QCOM_SPMI_ADC_TM5 was a module that nothing loads. Enabling that
+driver would make the zone live, including its critical trip.
+
+With these zones, the same GPU load starts throttling after about 40 s.
+sys_therm1 then settles near 58 degC and sys_therm7 near 62 degC, and the
+GPU runs at 500 MHz with 80 % of its initial throughput.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ .../boot/dts/qcom/sc8280xp-huawei-gaokun3.dts | 168 ++++++++++++++++--
+ 1 file changed, 152 insertions(+), 16 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
+index 879ade4fe8..05839dbc3d 100644
+--- a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
++++ b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
+@@ -234,26 +234,96 @@ linux,cma {
+ 	};
+ 
+ 	thermal-zones {
+-		skin-temp-thermal {
+-			polling-delay-passive = <250>;
++		sys-therm1-thermal {
++			polling-delay-passive = <1000>;
+ 
+-			thermal-sensors = <&pmk8280_adc_tm 5>;
++			thermal-sensors = <&pmk8280_adc_tm 0>;
+ 
+ 			trips {
+-				skin_temp_alert0: trip-point0 {
+-					temperature = <55000>;
+-					hysteresis = <1000>;
++				sys_therm1_alert0: trip-point0 {
++					temperature = <54000>;
++					hysteresis = <2000>;
+ 					type = "passive";
+ 				};
+ 
+-				skin_temp_alert1: trip-point1 {
++				sys-therm1-crit {
++					temperature = <100000>;
++					hysteresis = <1000>;
++					type = "critical";
++				};
++			};
++
++			cooling-maps {
++				map0 {
++					trip = <&sys_therm1_alert0>;
++					cooling-device = <&cpu0 THERMAL_NO_LIMIT 8>,
++							 <&cpu1 THERMAL_NO_LIMIT 8>,
++							 <&cpu2 THERMAL_NO_LIMIT 8>,
++							 <&cpu3 THERMAL_NO_LIMIT 8>,
++							 <&cpu4 THERMAL_NO_LIMIT 10>,
++							 <&cpu5 THERMAL_NO_LIMIT 10>,
++							 <&cpu6 THERMAL_NO_LIMIT 10>,
++							 <&cpu7 THERMAL_NO_LIMIT 10>,
++							 <&gpu THERMAL_NO_LIMIT 5>;
++				};
++			};
++		};
++
++		sys-therm2-thermal {
++			polling-delay-passive = <1000>;
++
++			thermal-sensors = <&pmk8280_adc_tm 1>;
++
++			trips {
++				sys_therm2_alert0: trip-point0 {
+ 					temperature = <58000>;
++					hysteresis = <2000>;
++					type = "passive";
++				};
++
++				sys-therm2-crit {
++					temperature = <100000>;
+ 					hysteresis = <1000>;
++					type = "critical";
++				};
++			};
++
++			cooling-maps {
++				map0 {
++					trip = <&sys_therm2_alert0>;
++					cooling-device = <&cpu0 THERMAL_NO_LIMIT 9>,
++							 <&cpu1 THERMAL_NO_LIMIT 9>,
++							 <&cpu2 THERMAL_NO_LIMIT 9>,
++							 <&cpu3 THERMAL_NO_LIMIT 9>,
++							 <&cpu4 THERMAL_NO_LIMIT 11>,
++							 <&cpu5 THERMAL_NO_LIMIT 11>,
++							 <&cpu6 THERMAL_NO_LIMIT 11>,
++							 <&cpu7 THERMAL_NO_LIMIT 11>,
++							 <&gpu THERMAL_NO_LIMIT 6>;
++				};
++			};
++		};
++
++		sys-therm3-thermal {
++			polling-delay-passive = <1000>;
++
++			thermal-sensors = <&pmk8280_adc_tm 2>;
++
++			trips {
++				sys_therm3_alert0: trip-point0 {
++					temperature = <58000>;
++					hysteresis = <2000>;
+ 					type = "passive";
+ 				};
+ 
+-				skin-temp-crit {
+-					temperature = <73000>;
++				sys_therm3_alert1: trip-point1 {
++					temperature = <65000>;
++					hysteresis = <2000>;
++					type = "passive";
++				};
++
++				sys-therm3-crit {
++					temperature = <100000>;
+ 					hysteresis = <1000>;
+ 					type = "critical";
+ 				};
+@@ -261,19 +331,85 @@ skin-temp-crit {
+ 
+ 			cooling-maps {
+ 				map0 {
+-					trip = <&skin_temp_alert0>;
+-					cooling-device = <&cpu4 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++					trip = <&sys_therm3_alert0>;
++					cooling-device = <&gpu THERMAL_NO_LIMIT 5>;
++				};
++
++				map1 {
++					trip = <&sys_therm3_alert1>;
++					cooling-device = <&cpu0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++							 <&cpu1 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++							 <&cpu2 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++							 <&cpu3 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++							 <&cpu4 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+ 							 <&cpu5 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+ 							 <&cpu6 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+-							 <&cpu7 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
++							 <&cpu7 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++							 <&gpu THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+ 				};
++			};
++		};
+ 
+-				map1 {
+-					trip = <&skin_temp_alert1>;
+-					cooling-device = <&cpu4 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++		sys-therm4-thermal {
++			polling-delay-passive = <1000>;
++
++			thermal-sensors = <&pmk8280_adc_tm 3>;
++
++			trips {
++				sys_therm4_alert0: trip-point0 {
++					temperature = <64000>;
++					hysteresis = <2000>;
++					type = "passive";
++				};
++
++				sys-therm4-crit {
++					temperature = <100000>;
++					hysteresis = <1000>;
++					type = "critical";
++				};
++			};
++
++			cooling-maps {
++				map0 {
++					trip = <&sys_therm4_alert0>;
++					cooling-device = <&cpu0 THERMAL_NO_LIMIT 13>,
++							 <&cpu1 THERMAL_NO_LIMIT 13>,
++							 <&cpu2 THERMAL_NO_LIMIT 13>,
++							 <&cpu3 THERMAL_NO_LIMIT 13>,
++							 <&cpu4 THERMAL_NO_LIMIT 14>,
++							 <&cpu5 THERMAL_NO_LIMIT 14>,
++							 <&cpu6 THERMAL_NO_LIMIT 14>,
++							 <&cpu7 THERMAL_NO_LIMIT 14>,
++							 <&gpu THERMAL_NO_LIMIT 6>;
++				};
++			};
++		};
++
++		sys-therm7-thermal {
++			polling-delay-passive = <1000>;
++
++			thermal-sensors = <&pmk8280_adc_tm 6>;
++
++			trips {
++				sys_therm7_alert0: trip-point0 {
++					temperature = <95000>;
++					hysteresis = <2000>;
++					type = "passive";
++				};
++			};
++
++			cooling-maps {
++				map0 {
++					trip = <&sys_therm7_alert0>;
++					cooling-device = <&cpu0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++							 <&cpu1 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++							 <&cpu2 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++							 <&cpu3 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++							 <&cpu4 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+ 							 <&cpu5 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+ 							 <&cpu6 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+-							 <&cpu7 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
++							 <&cpu7 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
++							 <&gpu THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+ 				};
+ 			};
+ 		};
