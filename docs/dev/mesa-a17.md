@@ -39,7 +39,7 @@ m vulkan.freedreno
 | 1 | 检查`VERSION`为`26.1.*`且`python3 >= 3.11`（需标准库`tomllib`） | [`scripts/mesa-a17/regen.sh`](../../scripts/mesa-a17/regen.sh) |
 | 2 | 按固定SHA浅克隆生成器至`~/.cache/gaokun-mesa/mesonbuild-<SHA>`（或由`--generator`指定本地路径） | 同上 |
 | 3 | 校验根`Android.bp`末尾的`gfxstream`手写兼容块与存档副本逐字一致，生成后原样贴回 | [`device/huawei/gaokun3/mesa/hermetic/android/gfxstream_workaround.txt`](../../device/huawei/gaokun3/mesa/hermetic/android/gfxstream_workaround.txt) |
-| 4 | 幂等应用源码补丁：[`patches/mesa/0001..0015`](../../patches/mesa/)（含ANB延迟绑定、P010支持、上游11个backport提交、A6xx抢占与微信的信号量规避） | [`patches/mesa/`](../../patches/mesa/) |
+| 4 | 幂等应用源码补丁：[`patches/mesa/0001..0016`](../../patches/mesa/)（含ANB延迟绑定、P010支持、上游12个backport提交、A6xx抢占与微信的信号量规避） | [`patches/mesa/`](../../patches/mesa/) |
 | 5 | 清理带`The Magma GPU Project`头部的旧生成文件，执行`meson convert` | [`device/huawei/gaokun3/mesa/hermetic/android/`](../../device/huawei/gaokun3/mesa/hermetic/android/aosp_mesa3d.toml) |
 | 6 | 后处理：为`vulkan.freedreno`补齐`compile_multilib: "64"` | [`scripts/mesa-a17/postprocess.py`](../../scripts/mesa-a17/postprocess.py) |
 | 7 | 运行`bpfmt -l`检查语法，运行`check-output.py`验证模块闭合性与编译参数 | [`scripts/mesa-a17/check-output.py`](../../scripts/mesa-a17/check-output.py) |
@@ -63,6 +63,7 @@ m vulkan.freedreno
 | `patches/mesa/0013` | 本仓 | msm上的A6xx队列也声明`MSM_SUBMITQUEUE_ALLOW_PREEMPT`；内核有多个ring时声明REALTIME队列优先级 |
 | `patches/mesa/0014` | 本仓 | 新增driconf选项`vk_drop_unsignaled_binary_waits`，只对微信打开：丢弃对没有signal的二值信号量的等待，避免微信的Impeller重复等待acquire信号量时卡死在`vkQueueSubmit`（详见[`gpu-turnip.md`](gpu-turnip.md)） |
 | `patches/mesa/0015`（`4df9d03`） | 上游MR !41661 | GLSL.std.450的`FMin`、`FMax`和`FClamp`总是保留无穷大，避免NIR删去依赖无穷大的clamp；修正《无限暖暖》（虚幻引擎5）的移动端色调映射输出全黑。基线包含该提交（26.1分支为26.1.1及以后）时删除（详见[`gpu-turnip.md`](gpu-turnip.md)） |
+| `patches/mesa/0016`（`3a815a5`） | 上游MR !41953 | `nir_atan2()`在零输入时会由`frcp(0.0)`产生中间的无穷大，降级时保留无穷大与有符号零，使中间的无穷大及其符号不受“无Inf”假设的影响。基线包含该提交（26.1分支为26.1.3及以后）时删除（详见[`gpu-turnip.md`](gpu-turnip.md)） |
 
 ## 4. 构建与实机验证要点
 
