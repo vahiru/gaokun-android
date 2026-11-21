@@ -1,0 +1,366 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] WM: respect landscape requests on a naturally landscape
+ display
+
+A large screen ignores fixed-orientation requests by default
+(DisplayContent.getIgnoreOrientationRequest()): the display follows the
+sensor or the user's rotation lock, and an app whose request does not
+match is letterboxed. On a tablet used mostly in landscape this keeps
+portrait-only phone apps from turning the display to portrait, but it
+also letterboxes landscape-only apps, most games, whenever the display
+is in portrait when they start: the app is shown as a landscape strip
+at the top of the display until the user turns the tablet.
+
+On a display whose natural orientation is landscape, respect requests
+for landscape (landscape, sensorLandscape, reverseLandscape and
+userLandscape) in DisplayArea.shouldIgnoreOrientationRequest(). Other
+requests are still ignored unless exempted per app, so portrait-only
+apps stay letterboxed in landscape. A landscape-only app turns the
+display to landscape, as it does where orientation requests are not
+ignored. Tasks that cannot specify an orientation (multi-window, split
+screen) are unaffected, and the per-app aspect ratio settings and the
+other app-compat treatments still see ignoreOrientationRequest enabled.
+As on displays that do not ignore requests, a window that sets a
+landscape screenOrientation in its layout params is respected too.
+
+"landscape" and "reverseLandscape" each give one fixed rotation
+(DisplayRotation.rotationForOrientation()), so a tablet held the other
+way round would be turned over; players that pick between the two from
+their own sensor listener would turn it back and forth. Rotate for
+"userLandscape" instead wherever the display computes a rotation from
+them (the display orientation, the fixed rotation of a launching or a
+non-top visible activity, the snapshot check of a trampoline): the
+sensor or the rotation lock chooses between both landscape rotations,
+as they do while the display is in landscape and the request is
+ignored. The requests themselves are not changed, so apps still read
+back what they asked for.
+
+A translucent or floating activity whose request is ignored, such as a
+portrait login dialog over a landscape game, now takes its orientation
+from the activities behind it, as if it requested "behind", also where
+the display looks for a top activity that follows the one behind and
+where it applies a fixed rotation to non-top visible activities.
+Otherwise its request ends the search, the display follows the sensor
+or the rotation lock to portrait, and the game behind it is laid out in
+portrait: its own request is respected, so it is not letterboxed, and
+as the display has no orientation source no fixed rotation is applied
+to it. Not while the keyguard is locked, where the activities behind
+may be hidden.
+
+Conversely, a translucent activity that requests landscape is now an
+orientation source. A letterboxed activity behind it whose request is
+ignored no longer gets a fixed rotation for that request, which would
+draw it sideways and lay it out again; an activity that is not
+letterboxed, typically one that filled the portrait display now rotating
+for the top, still keeps its appearance through the transform.
+
+Activity Embedding: TaskFragments shown side by side report
+"unspecified", so the display follows the sensor. A split that is shown
+only in landscape is stacked in portrait, where its containers fill the
+task and the task takes the orientation of the first one, from the top,
+whose activities report one. A landscape request from it now rotates the
+display to landscape, which shows the split side by side; the display
+would then follow the sensor back to portrait, stack the split, and
+start over. While the display is in landscape, embedded TaskFragments
+shown side by side report "userLandscape" instead when a walk over them
+from the top, as the task walks them stacked (skipping those that report
+nothing or "behind"), first meets a landscape request, and make the
+requesting activity the orientation source, so that a rotation lock does
+not take it for a system request. Requests below an opaque container are
+covered when the split is stacked, so they do not keep the display in
+landscape. A placeholder that is finished in portrait uncovers its
+primary; WM Jetpack launches no placeholder beside a primary whose
+container requests landscape and dismisses one already shown ("WM
+Jetpack: parallel view from the app's EasyGo rules"). The root tasks of
+split screen are adjacent too and keep reporting "unspecified".
+
+Opening Overview from a landscape app while the sensor or the rotation
+lock says portrait puts the display rotation into the transition that
+starts recents; this needs "WM Shell: cancel recents when its starting
+transition rotates the display", without which only the wallpaper stays
+on screen.
+
+Seen on a 2560x1600 tablet: a game requesting "landscape", started
+with the tablet held in portrait, was shown 1600x1000 at the top of the
+portrait display.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ .../com/android/server/wm/ActivityRecord.java | 29 +++++++-
+ .../com/android/server/wm/DisplayArea.java    | 10 +++
+ .../com/android/server/wm/DisplayContent.java | 49 +++++++++++--
+ .../com/android/server/wm/TaskFragment.java   | 69 +++++++++++++++++++
+ 4 files changed, 150 insertions(+), 7 deletions(-)
+
+diff --git a/services/core/java/com/android/server/wm/ActivityRecord.java b/services/core/java/com/android/server/wm/ActivityRecord.java
+index 25bb429..65bc389 100644
+--- a/services/core/java/com/android/server/wm/ActivityRecord.java
++++ b/services/core/java/com/android/server/wm/ActivityRecord.java
+@@ -2446,7 +2446,7 @@ final class ActivityRecord extends WindowToken {
+                 if (topAttached.isSnapshotCompatible(snapshot)
+                         // This trampoline must be the same rotation.
+                         && mDisplayContent.getDisplayRotation().rotationForOrientation(
+-                                getOverrideOrientation(),
++                                mDisplayContent.toRespectedLandscape(getOverrideOrientation()),
+                                 mDisplayContent.getRotation()) == snapshot.getRotation()) {
+                     return STARTING_WINDOW_TYPE_SNAPSHOT;
+                 }
+@@ -7535,6 +7535,10 @@ final class ActivityRecord extends WindowToken {
+             return SCREEN_ORIENTATION_UNSET;
+         }
+ 
++        if (isVisibleRequested() && defersIgnoredOrientationRequest()) {
++            return SCREEN_ORIENTATION_BEHIND;
++        }
++
+         if (candidate == SCREEN_ORIENTATION_BEHIND) {
+             // Allow app to specify orientation regardless of its visibility state if the current
+             // candidate want us to use orientation behind. I.e. the visible app on-top of this one
+@@ -7552,6 +7556,29 @@ final class ActivityRecord extends WindowToken {
+         return SCREEN_ORIENTATION_UNSET;
+     }
+ 
++    /**
++     * Whether this translucent or floating activity takes its orientation from the activities
++     * behind it, as if it requested "behind", because the display ignores its request, on a
++     * display that {@link DisplayContent#respectsLandscapeRequests}. E.g. a portrait dialog over a
++     * landscape game: otherwise its request would end the search, the display would follow the
++     * sensor or the rotation lock to portrait, and the game would be laid out in portrait, as its
++     * own landscape request is respected, so it is not letterboxed, and no fixed rotation is
++     * applied to it while the display has no orientation source. Not while the keyguard is
++     * locked, where activities behind may be hidden.
++     */
++    boolean defersIgnoredOrientationRequest() {
++        if (fillsParent() || mDisplayContent == null
++                || !mDisplayContent.respectsLandscapeRequests()
++                || mDisplayContent.isKeyguardLocked()) {
++            return false;
++        }
++        final int orientation = getOverrideOrientation();
++        return orientation != SCREEN_ORIENTATION_UNSET
++                && orientation != ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
++                && orientation != SCREEN_ORIENTATION_BEHIND
++                && mDisplayContent.shouldIgnoreOrientationRequest(orientation);
++    }
++
+     /**
+      * Returns the app's preferred orientation regardless of its current visibility state taking
+      * into account orientation per-app overrides applied by the device manufacturers.
+diff --git a/services/core/java/com/android/server/wm/DisplayArea.java b/services/core/java/com/android/server/wm/DisplayArea.java
+index 598b577..a43f888 100644
+--- a/services/core/java/com/android/server/wm/DisplayArea.java
++++ b/services/core/java/com/android/server/wm/DisplayArea.java
+@@ -257,6 +257,16 @@ public class DisplayArea<T extends WindowContainer> extends WindowContainer<T> {
+                 // The behavior of non-fixed orientation is the same as ignoring.
+                 return true;
+             }
++            if (ActivityInfo.isFixedOrientationLandscape(orientation) && mDisplayContent != null
++                    && mDisplayContent.getNaturalOrientation()
++                            == Configuration.ORIENTATION_LANDSCAPE) {
++                // On a display whose natural orientation is landscape, respect landscape
++                // requests, so that a landscape-only app (most games) fills the display instead
++                // of being letterboxed when it starts while the display is in portrait. Other
++                // requests are still ignored unless exempted per app: portrait-only apps stay
++                // letterboxed in landscape. See DisplayContent#respectsLandscapeRequests().
++                return false;
++            }
+             return !shouldRespectOrientationRequestDueToPerAppOverride();
+         }
+         return false;
+diff --git a/services/core/java/com/android/server/wm/DisplayContent.java b/services/core/java/com/android/server/wm/DisplayContent.java
+index 1e5d898..0b575be 100644
+--- a/services/core/java/com/android/server/wm/DisplayContent.java
++++ b/services/core/java/com/android/server/wm/DisplayContent.java
+@@ -30,6 +30,7 @@ import static android.app.WindowConfiguration.WINDOWING_MODE_UNDEFINED;
+ import static android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE;
+ import static android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSET;
+ import static android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED;
++import static android.content.pm.ActivityInfo.SCREEN_ORIENTATION_USER_LANDSCAPE;
+ import static android.content.res.Configuration.ORIENTATION_LANDSCAPE;
+ import static android.content.res.Configuration.ORIENTATION_PORTRAIT;
+ import static android.content.res.Configuration.ORIENTATION_UNDEFINED;
+@@ -2131,7 +2132,8 @@ class DisplayContent extends RootDisplayArea implements WindowManagerPolicy.Disp
+         if (top != null) {
+             final int orientation = top.getRequestedOrientation();
+             if ((orientation == SCREEN_ORIENTATION_UNSPECIFIED && !top.providesOrientation())
+-                    || (orientation == ActivityInfo.SCREEN_ORIENTATION_BEHIND)) {
++                    || (orientation == ActivityInfo.SCREEN_ORIENTATION_BEHIND)
++                    || top.defersIgnoredOrientationRequest()) {
+                 return top;
+             }
+         }
+@@ -2217,7 +2219,8 @@ class DisplayContent extends RootDisplayArea implements WindowManagerPolicy.Disp
+     private void applyFixedRotationForNonTopVisibleActivityIfNeeded(@NonNull ActivityRecord ar,
+             @ActivityInfo.ScreenOrientation int topOrientation) {
+         int orientation = ar.getRequestedOrientation();
+-        if (orientation == ActivityInfo.SCREEN_ORIENTATION_BEHIND) {
++        if (orientation == ActivityInfo.SCREEN_ORIENTATION_BEHIND
++                || ar.defersIgnoredOrientationRequest()) {
+             final ActivityRecord nextCandidate = getActivityBelowForDefiningOrientation(ar);
+             if (nextCandidate != null) {
+                 orientation = nextCandidate.getRequestedOrientation();
+@@ -2231,13 +2234,23 @@ class DisplayContent extends RootDisplayArea implements WindowManagerPolicy.Disp
+             }
+             return;
+         }
++        if (respectsLandscapeRequests() && shouldIgnoreOrientationRequest(orientation)
++                && ar.areBoundsLetterboxed()) {
++            // A landscape top is respected here. An activity behind it whose request is ignored
++            // and that is already letterboxed (in landscape, or for an aspect ratio) stays
++            // letterboxed rather than being drawn in its own rotation and relaid out. One that is
++            // not, typically one that filled the portrait display now rotating for the top,
++            // keeps its appearance through the transform, as elsewhere.
++            return;
++        }
+         if (ar.inMultiWindowMode()
+                 || ar.getTask().inMultiWindowMode()
+                 || ar.getRequestedConfigurationOrientation() == ORIENTATION_UNDEFINED) {
+             return;
+         }
+         final int displayRotation = getRotation();
+-        final int rotation = mDisplayRotation.rotationForOrientation(orientation, displayRotation);
++        final int rotation = mDisplayRotation.rotationForOrientation(
++                toRespectedLandscape(orientation), displayRotation);
+         final DisplayFrames rotatedFrames = ar.getFixedRotationTransformDisplayFrames();
+         if (rotation == displayRotation && (rotatedFrames == null || (rotatedFrames.mWidth
+                 == mDisplayFrames.mWidth && rotatedFrames.mHeight == mDisplayFrames.mHeight))) {
+@@ -2289,8 +2302,8 @@ class DisplayContent extends RootDisplayArea implements WindowManagerPolicy.Disp
+             return ROTATION_UNDEFINED;
+         }
+         final int currentRotation = getRotation();
+-        final int rotation = mDisplayRotation.rotationForOrientation(activityOrientation,
+-                currentRotation);
++        final int rotation = mDisplayRotation.rotationForOrientation(
++                toRespectedLandscape(activityOrientation), currentRotation);
+         if (rotation == currentRotation) {
+             return ROTATION_UNDEFINED;
+         }
+@@ -3350,7 +3363,31 @@ class DisplayContent extends RootDisplayArea implements WindowManagerPolicy.Disp
+             return SCREEN_ORIENTATION_UNSPECIFIED;
+         }
+ 
+-        return orientation;
++        return toRespectedLandscape(orientation);
++    }
++
++    /**
++     * Whether this display respects landscape requests although it ignores orientation requests:
++     * it ignores them (large screens by default) and its natural orientation is landscape (see
++     * DisplayArea#shouldIgnoreOrientationRequest()).
++     */
++    boolean respectsLandscapeRequests() {
++        return getIgnoreOrientationRequest()
++                && getNaturalOrientation() == ORIENTATION_LANDSCAPE;
++    }
++
++    /**
++     * On a display that {@link #respectsLandscapeRequests}, returns "userLandscape" for
++     * "landscape" and "reverseLandscape". These are respected to keep the display in landscape,
++     * but each gives one fixed rotation, so a tablet held the other way would be turned over;
++     * with "userLandscape" the sensor or the rotation lock chooses between both landscape
++     * rotations, as they do while the display is in landscape and the request is ignored.
++     */
++    @ScreenOrientation
++    int toRespectedLandscape(@ScreenOrientation int orientation) {
++        return (orientation == SCREEN_ORIENTATION_LANDSCAPE
++                        || orientation == ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE)
++                && respectsLandscapeRequests() ? SCREEN_ORIENTATION_USER_LANDSCAPE : orientation;
+     }
+ 
+     void updateDisplayInfo(@NonNull DisplayInfo newDisplayInfo) {
+diff --git a/services/core/java/com/android/server/wm/TaskFragment.java b/services/core/java/com/android/server/wm/TaskFragment.java
+index 4444b8e..530e599 100644
+--- a/services/core/java/com/android/server/wm/TaskFragment.java
++++ b/services/core/java/com/android/server/wm/TaskFragment.java
+@@ -33,6 +33,7 @@ import static android.content.pm.ActivityInfo.FLAG_ALLOW_UNTRUSTED_ACTIVITY_EMBE
+ import static android.content.pm.ActivityInfo.FLAG_RESUME_WHILE_PAUSING;
+ import static android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSET;
+ import static android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED;
++import static android.content.pm.ActivityInfo.SCREEN_ORIENTATION_USER_LANDSCAPE;
+ import static android.content.res.Configuration.ORIENTATION_LANDSCAPE;
+ import static android.content.res.Configuration.ORIENTATION_PORTRAIT;
+ import static android.content.res.Configuration.ORIENTATION_UNDEFINED;
+@@ -2029,6 +2030,9 @@ class TaskFragment extends WindowContainer<WindowContainer> {
+     @Override
+     int getOrientation(@ActivityInfo.ScreenOrientation int candidate) {
+         if (shouldReportOrientationUnspecified()) {
++            if (shouldKeepDisplayInLandscape()) {
++                return SCREEN_ORIENTATION_USER_LANDSCAPE;
++            }
+             return SCREEN_ORIENTATION_UNSPECIFIED;
+         }
+         if (canSpecifyOrientation()) {
+@@ -2073,6 +2077,71 @@ class TaskFragment extends WindowContainer<WindowContainer> {
+         return super.providesOrientation() || shouldReportOrientationUnspecified();
+     }
+ 
++    /**
++     * Whether this embedded TaskFragment, shown side by side with adjacent TaskFragments, keeps the
++     * display in landscape, on a display that {@link DisplayContent#respectsLandscapeRequests}:
++     * when the TaskFragments of the group, from the top, find a landscape request first, as the
++     * task would find it with them stacked. Sets {@link #mLastOrientationSource} towards the
++     * requesting activity, which rotation code uses to tell an app request apart (e.g. against a
++     * rotation lock).
++     *
++     * <p>A split may be shown only in landscape and be stacked in portrait, where its containers
++     * fill the task and report the orientation of their activities. Reporting unspecified side by
++     * side would let the display follow the sensor back to portrait, which stacks the split, whose
++     * landscape request then rotates the display to landscape again. A request below an opaque
++     * container (whose activities report an orientation, unspecified included) is covered when
++     * the split is stacked, so it does not keep the display in landscape. Only kept, not entered:
++     * the display must already be in landscape.
++     *
++     * <p>Only for Activity Embedding: the root tasks of split screen are adjacent as well, and the
++     * apps in them do not decide the display orientation.
++     */
++    private boolean shouldKeepDisplayInLandscape() {
++        if (!isEmbedded()) {
++            return false;
++        }
++        mLastOrientationSource = null;
++        final DisplayContent dc = getDisplayContent();
++        if (dc == null || getParent() == null || !dc.respectsLandscapeRequests()
++                || dc.getConfiguration().orientation != ORIENTATION_LANDSCAPE) {
++            return false;
++        }
++        final ArrayList<TaskFragment> group = new ArrayList<>();
++        group.add(this);
++        forOtherAdjacentTaskFragments(tf -> {
++            group.add(tf);
++        });
++        final ArrayList<WindowContainer> siblings = getParent().mChildren;
++        group.sort((a, b) -> Integer.compare(siblings.indexOf(b), siblings.indexOf(a)));
++        for (int i = 0; i < group.size(); i++) {
++            final TaskFragment tf = group.get(i);
++            final int orientation = tf.getActivitiesOrientation();
++            if (orientation == SCREEN_ORIENTATION_UNSET
++                    || orientation == ActivityInfo.SCREEN_ORIENTATION_BEHIND) {
++                continue;
++            }
++            if (!ActivityInfo.isFixedOrientationLandscape(orientation)) {
++                break;
++            }
++            if (tf != this) {
++                mLastOrientationSource = tf;
++            }
++            return true;
++        }
++        mLastOrientationSource = null;
++        return false;
++    }
++
++    /**
++     * The orientation that the activities of this TaskFragment request, as it reports it when it
++     * is not shown side by side. Like {@link #getOrientation}, updates
++     * {@link #mLastOrientationSource}.
++     */
++    @ActivityInfo.ScreenOrientation
++    private int getActivitiesOrientation() {
++        return super.getOrientation(SCREEN_ORIENTATION_UNSET);
++    }
++
+     private boolean shouldReportOrientationUnspecified() {
+         // Apps and their containers are not allowed to specify orientation from adjacent
+         // TaskFragment.
