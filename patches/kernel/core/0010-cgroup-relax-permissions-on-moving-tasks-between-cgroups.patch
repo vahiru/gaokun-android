@@ -1,0 +1,52 @@
+From: Dmitry Torokhov <dtor@chromium.org>
+Subject: [PATCH] cgroup: relax permissions on moving tasks between cgroups
+
+Android expects system_server to be able to move tasks between different
+cgroups/cpusets, but does not want to be running as root. Let's relax
+permission check so that processes can move other tasks if they have
+CAP_SYS_NICE in the affected task's user namespace.
+
+BUG=b:31790445,chromium:647994
+Bug: 147109865
+TEST=Boot android container, examine logcat
+
+Signed-off-by: Dmitry Torokhov <dtor@chromium.org>
+Reviewed-on: https://chromium-review.googlesource.com/394927
+Reviewed-by: Ricky Zhou <rickyz@chromium.org>
+[AmitP: Refactored original changes to align with upstream commit
+        201af4c0fab0 ("cgroup: move cgroup files under kernel/cgroup/")]
+Change-Id: Ia919c66ab6ed6a6daf7c4cf67feb38b13b1ad09b
+Signed-off-by: Amit Pundir <amit.pundir@linaro.org>
+(cherry picked from commit ec54762b84a1d06de188bc846655305d3f7acf75)
+[Akisaira: code unchanged from ACK android-mainline, where the subject is
+ "CHROMIUM: cgroups: relax permissions on moving tasks between cgroups".
+ Without it, every libprocessgroup move that system_server (uid 1000 with
+ CAP_SYS_NICE) makes for a process that does not run as uid 1000 fails
+ with EACCES in the cpuset, cpu and blkio v1 hierarchies. That covers
+ every app with its own uid (>= 10000) and system uids such as shell
+ (2000). Those processes then stay in the groups they were given at
+ process start: cached apps are never confined to the background cpuset,
+ and an app brought to the front never joins the top-app cpuset and cpu
+ groups.]
+Signed-off-by: Akisaira <akisaira@outlook.com>
+Assisted-by: Claude:claude-opus-5-5
+Origin: backport, https://android-review.googlesource.com/c/kernel/common/+/1201963 (android-mainline a88f61676008)
+Upstream-Status: Inappropriate [Android-specific, carried in ACK android-mainline]
+---
+ kernel/cgroup/cgroup-v1.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/kernel/cgroup/cgroup-v1.c b/kernel/cgroup/cgroup-v1.c
+index a4337c9b52..4e25b740d1 100644
+--- a/kernel/cgroup/cgroup-v1.c
++++ b/kernel/cgroup/cgroup-v1.c
+@@ -523,7 +523,8 @@ static ssize_t __cgroup1_procs_write(struct kernfs_open_file *of,
+ 	tcred = get_task_cred(task);
+ 	if (!uid_eq(cred->euid, GLOBAL_ROOT_UID) &&
+ 	    !uid_eq(cred->euid, tcred->uid) &&
+-	    !uid_eq(cred->euid, tcred->suid))
++	    !uid_eq(cred->euid, tcred->suid) &&
++	    !ns_capable(tcred->user_ns, CAP_SYS_NICE))
+ 		ret = -EACCES;
+ 	put_cred(tcred);
+ 	if (ret)

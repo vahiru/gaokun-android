@@ -39,6 +39,7 @@ KPATCHES=(
     # ─── 1. kernel/core：核心内核、Android 基础支撑（ashmem / xt_quota2 / bpffs / SELinux）、架构与通用子系统 ───
     # 0006 引入 CONFIG_ARM64_USER_MMAP_WINDOW_39（kernel-config-android.sh 开启并断言）；
     # 0008 与 crdroid-tree-fixes.py [36][37] 配套。
+    # 0010取自ACK：system_server（uid 1000，持有CAP_SYS_NICE）须能迁移不以uid 1000运行的进程（各应用及shell等系统uid），涉及cpuset/cpu/blkio的v1分组。
     kernel/core/0001-efi-pstore-register-backend-when-efivars-ops-arrive-.patch
     kernel/core/0002-bpf-inode-label-bpffs-lazily-for-android-genfscon.patch
     kernel/core/0003-remoteproc-qcom-ratelimit-repeat-handover-error.patch
@@ -48,6 +49,7 @@ KPATCHES=(
     kernel/core/0007-selinux-netlink-route-remap-getlink-getneigh-priv-perms.patch
     kernel/core/0008-kernel-report-a-set-release-to-android-apps.patch
     kernel/core/0009-misc-fastrpc-fix-context-leak-and-hang-on-signal-interrupted-invoke.patch
+    kernel/core/0010-cgroup-relax-permissions-on-moving-tasks-between-cgroups.patch
 
     # ─── 1b. kernel/iommu：arm-smmu-qcom（SC8280XP的CP非像素上下文，供iris硬件编码）───
     # 只改arm-smmu-qcom.c并新增include/linux/qcom_iommu_cp_nonpixel.h，与其它子系统正交。
