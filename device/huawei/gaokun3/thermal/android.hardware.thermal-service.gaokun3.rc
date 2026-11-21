@@ -1,6 +1,17 @@
-# 温控 HAL。跑 system:system —— 它只读 /sys/class/thermal，不写任何东西
-# （cooling device 的调节归内核 thermal core，用户态再插手就是打架，见 M7/M8）。
+# 温控HAL，以system:system运行。它读取/sys/class/thermal，并按性能模式与电源状态改写板载热敏电阻
+# 温区的降频点（trip_point_*_temp，ueventd.gaokun3.rc把它们交给system组）。降频本身（cooling device
+# 的状态）仍由内核thermal core控制，HAL不改动。
 service vendor.thermal-gaokun3 /vendor/bin/hw/android.hardware.thermal-service.gaokun3
     class hal
     user system
     group system
+
+# 「设置 → 电池」里的性能模式开关（parts/…/PerformanceModeProvider.java）写persist.sys.gaokun3.perf_mode。
+# Parts是system_app，不能设置vendor属性，HAL又无法读取system_prop，所以按字面值转成非持久的
+# vendor.gaokun3.perf_mode；开机加载持久属性时这些触发器会再执行一次。认不出的值不转：开机后HAL按
+# 关闭处理，运行中则保持上一个值。
+on property:persist.sys.gaokun3.perf_mode=performance
+    setprop vendor.gaokun3.perf_mode performance
+
+on property:persist.sys.gaokun3.perf_mode=balanced
+    setprop vendor.gaokun3.perf_mode balanced
