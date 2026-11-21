@@ -18,7 +18,8 @@
 #      （生成器原样把这个文件贴回去；上游改了它而我们没跟，会悄悄回退上游的改动）
 #   4. 打源码补丁（幂等）：patches/mesa/*.patch（0001 turnip ANB 延迟绑定 v3、0002 turnip P010，
 #      0003..0011 上游 mesa 的 9 个构建与依赖 backport 提交，0012 上游 turnip VSC 修正，
-#      0013 turnip A6xx 抢占与 REALTIME 优先级，0014 只对微信丢弃没有 signal 的二值信号量等待；
+#      0013 turnip A6xx 抢占与 REALTIME 优先级，0014 只对微信丢弃没有 signal 的二值信号量等待，
+#      0015 上游 SPIR-V 修正：FMin/FMax/FClamp 总是保留无穷大；
 #      0012 必须与 kernel/drm/0016 同时发布）。
 #   5. 删掉旧的生成 Android.bp（文件头带 "The Magma GPU Project" 的那些），重新生成
 #   6. postprocess.py：vulkan.freedreno 补 compile_multilib: "64"

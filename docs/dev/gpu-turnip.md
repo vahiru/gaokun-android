@@ -159,3 +159,14 @@ GPU的每档OPP在`opp-peak-kBps`中声明对DDR（`ebi`）的峰值带宽投票
 
 - 微信进程的logcat中出现上面的警告，说明选项已生效，并且发生了丢弃。
 - 其他应用出现同样的卡死时，ANR记录中光栅线程停在`vk_queue_submit_move_binary_waits_to_temps()` → `drmSyncobjTimelineWait`。确认是同类问题后，可以在`00-mesa-defaults.conf`中为它添加同样的条目。
+
+## 八、FMin、FMax与FClamp保留无穷大（`mesa/0015`）
+
+《无限暖暖》所用的虚幻引擎5移动端色调映射在计算抖动噪声的符号时使用`clamp(x * +Inf, -1, 1)`，`+Inf`在DXC生成的SPIR-V中是一个`OpConstant`（`0x7f800000`），而模块没有声明`SignedZeroInfNanPreserve`。按Vulkan规范，这种情况下实现可以假设浮点运算的操作数和结果都不是Inf或NaN。ROM所用的Mesa快照已包含MR !40291（`nir/search_helpers: assume float sources without preserve flag can't be inf/nan`），按取值范围匹配的代数优化因此使用这一假设：`x * +Inf`只可能是±Inf或NaN，在该假设下既算作“非负”也算作“非正”，`nir_opt_algebraic`把`fmax`和`fmin`都换成`fcanonicalize`，clamp被删去。噪声随之变为`-Inf * s + Inf = NaN`，并被加到全部颜色通道上，UNORM渲染目标把NaN存为0。其结果是《无限暖暖》（[issue #33](https://github.com/vahiru/gaokun-android/issues/33)）进入大世界后实时3D画面全黑，而之后绘制的UI正常。
+
+上游MR !41661（`4df9d03`，已回移到26.1分支）让GLSL.std.450的`FMin`、`FMax`和`FClamp`生成的`fmin`、`fmax`总是带有`nir_fp_preserve_inf`，上述规则不再匹配，clamp得以保留；上游的说明指出Unity和虚幻引擎都依赖这一行为。`mesa/0015`是该提交的原样回移，基线升级到包含该提交的版本（26.1分支为26.1.1及以后）时删除。
+
+排查：
+
+- 全屏后处理在lavapipe等驱动上正常、在Turnip上输出为0或NaN时，先用`spirv-dis`检查其SPIR-V中是否有Inf或NaN常量，以及是否声明了`SignedZeroInfNanPreserve`。
+- Turnip的反汇编（`IR3_SHADER_DEBUG=disasm`，Android上对应属性`debug.mesa.ir3.shader.debug`，输出到logcat）只在着色器重新编译时输出，命中磁盘缓存或管线缓存时不输出，且该属性在每个进程中只读取一次。Inf常量位于常量寄存器中，可在反汇编开头的立即数表里找到`0x7f800000`及其所在的寄存器（如`c13.w`），再检查与它相乘之后是否有对应的`max.f`和`min.f`。

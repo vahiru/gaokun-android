@@ -34,7 +34,7 @@
 - **插电脑时平板反过来供电**（[issue #103](https://github.com/vahiru/gaokun-android/issues/103)）：对方不支持USB PD时偶尔发生，目前只会弹通知提示重插。自动重新协商尚未实现。
 - **音频与蓝牙在长时间运行后一起卡死**（[issue #104](https://github.com/vahiru/gaokun-android/issues/104)）：有用户报告，从未复现。看门狗会把现场记录到`/data/vendor/gaokun3/hangdump-*`，请遇到的人提供。
 - **休眠期间大流量下载可能断网**（[issue #105](https://github.com/vahiru/gaokun-android/issues/105)）：息屏休眠期间若后台有持续大带宽下载，有较大概率被路由器踢下线，点亮屏幕后自动重连恢复。
-- **无限暖暖的联网闪退与约280秒后的退出**（[issue #33](https://github.com/vahiru/gaokun-android/issues/33)）：启动即退出的原因是虚幻引擎无法从GL_VERSION读取高通驱动版本、改用了GLES，现由"GPU驱动兼容"设置处理（见[`dev/gaming.md`](dev/gaming.md)），该设置尚未经实测。报告者使用修改过的安装包时，登录前有与网络连接有关的闪退，登录后约280秒退出；原版安装包停留在登录界面时没有出现前者，后者尚未经实测。
+- **无限暖暖的联网闪退、约280秒后的退出与3D画面全黑**（[issue #33](https://github.com/vahiru/gaokun-android/issues/33)）：启动即退出的原因是虚幻引擎无法从GL_VERSION读取高通驱动版本、改用了GLES，现由"GPU驱动兼容"设置处理（见[`dev/gaming.md`](dev/gaming.md)），该设置尚未经实测。报告者使用修改过的安装包时，登录前有与网络连接有关的闪退，登录后约280秒退出；原版安装包停留在登录界面时没有出现前者，后者尚未经实测。使用Vulkan时进入大世界后实时3D画面全黑，原因是色调映射着色器依赖Inf的clamp被删去（见[`dev/gpu-turnip.md`](dev/gpu-turnip.md)），由`patches/mesa/0015`（上游修正的回移）修正，修正后的效果尚未在游戏中实测。
 - **部分网站里后摄红蓝颠倒或无法打开**：需要网站名称和复现时的日志。
 - **部分机器的后摄模组不受支持**：后摄有OV13B10与S5K3L6两种模组，本项目只支持OV13B10；S5K3L6尚无可用的驱动，尚未收到报告。前摄的两种模组（HI846、S5K4H7）都已支持，做法见[`dev/camera.md`](dev/camera.md)中“前摄的两种模组”一节，S5K3L6可以照此处理。
 - **硬件解码的遗留问题**：拖动到更低分辨率后裁剪不更新；字节缓冲模式下分辨率变大时重新分配失败；`SYS_ERROR`之后出现`invalid uc_region`；HAL里POLLPRI空转；`venus_compat_gfmt=N`需要复测。
