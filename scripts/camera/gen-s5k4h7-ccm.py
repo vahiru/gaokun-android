@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the Awb and Ccm sections of the s5k4h7 qcom-ife tuning.
+"""Generate the Awb and Ccm sections of the s5k4h7 and s5k3l6 qcom-ife tunings.
 
 Some Huawei MateBook E Go units carry an S5K4H7 front camera module (Xinli)
 instead of the HI846. The tuning Huawei's Windows camera driver ships for it,
@@ -19,11 +19,15 @@ gen-ov13b10-ccm.py, which describes the file layout:
 Record ids differ between files, so the tables are looked up by name: the
 IPE cc13 table is the first mod_cc13_aec_data with more than one region.
 
-This prints the two sections as they appear in
-device/huawei/gaokun3/camera/ipa-data/qcom-ife/s5k4h7.yaml (the same file as
-src/ipa/qcom-ife/data/s5k4h7.yaml of patches/libcamera).
+The rear S5K3L6 module (Lijing) that some units carry instead of the OV13B10
+has a tuning of its own with the same layout,
+com.qti.tuned.lijing_s5k3l6.bin in qccamrearsensor_extension8280.cab.
 
-Usage: gen-s5k4h7-ccm.py <com.qti.tuned.xinli_s5k4h7.bin>
+This prints the two sections as they appear in
+device/huawei/gaokun3/camera/ipa-data/qcom-ife/s5k4h7.yaml or s5k3l6.yaml (the
+same files as src/ipa/qcom-ife/data/ of patches/libcamera).
+
+Usage: gen-s5k4h7-ccm.py <com.qti.tuned.xinli_s5k4h7.bin | com.qti.tuned.lijing_s5k3l6.bin>
 """
 import struct
 import sys

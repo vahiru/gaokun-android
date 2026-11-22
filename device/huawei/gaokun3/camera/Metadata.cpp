@@ -341,7 +341,7 @@ std::vector<uint8_t> buildCharacteristics(const SensorFacts &f)
 	/*
 	 * HAL 把请求的帧率范围作为 FrameDurationLimits 交给 libcamera（见
 	 * processCaptureRequest），由它据此设置传感器的帧长。HAL 要的模式最高
-	 * 60 fps（ov13b10 合并模式）或 30 fps（全尺寸、前摄的合并模式），所以
+	 * 60 fps（后摄的合并模式）或 30 fps（全尺寸模式与前摄的合并模式），所以
 	 * 30 fps 总能达到。只有某个尺寸能到 60 fps 时才声明 60 fps 的范围
 	 * （Device::init()），具体哪些尺寸由最短帧长告诉应用。
 	 */

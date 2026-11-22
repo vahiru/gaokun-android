@@ -50,7 +50,7 @@ struct LensParams {
 	float focalLengthMm;
 	float fNumber;
 };
-constexpr LensParams kLensBack = { 4.0f, 1.8f };     /* ov13b10 */
+constexpr LensParams kLensBack = { 4.0f, 1.8f };     /* ov13b10与s5k3l6模组的镜头参数相同 */
 constexpr LensParams kLensFront = { 3.0f, 2.0f };    /* hi846 与 s5k4h7 模组的镜头参数相同 */
 constexpr const LensParams &lensParams(bool frontFacing)
 {
@@ -120,6 +120,9 @@ struct SensorFacts {
 	 *      框架会按"定焦但能设 AF 模式"理解，CameraX 会一直等一个不会到来的
 	 *      FOCUSED_LOCKED。 */
 	bool hasAf = false;
+	/* 传感器带有PhaseDetect能读的相位对焦像素：只有后摄ov13b10（布局见PhaseDetect.h）。
+	 * 部分机器的后摄是s5k3l6模组，它的相位对焦像素由传感器自行修正，RAW里没有相位信息，只做反差对焦。 */
+	bool hasPdPixels = false;
 	/* 最近对焦距离（屈光度 = 1/m）。硬件手册没有可信值，按 10 diopter(10 cm) 声明，
 	 * 并把 FOCUS_DISTANCE_CALIBRATION 报成 UNCALIBRATED —— 不谎称已标定。 */
 	float minFocusDiopters = 10.0f;

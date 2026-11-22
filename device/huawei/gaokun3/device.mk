@@ -713,6 +713,7 @@ PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/camera/gaokun3-camera-features.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/gaokun3-camera-features.xml \
     $(LOCAL_PATH)/camera/ipa-data/qcom-ife/hi846.yaml:$(TARGET_COPY_OUT_VENDOR)/etc/libcamera/ipa/qcom-ife/hi846.yaml \
     $(LOCAL_PATH)/camera/ipa-data/qcom-ife/ov13b10.yaml:$(TARGET_COPY_OUT_VENDOR)/etc/libcamera/ipa/qcom-ife/ov13b10.yaml \
+    $(LOCAL_PATH)/camera/ipa-data/qcom-ife/s5k3l6.yaml:$(TARGET_COPY_OUT_VENDOR)/etc/libcamera/ipa/qcom-ife/s5k3l6.yaml \
     $(LOCAL_PATH)/camera/ipa-data/qcom-ife/s5k4h7.yaml:$(TARGET_COPY_OUT_VENDOR)/etc/libcamera/ipa/qcom-ife/s5k4h7.yaml \
     $(LOCAL_PATH)/camera/ipa-data/qcom-ife/uncalibrated.yaml:$(TARGET_COPY_OUT_VENDOR)/etc/libcamera/ipa/qcom-ife/uncalibrated.yaml
 

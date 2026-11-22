@@ -169,8 +169,8 @@ bool Device::init()
 	 *   ★ 还要扣掉 libcamera 已经转掉的部分：会话不设 CameraConfiguration::orientation，
 	 *     默认要 Rotate0，管线用 CameraSensor::computeTransform() 去凑。180 能靠
 	 *     水平 + 垂直翻转消掉，后摄 ov13b10 支持翻转，就是被翻转读出的（日志里
-	 *     transform hvflip）；90 / 270 要转置，消不掉。前摄 hi846 没有翻转控件；s5k4h7 有，
-	 *     但前摄设备树写的是 0°，不需要翻转。
+	 *     transform hvflip；后摄的s5k3l6模组同样支持翻转）；90 / 270 要转置，消不掉。
+	 *     前摄 hi846 没有翻转控件；s5k4h7 有，但前摄设备树写的是 0°，不需要翻转。
 	 *
 	 *   ⇒ 本机：后摄180 - 180 = 0、前摄0，SENSOR_ORIENTATION都是0。
 	 *     核对：接键盘横放（ROTATION_0，OrientationEventListener报0）时，应用按Android文档的
@@ -242,6 +242,8 @@ bool Device::init()
 		facts_.hasAf = true;
 		ALOGI("%s 检测到对焦马达（VCM），将声明 AF", name_.c_str());
 	}
+	auto model = props.get(libcamera::properties::Model);
+	facts_.hasPdPixels = !facts_.frontFacing && model && *model == "ov13b10";
 
 	/*
 	 * ── 对外声明的输出尺寸 ──

@@ -82,8 +82,8 @@ Each entry follows the same format: **Symptom** (what you will run into), **Caus
 
 ### The front or rear camera does not work on some machines
 * **Symptom**: the camera app shows only one camera and no button to switch between the front and rear cameras; apps that need the other camera (for example, face recognition with the front camera) cannot open it.
-* **Cause**: this machine comes with one of two front camera modules and one of two rear camera modules. The Samsung S5K4H7 front module is not supported on 1.0.0-rc.4 and earlier, which support only the Hynix HI846; later versions support it. The Samsung S5K3L6 rear module is still not supported (only the OmniVision OV13B10 is); no machine with it has been reported yet.
-* **What to do**: if the front camera does not work, update to a version later than 1.0.0-rc.4. If it still does not work after the update, or the rear camera does not work, please open an issue and attach the logs (see the [FAQ](FAQ.md#when-android-starts) for how to collect them).
+* **Cause**: this machine comes with one of two front camera modules and one of two rear camera modules. The Samsung S5K4H7 front module is not supported on 1.0.0-rc.4 and earlier, which support only the Hynix HI846; later versions support it. The Samsung S5K3L6 rear module is not supported on 1.0.0-rc.4 and earlier either, which support only the OmniVision OV13B10; later versions support it.
+* **What to do**: if the front or rear camera does not work, update to a version later than 1.0.0-rc.4. If it still does not work after the update, please open an issue and attach the logs (see the [FAQ](FAQ.md#when-android-starts) for how to collect them).
 
 ### Location mostly does not work
 * **Symptom**: maps, weather, delivery and ride-hailing apps cannot get a location, or stay on "locating".
