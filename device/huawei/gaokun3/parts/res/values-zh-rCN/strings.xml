@@ -2,52 +2,36 @@
 <resources>
     <string name="app_name">MateBook E Go</string>
     <string name="keyboard_title">磁吸键盘</string>
-    <string name="keyboard_summary">开关配套键盘与触控板</string>
-    <string name="keyboard_switch_title">启用键盘</string>
-    <string name="keyboard_switch_summary_on">键盘与触控板正常工作</string>
-    <string name="keyboard_switch_summary_off">键盘与触控板不再响应任何输入</string>
-    <string name="keyboard_note">关闭后由内核层面禁止这些输入设备。键盘仍然吸附在机器上、仍然供电，只是不再上报按键、指针移动和唤醒事件。</string>
+    <string name="keyboard_summary">开关磁吸键盘与触控板</string>
+    <string name="keyboard_error">无法更改磁吸键盘设置</string>
     <string name="tile_on">已启用</string>
     <string name="tile_off">已关闭</string>
-    <string name="speaker_fx_title">扬声器增强（实验性）</string>
-    <string name="speaker_fx_summary">为内置扬声器加上低音增强或华为 Histen 音效</string>
-    <string name="speaker_fx_switch_title">启用扬声器增强</string>
-    <string name="speaker_fx_switch_summary_on">内置扬声器的声音会经过处理</string>
-    <string name="speaker_fx_switch_summary_off">声音原样输出，不做任何处理</string>
-    <string name="speaker_fx_engine_title">处理方式</string>
+    <string name="sound_advanced_title">高级</string>
+    <string name="speaker_fx_title">扬声器音效</string>
+    <string name="speaker_fx_engine_title">音效引擎</string>
     <string name="speaker_fx_engine_bass">低音增强</string>
-    <string name="speaker_fx_engine_histen">华为 Histen</string>
-    <string name="speaker_fx_note">实验功能。只处理内置扬声器，耳机、蓝牙和 USB 音频一律不动。低音增强处理扬声器放出的所有声音，游戏也在内；华为 Histen 只处理媒体声音（音乐、视频），使用低延迟音频的游戏不经过它。改动约一秒内生效，但 Histen 从下一次开始播放起才生效。如果声音失真或断续，请关掉它。</string>
-    <!-- USB-C 口的提示（v1.0 PWR-4 / USB-1，UsbPortNotifier）。port0 = 靠近电源键的那个口。 -->
-    <string name="usb_port_channel">USB-C 接口</string>
-    <string name="usb_port_channel_desc">靠近电源键的 USB-C 口出现异常时提示</string>
-    <string name="usb_port_broken_title">USB-C 口出了故障</string>
-    <string name="usb_port_broken_text">靠近电源键的 USB-C 口在待机之后失灵了。重启后 USB 数据与待机都会恢复；重启之前平板不会进入待机，会一直耗电。</string>
-    <string name="usb_port_reversed_title">数据线连接方向反了</string>
-    <string name="usb_port_reversed_text">平板正在给对方供电，没有建立数据连接。如果连的是电脑（USB 调试、传文件），请拔下数据线重新插入。</string>
-    <!-- 统一启动入口（gk3boot）的通知（2026-10-05，S9；BootEntryNotifier）。 -->
-    <string name="boot_entry_channel">启动入口</string>
-    <string name="boot_entry_channel_desc">启动入口（gk3boot）的提示，例如更新失败后自动退回旧版本</string>
-    <string name="boot_entry_fallback_title">已自动退回旧版本</string>
-    <string name="boot_entry_fallback_text">上次更新后的系统没能启动，启动入口已自动退回旧版本（当前运行的是槽 %1$s）。可以重新检查更新再试；如果反复出现，请反馈。</string>
-    <string name="boot_entry_bcb_dropped_title">一次未执行的请求已取消</string>
-    <string name="boot_entry_bcb_dropped_text">装上启动入口时，有一个还没来得及执行的恢复出厂或进入恢复模式的请求，它已被取消、没有执行。如果仍然需要，请重新操作一次。</string>
-    <string name="boot_entry_other_title">启动入口记录了异常</string>
-    <string name="boot_entry_other_text">这次开机之前，启动入口记录了：%1$s。系统已正常启动；如果反复出现，请反馈。</string>
-    <string name="boot_entry_bypassed_title">这次开机绕过了启动入口</string>
-    <string name="boot_entry_bypassed_text">启动入口（gk3boot）已经装好，但这次是从直连启动项开机的：可能是入口连续几次没能启动、被自动跳过，也可能是在开机菜单里手动选了直连项。这次开机期间，系统更新失败不会自动回滚。如果每次开机都出现，请反馈。</string>
-    <!-- 触摸手感开关（2026-10-25，TouchModeSettingsActivity / TouchModeTileService），注入到「设置 → 系统」。 -->
-    <string name="touch_mode_title">触摸手感</string>
-    <string name="touch_mode_summary">游戏模式（不识别手掌）或日常模式（识别手掌）</string>
-    <string name="touch_mode_switch_title">游戏触摸模式</string>
-    <string name="touch_mode_switch_summary_on">游戏：不做手掌识别，拇指贴边平放时不会连带丢掉周围的点按</string>
-    <string name="touch_mode_switch_summary_off">日常：识别手掌，忽略搭在屏幕上的手</string>
-    <string name="touch_mode_note">两种模式跟手程度相同，只差手掌识别。游戏模式不做手掌识别，手掌或拇指根部搭在屏幕上时可能被当成触摸。日常模式会忽略搭在屏幕上的手掌，适合浏览、阅读和手写；但拇指贴着屏幕边缘平放时，它周围的点按也可能被一起忽略。\n\n切换立刻生效，不需要重启，重启后仍然保留。控制中心里也有开关：编辑快捷设置，把「游戏触摸」拖上去。</string>
-    <string name="touch_mode_tile_label">游戏触摸</string>
-    <string name="touch_mode_game">游戏</string>
-    <string name="touch_mode_daily">日常</string>
+    <string name="speaker_fx_engine_histen">华为Histen</string>
+    <string name="speaker_fx_engine_off">关闭</string>
+    <string name="speaker_fx_note">音效仅作用于内置扬声器。Histen音效引擎可能无法处理部分游戏的音频。</string>
+    <!-- 关于USB-C接口异常的通知 -->
+    <string name="usb_port_channel">USB-C接口异常</string>
+    <string name="usb_port_channel_desc">关于USB-C接口异常的通知</string>
+    <string name="usb_port_reversed_title">USB-C接口正在反向供电</string>
+    <string name="usb_port_reversed_text">平板正在未建立数据连接的情况下为其它设备供电。</string>
+    <!-- 关于启动流程异常的通知 -->
+    <string name="boot_entry_channel">启动流程异常</string>
+    <string name="boot_entry_channel_desc">关于启动流程异常的通知</string>
+    <string name="boot_entry_fallback_title">系统更新失败</string>
+    <string name="boot_entry_fallback_text">上一次进行系统更新后，新版本系统未能正常启动，已自动退回旧版本。请向开发者反馈此情况。</string>
+    <string name="boot_entry_bypassed_title">本次开机未经由默认启动条目</string>
+    <string name="boot_entry_bypassed_text">如果此通知反复出现，请向开发者反馈。</string>
+    <!-- 设置 → 显示 → 防误触模式 -->
+    <string name="touch_mode_title">防误触模式</string>
+    <string name="touch_mode_summary">减少在使用M-Pencil书写等场景下的手掌误触</string>
+    <string name="touch_mode_tile_label">防误触</string>
+    <string name="touch_mode_error">切换失败，请向开发者反馈。</string>
 
-    <!-- 内核版本伪装（AppKernelSettingsActivity），注入到「设置 → 系统」。 -->
+    <!-- 设置 → 系统 → 内核版本伪装 -->
     <string name="app_kernel_title">内核版本伪装</string>
     <string name="app_kernel_summary">向应用报告的内核版本号</string>
     <string name="app_kernel_switch_title">向应用报告其他版本</string>

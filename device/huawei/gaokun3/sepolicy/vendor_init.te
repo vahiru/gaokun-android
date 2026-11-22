@@ -8,7 +8,7 @@
 # "vendor_init 读不读得到这个属性"（system/core/init/action_parser.cpp:39-58
 #  IsActionableProperty → CanReadProperty，本机 ro.actionable_compatible_property.enabled=true），
 # 读不到就当成 "unexported property trigger found" —— 整个动作被丢掉。
-# ⇒ enforcing 下键盘开关、触摸手感、扬声器增强三个设置【全部静默失效】。
+# ⇒ enforcing 下磁吸键盘、防误触模式、扬声器音效三个设置【全部静默失效】。
 # 证据：完整开机日志里 `vendor_init system_prop:file read  property=persist.sys.gaokun3.keyboard`
 #   （pid=0，是 init 在解析期替 vendor_init 做的检查；同一元组只记一次，所以另外两个没露面）。
 # 不撞 neverallow：system_prop 是 system_public_prop（public/property.te:267），

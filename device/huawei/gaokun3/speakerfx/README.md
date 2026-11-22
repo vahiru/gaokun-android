@@ -2,7 +2,7 @@
 
 本目录实现运行在音频HAL播放钩子中的内置扬声器DSP处理库（`libgaokunspeakerfx.so`）。它在AudioFlinger完成所有音轨（含媒体、系统音及低延迟`FAST`游戏音轨）混音后、写入ALSA PCM之前对48 kHz立体声缓冲做实时低音增强、谐波合成、分频段动态控制与串扰消除。
 
-- **开关与模式协同**：由「设置 → 声音 → 扬声器增强」（`persist.sys.gaokun3.histen`，默认关闭）总控。同一页面的「处理方式」（`persist.sys.gaokun3.speakerfx.engine`）默认为「低音增强」（`bass`），由本库处理；若切换为「华为Histen」（`histen`），则本库保持逐比特直通，改由会话级音效（[`../effects/README.md`](../effects/README.md)）接管。两个属性均由[`etc/histen.rc`](../etc/histen.rc)镜像至`vendor.gaokun3.*`供HAL读取。
+- **开关与模式协同**：由「设置 → 提示音和振动 → 扬声器音效」的对话框控制，选项为「关闭」「低音增强」「华为Histen」，默认关闭。总开关是`persist.sys.gaokun3.histen`，引擎是`persist.sys.gaokun3.speakerfx.engine`。选择「低音增强」（`bass`）时由本库处理；选择「华为Histen」（`histen`）时，则本库保持逐比特直通，改由会话级音效（[`../effects/README.md`](../effects/README.md)）接管。两个属性均由[`etc/histen.rc`](../etc/histen.rc)镜像至`vendor.gaokun3.*`供HAL读取。
 - **作用范围**：仅处理内置扬声器（ALSA `card 0` / `device 1`），有线耳机、蓝牙与USB音频一律直通。
 
 ## 一、设计背景：为何置于音频HAL层

@@ -6,7 +6,7 @@
 Histen引擎（内置多段EQ与低音增强） ──► LR4高通滤波 ──► Makeup补偿增益 ──► 限幅器 ──► 软削波
 ```
 
-- **开关与分流机制**：由「设置 → 声音 → 扬声器增强」（`persist.sys.gaokun3.histen`，默认关闭）总控。当同一页面的「处理方式」（`persist.sys.gaokun3.speakerfx.engine`）处于默认的「低音增强」（`bass`）时，音频由音频HAL内的[`speakerfx/`](../speakerfx/README.md)处理，本effect保持逐比特直通；仅当用户选择「华为Histen」（`histen`）且总开关打开时，才由本effect处理内置扬声器上的媒体流（耳机、蓝牙与USB音频一律直通）。
+- **开关与分流机制**：由「设置 → 提示音和振动 → 扬声器音效」的对话框控制，选项为「关闭」「低音增强」「华为Histen」，默认关闭（总开关`persist.sys.gaokun3.histen`，引擎`persist.sys.gaokun3.speakerfx.engine`）。选择「低音增强」（`bass`）时，音频由音频HAL内的[`speakerfx/`](../speakerfx/README.md)处理，本effect保持逐比特直通；仅当用户选择「华为Histen」（`histen`）时，才由本effect处理内置扬声器上的媒体流（耳机、蓝牙与USB音频一律直通）。
 - **专有二进制依赖**：Histen算法引擎（`libhw_histen_processing.so`）不纳入版本控制，需放置于[`prebuilt/`](prebuilt/README.md)。缺失该文件时不影响编译，运行时自动退化为仅执行自研高通与限幅链路。
 
 ## 一、目录结构

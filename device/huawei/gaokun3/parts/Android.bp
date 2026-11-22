@@ -1,5 +1,5 @@
 //
-// gaokun3 设备设置：磁吸键盘开关 + 扬声器增强（试验功能）开关 + USB-C 口的提示通知（v1.0 PWR-4 / USB-1，UsbPortNotifier）。
+// gaokun3 设备设置：注入系统设置的开关条目与页面、扬声器音效对话框、控制中心磁贴，以及 USB-C 口与启动入口的通知。
 // 2026-09-28 用户要求：开关换成系统设置同款的 Material 3 Expressive 样式 ⇒ 改用 androidx.preference + SettingsLib。
 //
 // ★ platform_apis + certificate: "platform" 两个都必需：
@@ -38,7 +38,8 @@ android_app {
         "SettingsLibCollapsingToolbarBaseActivity",
         "SettingsLibFooterPreference",
         "SettingsLibSettingsTheme",
-        // 「设置 → 电池」里的性能模式开关条目（PerformanceModeProvider：EntriesProvider/ProviderSwitch）。
+        // 注入设置的开关条目、分组标题与动态说明（PerformanceModeProvider、KeyboardProvider、TouchProtectionProvider、
+        // SoundEntriesProvider：EntriesProvider/ProviderSwitch）。
         // 模块在frameworks/base/packages/SettingsLib/Tile/，crDroid 17.0的frameworks_base里同名。
         "SettingsLibTile",
         // 手写笔设置的四档平滑滑块（Material 离散滑块，带刻度和两端文字）：frameworks/base/packages/SettingsLib/
