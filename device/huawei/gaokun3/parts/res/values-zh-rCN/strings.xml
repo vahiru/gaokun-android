@@ -2,11 +2,8 @@
 <resources>
     <string name="app_name">MateBook E Go</string>
     <string name="keyboard_title">磁吸键盘</string>
-    <string name="keyboard_summary">开关配套键盘与触控板</string>
-    <string name="keyboard_switch_title">启用键盘</string>
-    <string name="keyboard_switch_summary_on">键盘与触控板正常工作</string>
-    <string name="keyboard_switch_summary_off">键盘与触控板不再响应任何输入</string>
-    <string name="keyboard_note">关闭后由内核层面禁止这些输入设备。键盘仍然吸附在机器上、仍然供电，只是不再上报按键、指针移动和唤醒事件。</string>
+    <string name="keyboard_summary">开关磁吸键盘与触控板</string>
+    <string name="keyboard_error">无法更改磁吸键盘设置</string>
     <string name="tile_on">已启用</string>
     <string name="tile_off">已关闭</string>
     <string name="speaker_fx_title">扬声器增强（实验性）</string>
@@ -30,18 +27,13 @@
     <string name="boot_entry_fallback_text">上一次进行系统更新后，新版本系统未能正常启动，已自动退回旧版本。请向开发者反馈此情况。</string>
     <string name="boot_entry_bypassed_title">本次开机未经由默认启动条目</string>
     <string name="boot_entry_bypassed_text">如果此通知反复出现，请向开发者反馈。</string>
-    <!-- 触摸手感开关（2026-10-25，TouchModeSettingsActivity / TouchModeTileService），注入到「设置 → 系统」。 -->
-    <string name="touch_mode_title">触摸手感</string>
-    <string name="touch_mode_summary">游戏模式（不识别手掌）或日常模式（识别手掌）</string>
-    <string name="touch_mode_switch_title">游戏触摸模式</string>
-    <string name="touch_mode_switch_summary_on">游戏：不做手掌识别，拇指贴边平放时不会连带丢掉周围的点按</string>
-    <string name="touch_mode_switch_summary_off">日常：识别手掌，忽略搭在屏幕上的手</string>
-    <string name="touch_mode_note">两种模式跟手程度相同，只差手掌识别。游戏模式不做手掌识别，手掌或拇指根部搭在屏幕上时可能被当成触摸。日常模式会忽略搭在屏幕上的手掌，适合浏览、阅读和手写；但拇指贴着屏幕边缘平放时，它周围的点按也可能被一起忽略。\n\n切换立刻生效，不需要重启，重启后仍然保留。控制中心里也有开关：编辑快捷设置，把「游戏触摸」拖上去。</string>
-    <string name="touch_mode_tile_label">游戏触摸</string>
-    <string name="touch_mode_game">游戏</string>
-    <string name="touch_mode_daily">日常</string>
+    <!-- 设置 → 显示 → 防误触模式 -->
+    <string name="touch_mode_title">防误触模式</string>
+    <string name="touch_mode_summary">减少在使用M-Pencil书写等场景下的手掌误触</string>
+    <string name="touch_mode_tile_label">防误触</string>
+    <string name="touch_mode_error">切换失败，请向开发者反馈。</string>
 
-    <!-- 内核版本伪装（AppKernelSettingsActivity），注入到「设置 → 系统」。 -->
+    <!-- 设置 → 系统 → 内核版本伪装 -->
     <string name="app_kernel_title">内核版本伪装</string>
     <string name="app_kernel_summary">向应用报告的内核版本号</string>
     <string name="app_kernel_switch_title">向应用报告其他版本</string>

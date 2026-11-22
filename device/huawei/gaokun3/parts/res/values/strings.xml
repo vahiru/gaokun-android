@@ -2,11 +2,8 @@
 <resources>
     <string name="app_name">MateBook E Go</string>
     <string name="keyboard_title">Detachable keyboard</string>
-    <string name="keyboard_summary">Turn the magnetic keyboard and touchpad on or off</string>
-    <string name="keyboard_switch_title">Keyboard enabled</string>
-    <string name="keyboard_switch_summary_on">Keyboard and touchpad are active</string>
-    <string name="keyboard_switch_summary_off">Keyboard and touchpad ignore all input</string>
-    <string name="keyboard_note">Turning this off inhibits the input devices in the kernel. The keyboard stays physically attached and charging; it simply stops reporting keys, pointer movement and wake events.</string>
+    <string name="keyboard_summary">Enable or disable the detachable keyboard and touchpad</string>
+    <string name="keyboard_error">Couldn\'t change the detachable keyboard setting</string>
     <string name="tile_on">On</string>
     <string name="tile_off">Off</string>
     <string name="speaker_fx_title">Speaker enhancement (experimental)</string>
@@ -38,16 +35,11 @@
     <string name="boot_entry_fallback_text">After the last system update, the new version failed to start, and the previous version was restored automatically. Please report this to the developers.</string>
     <string name="boot_entry_bypassed_title">This startup did not use the default boot entry</string>
     <string name="boot_entry_bypassed_text">If this notification keeps appearing, please report it to the developers.</string>
-    <!-- Touch feel switch (2026-10-25, TouchModeSettingsActivity / TouchModeTileService), injected into Settings > System. -->
-    <string name="touch_mode_title">Touch feel</string>
-    <string name="touch_mode_summary">Game mode (no palm rejection) or everyday mode (palm rejection)</string>
-    <string name="touch_mode_switch_title">Game touch mode</string>
-    <string name="touch_mode_switch_summary_on">Game: no palm rejection, so taps next to a thumb lying along the edge are not dropped</string>
-    <string name="touch_mode_switch_summary_off">Everyday: palm rejection, a resting hand is ignored</string>
-    <string name="touch_mode_note">Both modes follow your finger equally closely; they differ only in palm rejection. In game mode a palm or the base of the thumb resting on the screen may register as a touch. Everyday mode ignores a resting palm, which suits browsing, reading and handwriting, but while a thumb lies flat along the edge of the screen, taps around it may be ignored too.\n\nChanges apply right away, no restart needed, and survive restarts. A quick settings tile is also available: edit quick settings and add \"Game touch\".</string>
-    <string name="touch_mode_tile_label">Game touch</string>
-    <string name="touch_mode_game">Game</string>
-    <string name="touch_mode_daily">Everyday</string>
+    <!-- Settings > Display > Accidental touch protection -->
+    <string name="touch_mode_title">Accidental touch protection</string>
+    <string name="touch_mode_summary">Reduce accidental palm touches, for example when writing with the M-Pencil</string>
+    <string name="touch_mode_tile_label">Touch protection</string>
+    <string name="touch_mode_error">Couldn\'t change accidental touch protection. Please report this to the developers.</string>
 
     <!-- Kernel version spoofing (AppKernelSettingsActivity), injected into Settings → System. -->
     <string name="app_kernel_title">Kernel version spoofing</string>

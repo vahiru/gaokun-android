@@ -1,36 +1,30 @@
 /*
  * 控制中心（快捷设置）里的磁吸键盘开关。
  *
- * 和设置页共用同一条通路：只改 persist.sys.gaokun3.keyboard 这个属性，
- * 真正动硬件的是 init 触发器 + /vendor/bin/gaokun3-keyboard.sh。
- * ★ 这样两个入口不会打架，也不需要谁去同步对方的状态。
+ * 与「设置 → 已连接的设备」里的开关条目（KeyboardProvider）改同一个属性persist.sys.gaokun3.keyboard，
+ * 真正动硬件的是init触发器和/vendor/bin/gaokun3-keyboard.sh，两个入口不需要互相同步状态。
+ * 切换后通知设置刷新开关：设置页开着时下拉控制中心切换，页面上的开关也跟着变。
  *
- * ⚠️ 磁贴默认【不会】自己出现在控制中心里 —— 这是 Android 的设计：
- *    用户要在快捷设置的编辑页（下拉后点铅笔）把它从"可用磁贴"里拖上去。
- *    装好后第一次得手动加一次。
+ * 类名不能改：用户加到控制中心的磁贴按组件名记录，改名后磁贴会从控制中心消失。
+ * 磁贴默认不出现在控制中心，用户要在快捷设置的编辑页把它拖上去，这是Android的设计。
  */
 package com.huawei.gaokun3.parts;
 
 import android.graphics.drawable.Icon;
-import android.os.SystemProperties;
 import android.service.quicksettings.Tile;
 import android.service.quicksettings.TileService;
+import android.util.Log;
 
 public class KeyboardTileService extends TileService {
 
-    private static final String PROP = "persist.sys.gaokun3.keyboard";
-
-    private boolean isEnabled() {
-        // 属性没设过 = 键盘开着。失败方向永远偏向"键盘可用"。
-        return !"0".equals(SystemProperties.get(PROP, "1"));
-    }
+    private static final String TAG = "KeyboardTileService";
 
     private void refresh() {
         Tile tile = getQsTile();
         if (tile == null) {
             return;
         }
-        boolean on = isEnabled();
+        boolean on = KeyboardProvider.isEnabled();
         tile.setState(on ? Tile.STATE_ACTIVE : Tile.STATE_INACTIVE);
         tile.setLabel(getString(R.string.keyboard_title));
         tile.setSubtitle(getString(on ? R.string.tile_on : R.string.tile_off));
@@ -47,7 +41,12 @@ public class KeyboardTileService extends TileService {
     @Override
     public void onClick() {
         super.onClick();
-        SystemProperties.set(PROP, isEnabled() ? "0" : "1");
+        try {
+            KeyboardProvider.setEnabled(!KeyboardProvider.isEnabled());
+        } catch (RuntimeException e) {
+            Log.w(TAG, "cannot set " + KeyboardProvider.PROP, e);
+        }
+        KeyboardProvider.notifySwitchChanged(this);
         refresh();
     }
 }
