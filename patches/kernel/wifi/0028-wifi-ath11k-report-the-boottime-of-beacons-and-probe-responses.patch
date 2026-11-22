@@ -1,0 +1,45 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] wifi: ath11k: report the boottime of beacons and probe
+ responses
+
+The driver doesn't set boottime_ns in the rx status of a beacon or probe
+response, so cfg80211 has no CLOCK_BOOTTIME timestamp for the BSS and
+nl80211 leaves out NL80211_BSS_LAST_SEEN_BOOTTIME.
+
+Android's wificond then uses the TSF as the time the BSS was last seen,
+and the framework drops every scan result older than the start of the
+scan. The TSF is the AP's own timer, which usually starts when the AP
+does, so an AP that started after the station booted, a portable
+hotspot that ran out of battery and came back for example, is missing
+from every scan until the station reboots. Networks whose TSF is larger
+than the station's uptime stay visible.
+
+Set boottime_ns as ath10k does since commit e6dfbc3ba90c ("ath10k: Fix
+missing frame timestamp for beacon/probe-resp").
+
+Tested-on: WCN6855 hw2.1 PCI WLAN.HSP.1.1-03125-QCAHSPSWPL_V1_V2_SILICONZ_LITE-3.6510.41
+
+Fixes: d5c65159f289 ("ath11k: driver for Qualcomm IEEE 802.11ax devices")
+Cc: stable@vger.kernel.org
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/net/wireless/ath/ath11k/wmi.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/drivers/net/wireless/ath/ath11k/wmi.c b/drivers/net/wireless/ath/ath11k/wmi.c
+index 61b1adcdbf..91d8f1f233 100644
+--- a/drivers/net/wireless/ath/ath11k/wmi.c
++++ b/drivers/net/wireless/ath/ath11k/wmi.c
+@@ -7711,6 +7711,10 @@ static void ath11k_mgmt_rx_event(struct ath11k_base *ab, struct sk_buff *skb)
+ 	if (ieee80211_is_beacon(hdr->frame_control))
+ 		ath11k_mac_handle_beacon(ar, skb);
+ 
++	if (ieee80211_is_beacon(hdr->frame_control) ||
++	    ieee80211_is_probe_resp(hdr->frame_control))
++		status->boottime_ns = ktime_get_boottime_ns();
++
+ 	ath11k_dbg(ab, ATH11K_DBG_MGMT,
+ 		   "event mgmt rx skb %p len %d ftype %02x stype %02x\n",
+ 		   skb, skb->len,
