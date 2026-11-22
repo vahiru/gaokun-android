@@ -27,3 +27,7 @@ r_dir_file(hal_thermal_default, sysfs_thermal)
 allow hal_thermal_default sysfs_thermal:file w_file_perms;
 r_dir_file(hal_thermal_default, sysfs_batteryinfo)
 get_prop(hal_thermal_default, vendor_gaokun3_prop)
+
+# 按电源状态通过Power HAL的扩展接口开关AC_POWER模式。IPowerExt是挂在IPower上的另一个binder对象，
+# 与IPower同在hal_power_default进程中。
+hal_client_domain(hal_thermal_default, hal_power)

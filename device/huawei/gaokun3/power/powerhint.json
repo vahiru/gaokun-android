@@ -19,7 +19,8 @@
             ],
             "Values": [
                 "9999999",
-                "0"
+                "1209600",
+                "691200"
             ],
             "ResetOnInit": true
         },
@@ -42,6 +43,7 @@
             ],
             "Values": [
                 "9999999",
+                "1056000",
                 "0"
             ],
             "ResetOnInit": true
@@ -55,6 +57,28 @@
                 "67.58",
                 "30.00",
                 "0.00"
+            ],
+            "ResetOnInit": true
+        },
+        {
+            "Name": "BGUClampMax",
+            "Paths": [
+                "/dev/cpuctl/background/cpu.uclamp.max"
+            ],
+            "Values": [
+                "max",
+                "32.03"
+            ],
+            "ResetOnInit": true
+        },
+        {
+            "Name": "FGWUClampMax",
+            "Paths": [
+                "/dev/cpuctl/foreground_window/cpu.uclamp.max"
+            ],
+            "Values": [
+                "max",
+                "80.66"
             ],
             "ResetOnInit": true
         },
@@ -172,6 +196,30 @@
             "Node": "CPUBigClusterMaxFreq",
             "Duration": 0,
             "Value": "1286400"
+        },
+        {
+            "PowerHint": "AC_POWER",
+            "Node": "CPULittleClusterMinFreq",
+            "Duration": 0,
+            "Value": "1209600"
+        },
+        {
+            "PowerHint": "AC_POWER",
+            "Node": "CPUBigClusterMinFreq",
+            "Duration": 0,
+            "Value": "1056000"
+        },
+        {
+            "PowerHint": "AC_POWER",
+            "Node": "BGUClampMax",
+            "Duration": 0,
+            "Value": "max"
+        },
+        {
+            "PowerHint": "AC_POWER",
+            "Node": "FGWUClampMax",
+            "Duration": 0,
+            "Value": "max"
         }
     ],
     "AdpfConfig": [
