@@ -15,6 +15,14 @@
  *   否则在内核降频的平衡点附近会反复跳变。
  *   内核没有这些温区时，SKIN取所有CPU/GPU温区的最大值，按裸片温度分级。
  *
+ * ★ 面板：本机Windows的ACPI表把面板与CPU、GPU一起列在sys_therm2–sys_therm4的温控区里（包括
+ *   sys_therm3上只限制GPU的那一个），其中任何一个降温时都会降低背光。显示服务的亮度上限只能跟随
+ *   一路传感器，所以有板载温区时另报一路DISPLAY类型的panel：等级取sys-therm2–4中最高的等级
+ *   （各路按自己的阈值与回差分级），温度取决定这一等级的那一路，同级时取温度最高的一路；
+ *   某一路本轮无法读取时按它上次的读数与等级计入。panel没有自己的阈值，不出现在
+ *   getTemperatureThresholds中。框架的整机状态只取SKIN，过热关机也不看DISPLAY类型，所以它只
+ *   影响亮度上限，不改变CPU与GPU的降频。
+ *
  * ★ 降频点档位：内核按本机Windows ACPI表的开机默认值设好sys-therm1–4的降频点。这里按性能模式
  *   与电源状态改写它们（数值见kSetA、kSetB与kPerf*）。降频本身仍由内核thermal core完成，
  *   这里只改降频点，并在改写后从内核读回实际值来计算SKIN阈值。
@@ -48,6 +56,8 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 namespace aidl::android::hardware::thermal::impl::gaokun3 {
@@ -95,6 +105,10 @@ static constexpr char kPowerHal[] = "android.hardware.power.IPower/default";
 static constexpr char kAcPowerMode[] = "AC_POWER";
 static constexpr const char* kBoardZones[] = {"sys-therm1-thermal", "sys-therm2-thermal",
                                               "sys-therm3-thermal", "sys-therm4-thermal"};
+// Windows把面板列在其温控区里的板载温区，以及合成后上报的名称（与显示配置的tempSensor一致）。
+static constexpr const char* kPanelZones[] = {"sys-therm2-thermal", "sys-therm3-thermal",
+                                              "sys-therm4-thermal"};
+static constexpr char kPanelName[] = "panel";
 // 板载温区SKIN阈值的SHUTDOWN：低于内核在sys-therm1/2/4上的100 °C紧急关机点。
 static constexpr float kSkinShutdown = 95.0f;
 // 读回的降频点超出这个范围时视为无效，该温区不分级。
@@ -108,6 +122,7 @@ struct Zone {
     TemperatureType type;
     bool feeds_skin;    // 是否参与回退模式下合成SKIN的取最大值
     bool board;         // 板载热敏电阻温区：作为SKIN上报，阈值随降频点变化
+    bool panel = false; // 参与合成panel的板载温区
 };
 
 struct Cdev {
@@ -474,12 +489,15 @@ class Thermal : public BnThermal {
             if (!z.board) continue;
             if (board_skin_) {
                 z.type = TemperatureType::SKIN;
+                z.panel = std::find(std::begin(kPanelZones), std::end(kPanelZones),
+                                    z.name + "-thermal") != std::end(kPanelZones);
             } else {
                 z.board = false;
             }
         }
         hot_.assign(zones_.size(), kHot);
         status_.assign(zones_.size() + 1, ThrottlingSeverity::NONE);
+        last_c_.assign(zones_.size() + 1, NAN);
         RefreshBoardLevels(false);
         LOG(INFO) << "found " << zones_.size() << " thermal zones, " << cdevs_.size()
                   << " cooling devices; skin source: "
@@ -611,8 +629,17 @@ class Thermal : public BnThermal {
     ThrottlingSeverity ZoneSeverity(size_t slot, float c, const Levels& hot, bool update) {
         std::lock_guard<std::mutex> lk(hot_mutex_);
         const ThrottlingSeverity s = SeverityWithHyst(c, hot, status_[slot]);
-        if (update) status_[slot] = s;
+        if (update) {
+            status_[slot] = s;
+            last_c_[slot] = c;
+        }
         return s;
+    }
+
+    // 轮询线程最近一次成功读到的温度与记录的等级；尚未读到过时温度为NAN。
+    std::pair<float, ThrottlingSeverity> LastReading(size_t slot) {
+        std::lock_guard<std::mutex> lk(hot_mutex_);
+        return {last_c_[slot], status_[slot]};
     }
 
     // 回退模式下合成的SKIN：所有CPU/GPU温区的最大值。
@@ -629,17 +656,38 @@ class Thermal : public BnThermal {
 
     std::vector<Temperature> Snapshot(std::optional<TemperatureType> filter, bool update) {
         std::vector<Temperature> out;
+        const bool want_panel =
+                board_skin_ && (!filter.has_value() || filter.value() == TemperatureType::DISPLAY);
+        std::optional<Temperature> panel;
         for (size_t i = 0; i < zones_.size(); ++i) {
             const Zone& z = zones_[i];
-            if (filter.has_value() && filter.value() != z.type) continue;
-            float c = ReadTempC(z.path);
-            if (std::isnan(c)) continue;
+            const bool want = !filter.has_value() || filter.value() == z.type;
+            const bool feeds_panel = want_panel && z.panel;
+            if (!want && !feeds_panel) continue;
             Temperature t;
             t.type = z.type;
             t.name = z.name;
-            t.value = c;
-            t.throttlingStatus = ZoneSeverity(i, c, ZoneLevels(i), update);
-            out.push_back(t);
+            t.value = ReadTempC(z.path);
+            if (!std::isnan(t.value)) {
+                t.throttlingStatus = ZoneSeverity(i, t.value, ZoneLevels(i), update);
+                if (want) out.push_back(t);
+            } else if (feeds_panel) {
+                // 只按其余几路合成会绕过这一路的回差，所以按它上次的读数与等级计入panel。
+                std::tie(t.value, t.throttlingStatus) = LastReading(i);
+                if (std::isnan(t.value)) continue;
+            } else {
+                continue;
+            }
+            if (feeds_panel && (!panel.has_value() ||
+                                std::tie(t.throttlingStatus, t.value) >
+                                        std::tie(panel->throttlingStatus, panel->value))) {
+                panel = t;
+            }
+        }
+        if (panel.has_value()) {
+            panel->type = TemperatureType::DISPLAY;
+            panel->name = kPanelName;
+            out.push_back(*panel);
         }
         if (!board_skin_ && (!filter.has_value() || filter.value() == TemperatureType::SKIN)) {
             float c = FallbackSkinC();
@@ -703,7 +751,8 @@ class Thermal : public BnThermal {
 
     // 只在等级变化时回调，不是每次采样都通知，否则system_server会被刷爆。
     void PollLoop() {
-        std::vector<ThrottlingSeverity> last(zones_.size() + 1, ThrottlingSeverity::NONE);
+        // 每个温区一位，其后依次为回退模式的合成SKIN与panel。
+        std::vector<ThrottlingSeverity> last(zones_.size() + 2, ThrottlingSeverity::NONE);
         while (true) {
             std::this_thread::sleep_for(std::chrono::seconds(2));
             const bool adapter = AdapterOnline();  // 每次读取都是一次EC事务，每轮只读一次
@@ -711,7 +760,7 @@ class Thermal : public BnThermal {
             ac_hint_.Post(adapter);
             std::vector<Temperature> temps = Snapshot(std::nullopt, true);
             for (const auto& t : temps) {
-                size_t idx = zones_.size();  // 末位留给回退模式的合成SKIN
+                size_t idx = t.type == TemperatureType::DISPLAY ? zones_.size() + 1 : zones_.size();
                 for (size_t i = 0; i < zones_.size(); ++i) {
                     if (zones_[i].name == t.name) {
                         idx = i;
@@ -740,6 +789,7 @@ class Thermal : public BnThermal {
     std::mutex hot_mutex_;
     std::vector<Levels> hot_;  // 每个温区的分级阈值，板载温区随降频点变化
     std::vector<ThrottlingSeverity> status_;  // 每个温区（末位为回退模式的合成SKIN）当前的等级
+    std::vector<float> last_c_;               // 与status_对应的最近一次读数
     std::mutex cb_mutex_;
     std::vector<CbEntry> cbs_;
     std::thread poller_;
