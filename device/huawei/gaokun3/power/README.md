@@ -16,10 +16,10 @@
 
 - ADPF沿用Pixel 6 Pro的120 Hz配置档（只保留一份，名为`Default`）。会话的uclamp以算力为单位，按比例生效，与具体频率无关。HWUI的会话需要`debug.hwui.use_hint_manager=true`（`device.mk`）。
 - `sched_util_clamp_min_rt_default`在HAL启动节点写入线程时写为0。主线内核的默认值为1024：RT任务（SurfaceFlinger、输入、音频FastMixer、内核中断线程等）每次运行都把所在CPU簇拉到最高频率，这份提频也顺带惠及同簇的应用线程。改为0之后，由上面的INTERACTION与ADPF给需要的线程提频。HAL未启动时，这个值保持1024。
+- HAL还会给线程套用Pixel调度器的任务配置：启动时的`PreferIdleSet`，以及ADPF会话增减线程时的`SCHED_QOS_NONE`、`SCHED_QOS_SENSITIVE_STANDARD`、`SCHED_QOS_SENSITIVE_EXTREME`。Pixel上这几项写入其内核私有调度模块的`/proc/vendor_sched/sched_qos/`，主线内核没有等价接口。本目录的`task_profiles.json`（安装到`/vendor/etc/task_profiles.json`）把这几项声明为不含动作的空配置，套用时直接成功，不再记录警告和错误日志。
 - 频率值只用`9999999`（不设上限或拉到最高）、`0`和不高于2688 MHz的频点，3.0 GHz版本的大核同样适用；省电模式的上限在3.0 GHz版本上约为最高频率的43%。
 
 ## 已知限制
 
 - Chromium内核浏览器（Edge）的网页内容未建立ADPF会话，滚动时只靠触摸提示。
 - RT任务不再把整簇CPU拉到最高频率后，空闲一段时间再突然滑动时，超过帧期限的帧约为原来的两倍。如需调整，可提高`INTERACTION`的top-app下限或ADPF的`UclampMin_Init`。
-- HAL会用到AOSP的`task_profiles.json`中不存在的任务配置：启动时的`PreferIdleSet`（两条警告），以及ADPF会话增减线程时的`SCHED_QOS_*`（每次一条警告和一条错误日志）。这些调用只是不生效，不影响uclamp的调整。
