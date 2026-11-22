@@ -26,7 +26,8 @@
 #   GPU         /sys/class/devfreq/3d00000.gpu/trans_stat 每档最后一列 time(ms) 的增量，分母 = 各档 Δt 的合计
 #               （复核 PERF-2：本机 simple_ondemand 几乎只在 270 / 690 两档之间跳，所以要和 fps 一起看）。
 #               msm 没有导出 GPU 忙闲百分比，这里只有频率驻留。
-#   温度        /sys/class/thermal/thermal_zone*：cpu*-thermal 取最大、gpu-thermal、mem-thermal（°C）。本机没有 skin 区。
+#   温度        /sys/class/thermal/thermal_zone*：cpu*-thermal 取最大、gpu-thermal、mem-thermal（°C）；内核带板载热敏电阻温区时
+#               （patches/kernel/dts/0031），另记 sys-therm1–4 的最大值（t_board）。降频主要由这四路触发，但各路的降频点不同；没有这些温区时该列为空。
 #   降频        /sys/class/thermal/cooling_device*/cur_state（cpufreq-cpu0 / cpufreq-cpu4 / devfreq-3d00000.gpu），>0 = 温控在压频。
 #   电池        gaokun-ec-battery 的 capacity 与 current_now（µA，原始值，符号以 EC 为准）。
 #
@@ -106,7 +107,8 @@ delta() {
     sec == "@CPU0" || sec == "@CPU4" { k = sec ":" $1; if (f == 1) p[k] = $2; else { d = $2 - p[k]; fr[sec, ++nf[sec]] = $1; dt[sec, nf[sec]] = d } }
     sec == "@GPU" && /^[ *]*[0-9]+:/ { fq = $1; sub(/^\*/, "", fq); if (fq == "") fq = $2; sub(/:$/, "", fq); k = "G:" fq
         if (f == 1) p[k] = $NF; else { gf[++ng] = fq; gd[ng] = $NF - p[k] } }
-    f == 2 && sec == "@THERM" { t = $2 / 1000; if ($1 ~ /^cpu[0-9]+-thermal$/ && t > tc) tc = t; if ($1 == "gpu-thermal") tg = t; if ($1 == "mem-thermal") tm = t }
+    f == 2 && sec == "@THERM" { t = $2 / 1000; if ($1 ~ /^cpu[0-9]+-thermal$/ && t > tc) tc = t; if ($1 == "gpu-thermal") tg = t; if ($1 == "mem-thermal") tm = t
+        if ($1 ~ /^sys-therm[1-4]-thermal$/ && (!hb || t > tb)) { tb = t; hb = 1 } }
     f == 2 && sec == "@COOL" { cool[$1] = $2 }
     f == 2 && sec == "@BAT" { b[++nb] = $1 }
     sec == "@UP" { up[f] = $1 }
@@ -119,13 +121,13 @@ delta() {
         tot = 0; sw = 0; mx = 0; top = 0
         for (i = 1; i <= ng; i++) { tot += gd[i]; sw += gf[i] * gd[i]; if (gf[i] + 0 > mx) { mx = gf[i] + 0; top = gd[i] } }
         printf "%.0f,%.1f,", tot ? sw / tot / 1e6 : 0, tot ? 100 * top / tot : 0
-        printf "%.1f,%.1f,%.1f,", tc, tg, tm
+        printf "%.1f,%.1f,%.1f,%s,", tc, tg, tm, hb ? sprintf("%.1f", tb) : ""
         printf "%d,%d,%d,", cool["cpufreq-cpu0"], cool["cpufreq-cpu4"], cool["devfreq-3d00000.gpu"]
         printf "%s,%s,%.2f\n", b[1], b[2], up[2] - up[1]
     }' "$1" "$2"
 }
 
-echo "t_s,fps,frames,gap,cpu0_mhz,cpu0_top_pct,cpu4_mhz,cpu4_top_pct,gpu_mhz,gpu_max_pct,t_cpu_max,t_gpu,t_mem,cool_cpu0,cool_cpu4,cool_gpu,bat_cap,bat_cur_ua,dt_s" > "$OUT/samples.csv"
+echo "t_s,fps,frames,gap,cpu0_mhz,cpu0_top_pct,cpu4_mhz,cpu4_top_pct,gpu_mhz,gpu_max_pct,t_cpu_max,t_gpu,t_mem,t_board,cool_cpu0,cool_cpu4,cool_gpu,bat_cap,bat_cur_ua,dt_s" > "$OUT/samples.csv"
 : > "$OUT/frames.txt"
 TS0=$(timestats_frames)
 A "$SNAP" > "$TMPD/first.txt"; cp "$TMPD/first.txt" "$TMPD/prev.txt"
@@ -190,8 +192,11 @@ A "$SNAP" > "$TMPD/last.txt"
     echo "整段（首个快照 → 最后一个）："
     D=$(delta "$TMPD/first.txt" "$TMPD/last.txt")
     echo "$D" | awk -F, '{ printf "  CPU0 平均 %s MHz（最高档 %s%%），CPU4 平均 %s MHz（最高档 %s%%）\n  GPU 平均 %s MHz（最高档 %s%%）\n", $1, $2, $3, $4, $5, $6 }'
-    awk -F, 'NR > 1 { if ($11 > mc) mc = $11; if ($12 > mg) mg = $12; if ($13 > mm) mm = $13; if ($14 + $15 + $16 > 0) { thr++; ts += $19 } }
-             END { printf "  最高温：CPU %.1f °C、GPU %.1f °C、内存 %.1f °C\n  温控压频：%d 个采样行（约 %.0f 秒）cooling_device > 0\n", mc, mg, mm, thr, ts }' "$OUT/samples.csv"
+    awk -F, 'NR > 1 { if ($11 > mc) mc = $11; if ($12 > mg) mg = $12; if ($13 > mm) mm = $13; if ($14 != "" && (!hb || $14 > mb)) { mb = $14; hb = 1 }
+                      if ($15 + $16 + $17 > 0) { thr++; ts += $20 } }
+             END { printf "  最高温：CPU %.1f °C、GPU %.1f °C、内存 %.1f °C", mc, mg, mm
+                   if (hb) printf "、板载热敏电阻（sys-therm1–4）%.1f °C", mb
+                   printf "\n  温控压频：%d 个采样行（约 %.0f 秒）cooling_device > 0\n", thr, ts }' "$OUT/samples.csv"
 } | tee "$OUT/summary.txt"
 rm -rf "$TMPD"
 echo "产物：$OUT/"
