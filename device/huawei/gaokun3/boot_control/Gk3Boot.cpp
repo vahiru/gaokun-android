@@ -56,9 +56,9 @@
  * ── 导出的属性（vendor_gaokun3_prop，Parts = system_app 能读：sepolicy/vendor_gaokun3_props.te）──
  *   vendor.gaokun3.bootentry.via       gk3boot | gk3prev | direct（这次开机经过谁）
  *   vendor.gaokun3.bootentry.event     ro.boot.gk3boot.event 原样（none / fallback / bcab_invalid / forced）
- *   vendor.gaokun3.bootentry.notify    要通知的事件，逗号分隔（fallback、boot_corrupt、bcb_dropped、wipe_failed、
- *                                      refused_merging、bootloop、noslot）；取自 GK3 事件环里没通知过的，
- *                                      记录无效（观察模式）时退回 cmdline 的 event
+ *   vendor.gaokun3.bootentry.notify    要通知的事件，逗号分隔（fallback、default_reset、intent_dropped，见 Interesting()）；
+ *                                      取自 GK3 事件环里没通知过的，记录无效（观察模式）时退回 cmdline 的 event；
+ *                                      其余新事件只写进 logcat
  *   vendor.gaokun3.bootentry.bypassed  1 = 入口已部署、这次却没经过它（计数用完回落直连 / 菜单里手选直连 / fail-open）
  *   vendor.gaokun3.bootentry.streak    清零之前的 boot_streak（没有记录时为空）
  *   vendor.gaokun3.bootentry.mode      对齐之后 ESP 上现役入口的模式：off / observe / action / unknown
@@ -190,19 +190,19 @@ int BlkFlush(void* ctx) {
     return fsync(*static_cast<int*>(ctx)) == 0 ? 0 : -1;
 }
 
+// 只有Parts（BootEntryNotifier）有专门通知的事件才放进notify属性。
 bool Interesting(uint16_t code) {
     switch (code) {
         case GK3_EV_FALLBACK:
-        case GK3_EV_BOOT_CORRUPT:
-        case GK3_EV_BCB_DROPPED:
-        case GK3_EV_WIPE_FAILED:
-        case GK3_EV_REFUSED_MERGING:
-        case GK3_EV_BOOTLOOP:
-        case GK3_EV_NOSLOT:
         case GK3_EV_DEFAULT_RESET:    // S15：LoaderEntryDefault 被入口删掉（= 默认回到 Android）
         case GK3_EV_INTENT_DROPPED:   // S15："重启到 Windows" / 关机进 Windows / 设默认没执行
             return true;
-        default:  // migrated / bcb_ignored / to_windows / default_set 只是记录（后两样是用户自己要的），不打扰用户
+        // wipe_failed / refused_merging / bootloop / noslot：执行端已在屏幕上显示过（执行端菜单，或擦除时的
+        // "FACTORY RESET REFUSED / NOT DONE"），回到Android后再通知没有新的信息。
+        // bcb_dropped不上屏幕：首次迁移清掉的是从未执行过的旧请求，否则是入口不认识的命令（只有工具会写），
+        // 提示了用户也无法补救。
+        // migrated / bcb_ignored / to_windows / default_set 只是记录（后两样是用户自己要的）。
+        default:
             return false;
     }
 }
@@ -299,11 +299,12 @@ RecResult ClearStreakAndTakeEvents() {
                     if (ev[i].flags & GK3_EVF_NOTIFIED) continue;
                     pending = true;
                     upto = std::max(upto, ev[i].seq);
-                    if (!Interesting(ev[i].code)) continue;
+                    // 每个新事件都写进logcat（bugreport里查得到），只有Interesting()的才交给Parts通知
                     std::string name = gk3_ev_name(static_cast<gk3_ev_code>(ev[i].code));
-                    if (std::find(r.notify.begin(), r.notify.end(), name) == r.notify.end()) r.notify.push_back(name);
                     LOG(INFO) << "gk3boot: event seq=" << ev[i].seq << " " << name << " slot=" << unsigned(ev[i].slot)
                               << " aux=" << ev[i].aux;
+                    if (!Interesting(ev[i].code)) continue;
+                    if (std::find(r.notify.begin(), r.notify.end(), name) == r.notify.end()) r.notify.push_back(name);
                 }
                 if (r.streak == 0 && !pending) return false;  // 正常开机的常态：一个字节都不写
                 gk3_rec_set_boot_streak(rec, 0);
