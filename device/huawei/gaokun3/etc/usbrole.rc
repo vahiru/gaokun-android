@@ -59,7 +59,8 @@ on property:vendor.gaokun3.serialno=* && property:ro.serialno=""
     setprop ro.serialno ${vendor.gaokun3.serialno}
 
 # 切 host 失败（A6：待机后回插 port0 坏口）时脚本置 vendor.gaokun3.usbrole.broken=1、成功时清 0 ——
-# 失败就一直持有 wakelock，这次开机余下的时间整机不再睡（v1.0 PWR-4）。Parts 的 UsbPortNotifier 读它，亮屏时弹常驻通知请用户重启。
+# 失败就一直持有 wakelock，这次开机余下的时间整机不再睡（v1.0 PWR-4）。这个属性不再发通知：待机后 port0 失灵已由
+# vreg_l9d 常开（patches/kernel/dts/0014）解决。
 on property:persist.vendor.gaokun3.allow_suspend=1 && property:debug.tracing.screen_state=1
     start gaokun3_role_host
 

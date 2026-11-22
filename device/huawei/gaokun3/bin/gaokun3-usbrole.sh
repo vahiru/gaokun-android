@@ -37,7 +37,8 @@ has_downstream() {
 
 # PWR-4 止损：切 host 失败（A6：待机后回插 port0，xhci 一律 -110）时置 1，确认 host 成功时清 0。
 #   USB 端口 HAL 也会设它（我方供电、切 host 后 xhci 没起来，usb/Follow.cpp）。
-#   不持久 —— 口坏了要重启才好，重启后它自然没了。Parts 据此发"USB 口异常，重启后恢复"的通知（UsbPortNotifier）。
+#   不持久 —— 口坏了要重启才好，重启后它自然没了。不发通知：待机后 port0 失灵已由 vreg_l9d 常开（patches/kernel/dts/0014）解决；
+#   HAL 读它，避免在 host 没起来时误报反向供电。
 BROKEN=vendor.gaokun3.usbrole.broken
 
 # ── USB-2（v1.0，2026-10-05）：port0 在 host 时让 adbd 的 USB 传输停下 ──────────────

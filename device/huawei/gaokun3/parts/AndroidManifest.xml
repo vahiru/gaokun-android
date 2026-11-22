@@ -290,8 +290,7 @@
             </intent-filter>
         </service>
 
-        <!-- USB-C 口（port0）的两条提示（v1.0 PWR-4 / USB-1）：读 usbrole 设的
-             vendor.gaokun3.usbrole.broken / .reversed，亮屏时每 3 秒看一次。
+        <!-- USB-C 口（port0）的反向供电提示：读 USB 端口 HAL 设的 vendor.gaokun3.usbrole.reversed，亮屏时每 3 秒看一次。
              两个都写全限定类名（理由同上面的 activity）；不导出 —— 只有本应用自己（与系统同一个 uid）会启动它。 -->
         <!-- directBootAware：锁屏解锁之前（LOCKED_BOOT_COMPLETED）就要能跑，见 BootReceiver 顶部（2026-10-05）。 -->
         <service

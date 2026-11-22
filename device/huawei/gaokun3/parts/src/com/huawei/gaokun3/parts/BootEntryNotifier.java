@@ -4,8 +4,10 @@
  * 数据全来自 boot_control HAL 的开机完成线程（device/huawei/gaokun3/boot_control/Gk3Boot.cpp）设的
  * vendor.gaokun3.bootentry.*（vendor_gaokun3_prop，sepolicy 给了 system_app 读）：
  *   .done      本次开机的令牌；HAL 最后写它 ⇒ 有值 = 其余几项都已就绪
- *   .notify    要通知的事件，逗号分隔（fallback / bcb_dropped / boot_corrupt / wipe_failed / …）。
- *              HAL 取的是 GK3 事件环里【没通知过】的那几条、并当场置"已通知" ⇒ 同一件事只会出现在一次开机里
+ *   .notify    要通知的事件，逗号分隔（fallback / intent_dropped / default_reset / loader_replaced）。
+ *              HAL 取的是 GK3 事件环里【没通知过】的那几条、并当场置"已通知" ⇒ 同一件事只会出现在一次开机里。
+ *              其余事件（bcb_dropped、wipe_failed、bootloop等）只记在事件环和logcat里，原因见HAL的Interesting()。
+ *              HAL只把上面四种放进.notify，认不出的事件这里也不通知
  *   .bypassed  1 = 入口已部署、这次开机却没经过它
  *
  * ★ 开机后轮询 .done（每 2 秒，最多 10 分钟）而不是一直挂着：HAL 只在 sys.boot_completed=1 之后干一次活，
@@ -19,7 +21,7 @@
  *
  * 判据（⬜ 未编译、未上机）：
  *   · 人为造一条：adb root 后 setprop vendor.gaokun3.bootentry.notify fallback、再 setprop …done test1，
- *     然后 am startservice -n com.huawei.gaokun3.parts/.BootEntryNotifier → 通知栏出现"已自动退回旧版本"；
+ *     然后 am startservice -n com.huawei.gaokun3.parts/.BootEntryNotifier → 通知栏出现"系统更新失败"；
  *   · E8（真 OTA 回滚演练）回到旧槽后、锁屏解锁之前通知就在。
  */
 package com.huawei.gaokun3.parts;
@@ -51,8 +53,6 @@ public class BootEntryNotifier extends Service {
 
     private static final String CHANNEL = "boot_entry";
     private static final int ID_FALLBACK = 11;
-    private static final int ID_BCB_DROPPED = 12;
-    private static final int ID_OTHER = 13;
     private static final int ID_BYPASSED = 14;
     // S15 双系统
     private static final int ID_INTENT_DROPPED = 15;
@@ -134,19 +134,11 @@ public class BootEntryNotifier extends Service {
         ch.setDescription(getString(R.string.boot_entry_channel_desc));
         nm.createNotificationChannel(ch);
 
-        StringBuilder other = new StringBuilder();
         for (String ev : notify.split(",")) {
             ev = ev.trim();
-            if (ev.isEmpty()) {
-                continue;
-            }
             if ("fallback".equals(ev)) {
-                String slot = SystemProperties.get("ro.boot.slot_suffix", "");
                 post(nm, ID_FALLBACK, getString(R.string.boot_entry_fallback_title),
-                        getString(R.string.boot_entry_fallback_text, slot));
-            } else if ("bcb_dropped".equals(ev)) {
-                post(nm, ID_BCB_DROPPED, getString(R.string.boot_entry_bcb_dropped_title),
-                        getString(R.string.boot_entry_bcb_dropped_text));
+                        getString(R.string.boot_entry_fallback_text));
             } else if ("intent_dropped".equals(ev)) {   // S15：入口作废了"重启到 Windows" / 关机进 Windows / 设默认
                 post(nm, ID_INTENT_DROPPED, getString(R.string.boot_entry_intent_dropped_title),
                         getString(R.string.boot_entry_intent_dropped_text));
@@ -156,16 +148,8 @@ public class BootEntryNotifier extends Service {
             } else if ("loader_replaced".equals(ev)) {  // S15：Windows 换掉了回落路径上的 systemd-boot（只通知）
                 post(nm, ID_LOADER_REPLACED, getString(R.string.boot_entry_loader_replaced_title),
                         getString(R.string.boot_entry_loader_replaced_text));
-            } else {
-                if (other.length() > 0) {
-                    other.append(", ");
-                }
-                other.append(ev);
             }
-        }
-        if (other.length() > 0) {
-            post(nm, ID_OTHER, getString(R.string.boot_entry_other_title),
-                    getString(R.string.boot_entry_other_text, other.toString()));
+            // 认不出的事件不通知：notify原值已在上面的logcat里
         }
         if (bypassed) {
             post(nm, ID_BYPASSED, getString(R.string.boot_entry_bypassed_title),

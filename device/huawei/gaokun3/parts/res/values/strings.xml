@@ -26,24 +26,18 @@
         <item>histen</item>
     </string-array>
     <string name="speaker_fx_note">Experimental. Only the built-in speakers are processed; headphones, Bluetooth and USB audio are never touched. Bass enhancement processes everything the speakers play, games included. Huawei Histen processes media (music, video) only, and games that use low-latency audio bypass it. Changes apply within about a second, except that Histen takes effect from the next playback. If the sound is distorted or cuts out, turn it off.</string>
-    <!-- USB-C port notices (v1.0 PWR-4 / USB-1, UsbPortNotifier). port0 = the port next to the power button. -->
-    <string name="usb_port_channel">USB-C port</string>
-    <string name="usb_port_channel_desc">Problems with the USB-C port next to the power button</string>
-    <string name="usb_port_broken_title">USB-C port stopped working</string>
-    <string name="usb_port_broken_text">The USB-C port next to the power button failed after standby. USB data and standby will come back after a restart; until then the tablet will not go to sleep and keeps using battery.</string>
-    <string name="usb_port_reversed_title">USB cable connected the wrong way round</string>
-    <string name="usb_port_reversed_text">The tablet is powering the other device and no data connection was made. If this is a computer (USB debugging, file transfer), unplug the cable and plug it in again.</string>
-    <!-- Unified boot entry (gk3boot) notices (2026-10-05, S9; BootEntryNotifier). -->
-    <string name="boot_entry_channel">Boot loader</string>
-    <string name="boot_entry_channel_desc">Notices from the boot entry (gk3boot), such as falling back to the previous system after a failed update</string>
-    <string name="boot_entry_fallback_title">Rolled back to the previous version</string>
-    <string name="boot_entry_fallback_text">The system installed by the last update failed to start, so the boot entry automatically went back to the previous version (now running slot %1$s). You can check for updates and try again; if this keeps happening, please report it.</string>
-    <string name="boot_entry_bcb_dropped_title">A pending reset request was cancelled</string>
-    <string name="boot_entry_bcb_dropped_text">A factory reset or recovery request that was still pending when the boot entry was installed has been cancelled and was not carried out. If you still want it, please start it again.</string>
-    <string name="boot_entry_other_title">The boot entry recorded a problem</string>
-    <string name="boot_entry_other_text">Before this start-up the boot entry recorded: %1$s. The system started normally; if this keeps happening, please report it.</string>
-    <string name="boot_entry_bypassed_title">This start-up bypassed the boot entry</string>
-    <string name="boot_entry_bypassed_text">The boot entry (gk3boot) is installed, but this start-up used the direct boot item instead: either the boot entry failed to start several times in a row and was skipped automatically, or the direct item was picked in the boot menu. A failed system update will not be rolled back automatically during this start-up. If this appears on every start-up, please report it.</string>
+    <!-- Notifications about USB-C port issues -->
+    <string name="usb_port_channel">USB-C port issues</string>
+    <string name="usb_port_channel_desc">Notifications about USB-C port issues</string>
+    <string name="usb_port_reversed_title">USB-C port is supplying power</string>
+    <string name="usb_port_reversed_text">The tablet is supplying power to another device without a data connection.</string>
+    <!-- Notifications about startup issues -->
+    <string name="boot_entry_channel">Startup issues</string>
+    <string name="boot_entry_channel_desc">Notifications about startup issues</string>
+    <string name="boot_entry_fallback_title">System update failed</string>
+    <string name="boot_entry_fallback_text">After the last system update, the new version failed to start, and the previous version was restored automatically. Please report this to the developers.</string>
+    <string name="boot_entry_bypassed_title">This startup did not use the default boot entry</string>
+    <string name="boot_entry_bypassed_text">If this notification keeps appearing, please report it to the developers.</string>
     <!-- Touch feel switch (2026-10-25, TouchModeSettingsActivity / TouchModeTileService), injected into Settings > System. -->
     <string name="touch_mode_title">Touch feel</string>
     <string name="touch_mode_summary">Game mode (no palm rejection) or everyday mode (palm rejection)</string>
