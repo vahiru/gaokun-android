@@ -26,6 +26,9 @@ cc_binary {
         //    （compatibility_matrix.202504.xml）都写着 <version>3</version>，
         //    对不上开机就 VINTF 校验失败。
         "android.hardware.thermal-V3-ndk",
+        // Power HAL（lineage-libperfmgr）的扩展接口，用于开关接电源模式。与HAL一样用V1；
+        // 它在hardware/google/interfaces这个Soong命名空间里，所以写全名。
+        "//hardware/google/interfaces:pixel-power-ext-V1-ndk",
         "libbase",
     ],
     cflags: ["-Wall", "-Werror"],

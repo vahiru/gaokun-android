@@ -551,7 +551,9 @@ OUT="${1:?用法: $0 <kernel-out-dir>}"
 #   · UCLAMP_BUCKETS_COUNT：uclamp按桶聚合钳位值，5个桶时每桶宽20%，20个桶时每桶宽5%，与GKI
 #     相同。同一个桶中钳位值较高的任务离开后，桶内其余可运行任务仍按该值提升，直到桶空；桶越窄，
 #     多提升的幅度越小。Power HAL（power/powerhint.json）为top-app分组（cpu.uclamp.min）与ADPF
-#     会话的线程设置uclamp下限，两者的值可能落进同一个桶。
+#     会话的线程设置uclamp下限，两者的值可能落进同一个桶。用电池时它还给background与
+#     foreground_window分组设上限（cpu.uclamp.max）：5个桶时foreground_window的80.66%与默认的100%
+#     在同一个桶里，同一核心上有不受限的任务与它同时可运行后，上限要等桶里没有可运行的任务才恢复。
 #   · KFENCE：按采样间隔抽取少量分配放入带保护页的内存池，越界与释放后使用只打印报告，
 #     不触发panic。采样间隔与对象数取GKI的值（500 ms、63个，内存池约0.5 MB）。
 #   · WQ_WATCHDOG：工作队列超过30秒没有进展时打印告警与调用栈；BOOTPARAM_WQ_STALL_PANIC保持0。

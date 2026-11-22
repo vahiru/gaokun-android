@@ -95,10 +95,10 @@ on boot
     #   放在 on boot（晚于 init.rc 的 on init copy）：已经在这两个 cpuset 里的进程随 cpus 一起迁走，不怕时序。
     #   SELinux：/dev/cpuset 是 cgroup 类型（refs/lineage-sepolicy/private/genfs_contexts:121），
     #   vendor_init 有 cgroup:file w_file_perms（private/vendor_init.te:46）⇒ 不用加规则。
-    #   Power HAL（lineage-libperfmgr）只按提示改频率上下限和top-app的uclamp，不改cpuset。
-    #   ⬜ 未上机。判据：`cat /dev/cpuset/background/cpus /dev/cpuset/system-background/cpus` = 0-3、0-3，
-    #   top-app / foreground 仍 0-7；`grep Cpus_allowed_list /proc/$(pidof -s com.android.providers.media.module)/status`
-    #   之类后台进程 = 0-3；游戏帧率不低于改前（PERF-2 的 game-perf.sh 对照一次）。
+    #   Power HAL（lineage-libperfmgr）按提示与默认值改频率上下限、top-app的uclamp下限与background、
+    #   foreground_window的uclamp上限，不改cpuset。
+    #   已上机核对（1.0.0-rc.4）：background、system-background为0-3，top-app、foreground为0-7，
+    #   后台进程的Cpus_allowed_list为0-3。⬜ 游戏帧率不低于改前（PERF-2的game-perf.sh对照一次）尚未实测。
     write /dev/cpuset/background/cpus 0-3
     write /dev/cpuset/system-background/cpus 0-3
     chown system system /sys/class/backlight/ae96000.dsi.0/brightness

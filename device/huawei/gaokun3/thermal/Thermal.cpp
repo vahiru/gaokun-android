@@ -19,10 +19,15 @@
  *   与电源状态改写它们（数值见kSetA、kSetB与kPerf*）。降频本身仍由内核thermal core完成，
  *   这里只改降频点，并在改写后从内核读回实际值来计算SKIN阈值。
  *
+ * ★ 接电源与用电池的CPU设置：Windows的处理器电源管理在接电源时给两类核心设较高的性能下限，用电池时
+ *   降低下限，并限制后台线程与部分非焦点窗口的频率。本机由Power HAL（lineage-libperfmgr）按power/powerhint.json的AC_POWER模式调整，
+ *   这里只按gaokun-ec-adapter的online通过Power HAL的扩展接口开关这个模式（见AcPowerHint）。
+ *
  * ★ 内核的最后一道闸：8个cpu温区各有85 °C passive（patches/kernel/dts/0002）和110 °C critical。
  *   CPU/GPU的SHUTDOWN定在105，比内核critical低：先由Android有序关机，再轮到内核紧急断电。
  */
 #include <aidl/android/hardware/thermal/BnThermal.h>
+#include <aidl/google/hardware/power/extension/pixel/IPowerExt.h>
 #include <android-base/file.h>
 #include <android-base/logging.h>
 #include <android-base/parseint.h>
@@ -35,8 +40,10 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -45,6 +52,7 @@
 
 namespace aidl::android::hardware::thermal::impl::gaokun3 {
 
+using ::aidl::google::hardware::power::extension::pixel::IPowerExt;
 using ::android::base::ReadFileToString;
 using ::android::base::Trim;
 
@@ -82,6 +90,9 @@ static constexpr float kPerfTh1 = 60.0f, kPerfTh2 = 64.0f, kPerfTh3 = 68.0f;
 static constexpr char kPerfModeProp[] = "vendor.gaokun3.perf_mode";
 // EC的电源适配器节点。无法读取时按未接电源处理（使用开机默认值A）。
 static constexpr char kAdapterOnline[] = "/sys/class/power_supply/gaokun-ec-adapter/online";
+// Power HAL及其扩展接口里接电源模式的名称，与power/powerhint.json一致。
+static constexpr char kPowerHal[] = "android.hardware.power.IPower/default";
+static constexpr char kAcPowerMode[] = "AC_POWER";
 static constexpr const char* kBoardZones[] = {"sys-therm1-thermal", "sys-therm2-thermal",
                                               "sys-therm3-thermal", "sys-therm4-thermal"};
 // 板载温区SKIN阈值的SHUTDOWN：低于内核在sys-therm1/2/4上的100 °C紧急关机点。
@@ -177,11 +188,139 @@ static Levels BoardLevels(float t) {
     return {NAN, t - 2.0f, t, t + 4.0f, t + 8.0f, t + 14.0f, kSkinShutdown};
 }
 
+static bool AdapterOnline() {
+    std::string online;
+    return ReadTrimmed(kAdapterOnline, &online) && online == "1";
+}
+
+// 按电源状态开关Power HAL的AC_POWER模式。电源状态需连续两次读数一致才发送，启动后的第一次也是
+// 如此。Power HAL重启后模式状态随之丢失，所以监听它的binder死亡，重新连上后按当前状态再发送一次。
+// Power HAL明确没有扩展接口或不支持这个模式时（例如AOSP示例HAL），直到它下次重启前不再尝试；
+// 调用本身失败时下一轮重试。连接时的几次同步调用没有超时，所以连接与发送都在单独的线程上进行：
+// 轮询线程只交出读数，Power HAL无响应时，温控等级的上报与降频点档位的切换不受影响。工作线程忙时
+// 只保留最近一次读数，所以等待Power HAL期间电源状态的变化要在它恢复后再确认两轮才发送。
+class AcPowerHint {
+  public:
+    AcPowerHint() : death_(AIBinder_DeathRecipient_new(OnDied)) {
+        // cookie非空而未设置onUnlinked回调时，libbinder_ndk每次链接都会记录警告。cookie指向本对象，
+        // 本对象与进程同寿，回调无需释放任何资源。
+        AIBinder_DeathRecipient_setOnUnlinked(death_.get(), [](void*) {});
+        worker_ = std::thread([this] { Run(); });
+        worker_.detach();
+    }
+
+    // 由轮询线程调用，不等待：只记下本次读到的电源状态，交给工作线程处理。
+    void Post(bool adapter) {
+        {
+            std::lock_guard<std::mutex> lk(mutex_);
+            reading_ = adapter;
+            ++posted_;
+        }
+        cv_.notify_one();
+    }
+
+  private:
+    void Run() {
+        uint64_t handled = 0;
+        while (true) {
+            bool adapter;
+            {
+                std::unique_lock<std::mutex> lk(mutex_);
+                cv_.wait(lk, [&] { return posted_ != handled; });
+                adapter = reading_;
+                handled = posted_;
+            }
+            Update(adapter);
+        }
+    }
+
+    // 只在工作线程上调用，adapter为最近一次读到的电源状态。
+    void Update(bool adapter) {
+        const bool stable = last_read_.has_value() && *last_read_ == adapter;
+        last_read_ = adapter;
+        if (dead_.exchange(false)) {
+            power_ = ndk::SpAIBinder();
+            ext_ = nullptr;
+            unsupported_ = false;
+            failed_ = false;
+            sent_.reset();
+        }
+        if (!stable || !Connect() || sent_ == adapter) return;
+        ndk::ScopedAStatus st = ext_->setMode(kAcPowerMode, adapter);
+        if (!st.isOk()) {
+            // 多为Power HAL恰好退出；死亡通知随后到达，下一轮重新连接。
+            LOG(ERROR) << "setMode(" << kAcPowerMode << ") failed: " << st.getDescription();
+            return;
+        }
+        sent_ = adapter;
+        LOG(INFO) << "power mode " << kAcPowerMode << (adapter ? " on" : " off");
+    }
+
+    // 在binder线程上调用。
+    static void OnDied(void* cookie) { static_cast<AcPowerHint*>(cookie)->dead_ = true; }
+
+    bool Connect() {
+        if (ext_ != nullptr) return true;
+        if (unsupported_) return false;
+        // 不阻塞：Power HAL尚未注册时下一轮再试。
+        ndk::SpAIBinder power(AServiceManager_checkService(kPowerHal));
+        if (power.get() == nullptr) return false;
+        // 同一个binder只链接一次死亡通知；调用失败后重试时不重复链接。
+        if (power.get() != power_.get()) {
+            if (AIBinder_linkToDeath(power.get(), death_.get(), this) != STATUS_OK) return false;
+            power_ = power;
+        }
+        AIBinder* raw = nullptr;
+        if (AIBinder_getExtension(power.get(), &raw) != STATUS_OK) return Failed("getExtension");
+        if (raw == nullptr) return Unsupported();
+        ndk::SpAIBinder ext_binder(raw);
+        std::shared_ptr<IPowerExt> ext = IPowerExt::fromBinder(ext_binder);
+        // fromBinder会向扩展接口的binder查询接口描述符；对方已退出时同样返回空，这时等死亡通知后重连。
+        if (ext == nullptr) {
+            return AIBinder_isAlive(ext_binder.get()) ? Unsupported() : Failed("fromBinder");
+        }
+        bool supported = false;
+        if (!ext->isModeSupported(kAcPowerMode, &supported).isOk()) return Failed("isModeSupported");
+        if (!supported) return Unsupported();
+        ext_ = ext;
+        failed_ = false;
+        return true;
+    }
+
+    bool Unsupported() {
+        LOG(WARNING) << kPowerHal << " does not support mode " << kAcPowerMode;
+        unsupported_ = true;
+        return false;
+    }
+
+    // 日志只记一次，直到连接成功或Power HAL重启。
+    bool Failed(const char* call) {
+        if (!failed_) LOG(ERROR) << call << " on " << kPowerHal << " failed; retrying";
+        failed_ = true;
+        return false;
+    }
+
+    ndk::ScopedAIBinder_DeathRecipient death_;
+    std::atomic<bool> dead_{false};
+    ndk::SpAIBinder power_;  // 持有引用，死亡通知才保持有效
+    std::shared_ptr<IPowerExt> ext_;
+    bool unsupported_ = false;
+    bool failed_ = false;  // 已记过调用失败的日志
+    std::optional<bool> last_read_;
+    std::optional<bool> sent_;  // 已发送给当前Power HAL的状态
+    // 轮询线程交给工作线程的读数
+    std::mutex mutex_;
+    std::condition_variable cv_;
+    bool reading_ = false;
+    uint64_t posted_ = 0;
+    std::thread worker_;
+};
+
 class Thermal : public BnThermal {
   public:
     Thermal() {
         Discover();
-        UpdateTripProfile();
+        UpdateTripProfile(AdapterOnline());
         poller_ = std::thread([this] { PollLoop(); });
         poller_.detach();
     }
@@ -406,11 +545,10 @@ class Thermal : public BnThermal {
 
     // 按性能模式属性与电源状态选出档位；档位变化需连续两次读数一致才生效（首次除外），
     // 以免插头接触不良时反复改写降频点。写入后无论成败都从内核读回降频点更新SKIN阈值。
-    void UpdateTripProfile() {
+    // adapter为本轮读到的电源状态。
+    void UpdateTripProfile(bool adapter) {
         if (!board_skin_) return;
         const bool perf = ::android::base::GetProperty(kPerfModeProp, "") == "performance";
-        std::string online;
-        const bool adapter = ReadTrimmed(kAdapterOnline, &online) && online == "1";
         // 性能模式下sys-therm3的GPU降频点与sys-therm4仍随电源状态变化，所以档位键包含两者。
         const int key = (perf ? 2 : 0) + (adapter ? 1 : 0);
         if (key == profile_) {
@@ -568,7 +706,9 @@ class Thermal : public BnThermal {
         std::vector<ThrottlingSeverity> last(zones_.size() + 1, ThrottlingSeverity::NONE);
         while (true) {
             std::this_thread::sleep_for(std::chrono::seconds(2));
-            UpdateTripProfile();
+            const bool adapter = AdapterOnline();  // 每次读取都是一次EC事务，每轮只读一次
+            UpdateTripProfile(adapter);
+            ac_hint_.Post(adapter);
             std::vector<Temperature> temps = Snapshot(std::nullopt, true);
             for (const auto& t : temps) {
                 size_t idx = zones_.size();  // 末位留给回退模式的合成SKIN
@@ -603,6 +743,7 @@ class Thermal : public BnThermal {
     std::mutex cb_mutex_;
     std::vector<CbEntry> cbs_;
     std::thread poller_;
+    AcPowerHint ac_hint_;
 };
 
 }  // namespace aidl::android::hardware::thermal::impl::gaokun3
