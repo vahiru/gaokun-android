@@ -103,6 +103,7 @@ KPATCHES=(
     kernel/wifi/0025-wifi-ath11k-cover-a-restart-that-fails-and-a-suspend-that-fails-after-it.patch
     kernel/wifi/0026-wifi-ath11k-handle-a-failed-power-up-in-a-reset.patch
     kernel/wifi/0027-wifi-ath11k-keep-the-system-awake-briefly-after-a-WoW-wakeup.patch
+    kernel/wifi/0028-wifi-ath11k-report-the-boottime-of-beacons-and-probe-responses.patch
 
     # ─── 4. kernel/ec-usb：华为高鲲 EC、电池、Type-C UCSI、USB Gadget 与 xHCI ───
     # 0009 与 USB 端口 HAL（device/huawei/gaokun3/usb）配套；0010 与 kernel/dts/0015 配套；
