@@ -1,0 +1,125 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] arm64: dts: qcom: sc8280xp-huawei-gaokun3: Describe the
+ S5K3L6 rear camera
+
+Some units carry a Lijing S5K3L6 module instead of the OmniVision
+OV13B10 one on the rear camera connector, with the same supplies, reset
+line, MCLK and focus actuator, at address 0x10. Describe it next to the
+OV13B10, for the camera module prober to choose between them, with a
+second endpoint on CSIPHY0.
+
+The S5K3L6 settings need a 24 MHz MCLK, and the three link frequencies
+of its modes.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ .../qcom/sc8280xp-huawei-gaokun3-camera.dtsi  | 72 ++++++++++++++-----
+ 1 file changed, 56 insertions(+), 16 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3-camera.dtsi b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3-camera.dtsi
+index bd629db171..ab2002fd9d 100644
+--- a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3-camera.dtsi
++++ b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3-camera.dtsi
+@@ -151,12 +151,14 @@ &camss {
+ 
+ 	ports {
+ 		/*
+-		 * port@0: csiphy0 -> rear OV13B10. Powered per the board's
+-		 * Windows camera power table (CAMS_RES_QRD.bin): LDO2_B 2.8V
+-		 * (vdda), LDO2_C 1.8V (vddio), GPIO92-gated rail (vddd), reset
+-		 * GPIO7, MCLK4 19.2MHz. L2B is shared with the panel's vddi
+-		 * (1.8V vote); the sensor driver raises it to 2.8V while
+-		 * powered, matching Windows.
++		 * port@0: csiphy0 -> rear camera. Units carry either an OV13B10
++		 * or an S5K3L6 module on the same connector; only one of the two
++		 * endpoints ever binds. Powered per the board's Windows camera
++		 * power table (CAMS_RES_QRD.bin): LDO2_B 2.8V (vdda), LDO2_C
++		 * 1.8V (vddio), GPIO92-gated rail (vddd), reset GPIO7, MCLK4
++		 * (19.2MHz for the OV13B10, 24MHz for the S5K3L6). L2B is shared
++		 * with the panel's vddi (1.8V vote); the sensor driver raises it
++		 * to 2.8V while powered, matching Windows.
+ 		 */
+ 		port@0 {
+ 			csiphy0_ep: endpoint@0 {
+@@ -166,6 +168,14 @@ csiphy0_ep: endpoint@0 {
+ 				data-lanes = <0 1 2 3>;
+ 				remote-endpoint = <&ov13b10_ep>;
+ 			};
++
++			csiphy0_s5k3l6_ep: endpoint@1 {
++				reg = <1>;
++
++				clock-lanes = <7>;
++				data-lanes = <0 1 2 3>;
++				remote-endpoint = <&s5k3l6_ep>;
++			};
+ 		};
+ 
+ 		/*
+@@ -206,14 +216,44 @@ voice_coil_motor: vcm@c {
+ 	};
+ 
+ 	/*
+-	 * https://source.puri.sm/Librem5/linux/-/blob/pureos/latest/drivers/media/i2c/s5k3l6xx.c
+-	 *
+-	 * poor image quality, no plan to extract downstream registers
+-	 * configuration for it. I think nobody uses camera without tuning
+-	 * to take photos. Front camera with conference is enough.
+-	 *
+-	 * This sensor has never been detected on 2023 model
++	 * Rear camera, Lijing S5K3L6 module: the other module the rear
++	 * connector may carry, with the same supplies, reset GPIO, MCLK4 and
++	 * focus actuator as the OV13B10 module, see camera@36. The Windows
++	 * settings for this module, which the driver uses, need a 24 MHz MCLK.
+ 	 */
++	camera_rear_s5k3l6: camera@10 {
++		compatible = "samsung,s5k3l6";
++		reg = <0x10>;
++		status = "fail-needs-probe";
++
++		clocks = <&camcc CAMCC_MCLK4_CLK>;
++		assigned-clocks = <&camcc CAMCC_MCLK4_CLK>;
++		assigned-clock-rates = <24000000>;
++
++		reset-gpios = <&tlmm 7 GPIO_ACTIVE_LOW>;
++
++		vdda-supply = <&vreg_l2b>;
++		vddd-supply = <&vreg_camr>;
++		vddio-supply = <&vreg_l2c>;
++
++		lens-focus = <&voice_coil_motor>;
++
++		leds = <&privacy_led>;
++		led-names = "privacy";
++
++		orientation = <1>;
++		/* Counter-clockwise, with the sensor's flips off */
++		rotation = <180>;
++
++		port {
++			s5k3l6_ep: endpoint {
++				data-lanes = <1 2 3 4>;
++				link-frequencies = /bits/ 64 <600000000 284000000 260000000>;
++				remote-endpoint = <&csiphy0_s5k3l6_ep>;
++			};
++		};
++	};
++
+ 	/*
+ 	 * Rear camera. The board's Windows driver package lists two rear modules
+ 	 * (ofilm_ov13b10 and lijing_s5k3l6); on OV13B10 units, CCI responds at
+@@ -245,9 +285,9 @@ camera_rear: camera@36 {
+ 
+ 		/*
+ 		 * Same indicator as the front camera (GPIO34, white:indicator).
+-		 * The removed s5k3l6 rear node carried it too; v4l2 lights it on
+-		 * s_stream (v4l2-subdev.c call_s_stream), so either sensor
+-		 * streaming turns it on. Not async: led_get() is not a v4l2
++		 * The S5K3L6 node carries it too; v4l2 lights it on s_stream
++		 * (v4l2-subdev.c call_s_stream), so either sensor streaming
++		 * turns it on. Not async: led_get() is not a v4l2
+ 		 * subdev, unlike flash-leds.
+ 		 */
+ 		leds = <&privacy_led>;
