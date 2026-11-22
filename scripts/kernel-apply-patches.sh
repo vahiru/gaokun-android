@@ -192,7 +192,7 @@ KPATCHES=(
     # ─── 7. kernel/camera：camcc 时钟/GDSC、camss 与前后摄传感器驱动（ov13b10 / hi846 / s5k4h7）───
     # 0003 与 kernel/dts/0005 配套，需 CONFIG_VIDEO_OV13B10=y 与 CONFIG_VIDEO_DW9714=y；
     # 0007 叠在 0003 之上，0008 叠在 0005–0006 之上。
-    # 0038（S5K4H7驱动，需CONFIG_VIDEO_S5K4H7=y）与kernel/dts/0029配套；0039叠在0004之上。
+    # 0038（S5K4H7驱动，需CONFIG_VIDEO_S5K4H7=y）与kernel/dts/0029配套；0039叠在0004之上；0040叠在0038之上。
     kernel/camera/0001-clk-qcom-camcc-sc8280xp-gdsc-wait-vals.patch
     kernel/camera/0002-clk-qcom-camcc-sc8280xp-mark-camnoc-ahb-rcgs-shared.patch
     kernel/camera/0003-media-i2c-ov13b10-of-match-and-gaokun3-power-sequence.patch
@@ -235,6 +235,7 @@ KPATCHES=(
     kernel/camera/0037-media-i2c-hi846-Allow-every-analogue-gain-step.patch
     kernel/camera/0038-media-i2c-Add-a-driver-for-the-Samsung-S5K4H7-sensor.patch
     kernel/camera/0039-media-qcom-camss-Drop-unfitted-alternative-sensors-without-waiting.patch
+    kernel/camera/0040-media-i2c-s5k4h7-Fix-mode-changes-and-system-sleep-while-powered.patch
 
     # ─── 8. kernel/audio：ASoC sc8280xp、LPASS 编解码宏、WSA883x 功放、SoundWire 与 Q6APM ───
     # 0007–0008 与 kernel/dts/0016 及 device/huawei/gaokun3/bin/audio-route.sh 配套；

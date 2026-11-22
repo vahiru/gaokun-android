@@ -1,0 +1,79 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: i2c: s5k4h7: Fix mode changes and system sleep while
+ powered
+
+The sensor stays powered for the autosuspend delay after streaming
+stops. A format change in that window, which is when a camera stack
+reconfigures, changes HBLANK between the 3264 and the 1632 pixel wide
+modes. The control core calls s_ctrl for read-only controls too, and
+s_ctrl rejected HBLANK with -EINVAL: set_fmt failed with the mode
+already switched and HBLANK and the VBLANK range left at the old mode's
+values, which a later set_fmt for the same size did not correct. Accept
+the read-only controls in s_ctrl, which have no register of their own.
+
+Refuse active format changes while streaming, which would otherwise
+rewrite the frame length of the running mode.
+
+Only runtime PM callbacks were set, so a system suspend within the
+autosuspend delay left the sensor powered through the sleep, with its
+supplies and MCLK on. Use DEFINE_RUNTIME_DEV_PM_OPS, which forces the
+runtime suspend on system sleep.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/media/i2c/s5k4h7.c | 19 +++++++++++++++----
+ 1 file changed, 15 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/media/i2c/s5k4h7.c b/drivers/media/i2c/s5k4h7.c
+index fa811ee46c..ffba28affd 100644
+--- a/drivers/media/i2c/s5k4h7.c
++++ b/drivers/media/i2c/s5k4h7.c
+@@ -422,6 +422,14 @@ static int s5k4h7_set_ctrl(struct v4l2_ctrl *ctrl)
+ 					     ctrl_handler);
+ 	int ret;
+ 
++	/*
++	 * LINK_FREQ, HBLANK and PIXEL_RATE follow the mode and have no
++	 * register of their own; set_fmt changes them while the sensor may
++	 * still be powered.
++	 */
++	if (ctrl->flags & V4L2_CTRL_FLAG_READ_ONLY)
++		return 0;
++
+ 	if (ctrl->id == V4L2_CID_VBLANK)
+ 		s5k4h7_update_exposure_range(s5k4h7, ctrl->val);
+ 
+@@ -634,6 +642,10 @@ static int s5k4h7_set_pad_format(struct v4l2_subdev *sd,
+ 	s64 hblank, vblank;
+ 	int ret;
+ 
++	if (fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE &&
++	    v4l2_subdev_is_streaming(sd))
++		return -EBUSY;
++
+ 	mode = v4l2_find_nearest_size(s5k4h7_modes, ARRAY_SIZE(s5k4h7_modes),
+ 				      width, height, fmt->format.width,
+ 				      fmt->format.height);
+@@ -1082,9 +1094,8 @@ static void s5k4h7_remove(struct i2c_client *client)
+ 	}
+ }
+ 
+-static const struct dev_pm_ops s5k4h7_pm_ops = {
+-	SET_RUNTIME_PM_OPS(s5k4h7_power_off, s5k4h7_power_on, NULL)
+-};
++static DEFINE_RUNTIME_DEV_PM_OPS(s5k4h7_pm_ops, s5k4h7_power_off,
++				 s5k4h7_power_on, NULL);
+ 
+ static const struct of_device_id s5k4h7_of_match[] = {
+ 	{ .compatible = "samsung,s5k4h7" },
+@@ -1095,7 +1106,7 @@ MODULE_DEVICE_TABLE(of, s5k4h7_of_match);
+ static struct i2c_driver s5k4h7_i2c_driver = {
+ 	.driver = {
+ 		.name = "s5k4h7",
+-		.pm = &s5k4h7_pm_ops,
++		.pm = pm_ptr(&s5k4h7_pm_ops),
+ 		.of_match_table = s5k4h7_of_match,
+ 	},
+ 	.probe = s5k4h7_probe,
