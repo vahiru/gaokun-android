@@ -27,8 +27,8 @@
         <!-- Remote Submix Audio HAL -->
         <xi:include href="r_submix_audio_policy_configuration.xml"/>
 
-        <!-- Bluetooth Audio HAL -->
-        <xi:include href="bluetooth_with_le_audio_policy_configuration_7_0.xml"/>
+        <!-- Bluetooth Audio HAL：frameworks/av的bluetooth_with_le版本加上HFP端口，见文件头 -->
+        <xi:include href="bluetooth_audio_policy_configuration.xml"/>
 
         <!-- USB Audio HAL（v1.0 AV-4）：同一个 AIDL 示例 HAL 进程里的 ModuleUsb，
              接法与声卡编号的注意点见 usb_audio_policy_configuration.xml 文件头 -->

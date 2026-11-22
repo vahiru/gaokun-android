@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 蓝牙音频模块（AIDL示例HAL的ModuleBluetooth）。
+
+     改自frameworks/av/services/audiopolicy/config/bluetooth_with_le_audio_policy_configuration_7_0.xml，
+     A2DP、助听器与LE Audio部分原样保留，只增加HFP（蓝牙耳机通话）的两个混音口、四个设备口和四条路由。
+
+     蓝牙通话走软件数据通路：SCO音频经HCI在蓝牙芯片和协议栈之间传输，CVSD由芯片编解码，mSBC与LC3由协议栈
+     编解码，PCM经蓝牙音频HAL的HFP_SOFTWARE_ENCODING/DECODING会话与本模块交换。要与以下几处一起生效：
+       * device.mk的bluetooth.sco.managed_by_audio与bluetooth.hfp.software_datapath.enabled；
+       * patches/android/hardware-interfaces/0012：HFP输出流不再受BT_SCO参数控制。
+
+     混音口的格式是ModuleBluetooth对HFP会话的约定（audio/aidl/default/bluetooth/DevicePortProxy.cpp）：
+       * 采样率固定为32 kHz（kScoMixPortFixedSampleRate），HAL再按协商出的编解码器重采样到8、16或32 kHz；
+       * 输出为立体声：16位单声道的会话在loadAudioConfig()中按立体声报给框架，写入时由HAL转成单声道。
+         写成单声道时，连接耳机后打开输出会因声道数不符而失败，SCO输出设备无法注册；
+       * 输入为单声道。 -->
+<module name="bluetooth" halVersion="2.0">
+    <mixPorts>
+        <!-- A2DP Audio Ports -->
+        <mixPort name="a2dp output" role="source"/>
+        <!-- Hearing AIDs Audio Ports -->
+        <mixPort name="hearing aid output" role="source">
+            <profile name="" format="AUDIO_FORMAT_PCM_16_BIT"
+                     samplingRates="24000 16000"
+                     channelMasks="AUDIO_CHANNEL_OUT_STEREO"/>
+        </mixPort>
+        <!-- Le Audio Audio Ports -->
+        <mixPort name="le audio output" role="source" />
+        <mixPort name="le audio broadcast output" role="source" />
+        <mixPort name="le audio input" role="sink">
+            <profile name="" format="AUDIO_FORMAT_PCM_16_BIT"
+                     samplingRates="8000 16000 24000 32000 44100 48000"
+                     channelMasks="AUDIO_CHANNEL_IN_MONO AUDIO_CHANNEL_IN_STEREO"/>
+            <profile name="" format="AUDIO_FORMAT_PCM_24_BIT_PACKED"
+                     samplingRates="8000 16000 24000 32000 44100 48000"
+                     channelMasks="AUDIO_CHANNEL_IN_MONO AUDIO_CHANNEL_IN_STEREO"/>
+            <profile name="" format="AUDIO_FORMAT_PCM_32_BIT"
+                     samplingRates="8000 16000 24000 32000 44100 48000"
+                     channelMasks="AUDIO_CHANNEL_IN_MONO AUDIO_CHANNEL_IN_STEREO"/>
+        </mixPort>
+        <!-- HFP Audio Ports -->
+        <mixPort name="hfp output" role="source">
+            <profile name="" format="AUDIO_FORMAT_PCM_16_BIT"
+                     samplingRates="32000"
+                     channelMasks="AUDIO_CHANNEL_OUT_STEREO"/>
+        </mixPort>
+        <mixPort name="hfp input" role="sink">
+            <profile name="" format="AUDIO_FORMAT_PCM_16_BIT"
+                     samplingRates="32000"
+                     channelMasks="AUDIO_CHANNEL_IN_MONO"/>
+        </mixPort>
+    </mixPorts>
+    <devicePorts>
+        <!-- A2DP Audio Ports -->
+        <devicePort tagName="BT A2DP Out" type="AUDIO_DEVICE_OUT_BLUETOOTH_A2DP" role="sink">
+            <profile name="" format="AUDIO_FORMAT_PCM_16_BIT"
+                     samplingRates="44100 48000 88200 96000"
+                     channelMasks="AUDIO_CHANNEL_OUT_STEREO"/>
+        </devicePort>
+        <devicePort tagName="BT A2DP Headphones" type="AUDIO_DEVICE_OUT_BLUETOOTH_A2DP_HEADPHONES" role="sink">
+            <profile name="" format="AUDIO_FORMAT_PCM_16_BIT"
+                     samplingRates="44100 48000 88200 96000"
+                     channelMasks="AUDIO_CHANNEL_OUT_STEREO"/>
+        </devicePort>
+        <devicePort tagName="BT A2DP Speaker" type="AUDIO_DEVICE_OUT_BLUETOOTH_A2DP_SPEAKER" role="sink">
+            <profile name="" format="AUDIO_FORMAT_PCM_16_BIT"
+                     samplingRates="44100 48000 88200 96000"
+                     channelMasks="AUDIO_CHANNEL_OUT_STEREO"/>
+        </devicePort>
+        <!-- Hearing AIDs Audio Ports -->
+        <devicePort tagName="BT Hearing Aid Out" type="AUDIO_DEVICE_OUT_HEARING_AID" role="sink"/>
+        <!-- BLE Audio Ports -->
+        <devicePort tagName="BLE Headset Out" type="AUDIO_DEVICE_OUT_BLE_HEADSET" role="sink"/>
+        <devicePort tagName="BLE Speaker Out" type="AUDIO_DEVICE_OUT_BLE_SPEAKER" role="sink"/>
+        <devicePort tagName="BLE Headset In" type="AUDIO_DEVICE_IN_BLE_HEADSET" role="source"/>
+        <devicePort tagName="BLE Broadcast Out" type="AUDIO_DEVICE_OUT_BLE_BROADCAST" role="sink"/>
+        <!-- HFP Audio Ports -->
+        <devicePort tagName="BT SCO" type="AUDIO_DEVICE_OUT_BLUETOOTH_SCO" role="sink"/>
+        <devicePort tagName="BT SCO Headset" type="AUDIO_DEVICE_OUT_BLUETOOTH_SCO_HEADSET" role="sink"/>
+        <devicePort tagName="BT SCO Car Kit" type="AUDIO_DEVICE_OUT_BLUETOOTH_SCO_CARKIT" role="sink"/>
+        <devicePort tagName="BT SCO Headset Mic" type="AUDIO_DEVICE_IN_BLUETOOTH_SCO_HEADSET" role="source"/>
+    </devicePorts>
+    <routes>
+        <route type="mix" sink="BT A2DP Out"
+               sources="a2dp output"/>
+        <route type="mix" sink="BT A2DP Headphones"
+               sources="a2dp output"/>
+        <route type="mix" sink="BT A2DP Speaker"
+               sources="a2dp output"/>
+        <route type="mix" sink="BT Hearing Aid Out"
+               sources="hearing aid output"/>
+        <route type="mix" sink="BLE Headset Out"
+               sources="le audio output"/>
+        <route type="mix" sink="le audio input"
+               sources="BLE Headset In"/>
+        <route type="mix" sink="BLE Speaker Out"
+               sources="le audio output"/>
+        <route type="mix" sink="BLE Broadcast Out"
+               sources="le audio broadcast output"/>
+        <route type="mix" sink="BT SCO"
+               sources="hfp output"/>
+        <route type="mix" sink="BT SCO Headset"
+               sources="hfp output"/>
+        <route type="mix" sink="BT SCO Car Kit"
+               sources="hfp output"/>
+        <route type="mix" sink="hfp input"
+               sources="BT SCO Headset Mic"/>
+    </routes>
+</module>

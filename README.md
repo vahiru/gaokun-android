@@ -34,7 +34,7 @@ The table below shows how the main features work in the current version. See the
 | Detachable keyboard and touchpad | ✅ | |
 | Wi-Fi | ✅ | |
 | Wi-Fi hotspot | ✅ | |
-| Bluetooth | ⚠️ | The microphone of a Bluetooth headset cannot be used in calls |
+| Bluetooth | ⚠️ | Bluetooth headsets can be used for media and calls; calls in apps have not been tested yet |
 | Speakers | ✅ | Bass enhancement or Huawei Histen can be turned on in Settings |
 | Microphones | ✅ | Beamforming, with echo cancellation and noise suppression that can be switched per scenario |
 | Headphones | ⚠️ | The microphone of a wired headset has not been tested yet |

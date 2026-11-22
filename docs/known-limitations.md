@@ -98,11 +98,6 @@ Each entry follows the same format: **Symptom** (what you will run into), **Caus
 * **Cause**: the system has no DRM module. Widevine is a closed-source Google component that requires licensing and certification, which this project cannot ship.
 * **What to do**: please watch such content on another device.
 
-### The Bluetooth headset microphone does not work in calls
-* **Symptom**: in WeChat voice calls, Tencent Meeting or in-game voice chat over a Bluetooth headset, the headset microphone does not work, and the call audio may not play through the headset either. The microphone on wired headsets has not been tested yet.
-* **Cause**: Bluetooth calls need a dedicated audio path; this machine lacks the one Qualcomm provides for phones, and no replacement has been implemented yet.
-* **What to do**: use the tablet's own microphone and speakers for calls. Listening to music over a Bluetooth headset uses a different path and is not affected.
-
 ### Messages from some apps are delayed in standby
 * **Symptom**: once the screen is off and the machine is in standby, new messages from apps that do not use Google's push service (FCM), such as WeChat and QQ, only arrive at the system's next scheduled wake-up or when you turn the screen on, usually one or two minutes late, occasionally around three. Apps that use FCM are delayed the same way on 1.0.0-rc.3 and earlier; since 1.0.0-rc.4 they can wake the system and arrive on time. Wi-Fi stays connected during standby, so there is no need to reconnect after waking.
 * **Cause**: Chinese apps have no vendor push channel on this system, so they can only fetch messages from their servers when the system is awake.
