@@ -270,10 +270,8 @@ OUT="${1:?用法: $0 <kernel-out-dir>}"
 #    但看到它出现在 .config 里不要当成配错了。
 ./scripts/config --file "$OUT/.config"     --enable MEDIA_SUPPORT     --enable MEDIA_PLATFORM_SUPPORT     --enable VIDEO_DEV     --enable V4L_MEM2MEM_DRIVERS     --enable VIDEOBUF2_DMA_CONTIG     --enable V4L2_MEM2MEM_DEV     --enable SM_VIDEOCC_8350     --enable VIDEO_QCOM_IRIS
 
-# ─── Stage 6 M22: 相机（CAMSS + 前摄 hi846）───
-# 目标是【前摄】。上游作者自己在 camera.dtsi:158-166 写明后摄 s5k3l6 "画质差、
-# 不打算提取下游寄存器配置……前摄够开会用了"，而且 "This sensor has never been
-# detected on 2023 model"。
+# ─── Stage 6 M22: 相机（CAMSS + 前后摄）───
+# 前摄为HI846或S5K4H7，后摄为OV13B10或S5K3L6，由板级探测器选择，见下文。
 #
 # ⚠️★ 又是"=m 坑"，这次 5 个（实测于设备正在跑的 .config）：
 #      I2C_QCOM_CCI=m  LEDS_GPIO=m  SC_CAMCC_8280XP=m  VIDEO_HI846=m
@@ -302,12 +300,15 @@ OUT="${1:?用法: $0 <kernel-out-dir>}"
 #
 # ★ hi846 驱动的基础修复已在 linux-gaokun-buildbot 补丁层中带上，帧率与曝光上限修复见 patches/kernel/camera/0005–0008。
 #
-# ★ 部分机器的前摄是S5K4H7模组（patches/kernel/camera/0038），与HI846装在同一位置，设备树同时描述两者
-#   （patches/kernel/dts/0029），未装配的那个探测不到传感器后退出。两个节点引用同一根复位GPIO，
-#   gpiolib会把它当作共享GPIO，只能经gpio-shared-proxy取得：GPIO_SHARED_PROXY默认=m，
-#   =m时两个前摄都一直等待代理而无法探测（HI846机器上的前摄也会消失）。
+# ★ 每个相机接口都可能装两种模组之一：前摄HI846或S5K4H7（patches/kernel/camera/0038），
+#   后摄OV13B10或S5K3L6。设备树把各模组的节点标为"fail-needs-probe"，由板级探测器
+#   HUAWEI_GAOKUN3_CAMERA_PROBER给接口上电、启用应答的那个节点，只有装配的模组的驱动会探测。
+#   探测器=m时要等模块加载，而Android不加载模块，相机节点都不会启用，所以必须=y。
+#   GPIO_SHARED_PROXY保持=y：若两个已启用的节点共用一根GPIO，gpiolib只经gpio-shared-proxy
+#   交出这根GPIO，=m时这两个设备会一直等待代理而无法探测。
 ./scripts/config --file "$OUT/.config" \
     --enable VIDEO_QCOM_CAMSS \
+    --enable HUAWEI_GAOKUN3_CAMERA_PROBER \
     --enable VIDEO_HI846 \
     --enable VIDEO_S5K4H7 \
     --enable GPIO_SHARED_PROXY \
@@ -627,7 +628,7 @@ TRANSPARENT_HUGEPAGE_MADVISE LRU_GEN LRU_GEN_ENABLED BLK_WBT
 MEDIA_SUPPORT MEDIA_PLATFORM_SUPPORT VIDEO_DEV V4L_MEM2MEM_DRIVERS
 VIDEOBUF2_DMA_CONTIG V4L2_MEM2MEM_DEV SM_VIDEOCC_8350 VIDEO_QCOM_IRIS
 PM_DEVFREQ PM_OPP PM_GENERIC_DOMAINS_OF QCOM_UBWC_CONFIG QCOM_MDT_LOADER QCOM_SCM INTERCONNECT_QCOM_SC8280XP QCOM_RPMHPD
-VIDEO_QCOM_CAMSS VIDEO_HI846 VIDEO_S5K4H7 GPIO_SHARED_PROXY VIDEO_OV13B10 VIDEO_DW9714 I2C_QCOM_CCI SC_CAMCC_8280XP LEDS_GPIO LEDS_CLASS_FLASH LEDS_QCOM_FLASH
+VIDEO_QCOM_CAMSS HUAWEI_GAOKUN3_CAMERA_PROBER VIDEO_HI846 VIDEO_S5K4H7 GPIO_SHARED_PROXY VIDEO_OV13B10 VIDEO_DW9714 I2C_QCOM_CCI SC_CAMCC_8280XP LEDS_GPIO LEDS_CLASS_FLASH LEDS_QCOM_FLASH
 VIDEOBUF2_DMA_SG MEDIA_CAMERA_SUPPORT V4L_PLATFORM_DRIVERS VIDEO_CAMERA_SENSOR
 EXPERT PM_DEBUG PM_SLEEP_DEBUG PM_ADVANCED_DEBUG DPM_WATCHDOG
 SQUASHFS NTFS3_FS NLS_UTF8 ISO9660_FS
