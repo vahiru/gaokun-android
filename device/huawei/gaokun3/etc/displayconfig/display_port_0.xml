@@ -25,11 +25,11 @@
          sys_therm2-4 (the GPU-only one on sys_therm3 included) list the panel
          next to the CPUs and the GPU, so passive cooling there lowers the
          backlight as well; the zone on sys_therm2 stops at 56 % (_MTL).
-         Android follows one SKIN sensor here, sys-therm2. The thermal HAL
-         reports MODERATE at that zone's trip and SEVERE 4 degC above it:
-         halfway to 56 % at MODERATE, 56 % from SEVERE on, in the brightness
-         scale of this file. HDR content is boosted after this cap and is not
-         limited by it. -->
+         Android follows one sensor here, so the thermal HAL reports "panel":
+         the highest level of sys-therm2-4, each reporting MODERATE at its
+         lowest trip and SEVERE 4 degC above it. Halfway to 56 % at MODERATE,
+         56 % from SEVERE on, in the brightness scale of this file. HDR
+         content is boosted after this cap and is not limited by it. -->
     <thermalThrottling>
         <brightnessThrottlingMap>
             <brightnessThrottlingPoint>
@@ -94,7 +94,7 @@
     </hdrBrightnessConfig>
     <!-- The sensor the brightness cap above follows. -->
     <tempSensor>
-        <type>SKIN</type>
-        <name>sys-therm2</name>
+        <type>DISPLAY</type>
+        <name>panel</name>
     </tempSensor>
 </displayConfiguration>
