@@ -168,7 +168,8 @@ PRODUCT_SOONG_NAMESPACES += \
 PRODUCT_PACKAGES += \
     android.hardware.power-service.lineage-libperfmgr
 PRODUCT_COPY_FILES += \
-    $(LOCAL_PATH)/power/powerhint.json:$(TARGET_COPY_OUT_VENDOR)/etc/powerhint.json
+    $(LOCAL_PATH)/power/powerhint.json:$(TARGET_COPY_OUT_VENDOR)/etc/powerhint.json \
+    $(LOCAL_PATH)/power/task_profiles.json:$(TARGET_COPY_OUT_VENDOR)/etc/task_profiles.json
 # HWUI默认不为应用的UI线程和RenderThread创建ADPF会话（frameworks/base libs/hwui/Properties.cpp，
 # debug.hwui.use_hint_manager缺省为false）；没有会话，Power HAL无从按帧耗时调整这些线程的uclamp。
 PRODUCT_VENDOR_PROPERTIES += \
