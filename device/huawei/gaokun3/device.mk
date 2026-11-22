@@ -69,11 +69,14 @@ endif
 #   要么由 crdroid-tree-fixes.py 改 common.mk（例如恢复成 WITH_SU 门控），要么接受（反正设备上已有 KSU）。
 
 # 屏幕密度
-# [measured] 1600x2560，物理 266x166 mm -> 对角 12.34"，约 245 dpi
-# 取 240（hdpi 桶），1dp=1.5px -> 1067dp 宽，平板比例合理。
-# 可对照 Galaxy Tab S7 FE（同款面板）的取值再调。
+# [measured] 1600x2560，物理尺寸166x266 mm，对角12.34"，约245 dpi。
+# 取280：1dp=1.75px，最小宽度约914dp，横屏宽度约1463dp。按物理密度取240（1067dp）时，
+# 界面在平板的观看距离下偏小；320（800dp）及以上又偏大。
+# "显示大小"的档位按默认值的0.7～1.5倍推算（SettingsLib DisplayDensityUtils，LineageOS放宽了下限），
+# 取280时为196～420。最大一档约610dp，仍不低于大屏的600dp门槛（平行视界、ignoreOrientationRequest）；
+# 默认值不低于286时，最大一档会低于600dp。
 PRODUCT_PROPERTY_OVERRIDES += \
-    ro.sf.lcd_density=240
+    ro.sf.lcd_density=280
 
 # USB gadget 控制器
 # [measured] Stage 1 实测 UDC 名就是 a600000.usb
@@ -353,7 +356,7 @@ PRODUCT_COPY_FILES += \
 
 # ------------------------------------------------- Stage 3: 图形栈
 # 全套照抄 device/linaro/dragonboard/shared/graphics/（db845c 同款），
-# 属性名/包名均为树内实名，非记忆。density 用我们实测的 240（不抄他家 160）。
+# 属性名/包名均为树内实名，非记忆。density的取值见上方"屏幕密度"（不沿用db845c的160）。
 
 # gralloc：minigbm，platform=msm 是高通 UBWC 后端
 # （external/minigbm/Android.bp 的 soong_config_variable("minigbm","platform")）
