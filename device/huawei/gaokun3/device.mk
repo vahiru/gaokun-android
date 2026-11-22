@@ -246,8 +246,8 @@ endif
 # audio_policy_configuration.xml 解析结果（main.cpp:93-99 实名核实），
 # 没有它 HAL 只注册 IConfig，audioserver 等 IModule/default 永阻塞。
 # xml 抄 cuttlefish（同款 HAL），XInclude 相对路径要求全家同目录：
-# ⓘ A17：下面四份 frameworks/av 的文件路径都还在（refs/a17/frameworks/av/services/audiopolicy/config/）。
-#   内容上 r_submix / bluetooth_with_le 两份与 16.0 相同；audio_policy_volumes.xml 与 default_volume_tables.xml
+# ⓘ A17：下面三份frameworks/av的文件路径都还在（refs/a17/frameworks/av/services/audiopolicy/config/）。
+#   内容上r_submix与16.0相同；audio_policy_volumes.xml与default_volume_tables.xml
 #   改了一处，而且是成对改的（构建机 `git diff crdroid/16.0 HEAD`，上游 2fe00dfda0 / f94288519b "[Assistant Stream]"）：
 #   AUDIO_STREAM_ASSISTANT 在 HEADSET / SPEAKER / EARPIECE / EXT_MEDIA 上改用新加的 DEFAULT_ASSISTANT_VOLUME_CURVE /
 #   DEFAULT_DEVICE_CATEGORY_HEADSET_ASSISTANT_VOLUME_CURVE。只影响「助理」音频流的音量曲线，媒体 / 通话 / 铃声不变。
@@ -256,10 +256,12 @@ PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/audio/audio_policy_configuration.xml:$(TARGET_COPY_OUT_VENDOR)/etc/audio_policy_configuration.xml \
     $(LOCAL_PATH)/audio/primary_audio_policy_configuration.xml:$(TARGET_COPY_OUT_VENDOR)/etc/primary_audio_policy_configuration.xml \
     frameworks/av/services/audiopolicy/config/r_submix_audio_policy_configuration.xml:$(TARGET_COPY_OUT_VENDOR)/etc/r_submix_audio_policy_configuration.xml \
-    frameworks/av/services/audiopolicy/config/bluetooth_with_le_audio_policy_configuration_7_0.xml:$(TARGET_COPY_OUT_VENDOR)/etc/bluetooth_with_le_audio_policy_configuration_7_0.xml \
+    $(LOCAL_PATH)/audio/bluetooth_audio_policy_configuration.xml:$(TARGET_COPY_OUT_VENDOR)/etc/bluetooth_audio_policy_configuration.xml \
     frameworks/av/services/audiopolicy/config/audio_policy_volumes.xml:$(TARGET_COPY_OUT_VENDOR)/etc/audio_policy_volumes.xml \
     frameworks/av/services/audiopolicy/config/default_volume_tables.xml:$(TARGET_COPY_OUT_VENDOR)/etc/default_volume_tables.xml \
     $(LOCAL_PATH)/audio/usb_audio_policy_configuration.xml:$(TARGET_COPY_OUT_VENDOR)/etc/usb_audio_policy_configuration.xml
+# ↑ 蓝牙那份是我们自己的：frameworks/av的bluetooth_with_le_audio_policy_configuration_7_0.xml加上HFP（蓝牙通话）的端口，
+#   与下文“蓝牙通话”一段的两个属性、patches/android/hardware-interfaces/0012一起生效，见文件头。
 # ↑ usb 那份是我们自己的（v1.0 AV-4），不用 frameworks/av 的同名文件：那份是 HIDL 年代的，多一个
 #   USB_ACCESSORY 端口（Android 当配件时的音频，AIDL 示例 HAL 的 getUsbConfiguration() 里也没有它）。理由在文件头。
 #   IModule/usb 的 VINTF 声明在 manifest.xml（APEX 自带的那份把它注释掉了）。
@@ -778,6 +780,21 @@ PRODUCT_VENDOR_PROPERTIES += \
     bluetooth.profile.pan.panu.enabled=true \
     bluetooth.profile.pbap.server.enabled=true \
     bluetooth.profile.map.server.enabled=true
+
+# ─── 蓝牙通话（HFP软件数据通路，issue #107）───
+# 本机声卡没有接蓝牙芯片的PCM/I2S后端，SCO音频只能经HCI传给协议栈，再经蓝牙音频HAL交给音频HAL的
+# ModuleBluetooth。修改两个属性后要重启：
+#   * bluetooth.sco.managed_by_audio：由音频框架按路由开关SCO。框架在AudioDeviceBroker构造时读入final字段，
+#     蓝牙协议栈经AudioManager.isScoManagedByAudio()获知；协议栈只在这个模式下建立HFP会话
+#     （packages/modules/Bluetooth system/bta/ag/bta_ag_sco.cc bta_ag_init_hfp_client_interface()）。
+#     还需要ROM中的aconfig开关android.media.audio.sco_managed_by_audio与amsco_available_api（A17默认开启）。
+#   * bluetooth.hfp.software_datapath.enabled：只由协议栈读取（蓝牙启动、HFP服务启动时与每次建立SCO时）。HFP会话用
+#     软件数据通路，所有编解码器的数据都走HCI（CVSD由芯片编解码，mSBC与LC3由协议栈编解码）；不设时协议栈
+#     按硬件offload建链，本机没有那条通路。
+# 还需要audio/bluetooth_audio_policy_configuration.xml的HFP端口和patches/android/hardware-interfaces/0012。
+PRODUCT_VENDOR_PROPERTIES += \
+    bluetooth.sco.managed_by_audio=true \
+    bluetooth.hfp.software_datapath.enabled=true
 
 # ─── Stage 4/5: 固件双路安装 ───
 # 新增固件（从本机 Ubuntu /lib/firmware 提取，华为专有，不入版本库）：

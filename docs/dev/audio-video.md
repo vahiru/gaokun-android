@@ -1,6 +1,6 @@
 # 音频子系统与硬件视频编解码（Audioreach + `qcom-iris`）
 
-本文档说明`gaokun3`的LPASS/SoundWire音频拓扑、扬声器/耳机/麦克风通路配置、低延迟播放修复以及基于`qcom-iris`与`v4l2_codec2`的硬件视频编解码架构。
+本文档说明`gaokun3`的LPASS/SoundWire音频拓扑、扬声器/耳机/麦克风通路配置、低延迟播放修复、蓝牙耳机通话以及基于`qcom-iris`与`v4l2_codec2`的硬件视频编解码架构。
 
 ## 一、音频拓扑与内核驱动要求
 
@@ -110,7 +110,39 @@ TX_DEC0 Volume = 102, TX_DEC1 Volume = 102
    代价：HAL写入时DSP手上剩两个period，即10 ms，原来是20 ms，FastMixer或HAL写线程偶尔停顿超过10 ms就可能断音，而且没有计数器能看到。primary是唯一的输出，息屏放音乐等所有播放都按5 ms的周期运行，FastMixer和HAL的唤醒次数翻倍，对续航的影响尚未经实测。
    `0013`必须与`out_latency_ms=5`一起使用：内核还是480帧步长时，period会被取整到480帧，缓冲并不缩短；内核是240帧步长、播放块却是10 ms时，ALSA是3 × 240帧而HAL一次写入两个period，DSP手上可能只剩一个period，有断音风险，尚未经实测。若发布后出现断音，可先把`out_period_count`改为4（4 × 240帧，已测无断音），不必改内核。
 
-## 五、硬件视频编解码（`qcom-iris` + `v4l2_codec2`）
+## 五、蓝牙耳机通话（HFP软件数据通路，`patches/android/hardware-interfaces/0012`）
+
+### 1. 数据通路
+
+手机上的SCO音频（蓝牙通话的双向语音）通常由蓝牙芯片经PCM/I2S接口交给音频DSP处理，即硬件offload。本机声卡只有第一节表中的codec DMA后端，没有接蓝牙芯片的接口，因此采用AOSP的HFP软件数据通路：
+
+- WCN6855经UART（内核`hci_qca`，蓝牙HAL以`HCI_CHANNEL_USER`独占`hci0`）收发SCO包。协议栈以增强型SCO建链，并指定HCI数据通路（日志中`btm_send_connect_request`的`path=0x0`）。
+- CVSD（8 kHz，窄带）由蓝牙芯片编解码，HCI上传输的是PCM；mSBC（16 kHz，宽带）与LC3（32 kHz，超宽带）由协议栈编解码（`system/stack/btm/btm_sco_hci.cc`）。
+- 协议栈经蓝牙音频HAL（`android.hardware.bluetooth.audio-impl`，运行在音频HAL的APEX进程中）的`HFP_SOFTWARE_ENCODING_DATAPATH`与`HFP_SOFTWARE_DECODING_DATAPATH`两个会话，与音频HAL的`ModuleBluetooth`交换PCM，每块7.5 ms。
+- 耳机成为HFP活动设备时，协议栈启动两个会话，音频框架随之把耳机的SCO设备接入蓝牙模块。音频策略在耳机的SCO设备接入时就打开蓝牙模块的`hfp output`。SCO由音频框架按路由开关：应用进入通话模式并把通信设备设为蓝牙耳机后，通话的播放被路由到`hfp output`，开始录音时打开`hfp input`；流开始传输时HAL请求启动音频流，协议栈收到请求后与耳机协商编解码器并建立SCO。两个方向的流都进入待机后，协议栈才断开SCO。
+
+### 2. 配置
+
+以下三处要一起生效，缺一处都无法通话：
+
+1. **`device.mk`的两个属性**：`bluetooth.sco.managed_by_audio=true`让音频框架按路由开关SCO，框架在`AudioDeviceBroker`构造时读入，蓝牙协议栈经`AudioManager.isScoManagedByAudio()`获知，只在这个模式下建立HFP会话（`bta_ag_init_hfp_client_interface()`）；`bluetooth.hfp.software_datapath.enabled=true`只由协议栈读取，让HFP会话使用软件数据通路，否则协议栈按硬件offload建链。修改后要重启。前者还依赖ROM中的两个aconfig开关`android.media.audio.sco_managed_by_audio`与`android.media.audio.amsco_available_api`（A17默认开启）。
+2. **`audio/bluetooth_audio_policy_configuration.xml`**：frameworks/av的`bluetooth_with_le_audio_policy_configuration_7_0.xml`加上HFP的混音口、设备口与路由。混音口按`ModuleBluetooth`的约定声明（`audio/aidl/default/bluetooth/DevicePortProxy.cpp`）：采样率固定为32 kHz，HAL再重采样到协商出的8、16或32 kHz；输出为立体声，因为16位单声道的会话在`loadAudioConfig()`中按立体声报给框架，写入时由HAL转成单声道，写成单声道时打开输出会因声道数不符而失败，SCO输出设备无法注册；输入为单声道。
+3. **`patches/android/hardware-interfaces/0012`**：示例HAL的`StreamBluetooth::bluetoothParametersUpdated()`按`BT_SCO`参数（`IBluetooth`的`ScoConfig.isEnabled`，默认为false）开关HFP输出流，而SCO由音频托管时框架从不下发`BT_SCO=on`，初始化时还会下发`BT_SCO=off`。不打这个补丁时，SCO建立后耳机状态机一下发耳机名称与WBS状态，输出流就被挂起，此后的数据都被丢弃：路由、SCO链路与会话看上去都正常，耳机里却没有声音。补丁让HFP输出流不再受这个参数控制。
+
+### 3. 调试
+
+- `dumpsys audio | grep mScoManagedByAudio`应为`true`，`aflags list | grep amsco_available_api`应为`enabled`（前者只反映框架一侧）；`dumpsys media.audio_policy`中蓝牙模块应列出`hfp output`、`hfp input`与四个`BT SCO`设备口。
+- 耳机连接后，日志中有`StartSession: encode`与`StartSession: decode`，`AHAL_BluetoothAudioPort`为`HFP_SOFTWARE_ENCODING_DATAPATH`与`HFP_SOFTWARE_DECODING_DATAPATH`各注册一个端口；`AHAL_StreamBluetooth: checkConfigParams: Channel count mismatch`说明策略文件中的声道数与HAL的约定不符。
+- 通话开始时依次可见`StartRequest: ConnectAudio status = BT_SUCCESS`、`bta_ag_sco_codec_nego: Succeeded`、`btm_send_connect_request`的`path=0x0`、`[BTA_AG_SCO_OPEN_ST(0x06)]`，以及两个HAL端口的`STARTING -> STARTED`；之后`bluetoothParametersUpdated: mEnabled`应为1。
+
+### 4. 已知限制
+
+- 只支持CVSD的窄带耳机尚未经实测；LC3超宽带需要耳机支持，也尚未经实测。
+- 通话中由耳机断开SCO（例如在耳机上把声音切回平板）尚未经实测。HAL端口不会因此离开启动状态；耳机主动断开时，框架（A17默认开启`android.media.audio.bt_audio_disconnect_api`）取消蓝牙路由，改走默认的通信设备（平板的扬声器与麦克风）。链路超时等其他原因断开时，框架收不到通知。
+- HFP端口进入`DISABLED`后不会自动恢复：蓝牙音频会话在SCO设备仍连接时重启（`session_changed_cb`），或HAL无法向会话发出启动请求、挂起失败后，通话没有声音，直到耳机重新连接。示例HAL原本在收到`BT_SCO=on`时恢复端口，SCO由音频托管时这个参数不会到达。
+- 同时连接ASHA助听器与蓝牙耳机时，耳机状态机下发的耳机名称、WBS等参数会让助听器的输出流停止传输，直到重新打开。这是示例HAL原有的问题（`bluetoothParametersUpdated()`不认助听器会话，A2DP与LE Audio的挂起参数也会触发），蓝牙模块声明SCO端口后，耳机状态机下发的参数也会到达它。
+
+## 六、硬件视频编解码（`qcom-iris` + `v4l2_codec2`）
 
 ### 1. 从`qcom-venus`迁移至`qcom-iris`
 
