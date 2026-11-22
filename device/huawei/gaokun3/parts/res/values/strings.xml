@@ -6,23 +6,24 @@
     <string name="keyboard_error">Couldn\'t change the detachable keyboard setting</string>
     <string name="tile_on">On</string>
     <string name="tile_off">Off</string>
-    <string name="speaker_fx_title">Speaker enhancement (experimental)</string>
-    <string name="speaker_fx_summary">Bass enhancement or Huawei Histen for the built-in speakers</string>
-    <string name="speaker_fx_switch_title">Enable speaker enhancement</string>
-    <string name="speaker_fx_switch_summary_on">Sound from the built-in speakers is processed</string>
-    <string name="speaker_fx_switch_summary_off">Audio is passed through unchanged</string>
-    <string name="speaker_fx_engine_title">Processing</string>
+    <string name="sound_advanced_title">Advanced</string>
+    <string name="speaker_fx_title">Speaker sound effects</string>
+    <string name="speaker_fx_engine_title">Sound effect engine</string>
     <string name="speaker_fx_engine_bass">Bass enhancement</string>
     <string name="speaker_fx_engine_histen">Huawei Histen</string>
+    <string name="speaker_fx_engine_off">Off</string>
+    <!-- Options of the speaker sound effects dialog; the values match SpeakerFxDialogActivity. -->
     <string-array name="speaker_fx_engine_entries">
+        <item>@string/speaker_fx_engine_off</item>
         <item>@string/speaker_fx_engine_bass</item>
         <item>@string/speaker_fx_engine_histen</item>
     </string-array>
     <string-array name="speaker_fx_engine_values" translatable="false">
+        <item>off</item>
         <item>bass</item>
         <item>histen</item>
     </string-array>
-    <string name="speaker_fx_note">Experimental. Only the built-in speakers are processed; headphones, Bluetooth and USB audio are never touched. Bass enhancement processes everything the speakers play, games included. Huawei Histen processes media (music, video) only, and games that use low-latency audio bypass it. Changes apply within about a second, except that Histen takes effect from the next playback. If the sound is distorted or cuts out, turn it off.</string>
+    <string name="speaker_fx_note">Sound effects apply only to the built-in speakers. The Histen engine may be unable to process audio from some games.</string>
     <!-- Notifications about USB-C port issues -->
     <string name="usb_port_channel">USB-C port issues</string>
     <string name="usb_port_channel_desc">Notifications about USB-C port issues</string>

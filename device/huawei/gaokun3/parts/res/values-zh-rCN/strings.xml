@@ -6,15 +6,13 @@
     <string name="keyboard_error">无法更改磁吸键盘设置</string>
     <string name="tile_on">已启用</string>
     <string name="tile_off">已关闭</string>
-    <string name="speaker_fx_title">扬声器增强（实验性）</string>
-    <string name="speaker_fx_summary">为内置扬声器加上低音增强或华为 Histen 音效</string>
-    <string name="speaker_fx_switch_title">启用扬声器增强</string>
-    <string name="speaker_fx_switch_summary_on">内置扬声器的声音会经过处理</string>
-    <string name="speaker_fx_switch_summary_off">声音原样输出，不做任何处理</string>
-    <string name="speaker_fx_engine_title">处理方式</string>
+    <string name="sound_advanced_title">高级</string>
+    <string name="speaker_fx_title">扬声器音效</string>
+    <string name="speaker_fx_engine_title">音效引擎</string>
     <string name="speaker_fx_engine_bass">低音增强</string>
-    <string name="speaker_fx_engine_histen">华为 Histen</string>
-    <string name="speaker_fx_note">实验功能。只处理内置扬声器，耳机、蓝牙和 USB 音频一律不动。低音增强处理扬声器放出的所有声音，游戏也在内；华为 Histen 只处理媒体声音（音乐、视频），使用低延迟音频的游戏不经过它。改动约一秒内生效，但 Histen 从下一次开始播放起才生效。如果声音失真或断续，请关掉它。</string>
+    <string name="speaker_fx_engine_histen">华为Histen</string>
+    <string name="speaker_fx_engine_off">关闭</string>
+    <string name="speaker_fx_note">音效仅作用于内置扬声器。Histen音效引擎可能无法处理部分游戏的音频。</string>
     <!-- 关于USB-C接口异常的通知 -->
     <string name="usb_port_channel">USB-C接口异常</string>
     <string name="usb_port_channel_desc">关于USB-C接口异常的通知</string>

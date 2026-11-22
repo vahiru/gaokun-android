@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  gaokun3 设备设置：磁吸键盘开关（系统页）+ 扬声器增强试验开关（声音页）+ 待机开关（电池页，v1.0 PWR-16）
-  + 触摸手感 game / daily 开关（系统页与控制中心磁贴，2026-10-25）+ 手写笔设置（已连接的设备页）。
+  gaokun3 设备设置：磁吸键盘与手写笔设置（已连接的设备页）、防误触模式（显示页）、扬声器音效与
+  麦克风降噪（提示音和振动页的「高级」分组）、性能模式（电池页）等，以及键盘、防误触两个控制中心磁贴。
 
   ★ 为什么是独立应用而不是改 Settings：
     用 Android 的 "Settings 注入" 机制（com.android.settings.action.IA_SETTINGS
@@ -68,16 +68,32 @@
             </intent-filter>
         </provider>
 
-        <!-- 扬声器增强（试验功能，PR #7）。注入到「设置 → 声音」页：
-             category ia.sound = CategoryKey.CATEGORY_SOUND（frameworks/base
-             SettingsLib CategoryKey.java:37，lineage-23.0），SoundSettings 按它取注入条目
-             （Settings DashboardFragmentRegistry.java:92-93，crDroid 16.0；17.0 在 :98-99，CategoryKey 常量不变 :37）。
-             ⬜ 「系统」页的注入实测过（#65），「声音」页还没在实机上看过。
-             不加 LAUNCHER 入口：应用抽屉里已经有键盘那一个退路了，再加一个只会多一个同名图标。 -->
-        <activity
-            android:name="com.huawei.gaokun3.parts.SpeakerFxSettingsActivity"
+        <!-- 「提示音和振动」页的「高级」分组标题，以及扬声器音效条目下方的当前选项（SoundEntriesProvider.java）。
+             下面两个activity条目以com.android.settings.group_key放进这个分组。 -->
+        <provider
+            android:name="com.huawei.gaokun3.parts.SoundEntriesProvider"
+            android:authorities="com.huawei.gaokun3.parts.sound"
             android:exported="true"
-            android:label="@string/speaker_fx_title">
+            android:permission="android.permission.WRITE_SECURE_SETTINGS">
+            <intent-filter>
+                <action android:name="com.android.settings.action.IA_SETTINGS" />
+            </intent-filter>
+        </provider>
+
+        <!-- 扬声器音效（试验功能，PR #7）：「提示音和振动」页里的一个条目，点开后是选择对话框
+             （SpeakerFxDialogActivity，透明窗口），没有单独的页面。分类ia.sound = CategoryKey.CATEGORY_SOUND，
+             SoundSettings按它取注入条目（Settings DashboardFragmentRegistry.java，crDroid 17.0）。
+             条目说明是当前选项，由summary_uri向SoundEntriesProvider读取（有summary_uri时设置不用静态说明，
+             所以不给com.android.settings.summary）。
+             ⚠️ 写全限定类名而不是".SpeakerFxDialogActivity"：am start曾对相对名报START_CLASS_NOT_FOUND，
+             写死全名就没有展开的歧义。
+             ⚠️ 补DEFAULT category：没有它，隐式意图匹配不到。 -->
+        <activity
+            android:name="com.huawei.gaokun3.parts.SpeakerFxDialogActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:label="@string/speaker_fx_title"
+            android:theme="@style/Theme.Gaokun3Parts.DialogHost">
             <intent-filter>
                 <action android:name="com.android.settings.action.IA_SETTINGS" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -86,18 +102,25 @@
                 android:name="com.android.settings.category"
                 android:value="com.android.settings.category.ia.sound" />
             <meta-data
+                android:name="com.android.settings.keyhint"
+                android:value="gaokun3_speaker_fx" />
+            <meta-data
+                android:name="com.android.settings.group_key"
+                android:value="gaokun3_sound_advanced" />
+            <meta-data
                 android:name="com.android.settings.title"
                 android:resource="@string/speaker_fx_title" />
             <meta-data
-                android:name="com.android.settings.summary"
-                android:resource="@string/speaker_fx_summary" />
+                android:name="com.android.settings.summary_uri"
+                android:value="content://com.huawei.gaokun3.parts.sound/getDynamicSummary/gaokun3_speaker_fx" />
+            <!-- 不给这条，设置里那一行就没有图标 -->
             <meta-data
                 android:name="com.android.settings.icon"
                 android:resource="@drawable/ic_speaker" />
         </activity>
 
-        <!-- Microphone noise suppression (micarray/README.md), in Settings → Sound like the speaker
-             entry above. -->
+        <!-- Microphone noise suppression (micarray/README.md), in the Advanced group of Settings →
+             Sound like the speaker entry above. -->
         <activity
             android:name="com.huawei.gaokun3.parts.NoiseSuppressionSettingsActivity"
             android:exported="true"
@@ -109,6 +132,9 @@
             <meta-data
                 android:name="com.android.settings.category"
                 android:value="com.android.settings.category.ia.sound" />
+            <meta-data
+                android:name="com.android.settings.group_key"
+                android:value="gaokun3_sound_advanced" />
             <meta-data
                 android:name="com.android.settings.title"
                 android:resource="@string/denoise_title" />
