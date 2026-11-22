@@ -1,0 +1,270 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] tu: Add vk_dont_care_as_store and enable it for Genshin
+ Impact
+
+Genshin Impact reads depth after invalidating it: water fades by scene
+depth and occlusion depends on it. With TU_DEBUG=sysmem the game renders
+correctly; with TU_DEBUG=gmem the water is gone in every frame. Through
+ANGLE an invalidate becomes VK_ATTACHMENT_STORE_OP_DONT_CARE, and
+LOAD_OP_DONT_CARE for the next pass that uses the image. Passes Turnip
+renders in GMEM then never write the depth back, passes rendered in
+sysmem keep it, and autotune picks per pass from its history, so the
+water disappears in some frames and objects behind foliage show through
+in others. Mesa's GL driver already ignores this game's discards
+(ignore_discard_framebuffer).
+
+Add a driconf option, vk_dont_care_as_store: STORE_OP_DONT_CARE on an
+attachment the application passed in is treated as STORE_OP_STORE.
+Enable it together with vk_dont_care_as_load for the global release of
+the game, the CN release and its bilibili build.
+
+Apply both options to the application's load and store ops only, and
+use the converted ops for the MSRTSS resolve and unresolve decisions.
+vk_dont_care_as_load used to rewrite the ops Turnip sets itself as well;
+in dynamic rendering some of those attachments (resolve attachments, the
+fragment density and shading rate maps, single-sampled attachments that
+MSRTSS replaces) are not in GMEM, and a load of them would land on GMEM
+offset 0, over the first attachment there.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Inappropriate [application-specific workaround]
+---
+ src/freedreno/vulkan/tu_device.cc |  3 ++
+ src/freedreno/vulkan/tu_device.h  |  5 +++
+ src/freedreno/vulkan/tu_pass.cc   | 72 +++++++++++++++++++++----------
+ src/util/00-mesa-defaults.conf    | 18 ++++++++
+ src/util/driconf.h                |  4 ++
+ 5 files changed, 79 insertions(+), 23 deletions(-)
+
+diff --git a/src/freedreno/vulkan/tu_device.cc b/src/freedreno/vulkan/tu_device.cc
+index 2bec528..a11ec21 100644
+--- a/src/freedreno/vulkan/tu_device.cc
++++ b/src/freedreno/vulkan/tu_device.cc
+@@ -1817,6 +1817,7 @@ static const driOptionDescription tu_dri_options[] = {
+    DRI_CONF_SECTION_DEBUG
+       DRI_CONF_FORCE_VK_VENDOR()
+       DRI_CONF_VK_WSI_FORCE_BGRA8_UNORM_FIRST(false)
++      DRI_CONF_VK_DONT_CARE_AS_STORE(false)
+       DRI_CONF_VK_WSI_FORCE_SWAPCHAIN_TO_CURRENT_EXTENT(false)
+       DRI_CONF_VK_X11_IGNORE_SUBOPTIMAL(false)
+       DRI_CONF_VK_DONT_CARE_AS_LOAD(false)
+@@ -1843,6 +1844,8 @@ tu_init_dri_options(struct tu_instance *instance)
+                        instance->vk.app_info.app_name, instance->vk.app_info.app_version,
+                        instance->vk.app_info.engine_name, instance->vk.app_info.engine_version);
+ 
++   instance->dont_care_as_store =
++         driQueryOptionb(&instance->dri_options, "vk_dont_care_as_store");
+    instance->force_vk_vendor =
+          driQueryOptioni(&instance->dri_options, "force_vk_vendor");
+    instance->dont_care_as_load =
+diff --git a/src/freedreno/vulkan/tu_device.h b/src/freedreno/vulkan/tu_device.h
+index 0a43570..c3acf37 100644
+--- a/src/freedreno/vulkan/tu_device.h
++++ b/src/freedreno/vulkan/tu_device.h
+@@ -199,6 +199,11 @@ struct tu_instance
+     */
+    bool conservative_lrz;
+ 
++   /* vk_dont_care_as_store: STORE_OP_DONT_CARE on attachments the
++    * application passes in is treated as STORE_OP_STORE.
++    */
++   bool dont_care_as_store;
++
+    /* If to internally reserve a descriptor set for descriptor set
+     * dynamic offsets, a descriptor set can be freed at the cost of
+     * being unable to use the feature. As it is a part of the Vulkan
+diff --git a/src/freedreno/vulkan/tu_pass.cc b/src/freedreno/vulkan/tu_pass.cc
+index 1b53b51..80b8d5c 100644
+--- a/src/freedreno/vulkan/tu_pass.cc
++++ b/src/freedreno/vulkan/tu_pass.cc
+@@ -895,6 +895,32 @@ tu_render_pass_bandwidth_config(struct tu_render_pass *pass)
+    }
+ }
+ 
++/* Load and store ops the application passed in, with the
++ * vk_dont_care_as_load / vk_dont_care_as_store workarounds applied. Ops that
++ * Turnip sets itself are left alone: those of internal MSRTSS attachments
++ * and, in dynamic rendering, of resolve attachments, of the fragment density
++ * and shading rate maps and of single-sampled attachments that MSRTSS
++ * replaces. Some of those attachments are not in GMEM, and turning their
++ * load into LOAD_OP_LOAD would load them over GMEM offset 0.
++ */
++static VkAttachmentLoadOp
++app_load_op(const struct tu_device *device, VkAttachmentLoadOp op)
++{
++   if (unlikely(device->instance->dont_care_as_load) &&
++       op == VK_ATTACHMENT_LOAD_OP_DONT_CARE)
++      return VK_ATTACHMENT_LOAD_OP_LOAD;
++   return op;
++}
++
++static VkAttachmentStoreOp
++app_store_op(const struct tu_device *device, VkAttachmentStoreOp op)
++{
++   if (unlikely(device->instance->dont_care_as_store) &&
++       op == VK_ATTACHMENT_STORE_OP_DONT_CARE)
++      return VK_ATTACHMENT_STORE_OP_STORE;
++   return op;
++}
++
+ static void
+ attachment_set_ops(struct tu_device *device,
+                    struct tu_render_pass_attachment *att,
+@@ -903,13 +929,6 @@ attachment_set_ops(struct tu_device *device,
+                    VkAttachmentStoreOp store_op,
+                    VkAttachmentStoreOp stencil_store_op)
+ {
+-   if (unlikely(device->instance->dont_care_as_load)) {
+-      if (load_op == VK_ATTACHMENT_LOAD_OP_DONT_CARE)
+-         load_op = VK_ATTACHMENT_LOAD_OP_LOAD;
+-      if (stencil_load_op == VK_ATTACHMENT_LOAD_OP_DONT_CARE)
+-         stencil_load_op = VK_ATTACHMENT_LOAD_OP_LOAD;
+-   }
+-
+    /* load/store ops */
+    att->remapped_clear_att = VK_ATTACHMENT_UNUSED;
+    att->clear_mask =
+@@ -1118,10 +1137,10 @@ tu_CreateRenderPass2(VkDevice _device,
+                                     att,
+                                     pCreateInfo->pAttachments[i].samples);
+       attachment_set_ops(device, att,
+-                         pCreateInfo->pAttachments[i].loadOp,
+-                         pCreateInfo->pAttachments[i].stencilLoadOp,
+-                         pCreateInfo->pAttachments[i].storeOp,
+-                         pCreateInfo->pAttachments[i].stencilStoreOp);
++                         app_load_op(device, pCreateInfo->pAttachments[i].loadOp),
++                         app_load_op(device, pCreateInfo->pAttachments[i].stencilLoadOp),
++                         app_store_op(device, pCreateInfo->pAttachments[i].storeOp),
++                         app_store_op(device, pCreateInfo->pAttachments[i].stencilStoreOp));
+    }
+ 
+    uint32_t subpass_attachment_count = 0;
+@@ -1494,11 +1513,11 @@ tu_setup_dynamic_render_pass(struct tu_cmd_buffer *cmd_buffer,
+       if (msrtss && msrtss->multisampledRenderToSingleSampledEnable &&
+           msrtss->rasterizationSamples !=
+           (VkSampleCountFlagBits)view->image->layout->nr_samples) {
+-         if (att_info->loadOp == VK_ATTACHMENT_LOAD_OP_LOAD)
++         if (app_load_op(device, att_info->loadOp) == VK_ATTACHMENT_LOAD_OP_LOAD)
+             subpass->unresolve_attachments[i].attachment = att_idx;
+          else
+             subpass->unresolve_attachments[i].attachment = VK_ATTACHMENT_UNUSED;
+-         if (att_info->storeOp == VK_ATTACHMENT_STORE_OP_STORE) {
++         if (app_store_op(device, att_info->storeOp) == VK_ATTACHMENT_STORE_OP_STORE) {
+             subpass->resolve_attachments[i].attachment = att_idx;
+             att->resolve_views = info->viewMask;
+          } else {
+@@ -1508,7 +1527,7 @@ tu_setup_dynamic_render_pass(struct tu_cmd_buffer *cmd_buffer,
+          att->will_be_resolved = false;
+          attachment_set_ops(device, att, VK_ATTACHMENT_LOAD_OP_NONE,
+                             VK_ATTACHMENT_LOAD_OP_NONE,
+-                            att_info->storeOp,
++                            app_store_op(device, att_info->storeOp),
+                             VK_ATTACHMENT_STORE_OP_NONE);
+          att_is_msrtss = true;
+          subpass->samples = msrtss->rasterizationSamples;
+@@ -1516,8 +1535,9 @@ tu_setup_dynamic_render_pass(struct tu_cmd_buffer *cmd_buffer,
+          att->gmem = true;
+          att->used_views = info->viewMask;
+          att->resolve_views = 0;
+-         attachment_set_ops(device, att, att_info->loadOp,
+-                            VK_ATTACHMENT_LOAD_OP_NONE, att_info->storeOp,
++         attachment_set_ops(device, att, app_load_op(device, att_info->loadOp),
++                            VK_ATTACHMENT_LOAD_OP_NONE,
++                            app_store_op(device, att_info->storeOp),
+                             VK_ATTACHMENT_STORE_OP_NONE);
+          subpass->input_attachments[i + 1].patch_input_gmem = true;
+          subpass->unresolve_attachments[i].attachment = VK_ATTACHMENT_UNUSED;
+@@ -1583,16 +1603,20 @@ tu_setup_dynamic_render_pass(struct tu_cmd_buffer *cmd_buffer,
+          bool att_is_msrtss = false;
+          VkAttachmentLoadOp load_op =
+             (info->pDepthAttachment && info->pDepthAttachment->imageView) ?
+-               info->pDepthAttachment->loadOp : VK_ATTACHMENT_LOAD_OP_NONE_EXT;
++               app_load_op(device, info->pDepthAttachment->loadOp) :
++               VK_ATTACHMENT_LOAD_OP_NONE_EXT;
+          VkAttachmentLoadOp stencil_load_op =
+             (info->pStencilAttachment && info->pStencilAttachment->imageView) ?
+-               info->pStencilAttachment->loadOp : VK_ATTACHMENT_LOAD_OP_NONE_EXT;
++               app_load_op(device, info->pStencilAttachment->loadOp) :
++               VK_ATTACHMENT_LOAD_OP_NONE_EXT;
+          VkAttachmentStoreOp store_op =
+             (info->pDepthAttachment && info->pDepthAttachment->imageView) ?
+-               info->pDepthAttachment->storeOp : VK_ATTACHMENT_STORE_OP_NONE_EXT;
++               app_store_op(device, info->pDepthAttachment->storeOp) :
++               VK_ATTACHMENT_STORE_OP_NONE_EXT;
+          VkAttachmentStoreOp stencil_store_op =
+             (info->pStencilAttachment && info->pStencilAttachment->imageView) ?
+-               info->pStencilAttachment->storeOp : VK_ATTACHMENT_STORE_OP_NONE_EXT;
++               app_store_op(device, info->pStencilAttachment->storeOp) :
++               VK_ATTACHMENT_STORE_OP_NONE_EXT;
+          if (msrtss && msrtss->multisampledRenderToSingleSampledEnable &&
+              msrtss->rasterizationSamples !=
+              (VkSampleCountFlagBits)view->image->layout->nr_samples) {
+@@ -1780,7 +1804,7 @@ tu_setup_dynamic_render_pass(struct tu_cmd_buffer *cmd_buffer,
+                                VK_ATTACHMENT_STORE_OP_DONT_CARE);
+             subpass->color_attachments[i].attachment = att_idx;
+             att->will_be_resolved =
+-               att_info->storeOp == VK_ATTACHMENT_STORE_OP_STORE;
++               app_store_op(device, att_info->storeOp) == VK_ATTACHMENT_STORE_OP_STORE;
+          }
+       }
+ 
+@@ -1818,10 +1842,12 @@ tu_setup_dynamic_render_pass(struct tu_cmd_buffer *cmd_buffer,
+                att->will_be_resolved =
+                   (info->pDepthAttachment &&
+                    info->pDepthAttachment->imageView &&
+-                   info->pDepthAttachment->storeOp == VK_ATTACHMENT_STORE_OP_STORE) ||
++                   app_store_op(device, info->pDepthAttachment->storeOp) ==
++                      VK_ATTACHMENT_STORE_OP_STORE) ||
+                   (info->pStencilAttachment &&
+                    info->pStencilAttachment->imageView &&
+-                   info->pStencilAttachment->storeOp == VK_ATTACHMENT_STORE_OP_STORE);
++                   app_store_op(device, info->pStencilAttachment->storeOp) ==
++                      VK_ATTACHMENT_STORE_OP_STORE);
+             }
+          }
+       }
+diff --git a/src/util/00-mesa-defaults.conf b/src/util/00-mesa-defaults.conf
+index 5a0a584..f0295ac 100644
+--- a/src/util/00-mesa-defaults.conf
++++ b/src/util/00-mesa-defaults.conf
+@@ -762,6 +762,24 @@ TODO: document the other workarounds.
+             <option name="vk_dont_care_as_load" value="true" />
+         </application>
+ 
++        <!-- Genshin Impact invalidates depth that a later pass still samples
++             or tests against. Through ANGLE this becomes STORE_OP_DONT_CARE
++             and LOAD_OP_DONT_CARE, so passes rendered in GMEM lose the depth
++             and water disappears in some frames. Global release, CN release
++             and its bilibili build. -->
++        <application name="Genshin Impact" executable="com.miHoYo.GenshinImpact">
++            <option name="vk_dont_care_as_load" value="true" />
++            <option name="vk_dont_care_as_store" value="true" />
++        </application>
++        <application name="Genshin Impact (CN)" executable="com.miHoYo.Yuanshen">
++            <option name="vk_dont_care_as_load" value="true" />
++            <option name="vk_dont_care_as_store" value="true" />
++        </application>
++        <application name="Genshin Impact (CN, bilibili)" executable="com.miHoYo.ys.bilibili">
++            <option name="vk_dont_care_as_load" value="true" />
++            <option name="vk_dont_care_as_store" value="true" />
++        </application>
++
+         <application name="Spilled!" executable="Spilled!.exe">
+             <!-- Required for Turnip's GMEM mode running under Unity's Vulkan backend. -->
+             <option name="vk_dont_care_as_load" value="true" />
+diff --git a/src/util/driconf.h b/src/util/driconf.h
+index 874ac0e..d577d18 100644
+--- a/src/util/driconf.h
++++ b/src/util/driconf.h
+@@ -327,6 +327,10 @@
+    DRI_CONF_OPT_B(ignore_map_unsynchronized, def, \
+                   "Ignore GL_MAP_UNSYNCHRONIZED_BIT, workaround for games that use it incorrectly")
+ 
++#define DRI_CONF_VK_DONT_CARE_AS_STORE(def) \
++   DRI_CONF_OPT_B(vk_dont_care_as_store, def, \
++                  "Treat VK_ATTACHMENT_STORE_OP_DONT_CARE as STORE_OP_STORE, workaround on tiler GPUs for games that read attachments after discarding them")
++
+ #define DRI_CONF_VK_DONT_CARE_AS_LOAD(def) \
+    DRI_CONF_OPT_B(vk_dont_care_as_load, def, \
+                   "Treat VK_ATTACHMENT_LOAD_OP_DONT_CARE as LOAD_OP_LOAD, workaround on tiler GPUs for games that confuse these two load ops")
