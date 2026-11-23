@@ -12,9 +12,9 @@ does the PPM_RESET on the error path.
 
 Add UCSI_RETRY_INIT_ON_TIMEOUT. With it, ucsi_init_work() queues the
 work again after -ETIMEDOUT, one second later and at most five times, as
-long as ucsi_init() failed before publishing the connectors: it has then
-unregistered them, and the next run starts with a PPM reset. ucsi_init()
-can also fail after publishing them, when reading the CCI at the end
+long as ucsi->connector is NULL: ucsi_init() has then unregistered the
+connectors, and the next run starts with a PPM reset. ucsi_init() can
+also fail with the connectors in place, when reading the CCI at the end
 fails; the ports are in use then and are left alone, as before.
 
 Windows does not accept a CCI with BUSY set either. When a command times
@@ -30,18 +30,18 @@ Upstream-Status: Pending
  2 files changed, 25 insertions(+)
 
 diff --git a/drivers/usb/typec/ucsi/ucsi.c b/drivers/usb/typec/ucsi/ucsi.c
-index 8ebcc1162f..f7e6a121cb 100644
+index 131e79787c6..cd7de0366fa 100644
 --- a/drivers/usb/typec/ucsi/ucsi.c
 +++ b/drivers/usb/typec/ucsi/ucsi.c
-@@ -2266,6 +2266,25 @@ static void ucsi_init_work(struct work_struct *work)
+@@ -2291,6 +2291,25 @@ static void ucsi_init_work(struct work_struct *work)
  	}
  
  	dev_err_probe(ucsi->dev, ret, "PPM init failed\n");
 +
 +	/*
-+	 * Unless it got as far as publishing the connectors, a failed
-+	 * ucsi_init() has unregistered them, and the next run starts with a
-+	 * PPM reset, so it can simply run again.
++	 * A failed ucsi_init() that leaves ucsi->connector NULL has
++	 * unregistered the connectors, and the next run starts with a PPM
++	 * reset, so it can simply run again.
 +	 */
 +	if (ret == -ETIMEDOUT && !ucsi->connector &&
 +	    ucsi->quirks & UCSI_RETRY_INIT_ON_TIMEOUT) {
@@ -60,20 +60,20 @@ index 8ebcc1162f..f7e6a121cb 100644
  
  /**
 diff --git a/drivers/usb/typec/ucsi/ucsi.h b/drivers/usb/typec/ucsi/ucsi.h
-index 1996f04ed5..80862b3cd9 100644
+index 140d34e90c7..e6990edeec8 100644
 --- a/drivers/usb/typec/ucsi/ucsi.h
 +++ b/drivers/usb/typec/ucsi/ucsi.h
-@@ -491,6 +491,9 @@ struct ucsi {
- #define UCSI_ROLE_SWITCH_RETRY_PER_HZ	10
+@@ -492,6 +492,9 @@ struct ucsi {
  #define UCSI_ROLE_SWITCH_INTERVAL	(HZ / UCSI_ROLE_SWITCH_RETRY_PER_HZ)
  #define UCSI_ROLE_SWITCH_WAIT_COUNT	(10 * UCSI_ROLE_SWITCH_RETRY_PER_HZ)
+ #define UCSI_PPM_READY_WAIT_COUNT	(1 * UCSI_ROLE_SWITCH_RETRY_PER_HZ)
 +	int init_retries;
 +#define UCSI_INIT_RETRIES		5
 +#define UCSI_INIT_RETRY_DELAY		HZ
  
  	/* PPM Communication lock */
  	struct mutex ppm_lock;
-@@ -511,6 +514,9 @@ struct ucsi {
+@@ -512,6 +515,9 @@ struct ucsi {
  
  /* USB4 connection can imply that USB communcation is supported */
  #define UCSI_USB4_IMPLIES_USB	BIT(2)

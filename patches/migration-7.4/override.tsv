@@ -19,6 +19,7 @@ dts/arm64-dts-qcom-sc8280xp-huawei-gaokun3-move-wake-gpios-to-the-Wi-Fi-node	bc9
 dts/arm64-dts-sc8280xp-add-cpu-cooling-maps	3094dec2ee292c5297ccc4187a1d03f0b2043c886f610e2eca28b0e8a4c8e026	
 ec-usb/platform-arm64-huawei-gaokun-ec-use-an-edge-triggered-IRQ-while-suspended	45eae5c8969ce381d54e3230028cc194e90740cc56bbefdae77b19cfec9c1b29	
 ec-usb/usb-typec-ucsi-add-a-quirk-to-retry-the-initialization-after-a-timeout	2ef6e3293476f30c9064cba8646f094e433dc2cd588c79cf774ebd2ad0c86bd5	
+ec-usb/usb-typec-ucsi-huawei_gaokun-retry-the-initialization-after-a-timeout	0853c4600b813816d4951c7218385d5ab238f26b3f77f013bb95aba439e12833	
 ec-usb/usb-typec-ucsi-huawei_gaokun-set-the-number-of-ports-at-probe	277cd46beef89416e1418878f59c6d61f223aac817614881655b330347e3156c	
 iris/media-iris-gen1-decoder-seek-mode-switch	b99b3eb3640f1be086c3853b4c823d1a862144cbd03a747e9e3d45540f2e6aa0	
 iris/media-iris-route-the-encoder-ARP-through-the-CP-non-pixel-context	13b6619b6fb4659295d1598af7c50897538114f18e18678c5ab4baa9332cdeed	

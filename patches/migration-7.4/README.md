@@ -44,11 +44,11 @@ python3 -I $M/migrate.py check                      # 合并upstream/dev之后�
 
 ## 当前状态
 
-- 新基线：v7.4-rc3。
-- 补丁链217个（buildbot层19个，dev 169个，override 23个，新增6个），丢弃25个（见`drop.tsv`）。
-- 在v7.4-rc3上从头重建：217个全部可以打上，以rc.4发布配置加`kernel-config-android.sh`、`kernel-config-7.4.sh`编译通过。
-- 上机（rc.4用户空间，不含KSU）：Android完整启动，init无属性写入被拒；前后摄像头均注册，未装配的备选前摄在绑定后立即跳过；Type-C端口、板载热敏电阻温区、Wi-Fi、GPU与显示正常；iris可以探测。尚未测试视频解码（`iris/0019`须搭配含c2 0007的ROM）、待机唤醒与其余外设。
-- 上机：Android可以完整启动，不含KSU与含BakaSU两种构建都已验证；显示、触控、音频正常。
+- 新基线：v7.4-rc4。
+- 补丁链221个（buildbot层19个，dev 172个，override 24个，新增6个），丢弃25个（见`drop.tsv`）。
+- 在v7.4-rc4上从头重建：221个全部可以打上，以rc.4发布配置加`kernel-config-android.sh`、`kernel-config-7.4.sh`编译通过。rc4改写了UCSI的初始化重试（只重试-EPROBE_DEFER与新的-EAGAIN，并在开启通知之前设置`ucsi->connector`），`ec-usb`的两个超时重试补丁因此改用override。
+- v7.4-rc3上机（rc.4用户空间，不含KSU）：Android完整启动，init无属性写入被拒；前后摄像头均注册，未装配的备选前摄在绑定后立即跳过；Type-C端口、板载热敏电阻温区、Wi-Fi、GPU与显示正常；iris可以探测。尚未测试视频解码（`iris/0019`须搭配含c2 0007的ROM）、待机唤醒与其余外设。
+- v7.4-rc3上机：Android可以完整启动，不含KSU与含BakaSU两种构建都已验证；显示、触控、音频正常。
 - fastrpc：改用上游v4系列，1/3、2/3为`add/core/0003`、`0004`，3/3为`core/misc-fastrpc-fix-context-leak-and-hang-on-signal-interrupted-invoke`的override，内容与上游一致（3/3只适配了一处上下文）。本地修正单独放在`add/core/0005`，各项改动及原因见其补丁说明；v4的补丁单独应用并不安全，须与它一起应用。尚未上机验证。
 - KernelSU：改为钉住BakaSU主线`7b65bde0`。它的UAPI为6，与目前发布的管理器（ReSukiSU v4.2.0-rc3，UAPI 4）不兼容，切换时用户需要同时更换管理器；可用的管理器目前只有BakaSU在GitHub Actions上用官方证书签名的构建。
 
