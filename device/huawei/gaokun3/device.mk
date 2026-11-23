@@ -103,8 +103,8 @@ PRODUCT_COPY_FILES += \
 PRODUCT_COPY_FILES += \
     frameworks/native/data/etc/android.software.midi.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.software.midi.xml
 
-# USB 端口 HAL（usb/）：向 UsbPortManager 报告 port0 的状态，并按插进来的东西决定 port0 的数据角色
-# （原先 gaokun3-usbrole.sh 每 2 秒轮询一次的 follow 模式），还把 gadget 的连接状态写给 UsbDeviceManager
+# USB 端口 HAL（usb/）：向 UsbPortManager 报告 port0 的状态，按插进来的东西决定 port0 的数据角色，
+# 主机枚举了平板时持有 wakelock 不让系统挂起，还把 gadget 的连接状态写给 UsbDeviceManager
 # （patches/kernel/ec-usb/0011 的 android_usb 类）。设置里的 USB 页面（数据角色、USB 用途）和 MTP / PTP 都由 UsbDeviceManager 管，
 # MTP / PTP 的 FunctionFS 与配置在 init.gaokun3.usb.rc。
 # 权限见 ueventd.gaokun3.rc 与 sepolicy/hal_usb_default.te。
@@ -932,53 +932,22 @@ PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/bin/gaokun3-rproc-kick.sh:$(TARGET_COPY_OUT_VENDOR)/bin/gaokun3-rproc-kick.sh \
     $(LOCAL_PATH)/etc/hangdump.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/hangdump.rc
 
-# 挂起前把 a600000.usb 的 USB role 切到 host —— 那个控制器停在 role=device 时，
-# 设备挂起阶段会【整板复位】且不留任何日志；而 USB adb 的 UDC 就在它上面，
-# 所以不能简单把 DTS 改成 host。见 docs/dev/deep-sleep.md。
-# ★ 默认【启用】（persist.vendor.gaokun3.allow_suspend=1；2026-09-18～09-24 开发期曾是 0，见下面 ②）。
+# 整机序列号：etc/serialno.rc在init阶段运行bin/gaokun3-serialno.sh读SMBIOS的序列号，
+# 再由vendor_init写入ro.boot.serialno与ro.serialno。
 PRODUCT_COPY_FILES += \
-    $(LOCAL_PATH)/bin/gaokun3-usbrole.sh:$(TARGET_COPY_OUT_VENDOR)/bin/gaokun3-usbrole.sh \
-    $(LOCAL_PATH)/etc/usbrole.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/usbrole.rc
+    $(LOCAL_PATH)/bin/gaokun3-serialno.sh:$(TARGET_COPY_OUT_VENDOR)/bin/gaokun3-serialno.sh \
+    $(LOCAL_PATH)/etc/serialno.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/serialno.rc
 
-# ⚠️★★ 2026-09-18 两处改动，都要读一遍再动：
-#
-# ① 属性【改名】persist.gaokun3.* → persist.vendor.gaokun3.*。
-#    原名落在 property_contexts 的兜底 `*` 上 ⇒ default_prop ⇒
-#    `neverallow { domain -init } default_prop:property_service set`
-#    ⇒ 转 enforcing 之后连 adb shell setprop 都写不了。而 vendor 的
-#    property_contexts 只许标注 vendor 前缀（VTS 强制），所以改名是唯一出路。
-#    新名字的类型与权限见 sepolicy/property_contexts + sepolicy/vendor_gaokun3_props.te。
-#    ⚠️ persist.sys.gaokun3.*（键盘、触摸模式）【不要】跟着改 —— 那两个靠
-#      system_prop 才让 Parts 应用写得了，改成 vendor 前缀反而会写不了。
-#
-# ② 默认值 1 → 0（= 待机默认【关】）。这是 2026-09-18 的过渡决定：
-#    改名会让已装机器上现有的 persist.gaokun3.allow_suspend=0 失效，
-#    而开发机正是 0。默认改成 0，改名前后行为一致。
-#    ⚠️ 代价说清楚：**新装机的用户默认也不进 s2idle**，息屏耗电按不睡算 ——
-#      这与 v0.3.0～v0.6.2 的镜像默认相反，发版说明里必须写。
-#      要开（persist 属性，重启不丢）：
-#        · 写 persist.sys.gaokun3.allow_suspend 1（init.gaokun3.rc 镜像成这个 vendor 属性）；
-#        · 或 root 下直接 setprop persist.vendor.gaokun3.allow_suspend 1。
-#      普通 adb shell 在 enforcing 下设不了 vendor 属性，见 etc/usbrole.rc 顶部。
-#    ★ 2026-09-23 用户定：开发期保持 0；【正式版】发布前改回 1（老用户 OTA 后不能丢待机，
-#      TODO S1）。改回 1 之后，开发机自己 setprop … 0（persist 属性重启不丢）。
-#    ✅ 2026-09-24 已改回 1（这一版起的构建就是 v0.6.3 的候选版）。开发机已显式
-#      setprop persist.vendor.gaokun3.allow_suspend 0，并核对过它进了 /data/property/persistent_properties
-#      （之前只有旧名字存着，新名字一直是镜像默认值，没落盘）。
-#    ⚠️ 默认 1 + 持久 0 的开机时序：属性触发器在持久属性加载【之前】就按镜像默认值跑过一轮，
-#      于是 init.gaokun3.rc 的 `=1` 触发器会放掉 gaokun3_nosuspend；挡住挂起的是 usbrole.rc
-#      `on init` 拿的 gaokun3_usbrole（只有 allow_suspend=1 且息屏才会去放）。v0.6.2 时期本机就是
-#      这个组合、没有睡过；装机后仍要 `cat /sys/power/wake_lock` 核对一次（TODO 验收清单）。
-#
-# 开启后：息屏切 role=host（挂起安全）、亮屏切回 device（USB adb 可用）。
-# 实测 Android 真实挂起/唤醒 ×4 零复位、救援 Ubuntu systemctl suspend 3/3。
-# ⚠️ 开启的可见代价：息屏时 USB device-mode adb 断开，亮屏恢复。开发构建的 TCP adb（5555）不受影响；
-#    发布构建默认不开 TCP adb，无线调试走 Wi-Fi，同样不受 USB 角色影响。
-#
-# ★ 变量也换了：PRODUCT_PROPERTY_OVERRIDES 是 build/make 明确标了
-#   "TODO(b/117892318) deprecate this ... in favor of PRODUCT_VENDOR_PROPERTIES"
-#   的老写法（core/product.mk:92-93），两者都落到 /vendor/build.prop
-#   （core/sysprop.mk:194-205 的 _prop_vars_）。既然要动这一行，顺手换成新的。
+# 待机总开关persist.vendor.gaokun3.allow_suspend，默认1（允许s2idle）：
+#   · init.gaokun3.rc在1时放开wakelock gaokun3_nosuspend，在0时重新拿回，运行中两个方向都立即生效。
+#     开机时属性触发器可能先按这里的默认值放开，持久值0加载后再拿回。
+#   · port0在两种USB角色下都可以挂起（vreg_l9d常开，patches/kernel/dts/0014），息屏时不切换角色；
+#     主机枚举了平板时，由USB端口HAL持有gaokun3_usbhost（usb/Usb.cpp开头）。
+#   · 修改方法（persist属性，重启后保留）：写persist.sys.gaokun3.allow_suspend（init.gaokun3.rc镜像成vendor属性），
+#     或在root下直接setprop persist.vendor.gaokun3.allow_suspend。普通adb shell在enforcing下设不了vendor属性。
+#   · 属性名用vendor前缀：persist.gaokun3.*会落在property_contexts末尾的默认规则`*`上，即default_prop，enforcing下除init外
+#     都写不了，而vendor的property_contexts只许标注vendor前缀。persist.sys.gaokun3.*（键盘、触摸模式）保持
+#     system_prop，Parts才写得了。
 PRODUCT_VENDOR_PROPERTIES += \
     persist.vendor.gaokun3.allow_suspend=1
 

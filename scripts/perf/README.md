@@ -42,5 +42,5 @@ SER=gaokun3 bash scripts/perf/standby.sh stop
 * 日志中的`screen=`字段取自`debug.tracing.screen_state`（`Display.state`原始值）：**`2`为亮屏，`1`为息屏**。
 * **采样期间请勿切换USB调试开关或执行`adb root` / `adb unroot`**：采样器由`setsid nohup`启动，可耐受拔除USB线，但仍位于`init`为`adbd`创建的进程组cgroup中；`adbd`重启时同cgroup进程会被一并终止且不留`stop`记录。
 * 亮屏硬解1小时测试可通过`HB=300 SER=gaokun3 bash scripts/perf/standby.sh start`缩短心跳间隔。
-* 唤醒源与持锁排查：每条记录包含`wl=`（`/sys/power/wake_lock`中的用户态锁，如`gaokun3_nosuspend`、`gaokun3_usbrole`）、`ws_act=`（当前活动的内核唤醒源）、`ws_top=`（累计`wakeup_count`前5名，首尾相减即为期间唤醒源）以及`lpass=`（`LPASS_HW_MACRO` / `DCODEC`投票计数）。解读`qcom_stats`时应同时关注睡眠累计时长占比与进入次数。
+* 唤醒源与持锁排查：每条记录包含`wl=`（`/sys/power/wake_lock`中的用户态锁，如`gaokun3_nosuspend`、`gaokun3_usbhost`）、`ws_act=`（当前活动的内核唤醒源）、`ws_top=`（累计`wakeup_count`前5名，首尾相减即为期间唤醒源）以及`lpass=`（`LPASS_HW_MACRO` / `DCODEC`投票计数）。解读`qcom_stats`时应同时关注睡眠累计时长占比与进入次数。
 * 读取debugfs下的`qcom_stats`需要root权限；在发布构建上通过`su -c`执行，需预先在KernelSU管理器中为Shell授权。

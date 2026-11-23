@@ -20,6 +20,13 @@ constexpr char kGadgetState[] = "/sys/class/android_usb/android0/state";
 // sys.usb.config itself, as there is no UsbDeviceManager to do it.
 constexpr char kNoAndroidUsb[] = "vendor.gaokun3.usb.no_android_usb";
 
+// 1 while port0 is a host: there is no UDC then, and init pauses adbd's USB
+// transport (init.gaokun3.usb.rc), which would otherwise rebind every second.
+constexpr char kAdbPause[] = "vendor.gaokun3.usbrole.adb_pause";
+
+// The wakeup source held while a host is attached (/sys/power/wake_lock).
+constexpr char kWakeLock[] = "gaokun3_usbhost";
+
 struct Inputs {
     std::string role;     // usb_role: "device", "host" or "none"
     std::string udc;      // UDC state; "" while the controller is a host
@@ -60,10 +67,16 @@ void RestartPullup();
 bool HasGadgetState();
 bool WriteGadgetState(const std::string& state, bool logError = true);
 
+// Takes or releases kWakeLock. The kernel keeps a wakelock taken this way
+// after the process exits, so the HAL releases it when it starts.
+// logError = false leaves a failed write unlogged.
+bool SetWakeLock(bool held, bool logError = true);
+
 // Whether the DT keeps vreg_l9d on (regulator-always-on, patches/kernel/dts/0014).
 // Without it the controller must not be suspended in the device role (case
-// file #52). gaokun3-usbrole.sh guards that at screen off; this HAL, which
-// changes the role at any time, then leaves the role alone.
+// file #52), and nothing guards that: such DTs are not supported. This HAL
+// then does not decide the data role; it only returns an idle host role to
+// device (Usb.cpp).
 bool L9dAlwaysOn();
 
 std::string GetProp(const char* name);

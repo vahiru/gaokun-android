@@ -1,0 +1,24 @@
+# 整机序列号（bin/gaokun3-serialno.sh）。
+# init阶段同步运行脚本，从SMBIOS读出序列号写入vendor.gaokun3.serialno；下面的触发器再在vendor_init里把它写进
+# ro.boot.serialno与ro.serialno。要早于late-fs的KeyMint和post-fs-data里写USB gadget序列号的init.gaokun3.usb.rc。
+# 两个只读属性只在为空时写：将来引导程序传了androidboot.serialno，就以它为准。
+service gaokun3_serialno /vendor/bin/gaokun3-serialno.sh
+    user root
+    group root
+    oneshot
+    disabled
+
+on init
+    exec_start gaokun3_serialno
+
+on early-fs && property:vendor.gaokun3.serialno=* && property:ro.boot.serialno=""
+    setprop ro.boot.serialno ${vendor.gaokun3.serialno}
+
+on early-fs && property:vendor.gaokun3.serialno=* && property:ro.serialno=""
+    setprop ro.serialno ${vendor.gaokun3.serialno}
+
+on property:vendor.gaokun3.serialno=* && property:ro.boot.serialno=""
+    setprop ro.boot.serialno ${vendor.gaokun3.serialno}
+
+on property:vendor.gaokun3.serialno=* && property:ro.serialno=""
+    setprop ro.serialno ${vendor.gaokun3.serialno}

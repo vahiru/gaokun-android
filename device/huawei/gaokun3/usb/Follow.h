@@ -1,7 +1,6 @@
 /*
- * Port0's data role, decided from what is attached. These are the rules of
- * the follow loop gaokun3-usbrole.sh used to run (case file #118 §6-8), run
- * on events instead of a 2 s poll.
+ * Port0's data role, decided from what is attached, on events (case file
+ * #118 §6-8).
  *
  * The EC's UCSI gives the partner's presence, the power direction and PD, but
  * not its data role: it reports partner type UFP for everything. So UCSI
@@ -28,11 +27,9 @@
  *     notice only says that the tablet supplies power without a data
  *     connection.
  *   - vendor.gaokun3.usbrole.broken: the host role does not come up.
- * vendor.gaokun3.usbrole.adb_pause follows the role: in the host role there
- * is no UDC, and adbd stops retrying it (etc/usbrole.rc).
  *
  * A role chosen in Settings is kept until the partner detaches, and restored
- * if something else changes it (gaokun3-usbrole.sh at screen off and on).
+ * if something else changes it.
  *
  * Only for a DT with vreg_l9d always on: then the controller may suspend in
  * either role, so roles change regardless of the screen, and no wakelock is
@@ -66,7 +63,6 @@ class RoleFollow {
     void Detached(const Inputs& in, Clock::time_point now);
     void Switch(const std::string& from, const std::string& to, const char* why,
                 Clock::time_point now);
-    void SyncAdbPause(const std::string& role);
     void SetFlag(const char* prop, bool on, const char* why);
 
     bool mAttached = false;
