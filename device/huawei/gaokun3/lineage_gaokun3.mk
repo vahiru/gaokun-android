@@ -66,7 +66,7 @@ $(call inherit-product, $(SRC_TARGET_DIR)/product/full_base.mk)
 #   cmdline 的 androidboot.selinux=permissive 照样生效（2026-10-06 D5 起 cmdline 默认是 enforcing，见 BoardConfig.mk）。
 #   ✅ A17 核过：ProductNotDebuggableInUserdebug 只有 build/soong/scripts/gen_build_prop.py:350、:387-389 一个消费者
 #   （refs/a17/build/make/core/soong_extra_config.mk:88 传进去），不改 Debuggable（soong_config.mk:60 只看变体）。
-#   反过来这也意味着 adbd / adb_root 在发布构建里仍按"可调试"编译 —— A17 因此多出一条 adb root 的路，见 device.mk 开头。
+#   反过来这也意味着adbd（以及安装了adb_root时的adb_root）在发布构建里仍按"可调试"编译，见device.mk中adb_root一节。
 #
 # ⚠️ 开发机装发布构建（候选版就是发布构建 —— release.sh --no-build 发的必须是验过的那一版）
 #   之前要先在开发机上把这几样持久化进 /data，否则装上后 adb 全断：
@@ -219,7 +219,8 @@ TARGET_DISABLE_FASTBOOTD := true
 #     A16 装了 ParanoidSense，A17 默认【不装】。这等于替 v1.0-plan D23 / HW-10（人脸解锁保留与否，测完再定）做了「去掉」
 #     的决定 —— 要保留就在这里加 TARGET_FACE_UNLOCK_SUPPORTED := true（同 TARGET_DISABLE_FASTBOOTD，普通全局变量）。⬜ 待用户定；
 #   · common.mk 删掉了 debug.graphics.game_default_frame_rate.disabled=true —— 由 device.mk 补回，理由见那里；
-#   · common.mk:243-246 起 userdebug 无条件装 adb_root（16.0 只在 WITH_SU=true 时装）—— 见 device.mk 同一节的说明。
+#   · 早期同步的common.mk对userdebug也安装adb_root（16.0只在WITH_SU=true时安装），由修补[24]改回WITH_SU门控；
+#     crDroid上游82c2c41049起只在eng构建中安装 —— 见device.mk中adb_root一节。
 $(call inherit-product, vendor/lineage/config/common_full_tablet_wifionly.mk)
 
 # 设备配置（固件、init rc、HAL、图形、WiFi、音频 —— Stage 2–5 的全部成果）
