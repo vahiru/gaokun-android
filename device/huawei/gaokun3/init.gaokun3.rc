@@ -5,49 +5,32 @@
 #   而内核配置本来就是这个值（CONFIG_CONSOLE_LOGLEVEL_DEFAULT=7、MESSAGE_LOGLEVEL_DEFAULT=4，
 #   设备 /proc/config.gz 实查），这一行一直是空操作。要改就改内核 cmdline 的 loglevel=。
 
-# ═════════ s2idle 休眠：★2026-08-22 已修好，默认【开启】 ═════════
-# 真凶既不是内核也不是 EC，是我们自己在 Stage 2 为 USB adb 改的那行设备树：
-# a600000.usb 被设成 dr_mode="otg" + usb-role-switch（上游是 host），
-# 而本机 UCSI 是坏的、没有任何 role 源 → 控制器停在 role=device、
-# 既没有 gadget 也没有 xhci 子设备。给这个"半初始化"状态断电
-# （系统挂起会，单纯解绑驱动也会）→【整板复位，且不留任何日志】。
-# 说明见 docs/dev/deep-sleep.md。
+# ═════════ s2idle 休眠总开关 ═════════
+# a600000.usb（port0）在 device 角色下挂起曾经会整板复位且不留日志：combo PHY 退出时关掉了 vreg_l9d，
+# 它在这份 DT 里只有这一个用户，dwc3 随即失败（#27、#52）。DT 让 vreg_l9d 常开（patches/kernel/dts/0014）后，
+# port0 在 device、host 两种角色下都可以挂起，息屏时不再切换角色。说明见 docs/dev/deep-sleep.md 的 USB 一节。
 #
-# ⚠️ 别再被这段历史带偏：它在 Ubuntu 上用同一棵内核复现得一模一样，
-#    于是被判过"内核/EC 缺陷、与 Android 无关"—— 那个推理排除得对（确实与
-#    Android 无关），指向的层却完全错了。设备树两边是同一份。
+# 挂起由两把 wakelock 把关：
+#   - gaokun3_nosuspend（本文件）：总开关。allow_suspend=1 时放开，=0 时拿回。
+#   - gaokun3_usbhost（USB 端口 HAL，usb/Usb.cpp 开头）：主机枚举了平板时持有，拔线后放开。
 #
-# 两个 wakelock 的分工（别混淆）：
-#   - gaokun3_nosuspend（本文件）：总开关。allow_suspend=1 时放开。
-#   - gaokun3_usbrole（etc/usbrole.rc + bin/gaokun3-usbrole.sh）：真正的把关者。
-#     息屏时先切 role=host 并【确认 xhci 子设备出现】才放行挂起，亮屏切回 device。
-#     确认不了就一直按住 —— 所有失败路径都停在"不许睡"这一侧。
-# ⚠️ 用户可见代价：息屏时 USB device-mode adb 断开（UDC 就在那个控制器上），
-#    亮屏即恢复。开发构建的 TCP adb（5555）不受影响；发布构建默认不开 TCP adb，
-#    无线调试走 Wi-Fi，同样不受 USB 角色影响。
+# ⚠️ 排查用的副作用：持有 wakelock 时读 /sys/power/wakeup_count 会永久阻塞（cat 挂死 120s）。
+#   Android 的 SystemSuspend 正是卡在这一读上，所以持锁期间 /sys/power/suspend_stats/success 恒为 0，
+#   这不代表挂起坏了。别在探测脚本里 cat 这个节点。
 #
-# ⚠️ 排查用的副作用（记一条，省下一次两小时的误诊）：
-#   持有 wakelock 时读 /sys/power/wakeup_count 会【永久阻塞】（实测 cat 挂死 120s）。
-#   Android 的 SystemSuspend 正是卡在这一读上，所以持锁期间
-#   /sys/power/suspend_stats/success 恒为 0 —— 那不代表挂起坏了。
-#   别在探测脚本里 cat 这个节点。
-#
-# ⚠️ 必须是 `on init` 而不是 `on early-init`：早期 sysfs 还没挂好，
-#    2026-08-19 实测 early-init 写入静默失败。
-# ★ 为什么开机仍然先上锁：属性触发器要等 property_service 起来才跑，
-#   那几秒里 role 还是出厂的 device。失败方向永远选"不睡"。
+# ⚠️ 必须是 `on init` 而不是 `on early-init`：早期 sysfs 还没挂好，early-init 写入会静默失败。
+# 开机先上锁：属性触发器要等 property_service 起来才跑，那之前不许睡。
 on init
     write /sys/power/wake_lock gaokun3_nosuspend
 
-# 总开关。device.mk 的默认值是 **1**（2026-09-18～09-24 开发期曾是 0，TODO S1），
-# 属性 2026-09-18 起改名成 persist.vendor.gaokun3.*（旧名 persist.gaokun3.* 在 enforcing 下
-# 谁都写不了，理由见 device.mk 与 sepolicy/property_contexts）。
-# ⚠️ 设成 0 的机器：这个触发器开机时仍可能按镜像默认值 1 先跑一次（持久属性加载得比
-#    属性触发器晚），放掉的只是这一把；挡住挂起的是 usbrole.rc 的 gaokun3_usbrole。
-# ⚠️ 运行时 setprop ... 0 只能阻止后续的息屏切换，【不会】把这个 wakelock 重新拿回来
-#    —— 要完全回到"挡住挂起"的状态得重启。放开容易收回难，所以这里只做放开一个方向。
+# 总开关，device.mk 的默认值是 1；属性名用 vendor 前缀的理由见 device.mk。
+# 设成 0 的机器：=1 的触发器开机时可能先按镜像默认值跑一次（持久属性加载得比属性触发器晚），
+# 持久值 0 加载后 =0 的触发器再把锁拿回来。运行中改动两个方向都立即生效。
 on property:persist.vendor.gaokun3.allow_suspend=1
     write /sys/power/wake_unlock gaokun3_nosuspend
+
+on property:persist.vendor.gaokun3.allow_suspend=0
+    write /sys/power/wake_lock gaokun3_nosuspend
 
 # ── 待机开关属性镜像：system 属性 → vendor 属性 ───────────────
 # persist.sys.gaokun3.allow_suspend（system_prop，private/property_contexts:77）镜像到
@@ -57,7 +40,7 @@ on property:persist.vendor.gaokun3.allow_suspend=1
 # ★ 用两条【字面值】而不是 ${persist.sys.gaokun3.allow_suspend} 展开：只认 0 / 1，别的值（写坏了）一律不动。
 # ★ 镜像目标本身就是 persist 属性，所以【不做开机重放】：没设过 persist.sys 的机器
 #   完全按原来的 persist.vendor 值走；设过之后两边相同。
-# 生效时机：1→0 立刻生效（亮屏时 gaokun3_usbrole 握着，息屏不再放）；0→1 从下一次息屏起生效。
+# 生效时机：两个方向都立即生效（见上面两条触发器）。
 on property:persist.sys.gaokun3.allow_suspend=1
     setprop persist.vendor.gaokun3.allow_suspend 1
 
@@ -95,10 +78,10 @@ on boot
     #   放在 on boot（晚于 init.rc 的 on init copy）：已经在这两个 cpuset 里的进程随 cpus 一起迁走，不怕时序。
     #   SELinux：/dev/cpuset 是 cgroup 类型（refs/lineage-sepolicy/private/genfs_contexts:121），
     #   vendor_init 有 cgroup:file w_file_perms（private/vendor_init.te:46）⇒ 不用加规则。
-    #   Power HAL 仍是 AOSP 示例桩（device.mk 的 android.hardware.power-service.example），这里不碰它。
-    #   ⬜ 未上机。判据：`cat /dev/cpuset/background/cpus /dev/cpuset/system-background/cpus` = 0-3、0-3，
-    #   top-app / foreground 仍 0-7；`grep Cpus_allowed_list /proc/$(pidof -s com.android.providers.media.module)/status`
-    #   之类后台进程 = 0-3；游戏帧率不低于改前（PERF-2 的 game-perf.sh 对照一次）。
+    #   Power HAL（lineage-libperfmgr）按提示与默认值改频率上下限、top-app的uclamp下限与background、
+    #   foreground_window的uclamp上限，不改cpuset。
+    #   已上机核对（1.0.0-rc.4）：background、system-background为0-3，top-app、foreground为0-7，
+    #   后台进程的Cpus_allowed_list为0-3。⬜ 游戏帧率不低于改前（PERF-2的game-perf.sh对照一次）尚未实测。
     write /dev/cpuset/background/cpus 0-3
     write /dev/cpuset/system-background/cpus 0-3
     chown system system /sys/class/backlight/ae96000.dsi.0/brightness
@@ -178,6 +161,10 @@ service gaokun3_rprockick /vendor/bin/gaokun3-rproc-kick.sh
 on property:sys.boot_completed=1
     start gaokun3_rprockick
     start gaokun3_wifiwake
+    # Power HAL在此之前已注册服务，收到的提示先排队；开机完成后才启动节点写入线程和温控监听，
+    # 按powerhint.json的ResetOnInit写入各节点的默认值，排队中未到期的提示随后生效。
+    # ADPF会话不受这个属性影响。做法同Pixel的init.gs101.rc。
+    setprop vendor.powerhal.init 1
 
 # turnip 调试旗标（见 docs/dev/gpu-turnip.md）：
 # 内核 cmdline 加 androidboot.tu_debug=<flags> → ro.boot.tu_debug → 下面的属性。

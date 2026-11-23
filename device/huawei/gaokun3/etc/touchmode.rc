@@ -4,8 +4,8 @@
 #   ⚠️ enforcing 下普通 adb shell 设不了 system_prop（policy-query：shell system_prop set DENY）：
 #      开发构建先 adb root 再 setprop；发布构建（ro.debuggable=0，没有 adb root）装 ReSukiSU 管理器、
 #      给 Shell（com.android.shell）授 root 后 adb shell su -c "setprop …"（⬜ 发布构建上的 su 路径未实测）。
-#      ★ 2026-10-25 起用户不必走 adb：「设置 → 系统 → 触摸手感」与控制中心「游戏触摸」磁贴改的就是这个属性
-#      （parts/…/TouchModeSettingsActivity.java、TouchModeTileService.java）。⬜ 未编译、未上机。
+#      ★ 用户不必走 adb：「设置 → 显示 → 防误触模式」（开启 = daily）与控制中心「防误触」磁贴改的就是这个属性
+#      （parts/…/TouchProtectionProvider.java、TouchModeTileService.java）。
 #
 # ★ 用 persist.sys.* 与键盘开关同理：属性上下文是 system_prop，系统应用
 #   （Settings，uid system）能直接 SystemProperties.set()，不必再造一个服务。

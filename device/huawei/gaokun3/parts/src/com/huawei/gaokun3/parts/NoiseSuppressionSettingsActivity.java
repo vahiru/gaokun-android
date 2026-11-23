@@ -6,7 +6,7 @@
  * VOICE_COMMUNICATION), .record (MIC, DEFAULT) and .camcorder (CAMCORDER).  etc/denoise.rc copies
  * them to vendor.gaokun3.denoise.*, which the capture hook reads when a recording starts, so a
  * change applies from the next call or recording.  The detour through init has the same reason as
- * SpeakerFxSettingsActivity's: this app cannot set vendor properties and the audio HAL cannot read
+ * SpeakerFxDialogActivity's: this app cannot set vendor properties and the audio HAL cannot read
  * system ones.
  *
  * The page shows the persist.sys values, the only stored copy; unset means the hook's defaults:

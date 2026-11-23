@@ -92,7 +92,7 @@ consequences: section 2 of docs/known-limitations.md
 * Huawei Histen audio engine, /vendor/lib64/soundfx/libhw_histen_processing.so:
   proprietary to Huawei, not licensed for redistribution, and binary-modified
   (patched so that Android's bionic linker can load it). It processes audio only
-  when "Speaker enhancement (experimental)" is turned on. See
+  when Huawei Histen is selected in "Speaker sound effects". See
   device/huawei/gaokun3/effects/README.md and
   device/huawei/gaokun3/effects/prebuilt/README.md.
 * Qualcomm QNN runtime (libQnnHtp.so, libQnnHtpV68Stub.so, libQnnSystem.so

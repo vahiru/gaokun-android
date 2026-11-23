@@ -8,28 +8,70 @@
 
 ## 能力边界
 
-传感器经厂商 QSEE TA 取图，解密和匹配运行在普通 Android 用户态。
-服务固定报告 `CONVENIENCE`，拒绝非零 operationId 的加密认证，成功回调携带
-空 HardwareAuthToken。没有 HAT 签名密钥，不提供 KeyMint/Keystore 解锁能力。
-Class 1 的应用可见性和锁屏行为需要实际 crDroid 框架验证。
+传感器经厂商QSEE TA取图，解密和匹配运行在普通Android用户态。服务向框架报告`STRONG`（Class 3）：
+认证成功时签发HardwareAuthToken（见“令牌”一节），可用于锁屏解锁、应用内的指纹验证（BiometricPrompt）
+以及绑定指纹的Keystore密钥。
 
-录入仅检查 challenge、有效期、SID 非零和 MAC 长度，**不能验证 HAT 的 MAC**；
-因此目前不满足 ISession 的完整录入授权契约。`resetLockout` 也不验证 HAT；
-HAL 持久化失败计数：每 5 次失败锁定 30 秒，20 次永久锁定，
-框架调用 resetLockout 时清除计数，但 HAL 无法确认所携带的 PIN 授权真实有效。
-单调时钟计时；进程重启在 timed 边界
-重新等待完整 30 秒，不缩短锁定。完整行为仍须上机验收。
-没有 FAR/FRR、防伪、TEE 模板保护或防回滚证明，不声明已达到 CDD Class 1/2/3
-认证标准。`CONVENIENCE` 是开发阶段的保守能力报告，不是安全认证结论。
+报告`STRONG`是本项目的取舍，不是CDD认证结论。CDD要求Class 2、Class 3在隔离执行环境中匹配，这里达不到。
+采用`STRONG`的依据：
+
+- 本机的KeyMint和Gatekeeper都是软件实现（`device.mk`），PIN的校验和Keystore密钥本来就在普通世界，
+  取得root或内核权限即可获取。HAL在用户态签发令牌，不会让密钥的保护比PIN更弱。
+- 同一机型装FocalTech传感器的机器，在Windows上由用户态的WinBio引擎适配器匹配
+  （[设计文档](../../../../docs/dev/fingerprint-driver-design.md)第1节），Windows Hello照常可用于登录以外的验证。
+
+指纹本身的局限如实说明：匹配器的误识率只有一个人的数据作为依据（见“匹配”一节），不足以估计CDD要求的
+1/50000量级；没有防伪（假指纹）检测；模板库没有TEE保护，有root权限即可读写。
+
+仍无法使用的场景：微信支付、支付宝等应用的指纹支付一般依赖厂商在TEE中预置的密钥和机型白名单；检查硬件
+密钥证明或Play Integrity的应用会因KeyMint是软件实现而拒绝。
+
+录入要求本HAL生成、仍在有效期内的challenge，以及Gatekeeper为它签发、MAC校验通过的PIN令牌；`resetLockout`
+要求10分钟内签发、MAC校验通过的PIN令牌。HAL持久化失败计数：每5次失败锁定30秒，20次永久锁定，
+resetLockout成功时清零。单调时钟计时；进程重启在timed边界重新等待完整30秒，不缩短锁定。
 
 challenge按用户保存在服务里，不随会话销毁：每个用户最多16个，生成后10分钟内有效。传感器出错时HAL报
 `HW_UNAVAILABLE`并退役当前会话，框架新建会话后，设置用原来的授权令牌重试录入，新会话因此要能识别这个challenge。
 
-HAL随镜像构建。不得仅改成WEAK/STRONG来绕过框架限制；提高安全等级仍需可信录入授权以及安全等级评估。
+HAL随镜像构建。
+
 SystemUI对Class 1/2指纹只在人脸也锁定时才禁止指纹解锁，没有人脸识别时，指纹自己临时锁定期间仍会不断请求认证。
 [`patches/android/frameworks-base/0001`](../../../../patches/android/frameworks-base/0001-systemui-respect-fingerprint-lockout.patch)
-（由`scripts/crdroid-tree-fixes.py`打入）让它在锁定期间改为只检测接触，与Class 3指纹锁定时相同；锁定期满时HAL发出
-`onLockoutCleared`，SystemUI随之恢复认证。
+（由`scripts/crdroid-tree-fixes.py`打入）让它在锁定期间改为只检测接触，与Class 3指纹锁定时相同。本HAL报告`STRONG`后，
+SystemUI本身已按Class 3处理指纹锁定，这个补丁在本机上不再改变行为。锁定期满时HAL发出`onLockoutCleared`，
+SystemUI随之恢复认证。
+
+## 令牌
+
+签发和校验令牌用的HMAC-SHA256密钥与KeyMint、Gatekeeper的相同。keystore2启动时主持共享密钥协商：VINTF中
+声明的每个`ISharedSecret`实例（本机为KeyMint的`default`和Gatekeeper的`gatekeeper`）给出seed和nonce，
+各方用自己的协商密钥对排序后的全部参数做CKDF（`keymaster::ckdf`）。两个软件实现的协商密钥都是公开的
+32字节零（AOSP `security/keymint/aidl/default/ta/soft.rs`的`kak()`、`gatekeeper/aidl/software/SharedSecret.cpp`），
+各方的nonce在其进程启动后第一次被查询时生成，此后不变。HAL第一次需要密钥时向各方读取参数，用同样的算法推导出
+这把密钥，之后缓存到进程退出（`SharedSecretKeySource`、`deriveAuthKey`）；读取失败时这次操作以`UNABLE_TO_PROCESS`
+结束，下次重试。KeyMint或Gatekeeper的进程重启后会换新的nonce，keystore2却只在自己启动时协商，那时它们自己的
+令牌也已无法校验；若keystore2随后也重启并重新协商，HAL要等自己重启后才会用上新密钥。
+
+HAL不作为第三个参与方注册：keystore2要等VINTF中声明的全部参与方上线后才协商，且只协商一次。作为参与方时，
+指纹HAL注册失败（或在开机协商期间退出）会让协商无法完成，Keystore的全部令牌校验随之失效；协商之后重启则会
+丢失自己的密钥，此后签发的令牌都无法通过校验。自行推导没有这些依赖，HAL重启后重新推导即可。代价是依赖
+“协商密钥公开”这一前提：若改用TEE中的KeyMint，须改为作为参与方注册，Gatekeeper届时也要随之更换。推导的
+密钥不对时（例如多出HAL无权查找的参与方：servicemanager列出实例时会略去调用方无权查找的），录入和
+`resetLockout`会以`MAC mismatch`拒绝PIN令牌。
+
+SELinux：两个`ISharedSecret`服务只允许KeyMint、Gatekeeper的客户端查找（`hal_attribute_service`中的neverallow），
+所以HAL声明为这两者的客户端（`hal_client_domain`），写法与`hal_identity_default`相同。这同时允许它调用
+KeyMint的其他服务（IKeyMintDevice、ISecureClock等）、IGatekeeper和`computeSharedSecret`（后者会让对方换用新密钥）；HAL只调用
+`getSharedSecretParameters`，这些权限的风险与HAL本身被攻破、可以伪造令牌相比并不更大。
+
+签发的令牌：challenge为认证的operationId（锁屏为0），userId为用户的SID，authenticatorId为本HAL当前的值，
+类型为指纹，时间戳为`CLOCK_BOOTTIME`毫秒，与KeyMint、Gatekeeper相同。Keystore中同时接受PIN和指纹的密钥，
+以及设为不随新录入失效的指纹密钥，都绑定在SID上。SID取自校验通过的录入或`resetLockout`令牌（已录入指纹时，每次输入PIN后
+框架都会调用`resetLockout`），存在模板库旁的`gaokun3-secure-user-id`里（见“模板”一节）；升级后用户输入一次
+PIN之前SID为0，这两类密钥暂时无法用指纹解锁。
+
+authenticatorId在录入新手指和`invalidateAuthenticatorId`时更换，删除手指时不变，没有手指时为0
+（`ISession#getAuthenticatorId`）。绑定指纹且随新录入失效的密钥绑定在它上面。
 
 ## 传感器型号
 
@@ -164,6 +206,11 @@ HAL 的命名 type_transition 为新 fpdata 目录赋予 fingerprint_vendor_data
 自己的帧数。v3库（每指固定16帧）和FocalTech的v2库仍可读取，下次保存时写成v4。最多5个
 有唯一正ID的录入、随机authenticatorId、SHA256损坏校验、临时文件fsync→rename→目录fsync。
 
+用户的SID存在同一目录的`gaokun3-secure-user-id`里（`GK3S`、SID、SHA256，写法与模板库相同），不放进模板库：
+模板库格式不变，切换到另一个槽位上的旧版本时，旧版HAL照常读取模板库，只是不读这个文件。这个文件缺失、
+损坏或权限不对时SID按0处理，不影响模板库的载入，用户下次输入PIN时重新写入；写入失败也不影响模板库的保存，
+下次保存时重试。
+
 录入每指16帧。纹理覆盖不到画面六成的帧不收，提示用力按住（`PARTIAL`）；和已收下的某一帧
 得分达到`kRepeatScore`（60）的也不收，提示每次换个位置（`IMMOBILE`）；两种情况都要等手指
 抬起再按。设置的侧边指纹录入页目前不显示这两条提示的文字。之后认证得分达到`kLearnThreshold`（40）时，这一帧补进该手指的模板，每指
@@ -189,18 +236,28 @@ bash scripts/fingerprint/test-offline.sh
 `test-offline.sh`用Clang `-Wall -Wextra -Werror`编译core和matcher的测试，并在
 AddressSanitizer + UBSan下运行：
 
-- 模板库：往返、权限、损坏、截断、符号链接，v2/v3兼容，学习帧的顺序与上限，传感器型号绑定；
+- 模板库：往返、权限、损坏、截断、符号链接，v2/v3兼容，学习帧的顺序与上限，传感器型号绑定；SID文件的
+  保存，以及缺失、损坏、权限不对、符号链接时按0处理；
 - 解码：AES有效帧、平帧和越界帧，Goodix底图和固定图样；
 - 匹配器：合成纹理转动±10°和±50°、平移后仍能对齐，转90°的视图和无关场景在偶然水平以下；
   重采样后的尺寸与周期；
 - 特征缓存：与现提取的结果一致，学习时增量更新，重读数据库后沿用；
-- 持久失败计数和锁定期限。
+- 持久失败计数和锁定期限；
+- 令牌：CKDF、令牌密钥的推导（与参数顺序无关）、令牌MAC及各字段的篡改，期望值由独立实现
+  （Python的CMAC和HMAC）算出。
 
 合成纹理只是回归测试，推不出真实手指的识别率或误识率。`test-transport.sh`在Linux主机上
 检查真实Transport实现的GPIO持有和恢复、读回失败和INIT失败的清理、shutdown失败后的保留，
 设备调用全部用模拟实现替换。会话回归模块`gaokun3-fingerprint-session-test`在设备上运行，
-不采集图像也不访问模板，覆盖旧会话替换、HW_UNAVAILABLE回调内重试、close回调重入、
-退役会话的challenge在新会话中仍然有效，以及FocalTech等待抬起期间读出并丢弃待读的帧。
+不采集图像，只使用临时目录中的合成模板，覆盖旧会话替换、HW_UNAVAILABLE回调内重试、close回调重入、
+退役会话的challenge在新会话中仍然有效、FocalTech等待抬起期间读出并丢弃待读的帧，以及令牌：录入拒绝伪造、
+错误密钥、非密码类型或没有SID的PIN令牌且不启动传感器；resetLockout拒绝过期、晚于当前时间、伪造、错误密钥
+或非密码类型的令牌，接受后清零失败计数并保存SID；认证成功时签发带operationId、SID和authenticatorId的令牌，
+取不到密钥时不启动传感器；录入完成时更换authenticatorId并保存SID；删除手指不更换authenticatorId，invalidate
+更换。
 `test-integration.py`检查补丁能否打上、UAPI是否一致、V4接口覆盖、镜像总是装入HAL与固件、缺失或改动的输入被拒绝，以及输入准备。
 
-现在的代码已随ROM构建，在Goodix机器上实测过正式服务与SELinux策略下的录入、解锁和拒绝其他手指；FTE7001机器上的匹配尚未实测。
+录入、解锁和拒绝其他手指已在Goodix机器上随ROM构建的正式服务与SELinux策略下实测过；FTE7001机器上的匹配尚未实测。
+令牌的签发与校验在Goodix机器上实测过：录入时校验Gatekeeper的令牌、锁屏解锁、加密认证（BiometricPrompt）、
+绑定authenticatorId和绑定SID的限时密钥、指纹解锁后的“设备已解锁”密钥，以及输入PIN后的`resetLockout`。
+随ROM构建的这一版HAL及其SELinux规则（`hal_client_domain`）尚未上机测试，规则已通过完整的策略编译检查。

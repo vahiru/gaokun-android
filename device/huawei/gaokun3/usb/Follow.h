@@ -1,7 +1,6 @@
 /*
- * Port0's data role, decided from what is attached. These are the rules of
- * the follow loop gaokun3-usbrole.sh used to run (case file #118 §6-8), run
- * on events instead of a 2 s poll.
+ * Port0's data role, decided from what is attached, on events (case file
+ * #118 §6-8).
  *
  * The EC's UCSI gives the partner's presence, the power direction and PD, but
  * not its data role: it reports partner type UFP for everything. So UCSI
@@ -19,18 +18,18 @@
  *     so the UDC state does not keep the last host's "configured"; in the
  *     host role, go back to device, the role a computer plugged in next
  *     needs.
- * Two properties tell Parts what the user should know (UsbPortNotifier):
+ * Two properties report problems; Parts notifies the user only of the first
+ * (UsbPortNotifier):
  *   - vendor.gaokun3.usbrole.reversed: we supply a partner without PD and
  *     have no data connection with it for 6 s. That is a computer that came
  *     up as the sink; UCSI can only swap the power role with PD, so the user
- *     has to replug. A power-only gadget (a USB fan) looks the same, which is
- *     why the notice asks for a replug only "if this is a computer".
+ *     has to replug. A power-only gadget (a USB fan) looks the same, so the
+ *     notice only says that the tablet supplies power without a data
+ *     connection.
  *   - vendor.gaokun3.usbrole.broken: the host role does not come up.
- * vendor.gaokun3.usbrole.adb_pause follows the role: in the host role there
- * is no UDC, and adbd stops retrying it (etc/usbrole.rc).
  *
  * A role chosen in Settings is kept until the partner detaches, and restored
- * if something else changes it (gaokun3-usbrole.sh at screen off and on).
+ * if something else changes it.
  *
  * Only for a DT with vreg_l9d always on: then the controller may suspend in
  * either role, so roles change regardless of the screen, and no wakelock is
@@ -64,7 +63,6 @@ class RoleFollow {
     void Detached(const Inputs& in, Clock::time_point now);
     void Switch(const std::string& from, const std::string& to, const char* why,
                 Clock::time_point now);
-    void SyncAdbPause(const std::string& role);
     void SetFlag(const char* prop, bool on, const char* why);
 
     bool mAttached = false;

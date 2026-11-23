@@ -50,7 +50,7 @@ vendor_public_prop(vendor_gaokun3_prop)
 get_prop(postinstall, vendor_gaokun3_prop)
 
 # ★ v1.0 PWR-4 / USB-1（2026-10-05）：system_app 只给【读】—— Parts 的 UsbPortNotifier 亮屏时每 3 秒读
-#    vendor.gaokun3.usbrole.broken / .reversed（gaokun3-usbrole.sh 与 USB 端口 HAL 设），据此发 USB-C 口的提示通知。
+#    vendor.gaokun3.usbrole.reversed（USB 端口 HAL 设），据此发 USB-C 口的反向供电提示。
 #    能读是因为 vendor_gaokun3_prop 是 vendor_public_property_type：core 侧那条"coredomain 不许读 vendor 属性"的
 #    neverallow 对它有豁免（refs/lineage-sepolicy/private/property.te:193-198）。Parts 是 system_app
 #    （seapp_contexts:180，user=system seinfo=platform）。⬜ 未编译。

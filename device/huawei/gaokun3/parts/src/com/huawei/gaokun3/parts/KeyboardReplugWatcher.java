@@ -1,7 +1,7 @@
 /*
  * 磁吸键盘"关掉"之后，拔下再插回还得是关着的（v1.0 DISP-15 / HW-11，2026-10-05）。
  *
- * ★ "关掉键盘"指的是 Parts 的键盘开关（设置 → 系统 → 磁吸键盘，或控制中心的磁贴）：
+ * ★ "关掉键盘"指的是 Parts 的键盘开关（设置 → 已连接的设备 → 磁吸键盘，或控制中心的磁贴）：
  *   设 persist.sys.gaokun3.keyboard=0 → etc/keyboard.rc → /vendor/bin/gaokun3-keyboard.sh off，
  *   把名字以 "HID 12d1:10b8" 开头的 input 设备（键盘 + 触控板，共 6–7 个）的
  *   /sys/class/input/inputN/inhibited 写成 1（docs/dev/hardware.md）。
@@ -13,7 +13,7 @@
  *   看新加进来的设备；是这把键盘、且开关是关着的，就设 sys.gaokun3.keyboard.replug=<时间戳>，
  *   keyboard.rc 里 `on property:sys.gaokun3.keyboard.replug=* && property:persist.sys.gaokun3.keyboard=0`
  *   再跑一次 gaokun3-keyboard.sh off。
- *   · 为什么还经 init 而不是自己写 sysfs：理由同 KeyboardSettingsActivity 顶部（应用不该有写
+ *   · 为什么还经 init 而不是自己写 sysfs：理由同 KeyboardProvider 顶部（应用不该有写
  *     /sys/class/input 的权限；sys.* 是 system_prop，system_app 可写：refs/lineage-sepolicy/private/system_app.te:43）。
  *   · 为什么要去抖：一次插入会连着加 6–7 个设备，gaokun3_kbd_off 是 oneshot，跑着的时候再 start 是空操作
  *     ⇒ 最后一个设备加进来之后再等 DEBOUNCE_MS 才设一次属性，脚本一次把所有设备都处理掉。
@@ -42,7 +42,7 @@ public class KeyboardReplugWatcher extends Service implements InputManager.Input
 
     private static final String TAG = "Gaokun3KbdReplug";
 
-    /** 与 KeyboardSettingsActivity / KeyboardTileService 同一个开关属性。 */
+    /** 与 KeyboardProvider / KeyboardTileService 同一个开关属性。 */
     private static final String PROP_SWITCH = "persist.sys.gaokun3.keyboard";
     /** etc/keyboard.rc 盯着的触发属性。 */
     private static final String PROP_REPLUG = "sys.gaokun3.keyboard.replug";

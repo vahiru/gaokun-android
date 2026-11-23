@@ -11,7 +11,7 @@
  *   functionfs 挂到 /dev/usb-ffs/fastboot，描述符写进 ep0 之后才写 UDC（顺序反了 UDC 绑不上）。
  *   序列号 gaokun3（与 adb gadget 一致，init.gaokun3.usb.rc；U5 未定）。
  * role：/sys/class/usb_role/<udc>-role-switch/role 已经是 device 就不写，不是才写一次 —— 与
- *   init.gaokun3.usb.rc / gaokun3-usbrole.sh 同一个文件。【绝不】unbind / rebind dwc3（patch 0012:13，#52）。
+ *   Android 的 USB 端口 HAL（device/huawei/gaokun3/usb/Port.h）同一个文件。【绝不】unbind / rebind dwc3（patch 0012:13，#52）。
  * 同步 read/write（不用 aio）：fastboot 是单通道、主机驱动的同步协议，每次读满一个命令或一段数据。
  * ep0 由单独的线程读事件；SETUP 一律 stall（主机端 fastboot 不发控制请求）。
  */
@@ -159,7 +159,7 @@ static int mkdirs(const char *p)
     return mkdir(b, 0755) == 0 || errno == EEXIST ? 0 : -1;
 }
 
-/* 有 role switch 而且不是 device 才写一次，然后等 UDC 出现（dwc3 切换是异步的，gaokun3-usbrole.sh 的教训）。 */
+/* 有 role switch 而且不是 device 才写一次，然后等 UDC 出现（dwc3 的角色切换是异步的）。 */
 static void ensure_device_role(const char *udc)
 {
     char p[256], v[64];

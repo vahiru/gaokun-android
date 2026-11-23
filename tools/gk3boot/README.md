@@ -165,7 +165,7 @@ tools/gk3boot/
 |---|---|---|
 | `boot_control` HAL扩展 | [../../device/huawei/gaokun3/boot_control/Gk3Boot.cpp](../../device/huawei/gaokun3/boot_control/Gk3Boot.cpp) | `sys.boot_completed=1`后清零GK3记录`boot_streak`、提取未通知事件、祝福（bless）本次启动条目、按属性对齐ESP文件、处理双系统与菜单请求、关机时写`clean_poweroff`标记 |
 | OTA postinstall部署 | [../../device/huawei/gaokun3/bin/gaokun3-ota-postinstall.sh](../../device/huawei/gaokun3/bin/gaokun3-ota-postinstall.sh) | OTA写入新槽后同步直连条目与内核副本，并按开关部署或暂存（`.staged`）新槽`/vendor/boot/gk3boot/{gk3boot.efi,fastboot.img}` |
-| 系统设置与通知 | `GaokunParts`（`BootEntryNotifier` / `BootOptionsActivity`） | 开机异常通知（回退旧槽、丢弃遗留BCB、跳过入口等）与「启动选项」页面（重启到Windows、默认系统切换、重启到引导菜单） |
+| 系统设置与通知 | `GaokunParts`（`BootEntryNotifier` / `BootOptionsActivity`） | 开机异常通知（更新失败退回旧槽、未经默认启动条目开机、双系统请求未执行等）与「启动选项」页面（重启到Windows、默认系统切换、重启到引导菜单） |
 
 ### 4.2 开关属性`persist.vendor.gaokun3.gk3boot`
 

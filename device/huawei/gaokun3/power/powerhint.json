@@ -1,0 +1,270 @@
+{
+    "Nodes": [
+        {
+            "Name": "CPULittleClusterMaxFreq",
+            "Paths": [
+                "/sys/devices/system/cpu/cpufreq/policy0/scaling_max_freq"
+            ],
+            "Values": [
+                "9999999",
+                "1209600"
+            ],
+            "DefaultIndex": 0,
+            "ResetOnInit": true
+        },
+        {
+            "Name": "CPULittleClusterMinFreq",
+            "Paths": [
+                "/sys/devices/system/cpu/cpufreq/policy0/scaling_min_freq"
+            ],
+            "Values": [
+                "9999999",
+                "1209600",
+                "691200"
+            ],
+            "ResetOnInit": true
+        },
+        {
+            "Name": "CPUBigClusterMaxFreq",
+            "Paths": [
+                "/sys/devices/system/cpu/cpufreq/policy4/scaling_max_freq"
+            ],
+            "Values": [
+                "9999999",
+                "1286400"
+            ],
+            "DefaultIndex": 0,
+            "ResetOnInit": true
+        },
+        {
+            "Name": "CPUBigClusterMinFreq",
+            "Paths": [
+                "/sys/devices/system/cpu/cpufreq/policy4/scaling_min_freq"
+            ],
+            "Values": [
+                "9999999",
+                "1056000",
+                "0"
+            ],
+            "ResetOnInit": true
+        },
+        {
+            "Name": "TAUClampMin",
+            "Paths": [
+                "/dev/cpuctl/top-app/cpu.uclamp.min"
+            ],
+            "Values": [
+                "67.58",
+                "30.00",
+                "0.00"
+            ],
+            "ResetOnInit": true
+        },
+        {
+            "Name": "BGUClampMax",
+            "Paths": [
+                "/dev/cpuctl/background/cpu.uclamp.max"
+            ],
+            "Values": [
+                "max",
+                "32.03"
+            ],
+            "ResetOnInit": true
+        },
+        {
+            "Name": "FGWUClampMax",
+            "Paths": [
+                "/dev/cpuctl/foreground_window/cpu.uclamp.max"
+            ],
+            "Values": [
+                "max",
+                "80.66"
+            ],
+            "ResetOnInit": true
+        },
+        {
+            "Name": "GPUMinFreq",
+            "Paths": [
+                "/sys/class/devfreq/3d00000.gpu/min_freq"
+            ],
+            "Values": [
+                "690000000",
+                "410000000",
+                "0"
+            ],
+            "ResetOnInit": true
+        },
+        {
+            "Name": "RTUClampMinDefault",
+            "Paths": [
+                "/proc/sys/kernel/sched_util_clamp_min_rt_default"
+            ],
+            "Values": [
+                "0"
+            ],
+            "DefaultIndex": 0,
+            "ResetOnInit": true
+        }
+    ],
+    "Actions": [
+        {
+            "PowerHint": "LAUNCH",
+            "Node": "CPULittleClusterMaxFreq",
+            "Duration": 5000,
+            "Value": "9999999"
+        },
+        {
+            "PowerHint": "LAUNCH",
+            "Node": "CPUBigClusterMaxFreq",
+            "Duration": 5000,
+            "Value": "9999999"
+        },
+        {
+            "PowerHint": "LAUNCH",
+            "Node": "TAUClampMin",
+            "Duration": 5000,
+            "Value": "67.58"
+        },
+        {
+            "PowerHint": "GAME_LOADING",
+            "Node": "CPULittleClusterMaxFreq",
+            "Duration": 5000,
+            "Value": "9999999"
+        },
+        {
+            "PowerHint": "GAME_LOADING",
+            "Node": "CPUBigClusterMaxFreq",
+            "Duration": 5000,
+            "Value": "9999999"
+        },
+        {
+            "PowerHint": "GAME_LOADING",
+            "Node": "TAUClampMin",
+            "Duration": 5000,
+            "Value": "67.58"
+        },
+        {
+            "PowerHint": "INTERACTION",
+            "Node": "TAUClampMin",
+            "Duration": 0,
+            "Value": "30.00"
+        },
+        {
+            "PowerHint": "EXPENSIVE_RENDERING",
+            "Node": "GPUMinFreq",
+            "Duration": 0,
+            "Value": "410000000"
+        },
+        {
+            "PowerHint": "FIXED_PERFORMANCE",
+            "Node": "CPULittleClusterMaxFreq",
+            "Duration": 0,
+            "Value": "9999999"
+        },
+        {
+            "PowerHint": "FIXED_PERFORMANCE",
+            "Node": "CPULittleClusterMinFreq",
+            "Duration": 0,
+            "Value": "9999999"
+        },
+        {
+            "PowerHint": "FIXED_PERFORMANCE",
+            "Node": "CPUBigClusterMaxFreq",
+            "Duration": 0,
+            "Value": "9999999"
+        },
+        {
+            "PowerHint": "FIXED_PERFORMANCE",
+            "Node": "CPUBigClusterMinFreq",
+            "Duration": 0,
+            "Value": "9999999"
+        },
+        {
+            "PowerHint": "FIXED_PERFORMANCE",
+            "Node": "GPUMinFreq",
+            "Duration": 0,
+            "Value": "690000000"
+        },
+        {
+            "PowerHint": "LOW_POWER",
+            "Node": "CPULittleClusterMaxFreq",
+            "Duration": 0,
+            "Value": "1209600"
+        },
+        {
+            "PowerHint": "LOW_POWER",
+            "Node": "CPUBigClusterMaxFreq",
+            "Duration": 0,
+            "Value": "1286400"
+        },
+        {
+            "PowerHint": "AC_POWER",
+            "Node": "CPULittleClusterMinFreq",
+            "Duration": 0,
+            "Value": "1209600"
+        },
+        {
+            "PowerHint": "AC_POWER",
+            "Node": "CPUBigClusterMinFreq",
+            "Duration": 0,
+            "Value": "1056000"
+        },
+        {
+            "PowerHint": "AC_POWER",
+            "Node": "BGUClampMax",
+            "Duration": 0,
+            "Value": "max"
+        },
+        {
+            "PowerHint": "AC_POWER",
+            "Node": "FGWUClampMax",
+            "Duration": 0,
+            "Value": "max"
+        }
+    ],
+    "AdpfConfig": [
+        {
+            "Name": "Default",
+            "PID_On": true,
+            "PID_Po": 2,
+            "PID_Pu": 1,
+            "PID_I": 0,
+            "PID_I_Init": 200,
+            "PID_I_High": 512,
+            "PID_I_Low": -30,
+            "PID_Do": 500,
+            "PID_Du": 0,
+            "UclampMin_On": true,
+            "UclampMin_Init": 232,
+            "UclampMin_LoadUp": 480,
+            "UclampMin_LoadReset": 480,
+            "UclampMin_High": 480,
+            "UclampMin_Low": 2,
+            "SamplingWindow_P": 1,
+            "SamplingWindow_I": 0,
+            "SamplingWindow_D": 1,
+            "ReportingRateLimitNs": 83333330,
+            "TargetTimeFactor": 1,
+            "StaleTimeFactor": 15,
+            "HeuristicBoost_On": true,
+            "HBoostModerateJankThreshold": 2,
+            "HBoostOffMaxAvgDurRatio": 4.0,
+            "HBoostSevereJankPidPu": 0.5,
+            "HBoostSevereJankThreshold": 8,
+            "HBoostUclampMinCeilingRange": [
+                480,
+                722
+            ],
+            "HBoostUclampMinFloorRange": [
+                230,
+                410
+            ],
+            "JankCheckTimeFactor": 1.2,
+            "LowFrameRateThreshold": 25,
+            "MaxRecordsNum": 300
+        }
+    ],
+    "OtherConfigs": {
+        "EnableSFPreferHighCap": false
+    }
+}

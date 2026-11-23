@@ -1,0 +1,82 @@
+From 4df9d03e7a88b6430557e433d5167d3fbaa56257 Mon Sep 17 00:00:00 2001
+From: Georg Lehmann <dadschoorse@gmail.com>
+Date: Mon, 18 May 2026 22:15:03 +0200
+Subject: [PATCH] spirv: always preserve infinities for FMin, FMax and FClamp
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Don't ask me why these game engines do not use NMin and friends,
+maybe they don't know those exist.
+
+Closes: https://gitlab.freedesktop.org/mesa/mesa/-/work_items/15481
+Backport-to: 26.1
+
+Reviewed-by: Samuel Pitoiset <samuel.pitoiset@gmail.com>
+Reviewed-by: Timur Kristóf <timur.kristof@gmail.com>
+Part-of: <https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/41661>
+Origin: upstream, https://gitlab.freedesktop.org/mesa/mesa/-/commit/4df9d03e7a88b6430557e433d5167d3fbaa56257
+Upstream-Status: Backport [https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/41661]
+---
+ src/compiler/spirv/vtn_glsl450.c | 28 +++++++++++++++++++++++-----
+ 1 file changed, 23 insertions(+), 5 deletions(-)
+
+diff --git a/src/compiler/spirv/vtn_glsl450.c b/src/compiler/spirv/vtn_glsl450.c
+index 21fc4c8..e1ae8dd 100644
+--- a/src/compiler/spirv/vtn_glsl450.c
++++ b/src/compiler/spirv/vtn_glsl450.c
+@@ -196,10 +196,20 @@ vtn_nir_alu_op_for_spirv_glsl_opcode(struct vtn_builder *b,
+    *extra_fp_math_ctrl = nir_fp_fast_math;
+    switch (opcode) {
+    case GLSLstd450NMin:
+-   case GLSLstd450NMax: {
+-      *extra_fp_math_ctrl = nir_fp_preserve_nan | nir_fp_preserve_inf;
++   case GLSLstd450NMax:
++      *extra_fp_math_ctrl |= nir_fp_preserve_nan;
++      FALLTHROUGH;
++   case GLSLstd450FMax:
++   case GLSLstd450FMin: {
++      /* We don't have to preserve infinities according to the VK spec,
++       * but games break without it. Both Unity and Unreal Engine
++       * are affected.
++       */
++      *extra_fp_math_ctrl |= nir_fp_preserve_inf;
+       switch (opcode) {
++      case GLSLstd450FMin:
+       case GLSLstd450NMin: return nir_op_fmin;
++      case GLSLstd450FMax:
+       case GLSLstd450NMax: return nir_op_fmax;
+       default: UNREACHABLE("unhandled");
+       }
+@@ -221,10 +231,8 @@ vtn_nir_alu_op_for_spirv_glsl_opcode(struct vtn_builder *b,
+    case GLSLstd450Log2:          return nir_op_flog2;
+    case GLSLstd450Sqrt:          return nir_op_fsqrt;
+    case GLSLstd450InverseSqrt:   return nir_op_frsq;
+-   case GLSLstd450FMin:          return nir_op_fmin;
+    case GLSLstd450UMin:          return nir_op_umin;
+    case GLSLstd450SMin:          return nir_op_imin;
+-   case GLSLstd450FMax:          return nir_op_fmax;
+    case GLSLstd450UMax:          return nir_op_umax;
+    case GLSLstd450SMax:          return nir_op_imax;
+    case GLSLstd450FMix:          return nir_op_flrp;
+@@ -409,9 +417,19 @@ handle_glsl450_alu(struct vtn_builder *b, enum GLSLstd450 entrypoint,
+       dest->def = nir_flog(nb, src[0]);
+       break;
+ 
+-   case GLSLstd450FClamp:
++   case GLSLstd450FClamp: {
++      /* We don't have to preserve infinities according to the VK spec,
++       * but games break without it. Both Unity and Unreal Engine
++       * are affected.
++       */
++      const unsigned save_math_ctrl = nb->fp_math_ctrl;
++      b->nb.fp_math_ctrl = nir_fp_preserve_inf;
++
+       dest->def = nir_fclamp(nb, src[0], src[1], src[2]);
++
++      nb->fp_math_ctrl = save_math_ctrl;
+       break;
++   }
+    case GLSLstd450NClamp: {
+       const unsigned save_math_ctrl = nb->fp_math_ctrl;
+       nb->fp_math_ctrl |= nir_fp_preserve_nan | nir_fp_preserve_inf;

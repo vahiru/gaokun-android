@@ -159,3 +159,35 @@ GPU的每档OPP在`opp-peak-kBps`中声明对DDR（`ebi`）的峰值带宽投票
 
 - 微信进程的logcat中出现上面的警告，说明选项已生效，并且发生了丢弃。
 - 其他应用出现同样的卡死时，ANR记录中光栅线程停在`vk_queue_submit_move_binary_waits_to_temps()` → `drmSyncobjTimelineWait`。确认是同类问题后，可以在`00-mesa-defaults.conf`中为它添加同样的条目。
+
+## 八、无穷大的保留（`mesa/0015`、`mesa/0016`）
+
+《无限暖暖》所用的虚幻引擎5移动端色调映射在计算抖动噪声的符号时使用`clamp(x * +Inf, -1, 1)`，`+Inf`在DXC生成的SPIR-V中是一个`OpConstant`（`0x7f800000`），而模块没有声明`SignedZeroInfNanPreserve`。按Vulkan规范，这种情况下实现可以假设浮点运算的操作数和结果都不是Inf或NaN。ROM所用的Mesa快照已包含MR !40291（`nir/search_helpers: assume float sources without preserve flag can't be inf/nan`），按取值范围匹配的代数优化因此使用这一假设：`x * +Inf`只可能是±Inf或NaN，在该假设下既算作“非负”也算作“非正”，`nir_opt_algebraic`把`fmax`和`fmin`都换成`fcanonicalize`，clamp被删去。噪声随之变为`-Inf * s + Inf = NaN`，并被加到全部颜色通道上，UNORM渲染目标把NaN存为0。其结果是《无限暖暖》（[issue #33](https://github.com/vahiru/gaokun-android/issues/33)）进入大世界后实时3D画面全黑，而之后绘制的UI正常。
+
+上游MR !41661（`4df9d03`，已回移到26.1分支）让GLSL.std.450的`FMin`、`FMax`和`FClamp`生成的`fmin`、`fmax`总是带有`nir_fp_preserve_inf`，上述规则不再匹配，clamp得以保留；上游的说明指出Unity和虚幻引擎都依赖这一行为。`mesa/0015`是该提交的原样回移，基线升级到包含该提交的版本（26.1分支为26.1.1及以后）时删除。
+
+同一假设也影响`nir_atan2()`：零输入时`frcp(0.0)`会产生中间的无穷大，而最终结果并不是无穷大，应用即使没有要求保留无穷大，结果也应当确定。上游MR !41953（`3a815a5`，26.1.3）在`nir_atan2()`的降级中保留无穷大与有符号零，`mesa/0016`是它的原样回移，基线包含该提交时删除。该提交的Tested-by来自Intel的开发者；在Turnip上，测试用的32位与mediump的`atan(y, x)`着色器生成的代码与回移前相同，尚未发现受影响的着色器。
+
+排查：
+
+- 全屏后处理在lavapipe等驱动上正常、在Turnip上输出为0或NaN时，先用`spirv-dis`检查其SPIR-V中是否有Inf或NaN常量，以及是否声明了`SignedZeroInfNanPreserve`。
+- Turnip的反汇编（`IR3_SHADER_DEBUG=disasm`，Android上对应属性`debug.mesa.ir3.shader.debug`，输出到logcat）只在着色器重新编译时输出，命中磁盘缓存或管线缓存时不输出，且该属性在每个进程中只读取一次。Inf常量位于常量寄存器中，可在反汇编开头的立即数表里找到`0x7f800000`及其所在的寄存器（如`c13.w`），再检查与它相乘之后是否有对应的`max.f`和`min.f`。
+
+## 九、原神的深度写回（`mesa/0017`）
+
+原神在ANGLE上水面在部分帧中整片消失，灌木后方的物体在部分帧中显示到前方。`TU_DEBUG=sysmem`时画面正常，`TU_DEBUG=gmem`时水面每一帧都消失。由此推断：原神对深度缓冲调用`glInvalidateFramebuffer`之后，后面的渲染步骤仍要读取它（水面按场景深度计算透明度，物体之间的遮挡也依赖深度）；Mesa的OpenGL驱动也为原神忽略discard与invalidate（driconf选项`ignore_discard_framebuffer`，MR !21916）。按规范，invalidate之后的内容是未定义的。ANGLE把invalidate转换为`VK_ATTACHMENT_STORE_OP_DONT_CARE`，下一个使用这张图像的渲染步骤则为`VK_ATTACHMENT_LOAD_OP_DONT_CARE`。Turnip按分块渲染（GMEM，先在GPU片上缓存中绘制，再写回内存）执行时，深度不写回内存；按直接渲染（sysmem）执行时深度仍在内存中。两种方式由autotune按每个渲染步骤的历史统计选择，同一个步骤在不同帧中可能不同，所以画面时好时坏。
+
+`mesa/0017`新增driconf选项`vk_dont_care_as_store`：应用传入的附件若使用`STORE_OP_DONT_CARE`，按`STORE_OP_STORE`处理。它与已有的`vk_dont_care_as_load`（`LOAD_OP_DONT_CARE`按`LOAD_OP_LOAD`处理）一起，只对原神的国际服`com.miHoYo.GenshinImpact`、国服`com.miHoYo.Yuanshen`与B服`com.miHoYo.ys.bilibili`打开（`00-mesa-defaults.conf`）。两个选项都只作用于应用传入的附件，多重采样渲染到纹理（MSRTSS）的resolve与unresolve判断也按转换后的值。Turnip自己设定读写方式的附件不受影响：MSRTSS内部附件，以及动态渲染中的resolve附件、fragment density map与shading rate附件和被MSRTSS替换的单采样附件。上游的`vk_dont_care_as_load`原本也会改写这些附件，而其中一些不在GMEM里，载入会落在GMEM偏移0处，覆盖GMEM中排在最前的附件（通常是第一个颜色附件）。
+
+代价：原神中以`DONT_CARE`开始或结束的附件（深度与颜色）在分块渲染时也会载入与写回，多重采样附件会因此分配实际内存。未启用这两个选项的应用不受影响。
+
+限制（未修正）：
+
+- 经VkRenderPass的MSRTSS深度模板附件若只清除深度、模板为`LOAD_OP_DONT_CARE`，打开`vk_dont_care_as_load`后深度的清除会丢失。这是上游已有的问题；ANGLE在Turnip上使用动态渲染，不经过这条路径。
+- 附件为`LOAD_OP_NONE`与`STORE_OP_DONT_CARE`时，打开`vk_dont_care_as_store`后，未初始化的GMEM内容会写回内存。ANGLE只把`LOAD_OP_NONE`与`STORE_OP_NONE`成对设置，不会出现这种组合。
+- 动态渲染中只有深度的D24S8 MSRTSS附件可能被载入到GMEM偏移0处。这是上游已有的问题（应用本来就用`STORE_OP_STORE`时同样发生），`vk_dont_care_as_store`扩大了它的触发范围。原神是否使用MSRTSS（GLES的`EXT_multisampled_render_to_texture`）尚未确认。
+
+排查：
+
+- 画面某些元素时有时无、且`TU_DEBUG=sysmem`后消失时，先用`TU_DEBUG=gmem`确认是否每帧都出错；若是，问题多半在分块渲染下附件内容的载入与写回。
+- driconf按进程名匹配。经ANGLE的游戏中Turnip运行在游戏进程里，进程名就是包名；其他游戏遇到同类问题时，可以在`00-mesa-defaults.conf`中照原神的条目添加。

@@ -19,7 +19,6 @@ constexpr auto kNoData = std::chrono::seconds(6);
 // deciding again (it takes about 20 ms).
 constexpr auto kSwitchSettle = std::chrono::seconds(1);
 
-constexpr char kAdbPause[] = "vendor.gaokun3.usbrole.adb_pause";
 constexpr char kReversed[] = "vendor.gaokun3.usbrole.reversed";
 constexpr char kBroken[] = "vendor.gaokun3.usbrole.broken";
 
@@ -44,7 +43,6 @@ bool HasData(const Inputs& in) {
 
 std::optional<RoleFollow::Clock::time_point> RoleFollow::Tick(const Inputs& in,
                                                               Clock::time_point now) {
-    SyncAdbPause(in.role);
     if (in.role == "host" && in.xhci) SetFlag(kBroken, false, "the host role came up");
 
     if (!mSwitching.empty()) {
@@ -128,8 +126,7 @@ std::optional<RoleFollow::Clock::time_point> RoleFollow::Tick(const Inputs& in,
     mTried |= Bit(in.role);
     std::string next = Other(in.role);
     if (mTried & Bit(next)) {
-        // Tried both: a charger. Stay host until it detaches, as
-        // gaokun3-usbrole.sh does.
+        // Tried both: a charger. Stay host until it detaches.
         mSettled = true;
         if (in.role == "host") {
             LOGI("follow: no data connection in either role (a charger?); staying host");
@@ -181,14 +178,6 @@ void RoleFollow::Switch(const std::string& from, const std::string& to, const ch
     if (!WriteRole(to)) return;
     mSwitching = to;
     mSwitchingSince = now;
-}
-
-// In the host role the UDC is gone, and adbd would retry binding its USB
-// transport every second; adb_pause makes init pause it (etc/usbrole.rc).
-void RoleFollow::SyncAdbPause(const std::string& role) {
-    const char* want = role == "host" ? "1" : role == "device" ? "0" : nullptr;
-    if (!want || GetProp(kAdbPause) == want) return;
-    if (SetProp(kAdbPause, want)) LOGI("follow: role %s: %s=%s", role.c_str(), kAdbPause, want);
 }
 
 void RoleFollow::SetFlag(const char* prop, bool on, const char* why) {

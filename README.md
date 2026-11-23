@@ -34,7 +34,7 @@ The table below shows how the main features work in the current version. See the
 | Detachable keyboard and touchpad | ✅ | |
 | Wi-Fi | ✅ | |
 | Wi-Fi hotspot | ✅ | |
-| Bluetooth | ⚠️ | The microphone of a Bluetooth headset cannot be used in calls |
+| Bluetooth | ⚠️ | Bluetooth headsets can be used for media and calls; calls in apps have not been tested yet |
 | Speakers | ✅ | Bass enhancement or Huawei Histen can be turned on in Settings |
 | Microphones | ✅ | Beamforming, with echo cancellation and noise suppression that can be switched per scenario |
 | Headphones | ⚠️ | The microphone of a wired headset has not been tested yet |
@@ -48,7 +48,7 @@ The table below shows how the main features work in the current version. See the
 | Video encoding | ⚠️ | H.264 and HEVC hardware encoding, used for camera recording; the built-in screen recorder still uses software encoding; only one stream at a time uses the hardware, and video processed after the screen turns off may come out incomplete |
 | Camera | ✅ | Hardware ISP; both cameras take photos, record up to 1080p video and support digital zoom and exposure compensation, and the rear camera supports autofocus |
 | USB-C | ⚠️ | File transfer and network sharing with a computer, USB flash drives and external displays work; occasionally the USB-C port does not work after a boot until a restart, the cause is still under investigation |
-| Fingerprint | ⚠️ | Enrolment and screen unlock work (Goodix and FocalTech sensors); rated convenience class, fingerprint payment in apps is not available |
+| Fingerprint | ⚠️ | Enrolment, screen unlock and verification in apps work (Goodix and FocalTech sensors); fingerprint payment in WeChat Pay, Alipay and similar apps does not work |
 | Location | ❌ | No GPS hardware, satellite positioning is not available |
 | TPM | ❌ | Not supported |
 | Video copy protection (DRM) | ❌ | Widevine is not included, paid streaming content such as Netflix does not play |

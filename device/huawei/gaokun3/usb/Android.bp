@@ -1,8 +1,8 @@
 //
 // USB 端口 HAL（android.hardware.usb IUsb V3）。
 //
-// 向框架（UsbPortManager）报告 port0 的状态，并按插进来的东西决定 port0 的数据角色 ——
-// 也就是原先 gaokun3-usbrole.sh 的 follow 模式，从每 2 秒轮询一次改成由 uevent 驱动。
+// 向框架（UsbPortManager）报告 port0 的状态，按插进来的东西决定 port0 的数据角色（由 uevent 驱动），
+// 主机枚举了平板时持有 wakelock 不让系统挂起。
 // 说明在 Usb.cpp 与 Follow.h 的开头。
 //
 cc_binary {

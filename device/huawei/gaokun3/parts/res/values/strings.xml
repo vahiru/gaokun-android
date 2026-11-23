@@ -2,58 +2,45 @@
 <resources>
     <string name="app_name">MateBook E Go</string>
     <string name="keyboard_title">Detachable keyboard</string>
-    <string name="keyboard_summary">Turn the magnetic keyboard and touchpad on or off</string>
-    <string name="keyboard_switch_title">Keyboard enabled</string>
-    <string name="keyboard_switch_summary_on">Keyboard and touchpad are active</string>
-    <string name="keyboard_switch_summary_off">Keyboard and touchpad ignore all input</string>
-    <string name="keyboard_note">Turning this off inhibits the input devices in the kernel. The keyboard stays physically attached and charging; it simply stops reporting keys, pointer movement and wake events.</string>
+    <string name="keyboard_summary">Enable or disable the detachable keyboard and touchpad</string>
+    <string name="keyboard_error">Couldn\'t change the detachable keyboard setting</string>
     <string name="tile_on">On</string>
     <string name="tile_off">Off</string>
-    <string name="speaker_fx_title">Speaker enhancement (experimental)</string>
-    <string name="speaker_fx_summary">Bass enhancement or Huawei Histen for the built-in speakers</string>
-    <string name="speaker_fx_switch_title">Enable speaker enhancement</string>
-    <string name="speaker_fx_switch_summary_on">Sound from the built-in speakers is processed</string>
-    <string name="speaker_fx_switch_summary_off">Audio is passed through unchanged</string>
-    <string name="speaker_fx_engine_title">Processing</string>
+    <string name="sound_advanced_title">Advanced</string>
+    <string name="speaker_fx_title">Speaker sound effects</string>
+    <string name="speaker_fx_engine_title">Sound effect engine</string>
     <string name="speaker_fx_engine_bass">Bass enhancement</string>
     <string name="speaker_fx_engine_histen">Huawei Histen</string>
+    <string name="speaker_fx_engine_off">Off</string>
+    <!-- Options of the speaker sound effects dialog; the values match SpeakerFxDialogActivity. -->
     <string-array name="speaker_fx_engine_entries">
+        <item>@string/speaker_fx_engine_off</item>
         <item>@string/speaker_fx_engine_bass</item>
         <item>@string/speaker_fx_engine_histen</item>
     </string-array>
     <string-array name="speaker_fx_engine_values" translatable="false">
+        <item>off</item>
         <item>bass</item>
         <item>histen</item>
     </string-array>
-    <string name="speaker_fx_note">Experimental. Only the built-in speakers are processed; headphones, Bluetooth and USB audio are never touched. Bass enhancement processes everything the speakers play, games included. Huawei Histen processes media (music, video) only, and games that use low-latency audio bypass it. Changes apply within about a second, except that Histen takes effect from the next playback. If the sound is distorted or cuts out, turn it off.</string>
-    <!-- USB-C port notices (v1.0 PWR-4 / USB-1, UsbPortNotifier). port0 = the port next to the power button. -->
-    <string name="usb_port_channel">USB-C port</string>
-    <string name="usb_port_channel_desc">Problems with the USB-C port next to the power button</string>
-    <string name="usb_port_broken_title">USB-C port stopped working</string>
-    <string name="usb_port_broken_text">The USB-C port next to the power button failed after standby. USB data and standby will come back after a restart; until then the tablet will not go to sleep and keeps using battery.</string>
-    <string name="usb_port_reversed_title">USB cable connected the wrong way round</string>
-    <string name="usb_port_reversed_text">The tablet is powering the other device and no data connection was made. If this is a computer (USB debugging, file transfer), unplug the cable and plug it in again.</string>
-    <!-- Unified boot entry (gk3boot) notices (2026-10-05, S9; BootEntryNotifier). -->
-    <string name="boot_entry_channel">Boot loader</string>
-    <string name="boot_entry_channel_desc">Notices from the boot entry (gk3boot), such as falling back to the previous system after a failed update</string>
-    <string name="boot_entry_fallback_title">Rolled back to the previous version</string>
-    <string name="boot_entry_fallback_text">The system installed by the last update failed to start, so the boot entry automatically went back to the previous version (now running slot %1$s). You can check for updates and try again; if this keeps happening, please report it.</string>
-    <string name="boot_entry_bcb_dropped_title">A pending reset request was cancelled</string>
-    <string name="boot_entry_bcb_dropped_text">A factory reset or recovery request that was still pending when the boot entry was installed has been cancelled and was not carried out. If you still want it, please start it again.</string>
-    <string name="boot_entry_other_title">The boot entry recorded a problem</string>
-    <string name="boot_entry_other_text">Before this start-up the boot entry recorded: %1$s. The system started normally; if this keeps happening, please report it.</string>
-    <string name="boot_entry_bypassed_title">This start-up bypassed the boot entry</string>
-    <string name="boot_entry_bypassed_text">The boot entry (gk3boot) is installed, but this start-up used the direct boot item instead: either the boot entry failed to start several times in a row and was skipped automatically, or the direct item was picked in the boot menu. A failed system update will not be rolled back automatically during this start-up. If this appears on every start-up, please report it.</string>
-    <!-- Touch feel switch (2026-10-25, TouchModeSettingsActivity / TouchModeTileService), injected into Settings > System. -->
-    <string name="touch_mode_title">Touch feel</string>
-    <string name="touch_mode_summary">Game mode (no palm rejection) or everyday mode (palm rejection)</string>
-    <string name="touch_mode_switch_title">Game touch mode</string>
-    <string name="touch_mode_switch_summary_on">Game: no palm rejection, so taps next to a thumb lying along the edge are not dropped</string>
-    <string name="touch_mode_switch_summary_off">Everyday: palm rejection, a resting hand is ignored</string>
-    <string name="touch_mode_note">Both modes follow your finger equally closely; they differ only in palm rejection. In game mode a palm or the base of the thumb resting on the screen may register as a touch. Everyday mode ignores a resting palm, which suits browsing, reading and handwriting, but while a thumb lies flat along the edge of the screen, taps around it may be ignored too.\n\nChanges apply right away, no restart needed, and survive restarts. A quick settings tile is also available: edit quick settings and add \"Game touch\".</string>
-    <string name="touch_mode_tile_label">Game touch</string>
-    <string name="touch_mode_game">Game</string>
-    <string name="touch_mode_daily">Everyday</string>
+    <string name="speaker_fx_note">Sound effects apply only to the built-in speakers. The Histen engine may be unable to process audio from some games.</string>
+    <!-- Notifications about USB-C port issues -->
+    <string name="usb_port_channel">USB-C port issues</string>
+    <string name="usb_port_channel_desc">Notifications about USB-C port issues</string>
+    <string name="usb_port_reversed_title">USB-C port is supplying power</string>
+    <string name="usb_port_reversed_text">The tablet is supplying power to another device without a data connection.</string>
+    <!-- Notifications about startup issues -->
+    <string name="boot_entry_channel">Startup issues</string>
+    <string name="boot_entry_channel_desc">Notifications about startup issues</string>
+    <string name="boot_entry_fallback_title">System update failed</string>
+    <string name="boot_entry_fallback_text">After the last system update, the new version failed to start, and the previous version was restored automatically. Please report this to the developers.</string>
+    <string name="boot_entry_bypassed_title">This startup did not use the default boot entry</string>
+    <string name="boot_entry_bypassed_text">If this notification keeps appearing, please report it to the developers.</string>
+    <!-- Settings > Display > Accidental touch protection -->
+    <string name="touch_mode_title">Accidental touch protection</string>
+    <string name="touch_mode_summary">Reduce accidental palm touches, for example when writing with the M-Pencil</string>
+    <string name="touch_mode_tile_label">Touch protection</string>
+    <string name="touch_mode_error">Couldn\'t change accidental touch protection. Please report this to the developers.</string>
 
     <!-- Kernel version spoofing (AppKernelSettingsActivity), injected into Settings → System. -->
     <string name="app_kernel_title">Kernel version spoofing</string>

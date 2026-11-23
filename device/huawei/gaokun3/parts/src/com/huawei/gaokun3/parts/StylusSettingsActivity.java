@@ -6,7 +6,7 @@
  * (500, 300, 200, 125 from the weakest to the strongest smoothing), and persist.sys.gaokun3.pen_side
  * (eraser, button, none).  stylus/gk3pend.rc copies the known values to vendor.gaokun3.pen_*, which
  * gk3pend reads again whenever a property changes, so a change applies from the next frame.  The
- * detour through init has the same reason as SpeakerFxSettingsActivity's: this app cannot set vendor
+ * detour through init has the same reason as SpeakerFxDialogActivity's: this app cannot set vendor
  * properties and gk3pend cannot read system ones.
  *
  * The page shows the persist.sys values, the only stored copy; unset or unknown values show as the

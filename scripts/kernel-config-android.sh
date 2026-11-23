@@ -456,7 +456,7 @@ OUT="${1:?用法: $0 <kernel-out-dir>}"
     --enable SOFTLOCKUP_DETECTOR --set-val BOOTPARAM_SOFTLOCKUP_PANIC 0
 
 # ★ LIVE-12：ANON_VMA_NAME（mm/Kconfig:1365）—— scudo / ART 靠它给匿名映射起名，
-#   没有它 dumpsys meminfo 的 Java / Native 堆全是 0、全算进 Unknown。LRU_GEN 改回收行为，不在这里顺手开。
+#   没有它dumpsys meminfo的Java/Native堆全是0、全算进Unknown。
 # ★ LIVE-13：LOG_BUF_SHIFT（init/Kconfig:804，范围 12–25；7.2.9 树 ~/gk3-kernel-72y 里是 :807）17 → 19，内核环形缓冲 128 KiB → 512 KiB。
 # ★ PERF-11 / PWR-13：THERMAL_STATISTICS（drivers/thermal/Kconfig:29，7.2.9 同）—— cooling_device*/stats，
 #   降频历史可查。（以上与下面 APP-17 的四个符号 2026-10-05 在 7.2.9 树上重 grep 过；该树的 .config 四项 + 这两项都已是期望值。）
@@ -470,6 +470,20 @@ OUT="${1:?用法: $0 <kernel-out-dir>}"
     --enable THERMAL_STATISTICS \
     --enable ARMV8_DEPRECATED --enable SWP_EMULATION \
     --enable CP15_BARRIER_EMULATION --enable SETEND_EMULATION
+
+# ★ 透明大页、页面回收与写回节流采用GKI（android17-6.18的gki_defconfig）的设置：
+#   · 透明大页（THP）为madvise：匿名内存只有以madvise(MADV_HUGEPAGE)标记的区域才使用2 MiB大页。为always时，
+#     对齐的匿名映射在缺页时就分配大页，khugepaged还在后台把4 KiB页（包括文件映射）合并成大页，必要时规整内存，
+#     匿名内存占用随之增加。运行时改回：向/sys/kernel/mm/transparent_hugepage/enabled写always。
+#   · MGLRU（LRU_GEN、LRU_GEN_ENABLED）：按访问的新旧把页面分代回收，取代active/inactive两个链表。
+#     运行时关闭：向/sys/kernel/mm/lru_gen/enabled写n。Android 17的init.rc不再按DeviceConfig属性改写这个节点。
+#   · 写回节流（BLK_WBT）只编入，默认不启用（BLK_WBT_MQ=n，其Kconfig默认为y，须显式关闭）。启用后，
+#     读延迟超过目标值（非旋转盘为2 ms）时降低后台写回的队列深度；运行时启用：
+#     向/sys/block/<盘>/queue/wbt_lat_usec写-1（写0关闭）。
+./scripts/config --file "$OUT/.config" \
+    --disable TRANSPARENT_HUGEPAGE_ALWAYS --enable TRANSPARENT_HUGEPAGE_MADVISE \
+    --enable LRU_GEN --enable LRU_GEN_ENABLED \
+    --enable BLK_WBT --disable BLK_WBT_MQ
 
 # ★ LIVE-5：BTF 与 userfaultfd。
 #   · DEBUG_INFO_BTF（lib/Kconfig.debug:398）：buildbot defconfig 未选 DWARF 选项，olddefconfig 默认选
@@ -511,6 +525,52 @@ OUT="${1:?用法: $0 <kernel-out-dir>}"
 #   sync-device-tree.sh 第 3a 步和 release.sh 从内核镜像里嵌的配置确认指纹驱动在，要 IKCONFIG。
 ./scripts/config --file "$OUT/.config" --enable QCOM_QSEECOM --enable GAOKUN3_FPCMD --enable GPIO_CDEV \
     --enable IKCONFIG
+
+# ★ 游戏手柄与外设：与GKI（android17-6.18的gki_defconfig）对齐。AOSP kernel/configs的
+#   android-base.config要求HID_PLAYSTATION、HID_SONY、JOYSTICK_XPAD；系统自带的按键布局
+#   （Vendor_054c_*.kl、Vendor_045e_*.kl等）按这些驱动上报的按键编写。没有专用驱动时手柄只能经
+#   hid-generic工作：按键映射不全，震动、灯光与电量不可用；有线Xbox手柄（xpad）则完全无法识别。
+#   · LEDS_CLASS_MULTICOLOR：HID_PLAYSTATION与HID_LOGITECH都依赖它，它为=m时这两项会被
+#     olddefconfig降为=m（Android不加载模块）。
+#   · HID_BATTERY_STRENGTH：把HID设备报告的电量注册为power_supply，scope为Device，
+#     healthd的BatteryMonitor会跳过此类设备，不会被当作平板自身的电池。
+./scripts/config --file "$OUT/.config" \
+    --enable LEDS_CLASS_MULTICOLOR \
+    --enable INPUT_JOYSTICK --enable JOYSTICK_XPAD --enable JOYSTICK_XPAD_FF --enable JOYSTICK_XPAD_LEDS \
+    --enable HID_PLAYSTATION --enable PLAYSTATION_FF --enable HID_SONY --enable SONY_FF \
+    --enable HID_NINTENDO --enable NINTENDO_FF --enable HID_STEAM --enable HID_MICROSOFT \
+    --enable HID_LOGITECH --enable HID_LOGITECH_DJ --enable HID_APPLE --enable HID_MAGICMOUSE \
+    --enable HID_WACOM --enable HID_UCLOGIC --enable HID_BATTERY_STRENGTH
+
+# ★ 与GKI对齐的调度、电源与诊断选项：
+#   · PM_USERSPACE_AUTOSLEEP：声明挂起由用户态（Android的SystemSuspend）自动发起。主线中
+#     random.c据此不再在每次唤醒后重新为CRNG播种；另一个使用者wireguard在本机为=m，不会加载。
+#   · SCHED_AUTOGROUP：桌面系统按会话给CFS任务分组的功能，GKI未开启，且只作用于根cpu cgroup。
+#     init只为带console选项的服务调用setsid，其余服务与init同组，不受影响；开启时自行setsid的
+#     进程（如adb shell会话）各成一组，CPU份额的分配与GKI设备不同。
+#   · UCLAMP_BUCKETS_COUNT：uclamp按桶聚合钳位值，5个桶时每桶宽20%，20个桶时每桶宽5%，与GKI
+#     相同。同一个桶中钳位值较高的任务离开后，桶内其余可运行任务仍按该值提升，直到桶空；桶越窄，
+#     多提升的幅度越小。Power HAL（power/powerhint.json）为top-app分组（cpu.uclamp.min）与ADPF
+#     会话的线程设置uclamp下限，两者的值可能落进同一个桶。用电池时它还给background与
+#     foreground_window分组设上限（cpu.uclamp.max）：5个桶时foreground_window的80.66%与默认的100%
+#     在同一个桶里，同一核心上有不受限的任务与它同时可运行后，上限要等桶里没有可运行的任务才恢复。
+#   · KFENCE：按采样间隔抽取少量分配放入带保护页的内存池，越界与释放后使用只打印报告，
+#     不触发panic。采样间隔与对象数取GKI的值（500 ms、63个，内存池约0.5 MB）。
+#   · WQ_WATCHDOG：工作队列超过30秒没有进展时打印告警与调用栈；BOOTPARAM_WQ_STALL_PANIC保持0。
+#   · CPU_IDLE_GOV_TEO、RCU_LAZY：只编入，默认行为不变，便于以后不换内核做功耗对比。
+#     menu的rating（20）高于teo（19），默认仍用menu；cpuidle.governor=teo或运行时写
+#     /sys/devices/system/cpu/cpuidle/current_governor才会切换。
+#     RCU_LAZY_DEFAULT_OFF使延迟回调默认关闭，需rcutree.enable_rcu_lazy=1，且只作用于
+#     rcu_nocbs=指定的CPU。
+#   · TASKS_TRACE_RCU_NO_MB：开启RCU_EXPERT后，它在arm64上默认为y，会去掉tasks-trace RCU
+#     读侧的内存屏障。这里固定为n，保持与未开启RCU_EXPERT时相同的行为。
+./scripts/config --file "$OUT/.config" \
+    --enable PM_USERSPACE_AUTOSLEEP --disable SCHED_AUTOGROUP --set-val UCLAMP_BUCKETS_COUNT 20 \
+    --enable KFENCE --set-val KFENCE_SAMPLE_INTERVAL 500 --set-val KFENCE_NUM_OBJECTS 63 \
+    --enable WQ_WATCHDOG --set-val BOOTPARAM_WQ_STALL_PANIC 0 \
+    --enable CPU_IDLE_GOV_TEO \
+    --enable RCU_EXPERT --enable RCU_NOCB_CPU --enable RCU_LAZY --enable RCU_LAZY_DEFAULT_OFF \
+    --disable TASKS_TRACE_RCU_NO_MB
 
 # ─── olddefconfig + 断言（止损"=m 坑"）───
 # 这个坑已经踩了 13 次：`scripts/config --enable X` 写进去了，olddefconfig
@@ -563,6 +623,7 @@ SND_SOC_LPASS_WSA_MACRO SND_SOC_QDSP6 QCOM_PD_MAPPER SND_USB SND_USB_AUDIO
 FUSE_FS IIO QCOM_SPMI_ADC5 QCOM_SPMI_ADC_TM5 QCOM_FASTRPC
 CPUSETS_V1 MEMCG_V1 UCLAMP_TASK UCLAMP_TASK_GROUP EFI_ZBOOT EFI_STUB EFI_GENERIC_STUB EFI_VARS_PSTORE_DEFAULT_DISABLE
 SWAP ZRAM ZRAM_BACKEND_LZ4
+TRANSPARENT_HUGEPAGE_MADVISE LRU_GEN LRU_GEN_ENABLED BLK_WBT
 MEDIA_SUPPORT MEDIA_PLATFORM_SUPPORT VIDEO_DEV V4L_MEM2MEM_DRIVERS
 VIDEOBUF2_DMA_CONTIG V4L2_MEM2MEM_DEV SM_VIDEOCC_8350 VIDEO_QCOM_IRIS
 PM_DEVFREQ PM_OPP PM_GENERIC_DOMAINS_OF QCOM_UBWC_CONFIG QCOM_MDT_LOADER QCOM_SCM INTERCONNECT_QCOM_SC8280XP QCOM_RPMHPD
@@ -591,6 +652,10 @@ DEBUG_INFO_BTF USERFAULTFD
 ARMV8_DEPRECATED SWP_EMULATION CP15_BARRIER_EMULATION SETEND_EMULATION
 TOUCHSCREEN_HIMAX_HX83121A_PEN TYPEC_MUX_GPIO_SBU USB_ANDROID_USB_STATE
 QCOM_QSEECOM GAOKUN3_FPCMD GPIO_CDEV IKCONFIG
+LEDS_CLASS_MULTICOLOR INPUT_JOYSTICK JOYSTICK_XPAD JOYSTICK_XPAD_FF JOYSTICK_XPAD_LEDS
+HID_PLAYSTATION PLAYSTATION_FF HID_SONY SONY_FF HID_NINTENDO NINTENDO_FF HID_STEAM HID_MICROSOFT
+HID_LOGITECH HID_LOGITECH_DJ HID_APPLE HID_MAGICMOUSE HID_WACOM HID_UCLOGIC HID_BATTERY_STRENGTH
+PM_USERSPACE_AUTOSLEEP KFENCE WQ_WATCHDOG CPU_IDLE_GOV_TEO RCU_NOCB_CPU RCU_LAZY RCU_LAZY_DEFAULT_OFF
 "
 # 接了 ReSukiSU 才断言 KSU —— 没接的树上断言它只会误报。
 if [ "$RESUKISU" = 1 ]; then
@@ -614,8 +679,8 @@ for s in $MUST_Y; do
             ;;
     esac
 done
-# 反向断言：这些**必须关**，开着会主动破坏 Android
-MUST_N="RT_GROUP_SCHED VIDEO_QCOM_VENUS"
+# 反向断言：这些**必须关**（RT_GROUP_SCHED、VIDEO_QCOM_VENUS开着会主动破坏Android，其余见上方与GKI对齐的注释）
+MUST_N="RT_GROUP_SCHED VIDEO_QCOM_VENUS SCHED_AUTOGROUP TASKS_TRACE_RCU_NO_MB"
 for s in $MUST_N; do
     if grep -qE "^CONFIG_$s=(y|m)" "$OUT/.config"; then
         echo "  ✗ CONFIG_$s 开着 —— 必须 =n（见脚本内注释）"; bad=1
@@ -625,7 +690,8 @@ done
 for kv in DPM_WATCHDOG_TIMEOUT=120 DPM_WATCHDOG_WARNING_TIMEOUT=60 PANIC_TIMEOUT=10 \
           LOG_BUF_SHIFT=19 DEFAULT_HUNG_TASK_TIMEOUT=120 \
           BOOTPARAM_HUNG_TASK_PANIC=0 BOOTPARAM_SOFTLOCKUP_PANIC=0 \
-          ARCH_MMAP_RND_BITS_MAX=24; do
+          ARCH_MMAP_RND_BITS_MAX=24 UCLAMP_BUCKETS_COUNT=20 \
+          KFENCE_SAMPLE_INTERVAL=500 KFENCE_NUM_OBJECTS=63 BOOTPARAM_WQ_STALL_PANIC=0; do
     if ! grep -qx "CONFIG_$kv" "$OUT/.config"; then
         echo "  ✗ 期望 CONFIG_$kv，实际 '$(grep -E "^CONFIG_${kv%%=*}=" "$OUT/.config")'"; bad=1
     fi

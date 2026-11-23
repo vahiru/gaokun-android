@@ -13,3 +13,7 @@ type gaokun3_efivarfs, fs_type;
 # 单独一个类型而不直接标 sysfs_batteryinfo：要让 system_server 读它，而核心策略只让
 # health HAL 读 sysfs_batteryinfo；平台类型之间的规则不该由 vendor 策略来加。
 type sysfs_gaokun3_pen_battery, sysfs_type, fs_type;
+
+# GPU devfreq的min_freq（genfs_contexts）：Power HAL在EXPENSIVE_RENDERING、FIXED_PERFORMANCE时写入。
+# 只标这一个文件，同目录的trans_stat等仍是sysfs，开发脚本照常读取。
+type sysfs_gaokun3_gpu_min_freq, sysfs_type, fs_type;

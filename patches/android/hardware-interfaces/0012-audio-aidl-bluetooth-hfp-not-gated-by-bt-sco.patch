@@ -1,0 +1,68 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] audio: aidl: bluetooth: do not gate HFP streams on BT_SCO
+
+StreamBluetooth::bluetoothParametersUpdated() enables or disables an HFP
+stream from IBluetooth ScoConfig.isEnabled, which only the BT_SCO=on/off
+parameter sets and which starts as false. The Bluetooth stack opens HFP
+sessions (HFP_SOFTWARE_ENCODING/DECODING_DATAPATH, HFP_HARDWARE_OFFLOAD_DATAPATH)
+only when SCO is managed by audio (bluetooth.sco.managed_by_audio), and in
+that mode the framework never sends BT_SCO=on: AudioDeviceBroker's
+setBluetoothScoOn() leaves the parameter alone and
+reapplyAudioHalBluetoothState() sends BT_SCO=off.
+
+As a result, the first Bluetooth parameter update after SCO opens (the
+headset name and WBS/NREC state that HeadsetStateMachine sends once audio
+is connected) suspends the HFP output stream and sets the port DISABLED.
+transfer() then discards every buffer while reporting it consumed, so the
+headset receives silence while routing, the SCO link and the session all
+look correct.
+
+Keep HFP streams enabled regardless of ScoConfig: audio policy opens and
+closes them by routing, and the stack starts and suspends SCO through the
+session. A2DP and LE Audio streams are unchanged.
+
+Origin: local
+Upstream-Status: Pending
+Assisted-by: Claude:claude-opus-5-5
+---
+ .../aidl/default/bluetooth/StreamBluetooth.cpp  | 17 ++++++++---------
+ 1 file changed, 8 insertions(+), 9 deletions(-)
+
+diff --git a/audio/aidl/default/bluetooth/StreamBluetooth.cpp b/audio/aidl/default/bluetooth/StreamBluetooth.cpp
+index 782c51c..0e93174 100644
+--- a/audio/aidl/default/bluetooth/StreamBluetooth.cpp
++++ b/audio/aidl/default/bluetooth/StreamBluetooth.cpp
+@@ -296,22 +296,21 @@ ndk::ScopedAStatus StreamBluetooth::bluetoothParametersUpdated() {
+     bool hasLeParam, enableLe;
+     auto btLe = mBluetoothLe.lock();
+     hasLeParam = btLe != nullptr && btLe->isEnabled(&enableLe).isOk();
+-    bool hasScoParam;
+-    Bluetooth::ScoConfig scoConfig;
+-    auto btHfp = mBluetoothHfp.lock();
+-    hasScoParam = btHfp != nullptr && btHfp->setScoConfig({}, &scoConfig).isOk();
++    // HFP streams are not gated by the BT_SCO parameter (IBluetooth ScoConfig.isEnabled).
++    // The Bluetooth stack opens HFP sessions only when SCO is managed by audio
++    // (bluetooth.sco.managed_by_audio), and in that mode the framework never sends
++    // BT_SCO=on: AudioDeviceBroker.setBluetoothScoOn() does not touch it and
++    // reapplyAudioHalBluetoothState() sends BT_SCO=off. Audio policy opens and closes
++    // the stream by routing, and the stack starts and suspends SCO through the session.
+     std::lock_guard guard(mLock);
+     if (mBtDeviceProxy != nullptr) {
+         if ((hasA2dpParam && mBtDeviceProxy->isA2dp() && !applyParam(mBtDeviceProxy, enableA2dp)) ||
+-            (hasLeParam && mBtDeviceProxy->isLeAudio() && !applyParam(mBtDeviceProxy, enableLe)) ||
+-            (hasScoParam && mBtDeviceProxy->isHfp() &&
+-             !applyParam(mBtDeviceProxy, scoConfig.isEnabled.value().value))) {
++            (hasLeParam && mBtDeviceProxy->isLeAudio() && !applyParam(mBtDeviceProxy, enableLe))) {
+             LOG(DEBUG) << __func__ << ": applyParam failed";
+             return ndk::ScopedAStatus::fromExceptionCode(EX_UNSUPPORTED_OPERATION);
+         }
+         mEnabled = (mBtDeviceProxy->isA2dp() && enableA2dp) ||
+-                   (mBtDeviceProxy->isLeAudio() && enableLe) ||
+-                   (mBtDeviceProxy->isHfp() && scoConfig.isEnabled.value().value);
++                   (mBtDeviceProxy->isLeAudio() && enableLe) || mBtDeviceProxy->isHfp();
+         LOG(INFO) << __func__ << ": mEnabled: " << mEnabled;
+     }
+     return ndk::ScopedAStatus::ok();
+-- 
+2.53.0
+

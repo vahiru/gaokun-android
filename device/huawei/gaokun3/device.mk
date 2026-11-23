@@ -69,11 +69,14 @@ endif
 #   要么由 crdroid-tree-fixes.py 改 common.mk（例如恢复成 WITH_SU 门控），要么接受（反正设备上已有 KSU）。
 
 # 屏幕密度
-# [measured] 1600x2560，物理 266x166 mm -> 对角 12.34"，约 245 dpi
-# 取 240（hdpi 桶），1dp=1.5px -> 1067dp 宽，平板比例合理。
-# 可对照 Galaxy Tab S7 FE（同款面板）的取值再调。
+# [measured] 1600x2560，物理尺寸166x266 mm，对角12.34"，约245 dpi。
+# 取280：1dp=1.75px，最小宽度约914dp，横屏宽度约1463dp。按物理密度取240（1067dp）时，
+# 界面在平板的观看距离下偏小；320（800dp）及以上又偏大。
+# "显示大小"的档位按默认值的0.7～1.5倍推算（SettingsLib DisplayDensityUtils，LineageOS放宽了下限），
+# 取280时为196～420。最大一档约610dp，仍不低于大屏的600dp门槛（平行视界、ignoreOrientationRequest）；
+# 默认值不低于286时，最大一档会低于600dp。
 PRODUCT_PROPERTY_OVERRIDES += \
-    ro.sf.lcd_density=240
+    ro.sf.lcd_density=280
 
 # USB gadget 控制器
 # [measured] Stage 1 实测 UDC 名就是 a600000.usb
@@ -100,8 +103,8 @@ PRODUCT_COPY_FILES += \
 PRODUCT_COPY_FILES += \
     frameworks/native/data/etc/android.software.midi.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.software.midi.xml
 
-# USB 端口 HAL（usb/）：向 UsbPortManager 报告 port0 的状态，并按插进来的东西决定 port0 的数据角色
-# （原先 gaokun3-usbrole.sh 每 2 秒轮询一次的 follow 模式），还把 gadget 的连接状态写给 UsbDeviceManager
+# USB 端口 HAL（usb/）：向 UsbPortManager 报告 port0 的状态，按插进来的东西决定 port0 的数据角色，
+# 主机枚举了平板时持有 wakelock 不让系统挂起，还把 gadget 的连接状态写给 UsbDeviceManager
 # （patches/kernel/ec-usb/0011 的 android_usb 类）。设置里的 USB 页面（数据角色、USB 用途）和 MTP / PTP 都由 UsbDeviceManager 管，
 # MTP / PTP 的 FunctionFS 与配置在 init.gaokun3.usb.rc。
 # 权限见 ueventd.gaokun3.rc 与 sepolicy/hal_usb_default.te。
@@ -137,7 +140,7 @@ PRODUCT_PACKAGES += \
 # 软件 HAL 全家桶（hardware/interfaces 各 default 实现，模块名逐一核实）。
 # system_server 的 HAL 阶梯（每级都是实测 FATAL 后确认的）：
 #   BatteryService     ← IHealth（"instance default isn't available"）
-#   HintManagerService ← IPower（SupportInfo.headroom NPE）
+#   HintManagerService ← IPower（SupportInfo.headroom NPE）—— IPower现由下面的lineage-libperfmgr提供。
 # thermal/memtrack/lights 为预防性（cuttlefish 同款 example）。
 # ★ v1.0 HW-6（2026-10-05）：vibrator example 删掉了 —— 本机没有马达（键盘 / 触摸都没有 EV_FF），
 #   假 HAL 只会让框架以为有振动器（设置里出现"振动和触感"、App 调振动"成功"却没反应）。没有它不会 NPE（构建机核过）：
@@ -151,9 +154,29 @@ PRODUCT_PACKAGES += \
 #     没声明就退回 Legacy / nullptr，不会 waitForService 卡住。
 PRODUCT_PACKAGES += \
     android.hardware.health-service.example \
-    android.hardware.power-service.example \
     android.hardware.memtrack-service.example \
     android.hardware.lights-service.example
+
+# ------------------------------------------------------------- Power HAL
+# Lineage的lineage-libperfmgr（hardware/lineage/interfaces/power-libperfmgr，与Pixel共用libperfmgr），
+# 按power/powerhint.json处理触摸、启动应用、省电模式等提示，并为ADPF会话的线程设置uclamp。
+# 三个目录各是一个Soong namespace，HAL依赖另外两个。配置的取值依据见power/README.md。
+PRODUCT_SOONG_NAMESPACES += \
+    hardware/google/interfaces \
+    hardware/google/pixel/power-libperfmgr \
+    hardware/lineage/interfaces/power-libperfmgr
+PRODUCT_PACKAGES += \
+    android.hardware.power-service.lineage-libperfmgr
+PRODUCT_COPY_FILES += \
+    $(LOCAL_PATH)/power/powerhint.json:$(TARGET_COPY_OUT_VENDOR)/etc/powerhint.json \
+    $(LOCAL_PATH)/power/task_profiles.json:$(TARGET_COPY_OUT_VENDOR)/etc/task_profiles.json
+# HWUI默认不为应用的UI线程和RenderThread创建ADPF会话（frameworks/base libs/hwui/Properties.cpp，
+# debug.hwui.use_hint_manager缺省为false）；没有会话，Power HAL无从按帧耗时调整这些线程的uclamp。
+PRODUCT_VENDOR_PROPERTIES += \
+    debug.hwui.use_hint_manager=true
+# 本机没有显示空闲节点（idle_state），触摸提示按固定时长生效（1.4–5.65秒）；明确声明，HAL启动时不再报错。
+PRODUCT_VENDOR_PROPERTIES += \
+    vendor.powerhal.disp.idle_support=false
 
 # 音频 HAL（AIDL 示例实现，null 音频）—— audioserver 没有 HAL 会 NPE
 # 崩溃循环，而 system_server 主线程在 AudioService 构造时【同步阻塞】
@@ -223,8 +246,8 @@ endif
 # audio_policy_configuration.xml 解析结果（main.cpp:93-99 实名核实），
 # 没有它 HAL 只注册 IConfig，audioserver 等 IModule/default 永阻塞。
 # xml 抄 cuttlefish（同款 HAL），XInclude 相对路径要求全家同目录：
-# ⓘ A17：下面四份 frameworks/av 的文件路径都还在（refs/a17/frameworks/av/services/audiopolicy/config/）。
-#   内容上 r_submix / bluetooth_with_le 两份与 16.0 相同；audio_policy_volumes.xml 与 default_volume_tables.xml
+# ⓘ A17：下面三份frameworks/av的文件路径都还在（refs/a17/frameworks/av/services/audiopolicy/config/）。
+#   内容上r_submix与16.0相同；audio_policy_volumes.xml与default_volume_tables.xml
 #   改了一处，而且是成对改的（构建机 `git diff crdroid/16.0 HEAD`，上游 2fe00dfda0 / f94288519b "[Assistant Stream]"）：
 #   AUDIO_STREAM_ASSISTANT 在 HEADSET / SPEAKER / EARPIECE / EXT_MEDIA 上改用新加的 DEFAULT_ASSISTANT_VOLUME_CURVE /
 #   DEFAULT_DEVICE_CATEGORY_HEADSET_ASSISTANT_VOLUME_CURVE。只影响「助理」音频流的音量曲线，媒体 / 通话 / 铃声不变。
@@ -233,10 +256,12 @@ PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/audio/audio_policy_configuration.xml:$(TARGET_COPY_OUT_VENDOR)/etc/audio_policy_configuration.xml \
     $(LOCAL_PATH)/audio/primary_audio_policy_configuration.xml:$(TARGET_COPY_OUT_VENDOR)/etc/primary_audio_policy_configuration.xml \
     frameworks/av/services/audiopolicy/config/r_submix_audio_policy_configuration.xml:$(TARGET_COPY_OUT_VENDOR)/etc/r_submix_audio_policy_configuration.xml \
-    frameworks/av/services/audiopolicy/config/bluetooth_with_le_audio_policy_configuration_7_0.xml:$(TARGET_COPY_OUT_VENDOR)/etc/bluetooth_with_le_audio_policy_configuration_7_0.xml \
+    $(LOCAL_PATH)/audio/bluetooth_audio_policy_configuration.xml:$(TARGET_COPY_OUT_VENDOR)/etc/bluetooth_audio_policy_configuration.xml \
     frameworks/av/services/audiopolicy/config/audio_policy_volumes.xml:$(TARGET_COPY_OUT_VENDOR)/etc/audio_policy_volumes.xml \
     frameworks/av/services/audiopolicy/config/default_volume_tables.xml:$(TARGET_COPY_OUT_VENDOR)/etc/default_volume_tables.xml \
     $(LOCAL_PATH)/audio/usb_audio_policy_configuration.xml:$(TARGET_COPY_OUT_VENDOR)/etc/usb_audio_policy_configuration.xml
+# ↑ 蓝牙那份是我们自己的：frameworks/av的bluetooth_with_le_audio_policy_configuration_7_0.xml加上HFP（蓝牙通话）的端口，
+#   与下文“蓝牙通话”一段的两个属性、patches/android/hardware-interfaces/0012一起生效，见文件头。
 # ↑ usb 那份是我们自己的（v1.0 AV-4），不用 frameworks/av 的同名文件：那份是 HIDL 年代的，多一个
 #   USB_ACCESSORY 端口（Android 当配件时的音频，AIDL 示例 HAL 的 getUsbConfiguration() 里也没有它）。理由在文件头。
 #   IModule/usb 的 VINTF 声明在 manifest.xml（APEX 自带的那份把它注释掉了）。
@@ -334,7 +359,7 @@ PRODUCT_COPY_FILES += \
 
 # ------------------------------------------------- Stage 3: 图形栈
 # 全套照抄 device/linaro/dragonboard/shared/graphics/（db845c 同款），
-# 属性名/包名均为树内实名，非记忆。density 用我们实测的 240（不抄他家 160）。
+# 属性名/包名均为树内实名，非记忆。density的取值见上方"屏幕密度"（不沿用db845c的160）。
 
 # gralloc：minigbm，platform=msm 是高通 UBWC 后端
 # （external/minigbm/Android.bp 的 soong_config_variable("minigbm","platform")）
@@ -756,6 +781,21 @@ PRODUCT_VENDOR_PROPERTIES += \
     bluetooth.profile.pbap.server.enabled=true \
     bluetooth.profile.map.server.enabled=true
 
+# ─── 蓝牙通话（HFP软件数据通路，issue #107）───
+# 本机声卡没有接蓝牙芯片的PCM/I2S后端，SCO音频只能经HCI传给协议栈，再经蓝牙音频HAL交给音频HAL的
+# ModuleBluetooth。修改两个属性后要重启：
+#   * bluetooth.sco.managed_by_audio：由音频框架按路由开关SCO。框架在AudioDeviceBroker构造时读入final字段，
+#     蓝牙协议栈经AudioManager.isScoManagedByAudio()获知；协议栈只在这个模式下建立HFP会话
+#     （packages/modules/Bluetooth system/bta/ag/bta_ag_sco.cc bta_ag_init_hfp_client_interface()）。
+#     还需要ROM中的aconfig开关android.media.audio.sco_managed_by_audio与amsco_available_api（A17默认开启）。
+#   * bluetooth.hfp.software_datapath.enabled：只由协议栈读取（蓝牙启动、HFP服务启动时与每次建立SCO时）。HFP会话用
+#     软件数据通路，所有编解码器的数据都走HCI（CVSD由芯片编解码，mSBC与LC3由协议栈编解码）；不设时协议栈
+#     按硬件offload建链，本机没有那条通路。
+# 还需要audio/bluetooth_audio_policy_configuration.xml的HFP端口和patches/android/hardware-interfaces/0012。
+PRODUCT_VENDOR_PROPERTIES += \
+    bluetooth.sco.managed_by_audio=true \
+    bluetooth.hfp.software_datapath.enabled=true
+
 # ─── Stage 4/5: 固件双路安装 ───
 # 新增固件（从本机 Ubuntu /lib/firmware 提取，华为专有，不入版本库）：
 #   qcdxkmsuc8280.mbn   GPU zap shader（freedreno 必需，缺则 GPU 锁在安全模式）
@@ -892,53 +932,22 @@ PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/bin/gaokun3-rproc-kick.sh:$(TARGET_COPY_OUT_VENDOR)/bin/gaokun3-rproc-kick.sh \
     $(LOCAL_PATH)/etc/hangdump.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/hangdump.rc
 
-# 挂起前把 a600000.usb 的 USB role 切到 host —— 那个控制器停在 role=device 时，
-# 设备挂起阶段会【整板复位】且不留任何日志；而 USB adb 的 UDC 就在它上面，
-# 所以不能简单把 DTS 改成 host。见 docs/dev/deep-sleep.md。
-# ★ 默认【启用】（persist.vendor.gaokun3.allow_suspend=1；2026-09-18～09-24 开发期曾是 0，见下面 ②）。
+# 整机序列号：etc/serialno.rc在init阶段运行bin/gaokun3-serialno.sh读SMBIOS的序列号，
+# 再由vendor_init写入ro.boot.serialno与ro.serialno。
 PRODUCT_COPY_FILES += \
-    $(LOCAL_PATH)/bin/gaokun3-usbrole.sh:$(TARGET_COPY_OUT_VENDOR)/bin/gaokun3-usbrole.sh \
-    $(LOCAL_PATH)/etc/usbrole.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/usbrole.rc
+    $(LOCAL_PATH)/bin/gaokun3-serialno.sh:$(TARGET_COPY_OUT_VENDOR)/bin/gaokun3-serialno.sh \
+    $(LOCAL_PATH)/etc/serialno.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/serialno.rc
 
-# ⚠️★★ 2026-09-18 两处改动，都要读一遍再动：
-#
-# ① 属性【改名】persist.gaokun3.* → persist.vendor.gaokun3.*。
-#    原名落在 property_contexts 的兜底 `*` 上 ⇒ default_prop ⇒
-#    `neverallow { domain -init } default_prop:property_service set`
-#    ⇒ 转 enforcing 之后连 adb shell setprop 都写不了。而 vendor 的
-#    property_contexts 只许标注 vendor 前缀（VTS 强制），所以改名是唯一出路。
-#    新名字的类型与权限见 sepolicy/property_contexts + sepolicy/vendor_gaokun3_props.te。
-#    ⚠️ persist.sys.gaokun3.*（键盘、触摸模式）【不要】跟着改 —— 那两个靠
-#      system_prop 才让 Parts 应用写得了，改成 vendor 前缀反而会写不了。
-#
-# ② 默认值 1 → 0（= 待机默认【关】）。这是 2026-09-18 的过渡决定：
-#    改名会让已装机器上现有的 persist.gaokun3.allow_suspend=0 失效，
-#    而开发机正是 0。默认改成 0，改名前后行为一致。
-#    ⚠️ 代价说清楚：**新装机的用户默认也不进 s2idle**，息屏耗电按不睡算 ——
-#      这与 v0.3.0～v0.6.2 的镜像默认相反，发版说明里必须写。
-#      要开（persist 属性，重启不丢）：
-#        · 写 persist.sys.gaokun3.allow_suspend 1（init.gaokun3.rc 镜像成这个 vendor 属性）；
-#        · 或 root 下直接 setprop persist.vendor.gaokun3.allow_suspend 1。
-#      普通 adb shell 在 enforcing 下设不了 vendor 属性，见 etc/usbrole.rc 顶部。
-#    ★ 2026-09-23 用户定：开发期保持 0；【正式版】发布前改回 1（老用户 OTA 后不能丢待机，
-#      TODO S1）。改回 1 之后，开发机自己 setprop … 0（persist 属性重启不丢）。
-#    ✅ 2026-09-24 已改回 1（这一版起的构建就是 v0.6.3 的候选版）。开发机已显式
-#      setprop persist.vendor.gaokun3.allow_suspend 0，并核对过它进了 /data/property/persistent_properties
-#      （之前只有旧名字存着，新名字一直是镜像默认值，没落盘）。
-#    ⚠️ 默认 1 + 持久 0 的开机时序：属性触发器在持久属性加载【之前】就按镜像默认值跑过一轮，
-#      于是 init.gaokun3.rc 的 `=1` 触发器会放掉 gaokun3_nosuspend；挡住挂起的是 usbrole.rc
-#      `on init` 拿的 gaokun3_usbrole（只有 allow_suspend=1 且息屏才会去放）。v0.6.2 时期本机就是
-#      这个组合、没有睡过；装机后仍要 `cat /sys/power/wake_lock` 核对一次（TODO 验收清单）。
-#
-# 开启后：息屏切 role=host（挂起安全）、亮屏切回 device（USB adb 可用）。
-# 实测 Android 真实挂起/唤醒 ×4 零复位、救援 Ubuntu systemctl suspend 3/3。
-# ⚠️ 开启的可见代价：息屏时 USB device-mode adb 断开，亮屏恢复。开发构建的 TCP adb（5555）不受影响；
-#    发布构建默认不开 TCP adb，无线调试走 Wi-Fi，同样不受 USB 角色影响。
-#
-# ★ 变量也换了：PRODUCT_PROPERTY_OVERRIDES 是 build/make 明确标了
-#   "TODO(b/117892318) deprecate this ... in favor of PRODUCT_VENDOR_PROPERTIES"
-#   的老写法（core/product.mk:92-93），两者都落到 /vendor/build.prop
-#   （core/sysprop.mk:194-205 的 _prop_vars_）。既然要动这一行，顺手换成新的。
+# 待机总开关persist.vendor.gaokun3.allow_suspend，默认1（允许s2idle）：
+#   · init.gaokun3.rc在1时放开wakelock gaokun3_nosuspend，在0时重新拿回，运行中两个方向都立即生效。
+#     开机时属性触发器可能先按这里的默认值放开，持久值0加载后再拿回。
+#   · port0在两种USB角色下都可以挂起（vreg_l9d常开，patches/kernel/dts/0014），息屏时不切换角色；
+#     主机枚举了平板时，由USB端口HAL持有gaokun3_usbhost（usb/Usb.cpp开头）。
+#   · 修改方法（persist属性，重启后保留）：写persist.sys.gaokun3.allow_suspend（init.gaokun3.rc镜像成vendor属性），
+#     或在root下直接setprop persist.vendor.gaokun3.allow_suspend。普通adb shell在enforcing下设不了vendor属性。
+#   · 属性名用vendor前缀：persist.gaokun3.*会落在property_contexts末尾的默认规则`*`上，即default_prop，enforcing下除init外
+#     都写不了，而vendor的property_contexts只许标注vendor前缀。persist.sys.gaokun3.*（键盘、触摸模式）保持
+#     system_prop，Parts才写得了。
 PRODUCT_VENDOR_PROPERTIES += \
     persist.vendor.gaokun3.allow_suspend=1
 

@@ -8,7 +8,7 @@
 # "vendor_init 读不读得到这个属性"（system/core/init/action_parser.cpp:39-58
 #  IsActionableProperty → CanReadProperty，本机 ro.actionable_compatible_property.enabled=true），
 # 读不到就当成 "unexported property trigger found" —— 整个动作被丢掉。
-# ⇒ enforcing 下键盘开关、触摸手感、扬声器增强三个设置【全部静默失效】。
+# ⇒ enforcing 下磁吸键盘、防误触模式、扬声器音效三个设置【全部静默失效】。
 # 证据：完整开机日志里 `vendor_init system_prop:file read  property=persist.sys.gaokun3.keyboard`
 #   （pid=0，是 init 在解析期替 vendor_init 做的检查；同一元组只记一次，所以另外两个没露面）。
 # 不撞 neverallow：system_prop 是 system_public_prop（public/property.te:267），
@@ -19,8 +19,8 @@ get_prop(vendor_init, system_prop)
 #
 # 写 wake_lock 要 CAP_BLOCK_SUSPEND。证据：`vendor_init self:capability2 block_suspend`
 # （sysfs_wake_lock 的写权限 vendor_init 已经有，没被拒）。
-# ⚠️★ 这条不是可有可无：allow_suspend=0 的机器（开发机就是）靠这把锁不睡；
-#    拿不到锁，enforcing 下设备会在 device 模式里进 s2idle —— 那正是 #52 的整板复位。
+# ⚠️★ 这条不是可有可无：allow_suspend=0 的机器（开发机就是）靠这把锁不睡，
+#    on init 和 allow_suspend=0 的触发器都在 vendor_init 里写 wake_lock。
 allow vendor_init self:global_capability2_class_set block_suspend;
 
 # LIVE-8：on boot 把 hung_task_timeout_secs 写回 120（AOSP init.rc 在 on init 写 0）。

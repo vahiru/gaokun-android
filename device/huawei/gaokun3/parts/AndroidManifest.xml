@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  gaokun3 设备设置：磁吸键盘开关（系统页）+ 扬声器增强试验开关（声音页）+ 待机开关（电池页，v1.0 PWR-16）
-  + 触摸手感 game / daily 开关（系统页与控制中心磁贴，2026-10-25）+ 手写笔设置（已连接的设备页）。
+  gaokun3 设备设置：磁吸键盘与手写笔设置（已连接的设备页）、防误触模式（显示页）、扬声器音效与
+  麦克风降噪（提示音和振动页的「高级」分组）、性能模式（电池页）等，以及键盘、防误触两个控制中心磁贴。
 
   ★ 为什么是独立应用而不是改 Settings：
     用 Android 的 "Settings 注入" 机制（com.android.settings.action.IA_SETTINGS
@@ -43,51 +43,57 @@
         android:allowBackup="false"
         android:theme="@style/Theme.SubSettingsBase">
 
-        <!-- ⚠️ 写【全限定类名】而不是 ".KeyboardSettingsActivity"：
-             2026-08-22 实测 `am start -n .../.KeyboardSettingsActivity` 报
-             START_CLASS_NOT_FOUND（result code=-92），而 dex 里类在、
-             manifest 里 activity 也在、PMS 的解析器表里也有这条 IA_SETTINGS
-             过滤器。相对名的展开是唯一可疑处，写死全名就没有这个歧义。
-             ⚠️ 同时补 DEFAULT category：没有它，隐式意图匹配不到。
-             ⚠️ 再加一个 LAUNCHER 入口作退路 —— 万一 Settings 注入在这个 ROM
-             上不生效，至少能从应用抽屉里打开。 -->
-        <activity
-            android:name="com.huawei.gaokun3.parts.KeyboardSettingsActivity"
+        <!-- 磁吸键盘：「已连接的设备」页里的一个开关条目，没有单独的页面（KeyboardProvider.java）。
+             注入方式与下面的性能模式相同；分类（ia.connect）在provider返回的条目数据里。
+             本应用没有LAUNCHER入口，应用抽屉里不显示图标。 -->
+        <provider
+            android:name="com.huawei.gaokun3.parts.KeyboardProvider"
+            android:authorities="com.huawei.gaokun3.parts.keyboard"
             android:exported="true"
-            android:label="@string/keyboard_title">
+            android:permission="android.permission.WRITE_SECURE_SETTINGS">
             <intent-filter>
                 <action android:name="com.android.settings.action.IA_SETTINGS" />
-                <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-            <meta-data
-                android:name="com.android.settings.category"
-                android:value="com.android.settings.category.ia.system" />
-            <meta-data
-                android:name="com.android.settings.title"
-                android:resource="@string/keyboard_title" />
-            <meta-data
-                android:name="com.android.settings.summary"
-                android:resource="@string/keyboard_summary" />
-            <!-- 不给这条，设置里那一行就没有图标 -->
-            <meta-data
-                android:name="com.android.settings.icon"
-                android:resource="@drawable/ic_keyboard" />
-        </activity>
+        </provider>
 
-        <!-- 扬声器增强（试验功能，PR #7）。注入到「设置 → 声音」页：
-             category ia.sound = CategoryKey.CATEGORY_SOUND（frameworks/base
-             SettingsLib CategoryKey.java:37，lineage-23.0），SoundSettings 按它取注入条目
-             （Settings DashboardFragmentRegistry.java:92-93，crDroid 16.0；17.0 在 :98-99，CategoryKey 常量不变 :37）。
-             ⬜ 「系统」页的注入实测过（#65），「声音」页还没在实机上看过。
-             不加 LAUNCHER 入口：应用抽屉里已经有键盘那一个退路了，再加一个只会多一个同名图标。 -->
-        <activity
-            android:name="com.huawei.gaokun3.parts.SpeakerFxSettingsActivity"
+        <!-- 防误触模式：「显示」页里的一个开关条目（TouchProtectionProvider.java，分类ia.display），
+             注入方式同上。 -->
+        <provider
+            android:name="com.huawei.gaokun3.parts.TouchProtectionProvider"
+            android:authorities="com.huawei.gaokun3.parts.touchprotection"
             android:exported="true"
-            android:label="@string/speaker_fx_title">
+            android:permission="android.permission.WRITE_SECURE_SETTINGS">
+            <intent-filter>
+                <action android:name="com.android.settings.action.IA_SETTINGS" />
+            </intent-filter>
+        </provider>
+
+        <!-- 「提示音和振动」页的「高级」分组标题，以及扬声器音效条目下方的当前选项（SoundEntriesProvider.java）。
+             下面两个activity条目以com.android.settings.group_key放进这个分组。 -->
+        <provider
+            android:name="com.huawei.gaokun3.parts.SoundEntriesProvider"
+            android:authorities="com.huawei.gaokun3.parts.sound"
+            android:exported="true"
+            android:permission="android.permission.WRITE_SECURE_SETTINGS">
+            <intent-filter>
+                <action android:name="com.android.settings.action.IA_SETTINGS" />
+            </intent-filter>
+        </provider>
+
+        <!-- 扬声器音效（试验功能，PR #7）：「提示音和振动」页里的一个条目，点开后是选择对话框
+             （SpeakerFxDialogActivity，透明窗口），没有单独的页面。分类ia.sound = CategoryKey.CATEGORY_SOUND，
+             SoundSettings按它取注入条目（Settings DashboardFragmentRegistry.java，crDroid 17.0）。
+             条目说明是当前选项，由summary_uri向SoundEntriesProvider读取（有summary_uri时设置不用静态说明，
+             所以不给com.android.settings.summary）。
+             ⚠️ 写全限定类名而不是".SpeakerFxDialogActivity"：am start曾对相对名报START_CLASS_NOT_FOUND，
+             写死全名就没有展开的歧义。
+             ⚠️ 补DEFAULT category：没有它，隐式意图匹配不到。 -->
+        <activity
+            android:name="com.huawei.gaokun3.parts.SpeakerFxDialogActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:label="@string/speaker_fx_title"
+            android:theme="@style/Theme.Gaokun3Parts.DialogHost">
             <intent-filter>
                 <action android:name="com.android.settings.action.IA_SETTINGS" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -96,18 +102,25 @@
                 android:name="com.android.settings.category"
                 android:value="com.android.settings.category.ia.sound" />
             <meta-data
+                android:name="com.android.settings.keyhint"
+                android:value="gaokun3_speaker_fx" />
+            <meta-data
+                android:name="com.android.settings.group_key"
+                android:value="gaokun3_sound_advanced" />
+            <meta-data
                 android:name="com.android.settings.title"
                 android:resource="@string/speaker_fx_title" />
             <meta-data
-                android:name="com.android.settings.summary"
-                android:resource="@string/speaker_fx_summary" />
+                android:name="com.android.settings.summary_uri"
+                android:value="content://com.huawei.gaokun3.parts.sound/getDynamicSummary/gaokun3_speaker_fx" />
+            <!-- 不给这条，设置里那一行就没有图标 -->
             <meta-data
                 android:name="com.android.settings.icon"
                 android:resource="@drawable/ic_speaker" />
         </activity>
 
-        <!-- Microphone noise suppression (micarray/README.md), in Settings → Sound like the speaker
-             entry above. -->
+        <!-- Microphone noise suppression (micarray/README.md), in the Advanced group of Settings →
+             Sound like the speaker entry above. -->
         <activity
             android:name="com.huawei.gaokun3.parts.NoiseSuppressionSettingsActivity"
             android:exported="true"
@@ -120,6 +133,9 @@
                 android:name="com.android.settings.category"
                 android:value="com.android.settings.category.ia.sound" />
             <meta-data
+                android:name="com.android.settings.group_key"
+                android:value="gaokun3_sound_advanced" />
+            <meta-data
                 android:name="com.android.settings.title"
                 android:resource="@string/denoise_title" />
             <meta-data
@@ -128,30 +144,6 @@
             <meta-data
                 android:name="com.android.settings.icon"
                 android:resource="@drawable/ic_mic" />
-        </activity>
-
-        <!-- 触摸手感开关（2026-10-25）：game / daily，替代 touchmode.rc 顶上那条 adb setprop。
-             注入「系统」页（同键盘那一项，#65 实测过注入生效）。不加 LAUNCHER 入口，理由同上。 -->
-        <activity
-            android:name="com.huawei.gaokun3.parts.TouchModeSettingsActivity"
-            android:exported="true"
-            android:label="@string/touch_mode_title">
-            <intent-filter>
-                <action android:name="com.android.settings.action.IA_SETTINGS" />
-                <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>
-            <meta-data
-                android:name="com.android.settings.category"
-                android:value="com.android.settings.category.ia.system" />
-            <meta-data
-                android:name="com.android.settings.title"
-                android:resource="@string/touch_mode_title" />
-            <meta-data
-                android:name="com.android.settings.summary"
-                android:resource="@string/touch_mode_summary" />
-            <meta-data
-                android:name="com.android.settings.icon"
-                android:resource="@drawable/ic_touch_game" />
         </activity>
 
         <!-- 性能模式：电池页里的一个开关条目，没有单独的页面（PerformanceModeProvider.java）。
@@ -192,7 +184,7 @@
                 android:resource="@drawable/ic_stylus" />
         </activity>
 
-        <!-- Kernel version spoofing (patches/kernel/core/0008). Same injection as the touch feel entry. -->
+        <!-- Kernel version spoofing (patches/kernel/core/0008), injected into Settings → System. -->
         <activity
             android:name="com.huawei.gaokun3.parts.AppKernelSettingsActivity"
             android:exported="true"
@@ -278,11 +270,11 @@
             </intent-filter>
         </service>
 
-        <!-- 游戏触摸磁贴（2026-10-25），注意事项同上面键盘磁贴。 -->
+        <!-- 防误触磁贴，注意事项同上面键盘磁贴。类名沿用TouchModeTileService，见类顶部。 -->
         <service
             android:name="com.huawei.gaokun3.parts.TouchModeTileService"
             android:exported="true"
-            android:icon="@drawable/ic_touch_game"
+            android:icon="@drawable/ic_touch_protection"
             android:label="@string/touch_mode_tile_label"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
             <intent-filter>
@@ -290,8 +282,7 @@
             </intent-filter>
         </service>
 
-        <!-- USB-C 口（port0）的两条提示（v1.0 PWR-4 / USB-1）：读 usbrole 设的
-             vendor.gaokun3.usbrole.broken / .reversed，亮屏时每 3 秒看一次。
+        <!-- USB-C 口（port0）的反向供电提示：读 USB 端口 HAL 设的 vendor.gaokun3.usbrole.reversed，亮屏时每 3 秒看一次。
              两个都写全限定类名（理由同上面的 activity）；不导出 —— 只有本应用自己（与系统同一个 uid）会启动它。 -->
         <!-- directBootAware：锁屏解锁之前（LOCKED_BOOT_COMPLETED）就要能跑，见 BootReceiver 顶部（2026-10-05）。 -->
         <service

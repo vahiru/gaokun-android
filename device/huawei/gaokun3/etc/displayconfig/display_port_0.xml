@@ -21,6 +21,27 @@
     <!-- Brightness 0..1 spans the backlight range from its minimum up, so this
          is backlight 0.398, the framework default. -->
     <screenBrightnessDefault>0.3755</screenBrightnessDefault>
+    <!-- Brightness cap under heat, after Windows. Its thermal zones on
+         sys_therm2-4 (the GPU-only one on sys_therm3 included) list the panel
+         next to the CPUs and the GPU, so passive cooling there lowers the
+         backlight as well; the zone on sys_therm2 stops at 56 % (_MTL).
+         Android follows one sensor here, so the thermal HAL reports "panel":
+         the highest level of sys-therm2-4, each reporting MODERATE at its
+         lowest trip and SEVERE 4 degC above it. Halfway to 56 % at MODERATE,
+         56 % from SEVERE on, in the brightness scale of this file. HDR
+         content is boosted after this cap and is not limited by it. -->
+    <thermalThrottling>
+        <brightnessThrottlingMap>
+            <brightnessThrottlingPoint>
+                <thermalStatus>moderate</thermalStatus>
+                <brightness>0.78</brightness>
+            </brightnessThrottlingPoint>
+            <brightnessThrottlingPoint>
+                <thermalStatus>severe</thermalStatus>
+                <brightness>0.56</brightness>
+            </brightnessThrottlingPoint>
+        </brightnessThrottlingMap>
+    </thermalThrottling>
     <!-- Disabled, there is no sunlight mode. The section is still required:
          the framework only reports an HDR/SDR ratio to apps when these ratios
          are here. Reach full backlight down to 40 nits of SDR white, and limit
@@ -71,4 +92,9 @@
         <minimumHdrPercentOfScreenForHbm>0.1</minimumHdrPercentOfScreenForHbm>
         <allowInLowPowerMode>false</allowInLowPowerMode>
     </hdrBrightnessConfig>
+    <!-- The sensor the brightness cap above follows. -->
+    <tempSensor>
+        <type>DISPLAY</type>
+        <name>panel</name>
+    </tempSensor>
 </displayConfiguration>

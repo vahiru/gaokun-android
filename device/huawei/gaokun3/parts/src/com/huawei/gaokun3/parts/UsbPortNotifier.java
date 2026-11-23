@@ -1,27 +1,20 @@
 /*
- * USB-C 口（port0，靠近电源键的那个）的两条提示（v1.0 PWR-4 / USB-1，2026-10-05）。
+ * USB-C口（port0，靠近电源键的那个）的反向供电提示。
  *
- * 只看两个属性，由 /vendor/bin/gaokun3-usbrole.sh 和 USB 端口 HAL（usb/Follow.h）设（vendor_gaokun3_prop，sepolicy 给了 system_app 读）：
- *   vendor.gaokun3.usbrole.broken   = 1：息屏切 host 失败（A6：待机后回插坏口，xhci 一律 -110）。
- *       之后每次息屏都失败、一直持有 wakelock ⇒ 这次开机余下的时间整机不再待机，USB 数据也没了，只有重启能恢复。
- *       下一次切 host 成功时清 0（实际上口坏了就不会再成功）。
- *   vendor.gaokun3.usbrole.reversed = 1：我方在给对端供电、对端不支持 PD、约 6 秒没有数据连接
- *       （插 Mac 时偶发，拔插一次就好；内核换不了供电方向，ucsi_pr_swap 要 PD）。条件不成立 / 拔线即清 0。
+ * 只看一个属性vendor.gaokun3.usbrole.reversed，由USB端口HAL（usb/Follow.h）设（vendor_gaokun3_prop，
+ * sepolicy给了system_app读）：= 1表示平板在给对端供电、对端不支持PD、约6秒没有数据连接（插Mac时偶发，
+ * 拔插一次就好；内核换不了供电方向，ucsi_pr_swap要PD）。条件不成立或拔线即清0，通知随之撤下。
+ * 同一组的vendor.gaokun3.usbrole.broken（切到host后xhci没有起来，由HAL设）不再通知：
+ * 它针对的待机后port0失灵已由vreg_l9d常开（patches/kernel/dts/0014）解决。HAL读它，避免在host没起来时
+ * 误报反向供电。
  *
- * ★ 为什么是轮询而不是属性回调：SystemProperties.addChangeCallback 只在有人调 reportSyspropChanged()
- *   时才回调（frameworks/base core/java/android/os/SystemProperties.java:248-315，LineageOS lineage-23.2 的上游副本），
- *   init / vendor 脚本 setprop 不会触发它。所以：
- *   · 亮屏期间每 3 秒读一次两个属性（读属性是本进程内的共享内存读，不走 binder、不 fork）；
- *   · 息屏时不轮询（broken 正是在息屏那一刻产生的，亮屏广播一来立刻读一次 —— 用户看到屏幕时通知就在）；
- *   · 开机由 BootReceiver 拉起本服务（START_STICKY，被杀了系统会再拉起）。
- * ★ 本应用是 android.uid.system：后台起服务不受限制（与 system_server 同一个 uid，UidRecord 不会 idle，
- *   ActivityManagerService.getAppStartModeLOSP，ActivityManagerService.java:6480-6538）；发通知的权限检查走
- *   checkComponentPermission，system uid 一律放行（⬜ ActivityManager.checkComponentPermission 那一行待构建机核对）。
- *
- * 判据（⬜ 未编译、未上机）：
- *   · 开机解锁后 `dumpsys activity services com.huawei.gaokun3.parts` 能看到 UsbPortNotifier；
- *   · V11 人为造出坏口（broken=1）后亮屏，通知栏出现"USB-C 口出了故障"；
- *   · USB-1 复现（插 Mac 落成我方供电）约 6–9 秒后弹"连接方向反了"，重插后自动消失。
+ * ★ 为什么是轮询而不是属性回调：SystemProperties.addChangeCallback只在有人调reportSyspropChanged()
+ *   时才回调（frameworks/base core/java/android/os/SystemProperties.java），init / vendor进程setprop不会触发它。所以：
+ *   · 亮屏期间每3秒读一次属性（读属性是本进程内的共享内存读，不走binder、不fork）；
+ *   · 息屏时不轮询，亮屏广播一来立刻读一次，用户看到屏幕时通知就在；
+ *   · 开机由BootReceiver拉起本服务（START_STICKY，被杀了系统会再拉起）。
+ * ★ 本应用是android.uid.system：后台起服务不受限制（与system_server同一个uid，UidRecord不会idle，
+ *   ActivityManagerService.getAppStartModeLOSP）；发通知的权限检查走checkComponentPermission，system uid一律放行。
  */
 package com.huawei.gaokun3.parts;
 
@@ -44,20 +37,17 @@ public class UsbPortNotifier extends Service {
 
     private static final String TAG = "Gaokun3UsbPort";
 
-    static final String PROP_BROKEN = "vendor.gaokun3.usbrole.broken";
     static final String PROP_REVERSED = "vendor.gaokun3.usbrole.reversed";
 
     private static final String CHANNEL = "usb_port";
-    private static final int ID_BROKEN = 1;
     private static final int ID_REVERSED = 2;
 
-    /** 亮屏时的轮询间隔。USB-1 那条本身要约 6 秒才置位，3 秒的延迟用户感觉不到。 */
+    /** 亮屏时的轮询间隔。属性本身要约6秒才置位，3秒的延迟用户感觉不到。 */
     private static final long POLL_MS = 3000;
 
     private final Handler mHandler = new Handler(Looper.getMainLooper());
     private NotificationManager mNm;
     private boolean mScreenOn;
-    private boolean mShownBroken;
     private boolean mShownReversed;
 
     private final Runnable mPoll = new Runnable() {
@@ -86,8 +76,8 @@ public class UsbPortNotifier extends Service {
     public void onCreate() {
         super.onCreate();
         mNm = getSystemService(NotificationManager.class);
-        // 进程被杀后经 START_STICKY 拉起时 mShown* 都是 false：属性若已清 0，旧通知（"口坏了"那条划不掉）就永远不会被取消 ⇒ 先清一遍，下面轮询再按属性重贴（审查建议修 5）
-        mNm.cancel(ID_BROKEN);
+        // 进程被杀后经START_STICKY拉起时mShownReversed是false：属性若已清0，旧通知就不会被取消 ⇒ 先清一遍，
+        // 下面轮询再按属性重新发出。
         mNm.cancel(ID_REVERSED);
         NotificationChannel ch = new NotificationChannel(CHANNEL,
                 getString(R.string.usb_port_channel), NotificationManager.IMPORTANCE_DEFAULT);
@@ -124,39 +114,26 @@ public class UsbPortNotifier extends Service {
     }
 
     private void refresh() {
-        boolean broken = "1".equals(SystemProperties.get(PROP_BROKEN, ""));
         boolean reversed = "1".equals(SystemProperties.get(PROP_REVERSED, ""));
 
-        if (broken != mShownBroken) {
-            if (broken) {
-                // 常驻（划不掉）：口坏了、待机也没了，直到重启 —— 这件事不能让用户一划就忘。
-                post(ID_BROKEN, R.string.usb_port_broken_title, R.string.usb_port_broken_text, true);
-            } else {
-                mNm.cancel(ID_BROKEN);
-            }
-            mShownBroken = broken;
-            Log.i(TAG, PROP_BROKEN + "=" + (broken ? 1 : 0));
-        }
         if (reversed != mShownReversed) {
             if (reversed) {
-                post(ID_REVERSED, R.string.usb_port_reversed_title, R.string.usb_port_reversed_text,
-                        false);
+                post(ID_REVERSED, R.string.usb_port_reversed_title, R.string.usb_port_reversed_text);
             } else {
-                mNm.cancel(ID_REVERSED);   // 重插 / 拔线后 usbrole 清 0，通知跟着消失
+                mNm.cancel(ID_REVERSED);   // 重插 / 拔线后 HAL 清 0，通知跟着消失
             }
             mShownReversed = reversed;
             Log.i(TAG, PROP_REVERSED + "=" + (reversed ? 1 : 0));
         }
     }
 
-    private void post(int id, int title, int text, boolean ongoing) {
+    private void post(int id, int title, int text) {
         Notification n = new Notification.Builder(this, CHANNEL)
                 .setSmallIcon(R.drawable.ic_usb)
                 .setContentTitle(getString(title))
                 .setContentText(getString(text))
                 .setStyle(new Notification.BigTextStyle().bigText(getString(text)))
                 .setCategory(Notification.CATEGORY_STATUS)
-                .setOngoing(ongoing)
                 .setOnlyAlertOnce(true)
                 .setShowWhen(true)
                 .build();

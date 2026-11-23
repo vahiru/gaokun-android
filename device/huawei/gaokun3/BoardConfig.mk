@@ -136,6 +136,7 @@ BOARD_KERNEL_CMDLINE := \
     firmware_class.path=/vendor/firmware/ \
     init=/init printk.devkmsg=on deferred_probe_timeout=10 \
     fw_devlink.sync_state=timeout \
+    cgroup_disable=pressure \
     console=tty0 \
     clk_ignore_unused pd_ignore_unused arm64.nopauth efi=noruntime \
     efi_pstore.pstore_disable=1 \
@@ -166,6 +167,9 @@ BOARD_KERNEL_CMDLINE := \
 #   负值是卡槽位掩码（构建机 ~/gk3-kernel-72y sound/core/init.c get_slot_from_bitmask()），-2 = 除 0 以外任意；
 #   数组下标是第几个 USB 声卡（sound/usb/card.c:972-978 → :763 snd_card_new(index[idx])），四个够用。
 #   也是 0444 模块参数（card.c:81），内置驱动只能走 cmdline。模块名是 snd-usb-audio（sound/usb/Makefile:32）。
+# ↑ cgroup_disable=pressure：关闭各cgroup的PSI统计，系统级的/proc/pressure/*照常提供（lmkd只用这一份）。
+#   每次任务切换不再沿cgroup层级逐级更新压力计数。与GKI相同：android17-6.18的gki_defconfig在CONFIG_CMDLINE
+#   里带这一项（CMDLINE_EXTEND）。Live安装器从这里派生命令行，它的根文件系统没有装systemd-oomd，不受影响。
 
 # ------------------------------------------------------------ 分区布局
 # 动态分区（super）而不是分立分区：AOSP 16 默认如此，构建直接产出
@@ -292,6 +296,9 @@ AB_OTA_POSTINSTALL_CONFIG +=     RUN_POSTINSTALL_vendor=true     POSTINSTALL_PAT
 # --------------------------------------------------------------- sepolicy
 # permissive 起步（cmdline 里也带了），但 policy 仍要能编过
 BOARD_VENDOR_SEPOLICY_DIRS += device/huawei/gaokun3/sepolicy
+# lineage-libperfmgr的通用规则（CPU调频节点、cgroup、vendor.powerhal.*属性、温控HAL客户端）；
+# 本机另需的规则在sepolicy/hal_power_default.te。
+include device/lineage/sepolicy/libperfmgr/sepolicy.mk
 # minigbm 的 sepolicy 复用 dragonboard 的（同一套 HAL）
 # ⚠️ A17：这份的 file_contexts:8 把 /(system|vendor)/lib(64)?/libdrm.so 标成 same_process_hal_file，
 #   撞 A17 默认强制的 SELinux Treble 标签检查（vendor 策略不许标 /system 下的文件）——

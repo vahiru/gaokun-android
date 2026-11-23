@@ -22,8 +22,7 @@
  *
  * Status. With the Type-C class (UCSI up), the port is connected while a
  * partner is attached; the power role is UCSI's, the data role is the
- * controller's role switch. Without it, the rules of gaokun3-usbrole.sh
- * (host_attached, has_downstream) stand in:
+ * controller's role switch. Without it, these rules stand in:
  *   - Device role, connected: the EC reports an adapter online and a host has
  *     enumerated the UDC. The UDC state alone is not enough: it stays
  *     "configured" after the cable is pulled, while the adapter goes offline
@@ -33,17 +32,34 @@
  *   - Host role, connected: a device is enumerated under the controller's xhci.
  *
  * Roles. With the Type-C class and vreg_l9d always on (patches/kernel/dts/0014), this
- * HAL decides the data role (Follow.h); gaokun3-usbrole.sh still switches it
- * at screen off and on (etc/usbrole.rc). A role can also be chosen through
+ * HAL decides the data role (Follow.h). A role can also be chosen through
  * UsbManager: Settings' "USB controlled by", or `dumpsys usb set-port-roles
  * port0 source host` / `sink device`. The EC cannot swap the power role, so
  * the port reports that it can change mode, and the framework asks for a
  * mode: DFP for host, UFP for device. Otherwise the HAL reports status only,
- * and vendor.gaokun3.usbrole.adb_pause then changes only when
- * gaokun3-usbrole.sh switches the role at screen off and on, no longer
- * within seconds of any role change as with the script's old follow loop.
+ * and port0 stays a device: without the Type-C class an empty port and a
+ * drive we power look the same (adapter offline), so a USB drive on port0
+ * does not work on such a boot.
+ * Once registered, it puts a host role with nothing attached back to device:
+ * at start (dwc3 starts as a device; this covers a role left behind by an
+ * earlier instance), and whenever it does not decide the role, e.g. after the
+ * Type-C port goes away. It also sets
+ * vendor.gaokun3.usbrole.adb_pause from the actual role: in the host role
+ * there is no UDC, and init pauses adbd's USB transport (init.gaokun3.usb.rc).
  * Power role swaps, USB data disabling, power limiting and port reset are
  * answered with NOT_SUPPORTED.
+ *
+ * Suspend. With vreg_l9d always on the controller may suspend in either role,
+ * so the role does not change with the screen. While a host has enumerated
+ * the gadget and is still attached, the HAL holds the wakelock
+ * gaokun3_usbhost: suspending in the device role drops the gadget, so the
+ * computer would see the tablet disconnect and come back on every wake, and
+ * MTP or adb over USB would not last through screen off. It is kept until
+ * the cable is pulled or the role changes: through a bus the computer has
+ * suspended (the computer asleep), and through the moment the gadget rebinds
+ * when USB functions are switched.
+ * The kernel keeps such a wakelock after the process dies, so the HAL
+ * releases it when it starts.
  *
  * Changes are pushed from uevents (role switch, UDC, USB devices, the xhci,
  * the Type-C class, the EC adapter) and from sysfs_notify on the UDC state,
@@ -113,7 +129,7 @@ PortStatus ToStatus(const Inputs& in, bool following) {
     if (in.typec) {
         if (!in.partner || (!host && in.role != "device")) return s;
     } else if (host ? !in.downstream
-                    // Like gaokun3-usbrole.sh, an unreadable adapter node counts as online.
+                    // An unreadable adapter node counts as online.
                     : in.role != "device" || in.adapter == "0" || !in.Enumerated()) {
         return s;
     }
@@ -124,21 +140,27 @@ PortStatus ToStatus(const Inputs& in, bool following) {
     return s;
 }
 
+// Something is attached to port0: a partner when the Type-C class is up,
+// else the EC's adapter online (an unreadable adapter node counts as online).
+// The adapter is not used with the Type-C class: it reads 0 while we supply
+// power. It is the EC's flag for both USB-C ports, so without the Type-C
+// class a charger on port1 keeps it online after port0 is unplugged.
+bool Attached(const Inputs& in) {
+    return in.typec ? in.partner : in.adapter != "0";
+}
+
 // The gadget's connection state as Android kernels report it from their
 // configfs gadget: CONFIGURED once a host has configured it, CONNECTED while a
 // host is attached, else DISCONNECTED. The UDC state stays "configured" after
 // the cable is pulled, so a host only counts while something is attached: a
-// partner when the Type-C class is up, else the EC's adapter online (as in
-// ToStatus, an unreadable adapter node counts as online). The adapter is not
-// used with the Type-C class: it reads 0 while we supply power. A suspended
-// bus keeps the last state.
+// partner or the adapter (Attached). A suspended bus keeps the last state.
 std::string GadgetState(const Inputs& in, const std::string& last) {
-    bool attached = in.typec ? in.partner : in.adapter != "0";
-    if (!attached || in.udc.empty() || in.udc == "not attached") return "DISCONNECTED";
+    if (!Attached(in) || in.udc.empty() || in.udc == "not attached") return "DISCONNECTED";
     if (in.udc == "configured") return "CONFIGURED";
     if (in.udc == "suspended") return last.empty() ? "CONNECTED" : last;
     return "CONNECTED";
 }
+
 
 std::string Describe(const PortStatus& s) {
     if (s.currentMode == PortMode::NONE) return "not connected";
@@ -170,6 +192,9 @@ class Usb : public BnUsb {
             LOGW("no android_usb class (a kernel without patches/kernel/ec-usb/0011): %s=1", kNoAndroidUsb);
             SetProp(kNoAndroidUsb, "1");
         }
+        // An earlier instance may have died holding the wakelock; it is
+        // taken again below if a host is attached. Fails when none was held.
+        SetWakeLock(false, false);
         std::thread([this] { Monitor(); }).detach();
     }
 
@@ -321,6 +346,7 @@ class Usb : public BnUsb {
                   (mSwitch ? "; switching to " + mSwitch->target : "") +
                   "\ngadget state: " +
                   (mGadgetState.empty() ? std::string("not written") : mGadgetState) +
+                  "\nwakelock " + kWakeLock + ": " + (mWakeLockHeld ? "held" : "not held") +
                   "\ncallback: " + (mCallback ? "registered" : "none") + "\n";
         }
         if (write(fd, out.data(), out.size()) < 0) return -errno;
@@ -390,10 +416,13 @@ class Usb : public BnUsb {
     // when the partner detaches in the device role: restart the gadget's
     // pullup. dwc3 does not see VBUS go away, so the UDC state would keep the
     // last host's "configured", and the next partner, a charger too, would
-    // look enumerated. Called with mLock held.
+    // look enumerated (and hold the wakelock). Without the Type-C class the
+    // EC's adapter going offline counts as the detach (Attached).
+    // Called with mLock held.
     void UpdatePartner(const Inputs& in) {
-        bool detached = in.typec && mPartner && !in.partner;
-        mPartner = in.typec && in.partner;
+        bool attached = Attached(in);
+        bool detached = mAttached && !attached;
+        mAttached = attached;
         if (!detached || mFollowing || in.role != "device") return;
         RestartPullup();
         LOGI("partner detached; restarted the gadget pullup (UDC %s)",
@@ -419,6 +448,52 @@ class Usb : public BnUsb {
         LOGI("gadget state %s (UDC %s, adapter %s)", s.c_str(),
              in.udc.empty() ? "absent" : in.udc.c_str(), in.adapter.empty() ? "?" : in.adapter.c_str());
         mGadgetState = s;
+    }
+
+    // A host role with nothing attached (no partner, no device under the
+    // xhci) keeps the gadget unreachable until something is plugged in. dwc3
+    // starts as a device, but a host role can be left by an earlier instance,
+    // or by RoleFollow when the Type-C port goes away (UCSI can unregister it
+    // after a failed init). Puts it back to device: once registered, and from
+    // then on whenever the HAL does not decide the role. Called with mLock
+    // held, after UpdateFollowing.
+    void ReturnIdleHost(const Inputs& in, Clock::time_point now) {
+        if (!mRegistered) return;
+        bool check = !mStartChecked || !mFollowing;
+        mStartChecked = true;
+        if (!check || in.role != "host" || in.downstream || (in.typec && in.partner)) return;
+        // The controller takes about 20 ms to change role: do not write again
+        // for the uevents of the same switch.
+        if (mIdleSwitchAt && now < *mIdleSwitchAt + std::chrono::seconds(1)) return;
+        mIdleSwitchAt = now;
+        LOGI("host role with nothing attached: switching to device");
+        WriteRole("device");
+    }
+
+    // Called with mLock held.
+    void UpdateAdbPause(const Inputs& in) {
+        const char* want = in.role == "host" ? "1" : in.role == "device" ? "0" : nullptr;
+        if (!want || GetProp(kAdbPause) == want) return;
+        if (SetProp(kAdbPause, want)) LOGI("role %s: %s=%s", in.role.c_str(), kAdbPause, want);
+    }
+
+    // Takes kWakeLock once a host has enumerated the gadget (a bus the host
+    // has suspended counts too) and keeps it until the partner detaches or
+    // the role changes. Switching USB functions rebinds the gadget, and the
+    // UDC then reads "not attached" for a moment while the host stays, so
+    // the UDC state alone must not release it. A failed write is retried on
+    // the next update and logged once. Called with mLock held.
+    void UpdateWakeLock(const Inputs& in) {
+        bool device = in.role == "device" && Attached(in);
+        bool want = device && (mWakeLockHeld || in.Enumerated());
+        if (want == mWakeLockHeld) return;
+        if (!SetWakeLock(want, !mWakeLockFailed)) {
+            mWakeLockFailed = true;
+            return;
+        }
+        mWakeLockFailed = false;
+        mWakeLockHeld = want;
+        LOGI("%s %s (%s)", want ? "holding" : "released", kWakeLock, Describe(in).c_str());
     }
 
     // Reports the pending switchRole once the controller is up in the new
@@ -448,8 +523,11 @@ class Usb : public BnUsb {
     void Update(Clock::time_point now) {
         Inputs in = ReadInputs();
         UpdateFollowing(in);
+        ReturnIdleHost(in, now);
         mFollowDue = mFollowing ? mFollow.Tick(in, now) : std::nullopt;
         UpdatePartner(in);
+        UpdateAdbPause(in);
+        UpdateWakeLock(in);
         Report(Evaluate(in, now), false);
         UpdateGadgetState(in);
         FinishSwitch(in, now);
@@ -539,15 +617,19 @@ class Usb : public BnUsb {
     PortStatus mLast;
     std::optional<Clock::time_point> mHoldUntil;
     bool mRegistered = false;
+    bool mStartChecked = false;
+    std::optional<Clock::time_point> mIdleSwitchAt;
     std::optional<bool> mL9d;
     bool mFollowing = false;
-    bool mPartner = false;
+    bool mAttached = false;
     RoleFollow mFollow;
     std::optional<Clock::time_point> mFollowDue;
     std::optional<PendingSwitch> mSwitch;
     std::string mGadgetState;
     bool mNoGadgetStateLogged = false;
     bool mGadgetStateWriteFailed = false;
+    bool mWakeLockHeld = false;
+    bool mWakeLockFailed = false;
     bool mEnableUsbDataLogged = false;
 };
 

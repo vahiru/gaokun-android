@@ -568,7 +568,7 @@ def apply_patch_file(tree: pathlib.Path, project: str, patch_name: str,
     """把 <repo>/patches/<patch_name> 用 git apply 打进 AOSP 树的 <project>（幂等）。
 
     ★ 为什么要有这个助手：本仓 `patches/android/` 里的 **AOSP 侧**补丁（
-    hardware-interfaces/0001–0011 audio HAL、v4l2-codec2/0001–0007、tinyalsa/0001、drm-hwcomposer/0001–0005）
+    hardware-interfaces/0001–0012 audio HAL、v4l2-codec2/0001–0007、tinyalsa/0001、drm-hwcomposer/0001–0005）
     原先**没有任何消费者** —— 全靠人手动
     `git apply`。而本仓已经为"没有消费者的配置一定会漂"付过三次账
     （M13 的 BOARD_KERNEL_CMDLINE、M17 的上游 Venus 补丁集、以及 2026-09-12
@@ -1398,6 +1398,12 @@ def main():
     step(" [40] audio AIDL HAL播放方向的ALSA period数可配（录音不变）: ", apply_patch_file(
         tree, "hardware/interfaces",
         "android/hardware-interfaces/0011-audio-aidl-alsa-output-period-count.patch"))
+    # 蓝牙通话（issue #107）：HFP输出流不再受BT_SCO参数控制。SCO由音频托管时框架从不下发BT_SCO=on，
+    # 不改的话SCO一建立，第一次蓝牙参数更新就把输出流挂起。要和device.mk的两个蓝牙属性、
+    # audio/bluetooth_audio_policy_configuration.xml的HFP端口一起生效。只动bluetooth/StreamBluetooth.cpp，与[12]–[40]不重叠。
+    step(" [56] audio AIDL HAL蓝牙HFP输出流不受BT_SCO参数控制: ", apply_patch_file(
+        tree, "hardware/interfaces",
+        "android/hardware-interfaces/0012-audio-aidl-bluetooth-hfp-not-gated-by-bt-sco.patch"))
     # 字节缓冲模式的块 ID。要和 device.mk 的 poolmask（GRALLOC 位）一起生效，见补丁说明。
     step(" [28] v4l2_codec2 字节缓冲模式用 dmabuf ID: ", apply_patch_file(
         tree, "external/v4l2_codec2",
@@ -1455,9 +1461,10 @@ def main():
     step(" [46] v4l2_codec2解码器输入缓冲区按码流大小分配（需kernel/iris/0019）: ", apply_patch_file(
         tree, "external/v4l2_codec2",
         "android/v4l2-codec2/0007-v4l2-codec2-size-decoder-input-buffers-for-the-stream-again.patch"))
-    # 指纹HAL（device/huawei/gaokun3/fingerprint）报告CONVENIENCE。SystemUI对Class 1/2指纹只在人脸也锁定时
-    # 才禁止指纹解锁，没有人脸识别时，指纹自己临时锁定期间仍会不断请求认证，框架逐次拒绝。补丁让它在
-    # 锁定期间改为只检测接触（与Class 3相同）；锁定期满时HAL发出onLockoutCleared，SystemUI随之恢复认证。
+    # SystemUI对Class 1/2指纹只在人脸也锁定时才禁止指纹解锁，没有人脸识别时，指纹自己临时锁定期间仍会不断
+    # 请求认证，框架逐次拒绝。补丁让它在锁定期间改为只检测接触（与Class 3相同）；锁定期满时HAL发出
+    # onLockoutCleared，SystemUI随之恢复认证。指纹HAL（device/huawei/gaokun3/fingerprint）报告STRONG后，
+    # SystemUI本身已按Class 3处理指纹锁定，这个补丁在本机上不再改变行为。
     step(" [44] SystemUI在指纹临时锁定期间不再请求指纹认证: ", apply_patch_file(
         tree, "frameworks/base",
         "android/frameworks-base/0001-systemui-respect-fingerprint-lockout.patch"))

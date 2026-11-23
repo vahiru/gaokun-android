@@ -70,10 +70,10 @@ Each entry follows the same format: **Symptom** (what you will run into), **Caus
 * **Cause**: the keyboard cover's connector appears to the system as a permanently attached USB keyboard, and Android hides the USB connection notification when it sees such a device. The USB-C port next to the power button only runs at USB 2.0 speed when connected to a computer.
 * **What to do**: choose "File transfer" in Settings as above. The tablet does not enter standby while connected to a computer, so transfers continue with the screen off; please unplug the cable when you are done.
 
-### Fingerprint is for screen unlock only, not for payments
-* **Symptom**: 1.0.0-rc.3 and earlier do not support the fingerprint sensor. Since 1.0.0-rc.4, you can enrol fingerprints in Settings and unlock the screen (both Goodix and FocalTech sensors are supported), but fingerprint payment in banking and payment apps and fingerprint sign-in that relies on Android Keystore do not work; matching on machines with a FocalTech sensor has not been tested with real fingers yet.
-* **Cause**: image decoding, matching and template storage run in a normal system service without hardware-backed token signing or anti-spoofing certification, so the service reports the lowest security tier (Class 1 / convenience), which high-security apps do not accept. The pixel-pitch scale for FocalTech sensors has not been measured on real captures yet.
-* **What to do**: keep using your password or PIN in payment and banking apps. If recognition is poor on a FocalTech machine, unlock with a PIN or password for now and let us know in an issue.
+### Fingerprint payment does not work in some apps
+* **Symptom**: 1.0.0-rc.3 and earlier do not support the fingerprint sensor. In 1.0.0-rc.4, you can enrol fingerprints in Settings and unlock the screen (both Goodix and FocalTech sensors are supported), but apps cannot use the fingerprint. In later versions, apps can also verify your identity with a fingerprint, for example to sign in or to unlock a password manager. Fingerprint payment in WeChat Pay, Alipay and similar apps still does not work, and some banking apps may still refuse fingerprint sign-in. Matching on machines with a FocalTech sensor has not been tested with real fingers yet.
+* **Cause**: fingerprint matching runs in a normal system service rather than in the processor's secure environment (TEE), and the Android key store on this device is also implemented in software. Fingerprint payment in WeChat Pay, Alipay and similar apps relies on keys that the device manufacturer places in the TEE, and some banking apps do not accept a key store that is not backed by hardware. The pixel-pitch scale for FocalTech sensors has not been measured on real captures yet.
+* **What to do**: use your password or PIN for payments in these apps. If recognition is poor on a FocalTech machine, unlock with a PIN or password for now and let us know in an issue.
 
 ### The stylus does not support the first-generation M-Pencil
 * **Symptom**: on 1.0.0-rc.1 and earlier, the stylus does nothing at all. Since rc.2, the second- and third-generation M-Pencil support pressure, hover, tilt and double-tap on the side; everyday use of the third-generation pen has not been tested yet. The first-generation M-Pencil does not work.
@@ -97,11 +97,6 @@ Each entry follows the same format: **Symptom** (what you will run into), **Caus
 * **Symptom**: Netflix, Disney+, Prime Video and similar services cannot play their content and report a DRM error or that the device is not supported. Some members-only or licensed content in Chinese video apps may be affected too; this has not been tested yet.
 * **Cause**: the system has no DRM module. Widevine is a closed-source Google component that requires licensing and certification, which this project cannot ship.
 * **What to do**: please watch such content on another device.
-
-### The Bluetooth headset microphone does not work in calls
-* **Symptom**: in WeChat voice calls, Tencent Meeting or in-game voice chat over a Bluetooth headset, the headset microphone does not work, and the call audio may not play through the headset either. The microphone on wired headsets has not been tested yet.
-* **Cause**: Bluetooth calls need a dedicated audio path; this machine lacks the one Qualcomm provides for phones, and no replacement has been implemented yet.
-* **What to do**: use the tablet's own microphone and speakers for calls. Listening to music over a Bluetooth headset uses a different path and is not affected.
 
 ### Messages from some apps are delayed in standby
 * **Symptom**: once the screen is off and the machine is in standby, new messages from apps that do not use Google's push service (FCM), such as WeChat and QQ, only arrive at the system's next scheduled wake-up or when you turn the screen on, usually one or two minutes late, occasionally around three. Apps that use FCM are delayed the same way on 1.0.0-rc.3 and earlier; since 1.0.0-rc.4 they can wake the system and arrive on time. Wi-Fi stays connected during standby, so there is no need to reconnect after waking.

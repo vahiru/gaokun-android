@@ -15,8 +15,8 @@
  *
  *   1. The master switch is on: vendor.gaokun3.histen.on = 1.  That is init's
  *      mirror (etc/histen.rc) of persist.sys.gaokun3.histen, which the Parts
- *      app's "Speaker enhancement (experimental)" toggle writes.  Unset = OFF.
- *      And the processing mode chosen next to it is Histen; the default mode
+ *      app's "Speaker sound effects" dialog writes.  Unset = OFF.
+ *      And the engine chosen in the same dialog is Histen; bass enhancement
  *      processes the speaker in the audio HAL instead (engineInHal() below).
  *   2. The chain was armed for this stream -- i.e. the switch was already on
  *      at open() or at the last START.  Turning the switch OFF takes effect

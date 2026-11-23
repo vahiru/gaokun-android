@@ -1,0 +1,16 @@
+# Power HAL（lineage-libperfmgr，见power/README.md）在device/lineage/sepolicy/libperfmgr之外需要的规则。
+
+# powerhint.json的节点：GPU最低频率，以及RT任务的uclamp_min默认值
+# （/proc/sys/kernel/sched_util_clamp_min_rt_default，核心策略标为proc_sched）。
+allow hal_power_default sysfs_gaokun3_gpu_min_freq:file rw_file_perms;
+allow hal_power_default proc_sched:file rw_file_perms;
+
+# ADPF：按会话的帧耗时用sched_setattr调整会话线程（HWUI的UI线程与RenderThread、SystemUI等）的uclamp，
+# 写法同hardware/google/pixel-sepolicy。
+# 应用进程带MLS类别（seapp_contexts的levelFrom），而setsched的MLS约束要求两边级别相同，
+# 或主体为mlstrustedsubject（system/sepolicy private/mls），HAL运行在s0，所以要加这个属性；
+# 只有TE规则时，enforcing下只有system_app等s0进程的线程能调整。
+typeattribute hal_power_default mlstrustedsubject;
+allow hal_power_default appdomain:process { getsched setsched };
+allow hal_power_default system_server:process setsched;
+allow hal_power_default self:capability sys_nice;
