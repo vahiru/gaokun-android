@@ -1,0 +1,122 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] usb: typec: ucsi: huawei_gaokun: Acknowledge USB events after
+ a failed init
+
+The EC reports a port's mode change with a USB event, which the driver
+acknowledges. On some boots the EC already has one pending when the
+driver registers its notifier, and repeats it about every 200 ms. The
+driver acknowledges only once UCSI has registered its connectors: an
+event that arrives earlier is left unacknowledged, and the repeats stop
+once a later one is handled and acknowledged.
+
+UCSI does not always initialize. On some boots ucsi_init() fails, for
+example with "PPM init failed" and -ETIMEDOUT after "failed to register
+alt modes". The core then leaves ucsi->connector NULL and does not try
+again. If the EC was repeating a USB event, nothing acknowledges it, and
+the repeats go on until the next reboot while the driver keeps logging
+"ucsi connector is not initialized yet" (rate limited). Each repeat is
+an EC interrupt, which wakes the system from suspend, so it cannot stay
+asleep for more than a fraction of a second.
+
+Once initialization is over and has failed, acknowledge the event
+without handling the port, as the driver already does for an event
+without a port update. Initialization counts as over when UCSI is
+registered, ucsi->work, which runs ucsi_init() and is queued again only
+for -EPROBE_DEFER and -EAGAIN, is neither queued nor running, and
+ucsi->connector is still NULL. work_busy() is only a snapshot, so act
+only when this holds for two events in a row. While initialization may
+still succeed, keep the event unacknowledged as before, so that the mode
+of a port whose event arrives early is still applied.
+
+On such a boot the port's mode, orientation and DisplayPort HPD are
+still not applied until the next reboot, as before.
+
+Of the failed boots logged so far, two had the EC repeating from boot
+and four had no USB event after the failure. A failure simulated by
+failing GET_CAPABILITY did not make the EC repeat either. On such a
+boot, unplugging and replugging the cable gave two USB events; the first
+was only counted and the second was acknowledged, without EC errors.
+Whether the acknowledgment alone stops the repeats of a real failed boot
+has not been observed.
+
+Fixes: 00327d7f2c8c ("usb: typec: ucsi: add Huawei Matebook E Go ucsi driver")
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c | 43 ++++++++++++++++++++-
+ 1 file changed, 41 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c b/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c
+index cb7541cbe55..2433e69ba15 100644
+--- a/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c
++++ b/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c
+@@ -118,6 +118,7 @@ struct gaokun_ucsi {
+ 	bool registered;
+ 	bool usb_events; /* the EC has sent a USB event */
+ 	bool cmd_lost; /* the EC gave up resend_cmd */
++	u8 init_failed_seen; /* USB events seen in a row after a failed init */
+ };
+ 
+ /* -------------------------------------------------------------------------- */
+@@ -437,12 +438,49 @@ static void gaokun_ucsi_handle_usb_mode(struct gaokun_ucsi_port *port)
+ 	gaokun_ec_ucsi_pan_ack(uec->ec, port->idx);
+ }
+ 
++/*
++ * Whether UCSI has given up initializing. ucsi_register() only queues
++ * ucsi->work; ucsi_init() runs from it and sets ucsi->connector on success.
++ * On failure it leaves ucsi->connector NULL and does not try again, except
++ * for -EPROBE_DEFER, which queues the work once more. work_busy() is only a
++ * snapshot, so the caller acts on this only when it holds for two USB
++ * events in a row.
++ */
++static bool gaokun_ucsi_init_failed(struct gaokun_ucsi *uec)
++{
++	/* Pairs with smp_store_release() in gaokun_ucsi_register_worker() */
++	return smp_load_acquire(&uec->registered) &&
++	       !work_busy(&uec->ucsi->work.work) &&
++	       !READ_ONCE(uec->ucsi->connector);
++}
++
+ /* Returns whether a port had an update */
+ static bool gaokun_ucsi_usb_notify_ind(struct gaokun_ucsi *uec)
+ {
+ 	int idx;
+ 
+-	if (!uec->ucsi->connector) { /* slow to register */
++	if (!READ_ONCE(uec->ucsi->connector)) {
++		/*
++		 * On some boots the EC repeats a USB event about every 200 ms
++		 * until it is acknowledged. While UCSI is still initializing,
++		 * leave it unacknowledged: the repeat that arrives once the
++		 * connectors exist is handled in full. Once initialization has
++		 * failed, nothing will handle it, and the repeats would go on
++		 * until reboot, waking the system from suspend each time.
++		 * Acknowledge it then, without handling the port.
++		 */
++		if (!gaokun_ucsi_init_failed(uec))
++			uec->init_failed_seen = 0;
++		else if (uec->init_failed_seen < 2)
++			uec->init_failed_seen++;
++
++		if (uec->init_failed_seen >= 2) {
++			dev_warn_once(uec->dev,
++				      "UCSI failed to initialize, acknowledging USB events without handling them\n");
++			gaokun_ec_ucsi_pan_ack(uec->ec, gaokun_ucsi_refresh(uec));
++			return false;
++		}
++
+ 		dev_err_ratelimited(uec->dev, "ucsi connector is not initialized yet\n");
+ 		return false;
+ 	}
+@@ -622,7 +660,8 @@ static void gaokun_ucsi_register_worker(struct work_struct *work)
+ 		return;
+ 	}
+ 
+-	uec->registered = true;
++	/* Pairs with smp_load_acquire() in gaokun_ucsi_init_failed() */
++	smp_store_release(&uec->registered, true);
+ }
+ 
+ static int gaokun_ucsi_probe(struct auxiliary_device *adev,

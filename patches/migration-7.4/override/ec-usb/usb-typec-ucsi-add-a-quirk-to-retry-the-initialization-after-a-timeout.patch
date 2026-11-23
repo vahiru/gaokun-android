@@ -2,9 +2,9 @@ From: Akisaira <akisaira@outlook.com>
 Subject: [PATCH] usb: typec: ucsi: Add a quirk to retry the initialization
  after a timeout
 
-ucsi_init() gives up for good when a command times out: no connectors
-are left registered, ucsi->connector is NULL and the ports are unusable
-until the next boot. On some PPMs such a timeout is not a lasting fault.
+ucsi_init() gives up for good when a command times out: it unregisters
+the connectors it has registered, ucsi->connector is NULL and the ports
+are unusable until the next boot. On some PPMs such a timeout is not a lasting fault.
 The PPM of the Huawei Matebook E Go sometimes completes a command but
 leaves BUSY set in the CCI, which ucsi_notify_common() ignores, so the
 command times out. The commands sent after it still complete, and so
@@ -12,8 +12,9 @@ does the PPM_RESET on the error path.
 
 Add UCSI_RETRY_INIT_ON_TIMEOUT. With it, ucsi_init_work() queues the
 work again after -ETIMEDOUT, one second later and at most five times, as
-long as ucsi->connector is NULL: no connectors are registered then, and
-the next run starts with a PPM reset. ucsi_init() can
+long as ucsi->connector is NULL: that run has then registered no
+connectors or unregistered them again, and the next run starts with a
+PPM reset. ucsi_init() can
 also fail with the connectors in place, when reading the CCI at the end
 fails; the ports are in use then and are left alone, as before.
 
@@ -30,7 +31,7 @@ Upstream-Status: Pending
  2 files changed, 25 insertions(+)
 
 diff --git a/drivers/usb/typec/ucsi/ucsi.c b/drivers/usb/typec/ucsi/ucsi.c
-index 131e79787c6..e379c943c14 100644
+index 131e79787c6..e678f939ade 100644
 --- a/drivers/usb/typec/ucsi/ucsi.c
 +++ b/drivers/usb/typec/ucsi/ucsi.c
 @@ -2291,6 +2291,25 @@ static void ucsi_init_work(struct work_struct *work)
@@ -39,9 +40,9 @@ index 131e79787c6..e379c943c14 100644
  	dev_err_probe(ucsi->dev, ret, "PPM init failed\n");
 +
 +	/*
-+	 * When a failed ucsi_init() leaves ucsi->connector NULL, no connectors
-+	 * are registered, and the next run starts with a PPM reset, so it can
-+	 * simply run again.
++	 * A failed ucsi_init() that leaves ucsi->connector NULL has registered
++	 * no connectors or unregistered those it registered, and the next run
++	 * starts with a PPM reset, so it can simply run again.
 +	 */
 +	if (ret == -ETIMEDOUT && !ucsi->connector &&
 +	    ucsi->quirks & UCSI_RETRY_INIT_ON_TIMEOUT) {
