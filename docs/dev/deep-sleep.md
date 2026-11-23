@@ -30,6 +30,14 @@ Windows的PEP表也是这样：D3时拉低SSD的供电，Wi-Fi的3.9 V和`WLAN_E
 
 NVMe每次待机都做一次shutdown，醒来重新建队列。两条链路在noirq阶段重新训练，SSD那条约0.35秒，Wi-Fi那条约0.25秒，是醒来时最慢的一段；两个控制器并行恢复（`patches/kernel/pcie-pm/0008`），不再一条等一条。
 
+## USB
+
+`persist.vendor.gaokun3.allow_suspend`是总开关（默认1）：`init.gaokun3.rc`在1时放开wakelock `gaokun3_nosuspend`，在0时拿回。
+
+port0（`a600000.usb`）在device和host两种角色下都可以挂起，息屏时不切换角色。以前device角色下挂起会整板复位：combo PHY退出时关掉了`vreg_l9d`，它在这份DT里只有这一个用户，dwc3随后失败。DT让`vreg_l9d`常开（`patches/kernel/dts/0014`）解决了这个问题；没有这一条的DT不受支持。
+
+主机枚举了平板、线还接着时，USB端口HAL持有`gaokun3_usbhost`，平板不挂起。device角色下挂起会断开gadget，电脑每次都会看到平板断开再重连，MTP和USB adb也撑不过息屏。一旦持有就保持到拔线或角色改变：电脑让总线休眠（电脑睡着）、切换「USB用途」时gadget短暂断开，都不释放。只接充电器时不持有。逻辑在`device/huawei/gaokun3/usb/Usb.cpp`开头。
+
 ## EC唤醒
 
 插充电器、合盖这类事件由EC报给主机，中断走PDC（`pdc 215`，GPIO 103）。SoC进了AOSD之后，电平触发的中断常常接不住插充电器：PDC一直把SoC叫醒，CPU每次去看时线又是高的，GIC上没有挂着的中断，系统要等下一个闹钟或电源键。看起来EC这时只发很短的低电平脉冲。所以EC驱动在`suspend_noirq`里把中断改成下降沿，PDC把它当作边沿交给GIC；恢复时改回DT里的电平，再读一遍EC排着的事件（`patches/kernel/ec-usb/0015`）。醒着时一直是电平触发：打开中断时线如果已经是低的，边沿触发就收不到这个事件。睡眠中插线不亮屏、而`qcom_stats/aosd`的Count在一次睡眠里涨了几千，就是这个问题。

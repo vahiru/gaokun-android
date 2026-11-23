@@ -34,7 +34,7 @@ KEYS_LOG=$RUN/keys.log
 # —— 可被 test-hook 覆盖的默认值（真机的值）——
 FBD=/bin/gk3-fastbootd
 GK3_UDC=a600000.usb                                         # port0 的 dwc3
-GK3_ROLE=/sys/class/usb_role/a600000.usb-role-switch/role   # 同 gaokun3-usbrole.sh
+GK3_ROLE=/sys/class/usb_role/a600000.usb-role-switch/role   # 同 USB 端口 HAL（device/huawei/gaokun3/usb/Port.h）
 GK3_USB_PLAT=/sys/bus/platform/devices/a600000.usb
 GK3_IDLE_TIMEOUT=${GK3_IDLE_TIMEOUT:-1800}                  # 秒；默认 30 分钟。cmdline 里写 GK3_IDLE_TIMEOUT=60 也行
 GK3_TRACE=${GK3_TRACE:-0}                                   # 1 = 每条日志也打到控制台（测试用）
@@ -141,7 +141,7 @@ log "screen: ${ROWS} rows x ${COLS} columns on $GK3_TTY"
 
 role_now() { local r=; [ -e "$GK3_ROLE" ] && read -r r < "$GK3_ROLE" 2>/dev/null; echo "${r:-none}"; }
 
-# xhci 下有没有下游设备（同 gaokun3-usbrole.sh has_downstream）：有 = 用户在 port0 插了键盘 / U 盘，
+# xhci 下有没有下游设备（同 USB 端口 HAL 的 HasDownstream，device/huawei/gaokun3/usb/Port.cpp）：有 = 用户在 port0 插了键盘 / U 盘，
 # 这时 host 是对的，不去抢。
 has_downstream() {
     local u

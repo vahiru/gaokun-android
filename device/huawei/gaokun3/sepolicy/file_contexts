@@ -106,7 +106,7 @@
 # 本仓只补 sysfs 那一条，见 sepolicy/hal_lineage_health_default.te。⬜ 未编译。
 /vendor/bin/hw/vendor\.lineage\.health-service\.gaokun3     u:object_r:hal_lineage_health_default_exec:s0
 # USB 端口 HAL（usb/）—— AOSP 的 hal_usb_default 域（system/sepolicy vendor/hal_usb_default.te），
-# 本仓 hal_usb_default.te 补它读 UDC 状态、EC 适配器和设 vendor.gaokun3.usbrole.* 的几条。
+# 本仓 hal_usb_default.te 补它读 UDC 状态、EC 适配器、设 vendor.gaokun3.usbrole.* 和持有 wakelock 的几条。
 /vendor/bin/hw/android\.hardware\.usb-service\.gaokun3       u:object_r:hal_usb_default_exec:s0
 
 # ── 我们自己的服务脚本：各给一个域 ───────────────────────────────────────
@@ -119,7 +119,7 @@
 /vendor/bin/gaokun3-hangdump\.sh     u:object_r:gaokun3_hangdump_exec:s0
 /vendor/bin/gaokun3-qrtr-lookup    u:object_r:gaokun3_qrtr_lookup_exec:s0
 /vendor/bin/gaokun3-keyboard\.sh     u:object_r:gaokun3_keyboard_exec:s0
-/vendor/bin/gaokun3-usbrole\.sh      u:object_r:gaokun3_usbrole_exec:s0
+/vendor/bin/gaokun3-serialno\.sh     u:object_r:gaokun3_serialno_exec:s0
 /vendor/bin/gaokun3-rproc-kick\.sh   u:object_r:gaokun3_rprockick_exec:s0
 /vendor/bin/gaokun3-ssc-recover\.sh  u:object_r:gaokun3_sscrecover_exec:s0
 /vendor/bin/gaokun3-wlan-ap\.sh      u:object_r:gaokun3_wlanap_exec:s0

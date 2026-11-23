@@ -20,8 +20,8 @@
 # ⚠️ qcom_stats 在 debugfs，要 root。插着 USB 时 CX 塌缩本来就进不去（复核 PERF-3），计数为 0 不算异常 ——
 #   这份采样的意义在于【拔线】之后。
 # ⚠️ 不 setprop、不碰 wakelock、不开关任何服务：allow_suspend 由人来设（standby.sh start 会提示）。
-# ⚠️ screen= 是 debug.tracing.screen_state 的原始值：2 = 亮屏，1 = 息屏（device/huawei/gaokun3/bin/gaokun3-usbrole.sh:70、:124
-#   都按"= 2 才是亮屏"用它）—— 别把 1 读成亮屏。
+# ⚠️ screen= 是 debug.tracing.screen_state 的原始值，即 Android 的 Display.STATE_*：2 = 亮屏，1 = 息屏
+#   —— 别把 1 读成亮屏。
 # ⚠️ setsid 扛得住拔线，但出不了 init 给 adbd 建的进程组 cgroup：期间开关 USB 调试 / adb root / unroot 让 adbd 重启，
 #   采样器会被一起杀、不留 stop 行（standby.sh pull 会提示"中途死了"）。
 
@@ -46,7 +46,7 @@ qcom() {
 }
 
 # 为什么不睡 / 被谁叫醒（B7 排查用）：
-#   wl=      /sys/power/wake_lock 里的用户态锁（gaokun3_nosuspend = allow_suspend 没放开，gaokun3_usbrole = 插着主机）
+#   wl=      /sys/power/wake_lock 里的用户态锁（gaokun3_nosuspend = allow_suspend 没放开，gaokun3_usbhost = 主机枚举了平板，USB 端口 HAL 持有）
 #   ws_act=  此刻持有中的内核唤醒源（active_since > 0）
 #   ws_top=  累计 wakeup_count 前 5 的唤醒源（名:次数；首末两行相减 = 这段时间谁叫醒了机器）
 #   ⚠️ debugfs 的 wakeup_sources 一行是 名字 + 9 列数字，名字可能全是空格（实测有一个 active_count 1 万多的匿名源）⇒

@@ -19,8 +19,8 @@ get_prop(vendor_init, system_prop)
 #
 # 写 wake_lock 要 CAP_BLOCK_SUSPEND。证据：`vendor_init self:capability2 block_suspend`
 # （sysfs_wake_lock 的写权限 vendor_init 已经有，没被拒）。
-# ⚠️★ 这条不是可有可无：allow_suspend=0 的机器（开发机就是）靠这把锁不睡；
-#    拿不到锁，enforcing 下设备会在 device 模式里进 s2idle —— 那正是 #52 的整板复位。
+# ⚠️★ 这条不是可有可无：allow_suspend=0 的机器（开发机就是）靠这把锁不睡，
+#    on init 和 allow_suspend=0 的触发器都在 vendor_init 里写 wake_lock。
 allow vendor_init self:global_capability2_class_set block_suspend;
 
 # LIVE-8：on boot 把 hung_task_timeout_secs 写回 120（AOSP init.rc 在 on init 写 0）。

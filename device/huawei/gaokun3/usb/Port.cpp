@@ -225,6 +225,11 @@ bool WriteGadgetState(const std::string& state, bool logError) {
     return WriteAttr(kGadgetState, state.c_str(), logError);
 }
 
+bool SetWakeLock(bool held, bool logError) {
+    return WriteAttr(held ? "/sys/power/wake_lock" : "/sys/power/wake_unlock", kWakeLock,
+                     logError);
+}
+
 bool L9dAlwaysOn() {
     Dir regs = OpenDir(kRegulators);
     if (!regs) return false;

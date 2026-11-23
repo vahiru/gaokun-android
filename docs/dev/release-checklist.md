@@ -56,7 +56,7 @@ echo $?        # 0 = 无FAIL；1 = 有FAIL；2 = adb不通或中途掉线（不�
 | --- | --- | --- |
 | 视频解码边界回归 | 运行本地`rc-accept.sh`视频回归集 | 播放完毕后seek、连续seek、分辨率切换、stop、drain全部通过 |
 | 热点启停 | USB adb下执行`cmd wifi start-softap gk3test wpa2 <口令>` → `dumpsys wifi` → `cmd wifi stop-softap` | AP正常启动；关闭后STA自动重连 |
-| USB角色开机路径 | `logcat -b all -d \| grep 'SVC_EXEC service gaokun3_role_device'`；`getprop vendor.gaokun3.usbrole.broken` | 服务正常启动且USB adb枚举正常；`broken`为空或`0` |
+| USB角色开机路径 | `logcat -b all -d -s gaokun3-usb`；`dumpsys android.hardware.usb.IUsb/default`；`getprop vendor.gaokun3.usbrole.broken` | HAL已注册并在决定数据角色（`deciding the data role`），USB adb枚举正常；`broken`为空或`0` |
 | 发布版诊断通路 | `adb shell su -c id`、`adb shell dmesg`、`adb logcat -b kernel -d`、`adb bugreport` | 在KernelSU管理器授权Shell后`su -c id`返回`0`；核对各诊断命令可用性 |
 | `/data`保留块 | `su -c "tune2fs -l /dev/block/by-name/userdata" \| grep -iE 'Reserved block count\|Reserved blocks gid'`；`getprop vold.has_reserved` | 保留块数为`32768`、GID为`1065`；`vold.has_reserved`为`1` |
 | Wi-Fi软件PNO与NTP重试 | `dumpsys wifi`的`WifiResourceCache`；`dumpsys network_time_update_service` | `config_wifiSwPnoEnabled=true`；`mTryAgainTimesMax=-1`，首选NTP为`ntp.aliyun.com` |
@@ -84,6 +84,7 @@ echo $?        # 0 = 无FAIL；1 = 有FAIL；2 = adb不通或中途掉线（不�
 | 前后摄取景与对焦 | 打开Aperture相机，横竖屏切换查看前后摄取景，在画面各处点按对焦 | 取景方向正确（前后摄Orientation都是0）；后摄点按能锁焦 |
 | USB线与U盘拔插 | 拔插USB线；port0与port1在亮屏、息屏下分别插入U盘 | USB adb正常恢复；U盘自动挂载 |
 | USB调试授权弹窗 | 发布构建首次连接电脑USB | 弹出RSA公钥授权框；未授权前`adb devices`显示`unauthorized` |
+| 接着电脑时的待机 | 连接电脑并开启文件传输，息屏2分钟后亮屏；拔线后再息屏 | 接着电脑时`/sys/power/wake_lock`含`gaokun3_usbhost`、`suspend_stats/success`不增长、传输不中断；拔线后这把锁释放，息屏后能进入挂起 |
 | 拔线深度休眠唤醒 | 设`allow_suspend=1` → 拔除USB → 息屏静置等待入睡 → 按电源键唤醒 → 插回USB | `suspend_stats/success`计数增长；唤醒后Wi-Fi与USB adb正常恢复 |
 | 扬声器音效开关 | 在“设置 → 提示音和振动 → 扬声器音效”的对话框中依次选择关闭、低音增强与华为Histen并播放音乐，插耳机重复验证 | 默认关闭，条目说明显示当前选项；关闭时直通播放正常，选择华为Histen时`logcat`输出`Histen chain up`；耳机通道不经过扬声器音效链 |
 | 设置条目与控制中心磁贴 | 查看“设置 → 已连接的设备 → 磁吸键盘”、“设置 → 显示 → 防误触模式”与“设置 → 提示音和振动”的“高级”分组；设置页开着时下拉控制中心切换键盘与防误触磁贴 | 两个开关条目可切换，状态与磁贴一致，用磁贴切换后设置页的开关随即更新；“高级”分组包含扬声器音效与麦克风降噪；应用抽屉中没有Parts的图标 |

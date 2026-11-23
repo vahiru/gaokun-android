@@ -10,10 +10,9 @@
 # 实测教训（docs/dev/android-bringup.md）：
 # ① 骨架（尤其 mkdir functions/ffs.adb 注册实例）必须在 functionfs mount
 #    之前，否则 mount 报 ENODEV —— 全部放 post-fs-data 按序执行。
-# ② UCSI（EC 内建后）会把 otg 口切成 host，xhci 一起来 gadget 就没戏。
-#    必须写 /sys/class/usb_role/.../role = device（接口名 Ubuntu 实测）——
-#    现在由 gaokun3-usbrole.sh device 来写，port0 上有下游设备时它保持 host。
-# ③ ro.serialno由etc/usbrole.rc在init阶段从SMBIOS（/sys/class/dmi/id/product_serial）读取写入，
+# ② 数据角色：dwc3 以 device 启动，UCSI 不动 usb_0 的 role（patches/kernel/ec-usb/0009），之后由 USB 端口 HAL
+#    按插进来的东西决定（usb/Follow.h），这里不写 role。HAL 启动时发现 role 是 host 却什么都没接，会切回 device。
+# ③ ro.serialno由etc/serialno.rc在init阶段从SMBIOS（/sys/class/dmi/id/product_serial）读取写入，
 #    post-fs-data阶段在此处展开为硬件序列号。
 
 on post-fs-data
@@ -46,33 +45,21 @@ on post-fs-data
     # MIDI（"USB 用途"里的 MIDI）：内核的 f_midi（USB_CONFIGFS_F_MIDI）。system 的 init.usb.configfs.rc 只把
     # functions/midi.gs5 链接成 f1，不建它（rndis.gs4 它会建），所以在这里建。
     mkdir /config/usb_gadget/g1/functions/midi.gs5
-    # 切 device 交给 gaokun3_role_device（etc/usbrole.rc）：port0 上插着 U 盘 / 鼠标这类设备、
-    # xhci 已枚举到它们时保持 host，否则照旧切 device（v1.0 PWR-5 / STOR-2）。
-    # 用 exec_start（同步，etc/bpfrelabel.rc 用过同一招）而不是 start：下面 configfs=1 → adbd →
-    # 写 UDC 要等 device 角色就位。原先的 write 写完就返回（dwc3 的切换本身是异步的），脚本则轮询到
-    # UDC 出现才退出，顺序只会更稳。代价：切不成（口坏）时 init 在这里最多等约 6 秒。
-    # ⚠️ 保持 host 的那种开机，init.usb.configfs.rc 写 UDC 会落空（UDC 不在）⇒ 之后换插 PC、USB 端口 HAL 切回
-    #    device 时 USB adb 能不能自己回来：内核不留 pending（configfs.c:300-303 + udc/core.c:1760-1771，失败即注销驱动），
-    #    靠 adbd 每秒重开 ffs → sys.usb.ffs.ready → init.usb.configfs.rc 重写 UDC；前提是切回 device 后
-    #    sys.usb.adb.disabled 回到 0。源码结论（10-18），上机待 V11 / PWR-5 验收。
-    exec_start gaokun3_role_device
+    # 下面 configfs=1 → adbd → init.usb.configfs.rc 写 UDC。port0 这时是 device（见文件头 ②），UDC 在；
+    # 万一是 host、UDC 不在，写入会挂起等 UDC 出现（patches/kernel/ec-usb/0012），HAL 切回 device 后照常绑定。
     # configfs=1 必须在 post-fs-data 就设好：system 的 init.usb.rc:109（A17 在 :104）在 boot
     # 触发时就会把 config 设成 adb，届时 configfs 若还是 0 就走 legacy 死路。
     setprop sys.usb.configfs 1
 
-on boot
-    exec_start gaokun3_role_device
-    # ★ B1（2026-10-04）：这里原先无条件 setprop sys.usb.config adb —— 开机必开 adb，
-    #   用户在开发者选项里关掉「USB 调试」，重启又回来了。现在交给 system 的
-    #   init.usb.rc:109-110（refs/lineage-system-core/rootdir/；A17 refs/a17/system/core/rootdir/init.usb.rc:104-105，内容相同）：
-    #       on boot && property:persist.sys.usb.config=*
-    #           setprop sys.usb.config ${persist.sys.usb.config}
-    #   （`=*` 要求属性非空，init/action.cpp:199-205）。
-    #   · 开发构建：system_ext 的 ro.debuggable=1 让 refs/aosp-build/tools/post_process_props.py:33-42 往同一个
-    #     build.prop 补了 persist.sys.usb.config=adb ⇒ 照旧开机即开（实机那份 build.prop 里就有）。
-    #   · 发布构建：没人设它 ⇒ 开机不起 adbd，USB 侧只充电。
-    #   · 开发机跑发布构建：先 setprop persist.sys.usb.config adb 持久化进 /data。
-    #   当初强写，推测是因为 Stage 2 那时 system_ext 还没有 ro.debuggable=1、也就没有这个 persist 值。
+# 开机时不在这里设 sys.usb.config：无条件设成 adb 会让开发者选项里关掉的「USB 调试」重启后又打开。交给 system 的
+# init.usb.rc:109-110（refs/lineage-system-core/rootdir/；A17 refs/a17/system/core/rootdir/init.usb.rc:104-105，内容相同）：
+#     on boot && property:persist.sys.usb.config=*
+#         setprop sys.usb.config ${persist.sys.usb.config}
+# （`=*` 要求属性非空，init/action.cpp:199-205）。
+#   · 开发构建：system_ext 的 ro.debuggable=1 让 refs/aosp-build/tools/post_process_props.py:33-42 往同一个
+#     build.prop 补了 persist.sys.usb.config=adb ⇒ 照旧开机即开（实机那份 build.prop 里就有）。
+#   · 发布构建：没人设它 ⇒ 开机不起 adbd，USB 侧只充电。
+#   · 开发机跑发布构建：先 setprop persist.sys.usb.config adb 持久化进 /data。
 
 # 「USB 调试」/「无线调试」打开时，AdbService 起 adbd，把 adb 写进 sys.usb.config 的是 UsbDeviceManager
 # （它也管"USB 用途"）。框架只在 /sys/class/android_usb 存在时才建它，patches/kernel/ec-usb/0011 补上了这个类，
@@ -144,3 +131,18 @@ on property:sys.usb.ffs.ready=1 && property:sys.usb.config=midi,adb && property:
 # 切回只有 adb 时换回 adb 的产品 ID（post-fs-data 里设的初值）。
 on property:sys.usb.ffs.ready=1 && property:sys.usb.config=adb && property:sys.usb.configfs=1
     write /config/usb_gadget/g1/idProduct 0x4EE7
+
+# ── port0 是 host 时暂停 adbd 的 USB 传输 ──────────────────────────────────────
+# host 角色下没有 UDC。adbd 等不到 FUNCTIONFS_BIND 就每秒重开 functionfs、重设 sys.usb.ffs.ready=1，
+# init.usb.configfs.rc 随之每秒重写 UDC（packages/modules/adb daemon/usb.cpp）。上游为这种情况留了开关
+# sys.usb.adb.disabled（usb.cpp："When the device is acting as a USB host…"），由 system 的 init.usb.rc:23-24 从
+# vendor.sys.usb.adb.disabled 拷过去。USB 端口 HAL 按实际角色设 vendor.gaokun3.usbrole.adb_pause（usb/Usb.cpp），
+# 它只能设 vendor.gaokun3.*（vendor.sys.usb.adb.disabled 是 vendor_default_prop，只有 init / vendor_init 能设，
+# refs/lineage-sepolicy/private/domain.te:802），所以这里转一手。只停 adbd 的 USB 传输：sys.usb.config
+# （「USB 调试」开关和「USB 用途」）不受影响，TCP 与无线调试照常。
+# 用两条字面量而不是 ${…} 展开：只转发 0 和 1，别的值一律不动。
+on property:vendor.gaokun3.usbrole.adb_pause=1
+    setprop vendor.sys.usb.adb.disabled 1
+
+on property:vendor.gaokun3.usbrole.adb_pause=0
+    setprop vendor.sys.usb.adb.disabled 0

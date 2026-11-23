@@ -34,7 +34,7 @@ vendor.gaokun3.          u:object_r:vendor_gaokun3_prop:s0
 #   · 为什么要这一行：上面两条是前缀匹配，`vendor.gaokun3.` 匹配不到 `ro.vendor.gaokun3.…`；
 #     不加的话它落到 refs/lineage-sepolicy/private/property_contexts:271 的 `ro.vendor.` → vendor_default_prop。
 #     归到 vendor_gaokun3_prop（vendor_public_prop，vendor_gaokun3_props.te:14）才能沿用已有的那几条
-#     get_prop 规则被读（postinstall / 音频 HAL / usbrole 等，coredomain 读 vendor 属性也只豁免 public 类型）。
+#     get_prop 规则被读（postinstall / 音频 HAL / USB 端口 HAL 等，coredomain 读 vendor 属性也只豁免 public 类型）。
 #   · `ro.vendor.` 在允许前缀清单里（refs/lineage-sepolicy/build/soong/selinux_contexts.go:377）。
 #   ⚠️ 退路：若构建时 check_prop_prefix 或某条 neverallow 报错，删掉这一行即可 —— 属性照样会以
 #     vendor_default_prop 落进 /vendor/build.prop（vendor_init 能设它，refs/lineage-sepolicy/private/vendor_init.te:306），

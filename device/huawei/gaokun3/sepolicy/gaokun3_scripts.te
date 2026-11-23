@@ -29,10 +29,10 @@ type gaokun3_keyboard, domain;
 type gaokun3_keyboard_exec, exec_type, vendor_file_type, file_type;
 init_daemon_domain(gaokun3_keyboard)
 
-# ── gaokun3-usbrole.sh：息屏切 host / 亮屏切 device（s2idle 那半边）─────
-type gaokun3_usbrole, domain;
-type gaokun3_usbrole_exec, exec_type, vendor_file_type, file_type;
-init_daemon_domain(gaokun3_usbrole)
+# ── gaokun3-serialno.sh：开机时读整机序列号（etc/serialno.rc）─────────────
+type gaokun3_serialno, domain;
+type gaokun3_serialno_exec, exec_type, vendor_file_type, file_type;
+init_daemon_domain(gaokun3_serialno)
 
 # ── gaokun3-touch-mode.sh：触摸手感预设（game / daily）──────────────────
 # ⚠️★ 2026-09-18 补的。v0.6.2 加这个服务时【整个漏了域这一步】，于是它一直
@@ -70,8 +70,8 @@ allow gaokun3_hangdump   vendor_shell_exec:file rx_file_perms;
 allow gaokun3_hangdump   vendor_toolbox_exec:file rx_file_perms;
 allow gaokun3_keyboard   vendor_shell_exec:file rx_file_perms;
 allow gaokun3_keyboard   vendor_toolbox_exec:file rx_file_perms;
-allow gaokun3_usbrole    vendor_shell_exec:file rx_file_perms;
-allow gaokun3_usbrole    vendor_toolbox_exec:file rx_file_perms;
+allow gaokun3_serialno   vendor_shell_exec:file rx_file_perms;
+allow gaokun3_serialno   vendor_toolbox_exec:file rx_file_perms;
 allow gaokun3_touchmode  vendor_shell_exec:file rx_file_perms;
 allow gaokun3_touchmode  vendor_toolbox_exec:file rx_file_perms;
 allow gaokun3_rprockick  vendor_shell_exec:file rx_file_perms;
@@ -108,38 +108,13 @@ allow gaokun3_touchmode sysfs:file rw_file_perms;
 #   实机标签：…/2400000.remoteproc/remoteproc/remoteproc0/state = u:object_r:sysfs:s0
 allow gaokun3_rprockick sysfs:dir r_dir_perms;
 allow gaokun3_rprockick sysfs:file rw_file_perms;
-# gaokun3-usbrole.sh（host/device；follow 模式已交给 USB 端口 HAL，见 hal_usb_default.te）：
-#   写 usb_role 的 role、读 UDC state、列 xhci-hcd.*/usb* 与 driver 链接，
-#   以及 /sys/power/wake_lock|wake_unlock。实机标签：role / udc state 全是 sysfs，
-#   wake_lock 是 sysfs_wake_lock。属性：persist.vendor.gaokun3.allow_suspend 是
-#   vendor_gaokun3_prop（要显式 get_prop）；debug.tracing.screen_state 是 debug_prop
-#   （核心策略已给所有域：private/domain.te:485，不用写）。
-#   ⚠️ 此前这个域【一条 sysfs 规则都没有】—— enforcing 下连 role 都写不了。
-allow gaokun3_usbrole sysfs:dir r_dir_perms;
-allow gaokun3_usbrole sysfs:file rw_file_perms;
-allow gaokun3_usbrole sysfs_wake_lock:file rw_file_perms;
-get_prop(gaokun3_usbrole, vendor_gaokun3_prop)
-# ★ 2026-09-27 运行期 enforcing 试跑补的两条（#126）：
-#   1. /sys/class/udc 是 sysfs_udc（核心策略 genfscon），读 UDC state 要穿过它
-#      （当时是 follow 模式；现在是 host 模式的 host_attached）。
-#      试跑里被拒 3 次 ⇒ 守护进程以为"没被主机枚举"，6 秒后切 host、再判成纯充电器停在 host
-#      ⇒ **USB adb 当场掉线**，回 permissive 后也不会自己恢复（settled 要等拔线）。
-#   2. 切 device 之前要拿 wakelock（"device 模式不挂起"的不变量，#52），写 wake_lock 要
-#      CAP_BLOCK_SUSPEND —— 这一条在开机日志里从没出现过，因为守护进程开机时不切角色；
-#      试跑后重启服务、它切回 device 的那一下才露出来。拿不到锁 ⇒ device 模式下可能挂起 ⇒ 整板复位。
-r_dir_file(gaokun3_usbrole, sysfs_udc)
-allow gaokun3_usbrole self:global_capability2_class_set block_suspend;
-# ★ v1.0（PWR-4 止损）：切 host 失败时 setprop vendor.gaokun3.usbrole.broken 1、成功时清 0。
-#   属性落在 vendor_gaokun3_prop（property_contexts 的 `vendor.gaokun3.` 前缀，不用新增上下文）；
-#   gaokun3_usbrole 是 vendor 域，不撞 private/property.te:492-502（lineage-sepolicy）"coredomain 不许设 vendor 属性"那条 neverallow。
-#   set_prop 已含上面的 get_prop（public/te_macros:393-397），那行留着不动。⬜ 未上机、未编译。
-set_prop(gaokun3_usbrole, vendor_gaokun3_prop)
-# 拔线检测（gaokun3-usbrole.sh 的 vbus_present()）读 EC 的适配器在线标志
-#   /sys/class/power_supply/gaokun-ec-adapter/online。真实节点在 huawei_gaokun_ec.psy.0/power_supply 下，
-#   由 genfs_contexts:17 标成 sysfs_batteryinfo；/sys/class/power_supply 目录和其中的链接是 sysfs，与读 usb_role 时
-#   走的链接一样，原本就能穿过。
-#   对 sysfs_batteryinfo 的 neverallow 只限 coredomain（见 hal_lineage_health_default.te 的核对），本域是 vendor 域。
-r_dir_file(gaokun3_usbrole, sysfs_batteryinfo)
+# gaokun3-serialno.sh：读 /sys/class/dmi/id/{product,chassis}_serial 与 /sys/devices/soc0/serial_number，
+#   写 vendor.gaokun3.serialno。实机标签：dmi 的属性与 soc0/serial_number 都是 sysfs（后者见下面 gaokun3_wlanap 一段；
+#   lineage 的 qcom 策略把它标成 sysfs_socinfo_sensitive，那份策略本设备不用）。只读，不写 sysfs。
+#   gaokun3_serialno 是 vendor 域，不撞"coredomain 不许设 vendor 属性"那条 neverallow；ro.serialno 本身
+#   （serialno_prop）由 etc/serialno.rc 在 vendor_init 里写，这个域不碰。
+r_dir_file(gaokun3_serialno, sysfs)
+set_prop(gaokun3_serialno, vendor_gaokun3_prop)
 
 # ── audio-route.sh：2026-09-18 实机重跑一次这个服务抓到的完整清单 ────────────
 #
@@ -193,7 +168,7 @@ allow gaokun3_audioroute sysfs:file getattr;
 # 扬声器的数字音量基准（audio-route.sh 设完混音器后写 vendor.gaokun3.audioroute.spkdig，
 #   vendor_gaokun3_prop）：音频 HAL 里的 speakerfx 借余量、补偿、放回都以它为准，没有它就不碰混音器。
 #   gaokun3_audioroute 不是 coredomain，拦 coredomain 写 vendor 属性的那条 neverallow 管不到它
-#   （同 gaokun3_usbrole）。⬜ 未编译、未上机。
+#   （同 gaokun3_serialno）。⬜ 未编译、未上机。
 set_prop(gaokun3_audioroute, vendor_gaokun3_prop)
 
 # ── ⚠️ 故意【不写】的域（2026-09-18）—— ★ 2026-09-27 起写了，见下文（#126）──

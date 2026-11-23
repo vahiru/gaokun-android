@@ -4,7 +4,7 @@
  * 只看一个属性vendor.gaokun3.usbrole.reversed，由USB端口HAL（usb/Follow.h）设（vendor_gaokun3_prop，
  * sepolicy给了system_app读）：= 1表示平板在给对端供电、对端不支持PD、约6秒没有数据连接（插Mac时偶发，
  * 拔插一次就好；内核换不了供电方向，ucsi_pr_swap要PD）。条件不成立或拔线即清0，通知随之撤下。
- * 同一组的vendor.gaokun3.usbrole.broken（切到host后xhci没有起来，由gaokun3-usbrole.sh与HAL设）不再通知：
+ * 同一组的vendor.gaokun3.usbrole.broken（切到host后xhci没有起来，由HAL设）不再通知：
  * 它针对的待机后port0失灵已由vreg_l9d常开（patches/kernel/dts/0014）解决。HAL读它，避免在host没起来时
  * 误报反向供电。
  *
@@ -120,7 +120,7 @@ public class UsbPortNotifier extends Service {
             if (reversed) {
                 post(ID_REVERSED, R.string.usb_port_reversed_title, R.string.usb_port_reversed_text);
             } else {
-                mNm.cancel(ID_REVERSED);   // 重插 / 拔线后 usbrole 清 0，通知跟着消失
+                mNm.cancel(ID_REVERSED);   // 重插 / 拔线后 HAL 清 0，通知跟着消失
             }
             mShownReversed = reversed;
             Log.i(TAG, PROP_REVERSED + "=" + (reversed ? 1 : 0));

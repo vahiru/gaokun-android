@@ -58,7 +58,7 @@ vendor       /vendor       ext4  ro,barrier=1  wait,logical,first_stage_mount,sl
 #   * multiport 控制器（a4f8800.usb/a400000.usb）没写：它下面只有键盘接口（3-3），用户插不了 U 盘。
 # port1：a8f8800.usb/a800000.usb，固定 host（DT label usb_1；consumer:typec:port1）
 /devices/platform/soc@0/a8f8800.usb/a800000.usb/*  auto  auto  defaults  voldmanaged=usb:auto
-# port0：a6f8800.usb/a600000.usb，平时是 device（adb），只在 usbrole 切 host 时才有 xhci 子树，
-# device 模式下这一行什么也匹配不上。⚠️ 依赖 PWR-5/STOR-2 的 has_downstream（有下游设备就别切回
-# device）—— 否则亮屏/开机会把挂着的 U 盘硬拔掉。那条修复没进同一版时，先把这一行注释掉。
+# port0：a6f8800.usb/a600000.usb，平时是 device（adb）；USB 端口 HAL 把它切成 host 时（我方供电，对面是 U 盘这类设备）
+# 才有 xhci 子树，device 模式下这一行什么也匹配不上。⚠️ 依赖 HAL 在有下游设备时不切回 device
+# （usb/Usb.cpp 的 ReturnIdleHost 和 usb/Follow.cpp）—— 否则会把挂着的 U 盘硬拔掉。
 /devices/platform/soc@0/a6f8800.usb/a600000.usb/*  auto  auto  defaults  voldmanaged=usb:auto
