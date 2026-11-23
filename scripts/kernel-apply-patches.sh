@@ -40,6 +40,7 @@ KPATCHES=(
     # 0006 引入 CONFIG_ARM64_USER_MMAP_WINDOW_39（kernel-config-android.sh 开启并断言）；
     # 0008 与 crdroid-tree-fixes.py [36][37] 配套。
     # 0010取自ACK：system_server（uid 1000，持有CAP_SYS_NICE）须能迁移不以uid 1000运行的进程（各应用及shell等系统uid），涉及cpuset/cpu/blkio的v1分组。
+    # 0011让设备树温区的被动降频点按ACPI的被动降温公式判断趋势，系数由kernel/dts/0032给出。
     kernel/core/0001-efi-pstore-register-backend-when-efivars-ops-arrive-.patch
     kernel/core/0002-bpf-inode-label-bpffs-lazily-for-android-genfscon.patch
     kernel/core/0003-remoteproc-qcom-ratelimit-repeat-handover-error.patch
@@ -50,6 +51,7 @@ KPATCHES=(
     kernel/core/0008-kernel-report-a-set-release-to-android-apps.patch
     kernel/core/0009-misc-fastrpc-fix-context-leak-and-hang-on-signal-interrupted-invoke.patch
     kernel/core/0010-cgroup-relax-permissions-on-moving-tasks-between-cgroups.patch
+    kernel/core/0011-thermal-of-Let-passive-trips-follow-the-ACPI-passive-cooling-equation.patch
 
     # ─── 1b. kernel/iommu：arm-smmu-qcom（SC8280XP的CP非像素上下文，供iris硬件编码）───
     # 只改arm-smmu-qcom.c并新增include/linux/qcom_iommu_cp_nonpixel.h，与其它子系统正交。
@@ -316,6 +318,7 @@ KPATCHES=(
     kernel/dts/0029-arm64-dts-qcom-sc8280xp-huawei-gaokun3-Describe-the-S5K4H7-front-camera.patch
     kernel/dts/0030-arm64-dts-qcom-sc8280xp-huawei-gaokun3-set-the-panel-rotation.patch
     kernel/dts/0031-arm64-dts-qcom-sc8280xp-huawei-gaokun3-throttle-on-the-board-thermistors.patch
+    kernel/dts/0032-arm64-dts-qcom-sc8280xp-huawei-gaokun3-Use-the-Windows-passive-cooling-constants.patch
 
     # ─── 11. kernel/fingerprint：QSEECOM 与指纹传输驱动（/dev/gaokun3_fpcmd，CONFIG_GAOKUN3_FPCMD 由 kernel-config-android.sh 打开）───
     kernel/fingerprint/0001-firmware-qcom-scm-qseecom-app-load-shutdown-listener.patch
