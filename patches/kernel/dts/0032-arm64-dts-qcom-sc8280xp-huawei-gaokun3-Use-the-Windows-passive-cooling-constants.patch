@@ -1,0 +1,142 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] arm64: dts: qcom: sc8280xp-huawei-gaokun3: Use the Windows
+ passive cooling constants
+
+The Windows zones on the board thermistors evaluate the ACPI passive
+cooling equation with these constants from the DSDT:
+
+  zone  sensor      trip              _TC1  _TC2  _TSP
+  TZ31  sys_therm1  54 degC           1     2     5 s
+  TZ32  sys_therm2  58 degC           0     1     5 s
+  TZ70  sys_therm3  58 degC, GPU only 0     1     20 s
+  TZ33  sys_therm3  65 degC           0     1     5 s
+  TZ34  sys_therm4  64 degC           1     1     5 s
+
+Huawei's SSDT rewrites only the trip temperatures, not these constants.
+Give the passive trips the same values, so that the zones keep throttling
+while they stay above their trips. Give sys_therm7 the constants of the
+reference design's zone on that thermistor (1, 2, 1 s), whose trip
+temperature it already uses.
+
+Poll every 5 s instead of every second while passive cooling is active:
+that is the shortest sampling period of these zones, and more frequent
+polls would only report a stable trend in between.
+
+Under the load that left sys_therm1 at 63.7 degC (all eight cores busy
+and the GPU at full load for 20 minutes, on AC with the adapter trips),
+the cooling devices now reach the limits of the sys_therm1 map (little
+cluster 1555.2 MHz, big cluster 1632 MHz, GPU 500 MHz, i.e. the 60 %
+_MTL) after about 4 minutes and stay there. After 20 minutes sys_therm1
+reads 59.6 degC instead of 63.4 degC, sys_therm3 58.2 instead of 62.0 and
+sys_therm4 56.1 instead of 59.6. CPU throughput over the last 10 minutes
+drops from 85 % to 63 % of the initial value, GPU throughput from 77 %
+to 73 %. This load produces more heat than these limits remove, so
+sys_therm1 still rises by about 0.15 degC per minute; Windows does not go
+below _MTL either.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ .../boot/dts/qcom/sc8280xp-huawei-gaokun3.dts | 26 ++++++++++++++++---
+ 1 file changed, 22 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
+index 05839dbc3d..4ab52e9001 100644
+--- a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
++++ b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
+@@ -235,7 +235,7 @@ linux,cma {
+ 
+ 	thermal-zones {
+ 		sys-therm1-thermal {
+-			polling-delay-passive = <1000>;
++			polling-delay-passive = <5000>;
+ 
+ 			thermal-sensors = <&pmk8280_adc_tm 0>;
+ 
+@@ -244,6 +244,9 @@ sys_therm1_alert0: trip-point0 {
+ 					temperature = <54000>;
+ 					hysteresis = <2000>;
+ 					type = "passive";
++					thermal-constant-1 = <1>;
++					thermal-constant-2 = <2>;
++					sampling-period-ms = <5000>;
+ 				};
+ 
+ 				sys-therm1-crit {
+@@ -270,7 +273,7 @@ map0 {
+ 		};
+ 
+ 		sys-therm2-thermal {
+-			polling-delay-passive = <1000>;
++			polling-delay-passive = <5000>;
+ 
+ 			thermal-sensors = <&pmk8280_adc_tm 1>;
+ 
+@@ -279,6 +282,9 @@ sys_therm2_alert0: trip-point0 {
+ 					temperature = <58000>;
+ 					hysteresis = <2000>;
+ 					type = "passive";
++					thermal-constant-1 = <0>;
++					thermal-constant-2 = <1>;
++					sampling-period-ms = <5000>;
+ 				};
+ 
+ 				sys-therm2-crit {
+@@ -305,7 +311,7 @@ map0 {
+ 		};
+ 
+ 		sys-therm3-thermal {
+-			polling-delay-passive = <1000>;
++			polling-delay-passive = <5000>;
+ 
+ 			thermal-sensors = <&pmk8280_adc_tm 2>;
+ 
+@@ -314,12 +320,18 @@ sys_therm3_alert0: trip-point0 {
+ 					temperature = <58000>;
+ 					hysteresis = <2000>;
+ 					type = "passive";
++					thermal-constant-1 = <0>;
++					thermal-constant-2 = <1>;
++					sampling-period-ms = <20000>;
+ 				};
+ 
+ 				sys_therm3_alert1: trip-point1 {
+ 					temperature = <65000>;
+ 					hysteresis = <2000>;
+ 					type = "passive";
++					thermal-constant-1 = <0>;
++					thermal-constant-2 = <1>;
++					sampling-period-ms = <5000>;
+ 				};
+ 
+ 				sys-therm3-crit {
+@@ -351,7 +363,7 @@ map1 {
+ 		};
+ 
+ 		sys-therm4-thermal {
+-			polling-delay-passive = <1000>;
++			polling-delay-passive = <5000>;
+ 
+ 			thermal-sensors = <&pmk8280_adc_tm 3>;
+ 
+@@ -360,6 +372,9 @@ sys_therm4_alert0: trip-point0 {
+ 					temperature = <64000>;
+ 					hysteresis = <2000>;
+ 					type = "passive";
++					thermal-constant-1 = <1>;
++					thermal-constant-2 = <1>;
++					sampling-period-ms = <5000>;
+ 				};
+ 
+ 				sys-therm4-crit {
+@@ -395,6 +410,9 @@ sys_therm7_alert0: trip-point0 {
+ 					temperature = <95000>;
+ 					hysteresis = <2000>;
+ 					type = "passive";
++					thermal-constant-1 = <1>;
++					thermal-constant-2 = <2>;
++					sampling-period-ms = <1000>;
+ 				};
+ 			};
+ 

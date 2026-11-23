@@ -1,0 +1,451 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] thermal: of: Let passive trips follow the ACPI passive
+ cooling equation
+
+An ACPI thermal zone describes passive cooling with _TC1, _TC2 and _TSP.
+Every _TSP the OS evaluates
+
+  dP = _TC1 * (Tn - Tn-1) + _TC2 * (Tn - Tt)
+
+and lowers performance while dP is positive, so the mitigation keeps
+deepening as long as the zone stays above the trip temperature Tt. The
+ACPI thermal driver reports the sign of dP as the trend of the trip, and
+step_wise turns that into one cooling state per evaluation.
+
+Device tree zones only compare the last two temperature readings.
+step_wise then stops deepening the mitigation as soon as the temperature
+levels off, wherever that is. Zones modelled on firmware tables that
+assume the ACPI equation settle well above their trips: on the Huawei
+MateBook E Go, under sustained CPU and GPU load, a board thermistor with a
+54 degC passive trip reached 63.7 degC after 20 minutes and was still
+rising, while the CPU cooling devices moved between states 1 and 5 (of 20
+and 17).
+
+Add three optional properties to passive trips, thermal-constant-1,
+thermal-constant-2 and sampling-period-ms, with the meaning of _TC1, _TC2
+and _TSP. For a zone with such a trip, thermal_of provides a .get_trend()
+that evaluates the equation for that trip once per sampling period, with
+the temperature of its previous evaluation as Tn-1, and reports the sign.
+Between evaluations it reports a stable trend, so the governor keeps the
+current state.
+
+- Below the trip threshold (the trip temperature minus the hysteresis
+  once the trip has been crossed) the trend is always dropping. step_wise
+  ends the mitigation only on a dropping trend there, and the core stops
+  passive polling after that update, so any other answer would leave the
+  cooling devices throttled.
+- The first evaluation after the zone reaches the trip reports a raising
+  trend. dP is not negative there, but at exactly Tt it is 0 and would
+  leave the cooling devices at state 0, from which a later dropping trend
+  makes step_wise jump to the upper limit of the cooling map.
+- A previous sample older than two sampling periods, e.g. across suspend,
+  is left out of the _TC1 term.
+
+Trips without these properties, and zones whose sensor driver provides
+its own .get_trend(), keep the current behaviour. The per-trip state is
+kept by thermal_of, indexed by zone id, rather than in thermal_trip.priv:
+that holds the trip node for the cooling map lookup, and
+qcom-spmi-temp-alarm reuses it once the zone is registered.
+
+The constants are limited to 65535, and thermal_of warns if passive
+polling is missing or slower than the shortest sampling period, since
+every evaluation needs a zone update.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ .../bindings/thermal/thermal-zones.yaml       |  44 ++++
+ drivers/thermal/thermal_of.c                  | 228 +++++++++++++++++-
+ 2 files changed, 268 insertions(+), 4 deletions(-)
+
+diff --git a/Documentation/devicetree/bindings/thermal/thermal-zones.yaml b/Documentation/devicetree/bindings/thermal/thermal-zones.yaml
+index 999ad40a20..cadd9281aa 100644
+--- a/Documentation/devicetree/bindings/thermal/thermal-zones.yaml
++++ b/Documentation/devicetree/bindings/thermal/thermal-zones.yaml
+@@ -179,6 +179,50 @@ patternProperties:
+                 The active trip type can be used to control other HW to
+                 help in cooling e.g. fans can be sped up or slowed down
+ 
++            thermal-constant-1:
++              $ref: /schemas/types.yaml#/definitions/uint32
++              maximum: 65535
++              description:
++                Weight of the temperature change since the previous evaluation
++                in the passive cooling equation of an ACPI thermal zone (_TC1).
++                Every sampling period, the equation
++                thermal-constant-1 * (Tn - Tn-1) + thermal-constant-2 * (Tn - Tt),
++                with Tt the trip temperature, decides whether the cooling
++                devices of this passive trip go one state deeper (positive) or
++                back (negative), so the mitigation keeps deepening while the
++                zone stays above the trip temperature. Requires
++                thermal-constant-2 and sampling-period-ms.
++
++            thermal-constant-2:
++              $ref: /schemas/types.yaml#/definitions/uint32
++              maximum: 65535
++              description:
++                Weight of the distance from the trip temperature in the passive
++                cooling equation (_TC2), see thermal-constant-1.
++
++            sampling-period-ms:
++              minimum: 1
++              description:
++                Time between two evaluations of the passive cooling equation
++                (_TSP), see thermal-constant-1. The zone's
++                polling-delay-passive should be this period or divide it.
++
++          dependentRequired:
++            thermal-constant-1: [ thermal-constant-2, sampling-period-ms ]
++            thermal-constant-2: [ thermal-constant-1, sampling-period-ms ]
++            sampling-period-ms: [ thermal-constant-1, thermal-constant-2 ]
++
++          if:
++            not:
++              properties:
++                type:
++                  const: passive
++          then:
++            properties:
++              thermal-constant-1: false
++              thermal-constant-2: false
++              sampling-period-ms: false
++
+           required:
+             - temperature
+             - hysteresis
+diff --git a/drivers/thermal/thermal_of.c b/drivers/thermal/thermal_of.c
+index 100fd8a0c8..20df3c2817 100644
+--- a/drivers/thermal/thermal_of.c
++++ b/drivers/thermal/thermal_of.c
+@@ -10,14 +10,50 @@
+ 
+ #include <linux/err.h>
+ #include <linux/export.h>
++#include <linux/jiffies.h>
++#include <linux/minmax.h>
+ #include <linux/of.h>
+ #include <linux/slab.h>
+ #include <linux/thermal.h>
++#include <linux/timekeeping.h>
+ #include <linux/types.h>
+ #include <linux/string.h>
++#include <linux/xarray.h>
+ 
+ #include "thermal_core.h"
+ 
++/* Upper bound of thermal-constant-1/-2, keeps the equation well within s64. */
++#define THERMAL_OF_TC_MAX	U16_MAX
++
++/**
++ * struct thermal_of_trend - passive cooling equation of one trip
++ * @enabled: the trip has valid thermal-constant-1, thermal-constant-2 and
++ *	     sampling-period-ms, see thermal_of_get_trend()
++ * @tc1: weight of the temperature change since the previous evaluation (_TC1)
++ * @tc2: weight of the distance from the trip temperature (_TC2)
++ * @period_ns: time between evaluations (_TSP)
++ * @last_ns: boot time of the previous evaluation, 0 if there is none since the
++ *	     zone last went below the trip threshold
++ * @last_temp: zone temperature at the previous evaluation
++ */
++struct thermal_of_trend {
++	bool enabled;
++	u32 tc1;
++	u32 tc2;
++	u64 period_ns;
++	u64 last_ns;
++	int last_temp;
++};
++
++/*
++ * Arrays of struct thermal_of_trend, one entry per trip in the order of the
++ * zone's trips[], indexed by zone id. Only zones with at least one such trip
++ * have an entry. The data does not hang off thermal_trip.priv: that holds the
++ * trip node for the cooling map lookup, and some sensor drivers reuse it once
++ * the zone is registered.
++ */
++static DEFINE_XARRAY(thermal_of_trends);
++
+ /***   functions parsing device tree nodes   ***/
+ 
+ /*
+@@ -60,8 +96,38 @@ static int thermal_of_get_trip_type(struct device_node *np,
+ 	return -ENODEV;
+ }
+ 
++static void thermal_of_trip_trend_init(struct device_node *np,
++				       const struct thermal_trip *trip,
++				       struct thermal_of_trend *tr)
++{
++	u32 period_ms = 0;
++	int found = 0;
++
++	found += !of_property_read_u32(np, "thermal-constant-1", &tr->tc1);
++	found += !of_property_read_u32(np, "thermal-constant-2", &tr->tc2);
++	found += !of_property_read_u32(np, "sampling-period-ms", &period_ms);
++	if (!found)
++		return;
++
++	if (trip->type != THERMAL_TRIP_PASSIVE) {
++		pr_warn("%pOF: passive cooling constants on a %s trip, ignored\n",
++			np, trip_types[trip->type]);
++		return;
++	}
++
++	if (found != 3 || !period_ms || (!tr->tc1 && !tr->tc2) ||
++	    tr->tc1 > THERMAL_OF_TC_MAX || tr->tc2 > THERMAL_OF_TC_MAX) {
++		pr_warn("%pOF: invalid passive cooling constants, ignored\n", np);
++		return;
++	}
++
++	tr->period_ns = (u64)period_ms * NSEC_PER_MSEC;
++	tr->enabled = true;
++}
++
+ static int thermal_of_populate_trip(struct device_node *np,
+-				    struct thermal_trip *trip)
++				    struct thermal_trip *trip,
++				    struct thermal_of_trend *tr)
+ {
+ 	int prop;
+ 	int ret;
+@@ -90,14 +156,19 @@ static int thermal_of_populate_trip(struct device_node *np,
+ 
+ 	trip->priv = np;
+ 
++	if (tr)
++		thermal_of_trip_trend_init(np, trip, tr);
++
+ 	return 0;
+ }
+ 
+-static struct thermal_trip *thermal_of_trips_init(struct device_node *np, int *ntrips)
++static struct thermal_trip *thermal_of_trips_init(struct device_node *np, int *ntrips,
++						  struct thermal_of_trend **trends)
+ {
+ 	int ret, count;
+ 
+ 	*ntrips = 0;
++	*trends = NULL;
+ 
+ 	struct device_node *trips __free(device_node) = of_get_child_by_name(np, "trips");
+ 	if (!trips)
+@@ -111,18 +182,130 @@ static struct thermal_trip *thermal_of_trips_init(struct device_node *np, int *n
+ 	if (!tt)
+ 		return ERR_PTR(-ENOMEM);
+ 
++	/* Without memory for this, the zone keeps the core's trend. */
++	struct thermal_of_trend *tr __free(kfree) = kzalloc_objs(*tr, count);
++
+ 	count = 0;
+ 	for_each_child_of_node_scoped(trips, trip) {
+-		ret = thermal_of_populate_trip(trip, &tt[count++]);
++		ret = thermal_of_populate_trip(trip, &tt[count], tr ? &tr[count] : NULL);
+ 		if (ret)
+ 			return ERR_PTR(ret);
++		count++;
+ 	}
+ 
+ 	*ntrips = count;
++	*trends = no_free_ptr(tr);
+ 
+ 	return no_free_ptr(tt);
+ }
+ 
++/*
++ * An ACPI thermal zone describes passive cooling with _TC1, _TC2 and _TSP.
++ * Every _TSP the OS evaluates
++ *
++ *   dP = _TC1 * (Tn - Tn-1) + _TC2 * (Tn - Tt)
++ *
++ * and lowers performance while dP is positive, so the mitigation keeps
++ * deepening as long as the zone stays above the trip temperature Tt. The
++ * comparison of the last two readings that is used otherwise stops deepening
++ * as soon as the temperature levels off, wherever that is.
++ *
++ * Like the ACPI thermal driver, report the sign of dP as the trend of the trip.
++ * step_wise turns that into one cooling state per evaluation.
++ */
++static int thermal_of_get_trend(struct thermal_zone_device *tz,
++				const struct thermal_trip *trip,
++				enum thermal_trend *trend)
++{
++	const struct thermal_trip_desc *td = trip_to_trip_desc(trip);
++	struct thermal_of_trend *trends, *tr;
++	int temp = tz->temperature;
++	u64 now, elapsed, slack;
++	s64 dp;
++
++	trends = xa_load(&thermal_of_trends, tz->id);
++	if (!trends)
++		return -EINVAL;
++
++	tr = &trends[thermal_zone_trip_id(tz, trip)];
++	if (!tr->enabled)
++		return -EINVAL;
++
++	/*
++	 * Below the threshold step_wise ends the mitigation only on a dropping
++	 * trend, and the core stops passive polling after this update. Any other
++	 * answer would leave the cooling devices throttled.
++	 */
++	if (temp < td->threshold) {
++		tr->last_ns = 0;
++		*trend = THERMAL_TREND_DROPPING;
++		return 0;
++	}
++
++	now = ktime_get_boottime_ns();
++	elapsed = now - tr->last_ns;
++
++	/*
++	 * The zone has just reached the trip temperature: start the mitigation.
++	 * dP is not negative here, but at exactly Tt it is 0, which would leave
++	 * the cooling devices at state 0. A dropping trend in that state makes
++	 * step_wise jump to the upper limit of the cooling map.
++	 */
++	if (!tr->last_ns) {
++		tr->last_ns = now;
++		tr->last_temp = temp;
++		*trend = THERMAL_TREND_RAISING;
++		return 0;
++	}
++
++	/*
++	 * Keep the current state until the next evaluation is due. The core
++	 * rounds polling delays longer than a second to whole seconds, which
++	 * can bring a poll up to a quarter second early. Short periods still
++	 * need at least half a period between evaluations.
++	 */
++	slack = min_t(u64, max_t(u64, tr->period_ns / 8, jiffies_to_nsecs(HZ / 4)),
++		      tr->period_ns / 2);
++	if (elapsed + slack < tr->period_ns) {
++		*trend = THERMAL_TREND_STABLE;
++		return 0;
++	}
++
++	dp = (s64)tr->tc2 * ((s64)temp - trip->temperature);
++	/* Leave out the _TC1 term if the previous sample is stale, e.g. after suspend. */
++	if (elapsed <= 2 * tr->period_ns)
++		dp += (s64)tr->tc1 * ((s64)temp - tr->last_temp);
++
++	tr->last_ns = now;
++	tr->last_temp = temp;
++
++	if (dp > 0)
++		*trend = THERMAL_TREND_RAISING;
++	else if (dp < 0)
++		*trend = THERMAL_TREND_DROPPING;
++	else
++		*trend = THERMAL_TREND_STABLE;
++
++	return 0;
++}
++
++/*
++ * Decide whether the zone uses the passive cooling equation. Returns the
++ * shortest sampling period in ms, or 0 if no trip has valid constants.
++ */
++static u32 thermal_of_trend_period(const struct thermal_of_trend *trends, int ntrips)
++{
++	u64 min_ns = 0;
++	int i;
++
++	for (i = 0; i < ntrips; i++) {
++		if (trends[i].enabled && (!min_ns || trends[i].period_ns < min_ns))
++			min_ns = trends[i].period_ns;
++	}
++
++	return div_u64(min_ns, NSEC_PER_MSEC);
++}
++
+ static struct device_node *of_thermal_zone_find(struct device_node *sensor, int id)
+ {
+ 	struct of_phandle_args sensor_specs;
+@@ -358,8 +541,12 @@ static bool thermal_of_should_bind(struct thermal_zone_device *tz,
+  */
+ static void thermal_of_zone_unregister(struct thermal_zone_device *tz)
+ {
++	/* A zone update that already holds the data finishes before unregistering. */
++	struct thermal_of_trend *trends = xa_erase(&thermal_of_trends, tz->id);
++
+ 	thermal_zone_device_disable(tz);
+ 	thermal_zone_device_unregister(tz);
++	kfree(trends);
+ }
+ 
+ /**
+@@ -388,10 +575,12 @@ static struct thermal_zone_device *thermal_of_zone_register(struct device_node *
+ 	struct thermal_zone_device_ops of_ops = *ops;
+ 	struct thermal_zone_device *tz;
+ 	struct thermal_trip *trips;
++	struct thermal_of_trend *trends;
+ 	struct thermal_zone_params tzp = {};
+ 	struct device_node *np;
+ 	const char *action;
+ 	int delay, pdelay;
++	u32 trend_period;
+ 	int ntrips;
+ 	int ret;
+ 
+@@ -402,7 +591,7 @@ static struct thermal_zone_device *thermal_of_zone_register(struct device_node *
+ 		return ERR_CAST(np);
+ 	}
+ 
+-	trips = thermal_of_trips_init(np, &ntrips);
++	trips = thermal_of_trips_init(np, &ntrips, &trends);
+ 	if (IS_ERR(trips)) {
+ 		pr_err("Failed to parse trip points for %pOFP id=%d\n", sensor, id);
+ 		ret = PTR_ERR(trips);
+@@ -422,6 +611,23 @@ static struct thermal_zone_device *thermal_of_zone_register(struct device_node *
+ 
+ 	of_ops.should_bind = thermal_of_should_bind;
+ 
++	trend_period = trends ? thermal_of_trend_period(trends, ntrips) : 0;
++	if (trend_period && of_ops.get_trend) {
++		pr_warn("%pOFP: the sensor provides the trend, passive cooling constants ignored\n",
++			np);
++		trend_period = 0;
++	} else if (trend_period) {
++		of_ops.get_trend = thermal_of_get_trend;
++		/* Every evaluation needs a zone update while the trip is reached. */
++		if (!(pdelay ?: delay) || (pdelay ?: delay) > trend_period)
++			pr_warn("%pOFP: passive polling should not be slower than the sampling period of %u ms\n",
++				np, trend_period);
++	}
++	if (!trend_period) {
++		kfree(trends);
++		trends = NULL;
++	}
++
+ 	ret = of_property_read_string(np, "critical-action", &action);
+ 	if (!ret && !of_ops.critical) {
+ 		if (!strcasecmp(action, "reboot"))
+@@ -439,6 +645,19 @@ static struct thermal_zone_device *thermal_of_zone_register(struct device_node *
+ 		goto out_kfree_trips;
+ 	}
+ 
++	/*
++	 * The zone is still disabled, so .get_trend() normally runs only after
++	 * this. Without the data it reports an error and the core falls back to
++	 * its own trend.
++	 */
++	if (trends) {
++		ret = xa_err(xa_store(&thermal_of_trends, tz->id, trends, GFP_KERNEL));
++		if (ret) {
++			pr_warn("%pOFP: passive cooling constants not applied: %d\n", np, ret);
++			kfree(trends);
++		}
++	}
++
+ 	of_node_put(np);
+ 	kfree(trips);
+ 
+@@ -454,6 +673,7 @@ static struct thermal_zone_device *thermal_of_zone_register(struct device_node *
+ 
+ out_kfree_trips:
+ 	kfree(trips);
++	kfree(trends);
+ out_of_node_put:
+ 	of_node_put(np);
+ 
