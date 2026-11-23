@@ -1461,9 +1461,10 @@ def main():
     step(" [46] v4l2_codec2解码器输入缓冲区按码流大小分配（需kernel/iris/0019）: ", apply_patch_file(
         tree, "external/v4l2_codec2",
         "android/v4l2-codec2/0007-v4l2-codec2-size-decoder-input-buffers-for-the-stream-again.patch"))
-    # 指纹HAL（device/huawei/gaokun3/fingerprint）报告CONVENIENCE。SystemUI对Class 1/2指纹只在人脸也锁定时
-    # 才禁止指纹解锁，没有人脸识别时，指纹自己临时锁定期间仍会不断请求认证，框架逐次拒绝。补丁让它在
-    # 锁定期间改为只检测接触（与Class 3相同）；锁定期满时HAL发出onLockoutCleared，SystemUI随之恢复认证。
+    # SystemUI对Class 1/2指纹只在人脸也锁定时才禁止指纹解锁，没有人脸识别时，指纹自己临时锁定期间仍会不断
+    # 请求认证，框架逐次拒绝。补丁让它在锁定期间改为只检测接触（与Class 3相同）；锁定期满时HAL发出
+    # onLockoutCleared，SystemUI随之恢复认证。指纹HAL（device/huawei/gaokun3/fingerprint）报告STRONG后，
+    # SystemUI本身已按Class 3处理指纹锁定，这个补丁在本机上不再改变行为。
     step(" [44] SystemUI在指纹临时锁定期间不再请求指纹认证: ", apply_patch_file(
         tree, "frameworks/base",
         "android/frameworks-base/0001-systemui-respect-fingerprint-lockout.patch"))

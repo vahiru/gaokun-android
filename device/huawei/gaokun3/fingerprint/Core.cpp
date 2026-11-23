@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+// CKDF与keymaster一样用CMAC_*。BoringSSL照常提供；OpenSSL 3（主机上的离线测试）将其标为
+// 弃用，这里不让弃用警告在-Werror下中断编译。
+#define OPENSSL_SUPPRESS_DEPRECATED
 #include "Core.h"
 #ifdef __ANDROID__
 #include <android-base/logging.h>
@@ -7,14 +10,18 @@
 #include <cerrno>
 #include <cmath>
 #include <cstring>
+#include <ctime>
 #include <fcntl.h>
 #include <future>
 #include <memory>
+#include <openssl/cmac.h>
 #include <openssl/evp.h>
+#include <openssl/hmac.h>
 #include <openssl/rand.h>
 #include <openssl/sha.h>
 #include <set>
 #include <sys/stat.h>
+#include <tuple>
 #include <unistd.h>
 
 namespace gaokun3 {
@@ -61,6 +68,94 @@ int64_t randomId() {
         n &= INT64_MAX;
     } while (!n);
     return n;
+}
+
+bool ckdf(const uint8_t* key, size_t keyLen, const std::string& label,
+          const std::vector<uint8_t>& context, uint8_t* out, size_t outLen) {
+    const EVP_CIPHER* cipher = keyLen == 16 ? EVP_aes_128_cbc() : keyLen == 32 ? EVP_aes_256_cbc() : nullptr;
+    if (!cipher || !key || !out) return false;
+    // 第i块对i || label || 0x00 || context || L做CMAC；i和L（输出的位数）为32位网络字节序。
+    std::vector<uint8_t> message(4);
+    message.insert(message.end(), label.begin(), label.end());
+    message.push_back(0);
+    message.insert(message.end(), context.begin(), context.end());
+    const uint32_t bits = uint32_t(outLen * 8);
+    for (int shift = 24; shift >= 0; shift -= 8) message.push_back(uint8_t(bits >> shift));
+    std::unique_ptr<CMAC_CTX, decltype(&CMAC_CTX_free)> ctx(CMAC_CTX_new(), CMAC_CTX_free);
+    if (!ctx) return false;
+    for (size_t pos = 0, i = 1; pos < outLen; pos += 16, ++i) {
+        for (int b = 0; b < 4; ++b) message[b] = uint8_t(i >> (24 - 8 * b));
+        uint8_t block[16];
+        size_t n = 0;
+        if (CMAC_Init(ctx.get(), key, keyLen, cipher, nullptr) != 1 ||
+            CMAC_Update(ctx.get(), message.data(), message.size()) != 1 ||
+            CMAC_Final(ctx.get(), block, &n) != 1 || n != sizeof(block)) return false;
+        memcpy(out + pos, block, std::min(sizeof(block), outLen - pos));
+    }
+    return true;
+}
+
+bool deriveAuthKey(std::vector<SharedSecretParams> params, AuthKey* key) {
+    if (params.empty() || !key) return false;
+    for (const auto& p : params)
+        if ((!p.seed.empty() && p.seed.size() != 32) || p.nonce.size() != 32) return false;
+    std::sort(params.begin(), params.end(), [](const SharedSecretParams& a, const SharedSecretParams& b) {
+        return std::tie(a.seed, a.nonce) < std::tie(b.seed, b.nonce);
+    });
+    std::vector<uint8_t> context;
+    for (const auto& p : params) {
+        context.insert(context.end(), p.seed.begin(), p.seed.end());
+        context.insert(context.end(), p.nonce.begin(), p.nonce.end());
+    }
+    static const uint8_t kAgreementKey[32] = {};
+    return ckdf(kAgreementKey, sizeof(kAgreementKey), "KeymasterSharedMac", context,
+                key->data(), key->size());
+}
+
+std::vector<uint8_t> authTokenMacInput(const AuthToken& token) {
+    std::vector<uint8_t> b(1, 0);
+    auto native = [&b](int64_t v) {
+        uint8_t bytes[sizeof(v)];
+        memcpy(bytes, &v, sizeof(v));
+        b.insert(b.end(), bytes, bytes + sizeof(bytes));
+    };
+    auto network = [&b](uint64_t v, int bytes) {
+        for (int i = bytes - 1; i >= 0; --i) b.push_back(uint8_t(v >> (8 * i)));
+    };
+    native(token.challenge);
+    native(token.userId);
+    native(token.authenticatorId);
+    network(uint32_t(token.authenticatorType), 4);
+    network(uint64_t(token.timestampMs), 8);
+    return b;
+}
+static bool authTokenMac(const AuthKey& key, const AuthToken& token, uint8_t out[32]) {
+    const auto input = authTokenMacInput(token);
+    unsigned n = 0;
+    return HMAC(EVP_sha256(), key.data(), key.size(), input.data(), input.size(), out, &n) && n == 32;
+}
+bool signAuthToken(const AuthKey& key, AuthToken* token) {
+    uint8_t mac[32];
+    if (!token || !authTokenMac(key, *token, mac)) return false;
+    token->mac.assign(mac, mac + sizeof(mac));
+    return true;
+}
+bool verifyAuthToken(const AuthKey& key, const AuthToken& token) {
+    uint8_t mac[32];
+    if (token.mac.size() != sizeof(mac) || !authTokenMac(key, token, mac)) return false;
+    uint8_t diff = 0;
+    for (size_t i = 0; i < sizeof(mac); ++i) diff |= mac[i] ^ token.mac[i];
+    return diff == 0;
+}
+int64_t bootTimeMs() {
+#ifdef CLOCK_BOOTTIME
+    const clockid_t clock = CLOCK_BOOTTIME;
+#else
+    const clockid_t clock = CLOCK_MONOTONIC;  // macOS上的离线测试
+#endif
+    timespec ts{};
+    if (clock_gettime(clock, &ts)) return 0;
+    return int64_t(ts.tv_sec) * 1000 + ts.tv_nsec / 1000000;
 }
 
 static_assert(kFocalTech.width <= GAOKUN3_MAX_WIDTH && kFocalTech.height <= GAOKUN3_MAX_HEIGHT &&
@@ -366,12 +461,65 @@ static bool sameFrames(const Frames& a, const Frames& b) {
     return true;
 }
 
+// Writes b to path through path.tmp: fsync, rename, then fsync of the directory.
+static bool writeAtomically(const std::string& path, const std::vector<uint8_t>& b) {
+    std::string dir = path.substr(0,path.find_last_of('/'));
+    int dfd = open(dir.c_str(),O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    if (dfd < 0) return false;
+    // A stale temp file from power loss is disposable; never follow a symlink.
+    std::string tmp = path + ".tmp";
+    unlink(tmp.c_str());
+    int fd = open(tmp.c_str(),O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,0600);
+    bool ok = fd >= 0;
+    size_t pos = 0;
+    while (ok && pos < b.size()) {
+        ssize_t n = write(fd,b.data()+pos,b.size()-pos);
+        if (n < 0 && errno == EINTR) continue;
+        if (n <= 0) { ok = false; break; }
+        pos += n;
+    }
+    if (ok) ok = fsync(fd) == 0;
+    if (fd >= 0 && close(fd)) ok = false;
+    if (ok) ok = rename(tmp.c_str(),path.c_str()) == 0;
+    if (ok) ok = fsync(dfd) == 0;
+    close(dfd);
+    if (!ok) unlink(tmp.c_str());
+    return ok;
+}
+
+// 用户的SID不放进模板库，单独存一个文件："GK3S" 1 0 0 0 | SID u64 | SHA256。模板库格式
+// 因此不变，换回只认v2–v4的旧版HAL时模板库照常可用，旧版只是不读这个文件。文件不存在、
+// 权限不对或校验不符时按0（尚未得知）处理，不影响模板库的载入：SID只决定绑定SID的密钥能否
+// 用指纹解锁，用户下次输入PIN时就会重新写入。
+static int64_t loadSecureUserId(const std::string& path) {
+    constexpr size_t kSize = 16 + SHA256_DIGEST_LENGTH;
+    int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+    if (fd < 0) return 0;
+    struct stat st{};
+    std::vector<uint8_t> b(kSize);
+    bool ok = fstat(fd, &st) == 0 && S_ISREG(st.st_mode) && st.st_uid == geteuid() &&
+              (st.st_mode & 0777) == 0600 && st.st_size == int64_t(kSize);
+    size_t pos = 0;
+    while (ok && pos < b.size()) {
+        ssize_t n = read(fd, b.data()+pos, b.size()-pos);
+        if (n < 0 && errno == EINTR) continue;
+        if (n <= 0) { ok = false; break; }
+        pos += n;
+    }
+    close(fd);
+    uint8_t digest[SHA256_DIGEST_LENGTH];
+    if (ok) SHA256(b.data(), 16, digest);
+    if (!ok || memcmp(b.data(), "GK3S\1\0\0\0", 8) || memcmp(digest, b.data()+16, sizeof(digest))) return 0;
+    return int64_t(get(b, 8, 8));
+}
+
 bool Store::load() {
     // The session reloads before every capture; a finger whose frames are
     // unchanged keeps its feature cache.
     std::vector<Enrollment> previous;
     previous.swap(enrollments);
     authenticatorId = 0; failures = 0;
+    secureUserId = savedSecureUserId_ = loadSecureUserId(sidPath_);
     int fd = open(path_.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
     if (fd < 0) return errno == ENOENT;
     struct stat st{};
@@ -460,27 +608,18 @@ bool Store::save() {
     }
     uint8_t digest[SHA256_DIGEST_LENGTH];
     SHA256(b.data(),b.size(),digest); b.insert(b.end(),digest,digest+sizeof(digest));
-    std::string dir = path_.substr(0,path_.find_last_of('/'));
-    int dfd = open(dir.c_str(),O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
-    if (dfd < 0) return false;
-    // A stale temp file from power loss is disposable; never follow a symlink.
-    std::string tmp = path_ + ".tmp";
-    unlink(tmp.c_str());
-    int fd = open(tmp.c_str(),O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC,0600);
-    bool ok = fd >= 0;
-    size_t pos = 0;
-    while (ok && pos < b.size()) {
-        ssize_t n = write(fd,b.data()+pos,b.size()-pos);
-        if (n < 0 && errno == EINTR) continue;
-        if (n <= 0) { ok = false; break; }
-        pos += n;
+    if (!writeAtomically(path_,b)) return false;
+    // 模板库此时已经写入。SID文件写入失败不算保存失败：调用方会把已经生效的录入或解除锁定当作
+    // 失败上报。保留旧的savedSecureUserId_，下次保存时重试。
+    if (secureUserId != savedSecureUserId_) {
+        std::vector<uint8_t> sid{'G','K','3','S',1,0,0,0};
+        put(sid,uint64_t(secureUserId),8);
+        SHA256(sid.data(),sid.size(),digest); sid.insert(sid.end(),digest,digest+sizeof(digest));
+        if (writeAtomically(sidPath_,sid)) savedSecureUserId_ = secureUserId;
+#ifdef __ANDROID__
+        else LOG(ERROR) << "Fingerprint secure user ID not saved; retrying on the next save";
+#endif
     }
-    if (ok) ok = fsync(fd) == 0;
-    if (fd >= 0 && close(fd)) ok = false;
-    if (ok) ok = rename(tmp.c_str(),path_.c_str()) == 0;
-    if (ok) ok = fsync(dfd) == 0;
-    close(dfd);
-    if (!ok) unlink(tmp.c_str());
-    return ok;
+    return true;
 }
 }  // namespace gaokun3

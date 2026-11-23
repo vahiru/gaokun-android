@@ -17,3 +17,12 @@ allow hal_fingerprint_default fingerprint_vendor_data_file:dir create_dir_perms;
 # context. SELinux checks firmware_load against the HAL SID, not kernel SID.
 # The fixed driver ABI accepts only its configured TA and Goodix template paths.
 allow hal_fingerprint_default gaokun3_firmware_file:system firmware_load;
+# 签发和校验认证令牌用的密钥，由本机ISharedSecret各参与方的协商参数推导
+# （fingerprint/README.md“令牌”一节）：查找KeyMint的ISharedSecret/default
+# （hal_sharedsecret_service）和Gatekeeper的ISharedSecret/gatekeeper（service_contexts
+# 标为hal_gatekeeper_service），调用它们的getSharedSecretParameters。servicemanager列出
+# VINTF实例时会略去调用方无权查找的实例，所以两者都须可查找，否则推导出的密钥不对。
+# hal_attribute_service只允许对应HAL的客户端查找这两个服务，所以按它的要求声明为客户端，
+# 与hal_identity_default访问KeyMint的写法相同。HAL只调用getSharedSecretParameters。
+hal_client_domain(hal_fingerprint_default, hal_keymint)
+hal_client_domain(hal_fingerprint_default, hal_gatekeeper)
