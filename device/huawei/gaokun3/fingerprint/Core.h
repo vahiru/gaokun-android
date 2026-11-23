@@ -159,6 +159,37 @@ class Challenges {
     std::map<int32_t, std::map<int64_t, int64_t>> issued_;
 };
 
+// 硬件认证令牌（HardwareAuthToken，HAT）。签名密钥与KeyMint、Gatekeeper的相同：本机这两者
+// 都是软件实现（device.mk），keystore2启动时主持共享密钥协商，各方用公开的全零协商密钥和全体
+// 参与方的参数做CKDF，得到同一把HMAC-SHA256密钥。HAL读取各方的参数，用同样的算法推导出这把
+// 密钥，自己不参与协商（理由见README“令牌”一节）。
+using AuthKey = std::array<uint8_t, 32>;
+// ISharedSecret::getSharedSecretParameters的结果。seed为空或32字节，nonce为32字节。
+struct SharedSecretParams {
+    std::vector<uint8_t> seed, nonce;
+};
+// keymaster::ckdf：NIST SP 800-108计数器模式，PRF为AES-CMAC，key为16或32字节。
+bool ckdf(const uint8_t* key, size_t keyLen, const std::string& label,
+          const std::vector<uint8_t>& context, uint8_t* out, size_t outLen);
+// 与keystore2相同：参数按(seed, nonce)字典序排序后逐个拼接seed和nonce作为上下文，
+// 以全零协商密钥和标签"KeymasterSharedMac"做CKDF。
+bool deriveAuthKey(std::vector<SharedSecretParams> params, AuthKey* key);
+// HardwareAuthToken的字段。authenticatorType是位掩码：1为密码，2为指纹。
+struct AuthToken {
+    int64_t challenge = 0, userId = 0, authenticatorId = 0;
+    int32_t authenticatorType = 0;
+    int64_t timestampMs = 0;
+    std::vector<uint8_t> mac;
+};
+constexpr int32_t kAuthPassword = 1, kAuthFingerprint = 2;
+// MAC覆盖的字节与hw_auth_token_t相同：版本0、challenge、userId、authenticatorId（本机字节序），
+// authenticatorType、时间戳（网络字节序）。
+std::vector<uint8_t> authTokenMacInput(const AuthToken& token);
+bool signAuthToken(const AuthKey& key, AuthToken* token);
+bool verifyAuthToken(const AuthKey& key, const AuthToken& token);
+// 令牌时间戳的时钟：开机以来的毫秒数，含休眠（CLOCK_BOOTTIME），与KeyMint、Gatekeeper相同。
+int64_t bootTimeMs();
+
 // Failure count is persisted in Store. Runtime deadlines use a monotonic clock.
 // Restarting the HAL at a timed boundary imposes another 30 seconds, never less.
 class Lockout {
@@ -180,15 +211,23 @@ class Lockout {
 class Store {
   public:
     Store(std::string path, const SensorProfile& profile)
-        : path_(std::move(path)), profile_(&profile) {}
+        : path_(std::move(path)), sidPath_(path_.substr(0, path_.find_last_of('/')+1) + kSecureUserIdFile),
+          profile_(&profile) {}
+    // SID文件与模板库在同一目录。
+    static constexpr const char* kSecureUserIdFile = "gaokun3-secure-user-id";
     const SensorProfile& profile() const { return *profile_; }
     bool load();
     bool save();
+    // 录入新手指时更换，删除手指时不变，没有手指时为0（ISession#getAuthenticatorId）。
     int64_t authenticatorId = 0;
+    // 用户的安全ID（SID），取自校验通过的PIN令牌，填入签发的令牌；0表示尚未得知。
+    // 存在kSecureUserIdFile里，save()只在它变化时写入；写入失败不影响save()的结果，下次保存时重试。
+    int64_t secureUserId = 0;
     uint32_t failures = 0;
     std::vector<Enrollment> enrollments;
   private:
-    std::string path_;
+    std::string path_, sidPath_;
+    int64_t savedSecureUserId_ = 0;
     const SensorProfile* profile_;
 };
 }  // namespace gaokun3

@@ -4,6 +4,7 @@
 #include <aidl/android/hardware/biometrics/common/BnCancellationSignal.h>
 #include <aidl/android/hardware/biometrics/fingerprint/BnFingerprint.h>
 #include <aidl/android/hardware/biometrics/fingerprint/BnSession.h>
+#include <aidl/android/hardware/security/sharedsecret/ISharedSecret.h>
 #include <android/binder_manager.h>
 #include <android/binder_process.h>
 #include <android/binder_ibinder.h>
@@ -19,6 +20,7 @@
 #include <functional>
 #include <mutex>
 #include <map>
+#include <optional>
 #include <sys/stat.h>
 #include <thread>
 #include <unistd.h>
@@ -29,10 +31,33 @@ using namespace std::chrono_literals;
 using Clock = std::chrono::steady_clock;
 using Hat = keymaster::HardwareAuthToken;
 using Signal = std::shared_ptr<common::ICancellationSignal>;
+// 取得令牌密钥；失败时返回false，调用方以UNABLE_TO_PROCESS结束这次操作。
+using AuthKeySource = std::function<bool(gaokun3::AuthKey*)>;
 static ScopedAStatus invalid() { return ScopedAStatus::fromExceptionCode(EX_ILLEGAL_ARGUMENT); }
 // Framework clients catch RemoteException for a lost HAL/session. An AIDL
 // IllegalStateException escapes FingerprintStartUserClient and kills system_server.
 static ScopedAStatus unavailable() { return ScopedAStatus::fromStatus(STATUS_DEAD_OBJECT); }
+
+static gaokun3::AuthToken fromHat(const Hat& hat) {
+    gaokun3::AuthToken t;
+    t.challenge = hat.challenge;
+    t.userId = hat.userId;
+    t.authenticatorId = hat.authenticatorId;
+    t.authenticatorType = static_cast<int32_t>(hat.authenticatorType);
+    t.timestampMs = hat.timestamp.milliSeconds;
+    t.mac = hat.mac;
+    return t;
+}
+static Hat toHat(const gaokun3::AuthToken& t) {
+    Hat hat{};
+    hat.challenge = t.challenge;
+    hat.userId = t.userId;
+    hat.authenticatorId = t.authenticatorId;
+    hat.authenticatorType = static_cast<keymaster::HardwareAuthenticatorType>(t.authenticatorType);
+    hat.timestamp.milliSeconds = t.timestampMs;
+    hat.mac = t.mac;
+    return hat;
+}
 
 class Cancellation final : public common::BnCancellationSignal {
   public:
@@ -49,13 +74,14 @@ class Session final : public BnSession {
             std::shared_ptr<gaokun3::Lockout> lockout,
             std::shared_ptr<gaokun3::Challenges> challenges,
             std::shared_ptr<std::mutex> hardwareMutex,
+            AuthKeySource keys,
             std::shared_ptr<Session> predecessor = nullptr)
         : cb_(std::move(cb)),
           dir_("/data/vendor_de/"+std::to_string(user)+"/fpdata"),
           store_(dir_+"/gaokun3-templates.db",profile), transport_(profile),
           lockout_(std::move(lockout)), user_(user), challenges_(std::move(challenges)),
-          hardwareMutex_(std::move(hardwareMutex)), predecessor_(std::move(predecessor)),
-          worker_([this] { loop(); }) {}
+          hardwareMutex_(std::move(hardwareMutex)), keys_(std::move(keys)),
+          predecessor_(std::move(predecessor)), worker_([this] { loop(); }) {}
     ~Session() override {
         close();
         { std::lock_guard lock(mutex_); quit_ = true; }
@@ -99,14 +125,13 @@ class Session final : public BnSession {
         });
     }
     ScopedAStatus enroll(const Hat& hat, Signal* out) override {
-        return operation(1,hat,out);
+        return operation(1,hat,0,out);
     }
+    // operationId是Keystore操作的句柄（加密认证），锁屏为0；成功时作为令牌的challenge签发。
     ScopedAStatus authenticate(int64_t operationId, Signal* out) override {
-        // This host matcher has no HAT signing key; crypto authentication is unsupported.
-        if (operationId != 0) return invalid();
-        return operation(2,{},out);
+        return operation(2,{},operationId,out);
     }
-    ScopedAStatus detectInteraction(Signal* out) override { return operation(3,{},out); }
+    ScopedAStatus detectInteraction(Signal* out) override { return operation(3,{},0,out); }
     ScopedAStatus enumerateEnrollments() override {
         return command([this] {
             if (!load()) return;
@@ -126,6 +151,7 @@ class Session final : public BnSession {
                 if (std::find(ids.begin(),ids.end(),e.id) == ids.end()) return false;
                 removed.push_back(e.id); return true;
             }),es.end());
+            // 删除手指不更换authenticatorId，删光时save()把它置0。
             if (!removed.empty() && !save()) return;
             cb_->onEnrollmentsRemoved(removed);
         });
@@ -135,19 +161,28 @@ class Session final : public BnSession {
     }
     ScopedAStatus invalidateAuthenticatorId() override {
         return command([this] {
-            if (load() && save()) cb_->onAuthenticatorIdInvalidated(store_.authenticatorId);
+            if (!load()) return;
+            // 框架在另一种生物识别录入新数据时调用：绑定“全部生物识别”的密钥随之失效。
+            // 没有手指时保持0。
+            if (!store_.enrollments.empty()) store_.authenticatorId = gaokun3::randomId();
+            if (save()) cb_->onAuthenticatorIdInvalidated(store_.authenticatorId);
         });
     }
     ScopedAStatus resetLockout(const Hat& hat) override {
         return command([this,hat] {
-            // Development Class 1: trusted framework caller and structural
-            // credential-token checks; cryptographic MAC verification is absent.
-            if (!hat.userId || hat.mac.size() != 32 ||
-                !(static_cast<int32_t>(hat.authenticatorType) & 1)) {
+            // 框架在用户确认PIN后传入Gatekeeper签发的令牌，须是几分钟内签发的
+            // （ISession#resetLockout）。
+            // 时间戳来自调用方，先比较再做减法，避免有符号溢出。
+            const int64_t now = gaokun3::bootTimeMs(), issued = hat.timestamp.milliSeconds;
+            if (issued > now || issued < now - kCredentialTokenMaxAgeMs) {
+                LOG(ERROR) << "Fingerprint lockout reset rejected: credential token not issued in the last "
+                           << kCredentialTokenMaxAgeMs / 60000 << " minutes";
                 error(Error::UNABLE_TO_PROCESS); return;
             }
+            if (!verifiedCredential(hat)) { error(Error::UNABLE_TO_PROCESS); return; }
             if (!load()) return;
             store_.failures = 0;
+            store_.secureUserId = hat.userId;
             if (!store_.save()) { error(Error::UNABLE_TO_PROCESS); return; }
             lockout_->reset(); clearLockoutTimer(); cb_->onLockoutCleared();
         });
@@ -221,16 +256,38 @@ class Session final : public BnSession {
         updateLockoutTimer();
         return true;
     }
+    // authenticatorId由调用方按需更换（录入、invalidateAuthenticatorId），这里只在没有手指时置0。
     bool save() {
-        store_.authenticatorId = store_.enrollments.empty() ? 0 : gaokun3::randomId();
         if (store_.enrollments.empty()) {
+            store_.authenticatorId = 0;
             store_.failures = 0; lockout_->reset(); clearLockoutTimer();
         }
-        if ((!store_.enrollments.empty() && !store_.authenticatorId) || !store_.save()) {
+        if ((!store_.enrollments.empty() && store_.authenticatorId <= 0) || !store_.save()) {
             error(Error::UNABLE_TO_PROCESS); return false;
         }
         return true;
     }
+    // 令牌密钥；取不到时记录日志，由调用方结束操作。
+    bool authKey(gaokun3::AuthKey* key) {
+        if (keys_ && keys_(key)) return true;
+        LOG(ERROR) << "Fingerprint auth token key unavailable";
+        return false;
+    }
+    // Gatekeeper签发的PIN令牌：类型含密码，SID非零，MAC与令牌密钥相符。
+    bool verifiedCredential(const Hat& hat) {
+        if (!hat.userId || !(static_cast<int32_t>(hat.authenticatorType) & gaokun3::kAuthPassword)) {
+            LOG(ERROR) << "Fingerprint credential token rejected: not a password token";
+            return false;
+        }
+        gaokun3::AuthKey key;
+        if (!authKey(&key)) return false;
+        if (!gaokun3::verifyAuthToken(key,fromHat(hat))) {
+            LOG(ERROR) << "Fingerprint credential token rejected: MAC mismatch";
+            return false;
+        }
+        return true;
+    }
+    static constexpr int64_t kCredentialTokenMaxAgeMs = 10 * 60 * 1000;
     static int64_t monotonicMs() {
         return std::chrono::duration_cast<std::chrono::milliseconds>(
                 Clock::now().time_since_epoch()).count();
@@ -289,18 +346,18 @@ class Session final : public BnSession {
         });
         cv_.notify_all(); return ScopedAStatus::ok();
     }
-    ScopedAStatus operation(int kind, const Hat& hat, Signal* out) {
+    ScopedAStatus operation(int kind, const Hat& hat, int64_t operationId, Signal* out) {
         auto flag = std::make_shared<std::atomic_bool>(false);
         std::lock_guard lock(mutex_);
         if (closed_ || queue_.size() >= 8) return unavailable();
         cancel_ = flag;
         *out = ndk::SharedRefBase::make<Cancellation>(flag);
-        queue_.push_back([this,kind,hat,flag] {
+        queue_.push_back([this,kind,hat,operationId,flag] {
             waitForPredecessor();
             // A replacement session waits for cancellation and shutdown of the
             // previous owner; it must not reset or probe hardware concurrently.
             std::lock_guard hardwareLock(*hardwareMutex_);
-            capture(kind,hat,*flag);
+            capture(kind,hat,operationId,*flag);
             // FindSensor cancels its initial enrollment before Enrolling starts.
             // Keep this session's initialized TA/GPIO across that handoff, as
             // the vendor backend does across operations on an open device.
@@ -308,22 +365,26 @@ class Session final : public BnSession {
         });
         cv_.notify_all(); return ScopedAStatus::ok();
     }
-    void capture(int kind, const Hat& hat, const std::atomic_bool& cancel) {
+    void capture(int kind, const Hat& hat, int64_t operationId, const std::atomic_bool& cancel) {
         if (cancel || closed_) { error(Error::CANCELED); return; }
 #ifdef GAOKUN3_FP_TEST
         if (captureForTest_) { captureForTest_(transport_,cancel); return; }
 #endif
         if (!load()) return;
         if (kind == 1) {
-            if (!challenges_->valid(user_,hat.challenge,monotonicMs()) || !hat.userId ||
-                hat.mac.size() != 32 || !(static_cast<int32_t>(hat.authenticatorType) & 1)) {
+            // 录入须有本HAL生成、仍在有效期内的challenge，以及Gatekeeper为它签发的PIN令牌。
+            if (!challenges_->valid(user_,hat.challenge,monotonicMs())) {
+                LOG(ERROR) << "Fingerprint enrollment rejected: unknown or expired challenge";
                 error(Error::UNABLE_TO_PROCESS); return;
             }
-            // Only structural enrollment authorization is possible at Class 1.
+            if (!verifiedCredential(hat)) { error(Error::UNABLE_TO_PROCESS); return; }
             if (store_.enrollments.size() >= gaokun3::kMaxFingers) { error(Error::NO_SPACE); return; }
         }
         if (kind == 2 && store_.enrollments.empty()) { error(Error::UNABLE_TO_PROCESS); return; }
         if (kind == 2 && checkLockout()) return;
+        // 认证成功时签发令牌：先取密钥，取不到就不开传感器。
+        gaokun3::AuthKey key{};
+        if (kind == 2 && !authKey(&key)) { error(Error::UNABLE_TO_PROCESS); return; }
         if (!transport_.start()) { error(Error::HW_UNAVAILABLE); return; }
         // Feature caches are built while the finger is still on its way.
         if (kind == 2) gaokun3::prepare(store_.enrollments);
@@ -413,6 +474,9 @@ class Session final : public BnSession {
                         latched = true;
                         if (stages == gaokun3::kStages) {
                             store_.enrollments.push_back(pending);
+                            // 录入新手指须更换authenticatorId，绑定指纹且随录入失效的密钥由此失效。
+                            store_.authenticatorId = gaokun3::randomId();
+                            store_.secureUserId = hat.userId;
                             if (!save()) return;
                         }
                         cb_->onAcquired(AcquiredInfo::GOOD,0);
@@ -450,10 +514,22 @@ class Session final : public BnSession {
                         if (bestScore >= gaokun3::kMatchThreshold) break;
                     }
                     if (bestScore >= gaokun3::kMatchThreshold && !cancel && !closed_) {
+                        // 令牌的userId是用户的SID：绑定“指纹或PIN”、不随录入失效的密钥只认它；
+                        // authenticatorId对应随录入失效的密钥。SID尚未得知（升级后用户还没有
+                        // 输入过PIN）时为0，前一类密钥要等用户输入一次PIN后才可用。
+                        gaokun3::AuthToken token;
+                        token.challenge = operationId;
+                        token.userId = store_.secureUserId;
+                        token.authenticatorId = store_.authenticatorId;
+                        token.authenticatorType = gaokun3::kAuthFingerprint;
+                        token.timestampMs = gaokun3::bootTimeMs();
+                        if (!gaokun3::signAuthToken(key,&token)) {
+                            LOG(ERROR) << "Fingerprint auth token signing failed";
+                            error(Error::UNABLE_TO_PROCESS); return;
+                        }
                         lockout_->reset(); clearLockoutTimer();
                         cb_->onAcquired(AcquiredInfo::GOOD,0);
-                        // Empty token: no fabricated MAC, SID or crypto authorization.
-                        cb_->onAuthenticationSucceeded(bestId,Hat{});
+                        cb_->onAuthenticationSucceeded(bestId,toHat(token));
                         recent_.erase(std::remove(recent_.begin(),recent_.end(),bestId),recent_.end());
                         recent_.insert(recent_.begin(),bestId);
                         // The unlock does not wait for learning or the disk. If
@@ -507,6 +583,7 @@ class Session final : public BnSession {
     const int32_t user_;
     std::shared_ptr<gaokun3::Challenges> challenges_;
     std::shared_ptr<std::mutex> hardwareMutex_;
+    AuthKeySource keys_;
     std::shared_ptr<Session> predecessor_;
     Clock::time_point lockoutDeadline_ = Clock::time_point::max();
     // Finger ids, the one that authenticated last first.
@@ -524,15 +601,65 @@ class Session final : public BnSession {
     std::thread worker_;
 };
 
+// 令牌密钥的来源：向本机全部ISharedSecret参与方（VINTF中声明的实例，与keystore2协商时的
+// 名单相同）读取协商参数，推导出与协商结果相同的密钥。各方的参数在一次开机内不变，推导成功
+// 后缓存到进程退出；失败（如参与方尚未启动）时下次操作重试。
+class SharedSecretKeySource {
+  public:
+    bool get(gaokun3::AuthKey* key) {
+        std::lock_guard lock(mutex_);
+        if (!key_) key_ = derive();
+        if (!key_) return false;
+        *key = *key_;
+        return true;
+    }
+  private:
+    static std::optional<gaokun3::AuthKey> derive() {
+        using security::sharedsecret::ISharedSecret;
+        using security::sharedsecret::SharedSecretParameters;
+        std::vector<std::string> instances;
+        AServiceManager_forEachDeclaredInstance(ISharedSecret::descriptor,&instances,
+            [](const char* instance, void* context) {
+                static_cast<std::vector<std::string>*>(context)->push_back(instance);
+            });
+        if (instances.empty()) {
+            LOG(ERROR) << "No ISharedSecret instance declared; auth token key unavailable";
+            return std::nullopt;
+        }
+        std::vector<gaokun3::SharedSecretParams> params;
+        for (const auto& instance : instances) {
+            const std::string name = std::string(ISharedSecret::descriptor)+"/"+instance;
+            auto participant = ISharedSecret::fromBinder(ndk::SpAIBinder(AServiceManager_checkService(name.c_str())));
+            SharedSecretParameters p;
+            if (!participant || !participant->getSharedSecretParameters(&p).isOk()) {
+                LOG(ERROR) << "Shared secret parameters of " << name << " unavailable";
+                return std::nullopt;
+            }
+            params.push_back({p.seed,p.nonce});
+        }
+        gaokun3::AuthKey key;
+        if (!gaokun3::deriveAuthKey(std::move(params),&key)) {
+            LOG(ERROR) << "Auth token key derivation failed";
+            return std::nullopt;
+        }
+        LOG(INFO) << "Auth token key derived from " << instances.size() << " shared secret participants";
+        return key;
+    }
+    std::mutex mutex_;
+    std::optional<gaokun3::AuthKey> key_;
+};
+
 class Fingerprint final : public BnFingerprint {
   public:
     // nullptr: the board straps report no sensor, so none is offered.
-    explicit Fingerprint(const gaokun3::SensorProfile* profile) : profile_(profile) {}
+    Fingerprint(const gaokun3::SensorProfile* profile, AuthKeySource keys)
+        : profile_(profile), keys_(std::move(keys)) {}
     ScopedAStatus getSensorProps(std::vector<SensorProps>* out) override {
         if (!profile_) { out->clear(); return ScopedAStatus::ok(); }
         SensorProps p{};
         p.commonProps.sensorId = 0;
-        p.commonProps.sensorStrength = common::SensorStrength::CONVENIENCE;
+        // Class 3：签发的令牌用于Keystore，取舍见README“能力边界”。
+        p.commonProps.sensorStrength = common::SensorStrength::STRONG;
         p.commonProps.maxEnrollmentsPerUser = gaokun3::kMaxFingers;
         p.sensorType = FingerprintSensorType::POWER_BUTTON;
         p.supportsDetectInteraction = true;
@@ -579,7 +706,7 @@ class Fingerprint final : public BnFingerprint {
         auto& lockout = lockouts_[user];
         if (!lockout) lockout = std::make_shared<gaokun3::Lockout>();
         session_ = ndk::SharedRefBase::make<Session>(*profile_,user,cb,lockout,challenges_,hardwareMutex_,
-                                                     std::move(predecessor));
+                                                     keys_,std::move(predecessor));
         if (!session_->linkToDeath()) { session_->close(); return unavailable(); }
         *out = session_; return ScopedAStatus::ok();
     }
@@ -591,6 +718,7 @@ class Fingerprint final : public BnFingerprint {
     std::map<int32_t,std::shared_ptr<gaokun3::Lockout>> lockouts_;
     std::shared_ptr<gaokun3::Challenges> challenges_ = std::make_shared<gaokun3::Challenges>();
     std::shared_ptr<std::mutex> hardwareMutex_ = std::make_shared<std::mutex>();
+    const AuthKeySource keys_;
 };
 }
 
@@ -599,9 +727,11 @@ int main(int argc, char** argv) {
     (void)argc;
     ::android::base::InitLogging(argv,::android::base::LogdLogger());
     ABinderProcess_setThreadPoolMaxThreadCount(2);
+    using namespace aidl::android::hardware::biometrics::fingerprint;
+    auto keys = std::make_shared<SharedSecretKeySource>();
     // The straps pick the sensor once; one image serves both variants.
-    auto hal = ndk::SharedRefBase::make<aidl::android::hardware::biometrics::fingerprint::Fingerprint>(
-            gaokun3::Transport::detect());
+    auto hal = ndk::SharedRefBase::make<Fingerprint>(
+            gaokun3::Transport::detect(),[keys](gaokun3::AuthKey* key) { return keys->get(key); });
     const std::string name = std::string(hal->descriptor)+"/default";
     CHECK(AServiceManager_addService(hal->asBinder().get(),name.c_str()) == STATUS_OK);
     ABinderProcess_joinThreadPool();

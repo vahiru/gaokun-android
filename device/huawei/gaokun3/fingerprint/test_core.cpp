@@ -83,11 +83,12 @@ int main() {
     assert(!symlink(path.c_str(),link.c_str())); Store symlinked(link,kFocalTech); assert(!symlinked.load());
     s.enrollments.push_back(e); assert(!s.save()); s.enrollments.pop_back();
     s.enrollments[0].id = -1; assert(!s.save()); s.enrollments[0].id = 7;
-    // Oversized database, unsupported version, wrong geometry and zero IDs all fail closed.
+    // Unsupported version, a count without its records, wrong geometry and zero IDs all fail
+    // closed, also with a valid checksum.
     for (size_t offset : {size_t(4),size_t(8),size_t(12),size_t(32)}) {
         assert(s.save());
-        std::fstream f(path,std::ios::in | std::ios::out | std::ios::binary);
-        f.seekp(offset); f.put(0); f.close();
+        auto b = readFile(path); assert(b[offset] != 0);
+        b[offset] = 0; resign(b); writeFile(path,b); assert(!chmod(path.c_str(),0600));
         assert(!restored.load());
     }
     // Enrolment: a repeated frame and a mostly blank one are refused.
@@ -315,7 +316,97 @@ int main() {
     for (auto& v : warmer) v += 300;
     assert(goodixBaseUsable(cooler.data(),base.data()));
     assert(goodixBaseUsable(warmer.data(),base.data()));
+    // SID单独存放：模板库仍为v4；文件缺失、损坏、权限不对或为符号链接时按0处理，模板库照常载入。
+    {
+        const std::string sidPath = std::string(dir)+"/"+Store::kSecureUserIdFile;
+        // path holds the Goodix database saved above.
+        Store a(path,kGoodix); assert(a.load()); assert(a.secureUserId == 0);
+        a.secureUserId = 0x0123456789abcdefLL; assert(a.save());
+        assert(readFile(path)[4] == 4);
+        auto sid = readFile(sidPath);
+        assert(sid.size() == 48 && !memcmp(sid.data(),"GK3S\1\0\0\0",8) && sid[8] == 0xef && sid[15] == 0x01);
+        assert(!stat(sidPath.c_str(),&st) && (st.st_mode & 0777) == 0600);
+        Store b(path,kGoodix); assert(b.load() && b.secureUserId == a.secureUserId);
+        const size_t fingers = b.enrollments.size();
+        // Unchanged SID: save() leaves the file alone.
+        assert(!unlink(sidPath.c_str())); assert(b.save()); assert(access(sidPath.c_str(),F_OK));
+        b.secureUserId = 77; assert(b.save()); assert(b.load() && b.secureUserId == 77);
+        auto bad = readFile(sidPath); bad[9] ^= 1; writeFile(sidPath,bad);
+        assert(b.load() && b.secureUserId == 0 && b.enrollments.size() == fingers);
+        b.secureUserId = 78; assert(b.save());
+        assert(!chmod(sidPath.c_str(),0644)); assert(b.load() && b.secureUserId == 0);
+        assert(!chmod(sidPath.c_str(),0600)); assert(b.load() && b.secureUserId == 78);
+        auto truncated = readFile(sidPath); truncated.pop_back(); writeFile(sidPath,truncated);
+        assert(b.load() && b.secureUserId == 0);
+        assert(!unlink(sidPath.c_str()));
+        // A SID file that cannot be written does not fail the save; the next save retries.
+        assert(!mkdir(sidPath.c_str(),0700));
+        b.secureUserId = 79; assert(b.save()); assert(readFile(path)[4] == 4);
+        assert(b.load() && b.secureUserId == 0 && b.enrollments.size() == fingers);
+        assert(!rmdir(sidPath.c_str()));
+        b.secureUserId = 79; assert(b.save()); assert(b.load() && b.secureUserId == 79);
+        assert(!unlink(sidPath.c_str()));
+        const std::string target = std::string(dir)+"/sid-target";
+        writeFile(target,readFile(path)); assert(!symlink(target.c_str(),sidPath.c_str()));
+        assert(b.load() && b.secureUserId == 0);
+        unlink(sidPath.c_str()); unlink(target.c_str());
+    }
+
+    // 令牌。期望值由独立实现（Python cryptography的CMAC、hmac）按keymaster::ckdf与
+    // hw_auth_token_t的定义算出，不由本文件的代码生成。
+    {
+        auto hex = [](const char* s) {
+            std::vector<uint8_t> b;
+            for (; s[0] && s[1]; s += 2) b.push_back(uint8_t(std::stoi(std::string(s,2),nullptr,16)));
+            return b;
+        };
+        std::vector<uint8_t> out(20);
+        const std::vector<uint8_t> key16 = hex("000102030405060708090a0b0c0d0e0f");
+        const std::string ctx = "context";
+        assert(ckdf(key16.data(),key16.size(),"label",std::vector<uint8_t>(ctx.begin(),ctx.end()),out.data(),out.size()));
+        assert(out == hex("005ccdd612ed86ac3a5169c555986b7f880d5d7d"));
+        assert(!ckdf(key16.data(),24,"label",{},out.data(),out.size()));
+        // KeyMint的seed为空，Gatekeeper的是32字节零；排序与输入顺序无关。
+        SharedSecretParams keymint{{},{}}, gatekeeper{std::vector<uint8_t>(32,0),{}};
+        for (uint8_t i = 0; i < 32; ++i) { keymint.nonce.push_back(i); gatekeeper.nonce.push_back(i+32); }
+        AuthKey k1{}, k2{};
+        assert(deriveAuthKey({keymint,gatekeeper},&k1) && deriveAuthKey({gatekeeper,keymint},&k2));
+        const auto expectedKey = hex("e599eac5f496454282b0e2e9786411dac0e60ea1a75b1f1286a0132945951c8c");
+        assert(k1 == k2 && std::equal(k1.begin(),k1.end(),expectedKey.begin()));
+        assert(!deriveAuthKey({},&k2));
+        SharedSecretParams shortNonce = keymint; shortNonce.nonce.pop_back();
+        assert(!deriveAuthKey({shortNonce,gatekeeper},&k2));
+        SharedSecretParams oddSeed = gatekeeper; oddSeed.seed.pop_back();
+        assert(!deriveAuthKey({keymint,oddSeed},&k2));
+
+        AuthToken t;
+        t.challenge = 0x0102030405060708LL; t.userId = 0x1112131415161718LL;
+        t.authenticatorId = 0x2122232425262728LL; t.authenticatorType = kAuthFingerprint;
+        t.timestampMs = 123456789;
+        assert(authTokenMacInput(t) == hex("000807060504030201181716151413121128272625242322210000000200000000075bcd15"));
+        assert(signAuthToken(k1,&t));
+        assert(t.mac == hex("70637f0380a92946cdc8205642bca3f85e75b92ad1a8ec9b0c20666c61afd8d3"));
+        assert(verifyAuthToken(k1,t));
+        AuthKey other = k1; other[0] ^= 1;
+        assert(!verifyAuthToken(other,t));
+        for (int field = 0; field < 6; ++field) {
+            AuthToken bad = t;
+            switch (field) {
+            case 0: bad.challenge ^= 1; break;
+            case 1: bad.userId ^= 1; break;
+            case 2: bad.authenticatorId ^= 1; break;
+            case 3: bad.authenticatorType = kAuthPassword; break;
+            case 4: bad.timestampMs += 1; break;
+            case 5: bad.mac[31] ^= 1; break;
+            }
+            assert(!verifyAuthToken(k1,bad));
+        }
+        AuthToken truncated = t; truncated.mac.pop_back(); assert(!verifyAuthToken(k1,truncated));
+        AuthToken unsigned_ = t; unsigned_.mac.clear(); assert(!verifyAuthToken(k1,unsigned_));
+        const int64_t now = bootTimeMs(); assert(now > 0 && bootTimeMs() >= now);
+    }
     unlink(link.c_str()); unlink(path.c_str()); rmdir(dir);
     std::cout << "PASS: store integrity/permissions/round-trip, v2/v3 compatibility, learned frames, sensor-bound databases, "
-                 "matcher, AES decode/invalid frames, Goodix decode/base, persistent failures and lockout deadlines\n";
+                 "matcher, AES decode/invalid frames, Goodix decode/base, persistent failures and lockout deadlines, "
+                 "secure user ID file, CKDF/auth key derivation, auth token MAC\n";
 }

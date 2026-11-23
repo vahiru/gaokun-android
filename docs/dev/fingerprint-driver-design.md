@@ -1,6 +1,6 @@
 # 指纹驱动设计（gaokun3 / FocalTech FTE7001、Goodix GDIX5125）
 
-> **当前状态**：厂商签名的指纹TA已能加载进QSEE并收发命令；固定ioctl的内核驱动（[`patches/kernel/fingerprint/0002`](../../patches/kernel/fingerprint/0002-firmware-qcom-gaokun3-fingerprint-ioctl.patch)，Goodix分支[`0003`](../../patches/kernel/fingerprint/0003-firmware-qcom-gaokun3-fpcmd-add-the-Goodix-GDIX5125-sensor.patch)）和Android HAL（[`device/huawei/gaokun3/fingerprint/`](../../device/huawei/gaokun3/fingerprint/README.md)）由[PR #92](https://github.com/vahiru/gaokun-android/pull/92)、[PR #123](https://github.com/vahiru/gaokun-android/pull/123)合入，随镜像构建（`CONFIG_GAOKUN3_FPCMD`由`scripts/kernel-config-android.sh`打开）。解码、匹配和模板存储都在HAL里，服务报告`CONVENIENCE`。实机过程见[`fingerprint-machine-check-2026-10-30.md`](fingerprint-machine-check-2026-10-30.md)（M2命令收发与首帧）和[`crdroid-fingerprint-machine-check-2026-11-01.md`](crdroid-fingerprint-machine-check-2026-11-01.md)（crDroid候选）；逐条的逆向记录（D1–D22）见合并前的`docs/fingerprint-driver-design.md`（git历史，提交c902a34）。Windows侧专有二进制的本地逆向笔记说明见[`fingerprint/README.md`](fingerprint/README.md)。
+> **当前状态**：厂商签名的指纹TA已能加载进QSEE并收发命令；固定ioctl的内核驱动（[`patches/kernel/fingerprint/0002`](../../patches/kernel/fingerprint/0002-firmware-qcom-gaokun3-fingerprint-ioctl.patch)，Goodix分支[`0003`](../../patches/kernel/fingerprint/0003-firmware-qcom-gaokun3-fpcmd-add-the-Goodix-GDIX5125-sensor.patch)）和Android HAL（[`device/huawei/gaokun3/fingerprint/`](../../device/huawei/gaokun3/fingerprint/README.md)）由[PR #92](https://github.com/vahiru/gaokun-android/pull/92)、[PR #123](https://github.com/vahiru/gaokun-android/pull/123)合入，随镜像构建（`CONFIG_GAOKUN3_FPCMD`由`scripts/kernel-config-android.sh`打开）。解码、匹配和模板存储都在HAL里，服务报告`STRONG`并签发HardwareAuthToken（见第3.3节）。实机过程见[`fingerprint-machine-check-2026-10-30.md`](fingerprint-machine-check-2026-10-30.md)（M2命令收发与首帧）和[`crdroid-fingerprint-machine-check-2026-11-01.md`](crdroid-fingerprint-machine-check-2026-11-01.md)（crDroid候选）；逐条的逆向记录（D1–D22）见合并前的`docs/fingerprint-driver-design.md`（git历史，提交c902a34）。Windows侧专有二进制的本地逆向笔记说明见[`fingerprint/README.md`](fingerprint/README.md)。
 
 ## 1. 硬件与TrustZone边界
 
@@ -12,7 +12,7 @@
 ```
 Android FingerprintService
         │  AIDL IFingerprint/ISession
-   [指纹HAL（用户态）]  ── 解码、匹配、模板库；报告CONVENIENCE，不签发HAT
+   [指纹HAL（用户态）]  ── 解码、匹配、模板库；报告STRONG，签发HAT
         │  固定ioctl，/dev/gaokun3_fpcmd
    [fpcmd驱动（fingerprint/0002、0003）]  ── LOAD、INIT、CAPTURE、GET_FINGER_STATUS等固定操作
         │  qcom_scm_qseecom_app_load / _app_send / listener（fingerprint/0001）
@@ -52,7 +52,7 @@ Android FingerprintService
 
 HAL实现AIDL fingerprint V4，取图、解码、匹配、学习和模板存储都在用户态，细节见[HAL说明](../../device/huawei/gaokun3/fingerprint/README.md)。
 
-早先“设为`STRONG`、与软件KeyMint共享HMAC密钥签发HAT”的设想已经撤回：图像离开TEE后在主机上解码和匹配，没有证据表明采集和匹配链满足`STRONG`的要求，软件KeyMint能接受某种令牌也不等于满足生物识别强度。所以服务报告`CONVENIENCE`，不签发HardwareAuthToken，不能用于Keystore解锁。
+服务报告`STRONG`并签发HardwareAuthToken，签名密钥由本机软件KeyMint与Gatekeeper的共享密钥协商参数推导，HAL不参与协商（[HAL说明](../../device/huawei/gaokun3/fingerprint/README.md)“令牌”一节）。这是本项目的取舍，不是CDD认证结论：图像离开TEE后在主机上解码和匹配，达不到CDD对Class 2、Class 3在隔离环境中匹配的要求。依据是本机的PIN校验和Keystore密钥本来就在普通世界，HAL在用户态签发令牌不会让密钥的保护比PIN更弱；同一机型的FocalTech机器在Windows上也由用户态的引擎适配器匹配（第1节），Windows Hello照常可用于登录以外的验证。指纹本身的局限（误识率依据有限、没有防伪、模板库没有TEE保护）见HAL说明“能力边界”一节。
 
 ## 4. TA内算法的离线执行（HAL未采用）
 
