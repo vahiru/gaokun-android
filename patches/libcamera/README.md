@@ -31,6 +31,7 @@
 | `0020-ipa-qcom-ife-let-small-highlights-clip.patch` | 前后摄AGC的上限约束改看第90–95百分位，最亮的5%允许过曝；配合`0019`，第90百分位以下像素的平均亮度不低于平均目标的一半 |
 | `0021-libcamera-add-the-s5k4h7-sensor.patch` | 部分机器的前摄S5K4H7：传感器参数（黑电平、增益模型`码值/32`、曝光余量4行，均为传感器CCS寄存器的值）、传感器属性与`qcom-ife`调校文件`s5k4h7.yaml` |
 | `0022-libcamera-add-the-s5k3l6-sensor.patch` | 部分机器的后摄S5K3L6：传感器参数（黑电平与曝光余量8行取自Windows模组配置，增益模型`码值/32`）、传感器属性与`qcom-ife`调校文件`s5k3l6.yaml`；控件生效延迟经实测与OV13B10相同（2帧） |
+| `0023-pipeline-qcom-ife-keep-the-dual-ife-split-within-the-lens-shading-limits.patch` | 没有显示输出时，双IFE的分割列同样取镜头阴影网格允许的、最靠近中线的位置；4160像素宽的画面（S5K3L6全尺寸）原先的分割列使右侧条带从镜头阴影分块末尾附近开始 |
 | `libcamera-Android.bp` | AOSP Soong构建定义（复制到`external/libcamera/Android.bp`） |
 | `config.h` | 替代meson生成的`config.h`，将IPA与配置文件路径指向`/vendor/`对应目录 |
 
