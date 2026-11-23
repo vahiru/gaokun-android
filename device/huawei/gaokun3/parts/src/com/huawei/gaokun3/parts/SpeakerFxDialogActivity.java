@@ -3,7 +3,8 @@
  *
  * 「设置 → 提示音和振动」里只有一个条目，点开后显示这个对话框。注入的条目只能启动一个activity，
  * 设置不会替注入方弹对话框，所以这里是一个透明的activity（Theme.Gaokun3Parts.DialogHost），
- * 窗口里只有对话框，设置页留在下面；选择、取消或返回后activity随即结束。
+ * 窗口里只有对话框，设置页留在下面；选择选项、按返回或点按对话框外部后activity随即结束。
+ * 与设置自己的单选对话框一致，对话框没有按钮：选中即生效并关闭。
  * 条目下方显示当前选项，由SoundEntriesProvider按currentLabel()提供，选完后通知设置刷新。
  *
  * 只写两个属性：persist.sys.gaokun3.histen为"1"或"0"（开启或关闭），persist.sys.gaokun3.speakerfx.engine
@@ -102,6 +103,11 @@ public class SpeakerFxDialogActivity extends Activity {
                 android.R.id.text1, labels));
         list.setChoiceMode(ListView.CHOICE_MODE_SINGLE);
         list.setDivider(null);
+        // 对话框没有按钮，内置列表此时自带的下边距（abc_select_dialog_material）不会作用于setView()里的
+        // 列表，这里补上同一个尺寸，与设置自己的单选对话框底部留白一致。
+        list.setPadding(0, 0, 0, dialogContext.getResources().getDimensionPixelSize(
+                androidx.appcompat.R.dimen.abc_dialog_list_padding_bottom_no_buttons));
+        list.setClipToPadding(false);
         list.setItemChecked(indexOf(values, currentValue()), true);
         list.setOnItemClickListener((parent, view, position, id) -> {
             try {
@@ -117,7 +123,6 @@ public class SpeakerFxDialogActivity extends Activity {
         mDialog = builder.setTitle(R.string.speaker_fx_engine_title)
                 .setMessage(R.string.speaker_fx_note)
                 .setView(list)
-                .setNegativeButton(android.R.string.cancel, null)
                 .create();
         // 旋转屏幕时activity重建、对话框重新显示，那一次关闭不结束activity。
         mDialog.setOnDismissListener(dialog -> {
