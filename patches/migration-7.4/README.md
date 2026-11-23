@@ -47,6 +47,7 @@ python3 -I $M/migrate.py check                      # 合并upstream/dev之后�
 - 新基线：v7.4-rc4。
 - 补丁链222个（buildbot层19个，dev 171个，override 25个，新增7个），丢弃25个（见`drop.tsv`）。
 - 在v7.4-rc4上从头重建：222个全部可以打上，以rc.4发布配置加`kernel-config-android.sh`、`kernel-config-7.4.sh`编译通过。rc4改写了UCSI的初始化重试（只重试-EPROBE_DEFER与新的-EAGAIN，并在开启通知之前设置`ucsi->connector`），`ec-usb`的两个超时重试补丁因此改用override。提前设置`ucsi->connector`后，开启通知失败时连接器会被释放，gaokun驱动在EC线程中处理USB事件时可能用到已释放的连接器，`add/ec-usb/0001`改为在通知开启（`ucsi->ntfy`）之后才完整处理USB事件，与7.2.9上的时序相同，并改用已核验的连接器指针，不再重读`ucsi->connector`。`ec-usb`中确认失败后应答USB事件的补丁只改说明（v7.4上`ucsi->work`还会因-EAGAIN重新排队），其override与dev的diff相同。
+- v7.4-rc4上机（dev构建20261122的用户空间，原版DTB，不含KSU）：Android完整启动，init无属性写入被拒；内核的错误与警告与rc3相同，没有新增；UCSI初始化没有错误，端口0以设备模式连接，USB调试正常；前后摄像头、板载热敏电阻温区、Wi-Fi、蓝牙、GPU与显示正常。iris硬件解码H.264（1080p、4K）、HEVC、VP9，Surface与字节缓冲两种输出均通过，字节缓冲输出与软件解码器逐帧一致。连接电脑时系统不进入挂起，待机唤醒尚未测试。
 - v7.4-rc3上机（rc.4用户空间，不含KSU）：Android完整启动，init无属性写入被拒；前后摄像头均注册，未装配的备选前摄在绑定后立即跳过；Type-C端口、板载热敏电阻温区、Wi-Fi、GPU与显示正常；iris可以探测。尚未测试视频解码（`iris/0019`须搭配含c2 0007的ROM）、待机唤醒与其余外设。
 - v7.4-rc3上机：Android可以完整启动，不含KSU与含BakaSU两种构建都已验证；显示、触控、音频正常。
 - fastrpc：改用上游v4系列，1/3、2/3为`add/core/0003`、`0004`，3/3为`core/misc-fastrpc-fix-context-leak-and-hang-on-signal-interrupted-invoke`的override，内容与上游一致（3/3只适配了一处上下文）。本地修正单独放在`add/core/0005`，各项改动及原因见其补丁说明；v4的补丁单独应用并不安全，须与它一起应用。尚未上机验证。
