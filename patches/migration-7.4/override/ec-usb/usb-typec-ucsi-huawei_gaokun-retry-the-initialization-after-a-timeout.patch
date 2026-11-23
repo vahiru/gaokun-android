@@ -31,23 +31,25 @@ Assisted-by: Claude:claude-opus-5-5
 Origin: local
 Upstream-Status: Pending
 ---
- drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c | 15 +++++++++++----
- 1 file changed, 11 insertions(+), 4 deletions(-)
+ drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c | 17 ++++++++++++-----
+ 1 file changed, 12 insertions(+), 5 deletions(-)
 
 diff --git a/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c b/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c
-index 2433e69ba15..c4d6f3060a2 100644
+index 2433e69ba15..2351da067c5 100644
 --- a/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c
 +++ b/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c
-@@ -441,10 +441,11 @@ static void gaokun_ucsi_handle_usb_mode(struct gaokun_ucsi_port *port)
+@@ -440,11 +440,12 @@ static void gaokun_ucsi_handle_usb_mode(struct gaokun_ucsi_port *port)
+ 
  /*
   * Whether UCSI has given up initializing. ucsi_register() only queues
-  * ucsi->work; ucsi_init() runs from it and sets ucsi->connector on success.
+- * ucsi->work; ucsi_init() runs from it and sets ucsi->connector on success.
 - * On failure it leaves ucsi->connector NULL and does not try again, except
 - * for -EPROBE_DEFER, which queues the work once more. work_busy() is only a
 - * snapshot, so the caller acts on this only when it holds for two USB
 - * events in a row.
-+ * On failure it leaves ucsi->connector NULL. The work is queued again only
-+ * after -EPROBE_DEFER, -EAGAIN (the PPM is not ready yet) or, with
++ * ucsi->work, and ucsi_init() runs from it. When it fails, it leaves
++ * ucsi->connector NULL, unless only the CCI read at its end failed. The work
++ * is queued again only after -EPROBE_DEFER, -EAGAIN or, with
 + * UCSI_RETRY_INIT_ON_TIMEOUT, -ETIMEDOUT, each a limited number of times; a
 + * queued retry counts as busy. work_busy() is only a snapshot, so the caller
 + * acts on this only when it holds for two USB events in a row.
