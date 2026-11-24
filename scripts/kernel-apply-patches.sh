@@ -194,7 +194,7 @@ KPATCHES=(
     # 0007 叠在 0003 之上，0008 叠在 0005–0006 之上。
     # 0038（S5K4H7驱动，需CONFIG_VIDEO_S5K4H7=y）与kernel/dts/0029配套；0039叠在0004之上；0040叠在0038之上。
     # 0041–0042为相机模组探测器（需CONFIG_HUAWEI_GAOKUN3_CAMERA_PROBER=y），与kernel/dts/0033配套；
-    # 0043（S5K3L6驱动，需CONFIG_VIDEO_S5K3L6=y）与kernel/dts/0034配套。
+    # 0043（S5K3L6驱动，需CONFIG_VIDEO_S5K3L6=y）与kernel/dts/0034配套；0044叠在0043之上，与libcamera/0024配套。
     kernel/camera/0001-clk-qcom-camcc-sc8280xp-gdsc-wait-vals.patch
     kernel/camera/0002-clk-qcom-camcc-sc8280xp-mark-camnoc-ahb-rcgs-shared.patch
     kernel/camera/0003-media-i2c-ov13b10-of-match-and-gaokun3-power-sequence.patch
@@ -241,6 +241,7 @@ KPATCHES=(
     kernel/camera/0041-i2c-of-prober-Probe-the-components-on-a-given-bus.patch
     kernel/camera/0042-platform-arm64-Add-a-camera-module-prober-for-the-Huawei-Matebook-E-Go.patch
     kernel/camera/0043-media-i2c-Add-a-driver-for-the-Samsung-S5K3L6-sensor.patch
+    kernel/camera/0044-media-i2c-s5k3l6-Leave-the-phase-detection-pixels-uncorrected-at-full-size.patch
 
     # ─── 8. kernel/audio：ASoC sc8280xp、LPASS 编解码宏、WSA883x 功放、SoundWire 与 Q6APM ───
     # 0007–0008 与 kernel/dts/0016 及 device/huawei/gaokun3/bin/audio-route.sh 配套；

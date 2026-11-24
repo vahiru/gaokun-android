@@ -1,0 +1,101 @@
+From b16f5e09ef0b3f928004143626c0b9253e071233 Mon Sep 17 00:00:00 2001
+From: Akisaira <akisaira@outlook.com>
+Date: Tue, 24 Nov 2026 01:16:40 +1100
+Subject: [PATCH] libcamera: s5k3l6: Correct the phase detection pixels in the
+ IFE
+
+The S5K3L6 has 32 half-shielded phase detection pixels in each 64x64
+block. The kernel driver now leaves them uncorrected in the 4160x3120
+mode, for the camera HAL to measure the phase from the RAW frame, so
+the image needs them corrected instead.
+
+Give their positions for the readout with both flips, which the rear
+camera of the Huawei MateBook E Go uses, and turn on Pdpc in the tuning
+file with the thresholds of this module's Windows tuning, the same as
+the OV13B10's.
+
+Tested on an S5K3L6 unit with the kernel driver change: on a photo of a
+plain wall, these pixels stand out by at most about 0.4 percent of the
+level, about as much as on a photo of white paper taken with the
+sensor's own correction, and are not visible.
+
+Signed-off-by: Akisaira <akisaira@outlook.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+Origin: local
+Upstream-Status: Pending
+---
+ src/ipa/qcom-ife/data/s5k3l6.yaml             | 14 +++++++---
+ .../sensor/camera_sensor_properties.cpp       | 27 +++++++++++++++++++
+ 2 files changed, 38 insertions(+), 3 deletions(-)
+
+diff --git a/src/ipa/qcom-ife/data/s5k3l6.yaml b/src/ipa/qcom-ife/data/s5k3l6.yaml
+index b59de406..83178fec 100644
+--- a/src/ipa/qcom-ife/data/s5k3l6.yaml
++++ b/src/ipa/qcom-ife/data/s5k3l6.yaml
+@@ -12,9 +12,12 @@
+ # BlackLevel: the camera sensor helper gives the level.
+ #
+ # Agc, Gamma and Bf: as for the ov13b10, which has the same focal length,
+-# f-number and focus actuator. The sensor corrects its phase detection pixels
+-# itself (the kernel driver sets bit 2 of register 0x3403, as the Windows
+-# driver does), hence no Pdpc.
++# f-number and focus actuator.
++#
++# Pdpc: the thresholds of this module's Windows tuning (mod_pdpc11_aec_data:
++# fmax 80, fmin 32, offsets 128, as for the ov13b10). The phase detection
++# pixels themselves come from the sensor properties; the kernel driver leaves
++# them uncorrected in the full size mode only.
+ #
+ # Bpc: the Windows driver's values (bpcbcc50_ife, Default node) up to a gain of
+ # 36 are the defaults; its region from 45 lies beyond the sensor's 16x analogue
+@@ -80,6 +83,11 @@ algorithms:
+           offsets: [ 0, 0, 0 ]
+   - Gamma:
+       gamma: 2.2
++  - Pdpc:
++      fmax: 80
++      fmin: 32
++      offset: 128
++      t2Offset: 128
+   - Bf:
+       grid: 5
+       window: 0.7
+diff --git a/src/libcamera/sensor/camera_sensor_properties.cpp b/src/libcamera/sensor/camera_sensor_properties.cpp
+index a61d4073..8641f362 100644
+--- a/src/libcamera/sensor/camera_sensor_properties.cpp
++++ b/src/libcamera/sensor/camera_sensor_properties.cpp
+@@ -506,6 +506,33 @@ const CameraSensorProperties *CameraSensorProperties::get(const std::string &sen
+ 				.vblankDelay = 2,
+ 				.hblankDelay = 2
+ 			},
++			/*
++			 * The layout of the vendors' drivers, which flat field
++			 * frames of the 4160x3120 mode with the sensor's own
++			 * correction off confirm, read out with both flips (the
++			 * rear camera of the Huawei MateBook E Go is mounted
++			 * upside down): 32 pixels on blue sites per 64x64 block,
++			 * in pairs 4 rows apart; in a flat field under a lamp
++			 * they read on average 1.16 to 1.19 times the level of
++			 * the blue pixels (about 0.65 of the green ones). The
++			 * kernel driver leaves them uncorrected in that mode
++			 * only.
++			 */
++			.phaseDetectPixels = {
++				.period = { 64, 64 },
++				.positions = {
++					{ Transform::HVFlip, {
++						{ 11, 0 }, { 55, 0 }, { 23, 8 }, { 43, 8 },
++						{ 7, 12 }, { 23, 12 }, { 43, 12 }, { 59, 12 },
++						{ 7, 16 }, { 59, 16 }, { 7, 24 }, { 59, 24 },
++						{ 7, 28 }, { 23, 28 }, { 43, 28 }, { 59, 28 },
++						{ 23, 32 }, { 43, 32 }, { 11, 40 }, { 55, 40 },
++						{ 11, 44 }, { 27, 44 }, { 39, 44 }, { 55, 44 },
++						{ 27, 48 }, { 39, 48 }, { 27, 56 }, { 39, 56 },
++						{ 11, 60 }, { 27, 60 }, { 39, 60 }, { 55, 60 },
++					} },
++				},
++			},
+ 		} },
+ 		{ "s5k4h7", {
+ 			.unitCellSize = { 1120, 1120 },

@@ -243,7 +243,7 @@ bool Device::init()
 		ALOGI("%s 检测到对焦马达（VCM），将声明 AF", name_.c_str());
 	}
 	auto model = props.get(libcamera::properties::Model);
-	facts_.hasPdPixels = !facts_.frontFacing && model && *model == "ov13b10";
+	facts_.pdLayout = !facts_.frontFacing && model ? pdLayoutFor(*model) : nullptr;
 
 	/*
 	 * ── 对外声明的输出尺寸 ──

@@ -32,6 +32,7 @@
 | `0021-libcamera-add-the-s5k4h7-sensor.patch` | 部分机器的前摄S5K4H7：传感器参数（黑电平、增益模型`码值/32`、曝光余量4行，均为传感器CCS寄存器的值）、传感器属性与`qcom-ife`调校文件`s5k4h7.yaml` |
 | `0022-libcamera-add-the-s5k3l6-sensor.patch` | 部分机器的后摄S5K3L6：传感器参数（黑电平与曝光余量8行取自Windows模组配置，增益模型`码值/32`）、传感器属性与`qcom-ife`调校文件`s5k3l6.yaml`；控件生效延迟经实测与OV13B10相同（2帧） |
 | `0023-pipeline-qcom-ife-keep-the-dual-ife-split-within-the-lens-shading-limits.patch` | 没有显示输出时，双IFE的分割列同样取镜头阴影网格允许的、最靠近中线的位置；4160像素宽的画面（S5K3L6全尺寸）原先的分割列使右侧条带从镜头阴影分块末尾附近开始 |
+| `0024-libcamera-s5k3l6-correct-the-phase-detection-pixels-in-the-ife.patch` | S5K3L6全尺寸模式的相位对焦像素位置（双向翻转读出，每64×64像素32个）与调校文件中的`Pdpc`，由IFE修正这些像素；与内核`kernel/camera/0044`配套 |
 | `libcamera-Android.bp` | AOSP Soong构建定义（复制到`external/libcamera/Android.bp`） |
 | `config.h` | 替代meson生成的`config.h`，将IPA与配置文件路径指向`/vendor/`对应目录 |
 
@@ -39,4 +40,4 @@
 
 1. **必须在AOSP树内由Soong编译**：Android NDK的`libc++`使用`std::__ndk1`内联命名空间，而AOSP平台使用`std::__1`。跨工具链预编译会导致所有含标准库类型参数的C++符号无法链接。
 2. **生成源码准备**：Soong构建消费的5个生成源文件（`control_ids.cpp`、`property_ids.cpp`、`version.cpp`、`ipa_pub_key.cpp`、`qcom-ife_ipa_proxy.cpp`）与`generated/include/libcamera/**`由[`scripts/camera/gen-libcamera-sources.sh`](../../scripts/camera/gen-libcamera-sources.sh)运行meson生成后放入`external/libcamera/generated/`。[`scripts/camera/setup-libcamera-tree.sh`](../../scripts/camera/setup-libcamera-tree.sh)一次完成铺上游源码、打补丁、放置`Android.bp`、生成与`config.h`。
-3. **只编`qcom-ife`**：`libcamera-Android.bp`编出`libcamera_base_gk3`、`libcamera_gk3`（管线只有`qcom-ife`）与`libcamera_ipa_qcom_ife_gk3`，调校文件由`device.mk`从`device/huawei/gaokun3/camera/ipa-data/qcom-ife/`安装到`/vendor/etc/libcamera/ipa/qcom-ife/`，须与打完全部补丁后`src/ipa/qcom-ife/data/`的同名文件一致（`0018`加入，`0020`修改，`0021`加入`s5k4h7.yaml`，`0022`加入`s5k3l6.yaml`）。软件ISP（`simple`管线与`softisp` IPA）不再编译；`0006`、`0007`、`0009`–`0011`只改软件ISP，保留在补丁集中以便后续`0014`起的补丁按原顺序打上。
+3. **只编`qcom-ife`**：`libcamera-Android.bp`编出`libcamera_base_gk3`、`libcamera_gk3`（管线只有`qcom-ife`）与`libcamera_ipa_qcom_ife_gk3`，调校文件由`device.mk`从`device/huawei/gaokun3/camera/ipa-data/qcom-ife/`安装到`/vendor/etc/libcamera/ipa/qcom-ife/`，须与打完全部补丁后`src/ipa/qcom-ife/data/`的同名文件一致（`0018`加入，`0020`修改，`0021`加入`s5k4h7.yaml`，`0022`加入`s5k3l6.yaml`，`0024`为其加入`Pdpc`）。软件ISP（`simple`管线与`softisp` IPA）不再编译；`0006`、`0007`、`0009`–`0011`只改软件ISP，保留在补丁集中以便后续`0014`起的补丁按原顺序打上。

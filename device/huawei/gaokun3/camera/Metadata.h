@@ -17,6 +17,8 @@
 #include <aidl/android/hardware/camera/device/StreamConfiguration.h>
 #include <system/camera_metadata.h>
 
+#include "PhaseDetect.h"
+
 namespace gaokun3 {
 
 /* 60 fps */
@@ -120,9 +122,9 @@ struct SensorFacts {
 	 *      框架会按"定焦但能设 AF 模式"理解，CameraX 会一直等一个不会到来的
 	 *      FOCUSED_LOCKED。 */
 	bool hasAf = false;
-	/* 传感器带有PhaseDetect能读的相位对焦像素：只有后摄ov13b10（布局见PhaseDetect.h）。
-	 * 部分机器的后摄是s5k3l6模组，它的相位对焦像素由传感器自行修正，RAW里没有相位信息，只做反差对焦。 */
-	bool hasPdPixels = false;
+	/* 传感器全尺寸RAW里相位对焦像素的布局（PhaseDetect.h）：后摄的ov13b10或s5k3l6模组；
+	 * 其余传感器为nullptr，只做反差对焦。 */
+	const PdLayout *pdLayout = nullptr;
 	/* 最近对焦距离（屈光度 = 1/m）。硬件手册没有可信值，按 10 diopter(10 cm) 声明，
 	 * 并把 FOCUS_DISTANCE_CALIBRATION 报成 UNCALIBRATED —— 不谎称已标定。 */
 	float minFocusDiopters = 10.0f;
