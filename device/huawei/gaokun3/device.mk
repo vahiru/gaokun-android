@@ -684,6 +684,13 @@ PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/firmware/ath11k/WCN6855/hw2.0/m3.bin:$(TARGET_COPY_OUT_VENDOR)/firmware/ath11k/WCN6855/hw2.1/m3.bin \
     $(LOCAL_PATH)/firmware/ath11k/WCN6855/hw2.0/regdb.bin:$(TARGET_COPY_OUT_VENDOR)/firmware/ath11k/WCN6855/hw2.1/regdb.bin
 
+# cfg80211的无线监管数据库（wifi/regdb，wireless-regdb发布包）。cfg80211在/vendor挂载前加载它，
+# 所以安装至ramdisk的/lib/firmware。缺少它时，下发国家码后cfg80211会反复等待CRDA超时约30秒，
+# 期间后续的国家码请求都要排队。见wifi/regdb/README.md。
+PRODUCT_COPY_FILES += \
+    $(LOCAL_PATH)/wifi/regdb/regulatory.db:ramdisk/lib/firmware/regulatory.db \
+    $(LOCAL_PATH)/wifi/regdb/regulatory.db.p7s:ramdisk/lib/firmware/regulatory.db.p7s
+
 # goldfish 命名空间：libwifi-hal-emu（mainline nl80211 通用 wifi HAL 实现）在里面
 PRODUCT_SOONG_NAMESPACES += device/generic/goldfish
 

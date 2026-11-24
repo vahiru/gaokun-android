@@ -133,6 +133,18 @@ OUT="${1:?用法: $0 <kernel-out-dir>}"
     `# USB_STORAGE/UAS：Android 下能看见 USB 棒上的 Ubuntu ESP，`
     `# 维护引导项/DTB 不用重启（kb18 仍是 =m，kb19 转正）`
 
+# ─── Wi-Fi国家码：让Android下发的国家码到达WCN6855固件 ───
+#   ath11k是REGULATORY_WIPHY_SELF_MANAGED，可用信道由固件按国家码给出。wpa_supplicant设置国家码
+#   （NL80211_CMD_REQ_SET_REG）时，cfg80211把请求转给ath11k_reg_notifier，但不开ATH_REG_DYNAMIC_USER_REG_HINTS
+#   时它直接返回（drivers/net/wireless/ath/ath11k/reg.c），国家只能由固件根据周围AP通告的国家（802.11d）自行确定。
+#   开启后框架确定的国家码（Gaokun3WifiOverlay，无基带时按扫描结果推断）也能送到固件；框架这一侧还需要
+#   wpa_supplicant的私有命令库（device/huawei/gaokun3/wifi/wpa_supplicant_8_lib）。
+#   ATH_REG_DYNAMIC_USER_REG_HINTS依赖CFG80211_CERTIFICATION_ONUS（再依赖EXPERT，见下文DPM_WATCHDOG一节）。
+#   ONUS只让几项选项可以修改，它们保持原值（CFG80211_REQUIRE_SIGNED_REGDB等仍为y）。
+./scripts/config --file "$OUT/.config" \
+    --enable CFG80211_CERTIFICATION_ONUS \
+    --enable ATH_REG_DYNAMIC_USER_REG_HINTS
+
 # ★ 最关键也最容易漏的一步：
 #   CONFIG_SECURITY_SELINUX=y 只是「编进内核」，不等于「被激活」。
 #   真正决定哪些 LSM 生效的是 CONFIG_LSM 这个字符串。
@@ -615,6 +627,7 @@ make ARCH=arm64 CROSS_COMPILE="$CROSS_COMPILE" O="$OUT" olddefconfig >/dev/null 
 MUST_Y="
 BLK_DEV_DM SECURITY_SELINUX EROFS_FS F2FS_FS DM_VERITY PM_WAKELOCKS
 CFG80211 MAC80211 ATH11K ATH11K_PCI PCI_PWRCTRL_PWRSEQ QRTR QRTR_SMD
+CFG80211_CERTIFICATION_ONUS ATH_REG_DYNAMIC_USER_REG_HINTS
 BT BT_QCA BT_HCIUART BT_HCIUART_QCA BT_RFCOMM BT_HIDP UHID
 PINCTRL_LPASS_LPI PINCTRL_SC8280XP_LPASS_LPI SC_LPASSCC_8280XP
 SND_SOC_SC8280XP SND_SOC_WSA883X SND_SOC_WCD938X SOUNDWIRE_QCOM
