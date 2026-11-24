@@ -1,0 +1,95 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] v4l2_codec2: report the picture size when it changes
+
+The framework puts C2StreamPictureSizeInfo::output into the output
+format, and for clients that use the output buffer array (synchronous
+NDK clients, or clients calling getOutputBuffers()) it sizes the
+buffers it copies the frames into from that format. DecodeComponent
+never updated the picture size after a source change, so after a
+resolution increase the copies keep the starting size, the framework
+fails to copy the frames ("tried 5 realloc and failed") and the codec
+reports an error. The software decoders set the new size on their
+interface and put it into the work's configUpdate.
+
+Do the same with the first frame of a new visible size.
+
+Checked on SC8280XP (Huawei MateBook E Go) with an H.264 stream that
+goes from 720p to 1080p, decoded by a synchronous byte-buffer client:
+before, the hardware decoder failed after 299 frames; with the patch all
+598 frames decode, identical to the software decoder. Surface and
+byte-buffer decoding of 8-bit and 10-bit streams is unchanged.
+
+Origin: local
+Upstream-Status: Pending
+---
+ components/DecodeComponent.cpp                |  9 +++++++++
+ components/DecodeInterface.cpp                | 19 +++++++++++++++++++
+ .../v4l2_codec2/components/DecodeInterface.h  |  5 +++++
+ 3 files changed, 33 insertions(+)
+
+diff --git a/components/DecodeComponent.cpp b/components/DecodeComponent.cpp
+index a409d11..70c8ccd 100644
+--- a/components/DecodeComponent.cpp
++++ b/components/DecodeComponent.cpp
+@@ -613,6 +613,15 @@ void DecodeComponent::onOutputFrameReady(std::unique_ptr<VideoFrame> frame) {
+     C2Work* work = it->second.get();
+ 
+     C2ConstGraphicBlock constBlock = std::move(frame)->getGraphicBlock();
++    // Report a new visible size with the first frame that has it, as the software decoders do.
++    // The framework puts the picture size into the output format's width and height and sizes
++    // the client's copies from them when the client uses the output buffer array (synchronous
++    // NDK clients, getOutputBuffers()). Without this update those clients fail on the first
++    // larger frame with "tried 5 realloc and failed".
++    if (std::unique_ptr<C2Param> sizeUpdate = mIntfImpl->updatePictureSize(
++                constBlock.crop().width, constBlock.crop().height)) {
++        work->worklets.front()->output.configUpdate.push_back(std::move(sizeUpdate));
++    }
+     std::shared_ptr<C2Buffer> buffer = C2Buffer::CreateGraphicBuffer(std::move(constBlock));
+     if (mPendingColorAspectsChange &&
+         work->input.ordinal.frameIndex.peeku() >= mPendingColorAspectsChangeFrameIndex) {
+diff --git a/components/DecodeInterface.cpp b/components/DecodeInterface.cpp
+index 0397deb..19128f9 100644
+--- a/components/DecodeInterface.cpp
++++ b/components/DecodeInterface.cpp
+@@ -498,6 +498,25 @@ c2_status_t DecodeInterface::queryHdrStaticInfo(
+     return C2_OK;
+ }
+ 
++std::unique_ptr<C2Param> DecodeInterface::updatePictureSize(uint32_t width, uint32_t height) {
++    if (width == 0 || height == 0) return nullptr;
++
++    C2StreamPictureSizeInfo::output size(0u, width, height);
++    C2StreamPictureSizeInfo::output current(0u, 0u, 0u);
++    if (query({&current}, {}, C2_DONT_BLOCK, nullptr) == C2_OK && current == size) {
++        return nullptr;
++    }
++
++    std::vector<std::unique_ptr<C2SettingResult>> failures;
++    const c2_status_t status = config({&size}, C2_MAY_BLOCK, &failures);
++    if (status != C2_OK) {
++        ALOGW("Failed to set the output picture size to %ux%u: %d", width, height, status);
++        return nullptr;
++    }
++    ALOGV("Output picture size changed to %ux%u", size.width, size.height);
++    return C2Param::Copy(size);
++}
++
+ c2_status_t DecodeInterface::queryColorAspects(
+         std::shared_ptr<C2StreamColorAspectsInfo::output>* targetColorAspects) {
+     std::unique_ptr<C2StreamColorAspectsInfo::output> colorAspects =
+diff --git a/components/include/v4l2_codec2/components/DecodeInterface.h b/components/include/v4l2_codec2/components/DecodeInterface.h
+index d5c006b..70de126 100644
+--- a/components/include/v4l2_codec2/components/DecodeInterface.h
++++ b/components/include/v4l2_codec2/components/DecodeInterface.h
+@@ -37,6 +37,11 @@ public:
+             std::shared_ptr<C2StreamColorAspectsInfo::output>* targetColorAspects);
+     // Returns C2_NOT_FOUND when the client gave no HDR static metadata.
+     c2_status_t queryHdrStaticInfo(std::shared_ptr<C2StreamHdrStaticInfo::output>* targetInfo);
++    // Sets the output picture size to the visible size of a decoded frame. Returns the new value
++    // for the work's configUpdate, or nullptr when the size is unchanged or was not accepted.
++    // The interface keeps the value, so the framework reads the same size when it queries the
++    // component again, e.g. when it resumes after a flush.
++    std::unique_ptr<C2Param> updatePictureSize(uint32_t width, uint32_t height);
+ 
+ private:
+     // Configurable parameter setters.
