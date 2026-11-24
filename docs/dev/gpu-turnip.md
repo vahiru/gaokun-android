@@ -191,3 +191,27 @@ GPU的每档OPP在`opp-peak-kBps`中声明对DDR（`ebi`）的峰值带宽投票
 
 - 画面某些元素时有时无、且`TU_DEBUG=sysmem`后消失时，先用`TU_DEBUG=gmem`确认是否每帧都出错；若是，问题多半在分块渲染下附件内容的载入与写回。
 - driconf按进程名匹配。经ANGLE的游戏中Turnip运行在游戏进程里，进程名就是包名；其他游戏遇到同类问题时，可以在`00-mesa-defaults.conf`中照原神的条目添加。
+
+## 十、未初始化的着色器变量（ANGLE `forceInitShaderVariables`）
+
+GLSL ES规定，读取未赋值的变量，或片段着色器在某条路径上没有写入输出变量就结束，得到的值未定义。在ANGLE + Turnip上，这些值是寄存器中的残留值。小米天气的背景引擎（`libmglnative.so`）中有两处这样的写法：
+
+- 计算大气透射率的片段着色器中，累加变量（`vec3 sum;`）没有赋初值就做`+=`，透射率因此取到残留值，天空整片为黑色。
+- 云层的片段着色器用提前`return`跳过不需要绘制的像素，而不是`discard`，这些像素不写输出。默认（mediump按fp16计算）时看不出来；关闭fp16后（`debug.mesa.ir3.shader.debug=nofp16`），每片云所在的矩形显示为绿青色渐变。
+
+`device.mk`设置`debug.angle.feature_overrides_enabled=forceInitShaderVariables`，打开ANGLE的前端特性`forceInitShaderVariables`。ANGLE转换每个GLES着色器时启用翻译器选项`initOutputVariables`与`initializeUninitializedLocals`：输出变量在`main`开头设为0，未赋值的局部变量在声明处设为0，函数的out参数在函数入口设为0。计算着色器没有输出变量，只初始化后两类。
+
+代价：正常着色器中的这些初始化通常会被随后的写入覆盖，由编译器作为无用写入删除，不增加指令；只有确实读取了未初始化值的着色器会多出指令。
+
+限制：
+
+- 应用用`glProgramBinary`保存的程序是ANGLE转换后的结果。ANGLE加载时只核对ANGLE版本、`GL_RENDERER`等信息，不核对编译选项，所以打开此设置之前保存的程序会继续使用，需清除该应用的缓存后才会重新转换。
+- 属性值按`:`分隔，可列出多个特性；调试其他ANGLE特性时需要保留`forceInitShaderVariables`。对应的环境变量`ANGLE_FEATURE_OVERRIDES_ENABLED`只要存在（即使为空）就优先于该属性。
+- Edge等Chromium浏览器自带的ANGLE也读取这个属性。
+- 直接使用Vulkan的应用不经过ANGLE，不受影响；SPIR-V中未初始化的值同样是未定义的。
+
+排查：
+
+- ANGLE在初始化EGL显示时读取该属性，运行时修改只对之后启动的进程生效。
+- 修改属性后，只需删除应用自己用`glProgramBinary`保存的程序（如小米天气的`cache/mgl_shader_cache`）；EGL blob缓存的键包含编译选项，不必删除。
+- 打开与关闭`nofp16`时画面不同、且都不对，多半是读到了未初始化的值：两种情况下寄存器分配不同，残留值也不同。
