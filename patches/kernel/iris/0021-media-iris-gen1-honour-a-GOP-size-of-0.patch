@@ -1,0 +1,83 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: iris: gen1: honour a GOP size of 0
+
+V4L2_CID_MPEG_VIDEO_GOP_SIZE accepts 0, which clients such as the
+Android Codec2 V4L2 HAL use to say that they request key frames
+themselves and want no periodic intra frames. iris_set_intra_period()
+returns -EINVAL for it, and the caller ignores the error, so no
+HFI_PROPERTY_CONFIG_VENC_INTRA_PERIOD reaches the gen1 firmware. Without
+that property the firmware codes every frame as an intra frame: a
+300-frame 1080p encode came out with 300 key frames.
+
+Send the longest intra period instead, 0x0fffffff P-frames, the value
+Qualcomm's own drivers send for an unlimited GOP. B-frames keep their
+existing handling, and other GOP sizes are converted as before.
+
+Checked on SC8280XP (Huawei MateBook E Go) with a Codec2 HAL that sets
+GOP_SIZE to 0: 300-frame HEVC and H.264 encodes with a 5 s key frame
+interval at 30 fps have key frames at frames 0 and 150 only, and with
+no key frame interval only at frame 0.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/media/platform/qcom/iris/iris_ctrls.c | 29 +++++++++++++------
+ .../qcom/iris/iris_hfi_gen1_defines.h         |  3 ++
+ 2 files changed, 23 insertions(+), 9 deletions(-)
+
+diff --git a/drivers/media/platform/qcom/iris/iris_ctrls.c b/drivers/media/platform/qcom/iris/iris_ctrls.c
+index c9a143b913..bcb4cd7f2a 100644
+--- a/drivers/media/platform/qcom/iris/iris_ctrls.c
++++ b/drivers/media/platform/qcom/iris/iris_ctrls.c
+@@ -1389,16 +1389,27 @@ int iris_set_intra_period(struct iris_inst *inst, enum platform_inst_fw_cap_type
+ 	u32 hfi_id = inst->fw_caps[cap_id].hfi_id;
+ 	struct hfi_intra_period intra_period;
+ 
+-	if (!gop_size || b_frame >= gop_size)
+-		return -EINVAL;
++	if (!gop_size) {
++		/*
++		 * A GOP size of 0 asks for no periodic intra frames: the client
++		 * requests key frames itself (V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME).
++		 * The firmware has no such mode, and without an intra period it
++		 * codes every frame as an intra frame, so give it the longest one.
++		 */
++		intra_period.pframes = HFI_INTRA_PERIOD_MAX_PFRAMES;
++		intra_period.bframes = b_frame;
++	} else {
++		if (b_frame >= gop_size)
++			return -EINVAL;
+ 
+-	/*
+-	 * intra_period represents the length of a GOP, which includes both P-frames
+-	 * and B-frames. The counts of P-frames and B-frames within a GOP must be
+-	 * communicated to the firmware.
+-	 */
+-	intra_period.pframes = (gop_size - 1) / (b_frame + 1);
+-	intra_period.bframes = b_frame;
++		/*
++		 * intra_period represents the length of a GOP, which includes both
++		 * P-frames and B-frames. The counts of P-frames and B-frames within
++		 * a GOP must be communicated to the firmware.
++		 */
++		intra_period.pframes = (gop_size - 1) / (b_frame + 1);
++		intra_period.bframes = b_frame;
++	}
+ 
+ 	return hfi_ops->session_set_property(inst, hfi_id,
+ 					     HFI_HOST_FLAGS_NONE,
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen1_defines.h b/drivers/media/platform/qcom/iris/iris_hfi_gen1_defines.h
+index 1a2e83f7b1..05ff022ad5 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen1_defines.h
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen1_defines.h
+@@ -497,6 +497,9 @@ struct hfi_max_num_b_frames {
+ 	u32 max_num_b_frames;
+ };
+ 
++/* P-frame count Qualcomm's drivers send in hfi_intra_period for an unlimited GOP */
++#define HFI_INTRA_PERIOD_MAX_PFRAMES	0x0fffffff
++
+ struct hfi_intra_period {
+ 	u32 pframes;
+ 	u32 bframes;

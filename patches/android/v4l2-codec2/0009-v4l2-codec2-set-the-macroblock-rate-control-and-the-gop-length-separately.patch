@@ -1,0 +1,98 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] v4l2_codec2: set the macroblock rate control and the GOP
+ length separately
+
+configureDevice() sets V4L2_CID_MPEG_VIDEO_MB_RC_ENABLE and a GOP length
+of 0 in one VIDIOC_S_EXT_CTRLS call and ignores the result. The call
+applies all of its controls or none, so on a device without
+MB_RC_ENABLE, such as Qualcomm iris, the GOP length stays at the
+driver's default, 30 on iris gen1. The firmware then adds an intra
+frame every 30 frames between the key frames the component requests at
+the configured interval. A screen recording at 120 fps with a 2 s
+interval got non-IDR I-frames at frames 30, 60, ..., 210 between the
+IDRs at 0 and 240, and they took about a sixth of the bytes.
+
+Set the two controls in separate calls. For the GOP length, query the
+control's range first: the control framework clamps an integer to the
+range instead of rejecting it, so a device whose minimum is 1 would
+silently get a GOP length of 1, a key frame on every frame. Such a
+device, or one that rejects 0, gets the longest GOP length it supports;
+a device without the control is left alone. A negative key frame
+interval gives a key frame period of 0, which the counter divided by
+and initialize() asserted against; treat it as "the first frame and
+requested key frames only".
+
+On iris gen1 this also needs the driver to honour a GOP length of 0
+("media: iris: gen1: honour a GOP size of 0"). Without that fix the
+driver accepts the control, drops it when streaming starts, and the
+firmware codes every frame as an intra frame.
+
+Checked on SC8280XP (Huawei MateBook E Go) with that kernel fix:
+300-frame HEVC and H.264 encodes at 30 fps with a 5 s key frame interval
+have key frames at frames 0 and 150 only, and with a negative interval
+at frame 0 only; before, both had a key frame every 30 frames.
+
+Origin: local
+Upstream-Status: Pending
+---
+ v4l2/V4L2Encoder.cpp | 32 ++++++++++++++++++++++++++------
+ 1 file changed, 26 insertions(+), 6 deletions(-)
+
+diff --git a/v4l2/V4L2Encoder.cpp b/v4l2/V4L2Encoder.cpp
+index 172c9ba..d5adf3b 100644
+--- a/v4l2/V4L2Encoder.cpp
++++ b/v4l2/V4L2Encoder.cpp
+@@ -215,7 +215,6 @@ bool V4L2Encoder::initialize(C2Config::profile_t outputProfile, std::optional<ui
+                              std::optional<uint32_t> peakBitrate) {
+     ALOGV("%s()", __func__);
+     ALOG_ASSERT(mTaskRunner->RunsTasksInCurrentSequence());
+-    ALOG_ASSERT(keyFramePeriod > 0);
+ 
+     mVisibleSize = visibleSize;
+     mKeyFramePeriod = keyFramePeriod;
+@@ -323,7 +322,9 @@ void V4L2Encoder::handleEncodeRequest() {
+             return;
+         }
+     }
+-    mKeyFrameCounter = (mKeyFrameCounter + 1) % mKeyFramePeriod;
++    // A period of 0 (negative key frame interval) asks for no periodic key frames: only the first
++    // frame and the frames requested through requestKeyframe() are key frames.
++    mKeyFrameCounter = mKeyFramePeriod > 0 ? (mKeyFrameCounter + 1) % mKeyFramePeriod : 1;
+ 
+     // Enqueue the input frame in the V4L2 device.
+     uint64_t index = encodeRequest.video_frame->index();
+@@ -612,11 +613,30 @@ bool V4L2Encoder::configureDevice(C2Config::profile_t outputProfile,
+         // assume the operation was successful for now.
+     }
+ 
+-    // Additional optional controls:
++    // Additional optional controls, each set on its own: VIDIOC_S_EXT_CTRLS applies all controls of
++    // a call or none, so a control the device lacks would take the others with it.
+     // - Enable macroblock-level bitrate control.
+-    // - Set GOP length to 0 to disable periodic key frames.
+-    mDevice->setExtCtrls(V4L2_CTRL_CLASS_MPEG, {V4L2ExtCtrl(V4L2_CID_MPEG_VIDEO_MB_RC_ENABLE, 1),
+-                                                V4L2ExtCtrl(V4L2_CID_MPEG_VIDEO_GOP_SIZE, 0)});
++    if (!mDevice->setExtCtrls(V4L2_CTRL_CLASS_MPEG,
++                              {V4L2ExtCtrl(V4L2_CID_MPEG_VIDEO_MB_RC_ENABLE, 1)})) {
++        ALOGV("Device doesn't support macroblock-level bitrate control");
++    }
++    // - Disable periodic key frames: we request key frames ourselves. The control framework clamps
++    //   an integer to the control's range instead of rejecting it, so check the range first: a
++    //   device whose GOP length starts at 1 would otherwise code every frame as a key frame. Such a
++    //   device, or one that rejects 0, gets the longest GOP length it supports.
++    struct v4l2_query_ext_ctrl gopCtrl;
++    memset(&gopCtrl, 0, sizeof(gopCtrl));
++    gopCtrl.id = V4L2_CID_MPEG_VIDEO_GOP_SIZE;
++    if (mDevice->ioctl(VIDIOC_QUERY_EXT_CTRL, &gopCtrl) != 0) {
++        ALOGV("Device doesn't support setting the GOP length");
++    } else if ((gopCtrl.minimum > 0 ||
++                !mDevice->setExtCtrls(V4L2_CTRL_CLASS_MPEG,
++                                      {V4L2ExtCtrl(V4L2_CID_MPEG_VIDEO_GOP_SIZE, 0)})) &&
++               !mDevice->setExtCtrls(V4L2_CTRL_CLASS_MPEG,
++                                     {V4L2ExtCtrl(V4L2_CID_MPEG_VIDEO_GOP_SIZE,
++                                                  static_cast<int32_t>(gopCtrl.maximum))})) {
++        ALOGW("Failed to disable periodic key frames on the device");
++    }
+ 
+     // All controls below are codec-specific.
+     if (outputProfile >= C2Config::PROFILE_AVC_BASELINE &&
