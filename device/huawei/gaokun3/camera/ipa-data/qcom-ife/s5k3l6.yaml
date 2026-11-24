@@ -12,9 +12,12 @@
 # BlackLevel: the camera sensor helper gives the level.
 #
 # Agc, Gamma and Bf: as for the ov13b10, which has the same focal length,
-# f-number and focus actuator. The sensor corrects its phase detection pixels
-# itself (the kernel driver sets bit 2 of register 0x3403, as the Windows
-# driver does), hence no Pdpc.
+# f-number and focus actuator.
+#
+# Pdpc: the thresholds of this module's Windows tuning (mod_pdpc11_aec_data:
+# fmax 80, fmin 32, offsets 128, as for the ov13b10). The phase detection
+# pixels themselves come from the sensor properties; the kernel driver leaves
+# them uncorrected in the full size mode only.
 #
 # Bpc: the Windows driver's values (bpcbcc50_ife, Default node) up to a gain of
 # 36 are the defaults; its region from 45 lies beyond the sensor's 16x analogue
@@ -80,6 +83,11 @@ algorithms:
           offsets: [ 0, 0, 0 ]
   - Gamma:
       gamma: 2.2
+  - Pdpc:
+      fmax: 80
+      fmin: 32
+      offset: 128
+      t2Offset: 128
   - Bf:
       grid: 5
       window: 0.7

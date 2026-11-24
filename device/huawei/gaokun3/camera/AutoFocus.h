@@ -4,7 +4,7 @@
  *
  * ★ 信号：马达是内核暴露的 v4l2 子设备（dw9714），由 HAL 自己搜索。清晰度分数取 AF 区域里
  *   亮度的梯度能量，或者 libcamera 从 IFE 对焦统计算出的 FocusFoM（见 onFrame()）；全尺寸
- *   模式下另有 RAW 里 ov13b10 的 PD 像素算出的相位错位（见下面 Phase detection 一段）。
+ *   模式下另有 RAW 里后摄 PD 像素算出的相位错位（见下面 Phase detection 一段）。
  *
  * ★ 判据与曝光无关：梯度能量除以亮度均值的平方，AGC 换曝光、增益时比值不动 ——
  *   否则"越亮越清晰"会把马达一路推到曝光最好而画面最糊的位置。
@@ -36,8 +36,9 @@
  * Phase detection: with the full-size RAW frame (full-size sensor mode only,
  * see PhaseDetect.h) a search first moves straight to where the PD disparity
  * points and measures again after each move; it ends when the disparity is
- * below kPdDone. The first move uses kPdCodesPerUnit lens codes per unit of
- * disparity, later ones the slope between the last two measurements (secant):
+ * below kPdDone. The first move uses the layout's codesPerUnit (PhaseDetect.h)
+ * lens codes per unit of disparity, later ones the slope between the last two
+ * measurements (secant):
  * the codes per unit change along the travel (the lens moves less per code
  * below the focus of a 30-50 cm target) and with the scene. It falls back to
  * the contrast sweep, from where the lens is, when the disparity is not
@@ -127,8 +128,9 @@ public:
 	 * or move frames); Session maps the RAW buffer only then.
 	 */
 	bool wantsRaw() const;
-	/* Whether this stream configuration delivers RAW frames for phase. */
-	void setPhaseAvailable(bool available);
+	/* The PD layout when this stream configuration delivers RAW frames for
+	 * phase, else nullptr. */
+	void setPhaseLayout(const PdLayout *layout);
 	uint8_t lensState() const;
 	float focusDistance() const;      /* 屈光度（1/m），UNCALIBRATED 下的标称值 */
 
@@ -172,17 +174,17 @@ private:
 	static constexpr int kDropPoints = 2;
 	static constexpr int kMaxMoves = 24;        /* 兜底：探测次数上限 */
 	/*
-	 * Phase detection (experiments/rear-pdaf-20261103/notes.md). On a textured
-	 * target at 30-50 cm the disparity is zero at the contrast peak, about 300
-	 * codes per unit above it and about 650 below it, and saturates (keeping
-	 * its sign) more than ~200 codes away; a search on 11-04 measured 660-870
-	 * codes per unit around 225-511. The first step uses kPdCodesPerUnit
-	 * (short of the target rather than past it); later steps use the measured
-	 * slope when the disparity changed by at least kPdSecantMinDelta; a slope
-	 * outside kPdMinCodesPerUnit..kPdMaxCodesPerUnit (saturated disparity,
-	 * noise) is ignored and the previous gain kept.
+	 * Phase detection. On a textured target at 30-50 cm the ov13b10's disparity
+	 * is zero at the contrast peak, about 300 codes per unit above it and about
+	 * 650 below it, and saturates (keeping its sign) more than ~200 codes away;
+	 * a phase search measured 660-870 codes per unit around 225-511. The
+	 * s5k3l6's is linear from code 150 to 700. The first step uses the layout's
+	 * codesPerUnit, 300 for the ov13b10 (short of the target rather than past
+	 * it) and 270 for the s5k3l6; later steps use the measured slope when the
+	 * disparity changed by at least kPdSecantMinDelta; a slope outside
+	 * kPdMinCodesPerUnit..kPdMaxCodesPerUnit (saturated disparity, noise) is
+	 * ignored and the previous gain kept.
 	 */
-	static constexpr double kPdCodesPerUnit = 300.0;
 	static constexpr double kPdMinCodesPerUnit = 150.0;
 	static constexpr double kPdMaxCodesPerUnit = 1500.0;
 	static constexpr double kPdSecantMinDelta = 0.05;
@@ -263,11 +265,11 @@ private:
 	int startAge_ = 99;              /* setMode() calls since a START in a continuous mode */
 	std::map<int, double> samples_;  /* this search's (position, score) samples */
 	bool phaseMode_ = false;         /* this search follows the PD disparity */
-	bool havePhase_ = false;         /* this configuration delivers RAW frames (setPhaseAvailable) */
+	const PdLayout *pdLayout_ = nullptr; /* RAW frames for phase come with this layout (setPhaseLayout) */
 	int noRaw_ = 0;                  /* phase-search frames in a row without their RAW frame */
 	int pdSteps_ = 0;
 	int pdOff_ = 0;                  /* frames in a row with the disparity above kPdRescan */
-	double pdGain_ = kPdCodesPerUnit; /* lens codes per unit of disparity, this search */
+	double pdGain_ = 0.0;            /* lens codes per unit of disparity, this search */
 	int pdLastPos_ = -1;             /* last phase measurement: lens position, disparity */
 	double pdLastD_ = 0.0;
 	bool pdRescanOk_ = true;         /* the last phase search settled: trust it for rescans */

@@ -386,11 +386,11 @@ ndk::ScopedAStatus Session::configureStreams(const StreamConfiguration &cfg,
 	const int32_t halfH = facts_.activeH / 2;
 	const bool fullSize = !(maxW <= halfW && maxH <= halfH);
 	/*
-	 * 相位对焦要 RAW 帧，而 ov13b10 只在全尺寸模式里有 PD 像素（见 PhaseDetect.h）：一并
-	 * 要一路 RAW。它来自像素通路旁边的 RDI，与 NV12 是同一帧传感器数据。RAW里没有PD
-	 * 像素的传感器（后摄的s5k3l6模组由传感器自行修正）不要这路RAW，只做反差对焦。
+	 * 相位对焦要RAW帧，而后摄的RAW只在全尺寸模式里带有PD像素（见PhaseDetect.h）：
+	 * 一并要一路RAW。它来自像素通路旁边的RDI，与NV12是同一帧传感器数据。PD像素布局
+	 * 未知的传感器不请求这路RAW，只做反差对焦。
 	 */
-	bool withRaw = fullSize && facts_.hasAf && facts_.hasPdPixels;
+	bool withRaw = fullSize && facts_.hasAf && facts_.pdLayout;
 
 	/*
 	 * 硬件 ISP 能同时出两路 NV12：大的一路走 FULL，给 JPEG；小的一路走显示路径，由 IFE
@@ -574,9 +574,10 @@ ndk::ScopedAStatus Session::configureStreams(const StreamConfiguration &cfg,
 		rawWidth_ = rc.size.width;
 		rawHeight_ = rc.size.height;
 		/*
-		 * PhaseDetect reads CSI-2 packed 10-bit GRBG at full size, with the PD
-		 * positions measured on a readout that libcamera flipped H+V (DT
-		 * rotation 180). The driver keeps GRBG under flips, so the format
+		 * PhaseDetect reads CSI-2 packed 10-bit Bayer at full size, with the PD
+		 * positions given on a readout that libcamera flipped H+V (DT rotation
+		 * 180), in the layout's Bayer order. The ov13b10 driver keeps GRBG
+		 * under flips (the s5k3l6's order follows them), so the format alone
 		 * does not show them: compare the configured orientation with the
 		 * mounting one (libcamera falls back to no flips when it can't do the
 		 * transform, and then reports the mounting orientation).
@@ -584,14 +585,17 @@ ndk::ScopedAStatus Session::configureStreams(const StreamConfiguration &cfg,
 		const auto rot = cam_->properties().get(libcamera::properties::Rotation);
 		const libcamera::Transform readout =
 			config_->orientation / libcamera::orientationFromRotation(rot ? *rot : 0);
-		rawForPhase_ = rc.pixelFormat == libcamera::formats::SGRBG10_CSI2P &&
+		const libcamera::PixelFormat pdFmt = facts_.pdLayout && facts_.pdLayout->gbrg
+							   ? libcamera::formats::SGBRG10_CSI2P
+							   : libcamera::formats::SGRBG10_CSI2P;
+		rawForPhase_ = facts_.pdLayout && rc.pixelFormat == pdFmt &&
 			       rawWidth_ == facts_.activeW && rawHeight_ == facts_.activeH &&
 			       readout == libcamera::Transform::HVFlip;
 		ALOGI("RAW 流 %s stride %u 读出 %s%s", rc.toString().c_str(), rc.stride,
 		      libcamera::transformToString(readout),
 		      rawForPhase_ ? "，用于相位对焦" : "，格式或读出方向不符，不做相位对焦");
 	}
-	af_.setPhaseAvailable(rawForPhase_);
+	af_.setPhaseLayout(rawForPhase_ ? facts_.pdLayout : nullptr);
 
 	/* 上一次配置若在建池之后失败（start 失败等），池里还是指向旧 allocator 缓冲的 Request ——
 	 * 换 allocator 之前先清掉，别让新旧两代混在一个池里。此时没有在途请求（streaming_ 为假）。 */

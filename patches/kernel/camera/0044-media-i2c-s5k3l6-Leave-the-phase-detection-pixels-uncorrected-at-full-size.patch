@@ -1,0 +1,58 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: i2c: s5k3l6: Leave the phase detection pixels
+ uncorrected at full size
+
+The S5K3L6 has 32 half-shielded phase detection pixels in each 64x64
+block, on blue sites. The Windows settings have the sensor correct them
+in every mode (bit 2 of register 0x3403, written as part of 0x3402), so
+the frame carries no phase information.
+
+Clear that bit in the 4160x3120 mode, as the vendors' drivers do in
+their phase detection modes, so that the camera stack can measure the
+phase from the frame; the ISP then corrects these pixels in the image.
+The other modes keep the correction: as in the vendors' drivers, phase
+detection uses the full size mode only.
+
+On an S5K3L6 unit, clearing the bit changes exactly these 32 pixels per
+block of a flat field (by 16 to 18 percent), and no other. Over a lens
+sweep on a textured target, the phase measured from these pixels changes
+linearly with the lens position and crosses zero near the contrast peak.
+On a photo of a plain wall, the pixels corrected by the ISP stand out by
+at most about 0.4 percent of the level, about as much as on a photo of
+white paper taken with the sensor's own correction.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/media/i2c/s5k3l6.c | 10 ++++++----
+ 1 file changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/media/i2c/s5k3l6.c b/drivers/media/i2c/s5k3l6.c
+index 377c737f36..4424f48be0 100644
+--- a/drivers/media/i2c/s5k3l6.c
++++ b/drivers/media/i2c/s5k3l6.c
+@@ -214,9 +214,11 @@ static const struct cci_reg_sequence s5k3l6_init_regs_b[] = {
+ };
+ 
+ /*
+- * In every mode, the 16-bit write to 0x3402 sets 0x3403 to 0x46, whose bit 2
+- * has the sensor correct its phase detection pixels (32 per 64x64 block, on
+- * blue sites), as the Windows settings do.
++ * The 16-bit write to 0x3402 sets 0x3403, whose bit 2 has the sensor correct
++ * its phase detection pixels (32 per 64x64 block, on blue sites). The Windows
++ * settings set it in every mode. The 4160x3120 mode clears it, for phase
++ * detection from the frame, and the ISP corrects these pixels in the image;
++ * the other modes keep it.
+  */
+ static const struct cci_reg_sequence s5k3l6_4160x3120_regs[] = {
+ 	{ CCI_REG16(0x0344), 0x0020 },
+@@ -262,7 +264,7 @@ static const struct cci_reg_sequence s5k3l6_4160x3120_regs[] = {
+ 	{ CCI_REG16(0x314a), 0x5f00 },
+ 	{ CCI_REG16(0x3300), 0x0000 },
+ 	{ CCI_REG16(0x3400), 0x0000 },
+-	{ CCI_REG16(0x3402), 0x4e46 },
++	{ CCI_REG16(0x3402), 0x4e42 },	/* 0x3403 bit 2 clear, see above */
+ 	{ CCI_REG16(0x32b2), 0x0006 },
+ 	{ CCI_REG16(0x32b4), 0x0006 },
+ 	{ CCI_REG16(0x32b6), 0x0006 },

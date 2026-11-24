@@ -154,10 +154,10 @@ void AutoFocus::startScan()
 	stable_ = 0;
 	fineDone_ = false;
 	samples_.clear();
-	phaseMode_ = havePhase_;
+	phaseMode_ = pdLayout_ != nullptr;
 	pdSteps_ = 0;
 	pdOff_ = 0;
-	pdGain_ = kPdCodesPerUnit;
+	pdGain_ = pdLayout_ ? pdLayout_->codesPerUnit : 0.0;
 	pdLastPos_ = -1;
 	pdConfirm_ = false;
 	pdDonePos_ = -1;
@@ -374,8 +374,9 @@ void AutoFocus::onFrame(const uint8_t *pixels, int w, int h, int stride, bool sc
 	/* Phase only where it is used (rescan check, phase search), not in settle
 	 * or move frames, nor while AUTO holds its lock. */
 	auto measure = [&]() {
-		return raw ? measurePhase(*raw, region_[0], region_[1], region_[2], region_[3])
-			   : PhaseResult{};
+		return raw && pdLayout_ ? measurePhase(*raw, *pdLayout_, region_[0], region_[1],
+							region_[2], region_[3])
+					: PhaseResult{};
 	};
 	auto trusted = [](const PhaseResult &r) {
 		return r.valid && r.confidence >= kPdMinConfidence;
@@ -628,8 +629,10 @@ void AutoFocus::onFrame(const uint8_t *pixels, int w, int h, int stride, bool sc
 	 * A search started under a configuration without RAW (the AF state
 	 * survives a reconfigure) switches to it when RAW frames come, as long as
 	 * it has not sampled or moved yet. */
-	if (!phaseMode_ && havePhase_ && raw && moves_ == 0 && samples_.empty())
+	if (!phaseMode_ && pdLayout_ && raw && moves_ == 0 && samples_.empty()) {
 		phaseMode_ = true;
+		pdGain_ = pdLayout_->codesPerUnit;
+	}
 	/*
 	 * Without RAW frames (a binned configuration, or several lost buffers in a
 	 * row) phase can't work: not a phase failure, so phase-based rescans stay
@@ -637,7 +640,7 @@ void AutoFocus::onFrame(const uint8_t *pixels, int w, int h, int stride, bool sc
 	 */
 	if (phaseMode_ && raw)
 		noRaw_ = 0;
-	if (phaseMode_ && !raw && havePhase_ && ++noRaw_ < 3)
+	if (phaseMode_ && !raw && pdLayout_ && ++noRaw_ < 3)
 		return;
 	if (phaseMode_ && !raw) {
 		ALOGI("AF 没有 RAW 帧，改用对比度扫描");
@@ -949,10 +952,10 @@ void AutoFocus::regionChanged(bool tap)
 	}
 }
 
-void AutoFocus::setPhaseAvailable(bool available)
+void AutoFocus::setPhaseLayout(const PdLayout *layout)
 {
 	std::lock_guard<std::mutex> lk(m_);
-	havePhase_ = available;
+	pdLayout_ = layout;
 }
 
 bool AutoFocus::wantsRaw() const
