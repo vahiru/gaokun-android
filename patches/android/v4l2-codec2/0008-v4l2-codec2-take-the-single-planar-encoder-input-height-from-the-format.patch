@@ -1,0 +1,60 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] v4l2_codec2: take the single-planar encoder input height from
+ the format
+
+The encoder sizes the frames of its input format convertor by codedSize(),
+which configureInputFormat() takes from
+V4L2Device::allocatedSizeFromV4L2Format(). That function derives the coded
+height from sizeimage (sizeimage * 8 / width / bits per pixel). When the
+device pads sizeimage beyond the frame, the height comes out too large:
+Qualcomm iris rounds the NV12 input size up to whole 4 KiB pages, so 640x480
+(sizeimage 462848) becomes 640x482.
+
+The convertor then allocates 640x482 NV12 buffers. minigbm aligns their luma
+plane to 512 rows and puts the chroma plane after it, while the device,
+following the V4L2 single-planar layout, reads the chroma at
+bytesperline x height = 640 x 480. Every converted frame (RGB input such as
+screen recording or GL-rendered surfaces) is encoded with its chroma taken
+from 32 rows above where it was written: the top 64 rows turn green and the
+colours of the whole picture move down. Byte-buffer input and NV12 surfaces
+are not converted and are not affected.
+
+On iris the frame falls 2048 bytes short of a whole number of pages when the
+stride is an odd multiple of 128 and the 32-aligned height an odd multiple of
+32. The derived height only grows when those 2048 bytes make up at least one
+row, i.e. for strides up to 1152: 640x480, 800x480, 854x480, 352x288,
+120x160 and the like. Wider frames such as 1920x1440 are padded as well but
+come out at the right height.
+
+For single-planar formats use the format's height, which is where the device
+expects the chroma to start. Multi-planar formats pass every plane with its
+own offset and keep the previous size. The convertor frames still cover
+sizeimage: minigbm pads NV12 by 12 KiB and rounds up to 4 KiB, more than
+iris adds.
+
+Origin: local
+Upstream-Status: Pending
+---
+ v4l2/V4L2Encoder.cpp | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/v4l2/V4L2Encoder.cpp b/v4l2/V4L2Encoder.cpp
+index 38ec2ce..172c9ba 100644
+--- a/v4l2/V4L2Encoder.cpp
++++ b/v4l2/V4L2Encoder.cpp
+@@ -508,6 +508,15 @@ bool V4L2Encoder::configureInputFormat(VideoPixelFormat inputFormat, uint32_t st
+     // Calculate the input coded size from the format.
+     // TODO(dstaessens): How is this different from mInputLayout->coded_size()?
+     mInputCodedSize = V4L2Device::allocatedSizeFromV4L2Format(*format);
++    // In a single-planar format the chroma planes follow the luma plane directly, so the device
++    // reads them at bytesperline x height. allocatedSizeFromV4L2Format() derives the height from
++    // sizeimage instead, which overshoots when the device pads the image size: iris rounds it up
++    // to whole pages, and 640x480 NV12 comes out as 640x482. The format convertor allocates its
++    // frames at this size, and gralloc can then place their chroma further down than the device
++    // reads it (minigbm aligns the 482 rows to 512). Use the format's height for these formats.
++    if (!mInputLayout->mMultiPlanar) {
++        mInputCodedSize.set(mInputCodedSize.width, mInputLayout->mCodedSize.height);
++    }
+ 
+     // Configuring the input format might cause the output buffer size to change.
+     auto outputFormat = mOutputQueue->getFormat();
