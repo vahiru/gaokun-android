@@ -568,7 +568,7 @@ def apply_patch_file(tree: pathlib.Path, project: str, patch_name: str,
     """把 <repo>/patches/<patch_name> 用 git apply 打进 AOSP 树的 <project>（幂等）。
 
     ★ 为什么要有这个助手：本仓 `patches/android/` 里的 **AOSP 侧**补丁（
-    hardware-interfaces/0001–0012 audio HAL、v4l2-codec2/0001–0007、tinyalsa/0001、drm-hwcomposer/0001–0005）
+    hardware-interfaces/0001–0012 audio HAL、v4l2-codec2/0001–0008、tinyalsa/0001、drm-hwcomposer/0001–0005）
     原先**没有任何消费者** —— 全靠人手动
     `git apply`。而本仓已经为"没有消费者的配置一定会漂"付过三次账
     （M13 的 BOARD_KERNEL_CMDLINE、M17 的上游 Venus 补丁集、以及 2026-09-12
@@ -1473,6 +1473,12 @@ def main():
     step(" [46] v4l2_codec2解码器输入缓冲区按码流大小分配（需kernel/iris/0019）: ", apply_patch_file(
         tree, "external/v4l2_codec2",
         "android/v4l2-codec2/0007-v4l2-codec2-size-decoder-input-buffers-for-the-stream-again.patch"))
+    # 编码器格式转换器的帧改按驱动格式中的高分配：iris把sizeimage补齐到4 KiB的倍数，由它反推出的高偏大（640x480得到482），
+    # minigbm把色度平面放到第512行之后，驱动却在第480行处读色度，录屏等需要转换的输入在640x480、352x288这类尺寸上色度错位32行。
+    # 在[46]打完的树上生成，排在它之后。
+    step(" [57] v4l2_codec2编码器转换帧按驱动格式中的高分配（录屏640x480等尺寸的色度）: ", apply_patch_file(
+        tree, "external/v4l2_codec2",
+        "android/v4l2-codec2/0008-v4l2-codec2-take-the-single-planar-encoder-input-height-from-the-format.patch"))
     # SystemUI对Class 1/2指纹只在人脸也锁定时才禁止指纹解锁，没有人脸识别时，指纹自己临时锁定期间仍会不断
     # 请求认证，框架逐次拒绝。补丁让它在锁定期间改为只检测接触（与Class 3相同）；锁定期满时HAL发出
     # onLockoutCleared，SystemUI随之恢复认证。指纹HAL（device/huawei/gaokun3/fingerprint）报告STRONG后，
