@@ -7,9 +7,9 @@
 主线内核`qcom-camss`在Titan 17x上只驱动RDI（Raw Dump Interface），把CSI-2原始拜耳帧原样写入内存，不做任何图像处理。本项目在内核中补上IFE（VFE的像素通路）硬件ISP（`patches/kernel/camera/0009`–`0036`），由`libcamera`的`qcom-ife`流水线与IPA（`patches/libcamera/0014`–`0020`）按帧下发ISP参数、读取统计并运行3A，再由自研AIDL Camera HAL向Android框架提供相机服务：
 
 ```
-前摄 Hi-846 (2-0020) ──► CSIPHY3 ──┐
+前摄 Hi-846/S5K4H7 ────► CSIPHY3 ──┐
                                    ├──► CSID0 ─┬─ IPP ─► VFE0像素通路（IFE）─┬─► FULL输出（NV12）
-后摄 OV13B10 (1-0036) ─► CSIPHY0 ──┤           │          ▲ 每帧ISP参数       ├─► 显示输出（NV12，缩放、变焦）
+后摄 OV13B10/S5K3L6 ───► CSIPHY0 ──┤           │          ▲ 每帧ISP参数       ├─► 显示输出（NV12，缩放、变焦）
                                    │           │                              └─► 统计（AWB网格、对焦、拜耳直方图）
                                    │           └─ RDI0 ─► VFE0 RDI0 ─► 原始拜耳（相位对焦）
                                    └──► CSID1 ── IPP ─► VFE1像素通路（后摄全尺寸时处理右半幅，双IFE）
@@ -25,7 +25,7 @@
 - **输出**：每个全功能VFE有FULL与显示两路图像输出，同一传感器帧可同时出两种尺寸（如全尺寸拍照与预览）；显示输出可按帧设置缩放窗口，用于数码变焦。
 - **参数与统计节点**：`msm_vfeN_pix_params`（META_OUTPUT）接收V4L2可扩展ISP参数缓冲，`msm_vfeN_pix_stats`（META_CAPTURE）输出AWB网格、对焦统计（BFStats23）与拜耳直方图（BHistStats14）。格式定义在UAPI头`include/uapi/linux/media/qcom/ife17x-config.h`，`patches/libcamera`中有同名的一份，两者须一致。
 - **帧编号与时间戳**：参数在CAMIF epoch 0（第20行）中断时应用到下一帧；图像、参数、统计与RDI原始帧按epoch统一编号，同一请求的各路缓冲始终属于同一传感器帧。像素通路、显示与统计缓冲的时间戳取该帧epoch 0的中断时刻（队列标记`V4L2_BUF_FLAG_TSTAMP_SRC_SOE`），RDI缓冲仍为写完时刻。
-- **双IFE**：单个IFE一行最多3840像素，后摄全尺寸（4208×3120）由两个CSID各裁一半送两个IFE，主IFE持有缓冲，从IFE按主IFE的步幅写右半幅；参数同时下发两侧，统计按条带拆分后合入同一统计缓冲。
+- **双IFE**：单个IFE一行最多3840像素，后摄全尺寸（OV13B10为4208列宽，S5K3L6为4160列宽）由两个CSID各取约一半送两个IFE，主IFE持有缓冲，从IFE按主IFE的步幅写右半幅；参数同时下发两侧，统计按条带拆分后合入同一统计缓冲。
 - **出错恢复**：VFE总线错误或CSID FIFO溢出后，像素通路不会自行恢复，内核以`vb2_queue_error()`使相关队列全部失败，用户态收到`EPOLLERR`/`-EIO`后重启数据流（实测60–70 ms恢复出帧）；CSI-2 CRC/ECC错误只使当帧的FULL与显示缓冲失败。
 - **供电与时钟**：CAMSS按各时钟频率投MMCX电压档（屏幕关闭时显示控制器不再抬高MMCX，未投票会导致全尺寸通路溢出甚至整机复位）；`rpmhpd`使MX不低于MMCX，`camcc`为PLL投MX；各CSIPHY使用自己的供电（`patches/kernel/dts/0023`、`0024`）。
 
@@ -45,36 +45,39 @@
 
 | 部件 | 前置相机（`CAMF`） | 后置相机（`CAMS`） |
 |---|---|---|
-| 传感器型号 | Hynix Hi-846或Samsung S5K4H7（均为8 MP，3264×2448，见下文第4节） | OmniVision OV13B10（13 MP，4208×3120） |
-| CCI总线与I2C地址 | `cci1` bus 1，Hi-846为`0x20`（`2-0020`），S5K4H7为`0x2d`（`2-002d`） | `cci0` bus 0，`0x36`（`1-0036`） |
-| MIPI CSI-2通路 | `CSIPHY3`，4-lane | `CSIPHY0`，4-lane（560 MHz link freq） |
-| 拜耳排列格式 | Hi-846为`SGBRG10_CSI2P`，S5K4H7为`SGRBG10_CSI2P` | `SGRBG10_CSI2P` |
-| MCLK时钟 | `camcc_mclk3_clk`（24 MHz） | `camcc_mclk4_clk`（19.2 MHz，匹配上游寄存器表） |
+| 传感器型号 | Hynix Hi-846或Samsung S5K4H7（均为8 MP，3264×2448，见下文第4节） | OmniVision OV13B10或Samsung S5K3L6（均为13 MP，4208×3120，见下文第4节） |
+| CCI总线与I2C地址 | `cci1` bus 1，Hi-846为`0x20`（`2-0020`），S5K4H7为`0x2d`（`2-002d`） | `cci0` bus 0，OV13B10为`0x36`（`1-0036`），S5K3L6为`0x10`（`1-0010`） |
+| MIPI CSI-2通路 | `CSIPHY3`，4-lane | `CSIPHY0`，4-lane（OV13B10为560 MHz link freq，S5K3L6随模式为600、284或260 MHz） |
+| 拜耳排列格式 | Hi-846为`SGBRG10_CSI2P`，S5K4H7为`SGRBG10_CSI2P` | OV13B10为`SGRBG10_CSI2P`；S5K3L6随翻转变化，不翻转时为`SGRBG10_CSI2P`，后摄使用的水平与垂直翻转读出为`SGBRG10_CSI2P` |
+| MCLK时钟 | `camcc_mclk3_clk`（24 MHz） | `camcc_mclk4_clk`（OV13B10为19.2 MHz，匹配上游寄存器表；S5K3L6为24 MHz） |
 | 复位与供电使能GPIO | Reset `GPIO 15`；DVDD 1.2V使能`GPIO 44`（`vreg_camf`） | Reset `GPIO 7`；DVDD使能`GPIO 92`（`vreg_camr`） |
 | PMIC供电轨 | `vdda` = `LDO11_C`（2.8V），`vddio` = `LDO2_C`（1.8V） | `avdd` = `LDO2_B`（2.8V），`dovdd` = `LDO2_C`（1.8V） |
-| 附加外设 | — | 对焦马达DW9714（`1-000c`，`LDO7_B` 2.8V）、模组EEPROM（`1-0050`，16 KiB） |
+| 附加外设 | — | 对焦马达DW9714（`1-000c`，`LDO7_B` 2.8V）、模组EEPROM（OV13B10为`1-0050`，S5K3L6为`1-0051`，均为16 KiB） |
 
 ### 1. 后摄`LDO2_B`与显示面板共轨机制（`patches/kernel/dts/0005`、`patches/kernel/camera/0003`）
 
-`LDO2_B`同时连接显示面板的`vddi`（1.8V）与后摄OV13B10的模拟供电`avdd`（2.8V）。RPMh稳压器仲裁器对同一条LDO取所有消费者投票的**最大值**：当后摄打开时，`ov13b10`驱动在`power_on()`中调用`regulator_set_voltage(avdd, 2800000, 2800000)`将`LDO2_B`抬升至2.8V；后摄关闭时在`power_off()`中放宽回`1.8V..2.8V`区间，稳压器自动回落至面板所需的1.8V。这与Windows PEP电源表的设计一致。
+`LDO2_B`同时连接显示面板的`vddi`（1.8V）与后摄OV13B10的模拟供电`avdd`（2.8V）。RPMh稳压器仲裁器对同一条LDO取所有消费者投票的**最大值**：当后摄打开时，`ov13b10`驱动在`power_on()`中调用`regulator_set_voltage(avdd, 2800000, 2800000)`将`LDO2_B`抬升至2.8V；后摄关闭时在`power_off()`中放宽回`1.8V..2.8V`区间，稳压器自动回落至面板所需的1.8V。这与Windows PEP电源表的设计一致。`s5k3l6`驱动与相机模组探测器（见第4节）对`LDO2_B`的处理相同。
 
 ### 2. 后置闪光灯（`patches/kernel/dts/0006`）
 
 机背闪光灯由PM8350C内置闪光模块驱动（而非GPIO 93直驱），物理LED并联在**通道1与通道4**（`led-sources = <1>, <4>`），在sysfs下注册为`/sys/class/leds/white:flash`（手电筒模式上限200 mA，闪光strobe上限600 mA / 400 ms）。为避免`v4l2-async`因等待额外subdev阻塞，设备树故意不在传感器节点引用`flash-leds`，由Camera HAL直接读写`/sys/class/leds/white:flash/brightness`。
 
-### 3. 后摄模组EEPROM（`1-0050`）
+### 3. 后摄模组EEPROM（OV13B10为`1-0050`，S5K3L6为`1-0051`）
 
-后摄模组搭载16 KiB EEPROM（挂载在CCI0总线`0x50`，与面板共用1.8V轨，亮屏即应答）。因高通CCI适配器不支持`I2C_RDWR`复合消息，读取时需使用两步SMBus操作（`i2cset`写16位大端地址指针，再连续调用`i2cget`逐字节读取）。原始转储位于[ov13b10-module-eeprom-0x50.bin](hw/ov13b10-module-eeprom-0x50.bin)。
+后摄模组搭载16 KiB EEPROM：OV13B10模组的挂载在CCI0总线`0x50`（与面板共用1.8V轨，亮屏即应答），S5K3L6模组的在`0x51`（内容见第4节）。高通CCI适配器把一次`I2C_RDWR`中的写地址与读数据分成两次传输执行，中间有停止位；EEPROM按写入的地址指针继续读，所以先写16位大端地址、再读即可读出（也可以用`i2cset`写地址指针后连续调用`i2cget`逐字节读取）。原始转储位于[ov13b10-module-eeprom-0x50.bin](hw/ov13b10-module-eeprom-0x50.bin)。
 
-### 4. 前摄的两种模组（`patches/kernel/camera/0038`、`0039`，`patches/kernel/dts/0029`）
+### 4. 前后摄的两种模组与相机模组探测器（`patches/kernel/camera/0038`–`0043`，`patches/kernel/dts/0029`、`0033`、`0034`）
 
-部分机器的前摄是Xinli的S5K4H7模组，而不是Hi-846。两者装在同一个位置，使用相同的供电、复位GPIO与MCLK，只是I2C地址不同。华为Windows驱动先探测Hi-846，失败后再探测S5K4H7（`com.qti.sensormodule.xinli_s5k4h7.bin`）。
+每个相机接口都可能装两种模组之一：前摄为Hi-846或Xinli的S5K4H7模组，后摄为OV13B10或Lijing的S5K3L6模组。同一接口的两种模组使用相同的供电、复位GPIO与MCLK，只是I2C地址不同。华为Windows驱动包含四种模组的配置（`com.qti.sensormodule.xinli_s5k4h7.bin`、`com.qti.sensormodule.lijing_s5k3l6.bin`等），前摄先探测Hi-846，失败后再探测S5K4H7。
 
-- **设备树**：`cci1` bus 1下同时描述`camera@20`（Hi-846）与`camera@2d`（S5K4H7），分别连接`camss`的`port@3`下`endpoint@0`与`endpoint@1`。未装配的那个传感器的驱动无法读取芯片ID，探测失败并释放供电与复位GPIO，另一个随即正常探测，与两者的探测先后无关。S5K4H7驱动此时仅输出一行info级别的日志并返回`-ENODEV`；Hi-846驱动返回`-EIO`，内核日志中有`hi846 2-0020: i2c read error: -6`等两行错误，不影响功能。
-- **共享复位GPIO**：两个节点引用同一根`GPIO 15`，gpiolib会把它视为共享GPIO，只能通过`gpio-shared-proxy`取得。因此`CONFIG_GPIO_SHARED_PROXY`必须为`=y`（`scripts/kernel-config-android.sh`），为`=m`时两个前摄都会一直等待代理而无法探测。
-- **引脚**：MCLK3（`GPIO 17`）与复位脚的引脚状态改由`tlmm`自身持有（`pinctrl-0`），不再写在传感器节点上：TLMM是严格模式的引脚控制器，同一引脚只能属于一个设备。
-- **`camss`**（`0039`）：一个CSIPHY只接一个传感器。某个传感器绑定时，若仍在等待的endpoint都位于已有传感器绑定的端口上，即视为未装配的备选模组，`camss`立即按`0004`的方式只保留已绑定的endpoint继续注册，不再等待20秒。
+- **设备树**（`dts/0029`、`0033`、`0034`）：每个接口下同时描述两个模组节点，前摄为`&cci2_i2c1`（`i2c-2`）下的`camera@20`（Hi-846）与`camera@2d`（S5K4H7），后摄为`&cci1_i2c0`（`i2c-1`）下的`camera@36`（OV13B10）与`camera@10`（S5K3L6），分别连接`camss`对应端口（前摄`port@3`，后摄`port@0`）下的`endpoint@0`与`endpoint@1`。四个节点的`status`均为`"fail-needs-probe"`，启动时不建立I2C设备。
+- **相机模组探测器**（`0041`、`0042`）：`drivers/platform/arm64/huawei-gaokun3-camera-prober.c`，只在`huawei,gaokun3`机型上注册。它为每个接口取一个模组节点（前摄取Hi-846节点，后摄取OV13B10节点）的供电、MCLK与复位GPIO给接口上电：拉低复位，三路供电相隔2 ms依次打开（后摄先在`LDO2_B`上请求2.8V），MCLK设为24 MHz，1 ms后释放复位，再等20 ms。随后按主线`i2c-of-prober`的方式在该接口的CCI总线上对各节点地址做一次单字节读，把应答的节点改为`"okay"`，给接口下电后再由那个节点的驱动正常探测；未装配的节点保持未启用。主线的`i2c_of_probe_component()`只处理全树第一个同类型节点所在的总线，并要求总线节点名为`i2c`，而前后摄的节点都叫`camera`，CCI的总线节点名为`i2c-bus`，`0041`为此新增`i2c_of_probe_component_on_bus()`。`CONFIG_HUAWEI_GAOKUN3_CAMERA_PROBER`必须为`=y`（`scripts/kernel-config-android.sh`）。内核日志中每个接口有一行结果，如`huawei_gaokun3_camera_prober huawei_gaokun3_camera_prober: rear camera: ovti,ov13b10 at /soc@0/cci@ac4b000/i2c-bus@0/camera@36`；没有模组应答时为`no module answers`。
+- **复位GPIO**：未启用的节点不参与gpiolib的共享GPIO扫描，所以同一接口的两个节点虽引用同一根复位GPIO（前摄`GPIO 15`，后摄`GPIO 7`），它也不是共享GPIO。`CONFIG_GPIO_SHARED_PROXY`仍保持`=y`：若两个已启用的节点共用一根GPIO，gpiolib只经`gpio-shared-proxy`交出这根GPIO，为`=m`时这两个设备会一直等待代理而无法探测。
+- **引脚**：两个接口的MCLK（`GPIO 17`、`GPIO 6`）与复位脚的引脚状态由`tlmm`自身持有（`pinctrl-0`），不写在传感器节点上：探测器在启用节点前就要驱动这些引脚，而TLMM是严格模式的引脚控制器，同一引脚只能属于一个设备。
+- **`camss`**（`0039`）：一个CSIPHY只接一个传感器。`camss`按自己的端点注册异步连接，不看对端节点是否启用；某个传感器绑定时，若仍在等待的endpoint都位于已有传感器绑定的端口上，即视为未装配的备选模组，`camss`立即按`0004`的方式只保留已绑定的endpoint继续注册，不再等待20秒。
+- **设备链接**：`camss`解析端点时传感器节点尚未启用，没有建立`camss`指向传感器的fw_devlink链接；传感器设备建立时只建立传感器指向`camss`的链接，传感器因此成为`camss`的消费者：它的驱动等`camss`绑定后才探测，`camss`解绑时它随之解绑，传感器运行时上电期间`camss`也保持运行时激活。`camss`本身只注册异步通知，不依赖传感器先探测，不会死锁。
 - **S5K4H7驱动**（`0038`）：MIPI CCS寄存器布局，24 MHz MCLK，4-lane、每lane 700 Mbps（链路频率350 MHz），RAW10，像素时钟280 MHz。上电时序、初始化与三个模式（3264×2448、3264×1836、1632×1224合并，均为30 fps）的寄存器设置取自上述Windows模组配置。拜耳排列、模拟增益范围与曝光限制在探测时从传感器的CCS寄存器读取。定焦，镜头参数与Hi-846模组的配置相同。
+- **S5K3L6驱动**（`0043`）：MIPI CCS寄存器布局，24 MHz MCLK，4-lane，RAW10，像素时钟480 MHz。上电时序、初始化与四个模式（全尺寸4160×3120、16:9裁切4160×2336与2×2合并2080×1560，均为30 fps；2×2合并1920×1080，60 fps）的寄存器设置取自Windows模组配置，链路频率随模式为600、284或260 MHz，设备树须列出全部三个。各模式最多读出有效区中央的4160列，驱动把这一区域报为默认裁剪区域（`V4L2_SEL_TGT_CROP_DEFAULT`），libcamera与HAL据此得到的视场与各模式实际读出的一致。曝光上限为帧长减8行，与Windows模组配置相同。各模式默认的帧长取自Windows设置：1080p模式为1630行（60 fps），其余为3260行（30 fps）。两个合并模式每行的读出时间相同，所以2080×1560模式的帧长允许缩短到1634行（60 fps）；HAL按阵列宽高比要画面，用的是这个模式而不是只读出中央3840×2160的1080p模式，60 fps由它提供。其余模式的帧长不短于Windows的设置。传感器CCS寄存器给出的最短帧消隐（25行）不可用：垂直消隐在合并模式下为25行、在4160列宽的模式下为40行时，传感器停止输出，直到重新开始取流（32行与50行仍正常）。拜耳排列、模拟增益范围与最短曝光在探测时从传感器的CCS寄存器读取，并以调试级别记入内核日志。与OV13B10模组共用对焦马达DW9714，焦距与光圈相同。传感器每64×64像素有32个相位对焦像素，位于B像素的位置；按Windows的设置，传感器自行修正这些像素（`0x3403`位2），RAW中没有相位信息，HAL只做反差对焦（`SensorFacts::hasPdPixels`）。模组EEPROM挂载在CCI0总线`0x51`（16位地址），存有出厂的镜头阴影标定（`0x14fe`起，四个通道各17×13，大端16位）与高通格式的相位对焦标定（`0x1bf0`起，17×13的左右增益图与8×6的DCC），目前都未使用。设备树`rotation`为180，翻转由libcamera经翻转控件设置。
 
 ## 三、CAMSS电源域（`titan_top_gdsc`）死锁修复
 
@@ -119,19 +122,20 @@ Android NDK的`libc++`使用内联命名空间`std::__ndk1`，而AOSP平台源�
 - **免签名进程内IPA加载（`patches/libcamera/0003`）**：编译宏`LIBCAMERA_IPA_TRUST_UNSIGNED`使`IPAManager`在没有`.sign`签名的情况下将IPA直接加载到HAL进程内线程运行。
 - **生成文件**：`scripts/camera/setup-libcamera-tree.sh`铺上游源码、打补丁、放置`Android.bp`，并调用`scripts/camera/gen-libcamera-sources.sh`由meson产出`control_ids.cpp`、`qcom-ife_ipa_proxy.cpp`等生成文件，详见[`patches/libcamera/README.md`](../../patches/libcamera/README.md)。
 
-### 2. 传感器增益与黑电平标定（`patches/libcamera/0002`、`0004`、`0021`）
+### 2. 传感器增益与黑电平标定（`patches/libcamera/0002`、`0004`、`0021`、`0022`）
 
-内核传感器驱动（`hi846.c`、`ov13b10.c`、`s5k4h7.c`）仅将`V4L2_CID_ANALOGUE_GAIN`原样写入传感器寄存器，不包含物理增益换算公式；若`libcamera`的`CameraSensorHelper`未收录该传感器，AGC会将`analogue-gain`锁死在`0`，导致画面接近全黑。曝光、模拟增益与`VBLANK`的生效延迟（前后摄均为2帧，`patches/libcamera/0014`）经IFE统计逐帧实测；S5K4H7的生效延迟尚未测量，暂按2帧处理。
+内核传感器驱动（`hi846.c`、`ov13b10.c`、`s5k4h7.c`、`s5k3l6.c`）仅将`V4L2_CID_ANALOGUE_GAIN`原样写入传感器寄存器，不包含物理增益换算公式；若`libcamera`的`CameraSensorHelper`未收录该传感器，AGC会将`analogue-gain`锁死在`0`，导致画面接近全黑。曝光、模拟增益与`VBLANK`的生效延迟（前后摄均为2帧，`patches/libcamera/0014`）经IFE统计逐帧实测；S5K3L6的生效延迟经逐帧实测，与OV13B10相同；S5K4H7的尚未测量，暂按2帧处理。
 
 | 传感器 | 黑电平（16位归一化） | 模拟增益模型 | 说明 |
 |---|---|---|---|
 | `hi846` | `blackLevel_ = 4096`（10位下为64，位于模拟增益之后的数字偏置） | `AnalogueGainLinear{1, 16, 0, 16}`，即$\text{gain} = 1 + \frac{\text{code}}{16}$ | 经固定曝光留出法实测标定（`code=0..240`对应`1.0×..16.0×`，留出验证误差<2.3%）；内核增益控件的步长为1（`patches/kernel/camera/0037`），AGC可按1/16一档调节；`code=8..16`逐档实测与公式相差0.3%以内 |
 | `ov13b10` | `blackLevel_ = 4096`（10位下为64） | $\text{gain} = \frac{\text{code}}{128}$，按传感器实际保留的档位取整：1×–2×步长1/16，2×–4×为1/8，4×–8×为1/4，8×–15.5×为1/2（`patches/libcamera/0005`） | 档位经实机增益扫描测得，避免AGC在相邻档位间来回跳变 |
 | `s5k4h7` | `blackLevel_ = 4096`（10位下为64） | `AnalogueGainLinear{1, 0, 0, 32}`，即$\text{gain} = \frac{\text{code}}{32}$（`code=32..512`对应`1.0×..16.0×`） | 黑电平、增益模型与曝光余量（4行）均为传感器CCS寄存器报告的值（`patches/libcamera/0021`），未经实测标定 |
+| `s5k3l6` | `blackLevel_ = 4096`（10位下为64） | `AnalogueGainLinear{1, 0, 0, 32}`，即$\text{gain} = \frac{\text{code}}{32}$（`code=32..512`对应`1.0×..16.0×`） | 黑电平、最大增益（16倍）与曝光余量（8行，内核驱动同样采用）取自Windows模组配置（`patches/libcamera/0022`）；增益模型与传感器CCS寄存器报告的一致，黑电平以及曝光与增益的线性经实测核对 |
 
 ### 3. `qcom-ife`流水线（`patches/libcamera/0018`）
 
-- **传感器模式与双IFE**：前摄最大3264×2448，单IFE；后摄全尺寸4208×3120走双IFE，流水线按镜头阴影网格允许的起点、并使显示输出的接缝尽量落在整列上来选分割列；2104×1560等合并模式走单IFE。
+- **传感器模式与双IFE**：前摄最大3264×2448，单IFE；后摄全尺寸（OV13B10为4208×3120，S5K3L6为4160×3120）走双IFE，分割列取条带宽度与镜头阴影网格都允许的、最靠近中线的位置，有显示输出时还使显示输出的接缝尽量落在整列上（`0023`）；2104×1560等合并模式走单IFE。
 - **数据流**：
   - 一路处理流来自FULL输出；配两路时（取景与拍照），较大的一路来自FULL，另一路来自显示输出，两路视场相同。
   - RAW流取自RDI，固定为最大模式，供HAL做相位对焦。
@@ -147,7 +151,7 @@ Android NDK的`libc++`使用内联命名空间`std::__ndk1`，而AOSP平台源�
   - 黑电平、伽马、镜头阴影、坏点与PD像素修正、ABF降噪表（按增益）。
   - 对焦：在`AfWindows`区域内由对焦统计算出`FocusFoM`，对焦算法在HAL中。
   - 帧长由`FrameDurationLimits`设定。
-- **调校文件**：`device/huawei/gaokun3/camera/ipa-data/qcom-ife/{hi846,ov13b10,s5k4h7,uncalibrated}.yaml`，安装到`/vendor/etc/libcamera/ipa/qcom-ife/`，与打完全部补丁后`src/ipa/qcom-ife/data/`的同名文件一致（`0018`加入，`0020`修改，`0021`加入`s5k4h7.yaml`）。数据来自华为Windows相机驱动的模组调校与实机标定；`Awb`与`Ccm`两段由`scripts/camera/gen-*-ccm.py`生成（见[`scripts/camera/README.md`](../../scripts/camera/README.md)）。缺少调校文件时IPA初始化失败，该摄像头不会注册。
+- **调校文件**：`device/huawei/gaokun3/camera/ipa-data/qcom-ife/{hi846,ov13b10,s5k4h7,s5k3l6,uncalibrated}.yaml`，安装到`/vendor/etc/libcamera/ipa/qcom-ife/`，与打完全部补丁后`src/ipa/qcom-ife/data/`的同名文件一致（`0018`加入，`0020`修改，`0021`加入`s5k4h7.yaml`，`0022`加入`s5k3l6.yaml`）。数据来自华为Windows相机驱动的模组调校与实机标定；`Awb`与`Ccm`两段由`scripts/camera/gen-*-ccm.py`生成（见[`scripts/camera/README.md`](../../scripts/camera/README.md)）。缺少调校文件时IPA初始化失败，该摄像头不会注册。
 
 ### 5. 已知限制（内核与`libcamera`）
 
@@ -169,11 +173,11 @@ HAL实现`android.hardware.camera.provider-V3`，组件说明详见[`device/huaw
 4. **依赖的流水线行为**（流水线一侧的说明见第四节第3部分）：
    - 两路时显示路径的尺寸调成FULL视场的宽高比（宽度16对齐），只缩小不放大；请求可以不带FULL与RAW；同一请求的各路缓冲来自同一帧，请求按入队顺序完成。
    - `ScalerCrop`按请求下发（坐标相对`ScalerCropMaximum`），只作用于显示路径，元数据报实际显示的矩形。
-   - `FocusFoM`每帧输出，`AfWindows`按请求下发；RAW取最大的传感器模式（只有它带相位像素），读出变换为HVFlip时HAL才做相位对焦。
+   - `FocusFoM`每帧输出，`AfWindows`按请求下发；RAW取最大的传感器模式（只有它带相位像素），读出变换为HVFlip且传感器为ov13b10时HAL才做相位对焦。
    - 同一帧的图像缓冲都打该帧开始（SOE）的时刻，不随变焦与是否带FULL变化；HAL以显示路径（单路时就是那一路）的时间戳作快门与`SENSOR_TIMESTAMP`，不用RAW的时间戳。
    - 帧状态不是`FrameSuccess`时HAL把整个请求按出错上报；写主出错后由流水线重启流并取消在途请求。`Camera::stop()`返回前所有完成回调都已返回，HAL只在此之后解除帧缓冲的映射。
    - 帧缓冲是可`mmap()`的dma-buf，CPU读之前做`DMA_BUF_IOCTL_SYNC`。
-5. **对焦**：后摄`dw9714`马达由HAL经v4l2子设备直接驱动（`libcamera`不驱动镜头）。全尺寸模式下先按RAW里的相位像素对焦，再在相位结果两侧各采一个对比度点精调；对比度分数在增益不高时取AF区域亮度的梯度能量，暗处（增益≥10）取`FocusFoM`。
+5. **对焦**：后摄`dw9714`马达由HAL经v4l2子设备直接驱动（`libcamera`不驱动镜头）。OV13B10在全尺寸模式下先按RAW里的相位像素对焦，再在相位结果两侧各采一个对比度点精调；对比度分数在增益不高时取AF区域亮度的梯度能量，暗处（增益≥10）取`FocusFoM`。S5K3L6由传感器自行修正相位像素，只按对比度对焦。
 6. **3A控制**：曝光补偿、AE/AWB锁定、手动曝光（`MANUAL_SENSOR`）、手动对焦、白平衡预设与手动白平衡、防频闪（50 Hz/60 Hz，AUTO按50 Hz）都换成`libipa`的对应控制；能力按流水线实际接受的控制声明。帧率按探测到的传感器模式声明（后摄合并模式60 fps）。
 7. **画质**：IFE不做锐化，降噪只有拜耳域的ABF（见第一节）。HAL在输出分辨率上做带门限的亮度锐化（`EDGE_MODE`），照片另做亮度ε滤波（门限按噪声估计）与固定强度的色度模糊；预览、录像在增益高时只模糊色度。
 8. **AIDL缓冲缓存契约与Gralloc导入**：
@@ -186,5 +190,5 @@ HAL实现`android.hardware.camera.provider-V3`，组件说明详见[`device/huaw
     - 因PMIC LED无硬件帧同步信号，拍照闪光采用预闪常亮策略：收到`AE_PRECAPTURE_TRIGGER_START`时点亮LED并上报`AE_STATE_PRECAPTURE`让AGC收敛，通过`firedPending_`计数在途拍照请求，直至静态JPEG帧曝光完成才熄灭LED。
 11. **传感器朝向（`Device.cpp`）**：
     - 设备树按横屏使用的方向写安装角：后摄180、前摄0。设备树为面板声明了安装方向（`rotation = <90>`，`patches/kernel/dts/0030`），Android的自然方向因此也是横屏，接键盘横放时显示旋转为`ROTATION_0`。
-    - `ANDROID_SENSOR_ORIENTATION`直接按设备树的角度计算，并扣掉`libcamera`已用翻转消掉的部分（后摄ov13b10的180°由水平加垂直翻转读出消掉）：两颗都是0。接键盘横放时应用算出的JPEG角为0，交付的画面横放时本来就是正的。
+    - `ANDROID_SENSOR_ORIENTATION`直接按设备树的角度计算，并扣掉`libcamera`已用翻转消掉的部分（后摄的180°由水平加垂直翻转读出消掉，ov13b10与s5k3l6都是如此）：两颗都是0。接键盘横放时应用算出的JPEG角为0，交付的画面横放时本来就是正的。
     - JPEG按应用下发的`ANDROID_JPEG_ORIENTATION`转像素；转过时EXIF方向写0（未定义），0°时写1。

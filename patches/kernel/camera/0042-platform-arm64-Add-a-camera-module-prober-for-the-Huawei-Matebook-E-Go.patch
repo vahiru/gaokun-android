@@ -1,0 +1,440 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] platform: arm64: Add a camera module prober for the Huawei
+ Matebook E Go
+
+The Huawei Matebook E Go is built with one of two front camera modules,
+a Hynix HI846 or a Samsung S5K4H7, and one of two rear camera modules,
+an OmniVision OV13B10 or a Samsung S5K3L6. The two modules for one
+connector share its supplies, reset line and MCLK, and answer at
+different addresses on its CCI bus.
+
+With all four enabled in the device tree, every sensor driver powers its
+connector, and the drivers of the modules that are not fitted fail to
+probe. The reset line of a connector then has two consumers, and the
+two rear modules need different MCLK rates.
+
+Have the device tree describe the modules with the status
+"fail-needs-probe" instead, and probe them as the ChromeOS hardware
+prober does: power each connector with the supplies, reset line and MCLK
+of one of its module nodes, find the address that answers and enable
+that node, so that only the fitted module's sensor driver probes. The
+connectors are on CCI buses, hence i2c_of_probe_component_on_bus().
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/platform/arm64/Kconfig                |  16 +
+ drivers/platform/arm64/Makefile               |   1 +
+ .../arm64/huawei-gaokun3-camera-prober.c      | 363 ++++++++++++++++++
+ 3 files changed, 380 insertions(+)
+ create mode 100644 drivers/platform/arm64/huawei-gaokun3-camera-prober.c
+
+diff --git a/drivers/platform/arm64/Kconfig b/drivers/platform/arm64/Kconfig
+index e32e01b2a9..a382a5c07f 100644
+--- a/drivers/platform/arm64/Kconfig
++++ b/drivers/platform/arm64/Kconfig
+@@ -54,6 +54,22 @@ config EC_HUAWEI_GAOKUN
+ 
+ 	  Say M or Y here to include this support.
+ 
++config HUAWEI_GAOKUN3_CAMERA_PROBER
++	tristate "Huawei Matebook E Go camera module prober"
++	depends on ARCH_QCOM || COMPILE_TEST
++	depends on OF
++	depends on I2C
++	select OF_DYNAMIC
++	help
++	  Say Y here to enable the camera module prober for the Huawei
++	  Matebook E Go. The tablet is built with one of two front and one
++	  of two rear camera modules, all of which its device tree
++	  describes. The driver powers each camera connector and enables
++	  the module that answers, so that only that module's sensor
++	  driver probes.
++
++	  Say M or Y here to include this support.
++
+ config EC_LENOVO_YOGA_C630
+ 	tristate "Lenovo Yoga C630 Embedded Controller driver"
+ 	depends on ARCH_QCOM || COMPILE_TEST
+diff --git a/drivers/platform/arm64/Makefile b/drivers/platform/arm64/Makefile
+index 7681be4a46..a970ae6dc8 100644
+--- a/drivers/platform/arm64/Makefile
++++ b/drivers/platform/arm64/Makefile
+@@ -7,6 +7,7 @@
+ 
+ obj-$(CONFIG_EC_ACER_ASPIRE1)	+= acer-aspire1-ec.o
+ obj-$(CONFIG_EC_HUAWEI_GAOKUN)	+= huawei-gaokun-ec.o
++obj-$(CONFIG_HUAWEI_GAOKUN3_CAMERA_PROBER) += huawei-gaokun3-camera-prober.o
+ obj-$(CONFIG_EC_LENOVO_YOGA_C630) += lenovo-yoga-c630.o
+ obj-$(CONFIG_EC_LENOVO_THINKPAD_T14S) += lenovo-thinkpad-t14s.o
+ obj-$(CONFIG_EC_QCOM_HAMOA) += qcom-hamoa-ec.o
+diff --git a/drivers/platform/arm64/huawei-gaokun3-camera-prober.c b/drivers/platform/arm64/huawei-gaokun3-camera-prober.c
+new file mode 100644
+index 0000000000..cf2db2015a
+--- /dev/null
++++ b/drivers/platform/arm64/huawei-gaokun3-camera-prober.c
+@@ -0,0 +1,363 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Camera module prober for the Huawei Matebook E Go (gaokun3)
++ *
++ * The board is built with one of two front camera modules, a Hynix HI846 or a
++ * Samsung S5K4H7, and one of two rear camera modules, an OmniVision OV13B10 or
++ * a Samsung S5K3L6. The modules for one connector share its supplies, reset
++ * line and MCLK, and answer at different addresses on its CCI bus. The device
++ * tree describes all four with the status "fail-needs-probe": power each
++ * connector, find the address that answers and enable that module's node.
++ */
++
++#include <linux/array_size.h>
++#include <linux/clk.h>
++#include <linux/delay.h>
++#include <linux/err.h>
++#include <linux/gpio/consumer.h>
++#include <linux/i2c-of-prober.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/platform_device.h>
++#include <linux/regulator/consumer.h>
++#include <linux/units.h>
++
++#define DRV_NAME		"huawei_gaokun3_camera_prober"
++#define GAOKUN3_CAM_NUM_SUPPLIES	3
++
++/**
++ * struct gaokun3_cam_connector - A camera connector and how to power it
++ * @name: Name of the connector, for messages.
++ * @compatible: Compatible of a module node on the connector's bus; the
++ *		resources are taken from that node.
++ * @supplies: Supply names in that node, analogue supply first, in the order
++ *	      they are enabled.
++ * @avdd_uV: Voltage to request on the analogue supply while powered, or 0.
++ * @avdd_min_uV: Lowest voltage the analogue supply may return to afterwards.
++ * @mclk_rate: MCLK rate while probing.
++ */
++struct gaokun3_cam_connector {
++	const char *name;
++	const char *compatible;
++	const char *supplies[GAOKUN3_CAM_NUM_SUPPLIES];
++	int avdd_uV;
++	int avdd_min_uV;
++	unsigned long mclk_rate;
++};
++
++struct gaokun3_cam_ctx {
++	const struct gaokun3_cam_connector *conn;
++	struct regulator *supplies[GAOKUN3_CAM_NUM_SUPPLIES];
++	struct clk *mclk;
++	struct gpio_desc *reset;
++	bool powered;
++};
++
++static const struct gaokun3_cam_connector gaokun3_cam_connectors[] = {
++	{
++		.name = "front",
++		.compatible = "hynix,hi846",
++		.supplies = { "vdda", "vddd", "vddio" },
++		.mclk_rate = 24 * HZ_PER_MHZ,
++	}, {
++		/*
++		 * The analogue supply is LDO2_B, which the panel's VDDI also
++		 * uses at 1.8 V. The modules need 2.8 V; the regulator core
++		 * applies the highest request, as with the sensor drivers.
++		 */
++		.name = "rear",
++		.compatible = "ovti,ov13b10",
++		.supplies = { "avdd", "dvdd", "dovdd" },
++		.avdd_uV = 2800000,
++		.avdd_min_uV = 1800000,
++		.mclk_rate = 24 * HZ_PER_MHZ,
++	},
++};
++
++static void gaokun3_cam_power_off(struct gaokun3_cam_ctx *ctx)
++{
++	const struct gaokun3_cam_connector *conn = ctx->conn;
++	unsigned int i;
++
++	if (!ctx->powered)
++		return;
++
++	gpiod_set_value_cansleep(ctx->reset, 1);
++	usleep_range(1000, 1500);
++
++	clk_disable_unprepare(ctx->mclk);
++
++	for (i = GAOKUN3_CAM_NUM_SUPPLIES; i-- > 0;)
++		regulator_disable(ctx->supplies[i]);
++
++	if (conn->avdd_uV)
++		regulator_set_voltage(ctx->supplies[0], conn->avdd_min_uV,
++				      conn->avdd_uV);
++
++	ctx->powered = false;
++}
++
++/*
++ * Reset asserted, the supplies 2 ms apart, MCLK, then reset released. The
++ * modules answer within 18 ms of that (the S5K3L6 takes the longest).
++ */
++static int gaokun3_cam_power_on(struct device *dev, struct gaokun3_cam_ctx *ctx)
++{
++	const struct gaokun3_cam_connector *conn = ctx->conn;
++	unsigned int i;
++	int ret;
++
++	gpiod_set_value_cansleep(ctx->reset, 1);
++
++	if (conn->avdd_uV) {
++		ret = regulator_set_voltage(ctx->supplies[0], conn->avdd_uV,
++					    conn->avdd_uV);
++		if (ret)
++			return dev_err_probe(dev, ret,
++					     "%s: cannot request %d uV on %s\n",
++					     conn->name, conn->avdd_uV,
++					     conn->supplies[0]);
++	}
++
++	for (i = 0; i < GAOKUN3_CAM_NUM_SUPPLIES; i++) {
++		ret = regulator_enable(ctx->supplies[i]);
++		if (ret) {
++			dev_err_probe(dev, ret, "%s: cannot enable %s\n",
++				      conn->name, conn->supplies[i]);
++			goto disable_supplies;
++		}
++		usleep_range(2000, 2500);
++	}
++
++	ret = clk_set_rate(ctx->mclk, conn->mclk_rate);
++	if (ret) {
++		dev_err_probe(dev, ret, "%s: cannot set MCLK to %lu Hz\n",
++			      conn->name, conn->mclk_rate);
++		goto disable_supplies;
++	}
++
++	ret = clk_prepare_enable(ctx->mclk);
++	if (ret) {
++		dev_err_probe(dev, ret, "%s: cannot enable MCLK\n", conn->name);
++		goto disable_supplies;
++	}
++	usleep_range(1000, 1500);
++
++	gpiod_set_value_cansleep(ctx->reset, 0);
++	msleep(20);
++
++	ctx->powered = true;
++
++	return 0;
++
++disable_supplies:
++	while (i--)
++		regulator_disable(ctx->supplies[i]);
++	if (conn->avdd_uV)
++		regulator_set_voltage(ctx->supplies[0], conn->avdd_min_uV,
++				      conn->avdd_uV);
++
++	return ret;
++}
++
++static void gaokun3_cam_put(struct gaokun3_cam_ctx *ctx)
++{
++	unsigned int i;
++
++	gpiod_put(ctx->reset);
++	ctx->reset = NULL;
++
++	clk_put(ctx->mclk);
++	ctx->mclk = NULL;
++
++	for (i = 0; i < GAOKUN3_CAM_NUM_SUPPLIES; i++) {
++		regulator_put(ctx->supplies[i]);
++		ctx->supplies[i] = NULL;
++	}
++}
++
++static int gaokun3_cam_get(struct device *dev, struct device_node *node,
++			   struct gaokun3_cam_ctx *ctx)
++{
++	const struct gaokun3_cam_connector *conn = ctx->conn;
++	struct regulator *supply;
++	struct gpio_desc *reset;
++	struct clk *mclk;
++	unsigned int i;
++
++	for (i = 0; i < GAOKUN3_CAM_NUM_SUPPLIES; i++) {
++		supply = of_regulator_get_optional(dev, node, conn->supplies[i]);
++		if (IS_ERR(supply))
++			return dev_err_probe(dev, PTR_ERR(supply),
++					     "%s: no %s supply in %pOF\n",
++					     conn->name, conn->supplies[i], node);
++		ctx->supplies[i] = supply;
++	}
++
++	mclk = of_clk_get(node, 0);
++	if (IS_ERR(mclk))
++		return dev_err_probe(dev, PTR_ERR(mclk), "%s: no MCLK in %pOF\n",
++				     conn->name, node);
++	ctx->mclk = mclk;
++
++	reset = fwnode_gpiod_get_index(of_fwnode_handle(node), "reset", 0,
++				       GPIOD_OUT_HIGH, DRV_NAME);
++	if (IS_ERR(reset))
++		return dev_err_probe(dev, PTR_ERR(reset),
++				     "%s: no reset GPIO in %pOF\n", conn->name,
++				     node);
++	ctx->reset = reset;
++
++	return 0;
++}
++
++static int gaokun3_cam_enable(struct device *dev, struct device_node *bus_node,
++			      void *data)
++{
++	struct gaokun3_cam_ctx *ctx = data;
++	int ret;
++
++	struct device_node *node __free(device_node) =
++		of_get_compatible_child(bus_node, ctx->conn->compatible);
++	if (!node)
++		return dev_err_probe(dev, -ENODEV, "%s: no %s node under %pOF\n",
++				     ctx->conn->name, ctx->conn->compatible,
++				     bus_node);
++
++	ret = gaokun3_cam_get(dev, node, ctx);
++	if (!ret)
++		ret = gaokun3_cam_power_on(dev, ctx);
++	if (ret)
++		gaokun3_cam_put(ctx);
++
++	return ret;
++}
++
++/* Power the connector off before the module found probes its own way */
++static void gaokun3_cam_cleanup(struct device *dev, void *data)
++{
++	struct gaokun3_cam_ctx *ctx = data;
++
++	gaokun3_cam_power_off(ctx);
++	gaokun3_cam_put(ctx);
++}
++
++static const struct i2c_of_probe_ops gaokun3_cam_ops = {
++	.enable = gaokun3_cam_enable,
++	.cleanup_early = gaokun3_cam_cleanup,
++	.cleanup = gaokun3_cam_cleanup,
++};
++
++static const struct i2c_of_probe_cfg gaokun3_cam_cfg = {
++	.ops = &gaokun3_cam_ops,
++	.type = "camera",
++};
++
++static void gaokun3_cam_report(struct device *dev, struct device_node *bus_node,
++			       const struct gaokun3_cam_connector *conn)
++{
++	const char *compatible;
++
++	for_each_child_of_node_with_prefix(bus_node, node, gaokun3_cam_cfg.type) {
++		if (!of_device_is_available(node))
++			continue;
++		if (of_property_read_string(node, "compatible", &compatible))
++			compatible = "?";
++		dev_info(dev, "%s camera: %s at %pOF\n", conn->name, compatible,
++			 node);
++		return;
++	}
++
++	dev_warn(dev, "%s camera: no module answers\n", conn->name);
++}
++
++static int gaokun3_cam_probe_connector(struct device *dev,
++				       const struct gaokun3_cam_connector *conn)
++{
++	struct gaokun3_cam_ctx ctx = { .conn = conn };
++	int ret;
++
++	struct device_node *node __free(device_node) =
++		of_find_compatible_node(NULL, NULL, conn->compatible);
++	if (!node)
++		return dev_err_probe(dev, -ENODEV, "%s: no %s node\n",
++				     conn->name, conn->compatible);
++
++	struct device_node *bus_node __free(device_node) = of_get_parent(node);
++
++	ret = i2c_of_probe_component_on_bus(dev, bus_node, &gaokun3_cam_cfg, &ctx);
++	if (ret)
++		return ret;
++
++	gaokun3_cam_report(dev, bus_node, conn);
++
++	return 0;
++}
++
++static int gaokun3_cam_prober_probe(struct platform_device *pdev)
++{
++	static bool done[ARRAY_SIZE(gaokun3_cam_connectors)];
++	struct device *dev = &pdev->dev;
++	unsigned int i;
++	int ret = 0;
++
++	/*
++	 * Probe every connector even if one defers, and each one only until it
++	 * has a result: a module enabled, none answering or an error, which
++	 * leaves that connector's modules disabled.
++	 */
++	for (i = 0; i < ARRAY_SIZE(gaokun3_cam_connectors); i++) {
++		if (done[i])
++			continue;
++		if (gaokun3_cam_probe_connector(dev, &gaokun3_cam_connectors[i]) ==
++		    -EPROBE_DEFER)
++			ret = -EPROBE_DEFER;
++		else
++			done[i] = true;
++	}
++
++	return ret;
++}
++
++static struct platform_driver gaokun3_cam_prober_driver = {
++	.probe = gaokun3_cam_prober_probe,
++	.driver = {
++		.name = DRV_NAME,
++	},
++};
++
++static struct platform_device *gaokun3_cam_prober_pdev;
++
++static int __init gaokun3_cam_prober_init(void)
++{
++	int ret;
++
++	if (!of_machine_is_compatible("huawei,gaokun3"))
++		return -ENODEV;
++
++	ret = platform_driver_register(&gaokun3_cam_prober_driver);
++	if (ret)
++		return ret;
++
++	gaokun3_cam_prober_pdev =
++		platform_device_register_simple(DRV_NAME, PLATFORM_DEVID_NONE,
++						NULL, 0);
++	if (IS_ERR(gaokun3_cam_prober_pdev)) {
++		platform_driver_unregister(&gaokun3_cam_prober_driver);
++		return PTR_ERR(gaokun3_cam_prober_pdev);
++	}
++
++	return 0;
++}
++module_init(gaokun3_cam_prober_init);
++
++static void __exit gaokun3_cam_prober_exit(void)
++{
++	platform_device_unregister(gaokun3_cam_prober_pdev);
++	platform_driver_unregister(&gaokun3_cam_prober_driver);
++}
++module_exit(gaokun3_cam_prober_exit);
++
++MODULE_DESCRIPTION("Huawei Matebook E Go camera module prober");
++MODULE_LICENSE("GPL");
++MODULE_IMPORT_NS("I2C_OF_PROBER");

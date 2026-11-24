@@ -1,0 +1,147 @@
+From 140f0d236b5b2f656d38a347e2ad2266dc2f6545 Mon Sep 17 00:00:00 2001
+From: Akisaira <akisaira@outlook.com>
+Date: Mon, 23 Nov 2026 22:19:34 +1100
+Subject: [PATCH] pipeline: qcom-ife: Keep the dual IFE split within the lens
+ shading limits
+
+Without the display output, a frame wider than one IFE line was split at
+the multiple of 64 nearest its middle, without the check that
+dualSplitForDisplay() makes against the lens shading grid. For the
+4160 pixel wide frame of the S5K3L6's full-size mode, that split starts
+the right stripe 16 quads before the end of a lens shading block, closer
+than the 18 quads the driver requires, and the driver warned:
+
+  qcom-camss ac5a000.camss: VFE1: LSC: input column 2048 starts too late in a block
+
+Split such a frame at the multiple of 64 nearest the middle that both
+the stripe widths and the lens shading grid allow, the higher one on a
+tie as before, and fall back to it in dualSplitForDisplay(). Frames that
+were already split within the limits, such as the 4208 pixel wide one
+of the OV13B10, keep their split; the 4160 pixel wide one is now split
+at column 2048. On an S5K3L6 unit, a 4160x3120 stream without the
+display output now runs at 30 fps without the warning.
+
+Signed-off-by: Akisaira <akisaira@outlook.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+Origin: local
+Upstream-Status: Pending
+---
+ src/libcamera/pipeline/qcom-ife/qcom_ife.cpp | 77 +++++++++++++-------
+ 1 file changed, 51 insertions(+), 26 deletions(-)
+
+diff --git a/src/libcamera/pipeline/qcom-ife/qcom_ife.cpp b/src/libcamera/pipeline/qcom-ife/qcom_ife.cpp
+index 0d06e301..bbecdd0c 100644
+--- a/src/libcamera/pipeline/qcom-ife/qcom_ife.cpp
++++ b/src/libcamera/pipeline/qcom-ife/qcom_ife.cpp
+@@ -95,13 +95,7 @@ const char *const kPix1Name = "msm_vfe1_pix";
+ constexpr unsigned int kDualPad = 64;
+ constexpr unsigned int kDualAlign = 64;
+ 
+-/* Dual IFE: the column where the right stripe starts, near the middle */
+-constexpr unsigned int dualSplit(unsigned int width)
+-{
+-	return (width / 2 + kDualAlign / 2) / kDualAlign * kDualAlign;
+-}
+-
+-/* How far the split may move from the middle for the display output */
++/* How far the split may move from the middle */
+ constexpr unsigned int kDualSplitRange = 768;
+ 
+ /*
+@@ -149,6 +143,49 @@ bool lscGrid(const Size &frame, unsigned int *blockWidth, unsigned int *subWidth
+ 	}
+ }
+ 
++/*
++ * Whether the right stripe may start at @split: both stripes fit one IFE line
++ * with their padding, and the right stripe's lens shading starts inside the
++ * grid at least a block's 18 quads and a subgrid's 9 quads before their ends,
++ * which the driver takes as the IPA keeps the frame's own start.
++ */
++bool dualSplitAllowed(const Size &frame, unsigned int split)
++{
++	unsigned int bw, subW, startX;
++
++	if (split + kDualPad > kMaxInputWidth || frame.width - split + kDualPad > kMaxInputWidth)
++		return false;
++	if (!lscGrid(frame, &bw, &subW, &startX))
++		return true;
++
++	const unsigned int x = startX + (split - kDualPad) / 2;
++	return bw - x % bw >= 18 && subW - x % subW >= 9;
++}
++
++/*
++ * Dual IFE: the column where the right stripe starts, the multiple of
++ * kDualAlign nearest the middle that dualSplitAllowed() takes, the higher one
++ * on a tie; the one nearest the middle when none within kDualSplitRange is.
++ */
++unsigned int dualSplit(const Size &frame)
++{
++	const unsigned int half = frame.width / 2;
++	unsigned int best = 0, bestDist = 0;
++
++	for (unsigned int split = kDualAlign; split < frame.width; split += kDualAlign) {
++		const unsigned int dist = split > half ? split - half : half - split;
++
++		if (dist > kDualSplitRange || !dualSplitAllowed(frame, split))
++			continue;
++		if (!best || dist <= bestDist) {
++			best = split;
++			bestDist = dist;
++		}
++	}
++
++	return best ? best : (half + kDualAlign / 2) / kDualAlign * kDualAlign;
++}
++
+ /*
+  * Dual IFE with the display output: both stripes scale from their first
+  * column with the same step, so the right stripe's output columns lie
+@@ -162,26 +199,13 @@ unsigned int dualSplitForDisplay(const Size &frame, unsigned int scaledWidth,
+ 				 double *residual)
+ {
+ 	const unsigned int width = frame.width;
+-	unsigned int best = dualSplit(width);
++	unsigned int best = dualSplit(frame);
+ 	double bestErr = 2.0;
+ 
+-	/*
+-	 * The right stripe's lens shading starts inside the grid: the driver
+-	 * takes it at least a block's 18 quads and a subgrid's 9 quads before
+-	 * their ends, as the IPA keeps the frame's own start.
+-	 */
+-	unsigned int bw, subW, startX;
+-	const bool lsc = lscGrid(frame, &bw, &subW, &startX);
+-	const auto lscOk = [&](unsigned int split) {
+-		const unsigned int x = startX + (split - kDualPad) / 2;
+-		return !lsc || (bw - x % bw >= 18 && subW - x % subW >= 9);
+-	};
+-
+ 	for (unsigned int split = kDualAlign; split < width; split += kDualAlign) {
+ 		const unsigned int dist = split > width / 2 ? split - width / 2
+ 							    : width / 2 - split;
+-		if (dist > kDualSplitRange || split + kDualPad > kMaxInputWidth ||
+-		    width - split + kDualPad > kMaxInputWidth || !lscOk(split))
++		if (dist > kDualSplitRange || !dualSplitAllowed(frame, split))
+ 			continue;
+ 
+ 		const double v = static_cast<double>(split - kDualPad) * scaledWidth / width;
+@@ -1066,11 +1090,12 @@ int PipelineHandlerQcomIfe::configure(Camera *camera, CameraConfiguration *c)
+ 
+ 	if (dual) {
+ 		/*
+-		 * With the display output, the split that lines its stripes
+-		 * up best (dualSplitForDisplay()); its geometry is that of
+-		 * one IFE over the whole frame.
++		 * The split nearest the middle (dualSplit()), or with the
++		 * display output the one that lines its stripes up best
++		 * (dualSplitForDisplay()), whose geometry is that of one IFE
++		 * over the whole frame.
+ 		 */
+-		dualSplit_ = dualSplit(inputSize.width);
++		dualSplit_ = dualSplit(inputSize);
+ 		if (dispCfg) {
+ 			Size dispCompose;
+ 			Rectangle dispCrop;

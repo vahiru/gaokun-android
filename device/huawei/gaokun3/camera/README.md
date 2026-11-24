@@ -11,7 +11,7 @@
 ## 二、构建与依赖
 
 - **`libcamera`同树Soong构建**：由于Android NDK的`std::__ndk1`与AOSP平台的`std::__1` C++ ABI不兼容，`libcamera`通过[`patches/libcamera/libcamera-Android.bp`](../../../../patches/libcamera/README.md)在AOSP树内编译为`libcamera_base_gk3`、`libcamera_gk3`与`qcom-ife`流水线的IPA模块`libcamera_ipa_qcom_ife_gk3`（安装于`/vendor/lib64/libcamera/ipa/`）。
-- **调优配置**：`ipa-data/qcom-ife/`下的`ov13b10.yaml`、`hi846.yaml`、`s5k4h7.yaml`与`uncalibrated.yaml`安装至`/vendor/etc/libcamera/ipa/qcom-ife/`。
+- **调优配置**：`ipa-data/qcom-ife/`下的`ov13b10.yaml`、`hi846.yaml`、`s5k4h7.yaml`、`s5k3l6.yaml`与`uncalibrated.yaml`安装至`/vendor/etc/libcamera/ipa/qcom-ife/`。
 - **流水线能力**：本模块要求流水线给出NV12；不给时不探测帧率与3A控制，配置流时报错。其余依赖的流水线行为（两路输出、`ScalerCrop`、`FocusFoM`、时间戳、出错恢复）见`docs/dev/camera.md`。
 
 ## 三、硬件ISP路径
@@ -19,7 +19,7 @@
 - **单路**：向流水线要一路与传感器阵列同宽高比、刚好覆盖每一路流的NV12画面（`Session::hwIspFrameSize()`），传感器模式与视场由流水线选，IFE缩放；各路流由CPU从这幅画面裁剪、缩放。帧率按探测到的传感器模式声明（后摄合并模式60 fps）。
 - **两路（拍照模式）**：JPEG比其余各路大得多时，向流水线要两路NV12。显示路径由IFE缩放器缩小，给预览、录像、YUV流与对焦；FULL路径给JPEG，只有带JPEG的请求（以及下面数码变焦一条所说、预览要从FULL裁剪的请求）才带它的缓冲，IFE只在这些帧写出全尺寸画面。JPEG（含拍照降噪与锐化）在单独的线程上从FULL缓冲编码，预览、录像与结果元数据照常先交付，不因拍照断流。两路视场相同；流水线不支持两路时退回单路。
 - **数码变焦**：两路且流水线支持`ScalerCrop`时交给IFE显示路径（只缩小不放大，超出它能放大的倍数时CPU按元数据里实际显示的区域再裁、再放大），照片的变焦仍由HAL在FULL上裁；否则显示路径上的裁剪比预览小（要放大）的请求也带FULL，预览等非JPEG流改从FULL裁剪、缩小。
-- **对焦**：后摄`dw9714`马达由HAL直接驱动（见`Lens.h`）。全尺寸模式下按RAW里的相位像素对焦，再用对比度精调；对比度分数在增益不高时取AF区域亮度的梯度能量，暗处取IFE对焦统计的`FocusFoM`（见`AutoFocus.h`）。
+- **对焦**：后摄`dw9714`马达由HAL直接驱动（见`Lens.h`）。OV13B10在全尺寸模式下按RAW里的相位像素对焦，再用对比度精调（S5K3L6由传感器自行修正相位像素，只用对比度）；对比度分数在增益不高时取AF区域亮度的梯度能量，暗处取IFE对焦统计的`FocusFoM`（见`AutoFocus.h`）。
 - **画质**：IFE不做锐化，降噪只有拜耳域的ABF（调优配置里的`Abf`）。预览、录像与照片在输出分辨率上做亮度锐化（`EDGE_MODE`，`Sharpen.cpp`）；照片另做亮度ε滤波（门限按噪声估计）与固定强度的色度模糊；预览、录像在增益高时只模糊色度。
 
 ## 四、闪光灯与手电筒

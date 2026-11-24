@@ -387,9 +387,10 @@ ndk::ScopedAStatus Session::configureStreams(const StreamConfiguration &cfg,
 	const bool fullSize = !(maxW <= halfW && maxH <= halfH);
 	/*
 	 * 相位对焦要 RAW 帧，而 ov13b10 只在全尺寸模式里有 PD 像素（见 PhaseDetect.h）：一并
-	 * 要一路 RAW。它来自像素通路旁边的 RDI，与 NV12 是同一帧传感器数据。
+	 * 要一路 RAW。它来自像素通路旁边的 RDI，与 NV12 是同一帧传感器数据。RAW里没有PD
+	 * 像素的传感器（后摄的s5k3l6模组由传感器自行修正）不要这路RAW，只做反差对焦。
 	 */
-	bool withRaw = fullSize && facts_.hasAf;
+	bool withRaw = fullSize && facts_.hasAf && facts_.hasPdPixels;
 
 	/*
 	 * 硬件 ISP 能同时出两路 NV12：大的一路走 FULL，给 JPEG；小的一路走显示路径，由 IFE

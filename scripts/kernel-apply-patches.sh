@@ -189,10 +189,12 @@ KPATCHES=(
     # 1080p及以下的硬件解码与1080p以上的VP9硬件解码会在启动时报错。
     kernel/iris/0019-media-iris-let-the-decoder-client-size-its-input-buffers.patch
 
-    # ─── 7. kernel/camera：camcc 时钟/GDSC、camss 与前后摄传感器驱动（ov13b10 / hi846 / s5k4h7）───
+    # ─── 7. kernel/camera：camcc 时钟/GDSC、camss 与前后摄传感器驱动（ov13b10 / hi846 / s5k4h7 / s5k3l6）───
     # 0003 与 kernel/dts/0005 配套，需 CONFIG_VIDEO_OV13B10=y 与 CONFIG_VIDEO_DW9714=y；
     # 0007 叠在 0003 之上，0008 叠在 0005–0006 之上。
-    # 0038（S5K4H7驱动，需CONFIG_VIDEO_S5K4H7=y）与kernel/dts/0029配套；0039叠在0004之上。
+    # 0038（S5K4H7驱动，需CONFIG_VIDEO_S5K4H7=y）与kernel/dts/0029配套；0039叠在0004之上；0040叠在0038之上。
+    # 0041–0042为相机模组探测器（需CONFIG_HUAWEI_GAOKUN3_CAMERA_PROBER=y），与kernel/dts/0033配套；
+    # 0043（S5K3L6驱动，需CONFIG_VIDEO_S5K3L6=y）与kernel/dts/0034配套。
     kernel/camera/0001-clk-qcom-camcc-sc8280xp-gdsc-wait-vals.patch
     kernel/camera/0002-clk-qcom-camcc-sc8280xp-mark-camnoc-ahb-rcgs-shared.patch
     kernel/camera/0003-media-i2c-ov13b10-of-match-and-gaokun3-power-sequence.patch
@@ -235,6 +237,10 @@ KPATCHES=(
     kernel/camera/0037-media-i2c-hi846-Allow-every-analogue-gain-step.patch
     kernel/camera/0038-media-i2c-Add-a-driver-for-the-Samsung-S5K4H7-sensor.patch
     kernel/camera/0039-media-qcom-camss-Drop-unfitted-alternative-sensors-without-waiting.patch
+    kernel/camera/0040-media-i2c-s5k4h7-Fix-mode-changes-and-system-sleep-while-powered.patch
+    kernel/camera/0041-i2c-of-prober-Probe-the-components-on-a-given-bus.patch
+    kernel/camera/0042-platform-arm64-Add-a-camera-module-prober-for-the-Huawei-Matebook-E-Go.patch
+    kernel/camera/0043-media-i2c-Add-a-driver-for-the-Samsung-S5K3L6-sensor.patch
 
     # ─── 8. kernel/audio：ASoC sc8280xp、LPASS 编解码宏、WSA883x 功放、SoundWire 与 Q6APM ───
     # 0007–0008 与 kernel/dts/0016 及 device/huawei/gaokun3/bin/audio-route.sh 配套；
@@ -286,7 +292,9 @@ KPATCHES=(
     # 0025把Wi-Fi校准变体改为HW_GK3，要求vendor的board-2.bin带qmi-chip-id=18的HW_GK3名称
     # （scripts/wifi/ath11k-board-alias.py添加，device.mk构建时检查），否则会改用信号弱约22 dB的通用数据。
     # 0026在iris主域预留0x0..0x25800000，范围须与iris_platform_vpu2.c的tz_cp_config_vpu2一致。
-    # 0029在摄像头dtsi的前摄位置同时描述HI846与S5K4H7两个节点，二者共用复位GPIO，需CONFIG_GPIO_SHARED_PROXY=y。
+    # 0029在摄像头dtsi的前摄位置同时描述HI846与S5K4H7两个节点；0033把前后摄的模组节点标为fail-needs-probe，
+    # 由kernel/camera/0042的相机模组探测器启用装配的那个（需CONFIG_HUAWEI_GAOKUN3_CAMERA_PROBER=y）；
+    # 0034在后摄位置加入S5K3L6节点，与kernel/camera/0043配套。
     kernel/dts/0001-arm64-dts-gaokun3-drive-ts-mode-gpio174-low.patch
     kernel/dts/0002-arm64-dts-sc8280xp-add-cpu-cooling-maps.patch
     kernel/dts/0003-arm64-dts-gaokun3-usb0-otg-for-usb-adb.patch
@@ -319,6 +327,8 @@ KPATCHES=(
     kernel/dts/0030-arm64-dts-qcom-sc8280xp-huawei-gaokun3-set-the-panel-rotation.patch
     kernel/dts/0031-arm64-dts-qcom-sc8280xp-huawei-gaokun3-throttle-on-the-board-thermistors.patch
     kernel/dts/0032-arm64-dts-qcom-sc8280xp-huawei-gaokun3-Use-the-Windows-passive-cooling-constants.patch
+    kernel/dts/0033-arm64-dts-qcom-sc8280xp-huawei-gaokun3-Probe-the-camera-modules.patch
+    kernel/dts/0034-arm64-dts-qcom-sc8280xp-huawei-gaokun3-Describe-the-S5K3L6-rear-camera.patch
 
     # ─── 11. kernel/fingerprint：QSEECOM 与指纹传输驱动（/dev/gaokun3_fpcmd，CONFIG_GAOKUN3_FPCMD 由 kernel-config-android.sh 打开）───
     kernel/fingerprint/0001-firmware-qcom-scm-qseecom-app-load-shutdown-listener.patch

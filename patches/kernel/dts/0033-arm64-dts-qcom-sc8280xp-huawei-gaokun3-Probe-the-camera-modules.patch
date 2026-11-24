@@ -1,0 +1,84 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] arm64: dts: qcom: sc8280xp-huawei-gaokun3: Probe the camera
+ modules
+
+Each camera connector carries one of two modules, which share its
+supplies, reset line and MCLK. Mark the module nodes "fail-needs-probe"
+so that the camera module prober enables the one that answers, instead
+of having every sensor driver probe and the absent ones fail.
+
+The prober drives the MCLK and reset pins of the rear connector before
+any sensor node is enabled, so have the pin controller hold them, as it
+holds those of the front connector.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ .../qcom/sc8280xp-huawei-gaokun3-camera.dtsi  | 23 ++++++++++---------
+ 1 file changed, 12 insertions(+), 11 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3-camera.dtsi b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3-camera.dtsi
+index 7de5ce49b7..bd629db171 100644
+--- a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3-camera.dtsi
++++ b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3-camera.dtsi
+@@ -223,13 +223,13 @@ voice_coil_motor: vcm@c {
+ 	 * driver while powered), LDO2_C 1.8V (dovdd), GPIO92-gated core rail
+ 	 * (dvdd), reset GPIO7, MCLK4.
+ 	 * The upstream ov13b10 register tables assume a 19.2 MHz MCLK.
++	 * The camera module prober enables the node of the module that
++	 * answers; the pins are held by the pin controller, see &tlmm.
+ 	 */
+ 	camera_rear: camera@36 {
+ 		compatible = "ovti,ov13b10";
+ 		reg = <0x36>;
+-
+-		pinctrl-0 = <&camr_rgb_default>;
+-		pinctrl-names = "default";
++		status = "fail-needs-probe";
+ 
+ 		clocks = <&camcc CAMCC_MCLK4_CLK>;
+ 		assigned-clocks = <&camcc CAMCC_MCLK4_CLK>;
+@@ -280,6 +280,7 @@ &cci2_i2c1 {
+ 	camera_front: camera@20 {
+ 		compatible = "hynix,hi846";
+ 		reg = <0x20>;
++		status = "fail-needs-probe";
+ 
+ 		clocks = <&camcc CAMCC_MCLK3_CLK>;
+ 
+@@ -309,14 +310,13 @@ hi846_ep: endpoint {
+ 	/*
+ 	 * The other front camera module (Xinli S5K4H7, fixed focus), with the
+ 	 * same supplies, reset GPIO and MCLK3 as the HI846. Only one of the two
+-	 * is fitted: the driver of the missing one finds no sensor at its
+-	 * address and releases the supplies and the reset GPIO (a shared GPIO,
+-	 * through the gpio-shared proxy) for the other. The pins are held by
+-	 * the pin controller, see &tlmm.
++	 * is fitted, and the camera module prober enables the node of the one
++	 * that answers. The pins are held by the pin controller, see &tlmm.
+ 	 */
+ 	camera_front_s5k4h7: camera@2d {
+ 		compatible = "samsung,s5k4h7";
+ 		reg = <0x2d>;
++		status = "fail-needs-probe";
+ 
+ 		clocks = <&camcc CAMCC_MCLK3_CLK>;
+ 
+@@ -349,11 +349,12 @@ s5k4h7_ep: endpoint {
+ 
+ &tlmm {
+ 	/*
+-	 * The front camera's MCLK and reset pins are configured here rather
+-	 * than by a sensor node: both front sensor nodes use them, and this
+-	 * pin controller lets only one device own a pin.
++	 * The cameras' MCLK and reset pins are configured here rather than by
++	 * a sensor node: the camera module prober drives them before any
++	 * sensor node is enabled, and two sensor nodes use those of each
++	 * connector, while this pin controller lets only one device own a pin.
+ 	 */
+-	pinctrl-0 = <&camf_rgb_default>;
++	pinctrl-0 = <&camf_rgb_default>, <&camr_rgb_default>;
+ 	pinctrl-names = "default";
+ 
+ 	cam_indicator_en: cam-indicator-en-state {
