@@ -65,6 +65,18 @@ UEFI 2.16 (关闭Secure Boot)
   - **不指定变体（通用数据）**：信号减弱约22 dB，吞吐量只有前两者的几分之一。
 
   `HW_GK3`原本登记在`qmi-chip-id=2`的芯片上，用于本机时只对比过2.4 GHz和5 GHz，6 GHz尚未经实测。
+- **国家码**：固件默认根据周围AP通告的国家（802.11d）确定国家码。Android框架另有自己的国家码（本机没有基带，由扫描结果推断，见`Gaokun3WifiOverlay`），经以下路径下发到网卡：
+  1. 框架调用`ISupplicantStaIface.setCountryCode`，wpa_supplicant将其转为私有驱动命令`COUNTRY XX`，由私有命令库[`wifi/wpa_supplicant_8_lib`](../../device/huawei/gaokun3/wifi/wpa_supplicant_8_lib/)处理，以`NL80211_CMD_REQ_SET_REG`发给内核。
+  2. cfg80211把请求交给`ath11k_reg_notifier`，由它把国家码发给固件。内核未开启`CONFIG_ATH_REG_DYNAMIC_USER_REG_HINTS`时，该函数直接返回，国家码不会送达固件。
+  3. 固件按新的国家重新下发信道表。`config_wifiStaDynamicCountryCodeUpdateSupported`使框架在连接期间也会下发：当前信道仍允许时连接保持，否则cfg80211在60秒的宽限期后断开连接。
+
+  cfg80211同时需要无线监管数据库（[`wifi/regdb`](../../device/huawei/gaokun3/wifi/regdb/README.md)，安装至ramdisk的`/lib/firmware/`），否则下发国家码后会反复等待CRDA超时约30秒。
+
+  需要注意的行为：
+  - 框架下发与网卡当前不同的国家码后，本次开机内`ath11k`不再进行802.11d扫描，此后国家码只随框架下发而改变；与网卡当前相同的国家码不会产生影响，固件仍按802.11d确定国家。Wi-Fi开启期间固件崩溃时，驱动会在恢复后重新下发保存的国家码。
+  - 没有基带时，框架按扫描结果推断国家码（`WifiCountryCode.findCountryCodeFromScanResults`）：同一批扫描结果中，信号不低于-85 dBm且带国家信息的条目必须全部通告同一个国家，并且至少有2条（US为3条；按BSSID计数，同一台路由器的两个频段分别计入），框架才会采用并下发。周围AP通告的国家不一致时（例如边境附近），框架不会更新国家码，直到某次扫描结果重新一致。
+  - cfg80211为self-managed的网卡设置了`REGULATORY_COUNTRY_IE_IGNORE`，连接或断开AP本身不会改变监管域，AP通告的国家只经固件的802.11d扫描和框架的推断起作用。`ath11k`在关联AP后停止802.11d扫描，断开后重新开始，所以在框架下发不同的国家码之前，连接期间网卡的国家不随周围AP变化。
+  - 内核未开启`CONFIG_ATH_REG_DYNAMIC_USER_REG_HINTS`时，框架下发国家码后全局监管域仍会改变并广播事件，`cmd wifi get-country-code`会显示新的国家，但网卡不变。排查时以`iw reg get`中`phy#N (self-managed)`一节为准。
 - **持久化MAC地址生成**：因主线`ath11k`未从UEFI/NV读取出厂Wi-Fi MAC，`init.gaokun3.rc`在开机时运行`wpa_supplicant_mac_gen`脚本，在`/data/vendor/wifi/wlan_mac.bin`生成并持久化一个本地管理MAC地址，避免每次重启MAC变化导致路由器DHCP租约重置。
 - **WPA3（SAE-H2E）与多频段**：支持2.4 GHz / 5 GHz / 6 GHz（802.11ax 160 MHz）及WPA2-PSK与WPA3-SAE（`sae_pwe=1` H2E）。
 - **CMA内存预留与休眠恢复（`patches/kernel/dts/0011`）**：`ath11k`在每次挂起/恢复（或模块重初始化）时向DMA子系统申请高阶连续物理内存（order-9，2 MiB×32段）。设备树在`0xec000000`处配置512 MiB `shared-dma-pool`（`reusable`），确保系统长时间运行内存碎片化后`ath11k`仍能从CMA池稳定分配DMA缓冲。

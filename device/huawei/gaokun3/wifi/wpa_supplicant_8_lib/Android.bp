@@ -1,0 +1,29 @@
+// wpa_supplicant的设备私有驱动命令库，由BoardConfig.mk的BOARD_WPA_SUPPLICANT_PRIVATE_LIB静态链接进
+// /vendor/bin/hw/wpa_supplicant。设备树没有soong_namespace，模块在根命名空间里，wpa_supplicant可以直接引用。
+// 写法参照device/google/cuttlefish/guest/libs/wpa_supplicant_8_lib。
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+cc_library_static {
+    name: "lib_driver_cmd_gaokun3",
+    srcs: ["driver_cmd_nl80211.c"],
+    cflags: [
+        "-DANDROID_P2P",
+        "-DCONFIG_ANDROID_LOG",
+        "-DCONFIG_DRIVER_NL80211",
+        "-Wall",
+        "-Werror",
+        "-Wno-unused-parameter",
+    ],
+    header_libs: [
+        "wpa_supplicant_headers",
+    ],
+    shared_libs: [
+        "libc",
+        "libcutils",
+        "libnl",
+    ],
+    soc_specific: true,
+}

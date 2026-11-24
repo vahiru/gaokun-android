@@ -340,6 +340,11 @@ WPA_SUPPLICANT_VERSION := VER_0_8_X
 BOARD_WPA_SUPPLICANT_DRIVER := NL80211
 BOARD_WLAN_DEVICE := emulator
 BOARD_HOSTAPD_DRIVER := NL80211
+# wpa_supplicant的私有驱动命令库（wifi/wpa_supplicant_8_lib）：框架下发国家码走私有命令“COUNTRY XX”，
+#   不设这一项时wpa_supplicant以桩模式构建，没有私有命令，国家码无法送达内核。除COUNTRY外的行为与桩模式相同。
+#   hostapd不需要私有库：热点的国家码由框架经IWifiApIface.setCountryCode设置，libwifi-hal-emu中这一调用
+#   不起作用，热点使用固件经STA路径确定的国家。
+BOARD_WPA_SUPPLICANT_PRIVATE_LIB := lib_driver_cmd_gaokun3
 
 # v1.0 NET-2：STA+AP 并发（开热点不再断 Wi-Fi，热点能共享 Wi-Fi 的上行）。
 #   不设这个变量时 Wi-Fi HAL 用"单接口、双模式"的老默认：STA 模式（STA + P2P）与 AP 模式二选一，

@@ -82,9 +82,15 @@
             ath11k 是 REGULATORY_WIPHY_SELF_MANAGED（ath11k reg.c:1021 @7.2.9），固件 11d / 用户提示后经
             regulatory_set_wiphy_regd（reg.c:286）发 WIPHY_REG_CHANGE；wificond 收这两种事件
             （system/connectivity/wificond/net/netlink_manager.cpp:563-564）⇒ 置 true。
+            用户提示（框架下发的国家码）要送到固件，需要内核开启ATH_REG_DYNAMIC_USER_REG_HINTS（scripts/kernel-config-android.sh），
+            并由wpa_supplicant的私有命令库处理“COUNTRY”命令（wifi/wpa_supplicant_8_lib）。
          b. config_wifiUpdateCountryCodeFromScanResultGeneric 默认 false（:1282 / :340）：没有基带时从扫描到的 AP 的
             country IE 推国家码（WifiCountryCode.java:465-469 与 findCountryCodeFromScanResults）。作 a 的兜底：
             a 依赖固件 11d 有没有真报，未验证。⚠️ 资源注释提到这在某些地区需要监管预审（FCC 594280），社区 ROM 照常启用。
+         c. config_wifiStaDynamicCountryCodeUpdateSupported默认false（config.xml:414 / overlayable.xml:81，android-17.0.0_r1）：
+            为false时，WifiCountryCode.setCountryCodeNative只在所有STA都未连接时下发国家码（isAllCmmReady），
+            开机后自动连上已保存网络的机器要等到下次断开才下发。ath11k在连接期间可以更换国家码
+            （固件重新下发信道表，当前信道仍允许时连接保持），置true。
       ⓘ 没开 ACS（config_wifi_softap_acs_supported，:312）：与 STA 并发时 ACS 要离信道扫描，先不碰。
       ⬜ 未编译、未上机。判据：`cmd wifi get-country-code` 非 null；热点设置里能选 5 GHz 和 WPA3；
          另一台手机连上 5 GHz / WPA3 热点能上网（配合 NET-2 的 STA+AP）。
@@ -93,4 +99,5 @@
     <bool name="config_wifi_softap_sae_supported" translatable="false">true</bool>
     <bool name="config_wifiDriverSupportedNl80211RegChangedEvent" translatable="false">true</bool>
     <bool name="config_wifiUpdateCountryCodeFromScanResultGeneric" translatable="false">true</bool>
+    <bool name="config_wifiStaDynamicCountryCodeUpdateSupported" translatable="false">true</bool>
 </resources>
