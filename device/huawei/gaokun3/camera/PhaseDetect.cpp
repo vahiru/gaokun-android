@@ -49,14 +49,14 @@ constexpr PdLine kS5k3l6Lines[] = {
 };
 
 /*
- * codesPerUnit of the s5k3l6: the slope of the disparity over a lens sweep on
- * a target at 40-60 cm, measured over the central 70% of the frame (the
- * default AF region); linear from code 150 to 700, about 250 over the
- * central 30%.
+ * s5k3l6：在前后各2块（每侧128像素）内按位置去趋势。对着40–60厘米外有纹理的
+ * 物体扫描镜头时，视差在码值150–700范围内与镜头位置呈线性关系。codesPerUnit
+ * 是按画面中央的RAW估计的值，尚未在默认AF区域（画面中央70%）实测；估计值
+ * 取偏小的一侧，第一步宁可不到位。
  */
 constexpr PdLayout kLayouts[] = {
 	{ "ov13b10", 32, kOv13b10Lines, 4, false, 0, 300.0 },
-	{ "s5k3l6", 64, kS5k3l6Lines, 4, true, 16, 270.0 },
+	{ "s5k3l6", 64, kS5k3l6Lines, 4, true, 2, 255.0 },
 };
 
 /* One pixel of a CSI-2 packed 10-bit line: 4 pixels in 5 bytes, the fifth
@@ -69,18 +69,22 @@ inline int pixel(const uint8_t *line, int x)
 }
 
 /*
- * Subtract from each sample the mean of the samples within h of it (fewer at
- * the ends): what is left is the texture, without the slow change of the
- * pixels' response across the field.
+ * 采样k属于块k / m中的位置k % m。每个采样减去同一位置的采样在前后h块内的
+ * 均值（两端的块数较少）：留下的是画面纹理，去掉了像素响应在视场内的缓慢
+ * 变化与各位置所在行不同带来的偏移。sum为复用的缓冲区。
  */
-void removeTrend(std::vector<double> &v, int n, int h)
+void removeSiteTrend(std::vector<double> &v, int m, int h, std::vector<double> &sum)
 {
-	std::vector<double> sum(n + 1, 0.0);
-	for (int k = 0; k < n; k++)
-		sum[k + 1] = sum[k] + v[k];
-	for (int k = 0; k < n; k++) {
-		const int lo = std::max(0, k - h), hi = std::min(n, k + h + 1);
-		v[k] -= (sum[hi] - sum[lo]) / (hi - lo);
+	const int nb = static_cast<int>(v.size()) / m;
+	sum.resize(nb + 1);
+	for (int s = 0; s < m; s++) {
+		sum[0] = 0.0;
+		for (int b = 0; b < nb; b++)
+			sum[b + 1] = sum[b] + v[b * m + s];
+		for (int b = 0; b < nb; b++) {
+			const int lo = std::max(0, b - h), hi = std::min(nb, b + h + 1);
+			v[b * m + s] -= (sum[hi] - sum[lo]) / (hi - lo);
+		}
 	}
 }
 
@@ -117,7 +121,7 @@ PhaseResult measurePhase(const RawFrame &raw, const PdLayout &layout,
 
 	std::array<double, 2 * kMaxShift + 1> corr{};
 	double norm = 0.0;
-	std::vector<double> a, b;
+	std::vector<double> a, b, sum;
 
 	for (int l = 0; l < layout.lineCount; l++) {
 		const PdLine &line = layout.lines[l];
@@ -140,9 +144,9 @@ PhaseResult measurePhase(const RawFrame &raw, const PdLayout &layout,
 				mb += b[k];
 			}
 			double ea = 0.0, eb = 0.0;
-			if (layout.detrend > 0) {
-				removeTrend(a, n, layout.detrend);
-				removeTrend(b, n, layout.detrend);
+			if (layout.detrendBlocks > 0) {
+				removeSiteTrend(a, m, layout.detrendBlocks, sum);
+				removeSiteTrend(b, m, layout.detrendBlocks, sum);
 				for (int k = 0; k < n; k++) {
 					ea += a[k] * a[k];
 					eb += b[k] * b[k];

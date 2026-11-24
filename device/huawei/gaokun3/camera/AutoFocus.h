@@ -180,7 +180,7 @@ private:
 	 * a phase search measured 660-870 codes per unit around 225-511. The
 	 * s5k3l6's is linear from code 150 to 700. The first step uses the layout's
 	 * codesPerUnit, 300 for the ov13b10 (short of the target rather than past
-	 * it) and 270 for the s5k3l6; later steps use the measured slope when the
+	 * it) and 255 for the s5k3l6; later steps use the measured slope when the
 	 * disparity changed by at least kPdSecantMinDelta; a slope outside
 	 * kPdMinCodesPerUnit..kPdMaxCodesPerUnit (saturated disparity, noise) is
 	 * ignored and the previous gain kept.
