@@ -58,15 +58,17 @@ PRODUCT_SYSTEM_EXT_PROPERTIES += \
     persist.adb.tcp.port=5555
 endif
 
-# ⚠️★ A17 新情况（设备树没处理，等用户定）：crDroid 17.0 的
-#   vendor/lineage/config/common.mk:243-246 对所有非 user 变体【无条件】装 adb_root（16.0 只在 WITH_SU=true 时装，
-#   本树从没设过 WITH_SU）。adb_root 与 adbd 都按 Soong 的 Debuggable（= 变体是 userdebug，与 ro.debuggable 无关，
-#   refs/a17/build/make/core/soong_config.mk:60）编进 ANDROID_DEBUGGABLE=1（refs/a17/packages/modules/adb/Android.bp:47-55、
-#   :932-942）⇒ 发布构建（userdebug + ro.debuggable=0）上，只要在开发者选项里打开 adb root 开关（restart_service.cpp:63-64 的提示语就指向那里；Settings 里的确切名称未核），
-#   `adb root` 就能成（daemon/restart_service.cpp:42-72：拿到 adbroot_service 且已启用即放行）。A16 发布构建里没有
-#   adbroot_service，那条路在 :46-49 就返回了 —— 也就是 B1 / D1「发布构建没有 adb root」这条在 A17 上被悄悄打开了。
-#   PRODUCT_PACKAGES 只能加不能减（lineage_gaokun3.mk 里 SetupWizard 那段的实测），设备树这边没有干净的去法：
-#   要么由 crdroid-tree-fixes.py 改 common.mk（例如恢复成 WITH_SU 门控），要么接受（反正设备上已有 KSU）。
+# ⓘ adb_root：crDroid 17.0早期同步的树中，vendor/lineage/config/common.mk对所有非user变体安装adb_root
+#   （16.0只在WITH_SU=true时安装，本树从未设置WITH_SU）。adb_root与adbd都按Soong的Debuggable（= 变体是userdebug，
+#   与ro.debuggable无关，refs/a17/build/make/core/soong_config.mk:60）编进ANDROID_DEBUGGABLE=1
+#   （refs/a17/packages/modules/adb/Android.bp:47-55、:932-942），所以安装了adb_root的发布构建（userdebug + ro.debuggable=0）上，
+#   在开发者选项中打开「Rooted debugging」开关（简体中文界面为「Root 身份的调试」；
+#   refs/a17/packages/modules/adb/daemon/restart_service.cpp:63-64的提示语指向这个开关）后，`adb root`即可成功
+#   （restart_service.cpp:42-72：取得adbroot_service且已启用即放行）。没有安装adb_root时，这条路径在
+#   restart_service.cpp:46-49就返回。
+#   PRODUCT_PACKAGES只能加不能减（lineage_gaokun3.mk里SetupWizard那段的实测），设备树无法去掉它，
+#   因此由crdroid-tree-fixes.py的修补[24]改回WITH_SU=true时才安装。
+#   crDroid上游提交82c2c41049（common: Move adb root to eng builds）起只在eng构建中安装adb_root，修补[24]在这样的树上报"已废弃（A17）"。
 
 # 屏幕密度
 # [measured] 1600x2560，物理尺寸166x266 mm，对角12.34"，约245 dpi。

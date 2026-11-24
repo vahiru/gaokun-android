@@ -1106,7 +1106,8 @@ def patch_build_fingerprint_variant_user(tree: pathlib.Path) -> str:
 def patch_adb_root_only_with_su(tree: pathlib.Path) -> str:
     """—— 修补 24：adb_root 只在 WITH_SU=true 时装（恢复 crDroid 16.0 的行为）——
 
-    crDroid 17.0 的 vendor/lineage/config/common.mk:244-247 对所有非 user 变体无条件
+    crDroid 17.0在上游加入82c2c41049（首次推送时哈希不同，变基后才是现在的哈希）之前，有一段时间
+    vendor/lineage/config/common.mk:244-247对所有非user变体（不论WITH_SU）
     `PRODUCT_PACKAGES += adb_root`（16.0 时它在 `ifeq ($(WITH_SU),true)` 里面，和 su 一起）。
     我们的发布构建是 userdebug 变体（-user 的 init 强制 enforcing、起不来，#117 §15），
     adbd 按变体编成 ANDROID_DEBUGGABLE=1（packages/modules/adb/Android.bp:47-55）；装了
@@ -1115,8 +1116,13 @@ def patch_adb_root_only_with_su(tree: pathlib.Path) -> str:
     ⇒ 发布构建「没有 adb root」（见 docs/dev/release-checklist.md）被悄悄打开。
     设备树去不掉一个 PRODUCT_PACKAGES（没有 PRODUCT_PACKAGES_REMOVE），只能改这里。
     开发机照旧用 KSU 拿 root（`adb shell` 经 KSU 即 root，从来没有 `adb root`）。
-    上机判据：`pm list packages`/`ls /system_ext/bin /system/bin | grep adb_root` 为空；
-      开发者选项里没有「Rooted debugging / adb root」开关；`adb root` 报 adbd cannot run as root。
+    上机判据：`ls /system_ext/bin /system/bin | grep adb_root`为空，`service check adbroot_service`报not found；
+      开发者选项里没有「Rooted debugging」（简体中文界面为「Root 身份的调试」）开关；`adb root`约6秒后返回
+      （adbd等待adbroot_service 5秒后超时），没有任何输出，随后adbd重启一次，仍以shell身份运行。
+      装有adb_root时会输出"ADB Root access is disabled by system setting…"（开关未打开）或"restarting adbd as root"。
+
+    crDroid上游提交82c2c41049（common: Move adb root to eng builds）把这段改成只在eng构建中安装adb_root，
+    userdebug的发布构建因此不再安装它；同步到这个提交以后的树里本条报"已废弃（A17）"、什么都不改。
     """
     p = tree / "vendor/lineage/config/common.mk"
     if not p.exists():
@@ -1132,7 +1138,13 @@ def patch_adb_root_only_with_su(tree: pathlib.Path) -> str:
            "ifeq ($(WITH_SU),true)\n"
            "PRODUCT_PACKAGES += \\\n"
            "    su\n")
+    eng_only = ("# Root\n"
+                "ifeq ($(TARGET_BUILD_VARIANT),eng)\n"
+                "PRODUCT_PACKAGES += \\\n"
+                "    adb_root\n")
     if s.count(old) != 1:
+        if s.count(eng_only) == 1 and s.count("adb_root") == 1:
+            return "已废弃（A17）：上游已把adb_root限定为eng构建（82c2c41049），userdebug不再安装；什么都没改"
         return "⚠️ 找不到 common.mk 里「# Root」那段（或不唯一），上游可能改了写法；什么都没动"
     new = ("# Root\n"
            "# " + marker + ": adb_root only with WITH_SU=true (as in crDroid 16.0); release\n"
@@ -1530,6 +1542,7 @@ def main():
     # （Duck Detector system_properties 3 条 danger 的根；运行时改不掉 Build.FINGERPRINT 常量）
     step(" [23] BUILD_FINGERPRINT/THUMBPRINT/SYSTEM_FINGERPRINT 变体段改写成 user（与 ro.build.type 对齐）: ",
          patch_build_fingerprint_variant_user(tree))
+    # crDroid上游82c2c41049起只在eng构建中安装adb_root ⇒ 新树上通常打印"已废弃（A17）"；仍是旧写法的树照旧改写
     step(" [24] adb_root 只在 WITH_SU=true 时装（发布构建没有 adb root）: ", patch_adb_root_only_with_su(tree))
     step(" [25] KeyGestureController 读 LineageSettings 失败不致命（10-11 救砖兜底）: ", patch_keygesture_lineagesettings_guard(tree))
     step(" [26] codec2 BLOB 线性块在没有 ION 时也能 map（HEVC CSD 合并 / 硬解）: ", patch_codec2_blob_linear_map(tree))
