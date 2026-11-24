@@ -56,15 +56,14 @@ struct PdLayout {
 	int lineCount;
 	bool gbrg;             /* RAW Bayer order under the flips: GBRG, else GRBG */
 	/*
-	 * What each profile loses before the correlation: 0, its mean; above
-	 * that, at each sample the mean of the samples within this many of it.
-	 * The local mean is for pixels whose response changes across the field
-	 * (the two kinds of an s5k3l6 pair in opposite directions, by up to 1.6
-	 * times over the frame), which would otherwise dominate the profiles of
-	 * a low-contrast scene; 16 samples (256 pixels) keep the defocused texture
-	 * that a phase search starts from.
+	 * 相关运算之前各采样减去的基线。0：减去整条采样线的均值。大于0：每个
+	 * 采样减去块内同一位置的采样在前后各detrendBlocks块内的均值。按位置分别
+	 * 去趋势针对s5k3l6的两种情况：两类相位像素的响应在视场内朝相反方向倾斜
+	 * （左右两侧相差最多约1.6倍），不去掉会在低对比度场景中压过画面纹理；
+	 * 一条采样线的4个采样取自相差4行的不同行，画面中的水平边缘或上下亮度
+	 * 变化会给两组采样加上相同的、每块重复一次的分量，使测得的视差偏向0。
 	 */
-	int detrend;
+	int detrendBlocks;
 	/*
 	 * Lens codes per unit of disparity for the first move of a phase search
 	 * (AutoFocus.h); later moves use the measured slope.
