@@ -188,6 +188,9 @@ KPATCHES=(
     # 客户端填0时仍为最坏值。crdroid-tree-fixes.py [46]（android/v4l2-codec2/0007）依赖0019：缺少0019时，
     # 1080p及以下的硬件解码与1080p以上的VP9硬件解码会在启动时报错。
     kernel/iris/0019-media-iris-let-the-decoder-client-size-its-input-buffers.patch
+    # 0020在SC8280XP上让iris上电期间持有7000 µs的CPU延迟请求，CPU簇不再进入AOSS级休眠（视频硬件在这一级中途挂起），
+    # 仍可进入只断APSS的簇状态（需DT提供）。
+    kernel/iris/0020-media-iris-keep-the-CPU-cluster-out-of-AOSS-level-idle.patch
 
     # ─── 7. kernel/camera：camcc 时钟/GDSC、camss 与前后摄传感器驱动（ov13b10 / hi846 / s5k4h7 / s5k3l6）───
     # 0003 与 kernel/dts/0005 配套，需 CONFIG_VIDEO_OV13B10=y 与 CONFIG_VIDEO_DW9714=y；

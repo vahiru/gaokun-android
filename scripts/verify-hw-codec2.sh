@@ -5,7 +5,7 @@
 # 用法: [SERIAL=xxx] bash scripts/verify-hw-codec2.sh [测试视频.mp4 [组件名]]
 #   不给视频就不做真解；给了就真解一遍（这才是解码唯一算数的判据）。
 #   确认内核已建立CP非像素上下文、且屏幕亮着时，还会用screenrecord经c2.v4l2.avc.encoder在1280x720和640x480各真编一段
-#   （熄屏时视频硬件会挂起，见docs/dev/audio-video.md）；设了NOENC就跳过这一步（accept.sh --readonly）。
+#   （不含kernel/iris/0020的内核在熄屏时视频硬件会挂起，见docs/dev/audio-video.md中0020一行）；设了NOENC就跳过这一步（accept.sh --readonly）。
 #   内核日志要root才能读：adb shell不是uid 0时经su读，读不到的检查记为跳过。
 #   组件名默认 c2.v4l2.avc.decoder；HEVC / VP9 的片子要显式给 c2.v4l2.hevc.decoder / c2.v4l2.vp9.decoder。
 #
@@ -131,7 +131,7 @@ fi
 echo; echo "═══ 5b. ★ 真编一段（H.264，screenrecord）═══"
 # screenrecord只会用avc，--codec-name指定硬件组件，不让它悄悄落到软编上。画面不动时只出很少几帧。
 # 编码器在第一帧之后出错时screenrecord只打印Encoder failed、退出码仍是0，所以还要看--verbose最后报的帧数。
-# 熄屏时视频硬件会挂起（docs/dev/audio-video.md），所以只在亮屏时做；超时30秒算失败。
+# 不含kernel/iris/0020的内核在熄屏时视频硬件会挂起（docs/dev/audio-video.md中0020一行），所以只在亮屏时做；超时30秒算失败。
 # 编两个尺寸：1280x720的一帧正好是4 KiB的倍数；640x480不是，iris要求的缓冲比一帧的数据大2048字节，
 # 这个尺寸靠patches/android/v4l2-codec2/0006才能送进编码器。
 W=$($A shell 'dumpsys power 2>/dev/null | grep -m1 -o "mWakefulness=[A-Za-z]*"' | tr -d '\r')
