@@ -151,7 +151,7 @@ TX_DEC0 Volume = 102, TX_DEC1 Volume = 102
 - **内核配置与固件**：启用`CONFIG_VIDEO_QCOM_IRIS=y`（禁用`CONFIG_VIDEO_QCOM_VENUS`），设备树`video-codec@aa00000`指定固件`qcom/sc8280xp/HUAWEI/gaokun3/qcvss8280.mbn`。
 - **Android Codec2集成**：
   - 使用`android.hardware.media.c2@1.2-service-v4l2`（通过属性`media.c2.hal.selection=aidl`告知`MediaCodec`连接AIDL/HIDL服务）。
-  - 注册解码器组件：`c2.v4l2.avc.decoder`（H.264）、`c2.v4l2.hevc.decoder`（HEVC / H.265）、`c2.v4l2.vp9.decoder`（VP9）。实测单路实时解码3840x2160：HEVC（含10位）与VP9到120 fps，H.264到60 fps；`media_codecs_c2.xml`按此申报`blocks-per-second`与性能点（H.264 4K@60，HEVC与VP9 4K@120）。Media3等应用按性能点判断帧率，原来只申报4K@30时，60 fps以上的视频会交给软解。
+  - 注册解码器组件：`c2.v4l2.avc.decoder`（H.264）、`c2.v4l2.hevc.decoder`（HEVC / H.265）、`c2.v4l2.vp9.decoder`（VP9）。实测单路实时解码：3840x2160的HEVC（含10位）与VP9到120 fps，H.264在3840x2160下到60 fps、在2560x1440下到120 fps；`media_codecs_c2.xml`按此申报`blocks-per-second`与性能点（H.264 4K@60与2560x1440@120，HEVC与VP9 4K@120）。Media3等应用按性能点判断帧率，原来只申报4K@30时，60 fps以上的视频会交给软解。一个性能点只覆盖帧尺寸、帧率与宏块速率都不超过它的格式，所以H.264的4K@60无法覆盖1080p@120，另申报2560x1440@120。
   - 注册编码器组件：`c2.v4l2.avc.encoder`（H.264）、`c2.v4l2.hevc.encoder`（HEVC Main），见本节第3小节。
 
 ### 2. 关键内核与用户态修复
@@ -185,7 +185,8 @@ TX_DEC0 Volume = 102, TX_DEC1 Volume = 102
 | `patches/android/v4l2-codec2/0015` | `external/v4l2_codec2` | 轮询线程在`poll()`只返回`POLLERR`时原来立即重新轮询缓冲。两个队列都没有排队的缓冲时，`v4l2_m2m_poll()`马上返回`POLLERR`，于是每次解码器启动到第一次送入码流之间（3–40 ms）空转上万次，vb2队列出错后则一直空转，错误也传不到解码器。补丁在这种情况下只投递一次回调（真正的队列错误由`VIDIOC_DQBUF`返回`-EIO`暴露），停止轮询缓冲，直到下一次`VIDIOC_QBUF`或`VIDIOC_STREAMON`。编码器共用这个轮询线程 |
 | `patches/android/v4l2-codec2/0016` | `external/v4l2_codec2` | 事件回调投递之后、解码器线程把事件取走之前，`poll()`一直返回`POLLPRI`，轮询线程反复投递回调，多出来的回调`VIDIOC_DQEVENT`拿到`ENOENT`。补丁在事件回调执行期间不轮询`POLLPRI`，回调执行完再恢复 |
 | `patches/android/v4l2-codec2/0017` | `external/v4l2_codec2` | 解码器进入错误状态后，`serviceDeviceTask()`不再处理设备，没有取走的事件让`poll()`一直返回`POLLPRI`，轮询线程与解码器线程合计占用接近两个CPU核心，直到解码器被销毁。补丁在`onError()`中停止轮询 |
-| `patches/android/v4l2-codec2/0018` | `external/v4l2_codec2` | 设备不报告解码级别时，解码组件使用内置的默认级别表，VP9原来只到5级（3840x2160约37 fps）。应用按码流级别判断时，会把4K60的VP9（5.1级）判为超出硬件能力而转用软解。iris gen1解码器没有VP9级别控件；补丁在默认表里补上5.1与5.2级（4K约141 fps），实际可用的尺寸与帧率仍受`media_codecs_c2.xml`的限制 |
+| `patches/android/v4l2-codec2/0018` | `external/v4l2_codec2` | 没有任何解码设备列出该编码格式（或级别控件没有可识别的级别）时，`DecodeInterface`使用内置的默认级别表，VP9原来只到5级（3840x2160约37 fps）。补丁在这张表里补上5.1与5.2级（4K约141 fps），与`0019`改过的`V4L2Device`默认表保持一致。iris gen1解码器没有级别控件，`DecodeInterface`收到的是`V4L2Device`的默认表，见`0019` |
+| `patches/android/v4l2-codec2/0019` | `external/v4l2_codec2` | 驱动没有VP9级别控件时，`V4L2Device::queryC2Levels()`返回自己的默认级别表，VP9原来也只到5级。iris gen1解码器没有VP9级别控件，应用看到的就是这张表；按码流级别判断时，会把4K60的VP9（5.1级）判为超出硬件能力而转用软解。补丁补上5.1与5.2级，实际可用的尺寸与帧率仍受`media_codecs_c2.xml`的限制。实测`MediaCodecList.findDecoderForFormat()`对4K60（5.1级）与4K120（5.2级）的VP9选中`c2.v4l2.vp9.decoder`，此前返回空 |
 
 ### 3. 硬件视频编码
 
