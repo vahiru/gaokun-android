@@ -8,8 +8,8 @@ import '../model.dart';
 import 'bits.dart';
 import 'messages.dart';
 
-/// "可用未分配空间"一行右侧的按钮：分析系统盘上的一个分区最多还能压缩出多少、压缩停在哪个文件（gk3w shrink-info；
-/// 分析哪个分区由它选：用户最近在"磁盘管理"里压缩的那个，否则剩余空间最多的那个）
+/// "可用未分配空间"一行右侧的按钮：读取用户本次开机后最近一次在"磁盘管理"里压缩时停在哪个文件上（gk3w shrink-info：
+/// 解读 Windows 那次分析记下的 259 号事件，不自己分析）
 class ShrinkAnalyzeButton extends StatelessWidget {
   const ShrinkAnalyzeButton({super.key});
 
@@ -22,7 +22,7 @@ class ShrinkAnalyzeButton extends StatelessWidget {
   }
 }
 
-/// 分析的进度与结果，放在"可用未分配空间"一行下面：够不够、停在哪个文件、这个文件怎么处理。
+/// 读取的结果，放在"可用未分配空间"一行下面：停在哪个文件、这个文件怎么处理；可压缩多少由"压缩卷"对话框自己显示。
 /// 文件路径与处理步骤可以选中复制（步骤里有要在终端里运行的命令）
 class ShrinkGuide extends StatelessWidget {
   const ShrinkGuide({super.key});
@@ -47,30 +47,18 @@ class ShrinkGuide extends StatelessWidget {
     } else if (err != null) {
       body = NoteBox(warn: true, text: '${l.shrinkFailed}${errText(l, err)}');
     } else if (info != null) {
-      // 压缩出来的空间与这个分区之后已有的未分配空间连成一片，按两者之和比较
-      final total = fmtMib(info.totalMib), need = fmtMib(s.minNeedMib), dl = info.letter;
-      final file = info.file, kind = info.blocker;
-      // 已经有够用的未分配空间（"可用未分配空间"一行上按的）：说还能再压缩出多少，挡住的文件处理后可以更多
-      final more = s.hasRoom;
-      final head = !more
-          ? null
-          : info.adjacentMib > 0
-              ? l.shrinkMoreAdjacent(total, fmtMib(info.adjacentMib), dl)
-              : l.shrinkMore(total, dl);
-      final fg = more ? context.cs.onSurface : gk.onWarningContainer;
-      if (!more && info.totalMib >= s.minNeedMib) {
-        body = NoteBox(text: l.shrinkEnough(total, need, dl));
+      final dl = info.letter, file = info.file, kind = info.blocker;
+      // 已经有够用的未分配空间（"可用未分配空间"一行上按的）：照样说明，只是不用警示的底色
+      final warn = !s.hasRoom;
+      final fg = warn ? gk.onWarningContainer : context.cs.onSurface;
+      if (info.none) {
+        body = NoteBox(text: l.shrinkNoEvent);
       } else if (info.limitedBySpace) {
-        body = NoteBox(
-            warn: !more, text: more ? '$head\n${l.shrinkMoreFull(fmtMib(info.freeMib), dl)}' : l.shrinkFull(total, need, fmtMib(info.freeMib), dl));
+        body = NoteBox(warn: warn, text: l.shrinkFull(dl, fmtMib(info.freeMib)));
       } else if (file == null || kind == null) {
-        body = more ? NoteBox(text: head!) : NoteBox(warn: true, text: l.shrinkNoFile(total, need, dl));
+        body = NoteBox(warn: warn, text: l.shrinkNoFile(dl));
       } else {
-        body = NoteBox(
-          warn: !more,
-          text: more ? '$head\n${l.shrinkMoreLimit}' : l.shrinkNotEnough(total, need, dl),
-          child: _blocker(context, '${info.drive}$file', kind, dl, fg),
-        );
+        body = NoteBox(warn: warn, text: l.shrinkBlocked(dl), child: _blocker(context, '${info.drive}$file', kind, dl, fg));
       }
     } else {
       return const SizedBox.shrink();
@@ -100,7 +88,7 @@ class ShrinkGuide extends StatelessWidget {
 
   /// 压缩停在 MFT 上：没挪过就说明并提供"移动 MFT"；挪过了，说挪了多少，再按情况说明：
   /// MFT 已经只剩开头必须留在原处的部分（不能再多），还有放不下的部分（腾出前部的空间后可以再挪），
-  /// 或者别的原因仍停在它上面（例如挪动期间 MFT 又变大了：可以再挪一次）
+  /// 或者挪完了（请用户在"磁盘管理"里重新"压缩卷"、回来再查看：安装器不自己重新分析）
   List<Widget> _mftBody(BuildContext context, String dl, Color fg) {
     final s = context.session, l = context.l;
     final style = context.tt.bodyLarge!.copyWith(color: fg);
@@ -108,7 +96,7 @@ class ShrinkGuide extends StatelessWidget {
     // 校验恢复密钥（并暂停保护）期间不移动：它做完会重新检查
     final again = Btn(l.mftMoveBtn,
         kind: BtnKind.secondary, icon: Icons.low_priority, onPressed: s.bitlockerChecking ? null : () => confirmMoveMft(context));
-    // 移动失败的提示写在这一块里（分析结果仍然有效，照样显示）
+    // 移动失败的提示写在这一块里（读取的结果仍然有效，照样显示）
     final failed = s.mftErr == null ? null : Text('${l.mftFailed}${errText(l, s.mftErr!)}', style: style);
     if (done == null) {
       return [if (failed != null) ...[failed, const SizedBox(height: 4)], Text(l.sbMftHow(dl), style: style), const SizedBox(height: 12), again];
@@ -123,13 +111,13 @@ class ShrinkGuide extends StatelessWidget {
     return [
       moved > 0 ? movedText : Text(l.mftNothing, style: style),
       const SizedBox(height: 4),
-      Text(stuck ? l.mftStuck(dl) : unplaced > 0 ? l.mftUnplaced(fmtMib(unplaced), dl) : l.mftAgain(dl), style: style),
-      if (!stuck) ...[const SizedBox(height: 12), again],
+      Text(stuck ? l.mftStuck(dl) : unplaced > 0 ? l.mftUnplaced(fmtMib(unplaced), dl) : l.mftDone(dl), style: style),
+      if (!stuck && unplaced > 0) ...[const SizedBox(height: 12), again],
     ];
   }
 }
 
-/// 移动 MFT 之前问一句：会写所分析的那个分区，要几分钟
+/// 移动 MFT 之前问一句：会写那个分区，要几分钟
 Future<void> confirmMoveMft(BuildContext context) async {
   final s = context.session, l = context.l;
   final go = await showDialog<bool>(

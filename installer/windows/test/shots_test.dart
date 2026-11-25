@@ -232,7 +232,7 @@ void main() {
     await shot(t, '41-shrink-mft-moved');
   }, skip: !haveFont);
 
-  testWidgets('空间够用时分析还能压缩出多少', (t) async {
+  testWidgets('空间够用时查看压缩受阻原因', (t) async {
     await pumpApp(t, 'free');
     await tap(t, find.text(l.shrinkAnalyze));
     await waitFor(t, find.text(l.sbPagefile), tries: 400);

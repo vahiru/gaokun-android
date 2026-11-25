@@ -74,107 +74,39 @@
   "chkNoRoomNone": "There is no unallocated space on the system disk.",
   "chkNoRoomBiggest": "The largest contiguous unallocated space on the system disk is {size}.",
   "chkNoRoomHow": "In Windows Disk Management, shrink a partition on the system disk to free up at least {need} of contiguous unallocated space, then return here and check again.",
-  "shrinkAnalyze": "Analyze shrinkable space",
-  "shrinkReanalyze": "Analyze again",
-  "shrinkAnalyzing": "Analyzing shrinkable space. This may take a few minutes…",
-  "shrinkFailed": "Unable to analyze shrinkable space: ",
-  "shrinkEnough": "Shrinking the {drive}: volume can free up to {max} of contiguous unallocated space, which is sufficient for Android (at least {need} required). Shrink the {drive}: volume in Disk Management, then check again.",
-  "@shrinkEnough": {
+  "shrinkAnalyze": "Check what limits shrinking",
+  "shrinkReanalyze": "Check again",
+  "shrinkAnalyzing": "Reading the shrink record…",
+  "shrinkFailed": "Unable to read the shrink record: ",
+  "shrinkNoEvent": "Shrink Volume has not been run on a partition of the system disk in Disk Management since the device started. Right-click the partition you want to shrink in Disk Management, select “Shrink Volume”, then return here and check.",
+  "shrinkBlocked": "The last time the {drive}: volume was shrunk in Disk Management, shrinking was limited by the location of the following unmovable file:",
+  "@shrinkBlocked": {
     "placeholders": {
-      "max": {
-        "type": "String"
-      },
-      "need": {
-        "type": "String"
-      },
       "drive": {
         "type": "String"
       }
     }
   },
-  "shrinkNotEnough": "Shrinking the {drive}: volume can free at most {max} of contiguous unallocated space, whereas Android requires at least {need}. Further shrinking is blocked by the location of the following unmovable file:",
-  "@shrinkNotEnough": {
-    "placeholders": {
-      "max": {
-        "type": "String"
-      },
-      "need": {
-        "type": "String"
-      },
-      "drive": {
-        "type": "String"
-      }
-    }
-  },
-  "shrinkNoFile": "Shrinking the {drive}: volume can free at most {max} of contiguous unallocated space, whereas Android requires at least {need}. Unable to identify the file restricting the shrink operation; please restart the device and analyze again.",
-  "shrinkFull": "Shrinking the {drive}: volume can free at most {max} of contiguous unallocated space, whereas Android requires at least {need}. Shrinking is limited by remaining free space on {drive}: ({free} free) rather than by an unmovable file. Free up disk space on {drive}: (for example via Disk Cleanup or Settings → System → Storage), then analyze again.",
-  "@shrinkFull": {
-    "placeholders": {
-      "max": {
-        "type": "String"
-      },
-      "need": {
-        "type": "String"
-      },
-      "free": {
-        "type": "String"
-      },
-      "drive": {
-        "type": "String"
-      }
-    }
-  },
+  "shrinkNoFile": "The last time the {drive}: volume was shrunk in Disk Management, the file restricting the shrink could not be identified. Restart the device, run Shrink Volume again, then check again.",
   "@shrinkNoFile": {
     "placeholders": {
-      "max": {
-        "type": "String"
-      },
-      "need": {
-        "type": "String"
-      },
       "drive": {
         "type": "String"
       }
     }
   },
-  "shrinkNext": "After resolving this item, analyze again — another unmovable file may still restrict further shrinking.",
-  "shrinkMore": "Shrinking the {drive}: volume can free up to {total} of contiguous unallocated space. To allocate more space to the Android data partition, shrink {drive}: in Disk Management and check again.",
-  "@shrinkMore": {
+  "shrinkFull": "The last time the {drive}: volume was shrunk in Disk Management, shrinking was limited by the remaining free space on {drive}: ({free} free) rather than by an unmovable file. Free up disk space on {drive}: (for example via Disk Cleanup or Settings → System → Storage), then run Shrink Volume again.",
+  "@shrinkFull": {
     "placeholders": {
-      "total": {
-        "type": "String"
-      },
       "drive": {
         "type": "String"
-      }
-    }
-  },
-  "shrinkMoreAdjacent": "Shrinking the {drive}: volume can provide up to {total} of contiguous unallocated space in total (including the {adjacent} already following {drive}:). To allocate more space to the Android data partition, shrink {drive}: in Disk Management and check again.",
-  "@shrinkMoreAdjacent": {
-    "placeholders": {
-      "total": {
-        "type": "String"
       },
-      "adjacent": {
-        "type": "String"
-      },
-      "drive": {
-        "type": "String"
-      }
-    }
-  },
-  "shrinkMoreLimit": "Further shrinking is restricted by the following unmovable file; resolving it will allow freeing more space:",
-  "shrinkMoreFull": "Further shrinking is limited by remaining free space on {drive}: ({free} free). Freeing up disk space on {drive}: will allow shrinking it further.",
-  "@shrinkMoreFull": {
-    "placeholders": {
       "free": {
         "type": "String"
-      },
-      "drive": {
-        "type": "String"
       }
     }
   },
+  "shrinkNext": "After resolving this item, run Shrink Volume again in Disk Management and check here again — another unmovable file may still restrict shrinking.",
   "sbPagefile": "Virtual memory paging file",
   "sbPagefileHow": "1. Press Win+R, enter “SystemPropertiesPerformance”, and under Virtual memory on the Advanced tab click Change.\n2. Uncheck “Automatically manage paging file size for all drives”, select {drive}:, choose “No paging file”, click Set, confirm with Yes, and click OK.\n3. Restart the device and shrink the {drive}: volume in Disk Management.\n4. After shrinking, re-enable “Automatically manage paging file size for all drives” and restart the device.",
   "sbHiberfil": "System hibernation file",
@@ -186,7 +118,14 @@
   "sbUsn": "NTFS change journal (USN journal)",
   "sbUsnHow": "1. Open Terminal as Administrator and run “fsutil usn deletejournal /d {drive}:” to delete the change journal.\n2. Shrink the {drive}: volume in Disk Management (Windows automatically recreates the journal when needed).",
   "sbMft": "NTFS Master File Table (MFT)",
-  "sbMftHow": "Some MFT fragments are located near the end of the {drive}: volume. The installer can relocate them to free space near the beginning of the volume and then re-analyze automatically.",
+  "sbMftHow": "Some MFT fragments are located near the end of the {drive}: volume. The installer can relocate them to free space near the beginning of the volume.",
+  "@sbMftHow": {
+    "placeholders": {
+      "drive": {
+        "type": "String"
+      }
+    }
+  },
   "mftMoveBtn": "Move MFT",
   "mftConfirmTitle": "Move MFT",
   "mftConfirmBody": "MFT fragments near the end of the {drive}: volume will be relocated to free space near the beginning. The installer cannot be closed during this operation; do not shut down the device or disconnect power. This may take a few minutes.",
@@ -213,7 +152,14 @@
   "mftStuck": "System metadata records at the start of the MFT cannot be moved; the {drive}: volume has reached its maximum shrink limit.",
   "mftUnplaced": "Another {size} could not be moved closer to the start of the {drive}: volume due to insufficient contiguous free space. Delete unnecessary files on {drive}:, then move the MFT and analyze again.",
   "mftNothing": "No MFT fragments can be moved closer to the start of the volume.",
-  "mftAgain": "Some MFT fragments still remain near the end of the {drive}: volume (for example, if the MFT grew during the operation). You may run the move again.",
+  "mftDone": "The move is complete. Run Shrink Volume on the {drive}: volume again in Disk Management, then check here again.",
+  "@mftDone": {
+    "placeholders": {
+      "drive": {
+        "type": "String"
+      }
+    }
+  },
   "@mftUnplaced": {
     "placeholders": {
       "size": {
@@ -321,7 +267,7 @@
   "errBitlockerUnverifiable": "Unable to read BitLocker recovery key metadata from the system drive, so verification cannot be performed. Check again; if the issue persists, disable BitLocker (device encryption) in Windows before continuing.",
   "errBitlockerSuspend": "Unable to suspend BitLocker protection. Please check again and retry.",
   "errBitlockerConverting": "BitLocker is currently encrypting or decrypting the system drive. Wait for the conversion to complete, then check again.",
-  "errShrinkQuery": "Please try analyzing again shortly. If it continues to fail, right-click the partition you want to shrink in Disk Management and select “Shrink Volume” to check the available shrinkable space.",
+  "errShrinkQuery": "Unable to read the Windows Application log. Please try again shortly.",
   "errMftFailed": "Several move attempts failed, so the operation was stopped; you may try again later.",
   "errMftRead": "Unable to read the MFT layout or free-space bitmap of the volume.",
   "errVolumeOpen": "Unable to open the volume.",
@@ -622,13 +568,6 @@
       }
     }
   },
-  "@sbMftHow": {
-    "placeholders": {
-      "drive": {
-        "type": "String"
-      }
-    }
-  },
   "@mftConfirmBody": {
     "placeholders": {
       "drive": {
@@ -637,13 +576,6 @@
     }
   },
   "@mftStuck": {
-    "placeholders": {
-      "drive": {
-        "type": "String"
-      }
-    }
-  },
-  "@mftAgain": {
     "placeholders": {
       "drive": {
         "type": "String"

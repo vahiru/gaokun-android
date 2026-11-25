@@ -137,107 +137,39 @@
       }
     }
   },
-  "shrinkAnalyze": "分析可压缩空间",
-  "shrinkReanalyze": "重新分析",
-  "shrinkAnalyzing": "正在分析可压缩空间，可能需要数分钟……",
-  "shrinkFailed": "无法分析可压缩空间：",
-  "shrinkEnough": "压缩{drive}盘最多可腾出{max}的连续未分配空间，足以安装Android（至少需要{need}）。请在“磁盘管理”中压缩{drive}盘后重新检查。",
-  "@shrinkEnough": {
+  "shrinkAnalyze": "查看压缩受阻原因",
+  "shrinkReanalyze": "重新查看",
+  "shrinkAnalyzing": "正在读取压缩记录……",
+  "shrinkFailed": "无法读取压缩记录：",
+  "shrinkNoEvent": "本次开机后尚未在“磁盘管理”中对系统磁盘上的分区执行“压缩卷”。请先在“磁盘管理”中右键点击要压缩的分区并选择“压缩卷”，再回到此处查看。",
+  "shrinkBlocked": "最近一次在“磁盘管理”中压缩{drive}盘时，压缩受以下不可移动文件位置限制：",
+  "@shrinkBlocked": {
     "placeholders": {
-      "max": {
-        "type": "String"
-      },
-      "need": {
-        "type": "String"
-      },
       "drive": {
         "type": "String"
       }
     }
   },
-  "shrinkNotEnough": "压缩{drive}盘最多只能腾出{max}的连续未分配空间，而安装Android至少需要{need}。受以下不可移动文件位置限制，无法进一步压缩：",
-  "@shrinkNotEnough": {
-    "placeholders": {
-      "max": {
-        "type": "String"
-      },
-      "need": {
-        "type": "String"
-      },
-      "drive": {
-        "type": "String"
-      }
-    }
-  },
-  "shrinkNoFile": "压缩{drive}盘最多只能腾出{max}的连续未分配空间，而安装Android至少需要{need}。未能定位阻碍压缩的文件，请重启设备后重新分析。",
-  "shrinkFull": "压缩{drive}盘最多只能腾出{max}的连续未分配空间，而安装Android至少需要{need}。当前受限于{drive}盘剩余可用空间不足（仅剩{free}），而非不可移动文件阻碍。请先清理{drive}盘文件（例如通过“磁盘清理”或“设置 → 系统 → 存储”），随后重新分析。",
-  "@shrinkFull": {
-    "placeholders": {
-      "max": {
-        "type": "String"
-      },
-      "need": {
-        "type": "String"
-      },
-      "free": {
-        "type": "String"
-      },
-      "drive": {
-        "type": "String"
-      }
-    }
-  },
+  "shrinkNoFile": "最近一次在“磁盘管理”中压缩{drive}盘时，未能定位阻碍压缩的文件。请重启设备，重新执行“压缩卷”后再查看。",
   "@shrinkNoFile": {
     "placeholders": {
-      "max": {
-        "type": "String"
-      },
-      "need": {
-        "type": "String"
-      },
       "drive": {
         "type": "String"
       }
     }
   },
-  "shrinkNext": "处理完成后请重新分析，届时可能仍需处理下一个阻碍压缩的不可移动文件。",
-  "shrinkMore": "压缩{drive}盘最多可腾出{total}的连续未分配空间。如需为Android数据分区分配更多容量，请在“磁盘管理”中压缩{drive}盘后重新检查。",
-  "@shrinkMore": {
+  "shrinkFull": "最近一次在“磁盘管理”中压缩{drive}盘时，可压缩空间受限于{drive}盘剩余可用空间不足（仅剩{free}），而非不可移动文件阻碍。请先清理{drive}盘文件（例如通过“磁盘清理”或“设置 → 系统 → 存储”），随后重新执行“压缩卷”。",
+  "@shrinkFull": {
     "placeholders": {
-      "total": {
-        "type": "String"
-      },
       "drive": {
         "type": "String"
-      }
-    }
-  },
-  "shrinkMoreAdjacent": "压缩{drive}盘后最多可获得共{total}的连续未分配空间（含{drive}盘后方现有的{adjacent}）。如需为Android数据分区分配更多容量，请在“磁盘管理”中压缩{drive}盘后重新检查。",
-  "@shrinkMoreAdjacent": {
-    "placeholders": {
-      "total": {
-        "type": "String"
       },
-      "adjacent": {
-        "type": "String"
-      },
-      "drive": {
-        "type": "String"
-      }
-    }
-  },
-  "shrinkMoreLimit": "进一步压缩受限于以下不可移动文件，处理后可腾出更多空间：",
-  "shrinkMoreFull": "当前可压缩空间受限于{drive}盘剩余可用空间（剩余{free}）；清理{drive}盘文件后可腾出更多空间。",
-  "@shrinkMoreFull": {
-    "placeholders": {
       "free": {
         "type": "String"
-      },
-      "drive": {
-        "type": "String"
       }
     }
   },
+  "shrinkNext": "处理完成后，请在“磁盘管理”中重新执行“压缩卷”并回到此处查看：可能仍有下一个阻碍压缩的不可移动文件。",
   "sbPagefile": "虚拟内存分页文件",
   "sbPagefileHow": "1. 按Win+R，输入“SystemPropertiesPerformance”并确定，在“高级”选项卡的“虚拟内存”下点击“更改”。\n2. 取消勾选“自动管理所有驱动器的分页文件大小”，选中{drive}盘，选择“无分页文件”并点击“设置”，在弹出的提示中点击“是”，最后点击“确定”。\n3. 重启设备，在“磁盘管理”中压缩{drive}盘。\n4. 压缩完成后，重新勾选“自动管理所有驱动器的分页文件大小”并重启设备。",
   "sbHiberfil": "系统休眠文件",
@@ -249,7 +181,14 @@
   "sbUsn": "NTFS更改日志（USN日志）",
   "sbUsnHow": "1. 以管理员身份打开“终端”，运行“fsutil usn deletejournal /d {drive}:”删除更改日志。\n2. 在“磁盘管理”中压缩{drive}盘（Windows会在需要时自动重建更改日志）。",
   "sbMft": "NTFS主文件表（MFT）",
-  "sbMftHow": "MFT的部分片段位于{drive}盘靠后位置。安装器可将这些片段前移至{drive}盘前部的可用空间，随后自动重新分析。",
+  "sbMftHow": "MFT的部分片段位于{drive}盘靠后位置。安装器可将这些片段前移至{drive}盘前部的可用空间。",
+  "@sbMftHow": {
+    "placeholders": {
+      "drive": {
+        "type": "String"
+      }
+    }
+  },
   "mftMoveBtn": "移动MFT",
   "mftConfirmTitle": "移动MFT",
   "mftConfirmBody": "即将把{drive}盘靠后位置的MFT片段前移至前部的可用空间。操作期间无法关闭安装器，请勿关机或断开电源。此过程可能需要数分钟。",
@@ -276,7 +215,14 @@
   "mftStuck": "MFT起始处的系统元数据记录无法移动，{drive}盘目前已达可压缩空间上限。",
   "mftUnplaced": "另有{size}因{drive}盘前部缺乏足够的连续可用空间而未能前移。可先清理{drive}盘中不需要的文件，再重新执行移动与分析。",
   "mftNothing": "MFT中没有可进一步前移的片段。",
-  "mftAgain": "MFT仍有部分片段位于{drive}盘靠后位置（例如移动期间MFT有所增长），可再次执行移动。",
+  "mftDone": "移动已完成。请在“磁盘管理”中重新对{drive}盘执行“压缩卷”，再回到此处查看。",
+  "@mftDone": {
+    "placeholders": {
+      "drive": {
+        "type": "String"
+      }
+    }
+  },
   "@mftUnplaced": {
     "placeholders": {
       "size": {
@@ -476,7 +422,7 @@
   "errBitlockerUnverifiable": "无法读取系统盘的BitLocker恢复密钥信息，因此无法完成校验。请重新检查；若问题持续存在，请先在Windows中关闭BitLocker（设备加密）后再继续。",
   "errBitlockerSuspend": "无法暂停BitLocker保护，请重新检查后再试。",
   "errBitlockerConverting": "BitLocker正在加密或解密系统盘，请等待转换完成后重新检查。",
-  "errShrinkQuery": "请稍后重试；若仍然失败，可在“磁盘管理”中右键点击要压缩的分区并选择“压缩卷”查看可压缩空间。",
+  "errShrinkQuery": "无法读取Windows“应用程序”日志，请稍后重试。",
   "errMftFailed": "累计多次移动失败，操作已中止，可稍后重试。",
   "errMftRead": "无法读取该分区的MFT布局或可用空间位图。",
   "errVolumeOpen": "无法打开该分区。",
@@ -877,13 +823,6 @@
       }
     }
   },
-  "@sbMftHow": {
-    "placeholders": {
-      "drive": {
-        "type": "String"
-      }
-    }
-  },
   "@mftConfirmBody": {
     "placeholders": {
       "drive": {
@@ -892,13 +831,6 @@
     }
   },
   "@mftStuck": {
-    "placeholders": {
-      "drive": {
-        "type": "String"
-      }
-    }
-  },
-  "@mftAgain": {
     "placeholders": {
       "drive": {
         "type": "String"

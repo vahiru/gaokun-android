@@ -128,21 +128,21 @@ class Session extends ChangeNotifier {
 
   bool get hasRoom => plans.values.any((p) => p.ok);
 
-  // ── 压缩分析（空闲空间不够时） ──
-  /// 正在分析系统盘上的一个分区最多还能压缩出多少（gk3w shrink-info，大盘要几分钟；分析哪个分区由 gk3w 选）
+  // ── 压缩受阻的原因（空闲空间不够时） ──
+  /// 正在读取用户最近一次在"磁盘管理"里压缩时停在哪个文件上（gk3w shrink-info，只读事件日志，很快）
   bool shrinkChecking = false;
   ShrinkInfo? shrinkInfo;
   Gk3Record? shrinkErr;
 
   // ── 移动 MFT（压缩停在 $Mft 上时） ──
-  /// 正在把 MFT 挪到所分析分区的前部（gk3w mft-move --execute）：写这个分区，这期间不许关闭窗口、阻止关机
+  /// 正在把 MFT 挪到那个分区的前部（gk3w mft-move --execute）：写这个分区，这期间不许关闭窗口、阻止关机
   bool mftMoving = false;
 
-  /// 最近一次移动的结果（MFTMOVE 记录）或失败原因；重新检查时清掉
+  /// 最近一次移动的结果（MFTMOVE 记录）或失败原因；重新检查、重新查看时清掉
   Gk3Record? mftResult;
   Gk3Record? mftErr;
 
-  /// 移动所分析分区的 MFT（压缩停在它上面时），成功后重新分析可压缩空间
+  /// 移动那个分区的 MFT（压缩停在它上面时）。移动之后不自己重新分析：请用户在"磁盘管理"里重新"压缩卷"，再回来查看
   Future<void> moveMft() async {
     if (mftMoving || shrinkChecking || bitlockerChecking) return;
     final drive = shrinkInfo?.drive;
@@ -164,22 +164,19 @@ class Session extends ChangeNotifier {
       mftMoving = false;
       notifyListeners();
     }
-    // 挪动过（哪怕中途失败）：分区已经变了，重新分析同一个分区（不让 gk3w 另选：移动期间别的分区可能刚被分析过）
-    if (mftResult != null) await analyzeShrink(manual: false, drive: drive);
   }
 
-  /// [manual]：用户按的"分析"（清掉上一次移动的失败提示，让分析结果显示出来）；移动之后自动的那次不清。
-  /// [drive]：分析这个分区（"D:"）；不给时由 gk3w 选
-  Future<void> analyzeShrink({bool manual = true, String? drive}) async {
+  /// 读取用户最近一次压缩时停在哪个文件上；上一次移动 MFT 的结果随之清掉（新记录才说明现在的情况）
+  Future<void> analyzeShrink() async {
     if (shrinkChecking || mftMoving) return;
-    if (manual) mftErr = null;
+    mftResult = null;
+    mftErr = null;
     shrinkChecking = true;
     shrinkInfo = null;
     shrinkErr = null;
     notifyListeners();
     try {
-      final r = await backend.run('shrink-info', [if (drive != null && drive.isNotEmpty) ...['--drive', drive]]);
-      // 分析期间重新检查过也照样填上：分析读的是分区当时的状态，不依赖检查的结果
+      final r = await backend.run('shrink-info');
       final rec = r.ok ? r.first('SHRINK') : null;
       if (rec != null) {
         shrinkInfo = ShrinkInfo(rec);

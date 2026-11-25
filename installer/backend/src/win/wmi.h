@@ -1,4 +1,4 @@
-/* Windows：WMI 的连接、查询与实例方法调用（bitlocker.c、shrink.c 共用）。
+/* Windows：WMI 的连接、查询与实例方法调用（bitlocker.c 用）。
  * 查询与方法调用都是半同步的、带超时：WMI 服务或提供程序卡住时，检查与安装不能一直不返回。 */
 #ifndef GK3W_WMI_H
 #define GK3W_WMI_H

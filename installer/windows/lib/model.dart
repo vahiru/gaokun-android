@@ -41,11 +41,14 @@ String? normalizeRecoveryKey(String input) {
   return [for (var i = 0; i < 48; i += 6) d.substring(i, i + 6)].join('-');
 }
 
-/// gk3w shrink-info 的 SHRINK 记录：系统盘上的一个分区最多还能压缩出多少、压缩停在哪个文件
-/// （installer/backend/src/win/shrink.c；分析哪个分区由 gk3w 选，见那里的文件头）
+/// gk3w shrink-info 的 SHRINK 记录：用户本次开机后最近一次在"磁盘管理"里压缩系统盘上的分区时，压缩停在哪个文件上
+/// （installer/backend/src/win/shrink.c：解读 Windows 那次分析记下的 259 号事件，不自己分析）
 class ShrinkInfo {
   ShrinkInfo(this.r);
   final Gk3Record r;
+
+  /// 本次开机以来还没有这样的记录（用户还没在"磁盘管理"里点过"压缩卷"）
+  bool get none => r['event'] == 'none';
 
   /// "D:" 这样的盘符
   String get drive => r['drive'];
@@ -53,13 +56,7 @@ class ShrinkInfo {
   /// 只有字母（"D"），界面上写"D盘"、"D:"用
   String get letter => drive.isEmpty ? 'C' : drive.substring(0, 1);
 
-  int get maxShrinkMib => r.intOf('max_shrink_mib');
-
-  /// 这个分区之后紧挨着的未分配空间：压缩出来的空间与它连成一片
-  int get adjacentMib => r.intOf('adjacent_mib');
-
-  /// 压缩这个分区最多能得到的连续未分配空间
-  int get totalMib => maxShrinkMib + adjacentMib;
+  /// 这个分区的剩余可用空间
   int get freeMib => r.intOf('free_mib');
 
   /// 压缩停在已用空间上（分区太满），而不是停在事件里的那个文件上

@@ -6,7 +6,7 @@
 # download：LiveCD 的录制（installer/live/testdata/common），Windows 版按同一个行协议输出；去掉了 LiveCD 自己的中文日志行，RELEASE 的目录换成 Windows 路径；末尾的 LIVEISO（制作安装介质时一起下载的 LiveCD 镜像）是照 net.dart 的格式补的
 # plan：真跑的 gk3w plan（40 GiB 的区间 / 12508 MiB 的区间 / 空区间：界面用它问"至少要多大"，录的是 --disk 2）
 # bitlocker-key：PC 上对一个开启了 BitLocker 的测试卷（数据卷 Q:）真跑的输出，盘符换成 C:，时间是估的；带 --suspend 2 的那份按同样的格式补了暂停保护的一行（数据卷不能按重启次数暂停，录不到）
-# shrink-info：这台 PC（1 TB 的 C:）以管理员真跑的输出，分析的 38.8 s 缩短成 3 s
+# shrink-info：这台 PC（1 TB 的 C:）以管理员真跑的旧版 shrink-info 的结果，按现在的输出格式改写（文件、标志、剩余空间、limit 不变）
 # mft-move：PC 上 2 GB 测试卷（T:）真跑 --execute 的输出，盘符换成 C:，时间是估的
 # media-usb：gk3w media 写一个 62 GB 的真 U 盘（SanDisk Ultra USB 3.0）的真实输出，磁盘号 2 换成 3（usb 场景里 U 盘的号），时间是估的（真跑约 39 秒）；进度行按现在的 media.c 改过（写入 15–85、整体复核 85–96）
 # media-internal.txt：gk3w media --target internal 在 PC 上 VHDX（仿出厂布局，磁盘号 2）真跑的输出，分区表备份的目录换成 C:\ProgramData\gaokun3\backup，时间是估的（测试用 overrides 选它）

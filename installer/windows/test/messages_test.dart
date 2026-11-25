@@ -21,9 +21,7 @@ void main() {
 
   Set<String> grab(String s, RegExp re) => re.allMatches(s).map((m) => m.group(1)!).toSet();
   Set<String> quoted(String s) => grab(s, RegExp(r'"([a-z][a-z0-9-]*)"'));
-  final progCodes = grab(src, RegExp(r'gk3w_progress\(\s*[^,]+,\s*"([a-z][a-z0-9-]*)"\)'))
-    // shrink-info 在检查页里跑，不经过进度页
-    ..remove('shrink-analyze');
+  final progCodes = grab(src, RegExp(r'gk3w_progress\(\s*[^,]+,\s*"([a-z][a-z0-9-]*)"\)'));
   final errCodes = {
     for (final m in RegExp(r'gk3w_err(?:_kv2?)?\(\s*[^,]+,\s*([^,]+),').allMatches(src)) ...quoted(m.group(1)!),
   }
