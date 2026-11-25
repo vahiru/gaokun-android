@@ -1,0 +1,161 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: iris: keep the CPU cluster out of AOSS-level idle
+ while powered on SC8280XP
+
+On SC8280XP the encoder, and less visibly the decoder, fail while the
+screen is off and the system is awake. The firmware reports "VCODEC HW
+is hung due to (CCE 0 VPP 1 VSP 0)" and "BSE wd fired" and resets the
+hardware. An encode loses frames and gets extra IDR frames, then the
+SMMU reports context faults, and later sessions may keep failing until
+reboot. A decode drops a frame. With the screen on it hardly ever
+happens.
+
+The trigger is the cluster idle state, not the screen. The only cluster
+state in sc8280xp.dtsi, PSCI 0x4100c344 (cluster-sleep-0), is the
+AOSS-level collapse. The CPUs reach it far more often with the screen
+off, because nothing wakes them every frame. Blocking it with a CPU
+latency request below its entry + exit latency (9825 us) avoids the
+hangs. On a test DTB that also offers the APSS-only collapse
+(0x41000044, 5800 us), real-time 1080p HEVC encodes with the screen off
+ran clean through 1210 APSS-only entries with the AOSS level blocked,
+and hung within seconds once the AOSS level was allowed again in the
+same boot. Holding DDR, MMNOC, CX/MX/MMCX and XO votes, activating the
+LLCC video slice and other firmware builds did not help. The Windows
+power plugin vetoes the platform-level state while the video component
+holds its bus and rail votes, so video never runs in it there either.
+
+While the core is powered, hold a CPU latency request of 7000 us on
+SC8280XP. That blocks the AOSS-level state and the CX collapse (PSCI
+0x41002344, 7825 us; like the APSS-only state it is only proposed in
+the unmerged "arm64: dts: qcom: sc8280xp: Add lower cluster idle
+states" series), which has not been tested, and still allows the
+APSS-only collapse once a DT provides it. The request is taken in
+iris_vpu_power_on() and dropped in iris_vpu_power_off(), so idle
+behaviour does not change while no session keeps the core powered.
+
+Checked on SC8280XP (Huawei MateBook E Go) with the screen off and the
+system awake: with this patch, three real-time 1080p HEVC encodes of 300
+frames each completed without a single cluster idle entry during the
+encodes and without firmware errors; without it, the same encodes hang
+within the first seconds. Cluster idle entries resume once the core
+has runtime-suspended.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/media/platform/qcom/iris/iris_core.h  |  3 +++
+ drivers/media/platform/qcom/iris/iris_probe.c | 26 +++++++++++++++++++
+ .../platform/qcom/iris/iris_vpu_common.c      | 13 ++++++++++
+ 3 files changed, 42 insertions(+)
+
+diff --git a/drivers/media/platform/qcom/iris/iris_core.h b/drivers/media/platform/qcom/iris/iris_core.h
+index b4a9469f6e..fc2eddd431 100644
+--- a/drivers/media/platform/qcom/iris/iris_core.h
++++ b/drivers/media/platform/qcom/iris/iris_core.h
+@@ -8,6 +8,7 @@
+ 
+ #include <linux/types.h>
+ #include <linux/pm_domain.h>
++#include <linux/pm_qos.h>
+ #include <media/v4l2-device.h>
+ 
+ #include "iris_hfi_common.h"
+@@ -121,6 +122,8 @@ struct iris_core {
+ 	struct completion			core_init_done;
+ 	u32					intr_status;
+ 	bool					hw_powered;
++	struct pm_qos_request			cpu_latency_req;
++	s32					cpu_latency_us;
+ 	struct delayed_work			sys_error_handler;
+ 	struct list_head			instances;
+ 	/* encoder and decoder have overlapping caps, so two different arrays are required */
+diff --git a/drivers/media/platform/qcom/iris/iris_probe.c b/drivers/media/platform/qcom/iris/iris_probe.c
+index c2dcb50a27..c26eca9852 100644
+--- a/drivers/media/platform/qcom/iris/iris_probe.c
++++ b/drivers/media/platform/qcom/iris/iris_probe.c
+@@ -192,6 +192,13 @@ static int iris_register_video_device(struct iris_core *core, enum domain_type t
+ 	return ret;
+ }
+ 
++static void iris_remove_cpu_latency_req(void *data)
++{
++	struct iris_core *core = data;
++
++	cpu_latency_qos_remove_request(&core->cpu_latency_req);
++}
++
+ static void iris_remove(struct platform_device *pdev)
+ {
+ 	struct iris_core *core;
+@@ -258,6 +265,25 @@ static int iris_probe(struct platform_device *pdev)
+ 	if (IS_ERR(core->ubwc_cfg))
+ 		return PTR_ERR(core->ubwc_cfg);
+ 
++	/*
++	 * On SC8280XP the video hardware stalls mid-frame (firmware: "VCODEC HW
++	 * is hung", BSE/VPP watchdog) when the CPU cluster enters its deepest
++	 * idle state, the AOSS-level collapse (PSCI 0x4100c344, entry + exit
++	 * latency 9825 us), while a frame is in flight. The firmware then resets
++	 * the hardware and later sessions fault. A cluster state that collapses
++	 * only the APSS (0x41000044, 5800 us) does not trigger it, and Windows
++	 * keeps the platform out of the AOSS-level state while video is active.
++	 * Keep the cluster out of anything deeper than the APSS-only collapse
++	 * while the core is powered.
++	 */
++	if (of_device_is_compatible(dev->of_node, "qcom,sc8280xp-iris")) {
++		core->cpu_latency_us = 7000;
++		cpu_latency_qos_add_request(&core->cpu_latency_req, PM_QOS_DEFAULT_VALUE);
++		ret = devm_add_action_or_reset(dev, iris_remove_cpu_latency_req, core);
++		if (ret)
++			return ret;
++	}
++
+ 	ret = devm_request_threaded_irq(core->dev, core->irq, iris_hfi_isr,
+ 					iris_hfi_isr_handler,
+ 					IRQF_TRIGGER_HIGH | IRQF_NO_AUTOEN,
+diff --git a/drivers/media/platform/qcom/iris/iris_vpu_common.c b/drivers/media/platform/qcom/iris/iris_vpu_common.c
+index cb6aad958e..7d542f8df7 100644
+--- a/drivers/media/platform/qcom/iris/iris_vpu_common.c
++++ b/drivers/media/platform/qcom/iris/iris_vpu_common.c
+@@ -229,6 +229,15 @@ void iris_vpu_power_off_hw(struct iris_core *core)
+ 	iris_disable_unprepare_clock(core, IRIS_HW_CLK);
+ }
+ 
++static void iris_vpu_set_cpu_latency(struct iris_core *core, bool powered)
++{
++	if (!cpu_latency_qos_request_active(&core->cpu_latency_req))
++		return;
++
++	cpu_latency_qos_update_request(&core->cpu_latency_req,
++				       powered ? core->cpu_latency_us : PM_QOS_DEFAULT_VALUE);
++}
++
+ void iris_vpu_power_off(struct iris_core *core)
+ {
+ 	core->hw_powered = false;
+@@ -236,6 +245,7 @@ void iris_vpu_power_off(struct iris_core *core)
+ 	core->iris_platform_data->vpu_ops->power_off_hw(core);
+ 	core->iris_platform_data->vpu_ops->power_off_controller(core);
+ 	iris_unset_icc_bw(core);
++	iris_vpu_set_cpu_latency(core, false);
+ 
+ 	if (!iris_vpu_watchdog(core, core->intr_status))
+ 		disable_irq_nosync(core->irq);
+@@ -467,6 +477,8 @@ int iris_vpu_power_on(struct iris_core *core)
+ 	u32 freq;
+ 	int ret;
+ 
++	iris_vpu_set_cpu_latency(core, true);
++
+ 	ret = iris_set_icc_bw(core, INT_MAX);
+ 	if (ret)
+ 		goto err;
+@@ -498,6 +510,7 @@ int iris_vpu_power_on(struct iris_core *core)
+ err_unvote_icc:
+ 	iris_unset_icc_bw(core);
+ err:
++	iris_vpu_set_cpu_latency(core, false);
+ 	dev_err(core->dev, "power on failed\n");
+ 
+ 	return ret;

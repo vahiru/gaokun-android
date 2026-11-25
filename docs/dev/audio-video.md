@@ -165,6 +165,7 @@ TX_DEC0 Volume = 102, TX_DEC1 Volume = 102
 | `patches/kernel/iris/0005` | `drivers/media/platform/qcom/iris/` | 在非动态分辨率切换（非DRC）的`CAPTURE streamoff`路径发送`HFI_FLUSH_ALL`而非`HFI_FLUSH_OUTPUT`，修复视频拖动进度条（seek）或关闭播放器时固件等待`HFI_FLUSH_OUTPUT`响应超时导致的卡死 |
 | `patches/kernel/dts/0026` | `arch/arm64/boot/dts/qcom/sc8280xp.dtsi` | iris加载固件时把`0x0..0x25800000`作为视频内容保护范围交给TZ，只有安全会话可以使用。`iris`主域（SID `0x2a00`）的IOVA从高往低分配，在`v4l2-codec2/0007`之前，每路1080p解码约占260–310 MiB，1440p约占735 MiB（之后分别约为150 MiB和290 MiB），同时打开的会话较多时，普通会话的缓冲区会被映射进这个范围，解码器一访问，整板即复位，内核不留任何记录。补丁增加一个只带`iommu-addresses`的reserved-memory节点，并在`iris`的`memory-region`中引用（固件区域须排在第一个），使该范围在主域中预留。地址空间不足时，映射失败，对应会话的`VIDIOC_QBUF`或`VIDIOC_STREAMON`返回错误，该路解码失败，不再复位。CB15（编码器ARP，见下文）有独立的页表，不受影响 |
 | `patches/kernel/iris/0019` | `drivers/media/platform/qcom/iris/` | 解码器原来不论分辨率，都按4096x2304的最坏情况确定输入（码流）缓冲区大小（H.264/HEVC约6.75 MiB，VP9约13.5 MiB），并忽略客户端在`S_FMT`中设置的值，因此`v4l2_codec2`只能为每路会话分配16个16 MiB的输入缓冲区。补丁改为采用客户端设置的值，下限为分辨率所需的大小（4:2:0半帧，VP9为整帧，不低于720p），上限为原来的最坏值；客户端填0时仍为最坏值。`buf_prepare`改为按`S_FMT`确定的大小检查输入缓冲区，码流中途提高分辨率后，原有的输入缓冲区仍可使用 |
+| `patches/kernel/iris/0020` | `drivers/media/platform/qcom/iris/` | 屏幕关闭而系统没有休眠时（例如熄屏后继续录像或导出），CPU空闲时间长，CPU簇常进入最深的簇状态（PSCI `0x4100c344`，AOSS级休眠，进入加退出延迟9825 µs）。这期间视频硬件（VPP/VSP）会在一帧中途挂起，固件报告`VCODEC HW is hung`并复位硬件：编码丢帧、多出关键帧，随后出现SMMU context fault，之后的编码会话可能一直失败到重启；解码丢一帧。只断APSS的簇状态（`0x41000044`，5800 µs）实测不会触发；Windows的电源插件在视频持有总线与电压投票时同样不让平台进入AOSS级休眠。补丁让SC8280XP上的`iris`在上电期间持有7000 µs的CPU延迟请求，挡住AOSS级休眠与未经验证的CX级休眠（`0x41002344`，DT同样尚未提供），仍允许只断APSS的状态（DT目前没有提供，提供后即可使用）；`iris`运行时挂起后请求撤销，空闲时的簇休眠不受影响 |
 | `patches/android/v4l2-codec2/0007` | `external/v4l2_codec2` | 解码器的输入缓冲区改回1080p及以下2 MiB、以上8 MiB（LineageOS为满足旧版iris的最坏值改成了16 MiB和64 MiB），每路1080p会话的输入缓冲区从256 MiB降到32 MiB。应用设置了更大的`max-input-size`时仍采用应用的值。大小在配置解码器时确定：按1080p及以下配置的会话，单帧码流不能超过2 MiB，码流中途提高分辨率后也是如此；1080p以上的VP9不能超过8 MiB（原为13.5 MiB）。Chromium在关键帧放不下时会用更大的缓冲区重建解码器，Media3按自适应码流中最大的格式分配。必须与`patches/kernel/iris/0019`一起使用：在不含0019的内核上，1080p及以下的解码与1080p以上的VP9解码会在启动时报错退出 |
 
 ### 3. 硬件视频编码
@@ -199,7 +200,6 @@ TX_DEC0 Volume = 102, TX_DEC1 Volume = 102
 
 #### 已知限制
 
-- **熄屏时视频硬件会挂起**：屏幕关闭而系统没有休眠时（例如熄屏后继续录像或导出），APSS进入cluster-sleep-0期间视频硬件（VPP/VSP）会在一帧中途挂起，固件看门狗复位硬件。编码表现为丢帧、多出关键帧、提前结束，随后可能出现SMMU context fault；固件因此重启后，之后的编码会话可能一直失败，直到重启系统。解码也会挂起，但只丢一帧，播放时通常察觉不到。亮屏使用（包括相机预览和录像）时cluster sleep很少，没有出现挂起。原因尚未查明，供电档位、时钟、LLCC、页表遍历和固件版本都已排除；用CPU延迟QoS挡住cluster-sleep-0可以避免，但下游驱动没有这样做，目前不采用。
 - **一次只有一个编码会话**：ARP在固定IOVA。窗口内的另一处IOVA（`0x10000000`）实测可用，支持并发需要在窗口上做IOVA分配。
 - **两个IDR之间还有周期性的I帧**：iris gen1没有`V4L2_CID_MPEG_VIDEO_MB_RC_ENABLE`，`v4l2_codec2`把它和`GOP_SIZE 0`放在同一次`S_EXT_CTRLS`里，整次调用被拒，`GOP_SIZE`停在驱动默认的30。驱动每次开流都把它作为帧内间隔发给固件，于是在`v4l2_codec2`请求的IDR之间每30帧还有一个I帧。码流可以正常解码。
 - **没有HEVC Main 10和HDR编码**：输入只有8位NV12。

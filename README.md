@@ -45,7 +45,7 @@ The table below shows how the main features work in the current version. See the
 | Sensors | ✅ | Accelerometer and ambient light sensor work, with auto-rotate and auto-brightness; there is no magnetometer |
 | Games | ⚠️ | Genshin Impact runs smoothly at the highest settings, Arknights, Delta Force and others run; League of Legends: Wild Rift starts. **Playing games that come with ACE framework or other anti-cheat mechanisms on this system may get your account banned** |
 | Video playback | ✅ | Hardware decoding, including 10-bit and HDR video |
-| Video encoding | ⚠️ | H.264 and HEVC hardware encoding, used for camera recording; the built-in screen recorder still uses software encoding; only one stream at a time uses the hardware, and video processed after the screen turns off may come out incomplete |
+| Video encoding | ⚠️ | H.264 and HEVC hardware encoding, used for camera recording; the built-in screen recorder still uses software encoding; only one stream at a time uses the hardware |
 | Camera | ✅ | Hardware ISP; both cameras take photos, record up to 1080p video and support digital zoom and exposure compensation, and the rear camera supports autofocus |
 | USB-C | ⚠️ | File transfer and network sharing with a computer, USB flash drives and external displays work; occasionally the USB-C port does not work after a boot until a restart, the cause is still under investigation |
 | Fingerprint | ⚠️ | Enrolment, screen unlock and verification in apps work (Goodix and FocalTech sensors); fingerprint payment in WeChat Pay, Alipay and similar apps does not work |

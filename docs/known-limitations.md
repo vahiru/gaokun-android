@@ -145,11 +145,6 @@ The following are bugs, not trade-offs; they will be removed from this list once
 * **Cause**: the Type-C controller (UCSI) occasionally fails to initialize at boot; the cause is still being investigated.
 * **What to do**: a restart brings it back. Until then, use adb and transfer files over Wi-Fi.
 
-### Video processed with the screen off may come out incomplete
-* **Symptom**: if recording, exporting a video or compressing one before sending keeps going in the background after the screen turns off, the result may be shorter than expected or miss frames. Once this has happened, recording may keep failing until a restart.
-* **Cause**: with the screen off and the system still awake, the processor enters a deeper power-saving state, and the video encoding hardware gets stuck during it; why has not been found yet. Use with the screen on is not affected.
-* **What to do**: keep the screen on while recording, exporting or compressing video. If recording keeps failing, restart the tablet.
-
 ### With two recordings at once, the second one is slower or the first one stops
 * **Symptom**: starting a second recording while one is already running may give the second one choppy video. If the system starts the second one (for example screen recording from Quick Settings while recording video), the recording in progress may stop; this has not been tested yet.
 * **Cause**: the video encoding hardware handles one stream at a time. The second recording usually falls back to slower software encoding, but when its requester has a higher priority, the system first takes the hardware encoder away from the app that is recording.
