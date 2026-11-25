@@ -221,9 +221,15 @@ KPATCHES=(
     # 0034给每个编码会话在CP非像素窗口里分配自己的ARP槽位（8个256 KiB，槽位0即原来的0x01000000），需iommu/0002；
     # 0035在固件拒绝SESSION_INIT时让第一次REQBUFS失败，而不是等到STREAMON才报-EBUSY。叠在0027–0033之上。
     # 0036把解码码流的三原色11（SMPTE RP 431-2）报告为V4L2_COLORSPACE_DCI_P3（原来标签与返回值写反）。
+    # 0037–0039为HEVC Main 10编码：0037让gen1编码器接受P010输入（只在HEVC且有4条VPP管线的核心上），
+    # 0038把输入格式的色彩参数写进码流的VUI，0039加上HDR10静态元数据控件（PQ传输特性时写入SEI）。
+    # 与patches/android/v4l2-codec2/0020–0021（由crdroid-tree-fixes.py打入）一起生效。
     kernel/iris/0034-media-iris-give-every-encoder-session-its-own-CP-non-pixel-ARP-slot.patch
     kernel/iris/0035-media-iris-gen1-fail-the-session-open-when-the-firmware-rejects-it.patch
     kernel/iris/0036-media-iris-report-the-DCI-P3-colour-primaries-of-decoded-streams.patch
+    kernel/iris/0037-media-iris-gen1-accept-P010-encoder-input-for-HEVC-Main-10.patch
+    kernel/iris/0038-media-iris-gen1-write-the-raw-format-s-colorimetry-into-the-stream.patch
+    kernel/iris/0039-media-iris-gen1-add-HDR10-static-metadata-to-HEVC-Main-10-encoding.patch
 
     # ─── 7. kernel/camera：camcc 时钟/GDSC、camss 与前后摄传感器驱动（ov13b10 / hi846 / s5k4h7 / s5k3l6）───
     # 0003 与 kernel/dts/0005 配套，需 CONFIG_VIDEO_OV13B10=y 与 CONFIG_VIDEO_DW9714=y；

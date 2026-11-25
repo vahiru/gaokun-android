@@ -614,7 +614,7 @@ def apply_patch_file(tree: pathlib.Path, project: str, patch_name: str,
     """把 <repo>/patches/<patch_name> 用 git apply 打进 AOSP 树的 <project>（幂等）。
 
     ★ 为什么要有这个助手：本仓 `patches/android/` 里的 **AOSP 侧**补丁（
-    hardware-interfaces/0001–0012 audio HAL、v4l2-codec2/0001–0019、tinyalsa/0001、drm-hwcomposer/0001–0005）
+    hardware-interfaces/0001–0012 audio HAL、v4l2-codec2/0001–0021、tinyalsa/0001、drm-hwcomposer/0001–0005）
     原先**没有任何消费者** —— 全靠人手动
     `git apply`。而本仓已经为"没有消费者的配置一定会漂"付过三次账
     （M13 的 BOARD_KERNEL_CMDLINE、M17 的上游 Venus 补丁集、以及 2026-09-12
@@ -1512,7 +1512,8 @@ def main():
     # 在[42]打完的树上生成，排在它之后。
     step(" [43] v4l2_codec2编码器单平面输入按驱动要求的长度送缓冲（640x480等尺寸）: ", apply_patch_file(
         tree, "external/v4l2_codec2",
-        "android/v4l2-codec2/0006-v4l2-codec2-give-single-planar-encoder-input-the-device-buffer-length.patch"))
+        "android/v4l2-codec2/0006-v4l2-codec2-give-single-planar-encoder-input-the-device-buffer-length.patch",
+        covered_by=("android/v4l2-codec2/0021-v4l2-codec2-pass-the-colour-aspects-and-HDR10-metadata-of-10-bit-streams.patch",)))
     # 解码器输入缓冲区改回1080p及以下2 MiB、以上8 MiB（原为16 MiB和64 MiB，每路会话最多16个）。要和patches/kernel/iris/0019
     # 一起生效：旧内核仍要求6.75 MiB（VP9为13.5 MiB）的输入缓冲区，1080p及以下的解码与1080p以上的VP9解码会在启动时报错退出。
     # 在[43]打完的树上生成，排在它之后。
@@ -1530,7 +1531,8 @@ def main():
     # 旧内核接受GOP长度0后在开流时丢掉，固件把每帧都编成关键帧。在[57]打完的树上生成，排在它之后。
     step(" [58] v4l2_codec2编码器宏块码率控制与GOP长度分开设置（需kernel/iris/0021）: ", apply_patch_file(
         tree, "external/v4l2_codec2",
-        "android/v4l2-codec2/0009-v4l2-codec2-set-the-macroblock-rate-control-and-the-gop-length-separately.patch"))
+        "android/v4l2-codec2/0009-v4l2-codec2-set-the-macroblock-rate-control-and-the-gop-length-separately.patch",
+        covered_by=("android/v4l2-codec2/0021-v4l2-codec2-pass-the-colour-aspects-and-HDR10-metadata-of-10-bit-streams.patch",)))
     # 解码器：flush后已投递的复用帧在输出队列重新分配后丢弃（seek到另一位深的部分时，旧格式的缓冲被排进新队列，
     # QBUF失败或按错误格式解码）；尺寸变化时上报C2StreamPictureSizeInfo（使用输出缓冲数组的客户端，即同步模式下的
     # NDK客户端或调用getOutputBuffers()的客户端，在分辨率变大后框架无法按新尺寸复制，解码报错）；10位档次在输出像素格式里声明P010，框架据此在颜色格式中列出
@@ -1550,7 +1552,8 @@ def main():
     # 不再因旧组件对象还没析构而撞到上限。在[61]打完的树上生成，排在它之后。
     step(" [62] v4l2_codec2编码器丢帧时完成对应的工作项: ", apply_patch_file(
         tree, "external/v4l2_codec2",
-        "android/v4l2-codec2/0013-v4l2-codec2-complete-the-work-of-frames-the-encoder-drops.patch"))
+        "android/v4l2-codec2/0013-v4l2-codec2-complete-the-work-of-frames-the-encoder-drops.patch",
+        covered_by=("android/v4l2-codec2/0021-v4l2-codec2-pass-the-colour-aspects-and-HDR10-metadata-of-10-bit-streams.patch",)))
     step(" [63] v4l2_codec2编码器release()时释放实例计数: ", apply_patch_file(
         tree, "external/v4l2_codec2",
         "android/v4l2-codec2/0014-v4l2-codec2-free-the-encoder-instance-slot-when-the-component-is-released.patch"))
@@ -1578,6 +1581,17 @@ def main():
     step(" [68] v4l2_codec2设备默认级别表的VP9补上5.1与5.2: ", apply_patch_file(
         tree, "external/v4l2_codec2",
         "android/v4l2-codec2/0019-v4l2-codec2-add-VP9-levels-5.1-and-5.2-to-the-device-fallback-list.patch"))
+    # HEVC Main 10编码：设备的HEVC编码器接受P010输入时（kernel/iris/0037），组件提供Main 10档次与P010输入格式，
+    # 8位YUV输入扩展为10位，RGB输入按BT.601转换后扩展；10位会话把色彩参数写成输入格式的色彩描述
+    # （kernel/iris/0038），有HDR10控件时（kernel/iris/0039）提供Main 10 HDR10并传递静态元数据。
+    # 内核没有这些补丁时只提供Main，与原来相同。依次在v4l2-codec2/0019、0020打完的树上生成。
+    step(" v4l2_codec2编码器支持HEVC Main 10（v4l2-codec2/0020）: ", apply_patch_file(
+        tree, "external/v4l2_codec2",
+        "android/v4l2-codec2/0020-v4l2-codec2-encode-HEVC-Main-10-from-P010-input.patch",
+        covered_by=("android/v4l2-codec2/0021-v4l2-codec2-pass-the-colour-aspects-and-HDR10-metadata-of-10-bit-streams.patch",)))
+    step(" v4l2_codec2编码器传递10位码流的色彩参数与HDR10元数据（v4l2-codec2/0021）: ", apply_patch_file(
+        tree, "external/v4l2_codec2",
+        "android/v4l2-codec2/0021-v4l2-codec2-pass-the-colour-aspects-and-HDR10-metadata-of-10-bit-streams.patch"))
     # SystemUI对Class 1/2指纹只在人脸也锁定时才禁止指纹解锁，没有人脸识别时，指纹自己临时锁定期间仍会不断
     # 请求认证，框架逐次拒绝。补丁让它在锁定期间改为只检测接触（与Class 3相同）；锁定期满时HAL发出
     # onLockoutCleared，SystemUI随之恢复认证。指纹HAL（device/huawei/gaokun3/fingerprint）报告STRONG后，

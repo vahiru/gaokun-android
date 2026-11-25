@@ -1,0 +1,841 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] v4l2_codec2: encode HEVC Main 10 from P010 input
+
+The HEVC encoder offered Main only. EncodeInterface dropped Main 10
+because the encoder always configured NV12 input, so no app could get
+a hardware 10-bit HEVC stream (the software HEVC encoder has no Main 10
+either). A device that takes 10-bit input can now code Main 10:
+
+- Capabilities: a device may list Main 10 in its profile menu without
+  offering a 10-bit input format. queryEncodingCapabilities() now sets
+  HEVC as the coded format on a probe instance (the raw formats of a
+  stateful encoder may depend on it) and looks for P010 among the raw
+  formats. Main 10 is kept only when the device lists P010 and gralloc
+  can allocate it; otherwise the component offers Main as before.
+- Pixel format: with Main 10 the interface declares
+  C2StreamPixelFormatInfo::input {IMPLEMENTATION_DEFINED, YCBCR_420_888,
+  YCBCR_P010}, as the software AV1 encoder does, so the framework lists
+  COLOR_FormatYUVP010. Its setter takes any value: the component reads
+  the layout of every input block anyway, and configure() must not start
+  failing for a color format that worked before (e.g. RGBA byte buffers).
+- Input format: a Main 10 session configures single-planar P010 (V4L2
+  has no multi-planar P010) and takes the stride from a P010 block. It
+  no longer falls back to the device's preferred formats, which are
+  8-bit: a Main 10 stream coded from NV12 would lose the precision of
+  its input, and the firmware reads the input of a Main 10 session as
+  10-bit samples whatever its format.
+- Detection: getVideoFrameLayout() and FormatConverter classified a P010
+  block as NV12 (semi-planar, U first), so a P010 frame given to the
+  encoder was coded as an NV12 picture with the wrong stride. They now
+  tell P010 apart by its 10-bit samples in 16-bit words.
+- Device layout: P010 is single-planar, so the device reads a frame
+  from the start of the buffer at its own stride (bytesperline), with
+  the chroma plane at that stride times the format height; there is no
+  way to pass a frame's own stride or chroma offset. A P010 frame in
+  that layout is queued as is. Every other frame goes through the format
+  convertor, which writes its P010 frames in the device's layout rather
+  than in the layout gralloc gives its blocks (the same with minigbm, not
+  guaranteed elsewhere), after checking that the frames fit in each
+  block.
+- Other inputs: an 8-bit YUV frame in a Main 10 session is widened to
+  P010 instead of being refused. A client may pair any listed color
+  format with any listed profile, widening is exact (an 8-bit code
+  becomes the 10-bit code four times its value, in limited and full
+  range alike), and only that combination pays for the pass over the
+  frame. An RGB frame (an input surface rendered with GL, a screen
+  capture) is converted as in an 8-bit session, with the BT.601 matrix
+  into limited range at 8 bits, and then widened: apps that find Main 10
+  listed may use it with any input they used with Main, and an 8-bit
+  RGB frame has no more precision to keep. A P010 frame in an 8-bit
+  session (a 10-bit decoder rendering into an encoder's input surface)
+  is rounded to NV12 instead of being coded as garbage.
+- P010 helpers: bytesPerElement() counted two bytes for an element of
+  the UV plane, which holds a U and a V sample, so allocationSize() and
+  the bytesused of a queued P010 frame came out a sixth short.
+  videoPixelFormatToString(P010) returned "BGRA". The V4L2 frame layout
+  of single-planar P010 is now derived like that of NV12.
+
+8-bit sessions are unchanged: their input format, stride query, format
+conversions and buffers are as before, and the AVC encoder and HEVC on
+a device without P010 input declare the same parameters as before.
+
+Origin: local
+Upstream-Status: Pending
+Assisted-by: Claude:claude-opus-5-5
+---
+ common/FormatConverter.cpp                    | 203 +++++++++++++++++-
+ common/VideoPixelFormat.cpp                   |   9 +-
+ common/include/v4l2_codec2/common/Common.h    |   3 +
+ .../v4l2_codec2/common/FormatConverter.h      |  14 ++
+ components/EncodeComponent.cpp                |  46 +++-
+ components/EncodeInterface.cpp                |  40 +++-
+ .../v4l2_codec2/components/EncodeInterface.h  |   4 +
+ v4l2/V4L2Device.cpp                           |  43 +++-
+ v4l2/V4L2EncodeComponent.cpp                  |   9 +-
+ v4l2/V4L2Encoder.cpp                          |  32 ++-
+ v4l2/include/v4l2_codec2/v4l2/V4L2Device.h    |   4 +
+ v4l2/include/v4l2_codec2/v4l2/V4L2Encoder.h   |  17 +-
+ 12 files changed, 388 insertions(+), 36 deletions(-)
+
+diff --git a/common/FormatConverter.cpp b/common/FormatConverter.cpp
+index 8a9787b..99c7c73 100644
+--- a/common/FormatConverter.cpp
++++ b/common/FormatConverter.cpp
+@@ -9,7 +9,9 @@
+ #include <v4l2_codec2/common/FormatConverter.h>
+ 
+ #include <inttypes.h>
++#include <string.h>
+ 
++#include <algorithm>
+ #include <memory>
+ #include <string>
+ 
+@@ -52,6 +54,85 @@ void copyPlaneByPixel(const uint8_t* src, int srcStride, int srcColInc, uint8_t*
+     }
+ }
+ 
++// A plane of a mapped picture: its first sample and the steps in bytes between samples and rows.
++struct PlaneRef {
++    const uint8_t* data;
++    int colInc;
++    int rowInc;
++};
++
++PlaneRef planeRef(const C2GraphicView& view, const C2PlanarLayout& layout, uint32_t plane) {
++    return {view.data()[plane], layout.planes[plane].colInc, layout.planes[plane].rowInc};
++}
++
++// Whether |layout| is P010: semi-planar 4:2:0 with 10-bit samples in the top bits of 16-bit words,
++// U before V. Gralloc describes it with the U and V planes two bytes apart.
++bool isP010(const C2GraphicView& view, const C2PlanarLayout& layout) {
++    const C2PlaneInfo& y = layout.planes[C2PlanarLayout::PLANE_Y];
++    const C2PlaneInfo& u = layout.planes[C2PlanarLayout::PLANE_U];
++    const C2PlaneInfo& v = layout.planes[C2PlanarLayout::PLANE_V];
++    return layout.type == C2PlanarLayout::TYPE_YUV && layout.rootPlanes == 2 && y.bitDepth == 10 &&
++           y.allocatedDepth == 16 && y.colInc == 2 && u.colInc == 4 && v.colInc == 4 &&
++           u.rowInc == v.rowInc &&
++           view.data()[C2PlanarLayout::PLANE_V] == view.data()[C2PlanarLayout::PLANE_U] + 2;
++}
++
++// Write 8-bit 4:2:0 samples (planar or semi-planar, either chroma order) as P010. P010 keeps a
++// 10-bit sample in the top bits of a 16-bit word, so an 8-bit sample moved to the top byte becomes
++// the 10-bit code four times its value: the same level at the higher bit depth, in limited range
++// (16-235 becomes 64-940) as in full range.
++void widenToP010(PlaneRef y, PlaneRef u, PlaneRef v, uint8_t* dstY, int dstStrideY, uint8_t* dstUV,
++                 int dstStrideUV, int width, int height) {
++    for (int row = 0; row < height; row++) {
++        const uint8_t* src = y.data + static_cast<ptrdiff_t>(row) * y.rowInc;
++        uint16_t* dst =
++                reinterpret_cast<uint16_t*>(dstY + static_cast<ptrdiff_t>(row) * dstStrideY);
++        if (y.colInc == 1) {
++            for (int col = 0; col < width; col++) dst[col] = static_cast<uint16_t>(src[col] << 8);
++        } else {
++            for (int col = 0; col < width; col++) {
++                dst[col] = static_cast<uint16_t>(src[col * y.colInc] << 8);
++            }
++        }
++    }
++    for (int row = 0; row < height / 2; row++) {
++        const uint8_t* srcU = u.data + static_cast<ptrdiff_t>(row) * u.rowInc;
++        const uint8_t* srcV = v.data + static_cast<ptrdiff_t>(row) * v.rowInc;
++        uint16_t* dst =
++                reinterpret_cast<uint16_t*>(dstUV + static_cast<ptrdiff_t>(row) * dstStrideUV);
++        for (int col = 0; col < width / 2; col++) {
++            dst[2 * col] = static_cast<uint16_t>(srcU[col * u.colInc] << 8);
++            dst[2 * col + 1] = static_cast<uint16_t>(srcV[col * v.colInc] << 8);
++        }
++    }
++}
++
++// The 8-bit code nearest to a P010 sample.
++inline uint8_t narrowP010Sample(const uint8_t* sample) {
++    uint16_t value;
++    memcpy(&value, sample, sizeof(value));
++    return static_cast<uint8_t>(std::min<uint32_t>((value + 0x80u) >> 8, 0xffu));
++}
++
++// Write P010 samples as NV12, rounding each to the nearest 8-bit code.
++void narrowP010ToNV12(PlaneRef y, PlaneRef u, PlaneRef v, uint8_t* dstY, int dstStrideY,
++                      uint8_t* dstUV, int dstStrideUV, int width, int height) {
++    for (int row = 0; row < height; row++) {
++        const uint8_t* src = y.data + static_cast<ptrdiff_t>(row) * y.rowInc;
++        uint8_t* dst = dstY + static_cast<ptrdiff_t>(row) * dstStrideY;
++        for (int col = 0; col < width; col++) dst[col] = narrowP010Sample(src + col * y.colInc);
++    }
++    for (int row = 0; row < height / 2; row++) {
++        const uint8_t* srcU = u.data + static_cast<ptrdiff_t>(row) * u.rowInc;
++        const uint8_t* srcV = v.data + static_cast<ptrdiff_t>(row) * v.rowInc;
++        uint8_t* dst = dstUV + static_cast<ptrdiff_t>(row) * dstStrideUV;
++        for (int col = 0; col < width / 2; col++) {
++            dst[2 * col] = narrowP010Sample(srcU + col * u.colInc);
++            dst[2 * col + 1] = narrowP010Sample(srcV + col * v.colInc);
++        }
++    }
++}
++
+ }  // namespace
+ 
+ ImplDefinedToRGBXMap::ImplDefinedToRGBXMap(sp<GraphicBuffer> buf, uint8_t* addr, int rowInc)
+@@ -98,7 +179,8 @@ std::unique_ptr<FormatConverter> FormatConverter::create(VideoPixelFormat outFor
+                                                          const ui::Size& visibleSize,
+                                                          uint32_t inputCount,
+                                                          const ui::Size& codedSize) {
+-    if (outFormat != VideoPixelFormat::I420 && outFormat != VideoPixelFormat::NV12) {
++    if (outFormat != VideoPixelFormat::I420 && outFormat != VideoPixelFormat::NV12 &&
++        outFormat != VideoPixelFormat::P010) {
+         ALOGE("Unsupported output format: %d", static_cast<int32_t>(outFormat));
+         return nullptr;
+     }
+@@ -120,6 +202,10 @@ c2_status_t FormatConverter::initialize(VideoPixelFormat outFormat, const ui::Si
+     mOutFormat = outFormat;
+     mVisibleSize = visibleSize;
+     mCodedSize = codedSize;
++    if (mOutFormat == VideoPixelFormat::P010) {
++        mOutStride = static_cast<size_t>(mCodedSize.width) * 2;
++        mOutOffsetUV = mOutStride * mCodedSize.height;
++    }
+ 
+     mTempPlaneU =
+             std::unique_ptr<uint8_t[]>(new uint8_t[mVisibleSize.width * mVisibleSize.height / 4]);
+@@ -170,6 +256,43 @@ c2_status_t FormatConverter::allocateBuffers(uint32_t count) {
+             ALOGE("Failed to fetch graphic block (error: %d)", status);
+             return C2_NO_MEMORY;
+         }
++        // P010 frames are written in the device's layout (see |mOutStride|). It fits in a block of
++        // the coded size whatever padding gralloc adds to its rows and planes, as long as the UV
++        // plane follows the Y plane: check that the frames written stay in the block's planes.
++        if (mOutFormat == VideoPixelFormat::P010) {
++            const C2GraphicView view = block->map().get();
++            if (view.error() != C2_OK) {
++                ALOGE("Failed to map graphic block (error: %d)", view.error());
++                return C2_NO_MEMORY;
++            }
++            const C2PlanarLayout layout = view.layout();
++            const uint8_t* const y = view.data()[C2PlanarLayout::PLANE_Y];
++            const uint8_t* const uv = view.data()[C2PlanarLayout::PLANE_U];
++            const int32_t rowIncY = layout.planes[C2PlanarLayout::PLANE_Y].rowInc;
++            const int32_t rowIncUV = layout.planes[C2PlanarLayout::PLANE_U].rowInc;
++            const size_t rowBytes = static_cast<size_t>(mCodedSize.width) * 2;
++            const size_t chromaRows = std::max(mCodedSize.height / 2, 1);
++            const size_t writtenChromaRows = std::max(mVisibleSize.height / 2, 1);
++            const size_t written = mOutOffsetUV + mOutStride * (writtenChromaRows - 1) +
++                                   static_cast<size_t>(mVisibleSize.width) * 2;
++            if (uv <= y || rowIncY < static_cast<int32_t>(rowBytes) ||
++                rowIncUV < static_cast<int32_t>(rowBytes) ||
++                static_cast<size_t>(uv - y) + static_cast<size_t>(rowIncUV) * (chromaRows - 1) +
++                                rowBytes <
++                        written) {
++                ALOGE("P010 block layout (strides %d/%d, chroma at %td) cannot hold the device's "
++                      "(stride %zu, chroma at %zu)",
++                      rowIncY, rowIncUV, uv - y, mOutStride, mOutOffsetUV);
++                return C2_NO_MEMORY;
++            }
++            if (i == 0 && (static_cast<size_t>(rowIncY) != mOutStride ||
++                           static_cast<size_t>(rowIncUV) != mOutStride ||
++                           static_cast<size_t>(uv - y) != mOutOffsetUV)) {
++                ALOGW("P010 block layout (strides %d/%d, chroma at %td) differs from the device's "
++                      "(stride %zu, chroma at %zu), writing the device's",
++                      rowIncY, rowIncUV, uv - y, mOutStride, mOutOffsetUV);
++            }
++        }
+         mGraphicBlocks.emplace_back(new BlockEntry(std::move(block)));
+         mAvailableQueue.push(mGraphicBlocks.back().get());
+     }
+@@ -192,9 +315,13 @@ c2_status_t FormatConverter::convertBlock(uint64_t frameIndex,
+             inputFormat = VideoPixelFormat::YV12;
+         } else if (inputLayout.rootPlanes == 2) {
+             const uint8_t* const* data = inputView.data();
+-            inputFormat = (data[C2PlanarLayout::PLANE_V] > data[C2PlanarLayout::PLANE_U])
+-                                  ? VideoPixelFormat::NV12
+-                                  : VideoPixelFormat::NV21;
++            if (isP010(inputView, inputLayout)) {
++                inputFormat = VideoPixelFormat::P010;
++            } else {
++                inputFormat = (data[C2PlanarLayout::PLANE_V] > data[C2PlanarLayout::PLANE_U])
++                                      ? VideoPixelFormat::NV12
++                                      : VideoPixelFormat::NV21;
++            }
+         }
+     } else if (inputLayout.type == C2PlanarLayout::TYPE_RGB) {
+         inputFormat = VideoPixelFormat::ABGR;
+@@ -216,7 +343,10 @@ c2_status_t FormatConverter::convertBlock(uint64_t frameIndex,
+         return C2_CORRUPTED;
+     }
+ 
+-    if (inputFormat == mOutFormat) {
++    // P010 frames are always copied into the device's layout: the component passes a P010 frame
++    // in that layout to the device without the convertor, so one that reaches it may be in
++    // another layout.
++    if (inputFormat == mOutFormat && mOutFormat != VideoPixelFormat::P010) {
+         ALOGV("Zero-Copy is applied");
+         mGraphicBlocks.emplace_back(new BlockEntry(frameIndex));
+         *convertedBlock = inputBlock;
+@@ -242,7 +372,50 @@ c2_status_t FormatConverter::convertBlock(uint64_t frameIndex,
+     const int dstStrideV = outputLayout.planes[C2PlanarLayout::PLANE_U].rowInc;   // only for I420
+     const int dstStrideUV = outputLayout.planes[C2PlanarLayout::PLANE_U].rowInc;  // only for NV12
+ 
+-    if (inputLayout.type == C2PlanarLayout::TYPE_YUV) {
++    if (mOutFormat == VideoPixelFormat::P010 || inputFormat == VideoPixelFormat::P010) {
++        // 10-bit frames are coded from P010, in the device's layout. 8-bit YUV frames are widened
++        // to it, RGB frames are converted as for 8-bit coding and then widened.
++        if (mOutFormat == VideoPixelFormat::P010) {
++            dstUV = dstY + mOutOffsetUV;
++        }
++        const int dstStride =
++                mOutFormat == VideoPixelFormat::P010 ? static_cast<int>(mOutStride) : dstStrideY;
++        const int dstStrideC =
++                mOutFormat == VideoPixelFormat::P010 ? static_cast<int>(mOutStride) : dstStrideUV;
++        if (inputLayout.type == C2PlanarLayout::TYPE_RGB) {
++            convertRgbToP010(
++                    idMap ? idMap->addr() : inputView.data()[C2PlanarLayout::PLANE_R],
++                    idMap ? idMap->rowInc() : inputLayout.planes[C2PlanarLayout::PLANE_R].rowInc,
++                    dstY, dstUV, dstStride);
++        } else {
++            const PlaneRef srcY = planeRef(inputView, inputLayout, C2PlanarLayout::PLANE_Y);
++            const PlaneRef srcU = planeRef(inputView, inputLayout, C2PlanarLayout::PLANE_U);
++            const PlaneRef srcV = planeRef(inputView, inputLayout, C2PlanarLayout::PLANE_V);
++            switch (convertMap(inputFormat, mOutFormat)) {
++            case convertMap(VideoPixelFormat::YV12, VideoPixelFormat::P010):
++            case convertMap(VideoPixelFormat::NV12, VideoPixelFormat::P010):
++            case convertMap(VideoPixelFormat::NV21, VideoPixelFormat::P010):
++                widenToP010(srcY, srcU, srcV, dstY, dstStride, dstUV, dstStrideC,
++                            mVisibleSize.width, mVisibleSize.height);
++                break;
++            case convertMap(VideoPixelFormat::P010, VideoPixelFormat::P010):
++                libyuv::CopyPlane(srcY.data, srcY.rowInc, dstY, dstStride, mVisibleSize.width * 2,
++                                  mVisibleSize.height);
++                libyuv::CopyPlane(srcU.data, srcU.rowInc, dstUV, dstStrideC, mVisibleSize.width * 2,
++                                  mVisibleSize.height / 2);
++                break;
++            case convertMap(VideoPixelFormat::P010, VideoPixelFormat::NV12):
++                narrowP010ToNV12(srcY, srcU, srcV, dstY, dstStride, dstUV, dstStrideC,
++                                 mVisibleSize.width, mVisibleSize.height);
++                break;
++            default:
++                ALOGE("Unsupported pixel format conversion from %s to %s",
++                      videoPixelFormatToString(inputFormat).c_str(),
++                      videoPixelFormatToString(mOutFormat).c_str());
++                return C2_CORRUPTED;
++            }
++        }
++    } else if (inputLayout.type == C2PlanarLayout::TYPE_YUV) {
+         const uint8_t* srcY = inputView.data()[C2PlanarLayout::PLANE_Y];
+         const uint8_t* srcU = inputView.data()[C2PlanarLayout::PLANE_U];
+         const uint8_t* srcV = inputView.data()[C2PlanarLayout::PLANE_V];
+@@ -330,6 +503,24 @@ c2_status_t FormatConverter::convertBlock(uint64_t frameIndex,
+     return C2_OK;
+ }
+ 
++void FormatConverter::convertRgbToP010(const uint8_t* rgb, int rgbStride, uint8_t* dstY,
++                                       uint8_t* dstUV, int dstStride) {
++    // The same conversion as to NV12 for 8-bit coding (libyuv: BT.601 matrix, limited range), to
++    // an intermediate I420 frame, which is then widened. The 8-bit RGB frames have no more
++    // precision to keep.
++    const int width = mVisibleSize.width;
++    const int height = mVisibleSize.height;
++    const int tempStride = width / 2;
++    if (!mTempPlaneY) {
++        mTempPlaneY = std::unique_ptr<uint8_t[]>(new uint8_t[static_cast<size_t>(width) * height]);
++    }
++    libyuv::ABGRToI420(rgb, rgbStride, mTempPlaneY.get(), width, mTempPlaneU.get(), tempStride,
++                       mTempPlaneV.get(), tempStride, width, height);
++    widenToP010({mTempPlaneY.get(), 1, width}, {mTempPlaneU.get(), 1, tempStride},
++                {mTempPlaneV.get(), 1, tempStride}, dstY, dstStride, dstUV, dstStride, width,
++                height);
++}
++
+ c2_status_t FormatConverter::returnBlock(uint64_t frameIndex) {
+     ALOGV("returnBlock(frame_index=%" PRIu64 ")", frameIndex);
+ 
+diff --git a/common/VideoPixelFormat.cpp b/common/VideoPixelFormat.cpp
+index 48eb2a3..a388382 100644
+--- a/common/VideoPixelFormat.cpp
++++ b/common/VideoPixelFormat.cpp
+@@ -85,7 +85,7 @@ std::string videoPixelFormatToString(VideoPixelFormat format) {
+     case VideoPixelFormat::RGBA:
+         return "BGRA";
+     case VideoPixelFormat::P010:
+-        return "BGRA";
++        return "P010";
+     case VideoPixelFormat::UNKNOWN:
+         return "UNKNOWN";
+     }
+@@ -300,8 +300,13 @@ int bytesPerElement(VideoPixelFormat format, size_t plane) {
+     case VideoPixelFormat::YUV422P12:
+     case VideoPixelFormat::YUV444P12:
+     case VideoPixelFormat::P016LE:
+-    case VideoPixelFormat::P010:
+         return 2;
++    case VideoPixelFormat::P010: {
++        // As NV12 at two bytes per sample: an element of the UV plane is a U and a V sample.
++        static const int bytes_per_element[] = {2, 4};
++        ALOG_ASSERT(plane < base::size(bytes_per_element));
++        return bytes_per_element[plane];
++    }
+     case VideoPixelFormat::NV12:
+     case VideoPixelFormat::NV21: {
+         static const int bytes_per_element[] = {1, 2};
+diff --git a/common/include/v4l2_codec2/common/Common.h b/common/include/v4l2_codec2/common/Common.h
+index ac55bd2..af9e263 100644
+--- a/common/include/v4l2_codec2/common/Common.h
++++ b/common/include/v4l2_codec2/common/Common.h
+@@ -52,6 +52,9 @@ struct SupportedCapabilities {
+     C2Config::profile_t defaultProfile = C2Config::PROFILE_UNUSED;
+     std::vector<C2Config::level_t> supportedLevels;
+     C2Config::level_t defaultLevel = C2Config::LEVEL_UNUSED;
++    // Encoders: whether the device takes 10-bit (P010) input for the codec, which its 10-bit
++    // profiles need. A device can list such a profile without offering any 10-bit input format.
++    bool tenBitInput = false;
+ };
+ 
+ // Check whether |rect1| completely contains |rect2|.
+diff --git a/common/include/v4l2_codec2/common/FormatConverter.h b/common/include/v4l2_codec2/common/FormatConverter.h
+index b4aacca..d044c37 100644
+--- a/common/include/v4l2_codec2/common/FormatConverter.h
++++ b/common/include/v4l2_codec2/common/FormatConverter.h
+@@ -96,6 +96,11 @@ private:
+     // Allocate a set of graphic blocks with |mCodedSize| and |mOutFormat| for format conversion.
+     c2_status_t allocateBuffers(uint32_t count);
+ 
++    // Convert an RGB frame (|rgb|, rows |rgbStride| bytes apart) to P010, at |dstY| and |dstUV|
++    // with rows |dstStride| bytes apart.
++    void convertRgbToP010(const uint8_t* rgb, int rgbStride, uint8_t* dstY, uint8_t* dstUV,
++                          int dstStride);
++
+     // The array of block entries.
+     std::vector<std::unique_ptr<BlockEntry>> mGraphicBlocks;
+     // The queue of recording the raw pointers of available graphic blocks. The consumed block will
+@@ -105,6 +110,8 @@ private:
+     // allocated on initialize().
+     std::unique_ptr<uint8_t[]> mTempPlaneU;
+     std::unique_ptr<uint8_t[]> mTempPlaneV;
++    // The temporary Y plane for ABGR to P010 conversion, allocated with the first such frame.
++    std::unique_ptr<uint8_t[]> mTempPlaneY;
+ 
+     // The output pixel format.
+     VideoPixelFormat mOutFormat = VideoPixelFormat::UNKNOWN;
+@@ -112,6 +119,13 @@ private:
+     ui::Size mVisibleSize;
+     // The video frame coded size.
+     ui::Size mCodedSize;
++    // For P010 output: the layout the device reads, in bytes: the stride of both planes and the
++    // offset of the UV plane from the Y plane. P010 is a single-planar V4L2 format, so the device
++    // reads a frame from the start of the buffer at its own stride (|mCodedSize| width samples)
++    // with the UV plane after |mCodedSize| height rows. The converted frames are written in this
++    // layout, whichever layout gralloc gives the blocks.
++    size_t mOutStride = 0;
++    size_t mOutOffsetUV = 0;
+ };
+ 
+ }  // namespace android
+diff --git a/components/EncodeComponent.cpp b/components/EncodeComponent.cpp
+index e64b7be..cbad073 100644
+--- a/components/EncodeComponent.cpp
++++ b/components/EncodeComponent.cpp
+@@ -121,7 +121,17 @@ std::optional<std::vector<VideoFramePlane>> getVideoFrameLayout(const C2ConstGra
+             semiplanar = true;
+         }
+ 
+-        if (!crcb && !semiplanar) {
++        // P010 lays out like NV12 with two bytes per sample; gralloc describes its samples as 10
++        // bits in 16.
++        const C2PlaneInfo& yPlane = layout.planes[C2PlanarLayout::PLANE_Y];
++        if (yPlane.bitDepth == 10 && yPlane.allocatedDepth == 16) {
++            if (crcb || !semiplanar || layout.rootPlanes != 2) {
++                ALOGE("Unsupported 10-bit layout (Cr first: %d, semi-planar: %d, planes: %u)", crcb,
++                      semiplanar, layout.rootPlanes);
++                return std::nullopt;
++            }
++            *format = VideoPixelFormat::P010;
++        } else if (!crcb && !semiplanar) {
+             *format = VideoPixelFormat::I420;
+         } else if (!crcb && semiplanar) {
+             *format = VideoPixelFormat::NV12;
+@@ -170,10 +180,18 @@ std::optional<uint32_t> getVideoFrameStride(VideoPixelFormat format, ui::Size si
+     // converting to NV12. YCBCR_420_888 will allocate NV12 by minigbm.
+     HalPixelFormat halFormat = (format == VideoPixelFormat::I420) ? HalPixelFormat::YV12
+                                                                   : HalPixelFormat::YCBCR_420_888;
++    C2MemoryUsage usage(C2MemoryUsage::CPU_READ);
++    if (format == VideoPixelFormat::P010) {
++        // With the usage of the encoder's input blocks: gralloc may offer P010 only for the
++        // hardware that uses it.
++        halFormat = HalPixelFormat::YCBCR_P010;
++        usage = C2MemoryUsage(C2MemoryUsage::CPU_READ,
++                              static_cast<uint64_t>(BufferUsage::VIDEO_ENCODER));
++    }
+ 
+     std::shared_ptr<C2GraphicBlock> block;
+     status = pool->fetchGraphicBlock(size.width, size.height, static_cast<uint32_t>(halFormat),
+-                                     C2MemoryUsage(C2MemoryUsage::CPU_READ), &block);
++                                     usage, &block);
+     if (status != C2_OK) {
+         ALOGE("Failed to fetch graphic block (err=%d)", status);
+         return std::nullopt;
+@@ -476,13 +494,31 @@ void EncodeComponent::queueTask(std::unique_ptr<C2Work> work) {
+     // support the requested input format.
+     if ((mInputPixelFormat == VideoPixelFormat::UNKNOWN) && !work->input.buffers.empty()) {
+         VideoPixelFormat format = VideoPixelFormat::UNKNOWN;
+-        if (!getVideoFrameLayout(work->input.buffers.front()->data().graphicBlocks().front(),
+-                                 &format)) {
++        std::optional<std::vector<VideoFramePlane>> layout = getVideoFrameLayout(
++                work->input.buffers.front()->data().graphicBlocks().front(), &format);
++        if (!layout) {
+             ALOGE("Failed to get input block's layout");
+             reportError(C2_CORRUPTED);
+             return;
+         }
+-        if (mEncoder->inputFormat() != format) {
++        // The device reads a P010 frame from the start of the buffer, in its own layout: P010 is a
++        // single-planar V4L2 format, so there is no way to pass the frame's stride or chroma
++        // offset. A frame in another layout is copied.
++        bool copyP010 = false;
++        if (format == VideoPixelFormat::P010 && mEncoder->inputFormat() == format) {
++            const uint32_t stride = static_cast<uint32_t>(mEncoder->codedSize().width) * 2;
++            const size_t offsetUV = static_cast<size_t>(stride) * mEncoder->codedSize().height;
++            copyP010 = layout->size() != 2 || (*layout)[0].mOffset != 0 ||
++                       (*layout)[0].mStride != stride || (*layout)[1].mStride != stride ||
++                       (*layout)[1].mOffset != offsetUV;
++            if (copyP010) {
++                ALOGW("Input P010 layout (stride %u, chroma at %zu) differs from the device's "
++                      "(stride %u, chroma at %zu), copying each frame",
++                      (*layout)[0].mStride, layout->size() > 1 ? (*layout)[1].mOffset : 0, stride,
++                      offsetUV);
++            }
++        }
++        if (mEncoder->inputFormat() != format || copyP010) {
+             ALOG_ASSERT(!mInputFormatConverter);
+             ALOGV("Creating input format convertor (%s)",
+                   videoPixelFormatToString(mEncoder->inputFormat()).c_str());
+diff --git a/components/EncodeInterface.cpp b/components/EncodeInterface.cpp
+index ecf0bb9..eb22c5f 100644
+--- a/components/EncodeInterface.cpp
++++ b/components/EncodeInterface.cpp
+@@ -11,9 +11,12 @@
+ #include <algorithm>
+ 
+ #include <C2PlatformSupport.h>
++#include <Codec2CommonUtils.h>
+ #include <SimpleC2Interface.h>
+ #include <android/hardware/graphics/common/1.0/types.h>
++#include <android/hardware_buffer.h>
+ #include <media/stagefright/MediaDefs.h>
++#include <system/graphics.h>
+ #include <utils/Log.h>
+ 
+ #include <v4l2_codec2/common/Common.h>
+@@ -225,6 +228,12 @@ C2R EncodeInterface::SizeSetter(bool mayBlock, C2P<C2StreamPictureSizeInfo::inpu
+             .plus(videoSize.F(videoSize.v.height).validatePossible(videoSize.v.height));
+ }
+ 
++// static
++C2R EncodeInterface::PixelFormatSetter(bool /*mayBlock*/,
++                                       C2P<C2StreamPixelFormatInfo::input>& /*format*/) {
++    return C2R::Ok();
++}
++
+ // static
+ C2R EncodeInterface::IntraRefreshPeriodSetter(bool mayBlock,
+                                               C2P<C2StreamIntraRefreshTuning::output>& period) {
+@@ -254,16 +263,25 @@ void EncodeInterface::Initialize(const C2String& name, const SupportedCapabiliti
+     // std::vector<unsigned int> required by the c2 framework below.
+     std::vector<unsigned int> profiles;
+     ui::Size maxSize;
++    // HEVC Main is coded from 8-bit 4:2:0 input (NV12) and Main 10 from 10-bit input (P010), which
++    // the device has to take and gralloc to allocate.
++    const bool tenBitInput = caps.codec == VideoCodec::HEVC && caps.tenBitInput &&
++                             isHalPixelFormatSupported(static_cast<AHardwareBuffer_Format>(
++                                     HAL_PIXEL_FORMAT_YCBCR_P010));
++    bool tenBitProfile = false;
+     for (const auto& supportedProfile : caps.supportedProfiles) {
+         if (!isValidProfileForCodec(caps.codec, supportedProfile.profile)) {
+             continue;  // Ignore unrecognizable or unsupported profiles.
+         }
+-        // The input is 8-bit 4:2:0 (NV12), which is HEVC Main; Main Still Picture allows a single
+-        // picture per stream, and Main 10 would need a 10-bit input format.
++        // Main Still Picture allows a single picture per stream.
+         if (caps.codec == VideoCodec::HEVC &&
+-            supportedProfile.profile != C2Config::PROFILE_HEVC_MAIN) {
++            supportedProfile.profile != C2Config::PROFILE_HEVC_MAIN &&
++            !(supportedProfile.profile == C2Config::PROFILE_HEVC_MAIN_10 && tenBitInput)) {
+             continue;
+         }
++        if (supportedProfile.profile == C2Config::PROFILE_HEVC_MAIN_10) {
++            tenBitProfile = true;
++        }
+         ALOGV("Queried c2_profile = 0x%x : max_size = %d x %d", supportedProfile.profile,
+               supportedProfile.max_resolution.width, supportedProfile.max_resolution.height);
+         profiles.push_back(static_cast<unsigned int>(supportedProfile.profile));
+@@ -419,6 +437,22 @@ void EncodeInterface::Initialize(const C2String& name, const SupportedCapabiliti
+                     .withConstValue(new C2StreamBufferTypeSetting::output(0u, C2BufferData::LINEAR))
+                     .build());
+ 
++    // The framework lists COLOR_FormatYUVP010 among the encoder's color formats only when the
++    // input pixel formats name P010, as in the software AV1 encoder. Clients choose a format;
++    // the component reads the layout of each input block and converts where needed, so the
++    // setter takes any value: configure() must not start failing for a format missing here.
++    if (tenBitProfile) {
++        addParameter(DefineParam(mPixelFormat, C2_PARAMKEY_PIXEL_FORMAT)
++                             .withDefault(new C2StreamPixelFormatInfo::input(
++                                     0u, HAL_PIXEL_FORMAT_YCBCR_420_888))
++                             .withFields({C2F(mPixelFormat, value)
++                                                  .oneOf({HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED,
++                                                          HAL_PIXEL_FORMAT_YCBCR_420_888,
++                                                          HAL_PIXEL_FORMAT_YCBCR_P010})})
++                             .withSetter(PixelFormatSetter)
++                             .build());
++    }
++
+     addParameter(DefineParam(mInputMediaType, C2_PARAMKEY_INPUT_MEDIA_TYPE)
+                          .withConstValue(AllocSharedString<C2PortMediaTypeSetting::input>(
+                                  MEDIA_MIMETYPE_VIDEO_RAW))
+diff --git a/components/include/v4l2_codec2/components/EncodeInterface.h b/components/include/v4l2_codec2/components/EncodeInterface.h
+index fc68b54..cda2f7d 100644
+--- a/components/include/v4l2_codec2/components/EncodeInterface.h
++++ b/components/include/v4l2_codec2/components/EncodeInterface.h
+@@ -73,6 +73,8 @@ protected:
+ 
+     static C2R SizeSetter(bool mayBlock, C2P<C2StreamPictureSizeInfo::input>& videoSize);
+ 
++    static C2R PixelFormatSetter(bool mayBlock, C2P<C2StreamPixelFormatInfo::input>& format);
++
+     static C2R IntraRefreshPeriodSetter(bool mayBlock,
+                                         C2P<C2StreamIntraRefreshTuning::output>& period);
+ 
+@@ -96,6 +98,8 @@ protected:
+     std::shared_ptr<C2PortMediaTypeSetting::input> mInputMediaType;
+     // The MIME type of output port.
+     std::shared_ptr<C2PortMediaTypeSetting::output> mOutputMediaType;
++    // The pixel format clients may give, declared with a 10-bit profile only.
++    std::shared_ptr<C2StreamPixelFormatInfo::input> mPixelFormat;
+ 
+     // The suggested usage of input buffer allocator ID.
+     std::shared_ptr<C2PortAllocatorsTuning::input> mInputAllocatorIds;
+diff --git a/v4l2/V4L2Device.cpp b/v4l2/V4L2Device.cpp
+index 7b7a134..a880873 100644
+--- a/v4l2/V4L2Device.cpp
++++ b/v4l2/V4L2Device.cpp
+@@ -2157,7 +2157,8 @@ std::optional<VideoFrameLayout> V4L2Device::v4L2FormatToVideoFrameLayout(
+         const size_t yStrideAbs = static_cast<size_t>(yStride);
+         switch (pixFmt) {
+         case V4L2_PIX_FMT_NV12:
+-            // The stride of UV is the same as Y in NV12. The height is half of Y plane.
++        case V4L2_PIX_FMT_P010:
++            // The stride of UV is the same as Y in NV12 and P010. The height is half of Y plane.
+             planes.push_back(VideoFramePlane{yStride, yStrideAbs * pixMp.height,
+                                              yStrideAbs * pixMp.height / 2});
+             ALOG_ASSERT(2u == planes.size());
+@@ -2416,9 +2417,49 @@ SupportedCapabilities V4L2Device::queryEncodingCapabilities(VideoCodec codec) {
+     caps.codec = codec;
+     caps.supportedProfiles = V4L2Device::getSupportedProfiles(
+             V4L2Device::Type::kEncoder, {V4L2Device::videoCodecToPixFmt(codec)});
++    // Of the codecs encoded here only HEVC has a 10-bit profile (Main 10).
++    if (codec == VideoCodec::HEVC) {
++        queryEncoderInputCapabilities(V4L2Device::videoCodecToPixFmt(codec), &caps);
++    }
+     return caps;
+ }
+ 
++// static
++void V4L2Device::queryEncoderInputCapabilities(uint32_t codedFormat, SupportedCapabilities* caps) {
++    for (const auto& info : getDeviceInfosForType(Type::kEncoder)) {
++        if (std::find(info.second.begin(), info.second.end(), codedFormat) == info.second.end()) {
++            continue;
++        }
++        scoped_refptr<V4L2Device> device = V4L2Device::create();
++        if (!device->openDevicePath(info.first, Type::kEncoder)) {
++            ALOGV("Failed opening %s", info.first.c_str());
++            continue;
++        }
++
++        // The raw formats of an encoder may depend on the coded format (stateful encoder
++        // interface), so set it before listing them.
++        struct v4l2_format format;
++        memset(&format, 0, sizeof(format));
++        format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
++        if (device->ioctl(VIDIOC_G_FMT, &format) == 0) {
++            format.fmt.pix_mp.pixelformat = codedFormat;
++            if (device->ioctl(VIDIOC_S_FMT, &format) == 0 &&
++                format.fmt.pix_mp.pixelformat == codedFormat) {
++                const auto rawFormats =
++                        device->enumerateSupportedPixelformats(V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE);
++                caps->tenBitInput = std::find(rawFormats.begin(), rawFormats.end(),
++                                              V4L2_PIX_FMT_P010) != rawFormats.end();
++            }
++        }
++        device->closeDevice();
++
++        ALOGV("%s: 10-bit input %d", info.first.c_str(), caps->tenBitInput);
++        if (caps->tenBitInput) {
++            return;
++        }
++    }
++}
++
+ std::vector<C2Config::level_t> V4L2Device::enumerateSupportedDecodeLevels(
+         VideoCodec videoCodecType) {
+     std::vector<C2Config::level_t> supportedLevels;
+diff --git a/v4l2/V4L2EncodeComponent.cpp b/v4l2/V4L2EncodeComponent.cpp
+index e58f813..43c8852 100644
+--- a/v4l2/V4L2EncodeComponent.cpp
++++ b/v4l2/V4L2EncodeComponent.cpp
+@@ -95,10 +95,15 @@ bool V4L2EncodeComponent::initializeEncoder() {
+         level = c2LevelToV4L2LevelHEVC(mInterface->getOutputLevel());
+     }
+ 
++    // HEVC Main 10 is coded from 10-bit frames (P010), every other profile from NV12.
++    const VideoPixelFormat inputFormat = outputProfile == C2Config::PROFILE_HEVC_MAIN_10
++                                                 ? VideoPixelFormat::P010
++                                                 : VideoEncoder::kInputPixelFormat;
++
+     // Get the stride used by the C2 framework, as this might be different from the stride used by
+     // the V4L2 encoder.
+     std::optional<uint32_t> stride =
+-            getVideoFrameStride(VideoEncoder::kInputPixelFormat, mInterface->getInputVisibleSize());
++            getVideoFrameStride(inputFormat, mInterface->getInputVisibleSize());
+     if (!stride) {
+         ALOGE("Failed to get video frame stride");
+         reportError(C2_CORRUPTED);
+@@ -117,7 +122,7 @@ bool V4L2EncodeComponent::initializeEncoder() {
+     mBitrate = mInterface->getBitrate();
+ 
+     mEncoder = V4L2Encoder::create(
+-            outputProfile, level, mInterface->getInputVisibleSize(), *stride,
++            outputProfile, level, mInterface->getInputVisibleSize(), inputFormat, *stride,
+             mInterface->getKeyFramePeriod(), mBitrateMode, mBitrate,
+             mBitrate * VideoEncoder::kPeakBitrateMultiplier,
+             ::base::BindRepeating(&V4L2EncodeComponent::fetchOutputBlock, mWeakThis),
+diff --git a/v4l2/V4L2Encoder.cpp b/v4l2/V4L2Encoder.cpp
+index 86ba4d5..423addb 100644
+--- a/v4l2/V4L2Encoder.cpp
++++ b/v4l2/V4L2Encoder.cpp
+@@ -54,18 +54,19 @@ size_t GetMaxOutputBufferSize(const ui::Size& size) {
+ // static
+ std::unique_ptr<VideoEncoder> V4L2Encoder::create(
+         C2Config::profile_t outputProfile, std::optional<uint8_t> level,
+-        const ui::Size& visibleSize, uint32_t stride, uint32_t keyFramePeriod,
+-        C2Config::bitrate_mode_t bitrateMode, uint32_t bitrate, std::optional<uint32_t> peakBitrate,
+-        FetchOutputBufferCB fetchOutputBufferCb, InputBufferDoneCB inputBufferDoneCb,
+-        OutputBufferDoneCB outputBufferDoneCb, DrainDoneCB drainDoneCb, ErrorCB errorCb,
++        const ui::Size& visibleSize, VideoPixelFormat inputFormat, uint32_t stride,
++        uint32_t keyFramePeriod, C2Config::bitrate_mode_t bitrateMode, uint32_t bitrate,
++        std::optional<uint32_t> peakBitrate, FetchOutputBufferCB fetchOutputBufferCb,
++        InputBufferDoneCB inputBufferDoneCb, OutputBufferDoneCB outputBufferDoneCb,
++        DrainDoneCB drainDoneCb, ErrorCB errorCb,
+         scoped_refptr<::base::SequencedTaskRunner> taskRunner) {
+     ALOGV("%s()", __func__);
+ 
+     std::unique_ptr<V4L2Encoder> encoder = ::base::WrapUnique<V4L2Encoder>(new V4L2Encoder(
+             std::move(taskRunner), std::move(fetchOutputBufferCb), std::move(inputBufferDoneCb),
+             std::move(outputBufferDoneCb), std::move(drainDoneCb), std::move(errorCb)));
+-    if (!encoder->initialize(outputProfile, level, visibleSize, stride, keyFramePeriod, bitrateMode,
+-                             bitrate, peakBitrate)) {
++    if (!encoder->initialize(outputProfile, level, visibleSize, inputFormat, stride, keyFramePeriod,
++                             bitrateMode, bitrate, peakBitrate)) {
+         return nullptr;
+     }
+     return encoder;
+@@ -210,7 +211,8 @@ VideoPixelFormat V4L2Encoder::inputFormat() const {
+ }
+ 
+ bool V4L2Encoder::initialize(C2Config::profile_t outputProfile, std::optional<uint8_t> level,
+-                             const ui::Size& visibleSize, uint32_t stride, uint32_t keyFramePeriod,
++                             const ui::Size& visibleSize, VideoPixelFormat inputFormat,
++                             uint32_t stride, uint32_t keyFramePeriod,
+                              C2Config::bitrate_mode_t bitrateMode, uint32_t bitrate,
+                              std::optional<uint32_t> peakBitrate) {
+     ALOGV("%s()", __func__);
+@@ -271,7 +273,7 @@ bool V4L2Encoder::initialize(C2Config::profile_t outputProfile, std::optional<ui
+ 
+     // Configure the input format. If the device doesn't support the specified format we'll use one
+     // of the device's preferred formats in combination with an input format convertor.
+-    if (!configureInputFormat(kInputPixelFormat, stride)) return false;
++    if (!configureInputFormat(inputFormat, stride)) return false;
+ 
+     // Create input and output buffers.
+     if (!createInputBuffers() || !createOutputBuffers()) return false;
+@@ -467,13 +469,23 @@ bool V4L2Encoder::configureInputFormat(VideoPixelFormat inputFormat, uint32_t st
+     ALOG_ASSERT(!mInputQueue->isStreaming());
+     ALOG_ASSERT(!isEmpty(mVisibleSize));
+ 
+-    // First try to use the requested pixel format directly.
++    // First try to use the requested pixel format directly. V4L2 has P010 only as a single-planar
++    // format.
++    const bool tenBit = inputFormat == VideoPixelFormat::P010;
+     std::optional<struct v4l2_format> format;
+-    auto fourcc = Fourcc::fromVideoPixelFormat(inputFormat, false);
++    auto fourcc = Fourcc::fromVideoPixelFormat(inputFormat, tenBit);
+     if (fourcc) {
+         format = mInputQueue->setFormat(fourcc->toV4L2PixFmt(), mVisibleSize, 0, stride);
+     }
+ 
++    // The device's preferred formats are 8-bit: a 10-bit profile coded from one would not keep
++    // the precision of its input (and a device may refuse the combination, or code noise).
++    if (!format && tenBit) {
++        ALOGE("Device doesn't take %s input, which the 10-bit profile needs",
++              videoPixelFormatToString(inputFormat).c_str());
++        return false;
++    }
++
+     // If the device doesn't support the requested input format we'll try the device's preferred
+     // input pixel formats and use a format convertor. We need to try all formats as some formats
+     // might not be supported for the configured output format.
+diff --git a/v4l2/include/v4l2_codec2/v4l2/V4L2Device.h b/v4l2/include/v4l2_codec2/v4l2/V4L2Device.h
+index 850653b..19edade 100644
+--- a/v4l2/include/v4l2_codec2/v4l2/V4L2Device.h
++++ b/v4l2/include/v4l2_codec2/v4l2/V4L2Device.h
+@@ -530,6 +530,10 @@ private:
+     SupportedProfiles enumerateSupportedProfiles(V4L2Device::Type type,
+                                                  const std::vector<uint32_t>& pixelFormats);
+ 
++    // Fill in the encoder input capabilities of |caps| (10-bit input) for |codedFormat|, from the
++    // first encoder device with that coded format that has them.
++    static void queryEncoderInputCapabilities(uint32_t codedFormat, SupportedCapabilities* caps);
++
+     // Open device node for |path| as a device of |type|.
+     bool openDevicePath(const std::string& path, Type type);
+ 
+diff --git a/v4l2/include/v4l2_codec2/v4l2/V4L2Encoder.h b/v4l2/include/v4l2_codec2/v4l2/V4L2Encoder.h
+index 99d6221..1a9ffc7 100644
+--- a/v4l2/include/v4l2_codec2/v4l2/V4L2Encoder.h
++++ b/v4l2/include/v4l2_codec2/v4l2/V4L2Encoder.h
+@@ -27,12 +27,14 @@ class V4L2Queue;
+ 
+ class V4L2Encoder : public VideoEncoder {
+ public:
++    // |inputFormat| is the pixel format of the frames to encode, |stride| their stride in bytes.
+     static std::unique_ptr<VideoEncoder> create(
+             C2Config::profile_t profile, std::optional<uint8_t> level, const ui::Size& visibleSize,
+-            uint32_t stride, uint32_t keyFramePeriod, C2Config::bitrate_mode_t bitrateMode,
+-            uint32_t bitrate, std::optional<uint32_t> peakBitrate,
+-            FetchOutputBufferCB fetchOutputBufferCb, InputBufferDoneCB inputBufferDoneCb,
+-            OutputBufferDoneCB outputBufferDoneCb, DrainDoneCB drainDoneCb, ErrorCB errorCb,
++            VideoPixelFormat inputFormat, uint32_t stride, uint32_t keyFramePeriod,
++            C2Config::bitrate_mode_t bitrateMode, uint32_t bitrate,
++            std::optional<uint32_t> peakBitrate, FetchOutputBufferCB fetchOutputBufferCb,
++            InputBufferDoneCB inputBufferDoneCb, OutputBufferDoneCB outputBufferDoneCb,
++            DrainDoneCB drainDoneCb, ErrorCB errorCb,
+             scoped_refptr<::base::SequencedTaskRunner> taskRunner);
+     ~V4L2Encoder() override;
+ 
+@@ -78,8 +80,8 @@ private:
+ 
+     // Initialize the V4L2 encoder for specified parameters.
+     bool initialize(C2Config::profile_t outputProfile, std::optional<uint8_t> level,
+-                    const ui::Size& visibleSize, uint32_t stride, uint32_t keyFramePeriod,
+-                    C2Config::bitrate_mode_t bitrateMode, uint32_t bitrate,
++                    const ui::Size& visibleSize, VideoPixelFormat inputFormat, uint32_t stride,
++                    uint32_t keyFramePeriod, C2Config::bitrate_mode_t bitrateMode, uint32_t bitrate,
+                     std::optional<uint32_t> peakBitrate);
+ 
+     // Handle the next encode request on the queue.
+@@ -91,7 +93,8 @@ private:
+     // Called when draining the encoder has completed.
+     void onDrainDone(bool done);
+ 
+-    // Configure input format on the V4L2 device.
++    // Configure input format on the V4L2 device. When the device doesn't take an 8-bit
++    // |inputFormat| one of its preferred formats is used instead; a 10-bit one is required.
+     bool configureInputFormat(VideoPixelFormat inputFormat, uint32_t stride);
+     // Configure output format on the V4L2 device.
+     bool configureOutputFormat(C2Config::profile_t outputProfile);

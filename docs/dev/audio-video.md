@@ -152,7 +152,7 @@ TX_DEC0 Volume = 102, TX_DEC1 Volume = 102
 - **Android Codec2集成**：
   - 使用`android.hardware.media.c2@1.2-service-v4l2`（通过属性`media.c2.hal.selection=aidl`告知`MediaCodec`连接AIDL/HIDL服务）。
   - 注册解码器组件：`c2.v4l2.avc.decoder`（H.264）、`c2.v4l2.hevc.decoder`（HEVC / H.265）、`c2.v4l2.vp9.decoder`（VP9）。实测单路实时解码：3840x2160的HEVC（含10位）与VP9到120 fps，H.264在3840x2160下到60 fps、在2560x1440下到120 fps；`media_codecs_c2.xml`按此申报`blocks-per-second`与性能点（H.264 4K@60与2560x1440@120，HEVC与VP9 4K@120）。Media3等应用按性能点判断帧率，原来只申报4K@30时，60 fps以上的视频会交给软解。一个性能点只覆盖帧尺寸、帧率与宏块速率都不超过它的格式，所以H.264的4K@60无法覆盖1080p@120，另申报2560x1440@120。
-  - 注册编码器组件：`c2.v4l2.avc.encoder`（H.264）、`c2.v4l2.hevc.encoder`（HEVC Main），见本节第3小节。
+  - 注册编码器组件：`c2.v4l2.avc.encoder`（H.264）、`c2.v4l2.hevc.encoder`（HEVC Main与Main 10），见本节第3小节。
 
 ### 2. 关键内核与用户态修复
 
@@ -203,6 +203,9 @@ TX_DEC0 Volume = 102, TX_DEC1 Volume = 102
 - **`patches/kernel/iris/0013`**：编码器的`BUF_ARP`分配为连续内存，页独占赋给VMID `0xb`（HLOS与`0xb`共享的授予会被hypervisor拒绝），映射进CB15在窗口`0x01000000..0x25800000`内的固定IOVA `0x01000000`，并把该IOVA交给固件；拆除时反向还原，页无法交还HLOS时宁可泄漏也不释放。
 - **`patches/kernel/iris/0034`**：ARP改按会话分配IOVA：窗口起点起8个256 KiB的槽位（槽位0即原来的`0x01000000`），由一个全局的IDA管理。槽位在任何SCM调用之前取得，在解除映射之后释放，页泄漏时也释放；8个都占用时开流返回`-EBUSY`并记录`all … CP non-pixel slots in use`。8个槽位都在已有的那一张2 MiB叶页表里，不需要新的页表页。IDA放在文件作用域而不是`iris_core`里，因为CB15与它的页表是全系统唯一的，比单个`iris_core`活得久。
 - **`patches/kernel/iris/0035`**：固件拒绝SESSION_INIT时（例如会话数超出固件上限），原来只把实例置为错误，REQBUFS照常成功，直到STREAMON才返回`-EBUSY`；现在第一次REQBUFS即失败，并记录`init failed`。
+- **`patches/kernel/iris/0037`**：gen1编码器接受P010输入，只用于HEVC Main 10，并且只在有4条VPP管线的gen1核心（SM8250、SC8280XP）上提供。P010的步长为`ALIGN(宽×2, 256)`，Y平面行数按32对齐、UV平面按16对齐，与解码器的输出和gralloc的分配一致；向固件发送P010格式、按字节计的步长与平面约束。码流缓冲在HEVC 10位输入时放大四分之一。宽度上限为4096（平面约束的步长上限为8192字节），`TRY_FMT`与`S_FMT`钳制宽度，`ENUM_FRAMESIZES`与`ENUM_FRAMEINTERVALS`按此申报。开流时检查位深与档次：P010输入与H.264或HEVC Main的组合、NV12输入与Main 10的组合都返回`-EINVAL`并记录原因（此前Main 10与NV12输入的组合可以设置成功，固件按10位会话运行，编码结果错误）。编码格式从HEVC改为H.264时，输入格式退回NV12。
+- **`patches/kernel/iris/0038`**：按输入（OUTPUT）格式的色彩参数发送`HFI_PROPERTY_PARAM_VENC_VIDEO_SIGNAL_INFO`，固件把它写进码流的VUI（原来硬件编码的H.264与HEVC都不带色彩描述）。留为默认的字段按色彩空间的V4L2默认值补全；四项都为默认时不发送，未设置色彩参数的编码不受影响。色彩空间为默认时，V4L2核心会把其余三项一并清除（驱动替换不支持的色彩空间时同样如此），这时不发送色彩描述；opRGB与RAW没有对应的编号，三原色写为未指定（opRGB的传输特性同样写为未指定）。V4L2没有HLG传输特性，HLG无法写入。CAPTURE改为报告OUTPUT的色彩参数。
+- **`patches/kernel/iris/0039`**：gen1编码器增加`V4L2_CID_COLORIMETRY_HDR10_MASTERING_DISPLAY`与`V4L2_CID_COLORIMETRY_HDR10_CLL_INFO`两个控件。HEVC Main 10且传输特性为PQ时，以`HFI_PROPERTY_PARAM_VENC_HDR10_PQ_SEI`写入母版显示器与内容亮度SEI；客户端未设置时使用默认值（P3 D65，1000与0.005 cd/m²，内容亮度为0即未知）。venus同样在客户端未设置时使用默认值，但数值不同，并且对每个Main 10码流都写入。三原色按V4L2规定的绿、蓝、红顺序交给固件，码流中的顺序与此一致。开流后无法修改。
 - **`patches/kernel/iris/0014`**：gen1编码器的档次/级别改发HFI位掩码值（原来发V4L2枚举，HEVC Main会被固件当成Main Still Picture）；级别按分辨率和帧率推导。同时修正该属性的payload大小（原来少分配4字节）。
 - **`patches/kernel/iris/0015`**：编码器EMPTY_BUFFER时间戳按微秒发（固件码率控制按微秒读，发纳秒会让码率严重超标），响应侧转回纳秒。
 - **`patches/kernel/iris/0016`**：回移主线v7.3的强制关键帧控制`V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME`。`v4l2_codec2`每到关键帧间隔都设这个控件，设不上就判编码失败。
@@ -219,6 +222,8 @@ TX_DEC0 Volume = 102, TX_DEC1 Volume = 102
 - **`patches/android/v4l2-codec2/0009`**：编码器的宏块码率控制（`MB_RC_ENABLE`）与GOP长度改为各设一次。原来两者放在同一次`VIDIOC_S_EXT_CTRLS`里，iris没有`MB_RC_ENABLE`，整次调用被拒，GOP长度停在驱动默认的30，固件在组件请求的IDR之间每30帧再插一个I帧（录屏120 fps、2 s间隔时，这些I帧约占码流的六分之一）。现在先查GOP长度的取值范围：最小值为0时设为0，驱动不接受0或最小值大于0时改设它支持的最大值（控件框架会把超出范围的整数夹到范围内而不报错，直接设0在最小值为1的驱动上就成了每帧一个关键帧）；关键帧间隔为负时只在第一帧和请求时出关键帧。必须与`patches/kernel/iris/0021`一起使用。
 - **`patches/android/v4l2-codec2/0013`**：固件不带码流地返回一帧（丢帧、数据损坏，或长度为0），iris给出带`V4L2_BUF_FLAG_ERROR`或长度为0的缓冲，组件原来直接丢弃它。工作项按顺序完成，每一项都要等到输出，于是会话从这一帧起一帧不出，也不报错。没有B帧时输出按输入顺序返回，补丁把最早一个还在等待输出的工作项以`FLAG_DROP_FRAME`完成（与解码组件相同），连续丢30帧（30 fps下约1 s）时报错，让应用可以重建编码器或换用软编。排空时末尾带`V4L2_BUF_FLAG_LAST`的空缓冲仍只结束排空。
 - **`patches/android/v4l2-codec2/0014`**：编码器实例计数原来在组件析构时才减少，而框架在`release()`返回后还会持有组件一段时间；资源管理器收回编码器后立即重试时，可能因为旧组件对象还没析构而再次撞到上限。补丁在`release()`关闭设备之后减少计数，并保证只减一次。
+- **`patches/android/v4l2-codec2/0020`**：设备的HEVC编码器接受P010输入、gralloc也能分配P010时，HEVC编码组件提供Main 10档次并声明P010输入格式；否则只提供Main，与原来相同。Main 10会话使用单平面P010输入，布局与设备一致的P010帧直接送入硬件，其他布局逐帧复制。8位YUV输入扩展为10位（无损），RGB输入按BT.601有限范围转换后扩展；P010帧送进8位会话时四舍五入为NV12（此前按NV12编码，编码结果错误）。同时修正P010的`bytesPerElement`（UV平面少算一半）与`videoPixelFormatToString`。
+- **`patches/android/v4l2-codec2/0021`**：Main 10时声明输入色彩参数与VUI色彩参数；设备有HDR10控件时还声明`C2StreamHdrStaticInfo::input`，框架随之列出Main 10 HDR10。10位会话把色彩参数作为输入格式的色彩描述交给设备，只在V4L2能完整描述时发送：三原色、传输特性与矩阵都已指定（范围未指定时按有限范围）。HLG、D65白点的P3、gamma 2.2等V4L2没有的值，以及缺少三原色、传输特性或矩阵的组合，码流不带色彩描述，播放时使用容器中的色彩信息。VUI色彩参数报告码流实际携带的值。RGB输入在10位会话中按BT.601有限范围转换，第一帧到来时组件以BT.709三原色、sRGB传输特性、BT.601矩阵、有限范围的描述重新启动编码器；容器中的色彩信息由框架按输入Surface的数据空间写入，可能与码流不同。HDR10静态元数据在开流前写入两个控件。8位会话不传色彩参数，行为不变。
 
 #### 设备配置
 
@@ -230,7 +235,7 @@ TX_DEC0 Volume = 102, TX_DEC1 Volume = 102
 #### 已知限制
 
 - **同时最多3路编码**：内核有8个ARP槽位，`v4l2_codec2`按3路限制。固件出错重载时，所有正在进行的编解码会话一起报错。
-- **没有HEVC Main 10和HDR编码**：输入只有8位NV12。
+- **HEVC Main 10与HDR10编码**：只有HEVC提供10位档次，H.264不提供。Main 10编码的宽度最多为4096，与编码器申报的尺寸上限相同。HLG与D65白点的P3无法写入码流的色彩描述，只记录在容器中。8位编码不写色彩描述。RGB输入在10位会话中按8位sRGB内容处理；输入格式为10位RGB（`RGBA_1010102`）时无法编码；10位YUV（P010）输入不受影响。
 - **系统录屏**：系统录屏按30 fps申报，横屏录2560x1600，竖屏按解码器的能力缩到1360x2176（竖屏尚未经实测），默认用硬件H.264编码器，打开“HEVC编码”时用硬件HEVC编码器，不会换用软编。输入是可变帧率，滑动画面时可有接近120 fps的突发。`adb shell screenrecord`不带`--size`时会改用1280x720重试。
 - **很小的尺寸**：宽或高按驱动的对齐（128x32）之后仍小于128时（例如160x90），内核在申请缓冲时拒绝（`current session not supported`），应用在开始编码时拿到错误。原始尺寸小于128、对齐后不小于128的（例如160x120、100x100），固件能正常编码，并在SPS里写明裁剪。
 - **唤醒后偶发一次无输出**：休眠唤醒后紧接着编码，偶尔会有一次固件把每一帧都不带码流地返回，持续二三十秒，随后的编码自行恢复。内核记录`encoder frame without bitstream`告警（`patches/kernel/iris/0025`），组件按丢帧处理，连续丢30帧时向应用报错（`patches/android/v4l2-codec2/0013`）。原因不明。

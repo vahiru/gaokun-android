@@ -1,0 +1,334 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: iris: gen1: write the raw format's colorimetry into
+ the stream
+
+The gen1 encoder never sends HFI_PROPERTY_PARAM_VENC_VIDEO_SIGNAL_INFO,
+so the H.264 and HEVC streams it produces carry no video signal type in
+the VUI (video_signal_type_present_flag is 0): no colour primaries,
+transfer characteristics, matrix or range. Players then have to guess,
+which is wrong for anything but BT.709 limited range, and an HEVC Main
+10 stream cannot say that it is BT.2020 with the SMPTE ST 2084 (PQ)
+transfer. In addition, S_FMT on CAPTURE took the client's colorimetry
+and replaced every colorspace other than DEFAULT and REC709 with
+DEFAULT, also when it propagated the OUTPUT colorimetry after a size
+change, so G_FMT on CAPTURE could report DEFAULT next to a BT.2020
+encoding and transfer.
+
+At STREAMON, map the colorimetry of the raw (OUTPUT) format to ISO/IEC
+23091-2 code points and send it as VIDEO_SIGNAL_INFO, which the firmware
+writes into the VUI. A field left at *_DEFAULT takes the default of the
+colorspace, as V4L2 defines it; a DEFAULT colorspace comes with all four
+fields at DEFAULT, as the V4L2 core resets them together, and the driver
+does the same when it replaces a colorspace it does not take (BT.878),
+so nothing is sent then. Colorspaces and transfer functions without a
+code point (opRGB, RAW) are signalled as unspecified, video_format as
+unspecified. V4L2 has no value for the HLG transfer function, so HLG
+cannot be signalled. When all four fields are DEFAULT nothing is sent
+and the stream stays as before; this includes clients that never set the
+colorimetry.
+
+The encoder does no colour conversion, so CAPTURE now reports the OUTPUT
+colorimetry, as V4L2 has the driver set it for capture streams; S_FMT
+and TRY_FMT on CAPTURE no longer take it from the client. Out-of-range
+values set on OUTPUT are replaced with *_DEFAULT.
+
+Origin: local
+Upstream-Status: Pending
+Assisted-by: Claude:claude-opus-5-5
+---
+ .../media/platform/qcom/iris/iris_hfi_gen1.c  |   1 +
+ .../qcom/iris/iris_hfi_gen1_command.c         | 121 ++++++++++++++++++
+ .../qcom/iris/iris_hfi_gen1_defines.h         |  19 +++
+ drivers/media/platform/qcom/iris/iris_venc.c  |  52 +++++---
+ 4 files changed, 178 insertions(+), 15 deletions(-)
+
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen1.c b/drivers/media/platform/qcom/iris/iris_hfi_gen1.c
+index e3bc8997ab..f5bddd61fc 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen1.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen1.c
+@@ -405,6 +405,7 @@ static const u32 sm8250_venc_input_config_param[] = {
+ 	HFI_PROPERTY_PARAM_UNCOMPRESSED_FORMAT_SELECT,
+ 	HFI_PROPERTY_PARAM_UNCOMPRESSED_PLANE_ACTUAL_CONSTRAINTS_INFO,
+ 	HFI_PROPERTY_PARAM_BUFFER_COUNT_ACTUAL,
++	HFI_PROPERTY_PARAM_VENC_VIDEO_SIGNAL_INFO,
+ };
+ 
+ static const u32 sm8250_dec_ip_int_buf_tbl[] = {
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c b/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c
+index 066249e4c2..b77a22fab4 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c
+@@ -828,6 +828,13 @@ iris_hfi_gen1_packet_session_set_property(struct hfi_session_set_property_pkt *p
+ 	case HFI_PROPERTY_CONFIG_VENC_REQUEST_SYNC_FRAME: {
+ 		break;
+ 	}
++	case HFI_PROPERTY_PARAM_VENC_VIDEO_SIGNAL_INFO: {
++		struct hfi_video_signal_metadata *in = pdata, *info = prop_data;
++
++		*info = *in;
++		packet->shdr.hdr.size += sizeof(*info);
++		break;
++	}
+ 	default:
+ 		return -EINVAL;
+ 	}
+@@ -1197,6 +1204,118 @@ static int iris_hfi_gen1_set_stride(struct iris_inst *inst, u32 plane)
+ 	return hfi_gen1_set_property(inst, ptype, &plane_actual_info, sizeof(plane_actual_info));
+ }
+ 
++static u32 iris_hfi_gen1_color_primaries(u32 colorspace)
++{
++	switch (colorspace) {
++	case V4L2_COLORSPACE_REC709:
++	case V4L2_COLORSPACE_SRGB:
++	case V4L2_COLORSPACE_JPEG:
++		return HFI_PRIMARIES_BT709;
++	case V4L2_COLORSPACE_SMPTE170M:
++		return HFI_PRIMARIES_BT601_525;
++	case V4L2_COLORSPACE_470_SYSTEM_M:
++		return HFI_PRIMARIES_BT470_SYSTEM_M;
++	case V4L2_COLORSPACE_470_SYSTEM_BG:
++		return HFI_PRIMARIES_BT470_SYSTEM_BG;
++	case V4L2_COLORSPACE_SMPTE240M:
++		return HFI_PRIMARIES_SMPTE_ST240M;
++	case V4L2_COLORSPACE_BT2020:
++		return HFI_PRIMARIES_BT2020;
++	case V4L2_COLORSPACE_DCI_P3:
++		return HFI_PRIMARIES_SMPTE_RP431_2;
++	default:
++		/* DEFAULT, and OPRGB and RAW, which have no code point */
++		return HFI_PRIMARIES_UNSPECIFIED;
++	}
++}
++
++static u32 iris_hfi_gen1_transfer_char(u32 xfer_func)
++{
++	switch (xfer_func) {
++	case V4L2_XFER_FUNC_709:
++		return HFI_TRANSFER_BT709;
++	case V4L2_XFER_FUNC_SRGB:
++		return HFI_TRANSFER_SRGB_SYCC;
++	case V4L2_XFER_FUNC_SMPTE240M:
++		return HFI_TRANSFER_SMPTE_ST240M;
++	case V4L2_XFER_FUNC_NONE:
++		return HFI_TRANSFER_LINEAR;
++	case V4L2_XFER_FUNC_DCI_P3:
++		return HFI_TRANSFER_SMPTE_ST428_1;
++	case V4L2_XFER_FUNC_SMPTE2084:
++		return HFI_TRANSFER_SMPTE_ST2084_PQ;
++	default:
++		/* DEFAULT, and OPRGB, which has no code point */
++		return HFI_TRANSFER_UNSPECIFIED;
++	}
++}
++
++static u32 iris_hfi_gen1_matrix_coeffs(u32 ycbcr_enc, u32 colorspace)
++{
++	switch (ycbcr_enc) {
++	case V4L2_YCBCR_ENC_601:
++	case V4L2_YCBCR_ENC_XV601:
++		/* The same matrix; name the 625-line one for 625-line primaries. */
++		if (colorspace == V4L2_COLORSPACE_470_SYSTEM_BG)
++			return HFI_MATRIX_COEFF_BT470_SYS_BG_OR_BT601_625;
++		return HFI_MATRIX_COEFF_BT601_525_BT1358_525_OR_625;
++	case V4L2_YCBCR_ENC_709:
++	case V4L2_YCBCR_ENC_XV709:
++		return HFI_MATRIX_COEFF_BT709;
++	case V4L2_YCBCR_ENC_BT2020:
++		return HFI_MATRIX_COEFF_BT2020_NON_CONSTANT;
++	case V4L2_YCBCR_ENC_BT2020_CONST_LUM:
++		return HFI_MATRIX_COEFF_BT2020_CONSTANT;
++	case V4L2_YCBCR_ENC_SMPTE240M:
++		return HFI_MATRIX_COEFF_SMPTE_ST240;
++	default:
++		return HFI_MATRIX_COEFF_UNSPECIFIED;
++	}
++}
++
++/*
++ * Write the colorimetry the client set on the raw (OUTPUT) format into the
++ * VUI. A field left at *_DEFAULT takes the default of the colorspace, as V4L2
++ * defines it. A default colorspace comes with all four fields at *_DEFAULT
++ * (the V4L2 core and iris_venc_check_colorimetry() reset them together); then
++ * nothing is sent, and the stream carries no video signal type, as before.
++ * V4L2 has no HLG transfer function, so HLG cannot be signalled.
++ */
++static int iris_hfi_gen1_set_signal_info(struct iris_inst *inst, u32 plane)
++{
++	const u32 ptype = HFI_PROPERTY_PARAM_VENC_VIDEO_SIGNAL_INFO;
++	struct v4l2_pix_format_mplane *pixmp = &inst->fmt_src->fmt.pix_mp;
++	u32 colorspace = pixmp->colorspace, xfer_func = pixmp->xfer_func;
++	u32 ycbcr_enc = pixmp->ycbcr_enc, quantization = pixmp->quantization;
++	struct hfi_video_signal_metadata info = {};
++
++	if (colorspace == V4L2_COLORSPACE_DEFAULT && xfer_func == V4L2_XFER_FUNC_DEFAULT &&
++	    ycbcr_enc == V4L2_YCBCR_ENC_DEFAULT && quantization == V4L2_QUANTIZATION_DEFAULT)
++		return 0;
++
++	info.enable = 1;
++	info.video_format = HFI_VIDEO_FORMAT_UNSPECIFIED;
++	info.color_description = colorspace != V4L2_COLORSPACE_DEFAULT ||
++				 xfer_func != V4L2_XFER_FUNC_DEFAULT ||
++				 ycbcr_enc != V4L2_YCBCR_ENC_DEFAULT;
++
++	if (colorspace != V4L2_COLORSPACE_DEFAULT) {
++		if (xfer_func == V4L2_XFER_FUNC_DEFAULT)
++			xfer_func = V4L2_MAP_XFER_FUNC_DEFAULT(colorspace);
++		if (ycbcr_enc == V4L2_YCBCR_ENC_DEFAULT)
++			ycbcr_enc = V4L2_MAP_YCBCR_ENC_DEFAULT(colorspace);
++	}
++	if (quantization == V4L2_QUANTIZATION_DEFAULT)
++		quantization = V4L2_MAP_QUANTIZATION_DEFAULT(false, colorspace, ycbcr_enc);
++
++	info.video_full_range = quantization == V4L2_QUANTIZATION_FULL_RANGE;
++	info.color_primaries = iris_hfi_gen1_color_primaries(colorspace);
++	info.transfer_characteristics = iris_hfi_gen1_transfer_char(xfer_func);
++	info.matrix_coeffs = iris_hfi_gen1_matrix_coeffs(ycbcr_enc, colorspace);
++
++	return hfi_gen1_set_property(inst, ptype, &info, sizeof(info));
++}
++
+ static int iris_hfi_gen1_session_set_config_params(struct iris_inst *inst, u32 plane)
+ {
+ 	struct iris_hfi_prop_type_handle const *handler = NULL;
+@@ -1251,6 +1370,8 @@ static int iris_hfi_gen1_session_set_config_params(struct iris_inst *inst, u32 p
+ 			iris_hfi_gen1_set_enc_format_constraints},
+ 		{HFI_PROPERTY_PARAM_BUFFER_COUNT_ACTUAL,
+ 			iris_hfi_gen1_set_num_bufs},
++		{HFI_PROPERTY_PARAM_VENC_VIDEO_SIGNAL_INFO,
++			iris_hfi_gen1_set_signal_info},
+ 	};
+ 
+ 	if (inst->domain == DECODER) {
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen1_defines.h b/drivers/media/platform/qcom/iris/iris_hfi_gen1_defines.h
+index 05ff022ad5..b0ccafbbaa 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen1_defines.h
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen1_defines.h
+@@ -158,6 +158,7 @@
+ #define HFI_LTR_MODE_PERIODIC			0x2
+ 
+ #define HFI_PROPERTY_PARAM_VENC_LTRMODE				0x200501c
++#define HFI_PROPERTY_PARAM_VENC_VIDEO_SIGNAL_INFO		0x200501d
+ #define HFI_PROPERTY_PARAM_VENC_MAX_NUM_B_FRAMES		0x2005020
+ #define HFI_PROPERTY_PARAM_VENC_HIER_P_MAX_NUM_ENH_LAYER	0x2005026
+ #define HFI_PROPERTY_CONFIG_VENC_TARGET_BITRATE			0x2006001
+@@ -505,6 +506,24 @@ struct hfi_intra_period {
+ 	u32 bframes;
+ };
+ 
++/* VUI video_format "unspecified" */
++#define HFI_VIDEO_FORMAT_UNSPECIFIED	5
++
++/*
++ * VUI video signal type: enable sets video_signal_type_present_flag and
++ * color_description sets colour_description_present_flag. The colour codes
++ * are those of ISO/IEC 23091-2 (enum hfi_color_primaries and friends).
++ */
++struct hfi_video_signal_metadata {
++	u32 enable;
++	u32 video_format;
++	u32 video_full_range;
++	u32 color_description;
++	u32 color_primaries;
++	u32 transfer_characteristics;
++	u32 matrix_coeffs;
++};
++
+ struct hfi_event_data {
+ 	u32 error;
+ 	u32 height;
+diff --git a/drivers/media/platform/qcom/iris/iris_venc.c b/drivers/media/platform/qcom/iris/iris_venc.c
+index 828316e2f0..a70cf32b3b 100644
+--- a/drivers/media/platform/qcom/iris/iris_venc.c
++++ b/drivers/media/platform/qcom/iris/iris_venc.c
+@@ -195,6 +195,38 @@ int iris_venc_enum_fmt(struct iris_inst *inst, struct v4l2_fmtdesc *f)
+ 	return 0;
+ }
+ 
++/*
++ * The encoder does no colour conversion: the client describes the raw frames
++ * on OUTPUT, the stream carries that description, and CAPTURE reports it.
++ */
++static void iris_venc_set_colorimetry(struct v4l2_pix_format_mplane *pixmp,
++				      const struct v4l2_pix_format_mplane *src)
++{
++	pixmp->colorspace = src->colorspace;
++	pixmp->xfer_func = src->xfer_func;
++	pixmp->ycbcr_enc = src->ycbcr_enc;
++	pixmp->quantization = src->quantization;
++}
++
++static void iris_venc_check_colorimetry(struct v4l2_pix_format_mplane *pixmp)
++{
++	/* As v4l_sanitize_colorspace(): no colorspace, no colorimetry. */
++	if (pixmp->colorspace >= V4L2_COLORSPACE_LAST ||
++	    pixmp->colorspace == V4L2_COLORSPACE_BT878) {
++		pixmp->colorspace = V4L2_COLORSPACE_DEFAULT;
++		pixmp->xfer_func = V4L2_XFER_FUNC_DEFAULT;
++		pixmp->ycbcr_enc = V4L2_YCBCR_ENC_DEFAULT;
++		pixmp->quantization = V4L2_QUANTIZATION_DEFAULT;
++		return;
++	}
++	if (pixmp->xfer_func >= V4L2_XFER_FUNC_LAST)
++		pixmp->xfer_func = V4L2_XFER_FUNC_DEFAULT;
++	if (pixmp->ycbcr_enc >= V4L2_YCBCR_ENC_LAST)
++		pixmp->ycbcr_enc = V4L2_YCBCR_ENC_DEFAULT;
++	if (pixmp->quantization > V4L2_QUANTIZATION_LIM_RANGE)
++		pixmp->quantization = V4L2_QUANTIZATION_DEFAULT;
++}
++
+ int iris_venc_try_fmt(struct iris_inst *inst, struct v4l2_format *f)
+ {
+ 	struct v4l2_pix_format_mplane *pixmp = &f->fmt.pix_mp;
+@@ -214,6 +246,7 @@ int iris_venc_try_fmt(struct iris_inst *inst, struct v4l2_format *f)
+ 		/* The P010 plane constraints allow a stride of 8192 bytes at most. */
+ 		if (pixmp->pixelformat == V4L2_PIX_FMT_P010)
+ 			pixmp->width = min(pixmp->width, IRIS_VENC_P010_MAX_WIDTH);
++		iris_venc_check_colorimetry(pixmp);
+ 		break;
+ 	case V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE:
+ 		if (!supported) {
+@@ -222,6 +255,7 @@ int iris_venc_try_fmt(struct iris_inst *inst, struct v4l2_format *f)
+ 			f->fmt.pix_mp.height = f_inst->fmt.pix_mp.height;
+ 			f->fmt.pix_mp.pixelformat = f_inst->fmt.pix_mp.pixelformat;
+ 		}
++		iris_venc_set_colorimetry(pixmp, &inst->fmt_src->fmt.pix_mp);
+ 		break;
+ 	default:
+ 		return -EINVAL;
+@@ -296,13 +330,7 @@ static int iris_venc_s_fmt_output(struct iris_inst *inst, struct v4l2_format *f)
+ 	fmt->fmt.pix_mp.plane_fmt[0].bytesperline = 0;
+ 	fmt->fmt.pix_mp.plane_fmt[0].sizeimage = iris_get_buffer_size(inst, BUF_OUTPUT);
+ 
+-	if (f->fmt.pix_mp.colorspace != V4L2_COLORSPACE_DEFAULT &&
+-	    f->fmt.pix_mp.colorspace != V4L2_COLORSPACE_REC709)
+-		f->fmt.pix_mp.colorspace = V4L2_COLORSPACE_DEFAULT;
+-	fmt->fmt.pix_mp.colorspace = f->fmt.pix_mp.colorspace;
+-	fmt->fmt.pix_mp.xfer_func = f->fmt.pix_mp.xfer_func;
+-	fmt->fmt.pix_mp.ycbcr_enc = f->fmt.pix_mp.ycbcr_enc;
+-	fmt->fmt.pix_mp.quantization = f->fmt.pix_mp.quantization;
++	iris_venc_set_colorimetry(&fmt->fmt.pix_mp, &inst->fmt_src->fmt.pix_mp);
+ 
+ 	inst->buffers[BUF_OUTPUT].min_count = iris_vpu_buf_count(inst, BUF_OUTPUT);
+ 	inst->buffers[BUF_OUTPUT].size = fmt->fmt.pix_mp.plane_fmt[0].sizeimage;
+@@ -336,18 +364,12 @@ static int iris_venc_s_fmt_input(struct iris_inst *inst, struct v4l2_format *f)
+ 		fmt->fmt.pix_mp.plane_fmt[0].bytesperline = ALIGN(f->fmt.pix_mp.width, 128);
+ 	fmt->fmt.pix_mp.plane_fmt[0].sizeimage = iris_get_buffer_size(inst, BUF_INPUT);
+ 
+-	fmt->fmt.pix_mp.colorspace = f->fmt.pix_mp.colorspace;
+-	fmt->fmt.pix_mp.xfer_func = f->fmt.pix_mp.xfer_func;
+-	fmt->fmt.pix_mp.ycbcr_enc = f->fmt.pix_mp.ycbcr_enc;
+-	fmt->fmt.pix_mp.quantization = f->fmt.pix_mp.quantization;
++	iris_venc_set_colorimetry(&fmt->fmt.pix_mp, &f->fmt.pix_mp);
+ 
+ 	output_fmt = inst->fmt_dst;
+ 	output_fmt->fmt.pix_mp.width = fmt->fmt.pix_mp.width;
+ 	output_fmt->fmt.pix_mp.height = fmt->fmt.pix_mp.height;
+-	output_fmt->fmt.pix_mp.colorspace = fmt->fmt.pix_mp.colorspace;
+-	output_fmt->fmt.pix_mp.xfer_func = fmt->fmt.pix_mp.xfer_func;
+-	output_fmt->fmt.pix_mp.ycbcr_enc = fmt->fmt.pix_mp.ycbcr_enc;
+-	output_fmt->fmt.pix_mp.quantization = fmt->fmt.pix_mp.quantization;
++	iris_venc_set_colorimetry(&output_fmt->fmt.pix_mp, &fmt->fmt.pix_mp);
+ 
+ 	inst->buffers[BUF_INPUT].min_count = iris_vpu_buf_count(inst, BUF_INPUT);
+ 	inst->buffers[BUF_INPUT].size = fmt->fmt.pix_mp.plane_fmt[0].sizeimage;
