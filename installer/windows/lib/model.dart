@@ -53,14 +53,12 @@ class ShrinkInfo {
   /// 只有字母（"D"），界面上写"D盘"、"D:"用
   String get letter => drive.isEmpty ? 'C' : drive.substring(0, 1);
 
-  /// gk3w 怎么选的这个分区：arg / recent（用户最近在"磁盘管理"里压缩的）/ free（剩余空间最多）/ system
-  String get picked => r['picked'];
   int get maxShrinkMib => r.intOf('max_shrink_mib');
 
-  /// C 盘之后紧挨着的未分配空间：压缩出来的空间与它连成一片
+  /// 这个分区之后紧挨着的未分配空间：压缩出来的空间与它连成一片
   int get adjacentMib => r.intOf('adjacent_mib');
 
-  /// 压缩 C 盘最多能得到的连续未分配空间
+  /// 压缩这个分区最多能得到的连续未分配空间
   int get totalMib => maxShrinkMib + adjacentMib;
   int get freeMib => r.intOf('free_mib');
 
@@ -219,7 +217,7 @@ class LiveCd {
   /// 标签版本：标签去掉 live-installer-v，形如 0.2.0-for-v1.0.0-rc.5（每个 ROM 发布后各出一版，见 .github/workflows/installer-live.yml）
   String get id => r['id'];
 
-  /// 界面上显示的安装器版本（0.2.0）：系统文件另由用户选，"for"后面的 ROM 只决定 Live 系统用的内核
+  /// 界面上显示的安装器版本（0.2.0）：一并写入的系统文件是最新版本或本地文件，"for"后面的 ROM 只决定 Live 系统用的内核
   String get version => id.split('-for-').first;
   String get url => r['url'];
   String get sums => r['sums'];

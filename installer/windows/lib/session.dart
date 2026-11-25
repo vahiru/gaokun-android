@@ -164,12 +164,13 @@ class Session extends ChangeNotifier {
       mftMoving = false;
       notifyListeners();
     }
-    // 挪动过（哪怕中途失败）：分区已经变了，重新分析
-    if (mftResult != null) await analyzeShrink(manual: false);
+    // 挪动过（哪怕中途失败）：分区已经变了，重新分析同一个分区（不让 gk3w 另选：移动期间别的分区可能刚被分析过）
+    if (mftResult != null) await analyzeShrink(manual: false, drive: drive);
   }
 
-  /// [manual]：用户按的"分析"（清掉上一次移动的失败提示，让分析结果显示出来）；移动之后自动的那次不清
-  Future<void> analyzeShrink({bool manual = true}) async {
+  /// [manual]：用户按的"分析"（清掉上一次移动的失败提示，让分析结果显示出来）；移动之后自动的那次不清。
+  /// [drive]：分析这个分区（"D:"）；不给时由 gk3w 选
+  Future<void> analyzeShrink({bool manual = true, String? drive}) async {
     if (shrinkChecking || mftMoving) return;
     if (manual) mftErr = null;
     shrinkChecking = true;
@@ -177,7 +178,7 @@ class Session extends ChangeNotifier {
     shrinkErr = null;
     notifyListeners();
     try {
-      final r = await backend.run('shrink-info');
+      final r = await backend.run('shrink-info', [if (drive != null && drive.isNotEmpty) ...['--drive', drive]]);
       // 分析期间重新检查过也照样填上：分析读的是分区当时的状态，不依赖检查的结果
       final rec = r.ok ? r.first('SHRINK') : null;
       if (rec != null) {

@@ -93,7 +93,7 @@
 
 **修复：**本机没有可用的Android recovery。Android无法启动时，请用Live安装器重新安装Android，可以选择保留用户数据。
 
-**中国境内下载：**GitHub的下载服务器慢或者连不上时，系统镜像（`boot.img`、`super.img.zst`）可从镜像站：`https://ota.072172.xyz/install/<build>/<文件名>`下载，`<build>`即该版OTA包去掉`.zip`的文件名，详见[`docs/INSTALL.zh-CN.md`](docs/INSTALL.zh-CN.md#下载)。Windows安装器选择版本时，可以直接把下载源切换为"R2镜像源"。
+**中国境内下载：**GitHub的下载服务器慢或者连不上时，系统镜像（`boot.img`、`super.img.zst`）可从镜像站：`https://ota.072172.xyz/install/<build>/<文件名>`下载，`<build>`即该版OTA包去掉`.zip`的文件名，详见[`docs/INSTALL.zh-CN.md`](docs/INSTALL.zh-CN.md#下载)。使用Windows安装器时，可以直接把下载源切换为"R2镜像源"。
 
 **更新：**在"设置 → 系统 → 系统更新"界面进行OTA更新，OTA更新包会从上述镜像站下载。网络不畅时也可通过其他途径下载OTA包，在此界面使用"安装本地更新"功能安装放置在平板内部存储空间中的OTA包。
 

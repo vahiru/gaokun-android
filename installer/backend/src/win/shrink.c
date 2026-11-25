@@ -2,9 +2,11 @@
  *
  *   gk3w shrink-info [--drive X]
  *
- * 0. 分析哪个卷：给了 --drive 就是它。没给时跟着用户：在"磁盘管理"里对一个卷点"压缩卷"，Windows 做的就是下面
- *    第 1 步的分析，同样会记 259 号事件，所以取最近 30 天里最新的、卷在系统盘上的那条事件的卷；没有这样的事件时，
- *    取系统盘上剩余空间最多的 NTFS 卷（出厂时是很大的 D 盘）；都没有时取系统卷。
+ * 0. 分析哪个卷：给了 --drive 就是它。没给时取最近一次压缩分析所针对的卷：在"磁盘管理"里对一个卷点"压缩卷"，
+ *    Windows 做的就是下面第 1 步的分析，同样会记 259 号事件（这个命令自己的分析也会记），所以取 24 小时内最新的、
+ *    卷在系统盘上的那条事件的卷 —— 用户在"磁盘管理"里换一个卷试过之后，再分析就跟着换过去；只看 24 小时，
+ *    是为了不被很久以前的分析（包括旧版安装器的）一直定住。没有这样的事件时，取系统盘上剩余空间最多的 NTFS 卷
+ *    （出厂时是很大的 D 盘）；都没有时取系统卷。
  * 1. WMI 的 MSFT_Partition.GetSupportedSize（即 Get-PartitionSupportedSize）：分区最小能缩到多大。"磁盘管理"的
  *    "压缩卷"做的是同一个分析，大卷要几分钟。
  * 2. 这次分析会在"应用程序"日志里记一条 Microsoft-Windows-Defrag 的 259 号事件，写着最后一个不可移动的文件
@@ -13,7 +15,7 @@
  *
  * 输出 SHRINK drive=X: picked=arg|recent|free|system size_mib= min_mib= max_shrink_mib= adjacent_mib= free_mib=
  *   [file= flags= limit=file|space]：
- *   picked：卷是怎么选的（第 0 步：--drive、最近的 259 号事件、剩余空间最多、系统卷）；
+ *   picked：卷是怎么选的（第 0 步：--drive、最近的 259 号事件、剩余空间最多、系统卷），供日志排查；
  *   adjacent_mib：分区之后紧挨着的未分配空间（SizeMax − Size），压缩出来的空间与它连成一片；
  *   limit：这个文件的末尾（最后一个簇 × 簇大小）离分区最小尺寸不到 1 GiB 时是 file（压缩停在它上面），
  *     否则是 space（最小尺寸由已用空间决定：卷太满，挪开这个文件也没用）。
@@ -212,10 +214,10 @@ int gk3w_cmd_shrink_info(int argc, wchar_t **argv)
     if (da) {
         drive = towupper(da[0]);
     } else {
-        /* 第 0 步（文件头）：用户最近在"磁盘管理"里压缩的卷 → 剩余空间最多的卷 → 系统卷 */
+        /* 第 0 步（文件头）：最近一次压缩分析的卷 → 剩余空间最多的卷 → 系统卷 */
         long sysdisk = gk3w_system_disk_number();
         recent_arg ra = {sysdisk, 0};
-        if (sysdisk >= 0 && !scan_259(30ull * 24 * 3600 * 1000, take_recent, &ra)) {
+        if (sysdisk >= 0 && !scan_259(24ull * 3600 * 1000, take_recent, &ra)) {
             drive = ra.drive;
             picked = "recent";
         } else if (sysdisk >= 0 && (drive = freest_drive(sysdisk))) {

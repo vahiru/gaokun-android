@@ -67,7 +67,7 @@ Each time a system version is released, a Live installer carrying that version's
 
 ### Downloading the system installation files from the mirror
 
-If GitHub is slow or unreachable (for example in mainland China), the system installation files can be downloaded from a mirror. The mirror currently provides only the system installation files, not the installers. When choosing a release in the Windows installer, switch the source to "R2 mirror". To download by hand, use:
+If GitHub is slow or unreachable (for example in mainland China), the system installation files can be downloaded from a mirror. The mirror currently provides only the system installation files, not the installers. In the Windows installer, switch the download source to "R2 mirror". To download by hand, use:
 
 ```
 https://ota.072172.xyz/install/<build>/<file name>
@@ -95,7 +95,7 @@ When Android is installed, select "Manage" on the environment check page, then "
 
 ### Creating installation media
 
-"Create installation media" at the bottom of the left menu writes the Live installer and the system installation files of the selected release to:
+"Create installation media" at the bottom of the left menu writes the Live installer and the system installation files to:
 
 - **A USB drive**: the whole drive is erased first. The finished drive can be used on any MateBook E Go.
 - **The internal disk**: an installer partition of about 2 GiB (GK3LIVE) is created at the end of an unallocated area on the system disk, and `gaokun3 installer` is added to the boot menu. If Android is not installed yet, the boot manager (systemd-boot) is installed to the EFI system partition and the original default boot file (BOOTAA64.EFI) is backed up, with Windows remaining the default. Whenever BitLocker is enabled on the system disk (whether or not Android is already installed), verifying the recovery key is required before writing or deleting the installer partition. Other partitions and their data are not affected.

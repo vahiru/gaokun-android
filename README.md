@@ -93,7 +93,7 @@ Default partition layout after erasing the entire disk:
 
 **Repair:** this machine has no working Android recovery. If Android does not start, reinstall Android with the Live installer; you can keep your user data.
 
-**Downloads from mainland China:** when GitHub's download servers are slow or unreachable, the system images (`boot.img`, `super.img.zst`) can be downloaded from a mirror: `https://ota.072172.xyz/install/<build>/<file name>`, where `<build>` is the release's OTA package file name without `.zip`; see [`docs/INSTALL.md`](docs/INSTALL.md#downloads). In the Windows installer, you can switch the download source to "R2 mirror" when choosing a release.
+**Downloads from mainland China:** when GitHub's download servers are slow or unreachable, the system images (`boot.img`, `super.img.zst`) can be downloaded from a mirror: `https://ota.072172.xyz/install/<build>/<file name>`, where `<build>` is the release's OTA package file name without `.zip`; see [`docs/INSTALL.md`](docs/INSTALL.md#downloads). In the Windows installer, you can switch the download source to "R2 mirror".
 
 **Updating:** OTA updates are installed under Settings → System → System update; the OTA package is downloaded from the mirror above. If the network is poor, you can also get the OTA package another way, put it in the tablet's internal storage and install it with *Install local update* on the same screen.
 

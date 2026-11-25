@@ -168,7 +168,9 @@ int gk3w_cmd_mft_move(int argc, wchar_t **argv)
     sysdrive = GetSystemWindowsDirectoryW(win, MAX_PATH) && win[1] == L':' ? towupper(win[0]) : L'C';
     drive = da ? towupper(da[0]) : sysdrive;
     /* 改动系统盘上的卷（系统卷或 D 盘这类数据卷）只在这台平板上做；--drive 指别的盘上的卷用于测试 */
-    if (execute && (drive == sysdrive || (gk3w_system_disk_number() >= 0 && gk3w_drive_disk_number(drive) == gk3w_system_disk_number())) &&
+    /* 查不出卷在哪块盘上、或查不出系统盘时，也当作系统盘上的卷 */
+    if (execute && (drive == sysdrive || gk3w_system_disk_number() < 0 || gk3w_drive_disk_number(drive) < 0 ||
+                    gk3w_drive_disk_number(drive) == gk3w_system_disk_number()) &&
         !gk3w_model_ok_now())
         return gk3w_err(GK3W_TOUCHED_NO, "wrong-model", "this computer is not a Huawei MateBook E Go (gaokun3); not moving its MFT (disk not touched)", 0);
     if (enable_manage_volume())

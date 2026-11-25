@@ -233,6 +233,8 @@ void main() {
     await waitFor(t, find.text(l.mftStuck('C')), tries: 400);
     expect(rec.calls.singleWhere((c) => c.first == 'mft-move'), ['mft-move', '--execute', '--drive', 'C:']);
     expect(rec.calls.where((c) => c.first == 'shrink-info'), hasLength(2));
+    // 移动之后的自动重新分析固定分析同一个分区，不让 gk3w 另选
+    expect(rec.calls.where((c) => c.first == 'shrink-info').last, ['shrink-info', '--drive', 'C:']);
     expect(find.text(l.mftMoved('78 MiB', '755 MiB', '677 MiB', 'C')), findsOneWidget);
     expect(find.text(l.mftMoveBtn), findsNothing);
     final busy = [for (final c in window) if (c.method == 'setBusy') c.arguments as Map];
