@@ -1,0 +1,91 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] v4l2_codec2: free the encoder instance slot when the
+ component is released
+
+V4L2EncodeComponent counts its instances and refuses to create more than
+ro.vendor.v4l2_codec2.encode_concurrent_instances. MediaCodec turns the
+refusal (NO_MEMORY) into a request to the resource manager to reclaim a
+hardware codec from a lower-priority client, then retries the
+allocation. The count only dropped in the destructor, but the Codec2 HAL
+keeps the component object until the client lets go of its last
+reference, and CCodec drops that reference in a message it posts after
+the release has completed. The reclaimed component can therefore still
+be alive when MediaCodec retries right after the reclaim returned. The
+retry then fails although the hardware encoder is free, and after two
+reclaims the client falls back to a software encoder, or fails to start
+where there is none.
+
+Drop the count in release() as well, once per component. release()
+stops the component, which destroys the V4L2 encoder on the encoder
+thread before it returns. That closes the device, and with it the driver
+session, as nothing else holds the device file: both queues use DMABUF
+memory, so nothing is mapped, and the poll thread has been stopped. A
+released component cannot be started again. The count is still taken
+when the component is created, so the limit keeps showing up as
+NO_MEMORY at create time, which is what reclaim and fallback rely on.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ v4l2/V4L2EncodeComponent.cpp                  | 20 ++++++++++++++++++-
+ .../v4l2_codec2/v4l2/V4L2EncodeComponent.h    |  8 ++++++++
+ 2 files changed, 27 insertions(+), 1 deletion(-)
+
+diff --git a/v4l2/V4L2EncodeComponent.cpp b/v4l2/V4L2EncodeComponent.cpp
+index 07a6f63..e58f813 100644
+--- a/v4l2/V4L2EncodeComponent.cpp
++++ b/v4l2/V4L2EncodeComponent.cpp
+@@ -52,7 +52,25 @@ V4L2EncodeComponent::V4L2EncodeComponent(C2String name, c2_node_id_t id,
+ 
+ V4L2EncodeComponent::~V4L2EncodeComponent() {
+     ALOGV("%s():", __func__);
+-    sConcurrentInstances.fetch_sub(1, std::memory_order_relaxed);
++    releaseInstance();
++}
++
++c2_status_t V4L2EncodeComponent::release() {
++    ALOGV("%s()", __func__);
++
++    // Releasing stops the component, which destroys the V4L2 encoder and closes the device, so the
++    // hardware encoder is free again when this returns. The client may keep the released component
++    // alive for a while: a codec reclaimed by the resource manager is only destroyed after the
++    // reclaim returned, and the new client retries at once. Leave room for it now.
++    c2_status_t status = EncodeComponent::release();
++    releaseInstance();
++    return status;
++}
++
++void V4L2EncodeComponent::releaseInstance() {
++    if (!mInstanceReleased.exchange(true)) {
++        sConcurrentInstances.fetch_sub(1, std::memory_order_relaxed);
++    }
+ }
+ 
+ bool V4L2EncodeComponent::initializeEncoder() {
+diff --git a/v4l2/include/v4l2_codec2/v4l2/V4L2EncodeComponent.h b/v4l2/include/v4l2_codec2/v4l2/V4L2EncodeComponent.h
+index 79d99d0..e2f3edc 100644
+--- a/v4l2/include/v4l2_codec2/v4l2/V4L2EncodeComponent.h
++++ b/v4l2/include/v4l2_codec2/v4l2/V4L2EncodeComponent.h
+@@ -18,6 +18,8 @@ public:
+ 
+     virtual ~V4L2EncodeComponent() override;
+ 
++    c2_status_t release() override;
++
+ protected:
+     bool initializeEncoder() override;
+ 
+@@ -26,6 +28,12 @@ private:
+     static std::atomic<int32_t> sConcurrentInstances;
+ 
+     V4L2EncodeComponent(C2String name, c2_node_id_t id, std::shared_ptr<EncodeInterface> interface);
++
++    // Stop counting this component as a concurrent instance, if not done yet.
++    void releaseInstance();
++
++    // Whether this component no longer counts as a concurrent instance.
++    std::atomic<bool> mInstanceReleased{false};
+ };
+ 
+ }  // namespace android

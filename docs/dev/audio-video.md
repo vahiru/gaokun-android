@@ -161,7 +161,7 @@ TX_DEC0 Volume = 102, TX_DEC1 Volume = 102
 | `crdroid-tree-fixes.py` | `external/v4l2_codec2` | `V4L2Device::getDeviceInfos()`原本写死只扫描`/dev/video0..9`；启用相机`camss`后VFE占用了`video0..31`，解码器被推到`video32`，导致硬解静默消失。将扫描上界扩大至64 |
 | `patches/android/v4l2-codec2/0001` | `external/v4l2_codec2` | HEVC码流的首个配置缓冲（VPS/SPS/PPS）合并进第一帧DMA-BUF（不小于输入缓冲区），避免固件因缺少`CODECCONFIG`标志在`SOURCE_CHANGE`前等待输出缓冲而死锁 |
 | `patches/kernel/iris/0001` | `drivers/media/platform/qcom/iris/` | 引入`core->hw_powered`标志，防止解码器下电后残余中断触发未供电寄存器读取导致内核崩溃 |
-| `patches/kernel/iris/0003` | `drivers/media/platform/qcom/iris/` | 允许`v4l2_codec2`在首个`V4L2_EVENT_SOURCE_CHANGE`事件到达前调用`VIDIOC_G_FMT(CAPTURE)`，兼容Android Codec2初始化顺序 |
+| `patches/kernel/iris/0003` | `drivers/media/platform/qcom/iris/` | 客户端订阅了`V4L2_EVENT_SOURCE_CHANGE`、事件还没到时，让`VIDIOC_G_FMT(CAPTURE)`返回`-EINVAL`，与venus相同（参数`venus_compat_gfmt`，默认`Y`）。`v4l2_codec2`在启动时据此不建初始输出队列（`crdroid-tree-fixes.py`修补5只记一行INFO）。设为`N`时，`v4l2_codec2`会在码流头之前按128x128开启CAPTURE队列，gen1固件解H.264与HEVC时随即报致命错误（`sys error`，类型1），所以必须保持`Y` |
 | `patches/kernel/iris/0005` | `drivers/media/platform/qcom/iris/` | 在非动态分辨率切换（非DRC）的`CAPTURE streamoff`路径发送`HFI_FLUSH_ALL`而非`HFI_FLUSH_OUTPUT`，修复视频拖动进度条（seek）或关闭播放器时固件等待`HFI_FLUSH_OUTPUT`响应超时导致的卡死 |
 | `patches/kernel/dts/0026` | `arch/arm64/boot/dts/qcom/sc8280xp.dtsi` | iris加载固件时把`0x0..0x25800000`作为视频内容保护范围交给TZ，只有安全会话可以使用。`iris`主域（SID `0x2a00`）的IOVA从高往低分配，在`v4l2-codec2/0007`之前，每路1080p解码约占260–310 MiB，1440p约占735 MiB（之后分别约为150 MiB和290 MiB），同时打开的会话较多时，普通会话的缓冲区会被映射进这个范围，解码器一访问，整板即复位，内核不留任何记录。补丁增加一个只带`iommu-addresses`的reserved-memory节点，并在`iris`的`memory-region`中引用（固件区域须排在第一个），使该范围在主域中预留。地址空间不足时，映射失败，对应会话的`VIDIOC_QBUF`或`VIDIOC_STREAMON`返回错误，该路解码失败，不再复位。CB15（编码器ARP，见下文）有独立的页表，不受影响 |
 | `patches/kernel/iris/0019` | `drivers/media/platform/qcom/iris/` | 解码器原来不论分辨率，都按4096x2304的最坏情况确定输入（码流）缓冲区大小（H.264/HEVC约6.75 MiB，VP9约13.5 MiB），并忽略客户端在`S_FMT`中设置的值，因此`v4l2_codec2`只能为每路会话分配16个16 MiB的输入缓冲区。补丁改为采用客户端设置的值，下限为分辨率所需的大小（4:2:0半帧，VP9为整帧，不低于720p），上限为原来的最坏值；客户端填0时仍为最坏值。`buf_prepare`改为按`S_FMT`确定的大小检查输入缓冲区，码流中途提高分辨率后，原有的输入缓冲区仍可使用 |
@@ -182,6 +182,9 @@ TX_DEC0 Volume = 102, TX_DEC1 Volume = 102
 | `patches/android/v4l2-codec2/0010` | `external/v4l2_codec2` | `flush()`把仍排在驱动里的输出帧移入复用队列，再逐个投递任务重新排队。若这期间来了分辨率或位深变化（例如flush后立即seek到位深不同的部分），输出队列按新格式重新分配，已投递的旧帧却拿到新队列的缓冲编号、带着按旧格式分配的缓冲排进去：8位切到10位时NV12缓冲小于P010平面，`VIDIOC_QBUF`失败（videobuf2：`failed to attach dmabuf`），组件报错；反方向时P010缓冲会被当成NV12写入。补丁给输出队列的分配计数，丢弃早于最近一次分配取出的复用帧，块回到原来的缓冲池 |
 | `patches/android/v4l2-codec2/0011` | `external/v4l2_codec2` | 框架把`C2StreamPictureSizeInfo::output`放进输出格式；对使用输出缓冲数组的客户端（同步模式下的NDK客户端，或调用`getOutputBuffers()`的客户端），按它的宽高分配复制帧用的缓冲。组件原来在分辨率变化后不更新画面尺寸，分辨率变大后框架无法复制（`tried 5 realloc and failed`），解码报错。补丁在新尺寸的第一帧把画面尺寸写回接口并放进该帧的`configUpdate`，与软件解码器相同 |
 | `patches/android/v4l2-codec2/0012` | `external/v4l2_codec2` | 框架只在解码器的输出像素格式允许`HAL_PIXEL_FORMAT_YCBCR_P010`时，才在颜色格式里列出`COLOR_FormatYUVP010`。HEVC与VP9解码器对HEVC Main 10与VP9 Profile 2输出P010，但原来没有这个参数。补丁按软件VP9/AV1解码器的方式声明`YCBCR_420_888`、P010（支持10位档次且gralloc能分配P010时）与`IMPLEMENTATION_DEFINED`；解码器仍按码流决定输出NV12还是P010 |
+| `patches/android/v4l2-codec2/0015` | `external/v4l2_codec2` | 轮询线程在`poll()`只返回`POLLERR`时原来立即重新轮询缓冲。两个队列都没有排队的缓冲时，`v4l2_m2m_poll()`马上返回`POLLERR`，于是每次解码器启动到第一次送入码流之间（3–40 ms）空转上万次，vb2队列出错后则一直空转，错误也传不到解码器。补丁在这种情况下只投递一次回调（真正的队列错误由`VIDIOC_DQBUF`返回`-EIO`暴露），停止轮询缓冲，直到下一次`VIDIOC_QBUF`或`VIDIOC_STREAMON`。编码器共用这个轮询线程 |
+| `patches/android/v4l2-codec2/0016` | `external/v4l2_codec2` | 事件回调投递之后、解码器线程把事件取走之前，`poll()`一直返回`POLLPRI`，轮询线程反复投递回调，多出来的回调`VIDIOC_DQEVENT`拿到`ENOENT`。补丁在事件回调执行期间不轮询`POLLPRI`，回调执行完再恢复 |
+| `patches/android/v4l2-codec2/0017` | `external/v4l2_codec2` | 解码器进入错误状态后，`serviceDeviceTask()`不再处理设备，没有取走的事件让`poll()`一直返回`POLLPRI`，轮询线程与解码器线程合计占用接近两个CPU核心，直到解码器被销毁。补丁在`onError()`中停止轮询 |
 
 ### 3. 硬件视频编码
 
@@ -210,6 +213,8 @@ TX_DEC0 Volume = 102, TX_DEC1 Volume = 102
 - **`patches/android/v4l2-codec2/0006`**：单平面输入（NV12而不是NV12M）送缓冲时，长度改按驱动要求的`sizeimage`给。原来按一帧的数据量（步长×按32对齐的高×1.5）给，而iris把整帧大小补齐到4 KiB的倍数。步长是128的奇数倍、对齐后的高是32的奇数倍时（640x480、800x480、854x480、352x288、120x160等），长度差2048字节，第一次`VIDIOC_QBUF`就被videobuf2拒绝，组件随即报错；打开`videobuf2_common`的`debug`参数后，内核日志里能看到`invalid dmabuf length`。多平面分支本来就用驱动给的大小。
 - **`patches/android/v4l2-codec2/0008`**：编码器格式转换器的帧改按驱动格式中的高分配。需要转换的输入（录屏送来的RGB、应用用GL渲染后送入的Surface）由组件逐帧转成NV12，转换用的帧按`codedSize()`分配，这个尺寸原来由`V4L2Device::allocatedSizeFromV4L2Format()`从`sizeimage`反推。iris把`sizeimage`补齐到4 KiB的倍数后，640x480反推成640x482，minigbm把482行对齐到512行，色度平面放在其后；驱动按单平面NV12的布局，在`bytesperline`×高（640×480）处读色度。每帧的色度因此取自写入位置之上32行，画面顶部64行变绿，整幅颜色下移。步长是128的奇数倍、对齐后的高是32的奇数倍时一帧比整页少2048字节，只有步长不超过1152时这2048字节才够一行，反推出的高才偏大，所以受影响的是640x480、800x480、854x480、352x288、120x160这类尺寸；1920x1440等更宽的尺寸虽然也补齐，反推出的高仍然准确。字节缓冲输入和NV12的Surface不经转换，不受影响。补丁只对单平面格式改用格式中的高，多平面格式的各平面本来就分别带偏移。
 - **`patches/android/v4l2-codec2/0009`**：编码器的宏块码率控制（`MB_RC_ENABLE`）与GOP长度改为各设一次。原来两者放在同一次`VIDIOC_S_EXT_CTRLS`里，iris没有`MB_RC_ENABLE`，整次调用被拒，GOP长度停在驱动默认的30，固件在组件请求的IDR之间每30帧再插一个I帧（录屏120 fps、2 s间隔时，这些I帧约占码流的六分之一）。现在先查GOP长度的取值范围：最小值为0时设为0，驱动不接受0或最小值大于0时改设它支持的最大值（控件框架会把超出范围的整数夹到范围内而不报错，直接设0在最小值为1的驱动上就成了每帧一个关键帧）；关键帧间隔为负时只在第一帧和请求时出关键帧。必须与`patches/kernel/iris/0021`一起使用。
+- **`patches/android/v4l2-codec2/0013`**：固件不带码流地返回一帧（丢帧、数据损坏，或长度为0），iris给出带`V4L2_BUF_FLAG_ERROR`或长度为0的缓冲，组件原来直接丢弃它。工作项按顺序完成，每一项都要等到输出，于是会话从这一帧起一帧不出，也不报错。没有B帧时输出按输入顺序返回，补丁把最早一个还在等待输出的工作项以`FLAG_DROP_FRAME`完成（与解码组件相同），连续丢30帧（30 fps下约1 s）时报错，让应用可以重建编码器或换用软编。排空时末尾带`V4L2_BUF_FLAG_LAST`的空缓冲仍只结束排空。
+- **`patches/android/v4l2-codec2/0014`**：编码器实例计数原来在组件析构时才减少，而框架在`release()`返回后还会持有组件一段时间；资源管理器收回编码器后立即重试时，可能因为旧组件对象还没析构而再次撞到上限。补丁在`release()`关闭设备之后减少计数，并保证只减一次。
 
 #### 设备配置
 
@@ -224,4 +229,4 @@ TX_DEC0 Volume = 102, TX_DEC1 Volume = 102
 - **没有HEVC Main 10和HDR编码**：输入只有8位NV12。
 - **系统录屏**：系统录屏按30 fps申报，横屏录2560x1600，竖屏按解码器的能力缩到1360x2176（竖屏尚未经实测），默认用硬件H.264编码器，打开“HEVC编码”时用硬件HEVC编码器，不会换用软编。输入是可变帧率，滑动画面时可有接近120 fps的突发。`adb shell screenrecord`不带`--size`时会改用1280x720重试。
 - **很小的尺寸**：宽或高按驱动的对齐（128x32）之后仍小于128时（例如160x90），内核在申请缓冲时拒绝（`current session not supported`），应用在开始编码时拿到错误。原始尺寸小于128、对齐后不小于128的（例如160x120、100x100），固件能正常编码，并在SPS里写明裁剪。
-- **唤醒后偶发一次无输出**：休眠唤醒后紧接着编码，偶尔会有一次两个编码器都一帧不出：固件把每一帧都不带码流地返回，内核记录`encoder frame without bitstream`告警（`patches/kernel/iris/0025`），随后的编码自行恢复。原因不明。
+- **唤醒后偶发一次无输出**：休眠唤醒后紧接着编码，偶尔会有一次固件把每一帧都不带码流地返回，持续二三十秒，随后的编码自行恢复。内核记录`encoder frame without bitstream`告警（`patches/kernel/iris/0025`），组件按丢帧处理，连续丢30帧时向应用报错（`patches/android/v4l2-codec2/0013`）。原因不明。

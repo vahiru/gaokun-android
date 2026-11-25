@@ -1,0 +1,198 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] v4l2_codec2: do not poll for an event that is being handled
+
+A V4L2 event stays pending until the client dequeues it with
+VIDIOC_DQEVENT, and poll() returns POLLPRI until then.
+V4L2DevicePoller posts the client's callback for the event and calls
+poll() again at once, so until the client's sequence gets to run that
+callback every poll() returns immediately and posts one more callback.
+The extra callbacks find no event (VIDIOC_DQEVENT fails with ENOENT).
+This happens at every SOURCE_CHANGE event, the first one included.
+
+Leave POLLPRI out of the poll set from the moment a callback for an
+event is posted until that callback has run, then wake the poll thread
+to watch for the next event. Buffers are still polled meanwhile. The
+client is expected to dequeue the event in the callback; if it does
+not, poll() returns POLLPRI again after the callback.
+
+The callbacks are now bound to a weak pointer of the poller that
+stopPolling() invalidates, so a callback posted before polling stopped
+no longer runs after it, and the event gate is reset with polling.
+startPolling() polls the device again, so an event or a buffer that
+such a callback would have handled is reported again.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ v4l2/V4L2Device.cpp                           | 10 +++++--
+ v4l2/V4L2DevicePoller.cpp                     | 29 +++++++++++++++++--
+ v4l2/include/v4l2_codec2/v4l2/V4L2Device.h    |  8 ++---
+ .../v4l2_codec2/v4l2/V4L2DevicePoller.h       | 15 +++++++++-
+ 4 files changed, 52 insertions(+), 10 deletions(-)
+
+diff --git a/v4l2/V4L2Device.cpp b/v4l2/V4L2Device.cpp
+index 187d3c3..3cf10cf 100644
+--- a/v4l2/V4L2Device.cpp
++++ b/v4l2/V4L2Device.cpp
+@@ -1198,8 +1198,8 @@ int V4L2Device::ioctl(int request, void* arg) {
+     return HANDLE_EINTR(::ioctl(mDeviceFd.get(), request, arg));
+ }
+ 
+-bool V4L2Device::poll(bool pollDevice, bool pollBuffers, bool* eventPending, bool* buffersPending,
+-                      bool* errorPending) {
++bool V4L2Device::poll(bool pollDevice, bool pollEvents, bool pollBuffers, bool* eventPending,
++                      bool* buffersPending, bool* errorPending) {
+     struct pollfd pollfds[2];
+     nfds_t nfds;
+     int pollfd = -1;
+@@ -1211,7 +1211,11 @@ bool V4L2Device::poll(bool pollDevice, bool pollBuffers, bool* eventPending, boo
+     if (pollDevice) {
+         ALOGV("adding device fd to poll() set");
+         pollfds[nfds].fd = mDeviceFd.get();
+-        pollfds[nfds].events = POLLERR | POLLPRI;
++        pollfds[nfds].events = POLLERR;
++        if (pollEvents) {
++            ALOGV("will poll events");
++            pollfds[nfds].events |= POLLPRI;
++        }
+         if (pollBuffers) {
+             ALOGV("will poll buffers");
+             pollfds[nfds].events |= POLLIN | POLLOUT;
+diff --git a/v4l2/V4L2DevicePoller.cpp b/v4l2/V4L2DevicePoller.cpp
+index e3a7990..4b06ff2 100644
+--- a/v4l2/V4L2DevicePoller.cpp
++++ b/v4l2/V4L2DevicePoller.cpp
+@@ -48,8 +48,10 @@ bool V4L2DevicePoller::startPolling(EventCallback eventCallback,
+     }
+ 
+     mEventCallback = std::move(eventCallback);
++    mWeakThis = mWeakThisFactory.GetWeakPtr();
+ 
+     mPollBuffers.store(false);
++    mEventInFlight.store(false);
+     mStopPolling.store(false);
+     mPollThread.task_runner()->PostTask(
+             FROM_HERE, base::BindOnce(&V4L2DevicePoller::devicePollTask, base::Unretained(this)));
+@@ -77,6 +79,7 @@ bool V4L2DevicePoller::stopPolling() {
+ 
+     ALOGV("Stop device poll thread");
+     mPollThread.Stop();
++    mWeakThisFactory.InvalidateWeakPtrs();
+ 
+     if (!mDevice->clearDevicePollInterrupt()) {
+         ALOGE("Failed to clear interrupting device poll.");
+@@ -127,7 +130,8 @@ void V4L2DevicePoller::devicePollTask() {
+ 
+         ALOGV("Polling device.");
+         bool poll_buffers = mPollBuffers.exchange(false);
+-        if (!mDevice->poll(true, poll_buffers, &event_pending, &buffers_pending,
++        bool poll_events = !mEventInFlight.load();
++        if (!mDevice->poll(true, poll_events, poll_buffers, &event_pending, &buffers_pending,
+                            &error_pending)) {
+             ALOGE("An error occurred while polling, calling error callback");
+             mClientTaskTunner->PostTask(FROM_HERE, mErrorCallback);
+@@ -161,9 +165,30 @@ void V4L2DevicePoller::devicePollTask() {
+             ALOGV("Poll returned, calling event callback. event_pending=%d buffers_pending=%d "
+                   "error_pending=%d",
+                   event_pending, buffers_pending, error_pending);
+-            mClientTaskTunner->PostTask(FROM_HERE, base::Bind(mEventCallback, event_pending));
++            // The event stays pending until the client dequeues it in the callback. Polling for
++            // it until then would only post more callbacks.
++            if (event_pending) mEventInFlight.store(true);
++            mClientTaskTunner->PostTask(FROM_HERE,
++                                        base::BindOnce(&V4L2DevicePoller::runEventCallback,
++                                                       mWeakThis, event_pending));
+         }
+     }
+ }
+ 
++void V4L2DevicePoller::runEventCallback(bool event) {
++    ALOG_ASSERT(mClientTaskTunner->RunsTasksInCurrentSequence());
++
++    // The callback may stop polling, which invalidates |weakThis|.
++    base::WeakPtr<V4L2DevicePoller> weakThis = mWeakThisFactory.GetWeakPtr();
++    EventCallback callback = mEventCallback;
++    callback.Run(event);
++    if (!weakThis || !event) return;
++
++    // The client has dequeued the event, or does not want it: poll for the next one.
++    mEventInFlight.store(false);
++    if (!mDevice->setDevicePollInterrupt()) {
++        ALOGE("Failed to interrupt device poll.");
++    }
++}
++
+ }  // namespace android
+diff --git a/v4l2/include/v4l2_codec2/v4l2/V4L2Device.h b/v4l2/include/v4l2_codec2/v4l2/V4L2Device.h
+index d1d0454..850653b 100644
+--- a/v4l2/include/v4l2_codec2/v4l2/V4L2Device.h
++++ b/v4l2/include/v4l2_codec2/v4l2/V4L2Device.h
+@@ -433,16 +433,16 @@ public:
+ 
+     // This method sleeps until either:
+     // - SetDevicePollInterrupt() is called (on another thread),
+-    // - |pollDevice| is true, and there is new event from the device has arrived;
+-    //   in this case |*eventPending| will be set to true.
++    // - |pollDevice| and |pollEvents| are true, and there is new event from the device has
++    //   arrived; in this case |*eventPending| will be set to true.
+     // - |pollBuffers| is true and |pollDevice| is true and there is new data to
+     //   be read from the device; in this case |*buffersPending| will be set to true.
+     // - |pollDevice| is true and the device returned POLLERR; in this case |*errorPending| will be
+     //   set to true. With |pollBuffers|, a mem2mem device returns POLLERR at once when each of its
+     //   queues is not streaming, in the error state or without a queued buffer.
+     // Returns false on error, true otherwise. This method should be called from a separate thread.
+-    bool poll(bool pollDevice, bool pollBuffers, bool* eventPending, bool* buffersPending,
+-              bool* errorPending);
++    bool poll(bool pollDevice, bool pollEvents, bool pollBuffers, bool* eventPending,
++              bool* buffersPending, bool* errorPending);
+ 
+     // These methods are used to interrupt the thread sleeping on poll() and force it to return
+     // regardless of device state, which is usually when the client is no longer interested in what
+diff --git a/v4l2/include/v4l2_codec2/v4l2/V4L2DevicePoller.h b/v4l2/include/v4l2_codec2/v4l2/V4L2DevicePoller.h
+index 7081e15..871e1bc 100644
+--- a/v4l2/include/v4l2_codec2/v4l2/V4L2DevicePoller.h
++++ b/v4l2/include/v4l2_codec2/v4l2/V4L2DevicePoller.h
+@@ -9,6 +9,7 @@
+ #include <atomic>
+ 
+ #include <base/callback_forward.h>
++#include <base/memory/weak_ptr.h>
+ #include <base/sequence_checker.h>
+ #include <base/sequenced_task_runner.h>
+ #include <base/synchronization/waitable_event.h>
+@@ -50,7 +51,8 @@ public:
+     // If an error occurs during polling, |mErrorCallback| will be posted on the caller's sequence.
+     bool startPolling(EventCallback eventCallback, ::base::RepeatingClosure errorCallback);
+     // Stop polling and stop the thread. The poller won't post any new event to the caller's
+-    // sequence after this method has returned.
++    // sequence after this method has returned, and event callbacks that were posted before and
++    // have not run yet are dropped.
+     bool stopPolling();
+     // Returns true if currently polling, false otherwise.
+     bool isPolling() const;
+@@ -65,6 +67,9 @@ private:
+     // Perform a poll() on |mDevice| and post either |mEventCallback| or |mErrorCallback| on the
+     // client's sequence when poll() returns.
+     void devicePollTask();
++    // Run |mEventCallback| on the client's sequence. After a callback for a V4L2 event, let the
++    // poll thread watch for events again.
++    void runEventCallback(bool event);
+ 
+     // V4L2 device we are polling.
+     V4L2Device* const mDevice;
+@@ -81,6 +86,14 @@ private:
+     std::atomic_bool mStopPolling;
+     // Set to true when we wish poll to await for QBUF/DQBUF readiness
+     std::atomic_bool mPollBuffers;
++    // Set while a callback for a pending V4L2 event has been posted and has not run yet. poll()
++    // returns POLLPRI until the client dequeues the event, so events are not polled meanwhile.
++    std::atomic_bool mEventInFlight{false};
++
++    // Bound to the event callbacks posted to the client's sequence, and invalidated when polling
++    // stops.
++    ::base::WeakPtr<V4L2DevicePoller> mWeakThis;
++    ::base::WeakPtrFactory<V4L2DevicePoller> mWeakThisFactory{this};
+ };
+ 
+ }  // namespace android

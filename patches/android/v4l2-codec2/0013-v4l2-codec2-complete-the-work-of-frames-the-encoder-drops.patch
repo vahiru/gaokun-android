@@ -1,0 +1,224 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] v4l2_codec2: complete the work of frames the encoder drops
+
+V4L2Encoder passes a CAPTURE buffer to the component only when it holds
+data. It drops empty buffers silently and never looks at
+V4L2_BUF_FLAG_ERROR. EncodeComponent reports work items strictly in
+order and waits for a bitstream buffer for every work item that has an
+input frame, so a single frame the device returns no bitstream for holds
+up every later work item. The codec then takes no more input and
+produces no more output, and no error is reported: CCodec has no
+deadline on queued work. The Qualcomm iris driver returns such buffers
+when the firmware drops a frame (DROP_FRAME and DATACORRUPT become an
+empty buffer with V4L2_BUF_FLAG_ERROR) or returns an empty one.
+
+Pass a buffer without data, or with V4L2_BUF_FLAG_ERROR, to the
+component as a dropped frame, unless it is the empty last buffer that
+ends a drain. The encoder runs without B-frames, so bitstream buffers
+come back in input order: the component marks the oldest work item
+still waiting for output with C2FrameData::FLAG_DROP_FRAME, as
+DecodeComponent does for frames it does not output, and completes it
+without a buffer. The client gets one output buffer fewer. The timestamp
+cannot be used to find the work item, as iris returns these buffers with
+a zero timestamp. CSD is still taken from the first buffer with data.
+When the frame of the EOS work item was dropped, the end of the drain
+keeps the drop mark, so that work item completes too.
+
+The encoder is set up without frame skipping and is not expected to drop
+frames at all. If it drops 30 in a row, one second at the usual 30 fps,
+the component reports C2_CORRUPTED, so the client can restart the codec
+or fall back instead of waiting for output forever. A few dropped frames
+still give a usable stream.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ components/EncodeComponent.cpp                | 58 +++++++++++++++++--
+ .../v4l2_codec2/components/EncodeComponent.h  |  2 +
+ .../v4l2_codec2/components/VideoEncoder.h     |  3 +
+ v4l2/V4L2Device.cpp                           |  7 +++
+ v4l2/V4L2Encoder.cpp                          | 13 ++++-
+ v4l2/include/v4l2_codec2/v4l2/V4L2Device.h    |  2 +
+ 6 files changed, 80 insertions(+), 5 deletions(-)
+
+diff --git a/components/EncodeComponent.cpp b/components/EncodeComponent.cpp
+index e25f33d..e64b7be 100644
+--- a/components/EncodeComponent.cpp
++++ b/components/EncodeComponent.cpp
+@@ -38,6 +38,18 @@ using android::hardware::graphics::common::V1_0::BufferUsage;
+ namespace android {
+ 
+ namespace {
++// The number of frames in a row the encoder may drop before the component reports an error. Frame
++// skipping is not enabled, so the encoder is not expected to drop any frame. After one second of
++// input at the usual 30 fps without a single encoded frame the encoder is assumed to be broken, and
++// the client is told so it can recover instead of waiting for output forever.
++constexpr uint32_t kMaxConsecutiveDroppedFrames = 30;
++
++// Whether |work| had a frame to encode and is still waiting for its bitstream.
++bool isWaitingForOutput(const C2Work& work) {
++    return !work.input.buffers.empty() && work.worklets.front()->output.buffers.empty() &&
++           !(work.worklets.front()->output.flags & C2FrameData::FLAG_DROP_FRAME);
++}
++
+ // Create an input frame from the specified graphic block.
+ std::unique_ptr<VideoEncoder::InputFrame> createInputFrame(
+         const C2ConstGraphicBlock& block, VideoPixelFormat format,
+@@ -591,9 +603,10 @@ void EncodeComponent::onDrainDone(bool success) {
+         return;
+     }
+ 
+-    // Mark the item in the output work queue as EOS done.
++    // Mark the item in the output work queue as EOS done, keeping a dropped frame mark.
+     C2Work* eosWork = it->get();
+-    eosWork->worklets.back()->output.flags = C2FrameData::FLAG_END_OF_STREAM;
++    eosWork->worklets.back()->output.flags = static_cast<C2FrameData::flags_t>(
++            eosWork->worklets.back()->output.flags | C2FrameData::FLAG_END_OF_STREAM);
+ 
+     // Draining is done which means all buffers on the device output queue have been returned, but
+     // not all buffers on the device input queue might have been returned yet.
+@@ -785,6 +798,7 @@ void EncodeComponent::flush() {
+     ALOG_ASSERT(mEncoderTaskRunner->RunsTasksInCurrentSequence());
+ 
+     mEncoder->flush();
++    mConsecutiveDroppedFrames = 0;
+ 
+     // Report all queued work items as aborted.
+     std::list<std::unique_ptr<C2Work>> abortedWorkItems;
+@@ -875,6 +889,41 @@ void EncodeComponent::onOutputBufferDone(size_t dataSize, int64_t timestamp, boo
+     ALOGV("%s(): output buffer done (timestamp: %" PRId64 ", size: %zu, keyframe: %d)", __func__,
+           timestamp, dataSize, keyFrame);
+     ALOG_ASSERT(mEncoderTaskRunner->RunsTasksInCurrentSequence());
++
++    // The encoder dropped the oldest frame still waiting for its bitstream. Complete its work item
++    // without output, so the work items behind it are not held up forever.
++    if (dataSize == 0) {
++        auto it = std::find_if(
++                mWorkQueue.begin(), mWorkQueue.end(),
++                [](const std::unique_ptr<C2Work>& w) { return isWaitingForOutput(*w); });
++        if (it == mWorkQueue.end()) {
++            ALOGW("Encoder dropped a frame, but no frame is waiting for output");
++            return;
++        }
++        C2Work* work = it->get();
++        work->worklets.front()->output.flags = static_cast<C2FrameData::flags_t>(
++                work->worklets.front()->output.flags | C2FrameData::FLAG_DROP_FRAME);
++        mConsecutiveDroppedFrames++;
++        ALOGW("Encoder dropped frame (index: %" PRIu64 ", timestamp: %" PRIu64
++              ", dropped in a row: %u)",
++              work->input.ordinal.frameIndex.peeku(), work->input.ordinal.timestamp.peeku(),
++              mConsecutiveDroppedFrames);
++        if (mConsecutiveDroppedFrames >= kMaxConsecutiveDroppedFrames) {
++            if (mConsecutiveDroppedFrames == kMaxConsecutiveDroppedFrames) {
++                ALOGE("Encoder dropped %u frames in a row", mConsecutiveDroppedFrames);
++                reportError(C2_CORRUPTED);
++            }
++            return;
++        }
++
++        while (!mWorkQueue.empty() && isWorkDone(*mWorkQueue.front())) {
++            reportWork(std::move(mWorkQueue.front()));
++            mWorkQueue.pop_front();
++        }
++        return;
++    }
++    mConsecutiveDroppedFrames = 0;
++
+     ALOG_ASSERT(buffer->dmabuf);
+ 
+     C2ConstLinearBlock constBlock =
+@@ -988,8 +1037,9 @@ bool EncodeComponent::isWorkDone(const C2Work& work) const {
+         return false;
+     }
+ 
+-    // If the work item had an input buffer to be encoded, it should have an output buffer set.
+-    if (!work.input.buffers.empty() && work.worklets.front()->output.buffers.empty()) {
++    // If the work item had an input buffer to be encoded, it should have an output buffer set,
++    // unless the encoder dropped the frame.
++    if (isWaitingForOutput(work)) {
+         ALOGV("Output buffer associated with work item %" PRIu64 " not returned yet",
+               work.input.ordinal.frameIndex.peeku());
+         return false;
+diff --git a/components/include/v4l2_codec2/components/EncodeComponent.h b/components/include/v4l2_codec2/components/EncodeComponent.h
+index 2d40dff..04a592b 100644
+--- a/components/include/v4l2_codec2/components/EncodeComponent.h
++++ b/components/include/v4l2_codec2/components/EncodeComponent.h
+@@ -175,6 +175,8 @@ protected:
+ 
+     // The queue of encode work items currently being processed.
+     std::deque<std::unique_ptr<C2Work>> mWorkQueue;
++    // The number of frames the encoder dropped since it last returned an encoded frame.
++    uint32_t mConsecutiveDroppedFrames = 0;
+ 
+     // The output block pool.
+     std::shared_ptr<C2BlockPool> mOutputBlockPool;
+diff --git a/components/include/v4l2_codec2/components/VideoEncoder.h b/components/include/v4l2_codec2/components/VideoEncoder.h
+index eeb63c2..8941510 100644
+--- a/components/include/v4l2_codec2/components/VideoEncoder.h
++++ b/components/include/v4l2_codec2/components/VideoEncoder.h
+@@ -58,6 +58,9 @@ public:
+             ::base::RepeatingCallback<void(uint32_t, std::unique_ptr<BitstreamBuffer>* buffer)>;
+     // TODO(dstaessens): Change callbacks to OnceCallback provided when requesting encode/drain.
+     using InputBufferDoneCB = ::base::RepeatingCallback<void(uint64_t)>;
++    // Called with the data size, timestamp, key frame flag and buffer of each encoded frame, in
++    // input order. A data size of 0 and a null buffer mean the encoder dropped the oldest frame
++    // that has no output yet.
+     using OutputBufferDoneCB = ::base::RepeatingCallback<void(
+             size_t, int64_t, bool, std::unique_ptr<BitstreamBuffer> buffer)>;
+     using DrainDoneCB = ::base::RepeatingCallback<void(bool)>;
+diff --git a/v4l2/V4L2Device.cpp b/v4l2/V4L2Device.cpp
+index 05be881..3650563 100644
+--- a/v4l2/V4L2Device.cpp
++++ b/v4l2/V4L2Device.cpp
+@@ -640,6 +640,13 @@ bool V4L2ReadableBuffer::isKeyframe() const {
+     return mBufferData->mV4l2Buffer.flags & V4L2_BUF_FLAG_KEYFRAME;
+ }
+ 
++bool V4L2ReadableBuffer::isError() const {
++    DCHECK_CALLED_ON_VALID_SEQUENCE(mSequenceChecker);
++    ALOG_ASSERT(mBufferData);
++
++    return mBufferData->mV4l2Buffer.flags & V4L2_BUF_FLAG_ERROR;
++}
++
+ struct timeval V4L2ReadableBuffer::getTimeStamp() const {
+     DCHECK_CALLED_ON_VALID_SEQUENCE(mSequenceChecker);
+     ALOG_ASSERT(mBufferData);
+diff --git a/v4l2/V4L2Encoder.cpp b/v4l2/V4L2Encoder.cpp
+index d5adf3b..86ba4d5 100644
+--- a/v4l2/V4L2Encoder.cpp
++++ b/v4l2/V4L2Encoder.cpp
+@@ -1029,7 +1029,18 @@ bool V4L2Encoder::dequeueOutputBuffer() {
+ 
+     std::unique_ptr<BitstreamBuffer> bitstreamBuffer =
+             std::move(mOutputBuffers[buffer->bufferId()]);
+-    if (encodedDataSize > 0) {
++    if (encodedDataSize == 0 || buffer->isError()) {
++        // An empty buffer marked as last only signals the end of a drain. Any other empty buffer,
++        // and any buffer marked as erroneous, stands for a frame the device dropped. Without
++        // B-frames the device returns the bitstream buffers in input order, so the client matches
++        // it to the oldest frame still waiting for its bitstream; the timestamp cannot be used,
++        // as drivers may return such buffers without one. The block goes back to the pool.
++        if (buffer->isError() || !buffer->isLast()) {
++            ALOGW("Device returned no bitstream for a frame (data size: %zu, error: %d)",
++                  encodedDataSize, buffer->isError());
++            mOutputBufferDoneCb.Run(0, timestamp.InMicroseconds(), false, nullptr);
++        }
++    } else {
+         if (!mInjectParamsBeforeIDR) {
+             // No need to inject SPS or PPS before IDR frames, we can just return the buffer as-is.
+             mOutputBufferDoneCb.Run(encodedDataSize, timestamp.InMicroseconds(),
+diff --git a/v4l2/include/v4l2_codec2/v4l2/V4L2Device.h b/v4l2/include/v4l2_codec2/v4l2/V4L2Device.h
+index ec93902..0d56b25 100644
+--- a/v4l2/include/v4l2_codec2/v4l2/V4L2Device.h
++++ b/v4l2/include/v4l2_codec2/v4l2/V4L2Device.h
+@@ -161,6 +161,8 @@ public:
+     bool isLast() const;
+     // Returns whether the V4L2_BUF_FLAG_KEYFRAME flag is set for this buffer.
+     bool isKeyframe() const;
++    // Returns whether the V4L2_BUF_FLAG_ERROR flag is set for this buffer.
++    bool isError() const;
+     // Return the timestamp set by the driver on this buffer.
+     struct timeval getTimeStamp() const;
+     // Returns the number of planes in this buffer.

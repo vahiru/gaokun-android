@@ -463,47 +463,59 @@ def patch_v4l2_initial_output(tree: pathlib.Path) -> str:
         V4L2Decoder: Failed to start initialy output queue
         V4L2DecodeComponent: Failed to create V4L2Decoder for H264
 
-    ★ **venus 这边是对的。** `vdec_check_src_change()`（vdec.c）明写着：
+    venus 在客户端订阅了 SOURCE_CHANGE、事件还没到时拒绝 CAPTURE 队列的 G_FMT
+    （vdec_check_src_change() 返回 -EINVAL）；本仓的 iris 用 kernel/iris/0003
+    （venus_compat_gfmt=Y，默认）照做。V4L2 stateful 解码器规范并不要求这样做：
+    事件之前 CAPTURE 的格式只是还不描述码流，拒绝是驱动自己的选择。iris 不拒绝时
+    （venus_compat_gfmt=N），HAL 会在码流头之前按 128x128 开启 CAPTURE 队列，gen1
+    固件解 H.264 / HEVC 时随即报致命错误，所以 Y 必须保留。
 
-        if (inst->subscriptions & V4L2_EVENT_SOURCE_CHANGE &&
-            inst->codec_state == VENUS_DEC_STATE_INIT &&
-            !inst->reconfig)
-                return -EINVAL;
+    v4l2_codec2 的 setupInitialOutput() 在喂任何码流之前就建一个最小的输出队列，
+    只为第一个 SOURCE_CHANGE 之前的 drain 备一个 EOS 缓冲区（ChromeOS/ARCVM 的优化）。
+    在这类驱动上它必然建不起来，所以：
+      · start() 里改成失败不致命：真正的输出队列本来就在分辨率变更事件里建
+        （changeResolution() -> startOutputQueue()）；
+      · setupInitialOutput() 在设好最小 CAPTURE 格式之后先问一次 G_FMT(CAPTURE)，
+        EINVAL 时只记一行 INFO 并返回成功，不再每次启动都打两行 E 和一行 W。
+        到这一步为止驱动看到的 ioctl 与原来相同，只是不再接着查询 MIN_BUFFERS_FOR_CAPTURE。
 
-    客户端订阅了 SOURCE_CHANGE，就必须**等事件到了再问 CAPTURE 的格式** ——
-    这正是 V4L2 stateful 解码器规范要求的顺序。而 v4l2_codec2 的
-    `setupInitialOutput()` 在**喂任何码流之前**就 G_FMT，那是 ChromeOS/ARCVM
-    的一个优化（预先备一个 EOS 缓冲区），在守规范的驱动上必然失败。
-
-    ⇒ 改成**失败不致命**：真正的输出队列本来就在分辨率变更事件里建
-      （changeResolution() -> startOutputQueue()，A17 同文件 :738-747）。
-
-    ★ 安全性判据（逐个查过，不是猜的）：`mInitialEosBuffer` 的**每一处使用
-      都已经有空指针判断**（A17 V4L2Decoder.cpp 的 112 / 369 / 448 / 743 行；16.0 是 112 / 375 / 454 / 749），
-      也就是说"它是空"本来就是被支持的状态。setupInitialOutput() 自己里面的 :244-255 是分配它的地方，不算使用。
-      那几处分别是：
+    ★ 安全性判据：`mInitialEosBuffer` 的每一处使用都已经有空指针判断（A17 V4L2Decoder.cpp
+      的 112 / 369 / 448 / 743 行），"它是空"本来就是被支持的状态：
         · 369 提前判 DRC —— 跳过后 mPendingDRC 保持 false，只是少一个优化；
         · 448 "没有码流就直接结束 drain" —— 是 ARCVM 特有的捷径，
-          不走它就落到 `sendV4L2DecoderCmd(false)`，那才是**标准**的 V4L2 drain；
+          不走它就落到 `sendV4L2DecoderCmd(false)`，那才是标准的 V4L2 drain；
         · 112 / 743 是清理。
-    A17：锚点在 V4L2Decoder.cpp:175-178，原样未变。
-      并且 `startOutputQueue()` 是在**第一步** getFormatInfo() 就返回 false 的，
-      此时还没碰过队列，所以不会留下半配置状态。
+    旧版修补 5（只把 start() 改成失败不致命）打过的树也会被改成新版。
     """
     p = tree / "external/v4l2_codec2/v4l2/V4L2Decoder.cpp"
-    if not p.exists():
-        return f"✗ 找不到 {p}"
+    h = tree / "external/v4l2_codec2/v4l2/include/v4l2_codec2/v4l2/V4L2Decoder.h"
+    if not p.exists() or not h.exists():
+        return f"✗ 找不到 {p} 或 {h}"
     s = io.open(p, encoding="utf-8").read()
-    if "venus 在收到 SOURCE_CHANGE 之前" in s:
-        return "已打过（幂等，无需改动）"
-    anchor = ('    if (!setupInitialOutput()) {' + chr(10)
-              + '        ALOGE("Unable to setup initial output");' + chr(10)
-              + '        return false;' + chr(10)
-              + '    }')
-    if anchor not in s:
-        return "⚠️ 找不到锚点，上游可能改了 start()"
+    hs = io.open(h, encoding="utf-8").read()
     NL = chr(10)
-    new = (
+    marker = "初始输出队列只为第一个 SOURCE_CHANGE 事件之前的 drain"
+    probe_marker = "Driver reports the CAPTURE format only after the first SOURCE_CHANGE event"
+    h_old = ("    // drain done signaling." + NL + "    bool setupInitialOutput();")
+    h_new = ("    // drain done signaling. Returns true without allocating them when the driver" + NL
+             + "    // reports the CAPTURE format only after the first SOURCE_CHANGE event." + NL
+             + "    bool setupInitialOutput();")
+    if marker in s and probe_marker in s and "#include <errno.h>" in s and h_new in hs:
+        return "已打过（幂等，无需改动）"
+    start_new = (
+        "    // 初始输出队列只为第一个 SOURCE_CHANGE 事件之前的 drain 提供 EOS 缓冲区。" + NL
+        + "    // 建不起来不致命：事件到达时会重新建立 CAPTURE 队列，且 mInitialEosBuffer" + NL
+        + "    // 的每一处使用都有空指针判断。" + NL
+        + "    if (!setupInitialOutput()) {" + NL
+        + '        ALOGW("Failed to set up the initial output queue, continuing without the initial EOS "' + NL
+        + '              "buffer");' + NL
+        + "    }"
+    )
+    upstream_start = ('    if (!setupInitialOutput()) {' + NL
+                      + '        ALOGE("Unable to setup initial output");' + NL
+                      + '        return false;' + NL
+                      + '    }')
+    old5_start = (
         "    // venus 在收到 SOURCE_CHANGE 之前会拒绝 CAPTURE 队列的 G_FMT" + NL
         + "    // （vdec_check_src_change() 返回 -EINVAL），这是 V4L2 stateful 规范" + NL
         + "    // 要求的顺序，不是驱动缺陷。所以这个「预先建最小输出队列」的" + NL
@@ -515,9 +527,43 @@ def patch_v4l2_initial_output(tree: pathlib.Path) -> str:
           'SOURCE_CHANGE event first. Continuing without the initial EOS buffer.");' + NL
         + "    }"
     )
-    s = s.replace(anchor, new, 1)
+    if marker not in s:
+        if upstream_start in s:
+            s = s.replace(upstream_start, start_new, 1)
+        elif old5_start in s:
+            s = s.replace(old5_start, start_new, 1)
+        else:
+            return "⚠️ 找不到锚点，上游可能改了 start()"
+    if probe_marker not in s:
+        probe_anchor = ('    if (!startOutputQueue(1, V4L2_MEMORY_DMABUF)) {' + NL
+                        + '        ALOGE("Failed to start initialy output queue");')
+        if s.count(probe_anchor) != 1:
+            return "⚠️ 找不到 setupInitialOutput() 里的锚点"
+        probe = (
+            "    // venus（以及 venus_compat_gfmt=Y 的 iris）在第一个 SOURCE_CHANGE 事件之前" + NL
+            + "    // 以 EINVAL 拒绝 VIDIOC_G_FMT(CAPTURE)，这时没有初始输出队列。" + NL
+            + "    struct v4l2_format format;" + NL
+            + "    memset(&format, 0, sizeof(format));" + NL
+            + "    format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;" + NL
+            + "    if (mDevice->ioctl(VIDIOC_G_FMT, &format) != 0 && errno == EINVAL) {" + NL
+            + '        ALOGI("Driver reports the CAPTURE format only after the first SOURCE_CHANGE event, "' + NL
+            + '              "starting without the initial EOS buffer");' + NL
+            + "        return true;" + NL
+            + "    }" + NL + NL
+        )
+        s = s.replace(probe_anchor, probe + probe_anchor, 1)
+    if "#include <errno.h>" not in s:
+        inc = "#include <stdint.h>" + NL
+        if s.count(inc) != 1:
+            return "⚠️ 找不到 #include <stdint.h>"
+        s = s.replace(inc, "#include <errno.h>" + NL + inc, 1)
+    if h_new not in hs:
+        if hs.count(h_old) != 1:
+            return "⚠️ 找不到 V4L2Decoder.h 里 setupInitialOutput() 的注释"
+        hs = hs.replace(h_old, h_new, 1)
+        io.open(h, "w", encoding="utf-8", newline="").write(hs)
     io.open(p, "w", encoding="utf-8", newline="").write(s)
-    return "已改为失败不致命"
+    return "已改为失败不致命，驱动推迟 CAPTURE 格式时只记一行 INFO"
 
 
 def patch_disable_desktop_mode(tree: pathlib.Path) -> str:
@@ -568,7 +614,7 @@ def apply_patch_file(tree: pathlib.Path, project: str, patch_name: str,
     """把 <repo>/patches/<patch_name> 用 git apply 打进 AOSP 树的 <project>（幂等）。
 
     ★ 为什么要有这个助手：本仓 `patches/android/` 里的 **AOSP 侧**补丁（
-    hardware-interfaces/0001–0012 audio HAL、v4l2-codec2/0001–0012、tinyalsa/0001、drm-hwcomposer/0001–0005）
+    hardware-interfaces/0001–0012 audio HAL、v4l2-codec2/0001–0017、tinyalsa/0001、drm-hwcomposer/0001–0005）
     原先**没有任何消费者** —— 全靠人手动
     `git apply`。而本仓已经为"没有消费者的配置一定会漂"付过三次账
     （M13 的 BOARD_KERNEL_CMDLINE、M17 的上游 Venus 补丁集、以及 2026-09-12
@@ -1498,6 +1544,30 @@ def main():
     step(" [61] v4l2_codec2解码器为10位档次声明P010输出: ", apply_patch_file(
         tree, "external/v4l2_codec2",
         "android/v4l2-codec2/0012-v4l2-codec2-advertise-p010-output-for-10-bit-profiles.patch"))
+    # 编码器：固件不带码流地返回一帧（丢帧、数据损坏，或长度为0）时，组件原来直接丢掉这个空缓冲，而工作项按顺序完成、
+    # 每一项都要等到输出，会话从此一帧不出也不报错（唤醒后编码无输出即是如此）；现在按顺序把最早一个还没有输出的工作项
+    # 以FLAG_DROP_FRAME完成，连续丢30帧时报错。编码器实例计数改在release()时减少（设备已在此前关闭），收回后重试时
+    # 不再因旧组件对象还没析构而撞到上限。在[61]打完的树上生成，排在它之后。
+    step(" [62] v4l2_codec2编码器丢帧时完成对应的工作项: ", apply_patch_file(
+        tree, "external/v4l2_codec2",
+        "android/v4l2-codec2/0013-v4l2-codec2-complete-the-work-of-frames-the-encoder-drops.patch"))
+    step(" [63] v4l2_codec2编码器release()时释放实例计数: ", apply_patch_file(
+        tree, "external/v4l2_codec2",
+        "android/v4l2-codec2/0014-v4l2-codec2-free-the-encoder-instance-slot-when-the-component-is-released.patch"))
+    # V4L2DevicePoller：只返回POLLERR时不再立即重新轮询缓冲（两个队列都空时poll()马上返回POLLERR，每次解码器启动
+    # 空转上万次），改为投递一次回调，下一次QBUF或STREAMON再恢复；事件回调执行期间不再轮询POLLPRI（事件出队之前
+    # poll()一直返回POLLPRI）；解码器进入错误状态后停止轮询（错误状态下事件不再出队，原来会一直空转）。
+    # 在[63]打完的树上生成，依赖[5]新版的setupInitialOutput()。
+    step(" [64] v4l2_codec2轮询线程在POLLERR后不再空转: ", apply_patch_file(
+        tree, "external/v4l2_codec2",
+        "android/v4l2-codec2/0015-v4l2-codec2-do-not-poll-buffers-again-after-POLLERR.patch",
+        covered_by=("android/v4l2-codec2/0016-v4l2-codec2-do-not-poll-for-an-event-that-is-being-handled.patch",)))
+    step(" [65] v4l2_codec2事件回调期间不轮询POLLPRI: ", apply_patch_file(
+        tree, "external/v4l2_codec2",
+        "android/v4l2-codec2/0016-v4l2-codec2-do-not-poll-for-an-event-that-is-being-handled.patch"))
+    step(" [66] v4l2_codec2解码器出错后停止轮询: ", apply_patch_file(
+        tree, "external/v4l2_codec2",
+        "android/v4l2-codec2/0017-v4l2-codec2-stop-polling-the-decoder-device-on-error.patch"))
     # SystemUI对Class 1/2指纹只在人脸也锁定时才禁止指纹解锁，没有人脸识别时，指纹自己临时锁定期间仍会不断
     # 请求认证，框架逐次拒绝。补丁让它在锁定期间改为只检测接触（与Class 3相同）；锁定期满时HAL发出
     # onLockoutCleared，SystemUI随之恢复认证。指纹HAL（device/huawei/gaokun3/fingerprint）报告STRONG后，
