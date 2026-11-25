@@ -191,6 +191,9 @@ KPATCHES=(
     # 0020在SC8280XP上让iris上电期间持有7000 µs的CPU延迟请求，CPU簇不再进入AOSS级休眠（视频硬件在这一级中途挂起），
     # 仍可进入只断APSS的簇状态（需DT提供）。
     kernel/iris/0020-media-iris-keep-the-CPU-cluster-out-of-AOSS-level-idle.patch
+    # 0021让gen1编码器在GOP长度为0时向固件发最长的帧内间隔（原来丢掉这一属性，固件把每帧都编成帧内帧）。
+    # crdroid-tree-fixes.py [58]（android/v4l2-codec2/0009）依赖0021：缺少0021时每帧都会成为关键帧。
+    kernel/iris/0021-media-iris-gen1-honour-a-GOP-size-of-0.patch
 
     # ─── 7. kernel/camera：camcc 时钟/GDSC、camss 与前后摄传感器驱动（ov13b10 / hi846 / s5k4h7 / s5k3l6）───
     # 0003 与 kernel/dts/0005 配套，需 CONFIG_VIDEO_OV13B10=y 与 CONFIG_VIDEO_DW9714=y；

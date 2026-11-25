@@ -183,6 +183,7 @@ TX_DEC0 Volume = 102, TX_DEC1 Volume = 102
 - **`patches/kernel/iris/0016`**：回移主线v7.3的强制关键帧控制`V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME`。`v4l2_codec2`每到关键帧间隔都设这个控件，设不上就判编码失败。
 - **`patches/kernel/iris/0017`**：gen1编码器的输入帧尺寸改发原始尺寸、输出帧尺寸改发请求的输出尺寸（`enc_scale`）。原来输入发的是按128x32对齐的缓冲尺寸，宽度不是128的倍数时（竖拍1080x1920），固件把右侧填充当成画面读进来再缩放，画面右侧出现绿边、整体被压窄。步长和行数另由`UNCOMPRESSED_PLANE_ACTUAL_INFO`发给固件；固件把编码图像补齐到整宏块，并在SPS里写明裁剪。gen1没有输入裁剪偏移，比原始尺寸小的裁剪仍会被缩放而不是裁掉，`v4l2_codec2`不会这样设置。
 - **`patches/kernel/iris/0018`**：EMPTY_BUFFER包清零。没有开启`CONFIG_INIT_STACK_ALL_ZERO`的内核会把`extradata_buffer`与`data`两个字段的栈上旧值发给固件；本仓内核开启了这个选项，实际不受影响。
+- **`patches/kernel/iris/0021`**：gen1编码器在GOP长度为0时向固件发最长的帧内间隔（`0x0fffffff`个P帧，高通自家驱动对无限长GOP发的值）。`V4L2_CID_MPEG_VIDEO_GOP_SIZE`为0表示客户端自己请求关键帧、不要周期性的帧内帧；原来`iris_set_intra_period()`对0返回`-EINVAL`而调用方忽略，固件收不到帧内间隔，就把每一帧都编成帧内帧。
 
 #### `v4l2_codec2`侧
 
@@ -190,6 +191,7 @@ TX_DEC0 Volume = 102, TX_DEC1 Volume = 102
 - **`patches/android/v4l2-codec2/0005`**：新增`c2.v4l2.hevc.encoder`，由`ro.vendor.v4l2_codec2.encoder.supported.hevc`把守。只提供Main档次：输入是8位NV12，Main Still Picture一个码流只能有一张图，Main 10要10位输入。级别1到5.2，默认4.1，按尺寸、帧率和码率自动抬到够用的最低一级（H.265表A.8、A.9，以及A.4.1对单边长度的限制）。iris gen1没有`V4L2_CID_MPEG_VIDEO_PREPEND_SPSPPS_TO_IDR`，参数集由组件缓存后插到每个IRAP图像前：H.264是SPS/PPS（上游已有），HEVC是VPS/SPS/PPS。
 - **`patches/android/v4l2-codec2/0006`**：单平面输入（NV12而不是NV12M）送缓冲时，长度改按驱动要求的`sizeimage`给。原来按一帧的数据量（步长×按32对齐的高×1.5）给，而iris把整帧大小补齐到4 KiB的倍数。步长是128的奇数倍、对齐后的高是32的奇数倍时（640x480、800x480、854x480、352x288、120x160等），长度差2048字节，第一次`VIDIOC_QBUF`就被videobuf2拒绝，组件随即报错；打开`videobuf2_common`的`debug`参数后，内核日志里能看到`invalid dmabuf length`。多平面分支本来就用驱动给的大小。
 - **`patches/android/v4l2-codec2/0008`**：编码器格式转换器的帧改按驱动格式中的高分配。需要转换的输入（录屏送来的RGB、应用用GL渲染后送入的Surface）由组件逐帧转成NV12，转换用的帧按`codedSize()`分配，这个尺寸原来由`V4L2Device::allocatedSizeFromV4L2Format()`从`sizeimage`反推。iris把`sizeimage`补齐到4 KiB的倍数后，640x480反推成640x482，minigbm把482行对齐到512行，色度平面放在其后；驱动按单平面NV12的布局，在`bytesperline`×高（640×480）处读色度。每帧的色度因此取自写入位置之上32行，画面顶部64行变绿，整幅颜色下移。步长是128的奇数倍、对齐后的高是32的奇数倍时一帧比整页少2048字节，只有步长不超过1152时这2048字节才够一行，反推出的高才偏大，所以受影响的是640x480、800x480、854x480、352x288、120x160这类尺寸；1920x1440等更宽的尺寸虽然也补齐，反推出的高仍然准确。字节缓冲输入和NV12的Surface不经转换，不受影响。补丁只对单平面格式改用格式中的高，多平面格式的各平面本来就分别带偏移。
+- **`patches/android/v4l2-codec2/0009`**：编码器的宏块码率控制（`MB_RC_ENABLE`）与GOP长度改为各设一次。原来两者放在同一次`VIDIOC_S_EXT_CTRLS`里，iris没有`MB_RC_ENABLE`，整次调用被拒，GOP长度停在驱动默认的30，固件在组件请求的IDR之间每30帧再插一个I帧（录屏120 fps、2 s间隔时，这些I帧约占码流的六分之一）。现在先查GOP长度的取值范围：最小值为0时设为0，驱动不接受0或最小值大于0时改设它支持的最大值（控件框架会把超出范围的整数夹到范围内而不报错，直接设0在最小值为1的驱动上就成了每帧一个关键帧）；关键帧间隔为负时只在第一帧和请求时出关键帧。必须与`patches/kernel/iris/0021`一起使用。
 
 #### 设备配置
 
@@ -201,7 +203,6 @@ TX_DEC0 Volume = 102, TX_DEC1 Volume = 102
 #### 已知限制
 
 - **一次只有一个编码会话**：ARP在固定IOVA。窗口内的另一处IOVA（`0x10000000`）实测可用，支持并发需要在窗口上做IOVA分配。
-- **两个IDR之间还有周期性的I帧**：iris gen1没有`V4L2_CID_MPEG_VIDEO_MB_RC_ENABLE`，`v4l2_codec2`把它和`GOP_SIZE 0`放在同一次`S_EXT_CTRLS`里，整次调用被拒，`GOP_SIZE`停在驱动默认的30。驱动每次开流都把它作为帧内间隔发给固件，于是在`v4l2_codec2`请求的IDR之间每30帧还有一个I帧。码流可以正常解码。
 - **没有HEVC Main 10和HDR编码**：输入只有8位NV12。
 - **系统录屏会换用软编**：系统录屏按解码器的能力和120 Hz刷新率选尺寸和帧率（横屏约2560x1600@117，竖屏约1360x2176@120），码率约70–96 Mbps，超出H.264 5.1级和组件50 Mbps的码率上限，硬件编码器配置失败，按框架代码会换用软编，尚未经实测。`adb shell screenrecord`不带`--size`时会改用1280x720重试。
 - **很小的尺寸**：宽或高按驱动的对齐（128x32）之后仍小于128时（例如160x90），内核在申请缓冲时拒绝（`current session not supported`），应用在开始编码时拿到错误。原始尺寸小于128、对齐后不小于128的（例如160x120、100x100），固件能正常编码，并在SPS里写明裁剪。

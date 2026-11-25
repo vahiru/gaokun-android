@@ -568,7 +568,7 @@ def apply_patch_file(tree: pathlib.Path, project: str, patch_name: str,
     """把 <repo>/patches/<patch_name> 用 git apply 打进 AOSP 树的 <project>（幂等）。
 
     ★ 为什么要有这个助手：本仓 `patches/android/` 里的 **AOSP 侧**补丁（
-    hardware-interfaces/0001–0012 audio HAL、v4l2-codec2/0001–0008、tinyalsa/0001、drm-hwcomposer/0001–0005）
+    hardware-interfaces/0001–0012 audio HAL、v4l2-codec2/0001–0009、tinyalsa/0001、drm-hwcomposer/0001–0005）
     原先**没有任何消费者** —— 全靠人手动
     `git apply`。而本仓已经为"没有消费者的配置一定会漂"付过三次账
     （M13 的 BOARD_KERNEL_CMDLINE、M17 的上游 Venus 补丁集、以及 2026-09-12
@@ -1479,6 +1479,12 @@ def main():
     step(" [57] v4l2_codec2编码器转换帧按驱动格式中的高分配（录屏640x480等尺寸的色度）: ", apply_patch_file(
         tree, "external/v4l2_codec2",
         "android/v4l2-codec2/0008-v4l2-codec2-take-the-single-planar-encoder-input-height-from-the-format.patch"))
+    # 编码器的宏块码率控制与GOP长度分开设置：同一次VIDIOC_S_EXT_CTRLS里有驱动不支持的控件时整次调用被拒，
+    # iris没有MB_RC_ENABLE，GOP长度因此停在30，IDR之间多出周期性的I帧。要和patches/kernel/iris/0021一起生效：
+    # 旧内核接受GOP长度0后在开流时丢掉，固件把每帧都编成关键帧。在[57]打完的树上生成，排在它之后。
+    step(" [58] v4l2_codec2编码器宏块码率控制与GOP长度分开设置（需kernel/iris/0021）: ", apply_patch_file(
+        tree, "external/v4l2_codec2",
+        "android/v4l2-codec2/0009-v4l2-codec2-set-the-macroblock-rate-control-and-the-gop-length-separately.patch"))
     # SystemUI对Class 1/2指纹只在人脸也锁定时才禁止指纹解锁，没有人脸识别时，指纹自己临时锁定期间仍会不断
     # 请求认证，框架逐次拒绝。补丁让它在锁定期间改为只检测接触（与Class 3相同）；锁定期满时HAL发出
     # onLockoutCleared，SystemUI随之恢复认证。指纹HAL（device/huawei/gaokun3/fingerprint）报告STRONG后，
