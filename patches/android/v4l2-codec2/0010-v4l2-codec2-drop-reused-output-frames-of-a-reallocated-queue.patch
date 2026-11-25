@@ -1,0 +1,105 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] v4l2_codec2: drop reused output frames of a reallocated queue
+
+After flush(), V4L2Decoder moves the frames still queued at the device
+into mReuseFrameQueue and queues them again one posted task at a time.
+If a source change reallocates the CAPTURE queue in between, for
+example after a seek right after a flush into a part of the stream with
+another bit depth, startOutputQueue() clears the queue and the block ID
+map, but the tasks already posted still carry frames of the old queue.
+They get V4L2 buffer IDs of the new queue and are queued with a buffer
+allocated for the old format. Going from 8 to 10 bits at 1920x1088 the
+NV12 dma-buf is smaller than the P010 plane, QBUF fails (videobuf2:
+"failed to attach dmabuf") and the component goes to the error state.
+In the other direction a P010 buffer would be filled as NV12.
+
+Count the output queue allocations and drop a reused frame taken before
+the latest one. Its block goes back to its pool, and the new queue is
+filled from the pool created for it.
+
+Checked on SC8280XP (Huawei MateBook E Go) with an HEVC stream that
+switches from 10 to 8 bits after 120 frames, flushed and seeking back
+into the 10-bit part 8 frames after the switch: QBUF failed in 2 of 6
+runs before and passes in 12 of 12 with the patch, as does the opposite
+switch. Decoding of 8-bit and 10-bit streams with seeks is unchanged.
+
+Origin: local
+Upstream-Status: Pending
+---
+ v4l2/V4L2Decoder.cpp                        | 28 ++++++++++++++++++++-
+ v4l2/include/v4l2_codec2/v4l2/V4L2Decoder.h |  6 +++++
+ 2 files changed, 33 insertions(+), 1 deletion(-)
+
+diff --git a/v4l2/V4L2Decoder.cpp b/v4l2/V4L2Decoder.cpp
+index 24e98e5..f2050cb 100644
+--- a/v4l2/V4L2Decoder.cpp
++++ b/v4l2/V4L2Decoder.cpp
+@@ -350,6 +350,11 @@ bool V4L2Decoder::startOutputQueue(size_t minOutputBuffersCount, enum v4l2_memor
+     while (!mReuseFrameQueue.empty()) {
+         mReuseFrameQueue.pop();
+     }
++    // A frame that tryFetchVideoFrame() has already taken from mReuseFrameQueue
++    // is still waiting in a posted onReuseFrameReady() task. Its buffer was
++    // allocated for the old format and size, so retire it together with the
++    // queue it belonged to.
++    mOutputQueueGeneration++;
+ 
+     const size_t adjustedNumOutputBuffers =
+             mOutputQueue->allocateBuffers(*numOutputBuffers, memory);
+@@ -859,10 +864,31 @@ void V4L2Decoder::tryFetchVideoFrame() {
+     mReuseFrameQueue.pop();
+ 
+     // Avoid recursive calls
+-    mTaskRunner->PostTask(FROM_HERE, ::base::BindOnce(&V4L2Decoder::onVideoFrameReady, mWeakThis,
++    mTaskRunner->PostTask(FROM_HERE, ::base::BindOnce(&V4L2Decoder::onReuseFrameReady, mWeakThis,
++                                                      mOutputQueueGeneration,
+                                                       std::make_pair(std::move(frame), blockId)));
+ }
+ 
++void V4L2Decoder::onReuseFrameReady(uint64_t generation,
++                                    VideoFramePool::FrameWithBlockId frameWithBlockId) {
++    ALOGV("%s(generation=%llu)", __func__, static_cast<unsigned long long>(generation));
++    ALOG_ASSERT(mTaskRunner->RunsTasksInCurrentSequence());
++
++    if (generation != mOutputQueueGeneration) {
++        // The output buffers were reallocated after this frame was taken from
++        // mReuseFrameQueue, e.g. by a resolution or bit depth change right
++        // after a flush. The block may be too small for the new buffers (QBUF
++        // fails) or have the wrong layout (wrong picture). Dropping the frame
++        // returns the block to its pool; changeResolution() has already
++        // started fetching blocks for the new buffers.
++        ALOGI("%s(): dropping blockId=%u of an old output queue", __func__,
++              frameWithBlockId.second);
++        return;
++    }
++
++    onVideoFrameReady(std::move(frameWithBlockId));
++}
++
+ void V4L2Decoder::onVideoFrameReady(
+         std::optional<VideoFramePool::FrameWithBlockId> frameWithBlockId) {
+     ALOGV("%s()", __func__);
+diff --git a/v4l2/include/v4l2_codec2/v4l2/V4L2Decoder.h b/v4l2/include/v4l2_codec2/v4l2/V4L2Decoder.h
+index c825f74..5d0d204 100644
+--- a/v4l2/include/v4l2_codec2/v4l2/V4L2Decoder.h
++++ b/v4l2/include/v4l2_codec2/v4l2/V4L2Decoder.h
+@@ -92,6 +92,9 @@ private:
+ 
+     void tryFetchVideoFrame();
+     void onVideoFrameReady(std::optional<VideoFramePool::FrameWithBlockId> frameWithBlockId);
++    // Queues a frame taken from mReuseFrameQueue unless the output buffers
++    // have been reallocated since (|generation| is not the current one).
++    void onReuseFrameReady(uint64_t generation, VideoFramePool::FrameWithBlockId frameWithBlockId);
+ 
+     std::optional<size_t> getNumOutputBuffers();
+     std::optional<struct v4l2_format> getFormatInfo();
+@@ -148,6 +151,9 @@ private:
+     // is called. This is a workaround for b/297228544 and helps with general
+     // responsiveness of the video playback due to b/270003218.
+     std::queue<std::pair<size_t, std::unique_ptr<VideoFrame>>> mReuseFrameQueue;
++    // Counts the output buffer allocations done by startOutputQueue(). A frame
++    // taken from mReuseFrameQueue carries the value current at that time.
++    uint64_t mOutputQueueGeneration = 0;
+ 
+     // Block IDs can be arbitrarily large, but we only have a limited number of
+     // buffers. This maintains an association between a block ID and a specific

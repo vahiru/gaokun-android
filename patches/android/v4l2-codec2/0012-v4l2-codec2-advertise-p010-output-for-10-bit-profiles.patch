@@ -1,0 +1,104 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] v4l2_codec2: advertise P010 output for 10-bit profiles
+
+Codec2InfoBuilder lists COLOR_FormatYUVP010 among a decoder's colour
+formats only when the decoder's output pixel format parameter allows
+HAL_PIXEL_FORMAT_YCBCR_P010. DecodeInterface had no such parameter, so
+the HEVC and VP9 decoders, which output P010 for HEVC Main 10 and VP9
+Profile 2, did not list it, and a client that checks colorFormats before
+asking for 10-bit byte-buffer output would skip them.
+
+Declare the pixel formats as the software VP9 and AV1 decoders do:
+YCBCR_420_888, P010 when a 10-bit profile is supported and gralloc can
+allocate P010, and IMPLEMENTATION_DEFINED for surface clients. The
+decoder still picks NV12 or P010 from the stream.
+
+Checked on SC8280XP (Huawei MateBook E Go): MediaCodecInfo lists colour
+format 54 for the HEVC and VP9 decoders and not for H.264; 10-bit
+byte-buffer output is still identical to FFmpeg's.
+
+Origin: local
+Upstream-Status: Pending
+---
+ components/DecodeInterface.cpp                | 35 +++++++++++++++++++
+ .../v4l2_codec2/components/DecodeInterface.h  |  3 ++
+ 2 files changed, 38 insertions(+)
+
+diff --git a/components/DecodeInterface.cpp b/components/DecodeInterface.cpp
+index 19128f9..17fce34 100644
+--- a/components/DecodeInterface.cpp
++++ b/components/DecodeInterface.cpp
+@@ -10,10 +10,13 @@
+ #include <algorithm>
+ 
+ #include <C2PlatformSupport.h>
++#include <Codec2CommonUtils.h>
+ #include <SimpleC2Interface.h>
+ #include <android/hardware/graphics/common/1.0/types.h>
++#include <android/hardware_buffer.h>
+ #include <log/log.h>
+ #include <media/stagefright/foundation/MediaDefs.h>
++#include <system/graphics.h>
+ 
+ #include <v4l2_codec2/common/Common.h>
+ #include <v4l2_codec2/plugin_store/V4L2AllocatorId.h>
+@@ -42,6 +45,20 @@ size_t calculateInputBufferSize(size_t area) {
+     if (area > k1080pArea) return kInputBufferSizeFor4K;
+     return kInputBufferSizeFor1080p;
+ }
++
++// Whether one of the profiles has 4:2:0 at 10 bits per sample, which the decoder outputs as P010.
++bool hasTenBitProfile(const std::vector<uint32_t>& profiles) {
++    return std::any_of(profiles.begin(), profiles.end(), [](uint32_t profile) {
++        switch (profile) {
++        case C2Config::PROFILE_HEVC_MAIN_10:
++        case C2Config::PROFILE_HEVC_MAIN_10_INTRA:
++        case C2Config::PROFILE_VP9_2:
++            return true;
++        default:
++            return false;
++        }
++    });
++}
+ }  // namespace
+ 
+ // static
+@@ -311,6 +328,24 @@ DecodeInterface::DecodeInterface(const std::string& name,
+                          .withConstValue(
+                                  new C2StreamBufferTypeSetting::output(0u, C2BufferData::GRAPHIC))
+                          .build());
++
++    // The pixel formats a client may ask for, as in the software VP9 and AV1 decoders. The
++    // framework lists P010 as COLOR_FormatYUVP010 in the codec's color formats only when it
++    // appears here. The decoder still picks NV12 or P010 from the bit depth of the stream; the
++    // configured value is not used. IMPLEMENTATION_DEFINED is what a Surface client configures.
++    std::vector<uint32_t> pixelFormats = {HAL_PIXEL_FORMAT_YCBCR_420_888};
++    if (hasTenBitProfile(profiles) &&
++        isHalPixelFormatSupported(
++                static_cast<AHardwareBuffer_Format>(HAL_PIXEL_FORMAT_YCBCR_P010))) {
++        pixelFormats.push_back(HAL_PIXEL_FORMAT_YCBCR_P010);
++    }
++    pixelFormats.push_back(HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED);
++    addParameter(DefineParam(mPixelFormat, C2_PARAMKEY_PIXEL_FORMAT)
++                         .withDefault(new C2StreamPixelFormatInfo::output(
++                                 0u, HAL_PIXEL_FORMAT_YCBCR_420_888))
++                         .withFields({C2F(mPixelFormat, value).oneOf(pixelFormats)})
++                         .withSetter(Setter<decltype(*mPixelFormat)>::StrictValueWithNoDeps)
++                         .build());
+     addParameter(
+             DefineParam(mOutputDelay, C2_PARAMKEY_OUTPUT_DELAY)
+                     .withConstValue(new C2PortDelayTuning::output(getOutputDelay(*mVideoCodec)))
+diff --git a/components/include/v4l2_codec2/components/DecodeInterface.h b/components/include/v4l2_codec2/components/DecodeInterface.h
+index 70de126..79b456e 100644
+--- a/components/include/v4l2_codec2/components/DecodeInterface.h
++++ b/components/include/v4l2_codec2/components/DecodeInterface.h
+@@ -70,6 +70,9 @@ private:
+     std::shared_ptr<C2StreamUsageTuning::input> mInputMemoryUsage;
+     // The output format kind; should be C2FormatVideo.
+     std::shared_ptr<C2StreamBufferTypeSetting::output> mOutputFormat;
++    // The output pixel format the client asked for. Only advertises the formats the decoder can
++    // output; the decoder chooses between NV12 and P010 from the stream.
++    std::shared_ptr<C2StreamPixelFormatInfo::output> mPixelFormat;
+     // The MIME type of input port.
+     std::shared_ptr<C2PortMediaTypeSetting::input> mInputMediaType;
+     // The MIME type of output port; should be MEDIA_MIMETYPE_VIDEO_RAW.

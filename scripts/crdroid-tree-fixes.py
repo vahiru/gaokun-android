@@ -568,7 +568,7 @@ def apply_patch_file(tree: pathlib.Path, project: str, patch_name: str,
     """把 <repo>/patches/<patch_name> 用 git apply 打进 AOSP 树的 <project>（幂等）。
 
     ★ 为什么要有这个助手：本仓 `patches/android/` 里的 **AOSP 侧**补丁（
-    hardware-interfaces/0001–0012 audio HAL、v4l2-codec2/0001–0009、tinyalsa/0001、drm-hwcomposer/0001–0005）
+    hardware-interfaces/0001–0012 audio HAL、v4l2-codec2/0001–0012、tinyalsa/0001、drm-hwcomposer/0001–0005）
     原先**没有任何消费者** —— 全靠人手动
     `git apply`。而本仓已经为"没有消费者的配置一定会漂"付过三次账
     （M13 的 BOARD_KERNEL_CMDLINE、M17 的上游 Venus 补丁集、以及 2026-09-12
@@ -1485,6 +1485,19 @@ def main():
     step(" [58] v4l2_codec2编码器宏块码率控制与GOP长度分开设置（需kernel/iris/0021）: ", apply_patch_file(
         tree, "external/v4l2_codec2",
         "android/v4l2-codec2/0009-v4l2-codec2-set-the-macroblock-rate-control-and-the-gop-length-separately.patch"))
+    # 解码器：flush后已投递的复用帧在输出队列重新分配后丢弃（seek到另一位深的部分时，旧格式的缓冲被排进新队列，
+    # QBUF失败或按错误格式解码）；尺寸变化时上报C2StreamPictureSizeInfo（使用输出缓冲数组的客户端，即同步模式下的
+    # NDK客户端或调用getOutputBuffers()的客户端，在分辨率变大后框架无法按新尺寸复制，解码报错）；10位档次在输出像素格式里声明P010，框架据此在颜色格式中列出
+    # COLOR_FormatYUVP010。三者都在[58]打完的树上依次生成，排在它之后。
+    step(" [59] v4l2_codec2解码器丢弃重新分配前的复用帧: ", apply_patch_file(
+        tree, "external/v4l2_codec2",
+        "android/v4l2-codec2/0010-v4l2-codec2-drop-reused-output-frames-of-a-reallocated-queue.patch"))
+    step(" [60] v4l2_codec2解码器尺寸变化时上报画面尺寸: ", apply_patch_file(
+        tree, "external/v4l2_codec2",
+        "android/v4l2-codec2/0011-v4l2-codec2-report-the-picture-size-when-it-changes.patch"))
+    step(" [61] v4l2_codec2解码器为10位档次声明P010输出: ", apply_patch_file(
+        tree, "external/v4l2_codec2",
+        "android/v4l2-codec2/0012-v4l2-codec2-advertise-p010-output-for-10-bit-profiles.patch"))
     # SystemUI对Class 1/2指纹只在人脸也锁定时才禁止指纹解锁，没有人脸识别时，指纹自己临时锁定期间仍会不断
     # 请求认证，框架逐次拒绝。补丁让它在锁定期间改为只检测接触（与Class 3相同）；锁定期满时HAL发出
     # onLockoutCleared，SystemUI随之恢复认证。指纹HAL（device/huawei/gaokun3/fingerprint）报告STRONG后，
