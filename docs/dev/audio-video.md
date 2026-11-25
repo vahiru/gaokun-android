@@ -223,13 +223,13 @@ TX_DEC0 Volume = 102, TX_DEC1 Volume = 102
 #### 设备配置
 
 - `device.mk`：`ro.vendor.v4l2_codec2.encoder.supported.h264`、`.hevc`设为`true`，`ro.vendor.v4l2_codec2.encode_concurrent_instances=3`（AVC与HEVC共用这一个计数，需`kernel/iommu/0002`、`kernel/iris/0034`与`kernel/dts/0026`）。VP8/VP9编码iris没有，保持关闭。
-- `media_codecs_c2.xml`：两个编码器的`<Encoders>`条目，`concurrent-instances`为3。尺寸和吞吐量上限按4K30申报，偏保守：单路裸V4L2编码实测1080p约390 fps，4096x2176在输入预先填好时约180–200 fps。
+- `media_codecs_c2.xml`：两个编码器的`<Encoders>`条目，`concurrent-instances`为3。尺寸和吞吐量上限按4K30申报，偏保守：视频编解码硬件的核心时钟上限为444 MHz（见`kernel/dts/0035`），单路裸V4L2编码在输入预先填好时3840x2160约160 fps（4096x2176按像素数折算约150 fps）；逐帧在CPU上填充时受填充速度限制，1080p约380 fps。
 - 组件rank是0x80，排在软编（0x200）前面。第四个编码请求在分配组件时被拒（`maximum number of instances reached`，返回资源不足）。`MediaCodec`遇到资源不足会先请资源管理器从优先级更低的进程收回一个硬件编解码器（解码器也算在内）再重试，收不回才试下一个编码器，落到`c2.android.*`软编。因此按框架代码，优先级更高的一方会让优先级较低的应用失去编解码器（`ERROR_RECLAIMED`），尚未经实测；优先级不高于对方时，才会直接换软编。原生进程（例如shell里的`screenrecord`）既不会收回别人的编码器，也不会被收回。硬件编码器配置失败时，`MediaRecorder`同样会换下一个编码器；自己调用`configure`的应用拿到的是错误。
 - 验证：`scripts/verify-hw-codec2.sh`检查属性、编码节点属主、`cp-nonpixel: CB15 ready`和组件列表，亮屏时用`screenrecord --codec-name c2.v4l2.avc.encoder`在1280x720和640x480各真编一段。
 
 #### 已知限制
 
-- **同时最多3路编码**：内核有8个ARP槽位，`v4l2_codec2`按3路限制。固件出错重载时，所有正在进行的编解码会话一起报错。三路同时编码时偶尔有一帧不带码流返回，原因尚在调查。
+- **同时最多3路编码**：内核有8个ARP槽位，`v4l2_codec2`按3路限制。固件出错重载时，所有正在进行的编解码会话一起报错。
 - **没有HEVC Main 10和HDR编码**：输入只有8位NV12。
 - **系统录屏**：系统录屏按30 fps申报，横屏录2560x1600，竖屏按解码器的能力缩到1360x2176（竖屏尚未经实测），默认用硬件H.264编码器，打开“HEVC编码”时用硬件HEVC编码器，不会换用软编。输入是可变帧率，滑动画面时可有接近120 fps的突发。`adb shell screenrecord`不带`--size`时会改用1280x720重试。
 - **很小的尺寸**：宽或高按驱动的对齐（128x32）之后仍小于128时（例如160x90），内核在申请缓冲时拒绝（`current session not supported`），应用在开始编码时拿到错误。原始尺寸小于128、对齐后不小于128的（例如160x120、100x100），固件能正常编码，并在SPS里写明裁剪。
