@@ -1,6 +1,6 @@
 # 游戏与应用环境兼容
 
-本系统运行在主线Linux 7.2.9内核、UEFI解锁启动且内置KernelSU的环境中。部分手游和环境检测工具默认假定设备运行在Android通用内核（GKI 4.x–6.x）和手机的48位页表配置下。本页说明为游戏兼容性、低延迟和环境检测所做的跨层改动与取舍边界。
+本系统运行在主线Linux 7.2.9内核、UEFI解锁启动且内置KernelSU的环境中。部分手游和环境检测工具默认假定设备运行在Android通用内核（GKI 4.x–6.x）和手机的39位虚拟地址空间配置下。本页说明为游戏兼容性、低延迟和环境检测所做的跨层改动与取舍边界。
 
 ## 1. 改动与机制总览
 
@@ -15,7 +15,7 @@
 | 着色器缓存 | **EGL多文件blob缓存**（`ro.egl.blobcache.multifile=true`） | ANGLE的程序与管线缓存容易超出默认的2 MiB单文件上限，导致大型3D游戏（如《鸣潮》）每次启动都重新编译着色器 | `device.mk` |
 | 音频延迟 | **5 ms FastMixer低延迟通路**（`patches/android/hardware-interfaces/0008` + `patches/kernel/audio/0013` + `crdroid-tree-fixes.py`） | 原来85 ms一块时没有FastMixer，游戏的低延迟请求批不下来，应用输出延迟约317 ms。播放块现为5 ms（`ro.vendor.audio.primary.out_latency_ms=5`，`mixPeriod=5.00 ms`），按块数申请缓冲的游戏（如PJSK申请两个块），轨道缓冲也随之缩小；内核`q6apm-dai`的播放period步长同时改为240帧，否则ALSA缓冲不会跟着缩短 | `device.mk`、`kernel-apply-patches.sh`、`crdroid-tree-fixes.py` |
 | 音频延迟 | **播放缓冲3个period**（`patches/android/hardware-interfaces/0011`） | ALSA播放缓冲切成3个period（3 × 240帧 = 15 ms）；录音方向仍为4个，不影响采集钩子与降噪（`ro.vendor.audio.primary.out_period_count=3`）。与上一行合计：按PJSK的申请方式，应用按时间戳算出的输出延迟中位约21.5 ms（10 ms块、3 × 480帧时为43.7 ms），扬声器和有线耳机相同 | `device.mk`、`crdroid-tree-fixes.py` |
-| 触摸响应 | **`game`触摸预设** | 关闭坐标平滑（减少约25 ms稳态滞后）、debounce设为1帧、关闭手掌位置图（避免贴屏幕边缘平放的拇指被当成手掌撤回）。可在"设置 → 显示 → 触摸模式"切换 | `bin/gaokun3-touch-mode.sh`，详见[`palm-rejection.md`](palm-rejection.md) |
+| 触摸响应 | **`game`触摸预设** | 关闭手掌位置图（`hand_enabled=0`，避免贴屏幕边缘平放的拇指被当成手掌撤回；驱动侧引入一欧滤波后，`daily`与`game`预设均保持`SMOOTH=0`、`DEB=1`、`JUMP=0`）。可在“设置 → 显示 → 防误触模式”或快捷设置“防误触”磁贴切换（关闭防误触即`game`预设） | `bin/gaokun3-touch-mode.sh`，详见[`palm-rejection.md`](palm-rejection.md) |
 | 内存 | **zram交换空间**（`mmd.zram.enabled=true`） | 没有交换空间时，内存压缩只能回收文件页，进程正在执行的代码页也会被逐出；压缩全部系统进程时会反复逐出SurfaceFlinger、audioserver、音频HAL的代码页，造成约1秒的画面剧烈掉帧和扬声器爆音。现由mmd在开机完成时配置zram（lz4，大小为内存的一半） | `device.mk` |
 | 调度 | **后台cpuset限在`0-3`** | 将`background`和`system-background`限制在4个能效核，避免后台任务与前台游戏争抢大核 | `device/huawei/gaokun3/` |
 | 调度 | **Power HAL（lineage-libperfmgr）** | 触摸、启动应用、游戏加载时提高top-app的uclamp下限，HWUI等的ADPF会话按帧耗时调整线程的uclamp；RT任务不再一运行就把整簇CPU拉到最高频率 | `device/huawei/gaokun3/power/`，详见[`power/README.md`](../../device/huawei/gaokun3/power/README.md) |
@@ -23,7 +23,7 @@
 
 ## 2. 按应用UID伪装内核版本（`patches/kernel/core/0008`）
 
-在1.0.0-rc.2和rc.3中，旧版`patches/kernel/core/0008`直接覆写全局`init_uts_ns`，导致全系统都读到`6.6.30-android15-8-g0a4d3c12b3`。但这会让系统组件也误以为运行在6.6内核上（例如crDroid 17的`netd`在读到6.6版本时会启用未在主线7.2上验证过的L4S BPF路径，`BpfHandler.cpp:174-178`），在`adb shell`和系统设置中也看不到真实内核版本。
+在1.0.0-rc.2和rc.3中，旧版`patches/kernel/core/0008`直接覆写全局`init_uts_ns`，导致全系统都读到`6.6.30-android15-8-g0a4d3c12b3`。但这会让系统组件也误以为运行在6.6内核上（例如crDroid 13 / Android 17的`netd`在读到6.6版本时会启用未在主线7.2上验证过的L4S BPF路径，`BpfHandler.cpp:174-178`），在`adb shell`和系统设置中也看不到真实内核版本。
 
 因此现行方案改为**仅对应用UID返回设定的版本串**，可在"设置 → 系统 → 内核版本伪装"中开关或修改，重启后生效：
 

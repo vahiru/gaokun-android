@@ -7,6 +7,7 @@
 若设备上已运行本项目的Android系统，可直接从`/vendor/firmware/`拉取：
 
 ```bash
+mkdir -p /tmp/fw
 adb pull /vendor/firmware /tmp/fw
 cp -r /tmp/fw/firmware/* device/huawei/gaokun3/firmware/
 ```
@@ -23,7 +24,7 @@ cp -r /tmp/fw/firmware/* device/huawei/gaokun3/firmware/
 | `ath11k/WCN6855/hw2.0/{amss,board-2,m3,regdb}.bin` | WCN6855 Wi-Fi固件（`board-2.bin`需补充板级数据名称，见下文） | `linux-firmware` ≥ 20241210 |
 | `qcom/sc8280xp/HUAWEI/gaokun3/qcadsp8280.mbn`<br>`qccdsp8280.mbn`<br>`qcslpi8280.mbn` | ADSP / CDSP / SLPI远端处理器固件 | 华为Windows驱动包 |
 | `qcom/sc8280xp/HUAWEI/gaokun3/audioreach-tplg.bin` | Audioreach声卡拓扑（构建前需运行`micarray/tplg-four-channel-capture.py`开启四声道采集上限，详见[`../micarray/README.md`](../micarray/README.md)） | `audioreach-topology` / 驱动包 |
-| `qcom/sc8280xp/HUAWEI/gaokun3/qcvss8280.mbn` | Iris / Venus硬件视频解码固件 | 华为Windows驱动包 |
+| `qcom/sc8280xp/HUAWEI/gaokun3/qcvss8280.mbn` | Iris / Venus硬件视频编解码固件 | 华为Windows驱动包 |
 | `qcom/sc8280xp/HUAWEI/gaokun3/{adspr,adspua,battmgr,cdspr}.jsn` | `pd-mapper`服务映射表 | 华为Windows驱动包 |
 
 **Wi-Fi板级数据名称**：放入`board-2.bin`后，还需在仓库根目录运行：
@@ -47,11 +48,13 @@ unzip -o 200.0.10.0.zip 'qc*.cab' 'Qc*.cab' 'gfspi.cab'
 | 所需文件 | 所在cab包 |
 |---|---|
 | `qcslpi8280.mbn`、`RSCS.bin` | `qcsubsys_ext_scss8280.cab` |
-| `qcadsp8280.mbn`、`RADS.bin` | `qcsubsys_ext_adsp8280.cab` |
-| `qccdsp8280.mbn`、`RCDS.bin` | `qcsubsys_ext_cdsp8280.cab` |
+| `qcadsp8280.mbn` | `qcsubsys_ext_adsp8280.cab` |
+| `qccdsp8280.mbn` | `qcsubsys_ext_cdsp8280.cab` |
 | 传感器配置JSON、`sns_reg_config`、`socinfo` | `qcSensorsConfigQrd8280.cab` |
 | 指纹可信应用`fingerpr.mbn`（详见[`docs/dev/fingerprint-driver-design.md`](../../../../docs/dev/fingerprint-driver-design.md)） | `QcTreeExtOem8280.cab` |
 | `gfspi.dll`（用于导出Goodix配置模板，见第四节） | `gfspi.cab` |
+
+第二节表中其余源自华为Windows驱动包的固件（`qcdxkmsuc8280.mbn`、`qcvss8280.mbn`及`{adspr,adspua,battmgr,cdspr}.jsn`）同样位于`200.0.10.0.zip`内的对应高通cab归档中。
 
 ## 四、指纹TA与Goodix配置模板
 

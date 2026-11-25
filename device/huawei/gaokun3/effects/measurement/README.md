@@ -45,7 +45,7 @@ python windows/digital_response.py noise-flat.wav lb-noise-win.wav --csv win-dig
 
 ```bash
 # 使用NDK clang交叉编译eqscan.c：
-$NDK/toolchains/llvm/prebuilt/*/bin/aarch64-linux-android34-clang -O2 android/eqscan.c -I.. -o eqscan -ldl
+$NDK/toolchains/llvm/prebuilt/*/bin/aarch64-linux-android34-clang -O2 android/eqscan.c -I.. -o eqscan -ldl -lm
 adb push eqscan /data/local/tmp/
 adb shell /data/local/tmp/eqscan /data/local/tmp/eqscan-out 3   # 场景3 (SWS_SPK_LANDSCAPE_TWO)
 adb pull /data/local/tmp/eqscan-out ./eqscan-out
@@ -71,7 +71,7 @@ python3 analysis/win_vs_android.py --win data/win-digital-response.csv \
 
 1. **整体增益差约`+12 dB`**：数字域实测`@1 kHz`相差`+12.27 dB`，声学域双机位外录实测相差`+11.6 dB`，两者吻合，证实未加载音效插件时Android侧响度偏低源于缺少Windows侧软件音效链与功放增益配置。
 2. **频响形状差异**：Windows APO链在116–145 Hz存在凹陷、185 Hz存在峰值、590 Hz与3300 Hz存在窄谷；而Histen引擎默认场景表在110–230 Hz为`+13`至`+15 dB`平台，需配合后置LR4高通滤波器（HPF）与EQ槽位联合整形。
-3. **EQ槽位标定（`eqscan`，`R² >= 0.999`）**：场景3下槽`1..8`有效，中心频率依次为`120 / 220 / 560 / 1100 / 2200 / 3700 / 4600 / 14000 Hz`，槽`0/9/10`无响应；参数按无符号整数解析，`1`单位约等于`0.0801 dB`，`>= 204`会被`Init`拒绝（返回`-145`）。
+3. **EQ槽位标定（`eqscan`，`R² >= 0.999`）**：场景3下槽`1..8`有效，按槽号顺序中心频率依次为`120 / 560 / 2200 / 3700 / 4600 / 1100 / 220 / 14000 Hz`，槽`0/9/10`无响应；参数按无符号整数解析，`1`单位约等于`0.0801 dB`，`>= 204`会被`Init`拒绝（返回`-145`）。
 4. **HPF截止频率与失真保护**：
    - `win_vs_android.py`求解器仅评估`--grid-lo`（默认90 Hz）以上的频响残差，不包含振膜非线性失真（THD）约束。
    - 实测表明，若将HPF从150 Hz降至90 Hz，40–60 Hz频段净抬升达`+12.6`至`+15.5 dB`，显著增加微型扬声器冲程与破音风险；而在150 Hz LR4高通下，150 Hz处的THD从`-2.7 dB`降至`-26.8 dB`。因此ROM默认部署保持`HPF = 150 Hz`、`makeup = +4 dB`、WSA883x `PA Volume = 21`（内核驱动上限为`23`，即`+9 dB`）。

@@ -2,14 +2,14 @@
 
 本目录实现运行在音频HAL播放钩子中的内置扬声器DSP处理库（`libgaokunspeakerfx.so`）。它在AudioFlinger完成所有音轨（含媒体、系统音及低延迟`FAST`游戏音轨）混音后、写入ALSA PCM之前对48 kHz立体声缓冲做实时低音增强、谐波合成、分频段动态控制与串扰消除。
 
-- **开关与模式协同**：由「设置 → 提示音和振动 → 扬声器音效」的对话框控制，选项为「关闭」「低音增强」「华为Histen」，默认关闭。总开关是`persist.sys.gaokun3.histen`，引擎是`persist.sys.gaokun3.speakerfx.engine`。选择「低音增强」（`bass`）时由本库处理；选择「华为Histen」（`histen`）时，则本库保持逐比特直通，改由会话级音效（[`../effects/README.md`](../effects/README.md)）接管。两个属性均由[`etc/histen.rc`](../etc/histen.rc)镜像至`vendor.gaokun3.*`供HAL读取。
+- **开关与模式协同**：由「设置 → 提示音和振动」中「高级」分组下的「扬声器音效」对话框控制，选项为「关闭」「低音增强」「华为Histen」，默认关闭。总开关是`persist.sys.gaokun3.histen`，引擎是`persist.sys.gaokun3.speakerfx.engine`。选择「低音增强」（`bass`）时由本库处理；选择「华为Histen」（`histen`）时，则本库保持逐比特直通，改由会话级音效（[`../effects/README.md`](../effects/README.md)）接管。两个属性均由[`etc/histen.rc`](../etc/histen.rc)镜像至`vendor.gaokun3.*`供HAL读取。
 - **作用范围**：仅处理内置扬声器（ALSA `card 0` / `device 1`），有线耳机、蓝牙与USB音频一律直通。
 
 ## 一、设计背景：为何置于音频HAL层
 
 主输出流开启`FastMixer`后（`patches/android/hardware-interfaces/0008`），AudioFlinger禁止在挂载低延迟`FAST`音轨的会话上启用非硬件加速的软件effect（`checkEffectCompatibility_l`）。使用AAudio/OpenSL ES低延迟通路的音乐游戏（如Project SEKAI）音频均走`FAST`轨，会话级effect无法覆盖。
 
-将处理钩子置于音频HAL的`StreamPrimary`写盘出口有两个优势：
+将处理钩子置于音频HAL的`StreamPrimary`播放输出出口有两个优势：
 1. 能够覆盖包括`FAST`音轨在内的全部扬声器输出；
 2. 借用WSA数字混音器6 dB余量（见第三节）期间，所有发声通道均受同一个`-1 dBFS`前瞻限幅器保护，不会出现系统提示音或游戏音效因未过限幅器而意外暴涨6 dB的问题。
 
@@ -19,6 +19,7 @@
 |---|---|
 | `patches/android/hardware-interfaces/0009-audio-aidl-primary-playback-hook.patch`（及`crdroid-tree-fixes.py`） | 在`StreamPrimary`开流时按`ro.vendor.audio.primary.playback_hook`动态加载处理库，在每块PCM数据写入ALSA前原地调用处理回调 |
 | `speakerfx.cpp`（`libgaokunspeakerfx.so`） | 钩子入口：识别内置扬声器PCM、轮询属性开关与调参旋钮、管理WSA数字音量余量借还与增益补偿。安装于`/vendor/lib64/soundfx/`（由`patches/android/hardware-interfaces/0005`向音频HAL APEX链接器命名空间放行） |
+| `echo_reference.h` | 无锁扬声器回声参考环形缓冲接口（`playback_hook_echo_reference()`），供[`micarray/`](../micarray/README.md)通话AEC3读取远端参考信号 |
 | `bass_chain.h` | DSP信号处理核心实现 |
 | `bass_chain_coeffs.h`、`gen_bass_coeffs.py` | 虚拟低音谐波生成所用的90°全通移相网络系数及其确定性生成脚本（依赖`numpy`与`scipy`） |
 | [`bin/audio-route.sh`](../bin/audio-route.sh) | 开机设置混音器后将扬声器数字音量基准值写入`vendor.gaokun3.audioroute.spkdig` |
@@ -36,7 +37,7 @@
 
 ## 三、WSA数字混音器余量借用机制
 
-启用WSA端口映射补丁（`0113`–`0115`）后，内置扬声器的`WSA_RX0/RX1 Digital Volume`基准值为`78`（`-6 dB`）。为给低频瞬态留出充足动态范围，本库在工作期间会临时借用这6 dB余量：
+启用WSA端口映射补丁（`patches/kernel/audio/0007`、`0008`与`patches/kernel/dts/0016`）后，内置扬声器的`WSA_RX0/RX1 Digital Volume`基准值为`78`（`-6 dB`）。为给低频瞬态留出充足动态范围，本库在工作期间会临时借用这6 dB余量：
 
 - **借还时机**：扬声器流打开且低音增强处于启用状态时，将`WSA_RX0/RX1 Digital Volume`提升至`84`（`0 dB`单位增益）；当最后一个借用余量的流进入待机或关闭时，恢复为`vendor.gaokun3.audioroute.spkdig`记录的基准值（`78`）。
 - **链内增益补偿**：处理库每100 ms回读一次混音器实际值，将超出基准值的增益从链内`makeup`中扣除（若播放中途关闭开关或切换至Histen，则对直通样本施加等量衰减）。因此人声与中高频的主观响度始终与基准状态保持一致，多出的6 dB物理余量仅分配给受限幅器约束的低频峰值。

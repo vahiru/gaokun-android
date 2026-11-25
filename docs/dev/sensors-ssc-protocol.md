@@ -109,7 +109,7 @@ Protobuf层常用`msg_id`（`libssc/src/libssc-sensor*-private.h`）：
 
 | `data_type` | 物理芯片 | 状态与注意事项 |
 | --- | --- | --- |
-| `accel` | SH3001 | 正常，平放Z轴约9.88 m/s²，`accuracy=3`。出厂安装矩阵随Windows校准分区丢失而全零，退回单位矩阵后方向与本机面板天然一致 |
+| `accel` | SH3001 | 正常，平放Z轴约9.88 m/s²，`accuracy=3`。出厂安装矩阵随Windows校准分区丢失而全零，SSC上报的是芯片自身（面板竖屏）坐标轴；由于Android自然方向为横屏（`rotation = <90>`），`sensors-hal`在上报`accel`与`gyro`时显式做90°旋转（`x = -y`、`y = x`、`z`不变） |
 | `gyro` | SH3001 | 正常，静止各轴约0 rad/s，`accuracy=3`。配合`accel`由Android框架融合出Game Rotation Vector、Gravity、Linear Acceleration |
 | `ambient_light` | TCS3701 | 注册了两个SUID：流类型为1（DRI变化上报，`57069a9c48dd76bdef49dfb91c177728`，默认返回项）是驱动内部主实例，向其发送使能请求会触发SEE框架`SNS_ASSERT(req_found)`导致SLPI崩溃重启；**只能使能流类型为0（连续上报，`57069a9c48dd768def497fb916377829`）的提供者**（查询SUID时必须显式设`only_default_values=false`并按属性16筛选） |
 | `mag` / `rotv` / `proximity` | — | 本机无磁力计硬件，SSC不提供`mag`、`rotv`及`proximity`（查询失败不会污染会话） |

@@ -11,9 +11,9 @@
 | ALSA设备 | 前端DAI | 后端DAI | 物理编解码器与外设 | 用途 |
 |---|---|---|---|---|
 | `hw:0,0` | `MultiMedia1` | `RX_CODEC_DMA_RX_0` | WCD9380/9385（SoundWire） | 3.5mm有线耳机输出 |
-| `hw:0,1` | `MultiMedia2` | `WSA_CODEC_DMA_RX_0` | 双路WSA8830功放（SoundWire） | 机身四扬声器输出 |
+| `hw:0,1` | `MultiMedia2` | `WSA_CODEC_DMA_RX_0` | 双路WSA8830功放（SoundWire） | 机身左右双扬声器输出 |
 | `hw:0,2` | `MultiMedia3` | `TX_CODEC_DMA_TX_3` | WCD9380/9385 ADC2 | 有线耳麦麦克风输入 |
-| `hw:0,3` | `MultiMedia4` | `VA_CODEC_DMA_TX_0` | LPASS VA Macro DMIC0/1 | 机身内置双数字麦克风输入 |
+| `hw:0,3` | `MultiMedia4` | `VA_CODEC_DMA_TX_0` | LPASS VA Macro DMIC0–DMIC3 | 机身内置四数字麦克风阵列输入 |
 
 ### 2. 必须内建（`=y`）的内核配置
 
@@ -25,20 +25,21 @@
 
 ## 二、扬声器、有线耳机与混音器配置（`audio-route.sh`）
 
-开机时由`init.gaokun3.rc`触发`/vendor/bin/audio-route.sh`配置ALSA混音器路由。
+开机时由`/vendor/etc/init/audioroute.rc`（`device/huawei/gaokun3/etc/audioroute.rc`）触发`/vendor/bin/audio-route.sh`配置ALSA混音器路由。
 
-### 1. 扬声器通路与防破音/防爆音（`patches/kernel/audio/0001`）
+### 1. 扬声器通路与防破音/防爆音（`patches/kernel/audio/0001`、`0007`、`0008`、`patches/kernel/dts/0016`）
 
 - **路由控件**：
   ```
   WSA_CODEC_DMA_RX_0 Audio Mixer MultiMedia2 = 1
-  WSA RX0 Mux = AIF1_PB, WSA RX1 Mux = AIF1_PB
+  WSA RX0 MUX = AIF1_PB, WSA RX1 MUX = AIF1_PB
   WSA_RX0 INP0 = RX0, WSA_RX1 INP0 = RX1
+  WSA_COMP1 Switch = 1, WSA_COMP2 Switch = 1
   SpkrLeft COMP Switch = 1, SpkrRight COMP Switch = 1
   SpkrLeft DAC Switch = 1, SpkrRight DAC Switch = 1
   ```
 - **数字增益与模拟功放增益分离**：
-  - `WSA_RX0 Digital Volume`与`WSA_RX1 Digital Volume`必须保持在**`84`（0 dB单位增益）**。若将其抬高至90（+6 dB），满幅信号会在数字域直接硬削顶，产生约−20 dB的三次谐波失真（刺耳破音）。
+  - `WSA_RX0 Digital Volume`与`WSA_RX1 Digital Volume`不得高于`84`（0 dB单位增益），否则满幅信号会在数字域直接硬削顶，产生约−20 dB的三次谐波失真（刺耳破音）。引入动态DRE与WSA静态端口映射（`patches/kernel/audio/0007`、`0008`与`dts/0016`）后，`audio-route.sh`将基准数字音量设为**`78`（−6 dB）**（并关闭`VISENSE`；仅旧内核回退至`84`），由[`speakerfx/`](../../device/huawei/gaokun3/speakerfx/README.md)与[`effects/`](../../device/huawei/gaokun3/effects/README.md)（低音增强 / 华为Histen）按需管理后处理与余量。
   - 响度提升通过WSA8830的模拟功放增益`SpkrLeft/Right PA Volume`实现。根据内核`wsa883x.c`的TLV定义（`0..14`固定为−3 dB，`15..29`每档+1.5 dB），上游机器驱动`sc8280xp.c`原本调用`snd_soc_limit_volume(card, "SpkrLeft PA Volume", 17)`将上限锁在17（0 dB）。`patches/kernel/audio/0001`将该上限放宽至23（+9 dB），`audio-route.sh`在运行期将其设为**`21`（+6 dB）**，在不触发数字削顶的前提下获得充足外放音量。
 - **消除启停流爆音（Pop）**：
   - `SpkrLeft BOOST Switch`与`SpkrRight BOOST Switch`控制WSA8830的Boost SoundWire数据端口，与模拟PA增益无关。启用该开关会在每次音频流启动/停止时引发明显的瞬态电流冲击声（Pop），而稳态音量完全不变。因此`audio-route.sh`显式将其保持为`0`（关闭）。
@@ -68,29 +69,30 @@
 - **耳机插拔检测与HAL动态端口填充**：
   1. **Framework输入事件检测**：主线内核`wcd938x` MBHC通过`/dev/input/event*`上报`SW_HEADPHONE_INSERT`与`SW_MICROPHONE_INSERT`，不创建旧版`/sys/class/switch/h2w`。设备树overlay必须设置`config_useDevInputEventForAudioJack = true`，`WiredAccessoryManager`才能收到插拔事件。
   2. **策略XML与`ModulePrimary`修复（`patches/android/hardware-interfaces/0001`）**：
-     - 在`audio_policy_configuration.xml`中，可热插拔设备端口（`Wired Headphones`、`Wired Headset`、`Wired Headset Mic`）不可写死`address="CARD_0_DEV_0"`，因为`WiredAccessoryManager`构造连接通知时固定传入`address=""`，写死非空地址会导致策略引擎匹配不到模板端口而丢弃事件。省略`address`后，AOSP默认ALSA地址解析自动回退至`(card=0, device=0)`。
+     - 在`audio/primary_audio_policy_configuration.xml`（由`audio_policy_configuration.xml`引入）中，可热插拔设备端口（`Wired Headphones`、`Wired Headset`、`Wired Headset Mic`）不可写死`address="CARD_0_DEV_0"`，因为`WiredAccessoryManager`构造连接通知时固定传入`address=""`，写死非空地址会导致策略引擎匹配不到模板端口而丢弃事件。省略`address`后，AOSP默认ALSA地址解析自动回退至`(card=0, device=0)`。
      - AOSP `libaudiohal@aidl`的`ModulePrimary`继承自基类空实现`Module::populateConnectedDevicePort`（不会像USB/蓝牙子类那样探测硬件填充采样率与通道掩码），而`setDeviceConnectionState`要求连接后的端口必须带有非空`profiles`。`patches/android/hardware-interfaces/0001`在`ModulePrimary`中重写`populateConnectedDevicePort`，当目标端口`profiles`为空时直接复用模板端口声明的`profile`列表。
 
 ## 三、内置麦克风录音修复（`patches/android/hardware-interfaces/0002`、`0003`、`0004`）
 
 ### 1. 混音器路由
 
-内置双数字麦克风通过LPASS VA Macro采集至`MultiMedia4`（`hw:0,3`）：
+内置四数字麦克风通过LPASS VA Macro采集至`MultiMedia4`（`hw:0,3`），基础双路路由如下（配合`patches/kernel/audio/0011`、`0012`及扩展后的四声道拓扑可同步采集`DMIC0`–`DMIC3`，供[`micarray/`](../../device/huawei/gaokun3/micarray/README.md)三麦固定波束成形、WebRTC AEC3回声消除与[`denoise/`](../../device/huawei/gaokun3/denoise/README.md) CDSP NPU降噪使用）：
 
 ```
 MultiMedia4 Mixer VA_CODEC_DMA_TX_0 = 1
-VA DEC0 MUX = MSM_DMIC, VA DEC1 MUX = MSM_DMIC
+VA_AIF1_CAP Mixer DEC0 = 1, VA_AIF1_CAP Mixer DEC1 = 1
+VA DEC0 MUX = VA_DMIC, VA DEC1 MUX = VA_DMIC
 VA DMIC MUX0 = DMIC0, VA DMIC MUX1 = DMIC1
-TX_DEC0 Volume = 102, TX_DEC1 Volume = 102
+VA_DEC0 Volume = 112, VA_DEC1 Volume = 112
 ```
 
 ### 2. 三处用户态HAL修复
 
 1. **ALSA设备地址解析（`patches/android/hardware-interfaces/0002`）**：
-   `XsdcConversion.cpp`在处理`AUDIO_DEVICE_IN_BUILTIN_MIC`时无条件将XML中的`address`覆写为`"bottom"`，抹掉了`audio_policy_configuration.xml`中配置的`"bottom CARD_0_DEV_3"`，导致HAL回退去打开并不存在采集流的`hw:0,0`。`patches/android/hardware-interfaces/0002`保留带有`CARD_x_DEV_y`后缀的自定义地址。
+   `XsdcConversion.cpp`在处理`AUDIO_DEVICE_IN_BUILTIN_MIC`时无条件将XML中的`address`覆写为`"bottom"`，抹掉了`audio/primary_audio_policy_configuration.xml`中配置的`"bottom CARD_0_DEV_3"`，导致HAL回退去打开并不存在采集流的`hw:0,0`。`patches/android/hardware-interfaces/0002`保留带有`CARD_x_DEV_y`后缀的自定义地址。
 2. **输入Profile约束与移除假MMAP输入**：
-   - `hw:0,3`（`MultiMedia4`）的Audioreach拓扑仅支持`48000 Hz` + 双声道（`AUDIO_CHANNEL_IN_STEREO`）。若在XML中声明`16000`/`44100`或`AUDIO_CHANNEL_IN_MONO`，HAL会直接以不支持的参数调用`pcm_open`并失败。将其收敛为`48000` + `AUDIO_CHANNEL_IN_STEREO`后，`AudioFlinger`会自动为请求16 kHz单声道的应用插入重采样与声道转换。
-   - 移除XML中的`mmap_no_irq_in`端口（AOSP `ModulePrimary`对该标志实例化的是只产生随机白噪声的`StreamInMmapStub`测试桩）。
+   - `hw:0,3`（`MultiMedia4`）向Android框架统一声明`48000 Hz` + 双声道（`AUDIO_CHANNEL_IN_STEREO`；启用`micarray`采集钩子后，钩子内部以4通道打开`hw:0,3`并向框架交付双声道或单声道结果）。若在XML中声明`16000`/`44100`或直接不经重采样下发不支持的参数，ALSA `pcm_open`会失败；收敛为`48000` + `AUDIO_CHANNEL_IN_STEREO`后，`AudioFlinger`会自动为请求16 kHz单声道的应用插入重采样与声道转换。
+   - 移除`audio/primary_audio_policy_configuration.xml`中的`mmap_no_irq_in`端口（AOSP `ModulePrimary`对该标志实例化的是只产生随机白噪声的`StreamInMmapStub`测试桩）。
 3. **消除周期性丢块与启动静音（`patches/android/hardware-interfaces/0003`、`0004`）**：
    - AOSP `StreamAlsa`的采集线程每10 ms从ALSA读取480帧写入容量为3840帧（8块）的`MonoPipe`，但其内部的`OffsetProvider`设置`setpoint = capacity / 2`，将写入速率钳制在平均每11.25 ms一块，导致每8块必然溢出丢弃1块。`patches/android/hardware-interfaces/0003`将采集`MonoPipe`容量翻倍。
    - AOSP `StreamPrimary::transfer`原本对采集流也按墙钟休眠（`sleep`）定拍，而非按ALSA硬件就绪数据驱动，造成开头约171 ms全零静音与124 ms交付延迟。`patches/android/hardware-interfaces/0004`将采集方向的`transfer`改为直接在`mAlsaDeviceProxy->read()`上阻塞等待硬件数据就绪，启动静音降至0 ms、单次交付耗时降至约1 ms。
@@ -100,15 +102,15 @@ TX_DEC0 Volume = 102, TX_DEC1 Volume = 102
 1. **`tinyalsa`周期重算修复（`patches/android/tinyalsa/0001`）**：
    AOSP `libaudiohal@aidl`请求打开`hw:0,1`时传入`period_size=1024, period_count=4`，而内核`q6apm-dai`要求period是固定步长的整数倍（当时为480帧），在`SNDRV_PCM_IOCTL_HW_REFINE`中将`period_size`向上取整为`1440`（`buffer_size=5760`）。然而`external/tinyalsa_new/src/pcm.c`的`pcm_set_config()`仍用修改前的`1024`计算`sw_params.stop_threshold = 4096`。当环形缓冲区剩余帧数达到`5760 - 4096 = 1664`帧时，ALSA立即误判XRUN并中断流，引发持续爆音与断流。`patches/android/tinyalsa/0001`修正`pcm_set_config()`以内核返回的实际`period_size`计算`buffer_size`与`stop_threshold`。
 2. **移除假MMAP输出端口**：
-   与输入侧同理，从`audio_policy_configuration.xml`中移除`mmap_no_irq_out`（对应的`StreamOutMmapStub`会把走AAudio MMAP路径的游戏音频静默丢弃）。
+   与输入侧同理，从`audio/primary_audio_policy_configuration.xml`中移除`mmap_no_irq_out`（对应的`StreamOutMmapStub`会把走AAudio MMAP路径的游戏音频静默丢弃）。
 3. **播放方向取消墙钟跳帧（`patches/android/hardware-interfaces/0006`）**：
    AOSP示例实现`StreamPrimary::transfer`在播放方向同样维护一条合成墙钟：一旦上层混音线程唤醒稍晚，HAL就打印`skipping transfer`并将整块音频直接丢弃，导致音乐游戏出现严重的节奏漂移与吞音。`patches/android/hardware-interfaces/0006`在播放方向当ALSA proxy就绪时直接调用阻塞式ALSA写入，由声卡硬件时钟自然反压上层混音线程。
 4. **播放缓冲只用3个period（`patches/android/hardware-interfaces/0011`）**：
    alsa_utils给内置设备配ALSA缓冲时，period数统一取`ro.hardware.audio.tinyalsa.period_count`（默认4），播放和录音共用。`patches/android/hardware-interfaces/0011`在`openProxyForAttachedDevice()`里只对输出设备改用`ro.vendor.audio.primary.out_period_count`（`device.mk`设3）：块大小不变，只是切成3个period，内核`q6apm-dai`再按播放period步长向上取整。播放块为5 ms（`ro.vendor.audio.primary.out_latency_ms=5`）时得到3 × 240帧（15 ms）。录音方向保持4个，因为采集钩子在I/O线程里处理85 ms的块（通话降噪最长约51 ms才回退），这段时间新来的数据要靠录音缓冲接住。播放不能再减到2个：DSP缺数据时会扣着最后一个period不放，ALSA不会报XRUN，FastMixer与轨道的欠载计数也都是0，断音只能在游戏里听出来。
 5. **播放period步长240帧（`patches/kernel/audio/0013`）**：
    主线`q6apm-dai`把播放和录音的period与缓冲都限制为480帧（10 ms）的整数倍，注释称是为了适应DSP的限制。这样HAL即使改用5 ms的块，ALSA缓冲仍至少是3 × 480帧。实测SC8280XP的ADSP播放5 ms的period没有问题：扬声器（`MultiMedia2`，WSA codec DMA）和有线耳机（`MultiMedia1`，RX codec DMA）用3 × 240帧在游戏里都没有断音，扬声器上声学回环测得的时间戳误差与10 ms时相同。DSP真正需要的是排队的period多于两个，所以`0011`的3个period仍然必要。录音保持480帧。
-   代价：HAL写入时DSP手上剩两个period，即10 ms，原来是20 ms，FastMixer或HAL写线程偶尔停顿超过10 ms就可能断音，而且没有计数器能看到。primary是唯一的输出，息屏放音乐等所有播放都按5 ms的周期运行，FastMixer和HAL的唤醒次数翻倍，对续航的影响尚未经实测。
-   `0013`必须与`out_latency_ms=5`一起使用：内核还是480帧步长时，period会被取整到480帧，缓冲并不缩短；内核是240帧步长、播放块却是10 ms时，ALSA是3 × 240帧而HAL一次写入两个period，DSP手上可能只剩一个period，有断音风险，尚未经实测。若发布后出现断音，可先把`out_period_count`改为4（4 × 240帧，已测无断音），不必改内核。
+   代价：HAL写入时DSP手上剩两个period，即10 ms，原来是20 ms，FastMixer或HAL写线程偶尔停顿超过10 ms就可能断音，而且没有计数器能看到。primary是唯一的输出，息屏放音乐等所有播放都按5 ms的周期运行，FastMixer和HAL的唤醒次数翻倍，对续航的影响尚未实测。
+   `0013`必须与`out_latency_ms=5`一起使用：内核还是480帧步长时，period会被取整到480帧，缓冲并不缩短；内核是240帧步长、播放块却是10 ms时，ALSA是3 × 240帧而HAL一次写入两个period，DSP手上可能只剩一个period，有断音风险，尚未实测。若发布后出现断音，可先把`out_period_count`改为4（4 × 240帧，已测无断音），不必改内核。
 
 ## 五、蓝牙耳机通话（HFP软件数据通路，`patches/android/hardware-interfaces/0012`）
 
@@ -137,8 +139,8 @@ TX_DEC0 Volume = 102, TX_DEC1 Volume = 102
 
 ### 4. 已知限制
 
-- 只支持CVSD的窄带耳机尚未经实测；LC3超宽带需要耳机支持，也尚未经实测。
-- 通话中由耳机断开SCO（例如在耳机上把声音切回平板）尚未经实测。HAL端口不会因此离开启动状态；耳机主动断开时，框架（A17默认开启`android.media.audio.bt_audio_disconnect_api`）取消蓝牙路由，改走默认的通信设备（平板的扬声器与麦克风）。链路超时等其他原因断开时，框架收不到通知。
+- 只支持CVSD的窄带耳机尚未实测；LC3超宽带需要耳机支持，也尚未实测。
+- 通话中由耳机断开SCO（例如在耳机上把声音切回平板）尚未实测。HAL端口不会因此离开启动状态；耳机主动断开时，框架（A17默认开启`android.media.audio.bt_audio_disconnect_api`）取消蓝牙路由，改走默认的通信设备（平板的扬声器与麦克风）。链路超时等其他原因断开时，框架收不到通知。
 - HFP端口进入`DISABLED`后不会自动恢复：蓝牙音频会话在SCO设备仍连接时重启（`session_changed_cb`），或HAL无法向会话发出启动请求、挂起失败后，通话没有声音，直到耳机重新连接。示例HAL原本在收到`BT_SCO=on`时恢复端口，SCO由音频托管时这个参数不会到达。
 - 同时连接ASHA助听器与蓝牙耳机时，耳机状态机下发的耳机名称、WBS等参数会让助听器的输出流停止传输，直到重新打开。这是示例HAL原有的问题（`bluetoothParametersUpdated()`不认助听器会话，A2DP与LE Audio的挂起参数也会触发），蓝牙模块声明SCO端口后，耳机状态机下发的参数也会到达它。
 
@@ -146,11 +148,11 @@ TX_DEC0 Volume = 102, TX_DEC1 Volume = 102
 
 ### 1. 从`qcom-venus`迁移至`qcom-iris`
 
-在Linux 6.18+/7.x主线内核中，高通为Gen2 HFI硬件（含SC8280XP / SM8450 / SM8550）引入了全新的`qcom-iris`驱动（`drivers/media/platform/qcom/iris/`），替代旧版`qcom-venus`。
+在Linux 6.18+/7.x主线内核中，高通引入了全新的`qcom-iris`驱动（`drivers/media/platform/qcom/iris/`），统一支持Gen1 HFI（含SC8280XP / VPU2）与Gen2 HFI（SM8450 / SM8550等）硬件，替代旧版`qcom-venus`。
 
 - **内核配置与固件**：启用`CONFIG_VIDEO_QCOM_IRIS=y`（禁用`CONFIG_VIDEO_QCOM_VENUS`），设备树`video-codec@aa00000`指定固件`qcom/sc8280xp/HUAWEI/gaokun3/qcvss8280.mbn`。
 - **Android Codec2集成**：
-  - 使用`android.hardware.media.c2@1.2-service-v4l2`（通过属性`media.c2.hal.selection=aidl`告知`MediaCodec`连接AIDL/HIDL服务）。
+  - 使用纯AIDL服务`android.hardware.media.c2-service-v4l2`（通过属性`media.c2.hal.selection=aidl`告知`MediaCodec`连接AIDL服务），并部署扩展seccomp策略`device/huawei/gaokun3/etc/media-c2-extended-seccomp.policy`（安装至`/vendor/etc/seccomp_policy/android.hardware.media.c2-extended-seccomp_policy`，放行`eventfd2`及`bugreport`/崩溃转储所需的`getppid`、`uname`，缺失时会触发`SIGSYS`）。
   - 注册解码器组件：`c2.v4l2.avc.decoder`（H.264）、`c2.v4l2.hevc.decoder`（HEVC / H.265）、`c2.v4l2.vp9.decoder`（VP9）。实测单路实时解码：3840x2160的HEVC（含10位）与VP9到120 fps，H.264在3840x2160下到60 fps、在2560x1440下到120 fps；`media_codecs_c2.xml`按此申报`blocks-per-second`与性能点（H.264 4K@60与2560x1440@120，HEVC与VP9 4K@120）。Media3等应用按性能点判断帧率，原来只申报4K@30时，60 fps以上的视频会交给软解。一个性能点只覆盖帧尺寸、帧率与宏块速率都不超过它的格式，所以H.264的4K@60无法覆盖1080p@120，另申报2560x1440@120。
   - 注册编码器组件：`c2.v4l2.avc.encoder`（H.264）、`c2.v4l2.hevc.encoder`（HEVC Main与Main 10），见本节第3小节。
 
@@ -229,13 +231,13 @@ TX_DEC0 Volume = 102, TX_DEC1 Volume = 102
 
 - `device.mk`：`ro.vendor.v4l2_codec2.encoder.supported.h264`、`.hevc`设为`true`，`ro.vendor.v4l2_codec2.encode_concurrent_instances=3`（AVC与HEVC共用这一个计数，需`kernel/iommu/0002`、`kernel/iris/0034`与`kernel/dts/0026`）。VP8/VP9编码iris没有，保持关闭。
 - `media_codecs_c2.xml`：两个编码器的`<Encoders>`条目，`concurrent-instances`为3。尺寸和吞吐量上限按4K30申报，偏保守：视频编解码硬件的核心时钟上限为444 MHz（见`kernel/dts/0035`），单路裸V4L2编码在输入预先填好时3840x2160约160 fps（4096x2176按像素数折算约150 fps）；逐帧在CPU上填充时受填充速度限制，1080p约380 fps。
-- 组件rank是0x80，排在软编（0x200）前面。第四个编码请求在分配组件时被拒（`maximum number of instances reached`，返回资源不足）。`MediaCodec`遇到资源不足会先请资源管理器从优先级更低的进程收回一个硬件编解码器（解码器也算在内）再重试，收不回才试下一个编码器，落到`c2.android.*`软编。因此按框架代码，优先级更高的一方会让优先级较低的应用失去编解码器（`ERROR_RECLAIMED`），尚未经实测；优先级不高于对方时，才会直接换软编。原生进程（例如shell里的`screenrecord`）既不会收回别人的编码器，也不会被收回。硬件编码器配置失败时，`MediaRecorder`同样会换下一个编码器；自己调用`configure`的应用拿到的是错误。
+- 组件rank是0x80，排在软编（0x200）前面。第四个编码请求在分配组件时被拒（`maximum number of instances reached`，返回资源不足）。`MediaCodec`遇到资源不足会先请资源管理器从优先级更低的进程收回一个硬件编解码器（解码器也算在内）再重试，收不回才试下一个编码器，落到`c2.android.*`软编。因此按框架代码，优先级更高的一方会让优先级较低的应用失去编解码器（`ERROR_RECLAIMED`），尚未实测；优先级不高于对方时，才会直接换软编。原生进程（例如shell里的`screenrecord`）既不会收回别人的编码器，也不会被收回。硬件编码器配置失败时，`MediaRecorder`同样会换下一个编码器；自己调用`configure`的应用拿到的是错误。
 - 验证：`scripts/verify-hw-codec2.sh`检查属性、编码节点属主、`cp-nonpixel: CB15 ready`和组件列表，亮屏时用`screenrecord --codec-name c2.v4l2.avc.encoder`在1280x720和640x480各真编一段。
 
 #### 已知限制
 
 - **同时最多3路编码**：内核有8个ARP槽位，`v4l2_codec2`按3路限制。固件出错重载时，所有正在进行的编解码会话一起报错。
 - **HEVC Main 10与HDR10编码**：只有HEVC提供10位档次，H.264不提供。Main 10编码的宽度最多为4096，与编码器申报的尺寸上限相同。HLG与D65白点的P3无法写入码流的色彩描述，只记录在容器中。8位编码不写色彩描述。RGB输入在10位会话中按8位sRGB内容处理；输入格式为10位RGB（`RGBA_1010102`）时无法编码；10位YUV（P010）输入不受影响。
-- **系统录屏**：系统录屏按30 fps申报，横屏录2560x1600，竖屏按解码器的能力缩到1360x2176（竖屏尚未经实测），默认用硬件H.264编码器，打开“HEVC编码”时用硬件HEVC编码器，不会换用软编。输入是可变帧率，滑动画面时可有接近120 fps的突发。`adb shell screenrecord`不带`--size`时会改用1280x720重试。
+- **系统录屏**：系统录屏按30 fps申报，横屏录2560x1600，竖屏按解码器的能力缩到1360x2176（竖屏尚未实测），默认用硬件H.264编码器，打开“HEVC编码”时用硬件HEVC编码器，不会换用软编。输入是可变帧率，滑动画面时可有接近120 fps的突发。`adb shell screenrecord`不带`--size`时会改用1280x720重试。
 - **很小的尺寸**：宽或高按驱动的对齐（128x32）之后仍小于128时（例如160x90），内核在申请缓冲时拒绝（`current session not supported`），应用在开始编码时拿到错误。原始尺寸小于128、对齐后不小于128的（例如160x120、100x100），固件能正常编码，并在SPS里写明裁剪。
 - **唤醒后偶发一次无输出**：休眠唤醒后紧接着编码，偶尔会有一次固件把每一帧都不带码流地返回，持续二三十秒，随后的编码自行恢复。内核记录`encoder frame without bitstream`告警（`patches/kernel/iris/0025`），组件按丢帧处理，连续丢30帧时向应用报错（`patches/android/v4l2-codec2/0017`）。原因不明。

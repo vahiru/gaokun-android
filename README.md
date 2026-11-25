@@ -7,7 +7,7 @@ Unofficial port of crDroid 13 for Huawei MateBook E Go (gaokun3).
 <p align="center">
   <a href="https://t.me/gaokunAndroid"><img alt="Telegram channel: gaokunAndroid" src="https://img.shields.io/badge/Telegram-gaokunAndroid-26A5E4?logo=telegram&logoColor=white"></a>
   <a href="https://qm.qq.com/q/3VIV2KY6o0"><img alt="QQ group: 920133252" src="https://img.shields.io/badge/QQ%20Group-920133252-12B7F5?logo=qq&logoColor=white"></a>
-  <a href="https://github.com/vahiru/gaokun-android/releases/tag/v1.0.0-rc.4"><img alt="Latest release: 1.0.0-rc.4" src="https://img.shields.io/badge/Latest-1.0.0--rc.4-yellow"></a>
+  <a href="https://github.com/vahiru/gaokun-android/releases/tag/v1.0.0-rc.5"><img alt="Latest release: 1.0.0-rc.5" src="https://img.shields.io/badge/Latest-1.0.0--rc.5-yellow"></a>
 </p>
 
 ## Status
@@ -27,32 +27,32 @@ The table below shows how the main features work in the current version. See the
 |---|:--:|---|
 | Boot and system updates | ✅ | Seamless A/B system updates |
 | Factory reset | ⚠️ | Not yet tested on hardware; to wipe the device, reinstall with the Live installer |
-| Display | ✅ | 120 Hz, factory-calibrated colour, wide colour gamut and HDR |
+| Display | ✅ | 120 Hz, factory-calibrated colour, wide colour gamut, HDR and experimental force activity embedding |
 | GPU | ✅ | Hardware acceleration and Vulkan |
-| Touchscreen | ✅ | Everyday and game modes can be switched in Settings; everyday mode suppresses accidental palm touches while writing and the like |
+| Touchscreen | ✅ | Accidental touch protection can be enabled under Settings → Display to suppress accidental palm touches while writing with the stylus |
 | Stylus (M-Pencil) | ✅ | Compatible with second- and third-generation M-Pencils; supports pressure, hover, tilt and the side double-tap, with adjustable stroke smoothing and 4096 pressure levels |
 | Detachable keyboard and touchpad | ✅ | |
 | Wi-Fi | ✅ | |
 | Wi-Fi hotspot | ✅ | |
-| Bluetooth | ⚠️ | Bluetooth headsets can be used for media and calls; calls in apps have not been tested yet |
+| Bluetooth | ✅ | |
 | Speakers | ✅ | Bass enhancement or Huawei Histen can be turned on in Settings |
 | Microphones | ✅ | Beamforming, with echo cancellation and noise suppression that can be switched per scenario |
 | Headphones | ⚠️ | The microphone of a wired headset has not been tested yet |
-| USB audio | ⚠️ | USB headsets and USB sound cards have not been tested yet |
-| Battery and charging | ⚠️ | Because of the high base power draw of the machine, the battery may drain while on a low-power source, and the tablet may shut down without warning when the battery runs low |
+| Battery and charging | ✅ | |
 | Standby | ✅ | About 0.5 W in standby, about three days on a full charge |
-| Push notifications | ⚠️ | In sleep, FCM can wake the system and deliver messages promptly; apps that do not use FCM receive their messages at the next system wake-up, usually a minute or two late |
-| Sensors | ✅ | Accelerometer and ambient light sensor work, with auto-rotate and auto-brightness; there is no magnetometer |
-| Games | ⚠️ | Genshin Impact runs smoothly at the highest settings, Arknights, Delta Force and others run; League of Legends: Wild Rift starts. **Playing games that come with ACE framework or other anti-cheat mechanisms on this system may get your account banned** |
-| Video playback | ✅ | Hardware decoding, including 10-bit and HDR video |
-| Video encoding | ⚠️ | H.264 and HEVC hardware encoding, used for camera recording and the built-in screen recorder; up to three streams at a time use the hardware |
-| Camera | ✅ | Hardware ISP; both cameras take photos, record up to 1080p video and support digital zoom and exposure compensation, and the rear camera supports autofocus |
-| USB-C | ⚠️ | File transfer and network sharing with a computer, USB flash drives and external displays work; occasionally the USB-C port does not work after a boot until a restart, the cause is still under investigation |
+| Push notifications | ⚠️ | In sleep, FCM can wake the system and deliver messages promptly; apps that do not use FCM (such as WeChat and QQ) receive their messages at the next system wake-up, usually a minute or two late |
+| Sensors | ✅ | Accelerometer, gyroscope and ambient light sensor work, with auto-rotate and auto-brightness; there is no magnetometer |
+| Games | ⚠️ | Genshin Impact runs smoothly at the highest settings, Arknights, Delta Force and others run; League of Legends: Wild Rift starts; gamepads are supported. **Playing games that come with ACE framework or other anti-cheat mechanisms on this system may get your account banned** |
+| Thermals and CPU scheduling | ✅ | |
+| Video playback | ✅ | Hardware decoding for H.264, HEVC and VP9 |
+| Video encoding | ✅ | Hardware encoding for H.264 and HEVC |
+| Camera | ✅ | |
+| USB-C | ⚠️ | Currently only the left USB-C port supports device role; the right port always stays in host mode |
 | Fingerprint | ⚠️ | Enrolment, screen unlock and verification in apps work (Goodix and FocalTech sensors); fingerprint payment in WeChat Pay, Alipay and similar apps does not work |
-| Location | ❌ | No GPS hardware, satellite positioning is not available |
+| Location | ❌ | No GPS hardware |
 | TPM | ❌ | Not supported |
 | Video copy protection (DRM) | ❌ | Widevine is not included, paid streaming content such as Netflix does not play |
-| Root | ⚠️ | ReSukiSU is built into the kernel; apps that detect root may refuse to run |
+| Root | ⚠️ | ReSukiSU is built into the kernel |
 | Chinese input method | ✅ | fcitx5 is preinstalled |
 
 ## Hardware
@@ -78,7 +78,7 @@ There are two installers to choose from:
 | How it runs | Inside the Windows installed on the machine | Started from a USB drive or from the installer partition on the internal disk |
 | System installation files | The latest release is downloaded, or files you have already downloaded are used | Carried on the installation media; no network is used during installation |
 | Where to get it | The `Windows installer` releases on the [Releases](https://github.com/vahiru/gaokun-android/releases) page | The `Live installer` releases on the [Releases](https://github.com/vahiru/gaokun-android/releases) page |
-| Latest version | [Windows installer 0.2.0](https://github.com/vahiru/gaokun-android/releases/tag/windows-installer-v0.2.0) | [Live installer 0.2.0](https://github.com/vahiru/gaokun-android/releases/tag/live-installer-v0.2.0) |
+| Latest version | [Windows installer 0.2.1](https://github.com/vahiru/gaokun-android/releases/tag/windows-installer-v0.2.1) | [Live installer 0.2.0 (v1.0.0-rc.5)](https://github.com/vahiru/gaokun-android/releases/tag/live-installer-v0.2.0-for-v1.0.0-rc.5) |
 
 Default partition layout after erasing the entire disk:
 
@@ -103,19 +103,12 @@ The table below lists the limitations to keep in mind in daily use. The full exp
 
 | Topic | What it means | What to do |
 |---|---|---|
-| Data encryption | The user data partition is not encrypted: anyone who has the machine can read all data on it, and the lock screen cannot stop that | Don't keep sensitive data on it; before selling or sending it in for repair, reinstall and wipe it with the Live installer |
-| Root | ReSukiSU is built into the kernel and cannot be disabled; it stays dormant until the manager app is installed. Apps that detect root may refuse to run; once adb root is enabled in the manager, any computer authorized for USB debugging gets root through adb | Don't enable adb root unless you need it; only authorize computers you trust, and disable USB debugging and wireless debugging when not in use |
-| System signing | The system and its updates are signed with Android's public test keys, so anyone can build an update package or a system app this device will accept | Update only through System update in Settings or this project's release page, and don't install "system components" of unknown origin |
-| Boot security | Secure Boot must be disabled, the boot chain is unlocked, and system partitions are not integrity-checked | This is what running Android on this machine requires; there is no way around it |
-| Factory reset | *Erase all data* in Settings has not been tested; don't rely on it | Wipe the device with the Live installer's *Reinstall Android* |
-| Rolling back | Once a new version has booted successfully, the previous version is merged away and cannot be restored; major version updates also upgrade user data | Back up important data before updating |
-| Google certification | The device is not Play Protect certified, so the Play Store works properly only after you register it by hand; Play Integrity cannot pass, so apps that depend on it (Google Wallet, some banking apps) do not work | Register it once, following the [installation guide](docs/INSTALL.md#this-device-isnt-play-protect-certified) |
-| Use in mainland China | The system ships only Google apps and no Chinese app store; without access to Google, the Play Store, Google services and network location do not work | Download app packages from the apps' official sites or the web versions of app stores |
-| Kernel version | To pass some apps' environment checks, apps are told a disguised kernel version | Turn it off or change it in Settings → System → Kernel version spoofing |
-| Audio and Bluetooth | Users have reported sound and Bluetooth both stopping after a long uptime; the cause is still under investigation | Restart to recover; when reporting it, attach `/data/vendor/gaokun3/hangdump-*` (reading it needs root) |
+| Data encryption | `/data` is not encrypted: anyone who has the machine can read all data on it | Do not store sensitive data on it |
+| Root | ReSukiSU is built into the kernel; once the manager app is installed, some apps that detect root may refuse to run | Use at your own discretion |
+| Boot security | Secure Boot must be disabled | This is required to run a third-party OS on this machine; there is no way around it |
+| Google certification | The device is not Play Protect certified, so the Play Store works properly only after you register it manually | Register it once, following the [installation guide](docs/INSTALL.md#this-device-isnt-play-protect-certified) |
+| Use in mainland China | The system ships only Google apps and no Chinese app store | Use a third-party app store such as CoolApk |
 | Connecting to a computer | With some computers, the tablet may end up powering the computer, and neither side sees the other | Unplug and plug in again, or use another port on the computer |
-| USB-C port | After plugging and unplugging devices (mostly after standby), the USB-C port may stop working until a restart | Restart; until then, use adb and file transfer over Wi-Fi |
-| Low-power sources | On a computer's USB port or a small charger, the tablet may show *charging* while the battery still drains, and it switches off hard when the battery is empty | Use a charger with enough power, watch the battery percentage and save your work in time |
 
 ## Contributing
 

@@ -5,8 +5,8 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thank you for testing. Many features have only been tried on one or two machines, so every result helps. The "Needs testing on real hardware" section of [docs/TODO.md](https://github.com/vahiru/gaokun-android/blob/main/docs/TODO.md) lists what is still waiting for someone to try.
-        感谢你帮忙测试。很多功能只在一两台机器上试过，每一份结果都有帮助。还在等人测试的项目，列在[docs/TODO.md](https://github.com/vahiru/gaokun-android/blob/main/docs/TODO.md)的"需要在实机上核对的改动"一节。
+        Thank you for testing. Many features have only been tried on one or two machines, so every result helps. See [docs/TODO.md](https://github.com/vahiru/gaokun-android/blob/main/docs/TODO.md) for open tasks and known issues.
+        感谢你帮忙测试。很多功能只在一两台机器上试过，每一份结果都有帮助。待办事项和已知问题见[docs/TODO.md](https://github.com/vahiru/gaokun-android/blob/main/docs/TODO.md)。
 
   - type: input
     id: subject
@@ -33,7 +33,7 @@ body:
     attributes:
       label: Version / 版本
       description: The release you installed, or the output of `adb shell getprop ro.build.date.utc`. / 安装的版本，或`adb shell getprop ro.build.date.utc`的输出。
-      placeholder: "v1.0.0-rc.3"
+      placeholder: "v1.0.0-rc.5"
     validations:
       required: true
 
@@ -65,4 +65,4 @@ body:
       label: Logs or measurements / 日志或测量数据
       description: |
         Optional, but helpful when something does not work. The [FAQ](https://github.com/vahiru/gaokun-android/blob/main/docs/FAQ.md) explains how to collect logs; the kernel log from around the moment of the test is usually the most useful.
-        可选；功能不正常时尤其有帮助。抓取日志的方法见[常见问题](https://github.com/vahiru/gaokun-android/blob/main/docs/FAQ.zh-CN.md)，测试前后的内核日志通常最有用。
+        可选；功能不正常时尤其有帮助。获取日志的方法见[常见问题](https://github.com/vahiru/gaokun-android/blob/main/docs/FAQ.zh-CN.md)，测试前后的内核日志通常最有用。

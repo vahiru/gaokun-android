@@ -20,5 +20,5 @@
 2. **`toybox devmem`输出格式**：Android内置`toybox devmem`默认以十进制输出结果（例如`00000487`代表`0x1E7`），读取时需注意进制转换。
 3. **`crashdec`版本号识别**：使用Mesa `crashdec`解析主线内核产生的devcoredump时，若遇到`revision: 0 (06090000)`，可替换为`revision: 690 (6.9.0.0)`以便解析器识别Adreno 690寄存器定义。
 4. **Mesa Android属性命名规则**：环境变量`TU_DEBUG`在Android属性系统中对应`debug.mesa.tu.debug`（`mesa.`前缀并将下划线转为点号）。
-5. **切勿设置`msm.enable_preemption=0`**：主线`msm_submitqueue.c`中对该参数的判断逻辑相反，传入`0`反而会放行未完成的抢占路径。
+5. **`msm.enable_preemption`参数语义**：主线`msm_submitqueue.c`中对该参数的判断逻辑与名称相反。当前A690抢占已由`patches/kernel/drm/0016`默认启用（`nr_rings = 4`），调试时如需临时关闭抢占（退回`nr_rings = 1`），可传入`msm.enable_preemption=0`（见`patches/mesa/0013`说明）。
 6. **停用`/vendor/etc/init/`下的rc文件**：Android `init`会解析`/vendor/etc/init/`目录下的所有文件（不限于`.rc`扩展名），将文件重命名为`.rc.off`仍会被加载，停用时需移出该目录。

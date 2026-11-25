@@ -27,7 +27,7 @@ bash installer/tools/build/build-live.sh --release <发布目录> --firmware <�
    - `CONFIG_SQUASHFS=y`（挂载只读根文件系统）。
    - `CONFIG_NTFS3_FS=y`（双系统安装前只读挂载Windows分区，检查Windows是否处于休眠，同时显式禁用旧版`CONFIG_NTFS_FS`）。
    - `CONFIG_NLS_UTF8=y`（支持FAT32上的非ASCII文件名）。
-   - `CONFIG_ISO9660_FS=y`（ISO整个写入U盘后，从ISO9660分区读取`live.squashfs`）。rc.3及之前的内核尚未开启，带上它的ROM发布之前，正式构建会被拒绝。
+   - `CONFIG_ISO9660_FS=y`（ISO整个写入U盘后，从ISO9660分区读取`live.squashfs`）。已自`v1.0.0-rc.4`起在内核中开启；若传入`rc.3`及更早未开启该项的`boot.img`，正式构建会被拒绝。
 2. **`initramfs`动态查找介质**：
    `initramfs-init`不依赖固定的分区标签或UUID，而是先扫描可移动介质、再扫描内置盘，寻找包含`/gaokun3/live.squashfs`的分区。
    找到介质后，先把`gaokun3/`（`live.squashfs`与安装文件`payload/`）整个复制进内存（tmpfs，复制完改为只读）再卸下介质分区，内存副本同样挂在`/media/gk3`。U盘与内置盘的处理相同：复制成功时，启动完成后可以拔下U盘，照常安装；内置盘上的安装器分区（免U盘安装时的`GK3LIVE`）可以在清除整个磁盘时保留，安装完成后将其删除并入`/data`（见[`installer/backend/src/linux/live.h`](../../installer/backend/src/linux/live.h)）。介质带有安装文件时约需复制1.5 GB，从较慢的U盘启动时会多等约一分钟。内存不足（`gaokun3/`的大小加2 GiB）或复制失败时照旧直接挂载介质，此时U盘须保持插入；内核参数`gk3.toram=0`可关闭复制。U盘上的分区即使卷标为`GK3LIVE`也不视为安装器分区（`gk3l`只认内置盘上的）。介质信息记入`/run/gaokun3/medium`（`/run`在initramfs中挂好后整体移入新根），`gk3l`据此识别介质。

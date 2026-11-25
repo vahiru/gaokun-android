@@ -15,16 +15,15 @@
 ```text
 tools/gk3boot/
 ├── core/                  # libgk3core：纯C11、零堆分配、宿主/UEFI/Android共用的盘上格式与决策库
-│   ├── include/gk3/       # 公共头文件（types/endian/crc32/sha1/gpt/bcb/bcab/vab/gk3rec/bootimg/cmdline/select/dispatch/dual）
+│   ├── include/gk3core.h  # 单一公共头文件（类型、小端读写、CRC32/SHA-1、GPT/BCB/BCAB/VAB/GK3记录、Boot Image、cmdline、选槽、分派与双系统）
 │   ├── src/               # 实现文件
 │   └── Android.bp         # sync-device-tree.sh同步至device/huawei/gaokun3/gk3core/供boot_control HAL静态链接
 ├── misc/
-│   └── gk3-misc.c         # 命令行工具：dump / select / set-active / verify-boot / init / mark-poweroff / set-next / set-default
+│   └── gk3-misc.c         # 命令行工具：dump / select / gpt / bootimg / init / mark-poweroff / set-next / set-default
 ├── efi/
-│   ├── include/           # 最小UEFI ABI声明（零外部头文件依赖）
-│   ├── lib/               # UEFI控制台、日志、BlockIo选盘、文件读写、变量读写、Linux EFI Stub交接（H2）
+│   ├── lib/               # gk3efi.{c,h}：基于gnu-efi的UEFI控制台、日志、文件与变量读写封装
 │   ├── probe/             # gk3probe.efi：只读硬件探针（枚举BlockIo、GPT、misc、boot_x、Watchdog与ResetSystem）
-│   └── boot/              # gk3boot.efi：统一启动入口（observe观察模式 / action动作模式）
+│   └── boot/              # gk3boot.efi：统一启动入口（BlockIo选盘、observe/action模式、Linux EFI Stub交接handoff.{c,h}）
 ├── fastbootd/             # gk3-fastbootd：Fastboot协议守护进程与--wipe-data / --clear-bcb子命令
 ├── initramfs/             # fastboot.img构建脚本、PID 1 (/init) 与按键/状态/字体辅助工具gk3-fbi
 ├── test/                  # 单元测试（libgk3core）、AOSP对照测试、HAL宿主测试、postinstall测试、fastbootd测试与实机向量
@@ -33,9 +32,9 @@ tools/gk3boot/
 
 ### 代码约束（`libgk3core`）
 
-- 纯C11（`-std=c11`），仅依赖`<stdint.h>`、`<stddef.h>`、`<stdbool.h>`，可在宿主（glibc/musl/macOS）、UEFI（`-ffreestanding -mno-red-zone`）与Android vendor（`cc_library_static`）间直接共用。
+- 纯C11（`-std=c11`），仅依赖`<stdint.h>`、`<stddef.h>`、`<stdbool.h>`，可在宿主（glibc/musl/macOS）、UEFI（`-ffreestanding -fno-builtin -mgeneral-regs-only`，EFI侧另含`-mstrict-align`）与Android vendor（`cc_library_static`）间直接共用。
 - 无动态内存分配（不调用`malloc`/`free`），所有缓冲区由调用方在栈或静态区提供。
-- 所有盘上结构采用显式小端字节序读写（`gk3/endian.h`），并附带`_Static_assert`尺寸断言。
+- 盘上格式不直接映射C结构体，均采用显式小端字节序读写（`core/include/gk3core.h`），并在`gk3rec.c`中通过`_Static_assert`断言字段偏移与边界。
 - 对外纯函数输入输出均为`const uint8_t *` / `uint8_t *`，不直接发起I/O。
 
 ## 2. 盘上格式与选槽规则
@@ -60,11 +59,10 @@ tools/gk3boot/
 | `0..3` | 4 | `slot_suffix[4]` | 固定`"a\0\0\0"`或`"_a\0\0"`（实现只读槽数组，写回时保留原字段；初始化写`"_a\0\0"`） |
 | `4..7` | 4 | `magic` | 小端`0x42414342`（`"BCAB"`） |
 | `8` | 1 | `version` | `1` |
-| `9` | 1 | `nb_slot` | `2` |
-| `10..11` | 2 | `recovery_tries_remaining` | 保留 |
-| `12..15` | 4 | `slot_info[0]`（`_a`） | `priority`（0..15）、`tries_remaining`（0..7）、`successful_boot`（0/1）、`verity_corrupted`、`reserved` |
-| `16..19` | 4 | `slot_info[1]`（`_b`） | 同上 |
-| `20..27` | 8 | `reserved` | 保留 |
+| `9..10` | 2 | 位域（`u16`） | `nb_slot[0:2]`（`=2`）、`recovery_tries_remaining[3:5]`、`merge_status[6:8]` |
+| `11` | 1 | `reserved0[1]` | 保留 |
+| `12..19` | 8 | `slot_info[4]` | 每槽`u16`（`_a`在`12..13`，`_b`在`14..15`，其余两槽在`16..19`）：`priority[0:3]`（0..15）、`tries_remaining[4:6]`（0..7）、`successful_boot[7]`、`verity_corrupted[8]`、`reserved[9:15]` |
+| `20..27` | 8 | `reserved1[8]` | 保留 |
 | `28..31` | 4 | `crc32_le` | 前28字节的IEEE 802.3 CRC32（`zlib::crc32(0, buf, 28)`） |
 
 槽可启动条件：`priority > 0 && (successful_boot != 0 || tries_remaining > 0)`。
@@ -73,42 +71,44 @@ tools/gk3boot/
 
 | 字节范围 | 大小 | 字段 | 说明 |
 |---|---|---|---|
-| `0..7` | 8 | `magic[8]` | `"GK3BOOT\0"` |
-| `8..9` | 2 | `version` | 小端`1` |
-| `10..11` | 2 | `size` | 小端`2048` |
-| `12..15` | 4 | `flags` | bit0=`migrated`（已完成BCB首跑迁移），bit1=`fallback_pending`，bit2=`clean_poweroff` |
-| `16..19` | 4 | `boot_streak` | 连续未收到Android开机完成确认的启动次数（入口动作模式`+1`，HAL开机完成清零） |
-| `20` | 1 | `last_slot` | 上次入口选择的槽（`0`=无，`1`=`_a`，`2`=`_b`） |
-| `21` | 1 | `last_why` | 上次决策原因（`gk3_why_t`） |
-| `22` | 1 | `next_kind` | 一次性意图（`0`=无，`1`=`sdboot-menu`，`2`=`slot`，`3`=`windows`） |
-| `23` | 1 | `next_arg` | `next_kind=slot`时的目标槽（`1`=`_a`，`2`=`_b`） |
-| `24..25` | 2 | `dispatch_ver` | 完成首跑迁移时的分派规则版本（`GK3_DISPATCH_VER = 1`） |
-| `26` | 1 | `bcb_wipe_tries` | 同一份`wipe` BCB已分派给执行端的次数（上限3次） |
+| `0..3` | 4 | `magic` | 小端`0x52334B47`（`"GK3R"`） |
+| `4..5` | 2 | `version` | 小端`1` |
+| `6..7` | 2 | `size` | 小端`2048` |
+| `8..11` | 4 | `flags` | bit0=`migrated`（已完成BCB首跑迁移），bit1=`in_fallback`（上一次为回退启动），bit2=`clean_poweroff` |
+| `12..15` | 4 | `dispatch_ver` | 完成首跑迁移时的分派规则版本（`GK3_DISPATCH_VER = 1`） |
+| `16..19` | 4 | `seq` | 事件序号计数（`u32`小端） |
+| `20` | 1 | `boot_streak` | 连续未收到Android开机完成确认的启动次数（入口动作模式`+1`，HAL开机完成清零） |
+| `21` | 1 | `next_kind` | 一次性意图（`0`=none，`1`=sdboot-menu，`2`=slot，`3`=windows） |
+| `22` | 1 | `next_slot` | `next_kind=slot`时的目标槽（`0`=`_a`，`1`=`_b`） |
+| `23` | 1 | `dispatch_why` | 最近一次分派的BCB类型（`gk3_bcb_kind`） |
+| `24` | 1 | `dispatch_slot` | 最近一次分派时的目标槽 |
+| `25` | 1 | `dispatch_count` | 同一份BCB连续分派给执行端的次数（wipe上限3次） |
+| `26` | 1 | `ev_head` | 事件环下一个写入位置 |
 | `27` | 1 | `ok_streak` | 已标成功槽连续未开机完成的次数（达`GK3_BOOTLOOP_THRESHOLD = 5`进执行端菜单） |
-| `28..47` | 20 | `bcb_wipe_sha1[20]` | 当前计数对应的BCB前2 KiB SHA-1摘要 |
-| `48..79` | 32 | `entry_ver[32]` | 最近一次运行的`gk3boot`版本字符串（NUL结尾） |
-| `80..335` | 256 | `note[256]` | 最近一次异常或回退摘要（ASCII，NUL结尾） |
-| `336..351` | 16 | `event_seq` / `event_notified_seq` | 事件环形缓冲写序号与HAL已通知序号（各`uint64_t`小端） |
-| `352..355` | 4 | `bcb_seen_crc` | 分派关闭时最近一次已记录`bcb_ignored`事件的BCB CRC32 |
-| `356..359` | 4 | `bcb_disp_crc` | 分派开启时最近一次分派的BCB CRC32 |
-| `360` | 1 | `set_default` | 待由入口应用的默认系统请求（`0`=无，`1`=Android，`2`=Windows） |
-| `361` | 1 | `default_os` | 入口最近一次观测到的默认系统（`0`=未知，`1`=Android，`2`=Windows） |
-| `362..511` | 150 | `reserved` | 置零 |
-| `512..2043` | 1532 | `events[16]` | 16条×92字节事件环 + 60字节置零保留 |
+| `28..47` | 20 | `dispatch_digest[20]` | 分派时BCB前2 KiB的SHA-1摘要 |
+| `48..67` | 20 | `migrated_digest[20]` | 首跑迁移时被清除的BCB的SHA-1摘要 |
+| `68..99` | 32 | `migrated_command[32]` | 首跑迁移时被清除的BCB `command`原文 |
+| `100..355` | 256 | `migrated_recovery[256]` | 首跑迁移时被清除的BCB `recovery`原文（截断） |
+| `356..359` | 4 | `bcb_seen` | 分派关闭时最近一次已记录`bcb_ignored`事件的BCB摘要标识（`u32`） |
+| `360` | 1 | `set_default` | 待由入口应用的默认系统请求（`0`=无，`1`=Windows，`2`=Android） |
+| `361` | 1 | `default_os` | 入口最近一次观测到的默认系统缓存（`0`=未知，`1`=Android，`2`=Windows） |
+| `362..1023` | 662 | `reserved` | 置零保留（向后兼容扩展区） |
+| `1024..1535` | 512 | `events[32]` | 32条×16字节事件环（每条：`seq u32` / `code u16` / `slot u8` / `flags u8` / `aux u32` / `reserved u32`） |
+| `1536..2043` | 508 | `reserved` | 置零保留 |
 | `2044..2047` | 4 | `crc32_le` | 前2044字节的CRC32 |
 
 ### 2.4 选槽与BCB分派规则
 
-1. **强制槽（`gk3.slot=a|b`）**：仅用于调试，直接启动指定槽，不修改`misc`（等效于观察模式）。
-2. **正常选槽（`gk3_select`）**：
-   - 若BCAB CRC或头字段无效：使用`hint`槽（来自加载条目`gk3.hint=`或条目名，无则`_a`），不写BCAB，标记`event=misc_invalid`。
+1. **强制槽（`gk3.slot=a|b`）**：仅用于调试，直接启动指定槽；动作模式下跳过BCAB `tries_remaining`扣减与`noslot`/`merging`/`bootloop`跳转，但仍会更新`misc`中的GK3记录并写入ESP诊断日志（并非观察模式）。
+2. **正常选槽（`gk3_select_slot`）**：
+   - 若BCAB CRC或头字段无效：使用`hint`槽（来自加载条目`gk3.hint=`或条目名，无则`_a`），不写BCAB，标记`event=bcab_invalid`。
    - 若BCAB有效：选`priority`最高的可启动槽（平手取`_a`）。
    - 若最高优先级槽不可启动，但另一槽可启动：
      - 当VAB `merge_status == MERGING (3)`时，拒绝回退到旧槽，报`GK3_SEL_MERGING`（转执行端或fail-open）。
      - 否则回退到另一槽，记`event=fallback`。
    - 若两槽均不可启动：报`GK3_SEL_NOSLOT`。
 3. **扣减`tries_remaining`**：选中的槽若`successful_boot == 0 && tries_remaining > 0`，在动作模式下将`tries_remaining`减1并重算CRC32写回BCAB（写后读回校验）。已标成功的槽BCAB逐字节不动。
-4. **BCB分类与分派（`gk3_bcb_classify` / `gk3_dispatch_decide`）**：
+4. **BCB分类与分派（`gk3_bcb_classify` / `gk3_dispatch_plan`）**：
    - `command`为空：正常启动Android。
    - `bootonce-bootloader` / `boot-fastboot`：分派至执行端（`why=bootloader` / `why=fastboot`），进入前清空BCB。
    - `boot-recovery`：解析`recovery`字段行（首行跳过程序名）：
@@ -130,32 +130,32 @@ tools/gk3boot/
 | `gk3.observe` | `0` / `1` | `1`=观察模式（只读`misc`，仅写ESP日志，不改BCAB/BCB/GK3记录）；`0`=动作模式（缺省） |
 | `gk3.dispatch` | `0` / `1` | 是否启用BCB分派与异常进执行端（编译期缺省`0`） |
 | `gk3.hint` | `a` / `b` | 当前条目的槽提示（用于判定是否发生了回退，以及BCAB损坏时的回退目标） |
-| `gk3.slot` | `a` / `b` | 强制启动指定槽（强制观察模式） |
+| `gk3.slot` | `a` / `b` | 强制启动指定槽（动作模式下跳过`tries_remaining`扣减，仍更新GK3记录与ESP日志） |
+| `gk3.mid` | 32位小写hex | 指定ESP上的machine-id前缀（覆盖从条目名推断的值） |
 | `gk3.action` | `fastboot` / `menu` | 直接进入执行端（由`gk3boot-tools.conf`使用，不受`gk3.dispatch`开关限制） |
-| `gk3.hold` | `0..30` | fail-open复位前屏幕停留秒数（缺省`1`） |
-| `gk3.log` | `0` / `1` | 是否强制每回启动写ESP日志（缺省`0`，正常无事件启动实现ESP零写入） |
+| `gk3.hold` | `0..30` | fail-open复位前屏幕停留秒数（缺省`5`） |
 | `gk3.fbtcp` | `0` / `1` | 透传给执行端以开启TCP 5554调试端口 |
 
 ### 3.2 内核交接（H2：Linux EFI Stub + `LoadFile2` + `EfiDtbTableGuid`）
 
-1. **读取并校验`boot_x`**：从唯一定位的NVMe目标盘读取`boot_a`或`boot_b`分区，校验Android Boot Image Header v2，提取kernel、ramdisk、dtb切片，并计算SHA-1（3段各非空时哈希内容，为0时哈希4字节小端0；后面补5个32位0达8段）与头部的`id[0..19]`比对。
+1. **读取并校验`boot_x`**：从唯一定位的NVMe目标盘读取`boot_a`或`boot_b`分区，校验Android Boot Image Header v2，提取kernel、ramdisk、dtb切片，并按AOSP `mkbootimg`规范对5个分段（`kernel`、`ramdisk`、`second`、v1+ `recovery_dtbo`、v2 `dtb`）逐段哈希`data || le32(size)`，计算SHA-1并与头部的`id[0..19]`比对。
 2. **安装DTB与initrd**：
    - 将dtb拷贝至`EfiACPIReclaimMemory`并通过`InstallConfigurationTable(&EfiDtbTableGuid, ...)`注册。
    - 在新句柄上安装`EFI_DEVICE_PATH_PROTOCOL`（`LINUX_EFI_INITRD_MEDIA_GUID`）与`EFI_LOAD_FILE2_PROTOCOL`，由内核EFI Stub回调拉取ramdisk（Android启动时为`boot_x`的ramdisk；进入执行端时为`\EFI\gk3boot\<ver>\fastboot.img`）。
 3. **拼接cmdline**：
-   - Android路径：以`boot_x`内置cmdline为底，剔除冲突键后追加`androidboot.slot_suffix=_<a|b> androidboot.bootloader=gk3boot-<ver> androidboot.gk3boot.mode=<observe|action> androidboot.gk3boot.event=<...> androidboot.gk3boot.entry=<...> androidboot.gk3boot.streak=<N> [androidboot.gk3boot.dispatch=1] panic=10`。
+   - Android路径：以`boot_x`内置cmdline为底，剔除冲突键后追加`androidboot.slot_suffix=_<a|b> androidboot.bootloader=gk3boot-<ver> androidboot.gk3boot.mode=<observe|action> androidboot.gk3boot.event=<...> androidboot.gk3boot.entry=<...> androidboot.gk3boot.streak=<N> [androidboot.gk3boot.dispatch=1]`。
    - 执行端路径：剔除`androidboot.*`与`init=`，追加`panic=10 gk3.mode=fastboot gk3.why=<...> gk3.slot=<a|b> gk3.bootver=<ver> gk3.disk=<misc PARTUUID> gk3.esp=<ESP PARTUUID> [gk3.dispatch=1] [gk3.fbtcp=1]`。
-4. **启动内核**：对kernel切片调用`LoadImage( FALSE, ImageHandle, NULL, kernel_buf, kernel_sz, &kimg )`，设置`LoadedImage->LoadOptions`为UTF-16LE cmdline，在交接前调用`SetWatchdogTimer(0, ...)`撤除UEFI看门狗，然后调用`StartImage(kimg, ...)`。
+4. **启动内核**：对kernel切片调用`LoadImage(FALSE, ImageHandle, (EFI_DEVICE_PATH *)&kernel_dp, kernel_buf, kernel_sz, &kimg)`（`kernel_dp`为含`GK3_PAYLOAD_GUID`的Vendor Media Device Path），设置`LoadedImage->LoadOptions`为UTF-16LE cmdline，然后调用`StartImage(kimg, ...)`（UEFI看门狗随内核EFI Stub调用`ExitBootServices`自动关闭）。
 
 ### 3.3 Fail-Open故障退回机制
 
 若`gk3boot.efi`在选盘、读取`boot_x`、SHA-1校验或`LoadImage`/`StartImage`任一环节失败，或者遇到`MERGING`/`NOSLOT`且无可用执行端：
 
-1. 将诊断日志写入ESP `\EFI\gk3boot\log\boot-0.txt`（轮转保留`boot-0.txt`..`boot-3.txt`）。
+1. 将诊断日志顺序写入ESP `\EFI\gk3boot\log\boot-0.txt`..`boot-999.txt`（不覆盖旧文件，满1000个或ESP空余不足1 MiB时停写）。
 2. 在ESP `\loader\entries\`下查找目标槽的直连条目`<32位hex>-android-<a|b>.conf`（若不存在则尝试另一槽）。
 3. 向UEFI非易失变量写入`LoaderEntryOneShot`（GUID `4a67b082-0a4c-41cf-b6c7-440b29bb8c4f`，属性`NV|BS|RT = 0x7`）并读回核对。
 4. 调用`RT->ResetSystem(EfiResetCold, ...)`冷复位，由`systemd-boot`消费`LoaderEntryOneShot`直接引导ESP上的直连内核副本。
-5. 此外，部署的默认入口条目名带有`systemd-boot`启动计数后缀（`gk3boot-android-{a,b}+3.conf`，`sort-key 0gk3`）。若连续3次启动未进到Android完成祝福（重命名为不带`+N`的`.conf`），`systemd-boot`在第4次启动时会自动跳过`+0-3`条目，落到排序次之的直连条目`<mid>-android-{a,b}.conf`（`sort-key 1android`）。
+5. 此外，部署的默认入口条目名带有`systemd-boot`启动计数后缀（`gk3boot-android-{a,b}+3.conf`，`sort-key 0gk3`）。若连续3次启动未进到Android完成祝福（重命名为不带`+N`的`.conf`），`systemd-boot`在第4次启动时会自动跳过`+0-3`条目，落到排序次之的直连条目`<mid>-android-{a,b}.conf`（`sort-key zandroida` / `zandroidb`）。
 
 ## 4. Android侧集成
 
@@ -215,7 +215,7 @@ HAL在正常开机时先以**只读**方式挂载ESP比对文件状态；若条�
   - `set_active:<a|b>`要求：①VAB状态非`MERGING`；②目标槽`boot_x`为SHA-1校验通过的有效`boot.img`；③`super`的LpMetadata中目标槽至少含一个后缀为`_<x>`的逻辑分区；④目标槽当前可启动或本会话刚刷写过`boot_x`；⑤ESP上`slot_<x>`内核三件套齐全。
 - **恢复出厂与擦除（`erase:userdata|metadata` / `--wipe-data`）**：
   - VAB守卫：当`merge_status == MERGING`或处于待验证的新槽`SNAPSHOTTED`状态时拒绝擦除，清空BCB中的wipe请求并在GK3记录中写入`refused_merging`事件。
-  - 免确认条件：`gk3.why=wipe`、GK3记录已有`migrated`标记、BCB确为`wipe`且其SHA-1与`gk3boot.efi`分派时记录的`bcb_wipe_sha1`一致。满足时自动擦除并重启；从菜单手动进入、未迁移或摘要不匹配时均返回退出码`3`，由`/init`弹出二次确认界面（默认高亮`Cancel`）。
+  - 免确认条件：`gk3.why=wipe`、GK3记录已有`migrated`标记、`dispatch_why == GK3_BCB_WIPE`且`dispatch_count > 0`、BCB确为`wipe`且其SHA-1与`gk3boot.efi`分派时记录的`dispatch_digest`一致。满足时自动擦除并重启；从菜单手动进入、未迁移或摘要不匹配时均返回退出码`3`，由`/init`弹出二次确认界面（默认高亮`Cancel`）。
   - 擦除顺序：对`userdata`执行`BLKDISCARD`并将首尾各1 MiB写零读回，对`metadata`整块写零读回；两分区均确认完成后最后清空BCB，保证中途断电下次开机可重入完成擦除。
 
 ## 6. 双系统引导（Android + Windows）
@@ -236,7 +236,7 @@ HAL在正常开机时先以**只读**方式挂载ESP比对文件状态；若条�
 ### 7.1 宿主单元测试与脚本测试（无需Docker）
 
 ```bash
-# 编译libgk3core与gk3-misc并运行全部C单元测试（466条断言）
+# 编译libgk3core、gk3-misc与fastbootd并运行全部宿主测试（test_core在Linux下430条断言，macOS含实机向量466条）
 make -C tools/gk3boot check
 
 # 运行gk3-misc init与子命令独立校验测试
@@ -245,7 +245,7 @@ make -C tools/gk3boot misc-test
 # 运行fastbootd协议辅助单元（SHA-256 / sparse / LP元数据，32条断言）
 make -C tools/gk3boot fbd-unit
 
-# 运行boot_control HAL (Gk3Boot.cpp) 宿主场景测试（94条场景，含ASan+UBSan）
+# 运行boot_control HAL (Gk3Boot.cpp) 宿主场景测试（32个场景、94条断言，含ASan+UBSan）
 make -C tools/gk3boot hal-test
 
 # 运行gaokun3-ota-postinstall.sh多shell（mksh/dash/ksh）与HAL交叉测试（163条断言）
@@ -267,7 +267,7 @@ bash scripts/gk3boot/test-fastbootd.sh
 # 打包fastboot.img并在QEMU下运行11个initramfs界面、USB枚举与按键场景
 bash scripts/gk3boot/test-initramfs.sh
 
-# 运行gk3boot.efi + fastboot.img + gk3-fastbootd + 双系统全套25个QEMU端到端场景
+# 运行gk3boot.efi + fastboot.img + gk3-fastbootd + 双系统QEMU端到端场景（默认24个，传入BOOTIMG时含实机镜像共25个）
 bash scripts/gk3boot/test-executor.sh all
 ```
 

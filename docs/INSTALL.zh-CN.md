@@ -170,15 +170,23 @@ Live安装器启动时通常会把安装文件全部读入内存，此后可以�
 本系统不在Google的认证设备名单中，Play商店会提示"此设备未经Play保护机制认证"，部分应用在登记之前会拒绝安装。登记是免费的，每台设备只需要做一次：
 
 1. 在平板上登录Google账号。
-2. 读取设备的Android ID。目前需要在电脑上通过adb运行本仓库中的脚本：
+2. 读取设备的Android ID。先在电脑上运行`adb devices`获取设备序列号，再通过本仓库中的脚本读取：
 
    ```sh
-   bash scripts/google/gsf-android-id.sh
+   bash scripts/google/gsf-android-id.sh <设备序列号>
    ```
 
-   这个ID存放在Google Play服务的私有目录中，读取需要root权限。请先安装ReSukiSU管理器，为Shell授予root权限，脚本会自动使用它。adb的设置方法见[常见问题](FAQ.zh-CN.md)。
+   （1.0.0-rc.4起设备序列号为本机真实序列号，脚本无参默认尝试`gaokun3`会连接失败。）这个ID存放在Google Play服务的私有目录中，读取需要root权限。请先安装ReSukiSU管理器，为Shell授予root权限，脚本会自动使用它。adb的设置方法见[常见问题](FAQ.zh-CN.md)。
 3. 用同一个Google账号打开<https://www.google.com/android/uncertified/>，填入这个ID并登记。
 4. 等待几分钟，然后清除Google Play商店的存储数据（也可以运行`adb shell pm clear com.android.vending`）。
+
+登记之后，如果Play商店或Google应用打开时仍然提示设备未经认证，是因为应用仍在使用之前缓存的认证结果。可以删除缓存的认证结果后重新打开应用，与第2步一样需要root权限。请先解锁平板，然后在电脑上运行：
+
+```sh
+adb shell "su -c 'rm -f /data/data/com.google.android.gms/files/gmscompliance/shared/cache.pb /data/data/com.android.vending/cache/gmscompliance.pb; am force-stop com.google.android.gms; am force-stop com.android.vending; monkey -p com.android.vending -c android.intent.category.LAUNCHER 1'"
+```
+
+命令执行后，平板上会打开Play商店，并在几秒内获取新的认证结果。如果仍然提示未经认证，或者之后再次出现，重新运行这条命令即可。Google应用出现同样的问题时，把命令中的`com.android.vending`全部替换为`com.google.android.googlequicksearchbox`。
 
 恢复出厂设置或清除Google Play服务的数据之后，ID会改变，需要重新登记。
 
@@ -213,7 +221,7 @@ Live安装器启动时通常会把安装文件全部读入内存，此后可以�
 - 在装有Android SDK Platform Tools的电脑上，可以使用`fastboot devices`、`fastboot getvar all`、`fastboot oem device-info`（查看硬盘、分区、A/B和启动入口的状态）、`fastboot reboot`和`fastboot reboot bootloader`。
 - 在平板上可以用音量键移动选项，用电源键确认。
 
-刷写功能（`fastboot flash`）尚未在实机上测试，用电源键确认选项也尚未经实测。需要重新写入系统时，请使用Live安装器。
+刷写功能（`fastboot flash`）尚未在实机上测试，用电源键确认选项也尚未实测。需要重新写入系统时，请使用Live安装器。
 
 ### 双系统
 
@@ -234,7 +242,6 @@ Live安装器启动时通常会把安装文件全部读入内存，此后可以�
 | 开机后黑屏，没有出现开机菜单 | 确认Secure Boot已经关闭 |
 | 开机直接进入Windows，没有出现开机菜单 | 见[常见问题](FAQ.zh-CN.md#开机直接进入了windows没有出现开机菜单) |
 | 更新后选择了另一个槽位的条目，机器随即重启 | 正常现象，旧版本已被合并覆盖，见[系统更新](#系统更新) |
-| 固件的启动菜单里看不到U盘，或华为官方恢复无法启动 | 早期版本会把内核崩溃记录写进固件存储，存储被占满后会出现这种情况，主板并没有损坏。从1.0.0-rc.3起不再写入，已有的记录需要按[issue #56](https://github.com/vahiru/gaokun-android/issues/56)手动清理一次 |
 | Android无法启动 | 见[常见问题](FAQ.zh-CN.md#开机一直重启或卡住怎么办) |
 
 ## 报告问题

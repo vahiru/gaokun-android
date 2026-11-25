@@ -4,7 +4,7 @@
 
 ## 功能
 
-在日常触摸模式（`daily`）下，当写字、画画时手掌或手侧压在屏幕上、整只手平放或指节擦碰屏幕时，驱动不再把手的各部分误报为手指触点；已经上报、随后才识别为手掌的触点，会通过`MT_TOOL_PALM`撤回，Android的`InputReader`随即向应用发送`ACTION_CANCEL`（单指）或带`FLAG_CANCELED`的`ACTION_POINTER_UP`（多指）。
+在日常触摸模式（`daily`，对应“设置 → 显示 → 防误触模式”开启）下，当写字、画画时手掌或手侧压在屏幕上、整只手平放或指节擦碰屏幕时，驱动不再把手的各部分误报为手指触点；已经上报、随后才识别为手掌的触点，会通过`MT_TOOL_PALM`撤回，Android的`InputReader`随即向应用发送`ACTION_CANCEL`（单指）或带`FLAG_CANCELED`的`ACTION_POINTER_UP`（多指）。
 
 判断只使用40×60的电容网格数据（`patches/kernel/input/0012`、`patches/kernel/input/0013`），不依赖手写笔。屏幕上没有手掌时，纯手指操作的结果与原算法逐帧相同。
 
@@ -22,10 +22,10 @@
 
 * **掌根未触屏时无法建图**：手悬空很轻地搭着、没有任何一块连通域达到掌压阈值时，位置图不会建立，指节碎块仍会按手指上报。
 * **另一只手恰好同时按下**：手掌落下前后约100 ms、周围约11 cm内恰好按下的另一只手手指，会被当成同一只手撤回。
-* **游戏模式下默认关闭**：打音游或手柄式握持时，贴着屏幕边缘平放的拇指容易达到掌压面积阈值，位置图还会连带屏蔽其周围约9 mm、抬起后约300 ms内的点击。因此`bin/gaokun3-touch-mode.sh`在`game`预设下将`/sys/bus/spi/devices/spi0.0/algo/hand_enabled`设为`0`（`daily`预设设为`1`）。
+* **防误触关闭（`game`预设）时停用**：打音游或手柄式握持时，贴着屏幕边缘平放的拇指容易达到掌压面积阈值，位置图还会连带屏蔽其周围约9 mm、抬起后约300 ms内的点击。因此`bin/gaokun3-touch-mode.sh`在`game`预设（“防误触模式”关闭）下将`/sys/bus/spi/devices/spi0.0/algo/hand_enabled`设为`0`（`daily`预设设为`1`）。
 * **依赖应用正确处理`ACTION_CANCEL`**：被撤回的触点在撤回前已向应用发送过`ACTION_DOWN`，若应用忽略`ACTION_CANCEL`仍可能留下笔画点。
 
 ## 调试与回放
 
-* **运行时参数与统计**：参数（`hand_enabled`、`hand_margin`、`hand_hold_frames`、`hand_land_frames`、`hand_land_dist`）与计数器（`hand_lands`、`hand_peaks`、`hand_cancel_map`、`hand_cancel_land`）均在`/sys/bus/spi/devices/spi0.0/algo/`下；`logcat`中搜索`Canceling pointer`可查看Android侧撤回记录。
+* **运行时参数与统计**：参数（`hand_enabled`、`hand_margin`、`hand_hold_frames`、`hand_land_frames`、`hand_land_dist`）为`/sys/bus/spi/devices/spi0.0/algo/`下的独立文件，计数器（`hand_lands`、`hand_peaks`、`hand_cancel_map`、`hand_cancel_land`）输出于同一目录下的`stats`文件；`logcat`中搜索`Canceling pointer`可查看Android侧撤回记录。
 * **离线录制与仿真对比**：在设备上用`gk3trec`录制原始电容网格与evdev事件，在宿主机用`hxsim`直接链接内核树的`hx-algo.c`回放比对，用法见[`scripts/touch/README.md`](../../scripts/touch/README.md)。

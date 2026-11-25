@@ -1,4 +1,4 @@
-# 指纹HAL随镜像构建，服务报告CONVENIENCE（见README.md）。
+# 指纹HAL随镜像构建，服务报告STRONG（见README.md）。
 # TA和Goodix配置模板是专有二进制，不入库；缺失或哈希不符时构建直接失败。
 # Android构建不检查内核：CONFIG_GAOKUN3_FPCMD由scripts/kernel-config-android.sh
 # 打开，scripts/sync-device-tree.sh第3a步和scripts/release.sh确认内核镜像带着它。

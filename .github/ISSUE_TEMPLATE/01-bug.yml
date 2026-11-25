@@ -46,8 +46,8 @@ body:
     attributes:
       label: Version / 版本
       description: |
-        If you can use adb, please paste the output of the command below. Otherwise, the release you installed (e.g. v1.0.0-rc.3) is enough.
-        能使用adb的话，请粘贴下面这条命令的输出；不方便的话，写明安装的版本（如v1.0.0-rc.3）即可。
+        If you can use adb, please paste the output of the command below. Otherwise, the release you installed (e.g. v1.0.0-rc.5) is enough.
+        能使用adb的话，请粘贴下面这条命令的输出；不方便的话，写明安装的版本（如v1.0.0-rc.5）即可。
         ```
         adb shell 'getprop ro.build.date.utc; getprop ro.vendor.gaokun3.version; uname -a'
         ```
@@ -95,7 +95,7 @@ body:
       label: Logs / 日志
       description: |
         Logs help a lot. Please attach long logs as files; the [FAQ](https://github.com/vahiru/gaokun-android/blob/main/docs/FAQ.md) explains how to collect them. Before uploading, please remove anything private, such as Wi-Fi names, account names and serial numbers.
-        日志对排查很有帮助。较长的日志请作为附件上传，抓取方法见[常见问题](https://github.com/vahiru/gaokun-android/blob/main/docs/FAQ.zh-CN.md)。上传前请删除Wi-Fi名称、账号名、序列号等个人信息。
+        日志对排查很有帮助。较长的日志请作为附件上传，获取方法见[常见问题](https://github.com/vahiru/gaokun-android/blob/main/docs/FAQ.zh-CN.md)。上传前请删除Wi-Fi名称、账号名、序列号等个人信息。
         * `adb logcat -b all -d > logcat.txt`
         * `adb shell su -c dmesg > dmesg.txt`
         * For crashes: the newest file in `/data/tombstones/`. For freezes: `/data/vendor/gaokun3/hangdump-*`, if present. / 崩溃时附上`/data/tombstones/`里最新的文件；卡死时如有`/data/vendor/gaokun3/hangdump-*`，请一并附上。

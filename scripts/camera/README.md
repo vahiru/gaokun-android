@@ -9,6 +9,8 @@
 | `gen-ov13b10-ccm.py` | 从Windows驱动调校文件`com.qti.tuned.ofilm_ov13b10.bin`生成后摄调校的AWB与CCM数据 |
 | `gen-hi846-ccm.py` | 结合Windows驱动调校文件`com.qti.tuned.hlt_hi846.bin`与实测白点生成前摄调校的AWB与CCM数据 |
 | `gen-s5k4h7-ccm.py` | 从Windows驱动调校文件`com.qti.tuned.xinli_s5k4h7.bin`与`com.qti.tuned.lijing_s5k3l6.bin`生成S5K4H7前摄与S5K3L6后摄调校的AWB与CCM数据 |
+| `gen-libcamera-sources.sh` | 通过meson生成`patches/libcamera/libcamera-Android.bp`所需的`generated/`源码与头文件 |
+| `setup-libcamera-tree.sh` | 用上游`libcamera`替换crDroid树中的`external/libcamera`、应用`patches/libcamera/`补丁并生成构建文件（详见[`patches/libcamera/README.md`](../../patches/libcamera/README.md)） |
 
 编译C诊断工具：`bash scripts/camera/build.sh <内核源码树路径>`（生成静态链接二进制，`adb push`至`/data/local/tmp/`以root运行）。
 
@@ -47,7 +49,7 @@ python3 scripts/camera/gen-ov13b10-ccm.py com.qti.tuned.ofilm_ov13b10.bin \
     > /tmp/ov13b10-softisp.yaml   # 取其中的Awb与Ccm段
 ```
 
-### 前摄（`hi846` / `ov5675`）：`gen-hi846-ccm.py`
+### 前摄（`hi846`）：`gen-hi846-ccm.py`
 
 从`qccamfrontsensor_extension8280.cab`内的`com.qti.tuned.hlt_hi846.bin`提取CCM，并结合同光源下前后摄灰卡/白纸实测RAW增益比值将后摄色温曲线映射为前摄AWB曲线：
 

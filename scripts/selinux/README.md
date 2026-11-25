@@ -6,7 +6,7 @@
 |---|---|---|
 | 汇总并去重开机以来的AVC拒绝日志 | `avc-summary.py` | 宿主机（读取导出的`logcat` / `dmesg`） |
 | 查询设备当前加载策略是否放行指定访问 | `policy-query.sh` | 设备（root） |
-| 在不重启的情况下临时切换Enforcing试运行 | `enforcing-trial.sh` | 设备（root，带看门狗自动恢复） |
+| 在Permissive测试构建上临时切换Enforcing试运行 | `enforcing-trial.sh` | 设备（root，带看门狗自动恢复至Permissive） |
 
 ## 1. 完整开机普查
 
@@ -32,7 +32,9 @@ printf '%s\n' "kernel vendor_file system firmware_load" "p vendor_init vendor_in
 
 脚本通过`/sys/fs/selinux/access`直接查询内核当前加载的二进制策略。行首加`p `表示目标为进程上下文（`u:r:`）；源域处于Permissive状态（如KernelSU的`ksu`域）时输出会标注`[permissive]`。
 
-## 3. 运行期Enforcing试跑
+## 3. Permissive构建上的运行期Enforcing试跑
+
+> **注意**：当前正式构建默认已启用`androidboot.selinux=enforcing`（见`BoardConfig.mk`）。本脚本仅用于仍以Permissive模式启动的调试内核/镜像；在现行Enforcing构建上运行该脚本，退出或看门狗超时时会执行`setenforce 0`，反而会将设备退回Permissive模式。
 
 ```bash
 adb push scripts/selinux/enforcing-trial.sh /data/local/tmp/
@@ -42,4 +44,4 @@ adb shell cat /data/local/tmp/enf-trial.log
 python3 scripts/selinux/avc-summary.py --enforcing logcat.txt dmesg.txt
 ```
 
-由于本机`adbd`与`su`运行在Permissive的`ksu`域，全局切换Enforcing不会锁死adb连接；脚本内置300秒看门狗超时恢复。运行期试跑无法覆盖仅在开机或服务首次启动时发生的访问，后者需结合第1步或带`androidboot.selinux=enforcing`启动测试。
+由于本机`adbd`与`su`运行在Permissive的`ksu`域，全局切换Enforcing不会锁死adb连接；脚本内置300秒看门狗超时恢复。运行期试跑无法覆盖仅在开机或服务首次启动时发生的访问，后者需结合第1步或在现行默认Enforcing模式下直接开机验证。

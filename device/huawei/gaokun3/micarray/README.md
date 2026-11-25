@@ -6,7 +6,7 @@ Huawei MateBook E Go（gaokun3）配备四颗数字麦克风（`DMIC0`–`DMIC3`
 
 - **开关与依赖**：默认启用（可通过`persist.vendor.gaokun3.micarray=0`关闭，下一次开流生效）。运行依赖两项外部条件：
   1. 预置波束成形系数文件（位于[`prebuilt/README.md`](prebuilt/README.md)，不纳入版本控制）；
-  2. 支持四路采集的音频拓扑（`audioreach-tplg.bin`）与内核补丁`0203`、`0204`。
+  2. 支持四路采集的音频拓扑（`audioreach-tplg.bin`）与内核补丁`patches/kernel/audio/0011`、`0012`。
   若任一条件缺失，本库自动放弃接管并回退为原有的`DMIC0`/`DMIC1`双路采集。
 - **音源过滤**：仅接管内置麦克风（ALSA `card 0` / `device 3`）上的`MIC`、`CAMCORDER`、`VOICE_RECOGNITION`、`VOICE_COMMUNICATION`与`DEFAULT`音源；要求原始信号的`UNPROCESSED`、`VOICE_PERFORMANCE`音源以及外接耳机麦克风均不经过本库处理。
 
@@ -25,11 +25,12 @@ Huawei MateBook E Go（gaokun3）配备四颗数字麦克风（`DMIC0`–`DMIC3`
 | `patches/android/hardware-interfaces/0010-audio-aidl-primary-capture-hook.patch`（及`crdroid-tree-fixes.py`） | 在`StreamPrimary`采集侧引入厂商钩子：按`ro.vendor.audio.primary.capture_hook`加载库，由钩子决定ALSA采集声道数、转换PCM数据块、接收音源变更通知并修正采集时间戳延迟 |
 | `micarray.cpp`（`libgaokunmicarray.so`） | 钩子主入口：识别内置麦克风PCM、按音源切换处理模式、动态配置VA混音器、串联AEC3与NPU降噪客户端。安装于`/vendor/lib64/soundfx/` |
 | `beamformer.{h,cpp}` | 48 kHz频域重叠相加（STFT）固定波束成形实现 |
+| `echo_canceller.{h,cpp}`、`echo_reference_reader.{h,cpp}` | 语音通话WebRTC AEC3回声消除与扬声器参考信号环形缓冲读取 |
 | [`prebuilt/`](prebuilt/README.md) | 存放从华为Windows驱动提取的波束成形复数权重文件（不入库，安装至`/vendor/etc/micarray/`） |
 | `tplg-four-channel-capture.py` | 将`audioreach-tplg.bin`中内置麦克风（`MultiMedia4 Capture`）的声道上限从`2`修改为`4` |
 | `patches/kernel/audio/0011`、`0012`（内核） | `0011`使VA后端在前端请求4声道时保留4路；`0012`按源顺序标记采集声道映射，防止ADSP媒体格式转换模块（MFC）按扬声器声场重混四路麦克风信号 |
 | `denoise_protocol.h`、[`../denoise/`](../denoise/README.md) | 采集钩子与NPU降噪守护进程之间的Unix域套接字（`SOCK_SEQPACKET`）协议与服务端实现 |
-| [`../etc/denoise.rc`](../etc/denoise.rc)、`NoiseSuppressionSettingsActivity` | 将「设置 → 声音 → 麦克风降噪」的各场景开关镜像至`vendor.gaokun3.denoise.*` |
+| [`../etc/denoise.rc`](../etc/denoise.rc)、`NoiseSuppressionSettingsActivity` | 将「设置 → 提示音和振动」中「高级」分组下的「麦克风降噪」各场景开关镜像至`vendor.gaokun3.denoise.*` |
 
 ## 三、频域固定波束成形算法
 
@@ -37,7 +38,7 @@ Huawei MateBook E Go（gaokun3）配备四颗数字麦克风（`DMIC0`–`DMIC3`
 
 1. **分帧加窗与FFT**：取`DMIC1`、`DMIC3`、`DMIC2`三路各自最近1440帧（30 ms）样本，乘以正弦分析窗$\sin(\pi(n+1)/1441)$，末尾补零后执行2048点实数FFT；
 2. **频域复数加权求和**：在频点$k \in [0, 1023]$（Nyquist频点置零）上，将三路复数频谱与各自的复数权重矩阵相乘求和，得到左右两路输出频谱；
-3. **逆FFT与重叠相加（OLA）**：执行2048点逆FFT，乘以满足完全重构条件（$\sum w_a^2 w_s = 1$）的合成窗，重叠相加后每跳输出480帧双声道样本。
+3. **逆FFT与重叠相加（OLA）**：执行2048点逆FFT，乘以满足完全重构条件（$\sum w_a w_s = 1$）的合成窗，重叠相加后每跳输出480帧双声道样本。
 
 算法特性：
 - **权重来源**：取自华为Windows驱动录音组件（`hdrec_bf_data.bin`）中的第一组3输入2输出复数权重矩阵。
@@ -96,7 +97,7 @@ adb shell su -c 'cat /proc/asound/card0/pcm3c/sub0/hw_params'
 - **关键日志判据**：
   - `weights: ... loaded`：波束成形系数加载成功；
   - `open: sources 1 -- array (DMIC1,3,2), 1440 frames delay`：普通录音已启用三麦阵列；
-  - `open: sources 7 -- array, mono, echo cancellation, noise suppression (1 ch), 3310 frames delay`：语音通话已完整启用「阵列 + AEC3 + NPU降噪」管线；
+  - `open: sources 7 -- array, mono (DMIC1,3,2), echo cancellation, noise suppression (1 ch), 3310 frames delay`：语音通话已完整启用「阵列 + AEC3 + NPU降噪」管线；
   - 录音期间`/proc/asound/card0/pcm3c/sub0/hw_params`显示`channels: 4`。
 - **已知限制**：
   1. 波束成形权重针对屏幕正前方固定优化，未包含自适应旁瓣对消（GSC），且输出左右声道并非物理左右麦克风的直接对应；

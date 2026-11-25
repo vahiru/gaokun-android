@@ -36,11 +36,11 @@
 | [`mesa/`](mesa/) | AOSP `external/mesa3d`（Turnip Vulkan驱动） | [`scripts/mesa-a17/regen.sh`](../scripts/mesa-a17/regen.sh) | Android Native Buffer空内存重绑定容错、`VK_FORMAT_G10X6_B10X6R10X6_2PLANE_420_UNORM_3PACK16`（P010）支持、Mesa 26.1上游构建与依赖回移（`0003..0011`）、A6xx抢占（`0012`上游VSC修正，`0013`）、微信对acquire信号量重复等待的规避（`0014`）、SPIR-V的`FMin`、`FMax`与`FClamp`保留无穷大（`0015`，上游回移）、`atan2`保留无穷大与有符号零（`0016`，上游回移）、原神深度数据在分块渲染下的写回（`0017`） |
 | [`libcamera/`](libcamera/) | 上游`libcamera`（替换`external/libcamera`） | [`scripts/camera/setup-libcamera-tree.sh`](../scripts/camera/setup-libcamera-tree.sh) | 详见[`libcamera/README.md`](libcamera/README.md) |
 | [`e2fsprogs/`](e2fsprogs/) | Debian `e2fsprogs` 1.47.2-3（Windows安装器自带的`mke2fs.exe`） | [`installer/backend/mke2fs/build.sh`](../installer/backend/mke2fs/build.sh) | `-E android_sparse`下跨块的按字节读写（1 KiB块时`zap_sector()`越界） |
-| [`resukisu/`](resukisu/) | 内核树内`KernelSU/`子模块 | [`scripts/kernel-setup-resukisu.sh`](../scripts/kernel-setup-resukisu.sh) | Linux 7.x内核API适配与内置路径调整 |
+| [`resukisu/`](resukisu/) | 内核树内`KernelSU/`子模块 | [`scripts/kernel-setup-resukisu.sh`](../scripts/kernel-setup-resukisu.sh) | Linux 7.2+内核API兼容适配（恢复`strncpy()`；符号链接与Kconfig/Makefile接入由脚本完成） |
 
 ## 编号与维护规范
 
-1. **子目录内局部编号**：每个子目录内部从`0001`起连续编号，文件名格式为`NNNN-<subsystem-or-topic>.patch`。
+1. **子目录内局部编号**：每个子目录内部从`0001`起连续编号（`resukisu/`在上游合入`0001`、`0003`后当前仅保留`0002`），文件名格式为`NNNN-<subsystem-or-topic>.patch`。
 2. **头部说明与溯源标签（Git Trailers）**：所有补丁采用标准英文mbox头部格式（`From:` / `Subject: [PATCH] ...` / `---`），并在`---`分隔线前附带以下两个Trailer字段（遵循DEP-3与Yocto/OpenEmbedded规范）：
    - `Origin:`：`local`（本仓库编写）、`backport, <commit / MR / URL>`（自上游主线、维护者队列、MR或ACK回移）或`other, <URL>`（移植或参考自第三方社区树）。
    - `Upstream-Status:`：

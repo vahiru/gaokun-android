@@ -25,42 +25,6 @@ With the keyboard cover (or a USB keyboard) attached, press `Esc` at power-on to
 
 To boot from a USB drive, disable Secure Boot, plug in the Live installer's USB drive, press `F12` at power-on, and choose it in the firmware boot menu.
 
-### USB sticks do not appear in the firmware's boot menu, and Huawei's official recovery does not start
-
-Every version before 1.0.0-rc.3 writes the log into the mainboard firmware's variable storage on each kernel crash, and never cleans it up. After enough crashes the storage is full and the firmware can no longer create boot entries: USB sticks, card readers and Huawei's official recovery image no longer show up in the boot menu, and firmware updates or Windows changing its boot entries may fail too. The keyboard and mouse keep working, so this is easy to miss.
-
-**The mainboard is not broken and does not need replacing.** Since 1.0.0-rc.3 the system no longer writes these records, but the ones already written do not go away by themselves and have to be cleaned up once as follows. Deleting them makes the firmware reorganize its storage, which can take a while; please do not force the machine off meanwhile.
-
-**From Android** (first [set up adb](#setting-up-adb) and grant root to Shell in the ReSukiSU manager):
-
-1. Check for leftover records:
-
-   ```sh
-   adb shell "su -c 'mkdir -p /data/local/tmp/efivars; mount -t efivarfs none /data/local/tmp/efivars 2>/dev/null; ls /data/local/tmp/efivars | grep -c ^dump-type'"
-   ```
-
-   `0` means there are none and nothing needs cleaning.
-
-2. If you are willing to share these logs with us, save a copy first:
-
-   ```sh
-   adb exec-out "su -c 'cd /data/local/tmp/efivars && tar -cf - dump-type*'" > efi-dumps.tar
-   ```
-
-3. Delete the records:
-
-   ```sh
-   adb shell "su -c 'cd /data/local/tmp/efivars && chattr -i dump-type* && rm -f dump-type*; ls | grep -c ^dump-type'"
-   ```
-
-   A final `0` means they are gone.
-
-**From another Linux**: run `sudo bash scripts/pstore-ctl.sh clear`, or run `chattr -i` on `/sys/firmware/efi/efivars/dump-type*` and then delete them. Deleting only the files in `/sys/fs/pstore/` does not actually remove the records on this machine.
-
-**From Windows**: a method provided by the reporter, which we have not verified on this machine: with administrator rights, call `SetFirmwareEnvironmentVariableEx` with GUID `{CFC8FC79-BE2E-4DDC-97F0-9F98BFE298A0}`, the name of each `dump-type0-*`, a data length of 0 and attributes 7 (attributes 0 fails with error 19).
-
-See [issue #56](https://github.com/vahiru/gaokun-android/issues/56) for the discussion.
-
 ### How do I use the boot menu, and what are its entries?
 
 The boot menu stays for 5 seconds by default; without the keyboard cover, use the volume up/down buttons to move the cursor and the power button to confirm (with the keyboard cover attached, you can also use the arrow keys and Enter). The main entries are listed in the [install guide](INSTALL.md#the-boot-menu); the extra `Android (previous loader)` and per-slot `crDroid … — slot _a / _b` entries are for troubleshooting only (after an update, the old slot's entry no longer starts; see [below](#something-broke-after-an-update-can-i-go-back-to-the-previous-version)).
@@ -189,6 +153,13 @@ Some apps, such as Zhihu, Taobao and WeChat, include split layouts for tablets. 
 2. Turn on the switch for the app.
 
 The app is closed when the switch is changed; the change applies the next time the app opens. Only apps that include split layouts are listed. Known issues are listed in [Known limitations](known-limitations.md#showing-app-pages-side-by-side-is-experimental).
+
+### The interface and icons got larger after an update — how do I change them back?
+
+Since 1.0.0-rc.5, the default display density was raised from 240 to 280 (about 17% larger on devices that had not customized display size; devices that already customized it keep their existing setting) to suit typical tablet viewing distances. To make UI elements smaller:
+
+- Lower the level under Settings → Display → Display size.
+- The earlier 240 density is no longer a slider stop (the nearest stops are 224 and 252); to match the exact earlier scale, enable [Developer options](#enabling-developer-options) and set "Smallest width" to `1067` dp.
 
 ## Developer options and adb
 

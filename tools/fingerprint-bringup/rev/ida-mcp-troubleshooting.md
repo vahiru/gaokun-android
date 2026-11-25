@@ -12,7 +12,7 @@ REA 6.8.0 最初将 `idb_open` 返回的错误按成功结果解析，导致只�
 底层错误为 `Remote end closed connection without response`。捕获 worker 日志后发现：
 
 ```text
-FATAL ERROR: /Users/vahiru/.idapro/ida.reg: Operation timed out
+FATAL ERROR: <HOME>/.idapro/ida.reg: Operation timed out
 ```
 
 IDA 即使只分析输入文件，也会写入用户注册表 `ida.reg`。traex 工作区沙箱不允许
@@ -20,20 +20,20 @@ IDA 即使只分析输入文件，也会写入用户注册表 `ida.reg`。traex 
 
 ## 工作区修复
 
-`ida-mcp.json` 现在使用原来的 Python 环境运行 `ida_mcp_logged.py`。
+本地配置的 `ida-mcp.json`（`.gitignore`忽略，不入库）现在使用原来的 Python 环境运行 `ida_mcp_logged.py`。
 该启动器在系统临时目录中，为每个 worker 创建权限为 0700 的独立 `IDAUSR`，
 复制现有 `ida.reg`、`ida-config.json`、`proccache.lst` 和 `*.hexlic`（若存在）。
 副本权限为 0600；worker 退出并由 supervisor 回收时删除该目录。
 原始用户配置不被修改，无需扩大 traex 沙箱写权限。
 
-worker stdout/stderr 保留在系统临时目录的 `rea-ida-worker-logs-501/worker-*.log`
+worker stdout/stderr 保留在系统临时目录的 `rea-ida-worker-logs-<UID>/worker-*.log`
 （后缀数字取当前 UID）。断连错误中包含退出状态、日志路径和日志末尾。
 强制结束 supervisor 时，worker 及其临时配置可能保留到另行清理。
 
 ## 验证
 
 修复前，在以下相同沙箱中复现了 `ida.reg` 写入超时；修复后成功取得 `sub_ADFC`
-的全部伪代码，并确认临时用户配置已删除：
+的全部伪代码，并确认临时用户配置已删除（需预先在本地准备 `ida-mcp.json` 与从驱动包解出的 `fingerpr.mbn`）：
 
 ```sh
 traex sandbox macos \
@@ -41,7 +41,7 @@ traex sandbox macos \
   -c 'sandbox_workspace_write.network_access=true' -- \
   env REA_IDA_MCP_CONFIG="$PWD/tools/fingerprint-bringup/rev/ida-mcp.json" \
   REA_ANALYSIS_PROVIDER=ida \
-  /opt/homebrew/bin/rea decompile \
+  rea decompile \
   "$PWD/tools/fingerprint-bringup/rev/cabs/qctree/fingerpr.mbn" \
   0xadfc --format json
 ```

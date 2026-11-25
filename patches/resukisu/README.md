@@ -8,7 +8,7 @@
 |---|---|---|
 | 主线Linux 7.2编译表现 | `selinux/sepolicy.c`报4处编译错误 | 仅需下方1个兼容补丁 |
 | 差异原因 | 直接引用Android通用内核（ACK）私有的`policydb.android_netlink_route`等字段 | 同一处代码使用`KSU_COMPAT_HAS_*`宏做条件编译保护 |
-| 跨内核版本探测机制 | 手写`LINUX_VERSION_CODE`上限（仅覆盖至6.18） | `tools/kernel_compat.mk`通过扫描内核源码头文件探测各API是否存在 |
+| 跨内核版本探测机制 | 手写`LINUX_VERSION_CODE`上限（仅覆盖至6.18） | `kernel/tools/kernel_compat.mk`通过扫描内核源码头文件探测各API是否存在 |
 
 ## 补丁列表
 
@@ -16,7 +16,7 @@
 
 Linux 7.2的`include/linux/string.h`与`lib/string.c`已移除`strncpy`定义，而ReSukiSU中有9处调用（由于GCC自带`strncpy`内建原型，编译期不报错，仅在最终链接阶段报`undefined reference to 'strncpy'`）。
 
-补丁在兼容头中补充了与原语义一致的`strncpy`内联实现（`dispatch.c`拷贝用户态`uname`缓冲时依赖尾部补零，`throne_tracker.c`则依赖源串过长时不追加终止符，因此不逐点替换为`strscpy`）。`tools/kernel_compat.mk`中探测声明时避免在`$(shell ...)`内使用未配对的转义括号，以免触发GNU Make条件语法解析错误。
+补丁在兼容头中补充了与原语义一致的`strncpy`内联实现（`dispatch.c`拷贝用户态`uname`缓冲时依赖尾部补零，`throne_tracker.c`则依赖源串过长时不追加终止符，因此不逐点替换为`strscpy`）。`kernel/tools/kernel_compat.mk`中探测声明时避免在`$(shell ...)`内使用未配对的转义括号，以免触发GNU Make条件语法解析错误。
 
 ### 已去掉的补丁
 
