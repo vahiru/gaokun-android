@@ -1,0 +1,104 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: iris: reload the firmware when a warm boot fails
+
+When the firmware does not come back from power collapse,
+iris_hfi_pm_resume() powers the core off again and returns -EBUSY, and
+the core stays in IRIS_CORE_INIT. Nothing reloads the firmware, so
+every later runtime resume tries the same warm boot and fails, every
+command that needs the device fails with it, and hardware decoding and
+encoding stay unavailable until reboot.
+
+Treat a failed warm boot like a firmware crash: move the core and its
+instances to the error state and schedule the sys_error_handler, which
+unloads the firmware and loads it again with a cold boot.
+
+The core is powered off at that point while its firmware is still
+loaded. Power it on again for the PAS shutdown in the teardown, so that
+the firmware is shut down with the video clocks and power domains
+enabled, as on the other paths, instead of with the core unclocked.
+iris_core_deinit() in iris_remove() can now schedule the handler, if
+the runtime resume it starts with fails, so disable the work after it.
+Disabling rather than cancelling also keeps a reload from running after
+remove when the IRQ thread schedules one for a SYS_ERROR it was handling
+at the same time.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/media/platform/qcom/iris/iris_core.c  |  9 +++++++++
+ drivers/media/platform/qcom/iris/iris_probe.c | 20 +++++++++++++++++++
+ 2 files changed, 29 insertions(+)
+
+diff --git a/drivers/media/platform/qcom/iris/iris_core.c b/drivers/media/platform/qcom/iris/iris_core.c
+index 41c1a2fd11..b9ad4864a5 100644
+--- a/drivers/media/platform/qcom/iris/iris_core.c
++++ b/drivers/media/platform/qcom/iris/iris_core.c
+@@ -16,6 +16,15 @@
+  */
+ static void iris_core_teardown(struct iris_core *core)
+ {
++	/*
++	 * After a failed warm boot the core is powered off with its firmware
++	 * still loaded. Power it on again for the PAS shutdown, so that the
++	 * firmware is shut down with the video clocks and power domains
++	 * enabled, as on the other paths.
++	 */
++	if (!core->hw_powered)
++		iris_vpu_power_on(core);
++
+ 	iris_fw_unload(core);
+ 
+ 	if (core->hw_powered)
+diff --git a/drivers/media/platform/qcom/iris/iris_probe.c b/drivers/media/platform/qcom/iris/iris_probe.c
+index d6d729103f..66a28e5048 100644
+--- a/drivers/media/platform/qcom/iris/iris_probe.c
++++ b/drivers/media/platform/qcom/iris/iris_probe.c
+@@ -14,6 +14,7 @@
+ 
+ #include "iris_core.h"
+ #include "iris_ctrls.h"
++#include "iris_instance.h"
+ #include "iris_vidc.h"
+ 
+ static int iris_init_icc(struct iris_core *core)
+@@ -208,6 +209,12 @@ static void iris_remove(struct platform_device *pdev)
+ 		return;
+ 
+ 	iris_core_deinit(core);
++	/*
++	 * A failed warm boot in iris_core_deinit() schedules a reload, and the
++	 * IRQ thread can still schedule one for a SYS_ERROR it was handling
++	 * meanwhile. Disable the work so that none runs after remove.
++	 */
++	disable_delayed_work_sync(&core->sys_error_handler);
+ 
+ 	video_unregister_device(core->vdev_dec);
+ 	video_unregister_device(core->vdev_enc);
+@@ -384,6 +391,7 @@ static int __maybe_unused iris_pm_suspend(struct device *dev)
+ static int __maybe_unused iris_pm_resume(struct device *dev)
+ {
+ 	struct iris_core *core;
++	struct iris_inst *inst;
+ 	int ret = 0;
+ 
+ 	core = dev_get_drvdata(dev);
+@@ -393,6 +401,18 @@ static int __maybe_unused iris_pm_resume(struct device *dev)
+ 		goto exit;
+ 
+ 	ret = iris_hfi_pm_resume(core);
++	if (ret) {
++		/*
++		 * The firmware did not come back from power collapse. Nothing
++		 * else reloads it, so every later resume would try the same
++		 * warm boot again. Reload it, as after a firmware crash.
++		 */
++		dev_err(core->dev, "warm boot failed, reloading the firmware\n");
++		core->state = IRIS_CORE_ERROR;
++		list_for_each_entry(inst, &core->instances, list)
++			iris_inst_change_state(inst, IRIS_INST_ERROR);
++		schedule_delayed_work(&core->sys_error_handler, msecs_to_jiffies(10));
++	}
+ 	pm_runtime_mark_last_busy(core->dev);
+ 
+ exit:

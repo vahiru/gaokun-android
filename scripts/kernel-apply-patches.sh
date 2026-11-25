@@ -204,6 +204,17 @@ KPATCHES=(
     kernel/iris/0024-media-iris-gen1-keep-firmware-responses-off-a-closing-instance-s-m2m-context.patch
     kernel/iris/0025-media-iris-gen1-log-encoder-frames-that-come-back-without-bitstream.patch
     kernel/iris/0026-media-iris-gen1-stop-a-closing-decoder-session-at-OUTPUT-streamoff.patch
+    # 0027–0033整理固件恢复：错误状态下的打开返回-EBUSY，SYS_INIT失败时由初始化自己拆除核心（原来在半启动的固件上
+    # 再次初始化，引用泄漏到重启）；重载期间持有运行时PM引用；热启动失败升级为固件重载；命令写入时运行时恢复失败不再
+    # 多放一次引用；启动、关闭与重载失败时记录寄存器与原因；冷启动前清零启动握手寄存器；重载任务改在可冻结的工作队列上。
+    # 依次叠加，叠在0022–0026之上。
+    kernel/iris/0027-media-iris-do-not-load-the-firmware-on-top-of-a-core-in-error-state.patch
+    kernel/iris/0028-media-iris-keep-the-device-runtime-active-while-reloading-the-firmware.patch
+    kernel/iris/0029-media-iris-reload-the-firmware-when-a-warm-boot-fails.patch
+    kernel/iris/0030-media-iris-do-not-drop-a-runtime-PM-reference-that-was-not-taken.patch
+    kernel/iris/0031-media-iris-report-why-a-firmware-boot-shutdown-or-reload-failed.patch
+    kernel/iris/0032-media-iris-clear-the-boot-handshake-before-releasing-the-firmware.patch
+    kernel/iris/0033-media-iris-run-the-firmware-reload-on-the-freezable-workqueue.patch
 
     # ─── 7. kernel/camera：camcc 时钟/GDSC、camss 与前后摄传感器驱动（ov13b10 / hi846 / s5k4h7 / s5k3l6）───
     # 0003 与 kernel/dts/0005 配套，需 CONFIG_VIDEO_OV13B10=y 与 CONFIG_VIDEO_DW9714=y；

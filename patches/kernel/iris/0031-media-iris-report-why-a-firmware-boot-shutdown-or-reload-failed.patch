@@ -1,0 +1,133 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: iris: report why a firmware boot, shutdown or reload
+ failed
+
+When the firmware fails to boot, iris prints "invalid setting for
+uc_region" or "error booting up iris firmware" and nothing else, so a
+log cannot tell whether the firmware ran before the host had set it up,
+rejected the values it was given, or never answered. The result of the
+PAS shutdown is dropped, and so is the result of the reload in the
+sys_error_handler, so a reload that fails leaves no trace beyond the
+"core init failed" of later opens.
+
+On a boot failure, print CTRL_STATUS as it read just before CTRL_INIT
+was written, which the firmware only sets once it sees CTRL_INIT, and
+then CTRL_INIT, CTRL_STATUS, what the UC region, queue table and SFR
+registers read back, and the queue and SFR addresses the host
+programmed. Report a failed PAS shutdown, and report the outcome of
+each firmware reload.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/media/platform/qcom/iris/iris_core.c  |  8 ++++++-
+ .../media/platform/qcom/iris/iris_firmware.c  | 10 ++++++--
+ .../platform/qcom/iris/iris_vpu_common.c      | 23 +++++++++++++++++++
+ 3 files changed, 38 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/media/platform/qcom/iris/iris_core.c b/drivers/media/platform/qcom/iris/iris_core.c
+index b9ad4864a5..93b0a2bcfe 100644
+--- a/drivers/media/platform/qcom/iris/iris_core.c
++++ b/drivers/media/platform/qcom/iris/iris_core.c
+@@ -173,11 +173,17 @@ int iris_core_init(struct iris_core *core)
+  */
+ void iris_core_recover(struct iris_core *core)
+ {
++	int ret;
++
+ 	mutex_lock(&core->init_lock);
+ 
+ 	if (core->state == IRIS_CORE_ERROR) {
+ 		__iris_core_deinit(core);
+-		__iris_core_init(core);
++		ret = __iris_core_init(core);
++		if (ret)
++			dev_err(core->dev, "firmware reload failed: %d\n", ret);
++		else
++			dev_info(core->dev, "firmware reloaded\n");
+ 	}
+ 
+ 	mutex_unlock(&core->init_lock);
+diff --git a/drivers/media/platform/qcom/iris/iris_firmware.c b/drivers/media/platform/qcom/iris/iris_firmware.c
+index 1a476146d7..16a73ed966 100644
+--- a/drivers/media/platform/qcom/iris/iris_firmware.c
++++ b/drivers/media/platform/qcom/iris/iris_firmware.c
+@@ -94,7 +94,7 @@ int iris_fw_load(struct iris_core *core)
+ 						     cp_config->cp_nonpixel_size);
+ 		if (ret) {
+ 			dev_err(core->dev, "qcom_scm_mem_protect_video_var failed: %d\n", ret);
+-			qcom_scm_pas_shutdown(IRIS_PAS_ID);
++			iris_fw_unload(core);
+ 			return ret;
+ 		}
+ 	}
+@@ -104,7 +104,13 @@ int iris_fw_load(struct iris_core *core)
+ 
+ int iris_fw_unload(struct iris_core *core)
+ {
+-	return qcom_scm_pas_shutdown(IRIS_PAS_ID);
++	int ret;
++
++	ret = qcom_scm_pas_shutdown(IRIS_PAS_ID);
++	if (ret)
++		dev_err(core->dev, "firmware shutdown failed: %d\n", ret);
++
++	return ret;
+ }
+ 
+ int iris_set_hw_state(struct iris_core *core, bool resume)
+diff --git a/drivers/media/platform/qcom/iris/iris_vpu_common.c b/drivers/media/platform/qcom/iris/iris_vpu_common.c
+index 7d542f8df7..25ae70dc27 100644
+--- a/drivers/media/platform/qcom/iris/iris_vpu_common.c
++++ b/drivers/media/platform/qcom/iris/iris_vpu_common.c
+@@ -71,12 +71,33 @@ static void iris_vpu_setup_ucregion_memory_map(struct iris_core *core)
+ 		vpu_ops->program_bootup_registers(core);
+ }
+ 
++static void iris_vpu_dump_boot_registers(struct iris_core *core, u32 early_status, u32 polls)
++{
++	dev_err(core->dev,
++		"ctrl_status %#x before ctrl_init, after %u polls: ctrl_init %#x ctrl_status %#x uc_region %#x size %#x qtbl %#x info %#x sfr %#x (queues %pad sfr %pad)\n",
++		early_status, polls, readl(core->reg_base + CTRL_INIT),
++		readl(core->reg_base + CTRL_STATUS),
++		readl(core->reg_base + UC_REGION_ADDR),
++		readl(core->reg_base + UC_REGION_SIZE),
++		readl(core->reg_base + QTBL_ADDR),
++		readl(core->reg_base + QTBL_INFO),
++		readl(core->reg_base + SFR_ADDR),
++		&core->iface_q_table_daddr, &core->sfr_daddr);
++}
++
+ int iris_vpu_boot_firmware(struct iris_core *core)
+ {
+ 	u32 ctrl_init = BIT(0), ctrl_status = 0, count = 0, max_tries = 1000;
++	u32 early_status;
+ 
+ 	iris_vpu_setup_ucregion_memory_map(core);
+ 
++	/*
++	 * The firmware sets CTRL_STATUS only once it sees CTRL_INIT: a value
++	 * here is stale, or comes from a firmware that did not wait for it.
++	 */
++	early_status = readl(core->reg_base + CTRL_STATUS);
++
+ 	writel(ctrl_init, core->reg_base + CTRL_INIT);
+ 	writel(0x1, core->reg_base + CPU_CS_SCIACMDARG3);
+ 
+@@ -84,6 +105,7 @@ int iris_vpu_boot_firmware(struct iris_core *core)
+ 		ctrl_status = readl(core->reg_base + CTRL_STATUS);
+ 		if ((ctrl_status & CTRL_ERROR_STATUS__M) == 0x4) {
+ 			dev_err(core->dev, "invalid setting for uc_region\n");
++			iris_vpu_dump_boot_registers(core, early_status, count + 1);
+ 			return -EINVAL;
+ 		}
+ 
+@@ -93,6 +115,7 @@ int iris_vpu_boot_firmware(struct iris_core *core)
+ 
+ 	if (count >= max_tries) {
+ 		dev_err(core->dev, "error booting up iris firmware\n");
++		iris_vpu_dump_boot_registers(core, early_status, count);
+ 		return -ETIME;
+ 	}
+ 

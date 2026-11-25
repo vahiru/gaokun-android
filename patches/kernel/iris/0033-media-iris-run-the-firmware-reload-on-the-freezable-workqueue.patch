@@ -1,0 +1,81 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: iris: run the firmware reload on the freezable
+ workqueue
+
+The sys_error_handler that reloads the firmware runs on system_wq, which
+keeps running while the system suspends. The runtime PM reference the
+handler holds does not keep system sleep away: pm_runtime_force_suspend()
+calls the runtime suspend callback whatever the usage count. A reload
+that is waiting for SYS_INIT_DONE can therefore meet iris_pm_suspend(),
+which then either fails the power collapse and aborts the suspend, or
+power collapses a firmware that is still booting. A reload scheduled
+while the device is suspended only gets -EACCES from runtime PM and has
+to retry.
+
+Queue the handler on system_freezable_wq instead. The freezer waits for
+a reload in progress before devices suspend, and a reload scheduled
+later, such as the one iris_pm_resume() schedules for a failed warm
+boot, runs once the system has resumed.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/media/platform/qcom/iris/iris_hfi_gen1_response.c | 3 ++-
+ drivers/media/platform/qcom/iris/iris_hfi_gen2_response.c | 3 ++-
+ drivers/media/platform/qcom/iris/iris_probe.c             | 7 ++++---
+ 3 files changed, 8 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen1_response.c b/drivers/media/platform/qcom/iris/iris_hfi_gen1_response.c
+index e8780841c0..0fa7967653 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen1_response.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen1_response.c
+@@ -260,7 +260,8 @@ iris_hfi_gen1_sys_event_notify(struct iris_core *core, void *packet)
+ 		iris_inst_change_state(instance, IRIS_INST_ERROR);
+ 	mutex_unlock(&core->lock);
+ 
+-	schedule_delayed_work(&core->sys_error_handler, msecs_to_jiffies(10));
++	queue_delayed_work(system_freezable_wq, &core->sys_error_handler,
++			   msecs_to_jiffies(10));
+ }
+ 
+ static void
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen2_response.c b/drivers/media/platform/qcom/iris/iris_hfi_gen2_response.c
+index 1a1c221b84..26d9da592c 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen2_response.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen2_response.c
+@@ -287,7 +287,8 @@ static int iris_hfi_gen2_handle_system_error(struct iris_core *core,
+ 		iris_inst_change_state(instance, IRIS_INST_ERROR);
+ 	mutex_unlock(&core->lock);
+ 
+-	schedule_delayed_work(&core->sys_error_handler, msecs_to_jiffies(10));
++	queue_delayed_work(system_freezable_wq, &core->sys_error_handler,
++			   msecs_to_jiffies(10));
+ 
+ 	return 0;
+ }
+diff --git a/drivers/media/platform/qcom/iris/iris_probe.c b/drivers/media/platform/qcom/iris/iris_probe.c
+index 66a28e5048..01226b2cbe 100644
+--- a/drivers/media/platform/qcom/iris/iris_probe.c
++++ b/drivers/media/platform/qcom/iris/iris_probe.c
+@@ -242,8 +242,8 @@ static void iris_sys_error_handler(struct work_struct *work)
+ 	if (ret < 0) {
+ 		/* Runtime PM is disabled during system sleep: retry later. */
+ 		if (ret == -EACCES)
+-			schedule_delayed_work(&core->sys_error_handler,
+-					      msecs_to_jiffies(HW_RESPONSE_TIMEOUT_VALUE));
++			queue_delayed_work(system_freezable_wq, &core->sys_error_handler,
++					   msecs_to_jiffies(HW_RESPONSE_TIMEOUT_VALUE));
+ 		else
+ 			dev_err(core->dev, "cannot resume to reload the firmware: %d\n", ret);
+ 		return;
+@@ -411,7 +411,8 @@ static int __maybe_unused iris_pm_resume(struct device *dev)
+ 		core->state = IRIS_CORE_ERROR;
+ 		list_for_each_entry(inst, &core->instances, list)
+ 			iris_inst_change_state(inst, IRIS_INST_ERROR);
+-		schedule_delayed_work(&core->sys_error_handler, msecs_to_jiffies(10));
++		queue_delayed_work(system_freezable_wq, &core->sys_error_handler,
++				   msecs_to_jiffies(10));
+ 	}
+ 	pm_runtime_mark_last_busy(core->dev);
+ 
