@@ -1,0 +1,38 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] v4l2_codec2: stop polling the decoder device on error
+
+V4L2Decoder's error state is final, and serviceDeviceTask() returns at
+once in it, before it dequeues buffers or events. Polling continues
+until the component stops or releases the decoder. A SOURCE_CHANGE
+event that is pending when the error occurs, or that the driver sends
+afterwards for input it already holds, is then never dequeued: poll()
+keeps returning POLLPRI and the poll thread and the decoder thread keep
+each other busy, for as long as the client takes to release the codec.
+
+Stop polling in onError(). Nothing is lost, since the decoder ignores
+the device from then on; flush() does nothing in the error state, so
+polling is not restarted, and the destructor's stopPolling() call does
+nothing when polling has already stopped.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ v4l2/V4L2Decoder.cpp | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/v4l2/V4L2Decoder.cpp b/v4l2/V4L2Decoder.cpp
+index 31111ea..be6fbb9 100644
+--- a/v4l2/V4L2Decoder.cpp
++++ b/v4l2/V4L2Decoder.cpp
+@@ -1077,6 +1077,10 @@ void V4L2Decoder::onError() {
+     ALOGV("%s()", __func__);
+     ALOG_ASSERT(mTaskRunner->RunsTasksInCurrentSequence());
+ 
++    // The error state is final and serviceDeviceTask() ignores the device in it. A pending
++    // SOURCE_CHANGE event would never be dequeued and keep poll() returning POLLPRI until the
++    // decoder is destroyed.
++    if (mDevice) mDevice->stopPolling();
+     setState(State::Error);
+     mErrorCb.Run();
+ }

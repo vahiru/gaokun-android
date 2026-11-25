@@ -1,0 +1,167 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] v4l2_codec2: do not poll buffers again after POLLERR
+
+V4L2DevicePoller polls the device for buffers until one is ready, and
+arms buffer polling again whenever poll() returns without one. A
+mem2mem device returns POLLERR at once, without sleeping, while each of
+its queues is not streaming, in the error state or without a queued
+buffer. The poll thread then calls poll() again immediately and posts
+nothing to the client:
+
+- at every decoder start on a driver that does not report the CAPTURE
+  format before the first SOURCE_CHANGE event, from start() until the
+  first input buffer is queued: the input queue streams without a
+  buffer and the CAPTURE queue does not stream yet;
+- whenever no queue is streaming with a buffer queued, for example
+  while a drain waits for the first SOURCE_CHANGE event;
+- for good after the driver marks the queues as failed
+  (vb2_queue_error()). The client is never called, so it does not get
+  the -EIO that DQBUF would return, and if no further buffer is queued
+  decoding hangs with the poll thread busy.
+
+Do not arm buffer polling again after POLLERR. Post the client's
+callback once instead, so that a client with buffers still queued
+dequeues them and gets the queue error; without queued buffers the
+callback does nothing. Buffer polling resumes with the next
+schedulePoll(), which every QBUF calls. Call schedulePoll() after
+STREAMON as well, because buffers queued before STREAMON only become
+ready then.
+
+Without buffer polling a mem2mem device does not return POLLERR at all,
+so POLLERR there means that the device itself failed: an unregistered
+video node returns POLLERR | POLLHUP | POLLPRI, which the poller used to
+turn into an endless series of event callbacks. Report it through the
+error callback instead.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ v4l2/V4L2Device.cpp                           |  8 ++++-
+ v4l2/V4L2DevicePoller.cpp                     | 30 ++++++++++++++-----
+ v4l2/include/v4l2_codec2/v4l2/V4L2Device.h    |  6 +++-
+ .../v4l2_codec2/v4l2/V4L2DevicePoller.h       |  4 ++-
+ 4 files changed, 38 insertions(+), 10 deletions(-)
+
+diff --git a/v4l2/V4L2Device.cpp b/v4l2/V4L2Device.cpp
+index 3650563..187d3c3 100644
+--- a/v4l2/V4L2Device.cpp
++++ b/v4l2/V4L2Device.cpp
+@@ -1054,6 +1054,10 @@ bool V4L2Queue::streamon() {
+     mIsStreaming = true;
+     reportTraceMetrics();
+ 
++    // Buffers queued before STREAMON become ready for poll() only now. The poller stops polling
++    // buffers after poll() returned POLLERR, so make sure it polls them again.
++    mDevice->schedulePoll();
++
+     return true;
+ }
+ 
+@@ -1194,7 +1198,8 @@ int V4L2Device::ioctl(int request, void* arg) {
+     return HANDLE_EINTR(::ioctl(mDeviceFd.get(), request, arg));
+ }
+ 
+-bool V4L2Device::poll(bool pollDevice, bool pollBuffers, bool* eventPending, bool* buffersPending) {
++bool V4L2Device::poll(bool pollDevice, bool pollBuffers, bool* eventPending, bool* buffersPending,
++                      bool* errorPending) {
+     struct pollfd pollfds[2];
+     nfds_t nfds;
+     int pollfd = -1;
+@@ -1221,6 +1226,7 @@ bool V4L2Device::poll(bool pollDevice, bool pollBuffers, bool* eventPending, boo
+     }
+     *eventPending = (pollfd != -1 && pollfds[pollfd].revents & POLLPRI);
+     *buffersPending = (pollfd != -1 && pollfds[pollfd].revents & (POLLIN | POLLOUT));
++    *errorPending = (pollfd != -1 && pollfds[pollfd].revents & POLLERR);
+     return true;
+ }
+ 
+diff --git a/v4l2/V4L2DevicePoller.cpp b/v4l2/V4L2DevicePoller.cpp
+index b4add7d..e3a7990 100644
+--- a/v4l2/V4L2DevicePoller.cpp
++++ b/v4l2/V4L2DevicePoller.cpp
+@@ -123,18 +123,30 @@ void V4L2DevicePoller::devicePollTask() {
+ 
+         bool event_pending = false;
+         bool buffers_pending = false;
++        bool error_pending = false;
+ 
+         ALOGV("Polling device.");
+         bool poll_buffers = mPollBuffers.exchange(false);
+-        if (!mDevice->poll(true, poll_buffers, &event_pending, &buffers_pending)) {
++        if (!mDevice->poll(true, poll_buffers, &event_pending, &buffers_pending,
++                           &error_pending)) {
+             ALOGE("An error occurred while polling, calling error callback");
+             mClientTaskTunner->PostTask(FROM_HERE, mErrorCallback);
+             return;
+         }
+ 
+-        if (poll_buffers && !buffers_pending) {
+-            // If buffer polling was requested but the buffers are not pending,
+-            // then set to poll buffers again in the next iteration.
++        if (error_pending && !poll_buffers) {
++            // A mem2mem device returns POLLERR only for buffer polling. Without it, the device
++            // itself has failed, e.g. its video node was unregistered.
++            ALOGE("Device returned POLLERR, calling error callback");
++            mClientTaskTunner->PostTask(FROM_HERE, mErrorCallback);
++            return;
++        }
++
++        if (poll_buffers && !buffers_pending && !error_pending) {
++            // poll() returned for an event or an interrupt before a buffer was ready: poll buffers
++            // again in the next iteration. POLLERR is not re-armed: the device returns it at once
++            // while no queue can make progress, so polling again would only spin until the client
++            // queues a buffer, and queueing a buffer calls schedulePoll() anyway.
+             mPollBuffers.exchange(true);
+         }
+ 
+@@ -142,9 +154,13 @@ void V4L2DevicePoller::devicePollTask() {
+             ALOGE("Failed to clear interrupting device poll.");
+         }
+ 
+-        if (buffers_pending || event_pending) {
+-            ALOGV("Poll returned, calling event callback. event_pending=%d buffers_pending=%d",
+-                  event_pending, buffers_pending);
++        // POLLERR for buffer polling can also mean that a queue is in the error state. Let the
++        // client service the device once, so that it gets the error when it dequeues its
++        // buffers. If it has no buffers queued, the callback does nothing.
++        if (buffers_pending || event_pending || error_pending) {
++            ALOGV("Poll returned, calling event callback. event_pending=%d buffers_pending=%d "
++                  "error_pending=%d",
++                  event_pending, buffers_pending, error_pending);
+             mClientTaskTunner->PostTask(FROM_HERE, base::Bind(mEventCallback, event_pending));
+         }
+     }
+diff --git a/v4l2/include/v4l2_codec2/v4l2/V4L2Device.h b/v4l2/include/v4l2_codec2/v4l2/V4L2Device.h
+index 0d56b25..d1d0454 100644
+--- a/v4l2/include/v4l2_codec2/v4l2/V4L2Device.h
++++ b/v4l2/include/v4l2_codec2/v4l2/V4L2Device.h
+@@ -437,8 +437,12 @@ public:
+     //   in this case |*eventPending| will be set to true.
+     // - |pollBuffers| is true and |pollDevice| is true and there is new data to
+     //   be read from the device; in this case |*buffersPending| will be set to true.
++    // - |pollDevice| is true and the device returned POLLERR; in this case |*errorPending| will be
++    //   set to true. With |pollBuffers|, a mem2mem device returns POLLERR at once when each of its
++    //   queues is not streaming, in the error state or without a queued buffer.
+     // Returns false on error, true otherwise. This method should be called from a separate thread.
+-    bool poll(bool pollDevice, bool pollBuffers, bool* eventPending, bool* buffersPending);
++    bool poll(bool pollDevice, bool pollBuffers, bool* eventPending, bool* buffersPending,
++              bool* errorPending);
+ 
+     // These methods are used to interrupt the thread sleeping on poll() and force it to return
+     // regardless of device state, which is usually when the client is no longer interested in what
+diff --git a/v4l2/include/v4l2_codec2/v4l2/V4L2DevicePoller.h b/v4l2/include/v4l2_codec2/v4l2/V4L2DevicePoller.h
+index 4842088..7081e15 100644
+--- a/v4l2/include/v4l2_codec2/v4l2/V4L2DevicePoller.h
++++ b/v4l2/include/v4l2_codec2/v4l2/V4L2DevicePoller.h
+@@ -27,7 +27,9 @@ class V4L2Device;
+ //
+ // Note that the service callback may also be called when no particular event occurred due to the
+ // way poll() works. It is the responsibility of the caller to call SchedulePoll() again if there
+-// may still be pending events.
++// may still be pending events. After poll() returned POLLERR for the buffer queues, buffers are
++// not polled again until the next call to SchedulePoll(), which queueing a buffer or starting a
++// queue does.
+ class V4L2DevicePoller {
+ public:
+     // Callback to be called when buffer ready/V4L2 event has potentially been polled. |event| is
