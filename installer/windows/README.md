@@ -62,12 +62,12 @@ flutter test test/shots_test.dart                                  # 出图到 t
 
 | 场景 | 内容 |
 |---|---|
-| `free`（默认） | 检查全过，系统盘有40 GiB空闲 → 安装流程；分析可压缩空间停在分页文件上 |
+| `free`（默认） | 检查全过，系统盘有40 GiB空闲 → 安装流程；压缩受阻原因：停在分页文件上 |
 | `multi` | 系统盘有几块空闲区 → 选位置 |
 | `installed` | 平板上真实的已安装布局 → 管理页、卸载 |
-| `nospace` | 系统盘没有空闲区 → 分析可压缩空间，停在分页文件上 |
+| `nospace` | 系统盘没有空闲区 → 压缩受阻原因：停在分页文件上 |
 | `nospace-mft` | 同`nospace`，压缩停在`$MFT`上 → 移动MFT（成功后换到`nospace-mft-after`） |
-| `nospace-mft-after` | MFT移到前部之后，分析仍停在MFT开头的系统记录上 |
+| `nospace-mft-after` | MFT移到前部、重新“压缩卷”之后，仍停在MFT开头的系统记录上 |
 | `bitlocker` | 出厂状态：Secure Boot与BitLocker都开着 → 先校验恢复密钥并暂停保护（成功后换到`bitlocker-suspended`） |
 | `bitlocker-suspended` | BitLocker保护已暂停、Secure Boot仍开着 |
 | `bitlocker-on` | Secure Boot已关闭、BitLocker开着 → 确认页输入恢复密钥 |

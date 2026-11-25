@@ -74,39 +74,46 @@
   "chkNoRoomNone": "There is no unallocated space on the system disk.",
   "chkNoRoomBiggest": "The largest contiguous unallocated space on the system disk is {size}.",
   "chkNoRoomHow": "In Windows Disk Management, shrink a partition on the system disk to free up at least {need} of contiguous unallocated space, then return here and check again.",
-  "shrinkAnalyze": "Check what limits shrinking",
-  "shrinkReanalyze": "Check again",
+  "shrinkAnalyze": "Show what limits shrinking",
+  "shrinkReanalyze": "Refresh",
   "shrinkAnalyzing": "Reading the shrink record…",
   "shrinkFailed": "Unable to read the shrink record: ",
-  "shrinkNoEvent": "Shrink Volume has not been run on a partition of the system disk in Disk Management since the device started. Right-click the partition you want to shrink in Disk Management, select “Shrink Volume”, then return here and check.",
-  "shrinkBlocked": "The last time the {drive}: volume was shrunk in Disk Management, shrinking was limited by the location of the following unmovable file:",
+  "shrinkNoEvent": "Shrink Volume has not been run on a partition of the system disk in Disk Management since the device started. Right-click the partition you want to shrink in Disk Management, select “Shrink Volume”, then return here.",
+  "shrinkBlocked": "The last time the {drive}: volume was shrunk in Disk Management ({time}), shrinking was limited by the location of the following unmovable file:",
   "@shrinkBlocked": {
     "placeholders": {
       "drive": {
         "type": "String"
-      }
-    }
-  },
-  "shrinkNoFile": "The last time the {drive}: volume was shrunk in Disk Management, the file restricting the shrink could not be identified. Restart the device, run Shrink Volume again, then check again.",
-  "@shrinkNoFile": {
-    "placeholders": {
-      "drive": {
+      },
+      "time": {
         "type": "String"
       }
     }
   },
-  "shrinkFull": "The last time the {drive}: volume was shrunk in Disk Management, shrinking was limited by the remaining free space on {drive}: ({free} free) rather than by an unmovable file. Free up disk space on {drive}: (for example via Disk Cleanup or Settings → System → Storage), then run Shrink Volume again.",
+  "shrinkStale": "This is the same record as last time. After resolving the issue, run Shrink Volume again in Disk Management first, then return here.",
+  "shrinkNoFile": "The last time the {drive}: volume was shrunk in Disk Management ({time}), the file restricting the shrink could not be identified. Restart the device and run Shrink Volume again, then return here.",
+  "@shrinkNoFile": {
+    "placeholders": {
+      "drive": {
+        "type": "String"
+      },
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "shrinkFull": "The last time the {drive}: volume was shrunk in Disk Management ({time}), shrinking was limited by the space used on {drive}: rather than by an unmovable file. To free up more space, delete files on {drive}: (for example via Disk Cleanup or Settings → System → Storage), then run Shrink Volume again.",
   "@shrinkFull": {
     "placeholders": {
       "drive": {
         "type": "String"
       },
-      "free": {
+      "time": {
         "type": "String"
       }
     }
   },
-  "shrinkNext": "After resolving this item, run Shrink Volume again in Disk Management and check here again — another unmovable file may still restrict shrinking.",
+  "shrinkNext": "After resolving this item, run Shrink Volume again in Disk Management and return here — another unmovable file may still restrict shrinking.",
   "sbPagefile": "Virtual memory paging file",
   "sbPagefileHow": "1. Press Win+R, enter “SystemPropertiesPerformance”, and under Virtual memory on the Advanced tab click Change.\n2. Uncheck “Automatically manage paging file size for all drives”, select {drive}:, choose “No paging file”, click Set, confirm with Yes, and click OK.\n3. Restart the device and shrink the {drive}: volume in Disk Management.\n4. After shrinking, re-enable “Automatically manage paging file size for all drives” and restart the device.",
   "sbHiberfil": "System hibernation file",
@@ -150,9 +157,9 @@
     }
   },
   "mftStuck": "System metadata records at the start of the MFT cannot be moved; the {drive}: volume has reached its maximum shrink limit.",
-  "mftUnplaced": "Another {size} could not be moved closer to the start of the {drive}: volume due to insufficient contiguous free space. Delete unnecessary files on {drive}:, then move the MFT and analyze again.",
+  "mftUnplaced": "Another {size} could not be moved closer to the start of the {drive}: volume due to insufficient contiguous free space. Delete unnecessary files on {drive}:, then move the MFT again.",
   "mftNothing": "No MFT fragments can be moved closer to the start of the volume.",
-  "mftDone": "The move is complete. Run Shrink Volume on the {drive}: volume again in Disk Management, then check here again.",
+  "mftDone": "The move is complete. Run Shrink Volume on the {drive}: volume again in Disk Management, then return here.",
   "@mftDone": {
     "placeholders": {
       "drive": {
@@ -177,7 +184,7 @@
   "sbDump": "System memory dump file",
   "sbDumpHow": "1. Open Disk Cleanup, select drive {drive}:, and click Clean up system files.\n2. Check “System error memory dump files” and “System error minidump files” and delete them.\n3. Shrink the {drive}: volume in Disk Management.",
   "sbOther": "Other file",
-  "sbOtherHow": "This file cannot be moved right now because it may be in use by an application or locked by the system. Restart the device and analyze again; if shrinking is still blocked by the same file, identify the application from its path and close or temporarily uninstall it before retrying.",
+  "sbOtherHow": "This file cannot be moved right now because it may be in use by an application or locked by the system. Restart the device and run Shrink Volume again, then return here; if shrinking is still blocked by the same file, identify the application from its path and close or temporarily uninstall it before retrying.",
   "chkRoom": "Available unallocated space: {size}",
   "chkRoomDetail": "System disk: {model}, {size}",
   "chkBlockedNote": "Please resolve the failed checks above before continuing.",

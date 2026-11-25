@@ -48,7 +48,7 @@ class CheckPage extends StatelessWidget {
           state: CheckState.ok,
           title: l.chkRoom(fmtMib(r.sizeMib)),
           detail: l.chkRoomDetail(d.model, fmtMib(d.sizeMib)),
-          // 空间够用时也能看还能再压缩出多少（想给数据分区多留一些）
+          // 空间够用时也能查看压缩停在哪个文件上（想给数据分区多留一些）
           trailing: s.testMode ? null : const ShrinkAnalyzeButton(),
         ));
       }

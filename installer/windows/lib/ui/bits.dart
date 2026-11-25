@@ -11,7 +11,7 @@ class CheckRow extends StatelessWidget {
   final String title;
   final String? detail;
 
-  /// 右侧的操作（例如"分析可压缩空间"）
+  /// 右侧的操作（例如"查看压缩受阻原因"）
   final Widget? trailing;
 
   @override

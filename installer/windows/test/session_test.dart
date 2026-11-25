@@ -149,7 +149,7 @@ void main() {
   });
 
   test('压缩停在哪类文件：按卷内路径归类，去掉流名', () {
-    ShrinkBlocker k(String f) => ShrinkInfo(Gk3Record('SHRINK', {'drive': 'C:', 'max_shrink_mib': '1', 'file': f})).blocker!;
+    ShrinkBlocker k(String f) => ShrinkInfo(Gk3Record('SHRINK', {'drive': 'C:', 'record': '1', 'file': f})).blocker!;
     expect(k(r'\pagefile.sys::$DATA'), ShrinkBlocker.pagefile);
     expect(k(r'\SwapFile.sys::$DATA'), ShrinkBlocker.pagefile);
     expect(k(r'\hiberfil.sys::$DATA'), ShrinkBlocker.hiberfil);
@@ -169,9 +169,9 @@ void main() {
     expect(k(r'\$WINDOWS.~BT\Sources\install.esd::$DATA'), ShrinkBlocker.other);
     expect(k(r'\Windows\Minidump\111225-1.dmp::$DATA'), ShrinkBlocker.memoryDump);
     expect(k(r'\Users\a\big.vhdx::$DATA'), ShrinkBlocker.other);
-    final i = ShrinkInfo(const Gk3Record('SHRINK', {'drive': 'C:', 'max_shrink_mib': '2528', 'file': r'\pagefile.sys::$DATA'}));
+    final i = ShrinkInfo(const Gk3Record('SHRINK', {'drive': 'C:', 'record': '2', 'file': r'\pagefile.sys::$DATA'}));
     expect(i.file, r'\pagefile.sys');
-    expect(ShrinkInfo(const Gk3Record('SHRINK', {'drive': 'C:', 'max_shrink_mib': '2528'})).blocker, isNull);
+    expect(ShrinkInfo(const Gk3Record('SHRINK', {'drive': 'C:', 'record': '3'})).blocker, isNull);
   });
 
   group('恢复密钥输入框的格式', () {

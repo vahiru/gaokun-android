@@ -9,13 +9,16 @@
  * 要重启，重启之前的记录已经不能说明现在的情况。
  *
  * 事件数据依次是：卷名、卷的 GUID 路径、文件、文件的最后一个簇、压缩的目标位置（按已用空间算出的、最多能缩到的
- * 位置）、NTFS 文件标志、阶段（簇号都是"0x…"的十六进制）。
+ * 位置）、NTFS 文件标志、阶段（簇号都是"0x…"的十六进制）。阶段只写进日志、不用来筛选：见到过的都是"<analysis>"，
+ * 但不知道别的语言的 Windows 会不会翻译它。
  *
  * 输出：
- *   SHRINK drive=X: free_mib= [file= flags= limit=file|space]
- *     limit：文件的末尾（最后一个簇 + 1，乘簇大小）离目标位置不到 1 GiB 或在它之后时是 file（压缩停在这个文件上），
- *       否则是 space（最多能缩到哪里由已用空间决定：卷太满，挪开这个文件也没用）。簇号读不出时不带 limit；
- *   SHRINK event=none：本次开机以来没有这样的事件（用户还没在"磁盘管理"里点过"压缩卷"）。 */
+ *   SHRINK drive=X: record= time=HH:MM free_mib= [file= flags= limit=file|space]
+ *     record：事件的记录号（界面据此认出又读到了同一条：用户处理之后还没重新"压缩卷"）；time：事件的本地时间；
+ *     limit：文件的末尾（最后一个簇 + 1，乘簇大小）在目标位置之后、或离它不到 64 MiB 时是 file（压缩停在这个文件上），
+ *       否则是 space（最多能缩到哪里由已用空间决定，挪开这个文件也没用）。簇号读不出时不带 limit；
+ *   SHRINK event=none：本次开机以来没有这样的事件（用户还没在"磁盘管理"里点过"压缩卷"）。
+ * 读不了事件日志时报 ERR code=shrink-query。 */
 #include <windows.h>
 #include <winevt.h>
 
@@ -79,19 +82,44 @@ static wchar_t guid_drive(const wchar_t *g)
 
 typedef struct {
     wchar_t drive;              /* 卷的盘符 */
+    uint64_t record;            /* 事件的记录号 */
+    char time[8];               /* 事件的本地时间 HH:MM；读不出为空 */
     char file[2048], flags[32];
     int have_lcn;               /* last 与 target 都读出来了 */
     uint64_t last;              /* 文件的最后一个簇（LCN） */
     uint64_t target;            /* 压缩的目标位置（LCN） */
 } unmovable;
 
+/* 事件的记录号与本地时间（系统部分的属性） */
+static void event_system(EVT_HANDLE sys, EVT_HANDLE ev, unmovable *u)
+{
+    DWORD used = 0, count = 0;
+    PEVT_VARIANT v = NULL;
+    if (!sys || EvtRender(sys, ev, EvtRenderEventValues, 0, NULL, &used, &count) || GetLastError() != ERROR_INSUFFICIENT_BUFFER ||
+        !(v = malloc(used)) || !EvtRender(sys, ev, EvtRenderEventValues, used, v, &used, &count)) {
+        free(v);
+        return;
+    }
+    if (count > EvtSystemEventRecordId && v[EvtSystemEventRecordId].Type == EvtVarTypeUInt64)
+        u->record = v[EvtSystemEventRecordId].UInt64Val;
+    if (count > EvtSystemTimeCreated && v[EvtSystemTimeCreated].Type == EvtVarTypeFileTime) {
+        FILETIME ft, lt;
+        SYSTEMTIME st;
+        ft.dwLowDateTime = (DWORD)v[EvtSystemTimeCreated].FileTimeVal;
+        ft.dwHighDateTime = (DWORD)(v[EvtSystemTimeCreated].FileTimeVal >> 32);
+        if (FileTimeToLocalFileTime(&ft, &lt) && FileTimeToSystemTime(&lt, &st))
+            snprintf(u->time, sizeof u->time, "%02u:%02u", (unsigned)st.wHour, (unsigned)st.wMinute);
+    }
+    free(v);
+}
+
 /* 本次开机以来最新的一条可以解读的 259 号事件（only 不为 0 时只看这个盘符的卷）。找到返回 0，没有返回 1，
- * 查不了日志返回 -1 */
+ * 读不了日志返回 -1 */
 static int newest_event(long sysdisk, wchar_t only, unmovable *u)
 {
     wchar_t q[256];
-    EVT_HANDLE res, ctx, ev[16];
-    DWORD got = 0;
+    EVT_HANDLE res, ctx, sys, ev[16];
+    DWORD got = 0, why = ERROR_NO_MORE_ITEMS;
     int found = 1;
 
     /* 系统启动以来的毫秒数（含睡眠）：本次开机之后的事件；往前多留 10 秒，防止日志与本机计时的细小偏差 */
@@ -104,7 +132,16 @@ static int newest_event(long sysdisk, wchar_t only, unmovable *u)
         return -1;
     }
     ctx = EvtCreateRenderContext(0, NULL, EvtRenderContextUser);
-    while (found > 0 && ctx && EvtNext(res, 16, ev, 5000, 0, &got)) {
+    sys = EvtCreateRenderContext(0, NULL, EvtRenderContextSystem);
+    if (!ctx) {
+        gk3w_log("shrink: cannot create an event render context (%lu)", (unsigned long)GetLastError());
+        found = -1;
+    }
+    while (found > 0) {
+        if (!EvtNext(res, 16, ev, 5000, 0, &got)) {
+            why = GetLastError();
+            break;
+        }
         for (DWORD i = 0; i < got; i++) {
             DWORD used = 0, count = 0;
             PEVT_VARIANT v = NULL;
@@ -122,12 +159,25 @@ static int newest_event(long sysdisk, wchar_t only, unmovable *u)
                 if (v[5].Type == EvtVarTypeString && v[5].StringVal)
                     gk3w_w2u(v[5].StringVal, u->flags, sizeof u->flags);
                 u->have_lcn = !hex_lcn(&v[3], &u->last) && !hex_lcn(&v[4], &u->target);
+                if (count > 6 && v[6].Type == EvtVarTypeString && v[6].StringVal) {
+                    char phase[64];
+                    gk3w_w2u(v[6].StringVal, phase, sizeof phase);
+                    gk3w_log("shrink: event 259 phase %s", phase);
+                }
+                event_system(sys, ev[i], u);
                 found = 0;
             }
             free(v);
             EvtClose(ev[i]);
         }
     }
+    /* 没读完就出错（不是"没有更多"，例如超时）：不能当作没有事件 */
+    if (found > 0 && why != ERROR_NO_MORE_ITEMS) {
+        gk3w_log("shrink: reading the Application event log failed (%lu)", (unsigned long)why);
+        found = -1;
+    }
+    if (sys)
+        EvtClose(sys);
     if (ctx)
         EvtClose(ctx);
     EvtClose(res);
@@ -175,6 +225,8 @@ int gk3w_cmd_shrink_info(int argc, wchar_t **argv)
     dl[2] = 0;
     gk3w_line_begin(&l, "SHRINK");
     gk3w_line_kv(&l, "drive", dl);
+    gk3w_line_u64(&l, "record", u.record);
+    gk3w_line_kv(&l, "time", u.time);
     gk3w_line_u64(&l, "free_mib", freeb.QuadPart >> 20);
     if (u.file[0]) {
         gk3w_line_kv(&l, "file", u.file);
@@ -182,7 +234,7 @@ int gk3w_cmd_shrink_info(int argc, wchar_t **argv)
             gk3w_line_kv(&l, "flags", u.flags);
         if (u.have_lcn && spc && bps) {
             uint64_t cs = (uint64_t)spc * bps, end = (u.last + 1) * cs, target = u.target * cs;
-            gk3w_line_kv(&l, "limit", end + (1ull << 30) >= target ? "file" : "space");
+            gk3w_line_kv(&l, "limit", end + (64ull << 20) >= target ? "file" : "space");
         }
     }
     (void)gk3w_line_emit(&l, stdout);

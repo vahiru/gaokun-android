@@ -51,15 +51,20 @@ class ShrinkGuide extends StatelessWidget {
       // 已经有够用的未分配空间（"可用未分配空间"一行上按的）：照样说明，只是不用警示的底色
       final warn = !s.hasRoom;
       final fg = warn ? gk.onWarningContainer : context.cs.onSurface;
+      final Widget result;
       if (info.none) {
-        body = NoteBox(text: l.shrinkNoEvent);
+        result = NoteBox(text: l.shrinkNoEvent);
       } else if (info.limitedBySpace) {
-        body = NoteBox(warn: warn, text: l.shrinkFull(dl, fmtMib(info.freeMib)));
+        result = NoteBox(warn: warn, text: l.shrinkFull(dl, info.time));
       } else if (file == null || kind == null) {
-        body = NoteBox(warn: warn, text: l.shrinkNoFile(dl));
+        result = NoteBox(warn: warn, text: l.shrinkNoFile(dl, info.time));
       } else {
-        body = NoteBox(warn: warn, text: l.shrinkBlocked(dl), child: _blocker(context, '${info.drive}$file', kind, dl, fg));
+        result = NoteBox(warn: warn, text: l.shrinkBlocked(dl, info.time), child: _blocker(context, '${info.drive}$file', kind, dl, fg));
       }
+      // 又读到了上次那条：先说清楚，免得用户以为处理没有用
+      body = s.shrinkSame
+          ? Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [NoteBox(warn: true, text: l.shrinkStale), const SizedBox(height: 8), result])
+          : result;
     } else {
       return const SizedBox.shrink();
     }
@@ -107,7 +112,7 @@ class ShrinkGuide extends StatelessWidget {
     if (failed != null) {
       return [if (moved > 0) ...[movedText, const SizedBox(height: 4)], failed, const SizedBox(height: 12), again];
     }
-    final stuck = unplaced == 0 && done.intOf('end_after_mib') <= done.intOf('fixed_end_mib');
+    final stuck = mftStuck(done);
     return [
       moved > 0 ? movedText : Text(l.mftNothing, style: style),
       const SizedBox(height: 4),
@@ -134,7 +139,7 @@ Future<void> confirmMoveMft(BuildContext context) async {
   if (go == true) await s.moveMft();
 }
 
-/// 挡住压缩的那类文件：名称与处理方法（[dl]：所分析分区的盘符）
+/// 挡住压缩的那类文件：名称与处理方法（[dl]：那个分区的盘符）
 (String, String) blockerText(L10n l, ShrinkBlocker k, String dl) => switch (k) {
       ShrinkBlocker.pagefile => (l.sbPagefile, l.sbPagefileHow(dl)),
       ShrinkBlocker.hiberfil => (l.sbHiberfil, l.sbHiberfilHow(dl)),

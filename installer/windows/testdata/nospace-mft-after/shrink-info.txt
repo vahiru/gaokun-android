@@ -1,4 +1,4 @@
 D 120
 E shrink: newest event 259 since this boot is for C: (\$Mft::$DATA)
-O SHRINK drive=C: free_mib=1921 file=\$Mft::$DATA flags=-S--D limit=file
+O SHRINK drive=C: record=41391 time=21:20 free_mib=1921 file=\$Mft::$DATA flags=-S--D limit=file
 X 0

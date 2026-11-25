@@ -50,14 +50,17 @@ class ShrinkInfo {
   /// 本次开机以来还没有这样的记录（用户还没在"磁盘管理"里点过"压缩卷"）
   bool get none => r['event'] == 'none';
 
+  /// 事件的记录号：与上次读到的相同 = 用户处理之后还没重新"压缩卷"
+  int get record => r.intOf('record');
+
+  /// 事件的本地时间（HH:MM），读不出时为"--:--"
+  String get time => r['time'].isEmpty ? '--:--' : r['time'];
+
   /// "D:" 这样的盘符
   String get drive => r['drive'];
 
   /// 只有字母（"D"），界面上写"D盘"、"D:"用
   String get letter => drive.isEmpty ? 'C' : drive.substring(0, 1);
-
-  /// 这个分区的剩余可用空间
-  int get freeMib => r.intOf('free_mib');
 
   /// 压缩停在已用空间上（分区太满），而不是停在事件里的那个文件上
   bool get limitedBySpace => r['limit'] == 'space';
@@ -72,6 +75,9 @@ class ShrinkInfo {
 
   ShrinkBlocker? get blocker => file == null ? null : classifyShrinkBlocker(file!);
 }
+
+/// gk3w mft-move 的 MFTMOVE 记录说 MFT 已经只剩开头必须留在原处的部分：这个分区不能再因移动 MFT 压缩得更多
+bool mftStuck(Gk3Record r) => r.intOf('unplaced_mib') == 0 && r.intOf('end_after_mib') <= r.intOf('fixed_end_mib');
 
 /// 挡住压缩的常见文件，各有各的处理方法（界面按它给出步骤）
 enum ShrinkBlocker { pagefile, hiberfil, restorePoint, bitlocker, usnJournal, mft, ntfsMeta, memoryDump, other }

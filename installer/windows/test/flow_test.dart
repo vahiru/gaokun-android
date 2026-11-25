@@ -164,7 +164,7 @@ void main() {
     await see(t, find.text(l.shrinkAnalyze));
     await tap(t, find.text(l.shrinkAnalyze));
     await waitFor(t, find.text(l.sbPagefile), tries: 400);
-    expect(find.text(l.shrinkBlocked('C')), findsOneWidget);
+    expect(find.text(l.shrinkBlocked('C', '14:05')), findsOneWidget);
     expect(find.text(r'C:\pagefile.sys'), findsOneWidget);
     expect(find.text(l.sbPagefileHow('C')), findsOneWidget);
     expect(find.text(l.shrinkNext), findsOneWidget);
@@ -176,27 +176,32 @@ void main() {
     expect(find.text(l.shrinkAnalyze), findsOneWidget);
   });
 
-  testWidgets('还没压缩过、分区太满、找不到文件、D 盘、读取失败的写法', (t) async {
+  testWidgets('还没压缩过、分区太满、找不到文件、D 盘、又读到同一条、读取失败的写法', (t) async {
     Stream<Gk3Event> shrink(Map<String, String> f) => Stream.fromIterable([Gk3Record('SHRINK', f), const Gk3Exit(0)]);
     var reply = shrink({'event': 'none'});
     await pumpApp(t, 'nospace', respond: {'shrink-info': (args, input) => reply});
     await tap(t, find.text(l.shrinkAnalyze));
     await see(t, find.text(l.shrinkNoEvent));
     // 压缩停在已用空间上（分区太满）：请用户清理这个分区，不去怪事件里的文件
-    reply = shrink({'drive': 'C:', 'free_mib': '4096', 'file': r'\pagefile.sys::$DATA', 'limit': 'space'});
+    reply = shrink({'drive': 'C:', 'record': '11', 'time': '09:12', 'free_mib': '4096', 'file': r'\pagefile.sys::$DATA', 'limit': 'space'});
     await tap(t, find.text(l.shrinkReanalyze));
-    await see(t, find.text(l.shrinkFull('C', '4 GiB')));
+    await see(t, find.text(l.shrinkFull('C', '09:12')));
     expect(find.text(l.sbPagefile), findsNothing);
-    reply = shrink({'drive': 'C:', 'free_mib': '4096'});
+    reply = shrink({'drive': 'C:', 'record': '12', 'time': '09:20', 'free_mib': '4096'});
     await tap(t, find.text(l.shrinkReanalyze));
-    await see(t, find.text(l.shrinkNoFile('C')));
+    await see(t, find.text(l.shrinkNoFile('C', '09:20')));
+    expect(find.text(l.shrinkStale), findsNothing);
     // 用户在"磁盘管理"里压缩的是 D 盘：结果、文件路径与处理步骤都写 D 盘
-    reply = shrink({'drive': 'D:', 'free_mib': '300000',
+    reply = shrink({'drive': 'D:', 'record': '13', 'time': '09:31', 'free_mib': '300000',
         'file': r'\System Volume Information\{11111111-2222-3333-4444-555555555555}{3808876b-c176-4e48-b7ae-04046e6cc752}', 'limit': 'file'});
     await tap(t, find.text(l.shrinkReanalyze));
-    await see(t, find.text(l.shrinkBlocked('D')));
+    await see(t, find.text(l.shrinkBlocked('D', '09:31')));
     expect(find.text(l.sbRestoreHow('D')), findsOneWidget);
     expect(find.textContaining(r'D:\System Volume Information\'), findsOneWidget);
+    // 处理之后没重新"压缩卷"就来查看：还是那一条，先说清楚
+    await tap(t, find.text(l.shrinkReanalyze));
+    await see(t, find.text(l.shrinkStale));
+    expect(find.text(l.shrinkBlocked('D', '09:31')), findsOneWidget);
     reply = Stream.fromIterable([const Gk3Record('ERR', {'code': 'shrink-query'}), const Gk3Exit(1)]);
     await tap(t, find.text(l.shrinkReanalyze));
     await see(t, find.text('${l.shrinkFailed}${l.errShrinkQuery}'));
@@ -231,10 +236,55 @@ void main() {
     expect(busy.where((a) => a['busy'] == true && a['power'] == l.mftMoving), isNotEmpty);
     expect(busy.last['busy'], isFalse);
     expect(s.mftMoving, isFalse);
-    // 用户重新"压缩卷"之后再查看：移动的结果随之清掉，显示新的记录
-    await tap(t, find.text(l.shrinkReanalyze));
-    await waitFor(t, find.text(l.mftMoveBtn), tries: 400);
-    expect(find.text(l.mftMoved('78 MiB', '755 MiB', '677 MiB', 'C')), findsNothing);
+    // 用户重新"压缩卷"后再查看（回放换到 nospace-mft-after）：仍停在同一分区的 MFT 上，"已达上限"照样显示，不再建议移动
+    await tapShown(t, find.text(l.shrinkReanalyze));
+    expect(rec.calls.where((c) => c.first == 'shrink-info'), hasLength(2));
+    await see(t, find.text(l.shrinkBlocked('C', '21:20')));
+    expect(find.text(l.shrinkStale), findsNothing);
+    expect(find.text(l.mftStuck('C')), findsOneWidget);
+    expect(find.text(l.mftMoveBtn), findsNothing);
+    // 没再"压缩卷"就又来查看：还是那一条，先说清楚
+    await tapShown(t, find.text(l.shrinkReanalyze));
+    await see(t, find.text(l.shrinkStale));
+    expect(find.text(l.mftStuck('C')), findsOneWidget);
+  });
+
+  testWidgets('MFT 已挪到头：重新"压缩卷"后的新记录仍停在同一分区的 MFT 上时，不再建议移动', (t) async {
+    var record = '21';
+    final (rec, _) = await pumpApp(t, 'nospace-mft', respond: {
+      'shrink-info': (args, input) => Stream.fromIterable([
+            Gk3Record('SHRINK', {'drive': 'C:', 'record': record, 'time': '10:00', 'file': r'\$Mft::$DATA', 'limit': 'file'}),
+            const Gk3Exit(0),
+          ]),
+    });
+    await tap(t, find.text(l.shrinkAnalyze));
+    await tapShown(t, find.text(l.mftMoveBtn));
+    await tap(t, find.text(l.mftConfirmOk));
+    await waitFor(t, find.text(l.mftStuck('C')), tries: 400);
+    record = '22';
+    await tapShown(t, find.text(l.shrinkReanalyze));
+    expect(rec.calls.where((c) => c.first == 'shrink-info'), hasLength(2));
+    await see(t, find.text(l.shrinkBlocked('C', '10:00')));
+    expect(find.text(l.shrinkStale), findsNothing);
+    expect(find.text(l.mftStuck('C')), findsOneWidget);
+    expect(find.text(l.mftMoveBtn), findsNothing);
+    expect(rec.calls.where((c) => c.first == 'mft-move'), hasLength(1));
+  });
+
+  testWidgets('移动 MFT 成功但前部空间不够：说明还有多少没挪，可以清理后再挪', (t) async {
+    final (_, s) = await pumpApp(t, 'nospace-mft', respond: {
+      'mft-move': (args, input) => Stream.fromIterable([
+            const Gk3Record('MFTMOVE', {'drive': 'C:', 'execute': 'yes', 'end_before_mib': '755', 'end_after_mib': '720', 'moved_mib': '35',
+                'steps': '3', 'unplaced_mib': '43', 'fixed_end_mib': '678'}),
+            const Gk3Exit(0),
+          ]),
+    });
+    await t.runAsync(s.analyzeShrink);
+    await t.runAsync(s.moveMft);
+    await settle(t);
+    expect(find.text(l.mftMoved('35 MiB', '755 MiB', '720 MiB', 'C')), findsOneWidget);
+    expect(find.text(l.mftUnplaced('43 MiB', 'C')), findsOneWidget);
+    expect(find.text(l.mftMoveBtn), findsOneWidget);
   });
 
   testWidgets('移动 MFT 失败：说明原因、可以再试；中途失败时显示已移动的部分', (t) async {
@@ -273,7 +323,7 @@ void main() {
     await see(t, find.text(l.chkRoom('40 GiB')));
     await tap(t, find.text(l.shrinkAnalyze));
     await waitFor(t, find.text(l.sbPagefile), tries: 400);
-    expect(find.text(l.shrinkBlocked('C')), findsOneWidget);
+    expect(find.text(l.shrinkBlocked('C', '14:05')), findsOneWidget);
     expect(find.text(l.sbPagefileHow('C')), findsOneWidget);
     expect(rec.calls.where((c) => c.first == 'shrink-info'), hasLength(1));
     // 下一步照常可以按
@@ -310,6 +360,10 @@ void main() {
     // 挪完了（没有放不下的部分）：请用户重新"压缩卷"、回来再查看
     expect(find.text(l.mftDone('C')), findsOneWidget);
     expect(find.text(l.mftMoveBtn), findsNothing);
+    // 新的记录仍停在 MFT 上（还没挪到头）：移动的结果清掉，可以再挪
+    await tapShown(t, find.text(l.shrinkReanalyze));
+    await see(t, find.text(l.mftMoveBtn));
+    expect(find.text(l.mftDone('C')), findsNothing);
   });
 
   testWidgets('测试模式不读取这台电脑的压缩记录', (t) async {

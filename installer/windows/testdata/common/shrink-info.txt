@@ -1,4 +1,4 @@
 D 120
 E shrink: newest event 259 since this boot is for C: (\pagefile.sys::$DATA)
-O SHRINK drive=C: free_mib=22968 file=\pagefile.sys::$DATA flags=P---D limit=file
+O SHRINK drive=C: record=41207 time=14:05 free_mib=22968 file=\pagefile.sys::$DATA flags=P---D limit=file
 X 0

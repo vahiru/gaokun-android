@@ -56,7 +56,7 @@ class Session extends ChangeNotifier {
     // 恢复密钥只用于一次写盘：重新检查之后要重新输入
     _bitlockerKey = null;
     bitlockerErr = null;
-    // 压缩分析的结果对应的是检查之前的分区（在这之后才结束的分析照样填进来）
+    // 读到的压缩记录随重新检查清掉（在这之后才读完的照样填进来）
     shrinkInfo = null;
     shrinkErr = null;
     mftResult = null;
@@ -166,20 +166,32 @@ class Session extends ChangeNotifier {
     }
   }
 
-  /// 读取用户最近一次压缩时停在哪个文件上；上一次移动 MFT 的结果随之清掉（新记录才说明现在的情况）
+  /// 又读到了上次读过的那条记录：用户处理之后还没在"磁盘管理"里重新"压缩卷"
+  bool shrinkSame = false;
+  int? _lastShrinkRecord;
+
+  /// 读取用户最近一次压缩时停在哪个文件上。读到新记录时上一次移动 MFT 的结果随之清掉（新记录才说明现在的情况），
+  /// 但"MFT 已经挪到头了"是这个分区本身的情况：新记录仍停在同一分区的 MFT 上时保留，不再建议移动
   Future<void> analyzeShrink() async {
     if (shrinkChecking || mftMoving) return;
-    mftResult = null;
     mftErr = null;
     shrinkChecking = true;
     shrinkInfo = null;
     shrinkErr = null;
+    shrinkSame = false;
     notifyListeners();
     try {
       final r = await backend.run('shrink-info');
       final rec = r.ok ? r.first('SHRINK') : null;
       if (rec != null) {
-        shrinkInfo = ShrinkInfo(rec);
+        final info = ShrinkInfo(rec);
+        shrinkSame = !info.none && info.record != 0 && info.record == _lastShrinkRecord;
+        _lastShrinkRecord = info.none ? null : info.record;
+        final done = mftResult;
+        final keep = done != null &&
+            (shrinkSame || (mftStuck(done) && done['drive'] == info.drive && info.blocker == ShrinkBlocker.mft));
+        if (!keep) mftResult = null;
+        shrinkInfo = info;
       } else {
         shrinkErr = r.err ?? _failed('shrink-info');
       }

@@ -211,7 +211,7 @@ void main() {
     await shot(t, '37-bitlocker-confirm-ok-en');
   }, skip: !haveFont);
 
-  testWidgets('空间不够：分析可压缩空间', (t) async {
+  testWidgets('空间不够：查看压缩受阻原因', (t) async {
     await pumpApp(t, 'nospace');
     await tap(t, find.text(l.shrinkAnalyze));
     await waitFor(t, find.text(l.sbPagefile), tries: 400);

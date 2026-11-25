@@ -1,4 +1,4 @@
-# 场景：同 nospace-mft，MFT 挪到前部、用户重新"压缩卷"之后：仍停在 MFT 开头的系统记录上（同一测试卷挪完之后真跑旧版 shrink-info 的结果按现在的格式改写，盘符换成 C:；与那次的 259 号事件（最后一个簇 0x2a553、目标位置 0x6e26）相符）
+# 场景：同 nospace-mft，MFT 挪到前部、用户重新"压缩卷"之后：仍停在 MFT 开头的系统记录上（同一测试卷挪完之后真跑旧版 shrink-info 的结果按现在的格式改写，盘符换成 C:；与那次的 259 号事件（最后一个簇 0x2a553、目标位置 0x6e26）相符；record、time 是补的示例值）
 # probe：同 nospace；preflight 用 common 里平板的
 probe                     probe.txt
 shrink-info *             shrink-info.txt
