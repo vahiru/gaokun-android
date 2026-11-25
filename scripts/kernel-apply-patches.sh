@@ -194,6 +194,16 @@ KPATCHES=(
     # 0021让gen1编码器在GOP长度为0时向固件发最长的帧内间隔（原来丢掉这一属性，固件把每帧都编成帧内帧）。
     # crdroid-tree-fixes.py [58]（android/v4l2-codec2/0009）依赖0021：缺少0021时每帧都会成为关键帧。
     kernel/iris/0021-media-iris-gen1-honour-a-GOP-size-of-0.patch
+    # 0022回移主线的实例引用计数（中断线程处理某个会话的包时，close()不能释放这个实例）。
+    # 0023让flush或停流期间对不上号的FBD不再把会话置为错误（VP9在CAPTURE停流的FLUSH_ALL之后会回一个不带缓冲地址的
+    # 输出包，force-stop时报error in ftb done）；0024在iris_close()释放m2m上下文之前标记会话正在关闭，gen1的响应
+    # 处理不再触碰它；0025让编码器不带码流返回的帧、被拒的命令留下限速告警；0026让正在关闭的解码会话在OUTPUT停流时
+    # 完整停止（seek_mode=1时进程退出，原来只flush，SESSION_END被固件拒绝）。0023–0026依次叠加，0026依赖0024的标记。
+    kernel/iris/0022-media-iris-reference-count-video-instances.patch
+    kernel/iris/0023-media-iris-gen1-do-not-fail-the-session-on-a-late-buffer-return.patch
+    kernel/iris/0024-media-iris-gen1-keep-firmware-responses-off-a-closing-instance-s-m2m-context.patch
+    kernel/iris/0025-media-iris-gen1-log-encoder-frames-that-come-back-without-bitstream.patch
+    kernel/iris/0026-media-iris-gen1-stop-a-closing-decoder-session-at-OUTPUT-streamoff.patch
 
     # ─── 7. kernel/camera：camcc 时钟/GDSC、camss 与前后摄传感器驱动（ov13b10 / hi846 / s5k4h7 / s5k3l6）───
     # 0003 与 kernel/dts/0005 配套，需 CONFIG_VIDEO_OV13B10=y 与 CONFIG_VIDEO_DW9714=y；

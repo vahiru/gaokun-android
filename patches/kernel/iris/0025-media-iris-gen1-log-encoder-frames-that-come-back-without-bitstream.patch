@@ -1,0 +1,106 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: iris: gen1: log encoder frames that come back without
+ bitstream
+
+An encoder session can go quiet with nothing in the kernel log: the
+client keeps feeding frames, every capture buffer comes back without a
+bitstream, and a client that waits for one output per input stalls for
+good. The driver sees all of it but says nothing:
+
+- A fill-buffer-done flagged DROP_FRAME or DATACORRUPT is passed on as an
+  ERROR buffer with no payload, and one with filled_len 0 as an empty
+  buffer, without a message.
+- An empty-buffer-done carrying any status other than
+  HFI_ERR_SESSION_UNSUPPORTED_STREAM is not looked at.
+- Non-fatal session errors, where the firmware refuses a command but
+  keeps the session running, are only printed with dev_dbg.
+
+Warn, rate limited, about encoder frames that are dropped, flagged as
+corrupt, or empty outside the end of a drain, with the tag, timestamp,
+length, flags, picture type and status the firmware reported. Warn about
+encoder inputs returned with a status, and about non-fatal session
+errors, with the command they refer to. Packets that come back while a
+flush or stop is outstanding, or after the capture port stopped, are
+expected to be empty and are not reported. Decoder input statuses are
+routine and stay at debug level.
+
+What userspace receives is unchanged.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ .../qcom/iris/iris_hfi_gen1_response.c        | 46 ++++++++++++++++++-
+ 1 file changed, 44 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen1_response.c b/drivers/media/platform/qcom/iris/iris_hfi_gen1_response.c
+index 322d7b0aaa..e8780841c0 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen1_response.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen1_response.c
+@@ -272,8 +272,15 @@ iris_hfi_gen1_event_session_error(struct iris_inst *inst, struct hfi_msg_event_n
+ 	case HFI_ERR_SESSION_UNSUPPORT_BUFFERTYPE:
+ 	case HFI_ERR_SESSION_UNSUPPORTED_SETTING:
+ 	case HFI_ERR_SESSION_UPSCALE_NOT_SUPPORTED:
+-		dev_dbg(inst->core->dev, "session error: event id:%x, session id:%x\n",
+-			pkt->event_data1, pkt->shdr.session_id);
++		/*
++		 * The session goes on, but the firmware did not take the
++		 * command as asked. That can show up later as frames that
++		 * come back empty, so leave a trace.
++		 */
++		dev_warn_ratelimited(inst->core->dev,
++				     "session %x: firmware rejected command %x (non-fatal, event %x)\n",
++				     pkt->shdr.session_id, pkt->event_data2,
++				     pkt->event_data1);
+ 		break;
+ 	/* fatal session errors */
+ 	default:
+@@ -417,6 +424,22 @@ static void iris_hfi_gen1_session_etb_done(struct iris_inst *inst, void *packet)
+ 		buf->flags = V4L2_BUF_FLAG_ERROR;
+ 		iris_vb2_queue_error(inst);
+ 		iris_inst_change_state(inst, IRIS_INST_ERROR);
++	} else if (pkt->shdr.error_type != HFI_ERR_NONE) {
++		/*
++		 * Any other status is not acted on. For the encoder it can be the
++		 * only hint why a frame produces no bitstream; decoder statuses
++		 * (no sync frame yet, for example) are routine.
++		 */
++		if (inst->domain == ENCODER && !iris_hfi_gen1_returning_buffers(inst))
++			dev_warn_ratelimited(inst->core->dev,
++					     "session %x: encoder input %u returned with status %#x (filled %u)\n",
++					     inst->session_id, pkt->input_tag,
++					     pkt->shdr.error_type, pkt->filled_len);
++		else
++			dev_dbg(inst->core->dev,
++				"session %x: input %u returned with status %#x\n",
++				inst->session_id, pkt->input_tag,
++				pkt->shdr.error_type);
+ 	}
+ 
+ 	if (!(buf->attr & BUF_ATTR_QUEUED))
+@@ -567,6 +590,25 @@ static void iris_hfi_gen1_session_ftb_done(struct iris_inst *inst, void *packet)
+ 	if (!found)
+ 		goto error;
+ 
++	/*
++	 * An encoder frame the firmware dropped, flagged as corrupt or returned
++	 * empty reaches userspace only as an ERROR or empty capture buffer, and
++	 * a client that waits for every frame stalls on it without any trace.
++	 * An empty buffer is expected only at the end of a drain and while
++	 * buffers are being returned on a flush or stop.
++	 */
++	if (inst->domain == ENCODER &&
++	    ((hfi_flags & (HFI_BUFFERFLAG_DROP_FRAME | HFI_BUFFERFLAG_DATACORRUPT)) ||
++	     (!filled_len && !(hfi_flags & HFI_BUFFERFLAG_EOS) &&
++	      !(inst->sub_state & IRIS_INST_SUB_DRAIN))) &&
++	    !iris_hfi_gen1_returning_buffers(inst))
++		dev_warn_ratelimited(core->dev,
++				     "session %x: encoder frame without bitstream (tag %u, ts %llu us, filled %u, flags %#x, picture %#x, status %#x)\n",
++				     inst->session_id, output_tag,
++				     ((u64)timestamp_hi << 32) | timestamp_lo,
++				     filled_len, hfi_flags, pic_type,
++				     com_pkt->error_type);
++
+ 	buf->data_offset = offset;
+ 	buf->data_size = filled_len;
+ 

@@ -1,0 +1,52 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: iris: gen1: stop a closing decoder session at OUTPUT
+ streamoff
+
+With seek_mode=1, an OUTPUT streamoff that follows a CAPTURE streamoff
+only flushes the session and keeps it loaded and started, so that the
+next streamon continues it. iris_close() stops such a session before it
+releases the m2m context.
+
+When the file is released while both queues are still streaming, for
+example because the process holding it died, v4l2_m2m_ctx_release()
+streams both queues off itself, after that check. The OUTPUT streamoff
+then takes the seek branch, SESSION_END goes to a session that is still
+loaded and started, and the firmware rejects it, which puts the
+instance in the error state. The driver then frees the internal buffers
+while the firmware may still use them. Killing a raw V4L2 H.264 decode
+mid-stream with SIGKILL left the session in the error state in 40 of 40
+runs; 9 of them also hit an SMMU context fault on the video stream and
+11 a firmware watchdog and reload. With seek_mode=0 none of 30 runs did,
+and with this change none of 40.
+
+A closing instance gets no further streamon, so stop it fully instead
+of only flushing it.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c b/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c
+index 48a0de6fa5..0e21b8eb92 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c
+@@ -236,13 +236,15 @@ static int iris_hfi_gen1_session_stop(struct iris_inst *inst, u32 plane)
+ 				ret = iris_wait_for_session_response(inst, true);
+ 			}
+ 		} else if (READ_ONCE(iris_seek_mode) == 1 && V4L2_TYPE_IS_OUTPUT(plane) &&
++			   !inst->closing &&
+ 			   inst->state == IRIS_INST_INPUT_STREAMING &&
+ 			   inst->sub_state & IRIS_INST_SUB_LOAD_RESOURCES) {
+ 			/*
+ 			 * OUTPUT streamoff after CAPTURE streamoff (a seek, or the first half of
+ 			 * a stop): flush and keep the session loaded and started, as venus
+ 			 * vdec_stop_output() does. The next streamon continues it;
+-			 * iris_close() stops it if none comes.
++			 * iris_close() stops it if none comes. A closing instance
++			 * gets no further streamon, so it is stopped right here.
+ 			 */
+ 			reinit_completion(&inst->flush_completion);
+ 

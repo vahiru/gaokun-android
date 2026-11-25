@@ -1,0 +1,130 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: iris: gen1: keep firmware responses off a closing
+ instance's m2m context
+
+iris_close() frees the control handler, then calls
+v4l2_m2m_ctx_release(), which stops both queues and frees the m2m
+context, and only then sends SESSION_END. None of this happens under
+inst->lock, and inst->m2m_ctx keeps pointing at the freed context. The
+firmware can still answer for the session during that time, and the
+gen1 handlers for empty-buffer-done, fill-buffer-done and session events
+walk the m2m buffer lists, look up the vb2 queues and, on a sequence
+change, update a control. A packet that arrives late enough reads freed
+memory. Counting references on the instance keeps the instance itself
+alive but does nothing for the context it points to.
+
+Mark the instance as closing under inst->lock before anything is freed.
+From then on the gen1 handlers drop buffer-done packets, ignore sequence
+changes and no longer flag the vb2 queues on a session error. Nothing is
+left behind by this: the stop path run by v4l2_m2m_ctx_release() still
+completes every buffer the driver holds back to vb2, and the internal
+buffers are freed with the session.
+
+Only the gen1 handlers check the flag. The gen2 handlers can still reach
+the released context in the same window, as they could before.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ .../qcom/iris/iris_hfi_gen1_response.c        | 21 +++++++++++++++++--
+ .../media/platform/qcom/iris/iris_instance.h  |  3 +++
+ drivers/media/platform/qcom/iris/iris_vidc.c  | 11 ++++++++++
+ 3 files changed, 33 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen1_response.c b/drivers/media/platform/qcom/iris/iris_hfi_gen1_response.c
+index d3b78a6e35..322d7b0aaa 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen1_response.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen1_response.c
+@@ -285,7 +285,8 @@ iris_hfi_gen1_event_session_error(struct iris_inst *inst, struct hfi_msg_event_n
+ 			"session error for command: %x, event id:%x, session id:%x\n",
+ 			pkt->event_data2, pkt->event_data1,
+ 			pkt->shdr.session_id);
+-		iris_vb2_queue_error(inst);
++		if (!inst->closing)
++			iris_vb2_queue_error(inst);
+ 		iris_inst_change_state(inst, IRIS_INST_ERROR);
+ 		break;
+ 	}
+@@ -300,7 +301,9 @@ static void iris_hfi_gen1_session_event_notify(struct iris_inst *inst, void *pac
+ 		iris_hfi_gen1_event_session_error(inst, pkt);
+ 		break;
+ 	case HFI_EVENT_SESSION_SEQUENCE_CHANGED:
+-		iris_hfi_gen1_event_seq_changed(inst, pkt);
++		/* Nothing to reconfigure once iris_close() has started */
++		if (!inst->closing)
++			iris_hfi_gen1_event_seq_changed(inst, pkt);
+ 		break;
+ 	default:
+ 		break;
+@@ -396,6 +399,10 @@ static void iris_hfi_gen1_session_etb_done(struct iris_inst *inst, void *packet)
+ 	if (pkt->packet_buffer == 0xdeadb000)
+ 		return;
+ 
++	/* iris_close() is releasing the m2m context; its stop path returns the buffer */
++	if (inst->closing)
++		return;
++
+ 	v4l2_m2m_for_each_src_buf_safe(m2m_ctx, m2m_buffer, n) {
+ 		buf = to_iris_buffer(&m2m_buffer->vb);
+ 		if (buf->index == pkt->input_tag) {
+@@ -470,6 +477,16 @@ static void iris_hfi_gen1_session_ftb_done(struct iris_inst *inst, void *packet)
+ 		offset = com_pkt->offset;
+ 	}
+ 
++	/*
++	 * iris_close() is releasing the m2m context. Its stop path returns the
++	 * capture buffers to vb2, and the DPBs are freed with the session.
++	 */
++	if (inst->closing) {
++		dev_dbg(core->dev, "ftb done: session closing, dropped (stream %u, tag %u)\n",
++			stream_id, output_tag);
++		return;
++	}
++
+ 	if ((hfi_flags & HFI_BUFFERFLAG_EOS) && !filled_len) {
+ 		/*
+ 		 * Upstream flushes the output port here, returning the DPBs to the host.
+diff --git a/drivers/media/platform/qcom/iris/iris_instance.h b/drivers/media/platform/qcom/iris/iris_instance.h
+index 54661b028b..f267f48dbc 100644
+--- a/drivers/media/platform/qcom/iris/iris_instance.h
++++ b/drivers/media/platform/qcom/iris/iris_instance.h
+@@ -74,6 +74,8 @@ extern bool iris_eos_flush;
+  * @icc_data: structure of interconnect data
+  * @m2m_dev:	a reference to m2m device structure
+  * @m2m_ctx:	a reference to m2m context structure
++ * @closing: iris_close() has begun releasing the m2m context; firmware
++ *	     responses must no longer touch it
+  * @sequence_cap: a sequence counter for capture queue
+  * @sequence_out: a sequence counter for output queue
+  * @tss: timestamp metadata
+@@ -123,6 +125,7 @@ struct iris_inst {
+ 	struct icc_vote_data		icc_data;
+ 	struct v4l2_m2m_dev		*m2m_dev;
+ 	struct v4l2_m2m_ctx		*m2m_ctx;
++	bool				closing;
+ 	u32				sequence_cap;
+ 	u32				sequence_out;
+ 	struct iris_ts_metadata		tss[VIDEO_MAX_FRAME];
+diff --git a/drivers/media/platform/qcom/iris/iris_vidc.c b/drivers/media/platform/qcom/iris/iris_vidc.c
+index 0fe25b51ec..5f6148b744 100644
+--- a/drivers/media/platform/qcom/iris/iris_vidc.c
++++ b/drivers/media/platform/qcom/iris/iris_vidc.c
+@@ -328,6 +328,17 @@ int iris_close(struct file *filp)
+ 		mutex_unlock(&inst->lock);
+ 	}
+ 
++	/*
++	 * The control handler and the m2m context are freed below, the latter
++	 * after its release has stopped both queues and so handed every buffer
++	 * the driver still holds back to vb2. The firmware keeps answering for
++	 * this session until SESSION_END is acknowledged; from here on its
++	 * responses must not touch either of them.
++	 */
++	mutex_lock(&inst->lock);
++	inst->closing = true;
++	mutex_unlock(&inst->lock);
++
+ 	v4l2_ctrl_handler_free(&inst->ctrl_handler);
+ 	v4l2_m2m_ctx_release(inst->m2m_ctx);
+ 	v4l2_m2m_release(inst->m2m_dev);

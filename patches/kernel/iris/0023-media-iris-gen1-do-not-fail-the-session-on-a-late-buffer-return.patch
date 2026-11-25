@@ -1,0 +1,212 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: iris: gen1: do not fail the session on a late buffer
+ return
+
+Tearing down a decoder in the middle of playback sometimes logs
+
+  qcom-iris aa00000.video-codec: error in ftb done
+
+and moves the instance to IRIS_INST_ERROR. It happens when the codec is
+released while frames are still in flight, for example when the player
+is force-stopped, its surface is destroyed or the client process dies.
+Teardown still completes and later sessions are fine, but the instance
+ends in the error state and the error line shows up in every log check.
+
+iris_hfi_gen1_session_ftb_done() looks the returned buffer up among the
+DPBs or capture buffers still marked as queued and treats a miss as a
+fatal protocol violation. During a flush or a stop, however, the
+firmware hands back what it holds while the driver takes the capture
+buffers back on its own, and the firmware can return more than is
+queued. On a VP9 stream whose consumer had stopped returning capture
+buffers, it answers the FLUSH_ALL sent at capture streamoff with one
+extra fill-buffer-done on the output stream that names no buffer at
+all: no buffer address, no allocation length and output tag 0, but the
+length and timestamp of a decoded picture it had nowhere to put. A DPB
+that comes back after it was already returned does not match either.
+venus ignores such packets silently.
+
+The obvious checks do not cover the window. While capture streamoff
+waits for its flush, vb2 still reports the queue as streaming and the
+instance is still IRIS_INST_STREAMING. So mark a gen1 session stop for
+its whole duration, including the waits that drop inst->lock, and treat
+a non-matching FBD as a late return while a flush or a stop is
+outstanding or once the capture port no longer streams. Such a packet is
+dropped with a debug message and the buffer state is left alone. A DPB
+that was already returned is no longer marked queued, so the next
+capture streamon releases and replaces it; it is never handed to the
+firmware twice.
+
+A fill-buffer-done on the output stream with no buffer address names no
+capture buffer at all: every capture buffer is queued with its IOVA,
+which is never 0. Drop such a packet before the matching, unless it
+carries EOS, so that its tag 0 and offset 0 cannot complete capture
+buffer 0 with a picture that was never written to it. Outside a flush or
+stop it is reported with a rate-limited warning. EOS packets captured
+from H.264, HEVC and VP9 drains, including drains with the capture queue
+starved, all carried the address of the buffer they returned.
+
+A mismatch while the capture port streams with no flush or stop pending
+is still an error. It is now rate limited and reports the stream, tag,
+offset, length, flags and instance state needed to tell what came back.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ .../qcom/iris/iris_hfi_gen1_command.c         | 12 ++++
+ .../qcom/iris/iris_hfi_gen1_response.c        | 61 ++++++++++++++++++-
+ .../media/platform/qcom/iris/iris_instance.h  |  3 +
+ 3 files changed, 75 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c b/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c
+index 49911c91a5..48a0de6fa5 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c
+@@ -196,6 +196,16 @@ static int iris_hfi_gen1_session_stop(struct iris_inst *inst, u32 plane)
+ 	u32 flush_type = 0;
+ 	int ret = 0;
+ 
++	/*
++	 * The waits below drop inst->lock while the firmware hands back the
++	 * buffers it holds. Let the response handler know that a buffer it
++	 * cannot match was most likely taken back already. The flag is
++	 * cleared with inst->lock held and the caller updates the instance
++	 * state before it drops the lock, so the handler sees the new state
++	 * as soon as the flag is gone.
++	 */
++	inst->stop_in_progress = true;
++
+ 	if (inst->domain == DECODER) {
+ 		if (inst->state == IRIS_INST_STREAMING) {
+ 			if (V4L2_TYPE_IS_OUTPUT(plane))
+@@ -296,6 +306,8 @@ static int iris_hfi_gen1_session_stop(struct iris_inst *inst, u32 plane)
+ 					 VB2_BUF_STATE_ERROR);
+ 	}
+ 
++	inst->stop_in_progress = false;
++
+ 	return ret;
+ }
+ 
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen1_response.c b/drivers/media/platform/qcom/iris/iris_hfi_gen1_response.c
+index bee0f846ca..d3b78a6e35 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen1_response.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen1_response.c
+@@ -368,6 +368,22 @@ static void iris_hfi_gen1_sys_property_info(struct iris_core *core, void *packet
+ 	}
+ }
+ 
++/*
++ * Whether the firmware may hand back buffers the driver no longer counts as
++ * queued: while a flush or a stop is outstanding, and once the capture port
++ * has stopped streaming. In all of these the driver takes the capture buffers
++ * back itself, so a returned buffer that matches nothing queued is a late
++ * return, not a protocol violation.
++ */
++static bool iris_hfi_gen1_returning_buffers(struct iris_inst *inst)
++{
++	if (inst->flush_responses_pending || inst->stop_in_progress)
++		return true;
++
++	return inst->state != IRIS_INST_STREAMING &&
++	       inst->state != IRIS_INST_OUTPUT_STREAMING;
++}
++
+ static void iris_hfi_gen1_session_etb_done(struct iris_inst *inst, void *packet)
+ {
+ 	struct hfi_msg_session_empty_buffer_done_pkt *pkt = packet;
+@@ -428,6 +444,7 @@ static void iris_hfi_gen1_session_ftb_done(struct iris_inst *inst, void *packet)
+ 	u32 output_tag;
+ 	struct iris_buffer *buf, *iter;
+ 	struct iris_buffers *buffers;
++	u32 stream_id = 0;
+ 	u32 hfi_flags;
+ 	u32 offset;
+ 	u64 timestamp_us = 0;
+@@ -435,6 +452,7 @@ static void iris_hfi_gen1_session_ftb_done(struct iris_inst *inst, void *packet)
+ 	u32 flags = 0;
+ 
+ 	if (inst->domain == DECODER) {
++		stream_id = uncom_pkt->stream_id;
+ 		timestamp_hi = uncom_pkt->time_stamp_hi;
+ 		timestamp_lo = uncom_pkt->time_stamp_lo;
+ 		filled_len = uncom_pkt->filled_len;
+@@ -494,6 +512,29 @@ static void iris_hfi_gen1_session_ftb_done(struct iris_inst *inst, void *packet)
+ 			}
+ 		}
+ 	} else {
++		/*
++		 * A decoded picture the firmware had no output buffer for comes
++		 * back without a buffer address (VP9 sends one for a picture
++		 * still waiting for a buffer when FLUSH_ALL arrives). Every
++		 * capture buffer is queued with its IOVA, which is never 0, so
++		 * the packet names none of them, and its tag and offset (both 0)
++		 * would match capture buffer 0 if that one is queued. Drop it.
++		 * An EOS packet is left to the matching below.
++		 */
++		if (inst->domain == DECODER && !uncom_pkt->packet_buffer &&
++		    !(hfi_flags & HFI_BUFFERFLAG_EOS)) {
++			if (iris_hfi_gen1_returning_buffers(inst))
++				dev_dbg(core->dev,
++					"ftb done: picture without a buffer dropped (stream %u, filled %u, flags %#x)\n",
++					stream_id, filled_len, hfi_flags);
++			else
++				dev_warn_ratelimited(core->dev,
++						     "session %x: firmware returned a picture without a buffer (stream %u, filled %u, flags %#x, state %d, sub_state %#x)\n",
++						     inst->session_id, stream_id, filled_len,
++						     hfi_flags, inst->state, inst->sub_state);
++			return;
++		}
++
+ 		v4l2_m2m_for_each_dst_buf_safe(m2m_ctx, m2m_buffer, n) {
+ 			buf = to_iris_buffer(&m2m_buffer->vb);
+ 			if (!(buf->attr & BUF_ATTR_QUEUED))
+@@ -572,8 +613,26 @@ static void iris_hfi_gen1_session_ftb_done(struct iris_inst *inst, void *packet)
+ 	return;
+ 
+ error:
++	if (iris_hfi_gen1_returning_buffers(inst)) {
++		/*
++		 * The driver has already given the buffer back to vb2, or it
++		 * is a DPB that came back before. Leave it alone: a returned
++		 * DPB is no longer marked queued, so the next capture streamon
++		 * releases and replaces it, and it never reaches the firmware
++		 * twice.
++		 */
++		dev_dbg(core->dev,
++			"ftb done: late return dropped (stream %u, tag %u, offset %u, filled %u, flags %#x, state %d, sub_state %#x)\n",
++			stream_id, output_tag, offset, filled_len, hfi_flags,
++			inst->state, inst->sub_state);
++		return;
++	}
++
++	dev_err_ratelimited(core->dev,
++			    "error in ftb done: no queued buffer (stream %u, tag %u, offset %u, filled %u, flags %#x, state %d, sub_state %#x)\n",
++			    stream_id, output_tag, offset, filled_len, hfi_flags,
++			    inst->state, inst->sub_state);
+ 	iris_inst_change_state(inst, IRIS_INST_ERROR);
+-	dev_err(core->dev, "error in ftb done\n");
+ }
+ 
+ struct iris_hfi_gen1_response_pkt_info {
+diff --git a/drivers/media/platform/qcom/iris/iris_instance.h b/drivers/media/platform/qcom/iris/iris_instance.h
+index 79da2bea7c..54661b028b 100644
+--- a/drivers/media/platform/qcom/iris/iris_instance.h
++++ b/drivers/media/platform/qcom/iris/iris_instance.h
+@@ -61,6 +61,8 @@ extern bool iris_eos_flush;
+  * @completion: structure of signal completions
+  * @flush_completion: structure of signal completions for flush cmd
+  * @flush_responses_pending: counter to track number of pending flush responses
++ * @stop_in_progress: a gen1 session stop is in progress; the firmware is
++ *		      handing back the buffers it holds
+  * @fw_caps: array of supported instance firmware capabilities
+  * @buffers: array of different iris buffers
+  * @fw_min_count: minimnum count of buffers needed by fw
+@@ -109,6 +111,7 @@ struct iris_inst {
+ 	struct completion		completion;
+ 	struct completion		flush_completion;
+ 	u32				flush_responses_pending;
++	bool				stop_in_progress;
+ 	struct platform_inst_fw_cap	fw_caps[INST_FW_CAP_MAX];
+ 	struct iris_buffers		buffers[BUF_TYPE_MAX];
+ 	u32				fw_min_count;
