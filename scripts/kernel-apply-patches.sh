@@ -220,8 +220,10 @@ KPATCHES=(
     kernel/iris/0033-media-iris-run-the-firmware-reload-on-the-freezable-workqueue.patch
     # 0034给每个编码会话在CP非像素窗口里分配自己的ARP槽位（8个256 KiB，槽位0即原来的0x01000000），需iommu/0002；
     # 0035在固件拒绝SESSION_INIT时让第一次REQBUFS失败，而不是等到STREAMON才报-EBUSY。叠在0027–0033之上。
+    # 0036把解码码流的三原色11（SMPTE RP 431-2）报告为V4L2_COLORSPACE_DCI_P3（原来标签与返回值写反）。
     kernel/iris/0034-media-iris-give-every-encoder-session-its-own-CP-non-pixel-ARP-slot.patch
     kernel/iris/0035-media-iris-gen1-fail-the-session-open-when-the-firmware-rejects-it.patch
+    kernel/iris/0036-media-iris-report-the-DCI-P3-colour-primaries-of-decoded-streams.patch
 
     # ─── 7. kernel/camera：camcc 时钟/GDSC、camss 与前后摄传感器驱动（ov13b10 / hi846 / s5k4h7 / s5k3l6）───
     # 0003 与 kernel/dts/0005 配套，需 CONFIG_VIDEO_OV13B10=y 与 CONFIG_VIDEO_DW9714=y；
