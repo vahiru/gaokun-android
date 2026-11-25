@@ -59,11 +59,11 @@
 | 文件 | 用途 | 所在的发布 |
 |---|---|---|
 | `gaokun-android-windows-installer-<版本>-arm64.zip` | Windows安装器 | `windows-installer-v<版本>` |
-| `gaokun3-live-<版本>-android-<系统版本>.iso` | Live安装器，附带该版本的系统安装文件（约1.5 GB），写入U盘后即可安装 | `live-installer-v<版本>` |
-| `gaokun3-live-<版本>.iso` | Live安装器，不带系统安装文件（约180 MB），需要另外放入系统安装文件 | 同上 |
+| `gaokun3-live-<版本>-android-<系统版本>.iso` | Live安装器，附带该系统版本的安装文件（约1.5 GB），写入U盘后即可安装 | `live-installer-v<版本>-for-<系统版本>` |
+| `gaokun3-live-<版本>-for-<系统版本>.iso` | Live安装器，不带系统安装文件（约180 MB），供Windows安装器制作安装介质使用，一般无需下载 | 同上 |
 | `boot.img`、`super.img.zst`、`install-artifacts.sha256` | 系统安装文件 | 各系统版本的发布 |
 
-使用Windows安装器时，系统安装文件和Live安装器都由它下载，不需要手动下载。各文件的校验值见同一发布中的`.sha256`文件、`SHA256SUMS`和`install-artifacts.sha256`。
+每个系统版本发布后，都会随之发布一版附带该版本系统安装文件的Live安装器，请下载最新的一版。使用Windows安装器时，系统安装文件和Live安装器都由它下载，不需要手动下载。各文件的校验值见同一发布中的`.sha256`文件、`SHA256SUMS`和`install-artifacts.sha256`。
 
 ### 从镜像站下载系统安装文件
 
@@ -100,7 +100,7 @@ https://ota.072172.xyz/install/<build>/<文件名>
 - **U盘**：清空整个U盘后写入，制作完成后可以用于任意一台MateBook E Go。
 - **本机磁盘**：在系统磁盘的未分配空间末尾创建约2 GiB的安装器分区（GK3LIVE），并在开机菜单中添加`gaokun3 installer`。还没有安装Android时，会在EFI系统分区安装启动管理器（systemd-boot）并备份原有默认引导文件（BOOTAA64.EFI），开机默认仍进入Windows。系统磁盘开启了BitLocker时（无论是否已安装Android），写入或单独删除安装器分区均需先校验恢复密钥。其他分区和其中的数据不受影响。
 
-Live安装器只能从GitHub下载，或使用同一目录下的本地系统安装文件与`gaokun3-live-<版本>.iso`；选择"R2镜像源"时无法制作安装介质。
+Live安装器只能从GitHub下载，或使用同一目录下的本地系统安装文件与Live安装器的ISO；选择"R2镜像源"时无法制作安装介质。
 
 本机磁盘上已有安装器分区时，可以在"选择写入位置"一步中删除它（尚未安装Android时，删除后也会将EFI默认引导文件恢复为写入前的状态；单独删除安装器分区尚未在实机上验证）。安装Android后，Live安装器默认也会删除安装器分区。
 
@@ -117,7 +117,7 @@ Live安装器只能从GitHub下载，或使用同一目录下的本地系统安�
   sudo dd if=gaokun3-live-<版本>-android-<系统版本>.iso of=/dev/sdX bs=4M conv=fsync status=progress
   ```
 
-- **把文件复制到U盘**：把U盘格式化为FAT32（Windows自带格式化仅支持32 GB及以下的U盘，更大容量请使用前两种方式），在Windows中双击打开任一ISO，把其中的全部文件复制到U盘。使用不带系统安装文件的ISO时，再把`boot.img`、`super.img.zst`和`install-artifacts.sha256`复制到U盘的`gaokun3\payload`文件夹中。
+- **把文件复制到U盘**：把U盘格式化为FAT32（Windows自带格式化仅支持32 GB及以下的U盘，更大容量请使用前两种方式），在Windows中双击打开带系统安装文件的ISO，把其中的全部文件复制到U盘。
 
 ### 启动Live安装器
 
