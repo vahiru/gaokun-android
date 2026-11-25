@@ -1,0 +1,513 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: iris: gen1: accept P010 encoder input for HEVC Main 10
+
+The encoder only takes NV12 and QC08C input, so it cannot produce HEVC
+Main 10. A client can still select the Main 10 profile with NV12 input:
+the gen1 firmware then runs the session as 10-bit anyway (for 8-bit
+input it warns that the encoded data will be random), while the driver
+sized the internal buffers for 8 bits.
+
+Offer P010 as encoder input on HFI gen1 cores with four VPP pipes
+(SM8250, SC8280XP) when the coded format is HEVC. The gen1 firmware can
+refuse 10-bit encoding on smaller cores at the first frame, and gen2 has
+no 10-bit input setup yet, so neither offers it. For P010:
+
+- bytesperline is ALIGN(width * 2, 256) and the buffer size follows the
+  P010 layout (Y scanlines aligned to 32, UV to 16), the layout the
+  decoder already outputs and gralloc allocates;
+- the width is limited to 4096 (TRY_FMT and S_FMT clamp it,
+  ENUM_FRAMESIZES reports it for P010 and ENUM_FRAMEINTERVALS refuses
+  wider P010 frames), the stride limit of 8192 bytes the plane
+  constraints below declare;
+- UNCOMPRESSED_FORMAT_SELECT carries HFI_COLOR_FORMAT_P010 and
+  UNCOMPRESSED_PLANE_ACTUAL_INFO the byte stride;
+- UNCOMPRESSED_PLANE_ACTUAL_CONSTRAINTS_INFO is sent for the input
+  (stride multiple 256, scanlines 32/16, alignment 256), as downstream
+  msm_vidc does for P010; the packetizer now passes encoder input
+  constraints through and keeps the fixed decoder OUTPUT2 values;
+- SCRATCH_1 and SCRATCH_2 are sized for 10 bits. The gen1 encoder has
+  no LINE or VPSS buffers;
+- the bitstream (CAPTURE) buffers of HEVC are a quarter larger, as
+  downstream msm_vidc sizes them for 10 bits. Their size was computed
+  only when the coded format or the frame size was set, while the
+  stateful encoder interface has the client set the coded format
+  first, so S_FMT on OUTPUT now updates the CAPTURE size when the input
+  bit depth changes.
+
+The input formats depend on the coded format, so S_FMT on CAPTURE with a
+coded format that does not take the current input format (H.264 after
+HEVC with P010) now sets the input format back to NV12 at the same size,
+as the stateful encoder interface allows, instead of leaving a format
+that ENUM_FMT no longer lists and STREAMON refuses. With OUTPUT buffers
+allocated it fails with -EBUSY instead. S_FMT on CAPTURE now also sets
+the coded format before it computes the bitstream size.
+
+At STREAMON on gen1, require 10-bit input exactly for HEVC Main 10 and
+refuse both mismatches with -EINVAL and a log line. Main 10 with NV12
+input could be set before and is refused now; no other combination
+changes.
+
+Checked on SC8280XP (wrapper version 0x60100608, four pipes): P010 input
+is coded into Main 10 streams that keep the 10-bit precision, with the
+chroma order and levels intact, from 1920x1080 to 4096x2176 (at a 60 fps
+operating rate), in VBR and CBR, next to an 8-bit encode and after a
+client was killed mid-stream; both mismatches are refused at STREAMON.
+
+Origin: local
+Upstream-Status: Pending
+Assisted-by: Claude:claude-opus-5-5
+---
+ .../media/platform/qcom/iris/iris_buffer.c    |   7 ++
+ .../media/platform/qcom/iris/iris_hfi_gen1.c  |   1 +
+ .../qcom/iris/iris_hfi_gen1_command.c         |  64 +++++++++-
+ .../media/platform/qcom/iris/iris_instance.h  |   3 +
+ drivers/media/platform/qcom/iris/iris_venc.c  | 112 +++++++++++++++++-
+ drivers/media/platform/qcom/iris/iris_vidc.c  |  10 ++
+ .../platform/qcom/iris/iris_vpu_buffer.c      |  12 +-
+ 7 files changed, 198 insertions(+), 11 deletions(-)
+
+diff --git a/drivers/media/platform/qcom/iris/iris_buffer.c b/drivers/media/platform/qcom/iris/iris_buffer.c
+index b1e2902c6c..18bdb98dc3 100644
+--- a/drivers/media/platform/qcom/iris/iris_buffer.c
++++ b/drivers/media/platform/qcom/iris/iris_buffer.c
+@@ -577,6 +577,11 @@ static u32 iris_enc_bitstream_buffer_size(struct iris_inst *inst)
+ 	    bitstream_size < yuv_size)
+ 		bitstream_size = (bitstream_size << 1);
+ 
++	/* HEVC Main 10: a quarter more, as downstream msm_vidc allows for 10-bit */
++	if (f->fmt.pix_mp.pixelformat == V4L2_PIX_FMT_HEVC &&
++	    iris_fmt_is_10bit(inst->fmt_src->fmt.pix_mp.pixelformat))
++		bitstream_size += bitstream_size >> 2;
++
+ 	return ALIGN(bitstream_size, 4096);
+ }
+ 
+@@ -609,6 +614,8 @@ int iris_get_buffer_size(struct iris_inst *inst,
+ 		case BUF_INPUT:
+ 			if (inst->fmt_src->fmt.pix_mp.pixelformat == V4L2_PIX_FMT_QC08C)
+ 				return iris_yuv_buffer_size_qc08c(inst);
++			else if (inst->fmt_src->fmt.pix_mp.pixelformat == V4L2_PIX_FMT_P010)
++				return iris_yuv_buffer_size_p010(inst);
+ 			else
+ 				return iris_yuv_buffer_size_nv12(inst);
+ 		case BUF_OUTPUT:
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen1.c b/drivers/media/platform/qcom/iris/iris_hfi_gen1.c
+index 0f7e7d6b25..e3bc8997ab 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen1.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen1.c
+@@ -403,6 +403,7 @@ static const u32 sm8250_venc_input_config_param[] = {
+ 	HFI_PROPERTY_PARAM_UNCOMPRESSED_PLANE_ACTUAL_INFO,
+ 	HFI_PROPERTY_PARAM_FRAME_SIZE,
+ 	HFI_PROPERTY_PARAM_UNCOMPRESSED_FORMAT_SELECT,
++	HFI_PROPERTY_PARAM_UNCOMPRESSED_PLANE_ACTUAL_CONSTRAINTS_INFO,
+ 	HFI_PROPERTY_PARAM_BUFFER_COUNT_ACTUAL,
+ };
+ 
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c b/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c
+index d43b99bc90..066249e4c2 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c
+@@ -595,6 +595,14 @@ iris_hfi_gen1_packet_session_set_property(struct hfi_session_set_property_pkt *p
+ 	}
+ 	case HFI_PROPERTY_PARAM_UNCOMPRESSED_PLANE_ACTUAL_CONSTRAINTS_INFO: {
+ 		struct hfi_uncompressed_plane_actual_constraints_info *info = prop_data;
++		struct hfi_uncompressed_plane_actual_constraints_info *in = pdata;
++
++		/* The encoder sets its input constraints itself (P010 only). */
++		if (in->buffer_type == HFI_BUFFER_INPUT) {
++			*info = *in;
++			packet->shdr.hdr.size += sizeof(*info);
++			break;
++		}
+ 
+ 		info->buffer_type = HFI_BUFFER_OUTPUT2;
+ 		info->num_planes = 2;
+@@ -964,8 +972,17 @@ static int iris_hfi_gen1_set_raw_format(struct iris_inst *inst, u32 plane)
+ 	} else {
+ 		pixelformat = inst->fmt_src->fmt.pix_mp.pixelformat;
+ 		fmt.buffer_type = HFI_BUFFER_INPUT;
+-		fmt.format = pixelformat == V4L2_PIX_FMT_NV12 ?
+-			HFI_COLOR_FORMAT_NV12 : HFI_COLOR_FORMAT_NV12_UBWC;
++		switch (pixelformat) {
++		case V4L2_PIX_FMT_NV12:
++			fmt.format = HFI_COLOR_FORMAT_NV12;
++			break;
++		case V4L2_PIX_FMT_P010:
++			fmt.format = HFI_COLOR_FORMAT_P010;
++			break;
++		default:
++			fmt.format = HFI_COLOR_FORMAT_NV12_UBWC;
++			break;
++		}
+ 		ret = hfi_gen1_set_property(inst, ptype, &fmt, sizeof(fmt));
+ 	}
+ 
+@@ -997,6 +1014,33 @@ static int iris_hfi_gen1_set_format_constraints(struct iris_inst *inst, u32 plan
+ 	return hfi_gen1_set_property(inst, ptype, &pconstraint, sizeof(pconstraint));
+ }
+ 
++/*
++ * P010 input gets explicit plane constraints, as downstream msm_vidc sends for
++ * it: a stride multiple of 256 bytes, scanlines aligned to 32 (Y) and 16 (UV).
++ * NV12 and QC08C input keep the firmware defaults.
++ */
++static int iris_hfi_gen1_set_enc_format_constraints(struct iris_inst *inst, u32 plane)
++{
++	const u32 ptype = HFI_PROPERTY_PARAM_UNCOMPRESSED_PLANE_ACTUAL_CONSTRAINTS_INFO;
++	struct hfi_uncompressed_plane_actual_constraints_info pconstraint;
++
++	if (inst->fmt_src->fmt.pix_mp.pixelformat != V4L2_PIX_FMT_P010)
++		return 0;
++
++	pconstraint.buffer_type = HFI_BUFFER_INPUT;
++	pconstraint.num_planes = 2;
++	pconstraint.plane_format[0].stride_multiples = 256;
++	pconstraint.plane_format[0].max_stride = IRIS_VENC_P010_MAX_WIDTH * 2;
++	pconstraint.plane_format[0].min_plane_buffer_height_multiple = 32;
++	pconstraint.plane_format[0].buffer_alignment = 256;
++	pconstraint.plane_format[1].stride_multiples = 256;
++	pconstraint.plane_format[1].max_stride = IRIS_VENC_P010_MAX_WIDTH * 2;
++	pconstraint.plane_format[1].min_plane_buffer_height_multiple = 16;
++	pconstraint.plane_format[1].buffer_alignment = 256;
++
++	return hfi_gen1_set_property(inst, ptype, &pconstraint, sizeof(pconstraint));
++}
++
+ static int iris_hfi_gen1_set_num_bufs(struct iris_inst *inst, u32 plane)
+ {
+ 	u32 ptype = HFI_PROPERTY_PARAM_BUFFER_COUNT_ACTUAL;
+@@ -1132,15 +1176,21 @@ static int iris_hfi_gen1_set_stride(struct iris_inst *inst, u32 plane)
+ {
+ 	const u32 ptype = HFI_PROPERTY_PARAM_UNCOMPRESSED_PLANE_ACTUAL_INFO;
+ 	struct hfi_uncompressed_plane_actual_info plane_actual_info;
++	u32 width = inst->fmt_src->fmt.pix_mp.width;
++	u32 stride;
++
++	/* In bytes; P010 has two bytes per sample and a 256-byte aligned stride. */
++	if (inst->fmt_src->fmt.pix_mp.pixelformat == V4L2_PIX_FMT_P010)
++		stride = ALIGN(width * 2, 256);
++	else
++		stride = ALIGN(width, 128);
+ 
+ 	plane_actual_info.buffer_type = HFI_BUFFER_INPUT;
+ 	plane_actual_info.num_planes = 2;
+-	plane_actual_info.plane_format[0].actual_stride =
+-		ALIGN(inst->fmt_src->fmt.pix_mp.width, 128);
++	plane_actual_info.plane_format[0].actual_stride = stride;
+ 	plane_actual_info.plane_format[0].actual_plane_buffer_height =
+ 		ALIGN(inst->fmt_src->fmt.pix_mp.height, 32);
+-	plane_actual_info.plane_format[1].actual_stride =
+-		ALIGN(inst->fmt_src->fmt.pix_mp.width, 128);
++	plane_actual_info.plane_format[1].actual_stride = stride;
+ 	plane_actual_info.plane_format[1].actual_plane_buffer_height =
+ 		(ALIGN(inst->fmt_src->fmt.pix_mp.height, 32)) / 2;
+ 
+@@ -1197,6 +1247,8 @@ static int iris_hfi_gen1_session_set_config_params(struct iris_inst *inst, u32 p
+ 			iris_hfi_gen1_set_resolution},
+ 		{HFI_PROPERTY_PARAM_UNCOMPRESSED_FORMAT_SELECT,
+ 			iris_hfi_gen1_set_raw_format},
++		{HFI_PROPERTY_PARAM_UNCOMPRESSED_PLANE_ACTUAL_CONSTRAINTS_INFO,
++			iris_hfi_gen1_set_enc_format_constraints},
+ 		{HFI_PROPERTY_PARAM_BUFFER_COUNT_ACTUAL,
+ 			iris_hfi_gen1_set_num_bufs},
+ 	};
+diff --git a/drivers/media/platform/qcom/iris/iris_instance.h b/drivers/media/platform/qcom/iris/iris_instance.h
+index f267f48dbc..c1512baa6a 100644
+--- a/drivers/media/platform/qcom/iris/iris_instance.h
++++ b/drivers/media/platform/qcom/iris/iris_instance.h
+@@ -17,6 +17,9 @@
+ #define DEFAULT_WIDTH 320
+ #define DEFAULT_HEIGHT 240
+ 
++/* The widest P010 encoder input: 8192 bytes, the stride limit of its planes */
++#define IRIS_VENC_P010_MAX_WIDTH 4096U
++
+ struct iris_hfi_session_ops;
+ 
+ enum iris_fmt_type_out {
+diff --git a/drivers/media/platform/qcom/iris/iris_venc.c b/drivers/media/platform/qcom/iris/iris_venc.c
+index a945992f63..828316e2f0 100644
+--- a/drivers/media/platform/qcom/iris/iris_venc.c
++++ b/drivers/media/platform/qcom/iris/iris_venc.c
+@@ -87,8 +87,31 @@ static const u32 iris_venc_formats_cap[] = {
+ static const u32 iris_venc_formats_out[] = {
+ 	[IRIS_FMT_NV12] = V4L2_PIX_FMT_NV12,
+ 	[IRIS_FMT_QC08C] = V4L2_PIX_FMT_QC08C,
++	[IRIS_FMT_TP10] = V4L2_PIX_FMT_P010,
+ };
+ 
++static bool iris_venc_is_gen1(struct iris_inst *inst)
++{
++	return inst->core->iris_firmware_data == &iris_hfi_gen1_data;
++}
++
++/*
++ * P010 input is offered for HEVC (Main 10 is the only 10-bit profile) on HFI
++ * gen1 cores with four VPP pipes (SM8250, SC8280XP). The gen1 firmware can
++ * refuse 10-bit encoding on smaller cores at the first frame, and gen2 has no
++ * 10-bit input format setup. The list depends on the coded format, which the
++ * stateful encoder interface has the client set on CAPTURE first.
++ */
++static bool iris_venc_input_fmt_allowed(struct iris_inst *inst, u32 pixfmt, u32 codec)
++{
++	if (pixfmt != V4L2_PIX_FMT_P010)
++		return true;
++
++	return iris_venc_is_gen1(inst) &&
++	       inst->core->iris_platform_data->num_vpp_pipe == 4 &&
++	       codec == V4L2_PIX_FMT_HEVC;
++}
++
+ static bool check_format(struct iris_inst *inst, u32 pixfmt, u32 type)
+ {
+ 	unsigned int size, i;
+@@ -96,6 +119,8 @@ static bool check_format(struct iris_inst *inst, u32 pixfmt, u32 type)
+ 
+ 	switch (type) {
+ 	case V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE:
++		if (!iris_venc_input_fmt_allowed(inst, pixfmt, inst->codec))
++			return false;
+ 		fmt = iris_venc_formats_out;
+ 		size = ARRAY_SIZE(iris_venc_formats_out);
+ 		break;
+@@ -136,6 +161,10 @@ static u32 find_format_by_index(struct iris_inst *inst, u32 index, u32 type)
+ 	if (index >= size)
+ 		return 0;
+ 
++	if (type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE &&
++	    !iris_venc_input_fmt_allowed(inst, fmt[index], inst->codec))
++		return 0;
++
+ 	return fmt[index];
+ }
+ 
+@@ -182,6 +211,9 @@ int iris_venc_try_fmt(struct iris_inst *inst, struct v4l2_format *f)
+ 			f->fmt.pix_mp.height = f_inst->fmt.pix_mp.height;
+ 			f->fmt.pix_mp.pixelformat = f_inst->fmt.pix_mp.pixelformat;
+ 		}
++		/* The P010 plane constraints allow a stride of 8192 bytes at most. */
++		if (pixmp->pixelformat == V4L2_PIX_FMT_P010)
++			pixmp->width = min(pixmp->width, IRIS_VENC_P010_MAX_WIDTH);
+ 		break;
+ 	case V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE:
+ 		if (!supported) {
+@@ -203,9 +235,27 @@ int iris_venc_try_fmt(struct iris_inst *inst, struct v4l2_format *f)
+ 	return 0;
+ }
+ 
++/*
++ * The raw formats depend on the coded format (P010 is HEVC only). When a new
++ * coded format does not take the current raw format, the raw format falls
++ * back to NV12 at the same size, as the stateful encoder interface lets
++ * S_FMT on CAPTURE change the OUTPUT format.
++ */
++static void iris_venc_reset_input_fmt(struct iris_inst *inst)
++{
++	struct v4l2_format *fmt = inst->fmt_src;
++
++	fmt->fmt.pix_mp.pixelformat = V4L2_PIX_FMT_NV12;
++	fmt->fmt.pix_mp.plane_fmt[0].bytesperline = ALIGN(fmt->fmt.pix_mp.width, 128);
++	fmt->fmt.pix_mp.plane_fmt[0].sizeimage = iris_get_buffer_size(inst, BUF_INPUT);
++	inst->buffers[BUF_INPUT].min_count = iris_vpu_buf_count(inst, BUF_INPUT);
++	inst->buffers[BUF_INPUT].size = fmt->fmt.pix_mp.plane_fmt[0].sizeimage;
++}
++
+ static int iris_venc_s_fmt_output(struct iris_inst *inst, struct v4l2_format *f)
+ {
+ 	struct v4l2_format *fmt;
++	bool reset_input;
+ 	u32 codec_align;
+ 	bool supported;
+ 
+@@ -215,6 +265,12 @@ static int iris_venc_s_fmt_output(struct iris_inst *inst, struct v4l2_format *f)
+ 	if (!supported)
+ 		return -EINVAL;
+ 
++	reset_input = !iris_venc_input_fmt_allowed(inst, inst->fmt_src->fmt.pix_mp.pixelformat,
++						   f->fmt.pix_mp.pixelformat);
++	if (reset_input &&
++	    vb2_is_busy(v4l2_m2m_get_vq(inst->m2m_ctx, V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE)))
++		return -EBUSY;
++
+ 	codec_align = (f->fmt.pix_mp.pixelformat == V4L2_PIX_FMT_HEVC) ? 32 : 16;
+ 
+ 	fmt = inst->fmt_dst;
+@@ -232,6 +288,11 @@ static int iris_venc_s_fmt_output(struct iris_inst *inst, struct v4l2_format *f)
+ 		fmt->fmt.pix_mp.height = ALIGN(f->fmt.pix_mp.height, codec_align);
+ 	}
+ 	fmt->fmt.pix_mp.num_planes = 1;
++	fmt->fmt.pix_mp.pixelformat = f->fmt.pix_mp.pixelformat;
++	inst->codec = f->fmt.pix_mp.pixelformat;
++	if (reset_input)
++		iris_venc_reset_input_fmt(inst);
++	/* The size depends on the coded format and on the input bit depth. */
+ 	fmt->fmt.pix_mp.plane_fmt[0].bytesperline = 0;
+ 	fmt->fmt.pix_mp.plane_fmt[0].sizeimage = iris_get_buffer_size(inst, BUF_OUTPUT);
+ 
+@@ -245,8 +306,6 @@ static int iris_venc_s_fmt_output(struct iris_inst *inst, struct v4l2_format *f)
+ 
+ 	inst->buffers[BUF_OUTPUT].min_count = iris_vpu_buf_count(inst, BUF_OUTPUT);
+ 	inst->buffers[BUF_OUTPUT].size = fmt->fmt.pix_mp.plane_fmt[0].sizeimage;
+-	fmt->fmt.pix_mp.pixelformat = f->fmt.pix_mp.pixelformat;
+-	inst->codec = f->fmt.pix_mp.pixelformat;
+ 	memcpy(f, fmt, sizeof(struct v4l2_format));
+ 
+ 	return 0;
+@@ -255,6 +314,7 @@ static int iris_venc_s_fmt_output(struct iris_inst *inst, struct v4l2_format *f)
+ static int iris_venc_s_fmt_input(struct iris_inst *inst, struct v4l2_format *f)
+ {
+ 	struct v4l2_format *fmt, *output_fmt;
++	bool was_10bit;
+ 
+ 	iris_venc_try_fmt(inst, f);
+ 
+@@ -262,12 +322,18 @@ static int iris_venc_s_fmt_input(struct iris_inst *inst, struct v4l2_format *f)
+ 		return -EINVAL;
+ 
+ 	fmt = inst->fmt_src;
++	was_10bit = iris_fmt_is_10bit(fmt->fmt.pix_mp.pixelformat);
+ 	fmt->type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
+ 	fmt->fmt.pix_mp.width = ALIGN(f->fmt.pix_mp.width, 128);
+ 	fmt->fmt.pix_mp.height = ALIGN(f->fmt.pix_mp.height, 32);
+ 	fmt->fmt.pix_mp.num_planes = 1;
+ 	fmt->fmt.pix_mp.pixelformat = f->fmt.pix_mp.pixelformat;
+-	fmt->fmt.pix_mp.plane_fmt[0].bytesperline = ALIGN(f->fmt.pix_mp.width, 128);
++	/* P010 has two bytes per sample and a 256-byte aligned stride, as for decoding. */
++	if (f->fmt.pix_mp.pixelformat == V4L2_PIX_FMT_P010)
++		fmt->fmt.pix_mp.plane_fmt[0].bytesperline =
++			ALIGN(f->fmt.pix_mp.width * 2, 256);
++	else
++		fmt->fmt.pix_mp.plane_fmt[0].bytesperline = ALIGN(f->fmt.pix_mp.width, 128);
+ 	fmt->fmt.pix_mp.plane_fmt[0].sizeimage = iris_get_buffer_size(inst, BUF_INPUT);
+ 
+ 	fmt->fmt.pix_mp.colorspace = f->fmt.pix_mp.colorspace;
+@@ -299,6 +365,11 @@ static int iris_venc_s_fmt_input(struct iris_inst *inst, struct v4l2_format *f)
+ 		inst->crop.height = fmt->fmt.pix_mp.height;
+ 
+ 		iris_venc_s_fmt_output(inst, output_fmt);
++	} else if (iris_fmt_is_10bit(fmt->fmt.pix_mp.pixelformat) != was_10bit) {
++		/* The bitstream buffer size depends on the input bit depth. */
++		output_fmt->fmt.pix_mp.plane_fmt[0].sizeimage =
++			iris_get_buffer_size(inst, BUF_OUTPUT);
++		inst->buffers[BUF_OUTPUT].size = output_fmt->fmt.pix_mp.plane_fmt[0].sizeimage;
+ 	}
+ 
+ 	memcpy(f, fmt, sizeof(struct v4l2_format));
+@@ -461,10 +532,41 @@ int iris_venc_g_param(struct iris_inst *inst, struct v4l2_streamparm *s_parm)
+ 	return 0;
+ }
+ 
++/*
++ * The gen1 firmware runs an HEVC Main 10 session as 10-bit whatever the input
++ * format (for 8-bit input it warns that the encoded data will be random), and
++ * the internal buffers are sized from the input format. Require 10-bit input
++ * exactly for HEVC Main 10.
++ */
++static int iris_venc_check_bit_depth(struct iris_inst *inst)
++{
++	u32 pixfmt = inst->fmt_src->fmt.pix_mp.pixelformat;
++	bool ten_bit_in = iris_fmt_is_10bit(pixfmt);
++	bool main10 = inst->codec == V4L2_PIX_FMT_HEVC &&
++		      inst->fw_caps[PROFILE_HEVC].value == V4L2_MPEG_VIDEO_HEVC_PROFILE_MAIN_10;
++
++	if (!iris_venc_is_gen1(inst) || ten_bit_in == main10)
++		return 0;
++
++	if (ten_bit_in)
++		dev_err(inst->core->dev,
++			"%p4cc input needs HEVC Main 10 (coded format %p4cc)\n",
++			&pixfmt, &inst->codec);
++	else
++		dev_err(inst->core->dev,
++			"HEVC Main 10 needs 10-bit input, not %p4cc\n", &pixfmt);
++
++	return -EINVAL;
++}
++
+ int iris_venc_streamon_input(struct iris_inst *inst)
+ {
+ 	int ret;
+ 
++	ret = iris_venc_check_bit_depth(inst);
++	if (ret)
++		return ret;
++
+ 	ret = iris_set_properties(inst, V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE);
+ 	if (ret)
+ 		return ret;
+@@ -494,6 +596,10 @@ int iris_venc_streamon_output(struct iris_inst *inst)
+ {
+ 	int ret;
+ 
++	ret = iris_venc_check_bit_depth(inst);
++	if (ret)
++		return ret;
++
+ 	ret = iris_set_properties(inst, V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE);
+ 	if (ret)
+ 		goto error;
+diff --git a/drivers/media/platform/qcom/iris/iris_vidc.c b/drivers/media/platform/qcom/iris/iris_vidc.c
+index 5f6148b744..38c803d9af 100644
+--- a/drivers/media/platform/qcom/iris/iris_vidc.c
++++ b/drivers/media/platform/qcom/iris/iris_vidc.c
+@@ -454,6 +454,11 @@ static int iris_enum_framesizes(struct file *filp, void *fh,
+ 	fsize->stepwise.max_height = caps->max_frame_height;
+ 	fsize->stepwise.step_height = STEP_HEIGHT;
+ 
++	/* The P010 plane constraints allow a stride of 8192 bytes at most. */
++	if (inst->domain == ENCODER && fsize->pixel_format == V4L2_PIX_FMT_P010)
++		fsize->stepwise.max_width = min(fsize->stepwise.max_width,
++						IRIS_VENC_P010_MAX_WIDTH);
++
+ 	return ret;
+ }
+ 
+@@ -487,6 +492,11 @@ static int iris_enum_frameintervals(struct file *filp, void *fh,
+ 	    fival->height < caps->min_frame_height)
+ 		return -EINVAL;
+ 
++	/* As in iris_enum_framesizes(): P010 is limited by its plane constraints. */
++	if (fival->pixel_format == V4L2_PIX_FMT_P010 &&
++	    fival->width > IRIS_VENC_P010_MAX_WIDTH)
++		return -EINVAL;
++
+ 	mbpf = NUM_MBS_PER_FRAME(fival->height, fival->width);
+ 	fps = DIV_ROUND_UP(core->iris_platform_data->max_core_mbps, mbpf);
+ 
+diff --git a/drivers/media/platform/qcom/iris/iris_vpu_buffer.c b/drivers/media/platform/qcom/iris/iris_vpu_buffer.c
+index fb6f101641..8d47d92e61 100644
+--- a/drivers/media/platform/qcom/iris/iris_vpu_buffer.c
++++ b/drivers/media/platform/qcom/iris/iris_vpu_buffer.c
+@@ -840,6 +840,12 @@ static u32 iris_vpu_dec_scratch1_size(struct iris_inst *inst)
+ 		iris_vpu_dec_line_size(inst);
+ }
+ 
++/* The input format sets the bit depth (HEVC Main 10 iff 10-bit, see iris_venc.c). */
++static inline bool iris_vpu_enc_is_10bit(struct iris_inst *inst)
++{
++	return iris_fmt_is_10bit(inst->fmt_src->fmt.pix_mp.pixelformat);
++}
++
+ static inline u32 iris_vpu_enc_get_bitstream_width(struct iris_inst *inst)
+ {
+ 	if (is_rotation_90_or_270(inst))
+@@ -1655,7 +1661,8 @@ static u32 iris_vpu_enc_scratch1_size(struct iris_inst *inst)
+ 	}
+ 
+ 	return hfi_buffer_scratch1_enc(frame_width, frame_height, lcu_size,
+-				       num_ref, false, num_vpp_pipes, is_h265);
++				       num_ref, iris_vpu_enc_is_10bit(inst),
++				       num_vpp_pipes, is_h265);
+ }
+ 
+ static inline u32 ubwc_metadata_plane_stride(u32 width,
+@@ -1739,7 +1746,8 @@ static u32 iris_vpu_enc_scratch2_size(struct iris_inst *inst)
+ 	u32 frame_width = iris_vpu_enc_get_bitstream_width(inst);
+ 	u32 num_ref = hfi_buffer_get_recon_count(inst);
+ 
+-	return hfi_buffer_scratch2_enc(frame_width, frame_height, num_ref, false);
++	return hfi_buffer_scratch2_enc(frame_width, frame_height, num_ref,
++				       iris_vpu_enc_is_10bit(inst));
+ }
+ 
+ static u32 iris_vpu_enc_vpss_size(struct iris_inst *inst)
