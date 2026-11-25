@@ -36,7 +36,8 @@
          concurrent-instances 3：每个编码会话的ARP缓冲在内容保护窗口里有自己的槽位（需kernel/iommu/0002
          与kernel/iris/0034），两个编码器共用ro.vendor.v4l2_codec2.encode_concurrent_instances这一个计数。
          尺寸下限128x128是iris的帧尺寸下限（iris_platform_vpu2.c）。上限按4K30申报（3840x2176@30 =
-         979200块/秒），偏保守：单路裸V4L2编码实测1080p约390 fps、4096x2176约97 fps。驱动的核心负载上限
+         979200块/秒），偏保守：单路裸V4L2编码实测1080p约390 fps，4096x2176在输入预先填好时约180–200 fps
+         （逐帧在CPU上填充时约97 fps，受填充速度限制）。驱动的核心负载上限
          取自sm8250的平台数据（7680x4320@60），编解码共用。码率下限32 kbps是驱动gen1编码器的下限，上限40 Mbps是
          HEVC 5.1级Main层级的码率上限，H.264取同一个值。
          码率模式只能由这里声明（Codec2InfoBuilder不向组件查询），不写时应用只看到VBR；
@@ -62,15 +63,21 @@
         </MediaCodec>
     </Encoders>
 
+    <!-- 硬件解码的吞吐量按实测申报。单路按120 fps节奏实时解码3840x2160：HEVC（8位100与200 Mbps、10位100 Mbps）
+         与VP9（100 Mbps）在30秒内没有一帧晚过一个帧周期；H.264在4K、100 Mbps下不限速约120 fps，按60 fps实时解码
+         没有迟到，按120 fps则持续迟到。
+         blocks-per-second：H.264取5.2级的上限2073600（3840x2160约64 fps），HEVC与VP9取4096x2176@120（4177920）。
+         性能点：H.264 3840x2160@60，HEVC与VP9 3840x2160@120。Media3等应用用性能点判断帧率，
+         只申报4K30时，60 fps以上的视频会被交给软解；性能点覆盖帧尺寸更小、宏块速率不超过它的格式。 -->
     <Decoders>
         <MediaCodec name="c2.v4l2.avc.decoder" type="video/avc">
             <Limit name="size" min="128x128" max="4096x2176" />
             <Limit name="alignment" value="2x2" />
             <Limit name="block-size" value="16x16" />
-            <Limit name="blocks-per-second" min="1" max="1879200" />
+            <Limit name="blocks-per-second" min="1" max="2073600" />
             <Limit name="bitrate" range="1-62500000" />
             <Limit name="concurrent-instances" max="8" />
-            <Limit name="performance-point-3840x2160" range="30-30" />
+            <Limit name="performance-point-3840x2160" range="60-60" />
             <Feature name="adaptive-playback" />
         </MediaCodec>
 
@@ -87,10 +94,10 @@
             <Limit name="size" min="128x128" max="4096x2176" />
             <Limit name="alignment" value="2x2" />
             <Limit name="block-size" value="16x16" />
-            <Limit name="blocks-per-second" min="1" max="1879200" />
+            <Limit name="blocks-per-second" min="1" max="4177920" />
             <Limit name="bitrate" range="1-62500000" />
             <Limit name="concurrent-instances" max="8" />
-            <Limit name="performance-point-3840x2160" range="30-30" />
+            <Limit name="performance-point-3840x2160" range="120-120" />
             <Feature name="adaptive-playback" />
         </MediaCodec>
 
@@ -100,10 +107,10 @@
             <Limit name="size" min="128x128" max="4096x2176" />
             <Limit name="alignment" value="2x2" />
             <Limit name="block-size" value="16x16" />
-            <Limit name="blocks-per-second" min="1" max="2073600" />
+            <Limit name="blocks-per-second" min="1" max="4177920" />
             <Limit name="bitrate" range="1-62500000" />
             <Limit name="concurrent-instances" max="8" />
-            <Limit name="performance-point-3840x2160" range="30-30" />
+            <Limit name="performance-point-3840x2160" range="120-120" />
             <Feature name="adaptive-playback" />
         </MediaCodec>
     </Decoders>
