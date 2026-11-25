@@ -1,0 +1,78 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] arm64: dts: qcom: sc8280xp: limit the video core clock to 444
+ MHz
+
+The iris driver counts the raw input frame in the VSP term of its clock
+estimate for an encoder session, so even one real-time 1080p30 encode
+asks for about 1.08 GHz and the video core clock (video_cc_mvs0_clk)
+runs at the highest OPP, 560 MHz. At that clock the encoder's bitstream
+engine (VSP) now and then stops in the middle of a frame. The firmware
+watchdog then resets the hardware ("VCODEC HW is hung due to (CCE 0
+VPP 0 VSP 1)"), three frames are dropped and coding restarts with an
+IDR. On SC8280XP (Huawei MateBook E Go) this happened about once every
+7,500 encoded frames, independent of the number of sessions and of CPU
+idle states.
+
+In one boot, with 300-frame 1080p H.264 encodes, 120,000 frames at the
+driver's own choice of 560 MHz gave 13 hangs, while 60,000 frames each
+with the clock pinned to 444 MHz and to 240 MHz through a test-only
+driver parameter gave none. The MMCX and MX levels read back at
+TURBO_L1 in all of these runs, and raising the DDR bandwidth vote to the
+maximum at 560 MHz made no difference, so the hang follows the core
+clock rather than the voltage or the memory bandwidth. The Windows
+video driver for this SoC does not go above 444 MHz either: its highest
+video P-state sets the MVS0 clock source to 1332 MHz (444 MHz after the
+fixed divide-by-3) at MMCX NOM.
+
+Drop the 533 and 560 MHz OPPs. 533 MHz was not measured; it goes as
+well because the Windows driver never uses it. For larger requests
+devfreq_recommended_opp() falls back to the highest remaining OPP, so
+the core now runs at 444 MHz at most. At 444 MHz, single-stream
+decoding of 3840x2160 HEVC (8-bit at 100 and 200 Mbit/s, 10-bit) and
+VP9 paced at 120 fps still has no frame late by a frame period, unpaced
+3840x2160 H.264 at 100 Mbit/s decodes at about 100 fps, and 3840x2160
+encoding with prefilled input runs at about 160 fps, roughly 20% below
+560 MHz.
+
+With the two OPPs removed and no test parameter set, 120,000 frames of
+the same encodes ran at 444 MHz without a hang, a dropped frame or an
+extra IDR. No 300-frame round took more than 0.1 s longer than the
+median, so the lower clock does not merely hide stalls that a longer
+watchdog period would tolerate.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ arch/arm64/boot/dts/qcom/sc8280xp.dtsi | 18 +++++++-----------
+ 1 file changed, 7 insertions(+), 11 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/qcom/sc8280xp.dtsi b/arch/arm64/boot/dts/qcom/sc8280xp.dtsi
+index b41857d250..258bfdfc34 100644
+--- a/arch/arm64/boot/dts/qcom/sc8280xp.dtsi
++++ b/arch/arm64/boot/dts/qcom/sc8280xp.dtsi
+@@ -4302,17 +4302,13 @@ opp-444000000 {
+ 							<&rpmhpd_opp_nom>;
+ 				};
+ 
+-				opp-533000000 {
+-					opp-hz = /bits/ 64 <533000000>;
+-					required-opps = <&rpmhpd_opp_nom>,
+-							<&rpmhpd_opp_turbo>;
+-				};
+-
+-				opp-560000000 {
+-					opp-hz = /bits/ 64 <560000000>;
+-					required-opps = <&rpmhpd_opp_nom>,
+-							<&rpmhpd_opp_turbo_l1>;
+-				};
++				/*
++				 * No 533 and 560 MHz: at 560 MHz the encoder's VSP
++				 * occasionally stalls in mid-frame and the firmware
++				 * resets the hardware, which was not seen at 444 or
++				 * 240 MHz. The Windows driver does not go above
++				 * 444 MHz either.
++				 */
+ 			};
+ 		};
+ 
