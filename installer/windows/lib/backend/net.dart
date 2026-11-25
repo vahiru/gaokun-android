@@ -463,8 +463,10 @@ String? sumOf(String sums, String name) {
 }
 
 /// GitHub API 的 releases 列表 → VARIANT（只列挂着整套安装文件的版本，最新的在前、第一个 latest=yes）
-/// + 最新 Live 安装器的 LIVECD：最新一个 `live-installer-v<版本>` release 里不带系统文件的 `gaokun3-live-<版本>.iso`
-/// （带系统文件的叫 `gaokun3-live-<版本>-android-<ROM 标签>.iso`，不取）与核对它的 SHA256SUMS。
+/// + 最新 Live 安装器的 LIVECD：最新一个 `live-installer-v<标签版本>` release 里不带系统文件的 `gaokun3-live-<标签版本>.iso`
+/// 与核对它的 SHA256SUMS。标签版本形如 `0.2.0-for-v1.0.0-rc.5`（每个 ROM 发布后各出一版）；带系统文件的那个叫
+/// `gaokun3-live-<安装器版本>-android-<ROM 标签>.iso`，不取。已发布的安装器都按这个规则找，工作流的命名不能改
+/// （.github/workflows/installer-live.yml）。
 /// LiveCD 的 release 没有 boot.img 等安装文件，不会被当成一个系统版本
 List<Gk3Record> githubVariants(List<Map<String, dynamic>> releases) {
   final out = <Gk3Record>[];

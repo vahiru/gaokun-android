@@ -41,12 +41,20 @@ String? normalizeRecoveryKey(String input) {
   return [for (var i = 0; i < 48; i += 6) d.substring(i, i + 6)].join('-');
 }
 
-/// gk3w shrink-info 的 SHRINK 记录：C 盘最多还能压缩出多少、压缩停在哪个文件（installer/backend/src/win/shrink.c）
+/// gk3w shrink-info 的 SHRINK 记录：系统盘上的一个分区最多还能压缩出多少、压缩停在哪个文件
+/// （installer/backend/src/win/shrink.c；分析哪个分区由 gk3w 选，见那里的文件头）
 class ShrinkInfo {
   ShrinkInfo(this.r);
   final Gk3Record r;
 
+  /// "D:" 这样的盘符
   String get drive => r['drive'];
+
+  /// 只有字母（"D"），界面上写"D盘"、"D:"用
+  String get letter => drive.isEmpty ? 'C' : drive.substring(0, 1);
+
+  /// gk3w 怎么选的这个分区：arg / recent（用户最近在"磁盘管理"里压缩的）/ free（剩余空间最多）/ system
+  String get picked => r['picked'];
   int get maxShrinkMib => r.intOf('max_shrink_mib');
 
   /// C 盘之后紧挨着的未分配空间：压缩出来的空间与它连成一片
@@ -56,7 +64,7 @@ class ShrinkInfo {
   int get totalMib => maxShrinkMib + adjacentMib;
   int get freeMib => r.intOf('free_mib');
 
-  /// 压缩停在已用空间上（C 盘太满），而不是停在事件里的那个文件上
+  /// 压缩停在已用空间上（分区太满），而不是停在事件里的那个文件上
   bool get limitedBySpace => r['limit'] == 'space';
 
   /// 最后一个不可移动的文件（卷内路径，去掉了 ::$DATA 之类的流名）；没找到为 null
@@ -201,20 +209,18 @@ class Variant {
   int get sizeMib => r.intOf('size_mib');
   String get date => r['date'];
   bool get latest => r.yes('latest');
-
-  /// GitHub 上标成预发布的版本
-  bool get pre => r.yes('pre');
-
-  /// 版本号里带 alpha 的（v0.7.1-alpha 之类）：早期的测试版，界面提醒不建议使用
-  bool get alpha => _alpha.hasMatch(id);
-  static final _alpha = RegExp(r'^v?\d+(\.\d+)*-alpha\b', caseSensitive: false);
 }
 
-/// 最新的 LiveCD：gk3w releases 的 LIVECD 记录，不带系统文件的 gaokun3-live-<版本>.iso 与核对它的 SHA256SUMS
+/// 最新的 Live 安装器：gk3w releases 的 LIVECD 记录，不带系统文件的 gaokun3-live-<标签版本>.iso 与核对它的 SHA256SUMS
 class LiveCd {
   LiveCd(this.r);
   final Gk3Record r;
+
+  /// 标签版本：标签去掉 live-installer-v，形如 0.2.0-for-v1.0.0-rc.5（每个 ROM 发布后各出一版，见 .github/workflows/installer-live.yml）
   String get id => r['id'];
+
+  /// 界面上显示的安装器版本（0.2.0）：系统文件另由用户选，"for"后面的 ROM 只决定 Live 系统用的内核
+  String get version => id.split('-for-').first;
   String get url => r['url'];
   String get sums => r['sums'];
   int get sizeMib => r.intOf('size_mib');

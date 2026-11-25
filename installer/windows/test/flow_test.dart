@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gk3_common/backend/protocol.dart';
+import 'package:gk3_common/ui/widgets.dart';
 import 'package:gk3_windows/app.dart';
 import 'package:gk3_windows/model.dart';
 import 'package:gk3_windows/session.dart';
@@ -99,6 +100,18 @@ void main() {
     expect(rec.calls.singleWhere((c) => c.first == 'apply'), containsAllInOrder(['--release', r'D:\gk3\rc3']));
   });
 
+  testWidgets('只装最新版本：GitHub 有多个版本时也只显示最新的一个，不能另选', (t) async {
+    final (_, s) = await pumpApp(t, 'free');
+    await tap(t, find.text(l.btnNext));
+    await tap(t, find.text(l.btnNext));
+    await see(t, find.text(l.releaseLatest));
+    expect(s.variants.length, greaterThan(1));
+    expect(s.variant!.id, 'v1.0.0-rc.3');
+    expect(find.text(s.variant!.name), findsOneWidget);
+    expect(find.text(s.variants[1].name), findsNothing);
+    expect(find.byType(ChoiceCard), findsOneWidget);
+  });
+
   testWidgets('R2 镜像：只有最新的一个版本', (t) async {
     final (rec, s) = await pumpApp(t, 'free');
     await tap(t, find.text(l.btnNext));
@@ -146,14 +159,14 @@ void main() {
     expect(find.text(l.uninstallLive('2.3 GiB')), findsNothing);
   });
 
-  testWidgets('空间不够：分析 C 盘的可压缩空间，指出挡住压缩的文件与处理方法；重新检查后清掉', (t) async {
+  testWidgets('空间不够：分析可压缩空间，指出挡住压缩的文件与处理方法；重新检查后清掉', (t) async {
     final (rec, s) = await pumpApp(t, 'nospace');
     await see(t, find.text(l.shrinkAnalyze));
     await tap(t, find.text(l.shrinkAnalyze));
     await waitFor(t, find.text(l.sbPagefile), tries: 400);
-    expect(find.text(l.shrinkNotEnough('2.5 GiB', fmtMib(s.minNeedMib))), findsOneWidget);
+    expect(find.text(l.shrinkNotEnough('2.5 GiB', fmtMib(s.minNeedMib), 'C')), findsOneWidget);
     expect(find.text(r'C:\pagefile.sys'), findsOneWidget);
-    expect(find.text(l.sbPagefileHow), findsOneWidget);
+    expect(find.text(l.sbPagefileHow('C')), findsOneWidget);
     expect(find.text(l.shrinkReanalyze), findsOneWidget);
     expect(rec.calls.where((c) => c.first == 'shrink-info'), hasLength(1));
     await tap(t, find.text(l.btnRecheck));
@@ -161,27 +174,37 @@ void main() {
     expect(find.text(l.shrinkAnalyze), findsOneWidget);
   });
 
-  testWidgets('空间不够、但 C 盘压缩得出来：请用户去压缩；分析失败、找不到文件也说清楚', (t) async {
+  testWidgets('空间不够、但压缩得出来：请用户去压缩；分析失败、找不到文件也说清楚', (t) async {
     Stream<Gk3Event> shrink(Map<String, String> f) =>
         Stream.fromIterable([Gk3Record('SHRINK', {'drive': 'C:', 'size_mib': '170000', ...f}), const Gk3Exit(0)]);
     var reply = shrink({'max_shrink_mib': '90000', 'file': r'\pagefile.sys::$DATA'});
     final (_, s) = await pumpApp(t, 'nospace', respond: {'shrink-info': (args, input) => reply});
     final need = fmtMib(s.minNeedMib);
     await tap(t, find.text(l.shrinkAnalyze));
-    await see(t, find.text(l.shrinkEnough('87.9 GiB', need)));
+    await see(t, find.text(l.shrinkEnough('87.9 GiB', need, 'C')));
     expect(find.text(l.sbPagefile), findsNothing);
     reply = shrink({'max_shrink_mib': '1024'});
     await tap(t, find.text(l.shrinkReanalyze));
-    await see(t, find.text(l.shrinkNoFile('1 GiB', need)));
-    // C 盘之后已有 10 GiB 未分配空间：再压缩出 15 GiB 就连成 25 GiB，够了
+    await see(t, find.text(l.shrinkNoFile('1 GiB', need, 'C')));
+    // 分区之后已有 10 GiB 未分配空间：再压缩出 15 GiB 就连成 25 GiB，够了
     reply = shrink({'max_shrink_mib': '15360', 'adjacent_mib': '10240', 'file': r'\pagefile.sys::$DATA', 'limit': 'file'});
     await tap(t, find.text(l.shrinkReanalyze));
-    await see(t, find.text(l.shrinkEnough('25 GiB', need)));
-    // 压缩停在已用空间上（C 盘太满）：请用户清理 C 盘，不去怪事件里的文件
+    await see(t, find.text(l.shrinkEnough('25 GiB', need, 'C')));
+    // 压缩停在已用空间上（分区太满）：请用户清理这个分区，不去怪事件里的文件
     reply = shrink({'max_shrink_mib': '3072', 'free_mib': '4096', 'file': r'\pagefile.sys::$DATA', 'limit': 'space'});
     await tap(t, find.text(l.shrinkReanalyze));
-    await see(t, find.text(l.shrinkFull('3 GiB', need, '4 GiB')));
+    await see(t, find.text(l.shrinkFull('3 GiB', need, '4 GiB', 'C')));
     expect(find.text(l.sbPagefile), findsNothing);
+    // gk3w 分析的是 D 盘（用户在"磁盘管理"里压缩的那个）：结果、文件路径与处理步骤都写 D 盘
+    reply = Stream.fromIterable([
+      const Gk3Record('SHRINK', {'drive': 'D:', 'picked': 'recent', 'size_mib': '400000', 'max_shrink_mib': '4096',
+          'file': r'\System Volume Information\{11111111-2222-3333-4444-555555555555}{3808876b-c176-4e48-b7ae-04046e6cc752}', 'limit': 'file'}),
+      const Gk3Exit(0),
+    ]);
+    await tap(t, find.text(l.shrinkReanalyze));
+    await see(t, find.text(l.shrinkNotEnough('4 GiB', need, 'D')));
+    expect(find.text(l.sbRestoreHow('D')), findsOneWidget);
+    expect(find.textContaining(r'D:\System Volume Information\'), findsOneWidget);
     reply = Stream.fromIterable([const Gk3Record('ERR', {'code': 'shrink-query'}), const Gk3Exit(1)]);
     await tap(t, find.text(l.shrinkReanalyze));
     await see(t, find.text('${l.shrinkFailed}${l.errShrinkQuery}'));
@@ -207,10 +230,10 @@ void main() {
     expect(rec.calls.where((c) => c.first == 'mft-move'), isEmpty);
     await tapShown(t, find.text(l.mftMoveBtn));
     await tap(t, find.text(l.mftConfirmOk));
-    await waitFor(t, find.text(l.mftStuck), tries: 400);
-    expect(rec.calls.singleWhere((c) => c.first == 'mft-move'), ['mft-move', '--execute']);
+    await waitFor(t, find.text(l.mftStuck('C')), tries: 400);
+    expect(rec.calls.singleWhere((c) => c.first == 'mft-move'), ['mft-move', '--execute', '--drive', 'C:']);
     expect(rec.calls.where((c) => c.first == 'shrink-info'), hasLength(2));
-    expect(find.text(l.mftMoved('78 MiB', '755 MiB', '677 MiB')), findsOneWidget);
+    expect(find.text(l.mftMoved('78 MiB', '755 MiB', '677 MiB', 'C')), findsOneWidget);
     expect(find.text(l.mftMoveBtn), findsNothing);
     final busy = [for (final c in window) if (c.method == 'setBusy') c.arguments as Map];
     expect(busy.where((a) => a['busy'] == true && a['power'] == l.mftMoving), isNotEmpty);
@@ -242,10 +265,10 @@ void main() {
     await t.runAsync(s.moveMft);
     await settle(t);
     expect(rec.calls.where((c) => c.first == 'shrink-info'), hasLength(3));
-    expect(find.text(l.mftMoved('35 MiB', '755 MiB', '720 MiB')), findsOneWidget);
+    expect(find.text(l.mftMoved('35 MiB', '755 MiB', '720 MiB', 'C')), findsOneWidget);
     expect(find.text('${l.mftFailed}${l.errMftFailed}'), findsOneWidget);
     // 失败时不去猜别的原因（不说前部空间不足）
-    expect(find.text(l.mftUnplaced('43 MiB')), findsNothing);
+    expect(find.text(l.mftUnplaced('43 MiB', 'C')), findsNothing);
     expect(find.text(l.mftMoveBtn), findsOneWidget);
   });
 
@@ -254,23 +277,23 @@ void main() {
     await see(t, find.text(l.chkRoom('40 GiB')));
     await tap(t, find.text(l.shrinkAnalyze));
     await waitFor(t, find.text(l.sbPagefile), tries: 400);
-    expect(find.text('${l.shrinkMore('2.5 GiB')}\n${l.shrinkMoreLimit}'), findsOneWidget);
-    expect(find.text(l.sbPagefileHow), findsOneWidget);
+    expect(find.text('${l.shrinkMore('2.5 GiB', 'C')}\n${l.shrinkMoreLimit}'), findsOneWidget);
+    expect(find.text(l.sbPagefileHow('C')), findsOneWidget);
     expect(rec.calls.where((c) => c.first == 'shrink-info'), hasLength(1));
     // 下一步照常可以按
     expect(enabled(t, l.btnNext), isTrue);
   });
 
-  testWidgets('空间够用时：C 盘之后已有未分配空间、C 盘太满两种写法', (t) async {
+  testWidgets('空间够用时：分区之后已有未分配空间、分区太满两种写法', (t) async {
     Stream<Gk3Event> shrink(Map<String, String> f) =>
         Stream.fromIterable([Gk3Record('SHRINK', {'drive': 'C:', 'size_mib': '170000', ...f}), const Gk3Exit(0)]);
     var reply = shrink({'max_shrink_mib': '5120', 'adjacent_mib': '40960'});
     final (_, s) = await pumpApp(t, 'free', respond: {'shrink-info': (args, input) => reply});
     await tap(t, find.text(l.shrinkAnalyze));
-    await see(t, find.text(l.shrinkMoreAdjacent('45 GiB', '40 GiB')));
+    await see(t, find.text(l.shrinkMoreAdjacent('45 GiB', '40 GiB', 'C')));
     reply = shrink({'max_shrink_mib': '1024', 'free_mib': '2048', 'file': r'\pagefile.sys::$DATA', 'limit': 'space'});
     await tap(t, find.text(l.shrinkReanalyze));
-    await see(t, find.text('${l.shrinkMore('1 GiB')}\n${l.shrinkMoreFull('2 GiB')}'));
+    await see(t, find.text('${l.shrinkMore('1 GiB', 'C')}\n${l.shrinkMoreFull('2 GiB', 'C')}'));
     expect(s.hasRoom, isTrue);
   });
 

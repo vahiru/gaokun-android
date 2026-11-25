@@ -21,7 +21,7 @@ flutter build windows                               # CMake把它们放进程序
 
 ## 测试模式与端到端测试
 
-`GK3_TEST_DISK=<磁盘号>`：把那块VHD当作系统盘。此时写盘的调用去掉`--real-disk`（只允许写VHD）与`--bitlocker-key`，`bitlocker-key`去掉`--suspend`，`mft-move`去掉`--execute`，不改动这台电脑的C盘与BitLocker；检查页显示本机的检查项但不因它们阻止继续，不要求恢复密钥，也不提供压缩分析与移动MFT；“立即重启”不执行，右上角标出测试模式。
+`GK3_TEST_DISK=<磁盘号>`：把那块VHD当作系统盘。此时写盘的调用去掉`--real-disk`（只允许写VHD）与`--bitlocker-key`，`bitlocker-key`去掉`--suspend`，`mft-move`去掉`--execute`，不改动这台电脑的分区与BitLocker；检查页显示本机的检查项但不因它们阻止继续，不要求恢复密钥，也不提供压缩分析与移动MFT；“立即重启”不执行，右上角标出测试模式。
 
 `integration_test/vhd_test.dart`驱动真实界面与真实后端，在VHD上走完安装、管理、卸载。需要管理员权限，在已提权的终端中运行：
 
@@ -39,13 +39,13 @@ crDroid的荷鲁斯之眼（蓝色、透明底），取自crDroid设置应用的
 
 ## 页面
 
-检查（机型、Secure Boot、快速启动、BitLocker、电源、空闲空间）→ 选位置 → 选版本 → 开机默认的系统 → 确认（按住2秒）→ 安装进度 → 完成或失败。已经装过时从检查页进入管理页，可以卸载；卸载时一并删除`gk3w media`写入本机磁盘的安装器分区GK3LIVE。确认页提醒安全软件可能拦截`gk3w.exe`。
+检查（机型、Secure Boot、快速启动、BitLocker、电源、空闲空间）→ 选位置 → 选下载源（只装最新版本，要装别的版本时用本地文件）→ 开机默认的系统 → 确认（按住2秒）→ 安装进度 → 完成或失败。已经装过时从检查页进入管理页，可以卸载；卸载时一并删除`gk3w media`写入本机磁盘的安装器分区GK3LIVE。确认页提醒安全软件可能拦截`gk3w.exe`。
 
 BitLocker（`lib/ui/bitlocker_box.dart`，后端`gk3w bitlocker-key`）：系统盘的保护已开启时，安装与卸载的确认页要求输入48位恢复密钥，由`gk3w`通过WMI与系统盘的恢复密钥比对，一致才能开始；密钥只经标准输入传给`gk3w`，不进参数与日志。写入磁盘前`gk3w`暂停保护到下次重启，Windows届时按新的启动链重新绑定。Secure Boot与BitLocker都开启时（出厂状态），检查页先校验密钥并暂停保护（Windows重启两次后自动恢复），用户再去固件设置关闭Secure Boot。系统盘没有恢复密钥、或正在加密或解密时，检查不通过。
 
-压缩指引（`lib/ui/shrink_guide.dart`，后端`gk3w shrink-info`与`gk3w mft-move`）：检查页“可用未分配空间”一行的“分析可压缩空间”做一次与“磁盘管理”的“压缩卷”相同的分析，给出C盘最多还能压缩出多少，以及压缩停在哪个文件上（应用程序日志的259号事件），按文件类别给出处理步骤。停在`$MFT`上时可以“移动MFT”：用碎片整理接口把MFT位于后部的片段移到前部，执行期间不能关闭窗口、不能往下走，完成后自动重新分析。
+压缩指引（`lib/ui/shrink_guide.dart`，后端`gk3w shrink-info`与`gk3w mft-move`）：检查页“可用未分配空间”一行的“分析可压缩空间”做一次与“磁盘管理”的“压缩卷”相同的分析，给出系统盘上一个分区最多还能压缩出多少，以及压缩停在哪个文件上（应用程序日志的259号事件），按文件类别给出处理步骤。分析哪个分区由`gk3w shrink-info`选：用户最近在“磁盘管理”里压缩的那个（同样记有259号事件），否则剩余空间最多的那个（出厂时是D盘），界面上的文字与处理步骤都写这个分区的盘符。停在`$MFT`上时可以“移动MFT”：用碎片整理接口把MFT位于后部的片段移到前部，执行期间不能关闭窗口、不能往下走，完成后自动重新分析。
 
-左侧菜单底部的“制作独立安装介质”把最新的Live安装器与所选版本的安装文件写入U盘或本机磁盘：说明 → 目标（写到本机时另有位置页）→ 选版本 → 确认 → 写入。U盘整个清除后写入；写到本机时需满足首页的检查项，另有一页选择未分配空间并在分区条上标出GK3LIVE的位置：GK3LIVE建在所选未分配空间的末尾（默认选最大的一块，与Live安装器保留现有系统时选的相同），之后在Live安装器中安装的Android的userdata紧挨着它，删除GK3LIVE后可并入userdata。GK3LIVE是XBOOTLDR类型的分区，Live安装器的启动项与内核都在其中；EFI分区中还没有Android时，默认引导文件换成systemd-boot（原文件留作备份），默认仍启动Windows，开机时在启动菜单中选择“gaokun3 installer”进入Live安装器（不再需要时，在本程序制作安装介质的目标页或Live安装器中删除安装器分区即可撤销，EFI分区一并还原）；已安装Android时不改动EFI分区，只有默认引导文件不存在或已被换回Windows启动管理器时才恢复为systemd-boot。安装方式（清除整个磁盘、保留现有系统、重新安装）在Live安装器中选择，本程序不向Live安装器传递状态。写入由`gk3w media`完成（说明见[`installer/backend/src/win/media.c`](../backend/src/win/media.c)的文件头），演示数据中写入U盘与写入本机磁盘各有一份真实输出的录制。GK3LIVE至少2 GiB，内容更大时按256 MiB向上取整。`releases`另输出最新安装器的`LIVECD`记录。
+左侧菜单底部的“制作独立安装介质”把最新的Live安装器与所选版本的安装文件写入U盘或本机磁盘：说明 → 目标（写到本机时另有位置页）→ 选下载源 → 确认 → 写入。U盘整个清除后写入；写到本机时需满足首页的检查项，另有一页选择未分配空间并在分区条上标出GK3LIVE的位置：GK3LIVE建在所选未分配空间的末尾（默认选最大的一块，与Live安装器保留现有系统时选的相同），之后在Live安装器中安装的Android的userdata紧挨着它，删除GK3LIVE后可并入userdata。GK3LIVE是XBOOTLDR类型的分区，Live安装器的启动项与内核都在其中；EFI分区中还没有Android时，默认引导文件换成systemd-boot（原文件留作备份），默认仍启动Windows，开机时在启动菜单中选择“gaokun3 installer”进入Live安装器（不再需要时，在本程序制作安装介质的目标页或Live安装器中删除安装器分区即可撤销，EFI分区一并还原）；已安装Android时不改动EFI分区，只有默认引导文件不存在或已被换回Windows启动管理器时才恢复为systemd-boot。安装方式（清除整个磁盘、保留现有系统、重新安装）在Live安装器中选择，本程序不向Live安装器传递状态。写入由`gk3w media`完成（说明见[`installer/backend/src/win/media.c`](../backend/src/win/media.c)的文件头），演示数据中写入U盘与写入本机磁盘各有一份真实输出的录制。GK3LIVE至少2 GiB，内容更大时按256 MiB向上取整。`releases`另输出最新安装器的`LIVECD`记录。
 
 系统盘上已有`gk3w media`写入的GK3LIVE（XBOOTLDR类型、GPT名GK3LIVE、内容是卷标GK3LIVE的FAT32）时，目标页另有“删除系统磁盘上的安装器分区”（`gk3w uninstall --installer-only`）：装着Android时只删除这个分区，Android与EFI分区都不动；没装时EFI分区一并还原到写入之前的状态。
 

@@ -37,8 +37,8 @@ class CheckPage extends StatelessWidget {
           state: CheckState.fail,
           title: l.chkNoRoom(fmtMib(s.minNeedMib)),
           detail: '${biggest == 0 ? l.chkNoRoomNone : l.chkNoRoomBiggest(fmtMib(biggest))}\n${l.chkNoRoomHow(fmtMib(s.minNeedMib))}',
-          // C 盘压缩不出足够的空间时，查是哪个文件挡住了、怎么处理（结果在这一行下面：ShrinkGuide）。
-          // 测试模式装到 VHD 上，分析这台电脑的 C 盘没有意义
+          // 压缩不出足够的空间时，查是哪个文件挡住了、怎么处理（结果在这一行下面：ShrinkGuide）。
+          // 测试模式装到 VHD 上，分析这台电脑上的分区没有意义
           trailing: s.testMode ? null : const ShrinkAnalyzeButton(),
         ));
         blocked = true;
@@ -61,7 +61,7 @@ class CheckPage extends StatelessWidget {
       bottomLeft: Btn(l.btnRecheck,
           onPressed: s.checking || s.bitlockerChecking || s.mftMoving ? null : s.check, kind: BtnKind.secondary, icon: Icons.refresh),
       nextLabel: s.installed ? l.btnManage : l.btnNext,
-      // 移动 MFT 期间不能往下走：之后的安装会与它同时写 C 盘
+      // 移动 MFT 期间不能往下走：之后的安装会与它同时写磁盘
       onNext: s.checking || s.mftMoving || blocked || (s.probe == null)
           ? null
           : () => go(context, s.installed ? const ManagePage() : const RegionPage()),

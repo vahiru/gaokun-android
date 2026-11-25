@@ -85,7 +85,7 @@ On a freshly installed machine that has not been updated yet, the other slot hol
 
 ### Can I install an older version?
 
-You can install any version with "Reinstall Android" in the Live installer. But the newer version may already have upgraded your user data to a format the older one does not understand, so installing an older version while keeping data may leave it unable to start. When installing an older version, please wipe data (leave "Keep user data" unticked, which is also the default) and back up first.
+Yes. The Windows installer only downloads the latest release; to install another version, download `boot.img`, `super.img.zst` and `install-artifacts.sha256` from that version's release and select "Local files" in the Windows installer. You can also install any version with "Reinstall Android" in the Live installer. But the newer version may already have upgraded your user data to a format the older one does not understand, so installing an older version while keeping data may leave it unable to start. When installing an older version, please wipe data (leave "Keep user data" unticked, which is also the default) and back up first.
 
 ### The machine keeps restarting or hangs. What can I do?
 
@@ -162,7 +162,7 @@ Choose `Windows Boot Manager` in the boot menu. With dual boot you can also make
 
 ### Removing Android completely from a dual-boot machine
 
-Run the Windows installer in Windows, select "Manage" on the environment check page, then "Uninstall Android". This deletes all Android partitions and the installer partition on the internal disk, and restores the default EFI boot file to its state before the installation (usually the Windows Boot Manager). The freed space stays unallocated; to merge it back into C:, right-click the C: volume in Disk Management and select "Extend Volume".
+Run the Windows installer in Windows, select "Manage" on the environment check page, then "Uninstall Android". This deletes all Android partitions and the installer partition on the internal disk, and restores the default EFI boot file to its state before the installation (usually the Windows Boot Manager). The freed space stays unallocated; to merge it back, right-click the partition just before it in Disk Management and select "Extend Volume".
 
 ### Installed with "Erase entire disk" and want Windows back
 

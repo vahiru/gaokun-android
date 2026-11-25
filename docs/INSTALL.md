@@ -21,7 +21,7 @@ This guide explains how to install the system on a Huawei MateBook E Go, and cov
 |---|---|---|
 | How it runs | Inside the Windows installed on the machine | Started from a USB drive or from the installer partition on the internal disk; does not depend on any system on the disk |
 | What it does | Installs into unallocated space on the system disk (dual boot with Windows); uninstalls Android; creates standalone installation media (Live installer) | Keep existing system (dual boot); erase entire disk; reinstall Android; delete partitions; delete installer partition |
-| System installation files | Downloaded, or taken from files you have already downloaded | Carried on the installation media; no network is used during installation |
+| System installation files | The latest release is downloaded, or files you have already downloaded are used | Carried on the installation media; no network is used during installation |
 | Best for | Keeping Windows on a machine that already has it | Not keeping Windows, reinstalling Android, or repairing a system that does not start |
 
 Both installers install only to the machine's internal disk.
@@ -44,11 +44,11 @@ Note also that the user data partition of this system is not encrypted: anyone w
 
 ### If you want to keep Windows
 
-- **Using the Windows installer**: you can [download](#downloads) and launch the Windows installer first — its "Environment check" page guides you through each requirement below (including analyzing unmovable files blocking C: shrink, and verifying your recovery key to suspend BitLocker protection before you disable Secure Boot).
+- **Using the Windows installer**: you can [download](#downloads) and launch the Windows installer first — its "Environment check" page guides you through each requirement below (including analyzing unmovable files that prevent a partition from being shrunk, and verifying your recovery key to suspend BitLocker protection before you disable Secure Boot).
 - **Using the Live installer directly from a USB drive**: complete the following 4 steps in Windows beforehand, in order:
 
 1. **Disable Fast Startup**: uncheck "Turn on fast startup" under Control Panel → Power Options → Choose what the power buttons do. From then on, leave Windows with "Shut down" rather than "Hibernate". Writing to the shared EFI system partition while Windows is hibernated can corrupt its data, and the installers refuse to do it.
-2. **Free up space**: in Disk Management, right-click the C: volume, select "Shrink Volume" and shrink it by at least 20.2 GiB (at least 22.2 GiB if you first write the Live installer to the internal disk and install from it). The installers do not resize Windows partitions. If C: cannot be shrunk enough, the Windows installer can analyze which file is restricting the shrink and explain how to resolve it.
+2. **Free up space**: in Disk Management, shrink a partition on the system disk to free up at least 20.2 GiB of contiguous unallocated space (at least 22.2 GiB if you first write the Live installer to the internal disk and install from it). The installers do not resize existing partitions. If a partition cannot be shrunk enough, the Windows installer can analyze which file is restricting the shrink and explain how to resolve it.
 3. **Deal with BitLocker**: if BitLocker or device encryption is enabled, first make sure you can retrieve the 48-digit recovery key at <https://aka.ms/myrecoverykey> and save a copy on another device such as your phone. If you disable Secure Boot or modify boot files without first suspending protection in the Windows installer, Windows will prompt for this recovery key on its next boot (suspending and resuming BitLocker on the system drive has not been verified on this machine yet).
 4. **Disable Secure Boot**: Settings → System → Recovery → Advanced startup → Restart now, then Troubleshoot → Advanced options → UEFI Firmware Settings, and disable Secure Boot there.
 
@@ -81,7 +81,7 @@ https://ota.072172.xyz/install/<build>/<file name>
 
 1. Extract all of `gaokun-android-windows-installer-<version>-arm64.zip`, run `gk3_windows.exe` inside it and allow it to run as administrator when prompted. Do not run it directly from an archive viewer.
 2. Resolve any unmet requirements as the environment check describes, then select "Next".
-3. Select the installation location (an unallocated area on the system disk), the system release and its download source, and the system to start by default.
+3. Select the installation location (an unallocated area on the system disk), the download source, and the system to start by default. The installer downloads the latest system release; to install another version, select "Local files" and use the installation files of that version that you have downloaded.
 4. Check the summary, then hold the confirm button for 2 seconds to start. Downloading and writing take a few minutes; do not close the keyboard cover or press the power button meanwhile.
 5. Restart when the installation is complete. The boot menu now offers Android and Windows.
 
@@ -91,7 +91,7 @@ Some security software (for example Huorong) may block the installer's backend p
 
 ### Uninstalling
 
-When Android is installed, select "Manage" on the environment check page, then "Uninstall Android". This deletes all Android partitions and the installer partition on the internal disk, and restores the default EFI boot file to its state before the installation (usually the Windows Boot Manager). The freed space stays unallocated; to merge it back into C:, right-click the C: volume in Disk Management and select "Extend Volume".
+When Android is installed, select "Manage" on the environment check page, then "Uninstall Android". This deletes all Android partitions and the installer partition on the internal disk, and restores the default EFI boot file to its state before the installation (usually the Windows Boot Manager). The freed space stays unallocated; to merge it back, right-click the partition just before it in Disk Management and select "Extend Volume".
 
 ### Creating installation media
 

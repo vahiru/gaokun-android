@@ -48,7 +48,7 @@ class Session extends ChangeNotifier {
   int _checkGen = 0;
 
   Future<void> check() async {
-    // 移动 MFT 期间 C 盘还在变：不检查（界面上的入口那时都不可用）
+    // 移动 MFT 期间分区还在变：不检查（界面上的入口那时都不可用）
     if (mftMoving) return;
     final gen = ++_checkGen;
     checking = true;
@@ -56,7 +56,7 @@ class Session extends ChangeNotifier {
     // 恢复密钥只用于一次写盘：重新检查之后要重新输入
     _bitlockerKey = null;
     bitlockerErr = null;
-    // 压缩分析的结果对应的是检查之前的 C 盘（在这之后才结束的分析照样填进来）
+    // 压缩分析的结果对应的是检查之前的分区（在这之后才结束的分析照样填进来）
     shrinkInfo = null;
     shrinkErr = null;
     mftResult = null;
@@ -129,22 +129,23 @@ class Session extends ChangeNotifier {
   bool get hasRoom => plans.values.any((p) => p.ok);
 
   // ── 压缩分析（空闲空间不够时） ──
-  /// 正在分析 C 盘最多还能压缩出多少（gk3w shrink-info，大盘要几分钟）
+  /// 正在分析系统盘上的一个分区最多还能压缩出多少（gk3w shrink-info，大盘要几分钟；分析哪个分区由 gk3w 选）
   bool shrinkChecking = false;
   ShrinkInfo? shrinkInfo;
   Gk3Record? shrinkErr;
 
   // ── 移动 MFT（压缩停在 $Mft 上时） ──
-  /// 正在把 MFT 挪到 C 盘前部（gk3w mft-move --execute）：写 C 盘，这期间不许关闭窗口、阻止关机
+  /// 正在把 MFT 挪到所分析分区的前部（gk3w mft-move --execute）：写这个分区，这期间不许关闭窗口、阻止关机
   bool mftMoving = false;
 
   /// 最近一次移动的结果（MFTMOVE 记录）或失败原因；重新检查时清掉
   Gk3Record? mftResult;
   Gk3Record? mftErr;
 
-  /// 移动 MFT，成功后重新分析可压缩空间
+  /// 移动所分析分区的 MFT（压缩停在它上面时），成功后重新分析可压缩空间
   Future<void> moveMft() async {
     if (mftMoving || shrinkChecking || bitlockerChecking) return;
+    final drive = shrinkInfo?.drive;
     mftMoving = true;
     mftResult = null;
     mftErr = null;
@@ -152,7 +153,7 @@ class Session extends ChangeNotifier {
     try {
       // 原生窗口确认已经挡住关闭与关机，才启动 gk3w（同写盘）
       await beforeDiskWrite?.call();
-      final r = await backend.run('mft-move', ['--execute']);
+      final r = await backend.run('mft-move', ['--execute', if (drive != null && drive.isNotEmpty) ...['--drive', drive]]);
       // 中途失败时 gk3w 照样报已挪的部分（MFTMOVE），再报 ERR：两样都留着
       mftResult = r.first('MFTMOVE');
       if (!r.ok) mftErr = r.err ?? _failed('mft-move');
@@ -163,7 +164,7 @@ class Session extends ChangeNotifier {
       mftMoving = false;
       notifyListeners();
     }
-    // 挪动过（哪怕中途失败）：C 盘已经变了，重新分析
+    // 挪动过（哪怕中途失败）：分区已经变了，重新分析
     if (mftResult != null) await analyzeShrink(manual: false);
   }
 
@@ -177,7 +178,7 @@ class Session extends ChangeNotifier {
     notifyListeners();
     try {
       final r = await backend.run('shrink-info');
-      // 分析期间重新检查过也照样填上：分析读的是 C 盘当时的状态，不依赖检查的结果
+      // 分析期间重新检查过也照样填上：分析读的是分区当时的状态，不依赖检查的结果
       final rec = r.ok ? r.first('SHRINK') : null;
       if (rec != null) {
         shrinkInfo = ShrinkInfo(rec);
@@ -248,6 +249,8 @@ class Session extends ChangeNotifier {
   /// 正在取版本列表的来源（按来源分别记：一个来源还在取时切到另一个，另一个也要去取）
   final Set<ReleaseSource> _loading = {};
   bool get loadingVariants => _loading.contains(source);
+
+  /// 要装的版本：这个来源上的最新版本，不能另选（要装别的版本时用本地文件）
   Variant? variant;
 
   /// 用本地文件时的目录（boot.img、super.img.zst、install-artifacts.sha256 放在一起）
@@ -287,11 +290,6 @@ class Session extends ChangeNotifier {
       _loading.remove(src);
     }
     if (source == src) variant = variants.where((v) => v.latest).firstOrNull ?? variants.firstOrNull;
-    notifyListeners();
-  }
-
-  void selectVariant(Variant v) {
-    variant = v;
     notifyListeners();
   }
 

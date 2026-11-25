@@ -1,4 +1,4 @@
-/* Windows：把 NTFS 的主文件表（$MFT 的 $DATA、$BITMAP 与 $ATTRIBUTE_LIST）挪到卷的前部，让 C 盘能压缩得更多。
+/* Windows：把 NTFS 的主文件表（$MFT 的 $DATA、$BITMAP 与 $ATTRIBUTE_LIST）挪到卷的前部，让这个卷能压缩得更多。
  *
  *   gk3w mft-move [--drive X] [--execute] [--chunk-mib N] [--min-run-mib N]
  *
@@ -15,7 +15,7 @@
  * MFT 开头的 16 条记录（$MFT、$MFTMirr、$LogFile … 这些系统文件）必须留在引导扇区记录的位置（MftStartLcn）上，
  * NTFS 拒绝挪它们（错误 87；记录 1 KiB、簇 4 KiB 时是开头 4 个簇）：规划时就把这几个簇留在原处；紧接其后的
  * 一段仍被以错误 87 拒绝时，把它也留在原处。
- * 不带 --execute 只分析、给出计划。--execute 改动系统卷时要求本机是 MateBook E Go（--drive 用于对着测试卷）。
+ * 不带 --execute 只分析、给出计划。--execute 改动系统盘上的卷时要求本机是 MateBook E Go（--drive 指别的盘上的卷用于测试）。
  * 输出 MFTMOVE drive=X: execute=yes|no end_before_mib= end_after_mib= moved_mib= steps= unplaced_mib= fixed_end_mib=
  * （end_after_mib：执行时是挪完之后实际的位置，分析时是预计的位置；fixed_end_mib：留在原处的开头的末尾）。
  * 累计失败 3 次时照样输出这一行（已挪的部分），再报 ERR。 */
@@ -167,8 +167,9 @@ int gk3w_cmd_mft_move(int argc, wchar_t **argv)
         return gk3w_err(GK3W_TOUCHED_NA, "usage", "usage: mft-move [--drive X] [--execute] [--chunk-mib 1-1024] [--min-run-mib 1-1024]", 0);
     sysdrive = GetSystemWindowsDirectoryW(win, MAX_PATH) && win[1] == L':' ? towupper(win[0]) : L'C';
     drive = da ? towupper(da[0]) : sysdrive;
-    /* 改动系统卷只在这台平板上做；--drive 指别的卷用于测试 */
-    if (execute && drive == sysdrive && !gk3w_model_ok_now())
+    /* 改动系统盘上的卷（系统卷或 D 盘这类数据卷）只在这台平板上做；--drive 指别的盘上的卷用于测试 */
+    if (execute && (drive == sysdrive || (gk3w_system_disk_number() >= 0 && gk3w_drive_disk_number(drive) == gk3w_system_disk_number())) &&
+        !gk3w_model_ok_now())
         return gk3w_err(GK3W_TOUCHED_NO, "wrong-model", "this computer is not a Huawei MateBook E Go (gaokun3); not moving its MFT (disk not touched)", 0);
     if (enable_manage_volume())
         gk3w_log("cannot enable SeManageVolumePrivilege; moving may be refused");

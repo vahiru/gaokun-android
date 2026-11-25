@@ -227,7 +227,7 @@ void main() {
     await t.drag(find.byType(ListView).first, const Offset(0, -400));
     await shot(t, '40-shrink-mft');
     await t.runAsync(s.moveMft);
-    await waitFor(t, find.text(l.mftStuck), tries: 400);
+    await waitFor(t, find.text(l.mftStuck('C')), tries: 400);
     await t.drag(find.byType(ListView).first, const Offset(0, -400));
     await shot(t, '41-shrink-mft-moved');
   }, skip: !haveFont);

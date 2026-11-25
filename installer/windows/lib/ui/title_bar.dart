@@ -170,7 +170,7 @@ class WindowButtons extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = context.session, l = context.l;
-    // 移动 MFT 也在写 C 盘：与写盘一样不许关闭、阻止关机
+    // 移动 MFT 也在写磁盘：与写盘一样不许关闭、阻止关机
     final mft = s.mftMoving;
     WindowControl.setBusy(
       s.diskBusy || mft,
