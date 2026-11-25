@@ -76,7 +76,7 @@
 |---|---|---|
 | 支持的操作 | 安装到系统磁盘的未分配空间（与Windows双系统）；卸载Android；制作独立安装介质（Live安装器） | 保留现有系统（双系统）；清除整个磁盘；重新安装Android（默认清除数据，可选保留）；删除分区；删除安装器分区 |
 | 运行方式 | 在机器上的Windows中运行 | 从U盘或本机磁盘上的安装器分区启动 |
-| 系统安装文件 | 联网下载，或使用已下载的本地文件 | 随安装介质附带，安装时不联网 |
+| 系统安装文件 | 联网下载最新版本，或使用已下载的本地文件 | 随安装介质附带，安装时不联网 |
 | 获取方式 | [Releases](https://github.com/vahiru/gaokun-android/releases)页面中的`Windows installer`发布 | [Releases](https://github.com/vahiru/gaokun-android/releases)页面中的`Live installer`发布 |
 | 最新版本 | [Windows安装器0.2.0](https://github.com/vahiru/gaokun-android/releases/tag/windows-installer-v0.2.0) | [Live安装器0.2.0](https://github.com/vahiru/gaokun-android/releases/tag/live-installer-v0.2.0) |
 
@@ -93,7 +93,7 @@
 
 **修复：**本机没有可用的Android recovery。Android无法启动时，请用Live安装器重新安装Android，可以选择保留用户数据。
 
-**中国境内下载：**GitHub的下载服务器慢或者连不上时，系统镜像（`boot.img`、`super.img.zst`）可从镜像站：`https://ota.072172.xyz/install/<build>/<文件名>`下载，`<build>`即该版OTA包去掉`.zip`的文件名，详见[`docs/INSTALL.zh-CN.md`](docs/INSTALL.zh-CN.md#下载)。Windows安装器选择版本时，可以直接把下载源切换为"R2镜像源"。
+**中国境内下载：**GitHub的下载服务器慢或者连不上时，系统镜像（`boot.img`、`super.img.zst`）可从镜像站：`https://ota.072172.xyz/install/<build>/<文件名>`下载，`<build>`即该版OTA包去掉`.zip`的文件名，详见[`docs/INSTALL.zh-CN.md`](docs/INSTALL.zh-CN.md#下载)。使用Windows安装器时，可以直接把下载源切换为"R2镜像源"。
 
 **更新：**在"设置 → 系统 → 系统更新"界面进行OTA更新，OTA更新包会从上述镜像站下载。网络不畅时也可通过其他途径下载OTA包，在此界面使用"安装本地更新"功能安装放置在平板内部存储空间中的OTA包。
 

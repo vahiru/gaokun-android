@@ -101,8 +101,8 @@ class DiskLegend extends StatelessWidget {
   }
 }
 
-/// 第三步：装哪个版本、从哪来：GitHub 的 releases、R2 上的镜像，或者已经下载好的本地文件。
-/// 制作安装介质（[media]）也用这一页：所选版本的安装文件随最新的 LiveCD 一起写入介质
+/// 第三步：安装文件从哪来：GitHub 的 releases、R2 上的镜像（都只装最新版本），或者已经下载好的本地文件
+/// （要装别的版本时用它）。制作安装介质（[media]）也用这一页：安装文件随最新的 Live 安装器一起写入介质
 class ReleasePage extends StatefulWidget {
   const ReleasePage({super.key, this.media = false});
   final bool media;
@@ -152,12 +152,12 @@ class _ReleasePageState extends State<ReleasePage> {
             onSelectionChanged: (v) => s.setSource(v.first),
           ),
         ),
-        // 制作安装介质：写入的是哪个 LiveCD（放在列表上面，不必滚动就能看到）
+        // 制作安装介质：写入的是哪个 Live 安装器（放在版本上面，不必滚动就能看到）
         if (media && s.source != ReleaseSource.local && !s.loadingVariants) ...[
           const SizedBox(height: 16),
           s.liveCd == null
               ? NoteBox(warn: true, text: l.releaseNoLiveCd)
-              : NoteBox(text: l.releaseLiveCd(s.liveCd!.id, fmtMib(s.liveCd!.sizeMib))),
+              : NoteBox(text: l.releaseLiveCd(s.liveCd!.version, fmtMib(s.liveCd!.sizeMib))),
         ],
         const SizedBox(height: 20),
         Expanded(child: s.source == ReleaseSource.local ? _local(context) : _online(context)),
@@ -174,29 +174,26 @@ class _ReleasePageState extends State<ReleasePage> {
         Text(l.releaseLoading, style: context.tt.bodyLarge),
       ]));
     }
+    // 只装最新版本：显示它，不能另选（要装别的版本时用本地文件）
+    final v = s.variant;
     return ListView(children: [
-      if (s.variants.isEmpty)
+      if (v == null)
         NoteBox(
           warn: true,
           text: s.variantsErr == null ? l.releaseNone : errText(l, s.variantsErr!),
           child: Btn(l.btnRetry, kind: BtnKind.secondary, onPressed: () => s.loadVariants(force: true)),
+        )
+      else
+        ChoiceCard(
+          dense: true,
+          icon: Icons.android,
+          title: v.name,
+          body: l.releaseMeta(v.date, fmtMib(v.sizeMib)),
+          good: l.releaseLatest,
+          selected: true,
         ),
-      for (final v in s.variants)
-        Padding(
-          padding: const EdgeInsets.only(bottom: 12),
-          child: ChoiceCard(
-            dense: true,
-            icon: Icons.android,
-            title: v.name,
-            body: l.releaseMeta(v.date, fmtMib(v.sizeMib)),
-            good: v.latest && !v.alpha ? l.releaseLatest : null,
-            warn: v.alpha ? l.releaseAlpha : (v.pre && !v.latest ? l.releasePre : null),
-            selected: identical(v, s.variant),
-            onTap: () => s.selectVariant(v),
-          ),
-        ),
-      const SizedBox(height: 8),
-      NoteBox(text: s.source == ReleaseSource.r2 ? l.releaseNoteR2 : l.releaseNote),
+      const SizedBox(height: 20),
+      NoteBox(text: l.releaseNote),
     ]);
   }
 

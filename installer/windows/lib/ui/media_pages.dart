@@ -278,7 +278,7 @@ class MediaConfirmPage extends StatelessWidget {
           Bullet(l.confirmLocal(s.localDir))
         else ...[
           Bullet(l.confirmDownload(v!.name, fmtMib(v.sizeMib))),
-          Bullet(l.mediaConfirmLiveDl(lc!.id, fmtMib(lc.sizeMib))),
+          Bullet(l.mediaConfirmLiveDl(lc!.version, fmtMib(lc.sizeMib))),
         ],
         if (t.usb)
           Bullet(l.mediaConfirmUsb)

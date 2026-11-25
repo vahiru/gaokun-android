@@ -6,7 +6,7 @@
  *   gk3w media ...      制作独立安装介质：把 LiveCD 与所选版本写进 U 盘或本机磁盘上的安装器分区（见 media.c）
  *   gk3w preflight      安装前检查要看的系统状态（只读，见 sys.c）
  *   gk3w bitlocker-key  校验标准输入上的 BitLocker 恢复密钥，可选暂停保护（见 bitlocker.c）
- *   gk3w shrink-info    系统卷最多还能压缩出多少、被哪个文件挡住（只读，见 shrink.c）
+ *   gk3w shrink-info    解读用户在"磁盘管理"里最近一次压缩时停在哪个文件上（只读，见 shrink.c）
  *   gk3w mft-move       把 NTFS 主文件表挪到卷的前部，让 C 盘能压缩得更多（默认只出计划，见 mftmove.c）
  *   gk3w dump|esp-tree|readpart  把装好的盘摘要成文本或导出小分区，与 LiveCD 的结果对拍（只读，见 dump.c）
  *   gk3w mkpart|rmpart|write|esp-ls|esp-put   阶段 1 的写盘验证命令，只对 VHD 动手（见 write.c）

@@ -142,25 +142,31 @@ int gk3w_disk_read_layout(gk3w_disk *d)
     }
 }
 
-long gk3w_system_disk_number(void)
+long gk3w_drive_disk_number(wchar_t drive)
 {
-    wchar_t win[MAX_PATH], dev[8];
+    wchar_t dev[8];
     HANDLE h;
     VOLUME_DISK_EXTENTS e;
     DWORD got = 0;
-    if (!GetSystemWindowsDirectoryW(win, MAX_PATH) || win[1] != L':')
-        return -1;
-    _snwprintf(dev, 8, L"\\\\.\\%lc:", win[0]);
+    _snwprintf(dev, 8, L"\\\\.\\%lc:", drive);
     h = CreateFileW(dev, 0, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
     if (h == INVALID_HANDLE_VALUE)
         return -1;
-    /* 系统卷跨盘（动态卷）时这个调用会因缓冲区不够失败：这种布局本来就不支持 */
+    /* 卷跨盘（动态卷）时这个调用会因缓冲区不够失败：这种布局本来就不支持 */
     if (!DeviceIoControl(h, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS, NULL, 0, &e, sizeof e, &got, NULL)) {
         CloseHandle(h);
         return -1;
     }
     CloseHandle(h);
     return e.NumberOfDiskExtents == 1 ? (long)e.Extents[0].DiskNumber : -1;
+}
+
+long gk3w_system_disk_number(void)
+{
+    wchar_t win[MAX_PATH];
+    if (!GetSystemWindowsDirectoryW(win, MAX_PATH) || win[1] != L':')
+        return -1;
+    return gk3w_drive_disk_number(win[0]);
 }
 
 static int disk_open_any(DWORD num, gk3w_disk *d, gk3w_touched t, int need_gpt);

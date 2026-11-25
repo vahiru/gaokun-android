@@ -211,7 +211,7 @@ void main() {
     await shot(t, '37-bitlocker-confirm-ok-en');
   }, skip: !haveFont);
 
-  testWidgets('空间不够：分析可压缩空间', (t) async {
+  testWidgets('空间不够：查看压缩受阻原因', (t) async {
     await pumpApp(t, 'nospace');
     await tap(t, find.text(l.shrinkAnalyze));
     await waitFor(t, find.text(l.sbPagefile), tries: 400);
@@ -227,12 +227,12 @@ void main() {
     await t.drag(find.byType(ListView).first, const Offset(0, -400));
     await shot(t, '40-shrink-mft');
     await t.runAsync(s.moveMft);
-    await waitFor(t, find.text(l.mftStuck), tries: 400);
+    await waitFor(t, find.text(l.mftStuck('C')), tries: 400);
     await t.drag(find.byType(ListView).first, const Offset(0, -400));
     await shot(t, '41-shrink-mft-moved');
   }, skip: !haveFont);
 
-  testWidgets('空间够用时分析还能压缩出多少', (t) async {
+  testWidgets('空间够用时查看压缩受阻原因', (t) async {
     await pumpApp(t, 'free');
     await tap(t, find.text(l.shrinkAnalyze));
     await waitFor(t, find.text(l.sbPagefile), tries: 400);

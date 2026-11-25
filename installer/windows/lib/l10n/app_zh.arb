@@ -129,7 +129,7 @@
       }
     }
   },
-  "chkNoRoomHow": "请在Windows“磁盘管理”中右键点击C盘，选择“压缩卷”压缩出至少{need}的未分配空间，随后返回此处重新检查。",
+  "chkNoRoomHow": "请在Windows“磁盘管理”中压缩系统磁盘上的分区，腾出至少{need}的连续未分配空间，随后返回此处重新检查。",
   "@chkNoRoomHow": {
     "placeholders": {
       "need": {
@@ -137,105 +137,49 @@
       }
     }
   },
-  "shrinkAnalyze": "分析可压缩空间",
-  "shrinkReanalyze": "重新分析",
-  "shrinkAnalyzing": "正在分析C盘可压缩空间，可能需要数分钟……",
-  "shrinkFailed": "无法分析C盘可压缩空间：",
-  "shrinkEnough": "压缩C盘最多可腾出{max}的连续未分配空间，足以安装Android（至少需要{need}）。请在“磁盘管理”中压缩C盘后重新检查。",
-  "@shrinkEnough": {
-    "placeholders": {
-      "max": {
-        "type": "String"
-      },
-      "need": {
-        "type": "String"
-      }
-    }
-  },
-  "shrinkNotEnough": "压缩C盘最多只能腾出{max}的连续未分配空间，而安装Android至少需要{need}。受以下不可移动文件位置限制，无法进一步压缩：",
-  "@shrinkNotEnough": {
-    "placeholders": {
-      "max": {
-        "type": "String"
-      },
-      "need": {
-        "type": "String"
-      }
-    }
-  },
-  "shrinkNoFile": "压缩C盘最多只能腾出{max}的连续未分配空间，而安装Android至少需要{need}。未能定位阻碍压缩的文件，请重启设备后重新分析。",
-  "shrinkFull": "压缩C盘最多只能腾出{max}的连续未分配空间，而安装Android至少需要{need}。当前受限于C盘剩余可用空间不足（仅剩{free}），而非不可移动文件阻碍。请先清理C盘文件（例如通过“磁盘清理”或“设置 → 系统 → 存储”），随后重新分析。",
+  "shrinkAnalyze": "查看压缩受阻原因",
+  "shrinkReanalyze": "重新查看",
+  "shrinkAnalyzing": "正在读取压缩记录……",
+  "shrinkFailed": "无法读取压缩记录：",
+  "shrinkNoEvent": "本次开机后尚未进行分区压缩。请先在“磁盘管理”中右键点击要压缩的分区并选择“压缩卷”，再回到此处查看。",
+  "shrinkBlocked": "最近一次压缩受以下不可移动文件位置限制：",
+  "shrinkStale": "未读取到新日志，请先在“磁盘管理”中重新执行“压缩卷”，再回到此处查看。",
+  "shrinkNoFile": "未能定位阻碍压缩的文件。请重新执行“压缩卷”后再查看。",
+  "shrinkFull": "可压缩空间受{drive}盘已用空间限制。如需压缩出更多空间，请先清理{drive}盘文件，随后重新执行“压缩卷”。",
   "@shrinkFull": {
     "placeholders": {
-      "max": {
-        "type": "String"
-      },
-      "need": {
-        "type": "String"
-      },
-      "free": {
+      "drive": {
         "type": "String"
       }
     }
   },
-  "@shrinkNoFile": {
-    "placeholders": {
-      "max": {
-        "type": "String"
-      },
-      "need": {
-        "type": "String"
-      }
-    }
-  },
-  "shrinkNext": "处理完成后请重新分析，届时可能仍需处理下一个阻碍压缩的不可移动文件。",
-  "shrinkMore": "压缩C盘最多可腾出{total}的连续未分配空间。如需为Android数据分区分配更多容量，请在“磁盘管理”中压缩C盘后重新检查。",
-  "@shrinkMore": {
-    "placeholders": {
-      "total": {
-        "type": "String"
-      }
-    }
-  },
-  "shrinkMoreAdjacent": "压缩C盘后最多可获得共{total}的连续未分配空间（含C盘后方现有的{adjacent}）。如需为Android数据分区分配更多容量，请在“磁盘管理”中压缩C盘后重新检查。",
-  "@shrinkMoreAdjacent": {
-    "placeholders": {
-      "total": {
-        "type": "String"
-      },
-      "adjacent": {
-        "type": "String"
-      }
-    }
-  },
-  "shrinkMoreLimit": "进一步压缩受限于以下不可移动文件，处理后可腾出更多空间：",
-  "shrinkMoreFull": "当前可压缩空间受限于C盘剩余可用空间（剩余{free}）；清理C盘文件后可腾出更多空间。",
-  "@shrinkMoreFull": {
-    "placeholders": {
-      "free": {
-        "type": "String"
-      }
-    }
-  },
+  "shrinkNext": "处理完成后，请在“磁盘管理”中重新执行“压缩卷”并回到此处查看新的阻碍压缩的原因。",
   "sbPagefile": "虚拟内存分页文件",
-  "sbPagefileHow": "1. 按Win+R，输入“SystemPropertiesPerformance”并确定，在“高级”选项卡的“虚拟内存”下点击“更改”。\n2. 取消勾选“自动管理所有驱动器的分页文件大小”，选中C盘，选择“无分页文件”并点击“设置”，在弹出的提示中点击“是”，最后点击“确定”。\n3. 重启设备，在“磁盘管理”中压缩C盘。\n4. 压缩完成后，重新勾选“自动管理所有驱动器的分页文件大小”并重启设备。",
+  "sbPagefileHow": "1. 按Win+R，输入“SystemPropertiesPerformance”并确定，在“高级”选项卡的“虚拟内存”下点击“更改”。\n2. 取消勾选“自动管理所有驱动器的分页文件大小”，选中{drive}盘，选择“无分页文件”并点击“设置”，在弹出的提示中点击“是”，最后点击“确定”。\n3. 重启设备，在“磁盘管理”中压缩{drive}盘。\n4. 压缩完成后，重新勾选“自动管理所有驱动器的分页文件大小”并重启设备。",
   "sbHiberfil": "系统休眠文件",
-  "sbHiberfilHow": "1. 以管理员身份打开“终端”，运行“powercfg /h off”关闭休眠，休眠文件将随之删除。\n2. 在“磁盘管理”中压缩C盘。\n3. 如需继续使用休眠功能，可在压缩完成后运行“powercfg /h on”重新开启（注意保持“快速启动”处于关闭状态）。",
+  "sbHiberfilHow": "1. 以管理员身份打开“终端”，运行“powercfg /h off”关闭休眠，休眠文件将随之删除。\n2. 在“磁盘管理”中压缩{drive}盘。\n3. 如需继续使用休眠功能，可在压缩完成后运行“powercfg /h on”重新开启（注意保持“快速启动”处于关闭状态）。",
   "sbRestore": "系统还原点（卷影副本）",
-  "sbRestoreHow": "1. 按Win+R，输入“SystemPropertiesProtection”并确定，打开“系统保护”。\n2. 选中C盘，点击“配置”，再点击“删除”以清除该驱动器上的所有还原点。\n3. 在“磁盘管理”中压缩C盘（注意：已删除的还原点无法恢复）。",
+  "sbRestoreHow": "1. 按Win+R，输入“SystemPropertiesProtection”并确定，打开“系统保护”。\n2. 选中{drive}盘，点击“配置”，再点击“删除”以清除该驱动器上的所有还原点。\n3. 在“磁盘管理”中压缩{drive}盘（注意：已删除的还原点无法恢复）。",
   "sbBitlocker": "BitLocker元数据",
-  "sbBitlockerHow": "系统盘处于加密状态时，BitLocker元数据无法移动。如需腾出更多空间，请在Windows中关闭BitLocker（设备加密），待解密完成后压缩C盘，随后再重新开启加密。重新开启后会生成新的恢复密钥，请妥善保存。",
+  "sbBitlockerHow": "{drive}盘处于加密状态时，BitLocker元数据无法移动。如需腾出更多空间，请在Windows中关闭BitLocker（设备加密），待解密完成后压缩{drive}盘，随后再重新开启加密。重新开启后会生成新的恢复密钥，请妥善保存。",
   "sbUsn": "NTFS更改日志（USN日志）",
-  "sbUsnHow": "1. 以管理员身份打开“终端”，运行“fsutil usn deletejournal /d C:”删除更改日志。\n2. 在“磁盘管理”中压缩C盘（Windows会在需要时自动重建更改日志）。",
+  "sbUsnHow": "1. 以管理员身份打开“终端”，运行“fsutil usn deletejournal /d {drive}:”删除更改日志。\n2. 在“磁盘管理”中压缩{drive}盘（Windows会在需要时自动重建更改日志）。",
   "sbMft": "NTFS主文件表（MFT）",
-  "sbMftHow": "MFT的部分片段位于C盘靠后位置。安装器可将这些片段前移至C盘前部的可用空间，随后自动重新分析。",
+  "sbMftHow": "MFT的部分片段位于{drive}盘靠后位置。安装器可将这些片段前移至{drive}盘前部的可用空间。",
+  "@sbMftHow": {
+    "placeholders": {
+      "drive": {
+        "type": "String"
+      }
+    }
+  },
   "mftMoveBtn": "移动MFT",
   "mftConfirmTitle": "移动MFT",
-  "mftConfirmBody": "即将把C盘靠后位置的MFT片段前移至前部的可用空间。操作期间无法关闭安装器，请勿关机或断开电源。此过程可能需要数分钟。",
+  "mftConfirmBody": "即将把{drive}盘靠后位置的MFT片段前移至前部的可用空间。操作期间请勿关闭安装器、关机或断开电源。此过程可能需要数分钟。",
   "mftConfirmOk": "开始移动",
   "mftConfirmCancel": "取消",
   "mftMoving": "正在移动MFT，可能需要数分钟……",
-  "mftMoved": "已移动{moved}，MFT末尾距C盘起始处的位置已由{before}前移至{after}。",
+  "mftMoved": "已移动{moved}，MFT末尾距{drive}盘起始处的位置已由{before}前移至{after}。",
   "@mftMoved": {
     "placeholders": {
       "moved": {
@@ -246,28 +190,41 @@
       },
       "after": {
         "type": "String"
-      }
-    }
-  },
-  "mftStuck": "MFT起始处的系统元数据记录无法移动，C盘目前已达可压缩空间上限。",
-  "mftUnplaced": "另有{size}因C盘前部缺乏足够的连续可用空间而未能前移。可先清理C盘中不需要的文件，再重新执行移动与分析。",
-  "mftNothing": "MFT中没有可进一步前移的片段。",
-  "mftAgain": "MFT仍有部分片段位于C盘靠后位置（例如移动期间MFT有所增长），可再次执行移动。",
-  "@mftUnplaced": {
-    "placeholders": {
-      "size": {
+      },
+      "drive": {
         "type": "String"
       }
     }
   },
-  "mftFailed": "移动MFT未完成（已移动的部分仍然有效）：",
-  "shutdownReasonMft": "正在移动C盘的MFT",
+  "mftStuck": "MFT起始处的系统元数据记录无法移动，{drive}盘目前已达可压缩空间上限。",
+  "mftUnplaced": "另有{size}因{drive}盘前部缺乏足够的连续可用空间而未能前移。可先清理{drive}盘中不需要的文件，再重新执行移动。",
+  "mftNothing": "MFT中没有可进一步前移的片段。",
+  "mftDone": "移动已完成。请在“磁盘管理”中重新对{drive}盘执行“压缩卷”，再回到此处查看。",
+  "@mftDone": {
+    "placeholders": {
+      "drive": {
+        "type": "String"
+      }
+    }
+  },
+  "@mftUnplaced": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      },
+      "drive": {
+        "type": "String"
+      }
+    }
+  },
+  "mftFailed": "移动MFT未完成：",
+  "shutdownReasonMft": "正在移动MFT",
   "sbNtfs": "NTFS元数据",
-  "sbNtfsHow": "该文件属于NTFS文件系统元数据，Windows运行期间无法移动，C盘目前已达可压缩空间上限。",
+  "sbNtfsHow": "该文件属于NTFS文件系统元数据，Windows运行期间无法移动，{drive}盘目前已达可压缩空间上限。",
   "sbDump": "系统内存转储文件",
-  "sbDumpHow": "1. 打开“磁盘清理”，选择C盘，点击“清理系统文件”。\n2. 勾选“系统错误内存转储文件”与“系统错误小型转储文件”并执行清理。\n3. 在“磁盘管理”中压缩C盘。",
+  "sbDumpHow": "1. 打开“磁盘清理”，选择{drive}盘，点击“清理系统文件”。\n2. 勾选“系统错误内存转储文件”与“系统错误小型转储文件”并执行清理。\n3. 在“磁盘管理”中压缩{drive}盘。",
   "sbOther": "其他文件",
-  "sbOtherHow": "该文件当前无法移动，可能正被程序占用或被系统锁定。请先重启设备后重新分析；若仍受阻于同一文件，请根据路径确认其所属程序，暂时退出或卸载该程序后再试。",
+  "sbOtherHow": "该文件当前无法移动，可能正被程序占用或被系统锁定。请重启设备，重新执行“压缩卷”后再查看；若仍受阻于同一文件，请根据路径确认其所属程序，暂时退出或卸载该程序后再试。",
   "chkRoom": "可用未分配空间：{size}",
   "@chkRoom": {
     "placeholders": {
@@ -289,7 +246,7 @@
   },
   "chkBlockedNote": "请先解决上述未通过的检查项，再继续安装。",
   "regionTitle": "选择安装位置",
-  "regionSub": "Android将安装至系统磁盘（{model}，{size}）的未分配空间中，不会修改现有分区。",
+  "regionSub": "Android将安装至系统磁盘（{model}，{size}）的未分配空间中。",
   "@regionSub": {
     "placeholders": {
       "model": {
@@ -325,10 +282,10 @@
     }
   },
   "regionNote": "Android系统分区固定占用约12 GiB，剩余空间将全部分配给数据分区。",
-  "releaseTitle": "选择系统版本",
-  "releaseSub": "安装器将在下载完成后校验文件完整性，随后再写入磁盘。",
-  "releaseLoading": "正在获取版本列表……",
-  "releaseNone": "无法获取版本列表，请检查网络连接后重试。",
+  "releaseTitle": "选择下载源",
+  "releaseSub": "安装器将下载最新版本的系统，并在下载完成后校验文件完整性，随后再写入磁盘。",
+  "releaseLoading": "正在获取最新版本信息……",
+  "releaseNone": "无法获取最新版本信息，请检查网络连接后重试。",
   "releaseLatest": "最新版本",
   "releaseNote": "下载的文件保存在“下载”文件夹的Gaokun Android目录中。",
   "optionsTitle": "选择默认启动系统",
@@ -389,7 +346,7 @@
       }
     }
   },
-  "doneUninstallExtend": "可在Windows“磁盘管理”中右键点击C盘并选择“扩展卷”，将该未分配空间合并回C盘。",
+  "doneUninstallExtend": "可在Windows“磁盘管理”中右键点击该未分配空间之前的分区并选择“扩展卷”，将其合并回该分区。",
   "doneUninstallBoot": "Android的启动项已移除，设备开机时将按EFI分区中的默认引导文件启动（通常为Windows）。",
   "failInstallTitle": "安装未完成",
   "failUninstallTitle": "卸载未完成",
@@ -424,7 +381,7 @@
     }
   },
   "uninstallBoot": "移除Android的启动项，将EFI默认引导文件恢复为安装前的状态（通常为Windows启动管理器；EFI分区中其他系统的引导设置予以保留）",
-  "uninstallFree": "释放的空间将保留为未分配状态，后续可在“磁盘管理”中合并回C盘",
+  "uninstallFree": "释放的空间将保留为未分配状态，后续可在“磁盘管理”中合并回原来的分区",
   "errRelease": "安装镜像文件不完整或校验失败，请重新下载。",
   "errInstalled": "当前设备已安装Android。如需重新安装，请先执行卸载。",
   "errPlan": "所选未分配空间容量不足，无法安装Android。",
@@ -449,10 +406,10 @@
   "errBitlockerUnverifiable": "无法读取系统盘的BitLocker恢复密钥信息，因此无法完成校验。请重新检查；若问题持续存在，请先在Windows中关闭BitLocker（设备加密）后再继续。",
   "errBitlockerSuspend": "无法暂停BitLocker保护，请重新检查后再试。",
   "errBitlockerConverting": "BitLocker正在加密或解密系统盘，请等待转换完成后重新检查。",
-  "errShrinkQuery": "请稍后重试；若仍然失败，可在“磁盘管理”中右键点击C盘并选择“压缩卷”查看可压缩空间。",
+  "errShrinkQuery": "无法读取Windows“应用程序”日志，请稍后重试。",
   "errMftFailed": "累计多次移动失败，操作已中止，可稍后重试。",
-  "errMftRead": "无法读取C盘的MFT布局或可用空间位图。",
-  "errVolumeOpen": "无法打开C盘。",
+  "errMftRead": "无法读取该分区的MFT布局或可用空间位图。",
+  "errVolumeOpen": "无法打开该分区。",
   "errLowBattery": "设备电量过低且未连接电源适配器。",
   "errEspFull": "EFI系统分区剩余空间不足。",
   "errPartsUnclear": "磁盘中存在与Android分区同名但内容无法识别的分区；为避免误删数据，操作已中止。",
@@ -544,8 +501,6 @@
       }
     }
   },
-  "releasePre": "预发布版",
-  "releaseNoteR2": "R2镜像源仅提供最新版本。下载的文件保存在“下载”文件夹的Gaokun Android目录中。",
   "localDirLabel": "安装文件所在目录",
   "localNeed": "该目录中需包含以下文件：",
   "localBoot": "boot.img",
@@ -564,7 +519,6 @@
   "winClose": "关闭",
   "releaseSubLocal": "安装器将先校验本地文件的完整性，随后再写入磁盘。",
   "railTitle": "Gaokun Android",
-  "releaseAlpha": "早期测试版，不建议使用",
   "btnBrowse": "浏览…",
   "shutdownReasonInstall": "正在安装Android。中断安装可能导致磁盘分区处于不完整状态。",
   "shutdownReasonUninstall": "正在卸载Android。中断卸载可能导致磁盘分区处于不完整状态。",
@@ -620,7 +574,7 @@
   "mediaInternalTitle": "系统磁盘的未分配空间",
   "mediaInternalBody": "创建GK3LIVE分区并将Live安装器添加至启动菜单，现有分区及其中的数据不受影响",
   "mediaInternalBlocked": "以下条件尚未满足（详情请返回首页查看安装环境检查）：",
-  "releaseSubMedia": "所选版本的系统安装文件将与Live安装器一并写入安装介质，进入Live安装器安装时无需联网。",
+  "releaseSubMedia": "系统安装文件将与Live安装器一并写入安装介质，进入Live安装器安装时无需联网。",
   "releaseLiveCd": "将使用最新版Live安装器{version}（下载大小{size}）。",
   "@releaseLiveCd": {
     "placeholders": {
@@ -824,5 +778,68 @@
   "runRmLiveTitle": "正在删除安装器分区",
   "failRmLiveTitle": "安装器分区未删除",
   "failTouchedRmLive": "删除流程仅完成一部分，Windows系统不受影响。请返回首页并重新执行删除。",
-  "errLiveUnrecognized": "系统磁盘上的安装器分区内容无法识别；为避免误删数据，操作已中止。"
+  "errLiveUnrecognized": "系统磁盘上的安装器分区内容无法识别；为避免误删数据，操作已中止。",
+  "@sbPagefileHow": {
+    "placeholders": {
+      "drive": {
+        "type": "String"
+      }
+    }
+  },
+  "@sbHiberfilHow": {
+    "placeholders": {
+      "drive": {
+        "type": "String"
+      }
+    }
+  },
+  "@sbRestoreHow": {
+    "placeholders": {
+      "drive": {
+        "type": "String"
+      }
+    }
+  },
+  "@sbUsnHow": {
+    "placeholders": {
+      "drive": {
+        "type": "String"
+      }
+    }
+  },
+  "@mftConfirmBody": {
+    "placeholders": {
+      "drive": {
+        "type": "String"
+      }
+    }
+  },
+  "@mftStuck": {
+    "placeholders": {
+      "drive": {
+        "type": "String"
+      }
+    }
+  },
+  "@sbNtfsHow": {
+    "placeholders": {
+      "drive": {
+        "type": "String"
+      }
+    }
+  },
+  "@sbDumpHow": {
+    "placeholders": {
+      "drive": {
+        "type": "String"
+      }
+    }
+  },
+  "@sbBitlockerHow": {
+    "placeholders": {
+      "drive": {
+        "type": "String"
+      }
+    }
+  }
 }

@@ -41,6 +41,8 @@ typedef struct {
 
 /* 这块盘是不是 VHD 虚拟盘（只查不报） */
 int gk3w_disk_is_vhd(DWORD num);
+/* 盘符所在的那块盘（卷只在一块盘上时）；找不到返回 -1 */
+long gk3w_drive_disk_number(wchar_t drive);
 /* Windows 目录所在卷的那块盘；找不到返回 -1 */
 long gk3w_system_disk_number(void);
 /* 以读写方式打开一块 VHD（先查类型，真实磁盘连写句柄都不拿）。失败已报 ERR，返回 -1。 */
