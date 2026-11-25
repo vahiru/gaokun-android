@@ -54,7 +54,7 @@ HIDE_PATHS="/sdcard/MT2"
 # 与 ro.bootimage.build.fingerprint 本机为空，列上无害。
 # ⚠️ Build.FINGERPRINT（android.os.Build 常量）在 zygote 预加载时定死，运行时改不了；
 #    运行时改属性反而会制造 property↔constant 漂移。ROM 级对齐在
-#    scripts/crdroid-tree-fixes.py tree-fix [23]（config.mk 的 fingerprint 变体段 → user），
+#    patches/android/build-make/0001（config.mk 的 fingerprint 变体段 → user），
 #    下次 ROM 构建后这里的 sed 就是无操作（尾部本来就是 :user/）。
 FP_PROPS="ro.build.fingerprint ro.product.build.fingerprint ro.system.build.fingerprint ro.vendor.build.fingerprint ro.product.system.build.fingerprint ro.product.vendor.build.fingerprint ro.bootimage.build.fingerprint"
 

@@ -1,7 +1,7 @@
 /*
- * 平行视界（设置 → 应用）：按应用开启frameworks-base/0006的OVERRIDE_ENABLE_PARALLEL_VIEW。
+ * 平行视界（设置 → 应用）：按应用开启frameworks-base/0005的OVERRIDE_ENABLE_PARALLEL_VIEW。
  *
- * 开启后，窗口管理扩展库（frameworks-base/0007）在应用启动时读取应用自带的assets/easygo.json
+ * 开启后，窗口管理扩展库（frameworks-base/0006）在应用启动时读取应用自带的assets/easygo.json
  * （华为平板分栏规则中的magicwindow部分），横屏时按规则把页面左右分栏显示。
  *
  * 只列出带启动器图标、带有magicwindow规则且规则未排除平板的非系统应用。声明了

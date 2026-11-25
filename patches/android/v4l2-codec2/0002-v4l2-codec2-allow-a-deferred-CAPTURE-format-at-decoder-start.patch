@@ -1,0 +1,87 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] v4l2_codec2: allow a deferred CAPTURE format at decoder start
+
+setupInitialOutput() allocates a minimal CAPTURE queue before any
+bitstream is queued, only to have an EOS buffer for a drain that comes
+before the first SOURCE_CHANGE event. Venus rejects VIDIOC_G_FMT on the
+CAPTURE queue with EINVAL until that event, and so does iris with
+venus_compat_gfmt=Y (patches/kernel/iris/0003). Iris needs that
+setting: if the CAPTURE queue is started at 128x128 before the stream
+headers, gen1 firmware reports a fatal error for H.264 and HEVC. start()
+treats the failure as fatal, so no decoder can be created.
+
+Make the failure non-fatal in start(). The CAPTURE queue is set up in
+changeResolution() when the event arrives, and every use of
+mInitialEosBuffer already checks for null: without it, the early DRC
+shortcut is skipped and a drain before the first event uses the
+standard V4L2 decoder stop command. In setupInitialOutput(), query
+G_FMT(CAPTURE) after setting the minimal format, and on EINVAL log one
+info line and return success instead of logging two errors and a
+warning on every start.
+
+Origin: local
+Upstream-Status: Pending
+---
+ v4l2/V4L2Decoder.cpp                        | 19 +++++++++++++++++--
+ v4l2/include/v4l2_codec2/v4l2/V4L2Decoder.h |  3 ++-
+ 2 files changed, 19 insertions(+), 3 deletions(-)
+
+diff --git a/v4l2/V4L2Decoder.cpp b/v4l2/V4L2Decoder.cpp
+index 1a5fbf8..a522f23 100644
+--- a/v4l2/V4L2Decoder.cpp
++++ b/v4l2/V4L2Decoder.cpp
+@@ -8,6 +8,7 @@
+ 
+ #include <v4l2_codec2/v4l2/V4L2Decoder.h>
+ 
++#include <errno.h>
+ #include <stdint.h>
+ 
+ #include <algorithm>
+@@ -172,9 +173,12 @@ bool V4L2Decoder::start(const VideoCodec& codec, const size_t inputBufferSize,
+         ALOGE("Failed to setup input format.");
+         return false;
+     }
++    // The initial output queue only provides an EOS buffer for a drain before the first
++    // SOURCE_CHANGE event. Going on without it is safe: the CAPTURE queue is set up when
++    // the event arrives, and every use of mInitialEosBuffer checks for null.
+     if (!setupInitialOutput()) {
+-        ALOGE("Unable to setup initial output");
+-        return false;
++        ALOGW("Failed to set up the initial output queue, continuing without the initial EOS "
++              "buffer");
+     }
+ 
+     if (!mDevice->startPolling(mTaskRunner,
+@@ -236,6 +240,17 @@ bool V4L2Decoder::setupInitialOutput() {
+         return false;
+     }
+ 
++    // Venus, and iris with venus_compat_gfmt=Y, reject VIDIOC_G_FMT(CAPTURE) with EINVAL
++    // until the first SOURCE_CHANGE event. Start without the initial output queue then.
++    struct v4l2_format format;
++    memset(&format, 0, sizeof(format));
++    format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
++    if (mDevice->ioctl(VIDIOC_G_FMT, &format) != 0 && errno == EINVAL) {
++        ALOGI("Driver reports the CAPTURE format only after the first SOURCE_CHANGE event, "
++              "starting without the initial EOS buffer");
++        return true;
++    }
++
+     if (!startOutputQueue(1, V4L2_MEMORY_DMABUF)) {
+         ALOGE("Failed to start initialy output queue");
+         return false;
+diff --git a/v4l2/include/v4l2_codec2/v4l2/V4L2Decoder.h b/v4l2/include/v4l2_codec2/v4l2/V4L2Decoder.h
+index c825f74..0098b12 100644
+--- a/v4l2/include/v4l2_codec2/v4l2/V4L2Decoder.h
++++ b/v4l2/include/v4l2_codec2/v4l2/V4L2Decoder.h
+@@ -76,7 +76,8 @@ private:
+     bool setupInputFormat(const uint32_t inputPixelFormat, const size_t inputBufferSize);
+ 
+     // Sets minimal resolution and allocates minimal amount of output buffers for
+-    // drain done signaling.
++    // drain done signaling. Returns true without allocating them when the driver
++    // reports the CAPTURE format only after the first SOURCE_CHANGE event.
+     bool setupInitialOutput();
+     // Find the first output format and sets output to its minimal resolution.
+     bool setupMinimalOutputFormat();

@@ -18,7 +18,7 @@
 #     两组都数 framework 侧的丢帧（RecordThread buffer overflow / overrun on read from pipe）：非 0 时这一轮的 D / E 不作数。
 #   每个用例都带 -T（mic-smoke 的计时：交付延迟 D、时间戳误差 E），结果表后面附 D / E 的中位数。
 #
-#   HAL 二进制：构建机上 crdroid-tree-fixes.py 打好 [13]/[14] 之后 `m com.android.hardware.audio`，取
+#   HAL二进制：构建机上crdroid-tree-fixes.py应用hardware-interfaces/0002、0003之后执行`m com.android.hardware.audio`，取
 #     out/target/product/gaokun3/apex/com.android.hardware.audio/bin/hw/android.hardware.audio.service-aidl.example
 #   gaokun3-mic-smoke（device/huawei/gaokun3/audio/tools/mic-smoke.c）：`m gaokun3-mic-smoke`，或直接用 NDK：
 #     $NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang -O2 -Wall -Werror \

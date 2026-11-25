@@ -31,13 +31,13 @@ while [ ! -e /sys/class/net/wlan0 ]; do
 done
 
 # ★ v1.0 NET-4（2026-10-06 上机改）：wlan0 用由 SoC 序列号派生的稳定 MAC。
-#   tree-fix [19] 只让 HAL 的"出厂 MAC"（ETHTOOL_GPERMADDR 那一层）变成派生值；而 1.0 没开随机化总开关
+#   patches/android/hardware-interfaces/0013只让HAL的"出厂MAC"（ETHTOOL_GPERMADDR那一层）变成派生值；而1.0未开启随机化总开关
 #   （rro/Gaokun3WifiOverlay 的 config_wifi_connected_mac_randomization_supported=false），框架连接前
 #   根本不碰 MAC ⇒ wlan0 仍是固件每次开机给的 00:03:7f:12:xx:xx（dev.9 实机：框架日志
 #   "Primary factory MAC address retrieved: 7e:a1:e8:15:66:f1"，ip link 却是 00:03:7f:12:6d:44）。
 #   所以在这里、Wi-Fi 打开之前直接把 wlan0 的地址写成同一个派生值。实机核过：写进去之后关开 Wi-Fi 仍保持、照常连网。
 #   wlan0 已经 up（框架抢先开了 Wi-Fi）就不动它 —— 连着网时改地址会掉线，这种开机只能沿用固件地址，下次开机再说。
-# gaokun3_stable_mac <接口名> <序列号>：与 tree-fix [19]（Wi-Fi HAL 的 gaokun3StableMac）同一算法 ——
+# gaokun3_stable_mac <接口名> <序列号>：与patches/android/hardware-interfaces/0013（Wi-Fi HAL的gaokun3StableMac）同一算法 ——
 #   对 "gaokun3-wifi-mac:<接口名>:<序列号>" 做 FNV-1a 64，取低 6 字节（小端），清组播位、置本地管理位。
 #   mksh 的算术是 32 位，所以 64 位哈希拆成 4 个 16 位分量 h3:h2:h1:h0 来算；
 #   乘 FNV 素数 0x100000001b3 = 2^40 + 0x1b3 ⇒ h*0x1b3 加上 h<<40（只剩 h 的低 24 位落进高 24 位）。

@@ -1,1675 +1,224 @@
 #!/usr/bin/env python3
-"""对 crDroid 源码树的本地修补（幂等，可反复跑）。
+"""把patches/android/下的补丁应用到crDroid源码树中device/huawei/gaokun3以外的项目。
 
-在构建机上执行：
-    python3 <repo>/scripts/crdroid-tree-fixes.py ~/crdroid
+    python3 <本仓库>/scripts/crdroid-tree-fixes.py <源码树>
 
-目标树：crDroid 17.0（crDroid 13 / Android 17 = lineage-24.0、android-17.0.0_r1、release config cp2a），
-2026-10-25 起。crDroid 16.0（A16 / bp4a）不再维护，锚点只按 17.0 写，不再兼容 16.0。
+patches/android/<目录>/对应源码树中的一个项目，对应关系见PROJECTS。对每个项目：
 
-★ 严格模式（A17 迁移时改的）：每一条要么生效（或已生效），要么在下面 main() 里明确写着"A17 上废弃"。
-  * 结果以 ✗ / ⚠️ 开头 = 没做成，记失败、整个脚本退 1。17.0 树里【一定有】的项目缺文件、缺锚点都算这一类
-    —— 以前"跳过（找不到 …）"不算失败，上游一挪文件，修补就悄悄没了。
-  * 只有 [4] 的 vendor/gapps 是可选项目（不装 GApps 就不同步），没同步时打印"跳过"、不算失败。
-  * "已废弃（A17）"开头 = 上游已经不需要这条（例如 [11] 的 flag 被上游删掉了），照常打印、不算失败。
+  * 工作区已等于“清单版本＋目录中的全部补丁”时不做任何改动；
+  * 否则把项目恢复到清单版本（repo维护的refs/remotes/m/<清单分支>，执行
+    git checkout -f --detach与git clean -fd），再按编号依次git apply目录中的补丁。
+    **项目中的本地改动与未跟踪文件会被清除，HEAD停在清单版本上，本地提交不再参与构建。**
+    恢复后内容没有变化的文件改回原来的修改时间，增量构建不会因此重新编译；
+    所以执行期间不要同时构建。
 
-—— 修补 1：关掉 SPOOF_SAFETYNET ——
+repo sync因本地改动无法检出某个项目时，执行本脚本也会把该项目恢复到清单版本。
+补丁无法应用（上游代码有变化）或项目缺失时报错，全部项目处理完后以1退出。
 
-crDroid 在 system/core/init/property_service.cpp 里加了 SetSafetyNetProps()，
-在【解析 kernel cmdline 之前】硬写一整张属性表来伪装"已锁定、已验证、user 版"，
-好让 Play Integrity 通过。源码注释原话：
-
-    // Report a valid verified boot chain to make Google SafetyNet integrity
-    // checks pass. This needs to be done before parsing the kernel cmdline as
-    // these properties are read-only and will be set to invalid values with
-    // androidboot cmdline arguments.
-
-被它强制的值（2026-08-19 实机 getprop 逐条确认）：
-    ro.boot.verifiedbootstate = green      （cmdline 写的是 orange）
-    ro.boot.flash.locked      = 1          （cmdline 写的是 0）
-    ro.boot.veritymode        = enforcing  （cmdline 写的是 disabled）
-    ro.debuggable = 0    ro.adb.secure = 1    ro.secure = 1
-    ro.build.type = user   ro.build.tags = release-keys
-    ro.crypto.state = encrypted            ro.secureboot.lockstate = locked
-
-对本项目这是致命的：
-  * ro.debuggable=0            → adb root / adb remount 全部不可用，
-                                 而 M3 部署 turnip 完全依赖 overlayfs remount
-  * verifiedbootstate != orange → adb remount 的前提不成立（Stage 5 的运维基础）
-  * ro.adb.secure=1            → adb 要授权（可用 PRODUCT_ADB_KEYS 绕开，但治标）
-  * 这些值把 WITH_ADB_INSECURE、PRODUCT_SYSTEM_EXT_PROPERTIES、cmdline
-    统统盖掉 —— 排查时极具迷惑性，因为产物里的 build.prop 明明是对的。
-
-上游只在 eng 变体里关它（Android.bp 的 product_variables.eng），
-但 eng 会关掉 dexpreopt，首次开机全靠 JIT —— 本机跑 swangle 软渲染，
-慢到不可接受。所以直接把默认值改成 0。
-
-我们本来就不追求 Play Integrity（这是台开发机），关掉没有副作用。
-
-A17（crDroid 17.0）原样还在：system/core/init/Android.bp:133、:499 两处 "-DSPOOF_SAFETYNET=1"，
-eng 分支各有一对 "-USPOOF_SAFETYNET" / "-DSPOOF_SAFETYNET=0"（:163-164、:529-530）；
-property_service.cpp:1383-1385 照旧按它调 SetSafetyNetProps()。
+新增补丁：放进对应目录，编号接在末尾。新项目：新建目录，并在PROJECTS中登记项目路径。
+某个目录的补丁全部删除后，PROJECTS中的条目先保留，已应用过补丁的树才会恢复到清单版本。
+各补丁的原因与作用写在补丁说明中，目录一览见patches/README.md。
 """
-import io, os, re, sys, pathlib, shutil, subprocess, tempfile
+import hashlib
+import os
+import pathlib
+import shutil
+import subprocess
+import sys
+import tempfile
 
-def patch_spoof_safetynet(tree: pathlib.Path) -> str:
-    p = tree / "system/core/init/Android.bp"
-    if not p.exists():
-        return f"✗ 找不到 {p}"
-    s = io.open(p, encoding="utf-8").read()
-    n = s.count('"-DSPOOF_SAFETYNET=1"')
-    if n == 0:
-        # eng 分支本来就成对写着 -USPOOF_SAFETYNET / -DSPOOF_SAFETYNET=0；只有比 -U 多出来的 =0 才是我们改的。
-        # 光看"有没有 =0"会把"上游整个删掉了 =1"误判成已改过。
-        n0, nu = s.count('"-DSPOOF_SAFETYNET=0"'), s.count('"-USPOOF_SAFETYNET"')
-        return ("已是 0（幂等，无需改动）" if n0 > nu
-                else "⚠️ 找不到 -DSPOOF_SAFETYNET=1（也不是我们改过的样子），上游可能改了写法")
-    s = s.replace('"-DSPOOF_SAFETYNET=1"', '"-DSPOOF_SAFETYNET=0"')
-    io.open(p, "w", encoding="utf-8", newline="").write(s)
-    return f"已把 {n} 处 -DSPOOF_SAFETYNET=1 改为 =0"
+# patches/android/下的目录 -> 源码树中的项目路径
+PROJECTS = {
+    "build-make": "build/make",
+    "drm-hwcomposer": "external/drm_hwcomposer",
+    "frameworks-av": "frameworks/av",
+    "frameworks-base": "frameworks/base",
+    "frameworks-opt-net-wifi": "frameworks/opt/net/wifi",
+    "hardware-interfaces": "hardware/interfaces",
+    "hexagonrpc": "external/hexagonrpc",
+    "minigbm": "external/minigbm",
+    "packages-modules-wifi": "packages/modules/Wifi",
+    "system-core": "system/core",
+    "tinyalsa": "external/tinyalsa_new",
+    "v4l2-codec2": "external/v4l2_codec2",
+    "vendor-gapps": "vendor/gapps",
+    "vendor-lineage": "vendor/lineage",
+    "webrtc": "external/webrtc",
+}
+# 未安装GApps时不同步vendor/gapps，此时跳过
+OPTIONAL = {"vendor-gapps"}
 
-def patch_hexagonfs_cr(tree: pathlib.Path) -> str:
-    """—— 修补 2：给 hexagonfs 的路径解析加 CR 截断 ——
+PATCHES = pathlib.Path(__file__).resolve().parent.parent / "patches" / "android"
 
-    SLPI 的 DSP 固件是在 Windows 上编译的，它通过 FastRPC 请求文件时，
-    路径的【每一段都带一个尾随 CR】。hexagonrpcd 上游没有处理这件事，
-    于是 DSP 读不到传感器注册表 —— 症状是传感器一个都出不来。
 
-    ★ 补丁位置很关键：打在 copy_segment_and_advance() 里，那是【通用】分段
-      解析函数，清理后的 segment 才分派给各后端（hexagonfs.c 的 openat 循环）。
-      所以物理目录后端同样受益 —— 这就是为什么【不需要】贡献者指南里那 6 个
-      带 CR 的 socinfo symlink（本仓移走它们后加速度计照样正常，实测确认）。
-      而这一条正是 Android 侧能用普通 PRODUCT_COPY_FILES 的前提：
-      构建系统造不出带控制字符的文件名。
+class Failed(Exception):
+    pass
 
-    完整背景见 docs/dev/sensors-ssc-protocol.md。
 
-    external/hexagonrpc 来自本仓 manifests/local_manifest_gaokun3.xml（钉 435ed1c），A17 树上照样同步；
-    构建机 17.0 树上的副本（2026-10-25 核过）锚点原样在。没有这个项目 = 传感器全没 ⇒ 缺了算失败。
+def git(proj, *args, index=None):
+    env = None
+    if index:
+        env = dict(os.environ, GIT_INDEX_FILE=str(index))
+    r = subprocess.run(["git", "-C", str(proj), *args], capture_output=True, text=True, env=env)
+    if r.returncode:
+        msg = (r.stderr.strip() or r.stdout.strip() or "?").splitlines()[0]
+        raise Failed(f"git {args[0]}失败：{msg}")
+    return r.stdout.strip()
+
+
+def manifest_branch(tree):
+    """repo init -b指定的清单分支，取法与repo相同：.repo/manifests.git中的branch.default.merge。
+
+    返回(分支, None)，取不到时返回(None, 原因)。
     """
-    p = tree / "external/hexagonrpc/hexagonrpcd/hexagonfs.c"
-    if not p.exists():
-        return f"✗ 找不到 {p} —— local manifest 同步过了吗"
-    s = io.open(p, encoding="utf-8").read()
-    if "segment[--segment_len] = 0;" in s:
-        return "已打过（幂等，无需改动）"
-    anchor = "segment[segment_len] = 0;"
-    if anchor not in s:
-        return "⚠️ 找不到锚点，上游可能改了 copy_segment_and_advance()"
-    # ⚠️ 生成 C 代码时【一律用 chr()】，不写反斜杠转义：这段代码本身经过多层
-    #    引号传递，\n / \r 之类会被中间层 collapse 掉（本仓踩过两次）。
-    NL, TAB, BS = chr(10), chr(9), chr(92)
-    patch = (NL + TAB + "/* DSP 固件在 Windows 上编译，请求的路径每段都带尾随 CR。" + NL
-             + TAB + " * 这里是通用分段解析，清理后才分派给各后端，物理目录后端同样受益。 */" + NL
-             + TAB + "if (segment_len > 0 && segment[segment_len - 1] == " + chr(39) + BS + "r" + chr(39) + ")" + NL
-             + TAB + TAB + "segment[--segment_len] = 0;")
-    s = s.replace(anchor, anchor + patch, 1)
-    io.open(p, "w", encoding="utf-8", newline="").write(s)
-    return "已加上 CR 截断"
+    cfg = tree / ".repo" / "manifests.git" / "config"
+    if not cfg.exists():
+        return None, "未找到.repo/manifests.git"
+    r = subprocess.run(["git", "config", "--file", str(cfg), "branch.default.merge"],
+                       capture_output=True, text=True)
+    branch = r.stdout.strip()
+    if not branch:
+        return None, ".repo/manifests.git中没有branch.default.merge"
+    return (branch[len("refs/heads/"):] if branch.startswith("refs/heads/") else branch), None
 
 
-def patch_v4l2_input_size(tree: pathlib.Path) -> str:
-    """—— 修补 3：v4l2_codec2 给压缩输入队列传了非法分辨率 ——
+def manifest_ref(proj, branch, why):
+    """repo为每个项目维护的清单版本引用refs/remotes/m/<清单分支>。
 
-    症状：任何视频用 c2.v4l2.*.decoder 都 "start 失败"，内核打
-    `qcom-venus: HW can't support this load`。
-
-    原因分析（内核插桩实测，见 docs/dev/audio-video.md）：
-      1. V4L2Decoder::setupInputFormat() 对【压缩输入队列】做 S_FMT 时传
-         `ui::Size()`，而 ui::Size 的默认值是 **-1 x -1**
-         （frameworks/native/libs/ui/include/ui/Size.h:32-33），
-         不是想当然的 0 x 0。
-      2. buildV4L2Format() 把它赋给 __u32 -> 0xFFFFFFFF。
-      3. venus 的 vdec_try_fmt_common() clamp 到 [128, 8192] -> **8192**，
-         而 vdec_s_fmt() 就用这个值填 inst->width/height。
-      4. 同一个函数末尾立刻 streamon -> decide_core() 按 8192x8192@30fps
-         算出 1.573 GHz 负载 > max_freq 1.332 GHz -> -EINVAL。
-      实测插桩输出：`8192x8192 fps=30 ... inst=1572864000 max_freq=1332000000`，
-      而视频其实只有 640x360。
-
-    ★ 这是 v4l2_codec2 的**可移植性 bug**：ChromeOS 的驱动不看压缩队列的
-      分辨率，所以上游一直没暴露；venus 看，于是一撞就死。
-
-    修法：传设备自报的最小分辨率 —— 与同文件 setupMinimalOutputFormat()
-    对输出队列的做法完全一致。真实分辨率随后由 source-change 事件带来。
-
-    A17：锚点在 V4L2Decoder.cpp:205，原样未变（V4L2Decoder.cpp 本身比 16.0 有改动，这一行没动）。
+    切换过清单分支的树里可能留有旧分支的m/引用，所以按清单分支取，不能只看有几个。
+    取不到清单分支时（例如不是repo检出的树），要求恰好有一个m/引用。
     """
-    p = tree / "external/v4l2_codec2/v4l2/V4L2Decoder.cpp"
-    if not p.exists():
-        return f"✗ 找不到 {p}"
-    s = io.open(p, encoding="utf-8").read()
-    if "inputMinRes" in s:
-        return "已打过（幂等，无需改动）"
-    anchor = ("    auto format = mInputQueue->setFormat(inputPixelFormat, ui::Size(), "
-              "inputBufferSize, 0);")
-    if anchor not in s:
-        return "⚠️ 找不到锚点，上游可能改了 setupInputFormat()"
-    NL = chr(10)
-    new = (
-        "    // venus 会拿【压缩输入队列】S_FMT 的分辨率去算硬件负载，而 ui::Size()" + NL
-        + "    // 默认是 -1 x -1，转成 __u32 就是 0xFFFFFFFF，被 clamp 到 8192x8192，" + NL
-        + "    // decide_core() 于是一律判 HW overload。传设备自报的最小分辨率。" + NL
-        + "    ui::Size inputMinRes, inputMaxRes;" + NL
-        + "    mDevice->getSupportedResolution(inputPixelFormat, &inputMinRes, &inputMaxRes);" + NL
-        + "    if (inputMinRes.isEmpty()) inputMinRes.set(128, 128);" + NL
-        + "    auto format = mInputQueue->setFormat(inputPixelFormat, inputMinRes, "
-          "inputBufferSize, 0);"
-    )
-    s = s.replace(anchor, new, 1)
-    io.open(p, "w", encoding="utf-8", newline="").write(s)
-    return "已改为传最小分辨率（原来传的是 ui::Size() = -1 x -1）"
-
-
-def patch_minigbm_p010_scanout(tree: pathlib.Path) -> str:
-    """—— 修补 29：minigbm 只给 SC7280 开了 P010 的显示用途 ——
-
-    症状：10-bit 视频放到 SurfaceView 时黑屏。minigbm 报 `Unsupported combination`
-    （P010 + HW_COMPOSER，usage 0x400900），v4l2_codec2 拿不到输出块，也不报错给播放器。
-
-    根因：msm.c 里 P010 的 BO_USE_SCANOUT 包在 `#ifdef SC_7280` 里，本机是 sc8280xp。
-
-    ⚠️★ 必须和 patches/mesa/0002（turnip 的 P010）一起生效。只放开这里、GPU 又采样不了 P010 时，
-    10-bit 视频一进 SurfaceFlinger，RenderEngine 就 abort
-    （`Failed to create a valid texture ... format:54`），整个界面重启。
-    这台机器竖屏面板横屏用，视频要 GPU 旋转，所以 P010 一定会走到这里。
-    """
-    p = tree / "external/minigbm/msm.c"
-    if not p.exists():
-        return f"✗ 找不到 {p}"
-    s = io.open(p, encoding="utf-8").read()
-    NL = chr(10)
-    body = (
-        "\tdrv_modify_combination(drv, DRM_FORMAT_P010, &LINEAR_METADATA," + NL
-        + "\t\t\t       BO_USE_SCANOUT | BO_USE_HW_VIDEO_ENCODER);" + NL
-    )
-    guarded = "#ifdef SC_7280" + NL + body + "#endif" + NL
-    if s.count(guarded) == 1:
-        io.open(p, "w", encoding="utf-8").write(s.replace(guarded, body))
-        return "已修补"
-    if body in s:
-        return "已打过（幂等，无需改动）"
-    return "⚠️ 锚点不唯一或找不到，上游可能改了 msm_init()"
-
-
-def patch_webrtc_vendor_visibility(tree: pathlib.Path) -> str:
-    """—— 修补 39：让设备树链 webrtc_audio_processing（通话的回声消除）——
-
-    采集钩子（device/huawei/gaokun3/micarray/）对通话流自己做回声消除，用的是AOSP自带的WebRTC
-    （external/webrtc，android-17.0.0_r1）里的AEC3：平台给VOICE_COMMUNICATION接的AEC/NS在这个HAL上
-    拿不到音频（AudioFlinger把预处理音效交给HAL，HAL的addEffect不支持，日志是
-    `Error when adding effect: -38`，2026-11-03在rc.3上核实）。
-
-    webrtc_audio_processing本身是vendor可用的静态库，但visibility只放行
-    frameworks/av的preprocessing、cuttlefish和//vendor:__subpackages__（6bf8f3ca "Allow vendor
-    codes to use webrtc"），device/下的模块链它会被Soong拒绝。这里只在它自己的列表里加上本设备树。
-    """
-    p = tree / "external/webrtc/Android.bp"
-    if not p.exists():
-        return f"✗ 找不到 {p}"
-    s = io.open(p, encoding="utf-8").read()
-    NL = chr(10)
-    old = ("    visibility: [" + NL
-           + "        \"//vendor:__subpackages__\"," + NL
-           + "    ]," + NL)
-    new = ("    visibility: [" + NL
-           + "        \"//vendor:__subpackages__\"," + NL
-           + "        \"//device/huawei/gaokun3:__subpackages__\"," + NL
-           + "    ]," + NL)
-    if new in s:
-        return "已打过（幂等，无需改动）"
-    if s.count(old) == 1:
-        io.open(p, "w", encoding="utf-8").write(s.replace(old, new))
-        return "已修补"
-    return "⚠️ 锚点不唯一或找不到，上游可能改了webrtc_audio_processing的visibility"
-
-
-def patch_v4l2_10bit_profiles(tree: pathlib.Path) -> str:
-    """—— 修补 30：v4l2_codec2 没有声明 10-bit profile ——
-
-    症状：MediaCodecList 里硬解组件没有 HEVC Main10 和 VP9 Profile 2。ExoPlayer 记
-    NoSupport 但还会硬试，mpv（FFmpeg）按能力表选解码器，直接走软解。
-
-    根因：iris gen1 的解码器没有 profile 控件（iris_hfi_gen1.c 的 inst_fw_cap_sm8250_dec
-    只有 PIPE、STAGE），V4L2Device::getSupportedProfiles() 的 VIDIOC_QUERYCTRL 必然失败，
-    走这里的默认列表，而默认列表只有 8-bit。
-
-    ⚠️ 改 components/DecodeInterface.cpp 里那份同样的列表没有用：它只在 profiles
-    为空时才用，而这里的默认列表保证了 profiles 不为空。
-    """
-    p = tree / "external/v4l2_codec2/v4l2/V4L2Device.cpp"
-    if not p.exists():
-        return f"✗ 找不到 {p}"
-    s = io.open(p, encoding="utf-8").read()
-    if "C2Config::PROFILE_HEVC_MAIN_10,\n            };" in s:
-        return "已打过（幂等，无需改动）"
-    NL = chr(10)
-    vp9 = "            profiles = {C2Config::PROFILE_VP9_0};" + NL
-    hevc = "                    C2Config::PROFILE_HEVC_MAIN," + NL + "            };" + NL
-    if s.count(vp9) != 1 or s.count(hevc) != 1:
-        return "⚠️ 锚点不唯一或找不到，上游可能改了 getSupportedProfiles()"
-    s = s.replace(vp9, "            profiles = {C2Config::PROFILE_VP9_0, C2Config::PROFILE_VP9_2};" + NL)
-    s = s.replace(hevc, "                    C2Config::PROFILE_HEVC_MAIN," + NL
-                  + "                    C2Config::PROFILE_HEVC_MAIN_10," + NL + "            };" + NL)
-    io.open(p, "w", encoding="utf-8").write(s)
-    return "已修补"
-
-
-def patch_v4l2_device_scan_range(tree: pathlib.Path) -> str:
-    """—— 修补 7：v4l2_codec2 只扫 /dev/video0..9，开了 camss 之后就找不到 Venus 了 ——
-
-    症状：硬件视频编解码**静默消失**（组件名还在 MediaCodecList 里，因为那是
-    media_codecs_c2.xml 驱动的，但底下一个设备都没匹配上），一切回落软解。
-
-    ★ 根因：`V4L2Device::getDeviceInfosForType()` 里写死
-        for (int i = 0; i < 10; ++i)        // v4l2/V4L2Device.cpp:2567（A17；16.0 是 :2565）
-      只探 /dev/video0..video9。而 Stage 6 M22 把 camss 编进内核之后，
-      **camss 一家就占了 32 个 video 节点**（msm_vfeN_videoM，实测 video0-31），
-      Venus 被挤到 **video32 / video33**（实测 `cat /sys/class/video4linux/*/name`）。
-      于是扫描范围内全是 camss 的 capture 节点，而解码器要的是
-      V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE —— camss 不提供 ⇒ deviceInfos 为空。
-
-    ⚠️★ 编号还**不是稳定的**：谁先 probe 谁拿低号。所以"把 Venus 钉在 video0/1"
-      这种做法靠不住，正解就是把扫描范围放宽。
-
-    修法：上界 10 -> 64。多出来的 open() 全部立即失败、只在首次调用时发生一次
-    （结果有 sDeviceInfosCache 缓存），代价可以忽略。
-    """
-    p = tree / "external/v4l2_codec2/v4l2/V4L2Device.cpp"
-    if not p.exists():
-        return f"✗ 找不到 {p}"
-    s = io.open(p, encoding="utf-8").read()
-    if "kMaxVideoDeviceIndex" in s:
-        return "已打过（幂等，无需改动）"
-    anchor = "    for (int i = 0; i < 10; ++i) {"
-    if s.count(anchor) != 1:
-        return "⚠️ 锚点不唯一或找不到，上游可能改了 getDeviceInfosForType()"
-    NL = chr(10)
-    new = (
-        "    // 只扫 video0..9 在本机是不够的：camss 一家就占 32 个节点" + NL
-        + "    // （实测 video0-31 = msm_vfeN_videoM），Venus 被挤到 video32/33。" + NL
-        + "    // 编号取决于 probe 先后，不稳定，所以放宽范围而不是钉死编号。" + NL
-        + "    static constexpr int kMaxVideoDeviceIndex = 64;" + NL
-        + "    for (int i = 0; i < kMaxVideoDeviceIndex; ++i) {"
-    )
-    s = s.replace(anchor, new, 1)
-    io.open(p, "w", encoding="utf-8", newline="").write(s)
-    return "扫描上界 10 -> 64（camss 占了 video0-31，Venus 在 video32/33）"
-
-
-def patch_gapps_conflicts(tree: pathlib.Path) -> str:
-    """—— 修补 4：MindTheGapps 与 crDroid 树的三处冲突 ——
-
-    (a) **Google 的开机向导必须去掉**（`SetupWizard`，arm64-vendor.mk）。
-        它在初始化阶段强制连 Google 服务器，**中国大陆网络下会卡在欢迎页
-        过不去，设备无法完成初始化**。crDroid 自带的 LineageSetupWizard
-        不依赖 Google 服务，保留它。
-        ★ 安全性判据：MindTheGapps 的 `GmsSetupWizardOverlay` 目标包是
-          **org.lineageos.setupwizard**（不是 Google 那个），内容只有
-          dynamic_color / partner_experiment 这类外观 bool ——
-          **不会把流程交给 Google 向导**，删掉不会断链。
-
-    (b) **`libjni_latinimegoogle` 与树内 LatinIME 模块名撞车**
-        （arm64-vendor.mk + arm64/Android.bp）。两边都是
-        `cc_prebuilt_library_shared` 且都写了 `prefer: true`，而 soong 的
-        prefer 只解决「prebuilt 覆盖源码」，两个 prebuilt 它管不了。
-        MindTheGapps 用了 soong namespace，所以 soong 阶段不报错，到 kati 才炸：
-            base_rules.mk:320: error: vendor/gapps/arm64:
-            MODULE.TARGET.SHARED_LIBRARIES.libjni_latinimegoogle
-            already defined by packages/inputmethods/LatinIME/java
-        ⚠️ 这个错误发生在【生成模块定义】时，不是安装时 ——
-        **光从 PRODUCT_PACKAGES 里拿掉不够，必须删掉模块本身。**
-
-    (c) **`google.xml` 与 crDroid 的 addons 装到同一路径**
-        （common-vendor.mk）。`vendor/addons/config.mk:32` 无条件把自己那份
-        拷到 `product/etc/sysconfig/google.xml`，于是：
-            Makefile:148: error: overriding commands for target
-            `.../product/etc/sysconfig/google.xml'
-        ★ 留 crDroid 那份 —— **实测它是超集**：60 条声明 vs GApps 的 39 条，
-          GApps 独有的只有 3 行，其中唯一的实条目是
-          `<allow-in-power-save package="com.google.ambient.streaming" />`，
-          而 MindTheGapps 压根不带那个应用。（是按内容比对定的，不是按文件大小。）
-        这个是【安装路径】冲突而非模块名冲突，所以从 PRODUCT_PACKAGES
-        里拿掉就够了。
-
-    ⚠️★ **为什么不在设备树里用 `$(filter-out ...)`：那是无效的。**
-      实测 `get_build_var PRODUCT_PACKAGES` —— 写了 filter-out 之后
-      SetupWizard 仍在 1005 个条目里。现代 AOSP 从**继承图**重新推导
-      PRODUCT_PACKAGES，产品 makefile 里的直接赋值会被丢弃。
-
-    ★ 冲突是**一次性全找出来的**，不是一个个撞：36 个 gapps 模块名与全树
-      逐个比对（只有 b），13 个 gapps etc 文件名与全树 PRODUCT_COPY_FILES
-      逐个比对（只有 c）。
-    ★ A17 复查（2026-10-25，构建机 17.0 树，vendor/gapps = MindTheGapps cinnamonbun 分支 bfa45ac「17_202606」之后一提交）：
-      34 个模块名对全树 Android.bp / Android.mk 逐个比对，仍只撞 libjni_latinimegoogle
-      （packages/inputmethods/LatinIME/java/Android.bp:81）；15 个 etc 文件名对 vendor/lineage、vendor/addons、
-      device/huawei、build/make/target 的 PRODUCT_COPY_FILES 逐个比对，仍只撞 google.xml（vendor/addons/config.mk:32）。
-      三处锚点都在：arm64-vendor.mk:9 libjni_latinimegoogle、:15 SetupWizard；arm64/Android.bp:98；
-      common-vendor.mk:24 google.xml；common/Android.bp:192。GmsSetupWizardOverlay 的目标包仍是
-      org.lineageos.setupwizard（overlay/GmsSetupWizardOverlay/AndroidManifest.xml:5）。
-
-    ⚠️ repo sync 会还原 vendor/gapps，所以每次构建前都要跑本脚本（幂等）。
-    ★ 严格判据：某个名字在列表 / Android.bp 里找不到时，看 vendor/gapps 的 git 工作区 ——
-      有本地改动 = 我们以前删过（幂等）；工作区是干净的 = 上游自己没了这一项（改名或删了），
-      那就要重新做一遍上面的冲突比对，报 ⚠️ 而不是当成"已是干净的"。
-    """
-    NL = chr(10)
-    BS = chr(92)
-    root = tree / "vendor/gapps"
-    if not root.is_dir():
-        # 全脚本唯一一处可选项目：不装 GApps 就不同步 vendor/gapps
-        return "跳过（没同步 vendor/gapps —— 不装 GApps 就不需要这一步）"
-    # 同步了 vendor/gapps 却没有 arm64-vendor.mk = MindTheGapps 改了布局，不是"没装"，不能当跳过
-    # （下面 mk_names / bp_names 的存在性检查会报 ⚠️）
-    st = subprocess.run(["git", "-C", str(root), "status", "--porcelain", "--", "arm64", "common"],
-                        capture_output=True, text=True)
-    if st.returncode != 0:
-        return "✗ vendor/gapps 不是 git 仓库，分不出是我们改过还是上游变了"
-    pristine = st.stdout.strip() == ""
-
-    msgs = []
-
-    def drop_from_mk(mk: pathlib.Path, names):
-        """从 PRODUCT_PACKAGES 列表里删掉这些名字，并修好续行反斜杠。"""
-        if not mk.exists():
-            return []
-        lines = io.open(mk, encoding="utf-8").read().split(NL)
-        gone = []
-        for name in names:
-            for i, ln in enumerate(lines):
-                if ln.strip().rstrip(BS).strip() == name:
-                    had_cont = ln.rstrip().endswith(BS)
-                    del lines[i]
-                    # 删的是列表最后一项时，上一行的续行反斜杠要去掉
-                    if not had_cont and i > 0 and lines[i - 1].rstrip().endswith(BS):
-                        lines[i - 1] = lines[i - 1].rstrip().rstrip(BS).rstrip()
-                    gone.append(name)
-                    break
-        if gone:
-            io.open(mk, "w", encoding="utf-8", newline="").write(NL.join(lines))
-        return gone
-
-    mk_names = (("arm64/arm64-vendor.mk", ["SetupWizard", "libjni_latinimegoogle"]),
-                ("common/common-vendor.mk", ["google.xml"]))
-    bp_names = (("arm64/Android.bp", "libjni_latinimegoogle"),
-                ("common/Android.bp", "google.xml"))
-    for rel in [r for r, _ in mk_names] + [r for r, _ in bp_names]:
-        if not (root / rel).exists():
-            return f"⚠️ vendor/gapps 里找不到 {rel}，MindTheGapps 可能改了布局；什么都没动"
-
-    # 先在干净树上核对全部锚点再动手：别删了一半才发现另一半上游已经变了
-    if pristine:
-        for rel, names in mk_names:
-            lines = io.open(root / rel, encoding="utf-8").read().split(NL)
-            for name in names:
-                if not any(ln.strip().rstrip(BS).strip() == name for ln in lines):
-                    return f"⚠️ {rel} 的包列表里没有 {name}（vendor/gapps 是干净的 ⇒ 上游改了），要重新比对冲突；什么都没动"
-        for rel, name in bp_names:
-            # 与 drop_module() 同一个判据（整行等于 name: "…",），别出现"核对通过、删除却没匹配上"
-            if not any(ln.strip() == 'name: "%s",' % name
-                       for ln in io.open(root / rel, encoding="utf-8").read().split(NL)):
-                return f"⚠️ {rel} 里没有模块 {name}（vendor/gapps 是干净的 ⇒ 上游改了），要重新比对冲突；什么都没动"
-
-    gone = []
-    for rel, names in mk_names:
-        gone += drop_from_mk(root / rel, names)
-    msgs.append("从包列表删掉 " + "/".join(gone) if gone else "包列表已是干净的")
-
-    # ★★ 删掉模块定义【本身】——只从 PRODUCT_PACKAGES 里拿掉是不够的。
-    #   实测：把 google.xml 从 common-vendor.mk 的包列表里删掉之后，
-    #   构建仍然报同一个 "overriding commands for target ... google.xml"，
-    #   因为 soong 会为它 namespace 里的模块照样生成安装规则
-    #   （错误出自 out/soong/installs-lineage_gaokun3.mk）。
-    #   ⇒ 凡是【模块名撞车】或【安装路径撞车】，都必须删模块块。
-    def drop_module(bp: pathlib.Path, name: str):
-        if not bp.exists():
-            return False
-        lines = io.open(bp, encoding="utf-8").read().split(NL)
-        target = None
-        needle = 'name: "%s",' % name
-        for i, ln in enumerate(lines):
-            if ln.strip() == needle:
-                target = i
-                break
-        if target is None:
-            return False
-        start = target
-        while start > 0 and not lines[start].rstrip().endswith("{"):
-            start -= 1
-        end = target
-        while end < len(lines) and lines[end].rstrip() != "}":
-            end += 1
-        while end + 1 < len(lines) and lines[end + 1].strip() == "":
-            end += 1
-        del lines[start:end + 1]
-        io.open(bp, "w", encoding="utf-8", newline="").write(NL.join(lines))
-        return True
-
-    dropped = []
-    for rel, name in bp_names:
-        if drop_module(root / rel, name):
-            dropped.append(name)
-    msgs.append("从 Android.bp 删掉模块 " + "/".join(dropped)
-                if dropped else "Android.bp 已是干净的")
-
-    return " · ".join(msgs)
-
-
-def patch_v4l2_initial_output(tree: pathlib.Path) -> str:
-    """—— 修补 5：v4l2_codec2 在拿到 SOURCE_CHANGE 之前就想建输出队列 ——
-
-    症状（修补 3 之后暴露出来的下一层）：
-        V4L2Decoder: ioctl() failed: VIDIOC_G_FMT
-        V4L2Decoder: Failed to start initialy output queue
-        V4L2DecodeComponent: Failed to create V4L2Decoder for H264
-
-    venus 在客户端订阅了 SOURCE_CHANGE、事件还没到时拒绝 CAPTURE 队列的 G_FMT
-    （vdec_check_src_change() 返回 -EINVAL）；本仓的 iris 用 kernel/iris/0003
-    （venus_compat_gfmt=Y，默认）照做。V4L2 stateful 解码器规范并不要求这样做：
-    事件之前 CAPTURE 的格式只是还不描述码流，拒绝是驱动自己的选择。iris 不拒绝时
-    （venus_compat_gfmt=N），HAL 会在码流头之前按 128x128 开启 CAPTURE 队列，gen1
-    固件解 H.264 / HEVC 时随即报致命错误，所以 Y 必须保留。
-
-    v4l2_codec2 的 setupInitialOutput() 在喂任何码流之前就建一个最小的输出队列，
-    只为第一个 SOURCE_CHANGE 之前的 drain 备一个 EOS 缓冲区（ChromeOS/ARCVM 的优化）。
-    在这类驱动上它必然建不起来，所以：
-      · start() 里改成失败不致命：真正的输出队列本来就在分辨率变更事件里建
-        （changeResolution() -> startOutputQueue()）；
-      · setupInitialOutput() 在设好最小 CAPTURE 格式之后先问一次 G_FMT(CAPTURE)，
-        EINVAL 时只记一行 INFO 并返回成功，不再每次启动都打两行 E 和一行 W。
-        到这一步为止驱动看到的 ioctl 与原来相同，只是不再接着查询 MIN_BUFFERS_FOR_CAPTURE。
-
-    ★ 安全性判据：`mInitialEosBuffer` 的每一处使用都已经有空指针判断（A17 V4L2Decoder.cpp
-      的 112 / 369 / 448 / 743 行），"它是空"本来就是被支持的状态：
-        · 369 提前判 DRC —— 跳过后 mPendingDRC 保持 false，只是少一个优化；
-        · 448 "没有码流就直接结束 drain" —— 是 ARCVM 特有的捷径，
-          不走它就落到 `sendV4L2DecoderCmd(false)`，那才是标准的 V4L2 drain；
-        · 112 / 743 是清理。
-    旧版修补 5（只把 start() 改成失败不致命）打过的树也会被改成新版。
-    """
-    p = tree / "external/v4l2_codec2/v4l2/V4L2Decoder.cpp"
-    h = tree / "external/v4l2_codec2/v4l2/include/v4l2_codec2/v4l2/V4L2Decoder.h"
-    if not p.exists() or not h.exists():
-        return f"✗ 找不到 {p} 或 {h}"
-    s = io.open(p, encoding="utf-8").read()
-    hs = io.open(h, encoding="utf-8").read()
-    NL = chr(10)
-    marker = "初始输出队列只为第一个 SOURCE_CHANGE 事件之前的 drain"
-    probe_marker = "Driver reports the CAPTURE format only after the first SOURCE_CHANGE event"
-    h_old = ("    // drain done signaling." + NL + "    bool setupInitialOutput();")
-    h_new = ("    // drain done signaling. Returns true without allocating them when the driver" + NL
-             + "    // reports the CAPTURE format only after the first SOURCE_CHANGE event." + NL
-             + "    bool setupInitialOutput();")
-    if marker in s and probe_marker in s and "#include <errno.h>" in s and h_new in hs:
-        return "已打过（幂等，无需改动）"
-    start_new = (
-        "    // 初始输出队列只为第一个 SOURCE_CHANGE 事件之前的 drain 提供 EOS 缓冲区。" + NL
-        + "    // 建不起来不致命：事件到达时会重新建立 CAPTURE 队列，且 mInitialEosBuffer" + NL
-        + "    // 的每一处使用都有空指针判断。" + NL
-        + "    if (!setupInitialOutput()) {" + NL
-        + '        ALOGW("Failed to set up the initial output queue, continuing without the initial EOS "' + NL
-        + '              "buffer");' + NL
-        + "    }"
-    )
-    upstream_start = ('    if (!setupInitialOutput()) {' + NL
-                      + '        ALOGE("Unable to setup initial output");' + NL
-                      + '        return false;' + NL
-                      + '    }')
-    old5_start = (
-        "    // venus 在收到 SOURCE_CHANGE 之前会拒绝 CAPTURE 队列的 G_FMT" + NL
-        + "    // （vdec_check_src_change() 返回 -EINVAL），这是 V4L2 stateful 规范" + NL
-        + "    // 要求的顺序，不是驱动缺陷。所以这个「预先建最小输出队列」的" + NL
-        + "    // ChromeOS 优化在本平台必然失败 —— 失败不致命：真正的输出队列" + NL
-        + "    // 会在分辨率变更事件里建起来，且 mInitialEosBuffer 的每一处使用" + NL
-        + "    // 都已有空指针判断。" + NL
-        + "    if (!setupInitialOutput()) {" + NL
-        + '        ALOGW("Unable to setup initial output up front; the driver wants a '
-          'SOURCE_CHANGE event first. Continuing without the initial EOS buffer.");' + NL
-        + "    }"
-    )
-    if marker not in s:
-        if upstream_start in s:
-            s = s.replace(upstream_start, start_new, 1)
-        elif old5_start in s:
-            s = s.replace(old5_start, start_new, 1)
-        else:
-            return "⚠️ 找不到锚点，上游可能改了 start()"
-    if probe_marker not in s:
-        probe_anchor = ('    if (!startOutputQueue(1, V4L2_MEMORY_DMABUF)) {' + NL
-                        + '        ALOGE("Failed to start initialy output queue");')
-        if s.count(probe_anchor) != 1:
-            return "⚠️ 找不到 setupInitialOutput() 里的锚点"
-        probe = (
-            "    // venus（以及 venus_compat_gfmt=Y 的 iris）在第一个 SOURCE_CHANGE 事件之前" + NL
-            + "    // 以 EINVAL 拒绝 VIDIOC_G_FMT(CAPTURE)，这时没有初始输出队列。" + NL
-            + "    struct v4l2_format format;" + NL
-            + "    memset(&format, 0, sizeof(format));" + NL
-            + "    format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;" + NL
-            + "    if (mDevice->ioctl(VIDIOC_G_FMT, &format) != 0 && errno == EINVAL) {" + NL
-            + '        ALOGI("Driver reports the CAPTURE format only after the first SOURCE_CHANGE event, "' + NL
-            + '              "starting without the initial EOS buffer");' + NL
-            + "        return true;" + NL
-            + "    }" + NL + NL
-        )
-        s = s.replace(probe_anchor, probe + probe_anchor, 1)
-    if "#include <errno.h>" not in s:
-        inc = "#include <stdint.h>" + NL
-        if s.count(inc) != 1:
-            return "⚠️ 找不到 #include <stdint.h>"
-        s = s.replace(inc, "#include <errno.h>" + NL + inc, 1)
-    if h_new not in hs:
-        if hs.count(h_old) != 1:
-            return "⚠️ 找不到 V4L2Decoder.h 里 setupInitialOutput() 的注释"
-        hs = hs.replace(h_old, h_new, 1)
-        io.open(h, "w", encoding="utf-8", newline="").write(hs)
-    io.open(p, "w", encoding="utf-8", newline="").write(s)
-    return "已改为失败不致命，驱动推迟 CAPTURE 格式时只记一行 INFO"
-
-
-def patch_disable_desktop_mode(tree: pathlib.Path) -> str:
-    """—— 修补 6：关掉 crDroid 给所有设备开的桌面窗口模式 ——
-
-    用户要求关掉：这台平板上它会把每个应用都放进 freeform 窗口，日用很干扰。
-
-    ⚠️★ **不能只在设备树的 overlay 里写 false —— 实测那样【无效】。**
-      两次构建断言都顶回来 `config_isDesktopModeSupported 还是 true`：
-
-        device/huawei/gaokun3/overlay/...        false   (DEVICE_PACKAGE_OVERLAYS)
-        vendor/lineage/overlay/common/...        true    (PRODUCT_PACKAGE_OVERLAYS)
-
-      **胜出的是 vendor/lineage 那份。** 也就是说在这棵树里
-      `PRODUCT_PACKAGE_OVERLAYS` 的优先级【高于】`DEVICE_PACKAGE_OVERLAYS`
-      —— 与"设备树优先"的常见说法相反。我们别的 overlay 值之所以一直好用，
-      只是因为 vendor/lineage 没碰它们（逐个比对过，只有这一个资源冲突）。
-
-    ⇒ 所以直接改胜出的那份。repo sync 会还原它，故本脚本每次构建前都要跑。
-
-    ★ 顺带记一条被推翻的判断：上游参考（dragon-lineage 的 Radxa Dragon
-      提交 d480d02）**只**设 config_canInternalDisplayHostDesktops，那对
-      Lineage 系的树是**正确且充分**的 —— 因为 Lineage 自己已经把
-      config_isDesktopModeSupported 设成 true 了。只查 AOSP 默认值（false）
-      而不查 ROM 自己的 overlay，就会得出"他们漏了一个"的错误结论。
-
-    A17：crDroid 17.0 的 vendor/lineage（= android_vendor_crdroid@17.0）照旧在
-    overlay/common/frameworks/base/core/res/res/values/config.xml:98 写 true。
-    ⚠️ A17 的桌面模式是否还有别的开关（aconfig flag 等）能绕过这个资源，没核实 —— 上机看一眼应用是不是还进 freeform。
-    """
-    p = tree / "vendor/lineage/overlay/common/frameworks/base/core/res/res/values/config.xml"
-    if not p.exists():
-        return f"✗ 找不到 {p}"
-    s = io.open(p, encoding="utf-8").read()
-    old = '<bool name="config_isDesktopModeSupported">true</bool>'
-    new = '<bool name="config_isDesktopModeSupported">false</bool>'
-    if new in s:
-        return "已是 false（幂等，无需改动）"
-    if old not in s:
-        return "⚠️ 找不到锚点，crDroid 可能改了写法"
-    s = s.replace(old, new, 1)
-    io.open(p, "w", encoding="utf-8", newline="").write(s)
-    return "已把 crDroid 的 config_isDesktopModeSupported 改成 false"
-
-
-def apply_patch_file(tree: pathlib.Path, project: str, patch_name: str,
-                     covered_by: tuple = ()) -> str:
-    """把 <repo>/patches/<patch_name> 用 git apply 打进 AOSP 树的 <project>（幂等）。
-
-    ★ 为什么要有这个助手：本仓 `patches/android/` 里的 **AOSP 侧**补丁（
-    hardware-interfaces/0001–0012 audio HAL、v4l2-codec2/0001–0021、tinyalsa/0001、drm-hwcomposer/0001–0005）
-    原先**没有任何消费者** —— 全靠人手动
-    `git apply`。而本仓已经为"没有消费者的配置一定会漂"付过三次账
-    （M13 的 BOARD_KERNEL_CMDLINE、M17 的上游 Venus 补丁集、以及 2026-09-12
-    抢救回来的那一整批 08-24 工作）。内核那边有 kernel-apply-patches.sh，
-    AOSP 这边的消费者就是本脚本。
-
-    幂等判据用 `git apply --check -R`（反向能打上 = 已经在树里了）。
-    ⚠️ 与 kernel-apply-patches.sh 不同，这里**不接受 fuzz** —— AOSP 树是
-    repo sync 出来的干净树，打不上就是上游动了，应当大声报错而不是模糊匹配。
-
-    covered_by：排在后面、改到同一段上下文的补丁（例如 hardware-interfaces/0006 改了 0004 加的那几行附近）。
-    它们打上之后，本补丁正反两个方向都对不上 —— 2026-10-04 重跑时 [15] 就这样报了"打不上"，
-    而 0004 的 42 行其实一行不缺。这时把涉及的文件拷到临时目录、先撤掉这些后续补丁，
-    再对本补丁做反向检查：过了才算"已打过"。不是放宽判据，判的仍是"本补丁确实在树里"。
-    """
-    repo = pathlib.Path(__file__).resolve().parent.parent
-    patch = repo / "patches" / patch_name
-    if not patch.exists():
-        return f"⚠️ 找不到补丁 {patch}"
-    proj = tree / project
-    if not (proj / ".git").exists():
-        # 这里打补丁的项目（v4l2_codec2 / tinyalsa_new / hardware/interfaces）在 17.0 树里都一定有 ⇒ 缺了算失败
-        return f"✗ {project} 不存在或不是 git 仓库"
-
-    def git(*args):
-        return subprocess.run(["git", "-C", str(proj), *args],
-                              capture_output=True, text=True)
-
-    if git("apply", "--check", "-R", str(patch)).returncode == 0:
-        return "已打过（幂等，无需改动）"
-    later = [repo / "patches" / n for n in covered_by]
-    # 不能先逐个反向检查 later：later 之间也可能叠着改同一段（drm-hwcomposer/0002 之后的 0003），前面的单独撤不掉。
-    if later and _applied_under(proj, patch, later):
-        return "已打过（上下文被 " + "、".join(covered_by) + " 改过，撤掉它们后反向检查通过）"
-    chk = git("apply", "--check", str(patch))
-    if chk.returncode != 0:
-        return "✗ 打不上（既不是已应用、也不干净）：" + chk.stderr.strip().splitlines()[0] if chk.stderr.strip() else "✗ 打不上"
-    r = git("apply", str(patch))
-    if r.returncode != 0:
-        return "✗ 应用失败：" + (r.stderr.strip().splitlines()[0] if r.stderr.strip() else "?")
-    return f"已应用 {patch_name}"
-
-
-def _applied_under(proj: pathlib.Path, patch: pathlib.Path, later: list) -> bool:
-    """在临时目录里：拷出涉及的文件 → 依次（倒序）撤掉 later → 对 patch 做反向检查。不碰 proj 本身。"""
-    paths = set()
-    for p in [patch, *later]:
-        r = subprocess.run(["git", "-C", str(proj), "apply", "--numstat", str(p)],
+    if branch:
+        ref = f"refs/remotes/m/{branch}"
+        r = subprocess.run(["git", "-C", str(proj), "rev-parse", "-q", "--verify", ref + "^{commit}"],
                            capture_output=True, text=True)
-        paths |= {line.split("\t")[2] for line in r.stdout.splitlines() if line.count("\t") >= 2}
-    with tempfile.TemporaryDirectory() as tmp:
-        for rel in paths:
-            src = proj / rel
-            if src.exists():
-                (pathlib.Path(tmp) / rel).parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(src, pathlib.Path(tmp) / rel)
-
-        def git_tmp(*args):
-            # 临时目录不在任何仓库里，git apply 按普通补丁处理文件
-            return subprocess.run(["git", "apply", *args], cwd=tmp, capture_output=True, text=True)
-
-        for l in reversed(later):
-            if git_tmp("-R", str(l)).returncode != 0:
-                return False
-        return git_tmp("--check", "-R", str(patch)).returncode == 0
+        if r.returncode:
+            raise Failed(f"缺少清单版本引用{ref}，请先执行repo sync")
+        return ref
+    refs = git(proj, "for-each-ref", "--format=%(refname)", "refs/remotes/m/").split()
+    if len(refs) != 1:
+        raise Failed(f"无法确定清单版本：{why}，refs/remotes/m/下有{len(refs)}个引用")
+    return refs[0]
 
 
-def patch_connected_displays_flag(tree: pathlib.Path) -> str:
-    """—— 修补 11：关掉 status_bar_connected_displays 这个 aconfig flag ——
+def changed_paths(proj, base, want, added_only=False):
+    """清单版本与预期的树之间有差别的路径（added_only时只列新增的路径）。"""
+    args = ["diff-tree", "-r", "-z", "--no-renames", "--name-only"]
+    if added_only:
+        args.append("--diff-filter=A")
+    return [p for p in git(proj, *args, base, want).split("\0") if p]
 
-    **这条的立项理由从来没有被记录下来。** 它是 2026-09-12 从构建机上
-    抢救回来的一处未提交改动（`build/release` 项目），当时那一轮（08-24）
-    的详细记录缺失。本条注释是现存的全部说明。
 
-    已知的事实（不是推测）：
-      * flag 名 `com.android.systemui.shared/status_bar_connected_displays`，
-        构建机把 `state: ENABLED` 改成了 `DISABLED`。
-      * 本机的 USB-C 外接显示**一直不工作**（UCSI 有缺陷，`/sys/class/typec/`
-        为空，见 TODO A6）。一个"连接外部显示器时改变状态栏行为"的功能，
-        在没有可用外接显示的机器上打开，合理推测是有害无益的。
-    ⚠️ 但**"合理推测"不是证据** —— 如果将来 A6 修好了外接显示，
-    应当先把这条去掉再验一次，别让它变成又一条没人敢动的祖传配置。
+def expected_tree(proj, base, patches, tmp):
+    """在临时索引中算出“清单版本＋全部补丁”的树，不改动工作区。"""
+    index = tmp / "expected"
+    git(proj, "read-tree", base, index=index)
+    for p in patches:
+        try:
+            git(proj, "apply", "--cached", str(p), index=index)
+        except Failed as e:
+            raise Failed(f"{p.name}无法应用到清单版本（{e}）")
+    return git(proj, "write-tree", index=index)
 
-    ★ A17：**上游已经把这个 flag 删了**（构建机 17.0 树：frameworks/libs/systemui 提交 ab3c44e、
-      frameworks/base 提交 c6b29cd899a0，标题都是 "Flag removal: com.android.systemui.status_bar_connected_displays"；
-      frameworks/libs/systemui/aconfig/*.aconfig 里已经没有它的声明）。按 Android 的惯例 "Flag removal" =
-      功能转正、永久打开（这一点没逐行核实）。build/release 里残留的值文件
-      （aconfig/bp4a/com.android.systemui.shared/status_bar_connected_displays_flag_values.textproto）
-      aconfig 会悄悄跳过：未声明的 flag 不报错（build/make/tools/aconfig/aconfig/src/commands.rs:297-303）。
-      ⇒ 先查声明：没有声明就报"已废弃（A17）"、什么都不改；外接显示（TODO A6）修好时要验状态栏在外屏上的表现。
-    ★ 声明还在时（例如以后上游又加回来），值文件**不再写死 bp4a**，而是沿 TARGET_RELEASE 的继承链去找
-      实际生效的那一份 —— 见 _release_aconfig_value_sets()。A17 的 cp2a 链上（cp2a → mainline_2026_04 → … →
-      cp1a → bp4a → …）只有 bp4a 那一份，但只要以后 cp* 自己覆盖了这个 flag，写死 bp4a 就会悄悄失效。
+
+def worktree_tree(proj, created, tmp):
+    """工作区（含未跟踪文件，不含被忽略的文件）对应的树。
+
+    复制项目自己的索引再git add -A：索引中的文件状态信息仍然有效，只有改动过的文件需要重新读取。
+    复制时保留索引文件的修改时间，git才能识别与索引同一秒写入的改动。
+    补丁新建的文件即使被忽略规则匹配，也要计入。
     """
-    pkg, flag = "com.android.systemui.shared", "status_bar_connected_displays"
-    # 1) flag 还在不在：com.android.systemui.shared 包声明在 frameworks/libs/systemui/aconfig/（A17 两个 .aconfig 文件第 1 行）
-    decl_dir = tree / "frameworks/libs/systemui/aconfig"
-    decls = [io.open(f, encoding="utf-8").read() for f in sorted(decl_dir.glob("*.aconfig"))]
-    pkg_decls = [d for d in decls if re.search(r'^package:\s*"%s"' % re.escape(pkg), d, re.M)]
-    if not pkg_decls:
-        return f"✗ {decl_dir} 里找不到 package {pkg} 的声明，判不出这个 flag 还在不在"
-    if not any(re.search(r'^\s*name:\s*"%s"' % flag, d, re.M) for d in pkg_decls):
-        return ("已废弃（A17）：上游删掉了 " + pkg + "/" + flag
-                + "（功能常开），build/release 里残留的值文件 aconfig 会忽略；什么都没改")
-    # 2) 声明还在：沿继承链找实际生效的值文件
-    release, src = _target_release(tree)
-    if not release:
-        return "✗ 定不了 TARGET_RELEASE（没有环境变量，也读不到 vendor/lineage/vars/aosp_target_release）"
-    try:
-        sets = _release_aconfig_value_sets(tree, release)
-    except ValueError as e:
-        return f"✗ 解析 release config {release} 失败：{e}"
-    hit = None
-    for set_name, set_dir in reversed(sets):   # aconfig 的 --values 是后者覆盖前者，所以从后往前找第一份
-        for f in sorted((set_dir / pkg).glob("*_flag_values.textproto")):
-            s = io.open(f, encoding="utf-8").read()
-            for m in re.finditer(r"flag_value\s*\{[^}]*\}", s):
-                if (re.search(r'package:\s*"%s"' % re.escape(pkg), m.group(0))
-                        and re.search(r'name:\s*"%s"' % flag, m.group(0))):
-                    hit = (f, s, m)
-                    break
-            if hit:
-                break
-        if hit:
-            break
-    if not hit:
-        return (f"⚠️ {release}（来自 {src}）的 {len(sets)} 个 aconfig_value_set 里都没有 {flag} 的值文件，"
-                "要另加一份")
-    f, s, m = hit
-    block = m.group(0)
-    where = f.relative_to(tree)
-    if "state: DISABLED" in block:
-        return f"已是 DISABLED（幂等，无需改动；{where}）"
-    if "state: ENABLED" not in block:
-        return f"⚠️ {where} 里既不是 ENABLED 也不是 DISABLED，上游可能改了格式"
-    s = s[:m.start()] + block.replace("state: ENABLED", "state: DISABLED", 1) + s[m.end():]
-    io.open(f, "w", encoding="utf-8").write(s)
-    return f"ENABLED -> DISABLED（{where}，TARGET_RELEASE={release}）"
+    index = tmp / "worktree"
+    real = proj / git(proj, "rev-parse", "--git-path", "index")  # 相对于项目目录，或已是绝对路径
+    if real.exists():
+        shutil.copy2(real, index)
+    else:
+        git(proj, "read-tree", "HEAD", index=index)
+    git(proj, "add", "-A", index=index)
+    present = [c for c in created if (proj / c).is_file()]
+    if present:
+        git(proj, "add", "-f", "--", *present, index=index)
+    return git(proj, "write-tree", index=index)
 
 
-def _target_release(tree: pathlib.Path):
-    """TARGET_RELEASE：lunch 过就用环境变量；否则用 brunch 的默认值
-    vendor/lineage/vars/aosp_target_release（A17 = cp2a；vendor/lineage/build/envsetup.sh:47、:62 拿它拼 lunch 目标）。"""
-    env = os.environ.get("TARGET_RELEASE", "").strip()
-    if env:
-        return env, "环境变量 TARGET_RELEASE"
-    p = tree / "vendor/lineage/vars/aosp_target_release"
-    if p.exists():
-        m = re.search(r"^aosp_target_release=(\S+)", io.open(p, encoding="utf-8").read(), re.M)
-        if m:
-            return m.group(1), "vendor/lineage/vars/aosp_target_release"
-    return None, None
+def snapshot(proj, paths):
+    """记下这些文件的修改时间与内容摘要。"""
+    snap = {}
+    for rel in set(paths):
+        f = proj / rel
+        if f.is_file():
+            snap[rel] = (f.stat().st_mtime_ns, hashlib.sha256(f.read_bytes()).digest())
+    return snap
 
 
-def _release_aconfig_value_sets(tree: pathlib.Path, release: str, variant: str = "") -> list:
-    """按 release config 的规则算出 RELEASE_ACONFIG_VALUE_SETS：[(value_set 名, 目录), …]，前者先生效、后者覆盖。
-
-    照着 A17 的实现抄的（不是猜的）：
-      * 参与的 release_config_map：build/release，再加 device/*/release、device/*/*/release、vendor/*/release、
-        vendor/*/*/release（按路径排序）—— build/make/core/release_config.mk:53-63。
-        （PRODUCT_RELEASE_CONFIG_MAPS 另加的 build/release/gms_mainline/required 等只有 name、没有 aconfig_value_sets，不影响结果。）
-      * 每个 map 目录下 release_configs/<名>.textproto 是对同名 config 的一份"贡献"（A17 cp2a 有两份：
-        build/release 与 vendor/lineage/release）；map 里的 aliases 把别名指到真名。
-      * 一个 config 的列表 = 先按 inherits 顺序依次展开被继承的 config（有 root 就先放 root），再接上自己各份贡献的
-        aconfig_value_sets；最后去重、保留第一次出现的位置 —— build/soong/cmd/release_config/release_config_lib/
-        release_config.go:230-261（继承）、:283-290（接上自己的）、:389-398（去重）、:186-192（InheritConfig 拼接）。
-      * 接完自己的之后，若 build flag RELEASE_BUILD_USE_VARIANT_FLAGS 为真（自己的 <map>/flag_values/<名>/ 里设的，
-        或从被继承的 config 带下来的），再继承一次构建变体同名的 BUILD_VARIANT config（userdebug / user / eng）——
-        release_config.go:359-386。A17 是 bp3a 打开的（build/release/flag_values/bp3a/RELEASE_BUILD_USE_VARIANT_FLAGS.textproto），
-        所以 cp2a 的列表里 userdebug 排在 bp3a 与 bp4a 之间。
-      * 2026-10-25 对过构建机 17.0 树 lunch 出来的 out/soong/release-config/release_config-lineage_gaokun3-cp2a.varmk：
-        RELEASE_ACONFIG_VALUE_SETS 共 14 项，与本函数算出来的逐项一致（maps_list 里也只有 build/release 与 vendor/lineage/release）。
-      * aconfig_value_set 名 → 目录：<map>/aconfig/<子目录>/Android.bp 里的 aconfig_value_set { name: … }，
-        值文件在 <子目录>/<包名>/*_flag_values.textproto（例如 build/release/aconfig/bp4a/Android.bp）。
-      * 同一个 flag 多份值：aconfig create-cache 按 --values 顺序后者覆盖前者（aconfig/src/commands.rs:285-325），
-        --values 的顺序就是上面这个列表（build/soong/aconfig/aconfig_declarations.go:93-97、:148-163）。
-    任何一步对不上都抛 ValueError（严格模式：宁可报错，也不悄悄改错文件）。
-    """
-    map_dirs = [tree / "build/release"]
-    extra = []
-    for pat in ("device/*/release", "device/*/*/release", "vendor/*/release", "vendor/*/*/release"):
-        extra += [d for d in tree.glob(pat) if (d / "release_config_map.textproto").exists()]
-    map_dirs += sorted(set(extra), key=lambda d: str(d.relative_to(tree)))
-    if not (map_dirs[0] / "release_config_map.textproto").exists():
-        raise ValueError("找不到 build/release/release_config_map.textproto")
-
-    # 构建变体：lunch 过就用 TARGET_BUILD_VARIANT；否则按本机唯一用的 lineage_gaokun3-cp2a-userdebug
-    variant = variant or os.environ.get("TARGET_BUILD_VARIANT", "").strip() or "userdebug"
-    aliases, inherits, own_sets, set_dirs, rc_type, own_uv = {}, {}, {}, {}, {}, {}
-    for d in map_dirs:
-        mtxt = io.open(d / "release_config_map.textproto", encoding="utf-8").read()
-        for a in re.finditer(r'aliases\s*:?\s*\{\s*name:\s*"([^"]+)"\s*target:\s*"([^"]+)"', mtxt):
-            aliases[a.group(1)] = a.group(2)
-        for rc in sorted((d / "release_configs").glob("*.textproto")):
-            t = io.open(rc, encoding="utf-8").read()
-            nm = re.search(r'^name:\s*"([^"]+)"', t, re.M)
-            if not nm:
-                continue
-            name = nm.group(1)
-            inherits.setdefault(name, []).extend(re.findall(r'^inherits:\s*"([^"]+)"', t, re.M))
-            own_sets.setdefault(name, []).extend(re.findall(r'^aconfig_value_sets:\s*"([^"]+)"', t, re.M))
-            ty = re.search(r'^release_config_type:\s*(\w+)', t, re.M)
-            if ty:
-                rc_type[name] = ty.group(1)
-            uvf = d / "flag_values" / name / "RELEASE_BUILD_USE_VARIANT_FLAGS.textproto"
-            if uvf.exists():
-                bv = re.search(r'bool_value:\s*(true|false)', io.open(uvf, encoding="utf-8").read())
-                if not bv:
-                    raise ValueError(f"{uvf.relative_to(tree)} 不是 bool_value，看不懂")
-                own_uv[name] = bv.group(1) == "true"
-        for bp in sorted((d / "aconfig").glob("*/Android.bp")):
-            for n in re.findall(r'aconfig_value_set\s*\{\s*name:\s*"([^"]+)"', io.open(bp, encoding="utf-8").read()):
-                set_dirs[n] = bp.parent
-
-    def real(name):
-        seen = set()
-        while name in aliases and name not in seen:
-            seen.add(name)
-            name = aliases[name]
-        return name
-
-    memo, busy, uv_of = {}, set(), {}
-
-    def expand(name):
-        name = real(name)
-        if name in memo:
-            return memo[name]
-        if name not in own_sets:
-            raise ValueError(f"没有 release config {name}")
-        if name in busy:
-            raise ValueError(f"release config 继承成环：{name}")
-        busy.add(name)
-        out, done, uv = [], set(), None
-        for i in (["root"] if "root" in own_sets and name != "root" else []) + inherits[name]:
-            if i in done:
-                continue
-            done.add(i)
-            out += expand(i)
-            if uv_of.get(real(i)) is not None:      # 后继承的覆盖先继承的（InheritConfig :193-197）
-                uv = uv_of[real(i)]
-        out += own_sets[name]
-        if name in own_uv:
-            uv = own_uv[name]
-        if (uv and rc_type.get(name, "RELEASE_CONFIG") == "RELEASE_CONFIG" and name != variant
-                and rc_type.get(variant) == "BUILD_VARIANT"):
-            out += expand(variant)
-        uv_of[name] = uv
-        busy.discard(name)
-        memo[name] = out
-        return out
-
-    result, seen = [], set()
-    for v in expand(release):
-        if v in seen:
-            continue
-        seen.add(v)
-        if v not in set_dirs:
-            raise ValueError(f"aconfig_value_set {v} 找不到定义它的 Android.bp")
-        result.append((v, set_dirs[v]))
-    return result
+def keep_mtimes(proj, snap):
+    """内容与恢复前相同的文件，改回原来的修改时间。"""
+    for rel, (mtime, digest) in snap.items():
+        f = proj / rel
+        if f.is_file() and hashlib.sha256(f.read_bytes()).digest() == digest:
+            os.utime(f, ns=(f.stat().st_atime_ns, mtime))
 
 
-def patch_wifi_sw_pno_gate(tree: pathlib.Path) -> str:
-    """—— 修补 18：软件 PNO 只看 overlay 的 config_wifiSwPnoEnabled，不再看 DeviceConfig ——
-
-    v1.0 NET-1（2026-10-05，TODO V3）。息屏且 Wi-Fi 断开时 Android 只靠 PNO 找回网络；ath11k 没有
-    sched_scan（实机 iw phy 里没有 start_sched_scan），硬件 PNO 不可用 ⇒ 要软件 PNO。
-    设备树 rro/Gaokun3WifiOverlay 已把 config_wifiSwPnoEnabled 设成 true（ff4a5a4），但 1.0.0-dev.1 上
-    `dumpsys wifi` 里仍看不到软件 PNO：WifiScanningServiceImpl 的 StartedState 还要第二道门 ——
-
-        } else if (mWifiGlobals.isSwPnoEnabled()
-                && mDeviceConfigFacade.isSoftwarePnoEnabled()) {
-
-    （crDroid 17.0 / A17：scanner/WifiScanningServiceImpl.java:2695-2696（16.0 是 :2676-2677）；
-      isSoftwarePnoEnabled() = DeviceConfig wifi/software_pno_enabled，DeviceConfigFacade.java:407-408、:885-886，
-      默认 false。）实机 `device_config get wifi software_pno_enabled` = false，而且是**显式下发**的值
-    （list 里有这一项）—— 多半是 GMS Phenotype 推的，所以改默认值没用，只能去掉这道门。
-    ⇒ 把条件改成只看 mWifiGlobals.isSwPnoEnabled()（= overlay 的 config_wifiSwPnoEnabled，A17 WifiGlobals.java:589-592）。
-      不碰 DeviceConfigFacade：别处没有用 isSoftwarePnoEnabled()（A17 的 service/java 里 grep 只有这一处调用），
-      dumpsys 里那个值照旧如实显示。isPnoSupported()（A17 WifiServiceImpl.java:8655-8658）本来就只看 isSwPnoEnabled()，不用改。
-
-    ⚠️ 还没在构建机上确认的一条：com.android.wifi APEX 是从源码编的（不是预编译的 Google 模块 —— 那样改源码不进镜像；
-       Play 系统更新也换不掉它：包名 / 签名都不同）。
-    上机判据（V9 / V13）：`dumpsys wifi` 里 PNO 失败不再是 "reason: -3 not supported"，mPnoScanMetrics 的
-      numPnoScanAttempts 开始增长；息屏但醒着时让 AP 断开再恢复，2 分钟内自动回连。
-    ⓘ 耗电（V13 问的"SwPnoScanState 用什么闹钟"，上游副本里查到了）：schedulePnoTimer 用
-      setExactAndAllowWhileIdle(ELAPSED_REALTIME_WAKEUP, …)（A17 WifiScanningServiceImpl.java:3001、:3011）⇒ 会把机器从
-      s2idle 叫醒去扫。次数有上限：默认 config_wifiSwPnoFastTimerMs=300000 × 3 次、SlowTimerMs=1200000 × 10 次
-      （另有 MobilityStateTimerIterations=2；A17 ServiceWifiResources config.xml:740-761），之后不再排程 ——
-      只在"息屏 + 断网"时才有，批 4 量一次待机电流。
-    ⚠️ 写法：正则只容忍空白差异；找不到锚点就报 ⚠️（step() 记为失败、整个脚本退 1），不会悄悄跳过。
-    """
-    p = (tree / "packages/modules/Wifi/service/java/com/android/server/wifi/scanner"
-              / "WifiScanningServiceImpl.java")
-    if not p.exists():
-        # 与 [4] 那类"树里本来就可能没有"的项目不同：Wi-Fi 模块一定在，找不到只能是上游挪了文件 ⇒ 算失败
-        return f"⚠️ 找不到 {p}，上游可能挪了文件"
-    s = io.open(p, encoding="utf-8").read()
-    marker = "gaokun3 tree-fix [18]"
-    if marker in s:
-        return "已改（幂等，无需改动）"
-    pat = re.compile(r"\}(\s*)else if \(mWifiGlobals\.isSwPnoEnabled\(\)\s*"
-                     r"&&\s*mDeviceConfigFacade\.isSoftwarePnoEnabled\(\)\)\s*\{")
-    hits = pat.findall(s)
-    if len(hits) != 1:
-        return f"⚠️ 锚点（isSwPnoEnabled() && isSoftwarePnoEnabled()）出现 {len(hits)} 次（应为 1），上游可能改了写法"
-    # 插进 Java 的注释只用 ASCII：不赌 javac 的源码编码设置
-    s = pat.sub(lambda m: ("}" + m.group(1) + "else if (mWifiGlobals.isSwPnoEnabled()) {  // " + marker
-                           + ": ignore DeviceConfig wifi/software_pno_enabled (GMS pushes false);"
-                           + " see gaokun-android scripts/crdroid-tree-fixes.py"),
-                s, count=1)
-    io.open(p, "w", encoding="utf-8", newline="").write(s)
-    return "已去掉软件 PNO 的 DeviceConfig 门（只看 config_wifiSwPnoEnabled）"
-
-
-def patch_wifi_stable_factory_mac(tree: pathlib.Path) -> str:
-    """—— 修补 19：Wi-Fi HAL 的"出厂 MAC"改成由 SoC 序列号派生的稳定本地管理地址 ——
-
-    2026-10-05 构建机 crDroid 树核实。本机 WCN6855 板子上没烧 MAC：固件每次开机给一个
-    00:03:7f:12:xx:xx（只有后两字节随机），ath11k 拿它当 perm_addr。
-    框架拿"出厂 MAC"的链路（行号是 crDroid 17.0 / A17 的）：ClientModeImpl.retrieveFactoryMacAddressAndStoreIfNecessary（:8351）
-      → WifiNative.getStaFactoryMacAddress（:2616）→ WifiVendorHal.getStaFactoryMacAddress（:989）
-      → HAL IWifiStaIface.getFactoryMacAddress → WifiIfaceUtil::getFactoryMacAddress
-        （hardware/interfaces/wifi/aidl/default/wifi_iface_util.cpp:54-56）
-      → InterfaceTool::GetFactoryMacAddress = ETHTOOL_GPERMADDR（frameworks/opt/net/wifi/libwifi_system_iface/
-        interface_tool.cpp:144-165），读的是 netdev 的 perm_addr。
-    ⇒ 开机脚本里 `ip link set wlan0 address …` 改不到这一层（只改 dev_addr，不改 perm_addr）：
-       用户选"使用设备 MAC"时框架会在连接前把 MAC 设回 HAL 给的出厂值（ClientModeImpl.setCurrentMacToFactoryMac，
-       :4604）。所以改在 HAL 这一层：WifiIfaceUtil::getFactoryMacAddress 先读
-       /sys/devices/soc0/serial_number（qcom socinfo），对 "gaokun3-wifi-mac:<接口名>:<序列号>" 做 FNV-1a 64，
-       取低 6 字节、置本地管理位、清组播位；读不到序列号就照旧返回 perm_addr。
-       接口名进哈希 ⇒ wlan0 / wlan1（热点）各有一个固定地址、互不相同。
-    SELinux：hal_wifi 已能读所有 sysfs 类型（system/sepolicy/private/hal_wifi.te:11 r_dir_file(hal_wifi, sysfs_type)），不用加规则。
-    A17 锚点（wifi_iface_util.cpp:18 的 macros.h include、:32 的 kMacAddressLocallyAssignedMask、:54-56 的函数体）原样在；
-    HAL 仍链 libbase（wifi/aidl/default/Android.bp:104）。
-    配套：rro/Gaokun3WifiOverlay 把 config_wifiSaveFactoryMacToWifiConfigStore 设成 false —— 默认 true 时框架把
-      【第一次】拿到的出厂 MAC 存进 WifiSettingsConfigStore 永久复用（ClientModeImpl.retrieveFactoryMacAddressAndStoreIfNecessary），
-      老机器存的是当年那个固件随机地址，派生地址就永远用不上。
-    ⚠️ 序列号是 32 位的，派生地址能被穷举反推出序列号 —— 它不是秘密，只是别直接把序列号写进 MAC。
-    上机判据：两次重启后 `cmd wifi status` / Settings「关于」里的 Wi-Fi MAC 相同、首字节第 2 位为 1；
-      某个网络选"使用设备 MAC"后 `ip link show wlan0` 的地址等于它；`cat /sys/devices/soc0/serial_number` 非空。
-    """
-    p = tree / "hardware/interfaces/wifi/aidl/default/wifi_iface_util.cpp"
-    if not p.exists():
-        return f"⚠️ 找不到 {p}，上游可能挪了文件"
-    s = io.open(p, encoding="utf-8").read()
-    marker = "gaokun3 tree-fix [19]"
-    if marker in s:
-        return "已改（幂等，无需改动）"
-    inc = "#include <android-base/macros.h>\n"
-    ns_anchor = ("constexpr uint8_t kMacAddressLocallyAssignedMask = 0x02;\n")
-    fn = re.compile(r"(std::array<uint8_t, 6> WifiIfaceUtil::getFactoryMacAddress\(const std::string& iface_name\) \{\n)"
-                    r"(\s*return iface_tool_\.lock\(\)->GetFactoryMacAddress\(iface_name\.c_str\(\)\);\n\})")
-    if s.count(inc) != 1 or s.count(ns_anchor) != 1 or len(fn.findall(s)) != 1:
-        return "⚠️ wifi_iface_util.cpp 的锚点（include / 掩码常量 / getFactoryMacAddress）不唯一或不在，上游可能改了写法"
-    s = s.replace(inc, inc + "#include <android-base/file.h>\n#include <android-base/strings.h>\n", 1)
-    helper = (
-        "\n// " + marker + ": stable locally-administered \"factory\" MAC derived from the SoC serial\n"
-        "// (board has no programmed MAC; firmware hands out 00:03:7f:12:xx:xx, random every boot).\n"
-        "// See gaokun-android scripts/crdroid-tree-fixes.py.\n"
-        "bool gaokun3StableMac(const std::string& iface_name, std::array<uint8_t, 6>* mac) {\n"
-        "    std::string serial;\n"
-        "    if (!::android::base::ReadFileToString(\"/sys/devices/soc0/serial_number\", &serial)) {\n"
-        "        return false;\n"
-        "    }\n"
-        "    serial = ::android::base::Trim(serial);\n"
-        "    if (serial.empty() || serial == \"0\") return false;\n"
-        "    const std::string key = \"gaokun3-wifi-mac:\" + iface_name + \":\" + serial;\n"
-        "    uint64_t h = 0xcbf29ce484222325ULL;  // FNV-1a 64\n"
-        "    for (unsigned char c : key) {\n"
-        "        h ^= c;\n"
-        "        h *= 0x100000001b3ULL;\n"
-        "    }\n"
-        "    for (size_t i = 0; i < mac->size(); i++) {\n"
-        "        (*mac)[i] = static_cast<uint8_t>(h >> (8 * i));\n"
-        "    }\n"
-        "    (*mac)[0] &= ~kMacAddressMulticastMask;\n"
-        "    (*mac)[0] |= kMacAddressLocallyAssignedMask;\n"
-        "    return true;\n"
-        "}\n")
-    s = s.replace(ns_anchor, ns_anchor + helper, 1)
-    s = fn.sub(lambda m: (m.group(1)
-                          + "    std::array<uint8_t, 6> stable_mac;  // " + marker + "\n"
-                          + "    if (gaokun3StableMac(iface_name, &stable_mac)) return stable_mac;\n"
-                          + m.group(2)), s, count=1)
-    io.open(p, "w", encoding="utf-8", newline="").write(s)
-    return "HAL 出厂 MAC 改为由 soc0/serial_number 派生（读不到就退回 perm_addr）"
-
-
-def patch_wifi_mac_randomization_default(tree: pathlib.Path) -> str:
-    """—— 修补 20：新网络的 MAC 随机化默认值从"每次连接都换"（ALWAYS）改回 AOSP 的 AUTO（按网络固定）——
-
-    v1.0 NET-4 / D14（用户 2026-10-04 定：持久模式 + 稳定的设备 MAC）。2026-10-05 构建机核实（16.0），10-25 按 17.0 复核：
-      * 这个默认值【没有资源可改】：crDroid 带的 GrapheneOS 补丁把字段默认写死成 RANDOMIZATION_ALWAYS（=100）——
-        packages/modules/Wifi 提交 09e2d601ef（17.0；16.0 是 06bc263807）"add option of always randomizing MAC addresses"：
-        framework/java/android/net/wifi/WifiConfiguration.java:1934、
-        service/java/com/android/server/wifi/WifiConfigurationUtil.java:284（比较基准随之改成 ALWAYS）；
-        frameworks/opt/net/wifi 提交 a731178c0（17.0；16.0 是 3bf65d873）：WifiTrackerLib StandardWifiEntry.getPrivacy()
-        无配置时返回 PRIVACY_RANDOMIZATION_ALWAYS（:612）。
-      * ★ 17.0 的变化：**Settings 那半边 GrapheneOS 补丁没有跟过来**。packages/apps/Settings 里已经没有
-        wifi_privacy_entries_ext / "每次连接都换"这一项，连接对话框用的是 AOSP 的 wifi_privacy_entries
-        （WifiConfigController2.java:366；res/values/arrays.xml:1238-1241 只有"随机 MAC / 设备 MAC"两项），
-        新网络停在第 0 项，保存时经 WifiPrivacyPreferenceController2.translatePrefValueToWifiConfigSetting
-        （:120-123）写成 RANDOMIZATION_AUTO ⇒ 16.0 时的第四处（对话框给新网络预选"按网络随机"）**在 17.0 上不需要了**，
-        已删掉；其余三处照旧要改：别的路径（App 的 addNetwork / 建议网络等）建出来的配置仍取字段默认值 ALWAYS。
-    ⇒ 三处一起改回 AOSP 原值（字段默认与比较基准必须成对改，否则普通 App 的 addNetwork 会因"改了随机化设置"
-       被 WifiConfigManager.java:1706-1716（A17）拒掉）：字段默认 AUTO、比较基准 AUTO、无配置时 PRIVACY_RANDOMIZED_MAC。
-       ALWAYS 的框架逻辑一行没删（WifiConfigManager.shouldUseNonPersistentRandomization:558-561）。
-    ⓘ AUTO 的实际行为 = 按网络固定的随机 MAC（WifiConfigManager.shouldUseNonPersistentRandomization:558-597（A17）：
-       只有开放网络 + config_wifiAllowNonPersistentMacRandomizationOnOpenSsids（默认 false）或 SSID 在白名单里才换），
-       地址由 keystore 里的 MacRandSecret 密钥对 SSID 做 HMAC（MacAddressUtil），与出厂 MAC 无关。
-    ⚠️ 只管新加的网络。老用户已保存的网络存的是 ALWAYS，会继续每次连接都换 MAC。没做自动迁移：存储里分不出
-       "用户选的 ALWAYS"和"默认的 ALWAYS"（randomizedMacLastModifiedTimeMs 不落盘，XmlUtil 里没有这个标签）。
-    ⚠️ 17.0 新出的显示问题（上游的，本条不修）：Settings 只把 PRIVACY_RANDOMIZED_MAC 映射成"随机 MAC"
-       （WifiPrivacyPreferenceController2.translateWifiEntryPrivacyToPrefValue:109-112），ALWAYS 的网络会被显示成
-       "使用设备 MAC"，实际却每次连接都换；用户在详情里改选一次"随机 MAC"就会存成 PERSISTENT（StandardWifiEntry:630-631）。
-    上机判据：新连一个 WPA2 网络 → 详情里隐私显示"使用随机 MAC"（按网络）；断开重连 / 重启两次，
-      `ip link show wlan0` 的地址不变且与出厂 MAC 不同；`cmd wifi list-networks` 后 dumpsys 里该网络
-      macRandomizationSetting = 3（AUTO）。
-    """
-    edits = [
-        ("packages/modules/Wifi/framework/java/android/net/wifi/WifiConfiguration.java",
-         re.compile(r"public int macRandomizationSetting = RANDOMIZATION_ALWAYS;"),
-         lambda m: ("public int macRandomizationSetting = RANDOMIZATION_AUTO;"
-                    "  // MARK: AOSP default (was ALWAYS)")),
-        ("packages/modules/Wifi/service/java/com/android/server/wifi/WifiConfigurationUtil.java",
-         re.compile(r"return newConfig\.macRandomizationSetting != WifiConfiguration\.RANDOMIZATION_ALWAYS;"),
-         lambda m: ("return newConfig.macRandomizationSetting != WifiConfiguration.RANDOMIZATION_AUTO;"
-                    "  // MARK: must match the field default")),
-        ("frameworks/opt/net/wifi/libs/WifiTrackerLib/src/com/android/wifitrackerlib/StandardWifiEntry.java",
-         re.compile(r"(\}\s*else\s*\{\s*)return PRIVACY_RANDOMIZATION_ALWAYS;(\s*\})"),
-         lambda m: (m.group(1) + "return PRIVACY_RANDOMIZED_MAC;  // MARK: AOSP default (was ALWAYS)"
-                    + m.group(2))),
-        # 16.0 的第四处（Settings WifiConfigController2 给新网络预选"按网络随机"）17.0 上不需要了，见上面 docstring
-    ]
-    marker = "gaokun3 tree-fix [20]"
-    todo = []
-    for rel, pat, rep in edits:
-        p = tree / rel
-        if not p.exists():
-            return f"⚠️ 找不到 {rel}，上游可能挪了文件"
-        s = io.open(p, encoding="utf-8").read()
-        if marker in s:
-            continue
-        if len(pat.findall(s)) != 1:
-            return f"⚠️ {p.name} 的锚点出现 {len(pat.findall(s))} 次（应为 1），上游可能改了写法；三处都没动"
-        todo.append((p, pat.sub(lambda m: rep(m).replace("MARK", marker), s, count=1)))
-    if not todo:
-        return "已改（幂等，无需改动）"
-    # 先全部核对锚点、再统一写：避免只改了一半（字段默认与比较基准不成对会让 App 的 addNetwork 被拒）
-    for p, s in todo:
-        io.open(p, "w", encoding="utf-8", newline="").write(s)
-    return f"MAC 随机化默认改回 AUTO（改了 {len(todo)} 个文件）"
-
-
-def patch_build_fingerprint_variant_user(tree: pathlib.Path) -> str:
-    """—— 修补 23：BUILD_FINGERPRINT / BUILD_THUMBPRINT / BUILD_SYSTEM_FINGERPRINT 的变体段改写成 user ——
-
-    游戏环境如实修正（Duck Detector 体检 2026-10-10）：把自相矛盾的身份字段改一致，
-    不是伪造硬件证明。同一天的运行时手段（scripts/game-mode.sh identity）已实测
-    只能改属性、改不掉 android.os.Build.FINGERPRINT 常量（zygote 预加载时定死），
-    那三条 Type/property 漂移在运行时消不掉，只有 ROM 级能齐。
-
-    现状（16.0 dev.11 实机 /system/build.prop 与构建机 out/ 一致）：
-      ro.build.type=user              ← soong gen_build_prop.get_build_variant()：
-      ro.system.build.type=user         非 eng 一律按 user 处理（A17 build/soong/scripts/
-      ro.build.flavor=gaokun3-user      gen_build_prop.py:28-32 原样；lineage_gaokun3.mk 注释、#117 §16）
-      ro.build.fingerprint=…:userdebug/release-keys   ← build/make/core/config.mk 的 BUILD_FINGERPRINT
-      ro.system.build.fingerprint=…:userdebug/release-keys
-                                        用 $(TARGET_BUILD_VARIANT)=userdebug 拼尾部
-    ⇒ 半截身份：type 一侧已是 user，fingerprint 一侧还写着 userdebug。Duck Detector
-      的 SystemPropertyConsistencyUtils.buildBuildFingerprintTailSignals 拿
-      Build.FINGERPRINT 的尾部去比 Build.TYPE / ro.build.type，三条全是 WARNING；
-      SystemPropertiesCatalog.suspiciousFingerprintPatterns 还有 "userdebug" 一条，
-      盯 ro.build.fingerprint / ro.system.build.fingerprint / ro.vendor.build.fingerprint
-      / ro.bootimage.build.fingerprint / Build.FINGERPRINT。
-      实测 after1（跑过运行时 identity）：dangerous_apps / root_managers 已转绿，
-      system_properties 的 3 条 danger 全是这个漂移 —— 属性被 resetprop 成 :user/，
-      常量还是 :userdebug/，反而多出一条 "ro.build.fingerprint <> Build.FINGERPRINT"。
-
-    改法：config.mk 里每一处 `:$(TARGET_BUILD_VARIANT)/$(BUILD_VERSION_TAGS)` 改成 `:user/$(BUILD_VERSION_TAGS)`。
-      ★ A17 是【三处】（16.0 是两处）：BUILD_FINGERPRINT（config.mk:1433）、BUILD_THUMBPRINT（:1453），
-        外加 A17 新增的 BUILD_SYSTEM_FINGERPRINT（:1472）。第三处不能漏：A17 的 ro.system.build.fingerprint
-        改由它来 —— gen_build_prop.py:91 读 build_system_fingerprint 文件、:194-195 对 system 分区输出
-        ro.system.build.fingerprint?=BuildSystemFingerprint；system 镜像的 AVB 属性
-        com.android.build.system.fingerprint 也用它（build/make/core/Makefile:4905）。
-        全文件 TARGET_BUILD_VARIANT 只出现在这三行，改完 type 与各 fingerprint 尾部齐。
-      注释锚点：A17 上游把 "is used used to" 的错别字修掉了（config.mk:1430），按新原文找。
-    ⓘ 为什么不改 gen_build_prop 让 type 跟着变 userdebug：那会让 ro.build.type
-      直接撞 SystemPropertiesCatalog 的 dangerousValues=["eng","userdebug"]，
-      更糟；产品身份本来就是 type=user（crDroid 的 gen_build_prop 身份），只是
-      fingerprint 没跟上。
-    ⓘ OTA 不受影响：本仓 full OTA 包的 META-INF/com/android/metadata 里【没有】
-      pre-build / pre-build-incremental（out/release-v0.7.1-alpha 的 zip 实测），
-      CheckAbSpecificMetadata 对空 pre-build 直接跳过指纹比对
-      （lineage-bootable-recovery install/install.cpp:171-176）；post-build 只比
-      最后一段 tags=release-keys（:203-204），与变体段无关。in-system 走
-      update_engine 的 payload_properties 也不带 pre-build。（这一段是 16.0 时核的，A17 未复核。）
-    ⚠️ 锚点按 crDroid 17.0 的 build/make（lineage-24.0）写的；对不上会报 ⚠️ 并被 step() 记为失败，不会悄悄跳过。
-    上机判据：`getprop ro.build.fingerprint` / `ro.system.build.fingerprint` 与新装后的 Build.FINGERPRINT 都是
-      …:user/release-keys，且不再与 Build.TYPE 漂移；Duck Detector 的
-      system_properties 3 条 danger / "Suspicious fingerprint pattern 'userdebug'" 消失。
-    """
-    p = tree / "build/make/core/config.mk"
-    if not p.exists():
-        return f"⚠️ 找不到 build/make/core/config.mk（{p}），上游可能挪了文件"
-    s = io.open(p, encoding="utf-8").read()
-    marker = "gaokun3 tree-fix [23]"
-    if marker in s:
-        return "已改（幂等，无需改动）"
-    old = ":$(TARGET_BUILD_VARIANT)/$(BUILD_VERSION_TAGS)"
-    new = ":user/$(BUILD_VERSION_TAGS)"
-    want = 3   # BUILD_FINGERPRINT、BUILD_THUMBPRINT、BUILD_SYSTEM_FINGERPRINT
-    if s.count(old) != want:
-        return (f"⚠️ 锚点 {old} 出现 {s.count(old)} 次"
-                f"（应为 {want}：BUILD_FINGERPRINT / BUILD_THUMBPRINT / BUILD_SYSTEM_FINGERPRINT），上游可能改了写法")
-    # 三处必须都在各自的赋值行上，别误改到别的变量
-    for var in ("BUILD_FINGERPRINT", "BUILD_THUMBPRINT", "BUILD_SYSTEM_FINGERPRINT"):
-        if not re.search(r"^\s*" + var + r" := .*" + re.escape(old) + r"$", s, re.M):
-            return f"⚠️ {var} 的赋值行里找不到 {old}，上游可能改了写法；什么都没动"
-    # 注释锚点先核对，别改了变体段却插不进标记（下次幂等判断就瞎了）
-    anchor = "# BUILD_FINGERPRINT is used to uniquely identify the combined build and product;"
-    if s.count(anchor) != 1:
-        return "⚠️ 找不到 BUILD_FINGERPRINT 注释锚点（或不唯一），上游可能改了写法"
-    comment = ("# " + marker + ": fingerprint/thumbprint/system-fingerprint variant segment\n"
-               "# forced to 'user', not $(TARGET_BUILD_VARIANT). ro.build.type already comes out\n"
-               "# 'user' via soong gen_build_prop.get_build_variant() (no userdebug tier), so the\n"
-               "# fingerprint tail saying userdebug is a half-done identity that drifts\n"
-               "# against Build.TYPE. See gaokun-android scripts/crdroid-tree-fixes.py.\n")
-    s = s.replace(old, new).replace(anchor, comment + anchor, 1)
-    io.open(p, "w", encoding="utf-8", newline="").write(s)
-    return f"已把指纹/拇指纹/系统指纹的变体段改成 user（{want} 处）"
-
-
-def patch_adb_root_only_with_su(tree: pathlib.Path) -> str:
-    """—— 修补 24：adb_root 只在 WITH_SU=true 时装（恢复 crDroid 16.0 的行为）——
-
-    crDroid 17.0在上游加入82c2c41049（首次推送时哈希不同，变基后才是现在的哈希）之前，有一段时间
-    vendor/lineage/config/common.mk:244-247对所有非user变体（不论WITH_SU）
-    `PRODUCT_PACKAGES += adb_root`（16.0 时它在 `ifeq ($(WITH_SU),true)` 里面，和 su 一起）。
-    我们的发布构建是 userdebug 变体（-user 的 init 强制 enforcing、起不来，#117 §15），
-    adbd 按变体编成 ANDROID_DEBUGGABLE=1（packages/modules/adb/Android.bp:47-55）；装了
-    adbroot_service 之后，restart_service.cpp 的 root 路径不再看 ro.debuggable，
-    用户在开发者选项里一开「adb root」，`adb root` 就成了。
-    ⇒ 发布构建「没有 adb root」（见 docs/dev/release-checklist.md）被悄悄打开。
-    设备树去不掉一个 PRODUCT_PACKAGES（没有 PRODUCT_PACKAGES_REMOVE），只能改这里。
-    开发机照旧用 KSU 拿 root（`adb shell` 经 KSU 即 root，从来没有 `adb root`）。
-    上机判据：`ls /system_ext/bin /system/bin | grep adb_root`为空，`service check adbroot_service`报not found；
-      开发者选项里没有「Rooted debugging」（简体中文界面为「Root 身份的调试」）开关；`adb root`约6秒后返回
-      （adbd等待adbroot_service 5秒后超时），没有任何输出，随后adbd重启一次，仍以shell身份运行。
-      装有adb_root时会输出"ADB Root access is disabled by system setting…"（开关未打开）或"restarting adbd as root"。
-
-    crDroid上游提交82c2c41049（common: Move adb root to eng builds）把这段改成只在eng构建中安装adb_root，
-    userdebug的发布构建因此不再安装它；同步到这个提交以后的树里本条报"已废弃（A17）"、什么都不改。
-    """
-    p = tree / "vendor/lineage/config/common.mk"
-    if not p.exists():
-        return f"⚠️ 找不到 vendor/lineage/config/common.mk（{p}）"
-    s = io.open(p, encoding="utf-8").read()
-    marker = "gaokun3 tree-fix [24]"
-    if marker in s:
-        return "已改（幂等，无需改动）"
-    old = ("# Root\n"
-           "ifneq ($(TARGET_BUILD_VARIANT),user)\n"
-           "PRODUCT_PACKAGES += \\\n"
-           "    adb_root\n"
-           "ifeq ($(WITH_SU),true)\n"
-           "PRODUCT_PACKAGES += \\\n"
-           "    su\n")
-    eng_only = ("# Root\n"
-                "ifeq ($(TARGET_BUILD_VARIANT),eng)\n"
-                "PRODUCT_PACKAGES += \\\n"
-                "    adb_root\n")
-    if s.count(old) != 1:
-        if s.count(eng_only) == 1 and s.count("adb_root") == 1:
-            return "已废弃（A17）：上游已把adb_root限定为eng构建（82c2c41049），userdebug不再安装；什么都没改"
-        return "⚠️ 找不到 common.mk 里「# Root」那段（或不唯一），上游可能改了写法；什么都没动"
-    new = ("# Root\n"
-           "# " + marker + ": adb_root only with WITH_SU=true (as in crDroid 16.0); release\n"
-           "# builds are the userdebug variant and must not offer adb root.\n"
-           "ifneq ($(TARGET_BUILD_VARIANT),user)\n"
-           "ifeq ($(WITH_SU),true)\n"
-           "PRODUCT_PACKAGES += \\\n"
-           "    adb_root\n"
-           "PRODUCT_PACKAGES += \\\n"
-           "    su\n")
-    io.open(p, "w", encoding="utf-8", newline="").write(s.replace(old, new, 1))
-    return "adb_root 挪进 ifeq ($(WITH_SU),true)"
-
-
-def patch_keygesture_lineagesettings_guard(tree: pathlib.Path) -> str:
-    """—— 修补 25：KeyGestureController 读 LineageSettings 失败不致命 ——
-
-    来历（2026-10-11 救砖，见 memory「lineagesettings 被卸 → system_server 循环崩」）：
-    有人为"隐藏 ROM 痕迹"把 org.lineageos.lineagesettings 对 user 0 卸掉，
-    KeyGestureController 读 LineageSettings.System 抛异常 ⇒ system_server 每 5 秒崩一次、整机起不来。
-    当时在构建机树上直接给这两处读取包了 try/catch，**从没写进本脚本、全仓零记录**，
-    却编进了之后每一版（含 rc2e）。2026-10-25 A17 迁移 reset 树时，对照 A16 树的改动普查才发现。
-    A17（crDroid 17.0）frameworks/base 的 KeyGestureController.java:333-338 仍是同样没有防护的写法。
-    这只是防御措施：基本原则仍是"别隐藏 lineagesettings / lineageparts"（见 docs/dev/gaming.md）。
-       读失败时两个开关保持默认 false（不启用部分截图 / 音量上下同按静音），与没装 Lineage 设置时一致。
-    """
-    p = tree / "frameworks/base/services/core/java/com/android/server/input/KeyGestureController.java"
-    if not p.exists():
-        return f"⚠️ 找不到 KeyGestureController.java（{p}），上游可能挪了文件"
-    s = io.open(p, encoding="utf-8").read()
-    marker = "gaokun3 tree-fix [25]"
-    if marker in s:
-        return "已改（幂等，无需改动）"
-    old = ("        mClickPartialScreenshot = LineageSettings.System.getIntForUser(resolver,\n"
-           "                LineageSettings.System.CLICK_PARTIAL_SCREENSHOT, 0,\n"
-           "                UserHandle.USER_CURRENT) == 1;\n"
-           "        mVolUpAndDownMute = LineageSettings.System.getIntForUser(resolver,\n"
-           "                LineageSettings.System.VOLUME_UP_AND_DOWN_MUTE, 0,\n"
-           "                UserHandle.USER_CURRENT) == 1;\n")
-    if s.count(old) != 1:
-        return "⚠️ 找不到读 CLICK_PARTIAL_SCREENSHOT / VOLUME_UP_AND_DOWN_MUTE 的那段（或不唯一），上游可能改了写法"
-    new = ("        // " + marker + ": a missing/hidden LineageSettings provider must not crash-loop system_server.\n"
-           "        try {\n"
-           "            mClickPartialScreenshot = LineageSettings.System.getIntForUser(resolver,\n"
-           "                    LineageSettings.System.CLICK_PARTIAL_SCREENSHOT, 0,\n"
-           "                    UserHandle.USER_CURRENT) == 1;\n"
-           "        } catch (Exception e) {\n"
-           "            android.util.Log.w(\"KeyGestureController\", \"Failed to read CLICK_PARTIAL_SCREENSHOT\", e);\n"
-           "        }\n"
-           "        try {\n"
-           "            mVolUpAndDownMute = LineageSettings.System.getIntForUser(resolver,\n"
-           "                    LineageSettings.System.VOLUME_UP_AND_DOWN_MUTE, 0,\n"
-           "                    UserHandle.USER_CURRENT) == 1;\n"
-           "        } catch (Exception e) {\n"
-           "            android.util.Log.w(\"KeyGestureController\", \"Failed to read VOLUME_UP_AND_DOWN_MUTE\", e);\n"
-           "        }\n")
-    io.open(p, "w", encoding="utf-8", newline="").write(s.replace(old, new, 1))
-    return "两处 LineageSettings 读取包上 try/catch"
-
-
-def patch_codec2_blob_linear_map(tree: pathlib.Path) -> str:
-    """—— 修补 26：BLOB（gralloc 支撑）的线性块在没有 ION 的机器上照样能 map ——
-
-    A17 上游 frameworks/av 提交 3a5dff64c9（"Reapply codec2: add support for custom mappers"）把
-    C2ConstLinearBlock::map() / C2LinearBlock::map() 改成走 _C2Block1DImpl::mapReadView / mapWriteView
-    （vndk/C2Buffer.cpp）：没有 /dev/ion（C2HandleIon::IsUsed() = using_ion() = false，C2Store.cpp:116、:1446）
-    时一律交给 C2DmaBufAllocator::Map，而它先 CheckHandle —— 句柄不是 C2HandleBuf 就直接 C2_BAD_VALUE
-    （C2DmaBufAllocator.cpp:470-476）。A16 是直接调 allocation->map()，哪种分配都行。
-    本机没有 ION，device.mk 的 debug.stagefright.c2-poolmask=0xfe0000 让默认线性分配器是 BLOB
-    （C2Store.cpp:526 GetPreferredLinearAllocatorId）⇒ v4l2 解码 HAL 里 map 客户端送来的输入块报 err=22，
-    patches/android/v4l2-codec2/0001 的 HEVC CSD 合并退回"单独下发 CSD"，venus 死锁、HEVC 硬解一帧不出
-    （2026-10-26 A17 首个候选版 1792975257 上 A21 iris 回归 11/15，挂的正是 4 项 HEVC）。
-    修法：句柄不是 DMABUF 时退回 A16 的 allocation->map()；DMABUF 句柄照旧走上游新路径（custom mapper）。
-    上机判据：out/iris-rc/rc-accept.sh 15/15；logcat 有 "HEVC: stashed … bytes of CSD"、没有 "cannot map CSD"。
-    """
-    p = tree / "frameworks/av/media/codec2/vndk/C2Buffer.cpp"
-    if not p.exists():
-        return f"⚠️ 找不到 C2Buffer.cpp（{p}）"
-    s = io.open(p, encoding="utf-8").read()
-    marker = "gaokun3 tree-fix [26]"
-    if marker in s:
-        return "已改（幂等，无需改动）"
-    old = "    if (android::C2HandleIon::IsUsed()) {\n"
-    if s.count(old) != 2 or "android::C2DmaBufAllocator::Map(" not in s:
-        return "⚠️ C2Buffer.cpp 里 mapReadView / mapWriteView 的 IsUsed() 分支不是正好两处，上游可能改了写法；什么都没动"
-    new = ("    // " + marker + ": BLOB (gralloc-backed) linear blocks are not DMABUF handles;\n"
-           "    // C2DmaBufAllocator::Map rejects them with C2_BAD_VALUE on ION-less devices.\n"
-           "    if (android::C2HandleIon::IsUsed() ||\n"
-           "            !android::C2DmaBufAllocator::CheckHandle(mAllocation->handle())) {\n")
-    io.open(p, "w", encoding="utf-8", newline="").write(s.replace(old, new))
-    return "mapReadView / mapWriteView：非 DMABUF 句柄退回 allocation->map()"
-
-
-def patch_zygote_os_version(tree: pathlib.Path) -> str:
-    """Fix 36: re-read os.version in each specialized process.
-
-    libcore's System.java sets os.version once from uname(), in
-    initUnchangeableSystemProperties() (android-17.0.0_r1 ojluni/.../System.java:1085-1090).
-    Zygote runs as root, so with patches/kernel/core/0008 it gets the real release and every app inherits
-    that, while uname() in the same app returns the reported one.
-
-    callPostForkChildHooks() runs after setresuid() in SpecializeCommon()
-    (core/jni/com_android_internal_os_Zygote.cpp:2055, :2215), for system_server, apps, USAPs
-    and child zygotes alike, so reading uname() there gives each process what the kernel tells
-    it. Nothing changes for system_server. setUnchangeableSystemProperty() is @hide outside the
-    core platform API, hence the reflection; native bridge calls it for the same kind of reason.
-    ART's hiddenapi_platform_enforcement flag would make this fail with a log line. cp2a leaves
-    it off; check again when the release config moves on.
-    Check on a device: an app's System.getProperty("os.version") equals its uname().
-    """
-    p = tree / "frameworks/base/core/java/com/android/internal/os/Zygote.java"
-    if not p.exists():
-        return f"⚠️ 找不到 Zygote.java（{p}）"
-    s = io.open(p, encoding="utf-8").read()
-    marker = "gaokun3 tree-fix [36]"
-    if marker in s:
-        return "已改（幂等，无需改动）"
-    old = ("        ZygoteHooks.postForkChild(runtimeFlags, isSystemServer, isZygote, instructionSet);\n"
-           "    }\n")
-    if s.count(old) != 1:
-        return "⚠️ 找不到 callPostForkChildHooks 那段（或不唯一），上游可能改了写法；什么都没动"
-    new = ("        ZygoteHooks.postForkChild(runtimeFlags, isSystemServer, isZygote, instructionSet);\n"
-           "        // " + marker + ": os.version was read by zygote as root; apps may be told\n"
-           "        // another release (patches/kernel/core/0008). The uid is final here.\n"
-           "        try {\n"
-           "            System.class.getMethod(\"setUnchangeableSystemProperty\", String.class, String.class)\n"
-           "                    .invoke(null, \"os.version\", Os.uname().release);\n"
-           "        } catch (ReflectiveOperationException e) {\n"
-           "            Log.w(\"Zygote\", \"Could not refresh os.version\", e);\n"
-           "        }\n"
-           "    }\n")
-    io.open(p, "w", encoding="utf-8", newline="").write(s.replace(old, new, 1))
-    return "callPostForkChildHooks 重新读取 os.version"
-
-
-def patch_init_no_kernel_version_prop(tree: pathlib.Path) -> str:
-    """Fix 37: do not publish ro.kernel.version.
-
-    SetKernelVersion() (android-17.0.0_r1 init/init.cpp:741-750, called at :1193) sets it from
-    init's own uname(), before any rc file is read. With patches/kernel/core/0008 that is the real release,
-    the property has no entry in property_contexts so it falls to default_prop, and apps can
-    read default_prop (private/coredomain.te:38; private/untrusted_app.te:11). It would
-    contradict the release they are told.
-
-    The only uses in rootdir/init.rc are the two late-fs blocks at :645-648 for 4.19 and 5.4,
-    which never applied here. Grep the crDroid tree for other readers before merging:
-    grep -rn "ro\\.kernel\\.version" --include='*.rc' --include='*.cpp' --include='*.java' .
-    Check on a device: `getprop ro.kernel.version` is empty.
-    """
-    p = tree / "system/core/init/init.cpp"
-    if not p.exists():
-        return f"⚠️ 找不到 init.cpp（{p}）"
-    s = io.open(p, encoding="utf-8").read()
-    marker = "gaokun3 tree-fix [37]"
-    if marker in s:
-        return "已改（幂等，无需改动）"
-    old_def = "static void SetKernelVersion() {\n"
-    old_call = "    SetKernelVersion();\n"
-    if s.count(old_def) != 1 or s.count(old_call) != 1:
-        return "⚠️ 找不到 SetKernelVersion（或不唯一），上游可能改了写法；什么都没动"
-    s = s.replace(old_def, "[[maybe_unused]] " + old_def, 1)
-    s = s.replace(old_call, "    // " + marker + ": apps could read the real kernel version from it (patches/kernel/core/0008).\n", 1)
-    io.open(p, "w", encoding="utf-8", newline="").write(s)
-    return "不再设 ro.kernel.version"
+def fix_project(proj, branch, why, patches):
+    with tempfile.TemporaryDirectory() as t:
+        tmp = pathlib.Path(t)
+        base = manifest_ref(proj, branch, why)
+        want = expected_tree(proj, base, patches, tmp)
+        created = changed_paths(proj, base, want, added_only=True)
+        if worktree_tree(proj, created, tmp) == want:
+            return f"已是最新（{len(patches)}个补丁）"
+        snap = snapshot(proj, changed_paths(proj, base, want))
+        # 先刷新索引中的文件状态（与repo的做法相同）：树被复制过或文件属性变过时状态信息已过期，
+        # checkout -f会重写内容并未变化的文件
+        subprocess.run(["git", "-C", str(proj), "update-index", "-q", "--unmerged", "--ignore-missing",
+                        "--refresh"], capture_output=True)
+        git(proj, "checkout", "-q", "-f", "--detach", base)
+        git(proj, "clean", "-q", "-f", "-d")
+        for c in created:  # 被忽略规则匹配时git clean不会删除，git apply会因文件已存在而失败
+            if (proj / c).is_file():
+                (proj / c).unlink()
+        for p in patches:
+            try:
+                git(proj, "apply", str(p))
+            except Failed as e:
+                raise Failed(f"{p.name}无法应用（{e}）")
+        keep_mtimes(proj, snap)
+        if worktree_tree(proj, created, tmp) != want:
+            raise Failed("应用补丁后的工作区与预期不一致")
+        return f"已恢复到清单版本并应用{len(patches)}个补丁"
 
 
 def main():
-    tree = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else pathlib.Path.home() / "crdroid").expanduser()
+    if len(sys.argv) != 2:
+        sys.exit(__doc__)
+    tree = pathlib.Path(sys.argv[1]).expanduser().resolve()
     if not (tree / "build/envsetup.sh").exists():
-        print(f"✗ {tree} 看起来不是 Android 源码树"); sys.exit(1)
-    print(f"树: {tree}")
+        sys.exit(f"✗ {tree}不是Android源码树")
+    print(f"源码树：{tree}")
+    branch, why = manifest_branch(tree)
     failed = []
-
-    def step(label: str, result: str) -> None:
-        print(label + result)
-        # 以 ✗ 或 ⚠️ 开头的结果都是"没做成"：补丁打不上 / 应用失败 / 仓库里缺补丁文件，以及直接改文本的那几条
-        # 找不到锚点（上游改了写法）。都不能悄悄过去 —— 2026-09-28 PR #10 审查：以后 repo sync 让 [13]/[14] 打不上时，
-        # 空录音 / 整块静音会悄悄回来；[2] 失效就是传感器全没，[3][5][7] 失效就是硬解悄悄回落软解。
-        # 原先这里只打印、退出码照样是 0；现在与 kernel-apply-patches.sh 的"有失败就 exit 1"一致。
-        # A17 起是严格模式：17.0 树里一定有的项目缺文件 / 缺锚点也返回 ✗ / ⚠️（以前是"跳过（找不到 …）"、不算失败）。
-        # 还会打印"跳过"的只剩 [4] 没同步 vendor/gapps；"已废弃（A17）"是上游已经不需要这条，也不算失败。
-        if result.startswith(("✗", "⚠️")):
-            failed.append(label.strip())
-    step("  [1] SPOOF_SAFETYNET: ", patch_spoof_safetynet(tree))
-    step("  [2] hexagonfs CR 截断: ", patch_hexagonfs_cr(tree))
-    step("  [3] v4l2_codec2 输入分辨率: ", patch_v4l2_input_size(tree))
-    step("  [4] GApps 冲突: ", patch_gapps_conflicts(tree))
-    step("  [5] v4l2_codec2 初始输出队列: ", patch_v4l2_initial_output(tree))
-    step("  [6] 关闭桌面窗口模式: ", patch_disable_desktop_mode(tree))
-    step("  [7] v4l2_codec2 设备扫描范围: ", patch_v4l2_device_scan_range(tree))
-    step("  [8] v4l2_codec2 HEVC CSD 合并: ", apply_patch_file(
-        tree, "external/v4l2_codec2",
-        "android/v4l2-codec2/0001-v4l2-codec2-merge-hevc-csd-into-first-frame.patch"))
-    # [9] glslang host 端 glslangValidator —— A17 上已由上游 external/deqp-deps/glslang 自带
-    #   （Android.bp:263-292，提交 9442208b "Build rule for Mesa's glslangValidator"；
-    #   deqp_glslang_defaults 也加了 host_supported: true，:83），mesa 侧照旧用 tools: ["glslangValidator"]。
-    step(" [10] tinyalsa sw_params 取自 refined hw_params: ", apply_patch_file(
-        tree, "external/tinyalsa_new",
-        "android/tinyalsa/0001-tinyalsa-derive-sw-params-from-refined-hw-params.patch"))
-    # A17 上游已删掉这个 flag ⇒ 通常打印"已废弃（A17）"；声明回来了才沿 TARGET_RELEASE 继承链去改值文件
-    step(" [11] 关掉 connected-displays flag: ", patch_connected_displays_flag(tree))
-    step(" [12] audio AIDL primary 接受外部设备连接: ", apply_patch_file(
-        tree, "hardware/interfaces",
-        "android/hardware-interfaces/0001-audio-aidl-primary-accept-external-device-connect.patch"))
-    step(" [13] audio AIDL HAL 尊重策略给出的麦克风 address: ", apply_patch_file(
-        tree, "hardware/interfaces",
-        "android/hardware-interfaces/0002-audio-aidl-honour-explicit-mic-address.patch"))
-    step(" [14] audio AIDL HAL 采集方向 MonoPipe 容量翻倍（消除周期性插静音）: ", apply_patch_file(
-        tree, "hardware/interfaces",
-        "android/hardware-interfaces/0003-audio-aidl-monopipe-capacity.patch"))
-    # 依赖 [14]（采集管道要能放 2 块），所以排在它后面：去掉开头 170 ms 静音与常驻 2 块延迟
-    step(" [15] audio AIDL HAL 采集改成数据驱动交付（去掉开头静音与常驻延迟）: ", apply_patch_file(
-        tree, "hardware/interfaces",
-        "android/hardware-interfaces/0004-audio-aidl-primary-capture-data-driven.patch",
-        covered_by=("android/hardware-interfaces/0006-audio-aidl-primary-playback-paced-by-alsa.patch",
-                    "android/hardware-interfaces/0007-audio-aidl-primary-alsa-fallback-by-device-type.patch",
-                    "android/hardware-interfaces/0009-audio-aidl-primary-playback-hook.patch",
-                    "android/hardware-interfaces/0010-audio-aidl-primary-capture-hook.patch")))
-    # 不依赖前面几条（只动 audio/aidl/default/apex/）：effect HAL 在 vendor APEX 里，加载不了 /vendor/lib64/soundfx 的 Histen
-    # ⚠️ 这是唯一一条会【新建】文件的 AOSP 补丁（linker.config.json，未跟踪）：把 hardware/interfaces 还原成上游时
-    #    `git checkout -- .` / `reset --hard` 删不掉它，要再 `git clean -f audio/aidl/default/apex/`，否则这一条报"打不上"
-    step(" [16] audio APEX 链接器命名空间放行 /vendor/${LIB}/soundfx（Histen 效果库）: ", apply_patch_file(
-        tree, "hardware/interfaces",
-        "android/hardware-interfaces/0005-audio-aidl-apex-permit-vendor-soundfx.patch"))
-    # A17：改 StreamAlsaBase.{h,cpp} 与 StreamPrimary.cpp，上下文只和 [15]（0004）在 StreamPrimary.cpp 里重叠，所以排在它后面：播放由硬件定拍、不再整块丢音乐
-    step(" [17] audio AIDL HAL 播放由硬件定拍、位置按真实播出上报（卡顿不再整块丢音乐）: ", apply_patch_file(
-        tree, "hardware/interfaces",
-        "android/hardware-interfaces/0006-audio-aidl-primary-playback-paced-by-alsa.patch",
-        covered_by=("android/hardware-interfaces/0007-audio-aidl-primary-alsa-fallback-by-device-type.patch",
-                    "android/hardware-interfaces/0009-audio-aidl-primary-playback-hook.patch",
-                    "android/hardware-interfaces/0010-audio-aidl-primary-capture-hook.patch")))
-    # v1.0 NET-1 / TODO V3：软件 PNO 的第二道门（DeviceConfig wifi/software_pno_enabled，GMS 下发 false）
-    step(" [18] Wi-Fi 软件 PNO 不受 DeviceConfig 覆盖（息屏断网后能自己回连）: ", patch_wifi_sw_pno_gate(tree))
-    # v1.0 NET-4：稳定的设备 MAC（HAL 出厂 MAC 由 soc0 序列号派生）+ 新网络默认按网络固定的随机 MAC
-    step(" [19] Wi-Fi HAL 出厂 MAC 由 SoC 序列号派生（稳定的设备 MAC）: ", patch_wifi_stable_factory_mac(tree))
-    step(" [20] Wi-Fi 新网络 MAC 随机化默认改回 AUTO（按网络固定）: ", patch_wifi_mac_randomization_default(tree))
-    # v1.0 AV-10：耳机麦。可插拔端口不能带 address ⇒ HAL 按设备类型读 ro.vendor.audio.primary.alsa.<type>（device.mk 设）。
-    # 只动 StreamPrimary.cpp 的头文件区与 getCardAndDeviceId()，与 [12]–[17] 的上下文不重叠。
-    step(" [21] audio AIDL HAL 地址里没有 CARD_/DEV_ 时按设备类型回落（耳机麦）: ", apply_patch_file(
-        tree, "hardware/interfaces",
-        "android/hardware-interfaces/0007-audio-aidl-primary-alsa-fallback-by-device-type.patch",
-        covered_by=("android/hardware-interfaces/0009-audio-aidl-primary-playback-hook.patch",
-                    "android/hardware-interfaces/0010-audio-aidl-primary-capture-hook.patch")))
-    # 音游延迟：播放块按 ro.vendor.audio.primary.out_latency_ms（device.mk 设 5）⇒ FastMixer 开、游戏拿到 FAST 轨道。
-    # 只动 ModulePrimary.cpp（头文件区与 getNominalLatencyMs()），与 [12]–[21] 不重叠；依赖 [17]（播放直接写 ALSA）。
-    step(" [22] audio AIDL HAL 播放块大小可配（5 ms，开 FastMixer）: ", apply_patch_file(
-        tree, "hardware/interfaces",
-        "android/hardware-interfaces/0008-audio-aidl-primary-low-latency-playback-block.patch"))
-    # 扬声器低音处理（device/huawei/gaokun3/speakerfx）：播放块写进 ALSA 之前交给 ro.vendor.audio.primary.playback_hook 的库。
-    # 只动 StreamPrimary.{h,cpp}；transfer() 的上下文依赖 [17]（0006 的播放直写），所以排在 [22] 之后。
-    step(" [27] audio AIDL HAL 播放方向的厂商钩子（扬声器低音处理，覆盖 FAST 轨）: ", apply_patch_file(
-        tree, "hardware/interfaces",
-        "android/hardware-interfaces/0009-audio-aidl-primary-playback-hook.patch",
-        covered_by=("android/hardware-interfaces/0010-audio-aidl-primary-capture-hook.patch",)))
-    # 麦克风阵列（device/huawei/gaokun3/micarray）：采集方向的厂商钩子，ro.vendor.audio.primary.capture_hook 的库决定 ALSA 开几路、
-    # 读到的每块进管道之前交给它处理。改 StreamAlsaBase.{h,cpp}、StreamAlsaMonoPipe.{h,cpp}、StreamPrimary.{h,cpp}，
-    # standby / start / shutdown 的上下文是 [27]（0009）加的，所以排在它后面；[15][17][21][27] 的 covered_by 因此带上它。
-    step(" [38] audio AIDL HAL 采集方向的厂商钩子（内置麦克风阵列）: ", apply_patch_file(
-        tree, "hardware/interfaces",
-        "android/hardware-interfaces/0010-audio-aidl-primary-capture-hook.patch"))
-    # 游戏音频延迟：播放方向的ALSA缓冲按ro.vendor.audio.primary.out_period_count切成几个period（device.mk设3），录音方向不变。
-    # 只动alsa/UtilsAlsa.cpp，与[12]–[38]的上下文不重叠。
-    step(" [40] audio AIDL HAL播放方向的ALSA period数可配（录音不变）: ", apply_patch_file(
-        tree, "hardware/interfaces",
-        "android/hardware-interfaces/0011-audio-aidl-alsa-output-period-count.patch"))
-    # 蓝牙通话（issue #107）：HFP输出流不再受BT_SCO参数控制。SCO由音频托管时框架从不下发BT_SCO=on，
-    # 不改的话SCO一建立，第一次蓝牙参数更新就把输出流挂起。要和device.mk的两个蓝牙属性、
-    # audio/bluetooth_audio_policy_configuration.xml的HFP端口一起生效。只动bluetooth/StreamBluetooth.cpp，与[12]–[40]不重叠。
-    step(" [56] audio AIDL HAL蓝牙HFP输出流不受BT_SCO参数控制: ", apply_patch_file(
-        tree, "hardware/interfaces",
-        "android/hardware-interfaces/0012-audio-aidl-bluetooth-hfp-not-gated-by-bt-sco.patch"))
-    # 字节缓冲模式的块 ID。要和 device.mk 的 poolmask（GRALLOC 位）一起生效，见补丁说明。
-    step(" [28] v4l2_codec2 字节缓冲模式用 dmabuf ID: ", apply_patch_file(
-        tree, "external/v4l2_codec2",
-        "android/v4l2-codec2/0002-v4l2-codec2-use-dmabuf-id-for-gralloc-blocks.patch"))
-    step(" [39] external/webrtc 让设备树链 webrtc_audio_processing（通话的回声消除）: ",
-         patch_webrtc_vendor_visibility(tree))
-    # 10-bit 视频：[29][30] 要和 patches/kernel/iris/0012（iris）、patches/mesa/0002（turnip）一起生效，见各函数说明。
-    step(" [29] minigbm 给 P010 开显示用途: ", patch_minigbm_p010_scanout(tree))
-    step(" [30] v4l2_codec2 声明 HEVC Main10、VP9 Profile 2: ", patch_v4l2_10bit_profiles(tree))
-    # 要和内核平面列表的 ABGR2101010（kernel/drm/0007）一起生效；旧内核上 HWC 会保持 8 位，见补丁说明。
-    step(" [31] drm_hwcomposer 给 10-bit 图层请求 10-bit 帧缓冲: ", apply_patch_file(
-        tree, "external/drm_hwcomposer",
-        "android/drm-hwcomposer/0001-drm-hwcomposer-10-bit-client-target.patch",
-        covered_by=("android/drm-hwcomposer/0002-drm-hwcomposer-switch-panels-between-srgb-and-display-p3.patch",
-                    "android/drm-hwcomposer/0003-drm-hwcomposer-dim-layers-through-the-gpu.patch",
-                    "android/drm-hwcomposer/0004-drm-hwcomposer-declare-hdr-on-internal-panels.patch")))
-    # 要和内核 patches/kernel/drm/0005 的 Colorspace 属性、device.mk 的两个属性一起生效；没有 Colorspace 属性时 HWC 保持原样。
-    step(" [32] drm_hwcomposer 让内置屏在 sRGB 和 Display P3 之间切换: ", apply_patch_file(
-        tree, "external/drm_hwcomposer",
-        "android/drm-hwcomposer/0002-drm-hwcomposer-switch-panels-between-srgb-and-display-p3.patch",
-        covered_by=("android/drm-hwcomposer/0003-drm-hwcomposer-dim-layers-through-the-gpu.patch",
-                    "android/drm-hwcomposer/0004-drm-hwcomposer-declare-hdr-on-internal-panels.patch")))
-
-    step(" [33] drm_hwcomposer 让压暗的图层走 GPU（HDR 提亮）: ", apply_patch_file(
-        tree, "external/drm_hwcomposer",
-        "android/drm-hwcomposer/0003-drm-hwcomposer-dim-layers-through-the-gpu.patch",
-        covered_by=("android/drm-hwcomposer/0004-drm-hwcomposer-declare-hdr-on-internal-panels.patch",)))
-
-    # 声明 HDR：[34] 让框架列出 HEVC 的 HDR10 profile，[35] 让应用看到显示器支持 HDR，两条一起才有意义。
-    step(" [34] v4l2_codec2 声明 HDR 静态元数据: ", apply_patch_file(
-        tree, "external/v4l2_codec2",
-        "android/v4l2-codec2/0003-v4l2-codec2-pass-hdr-static-metadata.patch"))
-    step(" [35] drm_hwcomposer 内置屏声明 HDR10 和 HLG: ", apply_patch_file(
-        tree, "external/drm_hwcomposer",
-        "android/drm-hwcomposer/0004-drm-hwcomposer-declare-hdr-on-internal-panels.patch"))
-    step(" [49] drm_hwcomposer多余光标平面的警告每条管线只打印一次: ", apply_patch_file(
-        tree, "external/drm_hwcomposer",
-        "android/drm-hwcomposer/0005-drm-hwcomposer-report-extra-cursor-planes-once-per-pipeline.patch"))
-    # 硬件视频编码：[41][42]要和patches/kernel/iommu/0001、kernel/iris/0013–0018以及device.mk的编码器属性一起生效。
-    # 两条都是在[3][5][7][8][28][30][34]打完的树上生成的，所以排在它们之后；0004与0005改的是EncodeInterface.cpp的不同位置。
-    step(" [41] v4l2_codec2编码器输入块带CPU读用途（相机录像、录屏）: ", apply_patch_file(
-        tree, "external/v4l2_codec2",
-        "android/v4l2-codec2/0004-v4l2-codec2-request-cpu-read-access-for-encoder-input.patch"))
-    step(" [42] v4l2_codec2 HEVC编码组件: ", apply_patch_file(
-        tree, "external/v4l2_codec2",
-        "android/v4l2-codec2/0005-v4l2-codec2-add-an-hevc-encoder-component.patch"))
-    # 单平面输入的缓冲长度按驱动的sizeimage给：iris把整帧大小补齐到4 KiB的倍数，640x480、352x288这类尺寸原来在第一帧就被拒。
-    # 在[42]打完的树上生成，排在它之后。
-    step(" [43] v4l2_codec2编码器单平面输入按驱动要求的长度送缓冲（640x480等尺寸）: ", apply_patch_file(
-        tree, "external/v4l2_codec2",
-        "android/v4l2-codec2/0006-v4l2-codec2-give-single-planar-encoder-input-the-device-buffer-length.patch",
-        covered_by=("android/v4l2-codec2/0021-v4l2-codec2-pass-the-colour-aspects-and-HDR10-metadata-of-10-bit-streams.patch",)))
-    # 解码器输入缓冲区改回1080p及以下2 MiB、以上8 MiB（原为16 MiB和64 MiB，每路会话最多16个）。要和patches/kernel/iris/0019
-    # 一起生效：旧内核仍要求6.75 MiB（VP9为13.5 MiB）的输入缓冲区，1080p及以下的解码与1080p以上的VP9解码会在启动时报错退出。
-    # 在[43]打完的树上生成，排在它之后。
-    step(" [46] v4l2_codec2解码器输入缓冲区按码流大小分配（需kernel/iris/0019）: ", apply_patch_file(
-        tree, "external/v4l2_codec2",
-        "android/v4l2-codec2/0007-v4l2-codec2-size-decoder-input-buffers-for-the-stream-again.patch"))
-    # 编码器格式转换器的帧改按驱动格式中的高分配：iris把sizeimage补齐到4 KiB的倍数，由它反推出的高偏大（640x480得到482），
-    # minigbm把色度平面放到第512行之后，驱动却在第480行处读色度，录屏等需要转换的输入在640x480、352x288这类尺寸上色度错位32行。
-    # 在[46]打完的树上生成，排在它之后。
-    step(" [57] v4l2_codec2编码器转换帧按驱动格式中的高分配（录屏640x480等尺寸的色度）: ", apply_patch_file(
-        tree, "external/v4l2_codec2",
-        "android/v4l2-codec2/0008-v4l2-codec2-take-the-single-planar-encoder-input-height-from-the-format.patch"))
-    # 编码器的宏块码率控制与GOP长度分开设置：同一次VIDIOC_S_EXT_CTRLS里有驱动不支持的控件时整次调用被拒，
-    # iris没有MB_RC_ENABLE，GOP长度因此停在30，IDR之间多出周期性的I帧。要和patches/kernel/iris/0021一起生效：
-    # 旧内核接受GOP长度0后在开流时丢掉，固件把每帧都编成关键帧。在[57]打完的树上生成，排在它之后。
-    step(" [58] v4l2_codec2编码器宏块码率控制与GOP长度分开设置（需kernel/iris/0021）: ", apply_patch_file(
-        tree, "external/v4l2_codec2",
-        "android/v4l2-codec2/0009-v4l2-codec2-set-the-macroblock-rate-control-and-the-gop-length-separately.patch",
-        covered_by=("android/v4l2-codec2/0021-v4l2-codec2-pass-the-colour-aspects-and-HDR10-metadata-of-10-bit-streams.patch",)))
-    # 解码器：flush后已投递的复用帧在输出队列重新分配后丢弃（seek到另一位深的部分时，旧格式的缓冲被排进新队列，
-    # QBUF失败或按错误格式解码）；尺寸变化时上报C2StreamPictureSizeInfo（使用输出缓冲数组的客户端，即同步模式下的
-    # NDK客户端或调用getOutputBuffers()的客户端，在分辨率变大后框架无法按新尺寸复制，解码报错）；10位档次在输出像素格式里声明P010，框架据此在颜色格式中列出
-    # COLOR_FormatYUVP010。三者都在[58]打完的树上依次生成，排在它之后。
-    step(" [59] v4l2_codec2解码器丢弃重新分配前的复用帧: ", apply_patch_file(
-        tree, "external/v4l2_codec2",
-        "android/v4l2-codec2/0010-v4l2-codec2-drop-reused-output-frames-of-a-reallocated-queue.patch"))
-    step(" [60] v4l2_codec2解码器尺寸变化时上报画面尺寸: ", apply_patch_file(
-        tree, "external/v4l2_codec2",
-        "android/v4l2-codec2/0011-v4l2-codec2-report-the-picture-size-when-it-changes.patch"))
-    step(" [61] v4l2_codec2解码器为10位档次声明P010输出: ", apply_patch_file(
-        tree, "external/v4l2_codec2",
-        "android/v4l2-codec2/0012-v4l2-codec2-advertise-p010-output-for-10-bit-profiles.patch"))
-    # 编码器：固件不带码流地返回一帧（丢帧、数据损坏，或长度为0）时，组件原来直接丢掉这个空缓冲，而工作项按顺序完成、
-    # 每一项都要等到输出，会话从此一帧不出也不报错（唤醒后编码无输出即是如此）；现在按顺序把最早一个还没有输出的工作项
-    # 以FLAG_DROP_FRAME完成，连续丢30帧时报错。编码器实例计数改在release()时减少（设备已在此前关闭），收回后重试时
-    # 不再因旧组件对象还没析构而撞到上限。在[61]打完的树上生成，排在它之后。
-    step(" [62] v4l2_codec2编码器丢帧时完成对应的工作项: ", apply_patch_file(
-        tree, "external/v4l2_codec2",
-        "android/v4l2-codec2/0013-v4l2-codec2-complete-the-work-of-frames-the-encoder-drops.patch",
-        covered_by=("android/v4l2-codec2/0021-v4l2-codec2-pass-the-colour-aspects-and-HDR10-metadata-of-10-bit-streams.patch",)))
-    step(" [63] v4l2_codec2编码器release()时释放实例计数: ", apply_patch_file(
-        tree, "external/v4l2_codec2",
-        "android/v4l2-codec2/0014-v4l2-codec2-free-the-encoder-instance-slot-when-the-component-is-released.patch"))
-    # V4L2DevicePoller：只返回POLLERR时不再立即重新轮询缓冲（两个队列都空时poll()马上返回POLLERR，每次解码器启动
-    # 空转上万次），改为投递一次回调，下一次QBUF或STREAMON再恢复；事件回调执行期间不再轮询POLLPRI（事件出队之前
-    # poll()一直返回POLLPRI）；解码器进入错误状态后停止轮询（错误状态下事件不再出队，原来会一直空转）。
-    # 在[63]打完的树上生成，依赖[5]新版的setupInitialOutput()。
-    step(" [64] v4l2_codec2轮询线程在POLLERR后不再空转: ", apply_patch_file(
-        tree, "external/v4l2_codec2",
-        "android/v4l2-codec2/0015-v4l2-codec2-do-not-poll-buffers-again-after-POLLERR.patch",
-        covered_by=("android/v4l2-codec2/0016-v4l2-codec2-do-not-poll-for-an-event-that-is-being-handled.patch",)))
-    step(" [65] v4l2_codec2事件回调期间不轮询POLLPRI: ", apply_patch_file(
-        tree, "external/v4l2_codec2",
-        "android/v4l2-codec2/0016-v4l2-codec2-do-not-poll-for-an-event-that-is-being-handled.patch"))
-    step(" [66] v4l2_codec2解码器出错后停止轮询: ", apply_patch_file(
-        tree, "external/v4l2_codec2",
-        "android/v4l2-codec2/0017-v4l2-codec2-stop-polling-the-decoder-device-on-error.patch"))
-    # VP9的默认级别表原来只到5级（3840x2160约37 fps），应用按码流级别判断时会把4K60的VP9（5.1级）判为超出硬件能力，
-    # 转用软解。驱动没有VP9级别控件时（iris gen1即是如此），V4L2Device::queryC2Levels()返回它自己的默认表，
-    # 应用看到的是这张表（[68]）；DecodeInterface的默认表（[67]）只在没有任何解码设备列出VP9输入格式、
-    # 或级别控件没有可识别的级别时才使用。两张表都补上5.1与5.2级。依次在[66]、[67]打完的树上生成。
-    step(" [67] v4l2_codec2解码器VP9默认级别补上5.1与5.2: ", apply_patch_file(
-        tree, "external/v4l2_codec2",
-        "android/v4l2-codec2/0018-v4l2-codec2-advertise-VP9-levels-5.1-and-5.2-by-default.patch"))
-    step(" [68] v4l2_codec2设备默认级别表的VP9补上5.1与5.2: ", apply_patch_file(
-        tree, "external/v4l2_codec2",
-        "android/v4l2-codec2/0019-v4l2-codec2-add-VP9-levels-5.1-and-5.2-to-the-device-fallback-list.patch"))
-    # HEVC Main 10编码：设备的HEVC编码器接受P010输入时（kernel/iris/0037），组件提供Main 10档次与P010输入格式，
-    # 8位YUV输入扩展为10位，RGB输入按BT.601转换后扩展；10位会话把色彩参数写成输入格式的色彩描述
-    # （kernel/iris/0038），有HDR10控件时（kernel/iris/0039）提供Main 10 HDR10并传递静态元数据。
-    # 内核没有这些补丁时只提供Main，与原来相同。依次在v4l2-codec2/0019、0020打完的树上生成。
-    step(" v4l2_codec2编码器支持HEVC Main 10（v4l2-codec2/0020）: ", apply_patch_file(
-        tree, "external/v4l2_codec2",
-        "android/v4l2-codec2/0020-v4l2-codec2-encode-HEVC-Main-10-from-P010-input.patch",
-        covered_by=("android/v4l2-codec2/0021-v4l2-codec2-pass-the-colour-aspects-and-HDR10-metadata-of-10-bit-streams.patch",)))
-    step(" v4l2_codec2编码器传递10位码流的色彩参数与HDR10元数据（v4l2-codec2/0021）: ", apply_patch_file(
-        tree, "external/v4l2_codec2",
-        "android/v4l2-codec2/0021-v4l2-codec2-pass-the-colour-aspects-and-HDR10-metadata-of-10-bit-streams.patch"))
-    # SystemUI对Class 1/2指纹只在人脸也锁定时才禁止指纹解锁，没有人脸识别时，指纹自己临时锁定期间仍会不断
-    # 请求认证，框架逐次拒绝。补丁让它在锁定期间改为只检测接触（与Class 3相同）；锁定期满时HAL发出
-    # onLockoutCleared，SystemUI随之恢复认证。指纹HAL（device/huawei/gaokun3/fingerprint）报告STRONG后，
-    # SystemUI本身已按Class 3处理指纹锁定，这个补丁在本机上不再改变行为。
-    step(" [44] SystemUI在指纹临时锁定期间不再请求指纹认证: ", apply_patch_file(
-        tree, "frameworks/base",
-        "android/frameworks-base/0001-systemui-respect-fingerprint-lockout.patch"))
-    # crDroid（取自CAF）在开机完成20分钟后的任务里调用compactAllSystem()，把system内存cgroup整体回收一遍，
-    # SurfaceFlinger、音频服务等正在使用的页面随之被逐出，游戏中表现为约1秒的掉帧（没有交换空间时还会爆音）。
-    # AOSP和LineageOS在这个任务里只收集内存统计；AOSP正式版本还用disable_system_compaction关闭了空闲维护里的
-    # 系统压缩，这处调用绕过了它。补丁去掉这次调用，之后系统进程只在执行am compact system时压缩，后台应用的压缩不变。
-    step(" [47] 开机20分钟后不再压缩全部系统进程: ", apply_patch_file(
-        tree, "frameworks/base",
-        "android/frameworks-base/0002-activitymanager-dont-compact-system-processes-after-boot.patch"))
-    # 虚幻引擎只在GL_VERSION里读到不低于下限的高通驱动版本（"V@<版本>"）时才给Adreno 6xx选开启Vulkan的设备档案，
-    # ANGLE的GL_VERSION不含驱动版本。补丁让Parts的GPU驱动兼容设置中选定的应用在启动时设置ANGLE_GL_VERSION，
-    # 读到带驱动版本的GL_VERSION；名单经CoreSettingsObserver传给应用，默认为空。未采用全局的debug.angle.gl_version：
-    # Chromium浏览器自带的ANGLE也会读到它，Edge上的WebGL 1随之无法使用。
-    step(" [48] 选定的应用在GL_VERSION中读到高通驱动版本: ", apply_patch_file(
-        tree, "frameworks/base",
-        "android/frameworks-base/0003-graphicsenv-per-app-gl-driver-version.patch"))
-    # 屏幕忽略方向请求时（大屏默认如此），声明nosensor或locked的应用仍会改变屏幕方向。从这样的应用进入最近任务、
-    # 而加速度计报告另一个方向时，WindowManager把屏幕旋转放进启动最近任务的过渡，WMShell的RecentsController.start()
-    # 不处理旋转，屏幕上只剩壁纸，直到按下主屏幕键。补丁让start()与merge()一样：过渡中有屏幕旋转时取消最近任务，
-    # 交给下一个处理器连同旋转一起播放。
-    step(" [50] 启动最近任务的过渡带屏幕旋转时交给默认动画: ", apply_patch_file(
-        tree, "frameworks/base",
-        "android/frameworks-base/0004-wm-shell-cancel-recents-when-its-start-rotates-the-display.patch"))
-    # 自然方向为横屏后，电源键（侧边指纹）位于自然方向的左边缘，SystemUI只支持上边缘和右边缘。补丁新增配置项
-    # config_sideFpsSensorOnLeftEdge（默认false），开启后把竖直传感器视为位于左边缘，按镜像位置和多转180°复用右边缘的
-    # 摆放；本机由rro/Gaokun3SystemUIFingerprintOverlay开启，指纹HAL按此上报位置（见fingerprint/Service.cpp）。
-    step(" [51] SystemUI侧边指纹提示支持左边缘的传感器: ", apply_patch_file(
-        tree, "frameworks/base",
-        "android/frameworks-base/0005-systemui-side-fingerprint-sensor-on-the-left-edge.patch"))
-    # 平行视界：许多国内应用在assets/easygo.json中自带华为平板的分栏规则。0006新增按应用开启的兼容变更
-    # OVERRIDE_ENABLE_PARALLEL_VIEW（Parts的“设置 → 应用 → 平行视界”设置），开启的应用启动时初始化窗口管理
-    # 扩展库，不依赖虚拟手柄的标志，也不需要重启系统。0007让扩展库把这些规则转换为Activity嵌入规则，横屏时
-    # 左右分栏显示。
-    step(" [52] 按应用开启平行视界的兼容变更: ", apply_patch_file(
-        tree, "frameworks/base",
-        "android/frameworks-base/0006-core-parallel-view-compat-change.patch"))
-    step(" [53] 窗口管理扩展库按应用自带的规则分栏显示: ", apply_patch_file(
-        tree, "frameworks/base",
-        "android/frameworks-base/0007-wm-jetpack-parallel-view-from-easygo-rules.patch"))
-    # 拖动可拖动的分隔条时，AOSP用纯色遮罩盖住两侧，颜色取页面的窗口背景；许多应用的窗口背景与页面颜色不同
-    # （例如深色主题下窗口背景为纯黑），两侧因此变成全黑。0008在开始拖动时截取两侧页面，拖动期间显示截图。
-    step(" [54] 拖动分隔条时显示两侧页面的截图: ", apply_patch_file(
-        tree, "frameworks/base",
-        "android/frameworks-base/0008-wm-jetpack-show-snapshots-while-dragging-the-divider.patch"))
-    # 大屏默认忽略应用的方向请求（ignoreOrientationRequest），只支持横屏的应用（多数游戏）在屏幕处于竖屏时启动，
-    # 会以横条显示在屏幕顶部。0009让自然方向为横屏的屏幕仍响应横屏请求，其他请求照旧忽略（按应用豁免的除外）。
-    # 计算旋转时landscape与reverseLandscape按userLandscape处理，由传感器或旋转锁定在两个横屏方向中选择；请求被
-    # 忽略的半透明页面（如竖屏的登录对话框）让下层页面决定方向。平行视界等分栏只在横屏并排显示，屏幕已是横屏时，
-    # 并排的容器按堆叠时的覆盖关系从上往下判断，先遇到横屏请求则报告userLandscape，屏幕保持横屏，不会转回竖屏后
-    # 又转为横屏；主页面请求横屏时0007不打开占位页，已显示的占位页会被关闭。从这样的应用进入最近任务时的屏幕旋转
-    # 需要0004。
-    step(" [55] 自然方向为横屏的屏幕仍响应横屏请求: ", apply_patch_file(
-        tree, "frameworks/base",
-        "android/frameworks-base/0009-wm-respect-landscape-requests-on-a-naturally-landscape-display.patch"))
-    # crDroid的锁屏充电信息（core: Lockscreen Charging）固定从/sys/class/power_supply/battery读取电流和电压，
-    # 没有这个节点时改读充电器节点。本机电池节点名为gaokun-ec-battery，EC适配器节点没有电流和电压，UCSI节点在
-    # PD模式下两者均为0，锁屏因此只显示默认的5V。补丁在没有battery节点时改用BatteryMonitor已识别的电池节点。
-    step(" [45] healthd锁屏充电信息改用已识别的电池节点: ", apply_patch_file(
-        tree, "system/core",
-        "android/system-core/0001-healthd-use-the-discovered-battery-for-lockscreen-charging-info.patch"))
-    # 游戏环境如实修正：fingerprint 尾部 userdebug→user，与 ro.build.type=user 对齐
-    # （Duck Detector system_properties 3 条 danger 的根；运行时改不掉 Build.FINGERPRINT 常量）
-    step(" [23] BUILD_FINGERPRINT/THUMBPRINT/SYSTEM_FINGERPRINT 变体段改写成 user（与 ro.build.type 对齐）: ",
-         patch_build_fingerprint_variant_user(tree))
-    # crDroid上游82c2c41049起只在eng构建中安装adb_root ⇒ 新树上通常打印"已废弃（A17）"；仍是旧写法的树照旧改写
-    step(" [24] adb_root 只在 WITH_SU=true 时装（发布构建没有 adb root）: ", patch_adb_root_only_with_su(tree))
-    step(" [25] KeyGestureController 读 LineageSettings 失败不致命（10-11 救砖兜底）: ", patch_keygesture_lineagesettings_guard(tree))
-    step(" [26] codec2 BLOB 线性块在没有 ION 时也能 map（HEVC CSD 合并 / 硬解）: ", patch_codec2_blob_linear_map(tree))
-    # Both go with patches/kernel/core/0008: what apps read has to agree with the release the kernel tells them.
-    step(" [36] 应用进程重新读取 os.version: ", patch_zygote_os_version(tree))
-    step(" [37] init 不再设 ro.kernel.version: ", patch_init_no_kernel_version_prop(tree))
+    unknown = sorted(d.name for d in PATCHES.iterdir() if d.is_dir() and d.name not in PROJECTS)
+    for d in unknown:
+        print(f"  ✗ patches/android/{d}：未在PROJECTS中登记")
+        failed.append(d)
+    for name, path in PROJECTS.items():
+        patches = sorted((PATCHES / name).glob("*.patch"))
+        proj = tree / path
+        label = f"  {path}（patches/android/{name}）："
+        if not proj.exists() and name in OPTIONAL:
+            print(label + "跳过（未同步）")
+            continue
+        if not (proj / ".git").exists():
+            print(label + "✗ 项目不存在或不是git仓库")
+            failed.append(name)
+            continue
+        try:
+            print(label + fix_project(proj, branch, why, patches))
+        except Failed as e:
+            print(label + f"✗ {e}")
+            failed.append(name)
     if failed:
-        print(f"✗ {len(failed)} 条没做成：" + "；".join(failed))
+        print(f"✗ {len(failed)}个项目失败：" + "、".join(failed))
         sys.exit(1)
 
 

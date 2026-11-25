@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- 自然方向为横屏时，电源键（侧边指纹传感器）位于左边缘。SystemUI默认把竖直放置的侧边指纹传感器
-         视为位于右边缘；这一项由patches/android/frameworks-base/0005加入。 -->
+         视为位于右边缘；这一项由patches/android/frameworks-base/0004加入。 -->
     <bool name="config_sideFpsSensorOnLeftEdge">true</bool>
 </resources>

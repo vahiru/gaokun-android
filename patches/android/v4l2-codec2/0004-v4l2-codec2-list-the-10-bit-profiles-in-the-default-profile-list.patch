@@ -1,0 +1,42 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] v4l2_codec2: list the 10-bit profiles in the default profile
+ list
+
+When the driver has no profile control, V4L2Device::queryC2Profiles()
+falls back to a built-in list. The iris gen1 decoder has none (its
+capability table only has PIPE and STAGE), and the list only has 8-bit
+profiles, so HEVC Main 10 and VP9 Profile 2 are missing from
+MediaCodecList. Players that choose a decoder from these capabilities,
+such as mpv, decode 10-bit streams in software; ExoPlayer reports the
+format as unsupported but still tries the hardware decoder.
+
+Add PROFILE_VP9_2 and PROFILE_HEVC_MAIN_10. The similar list in
+DecodeInterface.cpp is only used when this one is empty.
+
+Origin: local
+Upstream-Status: Inappropriate [needs 10-bit decoding in the driver, patches/kernel/iris/0012]
+---
+ v4l2/V4L2Device.cpp | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/v4l2/V4L2Device.cpp b/v4l2/V4L2Device.cpp
+index d72219a..eab8d61 100644
+--- a/v4l2/V4L2Device.cpp
++++ b/v4l2/V4L2Device.cpp
+@@ -1756,7 +1756,7 @@ std::vector<C2Config::profile_t> V4L2Device::queryC2Profiles(uint32_t pixFmt) {
+     case V4L2_PIX_FMT_VP9_FRAME:
+         if (!getSupportedProfiles(VideoCodec::VP9, &profiles)) {
+             ALOGW("Driver doesn't support QUERY VP9 profiles, use default values, Profile0");
+-            profiles = {C2Config::PROFILE_VP9_0};
++            profiles = {C2Config::PROFILE_VP9_0, C2Config::PROFILE_VP9_2};
+         }
+         break;
+     case V4L2_PIX_FMT_HEVC:
+@@ -1766,6 +1766,7 @@ std::vector<C2Config::profile_t> V4L2Device::queryC2Profiles(uint32_t pixFmt) {
+                   "use default values, Main");
+             profiles = {
+                     C2Config::PROFILE_HEVC_MAIN,
++                    C2Config::PROFILE_HEVC_MAIN_10,
+             };
+         }
+         break;

@@ -1,0 +1,90 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] wifi: derive a stable factory MAC address from the SoC serial
+ number
+
+The WCN6855 on the Huawei MateBook E Go has no programmed MAC address.
+The firmware hands out 00:03:7f:12:xx:xx with the last two bytes random
+on every boot, and ath11k reports it as the permanent address, which is
+what WifiIfaceUtil::getFactoryMacAddress() returns. When connected MAC
+randomization is enabled and a network uses the device MAC, the
+framework sets the interface to this factory MAC before connecting, so
+the address cannot be made stable from userspace alone.
+
+Derive the address from /sys/devices/soc0/serial_number: the low six
+bytes of FNV-1a 64 over "gaokun3-wifi-mac:<interface>:<serial>", with
+the locally administered bit set and the multicast bit cleared. Each
+interface gets its own fixed address. Fall back to the permanent
+address when the serial number cannot be read. hal_wifi can already
+read all sysfs types. The device overlay sets
+config_wifiSaveFactoryMacToWifiConfigStore to false, so the framework
+does not keep using an address it stored earlier.
+
+The device overlay currently disables connected MAC randomization, so
+the framework does not set the interface address before connecting.
+device/huawei/gaokun3/bin/gaokun3-wlan-ap.sh therefore writes the same
+derived address to wlan0 at boot; the two implementations must stay
+identical.
+
+The serial number is 32 bits wide and can be recovered from the
+address by brute force. It is not a secret; the hash only keeps it out
+of the address in plain form.
+
+Origin: local
+Upstream-Status: Inappropriate [device-specific]
+---
+ wifi/aidl/default/wifi_iface_util.cpp | 28 +++++++++++++++++++++++++++
+ 1 file changed, 28 insertions(+)
+
+diff --git a/wifi/aidl/default/wifi_iface_util.cpp b/wifi/aidl/default/wifi_iface_util.cpp
+index 536812c..c06db19 100644
+--- a/wifi/aidl/default/wifi_iface_util.cpp
++++ b/wifi/aidl/default/wifi_iface_util.cpp
+@@ -16,6 +16,8 @@
+ 
+ #include <android-base/logging.h>
+ #include <android-base/macros.h>
++#include <android-base/file.h>
++#include <android-base/strings.h>
+ #include <net/if.h>
+ #include <private/android_filesystem_config.h>
+ 
+@@ -31,6 +33,30 @@ namespace {
+ constexpr uint8_t kMacAddressMulticastMask = 0x01;
+ constexpr uint8_t kMacAddressLocallyAssignedMask = 0x02;
+ 
++// Stable locally administered "factory" MAC derived from the SoC serial number. The board
++// has no programmed MAC, and the firmware hands out 00:03:7f:12:xx:xx with the last two
++// bytes random on every boot.
++bool gaokun3StableMac(const std::string& iface_name, std::array<uint8_t, 6>* mac) {
++    std::string serial;
++    if (!::android::base::ReadFileToString("/sys/devices/soc0/serial_number", &serial)) {
++        return false;
++    }
++    serial = ::android::base::Trim(serial);
++    if (serial.empty() || serial == "0") return false;
++    const std::string key = "gaokun3-wifi-mac:" + iface_name + ":" + serial;
++    uint64_t h = 0xcbf29ce484222325ULL;  // FNV-1a 64
++    for (unsigned char c : key) {
++        h ^= c;
++        h *= 0x100000001b3ULL;
++    }
++    for (size_t i = 0; i < mac->size(); i++) {
++        (*mac)[i] = static_cast<uint8_t>(h >> (8 * i));
++    }
++    (*mac)[0] &= ~kMacAddressMulticastMask;
++    (*mac)[0] |= kMacAddressLocallyAssignedMask;
++    return true;
++}
++
+ #ifdef WIFI_HAL_RETRY_SET_MAC_ADDRESS
+ // Constants to retry within setMacAddress()
+ constexpr uint32_t kMaxSetMacAddressRetries = 5;
+@@ -52,6 +78,8 @@ WifiIfaceUtil::WifiIfaceUtil(const std::weak_ptr<::android::wifi_system::Interfa
+       event_handlers_map_() {}
+ 
+ std::array<uint8_t, 6> WifiIfaceUtil::getFactoryMacAddress(const std::string& iface_name) {
++    std::array<uint8_t, 6> stable_mac;
++    if (gaokun3StableMac(iface_name, &stable_mac)) return stable_mac;
+     return iface_tool_.lock()->GetFactoryMacAddress(iface_name.c_str());
+ }
+ 

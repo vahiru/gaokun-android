@@ -2,7 +2,7 @@
  * GPU驱动兼容（设置 → 系统）：为选定的应用在GL_VERSION中报告高通驱动版本。
  *
  * 名单保存在Settings.Global的gaokun3_angle_gl_version_pkgs（逗号分隔的包名），默认为空。
- * patches/android/frameworks-base/0003经CoreSettingsObserver把它传给应用进程，
+ * patches/android/frameworks-base/0002经CoreSettingsObserver把它传给应用进程，
  * GraphicsEnvironment在应用启动时为名单中的应用设置ANGLE_GL_VERSION，原因见该补丁。
  *
  * 只列出带启动器图标的非系统应用。名单中已卸载应用的条目原样保留，重新安装后仍然生效。
@@ -41,7 +41,7 @@ import java.util.concurrent.Executors;
 
 public class GlDriverVersionSettingsActivity extends CollapsingToolbarBaseActivity {
 
-    /** 与frameworks-base/0003中GraphicsEnvironment的ANGLE_GL_VERSION_PKGS相同。 */
+    /** 与frameworks-base/0002中GraphicsEnvironment的ANGLE_GL_VERSION_PKGS相同。 */
     static final String SETTING = "gaokun3_angle_gl_version_pkgs";
 
     @Override

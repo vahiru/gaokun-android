@@ -6,7 +6,7 @@
 #   SER=<ip>:5555 bash scripts/audio/play-latency-verify.sh <带补丁的 HAL 二进制> [gaokun3-play-probe]
 #   可选环境变量：N=<每份 HAL 开流次数，默认 16>
 #
-#   HAL 二进制：构建机上 crdroid-tree-fixes.py 打好 [17] 之后 `m com.android.hardware.audio`，取
+#   HAL二进制：构建机上crdroid-tree-fixes.py应用hardware-interfaces/0006之后执行`m com.android.hardware.audio`，取
 #     out/target/product/gaokun3/apex/com.android.hardware.audio/bin/hw/android.hardware.audio.service-aidl.example
 #   gaokun3-play-probe（device/huawei/gaokun3/audio/tools/play-probe.c）用 NDK 编：
 #     $NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang -O2 -Wall -Werror \

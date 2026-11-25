@@ -1,0 +1,30 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] Android.bp: let device/huawei/gaokun3 use
+ webrtc_audio_processing
+
+The microphone array capture hook in device/huawei/gaokun3/micarray
+runs echo cancellation for voice communication streams with AEC3 from
+this library, because the audio HAL does not support the pre-processing
+effects AudioFlinger adds (addEffect returns -38).
+webrtc_audio_processing is available to vendor modules, but its
+visibility only lists the frameworks/av pre-processing library,
+cuttlefish and //vendor:__subpackages__. Add
+//device/huawei/gaokun3:__subpackages__.
+
+Origin: local
+Upstream-Status: Inappropriate [device-specific]
+---
+ Android.bp | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/Android.bp b/Android.bp
+index 3dd5608..ecdc2b5 100644
+--- a/Android.bp
++++ b/Android.bp
+@@ -6441,5 +6441,6 @@ cc_library_static {
+     },
+     visibility: [
+         "//vendor:__subpackages__",
++        "//device/huawei/gaokun3:__subpackages__",
+     ],
+ }

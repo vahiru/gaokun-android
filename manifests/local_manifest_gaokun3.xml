@@ -55,7 +55,7 @@
         include/Android.bp          cc_library_headers "hexagonrpc_headers"
 
     ⚠️ 必须自己补的集成点只有一个：上游【没有】CR 截断补丁，缺了 DSP 读不到
-    传感器注册表 → 由 scripts/crdroid-tree-fixes.py 打（幂等）。
+    传感器注册表 → patches/android/hexagonrpc/0001，由scripts/crdroid-tree-fixes.py打入。
 
     ★ hexagonrpc_defaults 里 header_libs 的 "device_kernel_headers" 【不用管】：
       AOSP 自己就在 build/soong/Android.bp:56 用 kernel_headers 模块类型定义了它
@@ -67,7 +67,7 @@
       与 5 个 uapi struct，bionic 的 uapi/misc/fastrpc.h 里本来就全有。
 
     revision 钉在实测通过的这个 commit（2026-08-13 "bump to version 0.5.0"）。
-    上游若改动 copy_segment_and_advance()，tree-fixes 脚本会报"找不到锚点"
+    上游若改动copy_segment_and_advance()，crdroid-tree-fixes.py会报告补丁无法应用，
     而不是静默打歪 —— 那时再评估要不要跟进。
     许可证 GPL-3.0（装进 vendor 分区）。
   -->

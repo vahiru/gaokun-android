@@ -1,0 +1,34 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] msm: allow P010 scanout on all targets
+
+msm_init() adds BO_USE_SCANOUT and BO_USE_HW_VIDEO_ENCODER to P010 only
+in SC7280 builds. On SC8280XP, 10-bit video in a SurfaceView fails with
+"Unsupported combination" (P010 with HW_COMPOSER usage): the decoder
+gets no output buffers and reports no error.
+
+Drop the #ifdef. This needs a GPU driver that can sample P010
+(patches/mesa/0002): RenderEngine aborts on a P010 buffer it cannot
+sample, and on the Huawei MateBook E Go video layers are rotated by the
+GPU, so they always reach it.
+
+Origin: local
+Upstream-Status: Inappropriate [needs P010 sampling in the GPU driver, patches/mesa/0002]
+---
+ msm.c | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/msm.c b/msm.c
+index 90a602c..9fb3472 100644
+--- a/msm.c
++++ b/msm.c
+@@ -269,10 +269,8 @@ static int msm_init(struct driver *drv)
+ 	/* Android CTS tests require this. */
+ 	drv_add_combination(drv, DRM_FORMAT_BGR888, &LINEAR_METADATA, BO_USE_SW_MASK);
+ 
+-#ifdef SC_7280
+ 	drv_modify_combination(drv, DRM_FORMAT_P010, &LINEAR_METADATA,
+ 			       BO_USE_SCANOUT | BO_USE_HW_VIDEO_ENCODER);
+-#endif
+ 
+ 	drv_modify_linear_combinations(drv);
+ 

@@ -14,7 +14,7 @@
     OVERRIDE_RESPECT_REQUESTED_ORIENTATION（236283604）：屏幕忽略方向请求时，仍响应它的方向请求，转为竖屏，
       而不是在横屏中居中显示（DisplayArea.shouldIgnoreOrientationRequest()）。
   覆盖按应用生效：Aperture中没有声明方向的设置页和锁屏相机（SettingsActivity、SecureCameraActivity）同样
-  转为竖屏。从Aperture进入最近任务时屏幕要转回横屏，这需要patches/android/frameworks-base/0004。
+  转为竖屏。从Aperture进入最近任务时屏幕要转回横屏，这需要patches/android/frameworks-base/0003。
 -->
 <overrides>
     <change-overrides changeId="265452344">

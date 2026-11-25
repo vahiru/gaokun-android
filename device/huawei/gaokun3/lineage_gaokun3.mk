@@ -111,7 +111,7 @@ WITH_ADB_INSECURE := true
 #    "user" 反倒是对外如实的身份；指纹里的 userdebug 是真实变体，也不该改。
 #    ✅ 10-18 构建机核实：是 crDroid 自己的改动（soong 45aecb5b2 / build/make 74b87074f7，"Turn off debug props on
 #    userdebug builds"），gen_build_prop.py:28-32 与 sysprop.mk 的分区 build.type 都改成"非 eng 即 user"；
-#    指纹那头没改，由 scripts/crdroid-tree-fixes.py 的 tree-fix [23] 补齐。
+#    指纹部分未修改，由patches/android/build-make/0001补齐。
 #
 # 2) init 的属性加载是【后来者覆盖】（property_service.cpp:807-815
 #    的 map 插入：已存在且不同就 it->second = value），
@@ -219,7 +219,7 @@ TARGET_DISABLE_FASTBOOTD := true
 #     A16 装了 ParanoidSense，A17 默认【不装】。这等于替 v1.0-plan D23 / HW-10（人脸解锁保留与否，测完再定）做了「去掉」
 #     的决定 —— 要保留就在这里加 TARGET_FACE_UNLOCK_SUPPORTED := true（同 TARGET_DISABLE_FASTBOOTD，普通全局变量）。⬜ 待用户定；
 #   · common.mk 删掉了 debug.graphics.game_default_frame_rate.disabled=true —— 由 device.mk 补回，理由见那里；
-#   · 早期同步的common.mk对userdebug也安装adb_root（16.0只在WITH_SU=true时安装），由修补[24]改回WITH_SU门控；
+#   · 早期同步的common.mk对userdebug也安装adb_root（16.0只在WITH_SU=true时安装）；
 #     crDroid上游82c2c41049起只在eng构建中安装 —— 见device.mk中adb_root一节。
 $(call inherit-product, vendor/lineage/config/common_full_tablet_wifionly.mk)
 
@@ -291,11 +291,11 @@ $(call inherit-product-if-exists, vendor/gapps/arm64/arm64-vendor.mk)
 #   （这个坑很贵：不实测的话，这一版会带着 Google 欢迎页发出去，
 #     而我会以为已经删掉了。）
 #
-# ⇒ 正确做法是**改源头**：由 scripts/crdroid-tree-fixes.py 从
+# ⇒ 正确做法是**改源头**：patches/android/vendor-gapps/0001从
 #   vendor/gapps/arm64/arm64-vendor.mk 里删掉这两个包名，
 #   并从 vendor/gapps/arm64/Android.bp 里删掉 libjni_latinimegoogle 模块
-#   （它与 packages/inputmethods/LatinIME 撞名，见那里的注释）。
-#   repo sync 会还原 vendor/gapps，所以 tree-fixes 每次构建前都要跑（幂等）。
+#   （它与packages/inputmethods/LatinIME的模块重名，见补丁说明），
+#   由scripts/crdroid-tree-fixes.py在每次构建前打入。
 
 # 动态分区（super）。这是 product 变量，必须设在这里而不是 BoardConfig.mk
 # —— 后者解析时它已经只读了（build/make/core/product.mk:311）。

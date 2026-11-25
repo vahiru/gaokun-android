@@ -1,0 +1,102 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] gapps: drop SetupWizard and the modules that clash with
+ crDroid
+
+Three changes for building MindTheGapps into crDroid:
+
+- Remove SetupWizard from PRODUCT_PACKAGES. Google's setup wizard must
+  reach Google servers during setup and cannot get past the welcome
+  screen without them. crDroid's LineageSetupWizard stays.
+  GmsSetupWizardOverlay targets org.lineageos.setupwizard and only sets
+  appearance flags, so nothing hands the flow to the Google wizard.
+- Remove libjni_latinimegoogle from PRODUCT_PACKAGES and its module from
+  arm64/Android.bp. packages/inputmethods/LatinIME defines a prebuilt
+  with the same name. Both set prefer: true, which cannot decide between
+  two prebuilts, and Kati stops with "already defined".
+- Remove google.xml from PRODUCT_PACKAGES and its module from
+  common/Android.bp. vendor/addons installs its own
+  product/etc/sysconfig/google.xml, which covers this one except for an
+  entry for an app MindTheGapps does not ship, and the second install
+  rule fails with "overriding commands for target". Soong generates
+  install rules for every module in the namespace, so removing it from
+  PRODUCT_PACKAGES alone is not enough.
+
+Filtering the packages out in the device tree has no effect, since
+PRODUCT_PACKAGES is derived from the inheritance graph.
+
+Origin: local
+Upstream-Status: Inappropriate [crDroid-specific]
+---
+ arm64/Android.bp        | 7 -------
+ arm64/arm64-vendor.mk   | 2 --
+ common/Android.bp       | 8 --------
+ common/common-vendor.mk | 1 -
+ 4 files changed, 18 deletions(-)
+
+diff --git a/arm64/Android.bp b/arm64/Android.bp
+index c800163..1a83492 100644
+--- a/arm64/Android.bp
++++ b/arm64/Android.bp
+@@ -94,13 +94,6 @@ android_app_import {
+     product_specific: true,
+ }
+ 
+-cc_prebuilt_library_shared {
+-    name: "libjni_latinimegoogle",
+-    srcs: ["proprietary/product/lib64/libjni_latinimegoogle.so"],
+-    prefer: true,
+-    product_specific: true,
+-}
+-
+ prebuilt_apex {
+     name: "com.google.android.gmssystem.prodvic",
+     owner: "gapps",
+diff --git a/arm64/arm64-vendor.mk b/arm64/arm64-vendor.mk
+index 8880865..b205b53 100644
+--- a/arm64/arm64-vendor.mk
++++ b/arm64/arm64-vendor.mk
+@@ -6,13 +6,11 @@ PRODUCT_SOONG_NAMESPACES += \
+ 
+ PRODUCT_PACKAGES += \
+     Phonesky \
+-    libjni_latinimegoogle \
+     com.google.android.gmssystem.prodvic
+ 
+ ifeq ($(TARGET_IS_GROUPER),)
+ PRODUCT_PACKAGES += \
+     MarkupGoogle_v2 \
+-    SetupWizard \
+     SpeechServicesByGoogle \
+     Velvet \
+     talkback
+diff --git a/common/Android.bp b/common/Android.bp
+index f84d5a2..a6fca59 100644
+--- a/common/Android.bp
++++ b/common/Android.bp
+@@ -188,14 +188,6 @@ prebuilt_etc {
+     product_specific: true,
+ }
+ 
+-prebuilt_etc {
+-    name: "google.xml",
+-    src: "proprietary/product/etc/sysconfig/google.xml",
+-    relative_install_path: "sysconfig",
+-    filename_from_src: true,
+-    product_specific: true,
+-}
+-
+ prebuilt_etc {
+     name: "privapp-permissions-google-product.xml",
+     src: "proprietary/product/etc/permissions/privapp-permissions-google-product.xml",
+diff --git a/common/common-vendor.mk b/common/common-vendor.mk
+index 6f4321e..30856b1 100644
+--- a/common/common-vendor.mk
++++ b/common/common-vendor.mk
+@@ -21,7 +21,6 @@ PRODUCT_PACKAGES += \
+     gapps.rc \
+     gms_fsverity_cert.der \
+     google-hiddenapi-package-allowlist.xml \
+-    google.xml \
+     privapp-permissions-google-product.xml \
+     privapp-permissions-google-system_ext.xml \
+     privapp-permissions-mtg.xml \
