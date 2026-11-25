@@ -26,3 +26,11 @@ sysinfo: 1
 statfs: 1
 fstatfs: 1
 newfstatat: 1
+
+# 崩溃转储所需。服务以no_new_privs运行，bionic的debuggerd信号处理函数因此不启动crash_dump，
+# 而在本进程的信号处理函数里抓取堆栈、写tombstone。处理函数屏蔽了全部信号，这时被拦截的系统调用
+# 会让内核以默认动作发出SIGSYS：服务被直接结束，也不留下tombstone。实测拦截的是这两个：
+#   getppid —— 抓取堆栈（debuggerd -b，bugreport抓原生堆栈时即是如此）；
+#   uname   —— 写完整的tombstone（debuggerd，服务自身崩溃时）。
+getppid: 1
+uname: 1
