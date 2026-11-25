@@ -57,6 +57,9 @@ KPATCHES=(
     # 只改arm-smmu-qcom.c并新增include/linux/qcom_iommu_cp_nonpixel.h，与其它子系统正交。
     # kernel/iris/0013依赖这里先建立CP非像素bank；iris映射ARP之前不映射任何东西。
     kernel/iommu/0001-iommu-arm-smmu-qcom-add-the-SC8280XP-CP-non-pixel-context.patch
+    # 0002让CB15只在第一个映射建立时编程（编程过程先写SCTLR=0，不能在另一路编码进行中重写），映射前检查窗口与对齐，
+    # 映射可跨越叶页表；供kernel/iris/0034的多路编码使用。
+    kernel/iommu/0002-iommu-arm-smmu-qcom-keep-the-CP-non-pixel-bank-live-across-several-mappings.patch
 
     # ─── 2. kernel/pcie-pm：PCIe、NVMe、cpuidle、系统休眠与唤醒基础设施 ───
     # 深度待机与 PCIe / NVMe 恢复处理详见 docs/dev/deep-sleep.md。
@@ -215,6 +218,10 @@ KPATCHES=(
     kernel/iris/0031-media-iris-report-why-a-firmware-boot-shutdown-or-reload-failed.patch
     kernel/iris/0032-media-iris-clear-the-boot-handshake-before-releasing-the-firmware.patch
     kernel/iris/0033-media-iris-run-the-firmware-reload-on-the-freezable-workqueue.patch
+    # 0034给每个编码会话在CP非像素窗口里分配自己的ARP槽位（8个256 KiB，槽位0即原来的0x01000000），需iommu/0002；
+    # 0035在固件拒绝SESSION_INIT时让第一次REQBUFS失败，而不是等到STREAMON才报-EBUSY。叠在0027–0033之上。
+    kernel/iris/0034-media-iris-give-every-encoder-session-its-own-CP-non-pixel-ARP-slot.patch
+    kernel/iris/0035-media-iris-gen1-fail-the-session-open-when-the-firmware-rejects-it.patch
 
     # ─── 7. kernel/camera：camcc 时钟/GDSC、camss 与前后摄传感器驱动（ov13b10 / hi846 / s5k4h7 / s5k3l6）───
     # 0003 与 kernel/dts/0005 配套，需 CONFIG_VIDEO_OV13B10=y 与 CONFIG_VIDEO_DW9714=y；

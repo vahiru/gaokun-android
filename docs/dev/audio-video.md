@@ -192,7 +192,10 @@ TX_DEC0 Volume = 102, TX_DEC1 Volume = 102
 `qcom-iris`的gen1编码路径在SC8280XP上要额外满足一条硬件约束：编码器固件通过内容保护非像素流SID `0x2a04`访问它的ARP（auto-register programming）PERSIST缓冲，而这条流只能经由`apps_smmu`上CBAR VMID为`0xb`（CP_NON_PIXEL）的stage-1上下文bank翻译。ARP若留在`iris`主域（SID `0x2a00`）上，第一次编码就会让整板复位。Windows的`qcsmmu8280.sys`从host侧配置这块bank，主线`arm-smmu`没有secure-VMID支持，所以由下游补丁完成：
 
 - **`patches/kernel/iommu/0001`（`arm-smmu-qcom`）**：`cfg_probe`时预留CB15、写CBAR（VMID `0xb`）、加`0x2a04`的SME，成功时打印`cp-nonpixel: CB15 ready`。bank号固定为15，与Windows相同：把`0x2a04`绑到另一个VMID相同的bank时启动挂住。页表经io-pgtable的自定义分配器分配，每个表页用`qcom_scm_assign_mem`赋给`{HLOS RW, 0xb R}`。系统resume的reset会清掉这块bank，SoC的reset钩子随后重新编程它。`0x2a04`不能写进`iris`主节点的`iommus`：那样它会被绑到`iris`的HLOS bank，启动时挂住。
+- **`patches/kernel/iommu/0002`**：CB15允许同时存在多个映射，只在映射数从0变为1时编程一次。编程过程先把SCTLR写成0，若在另一路编码进行中重写，那一路的ARP访问会落到翻译已关闭的bank上。映射前检查IOVA在窗口内且按页对齐，映射可以跨越叶页表；解除映射时计数，大小对不上时告警并保留计数。系统resume时仍无条件重新编程。
 - **`patches/kernel/iris/0013`**：编码器的`BUF_ARP`分配为连续内存，页独占赋给VMID `0xb`（HLOS与`0xb`共享的授予会被hypervisor拒绝），映射进CB15在窗口`0x01000000..0x25800000`内的固定IOVA `0x01000000`，并把该IOVA交给固件；拆除时反向还原，页无法交还HLOS时宁可泄漏也不释放。
+- **`patches/kernel/iris/0034`**：ARP改按会话分配IOVA：窗口起点起8个256 KiB的槽位（槽位0即原来的`0x01000000`），由一个全局的IDA管理。槽位在任何SCM调用之前取得，在解除映射之后释放，页泄漏时也释放；8个都占用时开流返回`-EBUSY`并记录`all … CP non-pixel slots in use`。8个槽位都在已有的那一张2 MiB叶页表里，不需要新的页表页。IDA放在文件作用域而不是`iris_core`里，因为CB15与它的页表是全系统唯一的，比单个`iris_core`活得久。
+- **`patches/kernel/iris/0035`**：固件拒绝SESSION_INIT时（例如会话数超出固件上限），原来只把实例置为错误，REQBUFS照常成功，直到STREAMON才返回`-EBUSY`；现在第一次REQBUFS即失败，并记录`init failed`。
 - **`patches/kernel/iris/0014`**：gen1编码器的档次/级别改发HFI位掩码值（原来发V4L2枚举，HEVC Main会被固件当成Main Still Picture）；级别按分辨率和帧率推导。同时修正该属性的payload大小（原来少分配4字节）。
 - **`patches/kernel/iris/0015`**：编码器EMPTY_BUFFER时间戳按微秒发（固件码率控制按微秒读，发纳秒会让码率严重超标），响应侧转回纳秒。
 - **`patches/kernel/iris/0016`**：回移主线v7.3的强制关键帧控制`V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME`。`v4l2_codec2`每到关键帧间隔都设这个控件，设不上就判编码失败。
@@ -210,15 +213,15 @@ TX_DEC0 Volume = 102, TX_DEC1 Volume = 102
 
 #### 设备配置
 
-- `device.mk`：`ro.vendor.v4l2_codec2.encoder.supported.h264`、`.hevc`设为`true`，`ro.vendor.v4l2_codec2.encode_concurrent_instances=1`。VP8/VP9编码iris没有，保持关闭。
-- `media_codecs_c2.xml`：两个编码器的`<Encoders>`条目，`concurrent-instances`为1。尺寸和吞吐量上限按4K30申报，实测只做到1080p 30 fps。
-- 组件rank是0x80，排在软编（0x200）前面。第二个编码请求在分配组件时被拒（`maximum number of instances reached`，返回资源不足）。`MediaCodec`遇到资源不足会先请资源管理器从优先级更低的进程收回一个硬件编解码器再重试，收不回才试下一个编码器，落到`c2.android.*`软编。因此按框架代码，优先级更高的一方会让正在编码的应用失去编码器（`ERROR_RECLAIMED`），例如前台相机录像时从快捷设置启动系统录屏，尚未经实测；优先级不高于对方时，第二路才会直接换软编。原生进程（例如shell里的`screenrecord`）既不会收回别人的编码器，也不会被收回。硬件编码器配置失败时，`MediaRecorder`同样会换下一个编码器；自己调用`configure`的应用拿到的是错误。
+- `device.mk`：`ro.vendor.v4l2_codec2.encoder.supported.h264`、`.hevc`设为`true`，`ro.vendor.v4l2_codec2.encode_concurrent_instances=3`（AVC与HEVC共用这一个计数，需`kernel/iommu/0002`、`kernel/iris/0034`与`kernel/dts/0026`）。VP8/VP9编码iris没有，保持关闭。
+- `media_codecs_c2.xml`：两个编码器的`<Encoders>`条目，`concurrent-instances`为3。尺寸和吞吐量上限按4K30申报，偏保守：单路裸V4L2编码实测1080p约390 fps、4096x2176约97 fps。
+- 组件rank是0x80，排在软编（0x200）前面。第四个编码请求在分配组件时被拒（`maximum number of instances reached`，返回资源不足）。`MediaCodec`遇到资源不足会先请资源管理器从优先级更低的进程收回一个硬件编解码器（解码器也算在内）再重试，收不回才试下一个编码器，落到`c2.android.*`软编。因此按框架代码，优先级更高的一方会让优先级较低的应用失去编解码器（`ERROR_RECLAIMED`），尚未经实测；优先级不高于对方时，才会直接换软编。原生进程（例如shell里的`screenrecord`）既不会收回别人的编码器，也不会被收回。硬件编码器配置失败时，`MediaRecorder`同样会换下一个编码器；自己调用`configure`的应用拿到的是错误。
 - 验证：`scripts/verify-hw-codec2.sh`检查属性、编码节点属主、`cp-nonpixel: CB15 ready`和组件列表，亮屏时用`screenrecord --codec-name c2.v4l2.avc.encoder`在1280x720和640x480各真编一段。
 
 #### 已知限制
 
-- **一次只有一个编码会话**：ARP在固定IOVA。窗口内的另一处IOVA（`0x10000000`）实测可用，支持并发需要在窗口上做IOVA分配。
+- **同时最多3路编码**：内核有8个ARP槽位，`v4l2_codec2`按3路限制。固件出错重载时，所有正在进行的编解码会话一起报错。三路同时编码时偶尔有一帧不带码流返回，原因尚在调查。
 - **没有HEVC Main 10和HDR编码**：输入只有8位NV12。
-- **系统录屏会换用软编**：系统录屏按解码器的能力和120 Hz刷新率选尺寸和帧率（横屏约2560x1600@117，竖屏约1360x2176@120），码率约70–96 Mbps，超出H.264 5.1级和组件50 Mbps的码率上限，硬件编码器配置失败，按框架代码会换用软编，尚未经实测。`adb shell screenrecord`不带`--size`时会改用1280x720重试。
+- **系统录屏**：系统录屏按30 fps申报，横屏录2560x1600，竖屏按解码器的能力缩到1360x2176（竖屏尚未经实测），默认用硬件H.264编码器，打开“HEVC编码”时用硬件HEVC编码器，不会换用软编。输入是可变帧率，滑动画面时可有接近120 fps的突发。`adb shell screenrecord`不带`--size`时会改用1280x720重试。
 - **很小的尺寸**：宽或高按驱动的对齐（128x32）之后仍小于128时（例如160x90），内核在申请缓冲时拒绝（`current session not supported`），应用在开始编码时拿到错误。原始尺寸小于128、对齐后不小于128的（例如160x120、100x100），固件能正常编码，并在SPS里写明裁剪。
 - **唤醒后偶发一次无输出**：休眠唤醒后紧接着编码，偶尔会有一次两个编码器都一帧不出：固件把每一帧都不带码流地返回，内核记录`encoder frame without bitstream`告警（`patches/kernel/iris/0025`），随后的编码自行恢复。原因不明。

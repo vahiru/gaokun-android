@@ -1,0 +1,257 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] iommu/arm-smmu-qcom: keep the CP non-pixel bank live across
+ several mappings
+
+qcom_iommu_cp_nonpixel_map() rewrites the whole CB15 bank after every
+successful map, and that sequence starts by writing SCTLR to 0. While
+the iris driver could map only one encoder ARP at a time this did not
+matter. Once a second encoder session maps its ARP while the first one
+is encoding, the first session's ARP traffic on SID 0x2a04 would meet a
+bank with translation disabled for the length of the rewrite, and its
+accesses would go out untranslated.
+
+Count the live mappings under the existing lock. Program the bank only
+when the count goes from 0 to 1, which is exactly the sequence a single
+session has always used; later mappings go into the already active page
+table and only get a TLB invalidation. Unmap decrements the count and
+warns if the count would underflow or if less than the requested size
+was unmapped; in that case the mapping is still counted as live, so a
+later map cannot rewrite the bank under it. The resume reset path keeps
+reprogramming the bank unconditionally, since a resume clears CB15 but
+the page table in RAM survives.
+
+Also reject ranges that are not 4 KiB aligned or do not lie in the
+content-protection non-pixel window, and stop ignoring how much a
+single io-pgtable call mapped: arm_lpae_map_pages() maps only up to the
+end of one leaf table and still returns 0, so a range across a 2 MiB
+boundary used to be left half mapped. Map and unmap now walk the range.
+
+Update the header comment: the caller picks the IOVA, the map helper
+returns an error code rather than an IOVA, and several disjoint
+mappings may coexist in the bank's one page table.
+
+Origin: local
+Upstream-Status: Inappropriate [SoC-specific secure-VMID setup, no mainline arm-smmu support]
+Assisted-by: Claude:claude-opus-5-5
+---
+ drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c | 104 +++++++++++++++++----
+ include/linux/qcom_iommu_cp_nonpixel.h     |  18 ++--
+ 2 files changed, 99 insertions(+), 23 deletions(-)
+
+diff --git a/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c b/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c
+index 8fe910cbbd..29754164ba 100644
+--- a/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c
++++ b/drivers/iommu/arm/arm-smmu/arm-smmu-qcom.c
+@@ -462,8 +462,9 @@ static int qcom_smmu_init_context(struct arm_smmu_domain *smmu_domain,
+  * no 16-bit VMIDs, so the VMID lives in CBAR[7:0] alone. Windows' qcsmmu8280
+  * sets this up from the host; mainline arm-smmu has no secure-VMID support,
+  * so build the bank here for this SoC's apps_smmu and let the iris driver map
+- * its ARP into it with qcom_iommu_cp_nonpixel_map(). The bank maps nothing
+- * until then.
++ * the ARP of each encoder session into it with qcom_iommu_cp_nonpixel_map().
++ * The bank maps nothing until then. All sessions share its one page table;
++ * the caller gives each mapping its own IOVA.
+  */
+ #define QCOM_CPNP_CB_IDX	15
+ #define QCOM_CPNP_CBAR		0x0001a20b	/* S1 trans, VMID 0xb = CP_NON_PIXEL */
+@@ -472,11 +473,20 @@ static int qcom_smmu_init_context(struct arm_smmu_domain *smmu_domain,
+ #define QCOM_VMID_CP_NON_PIXEL	0xb
+ #define QCOM_CPNP_SMMU_BASE	0x15000000	/* the apps_smmu that serves iris */
+ 
++/*
++ * The content-protection non-pixel window that iris registers with TZ for
++ * VPU2 (tz_cp_config cp_nonpixel_start/size). The ARP has to sit inside it,
++ * so a mapping outside it is a caller bug.
++ */
++#define QCOM_CPNP_IOVA_START	0x01000000UL
++#define QCOM_CPNP_IOVA_END	0x25800000UL
++
+ static struct {
+ 	struct arm_smmu_device	*smmu;	/* set once the bank is reserved */
+ 	struct io_pgtable_ops	*ops;	/* built lazily on the first map */
+ 	struct io_pgtable_cfg	cfg;
+-	struct mutex		lock;
++	unsigned int		nr_mapped;	/* live mappings */
++	struct mutex		lock;	/* protects ops, nr_mapped and the bank */
+ } qcom_cpnp = { .lock = __MUTEX_INITIALIZER(qcom_cpnp.lock) };
+ 
+ /* Table pages are shared with CP_NON_PIXEL, like qcsmmu8280 does. */
+@@ -555,10 +565,11 @@ static irqreturn_t qcom_cpnp_fault(int irq, void *data)
+ }
+ 
+ /*
+- * Write the whole bank. Called on the first map and again from the SoC reset
+- * path on every resume: a resume reset clears this bank (it has no normal
+- * cb->cfg), but the page table in RAM survives, so reprogramming the registers
+- * restores translation.
++ * Write the whole bank. Called when the first mapping goes live and again from
++ * the SoC reset path on every resume: a resume reset clears this bank (it has
++ * no normal cb->cfg), but the page table in RAM survives, so reprogramming the
++ * registers restores translation. The sequence passes SCTLR through 0, so it
++ * must not run while a mapping is in use.
+  */
+ static void qcom_cpnp_program(struct arm_smmu_device *smmu)
+ {
+@@ -584,6 +595,8 @@ static void qcom_cpnp_program(struct arm_smmu_device *smmu)
+ 	arm_smmu_cb_write(smmu, QCOM_CPNP_CB_IDX, ARM_SMMU_CB_FSR, ARM_SMMU_CB_FSR_FAULT);
+ 	qcom_cpnp_tlb_inv(smmu);
+ 	arm_smmu_cb_write(smmu, QCOM_CPNP_CB_IDX, ARM_SMMU_CB_SCTLR, sctlr);
++	dev_dbg(smmu->dev, "cp-nonpixel: CB%d programmed, %u live mappings\n",
++		QCOM_CPNP_CB_IDX, qcom_cpnp.nr_mapped);
+ }
+ 
+ static int qcom_cpnp_init(struct arm_smmu_device *smmu)
+@@ -623,18 +636,44 @@ bool qcom_iommu_cp_nonpixel_available(void)
+ EXPORT_SYMBOL_GPL(qcom_iommu_cp_nonpixel_available);
+ 
+ /*
+- * Map @size bytes of @pa at @iova in the CP non-pixel bank and (re)program the
+- * bank. @iova must lie in the content-protection window; the caller assigns
+- * the pages to CP_NON_PIXEL first. The mapping is removed with the unmap.
++ * Unmap up to @size bytes at @iova. io-pgtable stops at the end of a leaf
++ * table, so walk the range; returns how much was unmapped.
++ */
++static size_t qcom_cpnp_unmap_range(unsigned long iova, size_t size)
++{
++	size_t unmapped = 0, n;
++
++	while (unmapped < size) {
++		n = qcom_cpnp.ops->unmap_pages(qcom_cpnp.ops, iova + unmapped, SZ_4K,
++					       (size - unmapped) / SZ_4K, NULL);
++		if (!n)
++			break;
++		unmapped += n;
++	}
++	return unmapped;
++}
++
++/*
++ * Map @size bytes of @pa at @iova in the CP non-pixel bank. The range must be
++ * 4 KiB aligned, lie in the content-protection window and not overlap a live
++ * mapping; the caller assigns the pages to CP_NON_PIXEL first. The mapping is
++ * removed with the unmap.
+  */
+ int qcom_iommu_cp_nonpixel_map(unsigned long iova, phys_addr_t pa, size_t size)
+ {
+ 	struct arm_smmu_device *smmu = qcom_cpnp.smmu;
+ 	size_t mapped = 0;
+-	int ret;
++	int ret = 0;
+ 
+ 	if (!smmu)
+ 		return -ENODEV;
++	if (!size || !IS_ALIGNED(iova | pa | size, SZ_4K) ||
++	    iova < QCOM_CPNP_IOVA_START || iova >= QCOM_CPNP_IOVA_END ||
++	    size > QCOM_CPNP_IOVA_END - iova) {
++		dev_err(smmu->dev, "cp-nonpixel: refusing to map %#zx bytes at %#lx\n",
++			size, iova);
++		return -EINVAL;
++	}
+ 
+ 	mutex_lock(&qcom_cpnp.lock);
+ 	if (!qcom_cpnp.ops) {
+@@ -642,15 +681,32 @@ int qcom_iommu_cp_nonpixel_map(unsigned long iova, phys_addr_t pa, size_t size)
+ 		if (ret)
+ 			goto out;
+ 	}
+-	ret = qcom_cpnp.ops->map_pages(qcom_cpnp.ops, iova, pa, SZ_4K, size / SZ_4K,
+-				       IOMMU_READ | IOMMU_WRITE, GFP_KERNEL, &mapped);
++	/* Each call maps at most up to the end of one leaf table. */
++	while (!ret && mapped < size)
++		ret = qcom_cpnp.ops->map_pages(qcom_cpnp.ops, iova + mapped, pa + mapped,
++					       SZ_4K, (size - mapped) / SZ_4K,
++					       IOMMU_READ | IOMMU_WRITE, GFP_KERNEL,
++					       &mapped);
+ 	if (ret) {
+ 		if (mapped)
+-			qcom_cpnp.ops->unmap_pages(qcom_cpnp.ops, iova, SZ_4K,
+-						   mapped / SZ_4K, NULL);
++			qcom_cpnp_unmap_range(iova, mapped);
+ 		goto out;
+ 	}
+-	qcom_cpnp_program(smmu);
++	/*
++	 * Programming the bank passes SCTLR through 0, and the ARP of another
++	 * encoder session that is mapped at that moment would then be accessed
++	 * without translation. So program it only for the first live mapping.
++	 * Later mappings go into the same, already active page table and only
++	 * get the TLB invalidation that programming also does. A resume reset
++	 * is handled by qcom_cpnp_resume().
++	 */
++	if (!qcom_cpnp.nr_mapped)
++		qcom_cpnp_program(smmu);
++	else
++		qcom_cpnp_tlb_inv(smmu);
++	qcom_cpnp.nr_mapped++;
++	dev_dbg(smmu->dev, "cp-nonpixel: mapped %#zx bytes at %#lx, %u live\n",
++		size, iova, qcom_cpnp.nr_mapped);
+ out:
+ 	mutex_unlock(&qcom_cpnp.lock);
+ 	return ret;
+@@ -660,13 +716,27 @@ EXPORT_SYMBOL_GPL(qcom_iommu_cp_nonpixel_map);
+ void qcom_iommu_cp_nonpixel_unmap(unsigned long iova, size_t size)
+ {
+ 	struct arm_smmu_device *smmu = qcom_cpnp.smmu;
++	size_t unmapped;
+ 
+ 	if (!smmu || !qcom_cpnp.ops)
+ 		return;
++	if (WARN_ON(!size || !IS_ALIGNED(iova | size, SZ_4K)))
++		return;
+ 
+ 	mutex_lock(&qcom_cpnp.lock);
+-	qcom_cpnp.ops->unmap_pages(qcom_cpnp.ops, iova, SZ_4K, size / SZ_4K, NULL);
++	unmapped = qcom_cpnp_unmap_range(iova, size);
+ 	qcom_cpnp_tlb_inv(smmu);
++	/*
++	 * Only a complete unmap ends a mapping. Anything else is a caller bug;
++	 * keep counting the mapping as live then, so that a later map cannot
++	 * reprogram the bank under it.
++	 */
++	if (!WARN(unmapped != size || !qcom_cpnp.nr_mapped,
++		  "cp-nonpixel: unmapped %#zx of %#zx bytes at %#lx, %u live\n",
++		  unmapped, size, iova, qcom_cpnp.nr_mapped))
++		qcom_cpnp.nr_mapped--;
++	dev_dbg(smmu->dev, "cp-nonpixel: unmapped %#zx bytes at %#lx, %u live\n",
++		unmapped, iova, qcom_cpnp.nr_mapped);
+ 	mutex_unlock(&qcom_cpnp.lock);
+ }
+ EXPORT_SYMBOL_GPL(qcom_iommu_cp_nonpixel_unmap);
+diff --git a/include/linux/qcom_iommu_cp_nonpixel.h b/include/linux/qcom_iommu_cp_nonpixel.h
+index 5dab092e93..c21994537e 100644
+--- a/include/linux/qcom_iommu_cp_nonpixel.h
++++ b/include/linux/qcom_iommu_cp_nonpixel.h
+@@ -5,8 +5,10 @@
+  * The iris hardware video encoder's firmware reaches its ARP (auto-register
+  * programming) PERSIST buffer through the CP non-pixel stream SID 0x2a04,
+  * which must translate through a stage-1 context bank whose CBAR VMID is 0xb
+- * (CP_NON_PIXEL). arm-smmu-qcom owns that bank; the iris driver maps the ARP
+- * into it with these helpers and hands the firmware the returned IOVA.
++ * (CP_NON_PIXEL). arm-smmu-qcom owns that bank; the iris driver picks an IOVA
++ * in the content-protection window for each encoder session's ARP, maps the ARP
++ * there with these helpers and hands that IOVA to the firmware. All sessions
++ * share the bank's one page table, so several disjoint mappings may coexist.
+  */
+ #ifndef __QCOM_IOMMU_CP_NONPIXEL_H
+ #define __QCOM_IOMMU_CP_NONPIXEL_H
+@@ -17,12 +19,16 @@
+ /* True once the platform's CP non-pixel context bank is set up (SC8280XP). */
+ bool qcom_iommu_cp_nonpixel_available(void);
+ /*
+- * Map @size bytes of @pa at @iova in the CP non-pixel bank. @iova must lie in
+- * the TZ content-protection window 0x01000000..0x25800000. The caller must
+- * have assigned the backing pages to VMID 0xb (CP_NON_PIXEL) first. Returns 0,
+- * or -ENODEV when the platform has no CP non-pixel context.
++ * Map @size bytes of @pa at @iova in the CP non-pixel bank. @iova, @pa and
++ * @size must be 4 KiB aligned, the range must lie in the TZ content-protection
++ * window 0x01000000..0x25800000 and must not overlap another live mapping. The
++ * caller must have assigned the backing pages to VMID 0xb (CP_NON_PIXEL) first.
++ * Returns 0, -ENODEV when the platform has no CP non-pixel context, -EINVAL for
++ * a misaligned or out-of-window range, or another negative errno (for example
++ * -EEXIST when the range is already mapped).
+  */
+ int qcom_iommu_cp_nonpixel_map(unsigned long iova, phys_addr_t pa, size_t size);
++/* Remove a mapping made by qcom_iommu_cp_nonpixel_map() with the same range. */
+ void qcom_iommu_cp_nonpixel_unmap(unsigned long iova, size_t size);
+ #else
+ static inline bool qcom_iommu_cp_nonpixel_available(void)
