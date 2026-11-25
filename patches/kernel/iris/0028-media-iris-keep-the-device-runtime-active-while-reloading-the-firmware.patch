@@ -1,0 +1,68 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: iris: keep the device runtime active while reloading
+ the firmware
+
+The sys_error_handler reloads the firmware without a runtime PM
+reference of its own. iris_core_deinit() takes one and drops it with
+pm_runtime_put_sync() once the core is in DEINIT. If the autosuspend
+delay has already run out by then, measured from the last interrupt,
+the device runtime suspends right there, and iris_pm_suspend() does
+nothing because the core is not in INIT. iris_core_init() then powers
+the core and boots the firmware while runtime PM considers the device
+suspended. The next pm_runtime_resume_and_get() calls iris_pm_resume(),
+which powers the core on a second time and tries to warm boot a
+firmware that is already running: "Unbalanced enable for IRQ", context
+faults from the video stream, "error booting up iris firmware" on every
+resume, and the codecs stay unusable until reboot. A handler that runs
+late, or an interrupt thread that spends a while in the response
+handler before the SYS_ERROR is acted on, is enough. If the delay runs
+out during the reload instead, iris_pm_suspend() can try to power
+collapse a firmware that is still answering SYS_INIT.
+
+Hold a runtime PM reference across the reload, as iris_open() does
+around iris_core_init(), and drop it with autosuspend afterwards. While
+runtime PM is disabled for system sleep the resume fails with -EACCES;
+retry the reload later then, instead of running it without the
+reference.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/media/platform/qcom/iris/iris_probe.c | 21 +++++++++++++++++++
+ 1 file changed, 21 insertions(+)
+
+diff --git a/drivers/media/platform/qcom/iris/iris_probe.c b/drivers/media/platform/qcom/iris/iris_probe.c
+index b1ac4a87d8..d6d729103f 100644
+--- a/drivers/media/platform/qcom/iris/iris_probe.c
++++ b/drivers/media/platform/qcom/iris/iris_probe.c
+@@ -222,8 +222,29 @@ static void iris_sys_error_handler(struct work_struct *work)
+ {
+ 	struct iris_core *core =
+ 			container_of(work, struct iris_core, sys_error_handler.work);
++	int ret;
++
++	/*
++	 * Keep the device runtime active across the reload, as iris_open()
++	 * does around iris_core_init(). Otherwise the put in
++	 * iris_core_deinit() can runtime suspend the core while it is in
++	 * DEINIT, which does nothing, and the reloaded core then runs while
++	 * runtime PM considers it suspended.
++	 */
++	ret = pm_runtime_resume_and_get(core->dev);
++	if (ret < 0) {
++		/* Runtime PM is disabled during system sleep: retry later. */
++		if (ret == -EACCES)
++			schedule_delayed_work(&core->sys_error_handler,
++					      msecs_to_jiffies(HW_RESPONSE_TIMEOUT_VALUE));
++		else
++			dev_err(core->dev, "cannot resume to reload the firmware: %d\n", ret);
++		return;
++	}
+ 
+ 	iris_core_recover(core);
++
++	pm_runtime_put_autosuspend(core->dev);
+ }
+ 
+ static int iris_probe(struct platform_device *pdev)

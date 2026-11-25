@@ -1,0 +1,34 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: iris: do not drop a runtime PM reference that was not
+ taken
+
+pm_runtime_resume_and_get() drops the usage count it took when the
+resume fails. iris_hfi_queue_cmd_write() nevertheless jumps to its exit
+path, which calls pm_runtime_put_sync() once more. With no other
+reference held, every command issued while the core fails to resume
+logs "Runtime PM usage count underflow!". With another reference held,
+for instance by a concurrent command, the extra put drops that one
+instead, and the device can runtime suspend under its holder.
+
+Return the error directly when the resume fails.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/media/platform/qcom/iris/iris_hfi_queue.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_queue.c b/drivers/media/platform/qcom/iris/iris_hfi_queue.c
+index bf6db23b53..545bbe75e1 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_queue.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_queue.c
+@@ -132,7 +132,7 @@ int iris_hfi_queue_cmd_write(struct iris_core *core, void *pkt, u32 pkt_size)
+ 
+ 	ret = pm_runtime_resume_and_get(core->dev);
+ 	if (ret < 0)
+-		goto exit;
++		return ret;
+ 
+ 	mutex_lock(&core->lock);
+ 	ret = iris_hfi_queue_cmd_write_locked(core, pkt, pkt_size);

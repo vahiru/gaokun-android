@@ -1,0 +1,90 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: iris: clear the boot handshake before releasing the
+ firmware
+
+The firmware's reset handler spins until CTRL_INIT is non-zero, then
+builds its memory map from the UC region registers and the ranges TZ
+programmed in qcom_scm_mem_protect_video_var(), and reports the result
+in CTRL_STATUS. The host writes CTRL_INIT only after authenticating the
+image, protecting the memory and programming the UC region and queue
+table, and then polls CTRL_STATUS. Neither side ever clears the two
+registers. If they keep a value from an earlier firmware instance, for
+example because the controller power domain did not collapse between
+unload and reload, the new instance would start right after
+qcom_scm_pas_auth_and_reset(), before the memory protection and the UC
+region are set up, and could reject them as "invalid setting for
+uc_region". A stale CTRL_STATUS can also be taken for the new
+instance's answer.
+
+On a cold boot, clear CTRL_INIT and CTRL_STATUS after powering the core
+on and before the firmware is released, and warn when they were not
+zero. The warm boot path is not changed.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/media/platform/qcom/iris/iris_core.c  |  2 ++
+ .../platform/qcom/iris/iris_vpu_common.c      | 23 +++++++++++++++++++
+ .../platform/qcom/iris/iris_vpu_common.h      |  1 +
+ 3 files changed, 26 insertions(+)
+
+diff --git a/drivers/media/platform/qcom/iris/iris_core.c b/drivers/media/platform/qcom/iris/iris_core.c
+index 93b0a2bcfe..f8ec940515 100644
+--- a/drivers/media/platform/qcom/iris/iris_core.c
++++ b/drivers/media/platform/qcom/iris/iris_core.c
+@@ -106,6 +106,8 @@ static int __iris_core_init(struct iris_core *core)
+ 	if (ret)
+ 		goto error_queue_deinit;
+ 
++	iris_vpu_clear_boot_handshake(core);
++
+ 	ret = iris_fw_load(core);
+ 	if (ret)
+ 		goto error_power_off;
+diff --git a/drivers/media/platform/qcom/iris/iris_vpu_common.c b/drivers/media/platform/qcom/iris/iris_vpu_common.c
+index 25ae70dc27..14b8806e25 100644
+--- a/drivers/media/platform/qcom/iris/iris_vpu_common.c
++++ b/drivers/media/platform/qcom/iris/iris_vpu_common.c
+@@ -125,6 +125,29 @@ int iris_vpu_boot_firmware(struct iris_core *core)
+ 	return 0;
+ }
+ 
++/*
++ * The firmware's reset handler waits for CTRL_INIT before it reads the UC
++ * region and queue table registers, and then reports in CTRL_STATUS. Nothing
++ * else clears the two, so clear them before the firmware is released on a
++ * cold boot. A value left from an earlier firmware instance could otherwise
++ * start the new one before the host has programmed those registers, or be
++ * taken for its answer.
++ */
++void iris_vpu_clear_boot_handshake(struct iris_core *core)
++{
++	u32 ctrl_init, ctrl_status;
++
++	ctrl_init = readl(core->reg_base + CTRL_INIT);
++	ctrl_status = readl(core->reg_base + CTRL_STATUS);
++	if (!ctrl_init && !ctrl_status)
++		return;
++
++	dev_warn(core->dev, "stale boot handshake cleared: ctrl_init %#x ctrl_status %#x\n",
++		 ctrl_init, ctrl_status);
++	writel(0, core->reg_base + CTRL_INIT);
++	writel(0, core->reg_base + CTRL_STATUS);
++}
++
+ void iris_vpu_raise_interrupt(struct iris_core *core)
+ {
+ 	writel(1 << CPU_IC_SOFTINT_H2A_SHFT, core->reg_base + CPU_IC_SOFTINT);
+diff --git a/drivers/media/platform/qcom/iris/iris_vpu_common.h b/drivers/media/platform/qcom/iris/iris_vpu_common.h
+index 09799a375c..f352f25f0f 100644
+--- a/drivers/media/platform/qcom/iris/iris_vpu_common.h
++++ b/drivers/media/platform/qcom/iris/iris_vpu_common.h
+@@ -25,6 +25,7 @@ struct vpu_ops {
+ };
+ 
+ int iris_vpu_boot_firmware(struct iris_core *core);
++void iris_vpu_clear_boot_handshake(struct iris_core *core);
+ void iris_vpu_raise_interrupt(struct iris_core *core);
+ void iris_vpu_clear_interrupt(struct iris_core *core);
+ int iris_vpu_watchdog(struct iris_core *core, u32 intr_status);

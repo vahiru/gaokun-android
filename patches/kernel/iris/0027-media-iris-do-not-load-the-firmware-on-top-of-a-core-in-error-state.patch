@@ -1,0 +1,251 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: iris: do not load the firmware on top of a core in
+ error state
+
+When an open finds the core in IRIS_CORE_ERROR, iris_core_init() sets
+the state to IRIS_CORE_DEINIT and returns -EINVAL, but leaves the
+firmware loaded, the core powered and the HFI queues allocated. The
+sys_error_handler, scheduled 10 ms after the SYS_ERROR, then finds the
+core in DEINIT: iris_core_deinit() skips the teardown and
+iris_core_init() loads the firmware again on top. The old queues leak,
+the power domains, clocks and interconnects are enabled a second time
+so the controller GDSC never collapses again, and the first PAS image
+is never shut down. A failed SYS_INIT ends the same way: a timeout, or
+a SYS_INIT_DONE that reports an error, leaves the core in ERROR with
+everything up and nothing scheduled to recover it, the next open turns
+ERROR into DEINIT, and the one after that loads the firmware on top.
+
+Return -EBUSY for a core in error state and leave the state alone, so
+that only the sys_error_handler, which tears the core down first,
+brings it back. When SYS_INIT fails, unload the firmware, power the
+core off and free the queues before returning, so that the next open
+starts from DEINIT.
+
+The wait for SYS_INIT_DONE cannot run under core->lock, because the
+IRQ thread takes that lock to deliver the message. Serialise firmware
+load and unload, including that wait, with a new init_lock taken
+before core->lock. Otherwise the sys_error_handler could reload the
+firmware while an earlier init still waits, and that init's teardown
+would then unload the new firmware. The handler only reloads a core
+that is still in error, since a failed SYS_INIT now tears the core down
+by itself and an open may have brought it back up since. A second open
+now waits for the first one's SYS_INIT_DONE instead of going ahead
+before the firmware has answered. Re-arm core_init_done before each
+SYS_INIT so that a late SYS_INIT_DONE from an attempt that was torn
+down cannot complete the next one, and power the core off in the
+teardown whenever it is powered, rather than only when the runtime
+resume in iris_core_deinit() succeeded.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/media/platform/qcom/iris/iris_core.c  | 94 ++++++++++++++++---
+ drivers/media/platform/qcom/iris/iris_core.h  |  4 +
+ drivers/media/platform/qcom/iris/iris_probe.c |  5 +-
+ 3 files changed, 87 insertions(+), 16 deletions(-)
+
+diff --git a/drivers/media/platform/qcom/iris/iris_core.c b/drivers/media/platform/qcom/iris/iris_core.c
+index 8c335dbfce..41c1a2fd11 100644
+--- a/drivers/media/platform/qcom/iris/iris_core.c
++++ b/drivers/media/platform/qcom/iris/iris_core.c
+@@ -10,28 +10,45 @@
+ #include "iris_state.h"
+ #include "iris_vpu_common.h"
+ 
+-void iris_core_deinit(struct iris_core *core)
++/*
++ * Unload the firmware, power the core off and free the queues. Called with
++ * core->lock held on a core whose firmware has been loaded.
++ */
++static void iris_core_teardown(struct iris_core *core)
++{
++	iris_fw_unload(core);
++
++	if (core->hw_powered)
++		iris_vpu_power_off(core);
++
++	iris_hfi_queues_deinit(core);
++	core->state = IRIS_CORE_DEINIT;
++}
++
++static void __iris_core_deinit(struct iris_core *core)
+ {
+ 	int ret;
+ 
++	lockdep_assert_held(&core->init_lock);
++
+ 	ret = pm_runtime_resume_and_get(core->dev);
+ 
+ 	mutex_lock(&core->lock);
+-	if (core->state != IRIS_CORE_DEINIT) {
+-		iris_fw_unload(core);
+-
+-		if (!ret)
+-			iris_vpu_power_off(core);
+-
+-		iris_hfi_queues_deinit(core);
+-		core->state = IRIS_CORE_DEINIT;
+-	}
++	if (core->state != IRIS_CORE_DEINIT)
++		iris_core_teardown(core);
+ 	mutex_unlock(&core->lock);
+ 
+ 	if (!ret)
+ 		pm_runtime_put_sync(core->dev);
+ }
+ 
++void iris_core_deinit(struct iris_core *core)
++{
++	mutex_lock(&core->init_lock);
++	__iris_core_deinit(core);
++	mutex_unlock(&core->init_lock);
++}
++
+ static int iris_wait_for_system_response(struct iris_core *core)
+ {
+ 	int ret;
+@@ -49,20 +66,28 @@ static int iris_wait_for_system_response(struct iris_core *core)
+ 	return 0;
+ }
+ 
+-int iris_core_init(struct iris_core *core)
++static int __iris_core_init(struct iris_core *core)
+ {
+ 	int ret;
+ 
++	lockdep_assert_held(&core->init_lock);
++
+ 	mutex_lock(&core->lock);
+ 	if (core->state == IRIS_CORE_INIT) {
+ 		ret = 0;
+ 		goto exit;
+ 	} else if (core->state == IRIS_CORE_ERROR) {
+-		ret = -EINVAL;
+-		goto error;
++		/*
++		 * The firmware, power and queues are still up. Leave them to
++		 * the sys_error_handler, which tears them down before it loads
++		 * the firmware again.
++		 */
++		ret = -EBUSY;
++		goto exit;
+ 	}
+ 
+ 	core->state = IRIS_CORE_INIT;
++	reinit_completion(&core->core_init_done);
+ 
+ 	ret = iris_hfi_queues_init(core);
+ 	if (ret)
+@@ -92,7 +117,20 @@ int iris_core_init(struct iris_core *core)
+ 
+ 	mutex_unlock(&core->lock);
+ 
+-	return iris_wait_for_system_response(core);
++	ret = iris_wait_for_system_response(core);
++	if (ret) {
++		/*
++		 * No (successful) SYS_INIT_DONE, but the firmware is running and
++		 * the core is powered. Tear it all down so that the next open
++		 * starts from DEINIT, instead of loading the firmware a second
++		 * time on top of this one.
++		 */
++		mutex_lock(&core->lock);
++		iris_core_teardown(core);
++		mutex_unlock(&core->lock);
++	}
++
++	return ret;
+ 
+ error_unload_fw:
+ 	iris_fw_unload(core);
+@@ -107,3 +145,31 @@ int iris_core_init(struct iris_core *core)
+ 
+ 	return ret;
+ }
++
++int iris_core_init(struct iris_core *core)
++{
++	int ret;
++
++	mutex_lock(&core->init_lock);
++	ret = __iris_core_init(core);
++	mutex_unlock(&core->init_lock);
++
++	return ret;
++}
++
++/*
++ * Reload the firmware of a core in error state. A core that left the error
++ * state in the meantime is left alone: a failed SYS_INIT tears the core down
++ * by itself, and an open may have loaded the firmware again since then.
++ */
++void iris_core_recover(struct iris_core *core)
++{
++	mutex_lock(&core->init_lock);
++
++	if (core->state == IRIS_CORE_ERROR) {
++		__iris_core_deinit(core);
++		__iris_core_init(core);
++	}
++
++	mutex_unlock(&core->init_lock);
++}
+diff --git a/drivers/media/platform/qcom/iris/iris_core.h b/drivers/media/platform/qcom/iris/iris_core.h
+index fc2eddd431..5daa91b975 100644
+--- a/drivers/media/platform/qcom/iris/iris_core.h
++++ b/drivers/media/platform/qcom/iris/iris_core.h
+@@ -67,6 +67,8 @@ struct qcom_ubwc_cfg_data;
+  * @message_queue: shared interface queue to receive responses from firmware
+  * @debug_queue: shared interface queue to receive debug info from firmware
+  * @lock: a lock for this strucure
++ * @init_lock: serialises loading and unloading the firmware, including the
++ *	       wait for SYS_INIT_DONE; taken before @lock
+  * @response_packet: a pointer to response packet from fw to driver
+  * @header_id: id of packet header
+  * @packet_id: id of packet
+@@ -114,6 +116,7 @@ struct iris_core {
+ 	struct iris_iface_q_info		message_queue;
+ 	struct iris_iface_q_info		debug_queue;
+ 	struct mutex				lock; /* lock for core related operations */
++	struct mutex				init_lock; /* serialises firmware load and unload */
+ 	u8					*response_packet;
+ 	u32					header_id;
+ 	u32					packet_id;
+@@ -133,5 +136,6 @@ struct iris_core {
+ 
+ int iris_core_init(struct iris_core *core);
+ void iris_core_deinit(struct iris_core *core);
++void iris_core_recover(struct iris_core *core);
+ 
+ #endif
+diff --git a/drivers/media/platform/qcom/iris/iris_probe.c b/drivers/media/platform/qcom/iris/iris_probe.c
+index c26eca9852..b1ac4a87d8 100644
+--- a/drivers/media/platform/qcom/iris/iris_probe.c
++++ b/drivers/media/platform/qcom/iris/iris_probe.c
+@@ -214,6 +214,7 @@ static void iris_remove(struct platform_device *pdev)
+ 
+ 	v4l2_device_unregister(&core->v4l2_dev);
+ 
++	mutex_destroy(&core->init_lock);
+ 	mutex_destroy(&core->lock);
+ }
+ 
+@@ -222,8 +223,7 @@ static void iris_sys_error_handler(struct work_struct *work)
+ 	struct iris_core *core =
+ 			container_of(work, struct iris_core, sys_error_handler.work);
+ 
+-	iris_core_deinit(core);
+-	iris_core_init(core);
++	iris_core_recover(core);
+ }
+ 
+ static int iris_probe(struct platform_device *pdev)
+@@ -240,6 +240,7 @@ static int iris_probe(struct platform_device *pdev)
+ 
+ 	core->state = IRIS_CORE_DEINIT;
+ 	mutex_init(&core->lock);
++	mutex_init(&core->init_lock);
+ 	init_completion(&core->core_init_done);
+ 
+ 	core->response_packet = devm_kzalloc(core->dev, IFACEQ_CORE_PKT_SIZE, GFP_KERNEL);
