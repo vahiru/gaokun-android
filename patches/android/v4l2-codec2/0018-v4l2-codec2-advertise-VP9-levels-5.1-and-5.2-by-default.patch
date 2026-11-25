@@ -1,0 +1,41 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] v4l2_codec2: advertise VP9 levels 5.1 and 5.2 by default
+
+When the device does not report the levels it supports, the decoder
+falls back to a fixed list per codec. For VP9 that list ends at level 5,
+whose luma sample rate allows 3840x2160 at about 37 frames per second.
+Players check a stream's level against the decoder's profile levels, so
+a 4K60 VP9 stream (level 5.1, as served for example by YouTube) is
+treated as beyond the hardware decoder's capabilities, and Media3 then
+prefers the software decoder.
+
+Qualcomm iris does not expose a VP9 level control on its gen1 decoder, so
+this list is what applications see. Add levels 5.1 and 5.2 (3840x2160 up
+to about 141 frames per second). The decoder's size and rate limits in
+the media codecs XML still bound what is advertised.
+
+Checked on SC8280XP (Huawei MateBook E Go): 3840x2160 VP9 at 120 fps and
+100 Mbit/s decoded in real time for 30 s with no frame late by more than
+a frame period.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ components/DecodeInterface.cpp | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/components/DecodeInterface.cpp b/components/DecodeInterface.cpp
+index 17fce34..0ffedd8 100644
+--- a/components/DecodeInterface.cpp
++++ b/components/DecodeInterface.cpp
+@@ -227,7 +227,8 @@ DecodeInterface::DecodeInterface(const std::string& name,
+         case VideoCodec::VP9:
+             levels = {C2Config::LEVEL_VP9_1,   C2Config::LEVEL_VP9_1_1, C2Config::LEVEL_VP9_2,
+                       C2Config::LEVEL_VP9_2_1, C2Config::LEVEL_VP9_3,   C2Config::LEVEL_VP9_3_1,
+-                      C2Config::LEVEL_VP9_4,   C2Config::LEVEL_VP9_4_1, C2Config::LEVEL_VP9_5};
++                      C2Config::LEVEL_VP9_4,   C2Config::LEVEL_VP9_4_1, C2Config::LEVEL_VP9_5,
++                      C2Config::LEVEL_VP9_5_1, C2Config::LEVEL_VP9_5_2};
+             break;
+         case VideoCodec::HEVC:
+             levels = {C2Config::LEVEL_HEVC_MAIN_1,   C2Config::LEVEL_HEVC_MAIN_2,

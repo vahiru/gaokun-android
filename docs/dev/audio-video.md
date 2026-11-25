@@ -151,7 +151,7 @@ TX_DEC0 Volume = 102, TX_DEC1 Volume = 102
 - **内核配置与固件**：启用`CONFIG_VIDEO_QCOM_IRIS=y`（禁用`CONFIG_VIDEO_QCOM_VENUS`），设备树`video-codec@aa00000`指定固件`qcom/sc8280xp/HUAWEI/gaokun3/qcvss8280.mbn`。
 - **Android Codec2集成**：
   - 使用`android.hardware.media.c2@1.2-service-v4l2`（通过属性`media.c2.hal.selection=aidl`告知`MediaCodec`连接AIDL/HIDL服务）。
-  - 注册解码器组件：`c2.v4l2.avc.decoder`（H.264）、`c2.v4l2.hevc.decoder`（HEVC / H.265）、`c2.v4l2.vp9.decoder`（VP9），最高支持4K60硬件解码。
+  - 注册解码器组件：`c2.v4l2.avc.decoder`（H.264）、`c2.v4l2.hevc.decoder`（HEVC / H.265）、`c2.v4l2.vp9.decoder`（VP9）。实测单路实时解码3840x2160：HEVC（含10位）与VP9到120 fps，H.264到60 fps；`media_codecs_c2.xml`按此申报`blocks-per-second`与性能点（H.264 4K@60，HEVC与VP9 4K@120）。Media3等应用按性能点判断帧率，原来只申报4K@30时，60 fps以上的视频会交给软解。
   - 注册编码器组件：`c2.v4l2.avc.encoder`（H.264）、`c2.v4l2.hevc.encoder`（HEVC Main），见本节第3小节。
 
 ### 2. 关键内核与用户态修复
@@ -185,6 +185,7 @@ TX_DEC0 Volume = 102, TX_DEC1 Volume = 102
 | `patches/android/v4l2-codec2/0015` | `external/v4l2_codec2` | 轮询线程在`poll()`只返回`POLLERR`时原来立即重新轮询缓冲。两个队列都没有排队的缓冲时，`v4l2_m2m_poll()`马上返回`POLLERR`，于是每次解码器启动到第一次送入码流之间（3–40 ms）空转上万次，vb2队列出错后则一直空转，错误也传不到解码器。补丁在这种情况下只投递一次回调（真正的队列错误由`VIDIOC_DQBUF`返回`-EIO`暴露），停止轮询缓冲，直到下一次`VIDIOC_QBUF`或`VIDIOC_STREAMON`。编码器共用这个轮询线程 |
 | `patches/android/v4l2-codec2/0016` | `external/v4l2_codec2` | 事件回调投递之后、解码器线程把事件取走之前，`poll()`一直返回`POLLPRI`，轮询线程反复投递回调，多出来的回调`VIDIOC_DQEVENT`拿到`ENOENT`。补丁在事件回调执行期间不轮询`POLLPRI`，回调执行完再恢复 |
 | `patches/android/v4l2-codec2/0017` | `external/v4l2_codec2` | 解码器进入错误状态后，`serviceDeviceTask()`不再处理设备，没有取走的事件让`poll()`一直返回`POLLPRI`，轮询线程与解码器线程合计占用接近两个CPU核心，直到解码器被销毁。补丁在`onError()`中停止轮询 |
+| `patches/android/v4l2-codec2/0018` | `external/v4l2_codec2` | 设备不报告解码级别时，解码组件使用内置的默认级别表，VP9原来只到5级（3840x2160约37 fps）。应用按码流级别判断时，会把4K60的VP9（5.1级）判为超出硬件能力而转用软解。iris gen1解码器没有VP9级别控件；补丁在默认表里补上5.1与5.2级（4K约141 fps），实际可用的尺寸与帧率仍受`media_codecs_c2.xml`的限制 |
 
 ### 3. 硬件视频编码
 
@@ -219,7 +220,7 @@ TX_DEC0 Volume = 102, TX_DEC1 Volume = 102
 #### 设备配置
 
 - `device.mk`：`ro.vendor.v4l2_codec2.encoder.supported.h264`、`.hevc`设为`true`，`ro.vendor.v4l2_codec2.encode_concurrent_instances=3`（AVC与HEVC共用这一个计数，需`kernel/iommu/0002`、`kernel/iris/0034`与`kernel/dts/0026`）。VP8/VP9编码iris没有，保持关闭。
-- `media_codecs_c2.xml`：两个编码器的`<Encoders>`条目，`concurrent-instances`为3。尺寸和吞吐量上限按4K30申报，偏保守：单路裸V4L2编码实测1080p约390 fps、4096x2176约97 fps。
+- `media_codecs_c2.xml`：两个编码器的`<Encoders>`条目，`concurrent-instances`为3。尺寸和吞吐量上限按4K30申报，偏保守：单路裸V4L2编码实测1080p约390 fps，4096x2176在输入预先填好时约180–200 fps。
 - 组件rank是0x80，排在软编（0x200）前面。第四个编码请求在分配组件时被拒（`maximum number of instances reached`，返回资源不足）。`MediaCodec`遇到资源不足会先请资源管理器从优先级更低的进程收回一个硬件编解码器（解码器也算在内）再重试，收不回才试下一个编码器，落到`c2.android.*`软编。因此按框架代码，优先级更高的一方会让优先级较低的应用失去编解码器（`ERROR_RECLAIMED`），尚未经实测；优先级不高于对方时，才会直接换软编。原生进程（例如shell里的`screenrecord`）既不会收回别人的编码器，也不会被收回。硬件编码器配置失败时，`MediaRecorder`同样会换下一个编码器；自己调用`configure`的应用拿到的是错误。
 - 验证：`scripts/verify-hw-codec2.sh`检查属性、编码节点属主、`cp-nonpixel: CB15 ready`和组件列表，亮屏时用`screenrecord --codec-name c2.v4l2.avc.encoder`在1280x720和640x480各真编一段。
 
