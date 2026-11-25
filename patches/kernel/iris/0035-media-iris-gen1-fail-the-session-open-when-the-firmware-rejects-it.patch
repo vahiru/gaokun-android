@@ -1,0 +1,78 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: iris: gen1: fail the session open when the firmware
+ rejects it
+
+When the gen1 firmware cannot create a session, for example because its
+session table is full (HFI_ERR_SYS_MAX_SESSIONS_REACHED), it answers
+HFI_CMD_SYS_SESSION_INIT with a SESSION_INIT_DONE that carries the
+error. The response handler only moves the instance to the error state,
+and iris_hfi_gen1_session_open() still returns 0. The first REQBUFS
+therefore succeeds, and the failure only shows up later as -EBUSY from
+the next REQBUFS or from STREAMON, with nothing in the kernel log. A
+client such as the Android Codec2 V4L2 HAL thus creates and configures
+a component that can only fail once it is started.
+
+After SESSION_INIT_DONE, return -EBUSY from the gen1 session open when
+the instance is in the error state, so that the first REQBUFS fails
+(iris_vb2_queue_setup() logs "session open failed" and returns
+-EINVAL), and log the error code the firmware sent with
+SESSION_INIT_DONE.
+
+Sessions the firmware accepts are not affected. A rejected session
+already stayed in the error state and every later REQBUFS or STREAMON
+already failed with -EBUSY; only the point of failure moves to the
+first REQBUFS. Closing a rejected session still sends SESSION_END, as
+before.
+
+Origin: local
+Upstream-Status: Pending
+Assisted-by: Claude:claude-opus-5-5
+---
+ .../platform/qcom/iris/iris_hfi_gen1_command.c    | 15 ++++++++++++++-
+ .../platform/qcom/iris/iris_hfi_gen1_response.c   |  6 +++++-
+ 2 files changed, 19 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c b/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c
+index 0e21b8eb92..d43b99bc90 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen1_command.c
+@@ -130,7 +130,20 @@ static int iris_hfi_gen1_session_open(struct iris_inst *inst)
+ 	if (ret)
+ 		return ret;
+ 
+-	return iris_wait_for_session_response(inst, false);
++	ret = iris_wait_for_session_response(inst, false);
++	if (ret)
++		return ret;
++
++	/*
++	 * A session the firmware cannot create, for example because its
++	 * session table is full, is answered with an error in SESSION_INIT_DONE,
++	 * and the response handler has moved the instance to the error state.
++	 * Fail the open instead of letting the client go on until STREAMON.
++	 */
++	if (inst->state == IRIS_INST_ERROR)
++		return -EBUSY;
++
++	return 0;
+ }
+ 
+ static void iris_hfi_gen1_packet_session_cmd(struct iris_inst *inst,
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_gen1_response.c b/drivers/media/platform/qcom/iris/iris_hfi_gen1_response.c
+index 0fa7967653..1fccb27ddc 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_gen1_response.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_gen1_response.c
+@@ -819,8 +819,12 @@ static void iris_hfi_gen1_handle_response(struct iris_core *core, void *response
+ 			struct hfi_msg_session_hdr_pkt *shdr;
+ 
+ 			shdr = (struct hfi_msg_session_hdr_pkt *)hdr;
+-			if (shdr->error_type != HFI_ERR_NONE)
++			if (shdr->error_type != HFI_ERR_NONE) {
++				if (hdr->pkt_type == HFI_MSG_SYS_SESSION_INIT)
++					dev_err(dev, "session %#x: init failed, error %#x\n",
++						pkt->shdr.session_id, shdr->error_type);
+ 				iris_inst_change_state(inst, IRIS_INST_ERROR);
++			}
+ 
+ 			if (pkt_info->pkt == HFI_MSG_SESSION_FLUSH) {
+ 				if (!(--inst->flush_responses_pending))

@@ -1,0 +1,189 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: iris: give every encoder session its own CP non-pixel
+ ARP slot
+
+On SC8280XP the encoder ARP is mapped in the CP non-pixel bank at the
+fixed IOVA 0x01000000, so only one encoder session can hold an ARP at a
+time. The map of a second, concurrent session hits the page-table
+entries of the first one: io-pgtable warns, the map fails with -EEXIST
+and the second session's STREAMON fails. Every encoder session needs
+exactly one ARP, and SID 0x2a04 is tied to the one CB15 bank and its one
+page table, so sessions can only be kept apart by IOVA.
+
+Hand the IOVA out from an IDA of eight 256 KiB slots that start at the
+platform's content-protection non-pixel window (tz_cp_config
+cp_nonpixel_start). Slot 0 is the old fixed address, so a single
+session maps exactly as before. 256 KiB is the alignment iommu-dma
+itself would give the 200 KiB ARP; the unmapped gap after each ARP
+turns a firmware overrun into a context fault instead of a write into
+the next session's ARP; and all eight slots lie in the 2 MiB that one
+leaf table covers.
+
+The slot is taken before any SCM call, so running out of slots has
+nothing to undo. That case returns -EBUSY and logs a warning, because
+STREAMON also fails with -EBUSY when the firmware rejects a session.
+Every later error path frees the slot again, including the one that
+leaks pages stuck with VMID 0xb, since a failed map leaves nothing
+mapped at the slot. On teardown the slot is freed right after the
+unmap, whether or not the pages can be returned to HLOS. The buffer
+records its slot index instead of deriving it from the IOVA.
+
+The CP non-pixel bank is one system-wide resource, and its mappings
+outlive an unbind of the iris device. Keep the slots in a file-scope
+IDA rather than in struct iris_core for the same reason: a session that
+stays open across an unbind and rebind keeps its slot instead of having
+it handed out again while still mapped, and a late close frees the slot
+into an IDA that still exists. With at most eight small ids the IDA
+never allocates memory, so it needs no destroy.
+
+Several sessions now have live mappings in the bank at the same time,
+so this depends on arm-smmu-qcom no longer reprogramming the bank,
+which briefly disables its translation, while another mapping is live.
+
+Origin: local
+Upstream-Status: Inappropriate [depends on the downstream arm-smmu-qcom CP non-pixel helpers]
+Assisted-by: Claude:claude-opus-5-5
+---
+ .../media/platform/qcom/iris/iris_buffer.c    | 62 +++++++++++++++----
+ .../media/platform/qcom/iris/iris_buffer.h    |  4 +-
+ 2 files changed, 53 insertions(+), 13 deletions(-)
+
+diff --git a/drivers/media/platform/qcom/iris/iris_buffer.c b/drivers/media/platform/qcom/iris/iris_buffer.c
+index 2b23d4bb56..b1e2902c6c 100644
+--- a/drivers/media/platform/qcom/iris/iris_buffer.c
++++ b/drivers/media/platform/qcom/iris/iris_buffer.c
+@@ -5,6 +5,7 @@
+ 
+ #include <dt-bindings/firmware/qcom,scm.h>
+ #include <linux/firmware/qcom/qcom_scm.h>
++#include <linux/idr.h>
+ #include <linux/iommu.h>
+ #include <linux/qcom_iommu_cp_nonpixel.h>
+ #include <media/v4l2-event.h>
+@@ -34,34 +35,61 @@
+  * SC8280XP: the encoder ARP (BUF_ARP) must be reached by the firmware through
+  * the content-protection non-pixel context (SID 0x2a04, VMID 0xb), not the
+  * main iris stream. Assign its pages exclusively to that VMID and map it in
+- * the CP non-pixel bank at a fixed IOVA in the content-protection window; the
+- * firmware is given that IOVA. One encoder session at a time (fixed IOVA).
++ * the CP non-pixel bank at an IOVA in the content-protection window; the
++ * firmware is given that IOVA.
++ *
++ * Each encoder session has one ARP, and all sessions share the bank's one page
++ * table, so every session takes its own slot from the start of the window.
++ * A slot is 256 KiB, the alignment iommu-dma would give the 200 KiB ARP, and
++ * eight slots fill the 2 MiB that one leaf table covers; slot 0 is the window
++ * start. The bank is a single system-wide resource, so the slots are too: they
++ * are not tied to one iris_core, and a slot that is still held when the device
++ * is unbound stays taken until its session closes.
+  */
+-#define IRIS_ENC_ARP_CP_IOVA	0x01000000
+-#define IRIS_VMID_CP_NON_PIXEL	0xb
++#define IRIS_ENC_ARP_CP_SLOT_SIZE	SZ_256K
++#define IRIS_ENC_ARP_CP_SLOTS		8
++#define IRIS_VMID_CP_NON_PIXEL		0xb
++
++static DEFINE_IDA(iris_enc_arp_cp_slots);
+ 
+ static int iris_enc_arp_to_cp_nonpixel(struct iris_core *core, struct iris_buffer *buffer)
+ {
++	const struct tz_cp_config *cp = core->iris_platform_data->tz_cp_config_data;
+ 	struct iommu_domain *domain = iommu_get_domain_for_dev(core->dev);
+ 	struct qcom_scm_vmperm to_cp = { IRIS_VMID_CP_NON_PIXEL, QCOM_SCM_PERM_RW };
+ 	struct qcom_scm_vmperm to_hlos = { QCOM_SCM_VMID_HLOS, QCOM_SCM_PERM_RWX };
+ 	size_t size = PAGE_ALIGN(buffer->buffer_size);
+ 	u64 src = BIT(QCOM_SCM_VMID_HLOS);
++	unsigned long iova;
+ 	phys_addr_t phys;
+-	int ret;
++	int slot, ret;
+ 
+-	if (!domain)
++	if (!domain || !cp)
+ 		return -ENODEV;
++	if (WARN_ON_ONCE(size > IRIS_ENC_ARP_CP_SLOT_SIZE))
++		return -EINVAL;
+ 	phys = iommu_iova_to_phys(domain, buffer->device_addr);
+ 	if (!phys)
+ 		return -EINVAL;
+ 
++	/* Take the slot before any hypervisor call: running out has nothing to undo. */
++	slot = ida_alloc_max(&iris_enc_arp_cp_slots, IRIS_ENC_ARP_CP_SLOTS - 1, GFP_KERNEL);
++	if (slot < 0) {
++		if (slot != -ENOSPC)
++			return slot;
++		/* Log it: a firmware rejection also ends STREAMON with -EBUSY. */
++		dev_warn_ratelimited(core->dev, "enc ARP: all %d CP non-pixel slots in use\n",
++				     IRIS_ENC_ARP_CP_SLOTS);
++		return -EBUSY;
++	}
++	iova = cp->cp_nonpixel_start + slot * IRIS_ENC_ARP_CP_SLOT_SIZE;
++
+ 	/* Hand the pages to CP_NON_PIXEL alone (a shared HLOS+0xb grant is refused). */
+ 	ret = qcom_scm_assign_mem(phys, size, &src, &to_cp, 1);
+ 	if (ret)
+-		return ret;
++		goto free_slot;
+ 
+-	ret = qcom_iommu_cp_nonpixel_map(IRIS_ENC_ARP_CP_IOVA, phys, size);
++	ret = qcom_iommu_cp_nonpixel_map(iova, phys, size);
+ 	if (ret) {
+ 		src = BIT(IRIS_VMID_CP_NON_PIXEL);
+ 		if (qcom_scm_assign_mem(phys, size, &src, &to_hlos, 1)) {
+@@ -70,16 +98,23 @@ static int iris_enc_arp_to_cp_nonpixel(struct iris_core *core, struct iris_buffe
+ 			 * tells the caller NOT to free them (leak instead).
+ 			 */
+ 			dev_err(core->dev, "enc ARP: stuck in CP_NON_PIXEL, leaking\n");
+-			return -EOWNERDEAD;
++			ret = -EOWNERDEAD;
+ 		}
+-		return ret;
++		/* A failed map leaves nothing mapped at the slot. */
++		goto free_slot;
+ 	}
+ 
+ 	buffer->cp_phys = phys;
+ 	buffer->cp_dma = buffer->device_addr;
+-	buffer->device_addr = IRIS_ENC_ARP_CP_IOVA;
++	buffer->cp_slot = slot;
++	buffer->device_addr = iova;
++	dev_dbg(core->dev, "enc ARP: slot %d, iova %#lx\n", slot, iova);
+ 
+ 	return 0;
++
++free_slot:
++	ida_free(&iris_enc_arp_cp_slots, slot);
++	return ret;
+ }
+ 
+ /*
+@@ -94,7 +129,10 @@ static int iris_enc_arp_from_cp_nonpixel(struct iris_core *core, struct iris_buf
+ 	size_t size = PAGE_ALIGN(buffer->buffer_size);
+ 	u64 src = BIT(IRIS_VMID_CP_NON_PIXEL);
+ 
+-	qcom_iommu_cp_nonpixel_unmap(IRIS_ENC_ARP_CP_IOVA, size);
++	qcom_iommu_cp_nonpixel_unmap(buffer->device_addr, size);
++	/* The bank no longer maps the slot, even if the pages cannot come back. */
++	ida_free(&iris_enc_arp_cp_slots, buffer->cp_slot);
++	dev_dbg(core->dev, "enc ARP: slot %d released\n", buffer->cp_slot);
+ 	if (qcom_scm_assign_mem(buffer->cp_phys, size, &src, &to_hlos, 1)) {
+ 		dev_err(core->dev, "enc ARP: stuck in CP_NON_PIXEL, leaking\n");
+ 		return -EOWNERDEAD;
+diff --git a/drivers/media/platform/qcom/iris/iris_buffer.h b/drivers/media/platform/qcom/iris/iris_buffer.h
+index e97faa28a5..e7ce6cdd6c 100644
+--- a/drivers/media/platform/qcom/iris/iris_buffer.h
++++ b/drivers/media/platform/qcom/iris/iris_buffer.h
+@@ -100,10 +100,12 @@ struct iris_buffer {
+ 	u64				timestamp;
+ 	enum iris_buffer_attributes	attr;
+ 	/* Encoder ARP routed through the CP non-pixel bank (SC8280XP): the main
+-	 * iris DMA address to restore on free, and the phys assigned to VMID 0xb.
++	 * iris DMA address to restore on free, the phys assigned to VMID 0xb,
++	 * and the slot of the CP non-pixel window it is mapped at.
+ 	 */
+ 	dma_addr_t			cp_dma;
+ 	phys_addr_t			cp_phys;
++	int				cp_slot;
+ };
+ 
+ struct iris_buffers {

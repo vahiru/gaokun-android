@@ -14,7 +14,7 @@
 #                      而且不报任何错（V4L2ComponentStore.cpp:29-79）
 #   /dev/video* 属主 —— 服务跑 user media，默认 root:root 0600 打不开
 #   扩展 seccomp     —— 不装就在真干活时被 SIGSYS 打死（blocked syscall: eventfd2）
-#   编码器只开avc/hevc、并发1 —— 编码器ARP在固定IOVA上，第二路要在分配时被拒、回退软编；
+#   编码器只开avc/hevc、并发3 —— 每路编码器ARP有自己的CP非像素槽位，第四路要在分配时被拒、回退软编；
 #                      VP8/VP9编码iris没有，开着的话应用拿到失败而不是回退软编
 #   CP非像素上下文   —— 内核没有patches/kernel/iommu/0001时第一次编码就整板复位，dmesg里要有CB15 ready
 #   VP8【必须没有】  —— iris gen1 不解 VP8（iris_platform_vpu2.c 的解码格式表只有 H264/HEVC/VP9），
@@ -49,8 +49,8 @@ for k in h264 hevc; do
     [ "$v" = true ] && ok "encoder.$k = true" || bad "encoder.$k = [$v]（应为true）"
 done
 v=$($A shell getprop ro.vendor.v4l2_codec2.encode_concurrent_instances | tr -d '\r')
-[ "$v" = 1 ] && ok "encode_concurrent_instances = 1（编码器ARP在固定IOVA，只能有一个编码会话）" \
-    || bad "encode_concurrent_instances = [$v]，应为1"
+[ "$v" = 3 ] && ok "encode_concurrent_instances = 3（每路编码器ARP有自己的CP非像素槽位）" \
+    || bad "encode_concurrent_instances = [$v]，应为3"
 for k in decoder.supported.vp8 decoder.supported.av1 encoder.supported.vp8 encoder.supported.vp9; do
     v=$($A shell getprop "ro.vendor.v4l2_codec2.$k" | tr -d '\r')
     if [ -z "$v" ] || [ "$v" = false ]; then ok "$k 未启用（有意为之）"; else bad "$k = [$v]，不该启用"; fi

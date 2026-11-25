@@ -145,11 +145,6 @@ The following are bugs, not trade-offs; they will be removed from this list once
 * **Cause**: the Type-C controller (UCSI) occasionally fails to initialize at boot; the cause is still being investigated.
 * **What to do**: a restart brings it back. Until then, use adb and transfer files over Wi-Fi.
 
-### With two recordings at once, the second one is slower or the first one stops
-* **Symptom**: starting a second recording while one is already running may give the second one choppy video. If the system starts the second one (for example screen recording from Quick Settings while recording video), the recording in progress may stop; this has not been tested yet.
-* **Cause**: the video encoding hardware handles one stream at a time. The second recording usually falls back to slower software encoding, but when its requester has a higher priority, the system first takes the hardware encoder away from the app that is recording.
-* **What to do**: record one thing at a time where possible.
-
 ### *League of Legends: Wild Rift* starts; whether matches work has not been tested
 * **Symptom**: on 1.0.0-rc.1 and earlier, the game quits as soon as it opens. Since rc.2 it starts and reaches the user agreement screen; whether you can get into a match has not been tested yet.
 * **Cause**: the game engine assumes that a 64-bit process's memory addresses stay below 2^39, while this kernel gave processes a 2^48 address space by default. The kernel now hands out addresses below 2^39 by default.

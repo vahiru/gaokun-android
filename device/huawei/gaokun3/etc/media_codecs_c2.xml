@@ -33,11 +33,11 @@
 -->
 <MediaCodecs>
     <!-- 硬件编码：只能配合带CP非像素上下文的内核（patches/kernel/iommu/0001），条件见device.mk。
-         concurrent-instances 1：编码器的ARP缓冲映射在一个固定IOVA上，同一时刻只有一个编码会话，
-         两个编码器共用ro.vendor.v4l2_codec2.encode_concurrent_instances这一个计数。
-         尺寸下限128x128是iris的帧尺寸下限（iris_platform_vpu2.c）。上限是判断，不是实测：
-         实测做到1080p 30 fps；按4K30申报（3840x2176@30 = 979200块/秒），驱动的核心负载上限是
-         4096x2176@60，编解码共用。码率下限32 kbps是驱动gen1编码器的下限，上限40 Mbps是
+         concurrent-instances 3：每个编码会话的ARP缓冲在内容保护窗口里有自己的槽位（需kernel/iommu/0002
+         与kernel/iris/0034），两个编码器共用ro.vendor.v4l2_codec2.encode_concurrent_instances这一个计数。
+         尺寸下限128x128是iris的帧尺寸下限（iris_platform_vpu2.c）。上限按4K30申报（3840x2176@30 =
+         979200块/秒），偏保守：单路裸V4L2编码实测1080p约390 fps、4096x2176约97 fps。驱动的核心负载上限
+         取自sm8250的平台数据（7680x4320@60），编解码共用。码率下限32 kbps是驱动gen1编码器的下限，上限40 Mbps是
          HEVC 5.1级Main层级的码率上限，H.264取同一个值。
          码率模式只能由这里声明（Codec2InfoBuilder不向组件查询），不写时应用只看到VBR；
          组件和iris gen1都支持VBR与CBR。 -->
@@ -48,7 +48,7 @@
             <Limit name="block-size" value="16x16" />
             <Limit name="blocks-per-second" range="1-979200" />
             <Limit name="bitrate" range="32000-40000000" />
-            <Limit name="concurrent-instances" max="1" />
+            <Limit name="concurrent-instances" max="3" />
             <Feature name="bitrate-modes" value="VBR,CBR" />
         </MediaCodec>
         <MediaCodec name="c2.v4l2.hevc.encoder" type="video/hevc">
@@ -57,7 +57,7 @@
             <Limit name="block-size" value="16x16" />
             <Limit name="blocks-per-second" range="1-979200" />
             <Limit name="bitrate" range="32000-40000000" />
-            <Limit name="concurrent-instances" max="1" />
+            <Limit name="concurrent-instances" max="3" />
             <Feature name="bitrate-modes" value="VBR,CBR" />
         </MediaCodec>
     </Encoders>
@@ -75,7 +75,7 @@
         </MediaCodec>
 
         <!-- HEVC：2026-08-23 之前这一条是撤掉的（组件能建会话但一帧不出）。
-             根因已查明并修复在【用户态】：venus 固件收到「只有 VPS/SPS/PPS、
+             原因已查明并修复在【用户态】：venus 固件收到「只有 VPS/SPS/PPS、
              又没打 CODECCONFIG 标志」的缓冲会报 H265_CONFIG_FLAG_MISSING，
              用默认 SPS 编造一张 pic 0，那张图要 YUV 输出缓冲，而主机在等
              SOURCE_CHANGE 才肯分配 —— 死锁。修法是让 v4l2_codec2 把 CSD 并进
