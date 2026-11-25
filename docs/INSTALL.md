@@ -59,11 +59,11 @@ The installers and the system installation files are on the [Releases page](http
 | File | Purpose | Release |
 |---|---|---|
 | `gaokun-android-windows-installer-<version>-arm64.zip` | Windows installer | `windows-installer-v<version>` |
-| `gaokun3-live-<version>-android-<system version>.iso` | Live installer carrying the system installation files of that version (about 1.5 GB); write it to a USB drive and install | `live-installer-v<version>` |
-| `gaokun3-live-<version>.iso` | Live installer without system installation files (about 180 MB); the system installation files must be added | Same as above |
+| `gaokun3-live-<version>-android-<system version>.iso` | Live installer carrying the installation files of that system version (about 1.5 GB); write it to a USB drive and install | `live-installer-v<version>-for-<system version>` |
+| `gaokun3-live-<version>-for-<system version>.iso` | Live installer without system installation files (about 180 MB); used by the Windows installer to create installation media, and usually not needed otherwise | Same as above |
 | `boot.img`, `super.img.zst`, `install-artifacts.sha256` | System installation files | The release of each system version |
 
-The Windows installer downloads the system installation files and the Live installer itself, so you do not need to download them by hand when you use it. Checksums are in the `.sha256` file, `SHA256SUMS` and `install-artifacts.sha256` of the same release.
+Each time a system version is released, a Live installer carrying that version's system installation files is released along with it; download the latest one. The Windows installer downloads the system installation files and the Live installer itself, so you do not need to download them by hand when you use it. Checksums are in the `.sha256` file, `SHA256SUMS` and `install-artifacts.sha256` of the same release.
 
 ### Downloading the system installation files from the mirror
 
@@ -100,7 +100,7 @@ When Android is installed, select "Manage" on the environment check page, then "
 - **A USB drive**: the whole drive is erased first. The finished drive can be used on any MateBook E Go.
 - **The internal disk**: an installer partition of about 2 GiB (GK3LIVE) is created at the end of an unallocated area on the system disk, and `gaokun3 installer` is added to the boot menu. If Android is not installed yet, the boot manager (systemd-boot) is installed to the EFI system partition and the original default boot file (BOOTAA64.EFI) is backed up, with Windows remaining the default. Whenever BitLocker is enabled on the system disk (whether or not Android is already installed), verifying the recovery key is required before writing or deleting the installer partition. Other partitions and their data are not affected.
 
-The Live installer can only be downloaded from GitHub or taken from local system installation files placed in the same directory as `gaokun3-live-<version>.iso`; with "R2 mirror" selected, installation media cannot be created.
+The Live installer can only be downloaded from GitHub or taken from local system installation files placed in the same directory as a Live installer ISO; with "R2 mirror" selected, installation media cannot be created.
 
 If the internal disk already has an installer partition, it can be deleted in the "Select target location" step (if Android is not installed yet, deleting it also restores the default EFI boot file; deleting the installer partition separately has not been verified on real hardware yet). When you install Android, the Live installer also deletes the installer partition by default.
 
@@ -117,7 +117,7 @@ Use any one of the following:
   sudo dd if=gaokun3-live-<version>-android-<system version>.iso of=/dev/sdX bs=4M conv=fsync status=progress
   ```
 
-- **Copy the files to a USB drive**: format the USB drive as FAT32 (Windows built-in formatting supports drives up to 32 GB; use one of the two methods above for larger drives), open either ISO in Windows by double-clicking it, and copy all of its files to the drive. With the ISO that has no system installation files, also copy `boot.img`, `super.img.zst` and `install-artifacts.sha256` into the `gaokun3\payload` folder on the drive.
+- **Copy the files to a USB drive**: format the USB drive as FAT32 (Windows built-in formatting supports drives up to 32 GB; use one of the two methods above for larger drives), open the ISO that carries the system installation files in Windows by double-clicking it, and copy all of its files to the drive.
 
 ### Starting the Live installer
 

@@ -1,19 +1,24 @@
-# LiveCD（installer/live 的图形安装器 + Debian live 系统）：在 GitHub 的 arm64 运行器上原生构建，与本地构建
+# Live安装器（installer/live 的图形安装器 + Debian live 系统）：在 GitHub 的 arm64 运行器上原生构建，与本地构建
 # 同一套脚本（installer/tools/build/build-flutter.sh → build-live.sh）。产物是混合 ISO（可在 Windows 中打开后把文件拖进
 # FAT32 U 盘，也可整个写入 U 盘）：
-#   - gaokun3-live-<版本>.iso：不带 Android 的系统文件（gaokun3/payload/ 由用户另行放入，或由 Windows 安装器制作安装介质时写入）
-#   - gaokun3-live-<版本>-android-<ROM 标签>.iso：带上下面那个 ROM 发布的系统文件（约 1.5 GB），整个写入 U 盘后也能直接安装。
+#   - gaokun3-live-<安装器版本>-android-<ROM 标签>.iso：带上那个 ROM 发布的系统文件（约 1.5 GB），整个写入 U 盘后就能安装。
 #     发布构建都出；测试构建只在标签以 -payload 结尾（live-installer-test-<任意>-payload）或手动运行勾选 payload 时出
+#   - gaokun3-live-<标签版本>.iso：不带系统文件，Windows 安装器制作安装介质时用它，另行写入用户选的系统文件。
+#     <标签版本> 是标签去掉 live-installer-v 之后的部分：已发布的 Windows 安装器按这个名字找它
+#     （installer/windows/lib/backend/net.dart 的 githubVariants），改名会让它们无法制作安装介质
 #
 # 什么时候跑（不随每次推送跑）：
-#   - 推送 live-installer-vX.Y.Z[-pre] 标签：发布构建，打包后建一个【草稿】Release，维护者改好说明再发布（不设为最新版本）
+#   - 推送 live-installer-v<安装器版本>-for-<ROM 标签> 标签（如 live-installer-v0.2.0-for-v1.0.0-rc.5）：发布构建。
+#     每个 ROM 发布之后出一版，标签打在那个 ROM 标签所在的提交上；安装器版本要等于 installer/live/pubspec.yaml 的
+#     版本，安装器代码有改动时先改版本号（docs/dev/release-checklist.md 第 5 节）。打包后建一个【草稿】Release，
+#     维护者改好说明再发布（不设为最新版本）
 #   - 手动（Actions 页面的 Run workflow，可选分支）：测试构建，产物是 Actions 的工件。GitHub 只列出默认分支上的
 #     工作流，这个文件还不在默认分支上时，改推一个 live-installer-test-<任意> 标签：同样是测试构建，不建 Release
 #
 # 输入（都从公开来源取，按 sha256 钉死）：
-#   - 内核、dtb、内核参数：ROM 发布里的 boot.img（live 与 Android 共用同一个内核），默认取下面 ROM_TAG 那一版，
-#     按同一发布里的 install-artifacts.sha256 核对；手动运行时可以另指一个标签。带系统文件的 ISO 另取同一发布的
-#     super.img.zst，同样核对。发布构建要求这个内核开启了
+#   - 内核、dtb、内核参数：ROM 发布里的 boot.img（live 与 Android 共用同一个内核）。发布构建取标签里的 ROM 标签那一版；
+#     测试构建取手动运行时指定的那一版，没有指定时取下面的 ROM_TAG。按同一发布里的 install-artifacts.sha256 核对。
+#     带系统文件的 ISO 另取同一发布的 super.img.zst，同样核对。发布构建要求这个内核开启了
 #     CONFIG_ISO9660_FS（整个写入 U 盘时从 ISO9660 分区读取 squashfs，见 build-iso.sh）；测试构建不要求
 #   - GPU 固件（cage 要 GPU；zap shader 是华为专有的，Debian 的固件包里没有，见 build-rootfs.sh 的 GPU_FW）：
 #     KawaiiHachimi/linux-gaokun-buildbot 的固定提交，三个文件与 ROM 的 /vendor/firmware 里的逐字节相同
@@ -44,6 +49,7 @@ permissions:
 
 env:
   ROM_REPO: vahiru/gaokun-android
+  # 只有测试构建用它（手动运行没有指定时）；发布构建的 ROM 写在标签里
   ROM_TAG: v1.0.0-rc.4
   FW_REPO: KawaiiHachimi/linux-gaokun-buildbot
   FW_COMMIT: 315528c028843794ccd0f3d9dab373b03033150f
@@ -54,6 +60,7 @@ jobs:
     runs-on: ubuntu-24.04-arm
     outputs:
       version: ${{ steps.version.outputs.version }}
+      tagver: ${{ steps.version.outputs.tagver }}
       prerelease: ${{ steps.version.outputs.prerelease }}
       rom: ${{ steps.version.outputs.rom }}
     steps:
@@ -63,20 +70,26 @@ jobs:
           ROM_INPUT: ${{ inputs.rom_tag }}
           PAYLOAD_INPUT: ${{ inputs.payload }}
         run: |
-          echo "rom=${ROM_INPUT:-$ROM_TAG}" >> "$GITHUB_OUTPUT"
           if [[ "$GITHUB_REF" == refs/tags/live-installer-v* || "$GITHUB_REF" == refs/tags/live-installer-test-*-payload || "$PAYLOAD_INPUT" == true ]]; then
             echo "payload=yes" >> "$GITHUB_OUTPUT"
           else
             echo "payload=no" >> "$GITHUB_OUTPUT"
           fi
+          # version：安装器版本；tagver：标签去掉 live-installer-v 的部分（不带系统文件的 ISO 与 Release 用它）；rom：内核与系统文件的来源
           if [[ "$GITHUB_REF" == refs/tags/live-installer-v* ]]; then
-            v=${GITHUB_REF#refs/tags/live-installer-v}
-            [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] \
-              || { echo "::error::the tag must look like live-installer-v1.2.3 or live-installer-v1.2.3-rc.1"; exit 1; }
+            # live-installer-v<安装器版本>-for-<ROM 标签>：安装器版本的预发布后缀里不能有 -，所以两段只有一种拆法
+            t=${GITHUB_REF#refs/tags/live-installer-v}
+            [[ "$t" =~ ^([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?)-for-(v[0-9][0-9A-Za-z.-]*)$ ]] \
+              || { echo "::error::the tag must look like live-installer-v1.2.3-for-v1.0.0-rc.5: the installer version, then the ROM release tag"; exit 1; }
+            v=${BASH_REMATCH[1]}
             echo "version=$v" >> "$GITHUB_OUTPUT"
+            echo "tagver=$t" >> "$GITHUB_OUTPUT"
+            echo "rom=${BASH_REMATCH[3]}" >> "$GITHUB_OUTPUT"
             [[ "$v" == *-* ]] && echo "prerelease=yes" >> "$GITHUB_OUTPUT" || echo "prerelease=no" >> "$GITHUB_OUTPUT"
           else
             echo "version=dev-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+            echo "tagver=dev-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+            echo "rom=${ROM_INPUT:-$ROM_TAG}" >> "$GITHUB_OUTPUT"
             echo "prerelease=no" >> "$GITHUB_OUTPUT"
           fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -86,7 +99,7 @@ jobs:
           # 镜像里的版本号只从 installer/live/pubspec.yaml 读（build-live.sh），标签要与它一致
           p=$(sed -n 's/^version:[[:space:]]*\([^+[:space:]]*\).*/\1/p' installer/live/pubspec.yaml)
           [ "$p" = '${{ steps.version.outputs.version }}' ] \
-            || { echo "::error::tag live-installer-v${{ steps.version.outputs.version }} but installer/live/pubspec.yaml says $p"; exit 1; }
+            || { echo "::error::tag live-installer-v${{ steps.version.outputs.tagver }} names installer ${{ steps.version.outputs.version }} but installer/live/pubspec.yaml says $p"; exit 1; }
       - name: fonts
         run: python3 installer/common/tool/fetch-fonts.py
       - name: ROM release files
@@ -134,6 +147,7 @@ jobs:
       - name: live image
         env:
           PAYLOAD: ${{ steps.version.outputs.payload }}
+          GK3_ROM_TAG: ${{ steps.version.outputs.rom }}
         run: |
           allow=(); [[ "$GITHUB_REF" == refs/tags/live-installer-v* ]] || allow=(--allow-no-iso9660)
           src=(--boot-img out/rom/boot.img); [ "$PAYLOAD" = yes ] && src=(--release out/rom --payload)
@@ -141,19 +155,20 @@ jobs:
       - name: collect
         env:
           V: ${{ steps.version.outputs.version }}
+          TV: ${{ steps.version.outputs.tagver }}
           ROM: ${{ steps.version.outputs.rom }}
           PAYLOAD: ${{ steps.version.outputs.payload }}
         run: |
-          # 带系统文件的那个用 mv：1.5 GB 左右，不再多存一份
+          # 不带系统文件的按标签版本命名（文件头的说明）；带系统文件的用 mv：1.5 GB 左右，不再多存一份
           mkdir -p dist
           cp out/live/release.txt out/live/packages-live.lock dist/
-          cp out/live/gaokun3-live.iso "dist/gaokun3-live-$V.iso"
+          cp out/live/gaokun3-live.iso "dist/gaokun3-live-$TV.iso"
           [ "$PAYLOAD" = yes ] && mv out/live/gaokun3-live-payload.iso "dist/gaokun3-live-$V-android-$ROM.iso"
           ( cd dist && sha256sum ./*.iso | sed 's#  \./#  #' > SHA256SUMS )
           cat dist/release.txt dist/SHA256SUMS
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: live-installer-${{ steps.version.outputs.version }}
+          name: live-installer-${{ steps.version.outputs.tagver }}
           if-no-files-found: error
           retention-days: 14
           path: dist/
@@ -168,14 +183,16 @@ jobs:
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: live-installer-${{ needs.build.outputs.version }}
+          name: live-installer-${{ needs.build.outputs.tagver }}
           path: dist
       - name: draft release
         env:
           GH_TOKEN: ${{ github.token }}
           V: ${{ needs.build.outputs.version }}
+          TV: ${{ needs.build.outputs.tagver }}
+          ROM: ${{ needs.build.outputs.rom }}
         run: |
           pre=(); [ '${{ needs.build.outputs.prerelease }}' = yes ] && pre=(--prerelease)
-          gh release create "live-installer-v$V" -R "$GITHUB_REPOSITORY" --draft --latest=false "${pre[@]}" \
-            --title "Live installer v$V" --notes "Draft: write the release notes before publishing." \
+          gh release create "live-installer-v$TV" -R "$GITHUB_REPOSITORY" --draft --latest=false --verify-tag "${pre[@]}" \
+            --title "Live installer $V for $ROM" --notes "Draft: write the release notes before publishing." \
             dist/*.iso dist/SHA256SUMS dist/release.txt

@@ -55,7 +55,8 @@ TAG="gk3-live-build:${H:0:12}"
 docker image inspect "$TAG" >/dev/null 2>&1 || { say "构建 live 构建环境 ${TAG}"; docker build -q -t "$TAG" -f "$REPO/installer/tools/build/live-build.Dockerfile" "$REPO/installer/tools/build" >/dev/null; }
 
 # 版本信息：安装器版本只从 pubspec.yaml 读（界面上的常量由 test/version_test.dart 核对与它一致）；
-# 另记 git 提交（工作区有改动就带 -dirty）、内核来源 boot.img 的 sha256 与 gk3l 的 sha256 ——
+# 另记 git 提交（工作区有改动就带 -dirty）、内核来源 boot.img 的 sha256 与 gk3l 的 sha256，
+# 以及 boot.img 所属的 ROM 发布（环境变量 GK3_ROM_TAG，CI 从标签里取；本地构建不设时记 unknown）——
 # 进镜像的 /etc/gaokun3-release 与 U 盘上的 gaokun3/release.txt，bug 报告与发布说明都按它对版本
 GK3_VERSION=$(sed -n 's/^version:[[:space:]]*\([^+[:space:]]*\).*/\1/p' "$REPO/installer/live/pubspec.yaml")
 [ -n "$GK3_VERSION" ] || die "读不到 installer/live/pubspec.yaml 的 version"
@@ -63,11 +64,12 @@ GK3_GIT=$(git -C "$REPO" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 [ -z "$(git -C "$REPO" status --porcelain 2>/dev/null)" ] || GK3_GIT="$GK3_GIT-dirty"
 GK3_BOOTSHA=$(shasum -a 256 "$BOOTIMG" 2>/dev/null | cut -d' ' -f1 || sha256sum "$BOOTIMG" | cut -d' ' -f1)
 GK3_BUILT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-echo "   安装器 $GK3_VERSION · git $GK3_GIT · 内核来自 boot.img ${GK3_BOOTSHA:0:16}…"
+GK3_ROM_TAG=${GK3_ROM_TAG:-unknown}
+echo "   安装器 $GK3_VERSION · git $GK3_GIT · 内核来自 boot.img ${GK3_BOOTSHA:0:16}…（ROM $GK3_ROM_TAG）"
 
 say "在容器里构建"
 docker run --rm --privileged "${MOUNTS[@]}" -e PAYLOAD="$PAYLOAD" -e ALLOW_NO_ISO="$ALLOW_NO_ISO" \
-    -e GK3_VERSION="$GK3_VERSION" -e GK3_GIT="$GK3_GIT" -e GK3_BOOTSHA="$GK3_BOOTSHA" -e GK3_BUILT="$GK3_BUILT" \
+    -e GK3_VERSION="$GK3_VERSION" -e GK3_GIT="$GK3_GIT" -e GK3_BOOTSHA="$GK3_BOOTSHA" -e GK3_BUILT="$GK3_BUILT" -e GK3_ROM_TAG="$GK3_ROM_TAG" \
     ${GK3_DEBIAN_MIRROR:+-e GK3_DEBIAN_MIRROR="$GK3_DEBIAN_MIRROR"} ${GK3_SNAPSHOT+-e GK3_SNAPSHOT="$GK3_SNAPSHOT"} \
     "$TAG" bash -euo pipefail -c '
     O=/build/out; mkdir -p $O /build/boot
@@ -88,8 +90,8 @@ docker run --rm --privileged "${MOUNTS[@]}" -e PAYLOAD="$PAYLOAD" -e ALLOW_NO_IS
     # 测试构建（ALLOW_NO_ISO）不要求能提取内核配置：提取不了就当作没有开启 ISO9660，交给 build-iso.sh 提醒
     python3 /repo/scripts/extract-kconfig.py /in/boot.img > /build/boot/kernel-config.txt \
         || { [ -n "$ALLOW_NO_ISO" ] && : > /build/boot/kernel-config.txt; }
-    printf "GK3_INSTALLER_VERSION=%s\nGK3_GIT=%s\nGK3_BUILT=%s\nGK3_BOOTIMG_SHA256=%s\nGK3_GK3L_SHA256=%s\n" \
-        "$GK3_VERSION" "$GK3_GIT" "$GK3_BUILT" "$GK3_BOOTSHA" "$(cat $O/gk3l.sha256)" > $O/release.txt
+    printf "GK3_INSTALLER_VERSION=%s\nGK3_GIT=%s\nGK3_BUILT=%s\nGK3_ROM_TAG=%s\nGK3_BOOTIMG_SHA256=%s\nGK3_GK3L_SHA256=%s\n" \
+        "$GK3_VERSION" "$GK3_GIT" "$GK3_BUILT" "$GK3_ROM_TAG" "$GK3_BOOTSHA" "$(cat $O/gk3l.sha256)" > $O/release.txt
     ISO=(bash /build/installer/tools/build/build-iso.sh --squashfs $O/gaokun3-live.squashfs --initramfs $O/initramfs.img
         --kernel /build/boot/Image --dtb /build/boot/gaokun3.dtb --sdboot $O/systemd-bootaa64.efi
         --cmdline /build/boot/cmdline.txt --kconfig /build/boot/kernel-config.txt ${ALLOW_NO_ISO:+--allow-no-iso9660}

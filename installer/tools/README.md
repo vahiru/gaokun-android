@@ -12,7 +12,7 @@ bash installer/tools/build/build-live.sh --boot-img <boot.img> --firmware <目�
 bash installer/tools/build/build-live.sh --release <发布目录> --firmware <目录> --payload   # 另出一个带系统文件的ISO
 ```
 
-`--firmware`指向形如`/vendor/firmware`的目录（GPU的zap shader为华为专有固件，Debian中没有）。正式构建由GitHub Actions完成（[`.github/workflows/installer-live.yml`](../../.github/workflows/installer-live.yml)，推送`livecd-v*`标签触发），输入均按sha256固定。每次发布产出两个ISO：不带系统文件的`gaokun3-live-<版本>.iso`（用户自行放入系统文件，或由Windows安装器制作安装介质），以及带上所用ROM版本系统文件的`gaokun3-live-<版本>-android-<ROM标签>.iso`（整个写入U盘后也能直接安装）。
+`--firmware`指向形如`/vendor/firmware`的目录（GPU的zap shader为华为专有固件，Debian中没有）。正式构建由GitHub Actions完成（[`.github/workflows/installer-live.yml`](../../.github/workflows/installer-live.yml)），输入均按sha256固定。每个ROM发布之后推送一次`live-installer-v<安装器版本>-for-<ROM标签>`标签，内核与系统文件取自标签中的ROM发布；安装器版本只在安装器本身有改动时更新（见[发版回归清单](../../docs/dev/release-checklist.md)第5节）。每次发布产出两个ISO：带该ROM版本系统文件的`gaokun3-live-<安装器版本>-android-<ROM标签>.iso`（整个写入U盘后即可安装），以及不带系统文件的`gaokun3-live-<安装器版本>-for-<ROM标签>.iso`（供Windows安装器制作安装介质；已发布的Windows安装器按标签名查找它，文件名不能改）。
 
 `build-live.sh`在容器内依次执行：
 1. `build/build-rootfs.sh`：用`mmdebstrap`按[`pkgs.txt`](build/pkgs.txt)从snapshot.debian.org的固定时间点构建根文件系统（其中systemd-boot与e2fsprogs与Windows安装器带的版本相同），叠加`build/overlay/`，静态编译`gk3l`，放入图形安装器与GPU固件；打包`squashfs`前逐项检查（命令、单元是否启用、动态库能否解析、字体、freedreno，以及systemd-boot与e2fsprogs是否与Windows安装器的一致）。所装软件包的版本记入[`packages-live.lock`](build/packages-live.lock)。
