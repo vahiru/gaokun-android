@@ -162,7 +162,7 @@ KPATCHES=(
     kernel/drm/0021-drm-panel-himax-hx83121a-swap-the-panel-s-width-and-height-in-mm.patch
 
     # ─── 6. kernel/iris：qcom-iris视频编解码驱动 ───
-    # 配套 DT 见 kernel/dts/0009–0010、0026；需 CONFIG_VIDEO_QCOM_IRIS=y、CONFIG_VIDEO_QCOM_VENUS 不设。
+    # 配套 DT 见 kernel/dts/0009–0010、0026、0035；需 CONFIG_VIDEO_QCOM_IRIS=y、CONFIG_VIDEO_QCOM_VENUS 不设。
     # 0009 叠在 0006 之上；0012 需与 patches/mesa/0002 及 crdroid-tree-fixes.py [29][30] 一起生效。
     kernel/iris/0001-media-iris-irq-thread-skips-hw-access-after-power-off.patch
     kernel/iris/0002-media-iris-fail-firmware-boot-on-invalid-uc_region.patch
@@ -364,6 +364,7 @@ KPATCHES=(
     kernel/dts/0032-arm64-dts-qcom-sc8280xp-huawei-gaokun3-Use-the-Windows-passive-cooling-constants.patch
     kernel/dts/0033-arm64-dts-qcom-sc8280xp-huawei-gaokun3-Probe-the-camera-modules.patch
     kernel/dts/0034-arm64-dts-qcom-sc8280xp-huawei-gaokun3-Describe-the-S5K3L6-rear-camera.patch
+    kernel/dts/0035-arm64-dts-qcom-sc8280xp-limit-the-video-core-clock-to-444-MHz.patch
 
     # ─── 11. kernel/fingerprint：QSEECOM 与指纹传输驱动（/dev/gaokun3_fpcmd，CONFIG_GAOKUN3_FPCMD 由 kernel-config-android.sh 打开）───
     kernel/fingerprint/0001-firmware-qcom-scm-qseecom-app-load-shutdown-listener.patch
