@@ -65,10 +65,11 @@
 
     <!-- 硬件解码的吞吐量按实测申报。单路按120 fps节奏实时解码3840x2160：HEVC（8位100与200 Mbps、10位100 Mbps）
          与VP9（100 Mbps）在30秒内没有一帧晚过一个帧周期；H.264在4K、100 Mbps下不限速约120 fps，按60 fps实时解码
-         没有迟到，按120 fps则持续迟到。
+         没有迟到，按120 fps则持续迟到；H.264 2560x1440（100 Mbps）按120 fps实时解码没有一帧晚过一个帧周期。
          blocks-per-second：H.264取5.2级的上限2073600（3840x2160约64 fps），HEVC与VP9取4096x2176@120（4177920）。
-         性能点：H.264 3840x2160@60，HEVC与VP9 3840x2160@120。Media3等应用用性能点判断帧率，
-         只申报4K30时，60 fps以上的视频会被交给软解；性能点覆盖帧尺寸更小、宏块速率不超过它的格式。 -->
+         性能点：H.264 3840x2160@60与2560x1440@120，HEVC与VP9 3840x2160@120。Media3等应用用性能点判断帧率，
+         只申报4K30时，60 fps以上的视频会被交给软解。一个性能点只覆盖帧尺寸、帧率与宏块速率都不超过它的格式，
+         H.264的1080p@120与1440p@120由2560x1440@120覆盖。 -->
     <Decoders>
         <MediaCodec name="c2.v4l2.avc.decoder" type="video/avc">
             <Limit name="size" min="128x128" max="4096x2176" />
@@ -78,6 +79,7 @@
             <Limit name="bitrate" range="1-62500000" />
             <Limit name="concurrent-instances" max="8" />
             <Limit name="performance-point-3840x2160" range="60-60" />
+            <Limit name="performance-point-2560x1440" range="120-120" />
             <Feature name="adaptive-playback" />
         </MediaCodec>
 

@@ -614,7 +614,7 @@ def apply_patch_file(tree: pathlib.Path, project: str, patch_name: str,
     """把 <repo>/patches/<patch_name> 用 git apply 打进 AOSP 树的 <project>（幂等）。
 
     ★ 为什么要有这个助手：本仓 `patches/android/` 里的 **AOSP 侧**补丁（
-    hardware-interfaces/0001–0012 audio HAL、v4l2-codec2/0001–0018、tinyalsa/0001、drm-hwcomposer/0001–0005）
+    hardware-interfaces/0001–0012 audio HAL、v4l2-codec2/0001–0019、tinyalsa/0001、drm-hwcomposer/0001–0005）
     原先**没有任何消费者** —— 全靠人手动
     `git apply`。而本仓已经为"没有消费者的配置一定会漂"付过三次账
     （M13 的 BOARD_KERNEL_CMDLINE、M17 的上游 Venus 补丁集、以及 2026-09-12
@@ -1568,12 +1568,16 @@ def main():
     step(" [66] v4l2_codec2解码器出错后停止轮询: ", apply_patch_file(
         tree, "external/v4l2_codec2",
         "android/v4l2-codec2/0017-v4l2-codec2-stop-polling-the-decoder-device-on-error.patch"))
-    # 设备不报告解码级别时，VP9的默认级别表原来只到5级（3840x2160约37 fps），应用按码流级别判断时会把4K60的VP9
-    # （5.1级）判为超出硬件能力，转用软解。iris gen1解码器没有VP9级别控件，用的就是这张表；补上5.1与5.2级。
-    # 在[66]打完的树上生成，排在它之后。
+    # VP9的默认级别表原来只到5级（3840x2160约37 fps），应用按码流级别判断时会把4K60的VP9（5.1级）判为超出硬件能力，
+    # 转用软解。驱动没有VP9级别控件时（iris gen1即是如此），V4L2Device::queryC2Levels()返回它自己的默认表，
+    # 应用看到的是这张表（[68]）；DecodeInterface的默认表（[67]）只在没有任何解码设备列出VP9输入格式、
+    # 或级别控件没有可识别的级别时才使用。两张表都补上5.1与5.2级。依次在[66]、[67]打完的树上生成。
     step(" [67] v4l2_codec2解码器VP9默认级别补上5.1与5.2: ", apply_patch_file(
         tree, "external/v4l2_codec2",
         "android/v4l2-codec2/0018-v4l2-codec2-advertise-VP9-levels-5.1-and-5.2-by-default.patch"))
+    step(" [68] v4l2_codec2设备默认级别表的VP9补上5.1与5.2: ", apply_patch_file(
+        tree, "external/v4l2_codec2",
+        "android/v4l2-codec2/0019-v4l2-codec2-add-VP9-levels-5.1-and-5.2-to-the-device-fallback-list.patch"))
     # SystemUI对Class 1/2指纹只在人脸也锁定时才禁止指纹解锁，没有人脸识别时，指纹自己临时锁定期间仍会不断
     # 请求认证，框架逐次拒绝。补丁让它在锁定期间改为只检测接触（与Class 3相同）；锁定期满时HAL发出
     # onLockoutCleared，SystemUI随之恢复认证。指纹HAL（device/huawei/gaokun3/fingerprint）报告STRONG后，
