@@ -36,8 +36,8 @@
          concurrent-instances 3：每个编码会话的ARP缓冲在内容保护窗口里有自己的槽位（需kernel/iommu/0002
          与kernel/iris/0034），两个编码器共用ro.vendor.v4l2_codec2.encode_concurrent_instances这一个计数。
          尺寸下限128x128是iris的帧尺寸下限（iris_platform_vpu2.c）。上限按4K30申报（3840x2176@30 =
-         979200块/秒），偏保守：单路裸V4L2编码实测1080p约390 fps，4096x2176在输入预先填好时约180–200 fps
-         （逐帧在CPU上填充时约97 fps，受填充速度限制）。驱动的核心负载上限
+         979200块/秒），偏保守：核心时钟上限444 MHz下，单路裸V4L2编码在输入预先填好时3840x2160约160 fps
+         （4096x2176按像素数折算约150 fps）；逐帧在CPU上填充时受填充速度限制，1080p约380 fps。驱动的核心负载上限
          取自sm8250的平台数据（7680x4320@60），编解码共用。码率下限32 kbps是驱动gen1编码器的下限，上限40 Mbps是
          HEVC 5.1级Main层级的码率上限，H.264取同一个值。
          码率模式只能由这里声明（Codec2InfoBuilder不向组件查询），不写时应用只看到VBR；
