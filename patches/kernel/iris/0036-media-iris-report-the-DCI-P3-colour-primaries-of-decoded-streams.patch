@@ -1,0 +1,52 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] media: iris: report the DCI-P3 colour primaries of decoded
+ streams
+
+iris_hfi_get_v4l2_color_primaries() turns the colour primaries that the
+firmware reports for a decoded stream (ITU-T H.273 code points) into a
+V4L2 colorspace. Its DCI-P3 case has the label and the return value
+swapped: it matches V4L2_COLORSPACE_DCI_P3 (12) and returns
+HFI_PRIMARIES_SMPTE_RP431_2 (11). A stream that signals colour primaries
+11 (SMPTE RP 431-2, DCI-P3) is therefore reported as
+V4L2_COLORSPACE_DEFAULT, and one that signals 12 (SMPTE EG 432-1, the P3
+primaries with a D65 white point) as 11, which is V4L2_COLORSPACE_RAW.
+
+Match HFI_PRIMARIES_SMPTE_RP431_2 and return V4L2_COLORSPACE_DCI_P3.
+EG 432-1 has no V4L2 colorspace (V4L2_COLORSPACE_DCI_P3 uses the DCI
+white point), so it now gets V4L2_COLORSPACE_DEFAULT like the other
+primaries without a V4L2 equivalent.
+
+Both decoders call this helper, but on SC8280XP the gen1 decoder does
+not reach it. Its firmware puts only the colour primaries code into
+HFI_PROPERTY_PARAM_VDEC_COLOUR_SPACE (1 for BT.709, 9 for BT.2020, 11
+and 12 for the two P3 variants, 0 without a colour description; the
+transfer characteristics and matrix of the stream do not change it),
+while iris_hfi_gen1_read_changed_params() decodes the value as the
+packed gen2 layout and finds no video_signal_type_present flag. The
+SC8280XP gen1 decoder therefore reports the V4L2 defaults with or
+without this change, and the change is only compile-tested. Other gen1
+platforms were not checked.
+
+Fixes: 84e17adae3e3 ("media: iris: add support for dynamic resolution change")
+Origin: local
+Upstream-Status: Pending
+Assisted-by: Claude:claude-opus-5-5
+---
+ drivers/media/platform/qcom/iris/iris_hfi_common.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/media/platform/qcom/iris/iris_hfi_common.c b/drivers/media/platform/qcom/iris/iris_hfi_common.c
+index aff27934c8..440c6176f7 100644
+--- a/drivers/media/platform/qcom/iris/iris_hfi_common.c
++++ b/drivers/media/platform/qcom/iris/iris_hfi_common.c
+@@ -27,8 +27,8 @@ u32 iris_hfi_get_v4l2_color_primaries(u32 hfi_primaries)
+ 		return V4L2_COLORSPACE_SMPTE240M;
+ 	case HFI_PRIMARIES_BT2020:
+ 		return V4L2_COLORSPACE_BT2020;
+-	case V4L2_COLORSPACE_DCI_P3:
+-		return HFI_PRIMARIES_SMPTE_RP431_2;
++	case HFI_PRIMARIES_SMPTE_RP431_2:
++		return V4L2_COLORSPACE_DCI_P3;
+ 	default:
+ 		return V4L2_COLORSPACE_DEFAULT;
+ 	}
