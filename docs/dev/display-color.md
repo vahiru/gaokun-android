@@ -72,7 +72,7 @@ HDR 图层上屏 ─→ 框架算出提亮后的亮度 ─→ SF 压暗 SDR 图�
 - 色调映射保持默认的500尼特目标。调低它中间调会变亮，但高光压缩得更早，天空这类大面积亮部会发白。
 - HWC只把背光绑给内置屏。sysfs没有说明背光属于哪个连接器，绑给外接显示器的话，它的亮度会写到内置屏上。
 - HWC给内置屏声明HDR10和HLG（`patches/android/drm-hwcomposer/0004`，`vendor.hwc.drm.force_hdr_support`），应用靠`Display.isHdr()`选片源。声明之后SF不再把HDR图层强制交给GPU，平面又做不了色调映射，所以HWC自己转给GPU。
-- `v4l2_codec2`声明HDR静态元数据（`patches/android/v4l2-codec2/0003`），框架才会给HEVC列出`Main10 HDR10`。元数据只来自容器，不解析码流里的SEI；系统的MP4提取器不读`mdcv`和`clli`，只有Media3这类自己解析容器的播放器传得进来。HDR10+不支持。
+- `v4l2_codec2`声明HDR静态元数据（`patches/android/v4l2-codec2/0007`），框架才会给HEVC列出`Main10 HDR10`。元数据只来自容器，不解析码流里的SEI；系统的MP4提取器不读`mdcv`和`clli`，只有Media3这类自己解析容器的播放器传得进来。HDR10+不支持。
 - ToneMapper13的内容峰值写死4000尼特，不读静态元数据，所以元数据不改变画面。
 - Ultra HDR要应用自己申请`COLOR_MODE_HDR`。Google相册可以提亮；Glimpse和Edge不申请，按SDR显示。Chromium只在系统已经提亮时才按HDR渲染，单张图片不会触发。
 

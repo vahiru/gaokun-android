@@ -66,9 +66,8 @@ endif
 #   refs/a17/packages/modules/adb/daemon/restart_service.cpp:63-64的提示语指向这个开关）后，`adb root`即可成功
 #   （restart_service.cpp:42-72：取得adbroot_service且已启用即放行）。没有安装adb_root时，这条路径在
 #   restart_service.cpp:46-49就返回。
-#   PRODUCT_PACKAGES只能加不能减（lineage_gaokun3.mk里SetupWizard那段的实测），设备树无法去掉它，
-#   因此由crdroid-tree-fixes.py的修补[24]改回WITH_SU=true时才安装。
-#   crDroid上游提交82c2c41049（common: Move adb root to eng builds）起只在eng构建中安装adb_root，修补[24]在这样的树上报"已废弃（A17）"。
+#   PRODUCT_PACKAGES只能加不能减（lineage_gaokun3.mk里SetupWizard那段的实测），设备树无法去掉它。
+#   crDroid上游提交82c2c41049（common: Move adb root to eng builds）起只在eng构建中安装adb_root，userdebug的发布构建不再安装它。
 
 # 屏幕密度
 # [measured] 1600x2560，物理尺寸166x266 mm，对角12.34"，约245 dpi。
@@ -269,14 +268,14 @@ PRODUCT_COPY_FILES += \
 #   IModule/usb 的 VINTF 声明在 manifest.xml（APEX 自带的那份把它注释掉了）。
 
 # v1.0 AV-10：耳机麦走 hw:0,2。可插拔端口在策略里不能写 address（理由见 primary_audio_policy_configuration.xml
-# 耳机那段），HAL 只拿得到设备类型 ⇒ 补丁 0077（tree-fix [21]）让 StreamPrimary 按类型读这个属性。
+# 耳机那段），HAL只能获取设备类型 ⇒ patches/android/hardware-interfaces/0007让StreamPrimary按类型读这个属性。
 # 映射来自 bin/audio-route.sh / docs/dev/audio-video.md 的 PCM 表：头戴麦 = hw:0,2（TX_CODEC_DMA_TX_3 → MultiMedia3）。
 # 属性落在 ro.vendor. → vendor_default_prop，vendor 域可读（refs/lineage-sepolicy/private/domain.te:473），不用加规则。
 PRODUCT_VENDOR_PROPERTIES += \
     ro.vendor.audio.primary.alsa.in_headset=CARD_0_DEV_2
 
 # 音游延迟：播放块5 ms（240帧）⇒ AudioFlinger开FastMixer（混音周期5 ms），游戏的低延迟请求能批下来，
-# 游戏申请的轨道缓冲（通常是两个块）也跟着缩小。补丁hardware-interfaces/0008（tree-fix [22]）读它；
+# 游戏申请的轨道缓冲（通常是两个块）也跟着缩小。补丁hardware-interfaces/0008读它；
 # 不设 = 原来的85 ms / 4096帧。
 # 必须与内核kernel/audio/0013（q6apm-dai播放period步长240帧）一起改：内核还是480帧步长时，ALSA的period
 # 会被取整到480帧，缓冲并不缩短；反过来内核是240帧、这里却是10 ms时，ALSA是3 × 240帧而HAL一次写两个
@@ -285,22 +284,22 @@ PRODUCT_VENDOR_PROPERTIES += \
     ro.vendor.audio.primary.out_latency_ms=5
 
 # 游戏音频延迟：播放方向的ALSA缓冲切成3个period（5 ms块 ⇒ 3 × 240帧 = 15 ms），录音方向仍按alsa_utils
-# 默认的4个。补丁hardware-interfaces/0011（tree-fix [40]）读它；不设 = 4个。不要减到2个：DSP缺数据时扣着
+# 默认的4个。补丁hardware-interfaces/0011读它；不设 = 4个。不要减到2个：DSP缺数据时扣着
 # 最后一个period不放，ALSA不会报XRUN，FastMixer和轨道的计数也都是0，只能在游戏里听出断音。
 # 发布后若有断音，可先把out_period_count改为4（4 × 240帧，内核不用动）。
 PRODUCT_VENDOR_PROPERTIES += \
     ro.vendor.audio.primary.out_period_count=3
 
 # 扬声器低音处理（speakerfx/README.md）：音频 HAL 把每块播放数据写进 ALSA 之前交给这个库
-# （补丁 0117，tree-fix [27]），所以游戏的 FAST 轨也在内 —— 会话音效挂不上 FAST 会话。
+# （patches/android/hardware-interfaces/0009），所以游戏的 FAST 轨也在内 —— 会话音效挂不上 FAST 会话。
 # 只在扬声器增强打开、且处理方式不是 Histen 时处理（默认就是它；会话音效那时是直通），其余原样放过。
-# 装在 /vendor/lib64/soundfx：HAL 跑在 APEX 里，隔离的链接器命名空间只放行这一个 vendor 目录（补丁 0068）。
+# 装在 /vendor/lib64/soundfx：HAL 跑在 APEX 里，隔离的链接器命名空间只放行这一个 vendor 目录（patches/android/hardware-interfaces/0005）。
 PRODUCT_PACKAGES += \
     libgaokunspeakerfx
 PRODUCT_VENDOR_PROPERTIES += \
     ro.vendor.audio.primary.playback_hook=/vendor/lib64/soundfx/libgaokunspeakerfx.so
 
-# 内置麦克风阵列（micarray/README.md）：音频HAL打开内置麦之前先问这个库（补丁0206，tree-fix [38]）。
+# 内置麦克风阵列（micarray/README.md）：音频HAL打开内置麦之前先问这个库（patches/android/hardware-interfaces/0010）。
 # 它接管时ALSA按四路开，每块录音由顶部三颗麦克风经固定波束成形变成双声道，延迟30 ms；
 # UNPROCESSED、VOICE_PERFORMANCE等音源不经过它。四路要拓扑改过（micarray/tplg-four-channel-capture.py），
 # 拓扑没改时HAL按原来的两路开；拓扑改了就必须带内核0203、0204，否则声道是重混过的。
@@ -461,7 +460,7 @@ PRODUCT_SYSTEM_EXT_PROPERTIES += \
 
 # 广色域（docs/dev/display-color.md）：面板原生接近 Display P3，有工厂校准时内核按连接器 Colorspace 切 sRGB、P3。
 #   · has_wide_color_display 让 SF 不再滤掉 P3 模式，应用才看得到广色域；落 system_ext，理由同上。
-#   · force_p3_support 让 HWC 报告 P3（patches/android/drm-hwcomposer/0002，tree-fix [32]）。连接器没有 Colorspace 属性时它不起作用，
+#   · force_p3_support 让 HWC 报告 P3（patches/android/drm-hwcomposer/0002）。连接器没有 Colorspace 属性时它不起作用，
 #     所以校准表读取失败的机器只是退回 sRGB。
 #   判据：`dumpsys SurfaceFlinger | grep "Device supports wide color"` = 1；空闲时 Current color mode 仍是 SRGB。
 PRODUCT_SYSTEM_EXT_PROPERTIES += \
@@ -1027,7 +1026,7 @@ PRODUCT_PACKAGES += \
 #   service 跑在 system:system，-R /vendor/etc/hexagonrpcd-root）——所以这里
 #   只需要把包加进来 + 把 VFS 根装到那个路径。
 #   项目由 manifests/local_manifest_gaokun3.xml 拉取；
-#   \r 截断补丁由 scripts/crdroid-tree-fixes.py 打（上游没有，缺了 DSP 读不到 registry）。
+#   \r截断补丁是patches/android/hexagonrpc/0001（上游没有这个补丁，缺少它时DSP无法读取传感器注册表）。
 # ⚠️ 前提是 CONFIG_QCOM_FASTRPC=y（buildbot 默认 =m，而 Android 不加载模块）
 #   —— 已在 scripts/kernel-config-android.sh 里 enable + 断言。
 # ⚠️ /dev/fastrpc-sdsp 的权限在 ueventd.gaokun3.rc 里给（默认 root 独占）。
@@ -1163,7 +1162,7 @@ endif
 #  3. poolmask 不能抄 README 的 0xf50000（那是 ION）—— 本机没有 ION
 #     （/dev/ion 不存在、CONFIG_ION 也不在），要用 BLOB 的 0xfc0000。
 #     再加 GRALLOC（第 17 位）成 0xfe0000：没有这一位，CCodec 给字节缓冲解码器的是
-#     基础块池，每次 fetch 都是新缓冲，VideoFramePool 的缓冲数用完就停住（patches/android/v4l2-codec2/0002）。
+#     基础块池，每次 fetch 都是新缓冲，VideoFramePool 的缓冲数用完就停住（patches/android/v4l2-codec2/0006）。
 #  ★ 另外 libv4l2_codec2_vendor_allocator **不必装**：
 #     plugin_store/VendorAllocatorLoader.cpp:26 的 dlopen 失败只 ALOGI 返回 nullptr，
 #     是可选项（给安全播放用的，本机没有）。
@@ -1204,8 +1203,8 @@ PRODUCT_VENDOR_PROPERTIES += \
 #      不能设这几条属性。encode_concurrent_instances大于1还要kernel/iommu/0002、kernel/iris/0034与
 #      kernel/dts/0026：没有0034时ARP在固定IOVA上，第二路编码在开流时失败，应用拿到错误而不是换软编；
 #      没有dts/0026时，同时打开的会话多了，编码器的其它内部缓冲可能落进内容保护范围，整板复位。
-#   Codec2一侧要patches/android/v4l2-codec2/0004（输入块带CPU读用途：组件要映射第一块输入读平面布局，
-#   录屏的RGB输入还要在CPU上转成NV12）与0005（HEVC编码组件）。iris没有VP8/VP9编码，那两条保持关闭。
+#   Codec2一侧要patches/android/v4l2-codec2/0008（输入块带CPU读用途：组件要映射第一块输入读平面布局，
+#   录屏的RGB输入还要在CPU上转成NV12）与0009（HEVC编码组件）。iris没有VP8/VP9编码，那两条保持关闭。
 #   encode_concurrent_instances=3：每个编码会话的ARP在内容保护窗口里有自己的槽位（内核有8个），AVC与HEVC
 #   共用这一个计数。第四个编码请求在分配组件时被拒（资源不足）。MediaCodec先请资源管理器从优先级更低的
 #   进程收回一个硬件编解码器（解码器也算在内）再重试，收不回时才试下一个编码器，也就是c2.android.*软编；

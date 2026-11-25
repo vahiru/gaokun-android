@@ -132,7 +132,7 @@
              扬声器在另一个后端（WSA / MultiMedia2 / hw:0,1），两者不争用，
              切换发生在 PCM 层面。
              ⚠️ 耳机麦要的是 hw:0,2，回落成 (0,0) 会失败 —— 所以 v1.0 AV-10 加了"按设备类型回落"：
-             patches/android/hardware-interfaces/0007（tree-fix [21]）让 getCardAndDeviceId() 在地址解析失败时先读
+             patches/android/hardware-interfaces/0007让getCardAndDeviceId()在地址解析失败时先读
              ro.vendor.audio.primary.alsa.<类型>（device.mk 只设了 in_headset）；输出两口没设属性，
              仍走上面这个 (0,0) 回落，行为不变。见下面耳机麦那段。
 
@@ -161,7 +161,7 @@
              让它落到 hw:0,2（TX_CODEC_DMA_TX_3 → MultiMedia3）；混音器 TX 通路 audio-route.sh 开机就摆好了
              （"耳机麦路由已应用（PCM2 / TX）"那段），这里不用再加控件。
              ⚠️ 前提三条，缺一条就会重现上面那个退化（插耳机后录音为空）：
-               ① tree-fix [21] 打上了（构建日志里 [21] 是"已应用"/"已打过"）；
+               ① hardware-interfaces/0007已打上（crdroid-tree-fixes.py对hardware/interfaces没有报错）；
                ② 属性在 /vendor/build.prop 里；
                ③ 只在带麦的耳机上连接 —— 框架只有 WiredAccessoryManager 报 BIT_HEADSET（三段 + 麦检测）时
                   才连 IN_WIRED_HEADSET，三段耳机（无麦）只连 OUT_WIRED_HEADPHONE、录音继续用内置麦。

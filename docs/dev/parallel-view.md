@@ -8,16 +8,16 @@
 
 | 部分 | 位置 | 作用 |
 |---|---|---|
-| 兼容变更 | `patches/android/frameworks-base/0006`（`ActivityInfo`、`ActivityThread`、`WindowExtensionsHelper`） | 新增`OVERRIDE_ENABLE_PARALLEL_VIEW`（3374131364，可覆盖，默认关闭）。开启的应用在`handleBindApplication`末尾初始化窗口管理扩展库，不依赖虚拟手柄的aconfig标志`virtual_gamepad_override` |
-| 规则转换 | `patches/android/frameworks-base/0007`（`libs/WindowManager/Jetpack`的`ParallelViewRules`） | 读取`easygo.json`并生成嵌入规则；处理两类妨碍扩展库识别页面的应用行为 |
+| 兼容变更 | `patches/android/frameworks-base/0005`（`ActivityInfo`、`ActivityThread`、`WindowExtensionsHelper`） | 新增`OVERRIDE_ENABLE_PARALLEL_VIEW`（3374131364，可覆盖，默认关闭）。开启的应用在`handleBindApplication`末尾初始化窗口管理扩展库，不依赖虚拟手柄的aconfig标志`virtual_gamepad_override` |
+| 规则转换 | `patches/android/frameworks-base/0006`（`libs/WindowManager/Jetpack`的`ParallelViewRules`） | 读取`easygo.json`并生成嵌入规则；处理两类妨碍扩展库识别页面的应用行为 |
 | 设置页面 | `device/huawei/gaokun3/parts`的`ParallelViewSettingsActivity` | 列出带规则的应用，按应用设置兼容覆盖 |
-| 分隔条拖动画面 | `patches/android/frameworks-base/0008`（`DividerPresenter`） | 拖动分隔条时显示两侧页面的截图，对所有使用可拖动分隔条的应用生效 |
+| 分隔条拖动画面 | `patches/android/frameworks-base/0007`（`DividerPresenter`） | 拖动分隔条时显示两侧页面的截图，对所有使用可拖动分隔条的应用生效 |
 
 ### 扩展库的加载
 
 AOSP只为虚拟手柄提供了"系统替应用载入嵌入规则"的路径：PMS在扫描时给开启了手柄变更的应用追加扩展库，`ActivityThread`在绑定应用时初始化嵌入。PMS只在扫描时追加，开关切换后要重启系统才生效。
 
-0006不改PMS：应用的类加载器中找不到`WindowExtensionsProvider`时，`WindowExtensionsHelper`改用zygote为扩展库缓存的类加载器（`ApplicationLoaders.getCachedNonBootclasspathSystemLib`，后三个参数必须为null）。声明了扩展库的应用拿到的也是这个类加载器，所以每个进程中只有一份扩展库实例。切换开关后只需重启该应用。
+0005不改PMS：应用的类加载器中未找到`WindowExtensionsProvider`时，`WindowExtensionsHelper`改用zygote为扩展库缓存的类加载器（`ApplicationLoaders.getCachedNonBootclasspathSystemLib`，后三个参数必须为null）。声明了扩展库的应用拿到的也是这个类加载器，所以每个进程中只有一份扩展库实例。切换开关后只需重启该应用。
 
 ### 规则对应关系
 
@@ -52,14 +52,14 @@ AOSP只为虚拟手柄提供了"系统替应用载入嵌入规则"的路径：PM
 
 ### 全屏播放
 
-分栏中的页面处于多窗口模式，部分应用在此模式下禁用全屏播放：哔哩哔哩的全屏按钮只检查`Activity.isInMultiWindowMode()`，为true时提示"分屏模式下暂不支持全屏播放"。0007对载入了平行视界规则的应用这样处理：
+分栏中的页面处于多窗口模式，部分应用在此模式下禁用全屏播放：哔哩哔哩的全屏按钮只检查`Activity.isInMultiWindowMode()`，为true时提示"分屏模式下暂不支持全屏播放"。0006对载入了平行视界规则的应用这样处理：
 
 - **多窗口状态**：页面位于分栏中、且任务本身不处于多窗口模式时，报告为不处于多窗口模式；其他情况按实际报告（系统分屏、自由窗口、画中画）。`ActivityThread`只在页面创建时以及进入、退出多窗口模式时设置这个状态，所以每次布局后、以及任务变化时都重新检查。容器的窗口模式本身仍是多窗口，窗口管理依赖它确定容器的边界与可见性。
-- **展开**：右侧容器的页面请求横屏时，用`SplitController.updateSplitAttributes()`把分栏改为`ExpandContainersSplitType`并去掉分隔条：该页面铺满任务，左侧页面保留在下面，视频上没有把手。该页面不再请求横屏时，恢复原来的分栏属性。右侧容器中的页面按窗口管理决定屏幕方向的规则判断：从最上层往下，第一个明确请求了方向的页面做决定；请求“跟随下层”（behind）的页面，以及没有请求方向、或请求的方向会被屏幕忽略（横屏、locked、nosensor、sensor、fullSensor以外的方向）的半透明或浮动样式页面，让给下层，与frameworks-base/0009中窗口管理的判断一致；没有请求方向的不透明页面则终止判断。其他进程的页面不参与判断。因此播放页上叠加的页面不会在播放页仍可见时恢复分栏，主题为半透明的播放页也能触发展开。右侧为非粘性占位页的分栏不展开，因为展开会关闭占位页及其上的页面。
+- **展开**：右侧容器的页面请求横屏时，用`SplitController.updateSplitAttributes()`把分栏改为`ExpandContainersSplitType`并去掉分隔条：该页面铺满任务，左侧页面保留在下面，视频上没有把手。该页面不再请求横屏时，恢复原来的分栏属性。右侧容器中的页面按窗口管理决定屏幕方向的规则判断：从最上层往下，第一个明确请求了方向的页面做决定；请求“跟随下层”（behind）的页面，以及没有请求方向、或请求的方向会被屏幕忽略（横屏、locked、nosensor、sensor、fullSensor以外的方向）的半透明或浮动样式页面，让给下层，与frameworks-base/0008中窗口管理的判断一致；没有请求方向的不透明页面则终止判断。其他进程的页面不参与判断。因此播放页上叠加的页面不会在播放页仍可见时恢复分栏，主题为半透明的播放页也能触发展开。右侧为非粘性占位页的分栏不展开，因为展开会关闭占位页及其上的页面。
 - **请求的方向**：页面最近一次传给`setRequestedOrientation()`的值（`Activity.mLastRequestedOrientation`）；没有时向系统查询一次，得到清单中声明的方向，或重建前的实例请求的方向。
 - 布局监听按页面实例登记，页面销毁时移除，因为页面重建时可能沿用原来的窗口。`SplitController`构造时把自己交给`ParallelViewRules`。
 
-竖握平板时：frameworks-base/0009让自然方向为横屏的屏幕响应横屏请求，竖屏时堆叠在一起的容器中，最上层的容器照常报告页面请求的方向，所以页面请求横屏时屏幕转为横屏。分栏随即并排显示，而并排的容器在AOSP中报告“未指定”，屏幕会跟随传感器转回竖屏、再次堆叠并转为横屏。0009在屏幕已是横屏时，按堆叠时的覆盖关系从最上层的容器（通常是右侧）往下找：跳过只有半透明且未请求方向、或请求会被忽略的页面的容器，第一个有明确方向的容器请求横屏时，让这些容器报告userLandscape，屏幕在分栏显示期间保持横屏。
+竖握平板时：frameworks-base/0008让自然方向为横屏的屏幕响应横屏请求，竖屏时堆叠在一起的容器中，最上层的容器照常报告页面请求的方向，所以页面请求横屏时屏幕转为横屏。分栏随即并排显示，而并排的容器在AOSP中报告“未指定”，屏幕会跟随传感器转回竖屏、再次堆叠并转为横屏。0008在屏幕已是横屏时，按堆叠时的覆盖关系从最上层的容器（通常是右侧）往下找：跳过只有半透明且未请求方向、或请求会被忽略的页面的容器，第一个有明确方向的容器请求横屏时，让这些容器报告userLandscape，屏幕在分栏显示期间保持横屏。
 
 - 同一进程的右侧页面随后按上述方式展开。其他进程的右侧页面无法展开，分栏保持并排，在该页面关闭或不再请求横屏之前，转动平板不会使屏幕转为竖屏。
 - 右侧是不透明页面时，左侧页面的请求不使屏幕保持横屏：堆叠时左侧被右侧覆盖，不会引起反复旋转。例如购物模式中被推到左侧的横屏页面仍可见时，竖握平板，分栏堆叠，右侧页面竖屏显示。
@@ -72,7 +72,7 @@ AOSP只为虚拟手柄提供了"系统替应用载入嵌入规则"的路径：PM
 
 AOSP拖动分隔条时不实时调整两侧大小（否则应用每一帧都要重新排版），而是用纯色遮罩盖住两侧，松手后再按新比例排版。遮罩颜色取页面的窗口背景，而许多应用的窗口背景与页面颜色不同：例如知乎深色主题下窗口背景为`#000000`，页面为`#191B1F`，拖动时两侧都变成全黑。
 
-0008在开始拖动时用`ScreenCaptureInternal.captureLayers`截取两侧页面的窗口（含视频等子图层），显示在遮罩上原来的位置，由遮罩按新边界裁切，看起来是分隔条从页面上划过。某一侧变宽时，截图未覆盖的部分用该侧窗口靠分隔条一边4 px宽的条带中最常见的不透明颜色填充（应用自己设置了遮罩颜色时用该颜色）。没有`READ_FRAME_BUFFER`权限时，SurfaceFlinger只允许应用截取自己uid的图层，正好满足这里的需要。以下情况退回原来的纯色遮罩：容器中有其他进程的页面（无法在本进程截取，且可能盖在上面）、窗口与容器不重合（留边或按尺寸兼容缩放）、窗口含安全内容（截出来是黑色）、截取失败。截取（每侧一次窗口、一次条带）在开始拖动时同步进行。
+0007在开始拖动时用`ScreenCaptureInternal.captureLayers`截取两侧页面的窗口（含视频等子图层），显示在遮罩上原来的位置，由遮罩按新边界裁切，看起来是分隔条从页面上划过。某一侧变宽时，截图未覆盖的部分用该侧窗口靠分隔条一边4 px宽的条带中最常见的不透明颜色填充（应用自己设置了遮罩颜色时用该颜色）。没有`READ_FRAME_BUFFER`权限时，SurfaceFlinger只允许应用截取自己uid的图层，正好满足这里的需要。以下情况退回原来的纯色遮罩：容器中有其他进程的页面（无法在本进程截取，且可能盖在上面）、窗口与容器不重合（留边或按尺寸兼容缩放）、窗口含安全内容（截出来是黑色）、截取失败。截取（每侧一次窗口、一次条带）在开始拖动时同步进行。
 
 拖到边缘时，AOSP的处理分两种：右侧（次容器）铺满时两侧都保留，可以再拖回来；左侧（主容器）铺满时，右侧的页面随即结束（`TaskContainer.updateTopSplitContainerForDivider`）。
 

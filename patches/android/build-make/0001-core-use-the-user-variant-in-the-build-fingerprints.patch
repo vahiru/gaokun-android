@@ -1,0 +1,54 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] core: use the user variant in the build fingerprints
+
+gen_build_prop.py reports ro.build.type=user for every variant except
+eng, but BUILD_FINGERPRINT, BUILD_THUMBPRINT and BUILD_SYSTEM_FINGERPRINT
+end in $(TARGET_BUILD_VARIANT), which is userdebug for these builds. The
+fingerprints then contradict Build.TYPE, and Build.FINGERPRINT is fixed
+when zygote preloads its classes, so it cannot be corrected at runtime.
+
+Use "user" as the variant segment of all three.
+
+Origin: local
+Upstream-Status: Inappropriate [device-specific policy]
+---
+ core/config.mk | 9 ++++++---
+ 1 file changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/core/config.mk b/core/config.mk
+index 4ea5e78..e74cd32 100644
+--- a/core/config.mk
++++ b/core/config.mk
+@@ -1427,10 +1427,13 @@ BUILD_KEYS := release-keys
+ BUILD_VERSION_TAGS += $(BUILD_KEYS)
+ BUILD_VERSION_TAGS := $(subst $(space),$(comma),$(sort $(BUILD_VERSION_TAGS)))
+ 
++# The variant segment of the fingerprint, thumbprint and system fingerprint is 'user',
++# not $(TARGET_BUILD_VARIANT): gen_build_prop.py reports ro.build.type=user for every
++# variant except eng, and the fingerprints must agree with it.
+ # BUILD_FINGERPRINT is used to uniquely identify the combined build and product;
+ # used by the OTA server.
+ ifeq (,$(strip $(BUILD_FINGERPRINT)))
+-  BUILD_FINGERPRINT := $(PRODUCT_BRAND)/$(TARGET_PRODUCT)/$(TARGET_DEVICE):$(PLATFORM_VERSION)/$(BUILD_ID)/$(BUILD_NUMBER_FROM_FILE):$(TARGET_BUILD_VARIANT)/$(BUILD_VERSION_TAGS)
++  BUILD_FINGERPRINT := $(PRODUCT_BRAND)/$(TARGET_PRODUCT)/$(TARGET_DEVICE):$(PLATFORM_VERSION)/$(BUILD_ID)/$(BUILD_NUMBER_FROM_FILE):user/$(BUILD_VERSION_TAGS)
+ endif
+ 
+ # In order to allow product-config to be run in parallel for multiple lunch targets, the build_fingerprint file is product-specific.
+@@ -1450,7 +1453,7 @@ BUILD_UUID_FILE :=
+ # BUILD_THUMBPRINT is used to uniquely identify the system build; used by the
+ # OTA server. This purposefully excludes any product-specific variables.
+ ifeq (,$(strip $(BUILD_THUMBPRINT)))
+-  BUILD_THUMBPRINT := $(PLATFORM_VERSION)/$(BUILD_ID)/$(BUILD_NUMBER_FROM_FILE):$(TARGET_BUILD_VARIANT)/$(BUILD_VERSION_TAGS)
++  BUILD_THUMBPRINT := $(PLATFORM_VERSION)/$(BUILD_ID)/$(BUILD_NUMBER_FROM_FILE):user/$(BUILD_VERSION_TAGS)
+ endif
+ 
+ # In order to allow product-config to be run in parallel for multiple lunch targets, the build_thumbprint file is product-specific.
+@@ -1469,7 +1472,7 @@ BUILD_THUMBPRINT :=
+ # the BUILD_THUMBPRINT, it includes system image attributes to uniquely identify
+ # the system image; This purposefully excludes any product-specific variables.
+ ifeq (,$(strip $(BUILD_SYSTEM_FINGERPRINT)))
+-  BUILD_SYSTEM_FINGERPRINT := $(PRODUCT_SYSTEM_BRAND)/$(PRODUCT_SYSTEM_NAME)/$(PRODUCT_SYSTEM_DEVICE):$(PLATFORM_VERSION)/$(BUILD_ID)/$(BUILD_NUMBER_FROM_FILE):$(TARGET_BUILD_VARIANT)/$(BUILD_VERSION_TAGS)
++  BUILD_SYSTEM_FINGERPRINT := $(PRODUCT_SYSTEM_BRAND)/$(PRODUCT_SYSTEM_NAME)/$(PRODUCT_SYSTEM_DEVICE):$(PLATFORM_VERSION)/$(BUILD_ID)/$(BUILD_NUMBER_FROM_FILE):user/$(BUILD_VERSION_TAGS)
+ endif
+ 
+ # In order to allow product-config to be run in parallel for multiple lunch targets, the build_system_fingerprint file is product-specific.

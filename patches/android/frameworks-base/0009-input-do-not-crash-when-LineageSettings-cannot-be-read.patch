@@ -1,0 +1,52 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] input: do not crash when LineageSettings cannot be read
+
+KeyGestureController reads CLICK_PARTIAL_SCREENSHOT and
+VOLUME_UP_AND_DOWN_MUTE from LineageSettings.System without handling
+errors. If the LineageSettings provider is missing, for example after
+org.lineageos.lineagesettings has been uninstalled for the user, the
+read throws and system_server crashes in a loop, so the device does not
+finish booting.
+
+Catch the exception for each read and log a warning. If the provider is
+missing from the start, both options stay off, as on a device without
+these settings; if a later re-read fails, the previous value is kept.
+
+Origin: local
+Upstream-Status: Pending
+---
+ .../server/input/KeyGestureController.java    | 21 +++++++++++++------
+ 1 file changed, 15 insertions(+), 6 deletions(-)
+
+diff --git a/services/core/java/com/android/server/input/KeyGestureController.java b/services/core/java/com/android/server/input/KeyGestureController.java
+index 8944ca1..2d17048 100644
+--- a/services/core/java/com/android/server/input/KeyGestureController.java
++++ b/services/core/java/com/android/server/input/KeyGestureController.java
+@@ -330,12 +330,21 @@ final class KeyGestureController {
+                 Settings.Global.KEY_CHORD_POWER_VOLUME_UP,
+                 mContext.getResources().getInteger(
+                         com.android.internal.R.integer.config_keyChordPowerVolumeUp));
+-        mClickPartialScreenshot = LineageSettings.System.getIntForUser(resolver,
+-                LineageSettings.System.CLICK_PARTIAL_SCREENSHOT, 0,
+-                UserHandle.USER_CURRENT) == 1;
+-        mVolUpAndDownMute = LineageSettings.System.getIntForUser(resolver,
+-                LineageSettings.System.VOLUME_UP_AND_DOWN_MUTE, 0,
+-                UserHandle.USER_CURRENT) == 1;
++        // A missing or hidden LineageSettings provider must not crash system_server.
++        try {
++            mClickPartialScreenshot = LineageSettings.System.getIntForUser(resolver,
++                    LineageSettings.System.CLICK_PARTIAL_SCREENSHOT, 0,
++                    UserHandle.USER_CURRENT) == 1;
++        } catch (Exception e) {
++            android.util.Log.w("KeyGestureController", "Failed to read CLICK_PARTIAL_SCREENSHOT", e);
++        }
++        try {
++            mVolUpAndDownMute = LineageSettings.System.getIntForUser(resolver,
++                    LineageSettings.System.VOLUME_UP_AND_DOWN_MUTE, 0,
++                    UserHandle.USER_CURRENT) == 1;
++        } catch (Exception e) {
++            android.util.Log.w("KeyGestureController", "Failed to read VOLUME_UP_AND_DOWN_MUTE", e);
++        }
+     }
+ 
+     private void initKeyCombinationRules() {

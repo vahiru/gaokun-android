@@ -17,7 +17,7 @@
     venus 时代（`tools/v4l2-probe` 实测 VIDIOC_ENUM_FMT）：解码 H264 VP80 VP90 HEVC MPG2，编码 H264 VP80 HEVC
     ★ iris gen1（iris_platform_vpu2.c 的格式表，#128）：解码 H264 HEVC VP90，编码 H264 HEVC
   v4l2_codec2 有组件的（v4l2/V4L2ComponentCommon.cpp）：
-    解码avc/vp8/vp9/hevc/av1，编码avc/vp8/vp9，加上patches/android/v4l2-codec2/0005的hevc编码
+    解码avc/vp8/vp9/hevc/av1，编码avc/vp8/vp9，加上patches/android/v4l2-codec2/0009的hevc编码
   ⇒ 交集 = 解码avc/vp9/hevc，编码avc/hevc。
     ⚠️ VP8：iris 不解。这里要是还声明它，rank 压过软解，应用拿到失败而不是回退；
     ⚠️ AV1、VP9 编码硬件都没有 —— 对应属性必须保持 false。

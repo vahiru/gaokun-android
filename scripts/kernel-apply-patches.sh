@@ -38,7 +38,7 @@ MODE=${2:-apply}
 KPATCHES=(
     # ─── 1. kernel/core：核心内核、Android 基础支撑（ashmem / xt_quota2 / bpffs / SELinux）、架构与通用子系统 ───
     # 0006 引入 CONFIG_ARM64_USER_MMAP_WINDOW_39（kernel-config-android.sh 开启并断言）；
-    # 0008 与 crdroid-tree-fixes.py [36][37] 配套。
+    # 0008与patches/android/frameworks-base/0010、system-core/0003配套。
     # 0010取自ACK：system_server（uid 1000，持有CAP_SYS_NICE）须能迁移不以uid 1000运行的进程（各应用及shell等系统uid），涉及cpuset/cpu/blkio的v1分组。
     # 0011让设备树温区的被动降频点按ACPI的被动降温公式判断趋势，系数由kernel/dts/0032给出。
     kernel/core/0001-efi-pstore-register-backend-when-efivars-ops-arrive-.patch
@@ -135,8 +135,8 @@ KPATCHES=(
 
     # ─── 5. kernel/drm：DRM 核心、MSM DPU 色彩与平面、DSI PHY、Himax 面板、MSM GPU ───
     # 显示色彩详见 docs/dev/display-color.md。0003 与 kernel/dts/0017 配套；
-    # 0005 依赖 0004 并与 android/drm-hwcomposer/0002（tree-fix [32]）配套；
-    # 0007 与 android/drm-hwcomposer/0001（tree-fix [31]）配套。
+    # 0005 依赖 0004 并与 android/drm-hwcomposer/0002 配套；
+    # 0007 与 android/drm-hwcomposer/0001 配套。
     # 0016 需要 mesa/0012（Turnip VSC 修正）：内核报告抢占后 Turnip 走 a6xx 抢占路径。
     # 0018 给 DSPP 加 3D LUT；0019 依赖 0005、0018，把工厂校准从 PCC 矩阵换成 3D LUT 的两个存储体。
     kernel/drm/0001-drm-crtc-drop-racy-BUG_ON-in-fence_to_crtc.patch
@@ -163,7 +163,7 @@ KPATCHES=(
 
     # ─── 6. kernel/iris：qcom-iris视频编解码驱动 ───
     # 配套 DT 见 kernel/dts/0009–0010、0026、0035；需 CONFIG_VIDEO_QCOM_IRIS=y、CONFIG_VIDEO_QCOM_VENUS 不设。
-    # 0009 叠在 0006 之上；0012 需与 patches/mesa/0002 及 crdroid-tree-fixes.py [29][30] 一起生效。
+    # 0009叠在0006之上；0012需与patches/mesa/0002及patches/android/minigbm/0001、v4l2-codec2/0004一起生效。
     kernel/iris/0001-media-iris-irq-thread-skips-hw-access-after-power-off.patch
     kernel/iris/0002-media-iris-fail-firmware-boot-on-invalid-uc_region.patch
     kernel/iris/0003-media-iris-venus-compatible-decoder-capture-g_fmt.patch
@@ -188,14 +188,14 @@ KPATCHES=(
     kernel/iris/0017-media-iris-send-the-raw-and-visible-frame-sizes-to-the-gen1-encoder.patch
     kernel/iris/0018-media-iris-zero-the-gen1-empty-buffer-packets.patch
     # 0019让解码器采用客户端在S_FMT中设置的输入缓冲区大小，限定在分辨率所需的下限（不低于720p）与原来的最坏值之间；
-    # 客户端填0时仍为最坏值。crdroid-tree-fixes.py [46]（android/v4l2-codec2/0007）依赖0019：缺少0019时，
+    # 客户端填0时仍为最坏值。android/v4l2-codec2/0011依赖0019：缺少0019时，
     # 1080p及以下的硬件解码与1080p以上的VP9硬件解码会在启动时报错。
     kernel/iris/0019-media-iris-let-the-decoder-client-size-its-input-buffers.patch
     # 0020在SC8280XP上让iris上电期间持有7000 µs的CPU延迟请求，CPU簇不再进入AOSS级休眠（视频硬件在这一级中途挂起），
     # 仍可进入只断APSS的簇状态（需DT提供）。
     kernel/iris/0020-media-iris-keep-the-CPU-cluster-out-of-AOSS-level-idle.patch
     # 0021让gen1编码器在GOP长度为0时向固件发最长的帧内间隔（原来丢掉这一属性，固件把每帧都编成帧内帧）。
-    # crdroid-tree-fixes.py [58]（android/v4l2-codec2/0009）依赖0021：缺少0021时每帧都会成为关键帧。
+    # android/v4l2-codec2/0013依赖0021：缺少0021时每帧都会成为关键帧。
     kernel/iris/0021-media-iris-gen1-honour-a-GOP-size-of-0.patch
     # 0022回移主线的实例引用计数（中断线程处理某个会话的包时，close()不能释放这个实例）。
     # 0023让flush或停流期间对不上号的FBD不再把会话置为错误（VP9在CAPTURE停流的FLUSH_ALL之后会回一个不带缓冲地址的
@@ -223,7 +223,7 @@ KPATCHES=(
     # 0036把解码码流的三原色11（SMPTE RP 431-2）报告为V4L2_COLORSPACE_DCI_P3（原来标签与返回值写反）。
     # 0037–0039为HEVC Main 10编码：0037让gen1编码器接受P010输入（只在HEVC且有4条VPP管线的核心上），
     # 0038把输入格式的色彩参数写进码流的VUI，0039加上HDR10静态元数据控件（PQ传输特性时写入SEI）。
-    # 与patches/android/v4l2-codec2/0020–0021（由crdroid-tree-fixes.py打入）一起生效。
+    # 与patches/android/v4l2-codec2/0024–0025（由crdroid-tree-fixes.py打入）一起生效。
     kernel/iris/0034-media-iris-give-every-encoder-session-its-own-CP-non-pixel-ARP-slot.patch
     kernel/iris/0035-media-iris-gen1-fail-the-session-open-when-the-firmware-rejects-it.patch
     kernel/iris/0036-media-iris-report-the-DCI-P3-colour-primaries-of-decoded-streams.patch

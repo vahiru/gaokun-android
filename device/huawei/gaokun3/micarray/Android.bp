@@ -18,7 +18,7 @@ cc_library_shared {
     include_dirs: ["device/huawei/gaokun3/speakerfx"],
     shared_libs: ["liblog"],
     // AEC3 for calls (echo_canceller.cpp): AOSP's WebRTC, visible to this tree through
-    // tree-fix [39] (scripts/crdroid-tree-fixes.py).
+    // patches/android/webrtc/0001.
     static_libs: [
         "webrtc_audio_processing",
         "absl_strings_string_view",

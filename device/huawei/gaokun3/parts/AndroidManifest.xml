@@ -207,7 +207,7 @@
                 android:resource="@drawable/ic_app_kernel" />
         </activity>
 
-        <!-- GPU驱动兼容：为选定的应用在GL_VERSION中报告高通驱动版本（frameworks-base/0003）。入口与内核版本伪装相同。 -->
+        <!-- GPU驱动兼容：为选定的应用在GL_VERSION中报告高通驱动版本（frameworks-base/0002）。入口与内核版本伪装相同。 -->
         <activity
             android:name="com.huawei.gaokun3.parts.GlDriverVersionSettingsActivity"
             android:exported="true"
@@ -230,7 +230,7 @@
                 android:resource="@drawable/ic_gl_driver_version" />
         </activity>
 
-        <!-- 平行视界：按应用开启frameworks-base/0006–0007的分栏显示。入口在“设置 → 应用”。 -->
+        <!-- 平行视界：按应用开启frameworks-base/0005–0006的分栏显示。入口在“设置 → 应用”。 -->
         <activity
             android:name="com.huawei.gaokun3.parts.ParallelViewSettingsActivity"
             android:exported="true"

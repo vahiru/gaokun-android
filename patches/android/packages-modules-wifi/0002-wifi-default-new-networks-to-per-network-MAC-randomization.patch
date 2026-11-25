@@ -1,0 +1,51 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] wifi: default new networks to per-network MAC randomization
+
+crDroid makes RANDOMIZATION_ALWAYS the default of
+WifiConfiguration.macRandomizationSetting, and WifiConfigurationUtil
+compares against it to tell whether an app changed the setting.
+Networks added outside the Settings dialog, by apps or as suggestions,
+then get a new MAC address on every connection. crDroid's Settings no
+longer offers that option and saves new networks as RANDOMIZATION_AUTO.
+
+Restore the AOSP default, RANDOMIZATION_AUTO, in both places. They must
+match, or WifiConfigManager rejects addNetwork() from normal apps as a
+change of the randomization setting. RANDOMIZATION_ALWAYS itself still
+works, and saved networks keep their stored setting. The device overlay
+currently disables connected MAC randomization, so the address in use
+does not change; the new default takes effect once randomization is
+enabled. Goes with patches/android/frameworks-opt-net-wifi/0001.
+
+Origin: local
+Upstream-Status: Inappropriate [device-specific policy]
+---
+ framework/java/android/net/wifi/WifiConfiguration.java          | 2 +-
+ service/java/com/android/server/wifi/WifiConfigurationUtil.java | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/framework/java/android/net/wifi/WifiConfiguration.java b/framework/java/android/net/wifi/WifiConfiguration.java
+index 32d5dbb..e4bcac8 100644
+--- a/framework/java/android/net/wifi/WifiConfiguration.java
++++ b/framework/java/android/net/wifi/WifiConfiguration.java
+@@ -1931,7 +1931,7 @@ public class WifiConfiguration implements Parcelable {
+      */
+     @SystemApi
+     @MacRandomizationSetting
+-    public int macRandomizationSetting = RANDOMIZATION_ALWAYS;
++    public int macRandomizationSetting = RANDOMIZATION_AUTO;  // AOSP default
+ 
+     /**
+      * Set the MAC randomization setting for this network.
+diff --git a/service/java/com/android/server/wifi/WifiConfigurationUtil.java b/service/java/com/android/server/wifi/WifiConfigurationUtil.java
+index fa0243f..7cdb9d7 100644
+--- a/service/java/com/android/server/wifi/WifiConfigurationUtil.java
++++ b/service/java/com/android/server/wifi/WifiConfigurationUtil.java
+@@ -281,7 +281,7 @@ public class WifiConfigurationUtil {
+     public static boolean hasMacRandomizationSettingsChanged(WifiConfiguration existingConfig,
+             WifiConfiguration newConfig) {
+         if (existingConfig == null) {
+-            return newConfig.macRandomizationSetting != WifiConfiguration.RANDOMIZATION_ALWAYS;
++            return newConfig.macRandomizationSetting != WifiConfiguration.RANDOMIZATION_AUTO;  // must match the field default
+         }
+         return newConfig.macRandomizationSetting != existingConfig.macRandomizationSetting;
+     }

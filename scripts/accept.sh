@@ -228,7 +228,7 @@ NSRE='soundfx|histen|audio\.effect'
 NSL=$(R 'logcat -b all -d 2>/dev/null | grep -v "adbd service requested" | grep "not accessible for the namespace"')
 NA=$(printf '%s\n' "$NSL" | grep -ciE "$NSRE"); NO=$(printf '%s\n' "$NSL" | grep -c .)
 [ "$NA" = 0 ] && pass A14 "logcat 没有 effect 相关的 not accessible for the namespace" \
-    || fail A14 "logcat 有 $NA 行 effect 相关的 not accessible for the namespace（0068 的放行失效？）"
+    || fail A14 "logcat 有 $NA 行 effect 相关的 not accessible for the namespace（hardware-interfaces/0005 的放行失效？）"
 [ "$((NO - NA))" = 0 ] || info "另有 $((NO - NA)) 行别的进程的 namespace 报错（App 自己的，不算 A14），例：$(printf '%s\n' "$NSL" | grep -viE "$NSRE" | head -1 | cut -c1-160)"
 
 # ── A15 GPU ──

@@ -1,0 +1,36 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] v4l2_codec2: scan video device nodes up to /dev/video63
+
+getDeviceInfosForType() only opens /dev/video0 to /dev/video9. With
+camss enabled on SC8280XP, camss alone registers 32 video nodes and the
+codec nodes come after them (video32 and video33 on the Huawei MateBook
+E Go). No device is found for the decoders and encoders, and every
+codec falls back to software while the component names still appear in
+MediaCodecList. The numbering depends on probe order, so the codec
+nodes cannot be pinned to low numbers.
+
+Scan up to /dev/video63. The extra open() calls fail at once, and only
+on the first call, since the result is cached in sDeviceInfosCache.
+
+Origin: local
+Upstream-Status: Pending
+---
+ v4l2/V4L2Device.cpp | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/v4l2/V4L2Device.cpp b/v4l2/V4L2Device.cpp
+index f8df182..d72219a 100644
+--- a/v4l2/V4L2Device.cpp
++++ b/v4l2/V4L2Device.cpp
+@@ -2564,7 +2564,10 @@ const V4L2Device::DeviceInfos& V4L2Device::getDeviceInfosForType(V4L2Device::Typ
+     }
+ 
+     DeviceInfos deviceInfos;
+-    for (int i = 0; i < 10; ++i) {
++    // Camera drivers can register many video nodes before the codec (camss alone
++    // registers 32), and the numbering depends on probe order, so scan a wider range.
++    static constexpr int kMaxVideoDeviceIndex = 64;
++    for (int i = 0; i < kMaxVideoDeviceIndex; ++i) {
+         std::string path = base::StringPrintf("%s%d", kVideoDevicePattern, i);
+ 
+         scoped_refptr<V4L2Device> device = V4L2Device::create();

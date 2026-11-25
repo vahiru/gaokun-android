@@ -10,13 +10,14 @@ cp <本仓库>/manifests/local_manifest_gaokun3.xml .repo/local_manifests/
 repo sync -c -j"$(nproc)"
 
 cp -a <本仓库>/device/huawei/gaokun3 device/huawei/gaokun3
-python3 <本仓库>/scripts/crdroid-tree-fixes.py .   # 为什么要改，脚本里写了
+python3 <本仓库>/scripts/crdroid-tree-fixes.py .   # 打入patches/android/下的补丁，见下文
 bash <本仓库>/scripts/camera/setup-libcamera-tree.sh . <上游libcamera仓库>   # 见patches/libcamera/README.md
 source build/envsetup.sh
 lunch lineage_gaokun3-cp2a-userdebug
 m bacon superimage
 ```
 
+* `crdroid-tree-fixes.py`把[`patches/android/`](../patches/README.md)下的补丁应用到对应的项目。项目已是“清单版本＋全部补丁”时不做改动；否则先恢复到清单版本，再按编号重新应用补丁，**这些项目中的本地改动与未跟踪文件会被清除，HEAD回到清单版本，本地提交不再参与构建**。每次`repo sync`之后都要执行；`repo sync`因本地改动无法检出某个项目时，执行一次本脚本即可把它恢复到清单版本。
 * `bacon`和`superimage`要在**同一次**`m`里编：分两次会得到两个构建戳，OTA包和`super.img`互不相认（[`scripts/release.sh`](../scripts/release.sh)）。
 * 编**`userdebug`**，不要编`user`：`gaokun3_hangdump`的SELinux规则（[`sepolicy/gaokun3_scripts.te`](../device/huawei/gaokun3/sepolicy/gaokun3_scripts.te)）依赖`userdebug_or_eng`豁免，`user`变体尚未经验证。
 * 默认编出来的是**发布构建**（变体仍是`userdebug`）：adb默认关、要用户自己打开，每台电脑都要授权；不监听TCP 5555；`ro.debuggable`为0；镜像里没有adb公钥。`GAOKUN3_DEV_BUILD=1 m bacon superimage`编出的是**开发构建**，带着以前那几样开发便利（adb免授权、TCP 5555、`ro.debuggable=1`、烤进你的公钥）——绝不要拿它发布。开关在[`lineage_gaokun3.mk`](../device/huawei/gaokun3/lineage_gaokun3.mk)，v0.7.1-alpha之后才有。

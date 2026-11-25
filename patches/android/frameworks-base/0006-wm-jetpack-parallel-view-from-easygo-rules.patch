@@ -147,7 +147,7 @@ index 918505b..4ec7391 100644
  
 diff --git a/libs/WindowManager/Jetpack/src/androidx/window/extensions/embedding/ParallelViewRules.java b/libs/WindowManager/Jetpack/src/androidx/window/extensions/embedding/ParallelViewRules.java
 new file mode 100644
-index 0000000..631be0d
+index 0000000..d86ef85
 --- /dev/null
 +++ b/libs/WindowManager/Jetpack/src/androidx/window/extensions/embedding/ParallelViewRules.java
 @@ -0,0 +1,1061 @@
@@ -317,7 +317,7 @@ index 0000000..631be0d
 +     * finish the placeholder, and rotate to landscape again. Without a placeholder, the main page
 +     * fills the task in landscape. A sticky placeholder would cover the main page in portrait.
 +     * Window management keeps a split side by side in landscape only while its top container
-+     * requests landscape (frameworks-base/0009, TaskFragment#getOrientation).
++     * requests landscape (frameworks-base/0008, TaskFragment#getOrientation).
 +     */
 +    static boolean isPlaceholderSuppressed(@NonNull Activity primary) {
 +        final SplitController controller = sController;
@@ -710,7 +710,7 @@ index 0000000..631be0d
 +    /**
 +     * Whether the display ignores {@code orientation}: large screens ignore orientation requests,
 +     * except "locked", "nosensor", "sensor" and "fullSensor", and here landscape ones
-+     * (frameworks-base/0009, DisplayArea#shouldIgnoreOrientationRequest). A translucent page with
++     * (frameworks-base/0008, DisplayArea#shouldIgnoreOrientationRequest). A translucent page with
 +     * such a request defers to the pages behind it there too
 +     * (ActivityRecord#defersIgnoredOrientationRequest).
 +     */

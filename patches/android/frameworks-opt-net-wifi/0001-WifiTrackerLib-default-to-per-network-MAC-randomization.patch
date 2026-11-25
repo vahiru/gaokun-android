@@ -1,0 +1,27 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] WifiTrackerLib: default to per-network MAC randomization
+
+crDroid changed StandardWifiEntry.getPrivacy() to return
+PRIVACY_RANDOMIZATION_ALWAYS when the entry has no saved configuration.
+Restore the AOSP value, PRIVACY_RANDOMIZED_MAC, to match the default for
+new networks in patches/android/packages-modules-wifi/0002.
+
+Origin: local
+Upstream-Status: Inappropriate [device-specific policy]
+---
+ .../src/com/android/wifitrackerlib/StandardWifiEntry.java       | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/libs/WifiTrackerLib/src/com/android/wifitrackerlib/StandardWifiEntry.java b/libs/WifiTrackerLib/src/com/android/wifitrackerlib/StandardWifiEntry.java
+index c715b0e..d35f0a9 100644
+--- a/libs/WifiTrackerLib/src/com/android/wifitrackerlib/StandardWifiEntry.java
++++ b/libs/WifiTrackerLib/src/com/android/wifitrackerlib/StandardWifiEntry.java
+@@ -609,7 +609,7 @@ public class StandardWifiEntry extends WifiEntry {
+                     return PRIVACY_RANDOMIZED_MAC;
+             }
+         } else {
+-            return PRIVACY_RANDOMIZATION_ALWAYS;
++            return PRIVACY_RANDOMIZED_MAC;  // AOSP default
+         }
+     }
+ 

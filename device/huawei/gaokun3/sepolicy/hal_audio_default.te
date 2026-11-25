@@ -24,7 +24,7 @@ get_prop(hal_audio_default, vendor_gaokun3_prop)
 #    ★ 我审阅时"system_public 就能读"的推理漏了这一条 —— 和 vendor_gaokun3_props.te 顶上
 #      那次一样，neverallow 读漏了，只有编译器能证伪（permissive 下实机永远不报）。
 #
-# ✅ dlopen /vendor/lib64/soundfx/ 下的两个库：v0.7.0 验收（B2，补丁 0068）引擎加载成功；
+# ✅ dlopen /vendor/lib64/soundfx/ 下的两个库：v0.7.0 验收（B2，patches/android/hardware-interfaces/0005）引擎加载成功；
 #    hal_audio_default 对 vendor_file 的 execute / map 核心策略现成（policy-query ALLOW）。
 
 # ── 核心音频 HAL ↔ effect HAL 的 binder 调用（同一个域）──────────────────────────

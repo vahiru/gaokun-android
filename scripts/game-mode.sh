@@ -19,7 +19,7 @@
 #      与 ro.build.type=user 对齐（SystemPropertiesDetector 对指纹含 "userdebug"
 #      报 warning，对指纹尾部与 Build.TYPE 漂移再报一条；Bootloader 也查同一漂移）。
 #      ⚠️ Build.FINGERPRINT 常量运行时改不掉（zygote 预加载）；ROM 级对齐见
-#      crdroid-tree-fixes.py tree-fix [23]（下次 ROM 构建生效）。
+#      patches/android/build-make/0001（下次 ROM 构建生效）。
 #   2. 删 ro.crdroid.version（SystemPropertiesDetector 对任意非空值直接 danger）。
 #      ro.crdroid.device 别删——find-device.sh 的身份判据。
 #   3. on 额外：development_settings_enabled=0（warning 项）、adb_enabled=0、

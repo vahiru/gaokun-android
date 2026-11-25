@@ -81,7 +81,7 @@
       claim that the device overlay wins. Our other values here work only
       because vendor/lineage does not touch them (checked name by name:
       config_isDesktopModeSupported is the single conflict).
-      The actual disable is done by scripts/crdroid-tree-fixes.py, which
+      The actual disable is done by patches/android/vendor-lineage/0001, which
       edits vendor/lineage/overlay/common directly. The entries below are
       kept only to state intent.
 
@@ -148,7 +148,7 @@
 
       ★ Lineage 不覆盖这一项（逐名核对过 vendor/lineage 的 common overlay），
       所以设备 overlay 在这里是有效的 —— 不像 config_isDesktopModeSupported
-      那样要绕到 crdroid-tree-fixes.py 去改。
+      那样要靠patches/android/vendor-lineage/0001去改。
     -->
     <bool name="config_showNavigationBar">true</bool>
 
@@ -283,7 +283,7 @@
 
       内屏的ignoreOrientationRequest采用平台的大屏默认值：最小宽度不小于600dp时为true
       （DisplayContent.getIgnoreOrientationRequest()）。屏幕方向跟随加速度计或用户锁定的方向，请求竖屏的应用改为
-      在当前方向中居中显示。横屏请求（frameworks-base/0009，自然方向为横屏时），以及nosensor、locked、sensor、
+      在当前方向中居中显示。横屏请求（frameworks-base/0008，自然方向为横屏时），以及nosensor、locked、sensor、
       fullSensor和按应用豁免的请求，仍会改变屏幕方向（DisplayArea.shouldIgnoreOrientationRequest()）。
       宽高比选项，以及"全屏"对应用方向的覆盖，只在ignoreOrientationRequest为true时生效
       （AppCompatAspectRatioOverrides.shouldEnableUserAspectRatioSettings()、

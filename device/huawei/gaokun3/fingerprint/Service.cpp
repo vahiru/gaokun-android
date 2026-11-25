@@ -670,7 +670,7 @@ class Fingerprint final : public BnFingerprint {
         // 两种传感器都装在同一个按键里。数据来自华为的外形图，误差约2 mm。
         // SystemUI把y != 0的传感器当作竖直放置：y是按键沿边缘的起点，半径是长度的一半，按键占
         // [y, y + 2r]，所以y = 中心172 - r；x不使用，填0。位于左边缘由SystemUI的
-        // config_sideFpsSensorOnLeftEdge声明（patches/android/frameworks-base/0005，
+        // config_sideFpsSensorOnLeftEdge声明（patches/android/frameworks-base/0004，
         // rro/Gaokun3SystemUIFingerprintOverlay），否则SystemUI按右边缘放置。
         SensorLocation location{};
         location.sensorLocationX = 0;

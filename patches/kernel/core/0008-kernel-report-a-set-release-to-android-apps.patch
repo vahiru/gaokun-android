@@ -30,7 +30,8 @@ set it, and SELinux limits that to vendor_init.
 LINUX_VERSION_CODE, vermagic and linux_banner are unchanged. The vDSO's
 .note.Linux also still holds the real version; this does not hide it.
 
-Two ROM changes go with this, see scripts/crdroid-tree-fixes.py [36] and [37]:
+Two ROM changes go with this (patches/android/frameworks-base/0010 and
+patches/android/system-core/0003):
 zygote reads uname() as root, so os.version has to be re-read in each
 specialized process, and init must not publish ro.kernel.version.
 

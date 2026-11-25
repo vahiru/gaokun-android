@@ -1,0 +1,46 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] init: do not override the verified boot and build properties
+
+crDroid builds init with SPOOF_SAFETYNET=1 for every variant except eng.
+SetSafetyNetProps() then sets ro.boot.verifiedbootstate=green,
+ro.boot.flash.locked=1, ro.boot.veritymode=enforcing, ro.debuggable=0,
+ro.secure=1, ro.adb.secure=1, ro.build.type=user,
+ro.build.tags=release-keys, ro.crypto.state=encrypted and
+ro.secureboot.lockstate=locked before the kernel command line is parsed.
+These properties are read-only, so the values passed by the bootloader
+and the values set by the build no longer take effect.
+
+The Huawei MateBook E Go boots with an unlocked bootloader and an orange
+verified boot state, and this build does not try to pass Play Integrity.
+With the spoofed values the reported state contradicts the real one, and
+adb remount refuses to run. Build init with SPOOF_SAFETYNET=0 for all
+variants.
+
+Origin: local
+Upstream-Status: Inappropriate [device-specific policy]
+---
+ init/Android.bp | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/init/Android.bp b/init/Android.bp
+index 5a68ddb..bc8b725 100644
+--- a/init/Android.bp
++++ b/init/Android.bp
+@@ -130,7 +130,7 @@ libinit_cc_defaults {
+         "-DREBOOT_BOOTLOADER_ON_PANIC=0",
+         "-DSHUTDOWN_ZERO_TIMEOUT=0",
+         "-DWORLD_WRITABLE_KMSG=0",
+-        "-DSPOOF_SAFETYNET=1",
++        "-DSPOOF_SAFETYNET=0",
+         "-Wall",
+         "-Werror",
+         "-Wextra",
+@@ -496,7 +496,7 @@ init_first_stage_cc_defaults {
+         "-DSHUTDOWN_ZERO_TIMEOUT=0",
+         "-DLOG_UEVENTS=0",
+         "-DSEPOLICY_VERSION=30", // TODO(jiyong): externalize the version number
+-        "-DSPOOF_SAFETYNET=1",
++        "-DSPOOF_SAFETYNET=0",
+     ] + GLOBAL_HWASAN_OPTIONS,
+ 
+     product_variables: {

@@ -1,0 +1,37 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] wifi: enable software PNO from the overlay setting alone
+
+Software PNO starts only when both config_wifiSwPnoEnabled and the
+DeviceConfig flag wifi/software_pno_enabled are true. ath11k has no
+scheduled scan, so without software PNO the device does not reconnect
+on its own while the screen is off and Wi-Fi is disconnected. The
+device overlay enables config_wifiSwPnoEnabled, but on the Huawei
+MateBook E Go software_pno_enabled is set to false explicitly, most
+likely pushed by GMS, so changing its default does not help.
+
+Check only mWifiGlobals.isSwPnoEnabled(). isPnoSupported() already
+looks only at the overlay value. DeviceConfigFacade is left as is, so
+dumpsys still shows the pushed value. The scans run only while the
+screen is off and Wi-Fi is disconnected, and stop after the configured
+number of fast and slow timer iterations.
+
+Origin: local
+Upstream-Status: Inappropriate [device-specific policy]
+---
+ .../android/server/wifi/scanner/WifiScanningServiceImpl.java   | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/service/java/com/android/server/wifi/scanner/WifiScanningServiceImpl.java b/service/java/com/android/server/wifi/scanner/WifiScanningServiceImpl.java
+index c762991..d0f6ca3 100644
+--- a/service/java/com/android/server/wifi/scanner/WifiScanningServiceImpl.java
++++ b/service/java/com/android/server/wifi/scanner/WifiScanningServiceImpl.java
+@@ -2699,8 +2699,7 @@ public class WifiScanningServiceImpl extends IWifiScanner.Stub {
+                                 scanParams.pnoSettings.isConnected)) {
+                             deferMessage(msg);
+                             transitionTo(mHwPnoScanState);
+-                        } else if (mWifiGlobals.isSwPnoEnabled()
+-                                && mDeviceConfigFacade.isSoftwarePnoEnabled()) {
++                        } else if (mWifiGlobals.isSwPnoEnabled()) {  // not gated by DeviceConfig
+                             deferMessage(msg);
+                             transitionTo(mSwPnoScanState);
+                         } else {

@@ -1,0 +1,42 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] zygote: read os.version again in each specialized process
+
+libcore sets os.version once from uname(), in
+initUnchangeableSystemProperties(). Zygote runs as root, so with
+patches/kernel/core/0008 it gets the real release and every app
+inherits it, while uname() in the same app returns the release the
+kernel reports to it.
+
+callPostForkChildHooks() runs after setresuid() in SpecializeCommon(),
+for system_server, apps, USAPs and child zygotes, so reading uname()
+there gives each process the release the kernel reports to it. Nothing
+changes for system_server. setUnchangeableSystemProperty() is hidden
+outside the core platform API, hence the reflection. With ART's
+hiddenapi_platform_enforcement flag enabled the call fails and logs a
+warning; the cp2a release configuration leaves it off.
+
+Origin: local
+Upstream-Status: Inappropriate [goes with patches/kernel/core/0008]
+---
+ core/java/com/android/internal/os/Zygote.java | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/core/java/com/android/internal/os/Zygote.java b/core/java/com/android/internal/os/Zygote.java
+index 5a2f526..62005da 100644
+--- a/core/java/com/android/internal/os/Zygote.java
++++ b/core/java/com/android/internal/os/Zygote.java
+@@ -1182,6 +1182,14 @@ public final class Zygote {
+     private static void callPostForkChildHooks(int runtimeFlags, boolean isSystemServer,
+             boolean isZygote, String instructionSet) {
+         ZygoteHooks.postForkChild(runtimeFlags, isSystemServer, isZygote, instructionSet);
++        // Zygote read os.version as root, and the kernel may report another release to
++        // apps. The uid is final here, so read it again.
++        try {
++            System.class.getMethod("setUnchangeableSystemProperty", String.class, String.class)
++                    .invoke(null, "os.version", Os.uname().release);
++        } catch (ReflectiveOperationException e) {
++            Log.w("Zygote", "Could not refresh os.version", e);
++        }
+     }
+ 
+     /**

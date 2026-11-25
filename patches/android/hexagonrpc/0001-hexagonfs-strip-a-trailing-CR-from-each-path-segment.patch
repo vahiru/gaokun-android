@@ -1,0 +1,34 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] hexagonfs: strip a trailing CR from each path segment
+
+The sensor DSP firmware of the Huawei MateBook E Go (SC8280XP) is built
+on Windows. When it opens a file through hexagonrpcd, every segment of
+the requested path ends in a carriage return, so lookups fail, the DSP
+cannot read its sensor registry and no sensors appear.
+
+Strip the CR in copy_segment_and_advance(). It is the common path
+parser, so the cleaned segment reaches every backend, the physical
+directory backend included, and the served directory needs no file
+names with control characters.
+
+Origin: local
+Upstream-Status: Pending
+---
+ hexagonrpcd/hexagonfs.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/hexagonrpcd/hexagonfs.c b/hexagonrpcd/hexagonfs.c
+index bd9f353..4c4b0d6 100644
+--- a/hexagonrpcd/hexagonfs.c
++++ b/hexagonrpcd/hexagonfs.c
+@@ -56,6 +56,10 @@ static char *copy_segment_and_advance(const char *path,
+ 
+ 	memcpy(segment, path, segment_len);
+ 	segment[segment_len] = 0;
++	/* Firmware built on Windows ends every path segment with a CR. This is the
++	 * common segment parser, so every backend sees the cleaned segment. */
++	if (segment_len > 0 && segment[segment_len - 1] == '\r')
++		segment[--segment_len] = 0;
+ 
+ 	*next = next_tmp;
+ 

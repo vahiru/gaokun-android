@@ -1,0 +1,42 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] init: do not set ro.kernel.version
+
+SetKernelVersion() sets ro.kernel.version from init's own uname() before
+any rc file is read. With patches/kernel/core/0008 the kernel reports a
+configured release to apps, while init sees the real one. The property
+has no entry in property_contexts, so it is labelled default_prop, which
+apps can read, and it would contradict the release they are told.
+
+The only users in rootdir/init.rc are the late-fs blocks for 4.19 and
+5.4 kernels, which do not apply to this device. Keep the function and
+drop the call.
+
+Origin: local
+Upstream-Status: Inappropriate [goes with patches/kernel/core/0008]
+---
+ init/init.cpp | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/init/init.cpp b/init/init.cpp
+index aec2688..1477925 100644
+--- a/init/init.cpp
++++ b/init/init.cpp
+@@ -738,7 +738,7 @@ static void SetUsbController(bool run_loop) {
+ 
+ /// Set ro.kernel.version property to contain the major.minor pair as returned
+ /// by uname(2).
+-static void SetKernelVersion() {
++[[maybe_unused]] static void SetKernelVersion() {
+     struct utsname uts;
+     unsigned int major, minor;
+ 
+@@ -1190,7 +1190,8 @@ int SecondStageMain(int argc, char** argv) {
+     } else {
+         usb_controller_thread = std::make_unique<std::thread>(&SetUsbController, true);
+     }
+-    SetKernelVersion();
++    // ro.kernel.version is not set: apps can read it, and it would contradict the release
++    // the kernel reports to them.
+ 
+     const BuiltinFunctionMap& function_map = GetBuiltinFunctionMap();
+     Action::set_function_map(&function_map);

@@ -1,6 +1,6 @@
 # 补丁目录说明（`patches/`）
 
-本目录按**目标源码树与子系统**分级存放所有树外补丁。每个叶子子目录使用独立的本地四位序号（`0001..NNNN`），新增补丁只需在对应子目录末尾顺延编号并在消费脚本中登记，无需跨子系统抢占全局序号。
+本目录按**目标源码树与子系统**分级存放所有树外补丁。每个叶子子目录使用独立的本地四位序号（`0001..NNNN`），新增补丁只需在对应子目录末尾顺延编号（内核补丁还要在消费脚本中登记），无需跨子系统抢占全局序号。
 
 ## 目录结构与消费者
 
@@ -18,12 +18,21 @@
 | [`kernel/input/`](kernel/input/) | Linux内核（`himax-spi`触摸屏、HX83121A手写笔从片、`usbhid`） | [`scripts/kernel-apply-patches.sh`](../scripts/kernel-apply-patches.sh)（`KPATCHES`） | 触摸跳点检测、SPI读重试、连通域与掌压/手部位置图、点击锁定与一欧滤波、边缘补偿、级联手写笔从片驱动、键盘/笔HID恢复`SET_IDLE` |
 | [`kernel/dts/`](kernel/dts/) | Linux内核（`sc8280xp.dtsi`与`sc8280xp-huawei-gaokun3.dts`等设备树） | [`scripts/kernel-apply-patches.sh`](../scripts/kernel-apply-patches.sh)（`KPATCHES`） | CPU温区cooling-maps、按Windows配置的板载热敏电阻温控区及其被动降温系数、USB0 OTG、前后摄与闪光灯/隐私灯、CSIPHY独立供电、`camcc`的MX电源域、启用`iris`/`videocc`、CMA低于4 GiB、手写笔从片、常开稳压器、DMIC降频、CDSP `dma-coherent`、Wi-Fi校准变体`HW_GK3`、`iris`主域预留内容保护范围的IOVA、GPU SMMU上下文中断与GPU带宽投票（上游回移）、前后摄备选模组节点（`fail-needs-probe`，由探测器启用）与相机引脚改由`tlmm`持有、后摄S5K3L6节点、面板安装方向（`rotation`）、视频编解码硬件核心时钟上限444 MHz等 |
 | [`kernel/fingerprint/`](kernel/fingerprint/) | Linux内核（QSEECOM与指纹传输驱动） | [`scripts/kernel-apply-patches.sh`](../scripts/kernel-apply-patches.sh)（`KPATCHES`） | QSEECOM TA加载/卸载与listener服务、`/dev/gaokun3_fpcmd`受限指纹传输驱动（FocalTech FTE7001与Goodix GDIX5125，`CONFIG_GAOKUN3_FPCMD`由`kernel-config-android.sh`打开） |
-| [`android/hardware-interfaces/`](android/hardware-interfaces/) | AOSP `hardware/interfaces` | [`scripts/crdroid-tree-fixes.py`](../scripts/crdroid-tree-fixes.py) | Audio AIDL primary HAL外设连接、麦克风地址、数据驱动采集、ALSA硬件定拍播放、低延迟块与period数、播放/采集厂商钩子、APEX命名空间、蓝牙HFP输出流 |
+| [`android/hardware-interfaces/`](android/hardware-interfaces/) | AOSP `hardware/interfaces` | [`scripts/crdroid-tree-fixes.py`](../scripts/crdroid-tree-fixes.py) | Audio AIDL primary HAL外设连接、麦克风地址、数据驱动采集、ALSA硬件定拍播放、低延迟块与period数、播放/采集厂商钩子、APEX命名空间、蓝牙HFP输出流；Wi-Fi HAL由SoC序列号派生稳定的出厂MAC地址 |
 | [`android/drm-hwcomposer/`](android/drm-hwcomposer/) | AOSP `external/drm_hwcomposer` | [`scripts/crdroid-tree-fixes.py`](../scripts/crdroid-tree-fixes.py) | 10-bit客户端目标帧缓冲、内置屏sRGB/Display P3切换、压暗图层走GPU、内置屏HDR10/HLG声明、多余光标平面的警告每条管线只打印一次 |
-| [`android/v4l2-codec2/`](android/v4l2-codec2/) | AOSP `external/v4l2_codec2` | [`scripts/crdroid-tree-fixes.py`](../scripts/crdroid-tree-fixes.py) | HEVC CSD合并入首帧、字节缓冲模式使用dmabuf ID、HDR静态元数据传递、编码器输入块CPU读用途、HEVC编码组件、单平面编码输入的缓冲长度、解码输入缓冲区按码流分配（需`kernel/iris/0019`）、编码转换帧按驱动格式中的高分配、编码器宏块码率控制与GOP长度分开设置（需`kernel/iris/0021`）、解码器丢弃重新分配前的复用帧、尺寸变化时上报画面尺寸、10位档次声明P010输出、编码器丢帧时完成对应的工作项、编码器release()时释放实例计数、轮询线程不再在POLLERR与POLLPRI上空转、解码器出错后停止轮询、VP9默认解码级别补上5.1与5.2、编码器HEVC Main 10与10位码流的色彩参数和HDR10元数据 |
+| [`android/v4l2-codec2/`](android/v4l2-codec2/) | AOSP `external/v4l2_codec2` | [`scripts/crdroid-tree-fixes.py`](../scripts/crdroid-tree-fixes.py) | 压缩输入队列设置最小分辨率、驱动推迟CAPTURE格式时不建立初始输出队列、设备节点扫描到`/dev/video63`、默认档次表加入10位档次、HEVC CSD合并入首帧、字节缓冲模式使用dmabuf ID、HDR静态元数据传递、编码器输入块CPU读用途、HEVC编码组件、单平面编码输入的缓冲长度、解码输入缓冲区按码流分配（需`kernel/iris/0019`）、编码转换帧按驱动格式中的高分配、编码器宏块码率控制与GOP长度分开设置（需`kernel/iris/0021`）、解码器丢弃重新分配前的复用帧、尺寸变化时上报画面尺寸、10位档次声明P010输出、编码器丢帧时完成对应的工作项、编码器release()时释放实例计数、轮询线程不再在POLLERR与POLLPRI上空转、解码器出错后停止轮询、VP9默认解码级别补上5.1与5.2、编码器HEVC Main 10与10位码流的色彩参数和HDR10元数据 |
 | [`android/tinyalsa/`](android/tinyalsa/) | AOSP `external/tinyalsa_new` | [`scripts/crdroid-tree-fixes.py`](../scripts/crdroid-tree-fixes.py) | `sw_params`从refined `hw_params`推导 |
-| [`android/frameworks-base/`](android/frameworks-base/) | AOSP/crDroid `frameworks/base` | [`scripts/crdroid-tree-fixes.py`](../scripts/crdroid-tree-fixes.py) | SystemUI在指纹临时锁定期间不再请求指纹认证、开机20分钟后不再压缩全部系统进程、选定的应用在GL_VERSION中读到高通驱动版本（Parts的GPU驱动兼容设置）、启动最近任务的过渡带屏幕旋转时交给默认动画、侧边指纹提示支持左边缘的传感器、按应用开启的平行视界（兼容变更与窗口管理扩展库的规则转换，Parts的平行视界设置）、拖动分隔条时显示两侧页面的截图、自然方向为横屏的屏幕仍响应横屏请求 |
-| [`android/system-core/`](android/system-core/) | crDroid `system/core`（healthd） | [`scripts/crdroid-tree-fixes.py`](../scripts/crdroid-tree-fixes.py) | 锁屏充电信息在没有`battery`电源节点时改用已识别的电池节点 |
+| [`android/frameworks-base/`](android/frameworks-base/) | AOSP/crDroid `frameworks/base` | [`scripts/crdroid-tree-fixes.py`](../scripts/crdroid-tree-fixes.py) | 开机20分钟后不再压缩全部系统进程、选定的应用在GL_VERSION中读到高通驱动版本（Parts的GPU驱动兼容设置）、启动最近任务的过渡带屏幕旋转时交给默认动画、侧边指纹提示支持左边缘的传感器、按应用开启的平行视界（兼容变更与窗口管理扩展库的规则转换，Parts的平行视界设置）、拖动分隔条时显示两侧页面的截图、自然方向为横屏的屏幕仍响应横屏请求、读取LineageSettings失败时system_server不再崩溃、应用进程重新读取`os.version` |
+| [`android/system-core/`](android/system-core/) | crDroid `system/core`（healthd、init） | [`scripts/crdroid-tree-fixes.py`](../scripts/crdroid-tree-fixes.py) | 锁屏充电信息在没有`battery`电源节点时改用已识别的电池节点、init不再覆盖验证启动状态与构建属性（`SPOOF_SAFETYNET`）、不设置`ro.kernel.version` |
+| [`android/hexagonrpc/`](android/hexagonrpc/) | linux-msm `external/hexagonrpc`（由本地清单引入） | [`scripts/crdroid-tree-fixes.py`](../scripts/crdroid-tree-fixes.py) | 路径各段去掉尾随的CR（传感器DSP固件在Windows上编译） |
+| [`android/vendor-gapps/`](android/vendor-gapps/) | MindTheGapps `vendor/gapps`（可选，未同步时跳过） | [`scripts/crdroid-tree-fixes.py`](../scripts/crdroid-tree-fixes.py) | 去掉Google开机向导，以及与crDroid模块名、安装路径冲突的`libjni_latinimegoogle`与`google.xml` |
+| [`android/vendor-lineage/`](android/vendor-lineage/) | crDroid `vendor/lineage` | [`scripts/crdroid-tree-fixes.py`](../scripts/crdroid-tree-fixes.py) | 关闭通用overlay中的桌面窗口模式 |
+| [`android/build-make/`](android/build-make/) | crDroid `build/make` | [`scripts/crdroid-tree-fixes.py`](../scripts/crdroid-tree-fixes.py) | 构建指纹的变体段为`user`，与`ro.build.type`一致 |
+| [`android/frameworks-av/`](android/frameworks-av/) | crDroid `frameworks/av`（Codec2） | [`scripts/crdroid-tree-fixes.py`](../scripts/crdroid-tree-fixes.py) | 没有ION时，由gralloc分配的线性块照常映射 |
+| [`android/packages-modules-wifi/`](android/packages-modules-wifi/) | crDroid `packages/modules/Wifi` | [`scripts/crdroid-tree-fixes.py`](../scripts/crdroid-tree-fixes.py) | 软件PNO只由overlay开启、新网络默认使用按网络固定的随机MAC地址 |
+| [`android/frameworks-opt-net-wifi/`](android/frameworks-opt-net-wifi/) | crDroid `frameworks/opt/net/wifi`（WifiTrackerLib） | [`scripts/crdroid-tree-fixes.py`](../scripts/crdroid-tree-fixes.py) | 没有保存配置的网络默认显示按网络固定的随机MAC地址 |
+| [`android/minigbm/`](android/minigbm/) | AOSP `external/minigbm` | [`scripts/crdroid-tree-fixes.py`](../scripts/crdroid-tree-fixes.py) | 所有平台的P010缓冲区均可用于显示 |
+| [`android/webrtc/`](android/webrtc/) | AOSP `external/webrtc` | [`scripts/crdroid-tree-fixes.py`](../scripts/crdroid-tree-fixes.py) | 允许设备树使用`webrtc_audio_processing`（通话回声消除） |
 | [`mesa/`](mesa/) | AOSP `external/mesa3d`（Turnip Vulkan驱动） | [`scripts/mesa-a17/regen.sh`](../scripts/mesa-a17/regen.sh) | Android Native Buffer空内存重绑定容错、`VK_FORMAT_G10X6_B10X6R10X6_2PLANE_420_UNORM_3PACK16`（P010）支持、Mesa 26.1上游构建与依赖回移（`0003..0011`）、A6xx抢占（`0012`上游VSC修正，`0013`）、微信对acquire信号量重复等待的规避（`0014`）、SPIR-V的`FMin`、`FMax`与`FClamp`保留无穷大（`0015`，上游回移）、`atan2`保留无穷大与有符号零（`0016`，上游回移）、原神深度数据在分块渲染下的写回（`0017`） |
 | [`libcamera/`](libcamera/) | 上游`libcamera`（替换`external/libcamera`） | [`scripts/camera/setup-libcamera-tree.sh`](../scripts/camera/setup-libcamera-tree.sh) | 详见[`libcamera/README.md`](libcamera/README.md) |
 | [`e2fsprogs/`](e2fsprogs/) | Debian `e2fsprogs` 1.47.2-3（Windows安装器自带的`mke2fs.exe`） | [`installer/backend/mke2fs/build.sh`](../installer/backend/mke2fs/build.sh) | `-E android_sparse`下跨块的按字节读写（1 KiB块时`zap_sector()`越界） |
@@ -39,6 +48,7 @@
      - `Pending`：通用的驱动修复、DTS节点或功能补丁，具备向上游投递的价值。
      - `Inappropriate [<reason>]`：仅限本地维护的补丁（如`[Android-specific]`、`[firmware workaround]`、`[device-specific policy]`等），不向上游主线投递。
 3. **内核补丁正交性**：[`kernel/`](kernel/)下各子系统目录修改的内核源文件互不重叠；同一子系统内存在上下文依赖的补丁按本地序号先后排列，由[`scripts/kernel-apply-patches.sh`](../scripts/kernel-apply-patches.sh)的`KPATCHES`数组显式定义应用顺序。
-4. **验证命令**：
+4. **AOSP补丁**：[`android/`](android/)下每个目录对应一个项目，目录与项目路径的对应关系在[`scripts/crdroid-tree-fixes.py`](../scripts/crdroid-tree-fixes.py)的`PROJECTS`中。脚本把目录中的补丁按编号依次打在该项目的清单版本上，编号即应用顺序，放进目录即生效；补丁之间有上下文依赖时，依赖方编号在后。
+5. **验证命令**：
    - 核对内核树与配方逐字节一致：`bash scripts/kernel-apply-patches.sh <内核树路径> --verify`
    - 核对文档链接完整性：`python3 -I scripts/check-doc-links.py`

@@ -53,15 +53,14 @@
          随机给的 00:03:7f:12:xx:xx —— B20"每次开机都换"的真正原因。打开后改 MAC 走 HAL 的 setMacAddress
          （iface down → SIOCSIFHWADDR → up，hardware/interfaces/wifi/aidl/default/wifi_iface_util.cpp:53-80）。
          2026-10-04 用 force-overlay-config-value 在本机临时打开过，三次都连上（TODO B20 / #14 那一行）。
-         新网络默认"按网络固定的随机 MAC"靠 tree-fix [20]（crDroid 把默认写死成每次连接都换，没有资源能改）。
+         新网络默认"按网络固定的随机MAC"靠patches/android/packages-modules-wifi/0002（crDroid将默认值固定为每次连接都更换，没有资源可以修改）。
       ② config_wifiSaveFactoryMacToWifiConfigStore 默认 true（config.xml:370；overlayable.xml:128）：框架把第一次拿到的
          出厂 MAC 永久存进 WifiSettingsConfigStore（ClientModeImpl.java:8065-8095）。老机器存的是当年那个固件随机地址，
-         tree-fix [19] 从 soc0 序列号派生的稳定地址就永远用不上 ⇒ 关掉，每次都问 HAL（HAL 那边本来就稳定）。
-      ⬜ 未编译、未上机。判据见 scripts/crdroid-tree-fixes.py 的 [19] / [20]。
+         patches/android/hardware-interfaces/0013从soc0序列号派生的稳定地址永远不会被使用 ⇒ 关闭此项，每次都向HAL获取（HAL返回的地址本身是稳定的）。
       ★ 2026-10-05 合并时改定：1.0 先【不开】①（保持 false）。老用户已存的网络都记着 crDroid 写死的 ALWAYS，一开总开关
         就会第一次真的"每次连接都换 MAC"（含每次待机恢复后的重连），校园网 MAC 绑定反而更糟，而存储里分不出用户选的
-        ALWAYS 与默认的 ALWAYS，没有安全的迁移。保持 false ⇒ 所有网络都用 [19] 派生的稳定设备 MAC —— 正是 NET-4 要的
-        "MAC 不再每次开机都变"；代价是和以前一样没有按网络的随机 MAC（隐私选项不显示）。[20] 留着（总开关关时无效、无害），
+        ALWAYS与默认的ALWAYS，没有安全的迁移。保持false ⇒ 所有网络都用hardware-interfaces/0013派生的稳定设备MAC —— 正是NET-4要的
+        "MAC不再每次开机都变"；代价是和以前一样没有按网络的随机MAC（隐私选项不显示）。packages-modules-wifi/0002与frameworks-opt-net-wifi/0001保留（总开关关闭时不起作用，也无副作用），
         以后要开随机化时连同一次性迁移（WifiConfigManager 加迁移标记）一起做。
     -->
     <bool name="config_wifi_connected_mac_randomization_supported" translatable="false">false</bool>

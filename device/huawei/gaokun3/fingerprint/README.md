@@ -35,11 +35,8 @@ challenge按用户保存在服务里，不随会话销毁：每个用户最多16
 
 HAL随镜像构建。
 
-SystemUI对Class 1/2指纹只在人脸也锁定时才禁止指纹解锁，没有人脸识别时，指纹自己临时锁定期间仍会不断请求认证。
-[`patches/android/frameworks-base/0001`](../../../../patches/android/frameworks-base/0001-systemui-respect-fingerprint-lockout.patch)
-（由`scripts/crdroid-tree-fixes.py`打入）让它在锁定期间改为只检测接触，与Class 3指纹锁定时相同。本HAL报告`STRONG`后，
-SystemUI本身已按Class 3处理指纹锁定，这个补丁在本机上不再改变行为。锁定期满时HAL发出`onLockoutCleared`，
-SystemUI随之恢复认证。
+本HAL报告`STRONG`（Class 3）。SystemUI在Class 3指纹临时锁定期间只检测接触，不再请求认证；锁定期满时HAL发出
+`onLockoutCleared`，SystemUI随之恢复认证。
 
 ## 令牌
 

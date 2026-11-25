@@ -1,0 +1,42 @@
+From: Vahiru <nekovahiru@gmail.com>
+Subject: [PATCH] v4l2_codec2: set the minimum resolution on the compressed
+ input queue
+
+setupInputFormat() sets the format of the OUTPUT (compressed) queue with
+ui::Size(), which is -1 x -1, not 0 x 0. buildV4L2Format() stores it in
+the __u32 width and height, and venus clamps 0xFFFFFFFF to 8192x8192.
+It computes the hardware load from that size at streamon, before the
+first SOURCE_CHANGE event, and fails every stream with "HW can't
+support this load". ChromeOS drivers ignore the resolution of the
+compressed queue.
+
+Set the minimum resolution the device reports for the input format, as
+setupMinimalOutputFormat() does for the CAPTURE queue, or 128x128 when
+the device reports none. The real resolution arrives with the source
+change event.
+
+Origin: local
+Upstream-Status: Pending
+---
+ v4l2/V4L2Decoder.cpp | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/v4l2/V4L2Decoder.cpp b/v4l2/V4L2Decoder.cpp
+index 52b63b1..1a5fbf8 100644
+--- a/v4l2/V4L2Decoder.cpp
++++ b/v4l2/V4L2Decoder.cpp
+@@ -202,7 +202,13 @@ bool V4L2Decoder::setupInputFormat(const uint32_t inputPixelFormat, const size_t
+     }
+ 
+     // Setup the input format.
+-    auto format = mInputQueue->setFormat(inputPixelFormat, ui::Size(), inputBufferSize, 0);
++    // Drivers such as venus compute the load from the resolution set on the compressed
++    // queue. ui::Size() is -1 x -1 and would be clamped to the maximum, so use the
++    // minimum resolution the device reports.
++    ui::Size inputMinRes, inputMaxRes;
++    mDevice->getSupportedResolution(inputPixelFormat, &inputMinRes, &inputMaxRes);
++    if (inputMinRes.isEmpty()) inputMinRes.set(128, 128);
++    auto format = mInputQueue->setFormat(inputPixelFormat, inputMinRes, inputBufferSize, 0);
+     if (!format) {
+         ALOGE("Failed to call IOCTL to set input format.");
+         return false;
