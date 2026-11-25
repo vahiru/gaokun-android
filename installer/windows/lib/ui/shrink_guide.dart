@@ -55,11 +55,11 @@ class ShrinkGuide extends StatelessWidget {
       if (info.none) {
         result = NoteBox(text: l.shrinkNoEvent);
       } else if (info.limitedBySpace) {
-        result = NoteBox(warn: warn, text: l.shrinkFull(dl, info.time));
+        result = NoteBox(warn: warn, text: l.shrinkFull(dl));
       } else if (file == null || kind == null) {
-        result = NoteBox(warn: warn, text: l.shrinkNoFile(dl, info.time));
+        result = NoteBox(warn: warn, text: l.shrinkNoFile);
       } else {
-        result = NoteBox(warn: warn, text: l.shrinkBlocked(dl, info.time), child: _blocker(context, '${info.drive}$file', kind, dl, fg));
+        result = NoteBox(warn: warn, text: l.shrinkBlocked, child: _blocker(context, '${info.drive}$file', kind, dl, fg));
       }
       // 又读到了上次那条：先说清楚，免得用户以为处理没有用
       body = s.shrinkSame

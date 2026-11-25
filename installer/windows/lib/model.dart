@@ -53,9 +53,6 @@ class ShrinkInfo {
   /// 事件的记录号：与上次读到的相同 = 用户处理之后还没重新"压缩卷"
   int get record => r.intOf('record');
 
-  /// 事件的本地时间（HH:MM），读不出时为"--:--"
-  String get time => r['time'].isEmpty ? '--:--' : r['time'];
-
   /// "D:" 这样的盘符
   String get drive => r['drive'];
 

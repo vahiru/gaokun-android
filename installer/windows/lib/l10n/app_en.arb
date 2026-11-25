@@ -78,42 +78,19 @@
   "shrinkReanalyze": "Refresh",
   "shrinkAnalyzing": "Reading the shrink record…",
   "shrinkFailed": "Unable to read the shrink record: ",
-  "shrinkNoEvent": "Shrink Volume has not been run on a partition of the system disk in Disk Management since the device started. Right-click the partition you want to shrink in Disk Management, select “Shrink Volume”, then return here.",
-  "shrinkBlocked": "The last time the {drive}: volume was shrunk in Disk Management ({time}), shrinking was limited by the location of the following unmovable file:",
-  "@shrinkBlocked": {
-    "placeholders": {
-      "drive": {
-        "type": "String"
-      },
-      "time": {
-        "type": "String"
-      }
-    }
-  },
-  "shrinkStale": "This is the same record as last time. After resolving the issue, run Shrink Volume again in Disk Management first, then return here.",
-  "shrinkNoFile": "The last time the {drive}: volume was shrunk in Disk Management ({time}), the file restricting the shrink could not be identified. Restart the device and run Shrink Volume again, then return here.",
-  "@shrinkNoFile": {
-    "placeholders": {
-      "drive": {
-        "type": "String"
-      },
-      "time": {
-        "type": "String"
-      }
-    }
-  },
-  "shrinkFull": "The last time the {drive}: volume was shrunk in Disk Management ({time}), shrinking was limited by the space used on {drive}: rather than by an unmovable file. To free up more space, delete files on {drive}: (for example via Disk Cleanup or Settings → System → Storage), then run Shrink Volume again.",
+  "shrinkNoEvent": "No partition has been shrunk since the device started. Right-click the partition you want to shrink in Disk Management, select “Shrink Volume”, then return here.",
+  "shrinkBlocked": "The last shrink was limited by the location of the following unmovable file:",
+  "shrinkStale": "No new log entry was found. Run Shrink Volume again in Disk Management first, then return here.",
+  "shrinkNoFile": "The file restricting the shrink could not be identified. Run Shrink Volume again, then return here.",
+  "shrinkFull": "Shrinking is limited by the space used on {drive}:. To free up more space, delete files on {drive}:, then run Shrink Volume again.",
   "@shrinkFull": {
     "placeholders": {
       "drive": {
         "type": "String"
-      },
-      "time": {
-        "type": "String"
       }
     }
   },
-  "shrinkNext": "After resolving this item, run Shrink Volume again in Disk Management and return here — another unmovable file may still restrict shrinking.",
+  "shrinkNext": "After resolving this item, run Shrink Volume again in Disk Management and return here to see what restricts shrinking next.",
   "sbPagefile": "Virtual memory paging file",
   "sbPagefileHow": "1. Press Win+R, enter “SystemPropertiesPerformance”, and under Virtual memory on the Advanced tab click Change.\n2. Uncheck “Automatically manage paging file size for all drives”, select {drive}:, choose “No paging file”, click Set, confirm with Yes, and click OK.\n3. Restart the device and shrink the {drive}: volume in Disk Management.\n4. After shrinking, re-enable “Automatically manage paging file size for all drives” and restart the device.",
   "sbHiberfil": "System hibernation file",
@@ -135,7 +112,7 @@
   },
   "mftMoveBtn": "Move MFT",
   "mftConfirmTitle": "Move MFT",
-  "mftConfirmBody": "MFT fragments near the end of the {drive}: volume will be relocated to free space near the beginning. The installer cannot be closed during this operation; do not shut down the device or disconnect power. This may take a few minutes.",
+  "mftConfirmBody": "MFT fragments near the end of the {drive}: volume will be relocated to free space near the beginning. Do not close the installer, shut down the device or disconnect power during this operation. This may take a few minutes.",
   "mftConfirmOk": "Start move",
   "mftConfirmCancel": "Cancel",
   "mftMoving": "Moving the MFT. This may take a few minutes…",
@@ -177,7 +154,7 @@
       }
     }
   },
-  "mftFailed": "Moving the MFT did not complete (already relocated fragments remain valid): ",
+  "mftFailed": "Moving the MFT did not complete: ",
   "shutdownReasonMft": "Moving the MFT",
   "sbNtfs": "NTFS metadata",
   "sbNtfsHow": "This file is internal NTFS filesystem metadata that Windows cannot relocate while running; the {drive}: volume has reached its maximum shrink limit.",
@@ -189,7 +166,7 @@
   "chkRoomDetail": "System disk: {model}, {size}",
   "chkBlockedNote": "Please resolve the failed checks above before continuing.",
   "regionTitle": "Select installation location",
-  "regionSub": "Android will be installed into unallocated space on the system disk ({model}, {size}). Existing partitions will not be modified.",
+  "regionSub": "Android will be installed into unallocated space on the system disk ({model}, {size}).",
   "regionFree": "Unallocated space ({size})",
   "regionData": "Android data partition after installation: approx. {size}",
   "regionTooSmall": "Insufficient space (at least {need} required)",
