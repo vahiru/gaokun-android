@@ -418,19 +418,6 @@ PRODUCT_VENDOR_PROPERTIES += \
 #   后 App 的 cache/ 下出现 com.android.opengl.shaders_cache.multifile/，发布构建上也生效。
 PRODUCT_VENDOR_PROPERTIES += \
     ro.egl.blobcache.multifile=true
-# ANGLE转换GLES着色器时把输出变量、未赋值的局部变量和函数的out参数设为0（前端特性
-# forceInitShaderVariables，即翻译器选项initOutputVariables与initializeUninitializedLocals）。
-#   GLSL ES规定：读取未赋值的变量，或片段着色器在某条路径上不写输出就结束，得到的值未定义。部分应用的
-#   着色器这样写，在ANGLE + Turnip上得到的是寄存器中的残留值。例如小米天气的背景引擎计算大气透射率时，
-#   累加变量没有赋初值，天空整片为黑色；它的云层着色器跳过像素时提前return，不写输出。
-#   正常着色器中的这些初始化通常会被随后的写入覆盖，由编译器作为无用写入删除，不增加指令。
-#   · 应用用glProgramBinary保存的程序是ANGLE转换后的结果，ANGLE加载时不核对编译选项：
-#     打开此设置之前保存的程序会继续使用，需清除该应用的缓存后才会重新转换。
-#   · 属性值按":"分隔，可列出多个特性；调试其他ANGLE特性时需保留forceInitShaderVariables。
-#     环境变量ANGLE_FEATURE_OVERRIDES_ENABLED只要存在（即使为空）就优先于该属性。
-#   · Edge等Chromium浏览器自带的ANGLE也读取该属性。
-PRODUCT_VENDOR_PROPERTIES += \
-    debug.angle.feature_overrides_enabled=forceInitShaderVariables
 
 # ★ A17：不让 GameManagerService 把游戏默认压到 60 帧（保持 A16 上的实际行为）。
 #   crDroid 16.0 的 vendor/lineage/config/common.mk 设过 debug.graphics.game_default_frame_rate.disabled=true，
