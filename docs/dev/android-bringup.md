@@ -79,6 +79,18 @@ UEFI 2.16 (关闭Secure Boot)
   - 内核未开启`CONFIG_ATH_REG_DYNAMIC_USER_REG_HINTS`时，框架下发国家码后全局监管域仍会改变并广播事件，`cmd wifi get-country-code`会显示新的国家，但网卡不变。排查时以`iw reg get`中`phy#N (self-managed)`一节为准。
 - **持久化MAC地址生成**：因主线`ath11k`未从UEFI/NV读取出厂Wi-Fi MAC，系统基于`/sys/devices/soc0/serial_number`通过FNV-1a 64确定性派生稳定的本地管理MAC地址：开机阶段由`device/huawei/gaokun3/bin/gaokun3-wlan-ap.sh`在`wlan0`启用前写入，`patches/android/hardware-interfaces/0013`在Wi-Fi HAL侧返回同一派生出厂MAC，并配合`Gaokun3WifiOverlay`中的`config_wifiSaveFactoryMacToWifiConfigStore=false`，避免每次重启MAC变化导致路由器DHCP租约重置。
 - **WPA3（SAE-H2E）与多频段**：支持2.4 GHz / 5 GHz / 6 GHz（802.11ax 160 MHz）及WPA2-PSK与WPA3-SAE（`sae_pwe=1` H2E）。
+- **WLAN直连（Wi-Fi P2P）**：`ath11k`为WCN6855声明了P2P-device、P2P-client与P2P-GO三种接口，接口组合允许Wi-Fi连接与P2P群组使用不同信道（最多2个）。设备侧的配置都由`device.mk`安装：
+  - `android.hardware.wifi.direct`功能声明。框架只在声明这项功能时启动`WifiP2pService`，crDroid的设置也只在声明后显示“WLAN直连”。
+  - `wifi.direct.interface=p2p-dev-wlan0`。Wi-Fi HAL的`createP2pIface`按这个属性确定接口名，只登记、不创建网卡，默认值`p2p0`在本机不存在。名称以`p2p-dev-`开头时，wpa_supplicant通过nl80211在`wlan0`所在的无线网卡上自行创建P2P Device（不是网卡）；群组接口`p2p-wlan0-N`也由它创建，`libwifi-hal-emu`不参与。
+  - `wifi/p2p_supplicant_overlay.conf`（安装至`/vendor/etc/wifi/`）。`/data/vendor/wifi/wpa/p2p_supplicant.conf`只在首次使用时由`/vendor/etc/wifi/wpa_supplicant.conf`复制而来，此后不再从模板重新复制；覆盖文件在每次添加P2P接口时读取，其中的值优先。`update_config=1`允许wpa_supplicant写回配置，框架保存的群组靠它写入文件，否则wpa_supplicant重启后丢失。`p2p_add_cli_chan=1`让固件标为仅被动扫描的信道仍可用于平板作为客户端的情况。wpa_supplicant按触发更新的接口的配置重建P2P信道列表，`wlan0`的状态变化也会触发，所以这一项同时写在`wifi/wpa_supplicant.conf`中。
+
+  平板作为群组所有者（GO）时，由Tethering模块在群组接口上提供DHCP（`192.168.49.0/24`）。Tethering直接使用框架广播的群组接口名，不需要配置`config_tether_wifi_p2p_regexs`。
+
+  已知限制：
+  - 平板作为群组所有者时，只能使用固件允许主动发射的信道。在部分国家（例如AU），固件下发的信道表把全部5 GHz信道标为仅被动扫描（`PASSIVE-SCAN`），这时群组无法使用5 GHz，可以使用2.4 GHz。信道表中的6 GHz信道没有这项限制，在6 GHz上建立群组尚未实测。
+  - 热点与WLAN直连无法同时使用。`BoardConfig.mk`的`WIFI_HAL_INTERFACE_COMBINATIONS`中没有同时包含AP与P2P的组合，由`HalDeviceManager`按请求方的优先级决定保留哪一个。设置等特权请求方之间热点优先，所以从设置开启热点会断开WLAN直连（依据源码，尚未实测）。
+  - P2P Device的地址由固件的MAC地址加上本地管理位得到，固件MAC每次开机都会变化，`wlan0`的稳定MAC地址（见上文）不适用于它。因此对方设备保存的群组在平板重启后可能无法直接用于重新连接，这一点尚未实测。
+  - 平板作为客户端加入对方群组的情况尚未实测。
 - **CMA内存预留与休眠恢复（`patches/kernel/dts/0011`）**：`ath11k`在每次挂起/恢复（或模块重初始化）时向DMA子系统申请高阶连续物理内存。设备树将`linux,cma`配置为4 GiB以下（`alloc-ranges = <0x0 0x80000000 0x0 0x80000000>`）的128 MiB `shared-dma-pool`（`reusable`），确保系统长时间运行内存碎片化后`ath11k`仍能从低4 GiB CMA池稳定分配DMA缓冲。
 
 ### 2. 蓝牙（WCN6855 UART / `HCI_CHANNEL_USER`）

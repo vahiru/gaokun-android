@@ -29,7 +29,7 @@
 - **GPU最高优先级的权限检查**：目前内核和Turnip都不检查调用者权限。ROM里的ANGLE看到Turnip声明了REALTIME，就会让每个进程都用它，所以用OpenGL ES的游戏和SurfaceFlinger同在ring 0，享受不到抢占。可以参照panthor的`group_priority_permit()`：内核只允许带`CAP_SYS_NICE`的进程或DRM master使用最高一档ring；Turnip在初始化时试建一个最高优先级的队列，建不成就不声明REALTIME。不能让队列创建直接失败，因为ROM的ANGLE遇到`VK_ERROR_NOT_PERMITTED`不会降级重试，GLES应用会无法启动。动手之前先确认两点：SurfaceFlinger在本ROM上带有`CAP_SYS_NICE`；常玩的GLES游戏在现有内核上确实有合成掉帧。代价是SystemUI等界面也会落到ring 2，游戏在前台时下拉通知栏，动画可能变卡。背景见[`dev/gpu-turnip.md`](dev/gpu-turnip.md)的"GPU抢占"一节。
 - **120 Hz无缝降频**
 - **平行视界的全屏播放（部分情况）**：右侧页面请求横屏时已能展开为整屏；左侧页面请求横屏、不切换为横屏的全屏，以及按窗口大小判断分屏的应用仍不能全屏显示（见[`dev/parallel-view.md`](dev/parallel-view.md)）。
-- **Wi-Fi Direct**
+- **固定WLAN直连的设备地址**：P2P Device的地址取自固件每次开机变化的MAC，对方设备保存的群组在平板重启后可能无法直接使用。可以为它派生与`wlan0`类似的固定地址。wpa_supplicant的`p2p_device_random_mac_addr=2`从`wlan0`使用的配置读取持久地址，而该配置每次开机都由`/vendor/etc/wifi/wpa_supplicant.conf`覆盖，并且需要框架开启P2P的MAC随机化，不能直接使用。背景见[`dev/android-bringup.md`](dev/android-bringup.md)的Wi-Fi一节。
 - **在设置里显示Android ID**，方便用户自己登记Google认证
 - **收紧SELinux策略**：rproc-kick、hexagonrpcd、bootctl的规则收窄；crDroid 17.0的`external/tinyalsa`已给`tinymix`加上`vendor_available: true`，可在`device.mk`改装`tinymix.vendor`并调整`audio-route.sh`的查找顺序，让`audioroute`不再需要`vendor_executes_system_violators`。
 - **统一启动入口的后续**：不再依赖ESP上的派生文件；AVB校验。

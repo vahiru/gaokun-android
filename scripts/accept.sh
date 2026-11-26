@@ -139,8 +139,8 @@ for s in "SH3001 Accelerometer" "SH3001 Gyroscope"; do
     echo "$SL" | grep -q "$s" && pass A7 "sensorservice 列出 $s" || fail A7 "sensorservice 里没有 ${s}（SSC / SLPI 挂了？）"
 done
 
-# ── A8 Wi-Fi / 热点 ──
-sect "A8 Wi-Fi / 热点"
+# ── A8 Wi-Fi / 热点 / WLAN直连 ──
+sect "A8 Wi-Fi / 热点 / WLAN直连"
 # B16 的 RRO（rro/Gaokun3WifiOverlay，target com.android.wifi.resources）：先查资源值，再查活动网络上的实际值
 TB=$(R 'cmd overlay lookup com.android.wifi.resources com.android.wifi.resources:string/config_wifi_tcp_buffers')
 case $TB in *8388608*) pass A8 "config_wifi_tcp_buffers = $TB" ;; *) fail A8 "config_wifi_tcp_buffers = [$TB]，应含 8388608" ;; esac
@@ -152,6 +152,11 @@ grep -q "Resource Name: config_wifiSaeUpgradeEnabled, value: false" "$OUT/dumpsy
     && pass A8 "config_wifiSaeUpgradeEnabled = false（混合 WPA2/WPA3 路由器）" \
     || fail A8 "config_wifiSaeUpgradeEnabled 不是 false"
 chk A8 "$(R 'test -x /vendor/bin/hw/hostapd && echo 在 || echo 无')" 在 "/vendor/bin/hw/hostapd（#11）"
+# WLAN直连：功能声明、P2P接口名、WifiP2pService（缺功能声明时框架不启动该服务）与wpa_supplicant的P2P配置覆盖文件
+R 'pm list features' | grep -qx "feature:android.hardware.wifi.direct" && pass A8 "feature android.hardware.wifi.direct" || fail A8 "缺 feature android.hardware.wifi.direct"
+chk A8 "$(R 'getprop wifi.direct.interface')" p2p-dev-wlan0 "wifi.direct.interface"
+chk A8 "$(R 'service check wifip2p' | sed 's/.*: //')" found "service wifip2p"
+chk A8 "$(R 'test -f /vendor/etc/wifi/p2p_supplicant_overlay.conf && echo 在 || echo 无')" 在 "/vendor/etc/wifi/p2p_supplicant_overlay.conf"
 info "$(grep -m1 -E '^Wi-Fi is' "$OUT/dumpsys-wifi.txt")；$(grep -m1 -o 'current SSID(s):{[^}]*}' "$OUT/dumpsys-wifi.txt")"
 
 # ── A9 USB 服务（#13）──
