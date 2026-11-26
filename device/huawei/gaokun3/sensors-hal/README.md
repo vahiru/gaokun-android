@@ -11,7 +11,7 @@ SLPI DSP → QMI/QRTR → libgaokun3ssc → SscHub → android.hardware.sensors-
 本模块基于AOSP `hardware/interfaces/sensors/aidl/default/`（Apache-2.0）改造：
 
 1. 将默认示例中的9个模拟传感器裁剪为本机实际具备的3个物理传感器：`AccelSensor`（`SH3001 Accelerometer`）、`GyroSensor`（`SH3001 Gyroscope`）与`LightSensor`（`TCS3701 Ambient Light`）。Android框架基于`accel` + `gyro`自动融合生成`Game Rotation Vector`、`Gravity`与`Linear Acceleration`。
-2. `Sensor::readEventPayload`从`SscHub`读取最新实测样本；在首个有效样本到达或数据过期（超过2秒未刷新）时上报`SensorStatus::UNRELIABLE`。
+2. `Sensor::readEventPayload`从`SscHub`读取最新实测样本；`AccelSensor`与`GyroSensor`在首个有效样本到达前或数据过期（超过2秒未刷新）时上报`SensorStatus::UNRELIABLE`（`LightSensor`在无有效样本时返回空列表）。
 3. `Sensor::activate`将订阅状态同步至`SscHub`，实现按需启停。
 4. 加速度计和陀螺仪按屏幕自然方向的坐标轴上报。SSC给出的是芯片自身的坐标轴（安装矩阵全为0），即面板竖屏的坐标轴；屏幕的自然方向是横屏（设备树中面板的`rotation`，见`device.mk`），所以上报时换算为`x = -y`、`y = x`，`z`不变。
 
@@ -36,4 +36,4 @@ SLPI固件中的`tcs3701`驱动为`ambient_light`注册了两个SUID：
 | `57069a9c48dd76bdef49dfb91c177728` | `1`（DRI变化上报，默认项） | 驱动内部主传感器实例，不受理外部客户端请求；向其发送使能请求会触发SEE框架`SNS_ASSERT(req_found)`并导致SLPI崩溃重启 |
 | `57069a9c48dd768def497fb916377829` | `0`（连续采样上报，1/2/5/10 Hz） | 正常输出光照度（lux）与色温 |
 
-由于SEE在`only_default_values=true`时默认返回流类型为1的SUID，`SscHub::FindStreamingLight`显式以`only_default_values=false`查询全部提供者，并按属性`16`（`SNS_STD_SENSOR_ATTRID_STREAM_TYPE`）筛选出流类型为`0`的SUID进行订阅。自动亮度映射曲线配置于`overlay/frameworks/base/core/res/res/values/config.xml`。
+由于SEE在`only_default_values=true`时默认返回流类型为1的SUID，`SscHub.cpp`中的静态函数`FindStreamingLight`显式以`only_default_values=false`查询全部提供者，并按属性`16`（`SNS_STD_SENSOR_ATTRID_STREAM_TYPE`）筛选出流类型为`0`的SUID进行订阅。自动亮度映射曲线配置于`overlay/frameworks/base/core/res/res/values/config.xml`。

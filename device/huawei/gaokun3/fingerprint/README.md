@@ -158,7 +158,7 @@ TA或Goodix模板缺失、哈希不符时，fingerprint.mk直接报错。内核�
 新增节点标签和 ueventd 权限为 system:system 0600；SELinux 仅给指纹 HAL 访问。
 GPIO chip 固定核对 `f100000.pinctrl` / 230 lines，使用 line 185，输出加上拉，
 读回确认高 10ms→低后等待 400ms，并在 TA 使用期间持有 GPIO。成功 shutdown 后
-恢复输入/下拉再释放；关闭失败则保留所有权。本机初始化探测已通过，不能据此声明录入成功。
+恢复输入/下拉再释放；关闭失败则保留所有权。
 GPIO line FD 使用内核的 [gpiolib cdev 接口](https://github.com/torvalds/linux/blob/master/drivers/gpio/gpiolib-cdev.c)。
 
 ## 匹配
@@ -254,7 +254,7 @@ AddressSanitizer + UBSan下运行：
 更换。
 `test-integration.py`检查补丁能否打上、UAPI是否一致、V4接口覆盖、镜像总是装入HAL与固件、缺失或改动的输入被拒绝，以及输入准备。
 
-录入、解锁和拒绝其他手指已在Goodix机器上随ROM构建的正式服务与SELinux策略下实测过；FTE7001机器上的匹配尚未实测。
+录入、解锁和拒绝其他手指已在Goodix机器上随ROM构建的正式服务与SELinux策略下实测过；在FTE7001机器上已有1.0.0-rc.4的实机录入解锁反馈（因像素间距未校准，录入需按压较多次），#133的录入修复与FTE7001像素间距标定仍待实机核对。
 令牌的签发与校验在Goodix机器上实测过：录入时校验Gatekeeper的令牌、锁屏解锁、加密认证（BiometricPrompt）、
 绑定authenticatorId和绑定SID的限时密钥、指纹解锁后的“设备已解锁”密钥，以及输入PIN后的`resetLockout`。
 随ROM构建的这一版HAL及其SELinux规则（`hal_client_domain`）尚未上机测试，规则已通过完整的策略编译检查。

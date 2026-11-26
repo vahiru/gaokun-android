@@ -42,7 +42,7 @@ port0（`a600000.usb`）在device和host两种角色下都可以挂起，息屏�
 
 插充电器、合盖这类事件由EC报给主机，中断走PDC（`pdc 215`，GPIO 103）。SoC进了AOSD之后，电平触发的中断常常接不住插充电器：PDC一直把SoC叫醒，CPU每次去看时线又是高的，GIC上没有挂着的中断，系统要等下一个闹钟或电源键。看起来EC这时只发很短的低电平脉冲。所以EC驱动在`suspend_noirq`里把中断改成下降沿，PDC把它当作边沿交给GIC；恢复时改回DT里的电平，再读一遍EC排着的事件（`patches/kernel/ec-usb/0015`）。醒着时一直是电平触发：打开中断时线如果已经是低的，边沿触发就收不到这个事件。睡眠中插线不亮屏、而`qcom_stats/aosd`的Count在一次睡眠里涨了几千，就是这个问题。
 
-UCSI初始化偶尔失败（`PPM init failed`，`/sys/class/typec`为空，见[TODO](../TODO.md)）。部分开机过程中，EC从驱动注册通知起就约每200毫秒重复一个USB事件（0x22），等待驱动确认；初始化成功时，驱动处理并确认这个事件之后，重复随之停止。初始化失败后没有连接器，事件不会被处理，重复会持续到重启，每次都把系统从休眠中叫醒，系统无法持续休眠。`ucsi_huawei_gaokun`在判定初始化已经结束且失败之后（已注册，`ucsi->work`既不排队也不运行，连接器仍为空，连续两个事件都如此），只确认、不处理这些事件（`patches/kernel/ec-usb/0017`）。初始化超时后会重试（`patches/kernel/ec-usb/0018`、`0019`），等待重试期间`ucsi->work`处于排队状态，所以要等最后一次重试也失败之后才会确认。初始化仍可能成功时仍不确认，之后的重复事件会被完整处理（设置端口的模式、方向和DP HPD）。单独确认能否让真实失败开机里的重复停止，尚未经实测。排查：UCSI初始化失败之后，日志里仍反复出现`ucsi connector is not initialized yet`，就是这种情况。带此补丁时，确认生效会输出一条`acknowledging USB events without handling them`，之后这条日志不再出现，EC是否停止重复要看`/proc/interrupts`里EC中断（`15-0038`）是否还在增长。
+UCSI初始化偶尔失败（`PPM init failed`，`/sys/class/typec`为空，见[TODO](../TODO.md)）。部分开机过程中，EC从驱动注册通知起就约每200毫秒重复一个USB事件（0x22），等待驱动确认；初始化成功时，驱动处理并确认这个事件之后，重复随之停止。初始化失败后没有连接器，事件不会被处理，重复会持续到重启，每次都把系统从休眠中叫醒，系统无法持续休眠。`ucsi_huawei_gaokun`在判定初始化已经结束且失败之后（已注册，`ucsi->work`既不排队也不运行，连接器仍为空，连续两个事件都如此），只确认、不处理这些事件（`patches/kernel/ec-usb/0017`）。初始化超时后会重试（`patches/kernel/ec-usb/0018`、`0019`），等待重试期间`ucsi->work`处于排队状态，所以要等最后一次重试也失败之后才会确认。初始化仍可能成功时仍不确认，之后的重复事件会被完整处理（设置端口的模式、方向和DP HPD）。单独确认能否让真实失败开机里的重复停止，尚未实测。排查：UCSI初始化失败之后，日志里仍反复出现`ucsi connector is not initialized yet`，就是这种情况。带此补丁时，确认生效会输出一条`acknowledging USB events without handling them`，之后这条日志不再出现，EC是否停止重复要看`/proc/interrupts`里EC中断（`15-0038`）是否还在增长。
 
 ## Wi-Fi
 
@@ -65,8 +65,8 @@ Wi-Fi进了D3hot之后、主机发`PME_Turn_Off`之前，固件如果碰上触�
 - **radio关着（`patches/kernel/wifi/0011`）。**reset在`ath11k_mac_op_reconfig_complete()`结束，`mac80211`只为重启的radio走到那里。radio关着时`is_reset`不清，之后每次加载固件都持60秒`ath11k_recovery`。现在没有radio要重启时直接结束reset。
 - **崩溃循环（`patches/kernel/wifi/0016`、`0017`）。**重启途中再崩也会reset。距离上一次reset不到600秒（boottime，睡眠也算）的崩溃算同一个循环：前两次立刻reset，之后从30秒起每次翻倍，等待时放掉唤醒源，6次reset之后再崩就放弃。放弃后下一次挂起给设备下电，醒来重新加载固件。
 - **重启途中崩溃（`patches/kernel/wifi/0023–0025`）。**`op_start`、`add_interface`不再因此失败。否则`mac80211`关掉接口，Android的`WifiSelfRecovery`跟着关Wi-Fi，要用户手动打开。日志里的`restarted without firmware`表示radio回来了、固件还没有，下一次reset或挂起下电会接手。退避等待时挂起不动固件，醒来由reset接手；放弃之后WoW被拒绝，挂起走下电路径。
-- **链路丢了（`patches/kernel/wifi/0026`）。**端点从总线上消失后，reset里MHI准备失败。之后的挂起下电或关机不再重复释放MHI。Wi-Fi在重启前无法使用，之后的挂起能否让它恢复尚未经验证。
-- 其余：0175重启失败时留着已注册的hw，0176不重复关PCI中断，0179不让删除station失败，0180–0183、0185是上游和邮件列表的修复。
+- **链路丢了（`patches/kernel/wifi/0026`）。**端点从总线上消失后，reset里MHI准备失败。之后的挂起下电或关机不再重复释放MHI。Wi-Fi在重启前无法使用，之后的挂起能否让它恢复尚未验证。
+- 其余：`patches/kernel/wifi/0014`重启失败时留着已注册的hw，`0015`不重复关PCI中断，`0018`不让删除station失败，`0019`–`0022`与`0024`（已含于上条`0023–0025`）是上游和邮件列表的修复。
 
 ## 恢复失败
 

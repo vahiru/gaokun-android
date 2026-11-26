@@ -6,9 +6,9 @@
 
 ## `ov13b10-module-eeprom-0x50.bin`：后摄模组EEPROM（16 KiB）
 
-后摄模组（OV13B10，CCI总线0 = `/dev/i2c-1`）上`0x50`地址EEPROM的完整内容，16位地址、16384字节、前后两半不重复（不是8 KiB镜像）。
+后摄模组（OV13B10，`cci1` bus 0 = `/dev/i2c-1`）上`0x50`地址EEPROM的完整内容，16位地址、16384字节、前后两半不重复（不是8 KiB镜像）。
 
-**读取方式**：CCI适配器不支持`I2C_RDWR`的组合消息（`i2ctransfer`报`ioctl 707: Operation not supported`），因此采用SMBus两步法：`i2cset -y 1 0x50 <hi> <lo> b`写地址指针，随后用`i2cget -y 1 0x50`（receive byte）逐字节读取，地址自增。该EEPROM挂在与面板VDDI共用的1.8 V轨上，屏幕点亮期间无需单独给相机传感器上电即可应答。
+**读取方式**：高通CCI适配器会把一次`I2C_RDWR`中的写地址与读数据拆成两次带停止位的传输执行，EEPROM按已写入的地址指针继续读，因此先写16位大端地址、再读即可读出；也可以用SMBus两步法：`i2cset -y 1 0x50 <hi> <lo> b`写地址指针，随后用`i2cget -y 1 0x50`（receive byte）逐字节读取，地址自增。该EEPROM挂在与面板VDDI共用的1.8 V轨上，屏幕点亮期间无需单独给相机传感器上电即可应答。
 
 **已确认的字段布局**（其余偏移为厂商私有布局）：
 

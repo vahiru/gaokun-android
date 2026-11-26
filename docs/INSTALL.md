@@ -44,7 +44,7 @@ Note also that the user data partition of this system is not encrypted: anyone w
 
 ### If you want to keep Windows
 
-- **Using the Windows installer**: you can [download](#downloads) and launch the Windows installer first — its "Environment check" page guides you through each requirement below (including showing the unmovable files that prevent a partition from being shrunk, and verifying your recovery key to suspend BitLocker protection before you disable Secure Boot).
+- **Using the Windows installer**: you can [download](#downloads) and launch the Windows installer first — its "Environment check" page guides you through each requirement below (including showing the unmovable files that prevent a partition from being shrunk, and verifying your recovery key to suspend BitLocker protection before you disable Secure Boot), after which you enter the firmware settings to disable Secure Boot.
 - **Using the Live installer directly from a USB drive**: complete the following 4 steps in Windows beforehand, in order:
 
 1. **Disable Fast Startup**: uncheck "Turn on fast startup" under Control Panel → Power Options → Choose what the power buttons do. From then on, leave Windows with "Shut down" rather than "Hibernate". Writing to the shared EFI system partition while Windows is hibernated can corrupt its data, and the installers refuse to do it.
@@ -170,15 +170,23 @@ The first boot takes about two to three minutes. Then follow the setup wizard; n
 This system is not on Google's list of certified devices, so the Play Store shows "This device isn't Play Protect certified", and some apps refuse to install until the device is registered. Registering is free and only needs to be done once per device:
 
 1. Sign in to your Google account on the tablet.
-2. Read the device's Android ID. For now this means running a script from this repository on a computer, over adb:
+2. Read the device's Android ID. First run `adb devices` on your computer to find the device serial number, then run the script from this repository:
 
    ```sh
-   bash scripts/google/gsf-android-id.sh
+   bash scripts/google/gsf-android-id.sh <adb-serial>
    ```
 
-   The ID is stored in Google Play services' private directory, so reading it needs root. Install the ReSukiSU manager first and grant root to Shell; the script uses it automatically. For setting up adb, see the [FAQ](FAQ.md).
+   (Since 1.0.0-rc.4 the device reports its real serial number, so running the script without arguments fails because it defaults to `gaokun3`.) The ID is stored in Google Play services' private directory, so reading it needs root. Install the ReSukiSU manager first and grant root to Shell; the script uses it automatically. For setting up adb, see the [FAQ](FAQ.md).
 3. With the same Google account, open <https://www.google.com/android/uncertified/>, enter the ID and register it.
 4. Wait a few minutes, then clear the Google Play Store's storage (or run `adb shell pm clear com.android.vending`).
+
+If, after registering, the Play Store or the Google app still reports that the device is not certified when opened, the app is still using a certification result it cached earlier. Delete the cached result and open the app again; as in step 2, this needs root. Unlock the tablet first, then run on the computer:
+
+```sh
+adb shell "su -c 'rm -f /data/data/com.google.android.gms/files/gmscompliance/shared/cache.pb /data/data/com.android.vending/cache/gmscompliance.pb; am force-stop com.google.android.gms; am force-stop com.android.vending; monkey -p com.android.vending -c android.intent.category.LAUNCHER 1'"
+```
+
+The Play Store then opens on the tablet and obtains a new certification result within a few seconds. If it still reports that the device is not certified, or the message appears again later, run the command again. If the Google app shows the same message, replace every `com.android.vending` in the command with `com.google.android.googlequicksearchbox`.
 
 After a factory reset, or after clearing Google Play services' data, the ID changes and has to be registered again.
 
@@ -234,7 +242,6 @@ To uninstall Android, use the Windows installer; see [Uninstalling](#uninstallin
 | Black screen after power-on, no boot menu | Make sure Secure Boot is disabled |
 | The machine starts Windows directly, without the boot menu | See the [FAQ](FAQ.md#the-machine-starts-windows-directly-without-the-boot-menu) |
 | After an update, you chose the other slot's entry and the machine restarted | Expected: the old version has been merged away; see [System updates](#system-updates) |
-| USB sticks do not appear in the firmware's boot menu, or Huawei's official recovery does not start | Earlier versions wrote kernel crash records into the firmware storage, and this happens once it is full; the mainboard is not broken. Since 1.0.0-rc.3 nothing is written there any more; existing records have to be cleaned up once as described in [issue #56](https://github.com/vahiru/gaokun-android/issues/56) |
 | Android does not start | See the [FAQ](FAQ.md#the-machine-keeps-restarting-or-hangs-what-can-i-do) |
 
 ## Reporting problems

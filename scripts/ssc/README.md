@@ -42,6 +42,7 @@ adb shell '
     echo start > /sys/class/remoteproc/remoteproc0/state
   rm -rf /data/local/tmp/hr
   start vendor.hexagonrpcd-sdsp
+  start vendor.sensors-gaokun3
 '
 ```
 

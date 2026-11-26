@@ -10,9 +10,9 @@ Each entry follows the same format: **Symptom** (what you will run into), **Caus
 
 ### v0.7.1 and earlier opened network adb without authorization
 * **Symptom**: nothing visible in use.
-* **Cause**: v0.7.1 and earlier opened adb on TCP port 5555 on every network interface (including the Wi-Fi hotspot), without asking for authorization; once connected, root was available, and the image also carried the maintainer's adb public key. Anyone on the same Wi-Fi, or connected to your hotspot, could take full control of the machine. Since 1.0.0-rc.1, adb is off by default, every computer needs your authorization, port 5555 is no longer opened, and the maintainer's key is gone. Updating through System update is enough for this to take effect.
+* **Cause**: v0.7.1 and earlier opened adb on TCP port 5555 on every network interface (including the Wi-Fi hotspot), without asking for authorization; once connected, root was available, and the image also carried the maintainer's adb public key. Anyone on the same Wi-Fi, or connected to your hotspot, could take full control of the machine. Since 1.0.0-rc.1, adb is off by default, every computer needs your authorization, port 5555 is no longer opened, and the maintainer's key is gone. Installing a newer version applies this automatically.
 * **What to do**:
-  * If you are still on v0.7.1 or earlier, back up first, then update in Settings → System → System update. Upgrading from Android 16 to 17 rewrites your user data and cannot be undone; see the [rc.3 release notes](relnotes/v1.0.0-rc.3.md). Until you have updated, do not join Wi-Fi networks you do not trust, and do not let strangers join your hotspot.
+  * If you are still on v0.7.1 or earlier, back up your data first and reinstall the current release with the installer (System update does not take Android 16 straight to Android 17, and reinstalling erases data). Until you have updated, do not join Wi-Fi networks you do not trust, and do not let strangers join your hotspot.
   * If you ever set `persist.adb.tcp.port` by hand, that setting survives the update; how to clear it has not been documented yet.
   * To use adb over the network, use [wireless debugging](FAQ.md#wireless-debugging).
 
@@ -37,16 +37,16 @@ Each entry follows the same format: **Symptom** (what you will run into), **Caus
 * **Cause**: developing and troubleshooting need root, so release builds keep it. Which apps get root is decided by the ReSukiSU manager: only apps you have approved there get it; without the manager installed, no app can get it.
 * **What to do**:
   * If you do not need root, do not grant it to any app in the manager.
-  * Once adb root is turned on in the manager, any computer you have authorized for USB or wireless debugging gets root directly through `adb shell`. Leave adb root off unless you need it, only authorize computers you trust, and turn USB and wireless debugging off when you are not using them.
+  * Once you grant root to Shell in the manager, any computer you have authorized for USB or wireless debugging can obtain root via `adb shell su` (release builds do not support `adb root`). Do not grant root to Shell unless you need it, only authorize computers you trust, and disable USB and wireless debugging when not in use.
   * There is no build without root yet, and the kernel's root support cannot be switched off.
-  * In smoke tests, *Delta Force* and *Strinova*, which use ACE anti-cheat, run normally; banking and payment apps have not been tested systematically yet, and feedback is welcome.
+  * In smoke tests, *Delta Force* and *Strinova*, which use ACE anti-cheat, run normally, but playing games that use ACE or other anti-cheat frameworks still carries a risk of account bans; banking and payment apps have not been tested systematically yet, and feedback is welcome.
 
 ### SELinux is enforcing; hand-partitioned disks may need their EFI partition renamed
 * **Symptom**: nothing visible on most machines. But if you partitioned the disk yourself and the EFI partition's GPT partition name is neither `esp` nor `EFI system partition`, system updates and slot switching fail.
 * **Cause**: since 1.0.0-rc.1, SELinux has changed from permissive (log only) to enforcing (actually block). SELinux is the second layer of Android's app sandbox: even an app that finds a vulnerability can do far less. The policy only lets the update and boot control components open the EFI partition by these two names: `esp` is the name the installer gives it when erasing the whole disk, and `EFI system partition` is the name Windows gives it, which is what dual boot uses. Earlier versions scanned every storage device when the partition was not found; enforcing mode does not allow that.
 * **What to do**:
   * If your EFI partition has a different name, rename it once from any Linux (for example the Live installer's terminal: press Ctrl+Alt+F2 and log in as root, no password needed): `sgdisk -c <N>:esp /dev/nvme0n1`, where N is the EFI partition's number. UEFI only looks at the partition type, so renaming has no side effects.
-  * If something worked on v0.7.1 and no longer does, please report it and attach the output of `adb shell dmesg | grep avc`.
+  * If something worked on v0.7.1 and no longer does, please report it, grant root to Shell in the ReSukiSU manager, and attach the output of `adb shell su -c dmesg | grep avc`.
 
 ### The boot chain is unlocked, and system partitions are not verified
 * **Symptom**: nothing checks at boot whether the system has been modified, and Play Integrity cannot pass (see "Not Google-certified" below).
@@ -71,7 +71,7 @@ Each entry follows the same format: **Symptom** (what you will run into), **Caus
 * **What to do**: choose "File transfer" in Settings as above. The tablet does not enter standby while connected to a computer, so transfers continue with the screen off; please unplug the cable when you are done.
 
 ### Fingerprint payment does not work in some apps
-* **Symptom**: 1.0.0-rc.3 and earlier do not support the fingerprint sensor. In 1.0.0-rc.4, you can enrol fingerprints in Settings and unlock the screen (both Goodix and FocalTech sensors are supported), but apps cannot use the fingerprint. In later versions, apps can also verify your identity with a fingerprint, for example to sign in or to unlock a password manager. Fingerprint payment in WeChat Pay, Alipay and similar apps still does not work, and some banking apps may still refuse fingerprint sign-in. Matching on machines with a FocalTech sensor has not been tested with real fingers yet.
+* **Symptom**: 1.0.0-rc.3 and earlier do not support the fingerprint sensor. In 1.0.0-rc.4, you can enrol fingerprints in Settings and unlock the screen (both Goodix and FocalTech sensors are supported), but apps cannot use the fingerprint. Since 1.0.0-rc.5, apps can also verify your identity with a fingerprint, for example to sign in or to unlock a password manager. Fingerprint payment in WeChat Pay, Alipay and similar apps still does not work, and some banking apps may still refuse fingerprint sign-in. On machines with a FocalTech sensor, pixel-pitch calibration has not been done yet, so enrolment may require more touches than usual (since 1.0.0-rc.5, enrolment becoming unresponsive and failing to retry after sensor errors are fixed).
 * **Cause**: fingerprint matching runs in a normal system service rather than in the processor's secure environment (TEE), and the Android key store on this device is also implemented in software. Fingerprint payment in WeChat Pay, Alipay and similar apps relies on keys that the device manufacturer places in the TEE, and some banking apps do not accept a key store that is not backed by hardware. The pixel-pitch scale for FocalTech sensors has not been measured on real captures yet.
 * **What to do**: use your password or PIN for payments in these apps. If recognition is poor on a FocalTech machine, unlock with a PIN or password for now and let us know in an issue.
 
@@ -79,11 +79,6 @@ Each entry follows the same format: **Symptom** (what you will run into), **Caus
 * **Symptom**: on 1.0.0-rc.1 and earlier, the stylus does nothing at all. Since rc.2, the second- and third-generation M-Pencil support pressure, hover, tilt and double-tap on the side; everyday use of the third-generation pen has not been tested yet. The first-generation M-Pencil does not work.
 * **Cause**: the stylus signal comes from the touchscreen's second controller chip, whose driver was reverse-engineered by a community contributor; the first-generation pen uses a different protocol that the driver does not support.
 * **What to do**: if a second- or third-generation pen does not work properly on rc.2 or later, please open an issue and attach the output of `adb shell getevent -pl`.
-
-### The front or rear camera does not work on some machines
-* **Symptom**: the camera app shows only one camera and no button to switch between the front and rear cameras; apps that need the other camera (for example, face recognition with the front camera) cannot open it.
-* **Cause**: this machine comes with one of two front camera modules and one of two rear camera modules. The Samsung S5K4H7 front module is not supported on 1.0.0-rc.4 and earlier, which support only the Hynix HI846; later versions support it. The Samsung S5K3L6 rear module is not supported on 1.0.0-rc.4 and earlier either, which support only the OmniVision OV13B10; later versions support it.
-* **What to do**: if the front or rear camera does not work, update to a version later than 1.0.0-rc.4. If it still does not work after the update, please open an issue and attach the logs (see the [FAQ](FAQ.md#when-android-starts) for how to collect them).
 
 ### Location mostly does not work
 * **Symptom**: maps, weather, delivery and ride-hailing apps cannot get a location, or stay on "locating".
@@ -97,6 +92,11 @@ Each entry follows the same format: **Symptom** (what you will run into), **Caus
 * **Symptom**: Netflix, Disney+, Prime Video and similar services cannot play their content and report a DRM error or that the device is not supported. Some members-only or licensed content in Chinese video apps may be affected too; this has not been tested yet.
 * **Cause**: the system has no DRM module. Widevine is a closed-source Google component that requires licensing and certification, which this project cannot ship.
 * **What to do**: please watch such content on another device.
+
+### Headset microphones in calls are not yet fully tested
+* **Symptom**: on 1.0.0-rc.4 and earlier, the microphone of a Bluetooth headset could not be used in calls and call audio might not route to the headset. Bluetooth headset calls are supported since 1.0.0-rc.5 (over the HFP software data path), but real calling apps such as WeChat voice calls or online meetings, CVSD-only narrowband headsets, and switching audio back to the tablet from the headset mid-call have not been tested yet; the microphone of a 3.5 mm wired headset has also not been tested yet.
+* **Cause**: the tablet's sound card has no PCM/I2S link to the Bluetooth chip for hardware SCO offload, so Bluetooth calls use the software data path; more hardware testing is still needed across headset models and calling apps.
+* **What to do**: if you run into silence, noise or routing issues during Bluetooth calls or wired headset recording, please open an issue with logs (see the [FAQ](FAQ.md#when-android-starts)); for urgent calls, switch back to the tablet's built-in speakers and microphones.
 
 ### Messages from some apps are delayed in standby
 * **Symptom**: once the screen is off and the machine is in standby, new messages from apps that do not use Google's push service (FCM), such as WeChat and QQ, only arrive at the system's next scheduled wake-up or when you turn the screen on, usually one or two minutes late, occasionally around three. Apps that use FCM are delayed the same way on 1.0.0-rc.3 and earlier; since 1.0.0-rc.4 they can wake the system and arrive on time. Wi-Fi stays connected during standby, so there is no need to reconnect after waking.
@@ -118,7 +118,7 @@ Each entry follows the same format: **Symptom** (what you will run into), **Caus
   * WeChat opens chats from its Chats list on the left, inside its main screen; pages opened from elsewhere, such as Contacts, open on the right.
   * A video played full screen from the left-hand page, or in a full-screen mode that does not switch to landscape, stays within its side of the screen.
   * When an app requests a permission, the permission dialog may be partly covered by the right-hand page.
-  * 1.0.0-rc.4 and earlier do not have this setting.
+  * Available since 1.0.0-rc.5; earlier versions do not have this setting.
 * **Cause**: the split layouts come with the apps, and WeChat opens chats on the right only on devices it recognizes. A side is expanded to the full screen only when the right-hand page switches to landscape.
 * **What to do**: in apps whose divider can be dragged to the edge of the screen, drag it there to show one page in full screen. Otherwise turn off the switch for the app.
 
@@ -141,9 +141,9 @@ The following are bugs, not trade-offs; they will be removed from this list once
 * **What to do**: unplug the cable and plug it in again (once is usually enough), or use another port on the computer. Only the USB-C port next to the power button can be used for USB debugging; the other port only connects peripherals.
 
 ### Occasionally the USB-C port does not work after power-on until a restart
-* **Symptom**: occasionally right after power-on, the USB-C port does not work: USB debugging cannot connect and USB devices are not recognized, until a restart.
-* **Cause**: the Type-C controller (UCSI) occasionally fails to initialize at boot; the cause is still being investigated.
-* **What to do**: a restart brings it back. Until then, use adb and transfer files over Wi-Fi.
+* **Symptom**: occasionally right after power-on, the USB-C port does not work: USB debugging cannot connect and USB devices are not recognized. Since 1.0.0-rc.5, the system retries initialization automatically, making ports available about 15 s later than usual on affected boots; if all retries still fail, the USB-C port does not work until a restart.
+* **Cause**: occasionally at boot the EC fails to clear the BUSY status bit after completing a command, causing the Type-C controller (UCSI) command to time out after 10 s and abort initialization. Since 1.0.0-rc.5, the kernel retries UCSI initialization up to 5 times after a timeout and acknowledges repeated EC USB events after a final failure so sleep is no longer blocked; a separate occasional case where a computer does not recognize the tablet after boot is still under investigation.
+* **What to do**: if USB-C still does not work after waiting ~15 s following boot, restart to recover. Until then, use adb and transfer files over Wi-Fi.
 
 ### *League of Legends: Wild Rift* starts; whether matches work has not been tested
 * **Symptom**: on 1.0.0-rc.1 and earlier, the game quits as soon as it opens. Since rc.2 it starts and reaches the user agreement screen; whether you can get into a match has not been tested yet.
@@ -153,7 +153,7 @@ The following are bugs, not trade-offs; they will be removed from this list once
 ### Some Unreal Engine games only use OpenGL ES, or exit at startup
 * **Symptom**: some games built with Unreal Engine only use OpenGL ES; games that ship only Vulkan shaders, such as *Infinity Nikki*, exit at startup with "Game files required to initialize the global shader and cooked content are most likely missing".
 * **Cause**: these games use Vulkan only when they detect a Qualcomm GPU driver. OpenGL ES on this device is provided by ANGLE, whose version information contains no Qualcomm driver version.
-* **What to do**: turn on the switch for the game in Settings → System → GPU driver compatibility, then restart the game. Do not turn it on for browsers, or some WebGL pages will not display correctly. 1.0.0-rc.4 and earlier do not have this setting; it has not been tested yet.
+* **What to do**: turn on the switch for the game in Settings → System → GPU driver compatibility, then restart the game. Do not turn it on for browsers, or some WebGL pages will not display correctly. Available since 1.0.0-rc.5; not yet fully tested in-game.
 
 ### The Chinese input method has to be turned on once
 * **Symptom**: the default keyboard does not support Chinese.

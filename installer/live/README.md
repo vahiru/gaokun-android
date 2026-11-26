@@ -26,7 +26,7 @@ testdata/         由真实后端在容器内录制的各场景输出fixture
 python3 ../common/tool/fetch-fonts.py     # 首次运行：从google/fonts下载打包所需的Roboto与Noto Sans SC字体（存放在gk3_common）
 flutter test                              # 运行全部单元测试（协议解析、导航流转、多语言文案与截图测试）
 flutter test test/shots_test.dart         # 生成全流程界面截图 → test/shots/*.png
-flutter run -d chrome --web-browser-flag=--window-size=1280,800   # 浏览器交互预览（支持 ?scenario=factory|windows-free|blank|android&lang=zh|en）
+flutter run -d chrome --web-browser-flag=--window-size=1280,800   # 浏览器交互预览（支持 ?scenario=factory|windows-free|windows-live|windows-setup|windows-setup-shrunk|blank|android|android-live&lang=zh|en）
 ```
 
 重新录制容器内的后端测试fixture：
@@ -39,8 +39,12 @@ bash installer/tools/test/test-in-container.sh installer/tools/test/gen-fixtures
 |---|---|
 | `factory` | 出厂Windows全盘布局（无未分配空间，双系统并存安装不可用） |
 | `windows-free` | 在`factory`上压缩Data腾出80 GiB未分配空间后的状态（引导进入“双系统并存安装”） |
+| `windows-live` | 免U盘双系统：已压缩出未分配空间且末尾带有安装器分区`GK3LIVE`（介质与目标同盘，默认安装后删除该分区） |
+| `windows-setup` | Windows安装器仅压缩出512 MiB放置`GK3LIVE`、尚无安装空间（提示先回Windows压缩卷） |
+| `windows-setup-shrunk` | `windows-setup`回Windows再压缩出80 GiB未分配空间后的状态（可进入双系统安装） |
 | `blank` | 空盘（引导进入“清空整盘安装”） |
 | `android` | 已安装过Android的磁盘（引导进入“重新安装Android”或拒绝重复追加双系统） |
+| `android-live` | 在`windows-live`上安装双系统并保留`GK3LIVE`后的状态（方式页提供“删除安装器分区”） |
 
 ## 三、交互与安全设计要点
 

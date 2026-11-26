@@ -20,7 +20,7 @@ echo $?        # 0 = 无FAIL；1 = 有FAIL；2 = adb不通或中途掉线（不�
 * 报告保存在`out/accept/<戳>-<时间>/report.txt`，同目录保存`logcat`、`dmesg`、`dropbox`列表及频率与温度快照，供跨版本对比。
 * `--profile dev`：面向开发构建（故意开启adb免授权与TCP 5555）时安全默认值检查只记录不判失败；发布构建一律使用默认的`release`。
 * `--readonly`：仅执行只读检查（跳过开相机、录音、硬解视频、硬件编码），可在任意时刻运行。
-* A11的真编一段只在屏幕亮着、且内核日志里确认有`cp-nonpixel: CB15 ready`时进行，否则记为SKIP。开机满10分钟时屏幕通常已经熄灭，要验证硬件编码，请先点亮屏幕再运行。
+* 硬件编解码检查中的真编一段只在屏幕亮着、且内核日志里确认有`cp-nonpixel: CB15 ready`时进行，否则记为SKIP。开机满10分钟时屏幕通常已经熄灭，要验证硬件编码，请先点亮屏幕再运行。
 * **涉及重启的检查项**（启动入口部署与祝福、fastboot执行端查询、BCB分派、稳定Wi-Fi MAC）：重启前需确认有人可在设备旁长按电源键恢复；新候选版首次跑fastboot执行端时需人在场。
 
 ## 2. 无人值守检查
@@ -54,7 +54,7 @@ echo $?        # 0 = 无FAIL；1 = 有FAIL；2 = adb不通或中途掉线（不�
 
 | 检查项 | 命令 | 通过判据 |
 | --- | --- | --- |
-| 视频解码边界回归 | 运行本地`rc-accept.sh`视频回归集 | 播放完毕后seek、连续seek、分辨率切换、stop、drain全部通过 |
+| 视频解码边界回归 | 配合`scripts/verify-hw-codec2.sh`与播放器实测视频解码边界场景 | 播放完毕后seek、连续seek、分辨率切换、stop、drain全部通过 |
 | 热点启停 | USB adb下执行`cmd wifi start-softap gk3test wpa2 <口令>` → `dumpsys wifi` → `cmd wifi stop-softap` | AP正常启动；关闭后STA自动重连 |
 | USB角色开机路径 | `logcat -b all -d -s gaokun3-usb`；`dumpsys android.hardware.usb.IUsb/default`；`getprop vendor.gaokun3.usbrole.broken` | HAL已注册并在决定数据角色（`deciding the data role`），USB adb枚举正常；`broken`为空或`0` |
 | 发布版诊断通路 | `adb shell su -c id`、`adb shell dmesg`、`adb logcat -b kernel -d`、`adb bugreport` | 在KernelSU管理器授权Shell后`su -c id`返回`0`；核对各诊断命令可用性 |
@@ -76,6 +76,14 @@ echo $?        # 0 = 无FAIL；1 = 有FAIL；2 = adb不通或中途掉线（不�
 | 麦克风降噪与手写笔服务 | `getprop init.svc.vendor.gk3denoise`、`getprop init.svc.vendor.gk3pend`；`ps -AZ` | 均为`running`，分别位于`gk3denoise`与`gk3pend`域 |
 | 指纹服务与内核配置 | `getprop init.svc.vendor.fingerprint-gaokun3`；`ps -AZ -o LABEL,PID,ARGS \| grep fingerprint-service.gaokun3`；`su -c "zcat /proc/config.gz \| grep CONFIG_GAOKUN3_FPCMD"` | 服务`running`且位于`hal_fingerprint_default`域；`CONFIG_GAOKUN3_FPCMD=y` |
 | 显示模糊、色彩与HDR声明 | `dumpsys window \| grep mBlurEnabled`；`su -c "dmesg \| grep 'factory calibration'"`；`dumpsys SurfaceFlinger \| grep -E 'DisplayColorSetting\|wide color\|hdr10'`；`dumpsys display \| grep useSurfaceControl`；`dumpsys media.player \| grep Main10HDR10` | `mBlurEnabled=true`；内核加载两档出厂校准数据，SurfaceFlinger支持广色域且`hdr10=true`；`useSurfaceControl=true`；HEVC解码器列出`Main10HDR10` |
+| 自然横屏、DPI与默认密度 | `dumpsys display \| grep -E 'mBaseDisplayInfo\|installOrientation\|dpi'`；`getprop ro.sf.lcd_density`；`ls /vendor/etc/display_settings.xml 2>&1` | 物理尺寸为`2560 x 1600`、`installOrientation=1`、物理DPI约`245`、`ro.sf.lcd_density=280`；不存在`/vendor/etc/display_settings.xml` |
+| Power HAL与电源状态调度 | `ps -AZ -o LABEL,PID,ARGS \| grep power-service.lineage-libperfmgr`；`logcat -b all -d \| grep -iE 'task_profiles\|powerhal-libperfmgr'`；插拔电源后分别检查`/sys/devices/system/cpu/cpufreq/policy{0,4}/scaling_min_freq`与`/dev/cpuctl/{background,foreground_window}/cpu.uclamp.max` | 服务运行于`hal_power_default`域，无Pixel任务配置或`sched_setattr`报错；接电源时下限为`1209600`/`1056000`且两分组上限为`max`，用电池时小核下限`691200`、两分组上限为`32.03`/`80.66` |
+| 板载温控区、被动降温与亮度上限配置 | `su -c "for z in /sys/class/thermal/thermal_zone*; do echo \$(cat \$z/type); done \| grep sys-therm"`；`dumpsys thermalservice`；`ls /vendor/etc/displayconfig/display_port_0.xml` | 存在`sys-therm1-thermal`至`sys-therm4-thermal`；`thermalservice`将`sys-therm1`至`sys-therm4`上报为`SKIN`、将`panel`上报为`DISPLAY`；存在`display_port_0.xml` |
+| 内存、zram与GKI内核配置 | `cat /proc/swaps`；`getprop mmd.zram.enabled`；`cat /sys/kernel/mm/transparent_hugepage/enabled`；`cat /proc/cmdline`；`su -c "zcat /proc/config.gz \| grep -E 'UCLAMP_BUCKETS_COUNT=20\|LRU_GEN_ENABLED=y\|INPUT_JOYSTICK=y\|QCOM_SPMI_ADC_TM5=y\|HUAWEI_GAOKUN3_CAMERA_PROBER=y\|GPIO_SHARED_PROXY=y\|ATH_REG_DYNAMIC_USER_REG_HINTS=y'"` | `zram0`已挂载且`mmd.zram.enabled=true`；THP为`[madvise]`；cmdline含`cgroup_disable=pressure`；七项内核配置均匹配 |
+| GPU SMMU、带宽投票与`smmustall`移除 | `getprop init.svc.smmustall`；`su -c "grep arm-smmu-context-fault /proc/interrupts"`；高负载下查`su -c "grep 3d00000.gpu /sys/kernel/debug/interconnect/interconnect_summary"` | 不存在`smmustall`服务；上下文中断位于正确中断线；GPU峰值DDR投票可升至`6220000`或`10944000` |
+| 蓝牙HFP音频策略 | `dumpsys audio \| grep mScoManagedByAudio`；`dumpsys media.audio_policy \| grep -E 'hfp output\|hfp input'` | `mScoManagedByAudio=true`；蓝牙音频模块列出`hfp output`与`hfp input` |
+| Wi-Fi `HW_GK3`、国家码与PCIe一致性 | `su -c "find /proc/device-tree -name 'qcom,calibration-variant' -exec cat {} \;"`；`su -c "iw reg get"`并扫描2.4 GHz第12/13信道；链路在线时`su -c "devmem 0x1c203d4 4; devmem 0x1c003d4 4"` | 校准变体为`HW_GK3`、`phy#0 (self-managed)`反映当前国家码且无CRDA超时、可被动扫描12/13信道；两处PARF寄存器均为`0x0000000a` |
+| 相机模组探测与硬件编解码能力 | `su -c "dmesg \| grep huawei_gaokun3_camera_prober"`；`getprop ro.vendor.v4l2_codec2.encode_concurrent_instances`；`dumpsys media.player \| grep -E 'c2\.v4l2\.(hevc\.encoder\|vp9\.decoder\|avc\.decoder)' -A 15`；执行`adb bugreport`后查`logcat`/`dmesg`有无Codec2 HAL的`SIGSYS` | 日志准确列出已装配的前后摄型号；编码并发数为`3`；HEVC编码器声明`Main10`、VP9解码器含5.1/5.2、H.264解码器覆盖1440p@120；`bugreport`期间Codec2 HAL无`SIGSYS`退出 |
 
 ## 3. 人在场交互检查
 
@@ -88,7 +96,7 @@ echo $?        # 0 = 无FAIL；1 = 有FAIL；2 = adb不通或中途掉线（不�
 | 拔线深度休眠唤醒 | 设`allow_suspend=1` → 拔除USB → 息屏静置等待入睡 → 按电源键唤醒 → 插回USB | `suspend_stats/success`计数增长；唤醒后Wi-Fi与USB adb正常恢复 |
 | 扬声器音效开关 | 在“设置 → 提示音和振动 → 扬声器音效”的对话框中依次选择关闭、低音增强与华为Histen并播放音乐，插耳机重复验证 | 默认关闭，条目说明显示当前选项；关闭时直通播放正常，选择华为Histen时`logcat`输出`Histen chain up`；耳机通道不经过扬声器音效链 |
 | 设置条目与控制中心磁贴 | 查看“设置 → 已连接的设备 → 磁吸键盘”、“设置 → 显示 → 防误触模式”与“设置 → 提示音和振动”的“高级”分组；设置页开着时下拉控制中心切换键盘与防误触磁贴 | 两个开关条目可切换，状态与磁贴一致，用磁贴切换后设置页的开关随即更新；“高级”分组包含扬声器音效与麦克风降噪；应用抽屉中没有Parts的图标 |
-| 音频播放与录制 | 测试扬声器、3.5mm耳机（经Type-C转接）、双麦录音、蓝牙耳机及音游发声 | 播放与录音正常、无爆音 |
+| 音频播放与录制 | 测试扬声器、3.5mm有线耳机、四麦阵列录音、蓝牙耳机及音游发声 | 播放与录音正常、无爆音 |
 | STA+AP热点并发 | 保持平板连接Wi-Fi，开启个人热点并用手机连接访问网页 | 平板自身Wi-Fi不断线，手机可正常联网 |
 | WPA2/WPA3混合路由 | 连接开启WPA2/WPA3混合模式的路由器 | 连接稳定，无反复断连 |
 | 常用应用与游戏冒烟 | 依次打开明日方舟、三角洲行动、卡拉彼丘、Phigros、Arcaea、QQ、网易云音乐、Brave | 全部正常启动运行，系统崩溃记录中无新增崩溃 |
@@ -106,13 +114,19 @@ echo $?        # 0 = 无FAIL；1 = 有FAIL；2 = adb不通或中途掉线（不�
 | fastboot执行端界面与按键 | 进入fastboot执行端界面，用音量上/下键移动光标、电源键确认执行`Reboot to Android` | 屏幕显示状态信息且方向正确，音量键与电源键操作正常响应 |
 | 恢复出厂设置（RC跑一次） | 备份`/data/misc/adb/adb_keys`后在“设置 → 系统 → 重置选项”执行“清除所有数据” | `gk3boot`识别`why=wipe`并转交执行端格式化`userdata`与`metadata`，重启后进入开机向导且BCB清零 |
 | USB文件传输/PTP/RNDIS/MIDI | 连接电脑依次切换文件传输（拷贝>1 GB文件并校验哈希）、PTP、USB网络共享、MIDI，并测试`scripts/game-mode.sh` | 四种USB功能在电脑端均正常识别工作，大文件传输哈希一致；游戏模式开启与恢复后adb正常重连 |
-| 手写笔设置 | 在“设置 → 已连接的设备 → 手写笔设置”中调节笔迹平滑档位与双击笔身功能，重启后复查 | 每次调节后`dmesg`输出对应`beta`值（300/200/125），双击功能与电量显示正常，重启后设置保留 |
-| 侧边指纹录入与解锁 | 在设置中录入指纹并锁屏解锁，测试未录入的手指与连续5次失败后的锁定 | 录入与解锁正常、其他手指被拒绝；连续5次失败后锁定30秒且期间不再高频轮询认证，期满自动恢复 |
+| 手写笔设置 | 在“设置 → 已连接的设备 → 手写笔设置”中调节笔迹平滑档位与双击笔身功能，重启后复查 | 每次调节后`dmesg`输出对应`beta`值（500/300/200/125），双击功能与电量显示正常，重启后设置保留 |
+| 侧边指纹录入、解锁与应用内验证 | 在设置中录入指纹并锁屏解锁，观察横屏下侧边指纹波纹提示位置；测试应用内指纹验证（如密码管理器或BiometricPrompt加密认证与绑定指纹的Keystore密钥）；测试未录入的手指与连续5次失败后的锁定；在FocalTech机型上验证录入与出错后重试 | 横屏下提示位于左边缘电源键处；录入、锁屏解锁与应用内验证均正常、其他手指被拒绝；连续5次失败后锁定30秒且期间不再高频轮询认证，期满自动恢复；FocalTech录入不卡死 |
 | 显示颜色模式与HDR播放 | 在“设置 → 显示 → 颜色”切换“鲜艳”与“标准”，播放10-bit HDR视频 | 两种颜色模式切换生效；HDR视频高光提亮正常 |
-| 麦克风阵列、回声消除与降噪 | 外放状态下进行语音通话，切换“设置 → 提示音和振动 → 麦克风降噪”各开关测试录音与录像 | 通话对方听不到外放回声；各场景降噪开关按设置生效 |
+| 麦克风阵列、回声消除与降噪 | 外放状态下进行语音通话，切换“设置 → 提示音和振动”中“高级”分组下的“麦克风降噪”各开关测试录音与录像 | 通话对方听不到外放回声；各场景降噪开关按设置生效 |
+| 蓝牙耳机通话 | 连接蓝牙耳机进行微信语音、网络会议或游戏语音，测试通话中在耳机上切回平板扬声器与麦克风 | 双向语音清晰无断续；切回平板后改由内置扬声器与麦克风继续通话 |
 | 内核版本伪装设置 | 查看设置中的内核版本与`adb shell uname -r`，在“设置 → 系统 → 内核版本伪装”中切换开关或修改版本号并重启 | 系统与`uname -r`始终显示真实版本，普通应用读到设定版本；关闭后普通应用读到真实版本 |
-| GPU驱动兼容设置 | 安装只带Vulkan着色器的虚幻引擎游戏（如《无限暖暖》），先直接启动一次；再在“设置 → 系统 → GPU驱动兼容”中为它开启，结束游戏后重新启动；随后用浏览器打开WebGL 1页面 | 开启前启动时报global shader缺失并退出，开启后进入登录界面；`adb shell settings get global gaokun3_angle_gl_version_pkgs`含该包名，logcat中有`GraphicsEnvironment: ANGLE_GL_VERSION set for <包名>`；未开启的浏览器中WebGL 1正常 |
-| 平行视界设置 | 安装知乎与淘宝，在“设置 → 应用 → 平行视界（实验性）”中查看列表并为两者开启；横屏打开知乎首页的一条回答、淘宝首页的一件商品；再关闭知乎的开关并重新打开知乎 | 列表只含带分栏规则的应用，不含酷安；开启后无需重启系统，知乎回答在右侧打开，淘宝在右侧显示默认页面、商品在右侧打开；`adb shell dumpsys platform_compat`中`OVERRIDE_ENABLE_PARALLEL_VIEW`与`FORCE_RESIZE_APP`含该包名；logcat中有`ParallelView: <包名>: mode …`；关闭后知乎恢复居中显示 |
+| GPU驱动兼容设置 | 安装只带Vulkan着色器的虚幻引擎游戏（如《无限暖暖》），先直接启动一次；再在“设置 → 系统 → GPU驱动兼容”中为它开启，结束游戏后重新启动；随后用浏览器打开WebGL 1页面 | 开启前启动时报global shader缺失并退出，开启后进入登录界面且进入大世界3D画面正常；`adb shell settings get global gaokun3_angle_gl_version_pkgs`含该包名，logcat中有`GraphicsEnvironment: ANGLE_GL_VERSION set for <包名>`；未开启的浏览器中WebGL 1正常 |
+| 平行视界设置 | 安装知乎与淘宝，在“设置 → 应用 → 平行视界（实验性）”中查看列表并为两者开启；横屏打开知乎首页的一条回答、淘宝首页的一件商品并拖动分隔条；再关闭知乎的开关并重新打开知乎 | 列表只含带分栏规则的应用，不含酷安；开启后无需重启系统，知乎回答在右侧打开，淘宝在右侧显示默认页面、商品在右侧打开，拖动分隔条时显示两侧页面截图；`adb shell dumpsys platform_compat`中`OVERRIDE_ENABLE_PARALLEL_VIEW`与`FORCE_RESIZE_APP`含该包名；logcat中有`ParallelView: <包名>: mode …`；关闭后知乎恢复居中显示 |
+| 性能模式与锁屏充电信息 | 在“设置 → 电池”切换“性能模式”开关并重启复查；连接PD充电器观察锁屏充电信息 | 切换时`persist.sys.gaokun3.perf_mode`与`sys-therm1`–`3`降频点同步切换且重启保留；锁屏显示电流、功率、电压、温度与“正在快速充电” |
+| 手电筒亮度档位 | 从快捷设置展开手电筒磁贴，拖动亮度滑块至多档观察亮度变化 | 手电筒亮度随20档滑块平滑变化，关闭后正常熄灭 |
+| 微信LiteApp、《原神》与ANGLE着色器 | 在微信中打开公众号文章与游戏中心页面后返回；在《原神》中观察水面与灌木遮挡；打开依赖未初始化着色器变量的应用（如小米天气） | 微信页面正常显示、返回无卡死或ANR；《原神》水面不再时有时无且灌木遮挡正常；小米天气背景渲染正常 |
+| 硬件编码并发、HEVC Main 10与息屏编码 | 开启系统录屏（分别测试H.264与HEVC编码），同步进行相机录像验证多路并发编码；在后台导出或压制视频时熄屏等待完成后查看成品；验证10-bit/HDR10 HEVC编码输出 | 系统录屏走硬件编码且画面色彩无错位；最多3路并发编码正常完成；熄屏继续编码不挂起、无缺帧或提前截断；HEVC Main 10/HDR10码流可正常解码回放 |
+| S5K3L6后摄与相位对焦（对应机型） | 在配备S5K3L6后摄的机器上打开Aperture切换照片与录像，对远近物体点按对焦并查看成片 | 自动探测并启用S5K3L6，取景与录像正常，全尺寸模式下相位对焦能准确合焦 |
 
 ## 4. 长稳与性能/功耗测量
 
@@ -131,7 +145,7 @@ echo $?        # 0 = 无FAIL；1 = 有FAIL；2 = adb不通或中途掉线（不�
 | --- | --- | --- |
 | 内核可复现性核对 | 比对设备`/proc/config.gz`与仓库配方生成的`.config`；比对内核镜像字符串差集与DTB sha256 | `.config`无差异，DTB sha256一致 |
 | 文档与注释同步检查 | 检查`README*.md`、`docs/INSTALL*.md`、`docs/known-limitations*.md`、`docs/TODO.md`及`device/huawei/gaokun3/`中的配置注释 | 状态描述与本版实测结果一致 |
-| 构建时间戳一致性 | 运行`release.sh --no-build`核对`system`、`system_ext`、`product`、`vendor`、`odm`各分区`build.prop`的`date.utc` | 各分区时间戳与验收时的时间戳完全一致 |
+| 构建时间戳一致性 | 运行`release.sh --no-build`核对`system`、`system_ext`、`product`、`vendor`、`vendor_dlkm`、`odm`各分区`build.prop`的`date.utc` | 各分区时间戳与验收时的时间戳完全一致 |
 | 发布产物与校验和核对 | 核对GitHub Release与R2上所有附件的服务端字节数及`install-artifacts.sha256`、`kernel-source.txt`、`kernel-config.txt`、`kernel-base-patches.tar.gz` | 服务端文件字节数与本地完全一致 |
 | 安装器版本号 | 在为ROM打发布标签之前，运行`git diff --stat <上一个Live安装器标签> HEAD -- installer/live installer/common installer/backend installer/tools`，查看自上次发布Live安装器以来的改动。版本号的改动必须在ROM标签所在的提交之前合入：Live安装器的标签打在同一个提交上，工作流会核对其中`pubspec.yaml`的版本 | 有影响Live安装器的改动时，`installer/live/pubspec.yaml`与`installer/live/lib/version.dart`的版本号已更新；只改了注释或只涉及Windows安装器时保持不变 |
 | 随本版发布Live安装器 | ROM发布后，在本版ROM标签所在的提交上推送`live-installer-v<安装器版本>-for-<ROM标签>`标签（如`live-installer-v0.2.0-for-v1.0.0-rc.5`）。工作流（`.github/workflows/installer-live.yml`）按标签中的ROM标签取`boot.img`与系统文件，构建后生成草稿Release，填写发布说明后发布，不设为最新版本 | Release中有`gaokun3-live-<安装器版本>-android-<ROM标签>.iso`、`gaokun3-live-<安装器版本>-for-<ROM标签>.iso`与`SHA256SUMS`；`release.txt`中的`GK3_ROM_TAG`为本版，`GK3_BOOTIMG_SHA256`与清单中`boot.img`的sha256相同 |

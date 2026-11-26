@@ -20,7 +20,7 @@ Android App / SystemUI / SurfaceFlinger (renderengine = skiagl / skiavkthreaded)
                        │
         ┌──────────────┴──────────────┐
         ▼                             ▼
- /dev/dri/renderD128           CrosGralloc4 (minigbm_msm)
+ /dev/dri/renderD128           IMapper5 / Gralloc (minigbm_msm)
  (msm_drm GEM / SUBMIT)        (DMA-BUF + QCOM_COMPRESSED / LINEAR)
         │                             │
         └──────────────┬──────────────┘
@@ -34,10 +34,10 @@ Android App / SystemUI / SurfaceFlinger (renderengine = skiagl / skiavkthreaded)
 |---|---|---|
 | GPU硬件ID | `0x06090000`（Adreno 690） | 8档OPP（270 MHz–690 MHz），由GMU（`qcom/a660_gmu.bin`）与SQE（`qcom/a660_sqe.fw`）驱动 |
 | Zap Shader | `qcom/sc8280xp/HUAWEI/gaokun3/qcdxkmsuc8280.mbn` | 离开安全模式所需的签名微码，在设备树`gpu@3d00000`节点的`zap-shader`子节声明 |
-| Vulkan HAL | `/vendor/lib64/hw/vulkan.freedreno.so` | `ro.hardware.vulkan=freedreno`，声明`android.hardware.vulkan.version=4198400`（1.3） |
+| Vulkan HAL | `/vendor/lib64/hw/vulkan.freedreno.so` | `ro.hardware.vulkan=freedreno`，声明`android.hardware.vulkan.version=4206592`（`0x403000`，1.3） |
 | OpenGL ES实现 | ANGLE（`ro.hardware.egl=angle`） | 将GLES 2.0/3.x调用翻译为Turnip Vulkan调用，无需编译Gallium `libgallium_dri.so` |
-| Gralloc HAL | `minigbm_msm` | 分配`MSM_SUBMIT`与DPU直通兼容的DMA-BUF，支持`DRM_FORMAT_MOD_QCOM_COMPRESSED`（UBWC）与线性布局 |
-| 节点权限与SELinux | `/dev/dri/renderD128`、`/dev/dri/card*` `0666` | `vulkan.freedreno.so`必须标记为`same_process_hal_file`，以便普通应用进程在沙箱内直接打开渲染节点并加载同进程HAL |
+| Gralloc HAL | `minigbm_msm`（`IMapper5`） | 分配`MSM_SUBMIT`与DPU兼容的DMA-BUF，支持`DRM_FORMAT_MOD_QCOM_COMPRESSED`（UBWC）与线性布局（当前`device.mk`仍保留`vendor.minigbm.debug=nocompression`以强制分配线性缓冲） |
+| 节点权限与SELinux | `/dev/dri/renderD*` `0666`、`/dev/dri/card*` `0660`（`system:graphics`） | `vulkan.freedreno.so`必须标记为`same_process_hal_file`，以便普通应用进程在沙箱内直接打开渲染节点并加载同进程HAL |
 
 ## 二、Android Native Buffer（ANB）延迟绑定修复（`patches/mesa/0001`）
 
@@ -66,7 +66,7 @@ Android App / SystemUI / SurfaceFlinger (renderengine = skiagl / skiavkthreaded)
 
 在`tu_BindImageMemory2`中识别`pNext`链上的`VK_STRUCTURE_TYPE_NATIVE_BUFFER_ANDROID`：
 
-1. 调用`vk_android_get_anb_layout()`向Gralloc4查询该buffer的实际`drm_format_modifier`、plane偏移与行跨距（stride）。
+1. 调用`vk_android_get_anb_layout()`向Gralloc（`IMapper5`）查询该buffer的实际`drm_format_modifier`、plane偏移与行跨距（stride）。
 2. 将查询到的modifier（如`DRM_FORMAT_MOD_QCOM_COMPRESSED`或`DRM_FORMAT_MOD_LINEAR`）写入`image->vk.drm_format_mod`，调用`tu_image_update_layout()`重新计算Turnip内部布局（避免`tu_CreateImage`阶段假定的线性布局与Gralloc实际分配的UBWC布局不一致导致渲染错位或越界写）。
 3. 调用`vk_android_import_anb()`将DMA-BUF fd导入为`VkDeviceMemory`，再通过`image->ops->bind_memory()`绑定`image->bo`并映射正确的GPU IOVA。
 
@@ -95,9 +95,9 @@ SC8280XP的GPU SMMU（`3da0000.iommu`，`qcom,sc8280xp-smmu-500`）在`msm_iommu
 
 ## 四、10位视频（P010）零拷贝合成与构建脚本
 
-- **P010零拷贝显示合成**（`patches/mesa/0002`）：
+- **P010零拷贝采样与合成**（`patches/android/minigbm/0001`、`patches/mesa/0002`）：
   - Iris硬件解码器在解码10-bit HEVC/VP9视频时输出`HAL_PIXEL_FORMAT_YCbCr_P010`。
-  - `minigbm_msm`为`DRM_FORMAT_P010`开放`BO_USE_SCANOUT`用法，DPU驱动在`msm_dpu`层直接接收P010平面，避免SurfaceFlinger回退到GPU Shader做每帧格式转换，显著降低4K 10-bit视频播放时的GPU负载与功耗。
+  - `minigbm_msm`为`DRM_FORMAT_P010`开放`BO_USE_SCANOUT`用法，使SurfaceView（带`HW_COMPOSER`用途）可正常分配P010缓冲；配合`patches/mesa/0002`，Turnip可直接以硬件采样P010平面而不引发RenderEngine中止（在需要90°旋转的内屏及HDR场景下仍由GPU RenderEngine合成旋转，无旋转外接屏可直通DPU）。
 - **Mesa构建工具链**：Android 17使用上游生成器`meson2hermetic`（`meson convert`）生成`Android.bp`，具体适配步骤见[mesa-a17.md](mesa-a17.md)。
 
 
@@ -125,7 +125,7 @@ SC8280XP的GPU SMMU（`3da0000.iommu`，`qcom,sc8280xp-smmu-500`）在`msm_iommu
 - GPU每次运行时挂起都会把4个抢占记录清零（`kernel/drm/0015`，共约20 MB），会占用一些CPU时间。
 - 抢占超时或抢占出错时，GPU会被复位，正在执行的应用可能因此丢失GPU上下文。主线的恢复流程原本在当前ring空闲时（找不到要怪罪的提交）直接跳过，抢占状态停在FAULTED，所有ring都不再执行；`kernel/drm/0017`让这种情况也照常复位并重放，`dmesg`里会多一行`no pending submit on the active ring, resetting anyway`。
 - 如果抢占卡住期间被切走的ring又收到新提交，hangcheck大约1秒后会照常复位GPU，但会把那次提交当作元凶：它其实从没执行过（卡住期间内核不写WPTR）。用VM_BIND的Vulkan应用（Turnip）会因此收到设备丢失。抢占若在某种情况下反复失败，每次都是约10秒卡顿加一次复位，没有计数，也不会自动关闭抢占。
-- 抢占跨整机挂起的情况尚未经实测；GPU运行时挂起（同一个`pm_suspend`回调）之后工作正常。
+- 抢占跨整机挂起的情况尚未实测；GPU运行时挂起（同一个`pm_suspend`回调）之后工作正常。
 - 用OpenGL ES的游戏与SurfaceFlinger同在ring 0，不受益。
 - 内核和Turnip都不检查调用者的权限，任何应用都能申请REALTIME，与SurfaceFlinger同在ring 0。
 

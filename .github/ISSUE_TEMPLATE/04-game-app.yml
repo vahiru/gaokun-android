@@ -23,7 +23,7 @@ body:
       options:
         - Runs well / 运行正常
         - Display problems / 显示异常
-        - Runs too slowly / 运行太卡
+        - Runs too slowly / 运行缓慢
         - A feature does not work (login, camera, microphone, payment...) / 某项功能不可用（登录、相机、麦克风、支付等）
         - Crashes while in use / 使用中崩溃
         - Crashes at launch / 启动时崩溃
@@ -37,7 +37,7 @@ body:
     attributes:
       label: System version / 系统版本
       description: The release you installed, or the output of `adb shell getprop ro.build.date.utc`. / 安装的版本，或`adb shell getprop ro.build.date.utc`的输出。
-      placeholder: "v1.0.0-rc.3"
+      placeholder: "v1.0.0-rc.5"
     validations:
       required: true
 
@@ -63,4 +63,4 @@ body:
       label: Logs / 日志
       description: |
         For a crash, the newest file in `/data/tombstones/` and `adb logcat -b all -d` taken right after the crash help the most. See the [FAQ](https://github.com/vahiru/gaokun-android/blob/main/docs/FAQ.md) for how to collect them.
-        崩溃时，`/data/tombstones/`里最新的文件和崩溃后立即抓取的`adb logcat -b all -d`最有帮助，抓取方法见[常见问题](https://github.com/vahiru/gaokun-android/blob/main/docs/FAQ.zh-CN.md)。
+        崩溃时，`/data/tombstones/`中最新的文件与崩溃后立即获取的`adb logcat -b all -d`最有帮助，获取方法见[常见问题](https://github.com/vahiru/gaokun-android/blob/main/docs/FAQ.zh-CN.md)。

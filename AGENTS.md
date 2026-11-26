@@ -6,8 +6,8 @@ This repository brings Android (crDroid) to the **Huawei MateBook E Go (`gaokun3
 
 This repository contains the Android device tree, custom HALs and system services, patch queues for upstream trees, and standalone UEFI boot and installer tools:
 
-- [`device/huawei/gaokun3/`](device/huawei/gaokun3/): Android device configuration, custom AIDL HALs (camera, sensors, light, USB, boot control, audio hooks/mic array/NPU denoise/speaker effects), stylus daemon, Parts settings app, and SELinux policies.
-- [`patches/`](patches/README.md): Patch queues organized by target tree and subsystem (`kernel/`, `android/`, `mesa/`, `libcamera/`, `resukisu/`), applied by [`scripts/kernel-apply-patches.sh`](scripts/kernel-apply-patches.sh), [`scripts/crdroid-tree-fixes.py`](scripts/crdroid-tree-fixes.py), [`scripts/mesa-a17/regen.sh`](scripts/mesa-a17/regen.sh), [`scripts/camera/setup-libcamera-tree.sh`](scripts/camera/setup-libcamera-tree.sh), and [`scripts/kernel-setup-resukisu.sh`](scripts/kernel-setup-resukisu.sh).
+- [`device/huawei/gaokun3/`](device/huawei/gaokun3/): Android device configuration, custom AIDL HALs (camera, sensors, light, thermal, health, fingerprint, USB, boot control, audio hooks/mic array/NPU denoise/speaker effects), `lineage-libperfmgr` power configuration, stylus daemon, Parts settings app, and SELinux policies.
+- [`patches/`](patches/README.md): Patch queues organized by target tree and subsystem (`kernel/`, `android/`, `mesa/`, `libcamera/`, `resukisu/`, `e2fsprogs/`), applied by [`scripts/kernel-apply-patches.sh`](scripts/kernel-apply-patches.sh), [`scripts/crdroid-tree-fixes.py`](scripts/crdroid-tree-fixes.py), [`scripts/mesa-a17/regen.sh`](scripts/mesa-a17/regen.sh), [`scripts/camera/setup-libcamera-tree.sh`](scripts/camera/setup-libcamera-tree.sh), [`scripts/kernel-setup-resukisu.sh`](scripts/kernel-setup-resukisu.sh), and [`installer/backend/mke2fs/build.sh`](installer/backend/mke2fs/build.sh).
 - [`scripts/crdroid-tree-fixes.py`](scripts/crdroid-tree-fixes.py): Applies the `patches/android/<project>/` queues to other AOSP/crDroid repositories. Put any AOSP change outside `device/huawei/gaokun3/` into such a queue as a patch; a new project also needs an entry in the script's `PROJECTS` table.
 - [`tools/`](tools/) and [`installer/`](installer/): Self-contained subprojects — [`tools/gk3boot/`](tools/gk3boot/README.md) (UEFI boot manager `gk3boot.efi` and `fastboot` executor), [`installer/backend/`](installer/backend/) (C installer backend: `gk3l` for the live installer, `gk3w` for Windows), [`installer/live/`](installer/live/README.md) (Flutter live installer, image built via [`installer/tools/`](installer/tools/README.md)), and [`installer/windows/`](installer/windows/README.md) (Flutter Windows installer).
 - `refs/` (git-ignored, fetched via `bash scripts/clone-refs.sh`): Read-only reference trees (`linux-gaokun`, `gaokun-buildbot`, `aospm-*`, `lineage-sepolicy`).
@@ -21,7 +21,7 @@ Modifications to upstream source trees (Linux kernel, AOSP/crDroid repositories,
 - **Hierarchy by target tree and subsystem**:
   - [`patches/kernel/<subsystem>/`](patches/README.md) (`core`, `iommu`, `pcie-pm`, `wifi`, `ec-usb`, `drm`, `iris`, `camera`, `audio`, `input`, `dts`, `fingerprint`): Kernel patches (`KPATCHES`).
   - [`patches/android/<project>/`](patches/README.md) (one directory per AOSP/crDroid project, mapped to its path by `PROJECTS` in `scripts/crdroid-tree-fixes.py`): Patches applied in number order onto the project's manifest revision.
-  - [`patches/mesa/`](patches/mesa/), [`patches/libcamera/`](patches/libcamera/), [`patches/resukisu/`](patches/resukisu/): Patches for their respective upstream trees.
+  - [`patches/mesa/`](patches/mesa/), [`patches/libcamera/`](patches/libcamera/), [`patches/resukisu/`](patches/resukisu/), [`patches/e2fsprogs/`](patches/e2fsprogs/): Patches for their respective upstream trees.
 - **Local `0001..NNNN` numbering per leaf directory**: Each leaf directory numbers its patches independently from `0001` (`NNNN-<topic>.patch`). Do not use a global cross-directory number sequence.
 - **Subsystem orthogonality**: Different `patches/kernel/<subsystem>/` directories must modify disjoint sets of kernel source files. Patches that touch the same file or depend on each other's context must live in the same subsystem directory in application order.
 
@@ -51,9 +51,9 @@ Modifications to upstream source trees (Linux kernel, AOSP/crDroid repositories,
 - **Respect module boundaries**: Place fixes in the driver or module where the problem originates rather than layering workarounds elsewhere. Keep code, scripts, and configs host-agnostic (never hardcode personal file paths, hostnames, network addresses, or credentials).
 - **Hardware safety**: Writing `boot` partitions, altering ESP boot entries, writing EC charging thresholds, or issuing untested TrustZone SMCs requires explicit user confirmation beforehand.
 - **Local verification commands**:
-  - Boot manager & fastboot: `make -C tools/gk3boot/core test`; container tests: `bash scripts/gk3boot/test-{boot,probe,fastbootd,executor}.sh`
+  - Boot manager & fastboot: `make -C tools/gk3boot test`; container tests: `bash scripts/gk3boot/test-{boot,probe,fastbootd,executor}.sh`
   - Installer backend: `make -C installer/backend test`; container tests: `bash installer/tools/test/test-in-container.sh installer/backend/test/linux/test-{probe,apply,jobs,live}.sh`
-  - Installer frontend: `flutter test` inside `installer/live/`
+  - Installer frontend: `flutter test` inside `installer/live/` and `installer/windows/`
   - Kernel patches & config: `bash scripts/kernel-apply-patches.sh <kernel-tree> --check`, `bash scripts/kernel-config-android.sh <kout>`
   - Documentation links: `python3 -I scripts/check-doc-links.py`
   - On-device release acceptance: `bash scripts/accept.sh` (pass `SER=<serial>` if multiple devices are attached; see [`docs/dev/release-checklist.md`](docs/dev/release-checklist.md))

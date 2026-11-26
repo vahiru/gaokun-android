@@ -6,7 +6,7 @@ body:
     attributes:
       value: |
         Sorry you ran into this. Please first check the "If it does not boot" section of the [install guide](https://github.com/vahiru/gaokun-android/blob/main/docs/INSTALL.md); many common cases are covered there.
-        遇到这种情况很抱歉。请先看一下[安装说明](https://github.com/vahiru/gaokun-android/blob/main/docs/INSTALL.zh-CN.md)里"无法开机时"一节，常见的情况那里都有说明。
+        遇到这种情况很抱歉。请先查看[安装说明](https://github.com/vahiru/gaokun-android/blob/main/docs/INSTALL.zh-CN.md)中的“无法开机时”一节，常见情况均有说明。
 
         This machine has no serial console, so most clues come from the installer's logs.
         这台机器没有串口，线索主要来自安装器的日志。
@@ -46,7 +46,7 @@ body:
       options:
         - The installer does not start / 安装器无法启动
         - The installer reported an error / 安装器报错
-        - No Android entry in the boot menu after installing / 安装后开机菜单里没有Android
+        - No Android entry in the boot menu after installing / 安装后开机菜单中未显示Android
         - Android does not reach the desktop / Android无法进入桌面
         - It broke after a system update / 系统更新之后出了问题
         - Windows no longer starts, or asks for the BitLocker recovery key / Windows无法启动，或要求输入BitLocker恢复密钥
@@ -71,7 +71,7 @@ body:
     attributes:
       label: Release and installer version / 系统与安装器版本
       description: The installer version is shown at the bottom of its side bar. / 安装器版本显示在它的侧边栏底部。
-      placeholder: "v1.0.0-rc.4, Windows installer 0.1.0"
+      placeholder: "v1.0.0-rc.5, Windows installer 0.2.1"
     validations:
       required: true
 

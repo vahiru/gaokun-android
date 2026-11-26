@@ -6,7 +6,7 @@
 Histen引擎（内置多段EQ与低音增强） ──► LR4高通滤波 ──► Makeup补偿增益 ──► 限幅器 ──► 软削波
 ```
 
-- **开关与分流机制**：由「设置 → 提示音和振动 → 扬声器音效」的对话框控制，选项为「关闭」「低音增强」「华为Histen」，默认关闭（总开关`persist.sys.gaokun3.histen`，引擎`persist.sys.gaokun3.speakerfx.engine`）。选择「低音增强」（`bass`）时，音频由音频HAL内的[`speakerfx/`](../speakerfx/README.md)处理，本effect保持逐比特直通；仅当用户选择「华为Histen」（`histen`）时，才由本effect处理内置扬声器上的媒体流（耳机、蓝牙与USB音频一律直通）。
+- **开关与分流机制**：由「设置 → 提示音和振动」中「高级」分组下的「扬声器音效」对话框控制，选项为「关闭」「低音增强」「华为Histen」，默认关闭（总开关`persist.sys.gaokun3.histen`，引擎`persist.sys.gaokun3.speakerfx.engine`）。选择「低音增强」（`bass`）时，音频由音频HAL内的[`speakerfx/`](../speakerfx/README.md)处理，本effect保持逐比特直通；仅当用户选择「华为Histen」（`histen`）时，才由本effect处理内置扬声器上的媒体流（耳机、蓝牙与USB音频一律直通）。
 - **专有二进制依赖**：Histen算法引擎（`libhw_histen_processing.so`）不纳入版本控制，需放置于[`prebuilt/`](prebuilt/README.md)。缺失该文件时不影响编译，运行时自动退化为仅执行自研高通与限幅链路。
 
 ## 一、目录结构
@@ -45,12 +45,12 @@ effects HAL服务（APEX com.android.hardware.audio，SELinux域 hal_audio_defau
 
 ## 三、生效条件与低延迟音轨限制
 
-`music`流上的`gaokun_histeneffect`实例仅在以下条件**同时满足**时执行信号处理，否则逐比特直通：
+`music`流上的`gaokun_histen`实例仅在以下条件**同时满足**时执行信号处理，否则逐比特直通：
 
 1. **总开关开启**：`vendor.gaokun3.histen.on=1`；
 2. **处理方式为Histen**：`vendor.gaokun3.speakerfx.engine=histen`；
 3. **当前流已完成引擎装载（armed）**：引擎`dlopen`不在实时音频线程内执行，仅在开流或`START`命令时装载；
-4. **输出设备为内置扬声器**：框架下发的设备类型为`OUT_SPEAKER`且不含`bt-a2dp`连接标识；
+4. **输出设备为内置扬声器**：框架下发的设备类型为`OUT_SPEAKER`或`OUT_SPEAKER_SAFE`且连接标识为空（`d.connection.empty()`）；
 5. **双声道立体声格式**：Histen引擎仅在48 kHz采样率下接入（其他采样率仅运行自研扬声器保护链）。
 
 **低延迟（`FAST`）音轨限制**：主输出开启`FastMixer`后（`patches/android/hardware-interfaces/0008`），AudioFlinger拒绝在含`FAST`音轨的会话上挂载非硬件加速effect。使用低延迟通路的游戏音轨不会经过本模块；如需覆盖游戏音轨，请使用默认的音频HAL层「低音增强」模式（[`../speakerfx/README.md`](../speakerfx/README.md)）。

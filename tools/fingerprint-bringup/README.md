@@ -1,6 +1,6 @@
-# 指纹TA加载冒烟测试
+# 指纹Bringup与TA测试工具
 
-本目录包含用于验证gaokun3指纹（FocalTech `FTE7001`）可信应用加载路径的内核测试模块：通过高通QSEECOM `APP_START` SMC将华为签名的指纹TA（`fingerpr.mbn`，单一secelf，TA名`fingerprint`）加载进QSEE并获取`app_id`。架构与设计说明见[`docs/dev/fingerprint-driver-design.md`](../../docs/dev/fingerprint-driver-design.md)与[`docs/dev/fingerprint/`](../../docs/dev/fingerprint/README.md)。
+本目录包含用于验证gaokun3侧边指纹（FocalTech `FTE7001`与Goodix `GDIX5125`）QSEECOM可信应用（`fingerpr.mbn`，单一secelf，TA名`fingerprint`）加载、协议探测、主机侧模板存储参考实现（[`host-store/`](host-store/README.md)）及故障注入测试的内核模块与工具集。完整驱动与HAL架构见[`docs/dev/fingerprint-driver-design.md`](../../docs/dev/fingerprint-driver-design.md)与[`device/huawei/gaokun3/fingerprint/README.md`](../../device/huawei/gaokun3/fingerprint/README.md)。
 
 > **说明**：测试使用的是厂商QSEECOM SMC加载路径与厂商签名的TA镜像，TrustZone仍逐段验签，性质与GPU/DSP/Wi-Fi固件加载相同。
 
@@ -19,7 +19,7 @@
 ## 运行步骤
 
 ```sh
-# 1) 启动带0050补丁的测试内核（写boot分区或单次启动前需用户确认）
+# 1) 启动带patches/kernel/fingerprint/0001补丁的测试内核（写boot分区或单次启动前需用户确认）
 # 2) 推送模块与TA镜像
 adb push qcom_qseecom_fptest.ko /data/local/tmp/
 # fingerpr.mbn放在/data/local/tmp/（取自uup-drivers发布包，见device/huawei/gaokun3/firmware/README.md）
@@ -31,7 +31,7 @@ adb shell su -c 'dmesg | grep fptest | tail'
 
 预期`dmesg`输出`LOAD 成功！app_id=N`。
 
-## 构建（外部模块，指向带0050补丁的内核树）
+## 构建（外部模块，指向带`patches/kernel/fingerprint/0001`补丁的内核树）
 
 ```sh
 make -C <kernel-tree> M=$PWD ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- modules

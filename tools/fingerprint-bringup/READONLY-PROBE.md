@@ -10,7 +10,7 @@
 
 ## 使用前提
 
-先构建并核验带 patch 0050 的匹配实验内核及模块。保留正式内核，使用独立启动项，
+先构建并核验带 `patches/kernel/fingerprint/0001` 的匹配实验内核及模块。保留正式内核，使用独立启动项，
 确认模块实际未引用裸 SMC。编译时可通过命令行覆盖现有 Makefile 的 `obj-m`，
 只构建新模块；不要为方便而强制跳过版本或符号检查：
 
@@ -32,10 +32,10 @@ insmod 只建立 debugfs。写入精确的 `probe` 或 `probe\n` 才执行，单
 
 路径是 LOAD → LOOKUP → SEND → SHUTDOWN。LOOKUP 成功必须与 LOAD 的 app_id
 一致；仅 `-ENOENT` 作为已知名字缺失允许继续，SEND 始终使用 LOAD 返回的 id。
-依据是 `docs/stage4-findings.md` #125 的既有真机记录：同一签名 TA 的
+依据是早期真机记录：同一签名 TA 的
 LOAD 返回5、LOOKUP `fingerprint` 返回 `-ENOENT`、SHUTDOWN(5) 成功。
 真正注册名仍未知，不能宣称 LOOKUP 已修好；其他错误和 id 不一致一律停止。
-根据 `rev/out/sub_ADFC.c`，`0x8031` 写响应偏移 12 的四字节状态，完成时写
+根据本地逆向导出的 `sub_ADFC`（`rev/out/`，`.gitignore`忽略未入库），`0x8031` 写响应偏移 12 的四字节状态，完成时写
 请求 word0=`0x5aa5`、word2=0。探针检查 ACK，记录状态原值；仅响应全零不算通过。
 状态非零也不能被解释为传感器已初始化。M2 通过还需要人工核对日志、退出码、
 实际 ACK 和卸载成功，不能仅搜索 `transport returned`。
@@ -51,7 +51,7 @@ LOAD 前失败可释放全部资源。开始 LOAD 前持有模块引用；此后
 缓冲和模块引用、禁止重复触发，要求重启恢复。
 只有明确 SHUTDOWN 成功后才释放缓冲和引用。不要强制卸载模块。
 
-patch 0050 的 listener 轮数上限只能限制每次 SMC **已经返回**后的循环，不能
+`patches/kernel/fingerprint/0001` 的 listener 轮数上限只能限制每次 SMC **已经返回**后的循环，不能
 中断不返回的 SMC；因此不能承诺“不会硬挂”。首条命令还可能触发 TA 初始化时
 读取模板信息，无 listener 的失败应答是否能完成仍待实机验证。现场须可恢复电源。
 本候选没有注册安全存储 listener，也没有放宽 SELinux。

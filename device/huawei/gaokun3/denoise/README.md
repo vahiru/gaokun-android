@@ -35,5 +35,5 @@
 
 ## 三、验证现状
 
-- **实机音频链路验证**：相同源码使用NDK编译并通过KernelSU模块部署后，在SELinux Enforcing模式下运行于独立域且无AVC拒绝记录；实机NPU输出与离线参考实现逐位一致，音频HAL每85 ms音频块的IPC往返耗时约14 ms。
+- **实机音频链路验证**：已自`v1.0.0-rc.4`起随正式ROM构建并部署，在SELinux Enforcing模式下运行于独立域且无AVC拒绝记录；实机NPU输出与离线参考实现逐位一致，音频HAL每85 ms音频块的IPC往返耗时约14 ms。
 - **SELinux编译期校验**：策略通过`lineage_gaokun3-cp2a-userdebug`完整编译检查（含`neverallow`断言、平台公开类型约束、`file_contexts`与`sepolicy_tests`）。

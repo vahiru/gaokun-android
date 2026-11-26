@@ -42,7 +42,7 @@ shasum -a 256 device/huawei/gaokun3/prebuilt-gk3boot/fastboot.img
 |---|---|---|
 | `off` / 未设置 | 清理全部`gk3boot-*`与`gk3prev-*`条目（含`gk3boot-tools.conf`）及`EFI/gk3boot/<ver>/`目录（保留`log/`） | 移除启动条目，目录留待新槽位HAL回收 |
 | `observe` | 部署本槽位版本，设`gk3.observe=1`（仅计算决策、不修改`misc`）；不生成`gk3boot-tools.conf` | 若ESP尚无入口则直接部署`+3`条目；若已有旧版则仅铺设目录与`.staged`标记 |
-| `action` | 部署本槽位版本，设`gk3.observe=0`（扣减`tries_remaining`、自动回滚、写入GK3记录）；存在`fastboot.img`时一并生成`gk3boot-tools.conf` | 同上，并在首次部署或版本一致时同步生成`gk3boot-tools.conf` |
+| `action` | 部署本槽位版本，设`gk3.observe=0 gk3.dispatch=1`（扣减`tries_remaining`、自动回滚、启用BCB分派、写入GK3记录）；存在`fastboot.img`时一并生成`gk3boot-tools.conf` | 同上，并在首次部署或版本一致时同步生成`gk3boot-tools.conf` |
 
 ESP上常态最多保留两个版本目录（当前生效版本与`gk3prev`上一版本）；OTA写入新槽位后、新槽位首次开机完成前最多暂存三个版本（含`.staged`），待HAL激活新版本时自动回收最旧目录。
 
@@ -54,7 +54,7 @@ title      Android                          （observe模式为"Android (gk3boot
 version    gk3boot-<ver>
 sort-key   0gk3                             （上一版为0gk3prev，均排在直连条目zandroid<x>之前）
 efi        /EFI/gk3boot/<ver>/gk3boot.efi
-options    gk3.observe=<0|1> gk3.hint=<x>
+options    gk3.observe=0 gk3.hint=<x> gk3.dispatch=1  （observe模式为gk3.observe=1 gk3.hint=<x>）
 
 # gk3boot-tools.conf（菜单手动进入fastboot执行端）
 title      Android fastboot / boot menu
