@@ -1,0 +1,56 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] ir3: Write zero for undefined phi sources
+
+emit_undef() turns every undefined value into an immediate 0, except
+when it is a phi source: read_phi_src() then gives the phi no source on
+that edge, and the phi keeps whatever is in its register. Some apps read
+uninitialized shader variables and render as intended only if they read
+as zero. Xiaomi Weather's sky shader accumulates into an uninitialized
+vec3 in a loop, so the undefined initial value reaches the loop phi, and
+on Turnip the whole sky turns black.
+
+Write an immediate 0 at the end of the predecessor instead, with the
+phi's type and register file, so that phi sources behave like the other
+uses of an undefined value. NIR is not changed; only phis with an
+undefined source gain a move in that predecessor. Undefined values that
+nir_opt_undef has already replaced (with NaN for float-only uses, or by
+dropping an undefined bcsel operand) are not affected.
+
+In Settings, the launcher, Etar and Edge (WebGL included) every shader
+compiles to the same binary as before. In the weather app one fragment
+shader changes, from 82 to 85 instructions, and the sky renders
+correctly; with fp16 disabled, a cloud shader that returns before
+writing its output no longer shows garbage either.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ src/freedreno/ir3/ir3_compiler_nir.c | 14 ++++++++++++--
+ 1 file changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/src/freedreno/ir3/ir3_compiler_nir.c b/src/freedreno/ir3/ir3_compiler_nir.c
+index 3d707df..3f75bca 100644
+--- a/src/freedreno/ir3/ir3_compiler_nir.c
++++ b/src/freedreno/ir3/ir3_compiler_nir.c
+@@ -4356,8 +4356,18 @@ read_phi_src(struct ir3_context *ctx, struct ir3_block *blk,
+    nir_foreach_phi_src (nsrc, nphi) {
+       if (blk->nblock == nsrc->pred) {
+          if (nir_src_is_undef(nsrc->src)) {
+-            /* Create an ir3 undef */
+-            return NULL;
++            /* Write 0 at the end of the predecessor, like emit_undef() does
++             * for every other undefined value. A phi source left undefined
++             * keeps whatever is in the register on this edge, and apps that
++             * read uninitialized variables, or leave a fragment output
++             * unwritten on some path, then get stale values.
++             */
++            type_t type =
++               utype_for_size(ir3_bitsize(ctx, nphi->def.bit_size));
++            struct ir3_builder build =
++               ir3_builder_at(ir3_before_terminator(blk));
++            return create_immed_typed_shared(
++               &build, 0, type, phi->dsts[0]->flags & IR3_REG_SHARED);
+          } else {
+             /* We need to insert the move at the end of the block */
+             struct ir3_block *old_block = ctx->block;
