@@ -1,0 +1,249 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] Input: himax-spi: drop frames that fail the checksum and re-init the IC
+
+Every frame read from the event stack went through the pipeline as it
+was. An empty or corrupted frame then moves the baseline and can start
+contacts, and an all-zero frame even reads as "finger present" in the
+firmware finger flag, whose test looks for 0xff low bytes.
+
+The master frame carries a check word: the 16-bit little-endian sum of
+everything from that word (after the 5A A5 header) to the end of the 128
+status words is zero. Drop frames that fail it, and empty frames, before
+anything else looks at them: the baseline and the touches stay as they
+were and nothing is reported. Status word 6 turns non-zero after the
+firmware has restarted on its own; the vendor's Windows driver
+initialises the IC again then, and so does this driver now.
+
+A failed SPI read used to pin-reset the IC from the interrupt thread.
+That kept the touches down until frames came back and skipped the init
+sequence the probe and panel power-up paths run after a reset (flash
+reload off, sense on, RAW_OUT_SEL). Five failed reads or bad frames in
+a row, or one frame flagging a firmware restart, now release all
+touches and queue the panel re-init work. If bad frames keep coming
+right after three such re-inits, their format is taken to differ from
+the one the checks expect and the checks are switched off, so frames
+are used unchecked as before this change; failed reads still lead to a
+re-init.
+
+The panel-off callbacks now clear panel_enabled under the lock before
+they cancel the re-init work, so a re-init the interrupt thread queues
+while the panel goes off leaves the IC alone.
+
+The stats attribute gains counters for failed reads, dropped frames,
+firmware restarts and re-inits, and shows whether the checks are on.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/input/touchscreen/himax-spi-core.c | 124 ++++++++++++++++++++-
+ drivers/input/touchscreen/hx-algo.h        |   4 +
+ 2 files changed, 123 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/input/touchscreen/himax-spi-core.c b/drivers/input/touchscreen/himax-spi-core.c
+index 975c00ace0..00601deef7 100644
+--- a/drivers/input/touchscreen/himax-spi-core.c
++++ b/drivers/input/touchscreen/himax-spi-core.c
+@@ -138,6 +138,10 @@ struct himax_ts_data {
+ 	struct touchscreen_properties props;
+ 	struct drm_panel_follower panel_follower;
+ 	struct delayed_work panel_reinit_work;
++	/* frame checks, see himax_frame_valid() */
++	bool frame_checks;
++	u8 bad_frames;
++	u8 check_recoveries;
+ 	struct hx_algo *algo;
+ 	struct dentry *dbg_dir;
+ };
+@@ -743,6 +747,7 @@ static int himax_hw_reinit(struct himax_ts_data *ts, bool check_crc)
+ 	int ret;
+ 
+ 	himax_release_all_touches(ts);
++	ts->bad_frames = 0;
+ 
+ 	ret = hx83121a_chip_detect(ts);
+ 	if (ret) {
+@@ -864,12 +869,24 @@ static int himax_panel_enabled(struct drm_panel_follower *follower)
+ 	return 0;
+ }
+ 
++/*
++ * Clear panel_enabled before cancelling the re-init work, so that a re-init
++ * the interrupt thread queues while the panel goes off leaves the IC alone.
++ */
++static void himax_panel_going_off(struct himax_ts_data *ts)
++{
++	mutex_lock(&ts->op_lock);
++	ts->panel_enabled = false;
++	mutex_unlock(&ts->op_lock);
++	cancel_delayed_work_sync(&ts->panel_reinit_work);
++}
++
+ static int himax_panel_disabling(struct drm_panel_follower *follower)
+ {
+ 	struct himax_ts_data *ts = container_of(follower, struct himax_ts_data,
+ 						panel_follower);
+ 
+-	cancel_delayed_work_sync(&ts->panel_reinit_work);
++	himax_panel_going_off(ts);
+ 
+ 	himax_lock(ts);
+ 	ts->panel_enabled = false;
+@@ -885,7 +902,7 @@ static int himax_panel_unpreparing(struct drm_panel_follower *follower)
+ 	struct himax_ts_data *ts = container_of(follower, struct himax_ts_data,
+ 						panel_follower);
+ 
+-	cancel_delayed_work_sync(&ts->panel_reinit_work);
++	himax_panel_going_off(ts);
+ 
+ 	himax_lock(ts);
+ 	ts->panel_enabled = false;
+@@ -1148,6 +1165,11 @@ static ssize_t stats_show(struct device *dev, struct device_attribute *attr,
+ 	struct hx_stats *st = &ts->algo->stats;
+ 	int n = 0;
+ 
++	n += sysfs_emit_at(buf, n, "frames_read_err   %u\n", st->frames_read_err);
++	n += sysfs_emit_at(buf, n, "frames_bad        %u\n", st->frames_bad);
++	n += sysfs_emit_at(buf, n, "fw_resets         %u\n", st->fw_resets);
++	n += sysfs_emit_at(buf, n, "recoveries        %u\n", st->recoveries);
++	n += sysfs_emit_at(buf, n, "frame_checks      %u\n", ts->frame_checks);
+ 	n += sysfs_emit_at(buf, n, "frames            %u\n", st->frames);
+ 	n += sysfs_emit_at(buf, n, "frames_reported   %u\n", st->frames_reported);
+ 	n += sysfs_emit_at(buf, n, "zones             %u\n", st->zones);
+@@ -1389,6 +1411,77 @@ static int hx83121a_gaokun_read_event_stack(struct himax_ts_data *ts)
+ 	return 0;
+ }
+ 
++/*
++ * A master frame is the 5A A5 header, one 16-bit check word, the 2400 cells
++ * and 128 status words, 5060 bytes in all.  The check word makes the 16-bit
++ * little-endian sum of everything from itself to the end of the frame zero;
++ * an empty (all-zero) frame sums to zero as well and is not a frame either.
++ * Status word 6 turns non-zero once the firmware has restarted on its own;
++ * the vendor's Windows driver initialises the IC again then, and so does
++ * this one.
++ */
++#define HIMAX_FRAME_CHECK_OFFSET	2
++#define HIMAX_FRAME_GRID_OFFSET		4
++#define HIMAX_FRAME_STATUS_WORDS	128
++#define HIMAX_FRAME_SZ			(HIMAX_FRAME_GRID_OFFSET + HX_PIXELS * 2 + \
++					 HIMAX_FRAME_STATUS_WORDS * 2)
++#define HIMAX_STATUS_FW_RESET		6
++/* Failed reads or bad frames in a row before the IC is initialised again. */
++#define HIMAX_BAD_FRAME_LIMIT		5
++/* Re-inits for bad frames, with no good frame between, before the checks stop. */
++#define HIMAX_CHECK_RECOVERY_LIMIT	3
++
++static bool himax_frame_valid(const u8 *frame)
++{
++	u32 sum = 0;
++	int i;
++
++	for (i = HIMAX_FRAME_CHECK_OFFSET; i < HIMAX_FRAME_SZ; i += 2)
++		sum += get_unaligned_le16(frame + i);
++
++	return sum && !(sum & 0xffff);
++}
++
++static u16 himax_frame_status(const u8 *frame, int word)
++{
++	return get_unaligned_le16(frame + HIMAX_FRAME_GRID_OFFSET + HX_PIXELS * 2 + word * 2);
++}
++
++/*
++ * Start a full re-init from the interrupt thread (op_lock held): release the
++ * touches now, keep the interrupt off and let panel_reinit_work do the rest,
++ * as after a panel power-up.
++ */
++static void himax_frame_recover(struct himax_ts_data *ts, const char *why)
++{
++	ts->bad_frames = 0;
++	ts->algo->stats.recoveries++;
++	dev_warn(ts->dev, "%s, initialising the touch IC again\n", why);
++	himax_release_all_touches(ts);
++	himax_int_enable(ts, false);
++	mod_delayed_work(system_wq, &ts->panel_reinit_work, 0);
++}
++
++/*
++ * A frame failed the checksum or flagged a firmware restart.  If that keeps
++ * happening right after re-inits, the frame format is taken to differ from
++ * the one these checks expect, and frames are used unchecked from then on,
++ * as before the checks existed.
++ */
++static void himax_frame_rejected(struct himax_ts_data *ts, bool now, const char *why)
++{
++	if (!now && ++ts->bad_frames < HIMAX_BAD_FRAME_LIMIT)
++		return;
++
++	if (++ts->check_recoveries > HIMAX_CHECK_RECOVERY_LIMIT) {
++		dev_err(ts->dev, "%s after %d re-inits, frame checks disabled\n",
++			why, HIMAX_CHECK_RECOVERY_LIMIT);
++		ts->bad_frames = 0;
++		ts->frame_checks = false;
++		return;
++	}
++	himax_frame_recover(ts, why);
++}
+ 
+ static void himax_report_tracked_state(struct himax_ts_data *ts, bool report_on)
+ {
+@@ -1455,12 +1548,32 @@ static irqreturn_t himax_ts_thread(int irq, void *data)
+ 	}
+ 
+ 	if (hx83121a_gaokun_read_event_stack(ts)) {
+-		dev_err(ts->dev, "failed to get touch data!\n");
+-		himax_mcu_ic_reset(ts, true);
+-		irq_ret = IRQ_NONE;
++		dev_err_ratelimited(ts->dev, "failed to get touch data!\n");
++		algo->stats.frames_read_err++;
++		if (++ts->bad_frames >= HIMAX_BAD_FRAME_LIMIT)
++			himax_frame_recover(ts, "event stack reads keep failing");
+ 		goto out_unlock;
+ 	}
+ 
++	/*
++	 * A frame that fails the checks is dropped whole: no baseline update,
++	 * the touches stay as they were, nothing is reported.
++	 */
++	if (ts->frame_checks) {
++		if (!himax_frame_valid(ts->event_buf)) {
++			algo->stats.frames_bad++;
++			himax_frame_rejected(ts, false, "frames keep failing the checksum");
++			goto out_unlock;
++		}
++		if (himax_frame_status(ts->event_buf, HIMAX_STATUS_FW_RESET)) {
++			algo->stats.fw_resets++;
++			himax_frame_rejected(ts, true, "the touch firmware restarted");
++			goto out_unlock;
++		}
++		ts->check_recoveries = 0;
++	}
++	ts->bad_frames = 0;
++
+ 	// dump_frame((void *)ptr - OFST, true);
+ 
+ 	/*
+@@ -1734,6 +1847,7 @@ static int himax_spi_probe(struct spi_device *spi)
+ 	spi->cs_setup.value = HIMAX_SPI_CS_SETUP_TIME;
+ 
+ 	ts->spi = spi;
++	ts->frame_checks = true;
+ 	/*
+ 	 * spi_xfer_max_sz is the largest *total* SPI transfer, header
+ 	 * included, so max_trunk_sz (which subtracts the header) came out
+diff --git a/drivers/input/touchscreen/hx-algo.h b/drivers/input/touchscreen/hx-algo.h
+index 4a7fcc5e66..d4f018d58f 100644
+--- a/drivers/input/touchscreen/hx-algo.h
++++ b/drivers/input/touchscreen/hx-algo.h
+@@ -167,6 +167,10 @@ struct hx_macro_zone {
+  * Free-running; reset by writing anything to the sysfs stats attribute.
+  */
+ struct hx_stats {
++	u32 frames_read_err;    /* event stack reads that failed           */
++	u32 frames_bad;         /* frames dropped: bad checksum or empty   */
++	u32 fw_resets;          /* frames flagging a firmware reset        */
++	u32 recoveries;         /* re-inits after bad frames or reads      */
+ 	u32 frames;             /* frames processed                        */
+ 	u32 frames_reported;    /* frames with at least one stable contact */
+ 	u32 zones;              /* macro-zones found                       */
