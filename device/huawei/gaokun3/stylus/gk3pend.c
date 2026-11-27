@@ -749,6 +749,8 @@ static int pen_generation(unsigned int id)
  *                 (see UNPAIRED_* below), else 0
  *   pen_paired    "<ms>,<generation>" for each completed pairing (0x16 = 1);
  *                 the time keeps two pairings in one boot apart
+ *   pen_nib_loose "<ms>" from when writing shows a loose nib (see NIB_*
+ *                 below), a new value each time; 0 once it reads healthy again
  */
 static void pen_state(const char *name, const char *value)
 {
@@ -823,6 +825,74 @@ static void unpaired_frame(long long t, int peak, long long last_report)
 		pen_state("pen_unpaired", "1");
 		printf("%lld unpaired pen hint on: writing without pressure reports\n", t);
 	}
+}
+
+/*
+ * A loose nib.  The tip electrode reaches the glass through the nib: screwed
+ * loose, its TX1 anchor peak in contact falls to a quarter or less (median
+ * ~3300 -> 400-1000 on a CD54R) while the ring electrode's TX2 stays (~1000),
+ * and the position noise triples.  Pressure still works, so the pen seems
+ * fine apart from the jitter.  On a CD54R the nib reads healthy up to a full
+ * turn out; at about 1 1/4 turns TX1 drops within a stroke and the ink goes
+ * wrong.  Healthy strokes (BOE and CSOT, 2nd and 3rd generation) read TX1
+ * 2000-9000 at TX2/TX1 0.08-0.6; a few single ones go below 1500 or above 1,
+ * never both.  A frame in contact counts as weak with TX1 under NIB_PEAK and
+ * TX2 over NIB_RATIO percent of it, a stroke of at least NIB_STROKE_MIN
+ * frames as loose when most of its frames are.  The bar is low because a nib that
+ * loose also drops frames under PEAK_MIN, which breaks strokes into short
+ * pieces.  A loose nib still seats now and then for a stroke or two, so
+ * NIB_SET loose strokes among the last NIB_WIN raise pen_nib_loose and
+ * NIB_CLEAR or fewer clear it.  On the recordings at hand this flags a loose
+ * nib on the 6th or 7th stroke after the drop, clears it on the 7th stroke
+ * after tightening, and judges none of 1347 healthy strokes loose.
+ * Not reset on resume: only writing clears it, or a restart of gk3pend, which
+ * sets pen_nib_loose to 0 and starts over (a nib still loose is flagged again
+ * with a new value after NIB_WIN strokes).
+ */
+#define NIB_PEAK	1500
+#define NIB_RATIO	80
+#define NIB_STROKE_MIN	10	/* frames, ~40-50 ms */
+#define NIB_GAP_MS	100	/* no valid frame for longer than this ends a stroke */
+#define NIB_WIN		8
+#define NIB_SET		6
+#define NIB_CLEAR	1
+static struct {
+	int frames, weak;	/* the stroke going on */
+	unsigned int last;	/* one bit per stroke, newest in bit 0 */
+	int strokes, on;
+} nib;
+
+static void nib_stroke_end(long long t)
+{
+	int loose;
+
+	if (nib.frames >= NIB_STROKE_MIN) {
+		nib.last = (nib.last << 1 | (2 * nib.weak > nib.frames)) & ((1u << NIB_WIN) - 1);
+		if (nib.strokes < NIB_WIN)
+			nib.strokes++;
+		loose = __builtin_popcount(nib.last);
+		if (!nib.on && nib.strokes == NIB_WIN && loose >= NIB_SET) {
+			char v[24];
+
+			nib.on = 1;
+			snprintf(v, sizeof(v), "%lld", t);
+			pen_state("pen_nib_loose", v);
+			printf("%lld loose nib hint on: %d of the last %d strokes weak at the tip\n",
+			       t, loose, NIB_WIN);
+		} else if (nib.on && loose <= NIB_CLEAR) {
+			nib.on = 0;
+			pen_state("pen_nib_loose", "0");
+			printf("%lld loose nib hint off\n", t);
+		}
+	}
+	nib.frames = nib.weak = 0;
+}
+
+/* a valid frame in contact: TX1 and TX2 anchor peaks, tx2 0 without a TX2 */
+static void nib_frame(int tx1, int tx2)
+{
+	nib.frames++;
+	nib.weak += tx1 < NIB_PEAK && tx2 * 100 > tx1 * NIB_RATIO;
 }
 
 /*
@@ -1017,6 +1087,7 @@ int main(int argc, char **argv)
 	pitch = col_map == PANEL_CSOT ? pitch_csot : pitch_boe;
 
 	pen_state("pen_unpaired", "0");	/* an earlier instance may have left 1 */
+	pen_state("pen_nib_loose", "0");
 
 	/* ueventd creates /dev/gk3_pen a moment after insmod: wait up to 10 s */
 	for (int tries = 0; tries < 100; tries++) {
@@ -1248,6 +1319,11 @@ int main(int argc, char **argv)
 					g[k] = word(rec.d, 2 + k);
 					g2[k] = word(rec.d, 85 + k);
 				}
+				/* loose nib: a stroke ends at a lift or a gap in the frames */
+				if (nib.frames && (!press || t - valid_t > NIB_GAP_MS))
+					nib_stroke_end(t);
+				if (press)
+					nib_frame(peak, a2r == 0xff && a2c == 0xff ? 0 : g2[40]);
 				restart = !in_range || t - valid_t > 20 || (press && !touching);
 				skip = stale_on && stale_frame(g, ar, ac) && !restart;
 				if (region_on)

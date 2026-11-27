@@ -1,5 +1,5 @@
 /*
- * 手写笔（M-Pencil）的两条通知，状态来自 gk3pend（stylus/gk3pend.c 的 pen_state）设的两个属性
+ * 手写笔（M-Pencil）的三条通知，状态来自 gk3pend（stylus/gk3pend.c 的 pen_state）设的三个属性
  * （vendor_gaokun3_prop，sepolicy 给了 system_app 读）：
  *   · vendor.gaokun3.pen_unpaired = 1：有笔在屏幕上书写，却收不到它的压感（未与本机配对的笔；
  *     已配对的另一支笔放下约 20 秒、停发压感之后，换用未配对的笔也算）⇒ 提示把笔吸附到充电区域
@@ -9,6 +9,9 @@
  *     服务被杀后由 START_STICKY 拉起、或框架重启后重新拉起都不会重复弹。值里是 gk3pend 的单调时钟毫秒数，
  *     属性不持久（每次开机从空开始），所以单凭值就能区分每一次配对；不能用 Settings.Global.BOOT_COUNT
  *     区分开机，它在框架每次重启时都会加一，而 vendor 属性在框架重启后还在。
+ *   · vendor.gaokun3.pen_nib_loose = "<毫秒>"：书写时笔尖信号弱、笔身信号如常（笔尖松动）⇒ 提示拧紧笔尖；
+ *     回到 0（恢复正常书写）时撤下。与 pen_paired 一样，同一个值只提示一次，用户划掉后不会再弹，
+ *     直到 gk3pend 判定恢复后又一次松动；gk3pend 重启时属性回到 0（提示撤下），笔尖仍松动时再写 8 笔会以新值重新提示。
  *
  * 轮询而不是属性回调，理由同 UsbPortNotifier 顶部：亮屏期间每 3 秒读一次，息屏不读，亮屏时立刻读一次；
  * 开机由 BootReceiver 拉起。
@@ -38,13 +41,16 @@ public class StylusNotifier extends Service {
 
     static final String PROP_UNPAIRED = "vendor.gaokun3.pen_unpaired";
     static final String PROP_PAIRED = "vendor.gaokun3.pen_paired";
+    static final String PROP_NIB = "vendor.gaokun3.pen_nib_loose";
 
     private static final String CHANNEL = "stylus";
     private static final int ID_UNPAIRED = 21;
     private static final int ID_PAIRED = 22;
+    private static final int ID_NIB = 23;
 
     private static final String PREFS = "stylus_notifier";
     private static final String KEY_PAIRED_SEEN = "paired_seen";
+    private static final String KEY_NIB_SEEN = "nib_seen";
 
     private static final long POLL_MS = 3000;
 
@@ -53,6 +59,7 @@ public class StylusNotifier extends Service {
     private SharedPreferences mPrefs;
     private boolean mScreenOn;
     private boolean mShownUnpaired;
+    private String mNib;    // 上次读到的 pen_nib_loose；null 表示还没读过
 
     private final Runnable mPoll = new Runnable() {
         @Override
@@ -132,6 +139,18 @@ public class StylusNotifier extends Service {
             mShownUnpaired = unpaired;
             Log.i(TAG, PROP_UNPAIRED + "=" + (unpaired ? 1 : 0));
         }
+
+        String nib = SystemProperties.get(PROP_NIB, "");
+        if (!nib.equals(mNib)) {
+            mNib = nib;
+            if (nib.isEmpty() || "0".equals(nib)) {
+                mNm.cancel(ID_NIB);
+            } else if (!nib.equals(mPrefs.getString(KEY_NIB_SEEN, ""))) {
+                mPrefs.edit().putString(KEY_NIB_SEEN, nib).commit();   // 先记下再发，理由同上
+                postNib();
+            }
+            Log.i(TAG, PROP_NIB + "=" + nib);
+        }
     }
 
     /** "<毫秒>,<代数>"里的代数：2、3，认不出（0 或缺省）时不写代数。 */
@@ -150,6 +169,18 @@ public class StylusNotifier extends Service {
                 .setStyle(new Notification.BigTextStyle().bigText(text))
                 .setCategory(Notification.CATEGORY_STATUS)
                 .setOnlyAlertOnce(true)
+                .setShowWhen(true)
+                .build());
+    }
+
+    private void postNib() {
+        String text = getString(R.string.stylus_nib_text);
+        mNm.notify(ID_NIB, new Notification.Builder(this, CHANNEL)
+                .setSmallIcon(R.drawable.ic_stylus)
+                .setContentTitle(getString(R.string.stylus_nib_title))
+                .setContentText(text)
+                .setStyle(new Notification.BigTextStyle().bigText(text))
+                .setCategory(Notification.CATEGORY_STATUS)
                 .setShowWhen(true)
                 .build());
     }

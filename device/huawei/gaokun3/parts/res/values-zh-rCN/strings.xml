@@ -78,6 +78,8 @@
     <string name="stylus_unpaired_text">您可能正在使用未配对的M-Pencil进行书写，请将M-Pencil吸附到平板顶部的充电区域完成配对。</string>
     <string name="stylus_paired_title">已连接到%1$s</string>
     <string name="stylus_paired_text">%1$s已与平板完成配对。</string>
+    <string name="stylus_nib_title">检测到M-Pencil笔尖松动</string>
+    <string name="stylus_nib_text">笔尖松动可能影响书写效果。请检查并拧紧笔尖，或在必要的情况下更换笔尖。</string>
 
     <string name="denoise_title">麦克风降噪</string>
     <string name="denoise_summary">压低内置麦克风收到的背景噪声</string>
