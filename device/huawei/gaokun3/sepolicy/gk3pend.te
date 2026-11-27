@@ -21,8 +21,9 @@ allow gk3pend usb_device:chr_file rw_file_perms;
 # 按面板选列间距表。只读这一个文件，不需要别的 sysfs。
 allow gk3pend sysfs:file r_file_perms;
 
-# 读：设置页的平滑强度和侧边双击，init 从 persist.sys.gaokun3.pen_* 转写的 vendor.gaokun3.pen_*（stylus/gk3pend.rc）。
-# 写：vendor.gaokun3.pen_unpaired / pen_paired / pen_nib_loose，供 Parts 的 StylusNotifier 发未配对提示、配对完成通知和笔尖松动提示。
+# 读：设置页的平滑强度、侧边双击和断开连接请求，init 从 persist.sys.gaokun3.pen_* 与 sys.gaokun3.pen_unpair 转写的 vendor.gaokun3.pen_*（stylus/gk3pend.rc）。
+# 写：vendor.gaokun3.pen_unpaired / pen_paired / pen_nib_loose，供 Parts 的 StylusNotifier 发未配对提示、配对完成通知和笔尖松动提示；
+# vendor.gaokun3.pen_conn，供手写笔设置页显示已连接的笔。
 set_prop(gk3pend, vendor_gaokun3_prop)
 
 # stdio_to_kmsg（stylus/gk3pend.rc）：日志写进 /dev/kmsg_debug，只有 userdebug / eng 有这个节点。

@@ -56,8 +56,6 @@
     <string name="stylus_title">手写笔设置</string>
     <string name="stylus_summary">笔迹平滑和双击笔身</string>
     <string name="stylus_smooth_title">笔迹平滑</string>
-    <string name="stylus_smooth_weak">弱</string>
-    <string name="stylus_smooth_strong">强</string>
     <string-array name="stylus_smooth_levels">
         <item>弱</item>
         <item>较弱</item>
@@ -71,6 +69,11 @@
         <item>关</item>
     </string-array>
     <string name="stylus_note">平滑越强，放大后的线条越平滑，但书写时笔迹会更明显地落后于笔尖。</string>
+    <string name="stylus_pen_connected">已连接到%1$s</string>
+    <string name="stylus_pen_none">当前未连接M-Pencil</string>
+    <string name="stylus_unpair_title">断开连接</string>
+    <string name="stylus_unpair_dialog_title">断开与M-Pencil的连接</string>
+    <string name="stylus_unpair_dialog_text">将断开与%1$s的连接。您可以将%1$s吸附到平板顶部的充电区域将其再次连接到平板。</string>
 
     <!-- 手写笔通知（StylusNotifier） -->
     <string name="stylus_channel">手写笔</string>

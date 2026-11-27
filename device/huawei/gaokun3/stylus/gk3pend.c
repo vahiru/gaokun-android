@@ -50,6 +50,10 @@
  * gk3pend sends it this tablet's pen parameters (0x7D01), as Huawei's THP
  * service does on Windows (see q7d01).
  *
+ * Connection: for the M-Pencil page in Settings gk3pend publishes whether a
+ * pen is connected and its generation, and deletes the pairing when the page
+ * asks (see q0000 / q1500 and pen_conn_update, unpair_check).
+ *
  * Side touch: the pen reports a double-tap on its side as event 0x2F = 1
  * (single taps and long presses report nothing).  Windows uses it to switch
  * between pen and eraser; -side eraser (default) does the same, -side button
@@ -157,6 +161,8 @@ struct mcu {
 	int pair_n;			/* requests answered in it */
 	unsigned int pair_model;	/* model id of the last request answered */
 	long long init_sent;		/* when init params (q7d01) were last sent */
+	int conn;			/* event 0x71: 1 a pen is connected, 0 none, -1 not reported yet */
+	unsigned int model;		/* model id from event 0x00; 0: not reported yet */
 	struct usbdevfs_urb urb[MCU_URBS];
 	unsigned char buf[MCU_URBS][64];
 };
@@ -678,6 +684,21 @@ static const unsigned char q7d01[40] = {
 	0x58, 0x02, 0x1A, 0x41, 0x0F, 0x01, 0x01,
 };
 
+/*
+ * Connection, for the settings page.  The controller reports the pen's model
+ * id (0x00) when a pen docks or connects, but not in its reply to the
+ * handshake, so a pen connected before gk3pend started or across a suspend
+ * would stay unknown.  PC Manager asks with an empty 0x00 whenever it has no
+ * model id (McuDevCo [IsPenBaseInfoComplete]); gk3pend asks after each
+ * handshake.  q1500 deletes the pairing, as PC Manager's [PenDeletePair]: the
+ * controller then reports 0x71 = 0, and the pen only hovers until it is
+ * docked and paired again.
+ */
+static const unsigned char q0000[] = { 0x07, 0x00, 0x02, 0x00, 0x01, 0x00, 0x11, 0x00 };
+static const unsigned char q1500[] = { 0x07, 0x00, 0x02, 0x00, 0x01, 0x15, 0x11, 0x01, 0x00 };
+
+static void pen_conn_update(const struct mcu *m);
+
 static void mcu_open(struct mcu *m, long long t)
 {
 	int ifnum = MCU_IFNUM;
@@ -686,12 +707,15 @@ static void mcu_open(struct mcu *m, long long t)
 	m->fd = mcu_find();
 	if (m->fd < 0) {
 		m->retry_at = t + MCU_RETRY_MS;
-		return;
-	}
-	if (ioctl(m->fd, USBDEVFS_CLAIMINTERFACE, &ifnum) < 0 ||
-	    mcu_submit(m, 0) < 0 || mcu_submit(m, 1) < 0) {
+	} else if (ioctl(m->fd, USBDEVFS_CLAIMINTERFACE, &ifnum) < 0 ||
+		   mcu_submit(m, 0) < 0 || mcu_submit(m, 1) < 0) {
 		printf("mcu: claim/submit failed: %d\n", errno);
 		mcu_close(m, t);
+	}
+	if (m->fd < 0) {
+		/* no controller, no pen: the page stops offering it (a close alone keeps the state) */
+		m->conn = -1;
+		pen_conn_update(m);
 		return;
 	}
 	/* every handshake may send the init params again (q7d01) */
@@ -699,6 +723,7 @@ static void mcu_open(struct mcu *m, long long t)
 	/* the MCU stays silent until queried (EGoTouchRev: THP_Service does this on start) */
 	mcu_out(m, q7101, sizeof(q7101));
 	mcu_out(m, q7701, sizeof(q7701));
+	mcu_out(m, q0000, sizeof(q0000));
 	unpaired_pause(t);
 }
 
@@ -743,14 +768,18 @@ static int pen_generation(unsigned int id)
 }
 
 /*
- * Pen state for Parts (StylusNotifier), which polls these vendor.gaokun3.*
- * properties while the screen is on:
+ * Pen state for Parts, which polls these vendor.gaokun3.* properties
+ * (StylusNotifier while the screen is on, StylusSettingsActivity while the
+ * M-Pencil page is shown):
  *   pen_unpaired  1 while a pen is writing whose pressure does not reach us
  *                 (see UNPAIRED_* below), else 0
  *   pen_paired    "<ms>,<generation>" for each completed pairing (0x16 = 1);
  *                 the time keeps two pairings in one boot apart
  *   pen_nib_loose "<ms>" from when writing shows a loose nib (see NIB_*
  *                 below), a new value each time; 0 once it reads healthy again
+ *   pen_conn      0 while no pen is connected (0x71 = 0, or not reported
+ *                 yet), else the connected pen's generation: 2 or 3, 1 for
+ *                 a model id that is not known or not reported yet
  */
 static void pen_state(const char *name, const char *value)
 {
@@ -776,6 +805,58 @@ static void pen_state_paired(long long t, int generation)
 #else
 	(void)t;
 	(void)generation;
+#endif
+}
+
+/* pen_conn (see pen_state), set when it changes */
+static void pen_conn_update(const struct mcu *m)
+{
+	static char last[4];
+	char v[4];
+	int gen = pen_generation(m->model);
+
+	snprintf(v, sizeof(v), "%d", m->conn != 1 ? 0 : gen ? gen : 1);
+	if (strcmp(v, last)) {
+		strcpy(last, v);
+		pen_state("pen_conn", v);
+	}
+}
+
+/*
+ * Disconnect, from the settings page: Parts sets sys.gaokun3.pen_unpair to 1
+ * or 2, the other value each time, and stylus/gk3pend.rc copies it to
+ * vendor.gaokun3.pen_unpair.  A change from the value last seen (at start,
+ * the value then counts as seen) sends q1500.  The properties are not
+ * persistent, so nothing is replayed at boot; a request while the controller
+ * is closed for a reopen is dropped (the page still shows the pen, so it can
+ * be asked again), and while it cannot be opened the page shows no pen.
+ */
+static void unpair_check(struct mcu *m, long long t)
+{
+#ifdef __BIONIC__
+	static unsigned int serial;
+	static char seen[PROP_VALUE_MAX] = "\1";
+	unsigned int s = __system_property_area_serial();
+	char v[PROP_VALUE_MAX] = "";
+
+	if (s == serial)
+		return;
+	serial = s;
+	__system_property_get("vendor.gaokun3.pen_unpair", v);
+	if (seen[0] == 1 || !strcmp(v, seen)) {	/* first look: the current value is old */
+		strcpy(seen, v);
+		return;
+	}
+	strcpy(seen, v);
+	if (m->fd < 0)
+		printf("%lld pen disconnect dropped: controller closed\n", t);
+	else if (mcu_out(m, q1500, sizeof(q1500)) < 0)
+		printf("%lld pen disconnect failed: %d\n", t, errno);
+	else
+		printf("%lld pen disconnect: pairing deleted\n", t);
+#else
+	(void)m;
+	(void)t;
 #endif
 }
 
@@ -925,6 +1006,10 @@ static int mcu_events(struct mcu *m, const unsigned char *b, int n, long long t,
 			if (verbose)
 				printf("%lld mcu: second 0x7701\n", t);
 		}
+		if (e[5] == 0x71 && len) {
+			m->conn = e[8] == 1;
+			pen_conn_update(m);
+		}
 		if (e[5] == 0x71 && len && e[8] == 0)
 			m->init_sent = -INIT_PARAM_GAP_MS;	/* the next connection gets them */
 		if (e[5] == 0x71 && len && e[8] == 1 && t - m->init_sent >= INIT_PARAM_GAP_MS) {
@@ -948,6 +1033,8 @@ static int mcu_events(struct mcu *m, const unsigned char *b, int n, long long t,
 
 			for (int i = 0; i < len; i++)
 				id |= (unsigned int)e[8 + i] << (8 * i);
+			m->model = id;
+			pen_conn_update(m);
 			printf("%lld pen model 0x%06x %s\n", t, id, pen_model(id));
 		}
 		if (e[5] == 0x15 && !m->accept_at) {	/* pairing request */
@@ -1009,7 +1096,7 @@ int main(int argc, char **argv)
 {
 	struct pollfd pf[3];
 	struct pen_rec rec;
-	struct mcu mcu = { .fd = -1, .init_sent = -INIT_PARAM_GAP_MS };
+	struct mcu mcu = { .fd = -1, .init_sent = -INIT_PARAM_GAP_MS, .conn = -1 };
 	struct tilt_state ts;
 	int tilt_x = 0, tilt_y = 0;
 	long tsum_x = 0, tsum_y = 0, tn = 0;	/* -v: mean tilt of a stroke */
@@ -1088,6 +1175,8 @@ int main(int argc, char **argv)
 
 	pen_state("pen_unpaired", "0");	/* an earlier instance may have left 1 */
 	pen_state("pen_nib_loose", "0");
+	pen_state("pen_conn", "0");
+	unpair_check(&mcu, 0);		/* the first look takes the current request as old */
 
 	/* ueventd creates /dev/gk3_pen a moment after insmod: wait up to 10 s */
 	for (int tries = 0; tries < 100; tries++) {
@@ -1285,6 +1374,7 @@ int main(int argc, char **argv)
 		}
 		if (mcu.fd < 0 && t >= mcu.retry_at)
 			mcu_open(&mcu, t);
+		unpair_check(&mcu, t);
 		if (unpaired && t - nopress_last > UNPAIRED_KEEP_MS)
 			unpaired_clear(t, "no such writing for a while");
 		if (mcu.accept_at && t >= mcu.accept_at) {

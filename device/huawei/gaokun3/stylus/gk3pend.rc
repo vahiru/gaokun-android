@@ -37,3 +37,12 @@ on property:persist.sys.gaokun3.pen_side=button
 
 on property:persist.sys.gaokun3.pen_side=none
     setprop vendor.gaokun3.pen_side none
+
+# 手写笔设置页的“断开连接”（StylusSettingsActivity）：Parts 把非持久的 sys.gaokun3.pen_unpair
+# 在 1、2 之间交替设置，这里按字面值转成 vendor.gaokun3.pen_unpair；gk3pend 看到它与上一次看到的值不同（启动时的值视为已看到），
+# 就删除与笔的配对（0x1500）。两个属性都不持久，开机不会重放。
+on property:sys.gaokun3.pen_unpair=1
+    setprop vendor.gaokun3.pen_unpair 1
+
+on property:sys.gaokun3.pen_unpair=2
+    setprop vendor.gaokun3.pen_unpair 2
