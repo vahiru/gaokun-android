@@ -658,6 +658,12 @@ PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/wifi/wpa_supplicant.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/wpa_supplicant.rc \
     frameworks/native/data/etc/android.hardware.wifi.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.hardware.wifi.xml
 
+# WLAN直连：框架只在声明android.hardware.wifi.direct时启动WifiP2pService，crDroid的设置也只在声明后显示
+#   “WLAN直连”。p2p_supplicant_overlay.conf的作用见文件内说明，P2P接口名见下方的wifi.direct.interface。
+PRODUCT_COPY_FILES += \
+    frameworks/native/data/etc/android.hardware.wifi.direct.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.hardware.wifi.direct.xml \
+    $(LOCAL_PATH)/wifi/p2p_supplicant_overlay.conf:$(TARGET_COPY_OUT_VENDOR)/etc/wifi/p2p_supplicant_overlay.conf
+
 # WCN6855 固件，来自linux-firmware。设备树的qcom,calibration-variant是HW_GK3（patches/kernel/dts/0025），
 # 本机芯片上报qmi-chip-id=18，而linux-firmware只在qmi-chip-id=2下登记了HW_GK3，所以board-2.bin要先用
 # scripts/wifi/ath11k-board-alias.py补上qmi-chip-id=18的名称。缺少这个名称时驱动会改用通用板级数据，
@@ -672,8 +678,12 @@ PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/firmware/ath11k/WCN6855/hw2.0/m3.bin:$(TARGET_COPY_OUT_VENDOR)/firmware/ath11k/WCN6855/hw2.0/m3.bin \
     $(LOCAL_PATH)/firmware/ath11k/WCN6855/hw2.0/regdb.bin:$(TARGET_COPY_OUT_VENDOR)/firmware/ath11k/WCN6855/hw2.0/regdb.bin
 
+# wifi.direct.interface：Wi-Fi HAL的createP2pIface按这个属性确定P2P接口名，只登记、不创建网卡，默认值p2p0在本机
+#   不存在。名称以p2p-dev-开头时，wpa_supplicant通过nl80211在wlan0所在的无线网卡上自行创建P2P Device（不是网卡，
+#   ath11k为WCN6855声明了P2P-device），群组接口p2p-wlan0-N也由它创建，不经过libwifi-hal-emu。
 PRODUCT_VENDOR_PROPERTIES += \
-    wifi.interface=wlan0
+    wifi.interface=wlan0 \
+    wifi.direct.interface=p2p-dev-wlan0
 
 # 实机芯片是 wcn6855 hw2.1（dmesg 实测）；上游 WHENCE 将 hw2.1 软链到 hw2.0，
 # vendor 里直接把 hw2.0 文件再装一份到 hw2.1 路径

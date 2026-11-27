@@ -34,6 +34,7 @@ The table below shows how the main features work in the current version. See the
 | Detachable keyboard and touchpad | ✅ | |
 | Wi-Fi | ✅ | |
 | Wi-Fi hotspot | ✅ | |
+| Wi-Fi Direct | ✅ | |
 | Bluetooth | ✅ | |
 | Speakers | ✅ | Bass enhancement or Huawei Histen can be turned on in Settings |
 | Microphones | ✅ | Beamforming, with echo cancellation and noise suppression that can be switched per scenario |

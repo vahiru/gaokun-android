@@ -122,6 +122,15 @@ Each entry follows the same format: **Symptom** (what you will run into), **Caus
 * **Cause**: the split layouts come with the apps, and WeChat opens chats on the right only on devices it recognizes. A side is expanded to the full screen only when the right-hand page switches to landscape.
 * **What to do**: in apps whose divider can be dragged to the edge of the screen, drag it there to show one page in full screen. Otherwise turn off the switch for the app.
 
+### Wi-Fi Direct limitations
+* **Symptom**:
+  * Wi-Fi Direct cannot be used while the hotspot is enabled, and turning on the hotspot ends an existing Wi-Fi Direct connection.
+  * In some countries and regions, groups created by the tablet cannot use the 5 GHz band, which may lower the speed.
+  * After the tablet restarts, other devices may not be able to reconnect using a group they saved earlier; this has not been tested yet.
+  * Available since 1.0.0-rc.5; earlier versions do not have this feature.
+* **Cause**: the system does not yet support the hotspot and Wi-Fi Direct at the same time. In some countries and regions, the Wi-Fi firmware does not allow the tablet to start its own network on 5 GHz channels. The tablet's Wi-Fi Direct device address changes at every startup.
+* **What to do**: turn off the hotspot before using Wi-Fi Direct. If another device cannot reconnect after the tablet restarts, delete the saved group on that device and connect again.
+
 ### Hardware this machine does not have
 * **Mobile network and SIM card**: this machine has no modem.
 * **Compass**: there is no magnetometer. Auto-rotation uses the accelerometer and gyroscope and is not affected.

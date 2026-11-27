@@ -36,7 +36,7 @@ echo $?        # 0 = 无FAIL；1 = 有FAIL；2 = adb不通或中途掉线（不�
 | 自研服务与域 | `getprop init.svc.<名>`；`ps -AZ` | `hangdump`、`vendor.{usb,boot,camera-provider,sensors,light,thermal}-gaokun3`均为`running`；`android.hardware.usb-service.gaokun3`位于`hal_usb_default`域 |
 | 三颗DSP | `/sys/class/remoteproc/*/{name,state}` | `adsp`、`cdsp`、`slpi`均为`running` |
 | 传感器 | `dumpsys sensorservice`的Sensor List | 含`SH3001 Accelerometer`、`SH3001 Gyroscope` |
-| Wi-Fi / 热点配置 | `cmd overlay lookup com.android.wifi.resources com.android.wifi.resources:string/config_wifi_tcp_buffers`；`dumpsys connectivity`的`TcpBufferSizes`；`dumpsys wifi`的`config_wifiSaeUpgradeEnabled`；`/vendor/bin/hw/hostapd` | 资源值与活动网络均含`8388608`；SAE升级为`false`；`hostapd`存在 |
+| Wi-Fi / 热点 / WLAN直连配置 | `cmd overlay lookup com.android.wifi.resources com.android.wifi.resources:string/config_wifi_tcp_buffers`；`dumpsys connectivity`的`TcpBufferSizes`；`dumpsys wifi`的`config_wifiSaeUpgradeEnabled`；`/vendor/bin/hw/hostapd`；`pm list features`；`getprop wifi.direct.interface`；`service check wifip2p`；`/vendor/etc/wifi/p2p_supplicant_overlay.conf` | 资源值与活动网络均含`8388608`；SAE升级为`false`；`hostapd`存在；含`android.hardware.wifi.direct`；`p2p-dev-wlan0`；`found`；覆盖文件存在 |
 | USB服务 | `service check usb`；`pm list features` | `found`；含`android.hardware.usb.host` |
 | NTP时间同步 | `settings get global ntp_server`；设备与宿主机`date +%s`差值 | `null`；差值≤5秒（5–60秒WARN，>60秒FAIL） |
 | 硬件编解码 | `scripts/verify-hw-codec2.sh [视频]` | 失败数为0；传入`--video`时第5步解出有效帧；亮屏、未加`--readonly`且确认了CP非像素上下文时，第5b步由`c2.v4l2.avc.encoder`在1280x720和640x480各编出帧 |
