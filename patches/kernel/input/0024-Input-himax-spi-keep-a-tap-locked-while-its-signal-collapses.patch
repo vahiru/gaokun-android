@@ -1,0 +1,117 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] Input: himax-spi: keep a tap locked while its signal collapses
+
+The tap lock reports a touch at its down position until the touch
+moves away. While the signal is under track_tap_fall percent of the
+touch's peak, only a move past track_tap_hard (22 units, about 2.3 mm)
+releases it. In the last one or two frames of a lift the centroid of
+the fading signal still jumps that far, and the touch then reports the
+jump; games that treat 10 pixels as a drag turn such a tap into a drag
+or a flick.
+
+Add track_tap_floor, default 35 percent: under it only twice
+track_tap_hard releases the lock. A flick still has most of its signal
+when it starts to move and is released as before. A finger that
+pressed hard and then slides off lightly is released once it is twice
+track_tap_hard away, which for the flicks in the recordings below was
+one frame later. track_tap_hard is capped at 4096 units, the span of
+the positions, so that twice it squared cannot overflow.
+
+Checked with hxsim on five recorded rhythm-game sessions (about 5000
+touches): taps whose raw centroid stayed within 1.5 mm but whose
+reported point moved 10 units or more went from 129 of 2942 to 22.
+Short flicks that never reported moving stayed at 17 of 716, and when
+flicks start to move and when touches end did not change.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/input/touchscreen/himax-spi-core.c |  2 ++
+ drivers/input/touchscreen/hx-algo.c        | 19 +++++++++++++++----
+ drivers/input/touchscreen/hx-algo.h        |  6 +++++-
+ 3 files changed, 22 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/input/touchscreen/himax-spi-core.c b/drivers/input/touchscreen/himax-spi-core.c
+index 00601deef7..7d264238a2 100644
+--- a/drivers/input/touchscreen/himax-spi-core.c
++++ b/drivers/input/touchscreen/himax-spi-core.c
+@@ -1137,6 +1137,7 @@ HX_ALGO_ATTR_S32_RW(track_tap_radius);
+ HX_ALGO_ATTR_S32_RW(track_tap_speed);
+ HX_ALGO_ATTR_S32_RW(track_tap_hard);
+ HX_ALGO_ATTR_S32_RW(track_tap_fall);
++HX_ALGO_ATTR_S32_RW(track_tap_floor);
+ HX_ALGO_ATTR_BOOL_RW(track_tap_snap);
+ HX_ALGO_ATTR_S32_RW(track_filter_mincutoff);
+ HX_ALGO_ATTR_S32_RW(track_filter_beta);
+@@ -1295,6 +1296,7 @@ static struct attribute *hx_algo_attrs[] = {
+ 	&dev_attr_track_tap_speed.attr,
+ 	&dev_attr_track_tap_hard.attr,
+ 	&dev_attr_track_tap_fall.attr,
++	&dev_attr_track_tap_floor.attr,
+ 	&dev_attr_track_tap_snap.attr,
+ 	&dev_attr_track_filter_mincutoff.attr,
+ 	&dev_attr_track_filter_beta.attr,
+diff --git a/drivers/input/touchscreen/hx-algo.c b/drivers/input/touchscreen/hx-algo.c
+index 9e58aefa57..0682fca173 100644
+--- a/drivers/input/touchscreen/hx-algo.c
++++ b/drivers/input/touchscreen/hx-algo.c
+@@ -97,6 +97,7 @@ void hx_algo_init_defaults(struct hx_algo *algo)
+ 	algo->track_tap_speed      = 15;   /* ~1.5 mm in one frame */
+ 	algo->track_tap_hard       = 22;   /* ~2.3 mm */
+ 	algo->track_tap_fall       = 50;
++	algo->track_tap_floor      = 35;
+ 	algo->track_tap_snap       = true;
+ 	algo->track_filter_mincutoff = 1000;  /* 1 Hz at rest */
+ 	algo->track_filter_beta      = 30;
+@@ -2208,8 +2209,12 @@ static void hx_filter_update(const struct hx_algo *algo, struct hx_track *trk)
+  * of a tap's centroid as the finger lifts, and so holds a flick back until it
+  * has gone that far.  Two things tell the two apart.  The lifting centroid
+  * jumps while the signal collapses: under track_tap_fall percent of the touch's
+- * peak only track_tap_hard releases.  And once the landing has settled a tap
+- * stays put, so a single step of track_tap_speed units is the finger moving.
++ * peak only track_tap_hard releases, and in the last frames of a lift, under
++ * track_tap_floor percent, only twice that.  A flick still has most of its
++ * signal when it starts to move; a finger that pressed hard and then slides off
++ * lightly is released once it is twice track_tap_hard away, a frame later for a
++ * flick.  And once the landing has settled a tap stays put, so a single step of
++ * track_tap_speed units is the finger moving.
+  */
+ static bool hx_track_left_anchor(const struct hx_algo *algo,
+ 				 const struct hx_track *trk)
+@@ -2218,10 +2223,16 @@ static bool hx_track_left_anchor(const struct hx_algo *algo,
+ 	s64 ay = trk->y - trk->ref_y;
+ 	s64 d2 = ax * ax + ay * ay;
+ 	s64 r = algo->track_tap_radius;
+-	s64 hard = max_t(s64, algo->track_tap_hard, r);
++	/* Positions span fewer than 4096 units: cap it there, so 4 * hard^2 fits. */
++	s64 hard = min_t(s64, max_t(s64, algo->track_tap_hard, r), 4096);
+ 	s64 v = algo->track_tap_speed;
+ 
+-	if (r <= 0 || d2 > hard * hard)
++	if (r <= 0)
++		return true;
++	if (algo->track_tap_floor > 0 &&
++	    (s64)trk->signal_sum * 100 < (s64)algo->track_tap_floor * trk->sig_peak)
++		return d2 > 4 * hard * hard;
++	if (d2 > hard * hard)
+ 		return true;
+ 	if (algo->track_tap_fall > 0 &&
+ 	    (s64)trk->signal_sum * 100 < (s64)algo->track_tap_fall * trk->sig_peak)
+diff --git a/drivers/input/touchscreen/hx-algo.h b/drivers/input/touchscreen/hx-algo.h
+index d4f018d58f..5d7c8f2d75 100644
+--- a/drivers/input/touchscreen/hx-algo.h
++++ b/drivers/input/touchscreen/hx-algo.h
+@@ -392,7 +392,11 @@ struct hx_algo {
+ 	s32  track_tap_hard;       /* radius while the signal is falling   */
+ 				   /* (at least track_tap_radius)          */
+ 	s32  track_tap_fall;       /* falling: under this % of the touch's */
+-				   /* peak signal (0 = ignore the signal)  */
++				   /* peak signal (0 = off; the floor      */
++				   /* below still applies)                 */
++	s32  track_tap_floor;      /* lifting: under this % of the peak    */
++				   /* only twice track_tap_hard releases   */
++				   /* (0 = off)                            */
+ 	bool track_tap_snap;       /* on release, report the contact       */
+ 				   /* itself, not the filter behind it     */
+ 	s32  track_filter_mincutoff; /* One Euro cutoff at rest, mHz (0 = off) */
