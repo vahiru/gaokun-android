@@ -88,6 +88,13 @@
     </string-array>
     <string name="stylus_note">Stronger smoothing gives smoother lines when zoomed in, but the ink trails further behind the pen tip while you write.</string>
 
+    <!-- Stylus notifications (StylusNotifier) -->
+    <string name="stylus_channel">Stylus</string>
+    <string name="stylus_unpaired_title">Unpaired M-Pencil detected</string>
+    <string name="stylus_unpaired_text">You may be writing with an M-Pencil that is not paired. Attach the M-Pencil to the charging area at the top of the tablet to pair it.</string>
+    <string name="stylus_paired_title">Connected to %1$s</string>
+    <string name="stylus_paired_text">%1$s is now paired with the tablet.</string>
+
     <string name="denoise_title">Microphone noise suppression</string>
     <string name="denoise_summary">Reduce background noise picked up by the built-in microphones</string>
     <string name="denoise_call_title">Calls</string>
