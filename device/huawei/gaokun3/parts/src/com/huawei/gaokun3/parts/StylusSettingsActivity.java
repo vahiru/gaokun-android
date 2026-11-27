@@ -4,13 +4,16 @@
  *
  * The settings are two persist.sys.* properties: persist.sys.gaokun3.pen_beta, the position
  * filter's beta (500, 300, 200, 125 from the weakest to the strongest smoothing), and
- * persist.sys.gaokun3.pen_side (eraser, button, none).  stylus/gk3pend.rc copies the known values to vendor.gaokun3.pen_*, which
- * gk3pend reads again whenever a property changes, so a change applies from the next frame.  The
- * detour through init has the same reason as SpeakerFxDialogActivity's: this app cannot set vendor
- * properties and gk3pend cannot read system ones.
+ * persist.sys.gaokun3.pen_side (eraser, button, none).  stylus/gk3pend.rc copies the known values
+ * to vendor.gaokun3.pen_*, which gk3pend reads again whenever a property changes, so a change
+ * applies from the next frame.  The detour through init has the same reason as
+ * SpeakerFxDialogActivity's: this app cannot set vendor properties and gk3pend cannot read system
+ * ones.
  *
  * The page shows the persist.sys values, the only stored copy; unset or unknown values show as the
- * defaults (beta 500, eraser), which gk3pend uses from the next boot on.
+ * defaults (beta 500, none), which gk3pend uses from the next boot on.  The double-tap is off by
+ * default: Android shows nothing when the pen turns into an eraser, and in apps that do not handle
+ * the eraser it then seems to have stopped writing.
  *
  * The connected pen, shown under the page title, comes from vendor.gaokun3.pen_conn, which gk3pend
  * sets (0: none, else the generation, 1 for a model it does not know), read every second while the
@@ -41,7 +44,7 @@ public class StylusSettingsActivity extends CollapsingToolbarBaseActivity {
     private static final String SIDE_PROP = "persist.sys.gaokun3.pen_side";
     /** Slider positions from weak to strong; a lower beta smooths more and lags more. */
     private static final String[] BETAS = { "500", "300", "200", "125" };
-    private static final String SIDE_DEFAULT = "eraser";
+    private static final String SIDE_DEFAULT = "none";
     private static final String CONN_PROP = "vendor.gaokun3.pen_conn";
     private static final String UNPAIR_PROP = "sys.gaokun3.pen_unpair";
     private static final long CONN_POLL_MS = 1000;

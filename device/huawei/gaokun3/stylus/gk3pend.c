@@ -56,10 +56,12 @@
  *
  * Side touch: the pen reports a double-tap on its side as event 0x2F = 1
  * (single taps and long presses report nothing).  Windows uses it to switch
- * between pen and eraser; -side eraser (default) does the same, -side button
- * sends a BTN_STYLUS click instead, -side none ignores it (the controller is
- * still opened, for the battery).  A switch asked for while the tip is down
- * waits for the lift, so a stroke never changes tool.
+ * between pen and eraser; -side eraser does the same, -side button sends a
+ * BTN_STYLUS click instead, -side none (the default) ignores it (the
+ * controller is still opened, for the battery).  Off by default because
+ * Android shows nothing when the tool changes, and in apps that do not handle
+ * the eraser the pen then seems to have stopped writing.  A switch asked for
+ * while the tip is down waits for the lift, so a stroke never changes tool.
  *
  * Settings (parts/StylusSettingsActivity.java): the filter's beta and what a
  * double-tap does come from vendor.gaokun3.pen_beta and vendor.gaokun3.pen_side,
@@ -169,7 +171,7 @@ struct mcu {
 
 static int verbose, flip_x, flip_y = 1;
 static int press_tau_ms = 4;	/* -pt N: pressure smoothing time constant */
-static int side_mode = -1;	/* -side; unset: from the settings, else SIDE_ERASER */
+static int side_mode = -1;	/* -side; unset: from the settings, else SIDE_NONE */
 static int press_incell = 1;	/* -pm incell|direct */
 static int tilt_on = 1, tilt_sx = 1, tilt_sy = 1;	/* -nt, -tx, -ty */
 static int region_on = -1;	/* -pr strong peak region, -lr legacy; unset: strong except on BOE */
@@ -322,7 +324,7 @@ static int beta_given, side_given;	/* on the command line, so the settings stay 
 /* The settings (see the top of this file).  Returns 1 when one changed. */
 static int read_settings(void)
 {
-	int beta = 500, side = SIDE_ERASER, changed;
+	int beta = 500, side = SIDE_NONE, changed;
 #ifdef __BIONIC__
 	static unsigned int serial;
 	unsigned int s = __system_property_area_serial();
@@ -334,7 +336,7 @@ static int read_settings(void)
 	if (__system_property_get("vendor.gaokun3.pen_beta", v) > 0 && atoi(v) >= 50 && atoi(v) <= 5000)
 		beta = atoi(v);
 	if (__system_property_get("vendor.gaokun3.pen_side", v) > 0)
-		side = !strcmp(v, "button") ? SIDE_BUTTON : !strcmp(v, "none") ? SIDE_NONE : SIDE_ERASER;
+		side = !strcmp(v, "eraser") ? SIDE_ERASER : !strcmp(v, "button") ? SIDE_BUTTON : SIDE_NONE;
 #endif
 	if (beta_given)
 		beta = pf_beta;
@@ -1158,8 +1160,8 @@ int main(int argc, char **argv)
 			press_incell = strcmp(argv[++i], "direct") != 0;
 		else if (!strcmp(argv[i], "-side") && i + 1 < argc) {
 			i++;
-			side_mode = !strcmp(argv[i], "button") ? SIDE_BUTTON :
-				    !strcmp(argv[i], "none") ? SIDE_NONE : SIDE_ERASER;
+			side_mode = !strcmp(argv[i], "eraser") ? SIDE_ERASER :
+				    !strcmp(argv[i], "button") ? SIDE_BUTTON : SIDE_NONE;
 		}
 		else if (!strcmp(argv[i], "-pr"))
 			region_on = 1;
