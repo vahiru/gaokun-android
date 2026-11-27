@@ -290,6 +290,12 @@
             android:directBootAware="true"
             android:exported="false" />
 
+        <!-- 手写笔的未配对提示与配对完成通知：读 gk3pend 设的 vendor.gaokun3.pen_unpaired / pen_paired，亮屏时每 3 秒看一次。 -->
+        <service
+            android:name="com.huawei.gaokun3.parts.StylusNotifier"
+            android:directBootAware="true"
+            android:exported="false" />
+
         <!-- 统一启动入口的通知（2026-10-05，S9）：读 boot_control HAL 设的 vendor.gaokun3.bootentry.*，
              入口回落到旧槽（fallback）/ 绕过入口开机（bypassed）等。只在开机后跑一次，见类顶部。 -->
         <service

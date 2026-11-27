@@ -7,7 +7,7 @@
  * ★ 2026-10-05：改成 directBootAware + 同时收 LOCKED_BOOT_COMPLETED（TODO 里记过的小改进）。
  *   BOOT_COMPLETED 要等用户第一次解锁才发；有锁屏密码时，开机到解锁之间 Parts 什么都看不到
  *   （1.0.0-dev 验收时 UsbPortNotifier 就是这么"没起来"的）。LOCKED_BOOT_COMPLETED 在用户启动、
- *   还没解锁时就发；两个服务都只读属性、只发通知、只用设备加密存储，解锁前跑没有问题。
+ *   还没解锁时就发；UsbPortNotifier、BootEntryNotifier与StylusNotifier都只读属性、只发通知、只用设备加密存储，解锁前跑没有问题。
  *   解锁后的 BOOT_COMPLETED 照样会来：startService 对已在跑的服务只是多一次 onStartCommand，
  *   BootEntryNotifier 另有按开机令牌去重，不会重复弹。
  * 本应用是 android.uid.system，后台 startService 不受限（见 UsbPortNotifier 顶部的注释）。
@@ -29,6 +29,7 @@ public class BootReceiver extends BroadcastReceiver {
         RotationLockMigration.apply(context);
         LidBehaviorDefault.apply(context);
         context.startService(new Intent(context, UsbPortNotifier.class));
+        context.startService(new Intent(context, StylusNotifier.class));
         context.startService(new Intent(context, BootEntryNotifier.class));
         context.startService(new Intent(context, KeyboardReplugWatcher.class));
     }

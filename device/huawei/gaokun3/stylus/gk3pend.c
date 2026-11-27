@@ -116,6 +116,17 @@
 #define PAIR_ACCEPT_MS	1500	/* pairing: 0x2E, then this long before 0x1501 */
 #define PAIR_MAX	3	/* pairing: requests answered per PAIR_WINDOW_MS */
 #define PAIR_WINDOW_MS	60000
+#define UNPAIRED_HOLD_MS	5000	/* unpaired-pen check off this long after a (re)open or resume */
+
+static long long unpaired_hold;	/* unpaired-pen check off until then, see unpaired_frame() */
+static long long nopress_ms;	/* writing at contact strength without pressure reports, ms */
+
+/* the pressure path was lost, (re)opened or woke up: missing reports mean nothing for a while */
+static void unpaired_pause(long long t)
+{
+	unpaired_hold = t + UNPAIRED_HOLD_MS;
+	nopress_ms = 0;
+}
 
 enum { SIDE_NONE, SIDE_ERASER, SIDE_BUTTON };
 
@@ -138,6 +149,7 @@ struct mcu {
 	long long accept_at;		/* when to accept a pairing request (0x1501); 0: none due */
 	long long pair_window;		/* start of the current PAIR_WINDOW_MS */
 	int pair_n;			/* requests answered in it */
+	unsigned int pair_model;	/* model id of the last request answered */
 	struct usbdevfs_urb urb[MCU_URBS];
 	unsigned char buf[MCU_URBS][64];
 };
@@ -592,6 +604,7 @@ static void mcu_close(struct mcu *m, long long t)
 		close(m->fd);
 	m->fd = -1;
 	m->retry_at = t + MCU_RETRY_MS;
+	unpaired_pause(t);
 	/*
 	 * After a reopen (a resume, a USB error) the request is stale: the MCU may
 	 * have reset, and monotonic time stood still during a suspend.
@@ -650,6 +663,7 @@ static void mcu_open(struct mcu *m, long long t)
 	/* the MCU stays silent until queried (EGoTouchRev: THP_Service does this on start) */
 	mcu_out(m, q7101, sizeof(q7101));
 	mcu_out(m, q7701, sizeof(q7701));
+	unpaired_pause(t);
 }
 
 /* PEN_MODULE (event 0x00) model ids, from EGoTouchRev btmcu/PenModuleModelId.h */
@@ -684,6 +698,95 @@ static int pen_pairable(unsigned int id)
 		return 1;
 	}
 	return 0;
+}
+
+/* pen generation for the Parts notifications: 2, 3, or 0 if not known */
+static int pen_generation(unsigned int id)
+{
+	return id == 0x00011b || id == 0x01011b ? 2 : pen_pairable(id) ? 3 : 0;
+}
+
+/*
+ * Pen state for Parts (StylusNotifier), which polls these vendor.gaokun3.*
+ * properties while the screen is on:
+ *   pen_unpaired  1 while a pen is writing whose pressure does not reach us
+ *                 (see UNPAIRED_* below), else 0
+ *   pen_paired    "<ms>,<generation>" for each completed pairing (0x16 = 1);
+ *                 the time keeps two pairings in one boot apart
+ */
+static void pen_state(const char *name, const char *value)
+{
+#ifdef __BIONIC__
+	char key[PROP_NAME_MAX];
+
+	snprintf(key, sizeof(key), "vendor.gaokun3.%s", name);
+	if (__system_property_set(key, value))
+		printf("setprop %s failed\n", key);
+#else
+	(void)name;
+	(void)value;
+#endif
+}
+
+static void pen_state_paired(long long t, int generation)
+{
+#ifdef __BIONIC__
+	char v[32];
+
+	snprintf(v, sizeof(v), "%lld,%d", t, generation);
+	pen_state("pen_paired", v);
+#else
+	(void)t;
+	(void)generation;
+#endif
+}
+
+/*
+ * A pen writing on the screen while no pressure report arrives: one not paired
+ * with this tablet, or connected to another device.  Its own signal still
+ * reaches the touch slave, its pressure does not.  A paired pen sends pressure
+ * reports (0 while hovering) from the moment it is picked up, so no report
+ * for UNPAIRED_QUIET_MS together with UNPAIRED_MS of frames at contact
+ * strength (TX1 anchor peak at least UNPAIRED_PEAK: hovering stays below
+ * about 2500, contact is above about 3000) is taken as writing with an
+ * unpaired pen.  With a second pen paired, its reports go on for about 20 s
+ * after it is put down, so the check fires only once it has gone quiet.  Off
+ * while the pressure node or the MCU is closed and for UNPAIRED_HOLD_MS after
+ * either was (re)opened or the system resumed, when missing reports mean
+ * nothing.  Cleared by a pressure report, a completed pairing, a resume, or
+ * UNPAIRED_KEEP_MS (monotonic) without such frames.  A pen with a flat
+ * battery sends no signal at all.
+ */
+#define UNPAIRED_PEAK		3000
+#define UNPAIRED_QUIET_MS	2000
+#define UNPAIRED_MS		2000
+#define UNPAIRED_KEEP_MS	600000
+static int unpaired;
+static long long nopress_last;
+
+static void unpaired_clear(long long t, const char *why)
+{
+	nopress_ms = 0;
+	if (unpaired) {
+		unpaired = 0;
+		pen_state("pen_unpaired", "0");
+		printf("%lld unpaired pen hint off: %s\n", t, why);
+	}
+}
+
+/* a valid frame; last_report is when the last pressure report arrived */
+static void unpaired_frame(long long t, int peak, long long last_report)
+{
+	if (peak < UNPAIRED_PEAK || t - last_report < UNPAIRED_QUIET_MS)
+		return;
+	if (t - nopress_last <= 50)	/* frames ~4 ms apart while the pen is down */
+		nopress_ms += t - nopress_last;
+	nopress_last = t;
+	if (!unpaired && nopress_ms >= UNPAIRED_MS) {
+		unpaired = 1;
+		pen_state("pen_unpaired", "1");
+		printf("%lld unpaired pen hint on: writing without pressure reports\n", t);
+	}
 }
 
 /*
@@ -749,6 +852,7 @@ static int mcu_events(struct mcu *m, const unsigned char *b, int n, long long t,
 				int r = mcu_out(m, q2e00, sizeof(q2e00));
 
 				m->pair_n++;
+				m->pair_model = id;
 				m->accept_at = t + PAIR_ACCEPT_MS;
 				if (r < 0)
 					what = "accepting (0x2E send failed)";
@@ -760,9 +864,15 @@ static int mcu_events(struct mcu *m, const unsigned char *b, int n, long long t,
 			m->accept_at = 0;
 			printf("%lld pen pairing acceptance cancelled by event 0x%02x\n", t, e[5]);
 		}
-		if (e[5] == 0x16 && len)
+		if (e[5] == 0x16 && len) {
 			printf("%lld pen pairing %s\n", t,
 			       e[8] == 1 ? "done" : e[8] == 0 ? "failed" : "result unknown");
+			if (e[8] == 1) {
+				/* hint off first: Parts reads pen_paired before pen_unpaired */
+				unpaired_clear(t, "pen paired");
+				pen_state_paired(t, pen_generation(m->pair_model));
+			}
+		}
 		if (e[5] == 0x03 && len) {			/* firmware version, ASCII */
 			char s[64];
 			int k;
@@ -860,6 +970,8 @@ int main(int argc, char **argv)
 	col_map = panel_kind();
 	pitch = col_map == PANEL_CSOT ? pitch_csot : pitch_boe;
 
+	pen_state("pen_unpaired", "0");	/* an earlier instance may have left 1 */
+
 	/* ueventd creates /dev/gk3_pen a moment after insmod: wait up to 10 s */
 	for (int tries = 0; tries < 100; tries++) {
 		pen = open("/dev/gk3_pen", O_RDWR | O_NONBLOCK);
@@ -875,6 +987,7 @@ int main(int argc, char **argv)
 		return 1;
 	}
 	mcu_open(&mcu, now_ms());
+	unpaired_pause(now_ms());
 	/* on BOE the strong region bends gentle curves further off the path */
 	if (region_on < 0)
 		region_on = col_map != PANEL_BOE;
@@ -934,6 +1047,8 @@ int main(int argc, char **argv)
 		if (suspended_ms() - slept > 1000) {
 			slept = suspended_ms();
 			printf("%lld resumed: reopening mcu\n", t);
+			unpaired_clear(t, "system resumed");
+			unpaired_pause(t);
 			if (mcu.fd >= 0) {
 				mcu_close(&mcu, t);
 				mcu_open(&mcu, t);
@@ -958,6 +1073,8 @@ int main(int argc, char **argv)
 					pressure = slots[3];
 					play = 0;
 					press_t = t;
+					if (unpaired || nopress_ms)
+						unpaired_clear(t, "pressure reports");
 					reports++;
 				}
 			}
@@ -972,6 +1089,7 @@ int main(int argc, char **argv)
 				hid = pf[1].fd = -1;
 				pressure = 0;
 				hid_retry_at = t + HID_RETRY_MS;
+				unpaired_pause(t);
 			} else if (got && t - hint_t >= 200) {
 				/*
 				 * Pressure reports flow as soon as the pen is picked
@@ -988,6 +1106,8 @@ int main(int argc, char **argv)
 			hid = pf[1].fd = open_pressure_hidraw();
 			if (hid < 0)
 				hid_retry_at = t + HID_RETRY_MS;
+			else
+				unpaired_pause(t);
 		}
 
 		if (mcu.fd >= 0 && pf[2].revents) {
@@ -1048,6 +1168,8 @@ int main(int argc, char **argv)
 		}
 		if (mcu.fd < 0 && t >= mcu.retry_at)
 			mcu_open(&mcu, t);
+		if (unpaired && t - nopress_last > UNPAIRED_KEEP_MS)
+			unpaired_clear(t, "no such writing for a while");
 		if (mcu.accept_at && t >= mcu.accept_at) {
 			mcu.accept_at = 0;
 			if (mcu.fd >= 0) {
@@ -1072,6 +1194,9 @@ int main(int argc, char **argv)
 				double fx, fy;
 				int a2r = word(rec.d, 83) & 0xff, a2c = word(rec.d, 84) & 0xff;
 				int press = pressure > 0 && t - press_t <= PRESS_MAX_AGE;
+
+				if (hid >= 0 && mcu.fd >= 0 && t >= unpaired_hold)
+					unpaired_frame(t, peak, press_t);
 
 				for (k = 0; k < 81; k++) {
 					g[k] = word(rec.d, 2 + k);

@@ -25,7 +25,8 @@
 | 设备树 | `patches/kernel/dts/0013` | 启用`&spi20`与引脚，挂载从片节点`pen@0` |
 | 休眠恢复 | `patches/kernel/input/0022`、`BoardConfig.mk` | `usbhid.quirks=0x12d1:0x10b8:0x21000000`（`HID_QUIRK_IDLE_ON_RESUME`） |
 | 守护进程 | `device/huawei/gaokun3/stylus/` | `gk3pend`（服务`vendor.gk3pend`），解算与系数说明见`stylus/solver.h` |
-| 权限与电量 | `ueventd.gaokun3.rc`、`sepolicy/gk3pend.te`、`genfs_contexts` | `/dev/gk3_pen`、`hidraw`、`uinput`、`usbfs`及`sysfs_gaokun3_pen_battery` |
+| 权限与电量 | `ueventd.gaokun3.rc`、`sepolicy/gk3pend.te`、`genfs_contexts` | `/dev/gk3_pen`、`hidraw`、`uinput`、`usbfs`、`sysfs_gaokun3_pen_battery`，以及设置`vendor.gaokun3.pen_unpaired`、`pen_paired` |
+| 通知 | `parts/…/StylusNotifier.java` | 未配对提示与配对完成通知，读`gk3pend`设置的`vendor.gaokun3.pen_unpaired`、`pen_paired` |
 
 ## 设计取舍
 
@@ -34,6 +35,7 @@
 * **从片跟随复位与空闲降频**：从片没有复位线，主片每次复位（熄屏亮屏、`himax-spi`自恢复）都会使从片丢失配置，因此驱动在帧头异常、连续读失败或亮屏无帧时自动重初始化。无笔超过`idle_after_ms`后关闭中断改为低频轮询，`gk3pend`收到笔MCU报文时写`/dev/gk3_pen`立即恢复中断。
 * **USB休眠恢复**：笔MCU在收到`SET_FEATURE(REMOTE_WAKEUP)`后会按接口扣住IN报文，直到该接口收到`SET_IDLE`或OUT传输才放行。接口0（压感）绑定`hid-generic`，靠`patches/kernel/input/0022`新增的`HID_QUIRK_IDLE_ON_RESUME`在恢复时发送`SET_IDLE`；接口1（侧键与电量）由`gk3pend`在检测到休眠恢复后重新发送查询握手。
 * **配对新笔**：尚未与本机配对的笔吸附到充电位置后，笔MCU上报配对请求（`0x15`，载荷为笔的型号）并等待主机确认；没有这一步，笔不会连接，只能悬停而无法书写。Windows中由华为电脑管家（`McuDevCo.dll`）立即回`0x2E`并弹窗询问，用户同意后发送`0x1501`（`0x1500`为删除配对，`0x1502`为取消），笔MCU随后以事件`0x16`上报结果（1为成功），笔照常连接；收到`0x29`时关闭弹窗，不再确认。电脑管家只连接其型号表中的笔，且确认前先将当前连接的笔报告为断开，即同一时间只连接一支笔；吸附另一支笔后，原来的笔是否需要重新配对尚未实测。`gk3pend`将吸附视为同意：对二代、三代笔回`0x2E`后1.5秒发送`0x1501`，其间收到`0x29`或`0x16`、或者重新打开笔MCU（休眠恢复、USB出错）时放弃；其他型号（包括一代笔）不予确认；每分钟最多响应3次请求，以免配对失败后笔MCU反复请求时陷入循环。
+* **未配对提示与配对完成通知**：笔尖信号由笔自身的电池驱动，与蓝牙配对无关，因此未配对的笔仍能被从片感应到，只是收不到它的压感。已配对的笔从拿起起就持续发送压感报文（悬停时为0），所以当锚点峰值达到接触强度（至少3000；悬停一般低于约2500，接触高于约3000）累计2秒、而2秒内没有任何压感报文时，`gk3pend`判定有未配对的笔在书写，将`vendor.gaokun3.pen_unpaired`设为1；已配对的另一支笔放下后约20秒才停发压感报文，此后换用未配对的笔才会触发。压感节点或笔MCU未打开时，以及二者重新打开或系统休眠恢复后的5秒内不做判断。收到压感报文、配对完成、系统休眠恢复，或者系统未休眠时10分钟内不再出现这种情况时恢复为0。每完成一次配对（`0x16`为1），`gk3pend`先撤销提示，再把`vendor.gaokun3.pen_paired`设为“单调时钟的毫秒数,代数”。Parts的`StylusNotifier`在亮屏时每3秒读取这两个属性，发出“发现未配对的M-Pencil”提示和“已连接到M-Pencil 2/3”通知（点按打开“手写笔设置”，同一次配对只通知一次），通知类别为“手写笔”。电量耗尽的笔不发出任何信号，不会触发提示。
 * **电量节点挂载方式**：驱动注册的`power_supply`节点`m-pencil`故意不挂父设备——Android `EventHub`为虚拟`/sys/devices/virtual`下的`uinput`设备查找电池时，会将无父设备的设备级电池关联为触控笔电池，并由单独的SELinux类型`sysfs_gaokun3_pen_battery`放行`system_server`读取。
 * **面板列间距、列读出时差与强峰区域**：
   * **列间距**：BOE屏两端变宽、中间变窄，CSOT屏相反。`gk3pend`读取设备树中面板的`compatible`自动选表（日志打印`column pitch boe|csot|even`）。
