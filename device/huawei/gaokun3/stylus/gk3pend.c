@@ -41,6 +41,10 @@
  * is logged.  So are the pen's model id (0x00) and firmware version (0x03),
  * which the controller sends when it comes online (after a USB reset).
  *
+ * Pairing: a pen that is not paired with this tablet asks to pair when it is
+ * put on the charging dock (event 0x15); gk3pend accepts the request with the
+ * packets Huawei PC Manager sends on Windows (see q2e00 / q1501).
+ *
  * Side touch: the pen reports a double-tap on its side as event 0x2F = 1
  * (single taps and long presses report nothing).  Windows uses it to switch
  * between pen and eraser; -side eraser (default) does the same, -side button
@@ -109,6 +113,9 @@
 #define MCU_URBS	2
 #define MCU_RETRY_MS	2000
 #define HID_RETRY_MS	2000
+#define PAIR_ACCEPT_MS	1500	/* pairing: 0x2E, then this long before 0x1501 */
+#define PAIR_MAX	3	/* pairing: requests answered per PAIR_WINDOW_MS */
+#define PAIR_WINDOW_MS	60000
 
 enum { SIDE_NONE, SIDE_ERASER, SIDE_BUTTON };
 
@@ -128,6 +135,9 @@ struct mcu {
 	int fd;
 	int seen_77;			/* 0x77 replies since open: the first one gets a second 0x7701 */
 	long long retry_at;
+	long long accept_at;		/* when to accept a pairing request (0x1501); 0: none due */
+	long long pair_window;		/* start of the current PAIR_WINDOW_MS */
+	int pair_n;			/* requests answered in it */
 	struct usbdevfs_urb urb[MCU_URBS];
 	unsigned char buf[MCU_URBS][64];
 };
@@ -582,6 +592,14 @@ static void mcu_close(struct mcu *m, long long t)
 		close(m->fd);
 	m->fd = -1;
 	m->retry_at = t + MCU_RETRY_MS;
+	/*
+	 * After a reopen (a resume, a USB error) the request is stale: the MCU may
+	 * have reset, and monotonic time stood still during a suspend.
+	 */
+	if (m->accept_at) {
+		m->accept_at = 0;
+		printf("%lld pen pairing request dropped: controller closed\n", t);
+	}
 }
 
 /*
@@ -593,6 +611,25 @@ static void mcu_close(struct mcu *m, long long t)
  */
 static const unsigned char q7101[] = { 0x07, 0x00, 0x02, 0x00, 0x01, 0x71, 0x11, 0x00 };
 static const unsigned char q7701[] = { 0x07, 0x00, 0x02, 0x00, 0x01, 0x77, 0x11, 0x00 };
+
+/*
+ * Pairing a pen that is not paired with this tablet.  Put on the charging dock,
+ * it makes the MCU report a pairing request (0x15, payload: the pen's model
+ * id) and wait for the host.  Huawei PC Manager (McuDevCo.dll) answers 0x2E at
+ * once and shows a "pen found" dialog; on the user's OK it sends 0x1501
+ * (0x1500 deletes the pairing, 0x1502 cancels), and the MCU reports the
+ * result (0x16: 1 paired, 0 failed) before the pen connects as usual.  The
+ * dialog closes without a 0x1501 when the MCU reports 0x29.  PC Manager only
+ * connects model ids it knows, and before connecting it reports the pen
+ * connected so far as gone, so one pen is connected at a time.  Here docking
+ * a known model is the user's OK: the request is accepted PAIR_ACCEPT_MS after
+ * the 0x2E unless 0x29 or a pairing result (0x16) comes first.  At most
+ * PAIR_MAX requests are answered per PAIR_WINDOW_MS, in case the MCU keeps
+ * asking after a failed pairing.  The MCU has not been seen to answer the
+ * 0x2E itself.  Byte 1 stays 0 in these, as PC Manager sends them.
+ */
+static const unsigned char q2e00[] = { 0x07, 0x00, 0x02, 0x00, 0x01, 0x2E, 0x11, 0x00 };
+static const unsigned char q1501[] = { 0x07, 0x00, 0x02, 0x00, 0x01, 0x15, 0x11, 0x01, 0x01 };
 
 static void mcu_open(struct mcu *m, long long t)
 {
@@ -623,8 +660,30 @@ static const char *pen_model(unsigned int id)
 	case 0x00011b: return "CD54";
 	case 0x01011b: return "CD54R";
 	case 0x443002: return "CD54S";
+	case 0x533002:		/* the other M-Pencil 3 ids in PC Manager's table */
+	case 0x543002:
+	case 0x553002: return "M-Pencil 3";
 	}
 	return "unknown";
+}
+
+/*
+ * Models a pairing request is accepted for: the 2nd and 3rd generation pens
+ * (HPP3) of the table above, and the other M-Pencil 3 ids in PC Manager's
+ * table (McuDevCo.dll: 0x533002, 0x543002, 0x553002).
+ */
+static int pen_pairable(unsigned int id)
+{
+	switch (id) {
+	case 0x00011b:
+	case 0x01011b:
+	case 0x443002:
+	case 0x533002:
+	case 0x543002:
+	case 0x553002:
+		return 1;
+	}
+	return 0;
 }
 
 /*
@@ -672,6 +731,38 @@ static int mcu_events(struct mcu *m, const unsigned char *b, int n, long long t,
 				id |= (unsigned int)e[8 + i] << (8 * i);
 			printf("%lld pen model 0x%06x %s\n", t, id, pen_model(id));
 		}
+		if (e[5] == 0x15 && !m->accept_at) {	/* pairing request */
+			unsigned int id = 0;
+			const char *what = "accepting";
+
+			for (int i = 0; i < len && i < 4; i++)
+				id |= (unsigned int)e[8 + i] << (8 * i);
+			if (t - m->pair_window >= PAIR_WINDOW_MS) {
+				m->pair_window = t;
+				m->pair_n = 0;
+			}
+			if (!pen_pairable(id)) {
+				what = "not a supported pen, ignored";
+			} else if (m->pair_n >= PAIR_MAX) {
+				what = "too many requests, ignored for now";
+			} else {
+				int r = mcu_out(m, q2e00, sizeof(q2e00));
+
+				m->pair_n++;
+				m->accept_at = t + PAIR_ACCEPT_MS;
+				if (r < 0)
+					what = "accepting (0x2E send failed)";
+			}
+			printf("%lld pen pairing request, model 0x%06x %s: %s\n", t, id, pen_model(id), what);
+		}
+		/* 0x16 counts as PC Manager reads it: a payload of 0 or 1 */
+		if ((e[5] == 0x29 || (e[5] == 0x16 && len && e[8] < 2)) && m->accept_at) {
+			m->accept_at = 0;
+			printf("%lld pen pairing acceptance cancelled by event 0x%02x\n", t, e[5]);
+		}
+		if (e[5] == 0x16 && len)
+			printf("%lld pen pairing %s\n", t,
+			       e[8] == 1 ? "done" : e[8] == 0 ? "failed" : "result unknown");
 		if (e[5] == 0x03 && len) {			/* firmware version, ASCII */
 			char s[64];
 			int k;
@@ -810,10 +901,17 @@ int main(int argc, char **argv)
 	for (;;) {
 		int frame_valid = -1;	/* -1: no new frame this round */
 		int reopened = 0;	/* pf[2].revents below belong to the old fd */
+		int timeout = in_range ? RELEASE_DELAY : 1000;
 		long long t;
 
+		if (mcu.accept_at) {	/* wake up for a pairing acceptance that falls due */
+			long long d = mcu.accept_at - now_ms();
+
+			if (d < timeout)
+				timeout = d > 0 ? (int)d : 0;
+		}
 		pf[2].fd = mcu.fd;	/* negative fds are ignored by poll() */
-		if (poll(pf, 3, in_range ? RELEASE_DELAY : 1000) < 0) {
+		if (poll(pf, 3, timeout) < 0) {
 			if (errno == EINTR)
 				continue;
 			printf("poll: %d\n", errno);
@@ -950,6 +1048,17 @@ int main(int argc, char **argv)
 		}
 		if (mcu.fd < 0 && t >= mcu.retry_at)
 			mcu_open(&mcu, t);
+		if (mcu.accept_at && t >= mcu.accept_at) {
+			mcu.accept_at = 0;
+			if (mcu.fd >= 0) {
+				int r = mcu_out(&mcu, q1501, sizeof(q1501));
+
+				if (r < 0)
+					printf("%lld pen pairing accept failed: %d\n", t, errno);
+				else
+					printf("%lld pen pairing accepted\n", t);
+			}
+		}
 
 		if (pf[0].revents & POLLIN && read(pen, &rec, sizeof(rec)) == sizeof(rec)) {
 			int ar = word(rec.d, 0) & 0xff, ac = word(rec.d, 1) & 0xff;
