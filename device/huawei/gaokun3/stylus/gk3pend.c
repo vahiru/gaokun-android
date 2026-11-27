@@ -45,6 +45,11 @@
  * put on the charging dock (event 0x15); gk3pend accepts the request with the
  * packets Huawei PC Manager sends on Windows (see q2e00 / q1501).
  *
+ * Init params: when the controller reports the pen connected (event 0x71 =
+ * 1, which the reply to each handshake also carries while a pen is connected)
+ * gk3pend sends it this tablet's pen parameters (0x7D01), as Huawei's THP
+ * service does on Windows (see q7d01).
+ *
  * Side touch: the pen reports a double-tap on its side as event 0x2F = 1
  * (single taps and long presses report nothing).  Windows uses it to switch
  * between pen and eraser; -side eraser (default) does the same, -side button
@@ -116,6 +121,7 @@
 #define PAIR_ACCEPT_MS	1500	/* pairing: 0x2E, then this long before 0x1501 */
 #define PAIR_MAX	3	/* pairing: requests answered per PAIR_WINDOW_MS */
 #define PAIR_WINDOW_MS	60000
+#define INIT_PARAM_GAP_MS	2000	/* init params: repeats within this are dropped, see q7d01 */
 #define UNPAIRED_HOLD_MS	5000	/* unpaired-pen check off this long after a (re)open or resume */
 
 static long long unpaired_hold;	/* unpaired-pen check off until then, see unpaired_frame() */
@@ -150,6 +156,7 @@ struct mcu {
 	long long pair_window;		/* start of the current PAIR_WINDOW_MS */
 	int pair_n;			/* requests answered in it */
 	unsigned int pair_model;	/* model id of the last request answered */
+	long long init_sent;		/* when init params (q7d01) were last sent */
 	struct usbdevfs_urb urb[MCU_URBS];
 	unsigned char buf[MCU_URBS][64];
 };
@@ -618,9 +625,9 @@ static void mcu_close(struct mcu *m, long long t)
 /*
  * The factory handshake (EGoTouchRev BTMCU_PROTOCOL.md, from an API Monitor
  * capture): 0x7101, 0x7701, and a second 0x7701 after the 0x77 reply.  The
- * factory also sends 0x7D01 (32 bytes of init params) after the first 0x7B;
- * answering every 0x7B with it makes the MCU report 0x7B again, ~20 times a
- * second, so it is not sent here.
+ * init params (q7d01) follow when the pen is reported connected, not on 0x7B:
+ * the pen reports a 0x7B after every 0x7D01 (and after screen status changes),
+ * so answering 0x7B with it loops at ~20 per second.
  */
 static const unsigned char q7101[] = { 0x07, 0x00, 0x02, 0x00, 0x01, 0x71, 0x11, 0x00 };
 static const unsigned char q7701[] = { 0x07, 0x00, 0x02, 0x00, 0x01, 0x77, 0x11, 0x00 };
@@ -644,6 +651,33 @@ static const unsigned char q7701[] = { 0x07, 0x00, 0x02, 0x00, 0x01, 0x77, 0x11,
 static const unsigned char q2e00[] = { 0x07, 0x00, 0x02, 0x00, 0x01, 0x2E, 0x11, 0x00 };
 static const unsigned char q1501[] = { 0x07, 0x00, 0x02, 0x00, 0x01, 0x15, 0x11, 0x01, 0x01 };
 
+/*
+ * Init params.  The pen keeps the last ones a host sent it, and every Huawei
+ * device has its own (one table per product in the THP service's TSAPrmt.dll;
+ * all gaokun panels share this one).  The controller passes 0x7D01 on to the
+ * pen.  A pen that last got another device's values, or other values for this
+ * one, times its tip signal so that the second panel scan of each pair (the
+ * slave delivers two frames per display frame) reads only every other column
+ * near the pen: that frame's position falls to the cell centre and the ink
+ * zigzags by up to a column.  This lasts across tablet power-off, reboot and
+ * re-pairing until a host sends values again.  Huawei's THP service on
+ * Windows sends these on every pen connection ("hpp3 on"), so Windows always
+ * sets them right.  Payload: 15 bytes LE, X Y A B C DisplayCycle (u16) N type
+ * last (u8), from the Gaokun table "3333,3333,2e7,412,258,411a,0f,1"; its
+ * token "0f" makes N and type (0F 00), and the service then sets offsets 13
+ * and 14 (type, last) to 1.  Type 0, from the string alone, leaves the pen
+ * zigzagging.  Rest of the 32-byte payload zero.  Sent on every 0x71 = 1
+ * (a reconnect while the system slept only shows up in the reply to the
+ * handshake after resume); INIT_PARAM_GAP_MS only drops repeats after a
+ * successful send with no reopen or disconnect in between, so a failed send
+ * is retried on the next 0x71 = 1.
+ */
+static const unsigned char q7d01[40] = {
+	0x07, 0x01, 0x02, 0x00, 0x01, 0x7D, 0x11, 0x20,
+	0x33, 0x33, 0x33, 0x33, 0xE7, 0x02, 0x12, 0x04,
+	0x58, 0x02, 0x1A, 0x41, 0x0F, 0x01, 0x01,
+};
+
 static void mcu_open(struct mcu *m, long long t)
 {
 	int ifnum = MCU_IFNUM;
@@ -660,6 +694,8 @@ static void mcu_open(struct mcu *m, long long t)
 		mcu_close(m, t);
 		return;
 	}
+	/* every handshake may send the init params again (q7d01) */
+	m->init_sent = -INIT_PARAM_GAP_MS;
 	/* the MCU stays silent until queried (EGoTouchRev: THP_Service does this on start) */
 	mcu_out(m, q7101, sizeof(q7101));
 	mcu_out(m, q7701, sizeof(q7701));
@@ -819,6 +855,16 @@ static int mcu_events(struct mcu *m, const unsigned char *b, int n, long long t,
 			if (verbose)
 				printf("%lld mcu: second 0x7701\n", t);
 		}
+		if (e[5] == 0x71 && len && e[8] == 0)
+			m->init_sent = -INIT_PARAM_GAP_MS;	/* the next connection gets them */
+		if (e[5] == 0x71 && len && e[8] == 1 && t - m->init_sent >= INIT_PARAM_GAP_MS) {
+			if (mcu_out(m, q7d01, sizeof(q7d01)) < 0) {
+				printf("%lld pen connected: init params send failed: %d\n", t, errno);
+			} else {
+				m->init_sent = t;
+				printf("%lld pen connected: init params sent\n", t);
+			}
+		}
 		if (e[5] == 0x2F && len && e[8] == 1)
 			taps++;
 		if (e[5] == 0x7F && len)
@@ -893,7 +939,7 @@ int main(int argc, char **argv)
 {
 	struct pollfd pf[3];
 	struct pen_rec rec;
-	struct mcu mcu = { .fd = -1 };
+	struct mcu mcu = { .fd = -1, .init_sent = -INIT_PARAM_GAP_MS };
 	struct tilt_state ts;
 	int tilt_x = 0, tilt_y = 0;
 	long tsum_x = 0, tsum_y = 0, tn = 0;	/* -v: mean tilt of a stroke */
