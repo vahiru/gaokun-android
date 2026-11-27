@@ -37,6 +37,8 @@ android_app {
     static_libs: [
         "SettingsLibCollapsingToolbarBaseActivity",
         "SettingsLibFooterPreference",
+        // 手写笔设置页的“断开连接”按钮（DangerButtonPreference）：frameworks/base/packages/SettingsLib/ButtonPreference/。
+        "SettingsLibButtonPreference",
         "SettingsLibSettingsTheme",
         // 注入设置的开关条目、分组标题与动态说明（PerformanceModeProvider、KeyboardProvider、TouchProtectionProvider、
         // SoundEntriesProvider：EntriesProvider/ProviderSwitch）。

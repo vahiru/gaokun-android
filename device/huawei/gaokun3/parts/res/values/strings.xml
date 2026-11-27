@@ -67,8 +67,6 @@
     <string name="stylus_title">Stylus settings</string>
     <string name="stylus_summary">Ink smoothing and double-tap on the pen</string>
     <string name="stylus_smooth_title">Ink smoothing</string>
-    <string name="stylus_smooth_weak">Weak</string>
-    <string name="stylus_smooth_strong">Strong</string>
     <string-array name="stylus_smooth_levels">
         <item>Weak</item>
         <item>Medium weak</item>
@@ -87,6 +85,11 @@
         <item>none</item>
     </string-array>
     <string name="stylus_note">Stronger smoothing gives smoother lines when zoomed in, but the ink trails further behind the pen tip while you write.</string>
+    <string name="stylus_pen_connected">Connected to %1$s</string>
+    <string name="stylus_pen_none">No M-Pencil is connected</string>
+    <string name="stylus_unpair_title">Disconnect</string>
+    <string name="stylus_unpair_dialog_title">Disconnect M-Pencil</string>
+    <string name="stylus_unpair_dialog_text">%1$s will be disconnected. You can connect %1$s to the tablet again by attaching it to the charging area at the top of the tablet.</string>
 
     <!-- Stylus notifications (StylusNotifier) -->
     <string name="stylus_channel">Stylus</string>

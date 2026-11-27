@@ -1,17 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
-    <!-- Four positions, weak to strong (labels under the ends); StylusSettingsActivity turns the tick
-         marks on, maps the positions to the filter's beta and reads the value back from the property.
-         Written when the slider is let go. -->
-    <com.android.settingslib.widget.SliderPreference
+    <!-- Four positions, weak to strong; StylusSettingsActivity turns the tick marks on, maps the
+         positions to the filter's beta and reads the value back from the property.  Written when the
+         slider is let go.  The level's name floats over the thumb while dragging (showSeekBarValue,
+         names from the label formatter) and is the summary; the note on what smoothing costs sits
+         under the slider, in the slot for the start label, across the whole row
+         (NoteSliderPreference). -->
+    <com.huawei.gaokun3.parts.NoteSliderPreference
         android:key="pen_smooth"
         android:title="@string/stylus_smooth_title"
         android:max="3"
         app:min="0"
         app:seekBarIncrement="1"
-        app:textStart="@string/stylus_smooth_weak"
-        app:textEnd="@string/stylus_smooth_strong"
+        app:showSeekBarValue="true"
+        app:textStart="@string/stylus_note"
         app:updatesContinuously="false"
         android:persistent="false" />
     <ListPreference
@@ -21,8 +24,12 @@
         android:entries="@array/stylus_side_entries"
         android:entryValues="@array/stylus_side_values"
         android:persistent="false" />
-    <com.android.settingslib.widget.FooterPreference
-        android:key="stylus_note"
-        android:title="@string/stylus_note"
-        android:selectable="false" />
+    <!-- Disconnect, last on the page; shown only while a pen is connected. -->
+    <com.huawei.gaokun3.parts.DangerButtonPreference
+        android:key="pen_unpair"
+        android:title="@string/stylus_unpair_title"
+        android:gravity="center"
+        app:buttonPreferenceType="filled"
+        app:isPreferenceVisible="false"
+        android:persistent="false" />
 </PreferenceScreen>
