@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build hxsim on the host from a kernel tree's own hx-algo.c, with shim/
 # standing in for the few kernel headers it includes.  The tree needs the
-# hand map (patches/kernel/input/0013) and the tunables of patches/kernel/input/0016-0018, 0020-0021 and 0024,
+# hand map (patches/kernel/input/0013) and the tunables of patches/kernel/input/0016-0018, 0020-0021 and 0024-0025,
 # so run scripts/kernel-apply-patches.sh on it first.  To replay a tree from
 # before them, build that tree's own scripts/touch/hxsim/hxsim.c instead.
 #
@@ -16,8 +16,8 @@ TS=$TREE/drivers/input/touchscreen
 [ -f "$TS/hx-algo.c" ] || { echo "no $TS/hx-algo.c" >&2; exit 2; }
 grep -q hx_hand_update "$TS/hx-algo.h" && grep -q hx_track_report_pos "$TS/hx-algo.h" &&
 	grep -q baseline_mode "$TS/hx-algo.h" && grep -q track_fw_lost_frames "$TS/hx-algo.h" &&
-	grep -q track_tap_floor "$TS/hx-algo.h" ||
-	{ echo "$TS/hx-algo.h lacks the hand map or patches/kernel/input/0016-0018, 0020-0021, 0024; apply patches/kernel/ first" >&2; exit 2; }
+	grep -q track_tap_floor "$TS/hx-algo.h" && grep -q idle_ms "$TS/hx-algo.h" ||
+	{ echo "$TS/hx-algo.h lacks the hand map or patches/kernel/input/0016-0018, 0020-0021, 0024-0025; apply patches/kernel/ first" >&2; exit 2; }
 
 ${CC:-cc} -O2 -Wall -Wno-unused-function -I "$HERE/shim" -I "$TS" \
 	-o "$OUT" "$HERE/hxsim.c" "$TS/hx-algo.c"

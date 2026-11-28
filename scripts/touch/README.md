@@ -23,8 +23,9 @@
 
 | 路径 | 内容 |
 |---|---|
-| `/sys/bus/spi/devices/spi0.0/algo/stats` | 30个逐级计数器；写入任意值清零 |
+| `/sys/bus/spi/devices/spi0.0/algo/stats` | 逐级计数器，另含帧校验与IDLE的当前状态；写入任意值将计数器清零 |
 | `…/algo/contacts_log` | 最近16个触点出生时的`seq x y area signal edge` |
+| `…/algo/idle_ms` | 屏幕无触摸持续多少毫秒后请求触摸芯片进入IDLE（`patches/kernel/input/0025`，默认3000）；小于或等于0时不请求，但已处于IDLE的芯片不会因此退出，触摸屏幕后才恢复正常扫描。IDLE期间约每3秒才有一帧，用`frame-rate-sampler.sh`或`irq-trace.sh`测量空闲阶段前可先写入0 |
 | `/sys/kernel/debug/himax-hx83121a/frame_raw` | 面板产出的40×60 `s16`原始网格（仅去基线） |
 | `/sys/kernel/debug/himax-hx83121a/frame` | 经过CMF、边缘增强与IIR滤波后的40×60网格 |
 | `…/algo/hand_*` | 手掌位置图参数（`patches/kernel/input/0013`），计数器位于`stats`中，详见[`docs/dev/palm-rejection.md`](../../docs/dev/palm-rejection.md) |
