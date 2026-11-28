@@ -66,7 +66,7 @@ When reporting a problem, please describe what you did and what happened, and in
 1. Install Google's SDK Platform Tools on your computer; they include `adb`.
 2. Enable Developer options and USB debugging on the tablet; see [below](#enabling-developer-options).
 3. Connect the tablet to the computer with a USB cable and run `adb devices` on the computer. Use the USB-C port **next to the power button**; the other port cannot be used for USB debugging.
-4. If the computer does not see the device, unplug the cable and plug it in again. With some computers the two sides occasionally negotiate the wrong way round, so that the tablet powers the computer and neither sees the other; see [known limitations](known-limitations.md#plugged-into-a-computer-the-tablet-may-charge-the-computer-instead).
+4. If the computer does not see the device, unplug the cable and plug it in again.
 5. If a cable is inconvenient, use [wireless debugging](#wireless-debugging).
 
 ### When Android starts

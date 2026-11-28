@@ -109,7 +109,6 @@ The table below lists the limitations to keep in mind in daily use. The full exp
 | Boot security | Secure Boot must be disabled | This is required to run a third-party OS on this machine; there is no way around it |
 | Google certification | The device is not Play Protect certified, so the Play Store works properly only after you register it manually | Register it once, following the [installation guide](docs/INSTALL.md#this-device-isnt-play-protect-certified) |
 | Use in mainland China | The system ships only Google apps and no Chinese app store | Use a third-party app store such as CoolApk |
-| Connecting to a computer | With some computers, the tablet may end up powering the computer, and neither side sees the other | Unplug and plug in again, or use another port on the computer |
 
 ## Contributing
 
