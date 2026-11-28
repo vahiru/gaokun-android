@@ -2,10 +2,11 @@
 <!--
   gaokun3 设备设置：磁吸键盘与手写笔设置（已连接的设备页）、防误触模式（显示页）、扬声器音效与
   麦克风降噪（提示音和振动页的「高级」分组）、性能模式（电池页）等，以及键盘、防误触两个控制中心磁贴。
+  设置首页的「MateBook E Go设置」（DeviceSettingsActivity）把这些条目集中列出。
 
   ★ 为什么是独立应用而不是改 Settings：
     用 Android 的 "Settings 注入" 机制（com.android.settings.action.IA_SETTINGS
-    + category meta-data），系统设置会自动把这一项收进「系统」页，
+    + category meta-data），系统设置会自动把各个条目收进对应的页面，
     【不需要】动 packages/apps/Settings，也不需要 LineageParts
     （实测这个 ROM 里根本没装 org.lineageos.lineageparts）。
     ⚠️ 2026-10-05 复核：这句与现在的构建对不上 —— vendor/lineage/config/common.mk:156 把 LineageParts 列进
@@ -42,6 +43,41 @@
         android:icon="@drawable/ic_keyboard"
         android:allowBackup="false"
         android:theme="@style/Theme.SubSettingsBase">
+
+        <!-- 「MateBook E Go设置」：设置首页通知、提示音和振动所在的分组（top_level_personalize_category）里
+             紧跟crDroid设置的条目，打开后集中列出本应用的
+             各个条目（DeviceSettingsActivity顶部）。分类ia.homepage = CategoryKey.CATEGORY_HOMEPAGE，
+             TopLevelSettings按它取注入条目；group_key是首页的分组键，order直接与首页条目的android:order比较。 -->
+        <activity
+            android:name="com.huawei.gaokun3.parts.DeviceSettingsActivity"
+            android:exported="true"
+            android:label="@string/device_settings_title">
+            <intent-filter>
+                <action android:name="com.android.settings.action.IA_SETTINGS" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <meta-data
+                android:name="com.android.settings.category"
+                android:value="com.android.settings.category.ia.homepage" />
+            <meta-data
+                android:name="com.android.settings.keyhint"
+                android:value="gaokun3_device_settings" />
+            <meta-data
+                android:name="com.android.settings.group_key"
+                android:value="top_level_personalize_category" />
+            <meta-data
+                android:name="com.android.settings.order"
+                android:value="-55" />
+            <meta-data
+                android:name="com.android.settings.title"
+                android:resource="@string/device_settings_title" />
+            <meta-data
+                android:name="com.android.settings.summary"
+                android:resource="@string/device_settings_summary" />
+            <meta-data
+                android:name="com.android.settings.icon"
+                android:resource="@drawable/ic_tablet" />
+        </activity>
 
         <!-- 磁吸键盘：「已连接的设备」页里的一个开关条目，没有单独的页面（KeyboardProvider.java）。
              注入方式与下面的性能模式相同；分类（ia.connect）在provider返回的条目数据里。
@@ -257,8 +293,8 @@
              ⚠️ android:permission 必须是 BIND_QUICK_SETTINGS_TILE —— 那是给
                 【系统】绑定这个服务用的权限声明，不是我们要申请的权限；
                 写错了 SystemUI 直接不认这个磁贴，而且不报错。
-             ⚠️ 磁贴不会自动出现在控制中心：用户要在快捷设置编辑页里手动加一次。
-                这是 Android 的设计，不是缺陷。 -->
+             两个磁贴由SystemUI在完成开机向导后自动加到控制中心末尾（rro/Gaokun3SystemUIQsOverlay），
+             每个用户只加一次。 -->
         <service
             android:name="com.huawei.gaokun3.parts.KeyboardTileService"
             android:exported="true"

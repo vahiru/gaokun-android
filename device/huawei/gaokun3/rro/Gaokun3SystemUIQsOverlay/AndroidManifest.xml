@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SystemUI RRO：自动添加Parts的控制中心磁贴，见Android.bp。 -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.android.systemui.gaokun3.qs"
+    android:versionCode="1"
+    android:versionName="1.0">
+    <application android:hasCode="false" />
+    <overlay
+        android:targetPackage="com.android.systemui"
+        android:priority="0"
+        android:isStatic="true" />
+</manifest>

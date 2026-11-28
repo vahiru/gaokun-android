@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Material Symbols的tablet图标（Outlined，填充），用于设置首页的「MateBook E Go设置」条目。
+     首页其他条目的图标也是Outlined填充样式；crDroid统一为首页图标着色。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="960"
+    android:viewportHeight="960"
+    android:tint="?android:attr/colorControlNormal">
+    <path
+        android:fillColor="@android:color/white"
+        android:pathData="M120,800Q87,800 63.5,776.5Q40,753 40,720L40,240Q40,207 63.5,183.5Q87,160 120,160L840,160Q873,160 896.5,183.5Q920,207 920,240L920,720Q920,753 896.5,776.5Q873,800 840,800L120,800ZM240,720L720,720L720,240L240,240L240,720Z" />
+</vector>

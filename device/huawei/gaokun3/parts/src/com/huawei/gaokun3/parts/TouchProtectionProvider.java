@@ -10,7 +10,8 @@
  * 开关与属性值的对应是反过来的：镜像默认game（device.mk），所以防误触模式默认关闭。
  * 只有字面值"daily"算开启，没设过或认不出的值都按关闭显示，与touchmode.rc一致。
  *
- * 控制中心的磁贴（TouchModeTileService）改的是同一个属性，改完通知设置刷新这个开关。
+ * 控制中心的磁贴（TouchModeTileService）和「MateBook E Go设置」页（DeviceSettingsActivity）改的是同一个属性，
+ * 改完通知设置刷新这个开关。
  */
 package com.huawei.gaokun3.parts;
 

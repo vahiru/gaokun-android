@@ -12,6 +12,8 @@
  * 性能模式的数值，关闭时按是否接电源在两套默认值之间自动切换。各档数值只在thermal/Thermal.cpp里。
  * 没设过或认不出的值都按关闭显示，与开机后的HAL一致（运行中HAL对认不出的值保持上一个模式）。
  * 用电池时也允许开启。
+ *
+ * 「MateBook E Go设置」页（DeviceSettingsActivity）也有这个开关，改的是同一个属性，改完通知设置刷新。
  */
 package com.huawei.gaokun3.parts;
 
@@ -28,7 +30,24 @@ import java.util.List;
 public class PerformanceModeProvider extends EntriesProvider {
 
     private static final String TAG = "PerformanceModeProvider";
+
+    static final String AUTHORITY = "com.huawei.gaokun3.parts.performancemode";
+    static final String KEY = "gaokun3_performance_mode";
     static final String PROP = "persist.sys.gaokun3.perf_mode";
+
+    /** 只有字面值"performance"算开启。 */
+    static boolean isEnabled() {
+        return "performance".equals(SystemProperties.get(PROP, ""));
+    }
+
+    /** SystemProperties.set()失败时抛出RuntimeException，由调用方处理。 */
+    static void setEnabled(boolean enabled) {
+        SystemProperties.set(PROP, enabled ? "performance" : "balanced");
+    }
+
+    static void notifySwitchChanged(Context context) {
+        SettingsEntryUris.notifySwitchChanged(context, AUTHORITY, KEY);
+    }
 
     @Override
     protected List<? extends EntryController> createEntryControllers() {
@@ -46,7 +65,7 @@ public class PerformanceModeProvider extends EntriesProvider {
         // 注入项的键会成为电池页上的偏好键，加前缀以免与设置自身的键重名。
         @Override
         public String getKey() {
-            return "gaokun3_performance_mode";
+            return KEY;
         }
 
         @Override
@@ -57,10 +76,9 @@ public class PerformanceModeProvider extends EntriesProvider {
                     .setIcon(R.drawable.ic_performance_mode);
         }
 
-        /** 只有字面值"performance"算开启。 */
         @Override
         public boolean isSwitchChecked() {
-            return "performance".equals(SystemProperties.get(PROP, ""));
+            return isEnabled();
         }
 
         // SystemProperties.set()失败时会抛出异常；在这里捕获并返回false，设置会提示错误并把开关
@@ -68,7 +86,7 @@ public class PerformanceModeProvider extends EntriesProvider {
         @Override
         public boolean onSwitchCheckedChanged(boolean checked) {
             try {
-                SystemProperties.set(PROP, checked ? "performance" : "balanced");
+                setEnabled(checked);
                 return true;
             } catch (RuntimeException e) {
                 Log.w(TAG, "cannot set " + PROP, e);

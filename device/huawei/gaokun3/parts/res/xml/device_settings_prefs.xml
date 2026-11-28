@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 「MateBook E Go设置」页（DeviceSettingsActivity）：把注入到设置各处的条目集中列出。
+     页面类条目以intent打开原有的页面或对话框；三个开关由DeviceSettingsActivity读写，
+     与设置里对应的开关条目改同一个属性。 -->
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <PreferenceCategory
+        android:key="category_input"
+        android:title="@string/device_settings_category_input">
+        <Preference
+            android:key="stylus"
+            android:title="@string/stylus_title"
+            android:summary="@string/stylus_summary"
+            android:icon="@drawable/ic_stylus">
+            <intent
+                android:targetPackage="com.huawei.gaokun3.parts"
+                android:targetClass="com.huawei.gaokun3.parts.StylusSettingsActivity" />
+        </Preference>
+        <SwitchPreferenceCompat
+            android:key="keyboard"
+            android:title="@string/keyboard_title"
+            android:summary="@string/keyboard_summary"
+            android:icon="@drawable/ic_keyboard"
+            android:persistent="false" />
+        <SwitchPreferenceCompat
+            android:key="touch_protection"
+            android:title="@string/touch_mode_title"
+            android:summary="@string/touch_mode_summary"
+            android:icon="@drawable/ic_touch_protection"
+            android:persistent="false" />
+    </PreferenceCategory>
+
+    <PreferenceCategory
+        android:key="category_sound"
+        android:title="@string/device_settings_category_sound">
+        <!-- 说明为当前选项，由DeviceSettingsActivity填写。 -->
+        <Preference
+            android:key="speaker_fx"
+            android:title="@string/speaker_fx_title"
+            android:icon="@drawable/ic_speaker">
+            <intent
+                android:targetPackage="com.huawei.gaokun3.parts"
+                android:targetClass="com.huawei.gaokun3.parts.SpeakerFxDialogActivity" />
+        </Preference>
+        <Preference
+            android:key="denoise"
+            android:title="@string/denoise_title"
+            android:summary="@string/denoise_summary"
+            android:icon="@drawable/ic_mic">
+            <intent
+                android:targetPackage="com.huawei.gaokun3.parts"
+                android:targetClass="com.huawei.gaokun3.parts.NoiseSuppressionSettingsActivity" />
+        </Preference>
+    </PreferenceCategory>
+
+    <PreferenceCategory
+        android:key="category_performance"
+        android:title="@string/device_settings_category_performance">
+        <SwitchPreferenceCompat
+            android:key="performance_mode"
+            android:title="@string/perf_mode_title"
+            android:summary="@string/perf_mode_summary"
+            android:icon="@drawable/ic_performance_mode"
+            android:persistent="false" />
+    </PreferenceCategory>
+
+    <PreferenceCategory
+        android:key="category_apps"
+        android:title="@string/device_settings_category_apps">
+        <Preference
+            android:key="parallel_view"
+            android:title="@string/parallel_view_title"
+            android:summary="@string/parallel_view_summary"
+            android:icon="@drawable/ic_parallel_view">
+            <intent
+                android:targetPackage="com.huawei.gaokun3.parts"
+                android:targetClass="com.huawei.gaokun3.parts.ParallelViewSettingsActivity" />
+        </Preference>
+        <Preference
+            android:key="gl_driver_version"
+            android:title="@string/gl_driver_version_title"
+            android:summary="@string/gl_driver_version_summary"
+            android:icon="@drawable/ic_gl_driver_version">
+            <intent
+                android:targetPackage="com.huawei.gaokun3.parts"
+                android:targetClass="com.huawei.gaokun3.parts.GlDriverVersionSettingsActivity" />
+        </Preference>
+        <Preference
+            android:key="app_kernel"
+            android:title="@string/app_kernel_title"
+            android:summary="@string/app_kernel_summary"
+            android:icon="@drawable/ic_app_kernel">
+            <intent
+                android:targetPackage="com.huawei.gaokun3.parts"
+                android:targetClass="com.huawei.gaokun3.parts.AppKernelSettingsActivity" />
+        </Preference>
+    </PreferenceCategory>
+
+    <!-- 与BootOptionsActivity一样，只在该activity已启用时显示（见BootEntryNotifier）。 -->
+    <PreferenceCategory
+        android:key="category_boot"
+        android:title="@string/device_settings_category_boot">
+        <Preference
+            android:key="boot_options"
+            android:title="@string/boot_options_title"
+            android:summary="@string/boot_options_summary"
+            android:icon="@drawable/ic_boot">
+            <intent
+                android:targetPackage="com.huawei.gaokun3.parts"
+                android:targetClass="com.huawei.gaokun3.parts.BootOptionsActivity" />
+        </Preference>
+    </PreferenceCategory>
+</PreferenceScreen>
