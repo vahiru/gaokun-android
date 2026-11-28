@@ -1,0 +1,77 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] app: keep game power mode on while a game is in the foreground
+
+GameManagerService turns Mode.GAME on when a game's uid reaches
+PROCESS_STATE_TOP. Since the disableGameModeWhenAppTop rollout it also
+tracks the other uids in the foreground and turns GAME off as soon as
+one of them joins a game there: an app next to the game in split screen
+or in a freeform window, or for a moment another app's activity that
+the game opens, such as a share sheet. GAME comes back on when that app
+leaves the foreground. Likewise, a game that joins an app already in the
+foreground does not turn GAME on until that app leaves.
+
+On this device GAME drives the automatic game settings: while a game is
+in the foreground, palm rejection is turned off and performance mode on
+(device/huawei/gaokun3/power/powerhint.json and the Parts switches).
+They should stay on while any game is visible, so track games only
+again: GAME on when the first game reaches the foreground, off when the
+last one leaves it. Nothing else in GameManagerService used the set of
+other foreground uids.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Inappropriate [device-specific policy]
+---
+ .../server/app/GameManagerService.java        | 19 ++++---------------
+ 1 file changed, 4 insertions(+), 15 deletions(-)
+
+diff --git a/services/core/java/com/android/server/app/GameManagerService.java b/services/core/java/com/android/server/app/GameManagerService.java
+index e14b5ac..3466e92 100644
+--- a/services/core/java/com/android/server/app/GameManagerService.java
++++ b/services/core/java/com/android/server/app/GameManagerService.java
+@@ -194,8 +194,6 @@ public final class GameManagerService extends IGameManagerService.Stub {
+     final MyUidObserver mUidObserver;
+     @GuardedBy("mUidObserverLock")
+     private final Set<Integer> mGameForegroundUids = new HashSet<>();
+-    @GuardedBy("mUidObserverLock")
+-    private final Set<Integer> mNonGameForegroundUids = new HashSet<>();
+     private final GameManagerServiceSystemPropertiesWrapper mSysProps;
+     private float mGameDefaultFrameRateValue;
+ 
+@@ -2337,15 +2335,12 @@ public final class GameManagerService extends IGameManagerService.Stub {
+             final boolean isNotGame = Arrays.stream(packages).noneMatch(
+                     p -> isPackageGame(p, userId));
+             synchronized (mUidObserverLock) {
++                // GAME stays on while any game is in the foreground, also next to other apps
++                // in split screen or freeform windows.
+                 if (isNotGame) {
+-                    if (!mGameForegroundUids.isEmpty() && mNonGameForegroundUids.isEmpty()) {
+-                        Slog.v(TAG, "Game power mode OFF (first non-game in foreground)");
+-                        mPowerManagerInternal.setPowerMode(Mode.GAME, false);
+-                    }
+-                    mNonGameForegroundUids.add(uid);
+                     return;
+                 }
+-                if (mGameForegroundUids.isEmpty() && mNonGameForegroundUids.isEmpty()) {
++                if (mGameForegroundUids.isEmpty()) {
+                     Slog.v(TAG, "Game power mode ON (first game in foreground)");
+                     mPowerManagerInternal.setPowerMode(Mode.GAME, true);
+                 }
+@@ -2362,16 +2357,10 @@ public final class GameManagerService extends IGameManagerService.Stub {
+             synchronized (mUidObserverLock) {
+                 if (mGameForegroundUids.contains(uid)) {
+                     mGameForegroundUids.remove(uid);
+-                    if (mGameForegroundUids.isEmpty() && mNonGameForegroundUids.isEmpty()) {
++                    if (mGameForegroundUids.isEmpty()) {
+                         Slog.v(TAG, "Game power mode OFF (no games in foreground)");
+                         mPowerManagerInternal.setPowerMode(Mode.GAME, false);
+                     }
+-                } else if (mNonGameForegroundUids.contains(uid)) {
+-                    mNonGameForegroundUids.remove(uid);
+-                    if (mNonGameForegroundUids.isEmpty() && !mGameForegroundUids.isEmpty()) {
+-                        Slog.v(TAG, "Game power mode ON (only games in foreground)");
+-                        mPowerManagerInternal.setPowerMode(Mode.GAME, true);
+-                    }
+                 }
+             }
+         }

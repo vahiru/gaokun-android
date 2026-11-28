@@ -12,7 +12,7 @@
 | `INTERACTION` | top-app的`uclamp.min`为30% | 触摸时由框架发出；本机无显示空闲节点（`vendor.powerhal.disp.idle_support=false`），HAL按固定时长处理（1.4–5.65秒） |
 | `EXPENSIVE_RENDERING` | GPU最低频率410 MHz | 对应Pixel的GPU最低频率提示 |
 | `FIXED_PERFORMANCE` | CPU与GPU频率下限都拉到最高 | 基准测试用 |
-| `GAME` | 把`vendor.gaokun3.game`设为1，结束后恢复为0（`GameActive`节点，`Property`类型） | 框架在声明为游戏类别或已加入游戏空间列表的应用位于前台时发出（`GameManagerService`），离开游戏、熄屏时结束，框架开机完成时也会结束一次；触摸模式（`etc/touchmode.rc`）与温控HAL（`thermal/`的`.rc`）据此在游戏期间自动关闭防误触、开启性能模式（Parts中的两个开关）。HAL启动节点写入线程之前，这个属性由`init.gaokun3.rc`先设为0 |
+| `GAME` | 把`vendor.gaokun3.game`设为1，结束后恢复为0（`GameActive`节点，`Property`类型） | 框架在声明为游戏类别或已加入游戏空间列表的应用位于前台时发出（`GameManagerService`），与其他应用同时位于前台时（分屏、自由窗口）也会开启并保持（`patches/android/frameworks-base/0011`），离开游戏、熄屏时结束，框架开机完成时也会结束一次；触摸模式（`etc/touchmode.rc`）与温控HAL（`thermal/`的`.rc`）据此在游戏期间自动关闭防误触、开启性能模式（Parts中的两个开关）。HAL启动节点写入线程之前，这个属性由`init.gaokun3.rc`先设为0 |
 | `LOW_POWER`（省电模式） | 小核、大核频率上限1209.6 MHz、1286.4 MHz | Windows的LowPower配置档把两类核心的最高性能限为50% |
 | `AC_POWER`（接电源） | 小核、大核频率下限1209.6 MHz、1056 MHz；解除`background`与`foreground_window`分组的频率上限 | Windows接电源时两类核心的最低性能为49%、39%（MinPerformance、MinPerformance1），这里按2688 MHz的大核取不低于它的频点 |
 
