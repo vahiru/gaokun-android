@@ -1,0 +1,48 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] Input: himax-spi: return a failed register write as an error
+
+himax_mcu_register_write() logs a failed data write, then switches the
+burst mode as it does after every write and returns what that returned,
+normally 0, so every caller takes the failed write as done: power-on
+init goes on as if the IC had taken its settings, and the IC command
+mailbox hands over a slot whose packet never arrived and moves on to the
+next one.  Every caller already checks the return value.  Still switch
+the burst mode as after a successful write, and then return the write's
+error.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/input/touchscreen/himax-spi-core.c | 9 +++++----
+ 1 file changed, 5 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/input/touchscreen/himax-spi-core.c b/drivers/input/touchscreen/himax-spi-core.c
+index 1f3f76fe06..e7b2922cd9 100644
+--- a/drivers/input/touchscreen/himax-spi-core.c
++++ b/drivers/input/touchscreen/himax-spi-core.c
+@@ -346,7 +346,7 @@ static int himax_mcu_register_read(struct himax_ts_data *ts, u32 addr, u8 *buf,
+ /* Write the internal (SRAM)address and data to AHB register */
+ static int himax_mcu_register_write(struct himax_ts_data *ts, u32 addr, const u8 *buf, u32 len)
+ {
+-	int ret;
++	int ret, burst;
+ 
+ 	union himax_dword_data target_addr;
+ 
+@@ -357,11 +357,12 @@ static int himax_mcu_register_write(struct himax_ts_data *ts, u32 addr, const u8
+ 	target_addr.dword = cpu_to_le32(addr);
+ 	ret = himax_write(ts, HIMAX_AHB_ADDR_BYTE_0,
+ 				target_addr.byte, buf, len + HIMAX_REG_SZ);
+-	if (ret < 0) {
++	if (ret < 0)
+ 		dev_err(ts->dev, "%s: write ahb_addr_byte_0 failed\n", __func__);
+-	}
+ 
+-	return himax_mcu_set_burst_mode(ts, !(len > HIMAX_REG_SZ));
++	/* switch the burst mode as after a successful write, then report the write's error */
++	burst = himax_mcu_set_burst_mode(ts, !(len > HIMAX_REG_SZ));
++	return ret < 0 ? ret : burst;
+ }
+ 
+ /*
