@@ -51,6 +51,9 @@
     <string name="touch_mode_summary">Reduce accidental palm touches, for example when writing with the M-Pencil</string>
     <string name="touch_mode_tile_label">Touch protection</string>
     <string name="touch_mode_error">Couldn\'t change accidental touch protection. Please report this to the developers.</string>
+    <!-- Accidental touch protection is turned off while a game is in the foreground and back on after it. -->
+    <string name="touch_mode_game_auto_title">Turn off accidental touch protection for games</string>
+    <string name="touch_mode_game_auto_summary">Turn off accidental touch protection automatically while a game is running in the foreground.</string>
 
     <!-- Kernel version spoofing (AppKernelSettingsActivity), injected into Settings → System. -->
     <string name="app_kernel_title">Kernel version spoofing</string>
@@ -131,4 +134,7 @@
     <string name="perf_mode_title">Performance mode</string>
     <string name="perf_mode_summary">Turn on to raise the temperature limits of the processor and GPU under heavy load, for long periods of heavy use such as games.</string>
     <string name="perf_mode_error">Couldn\'t change performance mode</string>
+    <!-- Performance mode is turned on while a game is in the foreground and back off after it. -->
+    <string name="perf_mode_game_auto_title">Turn on performance mode for games</string>
+    <string name="perf_mode_game_auto_summary">Turn on performance mode automatically while a game is running in the foreground.</string>
 </resources>

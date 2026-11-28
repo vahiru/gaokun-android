@@ -10,8 +10,19 @@ service vendor.thermal-gaokun3 /vendor/bin/hw/android.hardware.thermal-service.g
 # Parts是system_app，不能设置vendor属性，HAL又无法读取system_prop，所以按字面值转成非持久的
 # vendor.gaokun3.perf_mode；开机加载持久属性时这些触发器会再执行一次。认不出的值不转：开机后HAL按
 # 关闭处理，运行中则保持上一个值。
+#
+# 游戏时自动开启性能模式（persist.sys.gaokun3.perf_mode_auto=1，Parts的开关）：性能模式关闭（balanced）时，
+# 游戏在前台（vendor.gaokun3.game=1，Power HAL按框架的GAME模式设置，见power/README.md）期间转写为
+# performance，离开游戏后恢复balanced；用户设置的perf_mode本身不改。三个属性任一变化时，只有与新状态
+# 相符的触发器会执行。perf_mode的默认值balanced在device.mk中设置。
 on property:persist.sys.gaokun3.perf_mode=performance
     setprop vendor.gaokun3.perf_mode performance
 
-on property:persist.sys.gaokun3.perf_mode=balanced
+on property:persist.sys.gaokun3.perf_mode=balanced && property:vendor.gaokun3.game=0
     setprop vendor.gaokun3.perf_mode balanced
+
+on property:persist.sys.gaokun3.perf_mode=balanced && property:persist.sys.gaokun3.perf_mode_auto=0
+    setprop vendor.gaokun3.perf_mode balanced
+
+on property:persist.sys.gaokun3.perf_mode=balanced && property:vendor.gaokun3.game=1 && property:persist.sys.gaokun3.perf_mode_auto=1
+    setprop vendor.gaokun3.perf_mode performance

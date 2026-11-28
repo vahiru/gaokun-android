@@ -1329,6 +1329,15 @@ PRODUCT_COPY_FILES += \
 PRODUCT_SYSTEM_EXT_PROPERTIES += \
     persist.sys.gaokun3.touch_mode=game
 
+# 游戏时自动关闭防误触、自动开启性能模式（Parts的两个开关，默认开启）。touchmode.rc与温控HAL的.rc按
+# 它们和vendor.gaokun3.game（Power HAL按框架的GAME模式设置）决定实际生效的预设，用户的设置不改。
+# perf_mode给出默认值balanced（与未设置时的含义相同），这样从未切换过性能模式时，自动开启的触发器
+# 也有值可比。
+PRODUCT_SYSTEM_EXT_PROPERTIES += \
+    persist.sys.gaokun3.touch_mode_auto=1 \
+    persist.sys.gaokun3.perf_mode=balanced \
+    persist.sys.gaokun3.perf_mode_auto=1
+
 # Kernel release reported to apps (patches/kernel/core/0008), changed in Settings → System. init hands it
 # to the kernel before zygote starts; everything that is not an app keeps the real release.
 # Some environment checks accept only 4.x to 6.x; this value is what 0085 used to report to
