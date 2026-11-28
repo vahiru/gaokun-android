@@ -763,7 +763,7 @@ static int pen_pairable(unsigned int id)
 	return 0;
 }
 
-/* pen generation for the Parts notifications: 2, 3, or 0 if not known */
+/* pen generation for Parts (popup, settings page): 2, 3, or 0 if not known */
 static int pen_generation(unsigned int id)
 {
 	return id == 0x00011b || id == 0x01011b ? 2 : pen_pairable(id) ? 3 : 0;
@@ -776,9 +776,16 @@ static int pen_generation(unsigned int id)
  *   pen_unpaired  1 while a pen is writing whose pressure does not reach us
  *                 (see UNPAIRED_* below), else 0
  *   pen_paired    "<ms>,<generation>" for each completed pairing (0x16 = 1);
- *                 the time keeps two pairings in one boot apart
- *   pen_nib_loose "<ms>" from when writing shows a loose nib (see NIB_*
- *                 below), a new value each time; 0 once it reads healthy again
+ *                 ms is CLOCK_BOOTTIME (counts suspend, as Java's
+ *                 elapsedRealtime), which keeps two pairings apart and
+ *                 lets Parts tell a fresh event from one before a suspend
+ *   pen_nib_loose "<ms>" (CLOCK_MONOTONIC) from when writing shows a loose
+ *                 nib (see NIB_* below), a new value each time; 0 once it
+ *                 reads healthy again
+ *   pen_docked    "<ms>" (CLOCK_BOOTTIME, as above) each time the pen is put
+ *                 on the charging dock (event 0x28, which Huawei PC Manager
+ *                 answers with its battery window); Parts shows the
+ *                 pen's battery then
  *   pen_conn      0 while no pen is connected (0x71 = 0, or not reported
  *                 yet), else the connected pen's generation: 2 or 3, 1 for
  *                 a model id that is not known or not reported yet
@@ -797,15 +804,14 @@ static void pen_state(const char *name, const char *value)
 #endif
 }
 
-static void pen_state_paired(long long t, int generation)
+static void pen_state_paired(int generation)
 {
 #ifdef __BIONIC__
 	char v[32];
 
-	snprintf(v, sizeof(v), "%lld,%d", t, generation);
+	snprintf(v, sizeof(v), "%lld,%d", clock_ms(CLOCK_BOOTTIME), generation);
 	pen_state("pen_paired", v);
 #else
-	(void)t;
 	(void)generation;
 #endif
 }
@@ -1022,6 +1028,12 @@ static int mcu_events(struct mcu *m, const unsigned char *b, int n, long long t,
 				printf("%lld pen connected: init params sent\n", t);
 			}
 		}
+		if (e[5] == 0x28) {	/* put on the dock: Parts shows the battery */
+			char v[24];
+
+			snprintf(v, sizeof(v), "%lld", clock_ms(CLOCK_BOOTTIME));
+			pen_state("pen_docked", v);
+		}
 		if (e[5] == 0x2F && len && e[8] == 1)
 			taps++;
 		if (e[5] == 0x7F && len)
@@ -1075,7 +1087,7 @@ static int mcu_events(struct mcu *m, const unsigned char *b, int n, long long t,
 			if (e[8] == 1) {
 				/* hint off first: Parts reads pen_paired before pen_unpaired */
 				unpaired_clear(t, "pen paired");
-				pen_state_paired(t, pen_generation(m->pair_model));
+				pen_state_paired(pen_generation(m->pair_model));
 			}
 		}
 		if (e[5] == 0x03 && len) {			/* firmware version, ASCII */

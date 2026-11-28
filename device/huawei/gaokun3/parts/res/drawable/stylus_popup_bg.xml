@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- StylusBatteryPopup 的背景：圆角卡片，颜色随主题（深浅色、动态取色）。 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <corners android:radius="24dp" />
+    <solid android:color="?attr/colorSurfaceContainerHigh" />
+</shape>
