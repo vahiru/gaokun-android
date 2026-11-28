@@ -31,7 +31,7 @@
 | 文档 | 内容说明 |
 |---|---|
 | [dev/hardware.md](dev/hardware.md) | 硬件清单与平台基线：SoC/外设拓扑、BIOS 2.16引脚警告、DRM/DSI显示、USB控制器分工、专有固件清单与`efi_pstore`崩溃日志机制 |
-| [dev/android-bringup.md](dev/android-bringup.md) | Android系统移植总览：UEFI双阶段启动链路、必选内核Kconfig项、温控/电源/导航栏HAL、Wi-Fi 6E与蓝牙集成、SELinux策略与内置`ReSukiSU` |
+| [dev/android-bringup.md](dev/android-bringup.md) | Android系统移植总览：UEFI双阶段启动链路、必选内核Kconfig项、温控/电源/导航栏HAL、桌面模式、Wi-Fi 6E与蓝牙集成、SELinux策略与内置`ReSukiSU` |
 | [dev/gpu-turnip.md](dev/gpu-turnip.md) | Adreno 690 GPU加速架构：Turnip + ANGLE + DPU图形栈、`VkNativeBufferANDROID`延迟绑定修复、GPU SMMU中断与带宽投票修复、GPU抢占、游戏/应用专项修复及P010零拷贝合成 |
 | [dev/mesa-a17.md](dev/mesa-a17.md) | Android 17上的Mesa 26.1 Turnip构建管线（`meson2hermetic`与`scripts/mesa-a17/`） |
 | [dev/audio-video.md](dev/audio-video.md) | 音频与硬件视频编解码：Audioreach/SoundWire拓扑、扬声器增益与防爆音、有线耳机插拔检测、内置麦克风录音、低延迟音频播放、蓝牙耳机通话（HFP软件数据通路）及`qcom-iris`视频硬件编解码 |

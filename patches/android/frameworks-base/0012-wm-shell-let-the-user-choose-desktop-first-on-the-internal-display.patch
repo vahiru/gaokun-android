@@ -1,0 +1,193 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] WM Shell: let the user choose desktop-first on the internal
+ display
+
+DesktopDisplayModeController makes the default display desktop-first
+(freeform windowing mode, apps open in desktop windows) while a
+desktop-capable external display is connected, while an enabled
+touchpad and an enabled full keyboard are present, or while the device
+state reports a laptop hardware configuration. A tablet whose keyboard
+cover stays connected over a wireless link after it is detached has
+the touchpad and keyboard all the time, so its display would never be
+touch-first, and an external display would turn the tablet's own
+display into a desktop as well.
+
+Add config_desktopFirstFollowsUserSetting. When it is set and the
+internal display can host desktop sessions, the default display is
+desktop-first exactly when the per-user Settings.Secure
+"desktop_first_on_default_display" is non-zero, and touch-first when
+it is 0 or unset. External displays, input devices and the device
+state no longer change the default display; the input device listener
+and the device state callback are not registered. The setting is
+observed, and read again after a user switch. External displays still
+become desktop-first on their own. The config defaults to false, which
+keeps the existing behaviour.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Inappropriate [device-specific policy]
+---
+ core/res/res/values/config.xml                |  6 ++
+ core/res/res/values/symbols.xml               |  1 +
+ .../DesktopDisplayModeController.kt           | 66 +++++++++++++++++--
+ 3 files changed, 69 insertions(+), 4 deletions(-)
+
+diff --git a/core/res/res/values/config.xml b/core/res/res/values/config.xml
+index c1e8a7a..491a4f0 100644
+--- a/core/res/res/values/config.xml
++++ b/core/res/res/values/config.xml
+@@ -7764,6 +7764,12 @@
+     <!-- Whether the current device's internal display can host desktop sessions.  -->
+     <bool name="config_canInternalDisplayHostDesktops">false</bool>
+ 
++    <!-- Whether the internal display switches between touch-first and desktop-first only as the
++         user chooses with the per-user Settings.Secure "desktop_first_on_default_display",
++         instead of following external displays, a connected touchpad and keyboard, and the
++         device state. Applies when the internal display can host desktop sessions. -->
++    <bool name="config_desktopFirstFollowsUserSetting">false</bool>
++
+     <!-- Whether desktop mode is supported on the current device  -->
+     <bool name="config_isDesktopModeSupported">false</bool>
+ 
+diff --git a/core/res/res/values/symbols.xml b/core/res/res/values/symbols.xml
+index 9be70a3..9997afb 100644
+--- a/core/res/res/values/symbols.xml
++++ b/core/res/res/values/symbols.xml
+@@ -6284,6 +6284,7 @@
+ 
+   <!-- Whether the current device's internal display can host desktop sessions.  -->
+   <java-symbol type="bool" name="config_canInternalDisplayHostDesktops" />
++  <java-symbol type="bool" name="config_desktopFirstFollowsUserSetting" />
+ 
+   <!-- Maximum number of active tasks on a given Desktop Windowing session. Set to 0 for unlimited. -->
+   <java-symbol type="integer" name="config_maxDesktopWindowingActiveTasks"/>
+diff --git a/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/desktopfirst/DesktopDisplayModeController.kt b/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/desktopfirst/DesktopDisplayModeController.kt
+index c5580da..ad850da 100644
+--- a/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/desktopfirst/DesktopDisplayModeController.kt
++++ b/libs/WindowManager/Shell/src/com/android/wm/shell/desktopmode/desktopfirst/DesktopDisplayModeController.kt
+@@ -21,11 +21,13 @@ import android.app.WindowConfiguration.WINDOWING_MODE_FULLSCREEN
+ import android.app.WindowConfiguration.WINDOWING_MODE_UNDEFINED
+ import android.app.WindowConfiguration.windowingModeToString
+ import android.content.Context
++import android.database.ContentObserver
+ import android.hardware.devicestate.DeviceState
+ import android.hardware.devicestate.DeviceStateManager
+ import android.hardware.input.InputManager
+ import android.os.Handler
+ import android.os.SystemProperties
++import android.os.UserHandle
+ import android.provider.Settings
+ import android.provider.Settings.Global.DEVELOPMENT_FORCE_DESKTOP_MODE_ON_EXTERNAL_DISPLAYS
+ import android.util.IndentingPrintWriter
+@@ -35,6 +37,7 @@ import android.view.InputDevice
+ import android.view.WindowManager.TRANSIT_CHANGE
+ import android.window.DesktopExperienceFlags
+ import android.window.WindowContainerTransaction
++import com.android.internal.R
+ import com.android.internal.annotations.VisibleForTesting
+ import com.android.internal.protolog.ProtoLog
+ import com.android.window.flags.Flags
+@@ -127,17 +130,45 @@ class DesktopDisplayModeController(
+             }
+         }
+ 
++    /**
++     * Whether the user chooses between touch-first and desktop-first for the default display,
++     * with [DESKTOP_FIRST_ON_DEFAULT_DISPLAY], instead of it following external displays, input
++     * devices and the device state. For devices whose keyboard cover cannot tell whether it is
++     * attached.
++     */
++    private val desktopFirstFollowsUserSetting =
++        context.resources.getBoolean(R.bool.config_desktopFirstFollowsUserSetting)
++
++    private val userSettingObserver =
++        object : ContentObserver(mainHandler) {
++            override fun onChange(selfChange: Boolean) {
++                updateDefaultDisplayWindowingMode()
++            }
++        }
++
+     init {
+         shellInit.addInitCallback({ onInit() }, this)
+-        inputManager.registerInputDeviceListener(inputDeviceListener, mainHandler)
+-        if (Flags.enableDesktopFirstLaptopStateBugfix()) {
+-            deviceStateManager.registerCallback(mainExecutor, deviceStateCallback)
++        // With the user's choice, input devices and the device state do not change the mode.
++        if (!desktopFirstFollowsUserSetting) {
++            inputManager.registerInputDeviceListener(inputDeviceListener, mainHandler)
++            if (Flags.enableDesktopFirstLaptopStateBugfix()) {
++                deviceStateManager.registerCallback(mainExecutor, deviceStateCallback)
++            }
+         }
+     }
+ 
+     private fun onInit() {
+         shellCommandHandler.addDumpCallback(this::dump, this)
+-        if (Flags.enableDesktopFirstUserChangeBugfix()) {
++        if (desktopFirstFollowsUserSetting) {
++            context.contentResolver.registerContentObserver(
++                Settings.Secure.getUriFor(DESKTOP_FIRST_ON_DEFAULT_DISPLAY),
++                /* notifyForDescendants= */ false,
++                userSettingObserver,
++                UserHandle.USER_ALL,
++            )
++        }
++        // With the user's choice, the setting of the new user applies after a user switch.
++        if (Flags.enableDesktopFirstUserChangeBugfix() || desktopFirstFollowsUserSetting) {
+             shellController.addUserChangeListener(
+                 object : UserChangeListener {
+                     override fun onUserChanged(newUserId: Int, userContext: Context) {
+@@ -252,6 +283,14 @@ class DesktopDisplayModeController(
+             isDefaultDisplayDesktopEligible,
+         )
+         if (isDefaultDisplayDesktopEligible) {
++            if (desktopFirstFollowsUserSetting) {
++                val isDesktopFirstChosenByUser = isDesktopFirstChosenByUser()
++                logV(
++                    "canDesktopFirstModeBeEnabledOnDefaultDisplay: isDesktopFirstChosenByUser=%b",
++                    isDesktopFirstChosenByUser,
++                )
++                return isDesktopFirstChosenByUser
++            }
+             val isExtendedDisplayEnabled = isExtendedDisplayEnabled()
+             val hasExternalDisplay = hasExternalDisplay()
+             logV(
+@@ -335,6 +374,14 @@ class DesktopDisplayModeController(
+         return desktopState.isDesktopModeSupportedOnDisplay(DEFAULT_DISPLAY)
+     }
+ 
++    private fun isDesktopFirstChosenByUser() =
++        Settings.Secure.getIntForUser(
++            context.contentResolver,
++            DESKTOP_FIRST_ON_DEFAULT_DISPLAY,
++            0,
++            UserHandle.USER_CURRENT,
++        ) != 0
++
+     // TODO(b/478792808): Remove suppression
+     @SuppressWarnings("ProtoLogNonConstantFormat")
+     private fun logV(msg: String, vararg arguments: Any?) {
+@@ -372,6 +419,10 @@ class DesktopDisplayModeController(
+         if (Flags.enableDesktopFirstLaptopStateBugfix()) {
+             pw.println("isDesktopFirstDeviceState=" + isDesktopFirstDeviceState)
+         }
++        pw.println("desktopFirstFollowsUserSetting=" + desktopFirstFollowsUserSetting)
++        if (desktopFirstFollowsUserSetting) {
++            pw.println("isDesktopFirstChosenByUser=" + isDesktopFirstChosenByUser())
++        }
+ 
+         pw.println("Current Desktop Display Modes:")
+         pw.increaseIndent()
+@@ -383,5 +434,12 @@ class DesktopDisplayModeController(
+ 
+     companion object {
+         private const val TAG = "DesktopDisplayModeController"
++
++        /**
++         * [Settings.Secure] key, per user: a non-zero value makes the default display
++         * desktop-first, 0 or unset touch-first. Read only with
++         * config_desktopFirstFollowsUserSetting.
++         */
++        const val DESKTOP_FIRST_ON_DEFAULT_DISPLAY = "desktop_first_on_default_display"
+     }
+ }

@@ -54,6 +54,14 @@ UEFI 2.16 (关闭Secure Boot)
 - **导航栏与侧滑返回手势**：平板设备必须在framework overlay（`overlay/frameworks/base/core/res/res/values/config.xml`）中声明`config_showNavigationBar = true`。在Android中，全屏边缘侧滑返回（Edge Back Gesture）的输入监听器由`NavigationBar` / `Taskbar`组件负责创建；若未启用该项，系统既无底部任务栏也无法响应侧滑返回手势。
 - **游戏兼容、内存与待机**：游戏兼容性、内存与调度调优详见[gaming.md](gaming.md)，深度待机（`s2idle`）详见[deep-sleep.md](deep-sleep.md)。
 
+### 3. 桌面模式
+
+- **开启方式**：`config_isDesktopModeSupported`与`config_canInternalDisplayHostDesktops`由crDroid的`vendor/lineage` overlay（`overlay/common`与`overlay/tablet`）设为`true`，内屏与外接屏都可以承载桌面，多桌面随桌面模式一起提供。这棵树中`vendor/lineage`的overlay优先于设备overlay，两者都设置的值无法在设备overlay中更改。
+- **触屏优先与桌面优先**：AOSP的`DesktopDisplayModeController`（WMShell）在接入外接屏、同时存在已启用的触控板与全尺寸键盘、或设备状态为笔记本形态时，把内屏切换为桌面优先（窗口模式为freeform，应用默认在桌面窗口中打开），否则为触屏优先（应用默认全屏打开，可经应用顶部的把手移入桌面窗口）。这一切换需要aconfig标志`enable_display_windowing_mode_switching`，本ROM中为只读开启。键盘保护套取下后仍通过无线保持连接，触控板与键盘始终存在，内屏会一直处于桌面优先。`patches/android/frameworks-base/0012`新增`config_desktopFirstFollowsUserSetting`（设备overlay中开启）：内屏只按当前用户的`Settings.Secure` `desktop_first_on_default_display`切换，未设置或为0时为触屏优先；外接屏仍自行进入桌面优先，不再带动内屏切换。
+- **设置入口**：「MateBook E Go设置 → 显示 → 桌面模式」开关与控制中心的桌面模式磁贴（`DesktopModeTileService`，完成开机向导后自动添加）都读写这项设置（Parts的`DesktopModeSetting`）。
+- **与平行视界**：全屏打开的应用照常分栏；桌面窗口中按窗口本身的宽度决定是否分栏，见[parallel-view.md](parallel-view.md)。
+- **验证**：`adb shell settings get secure desktop_first_on_default_display`读取当前选择，`adb shell dumpsys activity service SystemUIService WMShell`中`DesktopDisplayModeController`一节列出`desktopFirstFollowsUserSetting`、`isDesktopFirstChosenByUser`与各屏幕的`isDesktopFirst`。
+
 ## 四、无线网络（Wi-Fi 6E）与蓝牙（Bluetooth 5.2）
 
 ### 1. Wi-Fi（WCN6855 / `ath11k_pci`）

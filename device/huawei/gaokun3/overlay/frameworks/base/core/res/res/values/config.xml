@@ -61,66 +61,19 @@
     <bool name="config_useDevInputEventForAudioJack">true</bool>
 
     <!--
-      Android 16 desktop windowing: deliberately turned OFF.
+      桌面模式：内屏可以承载桌面，默认为触屏优先（平板模式），用户在Parts的“桌面模式”
+      开关中切换为桌面优先（patches/android/frameworks-base/0012）。
 
-      It was switched on briefly and switched back off at the user's request:
-      on this tablet it puts every app into a freeform window, which is
-      disruptive for normal use.
+      config_isDesktopModeSupported与config_canInternalDisplayHostDesktops由vendor/lineage
+      的overlay（overlay/common与overlay/tablet）设为true，这里不声明。这棵树中
+      PRODUCT_PACKAGE_OVERLAYS（vendor/lineage）优先于DEVICE_PACKAGE_OVERLAYS（本文件），
+      两者都设置的值以vendor/lineage为准；本文件的其他值有效，是因为vendor/lineage没有设置它们。
 
-      ⚠️★ These must be explicit `false` overrides, not just "leave them out".
-      crDroid turns desktop mode on for **every** device:
-
-        vendor/lineage/overlay/common/frameworks/base/core/res/res/values/
-        config.xml:98   <bool name="config_isDesktopModeSupported">true</bool>
-
-      ⚠️★ And writing `false` **here** does not work either. Measured twice:
-      the build assertion still reported `config_isDesktopModeSupported 还是
-      true` with this file saying false. In this tree
-      **PRODUCT_PACKAGE_OVERLAYS (vendor/lineage) outranks
-      DEVICE_PACKAGE_OVERLAYS (this file)** — the opposite of the usual
-      claim that the device overlay wins. Our other values here work only
-      because vendor/lineage does not touch them (checked name by name:
-      config_isDesktopModeSupported is the single conflict).
-      The actual disable is done by patches/android/vendor-lineage/0001, which
-      edits vendor/lineage/overlay/common directly. The entries below are
-      kept only to state intent.
-
-      Removing our own entry therefore changed nothing — the build assertion
-      caught it (`config_isDesktopModeSupported 还是 true`). Ours is a
-      DEVICE_PACKAGE_OVERLAYS overlay, which outranks vendor/lineage's
-      PRODUCT_PACKAGE_OVERLAYS, so an explicit false here wins.
-
-      ★ This also corrects an earlier misreading: the upstream reference
-      (dragon-lineage's Radxa Dragon commit d480d02) sets *only*
-      config_canInternalDisplayHostDesktops, and that is in fact correct and
-      sufficient for a Lineage-based tree, because Lineage already supplies
-      config_isDesktopModeSupported=true. Checking AOSP's default (false)
-      without checking the ROM's own overlays is what led to the wrong call.
-
-      ⚠️ There is no runtime way back — the developer-options toggle can only
-      force desktop mode ON. Measured on device:
-
-        show_desktop_experience_dev_option = true
-
-      and DesktopModeFlags.getToggleOverrideFromSystem() short-circuits on it:
-
-        if (Flags.showDesktopExperienceDevOption()) {
-            if (DesktopExperienceFlags.getToggleOverride()) return OVERRIDE_ON;
-            return ToggleOverride.OVERRIDE_UNSET;      // never OVERRIDE_OFF
-        }
-
-      so Settings.Global "override_desktop_mode_features" is dead here —
-      verified: writing 0 changed nothing. "Off by default, opt in later" is
-      likewise not expressible, because canEnterDesktopMode() is
-      isDeviceEligibleForDesktopMode() && ENABLE_DESKTOP_WINDOWING_MODE, the
-      aconfig flag is already true, and being eligible at all therefore means
-      "always on".
-
-      ⇒ To enable desktop windowing again, flip these two to true and rebuild.
+      AOSP在接入外接屏、同时存在已启用的触控板与全尺寸键盘、或设备状态为笔记本形态时，
+      把内屏切换为桌面优先。键盘保护套取下后仍通过无线保持连接，触控板与键盘始终存在，
+      内屏会一直处于桌面优先，所以内屏只按用户的选择切换。
     -->
-    <bool name="config_isDesktopModeSupported">false</bool>
-    <bool name="config_canInternalDisplayHostDesktops">false</bool>
-    <bool name="config_isDesktopModeDevOptionSupported">false</bool>
+    <bool name="config_desktopFirstFollowsUserSetting">true</bool>
 
 
     <!--
@@ -147,8 +100,7 @@
       那个假说是错的：桌面模式已经关了、窗口是 fullscreen，手势照样没有。
 
       ★ Lineage 不覆盖这一项（逐名核对过 vendor/lineage 的 common overlay），
-      所以设备 overlay 在这里是有效的 —— 不像 config_isDesktopModeSupported
-      那样要靠patches/android/vendor-lineage/0001去改。
+      所以设备 overlay 在这里是有效的。
     -->
     <bool name="config_showNavigationBar">true</bool>
 

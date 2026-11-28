@@ -7,6 +7,7 @@
     <string name="device_settings_summary">Stylus, detachable keyboard, performance mode</string>
     <string name="device_settings_category_input">Input</string>
     <string name="device_settings_category_sound">Sound</string>
+    <string name="device_settings_category_display">Display</string>
     <string name="device_settings_category_performance">Performance</string>
     <string name="device_settings_category_apps">Apps</string>
     <string name="device_settings_category_boot">Startup</string>
@@ -54,6 +55,10 @@
     <!-- Accidental touch protection is turned off while a game is in the foreground and back on after it. -->
     <string name="touch_mode_game_auto_title">Turn off accidental touch protection for games</string>
     <string name="touch_mode_game_auto_summary">Turn off accidental touch protection automatically while a game is running in the foreground.</string>
+    <!-- MateBook E Go settings → Display → Desktop mode; Quick Settings tile -->
+    <string name="desktop_mode_title">Desktop mode</string>
+    <string name="desktop_mode_summary">Open apps as windows in desktop mode by default</string>
+    <string name="desktop_mode_tile_label">Desktop mode</string>
 
     <!-- Kernel version spoofing (AppKernelSettingsActivity), injected into Settings → System. -->
     <string name="app_kernel_title">Kernel version spoofing</string>

@@ -8,5 +8,6 @@
         <item>accessibility_force_invert_color_enabled:dark</item>
         <item>user_setup_complete:custom(com.huawei.gaokun3.parts/.KeyboardTileService)</item>
         <item>user_setup_complete:custom(com.huawei.gaokun3.parts/.TouchModeTileService)</item>
+        <item>user_setup_complete:custom(com.huawei.gaokun3.parts/.DesktopModeTileService)</item>
     </string-array>
 </resources>

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- 「MateBook E Go设置」页（DeviceSettingsActivity）：把注入到设置各处的条目集中列出。
-     页面类条目以intent打开原有的页面或对话框；五个开关由DeviceSettingsActivity读写，
-     与设置里对应的开关条目改同一个属性。两个「为游戏自动…」开关只在起作用时可用：
+     页面类条目以intent打开原有的页面或对话框；各开关由DeviceSettingsActivity读写，
+     与设置里对应的开关条目或控制中心的磁贴改同一个属性或设置。两个「为游戏自动…」开关只在起作用时可用：
      防误触模式开启时，或性能模式关闭时（disableDependentsState）。 -->
 <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android">
 
@@ -58,6 +58,17 @@
                 android:targetPackage="com.huawei.gaokun3.parts"
                 android:targetClass="com.huawei.gaokun3.parts.NoiseSuppressionSettingsActivity" />
         </Preference>
+    </PreferenceCategory>
+
+    <PreferenceCategory
+        android:key="category_display"
+        android:title="@string/device_settings_category_display">
+        <SwitchPreferenceCompat
+            android:key="desktop_mode"
+            android:title="@string/desktop_mode_title"
+            android:summary="@string/desktop_mode_summary"
+            android:icon="@drawable/ic_desktop_mode"
+            android:persistent="false" />
     </PreferenceCategory>
 
     <PreferenceCategory

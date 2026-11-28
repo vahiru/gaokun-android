@@ -7,6 +7,7 @@
     <string name="device_settings_summary">手写笔、磁吸键盘、性能模式</string>
     <string name="device_settings_category_input">输入</string>
     <string name="device_settings_category_sound">声音</string>
+    <string name="device_settings_category_display">显示</string>
     <string name="device_settings_category_performance">性能</string>
     <string name="device_settings_category_apps">应用</string>
     <string name="device_settings_category_boot">启动</string>
@@ -43,6 +44,10 @@
     <!-- 游戏时自动关闭防误触 -->
     <string name="touch_mode_game_auto_title">为游戏自动关闭防误触</string>
     <string name="touch_mode_game_auto_summary">前台运行游戏时自动关闭防误触。</string>
+    <!-- MateBook E Go设置 → 显示 → 桌面模式；控制中心的桌面模式磁贴 -->
+    <string name="desktop_mode_title">桌面模式</string>
+    <string name="desktop_mode_summary">使应用默认以窗口形式在桌面模式下打开</string>
+    <string name="desktop_mode_tile_label">桌面模式</string>
 
     <!-- 设置 → 系统 → 内核版本伪装 -->
     <string name="app_kernel_title">内核版本伪装</string>

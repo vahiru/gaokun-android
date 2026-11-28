@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   gaokun3 设备设置：磁吸键盘与手写笔设置（已连接的设备页）、防误触模式（显示页）、扬声器音效与
-  麦克风降噪（提示音和振动页的「高级」分组）、性能模式（电池页）等，以及键盘、防误触两个控制中心磁贴。
+  麦克风降噪（提示音和振动页的「高级」分组）、性能模式（电池页）等，以及键盘、防误触与桌面模式三个控制中心磁贴。
   设置首页的「MateBook E Go设置」（DeviceSettingsActivity）把这些条目集中列出。
 
   ★ 为什么是独立应用而不是改 Settings：
@@ -293,7 +293,7 @@
              ⚠️ android:permission 必须是 BIND_QUICK_SETTINGS_TILE —— 那是给
                 【系统】绑定这个服务用的权限声明，不是我们要申请的权限；
                 写错了 SystemUI 直接不认这个磁贴，而且不报错。
-             两个磁贴由SystemUI在完成开机向导后自动加到控制中心末尾（rro/Gaokun3SystemUIQsOverlay），
+             这几个磁贴由SystemUI在完成开机向导后自动加到控制中心末尾（rro/Gaokun3SystemUIQsOverlay），
              每个用户只加一次。 -->
         <service
             android:name="com.huawei.gaokun3.parts.KeyboardTileService"
@@ -312,6 +312,18 @@
             android:exported="true"
             android:icon="@drawable/ic_touch_protection"
             android:label="@string/touch_mode_tile_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <!-- 桌面模式磁贴，注意事项同上面键盘磁贴。 -->
+        <service
+            android:name="com.huawei.gaokun3.parts.DesktopModeTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_desktop_mode"
+            android:label="@string/desktop_mode_tile_label"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
             <intent-filter>
                 <action android:name="android.service.quicksettings.action.QS_TILE" />
