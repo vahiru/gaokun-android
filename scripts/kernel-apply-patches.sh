@@ -110,7 +110,7 @@ KPATCHES=(
     kernel/wifi/0027-wifi-ath11k-keep-the-system-awake-briefly-after-a-WoW-wakeup.patch
     kernel/wifi/0028-wifi-ath11k-report-the-boottime-of-beacons-and-probe-responses.patch
 
-    # ─── 4. kernel/ec-usb：华为高鲲 EC、电池、Type-C UCSI、USB Gadget 与 xHCI ───
+    # ─── 4. kernel/ec-usb：华为高鲲 EC、电池、Type-C UCSI、USB Gadget、xHCI 与 dwc3 ───
     # 0009 与 USB 端口 HAL（device/huawei/gaokun3/usb）配套；0010 与 kernel/dts/0015 配套；
     # 0011 引入 CONFIG_USB_ANDROID_USB_STATE=y（kernel-config-android.sh 开启并断言）。
     kernel/ec-usb/0001-power-supply-gaokun-battery-decode-status-bits-and-capacity-level.patch
@@ -132,6 +132,8 @@ KPATCHES=(
     kernel/ec-usb/0017-usb-typec-ucsi-huawei_gaokun-acknowledge-USB-events-after-a-failed-init.patch
     kernel/ec-usb/0018-usb-typec-ucsi-add-a-quirk-to-retry-the-initialization-after-a-timeout.patch
     kernel/ec-usb/0019-usb-typec-ucsi-huawei_gaokun-retry-the-initialization-after-a-timeout.patch
+    kernel/ec-usb/0020-usb-xhci-fail-system-suspend-while-a-USB2-port-is-resuming.patch
+    kernel/ec-usb/0021-usb-dwc3-qcom-legacy-don-t-lose-a-remote-wakeup-during-system-suspend.patch
 
     # ─── 5. kernel/drm：DRM 核心、MSM DPU 色彩与平面、DSI PHY、Himax 面板、MSM GPU ───
     # 显示色彩详见 docs/dev/display-color.md。0003 与 kernel/dts/0017 配套；
