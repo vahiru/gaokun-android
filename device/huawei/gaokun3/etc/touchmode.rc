@@ -25,11 +25,30 @@ service gaokun3_touch_daily /vendor/bin/gaokun3-touch-mode.sh daily
     oneshot
     disabled
 
+# 游戏时自动关闭防误触（persist.sys.gaokun3.touch_mode_auto=1，Parts的开关）：防误触开启（daily）时，
+# 只要游戏在前台（vendor.gaokun3.game=1，Power HAL按框架的GAME模式设置，见power/README.md）就改用
+# game预设，离开游戏后恢复daily；用户设置的touch_mode本身不改。判断放在init中，因为vendor域的脚本
+# 无法读取persist.sys.*所在的system_prop（核心策略的neverallow禁止非coredomain读取，见
+# sepolicy/hal_audio_default.te）。三个属性任一变化时，下面只有与新状态相符的触发器会执行（daily的
+# 两条可能同时执行，结果相同）。先停另一个服务、再启动目标服务，两个预设快速交替时以最后一次为准，
+# 不会两个脚本同时写。目标服务已在运行时，它写入的就是目标预设，所以用start而不用restart：restart
+# 会杀掉刚启动的脚本，按init的重启间隔5秒后才重跑。目标服务刚被停止、尚未退出时，start让init在它
+# 退出后重新启动（同样按5秒的间隔）。
 on property:persist.sys.gaokun3.touch_mode=game
+    stop gaokun3_touch_daily
     start gaokun3_touch_game
 
-on property:persist.sys.gaokun3.touch_mode=daily
+on property:persist.sys.gaokun3.touch_mode=daily && property:vendor.gaokun3.game=0
+    stop gaokun3_touch_game
     start gaokun3_touch_daily
+
+on property:persist.sys.gaokun3.touch_mode=daily && property:persist.sys.gaokun3.touch_mode_auto=0
+    stop gaokun3_touch_game
+    start gaokun3_touch_daily
+
+on property:persist.sys.gaokun3.touch_mode=daily && property:vendor.gaokun3.game=1 && property:persist.sys.gaokun3.touch_mode_auto=1
+    stop gaokun3_touch_daily
+    start gaokun3_touch_game
 
 # 开机补一次：属性触发器在 init 早期不会重放，而触摸驱动 probe 也要时间。
 on boot && property:persist.sys.gaokun3.touch_mode=game

@@ -40,6 +40,9 @@
     <string name="touch_mode_summary">减少在使用M-Pencil书写等场景下的手掌误触</string>
     <string name="touch_mode_tile_label">防误触</string>
     <string name="touch_mode_error">切换失败，请向开发者反馈。</string>
+    <!-- 游戏时自动关闭防误触 -->
+    <string name="touch_mode_game_auto_title">为游戏自动关闭防误触</string>
+    <string name="touch_mode_game_auto_summary">前台运行游戏时自动关闭防误触。</string>
 
     <!-- 设置 → 系统 → 内核版本伪装 -->
     <string name="app_kernel_title">内核版本伪装</string>
@@ -115,4 +118,7 @@
     <string name="perf_mode_title">性能模式</string>
     <string name="perf_mode_summary">开启性能模式可提高处理器和GPU在高负载下的温度上限，适合游戏等长时间高负载的场景。</string>
     <string name="perf_mode_error">无法更改性能模式</string>
+    <!-- 游戏时自动开启性能模式 -->
+    <string name="perf_mode_game_auto_title">为游戏自动开启性能模式</string>
+    <string name="perf_mode_game_auto_summary">在前台运行游戏时自动开启性能模式。</string>
 </resources>

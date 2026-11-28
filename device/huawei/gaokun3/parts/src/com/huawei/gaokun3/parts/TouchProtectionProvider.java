@@ -3,7 +3,7 @@
  * （PerformanceModeProvider），provider受WRITE_SECURE_SETTINGS保护。
  *
  * 只做一件事：把persist.sys.gaokun3.touch_mode设成"daily"（开启，识别手掌）或"game"（关闭，
- * 不识别手掌）。init（etc/touchmode.rc的两条字面值触发器）起/vendor/bin/gaokun3-touch-mode.sh写驱动的
+ * 不识别手掌）。init（etc/touchmode.rc的触发器）起/vendor/bin/gaokun3-touch-mode.sh写驱动的
  * algo/参数，两个预设只差手掌识别，差别只看那个脚本。切换立即生效，重启后保留。
  * persist.sys.*是system_prop，system_app能直接写，不必绕vendor属性。
  *
@@ -12,6 +12,10 @@
  *
  * 控制中心的磁贴（TouchModeTileService）和「MateBook E Go设置」页（DeviceSettingsActivity）改的是同一个属性，
  * 改完通知设置刷新这个开关。
+ *
+ * 紧随其后的第二个开关「为游戏自动关闭防误触」写persist.sys.gaokun3.touch_mode_auto（"1"/"0"，默认"1"，
+ * device.mk）：防误触开启时，游戏在前台期间由touchmode.rc改用game预设，离开游戏后恢复，touch_mode本身不改。
+ * 只有字面值"1"算开启，与touchmode.rc一致。
  */
 package com.huawei.gaokun3.parts;
 
@@ -46,9 +50,26 @@ public class TouchProtectionProvider extends EntriesProvider {
         SettingsEntryUris.notifySwitchChanged(context, AUTHORITY, KEY);
     }
 
+    static final String GAME_AUTO_KEY = "gaokun3_touch_protection_game_auto";
+    static final String GAME_AUTO_PROP = "persist.sys.gaokun3.touch_mode_auto";
+
+    static boolean isGameAutoEnabled() {
+        return "1".equals(SystemProperties.get(GAME_AUTO_PROP, ""));
+    }
+
+    /** SystemProperties.set()失败时抛出RuntimeException，由调用方处理。 */
+    static void setGameAutoEnabled(boolean enabled) {
+        SystemProperties.set(GAME_AUTO_PROP, enabled ? "1" : "0");
+    }
+
+    static void notifyGameAutoSwitchChanged(Context context) {
+        SettingsEntryUris.notifySwitchChanged(context, AUTHORITY, GAME_AUTO_KEY);
+    }
+
     @Override
     protected List<? extends EntryController> createEntryControllers() {
-        return List.of(new TouchProtectionController(getContext()));
+        return List.of(new TouchProtectionController(getContext()),
+                new GameAutoController(getContext()));
     }
 
     static class TouchProtectionController extends EntryController implements ProviderSwitch {
@@ -86,6 +107,49 @@ public class TouchProtectionProvider extends EntriesProvider {
                 return true;
             } catch (RuntimeException e) {
                 Log.w(TAG, "cannot set " + PROP, e);
+                return false;
+            }
+        }
+
+        @Override
+        public String getSwitchErrorMessage(boolean attemptedChecked) {
+            return mContext.getString(R.string.touch_mode_error);
+        }
+    }
+
+    /** 「为游戏自动关闭防误触」，与防误触模式开关同在「设置 → 显示」，排在它之后。 */
+    static class GameAutoController extends EntryController implements ProviderSwitch {
+
+        private final Context mContext;
+
+        GameAutoController(Context context) {
+            mContext = context;
+        }
+
+        @Override
+        public String getKey() {
+            return GAME_AUTO_KEY;
+        }
+
+        @Override
+        protected MetaData getMetaData() {
+            return new MetaData("com.android.settings.category.ia.display")
+                    .setTitle(R.string.touch_mode_game_auto_title)
+                    .setSummary(R.string.touch_mode_game_auto_summary);
+        }
+
+        @Override
+        public boolean isSwitchChecked() {
+            return isGameAutoEnabled();
+        }
+
+        @Override
+        public boolean onSwitchCheckedChanged(boolean checked) {
+            try {
+                setGameAutoEnabled(checked);
+                return true;
+            } catch (RuntimeException e) {
+                Log.w(TAG, "cannot set " + GAME_AUTO_PROP, e);
                 return false;
             }
         }

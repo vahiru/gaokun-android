@@ -14,3 +14,7 @@ typeattribute hal_power_default mlstrustedsubject;
 allow hal_power_default appdomain:process { getsched setsched };
 allow hal_power_default system_server:process setsched;
 allow hal_power_default self:capability sys_nice;
+
+# powerhint.json的GameActive节点（Property类型）：GAME模式期间把vendor.gaokun3.game设为1，结束后恢复为0，
+# 供touchmode.rc与温控HAL的.rc判断游戏是否在前台。
+set_prop(hal_power_default, vendor_gaokun3_prop)

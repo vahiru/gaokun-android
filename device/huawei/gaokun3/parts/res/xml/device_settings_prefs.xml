@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- 「MateBook E Go设置」页（DeviceSettingsActivity）：把注入到设置各处的条目集中列出。
-     页面类条目以intent打开原有的页面或对话框；三个开关由DeviceSettingsActivity读写，
-     与设置里对应的开关条目改同一个属性。 -->
+     页面类条目以intent打开原有的页面或对话框；五个开关由DeviceSettingsActivity读写，
+     与设置里对应的开关条目改同一个属性。两个「为游戏自动…」开关只在起作用时可用：
+     防误触模式开启时，或性能模式关闭时（disableDependentsState）。 -->
 <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android">
 
     <PreferenceCategory
@@ -27,6 +28,12 @@
             android:title="@string/touch_mode_title"
             android:summary="@string/touch_mode_summary"
             android:icon="@drawable/ic_touch_protection"
+            android:persistent="false" />
+        <SwitchPreferenceCompat
+            android:key="touch_protection_game_auto"
+            android:title="@string/touch_mode_game_auto_title"
+            android:summary="@string/touch_mode_game_auto_summary"
+            android:dependency="touch_protection"
             android:persistent="false" />
     </PreferenceCategory>
 
@@ -61,6 +68,13 @@
             android:title="@string/perf_mode_title"
             android:summary="@string/perf_mode_summary"
             android:icon="@drawable/ic_performance_mode"
+            android:disableDependentsState="true"
+            android:persistent="false" />
+        <SwitchPreferenceCompat
+            android:key="performance_mode_game_auto"
+            android:title="@string/perf_mode_game_auto_title"
+            android:summary="@string/perf_mode_game_auto_summary"
+            android:dependency="performance_mode"
             android:persistent="false" />
     </PreferenceCategory>
 

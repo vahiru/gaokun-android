@@ -22,6 +22,10 @@
 # 开机先上锁：属性触发器要等 property_service 起来才跑，那之前不许睡。
 on init
     write /sys/power/wake_lock gaokun3_nosuspend
+    # 游戏是否在前台（power/powerhint.json的GameActive节点，Power HAL按框架的GAME模式设置）。
+    # HAL要到开机完成后才写入节点的默认值，在此之前先设为0，touchmode.rc与温控HAL的.rc中按它判断的
+    # 触发器从开机起就有确定的值可比。
+    setprop vendor.gaokun3.game 0
 
 # 总开关，device.mk 的默认值是 1；属性名用 vendor 前缀的理由见 device.mk。
 # 设成 0 的机器：=1 的触发器开机时可能先按镜像默认值跑一次（持久属性加载得比属性触发器晚），

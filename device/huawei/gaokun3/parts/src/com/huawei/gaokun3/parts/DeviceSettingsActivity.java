@@ -6,8 +6,8 @@
  * top_level_personalize_category分组，com.android.settings.order为-55，排在crDroid设置（-60）与
  * 通知（-50）之间。首页的注入项直接使用这个order（首页没有占位条目，不加偏移）。
  *
- * 原有的条目都保留在原处。页面类条目以intent打开原有的activity；磁吸键盘、防误触模式与性能模式
- * 三个开关在这里直接读写，与设置里的开关条目改同一个属性（各Provider的isEnabled()/setEnabled()），
+ * 原有的条目都保留在原处。页面类条目以intent打开原有的activity；磁吸键盘、防误触模式、性能模式
+ * 与两个「为游戏自动…」开关在这里直接读写，与设置里的开关条目改同一个属性（各Provider的isEnabled()/setEnabled()），
  * 改完通知设置刷新对应的开关条目。控制中心的磁贴改动属性后也会发出同一通知，本页监听这些URI，
  * 下拉控制中心切换时开关随即更新。
  *
@@ -53,7 +53,9 @@ public class DeviceSettingsActivity extends CollapsingToolbarBaseActivity {
 
         private SwitchPreferenceCompat mKeyboard;
         private SwitchPreferenceCompat mTouchProtection;
+        private SwitchPreferenceCompat mTouchGameAuto;
         private SwitchPreferenceCompat mPerformanceMode;
+        private SwitchPreferenceCompat mPerfGameAuto;
         private Preference mSpeakerFx;
         private Preference mBootCategory;
 
@@ -70,12 +72,16 @@ public class DeviceSettingsActivity extends CollapsingToolbarBaseActivity {
             setPreferencesFromResource(R.xml.device_settings_prefs, rootKey);
             mKeyboard = findPreference("keyboard");
             mTouchProtection = findPreference("touch_protection");
+            mTouchGameAuto = findPreference("touch_protection_game_auto");
             mPerformanceMode = findPreference("performance_mode");
+            mPerfGameAuto = findPreference("performance_mode_game_auto");
             mSpeakerFx = findPreference("speaker_fx");
             mBootCategory = findPreference("category_boot");
             mKeyboard.setOnPreferenceChangeListener(this);
             mTouchProtection.setOnPreferenceChangeListener(this);
+            mTouchGameAuto.setOnPreferenceChangeListener(this);
             mPerformanceMode.setOnPreferenceChangeListener(this);
+            mPerfGameAuto.setOnPreferenceChangeListener(this);
         }
 
         // 从各页面或扬声器音效对话框返回时onResume，重新读取全部状态。
@@ -85,7 +91,9 @@ public class DeviceSettingsActivity extends CollapsingToolbarBaseActivity {
             refresh();
             observe(KeyboardProvider.AUTHORITY, KeyboardProvider.KEY);
             observe(TouchProtectionProvider.AUTHORITY, TouchProtectionProvider.KEY);
+            observe(TouchProtectionProvider.AUTHORITY, TouchProtectionProvider.GAME_AUTO_KEY);
             observe(PerformanceModeProvider.AUTHORITY, PerformanceModeProvider.KEY);
+            observe(PerformanceModeProvider.AUTHORITY, PerformanceModeProvider.GAME_AUTO_KEY);
         }
 
         @Override
@@ -106,7 +114,9 @@ public class DeviceSettingsActivity extends CollapsingToolbarBaseActivity {
             }
             mKeyboard.setChecked(KeyboardProvider.isEnabled());
             mTouchProtection.setChecked(TouchProtectionProvider.isEnabled());
+            mTouchGameAuto.setChecked(TouchProtectionProvider.isGameAutoEnabled());
             mPerformanceMode.setChecked(PerformanceModeProvider.isEnabled());
+            mPerfGameAuto.setChecked(PerformanceModeProvider.isGameAutoEnabled());
             mSpeakerFx.setSummary(SpeakerFxDialogActivity.currentLabel(context));
             mBootCategory.setVisible(context.getPackageManager().getComponentEnabledSetting(
                     new ComponentName(context, BootOptionsActivity.class))
@@ -125,15 +135,22 @@ public class DeviceSettingsActivity extends CollapsingToolbarBaseActivity {
                 } else if (preference == mTouchProtection) {
                     TouchProtectionProvider.setEnabled(checked);
                     TouchProtectionProvider.notifySwitchChanged(context);
+                } else if (preference == mTouchGameAuto) {
+                    TouchProtectionProvider.setGameAutoEnabled(checked);
+                    TouchProtectionProvider.notifyGameAutoSwitchChanged(context);
                 } else if (preference == mPerformanceMode) {
                     PerformanceModeProvider.setEnabled(checked);
                     PerformanceModeProvider.notifySwitchChanged(context);
+                } else if (preference == mPerfGameAuto) {
+                    PerformanceModeProvider.setGameAutoEnabled(checked);
+                    PerformanceModeProvider.notifyGameAutoSwitchChanged(context);
                 }
                 return true;
             } catch (RuntimeException e) {
                 Log.w(TAG, "cannot change " + preference.getKey(), e);
                 int error = preference == mKeyboard ? R.string.keyboard_error
-                        : preference == mTouchProtection ? R.string.touch_mode_error
+                        : preference == mTouchProtection || preference == mTouchGameAuto
+                                ? R.string.touch_mode_error
                         : R.string.perf_mode_error;
                 Toast.makeText(context, error, Toast.LENGTH_SHORT).show();
                 return false;
