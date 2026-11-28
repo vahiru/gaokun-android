@@ -1,0 +1,574 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] Input: himax-spi: let the IC idle while nothing touches the panel
+
+With the screen on the IC scans at 120 Hz and the driver reads and
+processes every 5 KB frame whether or not anything touches the panel:
+120 touch and 120 SPI interrupts a second and about 1.3 % of a CPU.
+Unbinding the driver on a still screen saved 0.33-0.4 W of 5.4 W.
+
+The firmware has an IDLE scan.  Asked through its command mailbox (five
+16-byte slots at 0x10007550, written the way the vendor's Windows driver
+writes them), it sends a frame only every three seconds or so, says so
+in status word 0, and wakes up by itself when a finger or the pen comes.
+After idle_ms (default 3000, <= 0 = never) of frames without a zone, a
+track or the firmware's finger flag, send enter-IDLE, up to 8 times
+100 ms apart.  If the IC still scans a second after the last one, or
+wakes up again with nothing on the panel, wait idle_ms again and ask
+again.  Times, not frame counts, so this holds at any scan rate.  The
+mailbox and its write pointer are cleared at every init, as the Windows
+driver does.  IDLE frames go through the pipeline as usual: their raw
+grid stays within the noise of a normal empty frame (154 at most apart,
+baseline_gate is 305).
+
+The cascade slave slows down in IDLE as well.  himax-cascade.h shares
+two things with its driver.  Whether the IC is idle, while its frames
+say so and from the first enter-IDLE until a touch, a wake-up or a new
+wait: the slave then sends a frame every three seconds or so too, so the
+pen driver neither counts reads without a new frame as bad nor lets its
+watchdog re-init the slave, as long as a frame with the 5a a5 header
+came within 10 s (a slave that a master reset took down sends none).
+And when the pen was last in use (a frame with the pen in it, or
+userspace's hint that the pen controller is reporting): the pen leaves
+no trace in the master's frames, so for 3 s after pen use frames do not
+count as quiet (IDLE is requested idle_ms after that), as in the
+vendor's software.  An IC already in IDLE is not forced out: it wakes up
+when it notices the pen, and the vendor's software does not force it out
+either.  The pen driver now depends on the touchscreen driver.
+
+The stats attribute gains idle_cmds, idle_frames, ic_idle and
+idle_state.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/input/touchscreen/Kconfig             |   1 +
+ drivers/input/touchscreen/himax-cascade.h     |  24 +++
+ drivers/input/touchscreen/himax-spi-core.c    | 204 ++++++++++++++++++
+ .../input/touchscreen/himax_hx83121a_pen.c    |  60 +++++-
+ drivers/input/touchscreen/hx-algo.c           |   1 +
+ drivers/input/touchscreen/hx-algo.h           |   6 +
+ 6 files changed, 288 insertions(+), 8 deletions(-)
+ create mode 100644 drivers/input/touchscreen/himax-cascade.h
+
+diff --git a/drivers/input/touchscreen/Kconfig b/drivers/input/touchscreen/Kconfig
+index 2633766180..93309f4b57 100644
+--- a/drivers/input/touchscreen/Kconfig
++++ b/drivers/input/touchscreen/Kconfig
+@@ -1434,6 +1434,7 @@ config TOUCHSCREEN_HIMAX_HX83121A_SPI
+ config TOUCHSCREEN_HIMAX_HX83121A_PEN
+ 	tristate "Himax HX83121A cascade slave (active pen)"
+ 	depends on SPI && POWER_SUPPLY
++	depends on TOUCHSCREEN_HIMAX_HX83121A_SPI
+ 	depends on DRM || !DRM
+ 	help
+ 	  Say Y here to enable the pen-sensing cascade slave of the Himax
+diff --git a/drivers/input/touchscreen/himax-cascade.h b/drivers/input/touchscreen/himax-cascade.h
+new file mode 100644
+index 0000000000..3c077d67ba
+--- /dev/null
++++ b/drivers/input/touchscreen/himax-cascade.h
+@@ -0,0 +1,24 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * What the two HX83121A drivers on the HUAWEI MateBook E Go share.  The
++ * master (himax-spi, finger touch) and the cascade slave (himax_hx83121a_pen,
++ * active pen) are one controller, so the master's IDLE request also slows
++ * the slave's frames, and the master must not ask for IDLE while the pen is
++ * in use.
++ */
++#ifndef _HIMAX_CASCADE_H
++#define _HIMAX_CASCADE_H
++
++#include <linux/types.h>
++
++/*
++ * True while the master's frames say IDLE, and from its first enter-IDLE
++ * request until the panel is touched, the IC scans normally again or the
++ * master starts its wait over; false after every init.
++ */
++bool himax_hx83121a_ic_idle(void);
++
++/* The pen is in use: the master does not ask for IDLE for a while. */
++void himax_hx83121a_pen_active(void);
++
++#endif
+diff --git a/drivers/input/touchscreen/himax-spi-core.c b/drivers/input/touchscreen/himax-spi-core.c
+index 7d264238a2..1f3f76fe06 100644
+--- a/drivers/input/touchscreen/himax-spi-core.c
++++ b/drivers/input/touchscreen/himax-spi-core.c
+@@ -32,6 +32,7 @@ MODULE_PARM_DESC(disable_pressure, "Disable ABS_MT_TOUCH_MAJOR and ABS_MT_PRESSU
+ 
+ #include <drm/drm_panel.h>
+ 
++#include "himax-cascade.h"
+ #include "hx-algo.h"
+ 
+ #define HIMAX_BUS_RETRY					3
+@@ -138,6 +139,12 @@ struct himax_ts_data {
+ 	struct touchscreen_properties props;
+ 	struct drm_panel_follower panel_follower;
+ 	struct delayed_work panel_reinit_work;
++	/* IC command mailbox and IDLE, see himax_send_command() */
++	u8 cmd_slot;
++	u8 idle_state;
++	u8 idle_requests;
++	bool ic_idle;
++	unsigned long idle_at;
+ 	/* frame checks, see himax_frame_valid() */
+ 	bool frame_checks;
+ 	u8 bad_frames;
+@@ -148,10 +155,22 @@ struct himax_ts_data {
+ 
+ static void himax_report_tracked_state(struct himax_ts_data *ts, bool report_on);
+ static int himax_disable_fw_reload(struct himax_ts_data *ts);
++static void himax_idle_reset(struct himax_ts_data *ts);
++static int himax_cmd_clear(struct himax_ts_data *ts);
+ static int himax_mcu_power_on_init(struct himax_ts_data *ts);
+ static int himax_mcu_check_crc(struct himax_ts_data *ts, u32 start_addr,
+ 			       int reload_length, u32 *crc_result);
+ 
++/* ts->idle_state, see himax_idle_update() */
++enum himax_idle_state {
++	HIMAX_IDLE_BUSY,	/* something on the panel, or IDLE is off */
++	HIMAX_IDLE_WAIT,	/* quiet; ask at idle_at */
++	HIMAX_IDLE_ASKED,	/* enter-IDLE sent; next step at idle_at */
++	HIMAX_IDLE_ON,		/* the IC scans in IDLE */
++};
++
++static const char *const himax_idle_names[] = { "busy", "wait", "asked", "on" };
++
+ /*
+  * 1st byte is the spi function select, 2nd byte is the command belong to the
+  * spi function and 3rd byte is the dummy byte for IC to process the command.
+@@ -748,6 +767,7 @@ static int himax_hw_reinit(struct himax_ts_data *ts, bool check_crc)
+ 
+ 	himax_release_all_touches(ts);
+ 	ts->bad_frames = 0;
++	himax_idle_reset(ts);
+ 
+ 	ret = hx83121a_chip_detect(ts);
+ 	if (ret) {
+@@ -774,6 +794,8 @@ static int himax_hw_reinit(struct himax_ts_data *ts, bool check_crc)
+ 	ret = himax_mcu_power_on_init(ts);
+ 	if (ret < 0)
+ 		dev_err(ts->dev, "%s: power-on init failed\n", __func__);
++	else if (himax_cmd_clear(ts))
++		dev_warn(ts->dev, "%s: clearing the command mailbox failed\n", __func__);
+ 
+ out_enable_irq:
+ 	if (!ret)
+@@ -808,6 +830,7 @@ static int himax_hw_reinit_retry(struct himax_ts_data *ts, bool check_crc,
+ static void himax_power_down(struct himax_ts_data *ts)
+ {
+ 	himax_release_all_touches(ts);
++	himax_idle_reset(ts);
+ 	gpiod_set_value_cansleep(ts->gpiod_rst, 1);
+ }
+ 
+@@ -1142,6 +1165,8 @@ HX_ALGO_ATTR_BOOL_RW(track_tap_snap);
+ HX_ALGO_ATTR_S32_RW(track_filter_mincutoff);
+ HX_ALGO_ATTR_S32_RW(track_filter_beta);
+ HX_ALGO_ATTR_S32_RW(track_filter_dcutoff);
++/* IC */
++HX_ALGO_ATTR_S32_RW(idle_ms);
+ HX_ALGO_ATTR_U8_RW(track_lost_frames);
+ HX_ALGO_ATTR_U8_RW(track_fw_lost_frames);
+ HX_ALGO_ATTR_U8_RW(debounce_base);
+@@ -1171,6 +1196,10 @@ static ssize_t stats_show(struct device *dev, struct device_attribute *attr,
+ 	n += sysfs_emit_at(buf, n, "fw_resets         %u\n", st->fw_resets);
+ 	n += sysfs_emit_at(buf, n, "recoveries        %u\n", st->recoveries);
+ 	n += sysfs_emit_at(buf, n, "frame_checks      %u\n", ts->frame_checks);
++	n += sysfs_emit_at(buf, n, "idle_cmds         %u\n", st->idle_cmds);
++	n += sysfs_emit_at(buf, n, "idle_frames       %u\n", st->idle_frames);
++	n += sysfs_emit_at(buf, n, "ic_idle           %u\n", ts->ic_idle);
++	n += sysfs_emit_at(buf, n, "idle_state        %s\n", himax_idle_names[ts->idle_state]);
+ 	n += sysfs_emit_at(buf, n, "frames            %u\n", st->frames);
+ 	n += sysfs_emit_at(buf, n, "frames_reported   %u\n", st->frames_reported);
+ 	n += sysfs_emit_at(buf, n, "zones             %u\n", st->zones);
+@@ -1301,6 +1330,7 @@ static struct attribute *hx_algo_attrs[] = {
+ 	&dev_attr_track_filter_mincutoff.attr,
+ 	&dev_attr_track_filter_beta.attr,
+ 	&dev_attr_track_filter_dcutoff.attr,
++	&dev_attr_idle_ms.attr,
+ 	&dev_attr_stats.attr,
+ 	&dev_attr_contacts_log.attr,
+ 	NULL,
+@@ -1485,6 +1515,171 @@ static void himax_frame_rejected(struct himax_ts_data *ts, bool now, const char
+ 	himax_frame_recover(ts, why);
+ }
+ 
++/* One HX83121A cascade per machine: this state is not per device. */
++static atomic_t himax_cascade_idle = ATOMIC_INIT(0);
++static atomic_long_t himax_cascade_pen_seen = ATOMIC_LONG_INIT(0);	/* jiffies, 0 = never */
++
++bool himax_hx83121a_ic_idle(void)
++{
++	return atomic_read(&himax_cascade_idle);
++}
++EXPORT_SYMBOL_GPL(himax_hx83121a_ic_idle);
++
++void himax_hx83121a_pen_active(void)
++{
++	atomic_long_set(&himax_cascade_pen_seen, jiffies | 1);
++}
++EXPORT_SYMBOL_GPL(himax_hx83121a_pen_active);
++
++/*
++ * The firmware takes commands through a mailbox of five 16-byte slots, used in
++ * turn: A8 8A, the command, 00, its parameter, and in the last word the 16-bit
++ * value that makes the eight little-endian words sum to zero.  The slot is
++ * written with its first two bytes zeroed, then the four-byte header, which
++ * hands it over, and read back; only then is the next slot used.  The
++ * vendor's Windows driver clears the slots and the write pointer at every
++ * start, before its reset; here it is done once the firmware runs again.
++ */
++#define HIMAX_CMD_SLOT_ADDR		0x10007550
++#define HIMAX_CMD_SLOTS			5
++#define HIMAX_CMD_PTR_ADDR		0x1000753c
++#define HIMAX_CMD_ENTER_IDLE		0x0a
++/* Status word 0 is 1 while the IC scans in IDLE. */
++#define HIMAX_STATUS_IDLE		0
++
++static int himax_cmd_clear(struct himax_ts_data *ts)
++{
++	u8 zero[HIMAX_CMD_SLOTS * 16] = { 0 };
++	int ret;
++
++	ret = himax_mcu_register_write(ts, HIMAX_CMD_SLOT_ADDR, zero, sizeof(zero));
++	if (!ret)
++		ret = himax_mcu_register_write(ts, HIMAX_CMD_PTR_ADDR, zero, HIMAX_REG_SZ);
++	return ret;
++}
++
++static int himax_send_command(struct himax_ts_data *ts, u8 cmd, u8 param)
++{
++	u32 addr = HIMAX_CMD_SLOT_ADDR + 16 * ts->cmd_slot;
++	u8 pkt[16] = { 0xa8, 0x8a, cmd, 0, param };
++	u8 back[16];
++	u32 sum = 0;
++	int i, ret;
++
++	for (i = 0; i < 14; i += 2)
++		sum += get_unaligned_le16(pkt + i);
++	put_unaligned_le16(-sum, pkt + 14);
++	pkt[0] = 0;
++	pkt[1] = 0;
++	ret = himax_mcu_register_write(ts, addr, pkt, sizeof(pkt));
++	if (!ret) {
++		pkt[0] = 0xa8;
++		pkt[1] = 0x8a;
++		ret = himax_mcu_register_write(ts, addr, pkt, HIMAX_REG_SZ);
++	}
++	if (!ret)
++		ret = himax_mcu_register_read(ts, addr, back, sizeof(back));
++	if (ret) {
++		dev_warn_ratelimited(ts->dev, "command %#x failed: %d\n", cmd, ret);
++		return ret;
++	}
++	ts->cmd_slot = (ts->cmd_slot + 1) % HIMAX_CMD_SLOTS;
++	return 0;
++}
++
++/*
++ * IDLE: with nothing on the panel for idle_ms the IC is asked to drop to its
++ * slow IDLE scan, in which it sends a frame every three seconds or so and
++ * wakes up by itself when a finger or the pen comes.  A frame is quiet
++ * without a zone, a track or the firmware's finger flag.  The pen leaves no
++ * trace in the master's frames, so the slave's driver reports pen use, and
++ * for HIMAX_PEN_IDLE_HOLD_MS after it IDLE is not requested, as by the
++ * vendor's Windows software.
++ *
++ * While the IC keeps scanning, enter-IDLE is sent again every
++ * HIMAX_IDLE_RETRY_MS, HIMAX_IDLE_MAX_REQUESTS times in all.  If the IC still
++ * scans HIMAX_IDLE_GIVE_UP_MS after the last one, or wakes up again with
++ * nothing on the panel, the wait starts over and it is asked again idle_ms
++ * later.  Times rather than frame counts, so this holds at any scan rate.
++ *
++ * The pen driver is told IDLE while the frames say so, and from the first
++ * enter-IDLE on (the slave slows down at once, while the master can send a
++ * few more frames as before) until the panel is touched, the IC wakes up or
++ * the wait starts over.
++ */
++#define HIMAX_PEN_IDLE_HOLD_MS		3000
++#define HIMAX_IDLE_RETRY_MS		100
++#define HIMAX_IDLE_MAX_REQUESTS		8
++#define HIMAX_IDLE_GIVE_UP_MS		1000
++
++static void himax_idle_set(struct himax_ts_data *ts, u8 state)
++{
++	ts->idle_state = state;
++	atomic_set(&himax_cascade_idle, ts->ic_idle || state >= HIMAX_IDLE_ASKED);
++}
++
++/* Every init resets the IC: it scans again, and commands start at slot 0. */
++static void himax_idle_reset(struct himax_ts_data *ts)
++{
++	ts->cmd_slot = 0;
++	ts->idle_requests = 0;
++	ts->ic_idle = false;
++	himax_idle_set(ts, HIMAX_IDLE_BUSY);
++}
++
++/* Restart the wait for idle_ms of quiet frames from now. */
++static void himax_idle_wait(struct himax_ts_data *ts, s32 ms)
++{
++	ts->idle_requests = 0;
++	ts->idle_at = jiffies + msecs_to_jiffies(ms);
++	himax_idle_set(ts, HIMAX_IDLE_WAIT);
++}
++
++static void himax_idle_update(struct himax_ts_data *ts, bool idle, bool quiet)
++{
++	struct hx_algo *algo = ts->algo;
++	unsigned long pen = atomic_long_read(&himax_cascade_pen_seen);
++	s32 ms = algo->idle_ms;
++	unsigned int next;
++
++	ts->ic_idle = idle;
++	if (idle)
++		algo->stats.idle_frames++;
++	if (pen && time_before(jiffies, pen + msecs_to_jiffies(HIMAX_PEN_IDLE_HOLD_MS)))
++		quiet = false;
++	if (!quiet) {
++		himax_idle_set(ts, HIMAX_IDLE_BUSY);
++		return;
++	}
++	if (idle) {
++		himax_idle_set(ts, HIMAX_IDLE_ON);
++		return;
++	}
++	if (ms <= 0) {
++		himax_idle_set(ts, HIMAX_IDLE_BUSY);
++		return;
++	}
++	/* quiet and scanning: just quiet, or awake again by itself */
++	if (ts->idle_state == HIMAX_IDLE_BUSY || ts->idle_state == HIMAX_IDLE_ON) {
++		himax_idle_wait(ts, ms);
++		return;
++	}
++	if (time_before(jiffies, ts->idle_at))
++		return;
++	if (ts->idle_requests >= HIMAX_IDLE_MAX_REQUESTS) {
++		himax_idle_wait(ts, ms);
++		return;
++	}
++	ts->idle_requests++;
++	next = ts->idle_requests < HIMAX_IDLE_MAX_REQUESTS ?
++	       HIMAX_IDLE_RETRY_MS : HIMAX_IDLE_GIVE_UP_MS;
++	ts->idle_at = jiffies + msecs_to_jiffies(next);
++	if (himax_send_command(ts, HIMAX_CMD_ENTER_IDLE, 0))
++		return;
++	algo->stats.idle_cmds++;
++	himax_idle_set(ts, HIMAX_IDLE_ASKED);
++}
++
+ static void himax_report_tracked_state(struct himax_ts_data *ts, bool report_on)
+ {
+ 	s32 x, y;
+@@ -1633,6 +1828,15 @@ static irqreturn_t himax_ts_thread(int irq, void *data)
+ 	/* 这里报告给系统的坐标数据可以通过 evtest 查看 */
+ 	himax_report_tracked_state(ts, report_on);
+ 
++	{
++		bool idle = himax_frame_status(ts->event_buf, HIMAX_STATUS_IDLE) == 1;
++		bool quiet = !algo->fw_finger && !algo->zone_count;
++
++		for (int i = 0; i < HIMAX_MAX_TOUCH && quiet; i++)
++			quiet = !algo->tracks[i].active;
++		himax_idle_update(ts, idle, quiet);
++	}
++
+ out_unlock:
+ 	mutex_unlock(&ts->op_lock);
+ 	return irq_ret;
+diff --git a/drivers/input/touchscreen/himax_hx83121a_pen.c b/drivers/input/touchscreen/himax_hx83121a_pen.c
+index 76188015c4..95898a70e1 100644
+--- a/drivers/input/touchscreen/himax_hx83121a_pen.c
++++ b/drivers/input/touchscreen/himax_hx83121a_pen.c
+@@ -19,7 +19,12 @@
+  *      /dev/gk3_pen (blocking read / poll, one struct pen_rec per read);
+  *   6. re-initialises the slave when the header stops reading 5a a5 or reads
+  *      keep failing, and, from a 1 s watchdog that follows the panel, when no
+- *      frame arrived for a second while the screen is on.  The slave has no
++ *      frame arrived for a second while the screen is on.  While himax-spi
++ *      has put the IC in IDLE the slave sends a frame only every three
++ *      seconds or so, so neither counts then, as long as frames still come
++ *      (see pen_ic_idle()).  Every frame with the pen in it, and every
++ *      write from userspace (7.), tells himax-spi that the pen is in use,
++ *      and himax-spi then does not ask for IDLE for a while.  The slave has no
+  *      reset line: every master reset (screen off/on, himax-spi recovery)
+  *      takes it down too, and an unconfigured slave raises no interrupts at
+  *      all, so in use_irq mode only the watchdog can notice.  The interrupt
+@@ -37,7 +42,10 @@
+  *      writes to /dev/gk3_pen whenever the pen controller reports activity
+  *      (its reports start as soon as the pen is picked up, before it is
+  *      anywhere near the screen): that switches the interrupt back on at
+- *      once and keeps the slave awake while the pen is in use;
++ *      once, keeps it on while the pen is in use, and keeps himax-spi from
++ *      asking for IDLE.  An IC already in IDLE stays there until it notices
++ *      the pen itself, as with the vendor's software, which does not force
++ *      it out either;
+  *   8. registers the pen's battery as power supply "m-pencil" (scope device,
+  *      so healthd leaves it out of the system battery).  The pen controller
+  *      reports the level (event 0x08, percent) and charging (0x09) to
+@@ -57,7 +65,8 @@
+  * double-tap.  Without it the pen still shows as connected but pressure
+  * stays off.
+  *
+- * It never touches the master, so finger touch is unaffected.
++ * It never touches the master, so finger touch is unaffected; it only tells
++ * himax-spi when the pen is in use.
+  *
+  * Bus protocol: same as himax-spi-core.c (himax_spi_read/write,
+  * himax_mcu_register_read/write, himax_mcu_interface_on) with the slave's
+@@ -89,6 +98,8 @@
+ 
+ #include <drm/drm_panel.h>
+ 
++#include "himax-cascade.h"
++
+ static int spi_mode = 3;
+ module_param(spi_mode, int, 0444);
+ MODULE_PARM_DESC(spi_mode, "SPI mode 0..3 (master runs mode 3; ACPI says 0)");
+@@ -190,6 +201,7 @@ struct gk3_pen {
+ 
+ 	u32 bad_frames, reinits;
+ 	unsigned long last_reinit;
++	unsigned long hdr_seen;		/* jiffies of the last frame with 5a a5 */
+ 
+ 	/* screen state from the panel, and the stall watchdog */
+ 	struct drm_panel_follower follower;
+@@ -206,6 +218,27 @@ struct gk3_pen {
+ 	u32 hints, hint_wakes;		/* pen-in-use writes, and those that ended idle */
+ };
+ 
++/*
++ * While himax-spi has put the IC in IDLE the slave sends a frame only every
++ * three seconds or so (once 6 s, at IDLE entry), so neither a read without
++ * a new frame nor a second without one means trouble then, as long as
++ * frames still come at all: a slave that a master reset took down sends
++ * none, and is re-initialised once IDLE_FRAME_GAP has passed without one.
++ */
++#define IDLE_FRAME_GAP		msecs_to_jiffies(10000)
++
++static bool pen_ic_idle(struct gk3_pen *p)
++{
++	return himax_hx83121a_ic_idle() &&
++	       time_before(jiffies, p->hdr_seen + IDLE_FRAME_GAP);
++}
++
++/* Frames from before a master reset say nothing about the slave after it. */
++static void pen_forget_frames(struct gk3_pen *p)
++{
++	p->hdr_seen = jiffies - IDLE_FRAME_GAP;
++}
++
+ /*
+  * There is one slave; opening the char device finds it here.  Each open
+  * file holds a reference, so the state outlives an unbind (of the parent
+@@ -451,12 +484,15 @@ static void pen_account(struct gk3_pen *p, const u8 *d, ktime_t t)
+ 		if (HDR_OK(d)) {
+ 			p->pen_frames++;
+ 			p->pen_seen = jiffies;
++			himax_hx83121a_pen_active();
+ 		}
+ 	}
+ 	if (valid2)
+ 		p->tx2_valid++;
+-	if (HDR_OK(d))
++	if (HDR_OK(d)) {
+ 		memcpy(p->last, d, FRAME_LEN);
++		p->hdr_seen = jiffies;
++	}
+ 
+ 	r->t_ns = ktime_to_ns(t);
+ 	r->seq = p->seq++;
+@@ -489,10 +525,13 @@ static void pen_read_and_account(struct gk3_pen *p)
+ 	 * writes.  It then stops prefixing frames with 5a a5 (or stops
+ 	 * answering), so redo the init, at most once a second.
+ 	 */
+-	if (ret || !HDR_OK(frame))
+-		p->bad_frames++;
+-	else
++	if (ret || !HDR_OK(frame)) {
++		/* in IDLE most reads find no new frame */
++		if (ret || !pen_ic_idle(p))
++			p->bad_frames++;
++	} else {
+ 		p->bad_frames = 0;
++	}
+ 	if (p->bad_frames >= REINIT_AFTER && time_after(jiffies, p->last_reinit + HZ)) {
+ 		p->last_reinit = jiffies;
+ 		p->reinits++;
+@@ -641,7 +680,8 @@ static void pen_watchdog_fn(struct work_struct *work)
+ 	if (!READ_ONCE(p->panel_on) || READ_ONCE(p->gone))
+ 		return;
+ 	mutex_lock(&p->lock);
+-	if (p->frames == p->wd_frames) {
++	/* in IDLE the slave sends a frame only every three seconds or so */
++	if (p->frames == p->wd_frames && !pen_ic_idle(p)) {
+ 		p->wd_reinits++;
+ 		p->init_ret = pen_hw_init(p, false);
+ 		dev_info(&p->spi->dev, "watchdog: no frame for 1 s, re-init #%u: %d\n",
+@@ -665,6 +705,8 @@ static int pen_panel_enabled(struct drm_panel_follower *f)
+ 
+ 	mutex_lock(&p->lock);
+ 	p->pen_seen = jiffies;
++	/* the master was reset to turn the screen on */
++	pen_forget_frames(p);
+ 	mutex_unlock(&p->lock);
+ 	WRITE_ONCE(p->panel_on, true);
+ 	mod_delayed_work(system_freezable_wq, &p->watchdog, WD_PERIOD);
+@@ -957,6 +999,7 @@ static ssize_t pen_cdev_write(struct file *f, const char __user *buf, size_t n,
+ 	}
+ 	p->hints++;
+ 	p->pen_seen = jiffies;
++	himax_hx83121a_pen_active();
+ 	if (p->idle) {
+ 		p->hint_wakes++;
+ 		pen_set_idle(p, false);
+@@ -1025,6 +1068,7 @@ static int gk3_pen_probe(struct spi_device *spi)
+ 	p->spi = spi;
+ 	p->tx1_peak_max = S16_MIN;
+ 	mutex_init(&p->lock);
++	pen_forget_frames(p);
+ 	INIT_DELAYED_WORK(&p->idle_poll, pen_idle_poll_fn);
+ 	init_waitqueue_head(&p->wq);
+ 	spi_set_drvdata(spi, p);
+diff --git a/drivers/input/touchscreen/hx-algo.c b/drivers/input/touchscreen/hx-algo.c
+index 0682fca173..3f2ce8e2d0 100644
+--- a/drivers/input/touchscreen/hx-algo.c
++++ b/drivers/input/touchscreen/hx-algo.c
+@@ -102,6 +102,7 @@ void hx_algo_init_defaults(struct hx_algo *algo)
+ 	algo->track_filter_mincutoff = 1000;  /* 1 Hz at rest */
+ 	algo->track_filter_beta      = 30;
+ 	algo->track_filter_dcutoff   = 30000;
++	algo->idle_ms                = 3000;
+ }
+ 
+ /* ======================================================================== */
+diff --git a/drivers/input/touchscreen/hx-algo.h b/drivers/input/touchscreen/hx-algo.h
+index 5d7c8f2d75..7aeb024f63 100644
+--- a/drivers/input/touchscreen/hx-algo.h
++++ b/drivers/input/touchscreen/hx-algo.h
+@@ -171,6 +171,8 @@ struct hx_stats {
+ 	u32 frames_bad;         /* frames dropped: bad checksum or empty   */
+ 	u32 fw_resets;          /* frames flagging a firmware reset        */
+ 	u32 recoveries;         /* re-inits after bad frames or reads      */
++	u32 idle_cmds;          /* enter-IDLE commands sent                */
++	u32 idle_frames;        /* frames that came while the IC was idle  */
+ 	u32 frames;             /* frames processed                        */
+ 	u32 frames_reported;    /* frames with at least one stable contact */
+ 	u32 zones;              /* macro-zones found                       */
+@@ -403,6 +405,10 @@ struct hx_algo {
+ 	s32  track_filter_beta;    /* cutoff added per unit/s of speed, mHz */
+ 	s32  track_filter_dcutoff; /* cutoff of the speed estimate, mHz    */
+ 
++	/* ---- IC (himax-spi, not the algorithm) ---- */
++	s32  idle_ms;              /* untouched this long: IC to IDLE      */
++				   /* (<= 0 = never)                       */
++
+ 	/* ---- Diagnostics ---- */
+ 	struct hx_stats  stats;
+ 	struct hx_newlog newlog[HX_NEWLOG];

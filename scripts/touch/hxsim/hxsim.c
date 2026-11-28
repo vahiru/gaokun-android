@@ -40,11 +40,12 @@
  * contact that flickers off for one frame comes back as a new touch.
  *
  * The recorder drops idle grids, but the driver handles a frame every
- * 8.3 ms whether or not anything touches the panel, and the tracker and
- * the hand map count frames.  A gap of more than IDLE_GAP_NS between two
- * recorded grids is therefore replayed as that many empty frames (not
- * printed); shorter gaps are grids the recorder missed while something was
- * down, and are left alone.
+ * 8.3 ms whether or not anything touches the panel (until the IC drops to
+ * its IDLE scan, idle_ms after the last touch: long after every frame
+ * count here has run out), and the tracker and the hand map count frames.
+ * A gap of more than IDLE_GAP_NS between two recorded grids is therefore
+ * replayed as that many empty frames (not printed); shorter gaps are grids
+ * the recorder missed while something was down, and are left alone.
  */
 #include <errno.h>
 #include <stdio.h>
@@ -103,6 +104,7 @@ static struct param params[] = {
 	P(track_tap_floor, K_S32), P(track_tap_snap, K_BOOL),
 	P(track_filter_mincutoff, K_S32),
 	P(track_filter_beta, K_S32), P(track_filter_dcutoff, K_S32),
+	P(idle_ms, K_S32),
 	PM(baseline_mode, K_U8, 2), P(baseline_fw_finger, K_BOOL),
 	P(baseline_gate, K_S16), PM(cmf_mode, K_U8, 3),
 	P(peak_edge_threshold, K_S16), P(peak_drift_limit, K_S16),
