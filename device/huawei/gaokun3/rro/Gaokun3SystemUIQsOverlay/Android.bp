@@ -1,0 +1,17 @@
+// SystemUI的运行时overlay：完成开机向导后，把Parts的磁吸键盘与防误触两个磁贴自动加到控制中心（res/values/config.xml）。
+// 与Gaokun3Parts一起安装（device.mk）。
+//
+// config_quickSettingsAutoAdd的每一项为「Secure设置名:磁贴」：该设置的值不为0时，SystemUI把磁贴加到控制中心末尾，
+// 并记入Secure设置qs_auto_tiles，此后不再添加，用户移除后也不会加回；磁贴已在控制中心时只记录、不重复添加
+// （frameworks/base/packages/SystemUI/src/com/android/systemui/qs/pipeline/domain/interactor/AutoAddInteractor.kt）。
+// 记录从这次添加开始：已更新的设备上，之前手动添加后又移除的磁贴也会被加回一次。两个磁贴的先后顺序不固定。
+// 这里用user_setup_complete：已完成开机向导的设备在更新后第一次启动时添加，新安装的设备在完成开机向导后添加。
+// SystemUI未声明<overlayable>，预装的RRO可以覆盖它的任何资源。静态RRO按分区排序（vendor在product、system_ext之前），
+// 排在后面的overlay若也定义这个数组会整份替换本overlay的值；目前本树与crDroid（vendor/addons的
+// GlanceableHubSysuiConfigOverlay等）都没有其他overlay定义它。
+runtime_resource_overlay {
+    name: "Gaokun3SystemUIQsOverlay",
+    resource_dirs: ["res"],
+    vendor: true,
+    sdk_version: "current",
+}
