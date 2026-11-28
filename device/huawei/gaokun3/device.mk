@@ -1276,7 +1276,7 @@ PRODUCT_PACKAGES += \
 # 后端：属性 persist.sys.gaokun3.keyboard → init 触发器 → 脚本写内核的
 #       /sys/class/input/inputN/inhibited（实测本机这套键盘注册了 7 个 input
 #       设备，全部按名字前缀 "HID 12d1:10b8" 匹配）。
-# 前端：parts/ 里的小应用，用 Settings 注入（IA_SETTINGS）出现在「设置 → 系统」，
+# 前端：parts/ 里的小应用，用 Settings 注入（IA_SETTINGS）出现在「设置 → 已连接的设备」，
 #       不需要改 packages/apps/Settings，也不依赖 LineageParts
 #       （实测这个 ROM 没装 org.lineageos.lineageparts）。
 PRODUCT_PACKAGES += \

@@ -1,6 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">MateBook E Go</string>
+
+    <!-- 设置首页 → MateBook E Go设置（DeviceSettingsActivity） -->
+    <string name="device_settings_title">MateBook E Go设置</string>
+    <string name="device_settings_summary">手写笔、磁吸键盘、性能模式</string>
+    <string name="device_settings_category_input">输入</string>
+    <string name="device_settings_category_sound">声音</string>
+    <string name="device_settings_category_performance">性能</string>
+    <string name="device_settings_category_apps">应用</string>
+    <string name="device_settings_category_boot">启动</string>
+
     <string name="keyboard_title">磁吸键盘</string>
     <string name="keyboard_summary">开关磁吸键盘与触控板</string>
     <string name="keyboard_error">无法更改磁吸键盘设置</string>

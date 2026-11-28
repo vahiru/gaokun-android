@@ -10,7 +10,8 @@
  * 应用即使是system uid也不该有写/sys/class/input的权限，经init改是Android里做这件事的标准通路。
  * 属性没设过按开启显示，与init一致：默认偏向键盘可用，写坏了也不至于锁死唯一的输入设备。
  *
- * 控制中心的磁贴（KeyboardTileService）改的是同一个属性，改完通知设置刷新这个开关。
+ * 控制中心的磁贴（KeyboardTileService）和「MateBook E Go设置」页（DeviceSettingsActivity）改的是同一个属性，
+ * 改完通知设置刷新这个开关。
  */
 package com.huawei.gaokun3.parts;
 
