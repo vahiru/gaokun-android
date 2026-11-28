@@ -1286,7 +1286,7 @@ PRODUCT_PACKAGES += \
 # 前端：parts/ 里的小应用，用 Settings 注入（IA_SETTINGS）出现在「设置 → 已连接的设备」，
 #       不需要改 packages/apps/Settings，也不依赖 LineageParts
 #       （实测这个 ROM 没装 org.lineageos.lineageparts）。
-# 控制中心的键盘与防误触磁贴在完成开机向导后自动添加（rro/Gaokun3SystemUIQsOverlay）。
+# 控制中心的键盘、防误触与桌面模式三个磁贴在完成开机向导后自动添加（rro/Gaokun3SystemUIQsOverlay）。
 PRODUCT_PACKAGES += \
     Gaokun3Parts \
     Gaokun3SystemUIQsOverlay

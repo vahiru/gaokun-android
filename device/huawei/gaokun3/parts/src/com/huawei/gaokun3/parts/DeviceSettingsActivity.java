@@ -9,7 +9,8 @@
  * 原有的条目都保留在原处。页面类条目以intent打开原有的activity；磁吸键盘、防误触模式、性能模式
  * 与两个「为游戏自动…」开关在这里直接读写，与设置里的开关条目改同一个属性（各Provider的isEnabled()/setEnabled()），
  * 改完通知设置刷新对应的开关条目。控制中心的磁贴改动属性后也会发出同一通知，本页监听这些URI，
- * 下拉控制中心切换时开关随即更新。
+ * 下拉控制中心切换时开关随即更新。桌面模式开关只在本页和控制中心的磁贴中提供，读写
+ * Settings.Secure中的一项（DesktopModeSetting），本页直接监听这项设置。
  *
  * 启动选项与BootOptionsActivity一样，只在该activity已启用时显示（BootEntryNotifier按HAL导出的属性启用）。
  */
@@ -56,6 +57,7 @@ public class DeviceSettingsActivity extends CollapsingToolbarBaseActivity {
         private SwitchPreferenceCompat mTouchGameAuto;
         private SwitchPreferenceCompat mPerformanceMode;
         private SwitchPreferenceCompat mPerfGameAuto;
+        private SwitchPreferenceCompat mDesktopMode;
         private Preference mSpeakerFx;
         private Preference mBootCategory;
 
@@ -75,6 +77,7 @@ public class DeviceSettingsActivity extends CollapsingToolbarBaseActivity {
             mTouchGameAuto = findPreference("touch_protection_game_auto");
             mPerformanceMode = findPreference("performance_mode");
             mPerfGameAuto = findPreference("performance_mode_game_auto");
+            mDesktopMode = findPreference("desktop_mode");
             mSpeakerFx = findPreference("speaker_fx");
             mBootCategory = findPreference("category_boot");
             mKeyboard.setOnPreferenceChangeListener(this);
@@ -82,6 +85,7 @@ public class DeviceSettingsActivity extends CollapsingToolbarBaseActivity {
             mTouchGameAuto.setOnPreferenceChangeListener(this);
             mPerformanceMode.setOnPreferenceChangeListener(this);
             mPerfGameAuto.setOnPreferenceChangeListener(this);
+            mDesktopMode.setOnPreferenceChangeListener(this);
         }
 
         // 从各页面或扬声器音效对话框返回时onResume，重新读取全部状态。
@@ -94,6 +98,8 @@ public class DeviceSettingsActivity extends CollapsingToolbarBaseActivity {
             observe(TouchProtectionProvider.AUTHORITY, TouchProtectionProvider.GAME_AUTO_KEY);
             observe(PerformanceModeProvider.AUTHORITY, PerformanceModeProvider.KEY);
             observe(PerformanceModeProvider.AUTHORITY, PerformanceModeProvider.GAME_AUTO_KEY);
+            requireContext().getContentResolver().registerContentObserver(
+                    DesktopModeSetting.uri(), false, mObserver);
         }
 
         @Override
@@ -117,6 +123,7 @@ public class DeviceSettingsActivity extends CollapsingToolbarBaseActivity {
             mTouchGameAuto.setChecked(TouchProtectionProvider.isGameAutoEnabled());
             mPerformanceMode.setChecked(PerformanceModeProvider.isEnabled());
             mPerfGameAuto.setChecked(PerformanceModeProvider.isGameAutoEnabled());
+            mDesktopMode.setChecked(DesktopModeSetting.isEnabled(context));
             mSpeakerFx.setSummary(SpeakerFxDialogActivity.currentLabel(context));
             mBootCategory.setVisible(context.getPackageManager().getComponentEnabledSetting(
                     new ComponentName(context, BootOptionsActivity.class))
@@ -124,10 +131,22 @@ public class DeviceSettingsActivity extends CollapsingToolbarBaseActivity {
         }
 
         // 返回false时开关保持原状；与设置里的开关条目一样，提示与该开关对应的错误信息。
+        // 桌面模式开关没有对应的设置条目与错误信息，写入失败时只记录日志。
         @Override
         public boolean onPreferenceChange(Preference preference, Object newValue) {
             Context context = requireContext();
             boolean checked = (Boolean) newValue;
+            if (preference == mDesktopMode) {
+                try {
+                    if (DesktopModeSetting.setEnabled(context, checked)) {
+                        return true;
+                    }
+                    Log.w(TAG, "cannot write " + DesktopModeSetting.KEY);
+                } catch (RuntimeException e) {
+                    Log.w(TAG, "cannot write " + DesktopModeSetting.KEY, e);
+                }
+                return false;
+            }
             try {
                 if (preference == mKeyboard) {
                     KeyboardProvider.setEnabled(checked);
