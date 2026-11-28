@@ -1,0 +1,237 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] usb: dwc3: qcom-legacy: don't lose a remote wakeup during system suspend
+
+The xHCI stops in its own .suspend callback, and the PM core can take
+hundreds of milliseconds to get from there to the glue's .suspend,
+which arms the PHY wakeup interrupts. A remote wakeup in that window is
+seen by nobody: there is no port change event any more and no wakeup
+interrupt yet. Even after the interrupts are armed, the handler drops
+them until suspend_device_irqs() makes them system wakeups. The port is
+left in Resume while the system sleeps; on SC8280XP with both PCIe links
+in D3 it no longer answers after resume and the xHCI dies.
+
+For system suspend:
+- Arm the wakeup interrupts while the clocks are still on, then check
+  the USB2 root hub with hub_status_data(), as hcd_bus_suspend() does,
+  and abort the suspend on a pending change. A remote wakeup before
+  arming shows there, one after arming raises an interrupt. A dead host
+  is left alone, as in xhci_suspend().
+- Until suspend_device_irqs(), report a wakeup interrupt as a hard
+  wakeup event instead of dropping it.
+
+The wakeup interrupts fired right after being enabled on almost every
+suspend, without any wakeup: an edge latched in the GIC while the
+interrupt was disabled was still pending. The PDC disables the line
+itself, so this is not a replay by the IRQ core. Clear the pending
+state before enabling a wakeup interrupt, for runtime suspend as well;
+a remote wakeup that came before still shows in the port status. Only
+with that can the interrupts be treated as wakeups before noirq.
+
+Hibernation keeps the old behaviour.
+
+Signed-off-by: Akisaira <akisaira@outlook.com>
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/usb/dwc3/dwc3-qcom-legacy.c | 111 ++++++++++++++++++++++++++--
+ 1 file changed, 106 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/usb/dwc3/dwc3-qcom-legacy.c b/drivers/usb/dwc3/dwc3-qcom-legacy.c
+index d3fad0fcf..f2d4746ac 100644
+--- a/drivers/usb/dwc3/dwc3-qcom-legacy.c
++++ b/drivers/usb/dwc3/dwc3-qcom-legacy.c
+@@ -8,6 +8,7 @@
+ #include <linux/io.h>
+ #include <linux/of.h>
+ #include <linux/clk.h>
++#include <linux/interrupt.h>
+ #include <linux/irq.h>
+ #include <linux/of_clk.h>
+ #include <linux/module.h>
+@@ -88,6 +89,7 @@ struct dwc3_qcom {
+ 	enum usb_dr_mode	mode;
+ 	bool			is_suspended;
+ 	bool			pm_suspended;
++	bool			wake_before_noirq;
+ 	struct icc_path		*icc_path_ddr;
+ 	struct icc_path		*icc_path_apps;
+ };
+@@ -347,6 +349,14 @@ static void dwc3_qcom_enable_wakeup_irq(int irq, unsigned int polarity)
+ 	if (polarity)
+ 		irq_set_irq_type(irq, polarity);
+ 
++	/*
++	 * Drop an edge latched in the interrupt controller while the
++	 * interrupt was disabled: only a remote wakeup or a connection change
++	 * after this point should raise it. One that came earlier still shows
++	 * in the port status.
++	 */
++	irq_set_irqchip_state(irq, IRQCHIP_STATE_PENDING, false);
++
+ 	enable_irq(irq);
+ 	enable_irq_wake(irq);
+ }
+@@ -423,14 +433,58 @@ static void dwc3_qcom_enable_interrupts(struct dwc3_qcom *qcom)
+ 		dwc3_qcom_enable_port_interrupts(&qcom->ports[i]);
+ }
+ 
+-static int dwc3_qcom_suspend(struct dwc3_qcom *qcom, bool wakeup)
++/*
++ * The xHCI stops in its own .suspend, which can come long before this one.
++ * From then on a remote wakeup or a connection change on a root hub port only
++ * shows in the port status: nothing handles the port change event, and the
++ * wakeup interrupts are not armed yet. Look for one with hub_status_data(), as
++ * hcd_bus_suspend() does after a bus suspend. The USB2 root hub is the primary
++ * hcd.
++ */
++static bool dwc3_qcom_root_hub_changed(struct dwc3_qcom *qcom)
++{
++	struct dwc3 *dwc = platform_get_drvdata(qcom->dwc3);
++	struct usb_hcd *hcd = platform_get_drvdata(dwc->xhci);
++	char buf[6];	/* same size as in hcd_bus_suspend() */
++
++	/*
++	 * A dead host keeps its change bits for good, and xhci_suspend() lets
++	 * the system sleep without it on purpose. Only a root hub that went
++	 * through bus suspend is waiting for a wakeup.
++	 */
++	if (!hcd || HCD_DEAD(hcd) || hcd->state != HC_STATE_SUSPENDED)
++		return false;
++
++	return hcd->driver->hub_status_data(hcd, buf) > 0;
++}
++
++static int dwc3_qcom_suspend(struct dwc3_qcom *qcom, bool wakeup, bool system)
+ {
++	bool armed = false;
+ 	u32 val;
+ 	int i, ret;
+ 
+ 	if (qcom->is_suspended)
+ 		return 0;
+ 
++	/*
++	 * For system suspend, arm the wakeup interrupts while the clocks are
++	 * still on and only then look at the root hub ports: a remote wakeup
++	 * that comes later raises an interrupt, one that came earlier shows
++	 * in the port status. Either aborts the suspend.
++	 */
++	if (system && dwc3_qcom_is_host(qcom) && wakeup) {
++		for (i = 0; i < qcom->num_ports; i++)
++			qcom->ports[i].usb2_speed = dwc3_qcom_read_usb2_speed(qcom, i);
++		dwc3_qcom_enable_interrupts(qcom);
++		if (dwc3_qcom_root_hub_changed(qcom)) {
++			dwc3_qcom_disable_interrupts(qcom);
++			dev_info(qcom->dev, "root hub port change, aborting suspend\n");
++			return -EBUSY;
++		}
++		armed = true;
++	}
++
+ 	for (i = 0; i < qcom->num_ports; i++) {
+ 		val = readl(qcom->qscratch_base + pwr_evnt_irq_stat_reg[i]);
+ 		if (!(val & PWR_EVNT_LPM_IN_L2_MASK))
+@@ -448,7 +502,7 @@ static int dwc3_qcom_suspend(struct dwc3_qcom *qcom, bool wakeup)
+ 	 * The role is stable during suspend as role switching is done from a
+ 	 * freezable workqueue.
+ 	 */
+-	if (dwc3_qcom_is_host(qcom) && wakeup) {
++	if (!armed && dwc3_qcom_is_host(qcom) && wakeup) {
+ 		for (i = 0; i < qcom->num_ports; i++)
+ 			qcom->ports[i].usb2_speed = dwc3_qcom_read_usb2_speed(qcom, i);
+ 		dwc3_qcom_enable_interrupts(qcom);
+@@ -500,6 +554,16 @@ static irqreturn_t qcom_dwc3_resume_irq(int irq, void *data)
+ 	struct dwc3_qcom *qcom = data;
+ 	struct dwc3	*dwc = platform_get_drvdata(qcom->dwc3);
+ 
++	/*
++	 * Armed for system suspend but before suspend_device_irqs(): the IRQ
++	 * core doesn't treat this as a wakeup yet, so report it. After that it
++	 * does, and pm_resume takes care of resuming the hardware.
++	 */
++	if (READ_ONCE(qcom->wake_before_noirq)) {
++		pm_wakeup_hard_event(qcom->dev);
++		return IRQ_HANDLED;
++	}
++
+ 	/* If pm_suspended then let pm_resume take care of resuming h/w */
+ 	if (qcom->pm_suspended)
+ 		return IRQ_HANDLED;
+@@ -869,7 +933,25 @@ static int __maybe_unused dwc3_qcom_pm_suspend(struct device *dev)
+ 	bool wakeup = device_may_wakeup(dev);
+ 	int ret;
+ 
+-	ret = dwc3_qcom_suspend(qcom, wakeup);
++	WRITE_ONCE(qcom->wake_before_noirq, true);
++	ret = dwc3_qcom_suspend(qcom, wakeup, true);
++	if (ret) {
++		WRITE_ONCE(qcom->wake_before_noirq, false);
++		return ret;
++	}
++
++	qcom->pm_suspended = true;
++
++	return 0;
++}
++
++/* Hibernation: no remote wakeup is armed by usbcore, keep the old behaviour */
++static int __maybe_unused dwc3_qcom_pm_freeze(struct device *dev)
++{
++	struct dwc3_qcom *qcom = dev_get_drvdata(dev);
++	int ret;
++
++	ret = dwc3_qcom_suspend(qcom, device_may_wakeup(dev), false);
+ 	if (ret)
+ 		return ret;
+ 
+@@ -878,12 +960,25 @@ static int __maybe_unused dwc3_qcom_pm_suspend(struct device *dev)
+ 	return 0;
+ }
+ 
++static int __maybe_unused dwc3_qcom_pm_suspend_noirq(struct device *dev)
++{
++	struct dwc3_qcom *qcom = dev_get_drvdata(dev);
++
++	/* From here on the IRQ core reports a wakeup interrupt itself */
++	WRITE_ONCE(qcom->wake_before_noirq, false);
++
++	return 0;
++}
++
+ static int __maybe_unused dwc3_qcom_pm_resume(struct device *dev)
+ {
+ 	struct dwc3_qcom *qcom = dev_get_drvdata(dev);
+ 	bool wakeup = device_may_wakeup(dev);
+ 	int ret;
+ 
++	/* Also after a suspend aborted between .suspend and .suspend_noirq */
++	WRITE_ONCE(qcom->wake_before_noirq, false);
++
+ 	ret = dwc3_qcom_resume(qcom, wakeup);
+ 	if (ret)
+ 		return ret;
+@@ -897,7 +992,7 @@ static int __maybe_unused dwc3_qcom_runtime_suspend(struct device *dev)
+ {
+ 	struct dwc3_qcom *qcom = dev_get_drvdata(dev);
+ 
+-	return dwc3_qcom_suspend(qcom, true);
++	return dwc3_qcom_suspend(qcom, true, false);
+ }
+ 
+ static int __maybe_unused dwc3_qcom_runtime_resume(struct device *dev)
+@@ -908,7 +1003,13 @@ static int __maybe_unused dwc3_qcom_runtime_resume(struct device *dev)
+ }
+ 
+ static const struct dev_pm_ops dwc3_qcom_dev_pm_ops = {
+-	SET_SYSTEM_SLEEP_PM_OPS(dwc3_qcom_pm_suspend, dwc3_qcom_pm_resume)
++	.suspend = pm_sleep_ptr(dwc3_qcom_pm_suspend),
++	.suspend_noirq = pm_sleep_ptr(dwc3_qcom_pm_suspend_noirq),
++	.resume = pm_sleep_ptr(dwc3_qcom_pm_resume),
++	.freeze = pm_sleep_ptr(dwc3_qcom_pm_freeze),
++	.thaw = pm_sleep_ptr(dwc3_qcom_pm_resume),
++	.poweroff = pm_sleep_ptr(dwc3_qcom_pm_freeze),
++	.restore = pm_sleep_ptr(dwc3_qcom_pm_resume),
+ 	SET_RUNTIME_PM_OPS(dwc3_qcom_runtime_suspend, dwc3_qcom_runtime_resume,
+ 			   NULL)
+ };

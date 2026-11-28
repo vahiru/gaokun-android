@@ -72,7 +72,10 @@ Wi-Fi进了D3hot之后、主机发`PME_Turn_Off`之前，固件如果碰上触�
 
 - **链路重试（`patches/kernel/pcie-pm/0005`）。**链路在恢复时没起来，就按一次挂起和恢复的流程再来一次：`PERST#`、PHY、控制器都下去，NVMe的`VCC3_SSD`断电3秒。只重试一次，日志是`Link didn't come back`。
 - **系统盘没了就重启（`patches/kernel/pcie-pm/0006`、`0007`）。**盘没了ext4会关掉`/data`和`/metadata`，内核不会自己重启，也挂起不了。重试后NVMe链路还是没有，或者走到`nvme_mark_namespaces_dead()`，就panic，靠`CONFIG_PANIC_TIMEOUT`重启。成功重置之后才移除namespace的路径没有覆盖。Wi-Fi的链路丢了不panic，交给`ath11k`，见上一节。
-- **内部USB控制器死掉（`patches/kernel/ec-usb/0014`）。**日志里有`HC died; cleaning up`，`/sys/bus/usb/devices/3-3`不存在。键盘、触摸板和笔到重启前都没有反应，挂起不受影响。深度待机的测试内核上出现过，原因还没有查清。
+- **内部USB控制器失效（`patches/kernel/ec-usb/0014`、`0020`、`0021`）。**日志里有`HC died; cleaning up`，`/sys/bus/usb/devices/3-3`不存在，键盘、触摸板和笔在重启前都无法使用；`0014`使之后的挂起不受影响。原因是键盘盖的MCU在端口刚挂起时发出远程唤醒，系统带着处于Resume的端口进入睡眠；两条PCIe链路都在D3时，这个端口恢复后不再响应，设备断开，重新枚举卡住，控制器随即失效。
+  - `0020`：xHCI停止前，若有被挂起的USB2端口处于Resume，就拒绝这次挂起。
+  - `0021`：xHCI停止后要过数十到数百毫秒才轮到glue挂起，其间的远程唤醒没有人处理。glue在关时钟前先打开唤醒中断，再用`hub_status_data()`检查根集线器；noirq之前的唤醒中断作为唤醒事件上报。打开唤醒中断前清除GIC中残留的pending，否则几乎每次挂起都会误触发。
+  - 失效后取得的日志也能认出这种情况：每次挂起时`a4f8800.usb`的port-1到port-4都报`HS-PHY not in L2`，正常时几乎不出现。
 - **panic不留记录。**发版cmdline带`efi_pstore.pstore_disable=1`，DT也没有ramoops。待机时自己重启的机器，临时`echo N > /sys/module/efi_pstore/parameters/pstore_disable`，复现一次，读`/sys/fs/pstore`，再跑`scripts/pstore-ctl.sh clear`。不要默认打开，NVRAM写满的问题还在。
 
 ## 排查

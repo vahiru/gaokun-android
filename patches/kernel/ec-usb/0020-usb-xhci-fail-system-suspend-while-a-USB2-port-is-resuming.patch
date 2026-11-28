@@ -1,0 +1,91 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] usb: xhci: fail system suspend while a USB2 port is resuming
+
+A device can signal remote wakeup right after usbcore suspended its
+port. xhci_bus_suspend() refuses the bus suspend for a resuming port
+only when root hub wakeup is enabled, which it isn't by default, and
+xhci-plat's suspend doesn't look at HCD_FLAG_WAKEUP_PENDING. For a USB2
+port only GetPortStatus from the hub driver or a root hub resume writes
+U0, and neither runs during system suspend, so the port stays in Resume.
+
+xhci_suspend() then halts the controller and the system goes to sleep
+with the port in Resume. On SC8280XP with both PCIe links in D3 during
+that sleep, the port no longer answers after resume, the device is
+disconnected, re-enumeration hangs and the xHCI dies; the keyboard cover
+behind it is gone until the next reboot.
+
+Before halting the controller, look for a connected USB2 port that was
+suspended by usbcore or by bus suspend and is now in Resume, and fail
+the suspend. The PM core resumes the root hubs, and the resume of the
+port is completed while the system resumes. A port whose resume timed
+out is no longer marked suspended, so it can't block suspend for good.
+Don't depend on do_wakeup: on dwc3 it follows the probe order, and the
+port state is what matters.
+
+Signed-off-by: Akisaira <akisaira@outlook.com>
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/usb/host/xhci.c | 41 +++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 41 insertions(+)
+
+diff --git a/drivers/usb/host/xhci.c b/drivers/usb/host/xhci.c
+index 92b50d01c..91bd5fae8 100644
+--- a/drivers/usb/host/xhci.c
++++ b/drivers/usb/host/xhci.c
+@@ -942,6 +942,37 @@ static bool xhci_pending_portevent(struct xhci_hcd *xhci)
+ 	return false;
+ }
+ 
++/*
++ * A device can signal remote wakeup after usbcore suspended its USB2 port.
++ * Only GetPortStatus from the hub driver or a root hub resume writes U0 for
++ * that, and neither runs during system suspend: the port stays in Resume.
++ * Only look at ports suspended by usbcore or by bus suspend, so that a port
++ * that is stuck in Resume for another reason can't block suspend for good.
++ */
++static bool xhci_port_resuming(struct xhci_hcd *xhci)
++{
++	struct xhci_hub *rhub = &xhci->usb2_rhub;
++	struct xhci_bus_state *bus_state = &rhub->bus_state;
++	u32 portsc;
++	int i;
++
++	for (i = 0; i < rhub->num_ports; i++) {
++		if (!(bus_state->suspended_ports & BIT(i)) &&
++		    !test_bit(i, &bus_state->bus_suspended))
++			continue;
++
++		portsc = xhci_portsc_readl(rhub->ports[i]);
++		if ((portsc & PORT_CONNECT) &&
++		    (portsc & PORT_PLS_MASK) == XDEV_RESUME) {
++			xhci_info(xhci, "port %d-%d resuming, aborting suspend\n",
++				  rhub->hcd->self.busnum, i + 1);
++			return true;
++		}
++	}
++
++	return false;
++}
++
+ /*
+  * Stop HC (not bus-specific)
+  *
+@@ -977,6 +1008,16 @@ int xhci_suspend(struct xhci_hcd *xhci, bool do_wakeup)
+ 	    (xhci->shared_hcd && xhci->shared_hcd->state != HC_STATE_SUSPENDED))
+ 		return -EINVAL;
+ 
++	/*
++	 * Halting the controller now would leave such a port in Resume across
++	 * system sleep, and not every host gets it back afterwards. Fail the
++	 * suspend instead; the resume of the port is then completed while the
++	 * system resumes. This doesn't depend on do_wakeup: the device was armed
++	 * by usbcore, and the port state is what matters.
++	 */
++	if (HCD_HW_ACCESSIBLE(hcd) && xhci_port_resuming(xhci))
++		return -EBUSY;
++
+ 	/* Clear root port wake on bits if wakeup not allowed. */
+ 	xhci_disable_hub_port_wake(xhci, &xhci->usb3_rhub, do_wakeup);
+ 	xhci_disable_hub_port_wake(xhci, &xhci->usb2_rhub, do_wakeup);
