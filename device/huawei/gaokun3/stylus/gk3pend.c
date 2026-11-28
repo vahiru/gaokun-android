@@ -48,7 +48,8 @@
  * Init params: when the controller reports the pen connected (event 0x71 =
  * 1, which the reply to each handshake also carries while a pen is connected)
  * gk3pend sends it this tablet's pen parameters (0x7D01), as Huawei's THP
- * service does on Windows (see q7d01).
+ * service does on Windows.  It also sends them each time the pen is put on
+ * the charging dock (see q7d01).
  *
  * Connection: for the M-Pencil page in Settings gk3pend publishes whether a
  * pen is connected and its generation, and deletes the pairing when the page
@@ -633,9 +634,9 @@ static void mcu_close(struct mcu *m, long long t)
 /*
  * The factory handshake (EGoTouchRev BTMCU_PROTOCOL.md, from an API Monitor
  * capture): 0x7101, 0x7701, and a second 0x7701 after the 0x77 reply.  The
- * init params (q7d01) follow when the pen is reported connected, not on 0x7B:
- * the pen reports a 0x7B after every 0x7D01 (and after screen status changes),
- * so answering 0x7B with it loops at ~20 per second.
+ * init params (q7d01) follow when the pen is reported connected or docked,
+ * not on 0x7B: the pen reports a 0x7B after every 0x7D01 (and after screen
+ * status changes), so answering 0x7B with it loops at ~20 per second.
  */
 static const unsigned char q7101[] = { 0x07, 0x00, 0x02, 0x00, 0x01, 0x71, 0x11, 0x00 };
 static const unsigned char q7701[] = { 0x07, 0x00, 0x02, 0x00, 0x01, 0x77, 0x11, 0x00 };
@@ -669,16 +670,23 @@ static const unsigned char q1501[] = { 0x07, 0x00, 0x02, 0x00, 0x01, 0x15, 0x11,
  * near the pen: that frame's position falls to the cell centre and the ink
  * zigzags by up to a column.  This lasts across tablet power-off, reboot and
  * re-pairing until a host sends values again.  Huawei's THP service on
- * Windows sends these on every pen connection ("hpp3 on"), so Windows always
- * sets them right.  Payload: 15 bytes LE, X Y A B C DisplayCycle (u16) N type
- * last (u8), from the Gaokun table "3333,3333,2e7,412,258,411a,0f,1"; its
- * token "0f" makes N and type (0F 00), and the service then sets offsets 13
- * and 14 (type, last) to 1.  Type 0, from the string alone, leaves the pen
+ * Windows sends these at its start and on every pen connection ("hpp3 on"),
+ * so on Windows they are right after each boot and each reconnect.
+ * Payload: 15 bytes LE, X Y A B C DisplayCycle (u16) N type last (u8), from
+ * the Gaokun table "3333,3333,2e7,412,258,411a,0f,1"; its token "0f" makes
+ * N and type (0F 00), and the service then sets offsets 13 and 14 (type,
+ * last) to 1.  Type 0, from the string alone, leaves the pen
  * zigzagging.  Rest of the 32-byte payload zero.  Sent on every 0x71 = 1
  * (a reconnect while the system slept only shows up in the reply to the
- * handshake after resume); INIT_PARAM_GAP_MS only drops repeats after a
- * successful send with no reopen or disconnect in between, so a failed send
- * is retried on the next 0x71 = 1.
+ * handshake after resume) and on every 0x28 (put on the dock): a pen that
+ * another Huawei device has connected to since can come back without the
+ * controller reporting it disconnected, so no 0x71 = 1 follows; with the
+ * values Huawei's Android devices send for pen protocol 2.2, for one, this
+ * slave senses the pen for only a few frames at a time.  Docking is how a
+ * pen is switched to this tablet, so it sets the values again.
+ * INIT_PARAM_GAP_MS only drops repeats after a successful send with no reopen
+ * or disconnect in between, so a failed send is retried on the next 0x71 = 1
+ * or 0x28.
  */
 static const unsigned char q7d01[40] = {
 	0x07, 0x01, 0x02, 0x00, 0x01, 0x7D, 0x11, 0x20,
@@ -1020,12 +1028,15 @@ static int mcu_events(struct mcu *m, const unsigned char *b, int n, long long t,
 		}
 		if (e[5] == 0x71 && len && e[8] == 0)
 			m->init_sent = -INIT_PARAM_GAP_MS;	/* the next connection gets them */
-		if (e[5] == 0x71 && len && e[8] == 1 && t - m->init_sent >= INIT_PARAM_GAP_MS) {
+		if (((e[5] == 0x71 && len && e[8] == 1) || e[5] == 0x28) &&
+		    t - m->init_sent >= INIT_PARAM_GAP_MS) {
+			const char *why = e[5] == 0x28 ? "docked" : "connected";
+
 			if (mcu_out(m, q7d01, sizeof(q7d01)) < 0) {
-				printf("%lld pen connected: init params send failed: %d\n", t, errno);
+				printf("%lld pen %s: init params send failed: %d\n", t, why, errno);
 			} else {
 				m->init_sent = t;
-				printf("%lld pen connected: init params sent\n", t);
+				printf("%lld pen %s: init params sent\n", t, why);
 			}
 		}
 		if (e[5] == 0x28) {	/* put on the dock: Parts shows the battery */
