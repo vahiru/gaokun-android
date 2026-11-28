@@ -1,0 +1,111 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] usb: typec: ucsi: huawei_gaokun: Check ucsi->ntfy before
+ handling USB events
+
+Since commit 5b4b83c2ffe8 ("usb: typec: ucsi: Set ucsi->connector before
+enabling notifications"), ucsi_init() sets ucsi->connector before it
+sends the SET_NOTIFICATION_ENABLE that enables all notifications. If
+that command fails, it clears ucsi->connector again, unregisters the
+ports and frees the connectors.
+
+gaokun_ucsi_usb_notify_ind() takes a non-NULL ucsi->connector to mean
+that the connectors exist, and gaokun_ucsi_handle_usb_mode() then reads
+ucsi->connector again, indexes it and sets the orientation of the port.
+They run in the EC notifier thread, which also delivers the completions
+of UCSI commands, and in gaokun_ucsi_usb_work(). A USB event can
+therefore be handled while ucsi_init() runs that error path: after the
+command has timed out, or once the EC thread has delivered the last
+completion before it, that of the acknowledgment of the failed command
+or of the GET_ERROR_STATUS that follows. The second read of
+ucsi->connector can then return NULL, or the connector and its port can
+be freed while they are in use.
+
+Check ucsi->ntfy first, as ucsi_connector_change() does. ucsi_init()
+sets it only once the notifications are enabled, past the last point
+where it frees the connectors. Until then, a USB event is treated as it
+is while ucsi->connector is NULL: it is left unacknowledged, or
+acknowledged without handling once initialization has failed. Pass the
+connectors found this way to gaokun_ucsi_handle_usb_mode() rather than
+reading ucsi->connector again.
+
+Fixes: 5b4b83c2ffe8 ("usb: typec: ucsi: Set ucsi->connector before enabling notifications")
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Pending
+---
+ drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c | 32 ++++++++++++++++-----
+ 1 file changed, 25 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c b/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c
+index 2351da067c5..e3490b42e33 100644
+--- a/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c
++++ b/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c
+@@ -378,7 +378,8 @@ static int gaokun_ucsi_refresh(struct gaokun_ucsi *uec)
+ 	return idx;
+ }
+ 
+-static void gaokun_ucsi_handle_usb_mode(struct gaokun_ucsi_port *port)
++static void gaokun_ucsi_handle_usb_mode(struct gaokun_ucsi_port *port,
++					struct ucsi_connector *connector)
+ {
+ 	struct gaokun_ucsi *uec = port->ucsi;
+ 	struct ucsi_connector *con;
+@@ -411,7 +412,7 @@ static void gaokun_ucsi_handle_usb_mode(struct gaokun_ucsi_port *port)
+ 	 * port.
+ 	 */
+ 	if (idx < uec->ucsi->cap.num_connectors) {
+-		con = &uec->ucsi->connector[idx];
++		con = &connector[idx];
+ 		if (con->port)
+ 			gaokun_set_orientation(con, port);
+ 	}
+@@ -455,19 +456,36 @@ static bool gaokun_ucsi_init_failed(struct gaokun_ucsi *uec)
+ 	       !READ_ONCE(uec->ucsi->connector);
+ }
+ 
++/*
++ * The connectors, or NULL while they may still go away. ucsi_init() sets
++ * ucsi->connector before it enables the notifications; if that fails, it
++ * clears it again and frees the connectors. It sets ucsi->ntfy only after
++ * that point, once the notifications are enabled; ucsi_connector_change()
++ * checks ucsi->ntfy for the same reason. Use the returned pointer rather
++ * than reading ucsi->connector again.
++ */
++static struct ucsi_connector *gaokun_ucsi_connectors(struct gaokun_ucsi *uec)
++{
++	if (!(READ_ONCE(uec->ucsi->ntfy) & UCSI_ENABLE_NTFY_CONNECTOR_CHANGE))
++		return NULL;
++
++	return READ_ONCE(uec->ucsi->connector);
++}
++
+ /* Returns whether a port had an update */
+ static bool gaokun_ucsi_usb_notify_ind(struct gaokun_ucsi *uec)
+ {
++	struct ucsi_connector *connector = gaokun_ucsi_connectors(uec);
+ 	int idx;
+ 
+-	if (!READ_ONCE(uec->ucsi->connector)) {
++	if (!connector) {
+ 		/*
+ 		 * On some boots the EC repeats a USB event about every 200 ms
+ 		 * until it is acknowledged. While UCSI is still initializing,
+ 		 * leave it unacknowledged: the repeat that arrives once the
+-		 * connectors exist is handled in full. Once initialization has
+-		 * failed, nothing will handle it, and the repeats would go on
+-		 * until reboot, waking the system from suspend each time.
++		 * connectors are ready is handled in full. Once initialization
++		 * has failed, nothing will handle it, and the repeats would go
++		 * on until reboot, waking the system from suspend each time.
+ 		 * Acknowledge it then, without handling the port.
+ 		 */
+ 		if (!gaokun_ucsi_init_failed(uec))
+@@ -492,7 +510,7 @@ static bool gaokun_ucsi_usb_notify_ind(struct gaokun_ucsi *uec)
+ 		return false;
+ 	}
+ 
+-	gaokun_ucsi_handle_usb_mode(&uec->ports[idx]);
++	gaokun_ucsi_handle_usb_mode(&uec->ports[idx], connector);
+ 	return true;
+ }
+ 

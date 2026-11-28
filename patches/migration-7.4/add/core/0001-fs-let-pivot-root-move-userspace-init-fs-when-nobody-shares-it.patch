@@ -1,0 +1,86 @@
+From 138c28d615f9248f1d2a76e55b0b46874ffa2655 Mon Sep 17 00:00:00 2001
+From: Christian Brauner <brauner@kernel.org>
+Date: Thu, 19 Nov 2026 14:25:01 +0100
+Subject: [PATCH] fs: let pivot_root() move userspace_init_fs when nobody
+ shares it
+
+chroot_fs_refs() only finds userspace_init_fs through the tasks that
+share it. Currently that doesn't matter because validate_fs_switch()
+resets userspace_init_fs to nullfs as soon as PID 1 stops sharing it.
+
+But in the next patch we'll stop resetting userspace_init_fs and it will
+keep what PID 1 left behind. If no other task shares it either a later
+pivot_root() would leave kthreads and usermodehelpers behind on the old
+root and keep the old root pinned. A plain umount() of the old root
+would then fail with EBUSY.
+
+Before PID 1 got its own fs_struct chroot_fs_refs() found init_fs
+through the kthreads. So handle userspace_init_fs explicitly after
+walking the tasks. If the walk already updated it through a task that
+shares it nothing happens.
+
+Fixes: 14adbd5341aa ("fs: stop sharing fs_struct between init_task and pid 1")
+Cc: stable@vger.kernel.org # v7.3+
+Signed-off-by: Christian Brauner (Amutable) <brauner@kernel.org>
+Origin: backport, https://patch.msgid.link/20261119-work-fs-pid1_unshare-v1-1-b6a7e468bd68@kernel.org
+Upstream-Status: Backport [https://patch.msgid.link/20261119-work-fs-pid1_unshare-v1-1-b6a7e468bd68@kernel.org]
+---
+ fs/fs_struct.c | 32 +++++++++++++++++++++-----------
+ 1 file changed, 21 insertions(+), 11 deletions(-)
+
+diff --git a/fs/fs_struct.c b/fs/fs_struct.c
+index 34699f3b6f..538eaaecba 100644
+--- a/fs/fs_struct.c
++++ b/fs/fs_struct.c
+@@ -53,6 +53,21 @@ static inline int replace_path(struct path *p, const struct path *old, const str
+ 	return 1;
+ }
+ 
++static inline int replace_fs_paths(struct fs_struct *fs,
++				   const struct path *old_root,
++				   const struct path *new_root)
++{
++	int hits = 0;
++
++	write_seqlock(&fs->seq);
++	hits += replace_path(&fs->root, old_root, new_root);
++	hits += replace_path(&fs->pwd, old_root, new_root);
++	for (int i = 0; i < hits; i++)
++		path_get(new_root);
++	write_sequnlock(&fs->seq);
++	return hits;
++}
++
+ void chroot_fs_refs(const struct path *old_root, const struct path *new_root)
+ {
+ 	struct task_struct *g, *p;
+@@ -66,20 +81,15 @@ void chroot_fs_refs(const struct path *old_root, const struct path *new_root)
+ 
+ 		task_lock(p);
+ 		fs = p->real_fs;
+-		if (fs) {
+-			int hits = 0;
+-			write_seqlock(&fs->seq);
+-			hits += replace_path(&fs->root, old_root, new_root);
+-			hits += replace_path(&fs->pwd, old_root, new_root);
+-			while (hits--) {
+-				count++;
+-				path_get(new_root);
+-			}
+-			write_sequnlock(&fs->seq);
+-		}
++		if (fs)
++			count += replace_fs_paths(fs, old_root, new_root);
+ 		task_unlock(p);
+ 	}
+ 	read_unlock(&tasklist_lock);
++
++	/* Kernel lookups and usermodehelpers use it even if no task shares it. */
++	count += replace_fs_paths(userspace_init_fs, old_root, new_root);
++
+ 	while (count--)
+ 		path_put(old_root);
+ }
+-- 
+2.53.0
+

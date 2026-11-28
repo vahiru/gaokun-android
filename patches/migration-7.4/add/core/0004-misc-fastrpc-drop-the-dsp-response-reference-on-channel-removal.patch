@@ -1,0 +1,53 @@
+From 375074057f9d1b87d60e1f4fe9bda209a03f1c04 Mon Sep 17 00:00:00 2001
+From: Anandu Krishnan E <anandu.e@oss.qualcomm.com>
+Date: Tue, 17 Nov 2026 15:09:46 +0530
+Subject: [PATCH] misc: fastrpc: drop the DSP-response reference on channel
+ removal
+
+fastrpc_invoke_send() takes a second reference on the invoke context
+before calling rpmsg_send(), to be dropped later by whichever side
+consumes the eventual DSP response: fastrpc_rpmsg_callback() for a
+real reply, via schedule_work(&ctx->put_work).
+
+fastrpc_notify_users(), called from fastrpc_rpmsg_remove() when the
+rpmsg channel goes away (e.g. on subsystem restart), only completes
+each pending context with -EPIPE so its waiter can return - it never
+schedules the matching put. Since the channel is gone, no response
+will ever arrive to trigger it through the normal callback path
+either. Every context that was genuinely in flight (successfully
+sent, not yet answered) at the time of an SSR therefore leaks that
+second reference, and with it the context, its DMA maps, and the
+reference it holds on fl and cctx.
+
+Schedule the same put_work that a real response would have
+triggered, exactly as fastrpc_rpmsg_callback() does. rpmsg guarantees
+.callback and .remove are mutually exclusive for a given device, so
+there is no concurrent real response that could race with this.
+
+Fixes: c68cfb718c8f ("misc: fastrpc: Add support for context Invoke method")
+Cc: stable@kernel.org
+Signed-off-by: Anandu Krishnan E <anandu.e@oss.qualcomm.com>
+Origin: backport, https://patch.msgid.link/20261117-interrupted-invoke-v4-v4-2-2320a8a7eda2@oss.qualcomm.com
+Upstream-Status: Backport [https://patch.msgid.link/20261117-interrupted-invoke-v4-v4-2-2320a8a7eda2@oss.qualcomm.com]
+---
+ drivers/misc/fastrpc.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/drivers/misc/fastrpc.c b/drivers/misc/fastrpc.c
+index 7e84230d2e..307ade6dbd 100644
+--- a/drivers/misc/fastrpc.c
++++ b/drivers/misc/fastrpc.c
+@@ -2658,6 +2658,13 @@ static void fastrpc_notify_users(struct fastrpc_user *user)
+ 	list_for_each_entry(ctx, &user->pending, node) {
+ 		ctx->retval = -EPIPE;
+ 		complete(&ctx->work);
++		/*
++		 * fastrpc_invoke_send() took a second reference for the
++		 * DSP response that will now never arrive since the
++		 * channel is gone; schedule the matching put the same
++		 * way a real response would via fastrpc_rpmsg_callback().
++		 */
++		schedule_work(&ctx->put_work);
+ 	}
+ 	spin_unlock(&user->lock);
+ }
