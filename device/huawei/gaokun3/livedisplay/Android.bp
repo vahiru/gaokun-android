@@ -1,0 +1,32 @@
+//
+// LiveDisplay HAL：只实现vendor.lineage.livedisplay的IAdaptiveBacklight，开关面板的CABC，
+// 说明见AdaptiveBacklight.cpp顶部。
+//
+// 不用hardware/lineage/interfaces/livedisplay/aidl/sysfs的通用实现：它的节点路径写死为
+// /sys/class/graphics/fb0/cabc等高通下游驱动的路径，主线DRM面板没有这些节点，
+// 一个都不存在时它直接LOG(FATAL)。
+//
+cc_binary {
+    name: "vendor.lineage.livedisplay-service.gaokun3",
+    relative_install_path: "hw",
+    vendor: true,
+
+    srcs: ["AdaptiveBacklight.cpp"],
+
+    init_rc: ["vendor.lineage.livedisplay-service.gaokun3.rc"],
+    vintf_fragment_modules: ["vendor.lineage.livedisplay-service.gaokun3.xml"],
+
+    // 依赖照lineage的vendor.lineage.livedisplay-service.sysfs。
+    shared_libs: [
+        "libbase",
+        "libbinder_ndk",
+        "vendor.lineage.livedisplay-V1-ndk",
+    ],
+    cflags: ["-Wall", "-Werror"],
+}
+
+vintf_fragment {
+    name: "vendor.lineage.livedisplay-service.gaokun3.xml",
+    src: "vendor.lineage.livedisplay-service.gaokun3.xml",
+    vendor: true,
+}

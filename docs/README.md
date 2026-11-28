@@ -41,7 +41,7 @@
 
 | 文档 | 内容说明 |
 |---|---|
-| [dev/display-color.md](dev/display-color.md) | 显示色彩管理：ACPI `DLUT`出厂3D LUT校准提取、BOE/CSOT双面板识别、sRGB与Display P3切换、10-bit抖动与HDR提亮 |
+| [dev/display-color.md](dev/display-color.md) | 显示色彩管理：ACPI `DLUT`出厂3D LUT校准提取、BOE/CSOT双面板识别、sRGB与Display P3切换、10-bit抖动、HDR提亮与面板CABC开关 |
 | [dev/stylus.md](dev/stylus.md) | 手写笔（M-Pencil）：Himax SPI与蓝牙双通路、压感/倾斜上报、双击与侧键守护进程 |
 | [dev/palm-rejection.md](dev/palm-rejection.md) | 触摸屏防误触：驱动层手掌位置图算法、`MT_TOOL_PALM`撤回机制与调参接口 |
 | [dev/deep-sleep.md](dev/deep-sleep.md) | 深度待机（`s2idle`）：`qcom_stats`睡眠计数、阻断`cx`/`ddr`下电的投票排查、PCIe电源与Wi-Fi唤醒恢复 |

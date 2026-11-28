@@ -1,0 +1,10 @@
+<manifest version="1.0" type="device">
+    <!-- 框架矩阵要求版本1、optional（hardware/lineage/interfaces/compatibility_matrices/compatibility_matrix.lineage.xml）。
+         只声明IAdaptiveBacklight：LineageHardwareManager按接口逐个waitForDeclaredService，
+         声明了却没有进程注册的接口会让system_server一直等待。 -->
+    <hal format="aidl">
+        <name>vendor.lineage.livedisplay</name>
+        <version>1</version>
+        <fqname>IAdaptiveBacklight/default</fqname>
+    </hal>
+</manifest>

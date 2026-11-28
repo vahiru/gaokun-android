@@ -76,6 +76,21 @@ HDR 图层上屏 ─→ 框架算出提亮后的亮度 ─→ SF 压暗 SDR 图�
 - ToneMapper13的内容峰值写死4000尼特，不读静态元数据，所以元数据不改变画面。
 - Ultra HDR要应用自己申请`COLOR_MODE_HDR`。Google相册可以提亮；Glimpse和Edge不申请，按SDR显示。Chromium只在系统已经提亮时才按HDR渲染，单张图片不会触发。
 
+## 内容自适应背光（CABC）
+
+两块面板的初始化序列都打开面板控制器的CABC：DCS `0x55`写`0x01`，即界面模式，与原厂Windows的面板配置相同。控制器按每一帧的亮度分布降低背光，同时调高像素值来补偿。已经接近最亮的像素无法再调高，所以暗背景上的亮色会变暗，例如对话框后面的界面被压暗时，对话框本身也会显得暗一些。
+
+```
+设置中的“降低耗电” ─→ lineage-sdk LiveDisplayService ─→ IAdaptiveBacklight（livedisplay/） ─→ 背光设备的cabc节点 ─→ DCS 0x55
+```
+
+- 面板驱动（`patches/kernel/drm/0022`）在背光设备上提供`cabc`节点（`/sys/class/backlight/ae96000.dsi.0/cabc`）：`0`关闭，`1`界面模式（默认），`2`静态图片，`3`视频。驱动保存模式，面板上电时如果不是默认值就重新写入，所以熄屏、亮屏后设置照样有效；面板断电期间只保存模式，不发送命令。
+- 用户入口是设置→显示→LiveDisplay页中的“降低耗电”（LineageParts），状态保存在LineageSettings.System的`display_low_power`（`DISPLAY_CABC`）。默认开启，与出厂配置一致（lineage-sdk的`config_defaultCABC`）。打开时HAL写`1`。
+- HAL复用LineageOS的`hal_lineage_livedisplay_sysfs`域，节点标为`sysfs_livedisplay_tuneable`。没有用LineageOS通用的sysfs实现：它的节点路径写死为高通下游驱动的`/sys/class/graphics/fb0/cabc`等，一个都不存在时进程直接退出。
+- VINTF只声明`IAdaptiveBacklight`。LineageHardwareManager用`waitForDeclaredService`获取声明过的接口，所以HAL在节点不存在时也照常注册，只在调用时返回错误。
+- HDR提亮时界面被压暗，CABC也会降低背光，抵消一部分提亮。
+- CABC能节省多少电尚未实测。
+
 ## 排查
 
 ```sh
@@ -84,6 +99,8 @@ dumpsys SurfaceFlinger | grep displayBrightnessNits              # 提亮时 dis
 dumpsys SurfaceFlinger | grep 'HWC Support'                      # hdr10=true hlg=true
 dumpsys media.player | grep Main10HDR10                          # HEVC 解码器列出 HDR10 profile
 cat /sys/class/backlight/*/scale                                 # linear
+cat /sys/class/backlight/*/cabc                                  # 0 = CABC关闭，1 = 界面模式
+dumpsys lineagelivedisplay | grep -E 'mUseCABC|mCABC'            # mUseCABC=true表示框架接上了HAL，mCABC是当前设置
 dmesg | grep 'factory calibration'     # 两行，0 = sRGB，1 = P3，后面是 LUT 的白点
 dumpsys SurfaceFlinger | grep DisplayColorSetting               # Unmanaged = 鲜艳，Managed = 标准
 dumpsys SurfaceFlinger | grep -E 'Device supports wide color|Current color mode'

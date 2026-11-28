@@ -86,6 +86,10 @@ on boot
     write /dev/cpuset/system-background/cpus 0-3
     chown system system /sys/class/backlight/ae96000.dsi.0/brightness
     chmod 0664 /sys/class/backlight/ae96000.dsi.0/brightness
+    # 面板CABC模式（patches/kernel/drm/0022），由LiveDisplay HAL写入（livedisplay/）。
+    # 节点标为sysfs_livedisplay_tuneable（sepolicy/genfs_contexts），vendor_init对它的setattr核心策略现成。
+    chown system system /sys/class/backlight/ae96000.dsi.0/cabc
+    chmod 0664 /sys/class/backlight/ae96000.dsi.0/cabc
 
 # ⚠️ 这里绝不能自己挂 binderfs —— AOSP 16 的 init.rc 已原生处理（A17 照旧：system/core/rootdir/init.rc:280-294）
 # （挂 /dev/binderfs + 建 /dev/binder 等符号链接）。
