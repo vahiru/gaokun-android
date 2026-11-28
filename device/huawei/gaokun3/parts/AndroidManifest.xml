@@ -338,7 +338,7 @@
             android:directBootAware="true"
             android:exported="false" />
 
-        <!-- 手写笔的未配对提示与配对完成通知：读 gk3pend 设的 vendor.gaokun3.pen_unpaired / pen_paired，亮屏时每 3 秒看一次。 -->
+        <!-- 手写笔的未配对提示、笔尖松动提示与吸附时的电量小窗：读 gk3pend 设的 vendor.gaokun3.pen_*，亮屏时每 0.5 秒看一次。 -->
         <service
             android:name="com.huawei.gaokun3.parts.StylusNotifier"
             android:directBootAware="true"

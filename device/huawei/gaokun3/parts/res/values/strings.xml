@@ -113,8 +113,6 @@
     <string name="stylus_channel">Stylus</string>
     <string name="stylus_unpaired_title">Unpaired M-Pencil detected</string>
     <string name="stylus_unpaired_text">You may be writing with an M-Pencil that is not paired. Attach the M-Pencil to the charging area at the top of the tablet to pair it.</string>
-    <string name="stylus_paired_title">Connected to %1$s</string>
-    <string name="stylus_paired_text">%1$s is now paired with the tablet.</string>
     <string name="stylus_nib_title">Loose M-Pencil nib detected</string>
     <string name="stylus_nib_text">A loose nib may affect writing. Check and tighten the nib, or replace it if necessary.</string>
 

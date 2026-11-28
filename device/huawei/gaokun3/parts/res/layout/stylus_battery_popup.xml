@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 笔吸附或配对完成时弹出的电量小窗（StylusBatteryPopup）：型号一行，电池图标与电量一行。
+     外层留出边距，卡片的阴影才不会被窗口边界切掉。 -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:padding="12dp">
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:minWidth="160dp"
+        android:background="@drawable/stylus_popup_bg"
+        android:elevation="6dp"
+        android:gravity="center_horizontal"
+        android:orientation="vertical"
+        android:paddingHorizontal="28dp"
+        android:paddingVertical="14dp">
+        <TextView
+            android:id="@+id/stylus_popup_model"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textAppearance="?attr/textAppearanceTitleMedium"
+            android:textColor="?attr/colorOnSurface" />
+        <LinearLayout
+            android:id="@+id/stylus_popup_battery"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+            <com.huawei.gaokun3.parts.BatteryLevelView
+                android:id="@+id/stylus_popup_icon"
+                android:layout_width="22dp"
+                android:layout_height="11dp" />
+            <TextView
+                android:id="@+id/stylus_popup_level"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:textAppearance="?attr/textAppearanceBodyMedium"
+                android:textColor="?attr/colorOnSurfaceVariant" />
+        </LinearLayout>
+    </LinearLayout>
+</FrameLayout>
