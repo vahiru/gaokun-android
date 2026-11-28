@@ -639,32 +639,6 @@ static void mcu_close(struct mcu *m, long long t)
  */
 static const unsigned char q7101[] = { 0x07, 0x00, 0x02, 0x00, 0x01, 0x71, 0x11, 0x00 };
 static const unsigned char q7701[] = { 0x07, 0x00, 0x02, 0x00, 0x01, 0x77, 0x11, 0x00 };
-/*
- * Battery queries.  The MCU does not send the level (0x08) or the charging
- * state (0x09) on its own: PC Manager's PenService.dll asks for them with
- * 0x0801 (CommandSendGetPenBattery) and 0x0901, and on this tablet the level
- * otherwise stays at whatever the handshake returned until the pen reconnects,
- * so a pen that has been on the dock for an hour still shows the old value.
- * Ask once after the handshake, every time the pen is put on the dock (0x28),
- * and after a charging state change (0x09).
- */
-static const unsigned char q0801[] = { 0x07, 0x00, 0x02, 0x00, 0x01, 0x08, 0x11, 0x00 };
-static const unsigned char q0901[] = { 0x07, 0x00, 0x02, 0x00, 0x01, 0x09, 0x11, 0x00 };
-
-static long long last_bat_ask = -1000000LL;
-
-/*
- * Ask for the level, at most once a second.  A charging pen broadcasts 0x09 at
- * 1 Hz, and answering a 0x09 with a query that produces another 0x09 would feed
- * itself, so the rate limit is not optional.
- */
-static void ask_battery(struct mcu *m, long long t)
-{
-	if (t - last_bat_ask < 1000)
-		return;
-	last_bat_ask = t;
-	mcu_out(m, q0801, sizeof(q0801));
-}
 
 /*
  * Pairing a pen that is not paired with this tablet.  Put on the charging dock,
@@ -1031,20 +1005,9 @@ static int mcu_events(struct mcu *m, const unsigned char *b, int n, long long t,
 		}
 		if (e[5] == 0x77 && m->seen_77++ == 0) {
 			mcu_out(m, q7701, sizeof(q7701));
-			ask_battery(m, t);
-			mcu_out(m, q0901, sizeof(q0901));
 			if (verbose)
-				printf("%lld mcu: second 0x7701, asked 0x0801\n", t);
+				printf("%lld mcu: second 0x7701\n", t);
 		}
-		if (e[5] == 0x28) {
-			/* the pen was put on the dock: refresh level and charging */
-			ask_battery(m, t);
-			mcu_out(m, q0901, sizeof(q0901));
-			if (verbose)
-				printf("%lld mcu: pen docked (0x28), asked 0x0801\n", t);
-		}
-		if (e[5] == 0x09)
-			ask_battery(m, t);	/* the charging state moved: ask for the level */
 		if (e[5] == 0x71 && len) {
 			m->conn = e[8] == 1;
 			pen_conn_update(m);
