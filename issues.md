@@ -58,7 +58,7 @@ adb shell su -c dmesg > dmesg.txt          # 内核日志，要root
 | 意外重启、死机后重启 | `1.0.0-rc.3`起发布构建默认关闭`efi_pstore`且热复位会清空内存，`/sys/fs/pstore`通常为空；记下重启时间、触发前操作和复现条件，并附上重启后的`logcat`与`dmesg`（如为`rc.2`及更早版本或调试时手动开启过`efi_pstore`，再运行`adb exec-out "su -c 'tar -C /sys/fs -cf - pstore'" > pstore.tar`） |
 | 应用崩溃 / 闪退 | `adb logcat -b crash -d > crash.txt`；`adb shell su -c 'ls -t /data/tombstones/'`，取最新的那个：`adb exec-out "su -c 'cat /data/tombstones/<文件名>'" > tombstone.txt` |
 | 卡死、声音或蓝牙不动了 | 看门狗留的取证：`adb exec-out "su -c 'cd /data/vendor/gaokun3 && tar -cf - hangdump-*'" > hangdump.tar` |
-| USB-C（插电脑不识别、接口无法工作、充电方向反了） | 发布构建用`adb logcat -b all -d -s gaokun3-usb`、`adb shell su -c 'dmesg \| grep -iE "ucsi\|typec\|dwc3\|gaokun"'`及`adb shell 'for p in /sys/class/typec/port*; do echo "$p data=$(cat $p/data_role) power=$(cat $p/power_role)"; done'`（若为开发构建，可额外在仓库中跑`bash scripts/usb/ucsi-snapshot.sh <adb序列号> "<插的是什么>"`） |
+| USB-C（插电脑不识别、接口无法工作） | 发布构建用`adb logcat -b all -d -s gaokun3-usb`、`adb shell su -c 'dmesg \| grep -iE "ucsi\|typec\|dwc3\|gaokun"'`及`adb shell 'for p in /sys/class/typec/port*; do echo "$p data=$(cat $p/data_role) power=$(cat $p/power_role)"; done'`（若为开发构建，可额外在仓库中跑`bash scripts/usb/ucsi-snapshot.sh <adb序列号> "<插的是什么>"`） |
 | 游戏 / App画面、性能 | `adb shell getprop ro.hardware.vulkan`（如果是`pastel`，说明用的是软件渲染，性能数据没有参考价值）；游戏内画质设置 |
 | 触摸 / 手写笔 | `adb shell getevent -pl > getevent.txt` |
 | Android起不来 | 按[FAQ“The machine keeps restarting or hangs”](docs/FAQ.md#the-machine-keeps-restarting-or-hangs-what-can-i-do)：先等系统自动退回上一版本，退回后按上面几行收集；仍然起不来时，问清是更新后还是刚安装后出现的，以及开机停在哪一步 |

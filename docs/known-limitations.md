@@ -144,11 +144,6 @@ The following are bugs, not trade-offs; they will be removed from this list once
 * **Cause**: not known yet. Audio and Bluetooth share a path to the DSP, and that path is suspected of getting stuck.
 * **What to do**: a restart brings them back. A watchdog in the system saves records to `/data/vendor/gaokun3/hangdump-*` when it detects the hang, and they survive the restart. Please attach them when reporting (root is needed; see the [FAQ](FAQ.md#when-android-starts) for the commands); if the directory does not exist, please say so in the report too.
 
-### Plugged into a computer, the tablet may charge the computer instead
-* **Symptom**: after connecting the tablet (the USB-C port next to the power button) to a computer, neither the computer nor USB debugging sees the tablet, and the tablet's battery goes down instead.
-* **Cause**: the USB-C ports of the tablet and of many computers can both supply and receive power. When the computer does not support USB PD, which side supplies power is decided at the moment of plugging in, and occasionally it ends up the wrong way round. The tablet then acts as the host, while the computer will not act as a USB device, so neither sees the other.
-* **What to do**: unplug the cable and plug it in again (once is usually enough), or use another port on the computer. Only the USB-C port next to the power button can be used for USB debugging; the other port only connects peripherals.
-
 ### Occasionally the USB-C port does not work after power-on until a restart
 * **Symptom**: occasionally right after power-on, the USB-C port does not work: USB debugging cannot connect and USB devices are not recognized. Since 1.0.0-rc.5, the system retries initialization automatically, making ports available about 15 s later than usual on affected boots; if all retries still fail, the USB-C port does not work until a restart.
 * **Cause**: occasionally at boot the EC fails to clear the BUSY status bit after completing a command, causing the Type-C controller (UCSI) command to time out after 10 s and abort initialization. Since 1.0.0-rc.5, the kernel retries UCSI initialization up to 5 times after a timeout and acknowledges repeated EC USB events after a final failure so sleep is no longer blocked; a separate occasional case where a computer does not recognize the tablet after boot is still under investigation.
