@@ -161,6 +161,9 @@ KPATCHES=(
     kernel/drm/0020-drm-panel-himax-hx83121a-report-the-panel-orientation.patch
     kernel/drm/0021-drm-panel-himax-hx83121a-swap-the-panel-s-width-and-height-in-mm.patch
     kernel/drm/0022-drm-panel-himax-hx83121a-let-userspace-choose-the-CABC-mode.patch
+    kernel/drm/0023-drm-msm-dpu-clear-the-DSPP-pointer-when-no-DSPP-is-assigned.patch
+    kernel/drm/0024-drm-msm-dpu-clear-the-DSC-blocks-left-by-a-previous-reservation.patch
+    kernel/drm/0025-drm-msm-dpu-only-reassign-resources-when-the-encoder-is-reprogrammed.patch
 
     # ─── 6. kernel/iris：qcom-iris视频编解码驱动 ───
     # 配套 DT 见 kernel/dts/0009–0010、0026、0035；需 CONFIG_VIDEO_QCOM_IRIS=y、CONFIG_VIDEO_QCOM_VENUS 不设。
