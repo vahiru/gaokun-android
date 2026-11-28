@@ -13,7 +13,15 @@
  *     us as its host. Stay in the current role while it shows a data
  *     connection (enumerated by a host as a device; a device under the xhci
  *     as a host); after 6 s without one, try the other role. With neither
- *     working (a charger), settle on host until the partner detaches.
+ *     working, settle on device until the partner detaches. That is a
+ *     charger, which works in either role, or a computer that has nothing to
+ *     enumerate yet: the gadget is not bound while USB debugging is off and
+ *     no USB function is chosen, or before it is first bound at boot. Such a
+ *     computer finds the tablet as soon as the gadget is bound, and Settings
+ *     offers USB functions only in the device role. A dock or hub whose hub
+ *     enumerates during the 6 s host trial stays host; one that enumerates
+ *     later, or a monitor without a hub, ends up in device. A power role
+ *     swap to source starts the decision over.
  *   - The partner detaches: in the device role, restart the gadget's pullup
  *     so the UDC state does not keep the last host's "configured"; in the
  *     host role, go back to device, the role a computer plugged in next

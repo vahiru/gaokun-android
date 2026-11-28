@@ -84,6 +84,11 @@ std::optional<RoleFollow::Clock::time_point> RoleFollow::Tick(const Inputs& in,
     if (in.powerRole != "sink") {
         // We supply power, or the direction is not known yet.
         mIdleSince.reset();
+        if (in.powerRole == "source") {
+            // A power role swap: decide again if the partner powers us later.
+            mTried = 0;
+            mSettled = false;
+        }
         if (in.powerRole == "source" && in.role == "device") {
             Switch(in.role, "host", "we supply power, so the partner is a device", now);
             mSourceIdleSince.reset();
@@ -126,13 +131,17 @@ std::optional<RoleFollow::Clock::time_point> RoleFollow::Tick(const Inputs& in,
     mTried |= Bit(in.role);
     std::string next = Other(in.role);
     if (mTried & Bit(next)) {
-        // Tried both: a charger. Stay host until it detaches.
+        // Tried both: a charger, a computer with nothing to enumerate yet
+        // because the gadget is not bound, or a dock or monitor with nothing
+        // that enumerated during the host trial (Follow.h). Stay device until
+        // it detaches.
         mSettled = true;
-        if (in.role == "host") {
-            LOGI("follow: no data connection in either role (a charger?); staying host");
+        if (in.role == "device") {
+            LOGI("follow: no data connection in either role; staying device");
             return std::nullopt;
         }
-        next = "host";
+        Switch(in.role, "device", "no data connection in either role", now);
+        return std::nullopt;
     }
     Switch(in.role, next, "no data connection for 6 s", now);
     return std::nullopt;
@@ -151,7 +160,7 @@ void RoleFollow::Choose(const std::string& role) {
 std::string RoleFollow::Describe() const {
     std::string s = mAttached ? "partner attached" : "no partner";
     if (!mChosen.empty()) s += ", role chosen in Settings: " + mChosen;
-    if (mSettled) s += ", settled on host";
+    if (mSettled) s += ", settled on device";
     if (mIdleSince) s += ", waiting for a data connection";
     if (mSourceIdleSince) s += ", waiting for PD or data";
     return s;
