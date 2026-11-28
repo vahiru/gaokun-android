@@ -160,6 +160,7 @@ KPATCHES=(
     kernel/drm/0019-drm-msm-dpu-load-the-gaokun3-factory-calibration-into-the-3D-LUT.patch
     kernel/drm/0020-drm-panel-himax-hx83121a-report-the-panel-orientation.patch
     kernel/drm/0021-drm-panel-himax-hx83121a-swap-the-panel-s-width-and-height-in-mm.patch
+    kernel/drm/0022-drm-panel-himax-hx83121a-let-userspace-choose-the-CABC-mode.patch
 
     # ─── 6. kernel/iris：qcom-iris视频编解码驱动 ───
     # 配套 DT 见 kernel/dts/0009–0010、0026、0035；需 CONFIG_VIDEO_QCOM_IRIS=y、CONFIG_VIDEO_QCOM_VENUS 不设。

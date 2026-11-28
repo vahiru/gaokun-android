@@ -105,6 +105,11 @@
 # （已编进本机 vendor_sepolicy.cil，构建机 out/ 里实查）；lineage 自己的条目只标它那个名字（common/vendor/file_contexts:10）。
 # 本仓只补 sysfs 那一条，见 sepolicy/hal_lineage_health_default.te。⬜ 未编译。
 /vendor/bin/hw/vendor\.lineage\.health-service\.gaokun3     u:object_r:hal_lineage_health_default_exec:s0
+# LiveDisplay（livedisplay/，面板CABC开关）—— 复用LineageOS的hal_lineage_livedisplay_sysfs域：类型、hal_server_domain、
+# init_daemon_domain、servicemanager的binder_call以及sysfs_livedisplay_tuneable的读写都在构建树
+# device/lineage/sepolicy/common/vendor/hal_lineage_livedisplay_sysfs.te；本仓补路径上的背光目录，
+# 见sepolicy/hal_lineage_livedisplay_sysfs.te。
+/vendor/bin/hw/vendor\.lineage\.livedisplay-service\.gaokun3     u:object_r:hal_lineage_livedisplay_sysfs_exec:s0
 # USB 端口 HAL（usb/）—— AOSP 的 hal_usb_default 域（system/sepolicy vendor/hal_usb_default.te），
 # 本仓 hal_usb_default.te 补它读 UDC 状态、EC 适配器、设 vendor.gaokun3.usbrole.* 和持有 wakelock 的几条。
 /vendor/bin/hw/android\.hardware\.usb-service\.gaokun3       u:object_r:hal_usb_default_exec:s0

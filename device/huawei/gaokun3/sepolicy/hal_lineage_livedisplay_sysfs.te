@@ -1,0 +1,8 @@
+# LiveDisplay HAL（livedisplay/，面板CABC开关）跑在LineageOS的hal_lineage_livedisplay_sysfs域
+# （构建树device/lineage/sepolicy/common/vendor/hal_lineage_livedisplay_sysfs.te），
+# 那里已有对sysfs_livedisplay_tuneable文件的读写。
+#
+# 节点路径/sys/class/backlight/ae96000.dsi.0/cabc要经过背光类目录、DSI设备ae96000.dsi.0下的
+# backlight目录和背光设备目录，三者都标为sysfs_leds（sepolicy/genfs_contexts）。中间的符号链接本身是sysfs
+# （本机genfs_seclabel_symlinks=0，见genfs_contexts），核心策略已给所有域读sysfs链接。
+allow hal_lineage_livedisplay_sysfs sysfs_leds:dir search;

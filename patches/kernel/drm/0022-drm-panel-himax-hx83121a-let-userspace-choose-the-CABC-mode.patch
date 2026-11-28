@@ -1,0 +1,207 @@
+From: Akisaira <akisaira@outlook.com>
+Subject: [PATCH] drm/panel: himax-hx83121a: let userspace choose the CABC mode
+
+The init sequences of both panels turn on content adaptive brightness
+control (CABC, MIPI_DCS_WRITE_POWER_SAVE) in its user interface mode, as
+the factory configuration does. The controller then lowers the backlight
+for dark frames and raises the pixel values to make up for it. Bright
+elements that cannot be raised further, such as a dialog over a dimmed
+screen, visibly lose brightness.
+
+Add a "cabc" attribute to the backlight device so userspace can choose
+the mode: 0 off, 1 user interface (default), 2 still picture, 3 moving
+image. The value is sent at once while the panel is powered and again
+after each power on when it differs from the default, so it survives
+the panel being switched off. A lock keeps the write away from prepare
+and unprepare, so no command goes out while the panel is off.
+
+Assisted-by: Claude:claude-opus-5-5
+Origin: local
+Upstream-Status: Inappropriate [driver-specific sysfs interface, mainline has no generic CABC control]
+---
+ drivers/gpu/drm/panel/panel-himax-hx83121a.c | 116 ++++++++++++++++++-
+ 1 file changed, 115 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/gpu/drm/panel/panel-himax-hx83121a.c b/drivers/gpu/drm/panel/panel-himax-hx83121a.c
+index 9fc4f82a83..e5dae6e965 100644
+--- a/drivers/gpu/drm/panel/panel-himax-hx83121a.c
++++ b/drivers/gpu/drm/panel/panel-himax-hx83121a.c
+@@ -28,6 +28,15 @@ static bool enable_dsc = true;
+ module_param(enable_dsc, bool, 0);
+ MODULE_PARM_DESC(enable_dsc, "enable DSC on the panel (default: true)");
+ 
++/*
++ * Content adaptive brightness control (CABC) modes of
++ * MIPI_DCS_WRITE_POWER_SAVE: off, user interface, still picture and moving
++ * image. The init sequences select the user interface mode, as the factory
++ * configuration does.
++ */
++#define HIMAX_CABC_UI		0x01
++#define HIMAX_CABC_MAX		0x03
++
+ struct himax {
+ 	struct drm_panel panel;
+ 	struct mipi_dsi_device *dsi[2];
+@@ -37,6 +46,12 @@ struct himax {
+ 	struct regulator_bulk_data *supplies;
+ 	struct backlight_device *backlight;
+ 	enum drm_panel_orientation orientation;
++
++	/* Protects cabc_mode and powered against panel power changes */
++	struct mutex cabc_lock;
++	u8 cabc_mode;
++	/* Between prepare and unprepare, when DCS commands reach the panel */
++	bool powered;
+ };
+ 
+ struct panel_desc {
+@@ -86,6 +101,15 @@ static void himax_reset(struct himax *ctx)
+ 	msleep(20);
+ }
+ 
++static int himax_write_cabc(struct himax *ctx)
++{
++	ssize_t ret;
++
++	ret = mipi_dsi_dcs_write(to_primary_dsi(ctx), MIPI_DCS_WRITE_POWER_SAVE,
++				 &ctx->cabc_mode, 1);
++	return ret < 0 ? ret : 0;
++}
++
+ static int himax_prepare(struct drm_panel *panel)
+ {
+ 	struct himax *ctx = to_himax(panel);
+@@ -121,7 +145,27 @@ static int himax_prepare(struct drm_panel *panel)
+ 		mipi_dsi_compression_mode_multi(&dsi_ctx, true);
+ 	}
+ 
+-	return backlight_enable(ctx->backlight);
++	ret = backlight_enable(ctx->backlight);
++	if (ret)
++		return ret;
++
++	/*
++	 * Only now: a failed prepare is not followed by unprepare, which
++	 * would leave powered set while the DSI host is off.
++	 */
++	guard(mutex)(&ctx->cabc_lock);
++	/* The init sequence selected the default mode; reapply a changed one */
++	if (ctx->cabc_mode != HIMAX_CABC_UI) {
++		ret = himax_write_cabc(ctx);
++		if (ret) {
++			dev_warn(&dsi->dev, "failed to restore CABC mode %u: %d\n",
++				 ctx->cabc_mode, ret);
++			ctx->cabc_mode = HIMAX_CABC_UI;
++		}
++	}
++	ctx->powered = true;
++
++	return 0;
+ }
+ 
+ static int himax_off(struct mipi_dsi_multi_context *dsi_ctx)
+@@ -140,6 +184,9 @@ static int himax_unprepare(struct drm_panel *panel)
+ 	struct device *dev = &dsi->dev;
+ 	int ret;
+ 
++	scoped_guard(mutex, &ctx->cabc_lock)
++		ctx->powered = false;
++
+ 	ret = himax_off(&dsi_ctx);
+ 	if (ret < 0)
+ 		dev_err(dev, "panel failed to off: %d\n", ret);
+@@ -230,6 +277,60 @@ himax_create_backlight(struct mipi_dsi_device *dsi)
+ 					      &himax_bl_ops, &props);
+ }
+ 
++static struct himax *himax_from_bl_dev(struct device *dev)
++{
++	struct mipi_dsi_device *dsi = bl_get_data(to_backlight_device(dev));
++
++	return mipi_dsi_get_drvdata(dsi);
++}
++
++static ssize_t cabc_show(struct device *dev, struct device_attribute *attr,
++			 char *buf)
++{
++	struct himax *ctx = himax_from_bl_dev(dev);
++
++	guard(mutex)(&ctx->cabc_lock);
++	return sysfs_emit(buf, "%u\n", ctx->cabc_mode);
++}
++
++static ssize_t cabc_store(struct device *dev, struct device_attribute *attr,
++			  const char *buf, size_t count)
++{
++	struct himax *ctx = himax_from_bl_dev(dev);
++	u8 mode, old;
++	int ret;
++
++	ret = kstrtou8(buf, 0, &mode);
++	if (ret)
++		return ret;
++	if (mode > HIMAX_CABC_MAX)
++		return -EINVAL;
++
++	guard(mutex)(&ctx->cabc_lock);
++	old = ctx->cabc_mode;
++	ctx->cabc_mode = mode;
++	/* While the panel is off, prepare applies the mode at power on */
++	if (ctx->powered) {
++		ret = himax_write_cabc(ctx);
++		if (ret) {
++			ctx->cabc_mode = old;
++			return ret;
++		}
++	}
++
++	return count;
++}
++static DEVICE_ATTR_RW(cabc);
++
++static struct attribute *himax_bl_attrs[] = {
++	&dev_attr_cabc.attr,
++	NULL
++};
++
++static const struct attribute_group himax_bl_group = {
++	.attrs = himax_bl_attrs,
++};
++
+ static int boe_ppc357db1_4_dsc_init_seq(struct mipi_dsi_multi_context *dsi_ctx)
+ {
+ 	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xb9, 0x83, 0x12, 0x1a, 0x55, 0x00);
+@@ -683,6 +784,11 @@ static int himax_probe(struct mipi_dsi_device *dsi)
+ 	if (IS_ERR(ctx))
+ 		return PTR_ERR(ctx);
+ 
++	ret = devm_mutex_init(dev, &ctx->cabc_lock);
++	if (ret)
++		return ret;
++	ctx->cabc_mode = HIMAX_CABC_UI;
++
+ 	ret = devm_regulator_bulk_get_const(&dsi->dev,
+ 					    ARRAY_SIZE(himax_supplies),
+ 					    himax_supplies, &ctx->supplies);
+@@ -744,6 +850,12 @@ static int himax_probe(struct mipi_dsi_device *dsi)
+ 		if (IS_ERR(ctx->backlight))
+ 			return dev_err_probe(dev, PTR_ERR(ctx->backlight),
+ 					     "Failed to create backlight\n");
++
++		ret = sysfs_create_group(&ctx->backlight->dev.kobj,
++					 &himax_bl_group);
++		if (ret)
++			return dev_err_probe(dev, ret,
++					     "Failed to create CABC attribute\n");
+ 	} else {
+ 		ret = drm_panel_of_backlight(&ctx->panel);
+ 		if (ret)
+@@ -772,6 +884,8 @@ static void himax_remove(struct mipi_dsi_device *dsi)
+ {
+ 	struct himax *ctx = mipi_dsi_get_drvdata(dsi);
+ 
++	if (ctx->backlight)
++		sysfs_remove_group(&ctx->backlight->dev.kobj, &himax_bl_group);
+ 	drm_panel_remove(&ctx->panel);
+ }
+ 

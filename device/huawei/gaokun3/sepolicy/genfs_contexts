@@ -27,6 +27,9 @@ genfscon sysfs /devices/platform/soc@0/1c00000.pcie/pci0006:00/0006:00:00.0/0006
 # ⚠️ 这条在第 1 步之前显示为 scontext=u:r:init:s0（HAL 没有域）；
 #    打完标签之后它会变成 hal_light_default，而 AOSP 已经允许该域读写 sysfs_leds。
 genfscon sysfs /devices/platform/soc@0/ae00000.display-subsystem/ae96000.dsi/ae96000.dsi.0/backlight u:object_r:sysfs_leds:s0
+# 面板CABC模式（patches/kernel/drm/0022），LiveDisplay HAL读写。用LineageOS为LiveDisplay节点定义的类型，
+# 它的hal_lineage_livedisplay_sysfs域已能读写；比上一条更长的前缀优先。
+genfscon sysfs /devices/platform/soc@0/ae00000.display-subsystem/ae96000.dsi/ae96000.dsi.0/backlight/ae96000.dsi.0/cabc u:object_r:sysfs_livedisplay_tuneable:s0
 
 # ── 唤醒源：system_suspend 被拒读 xhci 的 wakeup 节点 ───────────────────
 # path=".../a600000.usb/xhci-hcd.5.auto/wakeup/wakeup52/name"

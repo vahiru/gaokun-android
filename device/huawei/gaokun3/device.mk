@@ -1254,6 +1254,13 @@ PRODUCT_PACKAGES += \
 PRODUCT_PACKAGES += \
     android.hardware.light-service.gaokun3
 
+# ═══════════ LiveDisplay：面板CABC开关 ═══════════
+#
+# vendor.lineage.livedisplay的IAdaptiveBacklight，对应LiveDisplay页的“降低耗电”。
+# 节点来自面板驱动（patches/kernel/drm/0022），说明见livedisplay/AdaptiveBacklight.cpp顶部。
+PRODUCT_PACKAGES += \
+    vendor.lineage.livedisplay-service.gaokun3
+
 # ═══════════ 手写笔（M-Pencil，#26）═══════════
 #
 # 内核一侧是触摸从片驱动（patches/kernel/input/0011、patches/kernel/dts/0013，kernel-config-android.sh 里 =y）；

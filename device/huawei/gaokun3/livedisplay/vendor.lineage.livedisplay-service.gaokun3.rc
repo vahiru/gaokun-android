@@ -1,0 +1,6 @@
+# LiveDisplay HAL：只实现IAdaptiveBacklight（面板CABC开关），说明见AdaptiveBacklight.cpp顶部。
+# 运行为system：它只写背光设备的cabc节点，该节点由init.gaokun3.rc的on boot交给system。
+service vendor.livedisplay-gaokun3 /vendor/bin/hw/vendor.lineage.livedisplay-service.gaokun3
+    class hal
+    user system
+    group system
