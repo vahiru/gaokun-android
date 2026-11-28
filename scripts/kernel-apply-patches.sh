@@ -304,7 +304,7 @@ KPATCHES=(
     kernel/audio/0013-ASoC-qcom-q6apm-dai-allow-5-ms-playback-periods.patch
 
     # ─── 9. kernel/input：Himax SPI 触摸屏、HX83121A 级联手写笔从片与 USB HID ───
-    # 0001–0010、0012–0021、0023–0025 按顺序叠在 drivers/input/touchscreen/himax/ 上，回放工具见 scripts/touch/hxsim；
+    # 0001–0010、0012–0021、0023–0026 按顺序叠在 drivers/input/touchscreen/himax/ 上，回放工具见 scripts/touch/hxsim；
     # 0011 与 kernel/dts/0013、device/huawei/gaokun3/stylus 配套，需 CONFIG_TOUCHSCREEN_HIMAX_HX83121A_PEN=y。
     # 0025也修改0011的从片驱动和Kconfig，此后从片驱动依赖主片驱动，需CONFIG_TOUCHSCREEN_HIMAX_HX83121A_SPI=y。
     kernel/input/0001-Input-himax-spi-runtime-tunable-coordinate-fuzz.patch
@@ -332,6 +332,7 @@ KPATCHES=(
     kernel/input/0023-Input-himax-spi-drop-frames-that-fail-the-checksum-and-re-init-the-IC.patch
     kernel/input/0024-Input-himax-spi-keep-a-tap-locked-while-its-signal-collapses.patch
     kernel/input/0025-Input-himax-spi-let-the-IC-idle-while-nothing-touches-the-panel.patch
+    kernel/input/0026-Input-himax-spi-return-a-failed-register-write-as-an-error.patch
 
     # ─── 10. kernel/dts：SC8280XP 与 gaokun3 设备树 ───
     # 0004→0005→0006→0008→0012 依次叠在 sc8280xp-huawei-gaokun3-camera.dtsi 上（0006 需 CONFIG_LEDS_CLASS_FLASH=y、
